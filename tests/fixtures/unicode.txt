@@ -1,0 +1,82 @@
+# Unicode fixtures (WORK-002). Expected layout follows D-042: grapheme clustering
+# (mode 2027) on, libghostty widths, ambiguous characters narrow.
+#
+# Format: id  widths  input  [stored]
+#   widths  cell span of each grapheme cluster, left to right, comma separated (1 or 2)
+#   input   bytes written to the terminal; <hex> is a codepoint, <xHH> one raw byte,
+#           anything else is literal. Write <20> for a space.
+#   stored  the codepoints the grid keeps, when they differ from input (invalid UTF-8)
+#
+# The file is ASCII only, so an editor cannot normalize a decomposed case without it
+# showing in the diff. Expectations come from the policy, not from current output;
+# change one only with a reason in the commit message.
+
+# Latin and combining marks
+latin.precomposed          1          <E9>
+latin.decomposed           1          e<301>
+latin.word                 1,1,1,1    caf<E9>
+latin.word-decomposed      1,1,1,1    cafe<301>
+combining.stack            1          a<301><302><323><324>
+combining.above-below      1          o<308><331>
+vietnamese.precomposed     1          <1EC7>
+vietnamese.decomposed      1          e<323><302>
+combining.after-wide       2          <754C><301>
+
+# Other scripts. Right-to-left text is stored in logical order; bidi is out of scope.
+greek                      1,1,1,1    <39A><3B1><3BB><3CC>
+cyrillic                   1,1,1      <41F><440><438>
+hebrew                     1,1,1,1    <5E9><5DC><5D5><5DD>
+hebrew.points              1          <5E9><5C1><5B8>
+arabic                     1,1,1,1,1  <645><631><62D><628><627>
+devanagari.syllable        2          <915><93F>      # spacing vowel sign widens the cluster
+devanagari.conjunct        2          <915><94D><937>
+thai.tone                  1          <E01><E48>
+hangul.syllable            2          <D55C>
+hangul.jamo                2          <1100><1161><11A8>
+
+# East Asian wide
+cjk.ideograph              2          <754C>
+cjk.pair                   2,2        <65E5><672C>
+cjk.mixed                  1,2,1      a<754C>b
+fullwidth.latin            2          <FF21>
+kana                       2,2        <3072><3089>
+halfwidth.kana             1          <FF8A>
+
+# Emoji
+emoji.default              2          <1F600>
+emoji.text-default         1          <2764>
+emoji.vs16                 2          <2764><FE0F>
+emoji.vs15                 1          <231A><FE0E>
+emoji.smiley-vs16          2          <263A><FE0F>
+emoji.keycap               2          1<FE0F><20E3>
+emoji.flag                 2          <1F1EF><1F1F5>
+emoji.flag-pair            2,2        <1F1EF><1F1F5><1F1FA><1F1F8>
+emoji.regional-lone        2          <1F1EF>
+emoji.skin-tone            2          <1F44D><1F3FD>
+emoji.zwj-profession       2          <1F469><200D><1F4BB>
+emoji.zwj-family           2          <1F468><200D><1F469><200D><1F467><200D><1F466>
+emoji.zwj-rainbow-flag     2          <1F3F3><FE0F><200D><1F308>
+emoji.tag-sequence         2          <1F3F4><E0067><E0062><E0073><E0063><E0074><E007F>
+emoji.after-text           1,2,1      a<1F600>b
+
+# Joiners attach to the preceding cluster; libghostty drops other zero-width format characters
+zero-width.joiner          1,1        a<200D>b
+zero-width.non-joiner      1,1        a<200C>b
+zero-width.space           1,1        a<200B>b          ab      # libghostty drops it
+variation.invalid-base     1,1        a<FE0F>b          ab      # ignored and dropped
+format.soft-hyphen         1,1,1      a<AD>b
+format.bom                 1          <FEFF>a           a
+
+# Invalid UTF-8 becomes U+FFFD without shifting what follows
+invalid.byte               1,1        <xFF>a            <FFFD>a
+invalid.truncated          1,1        <xE2><x82>a       <FFFD>a
+invalid.overlong           1,1,1      <xC0><xAF>a       <FFFD><FFFD>a
+
+# Symbols used by prompts and TUIs, and East Asian Ambiguous characters (narrow)
+box-drawing                1,1,1      <250C><2500><2510>
+block-elements             1,1        <2588><2591>
+braille                    1          <28FF>
+powerline                  1          <E0B0>
+nerd-font                  1          <F418>
+ambiguous                  1,1,1      <B1><A7><2192>
+dash.three-em              2          <2E3B>

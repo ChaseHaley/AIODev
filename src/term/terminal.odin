@@ -198,6 +198,9 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 			return .Terminal_Failed
 		}
 	}
+	if !apply_mode_defaults(s.terminal) {
+		return .Terminal_Failed
+	}
 	if ghostty.terminal_resize(s.terminal, g.columns, g.rows, g.cell_width, g.cell_height) != .Success {
 		return .Terminal_Failed
 	}
@@ -223,6 +226,19 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		}
 	}
 	return configure_press_event(s)
+}
+
+// Sets the modes every session starts with, and returns to after a reset.
+// Grapheme clustering (mode 2027) is on so emoji sequences and combining marks occupy one
+// cluster with libghostty's widths (D-042). Programs can still turn it off.
+@(require_results)
+apply_mode_defaults :: proc(terminal: ghostty.Terminal) -> bool {
+	grapheme := ghostty.Terminal_Mode_Config{mode = ghostty.MODE_GRAPHEME_CLUSTER, value = true}
+	if ghostty.terminal_set(terminal, .Mode_Default, &grapheme) != .Success {
+		log.error("term: enabling grapheme clustering failed")
+		return false
+	}
+	return true
 }
 
 @(private)
