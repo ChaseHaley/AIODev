@@ -105,12 +105,41 @@ user_identity :: proc(out: []u16) -> (length: int, err: Error) {
 	return count*2, .None
 }
 
+@(private, require_results)
+mutex_name :: proc(app_id: string) -> (name: [512]u16, err: Error) {
+	if len(app_id) == 0 || len(app_id) > 120 || !utf8.valid_string(app_id) {
+		return {}, .Invalid_Argument
+	}
+	for c in app_id {
+		if c == 0 || c == '\\' || c == '/' { return {}, .Invalid_Argument }
+	}
+	n := utf16.encode_string(name[:], "Local\\")
+	n += utf16.encode_string(name[n:], app_id)
+	name[n] = '.'
+	n += 1
+	_, err = user_identity(name[n:])
+	return
+}
+
+@(require_results)
+instance_running :: proc(app_id: string) -> (running: bool, err: Error) {
+	name, name_error := mutex_name(app_id)
+	if name_error != .None { return false, name_error }
+	mutex := OpenMutexW(w.SYNCHRONIZE, false, cstring16(raw_data(name[:])))
+	if mutex == nil {
+		if w.GetLastError() == w.ERROR_FILE_NOT_FOUND { return false, .None }
+		log.errorf("OpenMutexW failed: Win32 %d", w.GetLastError())
+		return false, .Os
+	}
+	if !os_ok(w.CloseHandle(mutex), "CloseHandle(mutex)") { return false, .Os }
+	return true, .None
+}
+
 @(require_results)
 init :: proc(p: ^Platform, app_id: string, allocator := context.allocator) -> Init_Result {
-	if p.wake_event != nil || len(app_id) == 0 || len(app_id) > 120 { return .Failed }
-	for c in app_id {
-		if c == 0 || c == '\\' || c == '/' { return .Failed }
-	}
+	if p.wake_event != nil { return .Failed }
+	name, name_error := mutex_name(app_id)
+	if name_error != .None { return .Failed }
 	p.allocator = allocator
 	p.callback_context = context
 	p.callback_context.allocator = allocator
@@ -128,13 +157,6 @@ init :: proc(p: ^Platform, app_id: string, allocator := context.allocator) -> In
 		log.errorf("GetModuleHandleW failed: %d", w.GetLastError())
 		return .Failed
 	}
-	name: [512]u16
-	n := utf16.encode_string(name[:], "Local\\")
-	n += utf16.encode_string(name[n:], app_id)
-	name[n] = '.'
-	n += 1
-	_, identity_error := user_identity(name[n:])
-	if identity_error != .None { return .Failed }
 	p.mutex = CreateMutexW(nil, false, cstring16(raw_data(name[:])))
 	mutex_error := w.GetLastError()
 	if p.mutex == nil {
@@ -618,6 +640,7 @@ window_client_size :: proc(p: ^Platform, id: Window_Id) -> (width, height: i32, 
 	if !os_ok(w.GetClientRect(window.hwnd, &rect), "GetClientRect") { return 0, 0, .Os }
 	return rect.right, rect.bottom, .None
 }
+
 @(require_results)
 window_set_client_size :: proc(p: ^Platform, id: Window_Id, width, height: i32) -> Error {
 	window := find_window(p, id)

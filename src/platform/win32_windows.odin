@@ -44,4 +44,5 @@ foreign kernel32 {
 	CreateMutexW :: proc(
 		lpMutexAttributes: ^w.SECURITY_ATTRIBUTES, bInitialOwner: w.BOOL, lpName: w.LPCWSTR,
 	) -> w.HANDLE ---
+	OpenMutexW :: proc(dwDesiredAccess: w.DWORD, bInheritHandle: w.BOOL, lpName: w.LPCWSTR) -> w.HANDLE ---
 }
