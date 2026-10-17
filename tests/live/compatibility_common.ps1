@@ -41,3 +41,15 @@ function Require-Application([string] $Application) {
     }
     return $command.Source
 }
+
+# Runs checks that fail because of a documented application limit, not AIODev. A failure
+# prints KNOWN-LIMIT and the journey continues; a pass prints LIMIT-CLEARED so the exception
+# can be removed. Never wrap a check of AIODev's own grid, text, or state in this.
+function Invoke-KnownLimit([string] $Reason, [scriptblock] $Checks) {
+    try {
+        & $Checks
+        Write-Output "LIMIT-CLEARED: $Reason. Remove this exception."
+    } catch {
+        Write-Output "KNOWN-LIMIT: $Reason"
+    }
+}

@@ -5,7 +5,9 @@ $claude = Require-Application claude
 & $claude --version
 Start-Journey claude
 try {
-    Invoke-Aio run "& '$claude'"
+    # A journey started from inside Claude Code inherits its session markers, which change how the
+    # child behaves; clear them so the journey sees a normal session.
+    Invoke-Aio run "Get-ChildItem Env:CLAUDE* | Remove-Item; & '$claude'"
     Invoke-Aio wait text 'Claude Code' --timeout 20000
     $screen = & $ctl --name $name screen
     if ($screen -match 'trust this folder|trust the files') {
@@ -18,6 +20,9 @@ try {
     Invoke-Aio wait text 'é界👩‍💻'
     Invoke-Aio resize 120x32
     Invoke-Aio key Ctrl+c Ctrl+c
+    # Wait for the application to leave; an older prompt row can already show 'U>'.
+    Invoke-Aio wait gone '⏵⏵' --timeout 10000
+    Invoke-Aio wait idle
     Invoke-Aio wait text 'U>' --timeout 10000
     Invoke-Aio run "Write-Output ('CLAUDE_' + 'RETURNED')"
     Invoke-Aio expect text CLAUDE_RETURNED
