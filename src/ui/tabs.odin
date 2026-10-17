@@ -10,15 +10,15 @@ Tab_Bar :: struct {
 	count: int,
 }
 
-tab_bar_layout :: proc(width, scale: f32, count: int) -> Tab_Bar {
-	if count < 2 { return {} }
+tab_bar_layout :: proc(width, scale: f32, count: int, show_with_one_tab: bool) -> Tab_Bar {
+	if count < 1 || (count == 1 && !show_with_one_tab) { return {} }
 	button := min(width, 32*scale)
 	return {width, TAB_HEIGHT*scale, min(220*scale, max(0, width-button)/f32(count)), button, count}
 }
 
 // The count is the new-tab button; -1 is outside the controls.
 tab_bar_hit_test :: proc(bar: Tab_Bar, x, y: f32) -> int {
-	if bar.count < 2 || x < 0 || x >= bar.width || y < 0 || y >= bar.height { return -1 }
+	if bar.count == 0 || x < 0 || x >= bar.width || y < 0 || y >= bar.height { return -1 }
 	end := bar.tab_width*f32(bar.count)
 	if x >= end { return x < end+bar.button_width ? bar.count : -1 }
 	return bar.tab_width > 0 ? int(x/bar.tab_width) : -1

@@ -8,8 +8,13 @@ import "aio:render"
 import "aio:term"
 import "aio:ui"
 
-window_content_area :: proc(w: ^Window) -> layout.Rect {
-	bar := ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs))
+window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
+	return ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs),
+		app.settings.window.show_tab_bar_with_one_tab)
+}
+
+window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
+	bar := window_tab_bar(app, w)
 	return {0, bar.height, f32(w.width), max(0, f32(w.height)-bar.height)}
 }
 
@@ -33,14 +38,11 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			}
 		}
 	}
-	bar := ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs))
-	if bar.count < 2 { return .Ok }
+	bar := window_tab_bar(app, w)
+	if bar.count == 0 { return .Ok }
 	for tab, i in w.workspace.tabs {
 		title := fmt.tprintf("Tab %d", i+1)
-		pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-		if entry := session_find(app, pane.content.id); entry != nil {
-			if value := term.title(entry.session, context.temp_allocator); value != "" { title = value }
-		}
+		if tab.title != "" { title = tab.title }
 		if result := ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, i, title,
 			i == w.workspace.selected, w.scale); result != .Ok { return result }
 	}

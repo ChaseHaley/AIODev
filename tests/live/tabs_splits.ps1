@@ -29,21 +29,68 @@ function Assert-Value($Actual, $Expected, [string] $Label) {
 }
 
 function Set-Marker([string] $Marker) {
-    Invoke-Aio run ('function prompt { "P> " }; Clear-Host; Write-Output "' + $Marker + '"')
+    Invoke-Aio run ('function prompt { "P> " }; Clear-Host; $Host.UI.RawUI.WindowTitle = "' +
+        $Marker + '"; Write-Output "' + $Marker + '"')
     Invoke-Aio expect text $Marker
+    $state = Read-State
+    Assert-Value $state["tab.$($state['tabs.selected']).title"] $Marker 'cached tab title'
 }
 
 function Assert-Isolated([string] $Marker, [string[]] $Others) {
     Invoke-Aio expect text $Marker
     foreach ($other in $Others) { Invoke-Aio expect no-text $other }
+    $state = Read-State
+    Assert-Value $state["tab.$($state['tabs.selected']).title"] $Marker 'focused-pane tab title'
 }
 
 Invoke-Aio launch --fresh
 try {
+    $settingsPath = Join-Path $repo "build/verify/$name/settings.ini"
+    $originalSettings = [IO.File]::ReadAllText($settingsPath)
+    $state = Read-State
+    $node = $state['panes.focused']
+    Assert-Value ($state["pane.$node.rect"] -split ',')[1] 30 'single-tab bar visible by default'
+    Assert-Value $state['grid.size'] '120x32' 'startup grid reserves tab bar space'
+    try {
+        $hiddenSettings = $originalSettings -replace '(?m)^window.show_tab_bar_with_one_tab\s*=.*$',
+            'window.show_tab_bar_with_one_tab = false'
+        if ($hiddenSettings -eq $originalSettings) {
+            $hiddenSettings += "`nwindow.show_tab_bar_with_one_tab = false`n"
+        }
+        [IO.File]::WriteAllText($settingsPath, $hiddenSettings)
+        Invoke-Aio command settings.reload
+        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 0 'reload hides single-tab bar'
+        Invoke-Aio key Ctrl+Shift+T
+        Invoke-Aio wait text 'PS '
+        $state = Read-State
+        $secondNode = $state['panes.focused']
+        Assert-Value ($state["pane.$secondNode.rect"] -split ',')[1] 30 'multiple tabs override hidden preference'
+        Invoke-Aio key Ctrl+Shift+W
+        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 0 'bar hides again after tab close'
+    } finally {
+        [IO.File]::WriteAllText($settingsPath, $originalSettings)
+        Invoke-Aio command settings.reload
+    }
+    Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 30 'reload restores single-tab bar'
+    Invoke-Aio dpi 144
+    Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 45 'single-tab bar scales with DPI'
+    Invoke-Aio dpi 96
+    Invoke-Aio resize 120x32
+    Invoke-Aio expect state grid.size=120x32
+    $windowSize = (Read-State)['window.size']
+    Invoke-Aio tray hide
+    Invoke-Aio tray open
+    Assert-Value (Read-State)['window.size'] $windowSize 'tray reopen preserves bar-inclusive size'
+    Invoke-Aio mouse click '225,15' --px
+    Invoke-Aio wait text 'PS '
+    Invoke-Aio expect state tabs.count=2
+    Invoke-Aio key Ctrl+Shift+W
+    Invoke-Aio expect state tabs.count=1
+    Write-Output 'PASS single-tab new-tab button and visibility setting'
     Set-Marker 'TAB_ONE_ONLY'
     $firstId = (Read-State)['session.id']
     $firstGrid = (Read-State)['grid.size']
-    Invoke-Aio run 'Start-Sleep -Milliseconds 1500; Write-Output HIDDEN_TAB_ALIVE' --idle 50
+    Invoke-Aio run 'Start-Sleep -Milliseconds 1500; $Host.UI.RawUI.WindowTitle = "HIDDEN_TAB_TITLE"; Write-Output HIDDEN_TAB_ALIVE' --idle 50
     Invoke-Aio key Ctrl+Shift+T
     Invoke-Aio wait text 'PS '
     Assert-Value (Read-State)['tabs.count'] 2 'tab count'
@@ -148,6 +195,7 @@ try {
     Invoke-Aio command tab.select_1
     Assert-Value (Read-State)['session.id'] $firstId 'tab selection preserves session'
     Invoke-Aio wait text HIDDEN_TAB_ALIVE
+    Invoke-Aio expect state tab.1.title=HIDDEN_TAB_TITLE
     Assert-Value (Read-State)['grid.size'] $firstGrid 'tab restores initial geometry'
     Invoke-Aio key Ctrl+Tab
     Assert-Value (Read-State)['tabs.selected'] 2 'next tab'

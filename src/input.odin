@@ -210,7 +210,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if _, dragging := w.dragging.?; dragging { w.dragging = nil; return }
 		if w.selecting { selection_finish(app, w, x, y); return }
 	}
-	bar := ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs))
+	bar := window_tab_bar(app, w)
 	if y < bar.height {
 		if e.pressed {
 			index := ui.tab_bar_hit_test(bar, x, y)
@@ -263,7 +263,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		return
 	}
 	shape: platform.Cursor_Shape = .Text
-	bar := ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs))
+	bar := window_tab_bar(app, w)
 	if y < bar.height { shape = .Arrow }
 	if d, found := layout.divider_hit_test(w.dividers[:], x, y, 3*w.scale); found {
 		shape = d.axis == .Horizontal ? .Resize_Horizontal : .Resize_Vertical

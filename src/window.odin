@@ -191,7 +191,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
-	area := window_content_area(w)
+	area := window_content_area(app, w)
 	layout.compute(w.tree, area, 1, &w.panes)
 	layout.dividers(w.tree, area, 1, &w.dividers)
 	for i := len(w.views)-1; i >= 0; i -= 1 {

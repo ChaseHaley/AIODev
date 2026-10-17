@@ -9,6 +9,7 @@ import "aio:term"
 Tab :: struct {
 	id: u32,
 	tree: layout.Layout,
+	title: string,
 }
 
 Workspace :: struct {
@@ -37,6 +38,7 @@ tab_create :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	}
 	workspace.next_tab_id += 1
 	tab.id = workspace.next_tab_id
+	tab_update_title(app, tab)
 	append(&workspace.tabs, tab)
 	return true
 }
@@ -54,6 +56,7 @@ session_close :: proc(app: ^App, id: u32) {
 workspace_destroy :: proc(workspace: ^Workspace) {
 	for tab in workspace.tabs {
 		layout.destroy(&tab.tree)
+		delete(tab.title)
 		free(tab)
 	}
 	delete(workspace.tabs)
@@ -138,6 +141,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	}
 	ordered_remove(&workspace.tabs, index)
 	layout.destroy(&tab.tree)
+	delete(tab.title)
 	free(tab)
 	if index < workspace.selected { workspace.selected -= 1 }
 	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs)-1))
@@ -168,6 +172,7 @@ pane_remove :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layo
 	}
 	if !layout.remove(&tab.tree, node) { return }
 	session_close(app, pane.content.id)
+	tab_update_title(app, tab)
 	if visible {
 		for w in app.windows {
 			if w.workspace != workspace { continue }
@@ -195,11 +200,36 @@ close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 	return false
 }
 
-window_update_title :: proc(app: ^App, w: ^Window) {
-	title := app.app_id
-	if entry := focused_session(app, w); entry != nil {
-		if value := term.title(entry.session, context.temp_allocator); value != "" { title = value }
+@(private)
+tab_update_title :: proc(app: ^App, tab: ^Tab) {
+	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+	title: string
+	if entry := session_find(app, pane.content.id); entry != nil {
+		title = term.title(entry.session)
 	}
+	delete(tab.title)
+	tab.title = title
+}
+
+session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
+	for workspace in app.workspaces {
+		for tab in workspace.tabs {
+			pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+			if pane.content.id == id { tab_update_title(app, tab) }
+		}
+	}
+	for window in app.windows {
+		window.dirty = true
+		if focused := focused_session(app, window); focused != nil && focused.id == id {
+			window_update_title(app, window)
+		}
+	}
+}
+
+window_update_title :: proc(app: ^App, w: ^Window) {
+	tab := selected_tab(w.workspace)
+	tab_update_title(app, tab)
+	title := tab.title != "" ? tab.title : app.app_id
 	if platform.window_set_title(&app.platform, w.id, title) != .None {
 		log.error("setting the window title failed")
 	}

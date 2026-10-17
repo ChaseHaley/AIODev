@@ -283,6 +283,9 @@ session_open :: proc(app: ^App) -> bool {
 	}
 	geometry.surface_width = u32(geometry.columns) * geometry.cell_width + 2 * geometry.padding_left
 	geometry.surface_height = u32(geometry.rows) * geometry.cell_height + 2 * geometry.padding_top
+	bar := ui.tab_bar_layout(f32(geometry.surface_width), scale, 1, app.settings.window.show_tab_bar_with_one_tab)
+	geometry.padding_top += u32(bar.height)
+	geometry.surface_height += u32(bar.height)
 	session, err := term.create(session_config(app, geometry), {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
@@ -349,12 +352,7 @@ update_sessions :: proc(app: ^App) {
 			if status.kind == .Exited && close_exited_session(app, entry.id) { continue }
 		}
 		if term.take_title_change(s) {
-			for window in app.windows {
-				window.dirty = true
-				if focused := focused_session(app, window); focused != nil && focused.id == entry.id {
-					window_update_title(app, window)
-				}
-			}
+			session_titles_changed(app, entry.id)
 		}
 		if term.take_bell(s) {
 			for window in app.windows {

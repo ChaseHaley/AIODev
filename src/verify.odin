@@ -267,6 +267,7 @@ when AIO_CONTROL {
 			tab_state := [?]control.State_Entry{
 				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
 				{fmt.tprintf("%s.focus", prefix), fmt.tprintf("%d", tab.tree.focus)},
+				{fmt.tprintf("%s.title", prefix), tab.title},
 			}
 			if _, err := append(&entries, ..tab_state[:]); err != nil { return nil, .Out_Of_Memory }
 			count := 0
@@ -520,7 +521,7 @@ when AIO_CONTROL {
 			padding := window_padding(app, w)
 			width := i32(f32(r.columns)*w.metrics.cell_width+2*padding)
 			height := i32(f32(r.rows)*w.metrics.cell_height+2*padding+
-				ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs)).height)
+				window_tab_bar(app, w).height)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) != .None { return .System }
 		case control.Command:
 			command := commands.find(&app.registry, r.name)
