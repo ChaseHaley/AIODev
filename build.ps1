@@ -46,8 +46,17 @@ if (Test-Path 'assets/aiodev.rc') { $resource = @('-resource:assets/aiodev.rc') 
 
 New-Item -ItemType Directory -Force build | Out-Null
 
+# The bundled ConPTY (D-043) loads from beside each executable that opens consoles.
+function Copy-Conpty([string] $Directory) {
+    New-Item -ItemType Directory -Force $Directory | Out-Null
+    foreach ($name in @('conpty.dll', 'OpenConsole.exe')) {
+        Copy-Item -LiteralPath "vendor/conpty/$name" -Destination (Join-Path $Directory $name) -Force
+    }
+}
+
 function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     Invoke-Odin build src "-out:$Output" @Mode @flags @resource
+    Copy-Conpty (Split-Path $Output)
 }
 
 function Build-Release {
@@ -81,6 +90,7 @@ switch ($Task) {
         Invoke-Odin build src '-out:build/aiodev-verify.exe' -debug '-subsystem:console' `
             '-define:AIO_CONTROL=true' "-define:AIO_BUILD_ID='$buildId'" `
             @flags @resource
+        Copy-Conpty 'build'
         foreach ($name in $toolPackages) {
             Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
         }
@@ -95,6 +105,8 @@ switch ($Task) {
         Copy-Item -LiteralPath 'build/release/aiodev.exe' -Destination "$stage/aiodev.exe"
         Copy-Item -LiteralPath 'tools/install.ps1' -Destination "$stage/install.ps1"
         Copy-Item -LiteralPath 'vendor/ghostty/LICENSE' -Destination "$stage/Ghostty-LICENSE.txt"
+        Copy-Conpty $stage
+        Copy-Item -LiteralPath 'vendor/conpty/LICENSE' -Destination "$stage/ConPTY-LICENSE.txt"
         [IO.File]::WriteAllText((Join-Path $PWD "$stage/build.txt"), "$buildId`r`n")
         $archive = "build/AIODev-$buildId-windows-x64.zip"
         Compress-Archive -LiteralPath $stage -DestinationPath $archive -Force
@@ -123,6 +135,7 @@ switch ($Task) {
         $targets = if ($Package) { @($Package) } else { $testPackages }
         if ($targets.Count -eq 0) { throw 'No test packages found under tests/.' }
         New-Item -ItemType Directory -Force build/test | Out-Null
+        Copy-Conpty 'build/test'
         foreach ($name in $targets) {
             if (-not (Test-Path "tests/$name")) { throw "No tests at tests/$name." }
             Invoke-Odin test "tests/$name" "-out:build/test/$name.exe" -debug -keep-executable @flags

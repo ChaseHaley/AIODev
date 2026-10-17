@@ -215,10 +215,12 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 		return {}, spawn_failure("CreatePipe", .Pipe, u32(w.GetLastError()))
 	}
 	size_cells := w.COORD{i16(options.cols), i16(options.rows)}
+	api := conpty()
 	flags := u32(PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE)
-	result := CreatePseudoConsole(size_cells, console_input, console_output, flags, &p.console)
+	if api.bundled { flags |= PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES }
+	result := api.create(size_cells, console_input, console_output, flags, &p.console)
 	if u32(result) == w.E_INVALIDARG {
-		result = CreatePseudoConsole(size_cells, console_input, console_output, 0, &p.console)
+		result = api.create(size_cells, console_input, console_output, 0, &p.console)
 	}
 	if result < 0 {
 		return {}, spawn_failure("CreatePseudoConsole", .Console, u32(result))
@@ -347,7 +349,7 @@ resize :: proc(p: ^Pty, cols, rows: u16) -> Error {
 	}
 	p.resizing += 1
 	sync.mutex_unlock(&p.console_mutex)
-	result := ResizePseudoConsole(console, {i16(cols), i16(rows)})
+	result := conpty().resize(console, {i16(cols), i16(rows)})
 	sync.mutex_lock(&p.console_mutex)
 	p.resizing -= 1
 	sync.cond_broadcast(&p.console_changed)
@@ -389,7 +391,7 @@ close_console :: proc(p: ^Pty) {
 	p.console = nil
 	sync.mutex_unlock(&p.console_mutex)
 	// After exit, closing delivers EOF and may wait for the reader to drain output.
-	ClosePseudoConsole(console)
+	conpty().close(console)
 	sync.mutex_lock(&p.console_mutex)
 	p.closing = false
 	sync.cond_broadcast(&p.console_changed)

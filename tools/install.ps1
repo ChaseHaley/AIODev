@@ -8,7 +8,7 @@ if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
 }
 $destination = Join-Path $env:LOCALAPPDATA 'Programs\AIODev'
 New-Item -ItemType Directory -Force $destination | Out-Null
-foreach ($name in @('aiodev.exe', 'Ghostty-LICENSE.txt', 'build.txt')) {
+foreach ($name in @('aiodev.exe', 'conpty.dll', 'OpenConsole.exe', 'Ghostty-LICENSE.txt', 'ConPTY-LICENSE.txt', 'build.txt')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $destination $name)
 }
 $shell = New-Object -ComObject WScript.Shell
