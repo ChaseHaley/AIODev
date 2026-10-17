@@ -46,7 +46,7 @@ if (Test-Path 'assets/aiodev.rc') { $resource = @('-resource:assets/aiodev.rc') 
 
 New-Item -ItemType Directory -Force build | Out-Null
 
-# The bundled ConPTY (D-043) loads from beside each executable that opens consoles.
+# The bundled ConPTY (D-044) loads from beside each executable that opens consoles.
 function Copy-Conpty([string] $Directory) {
     New-Item -ItemType Directory -Force $Directory | Out-Null
     foreach ($name in @('conpty.dll', 'OpenConsole.exe')) {

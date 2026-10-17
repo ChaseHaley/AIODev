@@ -6,7 +6,7 @@ import w "core:sys/windows"
 
 // Tells the bundled OpenConsole to measure text by grapheme cluster, matching libghostty with
 // mode 2027 (D-042). The system ConPTY measures per codepoint and rewrites full-screen rows
-// with those widths, so emoji sequences drift (D-043).
+// with those widths, so emoji sequences drift (D-044).
 @(private) PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES :: 0x08
 
 @(private)

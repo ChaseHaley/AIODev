@@ -313,7 +313,7 @@ closed_operations :: proc(t: ^testing.T) {
 	pty.destroy(&p)
 }
 
-// build.ps1 places the bundled ConPTY beside every executable, so consoles get grapheme widths (D-043).
+// build.ps1 places the bundled ConPTY beside every executable, so consoles get grapheme widths (D-044).
 @(test)
 uses_bundled_conpty :: proc(t: ^testing.T) {
 	testing.expect(t, pty.bundled_conpty(), "conpty.dll and OpenConsole.exe must sit beside the test executable")
