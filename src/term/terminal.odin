@@ -527,6 +527,23 @@ scroll_to_bottom :: proc(s: ^Session) {
 	mark_changed(s)
 }
 
+Scrollbar :: struct {
+	total, offset, len: u64,
+}
+
+@(require_results)
+scrollbar :: proc(s: ^Session) -> (Scrollbar, bool) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	value: ghostty.Terminal_Scrollbar
+	result := ghostty.terminal_get(s.terminal, .Scrollbar, &value)
+	if result != .Success {
+		log.errorf("term: reading scrollbar failed: %v", result)
+		return {}, false
+	}
+	return {value.total, value.offset, value.len}, true
+}
+
 clear_scrollback :: proc(s: ^Session) {
 	ERASE_SCROLLBACK :: "\x1b[3J"
 	sync.mutex_lock(&s.mutex)
