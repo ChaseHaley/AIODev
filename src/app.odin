@@ -2,11 +2,14 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:time"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
+import "aio:instance"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -30,12 +33,6 @@ Notice_Key :: enum u32 {
 	Copy,
 }
 
-Init_Result :: enum {
-	Ready,
-	Already_Running,
-	Failed,
-}
-
 Session_Entry :: struct {
 	id: u32,
 	session: ^term.Session,
@@ -43,6 +40,8 @@ Session_Entry :: struct {
 }
 
 App :: struct {
+	options: instance.Options,
+	app_id: string,
 	platform: platform.Platform,
 	platform_ready: bool,
 	settings: settings.Settings,
@@ -65,52 +64,56 @@ App :: struct {
 	tray_hint_shown: bool,
 }
 
-app_init :: proc(app: ^App) -> Init_Result {
-	switch platform.init(&app.platform, APP_ID) {
-	case .Secondary:
-		return .Already_Running
-	case .Failed:
-		log.error("platform initialization failed")
-		return .Failed
-	case .Primary:
-		app.platform_ready = true
+@(require_results)
+app_init :: proc(app: ^App) -> bool {
+	if app.options.data_dir != "" {
+		path, err := filepath.join({app.options.data_dir, "settings.ini"})
+		if err != nil {
+			log.errorf("constructing the settings path failed: %v", err)
+			return false
+		}
+		app.settings_path = path
+		if directory_error := os.mkdir_all(app.options.data_dir); directory_error != nil {
+			log.errorf("creating the data directory failed: %v", directory_error)
+			return false
+		}
 	}
 	ui.notices_init(&app.notices)
 	app.registry = commands.create()
 	if err := register_actions(&app.registry); err != .None {
 		log.errorf("registering commands failed: %v", err)
-		return .Failed
+		return false
 	}
 	if ui.palette_init(&app.palette) != nil {
-		return .Failed
+		return false
 	}
 	load_settings(app)
 	font_error: font.Error
 	app.fonts, font_error = font.system_create()
 	if font_error != .None {
 		log.errorf("font system creation failed: %v", font_error)
-		return .Failed
+		return false
 	}
 	render_error: render.Error
 	app.device, render_error = render.device_create()
 	if render_error != .None {
 		log.errorf("graphics device creation failed: %v", render_error)
-		return .Failed
+		return false
 	}
 	apply_text_gamma(app)
 	glyphs.init(&app.cache, app.fonts, app.device)
 	ui_size_px := UI_FONT_POINTS * f32(platform.primary_dpi(&app.platform)) / 72
 	if !ui.text_init(&app.ui_text, app.fonts, &app.cache, ui_size_px) {
 		log.error("no interface font is available")
-		return .Failed
+		return false
 	}
 	app.ui_ready = true
 	apply_fonts(app)
 	apply_theme(app)
 	if !session_open(app) {
-		return .Failed
+		return false
 	}
-	if platform.tray_create(&app.platform, APP_ID) != .None {
+	if platform.tray_create(&app.platform, app.app_id) != .None {
 		log.error("creating the tray icon failed")
 	}
 	tray_menu := [?]platform.Tray_Menu_Item{
@@ -122,10 +125,10 @@ app_init :: proc(app: ^App) -> Init_Result {
 	}
 	platform.set_modal_loop_callback(&app.platform, proc(user: rawptr) { tick((^App)(user)) }, app)
 	if !window_open(app) {
-		return .Failed
+		return false
 	}
 	app.running = true
-	return .Ready
+	return true
 }
 
 app_destroy :: proc(app: ^App) {
@@ -154,6 +157,7 @@ app_destroy :: proc(app: ^App) {
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
 	delete(app.settings_path)
+	delete(app.app_id)
 	if app.platform_ready {
 		if platform.destroy(&app.platform) != .None {
 			log.error("platform shutdown reported an error")
@@ -303,7 +307,9 @@ update_sessions :: proc(app: ^App) {
 		if term.take_title_change(s) {
 			title := term.title(s, context.temp_allocator)
 			for window in app.windows {
-				if platform.window_set_title(&app.platform, window.id, len(title) > 0 ? title : APP_ID) != .None {
+				if platform.window_set_title(
+					&app.platform, window.id, len(title) > 0 ? title : app.app_id,
+				) != .None {
 					log.error("setting the window title failed")
 				}
 			}

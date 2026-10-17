@@ -6,6 +6,19 @@ import w "core:sys/windows"
 import "core:unicode/utf16"
 
 @(require_results)
+window_show_inactive :: proc(p: ^Platform, id: Window_Id) -> Error {
+	window := find_window(p, id)
+	if window == nil { return .Invalid_Window }
+	// ShowWindow returns the previous visibility, not success.
+	w.ShowWindow(window.hwnd, w.SW_SHOWNOACTIVATE)
+	if !bool(w.IsWindowVisible(window.hwnd)) {
+		log.errorf("ShowWindow(inactive) failed: %v", w.GetLastError())
+		return .Os
+	}
+	return .None
+}
+
+@(require_results)
 @(private)
 tray_add :: proc(p: ^Platform) -> Error {
 	if !os_ok(w.Shell_NotifyIconW(w.NIM_ADD, &p.tray_data), "Shell_NotifyIconW(add)") { return .Os }

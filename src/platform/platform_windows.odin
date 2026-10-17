@@ -586,7 +586,7 @@ window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
 	}
 	enqueue(p, Resize_Event{window.id, width, height})
 	if !desc.hidden {
-		w.ShowWindow(window.hwnd, w.SW_SHOW)
+		w.ShowWindow(window.hwnd, desc.inactive ? w.SW_SHOWNOACTIVATE : w.SW_SHOW)
 	}
 	return window.id, .None
 }

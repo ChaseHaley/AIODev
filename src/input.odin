@@ -80,6 +80,12 @@ show_window :: proc(app: ^App) {
 			return
 		}
 	}
+	if app.options.inactive {
+		if platform.window_show_inactive(&app.platform, app.windows[0].id) != .None {
+			log.error("showing the inactive window failed")
+		}
+		return
+	}
 	if platform.window_focus(&app.platform, app.windows[0].id) != .None {
 		log.error("focusing the window failed")
 	}

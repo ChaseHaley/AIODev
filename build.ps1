@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('debug', 'release', 'run', 'test', 'check')]
+    [ValidateSet('debug', 'release', 'run', 'test', 'check', 'verify')]
     [string] $Task = 'debug',
 
     [Parameter(Position = 1)]
@@ -25,7 +25,9 @@ function Get-Packages([string] $Root) {
 
 $sourcePackages = @(Get-Packages 'src')
 $testPackages = @(Get-Packages 'tests')
-$vetPackages = @('main') + $sourcePackages + ($testPackages | ForEach-Object { "${_}_test" })
+$toolPackages = @(Get-Packages 'tools')
+$vetPackages = @('main') + $sourcePackages + $toolPackages +
+    ($testPackages | ForEach-Object { "${_}_test" })
 
 $flags = @(
     '-collection:aio=src'
@@ -48,11 +50,36 @@ function Build-App([string[]] $Mode) {
     Invoke-Odin build src '-out:build/aiodev.exe' @Mode @flags @resource
 }
 
+function Get-BuildId {
+    try {
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return 'unknown' }
+        $head = & git rev-parse --short HEAD 2>$null
+        if ($LASTEXITCODE -ne 0) { return 'unknown' }
+        $status = & git status --porcelain 2>$null
+        if ($LASTEXITCODE -ne 0) { return 'unknown' }
+        if ($status) { return "$head+dirty" }
+        return "$head"
+    } catch {
+        return 'unknown'
+    }
+}
+
 # Library packages expose API that tests and later features use, so only application code
 # is held to the unused-procedure check.
-$appFlags = @($flags | Where-Object { $_ -notlike '-vet-packages:*' }) + @('-vet-packages:main', '-vet-unused-procedures')
+$appFlags = @($flags | Where-Object { $_ -notlike '-vet-packages:*' }) +
+    @('-vet-packages:main', '-vet-unused-procedures')
 
 switch ($Task) {
+    'verify' {
+        $buildId = Get-BuildId
+        # Literal single quotes keep a numeric Git hash a string in Odin.
+        Invoke-Odin build src '-out:build/aiodev-verify.exe' -debug '-subsystem:console' `
+            '-define:AIO_CONTROL=true' "-define:AIO_BUILD_ID='$buildId'" `
+            -ignore-unused-defineables @flags @resource
+        foreach ($name in $toolPackages) {
+            Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
+        }
+    }
     'debug' { Build-App @('-debug', '-subsystem:console') }
     'release' { Build-App @('-o:speed', '-subsystem:windows') }
     'run' {
@@ -66,6 +93,10 @@ switch ($Task) {
         if (Get-ChildItem src -Filter *.odin -File) {
             Invoke-Odin check src @flags
             Invoke-Odin check src @appFlags
+            Invoke-Odin check src '-define:AIO_CONTROL=true' -ignore-unused-defineables @appFlags
+        }
+        foreach ($name in $toolPackages) {
+            Invoke-Odin check "tools/$name" @flags
         }
     }
     'test' {

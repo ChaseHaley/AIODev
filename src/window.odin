@@ -67,7 +67,8 @@ window_open :: proc(app: ^App) -> bool {
 	}
 	g := term.geometry(entry.session)
 	desc := platform.Window_Desc{
-		title = APP_ID,
+		title = app.app_id,
+		inactive = app.options.inactive,
 		width = i32(g.surface_width),
 		height = i32(g.surface_height),
 	}

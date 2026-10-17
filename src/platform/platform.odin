@@ -8,7 +8,7 @@ Error :: enum { None, Invalid_Argument, Not_Initialized, Invalid_Window, Out_Of_
 Window_Desc :: struct {
 	title: string,
 	width, height: i32,
-	hidden: bool,
+	hidden, inactive: bool,
 }
 Cursor_Shape :: enum { Arrow, Text, Hand, Resize_Horizontal, Resize_Vertical, Hidden }
 Tray_Menu_Item :: struct { id: u32, title: string, disabled, separator: bool }
