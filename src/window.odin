@@ -1,0 +1,345 @@
+package main
+
+import "core:log"
+import "core:time"
+import "aio:glyphs"
+import "aio:layout"
+import "aio:platform"
+import "aio:render"
+import "aio:term"
+import "aio:term_view"
+import "aio:ui"
+
+@(private) CURSOR_BLINK_INTERVAL :: 530 * time.Millisecond
+@(private) FRAME_WAIT_MS :: 100
+
+Pane_View :: struct {
+	content: layout.Content,
+	view: term_view.View,
+}
+
+Window :: struct {
+	id: platform.Window_Id,
+	surface: ^render.Surface,
+	tree: layout.Layout,
+	panes: [dynamic]layout.Pane_Rect,
+	views: [dynamic]Pane_View,
+	list: render.Draw_List,
+	width, height: i32,
+	scale: f32,
+	metrics: term_view.Metrics,
+	focused, dirty: bool,
+	generation: u64,
+	selecting: bool,
+	suppressed_key: Maybe(platform.Key_Event),
+	wheel_remainder: f32,
+	blinking, cursor_phase_visible: bool,
+	blink_deadline: time.Tick,
+}
+
+window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
+	size_px := app.font_points * scale * 96 / 72
+	return term_view.compute_metrics(app.fonts, app.family, size_px, f32(app.settings.font.line_height))
+}
+
+window_open :: proc(app: ^App) -> bool {
+	w, allocation_error := new(Window)
+	if allocation_error != nil {
+		return false
+	}
+	w.scale = f32(platform.primary_dpi(&app.platform)) / 96
+	w.metrics = window_metrics(app, w.scale)
+	w.list = render.draw_list_init()
+	w.panes = make([dynamic]layout.Pane_Rect)
+	w.views = make([dynamic]Pane_View)
+	w.cursor_phase_visible = true
+	w.dirty = true
+	entry := app.sessions[0]
+	if layout.init(&w.tree, {.Terminal, entry.id}) != nil {
+		window_free(w)
+		return false
+	}
+	g := term.geometry(entry.session)
+	desc := platform.Window_Desc{
+		title = APP_ID,
+		width = i32(g.surface_width),
+		height = i32(g.surface_height),
+	}
+	id, err := platform.window_create(&app.platform, desc)
+	if err != .None {
+		log.errorf("creating the window failed: %v", err)
+		window_free(w)
+		return false
+	}
+	w.id = id
+	w.width, w.height = desc.width, desc.height
+	append(&app.windows, w)
+	native := platform.window_native_handle(&app.platform, id)
+	render_error: render.Error
+	w.surface, render_error = render.surface_create(app.device, native, w.width, w.height)
+	if render_error != .None {
+		log.errorf("creating the window surface failed: %v", render_error)
+		window_close(app, w)
+		return false
+	}
+	window_set_dpi(app, w, platform.window_dpi(&app.platform, id))
+	window_apply_settings(app, w)
+	if platform.window_set_cursor(&app.platform, id, .Text) != .None {
+		log.error("setting the window cursor failed")
+	}
+	return true
+}
+
+window_close :: proc(app: ^App, w: ^Window) {
+	for i in 0 ..< len(app.windows) {
+		if app.windows[i] == w {
+			ordered_remove(&app.windows, i)
+			break
+		}
+	}
+	if w.surface != nil {
+		render.surface_destroy(w.surface)
+	}
+	if platform.window_destroy(&app.platform, w.id) != .None {
+		log.error("destroying the window failed")
+	}
+	window_free(w)
+}
+
+@(private)
+window_free :: proc(w: ^Window) {
+	for &pane in w.views {
+		term_view.destroy(&pane.view)
+	}
+	delete(w.views)
+	delete(w.panes)
+	render.draw_list_destroy(&w.list)
+	layout.destroy(&w.tree)
+	free(w)
+}
+
+window_find :: proc(app: ^App, id: platform.Window_Id) -> ^Window {
+	for w in app.windows {
+		if w.id == id {
+			return w
+		}
+	}
+	return nil
+}
+
+window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
+	if dpi == 0 {
+		return
+	}
+	w.scale = f32(dpi) / 96
+	ui.text_set_size(&app.ui_text, UI_FONT_POINTS * w.scale * 96 / 72)
+	window_apply_settings(app, w)
+}
+
+window_apply_settings :: proc(app: ^App, w: ^Window) {
+	w.metrics = window_metrics(app, w.scale)
+	if platform.window_set_frame_color(&app.platform, w.id, app.settings.colors.background) != .None {
+		log.error("setting the window frame color failed")
+	}
+	window_relayout(app, w)
+}
+
+window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
+	w.width, w.height = width, height
+	if width <= 0 || height <= 0 {
+		return
+	}
+	if err := render.surface_resize(app.device, w.surface, width, height); err != .None {
+		log.errorf("resizing the window surface failed: %v", err)
+		if err == .Device_Lost {
+			recover_device(app)
+		}
+	}
+	window_relayout(app, w)
+}
+
+// Recomputes pane rectangles and resizes every session to the grid that fits its pane.
+window_relayout :: proc(app: ^App, w: ^Window) {
+	w.dirty = true
+	if w.width <= 0 || w.height <= 0 {
+		return
+	}
+	layout.compute(&w.tree, {0, 0, f32(w.width), f32(w.height)}, 0, &w.panes)
+	padding := f32(app.settings.window.padding) * w.scale
+	for pane in w.panes {
+		entry := session_find(app, pane.content.id)
+		if entry == nil {
+			continue
+		}
+		columns, rows := term_view.grid_size(w.metrics, pane.rect.width, pane.rect.height, padding)
+		g := term.Geometry{
+			columns = columns,
+			rows = rows,
+			cell_width = u32(w.metrics.cell_width),
+			cell_height = u32(w.metrics.cell_height),
+			surface_width = u32(w.width),
+			surface_height = u32(w.height),
+			padding_left = u32(pane.rect.x + padding),
+			padding_top = u32(pane.rect.y + padding),
+		}
+		if g != term.geometry(entry.session) {
+			term.resize(entry.session, g)
+		}
+		if pane_view(w, pane.content) == nil {
+			view: term_view.View
+			if !term_view.create(&view) {
+				log.error("creating a terminal view failed")
+				continue
+			}
+			append(&w.views, Pane_View{pane.content, view})
+		}
+	}
+}
+
+@(private)
+pane_view :: proc(w: ^Window, content: layout.Content) -> ^term_view.View {
+	for &pane in w.views {
+		if pane.content == content {
+			return &pane.view
+		}
+	}
+	return nil
+}
+
+// The session shown in the focused pane, which receives keyboard input.
+focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
+	pane, is_pane := w.tree.nodes[w.tree.focus].(layout.Pane)
+	if !is_pane {
+		return nil
+	}
+	return session_find(app, pane.content.id)
+}
+
+update_blink :: proc(w: ^Window) {
+	if !w.blinking {
+		w.cursor_phase_visible = true
+		return
+	}
+	now := time.tick_now()
+	if time.tick_diff(w.blink_deadline, now) >= 0 {
+		w.cursor_phase_visible = !w.cursor_phase_visible
+		w.blink_deadline = time.tick_add(now, CURSOR_BLINK_INTERVAL)
+		w.dirty = true
+	}
+}
+
+// Restarts the blink cycle with the cursor shown, so typing never hides the cursor.
+reset_blink :: proc(w: ^Window) {
+	w.cursor_phase_visible = true
+	w.blink_deadline = time.tick_add(time.tick_now(), CURSOR_BLINK_INTERVAL)
+}
+
+window_render :: proc(app: ^App, w: ^Window) {
+	if w.width <= 0 || w.height <= 0 || w.surface == nil {
+		return
+	}
+	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
+		log.error("waiting for the swap chain failed")
+	}
+	background := color(app.settings.colors.background)
+	for _ in 0 ..< 2 {
+		frame, result := build_frame(app, w)
+		if result == .Ok {
+			background = frame.background
+			break
+		}
+	}
+	err := render.frame_render(app.device, w.surface, &w.list, background)
+	if err == .Device_Lost {
+		recover_device(app)
+		return
+	}
+	if err != .None {
+		log.errorf("rendering a frame failed: %v", err)
+	}
+	w.dirty = false
+}
+
+@(private)
+build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
+	render.draw_list_reset(&w.list)
+	padding := f32(app.settings.window.padding) * w.scale
+	frame: term_view.Frame
+	blinking := false
+	c := app.settings.colors
+	selection_foreground: Maybe(render.Color)
+	if fg, ok := c.selection_foreground.?; ok {
+		selection_foreground = color(fg)
+	}
+	for pane in w.panes {
+		entry := session_find(app, pane.content.id)
+		view := pane_view(w, pane.content)
+		if entry == nil || view == nil {
+			continue
+		}
+		if render.push_layer(&w.list, {pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}) != .None {
+			continue
+		}
+		style := term_view.Style{
+			family = app.family,
+			selection_background = color(c.selection_background),
+			selection_foreground = selection_foreground,
+			cursor_text = color(c.cursor_text),
+			focused = w.focused && !app.palette.open,
+			cursor_phase_visible = w.cursor_phase_visible,
+		}
+		origin := [2]f32{pane.rect.x + padding, pane.rect.y + padding}
+		result: glyphs.Result
+		frame, result = term_view.build(
+			view, entry.session, app.fonts, &app.cache, &w.list, origin, w.metrics, style,
+		)
+		if result != .Ok {
+			return frame, result
+		}
+		blinking ||= frame.cursor_blinking
+	}
+	if blinking != w.blinking {
+		w.blinking = blinking
+		reset_blink(w)
+	}
+	size := [2]f32{f32(w.width), f32(w.height)}
+	if app.palette.open {
+		result := ui.palette_draw(
+			&app.palette, &app.registry, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale,
+		)
+		if result != .Ok {
+			return frame, result
+		}
+	}
+	return frame, ui.notices_draw(&app.notices, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)
+}
+
+// Rebuilds every graphics object after the GPU was reset or removed; sessions are untouched.
+recover_device :: proc(app: ^App) {
+	log.warn("the graphics device was lost; recreating it")
+	for w in app.windows {
+		render.surface_destroy(w.surface)
+		w.surface = nil
+	}
+	render.device_destroy(app.device)
+	device, err := render.device_create()
+	if err != .None {
+		log.errorf("recreating the graphics device failed: %v", err)
+		app.device = nil
+		app.running = false
+		return
+	}
+	app.device = device
+	apply_text_gamma(app)
+	glyphs.reset_device(&app.cache, device)
+	for w in app.windows {
+		native := platform.window_native_handle(&app.platform, w.id)
+		surface, surface_error := render.surface_create(device, native, max(w.width, 1), max(w.height, 1))
+		if surface_error != .None {
+			log.errorf("recreating a window surface failed: %v", surface_error)
+			continue
+		}
+		w.surface = surface
+		w.dirty = true
+	}
+}

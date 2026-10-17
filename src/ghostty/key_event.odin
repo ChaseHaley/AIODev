@@ -1,0 +1,235 @@
+package ghostty
+
+when ODIN_OS == .Windows {
+	foreign import lib {"../../vendor/ghostty/ghostty-vt-static.lib", "system:ntdll.lib"}
+}
+
+Key_Event :: distinct rawptr
+
+Key_Action :: enum i32 {
+	Release = 0,
+	Press = 1,
+	Repeat = 2,
+}
+
+Mod :: enum u16 {
+	Shift,
+	Ctrl,
+	Alt,
+	Super,
+	Caps_Lock,
+	Num_Lock,
+	Shift_Side,
+	Ctrl_Side,
+	Alt_Side,
+	Super_Side,
+}
+
+Mods :: bit_set[Mod; u16]
+
+Key :: enum i32 {
+	Unidentified = 0,
+	Backquote,
+	Backslash,
+	Bracket_Left,
+	Bracket_Right,
+	Comma,
+	Digit_0,
+	Digit_1,
+	Digit_2,
+	Digit_3,
+	Digit_4,
+	Digit_5,
+	Digit_6,
+	Digit_7,
+	Digit_8,
+	Digit_9,
+	Equal,
+	Intl_Backslash,
+	Intl_Ro,
+	Intl_Yen,
+	A,
+	B,
+	C,
+	D,
+	E,
+	F,
+	G,
+	H,
+	I,
+	J,
+	K,
+	L,
+	M,
+	N,
+	O,
+	P,
+	Q,
+	R,
+	S,
+	T,
+	U,
+	V,
+	W,
+	X,
+	Y,
+	Z,
+	Minus,
+	Period,
+	Quote,
+	Semicolon,
+	Slash,
+	Alt_Left,
+	Alt_Right,
+	Backspace,
+	Caps_Lock,
+	Context_Menu,
+	Control_Left,
+	Control_Right,
+	Enter,
+	Meta_Left,
+	Meta_Right,
+	Shift_Left,
+	Shift_Right,
+	Space,
+	Tab,
+	Convert,
+	Kana_Mode,
+	Non_Convert,
+	Delete,
+	End,
+	Help,
+	Home,
+	Insert,
+	Page_Down,
+	Page_Up,
+	Arrow_Down,
+	Arrow_Left,
+	Arrow_Right,
+	Arrow_Up,
+	Num_Lock,
+	Numpad_0,
+	Numpad_1,
+	Numpad_2,
+	Numpad_3,
+	Numpad_4,
+	Numpad_5,
+	Numpad_6,
+	Numpad_7,
+	Numpad_8,
+	Numpad_9,
+	Numpad_Add,
+	Numpad_Backspace,
+	Numpad_Clear,
+	Numpad_Clear_Entry,
+	Numpad_Comma,
+	Numpad_Decimal,
+	Numpad_Divide,
+	Numpad_Enter,
+	Numpad_Equal,
+	Numpad_Memory_Add,
+	Numpad_Memory_Clear,
+	Numpad_Memory_Recall,
+	Numpad_Memory_Store,
+	Numpad_Memory_Subtract,
+	Numpad_Multiply,
+	Numpad_Paren_Left,
+	Numpad_Paren_Right,
+	Numpad_Subtract,
+	Numpad_Separator,
+	Numpad_Up,
+	Numpad_Down,
+	Numpad_Right,
+	Numpad_Left,
+	Numpad_Begin,
+	Numpad_Home,
+	Numpad_End,
+	Numpad_Insert,
+	Numpad_Delete,
+	Numpad_Page_Up,
+	Numpad_Page_Down,
+	Escape,
+	F1,
+	F2,
+	F3,
+	F4,
+	F5,
+	F6,
+	F7,
+	F8,
+	F9,
+	F10,
+	F11,
+	F12,
+	F13,
+	F14,
+	F15,
+	F16,
+	F17,
+	F18,
+	F19,
+	F20,
+	F21,
+	F22,
+	F23,
+	F24,
+	F25,
+	Fn,
+	Fn_Lock,
+	Print_Screen,
+	Scroll_Lock,
+	Pause,
+	Browser_Back,
+	Browser_Favorites,
+	Browser_Forward,
+	Browser_Home,
+	Browser_Refresh,
+	Browser_Search,
+	Browser_Stop,
+	Eject,
+	Launch_App_1,
+	Launch_App_2,
+	Launch_Mail,
+	Media_Play_Pause,
+	Media_Select,
+	Media_Stop,
+	Media_Track_Next,
+	Media_Track_Previous,
+	Power,
+	Sleep,
+	Audio_Volume_Down,
+	Audio_Volume_Mute,
+	Audio_Volume_Up,
+	Wake_Up,
+	Copy,
+	Cut,
+	Paste,
+}
+
+@(default_calling_convention="c", link_prefix="ghostty_")
+foreign lib {
+	@(require_results)
+	key_event_new :: proc(allocator: ^Allocator, event: ^Key_Event) -> Result ---
+	key_event_free :: proc(event: Key_Event) ---
+	key_event_set_action :: proc(event: Key_Event, action: Key_Action) ---
+	@(require_results)
+	key_event_get_action :: proc(event: Key_Event) -> Key_Action ---
+	key_event_set_key :: proc(event: Key_Event, key: Key) ---
+	@(require_results)
+	key_event_get_key :: proc(event: Key_Event) -> Key ---
+	key_event_set_mods :: proc(event: Key_Event, mods: Mods) ---
+	@(require_results)
+	key_event_get_mods :: proc(event: Key_Event) -> Mods ---
+	key_event_set_consumed_mods :: proc(event: Key_Event, consumed_mods: Mods) ---
+	@(require_results)
+	key_event_get_consumed_mods :: proc(event: Key_Event) -> Mods ---
+	key_event_set_composing :: proc(event: Key_Event, composing: bool) ---
+	@(require_results)
+	key_event_get_composing :: proc(event: Key_Event) -> bool ---
+	key_event_set_utf8 :: proc(event: Key_Event, utf8: [^]u8, len: uint) ---
+	@(require_results)
+	key_event_get_utf8 :: proc(event: Key_Event, len: ^uint) -> [^]u8 ---
+	key_event_set_unshifted_codepoint :: proc(event: Key_Event, codepoint: u32) ---
+	@(require_results)
+	key_event_get_unshifted_codepoint :: proc(event: Key_Event) -> u32 ---
+}

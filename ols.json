@@ -1,0 +1,5 @@
+{
+	"$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
+	"collections": [{ "name": "aio", "path": "src" }],
+	"checker_args": "-vet -vet-cast -vet-tabs -vet-using-param -strict-style -disallow-do"
+}
