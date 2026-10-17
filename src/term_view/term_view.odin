@@ -12,6 +12,7 @@ Metrics :: struct {
 	size_px: f32,
 	cell_width, cell_height: f32,
 	baseline: f32,
+	// Whole pixels from the baseline to a line's top edge: down for the underline, up for the strikethrough.
 	underline_offset, underline_thickness: f32,
 	strikethrough_offset, strikethrough_thickness: f32,
 }
@@ -86,9 +87,9 @@ compute_metrics :: proc(fonts: ^font.System, family: font.Family, size_px, line_
 		cell_width = max(1, math.round(advance)),
 		cell_height = cell_height,
 		baseline = math.round(face.ascent + face.line_gap / 2 + (cell_height - natural) / 2),
-		underline_offset = math.round(-face.underline_position + underline / 2),
+		underline_offset = math.round(-face.underline_position),
 		underline_thickness = underline,
-		strikethrough_offset = math.round(face.strikethrough_position - strikethrough / 2),
+		strikethrough_offset = math.round(face.strikethrough_position),
 		strikethrough_thickness = strikethrough,
 	}
 }
@@ -406,8 +407,7 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
 	m := b.metrics
 	baseline := top + m.baseline
 	if p.style.strikethrough {
-		t := m.strikethrough_thickness
-		rect(b, {left, baseline - m.strikethrough_offset - t / 2, m.cell_width, t}, p.foreground)
+		rect(b, {left, baseline - m.strikethrough_offset, m.cell_width, m.strikethrough_thickness}, p.foreground)
 	}
 	underline := ghostty.Sgr_Underline(p.style.underline)
 	if underline == .None {
@@ -415,13 +415,13 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
 	}
 	c := style_color(p.style.underline_color, &b.colors.palette, p.foreground)
 	t := m.underline_thickness
-	center := baseline + m.underline_offset
+	line := baseline + m.underline_offset
 	#partial switch underline {
 	case .Single:
-		rect(b, {left, center - t / 2, m.cell_width, t}, c)
+		rect(b, {left, line, m.cell_width, t}, c)
 	case .Double:
-		rect(b, {left, center - t * 1.5, m.cell_width, t}, c)
-		rect(b, {left, center + t * 0.5, m.cell_width, t}, c)
+		rect(b, {left, line - t, m.cell_width, t}, c)
+		rect(b, {left, line + t, m.cell_width, t}, c)
 	case .Curly, .Dotted, .Dashed:
 		sprite: glyphs.Sprite = .Dashed_Underline
 		if underline == .Curly {
@@ -433,7 +433,7 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
 		if result != .Ok {
 			return result
 		}
-		place(b, entry, {left, center}, c)
+		place(b, entry, {left, line + t / 2}, c)
 	}
 	return .Ok
 }

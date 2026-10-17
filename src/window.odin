@@ -1,6 +1,7 @@
 package main
 
 import "core:log"
+import "core:math"
 import "core:time"
 import "aio:glyphs"
 import "aio:layout"
@@ -40,6 +41,11 @@ Window :: struct {
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
 	size_px := app.font_points * scale * 96 / 72
 	return term_view.compute_metrics(app.fonts, app.family, size_px, f32(app.settings.font.line_height))
+}
+
+// Whole pixels, so the cell grid and its decorations stay on the pixel grid at every DPI.
+window_padding :: proc(app: ^App, w: ^Window) -> f32 {
+	return math.round(f32(app.settings.window.padding) * w.scale)
 }
 
 window_open :: proc(app: ^App) -> bool {
@@ -165,7 +171,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	layout.compute(&w.tree, {0, 0, f32(w.width), f32(w.height)}, 0, &w.panes)
-	padding := f32(app.settings.window.padding) * w.scale
+	padding := window_padding(app, w)
 	for pane in w.panes {
 		entry := session_find(app, pane.content.id)
 		if entry == nil {
@@ -263,7 +269,7 @@ window_render :: proc(app: ^App, w: ^Window) {
 @(private)
 build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	render.draw_list_reset(&w.list)
-	padding := f32(app.settings.window.padding) * w.scale
+	padding := window_padding(app, w)
 	frame: term_view.Frame
 	blinking := false
 	c := app.settings.colors

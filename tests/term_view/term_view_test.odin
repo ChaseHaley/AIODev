@@ -174,9 +174,9 @@ cell_has_ink :: proc(f: ^Fixture, pixels: []u8, column, row: int) -> bool {
 }
 
 @(test)
-decorations_survive_colored_backgrounds :: proc(t: ^testing.T) {
+decorations_are_crisp_over_backgrounds :: proc(t: ^testing.T) {
 	script :: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command \"" +
-		"$e = [char]27; [Console]::Write($e + '[41;4m ' + $e + '[24;9m ' + " +
+		"$e = [char]27; [Console]::Write($e + '[41;4m ' + $e + '[24;9m ' + $e + '[29;21m ' + " +
 		"$e + '[0mREADY'); [Console]::Out.Flush(); Start-Sleep -Seconds 30\""
 	f, ok := fixture_create(t, script)
 	defer fixture_destroy(&f)
@@ -185,16 +185,30 @@ decorations_survive_colored_backgrounds :: proc(t: ^testing.T) {
 	}
 	_, pixels := render_frame(t, &f, {family = f.family})
 	m := f.metrics
-	underline := m.baseline + m.underline_offset - m.underline_thickness / 2
-	strike := m.baseline - m.strikethrough_offset - m.strikethrough_thickness / 2
-	for x in 0 ..< int(m.cell_width) {
-		u := cell_pixel(&f, pixels, 0, 0, f32(x), underline)
-		s := cell_pixel(&f, pixels, 1, 0, f32(x), strike)
-		testing.expect(t, u[0] > 100 && u[1] > 100 && u[2] > 200)
-		testing.expect(t, s[0] > 100 && s[1] > 100 && s[2] > 200)
+	Line :: struct { top, height: int }
+	underline := Line{int(m.baseline + m.underline_offset), int(m.underline_thickness)}
+	strike := Line{int(m.baseline - m.strikethrough_offset), int(m.strikethrough_thickness)}
+	double := [2]Line{
+		{underline.top - underline.height, underline.height},
+		{underline.top + underline.height, underline.height},
 	}
-	testing.expect_value(t, cell_pixel(&f, pixels, 0, 0, 0, 0), [4]u8{0, 0, 200, 255})
-	testing.expect_value(t, cell_pixel(&f, pixels, 1, 0, 0, 0), [4]u8{0, 0, 200, 255})
+	cells := [3][]Line{{underline}, {strike}, double[:]}
+	background, ink := [4]u8{0, 0, 200, 255}, [4]u8{255, 255, 255, 255}
+	for lines, column in cells {
+		blended := 0
+		for y in 0 ..< int(m.cell_height) {
+			inside := false
+			for line in lines {
+				inside ||= y >= line.top && y < line.top + line.height
+			}
+			for x in 0 ..< int(m.cell_width) {
+				if cell_pixel(&f, pixels, column, 0, f32(x), f32(y)) != (inside ? ink : background) {
+					blended += 1
+				}
+			}
+		}
+		testing.expectf(t, blended == 0, "cell %d: %d pixels are neither the line nor the background", column, blended)
+	}
 }
 
 @(test)
