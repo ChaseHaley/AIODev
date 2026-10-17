@@ -93,6 +93,9 @@ show_window :: proc(app: ^App) {
 
 hide_to_tray :: proc(app: ^App, w: ^Window) {
 	ui.palette_close(&app.palette)
+	if w.find.open {
+		find_close(w, focused_session(app, w))
+	}
 	window_close(app, w)
 	if !app.tray_hint_shown {
 		app.tray_hint_shown = true
@@ -124,6 +127,17 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			run_action(app, w, action)
 			return
 		}
+	}
+	// The find bar has the keyboard: keys edit the query and none reach the shell.
+	if w.find.open {
+		outcome := ui.find_key(&w.find, e)
+		if outcome == .Closed {
+			w.suppressed_key = e
+		}
+		on_find_outcome(w, entry, outcome)
+		return
+	}
+	if e.pressed {
 		if entry.status != .Running {
 			if e.key == .Enter || e.key == .Numpad_Enter {
 				w.suppressed_key = e
@@ -135,6 +149,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			if term.has_selection(entry.session) {
 				term.clear_selection(entry.session)
 			}
+			paste_confirm_cancel(app, w)
 			reset_blink(w)
 		}
 	}
@@ -145,6 +160,10 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
+		return
+	}
+	if w.find.open {
+		on_find_outcome(w, focused_session(app, w), ui.find_text(&w.find, text))
 		return
 	}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
@@ -189,17 +208,20 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		}
 		return
 	}
+	x, y := f32(e.x), f32(e.y)
+	if w.find.open && !w.selecting && ui.find_contains(f32(w.width), w.scale, x, y) {
+		return
+	}
 	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
 		return
 	}
-	x, y := f32(e.x), f32(e.y)
 	if e.button == .Left && (w.selecting || !reports_mouse(entry, e.modifiers)) {
 		if e.pressed {
 			w.selecting = true
 			term.selection_press(entry.session, x, y, e.time_ns)
 		} else if w.selecting {
-			w.selecting = false
+			w.selecting, w.autoscrolling = false, false
 			term.selection_release(entry.session, x, y)
 			if app.settings.terminal.copy_on_select {
 				copy_selection(app, entry, false)
@@ -229,6 +251,8 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	}
 	if w.selecting {
 		term.selection_drag(entry.session, x, y)
+		w.pointer = {x, y}
+		autoscroll_follow(w, entry)
 		w.dirty = true
 	} else if reports_mouse(entry, e.modifiers) {
 		term.send_mouse(entry.session, .Motion, nil, e.buttons, e.modifiers, x, y)

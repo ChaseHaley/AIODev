@@ -12,6 +12,7 @@ import "aio:term_view"
 import "aio:ui"
 
 @(private) CURSOR_BLINK_INTERVAL :: 530 * time.Millisecond
+@(private) AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
 @(private) FRAME_WAIT_MS :: 100
 
 Pane_View :: struct {
@@ -32,6 +33,12 @@ Window :: struct {
 	focused, dirty: bool,
 	generation: u64,
 	selecting: bool,
+	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
+	autoscrolling: bool,
+	autoscroll_deadline: time.Tick,
+	pointer: [2]f32,
+	find: ui.Find_Bar,
+	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
 	blinking, cursor_phase_visible: bool,
@@ -58,6 +65,7 @@ window_open :: proc(app: ^App) -> bool {
 	w.list = render.draw_list_init()
 	w.panes = make([dynamic]layout.Pane_Rect)
 	w.views = make([dynamic]Pane_View)
+	ui.find_init(&w.find)
 	w.cursor_phase_visible = true
 	w.dirty = true
 	entry := app.sessions[0]
@@ -120,6 +128,7 @@ window_free :: proc(w: ^Window) {
 	}
 	delete(w.views)
 	delete(w.panes)
+	ui.find_destroy(&w.find)
 	render.draw_list_destroy(&w.list)
 	layout.destroy(&w.tree)
 	free(w)
@@ -235,6 +244,34 @@ update_blink :: proc(w: ^Window) {
 	}
 }
 
+// Starts or stops edge autoscroll after the selection drag moved to `pointer`.
+autoscroll_follow :: proc(w: ^Window, entry: ^Session_Entry) {
+	active := term.selection_autoscroll(entry.session) != .None
+	if active && !w.autoscrolling {
+		w.autoscroll_deadline = time.tick_add(time.tick_now(), AUTOSCROLL_INTERVAL)
+	}
+	w.autoscrolling = active
+}
+
+update_autoscroll :: proc(app: ^App, w: ^Window) {
+	if !w.autoscrolling {
+		return
+	}
+	entry := pane_at(app, w, i32(w.pointer.x), i32(w.pointer.y))
+	if !w.selecting || entry == nil {
+		w.autoscrolling = false
+		return
+	}
+	now := time.tick_now()
+	if time.tick_diff(w.autoscroll_deadline, now) < 0 {
+		return
+	}
+	term.selection_autoscroll_tick(entry.session, w.pointer.x, w.pointer.y)
+	w.autoscroll_deadline = time.tick_add(now, AUTOSCROLL_INTERVAL)
+	w.dirty = true
+	autoscroll_follow(w, entry)
+}
+
 // Restarts the blink cycle with the cursor shown, so typing never hides the cursor.
 reset_blink :: proc(w: ^Window) {
 	w.cursor_phase_visible = true
@@ -291,8 +328,11 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			family = app.family,
 			selection_background = color(c.selection_background),
 			selection_foreground = selection_foreground,
+			search_foreground = color(c.search_foreground),
+			search_background = color(c.search_background),
+			search_selected_background = color(c.search_selected_background),
 			cursor_text = color(c.cursor_text),
-			focused = w.focused && !app.palette.open,
+			focused = w.focused && !app.palette.open && !w.find.open,
 			cursor_phase_visible = w.cursor_phase_visible,
 		}
 		origin := [2]f32{pane.rect.x + padding, pane.rect.y + padding}
@@ -310,6 +350,13 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		reset_blink(w)
 	}
 	size := [2]f32{f32(w.width), f32(w.height)}
+	if w.find.open {
+		status := find_status(w, focused_session(app, w))
+		result := ui.find_draw(&w.find, &w.list, &app.ui_text, app.theme, status, size.x, size.y, w.scale)
+		if result != .Ok {
+			return frame, result
+		}
+	}
 	if app.palette.open {
 		result := ui.palette_draw(
 			&app.palette, &app.registry, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale,

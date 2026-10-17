@@ -143,7 +143,7 @@ palette_key :: proc(
 		if len(p.query) == 0 {
 			return .None, 0
 		}
-		erase(p, control)
+		erase(&p.query, control)
 		refresh(p, registry)
 		return .Changed, 0
 	}
@@ -153,29 +153,36 @@ palette_key :: proc(
 	return .None, 0
 }
 
+// Removes the last rune, or with `word` the last word and the spaces after it.
 @(private)
-erase :: proc(p: ^Palette, word: bool) {
-	end := len(p.query)
+erase :: proc(query: ^[dynamic]u8, word: bool) {
+	end := len(query)
 	for end > 0 {
-		_, size := utf8.decode_last_rune(p.query[:end])
+		_, size := utf8.decode_last_rune(query[:end])
 		end -= size
-		if !word || (end > 0 && p.query[end - 1] == ' ' && p.query[end] != ' ') {
+		if !word || (end > 0 && query[end - 1] == ' ' && query[end] != ' ') {
 			break
 		}
 	}
-	resize(&p.query, end)
+	resize(query, end)
 }
 
-palette_text :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -> Outcome {
+// Appends the printable runes of `text`, returning whether any were added.
+@(private)
+insert :: proc(query: ^[dynamic]u8, text: string) -> bool {
 	changed := false
 	for r in text {
 		if r >= ' ' && r != 0x7f {
 			bytes, size := utf8.encode_rune(r)
-			append(&p.query, ..bytes[:size])
+			append(query, ..bytes[:size])
 			changed = true
 		}
 	}
-	if !changed {
+	return changed
+}
+
+palette_text :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -> Outcome {
+	if !insert(&p.query, text) {
 		return .None
 	}
 	p.selected, p.scroll = 0, 0

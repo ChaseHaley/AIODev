@@ -217,8 +217,10 @@ text_and_paste_round_trip :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, term.send_text(s, "h\u00e9llo"))
 	press_and_release(s, enter({}, 0))
-	testing.expect(t, term.paste(s, "second\r\n"))
-	testing.expect(t, await(t, s, shows, "GOT:h\u00e9llo|second"))
+	testing.expect_value(t, term.paste(s, "second\r\n"), term.Paste_Result.Unsafe)
+	testing.expect_value(t, term.paste(s, "sec"), term.Paste_Result.Sent)
+	testing.expect_value(t, term.paste(s, "ond\x1b[201~\n", allow_unsafe = true), term.Paste_Result.Sent)
+	testing.expect(t, await(t, s, shows, "GOT:h\u00e9llo|second [201~"))
 }
 
 @(test)

@@ -382,3 +382,36 @@ paint_changes_preserve_ligatures :: proc(t: ^testing.T) {
 	testing.expect_value(t, cap(f.view.columns), columns)
 	testing.expect_value(t, cap(f.view.shaped), shaped)
 }
+
+@(test)
+search_matches_are_highlighted :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, text_command("'zz AB zz AB READY'"))
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "READY") {
+		return
+	}
+	term.search_set_needle(f.session, "ab")
+	for term.search_pending(f.session) {
+		term.search_update(f.session)
+	}
+	testing.expect(t, term.search_select(f.session, true))
+	style := term_view.Style{
+		family = f.family,
+		search_foreground = {0, 0, 0, 1},
+		search_background = {0, 1, 1, 1},
+		search_selected_background = {1, 0, 1, 1},
+		cursor_text = {0, 0, 0, 1},
+	}
+	_, pixels := render_frame(t, &f, style)
+	match, selected, none := [4]u8{255, 255, 0, 255}, [4]u8{255, 0, 255, 255}, [4]u8{0, 0, 0, 255}
+	testing.expect_value(t, cell_pixel(&f, pixels, 0, 0, 0, 0), none)
+	testing.expect_value(t, cell_pixel(&f, pixels, 3, 0, 0, 0), match)
+	testing.expect_value(t, cell_pixel(&f, pixels, 4, 0, 0, 0), match)
+	testing.expect_value(t, cell_pixel(&f, pixels, 5, 0, 0, 0), none)
+	testing.expect_value(t, cell_pixel(&f, pixels, 9, 0, 0, 0), selected)
+	testing.expect_value(t, cell_pixel(&f, pixels, 10, 0, 0, 0), selected)
+	testing.expect(t, !cell_has_ink(&f, pixels, 3, 0))
+	term.search_set_needle(f.session, "")
+	_, cleared := render_frame(t, &f, style)
+	testing.expect_value(t, cell_pixel(&f, cleared, 9, 0, 0, 0), none)
+}

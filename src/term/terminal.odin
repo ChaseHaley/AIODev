@@ -69,7 +69,11 @@ Session :: struct {
 	mouse_encoder: ghostty.Mouse_Encoder,
 	mouse_event: ghostty.Mouse_Event,
 	gesture: ghostty.Selection_Gesture,
-	press_event, drag_event, release_event: ghostty.Selection_Gesture_Event,
+	press_event, drag_event, release_event, autoscroll_event: ghostty.Selection_Gesture_Event,
+	search: ghostty.Search,
+	search_matches: [dynamic]ghostty.Selection,
+	search_active: bool,
+	search_fed: u64,
 	status: Status_Kind,
 	exit_code: u32,
 	failure: string,
@@ -109,6 +113,7 @@ create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^
 	s.wake = wake
 	s.geometry = config.geometry
 	s.queue.pending.allocator = allocator
+	s.search_matches.allocator = allocator
 	ok := false
 	defer if !ok {
 		destroy(s)
@@ -128,6 +133,8 @@ destroy :: proc(s: ^Session) {
 	ghostty.selection_gesture_event_free(s.press_event)
 	ghostty.selection_gesture_event_free(s.drag_event)
 	ghostty.selection_gesture_event_free(s.release_event)
+	ghostty.selection_gesture_event_free(s.autoscroll_event)
+	ghostty.search_free(s.search)
 	if s.gesture != nil {
 		ghostty.selection_gesture_free(s.gesture, s.terminal)
 	}
@@ -139,6 +146,7 @@ destroy :: proc(s: ^Session) {
 	clear_program_status(s, false)
 	delete(s.failure, s.allocator)
 	delete(s.queue.pending)
+	delete(s.search_matches)
 	free(s, s.allocator)
 }
 
@@ -203,6 +211,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		ghostty.selection_gesture_event_new(nil, &s.press_event, .Press),
 		ghostty.selection_gesture_event_new(nil, &s.drag_event, .Drag),
 		ghostty.selection_gesture_event_new(nil, &s.release_event, .Release),
+		ghostty.selection_gesture_event_new(nil, &s.autoscroll_event, .Autoscroll_Tick),
+		ghostty.search_new(nil, &s.search, s.terminal),
 	}
 	for result in results {
 		if result == .Out_Of_Memory {
@@ -426,13 +436,17 @@ on_render_hold :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr, held: 
 	}
 }
 
-capture :: proc(s: ^Session, state: ghostty.Render_State) -> bool {
+// Updates `state` from the terminal and, given `highlights`, replaces it with the visible search matches.
+capture :: proc(s: ^Session, state: ghostty.Render_State, highlights: ^[dynamic]Highlight = nil) -> bool {
 	sync.mutex_lock(&s.mutex)
 	if s.held && time.tick_since(s.held_since) < RENDER_HOLD_LIMIT {
 		sync.mutex_unlock(&s.mutex)
 		return false
 	}
 	result := ghostty.render_state_begin_update(state, s.terminal)
+	if result == .Success && highlights != nil {
+		collect_highlights(s, highlights)
+	}
 	sync.mutex_unlock(&s.mutex)
 	if result == .Success {
 		result = ghostty.render_state_end_update(state)

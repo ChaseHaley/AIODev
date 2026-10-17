@@ -21,6 +21,7 @@ Style :: struct {
 	family: font.Family,
 	selection_background: render.Color,
 	selection_foreground: Maybe(render.Color),
+	search_foreground, search_background, search_selected_background: render.Color,
 	cursor_text: render.Color,
 	focused: bool,
 	cursor_phase_visible: bool,
@@ -36,6 +37,9 @@ View :: struct {
 	rows: ghostty.Render_State_Row_Iterator,
 	cells: ghostty.Render_State_Row_Cells,
 	codepoints: [dynamic]u32,
+	highlights: [dynamic]term.Highlight,
+	// Search state of each cell in the row being built.
+	marks: [dynamic]Search_Mark,
 	paints: [dynamic]Cell_Paint,
 	runes: [dynamic]rune,
 	columns: [dynamic]int,
@@ -45,6 +49,8 @@ View :: struct {
 @(require_results)
 create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	v.codepoints = make([dynamic]u32, allocator)
+	v.highlights = make([dynamic]term.Highlight, allocator)
+	v.marks = make([dynamic]Search_Mark, allocator)
 	v.paints = make([dynamic]Cell_Paint, allocator)
 	v.runes = make([dynamic]rune, allocator)
 	v.columns = make([dynamic]int, allocator)
@@ -63,6 +69,8 @@ destroy :: proc(v: ^View) {
 	ghostty.render_state_row_iterator_free(v.rows)
 	ghostty.render_state_free(v.state)
 	delete(v.codepoints)
+	delete(v.highlights)
+	delete(v.marks)
 	delete(v.paints)
 	delete(v.runes)
 	delete(v.columns)
@@ -131,6 +139,7 @@ Builder :: struct {
 	colors: ghostty.Render_State_Colors,
 	cursor: ghostty.Render_State_Cursor,
 	origin: [2]f32,
+	columns: int,
 	ok: bool,
 }
 
@@ -169,7 +178,7 @@ build :: proc(
 	metrics: Metrics,
 	style: Style,
 ) -> (Frame, glyphs.Result) {
-	term.capture(session, v.state)
+	term.capture(session, v.state, &v.highlights)
 	b := Builder{
 		list = list,
 		cache = cache,
@@ -181,13 +190,16 @@ build :: proc(
 		origin = origin,
 		ok = true,
 	}
-	ok := ghostty.render_state_get(v.state, .Colors, &b.colors) == .Success
+	columns: u16
+	ok := ghostty.render_state_get(v.state, .Cols, &columns) == .Success
+	ok &&= ghostty.render_state_get(v.state, .Colors, &b.colors) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Cursor, &b.cursor) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Row_Iterator, &v.rows) == .Success
 	if !ok {
 		log.error("term_view: reading the render state failed")
 		return {}, .Ok
 	}
+	b.columns = int(columns)
 	frame := Frame{
 		background = color(b.colors.background),
 		cursor_blinking = b.cursor.visible && b.cursor.blinking,
@@ -208,6 +220,32 @@ build :: proc(
 }
 
 @(private)
+Search_Mark :: enum u8 {
+	None,
+	Match,
+	Selected,
+}
+
+// Fills v.marks with the search state of each of the row's `columns` cells; the selected match wins.
+@(private)
+mark_row :: proc(v: ^View, y, columns: int) -> bool {
+	if resize(&v.marks, columns) != nil {
+		return false
+	}
+	for &mark in v.marks {
+		mark = .None
+	}
+	for h in v.highlights {
+		if h.row != y { continue }
+		mark: Search_Mark = h.selected ? .Selected : .Match
+		for x in max(h.first, 0) ..= min(h.last, columns - 1) {
+			v.marks[x] = max(v.marks[x], mark)
+		}
+	}
+	return true
+}
+
+@(private)
 Cell_Paint :: struct {
 	foreground, background: render.Color,
 	has_background: bool,
@@ -221,6 +259,7 @@ paint_cell :: proc(
 	x, y: int,
 	selection: ghostty.Render_State_Row_Selection,
 	selected: bool,
+	mark: Search_Mark,
 ) -> Cell_Paint {
 	p := Cell_Paint{foreground = color(b.colors.foreground), style = ghostty.sized(ghostty.Style)}
 	styled: bool
@@ -239,6 +278,10 @@ paint_cell :: proc(
 	if p.style.inverse {
 		background := p.has_background ? p.background : color(b.colors.background)
 		p.foreground, p.background, p.has_background = background, p.foreground, true
+	}
+	if mark != .None {
+		p.foreground, p.has_background = b.style.search_foreground, true
+		p.background = mark == .Selected ? b.style.search_selected_background : b.style.search_background
 	}
 	if selected && x >= int(selection.start_x) && x <= int(selection.end_x) {
 		p.background, p.has_background = b.style.selection_background, true
@@ -271,9 +314,14 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	if ghostty.render_state_row_get(v.rows, .Cells, &v.cells) != .Success {
 		return .Ok
 	}
+	if !mark_row(v, y, b.columns) {
+		b.ok = false
+		return .Ok
+	}
 	clear(&v.paints)
 	for x := 0; ghostty.render_state_row_cells_next(v.cells); x += 1 {
-		p := paint_cell(v, b, x, y, selection, selected)
+		mark := x < len(v.marks) ? v.marks[x] : .None
+		p := paint_cell(v, b, x, y, selection, selected, mark)
 		if _, err := append(&v.paints, p); err != nil {
 			b.ok = false
 			return .Ok

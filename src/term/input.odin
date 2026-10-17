@@ -1,6 +1,7 @@
 package term
 
 import "core:log"
+import "core:strings"
 import "core:sync"
 import "aio:ghostty"
 import "aio:input"
@@ -95,28 +96,39 @@ normalize_newlines :: proc(text: string, out: []u8) -> []u8 {
 	return out[:n]
 }
 
-paste :: proc(s: ^Session, text: string) -> bool {
+Paste_Result :: enum {
+	Sent,
+	// The text has a line break and the program has not enabled bracketed paste, so each line would run as
+	// typed input. Nothing was sent; paste again with allow_unsafe once the user confirms.
+	Unsafe,
+	Failed,
+}
+
+paste :: proc(s: ^Session, text: string, allow_unsafe := false) -> Paste_Result {
 	if len(text) == 0 {
-		return true
+		return .Sent
 	}
 	data := normalize_newlines(text, make([]u8, len(text), context.temp_allocator))
 	sync.mutex_lock(&s.mutex)
 	bracketed := mode_enabled(s, ghostty.MODE_BRACKETED_PASTE)
 	sync.mutex_unlock(&s.mutex)
+	if !bracketed && !allow_unsafe && strings.index_byte(string(data), '\r') >= 0 {
+		return .Unsafe
+	}
 	needed: uint
 	result := ghostty.paste_encode(raw_data(data), len(data), bracketed, nil, 0, &needed)
 	if result != .Out_Of_Space && result != .Success {
 		log.errorf("term: paste encoding failed: %v", result)
-		return false
+		return .Failed
 	}
 	encoded := make([]u8, needed, context.temp_allocator)
 	written: uint
 	result = ghostty.paste_encode(raw_data(data), len(data), bracketed, raw_data(encoded), needed, &written)
 	if result != .Success {
 		log.errorf("term: paste encoding failed: %v", result)
-		return false
+		return .Failed
 	}
-	return send_input(s, encoded[:written], true)
+	return send_input(s, encoded[:written], true) ? .Sent : .Failed
 }
 
 send_focus :: proc(s: ^Session, focused: bool) {

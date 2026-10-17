@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:strings"
+import "core:time"
 import "aio:commands"
 import "aio:platform"
 import "aio:settings"
@@ -14,6 +15,7 @@ Action :: enum u32 {
 	Copy,
 	Paste,
 	Select_All,
+	Find,
 	Clear_Scrollback,
 	Scroll_Page_Up,
 	Scroll_Page_Down,
@@ -39,6 +41,7 @@ ACTIONS :: [Action]Action_Info{
 	.Copy = {"edit.copy", "Copy", {{.C, {.Control, .Shift}}, {.Insert, {.Control}}}},
 	.Paste = {"edit.paste", "Paste", {{.V, {.Control, .Shift}}, {.Insert, {.Shift}}}},
 	.Select_All = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}},
+	.Find = {"terminal.find", "Find in Scrollback", {{.F, {.Control, .Shift}}}},
 	.Clear_Scrollback = {"terminal.clear_scrollback", "Clear Scrollback", {{.K, {.Control, .Shift}}}},
 	.Scroll_Page_Up = {"terminal.scroll_page_up", "Scroll Up One Page", {{.Page_Up, {.Shift}}}},
 	.Scroll_Page_Down = {"terminal.scroll_page_down", "Scroll Down One Page", {{.Page_Down, {.Shift}}}},
@@ -101,11 +104,17 @@ run_action :: proc(app: ^App, w: ^Window, action: Action) {
 		}
 	case .Paste:
 		if entry != nil {
-			paste_clipboard(app, entry)
+			paste_clipboard(app, w, entry)
 		}
 	case .Select_All:
 		if entry != nil {
 			term.select_all(entry.session)
+		}
+	case .Find:
+		if w.find.open {
+			find_close(w, entry)
+		} else {
+			ui.find_open(&w.find)
 		}
 	case .Clear_Scrollback:
 		if entry != nil {
@@ -153,14 +162,94 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 	}
 }
 
-paste_clipboard :: proc(app: ^App, entry: ^Session_Entry) {
+// Pastes into the find bar when it is open, otherwise into the shell. Text the shell would run line by line
+// waits for a second paste within PASTE_CONFIRM_DURATION.
+paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
 	text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
 	if !ok || len(text) == 0 {
 		return
 	}
-	if entry.status != .Running || !term.paste(entry.session, text) {
+	if w.find.open {
+		line := text
+		if end := strings.index_any(text, "\r\n"); end >= 0 {
+			line = text[:end]
+		}
+		on_find_outcome(w, entry, ui.find_text(&w.find, line))
+		return
+	}
+	if entry.status != .Running {
+		notify(app, .Error, "Could not paste: the shell is not running.")
+		return
+	}
+	confirmed := !app.settings.terminal.confirm_multiline_paste ||
+		time.tick_diff(time.tick_now(), w.paste_confirm_until) > 0
+	switch term.paste(entry.session, text, confirmed) {
+	case .Sent:
+		paste_confirm_cancel(app, w)
+	case .Unsafe:
+		w.paste_confirm_until = time.tick_add(time.tick_now(), PASTE_CONFIRM_DURATION)
+		ui.notices_put(&app.notices, u32(Notice_Key.Paste), .Info, PASTE_CONFIRM_TEXT, PASTE_CONFIRM_DURATION)
+		mark_all_dirty(app)
+	case .Failed:
 		notify(app, .Error, "Could not paste: the shell is not accepting input.")
 	}
+}
+
+paste_confirm_cancel :: proc(app: ^App, w: ^Window) {
+	if w.paste_confirm_until == {} {
+		return
+	}
+	w.paste_confirm_until = {}
+	ui.notices_clear(&app.notices, u32(Notice_Key.Paste))
+	mark_all_dirty(app)
+}
+
+// Ends the search and returns the session to its live screen.
+find_close :: proc(w: ^Window, entry: ^Session_Entry) {
+	ui.find_close(&w.find)
+	w.dirty = true
+	if entry != nil {
+		term.search_set_needle(entry.session, "")
+		term.scroll_to_bottom(entry.session)
+	}
+}
+
+on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outcome) {
+	if outcome == .None {
+		return
+	}
+	w.dirty = true
+	if entry == nil {
+		return
+	}
+	switch outcome {
+	case .None:
+	case .Changed:
+		term.search_set_needle(entry.session, string(w.find.query[:]))
+	case .Older, .Newer:
+		term.search_select(entry.session, outcome == .Older)
+	case .Closed:
+		find_close(w, entry)
+	}
+}
+
+// The find bar's match count: "3 of 17" once a match is selected.
+find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
+	if entry == nil || len(w.find.query) == 0 {
+		return ""
+	}
+	s := term.search_summary(entry.session)
+	switch {
+	case s.selected >= 0:
+		return fmt.tprintf("%d of %d", s.selected + 1, s.total)
+	case s.total == 1:
+		return "1 match"
+	case s.total > 0:
+		return fmt.tprintf("%d matches", s.total)
+	case !s.complete:
+		return "Searching…"
+	}
+	return "No matches"
 }
 
 @(private)

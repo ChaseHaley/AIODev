@@ -57,7 +57,7 @@ only_text_input_returns_to_live_screen :: proc(t: ^testing.T) {
 			testing.expect(t, !cursor_in_viewport(t, s, state))
 		}
 		testing.expect(t, term.send_text(s, ""))
-		testing.expect(t, term.paste(s, ""))
+		testing.expect_value(t, term.paste(s, ""), term.Paste_Result.Sent)
 		testing.expect(t, !cursor_in_viewport(t, s, state))
 		text_keys := [?]platform.Key_Event{
 			{key = .A, pressed = true, text = "a", native = {vk = 'A', scan_code = 0x1e}},
@@ -76,7 +76,7 @@ only_text_input_returns_to_live_screen :: proc(t: ^testing.T) {
 		testing.expect(t, term.send_text(s, "text"))
 		testing.expect(t, cursor_in_viewport(t, s, state))
 		term.scroll_viewport(s, -50)
-		testing.expect(t, term.paste(s, "paste"))
+		testing.expect_value(t, term.paste(s, "paste"), term.Paste_Result.Sent)
 		testing.expect(t, cursor_in_viewport(t, s, state))
 	}
 }

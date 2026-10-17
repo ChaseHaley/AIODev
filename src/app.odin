@@ -23,6 +23,10 @@ import "aio:ui"
 @(private) NOTICE_DURATION :: 6 * time.Second
 @(private) COPY_NOTICE_DURATION :: 2 * time.Second
 @(private) ERROR_NOTICE_DURATION :: 12 * time.Second
+@(private) PASTE_CONFIRM_DURATION :: 10 * time.Second
+@(private) PASTE_CONFIRM_TEXT ::
+	"The clipboard text has line breaks, so the shell will run each line as a command. " +
+	"Paste again within 10 seconds to confirm."
 
 @(private)
 Notice_Key :: enum u32 {
@@ -31,6 +35,7 @@ Notice_Key :: enum u32 {
 	Settings,
 	Font,
 	Copy,
+	Paste,
 }
 
 Session_Entry :: struct {
@@ -194,6 +199,7 @@ tick :: proc(app: ^App) {
 	}
 	for window in app.windows {
 		update_blink(window)
+		update_autoscroll(app, window)
 		if window.dirty {
 			window_render(app, window)
 			verify_presented(app, window)
@@ -213,6 +219,14 @@ wait_timeout :: proc(app: ^App) -> u32 {
 	for window in app.windows {
 		if window.blinking && (!found || time.tick_diff(window.blink_deadline, deadline) > 0) {
 			deadline, found = window.blink_deadline, true
+		}
+		if window.autoscrolling && (!found || time.tick_diff(window.autoscroll_deadline, deadline) > 0) {
+			deadline, found = window.autoscroll_deadline, true
+		}
+	}
+	for entry in app.sessions {
+		if term.search_pending(entry.session) {
+			return 0
 		}
 	}
 	if !found {
@@ -310,6 +324,13 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 update_sessions :: proc(app: ^App) {
 	for &entry in app.sessions {
 		s := entry.session
+		if term.search_pending(s) {
+			before := term.search_summary(s)
+			term.search_update(s)
+			if term.search_summary(s) != before {
+				mark_all_dirty(app)
+			}
+		}
 		status := term.status(s)
 		if status.kind != entry.status {
 			entry.status = status.kind

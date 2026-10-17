@@ -156,3 +156,38 @@ text_measures_and_wraps :: proc(t: ^testing.T) {
 	ui.wrap(&text, "unbreakablelongword", word, &lines)
 	testing.expect(t, len(lines) > 1)
 }
+
+@(test)
+find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
+	f: ui.Find_Bar
+	ui.find_init(&f)
+	defer ui.find_destroy(&f)
+	Outcome :: ui.Find_Outcome
+	ui.find_open(&f)
+	testing.expect(t, f.open)
+	testing.expect_value(t, ui.find_key(&f, key({key = .E, text = "e"})), Outcome.Changed)
+	testing.expect_value(t, ui.find_text(&f, "rr or"), Outcome.Changed)
+	testing.expect_value(t, ui.find_text(&f, "\x1b"), Outcome.None)
+	testing.expect_value(t, string(f.query[:]), "err or")
+	control_a := key({key = .A, text = "\x01", modifiers = {.Control}})
+	testing.expect_value(t, ui.find_key(&f, control_a), Outcome.None)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace, modifiers = {.Control}})), Outcome.Changed)
+	testing.expect_value(t, string(f.query[:]), "err ")
+	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace})), Outcome.Changed)
+	testing.expect_value(t, string(f.query[:]), "err")
+	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), Outcome.Older)
+	shift_enter := key({key = .Enter, text = "\r", modifiers = {.Shift}})
+	testing.expect_value(t, ui.find_key(&f, shift_enter), Outcome.Newer)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Up})), Outcome.Older)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Down})), Outcome.Newer)
+	testing.expect_value(t, ui.find_key(&f, {key = .Escape}), Outcome.None)
+	testing.expect(t, f.open)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Escape})), Outcome.Closed)
+	testing.expect(t, !f.open)
+	testing.expect_value(t, len(f.query), 0)
+	r := ui.find_layout(1000, 1.5)
+	testing.expect_value(t, r, render.Rect{1000 - 18 - 570, 18, 570, 60})
+	testing.expect(t, ui.find_contains(1000, 1.5, 413, 19))
+	testing.expect(t, !ui.find_contains(1000, 1.5, 411, 19))
+	testing.expect_value(t, ui.find_layout(100, 1).width, 76)
+}

@@ -27,7 +27,7 @@ Scrollback_Settings :: struct {
 	lines: int,
 }
 Terminal_Settings :: struct {
-	copy_on_select: bool,
+	copy_on_select, confirm_multiline_paste: bool,
 }
 Cursor_Settings :: struct {
 	style: Cursor_Style,
@@ -36,6 +36,7 @@ Cursor_Settings :: struct {
 Color_Settings :: struct {
 	foreground, background, cursor, cursor_text, selection_background: Color,
 	selection_foreground: Maybe(Color),
+	search_foreground, search_background, search_selected_background: Color,
 	palette: [16]Color,
 }
 Settings :: struct {
@@ -70,8 +71,9 @@ SCHEMA :: [?]Schema_Entry{
 	{"window.columns", .Int, offset_of(Settings, window) + offset_of(Window_Settings, columns), "120", 1, 32767, nil, "Initial terminal columns."},
 	{"window.rows", .Int, offset_of(Settings, window) + offset_of(Window_Settings, rows), "32", 1, 32767, nil, "Initial terminal rows."},
 	{"window.padding", .Int, offset_of(Settings, window) + offset_of(Window_Settings, padding), "8", 0, 1024, nil, "Window padding in DIPs."},
-	{"scrollback.lines", .Int, offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines), "10000", 0, 10000000, nil, "Retained scrollback lines."},
+	{"scrollback.lines", .Int, offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines), "10000", 0, 10000000, nil, "Scrollback lines to keep; history is freed in blocks, so the count kept varies by a few hundred."},
 	{"terminal.copy_on_select", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select), "true", 0, 0, nil, "Copy selected text automatically."},
+	{"terminal.confirm_multiline_paste", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste), "true", 0, 0, nil, "Ask before pasting line breaks the shell would run as separate commands."},
 	{"cursor.style", .Enum, offset_of(Settings, cursor) + offset_of(Cursor_Settings, style), "block", 0, 0, {"block", "bar", "underline"}, "Cursor shape: block, bar, or underline."},
 	{"cursor.blink", .Bool, offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink), "false", 0, 0, nil, "Blink the cursor."},
 	{"colors.foreground", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, foreground), "#d6dae0", 0, 0, nil, "Default foreground color."},
@@ -80,6 +82,9 @@ SCHEMA :: [?]Schema_Entry{
 	{"colors.cursor_text", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, cursor_text), "#0f1115", 0, 0, nil, "Text under the block cursor."},
 	{"colors.selection_background", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, selection_background), "#2d3a52", 0, 0, nil, "Selection background color."},
 	{"colors.selection_foreground", .Optional_Color, offset_of(Settings, colors) + offset_of(Color_Settings, selection_foreground), "", 0, 0, nil, "Selection foreground; empty preserves the cell color."},
+	{"colors.search_foreground", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, search_foreground), "#0f1115", 0, 0, nil, "Text color of search matches."},
+	{"colors.search_background", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, search_background), "#e5c07b", 0, 0, nil, "Background of search matches."},
+	{"colors.search_selected_background", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, search_selected_background), "#ff9e64", 0, 0, nil, "Background of the selected search match."},
 	{"colors.palette.0", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 0 * size_of(Color), "#1b1e24", 0, 0, nil, "ANSI palette color 0."},
 	{"colors.palette.1", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 1 * size_of(Color), "#e06c75", 0, 0, nil, "ANSI palette color 1."},
 	{"colors.palette.2", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 2 * size_of(Color), "#98c379", 0, 0, nil, "ANSI palette color 2."},

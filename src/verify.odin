@@ -202,7 +202,7 @@ when AIO_CONTROL {
 	}
 
 	verify_notice_key :: proc(key: u32) -> string {
-		if key <= u32(Notice_Key.Copy) {
+		if key <= u32(max(Notice_Key)) {
 			return strings.to_lower(fmt.tprintf("%v", Notice_Key(key)), context.temp_allocator)
 		}
 		return fmt.tprintf("%d", key)
@@ -237,6 +237,9 @@ when AIO_CONTROL {
 				{"window.focused", fmt.tprintf("%t", w.focused)},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", window_padding(app, w))},
+				{"find.open", fmt.tprintf("%t", w.find.open)},
+				{"find.query", string(w.find.query[:])},
+				{"find.matches", find_status(w, entry)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
 		} else {
@@ -518,8 +521,8 @@ when AIO_CONTROL {
 			if _, err := append(&parts, label); err != nil { return "", .Out_Of_Memory }
 		}
 		for key in ([]string{"window.visible", "window.size", "window.dpi", "window.focused", "grid.size",
-			"palette.open", "palette.query", "palette.item", "palette.selected", "session.viewport",
-			"session.selection"}) {
+			"palette.open", "palette.query", "palette.item", "palette.selected", "find.open", "find.query",
+			"find.matches", "session.viewport", "session.selection"}) {
 			a, b := verify_value(v.before_state, key), verify_value(entries, key)
 			if a == b { continue }
 			value := strings.builder_make(context.temp_allocator)
@@ -527,6 +530,7 @@ when AIO_CONTROL {
 			change := fmt.tprintf("%s=%s", key, strings.to_string(value))
 			if key == "window.visible" { change = b == "true" ? "window shown" : "window hidden" }
 			if key == "palette.open" { change = b == "true" ? "palette opened" : "palette closed" }
+			if key == "find.open" { change = b == "true" ? "find opened" : "find closed" }
 			if _, err := append(&parts, change); err != nil { return "", .Out_Of_Memory }
 		}
 		for n in app.notices.items {
