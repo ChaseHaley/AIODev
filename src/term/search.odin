@@ -183,6 +183,17 @@ append_highlight :: proc(
 	}
 	if !has_end {
 		end = {u16(last_column), u32(last_row)}
+	} else {
+		// Search endpoints refer to the cluster head; its wide spacer is part of the match.
+		cell: ghostty.Cell
+		width: ghostty.Cell_Wide
+		result := ghostty.grid_ref_cell(&match.end, &cell)
+		if result == .Success { result = ghostty.cell_get(cell, .Wide, &width) }
+		if result != .Success {
+			log.errorf("term: reading search endpoint width failed: %v", result)
+			return false
+		}
+		if width == .Wide { end.x = min(end.x + 1, u16(last_column)) }
 	}
 	for row in int(start.y) ..= min(int(end.y), last_row) {
 		first := row == int(start.y) ? int(start.x) : 0

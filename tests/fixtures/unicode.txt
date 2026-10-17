@@ -1,11 +1,12 @@
 # Unicode fixtures (WORK-002). Expected layout follows D-042: grapheme clustering
 # (mode 2027) on, libghostty widths, ambiguous characters narrow.
 #
-# Format: id  widths  input  [stored]
+# Format: id  widths  input  [stored [conpty]]
 #   widths  cell span of each grapheme cluster, left to right, comma separated (1 or 2)
 #   input   bytes written to the terminal; <hex> is a codepoint, <xHH> one raw byte,
 #           anything else is literal. Write <20> for a space.
 #   stored  the codepoints the grid keeps, when they differ from input (invalid UTF-8)
+#   conpty  explicit decoded output when Windows replaces malformed bytes differently
 #
 # The file is ASCII only, so an editor cannot normalize a decomposed case without it
 # showing in the diff. Expectations come from the policy, not from current output;
@@ -71,6 +72,7 @@ format.bom                 1          <FEFF>a           a
 invalid.byte               1,1        <xFF>a            <FFFD>a
 invalid.truncated          1,1        <xE2><x82>a       <FFFD>a
 invalid.overlong           1,1,1      <xC0><xAF>a       <FFFD><FFFD>a
+invalid.surrogate          1,1,1,1    <xED><xA0><x80>a  <FFFD><FFFD><FFFD>a  <FFFD><FFFD>a
 
 # Symbols used by prompts and TUIs, and East Asian Ambiguous characters (narrow)
 box-drawing                1,1,1      <250C><2500><2510>

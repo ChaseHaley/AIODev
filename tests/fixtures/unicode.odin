@@ -16,6 +16,8 @@ Unicode_Case :: struct {
 	input: []u8,
 	// Codepoints the grid stores, in order; differs from the input only for invalid UTF-8.
 	stored: []rune,
+	// Explicit transport baseline when ConPTY replaces malformed UTF-8 differently.
+	conpty: []u8,
 	line: int,
 }
 
@@ -65,8 +67,8 @@ parse_line :: proc(raw: string, line: int) -> (c: Unicode_Case, ok: bool, error:
 	}
 	if content == "" { return {}, false, "" }
 	fields := strings.fields(content, context.temp_allocator)
-	if len(fields) != 3 && len(fields) != 4 {
-		return {}, false, "expected: id widths input [stored]"
+	if len(fields) < 3 || len(fields) > 5 {
+		return {}, false, "expected: id widths input [stored [conpty]]"
 	}
 	c = Unicode_Case{id = fields[0], line = line}
 	widths: [dynamic]int
@@ -89,6 +91,11 @@ parse_line :: proc(raw: string, line: int) -> (c: Unicode_Case, ok: bool, error:
 		return c, false, "invalid UTF-8 input needs a stored column"
 	}
 	c.stored = utf8.string_to_runes(string(stored))
+	if len(fields) == 5 {
+		c.conpty, error = unescape(fields[4])
+		if error != "" { return }
+		if !utf8.valid_string(string(c.conpty)) { return c, false, "conpty baseline must be valid UTF-8" }
+	}
 	return c, true, ""
 }
 
@@ -103,6 +110,7 @@ unicode_case_destroy :: proc(c: Unicode_Case) {
 	delete(c.widths)
 	delete(c.input)
 	delete(c.stored)
+	delete(c.conpty)
 }
 
 // Columns the cursor advances when the case is written at column 0.

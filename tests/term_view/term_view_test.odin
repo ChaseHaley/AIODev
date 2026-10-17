@@ -411,6 +411,20 @@ emoji_draw_in_color_within_cells :: proc(t: ^testing.T) {
 	}
 }
 
+// A block cursor on a wide character covers both of its cells, and only those.
+@(test)
+cursor_covers_wide_cell :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, text_command("[char]0x754c + 'x' + $e + '[1;1H'"))
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "x") { return }
+	style := term_view.Style{family = f.family, cursor_text = {0, 0, 0, 1}, focused = true, cursor_phase_visible = true}
+	_, pixels := render_frame(t, &f, style)
+	corner_x, corner_y := f.metrics.cell_width - 1, f32(1)
+	testing.expect_value(t, cell_pixel(&f, pixels, 0, 0, 0, corner_y), [4]u8{0, 255, 0, 255})
+	testing.expect_value(t, cell_pixel(&f, pixels, 1, 0, corner_x, corner_y), [4]u8{0, 255, 0, 255})
+	testing.expect_value(t, cell_pixel(&f, pixels, 2, 0, 0, corner_y), [4]u8{0, 0, 0, 255})
+}
+
 // A glyph wider than its cells (the three-em dash is about three em wide but two cells) shrinks to
 // fit instead of covering its neighbor (D-042).
 @(test)

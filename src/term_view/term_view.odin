@@ -140,6 +140,8 @@ Builder :: struct {
 	cursor: ghostty.Render_State_Cursor,
 	origin: [2]f32,
 	columns: int,
+	// The cursor sits on a wide cluster, so it covers two cells.
+	cursor_wide: bool,
 	ok: bool,
 }
 
@@ -310,7 +312,7 @@ paint_cell :: proc(
 block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 	c := b.cursor
 	return c.visible && c.viewport_has_value && b.style.focused && b.style.cursor_phase_visible &&
-		c.visual_style == .Block && int(c.viewport_x) == x && int(c.viewport_y) == y
+		c.visual_style == .Block && int(c.viewport_x) - (c.wide_tail ? 1 : 0) == x && int(c.viewport_y) == y
 }
 
 @(private)
@@ -334,6 +336,11 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 			b.ok = false
 			return .Ok
 		}
+	}
+	c := b.cursor
+	if c.viewport_has_value && int(c.viewport_y) == y {
+		x := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
+		b.cursor_wide = c.wide_tail || (x >= 0 && x < len(v.paints) && v.paints[x].wide)
 	}
 	run_start, run_color, run_active := 0, render.Color{}, false
 	flush :: proc(b: ^Builder, start, end: int, top: f32, c: render.Color) {
@@ -524,10 +531,12 @@ build_cursor :: proc(b: ^Builder) {
 	}
 	m := b.metrics
 	cursor_color := b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
+	// On a wide cluster the cursor covers both of its cells, from the head even if it reports the tail.
+	column := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
 	cell := render.Rect{
-		b.origin.x + f32(c.viewport_x) * m.cell_width,
+		b.origin.x + f32(column) * m.cell_width,
 		b.origin.y + f32(c.viewport_y) * m.cell_height,
-		m.cell_width,
+		m.cell_width * (b.cursor_wide ? 2 : 1),
 		m.cell_height,
 	}
 	// A block cursor sits between the cell background and the glyph: rects in a layer draw before its glyphs.
