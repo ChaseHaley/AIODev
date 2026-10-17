@@ -51,29 +51,33 @@ try {
     $firstGrid = (Read-State)['grid.size']
     Set-Marker 'LEFT_ONLY'
     $left = (Read-State)['session.id']
-    Invoke-Aio key Alt+Shift+=
+    Invoke-Aio key Ctrl+Shift+O
     Invoke-Aio wait text 'PS '
     Set-Marker 'TOP_ONLY'
     $top = (Read-State)['session.id']
-    Invoke-Aio command pane.split_down
+    Invoke-Aio key Ctrl+Shift+E
     Invoke-Aio wait text 'PS '
     Set-Marker 'BOTTOM_ONLY'
     $bottom = (Read-State)['session.id']
+    Invoke-Aio key 'Ctrl+Win+['
+    Assert-Value (Read-State)['session.id'] $top 'previous split'
+    Invoke-Aio key 'Ctrl+Win+]'
+    Assert-Value (Read-State)['session.id'] $bottom 'next split'
     Invoke-Aio run 'Write-Output ("SHELL_PID=" + $PID)'
     $screen = & $ctl --name $name screen
     $shellPid = [int]([regex]::Match(($screen -join "`n"), '\|SHELL_PID=(\d+)').Groups[1].Value)
     if ($shellPid -le 0) { throw 'Missing child PID.' }
     Assert-Isolated 'BOTTOM_ONLY' @('TAB_ONE_ONLY', 'LEFT_ONLY', 'TOP_ONLY')
-    Invoke-Aio key Alt+Up
+    Invoke-Aio key Ctrl+Alt+Up
     Assert-Value (Read-State)['session.id'] $top 'focus up'
     Assert-Isolated 'TOP_ONLY' @('TAB_ONE_ONLY', 'LEFT_ONLY', 'BOTTOM_ONLY')
-    Invoke-Aio key Alt+Left
+    Invoke-Aio key Ctrl+Alt+Left
     Assert-Value (Read-State)['session.id'] $left 'focus left'
     Assert-Isolated 'LEFT_ONLY' @('TAB_ONE_ONLY', 'TOP_ONLY', 'BOTTOM_ONLY')
-    Invoke-Aio key Alt+Right Alt+Down
+    Invoke-Aio key Ctrl+Alt+Right Ctrl+Alt+Down
     Assert-Value (Read-State)['session.id'] $bottom 'focus right and down'
     $before = (Read-State)['grid.size']
-    Invoke-Aio key Alt+Shift+Up
+    Invoke-Aio key Ctrl+Win+Shift+Up
     if ((Read-State)['grid.size'] -eq $before) { throw 'Keyboard resize did not change the grid.' }
     Write-Output 'PASS keyboard resize changes grid'
 
@@ -91,7 +95,7 @@ try {
     Invoke-Aio command terminal.find
     Invoke-Aio type 'BOTTOM_ONLY'
     Invoke-Aio expect state 'find.matches=1 match'
-    Invoke-Aio key Alt+Up
+    Invoke-Aio key Ctrl+Alt+Up
     Invoke-Aio expect state find.open=false
     Assert-Value (Read-State)['session.id'] $top 'find follows pane focus'
 
@@ -100,6 +104,10 @@ try {
     Invoke-Aio wait text 'PS '
     Set-Marker 'FOURTH_ONLY'
     $fourth = (Read-State)['session.id']
+    Invoke-Aio key 'Ctrl+Win+['
+    Assert-Value (Read-State)['session.id'] $bottom 'previous split uses creation order'
+    Invoke-Aio key 'Ctrl+Win+]'
+    Assert-Value (Read-State)['session.id'] $fourth 'next split uses creation order'
     $before = Read-State
     Invoke-Aio run '1..40 | ForEach-Object { Write-Output ("OUTPUT_" + $_); Start-Sleep -Milliseconds 20 }'
     $after = Read-State
@@ -151,7 +159,14 @@ try {
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state tabs.count=3
     Invoke-Aio expect state tabs.selected=3
-    Invoke-Aio command pane.close
+    Invoke-Aio key Alt+1 Alt+9
+    Invoke-Aio expect state tabs.selected=3
+    Invoke-Aio key Ctrl+PageUp Ctrl+PageDown Ctrl+Shift+Left Ctrl+Shift+Right
+    Invoke-Aio expect state tabs.selected=3
+    Invoke-Aio key Ctrl+Shift+O
+    Invoke-Aio wait text 'PS '
+    Invoke-Aio expect state panes.count=2
+    Invoke-Aio key Ctrl+Shift+W
     Invoke-Aio expect state tabs.count=2
     Invoke-Aio expect state tabs.selected=2
 
@@ -159,28 +174,17 @@ try {
     Invoke-Aio command pane.focus_down
     Assert-Value (Read-State)['session.id'] $bottom 'bottom pane before shell exit'
     Invoke-Aio run 'exit 7'
-    Invoke-Aio expect state session.status=exited
-    Invoke-Aio expect state session.exit=7
-    $message = (Read-State)['session.message']
-    if ($message -notlike '*The shell exited with code 7. Press Enter to restart it.*') {
-        throw "Missing pane-local exit message: $message"
-    }
-    Invoke-Aio command pane.focus_up
-    Invoke-Aio expect state 'session.message='
-    Invoke-Aio command pane.focus_down
-    Invoke-Aio key Enter
-    Invoke-Aio wait text 'PS '
-    Invoke-Aio expect state session.status=running
-    Invoke-Aio run 'Write-Output ("RESTART_PID=" + $PID)'
-    $screen = & $ctl --name $name screen
-    $restartPid = [int]([regex]::Match(($screen -join "`n"), '\|RESTART_PID=(\d+)').Groups[1].Value)
-    Invoke-Aio key Ctrl+Shift+W
     Invoke-Aio expect state panes.count=2
-    if (Get-Process -Id $restartPid -ErrorAction SilentlyContinue) { throw 'Closed pane shell still running.' }
+    Assert-Value (Read-State)['session.id'] $top 'exit focuses surviving sibling'
     if (Get-Process -Id $shellPid -ErrorAction SilentlyContinue) { throw 'Exited shell still running.' }
-    Write-Output 'PASS pane close ends the shell process'
+    Write-Output 'PASS shell exit closes its pane'
+    Invoke-Aio run 'Write-Output ("CLOSE_PID=" + $PID)'
+    $screen = & $ctl --name $name screen
+    $closePid = [int]([regex]::Match(($screen -join "`n"), '\|CLOSE_PID=(\d+)').Groups[1].Value)
     Invoke-Aio command pane.close
     Invoke-Aio expect state panes.count=1
+    if (Get-Process -Id $closePid -ErrorAction SilentlyContinue) { throw 'Closed pane shell still running.' }
+    Write-Output 'PASS manual pane close ends its shell process'
     Invoke-Aio tray hide
     Invoke-Aio expect state tabs.count=2
     Invoke-Aio tray open
@@ -200,6 +204,21 @@ try {
     Invoke-Aio expect state panes.count=1
     if ((Read-State)['session.id'] -eq $firstId) { throw 'Reopen reused the closed session.' }
     Write-Output 'PASS last-tab close and fresh tray reopen'
+    $soleId = (Read-State)['session.id']
+    Invoke-Aio run 'exit 7'
+    Invoke-Aio expect state session.status=exited
+    Invoke-Aio expect state session.exit=7
+    Invoke-Aio expect state tabs.count=1
+    Invoke-Aio expect state panes.count=1
+    Invoke-Aio expect state window.visible=true
+    if ((Read-State)['session.message'] -notlike '*The shell exited with code 7.*') {
+        throw 'The final pane must retain its exit message.'
+    }
+    Invoke-Aio key Enter
+    Invoke-Aio wait text 'PS '
+    Invoke-Aio expect state "session.id=$soleId"
+    Invoke-Aio expect state session.status=running
+    Write-Output 'PASS final-pane exception and Enter restart'
     $settingsPath = Join-Path $repo "build/verify/$name/settings.ini"
     $originalSettings = [IO.File]::ReadAllText($settingsPath)
     try {

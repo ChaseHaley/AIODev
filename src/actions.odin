@@ -51,6 +51,10 @@ Action :: enum u32 {
 	Resize_Right,
 	Resize_Up,
 	Resize_Down,
+	Focus_Previous,
+	Focus_Next,
+	Last_Tab,
+	Close_Tab,
 }
 
 @(private)
@@ -79,33 +83,39 @@ ACTIONS :: [Action]Action_Info{
 		"view.font_size_reset", "Reset Font Size", {{.Digit_0, {.Control}}, {.Numpad_0, {.Control}}},
 	},
 	.Open_Settings = {"settings.open_file", "Open Settings File", {{.Comma, {.Control}}}},
-	.Reload_Settings = {"settings.reload", "Reload Settings", nil},
+	.Reload_Settings = {"settings.reload", "Reload Settings", {{.Comma, {.Control, .Shift}}}},
 	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil},
 	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil},
-	.Quit = {"app.quit", "Quit AIODev", nil},
+	.Quit = {"app.quit", "Quit AIODev", {{.Q, {.Control, .Shift}}}},
 	.New_Tab = {"tab.new", "New Tab", {{.T, {.Control, .Shift}}}},
-	.Close_Pane = {"pane.close", "Close Pane", {{.W, {.Control, .Shift}}}},
-	.Next_Tab = {"tab.next", "Next Tab", {{.Tab, {.Control}}}},
-	.Previous_Tab = {"tab.previous", "Previous Tab", {{.Tab, {.Control, .Shift}}}},
-	.Tab_1 = {"tab.select_1", "Select Tab 1", {{.Digit_1, {.Control, .Alt}}}},
-	.Tab_2 = {"tab.select_2", "Select Tab 2", {{.Digit_2, {.Control, .Alt}}}},
-	.Tab_3 = {"tab.select_3", "Select Tab 3", {{.Digit_3, {.Control, .Alt}}}},
-	.Tab_4 = {"tab.select_4", "Select Tab 4", {{.Digit_4, {.Control, .Alt}}}},
-	.Tab_5 = {"tab.select_5", "Select Tab 5", {{.Digit_5, {.Control, .Alt}}}},
-	.Tab_6 = {"tab.select_6", "Select Tab 6", {{.Digit_6, {.Control, .Alt}}}},
-	.Tab_7 = {"tab.select_7", "Select Tab 7", {{.Digit_7, {.Control, .Alt}}}},
-	.Tab_8 = {"tab.select_8", "Select Tab 8", {{.Digit_8, {.Control, .Alt}}}},
-	.Tab_9 = {"tab.select_9", "Select Tab 9", {{.Digit_9, {.Control, .Alt}}}},
-	.Split_Right = {"pane.split_right", "Split Right", {{.Equal, {.Alt, .Shift}}}},
-	.Split_Down = {"pane.split_down", "Split Down", {{.Minus, {.Alt, .Shift}}}},
-	.Focus_Left = {"pane.focus_left", "Focus Left", {{.Arrow_Left, {.Alt}}}},
-	.Focus_Right = {"pane.focus_right", "Focus Right", {{.Arrow_Right, {.Alt}}}},
-	.Focus_Up = {"pane.focus_up", "Focus Up", {{.Arrow_Up, {.Alt}}}},
-	.Focus_Down = {"pane.focus_down", "Focus Down", {{.Arrow_Down, {.Alt}}}},
-	.Resize_Left = {"pane.resize_left", "Resize Left", {{.Arrow_Left, {.Alt, .Shift}}}},
-	.Resize_Right = {"pane.resize_right", "Resize Right", {{.Arrow_Right, {.Alt, .Shift}}}},
-	.Resize_Up = {"pane.resize_up", "Resize Up", {{.Arrow_Up, {.Alt, .Shift}}}},
-	.Resize_Down = {"pane.resize_down", "Resize Down", {{.Arrow_Down, {.Alt, .Shift}}}},
+	.Close_Pane = {"pane.close", "Close Pane", nil},
+	.Next_Tab = {"tab.next", "Next Tab",
+		{{.Tab, {.Control}}, {.Arrow_Right, {.Control, .Shift}}, {.Page_Down, {.Control}}}},
+	.Previous_Tab = {"tab.previous", "Previous Tab",
+		{{.Tab, {.Control, .Shift}}, {.Arrow_Left, {.Control, .Shift}}, {.Page_Up, {.Control}}}},
+	.Tab_1 = {"tab.select_1", "Select Tab 1", {{.Digit_1, {.Alt}}}},
+	.Tab_2 = {"tab.select_2", "Select Tab 2", {{.Digit_2, {.Alt}}}},
+	.Tab_3 = {"tab.select_3", "Select Tab 3", {{.Digit_3, {.Alt}}}},
+	.Tab_4 = {"tab.select_4", "Select Tab 4", {{.Digit_4, {.Alt}}}},
+	.Tab_5 = {"tab.select_5", "Select Tab 5", {{.Digit_5, {.Alt}}}},
+	.Tab_6 = {"tab.select_6", "Select Tab 6", {{.Digit_6, {.Alt}}}},
+	.Tab_7 = {"tab.select_7", "Select Tab 7", {{.Digit_7, {.Alt}}}},
+	.Tab_8 = {"tab.select_8", "Select Tab 8", {{.Digit_8, {.Alt}}}},
+	.Tab_9 = {"tab.select_9", "Select Tab 9", nil},
+	.Split_Right = {"pane.split_right", "Split Right", {{.O, {.Control, .Shift}}}},
+	.Split_Down = {"pane.split_down", "Split Down", {{.E, {.Control, .Shift}}}},
+	.Focus_Left = {"pane.focus_left", "Focus Left", {{.Arrow_Left, {.Control, .Alt}}}},
+	.Focus_Right = {"pane.focus_right", "Focus Right", {{.Arrow_Right, {.Control, .Alt}}}},
+	.Focus_Up = {"pane.focus_up", "Focus Up", {{.Arrow_Up, {.Control, .Alt}}}},
+	.Focus_Down = {"pane.focus_down", "Focus Down", {{.Arrow_Down, {.Control, .Alt}}}},
+	.Resize_Left = {"pane.resize_left", "Resize Left", {{.Arrow_Left, {.Control, .Super, .Shift}}}},
+	.Resize_Right = {"pane.resize_right", "Resize Right", {{.Arrow_Right, {.Control, .Super, .Shift}}}},
+	.Resize_Up = {"pane.resize_up", "Resize Up", {{.Arrow_Up, {.Control, .Super, .Shift}}}},
+	.Resize_Down = {"pane.resize_down", "Resize Down", {{.Arrow_Down, {.Control, .Super, .Shift}}}},
+	.Focus_Previous = {"pane.focus_previous", "Focus Previous Pane", {{.Bracket_Left, {.Control, .Super}}}},
+	.Focus_Next = {"pane.focus_next", "Focus Next Pane", {{.Bracket_Right, {.Control, .Super}}}},
+	.Last_Tab = {"tab.last", "Select Last Tab", {{.Digit_9, {.Alt}}}},
+	.Close_Tab = {"tab.close", "Close Tab", {{.W, {.Control, .Shift}}}},
 }
 
 @(require_results)
@@ -199,6 +209,10 @@ run_action :: proc(app: ^App, w: ^Window, action: Action) {
 		tab_select(app, w, (w.workspace.selected+len(w.workspace.tabs)-1)%len(w.workspace.tabs))
 	case .Tab_1, .Tab_2, .Tab_3, .Tab_4, .Tab_5, .Tab_6, .Tab_7, .Tab_8, .Tab_9:
 		tab_select(app, w, int(action)-int(Action.Tab_1))
+	case .Last_Tab: tab_select(app, w, len(w.workspace.tabs)-1)
+	case .Close_Tab: tab_close(app, w, w.workspace.selected)
+	case .Focus_Previous, .Focus_Next:
+		pane_focus(app, w, layout.focus_cycle(w.panes[:], w.tree.focus, action == .Focus_Next ? 1 : -1))
 	case .Split_Right: pane_split(app, w, .Horizontal)
 	case .Split_Down: pane_split(app, w, .Vertical)
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
@@ -206,8 +220,8 @@ run_action :: proc(app: ^App, w: ^Window, action: Action) {
 		pane_focus(app, w, layout.focus_direction(w.panes[:], w.tree.focus, direction))
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
 		axis: layout.Axis = action == .Resize_Left || action == .Resize_Right ? .Horizontal : .Vertical
-		delta: f32 = action == .Resize_Left || action == .Resize_Up ? -0.05 : 0.05
-		if layout.resize(w.tree, w.tree.focus, axis, delta) { window_relayout(app, w) }
+		delta: f32 = action == .Resize_Left || action == .Resize_Up ? -10 : 10
+		if layout.resize_pixels(w.tree, w.tree.focus, axis, delta, w.dividers[:]) { window_relayout(app, w) }
 	}
 }
 

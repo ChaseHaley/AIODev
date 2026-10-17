@@ -118,38 +118,81 @@ pane_split :: proc(app: ^App, w: ^Window, axis: layout.Axis) {
 }
 
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
-	if index < 0 || index >= len(w.workspace.tabs) { return }
-	workspace := w.workspace
+	workspace_close_tab(app, w.workspace, index)
+}
+
+pane_close :: proc(app: ^App, w: ^Window) {
+	pane_remove(app, w.workspace, w.workspace.selected, w.tree.focus)
+}
+
+@(private)
+workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
+	if index < 0 || index >= len(workspace.tabs) { return }
 	tab := workspace.tabs[index]
-	focus_leave(app, w)
+	was_selected := index == workspace.selected
+	if was_selected {
+		for w in app.windows { if w.workspace == workspace { focus_leave(app, w) } }
+	}
 	for node in tab.tree.nodes {
 		if pane, ok := node.(layout.Pane); ok { session_close(app, pane.content.id) }
 	}
 	ordered_remove(&workspace.tabs, index)
 	layout.destroy(&tab.tree)
 	free(tab)
-	if len(workspace.tabs) == 0 {
-		w.tree = nil
-		hide_to_tray(app, w)
-		return
-	}
 	if index < workspace.selected { workspace.selected -= 1 }
-	workspace.selected = min(workspace.selected, len(workspace.tabs)-1)
-	w.tree = &selected_tab(workspace).tree
-	window_relayout(app, w)
-	focus_enter(app, w)
+	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs)-1))
+	for i := len(app.windows)-1; i >= 0; i -= 1 {
+		w := app.windows[i]
+		if w.workspace != workspace { continue }
+		if len(workspace.tabs) == 0 {
+			w.tree = nil
+			hide_to_tray(app, w)
+		} else {
+			w.tree = &selected_tab(workspace).tree
+			window_relayout(app, w)
+			if was_selected { focus_enter(app, w) }
+		}
+	}
 }
 
-pane_close :: proc(app: ^App, w: ^Window) {
-	if len(w.panes) == 1 { tab_close(app, w, w.workspace.selected); return }
-	entry := focused_session(app, w)
-	if entry == nil { return }
-	id := entry.id
-	focus_leave(app, w)
-	if !layout.remove(w.tree, w.tree.focus) { return }
-	session_close(app, id)
-	window_relayout(app, w)
-	focus_enter(app, w)
+@(private)
+pane_remove :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
+	tab := workspace.tabs[tab_index]
+	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
+	if !is_pane { return }
+	if tab.tree.root == node { workspace_close_tab(app, workspace, tab_index); return }
+	visible := tab_index == workspace.selected
+	was_focused := visible && tab.tree.focus == node
+	if was_focused {
+		for w in app.windows { if w.workspace == workspace { focus_leave(app, w) } }
+	}
+	if !layout.remove(&tab.tree, node) { return }
+	session_close(app, pane.content.id)
+	if visible {
+		for w in app.windows {
+			if w.workspace != workspace { continue }
+			window_relayout(app, w)
+			if was_focused { focus_enter(app, w) }
+		}
+	}
+}
+
+@(require_results)
+close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
+	for workspace in app.workspaces {
+		for tab, tab_index in workspace.tabs {
+			for node, node_index in tab.tree.nodes {
+				if pane, ok := node.(layout.Pane); ok && pane.content.id == id {
+					if len(workspace.tabs) == 1 && tab.tree.root == layout.Node_Id(node_index) {
+						return false
+					}
+					pane_remove(app, workspace, tab_index, layout.Node_Id(node_index))
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 window_update_title :: proc(app: ^App, w: ^Window) {

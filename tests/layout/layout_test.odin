@@ -77,6 +77,7 @@ removal_preserves_survivors_and_reuses_vacant_slots :: proc(t: ^testing.T) {
 	again, split_error := layout.split(&l, right, .Vertical, 0.5, terminal(4))
 	testing.expect_value(t, split_error, nil)
 	testing.expect_value(t, len(l.nodes), capacity)
+	testing.expect(t, l.nodes[again].(layout.Pane).order > l.nodes[right].(layout.Pane).order)
 	testing.expect_value(t, l.nodes[again].(layout.Pane).content, terminal(4))
 	l.focus = left
 	testing.expect(t, layout.remove(&l, right))
@@ -185,4 +186,38 @@ pane_and_divider_edges_share_whole_pixels :: proc(t: ^testing.T) {
 	testing.expect_value(t, rects[0].rect.width, dividers[0].rect.x)
 	testing.expect_value(t, rects[1].rect.y+rects[1].rect.height, dividers[1].rect.y)
 	testing.expect_value(t, rects[2].rect.y, dividers[1].rect.y+1)
+}
+
+@(test)
+focus_cycles_in_creation_order_and_wraps :: proc(t: ^testing.T) {
+	rects := []layout.Pane_Rect{{node = 7, order = 1}, {node = 3, order = 3}, {node = 9, order = 2}}
+	testing.expect_value(t, layout.focus_cycle(rects, 7, 1), layout.Node_Id(9))
+	testing.expect_value(t, layout.focus_cycle(rects, 7, -1), layout.Node_Id(3))
+	testing.expect_value(t, layout.focus_cycle(rects, 3, 1), layout.Node_Id(7))
+	testing.expect_value(t, layout.focus_cycle(rects, 7, 6), layout.Node_Id(7))
+	testing.expect_value(t, layout.focus_cycle(nil, 7, 1), layout.Node_Id(7))
+	testing.expect_value(t, layout.focus_cycle(rects, layout.INVALID_NODE, -1), layout.INVALID_NODE)
+}
+
+@(test)
+pixel_resize_uses_the_matching_divider_extent :: proc(t: ^testing.T) {
+	l: layout.Layout
+	testing.expect_value(t, layout.init(&l, terminal(1)), nil)
+	defer layout.destroy(&l)
+	right, err := layout.split(&l, l.root, .Horizontal, 0.5, terminal(2))
+	testing.expect_value(t, err, nil)
+	_, nested_error := layout.split(&l, right, .Vertical, 0.5, terminal(3))
+	testing.expect_value(t, nested_error, nil)
+	dividers := make([dynamic]layout.Divider)
+	defer delete(dividers)
+	rects := make([dynamic]layout.Pane_Rect)
+	defer delete(rects)
+	layout.dividers(&l, {0, 0, 401, 201}, 1, &dividers)
+	testing.expect(t, layout.resize_pixels(&l, right, .Horizontal, 10, dividers[:]))
+	testing.expect(t, layout.resize_pixels(&l, right, .Vertical, -10, dividers[:]))
+	layout.compute(&l, {0, 0, 401, 201}, 1, &rects)
+	testing.expect_value(t, rects[0].rect.width, f32(210))
+	testing.expect_value(t, rects[1].rect.height, f32(90))
+	testing.expect(t, !layout.resize_pixels(&l, l.root, .Horizontal, 10, dividers[:]))
+	testing.expect(t, !layout.resize_pixels(&l, right, .Vertical, 10, nil))
 }

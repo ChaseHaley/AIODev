@@ -329,7 +329,9 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 
 @(private)
 update_sessions :: proc(app: ^App) {
-	for &entry in app.sessions {
+	// Exit cleanup removes only the current entry; earlier entries remain valid.
+	for i := len(app.sessions)-1; i >= 0; i -= 1 {
+		entry := &app.sessions[i]
 		s := entry.session
 		if term.search_pending(s) {
 			before := term.search_summary(s)
@@ -344,6 +346,7 @@ update_sessions :: proc(app: ^App) {
 				entry.status = status.kind
 				mark_all_dirty(app)
 			}
+			if status.kind == .Exited && close_exited_session(app, entry.id) { continue }
 		}
 		if term.take_title_change(s) {
 			for window in app.windows {

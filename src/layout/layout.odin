@@ -32,6 +32,7 @@ Divider :: struct {
 
 Pane :: struct {
 	content: Content,
+	order: u64,
 }
 
 Split :: struct {
@@ -54,17 +55,20 @@ Pane_Rect :: struct {
 	node: Node_Id,
 	content: Content,
 	rect: Rect,
+	order: u64,
 }
 
 Layout :: struct {
 	nodes: [dynamic]Node,
 	root, focus: Node_Id,
+	next_pane_order: u64,
 }
 
 init :: proc(l: ^Layout, content: Content, allocator := context.allocator) -> runtime.Allocator_Error {
 	l.nodes = make([dynamic]Node, allocator)
-	_, err := append(&l.nodes, Pane{content})
+	_, err := append(&l.nodes, Pane{content, 1})
 	l.root, l.focus = 0, 0
+	l.next_pane_order = 1
 	return err
 }
 
@@ -109,7 +113,8 @@ split :: proc(
 	assert(is_pane, "only panes can be split")
 	if err := reserve(&l.nodes, len(l.nodes)+2); err != nil { return INVALID_NODE, err }
 	parent := parent_of(l, node)
-	added := allocate_node(l, Pane{content})
+	l.next_pane_order += 1
+	added := allocate_node(l, Pane{content, l.next_pane_order})
 	branch := allocate_node(l, Split{axis, clamp(ratio, 0.05, 0.95), node, added})
 	if parent == INVALID_NODE {
 		l.root = branch
@@ -201,6 +206,56 @@ resize :: proc(l: ^Layout, node: Node_Id, axis: Axis, delta: f32) -> bool {
 	return false
 }
 
+@(require_results)
+resize_pixels :: proc(l: ^Layout, node: Node_Id, axis: Axis, delta: f32, dividers: []Divider) -> bool {
+	parent := parent_of(l, node)
+	for parent != INVALID_NODE {
+		s := l.nodes[parent].(Split)
+		if s.axis == axis {
+			for d in dividers {
+				if d.node != parent { continue }
+				available := axis == .Horizontal ? d.area.width-d.rect.width : d.area.height-d.rect.height
+				if available <= 0 { return false }
+				return resize(l, node, axis, delta/available)
+			}
+			return false
+		}
+		parent = parent_of(l, parent)
+	}
+	return false
+}
+
+@(require_results)
+focus_cycle :: proc(rects: []Pane_Rect, focus: Node_Id, delta: int) -> Node_Id {
+	if len(rects) == 0 { return focus }
+	order: u64
+	found := false
+	for pane in rects {
+		if pane.node == focus { order, found = pane.order, true; break }
+	}
+	if !found { return focus }
+	steps := delta%len(rects)
+	result := focus
+	for steps != 0 {
+		forward := steps > 0
+		wrap := rects[0]
+		candidate: Pane_Rect
+		have_candidate := false
+		for pane in rects {
+			if forward ? pane.order < wrap.order : pane.order > wrap.order { wrap = pane }
+			eligible := forward ? pane.order > order : pane.order < order
+			if eligible && (!have_candidate || (forward ? pane.order < candidate.order :
+				pane.order > candidate.order)) {
+				candidate, have_candidate = pane, true
+			}
+		}
+		if !have_candidate { candidate = wrap }
+		result, order = candidate.node, candidate.order
+		steps += forward ? -1 : 1
+	}
+	return result
+}
+
 compute :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
 	clear(out)
 	if l.root != INVALID_NODE { place(l, l.root, area, gap, out) }
@@ -211,7 +266,7 @@ place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane
 	switch node in l.nodes[id] {
 	case Vacant:
 	case Pane:
-		append(out, Pane_Rect{id, node.content, area})
+		append(out, Pane_Rect{id, node.content, area, node.order})
 	case Split:
 		first, second := area, area
 		switch node.axis {
