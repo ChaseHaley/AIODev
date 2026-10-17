@@ -145,6 +145,15 @@ shape :: proc(
 	start := 0
 	for start < len(runes) {
 		end := cluster_end(clusters, start, len(runes))
+		if syllable, composed := hangul_syllable(runes[start:end]); composed {
+			g, found := glyph_lookup(s, family, style, syllable)
+			if found {
+				_, err := append(&p.result, Shaped_Glyph{g, start, glyph_advance(s, g, size_px), {}})
+				if err != nil { return .Out_Of_Memory }
+			}
+			start = end
+			continue
+		}
 		if needs_fallback(p.coverage[start:end], runes[start:end]) {
 			if err := shape_fallback(s, family, style, runes[start:end], start, size_px); err != .None {
 				return err
@@ -430,4 +439,20 @@ shape_script :: proc(s: ^System, id: Face_Id, start, end: int, size, scale: f32)
 		if err != nil { return .Out_Of_Memory }
 	}
 	return .None
+}
+
+// Composes a cluster of modern conjoining jamo (leading consonant, vowel, optional trailing
+// consonant) into its precomposed syllable. Windows fonts draw these jamo as separate
+// full-width letters instead of joining them, which would not fit the cluster's two cells.
+@(private)
+hangul_syllable :: proc(runes: []rune) -> (rune, bool) {
+	if len(runes) != 2 && len(runes) != 3 { return 0, false }
+	l, v := runes[0], runes[1]
+	if l < 0x1100 || l > 0x1112 || v < 0x1161 || v > 0x1175 { return 0, false }
+	t: rune
+	if len(runes) == 3 {
+		if runes[2] < 0x11a8 || runes[2] > 0x11c2 { return 0, false }
+		t = runes[2] - 0x11a7
+	}
+	return 0xac00 + ((l - 0x1100) * 21 + (v - 0x1161)) * 28 + t, true
 }

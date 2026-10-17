@@ -100,3 +100,30 @@ emoji_sequences_use_emoji_font :: proc(t: ^testing.T) {
 	testing.expect_value(t, font.shape(s, family, .Regular, text, 20, &out, terminal_clusters(text)), font.Error.None)
 	testing.expect(t, len(out) > 0 && out[0].glyph.face == family.faces[.Regular])
 }
+
+// Conjoining jamo draw as their precomposed syllable, one glyph that fits the cluster's cells.
+@(test)
+hangul_jamo_compose :: proc(t: ^testing.T) {
+	s, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) { return }
+	defer font.system_destroy(s)
+	family, load_err := font.family_load(s, "Cascadia Mono")
+	if !testing.expect_value(t, load_err, font.Error.None) { return }
+	out := make([dynamic]font.Shaped_Glyph)
+	defer delete(out)
+	Case :: struct { jamo: []rune, syllable: rune }
+	for c in ([]Case{{{0x1100, 0x1161, 0x11a8}, 0xac01}, {{0x1112, 0x1161}, 0xd558}}) {
+		clear(&out)
+		testing.expect_value(t, font.shape(s, family, .Regular, c.jamo, 20, &out, terminal_clusters(c.jamo)), font.Error.None)
+		precomposed, found := font.glyph_lookup(s, family, .Regular, c.syllable)
+		testing.expect(t, found)
+		if testing.expect_value(t, len(out), 1) {
+			testing.expect_value(t, out[0].glyph, precomposed)
+			testing.expect_value(t, out[0].cluster, 0)
+		}
+	}
+	// Old jamo outside the modern ranges are left to the font.
+	old := []rune{0x1113, 0x1161}
+	clear(&out)
+	testing.expect_value(t, font.shape(s, family, .Regular, old, 20, &out, terminal_clusters(old)), font.Error.None)
+}
