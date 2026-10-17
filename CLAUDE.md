@@ -13,6 +13,8 @@ Use the intake queue if the area or delivery stage is uncertain.
 Tell the owner where it was recorded. Capturing an idea does not approve implementation.
 
 The Obsidian vault is authoritative; these startup files contain routing rules only.
+The vault is a Git repository: when you finish changing notes, commit them there
+(see AGENTS.md and the vault's Organization guide, Version control).
 Use ID-only work/decision filenames and concise titles with a colon after the ID.
 Do not use long-dash separators. Confirm links resolve to populated notes after
 trimming whitespace from targets, and verify any linked section exists.

@@ -36,6 +36,11 @@ Use short phrases for other filenames; do not use em or en dash separators. Vali
 links using Obsidian's trimmed targets, require nonempty destination notes, and check
 section headings. Never allow trailing spaces or periods in filename stems.
 
+The vault is a Git repository. Follow AIODev/System/Organization.md#Version control:
+read a note before changing it, never reuse an existing ID or filename, leave others'
+uncommitted changes alone, and when you finish changing notes, commit them in the vault
+(stage only your paths, Conventional Commit message) before ending the turn.
+
 Commit completed, validated source work automatically using Conventional Commits.
 All project Markdown belongs in the vault; AGENTS.md and CLAUDE.md are the narrow
 exception for agent startup routing. Do not duplicate plans or backlogs here.
