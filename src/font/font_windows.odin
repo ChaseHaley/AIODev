@@ -426,12 +426,15 @@ glyph_advance :: proc(s: ^System, glyph: Glyph, size_px: f32) -> f32 {
 	return glyph.advance_em * size_px
 }
 
+// Rasterizes one glyph. With color set, a glyph the font defines in color (COLR layers, as in
+// Segoe UI Emoji) comes back as premultiplied RGBA; any other glyph comes back as coverage.
 @(require_results)
 glyph_rasterize :: proc(
 	s: ^System,
 	glyph: Glyph,
 	size_px: f32,
 	allocator: runtime.Allocator,
+	color := false,
 ) -> (Bitmap, Error) {
 	face := face_get(s, glyph.face)
 	if !valid_size(size_px) || !valid_size(glyph.scale) || !valid_size(size_px * glyph.scale) ||
@@ -445,37 +448,145 @@ glyph_rasterize :: proc(
 		glyphCount = 1,
 		glyphIndices = &index,
 	}
+	if color {
+		bitmap, found, err := rasterize_color(s, &run, allocator)
+		if found || err != .None {
+			return bitmap, err
+		}
+	}
+	coverage, bounds, err := rasterize_coverage(s, &run, 0, 0, allocator)
+	if err != .None || coverage == nil {
+		return {}, err
+	}
+	return {coverage, bounds.right - bounds.left, bounds.bottom - bounds.top, bounds.left, -bounds.top, false}, .None
+}
+
+// Returns nil pixels for an empty glyph.
+@(private, require_results)
+rasterize_coverage :: proc(
+	s: ^System,
+	run: ^dw.Glyph_Run,
+	x, y: f32,
+	allocator: runtime.Allocator,
+) -> ([]u8, windows.RECT, Error) {
 	analysis: ^dw.IGlyphRunAnalysis
 	hr := s.factory->CreateGlyphRunAnalysis_2(
-		&run, nil, .Natural_Symmetric, .Natural, .Enabled, .Grayscale, 0, 0, &analysis,
+		run, nil, .Natural_Symmetric, .Natural, .Enabled, .Grayscale, x, y, &analysis,
 	)
 	if !checked(hr, "CreateGlyphRunAnalysis") {
-		return {}, .DirectWrite
+		return nil, {}, .DirectWrite
 	}
 	defer release(analysis)
 	bounds: windows.RECT
 	if !checked(analysis->GetAlphaTextureBounds(.Aliased_1x1, &bounds), "GetAlphaTextureBounds") {
-		return {}, .DirectWrite
+		return nil, {}, .DirectWrite
 	}
 	width := i64(bounds.right) - i64(bounds.left)
 	height := i64(bounds.bottom) - i64(bounds.top)
 	if width == 0 || height == 0 {
-		return {}, .None
+		return nil, {}, .None
 	}
 	if width < 0 || height < 0 || width > i64(max(i32)) || height > i64(max(i32)) ||
-	   width * height > i64(max(u32)) || bounds.top == min(i32) {
-		return {}, .Invalid_Argument
+	   width * height > i64(max(u32)) / 4 || bounds.top == min(i32) {
+		return nil, {}, .Invalid_Argument
 	}
 	pixels, alloc_err := make([]u8, int(width * height), allocator)
 	if alloc_err != nil || pixels == nil {
-		return {}, .Out_Of_Memory
+		return nil, {}, .Out_Of_Memory
 	}
 	hr = analysis->CreateAlphaTexture(.Aliased_1x1, &bounds, raw_data(pixels), u32(len(pixels)))
 	if !checked(hr, "CreateAlphaTexture") {
 		delete(pixels, allocator)
-		return {}, .DirectWrite
+		return nil, {}, .DirectWrite
 	}
-	return {pixels, i32(width), i32(height), bounds.left, -bounds.top}, .None
+	return pixels, bounds, .None
+}
+
+// Composites a color glyph's layers into premultiplied RGBA. Reports found false for a glyph
+// without color layers. Layers that use the text color are drawn white.
+@(private, require_results)
+rasterize_color :: proc(s: ^System, run: ^dw.Glyph_Run, allocator: runtime.Allocator) -> (Bitmap, bool, Error) {
+	layers: ^dw.IColorGlyphRunEnumerator
+	hr := s.factory->TranslateColorGlyphRun(0, 0, run, nil, .Natural, nil, 0, &layers)
+	if hr == dw.E_NOCOLOR {
+		return {}, false, .None
+	}
+	if !checked(hr, "TranslateColorGlyphRun") {
+		return {}, false, .DirectWrite
+	}
+	defer release(layers)
+	Layer :: struct {
+		coverage: []u8,
+		bounds: windows.RECT,
+		color: [4]f32,
+	}
+	collected := make([dynamic]Layer, allocator)
+	defer {
+		for layer in collected { delete(layer.coverage, allocator) }
+		delete(collected)
+	}
+	union_bounds := windows.RECT{max(i32), max(i32), min(i32), min(i32)}
+	for {
+		has_run: windows.BOOL
+		if !checked(layers->MoveNext(&has_run), "ColorGlyphRunEnumerator.MoveNext") {
+			return {}, true, .DirectWrite
+		}
+		if !has_run { break }
+		current: ^dw.Color_Glyph_Run
+		if !checked(layers->GetCurrentRun(&current), "ColorGlyphRunEnumerator.GetCurrentRun") {
+			return {}, true, .DirectWrite
+		}
+		coverage, bounds, err := rasterize_coverage(s, &current.glyphRun, current.baselineOriginX,
+			current.baselineOriginY, allocator)
+		if err != .None { return {}, true, err }
+		if coverage == nil { continue }
+		c := current.runColor
+		layer_color := current.paletteIndex == 0xffff ? [4]f32{1, 1, 1, 1} : [4]f32{c.r, c.g, c.b, c.a}
+		if _, append_err := append(&collected, Layer{coverage, bounds, layer_color}); append_err != nil {
+			delete(coverage, allocator)
+			return {}, true, .Out_Of_Memory
+		}
+		union_bounds.left = min(union_bounds.left, bounds.left)
+		union_bounds.top = min(union_bounds.top, bounds.top)
+		union_bounds.right = max(union_bounds.right, bounds.right)
+		union_bounds.bottom = max(union_bounds.bottom, bounds.bottom)
+	}
+	if len(collected) == 0 {
+		return {}, true, .None
+	}
+	width := i64(union_bounds.right) - i64(union_bounds.left)
+	height := i64(union_bounds.bottom) - i64(union_bounds.top)
+	if width > i64(max(i32)) || height > i64(max(i32)) || width * height > i64(max(u32)) / 4 {
+		return {}, true, .Invalid_Argument
+	}
+	pixels, alloc_err := make([]u8, int(width * height * 4), allocator)
+	if alloc_err != nil || pixels == nil {
+		return {}, true, .Out_Of_Memory
+	}
+	// Source-over in premultiplied space, bottom layer first, accumulated in floating point.
+	accumulated := make([][4]f32, int(width * height), allocator)
+	if accumulated == nil {
+		delete(pixels, allocator)
+		return {}, true, .Out_Of_Memory
+	}
+	defer delete(accumulated, allocator)
+	for layer in collected {
+		w := int(layer.bounds.right - layer.bounds.left)
+		dx := int(layer.bounds.left - union_bounds.left)
+		dy := int(layer.bounds.top - union_bounds.top)
+		for value, i in layer.coverage {
+			if value == 0 { continue }
+			a := f32(value) / 255 * layer.color.a
+			p := &accumulated[(dy + i / w) * int(width) + dx + i % w]
+			p^ = {layer.color.r * a, layer.color.g * a, layer.color.b * a, a} + p^ * (1 - a)
+		}
+	}
+	for p, i in accumulated {
+		for channel in 0..<4 {
+			pixels[i * 4 + channel] = u8(math.round(clamp(p[channel], 0, 1) * 255))
+		}
+	}
+	return {pixels, i32(width), i32(height), union_bounds.left, -union_bounds.top, true}, true, .None
 }
 
 text_gamma :: proc(s: ^System) -> Text_Gamma {

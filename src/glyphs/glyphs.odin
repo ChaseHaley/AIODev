@@ -17,6 +17,8 @@ Entry :: struct {
 	atlas: render.Rect,
 	offset: [2]f32,
 	size: [2]f32,
+	// The atlas rect is in the RGBA atlas and the glyph draws in its own colors.
+	color: bool,
 }
 
 Result :: enum {
@@ -38,6 +40,7 @@ Glyph_Key :: struct {
 	face: font.Face_Id,
 	index: u16,
 	size_q: u32,
+	color: bool,
 }
 
 @(private)
@@ -86,8 +89,8 @@ validate :: proc(c: ^Cache) {
 // Reserves atlas space and uploads pixels. When the atlas is full it is reset, every entry is
 // forgotten, and the caller must rebuild the frame because entries it already used are stale.
 @(private)
-upload :: proc(c: ^Cache, width, height: i32, pixels: []u8) -> (render.Rect, Result) {
-	slot, ok := render.atlas_reserve(c.device, width, height)
+upload :: proc(c: ^Cache, width, height: i32, pixels: []u8, color := false) -> (render.Rect, Result) {
+	slot, ok := render.atlas_reserve(c.device, width, height, color)
 	if !ok {
 		render.atlas_reset(c.device)
 		forget(c)
@@ -97,13 +100,14 @@ upload :: proc(c: ^Cache, width, height: i32, pixels: []u8) -> (render.Rect, Res
 	return {f32(slot.x), f32(slot.y), f32(width), f32(height)}, .Ok
 }
 
-glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32) -> (Entry, Result) {
+// With color set, a glyph the font draws in color is cached as RGBA and its entry reports color.
+glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry, Result) {
 	validate(c)
-	key := Glyph_Key{g.face, g.index, u32(math.round(size_px * g.scale * 64))}
+	key := Glyph_Key{g.face, g.index, u32(math.round(size_px * g.scale * 64)), color}
 	if entry, found := c.glyphs[key]; found {
 		return entry, .Ok
 	}
-	bitmap, err := font.glyph_rasterize(c.fonts, g, size_px, c.allocator)
+	bitmap, err := font.glyph_rasterize(c.fonts, g, size_px, c.allocator, color)
 	if err != .None {
 		log.errorf("glyphs: rasterizing glyph %v of face %v failed: %v", g.index, g.face, err)
 		c.glyphs[key] = {}
@@ -112,7 +116,7 @@ glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32) -> (Entry, Result) {
 	defer font.bitmap_destroy(&bitmap, c.allocator)
 	entry: Entry
 	if bitmap.width > 0 && bitmap.height > 0 {
-		rect, result := upload(c, bitmap.width, bitmap.height, bitmap.pixels)
+		rect, result := upload(c, bitmap.width, bitmap.height, bitmap.pixels, bitmap.color)
 		if result != .Ok {
 			return {}, result
 		}
@@ -120,6 +124,7 @@ glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32) -> (Entry, Result) {
 			atlas = rect,
 			offset = {f32(bitmap.left), -f32(bitmap.top)},
 			size = {f32(bitmap.width), f32(bitmap.height)},
+			color = bitmap.color,
 		}
 	}
 	c.glyphs[key] = entry

@@ -9,6 +9,7 @@ import "vendor:directx/dxgi"
 
 @(private) ATLAS_INITIAL_SIZE :: 2048
 @(private) ATLAS_MAX_SIZE :: 4096
+@(private) COLOR_ATLAS_INITIAL_SIZE :: 1024
 
 Device :: struct {
 	allocator: runtime.Allocator,
@@ -21,11 +22,17 @@ Device :: struct {
 	rasterizer: ^d3d.IRasterizerState,
 	constants: ^d3d.IBuffer,
 	rects, glyphs: Instance_Buffer,
-	atlas: ^d3d.ITexture2D,
-	atlas_view: ^d3d.IShaderResourceView,
-	atlas_size, shelf_x, shelf_y, shelf_height: i32,
+	atlas, color_atlas: Atlas,
 	generation: u64,
 	gamma: Text_Gamma,
+}
+
+@(private)
+Atlas :: struct {
+	texture: ^d3d.ITexture2D,
+	view: ^d3d.IShaderResourceView,
+	size, shelf_x, shelf_y, shelf_height: i32,
+	color: bool,
 }
 
 @(private)
@@ -210,7 +217,8 @@ device_create :: proc(allocator := context.allocator) -> (^Device, Error) {
 	if err = checked(d, d.native->CreateBuffer(&constants, nil, &d.constants), "CreateBuffer"); err != .None {
 		return nil, err
 	}
-	if err = atlas_create(d, ATLAS_INITIAL_SIZE); err != .None {
+	d.color_atlas.color = true
+	if err = atlas_create(d, &d.atlas, ATLAS_INITIAL_SIZE); err != .None {
 		return nil, err
 	}
 	ok = true
@@ -225,8 +233,8 @@ device_destroy :: proc(d: ^Device) {
 	release(d.rects.buffer)
 	release(d.glyphs.view)
 	release(d.glyphs.buffer)
-	release(d.atlas_view)
-	release(d.atlas)
+	atlas_destroy(&d.atlas)
+	atlas_destroy(&d.color_atlas)
 	release(d.constants)
 	release(d.rasterizer)
 	release(d.blend)
@@ -245,13 +253,13 @@ set_text_gamma :: proc(d: ^Device, gamma: Text_Gamma) {
 }
 
 @(private, require_results)
-atlas_create :: proc(d: ^Device, size: i32) -> Error {
+atlas_create :: proc(d: ^Device, a: ^Atlas, size: i32) -> Error {
 	desc := d3d.TEXTURE2D_DESC{
 		Width = u32(size),
 		Height = u32(size),
 		MipLevels = 1,
 		ArraySize = 1,
-		Format = .R8_UNORM,
+		Format = a.color ? .R8G8B8A8_UNORM : .R8_UNORM,
 		SampleDesc = {Count = 1},
 		BindFlags = {.SHADER_RESOURCE},
 	}
@@ -266,45 +274,59 @@ atlas_create :: proc(d: ^Device, size: i32) -> Error {
 		release(texture)
 		return err
 	}
-	if d.atlas != nil {
-		box := d3d.BOX{right = u32(d.atlas_size), bottom = u32(d.atlas_size), back = 1}
-		d.ctx->CopySubresourceRegion(texture, 0, 0, 0, 0, d.atlas, 0, &box)
+	if a.texture != nil {
+		box := d3d.BOX{right = u32(a.size), bottom = u32(a.size), back = 1}
+		d.ctx->CopySubresourceRegion(texture, 0, 0, 0, 0, a.texture, 0, &box)
 	}
-	release(d.atlas_view)
-	release(d.atlas)
-	d.atlas, d.atlas_view, d.atlas_size = texture, view, size
+	release(a.view)
+	release(a.texture)
+	a.texture, a.view, a.size = texture, view, size
 	return .None
 }
 
 @(private)
-shelf_place :: proc(d: ^Device, width, height: i32) -> (x, y, shelf: i32, fits: bool) {
-	x, y, shelf = d.shelf_x, d.shelf_y, d.shelf_height
-	if x + width > d.atlas_size {
-		x, y, shelf = 0, y + shelf, 0
-	}
-	return x, y, shelf, width <= d.atlas_size && y + height <= d.atlas_size
+atlas_destroy :: proc(a: ^Atlas) {
+	release(a.view)
+	release(a.texture)
+	a.view, a.texture = nil, nil
 }
 
+@(private)
+shelf_place :: proc(a: ^Atlas, width, height: i32) -> (x, y, shelf: i32, fits: bool) {
+	x, y, shelf = a.shelf_x, a.shelf_y, a.shelf_height
+	if x + width > a.size {
+		x, y, shelf = 0, y + shelf, 0
+	}
+	return x, y, shelf, width <= a.size && y + height <= a.size
+}
+
+// Reserves space in the coverage atlas, or with color set in the RGBA atlas for color glyphs.
 @(require_results)
-atlas_reserve :: proc(d: ^Device, width, height: i32) -> (Atlas_Slot, bool) {
+atlas_reserve :: proc(d: ^Device, width, height: i32, color := false) -> (Atlas_Slot, bool) {
 	assert(width > 0 && height > 0)
-	x, y, shelf, fits := shelf_place(d, width, height)
+	a := color ? &d.color_atlas : &d.atlas
+	if a.texture == nil && atlas_create(d, a, COLOR_ATLAS_INITIAL_SIZE) != .None {
+		return {}, false
+	}
+	x, y, shelf, fits := shelf_place(a, width, height)
 	if !fits {
-		if d.atlas_size == ATLAS_MAX_SIZE || atlas_create(d, ATLAS_MAX_SIZE) != .None {
+		if a.size == ATLAS_MAX_SIZE || atlas_create(d, a, ATLAS_MAX_SIZE) != .None {
 			return {}, false
 		}
-		x, y, shelf, fits = shelf_place(d, width, height)
+		x, y, shelf, fits = shelf_place(a, width, height)
 		if !fits {
 			return {}, false
 		}
 	}
-	d.shelf_x, d.shelf_y, d.shelf_height = x + width, y, max(shelf, height)
-	return {x, y, width, height, d.generation}, true
+	a.shelf_x, a.shelf_y, a.shelf_height = x + width, y, max(shelf, height)
+	return {x, y, width, height, d.generation, color}, true
 }
 
+// Stride is in pixels: one byte each in the coverage atlas, four (RGBA) in the color atlas.
 atlas_upload :: proc(d: ^Device, slot: Atlas_Slot, pixels: []u8, stride: int) {
 	assert(slot.generation == d.generation, "atlas slot from a previous generation")
-	assert(stride >= int(slot.width) && len(pixels) >= stride * int(slot.height - 1) + int(slot.width))
+	texel := slot.color ? 4 : 1
+	assert(stride >= int(slot.width) && len(pixels) >= (stride * int(slot.height - 1) + int(slot.width)) * texel)
 	box := d3d.BOX{
 		left = u32(slot.x),
 		top = u32(slot.y),
@@ -312,11 +334,15 @@ atlas_upload :: proc(d: ^Device, slot: Atlas_Slot, pixels: []u8, stride: int) {
 		bottom = u32(slot.y + slot.height),
 		back = 1,
 	}
-	d.ctx->UpdateSubresource(d.atlas, 0, &box, raw_data(pixels), u32(stride), 0)
+	a := slot.color ? &d.color_atlas : &d.atlas
+	d.ctx->UpdateSubresource(a.texture, 0, &box, raw_data(pixels), u32(stride * texel), 0)
 }
 
+// Empties both atlases; slots and entries from earlier generations are invalid.
 atlas_reset :: proc(d: ^Device) {
-	d.shelf_x, d.shelf_y, d.shelf_height = 0, 0, 0
+	for a in ([]^Atlas{&d.atlas, &d.color_atlas}) {
+		a.shelf_x, a.shelf_y, a.shelf_height = 0, 0, 0
+	}
 	d.generation += 1
 }
 

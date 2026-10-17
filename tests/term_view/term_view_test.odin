@@ -326,15 +326,27 @@ consolas_grid_and_combining_cluster :: proc(t: ^testing.T) {
 	testing.expect_value(t, render.push_layer(&f.list, {0, 0, 4096, 4096}), render.Error.None)
 	runes := [?]rune{'A', 'B', 0x6f22, 0x1f600}
 	columns := [?]int{0, 1, 2, 4}
+	m := f.metrics
 	for r, i in runes {
-		entry := unshaped_entry(t, &f, r)
+		// D-042: wide clusters are centered in their two cells, shrunk if wider, and drawn in color.
+		wide := i >= 2
+		g, found := font.glyph_lookup(f.fonts, f.family, .Regular, r)
+		testing.expect(t, found)
+		advance := font.glyph_advance(f.fonts, g, SIZE_PX)
+		span := (wide ? 2 : 1) * m.cell_width
+		scale := advance > span + 0.5 ? span / advance : 1
+		left := f32(columns[i]) * m.cell_width
+		if wide { left += (span - advance * scale) / 2 }
+		baseline := m.cell_height / 2 + (m.baseline - m.cell_height / 2) * scale
+		entry, result := glyphs.glyph(&f.cache, g, SIZE_PX * scale, wide)
+		testing.expect_value(t, result, glyphs.Result.Ok)
 		if entry.size.x == 0 { continue }
 		testing.expect_value(t, render.push_glyph(&f.list, {
 			rect = {
-				math.round(f32(columns[i]) * f.metrics.cell_width + entry.offset.x),
-				math.round(f.metrics.baseline + entry.offset.y), entry.size.x, entry.size.y,
+				math.round(left + entry.offset.x),
+				math.round(baseline + entry.offset.y), entry.size.x, entry.size.y,
 			},
-			atlas = entry.atlas, color = {1, 1, 1, 1},
+			atlas = entry.atlas, color = {1, 1, 1, 1}, flags = entry.color ? render.GLYPH_COLOR : 0,
 		}), render.Error.None)
 	}
 	combined := make([dynamic]font.Shaped_Glyph, context.temp_allocator)
@@ -358,6 +370,59 @@ consolas_grid_and_combining_cluster :: proc(t: ^testing.T) {
 	expected, err := render.surface_read_pixels(f.device, f.surface, context.temp_allocator)
 	testing.expect_value(t, err, render.Error.None)
 	testing.expect(t, slice.equal(actual, expected))
+}
+
+// Emoji draw in color, a ZWJ sequence draws as one glyph, and each stays inside its two cells.
+@(test)
+emoji_draw_in_color_within_cells :: proc(t: ^testing.T) {
+	text :: "'a' + [char]::ConvertFromUtf32(0x1f600) + 'b' + [char]::ConvertFromUtf32(0x1f469) + [char]0x200d + " +
+		"[char]::ConvertFromUtf32(0x1f4bb) + 'c'"
+	f, ok := fixture_create(t, text_command(text))
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "c") { return }
+	_, pixels := render_frame(t, &f, {family = f.family})
+	m := f.metrics
+	if !testing.expect_value(t, len(f.list.glyphs), 5) { return }
+	wide_columns := [2]int{1, 4}
+	colored := 0
+	for g in f.list.glyphs {
+		if g.flags & render.GLYPH_COLOR == 0 { continue }
+		if !testing.expect(t, colored < 2) { break }
+		left := f32(wide_columns[colored]) * m.cell_width
+		testing.expectf(t, g.rect.x >= left - 0.5 && g.rect.x + g.rect.width <= left + 2 * m.cell_width + 0.5,
+			"emoji %d spans x %v..%v outside its cells %v..%v", colored, g.rect.x, g.rect.x + g.rect.width,
+			left, left + 2 * m.cell_width)
+		testing.expect(t, g.rect.y >= -0.5 && g.rect.y + g.rect.height <= m.cell_height + 0.5)
+		colored += 1
+	}
+	testing.expect_value(t, colored, 2)
+	colorful :: proc(f: ^Fixture, pixels: []u8, column: int) -> bool {
+		for dy in 0 ..< int(f.metrics.cell_height) {
+			for dx in 0 ..< int(f.metrics.cell_width) {
+				p := cell_pixel(f, pixels, column, 0, f32(dx), f32(dy))
+				if max(p[0], p[1], p[2]) - min(p[0], p[1], p[2]) > 60 { return true }
+			}
+		}
+		return false
+	}
+	for column in 0 ..< 7 {
+		emoji := column == 1 || column == 2 || column == 4 || column == 5
+		testing.expectf(t, colorful(&f, pixels, column) == emoji, "column %d colorful: expected %v", column, emoji)
+	}
+}
+
+// A glyph wider than its cells (the three-em dash is about three em wide but two cells) shrinks to
+// fit instead of covering its neighbor (D-042).
+@(test)
+wide_glyphs_shrink_to_fit :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, text_command("[char]0x2e3b + 'x'"))
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "x") { return }
+	render_frame(t, &f, {family = f.family})
+	if !testing.expect_value(t, len(f.list.glyphs), 2) { return }
+	dash := f.list.glyphs[0]
+	testing.expectf(t, dash.rect.x >= -0.5 && dash.rect.x + dash.rect.width <= 2 * f.metrics.cell_width + 0.5,
+		"dash spans x %v..%v, cells end at %v", dash.rect.x, dash.rect.x + dash.rect.width, 2 * f.metrics.cell_width)
 }
 
 @(test)

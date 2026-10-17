@@ -84,7 +84,8 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 	c->PSSetConstantBuffers(0, 1, &d.constants)
 	views := [2]^d3d.IShaderResourceView{d.rects.view, d.glyphs.view}
 	c->VSSetShaderResources(0, len(views), &views[0])
-	c->PSSetShaderResources(2, 1, &d.atlas_view)
+	atlases := [2]^d3d.IShaderResourceView{d.atlas.view, d.color_atlas.view}
+	c->PSSetShaderResources(2, len(atlases), &atlases[0])
 	constants := Frame_Constants{
 		gamma_ratios = gamma_ratios(d.gamma.gamma),
 		target_size = {f32(s.width), f32(s.height)},

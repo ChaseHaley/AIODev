@@ -161,7 +161,8 @@ place :: proc(b: ^Builder, entry: glyphs.Entry, pen: [2]f32, c: render.Color) {
 		entry.size.x,
 		entry.size.y,
 	}
-	if render.push_glyph(b.list, {rect = at, atlas = entry.atlas, color = c}) != .None {
+	flags := entry.color ? render.GLYPH_COLOR : 0
+	if render.push_glyph(b.list, {rect = at, atlas = entry.atlas, color = c, flags = flags}) != .None {
 		b.ok = false
 	}
 }
@@ -250,6 +251,8 @@ Cell_Paint :: struct {
 	foreground, background: render.Color,
 	has_background: bool,
 	style: ghostty.Style,
+	// The cell holds a wide cluster and its spacer follows.
+	wide: bool,
 }
 
 @(private)
@@ -267,6 +270,11 @@ paint_cell :: proc(
 		if ghostty.render_state_row_cells_get(v.cells, .Style, &p.style) != .Success {
 			p.style = ghostty.sized(ghostty.Style)
 		}
+	}
+	raw: ghostty.Cell
+	if ghostty.render_state_row_cells_get(v.cells, .Raw, &raw) == .Success {
+		width: ghostty.Cell_Wide
+		p.wide = ghostty.cell_get(raw, .Wide, &width) == .Success && width == .Wide
 	}
 	rgb: ghostty.Color_Rgb
 	if ghostty.render_state_row_cells_get(v.cells, .Fg_Color, &rgb) == .Success {
@@ -418,20 +426,42 @@ draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Re
 		log.errorf("term_view: shaping failed: %v", err)
 		return draw_codepoints(v, b, face, top)
 	}
-	cluster := -1
-	advance: f32
-	for g in v.shaped {
-		if g.cluster != cluster {
-			cluster, advance = g.cluster, 0
+	m := b.metrics
+	for start := 0; start < len(v.shaped); {
+		cluster := v.shaped[start].cluster
+		end := start + 1
+		advance := v.shaped[start].advance
+		for end < len(v.shaped) && v.shaped[end].cluster == cluster {
+			advance += v.shaped[end].advance
+			end += 1
 		}
-		x := v.columns[g.cluster]
-		entry, result := glyphs.glyph(b.cache, g.glyph, b.metrics.size_px)
-		if result != .Ok { return result }
-		place(b, entry, {
-			b.origin.x + f32(x) * b.metrics.cell_width + advance + g.offset.x,
-			top + b.metrics.baseline - g.offset.y,
-		}, v.paints[x].foreground)
-		advance += g.advance
+		// The glyphs cover the runes up to the next glyph's cluster, which may span several cells
+		// for a programming ligature.
+		// Right-to-left runs arrive in visual order, so the next cluster can lie before this one.
+		last := max(cluster, (end < len(v.shaped) ? v.shaped[end].cluster : len(v.runes)) - 1)
+		x := v.columns[cluster]
+		p := v.paints[x]
+		span := f32(v.columns[last] - x + (v.paints[v.columns[last]].wide ? 2 : 1)) * m.cell_width
+		// D-042: a cluster wider than its cells shrinks to fit around the cell center, so it never
+		// covers a neighbor; a wide cluster is centered in its two cells. Wide clusters draw in
+		// color when the font defines color glyphs, so emoji presentation shows as emoji.
+		scale: f32 = 1
+		if advance > span + 0.5 {
+			scale = span / advance
+		}
+		left := b.origin.x + f32(x) * m.cell_width
+		if scale < 1 || p.wide {
+			left += (span - advance * scale) / 2
+		}
+		baseline := top + m.cell_height / 2 + (m.baseline - m.cell_height / 2) * scale
+		pen: f32
+		for g in v.shaped[start:end] {
+			entry, result := glyphs.glyph(b.cache, g.glyph, m.size_px * scale, p.wide)
+			if result != .Ok { return result }
+			place(b, entry, {left + pen + g.offset.x * scale, baseline - g.offset.y * scale}, p.foreground)
+			pen += g.advance * scale
+		}
+		start = end
 	}
 	return .Ok
 }

@@ -17,11 +17,14 @@ struct GlyphInstance {
     float4 rect;
     float4 atlas;
     float4 color;
+    uint flags;
+    uint3 padding;
 };
 
 StructuredBuffer<RectInstance> rects : register(t0);
 StructuredBuffer<GlyphInstance> glyphs : register(t1);
 Texture2D<float> atlas : register(t2);
+Texture2D<float4> color_atlas : register(t3);
 
 struct Vertex {
     float4 position : SV_Position;
@@ -29,6 +32,7 @@ struct Vertex {
     nointerpolation float4 rect : TEXCOORD1;
     nointerpolation float4 color : COLOR0;
     nointerpolation float2 edge : TEXCOORD2;
+    nointerpolation uint flags : TEXCOORD4;
     float2 texel : TEXCOORD3;
 };
 
@@ -69,11 +73,16 @@ Vertex glyph_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
     o.position = clip_position(g.rect.xy + c * g.rect.zw);
     o.texel = g.atlas.xy + c * g.atlas.zw;
     o.color = g.color;
+    o.flags = g.flags;
     return o;
 }
 
 // DirectWrite grayscale correction, after microsoft/terminal src/renderer/atlas/dwrite.hlsl (MIT).
 float4 glyph_ps(Vertex i) : SV_Target {
+    if (i.flags & 1) {
+        // Color glyphs are premultiplied RGBA; fade them with the instance alpha only.
+        return color_atlas.Load(int3(floor(i.texel), 0)) * i.color.a;
+    }
     float a = atlas.Load(int3(floor(i.texel), 0));
     float3 fg = i.color.rgb;
     float k = enhanced_contrast * saturate(1 - dot(fg, float3(0.30, 0.59, 0.11)) * (4.0 / 3.0));

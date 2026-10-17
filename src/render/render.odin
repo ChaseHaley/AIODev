@@ -14,10 +14,16 @@ Rect_Instance :: struct {
 	radius, softness: f32,
 }
 
+// A glyph quad. Coverage glyphs are tinted with color; with GLYPH_COLOR set, the glyph samples the
+// RGBA atlas and color.a only fades it.
 Glyph_Instance :: struct {
 	rect, atlas: Rect,
 	color: Color,
+	flags: u32,
+	_: [3]u32,
 }
+
+GLYPH_COLOR :: u32(1)
 
 Layer :: struct {
 	clip: Rect,
@@ -33,6 +39,7 @@ Draw_List :: struct {
 Atlas_Slot :: struct {
 	x, y, width, height: i32,
 	generation: u64,
+	color: bool,
 }
 
 Text_Gamma :: struct {

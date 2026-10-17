@@ -39,6 +39,8 @@ Bitmap :: struct {
 	pixels: []u8,
 	width, height: i32,
 	left, top: i32,
+	// Premultiplied RGBA when set; one coverage byte per pixel otherwise.
+	color: bool,
 }
 
 Text_Gamma :: struct {

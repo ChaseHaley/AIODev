@@ -182,7 +182,7 @@ layer_order_and_clipping :: proc(t: ^testing.T) {
 	}
 	render.atlas_upload(f.device, slot, {255}, 1)
 	layer(t, &f.list, {0, 0, 16, 16})
-	glyph(t, &f.list, {{0, 0, 16, 16}, {f32(slot.x), f32(slot.y), 0, 0}, {0, 1, 0, 1}})
+	glyph(t, &f.list, {rect = {0, 0, 16, 16}, atlas = {f32(slot.x), f32(slot.y), 0, 0}, color = {0, 1, 0, 1}})
 	rect(t, &f.list, {rect = {0, 0, 16, 16}, color = {1, 0, 0, 1}})
 	layer(t, &f.list, {4, 4, 8, 8})
 	rect(t, &f.list, {rect = {0, 0, 16, 16}, color = {0, 0, 1, 1}})
@@ -249,7 +249,7 @@ glyph_coverage_and_gamma :: proc(t: ^testing.T) {
 		render.draw_list_reset(&f.list)
 		layer(t, &f.list, {0, 0, 4, 2})
 		fg := sample.foreground
-		glyph(t, &f.list, {{0, 0, 4, 2}, {f32(slot.x), f32(slot.y), 4, 2}, {fg.r, fg.g, fg.b, 1}})
+		glyph(t, &f.list, {rect = {0, 0, 4, 2}, atlas = {f32(slot.x), f32(slot.y), 4, 2}, color = {fg.r, fg.g, fg.b, 1}})
 		render.set_text_gamma(f.device, sample.gamma)
 		pixels := render_pixels(t, &f)
 		defer delete(pixels)
@@ -296,7 +296,7 @@ atlas_growth_and_reset :: proc(t: ^testing.T) {
 	testing.expect(t, !oversized)
 	testing.expect_value(t, render.atlas_generation(d), generation)
 	layer(t, &f.list, {0, 0, 1, 1})
-	glyph(t, &f.list, {{0, 0, 1, 1}, {0, 0, 1, 1}, {1, 1, 1, 1}})
+	glyph(t, &f.list, {rect = {0, 0, 1, 1}, atlas = {0, 0, 1, 1}, color = {1, 1, 1, 1}})
 	render.set_text_gamma(d, {1, 0})
 	pixels := render_pixels(t, &f)
 	defer delete(pixels)
@@ -306,6 +306,43 @@ atlas_growth_and_reset :: proc(t: ^testing.T) {
 	whole, whole_ok := render.atlas_reserve(d, 4096, 4096)
 	testing.expect(t, whole_ok)
 	testing.expect_value(t, whole.x + whole.y, 0)
+}
+
+// Color glyphs sample the RGBA atlas as premultiplied color: the instance tint is ignored and its
+// alpha only fades the glyph. The two atlases allocate independently and reset together.
+@(test)
+color_atlas_glyphs :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, 2, 2)
+	if !ok {
+		return
+	}
+	defer fixture_destroy(&f)
+	d := f.device
+	coverage, coverage_ok := render.atlas_reserve(d, 3, 1)
+	color, color_ok := render.atlas_reserve(d, 2, 1, true)
+	if !testing.expect(t, coverage_ok && color_ok) {
+		return
+	}
+	testing.expect(t, color.color && !coverage.color)
+	testing.expect_value(t, color.x, 0)
+	render.atlas_upload(d, color, {255, 0, 0, 255, 0, 128, 0, 128}, 2)
+	atlas := render.Rect{f32(color.x), f32(color.y), 2, 1}
+	layer(t, &f.list, {0, 0, 2, 2})
+	glyph(t, &f.list, {rect = {0, 0, 2, 1}, atlas = atlas, color = {0, 0, 1, 1}, flags = render.GLYPH_COLOR})
+	glyph(t, &f.list, {rect = {0, 1, 2, 1}, atlas = atlas, color = {0, 0, 1, 0.5}, flags = render.GLYPH_COLOR})
+	// Surfaces read back as BGRA.
+	pixels := render_pixels(t, &f, {0, 0, 0, 1})
+	defer delete(pixels)
+	expect_pixel(t, pixels, 2, 0, 0, {0, 0, 255, 255}, 1)
+	expect_pixel(t, pixels, 2, 1, 0, {0, 128, 0, 255}, 1)
+	expect_pixel(t, pixels, 2, 0, 1, {0, 0, 128, 255}, 1)
+	expect_pixel(t, pixels, 2, 1, 1, {0, 64, 0, 255}, 1)
+	generation := render.atlas_generation(d)
+	render.atlas_reset(d)
+	testing.expect_value(t, render.atlas_generation(d), generation + 1)
+	again, again_ok := render.atlas_reserve(d, 1, 1, true)
+	testing.expect(t, again_ok)
+	testing.expect_value(t, again.x + again.y, 0)
 }
 
 @(test)
@@ -352,7 +389,7 @@ instance_buffer_growth_and_reuse :: proc(t: ^testing.T) {
 		for i in 0 ..< count {
 			color := i % 2 == 0 ? render.Color{1, 0, 0, 1} : render.Color{0, 0, 1, 1}
 			rect(t, &f.list, {rect = {f32(i), 0, 1, 1}, color = color})
-			glyph(t, &f.list, {{f32(i), 1, 1, 1}, {f32(slot.x), f32(slot.y), 0, 0}, color})
+			glyph(t, &f.list, {rect = {f32(i), 1, 1, 1}, atlas = {f32(slot.x), f32(slot.y), 0, 0}, color = color})
 		}
 		pixels := render_pixels(t, &f)
 		defer delete(pixels)
