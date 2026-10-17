@@ -761,7 +761,7 @@ IInlineObject :: struct #raw_union {
 
 ITextAnalyzer :: struct #raw_union {
 	#subtype iunknown: windows.IUnknown,
-	using vtable: ^windows.IUnknown_VTable,
+	using vtable: ^ITextAnalyzer_VTable,
 }
 
 Number_Substitution_Method :: enum i32 {

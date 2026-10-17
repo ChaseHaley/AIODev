@@ -35,11 +35,19 @@ View :: struct {
 	rows: ghostty.Render_State_Row_Iterator,
 	cells: ghostty.Render_State_Row_Cells,
 	codepoints: [dynamic]u32,
+	paints: [dynamic]Cell_Paint,
+	runes: [dynamic]rune,
+	columns: [dynamic]int,
+	shaped: [dynamic]font.Shaped_Glyph,
 }
 
 @(require_results)
 create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	v.codepoints = make([dynamic]u32, allocator)
+	v.paints = make([dynamic]Cell_Paint, allocator)
+	v.runes = make([dynamic]rune, allocator)
+	v.columns = make([dynamic]int, allocator)
+	v.shaped = make([dynamic]font.Shaped_Glyph, allocator)
 	ok := ghostty.render_state_new(nil, &v.state) == .Success
 	ok &&= ghostty.render_state_row_iterator_new(nil, &v.rows) == .Success
 	ok &&= ghostty.render_state_row_cells_new(nil, &v.cells) == .Success
@@ -54,6 +62,10 @@ destroy :: proc(v: ^View) {
 	ghostty.render_state_row_iterator_free(v.rows)
 	ghostty.render_state_free(v.state)
 	delete(v.codepoints)
+	delete(v.paints)
+	delete(v.runes)
+	delete(v.columns)
+	delete(v.shaped)
 	v^ = {}
 }
 
@@ -258,15 +270,25 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	if ghostty.render_state_row_get(v.rows, .Cells, &v.cells) != .Success {
 		return .Ok
 	}
+	clear(&v.paints)
+	for x := 0; ghostty.render_state_row_cells_next(v.cells); x += 1 {
+		p := paint_cell(v, b, x, y, selection, selected)
+		if _, err := append(&v.paints, p); err != nil {
+			b.ok = false
+			return .Ok
+		}
+	}
 	run_start, run_color, run_active := 0, render.Color{}, false
 	flush :: proc(b: ^Builder, start, end: int, top: f32, c: render.Color) {
 		m := b.metrics
-		rect(b, {b.origin.x + f32(start) * m.cell_width, top, f32(end - start) * m.cell_width, m.cell_height}, c)
+		rect(b, {
+			b.origin.x + f32(start) * m.cell_width,
+			top,
+			f32(end - start) * m.cell_width,
+			m.cell_height,
+		}, c)
 	}
-	x := 0
-	for ghostty.render_state_row_cells_next(v.cells) {
-		defer x += 1
-		p := paint_cell(v, b, x, y, selection, selected)
+	for p, x in v.paints {
 		if run_active && (!p.has_background || p.background != run_color) {
 			flush(b, run_start, x, top, run_color)
 			run_active = false
@@ -274,51 +296,107 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		if p.has_background && !run_active {
 			run_start, run_color, run_active = x, p.background, true
 		}
-		left := b.origin.x + f32(x) * m.cell_width
-		if result := decorate(b, p, left, top); result != .Ok {
-			return result
-		}
-		if !p.style.invisible {
-			if result := draw_text(v, b, p, left, top); result != .Ok {
-				return result
-			}
-		}
 	}
 	if run_active {
-		flush(b, run_start, x, top, run_color)
+		flush(b, run_start, len(v.paints), top, run_color)
+	}
+	for p, x in v.paints {
+		if result := decorate(b, p, b.origin.x + f32(x) * m.cell_width, top); result != .Ok {
+			return result
+		}
+	}
+	clear(&v.runes)
+	clear(&v.columns)
+	face: font.Style
+	previous := -2
+	cursor := b.cursor
+	cursor_x := -1
+	if cursor.visible && cursor.viewport_has_value && int(cursor.viewport_y) == y {
+		cursor_x = int(cursor.viewport_x)
+	}
+	for p, x in v.paints {
+		count: u32
+		if ghostty.render_state_row_cells_select(v.cells, u16(x)) != .Success ||
+		   ghostty.render_state_row_cells_get(v.cells, .Graphemes_Len, &count) != .Success {
+			log.error("term_view: reading row cell failed")
+			count = 0
+		}
+		next_face := cell_face(p)
+		if p.style.invisible || count == 0 || previous != x - 1 || next_face != face ||
+		   x == cursor_x || previous == cursor_x {
+			if result := draw_run(v, b, face, top); result != .Ok { return result }
+			clear(&v.runes)
+			clear(&v.columns)
+		}
+		if p.style.invisible || count == 0 { continue }
+		if resize(&v.codepoints, int(count)) != nil ||
+		   reserve(&v.runes, len(v.runes) + int(count)) != nil ||
+		   reserve(&v.columns, len(v.columns) + int(count)) != nil {
+			b.ok = false
+			return .Ok
+		}
+		if ghostty.render_state_row_cells_get(v.cells, .Graphemes_Buf, raw_data(v.codepoints)) != .Success {
+			log.error("term_view: reading cell graphemes failed")
+			continue
+		}
+		for codepoint in v.codepoints {
+			_, rune_err := append(&v.runes, rune(codepoint))
+			_, column_err := append(&v.columns, x)
+			if rune_err != nil || column_err != nil {
+				b.ok = false
+				return .Ok
+			}
+		}
+		face, previous = next_face, x
+	}
+	return draw_run(v, b, face, top)
+}
+
+@(private)
+cell_face :: proc(p: Cell_Paint) -> font.Style {
+	if p.style.bold && p.style.italic { return .Bold_Italic }
+	if p.style.bold { return .Bold }
+	if p.style.italic { return .Italic }
+	return .Regular
+}
+
+@(private, require_results)
+draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
+	if len(v.runes) == 0 { return .Ok }
+	clear(&v.shaped)
+	if err := font.shape(b.fonts, b.style.family, face, v.runes[:], b.metrics.size_px, &v.shaped);
+	   err != .None {
+		log.errorf("term_view: shaping failed: %v", err)
+		return draw_codepoints(v, b, face, top)
+	}
+	cluster := -1
+	advance: f32
+	for g in v.shaped {
+		if g.cluster != cluster {
+			cluster, advance = g.cluster, 0
+		}
+		x := v.columns[g.cluster]
+		entry, result := glyphs.glyph(b.cache, g.glyph, b.metrics.size_px)
+		if result != .Ok { return result }
+		place(b, entry, {
+			b.origin.x + f32(x) * b.metrics.cell_width + advance + g.offset.x,
+			top + b.metrics.baseline - g.offset.y,
+		}, v.paints[x].foreground)
+		advance += g.advance
 	}
 	return .Ok
 }
 
-@(private)
-draw_text :: proc(v: ^View, b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
-	count: u32
-	if ghostty.render_state_row_cells_get(v.cells, .Graphemes_Len, &count) != .Success || count == 0 {
-		return .Ok
-	}
-	resize(&v.codepoints, int(count))
-	if ghostty.render_state_row_cells_get(v.cells, .Graphemes_Buf, raw_data(v.codepoints)) != .Success {
-		return .Ok
-	}
-	face: font.Style = .Regular
-	if p.style.bold && p.style.italic {
-		face = .Bold_Italic
-	} else if p.style.bold {
-		face = .Bold
-	} else if p.style.italic {
-		face = .Italic
-	}
-	pen := [2]f32{left, top + b.metrics.baseline}
-	for codepoint in v.codepoints {
-		g, found := font.glyph_lookup(b.fonts, b.style.family, face, rune(codepoint))
-		if !found {
-			continue
-		}
+@(private, require_results)
+draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
+	for r, i in v.runes {
+		g, found := font.glyph_lookup(b.fonts, b.style.family, face, r)
+		if !found { continue }
 		entry, result := glyphs.glyph(b.cache, g, b.metrics.size_px)
-		if result != .Ok {
-			return result
-		}
-		place(b, entry, pen, p.foreground)
+		if result != .Ok { return result }
+		x := v.columns[i]
+		place(b, entry, {b.origin.x + f32(x) * b.metrics.cell_width, top + b.metrics.baseline},
+		      v.paints[x].foreground)
 	}
 	return .Ok
 }

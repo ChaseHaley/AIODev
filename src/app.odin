@@ -18,6 +18,7 @@ import "aio:ui"
 @(private) MIN_FONT_POINTS :: 6
 @(private) MAX_FONT_POINTS :: 72
 @(private) NOTICE_DURATION :: 6 * time.Second
+@(private) COPY_NOTICE_DURATION :: 2 * time.Second
 @(private) ERROR_NOTICE_DURATION :: 12 * time.Second
 
 @(private)
@@ -26,6 +27,7 @@ Notice_Key :: enum u32 {
 	Session,
 	Settings,
 	Font,
+	Copy,
 }
 
 Init_Result :: enum {
@@ -75,7 +77,10 @@ app_init :: proc(app: ^App) -> Init_Result {
 	}
 	ui.notices_init(&app.notices)
 	app.registry = commands.create()
-	register_actions(app)
+	if err := register_actions(&app.registry); err != .None {
+		log.errorf("registering commands failed: %v", err)
+		return .Failed
+	}
 	if ui.palette_init(&app.palette) != nil {
 		return .Failed
 	}
@@ -353,7 +358,8 @@ load_settings :: proc(app: ^App) {
 		}
 		app.settings_path = path
 	}
-	loaded, diagnostics, created, err := settings.load(app.settings_path)
+	comments := binding_comments()
+	loaded, diagnostics, created, err := settings.load(app.settings_path, extra_comments = comments[:])
 	defer settings.diagnostics_destroy(&diagnostics)
 	if err != nil {
 		log.errorf("reading %s failed: %v", app.settings_path, err)
@@ -367,6 +373,7 @@ load_settings :: proc(app: ^App) {
 	}
 	settings.destroy(&app.settings)
 	app.settings = loaded
+	apply_bindings(app, &diagnostics)
 	app.font_points = f32(loaded.font.size)
 	if created {
 		log.infof("created %s", app.settings_path)

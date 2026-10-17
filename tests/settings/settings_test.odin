@@ -18,7 +18,7 @@ round_trip :: proc(t: ^testing.T) {
 	baseline, baseline_error := settings.defaults()
 	defer settings.destroy(&baseline)
 	testing.expect_value(t, baseline_error, nil)
-	testing.expect_value(t, s, baseline)
+	expect_settings(t, s, baseline)
 	testing.expect_value(t, len(d), 0)
 	testing.expect_value(t, s.font.family, "Cascadia Mono")
 	testing.expect_value(t, s.font.size, 12)
@@ -72,7 +72,7 @@ window.rows = 1`
 	defer settings.diagnostics_destroy(&windows_diagnostics)
 	testing.expect_value(t, windows_error, nil)
 	testing.expect_value(t, len(windows_diagnostics), 0)
-	testing.expect_value(t, windows_settings, s)
+	expect_settings(t, windows_settings, s)
 }
 
 @(test)
@@ -181,32 +181,32 @@ file_lifecycle :: proc(t: ^testing.T) {
 	testing.expect_value(t, path_error, nil)
 	if path_error != nil { return }
 	defer delete(path)
-	s, d, created, err := settings.load(path)
+	s, d, created, err := settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"})
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect(t, created)
 	testing.expect_value(t, len(d), 0)
 	if err != nil { return }
-	text, text_error := settings.default_text()
+	text, text_error := settings.default_text(extra_comments = {"keys.edit.copy = Ctrl+C"})
 	defer delete(text)
 	testing.expect_value(t, text_error, nil)
 	bytes, read_error := os.read_entire_file(path, context.allocator)
 	defer delete(bytes)
 	testing.expect_value(t, read_error, nil)
 	testing.expect_value(t, string(bytes), text)
-	loaded, loaded_diagnostics, loaded_created, loaded_error := settings.load(path)
+	loaded, loaded_diagnostics, loaded_created, loaded_error := settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"})
 	defer settings.destroy(&loaded)
 	defer settings.diagnostics_destroy(&loaded_diagnostics)
 	testing.expect_value(t, loaded_error, nil)
 	testing.expect_value(t, loaded_created, false)
 	testing.expect_value(t, len(loaded_diagnostics), 0)
-	testing.expect_value(t, loaded, s)
+	expect_settings(t, loaded, s)
 	modified_text :: `font.family = Custom
 font.size = invalid
 `
 	testing.expect_value(t, os.write_entire_file(path, modified_text), nil)
-	modified, modified_diagnostics, modified_created, modified_error := settings.load(path)
+	modified, modified_diagnostics, modified_created, modified_error := settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"})
 	defer settings.destroy(&modified)
 	defer settings.diagnostics_destroy(&modified_diagnostics)
 	testing.expect_value(t, modified_error, nil)
@@ -254,7 +254,7 @@ invalid_values :: proc(t: ^testing.T) {
 		defer settings.diagnostics_destroy(&d)
 		testing.expect_value(t, err, nil)
 		testing.expect_value(t, len(d), 1)
-		testing.expect_value(t, s, baseline)
+		expect_settings(t, s, baseline)
 	}
 }
 
@@ -312,12 +312,14 @@ allocation_failures :: proc(t: ^testing.T) {
 unknown = x
 window.rows = 0
 window.rows = 4
-shell.command = Replacement`, allocator)
+shell.command = Replacement
+keys.edit.copy = Ctrl+C
+keys.edit.copy = Ctrl+Insert`, allocator)
 		settings.destroy(&s)
 		settings.diagnostics_destroy(&d)
 		testing.expect(t, err == nil || err == .Out_Of_Memory)
 		state.remaining = limit
-		generated, generated_error := settings.default_text(allocator)
+		generated, generated_error := settings.default_text(allocator, {"keys.edit.copy = Ctrl+C"})
 		delete(generated, allocator)
 		testing.expect(t, generated_error == nil || generated_error == .Out_Of_Memory)
 	}
@@ -329,4 +331,48 @@ shell.command = Replacement`, allocator)
 	testing.expect_value(t, path_error, os.Error(runtime.Allocator_Error.Out_Of_Memory))
 }
 
-
+expect_settings :: proc(t: ^testing.T, actual, expected: settings.Settings) {
+	testing.expect_value(t, actual.font, expected.font)
+	testing.expect_value(t, actual.shell, expected.shell)
+	testing.expect_value(t, actual.window, expected.window)
+	testing.expect_value(t, actual.scrollback, expected.scrollback)
+	testing.expect_value(t, actual.terminal, expected.terminal)
+	testing.expect_value(t, actual.cursor, expected.cursor)
+	testing.expect_value(t, actual.colors, expected.colors)
+	testing.expect_value(t, len(actual.keys), len(expected.keys))
+	for binding, i in actual.keys {
+		if i < len(expected.keys) { testing.expect_value(t, binding, expected.keys[i]) }
+	}
+}
+@(test)
+key_bindings :: proc(t: ^testing.T) {
+	fixture, clone_error := strings.clone("keys.edit.copy = Ctrl+Shift+C, Ctrl+Insert\r\n" +
+		"keys.unknown.command = not a chord\r\nkeys.edit.copy =\r\nkeys. = Ctrl+A\r\n")
+	if !testing.expect_value(t, clone_error, nil) { return }
+	s, diagnostics, err := settings.parse(fixture)
+	delete(fixture)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(s.keys), 3)
+	testing.expect_value(t, s.keys[0], settings.Key_Binding{"edit.copy", "", 3})
+	testing.expect_value(t, s.keys[1], settings.Key_Binding{"unknown.command", "not a chord", 2})
+	testing.expect_value(t, s.keys[2], settings.Key_Binding{"", "Ctrl+A", 4})
+	testing.expect_value(t, len(diagnostics), 1)
+	testing.expect_value(t, diagnostics[0].kind, settings.Diagnostic_Kind.Duplicate_Key)
+	testing.expect_value(t, diagnostics[0].line, 3)
+	testing.expect_value(t, diagnostics[0].key, "keys.edit.copy")
+	testing.expect_value(t, settings.diagnostic_append(&diagnostics, 2,
+		"keys.unknown.command", "unknown command name"), nil)
+	testing.expect_value(t, diagnostics[1].message, "unknown command name")
+	text, text_error := settings.default_text(extra_comments = {"keys.edit.copy = Ctrl+Shift+C, Ctrl+Insert"})
+	defer delete(text)
+	testing.expect_value(t, text_error, nil)
+	testing.expect(t, strings.has_suffix(text, "# keys.edit.copy = Ctrl+Shift+C, Ctrl+Insert\n"))
+	parsed, parsed_diagnostics, parsed_error := settings.parse(text)
+	defer settings.destroy(&parsed)
+	defer settings.diagnostics_destroy(&parsed_diagnostics)
+	testing.expect_value(t, parsed_error, nil)
+	testing.expect_value(t, len(parsed.keys), 0)
+	testing.expect_value(t, len(parsed_diagnostics), 0)
+}

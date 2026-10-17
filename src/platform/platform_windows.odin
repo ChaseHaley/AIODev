@@ -28,6 +28,8 @@ Window :: struct {
 	tracking, sizing: bool,
 	buttons: u8,
 	high_surrogate: u16,
+	previous_move: Mouse_Move_Event,
+	has_previous_move: bool,
 }
 Platform :: struct {
 	allocator: runtime.Allocator,
@@ -871,11 +873,19 @@ mouse_message :: proc(window: ^Window, message: u32, wp: w.WPARAM, lp: w.LPARAM)
 				p.error = .Os
 			}
 		}
-		enqueue(p, Mouse_Move_Event{window.id, x, y, mouse_buttons(wp), mods, time})
+		buttons := mouse_buttons(wp)
+		previous := window.previous_move
+		if !window.has_previous_move || previous.x != x || previous.y != y || previous.buttons != buttons {
+			move := Mouse_Move_Event{window.id, x, y, buttons, mods, time}
+			window.previous_move = move
+			window.has_previous_move = true
+			enqueue(p, move)
+		}
 		return
 	}
 	if message == w.WM_MOUSELEAVE {
 		window.tracking = false
+		window.has_previous_move = false
 		enqueue(p, Mouse_Leave_Event{window.id})
 		return
 	}

@@ -38,15 +38,12 @@ send_key :: proc(s: ^Session, event: platform.Key_Event) -> bool {
 			n += append_win32_key(buffer[n:], 0, 0, unit, false, 0, 1)
 		}
 	}
-	if !event.pressed {
-		return queue_push(&s.queue, buffer[:n])
-	}
-	return send_input(s, buffer[:n])
+	return send_input(s, buffer[:n], len(event.text) > 0)
 }
 
 send_text :: proc(s: ^Session, text: string) -> bool {
 	if !sync.atomic_load(&s.win32_input) {
-		return send_input(s, transmute([]u8)text)
+		return send_input(s, transmute([]u8)text, true)
 	}
 	units := make([]u16, len(text), context.temp_allocator)
 	data := make([dynamic]u8, 0, len(text) * 48, context.temp_allocator)
@@ -56,5 +53,5 @@ send_text :: proc(s: ^Session, text: string) -> bool {
 		n += append_win32_key(sequence[n:], 0, 0, unit, false, 0, 1)
 		append(&data, ..sequence[:n])
 	}
-	return send_input(s, data[:])
+	return send_input(s, data[:], true)
 }

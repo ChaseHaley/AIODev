@@ -39,6 +39,7 @@ Color_Settings :: struct {
 	palette: [16]Color,
 }
 Settings :: struct {
+	keys: [dynamic]Key_Binding,
 	font: Font_Settings,
 	shell: Shell_Settings,
 	window: Window_Settings,
@@ -48,6 +49,8 @@ Settings :: struct {
 	colors: Color_Settings,
 	allocator: runtime.Allocator,
 }
+KEY_BINDING_PREFIX :: "keys."
+Key_Binding :: struct { name, value: string, line: int }
 Kind :: enum { String, Int, Float, Bool, Color, Optional_Color, Enum }
 Schema_Entry :: struct {
 	key: string,
@@ -231,6 +234,7 @@ assign :: proc(
 @(require_results)
 defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator_Error) {
 	s := Settings{allocator = allocator}
+	s.keys.allocator = allocator
 	for entry in SCHEMA {
 		issue, err := assign(&s, entry, entry.default_value)
 		if err != nil {
@@ -246,6 +250,11 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 }
 
 destroy :: proc(s: ^Settings) {
+	for binding in s.keys {
+		delete(binding.name, s.allocator)
+		delete(binding.value, s.allocator)
+	}
+	delete(s.keys)
 	for entry in SCHEMA {
 		if entry.kind == .String {
 			delete((cast(^string)(uintptr(s) + entry.offset))^, s.allocator)
@@ -261,6 +270,17 @@ diagnostics_destroy :: proc(diagnostics: ^[dynamic]Diagnostic) {
 	}
 	delete(diagnostics^)
 	diagnostics^ = {}
+}
+
+@(require_results)
+diagnostic_append :: proc(
+	out: ^[dynamic]Diagnostic,
+	line: int,
+	key, message: string,
+) -> runtime.Allocator_Error {
+	issue, err := problem(.Invalid_Value, out.allocator, message)
+	if err != nil { return err }
+	return add_diagnostic(out, line, key, issue.(Problem))
 }
 
 @(private, require_results)
@@ -281,6 +301,48 @@ add_diagnostic :: proc(
 		delete(issue.message, out.allocator)
 	}
 	return err
+}
+
+@(private, require_results)
+parse_key_binding :: proc(s: ^Settings, diagnostics: ^[dynamic]Diagnostic,
+	key, value: string, line_number: int) -> runtime.Allocator_Error {
+	allocator := s.allocator
+	binding_name := strings.trim_prefix(key, KEY_BINDING_PREFIX)
+	duplicate := -1
+	for binding, i in s.keys {
+		if binding.name == binding_name {
+			duplicate = i
+			break
+		}
+	}
+	if duplicate >= 0 {
+		issue, issue_error := problem(.Duplicate_Key, allocator, "duplicate key \"", key,
+			"\"; last value wins")
+		if issue_error != nil { return issue_error }
+		err := add_diagnostic(diagnostics, line_number, key, issue.(Problem))
+		if err != nil { return err }
+	}
+	name, name_error := strings.clone(binding_name, allocator)
+	if name_error != nil { return name_error }
+	owned, value_error := strings.clone(value, allocator)
+	if value_error != nil {
+		delete(name, allocator)
+		return value_error
+	}
+	binding := Key_Binding{name, owned, line_number}
+	if duplicate >= 0 {
+		delete(s.keys[duplicate].name, allocator)
+		delete(s.keys[duplicate].value, allocator)
+		s.keys[duplicate] = binding
+	} else {
+		_, append_error := append(&s.keys, binding)
+		if append_error != nil {
+			delete(name, allocator)
+			delete(owned, allocator)
+			return append_error
+		}
+	}
+	return nil
 }
 
 @(require_results)
@@ -314,6 +376,11 @@ parse :: proc(
 		}
 		key := strings.trim_space(line[:equal])
 		value := strings.trim_space(line[equal+1:])
+		if strings.has_prefix(key, KEY_BINDING_PREFIX) {
+			binding_error := parse_key_binding(&s, &diagnostics, key, value, line_number)
+			if binding_error != nil { return {}, {}, binding_error }
+			continue
+		}
 		index := -1
 		for entry, i in SCHEMA {
 			if entry.key == key {
@@ -358,7 +425,10 @@ write_parts :: proc(b: ^strings.Builder, parts: ..string) -> runtime.Allocator_E
 }
 
 @(require_results)
-default_text :: proc(allocator := context.allocator) -> (text: string, err: runtime.Allocator_Error) {
+default_text :: proc(
+	allocator := context.allocator,
+	extra_comments: []string = nil,
+) -> (text: string, err: runtime.Allocator_Error) {
 	builder := strings.builder_make(allocator) or_return
 	defer strings.builder_destroy(&builder)
 	previous: string
@@ -378,6 +448,10 @@ default_text :: proc(allocator := context.allocator) -> (text: string, err: runt
 		}
 		write_parts(&builder, "\n") or_return
 	}
+	if len(extra_comments) > 0 { write_parts(&builder, "\n") or_return }
+	for line in extra_comments {
+		write_parts(&builder, "# ", line, "\n") or_return
+	}
 	return strings.clone(strings.to_string(builder), allocator)
 }
 
@@ -385,6 +459,7 @@ default_text :: proc(allocator := context.allocator) -> (text: string, err: runt
 load :: proc(
 	path: string,
 	allocator := context.allocator,
+	extra_comments: []string = nil,
 ) -> (s: Settings, diagnostics: [dynamic]Diagnostic, created: bool, err: os.Error) {
 	data, read_error := os.read_entire_file(path, allocator)
 	defer delete(data, allocator)
@@ -402,7 +477,7 @@ load :: proc(
 	}
 	err = os.mkdir_all(os.dir(path))
 	if err != nil { return }
-	text, text_error := default_text(allocator)
+	text, text_error := default_text(allocator, extra_comments)
 	if text_error != nil {
 		err = text_error
 		return
@@ -440,4 +515,3 @@ expand_home :: proc(path: string, allocator := context.allocator) -> (string, os
 	}
 	return result, nil
 }
-

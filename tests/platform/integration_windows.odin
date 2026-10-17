@@ -344,3 +344,53 @@ tray_menu_validation :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.tray_set_menu(&platform, nil), p.Error.None)
 	testing.expect_value(t, p.tray_destroy(&platform), p.Error.None)
 }
+
+@(test)
+synthetic_mouse_moves :: proc(t: ^testing.T) {
+	platform: p.Platform
+	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.MouseMove"), p.Init_Result.Primary) { return }
+	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
+	first, err := p.window_create(&platform, {hidden = true, width = 160, height = 100})
+	if !testing.expect_value(t, err, p.Error.None) { return }
+	second, second_error := p.window_create(&platform, {hidden = true, width = 160, height = 100})
+	if !testing.expect_value(t, second_error, p.Error.None) { return }
+	position := w.LPARAM(10 | (20 << 16))
+	Case :: struct { window: p.Window_Id, position: w.LPARAM, buttons: w.WPARAM, expected: int, leave: bool }
+	cases := [?]Case{
+		{first, position, 0, 1, false},
+		{first, position, 0, 0, false},
+		{first, position, w.MK_SHIFT, 0, false},
+		{first, position, w.MK_LBUTTON, 1, false},
+		{first, position, w.MK_LBUTTON, 0, false},
+		{first, position+1, w.MK_LBUTTON, 1, false},
+		{first, position+1, 0, 1, false},
+		{second, position+1, 0, 1, false},
+		{first, position+1, 0, 0, false},
+		{first, position+1, 0, 1, true},
+		{first, position+1, 0, 0, false},
+	}
+	for item in cases {
+		hwnd := w.HWND(p.window_native_handle(&platform, item.window))
+		if item.leave {
+			testing.expect_value(t, w.SendMessageW(hwnd, w.WM_MOUSELEAVE, 0, 0), w.LRESULT(0))
+		}
+		testing.expect_value(t, w.SendMessageW(hwnd, w.WM_MOUSEMOVE, item.buttons, item.position), w.LRESULT(0))
+	}
+	events, poll_error := p.poll_events(&platform)
+	testing.expect_value(t, poll_error, p.Error.None)
+	index := 0
+	for event in events {
+		if move, ok := event.(p.Mouse_Move_Event); ok {
+			for index < len(cases) && cases[index].expected == 0 { index += 1 }
+			if !testing.expect(t, index < len(cases)) { continue }
+			item := cases[index]
+			testing.expect_value(t, move.window, item.window)
+			testing.expect_value(t, move.x, i32(item.position & 0xffff))
+			testing.expect_value(t, move.y, i32(20))
+			testing.expect_value(t, .Left in move.buttons, item.buttons & w.MK_LBUTTON != 0)
+			index += 1
+		}
+	}
+	for index < len(cases) && cases[index].expected == 0 { index += 1 }
+	testing.expect_value(t, index, len(cases))
+}

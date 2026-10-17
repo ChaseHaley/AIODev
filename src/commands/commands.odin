@@ -8,10 +8,13 @@ import "aio:input"
 
 Command_Id :: distinct u32
 Shortcut :: struct { key: input.Key, modifiers: input.Modifiers }
+MAX_SHORTCUTS :: 4
+Shortcut_Set :: struct { items: [MAX_SHORTCUTS]Shortcut, count: int }
+Override :: struct { id: Command_Id, shortcuts: []Shortcut }
 Command :: struct {
 	id: Command_Id,
 	name, title: string,
-	shortcut: Maybe(Shortcut),
+	shortcuts, defaults: Shortcut_Set,
 	disabled: bool,
 }
 Error :: enum {
@@ -22,6 +25,8 @@ Error :: enum {
 	Invalid_UTF8,
 	Out_Of_Memory,
 	Output_Too_Small,
+	Unknown_Command,
+	Invalid_Shortcut,
 }
 Registry :: struct { items: [dynamic]Command }
 Search_Result :: struct { command: ^Command, score: f64, positions: []int }
@@ -54,15 +59,14 @@ register :: proc(registry: ^Registry, command: Command) -> Error {
 	for item in registry.items {
 		if item.id == command.id { return .Duplicate_Id }
 		if item.name == command.name { return .Duplicate_Name }
-		if shortcut, ok := command.shortcut.?; ok {
-			if other, present := item.shortcut.?;
-			   present && shortcut.key == other.key &&
-			   normalized(shortcut.modifiers) == normalized(other.modifiers) {
-				return .Duplicate_Shortcut
-			}
-		}
+	}
+	assert(command.shortcuts.count >= 0 && command.shortcuts.count <= MAX_SHORTCUTS)
+	for i in 0..<command.shortcuts.count {
+		binding := command.shortcuts.items[i]
+		if find_by_shortcut(registry, binding) != nil { return .Duplicate_Shortcut }
 	}
 	owned := command
+	owned.defaults = command.shortcuts
 	allocator := registry.items.allocator
 	name, name_error := strings.clone(command.name, allocator)
 	if name_error != nil { return .Out_Of_Memory }
@@ -102,10 +106,11 @@ find_name :: proc(registry: ^Registry, name: string) -> ^Command {
 @(require_results)
 find_by_shortcut :: proc(registry: ^Registry, shortcut: Shortcut) -> ^Command {
 	for &item in registry.items {
-		if binding, ok := item.shortcut.?;
-		   ok && binding.key == shortcut.key &&
-		   normalized(binding.modifiers) == normalized(shortcut.modifiers) {
-			return &item
+		for binding in active_shortcuts(&item) {
+			if binding.key == shortcut.key &&
+			   normalized(binding.modifiers) == normalized(shortcut.modifiers) {
+				return &item
+			}
 		}
 	}
 	return nil
@@ -138,7 +143,7 @@ KEY_LABELS :: #partial [input.Key]string{
 	.Digit_8 = "8",
 	.Digit_9 = "9",
 	.Equal = "=",
-	.Intl_Backslash = "\\",
+	.Intl_Backslash = "Intl Backslash",
 	.Intl_Ro = "Ro",
 	.Intl_Yen = "Yen",
 	.Minus = "-",
@@ -307,3 +312,105 @@ search :: proc(
 	return matched, .None
 }
 
+active_shortcuts :: proc(command: ^Command) -> []Shortcut {
+	return command.shortcuts.items[:command.shortcuts.count]
+}
+
+@(require_results)
+set_shortcuts :: proc(registry: ^Registry, id: Command_Id, shortcuts: []Shortcut) -> Error {
+	command := find(registry, id)
+	if command == nil { return .Unknown_Command }
+	assert(len(shortcuts) <= MAX_SHORTCUTS)
+	for shortcut in shortcuts {
+		if other := find_by_shortcut(registry, shortcut); other != nil && other.id != id {
+			return .Duplicate_Shortcut
+		}
+	}
+	bindings := Shortcut_Set{count = len(shortcuts)}
+	for shortcut, i in shortcuts {
+		bindings.items[i] = {shortcut.key, normalized(shortcut.modifiers)}
+	}
+	command.shortcuts = bindings
+	return .None
+}
+
+// Overrides replace defaults; an override that cannot apply falls back to its command's defaults, or
+// leaves the command unbound when those are taken too.
+rebind :: proc(registry: ^Registry, overrides: []Override, errors: []Error) {
+	assert(len(errors) >= len(overrides))
+	for &command in registry.items { command.shortcuts = {} }
+	for &command in registry.items {
+		overridden := false
+		for override in overrides {
+			if override.id == command.id {
+				overridden = true
+				break
+			}
+		}
+		if !overridden { command.shortcuts = command.defaults }
+	}
+	for override, i in overrides {
+		errors[i] = set_shortcuts(registry, override.id, override.shortcuts)
+		command := find(registry, override.id)
+		if errors[i] == .None || command == nil { continue }
+		defaults := command.defaults.items[:command.defaults.count]
+		if set_shortcuts(registry, command.id, defaults) != .None {
+			command.shortcuts = {}
+		}
+	}
+}
+
+@(require_results)
+parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
+	rest := strings.trim_space(text)
+	modifiers: input.Modifiers
+	for {
+		plus := strings.index_byte(rest, '+')
+		if plus < 0 { break }
+		prefix := strings.trim_space(rest[:plus])
+		modifier: input.Modifier
+		recognized := true
+		switch {
+		case strings.equal_fold(prefix, "Ctrl"): modifier = .Control
+		case strings.equal_fold(prefix, "Shift"): modifier = .Shift
+		case strings.equal_fold(prefix, "Alt"): modifier = .Alt
+		case strings.equal_fold(prefix, SUPER_LABEL): modifier = .Super
+		case: recognized = false
+		}
+		if !recognized { break }
+		if modifier in modifiers { return {}, false }
+		modifiers += {modifier}
+		rest = strings.trim_space(rest[plus+1:])
+	}
+	buffer: [128]u8
+	for key in input.Key {
+		label, err := shortcut_label({key, {}}, buffer[:])
+		if err != .None { return {}, false }
+		if strings.equal_fold(rest, label) { return {key, modifiers}, true }
+	}
+	return {}, false
+}
+
+@(require_results)
+parse_shortcuts :: proc(text: string, out: []Shortcut) -> (int, Error) {
+	rest := strings.trim_space(text)
+	count := 0
+	for rest != "" {
+		found := false
+		for end in 1..=len(rest) {
+			if end < len(rest) && rest[end] != ',' { continue }
+			shortcut, ok := parse_shortcut(rest[:end])
+			if !ok { continue }
+			if count == len(out) { return 0, .Output_Too_Small }
+			out[count] = shortcut
+			count += 1
+			if end == len(rest) { return count, .None }
+			rest = strings.trim_space(rest[end+1:])
+			if rest == "" { return 0, .Invalid_Shortcut }
+			found = true
+			break
+		}
+		if !found { return 0, .Invalid_Shortcut }
+	}
+	return count, .None
+}

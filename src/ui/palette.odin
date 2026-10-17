@@ -301,8 +301,8 @@ palette_draw :: proc(
 		}
 		row_baseline := row.y + (row.height - text.line_height) / 2 + text.ascent
 		label_width: f32
-		if shortcut, ok := item.command.shortcut.?; ok {
-			if label, err := commands.shortcut_label(shortcut, label_buffer[:]); err == .None {
+		if shortcuts := commands.active_shortcuts(item.command); len(shortcuts) > 0 {
+			if label, err := commands.shortcut_label(shortcuts[0], label_buffer[:]); err == .None {
 				label_width = text_width(text, label)
 				x := row.x + row.width - padding - label_width
 				if result := draw_text(text, list, label, x, row_baseline, theme.muted); result != .Ok {

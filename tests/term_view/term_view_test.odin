@@ -1,5 +1,7 @@
 package term_view_test
 
+import "core:math"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -58,14 +60,14 @@ palette :: proc() -> (p: [16]term.Color) {
 	return
 }
 
-fixture_create :: proc(t: ^testing.T, command: string) -> (f: Fixture, ok: bool) {
+fixture_create :: proc(t: ^testing.T, command: string, family := "Consolas") -> (f: Fixture, ok: bool) {
 	testing.set_fail_timeout(t, 60 * time.Second)
 	font_error: font.Error
 	f.fonts, font_error = font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) {
 		return
 	}
-	f.family, font_error = font.family_load(f.fonts, "Consolas")
+	f.family, font_error = font.family_load(f.fonts, family)
 	render_error: render.Error
 	f.device, render_error = render.device_create()
 	if font_error != .None || render_error != .None {
@@ -172,6 +174,30 @@ cell_has_ink :: proc(f: ^Fixture, pixels: []u8, column, row: int) -> bool {
 }
 
 @(test)
+decorations_survive_colored_backgrounds :: proc(t: ^testing.T) {
+	script :: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command \"" +
+		"$e = [char]27; [Console]::Write($e + '[41;4m ' + $e + '[24;9m ' + " +
+		"$e + '[0mREADY'); [Console]::Out.Flush(); Start-Sleep -Seconds 30\""
+	f, ok := fixture_create(t, script)
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "READY") {
+		return
+	}
+	_, pixels := render_frame(t, &f, {family = f.family})
+	m := f.metrics
+	underline := m.baseline + m.underline_offset - m.underline_thickness / 2
+	strike := m.baseline - m.strikethrough_offset - m.strikethrough_thickness / 2
+	for x in 0 ..< int(m.cell_width) {
+		u := cell_pixel(&f, pixels, 0, 0, f32(x), underline)
+		s := cell_pixel(&f, pixels, 1, 0, f32(x), strike)
+		testing.expect(t, u[0] > 100 && u[1] > 100 && u[2] > 200)
+		testing.expect(t, s[0] > 100 && s[1] > 100 && s[2] > 200)
+	}
+	testing.expect_value(t, cell_pixel(&f, pixels, 0, 0, 0, 0), [4]u8{0, 0, 200, 255})
+	testing.expect_value(t, cell_pixel(&f, pixels, 1, 0, 0, 0), [4]u8{0, 0, 200, 255})
+}
+
+@(test)
 renders_colors_text_and_cursor :: proc(t: ^testing.T) {
 	script :: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command \"" +
 		"$e = [char]27; [Console]::Write($e + '[41mRR' + $e + '[0mAB' + $e + '[44m ' + $e + '[0m'); " +
@@ -209,4 +235,136 @@ renders_colors_text_and_cursor :: proc(t: ^testing.T) {
 	style.focused = true
 	_, selected := render_frame(t, &f, style)
 	testing.expect_value(t, cell_pixel(&f, selected, 2, 0, 0, 0), [4]u8{51, 51, 51, 255})
+}
+
+text_command :: proc(text: string) -> string {
+	return strings.concatenate({
+		"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command \"",
+		"[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); $e = [char]27; " +
+		"[Console]::Write($e + '[2J' + $e + '[H' + ", text,
+		"); [Console]::Out.Flush(); Start-Sleep -Seconds 30\"",
+	}, context.temp_allocator)
+}
+
+unshaped_entry :: proc(t: ^testing.T, f: ^Fixture, r: rune, style: font.Style = .Regular) -> glyphs.Entry {
+	g, found := font.glyph_lookup(f.fonts, f.family, style, r)
+	testing.expect(t, found)
+	entry, result := glyphs.glyph(&f.cache, g, SIZE_PX)
+	testing.expect_value(t, result, glyphs.Result.Ok)
+	return entry
+}
+
+@(test)
+ligatures_and_cursor_boundary :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, text_command("'a->b != c ->' + $e + '[1;12H'"), "Cascadia Code")
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "a->b != c ->") { return }
+	render_frame(t, &f, {family = f.family})
+	baseline := make([dynamic]render.Glyph_Instance, context.temp_allocator)
+	for r in "a->b != c ->" {
+		entry := unshaped_entry(t, &f, r)
+		if entry.size.x > 0 {
+			_, err := append(&baseline, render.Glyph_Instance{atlas = entry.atlas})
+			testing.expect(t, err == nil)
+		}
+	}
+	different := len(baseline) != len(f.list.glyphs)
+	for g, i in f.list.glyphs {
+		if i < len(baseline) && g.atlas != baseline[i].atlas { different = true }
+	}
+	testing.expect(t, different)
+	n := len(f.list.glyphs)
+	if !testing.expect(t, n >= 2) { return }
+	testing.expect_value(t, f.list.glyphs[n - 2].atlas, unshaped_entry(t, &f, '-').atlas)
+	testing.expect_value(t, f.list.glyphs[n - 1].atlas, unshaped_entry(t, &f, '>').atlas)
+	before := slice.clone(f.list.glyphs[:], context.temp_allocator)
+	render_frame(t, &f, {family = f.family, focused = true, cursor_phase_visible = true})
+	for g, i in f.list.glyphs {
+		testing.expect_value(t, g.atlas, before[i].atlas)
+		testing.expect_value(t, g.rect, before[i].rect)
+	}
+}
+
+@(test)
+style_run_faces :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, text_command("'A' + $e + '[1mB' + $e + '[22;3mC' + $e + '[1mD' + $e + '[0m'"))
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "ABCD") { return }
+	render_frame(t, &f, {family = f.family})
+	if !testing.expect_value(t, len(f.list.glyphs), 4) { return }
+	styles := [4]font.Style{.Regular, .Bold, .Italic, .Bold_Italic}
+	for r, i in "ABCD" {
+		entry := unshaped_entry(t, &f, r, styles[i])
+		testing.expect_value(t, f.list.glyphs[i].atlas, entry.atlas)
+		testing.expect_value(t, f.list.glyphs[i].rect.x,
+		                     math.round(f32(i) * f.metrics.cell_width + entry.offset.x))
+	}
+}
+
+@(test)
+consolas_grid_and_combining_cluster :: proc(t: ^testing.T) {
+	command := text_command("'AB' + [char]0x6f22 + [char]::ConvertFromUtf32(0x1f600) + 'e' + [char]0x301")
+	f, ok := fixture_create(t, command)
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "AB") { return }
+	_, actual := render_frame(t, &f, {family = f.family})
+	render.draw_list_reset(&f.list)
+	testing.expect_value(t, render.push_layer(&f.list, {0, 0, 4096, 4096}), render.Error.None)
+	runes := [?]rune{'A', 'B', 0x6f22, 0x1f600}
+	columns := [?]int{0, 1, 2, 4}
+	for r, i in runes {
+		entry := unshaped_entry(t, &f, r)
+		if entry.size.x == 0 { continue }
+		testing.expect_value(t, render.push_glyph(&f.list, {
+			rect = {
+				math.round(f32(columns[i]) * f.metrics.cell_width + entry.offset.x),
+				math.round(f.metrics.baseline + entry.offset.y), entry.size.x, entry.size.y,
+			},
+			atlas = entry.atlas, color = {1, 1, 1, 1},
+		}), render.Error.None)
+	}
+	combined := make([dynamic]font.Shaped_Glyph, context.temp_allocator)
+	marks := [?]rune{'e', 0x301}
+	testing.expect_value(t, font.shape(f.fonts, f.family, .Regular, marks[:], SIZE_PX, &combined), font.Error.None)
+	advance: f32
+	for g in combined {
+		testing.expect_value(t, g.cluster, 0)
+		entry, result := glyphs.glyph(&f.cache, g.glyph, SIZE_PX)
+		testing.expect_value(t, result, glyphs.Result.Ok)
+		testing.expect_value(t, render.push_glyph(&f.list, {
+			rect = {
+				math.round(6 * f.metrics.cell_width + advance + g.offset.x + entry.offset.x),
+				math.round(f.metrics.baseline - g.offset.y + entry.offset.y), entry.size.x, entry.size.y,
+			},
+			atlas = entry.atlas, color = {1, 1, 1, 1},
+		}), render.Error.None)
+		advance += g.advance
+	}
+	testing.expect_value(t, render.frame_render(f.device, f.surface, &f.list, {0, 0, 0, 1}), render.Error.None)
+	expected, err := render.surface_read_pixels(f.device, f.surface, context.temp_allocator)
+	testing.expect_value(t, err, render.Error.None)
+	testing.expect(t, slice.equal(actual, expected))
+}
+
+@(test)
+paint_changes_preserve_ligatures :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, text_command("'-> ' + $e + '[31m-' + $e + '[4;44m>' + $e + '[0m'"),
+	                        "Cascadia Code")
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "-> ->") { return }
+	render_frame(t, &f, {family = f.family})
+	n := len(f.list.glyphs)
+	if !testing.expect(t, n > 0 && n % 2 == 0) { return }
+	for i in 0..<n / 2 {
+		a, b := f.list.glyphs[i], f.list.glyphs[i + n / 2]
+		testing.expect_value(t, a.atlas, b.atlas)
+		testing.expect_value(t, b.rect.x - a.rect.x, 3 * f.metrics.cell_width)
+		testing.expect_value(t, a.rect.y, b.rect.y)
+		testing.expect(t, a.color != b.color)
+	}
+	runes, columns, shaped := cap(f.view.runes), cap(f.view.columns), cap(f.view.shaped)
+	render_frame(t, &f, {family = f.family})
+	testing.expect_value(t, cap(f.view.runes), runes)
+	testing.expect_value(t, cap(f.view.columns), columns)
+	testing.expect_value(t, cap(f.view.shaped), shaped)
 }

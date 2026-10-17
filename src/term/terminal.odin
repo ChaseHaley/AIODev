@@ -84,6 +84,9 @@ Session :: struct {
 	win32_input: bool,
 	generation: u64,
 	title_changed, bell: bool,
+	program_status_changed: bool,
+	program_statuses: [PROGRAM_STATUS_LIMIT]Stored_Status,
+	program_status_count: int,
 	read_buffer: [READ_CHUNK]u8,
 }
 
@@ -133,6 +136,7 @@ destroy :: proc(s: ^Session) {
 	ghostty.key_event_free(s.key_event)
 	ghostty.key_encoder_free(s.key_encoder)
 	ghostty.terminal_free(s.terminal)
+	clear_program_status(s, false)
 	delete(s.failure, s.allocator)
 	delete(s.queue.pending)
 	free(s, s.allocator)
@@ -144,6 +148,7 @@ restart :: proc(s: ^Session, config: Config) {
 	}
 	sync.mutex_lock(&s.mutex)
 	ghostty.terminal_reset(s.terminal)
+	clear_program_status(s, false)
 	delete(s.failure, s.allocator)
 	s.failure = ""
 	s.held = false
@@ -163,6 +168,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 	bell: ghostty.Terminal_Bell_Fn = on_bell
 	title_changed: ghostty.Terminal_Title_Changed_Fn = on_title_changed
 	render_hold: ghostty.Terminal_Render_Hold_Fn = on_render_hold
+	program_status: ghostty.Terminal_Program_Status_Fn = on_program_status
+	semantic_prompt: ghostty.Terminal_Semantic_Prompt_Fn = on_semantic_prompt
 	scrollback := uint(config.scrollback_lines)
 	options := [?]struct {
 		option: ghostty.Terminal_Option,
@@ -173,6 +180,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		{.Bell, rawptr(bell)},
 		{.Title_Changed, rawptr(title_changed)},
 		{.Render_Hold, rawptr(render_hold)},
+		{.Program_Status, rawptr(program_status)},
+		{.Semantic_Prompt, rawptr(semantic_prompt)},
 		{.Scrollback_Max_Lines, &scrollback},
 	}
 	for item in options {
@@ -288,6 +297,12 @@ mark_changed :: proc(s: ^Session) {
 
 @(private)
 reader_main :: proc(s: ^Session) {
+	defer {
+		sync.mutex_lock(&s.mutex)
+		clear_program_status(s, true)
+		sync.mutex_unlock(&s.mutex)
+		notify(s)
+	}
 	for {
 		n, err := pty.read(&s.pty, s.read_buffer[:])
 		if err != .None {

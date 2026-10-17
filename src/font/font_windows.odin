@@ -18,6 +18,7 @@ System :: struct {
 	families: [dynamic]Loaded_Family,
 	cache: map[Lookup_Key]Lookup_Result,
 	gamma: Text_Gamma,
+	shaping: Shaping,
 }
 
 @(private)
@@ -88,6 +89,9 @@ system_create :: proc(allocator := context.allocator) -> (^System, Error) {
 	defer if !ok {
 		system_destroy(s)
 	}
+	if !shaping_init(&s.shaping, allocator) {
+		return nil, .Out_Of_Memory
+	}
 	if !checked(dw.create_factory(.Shared, dw.IFactory2_UUID, cast(^^windows.IUnknown)&s.factory),
 	            "DWriteCreateFactory") {
 		return nil, .DirectWrite
@@ -119,6 +123,7 @@ system_destroy :: proc(s: ^System) {
 	if s == nil {
 		return
 	}
+	shaping_destroy(&s.shaping)
 	for &face in s.faces {
 		face_destroy(&face, s.allocator)
 	}

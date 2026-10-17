@@ -38,14 +38,14 @@ source_query_interface :: proc "system" (
 	object: ^rawptr,
 ) -> windows.HRESULT {
 	if object == nil {
-		return (windows.E_POINTER - 0x1_0000_0000)
+		return failure(windows.E_POINTER)
 	}
 	object^ = nil
 	if iid == nil {
-		return (windows.E_POINTER - 0x1_0000_0000)
+		return failure(windows.E_POINTER)
 	}
 	if iid^ != windows.IUnknown_UUID^ && iid^ != ITextAnalysisSource_UUID^ {
-		return (windows.E_NOINTERFACE - 0x1_0000_0000)
+		return failure(windows.E_NOINTERFACE)
 	}
 	object^ = this
 	return windows.S_OK
@@ -69,7 +69,7 @@ source_text_at :: proc "system" (
 	length: ^u32,
 ) -> windows.HRESULT {
 	if text == nil || length == nil {
-		return (windows.E_POINTER - 0x1_0000_0000)
+		return failure(windows.E_POINTER)
 	}
 	source := cast(^Analysis_Source)this
 	text^ = nil
@@ -89,7 +89,7 @@ source_text_before :: proc "system" (
 	length: ^u32,
 ) -> windows.HRESULT {
 	if text == nil || length == nil {
-		return (windows.E_POINTER - 0x1_0000_0000)
+		return failure(windows.E_POINTER)
 	}
 	source := cast(^Analysis_Source)this
 	text^ = nil
@@ -117,13 +117,13 @@ source_locale :: proc "system" (
 	locale: ^windows.wstring,
 ) -> windows.HRESULT {
 	if length == nil || locale == nil {
-		return (windows.E_POINTER - 0x1_0000_0000)
+		return failure(windows.E_POINTER)
 	}
 	source := cast(^Analysis_Source)this
 	length^ = 0
 	locale^ = nil
 	if int(position) > len(source.text) {
-		return (windows.E_INVALIDARG - 0x1_0000_0000)
+		return failure(windows.E_INVALIDARG)
 	}
 	length^ = u32(len(source.text)) - position
 	locale^ = source.locale
@@ -138,13 +138,13 @@ source_number_substitution :: proc "system" (
 	substitution: ^^INumberSubstitution,
 ) -> windows.HRESULT {
 	if length == nil || substitution == nil {
-		return (windows.E_POINTER - 0x1_0000_0000)
+		return failure(windows.E_POINTER)
 	}
 	source := cast(^Analysis_Source)this
 	length^ = 0
 	substitution^ = nil
 	if int(position) > len(source.text) {
-		return (windows.E_INVALIDARG - 0x1_0000_0000)
+		return failure(windows.E_INVALIDARG)
 	}
 	length^ = u32(len(source.text)) - position
 	return windows.S_OK

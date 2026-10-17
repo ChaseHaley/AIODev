@@ -67,16 +67,17 @@ send_key_vt :: proc(s: ^Session, event: platform.Key_Event) -> bool {
 	sync.mutex_lock(&s.mutex)
 	n := encode_key(s, event, buffer[:])
 	sync.mutex_unlock(&s.mutex)
-	return n > 0 && send_input(s, buffer[:n])
+	return n > 0 && send_input(s, buffer[:n], len(event.text) > 0)
 }
 
-// Sends bytes the user typed or pasted; user input returns the viewport to the live screen.
 @(private)
-send_input :: proc(s: ^Session, data: []u8) -> bool {
+send_input :: proc(s: ^Session, data: []u8, carries_text: bool) -> bool {
 	if !queue_push(&s.queue, data) {
 		return false
 	}
-	scroll_to_bottom(s)
+	if carries_text && len(data) > 0 {
+		scroll_to_bottom(s)
+	}
 	return true
 }
 
@@ -115,7 +116,7 @@ paste :: proc(s: ^Session, text: string) -> bool {
 		log.errorf("term: paste encoding failed: %v", result)
 		return false
 	}
-	return send_input(s, encoded[:written])
+	return send_input(s, encoded[:written], true)
 }
 
 send_focus :: proc(s: ^Session, focused: bool) {

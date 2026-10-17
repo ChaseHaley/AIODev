@@ -2,9 +2,10 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:strings"
 import "aio:commands"
-import "aio:input"
 import "aio:platform"
+import "aio:settings"
 import "aio:term"
 import "aio:ui"
 
@@ -29,67 +30,54 @@ Action :: enum u32 {
 @(private)
 Action_Info :: struct {
 	name, title: string,
-	shortcut: Maybe(commands.Shortcut),
+	shortcuts: []commands.Shortcut,
 }
 
 @(private)
 ACTIONS :: [Action]Action_Info{
-	.Command_Palette = {"app.command_palette", "Show Command Palette", commands.Shortcut{.P, {.Control, .Shift}}},
-	.Copy = {"edit.copy", "Copy", commands.Shortcut{.C, {.Control, .Shift}}},
-	.Paste = {"edit.paste", "Paste", commands.Shortcut{.V, {.Control, .Shift}}},
-	.Select_All = {"edit.select_all", "Select All", commands.Shortcut{.A, {.Control, .Shift}}},
-	.Clear_Scrollback = {"terminal.clear_scrollback", "Clear Scrollback", commands.Shortcut{.K, {.Control, .Shift}}},
-	.Scroll_Page_Up = {"terminal.scroll_page_up", "Scroll Up One Page", commands.Shortcut{.Page_Up, {.Shift}}},
-	.Scroll_Page_Down = {"terminal.scroll_page_down", "Scroll Down One Page", commands.Shortcut{.Page_Down, {.Shift}}},
-	.Font_Size_Increase = {"view.font_size_increase", "Increase Font Size", commands.Shortcut{.Equal, {.Control}}},
-	.Font_Size_Decrease = {"view.font_size_decrease", "Decrease Font Size", commands.Shortcut{.Minus, {.Control}}},
-	.Font_Size_Reset = {"view.font_size_reset", "Reset Font Size", commands.Shortcut{.Digit_0, {.Control}}},
-	.Open_Settings = {"settings.open_file", "Open Settings File", commands.Shortcut{.Comma, {.Control}}},
+	.Command_Palette = {"app.command_palette", "Show Command Palette", {{.P, {.Control, .Shift}}}},
+	.Copy = {"edit.copy", "Copy", {{.C, {.Control, .Shift}}, {.Insert, {.Control}}}},
+	.Paste = {"edit.paste", "Paste", {{.V, {.Control, .Shift}}, {.Insert, {.Shift}}}},
+	.Select_All = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}},
+	.Clear_Scrollback = {"terminal.clear_scrollback", "Clear Scrollback", {{.K, {.Control, .Shift}}}},
+	.Scroll_Page_Up = {"terminal.scroll_page_up", "Scroll Up One Page", {{.Page_Up, {.Shift}}}},
+	.Scroll_Page_Down = {"terminal.scroll_page_down", "Scroll Down One Page", {{.Page_Down, {.Shift}}}},
+	.Font_Size_Increase = {
+		"view.font_size_increase", "Increase Font Size", {{.Equal, {.Control}}, {.Numpad_Add, {.Control}}},
+	},
+	.Font_Size_Decrease = {
+		"view.font_size_decrease", "Decrease Font Size", {{.Minus, {.Control}}, {.Numpad_Subtract, {.Control}}},
+	},
+	.Font_Size_Reset = {
+		"view.font_size_reset", "Reset Font Size", {{.Digit_0, {.Control}}, {.Numpad_0, {.Control}}},
+	},
+	.Open_Settings = {"settings.open_file", "Open Settings File", {{.Comma, {.Control}}}},
 	.Reload_Settings = {"settings.reload", "Reload Settings", nil},
 	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil},
 	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil},
 	.Quit = {"app.quit", "Quit AIODev", nil},
 }
 
-// Second bindings that WezTerm users expect alongside the primary shortcuts.
-@(private)
-ALTERNATE_SHORTCUTS :: [?]struct {
-	shortcut: commands.Shortcut,
-	action: Action,
-}{
-	{{.Insert, {.Control}}, .Copy},
-	{{.Insert, {.Shift}}, .Paste},
-	{{.Equal, {.Control, .Shift}}, .Font_Size_Increase},
-	{{.Numpad_Add, {.Control}}, .Font_Size_Increase},
-	{{.Numpad_Subtract, {.Control}}, .Font_Size_Decrease},
-	{{.Numpad_0, {.Control}}, .Font_Size_Reset},
-}
-
-register_actions :: proc(app: ^App) {
+@(require_results)
+register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 	@(static, rodata) actions := ACTIONS
 	for info, action in actions {
 		command := commands.Command{
 			id = commands.Command_Id(action),
 			name = info.name,
 			title = info.title,
-			shortcut = info.shortcut,
+			shortcuts = {count = len(info.shortcuts)},
 		}
-		if err := commands.register(&app.registry, command); err != .None {
-			log.errorf("registering %s failed: %v", info.name, err)
-		}
+		copy(command.shortcuts.items[:], info.shortcuts)
+		if err := commands.register(registry, command); err != .None { return err }
 	}
+	return .None
 }
 
 shortcut_action :: proc(app: ^App, e: platform.Key_Event) -> (Action, bool) {
 	shortcut := commands.Shortcut{e.key, e.modifiers}
 	if command := commands.find_by_shortcut(&app.registry, shortcut); command != nil {
 		return Action(command.id), true
-	}
-	ignored := input.Modifiers{.Caps_Lock, .Num_Lock, .Right_Shift, .Right_Control, .Right_Alt, .Right_Super}
-	for alternate in ALTERNATE_SHORTCUTS {
-		if alternate.shortcut.key == e.key && alternate.shortcut.modifiers == e.modifiers - ignored {
-			return alternate.action, true
-		}
 	}
 	return {}, false
 }
@@ -158,8 +146,10 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 	}
 	if !platform.clipboard_set_text(&app.platform, text) {
 		notify(app, .Error, "Could not copy to the clipboard.")
-	} else if explicit {
-		term.clear_selection(entry.session)
+	} else {
+		ui.notices_put(&app.notices, u32(Notice_Key.Copy), .Info, "Copied to clipboard", COPY_NOTICE_DURATION)
+		mark_all_dirty(app)
+		if explicit { term.clear_selection(entry.session) }
 	}
 }
 
@@ -170,5 +160,86 @@ paste_clipboard :: proc(app: ^App, entry: ^Session_Entry) {
 	}
 	if entry.status != .Running || !term.paste(entry.session, text) {
 		notify(app, .Error, "Could not paste: the shell is not accepting input.")
+	}
+}
+
+@(private)
+binding_comment :: proc(info: Action_Info) -> string {
+	labels: [commands.MAX_SHORTCUTS]string
+	for shortcut, i in info.shortcuts {
+		buffer: [128]u8
+		label, err := commands.shortcut_label(shortcut, buffer[:])
+		assert(err == .None)
+		labels[i] = fmt.tprintf("%s", label)
+	}
+	if len(info.shortcuts) == 0 { return fmt.tprintf("keys.%s =", info.name) }
+	joined := strings.join(labels[:len(info.shortcuts)], ", ", context.temp_allocator)
+	return fmt.tprintf("keys.%s = %s", info.name, joined)
+}
+
+@(private)
+binding_comments :: proc() -> [len(Action)+1]string {
+	lines: [len(Action)+1]string
+	lines[0] = "Shortcuts: uncomment a line to change it. Separate several with commas; " +
+		"leave the value empty to remove them."
+	@(static, rodata) actions := ACTIONS
+	for info, action in actions {
+		lines[int(action)+1] = binding_comment(info)
+	}
+	return lines
+}
+
+@(private)
+binding_diagnostic :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic,
+	binding: settings.Key_Binding, message: string) {
+	key := fmt.tprintf("%s%s", settings.KEY_BINDING_PREFIX, binding.name)
+	if err := settings.diagnostic_append(diagnostics, binding.line, key, message); err != nil {
+		log.errorf("recording shortcut diagnostic failed: %v", err)
+		notify(app, .Error, message)
+	}
+}
+
+@(private)
+apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
+	storage: [len(Action)][commands.MAX_SHORTCUTS]commands.Shortcut
+	overrides: [len(Action)]commands.Override
+	lines: [len(Action)]int
+	count := 0
+	for binding, i in app.settings.keys {
+		command := commands.find(&app.registry, binding.name)
+		if command == nil {
+			binding_diagnostic(app, diagnostics, binding, fmt.tprintf("unknown command \"%s\"", binding.name))
+			continue
+		}
+		n, err := commands.parse_shortcuts(binding.value, storage[count][:])
+		if err != .None {
+			message := fmt.tprintf("cannot parse shortcut \"%s\"", binding.value)
+			if err == .Output_Too_Small { message = "at most 4 shortcuts are allowed" }
+			binding_diagnostic(app, diagnostics, binding, message)
+			continue
+		}
+		overrides[count] = {command.id, storage[count][:n]}
+		lines[count] = i
+		count += 1
+	}
+	errors: [len(Action)]commands.Error
+	commands.rebind(&app.registry, overrides[:count], errors[:count])
+	for error, i in errors[:count] {
+		if error == .None { continue }
+		binding := app.settings.keys[lines[i]]
+		message := fmt.tprintf("cannot apply shortcuts for \"%s\": %v", binding.name, error)
+		if error == .Duplicate_Shortcut {
+			for shortcut in overrides[i].shortcuts {
+				other := commands.find_by_shortcut(&app.registry, shortcut)
+				if other != nil && other.id != overrides[i].id {
+					buffer: [128]u8
+					label, label_error := commands.shortcut_label(shortcut, buffer[:])
+					assert(label_error == .None)
+					message = fmt.tprintf("shortcut \"%s\" already used by %s", label, other.name)
+					break
+				}
+			}
+		}
+		binding_diagnostic(app, diagnostics, binding, message)
 	}
 }

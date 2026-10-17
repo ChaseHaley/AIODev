@@ -21,6 +21,13 @@ Glyph :: struct {
 	scale, advance_em: f32,
 }
 
+Shaped_Glyph :: struct {
+	glyph: Glyph,
+	cluster: int,
+	advance: f32,
+	offset: [2]f32,
+}
+
 Face_Metrics :: struct {
 	ascent, descent, line_gap: f32,
 	underline_position, underline_thickness: f32,

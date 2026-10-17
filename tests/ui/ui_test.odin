@@ -15,7 +15,7 @@ registry_create :: proc(t: ^testing.T) -> commands.Registry {
 		{id = 1, name = "app.quit", title = "Quit AIODev"},
 		{id = 2, name = "terminal.restart_shell", title = "Restart Shell"},
 		{id = 3, name = "settings.reload", title = "Reload Settings"},
-		{id = 4, name = "edit.copy", title = "Copy", shortcut = commands.Shortcut{.C, {.Control, .Shift}}},
+		{id = 4, name = "edit.copy", title = "Copy", shortcuts = {{0 = {.C, {.Control, .Shift}}}, 1}},
 	}
 	for item in items {
 		testing.expect_value(t, commands.register(&r, item), commands.Error.None)
