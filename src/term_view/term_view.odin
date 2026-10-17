@@ -131,8 +131,6 @@ Builder :: struct {
 	colors: ghostty.Render_State_Colors,
 	cursor: ghostty.Render_State_Cursor,
 	origin: [2]f32,
-	bounds: render.Rect,
-	row_count: u16,
 	ok: bool,
 }
 
@@ -181,13 +179,11 @@ build :: proc(
 		colors = ghostty.sized(ghostty.Render_State_Colors),
 		cursor = ghostty.sized(ghostty.Render_State_Cursor),
 		origin = origin,
-		bounds = list.layers[len(list.layers)-1].clip,
 		ok = true,
 	}
 	ok := ghostty.render_state_get(v.state, .Colors, &b.colors) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Cursor, &b.cursor) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Row_Iterator, &v.rows) == .Success
-	ok &&= ghostty.render_state_get(v.state, .Rows, &b.row_count) == .Success
 	if !ok {
 		log.error("term_view: reading the render state failed")
 		return {}, .Ok
@@ -214,7 +210,6 @@ build :: proc(
 @(private)
 Cell_Paint :: struct {
 	foreground, background: render.Color,
-	padding_background: render.Color,
 	has_background: bool,
 	style: ghostty.Style,
 }
@@ -245,7 +240,6 @@ paint_cell :: proc(
 		background := p.has_background ? p.background : color(b.colors.background)
 		p.foreground, p.background, p.has_background = background, p.foreground, true
 	}
-	p.padding_background = p.has_background ? p.background : color(b.colors.background)
 	if selected && x >= int(selection.start_x) && x <= int(selection.end_x) {
 		p.background, p.has_background = b.style.selection_background, true
 		if fg, ok := b.style.selection_foreground.?; ok {
@@ -269,45 +263,6 @@ block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 }
 
 @(private)
-padding_rect :: proc(b: ^Builder, r: render.Rect, c: render.Color) {
-	if r.width > 0 && r.height > 0 { rect(b, r, c) }
-}
-
-@(private)
-build_padding :: proc(b: ^Builder, paints: []Cell_Paint, y: int) {
-	if len(paints) == 0 { return }
-	top := b.origin.y + f32(y) * b.metrics.cell_height
-	bottom := top + b.metrics.cell_height
-	first, last := y == 0, y == int(b.row_count)-1
-	padded_top := first ? b.bounds.y : top
-	padded_bottom := last ? b.bounds.y + b.bounds.height : bottom
-	right := b.origin.x + f32(len(paints)) * b.metrics.cell_width
-	padding_rect(b, {b.bounds.x, padded_top, b.origin.x-b.bounds.x, padded_bottom-padded_top},
-		paints[0].padding_background)
-	padding_rect(b, {right, padded_top, b.bounds.x+b.bounds.width-right, padded_bottom-padded_top},
-		paints[len(paints)-1].padding_background)
-	if !first && !last { return }
-	flush :: proc(b: ^Builder, start, end, y: int, c: render.Color) {
-		x := b.origin.x + f32(start) * b.metrics.cell_width
-		width := f32(end-start) * b.metrics.cell_width
-		if y == 0 {
-			padding_rect(b, {x, b.bounds.y, width, b.origin.y-b.bounds.y}, c)
-		}
-		if y == int(b.row_count)-1 {
-			bottom := b.origin.y + f32(b.row_count) * b.metrics.cell_height
-			padding_rect(b, {x, bottom, width, b.bounds.y+b.bounds.height-bottom}, c)
-		}
-	}
-	start := 0
-	for x := 1; x < len(paints); x += 1 {
-		if paints[x].padding_background == paints[start].padding_background { continue }
-		flush(b, start, x, y, paints[start].padding_background)
-		start = x
-	}
-	flush(b, start, len(paints), y, paints[start].padding_background)
-}
-
-@(private)
 build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	m := b.metrics
 	top := b.origin.y + f32(y) * m.cell_height
@@ -324,7 +279,6 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 			return .Ok
 		}
 	}
-	build_padding(b, v.paints[:], y)
 	run_start, run_color, run_active := 0, render.Color{}, false
 	flush :: proc(b: ^Builder, start, end: int, top: f32, c: render.Color) {
 		m := b.metrics
