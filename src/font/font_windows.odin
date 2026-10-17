@@ -348,14 +348,7 @@ glyph_lookup :: proc(s: ^System, family: Family, style: Style, r: rune) -> (Glyp
 	if cached, ok := s.cache[key]; ok {
 		return cached.glyph, cached.found
 	}
-	name: windows.wstring
-	for loaded in s.families {
-		if loaded.value == family {
-			name = loaded.name
-			break
-		}
-	}
-	assert(name != nil)
+	name := family_name(s, family)
 	// Reserve below half full so the insertion cannot allocate after DirectWrite succeeds.
 	if reserve(&s.cache, (len(s.cache) + 1) * 2) != nil {
 		return {}, false
@@ -488,4 +481,15 @@ glyph_rasterize :: proc(
 text_gamma :: proc(s: ^System) -> Text_Gamma {
 	assert(s != nil)
 	return s.gamma
+}
+
+// The name a family was loaded by, which DirectWrite fallback uses as the base family.
+@(private)
+family_name :: proc(s: ^System, family: Family) -> windows.wstring {
+	for loaded in s.families {
+		if loaded.value == family {
+			return loaded.name
+		}
+	}
+	panic("font: family was not loaded by this system")
 }

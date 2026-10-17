@@ -413,7 +413,7 @@ cell_face :: proc(p: Cell_Paint) -> font.Style {
 draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
 	if len(v.runes) == 0 { return .Ok }
 	clear(&v.shaped)
-	if err := font.shape(b.fonts, b.style.family, face, v.runes[:], b.metrics.size_px, &v.shaped);
+	if err := font.shape(b.fonts, b.style.family, face, v.runes[:], b.metrics.size_px, &v.shaped, v.columns[:]);
 	   err != .None {
 		log.errorf("term_view: shaping failed: %v", err)
 		return draw_codepoints(v, b, face, top)

@@ -809,8 +809,30 @@ Glyph_Run_Description :: struct {
 
 IColorGlyphRunEnumerator :: struct #raw_union {
 	#subtype iunknown: windows.IUnknown,
-	using vtable: ^windows.IUnknown_VTable,
+	using vtable: ^IColorGlyphRunEnumerator_VTable,
 }
+IColorGlyphRunEnumerator_VTable :: struct {
+	using iunknown_vtable: windows.IUnknown_VTable,
+	MoveNext: proc "system" (this: ^IColorGlyphRunEnumerator, hasRun: ^windows.BOOL) -> windows.HRESULT,
+	GetCurrentRun: proc "system" (this: ^IColorGlyphRunEnumerator, colorGlyphRun: ^^Color_Glyph_Run) -> windows.HRESULT,
+}
+
+Color_F :: struct {
+	r, g, b, a: f32,
+}
+
+Color_Glyph_Run :: struct {
+	glyphRun: Glyph_Run,
+	glyphRunDescription: ^Glyph_Run_Description,
+	baselineOriginX: f32,
+	baselineOriginY: f32,
+	runColor: Color_F,
+	// 0xFFFF means the layer uses the text color.
+	paletteIndex: u16,
+}
+
+// TranslateColorGlyphRun result for a run without color glyphs.
+E_NOCOLOR :: windows.HRESULT(-2003283956) // 0x8898500C
 
 Grid_Fit_Mode :: enum i32 {
 	Default,
