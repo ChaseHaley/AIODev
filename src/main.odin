@@ -71,7 +71,7 @@ start :: proc() -> int {
 		app.platform_ready = true
 	}
 	log_error: os.Error
-	logger.file, log_error = file_logger_create(options, level)
+	logger.file, app.log_path, log_error = file_logger_create(options, level)
 	if log_error != nil {
 		log.errorf("opening the log file failed: %v", log_error)
 	}
@@ -81,23 +81,23 @@ start :: proc() -> int {
 }
 
 @(private, require_results)
-file_logger_create :: proc(options: instance.Options, level: log.Level) -> (log.Logger, os.Error) {
+file_logger_create :: proc(options: instance.Options, level: log.Level) -> (log.Logger, string, os.Error) {
 	root := options.data_dir
 	if root == "" {
 		base, found := os.lookup_env("LOCALAPPDATA", context.temp_allocator)
-		if !found { return {}, os.General_Error.Env_Var_Not_Found }
+		if !found { return {}, "", os.General_Error.Env_Var_Not_Found }
 		path, err := filepath.join({base, instance.APP_NAME}, context.temp_allocator)
-		if err != nil { return {}, err }
+		if err != nil { return {}, "", err }
 		root = path
 	}
 	directory, directory_error := filepath.join({root, "logs"}, context.temp_allocator)
-	if directory_error != nil { return {}, directory_error }
-	if err := os.mkdir_all(directory); err != nil { return {}, err }
+	if directory_error != nil { return {}, "", directory_error }
+	if err := os.mkdir_all(directory); err != nil { return {}, "", err }
 	name, name_error := instance.log_file_name(options, context.temp_allocator)
-	if name_error != nil { return {}, name_error }
-	path, path_error := filepath.join({directory, name}, context.temp_allocator)
-	if path_error != nil { return {}, path_error }
+	if name_error != nil { return {}, "", name_error }
+	path, path_error := filepath.join({directory, name})
+	if path_error != nil { return {}, "", path_error }
 	file, err := os.open(path, os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
-	if err != nil { return {}, err }
-	return log.create_file_logger(file, level), nil
+	if err != nil { return {}, path, err }
+	return log.create_file_logger(file, level), path, nil
 }

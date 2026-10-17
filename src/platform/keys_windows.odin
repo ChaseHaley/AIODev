@@ -1,13 +1,107 @@
 package platform
 
 import "aio:input"
+import "core:log"
 import w "core:sys/windows"
+import "core:unicode/utf16"
+import "core:unicode/utf8"
 
 Native_Key :: struct {
 	vk, scan_code: u16,
 	char: u16,
 	control_key_state: u32,
 	repeat_count: u16,
+}
+
+@(require_results)
+synthesize_key :: proc(
+	window: Window_Id, key: input.Key, modifiers: input.Modifiers, pressed: bool, buffer: []u8,
+) -> (Key_Event, Error) {
+	scan, extended, mapped := scan_code_from_key(key)
+	if !mapped { return {}, .Invalid_Argument }
+	vk := w.MapVirtualKeyW(u32(scan) | (extended ? 0xe000 : 0), w.MAPVK_VSC_TO_VK_EX)
+	if vk == 0 {
+		log.errorf("MapVirtualKeyW failed for %v: %v", key, w.GetLastError())
+		return {}, .Os
+	}
+	#partial switch key {
+	case .Shift_Left, .Shift_Right: vk = w.VK_SHIFT
+	case .Control_Left, .Control_Right: vk = w.VK_CONTROL
+	case .Alt_Left, .Alt_Right: vk = w.VK_MENU
+	}
+	// MapVirtualKey does not apply Num Lock to keypad navigation scan codes.
+	if .Num_Lock in modifiers && .Shift not_in modifiers {
+		#partial switch key {
+		case .Numpad_0: vk = w.VK_NUMPAD0
+		case .Numpad_1: vk = w.VK_NUMPAD1
+		case .Numpad_2: vk = w.VK_NUMPAD2
+		case .Numpad_3: vk = w.VK_NUMPAD3
+		case .Numpad_4: vk = w.VK_NUMPAD4
+		case .Numpad_5: vk = w.VK_NUMPAD5
+		case .Numpad_6: vk = w.VK_NUMPAD6
+		case .Numpad_7: vk = w.VK_NUMPAD7
+		case .Numpad_8: vk = w.VK_NUMPAD8
+		case .Numpad_9: vk = w.VK_NUMPAD9
+		case .Numpad_Decimal: vk = w.VK_DECIMAL
+		}
+	}
+	state: [256]u8
+	Modifier_Key :: struct { modifier, right: input.Modifier, generic, left_vk, right_vk: int }
+	keys := [?]Modifier_Key{
+		{.Shift, .Right_Shift, w.VK_SHIFT, w.VK_LSHIFT, w.VK_RSHIFT},
+		{.Control, .Right_Control, w.VK_CONTROL, w.VK_LCONTROL, w.VK_RCONTROL},
+		{.Alt, .Right_Alt, w.VK_MENU, w.VK_LMENU, w.VK_RMENU},
+		{.Super, .Right_Super, 0, w.VK_LWIN, w.VK_RWIN},
+	}
+	for k in keys {
+		if k.modifier in modifiers {
+			state[k.right in modifiers ? k.right_vk : k.left_vk] = 128
+			if k.generic != 0 { state[k.generic] = 128 }
+		}
+	}
+	if .Caps_Lock in modifiers { state[w.VK_CAPITAL] = 1 }
+	if .Num_Lock in modifiers { state[w.VK_NUMLOCK] = 1 }
+	e := Key_Event{window = window, key = key, modifiers = modifiers, pressed = pressed,
+		native = {vk = u16(vk), scan_code = scan, repeat_count = 1,
+			control_key_state = control_key_state(state, extended)}}
+	if !pressed { return e, .None }
+	layout := GetKeyboardLayout(0)
+	if layout == nil {
+		log.errorf("GetKeyboardLayout failed: %v", w.GetLastError())
+		return {}, .Os
+	}
+	empty: [256]u8
+	units: [8]u16
+	n := ToUnicodeEx(vk, u32(scan), cast(^w.BYTE)&empty[0], &units[0], i32(len(units)),
+		TO_UNICODE_NO_STATE_CHANGE, layout)
+	if n > 0 {
+		e.unshifted = rune(units[0])
+		if n >= 2 && utf16.is_surrogate(e.unshifted) {
+			e.unshifted = utf16.decode_surrogate_pair(rune(units[0]), rune(units[1]))
+		}
+	}
+	n = ToUnicodeEx(vk, u32(scan), cast(^w.BYTE)&state[0], &units[0], i32(len(units)),
+		TO_UNICODE_NO_STATE_CHANGE, layout)
+	if n <= 0 { return e, .None }
+	e.native.char = units[0]
+	at := 0
+	for i := 0; i < int(n); i += 1 {
+		r := rune(units[i])
+		if utf16.is_surrogate(r) {
+			if i+1 < int(n) && units[i] >= 0xd800 && units[i] <= 0xdbff &&
+			   units[i+1] >= 0xdc00 && units[i+1] <= 0xdfff {
+				r = utf16.decode_surrogate_pair(r, rune(units[i+1]))
+				i += 1
+			} else {
+				r = '\ufffd'
+			}
+		}
+		bytes, size := utf8.encode_rune(r)
+		if size > len(buffer)-at { return {}, .Invalid_Argument }
+		at += copy(buffer[at:], bytes[:size])
+	}
+	e.text = string(buffer[:at])
+	return e, .None
 }
 
 @(private)

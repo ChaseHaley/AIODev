@@ -75,7 +75,7 @@ switch ($Task) {
         # Literal single quotes keep a numeric Git hash a string in Odin.
         Invoke-Odin build src '-out:build/aiodev-verify.exe' -debug '-subsystem:console' `
             '-define:AIO_CONTROL=true' "-define:AIO_BUILD_ID='$buildId'" `
-            -ignore-unused-defineables @flags @resource
+            @flags @resource
         foreach ($name in $toolPackages) {
             Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
         }
@@ -93,7 +93,7 @@ switch ($Task) {
         if (Get-ChildItem src -Filter *.odin -File) {
             Invoke-Odin check src @flags
             Invoke-Odin check src @appFlags
-            Invoke-Odin check src '-define:AIO_CONTROL=true' -ignore-unused-defineables @appFlags
+            Invoke-Odin check src '-define:AIO_CONTROL=true' @appFlags
         }
         foreach ($name in $toolPackages) {
             Invoke-Odin check "tools/$name" @flags

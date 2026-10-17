@@ -26,6 +26,14 @@ valid_size :: proc(width, height: i32) -> bool {
 }
 
 @(require_results)
+surface_present_count :: proc(s: ^Surface) -> (u32, Error) {
+	if s == nil || s.chain == nil { return 0, .Invalid_Argument }
+	count: u32
+	err := checked(s.owner, s.chain->GetLastPresentCount(&count), "GetLastPresentCount", .Surface_Failed)
+	return count, err
+}
+
+@(require_results)
 surface_create_offscreen :: proc(d: ^Device, width, height: i32) -> (^Surface, Error) {
 	return surface_create(d, nil, width, height)
 }

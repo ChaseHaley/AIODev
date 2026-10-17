@@ -618,6 +618,33 @@ window_client_size :: proc(p: ^Platform, id: Window_Id) -> (width, height: i32, 
 	if !os_ok(w.GetClientRect(window.hwnd, &rect), "GetClientRect") { return 0, 0, .Os }
 	return rect.right, rect.bottom, .None
 }
+@(require_results)
+window_set_client_size :: proc(p: ^Platform, id: Window_Id, width, height: i32) -> Error {
+	window := find_window(p, id)
+	if window == nil { return .Invalid_Window }
+	if width <= 0 || height <= 0 || width > 32767 || height > 32767 { return .Invalid_Argument }
+	dpi := window_dpi(p, id)
+	if dpi == 0 { return .Os }
+	w.SetLastError(0)
+	style := w.GetWindowLongW(window.hwnd, w.GWL_STYLE)
+	if style == 0 && w.GetLastError() != 0 {
+		log.errorf("GetWindowLongW(style) failed: %v", w.GetLastError())
+		return .Os
+	}
+	w.SetLastError(0)
+	ex_style := w.GetWindowLongW(window.hwnd, w.GWL_EXSTYLE)
+	if ex_style == 0 && w.GetLastError() != 0 {
+		log.errorf("GetWindowLongW(exstyle) failed: %v", w.GetLastError())
+		return .Os
+	}
+	rect := w.RECT{right = width, bottom = height}
+	if !os_ok(w.AdjustWindowRectExForDpi(&rect, u32(style), false,
+		u32(ex_style), dpi), "AdjustWindowRectExForDpi") { return .Os }
+	flags := u32(w.SWP_NOMOVE | w.SWP_NOZORDER | w.SWP_NOACTIVATE)
+	if !os_ok(w.SetWindowPos(window.hwnd, nil, 0, 0, rect.right-rect.left,
+		rect.bottom-rect.top, flags), "SetWindowPos(client size)") { return .Os }
+	return .None
+}
 
 window_dpi :: proc(p: ^Platform, id: Window_Id) -> u32 {
 	window := find_window(p, id)

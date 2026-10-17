@@ -40,12 +40,14 @@ Session_Entry :: struct {
 }
 
 App :: struct {
+	verify: Verify,
 	options: instance.Options,
 	app_id: string,
 	platform: platform.Platform,
 	platform_ready: bool,
 	settings: settings.Settings,
 	settings_path: string,
+	log_path: string,
 	fonts: ^font.System,
 	family: font.Family,
 	font_points: f32,
@@ -127,11 +129,13 @@ app_init :: proc(app: ^App) -> bool {
 	if !window_open(app) {
 		return false
 	}
+	verify_start(app)
 	app.running = true
 	return true
 }
 
 app_destroy :: proc(app: ^App) {
+	verify_destroy(app)
 	for len(app.windows) > 0 {
 		window_close(app, app.windows[len(app.windows) - 1])
 	}
@@ -157,6 +161,7 @@ app_destroy :: proc(app: ^App) {
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
 	delete(app.settings_path)
+	delete(app.log_path)
 	delete(app.app_id)
 	if app.platform_ready {
 		if platform.destroy(&app.platform) != .None {
@@ -191,8 +196,10 @@ tick :: proc(app: ^App) {
 		update_blink(window)
 		if window.dirty {
 			window_render(app, window)
+			verify_presented(app, window)
 		}
 	}
+	verify_tick(app)
 	free_all(context.temp_allocator)
 }
 
@@ -200,6 +207,9 @@ tick :: proc(app: ^App) {
 wait_timeout :: proc(app: ^App) -> u32 {
 	INFINITE :: max(u32)
 	deadline, found := ui.notices_deadline(&app.notices)
+	if next, pending := verify_deadline(app); pending && (!found || time.tick_diff(next, deadline) > 0) {
+		deadline, found = next, true
+	}
 	for window in app.windows {
 		if window.blinking && (!found || time.tick_diff(window.blink_deadline, deadline) > 0) {
 			deadline, found = window.blink_deadline, true
