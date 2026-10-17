@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('debug', 'release', 'run', 'test', 'check', 'verify')]
+    [ValidateSet('debug', 'release', 'package', 'run', 'test', 'check', 'verify')]
     [string] $Task = 'debug',
 
     [Parameter(Position = 1)]
@@ -46,8 +46,13 @@ if (Test-Path 'assets/aiodev.rc') { $resource = @('-resource:assets/aiodev.rc') 
 
 New-Item -ItemType Directory -Force build | Out-Null
 
-function Build-App([string[]] $Mode) {
-    Invoke-Odin build src '-out:build/aiodev.exe' @Mode @flags @resource
+function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
+    Invoke-Odin build src "-out:$Output" @Mode @flags @resource
+}
+
+function Build-Release {
+    New-Item -ItemType Directory -Force build/release | Out-Null
+    Build-App @('-o:speed', '-subsystem:windows') 'build/release/aiodev.exe'
 }
 
 function Get-BuildId {
@@ -81,7 +86,22 @@ switch ($Task) {
         }
     }
     'debug' { Build-App @('-debug', '-subsystem:console') }
-    'release' { Build-App @('-o:speed', '-subsystem:windows') }
+    'release' { Build-Release }
+    'package' {
+        Build-Release
+        $buildId = Get-BuildId
+        $stage = 'build/package/AIODev'
+        New-Item -ItemType Directory -Force $stage | Out-Null
+        Copy-Item -LiteralPath 'build/release/aiodev.exe' -Destination "$stage/aiodev.exe"
+        Copy-Item -LiteralPath 'tools/install.ps1' -Destination "$stage/install.ps1"
+        Copy-Item -LiteralPath 'vendor/ghostty/LICENSE' -Destination "$stage/Ghostty-LICENSE.txt"
+        [IO.File]::WriteAllText((Join-Path $PWD "$stage/build.txt"), "$buildId`r`n")
+        $archive = "build/AIODev-$buildId-windows-x64.zip"
+        Compress-Archive -LiteralPath $stage -DestinationPath $archive -Force
+        $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        [IO.File]::WriteAllText((Join-Path $PWD "$archive.sha256"), "$hash  $(Split-Path $archive -Leaf)`r`n")
+        Write-Output "Package: $archive"
+    }
     'run' {
         Build-App @('-debug', '-subsystem:console')
         & build/aiodev.exe

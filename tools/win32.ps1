@@ -60,7 +60,15 @@ try {
     try {
         $null = $process.Handle
         if ($process.HasExited) { throw 'recorded process exited; run aioctl launch' }
-        Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+        $assemblies = @('System.Drawing')
+        if ($PSVersionTable.PSEdition -eq 'Core') {
+            $assemblies += 'Microsoft.Win32.Primitives', 'System.Drawing.Primitives', 'System.Drawing.Common'
+            foreach ($assemblyName in @('System.Private.Windows.GdiPlus.dll', 'System.Private.Windows.Core.dll')) {
+                $assemblyPath = Join-Path $PSHOME $assemblyName
+                if (Test-Path -LiteralPath $assemblyPath) { $assemblies += $assemblyPath }
+            }
+        }
+        Add-Type -ReferencedAssemblies $assemblies -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Drawing;

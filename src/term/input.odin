@@ -29,7 +29,7 @@ ghostty_mods :: proc(modifiers: input.Modifiers) -> ghostty.Mods {
 @(private)
 consumed_mods :: proc(event: platform.Key_Event) -> ghostty.Mods {
 	consumed: ghostty.Mods
-	if len(event.text) == 0 {
+	if len(event.text) == 0 || event.text[0] < 0x20 || event.text[0] == 0x7f {
 		return consumed
 	}
 	if .Shift in event.modifiers {
