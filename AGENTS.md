@@ -6,11 +6,11 @@ Vault root: `C:\Users\chale\Obsidian Vaults\Main\Main`
 
 Before project work, read these files from the vault:
 
-- `AIODev/AIODev.md` — project home and current position.
-- `AIODev/System/Organization.md` — note types, statuses, linking, and maintenance.
-- `AIODev/System/Idea capture.md` — required conversational idea capture procedure.
-- `AIODev/Work/Work.md` — work dashboard; follow links to relevant individual records.
-- `AIODev/Engineering Standards.md` — follow its links to applicable engineering rules.
+- `AIODev/AIODev.md`: project home and current position.
+- `AIODev/System/Organization.md`: note types, statuses, linking, and maintenance.
+- `AIODev/System/Idea capture.md`: required conversational idea capture procedure.
+- `AIODev/Work/Work.md`: work dashboard; follow links to relevant individual records.
+- `AIODev/Engineering Standards.md`: follow its links to applicable engineering rules.
 
 When the owner expresses an actionable idea, wish, improvement, or deferred request,
 catalogue it in the vault during that turn. Search existing work first. Extend a
@@ -29,6 +29,12 @@ Work items own status, dependencies, progress, and evidence. Update item propert
 dated progress, and evidence when status changes; maintain narrative navigation as
 needed. Link exact note sections and
 decision records. Keep accepted decisions and historical evidence intact.
+
+Use ID-only work and decision filenames, such as WORK-029.md and D-032.md. Store
+readable titles in the title property and heading, using a colon after the ID.
+Use short phrases for other filenames; do not use em or en dash separators. Validate
+links using Obsidian's trimmed targets, require nonempty destination notes, and check
+section headings. Never allow trailing spaces or periods in filename stems.
 
 Commit completed, validated source work automatically using Conventional Commits.
 All project Markdown belongs in the vault; AGENTS.md and CLAUDE.md are the narrow
