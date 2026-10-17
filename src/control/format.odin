@@ -1,0 +1,556 @@
+package control
+
+import "core:fmt"
+import "core:strings"
+import "aio:term"
+
+Error :: enum { None, Out_Of_Memory, Invalid_Argument, Protocol, Timeout, Closed, System }
+State_Entry :: struct { key, value: string }
+
+@(private)
+Writer :: struct { out: ^strings.Builder, error: Error }
+
+@(private)
+put :: proc(w: ^Writer, s: string) {
+	if w.error != .None { return }
+	if _, err := append(&w.out.buf, ..transmute([]u8)s); err != nil {
+		w.error = .Out_Of_Memory
+	}
+}
+
+@(private)
+integer :: proc(w: ^Writer, n: int) {
+	buffer: [32]u8
+	put(w, fmt.bprintf(buffer[:], "%d", n))
+}
+
+@(private)
+quoted :: proc(w: ^Writer, s: string) {
+	put(w, "\"")
+	escaped(w, s)
+	put(w, "\"")
+}
+
+@(private)
+escaped :: proc(w: ^Writer, s: string) {
+	for i := 0; i < len(s); i += 1 {
+		c := s[i]
+		switch {
+		case c == '"':
+			put(w, "\\\"")
+		case c == '\\':
+			put(w, "\\\\")
+		case c < 32 || c == 127:
+			buffer: [4]u8
+			put(w, fmt.bprintf(buffer[:], "\\x%02x", c))
+		case:
+			put(w, s[i:i+1])
+		}
+	}
+}
+
+@(private)
+span :: proc(w: ^Writer, first, last: int) {
+	integer(w, first)
+	if first != last {
+		put(w, "-")
+		integer(w, last)
+	}
+}
+
+@(private)
+bounds :: proc(r: Range, size: int) -> (int, int, bool) {
+	if !r.specified { return 0, size-1, size > 0 }
+	return r.first, r.last, r.first >= 0 && r.last >= r.first && r.last < size
+}
+
+@(private)
+cursor :: proc(w: ^Writer, s: ^term.Snapshot) {
+	put(w, "cursor ")
+	if !s.cursor.viewport_has_value {
+		put(w, "off-screen")
+		return
+	}
+	integer(w, int(s.cursor.viewport_x))
+	put(w, ",")
+	integer(w, int(s.cursor.viewport_y))
+	if !s.cursor.visible {
+		put(w, " hidden")
+	}
+	if s.cursor.blinking {
+		put(w, " blinking")
+	}
+}
+
+@(require_results)
+format_screen :: proc(out: ^strings.Builder, s: ^term.Snapshot, rows := Range{
+} ) -> Error {
+	if s == nil { return .Invalid_Argument }
+	first, last, ok := bounds(rows, int(s.rows))
+	if !ok { return .Invalid_Argument }
+	w := Writer{out = out}
+	put(&w, "screen ")
+	integer(&w, int(s.columns))
+	put(&w, "x")
+	integer(&w, int(s.rows))
+	put(&w, " ")
+	cursor(&w, s)
+	put(&w, "\n")
+	width := 1
+	for n := last; n >= 10; n /= 10 {
+		width += 1
+	}
+	blank := -1
+	for row in first..=last {
+		text, err := term.row_text(s, row, out.buf.allocator)
+		if err != .None { return .Out_Of_Memory }
+		if text == "" {
+			if blank < 0 {
+				blank = row
+			}
+		} else {
+			if blank >= 0 {
+				span(&w, blank, row-1)
+				put(&w, " blank\n")
+				blank = -1
+			}
+			buffer: [32]u8
+			label := fmt.bprintf(buffer[:], "%d", row)
+			for _ in len(label)..<width {
+				put(&w, " ")
+			}
+			put(&w, label)
+			put(&w, "|")
+			put(&w, text)
+			put(&w, "\n")
+		}
+		delete(text, out.buf.allocator)
+	}
+	if blank >= 0 {
+		span(&w, blank, last)
+		put(&w, " blank\n")
+	}
+	return w.error
+}
+
+@(private)
+Attributes :: struct {
+	fg, bg, underline_color: Maybe(term.Color),
+	flags: bit_set[Attribute_Flag],
+	underline: i32,
+}
+
+@(private)
+Attribute_Flag :: enum {
+	Bold,
+	Italic,
+	Faint,
+	Blink,
+	Inverse,
+	Invisible,
+	Strike,
+	Overline,
+	Selected,
+	Wide,
+}
+
+@(private)
+FLAG_NAMES :: [Attribute_Flag]string{
+	.Bold = "bold",
+	.Italic = "italic",
+	.Faint = "faint",
+	.Blink = "blink",
+	.Inverse = "inverse",
+	.Invisible = "invisible",
+	.Strike = "strike",
+	.Overline = "overline",
+	.Selected = "selected",
+	.Wide = "wide",
+}
+@(private)
+UNDERLINES :: [?]string{"none", "single", "double", "curly", "dotted", "dashed"}
+
+@(private)
+attributes :: proc(s: ^term.Snapshot, c: ^term.Snapshot_Cell) -> Attributes {
+	a := Attributes{fg = c.foreground, bg = c.background, underline = c.style.underline}
+	v := c.style
+	if v.bold {
+		a.flags += {.Bold}
+	}
+	if v.italic {
+		a.flags += {.Italic}
+	}
+	if v.faint {
+		a.flags += {.Faint}
+	}
+	if v.blink {
+		a.flags += {.Blink}
+	}
+	if v.inverse {
+		a.flags += {.Inverse}
+	}
+	if v.invisible {
+		a.flags += {.Invisible}
+	}
+	if v.strikethrough {
+		a.flags += {.Strike}
+	}
+	if v.overline {
+		a.flags += {.Overline}
+	}
+	if c.selected {
+		a.flags += {.Selected}
+	}
+	if c.width == .Wide || c.width == .Spacer_Tail {
+		a.flags += {.Wide}
+	}
+	switch v.underline_color.tag {
+	case .None:
+	case .Palette:
+		a.underline_color = s.palette[v.underline_color.value.palette]
+	case .Rgb:
+		rgb := v.underline_color.value.rgb
+		a.underline_color = term.Color{rgb.r, rgb.g, rgb.b}
+	}
+	return a
+}
+
+@(private)
+attributes_at :: proc(s: ^term.Snapshot, column, row: int) -> Attributes {
+	c := term.snapshot_cell(s, column, row)
+	// libghostty can mark only the leading half selected; a wide glyph is one output run.
+	if c.width == .Spacer_Tail && column > 0 {
+		previous := term.snapshot_cell(s, column-1, row)
+		if previous.width == .Wide {
+			c = previous
+		}
+	}
+	return attributes(s, c)
+}
+
+@(private)
+color_text :: proc(c: Maybe(term.Color), buffer: []u8) -> string {
+	if rgb, ok := c.?; ok { return fmt.bprintf(buffer, "#%02x%02x%02x", rgb[0], rgb[1], rgb[2]) }
+	return "default"
+}
+
+@(private)
+attribute_text :: proc(w: ^Writer, a: Attributes) {
+	@(static, rodata) names := FLAG_NAMES
+	@(static, rodata) underlines := UNDERLINES
+	buffer: [16]u8
+	if a.fg != nil {
+		put(w, " fg=")
+		put(w, color_text(a.fg, buffer[:]))
+	}
+	if a.bg != nil {
+		put(w, " bg=")
+		put(w, color_text(a.bg, buffer[:]))
+	}
+	for flag in Attribute_Flag.Bold..=Attribute_Flag.Overline {
+		if flag in a.flags {
+			put(w, " ")
+			put(w, names[flag])
+		}
+	}
+	if a.underline > 0 && a.underline < len(UNDERLINES) {
+		put(w, " underline=")
+		put(w, underlines[a.underline])
+	}
+	if a.underline_color != nil {
+		put(w, " underline-color=")
+		put(w, color_text(a.underline_color, buffer[:]))
+	}
+	if .Selected in a.flags {
+		put(w, " ")
+		put(w, names[.Selected])
+	}
+	if .Wide in a.flags {
+		put(w, " ")
+		put(w, names[.Wide])
+	}
+}
+
+@(private)
+cell_text :: proc(w: ^Writer, cells: []term.Snapshot_Cell) {
+	put(w, "\"")
+	for c in cells {
+		if c.width == .Spacer_Head || c.width == .Spacer_Tail {
+			continue
+		}
+		text := c.text == "" ? " " : c.text
+		escaped(w, text)
+	}
+	put(w, "\"")
+}
+
+@(require_results)
+format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -> Error {
+	if s == nil { return .Invalid_Argument }
+	first, last, ok := bounds(request.columns, int(s.columns))
+	if !ok || request.row < 0 || request.row >= int(s.rows) { return .Invalid_Argument }
+	w := Writer{out = out}
+	put(&w, "row ")
+	integer(&w, request.row)
+	put(&w, " cols ")
+	integer(&w, first)
+	put(&w, "-")
+	integer(&w, last)
+	put(&w, "\n")
+	row := s.cells[request.row*int(s.columns):(request.row+1)*int(s.columns)]
+	text_last := last
+	for text_last >= first {
+		c := &row[text_last]
+		if (c.text != "" && c.text != " ") || attributes_at(s, text_last, request.row) != (Attributes{}) {
+			break
+		}
+		text_last -= 1
+	}
+	for start := first; start <= last; {
+		if start > text_last {
+			span(&w, start, last)
+			put(&w, " blank\n")
+			break
+		}
+		a := attributes_at(s, start, request.row)
+		end := start
+		for end < text_last && attributes_at(s, end+1, request.row) == a {
+			end += 1
+		}
+		span(&w, start, end)
+		put(&w, " ")
+		cell_text(&w, row[start:end+1])
+		attribute_text(&w, a)
+		put(&w, "\n")
+		start = end+1
+	}
+	return w.error
+}
+
+@(private)
+value_text :: proc(w: ^Writer, value: string) {
+	quote := value == ""
+	for c in transmute([]u8)value {
+		quote ||= c == ' ' || c == '"' || c < 32 || c == 127
+	}
+	if !quote {
+		put(w, value)
+		return
+	}
+	put(w, "\"")
+	for i in 0..<len(value) {
+		c := value[i]
+		if c == '"' {
+			put(w, "\\\"")
+		} else if c < 32 || c == 127 {
+			buffer: [4]u8
+			put(w, fmt.bprintf(buffer[:], "\\x%02x", c))
+		} else {
+			put(w, value[i:i+1])
+		}
+	}
+	put(w, "\"")
+}
+
+@(require_results)
+format_value :: proc(out: ^strings.Builder, value: string) -> Error {
+	w := Writer{out = out}
+	value_text(&w, value)
+	return w.error
+}
+
+@(require_results)
+format_state :: proc(out: ^strings.Builder, entries: []State_Entry) -> Error {
+	w := Writer{out = out}
+	for entry in entries {
+		put(&w, entry.key)
+		put(&w, "=")
+		value_text(&w, entry.value)
+		put(&w, "\n")
+	}
+	return w.error
+}
+
+@(private)
+observed_attribute :: proc(c: ^term.Snapshot_Cell, a: Attributes, key: string, buffer: []u8) -> string {
+	@(static, rodata) underlines := UNDERLINES
+	switch key {
+	case "text":
+		return c.text
+	case "fg":
+		return color_text(a.fg, buffer)
+	case "bg":
+		return color_text(a.bg, buffer)
+	case "underline-color":
+		return color_text(a.underline_color, buffer)
+	case "underline":
+		if a.underline >= 0 && a.underline < len(UNDERLINES) { return underlines[a.underline] }
+		return "unknown"
+	}
+	for name, flag in FLAG_NAMES {
+		if name == key { return flag in a.flags ? "true" : "false" }
+	}
+	return "unknown"
+}
+
+@(require_results)
+evaluate :: proc(
+	out: ^strings.Builder, request: Expect, s: ^term.Snapshot, entries: []State_Entry = nil,
+) -> (passed: bool, error: Error) {
+	w := Writer{out = out}
+	if request.kind == .State {
+		value := "<missing>"
+		found := false
+		for entry in entries {
+			if entry.key == request.key {
+				value, found = entry.value, true
+				break
+			}
+		}
+		passed = found && value == request.value
+		put(&w, passed ? "PASS state " : "FAIL state ")
+		put(&w, request.key)
+		if passed {
+			put(&w, "=")
+			value_text(&w, value)
+		} else {
+			put(&w, ": expected ")
+			quoted(&w, request.value)
+			put(&w, ", observed ")
+			quoted(&w, value)
+		}
+		put(&w, "\n")
+		return passed, w.error
+	}
+	if s == nil { return false, .Invalid_Argument }
+	switch request.kind {
+	case .State:
+	case .Text, .No_Text:
+		found := false
+		position: Position
+		recent: [2]int
+		recent_count := 0
+		for row in 0..<int(s.rows) {
+			text, err := term.row_text(s, row, out.buf.allocator)
+			if err != .None { return false, .Out_Of_Memory }
+			if text != "" {
+				if recent_count == len(recent) {
+					recent[0], recent[1] = recent[1], row
+				} else {
+					recent[recent_count] = row
+					recent_count += 1
+				}
+			}
+			index := strings.index(text, request.text)
+			if index >= 0 {
+				// Map a UTF-8 byte match to terminal columns, including wide cells.
+				at := 0
+				for column in 0..<int(s.columns) {
+					c := term.snapshot_cell(s, column, row)
+					if c.width == .Spacer_Head || c.width == .Spacer_Tail {
+						continue
+					}
+					if index < at+max(1, len(c.text)) {
+						position = {column, row}
+						break
+					}
+					at += max(1, len(c.text))
+				}
+				found = true
+			}
+			delete(text, out.buf.allocator)
+			if found {
+				break
+			}
+		}
+		passed = request.kind == .Text ? found : !found
+		put(&w, passed ? "PASS " : "FAIL ")
+		put(&w, request.kind == .No_Text ? "no-text " : "text ")
+		quoted(&w, request.text)
+		if found {
+			put(&w, passed ? " at " : " found at ")
+			integer(&w, position.x)
+			put(&w, ",")
+			integer(&w, position.y)
+		} else if !passed {
+			put(&w, " not on screen; last rows:")
+			for row in recent[:recent_count] {
+				text, err := term.row_text(s, row, out.buf.allocator)
+				if err != .None { return false, .Out_Of_Memory }
+				if text != "" {
+					put(&w, " ")
+					integer(&w, row)
+					put(&w, "|")
+					put(&w, text)
+				}
+				delete(text, out.buf.allocator)
+			}
+			if recent_count == 0 {
+				put(&w, " ")
+				span(&w, 0, int(s.rows)-1)
+				put(&w, " blank")
+			}
+		}
+	case .Cursor:
+		p := request.position
+		passed = s.cursor.viewport_has_value && int(s.cursor.viewport_x) == p.x &&
+		         int(s.cursor.viewport_y) == p.y
+		put(&w, passed ? "PASS cursor " : "FAIL cursor ")
+		integer(&w, p.x)
+		put(&w, ",")
+		integer(&w, p.y)
+		if !passed {
+			put(&w, ": observed ")
+			cursor(&w, s)
+		}
+	case .Cell:
+		p := request.position
+		c := term.snapshot_cell(s, p.x, p.y)
+		passed = c != nil
+		failed_key, expected, observed := "", "", ""
+		buffer: [32]u8
+		a: Attributes
+		if c != nil {
+			a = attributes_at(s, p.x, p.y)
+			for item in request.attributes {
+				key, value, valid := assignment(item)
+				if !valid || !valid_attribute(item) { return false, .Invalid_Argument }
+				actual := observed_attribute(c, a, key, buffer[:])
+				matches := actual == value
+				if key == "fg" || key == "bg" || key == "underline-color" {
+					matches = strings.equal_fold(actual, value)
+				}
+				if !matches {
+					passed = false
+					failed_key, expected, observed = key, value, actual
+					break
+				}
+			}
+		}
+		put(&w, passed ? "PASS cell " : "FAIL cell ")
+		integer(&w, p.x)
+		put(&w, ",")
+		integer(&w, p.y)
+		if c == nil {
+			put(&w, " off-screen")
+		} else {
+			if !passed {
+				put(&w, " ")
+				put(&w, failed_key)
+				put(&w, ": expected ")
+				value_text(&w, expected)
+				put(&w, ", observed ")
+				value_text(&w, observed)
+				put(&w, "; cell")
+				if a.fg == nil {
+					a.fg = s.foreground
+				}
+			}
+			put(&w, " ")
+			quoted(&w, c.text)
+			attribute_text(&w, a)
+		}
+	}
+	put(&w, "\n")
+	return passed, w.error
+}

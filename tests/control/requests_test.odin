@@ -1,0 +1,128 @@
+package control_test
+
+import "base:runtime"
+import "core:strings"
+import "core:testing"
+import "aio:control"
+import "aio:input"
+
+fail_allocation :: proc(
+	data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,
+	old_memory: rawptr, old_size: int, location: runtime.Source_Code_Location,
+) -> ([]u8, runtime.Allocator_Error) {
+	if mode == .Alloc || mode == .Alloc_Non_Zeroed || mode == .Resize || mode == .Resize_Non_Zeroed {
+		return nil, .Out_Of_Memory
+	}
+	return nil, nil
+}
+
+failing_allocator :: proc() -> runtime.Allocator { return {fail_allocation, nil} }
+
+@(test)
+parse_commands :: proc(t: ^testing.T) {
+	cases := [][]string{
+		{"ping"}, {"state"}, {"screen"}, {"screen", "1"}, {"screen", "1:2"},
+		{"cells", "2"}, {"cells", "2", "1:8"}, {"type", "hello\nworld"}, {"type", ""},
+		{"key", "Ctrl+Shift+P", "Esc", "Enter"}, {"command", "app.reload_settings"},
+		{"wait", "text", "hello"}, {"wait", "gone", "hello", "--timeout", "0"},
+		{"wait", "idle"}, {"wait", "idle", "20", "--timeout", "500"},
+		{"wait", "frame", "--timeout", "100"}, {"run", "echo hi"},
+		{"run", "echo hi", "--timeout", "200", "--idle", "0"},
+		{"expect", "text", "hi"}, {"expect", "no-text", "bye"},
+		{"expect", "cursor", "2,3"}, {"expect", "state", "palette.query=a=b"},
+		{"expect", "cell", "0,1", "underline=single", "fg=default", "bg=#00AAbb", "wide=false"},
+		{"focus", "in"}, {"focus", "out"}, {"tray", "open"}, {"tray", "hide"}, {"tray", "quit"},
+		{"resize", "1x1000"}, {"dpi", "48"}, {"dpi", "768"}, {"help"}, {"help", "screen"},
+		{"mouse", "move", "1,2"}, {"mouse", "down", "1,2", "--button", "right"},
+		{"mouse", "up", "1,2", "--button", "middle"}, {"mouse", "click", "1,2", "--button", "left"},
+		{"mouse", "drag", "1,2", "3,4", "--px", "--mods", "Ctrl+Shift"},
+		{"mouse", "wheel", "1,2", "-3", "--mods", "Alt+Win", "--px"},
+	}
+	for args in cases {
+		r, err := control.parse(args)
+		testing.expect(t, err.advice == "", args[0])
+		control.request_destroy(&r)
+	}
+	r, err := control.parse({"wait", "idle"})
+	defer control.request_destroy(&r)
+	testing.expect_value(t, err.advice, "")
+	w := r.(control.Wait)
+	testing.expect_value(t, w.idle_ms, 300)
+	testing.expect_value(t, w.timeout_ms, 5000)
+	run, run_error := control.parse({"run", "x"})
+	testing.expect_value(t, run_error.advice, "")
+	testing.expect_value(t, run.(control.Run).idle_ms, 300)
+	testing.expect_value(t, run.(control.Run).timeout_ms, 10000)
+	m, mouse_error := control.parse({"mouse", "click", "2,3"})
+	testing.expect_value(t, mouse_error.advice, "")
+	testing.expect_value(t, m.(control.Mouse).button, input.Mouse_Button.Left)
+	testing.expect_value(t, m.(control.Mouse).position, control.Position{2, 3})
+	testing.expect(t, !m.(control.Mouse).pixels)
+}
+
+@(test)
+parse_errors :: proc(t: ^testing.T) {
+	cases := [][]string{
+		{}, {"nope"}, {"ping", "x"}, {"state", "x"}, {"help", "a", "b"},
+		{"screen", "-1"}, {"screen", "2:1"}, {"screen", "1:"}, {"screen", "x"},
+		{"screen", "1", "2"}, {"cells"}, {"cells", "x"}, {"cells", "0", "1"},
+		{"type"}, {"type", "a", "b"}, {"command", ""}, {"focus", "bad"}, {"tray", "bad"},
+		{"resize", "0x2"}, {"resize", "2x0"}, {"resize", "1001x2"}, {"resize", "2,3"},
+		{"dpi", "47"}, {"dpi", "769"}, {"dpi", "abc"}, {"dpi", "99999999999999999999"},
+		{"key"}, {"key", "Ctrl+bogus"}, {"key", "A", "Ctrl+Ctrl+A"},
+		{"wait"}, {"wait", "text"}, {"wait", "x"}, {"wait", "idle", "-1"},
+		{"wait", "frame", "--timeout"}, {"wait", "frame", "--timeout", "-1"},
+		{"wait", "frame", "--idle", "1"}, {"wait", "idle", "--bad", "1"},
+		{"run"}, {"run", "x", "--timeout", "1", "--timeout", "2"},
+		{"run", "x", "--idle", "1", "--idle", "2"},
+		{"expect"}, {"expect", "bad", "x"}, {"expect", "text", "x", "y"},
+		{"expect", "cursor", "-1,0"}, {"expect", "cursor", "1:2"},
+		{"expect", "cursor", "0,0", "x"}, {"expect", "cell", "0,0"},
+		{"expect", "cell", "0,0", "bad=true"}, {"expect", "cell", "0,0", "bold=yes"},
+		{"expect", "cell", "0,0", "underline=bad"}, {"expect", "cell", "0,0", "fg=#gg0000"},
+		{"expect", "cell", "0,0", "bg=#000"}, {"expect", "state", "=x"},
+		{"expect", "state", "x"}, {"mouse"}, {"mouse", "bad", "0,0"},
+		{"mouse", "move", "a,b"}, {"mouse", "drag", "0,0"}, {"mouse", "drag", "0,0", "x"},
+		{"mouse", "wheel", "0,0", "no"}, {"mouse", "click", "0,0", "--button"},
+		{"mouse", "click", "0,0", "--button", "back"},
+		{"mouse", "click", "0,0", "--mods", "Ctrl+Q"},
+		{"mouse", "click", "0,0", "--mods", "Ctrl+Ctrl"},
+		{"mouse", "click", "0,0", "--bad", "x"},
+		{"mouse", "click", "0,0", "--px", "--px"},
+		{"mouse", "click", "0,0", "--button", "left", "--button", "right"},
+		{"mouse", "click", "0,0", "--mods", "Alt", "--mods", "Ctrl"},
+	}
+	for args in cases {
+		r, err := control.parse(args)
+		testing.expect(t, err.advice != "")
+		control.request_destroy(&r)
+	}
+	r, err := control.parse({"key", "A"}, failing_allocator())
+	control.request_destroy(&r)
+	testing.expect(t, err.advice != "")
+}
+
+@(test)
+help_and_pipe_name :: proc(t: ^testing.T) {
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	testing.expect_value(t, control.help(&b), control.Error.None)
+	testing.expect_value(t, strings.to_string(b), control.HELP_OVERVIEW)
+	for command in ([]string{"ping", "screen", "cells", "state", "wait", "expect", "type", "key",
+		"run", "mouse", "focus", "resize", "dpi", "tray", "command", "help"}) {
+		strings.builder_reset(&b)
+		testing.expect_value(t, control.help(&b, command), control.Error.None)
+		testing.expect(t, strings.has_prefix(strings.to_string(b), command))
+	}
+	testing.expect_value(t, control.help(&b, "bad"), control.Error.Invalid_Argument)
+	name, err := control.pipe_name("test")
+	defer delete(name)
+	testing.expect_value(t, err, control.Error.None)
+	testing.expect_value(t, name, `\\.\pipe\test.control`)
+	for invalid in ([]string{"", "a/b", "a\\b", "a\x00b", "\xff"}) {
+		_, failure := control.pipe_name(invalid)
+		testing.expect_value(t, failure, control.Error.Invalid_Argument)
+	}
+	_, allocation_error := control.pipe_name("test", failing_allocator())
+	testing.expect_value(t, allocation_error, control.Error.Out_Of_Memory)
+}
