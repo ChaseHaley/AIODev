@@ -300,7 +300,9 @@ session_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
 session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	geometry := term.geometry(entry.session)
 	term.restart(entry.session, session_config(app, geometry))
-	ui.notices_clear(&app.notices, u32(Notice_Key.Session))
+	status := term.status(entry.session)
+	entry.status = status.kind
+	show_session_status(app, status)
 	mark_all_dirty(app)
 }
 
@@ -355,7 +357,8 @@ show_session_status :: proc(app: ^App, status: term.Status) {
 		ui.notices_put(&app.notices, key, .Info, text, 0)
 	case .Failed:
 		reason := len(status.message) > 0 ? status.message : "Could not start the shell."
-		text := fmt.tprintf("%s Check shell.command in the settings file, then press Enter to try again.", reason)
+		text := fmt.tprintf("%s Check shell.command and shell.directory in settings, then press Enter to try again.",
+			reason)
 		ui.notices_put(&app.notices, key, .Error, text, 0)
 	}
 }
