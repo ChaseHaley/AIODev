@@ -92,10 +92,8 @@ show_window :: proc(app: ^App) {
 }
 
 hide_to_tray :: proc(app: ^App, w: ^Window) {
+	focus_leave(app, w)
 	ui.palette_close(&app.palette)
-	if w.find.open {
-		find_close(w, focused_session(app, w))
-	}
 	window_close(app, w)
 	if !app.tray_hint_shown {
 		app.tray_hint_shown = true
@@ -187,9 +185,8 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 @(private)
 pane_at :: proc(app: ^App, w: ^Window, x, y: i32) -> ^Session_Entry {
 	pane, found := layout.hit_test(w.panes[:], f32(x), f32(y))
-	if !found {
-		return focused_session(app, w)
-	}
+	if w.selecting { return focused_session(app, w) }
+	if !found { return nil }
 	return session_find(app, pane.content.id)
 }
 
@@ -209,8 +206,34 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	x, y := f32(e.x), f32(e.y)
+	if e.button == .Left && !e.pressed {
+		if _, dragging := w.dragging.?; dragging { w.dragging = nil; return }
+		if w.selecting { selection_finish(app, w, x, y); return }
+	}
+	bar := ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs))
+	if y < bar.height {
+		if e.pressed {
+			index := ui.tab_bar_hit_test(bar, x, y)
+			if index == bar.count && e.button == .Left { tab_new(app, w) }
+			else if index >= 0 && index < bar.count {
+				if e.button == .Middle { tab_close(app, w, index) }
+				else if e.button == .Left { tab_select(app, w, index) }
+			}
+		}
+		return
+	}
+	if e.button == .Left && e.pressed {
+		if divider, found := layout.divider_hit_test(w.dividers[:], x, y, 3*w.scale); found {
+			w.selecting, w.autoscrolling = false, false
+			w.dragging = divider
+			return
+		}
+	}
 	if w.find.open && !w.selecting && ui.find_contains(f32(w.width), w.scale, x, y) {
 		return
+	}
+	if e.pressed && !w.selecting {
+		if pane, found := layout.hit_test(w.panes[:], x, y); found { pane_focus(app, w, pane.node) }
 	}
 	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
@@ -220,12 +243,6 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if e.pressed {
 			w.selecting = true
 			term.selection_press(entry.session, x, y, e.time_ns)
-		} else if w.selecting {
-			w.selecting, w.autoscrolling = false, false
-			term.selection_release(entry.session, x, y)
-			if app.settings.terminal.copy_on_select {
-				copy_selection(app, entry, false)
-			}
 		}
 		w.dirty = true
 		return
@@ -240,6 +257,22 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
+	if divider, dragging := w.dragging.?; dragging {
+		if .Left not_in e.buttons { w.dragging = nil; return }
+		if layout.drag_divider(w.tree, divider, x, y, 1) { window_relayout(app, w) }
+		return
+	}
+	shape: platform.Cursor_Shape = .Text
+	bar := ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs))
+	if y < bar.height { shape = .Arrow }
+	if d, found := layout.divider_hit_test(w.dividers[:], x, y, 3*w.scale); found {
+		shape = d.axis == .Horizontal ? .Resize_Horizontal : .Resize_Vertical
+	}
+	if shape != w.pointer_shape {
+		if platform.window_set_cursor(&app.platform, w.id, shape) != .None {
+			log.error("setting the pointer cursor failed")
+		} else { w.pointer_shape = shape }
+	}
 	if app.palette.open {
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 		on_palette_outcome(app, w, ui.palette_mouse_move(&app.palette, l, x, y), 0)
@@ -282,9 +315,18 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
-		w.selecting = false
+		w.selecting, w.autoscrolling = false, false
+		w.dragging = nil
 	}
-	for entry in app.sessions {
-		term.send_focus(entry.session, focused)
-	}
+	if entry := focused_session(app, w); entry != nil { term.send_focus(entry.session, focused) }
+}
+
+@(private)
+selection_finish :: proc(app: ^App, w: ^Window, x, y: f32) {
+	entry := focused_session(app, w)
+	w.selecting, w.autoscrolling = false, false
+	if entry == nil { return }
+	term.selection_release(entry.session, x, y)
+	if app.settings.terminal.copy_on_select { copy_selection(app, entry, false) }
+	w.dirty = true
 }

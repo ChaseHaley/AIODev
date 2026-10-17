@@ -18,12 +18,20 @@ import "aio:ui"
 Pane_View :: struct {
 	content: layout.Content,
 	view: term_view.View,
+	cache: render.Draw_List,
+	valid: bool,
+	generation, atlas_generation, builds: u64,
+	style: term_view.Style,
+	frame: term_view.Frame,
 }
 
 Window :: struct {
 	id: platform.Window_Id,
 	surface: ^render.Surface,
-	tree: layout.Layout,
+	workspace: ^Workspace,
+	tree: ^layout.Layout,
+	dividers: [dynamic]layout.Divider,
+	dragging: Maybe(layout.Divider),
 	panes: [dynamic]layout.Pane_Rect,
 	views: [dynamic]Pane_View,
 	list: render.Draw_List,
@@ -37,6 +45,7 @@ Window :: struct {
 	autoscrolling: bool,
 	autoscroll_deadline: time.Tick,
 	pointer: [2]f32,
+	pointer_shape: platform.Cursor_Shape,
 	find: ui.Find_Bar,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
@@ -66,13 +75,13 @@ window_open :: proc(app: ^App) -> bool {
 	w.panes = make([dynamic]layout.Pane_Rect)
 	w.views = make([dynamic]Pane_View)
 	ui.find_init(&w.find)
+	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
 	w.dirty = true
-	entry := app.sessions[0]
-	if layout.init(&w.tree, {.Terminal, entry.id}) != nil {
-		window_free(w)
-		return false
-	}
+	w.workspace = app.workspaces[0]
+	if len(w.workspace.tabs) == 0 && !tab_create(app, w.workspace) { window_free(w); return false }
+	w.tree = &selected_tab(w.workspace).tree
+	entry := focused_session(app, w)
 	g := term.geometry(entry.session)
 	desc := platform.Window_Desc{
 		title = app.app_id,
@@ -102,6 +111,7 @@ window_open :: proc(app: ^App) -> bool {
 	if platform.window_set_cursor(&app.platform, id, .Text) != .None {
 		log.error("setting the window cursor failed")
 	}
+	window_update_title(app, w)
 	return true
 }
 
@@ -125,12 +135,13 @@ window_close :: proc(app: ^App, w: ^Window) {
 window_free :: proc(w: ^Window) {
 	for &pane in w.views {
 		term_view.destroy(&pane.view)
+		render.draw_list_destroy(&pane.cache)
 	}
 	delete(w.views)
 	delete(w.panes)
 	ui.find_destroy(&w.find)
 	render.draw_list_destroy(&w.list)
-	layout.destroy(&w.tree)
+	delete(w.dividers)
 	free(w)
 }
 
@@ -180,7 +191,18 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
-	layout.compute(&w.tree, {0, 0, f32(w.width), f32(w.height)}, 0, &w.panes)
+	area := window_content_area(w)
+	layout.compute(w.tree, area, 1, &w.panes)
+	layout.dividers(w.tree, area, 1, &w.dividers)
+	for i := len(w.views)-1; i >= 0; i -= 1 {
+		visible := false
+		for pane in w.panes { visible ||= pane.content == w.views[i].content }
+		if !visible {
+			term_view.destroy(&w.views[i].view)
+			render.draw_list_destroy(&w.views[i].cache)
+			ordered_remove(&w.views, i)
+		} else { w.views[i].valid = false }
+	}
 	padding := window_padding(app, w)
 	for pane in w.panes {
 		entry := session_find(app, pane.content.id)
@@ -207,7 +229,12 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 				log.error("creating a terminal view failed")
 				continue
 			}
-			append(&w.views, Pane_View{pane.content, view})
+			cached := Pane_View{content = pane.content, view = view, cache = render.draw_list_init()}
+			if _, err := append(&w.views, cached); err != nil {
+				term_view.destroy(&view)
+				render.draw_list_destroy(&cached.cache)
+				log.error("storing a terminal view failed")
+			}
 		}
 	}
 }
@@ -224,6 +251,7 @@ pane_view :: proc(w: ^Window, content: layout.Content) -> ^term_view.View {
 
 // The session shown in the focused pane, which receives keyboard input.
 focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
+	if w.tree == nil || w.tree.focus == layout.INVALID_NODE { return nil }
 	pane, is_pane := w.tree.nodes[w.tree.focus].(layout.Pane)
 	if !is_pane {
 		return nil
@@ -321,9 +349,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if entry == nil || view == nil {
 			continue
 		}
-		if render.push_layer(&w.list, {pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}) != .None {
-			continue
-		}
+		content_focused := w.focused && pane.node == w.tree.focus && !app.palette.open && !w.find.open
 		style := term_view.Style{
 			family = app.family,
 			selection_background = color(c.selection_background),
@@ -332,23 +358,28 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			search_background = color(c.search_background),
 			search_selected_background = color(c.search_selected_background),
 			cursor_text = color(c.cursor_text),
-			focused = w.focused && !app.palette.open && !w.find.open,
-			cursor_phase_visible = w.cursor_phase_visible,
+			focused = content_focused,
+			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
 		}
 		origin := [2]f32{pane.rect.x + padding, pane.rect.y + padding}
 		result: glyphs.Result
-		frame, result = term_view.build(
-			view, entry.session, app.fonts, &app.cache, &w.list, origin, w.metrics, style,
-		)
+		frame, result = build_pane(app, w, pane, entry, view, origin, style)
 		if result != .Ok {
 			return frame, result
 		}
-		blinking ||= frame.cursor_blinking
+		blinking ||= frame.cursor_blinking && content_focused
+		if entry.status != .Running {
+			message := session_message(term.status(entry.session))
+			if message_result := ui.pane_message_draw(&w.list, &app.ui_text, app.theme,
+				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}, message, w.scale);
+				message_result != .Ok { return frame, message_result }
+		}
 	}
 	if blinking != w.blinking {
 		w.blinking = blinking
 		reset_blink(w)
 	}
+	if result := window_chrome_draw(app, w); result != .Ok { return frame, result }
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {
 		status := find_status(w, focused_session(app, w))
@@ -394,6 +425,42 @@ recover_device :: proc(app: ^App) {
 			continue
 		}
 		w.surface = surface
+		for &pane in w.views { pane.valid = false }
 		w.dirty = true
 	}
+}
+
+@(private)
+build_pane :: proc(
+	app: ^App, w: ^Window, pane: layout.Pane_Rect, entry: ^Session_Entry,
+	view: ^term_view.View, origin: [2]f32, style: term_view.Style,
+) -> (term_view.Frame, glyphs.Result) {
+	clip := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
+	for &cached in w.views {
+		if cached.content != pane.content { continue }
+		if len(w.panes) == 1 {
+			if render.push_layer(&w.list, clip) != .None { return {}, .Ok }
+			cached.builds += 1
+			return term_view.build(view, entry.session, app.fonts, &app.cache,
+				&w.list, origin, w.metrics, style)
+		}
+		generation := term.generation(entry.session)
+		atlas := render.atlas_generation(app.device)
+		if !cached.valid || cached.generation != generation || cached.atlas_generation != atlas ||
+		   cached.style != style {
+			cached.valid = false
+			render.draw_list_reset(&cached.cache)
+			if render.push_layer(&cached.cache, clip) != .None { return {}, .Ok }
+			frame, result := term_view.build(view, entry.session, app.fonts, &app.cache,
+				&cached.cache, origin, w.metrics, style)
+			if result != .Ok { return frame, result }
+			cached.frame, cached.style = frame, style
+			cached.generation, cached.atlas_generation = generation, render.atlas_generation(app.device)
+			cached.valid = true
+			cached.builds += 1
+		}
+		if render.append_list(&w.list, &cached.cache) != .None { log.error("copying a pane frame failed") }
+		return cached.frame, .Ok
+	}
+	return {}, .Ok
 }

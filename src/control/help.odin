@@ -26,7 +26,7 @@ No arguments or defaults.
 `)
 	case "screen":
 		put(&w, `screen [<first>[:<last>]]
-Reads visible terminal text; defaults to all rows. Ranges are inclusive.
+Reads the focused pane's visible terminal text; defaults to all rows. Ranges are inclusive.
 Header: screen <cols>x<rows> cursor <col>,<row> [hidden] [blinking], or cursor off-screen.
 Rows: right-aligned row number followed by |text; trailing spaces omitted.
 Consecutive empty rows collapse: 3-31 blank (one empty row: 3 blank).
@@ -35,7 +35,7 @@ Out-of-grid ranges fail; this reads terminal state, not rendered pixels.
 `)
 	case "cells":
 		put(&w, `cells <row> [<first>:<last>]
-Proves exact text and attributes in a visible row. Defaults to all columns; ranges inclusive.
+Proves exact text and attributes in a visible row of the focused pane. Defaults to all columns; ranges inclusive.
 Header: row <row> cols <first>-<last>. Each following line is a maximal attribute run.
 Example: 5-9 "world" fg=#ff0000 bold underline=curly
 Text escapes quotes and backslashes, and controls as \xNN. Wide spacers add no text.
@@ -49,7 +49,12 @@ Out-of-grid rows or columns fail.
 Reads app-supplied state entries, including dotted keys such as palette.open and viewport.
 Output is one key=value per line; values with spaces or quotes are quoted and escaped.
 Example: palette.open=false
-No arguments or defaults. Available keys come from the app; screen/cells inspect terminal content.
+Tab selection is one-based; pane IDs are stable within each tab. tabs.selected=0 means no tabs.
+Tabs: tabs.count/selected, tab.N.id/focus/panes, tab.N.pane.ID.session/grid.
+Visible panes: panes.count/focused, pane.ID.rect=x,y,width,height in client pixels.
+Focused session: session.id/status/exit/message/title; session.ID.builds counts glyph builds.
+Hidden tabs retain their sessions and last grid size; only visible panes have current rectangles.
+No arguments or defaults. Available keys come from the app; screen/cells inspect the focused pane.
 `)
 	case "wait":
 		put(&w, `wait text <s> | gone <s> | idle [<ms>] | frame [--timeout <ms>]

@@ -403,3 +403,27 @@ instance_buffer_growth_and_reuse :: proc(t: ^testing.T) {
 		}
 	}
 }
+
+@(test)
+appended_lists_preserve_layers_and_rebase_instances :: proc(t: ^testing.T) {
+	source := render.draw_list_init()
+	defer render.draw_list_destroy(&source)
+	out := render.draw_list_init()
+	defer render.draw_list_destroy(&out)
+	testing.expect_value(t, render.push_layer(&source, {1, 2, 3, 4}), render.Error.None)
+	testing.expect_value(t, render.push_rect(&source, {rect = {1, 2, 1, 1}}), render.Error.None)
+	testing.expect_value(t, render.push_glyph(&source, {rect = {2, 3, 1, 1}}), render.Error.None)
+	testing.expect_value(t, render.push_layer(&source, {5, 6, 7, 8}), render.Error.None)
+	testing.expect_value(t, render.push_glyph(&source, {rect = {5, 6, 1, 1}}), render.Error.None)
+	testing.expect_value(t, render.append_list(&out, &source), render.Error.None)
+	testing.expect_value(t, render.append_list(&out, &source), render.Error.None)
+	testing.expect_value(t, len(out.layers), 4)
+	testing.expect_value(t, len(out.rects), 2)
+	testing.expect_value(t, len(out.glyphs), 4)
+	testing.expect_value(t, out.layers[2].rect_start, 1)
+	testing.expect_value(t, out.layers[2].glyph_start, 2)
+	testing.expect_value(t, out.layers[3].glyph_start, 3)
+	testing.expect_value(t, out.layers[2].clip, source.layers[0].clip)
+	testing.expect_value(t, source.layers[0].glyph_start, 0)
+	testing.expect_value(t, out.glyphs[3], source.glyphs[1])
+}

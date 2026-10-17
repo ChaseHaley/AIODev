@@ -9,6 +9,7 @@ import "core:unicode/utf8"
 import "aio:commands"
 import "aio:control"
 import "aio:input"
+import "aio:layout"
 import "aio:platform"
 import "aio:render"
 import "aio:term"
@@ -22,6 +23,7 @@ _ :: strings
 _ :: utf8
 _ :: commands
 _ :: control
+_ :: layout
 _ :: input
 _ :: platform
 _ :: render
@@ -248,7 +250,60 @@ when AIO_CONTROL {
 				{"window.scale", "0"}, {"window.focused", "false"},
 			}
 			if _, err := append(&entries, ..hidden[:]); err != nil { return nil, .Out_Of_Memory }
-			if len(app.sessions) > 0 { entry = &app.sessions[0] }
+			if tab := selected_tab(app.workspaces[0]); tab != nil {
+				pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+				entry = session_find(app, pane.content.id)
+			}
+		}
+		workspace := app.workspaces[0]
+		workspace_state := [?]control.State_Entry{
+			{"tabs.count", fmt.tprintf("%d", len(workspace.tabs))},
+			{"tabs.selected", fmt.tprintf("%d", len(workspace.tabs) == 0 ? 0 : workspace.selected+1)},
+			{"sessions.count", fmt.tprintf("%d", len(app.sessions))},
+		}
+		if _, err := append(&entries, ..workspace_state[:]); err != nil { return nil, .Out_Of_Memory }
+		for tab, i in workspace.tabs {
+			prefix := fmt.tprintf("tab.%d", i+1)
+			tab_state := [?]control.State_Entry{
+				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
+				{fmt.tprintf("%s.focus", prefix), fmt.tprintf("%d", tab.tree.focus)},
+			}
+			if _, err := append(&entries, ..tab_state[:]); err != nil { return nil, .Out_Of_Memory }
+			count := 0
+			for node, n in tab.tree.nodes {
+				if pane, ok := node.(layout.Pane); ok {
+					count += 1
+					if session := session_find(app, pane.content.id); session != nil {
+						g := term.geometry(session.session)
+						if _, err := append(&entries, control.State_Entry{
+							fmt.tprintf("%s.pane.%d.grid", prefix, n), fmt.tprintf("%dx%d", g.columns, g.rows),
+						}); err != nil { return nil, .Out_Of_Memory }
+					}
+					if _, err := append(&entries, control.State_Entry{
+						fmt.tprintf("%s.pane.%d.session", prefix, n), fmt.tprintf("%d", pane.content.id),
+					}); err != nil { return nil, .Out_Of_Memory }
+				}
+			}
+			if _, err := append(&entries, control.State_Entry{fmt.tprintf("%s.panes", prefix),
+				fmt.tprintf("%d", count)}); err != nil { return nil, .Out_Of_Memory }
+		}
+		if w != nil {
+			pane_state := [?]control.State_Entry{
+				{"panes.count", fmt.tprintf("%d", len(w.panes))},
+				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
+			}
+			if _, err := append(&entries, ..pane_state[:]); err != nil { return nil, .Out_Of_Memory }
+			for view in w.views {
+				if _, err := append(&entries, control.State_Entry{
+					fmt.tprintf("session.%d.builds", view.content.id), fmt.tprintf("%d", view.builds),
+				}); err != nil { return nil, .Out_Of_Memory }
+			}
+			for pane in w.panes {
+				r := pane.rect
+				if _, err := append(&entries, control.State_Entry{
+					fmt.tprintf("pane.%d.rect", pane.node), fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height),
+				}); err != nil { return nil, .Out_Of_Memory }
+			}
 		}
 		if entry != nil {
 			s := entry.session
@@ -270,6 +325,8 @@ when AIO_CONTROL {
 				selection = text[:end]
 			}
 			session := [?]control.State_Entry{
+				{"session.id", fmt.tprintf("%d", entry.id)},
+				{"session.message", session_message(status)},
 				{"grid.size", fmt.tprintf("%dx%d", g.columns, g.rows)},
 				{"session.status", strings.to_lower(fmt.tprintf("%v", status.kind), context.temp_allocator)},
 				{"session.exit", fmt.tprintf("%d", status.exit_code)},
@@ -359,6 +416,7 @@ when AIO_CONTROL {
 			if err = verify_key_event(app, id, key, mods, true); err != .None { break }
 		}
 		if err == .None { err = verify_key_event(app, id, chord.key, mods, true) }
+		if window_find(app, id) == nil { return err }
 		up_error := verify_key_event(app, id, chord.key, mods, false)
 		if err == .None { err = up_error }
 		for i := len(keys)-1; i >= 0; i -= 1 {
@@ -461,7 +519,8 @@ when AIO_CONTROL {
 		case control.Resize:
 			padding := window_padding(app, w)
 			width := i32(f32(r.columns)*w.metrics.cell_width+2*padding)
-			height := i32(f32(r.rows)*w.metrics.cell_height+2*padding)
+			height := i32(f32(r.rows)*w.metrics.cell_height+2*padding+
+				ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs)).height)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) != .None { return .System }
 		case control.Command:
 			command := commands.find(&app.registry, r.name)
@@ -747,7 +806,7 @@ when AIO_CONTROL {
 			}
 			if w != nil {
 				current: u64
-				for entry in app.sessions { current += term.generation(entry.session) }
+				current = window_generation(app, w)
 				v.needs_frame = w.dirty || current != w.generation
 			}
 		}

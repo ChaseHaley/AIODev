@@ -31,7 +31,6 @@ import "aio:ui"
 @(private)
 Notice_Key :: enum u32 {
 	Transient,
-	Session,
 	Settings,
 	Font,
 	Copy,
@@ -65,6 +64,7 @@ App :: struct {
 	palette: ui.Palette,
 	notices: ui.Notices,
 	sessions: [dynamic]Session_Entry,
+	workspaces: [dynamic]^Workspace,
 	next_session_id: u32,
 	windows: [dynamic]^Window,
 	running: bool,
@@ -117,9 +117,10 @@ app_init :: proc(app: ^App) -> bool {
 	app.ui_ready = true
 	apply_fonts(app)
 	apply_theme(app)
-	if !session_open(app) {
-		return false
-	}
+	workspace, workspace_error := new(Workspace)
+	if workspace_error != nil { return false }
+	if _, err := append(&app.workspaces, workspace); err != nil { free(workspace); return false }
+	if !tab_create(app, workspace) { return false }
 	if platform.tray_create(&app.platform, app.app_id) != .None {
 		log.error("creating the tray icon failed")
 	}
@@ -149,6 +150,8 @@ app_destroy :: proc(app: ^App) {
 		term.destroy(entry.session)
 	}
 	delete(app.sessions)
+	for workspace in app.workspaces { workspace_destroy(workspace) }
+	delete(app.workspaces)
 	if app.platform_ready {
 		if platform.tray_destroy(&app.platform) != .None {
 			log.error("removing the tray icon failed")
@@ -286,7 +289,12 @@ session_open :: proc(app: ^App) -> bool {
 		return false
 	}
 	app.next_session_id += 1
-	append(&app.sessions, Session_Entry{id = app.next_session_id, session = session, status = .Running})
+	if _, allocation_error := append(&app.sessions,
+		Session_Entry{id = app.next_session_id, session = session, status = term.status(session).kind});
+		allocation_error != nil {
+		term.destroy(session)
+		return false
+	}
 	configure_session(app, session)
 	return true
 }
@@ -316,7 +324,6 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	term.restart(entry.session, session_config(app, geometry))
 	status := term.status(entry.session)
 	entry.status = status.kind
-	show_session_status(app, status)
 	mark_all_dirty(app)
 }
 
@@ -331,19 +338,18 @@ update_sessions :: proc(app: ^App) {
 				mark_all_dirty(app)
 			}
 		}
-		status := term.status(s)
-		if status.kind != entry.status {
-			entry.status = status.kind
-			show_session_status(app, status)
-			mark_all_dirty(app)
+		if term.take_status_change(s) {
+			status := term.status(s)
+			if status.kind != entry.status {
+				entry.status = status.kind
+				mark_all_dirty(app)
+			}
 		}
 		if term.take_title_change(s) {
-			title := term.title(s, context.temp_allocator)
 			for window in app.windows {
-				if platform.window_set_title(
-					&app.platform, window.id, len(title) > 0 ? title : app.app_id,
-				) != .None {
-					log.error("setting the window title failed")
+				window.dirty = true
+				if focused := focused_session(app, window); focused != nil && focused.id == entry.id {
+					window_update_title(app, window)
 				}
 			}
 		}
@@ -356,31 +362,11 @@ update_sessions :: proc(app: ^App) {
 		}
 	}
 	for window in app.windows {
-		generation: u64
-		for entry in app.sessions {
-			generation += term.generation(entry.session)
-		}
+		generation := window_generation(app, window)
 		if generation != window.generation {
 			window.generation = generation
 			window.dirty = true
 		}
-	}
-}
-
-@(private)
-show_session_status :: proc(app: ^App, status: term.Status) {
-	key := u32(Notice_Key.Session)
-	switch status.kind {
-	case .Running:
-		ui.notices_clear(&app.notices, key)
-	case .Exited:
-		text := fmt.tprintf("The shell exited with code %d. Press Enter to restart it.", status.exit_code)
-		ui.notices_put(&app.notices, key, .Info, text, 0)
-	case .Failed:
-		reason := len(status.message) > 0 ? status.message : "Could not start the shell."
-		text := fmt.tprintf("%s Check shell.command and shell.directory in settings, then press Enter to try again.",
-			reason)
-		ui.notices_put(&app.notices, key, .Error, text, 0)
 	}
 }
 

@@ -191,3 +191,20 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 	testing.expect(t, !ui.find_contains(1000, 1.5, 411, 19))
 	testing.expect_value(t, ui.find_layout(100, 1).width, 76)
 }
+
+@(test)
+tab_bar_hides_one_tab_and_fits_controls_in_narrow_windows :: proc(t: ^testing.T) {
+	single := ui.tab_bar_layout(1000, 1, 1)
+	testing.expect_value(t, single.height, f32(0))
+	testing.expect_value(t, ui.tab_bar_hit_test(single, 1, 1), -1)
+	bar := ui.tab_bar_layout(500, 2, 3)
+	testing.expect_value(t, bar.height, f32(60))
+	testing.expect_value(t, ui.tab_bar_hit_test(bar, 0, 0), 0)
+	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.tab_width, 10), 1)
+	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.tab_width*3, 10), 3)
+	testing.expect_value(t, ui.tab_bar_hit_test(bar, 500, 10), -1)
+	testing.expect_value(t, ui.tab_bar_hit_test(bar, 10, 60), -1)
+	testing.expect_value(t, ui.tab_bar_hit_test(bar, -1, 10), -1)
+	narrow := ui.tab_bar_layout(20, 1, 10)
+	testing.expect_value(t, ui.tab_bar_hit_test(narrow, 1, 1), 10)
+}

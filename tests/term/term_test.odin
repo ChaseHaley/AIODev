@@ -165,6 +165,8 @@ output_and_exit_status :: proc(t: ^testing.T) {
 	if await(t, s, exited, "exit") {
 		status := term.status(s)
 		testing.expect_value(t, status.exit_code, 3)
+		testing.expect(t, term.take_status_change(s))
+		testing.expect(t, !term.take_status_change(s))
 	}
 	testing.expect(t, await(t, s, shows, "AIO_SESSION_OUTPUT"))
 	testing.expect(t, sync.atomic_load(&wakes.count) > 0)
@@ -182,6 +184,8 @@ failed_spawn_reports_message :: proc(t: ^testing.T) {
 	defer term.destroy(s)
 	status := term.status(s)
 	testing.expect_value(t, status.kind, term.Status_Kind.Failed)
+	testing.expect(t, term.take_status_change(s))
+	testing.expect(t, !term.take_status_change(s))
 	testing.expect(t, strings.has_prefix(status.message, "Could not start \"aio_missing_program_5512.exe\""))
 }
 
@@ -235,6 +239,8 @@ restart_and_destroy_while_running :: proc(t: ^testing.T) {
 	}
 	term.restart(s, config("cmd.exe /d /c \"echo AIO_RESTARTED&ping -n 30 127.0.0.1 > nul\""))
 	testing.expect_value(t, term.status(s).kind, term.Status_Kind.Running)
+	testing.expect(t, term.take_status_change(s))
+	testing.expect(t, !term.take_status_change(s))
 	testing.expect(t, await(t, s, shows, "AIO_RESTARTED"))
 	started := time.tick_now()
 	term.destroy(s)

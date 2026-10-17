@@ -13,15 +13,15 @@ function Invoke-Aio {
     if ($LASTEXITCODE -ne 0) { throw 'AIODev request failed.' }
 }
 
-function Assert-SessionNotice([string] $Expected) {
+function Assert-SessionMessage([string] $Expected) {
     $state = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect session state.' }
-    $notice = @($state | Where-Object { $_ -like 'notice.session=*' })
+    $notice = @($state | Where-Object { $_ -like 'session.message=*' })
     if ($notice.Count -ne 1 -or $notice[0] -notlike "*$Expected*") {
         $state | Write-Output
-        throw "FAIL session notice: expected $Expected"
+        throw "FAIL pane message: expected $Expected"
     }
-    Write-Output "PASS session notice contains $Expected"
+    Write-Output "PASS pane message contains $Expected"
 }
 
 Invoke-Aio launch
@@ -34,7 +34,7 @@ try {
     Invoke-Aio command settings.reload
     Invoke-Aio command terminal.restart_shell
     Invoke-Aio expect state session.status=failed
-    Assert-SessionNotice 'aio_t1_missing_program_9821.exe'
+    Assert-SessionMessage 'aio_t1_missing_program_9821.exe'
 
     $invalid = [regex]::Replace($original, '(?m)^shell.directory = .*',
         'shell.directory = "C:\AIODev_t1_nonexistent_directory_9821"')
@@ -42,11 +42,11 @@ try {
     Invoke-Aio command settings.reload
     Invoke-Aio command terminal.restart_shell
     Invoke-Aio expect state session.status=failed
-    Assert-SessionNotice 'working directory'
+    Assert-SessionMessage 'working directory'
 
     Invoke-Aio key Enter
     Invoke-Aio expect state session.status=failed
-    Assert-SessionNotice 'working directory'
+    Assert-SessionMessage 'working directory'
 
     [IO.File]::WriteAllText($settingsPath, $original)
     Invoke-Aio command settings.reload
@@ -54,10 +54,10 @@ try {
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state session.status=running
     $state = & $ctl --name $name state
-    if ($LASTEXITCODE -ne 0 -or $state -match '^notice.session=') {
-        throw 'FAIL recovery: stale session notice.'
+    if ($LASTEXITCODE -ne 0 -or $state -notcontains 'session.message=""') {
+        throw 'FAIL recovery: stale pane message.'
     }
-    Write-Output 'PASS recovery clears the error notice'
+    Write-Output 'PASS recovery clears the pane message'
 } finally {
     if ($null -ne $original) { [IO.File]::WriteAllText($settingsPath, $original) }
     Invoke-Aio stop

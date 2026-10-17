@@ -88,6 +88,7 @@ Session :: struct {
 	win32_input: bool,
 	generation: u64,
 	title_changed, bell: bool,
+	status_changed: bool,
 	program_status_changed: bool,
 	program_statuses: [PROGRAM_STATUS_LIMIT]Stored_Status,
 	program_status_count: int,
@@ -263,12 +264,14 @@ spawn :: proc(s: ^Session, config: Config) {
 		}
 		sync.mutex_lock(&s.mutex)
 		s.status, s.failure = .Failed, message
+		sync.atomic_store(&s.status_changed, true)
 		sync.mutex_unlock(&s.mutex)
 		return
 	}
 	s.pty, s.spawned = process, true
 	sync.mutex_lock(&s.mutex)
 	s.status, s.exit_code = .Running, 0
+	sync.atomic_store(&s.status_changed, true)
 	sync.mutex_unlock(&s.mutex)
 	s.reader = thread.create_and_start_with_poly_data(s, reader_main, s.callback_context)
 	s.waiter = thread.create_and_start_with_poly_data(s, waiter_main, s.callback_context)
@@ -278,6 +281,7 @@ spawn :: proc(s: ^Session, config: Config) {
 		stop_process(s)
 		sync.mutex_lock(&s.mutex)
 		s.status = .Failed
+		sync.atomic_store(&s.status_changed, true)
 		sync.mutex_unlock(&s.mutex)
 	}
 }
@@ -357,6 +361,7 @@ waiter_main :: proc(s: ^Session) {
 	}
 	sync.mutex_lock(&s.mutex)
 	s.status, s.exit_code = .Exited, code
+	sync.atomic_store(&s.status_changed, true)
 	sync.mutex_unlock(&s.mutex)
 	// Closing the console after exit lets the reader drain the remaining output and reach EOF.
 	pty.close_console(&s.pty)
@@ -519,6 +524,10 @@ status :: proc(s: ^Session) -> Status {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
 	return {s.status, s.exit_code, s.failure}
+}
+
+take_status_change :: proc(s: ^Session) -> bool {
+	return sync.atomic_exchange(&s.status_changed, false)
 }
 
 title :: proc(s: ^Session, allocator := context.allocator) -> string {

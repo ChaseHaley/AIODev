@@ -5,6 +5,7 @@ import "core:log"
 import "core:strings"
 import "core:time"
 import "aio:commands"
+import "aio:layout"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
@@ -27,6 +28,29 @@ Action :: enum u32 {
 	Restart_Shell,
 	Hide_To_Tray,
 	Quit,
+	New_Tab,
+	Close_Pane,
+	Next_Tab,
+	Previous_Tab,
+	Tab_1,
+	Tab_2,
+	Tab_3,
+	Tab_4,
+	Tab_5,
+	Tab_6,
+	Tab_7,
+	Tab_8,
+	Tab_9,
+	Split_Right,
+	Split_Down,
+	Focus_Left,
+	Focus_Right,
+	Focus_Up,
+	Focus_Down,
+	Resize_Left,
+	Resize_Right,
+	Resize_Up,
+	Resize_Down,
 }
 
 @(private)
@@ -59,6 +83,29 @@ ACTIONS :: [Action]Action_Info{
 	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil},
 	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil},
 	.Quit = {"app.quit", "Quit AIODev", nil},
+	.New_Tab = {"tab.new", "New Tab", {{.T, {.Control, .Shift}}}},
+	.Close_Pane = {"pane.close", "Close Pane", {{.W, {.Control, .Shift}}}},
+	.Next_Tab = {"tab.next", "Next Tab", {{.Tab, {.Control}}}},
+	.Previous_Tab = {"tab.previous", "Previous Tab", {{.Tab, {.Control, .Shift}}}},
+	.Tab_1 = {"tab.select_1", "Select Tab 1", {{.Digit_1, {.Control, .Alt}}}},
+	.Tab_2 = {"tab.select_2", "Select Tab 2", {{.Digit_2, {.Control, .Alt}}}},
+	.Tab_3 = {"tab.select_3", "Select Tab 3", {{.Digit_3, {.Control, .Alt}}}},
+	.Tab_4 = {"tab.select_4", "Select Tab 4", {{.Digit_4, {.Control, .Alt}}}},
+	.Tab_5 = {"tab.select_5", "Select Tab 5", {{.Digit_5, {.Control, .Alt}}}},
+	.Tab_6 = {"tab.select_6", "Select Tab 6", {{.Digit_6, {.Control, .Alt}}}},
+	.Tab_7 = {"tab.select_7", "Select Tab 7", {{.Digit_7, {.Control, .Alt}}}},
+	.Tab_8 = {"tab.select_8", "Select Tab 8", {{.Digit_8, {.Control, .Alt}}}},
+	.Tab_9 = {"tab.select_9", "Select Tab 9", {{.Digit_9, {.Control, .Alt}}}},
+	.Split_Right = {"pane.split_right", "Split Right", {{.Equal, {.Alt, .Shift}}}},
+	.Split_Down = {"pane.split_down", "Split Down", {{.Minus, {.Alt, .Shift}}}},
+	.Focus_Left = {"pane.focus_left", "Focus Left", {{.Arrow_Left, {.Alt}}}},
+	.Focus_Right = {"pane.focus_right", "Focus Right", {{.Arrow_Right, {.Alt}}}},
+	.Focus_Up = {"pane.focus_up", "Focus Up", {{.Arrow_Up, {.Alt}}}},
+	.Focus_Down = {"pane.focus_down", "Focus Down", {{.Arrow_Down, {.Alt}}}},
+	.Resize_Left = {"pane.resize_left", "Resize Left", {{.Arrow_Left, {.Alt, .Shift}}}},
+	.Resize_Right = {"pane.resize_right", "Resize Right", {{.Arrow_Right, {.Alt, .Shift}}}},
+	.Resize_Up = {"pane.resize_up", "Resize Up", {{.Arrow_Up, {.Alt, .Shift}}}},
+	.Resize_Down = {"pane.resize_down", "Resize Down", {{.Arrow_Down, {.Alt, .Shift}}}},
 }
 
 @(require_results)
@@ -145,6 +192,22 @@ run_action :: proc(app: ^App, w: ^Window, action: Action) {
 		hide_to_tray(app, w)
 	case .Quit:
 		app.running = false
+	case .New_Tab: tab_new(app, w)
+	case .Close_Pane: pane_close(app, w)
+	case .Next_Tab: tab_select(app, w, (w.workspace.selected+1)%len(w.workspace.tabs))
+	case .Previous_Tab:
+		tab_select(app, w, (w.workspace.selected+len(w.workspace.tabs)-1)%len(w.workspace.tabs))
+	case .Tab_1, .Tab_2, .Tab_3, .Tab_4, .Tab_5, .Tab_6, .Tab_7, .Tab_8, .Tab_9:
+		tab_select(app, w, int(action)-int(Action.Tab_1))
+	case .Split_Right: pane_split(app, w, .Horizontal)
+	case .Split_Down: pane_split(app, w, .Vertical)
+	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
+		direction := layout.Direction(int(action)-int(Action.Focus_Left))
+		pane_focus(app, w, layout.focus_direction(w.panes[:], w.tree.focus, direction))
+	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
+		axis: layout.Axis = action == .Resize_Left || action == .Resize_Right ? .Horizontal : .Vertical
+		delta: f32 = action == .Resize_Left || action == .Resize_Up ? -0.05 : 0.05
+		if layout.resize(w.tree, w.tree.focus, axis, delta) { window_relayout(app, w) }
 	}
 }
 

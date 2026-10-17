@@ -82,6 +82,23 @@ draw_list_destroy :: proc(list: ^Draw_List) {
 }
 
 @(require_results)
+append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
+	if reserve(&list.layers, len(list.layers)+len(source.layers)) != nil ||
+	   reserve(&list.rects, len(list.rects)+len(source.rects)) != nil ||
+	   reserve(&list.glyphs, len(list.glyphs)+len(source.glyphs)) != nil { return .Out_Of_Memory }
+	rect_offset, glyph_offset := len(list.rects), len(list.glyphs)
+	append(&list.rects, ..source.rects[:])
+	append(&list.glyphs, ..source.glyphs[:])
+	for layer in source.layers {
+		adjusted := layer
+		adjusted.rect_start += rect_offset
+		adjusted.glyph_start += glyph_offset
+		append(&list.layers, adjusted)
+	}
+	return .None
+}
+
+@(require_results)
 push_layer :: proc(list: ^Draw_List, clip: Rect) -> Error {
 	layer := Layer{clip = clip, rect_start = len(list.rects), glyph_start = len(list.glyphs)}
 	if _, err := append(&list.layers, layer); err != nil {
