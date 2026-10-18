@@ -24,7 +24,9 @@ shell_badges_follow_the_launched_executable_and_explicit_override :: proc(t: ^te
 @(test)
 reported_directories_decode_file_uris_without_corrupting_plain_paths :: proc(t: ^testing.T) {
 	for row in ([?][2]string{
-		{"file://machine/C:/Users/Some%20Name", "C:/Users/Some Name"},
+		{"file://machine/C:/Users/Some%20Name", `C:\Users\Some Name`},
+		{`C:/Users/mixed\path`, `C:\Users\mixed\path`},
+		{"//server/share", `\\server\share`},
 		{"file:///home/user/caf%C3%A9", "/home/user/café"},
 		{"C:\\literal%20name", "C:\\literal%20name"},
 		{"/home/user", "/home/user"},

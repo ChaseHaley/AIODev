@@ -41,16 +41,29 @@ hex_digit :: proc(c: u8) -> (u8, bool) {
 	return 0, false
 }
 
+// Windows drive and UNC paths display with backslashes; other paths, such as WSL or Unix ones, keep
+// their slashes.
+@(private)
+windows_separators :: proc(path: string) -> string {
+	drive := len(path) >= 2 && path[1] == ':' &&
+		((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))
+	if !drive && !strings.has_prefix(path, `\\`) && !strings.has_prefix(path, "//") { return path }
+	bytes := transmute([]u8)path
+	for &c in bytes { if c == '/' { c = '\\' } }
+	return path
+}
+
+// The display form of a shell directory: file URIs are decoded and Windows paths use backslashes.
 @(require_results)
 directory_label :: proc(raw: string, allocator := context.allocator) -> (string, runtime.Allocator_Error) {
 	text := raw
-	uri := strings.has_prefix(text, "file://")
-	if !uri { return strings.clone(raw, allocator) }
-	if uri {
-		text = text[7:]
-		if slash := strings.index_byte(text, '/'); slash >= 0 { text = text[slash:] }
-		if len(text) >= 3 && text[0] == '/' && text[2] == ':' { text = text[1:] }
+	if !strings.has_prefix(text, "file://") {
+		copy, err := strings.clone(raw, allocator)
+		return windows_separators(copy), err
 	}
+	text = text[7:]
+	if slash := strings.index_byte(text, '/'); slash >= 0 { text = text[slash:] }
+	if len(text) >= 3 && text[0] == '/' && text[2] == ':' { text = text[1:] }
 	builder, err := strings.builder_make(allocator)
 	if err != nil { return "", err }
 	defer strings.builder_destroy(&builder)
@@ -68,6 +81,6 @@ directory_label :: proc(raw: string, allocator := context.allocator) -> (string,
 	}
 	decoded := strings.to_string(builder)
 	if !utf8.valid_string(decoded) { return strings.clone(raw, allocator) }
-	return strings.clone(decoded, allocator)
+	copy, clone_error := strings.clone(decoded, allocator)
+	return windows_separators(copy), clone_error
 }
-

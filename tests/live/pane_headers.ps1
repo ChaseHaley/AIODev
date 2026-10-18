@@ -96,10 +96,12 @@ try {
     Invoke-Aio expect state panes.header_height=0
     Invoke-Aio command pane.split_right
     Invoke-Aio wait text 'PS '
+    Invoke-Aio expect state session.header.directory_source=launch
     Invoke-Aio run 'function prompt { "H> " }; $esc=[char]27; [Console]::Write("${esc}]2;HEADER_TITLE${esc}\${esc}]7;file:///C:/Header%20Test${esc}\"); Write-Output ("HEADER_"+"READY")'
     Invoke-Aio wait text HEADER_READY
     Invoke-Aio expect state session.header.title=HEADER_TITLE
-    Invoke-Aio expect state 'session.header.directory=C:/Header Test'
+    Invoke-Aio expect state 'session.header.directory=C:\Header Test'
+    Invoke-Aio expect state session.header.directory_source=shell
     Invoke-Aio expect state 'session.header.icon=>_'
     Invoke-Aio expect state panes.header_height=28
     $session = (Read-State)['session.id']
@@ -109,11 +111,13 @@ try {
     Invoke-Aio command settings.reload
     Invoke-Aio expect state "session.id=$session"
     Invoke-Aio expect state 'session.header.icon=>_'
-    Invoke-Aio expect state 'session.header.directory=C:/Header Test'
+    Invoke-Aio expect state 'session.header.directory=C:\Header Test'
+    Invoke-Aio expect state session.header.directory_source=shell
     Header-Button 1
     Invoke-Aio wait text 'Microsoft Windows'
     Invoke-Aio expect state 'session.header.icon=C:'
     Invoke-Aio expect state 'session.header.directory=C:\Windows'
+    Invoke-Aio expect state session.header.directory_source=launch
     Invoke-Aio expect state panes.count=3
     Header-Button 3
     Invoke-Aio expect state panes.count=2

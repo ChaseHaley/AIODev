@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:strings"
 import "aio:commands"
@@ -34,7 +35,9 @@ pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config) {
 	pane_header_destroy(header)
 	header.executable = header_clone(settings.shell_executable(config.command_line))
 	header.icon = settings.shell_icon(header.executable, "")
-	header.launch_directory = header_clone(config.working_directory)
+	launch, err := settings.directory_label(config.working_directory)
+	if err != nil { log.error("caching the pane launch directory failed") }
+	header.launch_directory = launch
 }
 
 pane_header_refresh :: proc(entry: ^Session_Entry) {
@@ -53,8 +56,10 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
-pane_header_directory :: proc(header: ^Pane_Header_Metadata) -> string {
-	return header.directory != "" ? header.directory : header.launch_directory
+// Without a shell report (OSC 7) only the launch directory is known, which may no longer be current.
+pane_header_directory :: proc(header: ^Pane_Header_Metadata) -> (directory: string, reported: bool) {
+	if header.directory != "" { return header.directory, true }
+	return header.launch_directory, false
 }
 
 pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
@@ -64,9 +69,11 @@ pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
 	for view in w.views { if view.content == pane.content { controls = view.header_controls; break } }
 	r := pane.rect
 	icon := app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon
+	directory, reported := pane_header_directory(&entry.header)
+	if !reported && directory != "" { directory = fmt.tprintf("started in %s", directory) }
 	return ui.header_draw(&w.list, &app.ui_text, app.theme, {r.x, r.y, r.width, r.height},
 		app.theme.pane, f32(app.settings.pane.corner_radius)*w.scale, w.scale,
-		pane_header_title(&entry.header), pane_header_directory(&entry.header), icon,
+		pane_header_title(&entry.header), directory, icon,
 		pane.node == w.tree.focus, controls, w.tree.zoomed)
 }
 

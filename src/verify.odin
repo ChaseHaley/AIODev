@@ -351,6 +351,7 @@ when AIO_CONTROL {
 				}
 				selection = text[:end]
 			}
+			directory, reported := pane_header_directory(&entry.header)
 			session := [?]control.State_Entry{
 				{"session.id", fmt.tprintf("%d", entry.id)},
 				{"session.message", session_message(status)},
@@ -359,7 +360,8 @@ when AIO_CONTROL {
 				{"session.exit", fmt.tprintf("%d", status.exit_code)},
 				{"session.title", term.title(s, context.temp_allocator)},
 				{"session.header.title", pane_header_title(&entry.header)},
-				{"session.header.directory", pane_header_directory(&entry.header)},
+				{"session.header.directory", directory},
+				{"session.header.directory_source", reported ? "shell" : "launch"},
 				{"session.header.icon", app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon},
 				{"grid.origin", fmt.tprintf("%d,%d", g.padding_left, g.padding_top)},
 				{"session.viewport", up == 0 ? "bottom" : fmt.tprintf("up:%d", up)},
