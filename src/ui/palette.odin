@@ -2,6 +2,7 @@ package ui
 
 import "base:runtime"
 import "core:unicode/utf8"
+import "core:strings"
 import "aio:commands"
 import "aio:fuzzy"
 import "aio:glyphs"
@@ -9,9 +10,9 @@ import "aio:platform"
 import "aio:render"
 
 @(private) PALETTE_MAX_ROWS :: 8
-@(private) PALETTE_WIDTH :: 640
-@(private) PALETTE_INPUT_HEIGHT :: 48
-@(private) PALETTE_ROW_HEIGHT :: 34
+@(private) PALETTE_WIDTH :: 560
+@(private) PALETTE_INPUT_HEIGHT :: 64
+@(private) PALETTE_ROW_HEIGHT :: 42
 @(private) PALETTE_PADDING :: 8
 @(private) PALETTE_RADIUS :: 10
 
@@ -24,6 +25,7 @@ Outcome :: enum {
 
 Palette :: struct {
 	open: bool,
+	motion: Motion,
 	query: [dynamic]u8,
 	selected, scroll: int,
 	results: [dynamic]commands.Search_Result,
@@ -63,8 +65,6 @@ palette_open :: proc(p: ^Palette, registry: ^commands.Registry) {
 
 palette_close :: proc(p: ^Palette) {
 	p.open = false
-	clear(&p.query)
-	clear(&p.results)
 }
 
 @(private)
@@ -198,7 +198,7 @@ palette_layout :: proc(p: ^Palette, width, height, scale: f32) -> Palette_Layout
 	input_height := PALETTE_INPUT_HEIGHT * scale
 	panel := render.Rect{
 		x = (width - panel_width) / 2,
-		y = max(24 * scale, height * 0.15),
+		y = max(24 * scale, height * 0.12),
 		width = panel_width,
 		height = input_height + 1 + 2 * padding + f32(rows) * row_height,
 	}
@@ -271,10 +271,11 @@ palette_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
-	shadow := render.Rect{panel.x, panel.y + 8 * scale, panel.width, panel.height}
+	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
+	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
 	border := render.Rect{panel.x - scale, panel.y - scale, panel.width + 2 * scale, panel.height + 2 * scale}
 	rects := [?]render.Rect_Instance{
-		{rect = shadow, color = theme.shadow, radius = radius, softness = 18 * scale},
+		{rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale},
 		{rect = border, color = theme.border, radius = radius + scale},
 		{rect = panel, color = theme.surface, radius = radius},
 		{rect = {panel.x, l.input.y + l.input.height, panel.width, scale}, color = theme.border},
@@ -283,16 +284,20 @@ palette_draw :: proc(
 		draw_rect(list, r)
 	}
 	padding := 14 * scale
-	baseline := l.input.y + (l.input.height - text.line_height) / 2 + text.ascent
+	input_text := text_styled(text, .Input)
+	label_text := text_styled(text, .Label)
+	if result := draw_text(&label_text, list, "COMMANDS", l.input.x+padding, l.input.y+19*scale, theme.faint);
+		result != .Ok { return result }
+	baseline := l.input.y + 43*scale
 	query := string(p.query[:])
 	shown, shown_color := query, theme.text
 	if len(query) == 0 {
 		shown, shown_color = "Type a command", theme.muted
 	}
-	if result := draw_text(text, list, shown, l.input.x + padding, baseline, shown_color); result != .Ok {
+	if result := draw_text(&input_text, list, shown, l.input.x + padding, baseline, shown_color); result != .Ok {
 		return result
 	}
-	caret_x := l.input.x + padding + text_width(text, query)
+	caret_x := l.input.x + padding + text_width(&input_text, query)
 	caret := render.Rect{caret_x, baseline - text.ascent, max(1, 1.5 * scale), text.line_height}
 	draw_rect(list, {rect = caret, color = theme.accent})
 	if len(p.results) == 0 {
@@ -306,13 +311,30 @@ palette_draw :: proc(
 		if index == p.selected {
 			draw_rect(list, {rect = row, color = theme.selection, radius = 6 * scale})
 		}
-		row_baseline := row.y + (row.height - text.line_height) / 2 + text.ascent
+		row_baseline := row.y + 31*scale
+		category := item.command.name
+		if dot := strings.index_byte(category, '.'); dot >= 0 { category = category[:dot] }
+		switch category {
+		case "app": category = "APPLICATION"
+		case "terminal": category = "TERMINAL"
+		case "pane": category = "PANES"
+		case "tab": category = "TABS"
+		case "settings": category = "SETTINGS"
+		case "edit": category = "EDIT"
+		case "view": category = "VIEW"
+		case: category = "COMMANDS"
+		}
+		if result := draw_text(&label_text, list, category, row.x+padding, row.y+13*scale, theme.faint);
+			result != .Ok { return result }
 		label_width: f32
 		if shortcuts := commands.active_shortcuts(item.command); len(shortcuts) > 0 {
 			if label, err := commands.shortcut_label(shortcuts[0], label_buffer[:]); err == .None {
-				label_width = text_width(text, label)
+				key_text := text_styled(text, .Keycap)
+				label_width = text_width(&key_text, label)+12*scale
 				x := row.x + row.width - padding - label_width
-				if result := draw_text(text, list, label, x, row_baseline, theme.muted); result != .Ok {
+				draw_rect(list, {rect = {x-4*scale, row.y+7*scale, label_width+4*scale, row.height-14*scale},
+					color = theme.border, radius = 4*scale, stroke = scale})
+				if result := draw_text(&key_text, list, label, x+2*scale, row_baseline, theme.muted); result != .Ok {
 					return result
 				}
 			}

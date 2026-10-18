@@ -97,6 +97,7 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 			continue
 		}
 		c->RSSetScissorRects(1, &clip)
+		constants.round_clip, constants.clip_radius = layer.clip, layer.radius
 		constants.rect_start, constants.glyph_start = u32(layer.rect_start), u32(layer.glyph_start)
 		mapped: d3d.MAPPED_SUBRESOURCE
 		if err := checked(d, c->Map(d.constants, 0, .WRITE_DISCARD, {}, &mapped), "Map constants"); err != .None {

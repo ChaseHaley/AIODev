@@ -39,6 +39,8 @@ editor_layout_hit_targets_scale :: proc(t: ^testing.T) {
 		testing.expect(t, l.close.x+l.close.width < l.panel.x+l.panel.width)
 		p: ui.Editor
 		defer ui.editor_destroy(&p)
+		testing.expect_value(t, ui.editor_add(&p, {"x", "X", "", "", ""}), nil)
+		ui.editor_filter(&p)
 		testing.expect_value(t, ui.editor_click(&p, l, l.save.x+1, l.save.y+1), ui.Editor_Outcome.Save)
 		testing.expect_value(t, ui.editor_click(&p, l, l.reset.x+1, l.reset.y+1), ui.Editor_Outcome.Reset)
 		testing.expect_value(t, ui.editor_click(&p, l, l.close.x+1, l.close.y+1), ui.Editor_Outcome.Closed)

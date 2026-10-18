@@ -5,26 +5,26 @@ import "core:math"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
+import "aio:settings"
 
 Theme :: struct {
-	surface, border, text, muted, accent, selection, shadow, error: render.Color,
+	window, chrome, pane, surface, border, text, muted, faint, accent, accent_text: render.Color,
+	selection, shadow, scrim, hover, pressed, focus, error, success, warning, info: render.Color,
 }
 
-theme_from :: proc(background, foreground, accent, error: render.Color) -> Theme {
-	mix :: proc(a, b: render.Color, t: f32) -> render.Color {
-		c := a + (b - a) * t
-		c.a = 1
-		return c
+theme_from :: proc(t: settings.Theme) -> Theme {
+	rgb :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {
+		return {f32(c.r)/255, f32(c.g)/255, f32(c.b)/255, alpha}
 	}
 	return {
-		surface = mix(background, foreground, 0.07),
-		border = mix(background, foreground, 0.18),
-		text = foreground,
-		muted = mix(background, foreground, 0.55),
-		accent = accent,
-		selection = mix(background, accent, 0.30),
-		shadow = {0, 0, 0, 0.45},
-		error = error,
+		window = rgb(t.window), chrome = rgb(t.chrome), pane = rgb(t.pane), surface = rgb(t.raised),
+		text = rgb(t.text), muted = rgb(t.muted), faint = rgb(t.faint),
+		accent = rgb(t.accent), accent_text = rgb(t.accent_text),
+		border = rgb(t.text, t.light ? 0.09 : 0.08),
+		hover = rgb(t.text, t.light ? 0.04 : 0.05), pressed = rgb(t.text, t.light ? 0.08 : 0.09),
+		selection = rgb(t.accent, t.light ? 0.10 : 0.14), focus = rgb(t.accent, 0.50),
+		shadow = {0, 0, 0, t.light ? 0.12 : 0.35}, scrim = {0, 0, 0, t.light ? 0.08 : 0.18},
+		error = rgb(t.danger), success = rgb(t.success), warning = rgb(t.warning), info = rgb(t.info),
 	}
 }
 
@@ -34,7 +34,7 @@ theme_from :: proc(background, foreground, accent, error: render.Color) -> Theme
 Text :: struct {
 	fonts: ^font.System,
 	cache: ^glyphs.Cache,
-	family: font.Family,
+	family, strong_family: font.Family,
 	size_px, ascent, line_height: f32,
 }
 
@@ -44,7 +44,10 @@ text_init :: proc(t: ^Text, fonts: ^font.System, cache: ^glyphs.Cache, size_px: 
 	for name in UI_FAMILIES {
 		family, err := font.family_load(fonts, name)
 		if err == .None {
-			t.family = family
+			t.family, t.strong_family = family, family
+			if strong, strong_error := font.family_load(fonts, name, true); strong_error == .None {
+				t.strong_family = strong
+			}
 			text_set_size(t, size_px)
 			return true
 		}
@@ -168,4 +171,49 @@ draw_rect :: proc(list: ^render.Draw_List, instance: render.Rect_Instance) {
 	if render.push_rect(list, instance) != .None {
 		log.error("ui: the draw list ran out of memory")
 	}
+}
+
+Text_Style :: enum { Body, Strong, Small, Label, Input, Keycap }
+
+text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
+	copy := t^
+	size := f32(12)
+	#partial switch style {
+	case .Small: size = 11
+	case .Label: size = 10.5
+	case .Input: size = 13
+	case .Keycap: size = 10
+	}
+	if style == .Strong || style == .Label { copy.family = t.strong_family }
+	text_set_size(&copy, t.size_px*size/12)
+	return copy
+}
+
+draw_fading_text :: proc(t: ^Text, list: ^render.Draw_List, s: string,
+	x, baseline: f32, color: render.Color, width: f32) -> glyphs.Result {
+	if width <= 0 { return .Ok }
+	pen := x
+	clipped := text_width(t, s) > width
+	for r in s {
+		if pen >= x+width { break }
+		g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
+		if !found { continue }
+		start := len(list.glyphs)
+		if result := draw_glyph(t, list, g, pen, baseline, color); result != .Ok { return result }
+		if clipped && len(list.glyphs) > start {
+			glyph := &list.glyphs[start]
+			glyph.flags |= render.GLYPH_FADE
+			glyph.fade_start, glyph.fade_end = x+width*0.8, x+width
+		}
+		pen += font.glyph_advance(t.fonts, g, t.size_px)
+	}
+	return .Ok
+}
+
+@(private)
+focus_ring_draw :: proc(list: ^render.Draw_List, rect: render.Rect, theme: Theme, scale: f32) {
+	gap := render.Rect{rect.x-scale, rect.y-scale, rect.width+2*scale, rect.height+2*scale}
+	ring := render.Rect{rect.x-3*scale, rect.y-3*scale, rect.width+6*scale, rect.height+6*scale}
+	draw_rect(list, {rect = gap, color = theme.window, radius = 7*scale, stroke = scale})
+	draw_rect(list, {rect = ring, color = theme.accent, radius = 9*scale, stroke = 2*scale})
 }

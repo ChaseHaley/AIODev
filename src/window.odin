@@ -7,6 +7,7 @@ import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
+import "aio:settings"
 import "aio:term"
 import "aio:term_view"
 import "aio:ui"
@@ -49,6 +50,10 @@ Window :: struct {
 	find: ui.Find_Bar,
 	editor: ui.Editor,
 	leader_until: time.Tick,
+	tab_underline: ui.Motion,
+	tab_controls: [dynamic]ui.Control_Motion,
+	tab_hover: int,
+	tab_pressed: bool,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
@@ -77,6 +82,8 @@ window_open :: proc(app: ^App) -> bool {
 	w.panes = make([dynamic]layout.Pane_Rect)
 	w.views = make([dynamic]Pane_View)
 	ui.find_init(&w.find)
+	w.tab_hover = -1
+	w.tab_controls = make([dynamic]ui.Control_Motion)
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
 	w.dirty = true
@@ -140,6 +147,7 @@ window_free :: proc(w: ^Window) {
 		render.draw_list_destroy(&pane.cache)
 	}
 	delete(w.views)
+	delete(w.tab_controls)
 	delete(w.panes)
 	ui.find_destroy(&w.find)
 	ui.editor_destroy(&w.editor)
@@ -168,7 +176,8 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 
 window_apply_settings :: proc(app: ^App, w: ^Window) {
 	w.metrics = window_metrics(app, w.scale)
-	if platform.window_set_frame_color(&app.platform, w.id, app.settings.colors.background) != .None {
+	theme := settings.theme_resolve(app.settings.theme)
+	if platform.window_set_frame_color(&app.platform, w.id, theme.chrome, theme.text) != .None {
 		log.error("setting the window frame color failed")
 	}
 	window_relayout(app, w)
@@ -194,9 +203,12 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
+	if resize(&w.tab_controls, len(w.workspace.tabs)+1) != nil {
+		log.error("resizing tab control states failed")
+	}
 	area := window_content_area(app, w)
-	layout.compute(w.tree, area, 1, &w.panes)
-	layout.dividers(w.tree, area, 1, &w.dividers)
+	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
+	layout.dividers(w.tree, area, window_gap(app, w), &w.dividers)
 	for i := len(w.views)-1; i >= 0; i -= 1 {
 		visible := false
 		for pane in w.panes { visible ||= pane.content == w.views[i].content }
@@ -316,11 +328,10 @@ window_render :: proc(app: ^App, w: ^Window) {
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}
-	background := color(app.settings.colors.background)
+	background := app.theme.window
 	for _ in 0 ..< 2 {
-		frame, result := build_frame(app, w)
+		_, result := build_frame(app, w)
 		if result == .Ok {
-			background = frame.background
 			break
 		}
 	}
@@ -347,6 +358,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		selection_foreground = color(fg)
 	}
 	for pane in w.panes {
+		card := len(w.list.rects)
+		window_card_draw(app, w, pane)
 		entry := session_find(app, pane.content.id)
 		view := pane_view(w, pane.content)
 		if entry == nil || view == nil {
@@ -371,13 +384,15 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if result != .Ok {
 			return frame, result
 		}
+		if card < len(w.list.rects) { w.list.rects[card].color = frame.background }
 		blinking ||= frame.cursor_blinking && content_focused
 		if entry.status != .Running {
 			message := session_message(term.status(entry.session))
 			if message_result := ui.pane_message_draw(&w.list, &app.ui_text, app.theme,
-				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}, message, w.scale);
+				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}, message, w.scale, f32(app.settings.pane.corner_radius)*w.scale);
 				message_result != .Ok { return frame, message_result }
 		}
+		window_card_outline(app, w, pane)
 	}
 	if blinking != w.blinking {
 		w.blinking = blinking
@@ -392,13 +407,14 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			return frame, result
 		}
 	}
-	if app.palette.open {
+	if app.palette.open || app.palette.motion.value > 0 {
+		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		result := ui.palette_draw(
 			&app.palette, &app.registry, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale,
 		)
-		if result != .Ok {
-			return frame, result
-		}
+		ui.fade_draw(&w.list, layers, rects, glyph_count, app.palette.motion.value,
+			app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0)
+		if result != .Ok { return frame, result }
 	}
 	if w.editor.open {
 		result := ui.editor_draw(&w.editor, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)
@@ -444,10 +460,11 @@ build_pane :: proc(
 	view: ^term_view.View, origin: [2]f32, style: term_view.Style,
 ) -> (term_view.Frame, glyphs.Result) {
 	clip := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
+	radius := f32(app.settings.pane.corner_radius)*w.scale
 	for &cached in w.views {
 		if cached.content != pane.content { continue }
 		if len(w.panes) == 1 {
-			if render.push_layer(&w.list, clip) != .None { return {}, .Ok }
+			if render.push_layer(&w.list, clip, radius) != .None { return {}, .Ok }
 			cached.builds += 1
 			return term_view.build(view, entry.session, app.fonts, &app.cache,
 				&w.list, origin, w.metrics, style)
@@ -458,7 +475,7 @@ build_pane :: proc(
 		   cached.style != style {
 			cached.valid = false
 			render.draw_list_reset(&cached.cache)
-			if render.push_layer(&cached.cache, clip) != .None { return {}, .Ok }
+			if render.push_layer(&cached.cache, clip, radius) != .None { return {}, .Ok }
 			frame, result := term_view.build(view, entry.session, app.fonts, &app.cache,
 				&cached.cache, origin, w.metrics, style)
 			if result != .Ok { return frame, result }

@@ -2,6 +2,7 @@ package ui
 
 import "base:runtime"
 import "core:fmt"
+import "core:time"
 import "core:strings"
 import "core:unicode/utf8"
 import "aio:glyphs"
@@ -76,6 +77,8 @@ field_key :: proc(f: ^Text_Field, e: platform.Key_Event) {
 Editor_Row :: struct { key, title, description, value, default_value: string }
 Editor :: struct {
 	open, editing: bool,
+	hover, pressed, button_focus: int,
+	controls: [3]Control_Motion,
 	rows: [dynamic]Editor_Row,
 	matches: [dynamic]int,
 	selected, scroll, visible_rows: int,
@@ -157,24 +160,34 @@ editor_key :: proc(p: ^Editor, e: platform.Key_Event) -> Editor_Outcome {
 	if !e.pressed { return .None }
 	#partial switch e.key {
 	case .Escape: p.open = false; return .Closed
-	case .Tab: p.editing = !p.editing; return .Changed
+	case .Tab:
+		focus := p.button_focus > 0 ? p.button_focus+1 : (p.editing ? 1 : 0)
+		if .Shift in e.modifiers { focus = (focus+4)%5 } else { focus = (focus+1)%5 }
+		p.button_focus = focus >= 2 ? focus-1 : 0
+		p.editing = focus == 1
+		return .Changed
 	case .Arrow_Up: editor_select(p, p.selected-1); return .Changed
 	case .Arrow_Down: editor_select(p, p.selected+1); return .Changed
 	case .Page_Up: editor_select(p, p.selected-max(1, p.visible_rows)); return .Changed
 	case .Page_Down: editor_select(p, p.selected+max(1, p.visible_rows)); return .Changed
 	case .Enter, .Numpad_Enter:
+		if p.button_focus == 1 { return editor_row(p) == nil ? .None : .Save }
+		if p.button_focus == 2 { return editor_row(p) == nil ? .None : .Reset }
+		if p.button_focus == 3 { p.open = false; return .Closed }
 		if p.editing { return .Save }
 		p.editing = true
 		return .Changed
 	case .R:
 		if .Control in e.modifiers { return .Reset }
 	}
+	if p.button_focus > 0 { return .None }
 	if p.editing { field_key(&p.value, e) }
 	else { field_key(&p.filter, e); editor_filter(p) }
 	return .Changed
 }
 
 editor_text :: proc(p: ^Editor, text: string) {
+	if p.button_focus > 0 { return }
 	if p.editing { field_text(&p.value, text) }
 	else { field_text(&p.filter, text); editor_filter(p) }
 }
@@ -189,7 +202,7 @@ editor_layout :: proc(width, height, scale: f32) -> Editor_Layout {
 	l.rows = max(0, int((h-306*scale)/l.row_height))
 	l.list = {x+pad, l.filter.y+44*scale, max(0, w-2*pad), f32(l.rows)*l.row_height}
 	l.value = {x+pad, l.list.y+l.list.height+76*scale, max(0, w-2*pad), 36*scale}
-	l.save = {x+pad, y+h-48*scale, 120*scale, 32*scale}
+	l.save = {x+pad, y+h-48*scale, 120*scale, 26*scale}
 	l.reset = {l.save.x+132*scale, l.save.y, 132*scale, l.save.height}
 	l.close = {x+w-pad-82*scale, l.save.y, 82*scale, l.save.height}
 	return l
@@ -202,13 +215,13 @@ editor_contains :: proc(r: render.Rect, x, y: f32) -> bool {
 
 editor_click :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> Editor_Outcome {
 	if editor_contains(l.close, x, y) { p.open = false; return .Closed }
-	if editor_contains(l.save, x, y) { return .Save }
-	if editor_contains(l.reset, x, y) { return .Reset }
-	if editor_contains(l.filter, x, y) { p.editing = false }
-	if editor_contains(l.value, x, y) { p.editing = true }
+	if editor_contains(l.save, x, y) { return editor_row(p) == nil ? .None : .Save }
+	if editor_contains(l.reset, x, y) { return editor_row(p) == nil ? .None : .Reset }
+	if editor_contains(l.filter, x, y) { p.editing = false; p.button_focus = 0 }
+	if editor_contains(l.value, x, y) { p.editing = true; p.button_focus = 0 }
 	if editor_contains(l.list, x, y) {
 		i := p.scroll+int((y-l.list.y)/l.row_height)
-		if i < len(p.matches) { editor_select(p, i); p.editing = true }
+		if i < len(p.matches) { editor_select(p, i); p.editing = true; p.button_focus = 0 }
 	}
 	return .Changed
 }
@@ -218,20 +231,24 @@ editor_draw :: proc(p: ^Editor, list: ^render.Draw_List, text: ^Text, theme: The
 	l := editor_layout(width, height, scale)
 	p.visible_rows = l.rows
 	if render.push_layer(list, {0, 0, width, height}) != .None { return .Ok }
-	draw_rect(list, {rect = {0, 0, width, height}, color = theme.shadow})
+	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
+	shadow := l.panel
+	shadow.y += 12*scale
+	draw_rect(list, {rect = shadow, color = theme.shadow, radius = 10*scale, softness = 32*scale})
 	draw_rect(list, {rect = l.panel, color = theme.surface, radius = 10*scale})
+	draw_rect(list, {rect = l.panel, color = theme.border, radius = 10*scale, stroke = scale})
 	if render.push_layer(list, l.panel) != .None { return .Ok }
 	x, y := l.filter.x, l.panel.y+28*scale
 	if r := draw_text(text, list, "Settings", x, y, theme.text); r != .Ok { return r }
 	count := fmt.tprintf("%d results", len(p.matches))
 	if r := draw_text(text, list, count, x+110*scale, y, theme.muted,
 		max(1, l.panel.width-140*scale)); r != .Ok { return r }
-	if r := editor_field_draw(&p.filter, list, text, theme, l.filter, !p.editing,
+	if r := editor_field_draw(&p.filter, list, text, theme, l.filter, !p.editing && p.button_focus == 0,
 		"Filter settings and shortcuts", scale); r != .Ok { return r }
 	for index in p.scroll..<min(len(p.matches), p.scroll+l.rows) {
 		row := p.rows[p.matches[index]]
 		r := render.Rect{l.list.x, l.list.y+f32(index-p.scroll)*l.row_height, l.list.width, l.row_height}
-		if index == p.selected { draw_rect(list, {rect = r, color = theme.selection, radius = 4*scale}) }
+		if index == p.selected { draw_rect(list, {rect = r, color = theme.selection, radius = 6*scale}) }
 		baseline := r.y+(r.height-text.line_height)/2+text.ascent
 		if result := draw_text(text, list, row.title, r.x+8*scale, baseline, theme.text,
 			max(1, r.width*0.58-16*scale)); result != .Ok { return result }
@@ -241,29 +258,45 @@ editor_draw :: proc(p: ^Editor, list: ^render.Draw_List, text: ^Text, theme: The
 	if row := editor_row(p); row != nil {
 		if r := draw_text(text, list, row.key, x, l.value.y-52*scale, theme.accent,
 			max(1, l.value.width)); r != .Ok { return r }
-		if r := draw_text(text, list, row.description, x, l.value.y-28*scale, theme.muted,
+		small := text_styled(text, .Small)
+		if r := draw_text(&small, list, row.description, x, l.value.y-28*scale, theme.muted,
 			max(1, l.value.width)); r != .Ok { return r }
 	}
-	if r := editor_field_draw(&p.value, list, text, theme, l.value, p.editing,
+	if r := editor_field_draw(&p.value, list, text, theme, l.value, p.editing && p.button_focus == 0,
 		"Empty value", scale); r != .Ok { return r }
 	status := p.message
-	if status == "" { status = "Tab: filter / value   Up/Down: select   Enter: save   Esc: close" }
+	if status == "" { status = "Tab: move focus   Up/Down: select   Enter: activate   Esc: close" }
 	if r := draw_text(text, list, status, x, l.value.y+59*scale, p.error ? theme.error : theme.muted,
 		max(1, l.value.width)); r != .Ok { return r }
 	for rect, i in ([?]render.Rect{l.save, l.reset, l.close}) {
-		draw_rect(list, {rect = rect, color = i == 0 ? theme.selection : theme.border, radius = 4*scale})
+		disabled := i < 2 && editor_row(p) == nil
+		layers, rect_start, glyph_start := len(list.layers), len(list.rects), len(list.glyphs)
+		strong := text_styled(text, i == 0 ? .Strong : .Body)
+		draw_rect(list, {rect = rect, color = i == 0 ? theme.accent : theme.surface, radius = 6*scale})
+		if i != 0 { draw_rect(list, {rect = rect, color = theme.border, radius = 6*scale, stroke = scale}) }
+		fill := theme.hover
+		fill.a *= p.controls[i].hover.value
+		draw_rect(list, {rect = rect, color = fill, radius = 6*scale})
+		fill = theme.pressed
+		fill.a *= p.controls[i].press.value
+		draw_rect(list, {rect = rect, color = fill, radius = 6*scale})
+		if p.button_focus == i+1 { focus_ring_draw(list, rect, theme, scale) }
 		labels := [?]string{"Save change", "Reset default", "Close"}
-		if r := draw_text(text, list, labels[i], rect.x+10*scale,
-			rect.y+(rect.height-text.line_height)/2+text.ascent, theme.text,
+		if r := draw_text(&strong, list, labels[i], rect.x+10*scale,
+			rect.y+(rect.height-text.line_height)/2+text.ascent, i == 0 ? theme.accent_text : theme.text,
 			max(1, rect.width-20*scale)); r != .Ok { return r }
+		if disabled { fade_draw(list, layers, rect_start, glyph_start, 0.45, 0) }
 	}
 	return .Ok
 }
 
 @(private)
-editor_field_draw :: proc(f: ^Text_Field, list: ^render.Draw_List, text: ^Text, theme: Theme,
+editor_field_draw :: proc(f: ^Text_Field, list: ^render.Draw_List, base: ^Text, theme: Theme,
 	r: render.Rect, focused: bool, placeholder: string, scale: f32) -> glyphs.Result {
-	draw_rect(list, {rect = r, color = focused ? theme.selection : theme.border, radius = 4*scale})
+	input_text := text_styled(base, .Input)
+	text := &input_text
+	draw_rect(list, {rect = r, color = theme.border, radius = 6*scale})
+	if focused { focus_ring_draw(list, r, theme, scale) }
 	value := string(f.bytes[:])
 	available := max(1, r.width-20*scale)
 	start := 0
@@ -279,11 +312,37 @@ editor_field_draw :: proc(f: ^Text_Field, list: ^render.Draw_List, text: ^Text, 
 		draw_rect(list, {rect = {x, baseline-text.ascent, min(available, text_width(text, shown)),
 			text.line_height}, color = theme.accent})
 	}
-	if result := draw_text(text, list, shown, x, baseline, value == "" ? theme.muted : theme.text,
+	if result := draw_text(text, list, shown, x, baseline, value == "" ? theme.muted : (f.selected && focused ? theme.accent_text : theme.text),
 		available); result != .Ok { return result }
 	if focused {
 		caret := x+min(available, text_width(text, value[start:f.cursor]))
 		draw_rect(list, {rect = {caret, baseline-text.ascent, scale, text.line_height}, color = theme.accent})
 	}
 	return .Ok
+}
+
+editor_pointer :: proc(p: ^Editor, width, height, scale, x, y: f32, pressed: bool) -> bool {
+	previous_hover, previous_press := p.hover, p.pressed
+	l := editor_layout(width, height, scale)
+	p.hover = 0
+	for rect, i in ([?]render.Rect{l.save, l.reset, l.close}) {
+		if editor_contains(rect, x, y) && (i == 2 || editor_row(p) != nil) { p.hover = i+1 }
+	}
+	p.pressed = pressed ? p.hover : 0
+	return p.hover != previous_hover || p.pressed != previous_press
+}
+
+editor_animating :: proc(p: ^Editor) -> bool {
+	if !p.open { return false }
+	for control in p.controls { if control_active(control) { return true } }
+	return false
+}
+
+editor_animate :: proc(p: ^Editor, now: time.Tick, enabled: bool) -> bool {
+	if !p.open { return false }
+	changed := false
+	for &control, i in p.controls {
+		changed = control_update(&control, p.hover == i+1, p.pressed == i+1, enabled, now) || changed
+	}
+	return changed
 }

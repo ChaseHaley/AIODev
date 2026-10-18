@@ -43,6 +43,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			on_mouse_move(app, w, e)
 		}
 	case platform.Mouse_Leave_Event:
+		if w := window_find(app, e.window); w != nil {
+			w.tab_hover = -1
+			w.tab_pressed = false
+			w.editor.hover, w.editor.pressed = 0, 0
+			w.dirty = true
+		}
 	case platform.Mouse_Wheel_Event:
 		if w := window_find(app, e.window); w != nil {
 			on_wheel(app, w, e)
@@ -70,6 +76,8 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		case TRAY_OPEN: show_window(app)
 		case TRAY_QUIT: app.running = false
 		}
+	case platform.Settings_Event:
+		refresh_animations(app)
 	case platform.Wake_Event:
 	}
 }
@@ -216,6 +224,10 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	w.tab_pressed = e.pressed && e.button == .Left &&
+		ui.tab_bar_hit_test(window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
+	w.dirty = true
+	if w.editor.open { ui.editor_pointer(&w.editor, f32(w.width), f32(w.height), w.scale, f32(e.x), f32(e.y), e.pressed) }
 	if w.editor.open {
 		if e.button == .Left && e.pressed {
 			l := ui.editor_layout(f32(w.width), f32(w.height), w.scale)
@@ -283,10 +295,20 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
-	if w.editor.open { return }
+	if w.editor.open {
+		if ui.editor_pointer(&w.editor, f32(w.width), f32(w.height), w.scale, x, y, .Left in e.buttons) {
+			w.dirty = true
+		}
+		return
+	}
+	hover := ui.tab_bar_hit_test(window_tab_bar(app, w), x, y)
+	if hover != w.tab_hover {
+		w.tab_hover = hover
+		w.dirty = true
+	}
 	if divider, dragging := w.dragging.?; dragging {
 		if .Left not_in e.buttons { w.dragging = nil; return }
-		if layout.drag_divider(w.tree, divider, x, y, 1) { window_relayout(app, w) }
+		if layout.drag_divider(w.tree, divider, x, y, window_gap(app, w)) { window_relayout(app, w) }
 		return
 	}
 	shape: platform.Cursor_Shape = .Text
@@ -347,6 +369,9 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		w.tab_pressed = false
+		w.tab_hover = -1
+		w.editor.hover, w.editor.pressed = 0, 0
 		w.leader_until = {}
 		ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
 		w.selecting, w.autoscrolling = false, false

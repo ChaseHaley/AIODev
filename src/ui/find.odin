@@ -91,19 +91,21 @@ find_contains :: proc(width, scale, x, y: f32) -> bool {
 find_draw :: proc(
 	f: ^Find_Bar,
 	list: ^render.Draw_List,
-	text: ^Text,
+	base: ^Text,
 	theme: Theme,
 	status: string,
 	width, height, scale: f32,
 ) -> glyphs.Result {
+	input_text := text_styled(base, .Input)
+	text := &input_text
 	panel := find_layout(width, scale)
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
 	radius := FIND_RADIUS * scale
-	shadow := render.Rect{panel.x, panel.y + 6 * scale, panel.width, panel.height}
+	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
 	border := render.Rect{panel.x - scale, panel.y - scale, panel.width + 2 * scale, panel.height + 2 * scale}
-	draw_rect(list, {rect = shadow, color = theme.shadow, radius = radius, softness = 14 * scale})
+	draw_rect(list, {rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale})
 	draw_rect(list, {rect = border, color = theme.border, radius = radius + scale})
 	draw_rect(list, {rect = panel, color = theme.surface, radius = radius})
 	padding := FIND_PADDING * scale

@@ -1,7 +1,7 @@
 package main
 
 import "core:fmt"
-import "core:log"
+import "core:math"
 import "aio:glyphs"
 import "aio:layout"
 import "aio:render"
@@ -15,7 +15,8 @@ window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 
 window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 	bar := window_tab_bar(app, w)
-	return {0, bar.height, f32(w.width), max(0, f32(w.height)-bar.height)}
+	r := ui.pane_area(f32(w.width), f32(w.height), bar.height, f32(app.settings.pane.gap), w.scale)
+	return {r.x, r.y, r.width, r.height}
 }
 
 window_generation :: proc(app: ^App, w: ^Window) -> u64 {
@@ -29,22 +30,93 @@ window_generation :: proc(app: ^App, w: ^Window) -> u64 {
 }
 
 window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	if len(w.dividers) > 0 {
-		if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) == .None {
-			for d in w.dividers {
-				r := d.rect
-				if render.push_rect(&w.list, {rect = {r.x, r.y, r.width, r.height},
-					color = app.theme.border}) != .None { log.error("drawing a divider failed") }
-			}
-		}
-	}
+	window_shared_borders(app, w)
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 { return .Ok }
+	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {
+		if render.push_rect(&w.list, {rect = {0, 0, f32(w.width), bar.height}, color = app.theme.chrome}) != .None {
+			return .Ok
+		}
+	}
 	for tab, i in w.workspace.tabs {
 		title := fmt.tprintf("Tab %d", i+1)
 		if tab.title != "" { title = tab.title }
 		if result := ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, i, title,
-			i == w.workspace.selected, w.scale); result != .Ok { return result }
+			i == w.workspace.selected, w.scale,
+			tab_control(w, i).hover.value, tab_control(w, i).press.value, 0); result != .Ok { return result }
 	}
-	return ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, bar.count, "+", false, w.scale)
+	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {
+		x := w.tab_underline.value*bar.tab_width+10*w.scale
+		if render.push_rect(&w.list, {rect = {x, 30*w.scale, max(0, bar.tab_width-20*w.scale), 2*w.scale},
+			color = app.theme.accent, radius = w.scale}) != .None { return .Ok }
+	}
+	return ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, bar.count, "+", false, w.scale,
+		tab_control(w, bar.count).hover.value, tab_control(w, bar.count).press.value, 0)
+}
+
+window_gap :: proc(app: ^App, w: ^Window) -> f32 {
+	return ui.pane_gap(f32(app.settings.pane.gap), w.scale)
+}
+
+window_card_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
+	r := pane.rect
+	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return }
+	radius := f32(app.settings.pane.corner_radius)*w.scale
+	if render.push_rect(&w.list, {rect = {r.x, r.y, r.width, r.height},
+		color = color(app.settings.colors.background), radius = radius}) != .None { return }
+}
+
+window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
+	r := pane.rect
+	clip := render.Rect{0, 0, f32(w.width), f32(w.height)}
+	if app.settings.pane.gap == 0 {
+		clip = {r.x, r.y, r.width, r.height}
+		edge := math.ceil(max(1, w.scale))
+		for d in w.dividers {
+			if d.axis == .Horizontal {
+				if r.x == d.rect.x+d.rect.width { clip.x += edge; clip.width -= edge }
+				if r.x+r.width == d.rect.x { clip.width -= edge }
+			} else {
+				if r.y == d.rect.y+d.rect.height { clip.y += edge; clip.height -= edge }
+				if r.y+r.height == d.rect.y { clip.height -= edge }
+			}
+		}
+	}
+	if render.push_layer(&w.list, clip) != .None { return }
+	radius := f32(app.settings.pane.corner_radius)*w.scale
+	border := pane.node == w.tree.focus ? app.theme.focus : app.theme.border
+	if render.push_rect(&w.list, {rect = {r.x, r.y, r.width, r.height}, color = border,
+		radius = radius, stroke = max(1, w.scale)}) != .None { return }
+}
+
+@(private)
+tab_control :: proc(w: ^Window, index: int) -> ui.Control_Motion {
+	if index < 0 || index >= len(w.tab_controls) { return {} }
+	return w.tab_controls[index]
+}
+
+@(private)
+window_shared_borders :: proc(app: ^App, w: ^Window) {
+	if app.settings.pane.gap != 0 || len(w.dividers) == 0 { return }
+	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return }
+	for d in w.dividers {
+		r := d.rect
+		if render.push_rect(&w.list, {rect = {r.x, r.y, r.width, r.height}, color = app.theme.border}) != .None { return }
+		for pane in w.panes {
+			if pane.node != w.tree.focus { continue }
+			p := pane.rect
+			segment := r
+			if d.axis == .Horizontal {
+				if p.x+p.width != r.x && p.x != r.x+r.width { continue }
+				segment.y = max(r.y, p.y)
+				segment.height = max(0, min(r.y+r.height, p.y+p.height)-segment.y)
+			} else {
+				if p.y+p.height != r.y && p.y != r.y+r.height { continue }
+				segment.x = max(r.x, p.x)
+				segment.width = max(0, min(r.x+r.width, p.x+p.width)-segment.x)
+			}
+			if render.push_rect(&w.list, {rect = {segment.x, segment.y, segment.width, segment.height},
+				color = app.theme.focus}) != .None { return }
+		}
+	}
 }

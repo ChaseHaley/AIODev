@@ -72,7 +72,7 @@ try {
     Save-Value false
     $state = Read-State
     Assert-Value $state['settings.error'] 'false' 'boolean saved despite unrelated unknown key'
-    Assert-Value ($state['pane.0.rect'] -split ',')[1] '0' 'tab bar updates live'
+    Assert-Value ($state['pane.0.rect'] -split ',')[1] '5' 'tab bar updates live'
     if ([IO.File]::ReadAllText($path) -notlike '*# external comment*future.key = retained*') {
         throw 'Unrelated text was lost.'
     }

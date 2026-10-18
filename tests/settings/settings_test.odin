@@ -25,7 +25,7 @@ round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.shell.directory, "~")
 	testing.expect_value(t, s.window.columns, 120)
 	testing.expect_value(t, s.window.show_tab_bar_with_one_tab, true)
-	testing.expect_value(t, s.colors.palette[15], settings.Color{0xf0, 0xf2, 0xf5})
+	testing.expect_value(t, s.colors.palette[15], settings.Color{0xf4, 0xf4, 0xf7})
 	testing.expect_value(t, s.colors.selection_foreground, nil)
 	for entry in settings.SCHEMA {
 		testing.expect(t, strings.contains(text, entry.description))

@@ -12,6 +12,8 @@ Rect_Instance :: struct {
 	rect: Rect,
 	color: Color,
 	radius, softness: f32,
+	stroke: f32,
+	_: f32,
 }
 
 // A glyph quad. Coverage glyphs are tinted with color; with GLYPH_COLOR set, the glyph samples the
@@ -20,13 +22,16 @@ Glyph_Instance :: struct {
 	rect, atlas: Rect,
 	color: Color,
 	flags: u32,
-	_: [3]u32,
+	fade_start, fade_end: f32,
+	_: u32,
 }
 
 GLYPH_COLOR :: u32(1)
+GLYPH_FADE :: u32(2)
 
 Layer :: struct {
 	clip: Rect,
+	radius: f32,
 	rect_start, rect_count, glyph_start, glyph_count: int,
 }
 
@@ -99,8 +104,8 @@ append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
 }
 
 @(require_results)
-push_layer :: proc(list: ^Draw_List, clip: Rect) -> Error {
-	layer := Layer{clip = clip, rect_start = len(list.rects), glyph_start = len(list.glyphs)}
+push_layer :: proc(list: ^Draw_List, clip: Rect, radius: f32 = 0) -> Error {
+	layer := Layer{clip = clip, radius = radius, rect_start = len(list.rects), glyph_start = len(list.glyphs)}
 	if _, err := append(&list.layers, layer); err != nil {
 		return .Out_Of_Memory
 	}

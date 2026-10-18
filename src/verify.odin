@@ -14,6 +14,7 @@ import "aio:platform"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
+import "aio:settings"
 
 // These imports are used only when AIO_CONTROL is set.
 _ :: fmt
@@ -29,6 +30,7 @@ _ :: platform
 _ :: render
 _ :: term
 _ :: ui
+_ :: settings
 
 AIO_CONTROL :: #config(AIO_CONTROL, false)
 AIO_BUILD_ID :: #config(AIO_BUILD_ID, "unknown")
@@ -226,6 +228,10 @@ when AIO_CONTROL {
 			{"palette.selected", fmt.tprintf("%d", p.selected)},
 			{"palette.items", fmt.tprintf("%d", len(p.results))}, {"palette.item", item},
 			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
+			{"theme.name", settings.value_text(&app.settings, settings.schema_find("theme.name")^)},
+			{"theme.mode", settings.value_text(&app.settings, settings.schema_find("theme.mode")^)},
+			{"ui.animations", fmt.tprintf("%t", app.animations)},
+			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
 		}
 		if _, err := append(&entries, ..base[:]); err != nil { return nil, .Out_Of_Memory }
 		w := verify_window(app)
@@ -528,7 +534,8 @@ when AIO_CONTROL {
 		case control.Dpi:
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case control.Resize:
-			padding := window_padding(app, w)
+			padding := window_padding(app, w)+f32(ui.pane_area(f32(w.width), f32(w.height), 0,
+			f32(app.settings.pane.gap), w.scale).x)
 			width := i32(f32(r.columns)*w.metrics.cell_width+2*padding)
 			height := i32(f32(r.rows)*w.metrics.cell_height+2*padding+
 				window_tab_bar(app, w).height)

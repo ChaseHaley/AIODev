@@ -51,6 +51,9 @@ Settings :: struct {
 	terminal: Terminal_Settings,
 	cursor: Cursor_Settings,
 	colors: Color_Settings,
+	color_overrides: Color_Overrides,
+	theme: Theme_Settings,
+	pane: Pane_Settings,
 	allocator: runtime.Allocator,
 }
 KEY_BINDING_PREFIX :: "keys."
@@ -66,6 +69,10 @@ Schema_Entry :: struct {
 	description: string,
 }
 SCHEMA :: [?]Schema_Entry{
+	{"theme.name", .Enum, offset_of(Settings, theme) + offset_of(Theme_Settings, name), "studio", 0, 0, {"studio", "tide", "ember"}, "Color theme: studio, tide, or ember."},
+	{"theme.mode", .Enum, offset_of(Settings, theme) + offset_of(Theme_Settings, mode), "dark", 0, 0, {"dark", "light"}, "Color theme mode: dark or light."},
+	{"pane.gap", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, gap), "5", 0, 24, nil, "Space between and around pane cards in DIPs."},
+	{"pane.corner_radius", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, corner_radius), "7", 0, 16, nil, "Pane card corner radius in DIPs."},
 	{"input.leader", .String, offset_of(Settings, input) + offset_of(Input_Settings, leader), "", 0, 128, nil, "Optional leader chord, for example Ctrl+B; use Leader+T in a command shortcut. Empty disables it."},
 	{"font.family", .String, offset_of(Settings, font) + offset_of(Font_Settings, family), "Cascadia Mono", 1, 256, nil, "Terminal font family."},
 	{"font.size", .Float, offset_of(Settings, font) + offset_of(Font_Settings, size), "12", 1, 200, nil, "Font size in points."},
@@ -74,38 +81,38 @@ SCHEMA :: [?]Schema_Entry{
 	{"shell.directory", .String, offset_of(Settings, shell) + offset_of(Shell_Settings, directory), "~", 1, 32767, nil, "Initial directory; the caller expands the home prefix."},
 	{"window.columns", .Int, offset_of(Settings, window) + offset_of(Window_Settings, columns), "120", 1, 32767, nil, "Initial terminal columns."},
 	{"window.rows", .Int, offset_of(Settings, window) + offset_of(Window_Settings, rows), "32", 1, 32767, nil, "Initial terminal rows."},
-	{"window.padding", .Int, offset_of(Settings, window) + offset_of(Window_Settings, padding), "8", 0, 1024, nil, "Window padding in DIPs."},
+	{"window.padding", .Int, offset_of(Settings, window) + offset_of(Window_Settings, padding), "8", 0, 1024, nil, "Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap."},
 	{"window.show_tab_bar_with_one_tab", .Bool, offset_of(Settings, window) + offset_of(Window_Settings, show_tab_bar_with_one_tab), "true", 0, 0, nil, "Show the tab bar even with only one tab."},
 	{"scrollback.lines", .Int, offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines), "10000", 0, 10000000, nil, "Scrollback lines to keep; history is freed in blocks, so the count kept varies by a few hundred."},
 	{"terminal.copy_on_select", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select), "true", 0, 0, nil, "Copy selected text automatically."},
 	{"terminal.confirm_multiline_paste", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste), "true", 0, 0, nil, "Ask before pasting line breaks the shell would run as separate commands."},
 	{"cursor.style", .Enum, offset_of(Settings, cursor) + offset_of(Cursor_Settings, style), "block", 0, 0, {"block", "bar", "underline"}, "Cursor shape: block, bar, or underline."},
 	{"cursor.blink", .Bool, offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink), "false", 0, 0, nil, "Blink the cursor."},
-	{"colors.foreground", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, foreground), "#d6dae0", 0, 0, nil, "Default foreground color."},
-	{"colors.background", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, background), "#0f1115", 0, 0, nil, "Default background color."},
-	{"colors.cursor", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, cursor), "#e6e9ef", 0, 0, nil, "Cursor color."},
-	{"colors.cursor_text", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, cursor_text), "#0f1115", 0, 0, nil, "Text under the block cursor."},
-	{"colors.selection_background", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, selection_background), "#2d3a52", 0, 0, nil, "Selection background color."},
-	{"colors.selection_foreground", .Optional_Color, offset_of(Settings, colors) + offset_of(Color_Settings, selection_foreground), "", 0, 0, nil, "Selection foreground; empty preserves the cell color."},
-	{"colors.search_foreground", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, search_foreground), "#0f1115", 0, 0, nil, "Text color of search matches."},
-	{"colors.search_background", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, search_background), "#e5c07b", 0, 0, nil, "Background of search matches."},
-	{"colors.search_selected_background", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, search_selected_background), "#ff9e64", 0, 0, nil, "Background of the selected search match."},
-	{"colors.palette.0", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 0 * size_of(Color), "#1b1e24", 0, 0, nil, "ANSI palette color 0."},
-	{"colors.palette.1", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 1 * size_of(Color), "#e06c75", 0, 0, nil, "ANSI palette color 1."},
-	{"colors.palette.2", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 2 * size_of(Color), "#98c379", 0, 0, nil, "ANSI palette color 2."},
-	{"colors.palette.3", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 3 * size_of(Color), "#e5c07b", 0, 0, nil, "ANSI palette color 3."},
-	{"colors.palette.4", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 4 * size_of(Color), "#61afef", 0, 0, nil, "ANSI palette color 4."},
-	{"colors.palette.5", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 5 * size_of(Color), "#c678dd", 0, 0, nil, "ANSI palette color 5."},
-	{"colors.palette.6", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 6 * size_of(Color), "#56b6c2", 0, 0, nil, "ANSI palette color 6."},
-	{"colors.palette.7", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 7 * size_of(Color), "#c8ccd4", 0, 0, nil, "ANSI palette color 7."},
-	{"colors.palette.8", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 8 * size_of(Color), "#5c6370", 0, 0, nil, "ANSI palette color 8."},
-	{"colors.palette.9", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 9 * size_of(Color), "#ff7b86", 0, 0, nil, "ANSI palette color 9."},
-	{"colors.palette.10", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 10 * size_of(Color), "#b5e48c", 0, 0, nil, "ANSI palette color 10."},
-	{"colors.palette.11", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 11 * size_of(Color), "#ffd787", 0, 0, nil, "ANSI palette color 11."},
-	{"colors.palette.12", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 12 * size_of(Color), "#7cc4ff", 0, 0, nil, "ANSI palette color 12."},
-	{"colors.palette.13", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 13 * size_of(Color), "#d79bf0", 0, 0, nil, "ANSI palette color 13."},
-	{"colors.palette.14", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 14 * size_of(Color), "#7fd4e0", 0, 0, nil, "ANSI palette color 14."},
-	{"colors.palette.15", .Color, offset_of(Settings, colors) + offset_of(Color_Settings, palette) + 15 * size_of(Color), "#f0f2f5", 0, 0, nil, "ANSI palette color 15."},
+	{"colors.foreground", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, foreground), "", 0, 0, nil, "Default foreground color."},
+	{"colors.background", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, background), "", 0, 0, nil, "Default background color."},
+	{"colors.cursor", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, cursor), "", 0, 0, nil, "Cursor color."},
+	{"colors.cursor_text", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, cursor_text), "", 0, 0, nil, "Text under the block cursor."},
+	{"colors.selection_background", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, selection_background), "", 0, 0, nil, "Selection background color."},
+	{"colors.selection_foreground", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, selection_foreground), "", 0, 0, nil, "Selection foreground; empty preserves the cell color."},
+	{"colors.search_foreground", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, search_foreground), "", 0, 0, nil, "Text color of search matches."},
+	{"colors.search_background", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, search_background), "", 0, 0, nil, "Background of search matches."},
+	{"colors.search_selected_background", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, search_selected_background), "", 0, 0, nil, "Background of the selected search match."},
+	{"colors.palette.0", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 0 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 0."},
+	{"colors.palette.1", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 1 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 1."},
+	{"colors.palette.2", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 2 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 2."},
+	{"colors.palette.3", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 3 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 3."},
+	{"colors.palette.4", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 4 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 4."},
+	{"colors.palette.5", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 5 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 5."},
+	{"colors.palette.6", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 6 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 6."},
+	{"colors.palette.7", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 7 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 7."},
+	{"colors.palette.8", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 8 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 8."},
+	{"colors.palette.9", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 9 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 9."},
+	{"colors.palette.10", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 10 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 10."},
+	{"colors.palette.11", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 11 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 11."},
+	{"colors.palette.12", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 12 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 12."},
+	{"colors.palette.13", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 13 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 13."},
+	{"colors.palette.14", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 14 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 14."},
+	{"colors.palette.15", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 15 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 15."},
 }
 Diagnostic_Kind :: enum { Unknown_Key, Malformed_Line, Invalid_Value, Out_Of_Range, Duplicate_Key }
 Diagnostic :: struct {
@@ -256,6 +263,7 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 			unreachable()
 		}
 	}
+	resolve_colors(&s)
 	return s, nil
 }
 
@@ -422,6 +430,7 @@ parse :: proc(
 			assert(default_issue == nil)
 		}
 	}
+	resolve_colors(&s)
 	success = true
 	return s, diagnostics, nil
 }

@@ -3,7 +3,7 @@ package ui
 import "aio:glyphs"
 import "aio:render"
 
-TAB_HEIGHT :: f32(30)
+TAB_HEIGHT :: f32(36)
 
 Tab_Bar :: struct {
 	width, height, tab_width, button_width: f32,
@@ -26,23 +26,38 @@ tab_bar_hit_test :: proc(bar: Tab_Bar, x, y: f32) -> int {
 
 tab_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, bar: Tab_Bar,
-	index: int, title: string, selected: bool, scale: f32,
+	index: int, title: string, selected: bool, scale: f32, hover: f32 = 0, pressed: f32 = 0,
+	underline: f32 = -1,
 ) -> glyphs.Result {
 	x := f32(index)*bar.tab_width
 	width := bar.tab_width
 	if index == bar.count { x, width = f32(bar.count)*bar.tab_width, bar.button_width }
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None { return .Ok }
-	draw_rect(list, {rect = {x, 0, width, bar.height}, color = selected ? theme.selection : theme.surface})
-	if selected { draw_rect(list, {rect = {x, bar.height-2, width, 2}, color = theme.accent}) }
+	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.chrome})
+	tile := render.Rect{x+2*scale, 4*scale, max(0, width-4*scale), 28*scale}
+	if selected {
+		draw_rect(list, {rect = tile, color = theme.pane, radius = 7*scale})
+		draw_rect(list, {rect = tile, color = theme.border, radius = 7*scale, stroke = scale})
+	}
+	fill := theme.hover
+	fill.a *= hover
+	draw_rect(list, {rect = tile, color = fill, radius = 7*scale})
+	fill = theme.pressed
+	fill.a *= pressed
+	draw_rect(list, {rect = tile, color = fill, radius = 7*scale})
+	if selected && underline < 0 {
+		draw_rect(list, {rect = {x+10*scale, 30*scale, max(0, width-20*scale), 2*scale},
+			color = theme.accent, radius = scale})
+	}
 	if width <= 16*scale { return .Ok }
-	return draw_text(text, list, title, x+8*scale, (bar.height-text.line_height)/2+text.ascent,
-		selected ? theme.text : theme.muted, width-16*scale)
+	return draw_fading_text(text, list, title, x+11*scale, (bar.height-text.line_height)/2+text.ascent,
+		selected ? theme.text : theme.muted, width-22*scale)
 }
 
 pane_message_draw :: proc(
-	list: ^render.Draw_List, text: ^Text, theme: Theme, area: render.Rect, message: string, scale: f32,
+	list: ^render.Draw_List, text: ^Text, theme: Theme, area: render.Rect, message: string, scale: f32, radius: f32 = 0,
 ) -> glyphs.Result {
-	if render.push_layer(list, area) != .None { return .Ok }
+	if render.push_layer(list, area, radius) != .None { return .Ok }
 	padding := min(10*scale, area.width/4)
 	lines := make([dynamic]string, context.temp_allocator)
 	wrap(text, message, max(1, area.width-2*padding), &lines)

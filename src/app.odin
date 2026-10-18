@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:math"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -17,7 +18,7 @@ import "aio:term"
 import "aio:ui"
 
 @(private) FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
-@(private) UI_FONT_POINTS :: 10.5
+@(private) UI_FONT_POINTS :: 9
 @(private) MIN_FONT_POINTS :: 6
 @(private) MAX_FONT_POINTS :: 72
 @(private) NOTICE_DURATION :: 6 * time.Second
@@ -30,7 +31,7 @@ import "aio:ui"
 
 @(private)
 Notice_Key :: enum u32 {
-	Transient,
+	Transient = 1,
 	Settings,
 	Font,
 	Copy,
@@ -60,6 +61,7 @@ App :: struct {
 	cache: glyphs.Cache,
 	ui_text: ui.Text,
 	ui_ready: bool,
+	animations: bool,
 	theme: ui.Theme,
 	registry: commands.Registry,
 	leader: Maybe(commands.Shortcut),
@@ -87,7 +89,9 @@ app_init :: proc(app: ^App) -> bool {
 			return false
 		}
 	}
+	app.animations = platform.client_animations_enabled()
 	ui.notices_init(&app.notices)
+	app.notices.animations = app.animations
 	app.registry = commands.create()
 	if err := register_actions(&app.registry); err != .None {
 		log.errorf("registering commands failed: %v", err)
@@ -199,6 +203,7 @@ tick :: proc(app: ^App) {
 		handle_event(app, event)
 	}
 	update_sessions(app)
+	update_motion(app)
 	if ui.notices_expire(&app.notices, time.tick_now()) {
 		mark_all_dirty(app)
 	}
@@ -219,6 +224,7 @@ tick :: proc(app: ^App) {
 
 @(private)
 wait_timeout :: proc(app: ^App) -> u32 {
+	if motion_active(app) { return 16 }
 	INFINITE :: max(u32)
 	deadline, found := ui.notices_deadline(&app.notices)
 	if next, pending := verify_deadline(app); pending && (!found || time.tick_diff(next, deadline) > 0) {
@@ -277,7 +283,8 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 session_open :: proc(app: ^App) -> bool {
 	scale := f32(platform.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
-	padding := f32(app.settings.window.padding) * scale
+	padding := math.round(f32(app.settings.window.padding)*scale)+
+		math.round(f32(app.settings.pane.gap)*scale)
 	geometry := term.Geometry{
 		columns = u16(app.settings.window.columns),
 		rows = u16(app.settings.window.rows),
@@ -429,6 +436,7 @@ load_settings :: proc(app: ^App) {
 }
 
 reload_settings :: proc(app: ^App) {
+	refresh_animations(app)
 	for window in app.windows { window.leader_until = {} }
 	ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
@@ -470,8 +478,7 @@ apply_fonts :: proc(app: ^App) {
 }
 
 apply_theme :: proc(app: ^App) {
-	c := app.settings.colors
-	app.theme = ui.theme_from(color(c.background), color(c.foreground), color(c.palette[4]), color(c.palette[1]))
+	app.theme = ui.theme_from(settings.theme_resolve(app.settings.theme))
 }
 
 color :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {

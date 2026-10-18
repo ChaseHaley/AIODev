@@ -43,6 +43,7 @@ Loaded_Family :: struct {
 	value: Family,
 	name: windows.wstring,
 	collection_index: u32,
+	semibold: bool,
 }
 
 @(private)
@@ -245,7 +246,7 @@ style_values :: proc(style: Style) -> (dw.Font_Weight, dw.Font_Style) {
 }
 
 @(require_results)
-family_load :: proc(s: ^System, name: string) -> (Family, Error) {
+family_load :: proc(s: ^System, name: string, semibold: bool = false) -> (Family, Error) {
 	assert(s != nil)
 	if len(name) == 0 || len(name) > int(max(i32)) || !utf8.valid_string(name) {
 		return {}, .Invalid_Argument
@@ -272,7 +273,7 @@ family_load :: proc(s: ^System, name: string) -> (Family, Error) {
 		return {}, .Family_Not_Found
 	}
 	for family in s.families {
-		if family.collection_index == index {
+		if family.collection_index == index && family.semibold == semibold {
 			return family.value, .None
 		}
 	}
@@ -284,6 +285,7 @@ family_load :: proc(s: ^System, name: string) -> (Family, Error) {
 	family: Family
 	for style in Style {
 		weight, slant := style_values(style)
+		if semibold && style == .Regular { weight = .Semi_Bold }
 		font: ^dw.IFont
 		if !checked(handle->GetFirstMatchingFont(weight, .Normal, slant, &font), "GetFirstMatchingFont") {
 			return {}, .DirectWrite
@@ -295,7 +297,7 @@ family_load :: proc(s: ^System, name: string) -> (Family, Error) {
 		}
 		family.faces[style] = id
 	}
-	_, alloc_err := append(&s.families, Loaded_Family{family, wide, index})
+	_, alloc_err := append(&s.families, Loaded_Family{family, wide, index, semibold})
 	if alloc_err != nil {
 		return {}, .Out_Of_Memory
 	}

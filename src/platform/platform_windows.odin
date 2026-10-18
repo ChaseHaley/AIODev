@@ -722,9 +722,17 @@ window_set_title :: proc(p: ^Platform, id: Window_Id, title: string) -> Error {
 }
 
 @(require_results)
-window_set_frame_color :: proc(p: ^Platform, id: Window_Id, rgb: [3]u8) -> Error {
+window_set_frame_color :: proc(p: ^Platform, id: Window_Id, rgb: [3]u8, foreground: [3]u8 = {0xec, 0xec, 0xf1}) -> Error {
 	window := find_window(p, id)
 	if window == nil { return .Invalid_Window }
+	text := u32(foreground[0]) | u32(foreground[1]) << 8 | u32(foreground[2]) << 16
+	text_hr := w.DwmSetWindowAttribute(
+		window.hwnd, u32(w.DWMWINDOWATTRIBUTE.DWMWA_TEXT_COLOR), &text, size_of(text),
+	)
+	if text_hr < 0 {
+		log.errorf("DwmSetWindowAttribute(text) failed: HRESULT %x", u32(text_hr))
+		return .Os
+	}
 	color := u32(rgb[0]) | u32(rgb[1]) << 8 | u32(rgb[2]) << 16
 	hr := w.DwmSetWindowAttribute(
 		window.hwnd, u32(w.DWMWINDOWATTRIBUTE.DWMWA_CAPTION_COLOR), &color, size_of(color),
@@ -855,6 +863,9 @@ window_proc :: proc "system" (hwnd: w.HWND, message: u32, wp: w.WPARAM, lp: w.LP
 			p.modal_callback(p.modal_user)
 		}
 		return 0
+	case w.WM_SETTINGCHANGE:
+		enqueue(p, Settings_Event{})
+		return w.DefWindowProcW(hwnd, message, wp, lp)
 	case w.WM_DPICHANGED:
 		r := (^w.RECT)(uintptr(lp))
 		flags := u32(w.SWP_NOZORDER | w.SWP_NOACTIVATE)

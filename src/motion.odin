@@ -1,0 +1,44 @@
+package main
+
+import "core:time"
+import "aio:ui"
+import "aio:platform"
+
+motion_active :: proc(app: ^App) -> bool {
+	if ui.motion_active(app.palette.motion) || ui.notices_animating(&app.notices) { return true }
+	for w in app.windows {
+		if ui.motion_active(w.tab_underline) || ui.editor_animating(&w.editor) { return true }
+		for control in w.tab_controls { if ui.control_active(control) { return true } }
+	}
+	return false
+}
+
+update_motion :: proc(app: ^App) {
+	now := time.tick_now()
+	p := &app.palette
+	ui.motion_target(&p.motion, p.open ? 1 : 0, (p.open ? 120 : 90)*time.Millisecond,
+		p.open ? .Decelerate : .Accelerate, app.animations, now)
+	palette_changed := ui.motion_update(&p.motion, now)
+	notices_changed := ui.notices_animate(&app.notices, now)
+	if palette_changed || notices_changed { mark_all_dirty(app) }
+	for w in app.windows {
+		ui.motion_target(&w.tab_underline, f32(w.workspace.selected), 140*time.Millisecond,
+			.Decelerate, app.animations, now)
+		controls_changed := false
+		for &control, i in w.tab_controls {
+			controls_changed = ui.control_update(&control, w.tab_hover == i,
+				w.tab_pressed && w.tab_hover == i, app.animations, now) || controls_changed
+		}
+		underline_changed := ui.motion_update(&w.tab_underline, now)
+		editor_changed := ui.editor_animate(&w.editor, now, app.animations)
+		if underline_changed || controls_changed || editor_changed { w.dirty = true }
+	}
+}
+
+refresh_animations :: proc(app: ^App) {
+	enabled := platform.client_animations_enabled()
+	if app.animations == enabled { return }
+	app.animations = enabled
+	ui.notices_set_animations(&app.notices, enabled)
+	mark_all_dirty(app)
+}

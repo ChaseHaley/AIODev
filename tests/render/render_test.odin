@@ -427,3 +427,23 @@ appended_lists_preserve_layers_and_rebase_instances :: proc(t: ^testing.T) {
 	testing.expect_value(t, source.layers[0].glyph_start, 0)
 	testing.expect_value(t, out.glyphs[3], source.glyphs[1])
 }
+
+@(test)
+rounded_layers_clip_content_and_outline_has_no_fill :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, 32, 32)
+	if !ok { return }
+	defer fixture_destroy(&f)
+	testing.expect_value(t, render.push_layer(&f.list, {0, 0, 32, 32}, 7), render.Error.None)
+	rect(t, &f.list, {rect = {0, 0, 32, 32}, color = {1, 0, 0, 1}})
+	pixels := render_pixels(t, &f)
+	defer delete(pixels)
+	expect_pixel(t, pixels, 32, 0, 0, {0, 0, 0, 0})
+	expect_pixel(t, pixels, 32, 16, 16, {0, 0, 255, 255})
+	render.draw_list_reset(&f.list)
+	layer(t, &f.list, {0, 0, 32, 32})
+	rect(t, &f.list, {rect = {2, 2, 28, 28}, radius = 7, stroke = 2, color = {0, 1, 0, 1}})
+	outline := render_pixels(t, &f)
+	defer delete(outline)
+	expect_pixel(t, outline, 32, 16, 16, {0, 0, 0, 0})
+	expect_pixel(t, outline, 32, 16, 3, {0, 255, 0, 255})
+}

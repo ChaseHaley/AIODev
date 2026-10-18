@@ -49,6 +49,9 @@ Frame_Constants :: struct {
 	enhanced_contrast: f32,
 	rect_start, glyph_start: u32,
 	_: [3]f32,
+	round_clip: Rect,
+	clip_radius: f32,
+	_padding: [3]f32,
 }
 
 @(private)

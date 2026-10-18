@@ -4,6 +4,9 @@ cbuffer Frame : register(b0) {
     float enhanced_contrast;
     uint rect_start;
     uint glyph_start;
+    float3 padding;
+    float4 round_clip;
+    float clip_radius;
 };
 
 struct RectInstance {
@@ -11,6 +14,8 @@ struct RectInstance {
     float4 color;
     float radius;
     float softness;
+    float stroke;
+    float padding;
 };
 
 struct GlyphInstance {
@@ -18,7 +23,9 @@ struct GlyphInstance {
     float4 atlas;
     float4 color;
     uint flags;
-    uint3 padding;
+    float fade_start;
+    float fade_end;
+    uint padding;
 };
 
 StructuredBuffer<RectInstance> rects : register(t0);
@@ -34,6 +41,7 @@ struct Vertex {
     nointerpolation float2 edge : TEXCOORD2;
     nointerpolation uint flags : TEXCOORD4;
     float2 texel : TEXCOORD3;
+    nointerpolation float3 extra : TEXCOORD5;
 };
 
 float2 corner(uint id) {
@@ -54,7 +62,16 @@ Vertex rect_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
     o.rect = r.rect;
     o.color = r.color;
     o.edge = float2(r.radius, r.softness);
+    o.extra.x = r.stroke;
     return o;
+}
+
+float clip_coverage(float2 position) {
+    if (clip_radius <= 0) return 1;
+    float radius = min(clip_radius, min(round_clip.z, round_clip.w) * 0.5);
+    float2 q = abs(position - round_clip.xy - round_clip.zw * 0.5) - round_clip.zw * 0.5 + radius;
+    float d = length(max(q, 0)) + min(max(q.x, q.y), 0) - radius;
+    return saturate(0.5 - d);
 }
 
 float4 rect_ps(Vertex i) : SV_Target {
@@ -62,7 +79,8 @@ float4 rect_ps(Vertex i) : SV_Target {
     float2 q = abs(i.local - i.rect.zw * 0.5) - i.rect.zw * 0.5 + radius;
     float distance = length(max(q, 0)) + min(max(q.x, q.y), 0) - radius;
     float coverage = saturate(0.5 - distance / max(1, 2 * i.edge.y));
-    float alpha = coverage * i.color.a;
+    if (i.extra.x > 0) coverage *= saturate(distance + i.extra.x + 0.5);
+    float alpha = coverage * i.color.a * clip_coverage(i.position.xy);
     return float4(i.color.rgb * alpha, alpha);
 }
 
@@ -74,14 +92,17 @@ Vertex glyph_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
     o.texel = g.atlas.xy + c * g.atlas.zw;
     o.color = g.color;
     o.flags = g.flags;
+    o.extra.yz = float2(g.fade_start, g.fade_end);
     return o;
 }
 
 // DirectWrite grayscale correction, after microsoft/terminal src/renderer/atlas/dwrite.hlsl (MIT).
 float4 glyph_ps(Vertex i) : SV_Target {
+    float opacity = i.color.a * clip_coverage(i.position.xy);
+    if (i.flags & 2) opacity *= saturate((i.extra.z - i.position.x) / max(1, i.extra.z - i.extra.y));
     if (i.flags & 1) {
         // Color glyphs are premultiplied RGBA; fade them with the instance alpha only.
-        return color_atlas.Load(int3(floor(i.texel), 0)) * i.color.a;
+        return color_atlas.Load(int3(floor(i.texel), 0)) * opacity;
     }
     float a = atlas.Load(int3(floor(i.texel), 0));
     float3 fg = i.color.rgb;
@@ -89,6 +110,6 @@ float4 glyph_ps(Vertex i) : SV_Target {
     a = a * (k + 1) / (a * k + 1);
     float f = dot(fg, float3(0.25, 0.5, 0.25));
     float4 g = gamma_ratios;
-    a = saturate(a + a * (1 - a) * ((g.x * f + g.y) * a + (g.z * f + g.w))) * i.color.a;
+    a = saturate(a + a * (1 - a) * ((g.x * f + g.y) * a + (g.z * f + g.w))) * opacity;
     return float4(fg * a, a);
 }

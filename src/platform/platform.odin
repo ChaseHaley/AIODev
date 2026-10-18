@@ -52,11 +52,12 @@ Close_Request_Event :: struct { window: Window_Id }
 Tray_Event :: struct {}
 Tray_Menu_Event :: struct { id: u32 }
 Activate_Request_Event :: struct {}
+Settings_Event :: struct {}
 Wake_Event :: struct {}
 Event :: union {
 	Key_Event, Text_Event, Mouse_Button_Event, Mouse_Move_Event, Mouse_Leave_Event, Mouse_Wheel_Event,
 	Resize_Event, Dpi_Event, Focus_Event, Close_Request_Event, Tray_Event,
-	Tray_Menu_Event, Activate_Request_Event, Wake_Event,
+	Tray_Menu_Event, Activate_Request_Event, Settings_Event, Wake_Event,
 }
 
 @(require_results)
