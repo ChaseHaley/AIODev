@@ -207,21 +207,50 @@ tab_bar_visibility_and_controls_in_narrow_windows :: proc(t: ^testing.T) {
 	testing.expect_value(t, single.height, f32(0))
 	testing.expect_value(t, ui.tab_bar_hit_test(single, 1, 1), -1)
 	shown := ui.tab_bar_layout(1000, 1, 1, true)
-	testing.expect_value(t, shown.height, f32(36))
+	testing.expect_value(t, shown.height, f32(40))
 	testing.expect_value(t, ui.tab_bar_hit_test(shown, 1, 1), 0)
 	testing.expect_value(t, ui.tab_bar_hit_test(shown, 225, 1), 1)
 	testing.expect_value(t, ui.tab_bar_layout(1000, 1, 0, true), ui.Tab_Bar{})
 	testing.expect_value(t, ui.tab_bar_layout(500, 2, 3, true), ui.tab_bar_layout(500, 2, 3, false))
 	bar := ui.tab_bar_layout(500, 2, 3, false)
-	testing.expect_value(t, bar.height, f32(72))
+	testing.expect_value(t, bar.height, f32(80))
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, 0, 0), 0)
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.tab_width, 10), 1)
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.tab_width*3, 10), 3)
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, 500, 10), -1)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, 10, 72), -1)
+	testing.expect_value(t, ui.tab_bar_hit_test(bar, 10, 80), -1)
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, -1, 10), -1)
 	narrow := ui.tab_bar_layout(20, 1, 10, true)
 	testing.expect_value(t, ui.tab_bar_hit_test(narrow, 1, 1), 10)
+}
+
+@(test)
+tab_close_targets_and_caption_buttons_are_distinct :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5, 1.75, 2}) {
+		bar := ui.tab_bar_layout(900*scale, scale, 3, true)
+		for i in 0..<bar.count {
+			r := ui.tab_close_rect(bar, i, scale)
+			testing.expect_value(t, ui.tab_close_hit(bar, r.x+r.width/2, r.y+r.height/2, scale), i)
+			testing.expect_value(t, ui.tab_close_hit(bar, f32(i)*bar.tab_width+10*scale, 20*scale, scale), -1)
+		}
+		testing.expect_value(t, ui.tab_close_hit(bar, 670*scale, 20*scale, scale), -1)
+		for i in 0..<3 {
+			testing.expect_value(t, ui.caption_hit(1200*scale, (1085+f32(i)*46)*scale, 20*scale, scale), i)
+		}
+		testing.expect_value(t, ui.caption_hit(1200*scale, 300*scale, 20*scale, scale), -1)
+	}
+}
+
+@(test)
+leader_status_line_stays_inside_the_focused_card :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5, 1.75, 2}) {
+		for size in ([?][2]f32{{400, 300}, {160, 90}, {12, 8}, {0, 0}}) {
+			area := render.Rect{30*scale, 70*scale, size.x*scale, size.y*scale}
+			r := ui.leader_status_layout(area, 240*scale, scale)
+			testing.expect(t, r.x >= area.x && r.y >= area.y && r.width >= 0 && r.height >= 0)
+			testing.expect(t, r.x+r.width <= area.x+area.width && r.y+r.height <= area.y+area.height)
+		}
+	}
 }
 
 @(test)

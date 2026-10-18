@@ -3,7 +3,7 @@ package ui
 import "aio:glyphs"
 import "aio:render"
 
-TAB_HEIGHT :: f32(36)
+TAB_HEIGHT :: f32(40)
 
 Tab_Bar :: struct {
 	width, height, tab_width, button_width: f32,
@@ -34,7 +34,7 @@ tab_draw :: proc(
 	if index == bar.count { x, width = f32(bar.count)*bar.tab_width, bar.button_width }
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None { return .Ok }
 	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.chrome})
-	tile := render.Rect{x+2*scale, 4*scale, max(0, width-4*scale), 28*scale}
+	tile := render.Rect{x+2*scale, 6*scale, max(0, width-4*scale), 28*scale}
 	if selected {
 		draw_rect(list, {rect = tile, color = theme.pane, radius = 7*scale})
 		draw_rect(list, {rect = tile, color = theme.border, radius = 7*scale, stroke = scale})
@@ -50,8 +50,72 @@ tab_draw :: proc(
 			color = theme.accent, radius = scale})
 	}
 	if width <= 16*scale { return .Ok }
+	if index < bar.count && width >= 56*scale {
+		close := tab_close_rect(bar, index, scale)
+		large := text^
+		text_set_size(&large, text.size_px*1.5)
+		if result := draw_glyph_centered(&large, list, '×', close, theme.muted); result != .Ok { return result }
+	}
 	return draw_fading_text(text, list, title, x+11*scale, (bar.height-text.line_height)/2+text.ascent,
-		selected ? theme.text : theme.muted, width-22*scale)
+		selected ? theme.text : theme.muted, max(0, width-(index < bar.count ? 44 : 22)*scale))
+}
+
+tab_close_rect :: proc(bar: Tab_Bar, index: int, scale: f32) -> render.Rect {
+	if index < 0 || index >= bar.count || bar.tab_width < 56*scale { return {} }
+	return {f32(index+1)*bar.tab_width-28*scale, 9*scale, 22*scale, 22*scale}
+}
+
+tab_close_hit :: proc(bar: Tab_Bar, x, y, scale: f32) -> int {
+	index := tab_bar_hit_test(bar, x, y)
+	r := tab_close_rect(bar, index, scale)
+	if r.width > 0 && x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height { return index }
+	return -1
+}
+
+caption_hit :: proc(width, x, y, scale: f32) -> int {
+	if y < 0 || y >= TAB_HEIGHT*scale || x < width-138*scale || x >= width { return -1 }
+	return clamp(int((x-width+138*scale)/(46*scale)), 0, 2)
+}
+
+caption_draw :: proc(list: ^render.Draw_List, text: ^Text, theme: Theme, width, scale: f32,
+	hover, pressed: int, maximized: bool) -> glyphs.Result {
+	if render.push_layer(list, {0, 0, width, TAB_HEIGHT*scale}) != .None { return .Ok }
+	for i in 0..<3 {
+		r := render.Rect{width-f32(3-i)*46*scale, 0, 46*scale, TAB_HEIGHT*scale}
+		ink := theme.text
+		if i == hover {
+			fill := i == pressed ? theme.pressed : theme.hover
+			if i == 2 { fill, ink = {0.77, 0.17, 0.11, 1}, {1, 1, 1, 1} }
+			draw_rect(list, {rect = r, color = fill})
+		}
+		icon := ([3]rune{'\ue921', maximized ? '\ue923' : '\ue922', '\ue8bb'})[i]
+		if result := draw_icon(text, list, icon, r, ink, 0.5); result != .Ok { return result }
+	}
+	return .Ok
+}
+
+leader_status_layout :: proc(area: render.Rect, width, scale: f32) -> render.Rect {
+	padding := min(8*scale, area.width/4, area.height/4)
+	height := min(22*scale, max(0, area.height-2*padding))
+	return {area.x+padding, area.y+area.height-padding-height,
+		min(max(0, area.width-2*padding), width+16*scale), height}
+}
+
+leader_status_draw :: proc(list: ^render.Draw_List, text: ^Text, theme: Theme, area: render.Rect,
+	chord: string, scale: f32) -> glyphs.Result {
+	small := text_styled(text, .Small)
+	keycap := text_styled(text, .Keycap)
+	hint := "Leader · awaiting key"
+	key_width := text_width(&keycap, chord)
+	r := leader_status_layout(area, key_width+8*scale+text_width(&small, hint), scale)
+	if r.height < small.line_height || r.width <= 16*scale { return .Ok }
+	if render.push_layer(list, r) != .None { return .Ok }
+	draw_rect(list, {rect = r, color = theme.pane})
+	baseline := r.y+(r.height-small.line_height)/2+small.ascent
+	if result := draw_text(&keycap, list, chord, r.x+8*scale, baseline, theme.accent,
+		max(0, r.width-16*scale)); result != .Ok { return result }
+	return draw_text(&small, list, hint, r.x+8*scale+key_width+8*scale, baseline, theme.muted,
+		max(0, r.width-key_width-24*scale))
 }
 
 pane_message_draw :: proc(

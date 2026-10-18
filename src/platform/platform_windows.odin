@@ -30,6 +30,8 @@ Window :: struct {
 	high_surrogate: u16,
 	previous_move: Mouse_Move_Event,
 	has_previous_move: bool,
+	tabbed_title_bar: bool,
+	title_height, title_controls_end: i32,
 }
 Platform :: struct {
 	allocator: runtime.Allocator,
@@ -553,6 +555,7 @@ window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
 	window, alloc_error := new(Window, p.allocator)
 	if alloc_error != nil { return 0, .Out_Of_Memory }
 	window.owner = p
+	window.tabbed_title_bar = desc.tabbed_title_bar
 	p.next_id += 1
 	window.id = Window_Id(p.next_id)
 	window.cursor = w.LoadCursorW(nil, transmute(cstring16)w.IDC_ARROW)
@@ -575,6 +578,7 @@ window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
 		free(window, p.allocator)
 		return 0, .Os
 	}
+	if window.tabbed_title_bar { rect.top = 0 }
 	window.hwnd = w.CreateWindowExW(
 		0, cstring16(raw_data(p.class_name[:])), title, w.WS_OVERLAPPEDWINDOW,
 		w.CW_USEDEFAULT, w.CW_USEDEFAULT, rect.right-rect.left, rect.bottom-rect.top,
@@ -585,6 +589,16 @@ window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
 		pop(&p.windows)
 		free(window, p.allocator)
 		return 0, .Os
+	}
+	if window.tabbed_title_bar {
+		margins := w.MARGINS{cyTopHeight = i32(40*dpi/96)}
+		if hr := w.DwmExtendFrameIntoClientArea(window.hwnd, &margins); hr < 0 {
+			log.errorf("DwmExtendFrameIntoClientArea failed: HRESULT %x", u32(hr))
+			p.error = .Os
+		}
+		record_os(p, w.SetWindowPos(window.hwnd, nil, 0, 0, 0, 0,
+			w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOZORDER | w.SWP_NOACTIVATE | w.SWP_FRAMECHANGED),
+			"SetWindowPos(title bar)")
 	}
 	dark := w.BOOL(true)
 	hr := w.DwmSetWindowAttribute(
@@ -632,6 +646,12 @@ window_native_handle :: proc(p: ^Platform, id: Window_Id) -> rawptr {
 	return window != nil ? rawptr(window.hwnd) : nil
 }
 
+window_title_bar :: proc(p: ^Platform, id: Window_Id, height, controls_end: i32) {
+	if window := find_window(p, id); window != nil {
+		window.title_height, window.title_controls_end = height, controls_end
+	}
+}
+
 @(require_results)
 window_client_size :: proc(p: ^Platform, id: Window_Id) -> (width, height: i32, err: Error) {
 	window := find_window(p, id)
@@ -663,6 +683,7 @@ window_set_client_size :: proc(p: ^Platform, id: Window_Id, width, height: i32) 
 	rect := w.RECT{right = width, bottom = height}
 	if !os_ok(w.AdjustWindowRectExForDpi(&rect, u32(style), false,
 		u32(ex_style), dpi), "AdjustWindowRectExForDpi") { return .Os }
+	if window.tabbed_title_bar { rect.top = 0 }
 	flags := u32(w.SWP_NOMOVE | w.SWP_NOZORDER | w.SWP_NOACTIVATE)
 	if !os_ok(w.SetWindowPos(window.hwnd, nil, 0, 0, rect.right-rect.left,
 		rect.bottom-rect.top, flags), "SetWindowPos(client size)") { return .Os }
@@ -822,6 +843,55 @@ window_proc :: proc "system" (hwnd: w.HWND, message: u32, wp: w.WPARAM, lp: w.LP
 	if window == nil { return w.DefWindowProcW(hwnd, message, wp, lp) }
 	context = window.owner.callback_context
 	p := window.owner
+	if window.tabbed_title_bar {
+		if message == w.WM_NCCALCSIZE && wp != 0 {
+			params := cast(^w.NCCALCSIZE_PARAMS)uintptr(lp)
+			top := params.rgrc[0].top
+			result := w.DefWindowProcW(hwnd, message, wp, lp)
+			border := w.GetSystemMetricsForDpi(w.SM_CYFRAME, w.GetDpiForWindow(hwnd)) +
+				w.GetSystemMetricsForDpi(w.SM_CXPADDEDBORDER, w.GetDpiForWindow(hwnd))
+			params.rgrc[0].top = top + (bool(w.IsZoomed(hwnd)) ? border : 0)
+			return result
+		}
+		if message == w.WM_NCMOUSEMOVE || message == w.WM_NCLBUTTONDOWN {
+			point := w.POINT{i32(cast(i16)u16(uintptr(lp)&0xffff)), i32(cast(i16)u16(uintptr(lp)>>16))}
+			if os_ok(w.ScreenToClient(hwnd, &point), "ScreenToClient(caption)") {
+				if wp == w.HTMINBUTTON || wp == w.HTMAXBUTTON || wp == w.HTCLOSE {
+					track := w.TRACKMOUSEEVENT{cbSize = size_of(w.TRACKMOUSEEVENT),
+						dwFlags = w.TME_LEAVE | w.TME_NONCLIENT, hwndTrack = hwnd}
+					record_os(p, w.TrackMouseEvent(&track), "TrackMouseEvent(caption)")
+					packed := w.LPARAM(u32(u16(point.x)) | (u32(u16(point.y))<<16))
+					mouse_message(window, message == w.WM_NCMOUSEMOVE ? w.WM_MOUSEMOVE : w.WM_LBUTTONDOWN,
+						0, packed)
+					if message == w.WM_NCLBUTTONDOWN { return 0 }
+				}
+			}
+		}
+		if message == w.WM_NCMOUSELEAVE {
+			enqueue(p, Mouse_Move_Event{window = window.id, x = -1, y = -1})
+		}
+		result: w.LRESULT
+		if message != w.WM_NCHITTEST && bool(DwmDefWindowProc(hwnd, message, wp, lp, &result)) {
+			return result
+		}
+		if message == w.WM_NCHITTEST {
+			result = w.DefWindowProcW(hwnd, message, wp, lp)
+			if result != w.HTCLIENT && result != w.HTCAPTION && result != w.HTTOP { return result }
+			point := w.POINT{i32(cast(i16)u16(uintptr(lp)&0xffff)), i32(cast(i16)u16(uintptr(lp)>>16))}
+			if !os_ok(w.ScreenToClient(hwnd, &point), "ScreenToClient(title bar)") { return result }
+			if !bool(w.IsZoomed(hwnd)) && point.y < i32(5*w.GetDpiForWindow(hwnd)/96) { return w.HTTOP }
+			client: w.RECT
+			if !os_ok(w.GetClientRect(hwnd, &client), "GetClientRect(caption)") { return result }
+			button_width := i32(46*w.GetDpiForWindow(hwnd)/96)
+			if point.y < window.title_height && point.x >= client.right-3*button_width {
+				index := clamp((point.x-client.right+3*button_width)/max(1, button_width), 0, 2)
+				hits := [3]w.LRESULT{w.HTMINBUTTON, w.HTMAXBUTTON, w.HTCLOSE}
+				return hits[index]
+			}
+			if point.y < window.title_height && point.x >= window.title_controls_end { return w.HTCAPTION }
+			return w.HTCLIENT
+		}
+	}
 	if message == p.taskbar_created && p.tray_requested {
 		p.tray_added = false
 		err := tray_add(p)
@@ -910,6 +980,19 @@ window_proc :: proc "system" (hwnd: w.HWND, message: u32, wp: w.WPARAM, lp: w.LP
 		return 0
 	}
 	return w.DefWindowProcW(hwnd, message, wp, lp)
+}
+
+window_maximized :: proc(p: ^Platform, id: Window_Id) -> bool {
+	window := find_window(p, id)
+	return window != nil && bool(w.IsZoomed(window.hwnd))
+}
+
+window_caption_action :: proc(p: ^Platform, id: Window_Id, index: int) {
+	window := find_window(p, id)
+	if window == nil || index < 0 || index > 2 { return }
+	command := ([3]w.WPARAM{w.SC_MINIMIZE, bool(w.IsZoomed(window.hwnd)) ? w.SC_RESTORE : w.SC_MAXIMIZE,
+		w.SC_CLOSE})[index]
+	record_os(p, w.PostMessageW(window.hwnd, w.WM_SYSCOMMAND, command, 0), "PostMessageW(caption)")
 }
 
 @(private)

@@ -110,7 +110,7 @@ try {
     $s = Read-State
     $ids = 1..[int]$s['tabs.count'] | ForEach-Object { $s["tab.$_.id"] }
     $count = $ids.Count
-    $tabWidth = [math]::Min(220*$scale, ([double]($s['window.size'] -split 'x')[0]-32*$scale)/$count)
+    $tabWidth = [double]$s['tabs.width']
     Invoke-Aio command tab.select_1
     Invoke-Aio mouse drag (Px ($tabWidth/2) (18*$scale)) (Px ($tabWidth*2.6) (18*$scale)) --px
     $s = Read-State

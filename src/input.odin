@@ -259,6 +259,16 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	caption := ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale)
+	if e.button == .Left && (caption >= 0 || w.caption_pressed >= 0) {
+		if e.pressed { w.caption_pressed = caption } else {
+			pressed := w.caption_pressed
+			w.caption_pressed = -1
+			if caption == pressed { platform.window_caption_action(&app.platform, w.id, caption) }
+		}
+		w.dirty = true
+		return
+	}
 	w.tab_pressed = e.pressed && e.button == .Left &&
 		ui.tab_bar_hit_test(window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
 	w.dirty = true
@@ -280,17 +290,28 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	x, y := f32(e.x), f32(e.y)
+	bar := window_tab_bar(app, w)
+	if e.button == .Left && !e.pressed && w.tab_close_pressed >= 0 {
+		index := w.tab_close_pressed
+		w.tab_close_pressed = -1
+		if ui.tab_close_hit(bar, x, y, w.scale) == index { tab_close(app, w, index) }
+		return
+	}
 	if e.button == .Left && !e.pressed {
 		if w.dragging.count > 0 { w.dragging = {}; return }
 		if w.tab_drag.pressed { w.tab_drag = {}; return }
 		if settings_active(w) { editor_outcome(app, w, ui.editor_release(&w.editor)) }
 		if w.selecting { selection_finish(app, w, x, y); return }
 	}
-	bar := window_tab_bar(app, w)
 	if y < bar.height {
 		if e.pressed {
 			index := ui.tab_bar_hit_test(bar, x, y)
-			if index == bar.count && e.button == .Left { tab_new(app, w) }
+			palette_x := f32(bar.count)*bar.tab_width+bar.button_width
+			if e.button == .Left && x >= palette_x && x < palette_x+bar.button_width {
+				run_action(app, w, .Command_Palette)
+			} else if e.button == .Left && ui.tab_close_hit(bar, x, y, w.scale) >= 0 {
+				w.tab_close_pressed = index
+			} else if index == bar.count && e.button == .Left { tab_new(app, w) }
 			else if index >= 0 && index < bar.count {
 				if e.button == .Middle { tab_close(app, w, index) }
 				else if e.button == .Left {
@@ -338,6 +359,8 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
+	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
+	if caption != w.caption_hover { w.caption_hover = caption; w.dirty = true }
 	hover := ui.tab_bar_hit_test(window_tab_bar(app, w), x, y)
 	if hover != w.tab_hover {
 		w.tab_hover = hover
@@ -435,6 +458,8 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		pane_header_clear(w)
 		w.tab_pressed = false
 		w.tab_hover = -1
+		w.tab_close_pressed = -1
+		w.caption_hover, w.caption_pressed = -1, -1
 		w.editor.hover_item, w.editor.hover_reset = -1, -1
 		w.leader_until = {}
 		w.selecting, w.autoscrolling = false, false
@@ -475,6 +500,7 @@ clipboard_copy :: proc(app: ^App, text: string) -> bool {
 
 @(private)
 leader_cancel :: proc(w: ^Window) {
+	if w.leader_until != {} { w.dirty = true }
 	w.leader_until = {}
 }
 
@@ -510,7 +536,10 @@ leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 	if leader, enabled := app.leader.?; enabled {
 		if commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {
 			w.suppressed_key = e
-			if !e.repeat { w.leader_until = time.tick_add(time.tick_now(), 2*time.Second) }
+			if !e.repeat {
+				w.leader_until = time.tick_add(time.tick_now(), 2*time.Second)
+				w.dirty = true
+			}
 			return true
 		}
 	}

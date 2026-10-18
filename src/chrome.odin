@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:math"
+import "aio:commands"
 import "aio:glyphs"
 import "aio:layout"
 import "aio:render"
@@ -9,8 +10,10 @@ import "aio:term"
 import "aio:ui"
 
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
-	return ui.tab_bar_layout(f32(w.width), w.scale, len(w.workspace.tabs),
+	bar := ui.tab_bar_layout(max(0, f32(w.width)-218*w.scale), w.scale, len(w.workspace.tabs),
 		app.settings.window.show_tab_bar_with_one_tab)
+	bar.height = ui.TAB_HEIGHT*w.scale
+	return bar
 }
 
 window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
@@ -32,12 +35,14 @@ window_generation :: proc(app: ^App, w: ^Window) -> u64 {
 window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	window_shared_borders(app, w)
 	bar := window_tab_bar(app, w)
-	if bar.count == 0 { return .Ok }
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {
 		if render.push_rect(&w.list, {rect = {0, 0, f32(w.width), bar.height}, color = app.theme.chrome}) != .None {
 			return .Ok
 		}
 	}
+	if result := ui.caption_draw(&w.list, &app.ui_text, app.theme, f32(w.width), w.scale,
+		w.caption_hover, w.caption_pressed, w.maximized); result != .Ok { return result }
+	if bar.count == 0 { return .Ok }
 	for tab, i in w.workspace.tabs {
 		title := fmt.tprintf("Tab %d", i+1)
 		if tab.title != "" { title = tab.title }
@@ -50,12 +55,32 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if render.push_rect(&w.list, {rect = {x, 30*w.scale, max(0, bar.tab_width-20*w.scale), 2*w.scale},
 			color = app.theme.accent, radius = w.scale}) != .None { return .Ok }
 	}
-	return ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, bar.count, "+", false, w.scale,
-		tab_control(w, bar.count).hover.value, tab_control(w, bar.count).press.value, 0)
+	if result := ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, bar.count, "+", false, w.scale,
+		tab_control(w, bar.count).hover.value, tab_control(w, bar.count).press.value, 0); result != .Ok { return result }
+	x := f32(bar.count)*bar.tab_width+bar.button_width
+	if render.push_layer(&w.list, {x, 0, bar.button_width, bar.height}) != .None { return .Ok }
+	return ui.draw_text(&app.ui_text, &w.list, "⌕", x+8*w.scale,
+		(bar.height-app.ui_text.line_height)/2+app.ui_text.ascent, app.theme.muted, bar.button_width)
 }
 
 window_gap :: proc(app: ^App, w: ^Window) -> f32 {
 	return ui.pane_gap(f32(app.settings.pane.gap), w.scale)
+}
+
+window_leader_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	if w.leader_until == {} { return .Ok }
+	leader, enabled := app.leader.?
+	if !enabled { return .Ok }
+	buffer: [128]u8
+	label, err := commands.shortcut_label(leader, buffer[:])
+	if err != .None { return .Ok }
+	for pane in w.panes {
+		if pane.node != w.tree.focus { continue }
+		r := pane.rect
+		return ui.leader_status_draw(&w.list, &app.ui_text, app.theme,
+			{r.x, r.y, r.width, r.height}, label, w.scale)
+	}
+	return .Ok
 }
 
 window_card_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {

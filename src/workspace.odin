@@ -66,6 +66,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 }
 
 focus_leave :: proc(app: ^App, w: ^Window) {
+	leader_cancel(w)
 	if entry := focused_session(app, w); entry != nil {
 		term.send_focus(entry.session, false)
 		if w.find.open { find_close(w, entry) }

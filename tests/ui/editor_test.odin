@@ -52,6 +52,35 @@ page :: proc(p: ^ui.Editor) -> ui.Editor_Layout {
 center :: proc(r: render.Rect) -> (f32, f32) { return r.x+r.width/2, r.y+r.height/2 }
 
 @(test)
+editor_binding_search_and_positions_reserve_description_space :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	testing.expect_value(t, ui.editor_add(&p,
+		{key = "keys.tab.select_8", title = "Select Tab 8", value = "Alt+8, Ctrl+8", kind = .Shortcut},
+		"Tab Shortcuts"), nil)
+	testing.expect_value(t, ui.editor_add(&p,
+		{key = "colors.palette.8", title = "ANSI Bright Black", description = "ANSI palette color 8.",
+			kind = .Optional_Color}, "Colors"), nil)
+	for query in ([?]string{"alt+8", "al8", "ctrl8", "sltb8"}) {
+		ui.field_set(&p.filter, query)
+		ui.editor_filter(&p)
+		testing.expect_value(t, ui.editor_row(&p).key, "keys.tab.select_8")
+	}
+	ui.field_set(&p.filter, "")
+	ui.editor_filter(&p)
+	testing.expect(t, ui.editor_select_key(&p, "input.leader"))
+	for scale in ([?]f32{1, 1.5, 1.75, 2}) {
+		for width in ([?]f32{700, 1000, 1400}) {
+			l := ui.editor_layout({0, 40*scale, width*scale, 1400*scale}, scale)
+			parts := ui.editor_row_parts(&p, l, p.selected)
+			testing.expect(t, parts.text_right <= parts.positions.x-12*scale)
+			testing.expect(t, parts.positions.x+parts.positions.width+100*scale <= parts.field.x)
+		}
+	}
+}
+
+@(test)
 editor_groups_collapse_and_restore_after_search :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)

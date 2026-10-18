@@ -5,11 +5,14 @@ param(
     [string] $Task = 'debug',
 
     [Parameter(Position = 1)]
-    [string] $Package
+    [string] $Package,
+
+    [string] $OutputPath
 )
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
+if ($OutputPath -and $Task -ne 'release') { throw 'OutputPath is supported for release builds.' }
 
 function Invoke-Odin {
     & odin @args
@@ -98,9 +101,10 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     Copy-Conpty (Split-Path $Output)
 }
 
-function Build-Release {
-    New-Item -ItemType Directory -Force build/release | Out-Null
-    Build-App @('-o:speed', '-subsystem:windows') 'build/release/aiodev.exe'
+function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
+    $resolvedOutput = [IO.Path]::GetFullPath($Destination)
+    New-Item -ItemType Directory -Force (Split-Path $resolvedOutput) | Out-Null
+    Build-App @('-o:speed', '-subsystem:windows') $resolvedOutput
 }
 
 function Get-BuildId {
@@ -133,7 +137,10 @@ switch ($Task) {
         }
     }
     'debug' { Build-App @('-debug', '-subsystem:console') }
-    'release' { Build-Release }
+    'release' {
+        if ($OutputPath) { Build-Release $OutputPath }
+        else { Build-Release }
+    }
     'package' {
         Build-Release
         $buildId = Get-BuildId

@@ -9,6 +9,7 @@ Window_Desc :: struct {
 	title: string,
 	width, height: i32,
 	hidden, inactive: bool,
+	tabbed_title_bar: bool,
 }
 Cursor_Shape :: enum { Arrow, Text, Hand, Resize_Horizontal, Resize_Vertical, Resize_All, Hidden }
 Tray_Menu_Item :: struct { id: u32, title: string, disabled, separator: bool }

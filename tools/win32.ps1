@@ -3,6 +3,7 @@ param(
     [string] $Name,
     [Alias('Pid')] [uint32] $ProcessId,
     [string] $Shot,
+    [switch] $Frame,
     [AllowEmptyString()] [string] $Text,
     [string] $Keys,
     [string] $Chord,
@@ -36,6 +37,7 @@ try {
         throw 'use -Activate only with -Chord or -SendText'
     }
     if ($Pointer -and $action -ne 'Mouse') { throw 'use -Pointer only with -Mouse' }
+    if ($Frame -and $action -ne 'Shot') { throw 'use -Frame only with -Shot' }
     $repo = Split-Path $PSScriptRoot -Parent
     $record = @{}
     if ($Name) {
@@ -154,14 +156,16 @@ public static class AioWin32 {
         }
         return found;
     }
-    public static string Shot(IntPtr h, string path) {
-        RECT r; Check(GetClientRect(h, out r), "GetClientRect");
+    public static string Shot(IntPtr h, string path, bool frame) {
+        RECT r;
+        if (frame) Check(GetWindowRect(h, out r), "GetWindowRect");
+        else Check(GetClientRect(h, out r), "GetClientRect");
         int width = r.right-r.left, height = r.bottom-r.top;
         if (width <= 0 || height <= 0) throw new Exception("empty client area; restore the window and retry");
         using (Bitmap bitmap = new Bitmap(width, height))
         using (Graphics g = Graphics.FromImage(bitmap)) {
             IntPtr dc = g.GetHdc();
-            try { Check(PrintWindow(h, dc, 3), "PrintWindow"); }
+            try { Check(PrintWindow(h, dc, frame ? 2u : 3u), "PrintWindow"); }
             finally { g.ReleaseHdc(dc); }
             bitmap.Save(path, ImageFormat.Png);
         }
@@ -304,7 +308,7 @@ public static class AioWin32 {
         try {
             $window = [AioWin32]::Find($ProcessId)
             switch ($action) {
-                'Shot' { [AioWin32]::Shot($window, [IO.Path]::GetFullPath($Shot)) }
+                'Shot' { [AioWin32]::Shot($window, [IO.Path]::GetFullPath($Shot), $Frame.IsPresent) }
                 'Text' {
                     [AioWin32]::Text($window, $Text)
                     "posted text chars=$($Text.Length) pid=$ProcessId"

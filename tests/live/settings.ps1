@@ -87,7 +87,7 @@ try {
     Assert-Value (Read-State)['settings.error'] 'false' 'boolean saved despite unrelated unknown key'
     Assert-Value (Read-State)['settings.value'] 'false' 'Enter flips an inline toggle'
     Close-Settings
-    Assert-Value ((Read-State)['pane.0.rect'] -split ',')[1] '5' 'tab bar updates live'
+    Assert-Value ((Read-State)['pane.0.rect'] -split ',')[1] '45' 'hidden tabs retain the window title bar'
     if ([IO.File]::ReadAllText($path) -notlike '*# external comment*future.key = retained*') {
         throw 'Unrelated text was lost.'
     }
@@ -124,11 +124,13 @@ try {
     Assert-Value (Read-State)['tabs.count'] '2' 'direct shortcut remains available'
     Invoke-Aio key Ctrl+B
     Assert-Value (Read-State)['leader.pending'] 'true' 'leader prefix arms'
+    Assert-Value (Read-State)['leader.indicator'] 'pane-status-line' 'pending leader shows the chosen status line'
     Invoke-Aio key T
     Assert-Value (Read-State)['tabs.count'] '3' 'leader action dispatches'
     Invoke-Aio key Ctrl+B
     Invoke-Aio key Esc
     Assert-Value (Read-State)['leader.pending'] 'false' 'Escape cancels leader'
+    Assert-Value (Read-State)['leader.indicator'] 'none' 'cancel clears the status line'
     Invoke-Aio key Ctrl+B
     Invoke-Aio focus out
     Assert-Value (Read-State)['leader.pending'] 'false' 'focus loss cancels leader'
@@ -138,6 +140,7 @@ try {
     Invoke-Aio key Ctrl+B
     Start-Sleep -Milliseconds 2200
     Assert-Value (Read-State)['leader.pending'] 'false' 'leader expires after two seconds'
+    Assert-Value (Read-State)['leader.indicator'] 'none' 'timeout clears the status line'
     Invoke-Aio key Ctrl+B
     Invoke-Aio key X
     Assert-Value (Read-State)['tabs.count'] '3' 'unmatched leader leaves layout unchanged'

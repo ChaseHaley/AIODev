@@ -216,7 +216,7 @@ tick :: proc(app: ^App) {
 	}
 	for window in app.windows {
 		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
-			window.leader_until = {}
+			leader_cancel(window)
 		}
 		update_blink(window)
 		update_autoscroll(app, window)
@@ -238,6 +238,9 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		deadline, found = next, true
 	}
 	for window in app.windows {
+		if window.leader_until != {} && (!found || time.tick_diff(window.leader_until, deadline) > 0) {
+			deadline, found = window.leader_until, true
+		}
 		if window.blinking && (!found || time.tick_diff(window.blink_deadline, deadline) > 0) {
 			deadline, found = window.blink_deadline, true
 		}
@@ -302,9 +305,8 @@ session_open :: proc(app: ^App) -> bool {
 	}
 	geometry.surface_width = u32(geometry.columns) * geometry.cell_width + 2 * geometry.padding_left
 	geometry.surface_height = u32(geometry.rows) * geometry.cell_height + 2 * geometry.padding_top
-	bar := ui.tab_bar_layout(f32(geometry.surface_width), scale, 1, app.settings.window.show_tab_bar_with_one_tab)
-	geometry.padding_top += u32(bar.height)
-	geometry.surface_height += u32(bar.height)
+	geometry.padding_top += u32(ui.TAB_HEIGHT*scale)
+	geometry.surface_height += u32(ui.TAB_HEIGHT*scale)
 	config := session_config(app, geometry)
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
@@ -452,7 +454,7 @@ load_settings :: proc(app: ^App) {
 
 reload_settings :: proc(app: ^App) {
 	refresh_animations(app)
-	for window in app.windows { window.leader_until = {} }
+	for window in app.windows { leader_cancel(window) }
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
 	load_settings(app)

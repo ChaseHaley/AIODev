@@ -13,6 +13,43 @@ foreign user32 {
 }
 
 @(test)
+tabbed_title_bar_keeps_native_hit_testing_and_client_size :: proc(t: ^testing.T) {
+	platform: p.Platform
+	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.TitleBar"), p.Init_Result.Primary) { return }
+	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
+	id, err := p.window_create(&platform,
+		{hidden = true, title = "Tabs", width = 900, height = 600, tabbed_title_bar = true})
+	if !testing.expect_value(t, err, p.Error.None) { return }
+	p.window_title_bar(&platform, id, 40, 300)
+	width, height, size_error := p.window_client_size(&platform, id)
+	testing.expect_value(t, size_error, p.Error.None)
+	testing.expect_value(t, width, i32(900))
+	testing.expect_value(t, height, i32(600))
+	hwnd := w.HWND(p.window_native_handle(&platform, id))
+	for hit in ([?]struct { x, y: i32, expected: w.LRESULT }{
+		{100, 20, w.HTCLIENT}, {400, 20, w.HTCAPTION}, {400, 1, w.HTTOP},
+		{785, 20, w.HTMINBUTTON}, {831, 20, w.HTMAXBUTTON}, {877, 20, w.HTCLOSE},
+		{400, 200, w.HTCLIENT},
+	}) {
+		point := w.POINT{hit.x, hit.y}
+		testing.expect(t, bool(w.ClientToScreen(hwnd, &point)))
+		packed := w.LPARAM(u32(u16(point.x)) | (u32(u16(point.y))<<16))
+		testing.expect_value(t, w.SendMessageW(hwnd, w.WM_NCHITTEST, 0, packed), hit.expected)
+	}
+	testing.expect_value(t, p.window_set_client_size(&platform, id, 800, 500), p.Error.None)
+	width, height, size_error = p.window_client_size(&platform, id)
+	testing.expect_value(t, size_error, p.Error.None)
+	testing.expect_value(t, width, i32(800))
+	testing.expect_value(t, height, i32(500))
+	p.window_caption_action(&platform, id, 2)
+	events, poll_error := p.poll_events(&platform)
+	testing.expect_value(t, poll_error, p.Error.None)
+	closed := false
+	for e in events { if request, ok := e.(p.Close_Request_Event); ok { closed ||= request.window == id } }
+	testing.expect(t, closed)
+}
+
+@(test)
 invalid_and_partial_lifecycle :: proc(t: ^testing.T) {
 	platform: p.Platform
 	testing.expect_value(t, p.destroy(&platform), p.Error.None)

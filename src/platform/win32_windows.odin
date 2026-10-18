@@ -5,6 +5,7 @@ import w "core:sys/windows"
 
 foreign import user32 "system:user32.lib"
 foreign import kernel32 "system:kernel32.lib"
+foreign import dwmapi "system:dwmapi.lib"
 
 MWMO_INPUTAVAILABLE :: 0x0004
 FLASHW_ALL :: 0x00000003
@@ -25,6 +26,12 @@ FLASHWINFO :: struct {
 }
 
 HKL :: distinct rawptr
+
+@(default_calling_convention="system")
+foreign dwmapi {
+	DwmDefWindowProc :: proc(hwnd: w.HWND, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM,
+		result: ^w.LRESULT) -> w.BOOL ---
+}
 
 @(default_calling_convention="system")
 foreign user32 {

@@ -65,6 +65,9 @@ Window :: struct {
 	tab_controls: [dynamic]ui.Control_Motion,
 	tab_hover: int,
 	tab_pressed: bool,
+	tab_close_pressed: int,
+	caption_hover, caption_pressed: int,
+	maximized: bool,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
@@ -94,6 +97,8 @@ window_open :: proc(app: ^App) -> bool {
 	w.views = make([dynamic]Pane_View)
 	ui.find_init(&w.find)
 	w.tab_hover = -1
+	w.tab_close_pressed = -1
+	w.caption_hover, w.caption_pressed = -1, -1
 	w.divider_click_node = layout.INVALID_NODE
 	w.tab_controls = make([dynamic]ui.Control_Motion)
 	w.pointer_shape = .Text
@@ -107,6 +112,7 @@ window_open :: proc(app: ^App) -> bool {
 	desc := platform.Window_Desc{
 		title = app.app_id,
 		inactive = app.options.inactive,
+		tabbed_title_bar = true,
 		width = i32(g.surface_width),
 		height = i32(g.surface_height),
 	}
@@ -196,6 +202,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 }
 
 window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
+	w.maximized = platform.window_maximized(&app.platform, w.id)
 	w.width, w.height = width, height
 	if width <= 0 || height <= 0 {
 		return
@@ -218,6 +225,9 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if resize(&w.tab_controls, len(w.workspace.tabs)+1) != nil {
 		log.error("resizing tab control states failed")
 	}
+	bar := window_tab_bar(app, w)
+	platform.window_title_bar(&app.platform, w.id, i32(bar.height),
+		i32(f32(bar.count)*bar.tab_width+2*bar.button_width))
 	pane_header_cancel(w)
 	for &view in w.views { view.header_controls = {} }
 	w.header_height = 0
@@ -429,6 +439,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		reset_blink(w)
 	}
 	if result := window_chrome_draw(app, w); result != .Ok { return frame, result }
+	if result := window_leader_draw(app, w); result != .Ok { return frame, result }
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {
 		status := find_status(w, focused_session(app, w))

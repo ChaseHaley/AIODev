@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
+import "core:unicode/utf8"
 import "aio:commands"
 import "aio:glyphs"
 import "aio:input"
@@ -208,13 +209,20 @@ editor_select_key :: proc(p: ^Editor, key: string) -> bool {
 
 // Each query word matches as written or, for plurals such as "panes", without its final s.
 @(private)
-row_matches :: proc(words: []string, haystack: string) -> bool {
+row_matches :: proc(words: []string, haystack: string, fuzzy: bool = false) -> bool {
 	for word in words {
 		if strings.contains(haystack, word) { continue }
 		if len(word) > 3 && word[len(word)-1] == 's' && strings.contains(haystack, word[:len(word)-1]) {
 			continue
 		}
-		return false
+		if !fuzzy { return false }
+		at := 0
+		for c in haystack {
+			if at >= len(word) { break }
+			wanted, size := utf8.decode_rune(word[at:])
+			if wanted == c { at += size }
+		}
+		if at != len(word) { return false }
 	}
 	return true
 }
@@ -226,14 +234,28 @@ editor_rebuild :: proc(p: ^Editor) {
 	clear(&p.items)
 	query := strings.to_lower(strings.trim_space(field_string(&p.filter)), context.temp_allocator)
 	words := strings.fields(query, context.temp_allocator)
+	ranks := make([]u8, len(p.rows), context.temp_allocator)
+	best: u8
+	for row, i in p.rows {
+		haystack := strings.to_lower(fmt.tprintf("%s %s %s %s %s", row.key, row.title,
+			p.groups[row.group].title, row.description, row.kind == .Shortcut ? row.value : ""),
+			context.temp_allocator)
+		if row_matches(words, haystack) {
+			ranks[i] = 4
+		} else if row.kind == .Shortcut && row_matches(words,
+			strings.to_lower(row.value, context.temp_allocator), true) {
+			ranks[i] = 3
+		} else if row_matches(words, strings.to_lower(row.title, context.temp_allocator), true) {
+			ranks[i] = 2
+		} else if row_matches(words, haystack, true) { ranks[i] = 1 }
+		best = max(best, ranks[i])
+	}
 	matched := make([dynamic]int, context.temp_allocator)
-	for group, g in p.groups {
+	for _, g in p.groups {
 		clear(&matched)
 		for row, i in p.rows {
 			if row.group != g { continue }
-			haystack := strings.to_lower(fmt.tprintf("%s %s %s %s", row.key, row.title, group.title,
-				row.description), context.temp_allocator)
-			if row_matches(words, haystack) { append(&matched, i) }
+			if best > 0 && ranks[i] == best { append(&matched, i) }
 		}
 		if len(matched) == 0 { continue }
 		append(&p.items, Editor_Item{g, -1, len(matched)})
@@ -604,7 +626,10 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.text_right = parts.swatch.x-12*s
 	case .Shortcut:
 		parts.field = field(right, cy, 240, s)
-		if index == p.selected { parts.positions = {parts.field.x-178*s, cy-11*s, 36*s, 22*s} }
+		if index == p.selected {
+			parts.positions = {parts.field.x-148*s, cy-11*s, 36*s, 22*s}
+			parts.text_right = parts.positions.x
+		}
 	}
 	if parts.field.width > 0 && parts.text_right > parts.field.x { parts.text_right = parts.field.x }
 	parts.text_right -= 16*s
