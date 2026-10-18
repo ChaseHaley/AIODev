@@ -136,7 +136,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 			for &view in w.views {
 				if view.content == pane.content { view.header_pressed = action }
 			}
-			if action == .None && w.header_height > 0 { pane_drag_press(w, pane.node, f32(e.x), f32(e.y)) }
+			if action == .None { pane_drag_press(w, pane.node, f32(e.x), f32(e.y)) }
 		}
 	}
 	return true

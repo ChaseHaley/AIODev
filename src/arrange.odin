@@ -20,10 +20,12 @@ Divider_Drag :: struct {
 
 // A header press that becomes a pane move, or a swap while Shift is held, once it passes the threshold.
 Pane_Drag :: struct {
+	source, destination, hover: ^Tab,
+	hover_until: time.Tick,
 	node, target: layout.Node_Id,
 	direction: layout.Direction,
-	start: [2]f32,
-	pressed, active, swap, shown: bool,
+	start, pointer: [2]f32,
+	pressed, active, swap, shown, root: bool,
 	ghost: [4]ui.Motion,
 }
 
@@ -136,13 +138,17 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 }
 
 pane_drag_press :: proc(w: ^Window, node: layout.Node_Id, x, y: f32) {
-	if len(w.panes) < 2 { return }
-	w.pane_drag = {node = node, target = layout.INVALID_NODE, start = {x, y}, pressed = true}
+	source := selected_tab(w.workspace)
+	w.pane_drag = {source = source, destination = source, node = node,
+		target = layout.INVALID_NODE, start = {x, y}, pressed = true}
 }
 
-pane_drag_cancel :: proc(w: ^Window) {
-	if w.pane_drag.active { w.dirty = true }
+pane_drag_cancel :: proc(app: ^App, w: ^Window) {
+	d := w.pane_drag
 	w.pane_drag = {}
+	if !d.pressed { return }
+	w.dirty = true
+	for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
 }
 
 // The edge of `r` nearest to the point, as the side the dragged pane will take.
@@ -163,16 +169,26 @@ nearest_side :: proc(r: layout.Rect, x, y: f32) -> layout.Direction {
 @(private)
 pane_drag_preview :: proc(app: ^App, w: ^Window) -> (layout.Rect, bool) {
 	d := &w.pane_drag
-	if d.target == layout.INVALID_NODE { return {}, false }
+	if d.destination == nil || (d.target == layout.INVALID_NODE && !d.root) { return {}, false }
 	if d.swap {
+		if d.destination != d.source { return {}, false }
 		for pane in w.panes { if pane.node == d.target { return pane.rect, true } }
 		return {}, false
 	}
-	trial := w.tree^
-	trial.nodes = make([dynamic]layout.Node, len(w.tree.nodes), len(w.tree.nodes)+2, context.temp_allocator)
-	copy(trial.nodes[:], w.tree.nodes[:])
-	content := w.tree.nodes[d.node].(layout.Pane).content
-	if _, moved := layout.move_pane(&trial, d.node, d.target, d.direction); !moved { return {}, false }
+	trial := d.destination.tree
+	trial.zoomed = false
+	trial.nodes = make([dynamic]layout.Node, len(trial.nodes), len(trial.nodes)+2, context.temp_allocator)
+	copy(trial.nodes[:], d.destination.tree.nodes[:])
+	content := d.source.tree.nodes[d.node].(layout.Pane).content
+	moved := false
+	if d.destination != d.source {
+		source := d.source.tree
+		source.nodes = make([dynamic]layout.Node, len(source.nodes), context.temp_allocator)
+		copy(source.nodes[:], d.source.tree.nodes[:])
+		_, moved = layout.transfer_pane(&source, &trial, d.node, d.target, d.direction, d.root)
+	} else if d.root { _, moved = layout.dock_pane(&trial, d.node, d.direction) }
+	else { _, moved = layout.move_pane(&trial, d.node, d.target, d.direction) }
+	if !moved { return {}, false }
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(&trial, window_content_area(app, w), window_gap(app, w), &rects)
 	for r in rects { if r.content == content { return r.rect, true } }
@@ -185,16 +201,48 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	if !d.pressed { return false }
 	if !d.active && math.hypot(x-d.start.x, y-d.start.y) < DRAG_THRESHOLD*w.scale { return false }
 	d.active = true
-	target, direction := layout.INVALID_NODE, layout.Direction.Left
-	if pane, found := layout.hit_test(w.panes[:], x, y); found && pane.node != d.node {
-		target, direction = pane.node, nearest_side(pane.rect, x, y)
+	d.pointer = {x, y}
+	bar := window_tab_bar(app, w)
+	destination := selected_tab(w.workspace)
+	now := time.tick_now()
+	on_tab := ui.tab_bar_hit_test(bar, x, y)
+	if on_tab >= 0 && on_tab < bar.count {
+		tab := w.workspace.tabs[on_tab]
+		if root, settings := tab.tree.nodes[tab.tree.root].(layout.Pane); settings && root.content.kind == .Settings {
+			destination = nil
+		} else { destination = tab }
 	}
-	if target == d.target && direction == d.direction && swap == d.swap { return true }
-	d.target, d.direction, d.swap = target, direction, swap
+	if destination != nil && destination != selected_tab(w.workspace) && on_tab >= 0 && !swap {
+		if d.hover != destination {
+			d.hover, d.hover_until = destination, time.tick_add(now, 350*time.Millisecond)
+		} else if time.tick_diff(now, d.hover_until) <= 0 {
+			tab_select(app, w, on_tab)
+			d.hover_until = {}
+		}
+	} else { d.hover, d.hover_until = nil, {} }
+	target, direction := layout.INVALID_NODE, layout.Direction.Left
+	root := false
+	area := window_content_area(app, w)
+	band := min(24*w.scale, area.width/5, area.height/5)
+	if destination != nil && on_tab >= 0 && on_tab < bar.count {
+		if destination != d.source && !swap { target, direction = destination.tree.focus, .Right }
+	} else if destination != nil && x >= 0 && x < f32(w.width) && y >= bar.height && y < f32(w.height) {
+		if !swap && (x < area.x+band || x >= area.x+area.width-band ||
+		   y < area.y+band || y >= area.y+area.height-band) {
+			root, direction, target = true, nearest_side(area, x, y), destination.tree.focus
+			if destination == d.source && d.node == destination.tree.root { target, root = layout.INVALID_NODE, false }
+		} else if pane, found := layout.hit_test(w.panes[:], x, y);
+		          found && (destination != d.source || pane.node != d.node) {
+			target, direction = pane.node, nearest_side(pane.rect, x, y)
+		}
+	}
+	if swap && destination != d.source { target = layout.INVALID_NODE }
+	if target == d.target && direction == d.direction && swap == d.swap && root == d.root &&
+	   destination == d.destination { return true }
+	d.target, d.direction, d.swap, d.root, d.destination = target, direction, swap, root, destination
 	w.dirty = true
 	rect, shown := pane_drag_preview(app, w)
 	values := [4]f32{rect.x, rect.y, rect.width, rect.height}
-	now := time.tick_now()
 	for &m, i in d.ghost {
 		ui.motion_target(&m, values[i], GHOST_DURATION, .Decelerate, app.animations && d.shown, now)
 	}
@@ -208,10 +256,30 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	w.pane_drag = {}
 	if !d.active { return false }
 	w.dirty = true
-	if d.target == layout.INVALID_NODE { return true }
+	if d.target == layout.INVALID_NODE || !d.shown {
+		for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
+		return true
+	}
 	changed := false
+	if d.destination != d.source {
+		focus_leave(app, w)
+		_, changed = layout.transfer_pane(&d.source.tree, &d.destination.tree,
+			d.node, d.target, d.direction, d.root)
+		if changed {
+			for tab, i in w.workspace.tabs { if tab == d.destination { tab_select(app, w, i); break } }
+			if d.source.tree.root == layout.INVALID_NODE {
+				for tab, i in w.workspace.tabs { if tab == d.source { workspace_close_tab(app, w.workspace, i); break } }
+			} else { tab_update_title(app, d.source) }
+		} else {
+			for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
+			notify(app, .Error, "Could not move the pane. Both tabs were preserved.")
+		}
+		return true
+	}
 	if d.swap {
 		changed = layout.swap(w.tree, d.node, d.target)
+	} else if d.root {
+		_, changed = layout.dock_pane(w.tree, d.node, d.direction)
 	} else {
 		_, changed = layout.move_pane(w.tree, d.node, d.target, d.direction)
 	}
@@ -221,6 +289,13 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		reset_blink(w)
 	}
 	return true
+}
+
+pane_drag_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
+	d := &w.pane_drag
+	if d.active && d.hover_until != {} && time.tick_diff(now, d.hover_until) <= 0 {
+		pane_drag_move(app, w, d.pointer.x, d.pointer.y, d.swap)
+	}
 }
 
 pane_drag_animating :: proc(w: ^Window) -> bool {
@@ -243,9 +318,10 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	fill := app.theme.accent
 	fill.a = 0.16
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None { return .Ok }
+	r = {d.ghost[0].target, d.ghost[1].target, d.ghost[2].target, d.ghost[3].target}
 	if render.push_rect(&w.list, {rect = r, color = app.theme.accent, radius = radius,
 		stroke = 2*w.scale}) != .None { return .Ok }
-	label := d.swap ? "Swap panes" : "Move pane here"
+	label := d.swap ? "Swap panes" : d.root ? "Dock to workspace edge" : "Move pane here"
 	text := ui.text_styled(&app.ui_text, .Strong)
 	width := ui.text_width(&text, label)
 	return ui.draw_text(&text, &w.list, label, r.x+(r.width-width)/2,
@@ -256,5 +332,5 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 arrange_cancel :: proc(app: ^App, w: ^Window) {
 	w.dragging = {}
 	tab_drag_cancel(app, w)
-	pane_drag_cancel(w)
+	pane_drag_cancel(app, w)
 }

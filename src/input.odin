@@ -57,10 +57,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Resize_Event:
 		if w := window_find(app, e.window); w != nil {
+			arrange_cancel(app, w)
 			window_resize(app, w, e.width, e.height)
 		}
 	case platform.Dpi_Event:
 		if w := window_find(app, e.window); w != nil {
+			arrange_cancel(app, w)
 			window_set_dpi(app, w, e.dpi)
 		}
 	case platform.Focus_Event:
@@ -260,7 +262,8 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	caption := ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale)
-	if e.button == .Left && (caption >= 0 || w.caption_pressed >= 0) {
+	if e.button == .Left && (caption >= 0 || w.caption_pressed >= 0) &&
+	   !w.pane_drag.pressed && !w.tab_drag.pressed {
 		if e.pressed { w.caption_pressed = caption } else {
 			pressed := w.caption_pressed
 			w.caption_pressed = -1
@@ -376,7 +379,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	}
 	if w.pane_drag.pressed {
 		if .Left not_in e.buttons {
-			pane_drag_cancel(w)
+			pane_drag_cancel(app, w)
 		} else if pane_drag_move(app, w, x, y, .Shift in e.modifiers) {
 			pointer_set(app, w, .Resize_All)
 			return

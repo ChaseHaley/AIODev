@@ -183,6 +183,7 @@ run_action :: proc(
 	app: ^App, w: ^Window, action: Action,
 	split_direction: layout.Direction = .Right, split_ratio: f32 = 0.5, split_focus := true,
 ) {
+	if w.pane_drag.pressed || w.tab_drag.pressed { arrange_cancel(app, w) }
 	entry := focused_session(app, w)
 	w.dirty = true
 	switch action {

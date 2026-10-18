@@ -215,6 +215,7 @@ tick :: proc(app: ^App) {
 		mark_all_dirty(app)
 	}
 	for window in app.windows {
+		pane_drag_tick(app, window, time.tick_now())
 		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
 			leader_cancel(window)
 		}
@@ -238,6 +239,9 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		deadline, found = next, true
 	}
 	for window in app.windows {
+		if next := window.pane_drag.hover_until; next != {} && (!found || time.tick_diff(next, deadline) > 0) {
+			deadline, found = next, true
+		}
 		if window.leader_until != {} && (!found || time.tick_diff(window.leader_until, deadline) > 0) {
 			deadline, found = window.leader_until, true
 		}
@@ -454,7 +458,7 @@ load_settings :: proc(app: ^App) {
 
 reload_settings :: proc(app: ^App) {
 	refresh_animations(app)
-	for window in app.windows { leader_cancel(window) }
+	for window in app.windows { leader_cancel(window); arrange_cancel(app, window) }
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
 	load_settings(app)

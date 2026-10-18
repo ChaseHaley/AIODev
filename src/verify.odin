@@ -328,6 +328,10 @@ when AIO_CONTROL {
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
 				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
 				{"panes.dragging", fmt.tprintf("%t", w.pane_drag.active)},
+				{"panes.drop.shown", fmt.tprintf("%t", w.pane_drag.shown)},
+				{"panes.drop.root", fmt.tprintf("%t", w.pane_drag.root)},
+				{"panes.drop.rect", fmt.tprintf("%g,%g,%g,%g", w.pane_drag.ghost[0].target,
+					w.pane_drag.ghost[1].target, w.pane_drag.ghost[2].target, w.pane_drag.ghost[3].target)},
 			}
 			if _, err := append(&entries, ..pane_state[:]); err != nil { return nil, .Out_Of_Memory }
 			for view in w.views {

@@ -436,14 +436,59 @@ move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (N
 	if _, target_ok := l.nodes[target].(Pane); !ok || !target_ok { return INVALID_NODE, false }
 	focused := l.focus == node
 	if !remove(l, node) { return INVALID_NODE, false }
-	// Removal vacated two nodes, so the split below reuses them and cannot fail to allocate.
-	added, err := split_direction(l, target, direction, 0.5, pane.content)
-	assert(err == nil)
-	moved := l.nodes[added].(Pane)
-	moved.order = pane.order
-	l.nodes[added] = moved
-	l.next_pane_order -= 1
+	added := place_pane(l, target, pane, direction)
 	if focused { l.focus = added }
+	return added, true
+}
+
+@(private)
+place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction) -> Node_Id {
+	parent := parent_of(l, target)
+	added := allocate_node(l, pane)
+	before := direction == .Left || direction == .Up
+	axis: Axis = direction == .Left || direction == .Right ? .Horizontal : .Vertical
+	branch := allocate_node(l, Split{axis, 0.5, before ? added : target, before ? target : added})
+	if parent == INVALID_NODE { l.root = branch } else {
+		s := l.nodes[parent].(Split)
+		if s.first == target { s.first = branch } else { s.second = branch }
+		l.nodes[parent] = s
+	}
+	l.zoomed = false
+	return added
+}
+
+@(require_results)
+dock_pane :: proc(l: ^Layout, node: Node_Id, direction: Direction) -> (Node_Id, bool) {
+	if node == l.root || int(node) >= len(l.nodes) { return INVALID_NODE, false }
+	pane, ok := l.nodes[node].(Pane)
+	if !ok { return INVALID_NODE, false }
+	focused := l.focus == node
+	if !remove(l, node) { return INVALID_NODE, false }
+	added := place_pane(l, l.root, pane, direction)
+	if focused { l.focus = added }
+	return added, true
+}
+
+// Reserve before detaching, so allocation failure leaves both trees untouched.
+@(require_results)
+transfer_pane :: proc(source, destination: ^Layout, node, target: Node_Id,
+	direction: Direction, root: bool) -> (Node_Id, bool) {
+	if source == destination || int(node) >= len(source.nodes) ||
+	   int(target) >= len(destination.nodes) { return INVALID_NODE, false }
+	pane, ok := source.nodes[node].(Pane)
+	if !ok || pane.content.kind != .Terminal { return INVALID_NODE, false }
+	if _, target_ok := destination.nodes[target].(Pane); !target_ok { return INVALID_NODE, false }
+	for n in destination.nodes {
+		if p, is_pane := n.(Pane); is_pane && (p.content.kind != .Terminal || p.content == pane.content) {
+			return INVALID_NODE, false
+		}
+	}
+	if reserve(&destination.nodes, len(destination.nodes)+2) != nil { return INVALID_NODE, false }
+	if !remove(source, node) { return INVALID_NODE, false }
+	destination.next_pane_order += 1
+	pane.order = destination.next_pane_order
+	added := place_pane(destination, root ? destination.root : target, pane, direction)
+	destination.focus = added
 	return added, true
 }
 

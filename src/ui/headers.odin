@@ -122,11 +122,12 @@ header_draw :: proc(list: ^render.Draw_List, text: ^Text, theme: Theme,
 // Single-pane tabs keep their full terminal height, so their split controls float in a small pill at the
 // pane's top-right corner instead of a header row.
 split_overlay_layout :: proc(area: render.Rect, scale: f32) -> Header_Layout {
-	width, height := 52*scale, 28*scale
+	width, height := 80*scale, 28*scale
 	l := Header_Layout{panel = {max(area.x, area.x+area.width-width-6*scale), area.y+6*scale,
 		min(width, area.width), min(height, area.height)}}
-	l.buttons[0] = {l.panel.x+3*scale, l.panel.y+3*scale, 22*scale, 22*scale}
-	l.buttons[1] = {l.panel.x+27*scale, l.panel.y+3*scale, 22*scale, 22*scale}
+	l.title = {l.panel.x+3*scale, l.panel.y+3*scale, 26*scale, 22*scale}
+	l.buttons[0] = {l.panel.x+31*scale, l.panel.y+3*scale, 22*scale, 22*scale}
+	l.buttons[1] = {l.panel.x+55*scale, l.panel.y+3*scale, 22*scale, 22*scale}
 	return l
 }
 
@@ -135,6 +136,7 @@ split_overlay_draw :: proc(list: ^render.Draw_List, text: ^Text, theme: Theme, l
 	if render.push_layer(list, l.panel, 8*scale) != .None { return .Ok }
 	draw_rect(list, {rect = l.panel, color = theme.surface, radius = 8*scale})
 	draw_rect(list, {rect = l.panel, color = theme.border, radius = 8*scale, stroke = scale})
+	if result := draw_glyph_centered(text, list, '⠿', l.title, theme.muted); result != .Ok { return result }
 	buttons := l.buttons
 	for button, i in buttons[:2] {
 		fill := theme.hover

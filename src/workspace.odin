@@ -150,6 +150,7 @@ pane_close :: proc(app: ^App, w: ^Window) {
 @(private)
 workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	if index < 0 || index >= len(workspace.tabs) { return }
+	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
 	tab := workspace.tabs[index]
 	was_selected := index == workspace.selected
 	if was_selected {
@@ -183,6 +184,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 
 @(private)
 pane_remove :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
+	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
 	tab := workspace.tabs[tab_index]
 	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
 	if !is_pane { return }
