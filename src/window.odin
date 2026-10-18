@@ -35,7 +35,13 @@ Window :: struct {
 	workspace: ^Workspace,
 	tree: ^layout.Layout,
 	dividers: [dynamic]layout.Divider,
-	dragging: Maybe(layout.Divider),
+	dragging: Divider_Drag,
+	divider_click_node: layout.Node_Id,
+	divider_click_ns: i64,
+	pane_drag: Pane_Drag,
+	tab_drag: Tab_Drag,
+	// A single pane has no header row, so its split controls appear while the pointer is near its top.
+	split_overlay: bool,
 	panes: [dynamic]layout.Pane_Rect,
 	views: [dynamic]Pane_View,
 	list: render.Draw_List,
@@ -88,6 +94,7 @@ window_open :: proc(app: ^App) -> bool {
 	w.views = make([dynamic]Pane_View)
 	ui.find_init(&w.find)
 	w.tab_hover = -1
+	w.divider_click_node = layout.INVALID_NODE
 	w.tab_controls = make([dynamic]ui.Control_Motion)
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
@@ -408,6 +415,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if header_result := pane_header_draw(app, w, pane, entry); header_result != .Ok { return frame, header_result }
 		window_card_outline(app, w, pane)
 	}
+	if result := pane_drag_draw(app, w); result != .Ok { return frame, result }
 	if blinking != w.blinking {
 		w.blinking = blinking
 		reset_blink(w)

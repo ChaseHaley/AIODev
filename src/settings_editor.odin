@@ -97,7 +97,7 @@ editor_open :: proc(app: ^App, w: ^Window) {
 	find_close(w, focused_session(app, w))
 	leader_cancel(w)
 	w.selecting, w.autoscrolling = false, false
-	w.dragging = nil
+	w.dragging = {}
 	w.dirty = true
 	if len(diagnostics) > 0 {
 		ui.editor_message(p,

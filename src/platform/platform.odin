@@ -10,7 +10,7 @@ Window_Desc :: struct {
 	width, height: i32,
 	hidden, inactive: bool,
 }
-Cursor_Shape :: enum { Arrow, Text, Hand, Resize_Horizontal, Resize_Vertical, Hidden }
+Cursor_Shape :: enum { Arrow, Text, Hand, Resize_Horizontal, Resize_Vertical, Resize_All, Hidden }
 Tray_Menu_Item :: struct { id: u32, title: string, disabled, separator: bool }
 Key_Event :: struct {
 	window: Window_Id,

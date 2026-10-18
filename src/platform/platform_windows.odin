@@ -757,6 +757,7 @@ window_set_cursor :: proc(p: ^Platform, id: Window_Id, shape: Cursor_Shape) -> E
 			.Hand = transmute(cstring16)w.IDC_HAND,
 			.Resize_Horizontal = transmute(cstring16)w.IDC_SIZEWE,
 			.Resize_Vertical = transmute(cstring16)w.IDC_SIZENS,
+			.Resize_All = transmute(cstring16)w.IDC_SIZEALL,
 		}
 		window.cursor = w.LoadCursorW(nil, ids[shape])
 		if window.cursor == nil {

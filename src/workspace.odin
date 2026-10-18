@@ -70,7 +70,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 		if w.find.open { find_close(w, entry) }
 	}
 	w.selecting, w.autoscrolling = false, false
-	w.dragging = nil
+	w.dragging = {}
 	w.wheel_remainder = 0
 	paste_confirm_cancel(app, w)
 }
@@ -124,7 +124,7 @@ pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f3
 
 pane_zoom :: proc(app: ^App, w: ^Window) {
 	w.tree.zoomed = !w.tree.zoomed
-	w.dragging = nil
+	w.dragging = {}
 	window_relayout(app, w)
 }
 

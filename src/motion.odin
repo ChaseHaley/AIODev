@@ -9,7 +9,8 @@ motion_active :: proc(app: ^App) -> bool {
 	for w in app.windows {
 		if ui.motion_active(w.tab_underline) || ui.editor_animating(&w.editor) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
-		if w.header_height > 0 {
+		if pane_drag_animating(w) { return true }
+		if w.header_height > 0 || w.split_overlay {
 			for pane in w.views { for control in pane.header_controls { if ui.control_active(control) { return true } } }
 		}
 	}
@@ -32,7 +33,8 @@ update_motion :: proc(app: ^App) {
 			controls_changed = ui.control_update(&control, w.tab_hover == i,
 				w.tab_pressed && w.tab_hover == i, app.animations, now) || controls_changed
 		}
-		if w.header_height > 0 {
+		pane_drag_animate(w, now)
+		if w.header_height > 0 || w.split_overlay {
 			for &pane in w.views {
 				for &control, i in pane.header_controls {
 					controls_changed = ui.control_update(&control, pane.header_hover == ui.Header_Action(i+1),

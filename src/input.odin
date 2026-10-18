@@ -47,6 +47,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.tab_hover = -1
 			w.tab_pressed = false
 			w.editor.hover, w.editor.pressed = 0, 0
+			w.split_overlay = false
 			for &view in w.views { view.header_hover, view.header_pressed = .None, .None }
 			w.dirty = true
 		}
@@ -118,6 +119,11 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if suppressed, ok := w.suppressed_key.?; ok && !e.pressed && suppressed.key == e.key {
 		w.suppressed_key = nil
+		return
+	}
+	if e.pressed && e.key == .Escape && (w.pane_drag.active || w.tab_drag.active) {
+		arrange_cancel(app, w)
+		w.suppressed_key = e
 		return
 	}
 	if app.palette.open {
@@ -303,7 +309,8 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	x, y := f32(e.x), f32(e.y)
 	if e.button == .Left && !e.pressed {
-		if _, dragging := w.dragging.?; dragging { w.dragging = nil; return }
+		if w.dragging.count > 0 { w.dragging = {}; return }
+		if w.tab_drag.pressed { w.tab_drag = {}; return }
 		if w.selecting { selection_finish(app, w, x, y); return }
 	}
 	bar := window_tab_bar(app, w)
@@ -313,18 +320,15 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 			if index == bar.count && e.button == .Left { tab_new(app, w) }
 			else if index >= 0 && index < bar.count {
 				if e.button == .Middle { tab_close(app, w, index) }
-				else if e.button == .Left { tab_select(app, w, index) }
+				else if e.button == .Left {
+					tab_select(app, w, index)
+					tab_press(w, index, x)
+				}
 			}
 		}
 		return
 	}
-	if e.button == .Left && e.pressed {
-		if divider, found := layout.divider_hit_test(w.dividers[:], x, y, 3*w.scale); found {
-			w.selecting, w.autoscrolling = false, false
-			w.dragging = divider
-			return
-		}
-	}
+	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) { return }
 	if w.find.open && !w.selecting && ui.find_contains(f32(w.width), w.scale, x, y) {
 		return
 	}
@@ -366,24 +370,30 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		w.tab_hover = hover
 		w.dirty = true
 	}
-	if divider, dragging := w.dragging.?; dragging {
-		if .Left not_in e.buttons { w.dragging = nil; return }
-		if layout.drag_divider(w.tree, divider, x, y, window_gap(app, w)) { window_relayout(app, w) }
+	if w.dragging.count > 0 {
+		if .Left not_in e.buttons { w.dragging = {}; return }
+		divider_drag(app, w, x, y)
 		return
 	}
-	over_header := pane_header_pointer(w, x, y, !w.selecting && !app.palette.open &&
-		!(w.find.open && ui.find_contains(f32(w.width), w.scale, x, y)))
+	if w.tab_drag.pressed {
+		if .Left not_in e.buttons { w.tab_drag = {} } else if tab_drag_move(app, w, x) { return }
+	}
+	if w.pane_drag.pressed {
+		if .Left not_in e.buttons {
+			pane_drag_cancel(w)
+		} else if pane_drag_move(app, w, x, y, .Shift in e.modifiers) {
+			pointer_set(app, w, .Resize_All)
+			return
+		}
+	}
+	enabled := !w.selecting && !app.palette.open && !(w.find.open && ui.find_contains(f32(w.width), w.scale, x, y))
+	split_overlay_update(w, x, y, enabled)
+	over_header := pane_header_pointer(w, x, y, enabled)
 	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
 	bar := window_tab_bar(app, w)
 	if y < bar.height { shape = .Arrow }
-	if d, found := layout.divider_hit_test(w.dividers[:], x, y, 3*w.scale); found && w.header_buttons == {} {
-		shape = d.axis == .Horizontal ? .Resize_Horizontal : .Resize_Vertical
-	}
-	if shape != w.pointer_shape {
-		if platform.window_set_cursor(&app.platform, w.id, shape) != .None {
-			log.error("setting the pointer cursor failed")
-		} else { w.pointer_shape = shape }
-	}
+	if resize, found := divider_cursor(w, x, y); found && w.header_buttons == {} { shape = resize }
+	pointer_set(app, w, shape)
 	if app.palette.open {
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 		if app.palette.query.dragging && .Left in e.buttons {
@@ -443,7 +453,8 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		w.editor.hover, w.editor.pressed = 0, 0
 		w.leader_until = {}
 		w.selecting, w.autoscrolling = false, false
-		w.dragging = nil
+		w.split_overlay = false
+		arrange_cancel(app, w)
 		ui.editor_release(&w.editor)
 		ui.palette_input_release(&app.palette)
 	}
@@ -529,4 +540,12 @@ selection_finish :: proc(app: ^App, w: ^Window, x, y: f32) {
 	term.selection_release(entry.session, x, y)
 	if app.settings.terminal.copy_on_select { copy_selection(app, entry, false) }
 	w.dirty = true
+}
+
+@(private)
+pointer_set :: proc(app: ^App, w: ^Window, shape: platform.Cursor_Shape) {
+	if shape == w.pointer_shape { return }
+	if platform.window_set_cursor(&app.platform, w.id, shape) != .None {
+		log.error("setting the pointer cursor failed")
+	} else { w.pointer_shape = shape }
 }

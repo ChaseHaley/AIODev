@@ -7,6 +7,7 @@ import "aio:commands"
 import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
+import "aio:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
@@ -64,10 +65,14 @@ pane_header_directory :: proc(header: ^Pane_Header_Metadata) -> (directory: stri
 
 pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
 	entry: ^Session_Entry) -> glyphs.Result {
-	if w.header_height == 0 { return .Ok }
 	controls: [4]ui.Control_Motion
 	for view in w.views { if view.content == pane.content { controls = view.header_controls; break } }
 	r := pane.rect
+	if w.header_height == 0 {
+		if !w.split_overlay { return .Ok }
+		return ui.split_overlay_draw(&w.list, &app.ui_text, app.theme,
+			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale), controls, w.scale)
+	}
 	icon := app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon
 	directory, reported := pane_header_directory(&entry.header)
 	if !reported && directory != "" { directory = fmt.tprintf("started in %s", directory) }
@@ -78,10 +83,12 @@ pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
 }
 
 pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_Action, bool) {
-	if w.header_height == 0 { return {}, .None, false }
+	if w.header_height == 0 && !w.split_overlay { return {}, .None, false }
 	for pane in w.panes {
 		r := pane.rect
-		l := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, pane.node == w.tree.focus)
+		area := render.Rect{r.x, r.y, r.width, r.height}
+		l := ui.header_layout(area, w.scale, pane.node == w.tree.focus)
+		if w.header_height == 0 { l = ui.split_overlay_layout(area, w.scale) }
 		if ui.header_contains(l, x, y) { return pane, ui.header_hit_test(l, x, y), true }
 	}
 	return {}, .None, false
@@ -101,6 +108,10 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
 	if !e.pressed && e.button in w.header_buttons {
 		w.header_buttons -= {e.button}
+		if e.button == .Left && pane_drag_release(app, w) {
+			pane_header_cancel(w)
+			return true
+		}
 		chosen: ui.Header_Action
 		for &view in w.views {
 			if e.button == .Left {
@@ -125,6 +136,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 			for &view in w.views {
 				if view.content == pane.content { view.header_pressed = action }
 			}
+			if action == .None && w.header_height > 0 { pane_drag_press(w, pane.node, f32(e.x), f32(e.y)) }
 		}
 	}
 	return true
@@ -137,4 +149,17 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> bool {
 		if hover != view.header_hover { view.header_hover = hover; w.dirty = true }
 	}
 	return enabled && hit
+}
+
+// Shows a single pane's split controls while the pointer is within the top band of its card.
+split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
+	shown := false
+	if enabled && w.header_height == 0 && len(w.panes) == 1 {
+		r := w.panes[0].rect
+		shown = x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+40*w.scale
+	}
+	if shown == w.split_overlay { return }
+	w.split_overlay = shown
+	pane_header_cancel(w)
+	w.dirty = true
 }

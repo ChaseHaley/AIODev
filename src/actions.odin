@@ -286,7 +286,7 @@ run_action :: proc(
 		}
 		if target != w.tree.focus {
 			w.selecting, w.autoscrolling = false, false
-			w.dragging = nil
+			w.dragging = {}
 			w.wheel_remainder = 0
 			if layout.swap(w.tree, w.tree.focus, target) { window_relayout(app, w) }
 			reset_blink(w)
