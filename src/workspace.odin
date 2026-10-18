@@ -9,6 +9,7 @@ import "aio:ui"
 
 Tab :: struct {
 	id: u32,
+	marked: bool,
 	tree: layout.Layout,
 	title: string,
 }
@@ -17,6 +18,7 @@ Workspace :: struct {
 	tabs: [dynamic]^Tab,
 	selected: int,
 	next_tab_id: u32,
+	selection_anchor: u32,
 }
 
 selected_tab :: proc(workspace: ^Workspace) -> ^Tab {
@@ -94,13 +96,38 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	focus_enter(app, w)
 }
 
-tab_select :: proc(app: ^App, w: ^Window, index: int) {
+tab_select :: proc(app: ^App, w: ^Window, index: int, preserve_selection := false) {
 	if index < 0 || index >= len(w.workspace.tabs) { return }
+	if !preserve_selection { tab_select_one(w.workspace, index); mark_all_dirty(app) }
 	focus_leave(app, w)
 	w.workspace.selected = index
 	w.tree = &selected_tab(w.workspace).tree
 	window_relayout(app, w)
 	focus_enter(app, w)
+}
+
+tab_select_one :: proc(workspace: ^Workspace, index: int) {
+	for tab, i in workspace.tabs { tab.marked = i == index }
+	workspace.selection_anchor = workspace.tabs[index].id
+}
+
+tab_pointer_select :: proc(app: ^App, w: ^Window, index: int, toggle, range: bool) {
+	tabs := w.workspace.tabs
+	if index < 0 || index >= len(tabs) { return }
+	if toggle || range || !tabs[index].marked {
+		marked, err := make([]bool, len(tabs), context.temp_allocator)
+		if err != nil { notify(app, .Error, "Could not select tabs."); return }
+		anchor := w.workspace.selected
+		for tab, i in tabs {
+			marked[i] = tab.marked
+			if tab.id == w.workspace.selection_anchor { anchor = i }
+		}
+		ui.tab_selection_update(marked, index, anchor, toggle, range)
+		for tab, i in tabs { tab.marked = marked[i] }
+	}
+	if !range { w.workspace.selection_anchor = tabs[index].id }
+	tab_select(app, w, index, true)
+	mark_all_dirty(app)
 }
 
 tab_new :: proc(app: ^App, w: ^Window) {
@@ -140,7 +167,14 @@ pane_keep_open :: proc(app: ^App, w: ^Window) {
 }
 
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
-	workspace_close_tab(app, w.workspace, index)
+	if index < 0 || index >= len(w.workspace.tabs) { return }
+	group := w.workspace.tabs[index].marked
+	if group {
+		for i := len(w.workspace.tabs)-1; i >= 0; i -= 1 {
+			if w.workspace.tabs[i].marked { workspace_close_tab(app, w.workspace, i) }
+		}
+	} else { workspace_close_tab(app, w.workspace, index) }
+	if group && len(w.workspace.tabs) > 0 { tab_select_one(w.workspace, w.workspace.selected) }
 }
 
 pane_close :: proc(app: ^App, w: ^Window) {
@@ -148,10 +182,12 @@ pane_close :: proc(app: ^App, w: ^Window) {
 }
 
 @(private)
-workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
+workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: int) {
+	index := original_index
 	if index < 0 || index >= len(workspace.tabs) { return }
-	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
 	tab := workspace.tabs[index]
+	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
+	for current, i in workspace.tabs { if current == tab { index = i; break } }
 	was_selected := index == workspace.selected
 	if was_selected {
 		for w in app.windows { if w.workspace == workspace { focus_leave(app, w) } }
@@ -163,6 +199,10 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 		for w in app.windows { if w.workspace == workspace { ui.editor_destroy(&w.editor) } }
 	}
 	ordered_remove(&workspace.tabs, index)
+	for w in app.windows {
+		if w.workspace == workspace && index < len(w.tab_positions) { ordered_remove(&w.tab_positions, index) }
+		if w.workspace == workspace && index < len(w.tab_controls) { ordered_remove(&w.tab_controls, index) }
+	}
 	layout.destroy(&tab.tree)
 	delete(tab.title)
 	free(tab)
@@ -183,9 +223,11 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 }
 
 @(private)
-pane_remove :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
-	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
+pane_remove :: proc(app: ^App, workspace: ^Workspace, original_tab_index: int, node: layout.Node_Id) {
+	tab_index := original_tab_index
 	tab := workspace.tabs[tab_index]
+	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
+	for current, i in workspace.tabs { if current == tab { tab_index = i; break } }
 	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
 	if !is_pane { return }
 	if tab.tree.root == node { workspace_close_tab(app, workspace, tab_index); return }

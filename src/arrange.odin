@@ -31,9 +31,11 @@ Pane_Drag :: struct {
 
 // A tab press that reorders the strip once it passes the threshold.
 Tab_Drag :: struct {
-	index, origin: int,
-	start: f32,
-	pressed, active: bool,
+	grabbed: ^Tab,
+	order: [dynamic]^Tab,
+	start, offset: f32,
+	rank: int,
+	pressed, active, modified: bool,
 }
 
 @(private)
@@ -89,8 +91,10 @@ divider_cursor :: proc(w: ^Window, x, y: f32) -> (platform.Cursor_Shape, bool) {
 	return .Horizontal in axes ? .Resize_Horizontal : .Resize_Vertical, true
 }
 
-tab_press :: proc(w: ^Window, index: int, x: f32) {
-	w.tab_drag = {index = index, origin = index, start = x, pressed = true}
+tab_press :: proc(w: ^Window, index: int, x, width: f32, modified: bool) {
+	if !w.workspace.tabs[index].marked { return }
+	w.tab_drag = {grabbed = w.workspace.tabs[index], start = x,
+		offset = x-tab_position(w, index)*width, pressed = true, modified = modified}
 }
 
 // Moves a tab and everything indexed by tab position, keeping the selected tab selected.
@@ -104,6 +108,11 @@ tab_move :: proc(app: ^App, w: ^Window, from, to: int) {
 		control := w.tab_controls[from]
 		ordered_remove(&w.tab_controls, from)
 		inject_at(&w.tab_controls, to, control)
+	}
+	if from < len(w.tab_positions) && to < len(w.tab_positions) {
+		position := w.tab_positions[from]
+		ordered_remove(&w.tab_positions, from)
+		inject_at(&w.tab_positions, to, position)
 	}
 	selected := w.workspace.selected
 	switch {
@@ -121,20 +130,61 @@ tab_drag_move :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 	d := &w.tab_drag
 	if !d.pressed { return false }
 	if !d.active && abs(x-d.start) < DRAG_THRESHOLD*w.scale { return false }
-	d.active = true
+	if !d.active {
+		order, err := make([dynamic]^Tab, len(w.workspace.tabs))
+		if err != nil {
+			w.tab_drag = {}
+			notify(app, .Error, "Could not begin tab dragging.")
+			return true
+		}
+		copy(order[:], w.workspace.tabs[:])
+		d.order = order
+		for tab in order { if tab == d.grabbed { break }; if tab.marked { d.rank += 1 } }
+		d.active = true
+	}
 	bar := window_tab_bar(app, w)
 	if bar.tab_width <= 0 { return true }
-	target := clamp(int(x/bar.tab_width), 0, len(w.workspace.tabs)-1)
-	if target != d.index {
-		tab_move(app, w, d.index, target)
-		d.index = target
+	marked, mark_error := make([]bool, len(d.order), context.temp_allocator)
+	if mark_error != nil { tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return true }
+	count := 0
+	for tab, i in d.order { marked[i] = tab.marked; if tab.marked { count += 1 } }
+	first := clamp((x-d.offset)/bar.tab_width-f32(d.rank), 0, f32(len(d.order)-count))
+	slot := int(math.floor(first+0.5))
+	order, order_error := make([]int, len(d.order), context.temp_allocator)
+	if order_error != nil { tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return true }
+	if !ui.tab_group_order(marked, slot, order) { return true }
+	for original, to in order {
+		for tab, from in w.workspace.tabs {
+			if tab == d.order[original] { tab_move(app, w, from, to); break }
+		}
 	}
+	rank := 0
+	now := time.tick_now()
+	for tab, i in w.workspace.tabs {
+		if !tab.marked { continue }
+		if i < len(w.tab_positions) {
+			ui.motion_target(&w.tab_positions[i], first+f32(rank), 0, .Linear, false, now)
+		}
+		rank += 1
+	}
+	w.dirty = true
 	return true
 }
 
 tab_drag_cancel :: proc(app: ^App, w: ^Window) {
-	if w.tab_drag.active { tab_move(app, w, w.tab_drag.index, w.tab_drag.origin) }
+	if w.tab_drag.pressed { w.dirty = true }
+	for tab, to in w.tab_drag.order {
+		for current, from in w.workspace.tabs { if current == tab { tab_move(app, w, from, to); break } }
+	}
+	delete(w.tab_drag.order)
 	w.tab_drag = {}
+}
+
+tab_drag_release :: proc(w: ^Window) {
+	if !w.tab_drag.active && !w.tab_drag.modified { tab_select_one(w.workspace, w.workspace.selected) }
+	delete(w.tab_drag.order)
+	w.tab_drag = {}
+	w.dirty = true
 }
 
 pane_drag_press :: proc(w: ^Window, node: layout.Node_Id, x, y: f32) {
@@ -205,7 +255,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	bar := window_tab_bar(app, w)
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
-	on_tab := ui.tab_bar_hit_test(bar, x, y)
+	on_tab := window_tab_hit(w, bar, x, y)
 	if on_tab >= 0 && on_tab < bar.count {
 		tab := w.workspace.tabs[on_tab]
 		if root, settings := tab.tree.nodes[tab.tree.root].(layout.Pane); settings && root.content.kind == .Settings {

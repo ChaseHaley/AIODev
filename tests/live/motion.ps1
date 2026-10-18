@@ -86,6 +86,30 @@ try {
     Invoke-Aio key Ctrl+Shift+T
     Invoke-Aio expect state ui.animating=false
     Assert-Idle
+    Invoke-Aio command tab.new
+    Invoke-Aio command tab.select_1
+    $tabs = Read-State
+    $firstId, $secondId, $thirdId = $tabs['tab.1.id'], $tabs['tab.2.id'], $tabs['tab.3.id']
+    $width = [double]$tabs['tabs.width']
+    Invoke-Aio mouse click "$([int]($width*2.5)),20" --px --mods Ctrl
+    Invoke-Aio mouse drag "$([int]($width*0.5)),20" "$([int]($width*2.6)),20" --px
+    Invoke-Aio expect state "tab.1.id=$secondId"
+    Invoke-Aio expect state "tab.2.id=$firstId"
+    Invoke-Aio expect state "tab.3.id=$thirdId"
+    Invoke-Aio expect state tab.1.position=0
+    Invoke-Aio expect state tab.2.position=1
+    Invoke-Aio expect state tab.3.position=2
+    Invoke-Aio expect state ui.animating=false
+    Invoke-Aio mouse down "$([int]($width*1.5)),20" --px
+    Invoke-Aio mouse move "$([int]($width*0.5)),20" --px
+    Invoke-Aio key Esc
+    Invoke-Aio mouse up "$([int]($width*0.5)),20" --px
+    Invoke-Aio expect state "tab.1.id=$secondId"
+    Invoke-Aio expect state "tab.2.id=$firstId"
+    Invoke-Aio expect state "tab.3.id=$thirdId"
+    Invoke-Aio expect state ui.animating=false
+    Assert-Idle
+    Write-Output 'PASS group reordering and cancellation snap with reduced motion'
     Write-Output 'PASS startup and live animation preference, palette, tabs, notices, settings and immediate input'
 } finally {
     & $ctl --name $name stop | Write-Output

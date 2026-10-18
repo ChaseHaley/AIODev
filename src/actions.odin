@@ -135,7 +135,7 @@ ACTIONS :: [Action]Action_Info{
 	.Focus_Previous = {"pane.focus_previous", "Focus Previous Pane", {{.Bracket_Left, {.Control, .Super}}}},
 	.Focus_Next = {"pane.focus_next", "Focus Next Pane", {{.Bracket_Right, {.Control, .Super}}}},
 	.Last_Tab = {"tab.last", "Select Last Tab", {{.Digit_9, {.Alt}}}},
-	.Close_Tab = {"tab.close", "Close Tab", {{.W, {.Control, .Shift}}}},
+	.Close_Tab = {"tab.close", "Close Selected Tabs", {{.W, {.Control, .Shift}}}},
 	.Split = {"pane.split", "Split Pane", nil},
 	.Split_Left = {"pane.split_left", "Split Left", nil},
 	.Split_Up = {"pane.split_up", "Split Up", nil},

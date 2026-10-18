@@ -28,8 +28,10 @@ tab_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, bar: Tab_Bar,
 	index: int, title: string, selected: bool, scale: f32, hover: f32 = 0, pressed: f32 = 0,
 	underline: f32 = -1,
+	position: f32 = -1, marked: bool = false,
 ) -> glyphs.Result {
 	x := f32(index)*bar.tab_width
+	if position >= 0 { x = position }
 	width := bar.tab_width
 	if index == bar.count { x, width = f32(bar.count)*bar.tab_width, bar.button_width }
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None { return .Ok }
@@ -38,6 +40,10 @@ tab_draw :: proc(
 	if selected {
 		draw_rect(list, {rect = tile, color = theme.pane, radius = 7*scale})
 		draw_rect(list, {rect = tile, color = theme.border, radius = 7*scale, stroke = scale})
+	}
+	if marked && !selected {
+		draw_rect(list, {rect = tile, color = theme.selection, radius = 7*scale})
+		draw_rect(list, {rect = tile, color = theme.accent, radius = 7*scale, stroke = scale})
 	}
 	fill := theme.hover
 	fill.a *= hover
@@ -52,12 +58,47 @@ tab_draw :: proc(
 	if width <= 16*scale { return .Ok }
 	if index < bar.count && width >= 56*scale {
 		close := tab_close_rect(bar, index, scale)
+		close.x += x-f32(index)*bar.tab_width
 		large := text^
 		text_set_size(&large, text.size_px*1.5)
 		if result := draw_glyph_centered(&large, list, '×', close, theme.muted); result != .Ok { return result }
 	}
 	return draw_fading_text(text, list, title, x+11*scale, (bar.height-text.line_height)/2+text.ascent,
 		selected ? theme.text : theme.muted, max(0, width-(index < bar.count ? 44 : 22)*scale))
+}
+
+tab_selection_update :: proc(marked: []bool, index, anchor: int, toggle, range: bool) {
+	if index < 0 || index >= len(marked) { return }
+	if range {
+		first := clamp(anchor, 0, len(marked)-1)
+		for &value, i in marked {
+			inside := i >= min(first, index) && i <= max(first, index)
+			value = inside || (toggle && value)
+		}
+	} else if toggle { marked[index] = !marked[index] }
+	else {
+		for &value, i in marked { value = i == index }
+	}
+}
+
+// `slot` counts unselected tabs preceding the group. The result indexes the original strip.
+tab_group_order :: proc(marked: []bool, slot: int, out: []int) -> bool {
+	if len(out) != len(marked) { return false }
+	count := 0
+	for value in marked { if value { count += 1 } }
+	if count == 0 || slot < 0 || slot > len(marked)-count { return false }
+	at, unmarked := 0, 0
+	for value, i in marked {
+		if value { continue }
+		if unmarked == slot {
+			for selected, j in marked { if selected { out[at] = j; at += 1 } }
+		}
+		out[at], at, unmarked = i, at+1, unmarked+1
+	}
+	if unmarked == slot {
+		for selected, j in marked { if selected { out[at] = j; at += 1 } }
+	}
+	return true
 }
 
 tab_close_rect :: proc(bar: Tab_Bar, index: int, scale: f32) -> render.Rect {

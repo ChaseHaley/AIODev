@@ -9,6 +9,7 @@ motion_active :: proc(app: ^App) -> bool {
 	for w in app.windows {
 		if ui.motion_active(w.tab_underline) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
+		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
 		if w.header_height > 0 || w.split_overlay {
 			for pane in w.views { for control in pane.header_controls { if ui.control_active(control) { return true } } }
@@ -26,6 +27,13 @@ update_motion :: proc(app: ^App) {
 	notices_changed := ui.notices_animate(&app.notices, now)
 	if palette_changed || notices_changed { mark_all_dirty(app) }
 	for w in app.windows {
+		positions_changed := false
+		for &position, i in w.tab_positions {
+			if !w.tab_drag.active || !w.workspace.tabs[i].marked {
+				ui.motion_target(&position, f32(i), 140*time.Millisecond, .Decelerate, app.animations, now)
+			}
+			positions_changed = ui.motion_update(&position, now) || positions_changed
+		}
 		ui.motion_target(&w.tab_underline, f32(w.workspace.selected), 140*time.Millisecond,
 			.Decelerate, app.animations, now)
 		controls_changed := false
@@ -43,7 +51,7 @@ update_motion :: proc(app: ^App) {
 			}
 		}
 		underline_changed := ui.motion_update(&w.tab_underline, now)
-		if underline_changed || controls_changed { w.dirty = true }
+		if underline_changed || controls_changed || positions_changed { w.dirty = true }
 	}
 }
 

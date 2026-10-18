@@ -50,7 +50,7 @@ try {
     $originalSettings = [IO.File]::ReadAllText($settingsPath)
     $state = Read-State
     $node = $state['panes.focused']
-    Assert-Value ($state["pane.$node.rect"] -split ',')[1] 41 'single-tab bar visible by default'
+    Assert-Value ($state["pane.$node.rect"] -split ',')[1] 45 'single-tab bar visible by default'
     Assert-Value $state['grid.size'] '120x32' 'startup grid reserves tab bar space'
     try {
         $hiddenSettings = $originalSettings -replace '(?m)^window.show_tab_bar_with_one_tab\s*=.*$',
@@ -60,21 +60,21 @@ try {
         }
         [IO.File]::WriteAllText($settingsPath, $hiddenSettings)
         Invoke-Aio command settings.reload
-        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 5 'reload hides single-tab bar'
+        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 45 'hidden tabs retain title-bar space'
         Invoke-Aio key Ctrl+Shift+T
         Invoke-Aio wait text 'PS '
         $state = Read-State
         $secondNode = $state['panes.focused']
-        Assert-Value ($state["pane.$secondNode.rect"] -split ',')[1] 41 'multiple tabs override hidden preference'
+        Assert-Value ($state["pane.$secondNode.rect"] -split ',')[1] 45 'multiple tabs override hidden preference'
         Invoke-Aio key Ctrl+Shift+W
-        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 5 'bar hides again after tab close'
+        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 45 'title-bar space remains after tab close'
     } finally {
         [IO.File]::WriteAllText($settingsPath, $originalSettings)
         Invoke-Aio command settings.reload
     }
-    Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 41 'reload restores single-tab bar'
+    Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 45 'reload restores single-tab bar'
     Invoke-Aio dpi 144
-    Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 62 'single-tab bar scales with DPI'
+    Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 68 'single-tab bar scales with DPI'
     Invoke-Aio dpi 96
     Invoke-Aio resize 120x32
     Invoke-Aio expect state grid.size=120x32

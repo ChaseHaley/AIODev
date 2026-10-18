@@ -40,6 +40,7 @@ Window :: struct {
 	divider_click_ns: i64,
 	pane_drag: Pane_Drag,
 	tab_drag: Tab_Drag,
+	tab_positions: [dynamic]ui.Motion,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
 	split_overlay: bool,
 	panes: [dynamic]layout.Pane_Rect,
@@ -106,6 +107,7 @@ window_open :: proc(app: ^App) -> bool {
 	w.dirty = true
 	w.workspace = app.workspaces[0]
 	if len(w.workspace.tabs) == 0 && !tab_create(app, w.workspace) { window_free(w); return false }
+	if w.workspace.selection_anchor == 0 { tab_select_one(w.workspace, w.workspace.selected) }
 	w.tree = &selected_tab(w.workspace).tree
 	entry := focused_session(app, w)
 	g := term.geometry(entry.session)
@@ -166,6 +168,8 @@ window_free :: proc(w: ^Window) {
 	}
 	delete(w.views)
 	delete(w.tab_controls)
+	delete(w.tab_positions)
+	delete(w.tab_drag.order)
 	delete(w.panes)
 	ui.find_destroy(&w.find)
 	ui.editor_destroy(&w.editor)
@@ -224,6 +228,13 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	}
 	if resize(&w.tab_controls, len(w.workspace.tabs)+1) != nil {
 		log.error("resizing tab control states failed")
+	}
+	old_positions := len(w.tab_positions)
+	if resize(&w.tab_positions, len(w.workspace.tabs)) != nil {
+		log.error("resizing tab positions failed")
+	}
+	for &position, i in w.tab_positions {
+		if i >= old_positions { position.value, position.target = f32(i), f32(i) }
 	}
 	bar := window_tab_bar(app, w)
 	platform.window_title_bar(&app.platform, w.id, i32(bar.height),

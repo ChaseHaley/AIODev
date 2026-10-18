@@ -273,7 +273,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	w.tab_pressed = e.pressed && e.button == .Left &&
-		ui.tab_bar_hit_test(window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
+		window_tab_hit(w, window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
 	w.dirty = true
 	if !e.pressed && e.button in w.header_buttons {
 		if settings_active(w) || app.palette.open { pane_header_cancel(w) }
@@ -297,29 +297,29 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button == .Left && !e.pressed && w.tab_close_pressed >= 0 {
 		index := w.tab_close_pressed
 		w.tab_close_pressed = -1
-		if ui.tab_close_hit(bar, x, y, w.scale) == index { tab_close(app, w, index) }
+		if window_tab_close_hit(w, bar, x, y) == index { tab_close(app, w, index) }
 		return
 	}
 	if e.button == .Left && !e.pressed {
 		if w.dragging.count > 0 { w.dragging = {}; return }
-		if w.tab_drag.pressed { w.tab_drag = {}; return }
+		if w.tab_drag.pressed { tab_drag_release(w); return }
 		if settings_active(w) { editor_outcome(app, w, ui.editor_release(&w.editor)) }
 		if w.selecting { selection_finish(app, w, x, y); return }
 	}
 	if y < bar.height {
 		if e.pressed {
-			index := ui.tab_bar_hit_test(bar, x, y)
+			index := window_tab_hit(w, bar, x, y)
 			palette_x := f32(bar.count)*bar.tab_width+bar.button_width
 			if e.button == .Left && x >= palette_x && x < palette_x+bar.button_width {
 				run_action(app, w, .Command_Palette)
-			} else if e.button == .Left && ui.tab_close_hit(bar, x, y, w.scale) >= 0 {
+			} else if e.button == .Left && window_tab_close_hit(w, bar, x, y) >= 0 {
 				w.tab_close_pressed = index
 			} else if index == bar.count && e.button == .Left { tab_new(app, w) }
 			else if index >= 0 && index < bar.count {
 				if e.button == .Middle { tab_close(app, w, index) }
 				else if e.button == .Left {
-					tab_select(app, w, index)
-					tab_press(w, index, x)
+					tab_pointer_select(app, w, index, .Control in e.modifiers, .Shift in e.modifiers)
+					tab_press(w, index, x, bar.tab_width, e.modifiers & {.Control, .Shift} != {})
 				}
 			}
 		}
@@ -364,7 +364,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover { w.caption_hover = caption; w.dirty = true }
-	hover := ui.tab_bar_hit_test(window_tab_bar(app, w), x, y)
+	hover := window_tab_hit(w, window_tab_bar(app, w), x, y)
 	if hover != w.tab_hover {
 		w.tab_hover = hover
 		w.dirty = true
@@ -375,7 +375,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		return
 	}
 	if w.tab_drag.pressed {
-		if .Left not_in e.buttons { w.tab_drag = {} } else if tab_drag_move(app, w, x) { return }
+		if .Left not_in e.buttons { tab_drag_cancel(app, w) } else if tab_drag_move(app, w, x) { return }
 	}
 	if w.pane_drag.pressed {
 		if .Left not_in e.buttons {

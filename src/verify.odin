@@ -294,6 +294,8 @@ when AIO_CONTROL {
 			prefix := fmt.tprintf("tab.%d", i+1)
 			tab_state := [?]control.State_Entry{
 				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
+				{fmt.tprintf("%s.marked", prefix), fmt.tprintf("%t", tab.marked)},
+				{fmt.tprintf("%s.position", prefix), fmt.tprintf("%g", w != nil ? tab_position(w, i) : f32(i))},
 				{fmt.tprintf("%s.focus", prefix), fmt.tprintf("%d", tab.tree.focus)},
 				{fmt.tprintf("%s.title", prefix), tab.title},
 				{fmt.tprintf("%s.zoomed", prefix), fmt.tprintf("%t", tab.tree.zoomed)},
@@ -328,6 +330,7 @@ when AIO_CONTROL {
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
 				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
 				{"panes.dragging", fmt.tprintf("%t", w.pane_drag.active)},
+				{"tabs.dragging", fmt.tprintf("%t", w.tab_drag.active)},
 				{"panes.drop.shown", fmt.tprintf("%t", w.pane_drag.shown)},
 				{"panes.drop.root", fmt.tprintf("%t", w.pane_drag.root)},
 				{"panes.drop.rect", fmt.tprintf("%g,%g,%g,%g", w.pane_drag.ghost[0].target,
