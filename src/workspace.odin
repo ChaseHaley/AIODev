@@ -87,6 +87,7 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	if w.tree.focus == node { return }
 	focus_leave(app, w)
 	w.tree.focus = node
+	if w.tree.zoomed { window_relayout(app, w) }
 	focus_enter(app, w)
 }
 
@@ -107,17 +108,31 @@ tab_new :: proc(app: ^App, w: ^Window) {
 	tab_select(app, w, len(w.workspace.tabs)-1)
 }
 
-pane_split :: proc(app: ^App, w: ^Window, axis: layout.Axis) {
+pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f32 = 0.5, focus := true) {
 	if !session_open(app) { notify(app, .Error, "Could not create a pane."); return }
 	id := app.next_session_id
-	node, err := layout.split(w.tree, w.tree.focus, axis, 0.5, {.Terminal, id})
+	node, err := layout.split_direction(w.tree, w.tree.focus, direction, ratio, {.Terminal, id})
 	if err != nil {
 		session_close(app, id)
 		notify(app, .Error, "Could not split the pane.")
 		return
 	}
-	pane_focus(app, w, node)
+	if focus { pane_focus(app, w, node) }
 	window_relayout(app, w)
+}
+
+pane_zoom :: proc(app: ^App, w: ^Window) {
+	w.tree.zoomed = !w.tree.zoomed
+	w.dragging = nil
+	window_relayout(app, w)
+}
+
+pane_keep_open :: proc(app: ^App, w: ^Window) {
+	entry := focused_session(app, w)
+	if entry == nil { return }
+	entry.keep_open = !entry.keep_open
+	notify(app, .Info, entry.keep_open ? "Pane will stay open after exit." : "Pane will close after exit.")
+	if !entry.keep_open && entry.status == .Exited { _ = close_exited_session(app, entry.id) }
 }
 
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
@@ -184,6 +199,7 @@ pane_remove :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layo
 
 @(require_results)
 close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
+	if entry := session_find(app, id); entry != nil && entry.keep_open { return false }
 	for workspace in app.workspaces {
 		for tab, tab_index in workspace.tabs {
 			for node, node_index in tab.tree.nodes {

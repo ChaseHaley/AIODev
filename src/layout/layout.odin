@@ -62,11 +62,12 @@ Layout :: struct {
 	nodes: [dynamic]Node,
 	root, focus: Node_Id,
 	next_pane_order: u64,
+	zoomed: bool,
 }
 
 init :: proc(l: ^Layout, content: Content, allocator := context.allocator) -> runtime.Allocator_Error {
 	l.nodes = make([dynamic]Node, allocator)
-	_, err := append(&l.nodes, Pane{content, 1})
+	_, err := append(&l.nodes, Pane{content = content, order = 1})
 	l.root, l.focus = 0, 0
 	l.next_pane_order = 1
 	return err
@@ -114,7 +115,7 @@ split :: proc(
 	if err := reserve(&l.nodes, len(l.nodes)+2); err != nil { return INVALID_NODE, err }
 	parent := parent_of(l, node)
 	l.next_pane_order += 1
-	added := allocate_node(l, Pane{content, l.next_pane_order})
+	added := allocate_node(l, Pane{content = content, order = l.next_pane_order})
 	branch := allocate_node(l, Split{axis, clamp(ratio, 0.05, 0.95), node, added})
 	if parent == INVALID_NODE {
 		l.root = branch
@@ -123,7 +124,47 @@ split :: proc(
 		if s.first == node { s.first = branch } else { s.second = branch }
 		l.nodes[parent] = s
 	}
+	l.zoomed = false
 	return added, nil
+}
+
+@(require_results)
+split_direction :: proc(
+	l: ^Layout, node: Node_Id, direction: Direction, ratio: f32, content: Content,
+) -> (Node_Id, runtime.Allocator_Error) {
+	before := direction == .Left || direction == .Up
+	axis: Axis = direction == .Left || direction == .Right ? .Horizontal : .Vertical
+	share := clamp(ratio, 0.05, 0.95)
+	added, err := split(l, node, axis, before ? share : 1-share, content)
+	if err != nil { return INVALID_NODE, err }
+	if before {
+		parent := parent_of(l, added)
+		s := l.nodes[parent].(Split)
+		s.first, s.second = s.second, s.first
+		l.nodes[parent] = s
+	}
+	return added, nil
+}
+
+@(require_results)
+swap :: proc(l: ^Layout, first, second: Node_Id) -> bool {
+	if int(first) >= len(l.nodes) || int(second) >= len(l.nodes) || first == second { return false }
+	a, a_ok := l.nodes[first].(Pane)
+	b, b_ok := l.nodes[second].(Pane)
+	if !a_ok || !b_ok { return false }
+	a.content, b.content = b.content, a.content
+	l.nodes[first], l.nodes[second] = a, b
+	if l.focus == first { l.focus = second } else if l.focus == second { l.focus = first }
+	return true
+}
+
+balance :: proc(l: ^Layout) {
+	for node, i in l.nodes {
+		if s, ok := node.(Split); ok {
+			s.ratio = 0.5
+			l.nodes[i] = s
+		}
+	}
 }
 
 @(private)
@@ -136,6 +177,7 @@ first_pane :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
 remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 	if int(node) >= len(l.nodes) { return false }
 	if _, ok := l.nodes[node].(Pane); !ok { return false }
+	if l.focus == node { l.zoomed = false }
 	parent := parent_of(l, node)
 	if parent == INVALID_NODE {
 		l.root, l.focus = INVALID_NODE, INVALID_NODE
@@ -256,9 +298,9 @@ focus_cycle :: proc(rects: []Pane_Rect, focus: Node_Id, delta: int) -> Node_Id {
 	return result
 }
 
-compute :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
+compute :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect, honor_zoom := true) {
 	clear(out)
-	if l.root != INVALID_NODE { place(l, l.root, area, gap, out) }
+	if l.root != INVALID_NODE { place(l, l.zoomed && honor_zoom ? l.focus : l.root, area, gap, out) }
 }
 
 @(private)
@@ -288,7 +330,7 @@ place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane
 
 dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 	clear(out)
-	if l.root != INVALID_NODE { place_dividers(l, l.root, area, gap, out) }
+	if l.root != INVALID_NODE && !l.zoomed { place_dividers(l, l.root, area, gap, out) }
 }
 
 @(private)

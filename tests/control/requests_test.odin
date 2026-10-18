@@ -24,6 +24,7 @@ parse_commands :: proc(t: ^testing.T) {
 		{"ping"}, {"state"}, {"screen"}, {"screen", "1"}, {"screen", "1:2"},
 		{"cells", "2"}, {"cells", "2", "1:8"}, {"type", "hello\nworld"}, {"type", ""},
 		{"key", "Ctrl+Shift+P", "Esc", "Enter"}, {"command", "app.reload_settings"},
+		{"command", "pane.split", "--direction", "left", "--ratio", "0.25", "--focus", "false"},
 		{"wait", "text", "hello"}, {"wait", "gone", "hello", "--timeout", "0"},
 		{"wait", "idle"}, {"wait", "idle", "20", "--timeout", "500"},
 		{"wait", "frame", "--timeout", "100"}, {"run", "echo hi"},
@@ -58,6 +59,12 @@ parse_commands :: proc(t: ^testing.T) {
 	testing.expect_value(t, m.(control.Mouse).button, input.Mouse_Button.Left)
 	testing.expect_value(t, m.(control.Mouse).position, control.Position{2, 3})
 	testing.expect(t, !m.(control.Mouse).pixels)
+	split, split_error := control.parse({"command", "pane.split", "--direction", "up",
+		"--ratio", "0.3", "--focus", "false"})
+	testing.expect_value(t, split_error.advice, "")
+	s := split.(control.Command)
+	testing.expect_value(t, s.ratio, f32(0.3))
+	testing.expect(t, !s.focus)
 }
 
 @(test)
@@ -67,6 +74,11 @@ parse_errors :: proc(t: ^testing.T) {
 		{"screen", "-1"}, {"screen", "2:1"}, {"screen", "1:"}, {"screen", "x"},
 		{"screen", "1", "2"}, {"cells"}, {"cells", "x"}, {"cells", "0", "1"},
 		{"type"}, {"type", "a", "b"}, {"command", ""}, {"focus", "bad"}, {"tray", "bad"},
+		{"command", "pane.zoom", "--ratio", "0.5"}, {"command", "pane.split", "--ratio", "NaN"},
+		{"command", "pane.split", "--ratio", "0"}, {"command", "pane.split", "--ratio", "1"},
+		{"command", "pane.split", "--direction", "above"}, {"command", "pane.split", "--focus", "no"},
+		{"command", "pane.split", "--ratio"}, {"command", "pane.split", "--bad", "1"},
+		{"command", "pane.split", "--focus", "true", "--focus", "false"},
 		{"resize", "0x2"}, {"resize", "2x0"}, {"resize", "1001x2"}, {"resize", "2,3"},
 		{"dpi", "47"}, {"dpi", "769"}, {"dpi", "abc"}, {"dpi", "99999999999999999999"},
 		{"key"}, {"key", "Ctrl+bogus"}, {"key", "A", "Ctrl+Ctrl+A"},

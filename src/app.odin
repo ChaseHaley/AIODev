@@ -43,6 +43,7 @@ Session_Entry :: struct {
 	id: u32,
 	session: ^term.Session,
 	status: term.Status_Kind,
+	keep_open: bool,
 }
 
 App :: struct {

@@ -5,6 +5,7 @@ import "core:strings"
 import "core:unicode/utf8"
 import "aio:commands"
 import "aio:input"
+import "aio:layout"
 
 Range :: struct { first: int, last: int, specified: bool }
 MAX_GRID_DIMENSION :: 1000
@@ -40,7 +41,7 @@ Resize :: struct { columns, rows: int }
 Dpi :: struct { value: int }
 Tray_Action :: enum { Open, Hide, Quit }
 Tray :: struct { action: Tray_Action }
-Command :: struct { name: string }
+Command :: struct { name: string, direction: layout.Direction, ratio: f32, focus: bool }
 Help :: struct { command: string }
 Request :: union { Ping, Screen, Cells, State, Wait, Expect, Type, Key, Run, Mouse,
 	Focus, Resize, Dpi, Tray, Command, Help }
@@ -147,14 +148,45 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			if !ok { return {}, {args[2], "use first:last columns"} }
 		}
 		return Cells{n, r}, {}
-	case "type", "command", "focus", "tray", "resize", "dpi":
+	case "command":
+		if len(args) < 2 || args[1] == "" { return {}, bad }
+		r := Command{name = args[1], direction = .Right, ratio = 0.5, focus = true}
+		if len(args) > 2 && r.name != "pane.split" { return {}, bad }
+		seen: [3]bool
+		for i := 2; i < len(args); i += 2 {
+			if i+1 >= len(args) { return {}, bad }
+			index: int
+			switch args[i] {
+			case "--direction":
+				index = 0
+				switch args[i+1] {
+				case "left": r.direction = .Left
+				case "right": r.direction = .Right
+				case "up": r.direction = .Up
+				case "down": r.direction = .Down
+				case: return {}, bad
+				}
+			case "--ratio":
+				index = 1
+				n, ok := strconv.parse_f32(args[i+1])
+				if !ok || !(n >= 0.05 && n <= 0.95) { return {}, bad }
+				r.ratio = n
+			case "--focus":
+				index = 2
+				if args[i+1] != "true" && args[i+1] != "false" { return {}, bad }
+				r.focus = args[i+1] == "true"
+			case: return {}, bad
+			}
+			if seen[index] { return {}, bad }
+			seen[index] = true
+		}
+		return r, {}
+	case "type", "focus", "tray", "resize", "dpi":
 		if len(args) != 2 { return {}, bad }
 		s := args[1]
 		switch args[0] {
 		case "type":
 			return Type{s}, {}
-		case "command":
-			if s != "" { return Command{s}, {} }
 		case "focus":
 			if s == "in" || s == "out" { return Focus{s == "in"}, {} }
 		case "tray":

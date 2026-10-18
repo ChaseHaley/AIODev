@@ -56,6 +56,22 @@ Action :: enum u32 {
 	Last_Tab,
 	Close_Tab,
 	Settings_UI,
+	Split,
+	Split_Left,
+	Split_Up,
+	Zoom_Pane,
+	Balance_Panes,
+	Swap_Left,
+	Swap_Right,
+	Swap_Up,
+	Swap_Down,
+	Swap_Previous,
+	Swap_Next,
+	Resize_Left_Large,
+	Resize_Right_Large,
+	Resize_Up_Large,
+	Resize_Down_Large,
+	Keep_Pane_Open,
 }
 
 @(private)
@@ -118,6 +134,22 @@ ACTIONS :: [Action]Action_Info{
 	.Focus_Next = {"pane.focus_next", "Focus Next Pane", {{.Bracket_Right, {.Control, .Super}}}},
 	.Last_Tab = {"tab.last", "Select Last Tab", {{.Digit_9, {.Alt}}}},
 	.Close_Tab = {"tab.close", "Close Tab", {{.W, {.Control, .Shift}}}},
+	.Split = {"pane.split", "Split Pane", nil},
+	.Split_Left = {"pane.split_left", "Split Left", nil},
+	.Split_Up = {"pane.split_up", "Split Up", nil},
+	.Zoom_Pane = {"pane.zoom", "Toggle Pane Zoom", nil},
+	.Balance_Panes = {"pane.balance", "Balance All Splits", nil},
+	.Swap_Left = {"pane.swap_left", "Swap Pane Left", nil},
+	.Swap_Right = {"pane.swap_right", "Swap Pane Right", nil},
+	.Swap_Up = {"pane.swap_up", "Swap Pane Up", nil},
+	.Swap_Down = {"pane.swap_down", "Swap Pane Down", nil},
+	.Swap_Previous = {"pane.swap_previous", "Swap With Previous Pane", nil},
+	.Swap_Next = {"pane.swap_next", "Swap With Next Pane", nil},
+	.Resize_Left_Large = {"pane.resize_left_large", "Resize Left by 50 Pixels", nil},
+	.Resize_Right_Large = {"pane.resize_right_large", "Resize Right by 50 Pixels", nil},
+	.Resize_Up_Large = {"pane.resize_up_large", "Resize Up by 50 Pixels", nil},
+	.Resize_Down_Large = {"pane.resize_down_large", "Resize Down by 50 Pixels", nil},
+	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil},
 }
 
 @(require_results)
@@ -144,7 +176,10 @@ shortcut_action :: proc(app: ^App, e: platform.Key_Event) -> (Action, bool) {
 	return {}, false
 }
 
-run_action :: proc(app: ^App, w: ^Window, action: Action) {
+run_action :: proc(
+	app: ^App, w: ^Window, action: Action,
+	split_direction: layout.Direction = .Right, split_ratio: f32 = 0.5, split_focus := true,
+) {
 	entry := focused_session(app, w)
 	w.dirty = true
 	switch action {
@@ -217,17 +252,53 @@ run_action :: proc(app: ^App, w: ^Window, action: Action) {
 	case .Last_Tab: tab_select(app, w, len(w.workspace.tabs)-1)
 	case .Close_Tab: tab_close(app, w, w.workspace.selected)
 	case .Focus_Previous, .Focus_Next:
-		pane_focus(app, w, layout.focus_cycle(w.panes[:], w.tree.focus, action == .Focus_Next ? 1 : -1))
-	case .Split_Right: pane_split(app, w, .Horizontal)
-	case .Split_Down: pane_split(app, w, .Vertical)
+		pane_focus(app, w, layout.focus_cycle(pane_action_rects(app, w), w.tree.focus,
+			action == .Focus_Next ? 1 : -1))
+	case .Split: pane_split(app, w, split_direction, split_ratio, split_focus)
+	case .Split_Right: pane_split(app, w, .Right)
+	case .Split_Down: pane_split(app, w, .Down)
+	case .Split_Left: pane_split(app, w, .Left)
+	case .Split_Up: pane_split(app, w, .Up)
+	case .Zoom_Pane: pane_zoom(app, w)
+	case .Balance_Panes:
+		layout.balance(w.tree)
+		window_relayout(app, w)
+	case .Keep_Pane_Open: pane_keep_open(app, w)
+	case .Swap_Left, .Swap_Right, .Swap_Up, .Swap_Down, .Swap_Previous, .Swap_Next:
+		rects := pane_action_rects(app, w)
+		target: layout.Node_Id
+		if action == .Swap_Previous || action == .Swap_Next {
+			target = layout.focus_cycle(rects, w.tree.focus, action == .Swap_Next ? 1 : -1)
+		} else {
+			target = layout.focus_direction(rects, w.tree.focus, layout.Direction(int(action)-int(Action.Swap_Left)))
+		}
+		if target != w.tree.focus {
+			w.selecting, w.autoscrolling = false, false
+			w.dragging = nil
+			w.wheel_remainder = 0
+			if layout.swap(w.tree, w.tree.focus, target) { window_relayout(app, w) }
+			reset_blink(w)
+		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
 		direction := layout.Direction(int(action)-int(Action.Focus_Left))
-		pane_focus(app, w, layout.focus_direction(w.panes[:], w.tree.focus, direction))
+		pane_focus(app, w, layout.focus_direction(pane_action_rects(app, w), w.tree.focus, direction))
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
 		axis: layout.Axis = action == .Resize_Left || action == .Resize_Right ? .Horizontal : .Vertical
 		delta: f32 = action == .Resize_Left || action == .Resize_Up ? -10 : 10
 		if layout.resize_pixels(w.tree, w.tree.focus, axis, delta, w.dividers[:]) { window_relayout(app, w) }
+	case .Resize_Left_Large, .Resize_Right_Large, .Resize_Up_Large, .Resize_Down_Large:
+		axis: layout.Axis = action == .Resize_Left_Large || action == .Resize_Right_Large ? .Horizontal : .Vertical
+		delta: f32 = action == .Resize_Left_Large || action == .Resize_Up_Large ? -50 : 50
+		if layout.resize_pixels(w.tree, w.tree.focus, axis, delta, w.dividers[:]) { window_relayout(app, w) }
 	}
+}
+
+@(private)
+pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
+	if !w.tree.zoomed { return w.panes[:] }
+	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+	layout.compute(w.tree, window_content_area(app, w), window_gap(app, w), &rects, false)
+	return rects[:]
 }
 
 copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {

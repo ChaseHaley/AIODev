@@ -284,6 +284,7 @@ when AIO_CONTROL {
 				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
 				{fmt.tprintf("%s.focus", prefix), fmt.tprintf("%d", tab.tree.focus)},
 				{fmt.tprintf("%s.title", prefix), tab.title},
+				{fmt.tprintf("%s.zoomed", prefix), fmt.tprintf("%t", tab.tree.zoomed)},
 			}
 			if _, err := append(&entries, ..tab_state[:]); err != nil { return nil, .Out_Of_Memory }
 			count := 0
@@ -294,6 +295,9 @@ when AIO_CONTROL {
 						g := term.geometry(session.session)
 						if _, err := append(&entries, control.State_Entry{
 							fmt.tprintf("%s.pane.%d.grid", prefix, n), fmt.tprintf("%dx%d", g.columns, g.rows),
+						}); err != nil { return nil, .Out_Of_Memory }
+						if _, err := append(&entries, control.State_Entry{
+							fmt.tprintf("%s.pane.%d.keep_open", prefix, n), fmt.tprintf("%t", session.keep_open),
 						}); err != nil { return nil, .Out_Of_Memory }
 					}
 					if _, err := append(&entries, control.State_Entry{
@@ -308,6 +312,7 @@ when AIO_CONTROL {
 			pane_state := [?]control.State_Entry{
 				{"panes.count", fmt.tprintf("%d", len(w.panes))},
 				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
+				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
 			}
 			if _, err := append(&entries, ..pane_state[:]); err != nil { return nil, .Out_Of_Memory }
 			for view in w.views {
@@ -544,7 +549,7 @@ when AIO_CONTROL {
 			command := commands.find(&app.registry, r.name)
 			if command == nil || command.disabled { return .Invalid_Argument }
 			ui.palette_close(&app.palette)
-			run_action(app, w, Action(command.id))
+			run_action(app, w, Action(command.id), r.direction, r.ratio, r.focus)
 		case:
 			return .Invalid_Argument
 		}

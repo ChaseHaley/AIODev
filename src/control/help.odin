@@ -138,7 +138,9 @@ Runs tray actions through the app's normal path; quit fully exits and stops mana
 No defaults. Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start with error:.
 `)
 	case "command":
-		put(&w, `command <command name>
+		put(&w, `command <command name> [pane.split options]
+pane.split accepts --direction left|right|up|down, --ratio 0.05..0.95 (new pane's share),
+and --focus true|false. Defaults: right, 0.5, true. Other commands accept no options.
 Invokes a registered palette command by stable name, e.g. command app.reload_settings.
 Proves command dispatch. Output is one line: ok; <changes>. Failures start with error:.
 Example: ok; rows 1-2 changed; palette open "rel" app.reload_settings
