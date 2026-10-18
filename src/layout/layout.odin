@@ -384,3 +384,79 @@ hit_test :: proc(rects: []Pane_Rect, x, y: f32) -> (Pane_Rect, bool) {
 	}
 	return {}, false
 }
+
+// The topmost split of the run of same-axis splits containing `node`: panes side by side along one axis,
+// however their splits nested.
+@(private)
+run_top :: proc(l: ^Layout, node: Node_Id, axis: Axis) -> Node_Id {
+	top := node
+	for parent := parent_of(l, top); parent != INVALID_NODE; parent = parent_of(l, parent) {
+		s, ok := l.nodes[parent].(Split)
+		if !ok || s.axis != axis { break }
+		top = parent
+	}
+	return top
+}
+
+@(private)
+run_units :: proc(l: ^Layout, id: Node_Id, axis: Axis) -> int {
+	if s, ok := l.nodes[id].(Split); ok && s.axis == axis {
+		return run_units(l, s.first, axis)+run_units(l, s.second, axis)
+	}
+	return 1
+}
+
+@(private)
+balance_run :: proc(l: ^Layout, id: Node_Id, axis: Axis) {
+	s, ok := l.nodes[id].(Split)
+	if !ok || s.axis != axis { return }
+	first := run_units(l, s.first, axis)
+	s.ratio = clamp(f32(first)/f32(first+run_units(l, s.second, axis)), 0.05, 0.95)
+	l.nodes[id] = s
+	balance_run(l, s.first, axis)
+	balance_run(l, s.second, axis)
+}
+
+// Gives every region in the divider's same-axis run an equal share; other layout regions keep their sizes.
+@(require_results)
+balance_related :: proc(l: ^Layout, node: Node_Id) -> bool {
+	if int(node) >= len(l.nodes) { return false }
+	s, ok := l.nodes[node].(Split)
+	if !ok { return false }
+	balance_run(l, run_top(l, node, s.axis), s.axis)
+	return true
+}
+
+// Moves a pane beside `target`, keeping its content and focus order; the split it leaves collapses.
+@(require_results)
+move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (Node_Id, bool) {
+	if node == target || int(node) >= len(l.nodes) || int(target) >= len(l.nodes) { return INVALID_NODE, false }
+	pane, ok := l.nodes[node].(Pane)
+	if _, target_ok := l.nodes[target].(Pane); !ok || !target_ok { return INVALID_NODE, false }
+	focused := l.focus == node
+	if !remove(l, node) { return INVALID_NODE, false }
+	// Removal vacated two nodes, so the split below reuses them and cannot fail to allocate.
+	added, err := split_direction(l, target, direction, 0.5, pane.content)
+	assert(err == nil)
+	moved := l.nodes[added].(Pane)
+	moved.order = pane.order
+	l.nodes[added] = moved
+	l.next_pane_order -= 1
+	if focused { l.focus = added }
+	return added, true
+}
+
+// Every divider within `tolerance` of the point, so a junction of splits can be dragged as one.
+divider_hit_all :: proc(dividers: []Divider, x, y, tolerance: f32, out: []Divider) -> int {
+	count := 0
+	for d in dividers {
+		r := d.rect
+		r.x, r.width = r.x-tolerance, r.width+2*tolerance
+		r.y, r.height = r.y-tolerance, r.height+2*tolerance
+		if count < len(out) && x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height {
+			out[count] = d
+			count += 1
+		}
+	}
+	return count
+}
