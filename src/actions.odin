@@ -72,6 +72,7 @@ Action :: enum u32 {
 	Resize_Up_Large,
 	Resize_Down_Large,
 	Keep_Pane_Open,
+	Change_Shortcut,
 }
 
 @(private)
@@ -150,6 +151,7 @@ ACTIONS :: [Action]Action_Info{
 	.Resize_Up_Large = {"pane.resize_up_large", "Resize Up by 50 Pixels", nil},
 	.Resize_Down_Large = {"pane.resize_down_large", "Resize Down by 50 Pixels", nil},
 	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil},
+	.Change_Shortcut = {"settings.change_shortcut", "Change Shortcut…", nil},
 }
 
 @(require_results)
@@ -169,8 +171,7 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 }
 
 shortcut_action :: proc(app: ^App, e: platform.Key_Event) -> (Action, bool) {
-	shortcut := commands.Shortcut{e.key, e.modifiers}
-	if command := commands.find_by_shortcut(&app.registry, shortcut); command != nil {
+	if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted); command != nil {
 		return Action(command.id), true
 	}
 	return {}, false
@@ -184,6 +185,7 @@ run_action :: proc(
 	w.dirty = true
 	switch action {
 	case .Command_Palette:
+		leader_cancel(app, w)
 		ui.editor_destroy(&w.editor)
 		if app.palette.open {
 			ui.palette_close(&app.palette)
@@ -206,6 +208,7 @@ run_action :: proc(
 			term.select_all(entry.session)
 		}
 	case .Find:
+		leader_cancel(app, w)
 		if w.find.open {
 			find_close(w, entry)
 		} else {
@@ -232,6 +235,12 @@ run_action :: proc(
 		}
 	case .Settings_UI:
 		editor_open(app, w)
+	case .Change_Shortcut:
+		editor_open(app, w)
+		if w.editor.open {
+			ui.field_set(&w.editor.filter, "keys.")
+			ui.editor_filter(&w.editor)
+		}
 	case .Reload_Settings:
 		reload_settings(app)
 	case .Restart_Shell:
@@ -440,8 +449,8 @@ binding_diagnostic :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic
 
 @(private)
 settings_diagnostic :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic,
-	line: int, key, message: string) {
-	if err := settings.diagnostic_append(diagnostics, line, key, message); err != nil {
+	line: int, key, message: string, kind: settings.Diagnostic_Kind = .Invalid_Value) {
+	if err := settings.diagnostic_append(diagnostics, line, key, message, kind); err != nil {
 		log.errorf("recording shortcut diagnostic failed: %v", err)
 		notify(app, .Error, message)
 	}
@@ -483,6 +492,10 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 	}
 	errors: [len(Action)]commands.Error
 	commands.rebind(&app.registry, overrides[:count], errors[:count])
+	applied_lines: [len(Action)]int
+	for error, i in errors[:count] {
+		if error == .None { applied_lines[int(overrides[i].id)] = app.settings.keys[lines[i]].line }
+	}
 	for error, i in errors[:count] {
 		if error == .None { continue }
 		binding := app.settings.keys[lines[i]]
@@ -494,7 +507,10 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 					buffer: [128]u8
 					label, label_error := commands.shortcut_label(shortcut, buffer[:])
 					assert(label_error == .None)
-					message = fmt.tprintf("shortcut \"%s\" already used by %s", label, other.name)
+					message = fmt.tprintf("shortcut \"%s\" for %s (%s at %s) already used by %s (%s at %s)",
+						label, commands.find(&app.registry, binding.name).title, binding.name,
+						binding_origin(app, binding.line), other.title, other.name,
+						binding_origin(app, applied_lines[int(other.id)]))
 					break
 				}
 			}
@@ -505,11 +521,49 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 	if app.settings.input.leader != "" {
 		leader, valid := commands.parse_shortcut(app.settings.input.leader)
 		if !valid || .Leader in leader.modifiers || leader.key == .Unidentified || is_modifier_key(leader.key) {
-			settings_diagnostic(app, diagnostics, 0, "input.leader", "Use one ordinary shortcut.")
-		} else if other := commands.find_by_shortcut(&app.registry, leader); other != nil {
-			settings_diagnostic(app, diagnostics, 0, "input.leader", fmt.tprintf("Conflicts with %s.", other.name))
+			settings_diagnostic(app, diagnostics, app.settings.leader_line,
+				"input.leader", "Use one ordinary shortcut.")
 		} else {
 			app.leader = leader
+			// Decide once across every matching identity mode before removing any
+			// chord, so a later direct binding cannot leave partial removals behind.
+			winner: ^commands.Command
+			for &other in app.registry.items {
+				for shortcut in commands.active_shortcuts(&other) {
+					if commands.prefix_conflicts(leader, shortcut) &&
+						applied_lines[int(other.id)] >= app.settings.leader_line &&
+						(winner == nil || applied_lines[int(other.id)] > applied_lines[int(winner.id)]) {
+						winner = &other
+					}
+				}
+			}
+			leader_wins := winner == nil
+			if !leader_wins { app.leader = nil }
+			for &other in app.registry.items {
+				// Copy because unbind compacts the active shortcut array.
+				shortcuts := other.shortcuts
+				for shortcut in shortcuts.items[:shortcuts.count] {
+					if !commands.prefix_conflicts(leader, shortcut) { continue }
+					if leader_wins { _ = commands.unbind(&app.registry, other.id, shortcut) }
+					message := fmt.tprintf("input.leader vs %s (%s); %s wins [%s:%d; %s]",
+						other.title, other.name, leader_wins ? "input.leader" : winner.name,
+						binding_file(app), app.settings.leader_line, binding_origin(app, applied_lines[int(other.id)]))
+					settings_diagnostic(app, diagnostics, app.settings.leader_line,
+						"input.leader", message, .Shortcut_Warning)
+				}
+			}
 		}
 	}
+}
+
+@(private)
+binding_origin :: proc(app: ^App, line: int) -> string {
+	if line > 0 { return fmt.tprintf("%s:%d", binding_file(app), line) }
+	return "defaults"
+}
+
+@(private)
+binding_file :: proc(app: ^App) -> string {
+	i := max(strings.last_index_byte(app.settings_path, '/'), strings.last_index_byte(app.settings_path, '\\'))
+	return app.settings_path[i+1:]
 }

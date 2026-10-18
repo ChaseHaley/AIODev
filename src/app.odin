@@ -425,6 +425,8 @@ load_settings :: proc(app: ^App) {
 		return
 	}
 	b := strings.builder_make(context.temp_allocator)
+	warnings_only := true
+	for d in diagnostics { if d.kind != .Shortcut_Warning { warnings_only = false } }
 	for d, i in diagnostics {
 		if i == 3 {
 			fmt.sbprintf(&b, " (%d more)", len(diagnostics) - 3)
@@ -433,7 +435,7 @@ load_settings :: proc(app: ^App) {
 		fmt.sbprintf(&b, "%sLine %d, %s: %s.", i > 0 ? " " : "", d.line, d.key, d.message)
 	}
 	text := fmt.tprintf("Settings: %s", strings.to_string(b))
-	ui.notices_put(&app.notices, u32(Notice_Key.Settings), .Error, text, ERROR_NOTICE_DURATION)
+	ui.notices_put(&app.notices, u32(Notice_Key.Settings), warnings_only ? .Info : .Error, text, ERROR_NOTICE_DURATION)
 }
 
 reload_settings :: proc(app: ^App) {

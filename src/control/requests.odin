@@ -213,7 +213,7 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		k := Key{chords = make([dynamic]commands.Shortcut, allocator)}
 		for s in args[1:] {
 			chord, ok := commands.parse_shortcut(s)
-			if !ok {
+			if !ok || .Physical in chord.modifiers || .Leader in chord.modifiers {
 				delete(k.chords)
 				return {}, {s, "use a chord such as Ctrl+Shift+P"}
 			}

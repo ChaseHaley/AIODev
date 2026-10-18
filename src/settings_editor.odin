@@ -51,7 +51,7 @@ editor_open :: proc(app: ^App, w: ^Window) {
 		for binding in s.keys { if binding.name == command.name { value = binding.value; break } }
 		row := ui.Editor_Row{
 			fmt.tprintf("keys.%s", command.name), command.title,
-			"Shortcuts separated by commas. Empty disables. Leader+T requires input.leader. Up to four shortcuts.",
+			"Shortcuts separated by commas. Physical+ names a key position. Leader+ requires input.leader. Empty disables.",
 			value, shortcuts_text(command.defaults),
 		}
 		if ui.editor_add(p, row) != nil {
@@ -64,7 +64,7 @@ editor_open :: proc(app: ^App, w: ^Window) {
 	ui.editor_filter(p)
 	ui.palette_close(&app.palette)
 	find_close(w, focused_session(app, w))
-	w.leader_until = {}
+	leader_cancel(app, w)
 	w.selecting, w.autoscrolling = false, false
 	w.dragging = nil
 	w.dirty = true
@@ -75,22 +75,29 @@ editor_open :: proc(app: ^App, w: ^Window) {
 }
 
 @(private)
-editor_validate_bindings :: proc(text: string) -> string {
+editor_validate_bindings :: proc(text, path: string) -> (problem, warning: string) {
 	s, diagnostics, err := settings.parse(text)
-	if err != nil { return "Could not validate settings." }
+	if err != nil { return "Could not validate settings.", "" }
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
-	probe := App{settings = s, registry = commands.create()}
+	probe := App{settings = s, settings_path = path, registry = commands.create()}
 	defer commands.destroy(&probe.registry)
 	defer ui.notices_destroy(&probe.notices)
-	if register_actions(&probe.registry) != .None { return "Could not validate shortcuts." }
+	if register_actions(&probe.registry) != .None { return "Could not validate shortcuts.", "" }
 	before := len(diagnostics)
 	apply_bindings(&probe, &diagnostics)
-	if len(diagnostics) > before {
-		d := diagnostics[before]
-		return fmt.tprintf("%s: %s", d.key, d.message)
+	for d in diagnostics[before:] {
+		message := fmt.tprintf("%s: %s", d.key, d.message)
+		if d.kind == .Shortcut_Warning {
+			if warning == "" {
+				warning = d.message
+				if source := strings.index_byte(warning, '['); source > 0 {
+					warning = strings.trim_space(warning[:source])
+				}
+			}
+		} else { return message, "" }
 	}
-	return ""
+	return "", warning
 }
 
 editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
@@ -110,8 +117,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		delete(updated)
 		return
 	}
+	warning: string
 	if strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) || row.key == "input.leader" {
-		if problem := editor_validate_bindings(updated); problem != "" {
+		problem: string
+		problem, warning = editor_validate_bindings(updated, app.settings_path)
+		if problem != "" {
 			ui.editor_message(p, problem, true)
 			delete(updated)
 			return
@@ -130,6 +140,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	row.value = strings.clone(value)
 	reload_settings(app)
 	text := "Saved and applied."
+	if warning != "" { text = fmt.tprintf("Saved. %s", warning) }
 	if strings.has_prefix(row.key, "shell.") { text = "Saved. Applies to new or restarted shells." }
 	if row.key == "window.columns" || row.key == "window.rows" {
 		text = "Saved. Initial size applies to new sessions."

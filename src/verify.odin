@@ -232,6 +232,7 @@ when AIO_CONTROL {
 			{"theme.mode", settings.value_text(&app.settings, settings.schema_find("theme.mode")^)},
 			{"ui.animations", fmt.tprintf("%t", app.animations)},
 			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
+			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
 		}
 		if _, err := append(&entries, ..base[:]); err != nil { return nil, .Out_Of_Memory }
 		w := verify_window(app)

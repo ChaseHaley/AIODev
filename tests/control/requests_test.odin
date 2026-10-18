@@ -82,6 +82,7 @@ parse_errors :: proc(t: ^testing.T) {
 		{"resize", "0x2"}, {"resize", "2x0"}, {"resize", "1001x2"}, {"resize", "2,3"},
 		{"dpi", "47"}, {"dpi", "769"}, {"dpi", "abc"}, {"dpi", "99999999999999999999"},
 		{"key"}, {"key", "Ctrl+bogus"}, {"key", "A", "Ctrl+Ctrl+A"},
+		{"key", "Physical+Ctrl+Z"}, {"key", "Leader+T"},
 		{"wait"}, {"wait", "text"}, {"wait", "x"}, {"wait", "idle", "-1"},
 		{"wait", "frame", "--timeout"}, {"wait", "frame", "--timeout", "-1"},
 		{"wait", "frame", "--idle", "1"}, {"wait", "idle", "--bad", "1"},

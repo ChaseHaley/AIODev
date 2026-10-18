@@ -55,6 +55,7 @@ Settings :: struct {
 	theme: Theme_Settings,
 	pane: Pane_Settings,
 	allocator: runtime.Allocator,
+	leader_line: int,
 }
 KEY_BINDING_PREFIX :: "keys."
 Key_Binding :: struct { name, value: string, line: int }
@@ -114,7 +115,7 @@ SCHEMA :: [?]Schema_Entry{
 	{"colors.palette.14", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 14 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 14."},
 	{"colors.palette.15", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, palette) + 15 * size_of(Maybe(Color)), "", 0, 0, nil, "ANSI palette color 15."},
 }
-Diagnostic_Kind :: enum { Unknown_Key, Malformed_Line, Invalid_Value, Out_Of_Range, Duplicate_Key }
+Diagnostic_Kind :: enum { Unknown_Key, Malformed_Line, Invalid_Value, Out_Of_Range, Duplicate_Key, Shortcut_Warning }
 Diagnostic :: struct {
 	line: int,
 	key, message: string,
@@ -295,8 +296,9 @@ diagnostic_append :: proc(
 	out: ^[dynamic]Diagnostic,
 	line: int,
 	key, message: string,
+	kind: Diagnostic_Kind = .Invalid_Value,
 ) -> runtime.Allocator_Error {
-	issue, err := problem(.Invalid_Value, out.allocator, message)
+	issue, err := problem(kind, out.allocator, message)
 	if err != nil { return err }
 	return add_diagnostic(out, line, key, issue.(Problem))
 }
@@ -420,6 +422,7 @@ parse :: proc(
 			if index < 0 { continue }
 		}
 		seen[index] = true
+		if key == "input.leader" { s.leader_line = line_number }
 		issue, assign_error := assign(&s, schema[index], value)
 		if assign_error != nil { return {}, {}, assign_error }
 		if p, present := issue.?; present {

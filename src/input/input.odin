@@ -191,6 +191,7 @@ Modifier :: enum u16 {
 	Right_Alt,
 	Right_Super,
 	Leader,
+	Physical,
 }
 
 Modifiers :: bit_set[Modifier; u16]

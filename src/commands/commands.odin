@@ -48,7 +48,82 @@ destroy :: proc(registry: ^Registry) {
 
 @(private)
 normalized :: proc(modifiers: input.Modifiers) -> input.Modifiers {
-	return modifiers & {.Control, .Shift, .Alt, .Super, .Leader}
+	return modifiers & {.Control, .Shift, .Alt, .Super, .Leader, .Physical}
+}
+
+logical_key :: proc(physical: input.Key, unshifted: rune) -> input.Key {
+	// Digit-row defaults follow their number positions even on layouts such as
+	// AZERTY, whose unshifted row includes named punctuation (' and -).
+	if physical >= .Digit_0 && physical <= .Digit_9 { return physical }
+	if unshifted < ' ' || (physical > .Slash && physical != .Space) { return physical }
+	if unshifted >= 'a' && unshifted <= 'z' { return input.Key(int(input.Key.A)+int(unshifted-'a')) }
+	if unshifted >= 'A' && unshifted <= 'Z' { return input.Key(int(input.Key.A)+int(unshifted-'A')) }
+	if unshifted >= '0' && unshifted <= '9' { return input.Key(int(input.Key.Digit_0)+int(unshifted-'0')) }
+	switch unshifted {
+	case '`': return .Backquote
+	case '\\': return .Backslash
+	case '[': return .Bracket_Left
+	case ']': return .Bracket_Right
+	case ',': return .Comma
+	case '=': return .Equal
+	case '-': return .Minus
+	case '.': return .Period
+	case '\'': return .Quote
+	case ';': return .Semicolon
+	case '/': return .Slash
+	case ' ': return .Space
+	}
+	// Ghostty also falls back to the physical key when the layout character has
+	// no named key identity (for example Cyrillic letters or AZERTY '&').
+	return physical
+}
+
+// A prefix reserves the same named chord in both identity modes. Direct
+// logical/physical bindings remain distinct and retain physical-first dispatch.
+prefix_conflicts :: proc(prefix, binding: Shortcut) -> bool {
+	return prefix.key == binding.key &&
+		normalized(prefix.modifiers)-{.Physical} == normalized(binding.modifiers)-{.Physical}
+}
+
+shortcut_matches :: proc(
+	binding: Shortcut, physical: input.Key, modifiers: input.Modifiers, unshifted: rune,
+) -> bool {
+	key := .Physical in binding.modifiers ? physical : logical_key(physical, unshifted)
+	return binding.key == key && normalized(binding.modifiers)-{.Physical} == normalized(modifiers)-{.Physical}
+}
+
+@(require_results)
+find_by_key :: proc(
+	registry: ^Registry, physical: input.Key, modifiers: input.Modifiers, unshifted: rune,
+) -> ^Command {
+	logical := logical_key(physical, unshifted)
+	mods := normalized(modifiers)-{.Physical}
+	fallback: ^Command
+	for &item in registry.items {
+		for binding in active_shortcuts(&item) {
+			if normalized(binding.modifiers)-{.Physical} != mods { continue }
+			is_physical := .Physical in binding.modifiers
+			if binding.key != (is_physical ? physical : logical) { continue }
+			if is_physical { return &item }
+			if fallback == nil { fallback = &item }
+		}
+	}
+	return fallback
+}
+
+@(require_results)
+unbind :: proc(registry: ^Registry, id: Command_Id, shortcut: Shortcut) -> bool {
+	item := find(registry, id)
+	if item == nil { return false }
+	for binding, i in active_shortcuts(item) {
+		if binding.key != shortcut.key || normalized(binding.modifiers) != normalized(shortcut.modifiers) {
+			continue
+		}
+		for j := i; j+1 < item.shortcuts.count; j += 1 { item.shortcuts.items[j] = item.shortcuts.items[j+1] }
+		item.shortcuts.count -= 1
+		return true
+	}
+	return false
 }
 
 @(require_results)
@@ -245,7 +320,7 @@ shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 		key = label
 	}
 	length := 0
-	for modifier in ([?]input.Modifier{.Leader, .Control, .Shift, .Alt, .Super}) {
+	for modifier in ([?]input.Modifier{.Leader, .Physical, .Control, .Shift, .Alt, .Super}) {
 		if modifier not_in shortcut.modifiers { continue }
 		text: string
 		#partial switch modifier {
@@ -254,6 +329,7 @@ shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 		case .Alt: text = "Alt+"
 		case .Super: text = SUPER_LABEL + "+"
 		case .Leader: text = "Leader+"
+		case .Physical: text = "Physical+"
 		}
 		if len(out)-length < len(text) { return "", .Output_Too_Small }
 		length += copy(out[length:], text)
@@ -377,6 +453,7 @@ parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 		case strings.equal_fold(prefix, "Alt"): modifier = .Alt
 		case strings.equal_fold(prefix, SUPER_LABEL): modifier = .Super
 		case strings.equal_fold(prefix, "Leader"): modifier = .Leader
+		case strings.equal_fold(prefix, "Physical"): modifier = .Physical
 		case: recognized = false
 		}
 		if !recognized { break }

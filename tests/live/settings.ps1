@@ -92,7 +92,8 @@ try {
     Assert-Value (Read-State)['settings.error'] 'false' 'direct and leader binding saved'
     Open-Field input.leader
     Save-Value Ctrl+Shift+P
-    Assert-Value (Read-State)['settings.error'] 'true' 'leader conflict rejected'
+    Assert-Value (Read-State)['settings.error'] 'false' 'leader conflict saves with source-order warning'
+    if ((Read-State)['settings.message'] -notlike '*app.command_palette*') { throw 'Missing named conflict warning.' }
     Save-Value Ctrl+B
     Assert-Value (Read-State)['settings.error'] 'false' 'leader enabled explicitly'
     Invoke-Aio key Esc

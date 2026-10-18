@@ -120,18 +120,22 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		return
 	}
 	if app.palette.open {
-		outcome, id := ui.palette_key(&app.palette, &app.registry, e)
+		logical := e
+		logical.key = commands.logical_key(e.key, e.unshifted)
+		outcome, id := ui.palette_key(&app.palette, &app.registry, logical)
 		on_palette_outcome(app, w, outcome, id)
 		return
 	}
 	if w.editor.open {
-		if e.pressed && .Control in e.modifiers && e.key == .V {
+		logical := e
+		logical.key = commands.logical_key(e.key, e.unshifted)
+		if e.pressed && .Control in e.modifiers && logical.key == .V {
 			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
 				ui.editor_text(&w.editor, text)
 				w.dirty = true
 			}
 		} else {
-			editor_outcome(app, w, ui.editor_key(&w.editor, e))
+			editor_outcome(app, w, ui.editor_key(&w.editor, logical))
 		}
 		if e.pressed { w.suppressed_key = e }
 		return
@@ -141,7 +145,13 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		return
 	}
 	if e.pressed {
-		if !is_modifier_key(e.key) && leader_key(app, w, e) { return }
+		if w.find.open && e.key == .Escape {
+			leader_cancel(app, w)
+			w.suppressed_key = e
+			find_close(w, entry)
+			return
+		}
+		if !w.find.open && !is_modifier_key(e.key) && leader_key(app, w, e) { return }
 		if action, found := shortcut_action(app, e); found {
 			w.suppressed_key = e
 			run_action(app, w, action)
@@ -150,7 +160,9 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	// The find bar has the keyboard: keys edit the query and none reach the shell.
 	if w.find.open {
-		outcome := ui.find_key(&w.find, e)
+		logical := e
+		logical.key = commands.logical_key(e.key, e.unshifted)
+		outcome := ui.find_key(&w.find, logical)
 		if outcome == .Closed {
 			w.suppressed_key = e
 		}
@@ -381,15 +393,35 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 }
 
 @(private)
+leader_cancel :: proc(app: ^App, w: ^Window) {
+	if w.leader_until == {} { return }
+	w.leader_until = {}
+	ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
+	mark_all_dirty(app)
+}
+
+@(private)
 leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 	if w.leader_until != {} {
-		if leader, enabled := app.leader.?; enabled && e.repeat && e.key == leader.key &&
-		   e.modifiers & {.Control, .Shift, .Alt, .Super} == leader.modifiers { return true }
+		if leader, enabled := app.leader.?; enabled && e.repeat &&
+		   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) { return true }
 		pending := time.tick_diff(time.tick_now(), w.leader_until) > 0
-		w.leader_until = {}
-		ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
+		leader_cancel(app, w)
 		if pending {
 			w.suppressed_key = e
+			if leader, enabled := app.leader.?; enabled &&
+			   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {
+				if entry := focused_session(app, w); entry != nil && entry.status == .Running {
+					if term.has_selection(entry.session) { term.clear_selection(entry.session) }
+					paste_confirm_cancel(app, w)
+					reset_blink(w)
+					term.send_key(entry.session, e)
+					up := e
+					up.pressed, up.repeat, up.text = false, false, ""
+					term.send_key(entry.session, up)
+				}
+				return true
+			}
 			if e.key == .Escape { return true }
 			chord := e
 			chord.modifiers += {.Leader}
@@ -399,13 +431,12 @@ leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 		}
 	}
 	if leader, enabled := app.leader.?; enabled {
-		mods := e.modifiers & {.Control, .Shift, .Alt, .Super}
-		if e.key == leader.key && mods == leader.modifiers {
+		if commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {
 			w.suppressed_key = e
 			if !e.repeat {
 				w.leader_until = time.tick_add(time.tick_now(), 2*time.Second)
 				ui.notices_put(&app.notices, u32(Notice_Key.Leader), .Info,
-					"Leader: waiting for a shortcut (2 seconds). Esc cancels; unmatched keys are consumed.",
+					"Leader: waiting (2 seconds). Press it again to send it. Esc cancels; unmatched keys are consumed.",
 					2*time.Second)
 				mark_all_dirty(app)
 			}

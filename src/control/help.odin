@@ -92,6 +92,7 @@ Sends keys in order through the app input path using the settings shortcut parse
 Example input: key Ctrl+Shift+P Esc. Output is one line: ok; <changes>. Failures start with error:.
 Example: ok; rows 1-2 changed; palette open "rel" app.reload_settings
 Modifiers: Ctrl, Shift, Alt, Win; key names match settings. No defaults.
+Key names address physical positions. Physical+ and Leader+ are binding metadata, not driver modifiers.
 This proves app input handling; it does not test Win32 keyboard-message translation.
 `)
 	case "run":
