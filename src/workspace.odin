@@ -44,8 +44,9 @@ tab_create :: proc(app: ^App, workspace: ^Workspace) -> bool {
 }
 
 session_close :: proc(app: ^App, id: u32) {
-	for entry, i in app.sessions {
+	for &entry, i in app.sessions {
 		if entry.id == id {
+			pane_header_destroy(&entry.header)
 			term.destroy(entry.session)
 			ordered_remove(&app.sessions, i)
 			return

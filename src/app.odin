@@ -44,6 +44,7 @@ Session_Entry :: struct {
 	session: ^term.Session,
 	status: term.Status_Kind,
 	keep_open: bool,
+	header: Pane_Header_Metadata,
 }
 
 App :: struct {
@@ -153,7 +154,8 @@ app_destroy :: proc(app: ^App) {
 		window_close(app, app.windows[len(app.windows) - 1])
 	}
 	delete(app.windows)
-	for entry in app.sessions {
+	for &entry in app.sessions {
+		pane_header_destroy(&entry.header)
 		term.destroy(entry.session)
 	}
 	delete(app.sessions)
@@ -299,7 +301,8 @@ session_open :: proc(app: ^App) -> bool {
 	bar := ui.tab_bar_layout(f32(geometry.surface_width), scale, 1, app.settings.window.show_tab_bar_with_one_tab)
 	geometry.padding_top += u32(bar.height)
 	geometry.surface_height += u32(bar.height)
-	session, err := term.create(session_config(app, geometry), {wake_platform, &app.platform})
+	config := session_config(app, geometry)
+	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
 		return false
@@ -311,6 +314,7 @@ session_open :: proc(app: ^App) -> bool {
 		term.destroy(session)
 		return false
 	}
+	pane_header_launch(&app.sessions[len(app.sessions)-1].header, config)
 	configure_session(app, session)
 	return true
 }
@@ -337,7 +341,10 @@ session_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
 
 session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	geometry := term.geometry(entry.session)
-	term.restart(entry.session, session_config(app, geometry))
+	config := session_config(app, geometry)
+	term.restart(entry.session, config)
+	pane_header_launch(&entry.header, config)
+	pane_header_refresh(entry)
 	status := term.status(entry.session)
 	entry.status = status.kind
 	mark_all_dirty(app)
@@ -365,6 +372,7 @@ update_sessions :: proc(app: ^App) {
 			if status.kind == .Exited && close_exited_session(app, entry.id) { continue }
 		}
 		if term.take_title_change(s) {
+			pane_header_refresh(entry)
 			session_titles_changed(app, entry.id)
 		}
 		if term.take_bell(s) {

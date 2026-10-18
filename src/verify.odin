@@ -314,6 +314,7 @@ when AIO_CONTROL {
 				{"panes.count", fmt.tprintf("%d", len(w.panes))},
 				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
 				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
+				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
 			}
 			if _, err := append(&entries, ..pane_state[:]); err != nil { return nil, .Out_Of_Memory }
 			for view in w.views {
@@ -354,6 +355,10 @@ when AIO_CONTROL {
 				{"session.status", strings.to_lower(fmt.tprintf("%v", status.kind), context.temp_allocator)},
 				{"session.exit", fmt.tprintf("%d", status.exit_code)},
 				{"session.title", term.title(s, context.temp_allocator)},
+				{"session.header.title", pane_header_title(&entry.header)},
+				{"session.header.directory", pane_header_directory(&entry.header)},
+				{"session.header.icon", app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon},
+				{"grid.origin", fmt.tprintf("%d,%d", g.padding_left, g.padding_top)},
 				{"session.viewport", up == 0 ? "bottom" : fmt.tprintf("up:%d", up)},
 				{"session.selection", selection}, {"session.mouse", fmt.tprintf("%t", term.mouse_tracking(s))},
 				{"session.generation", fmt.tprintf("%d", term.generation(s))},

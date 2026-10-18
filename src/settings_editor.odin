@@ -21,6 +21,7 @@ shortcuts_text :: proc(shortcuts: commands.Shortcut_Set) -> string {
 }
 
 editor_open :: proc(app: ^App, w: ^Window) {
+	pane_header_cancel(w)
 	p := &w.editor
 	ui.editor_destroy(p)
 	data, err := os.read_entire_file(app.settings_path, context.allocator)
@@ -141,7 +142,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	reload_settings(app)
 	text := "Saved and applied."
 	if warning != "" { text = fmt.tprintf("Saved. %s", warning) }
-	if strings.has_prefix(row.key, "shell.") { text = "Saved. Applies to new or restarted shells." }
+	if row.key == "shell.command" || row.key == "shell.directory" { text = "Saved. Applies to new or restarted shells." }
 	if row.key == "window.columns" || row.key == "window.rows" {
 		text = "Saved. Initial size applies to new sessions."
 	}

@@ -1,0 +1,133 @@
+package main
+
+import "core:log"
+import "core:strings"
+import "aio:commands"
+import "aio:glyphs"
+import "aio:layout"
+import "aio:platform"
+import "aio:settings"
+import "aio:term"
+import "aio:ui"
+
+Pane_Header_Metadata :: struct {
+	executable, title, directory, launch_directory: string,
+	icon: string, // Borrowed static shell badge.
+}
+
+pane_header_destroy :: proc(header: ^Pane_Header_Metadata) {
+	delete(header.executable)
+	delete(header.title)
+	delete(header.directory)
+	delete(header.launch_directory)
+	header^ = {}
+}
+
+@(private)
+header_clone :: proc(text: string) -> string {
+	copy, err := strings.clone(text)
+	if err != nil { log.error("caching pane header text failed") }
+	return copy
+}
+
+pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config) {
+	pane_header_destroy(header)
+	header.executable = header_clone(settings.shell_executable(config.command_line))
+	header.icon = settings.shell_icon(header.executable, "")
+	header.launch_directory = header_clone(config.working_directory)
+}
+
+pane_header_refresh :: proc(entry: ^Session_Entry) {
+	header := &entry.header
+	title := term.title(entry.session)
+	directory := term.working_directory(entry.session)
+	defer delete(directory)
+	label, err := settings.directory_label(directory)
+	if err != nil { log.error("caching the reported pane directory failed") }
+	delete(header.title)
+	delete(header.directory)
+	header.title, header.directory = title, label
+}
+
+pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
+	return header.title != "" ? header.title : header.executable
+}
+
+pane_header_directory :: proc(header: ^Pane_Header_Metadata) -> string {
+	return header.directory != "" ? header.directory : header.launch_directory
+}
+
+pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
+	entry: ^Session_Entry) -> glyphs.Result {
+	if w.header_height == 0 { return .Ok }
+	controls: [4]ui.Control_Motion
+	for view in w.views { if view.content == pane.content { controls = view.header_controls; break } }
+	r := pane.rect
+	icon := app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon
+	return ui.header_draw(&w.list, &app.ui_text, app.theme, {r.x, r.y, r.width, r.height},
+		app.theme.pane, f32(app.settings.pane.corner_radius)*w.scale, w.scale,
+		pane_header_title(&entry.header), pane_header_directory(&entry.header), icon,
+		pane.node == w.tree.focus, controls, w.tree.zoomed)
+}
+
+pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_Action, bool) {
+	if w.header_height == 0 { return {}, .None, false }
+	for pane in w.panes {
+		r := pane.rect
+		l := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, pane.node == w.tree.focus)
+		if ui.header_contains(l, x, y) { return pane, ui.header_hit_test(l, x, y), true }
+	}
+	return {}, .None, false
+}
+
+pane_header_clear :: proc(w: ^Window) {
+	w.header_buttons = {}
+	pane_header_cancel(w)
+}
+
+pane_header_cancel :: proc(w: ^Window) {
+	for &view in w.views { view.header_hover, view.header_pressed = .None, .None }
+}
+
+// The terminal must not receive either half of a header click, including a release outside it.
+pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
+	if !e.pressed && e.button in w.header_buttons {
+		w.header_buttons -= {e.button}
+		chosen: ui.Header_Action
+		for &view in w.views {
+			if e.button == .Left {
+				if hit && view.content == pane.content && view.header_pressed == action { chosen = action }
+				view.header_pressed = .None
+			}
+		}
+		if chosen != .None {
+			names := [ui.Header_Action]string{
+				.None = "", .Split_Right = "pane.split_right", .Split_Down = "pane.split_down",
+				.Zoom = "pane.zoom", .Close = "pane.close",
+			}
+			if command := commands.find(&app.registry, names[chosen]); command != nil { run_action(app, w, Action(command.id)) }
+		}
+		return true
+	}
+	if !hit || w.selecting { return false }
+	if e.pressed {
+		w.header_buttons += {e.button}
+		if e.button == .Left {
+			pane_focus(app, w, pane.node)
+			for &view in w.views {
+				if view.content == pane.content { view.header_pressed = action }
+			}
+		}
+	}
+	return true
+}
+
+pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> bool {
+	pane, action, hit := pane_header_hit(w, x, y)
+	for &view in w.views {
+		hover := enabled && hit && view.content == pane.content ? action : ui.Header_Action.None
+		if hover != view.header_hover { view.header_hover = hover; w.dirty = true }
+	}
+	return enabled && hit
+}

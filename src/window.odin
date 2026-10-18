@@ -4,6 +4,7 @@ import "core:log"
 import "core:math"
 import "core:time"
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -24,6 +25,8 @@ Pane_View :: struct {
 	generation, atlas_generation, builds: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
+	header_controls: [4]ui.Control_Motion,
+	header_hover, header_pressed: ui.Header_Action,
 }
 
 Window :: struct {
@@ -37,6 +40,8 @@ Window :: struct {
 	views: [dynamic]Pane_View,
 	list: render.Draw_List,
 	width, height: i32,
+	header_height: f32,
+	header_buttons: input.Mouse_Buttons,
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
@@ -206,6 +211,14 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if resize(&w.tab_controls, len(w.workspace.tabs)+1) != nil {
 		log.error("resizing tab control states failed")
 	}
+	pane_header_cancel(w)
+	for &view in w.views { view.header_controls = {} }
+	w.header_height = 0
+	if app.settings.pane.show_headers {
+		count := 0
+		for node in w.tree.nodes { if _, ok := node.(layout.Pane); ok { count += 1 } }
+		if count > 1 { w.header_height = math.round(ui.HEADER_HEIGHT*w.scale) }
+	}
 	area := window_content_area(app, w)
 	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
 	layout.dividers(w.tree, area, window_gap(app, w), &w.dividers)
@@ -224,7 +237,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		if entry == nil {
 			continue
 		}
-		columns, rows := term_view.grid_size(w.metrics, pane.rect.width, pane.rect.height, padding)
+		columns, rows := term_view.grid_size(w.metrics, pane.rect.width, max(0, pane.rect.height-w.header_height), padding)
 		g := term.Geometry{
 			columns = columns,
 			rows = rows,
@@ -233,7 +246,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 			surface_width = u32(w.width),
 			surface_height = u32(w.height),
 			padding_left = u32(pane.rect.x + padding),
-			padding_top = u32(pane.rect.y + padding),
+			padding_top = u32(pane.rect.y + min(pane.rect.height, w.header_height) + padding),
 		}
 		if g != term.geometry(entry.session) {
 			term.resize(entry.session, g)
@@ -378,7 +391,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			focused = content_focused,
 			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
 		}
-		origin := [2]f32{pane.rect.x + padding, pane.rect.y + padding}
+		origin := [2]f32{pane.rect.x + padding, pane.rect.y + min(pane.rect.height, w.header_height) + padding}
 		result: glyphs.Result
 		frame, result = build_pane(app, w, pane, entry, view, origin, style)
 		if result != .Ok {
@@ -392,6 +405,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}, message, w.scale, f32(app.settings.pane.corner_radius)*w.scale);
 				message_result != .Ok { return frame, message_result }
 		}
+		if header_result := pane_header_draw(app, w, pane, entry); header_result != .Ok { return frame, header_result }
 		window_card_outline(app, w, pane)
 	}
 	if blinking != w.blinking {

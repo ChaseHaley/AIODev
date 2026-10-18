@@ -18,7 +18,7 @@ Font_Settings :: struct {
 	size, line_height: f64,
 }
 Shell_Settings :: struct {
-	command, directory: string,
+	command, directory, icon: string,
 }
 Input_Settings :: struct { leader: string }
 Window_Settings :: struct {
@@ -74,6 +74,8 @@ SCHEMA :: [?]Schema_Entry{
 	{"theme.mode", .Enum, offset_of(Settings, theme) + offset_of(Theme_Settings, mode), "dark", 0, 0, {"dark", "light"}, "Color theme mode: dark or light."},
 	{"pane.gap", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, gap), "5", 0, 24, nil, "Space between and around pane cards in DIPs."},
 	{"pane.corner_radius", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, corner_radius), "7", 0, 16, nil, "Pane card corner radius in DIPs."},
+	{"pane.show_headers", .Bool, offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers), "true", 0, 0, nil, "Show pane headers when a tab has multiple panes."},
+	{"shell.icon", .String, offset_of(Settings, shell) + offset_of(Shell_Settings, icon), "", 0, 16, nil, "Shell badge text; empty chooses the shell default."},
 	{"input.leader", .String, offset_of(Settings, input) + offset_of(Input_Settings, leader), "", 0, 128, nil, "Optional leader chord, for example Ctrl+B; use Leader+T in a command shortcut. Empty disables it."},
 	{"font.family", .String, offset_of(Settings, font) + offset_of(Font_Settings, family), "Cascadia Mono", 1, 256, nil, "Terminal font family."},
 	{"font.size", .Float, offset_of(Settings, font) + offset_of(Font_Settings, size), "12", 1, 200, nil, "Font size in points."},

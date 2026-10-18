@@ -186,6 +186,7 @@ run_action :: proc(
 	switch action {
 	case .Command_Palette:
 		leader_cancel(app, w)
+		pane_header_cancel(w)
 		ui.editor_destroy(&w.editor)
 		if app.palette.open {
 			ui.palette_close(&app.palette)
@@ -209,6 +210,7 @@ run_action :: proc(
 		}
 	case .Find:
 		leader_cancel(app, w)
+		pane_header_cancel(w)
 		if w.find.open {
 			find_close(w, entry)
 		} else {
@@ -234,6 +236,7 @@ run_action :: proc(
 			notify(app, .Error, fmt.tprintf("Could not open %s.", app.settings_path))
 		}
 	case .Settings_UI:
+		pane_header_cancel(w)
 		editor_open(app, w)
 	case .Change_Shortcut:
 		editor_open(app, w)

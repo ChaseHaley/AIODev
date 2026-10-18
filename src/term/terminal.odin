@@ -188,6 +188,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		{.Write_Pty, rawptr(write_pty)},
 		{.Bell, rawptr(bell)},
 		{.Title_Changed, rawptr(title_changed)},
+		{.Pwd_Changed, rawptr(title_changed)},
+		{.Reset, rawptr(title_changed)},
 		{.Render_Hold, rawptr(render_hold)},
 		{.Program_Status, rawptr(program_status)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
@@ -537,6 +539,14 @@ title :: proc(s: ^Session, allocator := context.allocator) -> string {
 	if ghostty.terminal_get(s.terminal, .Title, &value) != .Success || value.len == 0 {
 		return ""
 	}
+	return strings.clone(string(value.ptr[:value.len]), allocator)
+}
+
+working_directory :: proc(s: ^Session, allocator := context.allocator) -> string {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	value: ghostty.String
+	if ghostty.terminal_get(s.terminal, .Pwd, &value) != .Success || value.len == 0 { return "" }
 	return strings.clone(string(value.ptr[:value.len]), allocator)
 }
 

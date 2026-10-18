@@ -47,6 +47,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.tab_hover = -1
 			w.tab_pressed = false
 			w.editor.hover, w.editor.pressed = 0, 0
+			for &view in w.views { view.header_hover, view.header_pressed = .None, .None }
 			w.dirty = true
 		}
 	case platform.Mouse_Wheel_Event:
@@ -120,6 +121,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		return
 	}
 	if app.palette.open {
+		pane_header_cancel(w)
 		logical := e
 		logical.key = commands.logical_key(e.key, e.unshifted)
 		outcome, id := ui.palette_key(&app.palette, &app.registry, logical)
@@ -127,6 +129,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		return
 	}
 	if w.editor.open {
+		pane_header_cancel(w)
 		logical := e
 		logical.key = commands.logical_key(e.key, e.unshifted)
 		if e.pressed && .Control in e.modifiers && logical.key == .V {
@@ -239,6 +242,10 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	w.tab_pressed = e.pressed && e.button == .Left &&
 		ui.tab_bar_hit_test(window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
 	w.dirty = true
+	if !e.pressed && e.button in w.header_buttons {
+		if w.editor.open || app.palette.open { pane_header_cancel(w) }
+		if pane_header_button(app, w, e) { return }
+	}
 	if w.editor.open { ui.editor_pointer(&w.editor, f32(w.width), f32(w.height), w.scale, f32(e.x), f32(e.y), e.pressed) }
 	if w.editor.open {
 		if e.button == .Left && e.pressed {
@@ -282,6 +289,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if w.find.open && !w.selecting && ui.find_contains(f32(w.width), w.scale, x, y) {
 		return
 	}
+	if pane_header_button(app, w, e) { return }
 	if e.pressed && !w.selecting {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found { pane_focus(app, w, pane.node) }
 	}
@@ -323,10 +331,12 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		if layout.drag_divider(w.tree, divider, x, y, window_gap(app, w)) { window_relayout(app, w) }
 		return
 	}
-	shape: platform.Cursor_Shape = .Text
+	over_header := pane_header_pointer(w, x, y, !w.selecting && !app.palette.open &&
+		!(w.find.open && ui.find_contains(f32(w.width), w.scale, x, y)))
+	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
 	bar := window_tab_bar(app, w)
 	if y < bar.height { shape = .Arrow }
-	if d, found := layout.divider_hit_test(w.dividers[:], x, y, 3*w.scale); found {
+	if d, found := layout.divider_hit_test(w.dividers[:], x, y, 3*w.scale); found && w.header_buttons == {} {
 		shape = d.axis == .Horizontal ? .Resize_Horizontal : .Resize_Vertical
 	}
 	if shape != w.pointer_shape {
@@ -339,6 +349,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		on_palette_outcome(app, w, ui.palette_mouse_move(&app.palette, l, x, y), 0)
 		return
 	}
+	if over_header || w.header_buttons != {} { return }
 	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
 		return
@@ -370,6 +381,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return
 	}
+	if _, _, header := pane_header_hit(w, f32(e.x), f32(e.y)); header { return }
 	if entry := pane_at(app, w, e.x, e.y); entry != nil {
 		term.scroll(entry.session, rows, e.modifiers, f32(e.x), f32(e.y))
 		w.dirty = true
@@ -381,6 +393,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		pane_header_clear(w)
 		w.tab_pressed = false
 		w.tab_hover = -1
 		w.editor.hover, w.editor.pressed = 0, 0
