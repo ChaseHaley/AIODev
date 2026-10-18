@@ -13,8 +13,13 @@ Rect_Instance :: struct {
 	color: Color,
 	radius, softness: f32,
 	stroke: f32,
-	_: f32,
+	fill: u32,
 }
+
+// RECT_FILL_HUE_WHEEL shades a circle by hue around the center and saturation outward, with color.r as
+// the HSV value. RECT_FILL_VALUE_RAMP darkens color.rgb to black at the left edge.
+RECT_FILL_HUE_WHEEL :: u32(1)
+RECT_FILL_VALUE_RAMP :: u32(2)
 
 // A glyph quad. Coverage glyphs are tinted with color; with GLYPH_COLOR set, the glyph samples the
 // RGBA atlas and color.a only fades it.

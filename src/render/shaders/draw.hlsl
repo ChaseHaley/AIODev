@@ -15,7 +15,7 @@ struct RectInstance {
     float radius;
     float softness;
     float stroke;
-    float padding;
+    uint fill;
 };
 
 struct GlyphInstance {
@@ -63,6 +63,7 @@ Vertex rect_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
     o.color = r.color;
     o.edge = float2(r.radius, r.softness);
     o.extra.x = r.stroke;
+    o.flags = r.fill;
     return o;
 }
 
@@ -74,6 +75,11 @@ float clip_coverage(float2 position) {
     return saturate(0.5 - d);
 }
 
+float3 hsv_rgb(float hue, float saturation, float value) {
+    float3 k = saturate(abs(frac(hue + float3(1, 2.0 / 3, 1.0 / 3)) * 6 - 3) - 1);
+    return value * lerp(1, k, saturation);
+}
+
 float4 rect_ps(Vertex i) : SV_Target {
     float radius = clamp(i.edge.x, 0, min(i.rect.z, i.rect.w) * 0.5);
     float2 q = abs(i.local - i.rect.zw * 0.5) - i.rect.zw * 0.5 + radius;
@@ -81,7 +87,14 @@ float4 rect_ps(Vertex i) : SV_Target {
     float coverage = saturate(0.5 - distance / max(1, 2 * i.edge.y));
     if (i.extra.x > 0) coverage *= saturate(distance + i.extra.x + 0.5);
     float alpha = coverage * i.color.a * clip_coverage(i.position.xy);
-    return float4(i.color.rgb * alpha, alpha);
+    float3 rgb = i.color.rgb;
+    if (i.flags == 1) {
+        float2 d = (i.local - i.rect.zw * 0.5) / max(1, i.rect.zw * 0.5);
+        rgb = hsv_rgb(frac(atan2(d.y, d.x) / 6.2831853 + 1), saturate(length(d)), i.color.r);
+    } else if (i.flags == 2) {
+        rgb *= saturate(i.local.x / max(1, i.rect.z));
+    }
+    return float4(rgb * alpha, alpha);
 }
 
 Vertex glyph_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
