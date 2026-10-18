@@ -54,8 +54,47 @@ function Copy-Conpty([string] $Directory) {
     }
 }
 
+function Split-Arguments([string] $Line) {
+    [regex]::Matches($Line, '(?:[^\s"]+|"[^"]*")+') | ForEach-Object { $_.Value -replace '"', '' }
+}
+
+# libghostty-vt's Zig core is one large non-COMDAT section that the linker would place after
+# AIODev's code, so any source change moved the VT parser's alignment and TermBench by 2 to 3
+# percent. Linking that object first gives the parser the same address in every build.
 function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
-    Invoke-Odin build src "-out:$Output" @Mode @flags @resource
+    # With -print-linker-flags, Odin compiles and keeps the object but leaves the resource and link steps to us.
+    $printed = @(& odin build src "-out:$Output" @Mode @flags @resource -keep-temp-files -print-linker-flags)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $linkLine = $printed | Where-Object { $_ -match '-OUT:' } | Select-Object -Last 1
+    if (-not $linkLine) { throw 'Odin did not print linker flags.' }
+    $linkArgs = @(Split-Arguments $linkLine)
+    $msvcLib = $linkArgs | Where-Object { $_ -match '^/LIBPATH:(.*[/\\]MSVC[/\\][^/\\]+)[/\\]lib[/\\]x64$' } | Select-Object -First 1
+    if (-not $msvcLib) { throw 'Odin linker flags name no MSVC library path.' }
+    $msvcBin = Join-Path ($msvcLib -replace '^/LIBPATH:(.*)[/\\]lib[/\\]x64$', '$1') 'bin/Hostx64/x64'
+
+    if ($resource) {
+        $sdkLib = $linkArgs | Where-Object { $_ -match '^/LIBPATH:.*[/\\]Lib[/\\][^/\\]+[/\\]um[/\\]x64$' } | Select-Object -First 1
+        if (-not $sdkLib) { throw 'Odin linker flags name no Windows SDK library path.' }
+        $rc = $sdkLib -replace '^/LIBPATH:(.*)[/\\]Lib[/\\]([^/\\]+)[/\\]um[/\\]x64$', '$1/bin/$2/x64/rc.exe'
+        $rcLine = $printed | Where-Object { $_ -match '^/nologo /fo ' } | Select-Object -Last 1
+        if (-not $rcLine) { throw 'Odin did not print resource compiler flags.' }
+        & $rc @(Split-Arguments $rcLine)
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+
+    $ghostty = 'vendor/ghostty/ghostty-vt-static.lib'
+    $core = 'build/ghostty-vt-core.obj'
+    if (-not (Test-Path $core) -or (Get-Item $core).LastWriteTimeUtc -lt (Get-Item $ghostty).LastWriteTimeUtc) {
+        $member = & (Join-Path $msvcBin 'lib.exe') /nologo /list $ghostty |
+            Where-Object { $_ -like '*ghostty-vt-static_zcu.obj' }
+        if (@($member).Count -ne 1) { throw "Expected one Zig core object in $ghostty." }
+        & (Join-Path $msvcBin 'lib.exe') /nologo "/extract:$member" "/out:$core" $ghostty
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    & (Join-Path $msvcBin 'link.exe') $core @linkArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $stem = $Output -replace '\.exe$', ''
+    Remove-Item -LiteralPath "$stem.obj", "$stem.ll" -ErrorAction SilentlyContinue
     Copy-Conpty (Split-Path $Output)
 }
 
@@ -87,10 +126,8 @@ switch ($Task) {
     'verify' {
         $buildId = Get-BuildId
         # Literal single quotes keep a numeric Git hash a string in Odin.
-        Invoke-Odin build src '-out:build/aiodev-verify.exe' -debug '-subsystem:console' `
-            '-define:AIO_CONTROL=true' "-define:AIO_BUILD_ID='$buildId'" `
-            @flags @resource
-        Copy-Conpty 'build'
+        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true',
+            "-define:AIO_BUILD_ID='$buildId'") 'build/aiodev-verify.exe'
         foreach ($name in $toolPackages) {
             Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
         }
