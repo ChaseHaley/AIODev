@@ -82,7 +82,7 @@ settings_load :: proc(app: ^App, w: ^Window) -> bool {
 		for binding in s.keys { if binding.name == command.name { value = binding.value; break } }
 		row := ui.Editor_Row{
 			key = fmt.tprintf("keys.%s", command.name), title = command.title,
-			description = "Up to four shortcuts. Press Enter to record keys; Leader+ chords need a leader key.",
+			description = "Add, replace or remove individual shortcuts. Up to four alternatives.",
 			value = value, default_value = shortcuts_text(command.defaults), kind = .Shortcut,
 		}
 		group := shortcut_group(command.name)

@@ -1,6 +1,7 @@
 package ui_test
 
 import "core:testing"
+import "core:strings"
 import "aio:commands"
 import "aio:render"
 import "aio:ui"
@@ -273,6 +274,8 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	p.leader = commands.Shortcut{.B, {.Control}}
 	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
 	ui.editor_key(&p, key({key = .Enter}))
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Shortcuts)
+	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect(t, ui.editor_capturing(&p))
 	ui.editor_key(&p, key({key = .Control_Left, modifiers = {.Control}}))
 	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+Shift+O")
@@ -286,11 +289,12 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .B, modifiers = {.Control}}))
 	testing.expect(t, p.leader_pending)
 	ui.editor_key(&p, key({key = .R, text = "r"}))
-	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+Tab, Leader+R")
+	testing.expect_value(t, ui.field_string(&p.value), "Leader+R")
 	ui.editor_key(&p, key({key = .Escape}))
 	testing.expect(t, !ui.editor_capturing(&p))
 	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+Shift+O")
 
+	ui.editor_key(&p, key({key = .Enter}))
 	ui.editor_key(&p, key({key = .Enter}))
 	ui.editor_key(&p, key({key = .Backspace}))
 	testing.expect_value(t, ui.field_string(&p.value), "")
@@ -309,6 +313,42 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 }
 
 @(test)
+editor_alternatives_preserve_neighbors_and_limit_additions :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
+	row := ui.editor_row(&p)
+	delete(row.value)
+	row.value = strings.clone("Ctrl+O, Alt+O, F6")
+	ui.editor_select(&p, p.selected)
+	ui.editor_key(&p, key({key = .Enter}))
+	ui.editor_key(&p, key({key = .Arrow_Down}))
+	ui.editor_key(&p, key({key = .Enter}))
+	ui.editor_key(&p, key({key = .F7}))
+	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+O, F7, F6")
+	ui.editor_key(&p, key({key = .Escape}))
+	testing.expect_value(t, ui.field_string(&p.value), row.value)
+	ui.editor_key(&p, key({key = .Enter}))
+	for _ in 0..<3 { ui.editor_key(&p, key({key = .Arrow_Down})) }
+	ui.editor_key(&p, key({key = .Enter}))
+	ui.editor_key(&p, key({key = .F8}))
+	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+O, Alt+O, F6, F8")
+	ui.editor_key(&p, key({key = .Escape}))
+	ui.editor_key(&p, key({key = .Enter}))
+	ui.editor_key(&p, key({key = .Arrow_Down}))
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Delete})), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+O, F6")
+	ui.editor_select(&p, p.selected)
+	ui.editor_key(&p, key({key = .Enter}))
+	l := page(&p)
+	popup := ui.editor_popup_rect(&p, l)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+popup.width-12, popup.y+4+45, false),
+		ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+O, F6")
+}
+
+@(test)
 editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
@@ -322,6 +362,7 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect_value(t, p.focus, ui.Editor_Focus.Search)
 	ui.editor_key(&p, key({key = .Tab}))
+	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect(t, ui.editor_capturing(&p))
 	ui.editor_key(&p, key({key = .Z, unshifted = 'y', modifiers = {.Control}}))
 	testing.expect_value(t, ui.field_string(&p.value), "Physical+Ctrl+Z")

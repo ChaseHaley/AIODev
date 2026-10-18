@@ -39,7 +39,7 @@ Editor_Drag :: enum { None, Filter, Value, Slider, Wheel, Ramp }
 // Keyboard focus: the search field, the selected row's control, or its key-position switch.
 Editor_Focus :: enum { Search, Control, Positions }
 
-Editor_Popup :: enum { None, Choice, Color }
+Editor_Popup :: enum { None, Choice, Color, Shortcuts }
 
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
 // in `value` until it is saved.
@@ -53,7 +53,7 @@ Editor :: struct {
 	rows: [dynamic]Editor_Row,
 	groups: [dynamic]Editor_Group,
 	items: [dynamic]Editor_Item,
-	selected, scroll, visible_rows, captured: int,
+	selected, scroll, visible_rows, captured, shortcut_index: int,
 	filter, value: Text_Field,
 	drag: Editor_Drag,
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
@@ -77,7 +77,7 @@ Row_Parts :: struct {
 	text_right: f32,
 }
 
-CAPTURE_HINT :: "Press a shortcut. Enter saves, Esc cancels, Backspace clears, Tab leaves."
+CAPTURE_HINT :: "Press a shortcut. Enter saves this alternative, Esc cancels, Backspace removes it."
 @(private) ROW_HEIGHT :: 52
 @(private) CHOICE_HEIGHT :: 30
 @(private) ICON_UNDO :: ''
@@ -349,9 +349,39 @@ open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
 }
 
 @(private)
-start_capture :: proc(p: ^Editor) {
+start_capture :: proc(p: ^Editor, index: int = 0) {
 	p.focus, p.capturing, p.leader_pending, p.captured, p.popup = .Control, true, false, 0, .None
+	p.shortcut_index = index
 	editor_message(p, CAPTURE_HINT, false)
+}
+
+@(private)
+shortcut_alternatives :: proc(value: string) -> []string {
+	if strings.trim_space(value) == "" { return nil }
+	return strings.split(value, ",", context.temp_allocator)
+}
+
+@(private)
+shortcut_replace :: proc(p: ^Editor, row: ^Editor_Row, label: string) {
+	parts := shortcut_alternatives(row.value)
+	labels: [commands.MAX_SHORTCUTS]string
+	count := 0
+	for part, i in parts {
+		if count >= len(labels) { break }
+		value := i == p.shortcut_index ? label : strings.trim_space(part)
+		if value != "" { labels[count] = value; count += 1 }
+	}
+	if p.shortcut_index >= len(parts) && label != "" && count < len(labels) {
+		labels[count] = label
+		count += 1
+	}
+	field_set(&p.value, strings.join(labels[:count], ", ", context.temp_allocator))
+}
+
+@(private)
+open_shortcuts :: proc(p: ^Editor) {
+	p.popup, p.popup_index, p.focus = .Shortcuts, 0, .Control
+	editor_message(p, "Choose an alternative to replace; Delete removes it. Add shortcut keeps the others.", false)
 }
 
 @(private)
@@ -379,7 +409,9 @@ capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> Edit
 			p.capturing = false
 			return .Save
 		case .Backspace, .Delete:
-			field_set(&p.value, "")
+			if strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) {
+				shortcut_replace(p, row, "")
+			} else { field_set(&p.value, "") }
 			p.captured = 0
 			return .Changed
 		case .Tab:
@@ -407,12 +439,12 @@ capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> Edit
 	buffer: [128]u8
 	label, err := commands.shortcut_label(chord, buffer[:])
 	if err != .None { return .None }
-	if !binding || p.captured == 0 || p.captured >= commands.MAX_SHORTCUTS {
-		field_set(&p.value, label)
+	if binding {
+		shortcut_replace(p, row, label)
 		p.captured = 1
 	} else {
-		field_set(&p.value, fmt.tprintf("%s, %s", field_string(&p.value), label))
-		p.captured += 1
+		field_set(&p.value, label)
+		p.captured = 1
 	}
 	editor_message(p, CAPTURE_HINT, false)
 	return .Changed
@@ -431,7 +463,8 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 		p.focus = .Control
 		return flip_toggle(p)
 	case .Choice: open_choices(p, row)
-	case .Shortcut: start_capture(p)
+	case .Shortcut:
+		if strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) { open_shortcuts(p) } else { start_capture(p) }
 	case .Color, .Optional_Color:
 		p.focus, p.popup = .Control, .Color
 		field_select_all(&p.value)
@@ -445,6 +478,25 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 @(private)
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Editor_Outcome, bool) {
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
+	if p.popup == .Shortcuts {
+		count := len(shortcut_alternatives(row.value))
+		last := min(count, commands.MAX_SHORTCUTS-1)
+		#partial switch e.key {
+		case .Escape: stop_editing(p)
+		case .Arrow_Up, .Arrow_Down, .P, .N:
+			if (e.key == .P || e.key == .N) && !control { return .None, true }
+			p.popup_index = clamp(p.popup_index+(e.key == .Arrow_Up || e.key == .P ? -1 : 1), 0, last)
+		case .Enter, .Numpad_Enter, .Space: start_capture(p, p.popup_index)
+		case .Delete, .Backspace:
+			if p.popup_index < count {
+				p.shortcut_index = p.popup_index
+				shortcut_replace(p, row, "")
+				p.popup = .None
+				return .Save, true
+			}
+		}
+		return .Changed, true
+	}
 	#partial switch e.key {
 	case .Escape:
 		p.popup = .None
@@ -645,7 +697,11 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	parts := editor_row_parts(p, l, p.selected)
 	s := l.scale
 	r: render.Rect
-	if p.popup == .Choice {
+	if p.popup == .Shortcuts {
+		count := min(len(shortcut_alternatives(row.value))+1, commands.MAX_SHORTCUTS)
+		r = {parts.field.x+parts.field.width-320*s, parts.field.y+parts.field.height+4*s,
+			320*s, f32(count)*CHOICE_HEIGHT*s+8*s}
+	} else if p.popup == .Choice {
 		r = {parts.field.x, parts.field.y+parts.field.height+4*s, parts.field.width,
 			f32(len(row.choices))*CHOICE_HEIGHT*s+8*s}
 	} else {
@@ -717,6 +773,18 @@ editor_press :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32, exten
 		if p.popup == .Choice {
 			return choose(p, row, int((y-popup.y-4*s)/(CHOICE_HEIGHT*s)))
 		}
+		if p.popup == .Shortcuts {
+			count := len(shortcut_alternatives(row.value))
+			index := clamp(int((y-popup.y-4*s)/(CHOICE_HEIGHT*s)), 0, min(count, commands.MAX_SHORTCUTS-1))
+			if index < count && x >= popup.x+popup.width-32*s {
+				p.shortcut_index = index
+				shortcut_replace(p, row, "")
+				p.popup = .None
+				return .Save
+			}
+			start_capture(p, index)
+			return .Changed
+		}
 		c := color_parts(popup, row.kind == .Optional_Color, s)
 		switch {
 		case contains(c.wheel, x, y): p.drag = .Wheel
@@ -766,8 +834,7 @@ editor_press :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32, exten
 			if p.popup == .Choice { p.popup = .None } else { open_choices(p, row) }
 			return .Changed
 		case .Shortcut:
-			start_capture(p)
-			return .Changed
+			return activate(p, row)
 		}
 		if p.capturing { stop_editing(p) }
 		p.focus = .Control
@@ -936,7 +1003,8 @@ control_draw :: proc(p: ^Editor, row: ^Editor_Row, parts: Row_Parts, selected: b
 	if selected {
 		placeholder := row.kind == .Optional_Color ? "Theme default" : "Empty"
 		if row.kind == .Shortcut { placeholder = p.capturing ? "Press keys…" : "None" }
-		if r := field_box_draw(&p.value, list, text, theme, parts.field, focused && !p.capturing, placeholder,
+		if r := field_box_draw(&p.value, list, text, theme, parts.field,
+			focused && !p.capturing && row.kind != .Shortcut, placeholder,
 			scale); r != .Ok { return r }
 		if p.capturing {
 			draw_rect(list, {rect = parts.field, color = theme.accent, radius = 6*scale, stroke = 2*scale})
@@ -968,6 +1036,23 @@ popup_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text: 
 	draw_rect(list, {rect = {r.x, r.y+6*s, r.width, r.height}, color = theme.shadow, radius = 8*s, softness = 16*s})
 	draw_rect(list, {rect = r, color = theme.surface, radius = 8*s})
 	draw_rect(list, {rect = r, color = theme.border, radius = 8*s, stroke = s})
+	if p.popup == .Shortcuts {
+		parts := shortcut_alternatives(row.value)
+		count := min(len(parts)+1, commands.MAX_SHORTCUTS)
+		for i in 0..<count {
+			option := render.Rect{r.x+4*s, r.y+4*s+f32(i)*CHOICE_HEIGHT*s, r.width-8*s, CHOICE_HEIGHT*s}
+			if i == p.popup_index { draw_rect(list, {rect = option, color = theme.selection, radius = 5*s}) }
+			label := i < len(parts) ? strings.trim_space(parts[i]) : "+ Add shortcut"
+			if result := draw_text(text, list, label, option.x+10*s,
+				option.y+(option.height-text.line_height)/2+text.ascent, theme.text, option.width-44*s);
+				result != .Ok { return result }
+			if i < len(parts) {
+				remove := render.Rect{option.x+option.width-28*s, option.y, 28*s, option.height}
+				if result := draw_icon(text, list, '', remove, theme.muted, 0.8); result != .Ok { return result }
+			}
+		}
+		return .Ok
+	}
 	if p.popup == .Choice {
 		for name, i in row.choices {
 			option := render.Rect{r.x+4*s, r.y+4*s+f32(i)*CHOICE_HEIGHT*s, r.width-8*s, CHOICE_HEIGHT*s}

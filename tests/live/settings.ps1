@@ -45,6 +45,7 @@ function Open-Field([string] $Key, [switch] $NoFocus) {
 }
 
 function Capture-Keys([string[]] $Chords) {
+    if ((Read-State)['settings.popup'] -eq 'Shortcuts') { Invoke-Aio key Enter }
     Assert-Value (Read-State)['settings.capturing'] 'true' 'shortcut field records keys'
     Invoke-Aio key @Chords
     Invoke-Aio key Enter
@@ -109,16 +110,27 @@ try {
     Capture-Keys Ctrl+Shift+P
     Assert-Value (Read-State)['settings.error'] 'true' 'conflicting shortcut rejected'
     Assert-Value ([IO.File]::ReadAllText($path)) $beforeConflict 'conflict preserves shortcut file'
-    Invoke-Aio key Enter Shift+A
+    Invoke-Aio key Enter Enter Shift+A
     Assert-Value (Read-State)['settings.error'] 'true' 'typing key without a modifier refused'
     $recorded = (Read-State)['settings.value']
     Invoke-Aio key 'Left Ctrl'
     Assert-Value (Read-State)['settings.value'] $recorded 'modifier presses alone record nothing'
-    Capture-Keys Ctrl+Shift+T,Ctrl+B,T
+    Capture-Keys Ctrl+Shift+T
+    Invoke-Aio key Enter Down Enter
+    Capture-Keys Ctrl+B,T
     Assert-Value (Read-State)['settings.error'] 'false' 'direct and leader binding saved'
     if ([IO.File]::ReadAllText($path) -notmatch '(?m)^keys\.tab\.new = Ctrl\+Shift\+T, Leader\+T\r?$') {
         throw 'Captured binding not persisted.'
     }
+    Invoke-Aio key Enter Down Enter Ctrl+Alt+T Esc
+    Assert-Value (Read-State)['settings.value'].Trim('"') 'Ctrl+Shift+T, Leader+T' 'cancel preserves both alternatives'
+    Invoke-Aio key Enter Down Enter
+    Capture-Keys Ctrl+Alt+T
+    Assert-Value (Read-State)['settings.value'].Trim('"') 'Ctrl+Shift+T, Ctrl+Alt+T' 'replace preserves the other alternative'
+    Invoke-Aio key Enter Down Delete
+    Assert-Value (Read-State)['settings.value'] 'Ctrl+Shift+T' 'remove preserves the other alternative'
+    Invoke-Aio key Enter Down Enter
+    Capture-Keys Ctrl+B,T
     Close-Settings
     Invoke-Aio key Ctrl+Shift+T
     Assert-Value (Read-State)['tabs.count'] '2' 'direct shortcut remains available'
