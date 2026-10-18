@@ -424,7 +424,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if app.palette.open || app.palette.motion.value > 0 {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		result := ui.palette_draw(
-			&app.palette, &app.registry, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale,
+			&app.palette, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale,
 		)
 		ui.fade_draw(&w.list, layers, rects, glyph_count, app.palette.motion.value,
 			app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0)

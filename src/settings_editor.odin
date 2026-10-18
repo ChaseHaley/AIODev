@@ -20,6 +20,20 @@ shortcuts_text :: proc(shortcuts: commands.Shortcut_Set) -> string {
 	return strings.join(labels[:shortcuts.count], ", ", context.temp_allocator)
 }
 
+@(private)
+shortcut_group :: proc(name: string) -> string {
+	switch ui.command_category(name) {
+	case "Application": return "Application Shortcuts"
+	case "Terminal": return "Terminal Shortcuts"
+	case "Panes": return "Pane Shortcuts"
+	case "Tabs": return "Tab Shortcuts"
+	case "Settings": return "Settings Shortcuts"
+	case "Edit": return "Edit Shortcuts"
+	case "View": return "View Shortcuts"
+	}
+	return "Other Shortcuts"
+}
+
 editor_open :: proc(app: ^App, w: ^Window) {
 	pane_header_cancel(w)
 	p := &w.editor
@@ -38,10 +52,23 @@ editor_open :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	defer settings.destroy(&s)
-	for entry in settings.SCHEMA {
-		row := ui.Editor_Row{entry.key, entry.key, entry.description,
-			settings.value_text(&s, entry), entry.default_value}
-		if ui.editor_add(p, row) != nil {
+	@(static, rodata) schema := settings.SCHEMA
+	for &entry in schema {
+		row := ui.Editor_Row{key = entry.key, title = entry.title, description = entry.description,
+			value = settings.value_text(&s, entry), default_value = entry.default_value,
+			minimum = entry.minimum, maximum = entry.maximum}
+		switch entry.kind {
+		case .String: row.kind = entry.key == "input.leader" ? .Shortcut : .Text
+		case .Int: row.kind = .Integer
+		case .Float: row.kind = .Number
+		case .Bool: row.kind = .Toggle
+		case .Enum: row.kind, row.choices = .Choice, entry.enum_names
+		case .Color: row.kind = .Color
+		case .Optional_Color:
+			row.kind = .Optional_Color
+			if c, ok := settings.theme_color(&s, entry.key); ok { row.fallback = settings.color_hex(c) }
+		}
+		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {
 			ui.editor_destroy(p)
 			notify(app, .Error, "Could not allocate settings editor.")
 			return
@@ -51,21 +78,24 @@ editor_open :: proc(app: ^App, w: ^Window) {
 		value := shortcuts_text(command.shortcuts)
 		for binding in s.keys { if binding.name == command.name { value = binding.value; break } }
 		row := ui.Editor_Row{
-			fmt.tprintf("keys.%s", command.name), command.title,
-			"Shortcuts separated by commas. Physical+ names a key position. Leader+ requires input.leader. Empty disables.",
-			value, shortcuts_text(command.defaults),
+			key = fmt.tprintf("keys.%s", command.name), title = command.title,
+			description = "Up to four shortcuts. Press Enter to record keys; Leader+ chords need a leader key.",
+			value = value, default_value = shortcuts_text(command.defaults), kind = .Shortcut,
 		}
-		if ui.editor_add(p, row) != nil {
+		group := shortcut_group(command.name)
+		if ui.editor_add(p, row, group) != nil {
 			ui.editor_destroy(p)
 			notify(app, .Error, "Could not allocate settings editor.")
 			return
 		}
+		ui.editor_collapse(p, group, true)
 	}
+	p.leader = app.leader
 	p.open = true
 	ui.editor_filter(p)
 	ui.palette_close(&app.palette)
 	find_close(w, focused_session(app, w))
-	leader_cancel(app, w)
+	leader_cancel(w)
 	w.selecting, w.autoscrolling = false, false
 	w.dragging = nil
 	w.dirty = true
@@ -110,7 +140,13 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	row := ui.editor_row(p)
 	if row == nil { return }
 	if outcome == .Reset { ui.field_set(&p.value, row.default_value) }
-	value := string(p.value.bytes[:])
+	value := ui.field_string(&p.value)
+	alpha := false
+	if (row.kind == .Color || row.kind == .Optional_Color) && value != "" {
+		if c, ok, has_alpha := settings.parse_color(value); ok {
+			value, alpha = settings.color_hex(c), has_alpha
+		}
+	}
 	updated, message, err := settings.edit_text(p.source, row.key, value)
 	defer delete(message)
 	if err != nil || message != "" {
@@ -139,8 +175,12 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p.source = updated
 	delete(row.value)
 	row.value = strings.clone(value)
+	ui.field_set(&p.value, value)
+	if row.kind == .Shortcut { p.editing, p.capturing = false, false }
 	reload_settings(app)
+	p.leader = app.leader
 	text := "Saved and applied."
+	if alpha { text = "Saved and applied; the color's alpha is ignored." }
 	if warning != "" { text = fmt.tprintf("Saved. %s", warning) }
 	if row.key == "shell.command" || row.key == "shell.directory" { text = "Saved. Applies to new or restarted shells." }
 	if row.key == "window.columns" || row.key == "window.rows" {

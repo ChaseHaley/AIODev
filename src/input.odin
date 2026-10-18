@@ -124,22 +124,36 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		pane_header_cancel(w)
 		logical := e
 		logical.key = commands.logical_key(e.key, e.unshifted)
-		outcome, id := ui.palette_key(&app.palette, &app.registry, logical)
-		on_palette_outcome(app, w, outcome, id)
+		p := &app.palette
+		switch clipboard_chord(logical) {
+		case .Copy: clipboard_copy(app, ui.palette_selection(p))
+		case .Cut:
+			if clipboard_copy(app, ui.palette_selection(p)) { on_palette_outcome(app, w, ui.palette_cut(p, &app.registry), 0) }
+		case .Paste:
+			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
+				on_palette_outcome(app, w, ui.palette_paste(p, &app.registry, text), 0)
+			}
+		case .None:
+			outcome, id := ui.palette_key(p, &app.registry, logical)
+			on_palette_outcome(app, w, outcome, id)
+		}
 		return
 	}
 	if w.editor.open {
 		pane_header_cancel(w)
 		logical := e
 		logical.key = commands.logical_key(e.key, e.unshifted)
-		if e.pressed && .Control in e.modifiers && logical.key == .V {
+		chord := ui.editor_capturing(&w.editor) ? Clipboard_Chord.None : clipboard_chord(logical)
+		switch chord {
+		case .Copy: clipboard_copy(app, ui.editor_selection(&w.editor))
+		case .Cut: if clipboard_copy(app, ui.editor_selection(&w.editor)) { ui.editor_cut(&w.editor) }
+		case .Paste:
 			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-				ui.editor_text(&w.editor, text)
-				w.dirty = true
+				ui.editor_paste(&w.editor, text)
 			}
-		} else {
-			editor_outcome(app, w, ui.editor_key(&w.editor, logical))
+		case .None: editor_outcome(app, w, ui.editor_key(&w.editor, e))
 		}
+		w.dirty = true
 		if e.pressed { w.suppressed_key = e }
 		return
 	}
@@ -149,7 +163,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	if e.pressed {
 		if w.find.open && e.key == .Escape {
-			leader_cancel(app, w)
+			leader_cancel(w)
 			w.suppressed_key = e
 			find_close(w, entry)
 			return
@@ -165,7 +179,14 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if w.find.open {
 		logical := e
 		logical.key = commands.logical_key(e.key, e.unshifted)
-		outcome := ui.find_key(&w.find, logical)
+		outcome: ui.Find_Outcome
+		switch clipboard_chord(logical) {
+		case .Copy: clipboard_copy(app, ui.field_selected_text(&w.find.query))
+		case .Cut:
+			if clipboard_copy(app, ui.field_selected_text(&w.find.query)) { outcome = ui.find_text(&w.find, "") }
+		case .Paste: paste_clipboard(app, w, entry)
+		case .None: outcome = ui.find_key(&w.find, logical)
+		}
 		if outcome == .Closed {
 			w.suppressed_key = e
 		}
@@ -221,6 +242,12 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 	case .Run:
 		w.dirty = true
 		run_action(app, w, Action(id))
+	case .Open_Setting:
+		w.dirty = true
+		editor_open(app, w)
+		if w.editor.open && ui.editor_select_key(&w.editor, app.palette.chosen) {
+			w.editor.editing = ui.editor_row(&w.editor).kind != .Shortcut
+		}
 	}
 }
 
@@ -246,18 +273,30 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if w.editor.open || app.palette.open { pane_header_cancel(w) }
 		if pane_header_button(app, w, e) { return }
 	}
-	if w.editor.open { ui.editor_pointer(&w.editor, f32(w.width), f32(w.height), w.scale, f32(e.x), f32(e.y), e.pressed) }
 	if w.editor.open {
-		if e.button == .Left && e.pressed {
-			l := ui.editor_layout(f32(w.width), f32(w.height), w.scale)
-			editor_outcome(app, w, ui.editor_click(&w.editor, l, f32(e.x), f32(e.y)))
+		l := ui.editor_layout(&w.editor, f32(w.width), f32(w.height), w.scale)
+		ui.editor_pointer(&w.editor, l, f32(e.x), f32(e.y), e.pressed)
+		if e.button == .Left {
+			outcome: ui.Editor_Outcome
+			if e.pressed {
+				outcome = ui.editor_press(&w.editor, l, &app.ui_text, f32(e.x), f32(e.y), w.scale,
+					.Shift in e.modifiers)
+			} else {
+				outcome = ui.editor_release(&w.editor)
+			}
+			editor_outcome(app, w, outcome)
 		}
 		return
 	}
 	if app.palette.open {
-		if e.pressed {
-			l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
-			outcome, id := ui.palette_mouse_press(&app.palette, l, f32(e.x), f32(e.y))
+		p := &app.palette
+		l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+		if e.button == .Left && !e.pressed { ui.palette_input_release(p) }
+		if e.pressed && e.button == .Left && ui.palette_input_contains(l, f32(e.x), f32(e.y)) {
+			on_palette_outcome(app, w, ui.palette_input_press(p, l, &app.ui_text, f32(e.x), w.scale,
+				.Shift in e.modifiers), 0)
+		} else if e.pressed {
+			outcome, id := ui.palette_mouse_press(p, l, f32(e.x), f32(e.y))
 			on_palette_outcome(app, w, outcome, id)
 		}
 		return
@@ -316,9 +355,10 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	if w.editor.open {
-		if ui.editor_pointer(&w.editor, f32(w.width), f32(w.height), w.scale, x, y, .Left in e.buttons) {
-			w.dirty = true
-		}
+		l := ui.editor_layout(&w.editor, f32(w.width), f32(w.height), w.scale)
+		changed := ui.editor_pointer(&w.editor, l, x, y, .Left in e.buttons)
+		if .Left in e.buttons && ui.editor_drag(&w.editor, l, &app.ui_text, x, y, w.scale) { changed = true }
+		if changed { w.dirty = true }
 		return
 	}
 	hover := ui.tab_bar_hit_test(window_tab_bar(app, w), x, y)
@@ -346,7 +386,11 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	}
 	if app.palette.open {
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
-		on_palette_outcome(app, w, ui.palette_mouse_move(&app.palette, l, x, y), 0)
+		if app.palette.query.dragging && .Left in e.buttons {
+			on_palette_outcome(app, w, ui.palette_input_drag(&app.palette, l, &app.ui_text, x, w.scale), 0)
+		} else {
+			on_palette_outcome(app, w, ui.palette_mouse_move(&app.palette, l, x, y), 0)
+		}
 		return
 	}
 	if over_header || w.header_buttons != {} { return }
@@ -398,19 +442,44 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		w.tab_hover = -1
 		w.editor.hover, w.editor.pressed = 0, 0
 		w.leader_until = {}
-		ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
 		w.selecting, w.autoscrolling = false, false
 		w.dragging = nil
+		ui.editor_release(&w.editor)
+		ui.palette_input_release(&app.palette)
 	}
 	if entry := focused_session(app, w); entry != nil { term.send_focus(entry.session, focused) }
 }
 
 @(private)
-leader_cancel :: proc(app: ^App, w: ^Window) {
-	if w.leader_until == {} { return }
+Clipboard_Chord :: enum { None, Copy, Cut, Paste }
+
+// Clipboard chords for text fields, including the terminal's Ctrl+Shift forms.
+@(private)
+clipboard_chord :: proc(e: platform.Key_Event) -> Clipboard_Chord {
+	if !e.pressed { return .None }
+	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
+	control := modifiers == {.Control} || modifiers == {.Control, .Shift}
+	switch {
+	case control && e.key == .C, modifiers == {.Control} && e.key == .Insert: return .Copy
+	case control && e.key == .X, modifiers == {.Shift} && e.key == .Delete: return .Cut
+	case control && e.key == .V, modifiers == {.Shift} && e.key == .Insert: return .Paste
+	}
+	return .None
+}
+
+@(private)
+clipboard_copy :: proc(app: ^App, text: string) -> bool {
+	if text == "" { return false }
+	if !platform.clipboard_set_text(&app.platform, text) {
+		notify(app, .Error, "Could not copy to the clipboard.")
+		return false
+	}
+	return true
+}
+
+@(private)
+leader_cancel :: proc(w: ^Window) {
 	w.leader_until = {}
-	ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
-	mark_all_dirty(app)
 }
 
 @(private)
@@ -419,7 +488,7 @@ leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 		if leader, enabled := app.leader.?; enabled && e.repeat &&
 		   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) { return true }
 		pending := time.tick_diff(time.tick_now(), w.leader_until) > 0
-		leader_cancel(app, w)
+		leader_cancel(w)
 		if pending {
 			w.suppressed_key = e
 			if leader, enabled := app.leader.?; enabled &&
@@ -439,20 +508,13 @@ leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 			chord := e
 			chord.modifiers += {.Leader}
 			if action, found := shortcut_action(app, chord); found { run_action(app, w, action) }
-			else { notify(app, .Info, "No shortcut for that leader sequence.") }
 			return true
 		}
 	}
 	if leader, enabled := app.leader.?; enabled {
 		if commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {
 			w.suppressed_key = e
-			if !e.repeat {
-				w.leader_until = time.tick_add(time.tick_now(), 2*time.Second)
-				ui.notices_put(&app.notices, u32(Notice_Key.Leader), .Info,
-					"Leader: waiting (2 seconds). Press it again to send it. Esc cancels; unmatched keys are consumed.",
-					2*time.Second)
-				mark_all_dirty(app)
-			}
+			if !e.repeat { w.leader_until = time.tick_add(time.tick_now(), 2*time.Second) }
 			return true
 		}
 	}

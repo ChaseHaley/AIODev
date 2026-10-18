@@ -185,7 +185,7 @@ run_action :: proc(
 	w.dirty = true
 	switch action {
 	case .Command_Palette:
-		leader_cancel(app, w)
+		leader_cancel(w)
 		pane_header_cancel(w)
 		ui.editor_destroy(&w.editor)
 		if app.palette.open {
@@ -209,7 +209,7 @@ run_action :: proc(
 			term.select_all(entry.session)
 		}
 	case .Find:
-		leader_cancel(app, w)
+		leader_cancel(w)
 		pane_header_cancel(w)
 		if w.find.open {
 			find_close(w, entry)
@@ -388,9 +388,9 @@ on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outc
 		return
 	}
 	switch outcome {
-	case .None:
+	case .None, .Moved:
 	case .Changed:
-		term.search_set_needle(entry.session, string(w.find.query[:]))
+		term.search_set_needle(entry.session, ui.field_string(&w.find.query))
 	case .Older, .Newer:
 		term.search_select(entry.session, outcome == .Older)
 	case .Closed:
@@ -400,7 +400,7 @@ on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outc
 
 // The find bar's match count: "3 of 17" once a match is selected.
 find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
-	if entry == nil || len(w.find.query) == 0 {
+	if entry == nil || len(w.find.query.bytes) == 0 {
 		return ""
 	}
 	s := term.search_summary(entry.session)

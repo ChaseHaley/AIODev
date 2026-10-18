@@ -217,3 +217,19 @@ focus_ring_draw :: proc(list: ^render.Draw_List, rect: render.Rect, theme: Theme
 	draw_rect(list, {rect = gap, color = theme.window, radius = 7*scale, stroke = scale})
 	draw_rect(list, {rect = ring, color = theme.accent, radius = 9*scale, stroke = 2*scale})
 }
+
+// Centers the glyph's rasterized ink in `area`; draw_text instead places the pen on a baseline, which
+// leaves symbols such as × visibly off center inside small buttons.
+draw_glyph_centered :: proc(t: ^Text, list: ^render.Draw_List, r: rune, area: render.Rect,
+	c: render.Color) -> glyphs.Result {
+	g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
+	if !found { return .Ok }
+	entry, result := glyphs.glyph(t.cache, g, t.size_px)
+	if result != .Ok || entry.size.x == 0 { return result }
+	at := render.Rect{math.round(area.x+(area.width-entry.size.x)/2), math.round(area.y+(area.height-entry.size.y)/2),
+		entry.size.x, entry.size.y}
+	if render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c}) != .None {
+		log.error("ui: the draw list ran out of memory")
+	}
+	return .Ok
+}

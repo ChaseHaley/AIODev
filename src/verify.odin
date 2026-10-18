@@ -216,7 +216,7 @@ when AIO_CONTROL {
 	verify_state :: proc(app: ^App) -> ([]control.State_Entry, control.Error) {
 		item := ""
 		p := &app.palette
-		if p.selected >= 0 && p.selected < len(p.results) { item = p.results[p.selected].command.name }
+		if p.selected >= 0 && p.selected < len(p.results) { item = ui.palette_result_name(p, p.results[p.selected]) }
 		entries := make([dynamic]control.State_Entry, context.temp_allocator)
 		base := [?]control.State_Entry{
 			{"app.pid", fmt.tprintf("%d", os.get_pid())}, {"app.app", app.app_id},
@@ -224,7 +224,7 @@ when AIO_CONTROL {
 			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
 			{"app.settings", app.settings_path}, {"app.log", app.log_path},
 			{"window.visible", fmt.tprintf("%t", len(app.windows) > 0)},
-			{"palette.open", fmt.tprintf("%t", p.open)}, {"palette.query", string(p.query[:])},
+			{"palette.open", fmt.tprintf("%t", p.open)}, {"palette.query", ui.palette_query(p)},
 			{"palette.selected", fmt.tprintf("%d", p.selected)},
 			{"palette.items", fmt.tprintf("%d", len(p.results))}, {"palette.item", item},
 			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
@@ -240,13 +240,16 @@ when AIO_CONTROL {
 		if w != nil {
 			entry = focused_session(app, w)
 			editor_key := ""
-			if row := ui.editor_row(&w.editor); row != nil { editor_key = row.key }
+			editor_title := ""
+			if row := ui.editor_row(&w.editor); row != nil { editor_key, editor_title = row.key, row.title }
 			window := [?]control.State_Entry{
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
 				{"settings.filter", string(w.editor.filter.bytes[:])},
 				{"settings.key", editor_key},
 				{"settings.value", string(w.editor.value.bytes[:])},
 				{"settings.editing", fmt.tprintf("%t", w.editor.editing)},
+				{"settings.capturing", fmt.tprintf("%t", w.editor.capturing)},
+				{"settings.title", editor_title},
 				{"settings.message", w.editor.message},
 				{"settings.error", fmt.tprintf("%t", w.editor.error)},
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
@@ -257,7 +260,7 @@ when AIO_CONTROL {
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", window_padding(app, w))},
 				{"find.open", fmt.tprintf("%t", w.find.open)},
-				{"find.query", string(w.find.query[:])},
+				{"find.query", ui.field_string(&w.find.query)},
 				{"find.matches", find_status(w, entry)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }

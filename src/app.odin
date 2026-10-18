@@ -36,7 +36,6 @@ Notice_Key :: enum u32 {
 	Font,
 	Copy,
 	Paste,
-	Leader,
 }
 
 Session_Entry :: struct {
@@ -99,7 +98,12 @@ app_init :: proc(app: ^App) -> bool {
 		log.errorf("registering commands failed: %v", err)
 		return false
 	}
-	if ui.palette_init(&app.palette) != nil {
+	@(static) palette_settings: [len(settings.SCHEMA)]ui.Palette_Setting
+	@(static, rodata) schema := settings.SCHEMA
+	for entry, i in schema {
+		palette_settings[i] = {entry.key, entry.title, settings.group_title(entry.key)}
+	}
+	if ui.palette_init(&app.palette, palette_settings[:]) != nil {
 		return false
 	}
 	load_settings(app)
@@ -449,7 +453,6 @@ load_settings :: proc(app: ^App) {
 reload_settings :: proc(app: ^App) {
 	refresh_animations(app)
 	for window in app.windows { window.leader_until = {} }
-	ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
 	load_settings(app)

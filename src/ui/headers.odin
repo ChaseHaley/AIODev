@@ -74,8 +74,9 @@ header_icon_draw :: proc(list: ^render.Draw_List, text: ^Text, area: render.Rect
 			}
 		}
 	case .Close:
-		return draw_text(text, list, "×", area.x+5*scale,
-			area.y+(area.height-text.line_height)/2+text.ascent, color)
+		large := text^
+		text_set_size(&large, text.size_px*1.5)
+		return draw_glyph_centered(&large, list, '×', area, color)
 	case .None:
 	}
 	return .Ok

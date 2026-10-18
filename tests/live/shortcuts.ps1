@@ -133,14 +133,17 @@ try {
     Invoke-Aio expect state tabs.count=2
     Open-Shortcut
     $beforeCancel = [IO.File]::ReadAllText($path)
-    Invoke-Aio key Tab Ctrl+A
-    Invoke-Aio type Ctrl+Alt+Y
+    Invoke-Aio key Tab Ctrl+Alt+Y
+    Invoke-Aio expect state settings.value=Ctrl+Alt+Y
+    Invoke-Aio key Esc
+    Invoke-Aio expect state settings.capturing=false
+    Invoke-Aio expect state settings.open=true
     Invoke-Aio key Esc
     Assert-Value ([IO.File]::ReadAllText($path)) $beforeCancel 'cancel leaves shortcut file unchanged'
     Open-Shortcut
-    Invoke-Aio key Tab Ctrl+A
-    Invoke-Aio type Physical+Ctrl+Y
-    Invoke-Aio key Enter
+    Invoke-Aio key Shift+Tab Space Tab Tab
+    Invoke-Aio expect state settings.capturing=true
+    Invoke-Aio key Ctrl+Y Enter
     Invoke-Aio expect state settings.error=false
     if ([IO.File]::ReadAllText($path) -notlike '*keys.tab.new = Physical+Ctrl+Y*') { throw 'UI did not persist shortcut.' }
     Write-Output 'PASS shortcut UI and file share the physical binding model'
@@ -168,9 +171,7 @@ try {
     Configure "input.leader = Ctrl+B`nkeys.tab.new = Ctrl+B, Ctrl+Shift+T"
     Invoke-Aio command settings.open
     Invoke-Aio type input.leader
-    Invoke-Aio key Tab Ctrl+A
-    Invoke-Aio type Ctrl+Shift+P
-    Invoke-Aio key Enter
+    Invoke-Aio key Tab Ctrl+Shift+P Enter
     Invoke-Aio expect state settings.error=false
     if ((Read-State)['settings.message'] -notlike '*app.command_palette*') { throw 'UI warning does not name both bindings.' }
     Write-Output 'PASS UI saves source-order conflict as a named nonfatal warning'

@@ -23,6 +23,12 @@ registry_create :: proc(t: ^testing.T) -> commands.Registry {
 	return r
 }
 
+palette_settings := [?]ui.Palette_Setting{
+	{"pane.gap", "Pane Gap", "Panes"},
+	{"pane.show_headers", "Show Pane Headers", "Panes"},
+	{"font.size", "Font Size", "Font"},
+}
+
 key :: proc(k: platform.Key_Event) -> platform.Key_Event {
 	e := k
 	e.pressed = true
@@ -34,7 +40,7 @@ palette_filters_navigates_and_runs :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	p: ui.Palette
-	testing.expect_value(t, ui.palette_init(&p), nil)
+	testing.expect_value(t, ui.palette_init(&p, nil), nil)
 	defer ui.palette_destroy(&p)
 	ui.palette_open(&p, &registry)
 	testing.expect(t, p.open)
@@ -42,7 +48,7 @@ palette_filters_navigates_and_runs :: proc(t: ^testing.T) {
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .R, text = "r"}))
 	testing.expect_value(t, outcome, ui.Outcome.Changed)
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .S, text = "s"}))
-	testing.expect_value(t, string(p.query[:]), "rs")
+	testing.expect_value(t, ui.palette_query(&p), "rs")
 	testing.expect_value(t, len(p.results), 2)
 	testing.expect_value(t, p.results[0].command.id, commands.Command_Id(2))
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Arrow_Down}))
@@ -50,7 +56,7 @@ palette_filters_navigates_and_runs :: proc(t: ^testing.T) {
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Arrow_Down}))
 	testing.expect_value(t, p.selected, 1)
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Backspace}))
-	testing.expect_value(t, string(p.query[:]), "r")
+	testing.expect_value(t, ui.palette_query(&p), "r")
 	ui.palette_key(&p, &registry, key({key = .Home}))
 	expected := p.results[0].command.id
 	ran, id := ui.palette_key(&p, &registry, key({key = .Enter}))
@@ -64,13 +70,13 @@ palette_text_editing_and_close :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	p: ui.Palette
-	testing.expect_value(t, ui.palette_init(&p), nil)
+	testing.expect_value(t, ui.palette_init(&p, nil), nil)
 	defer ui.palette_destroy(&p)
 	ui.palette_open(&p, &registry)
 	testing.expect_value(t, ui.palette_text(&p, &registry, "re\x01load set"), ui.Outcome.Changed)
-	testing.expect_value(t, string(p.query[:]), "reload set")
+	testing.expect_value(t, ui.palette_query(&p), "reload set")
 	ui.palette_key(&p, &registry, key({key = .Backspace, modifiers = {.Control}}))
-	testing.expect_value(t, string(p.query[:]), "reload ")
+	testing.expect_value(t, ui.palette_query(&p), "reload ")
 	ignored, _ := ui.palette_key(&p, &registry, key({key = .V, modifiers = {.Control}, text = "\x16"}))
 	testing.expect_value(t, ignored, ui.Outcome.None)
 	testing.expect_value(t, ui.palette_text(&p, &registry, "zzzz"), ui.Outcome.Changed)
@@ -87,7 +93,7 @@ palette_mouse_selects_and_dismisses :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	p: ui.Palette
-	testing.expect_value(t, ui.palette_init(&p), nil)
+	testing.expect_value(t, ui.palette_init(&p, nil), nil)
 	defer ui.palette_destroy(&p)
 	ui.palette_open(&p, &registry)
 	l := ui.palette_layout(&p, 1000, 800, 1)
@@ -168,13 +174,15 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.find_key(&f, key({key = .E, text = "e"})), Outcome.Changed)
 	testing.expect_value(t, ui.find_text(&f, "rr or"), Outcome.Changed)
 	testing.expect_value(t, ui.find_text(&f, "\x1b"), Outcome.None)
-	testing.expect_value(t, string(f.query[:]), "err or")
+	testing.expect_value(t, ui.field_string(&f.query), "err or")
 	control_a := key({key = .A, text = "\x01", modifiers = {.Control}})
-	testing.expect_value(t, ui.find_key(&f, control_a), Outcome.None)
+	testing.expect_value(t, ui.find_key(&f, control_a), Outcome.Moved)
+	testing.expect_value(t, ui.field_selected_text(&f.query), "err or")
+	testing.expect_value(t, ui.find_key(&f, key({key = .End})), Outcome.Moved)
 	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace, modifiers = {.Control}})), Outcome.Changed)
-	testing.expect_value(t, string(f.query[:]), "err ")
+	testing.expect_value(t, ui.field_string(&f.query), "err ")
 	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace})), Outcome.Changed)
-	testing.expect_value(t, string(f.query[:]), "err")
+	testing.expect_value(t, ui.field_string(&f.query), "err")
 	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), Outcome.Older)
 	shift_enter := key({key = .Enter, text = "\r", modifiers = {.Shift}})
 	testing.expect_value(t, ui.find_key(&f, shift_enter), Outcome.Newer)
@@ -184,7 +192,7 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 	testing.expect(t, f.open)
 	testing.expect_value(t, ui.find_key(&f, key({key = .Escape})), Outcome.Closed)
 	testing.expect(t, !f.open)
-	testing.expect_value(t, len(f.query), 0)
+	testing.expect_value(t, len(f.query.bytes), 0)
 	r := ui.find_layout(1000, 1.5)
 	testing.expect_value(t, r, render.Rect{1000 - 18 - 570, 18, 570, 60})
 	testing.expect(t, ui.find_contains(1000, 1.5, 413, 19))
@@ -213,4 +221,58 @@ tab_bar_visibility_and_controls_in_narrow_windows :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, -1, 10), -1)
 	narrow := ui.tab_bar_layout(20, 1, 10, true)
 	testing.expect_value(t, ui.tab_bar_hit_test(narrow, 1, 1), 10)
+}
+
+@(test)
+palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^testing.T) {
+	registry := registry_create(t)
+	defer commands.destroy(&registry)
+	testing.expect_value(t, commands.register(&registry, {id = 5, name = "pane.split_right", title = "Split Right"}),
+		commands.Error.None)
+	p: ui.Palette
+	testing.expect_value(t, ui.palette_init(&p, palette_settings[:]), nil)
+	defer ui.palette_destroy(&p)
+	ui.palette_open(&p, &registry)
+	testing.expect_value(t, len(p.results), 5)
+	for r in p.results { testing.expect(t, r.command != nil) }
+	ui.palette_text(&p, &registry, "panes")
+	names := make([dynamic]string, context.temp_allocator)
+	for r in p.results { append(&names, ui.palette_result_name(&p, r)) }
+	testing.expect_value(t, len(names), 3)
+	testing.expect_value(t, names[0], "pane.gap")
+	testing.expect_value(t, names[1], "pane.show_headers")
+	testing.expect_value(t, names[2], "pane.split_right")
+	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
+	testing.expect_value(t, p.selected, 1)
+	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
+	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
+	testing.expect_value(t, p.selected, 2)
+	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
+	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
+	testing.expect_value(t, p.selected, 0)
+	testing.expect_value(t, ui.palette_query(&p), "panes")
+	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
+	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
+	testing.expect_value(t, p.chosen, "pane.gap")
+	testing.expect(t, !p.open)
+
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "font si")
+	testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "font.size")
+	selected, _ := ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}, text = "\x01"}))
+	testing.expect_value(t, selected, ui.Outcome.Changed)
+	testing.expect_value(t, ui.palette_selection(&p), "font si")
+	ui.palette_key(&p, &registry, key({key = .Backspace}))
+	testing.expect_value(t, ui.palette_query(&p), "")
+	testing.expect_value(t, len(p.results), 5)
+	ui.palette_paste(&p, &registry, "quit\nsecond line")
+	testing.expect_value(t, ui.palette_query(&p), "quit")
+	ui.palette_key(&p, &registry, key({key = .Arrow_Left, modifiers = {.Shift}}))
+	ui.palette_key(&p, &registry, key({key = .Arrow_Left, modifiers = {.Shift}}))
+	testing.expect_value(t, ui.palette_selection(&p), "it")
+	testing.expect_value(t, ui.palette_cut(&p, &registry), ui.Outcome.Changed)
+	testing.expect_value(t, ui.palette_query(&p), "qu")
+	ui.palette_key(&p, &registry, key({key = .Arrow_Left, modifiers = {.Control}}))
+	ui.palette_text(&p, &registry, "x")
+	testing.expect_value(t, ui.palette_query(&p), "xqu")
 }

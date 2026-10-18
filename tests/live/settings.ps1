@@ -29,12 +29,18 @@ function Assert-Value($Actual, $Expected, [string] $Label) {
     Write-Output "PASS $Label"
 }
 
-function Open-Field([string] $Key) {
-    if ((Read-State)['settings.open'] -eq 'true') { Invoke-Aio key Esc }
+function Open-Field([string] $Key, [switch] $NoFocus) {
+    while ((Read-State)['settings.open'] -eq 'true') { Invoke-Aio key Esc }
     Invoke-Aio key 'Ctrl+,'
     Invoke-Aio type $Key
     Assert-Value (Read-State)['settings.key'] $Key "select $Key"
-    Invoke-Aio key Tab
+    if (-not $NoFocus) { Invoke-Aio key Tab }
+}
+
+function Capture-Keys([string[]] $Chords) {
+    Assert-Value (Read-State)['settings.capturing'] 'true' 'shortcut field records keys'
+    Invoke-Aio key @Chords
+    Invoke-Aio key Enter
 }
 
 function Save-Value([string] $Value) {
@@ -69,7 +75,8 @@ try {
     Assert-Value ([IO.File]::ReadAllText($path)) $external 'external edit preserved'
 
     Open-Field window.show_tab_bar_with_one_tab
-    Save-Value false
+    Assert-Value (Read-State)['settings.title'].Trim('"') 'Show Tab Bar With One Tab' 'friendly setting name'
+    Invoke-Aio key Space
     $state = Read-State
     Assert-Value $state['settings.error'] 'false' 'boolean saved despite unrelated unknown key'
     Assert-Value ($state['pane.0.rect'] -split ',')[1] '5' 'tab bar updates live'
@@ -81,21 +88,28 @@ try {
     Assert-Value (Read-State)['session.id'] $originalSession 'shell setting does not restart session'
     if ((Read-State)['settings.message'] -notlike '*new or restarted shells*') { throw 'Missing restart guidance.' }
 
-    Open-Field keys.tab.new
-    $beforeConflict = [IO.File]::ReadAllText($path)
-    Save-Value Ctrl+Shift+P
-    Assert-Value (Read-State)['settings.error'] 'true' 'conflicting shortcut rejected'
-    Assert-Value ([IO.File]::ReadAllText($path)) $beforeConflict 'conflict preserves shortcut file'
-    Save-Value 'Leader+Left Ctrl'
-    Assert-Value (Read-State)['settings.error'] 'true' 'modifier-only leader binding rejected'
-    Save-Value 'Ctrl+Shift+T, Leader+T'
-    Assert-Value (Read-State)['settings.error'] 'false' 'direct and leader binding saved'
     Open-Field input.leader
-    Save-Value Ctrl+Shift+P
+    Capture-Keys Ctrl+Shift+P
     Assert-Value (Read-State)['settings.error'] 'false' 'leader conflict saves with source-order warning'
     if ((Read-State)['settings.message'] -notlike '*app.command_palette*') { throw 'Missing named conflict warning.' }
-    Save-Value Ctrl+B
+    Invoke-Aio key Enter
+    Capture-Keys Ctrl+B
     Assert-Value (Read-State)['settings.error'] 'false' 'leader enabled explicitly'
+    Open-Field keys.tab.new
+    $beforeConflict = [IO.File]::ReadAllText($path)
+    Capture-Keys Ctrl+Shift+P
+    Assert-Value (Read-State)['settings.error'] 'true' 'conflicting shortcut rejected'
+    Assert-Value ([IO.File]::ReadAllText($path)) $beforeConflict 'conflict preserves shortcut file'
+    Invoke-Aio key Enter Shift+A
+    Assert-Value (Read-State)['settings.error'] 'true' 'typing key without a modifier refused'
+    $recorded = (Read-State)['settings.value']
+    Invoke-Aio key 'Left Ctrl'
+    Assert-Value (Read-State)['settings.value'] $recorded 'modifier presses alone record nothing'
+    Capture-Keys Ctrl+Shift+T,Ctrl+B,T
+    Assert-Value (Read-State)['settings.error'] 'false' 'direct and leader binding saved'
+    if ([IO.File]::ReadAllText($path) -notmatch '(?m)^keys\.tab\.new = Ctrl\+Shift\+T, Leader\+T\r?$') {
+        throw 'Captured binding not persisted.'
+    }
     Invoke-Aio key Esc
     Invoke-Aio key Ctrl+Shift+T
     Assert-Value (Read-State)['tabs.count'] '2' 'direct shortcut remains available'
@@ -120,12 +134,41 @@ try {
     Assert-Value (Read-State)['tabs.count'] '3' 'unmatched leader leaves layout unchanged'
     Assert-Value (Read-State)['leader.pending'] 'false' 'unmatched leader ends sequence'
 
-    Open-Field keys.tab.new
+    Open-Field keys.tab.new -NoFocus
     Invoke-Aio key Ctrl+R
     Assert-Value (Read-State)['settings.error'] 'false' 'shortcut reset saves direct defaults'
     Invoke-Aio key Esc
     Invoke-Aio key Ctrl+Shift+T
     Assert-Value (Read-State)['tabs.count'] '4' 'default shortcut restored'
+    Open-Field colors.cursor
+    Save-Value 'rgb(255, 136, 0)'
+    Assert-Value (Read-State)['settings.value'] '#ff8800' 'pasted rgb color normalized'
+    if ([IO.File]::ReadAllText($path) -notmatch '(?m)^colors\.cursor = #ff8800\r?$') { throw 'Color not persisted as hex.' }
+    Save-Value 'hsl(120, 100%, 25%)'
+    Assert-Value (Read-State)['settings.value'] '#008000' 'pasted hsl color normalized'
+    while ((Read-State)['settings.open'] -eq 'true') { Invoke-Aio key Esc }
+    Invoke-Aio key 'Ctrl+,'
+    Invoke-Aio type panes
+    Assert-Value (Read-State)['settings.key'] 'pane.gap' 'group search finds pane settings'
+    Invoke-Aio key Ctrl+N
+    Assert-Value (Read-State)['settings.key'] 'pane.corner_radius' 'Ctrl+N selects next setting'
+    Invoke-Aio key Ctrl+P
+    Assert-Value (Read-State)['settings.key'] 'pane.gap' 'Ctrl+P selects previous setting'
+    Invoke-Aio key Esc
+    Invoke-Aio key Ctrl+Shift+P
+    Invoke-Aio type 'stray text'
+    Invoke-Aio key Ctrl+A Backspace
+    Assert-Value (Read-State)['palette.query'] '""' 'Ctrl+A selects and clears palette query'
+    Invoke-Aio type panes
+    Invoke-Aio key Ctrl+N Ctrl+N Ctrl+P
+    Assert-Value (Read-State)['palette.selected'] '1' 'palette Ctrl+N and Ctrl+P navigate'
+    Invoke-Aio key Ctrl+A
+    Invoke-Aio type 'pane gap'
+    Assert-Value (Read-State)['palette.item'] 'pane.gap' 'palette lists settings'
+    Invoke-Aio key Enter
+    Assert-Value (Read-State)['settings.key'] 'pane.gap' 'palette opens the chosen setting'
+    Assert-Value (Read-State)['settings.editing'] 'true' 'palette focuses the setting value'
+    while ((Read-State)['settings.open'] -eq 'true') { Invoke-Aio key Esc }
     Invoke-Aio command settings.open
     Invoke-Aio dpi 168
     Assert-Value (Read-State)['settings.open'] 'true' 'settings remains open at 175 percent DPI'

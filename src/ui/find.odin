@@ -12,34 +12,35 @@ import "aio:render"
 
 Find_Bar :: struct {
 	open: bool,
-	query: [dynamic]u8,
+	query: Text_Field,
 }
 
 Find_Outcome :: enum {
 	None,
 	Changed,
+	Moved,
 	Older,
 	Newer,
 	Closed,
 }
 
 find_init :: proc(f: ^Find_Bar, allocator := context.allocator) {
-	f.query = make([dynamic]u8, allocator)
+	f.query.bytes = make([dynamic]u8, allocator)
 }
 
 find_destroy :: proc(f: ^Find_Bar) {
-	delete(f.query)
+	delete(f.query.bytes)
 	f^ = {}
 }
 
 find_open :: proc(f: ^Find_Bar) {
 	f.open = true
-	clear(&f.query)
+	field_set(&f.query, "")
 }
 
 find_close :: proc(f: ^Find_Bar) {
 	f.open = false
-	clear(&f.query)
+	field_set(&f.query, "")
 }
 
 // Handles a key while the find bar is open. Enter and Up move to older matches; Shift+Enter and Down to newer.
@@ -47,7 +48,6 @@ find_key :: proc(f: ^Find_Bar, e: platform.Key_Event) -> Find_Outcome {
 	if !e.pressed {
 		return .None
 	}
-	control := .Control in e.modifiers
 	#partial switch e.key {
 	case .Escape:
 		find_close(f)
@@ -58,21 +58,22 @@ find_key :: proc(f: ^Find_Bar, e: platform.Key_Event) -> Find_Outcome {
 		return .Older
 	case .Arrow_Down:
 		return .Newer
-	case .Backspace:
-		if len(f.query) == 0 {
-			return .None
-		}
-		erase(&f.query, control)
-		return .Changed
 	}
-	if len(e.text) > 0 && (!control || .Alt in e.modifiers) {
-		return find_text(f, e.text)
+	return find_change(field_key(&f.query, e))
+}
+
+@(private)
+find_change :: proc(change: Field_Change) -> Find_Outcome {
+	switch change {
+	case .None: return .None
+	case .Moved: return .Moved
+	case .Edited:
 	}
-	return .None
+	return .Changed
 }
 
 find_text :: proc(f: ^Find_Bar, text: string) -> Find_Outcome {
-	return insert(&f.query, text) ? .Changed : .None
+	return find_change(field_text(&f.query, text))
 }
 
 // The bar sits in the window's top-right corner, clear of the command palette's centered column.
@@ -115,18 +116,7 @@ find_draw :: proc(
 	if result := draw_text(text, list, status, status_x, baseline, theme.muted); result != .Ok {
 		return result
 	}
-	query := string(f.query[:])
 	query_width := max(0, status_x - padding - (panel.x + padding))
-	shown, shown_color := query, theme.text
-	if len(query) == 0 {
-		shown, shown_color = "Find in scrollback", theme.muted
-	}
-	result := draw_text(text, list, shown, panel.x + padding, baseline, shown_color, query_width)
-	if result != .Ok {
-		return result
-	}
-	caret_x := panel.x + padding + min(text_width(text, query), query_width)
-	caret := render.Rect{caret_x, baseline - text.ascent, max(1, 1.5 * scale), text.line_height}
-	draw_rect(list, {rect = caret, color = theme.accent})
-	return .Ok
+	return field_draw(&f.query, list, text, theme, panel.x + padding, baseline, query_width, true,
+		"Find in scrollback", theme.text, max(1, 1.5 * scale))
 }
