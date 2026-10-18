@@ -73,6 +73,7 @@ Action :: enum u32 {
 	Resize_Down_Large,
 	Keep_Pane_Open,
 	Change_Shortcut,
+	Follow_Theme_Colors,
 }
 
 @(private)
@@ -152,6 +153,7 @@ ACTIONS :: [Action]Action_Info{
 	.Resize_Down_Large = {"pane.resize_down_large", "Resize Down by 50 Pixels", nil},
 	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil},
 	.Change_Shortcut = {"settings.change_shortcut", "Change Shortcut…", nil},
+	.Follow_Theme_Colors = {"settings.follow_theme_colors", "Use Theme for Shell Foreground and Background", nil},
 }
 
 @(require_results)
@@ -246,6 +248,7 @@ run_action :: proc(
 		}
 	case .Reload_Settings:
 		reload_settings(app)
+	case .Follow_Theme_Colors: editor_follow_theme(app, w)
 	case .Restart_Shell:
 		if entry != nil {
 			session_restart(app, entry)

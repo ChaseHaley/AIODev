@@ -230,6 +230,8 @@ when AIO_CONTROL {
 			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
 			{"theme.name", settings.value_text(&app.settings, settings.schema_find("theme.name")^)},
 			{"theme.mode", settings.value_text(&app.settings, settings.schema_find("theme.mode")^)},
+			{"terminal.foreground", settings.color_hex(app.settings.colors.foreground)},
+			{"terminal.background", settings.color_hex(app.settings.colors.background)},
 			{"ui.animations", fmt.tprintf("%t", app.animations)},
 			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
 			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},

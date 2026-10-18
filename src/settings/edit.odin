@@ -95,6 +95,17 @@ edit_text :: proc(text, key, value: string, allocator := context.allocator) -> (
 Save_Error :: enum { None, Conflict, IO }
 
 @(require_results)
+follow_theme_text :: proc(text: string, allocator := context.allocator) -> (string, runtime.Allocator_Error) {
+	foreground, message, err := edit_text(text, "colors.foreground", "", allocator)
+	defer delete(message, allocator)
+	if err != nil { return "", err }
+	defer delete(foreground, allocator)
+	background, background_message, background_error := edit_text(foreground, "colors.background", "", allocator)
+	delete(background_message, allocator)
+	return background, background_error
+}
+
+@(require_results)
 save :: proc(path, expected, updated: string) -> Save_Error {
 	f, err := os.create_temp_file(os.dir(path), ".aiodev-settings-*")
 	if err != nil { log.errorf("creating settings temporary file failed: %v", err); return .IO }

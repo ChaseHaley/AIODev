@@ -60,6 +60,10 @@ settings_load :: proc(app: ^App, w: ^Window) -> bool {
 		row := ui.Editor_Row{key = entry.key, title = entry.title, description = entry.description,
 			value = settings.value_text(&s, entry), default_value = entry.default_value,
 			minimum = entry.minimum, maximum = entry.maximum}
+		if entry.key == "theme.mode" &&
+		   (s.color_overrides.foreground != nil || s.color_overrides.background != nil) {
+			row.description = "Shell colors are pinned. Search Follow Theme to reset foreground and background."
+		}
 		switch entry.kind {
 		case .String: row.kind = entry.key == "input.leader" ? .Shortcut : .Text
 		case .Int: row.kind = .Integer
@@ -76,6 +80,13 @@ settings_load :: proc(app: ^App, w: ^Window) -> bool {
 			notify(app, .Error, "Could not allocate settings editor.")
 			return false
 		}
+	}
+	if ui.editor_add(p, {key = "colors.follow_theme", title = "Follow Theme for Shell Colors",
+		description = "Reset shell foreground and background together; preserve other color overrides.",
+		value = "Use theme colors", kind = .Action}, "Colors") != nil {
+		ui.editor_destroy(p)
+		notify(app, .Error, "Could not allocate settings editor.")
+		return false
 	}
 	for command in app.registry.items {
 		value := shortcuts_text(command.shortcuts)
@@ -182,6 +193,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if outcome != .Save && outcome != .Reset { return }
 	row := ui.editor_row(p)
 	if row == nil { return }
+	if row.key == "colors.follow_theme" { editor_follow_theme(app, w); return }
 	if outcome == .Reset { ui.field_set(&p.value, row.default_value) }
 	value := ui.field_string(&p.value)
 	alpha := false
@@ -230,6 +242,31 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		text = "Saved. Initial size applies to new sessions."
 	}
 	ui.editor_message(p, text, false)
+}
+
+editor_follow_theme :: proc(app: ^App, w: ^Window) {
+	data, err := os.read_entire_file(app.settings_path, context.temp_allocator)
+	if err != nil { notify(app, .Error, "Could not read settings."); return }
+	source := w.editor.open ? w.editor.source : string(data)
+	updated, edit_error := settings.follow_theme_text(source)
+	if edit_error != nil { notify(app, .Error, "Could not prepare theme colors."); return }
+	defer delete(updated)
+	result := settings.save(app.settings_path, source, updated)
+	if result != .None {
+		text := result == .Conflict ? "Settings changed outside the editor. Reopen Settings before resetting colors." :
+			"Could not save theme colors. Check the settings path and permissions."
+		if w.editor.open { ui.editor_message(&w.editor, text, true) } else { notify(app, .Error, text) }
+		return
+	}
+	reload_settings(app)
+	if w.editor.open {
+		filter := strings.clone(ui.field_string(&w.editor.filter), context.temp_allocator)
+		if !settings_load(app, w) { return }
+		ui.field_set(&w.editor.filter, filter)
+		ui.editor_filter(&w.editor)
+		ui.editor_select_key(&w.editor, "colors.follow_theme")
+		ui.editor_message(&w.editor, "Shell foreground and background now follow the theme.", false)
+	} else { notify(app, .Info, "Shell foreground and background now follow the theme.") }
 }
 
 // Plain and shifted keys type or navigate, and these Ctrl chords edit text or move through the list.

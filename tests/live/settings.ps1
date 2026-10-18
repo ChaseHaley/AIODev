@@ -209,8 +209,10 @@ try {
     Assert-Value (Read-State)['settings.open'] 'true' 'settings remains open at 175 percent DPI'
     Invoke-Aio dpi 96
     Invoke-Aio key Esc
+    $persisted = Join-Path (Split-Path $path -Parent) 'persisted.ini'
+    Copy-Item -LiteralPath $path -Destination $persisted
     Invoke-Aio stop
-    Invoke-Aio launch
+    Invoke-Aio launch --settings $persisted
     Invoke-Aio key 'Ctrl+,'
     Invoke-Aio type shell.directory
     Invoke-Aio key Tab

@@ -13,7 +13,7 @@ import "aio:platform"
 import "aio:render"
 import "aio:settings"
 
-Row_Kind :: enum { Text, Integer, Number, Toggle, Choice, Color, Optional_Color, Shortcut }
+Row_Kind :: enum { Text, Integer, Number, Toggle, Choice, Color, Optional_Color, Shortcut, Action }
 
 // Strings are owned by the editor except `choices`, which borrows static schema names. An empty optional
 // color shows `fallback`, the theme color it resolves to.
@@ -459,6 +459,7 @@ text_kind :: proc(kind: Row_Kind) -> bool {
 @(private)
 activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	switch row.kind {
+	case .Action: return .Save
 	case .Toggle:
 		p.focus = .Control
 		return flip_toggle(p)
@@ -661,6 +662,9 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	row := p.rows[item.row]
 	field := proc(right, cy, width, s: f32) -> render.Rect { return {right-width*s, cy-15*s, width*s, 30*s} }
 	switch row.kind {
+	case .Action:
+		parts.field = field(right, cy, 240, s)
+		parts.reset = {}
 	case .Toggle:
 		parts.toggle = {right-44*s, cy-11*s, 44*s, 22*s}
 		parts.text_right = parts.toggle.x-48*s
@@ -835,6 +839,7 @@ editor_press :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32, exten
 			return .Changed
 		case .Shortcut:
 			return activate(p, row)
+		case .Action: return .Save
 		}
 		if p.capturing { stop_editing(p) }
 		p.focus = .Control
@@ -967,6 +972,10 @@ control_draw :: proc(p: ^Editor, row: ^Editor_Row, parts: Row_Parts, selected: b
 	input_text := text_styled(text, .Input)
 	baseline := parts.field.y+(parts.field.height-input_text.line_height)/2+input_text.ascent
 	switch row.kind {
+	case .Action:
+		box_draw(list, parts.field, theme, focused, scale)
+		return draw_text(&input_text, list, value, parts.field.x+10*scale, baseline, theme.text,
+			max(1, parts.field.width-20*scale))
 	case .Toggle:
 		on := value == "true"
 		switch_draw(list, parts.toggle, on, focused, theme, scale)
@@ -1148,6 +1157,7 @@ editor_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text:
 			return result
 		}
 		if render.push_layer(list, l.list) != .None { return .Ok }
+		if row.kind == .Action { continue }
 		modified := row.value != row.default_value
 		if index == p.hover_reset && modified {
 			draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6*s})

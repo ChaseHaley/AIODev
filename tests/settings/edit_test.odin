@@ -1,9 +1,42 @@
 package settings_test
 
 import "core:os"
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
+
+@(test)
+follow_theme_resets_only_shell_defaults_explicitly :: proc(t: ^testing.T) {
+	for pair in ([?][2]string{{"#0f1115", "#d6dae0"}, {"#123456", "#abcdef"}}) {
+		source := fmt.tprintf("# keep\r\ntheme.mode = light\r\ncolors.background = %s\r\n"+
+			"colors.foreground = %s\r\ncolors.palette.1 = #112233\r\n"+
+			"colors.cursor = #445566\r\nfont.size = 14\r\n", pair[0], pair[1])
+		before, issues, parse_error := settings.parse(source)
+		defer settings.destroy(&before)
+		defer settings.diagnostics_destroy(&issues)
+		testing.expect_value(t, parse_error, nil)
+		testing.expect(t, before.color_overrides.background != nil)
+		text, err := settings.follow_theme_text(source)
+		defer delete(text)
+		testing.expect_value(t, err, nil)
+		after, diagnostics, after_error := settings.parse(text)
+		defer settings.destroy(&after)
+		defer settings.diagnostics_destroy(&diagnostics)
+		testing.expect_value(t, after_error, nil)
+		testing.expect_value(t, len(diagnostics), 0)
+		testing.expect_value(t, after.colors.background, settings.theme_resolve(after.theme).terminal.background)
+		testing.expect_value(t, after.colors.foreground, settings.theme_resolve(after.theme).terminal.foreground)
+		testing.expect_value(t, after.colors.palette[1], settings.Color{0x11, 0x22, 0x33})
+		testing.expect_value(t, after.colors.cursor, settings.Color{0x44, 0x55, 0x66})
+		testing.expect(t, strings.has_prefix(text, "# keep\r\n"))
+		testing.expect_value(t, after.font.size, 14)
+		again, again_error := settings.follow_theme_text(text)
+		defer delete(again)
+		testing.expect_value(t, again_error, nil)
+		testing.expect_value(t, again, text)
+	}
+}
 
 @(test)
 editor_round_trips_every_schema_kind :: proc(t: ^testing.T) {
