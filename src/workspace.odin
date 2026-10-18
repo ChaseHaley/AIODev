@@ -167,14 +167,15 @@ pane_keep_open :: proc(app: ^App, w: ^Window) {
 }
 
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
-	if index < 0 || index >= len(w.workspace.tabs) { return }
-	group := w.workspace.tabs[index].marked
+	workspace := w.workspace
+	if index < 0 || index >= len(workspace.tabs) { return }
+	group := workspace.tabs[index].marked
 	if group {
-		for i := len(w.workspace.tabs)-1; i >= 0; i -= 1 {
-			if w.workspace.tabs[i].marked { workspace_close_tab(app, w.workspace, i) }
+		for i := len(workspace.tabs)-1; i >= 0; i -= 1 {
+			if workspace.tabs[i].marked { workspace_close_tab(app, workspace, i) }
 		}
-	} else { workspace_close_tab(app, w.workspace, index) }
-	if group && len(w.workspace.tabs) > 0 { tab_select_one(w.workspace, w.workspace.selected) }
+	} else { workspace_close_tab(app, workspace, index) }
+	if group && len(workspace.tabs) > 0 { tab_select_one(workspace, workspace.selected) }
 }
 
 pane_close :: proc(app: ^App, w: ^Window) {

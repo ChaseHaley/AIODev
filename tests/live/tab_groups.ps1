@@ -141,6 +141,16 @@ try {
     Invoke-Aio mouse up "$([int]($width*2.6)),20" --px
     Assert-Equal (Order) $survivors 'shell exit during group drag closes the correct tab after cancellation'
     Assert-Equal (Read-State)['tabs.dragging'] false 'shell exit cancels active group drag'
+    Click-Tab 1
+    Click-Tab 2 Shift
+    Invoke-Aio key Ctrl+Shift+W
+    Invoke-Aio expect state tabs.count=0
+    Invoke-Aio expect state sessions.count=0
+    Invoke-Aio expect state window.visible=false
+    Invoke-Aio tray open
+    Invoke-Aio wait text 'PS '
+    Invoke-Aio expect state tabs.count=1
+    Write-Output 'PASS closing the complete group releases the window and reopens a fresh session'
     Write-Output 'PASS tab multiselection, group actions and animation journey'
 } finally {
     & $ctl --name $name stop | Out-Null
