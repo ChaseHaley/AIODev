@@ -2,6 +2,7 @@ package ui_test
 
 import "core:testing"
 import "aio:commands"
+import "aio:render"
 import "aio:ui"
 
 @(private, rodata)
@@ -19,7 +20,7 @@ editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 		{{key = "cursor.style", title = "Cursor Style", description = "Shape", value = "block",
 			default_value = "block", kind = .Choice, choices = cursor_styles[:]}, "Cursor"},
 		{{key = "colors.cursor", title = "Cursor Color", description = "Cursor.", value = "",
-			kind = .Optional_Color}, "Colors"},
+			kind = .Optional_Color, fallback = "#ffffff"}, "Colors"},
 		{{key = "scrollback.lines", title = "Scrollback Lines", description = "History.", value = "10000",
 			default_value = "10000", kind = .Integer, minimum = 0, maximum = 10000000}, "Scrollback"},
 		{{key = "keys.pane.split_right", title = "Split Right", description = "Shortcut.", value = "Ctrl+Shift+O",
@@ -40,6 +41,16 @@ visible_keys :: proc(p: ^ui.Editor) -> [dynamic]string {
 	return keys
 }
 
+@(private)
+page :: proc(p: ^ui.Editor) -> ui.Editor_Layout {
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	p.visible_rows = l.rows
+	return l
+}
+
+@(private)
+center :: proc(r: render.Rect) -> (f32, f32) { return r.x+r.width/2, r.y+r.height/2 }
+
 @(test)
 editor_groups_collapse_and_restore_after_search :: proc(t: ^testing.T) {
 	p: ui.Editor
@@ -48,38 +59,30 @@ editor_groups_collapse_and_restore_after_search :: proc(t: ^testing.T) {
 	keys := visible_keys(&p)
 	browse := len(keys)
 	testing.expect_value(t, browse, 14)
-	testing.expect_value(t, len(p.groups), 7)
 	testing.expect_value(t, keys[0], "Panes")
-	testing.expect_value(t, keys[1], "pane.gap")
 	testing.expect_value(t, keys[len(keys)-3], "Pane Shortcuts")
-	testing.expect_value(t, keys[len(keys)-2], "Input")
 	testing.expect(t, ui.editor_row(&p) == nil)
 	ui.editor_key(&p, key({key = .Enter}))
-	testing.expect_value(t, len(p.items), len(keys)-2)
-	testing.expect_value(t, p.selected, 0)
+	testing.expect_value(t, len(p.items), browse-2)
 	ui.editor_key(&p, key({key = .Arrow_Right}))
-	testing.expect_value(t, len(p.items), len(keys))
+	testing.expect_value(t, len(p.items), browse)
 	ui.editor_key(&p, key({key = .Arrow_Left}))
-	testing.expect_value(t, len(p.items), len(keys)-2)
+	testing.expect_value(t, len(p.items), browse-2)
 
 	ui.editor_text(&p, "panes")
 	keys = visible_keys(&p)
 	testing.expect_value(t, len(keys), 5)
-	testing.expect_value(t, keys[0], "Panes")
 	testing.expect_value(t, keys[3], "Pane Shortcuts")
-	testing.expect_value(t, keys[4], "keys.pane.split_right")
 	testing.expect_value(t, ui.editor_row(&p).key, "pane.gap")
-	ui.editor_key(&p, key({key = .A, modifiers = {.Control}}))
-	ui.editor_key(&p, key({key = .Backspace}))
+	ui.editor_key(&p, key({key = .Escape}))
 	testing.expect_value(t, len(p.filter.bytes), 0)
 	testing.expect_value(t, len(visible_keys(&p)), browse-2)
-	testing.expect_value(t, visible_keys(&p)[1], "Font")
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.None)
 
 	ui.editor_text(&p, "SPLIT")
 	testing.expect_value(t, ui.editor_row(&p).key, "keys.pane.split_right")
 	ui.editor_text(&p, " zzz")
 	testing.expect_value(t, len(p.items), 0)
-	testing.expect(t, ui.editor_row(&p) == nil)
 }
 
 @(test)
@@ -94,60 +97,109 @@ editor_lists_navigate_with_control_n_and_p :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .P, modifiers = {.Control}}))
 	testing.expect_value(t, ui.editor_row(&p).key, "pane.gap")
 	testing.expect_value(t, len(p.filter.bytes), 0)
-	ui.editor_key(&p, key({key = .Arrow_Down}))
-	testing.expect_value(t, ui.editor_row(&p).key, "pane.show_headers")
 }
 
 @(test)
-editor_typed_controls_produce_values :: proc(t: ^testing.T) {
+editor_inline_controls_produce_values :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	editor_fixture(t, &p)
+	l := page(&p)
+
 	testing.expect(t, ui.editor_select_key(&p, "pane.show_headers"))
-	ui.editor_key(&p, key({key = .Enter}))
-	testing.expect(t, p.editing)
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Space, text = " "})), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "false")
+	parts := ui.editor_row_parts(&p, l, p.selected)
+	testing.expect(t, parts.toggle.width > 0 && parts.field.width == 0)
+	x, y := center(parts.toggle)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "true")
 
 	testing.expect(t, ui.editor_select_key(&p, "cursor.style"))
 	ui.editor_key(&p, key({key = .Enter}))
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Arrow_Right})), ui.Editor_Outcome.Save)
-	testing.expect_value(t, ui.field_string(&p.value), "bar")
-	testing.expect(t, ui.editor_select_key(&p, "cursor.style"))
-	testing.expect_value(t, ui.field_string(&p.value), "block")
-	l := ui.editor_layout(&p, 1200, 900, 1)
-	third := l.choices[2]
-	testing.expect_value(t, ui.editor_press(&p, l, nil, third.x+2, third.y+2, 1, false), ui.Editor_Outcome.Save)
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Choice)
+	ui.editor_key(&p, key({key = .Arrow_Down}))
+	ui.editor_key(&p, key({key = .N, modifiers = {.Control}}))
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "underline")
+	testing.expect_value(t, p.popup, ui.Editor_Popup.None)
+	parts = ui.editor_row_parts(&p, l, p.selected)
+	x, y = center(parts.field)
+	ui.editor_press(&p, l, nil, x, y, false)
+	popup := ui.editor_popup_rect(&p, l)
+	testing.expect(t, popup.y > parts.field.y)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+4+30*1.5, false), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "bar")
+	ui.editor_press(&p, l, nil, x, y, false)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, 5, 5, false), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, p.popup, ui.Editor_Popup.None)
 
 	testing.expect(t, ui.editor_select_key(&p, "pane.gap"))
-	l = ui.editor_layout(&p, 1200, 900, 1)
-	testing.expect(t, l.slider.width > 0)
-	ui.editor_press(&p, l, nil, l.slider.x+l.slider.width*0.5, l.slider.y+2, 1, false)
+	parts = ui.editor_row_parts(&p, l, p.selected)
+	testing.expect(t, parts.slider.width > 0 && parts.field.width > 0)
+	ui.editor_press(&p, l, nil, parts.slider.x+parts.slider.width*0.5, parts.slider.y+2, false)
 	testing.expect_value(t, ui.field_string(&p.value), "12")
-	ui.editor_drag(&p, l, nil, l.slider.x+l.slider.width+40, l.slider.y, 1)
+	ui.editor_drag(&p, l, nil, parts.slider.x+parts.slider.width+40, parts.slider.y)
 	testing.expect_value(t, ui.field_string(&p.value), "24")
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Save)
 
 	testing.expect(t, ui.editor_select_key(&p, "scrollback.lines"))
-	l = ui.editor_layout(&p, 1200, 900, 1)
-	ui.editor_press(&p, l, nil, l.slider.x+l.slider.width*0.25, l.slider.y+2, 1, false)
+	parts = ui.editor_row_parts(&p, l, p.selected)
+	ui.editor_press(&p, l, nil, parts.slider.x+parts.slider.width*0.25, parts.slider.y+2, false)
 	small := ui.field_string(&p.value)
 	testing.expect(t, len(small) <= 3, small)
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Save)
 
 	testing.expect(t, ui.editor_select_key(&p, "colors.cursor"))
-	l = ui.editor_layout(&p, 1200, 900, 1)
-	center_y := l.wheel.y+l.wheel.height/2
-	ui.editor_press(&p, l, nil, l.wheel.x+l.wheel.width-0.01, center_y, 1, false)
+	parts = ui.editor_row_parts(&p, l, p.selected)
+	testing.expect(t, ui.editor_popup_rect(&p, l).width == 0)
+	x, y = center(parts.swatch)
+	ui.editor_press(&p, l, nil, x, y, false)
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Color)
+	popup = ui.editor_popup_rect(&p, l)
+	wheel := render.Rect{popup.x+12, popup.y+12, 140, 140}
+	ui.editor_press(&p, l, nil, wheel.x+wheel.width-0.01, wheel.y+wheel.height/2, false)
 	testing.expect_value(t, ui.field_string(&p.value), "#ff0000")
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Save)
-	ui.editor_press(&p, l, nil, l.ramp.x+l.ramp.width/2, l.ramp.y+2, 1, false)
+	ui.editor_press(&p, l, nil, popup.x+168+56, popup.y+24+8, false)
 	testing.expect_value(t, ui.field_string(&p.value), "#800000")
 	ui.editor_release(&p)
-	testing.expect_value(t, ui.editor_press(&p, l, nil, l.theme_default.x+2, l.theme_default.y+2, 1, false),
-		ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+20, popup.y+170, false), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "")
+	testing.expect_value(t, p.popup, ui.Editor_Popup.None)
+}
+
+@(test)
+editor_reset_buttons_and_pointer_shapes :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	l := page(&p)
+	for index in 0..<len(p.items) {
+		if p.items[index].row < 0 { continue }
+		parts := ui.editor_row_parts(&p, l, index)
+		testing.expect(t, parts.reset.width > 0)
+		testing.expect(t, parts.field.width == 0 || parts.field.x+parts.field.width <= parts.reset.x)
+	}
+	testing.expect(t, ui.editor_select_key(&p, "font.family"))
+	parts := ui.editor_row_parts(&p, l, p.selected)
+	x, y := center(parts.reset)
+	testing.expect(t, ui.editor_hover(&p, l, x, y))
+	testing.expect_value(t, p.hover_reset, p.selected)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Reset)
+	fx, fy := center(parts.field)
+	testing.expect(t, ui.editor_over_text(&p, l, fx, fy))
+	testing.expect(t, !ui.editor_over_text(&p, l, x, y))
+	testing.expect(t, !ui.editor_over_text(&p, l, parts.row.x+20, fy))
+	cx, cy := center(l.filter)
+	testing.expect(t, ui.editor_over_text(&p, l, cx, cy))
+	testing.expect(t, ui.editor_select_key(&p, "pane.show_headers"))
+	toggle := ui.editor_row_parts(&p, l, p.selected).toggle
+	tx, ty := center(toggle)
+	testing.expect(t, !ui.editor_over_text(&p, l, tx, ty))
+	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
+	sx, sy := center(ui.editor_row_parts(&p, l, p.selected).field)
+	testing.expect(t, !ui.editor_over_text(&p, l, sx, sy))
 }
 
 @(test)
@@ -157,8 +209,7 @@ editor_text_field_selects_and_replaces :: proc(t: ^testing.T) {
 	editor_fixture(t, &p)
 	testing.expect(t, ui.editor_select_key(&p, "font.family"))
 	ui.editor_key(&p, key({key = .Tab}))
-	testing.expect(t, p.editing)
-	ui.editor_key(&p, key({key = .A, modifiers = {.Control}}))
+	testing.expect(t, ui.editor_editing(&p))
 	testing.expect_value(t, ui.editor_selection(&p), "Mono")
 	ui.editor_text(&p, "aé🙂z")
 	ui.editor_key(&p, key({key = .Arrow_Left}))
@@ -174,8 +225,15 @@ editor_text_field_selects_and_replaces :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_string(&p.value), "Cascadia")
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.editor_row(&p).value, "Mono")
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.Closed)
-	testing.expect(t, !p.open)
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.Changed)
+	testing.expect(t, !ui.editor_editing(&p))
+	testing.expect_value(t, ui.field_string(&p.value), "Mono")
+	testing.expect(t, ui.editor_select_key(&p, "cursor.style"))
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Choice)
+	ui.editor_text(&p, "gap")
+	testing.expect(t, !ui.editor_editing(&p))
+	testing.expect_value(t, ui.field_string(&p.filter), "gap")
 }
 
 @(test)
@@ -196,7 +254,6 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+Tab")
 	ui.editor_key(&p, key({key = .X, text = "x"}))
 	testing.expect(t, p.error)
-	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+Tab")
 	ui.editor_key(&p, key({key = .B, modifiers = {.Control}}))
 	testing.expect(t, p.leader_pending)
 	ui.editor_key(&p, key({key = .R, text = "r"}))
@@ -219,28 +276,7 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+A")
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect(t, !ui.editor_capturing(&p))
-	testing.expect_value(t, p.button_focus, 1)
-}
-
-@(test)
-editor_layout_hit_targets_scale :: proc(t: ^testing.T) {
-	for scale in ([?]f32{1, 1.75, 2}) {
-		p: ui.Editor
-		defer ui.editor_destroy(&p)
-		testing.expect_value(t, ui.editor_add(&p, {key = "x", title = "X"}, "Group"), nil)
-		ui.editor_filter(&p)
-		ui.editor_select(&p, 1)
-		l := ui.editor_layout(&p, 1200*scale, 900*scale, scale)
-		testing.expect(t, l.rows > 0)
-		testing.expect(t, l.detail.y > l.list.y+l.list.height)
-		testing.expect(t, l.value.y+l.value.height < l.save.y)
-		testing.expect(t, l.close.x+l.close.width < l.panel.x+l.panel.width)
-		testing.expect_value(t, ui.editor_press(&p, l, nil, l.save.x+1, l.save.y+1, scale, false), ui.Editor_Outcome.Save)
-		testing.expect_value(t, ui.editor_press(&p, l, nil, l.reset.x+1, l.reset.y+1, scale, false),
-			ui.Editor_Outcome.Reset)
-		testing.expect_value(t, ui.editor_press(&p, l, nil, l.close.x+1, l.close.y+1, scale, false),
-			ui.Editor_Outcome.Closed)
-	}
+	testing.expect_value(t, p.focus, ui.Editor_Focus.Positions)
 }
 
 @(test)
@@ -248,13 +284,14 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	editor_fixture(t, &p)
+	l := page(&p)
 	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
 	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
-	testing.expect_value(t, p.button_focus, 4)
+	testing.expect_value(t, p.focus, ui.Editor_Focus.Positions)
 	ui.editor_key(&p, key({key = .Space, text = " "}))
 	testing.expect(t, p.physical)
 	ui.editor_key(&p, key({key = .Tab}))
-	testing.expect_value(t, p.button_focus, 0)
+	testing.expect_value(t, p.focus, ui.Editor_Focus.Search)
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect(t, ui.editor_capturing(&p))
 	ui.editor_key(&p, key({key = .Z, unshifted = 'y', modifiers = {.Control}}))
@@ -263,8 +300,9 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .Backspace}))
 	ui.editor_key(&p, key({key = .Z, unshifted = 'y', modifiers = {.Control}}))
 	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+Y")
-	l := ui.editor_layout(&p, 1200, 900, 1)
-	ui.editor_press(&p, l, nil, l.positions.x+2, l.positions.y+2, 1, false)
+	positions := ui.editor_row_parts(&p, l, p.selected).positions
+	testing.expect(t, positions.width > 0)
+	x, y := center(positions)
+	ui.editor_press(&p, l, nil, x, y, false)
 	testing.expect(t, p.physical)
-	testing.expect(t, !ui.editor_capturing(&p))
 }

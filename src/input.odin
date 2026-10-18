@@ -46,7 +46,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		if w := window_find(app, e.window); w != nil {
 			w.tab_hover = -1
 			w.tab_pressed = false
-			w.editor.hover, w.editor.pressed = 0, 0
+			w.editor.hover_item, w.editor.hover_reset = -1, -1
 			w.split_overlay = false
 			for &view in w.views { view.header_hover, view.header_pressed = .None, .None }
 			w.dirty = true
@@ -145,22 +145,8 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		}
 		return
 	}
-	if w.editor.open {
-		pane_header_cancel(w)
-		logical := e
-		logical.key = commands.logical_key(e.key, e.unshifted)
-		chord := ui.editor_capturing(&w.editor) ? Clipboard_Chord.None : clipboard_chord(logical)
-		switch chord {
-		case .Copy: clipboard_copy(app, ui.editor_selection(&w.editor))
-		case .Cut: if clipboard_copy(app, ui.editor_selection(&w.editor)) { ui.editor_cut(&w.editor) }
-		case .Paste:
-			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-				ui.editor_paste(&w.editor, text)
-			}
-		case .None: editor_outcome(app, w, ui.editor_key(&w.editor, e))
-		}
-		w.dirty = true
-		if e.pressed { w.suppressed_key = e }
+	if settings_active(w) {
+		settings_key(app, w, e)
 		return
 	}
 	entry := focused_session(app, w)
@@ -220,13 +206,13 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
-	if w.editor.open {
-		ui.editor_text(&w.editor, text)
-		w.dirty = true
-		return
-	}
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
+		return
+	}
+	if settings_active(w) {
+		ui.editor_text(&w.editor, text)
+		w.dirty = true
 		return
 	}
 	if w.find.open {
@@ -251,8 +237,9 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 	case .Open_Setting:
 		w.dirty = true
 		editor_open(app, w)
-		if w.editor.open && ui.editor_select_key(&w.editor, app.palette.chosen) {
-			w.editor.editing = ui.editor_row(&w.editor).kind != .Shortcut
+		if w.editor.open && ui.editor_select_key(&w.editor, app.palette.chosen) &&
+		   ui.editor_row(&w.editor).kind != .Shortcut {
+			w.editor.focus = .Control
 		}
 	}
 }
@@ -276,23 +263,8 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		ui.tab_bar_hit_test(window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
 	w.dirty = true
 	if !e.pressed && e.button in w.header_buttons {
-		if w.editor.open || app.palette.open { pane_header_cancel(w) }
+		if settings_active(w) || app.palette.open { pane_header_cancel(w) }
 		if pane_header_button(app, w, e) { return }
-	}
-	if w.editor.open {
-		l := ui.editor_layout(&w.editor, f32(w.width), f32(w.height), w.scale)
-		ui.editor_pointer(&w.editor, l, f32(e.x), f32(e.y), e.pressed)
-		if e.button == .Left {
-			outcome: ui.Editor_Outcome
-			if e.pressed {
-				outcome = ui.editor_press(&w.editor, l, &app.ui_text, f32(e.x), f32(e.y), w.scale,
-					.Shift in e.modifiers)
-			} else {
-				outcome = ui.editor_release(&w.editor)
-			}
-			editor_outcome(app, w, outcome)
-		}
-		return
 	}
 	if app.palette.open {
 		p := &app.palette
@@ -311,6 +283,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button == .Left && !e.pressed {
 		if w.dragging.count > 0 { w.dragging = {}; return }
 		if w.tab_drag.pressed { w.tab_drag = {}; return }
+		if settings_active(w) { editor_outcome(app, w, ui.editor_release(&w.editor)) }
 		if w.selecting { selection_finish(app, w, x, y); return }
 	}
 	bar := window_tab_bar(app, w)
@@ -325,6 +298,13 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 					tab_press(w, index, x)
 				}
 			}
+		}
+		return
+	}
+	if settings_active(w) {
+		if e.button == .Left && e.pressed {
+			editor_outcome(app, w, ui.editor_press(&w.editor, settings_layout(w), &app.ui_text, x, y,
+				.Shift in e.modifiers))
 		}
 		return
 	}
@@ -358,13 +338,6 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
-	if w.editor.open {
-		l := ui.editor_layout(&w.editor, f32(w.width), f32(w.height), w.scale)
-		changed := ui.editor_pointer(&w.editor, l, x, y, .Left in e.buttons)
-		if .Left in e.buttons && ui.editor_drag(&w.editor, l, &app.ui_text, x, y, w.scale) { changed = true }
-		if changed { w.dirty = true }
-		return
-	}
 	hover := ui.tab_bar_hit_test(window_tab_bar(app, w), x, y)
 	if hover != w.tab_hover {
 		w.tab_hover = hover
@@ -386,16 +359,11 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 			return
 		}
 	}
-	enabled := !w.selecting && !app.palette.open && !(w.find.open && ui.find_contains(f32(w.width), w.scale, x, y))
-	split_overlay_update(w, x, y, enabled)
-	over_header := pane_header_pointer(w, x, y, enabled)
-	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
-	bar := window_tab_bar(app, w)
-	if y < bar.height { shape = .Arrow }
-	if resize, found := divider_cursor(w, x, y); found && w.header_buttons == {} { shape = resize }
-	pointer_set(app, w, shape)
 	if app.palette.open {
+		split_overlay_update(w, x, y, false)
+		pane_header_pointer(w, x, y, false)
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
+		pointer_set(app, w, ui.palette_input_contains(l, x, y) ? .Text : .Arrow)
 		if app.palette.query.dragging && .Left in e.buttons {
 			on_palette_outcome(app, w, ui.palette_input_drag(&app.palette, l, &app.ui_text, x, w.scale), 0)
 		} else {
@@ -403,6 +371,23 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		}
 		return
 	}
+	if settings_active(w) {
+		l := settings_layout(w)
+		changed := ui.editor_hover(&w.editor, l, x, y)
+		if .Left in e.buttons && ui.editor_drag(&w.editor, l, &app.ui_text, x, y) { changed = true }
+		if changed { w.dirty = true }
+		over_text := y >= window_tab_bar(app, w).height && ui.editor_over_text(&w.editor, l, x, y)
+		pointer_set(app, w, over_text ? .Text : .Arrow)
+		return
+	}
+	enabled := !w.selecting && !(w.find.open && ui.find_contains(f32(w.width), w.scale, x, y))
+	split_overlay_update(w, x, y, enabled)
+	over_header := pane_header_pointer(w, x, y, enabled)
+	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
+	bar := window_tab_bar(app, w)
+	if y < bar.height { shape = .Arrow }
+	if resize, found := divider_cursor(w, x, y); found && w.header_buttons == {} { shape = resize }
+	pointer_set(app, w, shape)
 	if over_header || w.header_buttons != {} { return }
 	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
@@ -426,13 +411,13 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	w.wheel_remainder -= f32(rows)
-	if w.editor.open {
-		ui.editor_select(&w.editor, w.editor.selected-rows)
-		w.dirty = true
-		return
-	}
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
+		return
+	}
+	if settings_active(w) {
+		ui.editor_scroll(&w.editor, rows)
+		w.dirty = true
 		return
 	}
 	if _, _, header := pane_header_hit(w, f32(e.x), f32(e.y)); header { return }
@@ -450,7 +435,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		pane_header_clear(w)
 		w.tab_pressed = false
 		w.tab_hover = -1
-		w.editor.hover, w.editor.pressed = 0, 0
+		w.editor.hover_item, w.editor.hover_reset = -1, -1
 		w.leader_until = {}
 		w.selecting, w.autoscrolling = false, false
 		w.split_overlay = false

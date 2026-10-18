@@ -7,7 +7,7 @@ import "aio:platform"
 motion_active :: proc(app: ^App) -> bool {
 	if ui.motion_active(app.palette.motion) || ui.notices_animating(&app.notices) { return true }
 	for w in app.windows {
-		if ui.motion_active(w.tab_underline) || ui.editor_animating(&w.editor) { return true }
+		if ui.motion_active(w.tab_underline) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		if pane_drag_animating(w) { return true }
 		if w.header_height > 0 || w.split_overlay {
@@ -43,8 +43,7 @@ update_motion :: proc(app: ^App) {
 			}
 		}
 		underline_changed := ui.motion_update(&w.tab_underline, now)
-		editor_changed := ui.editor_animate(&w.editor, now, app.animations)
-		if underline_changed || controls_changed || editor_changed { w.dirty = true }
+		if underline_changed || controls_changed { w.dirty = true }
 	}
 }
 

@@ -29,12 +29,14 @@ theme_from :: proc(t: settings.Theme) -> Theme {
 }
 
 @(private) UI_FAMILIES :: [?]string{"Segoe UI Variable Text", "Segoe UI"}
+@(private) ICON_FAMILIES :: [?]string{"Segoe Fluent Icons", "Segoe MDL2 Assets"}
 @(private) ELLIPSIS :: "…"
 
 Text :: struct {
 	fonts: ^font.System,
 	cache: ^glyphs.Cache,
-	family, strong_family: font.Family,
+	family, strong_family, icons: font.Family,
+	has_icons: bool,
 	size_px, ascent, line_height: f32,
 }
 
@@ -47,6 +49,12 @@ text_init :: proc(t: ^Text, fonts: ^font.System, cache: ^glyphs.Cache, size_px: 
 			t.family, t.strong_family = family, family
 			if strong, strong_error := font.family_load(fonts, name, true); strong_error == .None {
 				t.strong_family = strong
+			}
+			for icon_name in ICON_FAMILIES {
+				if icons, icon_error := font.family_load(fonts, icon_name); icon_error == .None {
+					t.icons, t.has_icons = icons, true
+					break
+				}
 			}
 			text_set_size(t, size_px)
 			return true
@@ -232,4 +240,15 @@ draw_glyph_centered :: proc(t: ^Text, list: ^render.Draw_List, r: rune, area: re
 		log.error("ui: the draw list ran out of memory")
 	}
 	return .Ok
+}
+
+// Draws an icon-font glyph centered in `area`, sized to `fraction` of the area's height. Without an icon
+// font nothing is drawn.
+draw_icon :: proc(t: ^Text, list: ^render.Draw_List, icon: rune, area: render.Rect, c: render.Color,
+	fraction: f32) -> glyphs.Result {
+	if !t.has_icons { return .Ok }
+	icons := t^
+	icons.family = t.icons
+	text_set_size(&icons, area.height*fraction*0.6)
+	return draw_glyph_centered(&icons, list, icon, area, c)
 }

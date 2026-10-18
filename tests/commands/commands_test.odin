@@ -3,7 +3,6 @@ package commands_test
 import "base:runtime"
 import "core:testing"
 import "aio:commands"
-import "aio:fuzzy"
 import "aio:input"
 
 @(test)
@@ -108,85 +107,16 @@ labels :: proc(t: ^testing.T) {
 }
 
 @(test)
-search_and_errors :: proc(t: ^testing.T) {
-	registry := commands.create()
-	defer commands.destroy(&registry)
-	for command in ([?]commands.Command{
-		{id = 1, name = "restart", title = "Restart Shell"},
-		{id = 2, name = "reload", title = "Reload Settings"},
-		{id = 3, name = "restart_other", title = "Restart Shell"},
-		{id = 4, name = "unicode", title = "KςÉ"},
-	}) {
-		testing.expect_value(t, commands.register(&registry, command), commands.Error.None)
-	}
-	scratch, allocation_error := new(fuzzy.Scratch)
-	if allocation_error != nil { testing.fail_now(t, "scratch allocation failed") }
-	defer free(scratch)
-	out: [4]commands.Search_Result
-	positions: [12]int
-	count, search_error := commands.search(
-		&registry, "rs", out[:], positions[:], scratch, context.allocator,
-	)
-	testing.expect_value(t, search_error, commands.Error.None)
-	testing.expect_value(t, count, 3)
-	testing.expect_value(t, out[0].command.id, commands.Command_Id(1))
-	testing.expect_value(t, out[1].command.id, commands.Command_Id(3))
-	testing.expect_value(t, out[0].positions[0], 0)
-	testing.expect_value(t, out[0].positions[1], 8)
-	count, search_error = commands.search(&registry, "", out[:], nil, scratch, context.allocator)
-	testing.expect_value(t, search_error, commands.Error.None)
-	testing.expect_value(t, count, 4)
-	for result, index in out {
-		testing.expect_value(t, result.command.id, commands.Command_Id(index+1))
-		testing.expect_value(t, len(result.positions), 0)
-	}
-	count, search_error = commands.search(
-		&registry, "kσé", out[:], positions[:], scratch, context.allocator,
-	)
-	testing.expect_value(t, search_error, commands.Error.None)
-	testing.expect_value(t, count, 1)
-	testing.expect_value(t, out[0].positions[1], 3)
-	_, small_out := commands.search(&registry, "", out[:1], nil, scratch, context.allocator)
-	testing.expect_value(t, small_out, commands.Error.Output_Too_Small)
-	_, small_positions := commands.search(
-		&registry, "abc", out[:], positions[:1], scratch, context.allocator,
-	)
-	testing.expect_value(t, small_positions, commands.Error.Output_Too_Small)
-	_, invalid := commands.search(&registry, "\xff", out[:], positions[:], scratch, context.allocator)
-	testing.expect_value(t, invalid, commands.Error.Invalid_UTF8)
-	for successful_allocations in 0..<3 {
-		failure := Failure{context.allocator, successful_allocations}
-		allocator := runtime.Allocator{failing_allocator, &failure}
-		_, no_memory := commands.search(&registry, "", out[:], nil, scratch, allocator)
-		testing.expect_value(t, no_memory, commands.Error.Out_Of_Memory)
-	}
-}
-
-@(test)
 enabled_state :: proc(t: ^testing.T) {
 	registry := commands.create()
 	defer commands.destroy(&registry)
 	command := commands.Command{id = 1, name = "quit", title = "Quit"}
 	testing.expect_value(t, commands.register(&registry, command), commands.Error.None)
-	scratch, allocation_error := new(fuzzy.Scratch)
-	if allocation_error != nil { testing.fail_now(t, "scratch allocation failed") }
-	defer free(scratch)
-	out: [1]commands.Search_Result
-	positions: [1]int
 	testing.expect(t, !commands.set_enabled(&registry, 99, false))
 	testing.expect(t, !commands.set_enabled(&registry, 99, true))
-	for query in ([?]string{"", "q"}) {
-		for enabled in ([?]bool{true, false, true}) {
-			testing.expect(t, commands.set_enabled(&registry, 1, enabled))
-			count, err := commands.search(
-				&registry, query, out[:], positions[:], scratch, context.allocator,
-			)
-			testing.expect_value(t, err, commands.Error.None)
-			testing.expect_value(t, count, int(enabled))
-			if count == 1 {
-				testing.expect_value(t, out[0].command.id, commands.Command_Id(1))
-			}
-		}
+	for enabled in ([?]bool{true, false, true}) {
+		testing.expect(t, commands.set_enabled(&registry, 1, enabled))
+		testing.expect_value(t, commands.find(&registry, commands.Command_Id(1)).disabled, !enabled)
 	}
 }
 

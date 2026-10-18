@@ -29,8 +29,15 @@ function Assert-Value($Actual, $Expected, [string] $Label) {
     Write-Output "PASS $Label"
 }
 
+function Close-Settings {
+    if ((Read-State)['settings.open'] -eq 'true') {
+        Invoke-Aio command settings.open
+        Invoke-Aio command tab.close
+    }
+}
+
 function Open-Field([string] $Key, [switch] $NoFocus) {
-    while ((Read-State)['settings.open'] -eq 'true') { Invoke-Aio key Esc }
+    Close-Settings
     Invoke-Aio key 'Ctrl+,'
     Invoke-Aio type $Key
     Assert-Value (Read-State)['settings.key'] $Key "select $Key"
@@ -74,19 +81,21 @@ try {
     Assert-Value (Read-State)['settings.error'] 'true' 'external edit conflict reported'
     Assert-Value ([IO.File]::ReadAllText($path)) $external 'external edit preserved'
 
-    Open-Field window.show_tab_bar_with_one_tab
+    Open-Field window.show_tab_bar_with_one_tab -NoFocus
     Assert-Value (Read-State)['settings.title'].Trim('"') 'Show Tab Bar With One Tab' 'friendly setting name'
-    Invoke-Aio key Space
-    $state = Read-State
-    Assert-Value $state['settings.error'] 'false' 'boolean saved despite unrelated unknown key'
-    Assert-Value ($state['pane.0.rect'] -split ',')[1] '5' 'tab bar updates live'
+    Invoke-Aio key Enter
+    Assert-Value (Read-State)['settings.error'] 'false' 'boolean saved despite unrelated unknown key'
+    Assert-Value (Read-State)['settings.value'] 'false' 'Enter flips an inline toggle'
+    Close-Settings
+    Assert-Value ((Read-State)['pane.0.rect'] -split ',')[1] '5' 'tab bar updates live'
     if ([IO.File]::ReadAllText($path) -notlike '*# external comment*future.key = retained*') {
         throw 'Unrelated text was lost.'
     }
     Open-Field shell.directory
     Save-Value $repo
-    Assert-Value (Read-State)['session.id'] $originalSession 'shell setting does not restart session'
     if ((Read-State)['settings.message'] -notlike '*new or restarted shells*') { throw 'Missing restart guidance.' }
+    Close-Settings
+    Assert-Value (Read-State)['session.id'] $originalSession 'shell setting does not restart session'
 
     Open-Field input.leader
     Capture-Keys Ctrl+Shift+P
@@ -110,7 +119,7 @@ try {
     if ([IO.File]::ReadAllText($path) -notmatch '(?m)^keys\.tab\.new = Ctrl\+Shift\+T, Leader\+T\r?$') {
         throw 'Captured binding not persisted.'
     }
-    Invoke-Aio key Esc
+    Close-Settings
     Invoke-Aio key Ctrl+Shift+T
     Assert-Value (Read-State)['tabs.count'] '2' 'direct shortcut remains available'
     Invoke-Aio key Ctrl+B
@@ -137,7 +146,7 @@ try {
     Open-Field keys.tab.new -NoFocus
     Invoke-Aio key Ctrl+R
     Assert-Value (Read-State)['settings.error'] 'false' 'shortcut reset saves direct defaults'
-    Invoke-Aio key Esc
+    Close-Settings
     Invoke-Aio key Ctrl+Shift+T
     Assert-Value (Read-State)['tabs.count'] '4' 'default shortcut restored'
     Open-Field colors.cursor
@@ -146,8 +155,15 @@ try {
     if ([IO.File]::ReadAllText($path) -notmatch '(?m)^colors\.cursor = #ff8800\r?$') { throw 'Color not persisted as hex.' }
     Save-Value 'hsl(120, 100%, 25%)'
     Assert-Value (Read-State)['settings.value'] '#008000' 'pasted hsl color normalized'
-    while ((Read-State)['settings.open'] -eq 'true') { Invoke-Aio key Esc }
+    Close-Settings
     Invoke-Aio key 'Ctrl+,'
+    Assert-Value (Read-State)['settings.active'] 'true' 'settings opens as the selected tab'
+    Assert-Value (Read-State)['tabs.count'] '5' 'settings tab joins the tab strip'
+    Invoke-Aio key Ctrl+Tab
+    Assert-Value (Read-State)['settings.active'] 'false' 'tab shortcuts leave the settings tab'
+    Assert-Value (Read-State)['settings.open'] 'true' 'settings tab stays open in the background'
+    Invoke-Aio key 'Ctrl+,'
+    Assert-Value (Read-State)['tabs.count'] '5' 'reopening selects the existing settings tab'
     Invoke-Aio type panes
     Assert-Value (Read-State)['settings.key'] 'pane.gap' 'group search finds pane settings'
     Invoke-Aio key Ctrl+N
@@ -159,6 +175,10 @@ try {
     Invoke-Aio type 'stray text'
     Invoke-Aio key Ctrl+A Backspace
     Assert-Value (Read-State)['palette.query'] '""' 'Ctrl+A selects and clears palette query'
+    Invoke-Aio type term
+    if ([int](Read-State)['palette.items'] -lt 3) { throw 'Group search for term found too little.' }
+    Write-Output 'PASS palette fuzzy-matches the Terminal group'
+    Invoke-Aio key Ctrl+A Backspace
     Invoke-Aio type panes
     Invoke-Aio key Ctrl+N Ctrl+N Ctrl+P
     Assert-Value (Read-State)['palette.selected'] '1' 'palette Ctrl+N and Ctrl+P navigate'
@@ -168,7 +188,7 @@ try {
     Invoke-Aio key Enter
     Assert-Value (Read-State)['settings.key'] 'pane.gap' 'palette opens the chosen setting'
     Assert-Value (Read-State)['settings.editing'] 'true' 'palette focuses the setting value'
-    while ((Read-State)['settings.open'] -eq 'true') { Invoke-Aio key Esc }
+    Close-Settings
     Invoke-Aio command settings.open
     Invoke-Aio dpi 168
     Assert-Value (Read-State)['settings.open'] 'true' 'settings remains open at 175 percent DPI'

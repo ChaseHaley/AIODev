@@ -1,6 +1,7 @@
 package ui
 
 import "base:runtime"
+import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
 import "aio:commands"
@@ -34,6 +35,7 @@ Palette_Result :: struct {
 	setting: int,
 	score: f64,
 	positions: []int,
+	title_match: bool,
 }
 
 Palette :: struct {
@@ -42,9 +44,7 @@ Palette :: struct {
 	query: Text_Field,
 	selected, scroll: int,
 	results: [dynamic]Palette_Result,
-	found: [dynamic]commands.Search_Result,
-	ranked: [dynamic]fuzzy.Ranked,
-	positions, setting_positions: [dynamic]int,
+	positions: [dynamic]int,
 	settings: []Palette_Setting,
 	// The setting key of the last Open_Setting outcome.
 	chosen: string,
@@ -60,10 +60,7 @@ Palette_Layout :: struct {
 palette_init :: proc(p: ^Palette, settings: []Palette_Setting, allocator := context.allocator) -> runtime.Allocator_Error {
 	p.query.bytes = make([dynamic]u8, allocator)
 	p.results = make([dynamic]Palette_Result, allocator)
-	p.found = make([dynamic]commands.Search_Result, allocator)
-	p.ranked = make([dynamic]fuzzy.Ranked, allocator)
 	p.positions = make([dynamic]int, allocator)
-	p.setting_positions = make([dynamic]int, allocator)
 	p.settings = settings
 	err: runtime.Allocator_Error
 	p.scratch, err = new(fuzzy.Scratch, allocator)
@@ -74,10 +71,7 @@ palette_destroy :: proc(p: ^Palette) {
 	free(p.scratch, p.query.bytes.allocator)
 	delete(p.query.bytes)
 	delete(p.results)
-	delete(p.found)
-	delete(p.ranked)
 	delete(p.positions)
-	delete(p.setting_positions)
 	p^ = {}
 }
 
@@ -109,17 +103,6 @@ command_category :: proc(name: string) -> string {
 	}
 	return "Commands"
 }
-
-// Whether the whole query names a category, ignoring case and a plural s on either side.
-@(private)
-names_category :: proc(query, category: string) -> bool {
-	if len(query) < 3 { return false }
-	singular :: proc(s: string) -> string {
-		return len(s) > 3 && (s[len(s)-1] == 's' || s[len(s)-1] == 'S') ? s[:len(s)-1] : s
-	}
-	return strings.equal_fold(query, category) || strings.equal_fold(singular(query), singular(category))
-}
-
 palette_result_name :: proc(p: ^Palette, r: Palette_Result) -> string {
 	return r.command != nil ? r.command.name : p.settings[r.setting].key
 }
@@ -128,62 +111,49 @@ palette_result_title :: proc(p: ^Palette, r: Palette_Result) -> string {
 	return r.command != nil ? r.command.title : p.settings[r.setting].title
 }
 
+// Fuzzy-matches the title and the group, keeping the entry when either matches. Title matches carry
+// highlights and rank ahead of entries found only through their group.
 @(private)
-palette_has :: proc(p: ^Palette, command: ^commands.Command, setting: int) -> bool {
-	for r in p.results { if r.command == command && r.setting == setting { return true } }
-	return false
+consider :: proc(p: ^Palette, command: ^commands.Command, setting: int, title, group, query: string, width: int) {
+	by_title, title_error := fuzzy.score(query, title, p.scratch)
+	by_group, group_error := fuzzy.score(query, group, p.scratch)
+	if title_error != .None || group_error != .None { return }
+	if !by_title.matched && !by_group.matched { return }
+	result := Palette_Result{command = command, setting = setting, score = by_group.score}
+	if by_title.matched {
+		start := len(p.results)*width
+		highlights := p.positions[start:start+width]
+		if _, err := fuzzy.match_positions(query, title, highlights, p.scratch); err == .None {
+			result.positions = highlights
+		}
+		result.score, result.title_match = by_title.score, true
+	}
+	append(&p.results, result)
 }
 
-// Commands and, once the query is not empty, settings ranked together by fuzzy title score. A query that
-// names a settings group or command category, such as "panes", lists its members first.
+// With an empty query, every enabled command in registry order; otherwise commands and settings whose
+// title or group fuzzy-matches the query.
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
-	width := max(1, utf8.rune_count(query))
 	clear(&p.results)
-	resize(&p.found, len(registry.items))
-	resize(&p.positions, len(registry.items)*width)
-	matched, err := commands.search(registry, query, p.found[:], p.positions[:], p.scratch)
-	if err != .None { matched = 0 }
-	settings_matched := 0
-	trimmed := strings.trim_space(query)
-	if trimmed != "" {
-		titles := make([]string, len(p.settings), context.temp_allocator)
-		for s, i in p.settings { titles[i] = s.title }
-		resize(&p.ranked, len(p.settings))
-		resize(&p.setting_positions, len(p.settings)*width)
-		rank_error: fuzzy.Error
-		settings_matched, rank_error = fuzzy.rank(query, titles, p.ranked[:], p.scratch)
-		if rank_error != .None { settings_matched = 0 }
-	}
-	reserve(&p.results, matched+len(p.settings))
-	if trimmed != "" {
-		for setting, i in p.settings {
-			if names_category(trimmed, setting.group) { append(&p.results, Palette_Result{nil, i, 0, nil}) }
-		}
+	if strings.trim_space(query) == "" || !utf8.valid_string(query) {
 		for &command in registry.items {
-			if !command.disabled && names_category(trimmed, command_category(command.name)) {
-				append(&p.results, Palette_Result{&command, -1, 0, nil})
+			if !command.disabled { append(&p.results, Palette_Result{command = &command, setting = -1}) }
+		}
+	} else {
+		width := utf8.rune_count(query)
+		resize(&p.positions, (len(registry.items)+len(p.settings))*width)
+		for &command in registry.items {
+			if !command.disabled {
+				consider(p, &command, -1, command.title, command_category(command.name), query, width)
 			}
 		}
-	}
-	c, s := 0, 0
-	for c < matched || s < settings_matched {
-		if s >= settings_matched || (c < matched && p.found[c].score >= p.ranked[s].score) {
-			found := p.found[c]
-			if !palette_has(p, found.command, -1) {
-				append(&p.results, Palette_Result{found.command, -1, found.score, found.positions})
-			}
-			c += 1
-			continue
-		}
-		index := p.ranked[s].index
-		s += 1
-		if palette_has(p, nil, index) { continue }
-		highlights := p.setting_positions[(s-1)*width:s*width]
-		if _, position_error := fuzzy.match_positions(query, p.settings[index].title, highlights, p.scratch);
-		   position_error != .None { highlights = nil }
-		append(&p.results, Palette_Result{nil, index, p.ranked[s-1].score, highlights})
+		for s, i in p.settings { consider(p, nil, i, s.title, s.group, query, width) }
+		slice.stable_sort_by(p.results[:], proc(a, b: Palette_Result) -> bool {
+			if a.title_match != b.title_match { return a.title_match }
+			return a.score > b.score
+		})
 	}
 	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
 	keep_selection_visible(p)

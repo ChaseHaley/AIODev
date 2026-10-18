@@ -44,6 +44,13 @@ function Assert-Conflict([string] $Winner) {
     Write-Output "PASS named conflict and source locations: $notice"
 }
 
+function Close-Settings {
+    if ((Read-State)['settings.open'] -eq 'true') {
+        Invoke-Aio command settings.open
+        Invoke-Aio command tab.close
+    }
+}
+
 function Open-Shortcut {
     Invoke-Aio key Ctrl+Shift+P
     Invoke-Aio type 'Change Shortcut'
@@ -138,7 +145,7 @@ try {
     Invoke-Aio key Esc
     Invoke-Aio expect state settings.capturing=false
     Invoke-Aio expect state settings.open=true
-    Invoke-Aio key Esc
+    Close-Settings
     Assert-Value ([IO.File]::ReadAllText($path)) $beforeCancel 'cancel leaves shortcut file unchanged'
     Open-Shortcut
     Invoke-Aio key Shift+Tab Space Tab Tab
@@ -148,7 +155,7 @@ try {
     if ([IO.File]::ReadAllText($path) -notlike '*keys.tab.new = Physical+Ctrl+Y*') { throw 'UI did not persist shortcut.' }
     Write-Output 'PASS shortcut UI and file share the physical binding model'
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $data 'shortcut-editor.png')
-    Invoke-Aio key Esc
+    Close-Settings
     Invoke-Aio key Ctrl+Y
     Invoke-Aio expect state tabs.count=3
     Invoke-Aio key Ctrl+Shift+T
@@ -156,7 +163,7 @@ try {
     Open-Shortcut
     Invoke-Aio key Ctrl+R
     Invoke-Aio expect state settings.error=false
-    Invoke-Aio key Esc
+    Close-Settings
     Invoke-Aio key Ctrl+Shift+T
     Invoke-Aio expect state tabs.count=4
     Configure 'input.leader = Ctrl+Shift+T'
@@ -176,7 +183,7 @@ try {
     if ((Read-State)['settings.message'] -notlike '*app.command_palette*') { throw 'UI warning does not name both bindings.' }
     Write-Output 'PASS UI saves source-order conflict as a named nonfatal warning'
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $data 'shortcut-warning.png')
-    Invoke-Aio key Esc
+    Close-Settings
     Assert-LeaderDelivery Ctrl+B Ctrl+B 2
     Assert-LeaderDelivery Physical+Ctrl+B Ctrl+B 2
     Assert-LeaderDelivery Esc Esc 27

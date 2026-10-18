@@ -4,6 +4,8 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "aio:commands"
+import "aio:layout"
+import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
@@ -34,14 +36,15 @@ shortcut_group :: proc(name: string) -> string {
 	return "Other Shortcuts"
 }
 
-editor_open :: proc(app: ^App, w: ^Window) {
-	pane_header_cancel(w)
+// Fills the editor from the settings file; the settings tab shows it.
+@(private)
+settings_load :: proc(app: ^App, w: ^Window) -> bool {
 	p := &w.editor
 	ui.editor_destroy(p)
 	data, err := os.read_entire_file(app.settings_path, context.allocator)
 	if err != nil {
 		notify(app, .Error, "Could not read settings. Check the settings path and permissions.")
-		return
+		return false
 	}
 	p.source = string(data)
 	s, diagnostics, parse_error := settings.parse(p.source)
@@ -49,7 +52,7 @@ editor_open :: proc(app: ^App, w: ^Window) {
 	if parse_error != nil {
 		ui.editor_destroy(p)
 		notify(app, .Error, "Could not open settings.")
-		return
+		return false
 	}
 	defer settings.destroy(&s)
 	@(static, rodata) schema := settings.SCHEMA
@@ -71,7 +74,7 @@ editor_open :: proc(app: ^App, w: ^Window) {
 		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {
 			ui.editor_destroy(p)
 			notify(app, .Error, "Could not allocate settings editor.")
-			return
+			return false
 		}
 	}
 	for command in app.registry.items {
@@ -86,23 +89,64 @@ editor_open :: proc(app: ^App, w: ^Window) {
 		if ui.editor_add(p, row, group) != nil {
 			ui.editor_destroy(p)
 			notify(app, .Error, "Could not allocate settings editor.")
-			return
+			return false
 		}
 		ui.editor_collapse(p, group, true)
 	}
 	p.leader = app.leader
 	p.open = true
 	ui.editor_filter(p)
+	if len(diagnostics) > 0 {
+		ui.editor_message(p,
+			"File has diagnostics; invalid settings show defaults. Only the selected key is changed.", true)
+	}
+	return true
+}
+
+settings_tab_index :: proc(workspace: ^Workspace) -> int {
+	for tab, i in workspace.tabs {
+		if root, ok := tab.tree.nodes[tab.tree.root].(layout.Pane); ok && root.content.kind == .Settings { return i }
+	}
+	return -1
+}
+
+// Whether the window shows its settings tab, which then takes keyboard and pointer input.
+settings_active :: proc(w: ^Window) -> bool {
+	if w.tree == nil || w.tree.root == layout.INVALID_NODE { return false }
+	pane, ok := w.tree.nodes[w.tree.root].(layout.Pane)
+	return ok && pane.content.kind == .Settings
+}
+
+settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {
+	r := len(w.panes) > 0 ? w.panes[0].rect : {}
+	return ui.editor_layout({r.x, r.y, r.width, r.height}, w.scale)
+}
+
+// Selects the settings tab, creating it and loading the settings file when the workspace has none.
+editor_open :: proc(app: ^App, w: ^Window) {
+	pane_header_cancel(w)
 	ui.palette_close(&app.palette)
 	find_close(w, focused_session(app, w))
 	leader_cancel(w)
 	w.selecting, w.autoscrolling = false, false
 	w.dragging = {}
-	w.dirty = true
-	if len(diagnostics) > 0 {
-		ui.editor_message(p,
-			"File has diagnostics; invalid settings show defaults. Only the selected key is changed.", true)
+	if index := settings_tab_index(w.workspace); index >= 0 {
+		tab_select(app, w, index)
+		return
 	}
+	if !settings_load(app, w) { return }
+	tab, err := new(Tab)
+	if err != nil || layout.init(&tab.tree, {.Settings, 0}) != nil {
+		if tab != nil { layout.destroy(&tab.tree); free(tab) }
+		ui.editor_destroy(&w.editor)
+		notify(app, .Error, "Could not open the settings tab.")
+		return
+	}
+	w.workspace.next_tab_id += 1
+	tab.id = w.workspace.next_tab_id
+	tab.title = strings.clone("Settings")
+	append(&w.workspace.tabs, tab)
+	tab_select(app, w, len(w.workspace.tabs)-1)
 }
 
 @(private)
@@ -135,7 +179,6 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p := &w.editor
 	if outcome == .None { return }
 	w.dirty = true
-	if outcome == .Closed { ui.editor_destroy(p); return }
 	if outcome != .Save && outcome != .Reset { return }
 	row := ui.editor_row(p)
 	if row == nil { return }
@@ -176,7 +219,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	delete(row.value)
 	row.value = strings.clone(value)
 	ui.field_set(&p.value, value)
-	if row.kind == .Shortcut { p.editing, p.capturing = false, false }
+	if row.kind == .Shortcut { p.focus, p.capturing = .Search, false }
 	reload_settings(app)
 	p.leader = app.leader
 	text := "Saved and applied."
@@ -187,4 +230,50 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		text = "Saved. Initial size applies to new sessions."
 	}
 	ui.editor_message(p, text, false)
+}
+
+// Plain and shifted keys type or navigate, and these Ctrl chords edit text or move through the list.
+@(private)
+editor_owns :: proc(e: platform.Key_Event) -> bool {
+	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
+	if modifiers & {.Control, .Alt, .Super} == {} { return true }
+	#partial switch e.key {
+	case .Arrow_Left, .Arrow_Right, .Home, .End: return modifiers-{.Shift} == {.Control}
+	case .A, .N, .P, .R, .Backspace, .Delete: return modifiers == {.Control}
+	}
+	return false
+}
+
+// Keys on the settings tab. Recording a shortcut keeps every key; otherwise text fields keep their
+// clipboard and editing chords and other app shortcuts still run, so tabs can be switched or closed.
+settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+	pane_header_cancel(w)
+	p := &w.editor
+	w.dirty = true
+	if e.pressed { w.suppressed_key = e }
+	if ui.editor_capturing(p) {
+		editor_outcome(app, w, ui.editor_key(p, e))
+		return
+	}
+	logical := e
+	logical.key = commands.logical_key(e.key, e.unshifted)
+	switch clipboard_chord(logical) {
+	case .Copy:
+		clipboard_copy(app, ui.editor_selection(p))
+		return
+	case .Cut:
+		if clipboard_copy(app, ui.editor_selection(p)) { ui.editor_cut(p) }
+		return
+	case .Paste:
+		if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok { ui.editor_paste(p, text) }
+		return
+	case .None:
+	}
+	if e.pressed && !editor_owns(logical) {
+		if action, found := shortcut_action(app, e); found {
+			run_action(app, w, action)
+			return
+		}
+	}
+	editor_outcome(app, w, ui.editor_key(p, e))
 }

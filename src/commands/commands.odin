@@ -3,7 +3,6 @@ package commands
 import "core:reflect"
 import "core:strings"
 import "core:unicode/utf8"
-import "aio:fuzzy"
 import "aio:input"
 
 Command_Id :: distinct u32
@@ -29,7 +28,6 @@ Error :: enum {
 	Invalid_Shortcut,
 }
 Registry :: struct { items: [dynamic]Command }
-Search_Result :: struct { command: ^Command, score: f64, positions: []int }
 
 create :: proc(allocator := context.allocator) -> Registry {
 	registry: Registry
@@ -337,56 +335,6 @@ shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 	if len(out)-length < len(key) { return "", .Output_Too_Small }
 	length += copy(out[length:], key)
 	return string(out[:length]), .None
-}
-
-@(require_results)
-search :: proc(
-	registry: ^Registry,
-	query: string,
-	out: []Search_Result,
-	positions: []int,
-	scratch: ^fuzzy.Scratch,
-	allocator := context.temp_allocator,
-) -> (int, Error) {
-	if !utf8.valid_string(query) { return 0, .Invalid_UTF8 }
-	count := len(registry.items)
-	width := utf8.rune_count(query)
-	if len(out) < count || (width > 0 && len(positions)/width < count) {
-		return 0, .Output_Too_Small
-	}
-	titles, title_error := make([]string, count, allocator)
-	if title_error != nil { return 0, .Out_Of_Memory }
-	defer delete(titles, allocator)
-	indices, index_error := make([]int, count, allocator)
-	if index_error != nil { return 0, .Out_Of_Memory }
-	defer delete(indices, allocator)
-	ranked, rank_error := make([]fuzzy.Ranked, count, allocator)
-	if rank_error != nil { return 0, .Out_Of_Memory }
-	defer delete(ranked, allocator)
-	n := 0
-	for item, index in registry.items {
-		if item.disabled { continue }
-		titles[n], indices[n] = item.title, index
-		n += 1
-	}
-	matched, err := fuzzy.rank(query, titles[:n], ranked[:n], scratch)
-	switch err {
-	case .None:
-	case .Invalid_UTF8: return 0, .Invalid_UTF8
-	case .Output_Too_Small: unreachable()
-	}
-	for result, index in ranked[:matched] {
-		command := &registry.items[indices[result.index]]
-		highlights := positions[index*width:(index+1)*width]
-		_, position_error := fuzzy.match_positions(query, command.title, highlights, scratch)
-		switch position_error {
-		case .None:
-		case .Invalid_UTF8: return 0, .Invalid_UTF8
-		case .Output_Too_Small: unreachable()
-		}
-		out[index] = {command, result.score, highlights}
-	}
-	return matched, .None
 }
 
 active_shortcuts :: proc(command: ^Command) -> []Shortcut {

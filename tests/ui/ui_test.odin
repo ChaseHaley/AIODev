@@ -27,6 +27,7 @@ palette_settings := [?]ui.Palette_Setting{
 	{"pane.gap", "Pane Gap", "Panes"},
 	{"pane.show_headers", "Show Pane Headers", "Panes"},
 	{"font.size", "Font Size", "Font"},
+	{"terminal.copy_on_select", "Copy on Select", "Terminal"},
 }
 
 key :: proc(k: platform.Key_Event) -> platform.Key_Event {
@@ -239,9 +240,11 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	names := make([dynamic]string, context.temp_allocator)
 	for r in p.results { append(&names, ui.palette_result_name(&p, r)) }
 	testing.expect_value(t, len(names), 3)
-	testing.expect_value(t, names[0], "pane.gap")
-	testing.expect_value(t, names[1], "pane.show_headers")
-	testing.expect_value(t, names[2], "pane.split_right")
+	testing.expect_value(t, names[0], "pane.show_headers")
+	testing.expect(t, p.results[0].positions != nil)
+	testing.expect_value(t, names[1], "pane.split_right")
+	testing.expect_value(t, names[2], "pane.gap")
+	testing.expect(t, p.results[2].positions == nil)
 	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
 	testing.expect_value(t, p.selected, 1)
 	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
@@ -250,6 +253,7 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
 	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
 	testing.expect_value(t, p.selected, 0)
+	ui.palette_key(&p, &registry, key({key = .End}))
 	testing.expect_value(t, ui.palette_query(&p), "panes")
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
@@ -275,4 +279,29 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	ui.palette_key(&p, &registry, key({key = .Arrow_Left, modifiers = {.Control}}))
 	ui.palette_text(&p, &registry, "x")
 	testing.expect_value(t, ui.palette_query(&p), "xqu")
+}
+
+@(test)
+palette_fuzzy_matches_titles_and_groups_with_highlights :: proc(t: ^testing.T) {
+	registry := registry_create(t)
+	defer commands.destroy(&registry)
+	p: ui.Palette
+	testing.expect_value(t, ui.palette_init(&p, palette_settings[:]), nil)
+	defer ui.palette_destroy(&p)
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "term")
+	names := make([dynamic]string, context.temp_allocator)
+	for r in p.results { append(&names, ui.palette_result_name(&p, r)) }
+	testing.expect_value(t, len(names), 2)
+	testing.expect_value(t, names[0], "terminal.restart_shell")
+	testing.expect_value(t, names[1], "terminal.copy_on_select")
+	for query in ([?]string{"settin", "setting", "settings"}) {
+		ui.palette_open(&p, &registry)
+		ui.palette_text(&p, &registry, query)
+		testing.expectf(t, len(p.results) == 1, "%s matched %d", query, len(p.results))
+		if len(p.results) == 1 {
+			testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "settings.reload")
+			testing.expectf(t, len(p.results[0].positions) == len(query), "%s lost its highlights", query)
+		}
+	}
 }

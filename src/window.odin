@@ -380,13 +380,21 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	for pane in w.panes {
 		card := len(w.list.rects)
 		window_card_draw(app, w, pane)
+		if pane.content.kind == .Settings {
+			if card < len(w.list.rects) { w.list.rects[card].color = app.theme.pane }
+			result := ui.editor_draw(&w.editor, settings_layout(w), &w.list, &app.ui_text, app.theme,
+				w.focused && !app.palette.open)
+			if result != .Ok { return frame, result }
+			window_card_outline(app, w, pane)
+			continue
+		}
 		entry := session_find(app, pane.content.id)
 		view := pane_view(w, pane.content)
 		if entry == nil || view == nil {
 			continue
 		}
 		content_focused := w.focused && pane.node == w.tree.focus && !app.palette.open &&
-			!w.find.open && !w.editor.open
+			!w.find.open
 		style := term_view.Style{
 			family = app.family,
 			selection_background = color(c.selection_background),
@@ -436,10 +444,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		)
 		ui.fade_draw(&w.list, layers, rects, glyph_count, app.palette.motion.value,
 			app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0)
-		if result != .Ok { return frame, result }
-	}
-	if w.editor.open {
-		result := ui.editor_draw(&w.editor, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)
 		if result != .Ok { return frame, result }
 	}
 	return frame, ui.notices_draw(&app.notices, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)

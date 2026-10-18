@@ -5,6 +5,7 @@ import "core:log"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
+import "aio:ui"
 
 Tab :: struct {
 	id: u32,
@@ -110,6 +111,7 @@ tab_new :: proc(app: ^App, w: ^Window) {
 }
 
 pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f32 = 0.5, focus := true) {
+	if settings_active(w) { return }
 	if !session_open(app) { notify(app, .Error, "Could not create a pane."); return }
 	id := app.next_session_id
 	node, err := layout.split_direction(w.tree, w.tree.focus, direction, ratio, {.Terminal, id})
@@ -153,7 +155,10 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 		for w in app.windows { if w.workspace == workspace { focus_leave(app, w) } }
 	}
 	for node in tab.tree.nodes {
-		if pane, ok := node.(layout.Pane); ok { session_close(app, pane.content.id) }
+		pane, ok := node.(layout.Pane)
+		if !ok { continue }
+		if pane.content.kind == .Terminal { session_close(app, pane.content.id); continue }
+		for w in app.windows { if w.workspace == workspace { ui.editor_destroy(&w.editor) } }
 	}
 	ordered_remove(&workspace.tabs, index)
 	layout.destroy(&tab.tree)
@@ -204,7 +209,7 @@ close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 	for workspace in app.workspaces {
 		for tab, tab_index in workspace.tabs {
 			for node, node_index in tab.tree.nodes {
-				if pane, ok := node.(layout.Pane); ok && pane.content.id == id {
+				if pane, ok := node.(layout.Pane); ok && pane.content == {.Terminal, id} {
 					if len(workspace.tabs) == 1 && tab.tree.root == layout.Node_Id(node_index) {
 						return false
 					}
@@ -220,6 +225,7 @@ close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 @(private)
 tab_update_title :: proc(app: ^App, tab: ^Tab) {
 	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+	if pane.content.kind == .Settings { return }
 	title: string
 	if entry := session_find(app, pane.content.id); entry != nil {
 		title = term.title(entry.session)
@@ -232,7 +238,7 @@ session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 	for workspace in app.workspaces {
 		for tab in workspace.tabs {
 			pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-			if pane.content.id == id { tab_update_title(app, tab) }
+			if pane.content == {.Terminal, id} { tab_update_title(app, tab) }
 		}
 	}
 	for window in app.windows {

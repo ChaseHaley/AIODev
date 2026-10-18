@@ -247,7 +247,9 @@ when AIO_CONTROL {
 				{"settings.filter", string(w.editor.filter.bytes[:])},
 				{"settings.key", editor_key},
 				{"settings.value", string(w.editor.value.bytes[:])},
-				{"settings.editing", fmt.tprintf("%t", w.editor.editing)},
+				{"settings.editing", fmt.tprintf("%t", ui.editor_editing(&w.editor))},
+				{"settings.active", fmt.tprintf("%t", settings_active(w))},
+				{"settings.popup", fmt.tprintf("%v", w.editor.popup)},
 				{"settings.capturing", fmt.tprintf("%t", w.editor.capturing)},
 				{"settings.title", editor_title},
 				{"settings.message", w.editor.message},
@@ -408,7 +410,7 @@ when AIO_CONTROL {
 	@(require_results)
 	verify_before :: proc(app: ^App, entries: []control.State_Entry) -> control.Error {
 		v := &app.verify
-		if verify_window(app) != nil {
+		if w := verify_window(app); w != nil && focused_session(app, w) != nil {
 			err: control.Error
 			v.before, err = verify_snapshot(app, true)
 			if err != .None { return err }
@@ -767,7 +769,7 @@ when AIO_CONTROL {
 		}
 		s: term.Snapshot
 		err: control.Error
-		if w != nil {
+		if w != nil && focused_session(app, w) != nil {
 			s, err = verify_snapshot(app)
 			if err != .None { verify_error(app, err); return }
 		}

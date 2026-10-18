@@ -79,7 +79,7 @@ try {
     Assert-Idle
     Invoke-Aio mouse move '41,41' --px
     Assert-Idle
-    Invoke-Aio key Esc
+    Invoke-Aio command tab.close
     [AioAnimations]::Write($false)
     [AioAnimations]::Notify([int](Get-Content (Join-Path $repo "build/verify/$name/instance.ini") | Where-Object { $_ -like 'pid=*' }).Substring(4))
     Invoke-Aio expect state ui.animations=false

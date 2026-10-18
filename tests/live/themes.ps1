@@ -72,9 +72,9 @@ try {
             Invoke-Aio key Tab
             Shot "$theme-$mode-settings"
             Invoke-Aio key Tab
-            Shot "$theme-$mode-button-focus"
+            Shot "$theme-$mode-search-focus"
             Assert-Idle
-            Invoke-Aio key Esc
+            Invoke-Aio command tab.close
         }
     }
     Set-Option theme.name studio

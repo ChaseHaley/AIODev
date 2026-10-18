@@ -187,7 +187,6 @@ run_action :: proc(
 	case .Command_Palette:
 		leader_cancel(w)
 		pane_header_cancel(w)
-		ui.editor_destroy(&w.editor)
 		if app.palette.open {
 			ui.palette_close(&app.palette)
 			return
@@ -209,6 +208,7 @@ run_action :: proc(
 			term.select_all(entry.session)
 		}
 	case .Find:
+		if entry == nil { return }
 		leader_cancel(w)
 		pane_header_cancel(w)
 		if w.find.open {
