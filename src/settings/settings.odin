@@ -20,6 +20,7 @@ Font_Settings :: struct {
 Shell_Settings :: struct {
 	command, directory: string,
 }
+Input_Settings :: struct { leader: string }
 Window_Settings :: struct {
 	columns, rows, padding: int,
 	show_tab_bar_with_one_tab: bool,
@@ -44,6 +45,7 @@ Settings :: struct {
 	keys: [dynamic]Key_Binding,
 	font: Font_Settings,
 	shell: Shell_Settings,
+	input: Input_Settings,
 	window: Window_Settings,
 	scrollback: Scrollback_Settings,
 	terminal: Terminal_Settings,
@@ -64,6 +66,7 @@ Schema_Entry :: struct {
 	description: string,
 }
 SCHEMA :: [?]Schema_Entry{
+	{"input.leader", .String, offset_of(Settings, input) + offset_of(Input_Settings, leader), "", 0, 128, nil, "Optional leader chord, for example Ctrl+B; use Leader+T in a command shortcut. Empty disables it."},
 	{"font.family", .String, offset_of(Settings, font) + offset_of(Font_Settings, family), "Cascadia Mono", 1, 256, nil, "Terminal font family."},
 	{"font.size", .Float, offset_of(Settings, font) + offset_of(Font_Settings, size), "12", 1, 200, nil, "Font size in points."},
 	{"font.line_height", .Float, offset_of(Settings, font) + offset_of(Font_Settings, line_height), "1.0", 0.5, 4, nil, "Line height multiplier."},

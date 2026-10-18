@@ -47,6 +47,8 @@ Window :: struct {
 	pointer: [2]f32,
 	pointer_shape: platform.Cursor_Shape,
 	find: ui.Find_Bar,
+	editor: ui.Editor,
+	leader_until: time.Tick,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
@@ -140,6 +142,7 @@ window_free :: proc(w: ^Window) {
 	delete(w.views)
 	delete(w.panes)
 	ui.find_destroy(&w.find)
+	ui.editor_destroy(&w.editor)
 	render.draw_list_destroy(&w.list)
 	delete(w.dividers)
 	free(w)
@@ -349,7 +352,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if entry == nil || view == nil {
 			continue
 		}
-		content_focused := w.focused && pane.node == w.tree.focus && !app.palette.open && !w.find.open
+		content_focused := w.focused && pane.node == w.tree.focus && !app.palette.open &&
+			!w.find.open && !w.editor.open
 		style := term_view.Style{
 			family = app.family,
 			selection_background = color(c.selection_background),
@@ -395,6 +399,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if result != .Ok {
 			return frame, result
 		}
+	}
+	if w.editor.open {
+		result := ui.editor_draw(&w.editor, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)
+		if result != .Ok { return frame, result }
 	}
 	return frame, ui.notices_draw(&app.notices, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)
 }

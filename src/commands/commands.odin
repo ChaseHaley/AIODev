@@ -48,7 +48,7 @@ destroy :: proc(registry: ^Registry) {
 
 @(private)
 normalized :: proc(modifiers: input.Modifiers) -> input.Modifiers {
-	return modifiers & {.Control, .Shift, .Alt, .Super}
+	return modifiers & {.Control, .Shift, .Alt, .Super, .Leader}
 }
 
 @(require_results)
@@ -245,7 +245,7 @@ shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 		key = label
 	}
 	length := 0
-	for modifier in ([?]input.Modifier{.Control, .Shift, .Alt, .Super}) {
+	for modifier in ([?]input.Modifier{.Leader, .Control, .Shift, .Alt, .Super}) {
 		if modifier not_in shortcut.modifiers { continue }
 		text: string
 		#partial switch modifier {
@@ -253,6 +253,7 @@ shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 		case .Shift: text = "Shift+"
 		case .Alt: text = "Alt+"
 		case .Super: text = SUPER_LABEL + "+"
+		case .Leader: text = "Leader+"
 		}
 		if len(out)-length < len(text) { return "", .Output_Too_Small }
 		length += copy(out[length:], text)
@@ -375,6 +376,7 @@ parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 		case strings.equal_fold(prefix, "Shift"): modifier = .Shift
 		case strings.equal_fold(prefix, "Alt"): modifier = .Alt
 		case strings.equal_fold(prefix, SUPER_LABEL): modifier = .Super
+		case strings.equal_fold(prefix, "Leader"): modifier = .Leader
 		case: recognized = false
 		}
 		if !recognized { break }

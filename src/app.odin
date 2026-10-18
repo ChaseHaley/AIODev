@@ -35,6 +35,7 @@ Notice_Key :: enum u32 {
 	Font,
 	Copy,
 	Paste,
+	Leader,
 }
 
 Session_Entry :: struct {
@@ -61,6 +62,7 @@ App :: struct {
 	ui_ready: bool,
 	theme: ui.Theme,
 	registry: commands.Registry,
+	leader: Maybe(commands.Shortcut),
 	palette: ui.Palette,
 	notices: ui.Notices,
 	sessions: [dynamic]Session_Entry,
@@ -201,6 +203,9 @@ tick :: proc(app: ^App) {
 		mark_all_dirty(app)
 	}
 	for window in app.windows {
+		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
+			window.leader_until = {}
+		}
 		update_blink(window)
 		update_autoscroll(app, window)
 		if window.dirty {
@@ -424,6 +429,8 @@ load_settings :: proc(app: ^App) {
 }
 
 reload_settings :: proc(app: ^App) {
+	for window in app.windows { window.leader_until = {} }
+	ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
 	load_settings(app)

@@ -55,6 +55,7 @@ Action :: enum u32 {
 	Focus_Next,
 	Last_Tab,
 	Close_Tab,
+	Settings_UI,
 }
 
 @(private)
@@ -82,7 +83,8 @@ ACTIONS :: [Action]Action_Info{
 	.Font_Size_Reset = {
 		"view.font_size_reset", "Reset Font Size", {{.Digit_0, {.Control}}, {.Numpad_0, {.Control}}},
 	},
-	.Open_Settings = {"settings.open_file", "Open Settings File", {{.Comma, {.Control}}}},
+	.Open_Settings = {"settings.open_file", "Open Settings File", nil},
+	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}},
 	.Reload_Settings = {"settings.reload", "Reload Settings", {{.Comma, {.Control, .Shift}}}},
 	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil},
 	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil},
@@ -147,6 +149,7 @@ run_action :: proc(app: ^App, w: ^Window, action: Action) {
 	w.dirty = true
 	switch action {
 	case .Command_Palette:
+		ui.editor_destroy(&w.editor)
 		if app.palette.open {
 			ui.palette_close(&app.palette)
 			return
@@ -192,6 +195,8 @@ run_action :: proc(app: ^App, w: ^Window, action: Action) {
 		if !platform.open_path(app.settings_path) {
 			notify(app, .Error, fmt.tprintf("Could not open %s.", app.settings_path))
 		}
+	case .Settings_UI:
+		editor_open(app, w)
 	case .Reload_Settings:
 		reload_settings(app)
 	case .Restart_Shell:
@@ -359,7 +364,13 @@ binding_comments :: proc() -> [len(Action)+1]string {
 binding_diagnostic :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic,
 	binding: settings.Key_Binding, message: string) {
 	key := fmt.tprintf("%s%s", settings.KEY_BINDING_PREFIX, binding.name)
-	if err := settings.diagnostic_append(diagnostics, binding.line, key, message); err != nil {
+	settings_diagnostic(app, diagnostics, binding.line, key, message)
+}
+
+@(private)
+settings_diagnostic :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic,
+	line: int, key, message: string) {
+	if err := settings.diagnostic_append(diagnostics, line, key, message); err != nil {
 		log.errorf("recording shortcut diagnostic failed: %v", err)
 		notify(app, .Error, message)
 	}
@@ -382,6 +393,17 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 			message := fmt.tprintf("cannot parse shortcut \"%s\"", binding.value)
 			if err == .Output_Too_Small { message = "at most 4 shortcuts are allowed" }
 			binding_diagnostic(app, diagnostics, binding, message)
+			continue
+		}
+		unsupported := false
+		for shortcut in storage[count][:n] {
+			if .Leader in shortcut.modifiers &&
+			   (shortcut.key == .Unidentified || is_modifier_key(shortcut.key)) {
+				unsupported = true
+			}
+		}
+		if unsupported {
+			binding_diagnostic(app, diagnostics, binding, "Leader shortcuts require a nonmodifier key.")
 			continue
 		}
 		overrides[count] = {command.id, storage[count][:n]}
@@ -407,5 +429,16 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 			}
 		}
 		binding_diagnostic(app, diagnostics, binding, message)
+	}
+	app.leader = nil
+	if app.settings.input.leader != "" {
+		leader, valid := commands.parse_shortcut(app.settings.input.leader)
+		if !valid || .Leader in leader.modifiers || leader.key == .Unidentified || is_modifier_key(leader.key) {
+			settings_diagnostic(app, diagnostics, 0, "input.leader", "Use one ordinary shortcut.")
+		} else if other := commands.find_by_shortcut(&app.registry, leader); other != nil {
+			settings_diagnostic(app, diagnostics, 0, "input.leader", fmt.tprintf("Conflicts with %s.", other.name))
+		} else {
+			app.leader = leader
+		}
 	}
 }

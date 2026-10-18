@@ -190,6 +190,7 @@ Modifier :: enum u16 {
 	Right_Control,
 	Right_Alt,
 	Right_Super,
+	Leader,
 }
 
 Modifiers :: bit_set[Modifier; u16]

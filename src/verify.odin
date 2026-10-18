@@ -232,7 +232,17 @@ when AIO_CONTROL {
 		entry: ^Session_Entry
 		if w != nil {
 			entry = focused_session(app, w)
+			editor_key := ""
+			if row := ui.editor_row(&w.editor); row != nil { editor_key = row.key }
 			window := [?]control.State_Entry{
+				{"settings.open", fmt.tprintf("%t", w.editor.open)},
+				{"settings.filter", string(w.editor.filter.bytes[:])},
+				{"settings.key", editor_key},
+				{"settings.value", string(w.editor.value.bytes[:])},
+				{"settings.editing", fmt.tprintf("%t", w.editor.editing)},
+				{"settings.message", w.editor.message},
+				{"settings.error", fmt.tprintf("%t", w.editor.error)},
+				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
 				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
 				{"window.dpi", fmt.tprintf("%d", u32(w.scale*96))},
 				{"window.scale", fmt.tprintf("%g", w.scale)},

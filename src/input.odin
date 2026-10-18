@@ -2,6 +2,7 @@ package main
 
 import "core:log"
 import "core:math"
+import "core:time"
 import "aio:commands"
 import "aio:input"
 import "aio:layout"
@@ -115,11 +116,24 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		on_palette_outcome(app, w, outcome, id)
 		return
 	}
+	if w.editor.open {
+		if e.pressed && .Control in e.modifiers && e.key == .V {
+			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
+				ui.editor_text(&w.editor, text)
+				w.dirty = true
+			}
+		} else {
+			editor_outcome(app, w, ui.editor_key(&w.editor, e))
+		}
+		if e.pressed { w.suppressed_key = e }
+		return
+	}
 	entry := focused_session(app, w)
 	if entry == nil {
 		return
 	}
 	if e.pressed {
+		if !is_modifier_key(e.key) && leader_key(app, w, e) { return }
 		if action, found := shortcut_action(app, e); found {
 			w.suppressed_key = e
 			run_action(app, w, action)
@@ -156,6 +170,11 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
+	if w.editor.open {
+		ui.editor_text(&w.editor, text)
+		w.dirty = true
+		return
+	}
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
 		return
@@ -197,6 +216,13 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	if w.editor.open {
+		if e.button == .Left && e.pressed {
+			l := ui.editor_layout(f32(w.width), f32(w.height), w.scale)
+			editor_outcome(app, w, ui.editor_click(&w.editor, l, f32(e.x), f32(e.y)))
+		}
+		return
+	}
 	if app.palette.open {
 		if e.pressed {
 			l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -257,6 +283,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
+	if w.editor.open { return }
 	if divider, dragging := w.dragging.?; dragging {
 		if .Left not_in e.buttons { w.dragging = nil; return }
 		if layout.drag_divider(w.tree, divider, x, y, 1) { window_relayout(app, w) }
@@ -300,6 +327,11 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	w.wheel_remainder -= f32(rows)
+	if w.editor.open {
+		ui.editor_select(&w.editor, w.editor.selected-rows)
+		w.dirty = true
+		return
+	}
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return
@@ -315,10 +347,47 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		w.leader_until = {}
+		ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
 		w.selecting, w.autoscrolling = false, false
 		w.dragging = nil
 	}
 	if entry := focused_session(app, w); entry != nil { term.send_focus(entry.session, focused) }
+}
+
+@(private)
+leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
+	if w.leader_until != {} {
+		if leader, enabled := app.leader.?; enabled && e.repeat && e.key == leader.key &&
+		   e.modifiers & {.Control, .Shift, .Alt, .Super} == leader.modifiers { return true }
+		pending := time.tick_diff(time.tick_now(), w.leader_until) > 0
+		w.leader_until = {}
+		ui.notices_clear(&app.notices, u32(Notice_Key.Leader))
+		if pending {
+			w.suppressed_key = e
+			if e.key == .Escape { return true }
+			chord := e
+			chord.modifiers += {.Leader}
+			if action, found := shortcut_action(app, chord); found { run_action(app, w, action) }
+			else { notify(app, .Info, "No shortcut for that leader sequence.") }
+			return true
+		}
+	}
+	if leader, enabled := app.leader.?; enabled {
+		mods := e.modifiers & {.Control, .Shift, .Alt, .Super}
+		if e.key == leader.key && mods == leader.modifiers {
+			w.suppressed_key = e
+			if !e.repeat {
+				w.leader_until = time.tick_add(time.tick_now(), 2*time.Second)
+				ui.notices_put(&app.notices, u32(Notice_Key.Leader), .Info,
+					"Leader: waiting for a shortcut (2 seconds). Esc cancels; unmatched keys are consumed.",
+					2*time.Second)
+				mark_all_dirty(app)
+			}
+			return true
+		}
+	}
+	return false
 }
 
 @(private)
