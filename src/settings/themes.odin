@@ -1,5 +1,8 @@
 package settings
 
+import "core:strconv"
+import "core:strings"
+
 Theme_Name :: enum int { Studio, Tide, Ember }
 Theme_Mode :: enum int { Dark, Light }
 Theme_Settings :: struct { name: Theme_Name, mode: Theme_Mode }
@@ -308,4 +311,24 @@ resolve_colors :: proc(s: ^Settings) {
 	for value, i in s.color_overrides.palette {
 		if c, ok := value.?; ok { s.colors.palette[i] = c }
 	}
+}
+
+// The theme color that an empty optional color setting uses. Selection text has none: empty keeps cell colors.
+theme_color :: proc(s: ^Settings, key: string) -> (Color, bool) {
+	t := theme_resolve(s.theme).terminal
+	switch key {
+	case "colors.foreground": return t.foreground, true
+	case "colors.background": return t.background, true
+	case "colors.cursor": return t.cursor, true
+	case "colors.cursor_text": return t.cursor_text, true
+	case "colors.selection_background": return t.selection_background, true
+	case "colors.search_foreground": return t.search_foreground, true
+	case "colors.search_background": return t.search_background, true
+	case "colors.search_selected_background": return t.search_selected_background, true
+	}
+	if index, ok := strconv.parse_int(strings.trim_prefix(key, "colors.palette."), 10);
+	   ok && strings.has_prefix(key, "colors.palette.") && index >= 0 && index < len(t.palette) {
+		return t.palette[index], true
+	}
+	return {}, false
 }

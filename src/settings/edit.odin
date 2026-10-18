@@ -22,15 +22,14 @@ value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
 	case .Float: return fmt.tprintf("%g", (cast(^f64)p)^)
 	case .Bool: return (cast(^bool)p)^ ? "true" : "false"
 	case .Enum: return entry.enum_names[(cast(^int)p)^]
-	case .Color: return color_text((cast(^Color)p)^)
+	case .Color: return color_hex((cast(^Color)p)^)
 	case .Optional_Color:
-		if c, ok := (cast(^Maybe(Color))p)^.?; ok { return color_text(c) }
+		if c, ok := (cast(^Maybe(Color))p)^.?; ok { return color_hex(c) }
 	}
 	return ""
 }
 
-@(private)
-color_text :: proc(c: Color) -> string {
+color_hex :: proc(c: Color) -> string {
 	return fmt.tprintf("#%02x%02x%02x", c.r, c.g, c.b)
 }
 
@@ -46,6 +45,9 @@ edit_text :: proc(text, key, value: string, allocator := context.allocator) -> (
 	serialized := value
 	if entry := schema_find(key); entry != nil {
 		if entry.kind == .String { serialized = fmt.tprintf("\"%s\"", value) }
+		if (entry.kind == .Color || entry.kind == .Optional_Color) && value != "" {
+			if c, ok, _ := parse_color(value); ok { serialized = color_hex(c) }
+		}
 		s, default_error := defaults(allocator)
 		if default_error != nil { err = default_error; return }
 		defer destroy(&s)
