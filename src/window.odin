@@ -203,7 +203,10 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
-	if !w.preparing { arrange_cancel(app, w) }
+	id := w.id
+	arrange_cancel(app, w)
+	// Cancelling a gesture which owns this preview may already have destroyed it.
+	if window_find(app, id) == nil { return }
 	window_overlays_cancel(app, w)
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {

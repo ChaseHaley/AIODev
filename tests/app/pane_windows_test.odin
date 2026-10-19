@@ -42,6 +42,15 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, source.tree.root, node)
+	minimum := state.settings.pane.minimum_columns
+	state.settings.pane.minimum_columns = 10_000
+	failed = app.pane_window_preview_create(&state, source, node, 80, 80)
+	state.settings.pane.minimum_columns = minimum
+	testing.expect(t, failed == nil)
+	testing.expect_value(t, len(state.windows), 1)
+	testing.expect_value(t, len(state.workspaces), 1)
+	testing.expect_value(t, term.geometry(session), geometry)
+	testing.expect_value(t, term.process_id(session), pid)
 	preview := app.pane_window_preview_create(&state, source, node, 80, 80)
 	if !testing.expect(t, preview != nil) { return }
 	testing.expect(t, preview.preparing)
