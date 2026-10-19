@@ -22,6 +22,7 @@ Workspace :: struct {
 	provisional: bool, // A tear-off preview borrows a runtime until the drop commits.
 	id: u32,
 	name: string,
+	icon: Workspace_Icon,
 	tabs: [dynamic]^Tab,
 	selected: int,
 	next_tab_id: u32,
@@ -74,6 +75,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 	}
 	delete(workspace.tabs)
 	delete(workspace.name)
+	delete(workspace.icon.emoji)
 	free(workspace)
 }
 

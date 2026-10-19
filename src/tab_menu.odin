@@ -60,15 +60,17 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if !e.pressed { return }
 	menu := &w.tab_menu
+	w.dirty = true
+	if step := ui.list_step(e); step != 0 {
+		menu.selected = (menu.selected+menu.count+step)%menu.count
+		return
+	}
 	#partial switch e.key {
 	case .Escape, .Context_Menu: menu.open = false
-	case .Arrow_Up: menu.selected = (menu.selected+menu.count-1)%menu.count
-	case .Arrow_Down: menu.selected = (menu.selected+1)%menu.count
 	case .Home: menu.selected = 0
 	case .End: menu.selected = menu.count-1
 	case .Enter, .Numpad_Enter, .Space: tab_menu_choose(app, w)
 	}
-	w.dirty = true
 }
 
 tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {

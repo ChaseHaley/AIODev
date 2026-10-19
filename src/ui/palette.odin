@@ -215,20 +215,14 @@ palette_key :: proc(
 	if !e.pressed {
 		return .None, 0
 	}
-	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	shift := .Shift in e.modifiers
+	if step := list_step(e); step != 0 { return move(p, step), 0 }
 	#partial switch e.key {
 	case .Escape:
 		palette_close(p)
 		return .Closed, 0
 	case .Enter, .Numpad_Enter:
 		return run(p, p.selected)
-	case .Arrow_Up:
-		return move(p, -1), 0
-	case .Arrow_Down:
-		return move(p, 1), 0
-	case .P, .N:
-		if control { return move(p, e.key == .N ? 1 : -1), 0 }
 	case .Page_Up:
 		return move(p, -PALETTE_MAX_ROWS), 0
 	case .Page_Down:

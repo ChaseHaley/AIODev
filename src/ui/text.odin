@@ -2,6 +2,7 @@ package ui
 
 import "core:log"
 import "core:math"
+import "core:slice"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
@@ -251,4 +252,47 @@ draw_icon :: proc(t: ^Text, list: ^render.Draw_List, icon: rune, area: render.Re
 	icons.family = t.icons
 	text_set_size(&icons, area.height*fraction*0.6)
 	return draw_glyph_centered(&icons, list, icon, area, c)
+}
+
+// Supply the whole emoji sequence to system fallback, including variation selectors and ZWJ.
+draw_cluster_centered :: proc(t: ^Text, list: ^render.Draw_List, cluster: string, area: render.Rect,
+	c: render.Color, size_px: f32) -> glyphs.Result {
+	runes: [32]rune
+	clusters: [32]int
+	count := 0
+	for r in cluster {
+		if count == len(runes) { return .Ok }
+		runes[count] = r
+		count += 1
+	}
+	if count == 0 || size_px <= 0 || area.width <= 0 || area.height <= 0 { return .Ok }
+	// Cache hits append into bounded stack storage without per-icon scratch allocation.
+	storage: [64]font.Shaped_Glyph
+	shaped := slice.into_dynamic(storage[:])
+	if err := font.shape(t.fonts, t.family, .Regular, runes[:count], size_px, &shaped, clusters[:count]);
+	   err != .None {
+		log.errorf("ui: shaping an icon failed: %v", err)
+		return .Ok
+	}
+	width: f32
+	for g in shaped { width += g.advance }
+	fit := width > 0 ? min(1, area.width/width) : 1
+	draw_size := size_px*fit
+	m := font.face_metrics(t.fonts, t.family.faces[.Regular], draw_size)
+	baseline := math.round(area.y+(area.height-m.ascent-m.descent)/2+m.ascent)
+	pen := area.x+(area.width-width*fit)/2
+	for g in shaped {
+		entry, result := glyphs.glyph(t.cache, g.glyph, draw_size, true)
+		if result != .Ok { return result }
+		if entry.size.x > 0 {
+			at := render.Rect{math.round(pen+g.offset.x*fit+entry.offset.x),
+				math.round(baseline-g.offset.y*fit+entry.offset.y), entry.size.x, entry.size.y}
+			flags := entry.color ? render.GLYPH_COLOR : 0
+			if render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c, flags = flags}) != .None {
+				log.error("ui: the draw list ran out of memory")
+			}
+		}
+		pen += g.advance*fit
+	}
+	return .Ok
 }
