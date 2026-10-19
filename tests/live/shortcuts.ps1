@@ -140,8 +140,10 @@ try {
     Invoke-Aio expect state tabs.count=2
     Open-Shortcut
     $beforeCancel = [IO.File]::ReadAllText($path)
-    Invoke-Aio key Tab Ctrl+Alt+Y
-    Invoke-Aio expect state settings.value=Ctrl+Alt+Y
+    Invoke-Aio key Tab
+    Invoke-Aio expect state settings.popup=Shortcuts
+    Invoke-Aio key Enter Ctrl+Alt+Y
+    Assert-Value (Read-State)['settings.value'].Trim('"') 'Ctrl+Alt+Y, Ctrl+Shift+T' 'capture replaces only the chosen alternative'
     Invoke-Aio key Esc
     Invoke-Aio expect state settings.capturing=false
     Invoke-Aio expect state settings.open=true
@@ -149,16 +151,21 @@ try {
     Assert-Value ([IO.File]::ReadAllText($path)) $beforeCancel 'cancel leaves shortcut file unchanged'
     Open-Shortcut
     Invoke-Aio key Shift+Tab Space Tab Tab
+    Invoke-Aio expect state settings.popup=Shortcuts
+    Invoke-Aio key Enter
     Invoke-Aio expect state settings.capturing=true
     Invoke-Aio key Ctrl+Y Enter
     Invoke-Aio expect state settings.error=false
-    if ([IO.File]::ReadAllText($path) -notlike '*keys.tab.new = Physical+Ctrl+Y*') { throw 'UI did not persist shortcut.' }
+    if ([IO.File]::ReadAllText($path) -notlike '*keys.tab.new = Physical+Ctrl+Y, Ctrl+Shift+T*') { throw 'UI did not persist shortcut.' }
     Write-Output 'PASS shortcut UI and file share the physical binding model'
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $data 'shortcut-editor.png')
     Close-Settings
     Invoke-Aio key Ctrl+Y
     Invoke-Aio expect state tabs.count=3
     Invoke-Aio key Ctrl+Shift+T
+    Invoke-Aio expect state tabs.count=4
+    Write-Output 'PASS untouched alternative remains bound'
+    Invoke-Aio key Ctrl+Shift+W
     Invoke-Aio expect state tabs.count=3
     Open-Shortcut
     Invoke-Aio key Ctrl+R
@@ -178,7 +185,9 @@ try {
     Configure "input.leader = Ctrl+B`nkeys.tab.new = Ctrl+B, Ctrl+Shift+T"
     Invoke-Aio command settings.open
     Invoke-Aio type input.leader
-    Invoke-Aio key Tab Ctrl+Shift+P Enter
+    Invoke-Aio key Tab
+    if ((Read-State)['settings.popup'] -eq 'Shortcuts') { Invoke-Aio key Enter }
+    Invoke-Aio key Ctrl+Shift+P Enter
     Invoke-Aio expect state settings.error=false
     if ((Read-State)['settings.message'] -notlike '*app.command_palette*') { throw 'UI warning does not name both bindings.' }
     Write-Output 'PASS UI saves source-order conflict as a named nonfatal warning'

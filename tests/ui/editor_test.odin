@@ -75,8 +75,20 @@ editor_binding_search_and_positions_reserve_description_space :: proc(t: ^testin
 		for width in ([?]f32{700, 1000, 1400}) {
 			l := ui.editor_layout({0, 40*scale, width*scale, 1400*scale}, scale)
 			parts := ui.editor_row_parts(&p, l, p.selected)
+			testing.expect(t, !parts.positions_label_below)
 			testing.expect(t, parts.text_right <= parts.positions.x-12*scale)
 			testing.expect(t, parts.positions.x+parts.positions.width+100*scale <= parts.field.x)
+		}
+		// Narrow windows stack the label below the switch, inside the row and clear of the field.
+		for width in ([?]f32{360, 460, 560}) {
+			l := ui.editor_layout({0, 40*scale, width*scale, 1400*scale}, scale)
+			parts := ui.editor_row_parts(&p, l, p.selected)
+			testing.expect(t, parts.positions_label_below)
+			testing.expect(t, parts.positions.x >= parts.row.x+30*scale)
+			testing.expect(t, parts.text_right <= parts.positions.x-12*scale)
+			testing.expect(t, parts.positions.x+parts.positions.width+30*scale <= parts.field.x)
+			testing.expect(t, parts.positions.y+parts.positions.height+18*scale <= parts.row.y+parts.row.height)
+			testing.expect(t, parts.field.width >= 120*scale)
 		}
 	}
 }
