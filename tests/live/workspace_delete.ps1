@@ -53,7 +53,7 @@ try {
     Invoke-Aio expect state workspace.id=2
 
     Invoke-Aio command window.new
-    $secondWindow = (Read-State)['window.id']
+    $secondWindow = (Read-State)['window.2.id']
     if ($secondWindow -eq $firstWindow) { throw 'New Window did not create a separate owner.' }
     Invoke-Aio window select $firstWindow
     Request-Row 'Workspace 3'
