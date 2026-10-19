@@ -116,6 +116,11 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 
 @(private)
 on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+	if w.workspace_picker.open {
+		if e.pressed { w.suppressed_key = e }
+		workspace_picker_key(app, w, e)
+		return
+	}
 	if w.rename_open {
 		if e.pressed { w.suppressed_key = e }
 		rename_key(app, w, e)
@@ -144,7 +149,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if !app.palette.open && e.pressed &&
 	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
 		bar := window_tab_bar(app, w)
-		tab_menu_open(app, w, w.workspace.selected, f32(w.workspace.selected)*bar.tab_width, bar.height)
+		tab_menu_open(app, w, w.workspace.selected, bar.x+f32(w.workspace.selected)*bar.tab_width, bar.height)
 		w.suppressed_key = e
 		return
 	}
@@ -238,6 +243,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
+	if w.workspace_picker.open { workspace_picker_text(app, w, text); return }
 	if w.tab_menu.open { return }
 	if w.rename_open { ui.field_text(&w.rename, text); w.dirty = true; return }
 	if w.close_confirm.open { return }
@@ -308,6 +314,24 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	if w.workspace_picker.open {
+		p := &w.workspace_picker
+		x, y := f32(e.x), f32(e.y)
+		if !e.pressed { p.query.dragging = false; w.header_buttons -= {e.button}; return }
+		w.header_buttons += {e.button}
+		r, _ := workspace_picker_rect(w)
+		if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
+			p.open, w.dirty = false, true
+		} else if e.button == .Left {
+			if hit := workspace_picker_hit(w, x, y); hit >= 0 {
+				p.selected = hit
+				workspace_picker_choose(app, w)
+			} else if y >= r.y+44*w.scale && y < r.y+80*w.scale {
+				workspace_picker_pointer(app, w, x, true, .Shift in e.modifiers)
+			}
+		}
+		return
+	}
 	if w.tab_menu.open {
 		if !e.pressed { return }
 		w.header_buttons += {e.button}
@@ -384,8 +408,9 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	if y < bar.height {
 		if e.pressed {
+			if e.button == .Left && x >= 0 && x < bar.x { workspace_picker_open(app, w); return }
 			index := window_tab_hit(w, bar, x, y)
-			palette_x := f32(bar.count)*bar.tab_width+bar.button_width
+			palette_x := bar.x+f32(bar.count)*bar.tab_width+bar.button_width
 			if e.button == .Left && x >= palette_x && x < palette_x+bar.button_width {
 				run_action(app, w, .Command_Palette)
 			} else if e.button == .Left && window_tab_close_hit(w, bar, x, y) >= 0 {
@@ -438,6 +463,15 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+	if w.workspace_picker.open {
+		if w.workspace_picker.query.dragging && .Left in e.buttons {
+			workspace_picker_pointer(app, w, f32(e.x), false, true)
+		} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
+			w.workspace_picker.selected, w.dirty = hit, true
+		}
+		pointer_set(app, w, .Arrow)
+		return
+	}
 	if w.tab_menu.open {
 		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && hit != w.tab_menu.selected {
 			w.tab_menu.selected, w.dirty = hit, true
@@ -530,6 +564,12 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
+	if w.workspace_picker.open {
+		p := &w.workspace_picker
+		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, len(p.rows)+2)
+		w.dirty = true
+		return
+	}
 	if w.rename_open { return }
 	if w.tab_menu.open {
 		w.tab_menu.selected = clamp(w.tab_menu.selected-int(e.delta_y), 0, w.tab_menu.count-1)
@@ -564,6 +604,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		w.workspace_picker.open = false
 		w.tab_menu.open = false
 		if w.rename_open { rename_finish(app, w, false) }
 		pane_header_clear(w)

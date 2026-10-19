@@ -97,6 +97,8 @@ command_category :: proc(name: string) -> string {
 	case "terminal": return "Terminal"
 	case "pane": return "Panes"
 	case "tab": return "Tabs"
+	case "workspace": return "Workspaces"
+	case "window": return "Windows"
 	case "settings": return "Settings"
 	case "edit": return "Edit"
 	case "view": return "View"

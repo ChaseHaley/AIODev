@@ -29,6 +29,8 @@ shortcut_group :: proc(name: string) -> string {
 	case "Terminal": return "Terminal Shortcuts"
 	case "Panes": return "Pane Shortcuts"
 	case "Tabs": return "Tab Shortcuts"
+	case "Workspaces": return "Workspace Shortcuts"
+	case "Windows": return "Window Shortcuts"
 	case "Settings": return "Settings Shortcuts"
 	case "Edit": return "Edit Shortcuts"
 	case "View": return "View Shortcuts"

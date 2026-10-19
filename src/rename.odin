@@ -8,6 +8,7 @@ import "aio:settings"
 import "aio:ui"
 
 rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
+	w.rename_workspace = false
 	tab := selected_tab(w.workspace)
 	if tab == nil || settings_active(w) { return }
 	value := tab.name
@@ -26,6 +27,14 @@ rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
 }
 
 rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
+	if w.rename_workspace {
+		if save && !workspace_rename(app, w.workspace, ui.field_string(&w.rename)) {
+			notify(app, .Error, "Workspace names cannot be empty.")
+			return
+		}
+		w.rename_open, w.dirty = false, true
+		return
+	}
 	if save {
 		name := settings.display_title(strings.trim_space(ui.field_string(&w.rename)))
 		destination: ^string
@@ -85,7 +94,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		return .Ok
 	}
 	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 10*s}) != .None { return .Ok }
-	title := w.rename_tab ? "Rename Tab" : "Rename Pane"
+	title := w.rename_workspace ? "Rename Workspace" : w.rename_tab ? "Rename Tab" : "Rename Pane"
 	if result := ui.draw_text(&w.ui_text, &w.list, title, r.x+16*s, r.y+28*s, app.theme.text);
 		result != .Ok { return result }
 	field := rename_field_rect(w)
@@ -96,8 +105,11 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, field, 5*s) != .None { return .Ok }
 	if result := ui.field_draw(&w.rename, &w.list, &w.ui_text, app.theme, field.x+10*s,
 		field.y+(field.height-w.ui_text.line_height)/2+w.ui_text.ascent, max(1, field.width-20*s),
-		true, "Automatic title", app.theme.text, s); result != .Ok { return result }
+		true, w.rename_workspace ? "Workspace name" : "Automatic title", app.theme.text, s);
+		result != .Ok { return result }
 	if render.push_layer(&w.list, r) != .None { return .Ok }
-	return ui.draw_text(&w.ui_text, &w.list, "Enter saves · Esc cancels · Empty restores automatic titles",
+	hint := "Enter saves · Esc cancels"
+	if !w.rename_workspace { hint = "Enter saves · Esc cancels · Empty restores automatic titles" }
+	return ui.draw_text(&w.ui_text, &w.list, hint,
 		r.x+16*s, r.y+112*s, app.theme.muted, max(1, r.width-32*s))
 }

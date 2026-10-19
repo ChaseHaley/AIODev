@@ -19,6 +19,8 @@ Tab :: struct {
 }
 
 Workspace :: struct {
+	id: u32,
+	name: string,
 	tabs: [dynamic]^Tab,
 	selected: int,
 	next_tab_id: u32,
@@ -70,6 +72,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 		free(tab)
 	}
 	delete(workspace.tabs)
+	delete(workspace.name)
 	free(workspace)
 }
 

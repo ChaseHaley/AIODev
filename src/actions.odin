@@ -85,6 +85,10 @@ Action :: enum u32 {
 	Close_Other_Tabs,
 	Close_Right_Tabs,
 	Tab_Settings,
+	New_Workspace,
+	Change_Workspace,
+	Rename_Workspace,
+	New_Window,
 }
 
 @(private)
@@ -95,6 +99,10 @@ Action_Info :: struct {
 
 @(private)
 ACTIONS :: [Action]Action_Info{
+	.New_Workspace = {"workspace.new", "New Workspace", nil},
+	.Change_Workspace = {"workspace.change", "Change Workspace…", nil},
+	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil},
+	.New_Window = {"window.new", "New Window", {{.N, {.Control, .Shift}}}},
 	.Command_Palette = {"app.command_palette", "Show Command Palette", {{.P, {.Control, .Shift}}}},
 	.Copy = {"edit.copy", "Copy", {{.C, {.Control, .Shift}}, {.Insert, {.Control}}}},
 	.Paste = {"edit.paste", "Paste", {{.V, {.Control, .Shift}}, {.Insert, {.Shift}}}},
@@ -291,6 +299,10 @@ run_action :: proc(
 	case .Quit:
 		app.running = false
 	case .New_Tab: tab_new(app, w)
+	case .New_Workspace: workspace_new(app, w, false)
+	case .Change_Workspace: workspace_picker_open(app, w)
+	case .Rename_Workspace: workspace_rename_open(app, w)
+	case .New_Window: workspace_new(app, w, true)
 	case .Close_Pane: pane_close(app, w)
 	case .Next_Tab: tab_select(app, w, (w.workspace.selected+1)%len(w.workspace.tabs))
 	case .Previous_Tab:
