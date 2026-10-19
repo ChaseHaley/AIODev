@@ -254,6 +254,7 @@ when AIO_CONTROL {
 			{"shell.icon.loaded", fmt.tprintf("%t", app.shell_icon.width > 0)},
 			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
 			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
+			{"workspaces.count", fmt.tprintf("%d", len(app.workspaces))},
 		}
 		if _, err := append(&entries, ..base[:]); err != nil { return nil, .Out_Of_Memory }
 		origin: [2]i32
