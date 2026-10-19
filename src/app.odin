@@ -55,6 +55,8 @@ App :: struct {
 	app_id: string,
 	platform: platform_api.Platform,
 	platform_ready: bool,
+	settings_diagnostics: [dynamic]settings.Diagnostic,
+	settings_read_error: os.Error,
 	settings: settings.Settings,
 	settings_path: string,
 	log_path: string,
@@ -189,6 +191,7 @@ app_destroy :: proc(app: ^App) {
 	ui.notices_destroy(&app.notices)
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
+	settings.diagnostics_destroy(&app.settings_diagnostics)
 	delete(app.settings_path)
 	delete(app.log_path)
 	delete(app.app_id)
@@ -434,7 +437,7 @@ update_sessions :: proc(app: ^App) {
 }
 
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
-	duration := kind == .Error ? ERROR_NOTICE_DURATION : NOTICE_DURATION
+	duration := kind == .Error || kind == .Warning ? ERROR_NOTICE_DURATION : NOTICE_DURATION
 	ui.notices_put(&app.notices, u32(Notice_Key.Transient), kind, text, duration)
 	mark_all_dirty(app)
 }
@@ -452,10 +455,10 @@ load_settings :: proc(app: ^App) {
 	defer settings.diagnostics_destroy(&diagnostics)
 	if err != nil {
 		log.errorf("reading %s failed: %v", app.settings_path, err)
-		text := fmt.tprintf("Could not read %s. Using default settings.", app.settings_path)
-		ui.notices_put(&app.notices, u32(Notice_Key.Settings), .Error, text, ERROR_NOTICE_DURATION)
 		defaults, default_error := settings.defaults()
 		if default_error != nil {
+			log.errorf("loading default settings failed: %v", default_error)
+			notify(app, .Error, "Could not load settings or defaults. Check the log and restart AIODev.")
 			return
 		}
 		loaded = defaults
@@ -469,27 +472,10 @@ load_settings :: proc(app: ^App) {
 	if created {
 		log.infof("created %s", app.settings_path)
 	}
-	if len(diagnostics) == 0 {
-		if err == nil {
-			ui.notices_clear(&app.notices, u32(Notice_Key.Settings))
-		}
-		return
-	}
-	b := strings.builder_make(context.temp_allocator)
-	warnings_only := true
-	for d in diagnostics { if d.kind != .Shortcut_Warning { warnings_only = false } }
-	for d, i in diagnostics {
-		if i == 3 {
-			fmt.sbprintf(&b, " (%d more)", len(diagnostics) - 3)
-			break
-		}
-		fmt.sbprintf(&b, "%sLine %d, %s: %s.", i > 0 ? " " : "", d.line, d.key, d.message)
-	}
-	text := fmt.tprintf("Settings: %s", strings.to_string(b))
-	ui.notices_put(&app.notices, u32(Notice_Key.Settings), warnings_only ? .Info : .Error, text, ERROR_NOTICE_DURATION)
+	show_settings_diagnostics(app, &diagnostics, err)
 }
 
-reload_settings :: proc(app: ^App) {
+reload_settings :: proc(app: ^App, announce := true) {
 	refresh_animations(app)
 	for i := len(app.windows)-1; i >= 0; i -= 1 {
 		if i >= len(app.windows) { continue }
@@ -506,10 +492,12 @@ reload_settings :: proc(app: ^App) {
 		term.set_colors(entry.session, terminal_colors(app.settings.colors))
 		configure_session(app, entry.session)
 	}
-	if previous_shell != app.settings.shell.command || previous_directory != app.settings.shell.directory {
-		notify(app, .Info, "Shell settings apply the next time the shell restarts.")
-	} else {
-		notify(app, .Info, "Settings reloaded.")
+	if announce {
+		if previous_shell != app.settings.shell.command || previous_directory != app.settings.shell.directory {
+			notify(app, .Info, "Shell settings apply the next time the shell restarts.")
+		} else if app.settings_read_error == nil && len(app.settings_diagnostics) == 0 {
+			notify(app, .Info, "Settings reloaded.")
+		}
 	}
 	for window in app.windows {
 		window_apply_settings(app, window)

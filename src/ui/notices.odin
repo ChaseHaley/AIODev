@@ -13,6 +13,18 @@ import "aio:render"
 Notice_Kind :: enum u8 {
 	Info,
 	Error,
+	Warning,
+	Success,
+}
+
+notice_style :: proc(kind: Notice_Kind, theme: Theme) -> (label: string, symbol: rune, color: render.Color) {
+	switch kind {
+	case .Info: return "Info", 'i', theme.info
+	case .Warning: return "Warning", '!', theme.warning
+	case .Error: return "Error", '×', theme.error
+	case .Success: return "Success", '✓', theme.success
+	}
+	return "Info", 'i', theme.info
 }
 
 Notice :: struct {
@@ -117,20 +129,28 @@ notices_draw :: proc(
 		item: Notice
 		if i < len(n.items) { item = n.items[i] } else { item = n.fading[i-len(n.items)] }
 		layers, rects, glyph_count := len(list.layers), len(list.rects), len(list.glyphs)
-		wrap(text, item.text, box_width - 2 * padding - 4 * scale, &n.lines)
+		content_width := max(scale, box_width - 2 * padding - 32 * scale)
+		wrap(text, item.text, content_width, &n.lines)
 		lines := min(len(n.lines), NOTICE_MAX_LINES)
-		box_height := f32(lines) * text.line_height + 2 * padding
+		box_height := f32(lines+1) * text.line_height + 2 * padding + 4 * scale
 		box := render.Rect{width - margin - box_width, bottom - box_height, box_width, box_height}
-		accent := item.kind == .Error ? theme.error : theme.accent
+		label, symbol, accent := notice_style(item.kind, theme)
 		shadow := render.Rect{box.x, box.y + 12 * scale, box.width, box.height}
 		draw_rect(list, {rect = shadow, color = theme.shadow, radius = 8 * scale, softness = 32 * scale})
 		draw_rect(list, {rect = box, color = theme.surface, radius = 8 * scale})
 		draw_rect(list, {rect = box, color = theme.border, radius = 8 * scale, stroke = scale})
 		draw_rect(list, {rect = {box.x, box.y, 4 * scale, box.height}, color = accent, radius = 2 * scale})
+		badge := render.Rect{box.x+padding+4*scale, box.y+padding, 20*scale, 20*scale}
+		radius: f32 = item.kind == .Info || item.kind == .Error ? 10 : 3
+		draw_rect(list, {rect = badge, color = accent, radius = radius*scale, stroke = scale})
+		if result := draw_glyph_centered(text, list, symbol, badge, accent); result != .Ok { return result }
+		strong := text_styled(text, .Strong)
+		x := box.x + padding + 32 * scale
+		if result := draw_text(&strong, list, label, x, box.y+padding+strong.ascent, accent,
+			content_width); result != .Ok { return result }
 		for line, index in n.lines[:lines] {
-			x := box.x + padding + 4 * scale
-			baseline := box.y + padding + f32(index) * text.line_height + text.ascent
-			max_width := index == lines - 1 && len(n.lines) > lines ? box_width - 2 * padding : 0
+			baseline := box.y + padding + f32(index+1) * text.line_height + 4 * scale + text.ascent
+			max_width := index == lines - 1 && len(n.lines) > lines ? content_width : 0
 			if result := draw_text(text, list, line, x, baseline, theme.text, max_width); result != .Ok {
 				return result
 			}

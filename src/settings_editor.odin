@@ -242,7 +242,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	row.value = strings.clone(value)
 	ui.field_set(&p.value, value)
 	if row.kind == .Shortcut { p.focus, p.capturing = .Search, false }
-	reload_settings(app)
+	reload_settings(app, false)
 	p.leader = app.leader
 	text := "Saved and applied."
 	if alpha { text = "Saved and applied; the color's alpha is ignored." }
@@ -268,7 +268,7 @@ editor_follow_theme :: proc(app: ^App, w: ^Window) {
 		if w.editor.open { ui.editor_message(&w.editor, text, true) } else { notify(app, .Error, text) }
 		return
 	}
-	reload_settings(app)
+	reload_settings(app, false)
 	if w.editor.open {
 		filter := strings.clone(ui.field_string(&w.editor.filter), context.temp_allocator)
 		if !settings_load(app, w) { return }

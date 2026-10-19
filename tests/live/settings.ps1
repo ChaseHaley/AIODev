@@ -63,6 +63,8 @@ try {
     Open-Field font.size
     Save-Value 14
     Assert-Value (Read-State)['settings.error'] 'false' 'valid font applied'
+    if ((Read-State).ContainsKey('notice.transient')) { throw 'An inline Settings save added a routine toast.' }
+    Write-Output 'PASS inline Settings save stays quiet'
     $saved = [IO.File]::ReadAllText($path)
     if ($saved -notmatch '(?m)^font.size = 14$') { throw 'Font size not persisted.' }
     Save-Value 0

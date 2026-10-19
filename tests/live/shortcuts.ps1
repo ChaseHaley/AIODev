@@ -32,14 +32,21 @@ function Assert-Value($Actual, $Expected, [string] $Label) {
 }
 
 function Configure([string] $Bindings) {
+    $script:diagnosticOffset = [IO.File]::ReadAllText((Read-State)['app.log'].Trim('"')).Length
     [IO.File]::WriteAllText($path, $script:base + "`n" + $Bindings + "`n")
     Invoke-Aio command settings.reload
 }
 
+function Read-Diagnostics {
+    return [IO.File]::ReadAllText((Read-State)['app.log'].Trim('"')).Substring($script:diagnosticOffset)
+}
+
 function Assert-Conflict([string] $Winner) {
     $notice = (Read-State)['notice.settings']
+    if ($notice -notlike '*warning: *Review Leader Key*') { throw "Not an actionable warning: $notice" }
+    $details = Read-Diagnostics
     foreach ($part in @('input.leader', 'tab.new', 'settings.ini:', "$Winner wins")) {
-        if ($notice -notlike "*$part*") { throw "Missing $part in $notice" }
+        if ($details -notlike "*$part*") { throw "Missing $part in diagnostic log" }
     }
     Write-Output "PASS named conflict and source locations: $notice"
 }
@@ -121,7 +128,7 @@ try {
     # Ctrl+Shift+T even though the rejected attempted override is written later.
     Configure "input.leader = Ctrl+Shift+T`nkeys.tab.new = Ctrl+Shift+P"
     Invoke-Aio expect state leader.enabled=true
-    $notice = (Read-State)['notice.settings']
+    $notice = Read-Diagnostics
     foreach ($part in @('tab.new', 'defaults', 'input.leader wins', 'already used by', 'app.command_palette')) {
         if ($notice -notlike "*$part*") { throw "Missing effective-origin diagnostic $part in $notice" }
     }
@@ -176,7 +183,7 @@ try {
     Configure 'input.leader = Ctrl+Shift+T'
     Invoke-Aio expect state leader.enabled=true
     Assert-Conflict input.leader
-    if ((Read-State)['notice.settings'] -notlike '*defaults*') { throw 'Default origin missing.' }
+    if ((Read-Diagnostics) -notlike '*defaults*') { throw 'Default origin missing.' }
     Invoke-Aio key Ctrl+Shift+T
     Invoke-Aio expect state tabs.count=4
     Invoke-Aio expect state leader.pending=true
