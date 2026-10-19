@@ -19,7 +19,7 @@ rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
 	}
 	arrange_cancel(app, w)
 	leader_cancel(w)
-	ui.palette_close(&app.palette)
+	palette_close(app, w)
 	ui.field_set(&w.rename, value)
 	ui.field_select_all(&w.rename)
 	w.rename_open, w.rename_tab, w.rename_id, w.dirty = true, tab_name, id, true

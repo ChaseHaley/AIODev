@@ -103,7 +103,6 @@ show_window :: proc(app: ^App) {
 
 hide_to_tray :: proc(app: ^App, w: ^Window) {
 	focus_leave(app, w)
-	ui.palette_close(&app.palette)
 	window_close(app, w)
 	if !app.tray_hint_shown {
 		app.tray_hint_shown = true
@@ -141,15 +140,16 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		close_confirm_outcome(app, w, ui.confirm_key(&w.close_confirm, e))
 		return
 	}
-	if !app.palette.open && e.pressed &&
+	if !palette_active(app, w) && e.pressed &&
 	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
 		bar := window_tab_bar(app, w)
 		tab_menu_open(app, w, w.workspace.selected, f32(w.workspace.selected)*bar.tab_width, bar.height)
 		w.suppressed_key = e
 		return
 	}
-	if app.palette.open {
+	if palette_active(app, w) {
 		pane_header_cancel(w)
+		if e.pressed { w.suppressed_key = e }
 		logical := e
 		logical.key = commands.logical_key(e.key, e.unshifted)
 		p := &app.palette
@@ -241,7 +241,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if w.tab_menu.open { return }
 	if w.rename_open { ui.field_text(&w.rename, text); w.dirty = true; return }
 	if w.close_confirm.open { return }
-	if app.palette.open {
+	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
 		return
 	}
@@ -352,10 +352,10 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		window_tab_hit(w, window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
 	w.dirty = true
 	if !e.pressed && e.button in w.header_buttons {
-		if settings_active(w) || app.palette.open { pane_header_cancel(w) }
+		if settings_active(w) || palette_active(app, w) { pane_header_cancel(w) }
 		if pane_header_button(app, w, e) { return }
 	}
-	if app.palette.open {
+	if palette_active(app, w) {
 		p := &app.palette
 		l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
 		if e.button == .Left && !e.pressed { ui.palette_input_release(p) }
@@ -484,7 +484,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 			return
 		}
 	}
-	if app.palette.open {
+	if palette_active(app, w) {
 		split_overlay_update(w, x, y, false)
 		pane_header_pointer(w, x, y, false)
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -543,7 +543,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	}
 	w.wheel_remainder -= f32(rows)
 	if w.close_confirm.open { return }
-	if app.palette.open {
+	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return
 	}
@@ -564,8 +564,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
-		w.tab_menu.open = false
-		if w.rename_open { rename_finish(app, w, false) }
+		window_overlays_cancel(app, w)
 		pane_header_clear(w)
 		w.tab_pressed = false
 		w.tab_hover = -1
@@ -577,7 +576,6 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		w.split_overlay = false
 		arrange_cancel(app, w)
 		ui.editor_release(&w.editor)
-		ui.palette_input_release(&app.palette)
 	}
 	if entry := focused_session(app, w); entry != nil { term.send_focus(entry.session, focused) }
 }

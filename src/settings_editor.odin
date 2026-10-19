@@ -137,7 +137,7 @@ settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {
 // Selects the settings tab, creating it and loading the settings file when the workspace has none.
 editor_open :: proc(app: ^App, w: ^Window) {
 	pane_header_cancel(w)
-	ui.palette_close(&app.palette)
+	palette_close(app, w)
 	find_close(w, focused_session(app, w))
 	leader_cancel(w)
 	w.selecting, w.autoscrolling = false, false

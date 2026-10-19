@@ -74,6 +74,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 }
 
 focus_leave :: proc(app: ^App, w: ^Window) {
+	window_overlays_cancel(app, w)
 	leader_cancel(w)
 	if entry := focused_session(app, w); entry != nil {
 		term.send_focus(entry.session, false)
@@ -284,7 +285,7 @@ tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
 	arrange_cancel(app, w)
 	leader_cancel(w)
 	pane_header_cancel(w)
-	ui.palette_close(&app.palette)
+	palette_close(app, w)
 	w.selecting, w.autoscrolling = false, false
 	w.close_confirm_tab = w.workspace.tabs[index].id
 	w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)

@@ -214,9 +214,13 @@ when AIO_CONTROL {
 
 	@(require_results)
 	verify_state :: proc(app: ^App) -> ([]control.State_Entry, control.Error) {
+		w := verify_window(app)
+		owns_palette := w != nil && app.palette_window == w.id
 		item := ""
 		p := &app.palette
-		if p.selected >= 0 && p.selected < len(p.results) { item = ui.palette_result_name(p, p.results[p.selected]) }
+		if owns_palette && p.selected >= 0 && p.selected < len(p.results) {
+			item = ui.palette_result_name(p, p.results[p.selected])
+		}
 		entries := make([dynamic]control.State_Entry, context.temp_allocator)
 		base := [?]control.State_Entry{
 			{"app.pid", fmt.tprintf("%d", os.get_pid())}, {"app.app", app.app_id},
@@ -224,9 +228,11 @@ when AIO_CONTROL {
 			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
 			{"app.settings", app.settings_path}, {"app.log", app.log_path},
 			{"window.visible", fmt.tprintf("%t", len(app.windows) > 0)},
-			{"palette.open", fmt.tprintf("%t", p.open)}, {"palette.query", ui.palette_query(p)},
-			{"palette.selected", fmt.tprintf("%d", p.selected)},
-			{"palette.items", fmt.tprintf("%d", len(p.results))}, {"palette.item", item},
+			{"palette.window", fmt.tprintf("%d", app.palette_window)},
+			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
+			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
+			{"palette.selected", fmt.tprintf("%d", owns_palette ? p.selected : 0)},
+			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)}, {"palette.item", item},
 			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
 			{"theme.name", settings.value_text(&app.settings, settings.schema_find("theme.name")^)},
 			{"theme.mode", settings.value_text(&app.settings, settings.schema_find("theme.mode")^)},
@@ -239,7 +245,6 @@ when AIO_CONTROL {
 			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
 		}
 		if _, err := append(&entries, ..base[:]); err != nil { return nil, .Out_Of_Memory }
-		w := verify_window(app)
 		entry: ^Session_Entry
 		if w != nil {
 			entry = focused_session(app, w)
@@ -593,7 +598,7 @@ when AIO_CONTROL {
 		case control.Command:
 			command := commands.find(&app.registry, r.name)
 			if command == nil || command.disabled { return .Invalid_Argument }
-			ui.palette_close(&app.palette)
+			palette_close(app, w)
 			run_action(app, w, Action(command.id), r.direction, r.ratio, r.focus)
 		case:
 			return .Invalid_Argument

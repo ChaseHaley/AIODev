@@ -5,7 +5,8 @@ import "aio:ui"
 import "aio:platform"
 
 motion_active :: proc(app: ^App) -> bool {
-	if ui.motion_active(app.palette.motion) || ui.notices_animating(&app.notices) { return true }
+	if app.palette_window != 0 && ui.motion_active(app.palette.motion) { return true }
+	if ui.notices_animating(&app.notices) { return true }
 	for w in app.windows {
 		if ui.motion_active(w.tab_underline) || ui.motion_active(w.close_confirm.motion) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
@@ -24,8 +25,12 @@ update_motion :: proc(app: ^App) {
 	ui.motion_target(&p.motion, p.open ? 1 : 0, (p.open ? 120 : 90)*time.Millisecond,
 		p.open ? .Decelerate : .Accelerate, app.animations, now)
 	palette_changed := ui.motion_update(&p.motion, now)
+	if owner := window_find(app, app.palette_window); owner != nil {
+		if palette_changed { owner.dirty = true }
+		if !p.open && p.motion.value == 0 { palette_release(app, owner) }
+	}
 	notices_changed := ui.notices_animate(&app.notices, now)
-	if palette_changed || notices_changed { mark_all_dirty(app) }
+	if notices_changed { mark_all_dirty(app) }
 	for w in app.windows {
 		positions_changed := false
 		for &position, i in w.tab_positions {

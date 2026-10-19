@@ -11,7 +11,7 @@ import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
 import "aio:instance"
-import "aio:platform"
+import platform_api "aio:platform"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -53,7 +53,7 @@ App :: struct {
 	verify: Verify,
 	options: instance.Options,
 	app_id: string,
-	platform: platform.Platform,
+	platform: platform_api.Platform,
 	platform_ready: bool,
 	settings: settings.Settings,
 	settings_path: string,
@@ -71,6 +71,7 @@ App :: struct {
 	registry: commands.Registry,
 	leader: Maybe(commands.Shortcut),
 	palette: ui.Palette,
+	palette_window: platform_api.Window_Id,
 	notices: ui.Notices,
 	sessions: [dynamic]Session_Entry,
 	workspaces: [dynamic]^Workspace,
@@ -95,7 +96,7 @@ app_init :: proc(app: ^App) -> bool {
 			return false
 		}
 	}
-	app.animations = platform.client_animations_enabled()
+	app.animations = platform_api.client_animations_enabled()
 	ui.notices_init(&app.notices)
 	app.notices.animations = app.animations
 	app.registry = commands.create()
@@ -126,7 +127,7 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	apply_text_gamma(app)
 	glyphs.init(&app.cache, app.fonts, app.device)
-	ui_size_px := f32(app.settings.interface.font_size) * f32(platform.primary_dpi(&app.platform)) / 72
+	ui_size_px := f32(app.settings.interface.font_size) * f32(platform_api.primary_dpi(&app.platform)) / 72
 	if !ui.text_init(&app.ui_text, app.fonts, &app.cache, ui_size_px) {
 		log.error("no interface font is available")
 		return false
@@ -139,17 +140,17 @@ app_init :: proc(app: ^App) -> bool {
 	if workspace_error != nil { return false }
 	if _, err := append(&app.workspaces, workspace); err != nil { free(workspace); return false }
 	if !tab_create(app, workspace) { return false }
-	if platform.tray_create(&app.platform, app.app_id) != .None {
+	if platform_api.tray_create(&app.platform, app.app_id) != .None {
 		log.error("creating the tray icon failed")
 	}
-	tray_menu := [?]platform.Tray_Menu_Item{
+	tray_menu := [?]platform_api.Tray_Menu_Item{
 		{id = TRAY_OPEN, title = "Open AIODev"},
 		{id = TRAY_QUIT, title = "Quit"},
 	}
-	if platform.tray_set_menu(&app.platform, tray_menu[:]) != .None {
+	if platform_api.tray_set_menu(&app.platform, tray_menu[:]) != .None {
 		log.error("setting the tray menu failed")
 	}
-	platform.set_modal_loop_callback(&app.platform, proc(user: rawptr) { tick((^App)(user)) }, app)
+	platform_api.set_modal_loop_callback(&app.platform, proc(user: rawptr) { tick((^App)(user)) }, app)
 	if !window_open(app, workspace) {
 		return false
 	}
@@ -173,7 +174,7 @@ app_destroy :: proc(app: ^App) {
 	for workspace in app.workspaces { workspace_destroy(workspace) }
 	delete(app.workspaces)
 	if app.platform_ready {
-		if platform.tray_destroy(&app.platform) != .None {
+		if platform_api.tray_destroy(&app.platform) != .None {
 			log.error("removing the tray icon failed")
 		}
 	}
@@ -192,7 +193,7 @@ app_destroy :: proc(app: ^App) {
 	delete(app.log_path)
 	delete(app.app_id)
 	if app.platform_ready {
-		if platform.destroy(&app.platform) != .None {
+		if platform_api.destroy(&app.platform) != .None {
 			log.error("platform shutdown reported an error")
 		}
 	}
@@ -200,7 +201,7 @@ app_destroy :: proc(app: ^App) {
 
 run :: proc(app: ^App) {
 	for app.running {
-		if platform.wait_events(&app.platform, wait_timeout(app)) != .None {
+		if platform_api.wait_events(&app.platform, wait_timeout(app)) != .None {
 			log.error("waiting for events failed")
 		}
 		tick(app)
@@ -209,7 +210,7 @@ run :: proc(app: ^App) {
 
 // One iteration of the main loop; also driven by the platform during modal resize loops.
 tick :: proc(app: ^App) {
-	events, err := platform.poll_events(&app.platform)
+	events, err := platform_api.poll_events(&app.platform)
 	if err != .None {
 		log.errorf("polling events failed: %v", err)
 	}
@@ -283,7 +284,7 @@ mark_all_dirty :: proc(app: ^App) {
 
 @(private)
 wake_platform :: proc(user: rawptr) {
-	if platform.wake((^platform.Platform)(user)) != .None {
+	if platform_api.wake((^platform_api.Platform)(user)) != .None {
 		log.error("waking the main loop failed")
 	}
 }
@@ -306,7 +307,7 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 }
 
 initial_geometry :: proc(app: ^App) -> term.Geometry {
-	scale := f32(platform.primary_dpi(&app.platform)) / 96
+	scale := f32(platform_api.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
 	padding := math.round(f32(app.settings.window.padding)*scale)+
 		math.round(f32(app.settings.pane.gap)*scale)
@@ -411,7 +412,7 @@ update_sessions :: proc(app: ^App) {
 		}
 		if term.take_bell(s) {
 			for window in app.windows {
-				if !window.focused && platform.window_flash(&app.platform, window.id) != .None {
+				if !window.focused && platform_api.window_flash(&app.platform, window.id) != .None {
 					log.error("flashing the window failed")
 				}
 			}

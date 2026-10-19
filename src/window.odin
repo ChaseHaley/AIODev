@@ -184,6 +184,7 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
+	window_overlays_cancel(app, w)
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
 			ordered_remove(&app.windows, i)
@@ -442,7 +443,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if pane.content.kind == .Settings {
 			if card < len(w.list.rects) { w.list.rects[card].color = app.theme.pane }
 			result := ui.editor_draw(&w.editor, settings_layout(w), &w.list, &w.ui_text, app.theme,
-				w.focused && !app.palette.open)
+				w.focused && !palette_active(app, w))
 			if result != .Ok { return frame, result }
 			window_card_outline(app, w, pane)
 			continue
@@ -453,7 +454,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			continue
 		}
 		padding := pane_padding(app, w, entry)
-		content_focused := w.focused && pane.node == w.tree.focus && !app.palette.open &&
+		content_focused := w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
 			!w.find.open
 		style := term_view.Style{
 			family = app.family,
@@ -499,7 +500,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			return frame, result
 		}
 	}
-	if app.palette.open || app.palette.motion.value > 0 {
+	if palette_visible(app, w) {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,

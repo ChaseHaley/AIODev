@@ -208,16 +208,11 @@ run_action :: proc(
 	w.dirty = true
 	switch action {
 	case .Command_Palette:
-		leader_cancel(w)
-		pane_header_cancel(w)
-		if app.palette.open {
-			ui.palette_close(&app.palette)
+		if palette_active(app, w) {
+			palette_close(app, w)
 			return
 		}
-		has_selection := entry != nil && term.has_selection(entry.session)
-		registered := commands.set_enabled(&app.registry, commands.Command_Id(Action.Copy), has_selection)
-		assert(registered)
-		ui.palette_open(&app.palette, &app.registry)
+		palette_open(app, w)
 	case .Copy:
 		if entry != nil {
 			copy_selection(app, entry, true)
