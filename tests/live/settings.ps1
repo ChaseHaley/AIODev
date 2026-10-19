@@ -82,13 +82,11 @@ try {
     Assert-Value (Read-State)['settings.error'] 'true' 'external edit conflict reported'
     Assert-Value ([IO.File]::ReadAllText($path)) $external 'external edit preserved'
 
-    Open-Field window.show_tab_bar_with_one_tab -NoFocus
-    Assert-Value (Read-State)['settings.title'].Trim('"') 'Show Tab Bar With One Tab' 'friendly setting name'
+    Open-Field cursor.blink -NoFocus
+    Assert-Value (Read-State)['settings.title'].Trim('"') 'Cursor Blink' 'friendly setting name'
     Invoke-Aio key Enter
     Assert-Value (Read-State)['settings.error'] 'false' 'boolean saved despite unrelated unknown key'
-    Assert-Value (Read-State)['settings.value'] 'false' 'Enter flips an inline toggle'
-    Close-Settings
-    Assert-Value ((Read-State)['pane.0.rect'] -split ',')[1] '45' 'hidden tabs retain the window title bar'
+    Assert-Value (Read-State)['settings.value'] 'true' 'Enter flips an inline toggle'
     if ([IO.File]::ReadAllText($path) -notlike '*# external comment*future.key = retained*') {
         throw 'Unrelated text was lost.'
     }

@@ -10,8 +10,7 @@ import "aio:term"
 import "aio:ui"
 
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
-	bar := ui.tab_bar_layout(max(0, f32(w.width)-218*w.scale), w.scale, len(w.workspace.tabs),
-		app.settings.window.show_tab_bar_with_one_tab)
+	bar := ui.tab_bar_layout(max(0, f32(w.width)-218*w.scale), w.scale, len(w.workspace.tabs))
 	bar.height = ui.TAB_HEIGHT*w.scale
 	return bar
 }

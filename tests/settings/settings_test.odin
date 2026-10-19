@@ -24,7 +24,6 @@ round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.font.size, 12)
 	testing.expect_value(t, s.shell.directory, "~")
 	testing.expect_value(t, s.window.columns, 120)
-	testing.expect_value(t, s.window.show_tab_bar_with_one_tab, true)
 	testing.expect_value(t, s.colors.palette[15], settings.Color{0xf4, 0xf4, 0xf7})
 	testing.expect_value(t, s.colors.selection_foreground, nil)
 	for entry in settings.SCHEMA {
@@ -45,8 +44,7 @@ cursor.style = underline
 cursor.blink = true
 colors.cursor = #aB12Ef
 colors.selection_foreground = #123456
-window.rows = 1
-window.show_tab_bar_with_one_tab = false`
+window.rows = 1`
 	s, d, err := settings.parse(fixture)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
@@ -61,7 +59,6 @@ window.show_tab_bar_with_one_tab = false`
 	testing.expect_value(t, s.colors.selection_foreground,
 		Maybe(settings.Color)(settings.Color{0x12, 0x34, 0x56}))
 	testing.expect_value(t, s.window.rows, 1)
-	testing.expect_value(t, s.window.show_tab_bar_with_one_tab, false)
 	crlf, crlf_allocated := strings.replace_all(fixture, "\n", "\r\n")
 	defer if crlf_allocated {
 		delete(crlf)

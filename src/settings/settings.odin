@@ -23,7 +23,6 @@ Shell_Settings :: struct {
 Input_Settings :: struct { leader: string }
 Window_Settings :: struct {
 	columns, rows, padding: int,
-	show_tab_bar_with_one_tab: bool,
 }
 Scrollback_Settings :: struct {
 	lines: int,
@@ -85,7 +84,6 @@ SCHEMA :: [?]Schema_Entry{
 	{"window.columns", "Initial Columns", .Int, offset_of(Settings, window) + offset_of(Window_Settings, columns), "120", 1, 32767, nil, "Initial terminal columns."},
 	{"window.rows", "Initial Rows", .Int, offset_of(Settings, window) + offset_of(Window_Settings, rows), "32", 1, 32767, nil, "Initial terminal rows."},
 	{"window.padding", "Content Padding", .Int, offset_of(Settings, window) + offset_of(Window_Settings, padding), "8", 0, 1024, nil, "Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap."},
-	{"window.show_tab_bar_with_one_tab", "Show Tab Bar With One Tab", .Bool, offset_of(Settings, window) + offset_of(Window_Settings, show_tab_bar_with_one_tab), "true", 0, 0, nil, "Show the tab bar even with only one tab."},
 	{"scrollback.lines", "Scrollback Lines", .Int, offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines), "10000", 0, 10000000, nil, "Scrollback lines to keep; history is freed in blocks, so the count kept varies by a few hundred."},
 	{"terminal.copy_on_select", "Copy on Select", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select), "false", 0, 0, nil, "Copy selected text automatically; otherwise Ctrl+Shift+C copies it."},
 	{"terminal.confirm_multiline_paste", "Confirm Multiline Paste", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste), "true", 0, 0, nil, "Ask before pasting line breaks the shell would run as separate commands."},

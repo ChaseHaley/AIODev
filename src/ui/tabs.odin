@@ -10,8 +10,8 @@ Tab_Bar :: struct {
 	count: int,
 }
 
-tab_bar_layout :: proc(width, scale: f32, count: int, show_with_one_tab: bool) -> Tab_Bar {
-	if count < 1 || (count == 1 && !show_with_one_tab) { return {} }
+tab_bar_layout :: proc(width, scale: f32, count: int) -> Tab_Bar {
+	if count < 1 { return {} }
 	button := min(width, 32*scale)
 	return {width, TAB_HEIGHT*scale, min(220*scale, max(0, width-button)/f32(count)), button, count}
 }

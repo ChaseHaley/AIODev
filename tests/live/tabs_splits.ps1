@@ -46,33 +46,10 @@ function Assert-Isolated([string] $Marker, [string[]] $Others) {
 $savedClipboard = Get-Clipboard -Raw
 Invoke-Aio launch --fresh
 try {
-    $settingsPath = Join-Path $repo "build/verify/$name/settings.ini"
-    $originalSettings = [IO.File]::ReadAllText($settingsPath)
     $state = Read-State
     $node = $state['panes.focused']
-    Assert-Value ($state["pane.$node.rect"] -split ',')[1] 45 'single-tab bar visible by default'
+    Assert-Value ($state["pane.$node.rect"] -split ',')[1] 45 'single-tab bar visible'
     Assert-Value $state['grid.size'] '120x32' 'startup grid reserves tab bar space'
-    try {
-        $hiddenSettings = $originalSettings -replace '(?m)^window.show_tab_bar_with_one_tab\s*=.*$',
-            'window.show_tab_bar_with_one_tab = false'
-        if ($hiddenSettings -eq $originalSettings) {
-            $hiddenSettings += "`nwindow.show_tab_bar_with_one_tab = false`n"
-        }
-        [IO.File]::WriteAllText($settingsPath, $hiddenSettings)
-        Invoke-Aio command settings.reload
-        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 45 'hidden tabs retain title-bar space'
-        Invoke-Aio key Ctrl+Shift+T
-        Invoke-Aio wait text 'PS '
-        $state = Read-State
-        $secondNode = $state['panes.focused']
-        Assert-Value ($state["pane.$secondNode.rect"] -split ',')[1] 45 'multiple tabs override hidden preference'
-        Invoke-Aio key Ctrl+Shift+W
-        Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 45 'title-bar space remains after tab close'
-    } finally {
-        [IO.File]::WriteAllText($settingsPath, $originalSettings)
-        Invoke-Aio command settings.reload
-    }
-    Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 45 'reload restores single-tab bar'
     Invoke-Aio dpi 144
     Assert-Value ((Read-State)["pane.$node.rect"] -split ',')[1] 68 'single-tab bar scales with DPI'
     Invoke-Aio dpi 96
@@ -87,7 +64,7 @@ try {
     Invoke-Aio expect state tabs.count=2
     Invoke-Aio key Ctrl+Shift+W
     Invoke-Aio expect state tabs.count=1
-    Write-Output 'PASS single-tab new-tab button and visibility setting'
+    Write-Output 'PASS single-tab new-tab button'
     Set-Marker 'TAB_ONE_ONLY'
     $firstId = (Read-State)['session.id']
     $firstGrid = (Read-State)['grid.size']

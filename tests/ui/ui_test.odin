@@ -202,17 +202,13 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 }
 
 @(test)
-tab_bar_visibility_and_controls_in_narrow_windows :: proc(t: ^testing.T) {
-	single := ui.tab_bar_layout(1000, 1, 1, false)
-	testing.expect_value(t, single.height, f32(0))
-	testing.expect_value(t, ui.tab_bar_hit_test(single, 1, 1), -1)
-	shown := ui.tab_bar_layout(1000, 1, 1, true)
-	testing.expect_value(t, shown.height, f32(40))
-	testing.expect_value(t, ui.tab_bar_hit_test(shown, 1, 1), 0)
-	testing.expect_value(t, ui.tab_bar_hit_test(shown, 225, 1), 1)
-	testing.expect_value(t, ui.tab_bar_layout(1000, 1, 0, true), ui.Tab_Bar{})
-	testing.expect_value(t, ui.tab_bar_layout(500, 2, 3, true), ui.tab_bar_layout(500, 2, 3, false))
-	bar := ui.tab_bar_layout(500, 2, 3, false)
+tab_bar_controls_in_narrow_windows :: proc(t: ^testing.T) {
+	single := ui.tab_bar_layout(1000, 1, 1)
+	testing.expect_value(t, single.height, f32(40))
+	testing.expect_value(t, ui.tab_bar_hit_test(single, 1, 1), 0)
+	testing.expect_value(t, ui.tab_bar_hit_test(single, 225, 1), 1)
+	testing.expect_value(t, ui.tab_bar_layout(1000, 1, 0), ui.Tab_Bar{})
+	bar := ui.tab_bar_layout(500, 2, 3)
 	testing.expect_value(t, bar.height, f32(80))
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, 0, 0), 0)
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.tab_width, 10), 1)
@@ -220,14 +216,14 @@ tab_bar_visibility_and_controls_in_narrow_windows :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, 500, 10), -1)
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, 10, 80), -1)
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, -1, 10), -1)
-	narrow := ui.tab_bar_layout(20, 1, 10, true)
+	narrow := ui.tab_bar_layout(20, 1, 10)
 	testing.expect_value(t, ui.tab_bar_hit_test(narrow, 1, 1), 10)
 }
 
 @(test)
 tab_close_targets_and_caption_buttons_are_distinct :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 1.75, 2}) {
-		bar := ui.tab_bar_layout(900*scale, scale, 3, true)
+		bar := ui.tab_bar_layout(900*scale, scale, 3)
 		for i in 0..<bar.count {
 			r := ui.tab_close_rect(bar, i, scale)
 			testing.expect_value(t, ui.tab_close_hit(bar, r.x+r.width/2, r.y+r.height/2, scale), i)
