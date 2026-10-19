@@ -4,7 +4,7 @@ import "core:strings"
 
 HELP_OVERVIEW :: `aioctl <command> [arguments]
 Inspect: ping, screen, cells, state, wait, expect.
-Drive: type, key, run, mouse, focus, resize, dpi, tray, command.
+Drive: type, key, run, mouse, focus, resize, dpi, tray, command, window.
 Use help <command> for grammar, evidence, output, and defaults.
 Coordinates and inclusive ranges are zero-based; quote each text argument in your shell.
 Expect prints one PASS or FAIL line; FAIL includes observed state.
@@ -51,6 +51,10 @@ Output is one key=value per line; values with spaces or quotes are quoted and es
 Example: palette.open=false
 Tab selection is one-based; pane IDs are stable within each tab. tabs.selected=0 means no tabs.
 Tabs: tabs.count/selected, tab.N.id/focus/panes, tab.N.pane.ID.session/grid.
+Windows: windows.count, window.id/workspace_index, window.N.id/origin/size/workspace_index.
+Window inventory and workspace indexes are one-based; zero means no selected window/workspace.
+Origins are client pixel origins in signed screen coordinates; sizes are client pixels.
+State and commands use the selected verification window, otherwise the focused window.
 Visible panes: panes.count/focused, pane.ID.rect=x,y,width,height in client pixels.
 Focused session: session.id/status/exit/message/title; session.ID.builds counts glyph builds.
 Hidden tabs retain their sessions and last grid size; only visible panes have current rectangles.
@@ -108,12 +112,23 @@ Example: ok; rows 1-2 changed
 		put(&w, `mouse move|down|up|click <pos> [options]
 mouse drag <pos> <pos> [options]
 mouse wheel <pos> <lines> [options]
-Options: --button left|right|middle (default left), --mods Ctrl+Shift (default none), --px.
+Options: --button left|right|middle (default left), --mods Ctrl+Shift (default none), --px or --screen.
 Positions are nonnegative col,row cell centers; --px uses x,y pixels instead.
+--screen uses signed 32-bit screen pixels, converted to the selected source window's client coordinates.
 Wheel lines are signed 32-bit integers; negative scrolls down. Drag uses start and end positions.
 Proves the app's mouse path without moving the desktop pointer or taking focus.
 Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start with error:.
 Options may appear in any order after positions.
+`)
+	case "window":
+		put(&w, `window select <id>
+window move <signed-x>,<signed-y>
+Select a persistent verification target from state's window.N.id, without changing OS focus.
+Reads and subsequent commands use this window until another is selected or it is destroyed.
+On destruction, clear the target and fall back to the focused or first remaining window.
+Move positions the selected window's outer top-left in screen pixels without activating it.
+Coordinates are signed 32-bit integers; quote x,y in PowerShell. Unknown window IDs fail.
+Output is one line: ok; <changes>. No defaults.
 `)
 	case "focus":
 		put(&w, `focus in|out

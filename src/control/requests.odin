@@ -34,8 +34,10 @@ Mouse :: struct {
 	lines: int,
 	button: input.Mouse_Button,
 	modifiers: input.Modifiers,
-	pixels: bool,
+	pixels, screen: bool,
 }
+Window_Select :: struct { id: u64 }
+Window_Move :: struct { position: Position }
 Focus :: struct { focused: bool }
 Resize :: struct { columns, rows: int }
 Dpi :: struct { value: int }
@@ -44,7 +46,7 @@ Tray :: struct { action: Tray_Action }
 Command :: struct { name: string, direction: layout.Direction, ratio: f32, focus: bool }
 Help :: struct { command: string }
 Request :: union { Ping, Screen, Cells, State, Wait, Expect, Type, Key, Run, Mouse,
-	Focus, Resize, Dpi, Tray, Command, Help }
+	Focus, Resize, Dpi, Tray, Command, Window_Select, Window_Move, Help }
 Parse_Error :: struct { argument: string, advice: string }
 
 @(private, require_results)
@@ -58,12 +60,26 @@ number :: proc(s: string, low: int = 0, high: int = int(max(i32))) -> (int, bool
 }
 
 @(private, require_results)
-pair :: proc(s: string, separator: u8) -> (Position, bool) {
+pair :: proc(s: string, separator: u8, signed: bool = false) -> (Position, bool) {
 	i := strings.index_byte(s, separator)
 	if i < 0 { return {}, false }
 	x, a := number(s[:i])
 	y, b := number(s[i+1:])
+	if signed {
+		x, a = signed_number(s[:i])
+		y, b = signed_number(s[i+1:])
+	}
 	return {x, y}, a && b
+}
+
+@(private, require_results)
+signed_number :: proc(s: string) -> (int, bool) {
+	digits := s
+	if len(digits) > 0 && (digits[0] == '-' || digits[0] == '+') { digits = digits[1:] }
+	_, valid := number(digits, 0, int(max(i32))+1)
+	if !valid { return 0, false }
+	n, ok := strconv.parse_int(s)
+	return n, ok && n >= int(min(i32)) && n <= int(max(i32))
 }
 
 @(private, require_results)
@@ -132,6 +148,20 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 	case "help":
 		if len(args) > 2 { return {}, {args[2], "use help [command]"} }
 		return Help{len(args) == 2 ? args[1] : ""}, {}
+	case "window":
+		if len(args) != 3 { return {}, bad }
+		switch args[1] {
+		case "select":
+			for c in args[2] { if c < '0' || c > '9' { return {}, bad } }
+			id, ok := strconv.parse_uint(args[2])
+			if !ok || id == 0 { return {}, {args[2], "use a nonzero window id from state"} }
+			return Window_Select{u64(id)}, {}
+		case "move":
+			position, ok := pair(args[2], ',', true)
+			if !ok { return {}, {args[2], "use signed 32-bit screen x,y"} }
+			return Window_Move{position}, {}
+		}
+		return {}, bad
 	case "screen":
 		if len(args) == 1 { return Screen{}, {} }
 		if len(args) != 2 { return {}, bad }
@@ -320,14 +350,14 @@ parse_mouse :: proc(args: []string) -> (Request, Parse_Error) {
 	case:
 		return {}, {args[1], bad.advice}
 	}
-	p, ok := pair(args[2], ',')
-	if !ok { return {}, {args[2], "use nonnegative col,row (x,y with --px)"} }
+	p, ok := pair(args[2], ',', true)
+	if !ok { return {}, {args[2], "use col,row, pixel x,y with --px, or signed x,y with --screen"} }
 	m.position = p
 	i := 3
 	if m.kind == .Drag || m.kind == .Wheel {
 		if len(args) < 4 { return {}, bad }
 		if m.kind == .Drag {
-			m.end, ok = pair(args[3], ',')
+			m.end, ok = pair(args[3], ',', true)
 		} else {
 			m.lines, ok = strconv.parse_int(args[3])
 			ok &&= m.lines >= int(min(i32)) && m.lines <= int(max(i32))
@@ -338,8 +368,8 @@ parse_mouse :: proc(args: []string) -> (Request, Parse_Error) {
 	seen_button, seen_mods := false, false
 	for i < len(args) {
 		option := args[i]
-		if option == "--px" && !m.pixels {
-			m.pixels = true
+		if (option == "--px" || option == "--screen") && !m.pixels && !m.screen {
+			m.pixels, m.screen = option == "--px", option == "--screen"
 			i += 1
 			continue
 		}
@@ -371,9 +401,12 @@ parse_mouse :: proc(args: []string) -> (Request, Parse_Error) {
 			if !valid { return {}, {s, "use modifiers such as Ctrl+Shift"} }
 			m.modifiers = chord.modifiers
 		case:
-			return {}, {option, "choose --button, --mods, or --px"}
+			return {}, {option, "choose --button, --mods, --px, or --screen"}
 		}
 		i += 2
+	}
+	if !m.screen && (m.position.x < 0 || m.position.y < 0 || m.end.x < 0 || m.end.y < 0) {
+		return {}, {args[2], "negative positions require --screen"}
 	}
 	return m, {}
 }

@@ -94,7 +94,10 @@ parse_options :: proc(args: []string) -> (Options, string) {
 @(private)
 bare_number :: proc(text: string) -> bool {
 	if text == "" { return false }
-	for c in text {
+	digits := text
+	if digits[0] == '-' || digits[0] == '+' { digits = digits[1:] }
+	if digits == "" { return false }
+	for c in digits {
 		if c < '0' || c > '9' { return false }
 	}
 	return true
@@ -111,6 +114,8 @@ split_position :: proc(args: []string) -> bool {
 		case "move", "down", "up", "click", "wheel": positions = []int{2}
 		case "drag": positions = []int{2, 3}
 		}
+	} else if args[0] == "window" && args[1] == "move" {
+		positions = []int{2}
 	}
 	for i in positions {
 		if i+1 < len(args) && bare_number(args[i]) && bare_number(args[i+1]) { return true }

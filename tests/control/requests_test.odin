@@ -38,6 +38,10 @@ parse_commands :: proc(t: ^testing.T) {
 		{"mouse", "up", "1,2", "--button", "middle"}, {"mouse", "click", "1,2", "--button", "left"},
 		{"mouse", "drag", "1,2", "3,4", "--px", "--mods", "Ctrl+Shift"},
 		{"mouse", "wheel", "1,2", "-3", "--mods", "Alt+Win", "--px"},
+		{"mouse", "move", "-2147483648,2147483647", "--screen"},
+		{"mouse", "drag", "-100,20", "30,-40", "--screen", "--mods", "Ctrl"},
+		{"mouse", "wheel", "-100,-20", "-3", "--screen"},
+		{"window", "select", "18446744073709551615"}, {"window", "move", "-2147483648,2147483647"},
 	}
 	for args in cases {
 		r, err := control.parse(args)
@@ -104,6 +108,17 @@ parse_errors :: proc(t: ^testing.T) {
 		{"mouse", "click", "0,0", "--px", "--px"},
 		{"mouse", "click", "0,0", "--button", "left", "--button", "right"},
 		{"mouse", "click", "0,0", "--mods", "Alt", "--mods", "Ctrl"},
+		{"window"}, {"window", "select"}, {"window", "select", "0"}, {"window", "select", "-1"},
+		{"window", "select", "+1"}, {"window", "select", ""}, {"window", "select", "1", "2"},
+		{"window", "select", "18446744073709551616"}, {"window", "bad", "1"},
+		{"window", "move", "1"}, {"window", "move", "1,2,3"}, {"window", "move", "2147483648,0"},
+		{"window", "move", "0,-2147483649"}, {"window", "move", "--1,2"},
+		{"mouse", "move", "-1,0"}, {"mouse", "move", "-1,0", "--px"},
+		{"mouse", "drag", "0,0", "-1,0"}, {"mouse", "move", "2147483648,0", "--screen"},
+		{"mouse", "move", "0,-2147483649", "--screen"},
+		{"mouse", "move", "0,0", "--screen", "--screen"},
+		{"mouse", "move", "0,0", "--px", "--screen"},
+		{"mouse", "move", "0,0", "--screen", "--px"},
 	}
 	for args in cases {
 		r, err := control.parse(args)
@@ -122,7 +137,7 @@ help_and_pipe_name :: proc(t: ^testing.T) {
 	testing.expect_value(t, control.help(&b), control.Error.None)
 	testing.expect_value(t, strings.to_string(b), control.HELP_OVERVIEW)
 	for command in ([]string{"ping", "screen", "cells", "state", "wait", "expect", "type", "key",
-		"run", "mouse", "focus", "resize", "dpi", "tray", "command", "help"}) {
+		"run", "mouse", "focus", "resize", "dpi", "tray", "command", "window", "help"}) {
 		strings.builder_reset(&b)
 		testing.expect_value(t, control.help(&b, command), control.Error.None)
 		testing.expect(t, strings.has_prefix(strings.to_string(b), command))
@@ -138,4 +153,20 @@ help_and_pipe_name :: proc(t: ^testing.T) {
 	}
 	_, allocation_error := control.pipe_name("test", failing_allocator())
 	testing.expect_value(t, allocation_error, control.Error.Out_Of_Memory)
+}
+
+@(test)
+window_requests_preserve_screen_coordinates_and_target_ids :: proc(t: ^testing.T) {
+	r, err := control.parse({"window", "select", "4294967297"})
+	testing.expect_value(t, err.advice, "")
+	testing.expect_value(t, r.(control.Window_Select).id, u64(4294967297))
+	r, err = control.parse({"window", "move", "-1920,-240"})
+	testing.expect_value(t, err.advice, "")
+	testing.expect_value(t, r.(control.Window_Move).position, control.Position{-1920, -240})
+	r, err = control.parse({"mouse", "drag", "-1920,-240", "200,-300", "--screen"})
+	testing.expect_value(t, err.advice, "")
+	m := r.(control.Mouse)
+	testing.expect_value(t, m.position, control.Position{-1920, -240})
+	testing.expect_value(t, m.end, control.Position{200, -300})
+	testing.expect(t, m.screen && !m.pixels)
 }
