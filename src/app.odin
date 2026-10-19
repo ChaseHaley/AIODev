@@ -75,6 +75,7 @@ App :: struct {
 	notices: ui.Notices,
 	sessions: [dynamic]Session_Entry,
 	workspaces: [dynamic]^Workspace,
+	next_workspace_id: u32,
 	next_session_id: u32,
 	windows: [dynamic]^Window,
 	running: bool,
@@ -136,9 +137,8 @@ app_init :: proc(app: ^App) -> bool {
 	shell_icon_load(app)
 	apply_fonts(app)
 	apply_theme(app)
-	workspace, workspace_error := new(Workspace)
-	if workspace_error != nil { return false }
-	if _, err := append(&app.workspaces, workspace); err != nil { free(workspace); return false }
+	workspace := workspace_create_empty(app)
+	if workspace == nil { return false }
 	if !tab_create(app, workspace) { return false }
 	if platform_api.tray_create(&app.platform, app.app_id) != .None {
 		log.error("creating the tray icon failed")
@@ -387,6 +387,7 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 
 @(private)
 update_sessions :: proc(app: ^App) {
+	workspace_status_changed := false
 	// Exit cleanup removes only the current entry; earlier entries remain valid.
 	for i := len(app.sessions)-1; i >= 0; i -= 1 {
 		entry := &app.sessions[i]
@@ -399,6 +400,7 @@ update_sessions :: proc(app: ^App) {
 			}
 		}
 		if term.take_status_change(s) {
+			workspace_status_changed = true
 			status := term.status(s)
 			if status.kind != entry.status {
 				entry.status = status.kind
@@ -410,6 +412,7 @@ update_sessions :: proc(app: ^App) {
 			pane_header_refresh(entry)
 			session_titles_changed(app, entry.id)
 		}
+		workspace_status_changed = term.take_program_status_change(s) || workspace_status_changed
 		if term.take_bell(s) {
 			for window in app.windows {
 				if !window.focused && platform_api.window_flash(&app.platform, window.id) != .None {
@@ -418,6 +421,7 @@ update_sessions :: proc(app: ^App) {
 			}
 		}
 	}
+	if workspace_status_changed { workspace_picker_status_changed(app) }
 	for window in app.windows {
 		generation := window_generation(app, window)
 		if generation != window.generation {

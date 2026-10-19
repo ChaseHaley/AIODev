@@ -8,16 +8,17 @@ TAB_HEIGHT :: f32(40)
 Tab_Bar :: struct {
 	width, height, tab_width, button_width: f32,
 	count: int,
+	x: f32,
 }
 
 tab_bar_layout :: proc(width, scale: f32, count: int) -> Tab_Bar {
 	if count < 1 { return {} }
 	button := min(width, 32*scale)
-	return {width, TAB_HEIGHT*scale, min(220*scale, max(0, width-button)/f32(count)), button, count}
+	return {width, TAB_HEIGHT*scale, min(220*scale, max(0, width-button)/f32(count)), button, count, 0}
 }
 
 tab_drop_region :: proc(bar: Tab_Bar, width, scale: f32) -> render.Rect {
-	left := f32(bar.count)*bar.tab_width
+	left := bar.x+f32(bar.count)*bar.tab_width
 	return {left, 0, max(0, width-138*scale-left), bar.height}
 }
 
@@ -28,10 +29,11 @@ tab_drop_hit :: proc(bar: Tab_Bar, width, scale, x, y: f32) -> bool {
 
 // The count is the new-tab button; -1 is outside the controls.
 tab_bar_hit_test :: proc(bar: Tab_Bar, x, y: f32) -> int {
-	if bar.count == 0 || x < 0 || x >= bar.width || y < 0 || y >= bar.height { return -1 }
+	local_x := x-bar.x
+	if bar.count == 0 || local_x < 0 || local_x >= bar.width || y < 0 || y >= bar.height { return -1 }
 	end := bar.tab_width*f32(bar.count)
-	if x >= end { return x < end+bar.button_width ? bar.count : -1 }
-	return bar.tab_width > 0 ? int(x/bar.tab_width) : -1
+	if local_x >= end { return local_x < end+bar.button_width ? bar.count : -1 }
+	return bar.tab_width > 0 ? int(local_x/bar.tab_width) : -1
 }
 
 tab_draw :: proc(
@@ -44,6 +46,7 @@ tab_draw :: proc(
 	if position >= 0 { x = position }
 	width := bar.tab_width
 	if index == bar.count { x, width = f32(bar.count)*bar.tab_width, bar.button_width }
+	x += bar.x
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None { return .Ok }
 	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.chrome})
 	tile := render.Rect{x+2*scale, 6*scale, max(0, width-4*scale), 28*scale}
@@ -68,7 +71,7 @@ tab_draw :: proc(
 	if width <= 16*scale { return .Ok }
 	if index < bar.count && width >= 56*scale {
 		close := tab_close_rect(bar, index, scale)
-		close.x += x-f32(index)*bar.tab_width
+		close.x += x-bar.x-f32(index)*bar.tab_width
 		large := text^
 		text_set_size(&large, text.size_px*1.5)
 		if result := draw_glyph_centered(&large, list, '×', close, theme.muted); result != .Ok { return result }
@@ -120,7 +123,7 @@ tab_group_order :: proc(marked: []bool, slot: int, out: []int) -> bool {
 
 tab_close_rect :: proc(bar: Tab_Bar, index: int, scale: f32) -> render.Rect {
 	if index < 0 || index >= bar.count || bar.tab_width < 56*scale { return {} }
-	return {f32(index+1)*bar.tab_width-28*scale, 9*scale, 22*scale, 22*scale}
+	return {bar.x+f32(index+1)*bar.tab_width-28*scale, 9*scale, 22*scale, 22*scale}
 }
 
 tab_close_hit :: proc(bar: Tab_Bar, x, y, scale: f32) -> int {

@@ -76,6 +76,8 @@ Window :: struct {
 	tab_menu: Tab_Menu,
 	rename: ui.Text_Field,
 	rename_open, rename_tab: bool,
+	rename_workspace: bool,
+	workspace_picker: Workspace_Picker,
 	rename_id: u32,
 	caption_hover, caption_pressed: int,
 	maximized: bool,
@@ -214,6 +216,8 @@ window_free :: proc(w: ^Window) {
 	ui.find_destroy(&w.find)
 	ui.editor_destroy(&w.editor)
 	delete(w.rename.bytes)
+	delete(w.workspace_picker.query.bytes)
+	delete(w.workspace_picker.rows)
 	delete(w.close_restore)
 	render.draw_list_destroy(&w.list)
 	delete(w.dividers)
@@ -280,7 +284,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	}
 	bar := window_tab_bar(app, w)
 	platform.window_title_bar(&app.platform, w.id, i32(bar.height),
-		i32(f32(bar.count)*bar.tab_width+2*bar.button_width))
+		i32(bar.x+f32(bar.count)*bar.tab_width+2*bar.button_width))
 	pane_header_cancel(w)
 	for &view in w.views { view.header_controls = {} }
 	w.header_height = 0
@@ -522,6 +526,9 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	}
 	if w.tab_menu.open {
 		if result := tab_menu_draw(app, w); result != .Ok { return frame, result }
+	}
+	if w.workspace_picker.open {
+		if result := workspace_picker_draw(app, w); result != .Ok { return frame, result }
 	}
 	return frame, ui.notices_draw(&app.notices, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale)
 }

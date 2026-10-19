@@ -97,7 +97,7 @@ divider_cursor :: proc(w: ^Window, x, y: f32) -> (platform.Cursor_Shape, bool) {
 tab_press :: proc(w: ^Window, index: int, x, width: f32, modified: bool) {
 	if !w.workspace.tabs[index].marked { return }
 	w.tab_drag = {grabbed = w.workspace.tabs[index], start = x,
-		offset = x-tab_position(w, index)*width, pressed = true, modified = modified}
+		offset = x-workspace_button_width(w)-tab_position(w, index)*width, pressed = true, modified = modified}
 }
 
 // Moves a tab and everything indexed by tab position, keeping the selected tab selected.
@@ -151,7 +151,7 @@ tab_drag_move :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 	if mark_error != nil { tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return true }
 	count := 0
 	for tab, i in d.order { marked[i] = tab.marked; if tab.marked { count += 1 } }
-	first := clamp((x-d.offset)/bar.tab_width-f32(d.rank), 0, f32(len(d.order)-count))
+	first := clamp((x-bar.x-d.offset)/bar.tab_width-f32(d.rank), 0, f32(len(d.order)-count))
 	slot := int(math.floor(first+0.5))
 	order, order_error := make([]int, len(d.order), context.temp_allocator)
 	if order_error != nil { tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return true }
