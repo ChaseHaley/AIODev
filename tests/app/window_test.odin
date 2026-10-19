@@ -2,6 +2,7 @@ package app_test
 
 import "base:runtime"
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -9,6 +10,8 @@ import app "../../src"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
+
+_ :: log
 
 @(test)
 window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
@@ -52,6 +55,29 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect(t, first.tree != second.tree)
 	testing.expect_value(t, len(state.sessions), 2)
 	app.tick(&state)
+	when #config(AIO_NATIVE_FOCUS, false) {
+		state.options.inactive = false
+		logger := context.logger
+		context.logger = {}
+		activated := app.window_open(&state, second_workspace)
+		context.logger = logger
+		if activated {
+			testing.expect(t, platform.window_is_focused(&state.platform, second.id))
+			testing.expect(t, !platform.window_is_focused(&state.platform, first.id))
+			log.info("native workspace activation succeeded")
+		} else {
+			log.info("native workspace activation was denied; ownership preserved")
+		}
+		testing.expect(t, first.workspace == state.workspaces[0])
+		testing.expect_value(t, len(state.windows), 2)
+		state.options.inactive = true
+	}
+	if !testing.expect(t, app.window_open(&state, second_workspace)) { return }
+	if !testing.expect_value(t, len(state.windows), 2) { return }
+	testing.expect(t, state.windows[1] == second)
+	testing.expect(t, first.workspace == state.workspaces[0])
+	testing.expect_value(t, len(state.sessions), 2)
+	testing.expect_value(t, term.process_id(second_session), second_pid)
 	app.window_set_dpi(&state, first, 144)
 	testing.expect_value(t, first.ui_text.size_px, f32(24))
 	testing.expect_value(t, second.ui_text.size_px, f32(16))
@@ -70,16 +96,22 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.process_id(first_session), first_pid)
 	testing.expect_value(t, term.process_id(second_session), second_pid)
 	testing.expect_value(t, len(state.sessions), 2)
+	allocator := context.allocator
+	context.allocator = runtime.nil_allocator()
+	opened := app.window_open(&state, state.workspaces[0])
+	context.allocator = allocator
+	testing.expect(t, !opened)
+	testing.expect_value(t, len(state.windows), 1)
 	if !testing.expect(t, app.window_open(&state, state.workspaces[0])) { return }
 	testing.expect(t, state.windows[1].tree == &state.workspaces[0].tabs[0].tree)
 	testing.expect_value(t, term.process_id(first_session), first_pid)
 	testing.expect_value(t, len(state.sessions), 2)
 
-	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
-	opened := app.window_open(&state, second_workspace)
+	opened = app.window_open(&state, second_workspace)
 	context.allocator = allocator
-	testing.expect(t, !opened)
+	testing.expect(t, opened)
+	testing.expect(t, app.window_for_workspace(&state, second_workspace) == second)
 	testing.expect_value(t, len(state.windows), 2)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, term.process_id(second_session), second_pid)

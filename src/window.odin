@@ -94,6 +94,9 @@ window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
 @(require_results)
 window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	if workspace == nil || selected_tab(workspace) == nil { return false }
+	if existing := window_for_workspace(app, workspace); existing != nil {
+		return window_activate(app, existing)
+	}
 	if reserve(&app.windows, len(app.windows)+1) != nil { return false }
 	w, allocation_error := new(Window)
 	if allocation_error != nil {
@@ -161,6 +164,23 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 		log.error("focusing the new window failed")
 	}
 	return true
+}
+
+@(require_results)
+window_activate :: proc(app: ^App, w: ^Window) -> bool {
+	err := app.options.inactive ? platform.window_show_inactive(&app.platform, w.id) :
+		platform.window_focus(&app.platform, w.id)
+	if err != .None {
+		log.errorf("activating the workspace window failed: %v", err)
+		notify(app, .Error, "Could not activate the existing workspace window.")
+		return false
+	}
+	return true
+}
+
+window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
+	for w in app.windows { if w.workspace == workspace { return w } }
+	return nil
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
