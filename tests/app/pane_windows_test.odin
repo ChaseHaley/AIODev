@@ -67,6 +67,15 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.geometry(session), geometry)
 	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
 	if !testing.expect(t, preview != nil) { return }
+	app.pane_drag_press(&state, source_window, node, 80, 80)
+	source_window.pane_drag.preview_window = preview.id
+	app.window_close(&state, preview)
+	testing.expect(t, !source_window.pane_drag.pressed)
+	testing.expect_value(t, len(state.windows), 1)
+	testing.expect_value(t, len(state.workspaces), 1)
+	testing.expect_value(t, term.geometry(session), geometry)
+	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
+	if !testing.expect(t, preview != nil) { return }
 	preview_id = preview.id
 	// The prepared window adopts the existing runtime when its sole source view closes.
 	if !testing.expect(t, app.pane_to_window(&state, source_window, source, node, preview_id)) { return }

@@ -31,9 +31,11 @@ pane_preview_workspace_discard :: proc(app: ^App, workspace: ^Workspace) {
 pane_window_preview_discard :: proc(app: ^App, id: platform.Window_Id) {
 	preview := window_find(app, id)
 	if preview == nil || !preview.preparing { return }
-	workspace := preview.workspace
+	workspace_id := preview.workspace.id
 	window_close(app, preview)
-	pane_preview_workspace_discard(app, workspace)
+	if workspace := workspace_find(app, workspace_id); workspace != nil && workspace.provisional {
+		pane_preview_workspace_discard(app, workspace)
+	}
 }
 
 @(require_results)
