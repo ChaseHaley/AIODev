@@ -719,13 +719,15 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 		l.list = {x, top, width, f32(l.rows)*l.row_height}
 		return l
 	}
-	outline_x := area.x+pad
+	// The outline and list stay together as one block, centered once the list reaches its maximum width.
+	gutter := 24*s
+	width := max(0, min(960*s, area.width-2*pad-OUTLINE_WIDTH*s-gutter))
+	outline_x := area.x+max(pad, (area.width-OUTLINE_WIDTH*s-gutter-width)/2)
 	l.filter = {outline_x, area.y+52*s, OUTLINE_WIDTH*s, 34*s}
 	outline_top := l.filter.y+l.filter.height+12*s
 	l.outline_row_height = OUTLINE_ROW_HEIGHT*s
 	l.outline = {outline_x, outline_top, OUTLINE_WIDTH*s, max(0, bottom-outline_top)}
-	x := outline_x+OUTLINE_WIDTH*s+24*s
-	width := max(0, min(960*s, area.x+area.width-pad-x))
+	x := outline_x+OUTLINE_WIDTH*s+gutter
 	top := l.filter.y
 	l.rows = max(0, int((bottom-top)/l.row_height))
 	l.list = {x, top, width, f32(l.rows)*l.row_height}
