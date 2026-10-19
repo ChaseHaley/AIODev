@@ -72,6 +72,10 @@ Window :: struct {
 	// Asks before a close would end several panes; holds the id of the tab whose close was requested.
 	close_confirm: ui.Confirm,
 	close_confirm_tab: u32,
+	close_confirm_workspace, close_confirm_destination: u32,
+	close_confirm_owner: platform.Window_Id,
+	close_confirm_workspace_name, close_confirm_destination_name: string,
+	close_confirm_sessions: int,
 	close_confirm_tabs, close_confirm_panes: int,
 	close_restore: [dynamic]u32,
 	tab_menu: Tab_Menu,
@@ -241,6 +245,8 @@ window_free :: proc(w: ^Window) {
 	delete(w.workspace_picker.query.bytes)
 	delete(w.workspace_picker.rows)
 	delete(w.close_restore)
+	delete(w.close_confirm_workspace_name)
+	delete(w.close_confirm_destination_name)
 	render.draw_list_destroy(&w.list)
 	delete(w.dividers)
 	free(w)
@@ -539,9 +545,15 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	}
 	if c := &w.close_confirm; c.open || c.motion.value > 0 {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
-		title, body := close_confirm_text(w)
+		title, body := close_confirm_text(app, w)
+		note := "Turn this off with Confirm Closing Split Tabs in Settings."
+		label := "Close"
+		if w.close_confirm_workspace != 0 {
+			_, _, note = workspace_delete_text(app, w)
+			label = "Delete"
+		}
 		result := ui.confirm_draw(c, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale, title, body,
-			"Close")
+			label, note)
 		ui.fade_draw(&w.list, layers, rects, glyph_count, c.motion.value, c.open ? 4*w.scale*(1-c.motion.value) : 0)
 		if result != .Ok { return frame, result }
 	}

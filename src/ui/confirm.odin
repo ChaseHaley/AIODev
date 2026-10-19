@@ -14,6 +14,7 @@ Confirm :: struct {
 	open: bool,
 	focus, hover, pressed: Confirm_Button,
 	motion: Motion,
+	extended: bool,
 }
 
 Confirm_Layout :: struct { panel, cancel, accept: render.Rect }
@@ -31,9 +32,9 @@ confirm_close :: proc(c: ^Confirm) {
 	c.open, c.hover, c.pressed = false, .None, .None
 }
 
-confirm_layout :: proc(width, height, scale: f32) -> Confirm_Layout {
+confirm_layout :: proc(width, height, scale: f32, extended := false) -> Confirm_Layout {
 	s := scale
-	panel_width := min(CONFIRM_WIDTH*s, max(0, width-32*s))
+	panel_width := min((extended ? 540 : CONFIRM_WIDTH)*s, max(0, width-32*s))
 	panel := render.Rect{(width-panel_width)/2, max(24*s, height*0.22), panel_width, CONFIRM_HEIGHT*s}
 	y := panel.y+panel.height-16*s-CONFIRM_BUTTON_HEIGHT*s
 	accept := render.Rect{panel.x+panel.width-16*s-CONFIRM_BUTTON_WIDTH*s, y,
@@ -105,8 +106,9 @@ confirm_button_draw :: proc(c: ^Confirm, list: ^render.Draw_List, text: ^Text, t
 }
 
 confirm_draw :: proc(c: ^Confirm, list: ^render.Draw_List, text: ^Text, theme: Theme,
-	width, height, scale: f32, title, body, accept_label: string) -> glyphs.Result {
-	l := confirm_layout(width, height, scale)
+	width, height, scale: f32, title, body, accept_label: string,
+	note := "Turn this off with Confirm Closing Split Tabs in Settings.") -> glyphs.Result {
+	l := confirm_layout(width, height, scale, c.extended)
 	s := scale
 	if render.push_layer(list, {0, 0, width, height}) != .None { return .Ok }
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
@@ -118,14 +120,14 @@ confirm_draw :: proc(c: ^Confirm, list: ^render.Draw_List, text: ^Text, theme: T
 	strong := text_styled(text, .Strong)
 	text_set_size(&strong, strong.size_px*1.15)
 	inner := p.width-40*s
-	if r := draw_text(&strong, list, title, p.x+20*s, p.y+20*s+strong.ascent, theme.text, inner); r != .Ok {
+	if r := draw_fading_text(&strong, list, title, p.x+20*s, p.y+20*s+strong.ascent, theme.text, inner); r != .Ok {
 		return r
 	}
 	small := text_styled(text, .Small)
 	if r := draw_text(text, list, body, p.x+20*s, p.y+54*s+text.ascent, theme.muted, inner); r != .Ok {
 		return r
 	}
-	if r := draw_text(&small, list, "Turn this off with Confirm Closing Split Tabs in Settings.", p.x+20*s,
+	if r := draw_fading_text(&small, list, note, p.x+20*s,
 		p.y+78*s+small.ascent, theme.faint, inner); r != .Ok { return r }
 	if r := confirm_button_draw(c, list, text, theme, l.cancel, .Cancel, "Cancel", s); r != .Ok { return r }
 	return confirm_button_draw(c, list, text, theme, l.accept, .Accept, accept_label, s)
