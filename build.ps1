@@ -102,7 +102,9 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
-    $resolvedOutput = [IO.Path]::GetFullPath($Destination)
+    # Resolve against the PowerShell location; .NET's GetFullPath uses the process directory,
+    # which Set-Location does not change, so builds landed wherever the shell started.
+    $resolvedOutput = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
     New-Item -ItemType Directory -Force (Split-Path $resolvedOutput) | Out-Null
     Build-App @('-o:speed', '-subsystem:windows') $resolvedOutput
 }
