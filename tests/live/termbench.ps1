@@ -7,6 +7,7 @@ param(
     [int] $Runs = 3,
     [string] $Benchmark = 'C:\Users\chale\Libraries\termbench\termbench_release_msvc.exe',
     [string] $Executable,
+    [string] $ProcessGroups = '',
     [switch] $Child
 )
 
@@ -57,6 +58,7 @@ $settings = @(
     'font.family = Cascadia Mono'
     'font.size = 12'
     'cursor.blink = false'
+    "process.padding_groups = $ProcessGroups"
 )
 [IO.File]::WriteAllLines((Join-Path $data 'settings.ini'), $settings)
 if ($Executable -eq '') { $Executable = Join-Path $repo 'build/release/aiodev.exe' }

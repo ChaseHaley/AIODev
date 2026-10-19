@@ -23,6 +23,8 @@ Geometry :: struct {
 	padding_left, padding_top: u32,
 }
 
+process_id :: proc(s: ^Session) -> u32 { return pty.process_id(&s.pty) }
+
 Config :: struct {
 	command_line, working_directory: string,
 	geometry: Geometry,

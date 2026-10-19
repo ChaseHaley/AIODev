@@ -85,11 +85,6 @@ window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
 	return term_view.compute_metrics(app.fonts, app.family, size_px, f32(app.settings.font.line_height))
 }
 
-// Whole pixels, so the cell grid and its decorations stay on the pixel grid at every DPI.
-window_padding :: proc(app: ^App, w: ^Window) -> f32 {
-	return math.round(f32(app.settings.window.padding) * w.scale)
-}
-
 window_open :: proc(app: ^App) -> bool {
 	w, allocation_error := new(Window)
 	if allocation_error != nil {
@@ -263,12 +258,12 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 			ordered_remove(&w.views, i)
 		} else { w.views[i].valid = false }
 	}
-	padding := window_padding(app, w)
 	for pane in w.panes {
 		entry := session_find(app, pane.content.id)
 		if entry == nil {
 			continue
 		}
+		padding := pane_padding(app, w, entry)
 		columns, rows := term_view.grid_size(w.metrics, pane.rect.width, max(0, pane.rect.height-w.header_height), padding)
 		g := term.Geometry{
 			columns = columns,
@@ -394,7 +389,6 @@ window_render :: proc(app: ^App, w: ^Window) {
 @(private)
 build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	render.draw_list_reset(&w.list)
-	padding := window_padding(app, w)
 	frame: term_view.Frame
 	blinking := false
 	c := app.settings.colors
@@ -418,6 +412,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if entry == nil || view == nil {
 			continue
 		}
+		padding := pane_padding(app, w, entry)
 		content_focused := w.focused && pane.node == w.tree.focus && !app.palette.open &&
 			!w.find.open
 		style := term_view.Style{

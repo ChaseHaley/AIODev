@@ -46,6 +46,7 @@ Settings :: struct {
 	font: Font_Settings,
 	shell: Shell_Settings,
 	input: Input_Settings,
+	process: Process_Settings,
 	window: Window_Settings,
 	scrollback: Scrollback_Settings,
 	terminal: Terminal_Settings,
@@ -87,6 +88,7 @@ SCHEMA :: [?]Schema_Entry{
 	{"window.columns", "Initial Columns", .Int, offset_of(Settings, window) + offset_of(Window_Settings, columns), "120", 1, 32767, nil, "Initial terminal columns."},
 	{"window.rows", "Initial Rows", .Int, offset_of(Settings, window) + offset_of(Window_Settings, rows), "32", 1, 32767, nil, "Initial terminal rows."},
 	{"window.padding", "Content Padding", .Int, offset_of(Settings, window) + offset_of(Window_Settings, padding), "8", 0, 1024, nil, "Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap."},
+	{"process.padding_groups", "Process Padding Groups", .String, offset_of(Settings, process) + offset_of(Process_Settings, padding_groups), "", 0, 4096, nil, "Named groups: editors:0:nvim,vim; tools:4:less,bat. First match wins; other processes use Content Padding."},
 	{"scrollback.lines", "Scrollback Lines", .Int, offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines), "10000", 0, 10000000, nil, "Scrollback lines to keep; history is freed in blocks, so the count kept varies by a few hundred."},
 	{"terminal.copy_on_select", "Copy on Select", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select), "false", 0, 0, nil, "Copy selected text automatically; otherwise Ctrl+Shift+C copies it."},
 	{"terminal.confirm_multiline_paste", "Confirm Multiline Paste", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste), "true", 0, 0, nil, "Ask before pasting line breaks the shell would run as separate commands."},
@@ -175,6 +177,10 @@ assign :: proc(
 	p := rawptr(uintptr(s) + entry.offset)
 	switch entry.kind {
 	case .String:
+		if entry.key == "process.padding_groups" && !process_groups_valid(value) {
+			return problem(.Invalid_Value, s.allocator,
+				"Use group:padding:process,process; group:padding:process. Padding is 0..1024; use executable names without paths.")
+		}
 		if f64(len(value)) < entry.minimum || f64(len(value)) > entry.maximum {
 			return range_problem(entry, value, s.allocator)
 		}

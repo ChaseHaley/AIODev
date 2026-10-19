@@ -271,7 +271,8 @@ when AIO_CONTROL {
 				{"tabs.width", fmt.tprintf("%g", window_tab_bar(app, w).tab_width)},
 				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
-				{"grid.padding", fmt.tprintf("%g", window_padding(app, w))},
+				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w, entry))},
+				{"session.process", entry != nil ? string(entry.process_name[:entry.process_name_length]) : ""},
 				{"find.open", fmt.tprintf("%t", w.find.open)},
 				{"find.query", ui.field_string(&w.find.query)},
 				{"find.matches", find_status(w, entry)},
@@ -570,7 +571,7 @@ when AIO_CONTROL {
 		case control.Dpi:
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case control.Resize:
-			padding := window_padding(app, w)+f32(ui.pane_area(f32(w.width), f32(w.height), 0,
+			padding := pane_padding(app, w, focused_session(app, w))+f32(ui.pane_area(f32(w.width), f32(w.height), 0,
 			f32(app.settings.pane.gap), w.scale).x)
 			width := i32(f32(r.columns)*w.metrics.cell_width+2*padding)
 			height := i32(f32(r.rows)*w.metrics.cell_height+2*padding+

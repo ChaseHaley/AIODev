@@ -43,6 +43,9 @@ Session_Entry :: struct {
 	session: ^term.Session,
 	status: term.Status_Kind,
 	keep_open: bool,
+	process_padding: Maybe(int),
+	process_name: [780]u8,
+	process_name_length: int,
 	header: Pane_Header_Metadata,
 }
 
@@ -74,6 +77,7 @@ App :: struct {
 	windows: [dynamic]^Window,
 	running: bool,
 	tray_hint_shown: bool,
+	process_deadline: time.Tick,
 }
 
 @(require_results)
@@ -210,6 +214,7 @@ tick :: proc(app: ^App) {
 		handle_event(app, event)
 	}
 	update_sessions(app)
+	update_process_padding(app)
 	update_motion(app)
 	if ui.notices_expire(&app.notices, time.tick_now()) {
 		mark_all_dirty(app)
@@ -235,6 +240,9 @@ wait_timeout :: proc(app: ^App) -> u32 {
 	if motion_active(app) { return 16 }
 	INFINITE :: max(u32)
 	deadline, found := ui.notices_deadline(&app.notices)
+	if app.process_deadline != {} && (!found || time.tick_diff(app.process_deadline, deadline) > 0) {
+		deadline, found = app.process_deadline, true
+	}
 	if next, pending := verify_deadline(app); pending && (!found || time.tick_diff(next, deadline) > 0) {
 		deadline, found = next, true
 	}
@@ -431,6 +439,8 @@ load_settings :: proc(app: ^App) {
 	}
 	settings.destroy(&app.settings)
 	app.settings = loaded
+	app.process_deadline = {}
+	for &entry in app.sessions { entry.process_padding = nil }
 	apply_bindings(app, &diagnostics)
 	app.font_points = f32(loaded.font.size)
 	if created {
