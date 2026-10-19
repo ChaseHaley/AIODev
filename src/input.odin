@@ -121,9 +121,12 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 @(private)
 on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if w.preparing { return }
+	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
+	logical := e
+	logical.key = commands.logical_key(e.key, e.unshifted)
 	if w.workspace_picker.open {
 		if e.pressed { w.suppressed_key = e }
-		workspace_picker_key(app, w, e)
+		workspace_picker_key(app, w, logical)
 		return
 	}
 	if w.rename_open {
@@ -133,7 +136,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	if w.tab_menu.open {
 		if e.pressed { w.suppressed_key = e }
-		tab_menu_key(app, w, e)
+		tab_menu_key(app, w, logical)
 		return
 	}
 	if suppressed, ok := w.suppressed_key.?; ok && !e.pressed && suppressed.key == e.key {
@@ -161,8 +164,6 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if palette_active(app, w) {
 		pane_header_cancel(w)
 		if e.pressed { w.suppressed_key = e }
-		logical := e
-		logical.key = commands.logical_key(e.key, e.unshifted)
 		p := &app.palette
 		switch clipboard_chord(logical) {
 		case .Copy: clipboard_copy(app, ui.palette_selection(p))
@@ -206,8 +207,6 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	// The find bar has the keyboard: keys edit the query and none reach the shell.
 	if w.find.open {
-		logical := e
-		logical.key = commands.logical_key(e.key, e.unshifted)
 		outcome: ui.Find_Outcome
 		switch clipboard_chord(logical) {
 		case .Copy: clipboard_copy(app, ui.field_selected_text(&w.find.query))
@@ -331,12 +330,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
 			p.open, w.dirty = false, true
 		} else if e.button == .Left {
-			if hit := workspace_picker_hit(w, x, y); hit >= 0 {
-				p.selected = hit
-				workspace_picker_choose(app, w)
-			} else if y >= r.y+44*w.scale && y < r.y+80*w.scale {
-				workspace_picker_pointer(app, w, x, true, .Shift in e.modifiers)
-			}
+			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
 		}
 		return
 	}
@@ -577,7 +571,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.preparing { return }
 	if w.workspace_picker.open {
 		p := &w.workspace_picker
-		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, len(p.rows)+2)
+		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, workspace_picker_count(w)-1)
 		w.dirty = true
 		return
 	}
@@ -615,8 +609,10 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		icon_input := w.workspace_picker.open && w.workspace_picker.icons
 		window_overlays_cancel(app, w)
-		w.workspace_picker.open = false
+		// The OS emoji picker may take focus before delivering its text to the icon field.
+		w.workspace_picker.open = icon_input
 		pane_header_clear(w)
 		w.tab_pressed = false
 		w.tab_hover = -1

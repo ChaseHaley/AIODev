@@ -280,6 +280,7 @@ when AIO_CONTROL {
 			editor_title := ""
 			if row := ui.editor_row(&w.editor); row != nil { editor_key, editor_title = row.key, row.title }
 			confirm_title, confirm_body := close_confirm_text(app, w)
+			picker_rect, _ := workspace_picker_rect(w)
 			slider := render.Rect{}
 			page: ui.Editor_Layout
 			if settings_active(w) {
@@ -333,6 +334,15 @@ when AIO_CONTROL {
 				{"workspace.id", fmt.tprintf("%d", w.workspace.id)},
 				{"workspace.name", w.workspace.name},
 				{"workspace.picker", fmt.tprintf("%t", w.workspace_picker.open)},
+				{"workspace.icon.preset", fmt.tprintf("%d", w.workspace.icon.preset)},
+				{"workspace.icon.emoji", w.workspace.icon.emoji},
+				{"workspace.picker.icons", fmt.tprintf("%t", w.workspace_picker.icons)},
+				{"workspace.picker.selected", fmt.tprintf("%d", w.workspace_picker.selected)},
+				{"workspace.picker.count", fmt.tprintf("%d", workspace_picker_count(w))},
+				{"workspace.picker.query", ui.field_string(&w.workspace_picker.query)},
+				{"workspace.picker.rect", verify_workspace_rect(picker_rect)},
+				{"workspace.picker.field", verify_workspace_rect(workspace_picker_field_rect(w))},
+				{"workspace.picker.row", verify_workspace_rect(workspace_picker_row_rect(w, w.workspace_picker.selected))},
 				{"window.preparing", fmt.tprintf("%t", w.preparing)},
 				{"window.preview_visible", fmt.tprintf("%t", w.preview_visible)},
 				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
@@ -488,6 +498,10 @@ when AIO_CONTROL {
 			}
 		}
 		return entries[:], .None
+	}
+
+	verify_workspace_rect :: proc(r: render.Rect) -> string {
+		return fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)
 	}
 
 	verify_workspace_index :: proc(app: ^App, w: ^Window) -> int {
