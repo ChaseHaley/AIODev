@@ -32,6 +32,7 @@ Pane_View :: struct {
 Window :: struct {
 	id: platform.Window_Id,
 	surface: ^render.Surface,
+	ui_text: ui.Text,
 	workspace: ^Workspace,
 	tree: ^layout.Layout,
 	dividers: [dynamic]layout.Divider,
@@ -90,12 +91,16 @@ window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
 	return term_view.compute_metrics(app.fonts, app.family, size_px, f32(app.settings.font.line_height))
 }
 
-window_open :: proc(app: ^App) -> bool {
+@(require_results)
+window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
+	if workspace == nil || selected_tab(workspace) == nil { return false }
+	if reserve(&app.windows, len(app.windows)+1) != nil { return false }
 	w, allocation_error := new(Window)
 	if allocation_error != nil {
 		return false
 	}
 	w.scale = f32(platform.primary_dpi(&app.platform)) / 96
+	w.ui_text = app.ui_text
 	w.metrics = window_metrics(app, w.scale)
 	w.list = render.draw_list_init()
 	w.panes = make([dynamic]layout.Pane_Rect)
@@ -109,15 +114,16 @@ window_open :: proc(app: ^App) -> bool {
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
 	w.dirty = true
-	w.workspace = app.workspaces[0]
-	if len(w.workspace.tabs) == 0 && !tab_create(app, w.workspace) { window_free(w); return false }
+	w.workspace = workspace
+	if settings_tab_index(workspace) >= 0 && !settings_load(app, w) { window_free(w); return false }
 	if w.workspace.selection_anchor == 0 { tab_select_one(w.workspace, w.workspace.selected) }
 	w.tree = &selected_tab(w.workspace).tree
-	entry := focused_session(app, w)
-	g := term.geometry(entry.session)
+	g := initial_geometry(app)
+	if entry := focused_session(app, w); entry != nil { g = term.geometry(entry.session) }
 	desc := platform.Window_Desc{
 		title = app.app_id,
 		inactive = app.options.inactive,
+		hidden = true,
 		tabbed_title_bar = true,
 		width = i32(g.surface_width),
 		height = i32(g.surface_height),
@@ -145,6 +151,15 @@ window_open :: proc(app: ^App) -> bool {
 		log.error("setting the window cursor failed")
 	}
 	window_update_title(app, w)
+	show_error := platform.window_show_inactive(&app.platform, id)
+	if show_error != .None {
+		log.errorf("showing the window failed: %v", show_error)
+		window_close(app, w)
+		return false
+	}
+	if !app.options.inactive && platform.window_focus(&app.platform, id) != .None {
+		log.error("focusing the new window failed")
+	}
 	return true
 }
 
@@ -202,7 +217,7 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 }
 
 window_apply_settings :: proc(app: ^App, w: ^Window) {
-	ui.text_set_size(&app.ui_text, f32(app.settings.interface.font_size) * w.scale * 96 / 72)
+	ui.text_set_size(&w.ui_text, f32(app.settings.interface.font_size) * w.scale * 96 / 72)
 	w.metrics = window_metrics(app, w.scale)
 	theme := settings.theme_resolve(app.settings.theme)
 	if platform.window_set_frame_color(&app.platform, w.id, theme.chrome, theme.text) != .None {
@@ -406,7 +421,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		window_card_draw(app, w, pane)
 		if pane.content.kind == .Settings {
 			if card < len(w.list.rects) { w.list.rects[card].color = app.theme.pane }
-			result := ui.editor_draw(&w.editor, settings_layout(w), &w.list, &app.ui_text, app.theme,
+			result := ui.editor_draw(&w.editor, settings_layout(w), &w.list, &w.ui_text, app.theme,
 				w.focused && !app.palette.open)
 			if result != .Ok { return frame, result }
 			window_card_outline(app, w, pane)
@@ -442,7 +457,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		blinking ||= frame.cursor_blinking && content_focused
 		if entry.status != .Running {
 			message := session_message(term.status(entry.session))
-			if message_result := ui.pane_message_draw(&w.list, &app.ui_text, app.theme,
+			if message_result := ui.pane_message_draw(&w.list, &w.ui_text, app.theme,
 				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}, message, w.scale, f32(app.settings.pane.corner_radius)*w.scale);
 				message_result != .Ok { return frame, message_result }
 		}
@@ -459,7 +474,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {
 		status := find_status(w, focused_session(app, w))
-		result := ui.find_draw(&w.find, &w.list, &app.ui_text, app.theme, status, size.x, size.y, w.scale)
+		result := ui.find_draw(&w.find, &w.list, &w.ui_text, app.theme, status, size.x, size.y, w.scale)
 		if result != .Ok {
 			return frame, result
 		}
@@ -467,7 +482,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if app.palette.open || app.palette.motion.value > 0 {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		result := ui.palette_draw(
-			&app.palette, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale,
+			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
 		)
 		ui.fade_draw(&w.list, layers, rects, glyph_count, app.palette.motion.value,
 			app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0)
@@ -476,7 +491,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if c := &w.close_confirm; c.open || c.motion.value > 0 {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		title, body := close_confirm_text(w)
-		result := ui.confirm_draw(c, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale, title, body,
+		result := ui.confirm_draw(c, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale, title, body,
 			"Close")
 		ui.fade_draw(&w.list, layers, rects, glyph_count, c.motion.value, c.open ? 4*w.scale*(1-c.motion.value) : 0)
 		if result != .Ok { return frame, result }
@@ -487,7 +502,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if w.tab_menu.open {
 		if result := tab_menu_draw(app, w); result != .Ok { return frame, result }
 	}
-	return frame, ui.notices_draw(&app.notices, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)
+	return frame, ui.notices_draw(&app.notices, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale)
 }
 
 // Rebuilds every graphics object after the GPU was reset or removed; sessions are untouched.

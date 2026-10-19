@@ -88,7 +88,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 
 show_window :: proc(app: ^App) {
 	if len(app.windows) == 0 {
-		if !window_open(app) {
+		workspace := app.workspaces[0]
+		if len(workspace.tabs) == 0 && !tab_create(app, workspace) {
+			notify(app, .Error, "Could not create a tab.")
+			return
+		}
+		if !window_open(app, workspace) {
 			notify(app, .Error, "Could not open the AIODev window.")
 			return
 		}
@@ -363,7 +368,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
 		if e.button == .Left && !e.pressed { ui.palette_input_release(p) }
 		if e.pressed && e.button == .Left && ui.palette_input_contains(l, f32(e.x), f32(e.y)) {
-			on_palette_outcome(app, w, ui.palette_input_press(p, l, &app.ui_text, f32(e.x), w.scale,
+			on_palette_outcome(app, w, ui.palette_input_press(p, l, &w.ui_text, f32(e.x), w.scale,
 				.Shift in e.modifiers), 0)
 		} else if e.pressed {
 			outcome, id := ui.palette_mouse_press(p, l, f32(e.x), f32(e.y))
@@ -407,7 +412,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	if settings_active(w) {
 		if e.button == .Left && e.pressed {
-			editor_outcome(app, w, ui.editor_press(&w.editor, settings_layout(w), &app.ui_text, x, y,
+			editor_outcome(app, w, ui.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y,
 				.Shift in e.modifiers))
 		}
 		return
@@ -493,7 +498,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 		pointer_set(app, w, ui.palette_input_contains(l, x, y) ? .Text : .Arrow)
 		if app.palette.query.dragging && .Left in e.buttons {
-			on_palette_outcome(app, w, ui.palette_input_drag(&app.palette, l, &app.ui_text, x, w.scale), 0)
+			on_palette_outcome(app, w, ui.palette_input_drag(&app.palette, l, &w.ui_text, x, w.scale), 0)
 		} else {
 			on_palette_outcome(app, w, ui.palette_mouse_move(&app.palette, l, x, y), 0)
 		}
@@ -502,7 +507,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	if settings_active(w) {
 		l := settings_layout(w)
 		changed := ui.editor_hover(&w.editor, l, x, y)
-		if .Left in e.buttons && ui.editor_drag(&w.editor, l, &app.ui_text, x, y) { changed = true }
+		if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) { changed = true }
 		if changed { w.dirty = true }
 		over_text := y >= window_tab_bar(app, w).height && ui.editor_over_text(&w.editor, l, x, y)
 		pointer_set(app, w, over_text ? .Text : .Arrow)

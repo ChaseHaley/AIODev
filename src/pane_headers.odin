@@ -64,13 +64,13 @@ pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
 	r := pane.rect
 	if w.header_height == 0 {
 		if !w.split_overlay { return .Ok }
-		return ui.split_overlay_draw(&w.list, &app.ui_text, app.theme,
+		return ui.split_overlay_draw(&w.list, &w.ui_text, app.theme,
 			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale), controls, w.scale)
 	}
 	icon, result := shell_icon_atlas(app)
 	if result != .Ok { return result }
 	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
-	return ui.header_draw(&w.list, &app.ui_text, app.theme, {r.x, r.y, r.width, r.height},
+	return ui.header_draw(&w.list, &w.ui_text, app.theme, {r.x, r.y, r.width, r.height},
 		app.theme.pane, f32(app.settings.pane.corner_radius)*w.scale, w.scale,
 		entry.name != "" ? entry.name : pane_header_title(&entry.header), entry.header.directory, entry.header.icon,
 		pane.node == w.tree.focus, controls, w.tree.zoomed, icon)

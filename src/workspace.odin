@@ -181,6 +181,46 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) {
 	tab_select(app, w, len(w.workspace.tabs)-1)
 }
 
+@(require_results)
+pane_transfer :: proc(app: ^App, w: ^Window, source, destination: ^Tab,
+	node, target: layout.Node_Id, direction: layout.Direction, root: bool) -> bool {
+	source_workspace: ^Workspace
+	for workspace in app.workspaces {
+		for tab in workspace.tabs { if tab == source { source_workspace = workspace; break } }
+	}
+	destination_index := -1
+	for tab, index in w.workspace.tabs { if tab == destination { destination_index = index; break } }
+	if source_workspace == nil || destination_index < 0 || source == destination { return false }
+	for window in app.windows {
+		if selected := selected_tab(window.workspace); selected == source || selected == destination {
+			focus_leave(app, window)
+		}
+	}
+	_, moved := layout.transfer_pane(&source.tree, &destination.tree, node, target, direction, root)
+	if !moved {
+		for window in app.windows {
+			if selected := selected_tab(window.workspace); selected == source || selected == destination {
+				focus_enter(app, window)
+			}
+		}
+		return false
+	}
+	if source.tree.root != layout.INVALID_NODE { tab_update_title(app, source) }
+	tab_select(app, w, destination_index)
+	if source.tree.root == layout.INVALID_NODE {
+		for tab, index in source_workspace.tabs {
+			if tab == source { workspace_close_tab(app, source_workspace, index); break }
+		}
+	} else {
+		for window in app.windows {
+			if window == w || window.workspace != source_workspace { continue }
+			window_relayout(app, window)
+			focus_enter(app, window)
+		}
+	}
+	return true
+}
+
 pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f32 = 0.5, focus := true) {
 	if settings_active(w) { return }
 	if !pane_minimum_split(app, w, direction, ratio) { return }

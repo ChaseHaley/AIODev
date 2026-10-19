@@ -39,7 +39,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			return .Ok
 		}
 	}
-	if result := ui.caption_draw(&w.list, &app.ui_text, app.theme, f32(w.width), w.scale,
+	if result := ui.caption_draw(&w.list, &w.ui_text, app.theme, f32(w.width), w.scale,
 		w.caption_hover, w.caption_pressed, w.maximized); result != .Ok { return result }
 	if bar.count == 0 { return .Ok }
 	for pass in 0..<(w.tab_drag.active ? 2 : 1) {
@@ -58,7 +58,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				if result != .Ok { return result }
 			}
 			x := tab_position(w, i)*bar.tab_width
-			if result := ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, i, title,
+			if result := ui.tab_draw(&w.list, &w.ui_text, app.theme, bar, i, title,
 				i == w.workspace.selected, w.scale,
 				tab_control(w, i).hover.value, tab_control(w, i).press.value, 0, x, tab.marked, icon, atlas);
 				result != .Ok { return result }
@@ -73,12 +73,12 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			color = app.theme.accent, radius = w.scale}) != .None { return .Ok }
 	}
 	if w.pane_drag.active && w.pane_drag.new_tab { return .Ok }
-	if result := ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, bar.count, "+", false, w.scale,
+	if result := ui.tab_draw(&w.list, &w.ui_text, app.theme, bar, bar.count, "+", false, w.scale,
 		tab_control(w, bar.count).hover.value, tab_control(w, bar.count).press.value, 0); result != .Ok { return result }
 	x := f32(bar.count)*bar.tab_width+bar.button_width
 	if render.push_layer(&w.list, {x, 0, bar.button_width, bar.height}) != .None { return .Ok }
-	return ui.draw_text(&app.ui_text, &w.list, "⌕", x+8*w.scale,
-		(bar.height-app.ui_text.line_height)/2+app.ui_text.ascent, app.theme.muted, bar.button_width)
+	return ui.draw_text(&w.ui_text, &w.list, "⌕", x+8*w.scale,
+		(bar.height-w.ui_text.line_height)/2+w.ui_text.ascent, app.theme.muted, bar.button_width)
 }
 
 tab_position :: proc(w: ^Window, index: int) -> f32 {
@@ -120,7 +120,7 @@ window_leader_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	for pane in w.panes {
 		if pane.node != w.tree.focus { continue }
 		r := pane.rect
-		return ui.leader_status_draw(&w.list, &app.ui_text, app.theme,
+		return ui.leader_status_draw(&w.list, &w.ui_text, app.theme,
 			{r.x, r.y, r.width, r.height}, label, w.scale)
 	}
 	return .Ok

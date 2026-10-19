@@ -338,15 +338,7 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	}
 	changed := false
 	if d.destination != d.source {
-		focus_leave(app, w)
-		_, changed = layout.transfer_pane(&d.source.tree, &d.destination.tree,
-			d.node, d.target, d.direction, d.root)
-		if changed {
-			for tab, i in w.workspace.tabs { if tab == d.destination { tab_select(app, w, i); break } }
-			if d.source.tree.root == layout.INVALID_NODE {
-				for tab, i in w.workspace.tabs { if tab == d.source { workspace_close_tab(app, w.workspace, i); break } }
-			} else { tab_update_title(app, d.source) }
-		} else {
+		if !pane_transfer(app, w, d.source, d.destination, d.node, d.target, d.direction, d.root) {
 			for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
 			notify(app, .Error, "Could not move the pane. Both tabs were preserved.")
 		}
@@ -410,7 +402,7 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		stroke = 2*w.scale}) != .None { return .Ok }
 	label := d.new_tab ? (d.node == d.source.tree.root ? "Move tab to end" : "+ New tab") :
 		d.swap ? "Swap panes" : d.root ? "Dock to workspace edge" : "Move pane here"
-	text := ui.text_styled(&app.ui_text, .Strong)
+	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
 	label_color := app.theme.text
 	label_color.a *= opacity

@@ -150,7 +150,7 @@ app_init :: proc(app: ^App) -> bool {
 		log.error("setting the tray menu failed")
 	}
 	platform.set_modal_loop_callback(&app.platform, proc(user: rawptr) { tick((^App)(user)) }, app)
-	if !window_open(app) {
+	if !window_open(app, workspace) {
 		return false
 	}
 	verify_start(app)
@@ -305,8 +305,7 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 	}
 }
 
-@(private)
-session_open :: proc(app: ^App, command: string = "", directory: string = "") -> bool {
+initial_geometry :: proc(app: ^App) -> term.Geometry {
 	scale := f32(platform.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
 	padding := math.round(f32(app.settings.window.padding)*scale)+
@@ -328,6 +327,12 @@ session_open :: proc(app: ^App, command: string = "", directory: string = "") ->
 		geometry.padding_top += header
 		geometry.surface_height += header
 	}
+	return geometry
+}
+
+@(private)
+session_open :: proc(app: ^App, command: string = "", directory: string = "") -> bool {
+	geometry := initial_geometry(app)
 	config := session_config(app, geometry)
 	if command != "" { config.command_line = command }
 	if directory != "" { config.working_directory = directory }

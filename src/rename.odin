@@ -71,8 +71,8 @@ rename_field_rect :: proc(w: ^Window) -> render.Rect {
 rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
 	field := rename_field_rect(w)
 	available := max(1, field.width-20*w.scale)
-	start := ui.field_view_start(&w.rename, &app.ui_text, available)
-	at := ui.field_offset_at(&w.rename, &app.ui_text, start, field.x+10*w.scale, x)
+	start := ui.field_view_start(&w.rename, &w.ui_text, available)
+	at := ui.field_offset_at(&w.rename, &w.ui_text, start, field.x+10*w.scale, x)
 	ui.field_pointer(&w.rename, at, pressed, extend)
 	w.dirty = true
 }
@@ -86,7 +86,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 10*s}) != .None { return .Ok }
 	title := w.rename_tab ? "Rename Tab" : "Rename Pane"
-	if result := ui.draw_text(&app.ui_text, &w.list, title, r.x+16*s, r.y+28*s, app.theme.text);
+	if result := ui.draw_text(&w.ui_text, &w.list, title, r.x+16*s, r.y+28*s, app.theme.text);
 		result != .Ok { return result }
 	field := rename_field_rect(w)
 	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5*s}) != .None { return .Ok }
@@ -94,10 +94,10 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		return .Ok
 	}
 	if render.push_layer(&w.list, field, 5*s) != .None { return .Ok }
-	if result := ui.field_draw(&w.rename, &w.list, &app.ui_text, app.theme, field.x+10*s,
-		field.y+(field.height-app.ui_text.line_height)/2+app.ui_text.ascent, max(1, field.width-20*s),
+	if result := ui.field_draw(&w.rename, &w.list, &w.ui_text, app.theme, field.x+10*s,
+		field.y+(field.height-w.ui_text.line_height)/2+w.ui_text.ascent, max(1, field.width-20*s),
 		true, "Automatic title", app.theme.text, s); result != .Ok { return result }
 	if render.push_layer(&w.list, r) != .None { return .Ok }
-	return ui.draw_text(&app.ui_text, &w.list, "Enter saves · Esc cancels · Empty restores automatic titles",
+	return ui.draw_text(&w.ui_text, &w.list, "Enter saves · Esc cancels · Empty restores automatic titles",
 		r.x+16*s, r.y+112*s, app.theme.muted, max(1, r.width-32*s))
 }

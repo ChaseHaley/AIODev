@@ -100,8 +100,8 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			for tab in w.workspace.tabs { if tab.marked { count += 1 } }
 			label = count > 1 ? fmt.tprintf("Close %d Selected Tabs", count) : "Close Tab"
 		}
-		if result := ui.draw_text(&app.ui_text, &w.list, label, row.x+10*s,
-			row.y+(row.height-app.ui_text.line_height)/2+app.ui_text.ascent,
+		if result := ui.draw_text(&w.ui_text, &w.list, label, row.x+10*s,
+			row.y+(row.height-w.ui_text.line_height)/2+w.ui_text.ascent,
 			app.theme.text, max(1, row.width-20*s)); result != .Ok { return result }
 	}
 	return .Ok
