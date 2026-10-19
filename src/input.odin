@@ -46,7 +46,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		if w := window_find(app, e.window); w != nil {
 			w.tab_hover = -1
 			w.tab_pressed = false
-			w.editor.hover_item, w.editor.hover_reset = -1, -1
+			ui.editor_hover_clear(&w.editor)
 			w.split_overlay = false
 			for &view in w.views { view.header_hover, view.header_pressed = .None, .None }
 			w.dirty = true
@@ -482,7 +482,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	if settings_active(w) {
-		ui.editor_scroll(&w.editor, rows)
+		ui.editor_wheel(&w.editor, settings_layout(w), f32(e.x), f32(e.y), rows)
 		w.dirty = true
 		return
 	}
@@ -503,7 +503,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		w.tab_hover = -1
 		w.tab_close_pressed = -1
 		w.caption_hover, w.caption_pressed = -1, -1
-		w.editor.hover_item, w.editor.hover_reset = -1, -1
+		ui.editor_hover_clear(&w.editor)
 		w.leader_until = {}
 		w.selecting, w.autoscrolling = false, false
 		w.split_overlay = false

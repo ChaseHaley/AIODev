@@ -248,6 +248,8 @@ when AIO_CONTROL {
 			window := [?]control.State_Entry{
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
 				{"settings.filter", string(w.editor.filter.bytes[:])},
+				{"settings.scroll", fmt.tprintf("%d", w.editor.scroll)},
+				{"settings.group", fmt.tprintf("%d", ui.editor_active_group(&w.editor))},
 				{"settings.key", editor_key},
 				{"settings.value", string(w.editor.value.bytes[:])},
 				{"settings.editing", fmt.tprintf("%t", ui.editor_editing(&w.editor))},

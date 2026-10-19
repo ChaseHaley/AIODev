@@ -30,7 +30,6 @@ editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 			"Input"},
 	}
 	for r in rows { testing.expect_value(t, ui.editor_add(p, r.row, r.group), nil) }
-	ui.editor_collapse(p, "Pane Shortcuts", true)
 	p.open = true
 	ui.editor_filter(p)
 }
@@ -72,7 +71,7 @@ editor_binding_search_and_positions_reserve_description_space :: proc(t: ^testin
 	ui.editor_filter(&p)
 	testing.expect(t, ui.editor_select_key(&p, "input.leader"))
 	for scale in ([?]f32{1, 1.5, 1.75, 2}) {
-		for width in ([?]f32{700, 1000, 1400}) {
+		for width in ([?]f32{700, 1200, 1400}) {
 			l := ui.editor_layout({0, 40*scale, width*scale, 1400*scale}, scale)
 			parts := ui.editor_row_parts(&p, l, p.selected)
 			testing.expect(t, !parts.positions_label_below)
@@ -94,22 +93,33 @@ editor_binding_search_and_positions_reserve_description_space :: proc(t: ^testin
 }
 
 @(test)
-editor_groups_collapse_and_restore_after_search :: proc(t: ^testing.T) {
+editor_outline_jumps_without_filtering_and_tracks_scroll :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	editor_fixture(t, &p)
 	keys := visible_keys(&p)
 	browse := len(keys)
-	testing.expect_value(t, browse, 14)
+	testing.expect_value(t, browse, 15)
 	testing.expect_value(t, keys[0], "Panes")
-	testing.expect_value(t, keys[len(keys)-3], "Pane Shortcuts")
-	testing.expect(t, ui.editor_row(&p) == nil)
-	ui.editor_key(&p, key({key = .Enter}))
-	testing.expect_value(t, len(p.items), browse-2)
-	ui.editor_key(&p, key({key = .Arrow_Right}))
+	testing.expect_value(t, ui.editor_row(&p).key, "pane.gap")
+	l := ui.editor_layout({0, 40, 1200, 500}, 1)
+	p.visible_rows = l.rows
+	ui.editor_jump(&p, 2)
+	testing.expect_value(t, ui.editor_row(&p).key, "cursor.style")
+	testing.expect_value(t, ui.editor_active_group(&p), 2)
+	testing.expect_value(t, p.scroll, 5)
 	testing.expect_value(t, len(p.items), browse)
-	ui.editor_key(&p, key({key = .Arrow_Left}))
-	testing.expect_value(t, len(p.items), browse-2)
+	testing.expect_value(t, len(p.filter.bytes), 0)
+	ui.editor_wheel(&p, l, l.list.x+10, l.list.y+10, 3)
+	testing.expect_value(t, p.scroll, 2)
+	testing.expect_value(t, ui.editor_active_group(&p), 0)
+	ui.editor_key(&p, key({key = .Arrow_Down, modifiers = {.Alt}}))
+	testing.expect_value(t, ui.editor_active_group(&p), 1)
+	ui.editor_jump(&p, 6)
+	testing.expect_value(t, ui.editor_active_group(&p), 6)
+	testing.expect(t, p.scroll <= len(p.items)-p.visible_rows)
+	ui.editor_wheel(&p, l, l.list.x+10, l.list.y+10, 1)
+	testing.expect(t, ui.editor_active_group(&p) != 6)
 
 	ui.editor_text(&p, "panes")
 	keys = visible_keys(&p)
@@ -118,13 +128,20 @@ editor_groups_collapse_and_restore_after_search :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_row(&p).key, "pane.gap")
 	ui.editor_key(&p, key({key = .Escape}))
 	testing.expect_value(t, len(p.filter.bytes), 0)
-	testing.expect_value(t, len(visible_keys(&p)), browse-2)
+	testing.expect_value(t, len(visible_keys(&p)), browse)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.None)
 
 	ui.editor_text(&p, "SPLIT")
 	testing.expect_value(t, ui.editor_row(&p).key, "keys.pane.split_right")
 	ui.editor_text(&p, " zzz")
 	testing.expect_value(t, len(p.items), 0)
+	testing.expect_value(t, ui.editor_active_group(&p), -1)
+	clear := ui.editor_clear_rect(&p, l)
+	testing.expect(t, clear.width > 0)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, clear.x+1, clear.y+1, false),
+		ui.Editor_Outcome.Changed)
+	testing.expect_value(t, len(p.filter.bytes), 0)
+	testing.expect_value(t, len(p.items), browse)
 }
 
 @(test)
@@ -132,6 +149,7 @@ editor_lists_navigate_with_control_n_and_p :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	editor_fixture(t, &p)
+	ui.editor_select(&p, 0)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .N, modifiers = {.Control}})), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, ui.editor_row(&p).key, "pane.gap")
 	ui.editor_key(&p, key({key = .N, modifiers = {.Control}}))

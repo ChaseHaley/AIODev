@@ -96,16 +96,15 @@ settings_load :: proc(app: ^App, w: ^Window) -> bool {
 			description = "Add, replace or remove individual shortcuts. Up to four alternatives.",
 			value = value, default_value = shortcuts_text(command.defaults), kind = .Shortcut,
 		}
-		group := shortcut_group(command.name)
-		if ui.editor_add(p, row, group) != nil {
+		if ui.editor_add(p, row, shortcut_group(command.name)) != nil {
 			ui.editor_destroy(p)
 			notify(app, .Error, "Could not allocate settings editor.")
 			return false
 		}
-		ui.editor_collapse(p, group, true)
 	}
 	p.leader = app.leader
 	p.open = true
+	ui.editor_hover_clear(p)
 	ui.editor_filter(p)
 	if len(diagnostics) > 0 {
 		ui.editor_message(p,

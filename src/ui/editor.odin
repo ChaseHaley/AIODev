@@ -25,13 +25,9 @@ Editor_Row :: struct {
 	choices: []string,
 }
 
-// Browsing and filtering keep separate collapse states, so clearing a filter restores the browse view.
-Editor_Group :: struct {
-	title: string,
-	collapsed, filter_collapsed: bool,
-}
+Editor_Group :: struct { title: string }
 
-// One visible list line: a group header, with its matching row count, when row is -1.
+// One page line: a group header, with its matching row count, when row is -1. Headers are never selected.
 Editor_Item :: struct { group, row, count: int }
 
 Editor_Drag :: enum { None, Filter, Value, Slider, Wheel, Ramp }
@@ -44,12 +40,15 @@ Editor_Popup :: enum { None, Choice, Color, Shortcuts }
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
 // in `value` until it is saved.
 Editor :: struct {
-	open, capturing, leader_pending: bool,
+	open, capturing, leader_pending, hover_clear: bool,
 	// Captured shortcuts name physical key positions (Physical+) instead of layout characters.
 	physical: bool,
 	focus: Editor_Focus,
 	popup: Editor_Popup,
-	popup_index, hover_item, hover_reset: int,
+	popup_index, hover_item, hover_reset, hover_outline: int,
+	// The group last chosen in the outline stays highlighted until the page scrolls or the selection moves,
+	// since the final groups can be shown without reaching the top of the page.
+	jump_group, outline_scroll, outline_active: int,
 	rows: [dynamic]Editor_Row,
 	groups: [dynamic]Editor_Group,
 	items: [dynamic]Editor_Item,
@@ -65,9 +64,10 @@ Editor :: struct {
 }
 Editor_Outcome :: enum { None, Changed, Save, Reset }
 
+// Wide pages put the search field and a group outline in a left column; narrow ones have no outline.
 Editor_Layout :: struct {
-	page, filter, list: render.Rect,
-	row_height, scale: f32,
+	page, filter, list, outline: render.Rect,
+	row_height, outline_row_height, status_x, scale: f32,
 	rows: int,
 }
 
@@ -81,8 +81,12 @@ Row_Parts :: struct {
 CAPTURE_HINT :: "Press a shortcut. Enter saves this alternative, Esc cancels, Backspace removes it."
 @(private) ROW_HEIGHT :: 52
 @(private) CHOICE_HEIGHT :: 30
+@(private) OUTLINE_ROW_HEIGHT :: 30
+@(private) OUTLINE_WIDTH :: 220
+@(private) OUTLINE_MIN_PAGE :: 720
 @(private) ICON_UNDO :: ''
 @(private) ICON_CHEVRON_DOWN :: ''
+@(private) ICON_CLEAR :: ''
 
 editor_destroy :: proc(p: ^Editor) {
 	for row in p.rows {
@@ -125,10 +129,6 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 	return err
 }
 
-editor_collapse :: proc(p: ^Editor, group: string, collapsed: bool) {
-	for &g in p.groups { if g.title == group { g.collapsed = collapsed } }
-}
-
 editor_message :: proc(p: ^Editor, text: string, error: bool) {
 	delete(p.message)
 	p.message = strings.clone(text)
@@ -146,11 +146,6 @@ editor_editing :: proc(p: ^Editor) -> bool { return p.focus == .Control }
 
 @(private)
 filtering :: proc(p: ^Editor) -> bool { return strings.trim_space(field_string(&p.filter)) != "" }
-
-@(private)
-group_collapsed :: proc(p: ^Editor, group: int) -> ^bool {
-	return filtering(p) ? &p.groups[group].filter_collapsed : &p.groups[group].collapsed
-}
 
 @(private)
 color_or_fallback :: proc(row: ^Editor_Row, value: string) -> string {
@@ -181,6 +176,7 @@ stop_editing :: proc(p: ^Editor) {
 }
 
 editor_select :: proc(p: ^Editor, index: int) {
+	p.jump_group = -1
 	p.selected = clamp(index, 0, max(0, len(p.items)-1))
 	p.capturing, p.leader_pending, p.captured, p.drag, p.popup = false, false, 0, .None, .None
 	row := editor_row(p)
@@ -199,8 +195,6 @@ editor_select :: proc(p: ^Editor, index: int) {
 editor_select_key :: proc(p: ^Editor, key: string) -> bool {
 	for row, i in p.rows {
 		if row.key != key { continue }
-		group_collapsed(p, row.group)^ = false
-		editor_rebuild(p)
 		for item, index in p.items {
 			if item.row == i { editor_select(p, index); return true }
 		}
@@ -260,7 +254,6 @@ editor_rebuild :: proc(p: ^Editor) {
 		}
 		if len(matched) == 0 { continue }
 		append(&p.items, Editor_Item{g, -1, len(matched)})
-		if group_collapsed(p, g)^ { continue }
 		for i in matched { append(&p.items, Editor_Item{g, i, 0}) }
 	}
 	p.selected = 0
@@ -270,31 +263,73 @@ editor_rebuild :: proc(p: ^Editor) {
 }
 
 editor_filter :: proc(p: ^Editor) {
-	for &group in p.groups { group.filter_collapsed = false }
 	clear(&p.items)
 	editor_rebuild(p)
 	first := 0
-	if filtering(p) {
-		for item, index in p.items { if item.row >= 0 { first = index; break } }
-	}
-	p.scroll = 0
+	for item, index in p.items { if item.row >= 0 { first = index; break } }
+	p.scroll, p.outline_scroll = 0, 0
 	editor_select(p, first)
 }
 
-editor_toggle_group :: proc(p: ^Editor, index: int) {
-	if index < 0 || index >= len(p.items) { return }
-	group := p.items[index].group
-	collapsed := group_collapsed(p, group)
-	collapsed^ = !collapsed^
-	editor_rebuild(p)
-	for line, i in p.items {
-		if line.group == group && line.row < 0 { editor_select(p, i); return }
+// Moves the selection by `delta` lines, passing over group headers in the direction of travel.
+@(private)
+editor_step :: proc(p: ^Editor, delta: int) {
+	if len(p.items) == 0 { return }
+	direction := delta < 0 ? -1 : 1
+	index := clamp(p.selected+delta, 0, len(p.items)-1)
+	for index >= 0 && index < len(p.items) && p.items[index].row < 0 { index += direction }
+	if index < 0 || index >= len(p.items) {
+		index = clamp(p.selected+delta, 0, len(p.items)-1)
+		for index >= 0 && index < len(p.items) && p.items[index].row < 0 { index -= direction }
 	}
+	if index >= 0 && index < len(p.items) { editor_select(p, index) }
 }
 
-// Scrolls the list without moving the selection.
-editor_scroll :: proc(p: ^Editor, rows: int) {
-	p.scroll = clamp(p.scroll-rows, 0, max(0, len(p.items)-max(1, p.visible_rows)))
+@(private)
+max_scroll :: proc(p: ^Editor) -> int { return max(0, len(p.items)-max(1, p.visible_rows)) }
+
+// Scrolls the page, or the outline under the pointer, without moving the selection.
+editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
+	if contains(l.outline, x, y) {
+		p.outline_scroll = clamp(p.outline_scroll-rows, 0,
+			max(0, len(outline_entries(p))-outline_rows(l)))
+		return
+	}
+	p.jump_group = -1
+	p.scroll = clamp(p.scroll-rows, 0, max_scroll(p))
+}
+
+// The page lines of every group header, in page order; the outline lists them.
+@(private)
+outline_entries :: proc(p: ^Editor) -> []int {
+	entries := make([dynamic]int, context.temp_allocator)
+	for item, index in p.items { if item.row < 0 { append(&entries, index) } }
+	return entries[:]
+}
+
+@(private)
+outline_rows :: proc(l: Editor_Layout) -> int {
+	return l.outline_row_height > 0 ? int(l.outline.height/l.outline_row_height) : 0
+}
+
+// The group the page is showing: the one last chosen in the outline, otherwise the one at the top.
+editor_active_group :: proc(p: ^Editor) -> int {
+	if len(p.items) == 0 { return -1 }
+	for item in p.items { if item.row < 0 && item.group == p.jump_group { return p.jump_group } }
+	return p.items[clamp(p.scroll, 0, len(p.items)-1)].group
+}
+
+// Scrolls the chosen outline group's header to the top of the page and selects its first setting.
+editor_jump :: proc(p: ^Editor, entry: int) {
+	entries := outline_entries(p)
+	if entry < 0 || entry >= len(entries) { return }
+	header := entries[entry]
+	if p.focus != .Search { stop_editing(p) }
+	p.popup = .None
+	p.scroll = clamp(header, 0, max_scroll(p))
+	editor_select(p, header+1)
+	p.scroll = clamp(header, 0, max_scroll(p))
+	p.jump_group = p.items[header].group
 }
 
 @(private)
@@ -528,6 +563,16 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		if outcome, handled := popup_key(p, row, e); handled { return outcome }
 	}
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
+	if .Alt in e.modifiers && (e.key == .Arrow_Up || e.key == .Arrow_Down) {
+		entries := outline_entries(p)
+		for header, entry in entries {
+			if p.items[header].group == editor_active_group(p) {
+				editor_jump(p, clamp(entry+(e.key == .Arrow_Up ? -1 : 1), 0, len(entries)-1))
+				break
+			}
+		}
+		return .Changed
+	}
 	#partial switch e.key {
 	case .Escape:
 		if p.focus != .Search {
@@ -547,17 +592,17 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		if p.focus == .Control { stop_editing(p) }
 		p.focus = Editor_Focus(focus)
 		return .Changed
-	case .Arrow_Up: editor_select(p, p.selected-1); return .Changed
-	case .Arrow_Down: editor_select(p, p.selected+1); return .Changed
+	case .Arrow_Up: editor_step(p, -1); return .Changed
+	case .Arrow_Down: editor_step(p, 1); return .Changed
 	case .P, .N:
 		if control {
-			editor_select(p, p.selected+(e.key == .N ? 1 : -1))
+			editor_step(p, e.key == .N ? 1 : -1)
 			return .Changed
 		}
-	case .Page_Up: editor_select(p, p.selected-max(1, p.visible_rows)); return .Changed
-	case .Page_Down: editor_select(p, p.selected+max(1, p.visible_rows)); return .Changed
+	case .Page_Up: editor_step(p, -max(1, p.visible_rows)); return .Changed
+	case .Page_Down: editor_step(p, max(1, p.visible_rows)); return .Changed
 	case .Enter, .Numpad_Enter:
-		if row == nil { editor_toggle_group(p, p.selected); return .Changed }
+		if row == nil { return .None }
 		if p.focus == .Positions { p.physical = !p.physical; return .Changed }
 		if p.focus == .Control && text_kind(row.kind) {
 			p.popup = .None
@@ -571,10 +616,6 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		left := e.key == .Arrow_Left
 		if p.focus == .Control && row != nil && row.kind == .Choice {
 			return choose(p, row, choice_index(row, field_string(&p.value))+(left ? -1 : 1))
-		}
-		if p.focus == .Search && row == nil && len(p.filter.bytes) == 0 && len(p.items) > 0 {
-			if group_collapsed(p, p.items[p.selected].group)^ != left { editor_toggle_group(p, p.selected) }
-			return .Changed
 		}
 	case .R:
 		if control { return row == nil ? .None : .Reset }
@@ -639,15 +680,45 @@ editor_cut :: proc(p: ^Editor) {
 
 // Lays the page out inside a settings tab's card.
 editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
-	pad := 24*scale
-	width := max(0, min(960*scale, area.width-2*pad))
-	x := area.x+max(pad, (area.width-width)/2)
-	l := Editor_Layout{page = area, row_height = ROW_HEIGHT*scale, scale = scale}
-	l.filter = {x, area.y+52*scale, width, 34*scale}
-	top := l.filter.y+l.filter.height+12*scale
-	l.rows = max(0, int((area.y+area.height-pad/2-top)/l.row_height))
+	s := scale
+	pad := 24*s
+	bottom := area.y+area.height-pad/2
+	l := Editor_Layout{page = area, row_height = ROW_HEIGHT*s, scale = s}
+	if area.width < OUTLINE_MIN_PAGE*s {
+		width := max(0, min(960*s, area.width-2*pad))
+		x := area.x+max(pad, (area.width-width)/2)
+		l.filter = {x, area.y+52*s, width, 34*s}
+		top := l.filter.y+l.filter.height+12*s
+		l.rows = max(0, int((bottom-top)/l.row_height))
+		l.list = {x, top, width, f32(l.rows)*l.row_height}
+		return l
+	}
+	outline_x := area.x+pad
+	l.filter = {outline_x, area.y+52*s, OUTLINE_WIDTH*s, 34*s}
+	outline_top := l.filter.y+l.filter.height+12*s
+	l.outline_row_height = OUTLINE_ROW_HEIGHT*s
+	l.outline = {outline_x, outline_top, OUTLINE_WIDTH*s, max(0, bottom-outline_top)}
+	x := outline_x+OUTLINE_WIDTH*s+24*s
+	width := max(0, min(960*s, area.x+area.width-pad-x))
+	top := l.filter.y
+	l.rows = max(0, int((bottom-top)/l.row_height))
 	l.list = {x, top, width, f32(l.rows)*l.row_height}
+	l.status_x = x
 	return l
+}
+
+// The clear button inside the search field, shown while the field has text.
+editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
+	if len(p.filter.bytes) == 0 { return {} }
+	s := l.scale
+	return {l.filter.x+l.filter.width-30*s, l.filter.y+(l.filter.height-26*s)/2, 26*s, 26*s}
+}
+
+@(private)
+filter_text_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
+	r := l.filter
+	if clear := editor_clear_rect(p, l); clear.width > 0 { r.width = clear.x-r.x }
+	return r
 }
 
 editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts {
@@ -809,17 +880,28 @@ editor_press :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32, exten
 		pick_color(p, c, x, y)
 		return .Changed
 	}
+	if contains(editor_clear_rect(p, l), x, y) {
+		if p.focus != .Search { stop_editing(p) }
+		field_set(&p.filter, "")
+		editor_filter(p)
+		return .Changed
+	}
 	if contains(l.filter, x, y) {
 		if p.focus != .Search { stop_editing(p) }
 		input_text := text_styled(text, .Input)
-		field_pointer(&p.filter, field_offset(&p.filter, &input_text, l.filter, x, s), true, extend)
+		field_pointer(&p.filter, field_offset(&p.filter, &input_text, filter_text_rect(p, l), x, s), true, extend)
 		p.drag = .Filter
+		return .Changed
+	}
+	if contains(l.outline, x, y) {
+		entry := p.outline_scroll+int((y-l.outline.y)/l.outline_row_height)
+		if entry >= len(outline_entries(p)) { return .None }
+		editor_jump(p, entry)
 		return .Changed
 	}
 	if !contains(l.list, x, y) { return .None }
 	index := p.scroll+int((y-l.list.y)/l.row_height)
-	if index >= len(p.items) { return .None }
-	if p.items[index].row < 0 { editor_toggle_group(p, index); return .Changed }
+	if index >= len(p.items) || p.items[index].row < 0 { return .None }
 	if index != p.selected { editor_select(p, index) }
 	row := editor_row(p)
 	parts := editor_row_parts(p, l, index)
@@ -870,7 +952,8 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 	case .None: return false
 	case .Filter:
 		input_text := text_styled(text, .Input)
-		return field_pointer(&p.filter, field_offset(&p.filter, &input_text, l.filter, x, l.scale), false, true) != .None
+		return field_pointer(&p.filter, field_offset(&p.filter, &input_text, filter_text_rect(p, l), x, l.scale),
+			false, true) != .None
 	case .Value:
 		input_text := text_styled(text, .Input)
 		parts := editor_row_parts(p, l, p.selected)
@@ -896,23 +979,34 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 
 // Hover state for row highlights and reset buttons; returns whether the page must redraw.
 editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
-	item, reset := -1, -1
+	item, reset, outline := -1, -1, -1
 	if p.popup == .None && contains(l.list, x, y) {
 		index := p.scroll+int((y-l.list.y)/l.row_height)
-		if index < len(p.items) {
+		if index < len(p.items) && p.items[index].row >= 0 {
 			item = index
 			if contains(editor_row_parts(p, l, index).reset, x, y) { reset = index }
 		}
 	}
-	if item == p.hover_item && reset == p.hover_reset { return false }
-	p.hover_item, p.hover_reset = item, reset
+	if p.popup == .None && contains(l.outline, x, y) {
+		entry := p.outline_scroll+int((y-l.outline.y)/l.outline_row_height)
+		if entry < len(outline_entries(p)) { outline = entry }
+	}
+	clear := contains(editor_clear_rect(p, l), x, y)
+	if item == p.hover_item && reset == p.hover_reset && outline == p.hover_outline && clear == p.hover_clear {
+		return false
+	}
+	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
 	return true
+}
+
+editor_hover_clear :: proc(p: ^Editor) {
+	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
 }
 
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if contains(editor_popup_rect(p, l), x, y) { return false }
-	if contains(l.filter, x, y) { return true }
+	if contains(filter_text_rect(p, l), x, y) { return true }
 	if !contains(l.list, x, y) { return false }
 	index := p.scroll+int((y-l.list.y)/l.row_height)
 	if index >= len(p.items) || p.items[index].row < 0 { return false }
@@ -932,15 +1026,6 @@ row_preview :: proc(row: ^Editor_Row, value: string) -> string {
 @(private)
 color_value :: proc(c: settings.Color) -> render.Color {
 	return {f32(c.r)/255, f32(c.g)/255, f32(c.b)/255, 1}
-}
-
-@(private)
-icon_box_draw :: proc(list: ^render.Draw_List, r: render.Rect, color: render.Color, expanded: bool, scale: f32) {
-	draw_rect(list, {rect = r, color = color, radius = 3*scale, stroke = scale})
-	bar := math.round(max(1, scale))
-	cx, cy := math.round(r.x+r.width/2-bar/2), math.round(r.y+r.height/2-bar/2)
-	draw_rect(list, {rect = {r.x+3*scale, cy, r.width-6*scale, bar}, color = color})
-	if !expanded { draw_rect(list, {rect = {cx, r.y+3*scale, bar, r.height-6*scale}, color = color}) }
 }
 
 @(private)
@@ -1117,10 +1202,71 @@ popup_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text: 
 		c.theme_default.width-20*s)
 }
 
+@(private)
+filter_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text: ^Text, theme: Theme,
+	focused: bool) -> glyphs.Result {
+	s := l.scale
+	box_draw(list, l.filter, theme, focused, s)
+	r := filter_text_rect(p, l)
+	if render.push_layer(list, r, 6*s) != .None { return .Ok }
+	input_text := text_styled(text, .Input)
+	baseline := r.y+(r.height-input_text.line_height)/2+input_text.ascent
+	placeholder := l.outline.width > 0 ? "Search settings" : "Search settings, groups, and shortcuts"
+	if result := field_draw(&p.filter, list, &input_text, theme, r.x+10*s, baseline, field_available(r, s),
+		focused, placeholder, theme.text, s); result != .Ok { return result }
+	clear := editor_clear_rect(p, l)
+	if clear.width == 0 { return .Ok }
+	if render.push_layer(list, l.page) != .None { return .Ok }
+	if p.hover_clear { draw_rect(list, {rect = clear, color = theme.hover, radius = 5*s}) }
+	return draw_icon(text, list, ICON_CLEAR, clear, p.hover_clear ? theme.text : theme.muted, 0.7)
+}
+
+@(private)
+outline_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text: ^Text,
+	theme: Theme) -> glyphs.Result {
+	if l.outline.width == 0 { return .Ok }
+	s := l.scale
+	entries := outline_entries(p)
+	rows := outline_rows(l)
+	active := editor_active_group(p)
+	if active != p.outline_active {
+		for header, entry in entries {
+			if p.items[header].group != active { continue }
+			if entry < p.outline_scroll { p.outline_scroll = entry }
+			if entry >= p.outline_scroll+rows { p.outline_scroll = entry-rows+1 }
+		}
+		p.outline_active = active
+	}
+	p.outline_scroll = clamp(p.outline_scroll, 0, max(0, len(entries)-rows))
+	if render.push_layer(list, l.outline) != .None { return .Ok }
+	small := text_styled(text, .Small)
+	for entry in p.outline_scroll..<min(len(entries), p.outline_scroll+rows) {
+		item := p.items[entries[entry]]
+		r := render.Rect{l.outline.x, l.outline.y+f32(entry-p.outline_scroll)*l.outline_row_height,
+			l.outline.width, l.outline_row_height}
+		current := item.group == active
+		if current {
+			draw_rect(list, {rect = r, color = theme.selection, radius = 6*s})
+			draw_rect(list, {rect = {r.x, r.y+8*s, 3*s, r.height-16*s}, color = theme.accent, radius = 2*s})
+		} else if entry == p.hover_outline {
+			draw_rect(list, {rect = r, color = theme.hover, radius = 6*s})
+		}
+		baseline := r.y+(r.height-text.line_height)/2+text.ascent
+		label := fmt.tprintf("%d", item.count)
+		label_width := text_width(&small, label)
+		if result := draw_text(text, list, p.groups[item.group].title, r.x+14*s, baseline,
+			current ? theme.text : theme.muted, max(1, r.width-label_width-34*s)); result != .Ok { return result }
+		if result := draw_text(&small, list, label, r.x+r.width-10*s-label_width, baseline, theme.faint);
+			result != .Ok { return result }
+	}
+	return .Ok
+}
+
 editor_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text: ^Text, theme: Theme,
 	focused: bool) -> glyphs.Result {
 	s := l.scale
 	p.visible_rows = l.rows
+	p.scroll = clamp(p.scroll, 0, max_scroll(p))
 	if render.push_layer(list, l.page) != .None { return .Ok }
 	strong := text_styled(text, .Strong)
 	small := text_styled(text, .Small)
@@ -1131,12 +1277,21 @@ editor_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text:
 	status := p.message
 	matches := 0
 	for item in p.items { matches += item.count }
-	if status == "" { status = fmt.tprintf("%d settings and shortcuts", matches) }
+	if status == "" {
+		status = fmt.tprintf("%d settings and shortcuts · Alt+↑/↓ groups · Esc clears search", matches)
+	}
 	status_x := x+text_width(&heading, "Settings")+16*s
+	status_right := l.filter.x+l.filter.width
+	if l.outline.width > 0 { status_x, status_right = l.status_x, l.list.x+l.list.width }
 	if r := draw_text(&small, list, status, status_x, l.page.y+36*s, p.error ? theme.error : theme.muted,
-		max(1, l.filter.x+l.filter.width-status_x)); r != .Ok { return r }
-	if r := field_box_draw(&p.filter, list, text, theme, l.filter, focused && p.focus == .Search,
-		"Search settings, groups, and shortcuts", s); r != .Ok { return r }
+		max(1, status_right-status_x)); r != .Ok { return r }
+	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search); r != .Ok { return r }
+	if r := outline_draw(p, l, list, text, theme); r != .Ok { return r }
+	if len(p.items) == 0 && filtering(p) {
+		if render.push_layer(list, l.page) != .None { return .Ok }
+		return draw_text(text, list, "No matching settings or shortcuts", l.list.x+10*s,
+			l.list.y+(l.row_height-text.line_height)/2+text.ascent, theme.muted)
+	}
 	if render.push_layer(list, l.list) != .None { return .Ok }
 	for index in p.scroll..<min(len(p.items), p.scroll+l.rows) {
 		item := p.items[index]
@@ -1149,10 +1304,9 @@ editor_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text:
 			draw_rect(list, {rect = r, color = theme.hover, radius = 6*s})
 		}
 		if item.row < 0 {
-			baseline := r.y+(r.height-strong.line_height)/2+strong.ascent
-			icon_box_draw(list, {r.x+10*s, r.y+(r.height-11*s)/2, 11*s, 11*s}, theme.muted,
-				!group_collapsed(p, item.group)^, s)
-			if result := draw_text(&strong, list, p.groups[item.group].title, r.x+30*s, baseline, theme.text,
+			baseline := r.y+r.height-14*s
+			if index > 0 { draw_rect(list, {rect = {r.x+10*s, r.y+10*s, r.width-20*s, s}, color = theme.border}) }
+			if result := draw_text(&strong, list, p.groups[item.group].title, r.x+10*s, baseline, theme.text,
 				max(1, r.width*0.7)); result != .Ok { return result }
 			label := fmt.tprintf("%d", item.count)
 			if result := draw_text(&small, list, label, r.x+r.width-14*s-text_width(&small, label), baseline,
