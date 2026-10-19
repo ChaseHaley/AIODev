@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import "core:log"
 import "core:strings"
 import "aio:commands"
@@ -13,7 +12,7 @@ import "aio:term"
 import "aio:ui"
 
 Pane_Header_Metadata :: struct {
-	executable, title, directory, launch_directory: string,
+	executable, title, directory: string,
 	icon: string, // Borrowed static shell badge.
 }
 
@@ -21,7 +20,6 @@ pane_header_destroy :: proc(header: ^Pane_Header_Metadata) {
 	delete(header.executable)
 	delete(header.title)
 	delete(header.directory)
-	delete(header.launch_directory)
 	header^ = {}
 }
 
@@ -36,9 +34,6 @@ pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config) {
 	pane_header_destroy(header)
 	header.executable = header_clone(settings.shell_executable(config.command_line))
 	header.icon = settings.shell_icon(header.executable, "")
-	launch, err := settings.directory_label(config.working_directory)
-	if err != nil { log.error("caching the pane launch directory failed") }
-	header.launch_directory = launch
 }
 
 pane_header_refresh :: proc(entry: ^Session_Entry) {
@@ -57,12 +52,6 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
-// Without a shell report (OSC 7) only the launch directory is known, which may no longer be current.
-pane_header_directory :: proc(header: ^Pane_Header_Metadata) -> (directory: string, reported: bool) {
-	if header.directory != "" { return header.directory, true }
-	return header.launch_directory, false
-}
-
 pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
 	entry: ^Session_Entry) -> glyphs.Result {
 	controls: [4]ui.Control_Motion
@@ -74,11 +63,10 @@ pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
 			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale), controls, w.scale)
 	}
 	icon := app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon
-	directory, reported := pane_header_directory(&entry.header)
-	if !reported && directory != "" { directory = fmt.tprintf("started in %s", directory) }
+	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 	return ui.header_draw(&w.list, &app.ui_text, app.theme, {r.x, r.y, r.width, r.height},
 		app.theme.pane, f32(app.settings.pane.corner_radius)*w.scale, w.scale,
-		pane_header_title(&entry.header), directory, icon,
+		pane_header_title(&entry.header), entry.header.directory, icon,
 		pane.node == w.tree.focus, controls, w.tree.zoomed)
 }
 
