@@ -471,6 +471,20 @@ dock_pane :: proc(l: ^Layout, node: Node_Id, direction: Direction) -> (Node_Id, 
 
 // Reserve before detaching, so allocation failure leaves both trees untouched.
 @(require_results)
+separate_pane :: proc(source: ^Layout, node: Node_Id, allocator := context.allocator) -> (Layout, bool) {
+	if int(node) >= len(source.nodes) { return {}, false }
+	pane, ok := source.nodes[node].(Pane)
+	if !ok || pane.content.kind != .Terminal { return {}, false }
+	destination: Layout
+	if init(&destination, pane.content, allocator) != nil { destroy(&destination); return {}, false }
+	if !remove(source, node) { destroy(&destination); return {}, false }
+	destination.nodes[0] = pane
+	destination.next_pane_order = pane.order
+	return destination, true
+}
+
+// Reserve before detaching, so allocation failure leaves both trees untouched.
+@(require_results)
 transfer_pane :: proc(source, destination: ^Layout, node, target: Node_Id,
 	direction: Direction, root: bool) -> (Node_Id, bool) {
 	if source == destination || int(node) >= len(source.nodes) ||

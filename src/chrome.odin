@@ -63,6 +63,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if render.push_rect(&w.list, {rect = {x, 30*w.scale, max(0, bar.tab_width-20*w.scale), 2*w.scale},
 			color = app.theme.accent, radius = w.scale}) != .None { return .Ok }
 	}
+	if w.pane_drag.active && w.pane_drag.new_tab { return .Ok }
 	if result := ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, bar.count, "+", false, w.scale,
 		tab_control(w, bar.count).hover.value, tab_control(w, bar.count).press.value, 0); result != .Ok { return result }
 	x := f32(bar.count)*bar.tab_width+bar.button_width

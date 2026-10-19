@@ -41,7 +41,7 @@ update_motion :: proc(app: ^App) {
 			controls_changed = ui.control_update(&control, w.tab_hover == i,
 				w.tab_pressed && w.tab_hover == i, app.animations, now) || controls_changed
 		}
-		pane_drag_animate(w, now)
+		pane_drag_animate(w, app.animations, now)
 		if w.header_height > 0 || w.split_overlay {
 			for &pane in w.views {
 				for &control, i in pane.header_controls {

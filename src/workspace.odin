@@ -138,6 +138,41 @@ tab_new :: proc(app: ^App, w: ^Window) {
 	tab_select(app, w, len(w.workspace.tabs)-1)
 }
 
+pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) {
+	if node == source.tree.root {
+		for tab, index in w.workspace.tabs {
+			if tab != source { continue }
+			tab_move(app, w, index, len(w.workspace.tabs)-1)
+			tab_select(app, w, len(w.workspace.tabs)-1)
+			return
+		}
+		return
+	}
+	tab, err := new(Tab)
+	if err != nil { notify(app, .Error, "Could not create a tab. The pane was preserved."); return }
+	success := false
+	defer if !success { free(tab) }
+	if reserve(&w.workspace.tabs, len(w.workspace.tabs)+1) != nil {
+		notify(app, .Error, "Could not create a tab. The pane was preserved.")
+		return
+	}
+	focus_leave(app, w)
+	tree, separated := layout.separate_pane(&source.tree, node)
+	if !separated {
+		focus_enter(app, w)
+		notify(app, .Error, "Could not move the pane. The layout was preserved.")
+		return
+	}
+	tab.tree = tree
+	w.workspace.next_tab_id += 1
+	tab.id = w.workspace.next_tab_id
+	tab_update_title(app, source)
+	tab_update_title(app, tab)
+	append(&w.workspace.tabs, tab)
+	success = true
+	tab_select(app, w, len(w.workspace.tabs)-1)
+}
+
 pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f32 = 0.5, focus := true) {
 	if settings_active(w) { return }
 	if !session_open(app) { notify(app, .Error, "Could not create a pane."); return }

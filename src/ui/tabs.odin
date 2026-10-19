@@ -16,6 +16,16 @@ tab_bar_layout :: proc(width, scale: f32, count: int) -> Tab_Bar {
 	return {width, TAB_HEIGHT*scale, min(220*scale, max(0, width-button)/f32(count)), button, count}
 }
 
+tab_drop_region :: proc(bar: Tab_Bar, width, scale: f32) -> render.Rect {
+	left := f32(bar.count)*bar.tab_width
+	return {left, 0, max(0, width-138*scale-left), bar.height}
+}
+
+tab_drop_hit :: proc(bar: Tab_Bar, width, scale, x, y: f32) -> bool {
+	r := tab_drop_region(bar, width, scale)
+	return r.width > 0 && x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height
+}
+
 // The count is the new-tab button; -1 is outside the controls.
 tab_bar_hit_test :: proc(bar: Tab_Bar, x, y: f32) -> int {
 	if bar.count == 0 || x < 0 || x >= bar.width || y < 0 || y >= bar.height { return -1 }

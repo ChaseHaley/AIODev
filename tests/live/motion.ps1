@@ -110,6 +110,23 @@ try {
     Invoke-Aio expect state ui.animating=false
     Assert-Idle
     Write-Output 'PASS group reordering and cancellation snap with reduced motion'
+    Invoke-Aio command pane.split_right
+    Invoke-Aio wait text 'PS '
+    $state = Read-State
+    $scale = [double]$state['window.scale']
+    $rect = $state["pane.$($state['panes.focused']).rect"] -split ',' | ForEach-Object { [double]$_ }
+    $grab = "$([int]($rect[0]+60*$scale)),$([int]($rect[1]+14*$scale))"
+    $drop = "$([int]([double]$state['tabs.width']*[int]$state['tabs.count']+16*$scale)),$([int](20*$scale))"
+    Invoke-Aio mouse down $grab --px
+    Invoke-Aio mouse move $drop --px
+    Invoke-Aio expect state panes.drop.new_tab=true
+    Invoke-Aio expect state ui.animating=false
+    Assert-Idle
+    Invoke-Aio mouse up $drop --px
+    Invoke-Aio expect state tabs.count=4
+    Invoke-Aio expect state ui.animating=false
+    Assert-Idle
+    Write-Output 'PASS pane-to-tab indicator and drop snap with reduced motion'
     Write-Output 'PASS startup and live animation preference, palette, tabs, notices, settings and immediate input'
 } finally {
     & $ctl --name $name stop | Write-Output

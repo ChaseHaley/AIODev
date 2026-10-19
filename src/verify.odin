@@ -339,6 +339,7 @@ when AIO_CONTROL {
 				{"tabs.dragging", fmt.tprintf("%t", w.tab_drag.active)},
 				{"panes.drop.shown", fmt.tprintf("%t", w.pane_drag.shown)},
 				{"panes.drop.root", fmt.tprintf("%t", w.pane_drag.root)},
+				{"panes.drop.new_tab", fmt.tprintf("%t", w.pane_drag.new_tab)},
 				{"panes.drop.rect", fmt.tprintf("%g,%g,%g,%g", w.pane_drag.ghost[0].target,
 					w.pane_drag.ghost[1].target, w.pane_drag.ghost[2].target, w.pane_drag.ghost[3].target)},
 			}

@@ -4,6 +4,25 @@ import "core:testing"
 import "aio:ui"
 
 @(test)
+pane_tab_drop_region_excludes_tabs_and_caption_buttons :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5, 1.75}) {
+		for width in ([?]f32{360, 800, 1400}) {
+			for count in ([?]int{1, 3, 8}) {
+				bar := ui.tab_bar_layout((width-218)*scale, scale, count)
+				r := ui.tab_drop_region(bar, width*scale, scale)
+				testing.expect(t, r.width > 0)
+				testing.expect_value(t, r.x, f32(count)*bar.tab_width)
+				testing.expect(t, r.x+r.width <= (width-138)*scale)
+				testing.expect(t, ui.tab_drop_hit(bar, width*scale, scale, r.x, 20*scale))
+				testing.expect(t, !ui.tab_drop_hit(bar, width*scale, scale, r.x-1, 20*scale))
+				testing.expect(t, !ui.tab_drop_hit(bar, width*scale, scale, r.x+r.width, 20*scale))
+				testing.expect(t, !ui.tab_drop_hit(bar, width*scale, scale, r.x+1, 40*scale))
+			}
+		}
+	}
+}
+
+@(test)
 tab_selection_toggle_range_and_additive_range :: proc(t: ^testing.T) {
 	marked := [?]bool{false, false, false, false, false, false}
 	ui.tab_selection_update(marked[:], 1, 0, false, false)

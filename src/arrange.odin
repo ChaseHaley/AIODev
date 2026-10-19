@@ -25,8 +25,9 @@ Pane_Drag :: struct {
 	node, target: layout.Node_Id,
 	direction: layout.Direction,
 	start, pointer: [2]f32,
-	pressed, active, swap, shown, root: bool,
+	pressed, active, swap, shown, root, new_tab: bool,
 	ghost: [4]ui.Motion,
+	reveal: ui.Motion,
 }
 
 // A tab press that reorders the strip once it passes the threshold.
@@ -219,6 +220,10 @@ nearest_side :: proc(r: layout.Rect, x, y: f32) -> layout.Direction {
 @(private)
 pane_drag_preview :: proc(app: ^App, w: ^Window) -> (layout.Rect, bool) {
 	d := &w.pane_drag
+	if d.new_tab {
+		r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
+		return {r.x+2*w.scale, 6*w.scale, max(0, min(180*w.scale, r.width)-4*w.scale), 28*w.scale}, true
+	}
 	if d.destination == nil || (d.target == layout.INVALID_NODE && !d.root) { return {}, false }
 	if d.swap {
 		if d.destination != d.source { return {}, false }
@@ -256,6 +261,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
 	on_tab := window_tab_hit(w, bar, x, y)
+	new_tab := !swap && ui.tab_drop_hit(bar, f32(w.width), w.scale, x, y)
 	if on_tab >= 0 && on_tab < bar.count {
 		tab := w.workspace.tabs[on_tab]
 		if root, settings := tab.tree.nodes[tab.tree.root].(layout.Pane); settings && root.content.kind == .Settings {
@@ -288,8 +294,10 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	}
 	if swap && destination != d.source { target = layout.INVALID_NODE }
 	if target == d.target && direction == d.direction && swap == d.swap && root == d.root &&
-	   destination == d.destination { return true }
+	   destination == d.destination && new_tab == d.new_tab { return true }
 	d.target, d.direction, d.swap, d.root, d.destination = target, direction, swap, root, destination
+	d.new_tab = new_tab
+	ui.motion_target(&d.reveal, new_tab ? 1 : 0, GHOST_DURATION, .Decelerate, app.animations, now)
 	w.dirty = true
 	rect, shown := pane_drag_preview(app, w)
 	values := [4]f32{rect.x, rect.y, rect.width, rect.height}
@@ -306,6 +314,10 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	w.pane_drag = {}
 	if !d.active { return false }
 	w.dirty = true
+	if d.new_tab && d.shown {
+		pane_to_tab(app, w, d.source, d.node)
+		return true
+	}
 	if d.target == layout.INVALID_NODE || !d.shown {
 		for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
 		return true
@@ -350,12 +362,20 @@ pane_drag_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 
 pane_drag_animating :: proc(w: ^Window) -> bool {
 	if !w.pane_drag.active { return false }
+	if ui.motion_active(w.pane_drag.reveal) { return true }
 	for m in w.pane_drag.ghost { if ui.motion_active(m) { return true } }
 	return false
 }
 
-pane_drag_animate :: proc(w: ^Window, now: time.Tick) {
+pane_drag_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) {
 	if !w.pane_drag.active { return }
+	if !enabled && pane_drag_animating(w) {
+		for &m in w.pane_drag.ghost { m.value = m.target }
+		w.pane_drag.reveal.value = w.pane_drag.reveal.target
+		w.dirty = true
+		return
+	}
+	if ui.motion_update(&w.pane_drag.reveal, now) { w.dirty = true }
 	for &m in w.pane_drag.ghost { if ui.motion_update(&m, now) { w.dirty = true } }
 }
 
@@ -365,17 +385,23 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	r := render.Rect{d.ghost[0].value, d.ghost[1].value, d.ghost[2].value, d.ghost[3].value}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	radius := f32(app.settings.pane.corner_radius)*w.scale
+	opacity := d.new_tab ? d.reveal.value : 1
 	fill := app.theme.accent
-	fill.a = 0.16
+	fill.a = 0.16*opacity
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None { return .Ok }
 	r = {d.ghost[0].target, d.ghost[1].target, d.ghost[2].target, d.ghost[3].target}
-	if render.push_rect(&w.list, {rect = r, color = app.theme.accent, radius = radius,
+	accent := app.theme.accent
+	accent.a *= opacity
+	if render.push_rect(&w.list, {rect = r, color = accent, radius = radius,
 		stroke = 2*w.scale}) != .None { return .Ok }
-	label := d.swap ? "Swap panes" : d.root ? "Dock to workspace edge" : "Move pane here"
+	label := d.new_tab ? (d.node == d.source.tree.root ? "Move tab to end" : "+ New tab") :
+		d.swap ? "Swap panes" : d.root ? "Dock to workspace edge" : "Move pane here"
 	text := ui.text_styled(&app.ui_text, .Strong)
 	width := ui.text_width(&text, label)
+	label_color := app.theme.text
+	label_color.a *= opacity
 	return ui.draw_text(&text, &w.list, label, r.x+(r.width-width)/2,
-		r.y+(r.height-text.line_height)/2+text.ascent, app.theme.text, max(1, r.width-16*w.scale))
+		r.y+(r.height-text.line_height)/2+text.ascent, label_color, max(1, r.width-16*w.scale))
 }
 
 // Ends every pointer arrangement gesture, restoring a dragged tab to its starting position.

@@ -5,6 +5,39 @@ import "base:runtime"
 import "aio:layout"
 
 @(test)
+separating_a_pane_preserves_the_remaining_tree_and_content :: proc(t: ^testing.T) {
+	source: layout.Layout
+	testing.expect_value(t, layout.init(&source, terminal(1)), nil)
+	defer layout.destroy(&source)
+	right, _ := layout.split_direction(&source, 0, .Right, 0.5, terminal(2))
+	bottom, _ := layout.split_direction(&source, right, .Down, 0.5, terminal(3))
+	source.focus, source.zoomed = bottom, true
+	failed, separated := layout.separate_pane(&source, bottom, runtime.nil_allocator())
+	testing.expect(t, !separated)
+	defer layout.destroy(&failed)
+	testing.expect_value(t, source.focus, bottom)
+	testing.expect(t, source.zoomed)
+	for invalid in ([?]layout.Node_Id{layout.INVALID_NODE, source.root}) {
+		_, ok := layout.separate_pane(&source, invalid)
+		testing.expect(t, !ok)
+	}
+	destination, ok := layout.separate_pane(&source, bottom)
+	testing.expect(t, ok)
+	defer layout.destroy(&destination)
+	testing.expect_value(t, destination.nodes[destination.root].(layout.Pane).content, terminal(3))
+	testing.expect(t, !source.zoomed)
+	testing.expect_value(t, source.nodes[source.focus].(layout.Pane).content, terminal(2))
+	count := 0
+	for n in source.nodes {
+		if pane, is_pane := n.(layout.Pane); is_pane {
+			count += 1
+			testing.expect(t, pane.content.id == 1 || pane.content.id == 2)
+		}
+	}
+	testing.expect_value(t, count, 2)
+}
+
+@(test)
 root_docking_gives_each_pane_a_full_half :: proc(t: ^testing.T) {
 	for mirrored in ([?]bool{false, true}) {
 		for source in 1..=3 {

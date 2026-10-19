@@ -443,12 +443,12 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if header_result := pane_header_draw(app, w, pane, entry); header_result != .Ok { return frame, header_result }
 		window_card_outline(app, w, pane)
 	}
-	if result := pane_drag_draw(app, w); result != .Ok { return frame, result }
 	if blinking != w.blinking {
 		w.blinking = blinking
 		reset_blink(w)
 	}
 	if result := window_chrome_draw(app, w); result != .Ok { return frame, result }
+	if result := pane_drag_draw(app, w); result != .Ok { return frame, result }
 	if result := window_leader_draw(app, w); result != .Ok { return frame, result }
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {
