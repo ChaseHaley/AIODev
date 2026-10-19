@@ -266,6 +266,10 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 	case .Open_Setting:
 		w.dirty = true
 		editor_open(app, w)
+		if w.editor.open {
+			ui.field_set(&w.editor.filter, "")
+			ui.editor_filter(&w.editor)
+		}
 		if w.editor.open && ui.editor_select_key(&w.editor, app.palette.chosen) &&
 		   ui.editor_row(&w.editor).kind != .Shortcut {
 			w.editor.focus = .Control

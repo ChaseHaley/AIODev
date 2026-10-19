@@ -201,6 +201,23 @@ try {
     Invoke-Aio key Enter
     Assert-Value (Read-State)['settings.key'] 'pane.gap' 'palette opens the chosen setting'
     Assert-Value (Read-State)['settings.editing'] 'true' 'palette focuses the setting value'
+    foreach ($fromTerminal in @($true, $false)) {
+        Invoke-Aio key Esc Ctrl+A
+        Invoke-Aio type font
+        Assert-Value (Read-State)['settings.filter'] 'font' 'search hides the future palette target'
+        if ($fromTerminal) {
+            Invoke-Aio command tab.select_1
+            Invoke-Aio command settings.open
+            Assert-Value (Read-State)['settings.filter'] 'font' 'ordinary Settings navigation preserves search'
+            Invoke-Aio command tab.select_1
+        }
+        Invoke-Aio key Ctrl+Shift+P
+        Invoke-Aio type 'pane gap'
+        Invoke-Aio key Enter
+        Assert-Value (Read-State)['settings.filter'] '""' 'targeted palette navigation clears Settings search'
+        Assert-Value (Read-State)['settings.key'] 'pane.gap' 'previously hidden palette target is selected'
+        Assert-Value (Read-State)['settings.editing'] 'true' 'previously hidden palette target has control focus'
+    }
     Close-Settings
     Invoke-Aio command settings.open
     Invoke-Aio dpi 168
