@@ -223,8 +223,9 @@ tick :: proc(app: ^App) {
 	if ui.notices_expire(&app.notices, time.tick_now()) {
 		mark_all_dirty(app)
 	}
+	// A dwell can create or discard the trailing preview window.
+	for i := 0; i < len(app.windows); i += 1 { pane_drag_tick(app, app.windows[i], time.tick_now()) }
 	for window in app.windows {
-		pane_drag_tick(app, window, time.tick_now())
 		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
 			leader_cancel(window)
 		}
@@ -489,7 +490,12 @@ load_settings :: proc(app: ^App) {
 
 reload_settings :: proc(app: ^App) {
 	refresh_animations(app)
-	for window in app.windows { leader_cancel(window); arrange_cancel(app, window) }
+	for i := len(app.windows)-1; i >= 0; i -= 1 {
+		if i >= len(app.windows) { continue }
+		window := app.windows[i]
+		leader_cancel(window)
+		arrange_cancel(app, window)
+	}
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
 	load_settings(app)

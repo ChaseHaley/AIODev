@@ -23,13 +23,14 @@ Workspace_Picker :: struct {
 }
 
 @(require_results)
-workspace_create_empty :: proc(app: ^App) -> ^Workspace {
+workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 	if app.next_workspace_id == max(u32) { return nil }
 	workspace, err := new(Workspace)
 	if err != nil { return nil }
 	name, name_error := strings.clone(fmt.tprintf("Workspace %d", app.next_workspace_id+1))
 	if name_error != nil { free(workspace); return nil }
 	workspace.name, workspace.id = name, app.next_workspace_id+1
+	workspace.provisional = provisional
 	if _, append_error := append(&app.workspaces, workspace); append_error != nil {
 		workspace_destroy(workspace)
 		return nil
@@ -75,8 +76,9 @@ workspace_rename :: proc(app: ^App, workspace: ^Workspace, value: string) -> boo
 
 @(require_results)
 workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
-	if workspace == nil || workspace_find(app, workspace.id) != workspace { return false }
+	if workspace == nil || workspace.provisional || workspace_find(app, workspace.id) != workspace { return false }
 	if owner := window_for_workspace(app, workspace); owner != nil {
+		if owner.preparing { return false }
 		if owner == w { return true }
 		return window_activate(app, owner)
 	}
@@ -125,7 +127,7 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
 workspace_rename_open :: proc(app: ^App, w: ^Window) {
 	arrange_cancel(app, w)
 	leader_cancel(w)
-	ui.palette_close(&app.palette)
+	window_overlays_cancel(app, w)
 	w.workspace_picker.open, w.tab_menu.open = false, false
 	ui.field_set(&w.rename, w.workspace.name)
 	ui.field_select_all(&w.rename)
@@ -178,6 +180,8 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 	clear(&p.rows)
 	query := strings.to_lower(strings.trim_space(ui.field_string(&p.query)), context.temp_allocator)
 	for workspace in app.workspaces {
+		if workspace.provisional { continue }
+		if owner := window_for_workspace(app, workspace); owner != nil && owner.preparing { continue }
 		name := strings.to_lower(workspace.name, context.temp_allocator)
 		if query != "" && !strings.contains(name, query) { continue }
 		if _, err := append(&p.rows, Workspace_Row{workspace.id, workspace_status(app, workspace)}); err != nil {
@@ -218,7 +222,7 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	arrange_cancel(app, w)
 	leader_cancel(w)
 	pane_header_cancel(w)
-	ui.palette_close(&app.palette)
+	window_overlays_cancel(app, w)
 	w.tab_menu.open, w.rename_open = false, false
 	w.close_confirm = {}
 	tab_close_restore(w)

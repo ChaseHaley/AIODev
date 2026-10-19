@@ -19,6 +19,7 @@ Tab :: struct {
 }
 
 Workspace :: struct {
+	provisional: bool, // A tear-off preview borrows a runtime until the drop commits.
 	id: u32,
 	name: string,
 	tabs: [dynamic]^Tab,
@@ -149,40 +150,58 @@ tab_new :: proc(app: ^App, w: ^Window) {
 	tab_select(app, w, len(w.workspace.tabs)-1)
 }
 
-pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) {
-	if node == source.tree.root {
+@(require_results)
+pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -> bool {
+	source_workspace := pane_source_workspace(app, source)
+	if source_workspace == nil || int(node) >= len(source.tree.nodes) { return false }
+	if node == source.tree.root && source_workspace == w.workspace {
 		for tab, index in w.workspace.tabs {
 			if tab != source { continue }
 			tab_move(app, w, index, len(w.workspace.tabs)-1)
 			tab_select(app, w, len(w.workspace.tabs)-1)
-			return
+			return true
 		}
-		return
+		return false
 	}
-	if !pane_minimum_single(app, w) { return }
+	if !pane_minimum_single(app, w) { return false }
 	tab, err := new(Tab)
-	if err != nil { notify(app, .Error, "Could not create a tab. The pane was preserved."); return }
+	if err != nil { notify(app, .Error, "Could not create a tab. The pane was preserved."); return false }
 	success := false
 	defer if !success { free(tab) }
 	if reserve(&w.workspace.tabs, len(w.workspace.tabs)+1) != nil {
 		notify(app, .Error, "Could not create a tab. The pane was preserved.")
-		return
+		return false
 	}
-	focus_leave(app, w)
+	for window in app.windows {
+		if window == w || window.workspace == source_workspace { focus_leave(app, window) }
+	}
 	tree, separated := layout.separate_pane(&source.tree, node)
 	if !separated {
-		focus_enter(app, w)
+		for window in app.windows {
+			if window == w || window.workspace == source_workspace { focus_enter(app, window) }
+		}
 		notify(app, .Error, "Could not move the pane. The layout was preserved.")
-		return
+		return false
 	}
 	tab.tree = tree
 	w.workspace.next_tab_id += 1
 	tab.id = w.workspace.next_tab_id
-	tab_update_title(app, source)
+	if source.tree.root != layout.INVALID_NODE { tab_update_title(app, source) }
 	tab_update_title(app, tab)
 	append(&w.workspace.tabs, tab)
 	success = true
 	tab_select(app, w, len(w.workspace.tabs)-1)
+	if source.tree.root == layout.INVALID_NODE {
+		for current, index in source_workspace.tabs {
+			if current == source { workspace_close_tab(app, source_workspace, index); break }
+		}
+	} else if source_workspace != w.workspace {
+		if owner := window_for_workspace(app, source_workspace); owner != nil {
+			window_relayout(app, owner)
+			focus_enter(app, owner)
+		}
+	}
+	return true
 }
 
 @(require_results)

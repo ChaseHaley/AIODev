@@ -53,6 +53,7 @@ Window :: struct {
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
+	preparing: bool,
 	generation: u64,
 	selecting: bool,
 	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
@@ -99,11 +100,26 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	if existing := window_for_workspace(app, workspace); existing != nil {
 		return window_activate(app, existing)
 	}
-	if reserve(&app.windows, len(app.windows)+1) != nil { return false }
+	w := window_prepare(app, workspace)
+	if w == nil { return false }
+	if !window_show_prepared(app, w) { window_close(app, w); return false }
+	w.preparing = false
+	window_apply_settings(app, w)
+	if !app.options.inactive { _ = window_activate(app, w) }
+	return true
+}
+
+@(require_results)
+window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
+	if workspace == nil || selected_tab(workspace) == nil || window_for_workspace(app, workspace) != nil {
+		return nil
+	}
+	if reserve(&app.windows, len(app.windows)+1) != nil { return nil }
 	w, allocation_error := new(Window)
 	if allocation_error != nil {
-		return false
+		return nil
 	}
+	w.preparing = true
 	w.scale = f32(platform.primary_dpi(&app.platform)) / 96
 	w.ui_text = app.ui_text
 	w.metrics = window_metrics(app, w.scale)
@@ -120,7 +136,7 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	w.cursor_phase_visible = true
 	w.dirty = true
 	w.workspace = workspace
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, w) { window_free(w); return false }
+	if settings_tab_index(workspace) >= 0 && !settings_load(app, w) { window_free(w); return nil }
 	if w.workspace.selection_anchor == 0 { tab_select_one(w.workspace, w.workspace.selected) }
 	w.tree = &selected_tab(w.workspace).tree
 	g := initial_geometry(app)
@@ -137,7 +153,7 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	if err != .None {
 		log.errorf("creating the window failed: %v", err)
 		window_free(w)
-		return false
+		return nil
 	}
 	w.id = id
 	w.width, w.height = desc.width, desc.height
@@ -148,7 +164,7 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	if render_error != .None {
 		log.errorf("creating the window surface failed: %v", render_error)
 		window_close(app, w)
-		return false
+		return nil
 	}
 	window_set_dpi(app, w, platform.window_dpi(&app.platform, id))
 	window_apply_settings(app, w)
@@ -156,14 +172,15 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 		log.error("setting the window cursor failed")
 	}
 	window_update_title(app, w)
-	show_error := platform.window_show_inactive(&app.platform, id)
+	return w
+}
+
+@(require_results)
+window_show_prepared :: proc(app: ^App, w: ^Window) -> bool {
+	show_error := platform.window_show_inactive(&app.platform, w.id)
 	if show_error != .None {
 		log.errorf("showing the window failed: %v", show_error)
-		window_close(app, w)
 		return false
-	}
-	if !app.options.inactive && platform.window_focus(&app.platform, id) != .None {
-		log.error("focusing the new window failed")
 	}
 	return true
 }
@@ -186,6 +203,7 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
+	if !w.preparing { arrange_cancel(app, w) }
 	window_overlays_cancel(app, w)
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
@@ -269,6 +287,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
+	if w.preparing { return }
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
@@ -410,6 +429,7 @@ window_render :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 || w.surface == nil {
 		return
 	}
+	if w.preparing { pane_window_preview_render(app, w); return }
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}

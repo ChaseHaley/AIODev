@@ -57,12 +57,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Resize_Event:
 		if w := window_find(app, e.window); w != nil {
-			arrange_cancel(app, w)
+			if !w.preparing { arrange_cancel(app, w) }
 			window_resize(app, w, e.width, e.height)
 		}
 	case platform.Dpi_Event:
 		if w := window_find(app, e.window); w != nil {
-			arrange_cancel(app, w)
+			if !w.preparing { arrange_cancel(app, w) }
 			window_set_dpi(app, w, e.dpi)
 		}
 	case platform.Focus_Event:
@@ -75,7 +75,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Close_Request_Event:
 		if w := window_find(app, e.window); w != nil {
-			hide_to_tray(app, w)
+			if w.preparing { arrange_cancel(app, w) } else { hide_to_tray(app, w) }
 		}
 	case platform.Tray_Event, platform.Activate_Request_Event:
 		show_window(app)
@@ -119,6 +119,7 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 
 @(private)
 on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+	if w.preparing { return }
 	if w.workspace_picker.open {
 		if e.pressed { w.suppressed_key = e }
 		workspace_picker_key(app, w, e)
@@ -247,6 +248,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
+	if w.preparing { return }
 	if w.workspace_picker.open { workspace_picker_text(app, w, text); return }
 	if w.tab_menu.open { return }
 	if w.rename_open { ui.field_text(&w.rename, text); w.dirty = true; return }
@@ -318,6 +320,7 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	if w.preparing { return }
 	if w.workspace_picker.open {
 		p := &w.workspace_picker
 		x, y := f32(e.x), f32(e.y)
@@ -467,6 +470,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+	if w.preparing { return }
 	if w.workspace_picker.open {
 		if w.workspace_picker.query.dragging && .Left in e.buttons {
 			workspace_picker_pointer(app, w, f32(e.x), false, true)
@@ -568,6 +572,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
+	if w.preparing { return }
 	if w.workspace_picker.open {
 		p := &w.workspace_picker
 		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, len(p.rows)+2)

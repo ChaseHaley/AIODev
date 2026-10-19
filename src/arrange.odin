@@ -28,6 +28,9 @@ Pane_Drag :: struct {
 	start, pointer: [2]f32,
 	pressed, active, swap, shown, root, new_tab: bool,
 	minimum_rejected: bool,
+	destination_window, preview_window: platform.Window_Id,
+	destination_original: ^Tab,
+	new_window, preview_failed: bool,
 	ghost: [4]ui.Motion,
 	reveal: ui.Motion,
 }
@@ -190,10 +193,24 @@ tab_drag_release :: proc(w: ^Window) {
 	w.dirty = true
 }
 
-pane_drag_press :: proc(w: ^Window, node: layout.Node_Id, x, y: f32) {
+pane_drag_press :: proc(app: ^App, w: ^Window, node: layout.Node_Id, x, y: f32) {
+	for i := len(app.windows)-1; i >= 0; i -= 1 {
+		if i < len(app.windows) && app.windows[i] != w { pane_drag_cancel(app, app.windows[i]) }
+	}
 	source := selected_tab(w.workspace)
 	w.pane_drag = {source = source, destination = source, node = node,
-		target = layout.INVALID_NODE, start = {x, y}, pressed = true}
+		destination_window = w.id, target = layout.INVALID_NODE, start = {x, y}, pressed = true}
+}
+
+@(private)
+pane_drag_restore :: proc(app: ^App, w: ^Window, d: Pane_Drag) {
+	if destination := window_find(app, d.destination_window); destination != nil && destination != w {
+		for tab, i in destination.workspace.tabs {
+			if tab == d.destination_original { tab_select(app, destination, i, true); break }
+		}
+		destination.dirty = true
+	}
+	for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i, true); break } }
 }
 
 pane_drag_cancel :: proc(app: ^App, w: ^Window) {
@@ -201,7 +218,8 @@ pane_drag_cancel :: proc(app: ^App, w: ^Window) {
 	w.pane_drag = {}
 	if !d.pressed { return }
 	w.dirty = true
-	for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
+	if d.preview_window != 0 { pane_window_preview_discard(app, d.preview_window) }
+	pane_drag_restore(app, w, d)
 }
 
 // The edge of `r` nearest to the point, as the side the dragged pane will take.
@@ -220,8 +238,15 @@ nearest_side :: proc(r: layout.Rect, x, y: f32) -> layout.Direction {
 
 // Where the dragged pane would land: the target's card for a swap, otherwise its card in a trial layout.
 @(private)
-pane_drag_preview :: proc(app: ^App, w: ^Window) -> (layout.Rect, bool) {
-	d := &w.pane_drag
+pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bool) {
+	d := &source_window.pane_drag
+	if d.new_window {
+		for pane in source_window.panes { if pane.node == d.node { return pane.rect, d.preview_window != 0 } }
+		return {}, false
+	}
+	destination := window_find(app, d.destination_window)
+	if destination == nil { return {}, false }
+	w := destination
 	if d.new_tab {
 		r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
 		return {r.x+2*w.scale, 6*w.scale, max(0, min(180*w.scale, r.width)-4*w.scale), 28*w.scale}, true
@@ -265,6 +290,70 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	if !d.active && math.hypot(x-d.start.x, y-d.start.y) < DRAG_THRESHOLD*w.scale { return false }
 	d.active = true
 	d.pointer = {x, y}
+	sx, sy, screen_error := platform.window_to_screen(&app.platform, w.id, i32(x), i32(y))
+	if screen_error != .None { pane_drag_cancel(app, w); return true }
+	if preview := window_find(app, d.preview_window); preview != nil {
+		if !pane_window_preview_position(app, preview, sx, sy) { pane_drag_cancel(app, w); return true }
+	}
+	id, tx, ty, hit_error := platform.window_at_point(&app.platform, sx, sy)
+	if hit_error != .None { pane_drag_cancel(app, w); return true }
+	destination := window_find(app, id)
+	// Controller-driven client events may be delivered to an inactive, occluded source.
+	if app.options.inactive && destination == nil && x >= 0 && y >= 0 && x < f32(w.width) && y < f32(w.height) {
+		destination, tx, ty = w, i32(x), i32(y)
+	}
+	if destination != nil && destination.preparing { destination = nil }
+	previous := d.destination_window
+	if previous == w.id && destination != w && selected_tab(w.workspace) != d.source {
+		for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i, true); break } }
+	}
+	if destination == nil || destination.id != previous {
+		if old := window_find(app, previous); old != nil && old != w {
+			for tab, i in old.workspace.tabs {
+				if tab == d.destination_original { tab_select(app, old, i, true); break }
+			}
+			old.dirty = true
+		}
+		d.destination_original = nil
+		d.hover, d.hover_until = nil, {}
+	}
+	if destination == nil {
+		d.destination_window, d.destination, d.target = 0, nil, layout.INVALID_NODE
+		d.new_tab, d.new_window, d.swap = false, !swap, swap
+		if !swap && d.preview_window == 0 && !d.preview_failed {
+			if preview := pane_window_preview_create(app, d.source, d.node, sx, sy); preview != nil {
+				d.preview_window = preview.id
+			} else {
+				d.preview_failed = true
+				notify(app, .Error, "Could not prepare a new window. The pane was preserved.")
+			}
+		}
+		if swap && d.preview_window != 0 {
+			preview := d.preview_window
+			d.preview_window = 0
+			pane_window_preview_discard(app, preview)
+		}
+		rect, shown := pane_drag_preview(app, w)
+		d.shown = shown
+		values := [4]f32{rect.x, rect.y, rect.width, rect.height}
+		for &m, i in d.ghost { ui.motion_target(&m, values[i], 0, .Linear, false, time.tick_now()) }
+		w.dirty = true
+		return true
+	}
+	if d.preview_window != 0 {
+		preview := d.preview_window
+		d.preview_window = 0
+		pane_window_preview_discard(app, preview)
+	}
+	if destination.id != previous && destination != w { d.destination_original = selected_tab(destination.workspace) }
+	d.destination_window = destination.id
+	d.new_window, d.preview_failed = false, false
+	return pane_drag_target_move(app, w, destination, f32(tx), f32(ty), swap, previous != destination.id)
+}
+
+@(private)
+pane_drag_target_move :: proc(app: ^App, source_window, w: ^Window, x, y: f32, swap, changed_window: bool) -> bool {
+	d := &source_window.pane_drag
 	bar := window_tab_bar(app, w)
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
@@ -302,13 +391,14 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	}
 	if swap && destination != d.source { target = layout.INVALID_NODE }
 	if target == d.target && direction == d.direction && swap == d.swap && root == d.root &&
-	   destination == d.destination && new_tab == d.new_tab { return true }
+	   destination == d.destination && new_tab == d.new_tab && !changed_window { return true }
 	d.target, d.direction, d.swap, d.root, d.destination = target, direction, swap, root, destination
 	d.new_tab = new_tab
 	d.minimum_rejected = false
 	ui.motion_target(&d.reveal, new_tab ? 1 : 0, GHOST_DURATION, .Decelerate, app.animations, now)
 	w.dirty = true
-	rect, shown := pane_drag_preview(app, w)
+	source_window.dirty = true
+	rect, shown := pane_drag_preview(app, source_window)
 	values := [4]f32{rect.x, rect.y, rect.width, rect.height}
 	for &m, i in d.ghost {
 		ui.motion_target(&m, values[i], GHOST_DURATION, .Decelerate, app.animations && d.shown, now)
@@ -323,8 +413,20 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	w.pane_drag = {}
 	if !d.active { return false }
 	w.dirty = true
+	if d.new_window {
+		if d.shown && pane_to_window(app, w, d.source, d.node, d.preview_window) { return true }
+		pane_window_preview_discard(app, d.preview_window)
+		pane_drag_restore(app, w, d)
+		return true
+	}
+	destination_window := window_find(app, d.destination_window)
+	if destination_window != nil { destination_window.dirty = true }
+	if destination_window == nil { pane_drag_restore(app, w, d); return true }
+	if destination_window != w {
+		for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i, true); break } }
+	}
 	if d.new_tab && d.shown {
-		pane_to_tab(app, w, d.source, d.node)
+		if !pane_to_tab(app, destination_window, d.source, d.node) { pane_drag_restore(app, w, d) }
 		return true
 	}
 	if d.target == layout.INVALID_NODE || !d.shown {
@@ -333,13 +435,13 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 				"Change Minimum Pane Width and Height in Settings.",
 				app.settings.pane.minimum_columns, app.settings.pane.minimum_rows))
 		}
-		for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
+		pane_drag_restore(app, w, d)
 		return true
 	}
 	changed := false
 	if d.destination != d.source {
-		if !pane_transfer(app, w, d.source, d.destination, d.node, d.target, d.direction, d.root) {
-			for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
+		if !pane_transfer(app, destination_window, d.source, d.destination, d.node, d.target, d.direction, d.root) {
+			pane_drag_restore(app, w, d)
 			notify(app, .Error, "Could not move the pane. Both tabs were preserved.")
 		}
 		return true
@@ -373,7 +475,7 @@ pane_drag_animating :: proc(w: ^Window) -> bool {
 	return false
 }
 
-pane_drag_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) {
+pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) {
 	if !w.pane_drag.active { return }
 	if !enabled && pane_drag_animating(w) {
 		for &m in w.pane_drag.ghost { m.value = m.target }
@@ -383,11 +485,21 @@ pane_drag_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) {
 	}
 	if ui.motion_update(&w.pane_drag.reveal, now) { w.dirty = true }
 	for &m in w.pane_drag.ghost { if ui.motion_update(&m, now) { w.dirty = true } }
+	if w.dirty {
+		if target := window_find(app, w.pane_drag.destination_window); target != nil { target.dirty = true }
+	}
 }
 
 pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	d := &w.pane_drag
+	for source in app.windows {
+		if source.pane_drag.active && source.pane_drag.destination_window == w.id {
+			d = &source.pane_drag
+			break
+		}
+	}
 	if !d.active || !d.shown { return .Ok }
+	if d.destination_window != w.id && !d.new_window { return .Ok }
 	r := render.Rect{d.ghost[0].value, d.ghost[1].value, d.ghost[2].value, d.ghost[3].value}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	radius := f32(app.settings.pane.corner_radius)*w.scale
@@ -400,7 +512,8 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	accent.a *= opacity
 	if render.push_rect(&w.list, {rect = r, color = accent, radius = radius,
 		stroke = 2*w.scale}) != .None { return .Ok }
-	label := d.new_tab ? (d.node == d.source.tree.root ? "Move tab to end" : "+ New tab") :
+	label := d.new_window ? "+ New window" :
+		d.new_tab ? (d.destination == d.source && d.node == d.source.tree.root ? "Move tab to end" : "+ New tab") :
 		d.swap ? "Swap panes" : d.root ? "Dock to workspace edge" : "Move pane here"
 	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
@@ -412,6 +525,16 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 
 // Ends every pointer arrangement gesture, restoring a dragged tab to its starting position.
 arrange_cancel :: proc(app: ^App, w: ^Window) {
+	id := w.id
+	// Cancellation may destroy a preview and remove it from the registry.
+	for i := len(app.windows)-1; i >= 0; i -= 1 {
+		if i >= len(app.windows) { continue }
+		other := app.windows[i]
+		if other != w && (other.pane_drag.destination_window == w.id || other.pane_drag.preview_window == w.id) {
+			pane_drag_cancel(app, other)
+		}
+	}
+	if window_find(app, id) == nil { return }
 	w.dragging = {}
 	tab_drag_cancel(app, w)
 	pane_drag_cancel(app, w)

@@ -102,10 +102,13 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
 	if !e.pressed && e.button in w.header_buttons {
 		w.header_buttons -= {e.button}
-		if e.button == .Left && pane_drag_release(app, w) {
+		if e.button == .Left && w.pane_drag.active {
+			pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers)
 			pane_header_cancel(w)
+			_ = pane_drag_release(app, w)
 			return true
 		}
+		if e.button == .Left { _ = pane_drag_release(app, w) }
 		chosen: ui.Header_Action
 		for &view in w.views {
 			if e.button == .Left {
@@ -130,7 +133,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 			for &view in w.views {
 				if view.content == pane.content { view.header_pressed = action }
 			}
-			if action == .None { pane_drag_press(w, pane.node, f32(e.x), f32(e.y)) }
+			if action == .None { pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y)) }
 		}
 	}
 	return true
