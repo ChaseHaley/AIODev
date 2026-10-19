@@ -155,18 +155,22 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if entry == nil {
 		return
 	}
+	literal := false
 	if e.pressed {
-		if w.find.open && e.key == .Escape {
-			leader_cancel(w)
+		if w.find.open && e.key == .Escape && w.leader_until == {} {
 			w.suppressed_key = e
 			find_close(w, entry)
 			return
 		}
-		if !w.find.open && !is_modifier_key(e.key) && leader_key(app, w, e) { return }
-		if action, found := shortcut_action(app, e); found {
-			w.suppressed_key = e
-			run_action(app, w, action)
-			return
+		switch leader_key(app, w, e) {
+		case .Consumed: return
+		case .Literal: literal = true
+		case .None:
+			if action, found := shortcut_action(app, e); found {
+				w.suppressed_key = e
+				run_action(app, w, action)
+				return
+			}
 		}
 	}
 	// The find bar has the keyboard: keys edit the query and none reach the shell.
@@ -204,6 +208,12 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		}
 	}
 	term.send_key(entry.session, e)
+	// The leader's own release stays suppressed, so the shell receives the whole keystroke now.
+	if literal {
+		up := e
+		up.pressed, up.repeat, up.text = false, false, ""
+		term.send_key(entry.session, up)
+	}
 }
 
 @(private)
@@ -507,33 +517,28 @@ leader_cancel :: proc(w: ^Window) {
 	w.leader_until = {}
 }
 
+// Literal: the leader was pressed twice, so the caller delivers that key to whatever has the keyboard.
 @(private)
-leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
+Leader_Result :: enum { None, Consumed, Literal }
+
+// Every surface that takes keys calls this first, except while a shortcut field records keys.
+@(private)
+leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> Leader_Result {
+	if !e.pressed || is_modifier_key(e.key) { return .None }
 	if w.leader_until != {} {
 		if leader, enabled := app.leader.?; enabled && e.repeat &&
-		   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) { return true }
+		   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) { return .Consumed }
 		pending := time.tick_diff(time.tick_now(), w.leader_until) > 0
 		leader_cancel(w)
 		if pending {
 			w.suppressed_key = e
 			if leader, enabled := app.leader.?; enabled &&
-			   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {
-				if entry := focused_session(app, w); entry != nil && entry.status == .Running {
-					if term.has_selection(entry.session) { term.clear_selection(entry.session) }
-					paste_confirm_cancel(app, w)
-					reset_blink(w)
-					term.send_key(entry.session, e)
-					up := e
-					up.pressed, up.repeat, up.text = false, false, ""
-					term.send_key(entry.session, up)
-				}
-				return true
-			}
-			if e.key == .Escape { return true }
+			   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) { return .Literal }
+			if e.key == .Escape { return .Consumed }
 			chord := e
 			chord.modifiers += {.Leader}
 			if action, found := shortcut_action(app, chord); found { run_action(app, w, action) }
-			return true
+			return .Consumed
 		}
 	}
 	if leader, enabled := app.leader.?; enabled {
@@ -543,10 +548,10 @@ leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 				w.leader_until = time.tick_add(time.tick_now(), 2*time.Second)
 				w.dirty = true
 			}
-			return true
+			return .Consumed
 		}
 	}
-	return false
+	return .None
 }
 
 @(private)

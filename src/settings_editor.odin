@@ -292,6 +292,12 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		editor_outcome(app, w, ui.editor_key(p, e))
 		return
 	}
+	literal := false
+	switch leader_key(app, w, e) {
+	case .Consumed: return
+	case .Literal: literal = true
+	case .None:
+	}
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
 	switch clipboard_chord(logical) {
@@ -306,7 +312,7 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		return
 	case .None:
 	}
-	if e.pressed && !editor_owns(logical) {
+	if e.pressed && !literal && !editor_owns(logical) {
 		if action, found := shortcut_action(app, e); found {
 			run_action(app, w, action)
 			return

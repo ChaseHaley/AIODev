@@ -215,7 +215,7 @@ try {
     Invoke-Aio command terminal.find
     Invoke-Aio expect state leader.pending=false
     Invoke-Aio key Ctrl+B
-    Invoke-Aio expect state leader.pending=false
+    Invoke-Aio expect state leader.pending=true
     Invoke-Aio key Ctrl+B
     Invoke-Aio expect state leader.pending=false
     Invoke-Aio expect state find.open=true

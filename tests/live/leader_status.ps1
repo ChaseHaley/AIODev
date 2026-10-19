@@ -61,6 +61,36 @@ try {
     Invoke-Aio key Ctrl+B T
     Assert-Value (Read-State)['tabs.count'] 2 'leader command still dispatches'
     Assert-Value (Read-State)['leader.indicator'] none 'dispatch clears the line'
+    Invoke-Aio command terminal.find
+    Invoke-Aio key Ctrl+B
+    Assert-Value (Read-State)['leader.indicator'] pane-status-line 'leader arms while the find bar has the keyboard'
+    Invoke-Aio key Esc
+    Assert-Value (Read-State)['find.open'] true 'Escape cancels a pending leader before closing find'
+    Invoke-Aio key Ctrl+B T
+    Assert-Value (Read-State)['tabs.count'] 3 'leader command dispatches from the find bar'
+    Invoke-Aio command settings.open
+    Assert-Value (Read-State)['settings.active'] true 'settings tab is active'
+    Invoke-Aio key Ctrl+B
+    Assert-Value (Read-State)['leader.indicator'] pane-status-line 'leader arms on the settings tab'
+    Shot settings-pending
+    Invoke-Aio key Ctrl+B
+    Assert-Value (Read-State)['leader.indicator'] none 'pressing the leader twice passes it through'
+    Assert-Value (Read-State)['settings.active'] true 'literal leader keeps the settings tab'
+    Invoke-Aio key Ctrl+B T
+    $state = Read-State
+    Assert-Value $state['tabs.count'] 5 'leader command dispatches from the settings tab'
+    Assert-Value $state['settings.active'] false 'leader command leaves settings for the new tab'
+    Invoke-Aio command settings.open
+    Invoke-Aio type 'input.leader'
+    Assert-Value (Read-State)['settings.key'] 'input.leader' 'search selects the leader row'
+    Invoke-Aio key Tab
+    Assert-Value (Read-State)['settings.capturing'] true 'leader field records keys'
+    Invoke-Aio key Ctrl+B
+    $state = Read-State
+    Assert-Value $state['leader.indicator'] none 'recording a shortcut keeps the leader key'
+    Assert-Value $state['settings.capturing'] true 'recording continues after the leader chord'
+    Invoke-Aio key Esc
+    Invoke-Aio command tab.close
     [IO.File]::AppendAllText($path, "`ntheme.mode = light`n")
     Invoke-Aio command settings.reload
     Start-Sleep -Milliseconds 6500
