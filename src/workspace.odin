@@ -163,7 +163,10 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 		}
 		return false
 	}
-	if !pane_minimum_single(app, w) { return false }
+	pane, valid := source.tree.nodes[node].(layout.Pane)
+	if !valid || pane.content.kind != .Terminal { return false }
+	panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
+	if !pane_minimum_allows(app, w, panes[:], nil, true) { return false }
 	tab, err := new(Tab)
 	if err != nil { notify(app, .Error, "Could not create a tab. The pane was preserved."); return false }
 	success := false

@@ -248,6 +248,10 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 	if destination == nil { return {}, false }
 	w := destination
 	if d.new_tab {
+		pane := d.source.tree.nodes[d.node].(layout.Pane)
+		panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
+		d.minimum_rejected = !pane_minimum_allows(app, w, panes[:], nil, false)
+		if d.minimum_rejected { return {}, false }
 		r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
 		return {r.x+2*w.scale, 6*w.scale, max(0, min(180*w.scale, r.width)-4*w.scale), 28*w.scale}, true
 	}
