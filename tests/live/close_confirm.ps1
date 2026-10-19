@@ -25,9 +25,11 @@ function Shot([string] $Label) {
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $directory "$Label.png") -Frame | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
 }
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
 function Tab-Point([double] $Index) {
-    $width = [double](Read-State)['tabs.width']
-    return "$([int]($width*($Index-0.5))),20"
+    $s = Read-State
+    $width = [double]$s['tabs.width']
+    return "$([int]((Tab-X $s)+$width*($Index-0.5))),20"
 }
 # Mirrors ui.confirm_layout so the journey clicks the dialog's real buttons.
 function Button-Point([string] $Button) {

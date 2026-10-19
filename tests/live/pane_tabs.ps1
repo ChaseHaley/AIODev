@@ -8,6 +8,7 @@ function Invoke-Aio {
     $out = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
 }
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
 function Read-State {
     $out = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read state.' }
@@ -27,7 +28,7 @@ function Grab {
 }
 function Drop-Point {
     $s = Read-State
-    $x = [double]$s['tabs.width']*[int]$s['tabs.count']+16*[double]$s['window.scale']
+    $x = (Tab-X $s)+[double]$s['tabs.width']*[int]$s['tabs.count']+16*[double]$s['window.scale']
     return "$([int]$x),$([int](20*[double]$s['window.scale']))"
 }
 function Shot($Label) {

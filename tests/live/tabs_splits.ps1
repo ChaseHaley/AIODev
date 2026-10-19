@@ -12,6 +12,8 @@ function Invoke-Aio {
     $result | Write-Output
 }
 
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+
 function Read-State {
     $lines = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read state.' }
@@ -21,6 +23,17 @@ function Read-State {
         $values[$pair[0]] = $pair[1]
     }
     return $values
+}
+
+# Title-bar points from live state: a tab center (one-based) or the new-tab button.
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    return "$([int]((Tab-X $s)+[double]$s['tabs.width']*($Index-0.5))),15"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $x = (Tab-X $s)+[double]$s['tabs.width']*[int]$s['tabs.count']+16*[double]$s['window.scale']
+    return "$([int]$x),15"
 }
 
 function Assert-Value($Actual, $Expected, [string] $Label) {
@@ -59,7 +72,7 @@ try {
     Invoke-Aio tray hide
     Invoke-Aio tray open
     Assert-Value (Read-State)['window.size'] $windowSize 'tray reopen preserves bar-inclusive size'
-    Invoke-Aio mouse click '225,15' --px
+    Invoke-Aio mouse click (New-Tab-Point) --px
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state tabs.count=2
     Invoke-Aio key Ctrl+Shift+W
@@ -181,9 +194,9 @@ try {
     Assert-Value (Read-State)['tabs.selected'] 2 'next tab'
     Invoke-Aio key Ctrl+Shift+Tab
     Assert-Value (Read-State)['tabs.selected'] 1 'previous tab'
-    Invoke-Aio mouse click '230,15' --px
+    Invoke-Aio mouse click (Tab-Point 2) --px
     Assert-Value (Read-State)['tabs.selected'] 2 'tab click'
-    Invoke-Aio mouse click '455,15' --px
+    Invoke-Aio mouse click (New-Tab-Point) --px
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state tabs.count=3
     Invoke-Aio expect state tabs.selected=3
@@ -220,7 +233,7 @@ try {
     Invoke-Aio tray open
     Invoke-Aio expect state tabs.selected=2
     Invoke-Aio expect state panes.count=1
-    Invoke-Aio mouse click '230,15' --button middle --px
+    Invoke-Aio mouse click (Tab-Point 2) --button middle --px
     Invoke-Aio expect state tabs.count=1
     Invoke-Aio expect state panes.count=1
     Invoke-Aio expect state "session.id=$firstId"

@@ -27,6 +27,8 @@ function Read-State {
     }
     return $state
 }
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+function Tab-Center([int] $Index) { $s = Read-State; return "$([int]((Tab-X $s)+[double]$s['tabs.width']*($Index-0.5))),20" }
 Invoke-Aio launch --fresh
 try {
     Invoke-Aio command pane.split_right
@@ -63,7 +65,7 @@ try {
     Invoke-Aio expect state panes.drop.shown=false
     Invoke-Aio mouse up '7,350' --px
     Invoke-Aio expect state panes.count=3
-    $drop = "$([int]([double]$paneState['tabs.width']+16)),20"
+    $drop = "$([int]((Tab-X $paneState)+[double]$paneState['tabs.width']+16)),20"
     Invoke-Aio mouse drag $grab $drop --px
     Invoke-Aio expect state tabs.count=1
     Invoke-Aio expect state panes.count=3
@@ -90,7 +92,7 @@ try {
     Invoke-Aio command settings.reload
     Write-Output 'PASS sixth persisted shortcut alternative dispatches'
 
-    Invoke-Aio mouse click '80,20' --button right --px
+    Invoke-Aio mouse click (Tab-Center 1) --button right --px
     Invoke-Aio expect state tab_menu.open=true
     Invoke-Aio expect state tab_menu.count=13
     Shot single-menu
@@ -111,8 +113,8 @@ try {
     Invoke-Aio command tab.close
     Invoke-Aio command tab.new
     Invoke-Aio command tab.new
-    Invoke-Aio mouse click '50,20' --mods Ctrl --px
-    Invoke-Aio mouse click '50,20' --button right --px
+    Invoke-Aio mouse click (Tab-Center 1) --mods Ctrl --px
+    Invoke-Aio mouse click (Tab-Center 1) --button right --px
     Invoke-Aio expect state tab_menu.count=5
     Shot multiple-menu
     Invoke-Aio key Down Enter

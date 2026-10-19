@@ -10,6 +10,7 @@ function Invoke-Aio {
     $out = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
 }
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
 function Read-State {
     $lines = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect state.' }
@@ -107,8 +108,9 @@ try {
     $session = $s['session.id']
     Invoke-Aio command tab.new
     Invoke-Aio wait text 'PS '
-    $width = [double](Read-State)['tabs.width']
-    $destination = Px ($width*1.5) 18
+    $s = Read-State
+    $width, $tabX = [double]$s['tabs.width'], (Tab-X $s)
+    $destination = Px ($tabX+$width*1.5) 18
     Invoke-Aio command tab.select_1
     $grab = Grab
     Invoke-Aio mouse down $grab --px
@@ -142,28 +144,30 @@ try {
     $count = $s['sessions.count']
     $width = [double]$s['tabs.width']
     $grab = Grab
+    $tabX = Tab-X $s
     Invoke-Aio mouse move $grab --px
     Shot sole-pane-grip
-    Invoke-Aio mouse drag $grab (Px ($width/2) 18) --px
+    Invoke-Aio mouse drag $grab (Px ($tabX+$width/2) 18) --px
     $s = Read-State
     Assert-Equal $s['tabs.count'] 2 'successful sole-pane transfer closes empty source tab'
     Assert-Equal $s['session.id'] $sole 'sole-pane runtime preserved'
     Assert-Equal $s['sessions.count'] $count 'sole-pane transfer closes no runtime'
     Invoke-Aio command settings.open
-    $width = [double](Read-State)['tabs.width']
+    $s = Read-State
+    $width, $tabX = [double]$s['tabs.width'], (Tab-X $s)
     Invoke-Aio command tab.select_1
     $grab = Grab
     Invoke-Aio mouse down $grab --px
-    Invoke-Aio mouse move (Px ($width*2.5) 18) --px
+    Invoke-Aio mouse move (Px ($tabX+$width*2.5) 18) --px
     Assert-Equal (Read-State)['panes.drop.shown'] false 'Settings rejects pane destination'
-    Invoke-Aio mouse up (Px ($width*2.5) 18) --px
+    Invoke-Aio mouse up (Px ($tabX+$width*2.5) 18) --px
     Assert-Equal (Read-State)['tabs.selected'] 1 'invalid drop restores source tab'
     $grab = Grab
     Invoke-Aio mouse down $grab --px
-    Invoke-Aio mouse move (Px ($width*1.5) 18) --px
+    Invoke-Aio mouse move (Px ($tabX+$width*1.5) 18) --px
     Start-Sleep -Milliseconds 450
     Invoke-Aio focus out
-    Invoke-Aio mouse up (Px ($width*1.5) 18) --px
+    Invoke-Aio mouse up (Px ($tabX+$width*1.5) 18) --px
     Assert-Equal (Read-State)['tabs.selected'] 1 'focus loss restores original tab'
     Assert-Equal (Read-State)['panes.dragging'] false 'focus loss cancels docking'
     Write-Output 'PASS root and cross-tab docking journey'

@@ -36,6 +36,7 @@ function Invoke-Aio {
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $result" }
     $result | Write-Output
 }
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
 function Read-State {
     $lines = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect state.' }
@@ -91,8 +92,9 @@ try {
     $tabs = Read-State
     $firstId, $secondId, $thirdId = $tabs['tab.1.id'], $tabs['tab.2.id'], $tabs['tab.3.id']
     $width = [double]$tabs['tabs.width']
-    Invoke-Aio mouse click "$([int]($width*2.5)),20" --px --mods Ctrl
-    Invoke-Aio mouse drag "$([int]($width*0.5)),20" "$([int]($width*2.6)),20" --px
+    $tabX = Tab-X $tabs
+    Invoke-Aio mouse click "$([int]($tabX+$width*2.5)),20" --px --mods Ctrl
+    Invoke-Aio mouse drag "$([int]($tabX+$width*0.5)),20" "$([int]($tabX+$width*2.6)),20" --px
     Invoke-Aio expect state "tab.1.id=$secondId"
     Invoke-Aio expect state "tab.2.id=$firstId"
     Invoke-Aio expect state "tab.3.id=$thirdId"
@@ -100,10 +102,10 @@ try {
     Invoke-Aio expect state tab.2.position=1
     Invoke-Aio expect state tab.3.position=2
     Invoke-Aio expect state ui.animating=false
-    Invoke-Aio mouse down "$([int]($width*1.5)),20" --px
-    Invoke-Aio mouse move "$([int]($width*0.5)),20" --px
+    Invoke-Aio mouse down "$([int]($tabX+$width*1.5)),20" --px
+    Invoke-Aio mouse move "$([int]($tabX+$width*0.5)),20" --px
     Invoke-Aio key Esc
-    Invoke-Aio mouse up "$([int]($width*0.5)),20" --px
+    Invoke-Aio mouse up "$([int]($tabX+$width*0.5)),20" --px
     Invoke-Aio expect state "tab.1.id=$secondId"
     Invoke-Aio expect state "tab.2.id=$firstId"
     Invoke-Aio expect state "tab.3.id=$thirdId"
@@ -116,7 +118,7 @@ try {
     $scale = [double]$state['window.scale']
     $rect = $state["pane.$($state['panes.focused']).rect"] -split ',' | ForEach-Object { [double]$_ }
     $grab = "$([int]($rect[0]+60*$scale)),$([int]($rect[1]+14*$scale))"
-    $drop = "$([int]([double]$state['tabs.width']*[int]$state['tabs.count']+16*$scale)),$([int](20*$scale))"
+    $drop = "$([int]((Tab-X $state)+[double]$state['tabs.width']*[int]$state['tabs.count']+16*$scale)),$([int](20*$scale))"
     Invoke-Aio mouse down $grab --px
     Invoke-Aio mouse move $drop --px
     Invoke-Aio expect state panes.drop.new_tab=true

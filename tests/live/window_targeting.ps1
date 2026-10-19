@@ -9,6 +9,7 @@ function Invoke-Aio {
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
     $out | Write-Output
 }
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
 function Read-State {
     $out = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read state.' }
@@ -38,11 +39,22 @@ try {
     Invoke-Aio command settings.open
     Invoke-Aio command tab.select_1
     $tabs = Read-State
-    $x = [int]$origin[0] + [int](1.5 * [double]$tabs['tabs.width'])
+    $x = [int]$origin[0] + [int]((Tab-X $tabs) + 1.5 * [double]$tabs['tabs.width'])
     $y = [int]$origin[1] + [int](0.5 * [double]$tabs['tabs.height'])
     Invoke-Aio mouse click "$x,$y" --screen
     Invoke-Aio expect state settings.active=true
     Invoke-Aio expect state tabs.selected=2
+    # tabs.x is the strip's left edge: just left of it is the workspace button, just right is tab 1.
+    $left = [int]$origin[0] + [int](Tab-X $tabs)
+    if ((Tab-X $tabs) -le 8) { throw 'tabs.x leaves no room for the root workspace button.' }
+    Invoke-Aio mouse click "$($left - 8),$y" --screen
+    Invoke-Aio expect state workspace.picker=true
+    Invoke-Aio expect state tabs.selected=2
+    Invoke-Aio key Esc
+    Invoke-Aio expect state workspace.picker=false
+    Invoke-Aio mouse click "$($left + 8),$y" --screen
+    Invoke-Aio expect state tabs.selected=1
+    Invoke-Aio expect state workspace.picker=false
     Invoke-Aio command tab.select_1
     Invoke-Aio mouse move '-300,-200' --screen
     Invoke-Aio window move '120,120'

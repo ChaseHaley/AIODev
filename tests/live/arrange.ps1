@@ -49,6 +49,7 @@ function Pane-Rects {
     return $rects
 }
 
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
 function Px([double] $X, [double] $Y) { return "$([int]$X),$([int]$Y)" }
 
 function Shot([string] $Label) {
@@ -111,17 +112,18 @@ try {
     $ids = 1..[int]$s['tabs.count'] | ForEach-Object { $s["tab.$_.id"] }
     $count = $ids.Count
     $tabWidth = [double]$s['tabs.width']
+    $tabX = Tab-X $s
     Invoke-Aio command tab.select_1
-    Invoke-Aio mouse drag (Px ($tabWidth/2) (18*$scale)) (Px ($tabWidth*2.6) (18*$scale)) --px
+    Invoke-Aio mouse drag (Px ($tabX+$tabWidth/2) (18*$scale)) (Px ($tabX+$tabWidth*2.6) (18*$scale)) --px
     $s = Read-State
     Assert-Value $s['tab.3.id'] $ids[0] 'dragged tab lands at its drop position'
     Assert-Value $s['tab.1.id'] $ids[1] 'other tabs shift to make room'
     Assert-Value $s['tabs.selected'] 3 'dragged tab stays selected'
     $before = (1..$count | ForEach-Object { $s["tab.$_.id"] }) -join ','
-    Invoke-Aio mouse down (Px ($tabWidth*2.5) (18*$scale)) --px
-    Invoke-Aio mouse move (Px ($tabWidth*0.5) (18*$scale)) --px
+    Invoke-Aio mouse down (Px ($tabX+$tabWidth*2.5) (18*$scale)) --px
+    Invoke-Aio mouse move (Px ($tabX+$tabWidth*0.5) (18*$scale)) --px
     Invoke-Aio key Esc
-    Invoke-Aio mouse up (Px ($tabWidth*0.5) (18*$scale)) --px
+    Invoke-Aio mouse up (Px ($tabX+$tabWidth*0.5) (18*$scale)) --px
     $s = Read-State
     Assert-Value ((1..$count | ForEach-Object { $s["tab.$_.id"] }) -join ',') $before 'Escape cancels a tab drag'
 

@@ -9,6 +9,7 @@ function Invoke-Aio {
     $out = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
 }
+function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
 function Read-State {
     $lines = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read state.' }
@@ -36,20 +37,22 @@ try {
     Invoke-Aio command tab.select_1
     $state = Read-State
     $tabWidth = [double]$state['tabs.width']
-    Click ($tabWidth*2-17) 20
+    $tabX = Tab-X $state
+    Click ($tabX+$tabWidth*2-17) 20
     Assert-Value (Read-State)['tabs.count'] 1 'X closes an inactive tab'
     Assert-Value (Read-State)['session.id'] $session 'closing another tab preserves the active session'
     Invoke-Aio command tab.new
     $state = Read-State
     $tabWidth = [double]$state['tabs.width']
-    Invoke-Aio mouse down "$([int]($tabWidth*2-17)),20" --px
+    $tabX = Tab-X $state
+    Invoke-Aio mouse down "$([int]($tabX+$tabWidth*2-17)),20" --px
     Invoke-Aio mouse up '10,60' --px
     Assert-Value (Read-State)['tabs.count'] 2 'releasing away cancels close'
-    Click ($tabWidth*2-17) 20
+    Click ($tabX+$tabWidth*2-17) 20
     Assert-Value (Read-State)['tabs.count'] 1 'X closes the active tab'
-    Click ($tabWidth+16) 20
+    Click ($tabX+$tabWidth+16) 20
     Assert-Value (Read-State)['tabs.count'] 2 'new-tab button works in the title bar'
-    Click ($tabWidth*2+48) 20
+    Click ($tabX+$tabWidth*2+48) 20
     Assert-Value (Read-State)['palette.open'] true 'palette button works in the title bar'
     Invoke-Aio key Esc
     $width = [double]((Read-State)['window.size'] -split 'x')[0]
