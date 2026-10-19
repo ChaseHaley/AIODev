@@ -23,11 +23,6 @@ function Grab {
     $s = Read-State
     $r = $s["pane.$($s['panes.focused']).rect"] -split ',' | ForEach-Object { [double]$_ }
     $scale = [double]$s['window.scale']
-    if ($s['panes.count'] -eq '1') {
-        $point = "$([int]($r[0]+$r[2]-70*$scale)),$([int]($r[1]+20*$scale))"
-        Invoke-Aio mouse move $point --px
-        return $point
-    }
     return "$([int]($r[0]+60*$scale)),$([int]($r[1]+14*$scale))"
 }
 function Drop-Point {

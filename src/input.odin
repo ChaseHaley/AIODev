@@ -119,6 +119,16 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 
 @(private)
 on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+	if w.rename_open {
+		if e.pressed { w.suppressed_key = e }
+		rename_key(app, w, e)
+		return
+	}
+	if w.tab_menu.open {
+		if e.pressed { w.suppressed_key = e }
+		tab_menu_key(app, w, e)
+		return
+	}
 	if suppressed, ok := w.suppressed_key.?; ok && !e.pressed && suppressed.key == e.key {
 		w.suppressed_key = nil
 		return
@@ -132,6 +142,13 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		pane_header_cancel(w)
 		if e.pressed { w.suppressed_key = e }
 		close_confirm_outcome(app, w, ui.confirm_key(&w.close_confirm, e))
+		return
+	}
+	if !app.palette.open && e.pressed &&
+	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
+		bar := window_tab_bar(app, w)
+		tab_menu_open(app, w, w.workspace.selected, f32(w.workspace.selected)*bar.tab_width, bar.height)
+		w.suppressed_key = e
 		return
 	}
 	if app.palette.open {
@@ -224,6 +241,8 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
+	if w.tab_menu.open { return }
+	if w.rename_open { ui.field_text(&w.rename, text); w.dirty = true; return }
 	if w.close_confirm.open { return }
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
@@ -292,6 +311,30 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	if w.tab_menu.open {
+		if !e.pressed { return }
+		w.header_buttons += {e.button}
+		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
+			w.tab_menu.selected = hit
+			tab_menu_choose(app, w)
+		} else { w.tab_menu.open, w.dirty = false, true }
+		return
+	}
+	if w.rename_open {
+		r, field := rename_rect(w), rename_field_rect(w)
+		x, y := f32(e.x), f32(e.y)
+		if !e.pressed { w.rename.dragging = false }
+		if e.pressed {
+			if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
+				rename_finish(app, w, false)
+				w.header_buttons += {e.button}
+			} else if e.button == .Left && x >= field.x && x < field.x+field.width &&
+				y >= field.y && y < field.y+field.height {
+				rename_pointer(app, w, x, true, .Shift in e.modifiers)
+			}
+		}
+		return
+	}
 	caption := ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale)
 	if e.button == .Left && (caption >= 0 || w.caption_pressed >= 0) &&
 	   !w.pane_drag.pressed && !w.tab_drag.pressed {
@@ -352,7 +395,8 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 				w.tab_close_pressed = index
 			} else if index == bar.count && e.button == .Left { tab_new(app, w) }
 			else if index >= 0 && index < bar.count {
-				if e.button == .Middle { tab_close_request(app, w, index) }
+				if e.button == .Right { tab_menu_open(app, w, index, x, y) }
+				else if e.button == .Middle { tab_close_request(app, w, index) }
 				else if e.button == .Left {
 					tab_pointer_select(app, w, index, .Control in e.modifiers, .Shift in e.modifiers)
 					tab_press(w, index, x, bar.tab_width, e.modifiers & {.Control, .Shift} != {})
@@ -397,6 +441,21 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+	if w.tab_menu.open {
+		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && hit != w.tab_menu.selected {
+			w.tab_menu.selected, w.dirty = hit, true
+		}
+		pointer_set(app, w, .Arrow)
+		return
+	}
+	if w.rename_open {
+		field := rename_field_rect(w)
+		x, y := f32(e.x), f32(e.y)
+		inside := x >= field.x && x < field.x+field.width && y >= field.y && y < field.y+field.height
+		if w.rename.dragging && .Left in e.buttons { rename_pointer(app, w, x, false, true) }
+		pointer_set(app, w, inside ? .Text : .Arrow)
+		return
+	}
 	x, y := f32(e.x), f32(e.y)
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover { w.caption_hover = caption; w.dirty = true }
@@ -474,6 +533,12 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
+	if w.rename_open { return }
+	if w.tab_menu.open {
+		w.tab_menu.selected = clamp(w.tab_menu.selected-int(e.delta_y), 0, w.tab_menu.count-1)
+		w.dirty = true
+		return
+	}
 	w.wheel_remainder += e.delta_y * WHEEL_LINES
 	rows := int(w.wheel_remainder)
 	if rows == 0 {
@@ -502,6 +567,8 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		w.tab_menu.open = false
+		if w.rename_open { rename_finish(app, w, false) }
 		pane_header_clear(w)
 		w.tab_pressed = false
 		w.tab_hover = -1

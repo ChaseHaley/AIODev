@@ -71,6 +71,11 @@ Window :: struct {
 	close_confirm: ui.Confirm,
 	close_confirm_tab: u32,
 	close_confirm_tabs, close_confirm_panes: int,
+	close_restore: [dynamic]u32,
+	tab_menu: Tab_Menu,
+	rename: ui.Text_Field,
+	rename_open, rename_tab: bool,
+	rename_id: u32,
 	caption_hover, caption_pressed: int,
 	maximized: bool,
 	paste_confirm_until: time.Tick,
@@ -172,6 +177,8 @@ window_free :: proc(w: ^Window) {
 	delete(w.panes)
 	ui.find_destroy(&w.find)
 	ui.editor_destroy(&w.editor)
+	delete(w.rename.bytes)
+	delete(w.close_restore)
 	render.draw_list_destroy(&w.list)
 	delete(w.dividers)
 	free(w)
@@ -191,11 +198,11 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 		return
 	}
 	w.scale = f32(dpi) / 96
-	ui.text_set_size(&app.ui_text, UI_FONT_POINTS * w.scale * 96 / 72)
 	window_apply_settings(app, w)
 }
 
 window_apply_settings :: proc(app: ^App, w: ^Window) {
+	ui.text_set_size(&app.ui_text, f32(app.settings.interface.font_size) * w.scale * 96 / 72)
 	w.metrics = window_metrics(app, w.scale)
 	theme := settings.theme_resolve(app.settings.theme)
 	if platform.window_set_frame_color(&app.platform, w.id, theme.chrome, theme.text) != .None {
@@ -241,10 +248,8 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	pane_header_cancel(w)
 	for &view in w.views { view.header_controls = {} }
 	w.header_height = 0
-	if app.settings.pane.show_headers {
-		count := 0
-		for node in w.tree.nodes { if _, ok := node.(layout.Pane); ok { count += 1 } }
-		if count > 1 { w.header_height = math.round(ui.HEADER_HEIGHT*w.scale) }
+	if app.settings.pane.show_headers && !settings_active(w) {
+		w.header_height = math.round(ui.HEADER_HEIGHT*w.scale)
 	}
 	area := window_content_area(app, w)
 	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
@@ -423,6 +428,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			search_background = color(c.search_background),
 			search_selected_background = color(c.search_selected_background),
 			cursor_text = color(c.cursor_text),
+			minimum_contrast = app.settings.theme.mode == .Light ? f32(app.settings.terminal.minimum_contrast) : 1,
 			focused = content_focused,
 			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
 		}
@@ -474,6 +480,12 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			"Close")
 		ui.fade_draw(&w.list, layers, rects, glyph_count, c.motion.value, c.open ? 4*w.scale*(1-c.motion.value) : 0)
 		if result != .Ok { return frame, result }
+	}
+	if w.rename_open {
+		if result := rename_draw(app, w); result != .Ok { return frame, result }
+	}
+	if w.tab_menu.open {
+		if result := tab_menu_draw(app, w); result != .Ok { return frame, result }
 	}
 	return frame, ui.notices_draw(&app.notices, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)
 }

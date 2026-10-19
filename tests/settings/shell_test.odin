@@ -1,6 +1,7 @@
 package settings_test
 
 import "core:testing"
+import "core:strings"
 import "aio:settings"
 
 @(test)
@@ -22,9 +23,35 @@ shell_badges_follow_the_launched_executable_and_explicit_override :: proc(t: ^te
 }
 
 @(test)
+powershell_directory_hook_only_wraps_opted_in_interactive_shells :: proc(t: ^testing.T) {
+	for command in ([?]string{"pwsh.exe -NoLogo -NoProfile", "powershell.exe -NoLogo"}) {
+		testing.expect_value(t, settings.shell_command_line(command, false), command)
+		wrapped := settings.shell_command_line(command, true)
+		testing.expect(t, strings.contains(wrapped, "__AIODevPrompt"))
+		testing.expect(t, strings.contains(wrapped, "]7;"))
+	}
+	for command in ([?]string{"pwsh -c Write-Host", "pwsh -File test.ps1", "pwsh -EncodedCommand ABC",
+		"pwsh -NonInteractive", "cmd.exe /d", "wsl.exe"}) {
+		testing.expect_value(t, settings.shell_command_line(command, true), command)
+	}
+}
+
+@(test)
+display_titles_strip_controls_and_cap_at_a_complete_utf8_rune :: proc(t: ^testing.T) {
+	title := settings.display_title("hello\n\t\x7f\u0085world 🧪")
+	defer delete(title)
+	testing.expect_value(t, title, "helloworld 🧪")
+	long := strings.repeat("🧪", 300, context.temp_allocator)
+	capped := settings.display_title(long)
+	defer delete(capped)
+	testing.expect_value(t, len(capped), 1024)
+}
+
+@(test)
 reported_directories_decode_file_uris_without_corrupting_plain_paths :: proc(t: ^testing.T) {
 	for row in ([?][2]string{
 		{"file://machine/C:/Users/Some%20Name", `C:\Users\Some Name`},
+		{"file://server/share/Some%20Name", `\\server\share\Some Name`},
 		{`C:/Users/mixed\path`, `C:\Users\mixed\path`},
 		{"//server/share", `\\server\share`},
 		{"file:///home/user/caf%C3%A9", "/home/user/café"},

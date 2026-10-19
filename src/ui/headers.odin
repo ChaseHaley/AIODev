@@ -10,11 +10,11 @@ Header_Layout :: struct {
 	buttons: [4]render.Rect,
 }
 
-header_layout :: proc(area: render.Rect, scale: f32, focused: bool) -> Header_Layout {
+header_layout :: proc(area: render.Rect, scale: f32, _: bool) -> Header_Layout {
 	l := Header_Layout{panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT*scale)}}
 	l.badge = {area.x+8*scale, area.y+7*scale, 14*scale, 14*scale}
 	end := area.x+area.width-5*scale
-	if focused {
+	{
 		for i := 3; i >= 0; i -= 1 {
 			if end-22*scale < area.x+4*scale { break }
 			l.buttons[i] = {end-22*scale, area.y+3*scale, 22*scale, min(22*scale, l.panel.height)}
@@ -41,7 +41,16 @@ header_contains :: proc(l: Header_Layout, x, y: f32) -> bool {
 }
 
 shell_badge_draw :: proc(list: ^render.Draw_List, text: ^Text, theme: Theme,
-	area: render.Rect, icon: string, scale: f32) -> glyphs.Result {
+	area: render.Rect, icon: string, scale: f32, atlas: render.Rect = {}) -> glyphs.Result {
+	if atlas.width > 0 {
+		r := area
+		factor := min(area.width/atlas.width, area.height/atlas.height)
+		r.width, r.height = atlas.width*factor, atlas.height*factor
+		r.x, r.y = area.x+(area.width-r.width)/2, area.y+(area.height-r.height)/2
+		if render.push_glyph(list, {rect = r, atlas = atlas, color = {1, 1, 1, 1},
+			flags = render.GLYPH_COLOR}) != .None { return .Ok }
+		return .Ok
+	}
 	draw_rect(list, {rect = area, color = theme.selection, radius = 3*scale})
 	label := text_styled(text, .Keycap)
 	x := area.x+max(0, (area.width-text_width(&label, icon))/2)
@@ -84,14 +93,15 @@ header_icon_draw :: proc(list: ^render.Draw_List, text: ^Text, area: render.Rect
 
 header_draw :: proc(list: ^render.Draw_List, text: ^Text, theme: Theme,
 	area: render.Rect, background: render.Color, radius, scale: f32,
-	title, directory, icon: string, focused: bool, controls: [4]Control_Motion, zoomed := false) -> glyphs.Result {
+	title, directory, icon: string, focused: bool, controls: [4]Control_Motion, zoomed := false,
+	icon_atlas: render.Rect = {}) -> glyphs.Result {
 	l := header_layout(area, scale, focused)
 	if render.push_layer(list, area, radius) != .None { return .Ok }
 	draw_rect(list, {rect = l.panel, color = background})
 	draw_rect(list, {rect = {area.x, l.panel.y+l.panel.height-scale, area.width, scale}, color = theme.border})
 	if render.push_layer(list, l.panel) != .None { return .Ok }
 	if l.title.width > 0 && l.badge.x+l.badge.width <= area.x+area.width {
-		if result := shell_badge_draw(list, text, theme, l.badge, icon, scale); result != .Ok { return result }
+		if result := shell_badge_draw(list, text, theme, l.badge, icon, scale, icon_atlas); result != .Ok { return result }
 	}
 	strong := text_styled(text, focused ? .Strong : .Body)
 	small := text_styled(text, .Small)

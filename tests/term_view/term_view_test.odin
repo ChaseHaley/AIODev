@@ -494,3 +494,18 @@ search_matches_are_highlighted :: proc(t: ^testing.T) {
 	_, cleared := render_frame(t, &f, style)
 	testing.expect_value(t, cell_pixel(&f, cleared, 9, 0, 0, 0), none)
 }
+
+@(test)
+contrast_adjustment_reaches_rendered_glyphs_and_off_restores_exact_color :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, text_command("$e + '[38;2;200;200;200;48;2;200;200;200mWHITE' + $e + '[0mREADY'"))
+	defer fixture_destroy(&f)
+	if !ok || !await_text(t, f.session, "READY") { return }
+	style := term_view.Style{family = f.family, minimum_contrast = 4.5}
+	render_frame(t, &f, style)
+	if !testing.expect(t, len(f.list.glyphs) > 0) { return }
+	background := render.Color{200/f32(255), 200/f32(255), 200/f32(255), 1}
+	testing.expect(t, term_view.contrast_ratio(f.list.glyphs[0].color, background) >= 4.499)
+	style.minimum_contrast = 1
+	render_frame(t, &f, style)
+	testing.expect_value(t, f.list.glyphs[0].color, background)
+}

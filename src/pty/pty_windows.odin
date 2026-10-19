@@ -144,7 +144,8 @@ serialize_environment :: proc(
 }
 
 @(private, require_results)
-environment_block :: proc(overrides: []Env_Var, allocator: runtime.Allocator) -> ([]u16, Spawn_Error) {
+environment_block :: proc(overrides: []Env_Var, allocator: runtime.Allocator,
+	refresh: bool) -> ([]u16, Spawn_Error) {
 	parent := w.GetEnvironmentStringsW()
 	if parent == nil {
 		return nil, spawn_failure("GetEnvironmentStringsW", .Environment, u32(w.GetLastError()))
@@ -154,7 +155,22 @@ environment_block :: proc(overrides: []Env_Var, allocator: runtime.Allocator) ->
 			log.errorf("FreeEnvironmentStringsW failed: %v", w.GetLastError())
 		}
 	}
-	entries, parse_err := parse_environment(parent, len(overrides), allocator)
+	fresh: rawptr
+	if refresh {
+		token: w.HANDLE
+		if !bool(w.OpenProcessToken(w.GetCurrentProcess(), w.TOKEN_QUERY|w.TOKEN_DUPLICATE, &token)) {
+			return nil, spawn_failure("OpenProcessToken", .Environment, u32(w.GetLastError()))
+		}
+		defer close_handle(&token)
+		if !bool(CreateEnvironmentBlock(&fresh, token, true)) {
+			return nil, spawn_failure("CreateEnvironmentBlock", .Environment, u32(w.GetLastError()))
+		}
+	}
+	defer if fresh != nil && !bool(DestroyEnvironmentBlock(fresh)) {
+		log.errorf("DestroyEnvironmentBlock failed: %v", w.GetLastError())
+	}
+	source := fresh != nil ? cast(w.LPWCH)fresh : parent
+	entries, parse_err := parse_environment(source, len(overrides), allocator)
 	if parse_err.kind != .None { return nil, parse_err }
 	defer {
 		for entry in entries { delete(entry.owned, allocator) }
@@ -194,7 +210,7 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	if attributes & w.FILE_ATTRIBUTE_DIRECTORY == 0 {
 		return {}, {.Invalid_Working_Directory, ERROR_DIRECTORY}
 	}
-	environment, env_err := environment_block(options.environment, allocator)
+	environment, env_err := environment_block(options.environment, allocator, options.refresh_environment)
 	if env_err.kind != .None {
 		return {}, env_err
 	}

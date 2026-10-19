@@ -507,13 +507,43 @@ transfer_pane :: proc(source, destination: ^Layout, node, target: Node_Id,
 }
 
 // Every divider within `tolerance` of the point, so a junction of splits can be dragged as one.
-divider_hit_all :: proc(dividers: []Divider, x, y, tolerance: f32, out: []Divider) -> int {
+divider_hit_all :: proc(dividers: []Divider, x, y, tolerance: f32, out: []Divider,
+	junction_radius: f32 = 0, alignment: f32 = 0) -> int {
+	junction: [2]f32
+	closest := junction_radius+1
+	if junction_radius > 0 {
+		for vertical in dividers {
+			if vertical.axis != .Horizontal { continue }
+			for horizontal in dividers {
+				if horizontal.axis != .Vertical { continue }
+				v, h := vertical.rect, horizontal.rect
+				cx, cy := v.x+v.width/2, h.y+h.height/2
+				joins := h.x <= v.x+v.width+alignment && h.x+h.width >= v.x-alignment &&
+					cy >= v.y-alignment && cy <= v.y+v.height+alignment
+				distance := max(abs(x-cx), abs(y-cy))
+				if joins && distance <= junction_radius && distance < closest {
+					junction, closest = {cx, cy}, distance
+				}
+			}
+		}
+	}
 	count := 0
 	for d in dividers {
 		r := d.rect
 		r.x, r.width = r.x-tolerance, r.width+2*tolerance
 		r.y, r.height = r.y-tolerance, r.height+2*tolerance
-		if count < len(out) && x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height {
+		hit := x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height
+		if closest <= junction_radius {
+			if d.axis == .Horizontal {
+				hit = abs(d.rect.x+d.rect.width/2-junction[0]) <= alignment &&
+					junction[1] >= d.rect.y-alignment && junction[1] <= d.rect.y+d.rect.height+alignment
+			} else {
+				hit = abs(d.rect.y+d.rect.height/2-junction[1]) <= alignment &&
+					junction[0] >= d.rect.x-tolerance-d.rect.height &&
+					junction[0] <= d.rect.x+d.rect.width+tolerance+d.rect.height
+			}
+		}
+		if count < len(out) && hit {
 			out[count] = d
 			count += 1
 		}

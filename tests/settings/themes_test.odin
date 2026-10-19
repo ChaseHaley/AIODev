@@ -49,7 +49,7 @@ theme_and_shape_validation :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 4)
 	testing.expect_value(t, s.theme, settings.Theme_Settings{})
-	testing.expect_value(t, s.pane, settings.Pane_Settings{5, 7, true})
+	testing.expect_value(t, s.pane, settings.Pane_Settings{5, 7, true, 20, 5})
 	for fixture in ([?]string{"pane.gap = 0\npane.corner_radius = 0", "pane.gap = 24\npane.corner_radius = 16"}) {
 		limits, issues, parse_error := settings.parse(fixture)
 		defer settings.destroy(&limits)

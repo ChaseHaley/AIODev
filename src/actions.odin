@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import "aio:commands"
@@ -74,6 +75,16 @@ Action :: enum u32 {
 	Keep_Pane_Open,
 	Change_Shortcut,
 	Follow_Theme_Colors,
+	Rename_Tab,
+	Rename_Pane,
+	Duplicate_Tab,
+	Move_Tab_Left,
+	Move_Tab_Right,
+	Move_Tab_Start,
+	Move_Tab_End,
+	Close_Other_Tabs,
+	Close_Right_Tabs,
+	Tab_Settings,
 }
 
 @(private)
@@ -103,6 +114,16 @@ ACTIONS :: [Action]Action_Info{
 	},
 	.Open_Settings = {"settings.open_file", "Open Settings File", nil},
 	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}},
+	.Rename_Tab = {"tab.rename", "Rename Tab", nil},
+	.Rename_Pane = {"pane.rename", "Rename Pane", nil},
+	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil},
+	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil},
+	.Move_Tab_Right = {"tab.move_right", "Move Tab Right", nil},
+	.Move_Tab_Start = {"tab.move_start", "Move Selected Tabs to Start", nil},
+	.Move_Tab_End = {"tab.move_end", "Move Selected Tabs to End", nil},
+	.Close_Other_Tabs = {"tab.close_others", "Close Other Tabs", nil},
+	.Close_Right_Tabs = {"tab.close_right", "Close Tabs to the Right", nil},
+	.Tab_Settings = {"tab.settings", "Tab Settings", nil},
 	.Reload_Settings = {"settings.reload", "Reload Settings", {{.Comma, {.Control, .Shift}}}},
 	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil},
 	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil},
@@ -164,9 +185,8 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 			id = commands.Command_Id(action),
 			name = info.name,
 			title = info.title,
-			shortcuts = {count = len(info.shortcuts)},
+			shortcuts = {info.shortcuts, len(info.shortcuts)},
 		}
-		copy(command.shortcuts.items[:], info.shortcuts)
 		if err := commands.register(registry, command); err != .None { return err }
 	}
 	return .None
@@ -250,6 +270,18 @@ run_action :: proc(
 	case .Reload_Settings:
 		reload_settings(app)
 	case .Follow_Theme_Colors: editor_follow_theme(app, w)
+	case .Rename_Tab: rename_open(app, w, true)
+	case .Rename_Pane: rename_open(app, w, false)
+	case .Duplicate_Tab: tab_duplicate(app, w)
+	case .Move_Tab_Left: tab_move(app, w, w.workspace.selected, max(0, w.workspace.selected-1))
+	case .Move_Tab_Right: tab_move(app, w, w.workspace.selected, min(len(w.workspace.tabs)-1, w.workspace.selected+1))
+	case .Move_Tab_Start, .Move_Tab_End: tab_move_group(app, w, action == .Move_Tab_End)
+	case .Close_Other_Tabs, .Close_Right_Tabs: tab_close_subset(app, w, action == .Close_Right_Tabs)
+	case .Tab_Settings:
+		editor_open(app, w)
+		ui.field_set(&w.editor.filter, "")
+		ui.editor_filter(&w.editor)
+		ui.editor_select_key(&w.editor, "tab.confirm_close")
 	case .Restart_Shell:
 		if entry != nil {
 			session_restart(app, entry)
@@ -423,7 +455,7 @@ find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
 
 @(private)
 binding_comment :: proc(info: Action_Info) -> string {
-	labels: [commands.MAX_SHORTCUTS]string
+	labels := make([]string, len(info.shortcuts), context.temp_allocator)
 	for shortcut, i in info.shortcuts {
 		buffer: [128]u8
 		label, err := commands.shortcut_label(shortcut, buffer[:])
@@ -465,7 +497,6 @@ settings_diagnostic :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnosti
 
 @(private)
 apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
-	storage: [len(Action)][commands.MAX_SHORTCUTS]commands.Shortcut
 	overrides: [len(Action)]commands.Override
 	lines: [len(Action)]int
 	count := 0
@@ -475,15 +506,15 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 			binding_diagnostic(app, diagnostics, binding, fmt.tprintf("unknown command \"%s\"", binding.name))
 			continue
 		}
-		n, err := commands.parse_shortcuts(binding.value, storage[count][:])
+		storage := make([]commands.Shortcut, len(binding.value)+1, context.temp_allocator)
+		n, err := commands.parse_shortcuts(binding.value, storage)
 		if err != .None {
 			message := fmt.tprintf("cannot parse shortcut \"%s\"", binding.value)
-			if err == .Output_Too_Small { message = "at most 4 shortcuts are allowed" }
 			binding_diagnostic(app, diagnostics, binding, message)
 			continue
 		}
 		unsupported := false
-		for shortcut in storage[count][:n] {
+		for shortcut in storage[:n] {
 			if .Leader in shortcut.modifiers &&
 			   (shortcut.key == .Unidentified || is_modifier_key(shortcut.key)) {
 				unsupported = true
@@ -493,12 +524,15 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 			binding_diagnostic(app, diagnostics, binding, "Leader shortcuts require a nonmodifier key.")
 			continue
 		}
-		overrides[count] = {command.id, storage[count][:n]}
+		overrides[count] = {command.id, storage[:n]}
 		lines[count] = i
 		count += 1
 	}
 	errors: [len(Action)]commands.Error
-	commands.rebind(&app.registry, overrides[:count], errors[:count])
+	if commands.rebind(&app.registry, overrides[:count], errors[:count]) != .None {
+		notify(app, .Error, "Could not allocate shortcut bindings.")
+		return
+	}
 	applied_lines: [len(Action)]int
 	for error, i in errors[:count] {
 		if error == .None { applied_lines[int(overrides[i].id)] = app.settings.keys[lines[i]].line }
@@ -548,8 +582,8 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 			if !leader_wins { app.leader = nil }
 			for &other in app.registry.items {
 				// Copy because unbind compacts the active shortcut array.
-				shortcuts := other.shortcuts
-				for shortcut in shortcuts.items[:shortcuts.count] {
+				shortcuts := slice.clone(commands.active_shortcuts(&other), context.temp_allocator)
+				for shortcut in shortcuts {
 					if !commands.prefix_conflicts(leader, shortcut) { continue }
 					if leader_wins { _ = commands.unbind(&app.registry, other.id, shortcut) }
 					message := fmt.tprintf("input.leader vs %s (%s); %s wins [%s:%d; %s]",

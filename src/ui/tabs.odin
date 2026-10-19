@@ -38,7 +38,7 @@ tab_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, bar: Tab_Bar,
 	index: int, title: string, selected: bool, scale: f32, hover: f32 = 0, pressed: f32 = 0,
 	underline: f32 = -1,
-	position: f32 = -1, marked: bool = false,
+	position: f32 = -1, marked: bool = false, icon: string = "", icon_atlas: render.Rect = {},
 ) -> glyphs.Result {
 	x := f32(index)*bar.tab_width
 	if position >= 0 { x = position }
@@ -73,8 +73,15 @@ tab_draw :: proc(
 		text_set_size(&large, text.size_px*1.5)
 		if result := draw_glyph_centered(&large, list, '×', close, theme.muted); result != .Ok { return result }
 	}
-	return draw_fading_text(text, list, title, x+11*scale, (bar.height-text.line_height)/2+text.ascent,
-		selected ? theme.text : theme.muted, max(0, width-(index < bar.count ? 44 : 22)*scale))
+	icon_width := f32(0)
+	if index < bar.count && width >= 72*scale && (icon != "" || icon_atlas.width > 0) {
+		icon_width = 22*scale
+		if result := shell_badge_draw(list, text, theme, {x+10*scale, 13*scale, 14*scale, 14*scale},
+			icon, scale, icon_atlas); result != .Ok { return result }
+	}
+	return draw_fading_text(text, list, title, x+11*scale+icon_width,
+		(bar.height-text.line_height)/2+text.ascent, selected ? theme.text : theme.muted,
+		max(0, width-(index < bar.count ? 44 : 22)*scale-icon_width))
 }
 
 tab_selection_update :: proc(marked: []bool, index, anchor: int, toggle, range: bool) {
@@ -140,7 +147,7 @@ caption_draw :: proc(list: ^render.Draw_List, text: ^Text, theme: Theme, width, 
 			draw_rect(list, {rect = r, color = fill})
 		}
 		icon := ([3]rune{'\ue921', maximized ? '\ue923' : '\ue922', '\ue8bb'})[i]
-		if result := draw_icon(text, list, icon, r, ink, 0.5); result != .Ok { return result }
+		if result := draw_icon(text, list, icon, r, ink, 0.4); result != .Ok { return result }
 	}
 	return .Ok
 }

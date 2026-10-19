@@ -14,6 +14,7 @@ group_title :: proc(key: string) -> string {
 	case "input": return "Input"
 	case "process": return "Processes"
 	case "font": return "Font"
+	case "interface": return "Interface"
 	case "window": return "Window"
 	case "scrollback": return "Scrollback"
 	case "terminal": return "Terminal"

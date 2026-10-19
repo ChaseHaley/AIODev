@@ -8,6 +8,7 @@ Spawn_Options :: struct {
 	command_line, working_directory: string,
 	environment: []Env_Var,
 	cols, rows: u16,
+	refresh_environment: bool,
 }
 
 Spawn_Error_Kind :: enum {

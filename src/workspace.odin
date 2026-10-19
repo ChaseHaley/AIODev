@@ -2,8 +2,11 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:slice"
+import "core:strings"
 import "aio:layout"
 import "aio:platform"
+import "aio:settings"
 import "aio:term"
 import "aio:ui"
 
@@ -12,6 +15,7 @@ Tab :: struct {
 	marked: bool,
 	tree: layout.Layout,
 	title: string,
+	name: string,
 }
 
 Workspace :: struct {
@@ -27,11 +31,11 @@ selected_tab :: proc(workspace: ^Workspace) -> ^Tab {
 }
 
 @(require_results)
-tab_create :: proc(app: ^App, workspace: ^Workspace) -> bool {
+tab_create :: proc(app: ^App, workspace: ^Workspace, command: string = "", directory: string = "") -> bool {
 	tab, err := new(Tab)
 	if err != nil { return false }
 	if reserve(&workspace.tabs, len(workspace.tabs)+1) != nil { free(tab); return false }
-	if !session_open(app) { free(tab); return false }
+	if !session_open(app, command, directory) { free(tab); return false }
 	id := app.next_session_id
 	if layout.init(&tab.tree, {.Terminal, id}) != nil {
 		session_close(app, id)
@@ -50,6 +54,7 @@ session_close :: proc(app: ^App, id: u32) {
 	for &entry, i in app.sessions {
 		if entry.id == id {
 			pane_header_destroy(&entry.header)
+			delete(entry.name)
 			term.destroy(entry.session)
 			ordered_remove(&app.sessions, i)
 			return
@@ -61,6 +66,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 	for tab in workspace.tabs {
 		layout.destroy(&tab.tree)
 		delete(tab.title)
+		delete(tab.name)
 		free(tab)
 	}
 	delete(workspace.tabs)
@@ -131,6 +137,7 @@ tab_pointer_select :: proc(app: ^App, w: ^Window, index: int, toggle, range: boo
 }
 
 tab_new :: proc(app: ^App, w: ^Window) {
+	if !pane_minimum_single(app, w) { return }
 	if !tab_create(app, w.workspace) {
 		notify(app, .Error, "Could not create a tab.")
 		return
@@ -148,6 +155,7 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) {
 		}
 		return
 	}
+	if !pane_minimum_single(app, w) { return }
 	tab, err := new(Tab)
 	if err != nil { notify(app, .Error, "Could not create a tab. The pane was preserved."); return }
 	success := false
@@ -175,6 +183,7 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) {
 
 pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f32 = 0.5, focus := true) {
 	if settings_active(w) { return }
+	if !pane_minimum_split(app, w, direction, ratio) { return }
 	if !session_open(app) { notify(app, .Error, "Could not create a pane."); return }
 	id := app.next_session_id
 	node, err := layout.split_direction(w.tree, w.tree.focus, direction, ratio, {.Terminal, id})
@@ -258,8 +267,64 @@ close_confirm_text :: proc(w: ^Window) -> (title, body: string) {
 close_confirm_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	ui.confirm_close(&w.close_confirm)
 	w.dirty = true
-	if !accept { return }
-	if index := tab_index_by_id(w.workspace, w.close_confirm_tab); index >= 0 { tab_close(app, w, index) }
+	if accept {
+		if index := tab_index_by_id(w.workspace, w.close_confirm_tab); index >= 0 { tab_close(app, w, index) }
+	}
+	tab_close_restore(w)
+}
+
+tab_duplicate :: proc(app: ^App, w: ^Window) {
+	entry := focused_session(app, w)
+	if entry == nil || !pane_minimum_single(app, w) { return }
+	raw := term.working_directory(entry.session, context.temp_allocator)
+	directory, err := settings.directory_label(raw, context.temp_allocator)
+	if err != nil { notify(app, .Error, "Could not resolve the pane directory."); return }
+	if directory == "" { directory = entry.header.launch_directory }
+	if !tab_create(app, w.workspace, entry.header.command, directory) {
+		notify(app, .Error, "Could not duplicate the tab.")
+		return
+	}
+	tab_select(app, w, len(w.workspace.tabs)-1)
+}
+
+tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {
+	order := slice.clone(w.workspace.tabs[:], context.temp_allocator)
+	marked := make([]bool, len(order), context.temp_allocator)
+	indices := make([]int, len(order), context.temp_allocator)
+	slot := 0
+	for tab, i in order { marked[i] = tab.marked; if end && !tab.marked { slot += 1 } }
+	if !ui.tab_group_order(marked, slot, indices) { return }
+	for original, to in indices {
+		for current, from in w.workspace.tabs {
+			if current == order[original] { tab_move(app, w, from, to); break }
+		}
+	}
+}
+
+tab_close_restore :: proc(w: ^Window) {
+	if len(w.close_restore) == 0 { return }
+	for tab in w.workspace.tabs {
+		tab.marked = false
+		for id in w.close_restore { tab.marked ||= tab.id == id }
+	}
+	clear(&w.close_restore)
+	w.dirty = true
+}
+
+tab_close_subset :: proc(app: ^App, w: ^Window, right: bool) {
+	clear(&w.close_restore)
+	if reserve(&w.close_restore, len(w.workspace.tabs)) != nil {
+		notify(app, .Error, "Could not select tabs to close.")
+		return
+	}
+	for tab in w.workspace.tabs { if tab.marked { append(&w.close_restore, tab.id) } }
+	first := -1
+	for tab, i in w.workspace.tabs {
+		tab.marked = right ? i > w.workspace.selected : !tab.marked
+		if tab.marked && first < 0 { first = i }
+	}
+	if first >= 0 { tab_close_request(app, w, first) }
+	if !w.close_confirm.open { tab_close_restore(w) }
 }
 
 tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {
@@ -295,6 +360,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	}
 	layout.destroy(&tab.tree)
 	delete(tab.title)
+	delete(tab.name)
 	free(tab)
 	if index < workspace.selected { workspace.selected -= 1 }
 	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs)-1))
@@ -363,10 +429,13 @@ tab_update_title :: proc(app: ^App, tab: ^Tab) {
 	if pane.content.kind == .Settings { return }
 	title: string
 	if entry := session_find(app, pane.content.id); entry != nil {
-		title = term.title(entry.session)
+		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
 	}
+	if tab.name != "" { title = tab.name }
+	owned, err := strings.clone(title)
+	if err != nil { log.error("copying the tab title failed"); return }
 	delete(tab.title)
-	tab.title = title
+	tab.title = owned
 }
 
 session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {

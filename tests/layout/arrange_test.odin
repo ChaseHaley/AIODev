@@ -95,3 +95,31 @@ divider_hit_all_finds_junctions :: proc(t: ^testing.T) {
 	testing.expect_value(t, layout.divider_hit_all(bars[:], 50, 50, 3, out[:]), 0)
 	testing.expect_value(t, layout.divider_hit_all(bars[:], 200, 200, 3, out[:1]), 1)
 }
+
+@(test)
+junction_hot_zone_keeps_aligned_halves_together :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5, 1.75}) {
+		for gap in ([?]f32{0, 5, 24}) {
+			g := gap*scale
+			bars := [?]layout.Divider{
+				{node = 0, axis = .Horizontal, rect = {100*scale, 0, g, 300*scale}},
+				{node = 1, axis = .Vertical, rect = {0, 140*scale, 100*scale, g}},
+				{node = 2, axis = .Vertical, rect = {100*scale+g, 140*scale, 100*scale, g}},
+			}
+			hits: [4]layout.Divider
+			for dx in ([?]f32{-9, 0, 9}) {
+				for dy in ([?]f32{-9, 0, 9}) {
+					n := layout.divider_hit_all(bars[:], 100*scale+g/2+dx*scale,
+						140*scale+g/2+dy*scale, 3*scale, hits[:], 10*scale, 2*scale)
+					testing.expect_value(t, n, 3)
+				}
+			}
+			bars[2].rect.y += scale
+			testing.expect_value(t, layout.divider_hit_all(bars[:], 100*scale+g/2-8*scale,
+				140*scale+g/2, 3*scale, hits[:], 10*scale, 2*scale), 3)
+			bars[2].rect.y += 20*scale
+			testing.expect_value(t, layout.divider_hit_all(bars[:], 100*scale+g/2,
+				140*scale+g/2, 3*scale, hits[:], 10*scale, 2*scale), 2)
+		}
+	}
+}

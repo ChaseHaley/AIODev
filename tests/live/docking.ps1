@@ -40,7 +40,6 @@ function Px([double] $X, [double] $Y) { return "$([int]$X),$([int]$Y)" }
 function Grab {
     $r = Focused-Rect
     $scale = [double](Read-State)['window.scale']
-    if ((Read-State)['panes.count'] -eq '1') { return Px ($r[0]+$r[2]-70*$scale) ($r[1]+20*$scale) }
     return Px ($r[0]+[math]::Min(80*$scale,$r[2]/3)) ($r[1]+14*$scale)
 }
 function Shot([string] $Label) {
@@ -55,6 +54,7 @@ function Set-Gap([int] $Gap) {
 }
 Invoke-Aio launch --fresh
 try {
+    [IO.File]::AppendAllText($path, "`npane.minimum_columns = 0`npane.minimum_rows = 0`n")
     foreach ($dpi in @(96,144,168)) {
         Invoke-Aio dpi $dpi
         foreach ($gap in @(0,5)) {

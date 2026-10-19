@@ -27,6 +27,7 @@ process_id :: proc(s: ^Session) -> u32 { return pty.process_id(&s.pty) }
 
 Config :: struct {
 	command_line, working_directory: string,
+	refresh_environment: bool,
 	geometry: Geometry,
 	scrollback_lines: int,
 	colors: Colors,
@@ -259,6 +260,7 @@ spawn :: proc(s: ^Session, config: Config) {
 		environment = environment[:],
 		cols = config.geometry.columns,
 		rows = config.geometry.rows,
+		refresh_environment = config.refresh_environment,
 	}
 	process, err := pty.spawn(options, s.allocator)
 	if err.kind != .None {

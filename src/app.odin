@@ -18,7 +18,6 @@ import "aio:term"
 import "aio:ui"
 
 @(private) FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
-@(private) UI_FONT_POINTS :: 9
 @(private) MIN_FONT_POINTS :: 6
 @(private) MAX_FONT_POINTS :: 72
 @(private) NOTICE_DURATION :: 6 * time.Second
@@ -47,6 +46,7 @@ Session_Entry :: struct {
 	process_name: [780]u8,
 	process_name_length: int,
 	header: Pane_Header_Metadata,
+	name: string,
 }
 
 App :: struct {
@@ -63,6 +63,7 @@ App :: struct {
 	font_points: f32,
 	device: ^render.Device,
 	cache: glyphs.Cache,
+	shell_icon: Shell_Icon,
 	ui_text: ui.Text,
 	ui_ready: bool,
 	animations: bool,
@@ -125,12 +126,13 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	apply_text_gamma(app)
 	glyphs.init(&app.cache, app.fonts, app.device)
-	ui_size_px := UI_FONT_POINTS * f32(platform.primary_dpi(&app.platform)) / 72
+	ui_size_px := f32(app.settings.interface.font_size) * f32(platform.primary_dpi(&app.platform)) / 72
 	if !ui.text_init(&app.ui_text, app.fonts, &app.cache, ui_size_px) {
 		log.error("no interface font is available")
 		return false
 	}
 	app.ui_ready = true
+	shell_icon_load(app)
 	apply_fonts(app)
 	apply_theme(app)
 	workspace, workspace_error := new(Workspace)
@@ -164,6 +166,7 @@ app_destroy :: proc(app: ^App) {
 	delete(app.windows)
 	for &entry in app.sessions {
 		pane_header_destroy(&entry.header)
+		delete(entry.name)
 		term.destroy(entry.session)
 	}
 	delete(app.sessions)
@@ -293,7 +296,8 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 		directory = app.settings.shell.directory
 	}
 	return {
-		command_line = app.settings.shell.command,
+		command_line = settings.shell_command_line(app.settings.shell.command, app.settings.shell.report_directory),
+		refresh_environment = app.settings.shell.refresh_environment,
 		working_directory = directory,
 		geometry = geometry,
 		scrollback_lines = app.settings.scrollback.lines,
@@ -302,7 +306,7 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 }
 
 @(private)
-session_open :: proc(app: ^App) -> bool {
+session_open :: proc(app: ^App, command: string = "", directory: string = "") -> bool {
 	scale := f32(platform.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
 	padding := math.round(f32(app.settings.window.padding)*scale)+
@@ -319,7 +323,14 @@ session_open :: proc(app: ^App) -> bool {
 	geometry.surface_height = u32(geometry.rows) * geometry.cell_height + 2 * geometry.padding_top
 	geometry.padding_top += u32(ui.TAB_HEIGHT*scale)
 	geometry.surface_height += u32(ui.TAB_HEIGHT*scale)
+	if app.settings.pane.show_headers {
+		header := u32(math.round(ui.HEADER_HEIGHT*scale))
+		geometry.padding_top += header
+		geometry.surface_height += header
+	}
 	config := session_config(app, geometry)
+	if command != "" { config.command_line = command }
+	if directory != "" { config.working_directory = directory }
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
@@ -486,6 +497,7 @@ reload_settings :: proc(app: ^App) {
 	for window in app.windows {
 		window_apply_settings(app, window)
 	}
+	shell_icon_load(app)
 }
 
 // Resolves the configured terminal font, falling back to fonts every Windows install has.

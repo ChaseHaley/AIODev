@@ -13,6 +13,7 @@ import "aio:ui"
 
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
+	command, launch_directory: string,
 	icon: string, // Borrowed static shell badge.
 }
 
@@ -20,6 +21,8 @@ pane_header_destroy :: proc(header: ^Pane_Header_Metadata) {
 	delete(header.executable)
 	delete(header.title)
 	delete(header.directory)
+	delete(header.command)
+	delete(header.launch_directory)
 	header^ = {}
 }
 
@@ -33,19 +36,21 @@ header_clone :: proc(text: string) -> string {
 pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config) {
 	pane_header_destroy(header)
 	header.executable = header_clone(settings.shell_executable(config.command_line))
+	header.command, header.launch_directory = header_clone(config.command_line), header_clone(config.working_directory)
 	header.icon = settings.shell_icon(header.executable, "")
 }
 
 pane_header_refresh :: proc(entry: ^Session_Entry) {
 	header := &entry.header
 	title := term.title(entry.session)
+	defer delete(title)
 	directory := term.working_directory(entry.session)
 	defer delete(directory)
 	label, err := settings.directory_label(directory)
 	if err != nil { log.error("caching the reported pane directory failed") }
 	delete(header.title)
 	delete(header.directory)
-	header.title, header.directory = title, label
+	header.title, header.directory = settings.display_title(title), label
 }
 
 pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
@@ -62,12 +67,13 @@ pane_header_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect,
 		return ui.split_overlay_draw(&w.list, &app.ui_text, app.theme,
 			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale), controls, w.scale)
 	}
-	icon := app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon
+	icon, result := shell_icon_atlas(app)
+	if result != .Ok { return result }
 	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 	return ui.header_draw(&w.list, &app.ui_text, app.theme, {r.x, r.y, r.width, r.height},
 		app.theme.pane, f32(app.settings.pane.corner_radius)*w.scale, w.scale,
-		pane_header_title(&entry.header), entry.header.directory, icon,
-		pane.node == w.tree.focus, controls, w.tree.zoomed)
+		entry.name != "" ? entry.name : pane_header_title(&entry.header), entry.header.directory, entry.header.icon,
+		pane.node == w.tree.focus, controls, w.tree.zoomed, icon)
 }
 
 pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_Action, bool) {

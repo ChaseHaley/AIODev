@@ -8,6 +8,10 @@ param(
     [string] $Benchmark = 'C:\Users\chale\Libraries\termbench\termbench_release_msvc.exe',
     [string] $Executable,
     [string] $ProcessGroups = '',
+    [ValidateSet('dark', 'light')]
+    [string] $ThemeMode = 'dark',
+    [double] $MinimumContrast = 4.5,
+    [switch] $HideHeaders,
     [switch] $Child
 )
 
@@ -59,7 +63,10 @@ $settings = @(
     'font.size = 12'
     'cursor.blink = false'
     "process.padding_groups = $ProcessGroups"
+    "theme.mode = $ThemeMode"
 )
+if ($HideHeaders) { $settings += 'pane.show_headers = false' }
+if ($MinimumContrast -ne 4.5) { $settings += "terminal.minimum_contrast = $MinimumContrast" }
 [IO.File]::WriteAllLines((Join-Path $data 'settings.ini'), $settings)
 if ($Executable -eq '') { $Executable = Join-Path $repo 'build/release/aiodev.exe' }
 $arguments = '--instance bench-' + $Label + ' --data-dir "' + $data + '"'

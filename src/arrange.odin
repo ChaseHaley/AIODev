@@ -1,6 +1,7 @@
 package main
 
 import "core:math"
+import "core:fmt"
 import "core:time"
 import "aio:glyphs"
 import "aio:layout"
@@ -26,6 +27,7 @@ Pane_Drag :: struct {
 	direction: layout.Direction,
 	start, pointer: [2]f32,
 	pressed, active, swap, shown, root, new_tab: bool,
+	minimum_rejected: bool,
 	ghost: [4]ui.Motion,
 	reveal: ui.Motion,
 }
@@ -41,7 +43,7 @@ Tab_Drag :: struct {
 
 @(private)
 divider_hits :: proc(w: ^Window, x, y: f32, out: []layout.Divider) -> int {
-	return layout.divider_hit_all(w.dividers[:], x, y, 3*w.scale, out)
+	return layout.divider_hit_all(w.dividers[:], x, y, 3*w.scale, out, 10*w.scale, 2*w.scale)
 }
 
 // Starts a divider drag, or on a second click of the same divider balances the splits it belongs to.
@@ -246,6 +248,12 @@ pane_drag_preview :: proc(app: ^App, w: ^Window) -> (layout.Rect, bool) {
 	if !moved { return {}, false }
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(&trial, window_content_area(app, w), window_gap(app, w), &rects)
+	before := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+	original := d.destination.tree
+	original.zoomed = false
+	layout.compute(&original, window_content_area(app, w), window_gap(app, w), &before)
+	d.minimum_rejected = !pane_minimum_allows(app, w, rects[:], before[:], false)
+	if d.minimum_rejected { return {}, false }
 	for r in rects { if r.content == content { return r.rect, true } }
 	return {}, false
 }
@@ -297,6 +305,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	   destination == d.destination && new_tab == d.new_tab { return true }
 	d.target, d.direction, d.swap, d.root, d.destination = target, direction, swap, root, destination
 	d.new_tab = new_tab
+	d.minimum_rejected = false
 	ui.motion_target(&d.reveal, new_tab ? 1 : 0, GHOST_DURATION, .Decelerate, app.animations, now)
 	w.dirty = true
 	rect, shown := pane_drag_preview(app, w)
@@ -319,6 +328,11 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		return true
 	}
 	if d.target == layout.INVALID_NODE || !d.shown {
+		if d.minimum_rejected {
+			notify(app, .Info, fmt.tprintf("Can't dock: minimum %d × %d content cells. "+
+				"Change Minimum Pane Width and Height in Settings.",
+				app.settings.pane.minimum_columns, app.settings.pane.minimum_rows))
+		}
 		for tab, i in w.workspace.tabs { if tab == d.source { tab_select(app, w, i); break } }
 		return true
 	}

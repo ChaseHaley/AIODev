@@ -22,7 +22,7 @@ headers_keep_scaled_geometry_and_hit_targets_inside_visible_cards :: proc(t: ^te
 				testing.expect_value(t, ui.header_hit_test(l, area.x+area.width, area.y+5), ui.Header_Action.None)
 				testing.expect_value(t, ui.header_hit_test(l, area.x+5, l.panel.y+l.panel.height), ui.Header_Action.None)
 				inactive := ui.header_layout(area, scale, false)
-				for button in inactive.buttons { testing.expect_value(t, button.width, f32(0)) }
+				testing.expect_value(t, inactive.buttons, l.buttons)
 			}
 		}
 	}

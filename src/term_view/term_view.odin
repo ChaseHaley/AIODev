@@ -23,6 +23,7 @@ Style :: struct {
 	selection_foreground: Maybe(render.Color),
 	search_foreground, search_background, search_selected_background: render.Color,
 	cursor_text: render.Color,
+	minimum_contrast: f32,
 	focused: bool,
 	cursor_phase_visible: bool,
 }
@@ -44,6 +45,7 @@ View :: struct {
 	runes: [dynamic]rune,
 	columns: [dynamic]int,
 	shaped: [dynamic]font.Shaped_Glyph,
+	contrast: Contrast_Cache,
 }
 
 @(require_results)
@@ -304,6 +306,13 @@ paint_cell :: proc(
 	}
 	if block_cursor_at(b, x, y) {
 		p.foreground = b.style.cursor_text
+	}
+	if b.style.minimum_contrast > 1 && !p.style.invisible {
+		background := p.has_background ? p.background : color(b.colors.background)
+		if block_cursor_at(b, x, y) {
+			background = b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
+		}
+		p.foreground = minimum_contrast_cached(&v.contrast, p.foreground, background, b.style.minimum_contrast)
 	}
 	return p
 }

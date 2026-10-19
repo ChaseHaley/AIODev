@@ -138,6 +138,32 @@ ownership_and_failure :: proc(t: ^testing.T) {
 
 Failure :: struct { backing: runtime.Allocator, remaining: int }
 
+@(test)
+many_shortcut_alternatives_survive_rebinding_and_failed_growth :: proc(t: ^testing.T) {
+	state := Failure{context.allocator, 64}
+	registry := commands.create(runtime.Allocator{failing_allocator, &state})
+	defer commands.destroy(&registry)
+	defaults := [?]commands.Shortcut{{.Q, {.Control}}}
+	testing.expect_value(t, commands.register(&registry, {id = 1, name = "quit", title = "Quit",
+		shortcuts = {defaults[:], len(defaults)}}), commands.Error.None)
+	bindings: [12]commands.Shortcut
+	n, err := commands.parse_shortcuts("F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12", bindings[:])
+	testing.expect_value(t, err, commands.Error.None)
+	testing.expect_value(t, n, 12)
+	testing.expect_value(t, commands.set_shortcuts(&registry, 1, bindings[:]), commands.Error.None)
+	for binding in bindings { testing.expect(t, commands.find_by_shortcut(&registry, binding) != nil) }
+	command := commands.find(&registry, 1)
+	state.remaining = 0
+	larger: [13]commands.Shortcut
+	copy(larger[:], bindings[:])
+	larger[12] = {.F13, {}}
+	testing.expect_value(t, commands.set_shortcuts(&registry, 1, larger[:]), commands.Error.Out_Of_Memory)
+	testing.expect_value(t, command.shortcuts.count, 12)
+	testing.expect_value(t, commands.rebind(&registry, nil, nil), commands.Error.None)
+	testing.expect_value(t, command.shortcuts.count, 1)
+	testing.expect_value(t, command.shortcuts.items[0], defaults[0])
+}
+
 failing_allocator :: proc(
 	data: rawptr,
 	mode: runtime.Allocator_Mode,
@@ -233,7 +259,7 @@ multiple_shortcuts :: proc(t: ^testing.T) {
 
 @(test)
 rebinding :: proc(t: ^testing.T) {
-	state := Failure{context.allocator, 8}
+	state := Failure{context.allocator, 16}
 	registry := commands.create(runtime.Allocator{failing_allocator, &state})
 	defer commands.destroy(&registry)
 	for command in ([?]commands.Command{
@@ -251,30 +277,30 @@ rebinding :: proc(t: ^testing.T) {
 	other_chord := [?]commands.Shortcut{{.X, {.Control}}}
 	swap := [?]commands.Override{{1, paste_chord[:]}, {2, copy_chord[:]}}
 	errors: [2]commands.Error
-	commands.rebind(&registry, swap[:], errors[:])
+	_ = commands.rebind(&registry, swap[:], errors[:])
 	for error in errors { testing.expect_value(t, error, commands.Error.None) }
 	testing.expect(t, commands.find_by_shortcut(&registry, paste_chord[0]) == copy_command)
 	testing.expect_value(t, commands.find_by_shortcut(&registry, copy_chord[0]).id, commands.Command_Id(2))
 	testing.expect(t, commands.find(&registry, 1) == copy_command && copy_command.disabled)
 	conflict := [?]commands.Override{{1, other_chord[:]}}
-	commands.rebind(&registry, conflict[:], errors[:])
+	_ = commands.rebind(&registry, conflict[:], errors[:])
 	testing.expect_value(t, errors[0], commands.Error.Duplicate_Shortcut)
 	testing.expect(t, commands.find_by_shortcut(&registry, copy_chord[0]) == copy_command)
 	fallback_taken := [?]commands.Override{{2, copy_chord[:]}, {1, other_chord[:]}}
-	commands.rebind(&registry, fallback_taken[:], errors[:])
+	_ = commands.rebind(&registry, fallback_taken[:], errors[:])
 	testing.expect_value(t, errors[0], commands.Error.None)
 	testing.expect_value(t, errors[1], commands.Error.Duplicate_Shortcut)
 	testing.expect_value(t, len(commands.active_shortcuts(copy_command)), 0)
-	commands.rebind(&registry, nil, nil)
+	_ = commands.rebind(&registry, nil, nil)
 	testing.expect(t, commands.find_by_shortcut(&registry, copy_chord[0]) == copy_command)
 	testing.expect_value(t, commands.find_by_shortcut(&registry, paste_chord[0]).id, commands.Command_Id(2))
 	testing.expect_value(t, commands.find_by_shortcut(&registry, other_chord[0]).id, commands.Command_Id(3))
 	testing.expect(t, copy_command.disabled)
 	unbound := [?]commands.Override{{1, nil}}
-	commands.rebind(&registry, unbound[:], errors[:])
+	_ = commands.rebind(&registry, unbound[:], errors[:])
 	testing.expect_value(t, errors[0], commands.Error.None)
 	testing.expect_value(t, len(commands.active_shortcuts(copy_command)), 0)
 	unknown := [?]commands.Override{{99, copy_chord[:]}}
-	commands.rebind(&registry, unknown[:], errors[:])
+	_ = commands.rebind(&registry, unknown[:], errors[:])
 	testing.expect_value(t, errors[0], commands.Error.Unknown_Command)
 }

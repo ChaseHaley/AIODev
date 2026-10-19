@@ -1,5 +1,6 @@
 package commands
 
+import "base:runtime"
 import "core:reflect"
 import "core:strings"
 import "core:unicode/utf8"
@@ -7,8 +8,7 @@ import "aio:input"
 
 Command_Id :: distinct u32
 Shortcut :: struct { key: input.Key, modifiers: input.Modifiers }
-MAX_SHORTCUTS :: 4
-Shortcut_Set :: struct { items: [MAX_SHORTCUTS]Shortcut, count: int }
+Shortcut_Set :: struct { items: []Shortcut, count: int }
 Override :: struct { id: Command_Id, shortcuts: []Shortcut }
 Command :: struct {
 	id: Command_Id,
@@ -39,6 +39,8 @@ destroy :: proc(registry: ^Registry) {
 	for item in registry.items {
 		delete(item.name, registry.items.allocator)
 		delete(item.title, registry.items.allocator)
+		delete(item.shortcuts.items, registry.items.allocator)
+		delete(item.defaults.items, registry.items.allocator)
 	}
 	delete(registry.items)
 	registry^ = {}
@@ -133,13 +135,12 @@ register :: proc(registry: ^Registry, command: Command) -> Error {
 		if item.id == command.id { return .Duplicate_Id }
 		if item.name == command.name { return .Duplicate_Name }
 	}
-	assert(command.shortcuts.count >= 0 && command.shortcuts.count <= MAX_SHORTCUTS)
+	assert(command.shortcuts.count >= 0 && command.shortcuts.count <= len(command.shortcuts.items))
 	for i in 0..<command.shortcuts.count {
 		binding := command.shortcuts.items[i]
 		if find_by_shortcut(registry, binding) != nil { return .Duplicate_Shortcut }
 	}
 	owned := command
-	owned.defaults = command.shortcuts
 	allocator := registry.items.allocator
 	name, name_error := strings.clone(command.name, allocator)
 	if name_error != nil { return .Out_Of_Memory }
@@ -149,8 +150,22 @@ register :: proc(registry: ^Registry, command: Command) -> Error {
 		return .Out_Of_Memory
 	}
 	owned.name, owned.title = name, title
+	active, active_error := make([]Shortcut, command.shortcuts.count, allocator)
+	defaults, defaults_error := make([]Shortcut, command.shortcuts.count, allocator)
+	if active_error != nil || defaults_error != nil {
+		delete(active, allocator)
+		delete(defaults, allocator)
+		delete(name, allocator)
+		delete(title, allocator)
+		return .Out_Of_Memory
+	}
+	copy(active, command.shortcuts.items[:command.shortcuts.count])
+	copy(defaults, active)
+	owned.shortcuts, owned.defaults = {active, len(active)}, {defaults, len(defaults)}
 	_, err := append(&registry.items, owned)
 	if err != nil {
+		delete(active, allocator)
+		delete(defaults, allocator)
 		delete(name, allocator)
 		delete(title, allocator)
 		return .Out_Of_Memory
@@ -345,15 +360,23 @@ active_shortcuts :: proc(command: ^Command) -> []Shortcut {
 set_shortcuts :: proc(registry: ^Registry, id: Command_Id, shortcuts: []Shortcut) -> Error {
 	command := find(registry, id)
 	if command == nil { return .Unknown_Command }
-	assert(len(shortcuts) <= MAX_SHORTCUTS)
 	for shortcut in shortcuts {
 		if other := find_by_shortcut(registry, shortcut); other != nil && other.id != id {
 			return .Duplicate_Shortcut
 		}
 	}
-	bindings := Shortcut_Set{count = len(shortcuts)}
+	items := command.shortcuts.items
+	if len(shortcuts) > len(items) {
+		err: runtime.Allocator_Error
+		items, err = make([]Shortcut, len(shortcuts), registry.items.allocator)
+		if err != nil { return .Out_Of_Memory }
+	}
+	bindings := Shortcut_Set{items, len(shortcuts)}
 	for shortcut, i in shortcuts {
 		bindings.items[i] = {shortcut.key, normalized(shortcut.modifiers)}
+	}
+	if raw_data(items) != raw_data(command.shortcuts.items) {
+		delete(command.shortcuts.items, registry.items.allocator)
 	}
 	command.shortcuts = bindings
 	return .None
@@ -361,9 +384,10 @@ set_shortcuts :: proc(registry: ^Registry, id: Command_Id, shortcuts: []Shortcut
 
 // Overrides replace defaults; an override that cannot apply falls back to its command's defaults, or
 // leaves the command unbound when those are taken too.
-rebind :: proc(registry: ^Registry, overrides: []Override, errors: []Error) {
+@(require_results)
+rebind :: proc(registry: ^Registry, overrides: []Override, errors: []Error) -> Error {
 	assert(len(errors) >= len(overrides))
-	for &command in registry.items { command.shortcuts = {} }
+	for &command in registry.items { command.shortcuts.count = 0 }
 	for &command in registry.items {
 		overridden := false
 		for override in overrides {
@@ -372,7 +396,9 @@ rebind :: proc(registry: ^Registry, overrides: []Override, errors: []Error) {
 				break
 			}
 		}
-		if !overridden { command.shortcuts = command.defaults }
+		if !overridden {
+			if err := set_shortcuts(registry, command.id, command.defaults.items); err != .None { return err }
+		}
 	}
 	for override, i in overrides {
 		errors[i] = set_shortcuts(registry, override.id, override.shortcuts)
@@ -380,9 +406,10 @@ rebind :: proc(registry: ^Registry, overrides: []Override, errors: []Error) {
 		if errors[i] == .None || command == nil { continue }
 		defaults := command.defaults.items[:command.defaults.count]
 		if set_shortcuts(registry, command.id, defaults) != .None {
-			command.shortcuts = {}
+			command.shortcuts.count = 0
 		}
 	}
+	return .None
 }
 
 @(require_results)

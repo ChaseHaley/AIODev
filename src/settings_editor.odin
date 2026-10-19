@@ -11,7 +11,7 @@ import "aio:ui"
 
 @(private)
 shortcuts_text :: proc(shortcuts: commands.Shortcut_Set) -> string {
-	labels: [commands.MAX_SHORTCUTS]string
+	labels := make([]string, shortcuts.count, context.temp_allocator)
 	set := shortcuts
 	for shortcut, i in set.items[:set.count] {
 		buffer: [128]u8
@@ -60,6 +60,8 @@ settings_load :: proc(app: ^App, w: ^Window) -> bool {
 		row := ui.Editor_Row{key = entry.key, title = entry.title, description = entry.description,
 			value = settings.value_text(&s, entry), default_value = entry.default_value,
 			minimum = entry.minimum, maximum = entry.maximum}
+		if entry.key == "font.size" { row.minimum, row.maximum = 6, 32 }
+		if entry.key == "font.line_height" { row.minimum, row.maximum = 0.8, 2 }
 		if entry.key == "theme.mode" &&
 		   (s.color_overrides.foreground != nil || s.color_overrides.background != nil) {
 			row.description = "Shell colors are pinned. Search Follow Theme to reset foreground and background."
@@ -93,7 +95,7 @@ settings_load :: proc(app: ^App, w: ^Window) -> bool {
 		for binding in s.keys { if binding.name == command.name { value = binding.value; break } }
 		row := ui.Editor_Row{
 			key = fmt.tprintf("keys.%s", command.name), title = command.title,
-			description = "Add, replace or remove individual shortcuts. Up to four alternatives.",
+			description = "",
 			value = value, default_value = shortcuts_text(command.defaults), kind = .Shortcut,
 		}
 		if ui.editor_add(p, row, shortcut_group(command.name)) != nil {
@@ -180,7 +182,14 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 					warning = strings.trim_space(warning[:source])
 				}
 			}
-		} else { return message, "" }
+		} else {
+			if at := strings.index(d.message, "already used by "); at >= 0 {
+				other := d.message[at+len("already used by "):]
+				if end := strings.index(other, " ("); end >= 0 { other = other[:end] }
+				return fmt.tprintf("Assigned to %s. Choose another shortcut.", other), ""
+			}
+			return message, ""
+		}
 	}
 	return "", warning
 }

@@ -233,6 +233,8 @@ when AIO_CONTROL {
 			{"terminal.foreground", settings.color_hex(app.settings.colors.foreground)},
 			{"terminal.background", settings.color_hex(app.settings.colors.background)},
 			{"ui.animations", fmt.tprintf("%t", app.animations)},
+			{"ui.font_points", fmt.tprintf("%g", app.settings.interface.font_size)},
+			{"shell.icon.loaded", fmt.tprintf("%t", app.shell_icon.width > 0)},
 			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
 			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
 		}
@@ -245,8 +247,17 @@ when AIO_CONTROL {
 			editor_title := ""
 			if row := ui.editor_row(&w.editor); row != nil { editor_key, editor_title = row.key, row.title }
 			confirm_title, _ := close_confirm_text(w)
+			slider := render.Rect{}
+			if settings_active(w) && len(w.editor.items) > 0 {
+				slider = ui.editor_row_parts(&w.editor, settings_layout(w), w.editor.selected).slider
+			}
 			window := [?]control.State_Entry{
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
+				{"rename.open", fmt.tprintf("%t", w.rename_open)},
+				{"rename.value", ui.field_string(&w.rename)},
+				{"tab_menu.open", fmt.tprintf("%t", w.tab_menu.open)},
+				{"tab_menu.count", fmt.tprintf("%d", w.tab_menu.count)},
+				{"tab_menu.action", fmt.tprintf("%v", w.tab_menu.actions[w.tab_menu.selected])},
 				{"settings.filter", string(w.editor.filter.bytes[:])},
 				{"settings.scroll", fmt.tprintf("%d", w.editor.scroll)},
 				{"settings.group", fmt.tprintf("%d", ui.editor_active_group(&w.editor))},
@@ -259,6 +270,7 @@ when AIO_CONTROL {
 				{"settings.title", editor_title},
 				{"settings.message", w.editor.message},
 				{"settings.error", fmt.tprintf("%t", w.editor.error)},
+				{"settings.slider", fmt.tprintf("%g,%g,%g,%g", slider.x, slider.y, slider.width, slider.height)},
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
 				{"confirm.open", fmt.tprintf("%t", w.close_confirm.open)},
 				{"confirm.title", w.close_confirm.open ? confirm_title : ""},
@@ -384,7 +396,7 @@ when AIO_CONTROL {
 				{"session.title", term.title(s, context.temp_allocator)},
 				{"session.header.title", pane_header_title(&entry.header)},
 				{"session.header.directory", entry.header.directory},
-				{"session.header.icon", app.settings.shell.icon != "" ? app.settings.shell.icon : entry.header.icon},
+				{"session.header.icon", app.shell_icon.width > 0 ? app.settings.shell.icon : entry.header.icon},
 				{"grid.origin", fmt.tprintf("%d,%d", g.padding_left, g.padding_top)},
 				{"session.viewport", up == 0 ? "bottom" : fmt.tprintf("up:%d", up)},
 				{"session.selection", selection}, {"session.mouse", fmt.tprintf("%t", term.mouse_tracking(s))},
@@ -576,7 +588,7 @@ when AIO_CONTROL {
 			f32(app.settings.pane.gap), w.scale).x)
 			width := i32(f32(r.columns)*w.metrics.cell_width+2*padding)
 			height := i32(f32(r.rows)*w.metrics.cell_height+2*padding+
-				window_tab_bar(app, w).height)
+				window_tab_bar(app, w).height+w.header_height)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) != .None { return .System }
 		case control.Command:
 			command := commands.find(&app.registry, r.name)

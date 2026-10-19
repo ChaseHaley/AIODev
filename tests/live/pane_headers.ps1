@@ -93,7 +93,7 @@ $originalAnimations = [AioHeaderAnimations]::Read()
 Invoke-Aio launch --fresh
 try {
     Invoke-Aio expect state ui.animations=false
-    Invoke-Aio expect state panes.header_height=0
+    Invoke-Aio expect state panes.header_height=28
     Invoke-Aio command pane.split_right
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state session.header.directory=
@@ -253,9 +253,17 @@ try {
     Start-Sleep -Milliseconds 6600
     Assert-Idle
     Set-Option pane.show_headers true
-    Set-Option shell.icon 'λ'
+    Add-Type -AssemblyName System.Drawing
+    $iconPath = Join-Path $directory 'shell.png'
+    $icon = [Drawing.Bitmap]::new(16,16)
+    $graphics = [Drawing.Graphics]::FromImage($icon)
+    $graphics.Clear([Drawing.Color]::CornflowerBlue)
+    $icon.Save($iconPath, [Drawing.Imaging.ImageFormat]::Png)
+    $graphics.Dispose()
+    $icon.Dispose()
+    Set-Option shell.icon $iconPath
     Invoke-Aio command settings.reload
-    Invoke-Aio expect state 'session.header.icon=λ'
+    Invoke-Aio expect state shell.icon.loaded=true
     Shot custom-icon
     Start-Sleep -Milliseconds 6600
     $s = Read-State

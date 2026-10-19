@@ -6,7 +6,7 @@ import "core:strings"
 Theme_Name :: enum int { Studio, Tide, Ember }
 Theme_Mode :: enum int { Dark, Light }
 Theme_Settings :: struct { name: Theme_Name, mode: Theme_Mode }
-Pane_Settings :: struct { gap, corner_radius: int, show_headers: bool }
+Pane_Settings :: struct { gap, corner_radius: int, show_headers: bool, minimum_columns, minimum_rows: int }
 Color_Overrides :: struct {
 	foreground, background, cursor, cursor_text, selection_background: Maybe(Color),
 	selection_foreground: Maybe(Color),

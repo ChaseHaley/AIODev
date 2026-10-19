@@ -73,6 +73,27 @@ try {
     Invoke-Aio key Esc
     Assert-Value ([IO.File]::ReadAllText($path)) $saved 'cancel preserves file'
 
+    Close-Settings
+    $terminalCell = (Read-State)['grid.cell']
+    Open-Field interface.font_size
+    Save-Value 12
+    Assert-Value (Read-State)['ui.font_points'] '12' 'GUI font applies independently'
+    Close-Settings
+    Assert-Value (Read-State)['grid.cell'] $terminalCell 'GUI font preserves terminal cell size'
+    Open-Field interface.font_size
+    Save-Value 9
+    Close-Settings
+    $naturalCell = (Read-State)['grid.cell']
+    Open-Field font.line_height
+    Save-Value 1.25
+    Close-Settings
+    $tallerCell = (Read-State)['grid.cell']
+    if ($naturalCell -eq $tallerCell) { throw 'Line height did not change terminal cell geometry.' }
+    Write-Output 'PASS line height changes terminal cell geometry'
+    Open-Field font.line_height
+    Save-Value 1
+    Close-Settings
+
     Open-Field font.size
     Invoke-Aio key Ctrl+R
     Assert-Value (Read-State)['settings.value'] '12' 'reset saves schema default'

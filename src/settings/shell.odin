@@ -1,6 +1,7 @@
 package settings
 
 import "base:runtime"
+import "core:fmt"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -33,6 +34,35 @@ shell_icon :: proc(executable, override: string) -> string {
 	return ">_"
 }
 
+shell_command_line :: proc(command: string, report_directory: bool) -> string {
+	executable := shell_executable(command)
+	if !report_directory || !(strings.equal_fold(executable, "pwsh") ||
+		strings.equal_fold(executable, "powershell")) { return command }
+	for arg in strings.fields(command, context.temp_allocator) {
+		if len(arg) < 2 || arg[0] != '-' { continue }
+		name := arg[1:]
+		for option in ([?]string{"command", "commandwithargs", "encodedcommand", "file", "noninteractive"}) {
+			if len(name) <= len(option) && strings.equal_fold(name, option[:len(name)]) { return command }
+		}
+	}
+	script := "$global:__AIODevPrompt=$function:prompt; function global:prompt { " +
+		"try { if ($PWD.Provider.Name -eq 'FileSystem') { " +
+		"[Console]::Write(([char]27).ToString()+']7;'+([uri]$PWD.ProviderPath).AbsoluteUri+([char]7)) " +
+		"} } catch {}; & $global:__AIODevPrompt }"
+	return fmt.tprintf("%s -NoExit -Command \"%s\"", command, script)
+}
+
+display_title :: proc(raw: string, allocator := context.allocator) -> string {
+	bytes := make([dynamic]u8, 0, min(1024, len(raw)), allocator)
+	for r in raw {
+		if r < ' ' || r >= 0x7f && r <= 0x9f { continue }
+		encoded, count := utf8.encode_rune(r)
+		if len(bytes)+count > 1024 { break }
+		if _, err := append(&bytes, ..encoded[:count]); err != nil { break }
+	}
+	return string(bytes[:])
+}
+
 @(private)
 hex_digit :: proc(c: u8) -> (u8, bool) {
 	if c >= '0' && c <= '9' { return c-'0', true }
@@ -62,7 +92,14 @@ directory_label :: proc(raw: string, allocator := context.allocator) -> (string,
 		return windows_separators(copy), err
 	}
 	text = text[7:]
-	if slash := strings.index_byte(text, '/'); slash >= 0 { text = text[slash:] }
+	if slash := strings.index_byte(text, '/'); slash >= 0 {
+		host, path := text[:slash], text[slash:]
+		drive := len(path) >= 3 && path[0] == '/' && path[2] == ':'
+		text = path
+		if host != "" && !strings.equal_fold(host, "localhost") && !drive {
+			text = fmt.tprintf("//%s%s", host, path)
+		}
+	}
 	if len(text) >= 3 && text[0] == '/' && text[2] == ':' { text = text[1:] }
 	builder, err := strings.builder_make(allocator)
 	if err != nil { return "", err }

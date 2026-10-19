@@ -48,10 +48,19 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if (w.tab_drag.active && tab.marked) != foreground { continue }
 			title := fmt.tprintf("Tab %d", i+1)
 			if tab.title != "" { title = tab.title }
+			icon: string
+			atlas := render.Rect{}
+			pane, terminal := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+			if terminal && pane.content.kind == .Terminal {
+				if entry := session_find(app, pane.content.id); entry != nil { icon = entry.header.icon }
+				result: glyphs.Result
+				atlas, result = shell_icon_atlas(app)
+				if result != .Ok { return result }
+			}
 			x := tab_position(w, i)*bar.tab_width
 			if result := ui.tab_draw(&w.list, &app.ui_text, app.theme, bar, i, title,
 				i == w.workspace.selected, w.scale,
-				tab_control(w, i).hover.value, tab_control(w, i).press.value, 0, x, tab.marked);
+				tab_control(w, i).hover.value, tab_control(w, i).press.value, 0, x, tab.marked, icon, atlas);
 				result != .Ok { return result }
 		}
 	}

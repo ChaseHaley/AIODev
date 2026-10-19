@@ -19,8 +19,11 @@ Font_Settings :: struct {
 }
 Shell_Settings :: struct {
 	command, directory, icon: string,
+	refresh_environment: bool,
+	report_directory: bool,
 }
 Input_Settings :: struct { leader: string }
+Interface_Settings :: struct { font_size: f64 }
 Tab_Settings :: struct { confirm_close: bool }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -30,6 +33,7 @@ Scrollback_Settings :: struct {
 }
 Terminal_Settings :: struct {
 	copy_on_select, confirm_multiline_paste: bool,
+	minimum_contrast: f64,
 }
 Cursor_Settings :: struct {
 	style: Cursor_Style,
@@ -46,6 +50,7 @@ Settings :: struct {
 	font: Font_Settings,
 	shell: Shell_Settings,
 	input: Input_Settings,
+	interface: Interface_Settings,
 	process: Process_Settings,
 	window: Window_Settings,
 	scrollback: Scrollback_Settings,
@@ -76,15 +81,20 @@ SCHEMA :: [?]Schema_Entry{
 	{"theme.mode", "Theme Mode", .Enum, offset_of(Settings, theme) + offset_of(Theme_Settings, mode), "dark", 0, 0, {"dark", "light"}, "Color theme mode: dark or light."},
 	{"pane.gap", "Pane Gap", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, gap), "5", 0, 24, nil, "Space between and around pane cards in DIPs."},
 	{"pane.corner_radius", "Pane Corner Radius", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, corner_radius), "7", 0, 16, nil, "Pane card corner radius in DIPs."},
-	{"pane.show_headers", "Show Pane Headers", .Bool, offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers), "true", 0, 0, nil, "Show pane headers when a tab has multiple panes."},
+	{"pane.show_headers", "Show Pane Headers", .Bool, offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers), "true", 0, 0, nil, "Show a header and controls on every terminal pane."},
+	{"pane.minimum_columns", "Minimum Pane Width", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_columns), "20", 0, 32767, nil, "Minimum content columns for a new pane or split. Zero disables the width check; existing panes may shrink."},
+	{"pane.minimum_rows", "Minimum Pane Height", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_rows), "5", 0, 32767, nil, "Minimum content rows for a new pane or split. Zero disables the height check; existing panes may shrink."},
 	{"tab.confirm_close", "Confirm Closing Split Tabs", .Bool, offset_of(Settings, tab) + offset_of(Tab_Settings, confirm_close), "true", 0, 0, nil, "Ask before closing a tab that has more than one pane."},
-	{"shell.icon", "Shell Badge", .String, offset_of(Settings, shell) + offset_of(Shell_Settings, icon), "", 0, 16, nil, "Shell badge text; empty chooses the shell default."},
+	{"shell.icon", "Shell Icon", .String, offset_of(Settings, shell) + offset_of(Shell_Settings, icon), "", 0, 32767, nil, "PNG image path for tabs and pane headers. Relative paths start beside settings.ini; empty uses the shell default."},
 	{"input.leader", "Leader Key", .String, offset_of(Settings, input) + offset_of(Input_Settings, leader), "", 0, 128, nil, "Optional leader chord, for example Ctrl+B; use Leader+T in a command shortcut. Empty disables it."},
 	{"font.family", "Font Family", .String, offset_of(Settings, font) + offset_of(Font_Settings, family), "Cascadia Mono", 1, 256, nil, "Terminal font family."},
+	{"interface.font_size", "GUI Font Size", .Float, offset_of(Settings, interface) + offset_of(Interface_Settings, font_size), "9", 6, 14, nil, "Interface text size in points; independent of the terminal font."},
 	{"font.size", "Font Size", .Float, offset_of(Settings, font) + offset_of(Font_Settings, size), "12", 1, 200, nil, "Font size in points."},
 	{"font.line_height", "Line Height", .Float, offset_of(Settings, font) + offset_of(Font_Settings, line_height), "1.0", 0.5, 4, nil, "Line height multiplier."},
 	{"shell.command", "Shell Command", .String, offset_of(Settings, shell) + offset_of(Shell_Settings, command), "pwsh.exe -NoLogo", 1, 32767, nil, "Shell command line."},
 	{"shell.directory", "Starting Directory", .String, offset_of(Settings, shell) + offset_of(Shell_Settings, directory), "~", 1, 32767, nil, "Initial directory; the caller expands the home prefix."},
+	{"shell.refresh_environment", "Refresh Shell Environment", .Bool, offset_of(Settings, shell) + offset_of(Shell_Settings, refresh_environment), "true", 0, 0, nil, "Read current Windows environment variables for new and restarted shells; keep launcher-only variables."},
+	{"shell.report_directory", "Report PowerShell Directory", .Bool, offset_of(Settings, shell) + offset_of(Shell_Settings, report_directory), "false", 0, 0, nil, "Wrap the interactive PowerShell prompt to report its directory. Applies to new and restarted shells."},
 	{"window.columns", "Initial Columns", .Int, offset_of(Settings, window) + offset_of(Window_Settings, columns), "120", 1, 32767, nil, "Initial terminal columns."},
 	{"window.rows", "Initial Rows", .Int, offset_of(Settings, window) + offset_of(Window_Settings, rows), "32", 1, 32767, nil, "Initial terminal rows."},
 	{"window.padding", "Content Padding", .Int, offset_of(Settings, window) + offset_of(Window_Settings, padding), "8", 0, 1024, nil, "Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap."},
@@ -92,6 +102,7 @@ SCHEMA :: [?]Schema_Entry{
 	{"scrollback.lines", "Scrollback Lines", .Int, offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines), "10000", 0, 10000000, nil, "Scrollback lines to keep; history is freed in blocks, so the count kept varies by a few hundred."},
 	{"terminal.copy_on_select", "Copy on Select", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select), "false", 0, 0, nil, "Copy selected text automatically; otherwise Ctrl+Shift+C copies it."},
 	{"terminal.confirm_multiline_paste", "Confirm Multiline Paste", .Bool, offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste), "true", 0, 0, nil, "Ask before pasting line breaks the shell would run as separate commands."},
+	{"terminal.minimum_contrast", "Minimum Text Contrast", .Float, offset_of(Settings, terminal) + offset_of(Terminal_Settings, minimum_contrast), "4.5", 1, 21, nil, "Minimum text contrast in light themes, including application colors. One preserves exact colors; dark themes stay unchanged."},
 	{"cursor.style", "Cursor Style", .Enum, offset_of(Settings, cursor) + offset_of(Cursor_Settings, style), "block", 0, 0, {"block", "bar", "underline"}, "Cursor shape: block, bar, or underline."},
 	{"cursor.blink", "Cursor Blink", .Bool, offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink), "false", 0, 0, nil, "Blink the cursor."},
 	{"colors.foreground", "Foreground Color", .Optional_Color, offset_of(Settings, color_overrides) + offset_of(Color_Overrides, foreground), "", 0, 0, nil, "Shell foreground; empty follows the theme."},

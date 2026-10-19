@@ -3,6 +3,13 @@ package pty
 import w "core:sys/windows"
 
 foreign import kernel32 "system:kernel32.lib"
+foreign import userenv "system:userenv.lib"
+
+@(private, default_calling_convention = "system")
+foreign userenv {
+	CreateEnvironmentBlock :: proc(environment: ^rawptr, token: w.HANDLE, inherit: w.BOOL) -> w.BOOL ---
+	DestroyEnvironmentBlock :: proc(environment: rawptr) -> w.BOOL ---
+}
 
 @(private) HPCON :: distinct rawptr
 @(private) PSEUDOCONSOLE_RESIZE_QUIRK :: 0x2

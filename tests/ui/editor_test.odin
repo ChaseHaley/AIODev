@@ -343,7 +343,7 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 }
 
 @(test)
-editor_alternatives_preserve_neighbors_and_limit_additions :: proc(t: ^testing.T) {
+editor_alternatives_preserve_neighbors_and_allow_many_additions :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	editor_fixture(t, &p)
@@ -376,6 +376,48 @@ editor_alternatives_preserve_neighbors_and_limit_additions :: proc(t: ^testing.T
 	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+popup.width-12, popup.y+4+45, false),
 		ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+O, F6")
+}
+
+@(test)
+editor_adds_beyond_four_and_scrolls_shortcut_alternatives :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
+	row := ui.editor_row(&p)
+	delete(row.value)
+	row.value = strings.clone("F1, F2, F3, F4, F5, F6, F7, F8, F9")
+	ui.editor_select(&p, p.selected)
+	ui.editor_key(&p, key({key = .Enter}))
+	for _ in 0..<9 { ui.editor_key(&p, key({key = .Arrow_Down})) }
+	testing.expect_value(t, p.popup_index, 9)
+	testing.expect(t, p.popup_scroll > 0)
+	ui.editor_key(&p, key({key = .Enter}))
+	ui.editor_key(&p, key({key = .F10}))
+	testing.expect_value(t, ui.field_string(&p.value), "F1, F2, F3, F4, F5, F6, F7, F8, F9, F10")
+	ui.editor_key(&p, key({key = .Escape}))
+	testing.expect_value(t, p.message, "")
+}
+
+@(test)
+typography_sliders_use_whole_points_and_fine_line_height_steps :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	for row in ([?]ui.Editor_Row{
+		{key = "font.size", title = "Font Size", value = "12", kind = .Number, minimum = 6, maximum = 32},
+		{key = "font.line_height", title = "Line Height", value = "1", kind = .Number, minimum = 0.8, maximum = 2},
+	}) { testing.expect_value(t, ui.editor_add(&p, row, "Font"), nil) }
+	ui.editor_filter(&p)
+	l := page(&p)
+	testing.expect(t, ui.editor_select_key(&p, "font.size"))
+	parts := ui.editor_row_parts(&p, l, p.selected)
+	ui.editor_press(&p, l, nil, parts.slider.x+parts.slider.width*0.037, parts.slider.y+2, false)
+	testing.expect_value(t, ui.field_string(&p.value), "7")
+	ui.editor_release(&p)
+	testing.expect(t, ui.editor_select_key(&p, "font.line_height"))
+	parts = ui.editor_row_parts(&p, l, p.selected)
+	ui.editor_press(&p, l, nil, parts.slider.x+parts.slider.width*0.375, parts.slider.y+2, false)
+	testing.expect_value(t, ui.field_string(&p.value), "1.25")
 }
 
 @(test)
