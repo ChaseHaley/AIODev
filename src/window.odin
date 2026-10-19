@@ -67,6 +67,10 @@ Window :: struct {
 	tab_hover: int,
 	tab_pressed: bool,
 	tab_close_pressed: int,
+	// Asks before a close would end several panes; holds the id of the tab whose close was requested.
+	close_confirm: ui.Confirm,
+	close_confirm_tab: u32,
+	close_confirm_tabs, close_confirm_panes: int,
 	caption_hover, caption_pressed: int,
 	maximized: bool,
 	paste_confirm_until: time.Tick,
@@ -466,6 +470,14 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		)
 		ui.fade_draw(&w.list, layers, rects, glyph_count, app.palette.motion.value,
 			app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0)
+		if result != .Ok { return frame, result }
+	}
+	if c := &w.close_confirm; c.open || c.motion.value > 0 {
+		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
+		title, body := close_confirm_text(w)
+		result := ui.confirm_draw(c, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale, title, body,
+			"Close")
+		ui.fade_draw(&w.list, layers, rects, glyph_count, c.motion.value, c.open ? 4*w.scale*(1-c.motion.value) : 0)
 		if result != .Ok { return frame, result }
 	}
 	return frame, ui.notices_draw(&app.notices, &w.list, &app.ui_text, app.theme, size.x, size.y, w.scale)

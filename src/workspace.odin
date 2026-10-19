@@ -178,6 +178,60 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 	if group && len(workspace.tabs) > 0 { tab_select_one(workspace, workspace.selected) }
 }
 
+// The tabs a close of `index` affects, its whole selected group when marked, and their panes.
+@(private)
+tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int, split: bool) {
+	if index < 0 || index >= len(workspace.tabs) { return }
+	group := workspace.tabs[index].marked
+	for tab, i in workspace.tabs {
+		if group ? !tab.marked : i != index { continue }
+		count := 0
+		for node in tab.tree.nodes { if _, ok := node.(layout.Pane); ok { count += 1 } }
+		tabs, panes = tabs+1, panes+count
+		split ||= count > 1
+	}
+	return
+}
+
+// Closes a tab, or its selected group, after asking when that would end more than one pane in a tab.
+tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
+	_, _, split := tab_close_scope(w.workspace, index)
+	if !split || !app.settings.tab.confirm_close { tab_close(app, w, index); return }
+	arrange_cancel(app, w)
+	leader_cancel(w)
+	pane_header_cancel(w)
+	ui.palette_close(&app.palette)
+	w.selecting, w.autoscrolling = false, false
+	w.close_confirm_tab = w.workspace.tabs[index].id
+	w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)
+	ui.confirm_open(&w.close_confirm)
+	w.dirty = true
+}
+
+// Counts follow panes that exit while the question is open, then stay fixed while it fades out.
+close_confirm_text :: proc(w: ^Window) -> (title, body: string) {
+	if index := tab_index_by_id(w.workspace, w.close_confirm_tab); w.close_confirm.open && index >= 0 {
+		w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)
+	}
+	tabs, panes := w.close_confirm_tabs, w.close_confirm_panes
+	if tabs > 1 {
+		return fmt.tprintf("Close %d tabs with %d panes?", tabs, panes), "The shells running in them will exit."
+	}
+	return fmt.tprintf("Close this tab and its %d panes?", panes), "The shells running in it will exit."
+}
+
+close_confirm_finish :: proc(app: ^App, w: ^Window, accept: bool) {
+	ui.confirm_close(&w.close_confirm)
+	w.dirty = true
+	if !accept { return }
+	if index := tab_index_by_id(w.workspace, w.close_confirm_tab); index >= 0 { tab_close(app, w, index) }
+}
+
+tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {
+	for tab, i in workspace.tabs { if tab.id == id { return i } }
+	return -1
+}
+
 pane_close :: proc(app: ^App, w: ^Window) {
 	pane_remove(app, w.workspace, w.workspace.selected, w.tree.focus)
 }

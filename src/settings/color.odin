@@ -9,6 +9,7 @@ group_title :: proc(key: string) -> string {
 	switch dot < 0 ? key : key[:dot] {
 	case "theme": return "Theme"
 	case "pane": return "Panes"
+	case "tab": return "Tabs"
 	case "shell": return "Shell"
 	case "input": return "Input"
 	case "font": return "Font"

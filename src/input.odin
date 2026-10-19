@@ -128,6 +128,12 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		w.suppressed_key = e
 		return
 	}
+	if w.close_confirm.open {
+		pane_header_cancel(w)
+		if e.pressed { w.suppressed_key = e }
+		close_confirm_outcome(app, w, ui.confirm_key(&w.close_confirm, e))
+		return
+	}
 	if app.palette.open {
 		pane_header_cancel(w)
 		logical := e
@@ -218,6 +224,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
+	if w.close_confirm.open { return }
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
 		return
@@ -234,6 +241,16 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
 		term.send_text(entry.session, text)
 		reset_blink(w)
+	}
+}
+
+@(private)
+close_confirm_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Confirm_Outcome) {
+	switch outcome {
+	case .None:
+	case .Changed: w.dirty = true
+	case .Cancel: close_confirm_finish(app, w, false)
+	case .Accept: close_confirm_finish(app, w, true)
 	}
 }
 
@@ -282,6 +299,11 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		w.dirty = true
 		return
 	}
+	if w.close_confirm.open {
+		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale)
+		close_confirm_outcome(app, w, ui.confirm_mouse(&w.close_confirm, l, e.button, e.pressed, f32(e.x), f32(e.y)))
+		return
+	}
 	w.tab_pressed = e.pressed && e.button == .Left &&
 		window_tab_hit(w, window_tab_bar(app, w), f32(e.x), f32(e.y)) >= 0
 	w.dirty = true
@@ -307,7 +329,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button == .Left && !e.pressed && w.tab_close_pressed >= 0 {
 		index := w.tab_close_pressed
 		w.tab_close_pressed = -1
-		if window_tab_close_hit(w, bar, x, y) == index { tab_close(app, w, index) }
+		if window_tab_close_hit(w, bar, x, y) == index { tab_close_request(app, w, index) }
 		return
 	}
 	if e.button == .Left && !e.pressed {
@@ -326,7 +348,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 				w.tab_close_pressed = index
 			} else if index == bar.count && e.button == .Left { tab_new(app, w) }
 			else if index >= 0 && index < bar.count {
-				if e.button == .Middle { tab_close(app, w, index) }
+				if e.button == .Middle { tab_close_request(app, w, index) }
 				else if e.button == .Left {
 					tab_pointer_select(app, w, index, .Control in e.modifiers, .Shift in e.modifiers)
 					tab_press(w, index, x, bar.tab_width, e.modifiers & {.Control, .Shift} != {})
@@ -374,6 +396,13 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover { w.caption_hover = caption; w.dirty = true }
+	if w.close_confirm.open {
+		if ui.confirm_hover(&w.close_confirm, ui.confirm_layout(f32(w.width), f32(w.height), w.scale), x, y) {
+			w.dirty = true
+		}
+		pointer_set(app, w, .Arrow)
+		return
+	}
 	hover := window_tab_hit(w, window_tab_bar(app, w), x, y)
 	if hover != w.tab_hover {
 		w.tab_hover = hover
@@ -447,6 +476,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	w.wheel_remainder -= f32(rows)
+	if w.close_confirm.open { return }
 	if app.palette.open {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return

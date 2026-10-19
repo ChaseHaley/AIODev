@@ -244,6 +244,7 @@ when AIO_CONTROL {
 			editor_key := ""
 			editor_title := ""
 			if row := ui.editor_row(&w.editor); row != nil { editor_key, editor_title = row.key, row.title }
+			confirm_title, _ := close_confirm_text(w)
 			window := [?]control.State_Entry{
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
 				{"settings.filter", string(w.editor.filter.bytes[:])},
@@ -257,6 +258,8 @@ when AIO_CONTROL {
 				{"settings.message", w.editor.message},
 				{"settings.error", fmt.tprintf("%t", w.editor.error)},
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
+				{"confirm.open", fmt.tprintf("%t", w.close_confirm.open)},
+				{"confirm.title", w.close_confirm.open ? confirm_title : ""},
 				{"leader.indicator", w.leader_until != {} ? "pane-status-line" : "none"},
 				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
 				{"window.dpi", fmt.tprintf("%d", u32(w.scale*96))},

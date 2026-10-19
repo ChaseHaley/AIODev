@@ -94,6 +94,8 @@ try {
                 else { Assert-Equal $r[3] $a[3] 'docked pane spans full height' }
             }
             Invoke-Aio command tab.close
+            Invoke-Aio expect state confirm.open=true
+            Invoke-Aio key Enter
         }
     }
     Invoke-Aio dpi 96

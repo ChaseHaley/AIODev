@@ -195,6 +195,8 @@ try {
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state panes.count=2
     Invoke-Aio key Ctrl+Shift+W
+    Invoke-Aio expect state confirm.open=true
+    Invoke-Aio key Enter
     Invoke-Aio expect state tabs.count=2
     Invoke-Aio expect state tabs.selected=2
 

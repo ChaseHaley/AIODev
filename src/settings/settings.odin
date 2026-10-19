@@ -21,6 +21,7 @@ Shell_Settings :: struct {
 	command, directory, icon: string,
 }
 Input_Settings :: struct { leader: string }
+Tab_Settings :: struct { confirm_close: bool }
 Window_Settings :: struct {
 	columns, rows, padding: int,
 }
@@ -53,6 +54,7 @@ Settings :: struct {
 	color_overrides: Color_Overrides,
 	theme: Theme_Settings,
 	pane: Pane_Settings,
+	tab: Tab_Settings,
 	allocator: runtime.Allocator,
 	leader_line: int,
 }
@@ -74,6 +76,7 @@ SCHEMA :: [?]Schema_Entry{
 	{"pane.gap", "Pane Gap", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, gap), "5", 0, 24, nil, "Space between and around pane cards in DIPs."},
 	{"pane.corner_radius", "Pane Corner Radius", .Int, offset_of(Settings, pane) + offset_of(Pane_Settings, corner_radius), "7", 0, 16, nil, "Pane card corner radius in DIPs."},
 	{"pane.show_headers", "Show Pane Headers", .Bool, offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers), "true", 0, 0, nil, "Show pane headers when a tab has multiple panes."},
+	{"tab.confirm_close", "Confirm Closing Split Tabs", .Bool, offset_of(Settings, tab) + offset_of(Tab_Settings, confirm_close), "true", 0, 0, nil, "Ask before closing a tab that has more than one pane."},
 	{"shell.icon", "Shell Badge", .String, offset_of(Settings, shell) + offset_of(Shell_Settings, icon), "", 0, 16, nil, "Shell badge text; empty chooses the shell default."},
 	{"input.leader", "Leader Key", .String, offset_of(Settings, input) + offset_of(Input_Settings, leader), "", 0, 128, nil, "Optional leader chord, for example Ctrl+B; use Leader+T in a command shortcut. Empty disables it."},
 	{"font.family", "Font Family", .String, offset_of(Settings, font) + offset_of(Font_Settings, family), "Cascadia Mono", 1, 256, nil, "Terminal font family."},

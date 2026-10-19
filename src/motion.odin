@@ -7,7 +7,7 @@ import "aio:platform"
 motion_active :: proc(app: ^App) -> bool {
 	if ui.motion_active(app.palette.motion) || ui.notices_animating(&app.notices) { return true }
 	for w in app.windows {
-		if ui.motion_active(w.tab_underline) { return true }
+		if ui.motion_active(w.tab_underline) || ui.motion_active(w.close_confirm.motion) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
@@ -50,8 +50,12 @@ update_motion :: proc(app: ^App) {
 				}
 			}
 		}
+		c := &w.close_confirm
+		ui.motion_target(&c.motion, c.open ? 1 : 0, (c.open ? 120 : 90)*time.Millisecond,
+			c.open ? .Decelerate : .Accelerate, app.animations, now)
+		confirm_changed := ui.motion_update(&c.motion, now)
 		underline_changed := ui.motion_update(&w.tab_underline, now)
-		if underline_changed || controls_changed || positions_changed { w.dirty = true }
+		if underline_changed || controls_changed || positions_changed || confirm_changed { w.dirty = true }
 	}
 }
 

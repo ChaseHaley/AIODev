@@ -266,7 +266,7 @@ run_action :: proc(
 	case .Tab_1, .Tab_2, .Tab_3, .Tab_4, .Tab_5, .Tab_6, .Tab_7, .Tab_8, .Tab_9:
 		tab_select(app, w, int(action)-int(Action.Tab_1))
 	case .Last_Tab: tab_select(app, w, len(w.workspace.tabs)-1)
-	case .Close_Tab: tab_close(app, w, w.workspace.selected)
+	case .Close_Tab: tab_close_request(app, w, w.workspace.selected)
 	case .Focus_Previous, .Focus_Next:
 		pane_focus(app, w, layout.focus_cycle(pane_action_rects(app, w), w.tree.focus,
 			action == .Focus_Next ? 1 : -1))
