@@ -59,6 +59,11 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.geometry(session), geometry)
 	testing.expect_value(t, source.tree.root, node)
 	testing.expect_value(t, len(preview.views), 0)
+	testing.expect(t, app.pane_window_preview_hide(&state, preview.id))
+	testing.expect(t, !preview.preview_visible && preview.preparing)
+	testing.expect_value(t, term.geometry(session), geometry)
+	testing.expect(t, app.window_show_prepared(&state, preview))
+	testing.expect(t, preview.preview_visible && preview.preparing)
 	preview_id := preview.id
 	app.pane_window_preview_discard(&state, preview_id)
 	testing.expect(t, app.window_find(&state, preview_id) == nil)
@@ -88,6 +93,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.sessions), 1)
 	testing.expect_value(t, term.process_id(session), pid)
 	testing.expect_value(t, term.status(session).kind, term.Status_Kind.Running)
+	testing.expect(t, !state.tray_hint_shown)
 	app.tick(&state)
 
 	// A foreign empty strip accepts the sole pane and removes only its exhausted source view.

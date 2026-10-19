@@ -267,6 +267,8 @@ when AIO_CONTROL {
 				{fmt.tprintf("%s.origin", prefix), fmt.tprintf("%d,%d", x, y)},
 				{fmt.tprintf("%s.size", prefix), fmt.tprintf("%dx%d", window.width, window.height)},
 				{fmt.tprintf("%s.workspace_index", prefix), fmt.tprintf("%d", verify_workspace_index(app, window))},
+				{fmt.tprintf("%s.preparing", prefix), fmt.tprintf("%t", window.preparing)},
+				{fmt.tprintf("%s.preview_visible", prefix), fmt.tprintf("%t", window.preview_visible)},
 			}
 			if _, err := append(&entries, ..inventory[:]); err != nil { return nil, .Out_Of_Memory }
 		}
@@ -319,6 +321,7 @@ when AIO_CONTROL {
 				{"workspace.name", w.workspace.name},
 				{"workspace.picker", fmt.tprintf("%t", w.workspace_picker.open)},
 				{"window.preparing", fmt.tprintf("%t", w.preparing)},
+				{"window.preview_visible", fmt.tprintf("%t", w.preview_visible)},
 				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w, entry))},

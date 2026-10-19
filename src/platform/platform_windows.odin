@@ -646,6 +646,14 @@ window_native_handle :: proc(p: ^Platform, id: Window_Id) -> rawptr {
 	return window != nil ? rawptr(window.hwnd) : nil
 }
 
+@(require_results)
+window_hide :: proc(p: ^Platform, id: Window_Id) -> Error {
+	window := find_window(p, id)
+	if window == nil { return .Invalid_Window }
+	w.ShowWindow(window.hwnd, w.SW_HIDE)
+	return .None
+}
+
 window_title_bar :: proc(p: ^Platform, id: Window_Id, height, controls_end: i32) {
 	if window := find_window(p, id); window != nil {
 		window.title_height, window.title_controls_end = height, controls_end

@@ -39,6 +39,16 @@ pane_window_preview_discard :: proc(app: ^App, id: platform.Window_Id) {
 }
 
 @(require_results)
+pane_window_preview_hide :: proc(app: ^App, id: platform.Window_Id) -> bool {
+	w := window_find(app, id)
+	if w == nil || !w.preparing { return false }
+	if !w.preview_visible { return true }
+	if platform.window_hide(&app.platform, id) != .None { return false }
+	w.preview_visible, w.dirty = false, false
+	return true
+}
+
+@(require_results)
 pane_window_preview_position :: proc(app: ^App, w: ^Window, x, y: i32) -> bool {
 	offset := i32(math.round(16*w.scale))
 	if platform.window_set_position(&app.platform, w.id, x+offset, y+offset) != .None { return false }

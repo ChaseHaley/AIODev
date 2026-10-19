@@ -231,6 +231,7 @@ tick :: proc(app: ^App) {
 		}
 		update_blink(window)
 		update_autoscroll(app, window)
+		if window.preparing && !window.preview_visible { window.dirty = false; continue }
 		if window.dirty {
 			window_render(app, window)
 			verify_presented(app, window)

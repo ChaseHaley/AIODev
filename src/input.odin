@@ -108,6 +108,7 @@ show_window :: proc(app: ^App) {
 hide_to_tray :: proc(app: ^App, w: ^Window) {
 	focus_leave(app, w)
 	window_close(app, w)
+	if len(app.windows) > 0 { return }
 	if !app.tray_hint_shown {
 		app.tray_hint_shown = true
 		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use Quit to exit."

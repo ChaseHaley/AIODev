@@ -53,7 +53,7 @@ Window :: struct {
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
-	preparing: bool,
+	preparing, preview_visible: bool,
 	generation: u64,
 	selecting: bool,
 	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
@@ -182,6 +182,7 @@ window_show_prepared :: proc(app: ^App, w: ^Window) -> bool {
 		log.errorf("showing the window failed: %v", show_error)
 		return false
 	}
+	w.preview_visible, w.dirty = true, true
 	return true
 }
 

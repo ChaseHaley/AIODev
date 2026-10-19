@@ -297,7 +297,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	d.pointer = {x, y}
 	sx, sy, screen_error := platform.window_to_screen(&app.platform, w.id, i32(x), i32(y))
 	if screen_error != .None { pane_drag_cancel(app, w); return true }
-	if preview := window_find(app, d.preview_window); preview != nil {
+	if preview := window_find(app, d.preview_window); preview != nil && preview.preview_visible {
 		if !pane_window_preview_position(app, preview, sx, sy) { pane_drag_cancel(app, w); return true }
 	}
 	id, tx, ty, hit_error := platform.window_at_point(&app.platform, sx, sy)
@@ -333,10 +333,16 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 				notify(app, .Error, "Could not prepare a new window. The pane was preserved.")
 			}
 		}
+		if !swap {
+			if preview := window_find(app, d.preview_window); preview != nil && !preview.preview_visible {
+				if !pane_window_preview_position(app, preview, sx, sy) || !window_show_prepared(app, preview) {
+					pane_drag_cancel(app, w)
+					return true
+				}
+			}
+		}
 		if swap && d.preview_window != 0 {
-			preview := d.preview_window
-			d.preview_window = 0
-			pane_window_preview_discard(app, preview)
+			if !pane_window_preview_hide(app, d.preview_window) { pane_drag_cancel(app, w); return true }
 		}
 		rect, shown := pane_drag_preview(app, w)
 		d.shown = shown
@@ -346,9 +352,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 		return true
 	}
 	if d.preview_window != 0 {
-		preview := d.preview_window
-		d.preview_window = 0
-		pane_window_preview_discard(app, preview)
+		if !pane_window_preview_hide(app, d.preview_window) { pane_drag_cancel(app, w); return true }
 	}
 	if destination.id != previous && destination != w { d.destination_original = selected_tab(destination.workspace) }
 	d.destination_window = destination.id
@@ -424,6 +428,7 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		pane_drag_restore(app, w, d)
 		return true
 	}
+	if d.preview_window != 0 { pane_window_preview_discard(app, d.preview_window) }
 	destination_window := window_find(app, d.destination_window)
 	if destination_window != nil { destination_window.dirty = true }
 	if destination_window == nil { pane_drag_restore(app, w, d); return true }
