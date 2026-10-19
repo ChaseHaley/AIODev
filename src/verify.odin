@@ -280,8 +280,12 @@ when AIO_CONTROL {
 			if row := ui.editor_row(&w.editor); row != nil { editor_key, editor_title = row.key, row.title }
 			confirm_title, _ := close_confirm_text(w)
 			slider := render.Rect{}
-			if settings_active(w) && len(w.editor.items) > 0 {
-				slider = ui.editor_row_parts(&w.editor, settings_layout(w), w.editor.selected).slider
+			page: ui.Editor_Layout
+			if settings_active(w) {
+				page = settings_layout(w)
+				if len(w.editor.items) > 0 {
+					slider = ui.editor_row_parts(&w.editor, page, w.editor.selected).slider
+				}
 			}
 			window := [?]control.State_Entry{
 				{"window.id", fmt.tprintf("%d", w.id)},
@@ -306,6 +310,12 @@ when AIO_CONTROL {
 				{"settings.message", w.editor.message},
 				{"settings.error", fmt.tprintf("%t", w.editor.error)},
 				{"settings.slider", fmt.tprintf("%g,%g,%g,%g", slider.x, slider.y, slider.width, slider.height)},
+				{"settings.search_rect", fmt.tprintf("%g,%g,%g,%g",
+					page.filter.x, page.filter.y, page.filter.width, page.filter.height)},
+				{"settings.outline_rect", fmt.tprintf("%g,%g,%g,%g",
+					page.outline.x, page.outline.y, page.outline.width, page.outline.height)},
+				{"settings.list_rect", fmt.tprintf("%g,%g,%g,%g",
+					page.list.x, page.list.y, page.list.width, page.list.height)},
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
 				{"confirm.open", fmt.tprintf("%t", w.close_confirm.open)},
 				{"confirm.title", w.close_confirm.open ? confirm_title : ""},
