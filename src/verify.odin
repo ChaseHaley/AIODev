@@ -278,7 +278,7 @@ when AIO_CONTROL {
 			editor_key := ""
 			editor_title := ""
 			if row := ui.editor_row(&w.editor); row != nil { editor_key, editor_title = row.key, row.title }
-			confirm_title, _ := close_confirm_text(w)
+			confirm_title, confirm_body := close_confirm_text(app, w)
 			slider := render.Rect{}
 			page: ui.Editor_Layout
 			if settings_active(w) {
@@ -319,6 +319,8 @@ when AIO_CONTROL {
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
 				{"confirm.open", fmt.tprintf("%t", w.close_confirm.open)},
 				{"confirm.title", w.close_confirm.open ? confirm_title : ""},
+				{"confirm.body", w.close_confirm.open ? confirm_body : ""},
+				{"confirm.workspace", fmt.tprintf("%d", w.close_confirm_workspace)},
 				{"leader.indicator", w.leader_until != {} ? "pane-status-line" : "none"},
 				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
 				{"window.dpi", fmt.tprintf("%d", u32(w.scale*96))},

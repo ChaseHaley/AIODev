@@ -376,7 +376,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	if w.close_confirm.open {
-		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale)
+		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.close_confirm.extended)
 		close_confirm_outcome(app, w, ui.confirm_mouse(&w.close_confirm, l, e.button, e.pressed, f32(e.x), f32(e.y)))
 		return
 	}
@@ -500,7 +500,8 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover { w.caption_hover = caption; w.dirty = true }
 	if w.close_confirm.open {
-		if ui.confirm_hover(&w.close_confirm, ui.confirm_layout(f32(w.width), f32(w.height), w.scale), x, y) {
+		if ui.confirm_hover(&w.close_confirm,
+			ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.close_confirm.extended), x, y) {
 			w.dirty = true
 		}
 		pointer_set(app, w, .Arrow)
