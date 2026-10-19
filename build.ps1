@@ -184,7 +184,9 @@ switch ($Task) {
         Copy-Conpty 'build/test'
         foreach ($name in $targets) {
             if (-not (Test-Path "tests/$name")) { throw "No tests at tests/$name." }
-            Invoke-Odin test "tests/$name" "-out:build/test/$name.exe" -debug -keep-executable @flags
+            [string[]] $testDefines = @()
+            if ($name -eq 'app') { $testDefines = @('-define:AIO_CONTROL=true') }
+            Invoke-Odin test "tests/$name" "-out:build/test/$name.exe" -debug -keep-executable @flags @testDefines
         }
     }
 }

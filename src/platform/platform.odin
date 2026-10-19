@@ -49,6 +49,7 @@ Resize_Event :: struct { window: Window_Id, width, height: i32 }
 Dpi_Event :: struct { window: Window_Id, dpi: u32 }
 Focus_Event :: struct { window: Window_Id, focused: bool }
 Mouse_Leave_Event :: struct { window: Window_Id }
+Capture_Lost_Event :: struct { window: Window_Id }
 Close_Request_Event :: struct { window: Window_Id }
 Tray_Event :: struct {}
 Tray_Menu_Event :: struct { id: u32 }
@@ -57,7 +58,7 @@ Settings_Event :: struct {}
 Wake_Event :: struct {}
 Event :: union {
 	Key_Event, Text_Event, Mouse_Button_Event, Mouse_Move_Event, Mouse_Leave_Event, Mouse_Wheel_Event,
-	Resize_Event, Dpi_Event, Focus_Event, Close_Request_Event, Tray_Event,
+	Resize_Event, Dpi_Event, Focus_Event, Capture_Lost_Event, Close_Request_Event, Tray_Event,
 	Tray_Menu_Event, Activate_Request_Event, Settings_Event, Wake_Event,
 }
 

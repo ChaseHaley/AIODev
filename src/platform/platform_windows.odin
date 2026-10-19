@@ -662,6 +662,46 @@ window_client_size :: proc(p: ^Platform, id: Window_Id) -> (width, height: i32, 
 }
 
 @(require_results)
+window_to_screen :: proc(p: ^Platform, id: Window_Id, x, y: i32) -> (i32, i32, Error) {
+	window := find_window(p, id)
+	if window == nil { return 0, 0, .Invalid_Window }
+	point := w.POINT{x, y}
+	if !os_ok(w.ClientToScreen(window.hwnd, &point), "ClientToScreen") { return 0, 0, .Os }
+	return point.x, point.y, .None
+}
+
+@(require_results)
+window_from_screen :: proc(p: ^Platform, id: Window_Id, x, y: i32) -> (i32, i32, Error) {
+	window := find_window(p, id)
+	if window == nil { return 0, 0, .Invalid_Window }
+	point := w.POINT{x, y}
+	if !os_ok(w.ScreenToClient(window.hwnd, &point), "ScreenToClient") { return 0, 0, .Os }
+	return point.x, point.y, .None
+}
+
+@(require_results)
+window_at_point :: proc(p: ^Platform, screen_x, screen_y: i32) -> (Window_Id, i32, i32, Error) {
+	if p.host.hwnd == nil { return 0, 0, 0, .Not_Initialized }
+	hwnd := w.WindowFromPoint({screen_x, screen_y})
+	for window in p.windows {
+		if window.hwnd != hwnd { continue }
+		x, y, err := window_from_screen(p, window.id, screen_x, screen_y)
+		return window.id, x, y, err
+	}
+	return 0, 0, 0, .None
+}
+
+@(require_results)
+window_set_position :: proc(p: ^Platform, id: Window_Id, screen_x, screen_y: i32) -> Error {
+	window := find_window(p, id)
+	if window == nil { return .Invalid_Window }
+	flags := u32(w.SWP_NOSIZE | w.SWP_NOZORDER | w.SWP_NOACTIVATE)
+	if !os_ok(w.SetWindowPos(window.hwnd, nil, screen_x, screen_y, 0, 0, flags),
+		"SetWindowPos(position)") { return .Os }
+	return .None
+}
+
+@(require_results)
 window_set_client_size :: proc(p: ^Platform, id: Window_Id, width, height: i32) -> Error {
 	window := find_window(p, id)
 	if window == nil { return .Invalid_Window }
@@ -975,8 +1015,15 @@ window_proc :: proc "system" (hwnd: w.HWND, message: u32, wp: w.WPARAM, lp: w.LP
 		w.WM_XBUTTONDOWN, w.WM_XBUTTONUP, w.WM_MOUSEWHEEL, w.WM_MOUSEHWHEEL:
 		mouse_message(window, message, wp, lp)
 		return message == w.WM_XBUTTONDOWN || message == w.WM_XBUTTONUP || message == w.WM_XBUTTONDBLCLK ? 1 : 0
-	case w.WM_CAPTURECHANGED:
-		window.buttons = 0
+	case w.WM_CAPTURECHANGED, w.WM_CANCELMODE:
+		if window.buttons != 0 {
+			window.buttons = 0
+			window.has_previous_move = false
+			enqueue(p, Capture_Lost_Event{window.id})
+		}
+		if message == w.WM_CANCELMODE && w.GetCapture() == hwnd {
+			record_os(p, w.ReleaseCapture(), "ReleaseCapture(cancel)")
+		}
 		return 0
 	}
 	return w.DefWindowProcW(hwnd, message, wp, lp)
@@ -1067,10 +1114,12 @@ mouse_message :: proc(window: ^Window, message: u32, wp: w.WPARAM, lp: w.LPARAM)
 	}
 	bit := u8(1) << u8(button)
 	if pressed {
-		w.SetCapture(window.hwnd)
 		if w.GetCapture() != window.hwnd {
-			log.errorf("SetCapture failed: %d", w.GetLastError())
-			p.error = .Os
+			w.SetCapture(window.hwnd)
+			if w.GetCapture() != window.hwnd {
+				log.errorf("SetCapture failed: %d", w.GetLastError())
+				p.error = .Os
+			}
 		}
 		window.buttons |= bit
 	} else {

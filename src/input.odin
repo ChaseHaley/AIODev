@@ -69,6 +69,10 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		if w := window_find(app, e.window); w != nil {
 			on_focus(app, w, e.focused)
 		}
+	case platform.Capture_Lost_Event:
+		if w := window_find(app, e.window); w != nil {
+			arrange_cancel(app, w)
+		}
 	case platform.Close_Request_Event:
 		if w := window_find(app, e.window); w != nil {
 			hide_to_tray(app, w)

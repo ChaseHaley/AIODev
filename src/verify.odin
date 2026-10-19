@@ -50,6 +50,7 @@ when AIO_CONTROL {
 		before_state: []control.State_Entry,
 		presents: [dynamic]Verify_Present,
 		mouse_window: platform.Window_Id,
+		target_window: platform.Window_Id,
 		buttons: input.Mouse_Buttons,
 	}
 
@@ -95,6 +96,11 @@ when AIO_CONTROL {
 	}
 
 	verify_window :: proc(app: ^App) -> ^Window {
+		if app.verify.target_window != 0 {
+			if w := window_find(app, app.verify.target_window); w != nil { return w }
+			app.verify.target_window = 0
+			app.verify.mouse_window, app.verify.buttons = 0, {}
+		}
 		for w in app.windows {
 			if w.focused { return w }
 		}
@@ -116,8 +122,10 @@ when AIO_CONTROL {
 			if p.id != w.id { continue }
 			previous := p.surface == w.surface ? p.count : 0
 			if count == previous { w.dirty = true }
-			v.presented ||= count != previous
-			v.frames += u64(count >= previous ? count-previous : count)
+			if verify_window(app) == w {
+				v.presented ||= count != previous
+				v.frames += u64(count >= previous ? count-previous : count)
+			}
 			p.surface, p.count = w.surface, count
 			return
 		}
@@ -125,8 +133,10 @@ when AIO_CONTROL {
 			log.error("recording the presented frame failed: out of memory")
 			return
 		}
-		v.frames += u64(count)
-		v.presented ||= count > 0
+		if verify_window(app) == w {
+			v.frames += u64(count)
+			v.presented ||= count > 0
+		}
 		if count == 0 { w.dirty = true }
 	}
 
@@ -228,6 +238,7 @@ when AIO_CONTROL {
 			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
 			{"app.settings", app.settings_path}, {"app.log", app.log_path},
 			{"window.visible", fmt.tprintf("%t", len(app.windows) > 0)},
+			{"windows.count", fmt.tprintf("%d", len(app.windows))},
 			{"palette.window", fmt.tprintf("%d", app.palette_window)},
 			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
 			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
@@ -245,6 +256,20 @@ when AIO_CONTROL {
 			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
 		}
 		if _, err := append(&entries, ..base[:]); err != nil { return nil, .Out_Of_Memory }
+		origin: [2]i32
+		for window, i in app.windows {
+			x, y, err := platform.window_to_screen(&app.platform, window.id, 0, 0)
+			if err != .None { return nil, .System }
+			if window == w { origin = {x, y} }
+			prefix := fmt.tprintf("window.%d", i+1)
+			inventory := [?]control.State_Entry{
+				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", window.id)},
+				{fmt.tprintf("%s.origin", prefix), fmt.tprintf("%d,%d", x, y)},
+				{fmt.tprintf("%s.size", prefix), fmt.tprintf("%dx%d", window.width, window.height)},
+				{fmt.tprintf("%s.workspace_index", prefix), fmt.tprintf("%d", verify_workspace_index(app, window))},
+			}
+			if _, err := append(&entries, ..inventory[:]); err != nil { return nil, .Out_Of_Memory }
+		}
 		entry: ^Session_Entry
 		if w != nil {
 			entry = focused_session(app, w)
@@ -257,6 +282,9 @@ when AIO_CONTROL {
 				slider = ui.editor_row_parts(&w.editor, settings_layout(w), w.editor.selected).slider
 			}
 			window := [?]control.State_Entry{
+				{"window.id", fmt.tprintf("%d", w.id)},
+				{"window.origin", fmt.tprintf("%d,%d", origin.x, origin.y)},
+				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
 				{"rename.open", fmt.tprintf("%t", w.rename_open)},
 				{"rename.value", ui.field_string(&w.rename)},
@@ -297,16 +325,25 @@ when AIO_CONTROL {
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
 		} else {
 			hidden := [?]control.State_Entry{
+				{"window.id", "0"}, {"window.origin", "0,0"}, {"window.workspace_index", "0"},
 				{"window.size", "0x0"}, {"window.dpi", "0"},
 				{"window.scale", "0"}, {"window.focused", "false"},
 			}
 			if _, err := append(&entries, ..hidden[:]); err != nil { return nil, .Out_Of_Memory }
-			if tab := selected_tab(app.workspaces[0]); tab != nil {
-				pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-				entry = session_find(app, pane.content.id)
+			if len(app.workspaces) > 0 {
+				if tab := selected_tab(app.workspaces[0]); tab != nil {
+					pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+					entry = session_find(app, pane.content.id)
+				}
 			}
 		}
-		workspace := app.workspaces[0]
+		empty: Workspace
+		workspace := &empty
+		if w != nil {
+			workspace = w.workspace
+		} else if len(app.workspaces) > 0 {
+			workspace = app.workspaces[0]
+		}
 		workspace_state := [?]control.State_Entry{
 			{"tabs.count", fmt.tprintf("%d", len(workspace.tabs))},
 			{"tabs.selected", fmt.tprintf("%d", len(workspace.tabs) == 0 ? 0 : workspace.selected+1)},
@@ -429,6 +466,13 @@ when AIO_CONTROL {
 		return entries[:], .None
 	}
 
+	verify_workspace_index :: proc(app: ^App, w: ^Window) -> int {
+		for workspace, i in app.workspaces {
+			if workspace == w.workspace { return i+1 }
+		}
+		return 0
+	}
+
 	verify_reply :: proc(app: ^App, ok: bool, text: string) {
 		v := &app.verify
 		if err := control.respond(v.server, v.pending.id, {ok, text}); err != .None {
@@ -502,7 +546,16 @@ when AIO_CONTROL {
 	}
 
 	@(require_results)
-	verify_position :: proc(app: ^App, w: ^Window, p: control.Position, pixels: bool) -> ([2]i32, bool) {
+	verify_position :: proc(
+		app: ^App, w: ^Window, p: control.Position, pixels: bool, screen: bool = false,
+	) -> ([2]i32, bool) {
+		if screen {
+			if p.x < int(min(i32)) || p.y < int(min(i32)) ||
+			   p.x > int(max(i32)) || p.y > int(max(i32)) { return {}, false }
+			x, y, err := platform.window_from_screen(&app.platform, w.id, i32(p.x), i32(p.y))
+			return {x, y}, err == .None
+		}
+		if p.x < 0 || p.y < 0 { return {}, false }
 		if pixels {
 			if p.x > int(max(i32)) || p.y > int(max(i32)) { return {}, false }
 			return {i32(p.x), i32(p.y)}, true
@@ -521,11 +574,11 @@ when AIO_CONTROL {
 		if v.mouse_window != w.id {
 			v.mouse_window, v.buttons = w.id, {}
 		}
-		pos, ok := verify_position(app, w, m.position, m.pixels)
+		pos, ok := verify_position(app, w, m.position, m.pixels, m.screen)
 		if !ok { return .Invalid_Argument }
 		end := pos
 		if m.kind == .Drag {
-			end, ok = verify_position(app, w, m.end, m.pixels)
+			end, ok = verify_position(app, w, m.end, m.pixels, m.screen)
 			if !ok { return .Invalid_Argument }
 		}
 		now := i64(time.tick_diff({}, time.tick_now()))
@@ -559,6 +612,12 @@ when AIO_CONTROL {
 
 	@(require_results)
 	verify_drive :: proc(app: ^App, request: control.Request) -> control.Error {
+		if selection, ok := request.(control.Window_Select); ok {
+			id := platform.Window_Id(selection.id)
+			if window_find(app, id) == nil { return .Invalid_Argument }
+			app.verify.target_window = id
+			return .None
+		}
 		w := verify_window(app)
 		if tray, ok := request.(control.Tray); ok {
 			switch tray.action {
@@ -584,6 +643,9 @@ when AIO_CONTROL {
 			return verify_chord(app, w.id, {.Enter, {}})
 		case control.Mouse:
 			return verify_mouse(app, w, r)
+		case control.Window_Move:
+			if platform.window_set_position(&app.platform, w.id,
+				i32(r.position.x), i32(r.position.y)) != .None { return .System }
 		case control.Focus:
 			handle_event(app, platform.Focus_Event{w.id, r.focused})
 		case control.Dpi:
@@ -652,7 +714,8 @@ when AIO_CONTROL {
 				strings.join(ranges[:], ", ", context.temp_allocator))
 			if _, err := append(&parts, label); err != nil { return "", .Out_Of_Memory }
 		}
-		for key in ([]string{"window.visible", "window.size", "window.dpi", "window.focused", "grid.size",
+		for key in ([]string{"window.visible", "windows.count", "window.id", "window.origin", "window.size",
+			"window.dpi", "window.focused", "grid.size",
 			"palette.open", "palette.query", "palette.item", "palette.selected", "find.open", "find.query",
 			"find.matches", "session.viewport", "session.selection"}) {
 			a, b := verify_value(v.before_state, key), verify_value(entries, key)
