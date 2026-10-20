@@ -60,7 +60,7 @@ try {
     $s = Read-State
     $row = Rect $s 'workspace.picker.row'
     $scale = [double]$s['window.scale']
-    Invoke-Aio mouse click "$([int]($row[0]+10)),$([int]($row[1]+$row[3]+4*$scale))"
+    Invoke-Aio mouse click "$([int]($row[0]+10)),$([int]($row[1]+$row[3]+4*$scale))" --px
     Invoke-Aio expect state workspace.picker=true
     Invoke-Aio expect state workspace.picker.selected=1
     Shot 'dropdown-divider'
@@ -111,14 +111,14 @@ try {
     Invoke-Aio key Ctrl+P
     $hiddenRow = Rect (Read-State) 'workspace.picker.row'
     $deletePoint = "$([int]($hiddenRow[0]+$hiddenRow[2]-18)), $([int]($hiddenRow[1]+17))" -replace ' ',''
-    Invoke-Aio mouse move $deletePoint
-    Invoke-Aio mouse click $deletePoint
+    Invoke-Aio mouse move $deletePoint --px
+    Invoke-Aio mouse click $deletePoint --px
     Invoke-Aio expect state "confirm.workspace=$firstId"
     Shot 'delete-hidden-confirm'
     Invoke-Aio key Esc
     Invoke-Aio command workspace.change
     $size = (Read-State)['window.size'] -split 'x'
-    Invoke-Aio mouse click "$([int]$size[0]-5),$([int]$size[1]-5)"
+    Invoke-Aio mouse click "$([int]$size[0]-5),$([int]$size[1]-5)" --px
     Invoke-Aio expect state workspace.picker=false
     Invoke-Aio command workspace.change
     # Two workspace rows, then New, Rename, Icon, Delete, New Window.
