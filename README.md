@@ -11,6 +11,13 @@ This has gone surprisingly well (from a user perspective anyways, the code is _u
 https://github.com/user-attachments/assets/121ed4ec-85ea-4a96-810d-a93f5c0d93b7
 * I'm missing a lot. I'll make another one eventually. But look at that pane dragging!
 
+## Another showcase. I forgot about the Settings page
+https://github.com/user-attachments/assets/28d9fb77-be30-4786-b758-f88f1e93023f
+* In case you thought that last showcase couldn't get any worse!
+* Added because settings are pretty important. It's one of my complaints about WezTerm. Lua scripting is awesome! But sometimes I just want a GUI to tweak things.
+* I'll have Lua scripting for advanced tweaks too! But I'm starting with GUI settings for now.
+* Oh and yes themes! There are three built in, each with a light and dark mode. There will be support for community themes of course. It's a requirement.
+
 # Features
 
 ## Windows
@@ -32,6 +39,8 @@ https://github.com/user-attachments/assets/121ed4ec-85ea-4a96-810d-a93f5c0d93b7
 * Groups of panes
 * You can open a lot of them very quickly! Some might say too quickly...
 * Supports multi-select. Useful for when you open too many by accident and need to mass close! Or just move a couple of tabs at the same time.
+
+## Settings
 
 # Inspiration
 * [Ghostty](https://ghostty.org), [Rex](https://www.superlogical.com/rex/docs/installation), [Superlogical](https://www.superlogical.com), and basically everything Mitchell Hashimoto has done with terminals. Please make a Superlogical terminal for Windows. It will definitely be better than this one (obviously in code quality, but in UX too!).
