@@ -10,7 +10,7 @@ import "aio:ui"
 diagnostic_identity :: proc(d: settings.Diagnostic) -> string {
 	if d.kind == .Shortcut_Warning {
 		// Saving unrelated settings can move source lines without changing the conflict.
-		if at := strings.index_byte(d.message, '['); at > 0 { return strings.trim_space(d.message[:at]) }
+		if at := strings.last_index(d.message, " ["); at > 0 { return strings.trim_space(d.message[:at]) }
 	}
 	return d.message
 }
