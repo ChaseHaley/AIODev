@@ -179,10 +179,8 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 		message := fmt.tprintf("%s: %s", d.key, d.message)
 		if d.kind == .Shortcut_Warning {
 			if warning == "" {
-				warning = d.message
-				if source := strings.index_byte(warning, '['); source > 0 {
-					warning = strings.trim_space(warning[:source])
-				}
+				warning = diagnostic_identity(d)
+
 			}
 		} else {
 			if at := strings.index(d.message, "already used by "); at >= 0 {
