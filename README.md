@@ -7,16 +7,26 @@ This project is one of my attempts at testing frontier (for now) models (Opus 5.
 I know what I wanted in a terminal. So I continuously use the terminal and give feedback in addition to the initial long winded vision I described to my agents.
 This has gone surprisingly well (from a user perspective anyways, the code is _u_ _g_ _l_ _y_), so I've uploaded it to GitHub for others to use. I am terrified to look at the code closely. But maybe a good user experience, at the end of the day, is all that matters (_cope_).
 
-# Features
-## Splits and Panes
+# Showcase (a bad one)
 https://github.com/user-attachments/assets/121ed4ec-85ea-4a96-810d-a93f5c0d93b7
-* Draggable to move and reshape within a tab, across tabs, and across windows.
-* Will soon support moving panes across workspaces
+* I'm missing a lot. I'll make another one eventually. But look at that pane dragging!
+
+# Features
+
+## Windows
+* It's the window! You know what a window is. It displays a single workspace.
+* You can have more than one. Revolutionary.
+* All windows share the same pool of workspaces.
 
 ## Workspaces
 * Groups of tabs
-* A workspace can only be open in one window at a time, this it NOT a multiplexer. Read FAQ question 1 for more info.
-* 
+* All workspaces are available to all windows.
+* A workspace can only be open in one window at a time, this it NOT a multiplexer. Read FAQ question 1 for more info on why.
+* Attempting to open a workspace that's already opened in another window will focus that window.
+
+## Splits and Panes
+* Draggable to move and reshape within a tab, across tabs, and across windows.
+* Will soon support moving panes across workspaces
 
 ## Tabs
 * Groups of panes
@@ -24,11 +34,15 @@ https://github.com/user-attachments/assets/121ed4ec-85ea-4a96-810d-a93f5c0d93b7
 * Supports multi-select. Useful for when you open too many by accident and need to mass close! Or just move a couple of tabs at the same time.
 
 # Inspiration
-* Ghostty, Rex, Superlogical, and basically everything Mitchell Hashimoto has done with terminals. Please make a Superlogical terminal for Windows.
-* WezTerm, my daily driver (before this)! It does just about everything I want... except look nice and provide a more sane defaults out of the box.
-* Windows Terminal. Yes, that one. It's good! It's just missing a few things...
+* [Ghostty](https://ghostty.org), [Rex](https://www.superlogical.com/rex/docs/installation), [Superlogical](https://www.superlogical.com), and basically everything Mitchell Hashimoto has done with terminals. Please make a Superlogical terminal for Windows. It will definitely be better than this one (obviously in code quality, but in UX too!).
+* [WezTerm](https://wezterm.org/index.html), my daily driver (before this)! It does just about everything I want... except look nice and provide a more sane defaults out of the box.
+* [Windows Terminal](https://github.com/microsoft/terminal). Yes, that one. It's good! It's just missing a few things...
+* [Vivaldi](https://vivaldi.com). The browser? Yes! I love the behavior of its workspaces, so that's how AIODev's workspace behave. Also, you should use Vivaldi. It's the best browser I've ever used.
 
 # FAQ
-1. Is there multiplexing like Rex?
-   Nope! That sounds way too difficult. Please re-read the first 4 words of this README for more information as to why I'm not doing that.
-And that's the end of my very long FAQ. Thank you for reading.
+## Q: Is there multiplexing like Rex?
+Nope! That sounds way too difficult. Please re-read the first 4 words of this README for more information.
+## Q: Does this track coding agent statuses?
+Not yet, but soon! When I get to getting an agent to get to it. But soon! Probably.
+
+   And that's the end of my very long FAQ. Thank you for reading.
