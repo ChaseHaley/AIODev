@@ -130,12 +130,12 @@ try {
     Invoke-Aio expect state "workspace.id=$secondId"
     Invoke-Aio command workspace.delete
     Invoke-Aio expect state confirm.open=true
-    Invoke-Aio key Right Enter
+    Invoke-Aio key Enter
     Invoke-Aio expect state "workspace.id=$firstId"
     Invoke-Aio expect state "session.id=$firstSession"
     Invoke-Aio command workspace.delete
     Shot 'delete-last-confirm'
-    Invoke-Aio key Right Enter
+    Invoke-Aio key Enter
     $last = Read-State
     if ($last['workspace.id'] -eq $firstId -or $last['session.id'] -eq $firstSession) {
         throw 'Last workspace deletion did not create a fresh workspace and session.'
