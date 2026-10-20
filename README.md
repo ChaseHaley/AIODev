@@ -41,6 +41,9 @@ https://github.com/user-attachments/assets/28d9fb77-be30-4786-b758-f88f1e93023f
 * Supports multi-select. Useful for when you open too many by accident and need to mass close! Or just move a couple of tabs at the same time.
 
 ## Settings
+* I already yapped about this at the settings showcase. You should look there but I guess I'll list it here too
+* GUI for settings! You can customize a lot of the display. And by a lot I mean a couple of things
+* Shell font size, GUI font size, pane gaps, pane corner radius, keybindings, theme colors (presets and overrides!), cursor style, and more.
 
 # Inspiration
 * [Ghostty](https://ghostty.org), [Rex](https://www.superlogical.com/rex/docs/installation), [Superlogical](https://www.superlogical.com), and basically everything Mitchell Hashimoto has done with terminals. Please make a Superlogical terminal for Windows. It will definitely be better than this one (obviously in code quality, but in UX too!).
