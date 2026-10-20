@@ -3,6 +3,7 @@ param(
     [string] $Name,
     [Alias('Pid')] [uint32] $ProcessId,
     [string] $Shot,
+    [long] $WindowHandle = 0,
     [switch] $Frame,
     [AllowEmptyString()] [string] $Text,
     [string] $Keys,
@@ -160,6 +161,14 @@ public static class AioWin32 {
             throw new Exception("no visible window for PID; run aioctl tray open and retry");
         }
         return found;
+    }
+    public static IntPtr OwnedWindow(uint pid, long value) {
+        IntPtr h = (IntPtr)value;
+        uint owner;
+        Check(GetWindowThreadProcessId(h, out owner) != 0, "GetWindowThreadProcessId");
+        if (owner != pid || !IsWindowVisible(h))
+            throw new Exception("window handle is not a visible window of the target PID");
+        return h;
     }
     public static string Shot(IntPtr h, string path, bool frame) {
         RECT r;
@@ -339,7 +348,9 @@ public static class AioWin32 {
             throw 'cannot set per-monitor DPI awareness; check desktop access'
         }
         try {
-            $window = [AioWin32]::Find($ProcessId)
+            $window = if ($WindowHandle -ne 0) {
+                [AioWin32]::OwnedWindow($ProcessId, $WindowHandle)
+            } else { [AioWin32]::Find($ProcessId) }
             switch ($action) {
                 'Shot' { [AioWin32]::Shot($window, [IO.Path]::GetFullPath($Shot), $Frame.IsPresent) }
                 'Text' {
