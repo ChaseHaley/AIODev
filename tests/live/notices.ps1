@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch] $UsePrepared, [switch] $ControlOnly)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
@@ -9,6 +9,12 @@ $path = Join-Path $directory 'settings.ini'
 function Invoke-Aio {
     $out = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
+}
+function Read-Log([string] $LogPath) {
+    $stream = [IO.File]::Open($LogPath, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    $reader = [IO.StreamReader]::new($stream)
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 function Read-State {
     $out = & $ctl --name $name state
@@ -28,17 +34,29 @@ function Configure([string] $Extra = '', [string] $Mode = 'dark', [string] $Fami
     Invoke-Aio command settings.reload
 }
 function Shot([string] $Label) {
-    & (Join-Path $repo 'tools/win32.ps1') -Name $name -Frame -Shot (Join-Path $directory "$Label.png")
+    & (Join-Path $repo 'tools/win32.ps1') -Name $name -WindowHandle $script:windowHandle -Frame -Shot (Join-Path $directory "$Label.png")
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
 }
-Invoke-Aio launch --fresh
+if (-not $UsePrepared) { Invoke-Aio launch --fresh }
 try {
     Invoke-Aio wait text 'PS '
+    $record = @{}
+    foreach ($line in [IO.File]::ReadAllLines((Join-Path $directory 'instance.ini'))) {
+        $pair = $line -split '=',2; $record[$pair[0]] = $pair[1]
+    }
+    $script:windowHandle = (Get-Process -Id ([int]$record.pid)).MainWindowHandle.ToInt64()
+    Assert-True ($script:windowHandle -ne 0) 'exact isolated window handle recorded'
+    if (-not $ControlOnly) {
+    & (Join-Path $repo 'tools/win32.ps1') -Name $name -WindowHandle $script:windowHandle -Activate -Chord '0x11+0x10+0x50' -Verbose
+    if ($LASTEXITCODE -ne 0) { throw 'Native activation/input failed; stop without retry.' }
+    Invoke-Aio expect state palette.open=true
+    Invoke-Aio key Esc
+    }
     Configure 'input.leader = Ctrl+Shift+A'
     $first = Read-State
     Assert-True ($first['notice.settings'] -like 'warning: *only one is active*Review Leader Key*') 'leader overlap is an actionable warning'
     Assert-True ($first['notice.settings'] -notlike '*settings.ini:*') 'toast omits technical source locations'
-    $log = [IO.File]::ReadAllText($first['app.log'])
+    $log = (Read-Log $first['app.log'])
     Assert-True ($log -like '*input.leader*Select All*edit.select_all*input.leader wins*defaults*') 'full source-order conflict details remain in the log'
     Assert-True ($first['leader.enabled'] -eq 'true') 'accepted leader winner remains enabled'
     Start-Sleep -Milliseconds 1200
@@ -52,6 +70,17 @@ try {
     Assert-True (-not (Read-State).ContainsKey('notice.settings')) 'expired unchanged warning stays quiet on reload'
     Configure "keys.tab.new = Ctrl+B`ninput.leader = Ctrl+B"
     Assert-True ((Read-State)['notice.settings'] -like 'warning:*') 'a new actionable conflict is shown'
+    Configure "keys.tab.new = Ctrl+[`ninput.leader = Ctrl+["
+    Assert-True ((Read-State)['notice.settings'] -like 'warning:*') 'bracket leader conflict appears'
+    $remainingBracket = [int]([regex]::Match((Read-State)['notice.settings'], '\((\d+)ms\)$').Groups[1].Value)
+    Start-Sleep -Milliseconds ($remainingBracket + 400)
+    Configure "`nkeys.tab.new = Ctrl+[`ninput.leader = Ctrl+["
+    Assert-True (-not (Read-State).ContainsKey('notice.settings')) 'bracket leader line-only change stays quiet after expiry'
+    Configure "keys.tab.close = Ctrl+[`ninput.leader = Ctrl+["
+    Assert-True ((Read-State)['notice.settings'] -like 'warning:*') 'changed bracket leader action is delivered'
+    Configure "input.leader = Ctrl+[`nkeys.tab.close = Ctrl+["
+    Assert-True ((Read-State)['notice.settings'] -like 'warning:*') 'changed bracket leader winner is delivered'
+    Assert-True ((Read-State)['leader.enabled'] -eq 'false') 'later bracket direct binding still wins'
     Configure 'font.size = not-a-number'
     Assert-True ((Read-State)['notice.settings'] -like 'error: *could not be applied*log*') 'invalid setting is an error with recovery guidance'
     Configure
@@ -63,6 +92,7 @@ try {
         Configure "keys.tab.new = Ctrl+B`ninput.leader = Ctrl+B" $mode 'AIODev Missing Notice Test Font'
         Invoke-Aio command pane.keep_open
         Invoke-Aio command edit.select_all
+        Start-Sleep -Milliseconds 150
         Invoke-Aio command edit.copy
         $state = Read-State
         Assert-True ($state['notice.settings'] -like 'warning:*') "$mode warning classification"
@@ -77,5 +107,5 @@ try {
     Start-Sleep -Milliseconds 500
     Assert-True ((Read-State)['frames.presented'] -eq $settled['frames.presented']) 'expired notices do not add idle redraws'
 } finally {
-    & $ctl --name $name quit | Out-Null
+    & $ctl --name $name stop | Out-Null
 }

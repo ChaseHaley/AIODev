@@ -15,6 +15,12 @@ function Invoke-Aio {
     $out | Write-Output
 }
 
+function Read-Log([string] $LogPath) {
+    $stream = [IO.File]::Open($LogPath, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    $reader = [IO.StreamReader]::new($stream)
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+}
 function Read-State {
     $out = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read state.' }
@@ -32,13 +38,13 @@ function Assert-Value($Actual, $Expected, [string] $Label) {
 }
 
 function Configure([string] $Bindings) {
-    $script:diagnosticOffset = [IO.File]::ReadAllText((Read-State)['app.log'].Trim('"')).Length
+    $script:diagnosticOffset = (Read-Log ((Read-State)['app.log'].Trim('"'))).Length
     [IO.File]::WriteAllText($path, $script:base + "`n" + $Bindings + "`n")
     Invoke-Aio command settings.reload
 }
 
 function Read-Diagnostics {
-    return [IO.File]::ReadAllText((Read-State)['app.log'].Trim('"')).Substring($script:diagnosticOffset)
+    return (Read-Log ((Read-State)['app.log'].Trim('"'))).Substring($script:diagnosticOffset)
 }
 
 function Assert-Conflict([string] $Winner) {
@@ -191,6 +197,7 @@ try {
     Invoke-Aio expect state leader.pending=false
     Configure "input.leader = Ctrl+B`nkeys.tab.new = Ctrl+B, Ctrl+Shift+T"
     Invoke-Aio command settings.open
+    Invoke-Aio key Ctrl+A
     Invoke-Aio type input.leader
     Invoke-Aio key Tab
     if ((Read-State)['settings.popup'] -eq 'Shortcuts') { Invoke-Aio key Enter }
