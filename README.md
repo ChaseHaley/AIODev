@@ -51,10 +51,13 @@ https://github.com/user-attachments/assets/28d9fb77-be30-4786-b758-f88f1e93023f
 * [Windows Terminal](https://github.com/microsoft/terminal). Yes, that one. It's good! It's just missing a few things...
 * [Vivaldi](https://vivaldi.com). The browser? Yes! I love the behavior of its workspaces, so that's how AIODev's workspace behave. Also, you should use Vivaldi. It's the best browser I've ever used.
 
+# Building from Source
+Yikes. Uh. Did I mention this was a vibe coded slop terminal? You'll need Windows. You'll need Odin. You'll need Zig probably. It's all in the build.ps1 script. I'd just ask an agent or something. When I'm no longer out of tokens I'll ask it to tell you here too. I'm not made of money... or tokens for that matter.
+
 # FAQ
 ## Q: Is there multiplexing like Rex?
 Nope! That sounds way too difficult. Please re-read the first 4 words of this README for more information.
 ## Q: Does this track coding agent statuses?
 Not yet, but soon! When I get to getting an agent to get to it. But soon! Probably.
 
-   And that's the end of my very long FAQ. Thank you for reading.
+And that's the end of my very long FAQ. Thank you for reading.
