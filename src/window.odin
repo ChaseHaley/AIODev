@@ -297,6 +297,9 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
+	if palette_visible(app, w) {
+		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
+	}
 	if w.preparing { return }
 	if w.width <= 0 || w.height <= 0 {
 		return

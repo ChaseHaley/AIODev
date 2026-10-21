@@ -44,6 +44,7 @@ Palette :: struct {
 	motion: Motion,
 	query: Text_Field,
 	selected, scroll: int,
+	visible_rows: int,
 	results: [dynamic]Palette_Result,
 	positions: [dynamic]int,
 	haystack: [dynamic]u8,
@@ -56,6 +57,7 @@ Palette :: struct {
 Palette_Layout :: struct {
 	panel, input, list: render.Rect,
 	row_height: f32,
+	rows: int,
 }
 
 @(require_results)
@@ -64,6 +66,7 @@ palette_init :: proc(p: ^Palette, settings: []Palette_Setting, allocator := cont
 	p.results = make([dynamic]Palette_Result, allocator)
 	p.positions = make([dynamic]int, allocator)
 	p.settings = settings
+	p.visible_rows = PALETTE_MAX_ROWS
 	err: runtime.Allocator_Error
 	capacity := 0
 	for s in settings {
@@ -204,10 +207,13 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 
 @(private)
 keep_selection_visible :: proc(p: ^Palette) {
+	rows := max(1, p.visible_rows)
+	p.selected = clamp(p.selected, 0, max(0, len(p.results)-1))
+	p.scroll = clamp(p.scroll, 0, max(0, len(p.results)-rows))
 	if p.selected < p.scroll {
 		p.scroll = p.selected
-	} else if p.selected >= p.scroll + PALETTE_MAX_ROWS {
-		p.scroll = p.selected - PALETTE_MAX_ROWS + 1
+	} else if p.selected >= p.scroll + rows {
+		p.scroll = p.selected - rows + 1
 	}
 }
 
@@ -223,7 +229,7 @@ move :: proc(p: ^Palette, delta: int) -> Outcome {
 
 @(private)
 run :: proc(p: ^Palette, index: int) -> (Outcome, commands.Command_Id) {
-	if index < 0 || index >= len(p.results) {
+	if p.visible_rows == 0 || index < 0 || index >= len(p.results) {
 		return .None, 0
 	}
 	result := p.results[index]
@@ -265,9 +271,9 @@ palette_key :: proc(
 	case .Enter, .Numpad_Enter:
 		return run(p, p.selected)
 	case .Page_Up:
-		return move(p, -PALETTE_MAX_ROWS), 0
+		return move(p, -max(1, p.visible_rows)), 0
 	case .Page_Down:
-		return move(p, PALETTE_MAX_ROWS), 0
+		return move(p, max(1, p.visible_rows)), 0
 	case .Home:
 		if !shift { return move(p, -len(p.results)), 0 }
 	case .End:
@@ -294,28 +300,41 @@ palette_cut :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	return palette_text(p, registry, "")
 }
 
-palette_layout :: proc(p: ^Palette, width, height, scale: f32) -> Palette_Layout {
-	panel_width := min(PALETTE_WIDTH * scale, width - 32 * scale)
-	rows := max(1, min(len(p.results), PALETTE_MAX_ROWS))
+palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) -> Palette_Layout {
+	width, height := max(0, viewport_width), max(0, viewport_height)
+	scale := viewport_scale > 0 ? viewport_scale : 1
+	border := min(scale, width/2, height/2)
+	panel_width := min(PALETTE_WIDTH * scale, width - 2 * min(16 * scale, width/4))
 	row_height := PALETTE_ROW_HEIGHT * scale
 	padding := PALETTE_PADDING * scale
 	input_height := PALETTE_INPUT_HEIGHT * scale
+	minimum_height := input_height + 1 + 2 * padding + row_height
+	top := clamp(max(24 * scale, height * 0.12), border, max(border, height-border-minimum_height))
+	available := max(0, height-border-top)
+	p.visible_rows = clamp(int(max(0, available-input_height-1-2*padding) / row_height), 0, PALETTE_MAX_ROWS)
+	keep_selection_visible(p)
+	rows := min(max(1, len(p.results)), p.visible_rows)
+	input_height = min(input_height, available)
+	separator := min(f32(1), available-input_height)
+	padding = min(padding, max(0, available-input_height-separator)/2)
+	list_padding := min(padding, panel_width/2)
 	panel := render.Rect{
 		x = (width - panel_width) / 2,
-		y = max(24 * scale, height * 0.12),
+		y = top,
 		width = panel_width,
-		height = input_height + 1 + 2 * padding + f32(rows) * row_height,
+		height = input_height + separator + 2 * padding + f32(rows) * row_height,
 	}
 	return {
 		panel = panel,
 		input = {panel.x, panel.y, panel.width, input_height},
 		list = {
-			panel.x + padding,
-			panel.y + input_height + 1 + padding,
-			panel.width - 2 * padding,
+			panel.x + list_padding,
+			panel.y + input_height + separator + padding,
+			panel.width - 2 * list_padding,
 			f32(rows) * row_height,
 		},
 		row_height = row_height,
+		rows = rows,
 	}
 }
 
@@ -379,13 +398,14 @@ palette_input_release :: proc(p: ^Palette) -> bool {
 }
 
 palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
-	limit := max(0, len(p.results) - PALETTE_MAX_ROWS)
+	if p.visible_rows == 0 || len(p.results) == 0 { return .None }
+	limit := max(0, len(p.results) - p.visible_rows)
 	scroll := clamp(p.scroll - rows, 0, limit)
 	if scroll == p.scroll {
 		return .None
 	}
 	p.scroll = scroll
-	p.selected = clamp(p.selected, p.scroll, p.scroll + PALETTE_MAX_ROWS - 1)
+	p.selected = clamp(p.selected, p.scroll, min(len(p.results), p.scroll + p.visible_rows) - 1)
 	return .Changed
 }
 
@@ -414,21 +434,26 @@ palette_draw :: proc(
 	for r in rects {
 		draw_rect(list, r)
 	}
+	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
 	input_text := text_styled(text, .Input)
 	label_text := text_styled(text, .Label)
-	if result := draw_text(&label_text, list, "COMMANDS AND SETTINGS", l.input.x+padding, l.input.y+19*scale,
-		theme.faint); result != .Ok { return result }
-	if result := field_draw(&p.query, list, &input_text, theme, l.input.x + padding, l.input.y + 43*scale,
-		l.input.width - 2*padding, true, "Type a command or setting", theme.text, max(1, 1.5 * scale));
-		result != .Ok { return result }
+	if l.input.width > 2*padding {
+		if result := draw_text(&label_text, list, "COMMANDS AND SETTINGS", l.input.x+padding, l.input.y+19*scale,
+			theme.faint); result != .Ok { return result }
+		if result := field_draw(&p.query, list, &input_text, theme, l.input.x + padding, l.input.y + 43*scale,
+			l.input.width - 2*padding, true, "Type a command or setting", theme.text, max(1, 1.5 * scale));
+			result != .Ok { return result }
+	}
+	if l.rows == 0 || l.list.width <= 0 { return .Ok }
+	if render.push_layer(list, l.list) != .None { return .Ok }
 	if len(p.results) == 0 {
 		row_baseline := l.list.y + (l.row_height - text.line_height) / 2 + text.ascent
 		return draw_text(text, list, "No matching commands or settings", l.list.x + padding, row_baseline,
 			theme.muted)
 	}
 	label_buffer: [64]u8
-	for index in p.scroll ..< min(len(p.results), p.scroll + PALETTE_MAX_ROWS) {
+	for index in p.scroll ..< min(len(p.results), p.scroll + l.rows) {
 		item := p.results[index]
 		row := render.Rect{l.list.x, l.list.y + f32(index - p.scroll) * l.row_height, l.list.width, l.row_height}
 		if index == p.selected {

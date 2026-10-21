@@ -229,7 +229,11 @@ when AIO_CONTROL {
 		item := ""
 		p := &app.palette
 		palette_layout: ui.Palette_Layout
-		if owns_palette { palette_layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale) }
+		if owns_palette {
+			// Observing geometry must not repair selection or scroll before the assertion reads them.
+			measured := p^
+			palette_layout = ui.palette_layout(&measured, f32(w.width), f32(w.height), w.scale)
+		}
 		palette_rows := palette_layout.row_height > 0 ? int(palette_layout.list.height/palette_layout.row_height) : 0
 		if owns_palette && p.selected >= 0 && p.selected < len(p.results) {
 			item = ui.palette_result_name(p, p.results[p.selected])

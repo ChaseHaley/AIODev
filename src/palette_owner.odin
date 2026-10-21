@@ -45,6 +45,7 @@ palette_open :: proc(app: ^App, w: ^Window) {
 	assert(registered)
 	app.palette_window = w.id
 	ui.palette_open(&app.palette, &app.registry)
+	ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
 }
 
