@@ -168,7 +168,7 @@ New-Item -ItemType Directory -Path $data | Out-Null
 $receiptData = $null
 try {
     $settingsParser = Join-Path $data 'settings-parser.exe'
-    & odin build (Join-Path $PSScriptRoot 'termbench_settings.odin') -file "-out:$settingsParser" `
+    & odin build (Join-Path $PSScriptRoot 'termbench_settings') "-out:$settingsParser" `
         "-collection:aio=$(Join-Path $repo 'src')" -vet -vet-cast -vet-tabs -vet-using-param `
         -vet-unused-procedures -vet-packages:termbench_settings -strict-style -warnings-as-errors -disallow-do
     Assert-True ($LASTEXITCODE -eq 0) 'Headless product settings parser fixture did not compile'
