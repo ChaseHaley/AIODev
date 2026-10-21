@@ -7,24 +7,24 @@ when ODIN_OS == .Windows {
 Mouse_Event :: distinct rawptr
 
 Mouse_Action :: enum i32 {
-	Press = 0,
+	Press   = 0,
 	Release = 1,
-	Motion = 2,
+	Motion  = 2,
 }
 
 Mouse_Button :: enum i32 {
 	Unknown = 0,
-	Left = 1,
-	Right = 2,
-	Middle = 3,
-	Four = 4,
-	Five = 5,
-	Six = 6,
-	Seven = 7,
-	Eight = 8,
-	Nine = 9,
-	Ten = 10,
-	Eleven = 11,
+	Left    = 1,
+	Right   = 2,
+	Middle  = 3,
+	Four    = 4,
+	Five    = 5,
+	Six     = 6,
+	Seven   = 7,
+	Eight   = 8,
+	Nine    = 9,
+	Ten     = 10,
+	Eleven  = 11,
 }
 
 Mouse_Position :: struct {
@@ -32,7 +32,7 @@ Mouse_Position :: struct {
 	y: f32,
 }
 
-@(default_calling_convention="c", link_prefix="ghostty_")
+@(default_calling_convention = "c", link_prefix = "ghostty_")
 foreign lib {
 	@(require_results)
 	mouse_event_new :: proc(allocator: ^Allocator, event: ^Mouse_Event) -> Result ---

@@ -1,12 +1,12 @@
 package ui
 
-import "core:log"
-import "core:math"
-import "core:slice"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
 import "aio:settings"
+import "core:log"
+import "core:math"
+import "core:slice"
 
 Theme :: struct {
 	window, chrome, pane, surface, border, text, muted, faint, accent, accent_text: render.Color,
@@ -15,29 +15,44 @@ Theme :: struct {
 
 theme_from :: proc(t: settings.Theme) -> Theme {
 	rgb :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {
-		return {f32(c.r)/255, f32(c.g)/255, f32(c.b)/255, alpha}
+		return {f32(c.r) / 255, f32(c.g) / 255, f32(c.b) / 255, alpha}
 	}
 	return {
-		window = rgb(t.window), chrome = rgb(t.chrome), pane = rgb(t.pane), surface = rgb(t.raised),
-		text = rgb(t.text), muted = rgb(t.muted), faint = rgb(t.faint),
-		accent = rgb(t.accent), accent_text = rgb(t.accent_text),
+		window = rgb(t.window),
+		chrome = rgb(t.chrome),
+		pane = rgb(t.pane),
+		surface = rgb(t.raised),
+		text = rgb(t.text),
+		muted = rgb(t.muted),
+		faint = rgb(t.faint),
+		accent = rgb(t.accent),
+		accent_text = rgb(t.accent_text),
 		border = rgb(t.text, t.light ? 0.09 : 0.08),
-		hover = rgb(t.text, t.light ? 0.04 : 0.05), pressed = rgb(t.text, t.light ? 0.08 : 0.09),
-		selection = rgb(t.accent, t.light ? 0.10 : 0.14), focus = rgb(t.accent, 0.50),
-		shadow = {0, 0, 0, t.light ? 0.12 : 0.35}, scrim = {0, 0, 0, t.light ? 0.08 : 0.18},
-		error = rgb(t.danger), success = rgb(t.success), warning = rgb(t.warning), info = rgb(t.info),
+		hover = rgb(t.text, t.light ? 0.04 : 0.05),
+		pressed = rgb(t.text, t.light ? 0.08 : 0.09),
+		selection = rgb(t.accent, t.light ? 0.10 : 0.14),
+		focus = rgb(t.accent, 0.50),
+		shadow = {0, 0, 0, t.light ? 0.12 : 0.35},
+		scrim = {0, 0, 0, t.light ? 0.08 : 0.18},
+		error = rgb(t.danger),
+		success = rgb(t.success),
+		warning = rgb(t.warning),
+		info = rgb(t.info),
 	}
 }
 
-@(private) UI_FAMILIES :: [?]string{"Segoe UI Variable Text", "Segoe UI"}
-@(private) ICON_FAMILIES :: [?]string{"Segoe Fluent Icons", "Segoe MDL2 Assets"}
-@(private) ELLIPSIS :: "…"
+@(private)
+UI_FAMILIES :: [?]string{"Segoe UI Variable Text", "Segoe UI"}
+@(private)
+ICON_FAMILIES :: [?]string{"Segoe Fluent Icons", "Segoe MDL2 Assets"}
+@(private)
+ELLIPSIS :: "…"
 
 Text :: struct {
-	fonts: ^font.System,
-	cache: ^glyphs.Cache,
+	fonts:                        ^font.System,
+	cache:                        ^glyphs.Cache,
 	family, strong_family, icons: font.Family,
-	has_icons: bool,
+	has_icons:                    bool,
 	size_px, ascent, line_height: f32,
 }
 
@@ -182,37 +197,54 @@ draw_rect :: proc(list: ^render.Draw_List, instance: render.Rect_Instance) {
 	}
 }
 
-Text_Style :: enum { Body, Strong, Small, Label, Input, Keycap }
+Text_Style :: enum {
+	Body,
+	Strong,
+	Small,
+	Label,
+	Input,
+	Keycap,
+}
 
 text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 	copy := t^
 	size := f32(12)
 	#partial switch style {
-	case .Small: size = 11
-	case .Label: size = 10.5
-	case .Input: size = 13
-	case .Keycap: size = 10
+	case .Small:
+		size = 11
+	case .Label:
+		size = 10.5
+	case .Input:
+		size = 13
+	case .Keycap:
+		size = 10
 	}
-	if style == .Strong || style == .Label { copy.family = t.strong_family }
-	text_set_size(&copy, t.size_px*size/12)
+	if style == .Strong || style == .Label {copy.family = t.strong_family}
+	text_set_size(&copy, t.size_px * size / 12)
 	return copy
 }
 
-draw_fading_text :: proc(t: ^Text, list: ^render.Draw_List, s: string,
-	x, baseline: f32, color: render.Color, width: f32) -> glyphs.Result {
-	if width <= 0 { return .Ok }
+draw_fading_text :: proc(
+	t: ^Text,
+	list: ^render.Draw_List,
+	s: string,
+	x, baseline: f32,
+	color: render.Color,
+	width: f32,
+) -> glyphs.Result {
+	if width <= 0 {return .Ok}
 	pen := x
 	clipped := text_width(t, s) > width
 	for r in s {
-		if pen >= x+width { break }
+		if pen >= x + width {break}
 		g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
-		if !found { continue }
+		if !found {continue}
 		start := len(list.glyphs)
-		if result := draw_glyph(t, list, g, pen, baseline, color); result != .Ok { return result }
+		if result := draw_glyph(t, list, g, pen, baseline, color); result != .Ok {return result}
 		if clipped && len(list.glyphs) > start {
 			glyph := &list.glyphs[start]
 			glyph.flags |= render.GLYPH_FADE
-			glyph.fade_start, glyph.fade_end = x+width*0.8, x+width
+			glyph.fade_start, glyph.fade_end = x + width * 0.8, x + width
 		}
 		pen += font.glyph_advance(t.fonts, g, t.size_px)
 	}
@@ -221,22 +253,41 @@ draw_fading_text :: proc(t: ^Text, list: ^render.Draw_List, s: string,
 
 @(private)
 focus_ring_draw :: proc(list: ^render.Draw_List, rect: render.Rect, theme: Theme, scale: f32) {
-	gap := render.Rect{rect.x-scale, rect.y-scale, rect.width+2*scale, rect.height+2*scale}
-	ring := render.Rect{rect.x-3*scale, rect.y-3*scale, rect.width+6*scale, rect.height+6*scale}
-	draw_rect(list, {rect = gap, color = theme.window, radius = 7*scale, stroke = scale})
-	draw_rect(list, {rect = ring, color = theme.accent, radius = 9*scale, stroke = 2*scale})
+	gap := render.Rect {
+		rect.x - scale,
+		rect.y - scale,
+		rect.width + 2 * scale,
+		rect.height + 2 * scale,
+	}
+	ring := render.Rect {
+		rect.x - 3 * scale,
+		rect.y - 3 * scale,
+		rect.width + 6 * scale,
+		rect.height + 6 * scale,
+	}
+	draw_rect(list, {rect = gap, color = theme.window, radius = 7 * scale, stroke = scale})
+	draw_rect(list, {rect = ring, color = theme.accent, radius = 9 * scale, stroke = 2 * scale})
 }
 
 // Centers the glyph's rasterized ink in `area`; draw_text instead places the pen on a baseline, which
 // leaves symbols such as × visibly off center inside small buttons.
-draw_glyph_centered :: proc(t: ^Text, list: ^render.Draw_List, r: rune, area: render.Rect,
-	c: render.Color) -> glyphs.Result {
+draw_glyph_centered :: proc(
+	t: ^Text,
+	list: ^render.Draw_List,
+	r: rune,
+	area: render.Rect,
+	c: render.Color,
+) -> glyphs.Result {
 	g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
-	if !found { return .Ok }
+	if !found {return .Ok}
 	entry, result := glyphs.glyph(t.cache, g, t.size_px)
-	if result != .Ok || entry.size.x == 0 { return result }
-	at := render.Rect{math.round(area.x+(area.width-entry.size.x)/2), math.round(area.y+(area.height-entry.size.y)/2),
-		entry.size.x, entry.size.y}
+	if result != .Ok || entry.size.x == 0 {return result}
+	at := render.Rect {
+		math.round(area.x + (area.width - entry.size.x) / 2),
+		math.round(area.y + (area.height - entry.size.y) / 2),
+		entry.size.x,
+		entry.size.y,
+	}
 	if render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c}) != .None {
 		log.error("ui: the draw list ran out of memory")
 	}
@@ -245,54 +296,81 @@ draw_glyph_centered :: proc(t: ^Text, list: ^render.Draw_List, r: rune, area: re
 
 // Draws an icon-font glyph centered in `area`, sized to `fraction` of the area's height. Without an icon
 // font nothing is drawn.
-draw_icon :: proc(t: ^Text, list: ^render.Draw_List, icon: rune, area: render.Rect, c: render.Color,
-	fraction: f32) -> glyphs.Result {
-	if !t.has_icons { return .Ok }
+draw_icon :: proc(
+	t: ^Text,
+	list: ^render.Draw_List,
+	icon: rune,
+	area: render.Rect,
+	c: render.Color,
+	fraction: f32,
+) -> glyphs.Result {
+	if !t.has_icons {return .Ok}
 	icons := t^
 	icons.family = t.icons
-	text_set_size(&icons, area.height*fraction*0.6)
+	text_set_size(&icons, area.height * fraction * 0.6)
 	return draw_glyph_centered(&icons, list, icon, area, c)
 }
 
 // Supply the whole emoji sequence to system fallback, including variation selectors and ZWJ.
-draw_cluster_centered :: proc(t: ^Text, list: ^render.Draw_List, cluster: string, area: render.Rect,
-	c: render.Color, size_px: f32) -> glyphs.Result {
+draw_cluster_centered :: proc(
+	t: ^Text,
+	list: ^render.Draw_List,
+	cluster: string,
+	area: render.Rect,
+	c: render.Color,
+	size_px: f32,
+) -> glyphs.Result {
 	runes: [32]rune
 	clusters: [32]int
 	count := 0
 	for r in cluster {
-		if count == len(runes) { return .Ok }
+		if count == len(runes) {return .Ok}
 		runes[count] = r
 		count += 1
 	}
-	if count == 0 || size_px <= 0 || area.width <= 0 || area.height <= 0 { return .Ok }
+	if count == 0 || size_px <= 0 || area.width <= 0 || area.height <= 0 {return .Ok}
 	// Cache hits append into bounded stack storage without per-icon scratch allocation.
 	storage: [64]font.Shaped_Glyph
 	shaped := slice.into_dynamic(storage[:])
-	if err := font.shape(t.fonts, t.family, .Regular, runes[:count], size_px, &shaped, clusters[:count]);
-	   err != .None {
+	if err := font.shape(
+		t.fonts,
+		t.family,
+		.Regular,
+		runes[:count],
+		size_px,
+		&shaped,
+		clusters[:count],
+	); err != .None {
 		log.errorf("ui: shaping an icon failed: %v", err)
 		return .Ok
 	}
 	width: f32
-	for g in shaped { width += g.advance }
-	fit := width > 0 ? min(1, area.width/width) : 1
-	draw_size := size_px*fit
+	for g in shaped {width += g.advance}
+	fit := width > 0 ? min(1, area.width / width) : 1
+	draw_size := size_px * fit
 	m := font.face_metrics(t.fonts, t.family.faces[.Regular], draw_size)
-	baseline := math.round(area.y+(area.height-m.ascent-m.descent)/2+m.ascent)
-	pen := area.x+(area.width-width*fit)/2
+	baseline := math.round(area.y + (area.height - m.ascent - m.descent) / 2 + m.ascent)
+	pen := area.x + (area.width - width * fit) / 2
 	for g in shaped {
 		entry, result := glyphs.glyph(t.cache, g.glyph, draw_size, true)
-		if result != .Ok { return result }
+		if result != .Ok {return result}
 		if entry.size.x > 0 {
-			at := render.Rect{math.round(pen+g.offset.x*fit+entry.offset.x),
-				math.round(baseline-g.offset.y*fit+entry.offset.y), entry.size.x, entry.size.y}
+			at := render.Rect {
+				math.round(pen + g.offset.x * fit + entry.offset.x),
+				math.round(baseline - g.offset.y * fit + entry.offset.y),
+				entry.size.x,
+				entry.size.y,
+			}
 			flags := entry.color ? render.GLYPH_COLOR : 0
-			if render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c, flags = flags}) != .None {
+			if render.push_glyph(
+				   list,
+				   {rect = at, atlas = entry.atlas, color = c, flags = flags},
+			   ) !=
+			   .None {
 				log.error("ui: the draw list ran out of memory")
 			}
 		}
-		pen += g.advance*fit
+		pen += g.advance * fit
 	}
 	return .Ok
 }

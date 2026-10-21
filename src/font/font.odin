@@ -16,31 +16,31 @@ Family :: struct {
 }
 
 Glyph :: struct {
-	face: Face_Id,
-	index: u16,
+	face:              Face_Id,
+	index:             u16,
 	scale, advance_em: f32,
 }
 
 Shaped_Glyph :: struct {
-	glyph: Glyph,
+	glyph:   Glyph,
 	cluster: int,
 	advance: f32,
-	offset: [2]f32,
+	offset:  [2]f32,
 }
 
 Face_Metrics :: struct {
-	ascent, descent, line_gap: f32,
-	underline_position, underline_thickness: f32,
+	ascent, descent, line_gap:                       f32,
+	underline_position, underline_thickness:         f32,
 	strikethrough_position, strikethrough_thickness: f32,
-	cap_height: f32,
+	cap_height:                                      f32,
 }
 
 Bitmap :: struct {
-	pixels: []u8,
+	pixels:        []u8,
 	width, height: i32,
-	left, top: i32,
+	left, top:     i32,
 	// Premultiplied RGBA when set; one coverage byte per pixel otherwise.
-	color: bool,
+	color:         bool,
 }
 
 Text_Gamma :: struct {

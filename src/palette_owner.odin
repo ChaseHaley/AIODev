@@ -9,25 +9,29 @@ palette_active :: proc(app: ^App, w: ^Window) -> bool {
 }
 
 palette_visible :: proc(app: ^App, w: ^Window) -> bool {
-	return w != nil && w.id != 0 && app.palette_window == w.id &&
-		(app.palette.open || app.palette.motion.value > 0)
+	return(
+		w != nil &&
+		w.id != 0 &&
+		app.palette_window == w.id &&
+		(app.palette.open || app.palette.motion.value > 0) \
+	)
 }
 
 palette_close :: proc(app: ^App, w: ^Window) {
-	if w == nil || w.id == 0 || app.palette_window != w.id { return }
+	if w == nil || w.id == 0 || app.palette_window != w.id {return}
 	ui.palette_close(&app.palette)
 	w.dirty = true
 }
 
 palette_release :: proc(app: ^App, w: ^Window) {
-	if w == nil || w.id == 0 || app.palette_window != w.id { return }
+	if w == nil || w.id == 0 || app.palette_window != w.id {return}
 	palette_close(app, w)
 	app.palette.motion = {}
 	app.palette_window = 0
 }
 
 palette_open :: proc(app: ^App, w: ^Window) {
-	if w == nil || w.id == 0 { return }
+	if w == nil || w.id == 0 {return}
 	if previous := window_find(app, app.palette_window); previous != nil && previous != w {
 		palette_release(app, previous)
 	}
@@ -41,7 +45,11 @@ palette_open :: proc(app: ^App, w: ^Window) {
 	ui.editor_release(&w.editor)
 	entry := focused_session(app, w)
 	has_selection := entry != nil && term.has_selection(entry.session)
-	registered := commands.set_enabled(&app.registry, commands.Command_Id(Action.Copy), has_selection)
+	registered := commands.set_enabled(
+		&app.registry,
+		commands.Command_Id(Action.Copy),
+		has_selection,
+	)
 	assert(registered)
 	app.palette_window = w.id
 	ui.palette_open(&app.palette, &app.registry)
@@ -53,8 +61,8 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window) {
 	w.workspace_picker.open = false
 	w.tab_menu.open = false
 	w.rename.dragging = false
-	if w.rename_open { rename_finish(app, w, false) }
-	if w.close_confirm.open { close_confirm_finish(app, w, false) }
+	if w.rename_open {rename_finish(app, w, false)}
+	if w.close_confirm.open {close_confirm_finish(app, w, false)}
 	w.close_confirm = {}
 	w.dirty = true
 }

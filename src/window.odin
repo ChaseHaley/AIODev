@@ -1,8 +1,5 @@
 package main
 
-import "core:log"
-import "core:math"
-import "core:time"
 import "aio:glyphs"
 import "aio:input"
 import "aio:layout"
@@ -12,113 +9,126 @@ import "aio:settings"
 import "aio:term"
 import "aio:term_view"
 import "aio:ui"
+import "core:log"
+import "core:math"
+import "core:time"
 
-@(private) CURSOR_BLINK_INTERVAL :: 530 * time.Millisecond
-@(private) AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
-@(private) FRAME_WAIT_MS :: 100
+@(private)
+CURSOR_BLINK_INTERVAL :: 530 * time.Millisecond
+@(private)
+AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
+@(private)
+FRAME_WAIT_MS :: 100
 
 Pane_View :: struct {
-	content: layout.Content,
-	view: term_view.View,
-	cache: render.Draw_List,
-	valid: bool,
+	content:                              layout.Content,
+	view:                                 term_view.View,
+	cache:                                render.Draw_List,
+	valid:                                bool,
 	generation, atlas_generation, builds: u64,
-	style: term_view.Style,
-	frame: term_view.Frame,
-	header_controls: [4]ui.Control_Motion,
-	header_hover, header_pressed: ui.Header_Action,
+	style:                                term_view.Style,
+	frame:                                term_view.Frame,
+	header_controls:                      [4]ui.Control_Motion,
+	header_hover, header_pressed:         ui.Header_Action,
 }
 
 Window :: struct {
-	id: platform.Window_Id,
-	surface: ^render.Surface,
-	ui_text: ui.Text,
-	workspace: ^Workspace,
-	tree: ^layout.Layout,
-	dividers: [dynamic]layout.Divider,
-	dragging: Divider_Drag,
-	divider_click_node: layout.Node_Id,
-	divider_click_ns: i64,
-	pane_drag: Pane_Drag,
-	tab_drag: Tab_Drag,
-	tab_positions: [dynamic]ui.Motion,
+	id:                                                           platform.Window_Id,
+	surface:                                                      ^render.Surface,
+	ui_text:                                                      ui.Text,
+	workspace:                                                    ^Workspace,
+	tree:                                                         ^layout.Layout,
+	dividers:                                                     [dynamic]layout.Divider,
+	dragging:                                                     Divider_Drag,
+	divider_click_node:                                           layout.Node_Id,
+	divider_click_ns:                                             i64,
+	pane_drag:                                                    Pane_Drag,
+	tab_drag:                                                     Tab_Drag,
+	tab_positions:                                                [dynamic]ui.Motion,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
-	split_overlay: bool,
-	panes: [dynamic]layout.Pane_Rect,
-	views: [dynamic]Pane_View,
-	list: render.Draw_List,
-	width, height: i32,
-	header_height: f32,
-	header_buttons: input.Mouse_Buttons,
-	scale: f32,
-	metrics: term_view.Metrics,
-	focused, dirty: bool,
-	preparing, preview_visible: bool,
-	generation: u64,
-	selecting: bool,
+	split_overlay:                                                bool,
+	panes:                                                        [dynamic]layout.Pane_Rect,
+	views:                                                        [dynamic]Pane_View,
+	list:                                                         render.Draw_List,
+	width, height:                                                i32,
+	header_height:                                                f32,
+	header_buttons:                                               input.Mouse_Buttons,
+	scale:                                                        f32,
+	metrics:                                                      term_view.Metrics,
+	focused, dirty:                                               bool,
+	preparing, preview_visible:                                   bool,
+	generation:                                                   u64,
+	selecting:                                                    bool,
 	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
-	autoscrolling: bool,
-	autoscroll_deadline: time.Tick,
-	pointer: [2]f32,
-	pointer_shape: platform.Cursor_Shape,
-	find: ui.Find_Bar,
-	editor: ui.Editor,
-	leader_until: time.Tick,
-	tab_underline: ui.Motion,
-	tab_controls: [dynamic]ui.Control_Motion,
-	tab_hover: int,
-	tab_pressed: bool,
-	tab_close_pressed: int,
+	autoscrolling:                                                bool,
+	autoscroll_deadline:                                          time.Tick,
+	pointer:                                                      [2]f32,
+	pointer_shape:                                                platform.Cursor_Shape,
+	find:                                                         ui.Find_Bar,
+	editor:                                                       ui.Editor,
+	leader_until:                                                 time.Tick,
+	tab_underline:                                                ui.Motion,
+	tab_controls:                                                 [dynamic]ui.Control_Motion,
+	tab_hover:                                                    int,
+	tab_pressed:                                                  bool,
+	tab_close_pressed:                                            int,
 	// Asks before a close would end several panes; holds the id of the tab whose close was requested.
-	close_confirm: ui.Confirm,
-	close_confirm_tab: u32,
-	close_confirm_workspace, close_confirm_destination: u32,
-	close_confirm_owner: platform.Window_Id,
+	close_confirm:                                                ui.Confirm,
+	close_confirm_tab:                                            u32,
+	close_confirm_workspace, close_confirm_destination:           u32,
+	close_confirm_owner:                                          platform.Window_Id,
 	close_confirm_workspace_name, close_confirm_destination_name: string,
-	close_confirm_sessions: int,
-	close_confirm_tabs, close_confirm_panes: int,
-	close_restore: [dynamic]u32,
-	tab_menu: Tab_Menu,
-	rename: ui.Text_Field,
-	rename_open, rename_tab: bool,
-	rename_workspace: bool,
-	workspace_picker: Workspace_Picker,
-	rename_id: u32,
-	caption_hover, caption_pressed: int,
-	maximized: bool,
-	paste_confirm_until: time.Tick,
-	suppressed_key: Maybe(platform.Key_Event),
-	wheel_remainder: f32,
-	blinking, cursor_phase_visible: bool,
-	blink_deadline: time.Tick,
+	close_confirm_sessions:                                       int,
+	close_confirm_tabs, close_confirm_panes:                      int,
+	close_restore:                                                [dynamic]u32,
+	tab_menu:                                                     Tab_Menu,
+	rename:                                                       ui.Text_Field,
+	rename_open, rename_tab:                                      bool,
+	rename_workspace:                                             bool,
+	workspace_picker:                                             Workspace_Picker,
+	rename_id:                                                    u32,
+	caption_hover, caption_pressed:                               int,
+	maximized:                                                    bool,
+	paste_confirm_until:                                          time.Tick,
+	suppressed_key:                                               Maybe(platform.Key_Event),
+	wheel_remainder:                                              f32,
+	blinking, cursor_phase_visible:                               bool,
+	blink_deadline:                                               time.Tick,
 }
 
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
 	size_px := app.font_points * scale * 96 / 72
-	return term_view.compute_metrics(app.fonts, app.family, size_px, f32(app.settings.font.line_height))
+	return term_view.compute_metrics(
+		app.fonts,
+		app.family,
+		size_px,
+		f32(app.settings.font.line_height),
+	)
 }
 
 @(require_results)
 window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
-	if workspace == nil || selected_tab(workspace) == nil { return false }
+	if workspace == nil || selected_tab(workspace) == nil {return false}
 	if existing := window_for_workspace(app, workspace); existing != nil {
 		return window_activate(app, existing)
 	}
 	w := window_prepare(app, workspace)
-	if w == nil { return false }
-	if !window_show_prepared(app, w) { window_close(app, w); return false }
+	if w == nil {return false}
+	if !window_show_prepared(app, w) {window_close(app, w); return false}
 	w.preparing = false
 	window_apply_settings(app, w)
-	if !app.options.inactive { _ = window_activate(app, w) }
+	if !app.options.inactive {_ = window_activate(app, w)}
 	return true
 }
 
 @(require_results)
 window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
-	if workspace == nil || selected_tab(workspace) == nil || window_for_workspace(app, workspace) != nil {
+	if workspace == nil ||
+	   selected_tab(workspace) == nil ||
+	   window_for_workspace(app, workspace) != nil {
 		return nil
 	}
-	if reserve(&app.windows, len(app.windows)+1) != nil { return nil }
+	if reserve(&app.windows, len(app.windows) + 1) != nil {return nil}
 	w, allocation_error := new(Window)
 	if allocation_error != nil {
 		return nil
@@ -140,18 +150,18 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.cursor_phase_visible = true
 	w.dirty = true
 	w.workspace = workspace
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, w) { window_free(w); return nil }
-	if w.workspace.selection_anchor == 0 { tab_select_one(w.workspace, w.workspace.selected) }
+	if settings_tab_index(workspace) >= 0 && !settings_load(app, w) {window_free(w); return nil}
+	if w.workspace.selection_anchor == 0 {tab_select_one(w.workspace, w.workspace.selected)}
 	w.tree = &selected_tab(w.workspace).tree
 	g := initial_geometry(app)
-	if entry := focused_session(app, w); entry != nil { g = term.geometry(entry.session) }
-	desc := platform.Window_Desc{
-		title = app.app_id,
-		inactive = app.options.inactive,
-		hidden = true,
+	if entry := focused_session(app, w); entry != nil {g = term.geometry(entry.session)}
+	desc := platform.Window_Desc {
+		title            = app.app_id,
+		inactive         = app.options.inactive,
+		hidden           = true,
 		tabbed_title_bar = true,
-		width = i32(g.surface_width),
-		height = i32(g.surface_height),
+		width            = i32(g.surface_width),
+		height           = i32(g.surface_height),
 	}
 	id, err := platform.window_create(&app.platform, desc)
 	if err != .None {
@@ -192,8 +202,8 @@ window_show_prepared :: proc(app: ^App, w: ^Window) -> bool {
 
 @(require_results)
 window_activate :: proc(app: ^App, w: ^Window) -> bool {
-	err := app.options.inactive ? platform.window_show_inactive(&app.platform, w.id) :
-		platform.window_focus(&app.platform, w.id)
+	err :=
+		app.options.inactive ? platform.window_show_inactive(&app.platform, w.id) : platform.window_focus(&app.platform, w.id)
 	if err != .None {
 		log.errorf("activating the workspace window failed: %v", err)
 		notify(app, .Error, "Could not activate the existing workspace window.")
@@ -203,7 +213,7 @@ window_activate :: proc(app: ^App, w: ^Window) -> bool {
 }
 
 window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
-	for w in app.windows { if w.workspace == workspace { return w } }
+	for w in app.windows {if w.workspace == workspace {return w}}
 	return nil
 }
 
@@ -211,7 +221,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 	id := w.id
 	arrange_cancel(app, w)
 	// Cancelling a gesture which owns this preview may already have destroyed it.
-	if window_find(app, id) == nil { return }
+	if window_find(app, id) == nil {return}
 	window_overlays_cancel(app, w)
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
@@ -297,11 +307,11 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
-	if w.preparing { return }
+	if w.preparing {return}
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
-	if resize(&w.tab_controls, len(w.workspace.tabs)+1) != nil {
+	if resize(&w.tab_controls, len(w.workspace.tabs) + 1) != nil {
 		log.error("resizing tab control states failed")
 	}
 	old_positions := len(w.tab_positions)
@@ -309,28 +319,32 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		log.error("resizing tab positions failed")
 	}
 	for &position, i in w.tab_positions {
-		if i >= old_positions { position.value, position.target = f32(i), f32(i) }
+		if i >= old_positions {position.value, position.target = f32(i), f32(i)}
 	}
 	bar := window_tab_bar(app, w)
-	platform.window_title_bar(&app.platform, w.id, i32(bar.height),
-		i32(bar.x+f32(bar.count)*bar.tab_width+2*bar.button_width))
+	platform.window_title_bar(
+		&app.platform,
+		w.id,
+		i32(bar.height),
+		i32(bar.x + f32(bar.count) * bar.tab_width + 2 * bar.button_width),
+	)
 	pane_header_cancel(w)
-	for &view in w.views { view.header_controls = {} }
+	for &view in w.views {view.header_controls = {}}
 	w.header_height = 0
 	if app.settings.pane.show_headers && !settings_active(w) {
-		w.header_height = math.round(ui.HEADER_HEIGHT*w.scale)
+		w.header_height = math.round(ui.HEADER_HEIGHT * w.scale)
 	}
 	area := window_content_area(app, w)
 	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
 	layout.dividers(w.tree, area, window_gap(app, w), &w.dividers)
-	for i := len(w.views)-1; i >= 0; i -= 1 {
+	for i := len(w.views) - 1; i >= 0; i -= 1 {
 		visible := false
-		for pane in w.panes { visible ||= pane.content == w.views[i].content }
+		for pane in w.panes {visible ||= pane.content == w.views[i].content}
 		if !visible {
 			term_view.destroy(&w.views[i].view)
 			render.draw_list_destroy(&w.views[i].cache)
 			ordered_remove(&w.views, i)
-		} else { w.views[i].valid = false }
+		} else {w.views[i].valid = false}
 	}
 	for pane in w.panes {
 		entry := session_find(app, pane.content.id)
@@ -338,16 +352,21 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 			continue
 		}
 		padding := pane_padding(app, w, entry)
-		columns, rows := term_view.grid_size(w.metrics, pane.rect.width, max(0, pane.rect.height-w.header_height), padding)
-		g := term.Geometry{
-			columns = columns,
-			rows = rows,
-			cell_width = u32(w.metrics.cell_width),
-			cell_height = u32(w.metrics.cell_height),
-			surface_width = u32(w.width),
+		columns, rows := term_view.grid_size(
+			w.metrics,
+			pane.rect.width,
+			max(0, pane.rect.height - w.header_height),
+			padding,
+		)
+		g := term.Geometry {
+			columns        = columns,
+			rows           = rows,
+			cell_width     = u32(w.metrics.cell_width),
+			cell_height    = u32(w.metrics.cell_height),
+			surface_width  = u32(w.width),
 			surface_height = u32(w.height),
-			padding_left = u32(pane.rect.x + padding),
-			padding_top = u32(pane.rect.y + min(pane.rect.height, w.header_height) + padding),
+			padding_left   = u32(pane.rect.x + padding),
+			padding_top    = u32(pane.rect.y + min(pane.rect.height, w.header_height) + padding),
 		}
 		if g != term.geometry(entry.session) {
 			term.resize(entry.session, g)
@@ -358,7 +377,11 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 				log.error("creating a terminal view failed")
 				continue
 			}
-			cached := Pane_View{content = pane.content, view = view, cache = render.draw_list_init()}
+			cached := Pane_View {
+				content = pane.content,
+				view    = view,
+				cache   = render.draw_list_init(),
+			}
 			if _, err := append(&w.views, cached); err != nil {
 				term_view.destroy(&view)
 				render.draw_list_destroy(&cached.cache)
@@ -380,7 +403,7 @@ pane_view :: proc(w: ^Window, content: layout.Content) -> ^term_view.View {
 
 // The session shown in the focused pane, which receives keyboard input.
 focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
-	if w.tree == nil || w.tree.focus == layout.INVALID_NODE { return nil }
+	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return nil}
 	pane, is_pane := w.tree.nodes[w.tree.focus].(layout.Pane)
 	if !is_pane {
 		return nil
@@ -439,7 +462,7 @@ window_render :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 || w.surface == nil {
 		return
 	}
-	if w.preparing { pane_window_preview_render(app, w); return }
+	if w.preparing {pane_window_preview_render(app, w); return}
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}
@@ -475,10 +498,16 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		card := len(w.list.rects)
 		window_card_draw(app, w, pane)
 		if pane.content.kind == .Settings {
-			if card < len(w.list.rects) { w.list.rects[card].color = app.theme.pane }
-			result := ui.editor_draw(&w.editor, settings_layout(w), &w.list, &w.ui_text, app.theme,
-				w.focused && !palette_active(app, w))
-			if result != .Ok { return frame, result }
+			if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
+			result := ui.editor_draw(
+				&w.editor,
+				settings_layout(w),
+				&w.list,
+				&w.ui_text,
+				app.theme,
+				w.focused && !palette_active(app, w),
+			)
+			if result != .Ok {return frame, result}
 			window_card_outline(app, w, pane)
 			continue
 		}
@@ -488,48 +517,67 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			continue
 		}
 		padding := pane_padding(app, w, entry)
-		content_focused := w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
-			!w.find.open
-		style := term_view.Style{
-			family = app.family,
-			selection_background = color(c.selection_background),
-			selection_foreground = selection_foreground,
-			search_foreground = color(c.search_foreground),
-			search_background = color(c.search_background),
+		content_focused :=
+			w.focused && pane.node == w.tree.focus && !palette_active(app, w) && !w.find.open
+		style := term_view.Style {
+			family                     = app.family,
+			selection_background       = color(c.selection_background),
+			selection_foreground       = selection_foreground,
+			search_foreground          = color(c.search_foreground),
+			search_background          = color(c.search_background),
 			search_selected_background = color(c.search_selected_background),
-			cursor_text = color(c.cursor_text),
-			minimum_contrast = app.settings.theme.mode == .Light ? f32(app.settings.terminal.minimum_contrast) : 1,
-			focused = content_focused,
-			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
+			cursor_text                = color(c.cursor_text),
+			minimum_contrast           = app.settings.theme.mode == .Light ? f32(app.settings.terminal.minimum_contrast) : 1,
+			focused                    = content_focused,
+			cursor_phase_visible       = !content_focused || w.cursor_phase_visible,
 		}
-		origin := [2]f32{pane.rect.x + padding, pane.rect.y + min(pane.rect.height, w.header_height) + padding}
+		origin := [2]f32 {
+			pane.rect.x + padding,
+			pane.rect.y + min(pane.rect.height, w.header_height) + padding,
+		}
 		result: glyphs.Result
 		frame, result = build_pane(app, w, pane, entry, view, origin, style)
 		if result != .Ok {
 			return frame, result
 		}
-		if card < len(w.list.rects) { w.list.rects[card].color = frame.background }
+		if card < len(w.list.rects) {w.list.rects[card].color = frame.background}
 		blinking ||= frame.cursor_blinking && content_focused
 		if entry.status != .Running {
 			message := session_message(term.status(entry.session))
-			if message_result := ui.pane_message_draw(&w.list, &w.ui_text, app.theme,
-				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}, message, w.scale, f32(app.settings.pane.corner_radius)*w.scale);
-				message_result != .Ok { return frame, message_result }
+			if message_result := ui.pane_message_draw(
+				&w.list,
+				&w.ui_text,
+				app.theme,
+				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height},
+				message,
+				w.scale,
+				f32(app.settings.pane.corner_radius) * w.scale,
+			); message_result != .Ok {return frame, message_result}
 		}
-		if header_result := pane_header_draw(app, w, pane, entry); header_result != .Ok { return frame, header_result }
+		if header_result := pane_header_draw(app, w, pane, entry);
+		   header_result != .Ok {return frame, header_result}
 		window_card_outline(app, w, pane)
 	}
 	if blinking != w.blinking {
 		w.blinking = blinking
 		reset_blink(w)
 	}
-	if result := window_chrome_draw(app, w); result != .Ok { return frame, result }
-	if result := pane_drag_draw(app, w); result != .Ok { return frame, result }
-	if result := window_leader_draw(app, w); result != .Ok { return frame, result }
+	if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
+	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
+	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {
 		status := find_status(w, focused_session(app, w))
-		result := ui.find_draw(&w.find, &w.list, &w.ui_text, app.theme, status, size.x, size.y, w.scale)
+		result := ui.find_draw(
+			&w.find,
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			status,
+			size.x,
+			size.y,
+			w.scale,
+		)
 		if result != .Ok {
 			return frame, result
 		}
@@ -537,11 +585,23 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if palette_visible(app, w) {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		result := ui.palette_draw(
-			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
+			&app.palette,
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			size.x,
+			size.y,
+			w.scale,
 		)
-		ui.fade_draw(&w.list, layers, rects, glyph_count, app.palette.motion.value,
-			app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0)
-		if result != .Ok { return frame, result }
+		ui.fade_draw(
+			&w.list,
+			layers,
+			rects,
+			glyph_count,
+			app.palette.motion.value,
+			app.palette.open ? 4 * w.scale * (1 - app.palette.motion.value) : 0,
+		)
+		if result != .Ok {return frame, result}
 	}
 	if c := &w.close_confirm; c.open || c.motion.value > 0 {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
@@ -552,21 +612,47 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			_, _, note = workspace_delete_text(app, w)
 			label = "Delete"
 		}
-		result := ui.confirm_draw(c, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale, title, body,
-			label, note)
-		ui.fade_draw(&w.list, layers, rects, glyph_count, c.motion.value, c.open ? 4*w.scale*(1-c.motion.value) : 0)
-		if result != .Ok { return frame, result }
+		result := ui.confirm_draw(
+			c,
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			size.x,
+			size.y,
+			w.scale,
+			title,
+			body,
+			label,
+			note,
+		)
+		ui.fade_draw(
+			&w.list,
+			layers,
+			rects,
+			glyph_count,
+			c.motion.value,
+			c.open ? 4 * w.scale * (1 - c.motion.value) : 0,
+		)
+		if result != .Ok {return frame, result}
 	}
 	if w.rename_open {
-		if result := rename_draw(app, w); result != .Ok { return frame, result }
+		if result := rename_draw(app, w); result != .Ok {return frame, result}
 	}
 	if w.tab_menu.open {
-		if result := tab_menu_draw(app, w); result != .Ok { return frame, result }
+		if result := tab_menu_draw(app, w); result != .Ok {return frame, result}
 	}
 	if w.workspace_picker.open {
-		if result := workspace_picker_draw(app, w); result != .Ok { return frame, result }
+		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
 	}
-	return frame, ui.notices_draw(&app.notices, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale)
+	return frame, ui.notices_draw(
+		&app.notices,
+		&w.list,
+		&w.ui_text,
+		app.theme,
+		size.x,
+		size.y,
+		w.scale,
+	)
 }
 
 // Rebuilds every graphics object after the GPU was reset or removed; sessions are untouched.
@@ -589,48 +675,81 @@ recover_device :: proc(app: ^App) {
 	glyphs.reset_device(&app.cache, device)
 	for w in app.windows {
 		native := platform.window_native_handle(&app.platform, w.id)
-		surface, surface_error := render.surface_create(device, native, max(w.width, 1), max(w.height, 1))
+		surface, surface_error := render.surface_create(
+			device,
+			native,
+			max(w.width, 1),
+			max(w.height, 1),
+		)
 		if surface_error != .None {
 			log.errorf("recreating a window surface failed: %v", surface_error)
 			continue
 		}
 		w.surface = surface
-		for &pane in w.views { pane.valid = false }
+		for &pane in w.views {pane.valid = false}
 		w.dirty = true
 	}
 }
 
 @(private)
 build_pane :: proc(
-	app: ^App, w: ^Window, pane: layout.Pane_Rect, entry: ^Session_Entry,
-	view: ^term_view.View, origin: [2]f32, style: term_view.Style,
-) -> (term_view.Frame, glyphs.Result) {
+	app: ^App,
+	w: ^Window,
+	pane: layout.Pane_Rect,
+	entry: ^Session_Entry,
+	view: ^term_view.View,
+	origin: [2]f32,
+	style: term_view.Style,
+) -> (
+	term_view.Frame,
+	glyphs.Result,
+) {
 	clip := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
-	radius := f32(app.settings.pane.corner_radius)*w.scale
+	radius := f32(app.settings.pane.corner_radius) * w.scale
 	for &cached in w.views {
-		if cached.content != pane.content { continue }
+		if cached.content != pane.content {continue}
 		if len(w.panes) == 1 {
-			if render.push_layer(&w.list, clip, radius) != .None { return {}, .Ok }
+			if render.push_layer(&w.list, clip, radius) != .None {return {}, .Ok}
 			cached.builds += 1
-			return term_view.build(view, entry.session, app.fonts, &app.cache,
-				&w.list, origin, w.metrics, style)
+			return term_view.build(
+				view,
+				entry.session,
+				app.fonts,
+				&app.cache,
+				&w.list,
+				origin,
+				w.metrics,
+				style,
+			)
 		}
 		generation := term.generation(entry.session)
 		atlas := render.atlas_generation(app.device)
-		if !cached.valid || cached.generation != generation || cached.atlas_generation != atlas ||
+		if !cached.valid ||
+		   cached.generation != generation ||
+		   cached.atlas_generation != atlas ||
 		   cached.style != style {
 			cached.valid = false
 			render.draw_list_reset(&cached.cache)
-			if render.push_layer(&cached.cache, clip, radius) != .None { return {}, .Ok }
-			frame, result := term_view.build(view, entry.session, app.fonts, &app.cache,
-				&cached.cache, origin, w.metrics, style)
-			if result != .Ok { return frame, result }
+			if render.push_layer(&cached.cache, clip, radius) != .None {return {}, .Ok}
+			frame, result := term_view.build(
+				view,
+				entry.session,
+				app.fonts,
+				&app.cache,
+				&cached.cache,
+				origin,
+				w.metrics,
+				style,
+			)
+			if result != .Ok {return frame, result}
 			cached.frame, cached.style = frame, style
-			cached.generation, cached.atlas_generation = generation, render.atlas_generation(app.device)
+			cached.generation, cached.atlas_generation =
+				generation, render.atlas_generation(app.device)
 			cached.valid = true
 			cached.builds += 1
 		}
-		if render.append_list(&w.list, &cached.cache) != .None { log.error("copying a pane frame failed") }
+		if render.append_list(&w.list, &cached.cache) !=
+		   .None {log.error("copying a pane frame failed")}
 		return cached.frame, .Ok
 	}
 	return {}, .Ok

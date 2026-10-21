@@ -6,9 +6,9 @@ Env_Var :: struct {
 
 Spawn_Options :: struct {
 	command_line, working_directory: string,
-	environment: []Env_Var,
-	cols, rows: u16,
-	refresh_environment: bool,
+	environment:                     []Env_Var,
+	cols, rows:                      u16,
+	refresh_environment:             bool,
 }
 
 Spawn_Error_Kind :: enum {
@@ -27,7 +27,7 @@ Spawn_Error_Kind :: enum {
 }
 
 Spawn_Error :: struct {
-	kind: Spawn_Error_Kind,
+	kind:    Spawn_Error_Kind,
 	os_code: u32,
 }
 

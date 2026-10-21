@@ -18,38 +18,30 @@ SIZING_TIMER_ID :: 1
 SHELL_EXECUTE_ERROR_MAX :: 32
 
 FLASHWINFO :: struct {
-	cbSize: w.UINT,
-	hwnd: w.HWND,
-	dwFlags: w.DWORD,
-	uCount: w.UINT,
+	cbSize:    w.UINT,
+	hwnd:      w.HWND,
+	dwFlags:   w.DWORD,
+	uCount:    w.UINT,
 	dwTimeout: w.DWORD,
 }
 
 HKL :: distinct rawptr
 
-@(default_calling_convention="system")
+@(default_calling_convention = "system")
 foreign dwmapi {
-	DwmDefWindowProc :: proc(hwnd: w.HWND, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM,
-		result: ^w.LRESULT) -> w.BOOL ---
+	DwmDefWindowProc :: proc(hwnd: w.HWND, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM, result: ^w.LRESULT) -> w.BOOL ---
 }
 
-@(default_calling_convention="system")
+@(default_calling_convention = "system")
 foreign user32 {
-	MsgWaitForMultipleObjectsEx :: proc(
-		nCount: w.DWORD, pHandles: [^]w.HANDLE, dwMilliseconds, dwWakeMask, dwFlags: w.DWORD,
-	) -> w.DWORD ---
+	MsgWaitForMultipleObjectsEx :: proc(nCount: w.DWORD, pHandles: [^]w.HANDLE, dwMilliseconds, dwWakeMask, dwFlags: w.DWORD) -> w.DWORD ---
 	GetKeyboardLayout :: proc(idThread: w.DWORD) -> HKL ---
-	ToUnicodeEx :: proc(
-		wVirtKey, wScanCode: w.UINT, lpKeyState: ^w.BYTE, pwszBuff: w.LPWSTR,
-		cchBuff: w.INT, wFlags: w.UINT, dwhkl: HKL,
-	) -> w.INT ---
+	ToUnicodeEx :: proc(wVirtKey, wScanCode: w.UINT, lpKeyState: ^w.BYTE, pwszBuff: w.LPWSTR, cchBuff: w.INT, wFlags: w.UINT, dwhkl: HKL) -> w.INT ---
 	FlashWindowEx :: proc(pfwi: ^FLASHWINFO) -> w.BOOL ---
 }
 
-@(default_calling_convention="system")
+@(default_calling_convention = "system")
 foreign kernel32 {
-	CreateMutexW :: proc(
-		lpMutexAttributes: ^w.SECURITY_ATTRIBUTES, bInitialOwner: w.BOOL, lpName: w.LPCWSTR,
-	) -> w.HANDLE ---
+	CreateMutexW :: proc(lpMutexAttributes: ^w.SECURITY_ATTRIBUTES, bInitialOwner: w.BOOL, lpName: w.LPCWSTR) -> w.HANDLE ---
 	OpenMutexW :: proc(dwDesiredAccess: w.DWORD, bInheritHandle: w.BOOL, lpName: w.LPCWSTR) -> w.HANDLE ---
 }

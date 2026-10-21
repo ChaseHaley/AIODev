@@ -7,10 +7,10 @@ when ODIN_OS == .Windows {
 Mode :: u16
 
 Mode_Report_State :: enum i32 {
-	Not_Recognized = 0,
-	Set = 1,
-	Reset = 2,
-	Permanently_Set = 3,
+	Not_Recognized    = 0,
+	Set               = 1,
+	Reset             = 2,
+	Permanently_Set   = 3,
 	Permanently_Reset = 4,
 }
 
@@ -70,14 +70,8 @@ mode_ansi :: proc(mode: Mode) -> bool {
 	return mode >> 15 != 0
 }
 
-@(default_calling_convention="c", link_prefix="ghostty_")
+@(default_calling_convention = "c", link_prefix = "ghostty_")
 foreign lib {
 	@(require_results)
-	mode_report_encode :: proc(
-		mode: Mode,
-		state: Mode_Report_State,
-		buf: [^]u8,
-		buf_len: uint,
-		out_written: ^uint,
-	) -> Result ---
+	mode_report_encode :: proc(mode: Mode, state: Mode_Report_State, buf: [^]u8, buf_len: uint, out_written: ^uint) -> Result ---
 }

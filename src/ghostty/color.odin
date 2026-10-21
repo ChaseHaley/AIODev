@@ -12,7 +12,7 @@ Color_Rgb :: struct {
 
 Color_Palette_Index :: u8
 
-@(default_calling_convention="c", link_prefix="ghostty_")
+@(default_calling_convention = "c", link_prefix = "ghostty_")
 foreign lib {
 	color_palette_default :: proc(out: ^Color_Rgb) ---
 }

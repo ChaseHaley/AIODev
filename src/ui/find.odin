@@ -4,14 +4,19 @@ import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
 
-@(private) FIND_WIDTH :: 380
-@(private) FIND_HEIGHT :: 40
-@(private) FIND_MARGIN :: 12
-@(private) FIND_PADDING :: 12
-@(private) FIND_RADIUS :: 8
+@(private)
+FIND_WIDTH :: 380
+@(private)
+FIND_HEIGHT :: 40
+@(private)
+FIND_MARGIN :: 12
+@(private)
+FIND_PADDING :: 12
+@(private)
+FIND_RADIUS :: 8
 
 Find_Bar :: struct {
-	open: bool,
+	open:  bool,
 	query: Text_Field,
 }
 
@@ -65,8 +70,10 @@ find_key :: proc(f: ^Find_Bar, e: platform.Key_Event) -> Find_Outcome {
 @(private)
 find_change :: proc(change: Field_Change) -> Find_Outcome {
 	switch change {
-	case .None: return .None
-	case .Moved: return .Moved
+	case .None:
+		return .None
+	case .Moved:
+		return .Moved
 	case .Edited:
 	}
 	return .Changed
@@ -105,7 +112,12 @@ find_draw :: proc(
 	}
 	radius := FIND_RADIUS * scale
 	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
-	border := render.Rect{panel.x - scale, panel.y - scale, panel.width + 2 * scale, panel.height + 2 * scale}
+	border := render.Rect {
+		panel.x - scale,
+		panel.y - scale,
+		panel.width + 2 * scale,
+		panel.height + 2 * scale,
+	}
 	draw_rect(list, {rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale})
 	draw_rect(list, {rect = border, color = theme.border, radius = radius + scale})
 	draw_rect(list, {rect = panel, color = theme.surface, radius = radius})
@@ -117,6 +129,17 @@ find_draw :: proc(
 		return result
 	}
 	query_width := max(0, status_x - padding - (panel.x + padding))
-	return field_draw(&f.query, list, text, theme, panel.x + padding, baseline, query_width, true,
-		"Find in scrollback", theme.text, max(1, 1.5 * scale))
+	return field_draw(
+		&f.query,
+		list,
+		text,
+		theme,
+		panel.x + padding,
+		baseline,
+		query_width,
+		true,
+		"Find in scrollback",
+		theme.text,
+		max(1, 1.5 * scale),
+	)
 }

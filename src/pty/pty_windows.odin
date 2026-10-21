@@ -6,17 +6,17 @@ import "core:log"
 import "core:slice"
 import "core:strings"
 import "core:sync"
-import "core:unicode/utf8"
 import w "core:sys/windows"
+import "core:unicode/utf8"
 
 Pty :: struct {
 	output, input, process, job: w.HANDLE,
-	id: u32,
-	console: HPCON,
-	console_mutex: sync.Mutex, // Guards console ownership and active resize calls.
-	console_changed: sync.Cond,
-	resizing: int,
-	closing: bool,
+	id:                          u32,
+	console:                     HPCON,
+	console_mutex:               sync.Mutex, // Guards console ownership and active resize calls.
+	console_changed:             sync.Cond,
+	resizing:                    int,
+	closing:                     bool,
 }
 
 process_id :: proc(p: ^Pty) -> u32 {
@@ -37,7 +37,7 @@ io_failure :: proc(call: string, kind: Error, code: u32) -> Error {
 
 @(private)
 close_handle :: proc(handle: ^w.HANDLE) {
-	if handle^ == nil { return }
+	if handle^ == nil {return}
 	if !bool(w.CloseHandle(handle^)) {
 		log.errorf("CloseHandle failed: %v", w.GetLastError())
 	}
@@ -46,25 +46,30 @@ close_handle :: proc(handle: ^w.HANDLE) {
 
 @(private)
 Environment_Entry :: struct {
-	text: []u16,
+	text:  []u16,
 	owned: cstring16,
 }
 
 @(private, require_results)
 parse_environment :: proc(
-	parent: w.LPWCH, extra: int, allocator: runtime.Allocator,
-) -> ([dynamic]Environment_Entry, Spawn_Error) {
+	parent: w.LPWCH,
+	extra: int,
+	allocator: runtime.Allocator,
+) -> (
+	[dynamic]Environment_Entry,
+	Spawn_Error,
+) {
 	block := cast([^]u16)parent
 	length, count := 0, 0
 	for block[length] != 0 {
-		for block[length] != 0 { length += 1 }
+		for block[length] != 0 {length += 1}
 		length += 1
 		count += 1
 	}
-	entries, err := make([dynamic]Environment_Entry, count, count+extra, allocator)
-	if err != nil { return nil, {.Out_Of_Memory, 0} }
+	entries, err := make([dynamic]Environment_Entry, count, count + extra, allocator)
+	if err != nil {return nil, {.Out_Of_Memory, 0}}
 	start, index := 0, 0
-	for i in 0..<length {
+	for i in 0 ..< length {
 		if block[i] == 0 {
 			entries[index].text = block[start:i]
 			index += 1
@@ -77,7 +82,7 @@ parse_environment :: proc(
 @(private)
 environment_name :: proc(text: []u16) -> []u16 {
 	separator := 1
-	for separator < len(text) && text[separator] != '=' { separator += 1 }
+	for separator < len(text) && text[separator] != '=' {separator += 1}
 	return text[:separator]
 }
 
@@ -90,20 +95,27 @@ compare_environment :: proc(a, b: []u16) -> i32 {
 
 @(private, require_results)
 apply_environment_override :: proc(
-	entries: ^[dynamic]Environment_Entry, item: Env_Var, allocator: runtime.Allocator,
+	entries: ^[dynamic]Environment_Entry,
+	item: Env_Var,
+	allocator: runtime.Allocator,
 ) -> Spawn_Error {
-	if len(item.name) == 0 || strings.contains_any(item.name, "=\x00") ||
-	   strings.contains(item.value, "\x00") || !utf8.valid_string(item.name) ||
+	if len(item.name) == 0 ||
+	   strings.contains_any(item.name, "=\x00") ||
+	   strings.contains(item.value, "\x00") ||
+	   !utf8.valid_string(item.name) ||
 	   !utf8.valid_string(item.value) {
 		return {.Invalid_Environment, 0}
 	}
 	pieces := [?]string{item.name, "=", item.value}
 	text, text_err := strings.concatenate(pieces[:], allocator)
-	if text_err != nil { return {.Out_Of_Memory, 0} }
+	if text_err != nil {return {.Out_Of_Memory, 0}}
 	defer delete(text, allocator)
 	wide := w.utf8_to_wstring(text, allocator)
-	if wide == nil { return {.Out_Of_Memory, 0} }
-	entry := Environment_Entry{text = slice.from_ptr(cast(^u16)wide, len(wide)), owned = wide}
+	if wide == nil {return {.Out_Of_Memory, 0}}
+	entry := Environment_Entry {
+		text  = slice.from_ptr(cast(^u16)wide, len(wide)),
+		owned = wide,
+	}
 	name := environment_name(entry.text)
 	for &existing in entries^ {
 		if compare_environment(environment_name(existing.text), name) == CSTR_EQUAL {
@@ -129,12 +141,16 @@ sort_environment :: proc(entries: []Environment_Entry) {
 
 @(private, require_results)
 serialize_environment :: proc(
-	entries: []Environment_Entry, allocator: runtime.Allocator,
-) -> ([]u16, Spawn_Error) {
+	entries: []Environment_Entry,
+	allocator: runtime.Allocator,
+) -> (
+	[]u16,
+	Spawn_Error,
+) {
 	length := 1
-	for entry in entries { length += len(entry.text) + 1 }
+	for entry in entries {length += len(entry.text) + 1}
 	block, err := make([]u16, max(length, 2), allocator)
-	if err != nil || block == nil { return nil, {.Out_Of_Memory, 0} }
+	if err != nil || block == nil {return nil, {.Out_Of_Memory, 0}}
 	offset := 0
 	for entry in entries {
 		copy(block[offset:], entry.text)
@@ -144,8 +160,14 @@ serialize_environment :: proc(
 }
 
 @(private, require_results)
-environment_block :: proc(overrides: []Env_Var, allocator: runtime.Allocator,
-	refresh: bool) -> ([]u16, Spawn_Error) {
+environment_block :: proc(
+	overrides: []Env_Var,
+	allocator: runtime.Allocator,
+	refresh: bool,
+) -> (
+	[]u16,
+	Spawn_Error,
+) {
 	parent := w.GetEnvironmentStringsW()
 	if parent == nil {
 		return nil, spawn_failure("GetEnvironmentStringsW", .Environment, u32(w.GetLastError()))
@@ -158,12 +180,18 @@ environment_block :: proc(overrides: []Env_Var, allocator: runtime.Allocator,
 	fresh: rawptr
 	if refresh {
 		token: w.HANDLE
-		if !bool(w.OpenProcessToken(w.GetCurrentProcess(), w.TOKEN_QUERY|w.TOKEN_DUPLICATE, &token)) {
+		if !bool(
+			w.OpenProcessToken(w.GetCurrentProcess(), w.TOKEN_QUERY | w.TOKEN_DUPLICATE, &token),
+		) {
 			return nil, spawn_failure("OpenProcessToken", .Environment, u32(w.GetLastError()))
 		}
 		defer close_handle(&token)
 		if !bool(CreateEnvironmentBlock(&fresh, token, true)) {
-			return nil, spawn_failure("CreateEnvironmentBlock", .Environment, u32(w.GetLastError()))
+			return nil, spawn_failure(
+				"CreateEnvironmentBlock",
+				.Environment,
+				u32(w.GetLastError()),
+			)
 		}
 	}
 	defer if fresh != nil && !bool(DestroyEnvironmentBlock(fresh)) {
@@ -171,9 +199,9 @@ environment_block :: proc(overrides: []Env_Var, allocator: runtime.Allocator,
 	}
 	source := fresh != nil ? cast(w.LPWCH)fresh : parent
 	entries, parse_err := parse_environment(source, len(overrides), allocator)
-	if parse_err.kind != .None { return nil, parse_err }
+	if parse_err.kind != .None {return nil, parse_err}
 	defer {
-		for entry in entries { delete(entry.owned, allocator) }
+		for entry in entries {delete(entry.owned, allocator)}
 		delete(entries)
 	}
 	for item in overrides {
@@ -188,20 +216,25 @@ environment_block :: proc(overrides: []Env_Var, allocator: runtime.Allocator,
 @(require_results)
 spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, Spawn_Error) {
 	p: Pty
-	if options.cols == 0 || options.rows == 0 || options.cols > u16(max(i16)) ||
-	   options.rows > u16(max(i16)) || len(options.command_line) == 0 ||
-	   strings.contains(options.command_line, "\x00") || !utf8.valid_string(options.command_line) {
+	if options.cols == 0 ||
+	   options.rows == 0 ||
+	   options.cols > u16(max(i16)) ||
+	   options.rows > u16(max(i16)) ||
+	   len(options.command_line) == 0 ||
+	   strings.contains(options.command_line, "\x00") ||
+	   !utf8.valid_string(options.command_line) {
 		return {}, {.Invalid_Argument, 0}
 	}
-	if len(options.working_directory) == 0 || strings.contains(options.working_directory, "\x00") ||
+	if len(options.working_directory) == 0 ||
+	   strings.contains(options.working_directory, "\x00") ||
 	   !utf8.valid_string(options.working_directory) {
 		return {}, {.Invalid_Working_Directory, ERROR_DIRECTORY}
 	}
 	command := w.utf8_to_wstring(options.command_line, allocator)
-	if command == nil { return {}, {.Out_Of_Memory, 0} }
+	if command == nil {return {}, {.Out_Of_Memory, 0}}
 	defer delete(command, allocator)
 	directory := w.utf8_to_wstring(options.working_directory, allocator)
-	if directory == nil { return {}, {.Out_Of_Memory, 0} }
+	if directory == nil {return {}, {.Out_Of_Memory, 0}}
 	defer delete(directory, allocator)
 	attributes := w.GetFileAttributesW(directory)
 	if attributes == w.INVALID_FILE_ATTRIBUTES {
@@ -210,7 +243,11 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	if attributes & w.FILE_ATTRIBUTE_DIRECTORY == 0 {
 		return {}, {.Invalid_Working_Directory, ERROR_DIRECTORY}
 	}
-	environment, env_err := environment_block(options.environment, allocator, options.refresh_environment)
+	environment, env_err := environment_block(
+		options.environment,
+		allocator,
+		options.refresh_environment,
+	)
 	if env_err.kind != .None {
 		return {}, env_err
 	}
@@ -233,7 +270,7 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	size_cells := w.COORD{i16(options.cols), i16(options.rows)}
 	api := conpty()
 	flags := u32(PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE)
-	if api.bundled { flags |= PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES }
+	if api.bundled {flags |= PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES}
 	result := api.create(size_cells, console_input, console_output, flags, &p.console)
 	if u32(result) == w.E_INVALIDARG {
 		result = api.create(size_cells, console_input, console_output, 0, &p.console)
@@ -257,22 +294,37 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 		return {}, spawn_failure("InitializeProcThreadAttributeList", .Attributes, u32(w.GetLastError()))
 	}
 	defer DeleteProcThreadAttributeList(raw_data(storage))
-	if !bool(UpdateProcThreadAttribute(
-		raw_data(storage), 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, rawptr(p.console), size_of(HPCON), nil, nil,
-	)) {
+	if !bool(
+		UpdateProcThreadAttribute(
+			raw_data(storage),
+			0,
+			PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+			rawptr(p.console),
+			size_of(HPCON),
+			nil,
+			nil,
+		),
+	) {
 		return {}, spawn_failure("UpdateProcThreadAttribute", .Attributes, u32(w.GetLastError()))
 	}
 	p.job = CreateJobObjectW(nil, nil)
 	if p.job == nil {
 		return {}, spawn_failure("CreateJobObjectW", .Job, u32(w.GetLastError()))
 	}
-	limits := JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+	limits := JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
 		BasicLimitInformation = {LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE},
 	}
-	if !bool(SetInformationJobObject(p.job, JobObjectExtendedLimitInformation, &limits, size_of(limits))) {
+	if !bool(
+		SetInformationJobObject(
+			p.job,
+			JobObjectExtendedLimitInformation,
+			&limits,
+			size_of(limits),
+		),
+	) {
 		return {}, spawn_failure("SetInformationJobObject", .Job, u32(w.GetLastError()))
 	}
-	startup := STARTUPINFOEXW{
+	startup := STARTUPINFOEXW {
 		StartupInfo = {cb = size_of(STARTUPINFOEXW), dwFlags = w.STARTF_USESTDHANDLES},
 		lpAttributeList = raw_data(storage),
 	}
@@ -281,11 +333,23 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	if !bool(w.SetConsoleCtrlHandler(nil, false)) {
 		log.errorf("SetConsoleCtrlHandler failed: %v", w.GetLastError())
 	}
-	process_flags := u32(w.CREATE_UNICODE_ENVIRONMENT | w.EXTENDED_STARTUPINFO_PRESENT | w.CREATE_SUSPENDED)
-	if !bool(w.CreateProcessW(
-		nil, command, nil, nil, false, process_flags, raw_data(environment), directory,
-		&startup.StartupInfo, &info,
-	)) {
+	process_flags := u32(
+		w.CREATE_UNICODE_ENVIRONMENT | w.EXTENDED_STARTUPINFO_PRESENT | w.CREATE_SUSPENDED,
+	)
+	if !bool(
+		w.CreateProcessW(
+			nil,
+			command,
+			nil,
+			nil,
+			false,
+			process_flags,
+			raw_data(environment),
+			directory,
+			&startup.StartupInfo,
+			&info,
+		),
+	) {
 		return {}, spawn_failure("CreateProcessW", .Start_Process, u32(w.GetLastError()))
 	}
 	p.process = info.hProcess
@@ -336,7 +400,7 @@ write :: proc(p: ^Pty, data: []u8) -> Error {
 	offset := 0
 	for offset < len(data) {
 		count: u32
-		request := u32(min(len(data)-offset, int(max(u32))))
+		request := u32(min(len(data) - offset, int(max(u32))))
 		if !bool(w.WriteFile(p.input, raw_data(data[offset:]), request, &count, nil)) {
 			code := u32(w.GetLastError())
 			if code == w.ERROR_BROKEN_PIPE || code == w.ERROR_NO_DATA {
@@ -440,24 +504,40 @@ destroy :: proc(p: ^Pty) {
 
 @(require_results)
 error_message :: proc(
-	err: Spawn_Error, options: Spawn_Options, allocator := context.allocator,
-) -> (string, Error) {
-	if err.kind == .None { return "", .None }
+	err: Spawn_Error,
+	options: Spawn_Options,
+	allocator := context.allocator,
+) -> (
+	string,
+	Error,
+) {
+	if err.kind == .None {return "", .None}
 	prefix, subject := "", ""
 	switch err.kind {
-	case .None: return "", .None
-	case .Invalid_Argument: prefix = "Invalid shell command line or terminal size"
+	case .None:
+		return "", .None
+	case .Invalid_Argument:
+		prefix = "Invalid shell command line or terminal size"
 	case .Invalid_Working_Directory:
 		prefix, subject = "Could not use working directory", options.working_directory
-	case .Invalid_Environment: prefix = "Invalid environment variable name or value"
-	case .Out_Of_Memory: prefix = "Not enough memory to start the shell"
-	case .Environment: prefix = "Could not read the parent environment"
-	case .Pipe: prefix = "Could not create terminal pipes"
-	case .Console: prefix = "Could not create the terminal console"
-	case .Attributes: prefix = "Could not configure shell process attributes"
-	case .Job: prefix = "Could not configure the shell process job"
-	case .Start_Process: prefix, subject = "Could not start", options.command_line
-	case .Resume_Process: prefix, subject = "Could not resume", options.command_line
+	case .Invalid_Environment:
+		prefix = "Invalid environment variable name or value"
+	case .Out_Of_Memory:
+		prefix = "Not enough memory to start the shell"
+	case .Environment:
+		prefix = "Could not read the parent environment"
+	case .Pipe:
+		prefix = "Could not create terminal pipes"
+	case .Console:
+		prefix = "Could not create the terminal console"
+	case .Attributes:
+		prefix = "Could not configure shell process attributes"
+	case .Job:
+		prefix = "Could not configure the shell process job"
+	case .Start_Process:
+		prefix, subject = "Could not start", options.command_line
+	case .Resume_Process:
+		prefix, subject = "Could not resume", options.command_line
 	}
 	wide: [2048]u16
 	utf8_buffer: [8192]u8
@@ -465,7 +545,7 @@ error_message :: proc(
 	message := ""
 	if err.os_code != 0 {
 		code := err.os_code
-		if w.HRESULT_FACILITY(code) == .WIN32 { code = u32(w.HRESULT_CODE(code)) }
+		if w.HRESULT_FACILITY(code) == .WIN32 {code = u32(w.HRESULT_CODE(code))}
 		flags := u32(w.FORMAT_MESSAGE_FROM_SYSTEM | w.FORMAT_MESSAGE_IGNORE_INSERTS)
 		length := w.FormatMessageW(flags, nil, code, 0, raw_data(wide[:]), len(wide), nil)
 		if length == 0 {
@@ -474,7 +554,11 @@ error_message :: proc(
 		} else {
 			message = w.utf16_to_utf8(utf8_buffer[:], wide[:length])
 			if len(message) == 0 {
-				return "", io_failure("WideCharToMultiByte", .Invalid_Argument, u32(w.GetLastError()))
+				return "", io_failure(
+					"WideCharToMultiByte",
+					.Invalid_Argument,
+					u32(w.GetLastError()),
+				)
 			}
 		}
 	}
@@ -483,8 +567,15 @@ error_message :: proc(
 		quote_start, quote_end = " \"", "\""
 	}
 	separator := len(message) == 0 ? "." : ": "
-	parts := [?]string{prefix, quote_start, subject, quote_end, separator, strings.trim_space(message)}
+	parts := [?]string {
+		prefix,
+		quote_start,
+		subject,
+		quote_end,
+		separator,
+		strings.trim_space(message),
+	}
 	result, alloc_err := strings.concatenate(parts[:], allocator)
-	if alloc_err != nil || len(result) == 0 { return "", .Out_Of_Memory }
+	if alloc_err != nil || len(result) == 0 {return "", .Out_Of_Memory}
 	return result, .None
 }

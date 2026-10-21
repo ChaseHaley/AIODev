@@ -13,15 +13,12 @@ SECURITY_IDENTIFICATION :: u32(w.SECURITY_IMPERSONATION_LEVEL.SecurityIdentifica
 foreign import kernel32 "system:kernel32.lib"
 foreign import advapi32 "system:advapi32.lib"
 
-@(private, default_calling_convention="system")
+@(private, default_calling_convention = "system")
 foreign kernel32 {
 	GetNamedPipeServerProcessId :: proc(Pipe: w.HANDLE, ServerProcessId: ^w.ULONG) -> w.BOOL ---
 }
 
-@(private, default_calling_convention="system")
+@(private, default_calling_convention = "system")
 foreign advapi32 {
-	ConvertStringSecurityDescriptorToSecurityDescriptorW :: proc(
-		StringSecurityDescriptor: w.LPCWSTR, StringSDRevision: w.DWORD,
-		SecurityDescriptor: ^w.PSECURITY_DESCRIPTOR, SecurityDescriptorSize: ^w.ULONG,
-	) -> w.BOOL ---
+	ConvertStringSecurityDescriptorToSecurityDescriptorW :: proc(StringSecurityDescriptor: w.LPCWSTR, StringSDRevision: w.DWORD, SecurityDescriptor: ^w.PSECURITY_DESCRIPTOR, SecurityDescriptorSize: ^w.ULONG) -> w.BOOL ---
 }

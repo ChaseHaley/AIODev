@@ -14,19 +14,23 @@ instance_upload :: proc(d: ^Device, buffer: ^Instance_Buffer, data: []$T) -> Err
 		for capacity < len(data) {
 			capacity *= 2
 		}
-		desc := d3d.BUFFER_DESC{
-			ByteWidth = u32(capacity * size_of(T)),
-			Usage = .DYNAMIC,
-			BindFlags = {.SHADER_RESOURCE},
-			CPUAccessFlags = {.WRITE},
-			MiscFlags = {.BUFFER_STRUCTURED},
+		desc := d3d.BUFFER_DESC {
+			ByteWidth           = u32(capacity * size_of(T)),
+			Usage               = .DYNAMIC,
+			BindFlags           = {.SHADER_RESOURCE},
+			CPUAccessFlags      = {.WRITE},
+			MiscFlags           = {.BUFFER_STRUCTURED},
 			StructureByteStride = size_of(T),
 		}
 		native: ^d3d.IBuffer
-		if err := checked(d, d.native->CreateBuffer(&desc, nil, &native), "CreateBuffer instances"); err != .None {
+		if err := checked(
+			d,
+			d.native->CreateBuffer(&desc, nil, &native),
+			"CreateBuffer instances",
+		); err != .None {
 			return err
 		}
-		view_desc := d3d.SHADER_RESOURCE_VIEW_DESC{
+		view_desc := d3d.SHADER_RESOURCE_VIEW_DESC {
 			ViewDimension = .BUFFER,
 			Buffer = {NumElements = u32(capacity)},
 		}
@@ -38,7 +42,11 @@ instance_upload :: proc(d: ^Device, buffer: ^Instance_Buffer, data: []$T) -> Err
 		}
 		release(buffer.view)
 		release(buffer.buffer)
-		buffer^ = {buffer = native, view = view, capacity = capacity}
+		buffer^ = {
+			buffer   = native,
+			view     = view,
+			capacity = capacity,
+		}
 	}
 	mapped: d3d.MAPPED_SUBRESOURCE
 	hr := d.ctx->Map(buffer.buffer, 0, .WRITE_DISCARD, {}, &mapped)
@@ -76,7 +84,11 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 	c->ClearRenderTargetView(s.target, &premultiplied)
 	c->OMSetBlendState(d.blend, nil, max(u32))
 	c->RSSetState(d.rasterizer)
-	viewport := d3d.VIEWPORT{Width = f32(s.width), Height = f32(s.height), MaxDepth = 1}
+	viewport := d3d.VIEWPORT {
+		Width    = f32(s.width),
+		Height   = f32(s.height),
+		MaxDepth = 1,
+	}
 	c->RSSetViewports(1, &viewport)
 	c->IASetInputLayout(nil)
 	c->IASetPrimitiveTopology(.TRIANGLELIST)
@@ -86,9 +98,9 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 	c->VSSetShaderResources(0, len(views), &views[0])
 	atlases := [2]^d3d.IShaderResourceView{d.atlas.view, d.color_atlas.view}
 	c->PSSetShaderResources(2, len(atlases), &atlases[0])
-	constants := Frame_Constants{
-		gamma_ratios = gamma_ratios(d.gamma.gamma),
-		target_size = {f32(s.width), f32(s.height)},
+	constants := Frame_Constants {
+		gamma_ratios      = gamma_ratios(d.gamma.gamma),
+		target_size       = {f32(s.width), f32(s.height)},
 		enhanced_contrast = d.gamma.enhanced_contrast,
 	}
 	for layer in list.layers {
@@ -100,7 +112,8 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 		constants.round_clip, constants.clip_radius = layer.clip, layer.radius
 		constants.rect_start, constants.glyph_start = u32(layer.rect_start), u32(layer.glyph_start)
 		mapped: d3d.MAPPED_SUBRESOURCE
-		if err := checked(d, c->Map(d.constants, 0, .WRITE_DISCARD, {}, &mapped), "Map constants"); err != .None {
+		if err := checked(d, c->Map(d.constants, 0, .WRITE_DISCARD, {}, &mapped), "Map constants");
+		   err != .None {
 			return err
 		}
 		mem.copy(mapped.pData, &constants, size_of(constants))

@@ -8,8 +8,8 @@ Key_Event :: distinct rawptr
 
 Key_Action :: enum i32 {
 	Release = 0,
-	Press = 1,
-	Repeat = 2,
+	Press   = 1,
+	Repeat  = 2,
 }
 
 Mod :: enum u16 {
@@ -25,7 +25,7 @@ Mod :: enum u16 {
 	Super_Side,
 }
 
-Mods :: bit_set[Mod; u16]
+Mods :: bit_set[Mod;u16]
 
 Key :: enum i32 {
 	Unidentified = 0,
@@ -206,7 +206,7 @@ Key :: enum i32 {
 	Paste,
 }
 
-@(default_calling_convention="c", link_prefix="ghostty_")
+@(default_calling_convention = "c", link_prefix = "ghostty_")
 foreign lib {
 	@(require_results)
 	key_event_new :: proc(allocator: ^Allocator, event: ^Key_Event) -> Result ---

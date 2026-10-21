@@ -18,10 +18,9 @@ default_path :: proc(allocator := context.allocator) -> (string, os.Error) {
 		return "", os.Platform_Error(hr)
 	}
 	base, err := windows.wstring_to_utf8(windows.wstring(wide), -1, allocator)
-	if err != nil { return "", err }
+	if err != nil {return "", err}
 	defer delete(base, allocator)
 	result, copy_error := strings.concatenate({base, "\\AIODev\\settings.ini"}, allocator)
-	if copy_error != nil { return "", copy_error }
+	if copy_error != nil {return "", copy_error}
 	return result, nil
 }
-

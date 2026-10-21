@@ -1,12 +1,5 @@
 package main
 
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:os"
-import "core:path/filepath"
-import "core:strings"
-import "core:time"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
@@ -16,15 +9,30 @@ import "aio:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:os"
+import "core:path/filepath"
+import "core:strings"
+import "core:time"
 
-@(private) FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
-@(private) MIN_FONT_POINTS :: 6
-@(private) MAX_FONT_POINTS :: 72
-@(private) NOTICE_DURATION :: 6 * time.Second
-@(private) COPY_NOTICE_DURATION :: 2 * time.Second
-@(private) ERROR_NOTICE_DURATION :: 12 * time.Second
-@(private) PASTE_CONFIRM_DURATION :: 10 * time.Second
-@(private) PASTE_CONFIRM_TEXT ::
+@(private)
+FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
+@(private)
+MIN_FONT_POINTS :: 6
+@(private)
+MAX_FONT_POINTS :: 72
+@(private)
+NOTICE_DURATION :: 6 * time.Second
+@(private)
+COPY_NOTICE_DURATION :: 2 * time.Second
+@(private)
+ERROR_NOTICE_DURATION :: 12 * time.Second
+@(private)
+PASTE_CONFIRM_DURATION :: 10 * time.Second
+@(private)
+PASTE_CONFIRM_TEXT ::
 	"The clipboard text has line breaks, so the shell will run each line as a command. " +
 	"Paste again within 10 seconds to confirm."
 
@@ -38,52 +46,52 @@ Notice_Key :: enum u32 {
 }
 
 Session_Entry :: struct {
-	id: u32,
-	session: ^term.Session,
-	status: term.Status_Kind,
-	keep_open: bool,
-	process_padding: Maybe(int),
-	process_name: [780]u8,
+	id:                  u32,
+	session:             ^term.Session,
+	status:              term.Status_Kind,
+	keep_open:           bool,
+	process_padding:     Maybe(int),
+	process_name:        [780]u8,
 	process_name_length: int,
-	header: Pane_Header_Metadata,
-	name: string,
+	header:              Pane_Header_Metadata,
+	name:                string,
 }
 
 App :: struct {
-	verify: Verify,
-	options: instance.Options,
-	app_id: string,
-	platform: platform_api.Platform,
-	platform_ready: bool,
-	settings_diagnostics: [dynamic]settings.Diagnostic,
-	settings_read_error: os.Error,
-	settings: settings.Settings,
-	settings_path: string,
-	log_path: string,
-	fonts: ^font.System,
-	family: font.Family,
-	font_points: f32,
-	device: ^render.Device,
-	cache: glyphs.Cache,
-	shell_icon: Shell_Icon,
-	ui_text: ui.Text,
-	ui_ready: bool,
-	animations: bool,
-	theme: ui.Theme,
-	registry: commands.Registry,
-	leader: Maybe(commands.Shortcut),
-	palette: ui.Palette,
-	palette_window: platform_api.Window_Id,
-	notices: ui.Notices,
-	sessions: [dynamic]Session_Entry,
-	workspaces: [dynamic]^Workspace,
-	next_workspace_id: u32,
+	verify:                Verify,
+	options:               instance.Options,
+	app_id:                string,
+	platform:              platform_api.Platform,
+	platform_ready:        bool,
+	settings_diagnostics:  [dynamic]settings.Diagnostic,
+	settings_read_error:   os.Error,
+	settings:              settings.Settings,
+	settings_path:         string,
+	log_path:              string,
+	fonts:                 ^font.System,
+	family:                font.Family,
+	font_points:           f32,
+	device:                ^render.Device,
+	cache:                 glyphs.Cache,
+	shell_icon:            Shell_Icon,
+	ui_text:               ui.Text,
+	ui_ready:              bool,
+	animations:            bool,
+	theme:                 ui.Theme,
+	registry:              commands.Registry,
+	leader:                Maybe(commands.Shortcut),
+	palette:               ui.Palette,
+	palette_window:        platform_api.Window_Id,
+	notices:               ui.Notices,
+	sessions:              [dynamic]Session_Entry,
+	workspaces:            [dynamic]^Workspace,
+	next_workspace_id:     u32,
 	next_workspace_number: u32,
-	next_session_id: u32,
-	windows: [dynamic]^Window,
-	running: bool,
-	tray_hint_shown: bool,
-	process_deadline: time.Tick,
+	next_session_id:       u32,
+	windows:               [dynamic]^Window,
+	running:               bool,
+	tray_hint_shown:       bool,
+	process_deadline:      time.Tick,
 }
 
 @(require_results)
@@ -109,7 +117,8 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	@(static) palette_settings: [len(settings.SCHEMA)]ui.Palette_Setting
-	@(static, rodata) schema := settings.SCHEMA
+	@(static, rodata)
+	schema := settings.SCHEMA
 	for entry, i in schema {
 		palette_settings[i] = {entry.key, entry.title, settings.group_title(entry.key)}
 	}
@@ -131,7 +140,8 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	apply_text_gamma(app)
 	glyphs.init(&app.cache, app.fonts, app.device)
-	ui_size_px := f32(app.settings.interface.font_size) * f32(platform_api.primary_dpi(&app.platform)) / 72
+	ui_size_px :=
+		f32(app.settings.interface.font_size) * f32(platform_api.primary_dpi(&app.platform)) / 72
 	if !ui.text_init(&app.ui_text, app.fonts, &app.cache, ui_size_px) {
 		log.error("no interface font is available")
 		return false
@@ -141,19 +151,23 @@ app_init :: proc(app: ^App) -> bool {
 	apply_fonts(app)
 	apply_theme(app)
 	workspace := workspace_create_empty(app)
-	if workspace == nil { return false }
-	if !tab_create(app, workspace) { return false }
+	if workspace == nil {return false}
+	if !tab_create(app, workspace) {return false}
 	if platform_api.tray_create(&app.platform, app.app_id) != .None {
 		log.error("creating the tray icon failed")
 	}
-	tray_menu := [?]platform_api.Tray_Menu_Item{
+	tray_menu := [?]platform_api.Tray_Menu_Item {
 		{id = TRAY_OPEN, title = "Open AIODev"},
 		{id = TRAY_QUIT, title = "Quit"},
 	}
 	if platform_api.tray_set_menu(&app.platform, tray_menu[:]) != .None {
 		log.error("setting the tray menu failed")
 	}
-	platform_api.set_modal_loop_callback(&app.platform, proc(user: rawptr) { tick((^App)(user)) }, app)
+	platform_api.set_modal_loop_callback(
+		&app.platform,
+		proc(user: rawptr) {tick((^App)(user))},
+		app,
+	)
 	if !window_open(app, workspace) {
 		return false
 	}
@@ -174,7 +188,7 @@ app_destroy :: proc(app: ^App) {
 		term.destroy(entry.session)
 	}
 	delete(app.sessions)
-	for workspace in app.workspaces { workspace_destroy(workspace) }
+	for workspace in app.workspaces {workspace_destroy(workspace)}
 	delete(app.workspaces)
 	if app.platform_ready {
 		if platform_api.tray_destroy(&app.platform) != .None {
@@ -228,14 +242,14 @@ tick :: proc(app: ^App) {
 		mark_all_dirty(app)
 	}
 	// A dwell can create or discard the trailing preview window.
-	for i := 0; i < len(app.windows); i += 1 { pane_drag_tick(app, app.windows[i], time.tick_now()) }
+	for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], time.tick_now())}
 	for window in app.windows {
 		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
 			leader_cancel(window)
 		}
 		update_blink(window)
 		update_autoscroll(app, window)
-		if window.preparing && !window.preview_visible { window.dirty = false; continue }
+		if window.preparing && !window.preview_visible {window.dirty = false; continue}
 		if window.dirty {
 			window_render(app, window)
 			verify_presented(app, window)
@@ -247,26 +261,31 @@ tick :: proc(app: ^App) {
 
 @(private)
 wait_timeout :: proc(app: ^App) -> u32 {
-	if motion_active(app) { return 16 }
+	if motion_active(app) {return 16}
 	INFINITE :: max(u32)
 	deadline, found := ui.notices_deadline(&app.notices)
-	if app.process_deadline != {} && (!found || time.tick_diff(app.process_deadline, deadline) > 0) {
+	if app.process_deadline != {} &&
+	   (!found || time.tick_diff(app.process_deadline, deadline) > 0) {
 		deadline, found = app.process_deadline, true
 	}
-	if next, pending := verify_deadline(app); pending && (!found || time.tick_diff(next, deadline) > 0) {
+	if next, pending := verify_deadline(app);
+	   pending && (!found || time.tick_diff(next, deadline) > 0) {
 		deadline, found = next, true
 	}
 	for window in app.windows {
-		if next := window.pane_drag.hover_until; next != {} && (!found || time.tick_diff(next, deadline) > 0) {
+		if next := window.pane_drag.hover_until;
+		   next != {} && (!found || time.tick_diff(next, deadline) > 0) {
 			deadline, found = next, true
 		}
-		if window.leader_until != {} && (!found || time.tick_diff(window.leader_until, deadline) > 0) {
+		if window.leader_until != {} &&
+		   (!found || time.tick_diff(window.leader_until, deadline) > 0) {
 			deadline, found = window.leader_until, true
 		}
 		if window.blinking && (!found || time.tick_diff(window.blink_deadline, deadline) > 0) {
 			deadline, found = window.blink_deadline, true
 		}
-		if window.autoscrolling && (!found || time.tick_diff(window.autoscroll_deadline, deadline) > 0) {
+		if window.autoscrolling &&
+		   (!found || time.tick_diff(window.autoscroll_deadline, deadline) > 0) {
 			deadline, found = window.autoscroll_deadline, true
 		}
 	}
@@ -303,7 +322,10 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 		directory = app.settings.shell.directory
 	}
 	return {
-		command_line = settings.shell_command_line(app.settings.shell.command, app.settings.shell.report_directory),
+		command_line = settings.shell_command_line(
+			app.settings.shell.command,
+			app.settings.shell.report_directory,
+		),
 		refresh_environment = app.settings.shell.refresh_environment,
 		working_directory = directory,
 		geometry = geometry,
@@ -315,22 +337,24 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 initial_geometry :: proc(app: ^App) -> term.Geometry {
 	scale := f32(platform_api.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
-	padding := math.round(f32(app.settings.window.padding)*scale)+
-		math.round(f32(app.settings.pane.gap)*scale)
-	geometry := term.Geometry{
-		columns = u16(app.settings.window.columns),
-		rows = u16(app.settings.window.rows),
-		cell_width = u32(metrics.cell_width),
-		cell_height = u32(metrics.cell_height),
+	padding :=
+		math.round(f32(app.settings.window.padding) * scale) +
+		math.round(f32(app.settings.pane.gap) * scale)
+	geometry := term.Geometry {
+		columns      = u16(app.settings.window.columns),
+		rows         = u16(app.settings.window.rows),
+		cell_width   = u32(metrics.cell_width),
+		cell_height  = u32(metrics.cell_height),
 		padding_left = u32(padding),
-		padding_top = u32(padding),
+		padding_top  = u32(padding),
 	}
-	geometry.surface_width = u32(geometry.columns) * geometry.cell_width + 2 * geometry.padding_left
+	geometry.surface_width =
+		u32(geometry.columns) * geometry.cell_width + 2 * geometry.padding_left
 	geometry.surface_height = u32(geometry.rows) * geometry.cell_height + 2 * geometry.padding_top
-	geometry.padding_top += u32(ui.TAB_HEIGHT*scale)
-	geometry.surface_height += u32(ui.TAB_HEIGHT*scale)
+	geometry.padding_top += u32(ui.TAB_HEIGHT * scale)
+	geometry.surface_height += u32(ui.TAB_HEIGHT * scale)
 	if app.settings.pane.show_headers {
-		header := u32(math.round(ui.HEADER_HEIGHT*scale))
+		header := u32(math.round(ui.HEADER_HEIGHT * scale))
 		geometry.padding_top += header
 		geometry.surface_height += header
 	}
@@ -341,21 +365,26 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 session_open :: proc(app: ^App, command: string = "", directory: string = "") -> bool {
 	geometry := initial_geometry(app)
 	config := session_config(app, geometry)
-	if command != "" { config.command_line = command }
-	if directory != "" { config.working_directory = directory }
+	if command != "" {config.command_line = command}
+	if directory != "" {config.working_directory = directory}
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
 		return false
 	}
 	app.next_session_id += 1
-	if _, allocation_error := append(&app.sessions,
-		Session_Entry{id = app.next_session_id, session = session, status = term.status(session).kind});
-		allocation_error != nil {
+	if _, allocation_error := append(
+		&app.sessions,
+		Session_Entry {
+			id = app.next_session_id,
+			session = session,
+			status = term.status(session).kind,
+		},
+	); allocation_error != nil {
 		term.destroy(session)
 		return false
 	}
-	pane_header_launch(&app.sessions[len(app.sessions)-1].header, config)
+	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config)
 	configure_session(app, session)
 	return true
 }
@@ -364,9 +393,12 @@ session_open :: proc(app: ^App, command: string = "", directory: string = "") ->
 configure_session :: proc(app: ^App, session: ^term.Session) {
 	cursor: term.Cursor_Style
 	switch app.settings.cursor.style {
-	case .Block: cursor = .Block
-	case .Bar: cursor = .Bar
-	case .Underline: cursor = .Underline
+	case .Block:
+		cursor = .Block
+	case .Bar:
+		cursor = .Bar
+	case .Underline:
+		cursor = .Underline
 	}
 	term.configure(session, app.settings.scrollback.lines, cursor, app.settings.cursor.blink)
 }
@@ -395,7 +427,7 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 update_sessions :: proc(app: ^App) {
 	workspace_status_changed := false
 	// Exit cleanup removes only the current entry; earlier entries remain valid.
-	for i := len(app.sessions)-1; i >= 0; i -= 1 {
+	for i := len(app.sessions) - 1; i >= 0; i -= 1 {
 		entry := &app.sessions[i]
 		s := entry.session
 		if term.search_pending(s) {
@@ -412,7 +444,7 @@ update_sessions :: proc(app: ^App) {
 				entry.status = status.kind
 				mark_all_dirty(app)
 			}
-			if status.kind == .Exited && close_exited_session(app, entry.id) { continue }
+			if status.kind == .Exited && close_exited_session(app, entry.id) {continue}
 		}
 		if term.take_title_change(s) {
 			pane_header_refresh(entry)
@@ -421,13 +453,14 @@ update_sessions :: proc(app: ^App) {
 		workspace_status_changed = term.take_program_status_change(s) || workspace_status_changed
 		if term.take_bell(s) {
 			for window in app.windows {
-				if !window.focused && platform_api.window_flash(&app.platform, window.id) != .None {
+				if !window.focused &&
+				   platform_api.window_flash(&app.platform, window.id) != .None {
 					log.error("flashing the window failed")
 				}
 			}
 		}
 	}
-	if workspace_status_changed { workspace_picker_status_changed(app) }
+	if workspace_status_changed {workspace_picker_status_changed(app)}
 	for window in app.windows {
 		generation := window_generation(app, window)
 		if generation != window.generation {
@@ -452,14 +485,21 @@ load_settings :: proc(app: ^App) {
 		app.settings_path = path
 	}
 	comments := binding_comments()
-	loaded, diagnostics, created, err := settings.load(app.settings_path, extra_comments = comments[:])
+	loaded, diagnostics, created, err := settings.load(
+		app.settings_path,
+		extra_comments = comments[:],
+	)
 	defer settings.diagnostics_destroy(&diagnostics)
 	if err != nil {
 		log.errorf("reading %s failed: %v", app.settings_path, err)
 		defaults, default_error := settings.defaults()
 		if default_error != nil {
 			log.errorf("loading default settings failed: %v", default_error)
-			notify(app, .Error, "Could not load settings or defaults. Check the log and restart AIODev.")
+			notify(
+				app,
+				.Error,
+				"Could not load settings or defaults. Check the log and restart AIODev.",
+			)
 			return
 		}
 		loaded = defaults
@@ -467,7 +507,7 @@ load_settings :: proc(app: ^App) {
 	settings.destroy(&app.settings)
 	app.settings = loaded
 	app.process_deadline = {}
-	for &entry in app.sessions { entry.process_padding = nil }
+	for &entry in app.sessions {entry.process_padding = nil}
 	apply_bindings(app, &diagnostics)
 	app.font_points = f32(loaded.font.size)
 	if created {
@@ -478,8 +518,8 @@ load_settings :: proc(app: ^App) {
 
 reload_settings :: proc(app: ^App, announce := true) {
 	refresh_animations(app)
-	for i := len(app.windows)-1; i >= 0; i -= 1 {
-		if i >= len(app.windows) { continue }
+	for i := len(app.windows) - 1; i >= 0; i -= 1 {
+		if i >= len(app.windows) {continue}
 		window := app.windows[i]
 		leader_cancel(window)
 		arrange_cancel(app, window)
@@ -494,7 +534,8 @@ reload_settings :: proc(app: ^App, announce := true) {
 		configure_session(app, entry.session)
 	}
 	if announce {
-		if previous_shell != app.settings.shell.command || previous_directory != app.settings.shell.directory {
+		if previous_shell != app.settings.shell.command ||
+		   previous_directory != app.settings.shell.directory {
 			notify(app, .Info, "Shell settings apply the next time the shell restarts.")
 		} else if app.settings_read_error == nil && len(app.settings_diagnostics) == 0 {
 			notify(app, .Info, "Settings reloaded.")
@@ -517,7 +558,11 @@ apply_fonts :: proc(app: ^App) {
 	for name in FALLBACK_FONT_FAMILIES {
 		if fallback, fallback_error := font.family_load(app.fonts, name); fallback_error == .None {
 			app.family = fallback
-			text := fmt.tprintf("Font \"%s\" is not installed. Using %s.", app.settings.font.family, name)
+			text := fmt.tprintf(
+				"Font \"%s\" is not installed. Using %s.",
+				app.settings.font.family,
+				name,
+			)
 			ui.notices_put(&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION)
 			return
 		}
@@ -535,7 +580,11 @@ color :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {
 
 @(private)
 terminal_colors :: proc(c: settings.Color_Settings) -> term.Colors {
-	colors := term.Colors{foreground = c.foreground, background = c.background, cursor = c.cursor}
+	colors := term.Colors {
+		foreground = c.foreground,
+		background = c.background,
+		cursor     = c.cursor,
+	}
 	for value, i in c.palette {
 		colors.palette[i] = value
 	}
@@ -551,5 +600,8 @@ set_font_points :: proc(app: ^App, points: f32) {
 
 apply_text_gamma :: proc(app: ^App) {
 	gamma := font.text_gamma(app.fonts)
-	render.set_text_gamma(app.device, {gamma = gamma.gamma, enhanced_contrast = gamma.enhanced_contrast})
+	render.set_text_gamma(
+		app.device,
+		{gamma = gamma.gamma, enhanced_contrast = gamma.enhanced_contrast},
+	)
 }

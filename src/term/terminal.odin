@@ -1,41 +1,41 @@
 package term
 
+import "aio:ghostty"
+import "aio:pty"
 import "base:runtime"
 import "core:log"
 import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
-import "aio:ghostty"
-import "aio:pty"
 
 Color :: [3]u8
 
 Colors :: struct {
 	foreground, background, cursor: Color,
-	palette: [16]Color,
+	palette:                        [16]Color,
 }
 
 Geometry :: struct {
-	columns, rows: u16,
-	cell_width, cell_height: u32,
+	columns, rows:                 u16,
+	cell_width, cell_height:       u32,
 	surface_width, surface_height: u32,
-	padding_left, padding_top: u32,
+	padding_left, padding_top:     u32,
 }
 
-process_id :: proc(s: ^Session) -> u32 { return pty.process_id(&s.pty) }
+process_id :: proc(s: ^Session) -> u32 {return pty.process_id(&s.pty)}
 
 Config :: struct {
 	command_line, working_directory: string,
-	refresh_environment: bool,
-	geometry: Geometry,
-	scrollback_lines: int,
-	colors: Colors,
+	refresh_environment:             bool,
+	geometry:                        Geometry,
+	scrollback_lines:                int,
+	colors:                          Colors,
 }
 
 Wake :: struct {
 	procedure: proc(user: rawptr),
-	user: rawptr,
+	user:      rawptr,
 }
 
 Status_Kind :: enum {
@@ -45,9 +45,9 @@ Status_Kind :: enum {
 }
 
 Status :: struct {
-	kind: Status_Kind,
+	kind:      Status_Kind,
 	exit_code: u32,
-	message: string,
+	message:   string,
 }
 
 Error :: enum {
@@ -56,54 +56,57 @@ Error :: enum {
 	Terminal_Failed,
 }
 
-@(private) WRITE_QUEUE_LIMIT :: 4 * 1024 * 1024
-@(private) RENDER_HOLD_LIMIT :: time.Second
-@(private) READ_CHUNK :: 64 * 1024
+@(private)
+WRITE_QUEUE_LIMIT :: 4 * 1024 * 1024
+@(private)
+RENDER_HOLD_LIMIT :: time.Second
+@(private)
+READ_CHUNK :: 64 * 1024
 
 Session :: struct {
-	allocator: runtime.Allocator,
-	callback_context: runtime.Context,
-	wake: Wake,
+	allocator:                                                runtime.Allocator,
+	callback_context:                                         runtime.Context,
+	wake:                                                     Wake,
 	// Guards the libghostty objects below and the status fields.
-	mutex: sync.Mutex,
-	terminal: ghostty.Terminal,
-	key_encoder: ghostty.Key_Encoder,
-	key_event: ghostty.Key_Event,
-	mouse_encoder: ghostty.Mouse_Encoder,
-	mouse_event: ghostty.Mouse_Event,
-	gesture: ghostty.Selection_Gesture,
+	mutex:                                                    sync.Mutex,
+	terminal:                                                 ghostty.Terminal,
+	key_encoder:                                              ghostty.Key_Encoder,
+	key_event:                                                ghostty.Key_Event,
+	mouse_encoder:                                            ghostty.Mouse_Encoder,
+	mouse_event:                                              ghostty.Mouse_Event,
+	gesture:                                                  ghostty.Selection_Gesture,
 	press_event, drag_event, release_event, autoscroll_event: ghostty.Selection_Gesture_Event,
-	search: ghostty.Search,
-	search_matches: [dynamic]ghostty.Selection,
-	search_active: bool,
-	search_fed: u64,
-	status: Status_Kind,
-	exit_code: u32,
-	failure: string,
-	held: bool,
-	held_since: time.Tick,
-	geometry: Geometry,
-	spawned: bool,
-	pty: pty.Pty,
-	reader, writer, waiter: ^thread.Thread,
-	queue: Write_Queue,
-	scanner: Mode_Scanner,
-	win32_input: bool,
-	generation: u64,
-	title_changed, bell: bool,
-	status_changed: bool,
-	program_status_changed: bool,
-	program_statuses: [PROGRAM_STATUS_LIMIT]Stored_Status,
-	program_status_count: int,
-	read_buffer: [READ_CHUNK]u8,
+	search:                                                   ghostty.Search,
+	search_matches:                                           [dynamic]ghostty.Selection,
+	search_active:                                            bool,
+	search_fed:                                               u64,
+	status:                                                   Status_Kind,
+	exit_code:                                                u32,
+	failure:                                                  string,
+	held:                                                     bool,
+	held_since:                                               time.Tick,
+	geometry:                                                 Geometry,
+	spawned:                                                  bool,
+	pty:                                                      pty.Pty,
+	reader, writer, waiter:                                   ^thread.Thread,
+	queue:                                                    Write_Queue,
+	scanner:                                                  Mode_Scanner,
+	win32_input:                                              bool,
+	generation:                                               u64,
+	title_changed, bell:                                      bool,
+	status_changed:                                           bool,
+	program_status_changed:                                   bool,
+	program_statuses:                                         [PROGRAM_STATUS_LIMIT]Stored_Status,
+	program_status_count:                                     int,
+	read_buffer:                                              [READ_CHUNK]u8,
 }
 
 @(private)
 Write_Queue :: struct {
-	mutex: sync.Mutex,
-	ready: sync.Cond,
+	mutex:   sync.Mutex,
+	ready:   sync.Cond,
 	pending: [dynamic]u8,
-	closed: bool,
+	closed:  bool,
 }
 
 @(require_results)
@@ -185,8 +188,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 	scrollback := uint(config.scrollback_lines)
 	options := [?]struct {
 		option: ghostty.Terminal_Option,
-		value: rawptr,
-	}{
+		value:  rawptr,
+	} {
 		{.Userdata, s},
 		{.Write_Pty, rawptr(write_pty)},
 		{.Bell, rawptr(bell)},
@@ -207,11 +210,12 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 	if !apply_mode_defaults(s.terminal) {
 		return .Terminal_Failed
 	}
-	if ghostty.terminal_resize(s.terminal, g.columns, g.rows, g.cell_width, g.cell_height) != .Success {
+	if ghostty.terminal_resize(s.terminal, g.columns, g.rows, g.cell_width, g.cell_height) !=
+	   .Success {
 		return .Terminal_Failed
 	}
 	set_colors(s, config.colors)
-	results := [?]ghostty.Result{
+	results := [?]ghostty.Result {
 		ghostty.key_encoder_new(nil, &s.key_encoder),
 		ghostty.key_event_new(nil, &s.key_event),
 		ghostty.mouse_encoder_new(nil, &s.mouse_encoder),
@@ -239,7 +243,10 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 // cluster with libghostty's widths (D-042). Programs can still turn it off.
 @(require_results)
 apply_mode_defaults :: proc(terminal: ghostty.Terminal) -> bool {
-	grapheme := ghostty.Terminal_Mode_Config{mode = ghostty.MODE_GRAPHEME_CLUSTER, value = true}
+	grapheme := ghostty.Terminal_Mode_Config {
+		mode  = ghostty.MODE_GRAPHEME_CLUSTER,
+		value = true,
+	}
 	if ghostty.terminal_set(terminal, .Mode_Default, &grapheme) != .Success {
 		log.error("term: enabling grapheme clustering failed")
 		return false
@@ -249,17 +256,17 @@ apply_mode_defaults :: proc(terminal: ghostty.Terminal) -> bool {
 
 @(private)
 spawn :: proc(s: ^Session, config: Config) {
-	environment := [?]pty.Env_Var{
+	environment := [?]pty.Env_Var {
 		{"TERM", "xterm-256color"},
 		{"COLORTERM", "truecolor"},
 		{"TERM_PROGRAM", "AIODev"},
 	}
-	options := pty.Spawn_Options{
-		command_line = config.command_line,
-		working_directory = config.working_directory,
-		environment = environment[:],
-		cols = config.geometry.columns,
-		rows = config.geometry.rows,
+	options := pty.Spawn_Options {
+		command_line        = config.command_line,
+		working_directory   = config.working_directory,
+		environment         = environment[:],
+		cols                = config.geometry.columns,
+		rows                = config.geometry.rows,
 		refresh_environment = config.refresh_environment,
 	}
 	process, err := pty.spawn(options, s.allocator)
@@ -464,7 +471,11 @@ on_render_hold :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr, held: 
 }
 
 // Updates `state` from the terminal and, given `highlights`, replaces it with the visible search matches.
-capture :: proc(s: ^Session, state: ghostty.Render_State, highlights: ^[dynamic]Highlight = nil) -> bool {
+capture :: proc(
+	s: ^Session,
+	state: ghostty.Render_State,
+	highlights: ^[dynamic]Highlight = nil,
+) -> bool {
 	sync.mutex_lock(&s.mutex)
 	if s.held && time.tick_since(s.held_since) < RENDER_HOLD_LIMIT {
 		sync.mutex_unlock(&s.mutex)
@@ -489,14 +500,19 @@ resize :: proc(s: ^Session, geometry: Geometry) {
 	s.geometry = geometry
 	sync.mutex_lock(&s.mutex)
 	result := ghostty.terminal_resize(
-		s.terminal, geometry.columns, geometry.rows, geometry.cell_width, geometry.cell_height,
+		s.terminal,
+		geometry.columns,
+		geometry.rows,
+		geometry.cell_width,
+		geometry.cell_height,
 	)
 	sync.mutex_unlock(&s.mutex)
 	if result != .Success {
 		log.errorf("term: resize to %vx%v failed: %v", geometry.columns, geometry.rows, result)
 	}
 	if s.spawned {
-		if err := pty.resize(&s.pty, geometry.columns, geometry.rows); err != .None && err != .Closed {
+		if err := pty.resize(&s.pty, geometry.columns, geometry.rows);
+		   err != .None && err != .Closed {
 			log.errorf("term: console resize failed: %v", err)
 		}
 	}
@@ -509,7 +525,8 @@ set_colors :: proc(s: ^Session, colors: Colors) {
 	}
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	foreground, background, cursor := rgb(colors.foreground), rgb(colors.background), rgb(colors.cursor)
+	foreground, background, cursor :=
+		rgb(colors.foreground), rgb(colors.background), rgb(colors.cursor)
 	palette: [256]ghostty.Color_Rgb
 	ok := ghostty.terminal_set(s.terminal, .Color_Foreground, &foreground) == .Success
 	ok &&= ghostty.terminal_set(s.terminal, .Color_Background, &background) == .Success
@@ -550,7 +567,7 @@ working_directory :: proc(s: ^Session, allocator := context.allocator) -> string
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
 	value: ghostty.String
-	if ghostty.terminal_get(s.terminal, .Pwd, &value) != .Success || value.len == 0 { return "" }
+	if ghostty.terminal_get(s.terminal, .Pwd, &value) != .Success || value.len == 0 {return ""}
 	return strings.clone(string(value.ptr[:value.len]), allocator)
 }
 
@@ -600,14 +617,20 @@ scrollbar :: proc(s: ^Session) -> (Scrollbar, bool) {
 clear_scrollback :: proc(s: ^Session) {
 	ERASE_SCROLLBACK :: "\x1b[3J"
 	sync.mutex_lock(&s.mutex)
-	ghostty.terminal_vt_write(s.terminal, raw_data(string(ERASE_SCROLLBACK)), len(ERASE_SCROLLBACK))
+	ghostty.terminal_vt_write(
+		s.terminal,
+		raw_data(string(ERASE_SCROLLBACK)),
+		len(ERASE_SCROLLBACK),
+	)
 	sync.mutex_unlock(&s.mutex)
 	mark_changed(s)
 }
 
 @(private)
 mode_enabled :: proc(s: ^Session, mode: ghostty.Mode) -> bool {
-	config := ghostty.Terminal_Mode_Config{mode = mode}
+	config := ghostty.Terminal_Mode_Config {
+		mode = mode,
+	}
 	return ghostty.terminal_get(s.terminal, .Mode, &config) == .Success && config.value
 }
 
@@ -621,9 +644,12 @@ Cursor_Style :: enum u8 {
 configure :: proc(s: ^Session, scrollback_lines: int, cursor: Cursor_Style, blink: bool) {
 	style: ghostty.Terminal_Cursor_Style
 	switch cursor {
-	case .Block: style = .Block
-	case .Bar: style = .Bar
-	case .Underline: style = .Underline
+	case .Block:
+		style = .Block
+	case .Bar:
+		style = .Bar
+	case .Underline:
+		style = .Underline
 	}
 	lines := uint(scrollback_lines)
 	blinking := blink

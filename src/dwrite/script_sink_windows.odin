@@ -4,8 +4,8 @@ import windows "core:sys/windows"
 
 Script_Sink :: struct {
 	using interface: ITextAnalysisSink,
-	scripts: []Script_Analysis,
-	methods: ITextAnalysisSink_VTable,
+	scripts:         []Script_Analysis,
+	methods:         ITextAnalysisSink_VTable,
 }
 
 @(require_results)
@@ -30,11 +30,13 @@ script_sink_init :: proc(sink: ^Script_Sink, scripts: []Script_Analysis) -> bool
 
 @(private, require_results)
 script_query_interface :: proc "system" (
-	this: ^windows.IUnknown, iid: ^windows.GUID, object: ^rawptr,
+	this: ^windows.IUnknown,
+	iid: ^windows.GUID,
+	object: ^rawptr,
 ) -> windows.HRESULT {
-	if object == nil { return failure(windows.E_POINTER) }
+	if object == nil {return failure(windows.E_POINTER)}
 	object^ = nil
-	if iid == nil { return failure(windows.E_POINTER) }
+	if iid == nil {return failure(windows.E_POINTER)}
 	if iid^ != windows.IUnknown_UUID^ && iid^ != ITextAnalysisSink_UUID^ {
 		return failure(windows.E_NOINTERFACE)
 	}
@@ -54,10 +56,12 @@ script_release :: proc "system" (this: ^windows.IUnknown) -> u32 {
 
 @(private, require_results)
 script_set :: proc "system" (
-	this: ^ITextAnalysisSink, position, length: u32, analysis: ^Script_Analysis,
+	this: ^ITextAnalysisSink,
+	position, length: u32,
+	analysis: ^Script_Analysis,
 ) -> windows.HRESULT {
 	sink := cast(^Script_Sink)this
-	if analysis == nil { return failure(windows.E_POINTER) }
+	if analysis == nil {return failure(windows.E_POINTER)}
 	if u64(position) + u64(length) > u64(len(sink.scripts)) {
 		return failure(windows.E_INVALIDARG)
 	}
@@ -69,21 +73,27 @@ script_set :: proc "system" (
 
 @(private, require_results)
 script_line_breakpoints :: proc "system" (
-	this: ^ITextAnalysisSink, position, length: u32, breakpoints: [^]Line_Breakpoint,
+	this: ^ITextAnalysisSink,
+	position, length: u32,
+	breakpoints: [^]Line_Breakpoint,
 ) -> windows.HRESULT {
 	return failure(windows.E_NOTIMPL)
 }
 
 @(private, require_results)
 script_bidi :: proc "system" (
-	this: ^ITextAnalysisSink, position, length: u32, explicit_level, resolved_level: u8,
+	this: ^ITextAnalysisSink,
+	position, length: u32,
+	explicit_level, resolved_level: u8,
 ) -> windows.HRESULT {
 	return failure(windows.E_NOTIMPL)
 }
 
 @(private, require_results)
 script_substitution :: proc "system" (
-	this: ^ITextAnalysisSink, position, length: u32, substitution: ^INumberSubstitution,
+	this: ^ITextAnalysisSink,
+	position, length: u32,
+	substitution: ^INumberSubstitution,
 ) -> windows.HRESULT {
 	return failure(windows.E_NOTIMPL)
 }

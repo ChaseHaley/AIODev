@@ -1,51 +1,51 @@
 package term_view
 
-import "core:log"
-import "core:math"
 import "aio:font"
 import "aio:ghostty"
 import "aio:glyphs"
 import "aio:render"
 import "aio:term"
+import "core:log"
+import "core:math"
 
 Metrics :: struct {
-	size_px: f32,
-	cell_width, cell_height: f32,
-	baseline: f32,
+	size_px:                                       f32,
+	cell_width, cell_height:                       f32,
+	baseline:                                      f32,
 	// Whole pixels from the baseline to a line's top edge: down for the underline, up for the strikethrough.
-	underline_offset, underline_thickness: f32,
+	underline_offset, underline_thickness:         f32,
 	strikethrough_offset, strikethrough_thickness: f32,
 }
 
 Style :: struct {
-	family: font.Family,
-	selection_background: render.Color,
-	selection_foreground: Maybe(render.Color),
+	family:                                                           font.Family,
+	selection_background:                                             render.Color,
+	selection_foreground:                                             Maybe(render.Color),
 	search_foreground, search_background, search_selected_background: render.Color,
-	cursor_text: render.Color,
-	minimum_contrast: f32,
-	focused: bool,
-	cursor_phase_visible: bool,
+	cursor_text:                                                      render.Color,
+	minimum_contrast:                                                 f32,
+	focused:                                                          bool,
+	cursor_phase_visible:                                             bool,
 }
 
 Frame :: struct {
-	background: render.Color,
+	background:      render.Color,
 	cursor_blinking: bool,
 }
 
 View :: struct {
-	state: ghostty.Render_State,
-	rows: ghostty.Render_State_Row_Iterator,
-	cells: ghostty.Render_State_Row_Cells,
+	state:      ghostty.Render_State,
+	rows:       ghostty.Render_State_Row_Iterator,
+	cells:      ghostty.Render_State_Row_Cells,
 	codepoints: [dynamic]u32,
 	highlights: [dynamic]term.Highlight,
 	// Search state of each cell in the row being built.
-	marks: [dynamic]Search_Mark,
-	paints: [dynamic]Cell_Paint,
-	runes: [dynamic]rune,
-	columns: [dynamic]int,
-	shaped: [dynamic]font.Shaped_Glyph,
-	contrast: Contrast_Cache,
+	marks:      [dynamic]Search_Mark,
+	paints:     [dynamic]Cell_Paint,
+	runes:      [dynamic]rune,
+	columns:    [dynamic]int,
+	shaped:     [dynamic]font.Shaped_Glyph,
+	contrast:   Contrast_Cache,
 }
 
 @(require_results)
@@ -82,7 +82,11 @@ destroy :: proc(v: ^View) {
 
 // Cell size comes from the regular face's advance and line metrics, rounded to whole pixels so
 // glyphs stay on the pixel grid; the extra line height is split evenly above and below the text.
-compute_metrics :: proc(fonts: ^font.System, family: font.Family, size_px, line_height: f32) -> Metrics {
+compute_metrics :: proc(
+	fonts: ^font.System,
+	family: font.Family,
+	size_px, line_height: f32,
+) -> Metrics {
 	face := font.face_metrics(fonts, family.faces[.Regular], size_px)
 	advance := size_px * 0.6
 	if zero, found := font.glyph_lookup(fonts, family, .Regular, '0'); found {
@@ -124,8 +128,10 @@ style_color :: proc(
 	fallback: render.Color,
 ) -> render.Color {
 	switch c.tag {
-	case .Palette: return color(palette[c.value.palette])
-	case .Rgb: return color(c.value.rgb)
+	case .Palette:
+		return color(palette[c.value.palette])
+	case .Rgb:
+		return color(c.value.rgb)
 	case .None:
 	}
 	return fallback
@@ -133,18 +139,18 @@ style_color :: proc(
 
 @(private)
 Builder :: struct {
-	list: ^render.Draw_List,
-	cache: ^glyphs.Cache,
-	fonts: ^font.System,
-	metrics: Metrics,
-	style: Style,
-	colors: ghostty.Render_State_Colors,
-	cursor: ghostty.Render_State_Cursor,
-	origin: [2]f32,
-	columns: int,
+	list:        ^render.Draw_List,
+	cache:       ^glyphs.Cache,
+	fonts:       ^font.System,
+	metrics:     Metrics,
+	style:       Style,
+	colors:      ghostty.Render_State_Colors,
+	cursor:      ghostty.Render_State_Cursor,
+	origin:      [2]f32,
+	columns:     int,
 	// The cursor sits on a wide cluster, so it covers two cells.
 	cursor_wide: bool,
-	ok: bool,
+	ok:          bool,
 }
 
 @(private)
@@ -159,14 +165,15 @@ place :: proc(b: ^Builder, entry: glyphs.Entry, pen: [2]f32, c: render.Color) {
 	if entry.size.x == 0 {
 		return
 	}
-	at := render.Rect{
+	at := render.Rect {
 		math.round(pen.x + entry.offset.x),
 		math.round(pen.y + entry.offset.y),
 		entry.size.x,
 		entry.size.y,
 	}
 	flags := entry.color ? render.GLYPH_COLOR : 0
-	if render.push_glyph(b.list, {rect = at, atlas = entry.atlas, color = c, flags = flags}) != .None {
+	if render.push_glyph(b.list, {rect = at, atlas = entry.atlas, color = c, flags = flags}) !=
+	   .None {
 		b.ok = false
 	}
 }
@@ -182,18 +189,21 @@ build :: proc(
 	origin: [2]f32,
 	metrics: Metrics,
 	style: Style,
-) -> (Frame, glyphs.Result) {
+) -> (
+	Frame,
+	glyphs.Result,
+) {
 	term.capture(session, v.state, &v.highlights)
-	b := Builder{
-		list = list,
-		cache = cache,
-		fonts = fonts,
+	b := Builder {
+		list    = list,
+		cache   = cache,
+		fonts   = fonts,
 		metrics = metrics,
-		style = style,
-		colors = ghostty.sized(ghostty.Render_State_Colors),
-		cursor = ghostty.sized(ghostty.Render_State_Cursor),
-		origin = origin,
-		ok = true,
+		style   = style,
+		colors  = ghostty.sized(ghostty.Render_State_Colors),
+		cursor  = ghostty.sized(ghostty.Render_State_Cursor),
+		origin  = origin,
+		ok      = true,
 	}
 	columns: u16
 	ok := ghostty.render_state_get(v.state, .Cols, &columns) == .Success
@@ -205,8 +215,8 @@ build :: proc(
 		return {}, .Ok
 	}
 	b.columns = int(columns)
-	frame := Frame{
-		background = color(b.colors.background),
+	frame := Frame {
+		background      = color(b.colors.background),
 		cursor_blinking = b.cursor.visible && b.cursor.blinking,
 	}
 	for y := 0; ghostty.render_state_row_iterator_next(v.rows); y += 1 {
@@ -241,7 +251,7 @@ mark_row :: proc(v: ^View, y, columns: int) -> bool {
 		mark = .None
 	}
 	for h in v.highlights {
-		if h.row != y { continue }
+		if h.row != y {continue}
 		mark: Search_Mark = h.selected ? .Selected : .Match
 		for x in max(h.first, 0) ..= min(h.last, columns - 1) {
 			v.marks[x] = max(v.marks[x], mark)
@@ -253,10 +263,10 @@ mark_row :: proc(v: ^View, y, columns: int) -> bool {
 @(private)
 Cell_Paint :: struct {
 	foreground, background: render.Color,
-	has_background: bool,
-	style: ghostty.Style,
+	has_background:         bool,
+	style:                  ghostty.Style,
 	// The cell holds a wide cluster and its spacer follows.
-	wide: bool,
+	wide:                   bool,
 }
 
 @(private)
@@ -268,7 +278,10 @@ paint_cell :: proc(
 	selected: bool,
 	mark: Search_Mark,
 ) -> Cell_Paint {
-	p := Cell_Paint{foreground = color(b.colors.foreground), style = ghostty.sized(ghostty.Style)}
+	p := Cell_Paint {
+		foreground = color(b.colors.foreground),
+		style      = ghostty.sized(ghostty.Style),
+	}
 	styled: bool
 	if ghostty.render_state_row_cells_get(v.cells, .Has_Styling, &styled) == .Success && styled {
 		if ghostty.render_state_row_cells_get(v.cells, .Style, &p.style) != .Success {
@@ -293,7 +306,8 @@ paint_cell :: proc(
 	}
 	if mark != .None {
 		p.foreground, p.has_background = b.style.search_foreground, true
-		p.background = mark == .Selected ? b.style.search_selected_background : b.style.search_background
+		p.background =
+			mark == .Selected ? b.style.search_selected_background : b.style.search_background
 	}
 	if selected && x >= int(selection.start_x) && x <= int(selection.end_x) {
 		p.background, p.has_background = b.style.selection_background, true
@@ -310,9 +324,15 @@ paint_cell :: proc(
 	if b.style.minimum_contrast > 1 && !p.style.invisible {
 		background := p.has_background ? p.background : color(b.colors.background)
 		if block_cursor_at(b, x, y) {
-			background = b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
+			background =
+				b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
 		}
-		p.foreground = minimum_contrast_cached(&v.contrast, p.foreground, background, b.style.minimum_contrast)
+		p.foreground = minimum_contrast_cached(
+			&v.contrast,
+			p.foreground,
+			background,
+			b.style.minimum_contrast,
+		)
 	}
 	return p
 }
@@ -320,8 +340,15 @@ paint_cell :: proc(
 @(private)
 block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 	c := b.cursor
-	return c.visible && c.viewport_has_value && b.style.focused && b.style.cursor_phase_visible &&
-		c.visual_style == .Block && int(c.viewport_x) - (c.wide_tail ? 1 : 0) == x && int(c.viewport_y) == y
+	return(
+		c.visible &&
+		c.viewport_has_value &&
+		b.style.focused &&
+		b.style.cursor_phase_visible &&
+		c.visual_style == .Block &&
+		int(c.viewport_x) - (c.wide_tail ? 1 : 0) == x &&
+		int(c.viewport_y) == y \
+	)
 }
 
 @(private)
@@ -354,12 +381,16 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	run_start, run_color, run_active := 0, render.Color{}, false
 	flush :: proc(b: ^Builder, start, end: int, top: f32, c: render.Color) {
 		m := b.metrics
-		rect(b, {
-			b.origin.x + f32(start) * m.cell_width,
-			top,
-			f32(end - start) * m.cell_width,
-			m.cell_height,
-		}, c)
+		rect(
+			b,
+			{
+				b.origin.x + f32(start) * m.cell_width,
+				top,
+				f32(end - start) * m.cell_width,
+				m.cell_height,
+			},
+			c,
+		)
 	}
 	for p, x in v.paints {
 		if run_active && (!p.has_background || p.background != run_color) {
@@ -395,20 +426,25 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 			count = 0
 		}
 		next_face := cell_face(p)
-		if p.style.invisible || count == 0 || previous != x - 1 || next_face != face ||
-		   x == cursor_x || previous == cursor_x {
-			if result := draw_run(v, b, face, top); result != .Ok { return result }
+		if p.style.invisible ||
+		   count == 0 ||
+		   previous != x - 1 ||
+		   next_face != face ||
+		   x == cursor_x ||
+		   previous == cursor_x {
+			if result := draw_run(v, b, face, top); result != .Ok {return result}
 			clear(&v.runes)
 			clear(&v.columns)
 		}
-		if p.style.invisible || count == 0 { continue }
+		if p.style.invisible || count == 0 {continue}
 		if resize(&v.codepoints, int(count)) != nil ||
 		   reserve(&v.runes, len(v.runes) + int(count)) != nil ||
 		   reserve(&v.columns, len(v.columns) + int(count)) != nil {
 			b.ok = false
 			return .Ok
 		}
-		if ghostty.render_state_row_cells_get(v.cells, .Graphemes_Buf, raw_data(v.codepoints)) != .Success {
+		if ghostty.render_state_row_cells_get(v.cells, .Graphemes_Buf, raw_data(v.codepoints)) !=
+		   .Success {
 			log.error("term_view: reading cell graphemes failed")
 			continue
 		}
@@ -427,18 +463,25 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 
 @(private)
 cell_face :: proc(p: Cell_Paint) -> font.Style {
-	if p.style.bold && p.style.italic { return .Bold_Italic }
-	if p.style.bold { return .Bold }
-	if p.style.italic { return .Italic }
+	if p.style.bold && p.style.italic {return .Bold_Italic}
+	if p.style.bold {return .Bold}
+	if p.style.italic {return .Italic}
 	return .Regular
 }
 
 @(private, require_results)
 draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
-	if len(v.runes) == 0 { return .Ok }
+	if len(v.runes) == 0 {return .Ok}
 	clear(&v.shaped)
-	if err := font.shape(b.fonts, b.style.family, face, v.runes[:], b.metrics.size_px, &v.shaped, v.columns[:]);
-	   err != .None {
+	if err := font.shape(
+		b.fonts,
+		b.style.family,
+		face,
+		v.runes[:],
+		b.metrics.size_px,
+		&v.shaped,
+		v.columns[:],
+	); err != .None {
 		log.errorf("term_view: shaping failed: %v", err)
 		return draw_codepoints(v, b, face, top)
 	}
@@ -473,8 +516,13 @@ draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Re
 		pen: f32
 		for g in v.shaped[start:end] {
 			entry, result := glyphs.glyph(b.cache, g.glyph, m.size_px * scale, p.wide)
-			if result != .Ok { return result }
-			place(b, entry, {left + pen + g.offset.x * scale, baseline - g.offset.y * scale}, p.foreground)
+			if result != .Ok {return result}
+			place(
+				b,
+				entry,
+				{left + pen + g.offset.x * scale, baseline - g.offset.y * scale},
+				p.foreground,
+			)
 			pen += g.advance * scale
 		}
 		start = end
@@ -486,12 +534,16 @@ draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Re
 draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
 	for r, i in v.runes {
 		g, found := font.glyph_lookup(b.fonts, b.style.family, face, r)
-		if !found { continue }
+		if !found {continue}
 		entry, result := glyphs.glyph(b.cache, g, b.metrics.size_px)
-		if result != .Ok { return result }
+		if result != .Ok {return result}
 		x := v.columns[i]
-		place(b, entry, {b.origin.x + f32(x) * b.metrics.cell_width, top + b.metrics.baseline},
-		      v.paints[x].foreground)
+		place(
+			b,
+			entry,
+			{b.origin.x + f32(x) * b.metrics.cell_width, top + b.metrics.baseline},
+			v.paints[x].foreground,
+		)
 	}
 	return .Ok
 }
@@ -501,7 +553,11 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
 	m := b.metrics
 	baseline := top + m.baseline
 	if p.style.strikethrough {
-		rect(b, {left, baseline - m.strikethrough_offset, m.cell_width, m.strikethrough_thickness}, p.foreground)
+		rect(
+			b,
+			{left, baseline - m.strikethrough_offset, m.cell_width, m.strikethrough_thickness},
+			p.foreground,
+		)
 	}
 	underline := ghostty.Sgr_Underline(p.style.underline)
 	if underline == .None {
@@ -542,7 +598,7 @@ build_cursor :: proc(b: ^Builder) {
 	cursor_color := b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
 	// On a wide cluster the cursor covers both of its cells, from the head even if it reports the tail.
 	column := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
-	cell := render.Rect{
+	cell := render.Rect {
 		b.origin.x + f32(column) * m.cell_width,
 		b.origin.y + f32(c.viewport_y) * m.cell_height,
 		m.cell_width * (b.cursor_wide ? 2 : 1),

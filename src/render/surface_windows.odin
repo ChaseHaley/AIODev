@@ -7,16 +7,18 @@ import win "core:sys/windows"
 import d3d "vendor:directx/d3d11"
 import "vendor:directx/dxgi"
 
-@(private) MAX_SURFACE_SIZE :: d3d.REQ_TEXTURE2D_U_OR_V_DIMENSION
-@(private) SWAP_CHAIN_BUFFERS :: 2
+@(private)
+MAX_SURFACE_SIZE :: d3d.REQ_TEXTURE2D_U_OR_V_DIMENSION
+@(private)
+SWAP_CHAIN_BUFFERS :: 2
 
 Surface :: struct {
-	allocator: runtime.Allocator,
-	owner: ^Device,
-	texture: ^d3d.ITexture2D,
-	target: ^d3d.IRenderTargetView,
-	chain: ^dxgi.ISwapChain2,
-	waitable: win.HANDLE,
+	allocator:     runtime.Allocator,
+	owner:         ^Device,
+	texture:       ^d3d.ITexture2D,
+	target:        ^d3d.IRenderTargetView,
+	chain:         ^dxgi.ISwapChain2,
+	waitable:      win.HANDLE,
 	width, height: i32,
 }
 
@@ -27,9 +29,14 @@ valid_size :: proc(width, height: i32) -> bool {
 
 @(require_results)
 surface_present_count :: proc(s: ^Surface) -> (u32, Error) {
-	if s == nil || s.chain == nil { return 0, .Invalid_Argument }
+	if s == nil || s.chain == nil {return 0, .Invalid_Argument}
 	count: u32
-	err := checked(s.owner, s.chain->GetLastPresentCount(&count), "GetLastPresentCount", .Surface_Failed)
+	err := checked(
+		s.owner,
+		s.chain->GetLastPresentCount(&count),
+		"GetLastPresentCount",
+		.Surface_Failed,
+	)
 	return count, err
 }
 
@@ -39,7 +46,14 @@ surface_create_offscreen :: proc(d: ^Device, width, height: i32) -> (^Surface, E
 }
 
 @(require_results)
-surface_create :: proc(d: ^Device, native_window: rawptr, width, height: i32) -> (^Surface, Error) {
+surface_create :: proc(
+	d: ^Device,
+	native_window: rawptr,
+	width, height: i32,
+) -> (
+	^Surface,
+	Error,
+) {
 	if !valid_size(width, height) {
 		return nil, .Invalid_Argument
 	}
@@ -66,7 +80,7 @@ surface_create :: proc(d: ^Device, native_window: rawptr, width, height: i32) ->
 
 @(private, require_results)
 swap_chain_create :: proc(d: ^Device, s: ^Surface, window: win.HWND, width, height: i32) -> Error {
-	desc := dxgi.SWAP_CHAIN_DESC1{
+	desc := dxgi.SWAP_CHAIN_DESC1 {
 		Width = u32(width),
 		Height = u32(height),
 		Format = .B8G8R8A8_UNORM,
@@ -114,7 +128,7 @@ surface_target_create :: proc(s: ^Surface, width, height: i32) -> Error {
 			return err
 		}
 	} else {
-		desc := d3d.TEXTURE2D_DESC{
+		desc := d3d.TEXTURE2D_DESC {
 			Width = u32(width),
 			Height = u32(height),
 			MipLevels = 1,
@@ -157,7 +171,11 @@ surface_resize :: proc(d: ^Device, s: ^Surface, width, height: i32) -> Error {
 		d.ctx->ClearState()
 		d.ctx->Flush()
 		hr := s.chain->ResizeBuffers(
-			SWAP_CHAIN_BUFFERS, u32(width), u32(height), .B8G8R8A8_UNORM, {.FRAME_LATENCY_WAITABLE_OBJECT},
+			SWAP_CHAIN_BUFFERS,
+			u32(width),
+			u32(height),
+			.B8G8R8A8_UNORM,
+			{.FRAME_LATENCY_WAITABLE_OBJECT},
 		)
 		if err := checked(d, hr, "ResizeBuffers", .Surface_Failed); err != .None {
 			return err
@@ -196,9 +214,16 @@ frame_wait :: proc(s: ^Surface, timeout_ms: u32) -> Error {
 }
 
 @(require_results)
-surface_read_pixels :: proc(d: ^Device, s: ^Surface, allocator: runtime.Allocator) -> ([]u8, Error) {
+surface_read_pixels :: proc(
+	d: ^Device,
+	s: ^Surface,
+	allocator: runtime.Allocator,
+) -> (
+	[]u8,
+	Error,
+) {
 	assert(s.owner == d)
-	desc := d3d.TEXTURE2D_DESC{
+	desc := d3d.TEXTURE2D_DESC {
 		Width = u32(s.width),
 		Height = u32(s.height),
 		MipLevels = 1,

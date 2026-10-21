@@ -1,14 +1,14 @@
 package ghostty
 
 Result :: enum i32 {
-	Success = 0,
-	Out_Of_Memory = -1,
-	Invalid_Value = -2,
-	Out_Of_Space = -3,
-	No_Value = -4,
-	Io_Error = -5,
+	Success        = 0,
+	Out_Of_Memory  = -1,
+	Invalid_Value  = -2,
+	Out_Of_Space   = -3,
+	No_Value       = -4,
+	Io_Error       = -5,
 	Limit_Exceeded = -6,
-	Rejected = -7,
+	Rejected       = -7,
 }
 
 Terminal :: distinct rawptr

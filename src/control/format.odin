@@ -1,18 +1,31 @@
 package control
 
+import "aio:term"
 import "core:fmt"
 import "core:strings"
-import "aio:term"
 
-Error :: enum { None, Out_Of_Memory, Invalid_Argument, Protocol, Timeout, Closed, System }
-State_Entry :: struct { key, value: string }
+Error :: enum {
+	None,
+	Out_Of_Memory,
+	Invalid_Argument,
+	Protocol,
+	Timeout,
+	Closed,
+	System,
+}
+State_Entry :: struct {
+	key, value: string,
+}
 
 @(private)
-Writer :: struct { out: ^strings.Builder, error: Error }
+Writer :: struct {
+	out:   ^strings.Builder,
+	error: Error,
+}
 
 @(private)
 put :: proc(w: ^Writer, s: string) {
-	if w.error != .None { return }
+	if w.error != .None {return}
 	if _, err := append(&w.out.buf, ..transmute([]u8)s); err != nil {
 		w.error = .Out_Of_Memory
 	}
@@ -44,7 +57,7 @@ escaped :: proc(w: ^Writer, s: string) {
 			buffer: [4]u8
 			put(w, fmt.bprintf(buffer[:], "\\x%02x", c))
 		case:
-			put(w, s[i:i+1])
+			put(w, s[i:i + 1])
 		}
 	}
 }
@@ -60,7 +73,7 @@ span :: proc(w: ^Writer, first, last: int) {
 
 @(private)
 bounds :: proc(r: Range, size: int) -> (int, int, bool) {
-	if !r.specified { return 0, size-1, size > 0 }
+	if !r.specified {return 0, size - 1, size > 0}
 	return r.first, r.last, r.first >= 0 && r.last >= r.first && r.last < size
 }
 
@@ -83,12 +96,13 @@ cursor :: proc(w: ^Writer, s: ^term.Snapshot) {
 }
 
 @(require_results)
-format_screen :: proc(out: ^strings.Builder, s: ^term.Snapshot, rows := Range{
-} ) -> Error {
-	if s == nil { return .Invalid_Argument }
+format_screen :: proc(out: ^strings.Builder, s: ^term.Snapshot, rows := Range{}) -> Error {
+	if s == nil {return .Invalid_Argument}
 	first, last, ok := bounds(rows, int(s.rows))
-	if !ok { return .Invalid_Argument }
-	w := Writer{out = out}
+	if !ok {return .Invalid_Argument}
+	w := Writer {
+		out = out,
+	}
 	put(&w, "screen ")
 	integer(&w, int(s.columns))
 	put(&w, "x")
@@ -101,22 +115,22 @@ format_screen :: proc(out: ^strings.Builder, s: ^term.Snapshot, rows := Range{
 		width += 1
 	}
 	blank := -1
-	for row in first..=last {
+	for row in first ..= last {
 		text, err := term.row_text(s, row, out.buf.allocator)
-		if err != .None { return .Out_Of_Memory }
+		if err != .None {return .Out_Of_Memory}
 		if text == "" {
 			if blank < 0 {
 				blank = row
 			}
 		} else {
 			if blank >= 0 {
-				span(&w, blank, row-1)
+				span(&w, blank, row - 1)
 				put(&w, " blank\n")
 				blank = -1
 			}
 			buffer: [32]u8
 			label := fmt.bprintf(buffer[:], "%d", row)
-			for _ in len(label)..<width {
+			for _ in len(label) ..< width {
 				put(&w, " ")
 			}
 			put(&w, label)
@@ -136,8 +150,8 @@ format_screen :: proc(out: ^strings.Builder, s: ^term.Snapshot, rows := Range{
 @(private)
 Attributes :: struct {
 	fg, bg, underline_color: Maybe(term.Color),
-	flags: bit_set[Attribute_Flag],
-	underline: i32,
+	flags:                   bit_set[Attribute_Flag],
+	underline:               i32,
 }
 
 @(private)
@@ -155,24 +169,28 @@ Attribute_Flag :: enum {
 }
 
 @(private)
-FLAG_NAMES :: [Attribute_Flag]string{
-	.Bold = "bold",
-	.Italic = "italic",
-	.Faint = "faint",
-	.Blink = "blink",
-	.Inverse = "inverse",
+FLAG_NAMES :: [Attribute_Flag]string {
+	.Bold      = "bold",
+	.Italic    = "italic",
+	.Faint     = "faint",
+	.Blink     = "blink",
+	.Inverse   = "inverse",
 	.Invisible = "invisible",
-	.Strike = "strike",
-	.Overline = "overline",
-	.Selected = "selected",
-	.Wide = "wide",
+	.Strike    = "strike",
+	.Overline  = "overline",
+	.Selected  = "selected",
+	.Wide      = "wide",
 }
 @(private)
 UNDERLINES :: [?]string{"none", "single", "double", "curly", "dotted", "dashed"}
 
 @(private)
 attributes :: proc(s: ^term.Snapshot, c: ^term.Snapshot_Cell) -> Attributes {
-	a := Attributes{fg = c.foreground, bg = c.background, underline = c.style.underline}
+	a := Attributes {
+		fg        = c.foreground,
+		bg        = c.background,
+		underline = c.style.underline,
+	}
 	v := c.style
 	if v.bold {
 		a.flags += {.Bold}
@@ -220,7 +238,7 @@ attributes_at :: proc(s: ^term.Snapshot, column, row: int) -> Attributes {
 	c := term.snapshot_cell(s, column, row)
 	// libghostty can mark only the leading half selected; a wide glyph is one output run.
 	if c.width == .Spacer_Tail && column > 0 {
-		previous := term.snapshot_cell(s, column-1, row)
+		previous := term.snapshot_cell(s, column - 1, row)
 		if previous.width == .Wide {
 			c = previous
 		}
@@ -230,14 +248,16 @@ attributes_at :: proc(s: ^term.Snapshot, column, row: int) -> Attributes {
 
 @(private)
 color_text :: proc(c: Maybe(term.Color), buffer: []u8) -> string {
-	if rgb, ok := c.?; ok { return fmt.bprintf(buffer, "#%02x%02x%02x", rgb[0], rgb[1], rgb[2]) }
+	if rgb, ok := c.?; ok {return fmt.bprintf(buffer, "#%02x%02x%02x", rgb[0], rgb[1], rgb[2])}
 	return "default"
 }
 
 @(private)
 attribute_text :: proc(w: ^Writer, a: Attributes) {
-	@(static, rodata) names := FLAG_NAMES
-	@(static, rodata) underlines := UNDERLINES
+	@(static, rodata)
+	names := FLAG_NAMES
+	@(static, rodata)
+	underlines := UNDERLINES
 	buffer: [16]u8
 	if a.fg != nil {
 		put(w, " fg=")
@@ -247,7 +267,7 @@ attribute_text :: proc(w: ^Writer, a: Attributes) {
 		put(w, " bg=")
 		put(w, color_text(a.bg, buffer[:]))
 	}
-	for flag in Attribute_Flag.Bold..=Attribute_Flag.Overline {
+	for flag in Attribute_Flag.Bold ..= Attribute_Flag.Overline {
 		if flag in a.flags {
 			put(w, " ")
 			put(w, names[flag])
@@ -286,10 +306,12 @@ cell_text :: proc(w: ^Writer, cells: []term.Snapshot_Cell) {
 
 @(require_results)
 format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -> Error {
-	if s == nil { return .Invalid_Argument }
+	if s == nil {return .Invalid_Argument}
 	first, last, ok := bounds(request.columns, int(s.columns))
-	if !ok || request.row < 0 || request.row >= int(s.rows) { return .Invalid_Argument }
-	w := Writer{out = out}
+	if !ok || request.row < 0 || request.row >= int(s.rows) {return .Invalid_Argument}
+	w := Writer {
+		out = out,
+	}
 	put(&w, "row ")
 	integer(&w, request.row)
 	put(&w, " cols ")
@@ -297,11 +319,12 @@ format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -
 	put(&w, "-")
 	integer(&w, last)
 	put(&w, "\n")
-	row := s.cells[request.row*int(s.columns):(request.row+1)*int(s.columns)]
+	row := s.cells[request.row * int(s.columns):(request.row + 1) * int(s.columns)]
 	text_last := last
 	for text_last >= first {
 		c := &row[text_last]
-		if (c.text != "" && c.text != " ") || attributes_at(s, text_last, request.row) != (Attributes{}) {
+		if (c.text != "" && c.text != " ") ||
+		   attributes_at(s, text_last, request.row) != (Attributes{}) {
 			break
 		}
 		text_last -= 1
@@ -314,15 +337,15 @@ format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -
 		}
 		a := attributes_at(s, start, request.row)
 		end := start
-		for end < text_last && attributes_at(s, end+1, request.row) == a {
+		for end < text_last && attributes_at(s, end + 1, request.row) == a {
 			end += 1
 		}
 		span(&w, start, end)
 		put(&w, " ")
-		cell_text(&w, row[start:end+1])
+		cell_text(&w, row[start:end + 1])
 		attribute_text(&w, a)
 		put(&w, "\n")
-		start = end+1
+		start = end + 1
 	}
 	return w.error
 }
@@ -338,7 +361,7 @@ value_text :: proc(w: ^Writer, value: string) {
 		return
 	}
 	put(w, "\"")
-	for i in 0..<len(value) {
+	for i in 0 ..< len(value) {
 		c := value[i]
 		if c == '"' {
 			put(w, "\\\"")
@@ -346,7 +369,7 @@ value_text :: proc(w: ^Writer, value: string) {
 			buffer: [4]u8
 			put(w, fmt.bprintf(buffer[:], "\\x%02x", c))
 		} else {
-			put(w, value[i:i+1])
+			put(w, value[i:i + 1])
 		}
 	}
 	put(w, "\"")
@@ -354,14 +377,18 @@ value_text :: proc(w: ^Writer, value: string) {
 
 @(require_results)
 format_value :: proc(out: ^strings.Builder, value: string) -> Error {
-	w := Writer{out = out}
+	w := Writer {
+		out = out,
+	}
 	value_text(&w, value)
 	return w.error
 }
 
 @(require_results)
 format_state :: proc(out: ^strings.Builder, entries: []State_Entry) -> Error {
-	w := Writer{out = out}
+	w := Writer {
+		out = out,
+	}
 	for entry in entries {
 		put(&w, entry.key)
 		put(&w, "=")
@@ -372,8 +399,14 @@ format_state :: proc(out: ^strings.Builder, entries: []State_Entry) -> Error {
 }
 
 @(private)
-observed_attribute :: proc(c: ^term.Snapshot_Cell, a: Attributes, key: string, buffer: []u8) -> string {
-	@(static, rodata) underlines := UNDERLINES
+observed_attribute :: proc(
+	c: ^term.Snapshot_Cell,
+	a: Attributes,
+	key: string,
+	buffer: []u8,
+) -> string {
+	@(static, rodata)
+	underlines := UNDERLINES
 	switch key {
 	case "text":
 		return c.text
@@ -384,20 +417,28 @@ observed_attribute :: proc(c: ^term.Snapshot_Cell, a: Attributes, key: string, b
 	case "underline-color":
 		return color_text(a.underline_color, buffer)
 	case "underline":
-		if a.underline >= 0 && a.underline < len(UNDERLINES) { return underlines[a.underline] }
+		if a.underline >= 0 && a.underline < len(UNDERLINES) {return underlines[a.underline]}
 		return "unknown"
 	}
 	for name, flag in FLAG_NAMES {
-		if name == key { return flag in a.flags ? "true" : "false" }
+		if name == key {return flag in a.flags ? "true" : "false"}
 	}
 	return "unknown"
 }
 
 @(require_results)
 evaluate :: proc(
-	out: ^strings.Builder, request: Expect, s: ^term.Snapshot, entries: []State_Entry = nil,
-) -> (passed: bool, error: Error) {
-	w := Writer{out = out}
+	out: ^strings.Builder,
+	request: Expect,
+	s: ^term.Snapshot,
+	entries: []State_Entry = nil,
+) -> (
+	passed: bool,
+	error: Error,
+) {
+	w := Writer {
+		out = out,
+	}
 	if request.kind == .State {
 		value := "<missing>"
 		found := false
@@ -422,7 +463,7 @@ evaluate :: proc(
 		put(&w, "\n")
 		return passed, w.error
 	}
-	if s == nil { return false, .Invalid_Argument }
+	if s == nil {return false, .Invalid_Argument}
 	switch request.kind {
 	case .State:
 	case .Text, .No_Text:
@@ -430,9 +471,9 @@ evaluate :: proc(
 		position: Position
 		recent: [2]int
 		recent_count := 0
-		for row in 0..<int(s.rows) {
+		for row in 0 ..< int(s.rows) {
 			text, err := term.row_text(s, row, out.buf.allocator)
-			if err != .None { return false, .Out_Of_Memory }
+			if err != .None {return false, .Out_Of_Memory}
 			if text != "" {
 				if recent_count == len(recent) {
 					recent[0], recent[1] = recent[1], row
@@ -445,12 +486,12 @@ evaluate :: proc(
 			if index >= 0 {
 				// Map a UTF-8 byte match to terminal columns, including wide cells.
 				at := 0
-				for column in 0..<int(s.columns) {
+				for column in 0 ..< int(s.columns) {
 					c := term.snapshot_cell(s, column, row)
 					if c.width == .Spacer_Head || c.width == .Spacer_Tail {
 						continue
 					}
-					if index < at+max(1, len(c.text)) {
+					if index < at + max(1, len(c.text)) {
 						position = {column, row}
 						break
 					}
@@ -476,7 +517,7 @@ evaluate :: proc(
 			put(&w, " not on screen; last rows:")
 			for row in recent[:recent_count] {
 				text, err := term.row_text(s, row, out.buf.allocator)
-				if err != .None { return false, .Out_Of_Memory }
+				if err != .None {return false, .Out_Of_Memory}
 				if text != "" {
 					put(&w, " ")
 					integer(&w, row)
@@ -487,14 +528,16 @@ evaluate :: proc(
 			}
 			if recent_count == 0 {
 				put(&w, " ")
-				span(&w, 0, int(s.rows)-1)
+				span(&w, 0, int(s.rows) - 1)
 				put(&w, " blank")
 			}
 		}
 	case .Cursor:
 		p := request.position
-		passed = s.cursor.viewport_has_value && int(s.cursor.viewport_x) == p.x &&
-		         int(s.cursor.viewport_y) == p.y
+		passed =
+			s.cursor.viewport_has_value &&
+			int(s.cursor.viewport_x) == p.x &&
+			int(s.cursor.viewport_y) == p.y
 		put(&w, passed ? "PASS cursor " : "FAIL cursor ")
 		integer(&w, p.x)
 		put(&w, ",")
@@ -514,7 +557,7 @@ evaluate :: proc(
 			a = attributes_at(s, p.x, p.y)
 			for item in request.attributes {
 				key, value, valid := assignment(item)
-				if !valid || !valid_attribute(item) { return false, .Invalid_Argument }
+				if !valid || !valid_attribute(item) {return false, .Invalid_Argument}
 				actual := observed_attribute(c, a, key, buffer[:])
 				matches := actual == value
 				if key == "fg" || key == "bg" || key == "underline-color" {

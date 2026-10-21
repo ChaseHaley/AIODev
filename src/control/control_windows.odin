@@ -5,29 +5,32 @@ import "core:fmt"
 import "core:log"
 import "core:strings"
 import "core:sync"
+import w "core:sys/windows"
 import "core:thread"
 import "core:time"
-import w "core:sys/windows"
 
 Server :: struct {
-	allocator: runtime.Allocator,
-	wake: Wake,
-	pipe, stop, ready: w.HANDLE,
-	worker: ^thread.Thread,
-	mutex: sync.Mutex, // Guards request, response, and delivery state.
-	pending: ^Message,
+	allocator:                 runtime.Allocator,
+	wake:                      Wake,
+	pipe, stop, ready:         w.HANDLE,
+	worker:                    ^thread.Thread,
+	mutex:                     sync.Mutex, // Guards request, response, and delivery state.
+	pending:                   ^Message,
 	active, serial, completed: u64,
-	response: []u8,
+	response:                  []u8,
 }
 Client :: struct {
-	pipe: w.HANDLE,
+	pipe:       w.HANDLE,
 	process_id: u32,
-	allocator: runtime.Allocator,
-	reader: Line_Reader,
+	allocator:  runtime.Allocator,
+	reader:     Line_Reader,
 }
 
 @(private)
-Line_Reader :: struct { buffer: [8192]u8, first, last: int }
+Line_Reader :: struct {
+	buffer:      [8192]u8,
+	first, last: int,
+}
 
 @(private, require_results)
 os_error :: proc(call: string) -> Error {
@@ -67,9 +70,10 @@ security_descriptor :: proc(allocator: runtime.Allocator) -> (w.PSECURITY_DESCRI
 	defer close_handle(&token)
 	size: u32
 	if bool(w.GetTokenInformation(token, .TokenUser, nil, 0, &size)) ||
-	   w.GetLastError() != w.ERROR_INSUFFICIENT_BUFFER { return nil, os_error("GetTokenInformation") }
+	   w.GetLastError() !=
+		   w.ERROR_INSUFFICIENT_BUFFER {return nil, os_error("GetTokenInformation")}
 	buffer, allocation_error := make([]u8, int(size), allocator)
-	if allocation_error != nil { return nil, .Out_Of_Memory }
+	if allocation_error != nil {return nil, .Out_Of_Memory}
 	defer delete(buffer, allocator)
 	if !bool(w.GetTokenInformation(token, .TokenUser, raw_data(buffer), size, &size)) {
 		return nil, os_error("GetTokenInformation")
@@ -82,14 +86,21 @@ security_descriptor :: proc(allocator: runtime.Allocator) -> (w.PSECURITY_DESCRI
 	defer local_free(rawptr(sid))
 	text_buffer: [256]u8
 	text := w.wstring_to_utf8(text_buffer[:], sid)
-	if text == "" { return nil, os_error("WideCharToMultiByte") }
+	if text == "" {return nil, os_error("WideCharToMultiByte")}
 	sddl_buffer: [300]u8
 	sddl := fmt.bprintf(sddl_buffer[:], "D:P(A;;GA;;;%s)", text)
 	wide := w.utf8_to_wstring(sddl, allocator)
-	if wide == nil { return nil, .Out_Of_Memory }
+	if wide == nil {return nil, .Out_Of_Memory}
 	defer delete(wide, allocator)
 	descriptor: w.PSECURITY_DESCRIPTOR
-	if !bool(ConvertStringSecurityDescriptorToSecurityDescriptorW(wide, SDDL_REVISION_1, &descriptor, nil)) {
+	if !bool(
+		ConvertStringSecurityDescriptorToSecurityDescriptorW(
+			wide,
+			SDDL_REVISION_1,
+			&descriptor,
+			nil,
+		),
+	) {
 		return nil, os_error("ConvertStringSecurityDescriptorToSecurityDescriptorW")
 	}
 	return descriptor, .None
@@ -101,30 +112,39 @@ create :: proc(name: string, wake: Wake, allocator := context.allocator) -> (^Se
 		return nil, .Invalid_Argument
 	}
 	s, allocation_error := new(Server, allocator)
-	if allocation_error != nil { return nil, .Out_Of_Memory }
+	if allocation_error != nil {return nil, .Out_Of_Memory}
 	s.allocator, s.wake = allocator, wake
 	ok := false
 	defer if !ok {
 		destroy(s)
 	}
 	descriptor, err := security_descriptor(allocator)
-	if err != .None { return nil, err }
+	if err != .None {return nil, err}
 	defer local_free(descriptor)
 	wide := w.utf8_to_wstring(name, allocator)
-	if wide == nil { return nil, .Out_Of_Memory }
+	if wide == nil {return nil, .Out_Of_Memory}
 	defer delete(wide, allocator)
-	sa := w.SECURITY_ATTRIBUTES{nLength = size_of(w.SECURITY_ATTRIBUTES), lpSecurityDescriptor = descriptor}
-	s.pipe = w.CreateNamedPipeW(wide,
+	sa := w.SECURITY_ATTRIBUTES {
+		nLength              = size_of(w.SECURITY_ATTRIBUTES),
+		lpSecurityDescriptor = descriptor,
+	}
+	s.pipe = w.CreateNamedPipeW(
+		wide,
 		w.PIPE_ACCESS_DUPLEX | w.FILE_FLAG_OVERLAPPED | w.FILE_FLAG_FIRST_PIPE_INSTANCE,
 		w.PIPE_TYPE_BYTE | w.PIPE_READMODE_BYTE | w.PIPE_WAIT | w.PIPE_REJECT_REMOTE_CLIENTS,
-		1, 65536, 65536, 0, &sa)
-	if s.pipe == w.INVALID_HANDLE_VALUE { return nil, os_error("CreateNamedPipeW") }
+		1,
+		65536,
+		65536,
+		0,
+		&sa,
+	)
+	if s.pipe == w.INVALID_HANDLE_VALUE {return nil, os_error("CreateNamedPipeW")}
 	s.stop = w.CreateEventW(nil, true, false, nil)
-	if s.stop == nil { return nil, os_error("CreateEventW") }
+	if s.stop == nil {return nil, os_error("CreateEventW")}
 	s.ready = w.CreateEventW(nil, false, false, nil)
-	if s.ready == nil { return nil, os_error("CreateEventW") }
+	if s.ready == nil {return nil, os_error("CreateEventW")}
 	s.worker = thread.create(server_thread)
-	if s.worker == nil { return nil, .System }
+	if s.worker == nil {return nil, .System}
 	s.worker.data = s
 	thread.start(s.worker)
 	ok = true
@@ -132,7 +152,7 @@ create :: proc(name: string, wake: Wake, allocator := context.allocator) -> (^Se
 }
 
 destroy :: proc(s: ^Server) {
-	if s == nil { return }
+	if s == nil {return}
 	if s.stop != nil && !bool(w.SetEvent(s.stop)) {
 		log.errorf("control: SetEvent failed: %v", w.GetLastError())
 	}
@@ -160,7 +180,7 @@ poll :: proc(s: ^Server) -> ^Message {
 @(require_results)
 respond :: proc(s: ^Server, id: u64, response: Response) -> Error {
 	data, err := encode(response, s.allocator)
-	if err != .None { return err }
+	if err != .None {return err}
 	sync.mutex_lock(&s.mutex)
 	if id == 0 || s.active != id || s.response != nil {
 		sync.mutex_unlock(&s.mutex)
@@ -169,13 +189,13 @@ respond :: proc(s: ^Server, id: u64, response: Response) -> Error {
 	}
 	s.response = data
 	sync.mutex_unlock(&s.mutex)
-	if !bool(w.SetEvent(s.ready)) { return os_error("SetEvent") }
+	if !bool(w.SetEvent(s.ready)) {return os_error("SetEvent")}
 	return .None
 }
 
 @(require_results)
 delivery_finished :: proc(s: ^Server, id: u64) -> bool {
-	if s == nil || id == 0 { return false }
+	if s == nil || id == 0 {return false}
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
 	return id <= s.completed
@@ -190,8 +210,14 @@ finish_delivery :: proc(s: ^Server, id: u64) {
 
 @(private, require_results)
 wait_io :: proc(
-	pipe: w.HANDLE, overlapped: ^w.OVERLAPPED, stop: w.HANDLE, timeout: u32,
-) -> (u32, Error) {
+	pipe: w.HANDLE,
+	overlapped: ^w.OVERLAPPED,
+	stop: w.HANDLE,
+	timeout: u32,
+) -> (
+	u32,
+	Error,
+) {
 	handles := [?]w.HANDLE{overlapped.hEvent, stop}
 	count: u32 = stop == nil ? 1 : 2
 	result := w.WaitForMultipleObjects(count, &handles[0], false, timeout)
@@ -207,8 +233,8 @@ wait_io :: proc(
 		   w.GetLastError() != w.ERROR_OPERATION_ABORTED {
 			log.errorf("control: GetOverlappedResult after cancel failed: %v", w.GetLastError())
 		}
-		if result == w.WAIT_TIMEOUT { return 0, .Timeout }
-		if result == w.WAIT_OBJECT_0+1 { return 0, .Closed }
+		if result == w.WAIT_TIMEOUT {return 0, .Timeout}
+		if result == w.WAIT_OBJECT_0 + 1 {return 0, .Closed}
 		return 0, .System
 	}
 	n: u32
@@ -220,12 +246,21 @@ wait_io :: proc(
 
 @(private, require_results)
 transfer :: proc(
-	pipe: w.HANDLE, buffer: []u8, writing: bool, stop: w.HANDLE, timeout: u32,
-) -> (int, Error) {
+	pipe: w.HANDLE,
+	buffer: []u8,
+	writing: bool,
+	stop: w.HANDLE,
+	timeout: u32,
+) -> (
+	int,
+	Error,
+) {
 	event := w.CreateEventW(nil, true, false, nil)
-	if event == nil { return 0, os_error("CreateEventW") }
+	if event == nil {return 0, os_error("CreateEventW")}
 	defer close_handle(&event)
-	ov := w.OVERLAPPED{hEvent = event}
+	ov := w.OVERLAPPED {
+		hEvent = event,
+	}
 	n: u32
 	ok: w.BOOL
 	if writing {
@@ -234,46 +269,55 @@ transfer :: proc(
 		ok = w.ReadFile(pipe, raw_data(buffer), u32(len(buffer)), &n, &ov)
 	}
 	if !bool(ok) {
-		if w.GetLastError() != w.ERROR_IO_PENDING { return 0, os_error(writing ? "WriteFile" : "ReadFile") }
+		if w.GetLastError() !=
+		   w.ERROR_IO_PENDING {return 0, os_error(writing ? "WriteFile" : "ReadFile")}
 		count, err := wait_io(pipe, &ov, stop, timeout)
-		if err == .None && count == 0 { return 0, .Closed }
+		if err == .None && count == 0 {return 0, .Closed}
 		return int(count), err
 	}
-	if n == 0 { return 0, .Closed }
+	if n == 0 {return 0, .Closed}
 	return int(n), .None
 }
 
 @(private)
 remaining :: proc(start: time.Tick, timeout: int) -> u32 {
-	if timeout < 0 { return w.INFINITE }
-	elapsed := int(time.tick_since(start)/time.Millisecond)
-	return u32(max(0, timeout-elapsed))
+	if timeout < 0 {return w.INFINITE}
+	elapsed := int(time.tick_since(start) / time.Millisecond)
+	return u32(max(0, timeout - elapsed))
 }
 
 @(private, require_results)
 read_line :: proc(
-	r: ^Line_Reader, pipe: w.HANDLE, stop: w.HANDLE, start: time.Tick, timeout: int,
+	r: ^Line_Reader,
+	pipe: w.HANDLE,
+	stop: w.HANDLE,
+	start: time.Tick,
+	timeout: int,
 	allocator: runtime.Allocator,
-) -> ([]u8, Error) {
+) -> (
+	[]u8,
+	Error,
+) {
 	data := make([dynamic]u8, allocator)
 	defer delete(data)
 	for {
 		if r.first == r.last {
 			n, err := transfer(pipe, r.buffer[:], false, stop, remaining(start, timeout))
-			if err != .None { return nil, err }
+			if err != .None {return nil, err}
 			r.first, r.last = 0, n
 		}
 		end := r.first
 		for end < r.last && r.buffer[end] != '\n' {
 			end += 1
 		}
-		if len(data)+end-r.first > MAX_MESSAGE { return nil, .Protocol }
-		if _, err := append(&data, ..r.buffer[r.first:end]); err != nil { return nil, .Out_Of_Memory }
+		if len(data) + end - r.first > MAX_MESSAGE {return nil, .Protocol}
+		if _, err := append(&data, ..r.buffer[r.first:end]);
+		   err != nil {return nil, .Out_Of_Memory}
 		r.first = end
 		if end < r.last {
 			r.first += 1
 			line, err := make([]u8, len(data), allocator)
-			if err != nil { return nil, .Out_Of_Memory }
+			if err != nil {return nil, .Out_Of_Memory}
 			copy(line, data[:])
 			return line, .None
 		}
@@ -281,10 +325,16 @@ read_line :: proc(
 }
 
 @(private, require_results)
-write_line :: proc(pipe: w.HANDLE, data: []u8, stop: w.HANDLE, start: time.Tick, timeout: int) -> Error {
+write_line :: proc(
+	pipe: w.HANDLE,
+	data: []u8,
+	stop: w.HANDLE,
+	start: time.Tick,
+	timeout: int,
+) -> Error {
 	for offset := 0; offset < len(data); {
 		n, err := transfer(pipe, data[offset:], true, stop, remaining(start, timeout))
-		if err != .None { return err }
+		if err != .None {return err}
 		offset += n
 	}
 	newline := [1]u8{'\n'}
@@ -295,13 +345,15 @@ write_line :: proc(pipe: w.HANDLE, data: []u8, stop: w.HANDLE, start: time.Tick,
 @(private, require_results)
 accept_client :: proc(s: ^Server) -> Error {
 	event := w.CreateEventW(nil, true, false, nil)
-	if event == nil { return os_error("CreateEventW") }
+	if event == nil {return os_error("CreateEventW")}
 	defer close_handle(&event)
-	ov := w.OVERLAPPED{hEvent = event}
-	if bool(w.ConnectNamedPipe(s.pipe, &ov)) { return .None }
+	ov := w.OVERLAPPED {
+		hEvent = event,
+	}
+	if bool(w.ConnectNamedPipe(s.pipe, &ov)) {return .None}
 	code := w.GetLastError()
-	if code == w.ERROR_PIPE_CONNECTED { return .None }
-	if code != w.ERROR_IO_PENDING { return os_error("ConnectNamedPipe") }
+	if code == w.ERROR_PIPE_CONNECTED {return .None}
+	if code != w.ERROR_IO_PENDING {return os_error("ConnectNamedPipe")}
 	_, err := wait_io(s.pipe, &ov, s.stop, w.INFINITE)
 	return err
 }
@@ -327,11 +379,13 @@ await_response :: proc(s: ^Server) -> ([]u8, Error) {
 			s.active = 0
 		}
 		sync.mutex_unlock(&s.mutex)
-		if data != nil { return data, .None }
+		if data != nil {return data, .None}
 		result := w.WaitForMultipleObjects(2, &handles[0], false, 10)
-		if result == w.WAIT_OBJECT_0 { return nil, .Closed }
-		if result == w.WAIT_FAILED { return nil, os_error("WaitForMultipleObjects") }
-		if !bool(w.PeekNamedPipe(s.pipe, nil, 0, nil, nil, nil)) { return nil, os_error("PeekNamedPipe") }
+		if result == w.WAIT_OBJECT_0 {return nil, .Closed}
+		if result == w.WAIT_FAILED {return nil, os_error("WaitForMultipleObjects")}
+		if !bool(
+			w.PeekNamedPipe(s.pipe, nil, 0, nil, nil, nil),
+		) {return nil, os_error("PeekNamedPipe")}
 	}
 }
 
@@ -340,13 +394,15 @@ serve_client :: proc(s: ^Server) -> Error {
 	r: Line_Reader
 	for {
 		data, read_error := read_line(&r, s.pipe, s.stop, time.tick_now(), -1, s.allocator)
-		if read_error != .None { return read_error }
+		if read_error != .None {return read_error}
 		m, decode_error := decode_request(data, s.allocator)
 		delete(data, s.allocator)
-		if decode_error != .None { return decode_error }
+		if decode_error != .None {return decode_error}
 		if m.parse_error.advice != "" {
 			text := strings.builder_make(s.allocator)
-			writer := Writer{out = &text}
+			writer := Writer {
+				out = &text,
+			}
 			quoted(&writer, m.parse_error.argument)
 			put(&writer, ": ")
 			put(&writer, m.parse_error.advice)
@@ -357,10 +413,10 @@ serve_client :: proc(s: ^Server) -> Error {
 			}
 			response, encode_error := encode(Response{false, strings.to_string(text)}, s.allocator)
 			strings.builder_destroy(&text)
-			if encode_error != .None { return encode_error }
+			if encode_error != .None {return encode_error}
 			write_error := write_line(s.pipe, response, s.stop, time.tick_now(), -1)
 			delete(response, s.allocator)
-			if write_error != .None { return write_error }
+			if write_error != .None {return write_error}
 			continue
 		}
 		sync.mutex_lock(&s.mutex)
@@ -381,7 +437,7 @@ serve_client :: proc(s: ^Server) -> Error {
 		write_error := write_line(s.pipe, response, s.stop, time.tick_now(), -1)
 		delete(response, s.allocator)
 		finish_delivery(s, id)
-		if write_error != .None { return write_error }
+		if write_error != .None {return write_error}
 	}
 }
 
@@ -399,9 +455,9 @@ server_thread :: proc(t: ^thread.Thread) {
 			log.errorf("control: serving client failed: %v", err)
 		}
 		if err == .Protocol {
-			data, encode_error := encode(Response{
-				false, "protocol error: use a JSON string array, at most 4 MiB",
-			})
+			data, encode_error := encode(
+				Response{false, "protocol error: use a JSON string array, at most 4 MiB"},
+			)
 			if encode_error == .None {
 				if write_error := write_line(s.pipe, data, s.stop, time.tick_now(), 1000);
 				   write_error != .None {
@@ -412,7 +468,13 @@ server_thread :: proc(t: ^thread.Thread) {
 				buffer: [8192]u8
 				start := time.tick_now()
 				for remaining(start, 1000) > 0 {
-					_, drain_error := transfer(s.pipe, buffer[:], false, s.stop, remaining(start, 1000))
+					_, drain_error := transfer(
+						s.pipe,
+						buffer[:],
+						false,
+						s.stop,
+						remaining(start, 1000),
+					)
 					if drain_error != .None {
 						break
 					}
@@ -441,13 +503,19 @@ connect :: proc(name: string, timeout_ms: int, allocator := context.allocator) -
 		return {}, .Invalid_Argument
 	}
 	wide := w.utf8_to_wstring(name, allocator)
-	if wide == nil { return {}, .Out_Of_Memory }
+	if wide == nil {return {}, .Out_Of_Memory}
 	defer delete(wide, allocator)
 	start := time.tick_now()
 	for {
-		pipe := w.CreateFileW(wide, w.GENERIC_READ | w.GENERIC_WRITE, 0, nil,
+		pipe := w.CreateFileW(
+			wide,
+			w.GENERIC_READ | w.GENERIC_WRITE,
+			0,
+			nil,
 			w.OPEN_EXISTING,
-			w.FILE_FLAG_OVERLAPPED | w.SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nil)
+			w.FILE_FLAG_OVERLAPPED | w.SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+			nil,
+		)
 		if pipe != w.INVALID_HANDLE_VALUE {
 			id: u32
 			if !bool(GetNamedPipeServerProcessId(pipe, &id)) {
@@ -458,9 +526,10 @@ connect :: proc(name: string, timeout_ms: int, allocator := context.allocator) -
 			return Client{pipe = pipe, process_id = id, allocator = allocator}, .None
 		}
 		code := w.GetLastError()
-		if code != w.ERROR_FILE_NOT_FOUND && code != w.ERROR_PIPE_BUSY { return {}, os_error("CreateFileW") }
-		if remaining(start, timeout_ms) == 0 { return {}, .Timeout }
-		time.sleep(time.Duration(min(10, remaining(start, timeout_ms)))*time.Millisecond)
+		if code != w.ERROR_FILE_NOT_FOUND &&
+		   code != w.ERROR_PIPE_BUSY {return {}, os_error("CreateFileW")}
+		if remaining(start, timeout_ms) == 0 {return {}, .Timeout}
+		time.sleep(time.Duration(min(10, remaining(start, timeout_ms))) * time.Millisecond)
 	}
 }
 
@@ -471,11 +540,11 @@ close :: proc(c: ^Client) {
 
 @(require_results)
 call :: proc(c: ^Client, args: []string, timeout_ms: int = 15000) -> (Response, Error) {
-	if c.pipe == nil { return {}, .Closed }
-	if timeout_ms < 0 || timeout_ms > int(max(i32)) { return {}, .Invalid_Argument }
+	if c.pipe == nil {return {}, .Closed}
+	if timeout_ms < 0 || timeout_ms > int(max(i32)) {return {}, .Invalid_Argument}
 	allocator := c.allocator
 	data, encode_error := encode(args, allocator)
-	if encode_error != .None { return {}, encode_error }
+	if encode_error != .None {return {}, encode_error}
 	defer delete(data, allocator)
 	start := time.tick_now()
 	if err := write_line(c.pipe, data, nil, start, timeout_ms); err != .None {

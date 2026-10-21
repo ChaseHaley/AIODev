@@ -7,11 +7,11 @@ when ODIN_OS == .Windows {
 Grid_Ref :: struct {
 	size: uint,
 	node: rawptr,
-	x: u16,
-	y: u16,
+	x:    u16,
+	y:    u16,
 }
 
-@(default_calling_convention="c", link_prefix="ghostty_")
+@(default_calling_convention = "c", link_prefix = "ghostty_")
 foreign lib {
 	@(require_results)
 	grid_ref_cell :: proc(ref: ^Grid_Ref, out_cell: ^Cell) -> Result ---

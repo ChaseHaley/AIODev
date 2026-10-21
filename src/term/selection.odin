@@ -1,18 +1,23 @@
 package term
 
+import "aio:ghostty"
 import "core:log"
 import "core:strings"
 import "core:sync"
-import "aio:ghostty"
 
-@(private) REPEAT_CLICK_INTERVAL_NS :: u64(500_000_000)
-@(private) REPEAT_CLICK_DISTANCE :: f64(4)
+@(private)
+REPEAT_CLICK_INTERVAL_NS :: u64(500_000_000)
+@(private)
+REPEAT_CLICK_DISTANCE :: f64(4)
 
 @(private, require_results)
 configure_press_event :: proc(s: ^Session) -> Error {
 	interval, distance := REPEAT_CLICK_INTERVAL_NS, REPEAT_CLICK_DISTANCE
-	ok := ghostty.selection_gesture_event_set(s.press_event, .Repeat_Interval_Ns, &interval) == .Success
-	ok &&= ghostty.selection_gesture_event_set(s.press_event, .Repeat_Distance, &distance) == .Success
+	ok :=
+		ghostty.selection_gesture_event_set(s.press_event, .Repeat_Interval_Ns, &interval) ==
+		.Success
+	ok &&=
+		ghostty.selection_gesture_event_set(s.press_event, .Repeat_Distance, &distance) == .Success
 	return ok ? .None : .Terminal_Failed
 }
 
@@ -21,7 +26,10 @@ viewport_ref :: proc(s: ^Session, x, y: f32) -> (ghostty.Grid_Ref, bool) {
 	g := s.geometry
 	column := clamp(int((x - f32(g.padding_left)) / f32(g.cell_width)), 0, int(g.columns) - 1)
 	row := clamp(int((y - f32(g.padding_top)) / f32(g.cell_height)), 0, int(g.rows) - 1)
-	point := ghostty.Point{tag = .Viewport, value = {coordinate = {x = u16(column), y = u32(row)}}}
+	point := ghostty.Point {
+		tag = .Viewport,
+		value = {coordinate = {x = u16(column), y = u32(row)}},
+	}
 	ref := ghostty.sized(ghostty.Grid_Ref)
 	found := ghostty.terminal_grid_ref(s.terminal, point, &ref) == .Success
 	return ref, found
@@ -109,9 +117,12 @@ selection_autoscroll :: proc(s: ^Session) -> Autoscroll {
 		return .None
 	}
 	switch value {
-	case .None: return .None
-	case .Up: return .Up
-	case .Down: return .Down
+	case .None:
+		return .None
+	case .Up:
+		return .Up
+	case .Down:
+		return .Down
 	}
 	return .None
 }

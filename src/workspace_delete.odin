@@ -1,37 +1,38 @@
 package main
 
-import "core:fmt"
-import "core:strings"
 import "aio:layout"
 import "aio:render"
 import "aio:term"
 import "aio:term_view"
 import "aio:ui"
+import "core:fmt"
+import "core:strings"
 
 @(private)
 workspace_delete_destination :: proc(app: ^App, workspace: ^Workspace) -> ^Workspace {
 	index := -1
-	for current, i in app.workspaces { if current == workspace { index = i; break } }
-	if index < 0 { return nil }
+	for current, i in app.workspaces {if current == workspace {index = i; break}}
+	if index < 0 {return nil}
 	for offset in 1 ..< len(app.workspaces) {
-		candidate := app.workspaces[(index+offset)%len(app.workspaces)]
-		if !candidate.provisional && window_for_workspace(app, candidate) == nil { return candidate }
+		candidate := app.workspaces[(index + offset) % len(app.workspaces)]
+		if !candidate.provisional && window_for_workspace(app, candidate) == nil {return candidate}
 	}
 	return nil
 }
 
 workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
-	if w == nil || workspace == nil || w.preparing || workspace.provisional { return }
-	if workspace_find(app, workspace.id) != workspace { return }
+	if w == nil || workspace == nil || w.preparing || workspace.provisional {return}
+	if workspace_find(app, workspace.id) != workspace {return}
 	owner := window_for_workspace(app, workspace)
-	if owner != nil && owner.preparing { return }
+	if owner != nil && owner.preparing {return}
 	destination := owner != nil ? workspace_delete_destination(app, workspace) : nil
 	name, err := strings.clone(workspace.name)
-	if err != nil { notify(app, .Error, "Could not prepare workspace deletion."); return }
+	if err != nil {notify(app, .Error, "Could not prepare workspace deletion."); return}
 	destination_name: string
 	if destination != nil {
 		destination_name, err = strings.clone(destination.name)
-		if err != nil { delete(name); notify(app, .Error, "Could not prepare workspace deletion."); return }
+		if err !=
+		   nil {delete(name); notify(app, .Error, "Could not prepare workspace deletion."); return}
 	}
 	arrange_cancel(app, w)
 	window_overlays_cancel(app, w)
@@ -47,7 +48,8 @@ workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
 	w.close_confirm_destination = destination != nil ? destination.id : 0
 	w.close_confirm_owner = owner != nil ? owner.id : 0
 	w.close_confirm_tab = 0
-	w.close_confirm_tabs, w.close_confirm_panes, w.close_confirm_sessions = workspace_delete_counts(workspace)
+	w.close_confirm_tabs, w.close_confirm_panes, w.close_confirm_sessions =
+		workspace_delete_counts(workspace)
 	ui.confirm_open(&w.close_confirm)
 	w.close_confirm.extended = true
 	w.dirty = true
@@ -60,7 +62,7 @@ workspace_delete_counts :: proc(workspace: ^Workspace) -> (tabs, panes, sessions
 		for node in tab.tree.nodes {
 			if pane, ok := node.(layout.Pane); ok {
 				panes += 1
-				if pane.content.kind == .Terminal { sessions += 1 }
+				if pane.content.kind == .Terminal {sessions += 1}
 			}
 		}
 	}
@@ -70,41 +72,56 @@ workspace_delete_counts :: proc(workspace: ^Workspace) -> (tabs, panes, sessions
 @(private)
 workspace_delete_text :: proc(app: ^App, w: ^Window) -> (title, body, note: string) {
 	name := w.close_confirm_workspace_name
-	if workspace := workspace_find(app, w.close_confirm_workspace); w.close_confirm.open && workspace != nil {
+	if workspace := workspace_find(app, w.close_confirm_workspace);
+	   w.close_confirm.open && workspace != nil {
 		name = workspace.name
-		w.close_confirm_tabs, w.close_confirm_panes, w.close_confirm_sessions = workspace_delete_counts(workspace)
+		w.close_confirm_tabs, w.close_confirm_panes, w.close_confirm_sessions =
+			workspace_delete_counts(workspace)
 	}
 	title = fmt.tprintf("Delete #%d “%s”?", w.close_confirm_workspace, name)
-	body = fmt.tprintf("Close %d tabs (%d panes); stop %d sessions.",
-		w.close_confirm_tabs, w.close_confirm_panes, w.close_confirm_sessions)
+	body = fmt.tprintf(
+		"Close %d tabs (%d panes); stop %d sessions.",
+		w.close_confirm_tabs,
+		w.close_confirm_panes,
+		w.close_confirm_sessions,
+	)
 	if w.close_confirm_owner != 0 {
 		if w.close_confirm_destination != 0 {
-			note = fmt.tprintf("Switch its window to #%d “%s”.", w.close_confirm_destination,
-				w.close_confirm_destination_name)
-		} else { note = "Replace it with a fresh default workspace and shell." }
-	} else { note = "Other workspaces and their sessions stay open." }
+			note = fmt.tprintf(
+				"Switch its window to #%d “%s”.",
+				w.close_confirm_destination,
+				w.close_confirm_destination_name,
+			)
+		} else {note = "Replace it with a fresh default workspace and shell."}
+	} else {note = "Other workspaces and their sessions stay open."}
 	return
 }
 
 // Preparation owns all fallible view resources; the old window stays attached until it succeeds.
 @(private)
 @(require_results)
-workspace_delete_prepare_view :: proc(app: ^App, workspace: ^Workspace,
-	prepared: ^Window) -> bool {
+workspace_delete_prepare_view :: proc(
+	app: ^App,
+	workspace: ^Workspace,
+	prepared: ^Window,
+) -> bool {
 	prepared.workspace, prepared.tree = workspace, &selected_tab(workspace).tree
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, prepared) { return false }
-	if resize(&prepared.tab_controls, len(workspace.tabs)+1) != nil ||
+	if settings_tab_index(workspace) >= 0 && !settings_load(app, prepared) {return false}
+	if resize(&prepared.tab_controls, len(workspace.tabs) + 1) != nil ||
 	   resize(&prepared.tab_positions, len(workspace.tabs)) != nil ||
 	   reserve(&prepared.panes, len(prepared.tree.nodes)) != nil ||
 	   reserve(&prepared.dividers, len(prepared.tree.nodes)) != nil ||
-	   reserve(&prepared.views, len(prepared.tree.nodes)) != nil { return false }
-	for &position, i in prepared.tab_positions { position.value, position.target = f32(i), f32(i) }
+	   reserve(&prepared.views, len(prepared.tree.nodes)) != nil {return false}
+	for &position, i in prepared.tab_positions {position.value, position.target = f32(i), f32(i)}
 	for node in prepared.tree.nodes {
 		pane, ok := node.(layout.Pane)
-		if !ok || pane.content.kind != .Terminal { continue }
+		if !ok || pane.content.kind != .Terminal {continue}
 		view: term_view.View
-		if !term_view.create(&view) { return false }
-		append(&prepared.views, Pane_View{content = pane.content, view = view, cache = render.draw_list_init()})
+		if !term_view.create(&view) {return false}
+		append(
+			&prepared.views,
+			Pane_View{content = pane.content, view = view, cache = render.draw_list_init()},
+		)
 	}
 	return true
 }
@@ -135,7 +152,7 @@ workspace_delete_release :: proc(app: ^App, workspace: ^Workspace) {
 		}
 	}
 	for current, i in app.workspaces {
-		if current == workspace { ordered_remove(&app.workspaces, i); break }
+		if current == workspace {ordered_remove(&app.workspaces, i); break}
 	}
 	workspace_destroy(workspace)
 }
@@ -144,25 +161,26 @@ workspace_delete_release :: proc(app: ^App, workspace: ^Workspace) {
 @(require_results)
 workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	owner := window_for_workspace(app, workspace)
-	if workspace.provisional || (owner != nil && owner.preparing) { return false }
+	if workspace.provisional || (owner != nil && owner.preparing) {return false}
 	destination := owner != nil ? workspace_delete_destination(app, workspace) : nil
 	fresh := destination == nil && (owner != nil || len(app.workspaces) == 1)
 	if fresh {
 		destination = workspace_create_empty(app)
-		if destination == nil { return false }
+		if destination == nil {return false}
 	}
 	committed := false
-	defer if fresh && !committed { workspace_delete_release(app, destination); workspace_pickers_refresh(app) }
+	defer if fresh &&
+	   !committed {workspace_delete_release(app, destination); workspace_pickers_refresh(app)}
 	prepared: Window
 	defer workspace_delete_view_destroy(&prepared)
 	created_tab := destination != nil && len(destination.tabs) == 0
-	if created_tab && !tab_create(app, destination) { return false }
-	defer if created_tab && !fresh && !committed { workspace_close_tab(app, destination, 0) }
+	if created_tab && !tab_create(app, destination) {return false}
+	defer if created_tab && !fresh && !committed {workspace_close_tab(app, destination, 0)}
 	if created_tab {
 		entry := session_find(app, app.next_session_id)
-		if entry == nil || term.status(entry.session).kind == .Failed { return false }
+		if entry == nil || term.status(entry.session).kind == .Failed {return false}
 	}
-	if owner != nil && !workspace_delete_prepare_view(app, destination, &prepared) { return false }
+	if owner != nil && !workspace_delete_prepare_view(app, destination, &prepared) {return false}
 	if owner != nil {
 		arrange_cancel(app, owner)
 		focus_leave(app, owner)
@@ -178,8 +196,11 @@ workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 		owner.close_confirm = {}
 		owner.close_confirm_workspace = 0
 		owner.tab_hover, owner.tab_close_pressed, owner.tab_pressed = -1, -1, false
-		owner.tab_underline = {value = f32(destination.selected), target = f32(destination.selected)}
-		if destination.selection_anchor == 0 { tab_select_one(destination, destination.selected) }
+		owner.tab_underline = {
+			value  = f32(destination.selected),
+			target = f32(destination.selected),
+		}
+		if destination.selection_anchor == 0 {tab_select_one(destination, destination.selected)}
 		window_relayout(app, owner)
 		focus_enter(app, owner)
 	}
@@ -194,9 +215,9 @@ workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 workspace_delete_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	ui.confirm_close(&w.close_confirm)
 	w.dirty = true
-	if !accept { return }
+	if !accept {return}
 	workspace := workspace_find(app, w.close_confirm_workspace)
-	if workspace == nil { return }
+	if workspace == nil {return}
 	owner := window_for_workspace(app, workspace)
 	destination := owner != nil ? workspace_delete_destination(app, workspace) : nil
 	owner_id := owner != nil ? owner.id : 0

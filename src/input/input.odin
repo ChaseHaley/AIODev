@@ -194,7 +194,7 @@ Modifier :: enum u16 {
 	Physical,
 }
 
-Modifiers :: bit_set[Modifier; u16]
+Modifiers :: bit_set[Modifier;u16]
 
 Mouse_Button :: enum u8 {
 	Left = 1,
@@ -204,4 +204,4 @@ Mouse_Button :: enum u8 {
 	Forward,
 }
 
-Mouse_Buttons :: bit_set[Mouse_Button; u8]
+Mouse_Buttons :: bit_set[Mouse_Button;u8]

@@ -1,5 +1,6 @@
 package term
 
+import "aio:ghostty"
 import "base:runtime"
 import "core:log"
 import "core:strings"
@@ -7,7 +8,6 @@ import "core:sync"
 import "core:time"
 import "core:unicode"
 import "core:unicode/utf8"
-import "aio:ghostty"
 
 Program_Status_State :: enum i32 {
 	Idle,
@@ -19,8 +19,8 @@ Program_Status_State :: enum i32 {
 
 Program_Status :: struct {
 	id, app, title, message: string,
-	state: Program_Status_State,
-	updated_at: time.Time,
+	state:                   Program_Status_State,
+	updated_at:              time.Time,
 }
 
 @(private)
@@ -29,13 +29,16 @@ PROGRAM_STATUS_LIMIT :: 256
 @(private)
 Stored_Status :: struct {
 	value: Program_Status,
-	text: string,
+	text:  string,
 }
 
 @(private)
 status_descendant :: proc(id, ancestor: string) -> bool {
-	return len(ancestor) == 0 || id == ancestor ||
-		(len(id) > len(ancestor) && strings.has_prefix(id, ancestor) && id[len(ancestor)] == '/')
+	return(
+		len(ancestor) == 0 ||
+		id == ancestor ||
+		(len(id) > len(ancestor) && strings.has_prefix(id, ancestor) && id[len(ancestor)] == '/') \
+	)
 }
 
 @(private)
@@ -92,7 +95,7 @@ on_program_status :: proc "c" (
 		}
 		return
 	}
-	parts := [?]string{
+	parts := [?]string {
 		id,
 		string(report.app.ptr[:report.app.len]),
 		string(report.title.ptr[:report.title.len]),
@@ -103,7 +106,10 @@ on_program_status :: proc "c" (
 		log.error("term: storing program status failed: out of memory")
 		return
 	}
-	p := Program_Status{state = Program_Status_State(report.state), updated_at = time.now()}
+	p := Program_Status {
+		state      = Program_Status_State(report.state),
+		updated_at = time.now(),
+	}
 	fields := [?]^string{&p.id, &p.app, &p.title, &p.message}
 	offset := 0
 	for part, i in parts {
@@ -148,8 +154,10 @@ inherited_app :: proc(s: ^Session, p: Program_Status) -> string {
 	nearest := -1
 	for record in s.program_statuses[:s.program_status_count] {
 		ancestor := record.value
-		if len(ancestor.app) > 0 && len(ancestor.id) > nearest &&
-			ancestor.id != p.id && status_descendant(p.id, ancestor.id) {
+		if len(ancestor.app) > 0 &&
+		   len(ancestor.id) > nearest &&
+		   ancestor.id != p.id &&
+		   status_descendant(p.id, ancestor.id) {
 			app, nearest = ancestor.app, len(ancestor.id)
 		}
 	}
@@ -160,7 +168,10 @@ inherited_app :: proc(s: ^Session, p: Program_Status) -> string {
 program_status :: proc(
 	s: ^Session,
 	allocator := context.allocator,
-) -> (snapshot: []Program_Status, err: runtime.Allocator_Error) #optional_allocator_error {
+) -> (
+	snapshot: []Program_Status,
+	err: runtime.Allocator_Error,
+) #optional_allocator_error {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
 	result: []Program_Status

@@ -4,17 +4,21 @@ import windows "core:sys/windows"
 
 Analysis_Source :: struct {
 	using interface: ITextAnalysisSource,
-	text: []u16,
-	locale: windows.wstring,
-	methods: ITextAnalysisSource_VTable,
+	text:            []u16,
+	locale:          windows.wstring,
+	methods:         ITextAnalysisSource_VTable,
 }
 
 @(require_results)
-analysis_source_init :: proc(source: ^Analysis_Source, text: []u16, locale: windows.wstring) -> bool {
+analysis_source_init :: proc(
+	source: ^Analysis_Source,
+	text: []u16,
+	locale: windows.wstring,
+) -> bool {
 	if source == nil || locale == nil || len(text) > int(max(u32)) {
 		return false
 	}
-	source^ = Analysis_Source{
+	source^ = Analysis_Source {
 		text = text,
 		locale = locale,
 		methods = {

@@ -7,18 +7,26 @@ import w "core:sys/windows"
 // Tells the bundled OpenConsole to measure text by grapheme cluster, matching libghostty with
 // mode 2027 (D-042). The system ConPTY measures per codepoint and rewrites full-screen rows
 // with those widths, so emoji sequences drift (D-044).
-@(private) PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES :: 0x08
+@(private)
+PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES :: 0x08
 
 @(private)
 Conpty :: struct {
-	create: proc "system" (size: w.COORD, input, output: w.HANDLE, flags: w.DWORD, console: ^HPCON) -> w.HRESULT,
-	resize: proc "system" (console: HPCON, size: w.COORD) -> w.HRESULT,
-	close: proc "system" (console: HPCON),
+	create:  proc "system" (
+		size: w.COORD,
+		input, output: w.HANDLE,
+		flags: w.DWORD,
+		console: ^HPCON,
+	) -> w.HRESULT,
+	resize:  proc "system" (console: HPCON, size: w.COORD) -> w.HRESULT,
+	close:   proc "system" (console: HPCON),
 	bundled: bool,
 }
 
-@(private) conpty_api: Conpty
-@(private) conpty_once: sync.Once
+@(private)
+conpty_api: Conpty
+@(private)
+conpty_once: sync.Once
 
 // The ConPTY every console in this process uses: conpty.dll beside the executable (which starts
 // the OpenConsole.exe beside it) when present, otherwise the system ConPTY in kernel32.
@@ -51,7 +59,10 @@ conpty_load :: proc() {
 	path[n + len("conpty.dll")] = 0
 	module := w.LoadLibraryW(cstring16(&path[0]))
 	if module == nil {
-		log.warnf("pty: conpty.dll is not beside the executable (error %d); using the system ConPTY", w.GetLastError())
+		log.warnf(
+			"pty: conpty.dll is not beside the executable (error %d); using the system ConPTY",
+			w.GetLastError(),
+		)
 		return
 	}
 	create := w.GetProcAddress(module, "ConptyCreatePseudoConsole")
@@ -63,9 +74,9 @@ conpty_load :: proc() {
 		return
 	}
 	conpty_api = {
-		create = auto_cast create,
-		resize = auto_cast resize,
-		close = auto_cast close,
+		create  = auto_cast create,
+		resize  = auto_cast resize,
+		close   = auto_cast close,
 		bundled = true,
 	}
 }
