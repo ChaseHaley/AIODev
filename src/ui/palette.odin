@@ -17,6 +17,7 @@ import "aio:render"
 @(private) PALETTE_PADDING :: 8
 @(private) PALETTE_RADIUS :: 10
 @(private) PALETTE_TEXT_INSET :: 14
+@(private) PALETTE_SETTING_SUFFIX :: " SETTING"
 
 Outcome :: enum {
 	None,
@@ -45,6 +46,7 @@ Palette :: struct {
 	selected, scroll: int,
 	results: [dynamic]Palette_Result,
 	positions: [dynamic]int,
+	haystack: [dynamic]u8,
 	settings: []Palette_Setting,
 	// The setting key of the last Open_Setting outcome.
 	chosen: string,
@@ -63,6 +65,12 @@ palette_init :: proc(p: ^Palette, settings: []Palette_Setting, allocator := cont
 	p.positions = make([dynamic]int, allocator)
 	p.settings = settings
 	err: runtime.Allocator_Error
+	capacity := 0
+	for s in settings {
+		capacity = max(capacity, len(s.group)+len(PALETTE_SETTING_SUFFIX)+2+len(s.title))
+	}
+	p.haystack, err = make([dynamic]u8, 0, capacity, allocator)
+	if err != nil { return err }
 	p.scratch, err = new(fuzzy.Scratch, allocator)
 	return err
 }
@@ -72,6 +80,7 @@ palette_destroy :: proc(p: ^Palette) {
 	delete(p.query.bytes)
 	delete(p.results)
 	delete(p.positions)
+	delete(p.haystack)
 	p^ = {}
 }
 
@@ -113,28 +122,60 @@ palette_result_title :: proc(p: ^Palette, r: Palette_Result) -> string {
 	return r.command != nil ? r.command.title : p.settings[r.setting].title
 }
 
-// Fuzzy-matches the title and the group, keeping the entry when either matches. Title matches carry
-// highlights and rank ahead of entries found only through their group.
+@(private)
+setting_header_match :: proc(p: ^Palette, setting: int, query: string, highlights: []int) -> (
+	match: fuzzy.Result, positions: []int,
+) {
+	s := p.settings[setting]
+	clear(&p.haystack)
+	append(&p.haystack, s.group)
+	append(&p.haystack, PALETTE_SETTING_SUFFIX)
+	// The displayed singular header is also a subsequence of this plural alias.
+	append(&p.haystack, 's')
+	by_header, header_error := fuzzy.score(query, string(p.haystack[:]), p.scratch)
+	if header_error != .None { return }
+	if by_header.matched { return by_header, nil }
+	append(&p.haystack, ' ')
+	title_start := len(p.haystack)
+	append(&p.haystack, s.title)
+	combined, combined_error := fuzzy.match_positions(query, string(p.haystack[:]), highlights, p.scratch)
+	if combined_error != .None || !combined.matched { return }
+	// The renderer expects UTF-8 byte offsets into the title, never the header.
+	count := 0
+	for pos in highlights {
+		if pos >= title_start {
+			highlights[count] = pos-title_start
+			count += 1
+		}
+	}
+	return combined, highlights[:count]
+}
+
+// Title matches rank first. Setting headers extend group matching, with title offsets kept separate.
 @(private)
 consider :: proc(p: ^Palette, command: ^commands.Command, setting: int, title, group, query: string, width: int) {
 	by_title, title_error := fuzzy.score(query, title, p.scratch)
 	by_group, group_error := fuzzy.score(query, group, p.scratch)
 	if title_error != .None || group_error != .None { return }
-	if !by_title.matched && !by_group.matched { return }
+	start := len(p.results)*width
+	highlights := p.positions[start:start+width]
 	result := Palette_Result{command = command, setting = setting, score = by_group.score}
 	if by_title.matched {
-		start := len(p.results)*width
-		highlights := p.positions[start:start+width]
 		if _, err := fuzzy.match_positions(query, title, highlights, p.scratch); err == .None {
 			result.positions = highlights
 		}
 		result.score, result.title_match = by_title.score, true
+	} else if !by_group.matched {
+		if command != nil { return }
+		by_header, positions := setting_header_match(p, setting, query, highlights)
+		if !by_header.matched { return }
+		result.score, result.positions = by_header.score, positions
 	}
 	append(&p.results, result)
 }
 
 // With an empty query, every enabled command in registry order; otherwise commands and settings whose
-// title or group fuzzy-matches the query.
+// title, group or setting header fuzzy-matches the query.
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
@@ -396,7 +437,9 @@ palette_draw :: proc(
 		row_baseline := row.y + 31*scale
 		category := item.command != nil ? command_category(item.command.name) : p.settings[item.setting].group
 		category = strings.to_upper(category, context.temp_allocator)
-		if item.command == nil { category = strings.concatenate({category, " SETTING"}, context.temp_allocator) }
+		if item.command == nil {
+			category = strings.concatenate({category, PALETTE_SETTING_SUFFIX}, context.temp_allocator)
+		}
 		if result := draw_text(&label_text, list, category, row.x+padding, row.y+13*scale, theme.faint);
 			result != .Ok { return result }
 		label_width: f32
