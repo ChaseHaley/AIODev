@@ -1,3 +1,13 @@
+function ConvertTo-TermBenchSettingString {
+    param([string] $Value)
+
+    if ($Value.IndexOfAny([char[]]@([char]0, [char]10, [char]13)) -ge 0) {
+        throw 'TermBench settings strings cannot contain NUL or line breaks.'
+    }
+    # settings.assign removes one outer quote pair; it does not decode escapes.
+    return '"' + $Value + '"'
+}
+
 function Write-TermBenchSignal {
     param([string] $Path, [string] $Value)
 

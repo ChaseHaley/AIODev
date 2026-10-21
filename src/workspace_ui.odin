@@ -55,15 +55,19 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 	if app.next_workspace_id == max(u32) { return nil }
 	workspace, err := new(Workspace)
 	if err != nil { return nil }
-	name, name_error := strings.clone(fmt.tprintf("Workspace %d", app.next_workspace_id+1))
-	if name_error != nil { free(workspace); return nil }
-	workspace.name, workspace.id = name, app.next_workspace_id+1
+	number: u32
+	if !provisional {
+		workspace.name, number = workspace_default_name(app)
+		if number == 0 { free(workspace); return nil }
+	}
+	workspace.id = app.next_workspace_id+1
 	workspace.provisional = provisional
 	if _, append_error := append(&app.workspaces, workspace); append_error != nil {
 		workspace_destroy(workspace)
 		return nil
 	}
 	app.next_workspace_id = workspace.id
+	if !provisional { app.next_workspace_number = number }
 	workspace_pickers_refresh(app)
 	return workspace
 }

@@ -9,6 +9,20 @@ function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
 }
 
+function Test-SettingsParser([string] $SettingsPath, [string] $Command, [string] $Directory,
+    [string] $Groups) {
+    $legacyPath = Join-Path $data 'legacy.ini'
+    $commandPath = Join-Path $data 'command.txt'
+    $directoryPath = Join-Path $data 'directory.txt'
+    $groupsPath = Join-Path $data 'groups.txt'
+    [IO.File]::WriteAllText($legacyPath, 'shell.command = ' + $Command)
+    [IO.File]::WriteAllText($commandPath, $Command)
+    [IO.File]::WriteAllText($directoryPath, $Directory)
+    [IO.File]::WriteAllText($groupsPath, $Groups)
+    & $settingsParser $legacyPath $SettingsPath $commandPath $directoryPath $groupsPath
+    Assert-True ($LASTEXITCODE -eq 0) 'Product settings parser regression failed'
+}
+
 function Test-Cohort([string] $Name, [hashtable] $Overrides, [string] $ExpectedFailure,
     [int] $Starts, [int] $Cleanups) {
     $scenario = @{
@@ -153,6 +167,35 @@ $data = Join-Path $repo ('build/termbench-tests-' + [Guid]::NewGuid().ToString('
 New-Item -ItemType Directory -Path $data | Out-Null
 $receiptData = $null
 try {
+    $settingsParser = Join-Path $data 'settings-parser.exe'
+    & odin build (Join-Path $PSScriptRoot 'termbench_settings') "-out:$settingsParser" `
+        "-collection:aio=$(Join-Path $repo 'src')" -vet -vet-cast -vet-tabs -vet-using-param `
+        -vet-unused-procedures -vet-packages:termbench_settings -strict-style -warnings-as-errors -disallow-do
+    Assert-True ($LASTEXITCODE -eq 0) 'Headless product settings parser fixture did not compile'
+    $reproducedCommand = '"C:\Program Files\WindowsApps\' +
+        'Microsoft.PowerShell_7.6.7.0_x64__8wekyb3d8bbwe\pwsh.exe"' +
+        ' -NoLogo -NoProfile -ExecutionPolicy Bypass -File' +
+        ' "C:\Users\chale\Projects\AIODev\build\work148-candidate\tests\live\termbench.ps1"' +
+        ' -Label w148-control-1021 -Runs 3 -Benchmark' +
+        ' "C:\Users\chale\Libraries\termbench\termbench_release_msvc.exe"' +
+        ' -Token 888114049bcd4a4582572128b09aad81 -StartupSeconds 15 -AdmissionSeconds 30 -Child'
+    $settingsPath = Join-Path $data 'strings.ini'
+    foreach ($directory in @('C:\repo with spaces\', ' "C:\quoted\#hash=equals\" ', '\\server\share with spaces\')) {
+        [IO.File]::WriteAllLines($settingsPath, @(
+            ('shell.command = ' + (ConvertTo-TermBenchSettingString $reproducedCommand))
+            ('shell.directory = ' + (ConvertTo-TermBenchSettingString $directory))
+            ('process.padding_groups = ' + (ConvertTo-TermBenchSettingString ''))
+        ))
+        Test-SettingsParser $settingsPath $reproducedCommand $directory ''
+    }
+    Write-Output 'PASS product parser reproduces old command diagnostic and round-trips literal quotes/backslashes/whitespace/UNC'
+    foreach ($invalid in @("bad`nwindow.rows = 1", "bad`rvalue", "bad$([char]0)value")) {
+        $message = ''
+        try { ConvertTo-TermBenchSettingString $invalid | Out-Null } catch { $message = $_.Exception.Message }
+        Assert-True ($message -like '*NUL or line breaks*') 'Settings serializer accepted an unrepresentable value'
+    }
+    Write-Output 'PASS settings serializer refuses NUL and line injection'
+
     $signalData = Join-Path $data 'signals'
     New-Item -ItemType Directory -Path $signalData | Out-Null
     $signalToken = [Guid]::NewGuid().ToString('N')
@@ -266,10 +309,20 @@ try {
     Write-Output 'PASS real failed process startup reports error and disposes partial ownership'
 
     $label = 'w129-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
-    $receiptData = Join-Path $repo "build/termbench/$label"
+    $runnerRepo = Join-Path $data 'runner with spaces'
+    $runnerScripts = Join-Path $runnerRepo 'tests/live'
+    New-Item -ItemType Directory -Path $runnerScripts -Force | Out-Null
+    foreach ($name in @('termbench.ps1', 'termbench_common.ps1', 'termbench_windows.cs')) {
+        Copy-Item -LiteralPath (Join-Path $repo "tests/live/$name") -Destination $runnerScripts
+    }
+    $runnerPath = Join-Path $runnerScripts 'termbench.ps1'
+    $benchmarkPath = Join-Path $data 'benchmark with spaces.exe'
+    [IO.File]::WriteAllText($benchmarkPath, 'Never executed: app launch must fail first.')
+    $groups = 'tools:4:pwsh,powershell; editors:0:nvim,vim'
+    $receiptData = Join-Path $runnerRepo "build/termbench/$label"
     $message = ''
     try {
-        & (Join-Path $repo 'tests/live/termbench.ps1') -Label $label -Runs 1 -Benchmark $shell `
+        & $runnerPath -Label $label -Runs 1 -Benchmark $benchmarkPath -ProcessGroups $groups `
             -Executable (Join-Path $data 'missing.exe')
     } catch { $message = $_.Exception.Message }
     $receipt = Get-Content -LiteralPath (Join-Path $receiptData 'receipt.json') -Raw | ConvertFrom-Json
@@ -278,6 +331,13 @@ try {
     Assert-True ($receipt.arguments -like '--no-activate *') 'Actual launch omitted --no-activate'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $receiptData 'start.txt'))) 'Failed startup admitted child'
     Write-Output "PASS actual runner validates invalid startup receipt and --no-activate arguments (fixture cleaned on exit): $receiptData"
+    Assert-True ($receipt.shell -eq $shell) 'Runner changed the current PowerShell host'
+    $expectedCommand = ('"{0}" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "{1}"' +
+        ' -Label {2} -Runs 1 -Benchmark "{3}" -Token {4}' +
+        ' -StartupSeconds 15 -AdmissionSeconds 30 -Child') -f `
+            $shell, $runnerPath, $label, $benchmarkPath, $receipt.token
+    Test-SettingsParser (Join-Path $receiptData 'settings.ini') $expectedCommand $runnerRepo $groups
+    Write-Output 'PASS actual runner settings round-trip through product parser with same host, spaced paths, arguments and token'
 } finally {
     $buildRoot = [IO.Path]::GetFullPath((Join-Path $repo 'build')) + [IO.Path]::DirectorySeparatorChar
     $resolvedData = [IO.Path]::GetFullPath($data)

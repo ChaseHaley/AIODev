@@ -78,6 +78,7 @@ App :: struct {
 	sessions: [dynamic]Session_Entry,
 	workspaces: [dynamic]^Workspace,
 	next_workspace_id: u32,
+	next_workspace_number: u32,
 	next_session_id: u32,
 	windows: [dynamic]^Window,
 	running: bool,
