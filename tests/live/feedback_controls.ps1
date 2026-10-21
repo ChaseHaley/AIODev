@@ -94,7 +94,10 @@ try {
 
     Invoke-Aio mouse click (Tab-Center 1) --button right --px
     Invoke-Aio expect state tab_menu.open=true
-    Invoke-Aio expect state tab_menu.count=13
+    Invoke-Aio expect state tab_menu.count=8
+    Invoke-Aio expect state tab_menu.row.1.label=Rename
+    Invoke-Aio expect state tab_menu.row.3.separator=true
+    Invoke-Aio expect state tab_menu.row.7.separator=true
     Shot single-menu
     Invoke-Aio key Enter
     Invoke-Aio expect state rename.open=true
@@ -115,9 +118,12 @@ try {
     Invoke-Aio command tab.new
     Invoke-Aio mouse click (Tab-Center 1) --mods Ctrl --px
     Invoke-Aio mouse click (Tab-Center 1) --button right --px
-    Invoke-Aio expect state tab_menu.count=5
+    Invoke-Aio expect state tab_menu.count=4
+    Invoke-Aio expect state 'tab_menu.row.1.label=Close Others'
+    Invoke-Aio expect state 'tab_menu.row.2.label=Close 2 Selected Tabs'
     Shot multiple-menu
-    Invoke-Aio key Down Enter
+    Invoke-Aio key Esc
+    Invoke-Aio command tab.move_end
     Invoke-Aio expect state tabs.selected=2
     Invoke-Aio expect state tab.2.marked=true
     Invoke-Aio expect state tab.3.marked=true
