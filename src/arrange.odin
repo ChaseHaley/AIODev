@@ -324,8 +324,14 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	}
 	if destination == nil {
 		d.destination_window, d.destination, d.target = 0, nil, layout.INVALID_NODE
-		d.new_tab, d.new_window, d.swap = false, !swap, swap
-		if !swap && d.preview_window == 0 && !d.preview_failed {
+		tear_off := !swap && pane_window_source_allows(pane_source_workspace(app, d.source))
+		d.new_tab, d.new_window, d.swap = false, tear_off, swap
+		if !swap && !tear_off && d.preview_window != 0 {
+			preview := d.preview_window
+			d.preview_window = 0
+			pane_window_preview_discard(app, preview)
+		}
+		if tear_off && d.preview_window == 0 && !d.preview_failed {
 			if preview := pane_window_preview_create(app, d.source, d.node, sx, sy); preview != nil {
 				d.preview_window = preview.id
 			} else {
@@ -333,7 +339,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 				notify(app, .Error, "Could not prepare a new window. The pane was preserved.")
 			}
 		}
-		if !swap {
+		if tear_off {
 			if preview := window_find(app, d.preview_window); preview != nil && !preview.preview_visible {
 				if !pane_window_preview_position(app, preview, sx, sy) || !window_show_prepared(app, preview) {
 					pane_drag_cancel(app, w)
