@@ -23,7 +23,7 @@ pane_minimum_allows :: proc(app: ^App, w: ^Window, rects: []layout.Pane_Rect,
 		columns, rows := term_view.grid_size(w.metrics, pane.rect.width, max(0, pane.rect.height-header), padding)
 		if int(columns) < minimum.minimum_columns || int(rows) < minimum.minimum_rows {
 			if notify_failure {
-				notify(app, .Info, fmt.tprintf("Can't create this pane: %d × %d content cells; minimum %d × %d. "+
+				notify(app, .Warning, fmt.tprintf("Can't create this pane: %d × %d content cells; minimum %d × %d. "+
 					"Change Minimum Pane Width and Height in Settings.", columns, rows,
 					minimum.minimum_columns, minimum.minimum_rows))
 			}

@@ -1363,7 +1363,9 @@ editor_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, text:
 		}
 		row := &p.rows[item.row]
 		text_width_limit := max(1, parts.text_right-r.x-30*s)
-		if result := draw_text(text, list, row.title, r.x+30*s, r.y+21*s, theme.text, text_width_limit);
+		baseline := r.y+21*s
+		if row.description == "" { baseline = r.y+(r.height-text.line_height)/2+text.ascent }
+		if result := draw_text(text, list, row.title, r.x+30*s, baseline, theme.text, text_width_limit);
 			result != .Ok { return result }
 		if result := draw_text(&small, list, row.description, r.x+30*s, r.y+39*s, theme.muted, text_width_limit);
 			result != .Ok { return result }

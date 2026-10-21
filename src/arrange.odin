@@ -441,7 +441,7 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	}
 	if d.target == layout.INVALID_NODE || !d.shown {
 		if d.minimum_rejected {
-			notify(app, .Info, fmt.tprintf("Can't dock: minimum %d × %d content cells. "+
+			notify(app, .Warning, fmt.tprintf("Can't dock: minimum %d × %d content cells. "+
 				"Change Minimum Pane Width and Height in Settings.",
 				app.settings.pane.minimum_columns, app.settings.pane.minimum_rows))
 		}

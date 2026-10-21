@@ -491,7 +491,7 @@ when AIO_CONTROL {
 			remaining := max(i64(0), i64(time.tick_diff(time.tick_now(), n.expires)/time.Millisecond))
 			left := n.sticky ? "sticky" : fmt.tprintf("%dms", remaining)
 			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
-			kind := n.kind == .Error ? "error" : "info"
+			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
 			value := fmt.tprintf("%s: %s (%s)", kind, n.text, left)
 			if _, err := append(&entries, control.State_Entry{key, value}); err != nil {
 				return nil, .Out_Of_Memory
@@ -770,7 +770,8 @@ when AIO_CONTROL {
 			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
 			old := verify_value(v.before_state, key)
 			// Expiry countdown changes are not a new notice.
-			prefix := fmt.tprintf("%s: %s (", n.kind == .Error ? "error" : "info", n.text)
+			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
+			prefix := fmt.tprintf("%s: %s (", kind, n.text)
 			if strings.has_prefix(old, prefix) { continue }
 			value := strings.builder_make(context.temp_allocator)
 			if err := control.format_value(&value, n.text); err != .None { return "", err }

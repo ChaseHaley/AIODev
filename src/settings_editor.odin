@@ -178,12 +178,8 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 	for d in diagnostics[before:] {
 		message := fmt.tprintf("%s: %s", d.key, d.message)
 		if d.kind == .Shortcut_Warning {
-			if warning == "" {
-				warning = d.message
-				if source := strings.index_byte(warning, '['); source > 0 {
-					warning = strings.trim_space(warning[:source])
-				}
-			}
+			// The diagnostics are freed on return, before the caller formats the warning.
+			if warning == "" { warning = strings.clone(diagnostic_identity(d), context.temp_allocator) }
 		} else {
 			if at := strings.index(d.message, "already used by "); at >= 0 {
 				other := d.message[at+len("already used by "):]
@@ -242,7 +238,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	row.value = strings.clone(value)
 	ui.field_set(&p.value, value)
 	if row.kind == .Shortcut { p.focus, p.capturing = .Search, false }
-	reload_settings(app)
+	reload_settings(app, false)
 	p.leader = app.leader
 	text := "Saved and applied."
 	if alpha { text = "Saved and applied; the color's alpha is ignored." }
@@ -268,7 +264,7 @@ editor_follow_theme :: proc(app: ^App, w: ^Window) {
 		if w.editor.open { ui.editor_message(&w.editor, text, true) } else { notify(app, .Error, text) }
 		return
 	}
-	reload_settings(app)
+	reload_settings(app, false)
 	if w.editor.open {
 		filter := strings.clone(ui.field_string(&w.editor.filter), context.temp_allocator)
 		if !settings_load(app, w) { return }

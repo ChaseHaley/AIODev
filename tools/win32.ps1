@@ -126,6 +126,11 @@ public static class AioWin32 {
     [DllImport("user32.dll")]
     static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", SetLastError=true)]
+    static extern IntPtr SendMessageTimeoutW(IntPtr h, uint message, UIntPtr w, IntPtr l,
+        uint flags, uint timeout, out UIntPtr result);
+    [DllImport("kernel32.dll")]
+    static extern uint GetCurrentProcessId();
+    [DllImport("user32.dll", SetLastError=true)]
     static extern bool ClientToScreen(IntPtr h, ref POINT p);
     [DllImport("user32.dll", SetLastError=true)]
     static extern bool SetCursorPos(int x, int y);
@@ -214,9 +219,37 @@ public static class AioWin32 {
             Post(h, 0x101, vk, bits | (3L << 30));
         }
     }
-    public static void Activate(IntPtr h) {
-        if (!SetForegroundWindow(h) || GetForegroundWindow() != h)
-            throw new Exception("activation denied; foreground the target, then retry with -Activate");
+    static string WindowIdentity(IntPtr h) {
+        uint pid;
+        uint thread = GetWindowThreadProcessId(h, out pid);
+        return h + "/pid=" + pid + "/tid=" + thread;
+    }
+    public static string Activate(IntPtr h) {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        IntPtr before = GetForegroundWindow();
+        bool accepted = SetForegroundWindow(h);
+        IntPtr immediate = GetForegroundWindow(), final = immediate;
+        string completion = "not-needed";
+        int error = 0;
+        if (accepted && immediate != h) {
+            // Cross-queue activation is asynchronous; WM_NULL waits without granting foreground rights.
+            // https://devblogs.microsoft.com/oldnewthing/20161118-00/?p=94745
+            UIntPtr result;
+            SetLastError(0);
+            bool responsive = SendMessageTimeoutW(h, 0, UIntPtr.Zero, IntPtr.Zero,
+                0x22, 2000, out result) != IntPtr.Zero; // ABORTIFHUNG | ERRORONEXIT
+            if (!responsive) error = Marshal.GetLastWin32Error();
+            completion = responsive ? "processed" : "failed";
+            final = GetForegroundWindow();
+        }
+        string trace = "SetForegroundWindow=" + accepted + " callerPid=" + GetCurrentProcessId() +
+            " target=" + WindowIdentity(h) + " before=" + WindowIdentity(before) +
+            " immediate=" + WindowIdentity(immediate) + " final=" + WindowIdentity(final) +
+            " completion=" + completion + " completionError=" + error + " elapsedMs=" + timer.ElapsedMilliseconds;
+        if (!accepted) throw new Exception("activation request refused; no input sent; " + trace);
+        if (completion == "failed") throw new Exception("activation completion check failed; no input sent; " + trace);
+        if (final != h) throw new Exception("target did not retain foreground; no input sent; " + trace);
+        return trace;
     }
     static INPUT Key(ushort vk, bool up) {
         uint scan = Scan(vk);
@@ -331,12 +364,12 @@ public static class AioWin32 {
                 }
                 'Chord' {
                     $virtualKeys = [AioWin32]::Keys($Chord, '+')
-                    [AioWin32]::Activate($window)
+                    Write-Verbose ([AioWin32]::Activate($window))
                     [AioWin32]::Chord($window, $virtualKeys)
                     "sent chord keys=$($virtualKeys.Length) pid=$ProcessId"
                 }
                 'SendText' {
-                    [AioWin32]::Activate($window)
+                    Write-Verbose ([AioWin32]::Activate($window))
                     [AioWin32]::SendText($window, $SendText)
                     "sent text chars=$($SendText.Length) pid=$ProcessId"
                 }

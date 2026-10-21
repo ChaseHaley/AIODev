@@ -391,7 +391,7 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 	if !platform.clipboard_set_text(&app.platform, text) {
 		notify(app, .Error, "Could not copy to the clipboard.")
 	} else {
-		ui.notices_put(&app.notices, u32(Notice_Key.Copy), .Info, "Copied to clipboard", COPY_NOTICE_DURATION)
+		ui.notices_put(&app.notices, u32(Notice_Key.Copy), .Success, "Copied to clipboard", COPY_NOTICE_DURATION)
 		mark_all_dirty(app)
 		if explicit { term.clear_selection(entry.session) }
 	}
@@ -423,7 +423,7 @@ paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
 		paste_confirm_cancel(app, w)
 	case .Unsafe:
 		w.paste_confirm_until = time.tick_add(time.tick_now(), PASTE_CONFIRM_DURATION)
-		ui.notices_put(&app.notices, u32(Notice_Key.Paste), .Info, PASTE_CONFIRM_TEXT, PASTE_CONFIRM_DURATION)
+		ui.notices_put(&app.notices, u32(Notice_Key.Paste), .Warning, PASTE_CONFIRM_TEXT, PASTE_CONFIRM_DURATION)
 		mark_all_dirty(app)
 	case .Failed:
 		notify(app, .Error, "Could not paste: the shell is not accepting input.")
@@ -620,8 +620,8 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 				for shortcut in shortcuts {
 					if !commands.prefix_conflicts(leader, shortcut) { continue }
 					if leader_wins { _ = commands.unbind(&app.registry, other.id, shortcut) }
-					message := fmt.tprintf("input.leader vs %s (%s); %s wins [%s:%d; %s]",
-						other.title, other.name, leader_wins ? "input.leader" : winner.name,
+					message := fmt.tprintf("input.leader (%s) vs %s (%s); %s wins [%s:%d; %s]",
+						app.settings.input.leader, other.title, other.name, leader_wins ? "input.leader" : winner.name,
 						binding_file(app), app.settings.leader_line, binding_origin(app, applied_lines[int(other.id)]))
 					settings_diagnostic(app, diagnostics, app.settings.leader_line,
 						"input.leader", message, .Shortcut_Warning)
