@@ -77,7 +77,8 @@ public sealed class TermBenchProcess : IDisposable {
             var limits = new Limits { flags = 0x2000 }; // Kill descendants even if the runner is terminated.
             if (!SetInformationJobObject(owner.job, 9, ref limits, Marshal.SizeOf(limits)))
                 throw Error("SetInformationJobObject");
-            var startup = new Startup { cb = (uint)Marshal.SizeOf(typeof(Startup)), flags = 1, show = 0 };
+            // STARTF_USESHOWWINDOW overrides the app's first ShowWindow; SW_HIDE would prevent admission.
+            var startup = new Startup { cb = (uint)Marshal.SizeOf(typeof(Startup)), flags = 1, show = 4 };
             // Suspension closes the child-spawn race before job ownership is established.
             if (!CreateProcess(executable, new StringBuilder("\"" + executable + "\" " + arguments),
                 IntPtr.Zero, IntPtr.Zero, false, 0x08000004, IntPtr.Zero, directory, ref startup, out info))
