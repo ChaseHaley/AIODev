@@ -228,6 +228,9 @@ when AIO_CONTROL {
 		owns_palette := w != nil && app.palette_window == w.id
 		item := ""
 		p := &app.palette
+		palette_layout: ui.Palette_Layout
+		if owns_palette { palette_layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale) }
+		palette_rows := palette_layout.row_height > 0 ? int(palette_layout.list.height/palette_layout.row_height) : 0
 		if owns_palette && p.selected >= 0 && p.selected < len(p.results) {
 			item = ui.palette_result_name(p, p.results[p.selected])
 		}
@@ -244,6 +247,13 @@ when AIO_CONTROL {
 			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
 			{"palette.selected", fmt.tprintf("%d", owns_palette ? p.selected : 0)},
 			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)}, {"palette.item", item},
+			{"palette.scroll", fmt.tprintf("%d", owns_palette ? p.scroll : 0)},
+			{"palette.rows", fmt.tprintf("%d", palette_rows)},
+			{"palette.row_height", fmt.tprintf("%g", palette_layout.row_height)},
+			{"palette.panel", fmt.tprintf("%g,%g,%g,%g", palette_layout.panel.x, palette_layout.panel.y,
+				palette_layout.panel.width, palette_layout.panel.height)},
+			{"palette.list", fmt.tprintf("%g,%g,%g,%g", palette_layout.list.x, palette_layout.list.y,
+				palette_layout.list.width, palette_layout.list.height)},
 			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
 			{"theme.name", settings.value_text(&app.settings, settings.schema_find("theme.name")^)},
 			{"theme.mode", settings.value_text(&app.settings, settings.schema_find("theme.mode")^)},
