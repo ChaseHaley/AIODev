@@ -352,6 +352,9 @@ when AIO_CONTROL {
 				{"find.open", fmt.tprintf("%t", w.find.open)},
 				{"find.query", ui.field_string(&w.find.query)},
 				{"find.matches", find_status(w, entry)},
+				{"find.count", verify_find_count(w, entry)},
+				{"find.older", verify_find_rect(w, entry, true)},
+				{"find.newer", verify_find_rect(w, entry, false)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
 		} else {
@@ -498,6 +501,30 @@ when AIO_CONTROL {
 			}
 		}
 		return entries[:], .None
+	}
+
+	verify_find_count :: proc(w: ^Window, entry: ^Session_Entry) -> string {
+		label, _ := find_presentation(w, entry)
+		return label
+	}
+
+	// Retain the original matches field for existing control journeys.
+	find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
+		if entry == nil || len(w.find.query.bytes) == 0 { return "" }
+		s := term.search_summary(entry.session)
+		switch {
+		case s.selected >= 0: return fmt.tprintf("%d of %d", s.selected+1, s.total)
+		case s.total == 1: return "1 match"
+		case s.total > 0: return fmt.tprintf("%d matches", s.total)
+		case !s.complete: return "Searching…"
+		}
+		return "No matches"
+	}
+
+	verify_find_rect :: proc(w: ^Window, entry: ^Session_Entry, older: bool) -> string {
+		if !w.find.open { return "" }
+		l, _ := find_controls(w, entry)
+		return verify_workspace_rect(older ? l.older : l.newer)
 	}
 
 	verify_workspace_rect :: proc(r: render.Rect) -> string {

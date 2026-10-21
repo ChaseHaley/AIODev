@@ -195,10 +195,10 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 	testing.expect(t, !f.open)
 	testing.expect_value(t, len(f.query.bytes), 0)
 	r := ui.find_layout(1000, 1.5)
-	testing.expect_value(t, r, render.Rect{1000 - 18 - 570, 18, 570, 60})
-	testing.expect(t, ui.find_contains(1000, 1.5, 413, 19))
-	testing.expect(t, !ui.find_contains(1000, 1.5, 411, 19))
-	testing.expect_value(t, ui.find_layout(100, 1).width, 76)
+	testing.expect_value(t, r.panel, render.Rect{1000 - 18 - 690, 78, 690, 60})
+	testing.expect(t, ui.find_contains(r, 293, 79))
+	testing.expect(t, !ui.find_contains(r, 291, 79))
+	testing.expect_value(t, ui.find_layout(100, 1).panel.width, f32(76))
 }
 
 @(test)

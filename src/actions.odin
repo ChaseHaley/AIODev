@@ -469,22 +469,18 @@ on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outc
 }
 
 // The find bar's match count: "3 of 17" once a match is selected.
-find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
-	if entry == nil || len(w.find.query.bytes) == 0 {
-		return ""
-	}
+find_presentation :: proc(w: ^Window, entry: ^Session_Entry) -> (label: string, enabled: bool) {
+	if entry == nil || len(w.find.query.bytes) == 0 { return "0 of 0", false }
 	s := term.search_summary(entry.session)
-	switch {
-	case s.selected >= 0:
-		return fmt.tprintf("%d of %d", s.selected + 1, s.total)
-	case s.total == 1:
-		return "1 match"
-	case s.total > 0:
-		return fmt.tprintf("%d matches", s.total)
-	case !s.complete:
-		return "Searching…"
-	}
-	return "No matches"
+	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected+1, s.total), s.total > 0 }
+	if s.total == 0 { return "0 of 0 · No matches", false }
+	return fmt.tprintf("%d of %d", s.selected+1, s.total), true
+}
+
+find_controls :: proc(w: ^Window, entry: ^Session_Entry) -> (l: ui.Find_Layout, enabled: bool) {
+	label, available := find_presentation(w, entry)
+	text := ui.text_styled(&w.ui_text, .Input)
+	return ui.find_layout(f32(w.width), w.scale, ui.text_width(&text, label)), available
 }
 
 @(private)
