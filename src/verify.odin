@@ -254,6 +254,7 @@ when AIO_CONTROL {
 			{"shell.icon.loaded", fmt.tprintf("%t", app.shell_icon.width > 0)},
 			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
 			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
+			{"workspaces.count", fmt.tprintf("%d", len(app.workspaces))},
 		}
 		if _, err := append(&entries, ..base[:]); err != nil { return nil, .Out_Of_Memory }
 		origin: [2]i32
@@ -278,7 +279,8 @@ when AIO_CONTROL {
 			editor_key := ""
 			editor_title := ""
 			if row := ui.editor_row(&w.editor); row != nil { editor_key, editor_title = row.key, row.title }
-			confirm_title, _ := close_confirm_text(w)
+			confirm_title, confirm_body := close_confirm_text(app, w)
+			picker_rect, _ := workspace_picker_rect(w)
 			slider := render.Rect{}
 			page: ui.Editor_Layout
 			if settings_active(w) {
@@ -319,6 +321,8 @@ when AIO_CONTROL {
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
 				{"confirm.open", fmt.tprintf("%t", w.close_confirm.open)},
 				{"confirm.title", w.close_confirm.open ? confirm_title : ""},
+				{"confirm.body", w.close_confirm.open ? confirm_body : ""},
+				{"confirm.workspace", fmt.tprintf("%d", w.close_confirm_workspace)},
 				{"leader.indicator", w.leader_until != {} ? "pane-status-line" : "none"},
 				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
 				{"window.dpi", fmt.tprintf("%d", u32(w.scale*96))},
@@ -330,6 +334,15 @@ when AIO_CONTROL {
 				{"workspace.id", fmt.tprintf("%d", w.workspace.id)},
 				{"workspace.name", w.workspace.name},
 				{"workspace.picker", fmt.tprintf("%t", w.workspace_picker.open)},
+				{"workspace.icon.preset", fmt.tprintf("%d", w.workspace.icon.preset)},
+				{"workspace.icon.emoji", w.workspace.icon.emoji},
+				{"workspace.picker.icons", fmt.tprintf("%t", w.workspace_picker.icons)},
+				{"workspace.picker.selected", fmt.tprintf("%d", w.workspace_picker.selected)},
+				{"workspace.picker.count", fmt.tprintf("%d", workspace_picker_count(w))},
+				{"workspace.picker.query", ui.field_string(&w.workspace_picker.query)},
+				{"workspace.picker.rect", verify_workspace_rect(picker_rect)},
+				{"workspace.picker.field", verify_workspace_rect(workspace_picker_field_rect(w))},
+				{"workspace.picker.row", verify_workspace_rect(workspace_picker_row_rect(w, w.workspace_picker.selected))},
 				{"window.preparing", fmt.tprintf("%t", w.preparing)},
 				{"window.preview_visible", fmt.tprintf("%t", w.preview_visible)},
 				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
@@ -485,6 +498,10 @@ when AIO_CONTROL {
 			}
 		}
 		return entries[:], .None
+	}
+
+	verify_workspace_rect :: proc(r: render.Rect) -> string {
+		return fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)
 	}
 
 	verify_workspace_index :: proc(app: ^App, w: ^Window) -> int {

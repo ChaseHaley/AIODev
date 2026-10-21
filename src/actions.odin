@@ -89,6 +89,17 @@ Action :: enum u32 {
 	Change_Workspace,
 	Rename_Workspace,
 	New_Window,
+	Delete_Workspace,
+	Change_Workspace_Icon,
+	Workspace_1,
+	Workspace_2,
+	Workspace_3,
+	Workspace_4,
+	Workspace_5,
+	Workspace_6,
+	Workspace_7,
+	Workspace_8,
+	Workspace_9,
 }
 
 @(private)
@@ -103,6 +114,17 @@ ACTIONS :: [Action]Action_Info{
 	.Change_Workspace = {"workspace.change", "Change Workspace…", nil},
 	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil},
 	.New_Window = {"window.new", "New Window", {{.N, {.Control, .Shift}}}},
+	.Delete_Workspace = {"workspace.delete", "Delete Workspace…", nil},
+	.Change_Workspace_Icon = {"workspace.change_icon", "Change Workspace Icon…", nil},
+	.Workspace_1 = {"workspace.select_1", "Select Workspace 1", nil},
+	.Workspace_2 = {"workspace.select_2", "Select Workspace 2", nil},
+	.Workspace_3 = {"workspace.select_3", "Select Workspace 3", nil},
+	.Workspace_4 = {"workspace.select_4", "Select Workspace 4", nil},
+	.Workspace_5 = {"workspace.select_5", "Select Workspace 5", nil},
+	.Workspace_6 = {"workspace.select_6", "Select Workspace 6", nil},
+	.Workspace_7 = {"workspace.select_7", "Select Workspace 7", nil},
+	.Workspace_8 = {"workspace.select_8", "Select Workspace 8", nil},
+	.Workspace_9 = {"workspace.select_9", "Select Workspace 9", nil},
 	.Command_Palette = {"app.command_palette", "Show Command Palette", {{.P, {.Control, .Shift}}}},
 	.Copy = {"edit.copy", "Copy", {{.C, {.Control, .Shift}}, {.Insert, {.Control}}}},
 	.Paste = {"edit.paste", "Paste", {{.V, {.Control, .Shift}}, {.Insert, {.Shift}}}},
@@ -297,6 +319,11 @@ run_action :: proc(
 	case .New_Workspace: workspace_new(app, w, false)
 	case .Change_Workspace: workspace_picker_open(app, w)
 	case .Rename_Workspace: workspace_rename_open(app, w)
+	case .Delete_Workspace: workspace_delete_request(app, w, w.workspace)
+	case .Change_Workspace_Icon: workspace_icon_open(app, w)
+	case .Workspace_1, .Workspace_2, .Workspace_3, .Workspace_4, .Workspace_5, .Workspace_6, .Workspace_7,
+	     .Workspace_8, .Workspace_9:
+		workspace_select_index(app, w, int(action)-int(Action.Workspace_1))
 	case .New_Window: workspace_new(app, w, true)
 	case .Close_Pane: pane_close(app, w)
 	case .Next_Tab: tab_select(app, w, (w.workspace.selected+1)%len(w.workspace.tabs))

@@ -22,6 +22,7 @@ Workspace :: struct {
 	provisional: bool, // A tear-off preview borrows a runtime until the drop commits.
 	id: u32,
 	name: string,
+	icon: Workspace_Icon,
 	tabs: [dynamic]^Tab,
 	selected: int,
 	next_tab_id: u32,
@@ -74,6 +75,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 	}
 	delete(workspace.tabs)
 	delete(workspace.name)
+	delete(workspace.icon.emoji)
 	free(workspace)
 }
 
@@ -313,13 +315,19 @@ tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
 	palette_close(app, w)
 	w.selecting, w.autoscrolling = false, false
 	w.close_confirm_tab = w.workspace.tabs[index].id
+	w.close_confirm_workspace = 0
+	w.close_confirm.extended = false
 	w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)
 	ui.confirm_open(&w.close_confirm)
 	w.dirty = true
 }
 
 // Counts follow panes that exit while the question is open, then stay fixed while it fades out.
-close_confirm_text :: proc(w: ^Window) -> (title, body: string) {
+close_confirm_text :: proc(app: ^App, w: ^Window) -> (title, body: string) {
+	if w.close_confirm_workspace != 0 {
+		title, body, _ = workspace_delete_text(app, w)
+		return
+	}
 	if index := tab_index_by_id(w.workspace, w.close_confirm_tab); w.close_confirm.open && index >= 0 {
 		w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)
 	}
@@ -331,6 +339,7 @@ close_confirm_text :: proc(w: ^Window) -> (title, body: string) {
 }
 
 close_confirm_finish :: proc(app: ^App, w: ^Window, accept: bool) {
+	if w.close_confirm_workspace != 0 { workspace_delete_finish(app, w, accept); return }
 	ui.confirm_close(&w.close_confirm)
 	w.dirty = true
 	if accept {
