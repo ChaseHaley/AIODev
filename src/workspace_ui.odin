@@ -275,15 +275,15 @@ workspace_icon_open :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_picker_count :: proc(w: ^Window) -> int {
-	return w.workspace_picker.icons ? len(WORKSPACE_ICONS)+1 : len(w.workspace_picker.rows)+len(WORKSPACE_ACTIONS)
+	return w.workspace_picker.icons ? len(WORKSPACE_ICONS)+2 : len(w.workspace_picker.rows)+len(WORKSPACE_ACTIONS)
 }
 
 workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	index, count := p.selected, len(p.rows)
 	if p.icons {
-		emoji := index == len(WORKSPACE_ICONS) ? ui.field_string(&p.query) : ""
-		if index == len(WORKSPACE_ICONS) && !workspace_icon_valid(emoji) {
+		emoji := index >= len(WORKSPACE_ICONS) ? ui.field_string(&p.query) : ""
+		if index >= len(WORKSPACE_ICONS) && !workspace_icon_valid(emoji) {
 			notify(app, .Error, "Enter an emoji (up to 32 Unicode characters), then apply it.")
 			return
 		}
@@ -321,6 +321,7 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	p := &w.workspace_picker
 	count := workspace_picker_count(w)
 	w.dirty = true
+	if p.icons && workspace_icon_picker_key(w, e) { return }
 	if step := ui.list_step(e); step != 0 {
 		p.selected = (p.selected+count+step)%count
 		return
@@ -333,8 +334,10 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	case .Delete:
 		if !p.icons && e.modifiers == {.Shift} && p.selected < len(p.rows) {
 			workspace_delete_request(app, w, workspace_find(app, p.rows[p.selected].id))
-		} else if ui.field_key(&p.query, e) == .Edited {
-			if p.icons { p.selected = len(WORKSPACE_ICONS) } else { workspace_picker_filter(app, w) }
+		} else {
+			change := ui.field_key(&p.query, e)
+			if p.icons && change != .None { p.selected = len(WORKSPACE_ICONS) }
+			else if change == .Edited { workspace_picker_filter(app, w) }
 		}
 	case:
 		switch clipboard_chord(e) {
@@ -346,19 +349,23 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 				workspace_picker_text(app, w, text)
 			}
 		case .None:
-			if ui.field_key(&p.query, e) == .Edited {
-				if p.icons { p.selected = len(WORKSPACE_ICONS) } else { workspace_picker_filter(app, w) }
-			}
+			change := ui.field_key(&p.query, e)
+			if p.icons && change != .None { p.selected = len(WORKSPACE_ICONS) }
+			else if change == .Edited { workspace_picker_filter(app, w) }
 		}
 	}
 	w.dirty = true
 }
 
 workspace_picker_header :: proc(w: ^Window) -> f32 {
-	return (w.workspace_picker.icons ? 116 : 56)*w.scale
+	return 56*w.scale
 }
 
 workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
+	if w.workspace_picker.icons {
+		g := workspace_icon_picker_layout(w)
+		return g.panel, g.visible_rows
+	}
 	s := w.scale
 	x, y := 5*s, ui.TAB_HEIGHT*s
 	width := min(380*s, max(0, f32(w.width)-10*s))
@@ -369,12 +376,14 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 }
 
 workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
+	if w.workspace_picker.icons { return workspace_icon_picker_layout(w).field }
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
-	return {r.x+12*s, r.y+(w.workspace_picker.icons ? 38 : 12)*s, max(0, r.width-24*s), 32*s}
+	return {r.x+12*s, r.y+12*s, max(0, r.width-24*s), 32*s}
 }
 
 workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
+	if w.workspace_picker.icons { return workspace_icon_picker_cell(w, workspace_icon_picker_layout(w), index) }
 	r, _ := workspace_picker_rect(w)
 	p, s := &w.workspace_picker, w.scale
 	gap := !p.icons && index >= len(p.rows) && p.scroll <= len(p.rows) ? 8*s : 0
@@ -383,6 +392,7 @@ workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 }
 
 workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
+	if w.workspace_picker.icons { return workspace_icon_picker_hit(w, x, y) }
 	r, rows := workspace_picker_rect(w)
 	if !workspace_rect_contains(r, x, y) { return -1 }
 	for visible in 0..<rows {
@@ -414,6 +424,7 @@ workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 }
 
 workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
+	if w.workspace_picker.icons { w.workspace_picker.selected = len(WORKSPACE_ICONS) }
 	r := workspace_picker_field_rect(w)
 	f := &w.workspace_picker.query
 	width := max(1, r.width-16*w.scale)
@@ -427,27 +438,23 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	p := &w.workspace_picker
 	r, rows := workspace_picker_rect(w)
 	s := w.scale
-	@(static, rodata) presets := WORKSPACE_ICONS
 	@(static, rodata) actions := WORKSPACE_ACTIONS
 	@(static, rodata) action_info := ACTIONS
-	p.scroll = clamp(p.scroll, max(0, p.selected-rows+1), p.selected)
-	p.scroll = clamp(p.scroll, 0, max(0, workspace_picker_count(w)-rows))
+	if !p.icons {
+		p.scroll = clamp(p.scroll, max(0, p.selected-rows+1), p.selected)
+		p.scroll = clamp(p.scroll, 0, max(0, workspace_picker_count(w)-rows))
+	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	shadow := render.Rect{r.x+2*s, r.y+3*s, r.width, r.height}
 	if render.push_rect(&w.list, {rect = shadow, color = app.theme.shadow, radius = 7*s}) != .None { return .Ok }
 	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 7*s}) != .None { return .Ok }
 	if render.push_layer(&w.list, r, 7*s) != .None { return .Ok }
+	if p.icons { return workspace_icon_picker_draw(app, w) }
 	field := workspace_picker_field_rect(w)
-	if p.icons {
-		if result := ui.draw_text(&w.ui_text, &w.list, "Workspace icon", r.x+12*s, r.y+26*s,
-			app.theme.text, max(0, r.width-24*s)); result != .Ok { return result }
-		if result := ui.draw_fading_text(&w.ui_text, &w.list, "Enter emoji using your picker (Windows: Win+.)",
-			r.x+12*s, r.y+94*s, app.theme.muted, max(0, r.width-24*s)); result != .Ok { return result }
-	}
 	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5*s}) != .None { return .Ok }
 	if result := ui.field_draw(&p.query, &w.list, &w.ui_text, app.theme, field.x+8*s,
 		field.y+(field.height-w.ui_text.line_height)/2+w.ui_text.ascent, max(1, field.width-16*s),
-		true, p.icons ? "Custom emoji" : "Search workspaces", app.theme.text, s); result != .Ok { return result }
+		true, "Search workspaces", app.theme.text, s); result != .Ok { return result }
 	for visible in 0..<rows {
 		i := p.scroll+visible
 		if i >= workspace_picker_count(w) { break }
@@ -462,14 +469,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		label, detail := "", ""
 		icon := Workspace_Icon{}
 		has_icon, has_delete := false, false
-		if p.icons {
-			has_icon = true
-			if i < len(presets) { label, icon.preset = presets[i].name, i }
-			else {
-				label, icon.emoji = "Apply custom emoji", ui.field_string(&p.query)
-				has_icon = workspace_icon_valid(icon.emoji)
-			}
-		} else if i < len(p.rows) {
+		if i < len(p.rows) {
 			workspace := workspace_find(app, p.rows[i].id)
 			if workspace == nil { continue }
 			label, detail, icon, has_icon = workspace.name, p.rows[i].status, workspace.icon, true

@@ -66,7 +66,7 @@ try {
     Shot 'dropdown-divider'
     Invoke-Aio key Esc
     Invoke-Aio command workspace.change_icon
-    Invoke-Aio key Down Enter
+    Invoke-Aio key Right Enter
     Invoke-Aio expect state workspace.icon.preset=1
     Invoke-Aio key Esc
     Invoke-Aio command workspace.change_icon
