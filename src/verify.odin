@@ -522,6 +522,7 @@ when AIO_CONTROL {
 	}
 
 	verify_find_rect :: proc(w: ^Window, entry: ^Session_Entry, older: bool) -> string {
+		if !w.find.open { return "" }
 		l, _ := find_controls(w, entry)
 		return verify_workspace_rect(older ? l.older : l.newer)
 	}
