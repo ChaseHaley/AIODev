@@ -354,6 +354,15 @@ when AIO_CONTROL {
 				{"find.matches", find_status(w, entry)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
+			for i in 0..<w.tab_menu.count {
+				row := [?]control.State_Entry{
+					{fmt.tprintf("tab_menu.row.%d.label", i+1), tab_menu_label(w, i)},
+					{fmt.tprintf("tab_menu.row.%d.separator", i+1), fmt.tprintf("%t", w.tab_menu.separators[i])},
+					{fmt.tprintf("tab_menu.row.%d.enabled", i+1), fmt.tprintf("%t", tab_menu_enabled(w, i))},
+					{fmt.tprintf("tab_menu.row.%d.rect", i+1), verify_workspace_rect(tab_menu_row_rect(w, i))},
+				}
+				if _, err := append(&entries, ..row[:]); err != nil { return nil, .Out_Of_Memory }
+			}
 		} else {
 			hidden := [?]control.State_Entry{
 				{"window.id", "0"}, {"window.origin", "0,0"}, {"window.workspace_index", "0"},

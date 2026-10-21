@@ -338,8 +338,10 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if !e.pressed { return }
 		w.header_buttons += {e.button}
 		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
-			w.tab_menu.selected = hit
-			tab_menu_choose(app, w)
+			if tab_menu_enabled(w, hit) {
+				w.tab_menu.selected = hit
+				tab_menu_choose(app, w)
+			}
 		} else { w.tab_menu.open, w.dirty = false, true }
 		return
 	}
@@ -476,7 +478,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		return
 	}
 	if w.tab_menu.open {
-		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && hit != w.tab_menu.selected {
+		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); tab_menu_enabled(w, hit) && hit != w.tab_menu.selected {
 			w.tab_menu.selected, w.dirty = hit, true
 		}
 		pointer_set(app, w, .Arrow)
@@ -577,7 +579,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	}
 	if w.rename_open { return }
 	if w.tab_menu.open {
-		w.tab_menu.selected = clamp(w.tab_menu.selected-int(e.delta_y), 0, w.tab_menu.count-1)
+		tab_menu_step(w, -int(math.sign(e.delta_y)), false)
 		w.dirty = true
 		return
 	}
