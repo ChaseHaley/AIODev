@@ -218,6 +218,7 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 		for current, index in source_workspace.tabs {
 			if current == source { workspace_close_tab(app, source_workspace, index); break }
 		}
+		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
 	} else if source_workspace != w.workspace {
 		if owner := window_for_workspace(app, source_workspace); owner != nil {
 			window_relayout(app, owner)
@@ -257,6 +258,7 @@ pane_transfer :: proc(app: ^App, w: ^Window, source, destination: ^Tab,
 		for tab, index in source_workspace.tabs {
 			if tab == source { workspace_close_tab(app, source_workspace, index); break }
 		}
+		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
 	} else {
 		for window in app.windows {
 			if window == w || window.workspace != source_workspace { continue }
