@@ -97,15 +97,15 @@ try {
     Invoke-Aio key Menu
     Choose-Menu Duplicate
     Invoke-Aio expect state tabs.count=3
-    Invoke-Aio run 'Write-Output ("FALLBACK_"+(Get-Location).Path)'
-    Invoke-Aio wait text 'FALLBACK_C:\Windows'
-    Invoke-Aio run 'Set-Location C:\Windows\System32; [Console]::Write(([char]27).ToString()+"]7;file://localhost/C:/Windows/System32"+([char]7))'
-    Invoke-Aio expect state 'session.header.directory=C:\Windows\System32'
+    Invoke-Aio run 'Write-Output ("FALLBACK_"+(Get-Location).Path+"|")'
+    Invoke-Aio wait text 'FALLBACK_C:\Windows|'
+    Invoke-Aio run 'Set-Location C:\Windows\Temp; [Console]::Write(([char]27).ToString()+"]7;file://localhost/C:/Windows/Temp"+([char]7))'
+    Invoke-Aio expect state 'session.header.directory=C:\Windows\Temp'
     Invoke-Aio key Shift+F10
     Choose-Menu Duplicate
     Invoke-Aio expect state tabs.count=4
-    Invoke-Aio run 'Write-Output ("REPORTED_"+(Get-Location).Path)'
-    Invoke-Aio wait text 'REPORTED_C:\Windows\System32'
+    Invoke-Aio run 'Write-Output ("REPORTED_"+(Get-Location).Path+"|")'
+    Invoke-Aio wait text 'REPORTED_C:\Windows\Temp|'
     Set-Option shell.command 'pwsh.exe -NoLogo -NoProfile'
     Invoke-Aio command settings.reload
     Write-Output 'PASS Duplicate preserves source PowerShell command after changing default shell and uses launch/report directory'
