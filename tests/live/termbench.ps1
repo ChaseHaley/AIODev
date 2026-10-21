@@ -25,6 +25,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $data = Join-Path $repo "build/termbench/$Label"
+. (Join-Path $PSScriptRoot 'termbench_common.ps1')
 
 if ($Child) {
     try {
@@ -49,7 +50,7 @@ public class TermBenchScreen {
     }
 }
 '@
-        [IO.File]::WriteAllText((Join-Path $data 'ready.txt'), $Token)
+        Write-TermBenchSignal (Join-Path $data 'ready.txt') $Token
         $wait = [Diagnostics.Stopwatch]::StartNew()
         $start = Join-Path $data 'start.txt'
         while (-not (Test-Path -LiteralPath $start)) {
@@ -64,12 +65,12 @@ public class TermBenchScreen {
             if ($LASTEXITCODE -ne 0) { throw "TermBench failed: $LASTEXITCODE" }
             [IO.File]::WriteAllText((Join-Path $data "run-$i.txt"), [TermBenchScreen]::Read())
         }
-        [IO.File]::WriteAllText((Join-Path $data 'done.txt'), $Token)
+        Write-TermBenchSignal (Join-Path $data 'done.txt') $Token
         # Keep the shell/window alive until the parent observes completion and closes its job.
         Start-Sleep -Seconds 30
         throw 'Parent did not collect completion within 30 seconds.'
     } catch {
-        [IO.File]::WriteAllText((Join-Path $data 'child-failure.txt'), $_.Exception.Message)
+        Write-TermBenchSignal (Join-Path $data 'child-failure.txt') $_.Exception.Message
         throw
     }
 }
@@ -102,7 +103,6 @@ if ($MinimumContrast -ne 4.5) { $settings += "terminal.minimum_contrast = $Minim
 if ($Executable -eq '') { $Executable = Join-Path $repo 'build/release/aiodev.exe' }
 $Executable = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Executable)
 $arguments = '--no-activate --instance bench-' + $Label + ' --data-dir "' + $data + '"'
-. (Join-Path $PSScriptRoot 'termbench_common.ps1')
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $actions = @{
     Now = { $clock.Elapsed.TotalSeconds }
@@ -113,24 +113,9 @@ $actions = @{
         }
         [TermBenchProcess]::Launch($Executable, $arguments, $repo)
     }
-    State = {
-        param($owner)
-        $failurePath = Join-Path $data 'child-failure.txt'
-        $failure = if (Test-Path -LiteralPath $failurePath) { [IO.File]::ReadAllText($failurePath) } else { '' }
-        $flags = @{}
-        foreach ($name in @('ready', 'done')) {
-            $path = Join-Path $data "$name.txt"
-            $flags[$name] = Test-Path -LiteralPath $path
-            if ($flags[$name] -and [IO.File]::ReadAllText($path) -ne $Token) {
-                $failure = "Invalid $name token."
-            }
-        }
-        [pscustomobject]@{
-            Exited = $owner.HasExited; Ready = $flags.ready; Done = $flags.done; Failure = $failure
-        }
-    }
+    State = { param($owner) Read-TermBenchState $owner $data $Token }
     Probe = { param($owner) [TermBenchDisplay]::Probe($owner.Id) }
-    Start = { param($owner) [IO.File]::WriteAllText((Join-Path $data 'start.txt'), $Token) }
+    Start = { param($owner) Write-TermBenchSignal (Join-Path $data 'start.txt') $Token }
     Summaries = { Read-TermBenchSummaries $data $Runs }
     Cleanup = { param($owner) $owner.Dispose() }
     Event = {

@@ -151,7 +151,56 @@ Test-Cohort 'malformed summaries cannot accept' @{
 
 $data = Join-Path $repo ('build/termbench-tests-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $data | Out-Null
+$receiptData = $null
 try {
+    $signalData = Join-Path $data 'signals'
+    New-Item -ItemType Directory -Path $signalData | Out-Null
+    $signalToken = [Guid]::NewGuid().ToString('N')
+    $signalOwner = [pscustomobject]@{ HasExited = $false }
+    $pending = Join-Path $signalData 'ready.txt.pending.tmp'
+    $writer = [IO.File]::Open($pending, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        $writer.WriteByte(97)
+        $writer.Flush()
+        $state = Read-TermBenchState $signalOwner $signalData $signalToken
+        Assert-True (-not $state.Ready -and -not $state.Done -and -not $state.Failure) 'Unpublished locked file became visible'
+    } finally {
+        $writer.Dispose()
+        [IO.File]::Delete($pending)
+    }
+    Write-Output 'PASS real signal reader ignores an incomplete locked temporary file'
+
+    Write-TermBenchSignal (Join-Path $signalData 'ready.txt') 'wrong-token'
+    Test-Cohort 'real ready-token mismatch prevents admission' @{
+        State = { Read-TermBenchState $signalOwner $signalData $signalToken }
+    } 'Invalid ready token' 0 1
+    [IO.File]::Delete((Join-Path $signalData 'ready.txt'))
+    Write-TermBenchSignal (Join-Path $signalData 'ready.txt') $signalToken
+    Write-TermBenchSignal (Join-Path $signalData 'done.txt') 'wrong-token'
+    Test-Cohort 'real done-token mismatch prevents admission' @{
+        State = { Read-TermBenchState $signalOwner $signalData $signalToken }
+    } 'Invalid done token' 0 1
+    [IO.File]::Delete((Join-Path $signalData 'done.txt'))
+
+    Write-TermBenchSignal (Join-Path $signalData 'start.txt') $signalToken
+    Assert-True ([IO.File]::ReadAllText((Join-Path $signalData 'start.txt')) -eq $signalToken) 'Published start token incomplete'
+    Write-TermBenchSignal (Join-Path $signalData 'done.txt') $signalToken
+    $state = Read-TermBenchState $signalOwner $signalData $signalToken
+    Assert-True ($state.Ready -and $state.Done -and -not $state.Failure) 'Published matching signals rejected'
+    Write-TermBenchSignal (Join-Path $signalData 'child-failure.txt') 'fixture failure'
+    Test-Cohort 'real child failure overrides published completion' @{
+        State = { Read-TermBenchState $signalOwner $signalData $signalToken }
+    } 'fixture failure' 0 1
+
+    $message = ''
+    try { Write-TermBenchSignal (Join-Path $signalData 'start.txt') 'overwrite' }
+    catch { $message = $_.Exception.Message }
+    Assert-True ([bool]$message) 'Signal publication overwrote an existing handshake'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $signalData 'start.txt')) -eq $signalToken) 'Existing signal changed'
+    Assert-True (@(Get-ChildItem -LiteralPath $signalData -Filter '*.tmp').Count -eq 0) 'Signal publication leaked temporary files'
+    Write-Output 'PASS actual signal publication is complete, refuses overwrite, and cleans failed temporary writes'
+
+
     $names = @('ManyLine', 'LongLine', 'FGPerChar', 'FGBGPerChar', 'TermMarkV2 Normal')
     $lines = @($names | ForEach-Object { "${_}: 1.23s (4.56gb/s)" })
     [IO.File]::WriteAllText((Join-Path $data 'run-1.txt'), ($lines -join "`n"))
@@ -228,11 +277,16 @@ try {
     Assert-True ($receipt.status -eq 'invalid' -and -not $receipt.started) 'Actual runner accepted failed startup'
     Assert-True ($receipt.arguments -like '--no-activate *') 'Actual launch omitted --no-activate'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $receiptData 'start.txt'))) 'Failed startup admitted child'
-    Write-Output "PASS actual runner retains invalid startup receipt and --no-activate arguments: $receiptData"
+    Write-Output "PASS actual runner validates invalid startup receipt and --no-activate arguments (fixture cleaned on exit): $receiptData"
 } finally {
     $buildRoot = [IO.Path]::GetFullPath((Join-Path $repo 'build')) + [IO.Path]::DirectorySeparatorChar
     $resolvedData = [IO.Path]::GetFullPath($data)
     Assert-True ($resolvedData.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase)) `
         'Test cleanup path escaped build'
     Remove-Item -LiteralPath $resolvedData -Recurse -Force
+    if ($receiptData -and (Test-Path -LiteralPath $receiptData)) {
+        $resolvedReceipt = [IO.Path]::GetFullPath($receiptData)
+        Assert-True ($resolvedReceipt.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase)) 'Receipt cleanup path escaped build'
+        Remove-Item -LiteralPath $resolvedReceipt -Recurse -Force
+    }
 }

@@ -1,3 +1,34 @@
+function Write-TermBenchSignal {
+    param([string] $Path, [string] $Value)
+
+    # Publish only a closed complete file; readers never observe the writer's handle.
+    $temporary = $Path + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        [IO.File]::WriteAllText($temporary, $Value)
+        [IO.File]::Move($temporary, $Path)
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
+function Read-TermBenchState {
+    param($Owner, [string] $Data, [string] $Token)
+
+    $failurePath = Join-Path $Data 'child-failure.txt'
+    $failure = if (Test-Path -LiteralPath $failurePath) { [IO.File]::ReadAllText($failurePath) } else { '' }
+    $flags = @{}
+    foreach ($name in @('ready', 'done')) {
+        $path = Join-Path $Data "$name.txt"
+        $flags[$name] = Test-Path -LiteralPath $path
+        if ($flags[$name] -and [IO.File]::ReadAllText($path) -ne $Token) {
+            $failure = "Invalid $name token."
+        }
+    }
+    [pscustomobject]@{
+        Exited = $Owner.HasExited; Ready = $flags.ready; Done = $flags.done; Failure = $failure
+    }
+}
+
 function Invoke-TermBenchCohort {
     param(
         [hashtable] $Actions,
