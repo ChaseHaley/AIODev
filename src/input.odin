@@ -406,14 +406,6 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	x, y := f32(e.x), f32(e.y)
 	bar := window_tab_bar(app, w)
-	if w.find.open && !w.selecting {
-		entry := focused_session(app, w)
-		l, enabled := find_controls(w, entry)
-		if w.find.pointer_down || ui.find_contains(l, x, y) {
-			on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, e.pressed, x, y))
-			return
-		}
-	}
 	if e.button == .Left && !e.pressed && w.tab_close_pressed >= 0 {
 		index := w.tab_close_pressed
 		w.tab_close_pressed = -1
@@ -425,6 +417,14 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if w.tab_drag.pressed { tab_drag_release(w); return }
 		if settings_active(w) { editor_outcome(app, w, ui.editor_release(&w.editor)) }
 		if w.selecting { selection_finish(app, w, x, y); return }
+	}
+	if w.find.open && !w.selecting {
+		entry := focused_session(app, w)
+		l, enabled := find_controls(w, entry)
+		if w.find.pointer_down || ui.find_contains(l, x, y) {
+			on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, e.pressed, x, y))
+			return
+		}
 	}
 	if y < bar.height {
 		if e.pressed {

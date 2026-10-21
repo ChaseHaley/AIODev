@@ -9,6 +9,21 @@ import "aio:term_view"
 import "aio:ui"
 
 @(test)
+find_layout_stacks_before_inline_query_falls_below_minimum :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.25, 1.5, 2, 3}) {
+		for width in ([?]f32{250, 257, 258, 259}) {
+			l := ui.find_layout(width*scale, scale, 50*scale)
+			if width < 258 {
+				testing.expect(t, l.query.y < l.status.y)
+			} else {
+				testing.expect_value(t, l.query.y, l.status.y)
+			}
+			testing.expect(t, l.query.width >= 80*scale)
+		}
+	}
+}
+
+@(test)
 find_layout_reserves_count_and_usable_navigation_at_each_scale :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.25, 1.5, 2, 3}) {
 		for width in ([?]f32{240, 300, 380, 460, 1000}) {
