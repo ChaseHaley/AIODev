@@ -47,7 +47,7 @@ function Shot([string] $Label) {
 function Assert-Fit([string] $Label) {
     $s = Read-State
     foreach ($field in @('palette.panel', 'palette.list', 'palette.rows', 'palette.scroll', 'palette.row_height')) {
-        if (-not $s.ContainsKey($field)) { throw "Missing $field; baseline needs verify-only commit 865cf60." }
+        if (-not $s.ContainsKey($field)) { throw "Missing $field; baseline needs verify-only commit 3804aa3." }
     }
     $sizeParts = $s['window.size'] -split 'x'
     $width, $height = [double]$sizeParts[0], [double]$sizeParts[1]
@@ -95,6 +95,9 @@ try {
         Assert-Equal $count 59 "$query retains all existing results"
         Shot "title-priority-$query"
         Assert-Fit "$query first row"
+        if ($Size -eq '46x20' -and $Dpi -in @(144, 192)) {
+            Assert-Equal ([int](Read-State)['palette.rows']) 8 "$query keeps eight rows in the repro viewport"
+        }
         Invoke-Aio key End
         Assert-Equal ([int](Read-State)['palette.selected']) ($count-1) "$query End reaches final result"
         Assert-Fit "$query End"
@@ -134,11 +137,21 @@ try {
     }
     Search 'setting'
     Invoke-Aio key End Ctrl+A
+    $last = [int](Read-State)['palette.items']-1
+    Assert-Equal ([int](Read-State)['palette.selected']) $last 'End selects final result before resize'
     Invoke-Aio resize 46x12
+    Assert-Equal ([int](Read-State)['palette.selected']) $last 'shrink retains final result index'
     Assert-Fit 'resize retains final selection'
     Invoke-Aio dpi 144
+    Assert-Equal ([int](Read-State)['palette.selected']) $last 'DPI change retains final result index'
     Assert-Fit 'DPI change retains final selection'
     Shot 'resized-end'
+    Invoke-Aio resize 100x45
+    Assert-Equal ([int](Read-State)['palette.selected']) $last 'grow retains final result index'
+    Assert-Fit 'grow retains final selection'
+    Invoke-Aio dpi $Dpi
+    Assert-Equal ([int](Read-State)['palette.selected']) $last 'restored DPI retains final result index'
+    Assert-Fit 'restored DPI retains final selection'
     Invoke-Aio type 'terminal setting'
     Invoke-Aio expect state palette.items=3
     Invoke-Aio expect state palette.selected=0

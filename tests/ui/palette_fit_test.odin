@@ -31,6 +31,32 @@ palette_header_flood_fits_measured_narrow_viewport :: proc(t: ^testing.T) {
 }
 
 @(test)
+palette_fit_keeps_eight_rows_and_stable_query_top :: proc(t: ^testing.T) {
+	registry := registry_create(t)
+	defer commands.destroy(&registry)
+	rows: [len(settings.SCHEMA)]ui.Palette_Setting
+	for entry, i in settings.SCHEMA { rows[i] = {entry.key, entry.title, settings.group_title(entry.key)} }
+	p: ui.Palette
+	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
+	defer ui.palette_destroy(&p)
+	for viewport in ([?][3]f32{{926, 928, 2}, {695, 696, 1.5}, {926, 837, 2}, {1000, 800, 1}}) {
+		w, h, scale := viewport[0], viewport[1], viewport[2]
+		ui.palette_open(&p, &registry)
+		ui.palette_text(&p, &registry, "setting")
+		l := ui.palette_layout(&p, w, h, scale)
+		testing.expectf(t, l.rows == 8, "expected eight rows at %gx%g scale %g, got %d", w, h, scale, l.rows)
+		testing.expect(t, l.panel.y >= scale && l.panel.y+l.panel.height+scale <= h)
+		top := l.panel.y
+		for query in ([?]string{"terminal setting", "terminal settings contrast", "zzzz setting", "setting"}) {
+			ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
+			ui.palette_text(&p, &registry, query)
+			l = ui.palette_layout(&p, w, h, scale)
+			testing.expect_value(t, l.panel.y, top)
+		}
+	}
+}
+
+@(test)
 palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
@@ -54,7 +80,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 	defer ui.palette_destroy(&p)
 	ui.palette_open(&p, &registry)
 	ui.palette_text(&p, &registry, "setting")
-	for viewport in ([?][3]f32{{926, 928, 2}, {695, 696, 1.5}}) {
+	for viewport in ([?][3]f32{{926, 928, 2}, {695, 696, 1.5}, {926, 837, 2}, {1000, 800, 1}}) {
 		w, h, scale := viewport[0], viewport[1], viewport[2]
 		surface, surface_error := render.surface_create_offscreen(device, i32(w), i32(h))
 		if !testing.expect_value(t, surface_error, render.Error.None) { return }
@@ -66,27 +92,38 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 		for mode in settings.Theme_Mode {
 			theme := ui.theme_from(settings.theme_resolve({.Studio, mode}))
 			theme.selection = {1, 0, 0, 1}
-			render.draw_list_reset(&list)
-			testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), glyphs.Result.Ok)
-			selection: render.Rect
-			count := 0
-			for instance in list.rects {
-				if instance.color != theme.selection { continue }
-				selection = instance.rect
-				count += 1
-			}
-			testing.expect_value(t, count, 1)
-			inside := selection.y >= 0 && selection.y+selection.height <= h
-			testing.expectf(t, inside, "rendered final selection %v exceeds client height %g", selection, h)
-			testing.expect_value(t, render.frame_render(device, surface, &list, theme.window), render.Error.None)
-			pixels, pixel_error := render.surface_read_pixels(device, surface, context.allocator)
-			if !testing.expect_value(t, pixel_error, render.Error.None) { return }
-			defer delete(pixels)
-			if !inside { continue }
-			x, y := int(selection.x+selection.width/2), int(selection.y+selection.height-2*scale)
-			offset := (y*int(w)+x)*4
-			for expected, channel in ([4]u8{0, 0, 255, 255}) {
-				testing.expect_value(t, pixels[offset+channel], expected)
+			for progress in ([?]f32{0.01, 0.25, 0.5, 0.75, 1}) {
+				render.draw_list_reset(&list)
+				testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale, 1,
+					4*scale*(1-progress)), glyphs.Result.Ok)
+				for layer in list.layers {
+					testing.expect(t, layer.clip.y >= 0 && layer.clip.y+layer.clip.height <= h)
+				}
+				for instance in list.rects {
+					if instance.color != theme.border || instance.rect.width <= w/2 { continue }
+					testing.expectf(t, instance.rect.y+instance.rect.height <= h,
+						"animated border %v exceeds client height %g at progress %g", instance.rect, h, progress)
+				}
+				selection: render.Rect
+				count := 0
+				for instance in list.rects {
+					if instance.color != theme.selection { continue }
+					selection = instance.rect
+					count += 1
+				}
+				testing.expect_value(t, count, 1)
+				inside := selection.y >= 0 && selection.y+selection.height <= h
+				testing.expectf(t, inside, "rendered final selection %v exceeds client height %g", selection, h)
+				testing.expect_value(t, render.frame_render(device, surface, &list, theme.window), render.Error.None)
+				pixels, pixel_error := render.surface_read_pixels(device, surface, context.allocator)
+				if !testing.expect_value(t, pixel_error, render.Error.None) { return }
+				defer delete(pixels)
+				if !inside { continue }
+				x, y := int(selection.x+selection.width/2), int(selection.y+selection.height-2*scale)
+				offset := (y*int(w)+x)*4
+				for expected, channel in ([4]u8{0, 0, 255, 255}) {
+					testing.expect_value(t, pixels[offset+channel], expected)
+				}
 			}
 		}
 	}
@@ -187,8 +224,12 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	selected_text := ui.palette_selection(&p)
 	cursor, anchor := p.query.cursor, p.query.anchor
-	for viewport in ([?][3]f32{{926, 928, 2}, {463, 240, 1.5}, {1000, 800, 1}}) {
+	for viewport in ([?][3]f32{
+		{1000, 400, 1}, {1000, 800, 1}, {1000, 800, 2}, {926, 928, 2},
+		{463, 240, 1.5}, {463, 240, 0.5}, {40, 1, 1}, {1000, 800, 1},
+	}) {
 		l := ui.palette_layout(&p, viewport[0], viewport[1], viewport[2])
+		testing.expect_value(t, p.selected, len(p.results)-1)
 		palette_fit_visible(t, &p, l, viewport[0], viewport[1])
 		testing.expect_value(t, ui.palette_selection(&p), selected_text)
 		testing.expect_value(t, p.query.cursor, cursor)

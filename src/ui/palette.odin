@@ -308,8 +308,8 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	row_height := PALETTE_ROW_HEIGHT * scale
 	padding := PALETTE_PADDING * scale
 	input_height := PALETTE_INPUT_HEIGHT * scale
-	minimum_height := input_height + 1 + 2 * padding + row_height
-	top := clamp(max(24 * scale, height * 0.12), border, max(border, height-border-minimum_height))
+	full_height := input_height + 1 + 2 * padding + PALETTE_MAX_ROWS * row_height
+	top := clamp(max(24 * scale, height * 0.12), border, max(border, height-border-full_height))
 	available := max(0, height-border-top)
 	p.visible_rows = clamp(int(max(0, available-input_height-1-2*padding) / row_height), 0, PALETTE_MAX_ROWS)
 	keep_selection_visible(p)
@@ -415,6 +415,7 @@ palette_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, height, scale: f32,
+	opacity: f32 = 1, rise: f32 = 0,
 ) -> glyphs.Result {
 	l := palette_layout(p, width, height, scale)
 	panel := l.panel
@@ -422,6 +423,9 @@ palette_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
+	layer_start, rect_start, glyph_start := len(list.layers), len(list.rects), len(list.glyphs)
+	bounded_rise := clamp(rise, 0, max(0, height-scale-panel.y-panel.height))
+	defer fade_draw(list, layer_start, rect_start, glyph_start, opacity, bounded_rise)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
 	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
 	border := render.Rect{panel.x - scale, panel.y - scale, panel.width + 2 * scale, panel.height + 2 * scale}

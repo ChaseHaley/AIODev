@@ -538,12 +538,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		}
 	}
 	if palette_visible(app, w) {
-		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
+			app.palette.motion.value, app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0,
 		)
-		ui.fade_draw(&w.list, layers, rects, glyph_count, app.palette.motion.value,
-			app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0)
 		if result != .Ok { return frame, result }
 	}
 	if c := &w.close_confirm; c.open || c.motion.value > 0 {
