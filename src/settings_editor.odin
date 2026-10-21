@@ -178,10 +178,8 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 	for d in diagnostics[before:] {
 		message := fmt.tprintf("%s: %s", d.key, d.message)
 		if d.kind == .Shortcut_Warning {
-			if warning == "" {
-				warning = diagnostic_identity(d)
-
-			}
+			// The diagnostics are freed on return, before the caller formats the warning.
+			if warning == "" { warning = strings.clone(diagnostic_identity(d), context.temp_allocator) }
 		} else {
 			if at := strings.index(d.message, "already used by "); at >= 0 {
 				other := d.message[at+len("already used by "):]

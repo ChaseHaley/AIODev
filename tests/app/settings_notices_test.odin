@@ -1,11 +1,14 @@
 package app_test
 
+import "base:runtime"
+import "core:mem"
 import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
 import "aio:commands"
+import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
@@ -162,4 +165,39 @@ show_diagnostics_quietly :: proc(state: ^app.App, issues: ^[dynamic]settings.Dia
 	context.logger = {}
 	defer context.logger = logger
 	app.show_settings_diagnostics(state, issues, error)
+}
+
+@(private="file")
+poison_parent: runtime.Allocator
+
+// Overwrites freed bytes so text that outlives its owner is detected deterministically.
+@(private="file")
+poison_free :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,
+	old_memory: rawptr, old_size: int, loc := #caller_location) -> ([]u8, runtime.Allocator_Error) {
+	if mode == .Free && old_memory != nil && old_size > 0 { mem.set(old_memory, 0xAA, old_size) }
+	return poison_parent.procedure(poison_parent.data, mode, size, alignment, old_memory, old_size, loc)
+}
+
+@(test)
+settings_inline_shortcut_warning_outlives_validation :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "InlineWarning") { return }
+	s := &f.state
+	w := s.windows[0]
+	app.editor_open(s, w)
+	app.handle_event(s, platform.Text_Event{w.id, "input.leader"})
+	if !testing.expect_value(t, ui.editor_row(&w.editor).key, "input.leader") { return }
+	ui.field_set(&w.editor.value, "Ctrl+Shift+T")
+	poison_parent = context.allocator
+	{
+		context.allocator = runtime.Allocator{poison_free, nil}
+		logger := context.logger
+		context.logger = {}
+		defer context.logger = logger
+		app.editor_outcome(s, w, .Save)
+	}
+	testing.expect(t, !w.editor.error)
+	testing.expect_value(t, w.editor.message,
+		"Saved. input.leader (Ctrl+Shift+T) vs New Tab (tab.new); input.leader wins")
 }
