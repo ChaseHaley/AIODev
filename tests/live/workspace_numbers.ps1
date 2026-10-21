@@ -106,7 +106,7 @@ try {
     Invoke-Aio wait text 'PS ' | Out-Null
     $before = Read-State
     $runtime = $before['session.id']
-    Invoke-Aio run 'Write-Output ("WORK131_PID_" + $PID)' | Out-Null
+    Invoke-Aio run 'Write-Output (''WORK131_PID_'' + $PID)' | Out-Null
     Invoke-Aio wait text WORK131_PID_ | Out-Null
     $shell = [regex]::Matches(((Invoke-Aio screen) -join "`n"), 'WORK131_PID_(\d+)')
     Assert-True ($shell.Count -gt 0) 'shell process receipt exists'
@@ -170,7 +170,7 @@ try {
     Assert-Equal $torn['workspace.id'] $preview['workspace.id'] 'commit preserves stable workspace ID'
     Assert-Equal $torn['session.id'] $runtime 'commit preserves runtime identity'
     Invoke-Aio expect text "WORK131_PID_$shellPid" | Out-Null
-    Invoke-Aio run 'Write-Output ("WORK131_AFTER_" + $PID)' | Out-Null
+    Invoke-Aio run 'Write-Output (''WORK131_AFTER_'' + $PID)' | Out-Null
     Invoke-Aio expect text "WORK131_AFTER_$shellPid" | Out-Null
     Assert-Equal $torn['window.preparing'] false 'commit releases provisional state'
 
