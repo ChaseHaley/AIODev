@@ -1,9 +1,8 @@
 [CmdletBinding()]
-param()
+param([string] $Name = 'pane-windows')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
-$name = 'pane-windows'
 $directory = Join-Path $repo "build/verify/$name"
 $path = Join-Path $directory 'settings.ini'
 
@@ -174,6 +173,7 @@ function Assert-Hit([string] $Point, $State, [string] $Label) {
 }
 function Shell-Pid {
     Invoke-Aio run 'Write-Output ("SHELL" + "PID_" + $PID)' | Out-Null
+    Invoke-Aio wait text SHELLPID_ | Out-Null
     $match = [regex]::Matches((Invoke-Aio screen) -join "`n", 'SHELLPID_(\d+)')
     if ($match.Count -eq 0) { throw 'Shell PID marker is missing.' }
     return $match[$match.Count-1].Groups[1].Value
@@ -486,26 +486,81 @@ try {
     Shot $n tear-off-window
     Raise
 
-    # A sole-pane source tear-off closes the emptied source window after commit.
+    # The workspace's final pane cannot prepare or commit a tear-off.
     $s = Window-State $source
     $last = $s['session.id']
     $count = [int]$s['windows.count']
+    $workspaceCount = $s['workspaces.count']
+    $lastTab = $s['tab.1.id']
+    $lastGrid = $s['grid.size']
     Begin-Drag $source | Out-Null
     $desktop2 = "$($work[0]+60),$($work[3]-90)"
     Assert-Hit $desktop2 $null 'second desktop'
     Invoke-Aio mouse move $desktop2 --screen | Out-Null
+    $s = Read-State
+    Assert-Equal $s['panes.drop.new_window'] false 'final workspace pane offers no tear-off'
+    Assert-Equal $s['panes.drop.shown'] false 'final workspace pane shows no drop indicator'
+    Assert-Equal $s['panes.drop.preview_window'] 0 'final workspace pane prepares no window'
+    Assert-Equal $s['windows.count'] $count 'rejected preview creates no window'
+    Assert-Equal $s['workspaces.count'] $workspaceCount 'rejected preview creates no workspace'
+    Invoke-Aio mouse up $desktop2 --screen | Out-Null
+    $s = Read-State
+    Assert-Equal $s['windows.count'] $count 'final-pane release creates no window'
+    Assert-Equal $s['workspaces.count'] $workspaceCount 'final-pane release creates no workspace'
+    Assert-Equal $s['workspace.id'] $sourceWorkspace 'final-pane release preserves workspace identity'
+    Assert-Equal $s['tab.1.id'] $lastTab 'final-pane release preserves tab identity'
+    Assert-Equal $s['session.id'] $last 'final-pane release preserves runtime identity'
+    Assert-Equal $s['sessions.count'] $sessions 'final-pane release closes no runtime'
+    Assert-Equal $s['grid.size'] $lastGrid 'final-pane release preserves geometry'
+    Invoke-Aio run 'Write-Output ("LAST" + "_PRESERVED")' | Out-Null
+    Invoke-Aio expect text LAST_PRESERVED
+
+    # A one-pane tab may still tear off while another tab keeps the workspace populated.
+    Invoke-Aio command tab.new | Out-Null
+    Invoke-Aio wait text 'PS '
+    $s = Read-State
+    $oneTabSession = $s['session.id']
+    $sessions = $s['sessions.count']
+    Begin-Drag $source | Out-Null
+    Invoke-Aio mouse move $desktop2 --screen | Out-Null
     $soleId = (Read-State)['panes.drop.preview_window']
-    Assert-True ($soleId -ne '0') 'sole-pane tear-off prepares a preview'
+    Assert-True ($soleId -ne '0') 'one-pane tab in multi-pane workspace prepares a preview'
     Invoke-Aio mouse up $desktop2 --screen | Out-Null
     $ids = Window-Ids
-    Assert-True (-not ($ids -contains $source)) 'sole-pane tear-off closes the emptied source window'
-    Assert-Equal $ids.Count $count 'source closure and new window balance'
+    Assert-True ($ids -contains $source) 'multi-tab tear-off preserves the source window'
+    Assert-Equal $ids.Count ($count+1) 'multi-tab tear-off adds one window'
     $n = Window-State $soleId
-    Assert-Equal $n['session.id'] $last 'sole-pane runtime survives in its new window'
-    Assert-Equal $n['sessions.count'] $sessions 'sole-pane tear-off closes no runtime'
+    Assert-Equal $n['session.id'] $oneTabSession 'one-pane tab runtime survives in its new window'
+    Assert-Equal $n['sessions.count'] $sessions 'multi-tab tear-off closes no runtime'
     Invoke-Aio run 'Write-Output ("SOLE" + "_ALIVE")' | Out-Null
     Invoke-Aio expect text SOLE_ALIVE
     Shot (Read-State) sole-tear-off-window
+    $s = Window-State $source
+    Assert-Equal $s['tabs.count'] 1 'multi-tab tear-off removes only the exhausted tab'
+    Assert-Equal $s['tab.1.id'] $lastTab 'remaining tab keeps its stable ID'
+    Assert-Equal $s['session.id'] $last 'remaining tab keeps its runtime'
+    Invoke-Aio expect text LAST_PRESERVED
+
+    # The final workspace pane may still move to an existing window.
+    $d = Window-State $destination
+    Invoke-Aio command tab.select_1 | Out-Null
+    $d = Read-State
+    $a = Area $d
+    $edge = Screen $d ($a[0]+$a[2]/2) ($a[1]+$a[3]-3)
+    Assert-Hit $edge $d 'final-pane existing destination'
+    $beforeWindows = [int]$d['windows.count']
+    $beforeWorkspaces = $d['workspaces.count']
+    Begin-Drag $source | Out-Null
+    Invoke-Aio mouse move $edge --screen | Out-Null
+    Assert-Equal (Read-State)['panes.drop.shown'] true 'final workspace pane can target an existing window'
+    Invoke-Aio mouse up $edge --screen | Out-Null
+    Assert-True (-not ((Window-Ids) -contains $source)) 'existing-window transfer closes the exhausted source view'
+    $d = Window-State $destination
+    Assert-Equal $d['windows.count'] ($beforeWindows-1) 'existing-window final-pane transfer creates no window'
+    Assert-Equal $d['workspaces.count'] $beforeWorkspaces 'existing-window transfer retains the empty workspace'
+    Assert-Equal $d['session.id'] $last 'existing-window transfer preserves final-pane runtime identity'
+    Assert-Equal $d['sessions.count'] $sessions 'existing-window final-pane transfer closes no runtime'
+    Invoke-Aio expect text LAST_PRESERVED
 
     # The first moved runtime still answers in the destination window.
     Select-Window $destination
@@ -516,6 +571,10 @@ try {
     Assert-True ($null -ne $paneNode) 'first moved runtime remains in the destination tab'
     Write-Output "PASS shell pid=$shellPid runtime=$moving"
     Write-Output 'PASS cross-window, remote tab, tear-off, rejection and runtime continuity journey'
+} catch {
+    & $ctl --name $name state | Out-File (Join-Path $directory 'failure-state.txt')
+    & $ctl --name $name screen | Out-File (Join-Path $directory 'failure-screen.txt')
+    throw
 } finally {
     & $ctl --name $name stop | Out-Null
 }

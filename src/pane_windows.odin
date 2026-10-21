@@ -15,6 +15,20 @@ pane_source_workspace :: proc(app: ^App, source: ^Tab) -> ^Workspace {
 	return nil
 }
 
+@(private)
+pane_window_source_allows :: proc(workspace: ^Workspace) -> bool {
+	if workspace == nil { return false }
+	count := 0
+	for tab in workspace.tabs {
+		for node in tab.tree.nodes {
+			if _, pane := node.(layout.Pane); !pane { continue }
+			count += 1
+			if count > 1 { return true }
+		}
+	}
+	return false
+}
+
 // Preview tabs borrow their source runtime; discarding one must never close its session.
 @(private)
 pane_preview_workspace_discard :: proc(app: ^App, workspace: ^Workspace) {
@@ -62,6 +76,7 @@ pane_window_preview_position :: proc(app: ^App, w: ^Window, x, y: i32) -> bool {
 
 @(require_results)
 pane_window_preview_create :: proc(app: ^App, source: ^Tab, node: layout.Node_Id, x, y: i32) -> ^Window {
+	if !pane_window_source_allows(pane_source_workspace(app, source)) { return nil }
 	if int(node) >= len(source.tree.nodes) { return nil }
 	pane, ok := source.tree.nodes[node].(layout.Pane)
 	if !ok || pane.content.kind != .Terminal { return nil }
@@ -100,7 +115,8 @@ pane_to_window :: proc(app: ^App, source_window: ^Window, source: ^Tab,
 	node: layout.Node_Id, preview_id: platform.Window_Id) -> bool {
 	preview := window_find(app, preview_id)
 	workspace := pane_source_workspace(app, source)
-	if preview == nil || !preview.preparing || workspace == nil || int(node) >= len(source.tree.nodes) {
+	if preview == nil || !preview.preparing || !pane_window_source_allows(workspace) ||
+	   int(node) >= len(source.tree.nodes) {
 		return false
 	}
 	pane, valid := source.tree.nodes[node].(layout.Pane)
