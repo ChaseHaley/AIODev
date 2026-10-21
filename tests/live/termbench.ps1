@@ -87,15 +87,15 @@ $shell = '"' + $shellExecutable + '" -NoLogo -NoProfile -ExecutionPolicy Bypass 
     '" -Token ' + $Token + ' -StartupSeconds ' + $StartupSeconds +
     ' -AdmissionSeconds ' + $AdmissionSeconds + ' -Child'
 $settings = @(
-    "shell.command = $shell"
-    "shell.directory = $repo"
+    ('shell.command = ' + (ConvertTo-TermBenchSettingString $shell))
+    ('shell.directory = ' + (ConvertTo-TermBenchSettingString $repo))
     'window.columns = 120'
     'window.rows = 32'
     'font.family = Cascadia Mono'
     'font.size = 12'
     'cursor.blink = false'
-    "process.padding_groups = $ProcessGroups"
-    "theme.mode = $ThemeMode"
+    ('process.padding_groups = ' + (ConvertTo-TermBenchSettingString $ProcessGroups))
+    ('theme.mode = ' + (ConvertTo-TermBenchSettingString $ThemeMode))
 )
 if ($HideHeaders) { $settings += 'pane.show_headers = false' }
 if ($MinimumContrast -ne 4.5) { $settings += "terminal.minimum_contrast = $MinimumContrast" }
