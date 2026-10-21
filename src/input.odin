@@ -44,6 +44,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Mouse_Leave_Event:
 		if w := window_find(app, e.window); w != nil {
+			w.find.hover = .None
 			w.tab_hover = -1
 			w.tab_pressed = false
 			ui.editor_hover_clear(&w.editor)
@@ -71,6 +72,9 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Capture_Lost_Event:
 		if w := window_find(app, e.window); w != nil {
+			if w.find.pointer_down || w.find.hover != .None { w.dirty = true }
+			w.find.pointer_down = false
+			w.find.pressed, w.find.hover = .None, .None
 			arrange_cancel(app, w)
 		}
 	case platform.Close_Request_Event:
@@ -358,6 +362,12 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		}
 		return
 	}
+	if w.find.open && w.find.pointer_down && e.button == .Left && !e.pressed {
+		entry := focused_session(app, w)
+		l, enabled := find_controls(w, entry)
+		on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, false, f32(e.x), f32(e.y)))
+		return
+	}
 	caption := ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale)
 	if e.button == .Left && (caption >= 0 || w.caption_pressed >= 0) &&
 	   !w.pane_drag.pressed && !w.tab_drag.pressed {
@@ -396,6 +406,14 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	x, y := f32(e.x), f32(e.y)
 	bar := window_tab_bar(app, w)
+	if w.find.open && !w.selecting {
+		entry := focused_session(app, w)
+		l, enabled := find_controls(w, entry)
+		if w.find.pointer_down || ui.find_contains(l, x, y) {
+			on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, e.pressed, x, y))
+			return
+		}
+	}
 	if e.button == .Left && !e.pressed && w.tab_close_pressed >= 0 {
 		index := w.tab_close_pressed
 		w.tab_close_pressed = -1
@@ -437,9 +455,6 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) { return }
-	if w.find.open && !w.selecting && ui.find_contains(f32(w.width), w.scale, x, y) {
-		return
-	}
 	if pane_header_button(app, w, e) { return }
 	if e.pressed && !w.selecting {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found { pane_focus(app, w, pane.node) }
@@ -543,7 +558,17 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		pointer_set(app, w, over_text ? .Text : .Arrow)
 		return
 	}
-	enabled := !w.selecting && !(w.find.open && ui.find_contains(f32(w.width), w.scale, x, y))
+	if w.find.open && !w.selecting {
+		l, available := find_controls(w, focused_session(app, w))
+		if ui.find_hover(&w.find, l, available, x, y) { w.dirty = true }
+		if ui.find_contains(l, x, y) || w.find.pointer_down {
+			split_overlay_update(w, x, y, false)
+			pane_header_pointer(w, x, y, false)
+			pointer_set(app, w, ui.find_hit(l, x, y) == .None ? .Text : .Arrow)
+			return
+		}
+	}
+	enabled := !w.selecting
 	split_overlay_update(w, x, y, enabled)
 	over_header := pane_header_pointer(w, x, y, enabled)
 	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
@@ -609,6 +634,8 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		w.find.pointer_down = false
+		w.find.pressed, w.find.hover = .None, .None
 		icon_input := w.workspace_picker.open && w.workspace_picker.icons
 		window_overlays_cancel(app, w)
 		// The OS emoji picker may take focus before delivering its text to the icon field.

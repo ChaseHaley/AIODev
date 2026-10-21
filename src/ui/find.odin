@@ -1,10 +1,11 @@
 package ui
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:platform"
 import "aio:render"
 
-@(private) FIND_WIDTH :: 380
+@(private) FIND_WIDTH :: 460
 @(private) FIND_HEIGHT :: 40
 @(private) FIND_MARGIN :: 12
 @(private) FIND_PADDING :: 12
@@ -13,7 +14,11 @@ import "aio:render"
 Find_Bar :: struct {
 	open: bool,
 	query: Text_Field,
+	hover, pressed: Find_Outcome,
+	pointer_down: bool,
 }
+
+Find_Layout :: struct { panel, query, status, older, newer: render.Rect }
 
 Find_Outcome :: enum {
 	None,
@@ -35,11 +40,15 @@ find_destroy :: proc(f: ^Find_Bar) {
 
 find_open :: proc(f: ^Find_Bar) {
 	f.open = true
+	f.hover, f.pressed = .None, .None
+	f.pointer_down = false
 	field_set(&f.query, "")
 }
 
 find_close :: proc(f: ^Find_Bar) {
 	f.open = false
+	f.hover, f.pressed = .None, .None
+	f.pointer_down = false
 	field_set(&f.query, "")
 }
 
@@ -76,16 +85,56 @@ find_text :: proc(f: ^Find_Bar, text: string) -> Find_Outcome {
 	return find_change(field_text(&f.query, text))
 }
 
-// The bar sits in the window's top-right corner, clear of the command palette's centered column.
-find_layout :: proc(width, scale: f32) -> render.Rect {
+// Keep the overlay below title chrome so caption controls cannot intercept its pointer events.
+find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 	margin := FIND_MARGIN * scale
 	panel_width := max(0, min(FIND_WIDTH * scale, width - 2 * margin))
-	return {width - margin - panel_width, margin, panel_width, FIND_HEIGHT * scale}
+	l: Find_Layout
+	l.panel = {max(0, width-margin-panel_width), TAB_HEIGHT*scale+margin, panel_width, FIND_HEIGHT*scale}
+	padding, gap, button := FIND_PADDING*scale, 8*scale, 32*scale
+	inner := max(0, panel_width-2*padding)
+	stacked := inner < 80*scale+status_width+gap+2*button
+	l.query = {l.panel.x+min(padding, panel_width), l.panel.y+4*scale, inner, button}
+	y := l.query.y
+	if stacked { y += FIND_HEIGHT*scale; l.panel.height += FIND_HEIGHT*scale }
+	// On very narrow windows give the count its own row to keep every digit visible.
+	separate := inner < status_width+gap+2*button
+	l.status = {l.query.x, y, min(status_width, inner), button}
+	if stacked && separate { y += FIND_HEIGHT*scale; l.panel.height += FIND_HEIGHT*scale }
+	button = min(button, inner/2)
+	l.newer = {l.query.x+inner-button, y, button, 32*scale}
+	l.older = {l.newer.x-button, y, button, 32*scale}
+	if !separate { l.status.x = l.older.x-gap-l.status.width }
+	if !stacked { l.query.width = max(0, l.status.x-gap-l.query.x) }
+	return l
 }
 
-find_contains :: proc(width, scale, x, y: f32) -> bool {
-	r := find_layout(width, scale)
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+find_contains :: proc(l: Find_Layout, x, y: f32) -> bool { return contains(l.panel, x, y) }
+
+find_hit :: proc(l: Find_Layout, x, y: f32) -> Find_Outcome {
+	if contains(l.older, x, y) { return .Older }
+	if contains(l.newer, x, y) { return .Newer }
+	return .None
+}
+
+find_hover :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, x, y: f32) -> bool {
+	hit := enabled ? find_hit(l, x, y) : .None
+	if hit == f.hover { return false }
+	f.hover = hit
+	return true
+}
+
+// Like other chrome buttons, activate only on a matching left press/release. Query retains keyboard focus.
+find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mouse_Button,
+	pressed: bool, x, y: f32) -> Find_Outcome {
+	if button != .Left { return .None }
+	hit := enabled ? find_hit(l, x, y) : .None
+	f.pointer_down = pressed
+	if pressed { f.pressed = hit; return .Moved }
+	armed := f.pressed
+	f.pressed = .None
+	if armed != .None && hit == armed { return armed }
+	return .Moved
 }
 
 // Draws the bar with `status` (such as "3 of 17") right-aligned after the query.
@@ -95,11 +144,14 @@ find_draw :: proc(
 	base: ^Text,
 	theme: Theme,
 	status: string,
+	enabled: bool,
 	width, height, scale: f32,
 ) -> glyphs.Result {
 	input_text := text_styled(base, .Input)
 	text := &input_text
-	panel := find_layout(width, scale)
+	l := find_layout(width, scale, text_width(text, status))
+	panel := l.panel
+	if panel.width <= 2*FIND_PADDING*scale { return .Ok }
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
@@ -109,14 +161,27 @@ find_draw :: proc(
 	draw_rect(list, {rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale})
 	draw_rect(list, {rect = border, color = theme.border, radius = radius + scale})
 	draw_rect(list, {rect = panel, color = theme.surface, radius = radius})
-	padding := FIND_PADDING * scale
-	baseline := panel.y + (panel.height - text.line_height) / 2 + text.ascent
-	status_width := text_width(text, status)
-	status_x := panel.x + panel.width - padding - status_width
-	if result := draw_text(text, list, status, status_x, baseline, theme.muted); result != .Ok {
+	count := input_text
+	if measured := text_width(&count, status); measured > l.status.width && measured > 0 {
+		text_set_size(&count, count.size_px*l.status.width/measured)
+	}
+	if result := draw_text(&count, list, status, l.status.x,
+		l.status.y+(l.status.height-count.line_height)/2+count.ascent, theme.text); result != .Ok {
 		return result
 	}
-	query_width := max(0, status_x - padding - (panel.x + padding))
-	return field_draw(&f.query, list, text, theme, panel.x + padding, baseline, query_width, true,
+	for area, i in ([2]render.Rect{l.older, l.newer}) {
+		action: Find_Outcome = i == 0 ? .Older : .Newer
+		if enabled && (f.hover == action || f.pressed == action) {
+			draw_rect(list, {rect = area, color = f.pressed == action ? theme.pressed : theme.hover,
+				radius = 5*scale})
+		}
+		if enabled && f.pressed == action { focus_ring_draw(list, area, theme, scale) }
+		if result := draw_glyph_centered(text, list, i == 0 ? '↑' : '↓', area,
+			enabled ? theme.text : theme.faint); result != .Ok { return result }
+	}
+	if l.query.width <= 0 { return .Ok }
+	if render.push_layer(list, l.query) != .None { return .Ok }
+	baseline := l.query.y+(l.query.height-text.line_height)/2+text.ascent
+	return field_draw(&f.query, list, text, theme, l.query.x, baseline, l.query.width, true,
 		"Find in scrollback", theme.text, max(1, 1.5 * scale))
 }
