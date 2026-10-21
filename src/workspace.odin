@@ -29,6 +29,24 @@ Workspace :: struct {
 	selection_anchor: u32,
 }
 
+@(require_results)
+workspace_default_name :: proc(app: ^App) -> (name: string, number: u32) {
+	number = app.next_workspace_number
+	for number < max(u32) {
+		number += 1
+		candidate := fmt.tprintf("Workspace %d", number)
+		occupied := false
+		for workspace in app.workspaces {
+			if !workspace.provisional && workspace.name == candidate { occupied = true; break }
+		}
+		if occupied { continue }
+		owned, err := strings.clone(candidate)
+		if err != nil { return "", 0 }
+		return owned, number
+	}
+	return "", 0
+}
+
 selected_tab :: proc(workspace: ^Workspace) -> ^Tab {
 	if workspace == nil || len(workspace.tabs) == 0 { return nil }
 	return workspace.tabs[workspace.selected]

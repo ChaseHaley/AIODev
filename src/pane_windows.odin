@@ -126,12 +126,20 @@ pane_to_window :: proc(app: ^App, source_window: ^Window, source: ^Tab,
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
 	if !pane_minimum_allows(app, preview, panes[:], nil, true) { return false }
+	name, number := workspace_default_name(app)
+	if number == 0 { return false }
 	focus_leave(app, source_window)
-	if !layout.remove(&source.tree, node) { focus_enter(app, source_window); return false }
+	if !layout.remove(&source.tree, node) {
+		delete(name)
+		focus_enter(app, source_window)
+		return false
+	}
 	destination.tree.nodes[destination.tree.root] = pane
 	destination.tree.next_pane_order = pane.order
 	preview.preparing = false
 	preview.workspace.provisional = false
+	preview.workspace.name = name
+	app.next_workspace_number = number
 	workspace_pickers_refresh(app)
 	window_relayout(app, preview)
 	focus_enter(app, preview)
