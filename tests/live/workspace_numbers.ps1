@@ -46,12 +46,13 @@ function Preview {
     $s = Read-State
     $id = $s['panes.drop.preview_window']
     Assert-True ($id -ne '0') 'tear-off preview allocated'
-    Select-Window $id
-    $p = Read-State
-    Assert-Equal $p['window.preparing'] true 'preview remains provisional'
-    Write-Host "RECEIPT preview window=$id workspace=$($p['workspace.id']) name=$($p['workspace.name'])"
-    Select-Window $script:source
-    return $p
+    foreach ($index in 1..[int]$s['windows.count']) {
+        if ($s["window.$index.id"] -ne $id) { continue }
+        Assert-Equal $s["window.$index.preparing"] true 'preview remains provisional'
+        Write-Host "RECEIPT preview window=$id preparing=$($s["window.$index.preparing"])"
+        return $id
+    }
+    throw 'Preview is absent from the actual window inventory.'
 }
 function Snapshot([string] $Label) {
     Save-State $Label
@@ -130,18 +131,17 @@ try {
         Invoke-Aio command settings.reload | Out-Null
     }
 
-    $lastWorkspaceId = 4
+    $lastPreviewWindow = 0
     foreach ($cancel in @('escape', 'focus-loss')) {
         Begin-Drag
-        $preview = Preview
-        Assert-True ([int]$preview['workspace.id'] -gt $lastWorkspaceId) 'stable workspace ID advances'
-        $lastWorkspaceId = [int]$preview['workspace.id']
-        $previewWindow = $preview['window.id']
+        $previewWindow = Preview
+        Assert-True ([int]$previewWindow -gt $lastPreviewWindow) 'preview window identity advances'
+        $lastPreviewWindow = [int]$previewWindow
         if ($cancel -eq 'escape') {
             Invoke-Aio mouse move '100,100' --px | Out-Null
             Assert-Equal (Read-State)['panes.drop.preview_window'] $previewWindow 'reentry caches the same preview'
             $again = Preview
-            Assert-Equal $again['workspace.id'] $lastWorkspaceId 'reentry preserves preview identity'
+            Assert-Equal $again $previewWindow 'reentry preserves preview identity'
             Invoke-Aio key Esc | Out-Null
         } else { Invoke-Aio focus out | Out-Null }
         Invoke-Aio mouse up $DesktopPoint --screen | Out-Null
@@ -156,9 +156,8 @@ try {
     }
 
     Begin-Drag
-    $preview = Preview
-    $tornWindow = $preview['window.id']
-    Assert-True ([int]$preview['workspace.id'] -gt $lastWorkspaceId) 'commit preview has a fresh stable ID'
+    $tornWindow = Preview
+    Assert-True ([int]$tornWindow -gt $lastPreviewWindow) 'commit preview has a fresh window identity'
     Invoke-Aio mouse up $DesktopPoint --screen | Out-Null
     Select-Window $tornWindow
     # Bring only this own inactive window into capture range; no activation or host cursor input.
@@ -167,7 +166,7 @@ try {
     Snapshot 'committed-default'
     Write-Host "RECEIPT committed window=$tornWindow workspace=$($torn['workspace.id']) name=$($torn['workspace.name']) runtime=$runtime shell=$shellPid"
     Assert-Equal $torn['workspace.name'] 'Workspace 5' 'previews do not skip the committed visible default number'
-    Assert-Equal $torn['workspace.id'] $preview['workspace.id'] 'commit preserves stable workspace ID'
+    Assert-Equal $torn['workspace.id'] 8 'canceled and failed previews do not reuse stable workspace IDs'
     Assert-Equal $torn['session.id'] $runtime 'commit preserves runtime identity'
     Invoke-Aio expect text "WORK131_PID_$shellPid" | Out-Null
     Invoke-Aio run 'Write-Output (''WORK131_AFTER_'' + $PID)' | Out-Null
