@@ -73,6 +73,7 @@ try {
     Invoke-Aio expect state workspace.picker.selected=1
     $nextCell = Rect (Read-State) 'workspace.picker.row'
     Check ($nextCell[0] -gt $firstCell[0] -and $nextCell[1] -eq $firstCell[1]) 'horizontal grid navigation'
+    Shot 'preset-focused'
     Invoke-Aio key Enter
     Invoke-Aio expect state workspace.icon.preset=1
     Invoke-Aio expect state workspace.picker.icons=false
