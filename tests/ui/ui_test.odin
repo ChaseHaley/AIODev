@@ -323,10 +323,11 @@ palette_fuzzy_matches_titles_and_groups_with_highlights :: proc(t: ^testing.T) {
 	for query in ([?]string{"settin", "setting", "settings"}) {
 		ui.palette_open(&p, &registry)
 		ui.palette_text(&p, &registry, query)
-		testing.expectf(t, len(p.results) == 1, "%s matched %d", query, len(p.results))
-		if len(p.results) == 1 {
-			testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "settings.reload")
-			testing.expectf(t, len(p.results[0].positions) == len(query), "%s lost its highlights", query)
+		if !testing.expectf(t, len(p.results) == 1+len(palette_settings), "%s matched %d", query, len(p.results)) {
+			continue
 		}
+		testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "settings.reload")
+		testing.expectf(t, len(p.results[0].positions) == len(query), "%s lost its highlights", query)
+		for r in p.results[1:] { testing.expect(t, r.command == nil && !r.title_match && len(r.positions) == 0) }
 	}
 }
