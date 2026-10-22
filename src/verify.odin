@@ -33,7 +33,6 @@ _ :: ui
 _ :: settings
 
 AIO_CONTROL :: #config(AIO_CONTROL, false)
-AIO_BUILD_ID :: #config(AIO_BUILD_ID, "unknown")
 
 when AIO_CONTROL {
 	Verify :: struct {
@@ -265,6 +264,7 @@ when AIO_CONTROL {
 			{"app.pid", fmt.tprintf("%d", os.get_pid())},
 			{"app.app", app.app_id},
 			{"app.build", AIO_BUILD_ID},
+			{"app.build_kind", AIO_BUILD_KIND},
 			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
 			{"app.settings", app.settings_path},
 			{"app.log", app.log_path},

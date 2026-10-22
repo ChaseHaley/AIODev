@@ -100,6 +100,7 @@ Action :: enum u32 {
 	Workspace_7,
 	Workspace_8,
 	Workspace_9,
+	Show_Build_Info,
 }
 
 @(private)
@@ -110,6 +111,7 @@ Action_Info :: struct {
 
 @(private)
 ACTIONS :: [Action]Action_Info {
+	.Show_Build_Info = {"app.build_info", "Show Build Info", nil},
 	.New_Workspace = {"workspace.new", "New Workspace", nil},
 	.Change_Workspace = {"workspace.change", "Change Workspace…", nil},
 	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil},
@@ -315,6 +317,8 @@ run_action :: proc(
 	entry := focused_session(app, w)
 	w.dirty = true
 	switch action {
+	case .Show_Build_Info:
+		show_build_info(app)
 	case .Command_Palette:
 		if palette_active(app, w) {
 			palette_close(app, w)

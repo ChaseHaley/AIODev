@@ -43,6 +43,7 @@ Notice_Key :: enum u32 {
 	Font,
 	Copy,
 	Paste,
+	Build_Info,
 }
 
 Session_Entry :: struct {

@@ -65,8 +65,13 @@ function Split-Arguments([string] $Line) {
 # AIODev's code, so any source change moved the VT parser's alignment and TermBench by 2 to 3
 # percent. Linking that object first gives the parser the same address in every build.
 function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
+    $buildId = Get-BuildId
+    $kind = if ($Mode -contains '-define:AIO_CONTROL=true') { 'verify' }
+        elseif ($Mode -contains '-o:speed') { 'release' } else { 'debug' }
+    # Literal single quotes keep a numeric Git hash a string in Odin.
+    $identity = @("-define:AIO_BUILD_ID='$buildId'", "-define:AIO_BUILD_KIND='$kind'")
     # With -print-linker-flags, Odin compiles and keeps the object but leaves the resource and link steps to us.
-    $printed = @(& odin build src "-out:$Output" @Mode @flags @resource -keep-temp-files -print-linker-flags)
+    $printed = @(& odin build src "-out:$Output" @Mode @identity @flags @resource -keep-temp-files -print-linker-flags)
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $linkLine = $printed | Where-Object { $_ -match '-OUT:' } | Select-Object -Last 1
     if (-not $linkLine) { throw 'Odin did not print linker flags.' }
@@ -130,10 +135,7 @@ $appFlags = @($flags | Where-Object { $_ -notlike '-vet-packages:*' }) +
 
 switch ($Task) {
     'verify' {
-        $buildId = Get-BuildId
-        # Literal single quotes keep a numeric Git hash a string in Odin.
-        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true',
-            "-define:AIO_BUILD_ID='$buildId'") 'build/aiodev-verify.exe'
+        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true') 'build/aiodev-verify.exe'
         foreach ($name in $toolPackages) {
             Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
         }
