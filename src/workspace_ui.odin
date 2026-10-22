@@ -18,6 +18,7 @@ Workspace_Row :: struct {
 Workspace_Picker :: struct {
 	open: bool,
 	icons: bool,
+	icon_colors: bool,
 	query: ui.Text_Field,
 	rows: [dynamic]Workspace_Row,
 	selected, scroll: int,
@@ -290,7 +291,7 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	tab_close_restore(w)
 	w.selecting, w.autoscrolling = false, false
 	ui.field_set(&w.workspace_picker.query, "")
-	w.workspace_picker.open, w.workspace_picker.icons = true, false
+	w.workspace_picker.open, w.workspace_picker.icons, w.workspace_picker.icon_colors = true, false, false
 	w.workspace_picker.menu_id, w.workspace_picker.rename_id, w.workspace_picker.icon_id = 0, 0, 0
 	w.workspace_picker.rename_motion = {}
 	w.rename.dragging = false
@@ -304,13 +305,18 @@ workspace_icon_open :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_picker_count :: proc(w: ^Window) -> int {
-	return w.workspace_picker.icons ? len(WORKSPACE_ICONS)+2 : len(w.workspace_picker.rows)+len(WORKSPACE_ACTIONS)
+	if w.workspace_picker.icons {
+		return w.workspace_picker.icon_colors ? len(WORKSPACE_ICON_COLORS)+1 : len(WORKSPACE_ICONS)+3
+	}
+	return len(w.workspace_picker.rows)+len(WORKSPACE_ACTIONS)
 }
 
 workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	index, count := p.selected, len(p.rows)
 	if p.icons {
+		if p.icon_colors { workspace_icon_color_choose(app, w); return }
+		if index == len(WORKSPACE_ICONS)+2 { workspace_icon_color_open(app, w); return }
 		emoji := index >= len(WORKSPACE_ICONS) ? ui.field_string(&p.query) : ""
 		if index >= len(WORKSPACE_ICONS) && !workspace_icon_valid(emoji) {
 			notify(app, .Error, "Enter an emoji (up to 32 Unicode characters), then apply it.")
@@ -340,6 +346,7 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
+	if w.workspace_picker.icon_colors { return }
 	if w.workspace_picker.menu_id != 0 { return }
 	if w.workspace_picker.rename_id != 0 {
 		ui.field_text(&w.rename, value)
@@ -360,6 +367,7 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if workspace_row_key(app, w, e) { return }
 	count := workspace_picker_count(w)
 	w.dirty = true
+	if p.icon_colors { workspace_icon_color_key(app, w, e); return }
 	if p.icons && workspace_icon_picker_key(w, e) { return }
 	if step := ui.list_step(e); step != 0 {
 		p.selected = (p.selected + count + step) % count
@@ -421,6 +429,7 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 }
 
 workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
+	if w.workspace_picker.icon_colors { return {} }
 	if w.workspace_picker.icons { return workspace_icon_picker_layout(w).field }
 	r, _ := workspace_picker_rect(w)
 	s := w.scale

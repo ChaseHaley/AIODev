@@ -9,6 +9,7 @@ import "core:unicode/utf8"
 Workspace_Icon :: struct {
 	preset: int,
 	emoji:  string,
+	tint:   int,
 }
 
 Workspace_Icon_Preset :: struct {
@@ -48,7 +49,7 @@ workspace_icon_set :: proc(app: ^App, workspace: ^Workspace, preset: int, emoji:
 	owned, err := strings.clone(emoji)
 	if err != nil {return false}
 	delete(workspace.icon.emoji)
-	workspace.icon = {preset, owned}
+	workspace.icon = {preset = preset, emoji = owned, tint = workspace.icon.tint}
 	mark_all_dirty(app)
 	return true
 }
@@ -62,11 +63,12 @@ workspace_icon_draw :: proc(
 	if icon.emoji != "" {
 		return ui.draw_cluster_centered(&w.ui_text, &w.list, icon.emoji, area, color, 18 * w.scale)
 	}
+	tint := workspace_icon_tint(icon.tint, color)
 	@(static, rodata)
 	presets := WORKSPACE_ICONS
 	preset := presets[clamp(icon.preset, 0, len(presets) - 1)]
 	if !w.ui_text.has_icons {
-		return ui.draw_glyph_centered(&w.ui_text, &w.list, '◇', area, color)
+		return ui.draw_glyph_centered(&w.ui_text, &w.list, '◇', area, tint)
 	}
-	return ui.draw_icon(&w.ui_text, &w.list, preset.glyph, area, color, 0.9)
+	return ui.draw_icon(&w.ui_text, &w.list, preset.glyph, area, tint, 0.9)
 }

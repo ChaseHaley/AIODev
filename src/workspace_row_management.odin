@@ -94,7 +94,7 @@ workspace_row_icon_open :: proc(app: ^App, w: ^Window, id: u32) {
 	p := &w.workspace_picker
 	workspace_row_rename_finish(app, w, false)
 	ui.field_set(&p.saved_query, ui.field_string(&p.query))
-	p.icons, p.menu_id, p.icon_id = true, 0, id
+	p.icons, p.icon_colors, p.menu_id, p.icon_id = true, false, 0, id
 	p.selected = target.icon.emoji == "" ? target.icon.preset : len(WORKSPACE_ICONS)
 	p.scroll = 0
 	ui.field_set(&p.query, target.icon.emoji)
@@ -105,7 +105,7 @@ workspace_row_icon_open :: proc(app: ^App, w: ^Window, id: u32) {
 workspace_picker_return :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	id := p.icon_id
-	p.icons, p.icon_id, p.menu_id = false, 0, 0
+	p.icons, p.icon_colors, p.icon_id, p.menu_id = false, false, 0, 0
 	ui.field_set(&p.query, ui.field_string(&p.saved_query))
 	workspace_picker_filter(app, w)
 	workspace_row_reveal(w, id)
