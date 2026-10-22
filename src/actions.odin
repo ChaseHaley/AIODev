@@ -100,31 +100,33 @@ Action :: enum u32 {
 	Workspace_7,
 	Workspace_8,
 	Workspace_9,
+	Show_Build_Info,
 }
 
 @(private)
 Action_Info :: struct {
 	name, title: string,
-	shortcuts:   []commands.Shortcut,
+	shortcuts: []commands.Shortcut,
 }
 
 @(private)
 ACTIONS :: [Action]Action_Info {
-	.New_Workspace         = {"workspace.new", "New Workspace", nil},
-	.Change_Workspace      = {"workspace.change", "Change Workspace…", nil},
-	.Rename_Workspace      = {"workspace.rename", "Rename Workspace…", nil},
-	.New_Window            = {"window.new", "New Window", {{.N, {.Control, .Shift}}}},
-	.Delete_Workspace      = {"workspace.delete", "Delete Workspace…", nil},
+	.Show_Build_Info = {"app.build_info", "Show Build Info", nil},
+	.New_Workspace = {"workspace.new", "New Workspace", nil},
+	.Change_Workspace = {"workspace.change", "Change Workspace…", nil},
+	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil},
+	.New_Window = {"window.new", "New Window", {{.N, {.Control, .Shift}}}},
+	.Delete_Workspace = {"workspace.delete", "Delete Workspace…", nil},
 	.Change_Workspace_Icon = {"workspace.change_icon", "Change Workspace Icon…", nil},
-	.Workspace_1           = {"workspace.select_1", "Select Workspace 1", nil},
-	.Workspace_2           = {"workspace.select_2", "Select Workspace 2", nil},
-	.Workspace_3           = {"workspace.select_3", "Select Workspace 3", nil},
-	.Workspace_4           = {"workspace.select_4", "Select Workspace 4", nil},
-	.Workspace_5           = {"workspace.select_5", "Select Workspace 5", nil},
-	.Workspace_6           = {"workspace.select_6", "Select Workspace 6", nil},
-	.Workspace_7           = {"workspace.select_7", "Select Workspace 7", nil},
-	.Workspace_8           = {"workspace.select_8", "Select Workspace 8", nil},
-	.Workspace_9           = {"workspace.select_9", "Select Workspace 9", nil},
+	.Workspace_1 = {"workspace.select_1", "Select Workspace 1", nil},
+	.Workspace_2 = {"workspace.select_2", "Select Workspace 2", nil},
+	.Workspace_3 = {"workspace.select_3", "Select Workspace 3", nil},
+	.Workspace_4 = {"workspace.select_4", "Select Workspace 4", nil},
+	.Workspace_5 = {"workspace.select_5", "Select Workspace 5", nil},
+	.Workspace_6 = {"workspace.select_6", "Select Workspace 6", nil},
+	.Workspace_7 = {"workspace.select_7", "Select Workspace 7", nil},
+	.Workspace_8 = {"workspace.select_8", "Select Workspace 8", nil},
+	.Workspace_9 = {"workspace.select_9", "Select Workspace 9", nil},
 	.Command_Palette       = {
 		"app.command_palette",
 		"Show Command Palette",
@@ -140,8 +142,8 @@ ACTIONS :: [Action]Action_Info {
 		"Paste",
 		{{.V, {.Control, .Shift}}, {.Insert, {.Shift}}},
 	},
-	.Select_All            = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}},
-	.Find                  = {"terminal.find", "Find in Scrollback", {{.F, {.Control, .Shift}}}},
+	.Select_All = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}},
+	.Find = {"terminal.find", "Find in Scrollback", {{.F, {.Control, .Shift}}}},
 	.Clear_Scrollback      = {
 		"terminal.clear_scrollback",
 		"Clear Scrollback",
@@ -157,43 +159,43 @@ ACTIONS :: [Action]Action_Info {
 		"Scroll Down One Page",
 		{{.Page_Down, {.Shift}}},
 	},
-	.Font_Size_Increase    = {
+	.Font_Size_Increase = {
 		"view.font_size_increase",
 		"Increase Font Size",
 		{{.Equal, {.Control}}, {.Numpad_Add, {.Control}}},
 	},
-	.Font_Size_Decrease    = {
+	.Font_Size_Decrease = {
 		"view.font_size_decrease",
 		"Decrease Font Size",
 		{{.Minus, {.Control}}, {.Numpad_Subtract, {.Control}}},
 	},
-	.Font_Size_Reset       = {
+	.Font_Size_Reset = {
 		"view.font_size_reset",
 		"Reset Font Size",
 		{{.Digit_0, {.Control}}, {.Numpad_0, {.Control}}},
 	},
-	.Open_Settings         = {"settings.open_file", "Open Settings File", nil},
-	.Settings_UI           = {"settings.open", "Settings", {{.Comma, {.Control}}}},
-	.Rename_Tab            = {"tab.rename", "Rename Tab", nil},
-	.Rename_Pane           = {"pane.rename", "Rename Pane", nil},
-	.Duplicate_Tab         = {"tab.duplicate", "Duplicate Tab", nil},
-	.Move_Tab_Left         = {"tab.move_left", "Move Tab Left", nil},
-	.Move_Tab_Right        = {"tab.move_right", "Move Tab Right", nil},
-	.Move_Tab_Start        = {"tab.move_start", "Move Selected Tabs to Start", nil},
-	.Move_Tab_End          = {"tab.move_end", "Move Selected Tabs to End", nil},
-	.Close_Other_Tabs      = {"tab.close_others", "Close Other Tabs", nil},
-	.Close_Right_Tabs      = {"tab.close_right", "Close Tabs to the Right", nil},
-	.Tab_Settings          = {"tab.settings", "Tab Settings", nil},
+	.Open_Settings = {"settings.open_file", "Open Settings File", nil},
+	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}},
+	.Rename_Tab = {"tab.rename", "Rename Tab", nil},
+	.Rename_Pane = {"pane.rename", "Rename Pane", nil},
+	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil},
+	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil},
+	.Move_Tab_Right = {"tab.move_right", "Move Tab Right", nil},
+	.Move_Tab_Start = {"tab.move_start", "Move Selected Tabs to Start", nil},
+	.Move_Tab_End = {"tab.move_end", "Move Selected Tabs to End", nil},
+	.Close_Other_Tabs = {"tab.close_others", "Close Other Tabs", nil},
+	.Close_Right_Tabs = {"tab.close_right", "Close Tabs to the Right", nil},
+	.Tab_Settings = {"tab.settings", "Tab Settings", nil},
 	.Reload_Settings       = {
 		"settings.reload",
 		"Reload Settings",
 		{{.Comma, {.Control, .Shift}}},
 	},
-	.Restart_Shell         = {"terminal.restart_shell", "Restart Shell", nil},
-	.Hide_To_Tray          = {"app.hide_to_tray", "Hide to Tray", nil},
-	.Quit                  = {"app.quit", "Quit AIODev", {{.Q, {.Control, .Shift}}}},
-	.New_Tab               = {"tab.new", "New Tab", {{.T, {.Control, .Shift}}}},
-	.Close_Pane            = {"pane.close", "Close Pane", nil},
+	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil},
+	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil},
+	.Quit = {"app.quit", "Quit AIODev", {{.Q, {.Control, .Shift}}}},
+	.New_Tab = {"tab.new", "New Tab", {{.T, {.Control, .Shift}}}},
+	.Close_Pane = {"pane.close", "Close Pane", nil},
 	.Next_Tab              = {
 		"tab.next",
 		"Next Tab",
@@ -204,25 +206,25 @@ ACTIONS :: [Action]Action_Info {
 		"Previous Tab",
 		{{.Tab, {.Control, .Shift}}, {.Arrow_Left, {.Control, .Shift}}, {.Page_Up, {.Control}}},
 	},
-	.Tab_1                 = {"tab.select_1", "Select Tab 1", {{.Digit_1, {.Alt}}}},
-	.Tab_2                 = {"tab.select_2", "Select Tab 2", {{.Digit_2, {.Alt}}}},
-	.Tab_3                 = {"tab.select_3", "Select Tab 3", {{.Digit_3, {.Alt}}}},
-	.Tab_4                 = {"tab.select_4", "Select Tab 4", {{.Digit_4, {.Alt}}}},
-	.Tab_5                 = {"tab.select_5", "Select Tab 5", {{.Digit_5, {.Alt}}}},
-	.Tab_6                 = {"tab.select_6", "Select Tab 6", {{.Digit_6, {.Alt}}}},
-	.Tab_7                 = {"tab.select_7", "Select Tab 7", {{.Digit_7, {.Alt}}}},
-	.Tab_8                 = {"tab.select_8", "Select Tab 8", {{.Digit_8, {.Alt}}}},
-	.Tab_9                 = {"tab.select_9", "Select Tab 9", nil},
-	.Split_Right           = {"pane.split_right", "Split Right", {{.O, {.Control, .Shift}}}},
-	.Split_Down            = {"pane.split_down", "Split Down", {{.E, {.Control, .Shift}}}},
-	.Focus_Left            = {"pane.focus_left", "Focus Left", {{.Arrow_Left, {.Control, .Alt}}}},
+	.Tab_1 = {"tab.select_1", "Select Tab 1", {{.Digit_1, {.Alt}}}},
+	.Tab_2 = {"tab.select_2", "Select Tab 2", {{.Digit_2, {.Alt}}}},
+	.Tab_3 = {"tab.select_3", "Select Tab 3", {{.Digit_3, {.Alt}}}},
+	.Tab_4 = {"tab.select_4", "Select Tab 4", {{.Digit_4, {.Alt}}}},
+	.Tab_5 = {"tab.select_5", "Select Tab 5", {{.Digit_5, {.Alt}}}},
+	.Tab_6 = {"tab.select_6", "Select Tab 6", {{.Digit_6, {.Alt}}}},
+	.Tab_7 = {"tab.select_7", "Select Tab 7", {{.Digit_7, {.Alt}}}},
+	.Tab_8 = {"tab.select_8", "Select Tab 8", {{.Digit_8, {.Alt}}}},
+	.Tab_9 = {"tab.select_9", "Select Tab 9", nil},
+	.Split_Right = {"pane.split_right", "Split Right", {{.O, {.Control, .Shift}}}},
+	.Split_Down = {"pane.split_down", "Split Down", {{.E, {.Control, .Shift}}}},
+	.Focus_Left = {"pane.focus_left", "Focus Left", {{.Arrow_Left, {.Control, .Alt}}}},
 	.Focus_Right           = {
 		"pane.focus_right",
 		"Focus Right",
 		{{.Arrow_Right, {.Control, .Alt}}},
 	},
-	.Focus_Up              = {"pane.focus_up", "Focus Up", {{.Arrow_Up, {.Control, .Alt}}}},
-	.Focus_Down            = {"pane.focus_down", "Focus Down", {{.Arrow_Down, {.Control, .Alt}}}},
+	.Focus_Up = {"pane.focus_up", "Focus Up", {{.Arrow_Up, {.Control, .Alt}}}},
+	.Focus_Down = {"pane.focus_down", "Focus Down", {{.Arrow_Down, {.Control, .Alt}}}},
 	.Resize_Left           = {
 		"pane.resize_left",
 		"Resize Left",
@@ -253,25 +255,25 @@ ACTIONS :: [Action]Action_Info {
 		"Focus Next Pane",
 		{{.Bracket_Right, {.Control, .Super}}},
 	},
-	.Last_Tab              = {"tab.last", "Select Last Tab", {{.Digit_9, {.Alt}}}},
-	.Close_Tab             = {"tab.close", "Close Selected Tabs", {{.W, {.Control, .Shift}}}},
-	.Split                 = {"pane.split", "Split Pane", nil},
-	.Split_Left            = {"pane.split_left", "Split Left", nil},
-	.Split_Up              = {"pane.split_up", "Split Up", nil},
-	.Zoom_Pane             = {"pane.zoom", "Toggle Pane Zoom", nil},
-	.Balance_Panes         = {"pane.balance", "Balance All Splits", nil},
-	.Swap_Left             = {"pane.swap_left", "Swap Pane Left", nil},
-	.Swap_Right            = {"pane.swap_right", "Swap Pane Right", nil},
-	.Swap_Up               = {"pane.swap_up", "Swap Pane Up", nil},
-	.Swap_Down             = {"pane.swap_down", "Swap Pane Down", nil},
-	.Swap_Previous         = {"pane.swap_previous", "Swap With Previous Pane", nil},
-	.Swap_Next             = {"pane.swap_next", "Swap With Next Pane", nil},
-	.Resize_Left_Large     = {"pane.resize_left_large", "Resize Left by 50 Pixels", nil},
-	.Resize_Right_Large    = {"pane.resize_right_large", "Resize Right by 50 Pixels", nil},
-	.Resize_Up_Large       = {"pane.resize_up_large", "Resize Up by 50 Pixels", nil},
-	.Resize_Down_Large     = {"pane.resize_down_large", "Resize Down by 50 Pixels", nil},
-	.Keep_Pane_Open        = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil},
-	.Change_Shortcut       = {"settings.change_shortcut", "Change Shortcut…", nil},
+	.Last_Tab = {"tab.last", "Select Last Tab", {{.Digit_9, {.Alt}}}},
+	.Close_Tab = {"tab.close", "Close Selected Tabs", {{.W, {.Control, .Shift}}}},
+	.Split = {"pane.split", "Split Pane", nil},
+	.Split_Left = {"pane.split_left", "Split Left", nil},
+	.Split_Up = {"pane.split_up", "Split Up", nil},
+	.Zoom_Pane = {"pane.zoom", "Toggle Pane Zoom", nil},
+	.Balance_Panes = {"pane.balance", "Balance All Splits", nil},
+	.Swap_Left = {"pane.swap_left", "Swap Pane Left", nil},
+	.Swap_Right = {"pane.swap_right", "Swap Pane Right", nil},
+	.Swap_Up = {"pane.swap_up", "Swap Pane Up", nil},
+	.Swap_Down = {"pane.swap_down", "Swap Pane Down", nil},
+	.Swap_Previous = {"pane.swap_previous", "Swap With Previous Pane", nil},
+	.Swap_Next = {"pane.swap_next", "Swap With Next Pane", nil},
+	.Resize_Left_Large = {"pane.resize_left_large", "Resize Left by 50 Pixels", nil},
+	.Resize_Right_Large = {"pane.resize_right_large", "Resize Right by 50 Pixels", nil},
+	.Resize_Up_Large = {"pane.resize_up_large", "Resize Up by 50 Pixels", nil},
+	.Resize_Down_Large = {"pane.resize_down_large", "Resize Down by 50 Pixels", nil},
+	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil},
+	.Change_Shortcut = {"settings.change_shortcut", "Change Shortcut…", nil},
 	.Follow_Theme_Colors   = {
 		"settings.follow_theme_colors",
 		"Use Theme for Shell Foreground and Background",
@@ -285,9 +287,9 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 	actions := ACTIONS
 	for info, action in actions {
 		command := commands.Command {
-			id        = commands.Command_Id(action),
-			name      = info.name,
-			title     = info.title,
+			id = commands.Command_Id(action),
+			name = info.name,
+			title = info.title,
 			shortcuts = {info.shortcuts, len(info.shortcuts)},
 		}
 		if err := commands.register(registry, command); err != .None {return err}
@@ -315,6 +317,8 @@ run_action :: proc(
 	entry := focused_session(app, w)
 	w.dirty = true
 	switch action {
+	case .Show_Build_Info:
+		show_build_info(app)
 	case .Command_Palette:
 		if palette_active(app, w) {
 			palette_close(app, w)
@@ -631,22 +635,18 @@ on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outc
 }
 
 // The find bar's match count: "3 of 17" once a match is selected.
-find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
-	if entry == nil || len(w.find.query.bytes) == 0 {
-		return ""
-	}
+find_presentation :: proc(w: ^Window, entry: ^Session_Entry) -> (label: string, enabled: bool) {
+	if entry == nil || len(w.find.query.bytes) == 0 { return "0 of 0", false }
 	s := term.search_summary(entry.session)
-	switch {
-	case s.selected >= 0:
-		return fmt.tprintf("%d of %d", s.selected + 1, s.total)
-	case s.total == 1:
-		return "1 match"
-	case s.total > 0:
-		return fmt.tprintf("%d matches", s.total)
-	case !s.complete:
-		return "Searching…"
-	}
-	return "No matches"
+	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected+1, s.total), s.total > 0 }
+	if s.total == 0 { return "0 of 0 · No matches", false }
+	return fmt.tprintf("%d of %d", s.selected+1, s.total), true
+}
+
+find_controls :: proc(w: ^Window, entry: ^Session_Entry) -> (l: ui.Find_Layout, enabled: bool) {
+	label, available := find_presentation(w, entry)
+	text := ui.text_styled(&w.ui_text, .Input)
+	return ui.find_layout(f32(w.width), w.scale, ui.text_width(&text, label)), available
 }
 
 @(private)
@@ -803,7 +803,7 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 			for &other in app.registry.items {
 				for shortcut in commands.active_shortcuts(&other) {
 					if commands.prefix_conflicts(leader, shortcut) &&
-					   applied_lines[int(other.id)] >= app.settings.leader_line &&
+						applied_lines[int(other.id)] >= app.settings.leader_line &&
 					   (winner == nil ||
 							   applied_lines[int(other.id)] > applied_lines[int(winner.id)]) {
 						winner = &other

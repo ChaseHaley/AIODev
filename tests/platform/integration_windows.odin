@@ -431,3 +431,33 @@ synthetic_mouse_moves :: proc(t: ^testing.T) {
 	for index < len(cases) && cases[index].expected == 0 { index += 1 }
 	testing.expect_value(t, index, len(cases))
 }
+
+@(test)
+resize_does_not_turn_a_stationary_cursor_into_mouse_input :: proc(t: ^testing.T) {
+	platform: p.Platform
+	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.ResizeMouse"), p.Init_Result.Primary) { return }
+	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
+	id, err := p.window_create(&platform, {hidden = true, width = 160, height = 100})
+	if !testing.expect_value(t, err, p.Error.None) { return }
+	hwnd := w.HWND(p.window_native_handle(&platform, id))
+	_, poll_error := p.poll_events(&platform)
+	if !testing.expect_value(t, poll_error, p.Error.None) { return }
+	point: w.POINT
+	if !testing.expect(t, bool(w.GetCursorPos(&point))) { return }
+	testing.expect_value(t, w.SendMessageW(hwnd, w.WM_SIZE, 0, 160 | (100 << 16)), w.LRESULT(0))
+	if !testing.expect(t, bool(w.ScreenToClient(hwnd, &point))) { return }
+	position := w.LPARAM(u32(u16(point.x)) | (u32(u16(point.y)) << 16))
+	testing.expect_value(t, w.SendMessageW(hwnd, w.WM_MOUSEMOVE, 0, position), w.LRESULT(0))
+	testing.expect_value(t, w.SendMessageW(hwnd, w.WM_MOUSEMOVE, 0, position+1), w.LRESULT(0))
+	events, final_error := p.poll_events(&platform)
+	testing.expect_value(t, final_error, p.Error.None)
+	moves := 0
+	for event in events {
+		if move, ok := event.(p.Mouse_Move_Event); ok {
+			moves += 1
+			testing.expect_value(t, move.x, point.x+1)
+			testing.expect_value(t, move.y, point.y)
+		}
+	}
+	testing.expect_value(t, moves, 1)
+}

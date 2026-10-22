@@ -55,6 +55,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Mouse_Leave_Event:
 		if w := window_find(app, e.window); w != nil {
+			w.find.hover = .None
 			w.tab_hover = -1
 			w.tab_pressed = false
 			ui.editor_hover_clear(&w.editor)
@@ -82,6 +83,9 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Capture_Lost_Event:
 		if w := window_find(app, e.window); w != nil {
+			if w.find.pointer_down || w.find.hover != .None { w.dirty = true }
+			w.find.pointer_down = false
+			w.find.pressed, w.find.hover = .None, .None
 			arrange_cancel(app, w)
 		}
 	case platform.Close_Request_Event:
@@ -360,11 +364,14 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if w.workspace_picker.open {
 		p := &w.workspace_picker
 		x, y := f32(e.x), f32(e.y)
-		if !e.pressed {p.query.dragging = false; w.header_buttons -= {e.button}; return}
+		if !e.pressed { p.query.dragging, w.rename.dragging = false, false; w.header_buttons -= {e.button}; return }
 		w.header_buttons += {e.button}
 		r, _ := workspace_picker_rect(w)
-		if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height {
-			p.open, w.dirty = false, true
+		if p.menu_id != 0 && e.button == .Left {
+			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
+		} else if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
+			workspace_row_rename_finish(app, w, false)
+			p.open, p.menu_id, w.dirty = false, 0, true
 		} else if e.button == .Left {
 			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
 		}
@@ -374,9 +381,11 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if !e.pressed {return}
 		w.header_buttons += {e.button}
 		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
-			w.tab_menu.selected = hit
-			tab_menu_choose(app, w)
-		} else {w.tab_menu.open, w.dirty = false, true}
+			if tab_menu_enabled(w, hit) {
+				w.tab_menu.selected = hit
+				tab_menu_choose(app, w)
+			}
+		} else { w.tab_menu.open, w.dirty = false, true }
 		return
 	}
 	if w.rename_open {
@@ -395,6 +404,12 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 				rename_pointer(app, w, x, true, .Shift in e.modifiers)
 			}
 		}
+		return
+	}
+	if w.find.open && w.find.pointer_down && e.button == .Left && !e.pressed {
+		entry := focused_session(app, w)
+		l, enabled := find_controls(w, entry)
+		on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, false, f32(e.x), f32(e.y)))
 		return
 	}
 	caption := ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale)
@@ -459,6 +474,14 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if settings_active(w) {editor_outcome(app, w, ui.editor_release(&w.editor))}
 		if w.selecting {selection_finish(app, w, x, y); return}
 	}
+	if w.find.open && !w.selecting {
+		entry := focused_session(app, w)
+		l, enabled := find_controls(w, entry)
+		if w.find.pointer_down || ui.find_contains(l, x, y) {
+			on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, e.pressed, x, y))
+			return
+		}
+	}
 	if y < bar.height {
 		if e.pressed {
 			if e.button == .Left && x >= 0 && x < bar.x {workspace_picker_open(app, w); return}
@@ -502,11 +525,8 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		}
 		return
 	}
-	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) {return}
-	if w.find.open && !w.selecting && ui.find_contains(f32(w.width), w.scale, x, y) {
-		return
-	}
-	if pane_header_button(app, w, e) {return}
+	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) { return }
+	if pane_header_button(app, w, e) { return }
 	if e.pressed && !w.selecting {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
 	}
@@ -533,6 +553,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	if w.preparing {return}
 	if w.workspace_picker.open {
+		if workspace_row_hover(app, w, e) { return }
 		if w.workspace_picker.query.dragging && .Left in e.buttons {
 			workspace_picker_pointer(app, w, f32(e.x), false, true)
 		} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
@@ -542,7 +563,7 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		return
 	}
 	if w.tab_menu.open {
-		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && hit != w.tab_menu.selected {
+		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); tab_menu_enabled(w, hit) && hit != w.tab_menu.selected {
 			w.tab_menu.selected, w.dirty = hit, true
 		}
 		pointer_set(app, w, .Arrow)
@@ -620,7 +641,17 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 		pointer_set(app, w, over_text ? .Text : .Arrow)
 		return
 	}
-	enabled := !w.selecting && !(w.find.open && ui.find_contains(f32(w.width), w.scale, x, y))
+	if w.find.open && !w.selecting {
+		l, available := find_controls(w, focused_session(app, w))
+		if ui.find_hover(&w.find, l, available, x, y) { w.dirty = true }
+		if ui.find_contains(l, x, y) || w.find.pointer_down {
+			split_overlay_update(w, x, y, false)
+			pane_header_pointer(w, x, y, false)
+			pointer_set(app, w, ui.find_hit(l, x, y) == .None ? .Text : .Arrow)
+			return
+		}
+	}
+	enabled := !w.selecting
 	split_overlay_update(w, x, y, enabled)
 	over_header := pane_header_pointer(w, x, y, enabled)
 	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
@@ -648,17 +679,14 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.preparing {return}
 	if w.workspace_picker.open {
 		p := &w.workspace_picker
-		p.selected = clamp(
-			p.selected - int(math.sign(e.delta_y)),
-			0,
-			workspace_picker_count(w) - 1,
-		)
+		if p.menu_id != 0 || p.rename_id != 0 { return }
+		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, workspace_picker_count(w)-1)
 		w.dirty = true
 		return
 	}
 	if w.rename_open {return}
 	if w.tab_menu.open {
-		w.tab_menu.selected = clamp(w.tab_menu.selected - int(e.delta_y), 0, w.tab_menu.count - 1)
+		tab_menu_step(w, -int(math.sign(e.delta_y)), false)
 		w.dirty = true
 		return
 	}
@@ -690,6 +718,8 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
 	if !focused {
+		w.find.pointer_down = false
+		w.find.pressed, w.find.hover = .None, .None
 		icon_input := w.workspace_picker.open && w.workspace_picker.icons
 		window_overlays_cancel(app, w)
 		// The OS emoji picker may take focus before delivering its text to the icon field.

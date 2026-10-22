@@ -10,20 +10,14 @@ import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
 
-@(private)
-PALETTE_MAX_ROWS :: 8
-@(private)
-PALETTE_WIDTH :: 560
-@(private)
-PALETTE_INPUT_HEIGHT :: 64
-@(private)
-PALETTE_ROW_HEIGHT :: 42
-@(private)
-PALETTE_PADDING :: 8
-@(private)
-PALETTE_RADIUS :: 10
-@(private)
-PALETTE_TEXT_INSET :: 14
+@(private) PALETTE_MAX_ROWS :: 8
+@(private) PALETTE_WIDTH :: 560
+@(private) PALETTE_INPUT_HEIGHT :: 64
+@(private) PALETTE_ROW_HEIGHT :: 42
+@(private) PALETTE_PADDING :: 8
+@(private) PALETTE_RADIUS :: 10
+@(private) PALETTE_TEXT_INSET :: 14
+@(private) PALETTE_SETTING_SUFFIX :: " SETTING"
 
 Outcome :: enum {
 	None,
@@ -40,29 +34,32 @@ Palette_Setting :: struct {
 
 // A command result, or a setting result when command is nil.
 Palette_Result :: struct {
-	command:     ^commands.Command,
-	setting:     int,
-	score:       f64,
-	positions:   []int,
+	command: ^commands.Command,
+	setting: int,
+	score: f64,
+	positions: []int,
 	title_match: bool,
 }
 
 Palette :: struct {
-	open:             bool,
-	motion:           Motion,
-	query:            Text_Field,
+	open: bool,
+	motion: Motion,
+	query: Text_Field,
 	selected, scroll: int,
-	results:          [dynamic]Palette_Result,
-	positions:        [dynamic]int,
-	settings:         []Palette_Setting,
+	visible_rows: int,
+	results: [dynamic]Palette_Result,
+	positions: [dynamic]int,
+	haystack: [dynamic]u8,
+	settings: []Palette_Setting,
 	// The setting key of the last Open_Setting outcome.
-	chosen:           string,
-	scratch:          ^fuzzy.Scratch,
+	chosen: string,
+	scratch: ^fuzzy.Scratch,
 }
 
 Palette_Layout :: struct {
 	panel, input, list: render.Rect,
-	row_height:         f32,
+	row_height: f32,
+	rows: int,
 }
 
 @(require_results)
@@ -75,7 +72,14 @@ palette_init :: proc(
 	p.results = make([dynamic]Palette_Result, allocator)
 	p.positions = make([dynamic]int, allocator)
 	p.settings = settings
+	p.visible_rows = PALETTE_MAX_ROWS
 	err: runtime.Allocator_Error
+	capacity := 0
+	for s in settings {
+		capacity = max(capacity, len(s.group)+len(PALETTE_SETTING_SUFFIX)+2+len(s.title))
+	}
+	p.haystack, err = make([dynamic]u8, 0, capacity, allocator)
+	if err != nil { return err }
 	p.scratch, err = new(fuzzy.Scratch, allocator)
 	return err
 }
@@ -85,6 +89,7 @@ palette_destroy :: proc(p: ^Palette) {
 	delete(p.query.bytes)
 	delete(p.results)
 	delete(p.positions)
+	delete(p.haystack)
 	p^ = {}
 }
 
@@ -135,8 +140,36 @@ palette_result_title :: proc(p: ^Palette, r: Palette_Result) -> string {
 	return r.command != nil ? r.command.title : p.settings[r.setting].title
 }
 
-// Fuzzy-matches the title and the group, keeping the entry when either matches. Title matches carry
-// highlights and rank ahead of entries found only through their group.
+@(private)
+setting_header_match :: proc(p: ^Palette, setting: int, query: string, highlights: []int) -> (
+	match: fuzzy.Result, positions: []int,
+) {
+	s := p.settings[setting]
+	clear(&p.haystack)
+	append(&p.haystack, s.group)
+	append(&p.haystack, PALETTE_SETTING_SUFFIX)
+	// The displayed singular header is also a subsequence of this plural alias.
+	append(&p.haystack, 's')
+	by_header, header_error := fuzzy.score(query, string(p.haystack[:]), p.scratch)
+	if header_error != .None { return }
+	if by_header.matched { return by_header, nil }
+	append(&p.haystack, ' ')
+	title_start := len(p.haystack)
+	append(&p.haystack, s.title)
+	combined, combined_error := fuzzy.match_positions(query, string(p.haystack[:]), highlights, p.scratch)
+	if combined_error != .None || !combined.matched { return }
+	// The renderer expects UTF-8 byte offsets into the title, never the header.
+	count := 0
+	for pos in highlights {
+		if pos >= title_start {
+			highlights[count] = pos-title_start
+			count += 1
+		}
+	}
+	return combined, highlights[:count]
+}
+
+// Title matches rank first. Setting headers extend group matching, with title offsets kept separate.
 @(private)
 consider :: proc(
 	p: ^Palette,
@@ -147,26 +180,26 @@ consider :: proc(
 ) {
 	by_title, title_error := fuzzy.score(query, title, p.scratch)
 	by_group, group_error := fuzzy.score(query, group, p.scratch)
-	if title_error != .None || group_error != .None {return}
-	if !by_title.matched && !by_group.matched {return}
-	result := Palette_Result {
-		command = command,
-		setting = setting,
-		score   = by_group.score,
-	}
+	if title_error != .None || group_error != .None { return }
+	start := len(p.results)*width
+	highlights := p.positions[start:start+width]
+	result := Palette_Result{command = command, setting = setting, score = by_group.score}
 	if by_title.matched {
-		start := len(p.results) * width
-		highlights := p.positions[start:start + width]
 		if _, err := fuzzy.match_positions(query, title, highlights, p.scratch); err == .None {
 			result.positions = highlights
 		}
 		result.score, result.title_match = by_title.score, true
+	} else if !by_group.matched {
+		if command != nil { return }
+		by_header, positions := setting_header_match(p, setting, query, highlights)
+		if !by_header.matched { return }
+		result.score, result.positions = by_header.score, positions
 	}
 	append(&p.results, result)
 }
 
 // With an empty query, every enabled command in registry order; otherwise commands and settings whose
-// title or group fuzzy-matches the query.
+// title, group or setting header fuzzy-matches the query.
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
@@ -203,10 +236,13 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 
 @(private)
 keep_selection_visible :: proc(p: ^Palette) {
+	rows := max(1, p.visible_rows)
+	p.selected = clamp(p.selected, 0, max(0, len(p.results)-1))
+	p.scroll = clamp(p.scroll, 0, max(0, len(p.results)-rows))
 	if p.selected < p.scroll {
 		p.scroll = p.selected
-	} else if p.selected >= p.scroll + PALETTE_MAX_ROWS {
-		p.scroll = p.selected - PALETTE_MAX_ROWS + 1
+	} else if p.selected >= p.scroll + rows {
+		p.scroll = p.selected - rows + 1
 	}
 }
 
@@ -222,7 +258,7 @@ move :: proc(p: ^Palette, delta: int) -> Outcome {
 
 @(private)
 run :: proc(p: ^Palette, index: int) -> (Outcome, commands.Command_Id) {
-	if index < 0 || index >= len(p.results) {
+	if p.visible_rows == 0 || index < 0 || index >= len(p.results) {
 		return .None, 0
 	}
 	result := p.results[index]
@@ -269,9 +305,9 @@ palette_key :: proc(
 	case .Enter, .Numpad_Enter:
 		return run(p, p.selected)
 	case .Page_Up:
-		return move(p, -PALETTE_MAX_ROWS), 0
+		return move(p, -max(1, p.visible_rows)), 0
 	case .Page_Down:
-		return move(p, PALETTE_MAX_ROWS), 0
+		return move(p, max(1, p.visible_rows)), 0
 	case .Home:
 		if !shift {return move(p, -len(p.results)), 0}
 	case .End:
@@ -298,28 +334,41 @@ palette_cut :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	return palette_text(p, registry, "")
 }
 
-palette_layout :: proc(p: ^Palette, width, height, scale: f32) -> Palette_Layout {
-	panel_width := min(PALETTE_WIDTH * scale, width - 32 * scale)
-	rows := max(1, min(len(p.results), PALETTE_MAX_ROWS))
+palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) -> Palette_Layout {
+	width, height := max(0, viewport_width), max(0, viewport_height)
+	scale := viewport_scale > 0 ? viewport_scale : 1
+	border := min(scale, width/2, height/2)
+	panel_width := min(PALETTE_WIDTH * scale, width - 2 * min(16 * scale, width/4))
 	row_height := PALETTE_ROW_HEIGHT * scale
 	padding := PALETTE_PADDING * scale
 	input_height := PALETTE_INPUT_HEIGHT * scale
-	panel := render.Rect {
-		x      = (width - panel_width) / 2,
-		y      = max(24 * scale, height * 0.12),
-		width  = panel_width,
-		height = input_height + 1 + 2 * padding + f32(rows) * row_height,
+	full_height := input_height + 1 + 2 * padding + PALETTE_MAX_ROWS * row_height
+	top := clamp(max(24 * scale, height * 0.12), border, max(border, height-border-full_height))
+	available := max(0, height-border-top)
+	p.visible_rows = clamp(int(max(0, available-input_height-1-2*padding) / row_height), 0, PALETTE_MAX_ROWS)
+	keep_selection_visible(p)
+	rows := min(max(1, len(p.results)), p.visible_rows)
+	input_height = min(input_height, available)
+	separator := min(f32(1), available-input_height)
+	padding = min(padding, max(0, available-input_height-separator)/2)
+	list_padding := min(padding, panel_width/2)
+	panel := render.Rect{
+		x = (width - panel_width) / 2,
+		y = top,
+		width = panel_width,
+		height = input_height + separator + 2 * padding + f32(rows) * row_height,
 	}
 	return {
 		panel = panel,
 		input = {panel.x, panel.y, panel.width, input_height},
 		list = {
-			panel.x + padding,
-			panel.y + input_height + 1 + padding,
-			panel.width - 2 * padding,
+			panel.x + list_padding,
+			panel.y + input_height + separator + padding,
+			panel.width - 2 * list_padding,
 			f32(rows) * row_height,
 		},
 		row_height = row_height,
+		rows = rows,
 	}
 }
 
@@ -406,13 +455,14 @@ palette_input_release :: proc(p: ^Palette) -> bool {
 }
 
 palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
-	limit := max(0, len(p.results) - PALETTE_MAX_ROWS)
+	if p.visible_rows == 0 || len(p.results) == 0 { return .None }
+	limit := max(0, len(p.results) - p.visible_rows)
 	scroll := clamp(p.scroll - rows, 0, limit)
 	if scroll == p.scroll {
 		return .None
 	}
 	p.scroll = scroll
-	p.selected = clamp(p.selected, p.scroll, p.scroll + PALETTE_MAX_ROWS - 1)
+	p.selected = clamp(p.selected, p.scroll, min(len(p.results), p.scroll + p.visible_rows) - 1)
 	return .Changed
 }
 
@@ -422,6 +472,7 @@ palette_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, height, scale: f32,
+	opacity: f32 = 1, rise: f32 = 0,
 ) -> glyphs.Result {
 	l := palette_layout(p, width, height, scale)
 	panel := l.panel
@@ -429,6 +480,9 @@ palette_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
+	layer_start, rect_start, glyph_start := len(list.layers), len(list.rects), len(list.glyphs)
+	bounded_rise := clamp(rise, 0, max(0, height-scale-panel.y-panel.height))
+	defer fade_draw(list, layer_start, rect_start, glyph_start, opacity, bounded_rise)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
 	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
 	border := render.Rect {
@@ -446,30 +500,19 @@ palette_draw :: proc(
 	for r in rects {
 		draw_rect(list, r)
 	}
+	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
 	input_text := text_styled(text, .Input)
 	label_text := text_styled(text, .Label)
-	if result := draw_text(
-		&label_text,
-		list,
-		"COMMANDS AND SETTINGS",
-		l.input.x + padding,
-		l.input.y + 19 * scale,
-		theme.faint,
-	); result != .Ok {return result}
-	if result := field_draw(
-		&p.query,
-		list,
-		&input_text,
-		theme,
-		l.input.x + padding,
-		l.input.y + 43 * scale,
-		l.input.width - 2 * padding,
-		true,
-		"Type a command or setting",
-		theme.text,
-		max(1, 1.5 * scale),
-	); result != .Ok {return result}
+	if l.input.width > 2*padding {
+		if result := draw_text(&label_text, list, "COMMANDS AND SETTINGS", l.input.x+padding, l.input.y+19*scale,
+			theme.faint); result != .Ok { return result }
+		if result := field_draw(&p.query, list, &input_text, theme, l.input.x + padding, l.input.y + 43*scale,
+			l.input.width - 2*padding, true, "Type a command or setting", theme.text, max(1, 1.5 * scale));
+			result != .Ok { return result }
+	}
+	if l.rows == 0 || l.list.width <= 0 { return .Ok }
+	if render.push_layer(list, l.list) != .None { return .Ok }
 	if len(p.results) == 0 {
 		row_baseline := l.list.y + (l.row_height - text.line_height) / 2 + text.ascent
 		return draw_text(
@@ -482,7 +525,7 @@ palette_draw :: proc(
 		)
 	}
 	label_buffer: [64]u8
-	for index in p.scroll ..< min(len(p.results), p.scroll + PALETTE_MAX_ROWS) {
+	for index in p.scroll ..< min(len(p.results), p.scroll + l.rows) {
 		item := p.results[index]
 		row := render.Rect {
 			l.list.x,
@@ -497,16 +540,11 @@ palette_draw :: proc(
 		category :=
 			item.command != nil ? command_category(item.command.name) : p.settings[item.setting].group
 		category = strings.to_upper(category, context.temp_allocator)
-		if item.command ==
-		   nil {category = strings.concatenate({category, " SETTING"}, context.temp_allocator)}
-		if result := draw_text(
-			&label_text,
-			list,
-			category,
-			row.x + padding,
-			row.y + 13 * scale,
-			theme.faint,
-		); result != .Ok {return result}
+		if item.command == nil {
+			category = strings.concatenate({category, PALETTE_SETTING_SUFFIX}, context.temp_allocator)
+		}
+		if result := draw_text(&label_text, list, category, row.x+padding, row.y+13*scale, theme.faint);
+			result != .Ok { return result }
 		label_width: f32
 		if item.command != nil {
 			if shortcuts := commands.active_shortcuts(item.command); len(shortcuts) > 0 {

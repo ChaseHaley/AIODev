@@ -132,6 +132,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.sessions), 2)
 
 	first = state.windows[1]
+	source_workspace_id := first.workspace.id
 	source := app.selected_tab(first.workspace)
 	destination := app.selected_tab(second_workspace)
 	app.pane_split(&state, first, .Right)
@@ -152,7 +153,8 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 		source.tree.focus, destination.tree.focus, .Down, true)) { return }
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect(t, state.windows[0] == second)
-	testing.expect_value(t, len(state.workspaces[0].tabs), 0)
+	testing.expect(t, app.workspace_find(&state, source_workspace_id) == nil)
+	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, len(second.panes), 3)
 	testing.expect_value(t, len(state.sessions), 3)
 	testing.expect_value(t, term.process_id(first_session), first_pid)

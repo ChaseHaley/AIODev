@@ -33,31 +33,30 @@ _ :: ui
 _ :: settings
 
 AIO_CONTROL :: #config(AIO_CONTROL, false)
-AIO_BUILD_ID :: #config(AIO_BUILD_ID, "unknown")
 
 when AIO_CONTROL {
 	Verify :: struct {
-		server:                            ^control.Server,
-		pending:                           ^control.Message,
-		started, changed:                  time.Tick,
+		server: ^control.Server,
+		pending: ^control.Message,
+		started, changed: time.Tick,
 		generation, frames, request_frame: u64,
-		session_id:                        u32,
-		phase:                             Verify_Phase,
-		needs_frame, presented:            bool,
-		quit_id:                           u64,
-		quit_started:                      time.Tick,
-		before:                            term.Snapshot,
-		before_state:                      []control.State_Entry,
-		presents:                          [dynamic]Verify_Present,
-		mouse_window:                      platform.Window_Id,
-		target_window:                     platform.Window_Id,
-		buttons:                           input.Mouse_Buttons,
+		session_id: u32,
+		phase: Verify_Phase,
+		needs_frame, presented: bool,
+		quit_id: u64,
+		quit_started: time.Tick,
+		before: term.Snapshot,
+		before_state: []control.State_Entry,
+		presents: [dynamic]Verify_Present,
+		mouse_window: platform.Window_Id,
+		target_window: platform.Window_Id,
+		buttons: input.Mouse_Buttons,
 	}
 
 	Verify_Present :: struct {
-		id:      platform.Window_Id,
+		id: platform.Window_Id,
 		surface: ^render.Surface,
-		count:   u32,
+		count: u32,
 	}
 
 	Verify_Phase :: enum {
@@ -251,6 +250,12 @@ when AIO_CONTROL {
 		owns_palette := w != nil && app.palette_window == w.id
 		item := ""
 		p := &app.palette
+		palette_layout: ui.Palette_Layout
+		if owns_palette {
+			// Observing geometry must not repair selection or scroll before the assertion reads them.
+			measured := p^
+			palette_layout = ui.palette_layout(&measured, f32(w.width), f32(w.height), w.scale)
+		}
 		if owns_palette && p.selected >= 0 && p.selected < len(p.results) {
 			item = ui.palette_result_name(p, p.results[p.selected])
 		}
@@ -259,6 +264,7 @@ when AIO_CONTROL {
 			{"app.pid", fmt.tprintf("%d", os.get_pid())},
 			{"app.app", app.app_id},
 			{"app.build", AIO_BUILD_ID},
+			{"app.build_kind", AIO_BUILD_KIND},
 			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
 			{"app.settings", app.settings_path},
 			{"app.log", app.log_path},
@@ -268,8 +274,14 @@ when AIO_CONTROL {
 			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
 			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
 			{"palette.selected", fmt.tprintf("%d", owns_palette ? p.selected : 0)},
-			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)},
-			{"palette.item", item},
+			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)}, {"palette.item", item},
+			{"palette.scroll", fmt.tprintf("%d", owns_palette ? p.scroll : 0)},
+			{"palette.rows", fmt.tprintf("%d", palette_layout.rows)},
+			{"palette.row_height", fmt.tprintf("%g", palette_layout.row_height)},
+			{"palette.panel", fmt.tprintf("%g,%g,%g,%g", palette_layout.panel.x, palette_layout.panel.y,
+				palette_layout.panel.width, palette_layout.panel.height)},
+			{"palette.list", fmt.tprintf("%g,%g,%g,%g", palette_layout.list.x, palette_layout.list.y,
+				palette_layout.list.width, palette_layout.list.height)},
 			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
 			{
 				"theme.name",
@@ -405,18 +417,30 @@ when AIO_CONTROL {
 				{"workspace.picker", fmt.tprintf("%t", w.workspace_picker.open)},
 				{"workspace.icon.preset", fmt.tprintf("%d", w.workspace.icon.preset)},
 				{"workspace.icon.emoji", w.workspace.icon.emoji},
+				{"workspace.icon.tint", fmt.tprintf("%d", w.workspace.icon.tint)},
+				{"workspace.picker.colors", fmt.tprintf("%t", w.workspace_picker.icon_colors)},
+				{"workspace.picker.color_button", verify_workspace_rect(workspace_icon_color_button(w))},
 				{"workspace.picker.icons", fmt.tprintf("%t", w.workspace_picker.icons)},
 				{"workspace.picker.selected", fmt.tprintf("%d", w.workspace_picker.selected)},
 				{"workspace.picker.count", fmt.tprintf("%d", workspace_picker_count(w))},
 				{"workspace.picker.query", ui.field_string(&w.workspace_picker.query)},
 				{"workspace.picker.rect", verify_workspace_rect(picker_rect)},
 				{"workspace.picker.field", verify_workspace_rect(workspace_picker_field_rect(w))},
-				{
-					"workspace.picker.row",
-					verify_workspace_rect(
-						workspace_picker_row_rect(w, w.workspace_picker.selected),
-					),
-				},
+				{"workspace.picker.row", verify_workspace_rect(workspace_picker_row_rect(w, w.workspace_picker.selected))},
+				{"workspace.picker.menu_target", fmt.tprintf("%d", w.workspace_picker.menu_id)},
+				{"workspace.picker.menu_selected", fmt.tprintf("%d", w.workspace_picker.menu_selected)},
+				{"workspace.picker.window_enabled", fmt.tprintf("%t", workspace_row_window_enabled(app, w,
+					w.workspace_picker.menu_id))},
+				{"workspace.picker.window_title", workspace_row_window_title(app, w.workspace_picker.menu_id)},
+				{"workspace.picker.menu_button", verify_workspace_rect(workspace_picker_menu_button_rect(w,
+					w.workspace_picker.selected))},
+				{"workspace.picker.menu_item", verify_workspace_rect(workspace_row_menu_item_rect(w,
+					w.workspace_picker.menu_selected))},
+				{"workspace.picker.rename_target", fmt.tprintf("%d", w.workspace_picker.rename_id)},
+				{"workspace.picker.rename_value", ui.field_string(&w.rename)},
+				{"workspace.picker.rename_field", verify_workspace_rect(workspace_row_rename_field_rect(w))},
+				{"workspace.picker.rename_error", fmt.tprintf("%t", w.workspace_picker.rename_error)},
+				{"workspace.picker.icon_target", fmt.tprintf("%d", w.workspace_picker.icon_id)},
 				{"window.preparing", fmt.tprintf("%t", w.preparing)},
 				{"window.preview_visible", fmt.tprintf("%t", w.preview_visible)},
 				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
@@ -429,8 +453,20 @@ when AIO_CONTROL {
 				{"find.open", fmt.tprintf("%t", w.find.open)},
 				{"find.query", ui.field_string(&w.find.query)},
 				{"find.matches", find_status(w, entry)},
+				{"find.count", verify_find_count(w, entry)},
+				{"find.older", verify_find_rect(w, entry, true)},
+				{"find.newer", verify_find_rect(w, entry, false)},
 			}
-			if _, err := append(&entries, ..window[:]); err != nil {return nil, .Out_Of_Memory}
+			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
+			for i in 0..<w.tab_menu.count {
+				row := [?]control.State_Entry{
+					{fmt.tprintf("tab_menu.row.%d.label", i+1), tab_menu_label(w, i)},
+					{fmt.tprintf("tab_menu.row.%d.separator", i+1), fmt.tprintf("%t", w.tab_menu.separators[i])},
+					{fmt.tprintf("tab_menu.row.%d.enabled", i+1), fmt.tprintf("%t", tab_menu_enabled(w, i))},
+					{fmt.tprintf("tab_menu.row.%d.rect", i+1), verify_workspace_rect(tab_menu_row_rect(w, i))},
+				}
+				if _, err := append(&entries, ..row[:]); err != nil { return nil, .Out_Of_Memory }
+			}
 		} else {
 			hidden := [?]control.State_Entry {
 				{"window.id", "0"},
@@ -626,6 +662,30 @@ when AIO_CONTROL {
 			}
 		}
 		return entries[:], .None
+	}
+
+	verify_find_count :: proc(w: ^Window, entry: ^Session_Entry) -> string {
+		label, _ := find_presentation(w, entry)
+		return label
+	}
+
+	// Retain the original matches field for existing control journeys.
+	find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
+		if entry == nil || len(w.find.query.bytes) == 0 { return "" }
+		s := term.search_summary(entry.session)
+		switch {
+		case s.selected >= 0: return fmt.tprintf("%d of %d", s.selected+1, s.total)
+		case s.total == 1: return "1 match"
+		case s.total > 0: return fmt.tprintf("%d matches", s.total)
+		case !s.complete: return "Searching…"
+		}
+		return "No matches"
+	}
+
+	verify_find_rect :: proc(w: ^Window, entry: ^Session_Entry, older: bool) -> string {
+		if !w.find.open { return "" }
+		l, _ := find_controls(w, entry)
+		return verify_workspace_rect(older ? l.older : l.newer)
 	}
 
 	verify_workspace_rect :: proc(r: render.Rect) -> string {

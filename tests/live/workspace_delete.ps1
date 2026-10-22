@@ -36,7 +36,9 @@ function Shot([string] $Label) {
 function Shell-Process([string] $Label) {
     Invoke-Aio wait text 'PS ' | Out-Null
     $path = "$directory/pid-$Label.txt"
-    Invoke-Aio run "Set-Content -LiteralPath '$path' -Value `$PID" | Out-Null
+    $quotedPath = $path.Replace("'", "''")
+    Invoke-Aio run "Set-Content -LiteralPath '$quotedPath' -Value `$PID; Write-Output ('WORKSPACE_PID_' + '$Label')" | Out-Null
+    Invoke-Aio wait text "WORKSPACE_PID_$Label" | Out-Null
     $p = [Diagnostics.Process]::GetProcessById([int](Get-Content -LiteralPath $path))
     $null = $p.Handle
     $processes.Add($p)
@@ -66,7 +68,7 @@ function Confirm-Point([string] $Button) {
     $y = [Math]::Max(24*$scale,$height*0.22)+119*$scale
     return "$([int]$x),$([int]$y)"
 }
-function Row-X([string] $Query) {
+function Row-Menu-Delete([string] $Query) {
     Invoke-Aio command workspace.change
     Invoke-Aio type $Query
     $r = (Read-State)['workspace.picker.row'] -split ','
@@ -74,6 +76,7 @@ function Row-X([string] $Query) {
     $point = "$([int]([double]$r[0]+[double]$r[2]-18*$scale)),$([int]([double]$r[1]+17*$scale))"
     Invoke-Aio mouse move $point --px
     Invoke-Aio mouse click $point --px
+    Invoke-Aio key End Enter
     Invoke-Aio expect state confirm.open=true
 }
 Add-Type -TypeDefinition @"
@@ -129,6 +132,8 @@ try {
     Invoke-Aio command workspace.rename
     Invoke-Aio type 'Disposable tabs and panes'
     Invoke-Aio key Enter
+    Invoke-Aio key Esc
+    Invoke-Aio expect state workspace.picker=false
     $one = Shell-Process one
     Invoke-Aio command pane.split_right
     $two = Shell-Process two
@@ -178,7 +183,7 @@ try {
     Invoke-Aio command workspace.new
     $unrelated = Shell-Process unrelated
     Invoke-Aio run '$global:deleteMarker = "UNRELATED_" + "SURVIVED"'
-    Row-X 'Disposable tabs and panes'
+    Row-Menu-Delete 'Disposable tabs and panes'
     Invoke-Aio expect state confirm.workspace=1
     Shot 'hidden-row-x-confirm'
     Invoke-Aio key Esc
@@ -239,7 +244,7 @@ try {
     Invoke-Aio expect state sessions.count=4
     Assert-Alive @($one,$two,$three) ordinary-window-close
     Invoke-Aio window select $firstWindow
-    Row-X 'Disposable tabs and panes'
+    Row-Menu-Delete 'Disposable tabs and panes'
     Invoke-Aio expect state 'confirm.body=Close 3 tabs (4 panes); stop 3 sessions.'
     Shot 'hidden-delete-confirm'
     Invoke-Aio mouse click (Confirm-Point accept) --px
@@ -250,13 +255,12 @@ try {
     Assert-Alive @($replacement) hidden-unrelated
     Invoke-Aio command workspace.change
     Invoke-Aio type 'Disposable tabs and panes'
-    Invoke-Aio expect state workspace.picker.count=5
+    Invoke-Aio expect state workspace.picker.count=2
     Invoke-Aio key Esc
     foreach ($dpi in @(96,144)) {
         Invoke-Aio dpi $dpi
         Invoke-Aio command workspace.change
-        # One workspace row, New, Rename, Icon, Delete, New Window.
-        Invoke-Aio key Down Down Down Down Enter
+        Invoke-Aio key Right End Enter
         Invoke-Aio expect state confirm.open=true
         Invoke-Aio expect state confirm.workspace=4
         Shot "last-dropdown-confirm-$dpi"

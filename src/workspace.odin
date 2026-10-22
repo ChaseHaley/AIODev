@@ -11,21 +11,21 @@ import "core:slice"
 import "core:strings"
 
 Tab :: struct {
-	id:     u32,
+	id: u32,
 	marked: bool,
-	tree:   layout.Layout,
-	title:  string,
-	name:   string,
+	tree: layout.Layout,
+	title: string,
+	name: string,
 }
 
 Workspace :: struct {
-	provisional:      bool, // A tear-off preview borrows a runtime until the drop commits.
-	id:               u32,
-	name:             string,
-	icon:             Workspace_Icon,
-	tabs:             [dynamic]^Tab,
-	selected:         int,
-	next_tab_id:      u32,
+	provisional: bool, // A tear-off preview borrows a runtime until the drop commits.
+	id: u32,
+	name: string,
+	icon: Workspace_Icon,
+	tabs: [dynamic]^Tab,
+	selected: int,
+	next_tab_id: u32,
 	selection_anchor: u32,
 }
 
@@ -224,6 +224,7 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 		for current, index in source_workspace.tabs {
 			if current == source {workspace_close_tab(app, source_workspace, index); break}
 		}
+		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
 	} else if source_workspace != w.workspace {
 		if owner := window_for_workspace(app, source_workspace); owner != nil {
 			window_relayout(app, owner)
@@ -278,6 +279,7 @@ pane_transfer :: proc(
 		for tab, index in source_workspace.tabs {
 			if tab == source {workspace_close_tab(app, source_workspace, index); break}
 		}
+		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
 	} else {
 		for window in app.windows {
 			if window == w || window.workspace != source_workspace {continue}

@@ -66,7 +66,7 @@ try {
     Shot 'dropdown-divider'
     Invoke-Aio key Esc
     Invoke-Aio command workspace.change_icon
-    Invoke-Aio key Down Enter
+    Invoke-Aio key Right Enter
     Invoke-Aio expect state workspace.icon.preset=1
     Invoke-Aio key Esc
     Invoke-Aio command workspace.change_icon
@@ -113,6 +113,7 @@ try {
     $deletePoint = "$([int]($hiddenRow[0]+$hiddenRow[2]-18)), $([int]($hiddenRow[1]+17))" -replace ' ',''
     Invoke-Aio mouse move $deletePoint --px
     Invoke-Aio mouse click $deletePoint --px
+    Invoke-Aio key End Enter
     Invoke-Aio expect state "confirm.workspace=$firstId"
     Shot 'delete-hidden-confirm'
     Invoke-Aio key Esc
@@ -121,8 +122,7 @@ try {
     Invoke-Aio mouse click "$([int]$size[0]-5),$([int]$size[1]-5)" --px
     Invoke-Aio expect state workspace.picker=false
     Invoke-Aio command workspace.change
-    # Two workspace rows, then New, Rename, Icon, Delete, New Window.
-    Invoke-Aio key Ctrl+N Ctrl+N Ctrl+N Ctrl+N Enter
+    Invoke-Aio key Right End Enter
     Invoke-Aio expect state confirm.open=true
     Invoke-Aio expect state "confirm.workspace=$secondId"
     Shot 'delete-current-confirm'

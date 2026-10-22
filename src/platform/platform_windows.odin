@@ -1128,6 +1128,13 @@ window_proc :: proc "system" (
 		}
 		return 0
 	case w.WM_SIZE:
+		// Resizing beneath a stationary cursor can synthesize WM_MOUSEMOVE after WM_MOUSELEAVE.
+		point: w.POINT
+		if os_ok(w.GetCursorPos(&point), "GetCursorPos(resize)") &&
+		   os_ok(w.ScreenToClient(hwnd, &point), "ScreenToClient(resize)") {
+			window.previous_move.x, window.previous_move.y = point.x, point.y
+			window.has_previous_move = true
+		}
 		if window.id != 0 {
 			enqueue(
 				p,

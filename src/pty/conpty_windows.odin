@@ -57,10 +57,12 @@ conpty_load :: proc() {
 		path[n + i] = u16(c)
 	}
 	path[n + len("conpty.dll")] = 0
-	module := w.LoadLibraryW(cstring16(&path[0]))
+	// A full module path alone does not restrict its dependencies: exclude the shell's CWD/PATH.
+	module := w.LoadLibraryExW(cstring16(&path[0]), nil,
+		{.LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, .LOAD_LIBRARY_SEARCH_SYSTEM32})
 	if module == nil {
 		log.warnf(
-			"pty: conpty.dll is not beside the executable (error %d); using the system ConPTY",
+			"pty: loading bundled conpty.dll failed (error %d); using the system ConPTY",
 			w.GetLastError(),
 		)
 		return
@@ -70,7 +72,7 @@ conpty_load :: proc() {
 	close := w.GetProcAddress(module, "ConptyClosePseudoConsole")
 	if create == nil || resize == nil || close == nil {
 		log.warn("pty: conpty.dll lacks the ConPTY entry points; using the system ConPTY")
-		w.FreeLibrary(module)
+		if !bool(w.FreeLibrary(module)) {log.errorf("pty: FreeLibrary failed: %v", w.GetLastError())}
 		return
 	}
 	conpty_api = {

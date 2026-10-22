@@ -21,79 +21,79 @@ AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
 FRAME_WAIT_MS :: 100
 
 Pane_View :: struct {
-	content:                              layout.Content,
-	view:                                 term_view.View,
-	cache:                                render.Draw_List,
-	valid:                                bool,
+	content: layout.Content,
+	view: term_view.View,
+	cache: render.Draw_List,
+	valid: bool,
 	generation, atlas_generation, builds: u64,
-	style:                                term_view.Style,
-	frame:                                term_view.Frame,
-	header_controls:                      [4]ui.Control_Motion,
-	header_hover, header_pressed:         ui.Header_Action,
+	style: term_view.Style,
+	frame: term_view.Frame,
+	header_controls: [4]ui.Control_Motion,
+	header_hover, header_pressed: ui.Header_Action,
 }
 
 Window :: struct {
-	id:                                                           platform.Window_Id,
-	surface:                                                      ^render.Surface,
-	ui_text:                                                      ui.Text,
-	workspace:                                                    ^Workspace,
-	tree:                                                         ^layout.Layout,
-	dividers:                                                     [dynamic]layout.Divider,
-	dragging:                                                     Divider_Drag,
-	divider_click_node:                                           layout.Node_Id,
-	divider_click_ns:                                             i64,
-	pane_drag:                                                    Pane_Drag,
-	tab_drag:                                                     Tab_Drag,
-	tab_positions:                                                [dynamic]ui.Motion,
+	id: platform.Window_Id,
+	surface: ^render.Surface,
+	ui_text: ui.Text,
+	workspace: ^Workspace,
+	tree: ^layout.Layout,
+	dividers: [dynamic]layout.Divider,
+	dragging: Divider_Drag,
+	divider_click_node: layout.Node_Id,
+	divider_click_ns: i64,
+	pane_drag: Pane_Drag,
+	tab_drag: Tab_Drag,
+	tab_positions: [dynamic]ui.Motion,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
-	split_overlay:                                                bool,
-	panes:                                                        [dynamic]layout.Pane_Rect,
-	views:                                                        [dynamic]Pane_View,
-	list:                                                         render.Draw_List,
-	width, height:                                                i32,
-	header_height:                                                f32,
-	header_buttons:                                               input.Mouse_Buttons,
-	scale:                                                        f32,
-	metrics:                                                      term_view.Metrics,
-	focused, dirty:                                               bool,
-	preparing, preview_visible:                                   bool,
-	generation:                                                   u64,
-	selecting:                                                    bool,
+	split_overlay: bool,
+	panes: [dynamic]layout.Pane_Rect,
+	views: [dynamic]Pane_View,
+	list: render.Draw_List,
+	width, height: i32,
+	header_height: f32,
+	header_buttons: input.Mouse_Buttons,
+	scale: f32,
+	metrics: term_view.Metrics,
+	focused, dirty: bool,
+	preparing, preview_visible: bool,
+	generation: u64,
+	selecting: bool,
 	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
-	autoscrolling:                                                bool,
-	autoscroll_deadline:                                          time.Tick,
-	pointer:                                                      [2]f32,
-	pointer_shape:                                                platform.Cursor_Shape,
-	find:                                                         ui.Find_Bar,
-	editor:                                                       ui.Editor,
-	leader_until:                                                 time.Tick,
-	tab_underline:                                                ui.Motion,
-	tab_controls:                                                 [dynamic]ui.Control_Motion,
-	tab_hover:                                                    int,
-	tab_pressed:                                                  bool,
-	tab_close_pressed:                                            int,
+	autoscrolling: bool,
+	autoscroll_deadline: time.Tick,
+	pointer: [2]f32,
+	pointer_shape: platform.Cursor_Shape,
+	find: ui.Find_Bar,
+	editor: ui.Editor,
+	leader_until: time.Tick,
+	tab_underline: ui.Motion,
+	tab_controls: [dynamic]ui.Control_Motion,
+	tab_hover: int,
+	tab_pressed: bool,
+	tab_close_pressed: int,
 	// Asks before a close would end several panes; holds the id of the tab whose close was requested.
-	close_confirm:                                                ui.Confirm,
-	close_confirm_tab:                                            u32,
-	close_confirm_workspace, close_confirm_destination:           u32,
-	close_confirm_owner:                                          platform.Window_Id,
+	close_confirm: ui.Confirm,
+	close_confirm_tab: u32,
+	close_confirm_workspace, close_confirm_destination: u32,
+	close_confirm_owner: platform.Window_Id,
 	close_confirm_workspace_name, close_confirm_destination_name: string,
-	close_confirm_sessions:                                       int,
-	close_confirm_tabs, close_confirm_panes:                      int,
-	close_restore:                                                [dynamic]u32,
-	tab_menu:                                                     Tab_Menu,
-	rename:                                                       ui.Text_Field,
-	rename_open, rename_tab:                                      bool,
-	rename_workspace:                                             bool,
-	workspace_picker:                                             Workspace_Picker,
-	rename_id:                                                    u32,
-	caption_hover, caption_pressed:                               int,
-	maximized:                                                    bool,
-	paste_confirm_until:                                          time.Tick,
-	suppressed_key:                                               Maybe(platform.Key_Event),
-	wheel_remainder:                                              f32,
-	blinking, cursor_phase_visible:                               bool,
-	blink_deadline:                                               time.Tick,
+	close_confirm_sessions: int,
+	close_confirm_tabs, close_confirm_panes: int,
+	close_restore: [dynamic]u32,
+	tab_menu: Tab_Menu,
+	rename: ui.Text_Field,
+	rename_open, rename_tab: bool,
+	rename_workspace: bool,
+	workspace_picker: Workspace_Picker,
+	rename_id: u32,
+	caption_hover, caption_pressed: int,
+	maximized: bool,
+	paste_confirm_until: time.Tick,
+	suppressed_key: Maybe(platform.Key_Event),
+	wheel_remainder: f32,
+	blinking, cursor_phase_visible: bool,
+	blink_deadline: time.Tick,
 }
 
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
@@ -156,12 +156,12 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	g := initial_geometry(app)
 	if entry := focused_session(app, w); entry != nil {g = term.geometry(entry.session)}
 	desc := platform.Window_Desc {
-		title            = app.app_id,
-		inactive         = app.options.inactive,
-		hidden           = true,
+		title = app.app_id,
+		inactive = app.options.inactive,
+		hidden = true,
 		tabbed_title_bar = true,
-		width            = i32(g.surface_width),
-		height           = i32(g.surface_height),
+		width = i32(g.surface_width),
+		height = i32(g.surface_height),
 	}
 	id, err := platform.window_create(&app.platform, desc)
 	if err != .None {
@@ -253,6 +253,7 @@ window_free :: proc(w: ^Window) {
 	ui.editor_destroy(&w.editor)
 	delete(w.rename.bytes)
 	delete(w.workspace_picker.query.bytes)
+	delete(w.workspace_picker.saved_query.bytes)
 	delete(w.workspace_picker.rows)
 	delete(w.close_restore)
 	delete(w.close_confirm_workspace_name)
@@ -307,7 +308,10 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
-	if w.preparing {return}
+	if palette_visible(app, w) {
+		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
+	}
+	if w.preparing { return }
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
@@ -359,14 +363,14 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 			padding,
 		)
 		g := term.Geometry {
-			columns        = columns,
-			rows           = rows,
-			cell_width     = u32(w.metrics.cell_width),
-			cell_height    = u32(w.metrics.cell_height),
-			surface_width  = u32(w.width),
+			columns = columns,
+			rows = rows,
+			cell_width = u32(w.metrics.cell_width),
+			cell_height = u32(w.metrics.cell_height),
+			surface_width = u32(w.width),
 			surface_height = u32(w.height),
-			padding_left   = u32(pane.rect.x + padding),
-			padding_top    = u32(pane.rect.y + min(pane.rect.height, w.header_height) + padding),
+			padding_left = u32(pane.rect.x + padding),
+			padding_top = u32(pane.rect.y + min(pane.rect.height, w.header_height) + padding),
 		}
 		if g != term.geometry(entry.session) {
 			term.resize(entry.session, g)
@@ -520,16 +524,16 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		content_focused :=
 			w.focused && pane.node == w.tree.focus && !palette_active(app, w) && !w.find.open
 		style := term_view.Style {
-			family                     = app.family,
-			selection_background       = color(c.selection_background),
-			selection_foreground       = selection_foreground,
-			search_foreground          = color(c.search_foreground),
-			search_background          = color(c.search_background),
+			family = app.family,
+			selection_background = color(c.selection_background),
+			selection_foreground = selection_foreground,
+			search_foreground = color(c.search_foreground),
+			search_background = color(c.search_background),
 			search_selected_background = color(c.search_selected_background),
-			cursor_text                = color(c.cursor_text),
-			minimum_contrast           = app.settings.theme.mode == .Light ? f32(app.settings.terminal.minimum_contrast) : 1,
-			focused                    = content_focused,
-			cursor_phase_visible       = !content_focused || w.cursor_phase_visible,
+			cursor_text = color(c.cursor_text),
+			minimum_contrast = app.settings.theme.mode == .Light ? f32(app.settings.terminal.minimum_contrast) : 1,
+			focused = content_focused,
+			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
 		}
 		origin := [2]f32 {
 			pane.rect.x + padding,
@@ -567,41 +571,18 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {
-		status := find_status(w, focused_session(app, w))
-		result := ui.find_draw(
-			&w.find,
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			status,
-			size.x,
-			size.y,
-			w.scale,
-		)
+		status, enabled := find_presentation(w, focused_session(app, w))
+		result := ui.find_draw(&w.find, &w.list, &w.ui_text, app.theme, status, enabled, size.x, size.y, w.scale)
 		if result != .Ok {
 			return frame, result
 		}
 	}
 	if palette_visible(app, w) {
-		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		result := ui.palette_draw(
-			&app.palette,
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			size.x,
-			size.y,
-			w.scale,
+			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
+			app.palette.motion.value, app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0,
 		)
-		ui.fade_draw(
-			&w.list,
-			layers,
-			rects,
-			glyph_count,
-			app.palette.motion.value,
-			app.palette.open ? 4 * w.scale * (1 - app.palette.motion.value) : 0,
-		)
-		if result != .Ok {return frame, result}
+		if result != .Ok { return frame, result }
 	}
 	if c := &w.close_confirm; c.open || c.motion.value > 0 {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)

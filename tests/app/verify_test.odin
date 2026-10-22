@@ -96,6 +96,8 @@ when app.AIO_CONTROL {
 		testing.expect_value(t, app.verify_value(entries, "window.origin"), fmt.tprintf("%d,%d", origin_x, origin_y))
 		testing.expect_value(t, app.verify_value(entries, "tab.1.id"), "202")
 		testing.expect_value(t, app.verify_value(entries, "window.focused"), "false")
+		testing.expect_value(t, app.verify_value(entries, "find.older"), "")
+		testing.expect_value(t, app.verify_value(entries, "find.newer"), "")
 		state.verify.target_window = first_id
 		entries, state_error = app.verify_state(&state)
 		testing.expect_value(t, state_error, control.Error.None)
