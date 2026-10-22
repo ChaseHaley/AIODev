@@ -113,14 +113,14 @@ workspace143_targeted_pointer_keyboard_cancel_and_saved_filter :: proc(t: ^testi
 @(test)
 workspace143_stale_color_target_never_changes_current_workspace :: proc(t: ^testing.T) {
 	state: app.App
-	current := app.workspace_create_empty(&state)
-	target := app.workspace_create_empty(&state)
-	if !testing.expect(t, current != nil && target != nil) { return }
 	defer {
 		for workspace in state.workspaces { app.workspace_destroy(workspace) }
 		delete(state.workspaces)
 		delete(state.windows)
 	}
+	current := app.workspace_create_empty(&state)
+	target := app.workspace_create_empty(&state)
+	if !testing.expect(t, current != nil && target != nil) { return }
 	w := app.Window{id = 1, workspace = current, width = 600, height = 300, scale = 1}
 	append(&state.windows, &w)
 	defer delete(w.workspace_picker.rows)

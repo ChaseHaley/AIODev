@@ -153,7 +153,7 @@ try {
     Invoke-Aio dpi 96
     Invoke-Aio resize 25x10
     Invoke-Aio command workspace.change_icon
-    Invoke-Aio key Ctrl+N Ctrl+N
+    Invoke-Aio key Ctrl+N Ctrl+N Ctrl+N
     Invoke-Aio expect state workspace.picker.selected=0
     Invoke-Aio mouse wheel '30,100' -1 --px
     Invoke-Aio expect state workspace.picker.selected=1
