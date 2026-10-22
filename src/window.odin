@@ -243,6 +243,7 @@ window_free :: proc(w: ^Window) {
 	ui.editor_destroy(&w.editor)
 	delete(w.rename.bytes)
 	delete(w.workspace_picker.query.bytes)
+	delete(w.workspace_picker.saved_query.bytes)
 	delete(w.workspace_picker.rows)
 	delete(w.close_restore)
 	delete(w.close_confirm_workspace_name)

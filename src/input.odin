@@ -328,11 +328,14 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if w.workspace_picker.open {
 		p := &w.workspace_picker
 		x, y := f32(e.x), f32(e.y)
-		if !e.pressed { p.query.dragging = false; w.header_buttons -= {e.button}; return }
+		if !e.pressed { p.query.dragging, w.rename.dragging = false, false; w.header_buttons -= {e.button}; return }
 		w.header_buttons += {e.button}
 		r, _ := workspace_picker_rect(w)
-		if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
-			p.open, w.dirty = false, true
+		if p.menu_id != 0 && e.button == .Left {
+			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
+		} else if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
+			workspace_row_rename_finish(app, w, false)
+			p.open, p.menu_id, w.dirty = false, 0, true
 		} else if e.button == .Left {
 			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
 		}
@@ -484,6 +487,7 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	if w.preparing { return }
 	if w.workspace_picker.open {
+		if workspace_row_hover(app, w, e) { return }
 		if w.workspace_picker.query.dragging && .Left in e.buttons {
 			workspace_picker_pointer(app, w, f32(e.x), false, true)
 		} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
@@ -598,6 +602,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.preparing { return }
 	if w.workspace_picker.open {
 		p := &w.workspace_picker
+		if p.menu_id != 0 || p.rename_id != 0 { return }
 		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, workspace_picker_count(w)-1)
 		w.dirty = true
 		return

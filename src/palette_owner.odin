@@ -52,6 +52,9 @@ palette_open :: proc(app: ^App, w: ^Window) {
 window_overlays_cancel :: proc(app: ^App, w: ^Window) {
 	palette_release(app, w)
 	w.workspace_picker.open = false
+	w.workspace_picker.menu_id, w.workspace_picker.rename_id = 0, 0
+	w.workspace_picker.rename_motion = {}
+	w.workspace_picker.query.dragging = false
 	w.tab_menu.open = false
 	w.rename.dragging = false
 	if w.rename_open { rename_finish(app, w, false) }

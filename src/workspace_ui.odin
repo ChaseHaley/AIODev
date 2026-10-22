@@ -21,10 +21,14 @@ Workspace_Picker :: struct {
 	query: ui.Text_Field,
 	rows: [dynamic]Workspace_Row,
 	selected, scroll: int,
+	menu_id, rename_id, icon_id: u32,
+	menu_selected: int,
+	rename_motion: ui.Motion,
+	rename_error: bool,
+	saved_query: ui.Text_Field,
 }
 
-WORKSPACE_ACTIONS :: [?]Action{.New_Workspace, .Rename_Workspace, .Change_Workspace_Icon,
-	.Delete_Workspace, .New_Window}
+WORKSPACE_ACTIONS :: [?]Action{.New_Workspace, .New_Window}
 
 @(private)
 workspace_rect_contains :: proc(r: render.Rect, x, y: f32) -> bool {
@@ -157,17 +161,13 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
 }
 
 workspace_rename_open :: proc(app: ^App, w: ^Window) {
-	arrange_cancel(app, w)
-	leader_cancel(w)
-	window_overlays_cancel(app, w)
-	w.workspace_picker.open, w.tab_menu.open = false, false
-	ui.field_set(&w.rename, w.workspace.name)
-	ui.field_select_all(&w.rename)
-	w.rename_open, w.rename_workspace, w.rename_id, w.dirty = true, true, w.workspace.id, true
+	workspace_picker_open(app, w)
+	workspace_row_rename_open(app, w, w.workspace.id)
 }
 
 workspace_button_width :: proc(w: ^Window) -> f32 {
-	return min(184*w.scale, max(0, (f32(w.width)-218*w.scale)*0.35))
+	available := max(0, f32(w.width)-218*w.scale)
+	return min(184*w.scale, available, max(40*w.scale, available*0.35))
 }
 
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
@@ -177,13 +177,15 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, {0, 0, width, ui.TAB_HEIGHT*w.scale}) != .None { return .Ok }
 	fill := w.workspace_picker.open ? app.theme.selection : app.theme.pane
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = 6*w.scale}) != .None { return .Ok }
-	if result := workspace_icon_draw(w, w.workspace.icon, {10*w.scale, 8*w.scale, 24*w.scale, 24*w.scale},
-		app.theme.text); result != .Ok { return result }
+	if width >= 72*w.scale {
+		if result := workspace_icon_draw(w, w.workspace.icon, {10*w.scale, 8*w.scale, 24*w.scale, 24*w.scale},
+			app.theme.text); result != .Ok { return result }
+	}
 	if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, 40*w.scale,
 		(ui.TAB_HEIGHT*w.scale-w.ui_text.line_height)/2+w.ui_text.ascent,
 		app.theme.text, max(0, width-64*w.scale)); result != .Ok { return result }
-	return ui.draw_text(&w.ui_text, &w.list, "⌄", width-23*w.scale,
-		(ui.TAB_HEIGHT*w.scale-w.ui_text.line_height)/2+w.ui_text.ascent, app.theme.muted, 16*w.scale)
+	workspace_chevron_draw(&w.list, workspace_button_indicator_rect(w), app.theme.text, w.scale)
+	return .Ok
 }
 
 @(private)
@@ -231,10 +233,17 @@ workspace_pickers_refresh :: proc(app: ^App) {
 	for w in app.windows {
 		p := &w.workspace_picker
 		if !p.open { continue }
-		if p.icons { continue }
+		if p.icons {
+			if workspace_row_target(app, p.icon_id) == nil { workspace_picker_return(app, w) }
+			continue
+		}
+		if workspace_row_target(app, p.menu_id) == nil { p.menu_id = 0 }
+		if workspace_row_target(app, p.rename_id) == nil { workspace_row_rename_finish(app, w, false) }
 		id := p.selected >= 0 && p.selected < len(p.rows) ? p.rows[p.selected].id : 0
 		action := p.selected-len(p.rows)
 		workspace_picker_filter(app, w)
+		if workspace_row_index(w, p.menu_id) < 0 { p.menu_id = 0 }
+		if workspace_row_index(w, p.rename_id) < 0 { workspace_row_rename_finish(app, w, false) }
 		if id != 0 {
 			for row, i in p.rows { if row.id == id { p.selected = i; break } }
 		} else { p.selected = len(p.rows)+clamp(action, 0, len(WORKSPACE_ACTIONS)-1) }
@@ -264,18 +273,16 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	w.selecting, w.autoscrolling = false, false
 	ui.field_set(&w.workspace_picker.query, "")
 	w.workspace_picker.open, w.workspace_picker.icons = true, false
+	w.workspace_picker.menu_id, w.workspace_picker.rename_id, w.workspace_picker.icon_id = 0, 0, 0
+	w.workspace_picker.rename_motion = {}
+	w.rename.dragging = false
 	workspace_picker_filter(app, w)
 	for row, i in w.workspace_picker.rows { if row.id == w.workspace.id { w.workspace_picker.selected = i } }
 }
 
 workspace_icon_open :: proc(app: ^App, w: ^Window) {
 	workspace_picker_open(app, w)
-	p := &w.workspace_picker
-	p.icons = true
-	p.selected = w.workspace.icon.emoji == "" ? w.workspace.icon.preset : len(WORKSPACE_ICONS)
-	p.scroll = 0
-	ui.field_set(&p.query, w.workspace.icon.emoji)
-	ui.field_select_all(&p.query)
+	workspace_row_icon_open(app, w, w.workspace.id)
 }
 
 workspace_picker_count :: proc(w: ^Window) -> int {
@@ -291,11 +298,13 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 			notify(app, .Error, "Enter an emoji (up to 32 Unicode characters), then apply it.")
 			return
 		}
-		if !workspace_icon_set(app, w.workspace, index < len(WORKSPACE_ICONS) ? index : 0, emoji) {
+		target := workspace_row_target(app, p.icon_id)
+		if target == nil { workspace_picker_return(app, w); return }
+		if !workspace_icon_set(app, target, index < len(WORKSPACE_ICONS) ? index : 0, emoji) {
 			notify(app, .Error, "Could not change the workspace icon.")
 			return
 		}
-		workspace_picker_open(app, w)
+		workspace_picker_return(app, w)
 		return
 	}
 	p.open, w.dirty = false, true
@@ -312,6 +321,12 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
+	if w.workspace_picker.menu_id != 0 { return }
+	if w.workspace_picker.rename_id != 0 {
+		ui.field_text(&w.rename, value)
+		w.workspace_picker.rename_error, w.dirty = false, true
+		return
+	}
 	ui.field_text(&w.workspace_picker.query, value)
 	if w.workspace_picker.icons {
 		w.workspace_picker.selected, w.dirty = len(WORKSPACE_ICONS), true
@@ -323,6 +338,7 @@ workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if !e.pressed { return }
 	p := &w.workspace_picker
+	if workspace_row_key(app, w, e) { return }
 	count := workspace_picker_count(w)
 	w.dirty = true
 	if p.icons && workspace_icon_picker_key(w, e) { return }
@@ -332,7 +348,7 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	#partial switch e.key {
 	case .Escape:
-		if p.icons { workspace_picker_open(app, w) } else { p.open = false }
+		if p.icons { workspace_picker_return(app, w) } else { p.open = false }
 	case .Tab: p.selected = (p.selected+count+(.Shift in e.modifiers ? -1 : 1))%count
 	case .Enter, .Numpad_Enter: workspace_picker_choose(app, w)
 	case .Delete:
@@ -374,8 +390,10 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 	x, y := 5*s, ui.TAB_HEIGHT*s
 	width := min(380*s, max(0, f32(w.width)-10*s))
 	header := workspace_picker_header(w)
-	rows := min(workspace_picker_count(w), max(1, int((f32(w.height)-y-header-24*s)/(34*s))))
-	height := min(max(0, f32(w.height)-y-5*s), header+f32(rows)*34*s+16*s)
+	extra := workspace_row_rename_height(w)
+	reserve := w.workspace_picker.rename_id != 0 ? 68*s : 0
+	rows := min(workspace_picker_count(w), max(1, int((f32(w.height)-y-header-24*s-reserve)/(34*s))))
+	height := min(max(0, f32(w.height)-y-5*s), header+f32(rows)*34*s+16*s+extra)
 	return {x, y, width, height}, rows
 }
 
@@ -391,6 +409,8 @@ workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	r, _ := workspace_picker_rect(w)
 	p, s := &w.workspace_picker, w.scale
 	gap := !p.icons && index >= len(p.rows) && p.scroll <= len(p.rows) ? 8*s : 0
+	rename_index := workspace_row_index(w, p.rename_id)
+	if rename_index >= p.scroll && index > rename_index { gap += workspace_row_rename_height(w) }
 	return {r.x+6*s, r.y+workspace_picker_header(w)+f32(index-p.scroll)*34*s+gap,
 		max(0, r.width-12*s), 34*s}
 }
@@ -407,17 +427,18 @@ workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	return -1
 }
 
-workspace_picker_delete_rect :: proc(w: ^Window, index: int) -> render.Rect {
+workspace_picker_menu_button_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	r := workspace_picker_row_rect(w, index)
-	return {r.x+r.width-30*w.scale, r.y+5*w.scale, 24*w.scale, 24*w.scale}
+	return {r.x+r.width-34*w.scale, r.y+w.scale, 32*w.scale, 32*w.scale}
 }
 
 workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 	p := &w.workspace_picker
+	if workspace_row_click(app, w, x, y, extend) { return }
 	if hit := workspace_picker_hit(w, x, y); hit >= 0 {
-		if !p.icons && hit < len(p.rows) && hit == p.selected &&
-		   workspace_rect_contains(workspace_picker_delete_rect(w, hit), x, y) {
-			workspace_delete_request(app, w, workspace_find(app, p.rows[hit].id))
+		if !p.icons && hit < len(p.rows) &&
+		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+			workspace_row_menu_open(app, w, p.rows[hit].id)
 			return
 		}
 		p.selected = hit
@@ -431,6 +452,7 @@ workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend:
 	if w.workspace_picker.icons { w.workspace_picker.selected = len(WORKSPACE_ICONS) }
 	r := workspace_picker_field_rect(w)
 	f := &w.workspace_picker.query
+	if w.workspace_picker.rename_id != 0 { r, f = workspace_row_rename_field_rect(w), &w.rename }
 	width := max(1, r.width-16*w.scale)
 	start := ui.field_view_start(f, &w.ui_text, width)
 	at := ui.field_offset_at(f, &w.ui_text, start, r.x+8*w.scale, x)
@@ -445,6 +467,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	@(static, rodata) actions := WORKSPACE_ACTIONS
 	@(static, rodata) action_info := ACTIONS
 	if !p.icons {
+		if index := workspace_row_index(w, p.rename_id); index >= 0 { p.selected = index }
 		p.scroll = clamp(p.scroll, max(0, p.selected-rows+1), p.selected)
 		p.scroll = clamp(p.scroll, 0, max(0, workspace_picker_count(w)-rows))
 	}
@@ -458,7 +481,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5*s}) != .None { return .Ok }
 	if result := ui.field_draw(&p.query, &w.list, &w.ui_text, app.theme, field.x+8*s,
 		field.y+(field.height-w.ui_text.line_height)/2+w.ui_text.ascent, max(1, field.width-16*s),
-		true, "Search workspaces", app.theme.text, s); result != .Ok { return result }
+		p.rename_id == 0 && p.menu_id == 0, "Search workspaces", app.theme.text, s); result != .Ok { return result }
 	for visible in 0..<rows {
 		i := p.scroll+visible
 		if i >= workspace_picker_count(w) { break }
@@ -472,12 +495,11 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 		label, detail := "", ""
 		icon := Workspace_Icon{}
-		has_icon, has_delete := false, false
+		has_icon := false
 		if i < len(p.rows) {
 			workspace := workspace_find(app, p.rows[i].id)
 			if workspace == nil { continue }
 			label, detail, icon, has_icon = workspace.name, p.rows[i].status, workspace.icon, true
-			has_delete = i == p.selected
 			if workspace == w.workspace { detail = "Current" }
 			else if window_for_workspace(app, workspace) != nil { detail = "Open in window" }
 			if p.rows[i].status != "" && detail != p.rows[i].status {
@@ -492,10 +514,9 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			label_x += 30*s
 		}
 		right := row.x+row.width-8*s
-		if has_delete {
-			if result := ui.draw_icon(&w.ui_text, &w.list, '\ue8bb', workspace_picker_delete_rect(w, i),
-				app.theme.muted, 0.65); result != .Ok { return result }
-			right -= 28*s
+		if has_icon {
+			workspace_row_ellipsis_draw(app, w, i)
+			right -= 36*s
 		}
 		detail_width := min(ui.text_width(&w.ui_text, detail), max(0, (right-label_x)*0.5))
 		if result := ui.draw_fading_text(&w.ui_text, &w.list, label, label_x, baseline,
@@ -503,5 +524,6 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if result := ui.draw_fading_text(&w.ui_text, &w.list, detail, right-detail_width,
 			baseline, app.theme.muted, detail_width); result != .Ok { return result }
 	}
-	return .Ok
+	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }
+	return workspace_row_menu_draw(app, w)
 }

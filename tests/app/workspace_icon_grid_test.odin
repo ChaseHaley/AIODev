@@ -101,6 +101,7 @@ workspace_icon_grid_pointer_apply_cancel_and_invalid_custom_preserve_identity ::
 	defer delete(state.workspaces)
 	defer delete(state.windows)
 	defer delete(w.workspace_picker.rows)
+	defer delete(w.workspace_picker.saved_query.bytes)
 	defer delete(w.workspace_picker.query.bytes)
 	defer delete(workspace.icon.emoji)
 	ui.notices_init(&state.notices)

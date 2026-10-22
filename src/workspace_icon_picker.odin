@@ -86,6 +86,8 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	p, s := &w.workspace_picker, w.scale
 	g := workspace_icon_picker_layout(w)
 	workspace_icon_picker_reveal(w, g)
+	target := workspace_row_target(app, p.icon_id)
+	if target == nil { target = w.workspace }
 	if result := ui.draw_text(&w.ui_text, &w.list, "Workspace icon", g.panel.x+12*s, g.panel.y+26*s,
 		app.theme.text, max(0, g.panel.width-24*s)); result != .Ok { return result }
 	if render.push_layer(&w.list, g.grid) != .None { return .Ok }
@@ -100,7 +102,7 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 		icon := render.Rect{cell.x+10*s, cell.y+8*s, 24*s, 24*s}
 		if result := workspace_icon_draw(w, {preset = i}, icon, app.theme.text); result != .Ok { return result }
-		if w.workspace.icon.emoji == "" && w.workspace.icon.preset == i {
+		if target != nil && target.icon.emoji == "" && target.icon.preset == i {
 			mark := render.Rect{cell.x+14*s, cell.y+38*s, 16*s, 2*s}
 			if render.push_rect(&w.list, {rect = mark, color = app.theme.accent, radius = s}) != .None { return .Ok }
 		}
