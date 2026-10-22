@@ -66,8 +66,8 @@ try {
     $workspace, $session = $initial['workspace.id'], $initial['session.id']
     Invoke-Aio command workspace.change_icon
     Invoke-Aio expect state workspace.picker.icons=true
-    $count = [int](Read-State)['workspace.picker.count']-2
-    Check ($count -eq 10) 'ten presets and separate custom field/apply stops'
+    $count = [int](Read-State)['workspace.picker.count']-3
+    Check ($count -eq 10) 'ten presets and separate custom field/apply/color stops'
     $firstCell = Rect (Read-State) 'workspace.picker.row'
     Invoke-Aio key Right Down Up
     Invoke-Aio expect state workspace.picker.selected=1
@@ -142,6 +142,8 @@ try {
             Invoke-Aio command workspace.change_icon
             Invoke-Aio key Ctrl+N
             Invoke-Aio expect state "workspace.picker.selected=$($count+1)"
+            Invoke-Aio key Ctrl+N
+            Invoke-Aio expect state "workspace.picker.selected=$($count+2)"
             Invoke-Aio key Ctrl+N
             Invoke-Aio expect state workspace.picker.selected=0
             Check-Layout "$mode-$dpi"
