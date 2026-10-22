@@ -36,7 +36,9 @@ function Shot([string] $Label) {
 function Shell-Process([string] $Label) {
     Invoke-Aio wait text 'PS ' | Out-Null
     $path = "$directory/pid-$Label.txt"
-    Invoke-Aio run "Set-Content -LiteralPath '$path' -Value `$PID" | Out-Null
+    $quotedPath = $path.Replace("'", "''")
+    Invoke-Aio run "Set-Content -LiteralPath '$quotedPath' -Value `$PID; Write-Output ('WORKSPACE_PID_' + '$Label')" | Out-Null
+    Invoke-Aio wait text "WORKSPACE_PID_$Label" | Out-Null
     $p = [Diagnostics.Process]::GetProcessById([int](Get-Content -LiteralPath $path))
     $null = $p.Handle
     $processes.Add($p)
@@ -130,6 +132,8 @@ try {
     Invoke-Aio command workspace.rename
     Invoke-Aio type 'Disposable tabs and panes'
     Invoke-Aio key Enter
+    Invoke-Aio key Esc
+    Invoke-Aio expect state workspace.picker=false
     $one = Shell-Process one
     Invoke-Aio command pane.split_right
     $two = Shell-Process two
