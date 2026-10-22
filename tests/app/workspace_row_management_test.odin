@@ -283,6 +283,64 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 }
 
 @(test)
+workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
+	f: Workspace134_Fixture
+	defer workspace134_destroy(&f)
+	if !workspace134_init(t, &f) { return }
+	fonts, font_error := font.system_create()
+	if !testing.expect_value(t, font_error, font.Error.None) { return }
+	defer font.system_destroy(fonts)
+	device, device_error := render.device_create()
+	if !testing.expect_value(t, device_error, render.Error.None) { return }
+	defer render.device_destroy(device)
+	surface, surface_error := render.surface_create_offscreen(device, 512, 96)
+	if !testing.expect_value(t, surface_error, render.Error.None) { return }
+	defer render.surface_destroy(surface)
+	cache: glyphs.Cache
+	glyphs.init(&cache, fonts, device)
+	defer glyphs.destroy(&cache)
+	s, w := &f.state, &f.w
+	w.list = render.draw_list_init()
+	defer render.draw_list_destroy(&w.list)
+	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, &cache, 14)) { return }
+	name := f.current.name
+	defer f.current.name = name
+	for scale in ([?]f32{1, 1.5, 2}) {
+		w.scale = scale
+		ui.text_set_size(&w.ui_text, 14*scale)
+		for mode in settings.Theme_Mode {
+			s.theme = ui.theme_from(settings.theme_resolve({.Studio, mode}))
+			for width in ([?]i32{360, 460, 600, 900}) {
+				w.width = i32(f32(width)*scale)
+				f.current.name = ""
+				render.draw_list_reset(&w.list)
+				testing.expect_value(t, app.workspace_button_draw(s, w), glyphs.Result.Ok)
+				testing.expect_value(t, render.frame_render(device, surface, &w.list, s.theme.window), render.Error.None)
+				baseline, error := render.surface_read_pixels(device, surface, context.allocator)
+				if !testing.expect_value(t, error, render.Error.None) { return }
+				defer delete(baseline)
+				f.current.name = "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"
+				render.draw_list_reset(&w.list)
+				testing.expect_value(t, app.workspace_button_draw(s, w), glyphs.Result.Ok)
+				testing.expect_value(t, render.frame_render(device, surface, &w.list, s.theme.window), render.Error.None)
+				pixels, pixel_error := render.surface_read_pixels(device, surface, context.allocator)
+				if !testing.expect_value(t, pixel_error, render.Error.None) { return }
+				defer delete(pixels)
+				indicator := app.workspace_button_indicator_rect(w)
+				clear := true
+				for y in int(indicator.y)..<int(indicator.y+indicator.height) {
+					for x in int(indicator.x-4*scale)..<int(indicator.x+indicator.width) {
+						at := (y*512+x)*4
+						for channel in 0..<4 { clear &&= pixels[at+channel] == baseline[at+channel] }
+					}
+				}
+				testing.expect(t, clear, "workspace label must leave the indicator and its gap unchanged")
+			}
+		}
+	}
+}
+
+@(test)
 workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing.T) {
 	f: Workspace134_Fixture
 	defer workspace134_destroy(&f)

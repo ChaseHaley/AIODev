@@ -189,9 +189,12 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if result := workspace_icon_draw(w, w.workspace.icon, {10*w.scale, 8*w.scale, 24*w.scale, 24*w.scale},
 			app.theme.text); result != .Ok { return result }
 	}
-	if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, 40*w.scale,
-		(ui.TAB_HEIGHT*w.scale-w.ui_text.line_height)/2+w.ui_text.ascent,
-		app.theme.text, max(0, width-64*w.scale)); result != .Ok { return result }
+	label_width := workspace_button_indicator_rect(w).x-48*w.scale
+	if label_width >= 24*w.scale {
+		if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, 40*w.scale,
+			(ui.TAB_HEIGHT*w.scale-w.ui_text.line_height)/2+w.ui_text.ascent,
+			app.theme.text, label_width); result != .Ok { return result }
+	}
 	workspace_chevron_draw(&w.list, workspace_button_indicator_rect(w), app.theme.text, w.scale)
 	return .Ok
 }
