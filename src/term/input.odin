@@ -1,11 +1,11 @@
 package term
 
-import "core:log"
-import "core:strings"
-import "core:sync"
 import "aio:ghostty"
 import "aio:input"
 import "aio:platform"
+import "core:log"
+import "core:strings"
+import "core:sync"
 
 Mouse_Action :: enum {
 	Press,
@@ -123,7 +123,14 @@ paste :: proc(s: ^Session, text: string, allow_unsafe := false) -> Paste_Result 
 	}
 	encoded := make([]u8, needed, context.temp_allocator)
 	written: uint
-	result = ghostty.paste_encode(raw_data(data), len(data), bracketed, raw_data(encoded), needed, &written)
+	result = ghostty.paste_encode(
+		raw_data(data),
+		len(data),
+		bracketed,
+		raw_data(encoded),
+		needed,
+		&written,
+	)
 	if result != .Success {
 		log.errorf("term: paste encoding failed: %v", result)
 		return .Failed
@@ -141,7 +148,8 @@ send_focus :: proc(s: ^Session, focused: bool) {
 	buffer: [8]u8
 	n: uint
 	event: ghostty.Focus_Event = focused ? .Gained : .Lost
-	if result := ghostty.focus_encode(event, raw_data(buffer[:]), len(buffer), &n); result != .Success {
+	if result := ghostty.focus_encode(event, raw_data(buffer[:]), len(buffer), &n);
+	   result != .Success {
 		log.errorf("term: focus encoding failed: %v", result)
 		return
 	}
@@ -158,11 +166,16 @@ mouse_tracking :: proc(s: ^Session) -> bool {
 @(private)
 ghostty_button :: proc(button: input.Mouse_Button) -> ghostty.Mouse_Button {
 	switch button {
-	case .Left: return .Left
-	case .Right: return .Right
-	case .Middle: return .Middle
-	case .Back: return .Eight
-	case .Forward: return .Nine
+	case .Left:
+		return .Left
+	case .Right:
+		return .Right
+	case .Middle:
+		return .Middle
+	case .Back:
+		return .Eight
+	case .Forward:
+		return .Nine
 	}
 	return .Unknown
 }
@@ -228,9 +241,12 @@ send_mouse :: proc(
 ) {
 	ghostty_action: ghostty.Mouse_Action
 	switch action {
-	case .Press: ghostty_action = .Press
-	case .Release: ghostty_action = .Release
-	case .Motion: ghostty_action = .Motion
+	case .Press:
+		ghostty_action = .Press
+	case .Release:
+		ghostty_action = .Release
+	case .Motion:
+		ghostty_action = .Motion
 	}
 	target: Maybe(ghostty.Mouse_Button)
 	if b, ok := button.?; ok {
@@ -259,7 +275,9 @@ scroll :: proc(s: ^Session, rows: int, modifiers: input.Modifiers, x, y: f32) {
 	screen: ghostty.Terminal_Screen
 	tracked := ghostty.terminal_get(s.terminal, .Mouse_Tracking, &tracking) == .Success && tracking
 	tracked &&= .Shift not_in modifiers
-	alternate := ghostty.terminal_get(s.terminal, .Active_Screen, &screen) == .Success && screen == .Alternate
+	alternate :=
+		ghostty.terminal_get(s.terminal, .Active_Screen, &screen) == .Success &&
+		screen == .Alternate
 	alternate &&= mode_enabled(s, ghostty.MODE_ALT_SCROLL)
 	steps := min(abs(rows), 8)
 	switch {

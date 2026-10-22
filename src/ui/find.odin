@@ -74,8 +74,10 @@ find_key :: proc(f: ^Find_Bar, e: platform.Key_Event) -> Find_Outcome {
 @(private)
 find_change :: proc(change: Field_Change) -> Find_Outcome {
 	switch change {
-	case .None: return .None
-	case .Moved: return .Moved
+	case .None:
+		return .None
+	case .Moved:
+		return .Moved
 	case .Edited:
 	}
 	return .Changed
@@ -157,7 +159,12 @@ find_draw :: proc(
 	}
 	radius := FIND_RADIUS * scale
 	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
-	border := render.Rect{panel.x - scale, panel.y - scale, panel.width + 2 * scale, panel.height + 2 * scale}
+	border := render.Rect {
+		panel.x - scale,
+		panel.y - scale,
+		panel.width + 2 * scale,
+		panel.height + 2 * scale,
+	}
 	draw_rect(list, {rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale})
 	draw_rect(list, {rect = border, color = theme.border, radius = radius + scale})
 	draw_rect(list, {rect = panel, color = theme.surface, radius = radius})

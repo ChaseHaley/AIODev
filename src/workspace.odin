@@ -1,14 +1,14 @@
 package main
 
-import "core:fmt"
-import "core:log"
-import "core:slice"
-import "core:strings"
 import "aio:layout"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "core:fmt"
+import "core:log"
+import "core:slice"
+import "core:strings"
 
 Tab :: struct {
 	id: u32,
@@ -37,27 +37,32 @@ workspace_default_name :: proc(app: ^App) -> (name: string, number: u32) {
 		candidate := fmt.tprintf("Workspace %d", number)
 		occupied := false
 		for workspace in app.workspaces {
-			if !workspace.provisional && workspace.name == candidate { occupied = true; break }
+			if !workspace.provisional && workspace.name == candidate {occupied = true; break}
 		}
-		if occupied { continue }
+		if occupied {continue}
 		owned, err := strings.clone(candidate)
-		if err != nil { return "", 0 }
+		if err != nil {return "", 0}
 		return owned, number
 	}
 	return "", 0
 }
 
 selected_tab :: proc(workspace: ^Workspace) -> ^Tab {
-	if workspace == nil || len(workspace.tabs) == 0 { return nil }
+	if workspace == nil || len(workspace.tabs) == 0 {return nil}
 	return workspace.tabs[workspace.selected]
 }
 
 @(require_results)
-tab_create :: proc(app: ^App, workspace: ^Workspace, command: string = "", directory: string = "") -> bool {
+tab_create :: proc(
+	app: ^App,
+	workspace: ^Workspace,
+	command: string = "",
+	directory: string = "",
+) -> bool {
 	tab, err := new(Tab)
-	if err != nil { return false }
-	if reserve(&workspace.tabs, len(workspace.tabs)+1) != nil { free(tab); return false }
-	if !session_open(app, command, directory) { free(tab); return false }
+	if err != nil {return false}
+	if reserve(&workspace.tabs, len(workspace.tabs) + 1) != nil {free(tab); return false}
+	if !session_open(app, command, directory) {free(tab); return false}
 	id := app.next_session_id
 	if layout.init(&tab.tree, {.Terminal, id}) != nil {
 		session_close(app, id)
@@ -102,7 +107,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	leader_cancel(w)
 	if entry := focused_session(app, w); entry != nil {
 		term.send_focus(entry.session, false)
-		if w.find.open { find_close(w, entry) }
+		if w.find.open {find_close(w, entry)}
 	}
 	w.selecting, w.autoscrolling = false, false
 	w.dragging = {}
@@ -120,16 +125,16 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 }
 
 pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
-	if w.tree.focus == node { return }
+	if w.tree.focus == node {return}
 	focus_leave(app, w)
 	w.tree.focus = node
-	if w.tree.zoomed { window_relayout(app, w) }
+	if w.tree.zoomed {window_relayout(app, w)}
 	focus_enter(app, w)
 }
 
 tab_select :: proc(app: ^App, w: ^Window, index: int, preserve_selection := false) {
-	if index < 0 || index >= len(w.workspace.tabs) { return }
-	if !preserve_selection { tab_select_one(w.workspace, index); mark_all_dirty(app) }
+	if index < 0 || index >= len(w.workspace.tabs) {return}
+	if !preserve_selection {tab_select_one(w.workspace, index); mark_all_dirty(app)}
 	focus_leave(app, w)
 	w.workspace.selected = index
 	w.tree = &selected_tab(w.workspace).tree
@@ -138,70 +143,71 @@ tab_select :: proc(app: ^App, w: ^Window, index: int, preserve_selection := fals
 }
 
 tab_select_one :: proc(workspace: ^Workspace, index: int) {
-	for tab, i in workspace.tabs { tab.marked = i == index }
+	for tab, i in workspace.tabs {tab.marked = i == index}
 	workspace.selection_anchor = workspace.tabs[index].id
 }
 
 tab_pointer_select :: proc(app: ^App, w: ^Window, index: int, toggle, range: bool) {
 	tabs := w.workspace.tabs
-	if index < 0 || index >= len(tabs) { return }
+	if index < 0 || index >= len(tabs) {return}
 	if toggle || range || !tabs[index].marked {
 		marked, err := make([]bool, len(tabs), context.temp_allocator)
-		if err != nil { notify(app, .Error, "Could not select tabs."); return }
+		if err != nil {notify(app, .Error, "Could not select tabs."); return}
 		anchor := w.workspace.selected
 		for tab, i in tabs {
 			marked[i] = tab.marked
-			if tab.id == w.workspace.selection_anchor { anchor = i }
+			if tab.id == w.workspace.selection_anchor {anchor = i}
 		}
 		ui.tab_selection_update(marked, index, anchor, toggle, range)
-		for tab, i in tabs { tab.marked = marked[i] }
+		for tab, i in tabs {tab.marked = marked[i]}
 	}
-	if !range { w.workspace.selection_anchor = tabs[index].id }
+	if !range {w.workspace.selection_anchor = tabs[index].id}
 	tab_select(app, w, index, true)
 	mark_all_dirty(app)
 }
 
 tab_new :: proc(app: ^App, w: ^Window) {
-	if !pane_minimum_single(app, w) { return }
+	if !pane_minimum_single(app, w) {return}
 	if !tab_create(app, w.workspace) {
 		notify(app, .Error, "Could not create a tab.")
 		return
 	}
-	tab_select(app, w, len(w.workspace.tabs)-1)
+	tab_select(app, w, len(w.workspace.tabs) - 1)
 }
 
 @(require_results)
 pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -> bool {
 	source_workspace := pane_source_workspace(app, source)
-	if source_workspace == nil || int(node) >= len(source.tree.nodes) { return false }
+	if source_workspace == nil || int(node) >= len(source.tree.nodes) {return false}
 	if node == source.tree.root && source_workspace == w.workspace {
 		for tab, index in w.workspace.tabs {
-			if tab != source { continue }
-			tab_move(app, w, index, len(w.workspace.tabs)-1)
-			tab_select(app, w, len(w.workspace.tabs)-1)
+			if tab != source {continue}
+			tab_move(app, w, index, len(w.workspace.tabs) - 1)
+			tab_select(app, w, len(w.workspace.tabs) - 1)
 			return true
 		}
 		return false
 	}
 	pane, valid := source.tree.nodes[node].(layout.Pane)
-	if !valid || pane.content.kind != .Terminal { return false }
+	if !valid || pane.content.kind != .Terminal {return false}
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
-	if !pane_minimum_allows(app, w, panes[:], nil, true) { return false }
+	if !pane_minimum_allows(app, w, panes[:], nil, true) {return false}
 	tab, err := new(Tab)
-	if err != nil { notify(app, .Error, "Could not create a tab. The pane was preserved."); return false }
+	if err !=
+	   nil {notify(app, .Error, "Could not create a tab. The pane was preserved."); return false}
 	success := false
-	defer if !success { free(tab) }
-	if reserve(&w.workspace.tabs, len(w.workspace.tabs)+1) != nil {
+	defer if !success {free(tab)}
+	if reserve(&w.workspace.tabs, len(w.workspace.tabs) + 1) != nil {
 		notify(app, .Error, "Could not create a tab. The pane was preserved.")
 		return false
 	}
 	for window in app.windows {
-		if window == w || window.workspace == source_workspace { focus_leave(app, window) }
+		if window == w || window.workspace == source_workspace {focus_leave(app, window)}
 	}
 	tree, separated := layout.separate_pane(&source.tree, node)
 	if !separated {
 		for window in app.windows {
-			if window == w || window.workspace == source_workspace { focus_enter(app, window) }
+			if window == w || window.workspace == source_workspace {focus_enter(app, window)}
 		}
 		notify(app, .Error, "Could not move the pane. The layout was preserved.")
 		return false
@@ -209,14 +215,14 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 	tab.tree = tree
 	w.workspace.next_tab_id += 1
 	tab.id = w.workspace.next_tab_id
-	if source.tree.root != layout.INVALID_NODE { tab_update_title(app, source) }
+	if source.tree.root != layout.INVALID_NODE {tab_update_title(app, source)}
 	tab_update_title(app, tab)
 	append(&w.workspace.tabs, tab)
 	success = true
-	tab_select(app, w, len(w.workspace.tabs)-1)
+	tab_select(app, w, len(w.workspace.tabs) - 1)
 	if source.tree.root == layout.INVALID_NODE {
 		for current, index in source_workspace.tabs {
-			if current == source { workspace_close_tab(app, source_workspace, index); break }
+			if current == source {workspace_close_tab(app, source_workspace, index); break}
 		}
 		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
 	} else if source_workspace != w.workspace {
@@ -229,39 +235,54 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 }
 
 @(require_results)
-pane_transfer :: proc(app: ^App, w: ^Window, source, destination: ^Tab,
-	node, target: layout.Node_Id, direction: layout.Direction, root: bool) -> bool {
+pane_transfer :: proc(
+	app: ^App,
+	w: ^Window,
+	source, destination: ^Tab,
+	node, target: layout.Node_Id,
+	direction: layout.Direction,
+	root: bool,
+) -> bool {
 	source_workspace: ^Workspace
 	for workspace in app.workspaces {
-		for tab in workspace.tabs { if tab == source { source_workspace = workspace; break } }
+		for tab in workspace.tabs {if tab == source {source_workspace = workspace; break}}
 	}
 	destination_index := -1
-	for tab, index in w.workspace.tabs { if tab == destination { destination_index = index; break } }
-	if source_workspace == nil || destination_index < 0 || source == destination { return false }
+	for tab, index in w.workspace.tabs {if tab == destination {destination_index = index; break}}
+	if source_workspace == nil || destination_index < 0 || source == destination {return false}
 	for window in app.windows {
-		if selected := selected_tab(window.workspace); selected == source || selected == destination {
+		if selected := selected_tab(window.workspace);
+		   selected == source || selected == destination {
 			focus_leave(app, window)
 		}
 	}
-	_, moved := layout.transfer_pane(&source.tree, &destination.tree, node, target, direction, root)
+	_, moved := layout.transfer_pane(
+		&source.tree,
+		&destination.tree,
+		node,
+		target,
+		direction,
+		root,
+	)
 	if !moved {
 		for window in app.windows {
-			if selected := selected_tab(window.workspace); selected == source || selected == destination {
+			if selected := selected_tab(window.workspace);
+			   selected == source || selected == destination {
 				focus_enter(app, window)
 			}
 		}
 		return false
 	}
-	if source.tree.root != layout.INVALID_NODE { tab_update_title(app, source) }
+	if source.tree.root != layout.INVALID_NODE {tab_update_title(app, source)}
 	tab_select(app, w, destination_index)
 	if source.tree.root == layout.INVALID_NODE {
 		for tab, index in source_workspace.tabs {
-			if tab == source { workspace_close_tab(app, source_workspace, index); break }
+			if tab == source {workspace_close_tab(app, source_workspace, index); break}
 		}
 		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
 	} else {
 		for window in app.windows {
-			if window == w || window.workspace != source_workspace { continue }
+			if window == w || window.workspace != source_workspace {continue}
 			window_relayout(app, window)
 			focus_enter(app, window)
 		}
@@ -269,10 +290,16 @@ pane_transfer :: proc(app: ^App, w: ^Window, source, destination: ^Tab,
 	return true
 }
 
-pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f32 = 0.5, focus := true) {
-	if settings_active(w) { return }
-	if !pane_minimum_split(app, w, direction, ratio) { return }
-	if !session_open(app) { notify(app, .Error, "Could not create a pane."); return }
+pane_split :: proc(
+	app: ^App,
+	w: ^Window,
+	direction: layout.Direction,
+	ratio: f32 = 0.5,
+	focus := true,
+) {
+	if settings_active(w) {return}
+	if !pane_minimum_split(app, w, direction, ratio) {return}
+	if !session_open(app) {notify(app, .Error, "Could not create a pane."); return}
 	id := app.next_session_id
 	node, err := layout.split_direction(w.tree, w.tree.focus, direction, ratio, {.Terminal, id})
 	if err != nil {
@@ -280,7 +307,7 @@ pane_split :: proc(app: ^App, w: ^Window, direction: layout.Direction, ratio: f3
 		notify(app, .Error, "Could not split the pane.")
 		return
 	}
-	if focus { pane_focus(app, w, node) }
+	if focus {pane_focus(app, w, node)}
 	window_relayout(app, w)
 }
 
@@ -292,34 +319,38 @@ pane_zoom :: proc(app: ^App, w: ^Window) {
 
 pane_keep_open :: proc(app: ^App, w: ^Window) {
 	entry := focused_session(app, w)
-	if entry == nil { return }
+	if entry == nil {return}
 	entry.keep_open = !entry.keep_open
-	notify(app, .Info, entry.keep_open ? "Pane will stay open after exit." : "Pane will close after exit.")
-	if !entry.keep_open && entry.status == .Exited { _ = close_exited_session(app, entry.id) }
+	notify(
+		app,
+		.Info,
+		entry.keep_open ? "Pane will stay open after exit." : "Pane will close after exit.",
+	)
+	if !entry.keep_open && entry.status == .Exited {_ = close_exited_session(app, entry.id)}
 }
 
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
 	workspace := w.workspace
-	if index < 0 || index >= len(workspace.tabs) { return }
+	if index < 0 || index >= len(workspace.tabs) {return}
 	group := workspace.tabs[index].marked
 	if group {
-		for i := len(workspace.tabs)-1; i >= 0; i -= 1 {
-			if workspace.tabs[i].marked { workspace_close_tab(app, workspace, i) }
+		for i := len(workspace.tabs) - 1; i >= 0; i -= 1 {
+			if workspace.tabs[i].marked {workspace_close_tab(app, workspace, i)}
 		}
-	} else { workspace_close_tab(app, workspace, index) }
-	if group && len(workspace.tabs) > 0 { tab_select_one(workspace, workspace.selected) }
+	} else {workspace_close_tab(app, workspace, index)}
+	if group && len(workspace.tabs) > 0 {tab_select_one(workspace, workspace.selected)}
 }
 
 // The tabs a close of `index` affects, its whole selected group when marked, and their panes.
 @(private)
 tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int, split: bool) {
-	if index < 0 || index >= len(workspace.tabs) { return }
+	if index < 0 || index >= len(workspace.tabs) {return}
 	group := workspace.tabs[index].marked
 	for tab, i in workspace.tabs {
-		if group ? !tab.marked : i != index { continue }
+		if group ? !tab.marked : i != index {continue}
 		count := 0
-		for node in tab.tree.nodes { if _, ok := node.(layout.Pane); ok { count += 1 } }
-		tabs, panes = tabs+1, panes+count
+		for node in tab.tree.nodes {if _, ok := node.(layout.Pane); ok {count += 1}}
+		tabs, panes = tabs + 1, panes + count
 		split ||= count > 1
 	}
 	return
@@ -328,7 +359,7 @@ tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int,
 // Closes a tab, or its selected group, after asking when that would end more than one pane in a tab.
 tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
 	_, _, split := tab_close_scope(w.workspace, index)
-	if !split || !app.settings.tab.confirm_close { tab_close(app, w, index); return }
+	if !split || !app.settings.tab.confirm_close {tab_close(app, w, index); return}
 	arrange_cancel(app, w)
 	leader_cancel(w)
 	pane_header_cancel(w)
@@ -348,38 +379,42 @@ close_confirm_text :: proc(app: ^App, w: ^Window) -> (title, body: string) {
 		title, body, _ = workspace_delete_text(app, w)
 		return
 	}
-	if index := tab_index_by_id(w.workspace, w.close_confirm_tab); w.close_confirm.open && index >= 0 {
+	if index := tab_index_by_id(w.workspace, w.close_confirm_tab);
+	   w.close_confirm.open && index >= 0 {
 		w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)
 	}
 	tabs, panes := w.close_confirm_tabs, w.close_confirm_panes
 	if tabs > 1 {
-		return fmt.tprintf("Close %d tabs with %d panes?", tabs, panes), "The shells running in them will exit."
+		return fmt.tprintf("Close %d tabs with %d panes?", tabs, panes),
+			"The shells running in them will exit."
 	}
-	return fmt.tprintf("Close this tab and its %d panes?", panes), "The shells running in it will exit."
+	return fmt.tprintf("Close this tab and its %d panes?", panes),
+		"The shells running in it will exit."
 }
 
 close_confirm_finish :: proc(app: ^App, w: ^Window, accept: bool) {
-	if w.close_confirm_workspace != 0 { workspace_delete_finish(app, w, accept); return }
+	if w.close_confirm_workspace != 0 {workspace_delete_finish(app, w, accept); return}
 	ui.confirm_close(&w.close_confirm)
 	w.dirty = true
 	if accept {
-		if index := tab_index_by_id(w.workspace, w.close_confirm_tab); index >= 0 { tab_close(app, w, index) }
+		if index := tab_index_by_id(w.workspace, w.close_confirm_tab);
+		   index >= 0 {tab_close(app, w, index)}
 	}
 	tab_close_restore(w)
 }
 
 tab_duplicate :: proc(app: ^App, w: ^Window) {
 	entry := focused_session(app, w)
-	if entry == nil || !pane_minimum_single(app, w) { return }
+	if entry == nil || !pane_minimum_single(app, w) {return}
 	raw := term.working_directory(entry.session, context.temp_allocator)
 	directory, err := settings.directory_label(raw, context.temp_allocator)
-	if err != nil { notify(app, .Error, "Could not resolve the pane directory."); return }
-	if directory == "" { directory = entry.header.launch_directory }
+	if err != nil {notify(app, .Error, "Could not resolve the pane directory."); return}
+	if directory == "" {directory = entry.header.launch_directory}
 	if !tab_create(app, w.workspace, entry.header.command, directory) {
 		notify(app, .Error, "Could not duplicate the tab.")
 		return
 	}
-	tab_select(app, w, len(w.workspace.tabs)-1)
+	tab_select(app, w, len(w.workspace.tabs) - 1)
 }
 
 tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {
@@ -387,20 +422,20 @@ tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {
 	marked := make([]bool, len(order), context.temp_allocator)
 	indices := make([]int, len(order), context.temp_allocator)
 	slot := 0
-	for tab, i in order { marked[i] = tab.marked; if end && !tab.marked { slot += 1 } }
-	if !ui.tab_group_order(marked, slot, indices) { return }
+	for tab, i in order {marked[i] = tab.marked; if end && !tab.marked {slot += 1}}
+	if !ui.tab_group_order(marked, slot, indices) {return}
 	for original, to in indices {
 		for current, from in w.workspace.tabs {
-			if current == order[original] { tab_move(app, w, from, to); break }
+			if current == order[original] {tab_move(app, w, from, to); break}
 		}
 	}
 }
 
 tab_close_restore :: proc(w: ^Window) {
-	if len(w.close_restore) == 0 { return }
+	if len(w.close_restore) == 0 {return}
 	for tab in w.workspace.tabs {
 		tab.marked = false
-		for id in w.close_restore { tab.marked ||= tab.id == id }
+		for id in w.close_restore {tab.marked ||= tab.id == id}
 	}
 	clear(&w.close_restore)
 	w.dirty = true
@@ -412,18 +447,18 @@ tab_close_subset :: proc(app: ^App, w: ^Window, right: bool) {
 		notify(app, .Error, "Could not select tabs to close.")
 		return
 	}
-	for tab in w.workspace.tabs { if tab.marked { append(&w.close_restore, tab.id) } }
+	for tab in w.workspace.tabs {if tab.marked {append(&w.close_restore, tab.id)}}
 	first := -1
 	for tab, i in w.workspace.tabs {
 		tab.marked = right ? i > w.workspace.selected : !tab.marked
-		if tab.marked && first < 0 { first = i }
+		if tab.marked && first < 0 {first = i}
 	}
-	if first >= 0 { tab_close_request(app, w, first) }
-	if !w.close_confirm.open { tab_close_restore(w) }
+	if first >= 0 {tab_close_request(app, w, first)}
+	if !w.close_confirm.open {tab_close_restore(w)}
 }
 
 tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {
-	for tab, i in workspace.tabs { if tab.id == id { return i } }
+	for tab, i in workspace.tabs {if tab.id == id {return i}}
 	return -1
 }
 
@@ -434,74 +469,81 @@ pane_close :: proc(app: ^App, w: ^Window) {
 @(private)
 workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: int) {
 	index := original_index
-	if index < 0 || index >= len(workspace.tabs) { return }
+	if index < 0 || index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[index]
-	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
-	for current, i in workspace.tabs { if current == tab { index = i; break } }
+	for w in app.windows {if w.workspace == workspace {arrange_cancel(app, w)}}
+	for current, i in workspace.tabs {if current == tab {index = i; break}}
 	was_selected := index == workspace.selected
 	if was_selected {
-		for w in app.windows { if w.workspace == workspace { focus_leave(app, w) } }
+		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
 	}
 	for node in tab.tree.nodes {
 		pane, ok := node.(layout.Pane)
-		if !ok { continue }
-		if pane.content.kind == .Terminal { session_close(app, pane.content.id); continue }
-		for w in app.windows { if w.workspace == workspace { ui.editor_destroy(&w.editor) } }
+		if !ok {continue}
+		if pane.content.kind == .Terminal {session_close(app, pane.content.id); continue}
+		for w in app.windows {if w.workspace == workspace {ui.editor_destroy(&w.editor)}}
 	}
 	ordered_remove(&workspace.tabs, index)
 	for w in app.windows {
-		if w.workspace == workspace && index < len(w.tab_positions) { ordered_remove(&w.tab_positions, index) }
-		if w.workspace == workspace && index < len(w.tab_controls) { ordered_remove(&w.tab_controls, index) }
+		if w.workspace == workspace &&
+		   index < len(w.tab_positions) {ordered_remove(&w.tab_positions, index)}
+		if w.workspace == workspace &&
+		   index < len(w.tab_controls) {ordered_remove(&w.tab_controls, index)}
 	}
 	layout.destroy(&tab.tree)
 	delete(tab.title)
 	delete(tab.name)
 	free(tab)
-	if index < workspace.selected { workspace.selected -= 1 }
-	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs)-1))
-	for i := len(app.windows)-1; i >= 0; i -= 1 {
+	if index < workspace.selected {workspace.selected -= 1}
+	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs) - 1))
+	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		w := app.windows[i]
-		if w.workspace != workspace { continue }
+		if w.workspace != workspace {continue}
 		if len(workspace.tabs) == 0 {
 			w.tree = nil
 			hide_to_tray(app, w)
 		} else {
 			w.tree = &selected_tab(workspace).tree
 			window_relayout(app, w)
-			if was_selected { focus_enter(app, w) }
+			if was_selected {focus_enter(app, w)}
 		}
 	}
 }
 
 @(private)
-pane_remove :: proc(app: ^App, workspace: ^Workspace, original_tab_index: int, node: layout.Node_Id) {
+pane_remove :: proc(
+	app: ^App,
+	workspace: ^Workspace,
+	original_tab_index: int,
+	node: layout.Node_Id,
+) {
 	tab_index := original_tab_index
 	tab := workspace.tabs[tab_index]
-	for w in app.windows { if w.workspace == workspace { arrange_cancel(app, w) } }
-	for current, i in workspace.tabs { if current == tab { tab_index = i; break } }
+	for w in app.windows {if w.workspace == workspace {arrange_cancel(app, w)}}
+	for current, i in workspace.tabs {if current == tab {tab_index = i; break}}
 	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
-	if !is_pane { return }
-	if tab.tree.root == node { workspace_close_tab(app, workspace, tab_index); return }
+	if !is_pane {return}
+	if tab.tree.root == node {workspace_close_tab(app, workspace, tab_index); return}
 	visible := tab_index == workspace.selected
 	was_focused := visible && tab.tree.focus == node
 	if was_focused {
-		for w in app.windows { if w.workspace == workspace { focus_leave(app, w) } }
+		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
 	}
-	if !layout.remove(&tab.tree, node) { return }
+	if !layout.remove(&tab.tree, node) {return}
 	session_close(app, pane.content.id)
 	tab_update_title(app, tab)
 	if visible {
 		for w in app.windows {
-			if w.workspace != workspace { continue }
+			if w.workspace != workspace {continue}
 			window_relayout(app, w)
-			if was_focused { focus_enter(app, w) }
+			if was_focused {focus_enter(app, w)}
 		}
 	}
 }
 
 @(require_results)
 close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
-	if entry := session_find(app, id); entry != nil && entry.keep_open { return false }
+	if entry := session_find(app, id); entry != nil && entry.keep_open {return false}
 	for workspace in app.workspaces {
 		for tab, tab_index in workspace.tabs {
 			for node, node_index in tab.tree.nodes {
@@ -521,14 +563,14 @@ close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 @(private)
 tab_update_title :: proc(app: ^App, tab: ^Tab) {
 	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	if pane.content.kind == .Settings { return }
+	if pane.content.kind == .Settings {return}
 	title: string
 	if entry := session_find(app, pane.content.id); entry != nil {
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
 	}
-	if tab.name != "" { title = tab.name }
+	if tab.name != "" {title = tab.name}
 	owned, err := strings.clone(title)
-	if err != nil { log.error("copying the tab title failed"); return }
+	if err != nil {log.error("copying the tab title failed"); return}
 	delete(tab.title)
 	tab.title = owned
 }
@@ -537,7 +579,7 @@ session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 	for workspace in app.workspaces {
 		for tab in workspace.tabs {
 			pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-			if pane.content == {.Terminal, id} { tab_update_title(app, tab) }
+			if pane.content == {.Terminal, id} {tab_update_title(app, tab)}
 		}
 	}
 	for window in app.windows {
@@ -559,13 +601,20 @@ window_update_title :: proc(app: ^App, w: ^Window) {
 
 session_message :: proc(status: term.Status) -> string {
 	switch status.kind {
-	case .Running: return ""
+	case .Running:
+		return ""
 	case .Exited:
-		return fmt.tprintf("The shell exited with code %d. Press Enter to restart it.", status.exit_code)
+		return fmt.tprintf(
+			"The shell exited with code %d. Press Enter to restart it.",
+			status.exit_code,
+		)
 	case .Failed:
 		reason := status.message != "" ? status.message : "Could not start the shell."
-		return fmt.tprintf("%s Check shell.command and shell.directory in settings, " +
-			"then press Enter to try again.", reason)
+		return fmt.tprintf(
+			"%s Check shell.command and shell.directory in settings, " +
+			"then press Enter to try again.",
+			reason,
+		)
 	}
 	return ""
 }

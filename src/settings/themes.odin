@@ -3,25 +3,40 @@ package settings
 import "core:strconv"
 import "core:strings"
 
-Theme_Name :: enum int { Studio, Tide, Ember }
-Theme_Mode :: enum int { Dark, Light }
-Theme_Settings :: struct { name: Theme_Name, mode: Theme_Mode }
-Pane_Settings :: struct { gap, corner_radius: int, show_headers: bool, minimum_columns, minimum_rows: int }
+Theme_Name :: enum int {
+	Studio,
+	Tide,
+	Ember,
+}
+Theme_Mode :: enum int {
+	Dark,
+	Light,
+}
+Theme_Settings :: struct {
+	name: Theme_Name,
+	mode: Theme_Mode,
+}
+Pane_Settings :: struct {
+	gap, corner_radius:            int,
+	show_headers:                  bool,
+	minimum_columns, minimum_rows: int,
+}
 Color_Overrides :: struct {
 	foreground, background, cursor, cursor_text, selection_background: Maybe(Color),
-	selection_foreground: Maybe(Color),
-	search_foreground, search_background, search_selected_background: Maybe(Color),
-	palette: [16]Maybe(Color),
+	selection_foreground:                                              Maybe(Color),
+	search_foreground, search_background, search_selected_background:  Maybe(Color),
+	palette:                                                           [16]Maybe(Color),
 }
 Theme :: struct {
 	window, chrome, pane, raised, text, muted, faint, accent, accent_text: Color,
-	success, warning, danger, info: Color,
-	terminal: Color_Settings,
-	light: bool,
+	success, warning, danger, info:                                        Color,
+	terminal:                                                              Color_Settings,
+	light:                                                                 bool,
 }
 
 theme_resolve :: proc(s: Theme_Settings) -> Theme {
-	@(static, rodata) themes := [Theme_Name][Theme_Mode]Theme{
+	@(static, rodata)
+	themes := [Theme_Name][Theme_Mode]Theme {
 		.Studio = {
 			.Dark = {
 				window = {0x0c, 0x0c, 0x0e},
@@ -299,17 +314,18 @@ theme_resolve :: proc(s: Theme_Settings) -> Theme {
 @(private)
 resolve_colors :: proc(s: ^Settings) {
 	s.colors = theme_resolve(s.theme).terminal
-	if c, ok := s.color_overrides.foreground.?; ok { s.colors.foreground = c }
-	if c, ok := s.color_overrides.background.?; ok { s.colors.background = c }
-	if c, ok := s.color_overrides.cursor.?; ok { s.colors.cursor = c }
-	if c, ok := s.color_overrides.cursor_text.?; ok { s.colors.cursor_text = c }
-	if c, ok := s.color_overrides.selection_background.?; ok { s.colors.selection_background = c }
-	if c, ok := s.color_overrides.search_foreground.?; ok { s.colors.search_foreground = c }
-	if c, ok := s.color_overrides.search_background.?; ok { s.colors.search_background = c }
-	if c, ok := s.color_overrides.search_selected_background.?; ok { s.colors.search_selected_background = c }
+	if c, ok := s.color_overrides.foreground.?; ok {s.colors.foreground = c}
+	if c, ok := s.color_overrides.background.?; ok {s.colors.background = c}
+	if c, ok := s.color_overrides.cursor.?; ok {s.colors.cursor = c}
+	if c, ok := s.color_overrides.cursor_text.?; ok {s.colors.cursor_text = c}
+	if c, ok := s.color_overrides.selection_background.?; ok {s.colors.selection_background = c}
+	if c, ok := s.color_overrides.search_foreground.?; ok {s.colors.search_foreground = c}
+	if c, ok := s.color_overrides.search_background.?; ok {s.colors.search_background = c}
+	if c, ok := s.color_overrides.search_selected_background.?;
+	   ok {s.colors.search_selected_background = c}
 	s.colors.selection_foreground = s.color_overrides.selection_foreground
 	for value, i in s.color_overrides.palette {
-		if c, ok := value.?; ok { s.colors.palette[i] = c }
+		if c, ok := value.?; ok {s.colors.palette[i] = c}
 	}
 }
 
@@ -317,14 +333,22 @@ resolve_colors :: proc(s: ^Settings) {
 theme_color :: proc(s: ^Settings, key: string) -> (Color, bool) {
 	t := theme_resolve(s.theme).terminal
 	switch key {
-	case "colors.foreground": return t.foreground, true
-	case "colors.background": return t.background, true
-	case "colors.cursor": return t.cursor, true
-	case "colors.cursor_text": return t.cursor_text, true
-	case "colors.selection_background": return t.selection_background, true
-	case "colors.search_foreground": return t.search_foreground, true
-	case "colors.search_background": return t.search_background, true
-	case "colors.search_selected_background": return t.search_selected_background, true
+	case "colors.foreground":
+		return t.foreground, true
+	case "colors.background":
+		return t.background, true
+	case "colors.cursor":
+		return t.cursor, true
+	case "colors.cursor_text":
+		return t.cursor_text, true
+	case "colors.selection_background":
+		return t.selection_background, true
+	case "colors.search_foreground":
+		return t.search_foreground, true
+	case "colors.search_background":
+		return t.search_background, true
+	case "colors.search_selected_background":
+		return t.search_selected_background, true
 	}
 	if index, ok := strconv.parse_int(strings.trim_prefix(key, "colors.palette."), 10);
 	   ok && strings.has_prefix(key, "colors.palette.") && index >= 0 && index < len(t.palette) {

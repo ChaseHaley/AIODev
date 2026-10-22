@@ -1,7 +1,5 @@
 package main
 
-import "core:fmt"
-import "core:strings"
 import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
@@ -9,6 +7,8 @@ import "aio:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "core:fmt"
+import "core:strings"
 
 Workspace_Row :: struct {
 	id: u32,
@@ -32,16 +32,17 @@ WORKSPACE_ACTIONS :: [?]Action{.New_Workspace, .New_Window}
 
 @(private)
 workspace_rect_contains :: proc(r: render.Rect, x, y: f32) -> bool {
-	return x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height
+	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
 workspace_index :: proc(app: ^App, index: int) -> ^Workspace {
-	if index < 0 { return nil }
+	if index < 0 {return nil}
 	at := 0
 	for workspace in app.workspaces {
-		if workspace.provisional { continue }
-		if owner := window_for_workspace(app, workspace); owner != nil && owner.preparing { continue }
-		if at == index { return workspace }
+		if workspace.provisional {continue}
+		if owner := window_for_workspace(app, workspace);
+		   owner != nil && owner.preparing {continue}
+		if at == index {return workspace}
 		at += 1
 	}
 	return nil
@@ -56,33 +57,35 @@ workspace_select_index :: proc(app: ^App, w: ^Window, index: int) {
 
 @(require_results)
 workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
-	if app.next_workspace_id == max(u32) { return nil }
+	if app.next_workspace_id == max(u32) {return nil}
 	workspace, err := new(Workspace)
-	if err != nil { return nil }
+	if err != nil {return nil}
 	number: u32
 	if !provisional {
 		workspace.name, number = workspace_default_name(app)
-		if number == 0 { free(workspace); return nil }
+		if number == 0 {free(workspace); return nil}
 	}
-	workspace.id = app.next_workspace_id+1
+	workspace.id = app.next_workspace_id + 1
 	workspace.provisional = provisional
 	if _, append_error := append(&app.workspaces, workspace); append_error != nil {
 		workspace_destroy(workspace)
 		return nil
 	}
 	app.next_workspace_id = workspace.id
-	if !provisional { app.next_workspace_number = number }
+	if !provisional {app.next_workspace_number = number}
 	workspace_pickers_refresh(app)
 	return workspace
 }
 
 @(require_results)
 workspace_discard_empty :: proc(app: ^App, workspace: ^Workspace) -> bool {
-	if workspace == nil || len(workspace.tabs) != 0 || window_for_workspace(app, workspace) != nil {
+	if workspace == nil ||
+	   len(workspace.tabs) != 0 ||
+	   window_for_workspace(app, workspace) != nil {
 		return false
 	}
 	for current, i in app.workspaces {
-		if current != workspace { continue }
+		if current != workspace {continue}
 		ordered_remove(&app.workspaces, i)
 		workspace_destroy(workspace)
 		workspace_pickers_refresh(app)
@@ -92,36 +95,38 @@ workspace_discard_empty :: proc(app: ^App, workspace: ^Workspace) -> bool {
 }
 
 workspace_find :: proc(app: ^App, id: u32) -> ^Workspace {
-	for workspace in app.workspaces { if workspace.id == id { return workspace } }
+	for workspace in app.workspaces {if workspace.id == id {return workspace}}
 	return nil
 }
 
 @(require_results)
 workspace_rename :: proc(app: ^App, workspace: ^Workspace, value: string) -> bool {
-	if workspace == nil || workspace_find(app, workspace.id) != workspace { return false }
+	if workspace == nil || workspace_find(app, workspace.id) != workspace {return false}
 	clean := settings.display_title(strings.trim_space(value), context.temp_allocator)
-	if clean == "" { return false }
+	if clean == "" {return false}
 	name, err := strings.clone(clean)
-	if err != nil { return false }
+	if err != nil {return false}
 	delete(workspace.name)
 	workspace.name = name
-	for w in app.windows { window_relayout(app, w) }
+	for w in app.windows {window_relayout(app, w)}
 	workspace_pickers_refresh(app)
 	return true
 }
 
 @(require_results)
 workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
-	if workspace == nil || workspace.provisional || workspace_find(app, workspace.id) != workspace { return false }
+	if workspace == nil ||
+	   workspace.provisional ||
+	   workspace_find(app, workspace.id) != workspace {return false}
 	if owner := window_for_workspace(app, workspace); owner != nil {
-		if owner.preparing { return false }
-		if owner == w { return true }
+		if owner.preparing {return false}
+		if owner == w {return true}
 		return window_activate(app, owner)
 	}
-	if len(workspace.tabs) == 0 && !tab_create(app, workspace) { return false }
+	if len(workspace.tabs) == 0 && !tab_create(app, workspace) {return false}
 	// Load before changing ownership so an unreadable settings file leaves the old view intact.
 	prepared: Window
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, &prepared) { return false }
+	if settings_tab_index(workspace) >= 0 && !settings_load(app, &prepared) {return false}
 	arrange_cancel(app, w)
 	focus_leave(app, w)
 	tab_close_restore(w)
@@ -132,10 +137,13 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	w.editor = prepared.editor
 	w.workspace = workspace
 	w.tree = &selected_tab(workspace).tree
-	if workspace.selection_anchor == 0 { tab_select_one(workspace, workspace.selected) }
+	if workspace.selection_anchor == 0 {tab_select_one(workspace, workspace.selected)}
 	clear(&w.tab_positions)
 	clear(&w.tab_controls)
-	w.tab_underline = {value = f32(workspace.selected), target = f32(workspace.selected)}
+	w.tab_underline = {
+		value  = f32(workspace.selected),
+		target = f32(workspace.selected),
+	}
 	w.tab_hover, w.tab_close_pressed = -1, -1
 	w.tab_pressed = false
 	window_relayout(app, w)
@@ -145,7 +153,7 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 
 workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
 	workspace := workspace_create_empty(app)
-	if workspace == nil { notify(app, .Error, "Could not create a workspace."); return }
+	if workspace == nil {notify(app, .Error, "Could not create a workspace."); return}
 	if !tab_create(app, workspace) {
 		_ = workspace_discard_empty(app, workspace)
 		notify(app, .Error, "Could not create the workspace shell.")
@@ -172,9 +180,9 @@ workspace_button_width :: proc(w: ^Window) -> f32 {
 
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	width := workspace_button_width(w)
-	if width <= 12*w.scale { return .Ok }
-	r := render.Rect{5*w.scale, 6*w.scale, max(0, width-10*w.scale), 28*w.scale}
-	if render.push_layer(&w.list, {0, 0, width, ui.TAB_HEIGHT*w.scale}) != .None { return .Ok }
+	if width <= 12 * w.scale {return .Ok}
+	r := render.Rect{5 * w.scale, 6 * w.scale, max(0, width - 10 * w.scale), 28 * w.scale}
+	if render.push_layer(&w.list, {0, 0, width, ui.TAB_HEIGHT * w.scale}) != .None {return .Ok}
 	fill := w.workspace_picker.open ? app.theme.selection : app.theme.pane
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = 6*w.scale}) != .None { return .Ok }
 	if width >= 72*w.scale {
@@ -194,13 +202,13 @@ workspace_status :: proc(app: ^App, workspace: ^Workspace) -> string {
 	for tab in workspace.tabs {
 		for node in tab.tree.nodes {
 			pane, ok := node.(layout.Pane)
-			if !ok || pane.content.kind != .Terminal { continue }
+			if !ok || pane.content.kind != .Terminal {continue}
 			entry := session_find(app, pane.content.id)
-			if entry == nil { continue }
+			if entry == nil {continue}
 			done ||= entry.status == .Exited
 			blocked ||= entry.status == .Failed
 			statuses, err := term.program_status(entry.session, context.temp_allocator)
-			if err != nil { continue }
+			if err != nil {continue}
 			for status in statuses {
 				done ||= status.state == .Done
 				blocked ||= status.state == .Blocked || status.state == .Error
@@ -214,13 +222,20 @@ workspace_status :: proc(app: ^App, workspace: ^Workspace) -> string {
 workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	clear(&p.rows)
-	query := strings.to_lower(strings.trim_space(ui.field_string(&p.query)), context.temp_allocator)
+	query := strings.to_lower(
+		strings.trim_space(ui.field_string(&p.query)),
+		context.temp_allocator,
+	)
 	for workspace in app.workspaces {
-		if workspace.provisional { continue }
-		if owner := window_for_workspace(app, workspace); owner != nil && owner.preparing { continue }
+		if workspace.provisional {continue}
+		if owner := window_for_workspace(app, workspace);
+		   owner != nil && owner.preparing {continue}
 		name := strings.to_lower(workspace.name, context.temp_allocator)
-		if query != "" && !strings.contains(name, query) { continue }
-		if _, err := append(&p.rows, Workspace_Row{workspace.id, workspace_status(app, workspace)}); err != nil {
+		if query != "" && !strings.contains(name, query) {continue}
+		if _, err := append(
+			&p.rows,
+			Workspace_Row{workspace.id, workspace_status(app, workspace)},
+		); err != nil {
 			notify(app, .Error, "Could not list all workspaces.")
 			break
 		}
@@ -240,19 +255,19 @@ workspace_pickers_refresh :: proc(app: ^App) {
 		if workspace_row_target(app, p.menu_id) == nil { p.menu_id = 0 }
 		if workspace_row_target(app, p.rename_id) == nil { workspace_row_rename_finish(app, w, false) }
 		id := p.selected >= 0 && p.selected < len(p.rows) ? p.rows[p.selected].id : 0
-		action := p.selected-len(p.rows)
+		action := p.selected - len(p.rows)
 		workspace_picker_filter(app, w)
 		if workspace_row_index(w, p.menu_id) < 0 { p.menu_id = 0 }
 		if workspace_row_index(w, p.rename_id) < 0 { workspace_row_rename_finish(app, w, false) }
 		if id != 0 {
-			for row, i in p.rows { if row.id == id { p.selected = i; break } }
-		} else { p.selected = len(p.rows)+clamp(action, 0, len(WORKSPACE_ACTIONS)-1) }
+			for row, i in p.rows {if row.id == id {p.selected = i; break}}
+		} else {p.selected = len(p.rows) + clamp(action, 0, len(WORKSPACE_ACTIONS) - 1)}
 	}
 }
 
 workspace_picker_status_changed :: proc(app: ^App) {
 	for w in app.windows {
-		if !w.workspace_picker.open { continue }
+		if !w.workspace_picker.open {continue}
 		for &row in w.workspace_picker.rows {
 			if workspace := workspace_find(app, row.id); workspace != nil {
 				row.status = workspace_status(app, workspace)
@@ -277,7 +292,7 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	w.workspace_picker.rename_motion = {}
 	w.rename.dragging = false
 	workspace_picker_filter(app, w)
-	for row, i in w.workspace_picker.rows { if row.id == w.workspace.id { w.workspace_picker.selected = i } }
+	for row, i in w.workspace_picker.rows {if row.id == w.workspace.id {w.workspace_picker.selected = i}}
 }
 
 workspace_icon_open :: proc(app: ^App, w: ^Window) {
@@ -314,9 +329,10 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 		}
 		return
 	}
-	if index-count >= 0 && index-count < len(WORKSPACE_ACTIONS) {
-		@(static, rodata) actions := WORKSPACE_ACTIONS
-		run_action(app, w, actions[index-count])
+	if index - count >= 0 && index - count < len(WORKSPACE_ACTIONS) {
+		@(static, rodata)
+		actions := WORKSPACE_ACTIONS
+		run_action(app, w, actions[index - count])
 	}
 }
 
@@ -336,14 +352,14 @@ workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 }
 
 workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
-	if !e.pressed { return }
+	if !e.pressed {return}
 	p := &w.workspace_picker
 	if workspace_row_key(app, w, e) { return }
 	count := workspace_picker_count(w)
 	w.dirty = true
 	if p.icons && workspace_icon_picker_key(w, e) { return }
 	if step := ui.list_step(e); step != 0 {
-		p.selected = (p.selected+count+step)%count
+		p.selected = (p.selected + count + step) % count
 		return
 	}
 	#partial switch e.key {
@@ -361,9 +377,13 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		}
 	case:
 		switch clipboard_chord(e) {
-		case .Copy: clipboard_copy(app, ui.field_selected_text(&p.query))
+		case .Copy:
+			clipboard_copy(app, ui.field_selected_text(&p.query))
 		case .Cut:
-			if clipboard_copy(app, ui.field_selected_text(&p.query)) { workspace_picker_text(app, w, "") }
+			if clipboard_copy(
+				app,
+				ui.field_selected_text(&p.query),
+			) {workspace_picker_text(app, w, "")}
 		case .Paste:
 			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
 				workspace_picker_text(app, w, text)
@@ -387,8 +407,8 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 		return g.panel, g.visible_rows
 	}
 	s := w.scale
-	x, y := 5*s, ui.TAB_HEIGHT*s
-	width := min(380*s, max(0, f32(w.width)-10*s))
+	x, y := 5 * s, ui.TAB_HEIGHT * s
+	width := min(380 * s, max(0, f32(w.width) - 10 * s))
 	header := workspace_picker_header(w)
 	extra := workspace_row_rename_height(w)
 	reserve := w.workspace_picker.rename_id != 0 ? 68*s : 0
@@ -418,11 +438,11 @@ workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	if w.workspace_picker.icons { return workspace_icon_picker_hit(w, x, y) }
 	r, rows := workspace_picker_rect(w)
-	if !workspace_rect_contains(r, x, y) { return -1 }
-	for visible in 0..<rows {
-		i := w.workspace_picker.scroll+visible
-		if i >= workspace_picker_count(w) { break }
-		if workspace_rect_contains(workspace_picker_row_rect(w, i), x, y) { return i }
+	if !workspace_rect_contains(r, x, y) {return -1}
+	for visible in 0 ..< rows {
+		i := w.workspace_picker.scroll + visible
+		if i >= workspace_picker_count(w) {break}
+		if workspace_rect_contains(workspace_picker_row_rect(w, i), x, y) {return i}
 	}
 	return -1
 }
@@ -455,7 +475,7 @@ workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend:
 	if w.workspace_picker.rename_id != 0 { r, f = workspace_row_rename_field_rect(w), &w.rename }
 	width := max(1, r.width-16*w.scale)
 	start := ui.field_view_start(f, &w.ui_text, width)
-	at := ui.field_offset_at(f, &w.ui_text, start, r.x+8*w.scale, x)
+	at := ui.field_offset_at(f, &w.ui_text, start, r.x + 8 * w.scale, x)
 	ui.field_pointer(f, at, pressed, extend)
 	w.dirty = true
 }
@@ -487,42 +507,65 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if i >= workspace_picker_count(w) { break }
 		row := workspace_picker_row_rect(w, i)
 		if !p.icons && i == len(p.rows) {
-			divider := render.Rect{row.x+6*s, row.y-5*s, max(0, row.width-12*s), s}
-			if render.push_rect(&w.list, {rect = divider, color = app.theme.border}) != .None { return .Ok }
+			divider := render.Rect{row.x + 6 * s, row.y - 5 * s, max(0, row.width - 12 * s), s}
+			if render.push_rect(&w.list, {rect = divider, color = app.theme.border}) !=
+			   .None {return .Ok}
 		}
 		if i == p.selected {
-			if render.push_rect(&w.list, {rect = row, color = app.theme.selection, radius = 5*s}) != .None { return .Ok }
+			if render.push_rect(
+				   &w.list,
+				   {rect = row, color = app.theme.selection, radius = 5 * s},
+			   ) !=
+			   .None {return .Ok}
 		}
 		label, detail := "", ""
 		icon := Workspace_Icon{}
 		has_icon := false
 		if i < len(p.rows) {
 			workspace := workspace_find(app, p.rows[i].id)
-			if workspace == nil { continue }
+			if workspace == nil {continue}
 			label, detail, icon, has_icon = workspace.name, p.rows[i].status, workspace.icon, true
 			if workspace == w.workspace { detail = "Current" }
 			else if window_for_workspace(app, workspace) != nil { detail = "Open in window" }
 			if p.rows[i].status != "" && detail != p.rows[i].status {
 				detail = fmt.tprintf("%s · %s", detail, p.rows[i].status)
 			}
-		} else { label = action_info[actions[i-len(p.rows)]].title }
-		baseline := row.y+(row.height-w.ui_text.line_height)/2+w.ui_text.ascent
-		label_x := row.x+8*s
+		} else {label = action_info[actions[i - len(p.rows)]].title}
+		baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
+		label_x := row.x + 8 * s
 		if has_icon {
-			if result := workspace_icon_draw(w, icon, {row.x+6*s, row.y+5*s, 24*s, 24*s},
-				app.theme.text); result != .Ok { return result }
-			label_x += 30*s
+			if result := workspace_icon_draw(
+				w,
+				icon,
+				{row.x + 6 * s, row.y + 5 * s, 24 * s, 24 * s},
+				app.theme.text,
+			); result != .Ok {return result}
+			label_x += 30 * s
 		}
 		right := row.x+row.width-8*s
 		if has_icon {
 			workspace_row_ellipsis_draw(app, w, i)
 			right -= 36*s
 		}
-		detail_width := min(ui.text_width(&w.ui_text, detail), max(0, (right-label_x)*0.5))
-		if result := ui.draw_fading_text(&w.ui_text, &w.list, label, label_x, baseline,
-			app.theme.text, max(0, right-label_x-detail_width-8*s)); result != .Ok { return result }
-		if result := ui.draw_fading_text(&w.ui_text, &w.list, detail, right-detail_width,
-			baseline, app.theme.muted, detail_width); result != .Ok { return result }
+		detail_width := min(ui.text_width(&w.ui_text, detail), max(0, (right - label_x) * 0.5))
+		if result := ui.draw_fading_text(
+			&w.ui_text,
+			&w.list,
+			label,
+			label_x,
+			baseline,
+			app.theme.text,
+			max(0, right - label_x - detail_width - 8 * s),
+		); result != .Ok {return result}
+		if result := ui.draw_fading_text(
+			&w.ui_text,
+			&w.list,
+			detail,
+			right - detail_width,
+			baseline,
+			app.theme.muted,
+			detail_width,
+		); result != .Ok {return result}
 	}
 	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }
 	return workspace_row_menu_draw(app, w)

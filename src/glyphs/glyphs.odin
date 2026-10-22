@@ -1,10 +1,10 @@
 package glyphs
 
+import "aio:font"
+import "aio:render"
 import "base:runtime"
 import "core:log"
 import "core:math"
-import "aio:font"
-import "aio:render"
 
 Sprite :: enum u8 {
 	Curly_Underline,
@@ -14,11 +14,11 @@ Sprite :: enum u8 {
 
 // Where a glyph or sprite sits in the atlas and how to place it relative to the pen position on the baseline.
 Entry :: struct {
-	atlas: render.Rect,
+	atlas:  render.Rect,
 	offset: [2]f32,
-	size: [2]f32,
+	size:   [2]f32,
 	// The atlas rect is in the RGBA atlas and the glyph draws in its own colors.
-	color: bool,
+	color:  bool,
 }
 
 Result :: enum {
@@ -27,35 +27,40 @@ Result :: enum {
 }
 
 Cache :: struct {
-	allocator: runtime.Allocator,
-	fonts: ^font.System,
-	device: ^render.Device,
-	glyphs: map[Glyph_Key]Entry,
-	sprites: map[Sprite_Key]Entry,
+	allocator:  runtime.Allocator,
+	fonts:      ^font.System,
+	device:     ^render.Device,
+	glyphs:     map[Glyph_Key]Entry,
+	sprites:    map[Sprite_Key]Entry,
 	generation: u64,
 }
 
 @(private)
 Glyph_Key :: struct {
-	face: font.Face_Id,
-	index: u16,
+	face:   font.Face_Id,
+	index:  u16,
 	size_q: u32,
-	color: bool,
+	color:  bool,
 }
 
 @(private)
 Sprite_Key :: struct {
-	sprite: Sprite,
+	sprite:                   Sprite,
 	width, height, thickness: u16,
 }
 
-init :: proc(c: ^Cache, fonts: ^font.System, device: ^render.Device, allocator := context.allocator) {
+init :: proc(
+	c: ^Cache,
+	fonts: ^font.System,
+	device: ^render.Device,
+	allocator := context.allocator,
+) {
 	c^ = {
-		allocator = allocator,
-		fonts = fonts,
-		device = device,
-		glyphs = make(map[Glyph_Key]Entry, allocator),
-		sprites = make(map[Sprite_Key]Entry, allocator),
+		allocator  = allocator,
+		fonts      = fonts,
+		device     = device,
+		glyphs     = make(map[Glyph_Key]Entry, allocator),
+		sprites    = make(map[Sprite_Key]Entry, allocator),
 		generation = render.atlas_generation(device),
 	}
 }
@@ -89,7 +94,15 @@ validate :: proc(c: ^Cache) {
 // Reserves atlas space and uploads pixels. When the atlas is full it is reset, every entry is
 // forgotten, and the caller must rebuild the frame because entries it already used are stale.
 @(private)
-upload :: proc(c: ^Cache, width, height: i32, pixels: []u8, color := false) -> (render.Rect, Result) {
+upload :: proc(
+	c: ^Cache,
+	width, height: i32,
+	pixels: []u8,
+	color := false,
+) -> (
+	render.Rect,
+	Result,
+) {
 	slot, ok := render.atlas_reserve(c.device, width, height, color)
 	if !ok {
 		render.atlas_reset(c.device)
@@ -121,10 +134,10 @@ glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry,
 			return {}, result
 		}
 		entry = {
-			atlas = rect,
+			atlas  = rect,
 			offset = {f32(bitmap.left), -f32(bitmap.top)},
-			size = {f32(bitmap.width), f32(bitmap.height)},
-			color = bitmap.color,
+			size   = {f32(bitmap.width), f32(bitmap.height)},
+			color  = bitmap.color,
 		}
 	}
 	c.glyphs[key] = entry
@@ -147,7 +160,11 @@ sprite :: proc(c: ^Cache, kind: Sprite, cell_width, thickness: f32) -> (Entry, R
 	if result != .Ok {
 		return {}, result
 	}
-	entry := Entry{atlas = rect, offset = {0, -f32(h) / 2}, size = {f32(w), f32(h)}}
+	entry := Entry {
+		atlas  = rect,
+		offset = {0, -f32(h) / 2},
+		size   = {f32(w), f32(h)},
+	}
 	c.sprites[key] = entry
 	return entry, .Ok
 }
@@ -162,7 +179,9 @@ draw_sprite :: proc(kind: Sprite, width, height: int, thickness: f32, pixels: []
 			for x in 0 ..< width {
 				phase := (f32(x) + 0.5) / f32(width) * 2 * math.PI
 				curve := center + amplitude * math.sin(phase)
-				distance := abs(f32(y) + 0.5 - curve) * math.cos(math.atan(amplitude * 2 * math.PI / f32(width)))
+				distance :=
+					abs(f32(y) + 0.5 - curve) *
+					math.cos(math.atan(amplitude * 2 * math.PI / f32(width)))
 				coverage := clamp(thickness / 2 + 0.5 - distance, 0, 1)
 				pixels[y * width + x] = u8(coverage * 255)
 			}

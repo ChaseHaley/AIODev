@@ -6,14 +6,25 @@ import "core:unicode/utf8"
 
 MAX_SCORED_RUNES :: 256
 NO_SCORE :: -1.0e30
-Error :: enum { None, Invalid_UTF8, Output_Too_Small }
-Result :: struct { score: f64, matched: bool, scored: bool }
-Ranked :: struct { index: int, score: f64 }
+Error :: enum {
+	None,
+	Invalid_UTF8,
+	Output_Too_Small,
+}
+Result :: struct {
+	score:   f64,
+	matched: bool,
+	scored:  bool,
+}
+Ranked :: struct {
+	index: int,
+	score: f64,
+}
 Scratch :: struct {
-	matches, gaps: [MAX_SCORED_RUNES][MAX_SCORED_RUNES]f64,
+	matches, gaps:      [MAX_SCORED_RUNES][MAX_SCORED_RUNES]f64,
 	candidate, pattern: [MAX_SCORED_RUNES]rune,
-	offsets: [MAX_SCORED_RUNES]int,
-	bonuses: [MAX_SCORED_RUNES]f64,
+	offsets:            [MAX_SCORED_RUNES]int,
+	bonuses:            [MAX_SCORED_RUNES]f64,
 }
 
 @(private)
@@ -28,9 +39,12 @@ fold :: proc(r: rune) -> rune {
 @(private)
 bonus :: proc(previous, current: rune) -> f64 {
 	switch previous {
-	case '/', '\\': return 0.9
-	case ' ', '_', '-': return 0.8
-	case '.': return 0.6
+	case '/', '\\':
+		return 0.9
+	case ' ', '_', '-':
+		return 0.8
+	case '.':
+		return 0.6
 	}
 	if unicode.is_lower(previous) && unicode.is_upper(current) {
 		return 0.7
@@ -44,7 +58,14 @@ score :: proc(query, candidate: string, scratch: ^Scratch) -> (Result, Error) {
 }
 
 @(require_results)
-match_positions :: proc(query, candidate: string, out: []int, scratch: ^Scratch) -> (Result, Error) {
+match_positions :: proc(
+	query, candidate: string,
+	out: []int,
+	scratch: ^Scratch,
+) -> (
+	Result,
+	Error,
+) {
 	if len(out) < utf8.rune_count(query) {
 		return {}, .Output_Too_Small
 	}
@@ -73,7 +94,7 @@ evaluate :: proc(query, candidate: string, out: []int, s: ^Scratch) -> (Result, 
 				}
 				count += 1
 				q += size
-				if q == len(query) { return {NO_SCORE, true, false}, .None }
+				if q == len(query) {return {NO_SCORE, true, false}, .None}
 			}
 		}
 		return {}, .None
@@ -92,37 +113,43 @@ evaluate :: proc(query, candidate: string, out: []int, s: ^Scratch) -> (Result, 
 		previous = r
 		i += 1
 	}
-	for row in 0..<m {
+	for row in 0 ..< m {
 		gap := -0.01
-		if row == m-1 {
+		if row == m - 1 {
 			gap = -0.005
 		}
 		best := NO_SCORE
-		for col in 0..<n {
+		for col in 0 ..< n {
 			value := NO_SCORE
 			if s.pattern[row] == s.candidate[col] {
 				if row == 0 {
-					value = f64(col)*(-0.005) + s.bonuses[col]
+					value = f64(col) * (-0.005) + s.bonuses[col]
 				} else if col > 0 {
-					value = max(s.gaps[row-1][col-1]+s.bonuses[col], s.matches[row-1][col-1]+1)
+					value = max(
+						s.gaps[row - 1][col - 1] + s.bonuses[col],
+						s.matches[row - 1][col - 1] + 1,
+					)
 				}
 			}
 			s.matches[row][col] = value
-			best = max(value, best+gap)
+			best = max(value, best + gap)
 			s.gaps[row][col] = best
 		}
 	}
-	value := s.gaps[m-1][n-1]
-	if value <= NO_SCORE/2 { return {}, .None }
+	value := s.gaps[m - 1][n - 1]
+	if value <= NO_SCORE / 2 {return {}, .None}
 	if out != nil {
-		col := n-1
+		col := n - 1
 		consecutive := false
-		for row := m-1; row >= 0; row -= 1 {
+		for row := m - 1; row >= 0; row -= 1 {
 			for col >= 0 {
-				if s.matches[row][col] > NO_SCORE/2 &&
+				if s.matches[row][col] > NO_SCORE / 2 &&
 				   (consecutive || s.matches[row][col] == s.gaps[row][col]) {
 					out[row] = s.offsets[col]
-					consecutive = row > 0 && col > 0 && s.matches[row][col] == s.matches[row-1][col-1]+1
+					consecutive =
+						row > 0 &&
+						col > 0 &&
+						s.matches[row][col] == s.matches[row - 1][col - 1] + 1
 					col -= 1
 					break
 				}
@@ -137,17 +164,25 @@ evaluate :: proc(query, candidate: string, out: []int, s: ^Scratch) -> (Result, 
 }
 
 @(require_results)
-rank :: proc(query: string, candidates: []string, out: []Ranked, scratch: ^Scratch) -> (int, Error) {
-	if !utf8.valid_string(query) { return 0, .Invalid_UTF8 }
-	if len(out) < len(candidates) { return 0, .Output_Too_Small }
+rank :: proc(
+	query: string,
+	candidates: []string,
+	out: []Ranked,
+	scratch: ^Scratch,
+) -> (
+	int,
+	Error,
+) {
+	if !utf8.valid_string(query) {return 0, .Invalid_UTF8}
+	if len(out) < len(candidates) {return 0, .Output_Too_Small}
 	count := 0
 	for candidate, index in candidates {
 		result, err := score(query, candidate, scratch)
-		if err != .None { return 0, err }
-		if !result.matched { continue }
+		if err != .None {return 0, err}
+		if !result.matched {continue}
 		position := count
-		for position > 0 && out[position-1].score < result.score {
-			out[position] = out[position-1]
+		for position > 0 && out[position - 1].score < result.score {
+			out[position] = out[position - 1]
 			position -= 1
 		}
 		out[position] = {index, result.score}
@@ -155,4 +190,3 @@ rank :: proc(query: string, candidates: []string, out: []Ranked, scratch: ^Scrat
 	}
 	return count, .None
 }
-

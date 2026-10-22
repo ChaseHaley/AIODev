@@ -26,14 +26,14 @@ command_line :: proc(allocator: runtime.Allocator) -> (args: []string, error: Er
 			}
 		}
 	}
-	if count < 1 { return nil, .System }
+	if count < 1 {return nil, .System}
 	allocation_error: runtime.Allocator_Error
-	args, allocation_error = make([]string, int(count)-1, allocator)
-	if allocation_error != nil { return nil, .Out_Of_Memory }
+	args, allocation_error = make([]string, int(count) - 1, allocator)
+	if allocation_error != nil {return nil, .Out_Of_Memory}
 	for &arg, i in args {
-		units := cast([^]u16)wide[i+1]
+		units := cast([^]u16)wide[i + 1]
 		n := 0
-		for units[n] != 0 { n += 1 }
+		for units[n] != 0 {n += 1}
 		bytes, conversion_error := w.utf16_to_utf8(units[:n], allocator)
 		if conversion_error != nil {
 			command_line_destroy(args, allocator)
@@ -50,6 +50,6 @@ command_line :: proc(allocator: runtime.Allocator) -> (args: []string, error: Er
 }
 
 command_line_destroy :: proc(args: []string, allocator: runtime.Allocator) {
-	for arg in args { delete(arg, allocator) }
+	for arg in args {delete(arg, allocator)}
 	delete(args, allocator)
 }

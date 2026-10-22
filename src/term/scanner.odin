@@ -1,6 +1,7 @@
 package term
 
-@(private) WIN32_INPUT_MODE :: 9001
+@(private)
+WIN32_INPUT_MODE :: 9001
 
 @(private)
 Scan_State :: enum u8 {
@@ -13,8 +14,8 @@ Scan_State :: enum u8 {
 
 // Tracks DEC private mode 9001 (win32-input-mode), which libghostty does not model, across reads.
 Mode_Scanner :: struct {
-	state: Scan_State,
-	parameter: u32,
+	state:        Scan_State,
+	parameter:    u32,
 	targets_mode: bool,
 }
 

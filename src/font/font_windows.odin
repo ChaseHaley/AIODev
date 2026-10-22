@@ -1,56 +1,56 @@
 package font
 
+import dw "aio:dwrite"
 import "base:runtime"
 import "core:log"
 import "core:math"
 import "core:slice"
+import windows "core:sys/windows"
 import "core:unicode/utf16"
 import "core:unicode/utf8"
-import windows "core:sys/windows"
-import dw "aio:dwrite"
 
 System :: struct {
-	allocator: runtime.Allocator,
-	factory: ^dw.IFactory2,
+	allocator:  runtime.Allocator,
+	factory:    ^dw.IFactory2,
 	collection: ^dw.IFontCollection,
-	fallback: ^dw.IFontFallback,
-	faces: [dynamic]Face,
-	families: [dynamic]Loaded_Family,
-	cache: map[Lookup_Key]Lookup_Result,
-	gamma: Text_Gamma,
-	shaping: Shaping,
+	fallback:   ^dw.IFontFallback,
+	faces:      [dynamic]Face,
+	families:   [dynamic]Loaded_Family,
+	cache:      map[Lookup_Key]Lookup_Result,
+	gamma:      Text_Gamma,
+	shaping:    Shaping,
 }
 
 @(private)
 Face :: struct {
-	handle: ^dw.IFontFace,
-	metrics: dw.Font_Metrics,
+	handle:      ^dw.IFontFace,
+	metrics:     dw.Font_Metrics,
 	glyph_count: u16,
-	files: []File_Identity,
-	index: u32,
+	files:       []File_Identity,
+	index:       u32,
 	simulations: dw.Font_Simulations,
 }
 
 @(private)
 File_Identity :: struct {
-	file: ^dw.IFontFile,
+	file:   ^dw.IFontFile,
 	loader: ^windows.IUnknown,
-	key: []u8,
+	key:    []u8,
 }
 
 @(private)
 Loaded_Family :: struct {
-	value: Family,
-	name: windows.wstring,
+	value:            Family,
+	name:             windows.wstring,
 	collection_index: u32,
-	semibold: bool,
+	semibold:         bool,
 }
 
 @(private)
 Lookup_Key :: struct {
 	family: Family,
-	style: Style,
-	r: rune,
+	style:  Style,
+	r:      rune,
 }
 
 @(private)
@@ -93,11 +93,16 @@ system_create :: proc(allocator := context.allocator) -> (^System, Error) {
 	if !shaping_init(&s.shaping, allocator) {
 		return nil, .Out_Of_Memory
 	}
-	if !checked(dw.create_factory(.Shared, dw.IFactory2_UUID, cast(^^windows.IUnknown)&s.factory),
-	            "DWriteCreateFactory") {
+	if !checked(
+		dw.create_factory(.Shared, dw.IFactory2_UUID, cast(^^windows.IUnknown)&s.factory),
+		"DWriteCreateFactory",
+	) {
 		return nil, .DirectWrite
 	}
-	if !checked(s.factory->GetSystemFontCollection(&s.collection, false), "GetSystemFontCollection") ||
+	if !checked(
+		   s.factory->GetSystemFontCollection(&s.collection, false),
+		   "GetSystemFontCollection",
+	   ) ||
 	   !checked(s.factory->GetSystemFontFallback(&s.fallback), "GetSystemFontFallback") {
 		return nil, .DirectWrite
 	}
@@ -107,8 +112,10 @@ system_create :: proc(allocator := context.allocator) -> (^System, Error) {
 	}
 	defer release(params)
 	grayscale: ^dw.IRenderingParams1
-	if !checked(params->QueryInterface(dw.IRenderingParams1_UUID, cast(^rawptr)&grayscale),
-	            "QueryInterface(RenderingParams1)") {
+	if !checked(
+		params->QueryInterface(dw.IRenderingParams1_UUID, cast(^rawptr)&grayscale),
+		"QueryInterface(RenderingParams1)",
+	) {
 		return nil, .DirectWrite
 	}
 	defer release(grayscale)
@@ -206,13 +213,15 @@ face_intern :: proc(s: ^System, font: ^dw.IFont) -> (Face_Id, Error) {
 		}
 	}
 	for existing, i in s.faces {
-		if existing.index != face.index || existing.simulations != face.simulations ||
+		if existing.index != face.index ||
+		   existing.simulations != face.simulations ||
 		   len(existing.files) != len(face.files) {
 			continue
 		}
 		equal := true
 		for file, j in face.files {
-			if file.loader != existing.files[j].loader || !slice.equal(file.key, existing.files[j].key) {
+			if file.loader != existing.files[j].loader ||
+			   !slice.equal(file.key, existing.files[j].key) {
 				equal = false
 				break
 			}
@@ -285,9 +294,12 @@ family_load :: proc(s: ^System, name: string, semibold: bool = false) -> (Family
 	family: Family
 	for style in Style {
 		weight, slant := style_values(style)
-		if semibold && style == .Regular { weight = .Semi_Bold }
+		if semibold && style == .Regular {weight = .Semi_Bold}
 		font: ^dw.IFont
-		if !checked(handle->GetFirstMatchingFont(weight, .Normal, slant, &font), "GetFirstMatchingFont") {
+		if !checked(
+			handle->GetFirstMatchingFont(weight, .Normal, slant, &font),
+			"GetFirstMatchingFont",
+		) {
 			return {}, .DirectWrite
 		}
 		id, err := face_intern(s, font)
@@ -394,8 +406,17 @@ lookup_uncached :: proc(
 		mapped: u32
 		font: ^dw.IFont
 		hr := s.fallback->MapCharacters(
-			&source.interface, 0, length, s.collection, name,
-			weight, slant, .Normal, &mapped, &font, &scale,
+			&source.interface,
+			0,
+			length,
+			s.collection,
+			name,
+			weight,
+			slant,
+			.Normal,
+			&mapped,
+			&font,
+			&scale,
 		)
 		defer release(font)
 		if !checked(hr, "MapCharacters") || font == nil || mapped < length || !valid_size(scale) {
@@ -413,7 +434,10 @@ lookup_uncached :: proc(
 		}
 	}
 	metrics: dw.Glyph_Metrics
-	if !checked(face.handle->GetDesignGlyphMetrics(&index, 1, &metrics, false), "GetDesignGlyphMetrics") {
+	if !checked(
+		face.handle->GetDesignGlyphMetrics(&index, 1, &metrics, false),
+		"GetDesignGlyphMetrics",
+	) {
 		return {}
 	}
 	advance_em := f32(metrics.advanceWidth) * scale / f32(face.metrics.designUnitsPerEm)
@@ -437,17 +461,23 @@ glyph_rasterize :: proc(
 	size_px: f32,
 	allocator: runtime.Allocator,
 	color := false,
-) -> (Bitmap, Error) {
+) -> (
+	Bitmap,
+	Error,
+) {
 	face := face_get(s, glyph.face)
-	if !valid_size(size_px) || !valid_size(glyph.scale) || !valid_size(size_px * glyph.scale) ||
-	   glyph.index == 0 || glyph.index >= face.glyph_count {
+	if !valid_size(size_px) ||
+	   !valid_size(glyph.scale) ||
+	   !valid_size(size_px * glyph.scale) ||
+	   glyph.index == 0 ||
+	   glyph.index >= face.glyph_count {
 		return {}, .Invalid_Argument
 	}
 	index := glyph.index
-	run := dw.Glyph_Run{
-		fontFace = face.handle,
-		fontEmSize = size_px * glyph.scale,
-		glyphCount = 1,
+	run := dw.Glyph_Run {
+		fontFace     = face.handle,
+		fontEmSize   = size_px * glyph.scale,
+		glyphCount   = 1,
 		glyphIndices = &index,
 	}
 	if color {
@@ -460,7 +490,15 @@ glyph_rasterize :: proc(
 	if err != .None || coverage == nil {
 		return {}, err
 	}
-	return {coverage, bounds.right - bounds.left, bounds.bottom - bounds.top, bounds.left, -bounds.top, false}, .None
+	return {
+			coverage,
+			bounds.right - bounds.left,
+			bounds.bottom - bounds.top,
+			bounds.left,
+			-bounds.top,
+			false,
+		},
+		.None
 }
 
 // Returns nil pixels for an empty glyph.
@@ -470,10 +508,22 @@ rasterize_coverage :: proc(
 	run: ^dw.Glyph_Run,
 	x, y: f32,
 	allocator: runtime.Allocator,
-) -> ([]u8, windows.RECT, Error) {
+) -> (
+	[]u8,
+	windows.RECT,
+	Error,
+) {
 	analysis: ^dw.IGlyphRunAnalysis
 	hr := s.factory->CreateGlyphRunAnalysis_2(
-		run, nil, .Natural_Symmetric, .Natural, .Enabled, .Grayscale, x, y, &analysis,
+		run,
+		nil,
+		.Natural_Symmetric,
+		.Natural,
+		.Enabled,
+		.Grayscale,
+		x,
+		y,
+		&analysis,
 	)
 	if !checked(hr, "CreateGlyphRunAnalysis") {
 		return nil, {}, .DirectWrite
@@ -488,8 +538,12 @@ rasterize_coverage :: proc(
 	if width == 0 || height == 0 {
 		return nil, {}, .None
 	}
-	if width < 0 || height < 0 || width > i64(max(i32)) || height > i64(max(i32)) ||
-	   width * height > i64(max(u32)) / 4 || bounds.top == min(i32) {
+	if width < 0 ||
+	   height < 0 ||
+	   width > i64(max(i32)) ||
+	   height > i64(max(i32)) ||
+	   width * height > i64(max(u32)) / 4 ||
+	   bounds.top == min(i32) {
 		return nil, {}, .Invalid_Argument
 	}
 	pixels, alloc_err := make([]u8, int(width * height), allocator)
@@ -507,7 +561,15 @@ rasterize_coverage :: proc(
 // Composites a color glyph's layers into premultiplied RGBA. Reports found false for a glyph
 // without color layers. Layers that use the text color are drawn white.
 @(private, require_results)
-rasterize_color :: proc(s: ^System, run: ^dw.Glyph_Run, allocator: runtime.Allocator) -> (Bitmap, bool, Error) {
+rasterize_color :: proc(
+	s: ^System,
+	run: ^dw.Glyph_Run,
+	allocator: runtime.Allocator,
+) -> (
+	Bitmap,
+	bool,
+	Error,
+) {
 	layers: ^dw.IColorGlyphRunEnumerator
 	hr := s.factory->TranslateColorGlyphRun(0, 0, run, nil, .Natural, nil, 0, &layers)
 	if hr == dw.E_NOCOLOR {
@@ -519,12 +581,12 @@ rasterize_color :: proc(s: ^System, run: ^dw.Glyph_Run, allocator: runtime.Alloc
 	defer release(layers)
 	Layer :: struct {
 		coverage: []u8,
-		bounds: windows.RECT,
-		color: [4]f32,
+		bounds:   windows.RECT,
+		color:    [4]f32,
 	}
 	collected := make([dynamic]Layer, allocator)
 	defer {
-		for layer in collected { delete(layer.coverage, allocator) }
+		for layer in collected {delete(layer.coverage, allocator)}
 		delete(collected)
 	}
 	union_bounds := windows.RECT{max(i32), max(i32), min(i32), min(i32)}
@@ -533,18 +595,25 @@ rasterize_color :: proc(s: ^System, run: ^dw.Glyph_Run, allocator: runtime.Alloc
 		if !checked(layers->MoveNext(&has_run), "ColorGlyphRunEnumerator.MoveNext") {
 			return {}, true, .DirectWrite
 		}
-		if !has_run { break }
+		if !has_run {break}
 		current: ^dw.Color_Glyph_Run
 		if !checked(layers->GetCurrentRun(&current), "ColorGlyphRunEnumerator.GetCurrentRun") {
 			return {}, true, .DirectWrite
 		}
-		coverage, bounds, err := rasterize_coverage(s, &current.glyphRun, current.baselineOriginX,
-			current.baselineOriginY, allocator)
-		if err != .None { return {}, true, err }
-		if coverage == nil { continue }
+		coverage, bounds, err := rasterize_coverage(
+			s,
+			&current.glyphRun,
+			current.baselineOriginX,
+			current.baselineOriginY,
+			allocator,
+		)
+		if err != .None {return {}, true, err}
+		if coverage == nil {continue}
 		c := current.runColor
-		layer_color := current.paletteIndex == 0xffff ? [4]f32{1, 1, 1, 1} : [4]f32{c.r, c.g, c.b, c.a}
-		if _, append_err := append(&collected, Layer{coverage, bounds, layer_color}); append_err != nil {
+		layer_color :=
+			current.paletteIndex == 0xffff ? [4]f32{1, 1, 1, 1} : [4]f32{c.r, c.g, c.b, c.a}
+		if _, append_err := append(&collected, Layer{coverage, bounds, layer_color});
+		   append_err != nil {
 			delete(coverage, allocator)
 			return {}, true, .Out_Of_Memory
 		}
@@ -577,18 +646,20 @@ rasterize_color :: proc(s: ^System, run: ^dw.Glyph_Run, allocator: runtime.Alloc
 		dx := int(layer.bounds.left - union_bounds.left)
 		dy := int(layer.bounds.top - union_bounds.top)
 		for value, i in layer.coverage {
-			if value == 0 { continue }
+			if value == 0 {continue}
 			a := f32(value) / 255 * layer.color.a
 			p := &accumulated[(dy + i / w) * int(width) + dx + i % w]
 			p^ = {layer.color.r * a, layer.color.g * a, layer.color.b * a, a} + p^ * (1 - a)
 		}
 	}
 	for p, i in accumulated {
-		for channel in 0..<4 {
+		for channel in 0 ..< 4 {
 			pixels[i * 4 + channel] = u8(math.round(clamp(p[channel], 0, 1) * 255))
 		}
 	}
-	return {pixels, i32(width), i32(height), union_bounds.left, -union_bounds.top, true}, true, .None
+	return {pixels, i32(width), i32(height), union_bounds.left, -union_bounds.top, true},
+		true,
+		.None
 }
 
 text_gamma :: proc(s: ^System) -> Text_Gamma {

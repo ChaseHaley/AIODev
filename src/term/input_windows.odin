@@ -1,16 +1,31 @@
 package term
 
+import "aio:ghostty"
+import "aio:platform"
 import "core:fmt"
 import "core:log"
 import "core:sync"
 import "core:unicode/utf16"
-import "aio:ghostty"
-import "aio:platform"
 
 // ConPTY's win32-input-mode: ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _ carries a complete console key event.
 @(private)
-append_win32_key :: proc(out: []u8, vk, scan_code, unit: u16, down: bool, state: u32, repeat: u16) -> int {
-	text := fmt.bprintf(out, "\x1b[%d;%d;%d;%d;%d;%d_", vk, scan_code, unit, down ? 1 : 0, state, max(repeat, 1))
+append_win32_key :: proc(
+	out: []u8,
+	vk, scan_code, unit: u16,
+	down: bool,
+	state: u32,
+	repeat: u16,
+) -> int {
+	text := fmt.bprintf(
+		out,
+		"\x1b[%d;%d;%d;%d;%d;%d_",
+		vk,
+		scan_code,
+		unit,
+		down ? 1 : 0,
+		state,
+		max(repeat, 1),
+	)
 	return len(text)
 }
 
@@ -38,7 +53,7 @@ send_key :: proc(s: ^Session, event: platform.Key_Event) -> bool {
 	result := ghostty.terminal_get(s.terminal, .Kitty_Keyboard_Flags, &flags)
 	encoded: [128]u8
 	n := 0
-	if result == .Success && flags != {} { n = encode_key(s, event, encoded[:]) }
+	if result == .Success && flags != {} {n = encode_key(s, event, encoded[:])}
 	sync.mutex_unlock(&s.mutex)
 	if result != .Success {
 		log.errorf("term: reading keyboard protocol flags failed: %v", result)
@@ -60,7 +75,13 @@ send_key :: proc(s: ^Session, event: platform.Key_Event) -> bool {
 	}
 	buffer: [512]u8
 	n = append_win32_key(
-		buffer[:], native.vk, native.scan_code, first, event.pressed, native.control_key_state, native.repeat_count,
+		buffer[:],
+		native.vk,
+		native.scan_code,
+		first,
+		event.pressed,
+		native.control_key_state,
+		native.repeat_count,
 	)
 	if event.pressed && len(units) > 1 {
 		for unit in units[1:] {

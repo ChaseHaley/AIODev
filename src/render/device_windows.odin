@@ -7,51 +7,54 @@ import d3d "vendor:directx/d3d11"
 import compiler "vendor:directx/d3d_compiler"
 import "vendor:directx/dxgi"
 
-@(private) ATLAS_INITIAL_SIZE :: 2048
-@(private) ATLAS_MAX_SIZE :: 4096
-@(private) COLOR_ATLAS_INITIAL_SIZE :: 1024
+@(private)
+ATLAS_INITIAL_SIZE :: 2048
+@(private)
+ATLAS_MAX_SIZE :: 4096
+@(private)
+COLOR_ATLAS_INITIAL_SIZE :: 1024
 
 Device :: struct {
-	allocator: runtime.Allocator,
-	native: ^d3d.IDevice,
-	ctx: ^d3d.IDeviceContext,
-	factory: ^dxgi.IFactory2,
-	rect_vs, glyph_vs: ^d3d.IVertexShader,
-	rect_ps, glyph_ps: ^d3d.IPixelShader,
-	blend: ^d3d.IBlendState,
-	rasterizer: ^d3d.IRasterizerState,
-	constants: ^d3d.IBuffer,
-	rects, glyphs: Instance_Buffer,
+	allocator:          runtime.Allocator,
+	native:             ^d3d.IDevice,
+	ctx:                ^d3d.IDeviceContext,
+	factory:            ^dxgi.IFactory2,
+	rect_vs, glyph_vs:  ^d3d.IVertexShader,
+	rect_ps, glyph_ps:  ^d3d.IPixelShader,
+	blend:              ^d3d.IBlendState,
+	rasterizer:         ^d3d.IRasterizerState,
+	constants:          ^d3d.IBuffer,
+	rects, glyphs:      Instance_Buffer,
 	atlas, color_atlas: Atlas,
-	generation: u64,
-	gamma: Text_Gamma,
+	generation:         u64,
+	gamma:              Text_Gamma,
 }
 
 @(private)
 Atlas :: struct {
-	texture: ^d3d.ITexture2D,
-	view: ^d3d.IShaderResourceView,
+	texture:                              ^d3d.ITexture2D,
+	view:                                 ^d3d.IShaderResourceView,
 	size, shelf_x, shelf_y, shelf_height: i32,
-	color: bool,
+	color:                                bool,
 }
 
 @(private)
 Instance_Buffer :: struct {
-	buffer: ^d3d.IBuffer,
-	view: ^d3d.IShaderResourceView,
+	buffer:   ^d3d.IBuffer,
+	view:     ^d3d.IShaderResourceView,
 	capacity: int,
 }
 
 @(private)
 Frame_Constants :: struct {
-	gamma_ratios: [4]f32,
-	target_size: [2]f32,
-	enhanced_contrast: f32,
+	gamma_ratios:            [4]f32,
+	target_size:             [2]f32,
+	enhanced_contrast:       f32,
 	rect_start, glyph_start: u32,
-	_: [3]f32,
-	round_clip: Rect,
-	clip_radius: f32,
-	_padding: [3]f32,
+	_:                       [3]f32,
+	round_clip:              Rect,
+	clip_radius:             f32,
+	_padding:                [3]f32,
 }
 
 @(private)
@@ -62,7 +65,12 @@ release :: proc(p: ^$T) {
 }
 
 @(private, require_results)
-checked :: proc(d: ^Device, hr: win.HRESULT, call: string, failure: Error = .Device_Failed) -> Error {
+checked :: proc(
+	d: ^Device,
+	hr: win.HRESULT,
+	call: string,
+	failure: Error = .Device_Failed,
+) -> Error {
 	if hr >= 0 {
 		return .None
 	}
@@ -82,7 +90,17 @@ compile_shader :: proc(entry, target: cstring) -> (^compiler.ID3DBlob, Error) {
 	source :: #load("shaders/draw.hlsl", string)
 	code, diagnostics: ^compiler.ID3DBlob
 	hr := compiler.Compile(
-		raw_data(source), len(source), "draw.hlsl", nil, nil, entry, target, 0, 0, &code, &diagnostics,
+		raw_data(source),
+		len(source),
+		"draw.hlsl",
+		nil,
+		nil,
+		entry,
+		target,
+		0,
+		0,
+		&code,
+		&diagnostics,
 	)
 	defer release(diagnostics)
 	if hr < 0 {
@@ -104,7 +122,12 @@ vertex_shader :: proc(d: ^Device, entry: cstring) -> (^d3d.IVertexShader, Error)
 	}
 	defer release(blob)
 	shader: ^d3d.IVertexShader
-	hr := d.native->CreateVertexShader(blob->GetBufferPointer(), blob->GetBufferSize(), nil, &shader)
+	hr := d.native->CreateVertexShader(
+		blob->GetBufferPointer(),
+		blob->GetBufferSize(),
+		nil,
+		&shader,
+	)
 	return shader, checked(d, hr, "CreateVertexShader")
 }
 
@@ -116,7 +139,12 @@ pixel_shader :: proc(d: ^Device, entry: cstring) -> (^d3d.IPixelShader, Error) {
 	}
 	defer release(blob)
 	shader: ^d3d.IPixelShader
-	hr := d.native->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nil, &shader)
+	hr := d.native->CreatePixelShader(
+		blob->GetBufferPointer(),
+		blob->GetBufferSize(),
+		nil,
+		&shader,
+	)
 	return shader, checked(d, hr, "CreatePixelShader")
 }
 
@@ -131,8 +159,16 @@ create_native_device :: proc(d: ^Device) -> win.HRESULT {
 		}
 		for {
 			hr = d3d.CreateDevice(
-				nil, driver, nil, flags, raw_data(levels[:]), len(levels), d3d.SDK_VERSION,
-				&d.native, nil, &d.ctx,
+				nil,
+				driver,
+				nil,
+				flags,
+				raw_data(levels[:]),
+				len(levels),
+				d3d.SDK_VERSION,
+				&d.native,
+				nil,
+				&d.ctx,
 			)
 			// The debug layer is optional; it is missing when the Graphics Tools feature is not installed.
 			if hr != dxgi.ERROR_SDK_COMPONENT_MISSING || .DEBUG not_in flags {
@@ -194,30 +230,36 @@ device_create :: proc(allocator := context.allocator) -> (^Device, Error) {
 	}
 	blend: d3d.BLEND_DESC
 	blend.RenderTarget[0] = {
-		BlendEnable = true,
-		SrcBlend = .ONE,
-		DestBlend = .INV_SRC_ALPHA,
-		BlendOp = .ADD,
-		SrcBlendAlpha = .ONE,
-		DestBlendAlpha = .INV_SRC_ALPHA,
-		BlendOpAlpha = .ADD,
+		BlendEnable           = true,
+		SrcBlend              = .ONE,
+		DestBlend             = .INV_SRC_ALPHA,
+		BlendOp               = .ADD,
+		SrcBlendAlpha         = .ONE,
+		DestBlendAlpha        = .INV_SRC_ALPHA,
+		BlendOpAlpha          = .ADD,
 		RenderTargetWriteMask = u8(d3d.COLOR_WRITE_ENABLE_ALL),
 	}
-	if err = checked(d, d.native->CreateBlendState(&blend, &d.blend), "CreateBlendState"); err != .None {
+	if err = checked(d, d.native->CreateBlendState(&blend, &d.blend), "CreateBlendState");
+	   err != .None {
 		return nil, err
 	}
-	rasterizer := d3d.RASTERIZER_DESC{FillMode = .SOLID, CullMode = .NONE, ScissorEnable = true}
+	rasterizer := d3d.RASTERIZER_DESC {
+		FillMode      = .SOLID,
+		CullMode      = .NONE,
+		ScissorEnable = true,
+	}
 	hr = d.native->CreateRasterizerState(&rasterizer, &d.rasterizer)
 	if err = checked(d, hr, "CreateRasterizerState"); err != .None {
 		return nil, err
 	}
-	constants := d3d.BUFFER_DESC{
-		ByteWidth = size_of(Frame_Constants),
-		Usage = .DYNAMIC,
-		BindFlags = {.CONSTANT_BUFFER},
+	constants := d3d.BUFFER_DESC {
+		ByteWidth      = size_of(Frame_Constants),
+		Usage          = .DYNAMIC,
+		BindFlags      = {.CONSTANT_BUFFER},
 		CPUAccessFlags = {.WRITE},
 	}
-	if err = checked(d, d.native->CreateBuffer(&constants, nil, &d.constants), "CreateBuffer"); err != .None {
+	if err = checked(d, d.native->CreateBuffer(&constants, nil, &d.constants), "CreateBuffer");
+	   err != .None {
 		return nil, err
 	}
 	d.color_atlas.color = true
@@ -252,12 +294,15 @@ device_destroy :: proc(d: ^Device) {
 }
 
 set_text_gamma :: proc(d: ^Device, gamma: Text_Gamma) {
-	d.gamma = {gamma = clamp(gamma.gamma, 1, 2.2), enhanced_contrast = max(gamma.enhanced_contrast, 0)}
+	d.gamma = {
+		gamma             = clamp(gamma.gamma, 1, 2.2),
+		enhanced_contrast = max(gamma.enhanced_contrast, 0),
+	}
 }
 
 @(private, require_results)
 atlas_create :: proc(d: ^Device, a: ^Atlas, size: i32) -> Error {
-	desc := d3d.TEXTURE2D_DESC{
+	desc := d3d.TEXTURE2D_DESC {
 		Width = u32(size),
 		Height = u32(size),
 		MipLevels = 1,
@@ -278,7 +323,11 @@ atlas_create :: proc(d: ^Device, a: ^Atlas, size: i32) -> Error {
 		return err
 	}
 	if a.texture != nil {
-		box := d3d.BOX{right = u32(a.size), bottom = u32(a.size), back = 1}
+		box := d3d.BOX {
+			right  = u32(a.size),
+			bottom = u32(a.size),
+			back   = 1,
+		}
 		d.ctx->CopySubresourceRegion(texture, 0, 0, 0, 0, a.texture, 0, &box)
 	}
 	release(a.view)
@@ -329,13 +378,16 @@ atlas_reserve :: proc(d: ^Device, width, height: i32, color := false) -> (Atlas_
 atlas_upload :: proc(d: ^Device, slot: Atlas_Slot, pixels: []u8, stride: int) {
 	assert(slot.generation == d.generation, "atlas slot from a previous generation")
 	texel := slot.color ? 4 : 1
-	assert(stride >= int(slot.width) && len(pixels) >= (stride * int(slot.height - 1) + int(slot.width)) * texel)
-	box := d3d.BOX{
-		left = u32(slot.x),
-		top = u32(slot.y),
-		right = u32(slot.x + slot.width),
+	assert(
+		stride >= int(slot.width) &&
+		len(pixels) >= (stride * int(slot.height - 1) + int(slot.width)) * texel,
+	)
+	box := d3d.BOX {
+		left   = u32(slot.x),
+		top    = u32(slot.y),
+		right  = u32(slot.x + slot.width),
 		bottom = u32(slot.y + slot.height),
-		back = 1,
+		back   = 1,
 	}
 	a := slot.color ? &d.color_atlas : &d.atlas
 	d.ctx->UpdateSubresource(a.texture, 0, &box, raw_data(pixels), u32(stride * texel), 0)

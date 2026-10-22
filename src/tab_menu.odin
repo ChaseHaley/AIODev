@@ -1,10 +1,10 @@
 package main
 
-import "core:fmt"
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
+import "core:fmt"
 
 Tab_Menu :: struct {
 	open: bool,
@@ -15,15 +15,18 @@ Tab_Menu :: struct {
 }
 
 tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
-	if index < 0 || index >= len(w.workspace.tabs) { return }
-	if !w.workspace.tabs[index].marked { tab_select(app, w, index) } else { tab_select(app, w, index, true) }
+	if index < 0 || index >= len(w.workspace.tabs) {return}
+	if !w.workspace.tabs[index].marked {tab_select(app, w, index)} else {tab_select(app, w, index, true)}
 	arrange_cancel(app, w)
 	leader_cancel(w)
 	pane_header_cancel(w)
-	w.tab_menu = {open = true, position = {x, y}}
+	w.tab_menu = {
+		open     = true,
+		position = {x, y},
+	}
 	menu := &w.tab_menu
 	count := 0
-	for tab in w.workspace.tabs { if tab.marked { count += 1 } }
+	for tab in w.workspace.tabs {if tab.marked {count += 1}}
 	if count == 1 && !settings_active(w) {
 		menu.actions[0], menu.actions[1] = .Rename_Tab, .Duplicate_Tab
 		menu.separators[2] = true
@@ -130,7 +133,7 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 }
 
 tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
-	if !e.pressed { return }
+	if !e.pressed {return}
 	menu := &w.tab_menu
 	w.dirty = true
 	if step := ui.list_step(e); step != 0 {

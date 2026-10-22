@@ -1,24 +1,25 @@
 package term
 
+import "aio:ghostty"
 import "base:runtime"
 import "core:log"
 import "core:sync"
 import "core:time"
-import "aio:ghostty"
 
-@(private) SEARCH_STEP_BUDGET :: 2 * time.Millisecond
+@(private)
+SEARCH_STEP_BUDGET :: 2 * time.Millisecond
 
 Search_Summary :: struct {
 	active, complete: bool,
-	total: int,
+	total:            int,
 	// Position of the selected match counting from the newest, or -1 when none is selected.
-	selected: int,
+	selected:         int,
 }
 
 // A run of matched cells on one viewport row; columns are inclusive.
 Highlight :: struct {
 	row, first, last: int,
-	selected: bool,
+	selected:         bool,
 }
 
 // Starts a search of the session's scrollback and screens; an empty needle ends it.
@@ -103,7 +104,9 @@ search_select :: proc(s: ^Session, older: bool) -> bool {
 }
 
 search_summary :: proc(s: ^Session) -> Search_Summary {
-	summary := Search_Summary{selected = -1}
+	summary := Search_Summary {
+		selected = -1,
+	}
 	if !s.search_active {
 		return summary
 	}
@@ -173,8 +176,11 @@ append_highlight :: proc(
 ) -> bool {
 	last_column, last_row := int(s.geometry.columns) - 1, int(s.geometry.rows) - 1
 	start, end: ghostty.Point_Coordinate
-	has_start := ghostty.terminal_point_from_grid_ref(s.terminal, &match.start, .Viewport, &start) == .Success
-	has_end := ghostty.terminal_point_from_grid_ref(s.terminal, &match.end, .Viewport, &end) == .Success
+	has_start :=
+		ghostty.terminal_point_from_grid_ref(s.terminal, &match.start, .Viewport, &start) ==
+		.Success
+	has_end :=
+		ghostty.terminal_point_from_grid_ref(s.terminal, &match.end, .Viewport, &end) == .Success
 	if !has_start && !has_end {
 		return true
 	}
@@ -188,12 +194,12 @@ append_highlight :: proc(
 		cell: ghostty.Cell
 		width: ghostty.Cell_Wide
 		result := ghostty.grid_ref_cell(&match.end, &cell)
-		if result == .Success { result = ghostty.cell_get(cell, .Wide, &width) }
+		if result == .Success {result = ghostty.cell_get(cell, .Wide, &width)}
 		if result != .Success {
 			log.errorf("term: reading search endpoint width failed: %v", result)
 			return false
 		}
-		if width == .Wide { end.x = min(end.x + 1, u16(last_column)) }
+		if width == .Wide {end.x = min(end.x + 1, u16(last_column))}
 	}
 	for row in int(start.y) ..= min(int(end.y), last_row) {
 		first := row == int(start.y) ? int(start.x) : 0

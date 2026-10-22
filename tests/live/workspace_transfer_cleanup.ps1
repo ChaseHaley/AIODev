@@ -128,7 +128,8 @@ try {
         Write-Host "PASS old source window ID rejected: $rejected"
         Invoke-Aio command workspace.change | Out-Null
         Invoke-Aio type $initial['workspace.name'] | Out-Null
-        Invoke-Aio expect state workspace.picker.count=5 | Out-Null
+        # No workspace matches: only New Workspace and New Window remain.
+        Invoke-Aio expect state workspace.picker.count=2 | Out-Null
         Invoke-Aio key Esc | Out-Null
         Invoke-Aio command workspace.new | Out-Null
         Invoke-Aio expect state workspace.id=3 | Out-Null

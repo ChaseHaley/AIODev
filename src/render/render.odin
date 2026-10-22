@@ -9,11 +9,11 @@ Rect :: struct {
 }
 
 Rect_Instance :: struct {
-	rect: Rect,
-	color: Color,
+	rect:             Rect,
+	color:            Color,
 	radius, softness: f32,
-	stroke: f32,
-	fill: u32,
+	stroke:           f32,
+	fill:             u32,
 }
 
 // RECT_FILL_HUE_WHEEL shades a circle by hue around the center and saturation outward, with color.r as
@@ -24,39 +24,42 @@ RECT_FILL_VALUE_RAMP :: u32(2)
 // A glyph quad. Coverage glyphs are tinted with color; with GLYPH_COLOR set, the glyph samples the
 // RGBA atlas and color.a only fades it.
 Glyph_Instance :: struct {
-	rect, atlas: Rect,
-	color: Color,
-	flags: u32,
+	rect, atlas:          Rect,
+	color:                Color,
+	flags:                u32,
 	fade_start, fade_end: f32,
-	_: u32,
+	_:                    u32,
 }
 
 GLYPH_COLOR :: u32(1)
 GLYPH_FADE :: u32(2)
 
 Layer :: struct {
-	clip: Rect,
-	radius: f32,
+	clip:                                             Rect,
+	radius:                                           f32,
 	rect_start, rect_count, glyph_start, glyph_count: int,
 }
 
 Draw_List :: struct {
 	layers: [dynamic]Layer,
-	rects: [dynamic]Rect_Instance,
+	rects:  [dynamic]Rect_Instance,
 	glyphs: [dynamic]Glyph_Instance,
 }
 
 Atlas_Slot :: struct {
 	x, y, width, height: i32,
-	generation: u64,
-	color: bool,
+	generation:          u64,
+	color:               bool,
 }
 
 Text_Gamma :: struct {
 	gamma, enhanced_contrast: f32,
 }
 
-DEFAULT_TEXT_GAMMA :: Text_Gamma{gamma = 1.8, enhanced_contrast = 1.0}
+DEFAULT_TEXT_GAMMA :: Text_Gamma {
+	gamma             = 1.8,
+	enhanced_contrast = 1.0,
+}
 
 Error :: enum {
 	None,
@@ -93,9 +96,9 @@ draw_list_destroy :: proc(list: ^Draw_List) {
 
 @(require_results)
 append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
-	if reserve(&list.layers, len(list.layers)+len(source.layers)) != nil ||
-	   reserve(&list.rects, len(list.rects)+len(source.rects)) != nil ||
-	   reserve(&list.glyphs, len(list.glyphs)+len(source.glyphs)) != nil { return .Out_Of_Memory }
+	if reserve(&list.layers, len(list.layers) + len(source.layers)) != nil ||
+	   reserve(&list.rects, len(list.rects) + len(source.rects)) != nil ||
+	   reserve(&list.glyphs, len(list.glyphs) + len(source.glyphs)) != nil {return .Out_Of_Memory}
 	rect_offset, glyph_offset := len(list.rects), len(list.glyphs)
 	append(&list.rects, ..source.rects[:])
 	append(&list.glyphs, ..source.glyphs[:])
@@ -110,7 +113,12 @@ append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
 
 @(require_results)
 push_layer :: proc(list: ^Draw_List, clip: Rect, radius: f32 = 0) -> Error {
-	layer := Layer{clip = clip, radius = radius, rect_start = len(list.rects), glyph_start = len(list.glyphs)}
+	layer := Layer {
+		clip        = clip,
+		radius      = radius,
+		rect_start  = len(list.rects),
+		glyph_start = len(list.glyphs),
+	}
 	if _, err := append(&list.layers, layer); err != nil {
 		return .Out_Of_Memory
 	}
@@ -123,7 +131,7 @@ push_rect :: proc(list: ^Draw_List, instance: Rect_Instance) -> Error {
 	if _, err := append(&list.rects, instance); err != nil {
 		return .Out_Of_Memory
 	}
-	list.layers[len(list.layers)-1].rect_count += 1
+	list.layers[len(list.layers) - 1].rect_count += 1
 	return .None
 }
 
@@ -133,12 +141,12 @@ push_glyph :: proc(list: ^Draw_List, instance: Glyph_Instance) -> Error {
 	if _, err := append(&list.glyphs, instance); err != nil {
 		return .Out_Of_Memory
 	}
-	list.layers[len(list.layers)-1].glyph_count += 1
+	list.layers[len(list.layers) - 1].glyph_count += 1
 	return .None
 }
 
 @(private)
-GAMMA_INCORRECT_TARGET_RATIOS :: [13][4]f32{
+GAMMA_INCORRECT_TARGET_RATIOS :: [13][4]f32 {
 	{0.0000 / 4, 0.0000 / 4, 0.0000 / 4, 0.0000 / 4},
 	{0.0166 / 4, -0.0807 / 4, 0.2227 / 4, -0.0751 / 4},
 	{0.0350 / 4, -0.1760 / 4, 0.4325 / 4, -0.1370 / 4},
@@ -158,7 +166,8 @@ GAMMA_INCORRECT_TARGET_RATIOS :: [13][4]f32{
 gamma_ratios :: proc(gamma: f32) -> [4]f32 {
 	NORM13 :: f32(f64(0x10000) / (255 * 255) * 4)
 	NORM24 :: f32(f64(0x100) / 255 * 4)
-	@(static, rodata) table := GAMMA_INCORRECT_TARGET_RATIOS
+	@(static, rodata)
+	table := GAMMA_INCORRECT_TARGET_RATIOS
 	index := int(math.round((clamp(gamma, 1, 2.2) - 1) * 10))
 	r := table[index]
 	return {NORM13 * r[0], NORM24 * r[1], NORM13 * r[2], NORM24 * r[3]}
