@@ -137,7 +137,7 @@ try {
     }
     # aioctl resize waits for a terminal grid; the preceding click selected Settings.
     Invoke-Aio command tab.select_1
-    Invoke-Aio expect state settings.open=false
+    Invoke-Aio expect state settings.active=false
     Search 'setting'
     Invoke-Aio key End Ctrl+A
     $last = [int](Read-State)['palette.items']-1
@@ -186,7 +186,7 @@ try {
     Shot 'disabled-no-results'
     Invoke-Aio key Esc
     Invoke-Aio command tab.select_1
-    Invoke-Aio expect state settings.open=false
+    Invoke-Aio expect state settings.active=false
     Invoke-Aio dpi 96
     Invoke-Aio resize 100x45
     Search 'setting'
