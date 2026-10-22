@@ -59,6 +59,69 @@ workspace134_primary_actions_only_creation :: proc(t: ^testing.T) {
 }
 
 @(test)
+workspace133_window_action_rechecks_requester_target_and_owner :: proc(t: ^testing.T) {
+	f: Workspace134_Fixture
+	defer workspace134_destroy(&f)
+	if !workspace134_init(t, &f) {return}
+	s, w := &f.state, &f.w
+	ui.notices_init(&s.notices)
+	defer ui.notices_destroy(&s.notices)
+	testing.expect(t, !app.workspace_row_window_enabled(s, nil, f.target.id))
+	testing.expect(t, !app.workspace_row_window_enabled(s, w, f.current.id))
+	testing.expect(t, !app.workspace_open_window(s, w, f.current.id))
+	testing.expect_value(t, len(s.windows), 2)
+	testing.expect_value(t, app.workspace_row_window_title(s, f.target.id), "Show Existing Window")
+	testing.expect(t, app.workspace_row_window_enabled(s, w, f.target.id))
+	f.owner.preparing = true
+	testing.expect(t, !app.workspace_open_window(s, w, f.target.id))
+	f.owner.preparing = false
+	w.preparing = true
+	testing.expect(t, !app.workspace_open_window(s, w, f.target.id))
+	w.preparing = false
+	closed := app.Window{id = 99, workspace = f.current}
+	testing.expect(t, !app.workspace_open_window(s, &closed, f.target.id))
+	testing.expect(t, !app.workspace_open_window(s, w, max(u32)))
+	testing.expect_value(t, len(s.notices.items), 0)
+	app.workspace_row_menu_open(s, w, f.target.id)
+	w.workspace = f.target
+	w.workspace_picker.menu_selected = 2
+	app.workspace_row_menu_choose(s, w)
+	testing.expect_value(t, w.workspace_picker.menu_id, f.target.id)
+	testing.expect(t, w.workspace_picker.open)
+	testing.expect_value(t, len(s.windows), 2)
+}
+
+@(test)
+workspace133_failed_open_preserves_filtered_row_and_runtime :: proc(t: ^testing.T) {
+	f: Workspace134_Fixture
+	defer workspace134_destroy(&f)
+	if !workspace134_init(t, &f) {return}
+	s, w := &f.state, &f.w
+	ui.notices_init(&s.notices)
+	defer ui.notices_destroy(&s.notices)
+	ordered_remove(&s.windows, 1)
+	ui.field_set(&w.workspace_picker.query, "Workspace 2")
+	app.workspace_row_menu_open(s, w, f.target.id)
+	testing.expect_value(t, app.workspace_row_window_title(s, f.target.id), "Open in New Window")
+	testing.expect(t, app.workspace_row_window_enabled(s, w, f.target.id))
+	w.workspace_picker.menu_selected = 2
+	app.workspace_row_menu_choose(s, w)
+	testing.expect_value(t, len(s.windows), 1)
+	testing.expect_value(t, len(s.sessions), 0)
+	testing.expect(t, w.workspace == f.current && w.workspace_picker.open)
+	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "Workspace 2")
+	testing.expect_value(t, w.workspace_picker.menu_id, f.target.id)
+	if testing.expect_value(t, len(s.notices.items), 1) {
+		testing.expect_value(t, s.notices.items[0].kind, ui.Notice_Kind.Error)
+	}
+	if !testing.expect(t, app.workspace_discard_empty(s, f.target)) {return}
+	f.target = nil
+	app.workspace_row_menu_choose(s, w)
+	testing.expect_value(t, len(s.windows), 1)
+	testing.expect(t, w.workspace == f.current)
+}
+
+@(test)
 workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing.T) {
 	f: Workspace134_Fixture
 	defer workspace134_destroy(&f)
@@ -70,7 +133,7 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	testing.expect_value(t, w.workspace_picker.menu_id, f.target.id)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
 	app.workspace_picker_key(s, w, {key = .P, modifiers = {.Control}, pressed = true})
-	testing.expect_value(t, w.workspace_picker.menu_selected, 2)
+	testing.expect_value(t, w.workspace_picker.menu_selected, 3)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = false})
 	testing.expect(t, !w.close_confirm.open)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
@@ -93,7 +156,7 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	testing.expect(t, w.workspace_picker.open && w.workspace_picker.menu_id == 0)
 	app.workspace_picker_key(s, w, {key = .Arrow_Right, pressed = true})
 	app.workspace_picker_key(s, w, {key = .Tab, modifiers = {.Shift}, pressed = true})
-	testing.expect_value(t, w.workspace_picker.menu_selected, 2)
+	testing.expect_value(t, w.workspace_picker.menu_selected, 3)
 	app.workspace_picker_key(s, w, {key = .Escape, pressed = true})
 	app.workspace_picker_key(s, w, {key = .N, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.selected, 2)
@@ -228,7 +291,7 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	other = app.workspace_create_empty(s)
 	if !testing.expect(t, other != nil) { return }
 	app.workspace_row_menu_open(s, w, other.id)
-	w.workspace_picker.menu_selected = 2
+	w.workspace_picker.menu_selected = 3
 	testing.expect(t, app.workspace_discard_empty(s, other))
 	app.workspace_row_menu_choose(s, w)
 	testing.expect(t, !w.close_confirm.open)

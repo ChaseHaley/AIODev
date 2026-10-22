@@ -6,7 +6,33 @@ import "aio:platform"
 import "aio:render"
 import "aio:ui"
 
-WORKSPACE_ROW_ACTIONS :: [?]Action{.Rename_Workspace, .Change_Workspace_Icon, .Delete_Workspace}
+Workspace_Row_Action :: enum { Rename, Icon, Open_Window, Delete }
+WORKSPACE_ROW_ACTIONS :: [?]Workspace_Row_Action{.Rename, .Icon, .Open_Window, .Delete}
+
+workspace_row_window_enabled :: proc(app: ^App, w: ^Window, id: u32) -> bool {
+	target := workspace_row_target(app, id)
+	return w != nil && !w.preparing && window_find(app, w.id) == w &&
+		target != nil && target != w.workspace
+}
+
+workspace_row_window_title :: proc(app: ^App, id: u32) -> string {
+	target := workspace_row_target(app, id)
+	if target != nil && window_for_workspace(app, target) != nil {return "Show Existing Window"}
+	return "Open in New Window"
+}
+
+@(require_results)
+workspace_open_window :: proc(app: ^App, w: ^Window, id: u32) -> bool {
+	if !workspace_row_window_enabled(app, w, id) {return false}
+	target := workspace_row_target(app, id)
+	if !window_open(app, target) {
+		notify(app, .Error, "Could not open the workspace window.")
+		return false
+	}
+	w.workspace_picker.open, w.workspace_picker.menu_id = false, 0
+	mark_all_dirty(app)
+	return true
+}
 
 workspace_row_target :: proc(app: ^App, id: u32) -> ^Workspace {
 	workspace := workspace_find(app, id)
@@ -39,14 +65,19 @@ workspace_row_menu_open :: proc(app: ^App, w: ^Window, id: u32) {
 workspace_row_menu_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	id, selected := p.menu_id, p.menu_selected
-	p.menu_id, w.dirty = 0, true
+	w.dirty = true
 	target := workspace_row_target(app, id)
 	if target == nil || selected < 0 || selected >= len(WORKSPACE_ROW_ACTIONS) { return }
 	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
+	if actions[selected] == .Open_Window {
+		_ = workspace_open_window(app, w, id)
+		return
+	}
+	p.menu_id = 0
 	#partial switch actions[selected] {
-	case .Rename_Workspace: workspace_row_rename_open(app, w, id)
-	case .Change_Workspace_Icon: workspace_row_icon_open(app, w, id)
-	case .Delete_Workspace: workspace_delete_request(app, w, target)
+	case .Rename: workspace_row_rename_open(app, w, id)
+	case .Icon: workspace_row_icon_open(app, w, id)
+	case .Delete: workspace_delete_request(app, w, target)
 	}
 }
 
@@ -181,7 +212,7 @@ workspace_row_menu_rect :: proc(w: ^Window) -> render.Rect {
 	if index < 0 { return {} }
 	row := workspace_picker_row_rect(w, index)
 	width := min(196*s, max(0, f32(w.width)-10*s))
-	height := min(110*s, max(0, f32(w.height)-10*s))
+	height := min((8+34*f32(len(WORKSPACE_ROW_ACTIONS)))*s, max(0, f32(w.height)-10*s))
 	return {clamp(row.x+row.width-width, 5*s, max(5*s, f32(w.width)-width-5*s)),
 		clamp(row.y+row.height, 5*s, max(5*s, f32(w.height)-height-5*s)), width, height}
 }
@@ -298,9 +329,11 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		return .Ok
 	}
 	if render.push_layer(&w.list, r, 6*s) != .None { return .Ok }
-	@(static, rodata) titles := [?]string{"Rename", "Change Icon", "Delete…"}
-	enabled := workspace_row_target(app, p.menu_id) != nil
+	titles := [?]string{"Rename", "Change Icon", workspace_row_window_title(app, p.menu_id), "Delete…"}
+	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
 	for title, i in titles {
+		enabled := workspace_row_target(app, p.menu_id) != nil &&
+			(actions[i] != .Open_Window || workspace_row_window_enabled(app, w, p.menu_id))
 		item := workspace_row_menu_item_rect(w, i)
 		if i == p.menu_selected {
 			if render.push_rect(&w.list, {rect = item, color = app.theme.selection, radius = 4*s}) != .None {
