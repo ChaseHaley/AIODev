@@ -20,6 +20,16 @@ function Click([string]$Key) {
 }
 function Shot([string]$Label) {
     Aio wait idle | Out-Null
+    if($Capture){
+        $deadline=[DateTime]::UtcNow.AddSeconds(10)
+        do{
+            $state=State
+            $notices=@($state.Keys | Where-Object{$_.StartsWith('notice.') -and $state[$_]})
+            if(!$notices.Count){break}
+            if([DateTime]::UtcNow -ge $deadline){throw "Notice obscures capture: $Label"}
+            Start-Sleep -Milliseconds 100
+        }while($true)
+    }
     Start-Sleep -Milliseconds 250
     Aio state | Set-Content -LiteralPath "$data/$Label-state.txt" -Encoding utf8
     if($Capture){
@@ -29,6 +39,7 @@ function Shot([string]$Label) {
 }
 function Colors {
     Aio command workspace.change_icon | Out-Null
+    if($Capture -and !$script:entryCaptured){Shot 'icon-chooser-color-entry';$script:entryCaptured=$true}
     Click 'workspace.picker.color_button' | Out-Null
     Aio expect state workspace.picker.colors=true
     Aio expect state workspace.picker.count=10
@@ -111,7 +122,9 @@ try {
         }finally{$before.Dispose();$after.Dispose()}
     }
     Aio command workspace.change_icon | Out-Null
-    Aio key Home Right Right Right Enter Esc | Out-Null
+    Aio key Up Home Right Right Right Enter Esc | Out-Null
+    Aio expect state workspace.icon.preset=3
+    Aio expect state 'workspace.icon.emoji='
     foreach($mode in @('dark','light')){
         $path=Join-Path $data 'settings.ini'
         $text=[IO.File]::ReadAllText($path)
