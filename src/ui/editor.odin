@@ -1,5 +1,6 @@
 package ui
 
+import "aio:colour"
 import "aio:commands"
 import "aio:glyphs"
 import "aio:input"
@@ -1287,11 +1288,6 @@ row_preview :: proc(row: ^Editor_Row, value: string) -> string {
 }
 
 @(private)
-color_value :: proc(c: settings.Color) -> render.Color {
-	return {f32(c.r) / 255, f32(c.g) / 255, f32(c.b) / 255, 1}
-}
-
-@(private)
 switch_draw :: proc(
 	list: ^render.Draw_List,
 	track: render.Rect,
@@ -1411,7 +1407,7 @@ control_draw :: proc(
 	case .Color, .Optional_Color:
 		shown := color_or_fallback(row, value)
 		if c, ok, _ := settings.parse_color(shown); ok {
-			draw_rect(list, {rect = parts.swatch, color = color_value(c), radius = 6 * scale})
+			draw_rect(list, {rect = parts.swatch, color = colour.rgba(c), radius = 6 * scale})
 		}
 		draw_rect(
 			list,
@@ -1603,7 +1599,7 @@ popup_draw :: proc(
 			stroke = 2 * s,
 		},
 	)
-	full := color_value(settings.hsv_to_rgb(p.hsv[0], p.hsv[1], 1))
+	full := colour.rgba(settings.hsv_to_rgb(p.hsv[0], p.hsv[1], 1))
 	draw_rect(
 		list,
 		{rect = c.ramp, color = full, radius = 4 * s, fill = render.RECT_FILL_VALUE_RAMP},
@@ -1620,7 +1616,7 @@ popup_draw :: proc(
 		},
 	)
 	if color, ok, _ := settings.parse_color(color_or_fallback(row, field_string(&p.value))); ok {
-		draw_rect(list, {rect = c.swatch, color = color_value(color), radius = 6 * s})
+		draw_rect(list, {rect = c.swatch, color = colour.rgba(color), radius = 6 * s})
 	}
 	draw_rect(list, {rect = c.swatch, color = theme.border, radius = 6 * s, stroke = s})
 	small := text_styled(text, .Small)

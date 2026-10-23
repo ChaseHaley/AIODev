@@ -190,8 +190,7 @@ attributes :: proc(s: ^term.Snapshot, c: ^term.Snapshot_Cell) -> Attributes {
 	case .Palette:
 		a.underline_color = s.palette[v.underline_color.value.palette]
 	case .Rgb:
-		rgb := v.underline_color.value.rgb
-		a.underline_color = term.Color{rgb.r, rgb.g, rgb.b}
+		a.underline_color = term.color_from_ghostty(v.underline_color.value.rgb)
 	}
 	return a
 }

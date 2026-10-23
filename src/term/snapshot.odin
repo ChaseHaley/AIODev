@@ -29,9 +29,11 @@ snapshot_result :: proc(result: ghostty.Result, operation: string) -> Error {
 	return result == .Out_Of_Memory ? .Out_Of_Memory : .Terminal_Failed
 }
 
+// snapshot_color keeps the cell-read seam stable: the value contract lives in the colour module,
+// and this names the byte conversion the snapshot and frame share.
 @(private)
 snapshot_color :: proc(rgb: ghostty.Color_Rgb) -> Color {
-	return {rgb.r, rgb.g, rgb.b}
+	return color_from_ghostty(rgb)
 }
 
 @(require_results)

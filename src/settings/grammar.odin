@@ -1,5 +1,6 @@
 package settings
 
+import "aio:colour"
 import "base:runtime"
 import "core:strings"
 
@@ -66,7 +67,8 @@ line_next :: proc(scanner: ^Line_Scanner) -> (line: Line, ok: bool) {
 }
 
 // Writes the on-disk form of a schema value. Strings are quoted and colors are normalized to
-// #rrggbb; the other kinds pass their value text through.
+// #rrggbb; an alpha channel is dropped because settings colors are opaque. The other kinds pass
+// their value text through.
 @(require_results)
 encode_value :: proc(
 	b: ^strings.Builder,
@@ -78,8 +80,9 @@ encode_value :: proc(
 		return write_parts(b, "\"", value, "\"")
 	case .Color, .Optional_Color:
 		if value != "" {
-			if color, ok, _ := parse_color(value); ok {
-				return write_parts(b, color_hex(color))
+			if color, ok, _ := colour.parse(value, .Permissive); ok {
+				buffer: [colour.HEX_LENGTH]u8
+				return write_parts(b, colour.format(color, buffer[:]))
 			}
 		}
 		return write_parts(b, value)

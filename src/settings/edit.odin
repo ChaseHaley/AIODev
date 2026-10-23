@@ -1,5 +1,6 @@
 package settings
 
+import "aio:colour"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -37,7 +38,8 @@ value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
 }
 
 color_hex :: proc(c: Color) -> string {
-	return fmt.tprintf("#%02x%02x%02x", c.r, c.g, c.b)
+	buffer: [colour.HEX_LENGTH]u8
+	return fmt.tprintf("%s", colour.format(c, buffer[:]))
 }
 
 // The returned message is owned by the caller, even when validation fails.
