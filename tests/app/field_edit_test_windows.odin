@@ -144,21 +144,24 @@ field_edit_clipboard_and_direct_consumer_events :: proc(t: ^testing.T) {
 		delete(w.panes)
 		delete(w.dividers)
 	}
-	w.rename_open, w.rename_workspace = true, true
-	ui.field_set(&w.rename, "old")
-	ui.field_select_all(&w.rename)
+	app.workspace_picker_open(&s, &w)
+	testing.expect(t, app.workspace_picker_active(&w.workspace_picker))
+	testing.expect_value(t, len(w.workspace_picker.rows), 1)
+	app.workspace_row_rename_open(&s, &w, workspace.id)
+	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Rename), workspace.id)
+	testing.expect_value(t, ui.field_string(&w.rename), workspace.name)
 	testing.expect(t, platform.clipboard_set_text(&s.platform, "  漢\n🙂  "))
 	app.handle_event(&s, platform.Key_Event{window = w.id, key = .V, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, ui.field_string(&w.rename), "  漢🙂  ")
 	ui.field_select_all(&w.rename)
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .C, unshifted = 'x',
+	app.handle_event(&s, platform.Key_Event{window = w.id, key = .C, unshifted = 'c',
 		modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, ui.field_selected_text(&w.rename), "  漢🙂  ")
 	app.handle_event(&s, platform.Key_Event{window = w.id, key = .V, modifiers = {.Control}})
 	testing.expect_value(t, ui.field_string(&w.rename), "  漢🙂  ")
 	app.handle_event(&s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect_value(t, workspace.name, "漢🙂")
-	testing.expect(t, !w.rename_open)
+	testing.expect(t, !w.rename_open && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
 
 	app.workspace_picker_open(&s, &w)
 	testing.expect(t, platform.clipboard_set_text(&s.platform, "漢\n🙂"))
