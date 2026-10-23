@@ -116,6 +116,60 @@ shell.default_profile = pwsh
 }
 
 @(test)
+profile_detection_fills_unset_fields_and_rebuilds :: proc(t: ^testing.T) {
+	s, diagnostics, err := settings.parse(`profile.ubuntu.hidden = true
+profile.pwsh.name = My PowerShell
+`)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	testing.expect_value(t, settings.profile_detect(
+		&s,
+		{"ubuntu", "Ubuntu", "wsl.exe -d Ubuntu", "~"},
+	), nil)
+	ubuntu := settings.profile_find(&s.profiles, "ubuntu")
+	if testing.expect(t, ubuntu != nil) {
+		testing.expect_value(t, ubuntu.command, "wsl.exe -d Ubuntu")
+		testing.expect_value(t, ubuntu.name, "Ubuntu")
+		testing.expect_value(t, ubuntu.hidden, true)
+		testing.expect_value(t, ubuntu.detected, false)
+	}
+	testing.expect_value(t, settings.profile_detect(
+		&s,
+		{"pwsh", "PowerShell 7", "pwsh.exe -NoLogo", "~"},
+	), nil)
+	pwsh := settings.profile_find(&s.profiles, "pwsh")
+	if testing.expect(t, pwsh != nil) {
+		testing.expect_value(t, pwsh.name, "My PowerShell")
+		testing.expect_value(t, pwsh.command, "pwsh.exe -NoLogo")
+		testing.expect_value(t, pwsh.detected, false)
+	}
+	settings.profiles_begin_detection(&s.profiles)
+	testing.expect(t, settings.profile_find(&s.profiles, "ubuntu") != nil)
+	pwsh = settings.profile_find(&s.profiles, "pwsh")
+	testing.expect(t, pwsh != nil)
+	testing.expect_value(t, pwsh.command, "pwsh.exe -NoLogo")
+}
+
+@(test)
+detected_only_profiles_are_replaced_on_reload :: proc(t: ^testing.T) {
+	s, diagnostics, err := settings.parse("")
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, settings.profile_detect(
+		&s,
+		{"cmd", "Command Prompt", "cmd.exe", "~"},
+	), nil)
+	cmd := settings.profile_find(&s.profiles, "cmd")
+	if !testing.expect(t, cmd != nil) {return}
+	testing.expect(t, cmd.detected)
+	settings.profiles_begin_detection(&s.profiles)
+	testing.expect(t, settings.profile_find(&s.profiles, "cmd") == nil)
+}
+
+@(test)
 migration_rewrites_legacy_shell_keys :: proc(t: ^testing.T) {
 	source := "# keep\r\nshell.command = cmd.exe /k echo hi\r\n" +
 		`shell.directory = D:\work` + "\r\nfont.size = 12\r\n"
