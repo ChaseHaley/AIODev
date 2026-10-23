@@ -4,7 +4,6 @@ import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
-import "aio:settings"
 import "aio:term"
 import "aio:ui"
 import "core:fmt"
@@ -84,20 +83,6 @@ workspace_discard_empty :: proc(app: ^App, workspace: ^Workspace) -> bool {
 workspace_find :: proc(app: ^App, id: u32) -> ^Workspace {
 	for workspace in app.workspaces {if workspace.id == id {return workspace}}
 	return nil
-}
-
-@(require_results)
-workspace_rename :: proc(app: ^App, workspace: ^Workspace, value: string) -> bool {
-	if workspace == nil || workspace_find(app, workspace.id) != workspace {return false}
-	clean := settings.display_title(strings.trim_space(value), context.temp_allocator)
-	if clean == "" {return false}
-	name, err := strings.clone(clean)
-	if err != nil {return false}
-	delete(workspace.name)
-	workspace.name = name
-	for w in app.windows {window_relayout(app, w)}
-	workspace_pickers_refresh(app)
-	return true
 }
 
 @(require_results)

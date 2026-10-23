@@ -3,47 +3,26 @@ package main
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
-import "aio:settings"
 import "aio:ui"
-import "core:strings"
 
 rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
-	w.rename_workspace = false
 	tab := selected_tab(w.workspace)
 	if tab == nil || settings_active(w) {return}
-	value := tab.name
-	id := tab.id
+	target, value := Rename_Target{.Tab, tab.id}, tab.name
 	if !tab_name {
 		entry := focused_session(app, w)
 		if entry == nil {return}
-		value, id = entry.name, entry.id
+		target, value = {.Pane, entry.id}, entry.name
 	}
 	if !gesture_cancel(app, w) {return}
 	palette_close(app, w)
 	ui.field_set(&w.rename, value)
 	ui.field_select_all(&w.rename)
-	w.rename_open, w.rename_tab, w.rename_id, w.dirty = true, tab_name, id, true
+	w.rename_target, w.rename_open, w.dirty = target, true, true
 }
 
 rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
-	if w.rename_workspace {
-		if save && !workspace_rename(app, w.workspace, ui.field_string(&w.rename)) {
-			notify(app, .Error, "Workspace names cannot be empty.")
-			return
-		}
-		w.rename_open, w.dirty = false, true
-		return
-	}
-	if save {
-		name := settings.display_title(strings.trim_space(ui.field_string(&w.rename)))
-		destination: ^string
-		if w.rename_tab {
-			for tab in w.workspace.tabs {if tab.id == w.rename_id {destination = &tab.name; break}}
-		} else if entry := session_find(app, w.rename_id); entry != nil {destination = &entry.name}
-		if destination != nil {delete(destination^); destination^ = name} else {delete(name)}
-		for tab in w.workspace.tabs {tab_update_title(app, tab)}
-		window_update_title(app, w)
-	}
+	if save {_ = rename_target_commit(app, w, w.rename_target, ui.field_string(&w.rename))}
 	w.rename_open, w.dirty = false, true
 }
 
@@ -92,7 +71,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 10 * s}) !=
 	   .None {return .Ok}
-	title := w.rename_workspace ? "Rename Workspace" : w.rename_tab ? "Rename Tab" : "Rename Pane"
+	title := w.rename_target.kind == .Tab ? "Rename Tab" : "Rename Pane"
 	if result := ui.draw_text(
 		&w.ui_text,
 		&w.list,
@@ -121,13 +100,12 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		field.y + (field.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 		max(1, field.width - 20 * s),
 		true,
-		w.rename_workspace ? "Workspace name" : "Automatic title",
+		"Automatic title",
 		app.theme.text,
 		s,
 	); result != .Ok {return result}
 	if render.push_layer(&w.list, r) != .None {return .Ok}
-	hint := "Enter saves · Esc cancels"
-	if !w.rename_workspace {hint = "Enter saves · Esc cancels · Empty restores automatic titles"}
+	hint := "Enter saves · Esc cancels · Empty restores automatic titles"
 	return ui.draw_text(
 		&w.ui_text,
 		&w.list,
