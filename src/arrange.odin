@@ -590,6 +590,25 @@ pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) 
 	}
 }
 
+// The label a drop would produce, independent of its drawing.
+@(require_results)
+pane_drag_label :: proc(d: ^Pane_Drag) -> string {
+	switch {
+	case d.new_window:
+		return "+ New window"
+	case d.new_tab:
+		if d.destination == d.source && d.node == d.source.tree.root {
+			return "Move tab to end"
+		}
+		return "+ New tab"
+	case d.swap:
+		return "Swap panes"
+	case d.root:
+		return "Dock to workspace edge"
+	}
+	return "Move pane here"
+}
+
 pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	d := &w.pane_drag
 	for source in app.windows {
@@ -615,8 +634,7 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		   {rect = r, color = accent, radius = radius, stroke = 2 * w.scale},
 	   ) !=
 	   .None {return .Ok}
-	label :=
-		d.new_window ? "+ New window" : d.new_tab ? (d.destination == d.source && d.node == d.source.tree.root ? "Move tab to end" : "+ New tab") : d.swap ? "Swap panes" : d.root ? "Dock to workspace edge" : "Move pane here"
+	label := pane_drag_label(d)
 	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
 	label_color := app.theme.text

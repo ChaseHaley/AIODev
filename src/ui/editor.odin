@@ -1867,8 +1867,12 @@ editor_draw :: proc(
 		if index == p.hover_reset && modified {
 			draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6 * s})
 		}
-		icon_color := modified ? (index == p.hover_reset ? theme.text : theme.muted) : theme.faint
-		if !modified {icon_color.a *= 0.5}
+		icon_color := theme.faint
+		if modified {
+			icon_color = index == p.hover_reset ? theme.text : theme.muted
+		} else {
+			icon_color.a *= 0.5
+		}
 		if result := draw_icon(text, list, ICON_UNDO, parts.reset, icon_color, 0.9);
 		   result != .Ok {return result}
 	}

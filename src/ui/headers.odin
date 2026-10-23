@@ -4,6 +4,8 @@ import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: f32(28)
+@(private)
+GRIP_INSET :: f32(12)
 Header_Action :: enum {
 	None,
 	Split_Right,
@@ -120,8 +122,12 @@ header_icon_draw :: proc(
 				stroke = stroke,
 			},
 		)
-		line :=
-			action == .Split_Right ? render.Rect{x + 6 * scale, y, stroke, 12 * scale} : render.Rect{x, y + 6 * scale, 12 * scale, stroke}
+		line: render.Rect
+		if action == .Split_Right {
+			line = {x + 6 * scale, y, stroke, 12 * scale}
+		} else {
+			line = {x, y + 6 * scale, 12 * scale, stroke}
+		}
 		draw_rect(list, {rect = line, color = color})
 	case .Zoom:
 		if zoomed {
@@ -137,29 +143,17 @@ header_icon_draw :: proc(
 		}
 		for ox in ([?]f32{0, 8}) {
 			for oy in ([?]f32{0, 8}) {
+				// The second grip in each direction sits 12 points in, with its stroke
+				// pulled back so both grips read as one pair.
+				inset_y := oy == 0 ? 0 : GRIP_INSET * scale - stroke
+				inset_x := ox == 0 ? 0 : GRIP_INSET * scale - stroke
 				draw_rect(
 					list,
-					{
-						rect = {
-							x + ox * scale,
-							y + (oy == 0 ? 0 : 12) * scale - (oy == 0 ? 0 : stroke),
-							4 * scale,
-							stroke,
-						},
-						color = color,
-					},
+					{rect = {x + ox * scale, y + inset_y, 4 * scale, stroke}, color = color},
 				)
 				draw_rect(
 					list,
-					{
-						rect = {
-							x + (ox == 0 ? 0 : 12) * scale - (ox == 0 ? 0 : stroke),
-							y + oy * scale,
-							stroke,
-							4 * scale,
-						},
-						color = color,
-					},
+					{rect = {x + inset_x, y + oy * scale, stroke, 4 * scale}, color = color},
 				)
 			}
 		}

@@ -264,8 +264,10 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	}
 	if result := settings.save(app.settings_path, p.source, updated); result != .None {
 		delete(updated)
-		text :=
-			result == .Conflict ? "File changed outside this editor. Close and reopen Settings to reload it." : "Could not save settings. Check the settings path and permissions."
+		text := "Could not save settings. Check the settings path and permissions."
+		if result == .Conflict {
+			text = "File changed outside this editor. Close and reopen Settings to reload it."
+		}
 		ui.editor_message(p, text, true)
 		return
 	}
@@ -297,8 +299,10 @@ editor_follow_theme :: proc(app: ^App, w: ^Window) {
 	defer delete(updated)
 	result := settings.save(app.settings_path, source, updated)
 	if result != .None {
-		text :=
-			result == .Conflict ? "Settings changed outside the editor. Reopen Settings before resetting colors." : "Could not save theme colors. Check the settings path and permissions."
+		text := "Could not save theme colors. Check the settings path and permissions."
+		if result == .Conflict {
+			text = "Settings changed outside the editor. Reopen Settings before resetting colors."
+		}
 		if w.editor.open {ui.editor_message(&w.editor, text, true)} else {notify(app, .Error, text)}
 		return
 	}

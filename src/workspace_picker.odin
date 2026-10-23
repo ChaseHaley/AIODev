@@ -56,7 +56,7 @@ workspace_picker_destroy :: proc(w: ^Window) {
 workspace_picker_layout_changed :: proc(w: ^Window) {
 	p := &w.workspace_picker
 	if !workspace_picker_active(p) {return}
-	p.selected = clamp(p.selected, 0, workspace_picker_count(w)-1)
+	p.selected = clamp(p.selected, 0, workspace_picker_count(w) - 1)
 	if workspace_picker_icons(p) {
 		workspace_icon_picker_reveal(w, workspace_icon_picker_layout(w))
 		return
@@ -65,8 +65,8 @@ workspace_picker_layout_changed :: proc(w: ^Window) {
 		if index := workspace_row_index(w, p.target_id); index >= 0 {p.selected = index}
 	}
 	_, rows := workspace_picker_rect(w)
-	p.scroll = clamp(p.scroll, max(0, p.selected-rows+1), p.selected)
-	p.scroll = clamp(p.scroll, 0, max(0, workspace_picker_count(w)-rows))
+	p.scroll = clamp(p.scroll, max(0, p.selected - rows + 1), p.selected)
+	p.scroll = clamp(p.scroll, 0, max(0, workspace_picker_count(w) - rows))
 }
 
 workspace_picker_select :: proc(w: ^Window, index: int) {
@@ -106,5 +106,5 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Eve
 workspace_picker_wheel :: proc(w: ^Window, delta: f32) {
 	p := &w.workspace_picker
 	if p.mode == .Menu || p.mode == .Rename {return}
-	workspace_picker_select(w, p.selected-int(math.sign(delta)))
+	workspace_picker_select(w, p.selected - int(math.sign(delta)))
 }

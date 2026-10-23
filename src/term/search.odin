@@ -36,7 +36,8 @@ search_set_needle :: proc(s: ^Session, needle: string) {
 	mark_changed(s)
 }
 
-// Whether search_update has work: the search is still catching up or the terminal changed since it last looked.
+// Whether search_update has work: the search is still catching up or the terminal changed
+// since it last looked.
 search_pending :: proc(s: ^Session) -> bool {
 	if !s.search_active {
 		return false

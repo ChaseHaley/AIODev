@@ -34,6 +34,14 @@ _ :: settings
 
 AIO_CONTROL :: #config(AIO_CONTROL, false)
 
+// State keys whose change is reported by name rather than as a full value dump.
+@(private)
+CHANGED_KEYS :: [?]string {
+	"window.visible", "windows.count", "window.id", "window.origin", "window.size", "window.dpi",
+	"window.focused", "grid.size", "palette.open", "palette.query", "palette.item", "palette.selected",
+	"find.open", "find.query", "find.matches", "session.viewport", "session.selection",
+}
+
 when AIO_CONTROL {
 	Verify :: struct {
 		server: ^control.Server,
@@ -426,17 +434,20 @@ when AIO_CONTROL {
 				{"workspace.picker.query", ui.field_string(&w.workspace_picker.query)},
 				{"workspace.picker.rect", verify_workspace_rect(picker_rect)},
 				{"workspace.picker.field", verify_workspace_rect(workspace_picker_field_rect(w))},
-				{"workspace.picker.row", verify_workspace_rect(workspace_picker_row_rect(w, w.workspace_picker.selected))},
+				{"workspace.picker.row", verify_workspace_rect(
+					workspace_picker_row_rect(w, w.workspace_picker.selected))},
 				{"workspace.picker.menu_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Menu))},
 				{"workspace.picker.menu_selected", fmt.tprintf("%d", w.workspace_picker.menu_selected)},
 				{"workspace.picker.window_enabled", fmt.tprintf("%t", workspace_row_window_enabled(app, w,
 					workspace_picker_target(&w.workspace_picker, .Menu)))},
-				{"workspace.picker.window_title", workspace_row_window_title(app, workspace_picker_target(&w.workspace_picker, .Menu))},
+				{"workspace.picker.window_title", workspace_row_window_title(app,
+					workspace_picker_target(&w.workspace_picker, .Menu))},
 				{"workspace.picker.menu_button", verify_workspace_rect(workspace_picker_menu_button_rect(w,
 					w.workspace_picker.selected))},
 				{"workspace.picker.menu_item", verify_workspace_rect(workspace_row_menu_item_rect(w,
 					w.workspace_picker.menu_selected))},
-				{"workspace.picker.rename_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Rename))},
+				{"workspace.picker.rename_target", fmt.tprintf("%d",
+					workspace_picker_target(&w.workspace_picker, .Rename))},
 				{"workspace.picker.rename_value", ui.field_string(&w.rename)},
 				{"workspace.picker.rename_field", verify_workspace_rect(workspace_row_rename_field_rect(w))},
 				{"workspace.picker.rename_error", fmt.tprintf("%t", w.workspace_picker.rename_error)},
@@ -460,10 +471,10 @@ when AIO_CONTROL {
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
 			for i in 0..<w.tab_menu.count {
 				row := [?]control.State_Entry{
-					{fmt.tprintf("tab_menu.row.%d.label", i+1), tab_menu_label(w, i)},
-					{fmt.tprintf("tab_menu.row.%d.separator", i+1), fmt.tprintf("%t", w.tab_menu.separators[i])},
-					{fmt.tprintf("tab_menu.row.%d.enabled", i+1), fmt.tprintf("%t", tab_menu_enabled(w, i))},
-					{fmt.tprintf("tab_menu.row.%d.rect", i+1), verify_workspace_rect(tab_menu_row_rect(w, i))},
+					{fmt.tprintf("tab_menu.row.%d.label", i + 1), tab_menu_label(w, i)},
+					{fmt.tprintf("tab_menu.row.%d.separator", i + 1), fmt.tprintf("%t", w.tab_menu.separators[i])},
+					{fmt.tprintf("tab_menu.row.%d.enabled", i + 1), fmt.tprintf("%t", tab_menu_enabled(w, i))},
+					{fmt.tprintf("tab_menu.row.%d.rect", i + 1), verify_workspace_rect(tab_menu_row_rect(w, i))},
 				}
 				if _, err := append(&entries, ..row[:]); err != nil { return nil, .Out_Of_Memory }
 			}
@@ -674,7 +685,7 @@ when AIO_CONTROL {
 		if entry == nil || len(w.find.query.bytes) == 0 { return "" }
 		s := term.search_summary(entry.session)
 		switch {
-		case s.selected >= 0: return fmt.tprintf("%d of %d", s.selected+1, s.total)
+		case s.selected >= 0: return fmt.tprintf("%d of %d", s.selected + 1, s.total)
 		case s.total == 1: return "1 match"
 		case s.total > 0: return fmt.tprintf("%d matches", s.total)
 		case !s.complete: return "Searching…"
@@ -1011,7 +1022,7 @@ when AIO_CONTROL {
 			)
 			if _, err := append(&parts, label); err != nil {return "", .Out_Of_Memory}
 		}
-		for key in ([]string{"window.visible", "windows.count", "window.id", "window.origin", "window.size", "window.dpi", "window.focused", "grid.size", "palette.open", "palette.query", "palette.item", "palette.selected", "find.open", "find.query", "find.matches", "session.viewport", "session.selection"}) {
+		for key in CHANGED_KEYS {
 			a, b := verify_value(v.before_state, key), verify_value(entries, key)
 			if a == b {continue}
 			value := strings.builder_make(context.temp_allocator)

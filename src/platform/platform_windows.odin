@@ -1227,8 +1227,16 @@ window_maximized :: proc(p: ^Platform, id: Window_Id) -> bool {
 window_caption_action :: proc(p: ^Platform, id: Window_Id, index: int) {
 	window := find_window(p, id)
 	if window == nil || index < 0 || index > 2 {return}
-	command :=
-		([3]w.WPARAM{w.SC_MINIMIZE, bool(w.IsZoomed(window.hwnd)) ? w.SC_RESTORE : w.SC_MAXIMIZE, w.SC_CLOSE})[index]
+	command: w.WPARAM
+	switch index {
+	case 0:
+		command = w.SC_MINIMIZE
+	case 1:
+		command = w.SC_MAXIMIZE
+		if bool(w.IsZoomed(window.hwnd)) {command = w.SC_RESTORE}
+	case 2:
+		command = w.SC_CLOSE
+	}
 	record_os(p, w.PostMessageW(window.hwnd, w.WM_SYSCOMMAND, command, 0), "PostMessageW(caption)")
 }
 

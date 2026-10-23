@@ -32,7 +32,11 @@ workspace_view_init :: proc(app: ^App, resources: ^Workspace_View_Resources, wor
 // Deletion must finish every fallible allocation before it releases the old workspace.
 // Preview windows use init alone: they must not create views or resize borrowed sessions.
 @(require_results)
-workspace_view_prepare :: proc(app: ^App, resources: ^Workspace_View_Resources, workspace: ^Workspace) -> bool {
+workspace_view_prepare :: proc(
+	app: ^App,
+	resources: ^Workspace_View_Resources,
+	workspace: ^Workspace,
+) -> bool {
 	if !workspace_view_init(app, resources, workspace) {return false}
 	prepared := false
 	defer if !prepared {workspace_view_destroy(resources)}
