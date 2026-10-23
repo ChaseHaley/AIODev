@@ -556,7 +556,6 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		pane_drag_restore(app, w, d)
 		return true
 	}
-	changed := false
 	if d.destination != d.source {
 		if !pane_transfer(
 			app,
@@ -573,18 +572,7 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		}
 		return true
 	}
-	if d.swap {
-		changed = layout.swap(w.tree, d.node, d.target)
-	} else if d.root {
-		_, changed = layout.dock_pane(w.tree, d.node, d.direction)
-	} else {
-		_, changed = layout.move_pane(w.tree, d.node, d.target, d.direction)
-	}
-	if changed {
-		window_relayout(app, w)
-		window_update_title(app, w)
-		reset_blink(w)
-	}
+	pane_rearrange(app, w, d.node, d.target, d.direction, d.swap, d.root)
 	return true
 }
 

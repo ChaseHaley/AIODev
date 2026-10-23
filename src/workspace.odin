@@ -201,36 +201,19 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 		notify(app, .Error, "Could not create a tab. The pane was preserved.")
 		return false
 	}
-	for window in app.windows {
-		if window == w || window.workspace == source_workspace {focus_leave(app, window)}
-	}
+	move := pane_move_begin(app, w, source, source_workspace)
 	tree, separated := layout.separate_pane(&source.tree, node)
 	if !separated {
-		for window in app.windows {
-			if window == w || window.workspace == source_workspace {focus_enter(app, window)}
-		}
+		pane_move_abort(app, move)
 		notify(app, .Error, "Could not move the pane. The layout was preserved.")
 		return false
 	}
 	tab.tree = tree
 	w.workspace.next_tab_id += 1
 	tab.id = w.workspace.next_tab_id
-	if source.tree.root != layout.INVALID_NODE {tab_update_title(app, source)}
-	tab_update_title(app, tab)
 	append(&w.workspace.tabs, tab)
 	success = true
-	tab_select(app, w, len(w.workspace.tabs) - 1)
-	if source.tree.root == layout.INVALID_NODE {
-		for current, index in source_workspace.tabs {
-			if current == source {workspace_close_tab(app, source_workspace, index); break}
-		}
-		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
-	} else if source_workspace != w.workspace {
-		if owner := window_for_workspace(app, source_workspace); owner != nil {
-			window_relayout(app, owner)
-			focus_enter(app, owner)
-		}
-	}
+	pane_move_finish(app, move, tab)
 	return true
 }
 
@@ -243,19 +226,11 @@ pane_transfer :: proc(
 	direction: layout.Direction,
 	root: bool,
 ) -> bool {
-	source_workspace: ^Workspace
-	for workspace in app.workspaces {
-		for tab in workspace.tabs {if tab == source {source_workspace = workspace; break}}
-	}
+	source_workspace := pane_source_workspace(app, source)
 	destination_index := -1
 	for tab, index in w.workspace.tabs {if tab == destination {destination_index = index; break}}
 	if source_workspace == nil || destination_index < 0 || source == destination {return false}
-	for window in app.windows {
-		if selected := selected_tab(window.workspace);
-		   selected == source || selected == destination {
-			focus_leave(app, window)
-		}
-	}
+	move := pane_move_begin(app, w, source, source_workspace)
 	_, moved := layout.transfer_pane(
 		&source.tree,
 		&destination.tree,
@@ -265,28 +240,10 @@ pane_transfer :: proc(
 		root,
 	)
 	if !moved {
-		for window in app.windows {
-			if selected := selected_tab(window.workspace);
-			   selected == source || selected == destination {
-				focus_enter(app, window)
-			}
-		}
+		pane_move_abort(app, move)
 		return false
 	}
-	if source.tree.root != layout.INVALID_NODE {tab_update_title(app, source)}
-	tab_select(app, w, destination_index)
-	if source.tree.root == layout.INVALID_NODE {
-		for tab, index in source_workspace.tabs {
-			if tab == source {workspace_close_tab(app, source_workspace, index); break}
-		}
-		if source_workspace != w.workspace { _ = workspace_discard_empty(app, source_workspace) }
-	} else {
-		for window in app.windows {
-			if window == w || window.workspace != source_workspace {continue}
-			window_relayout(app, window)
-			focus_enter(app, window)
-		}
-	}
+	pane_move_finish(app, move, destination)
 	return true
 }
 

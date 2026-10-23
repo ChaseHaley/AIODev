@@ -132,6 +132,7 @@ pane_to_window :: proc(
 	workspace := pane_source_workspace(app, source)
 	if preview == nil ||
 	   !preview.preparing ||
+	   workspace == nil || source_window.workspace != workspace ||
 	   !pane_window_source_allows(workspace) ||
 	   int(node) >= len(source.tree.nodes) {
 		return false
@@ -147,10 +148,10 @@ pane_to_window :: proc(
 	if !pane_minimum_allows(app, preview, panes[:], nil, true) {return false}
 	name, number := workspace_default_name(app)
 	if number == 0 {return false}
-	focus_leave(app, source_window)
+	move := pane_move_begin(app, preview, source, workspace)
 	if !layout.remove(&source.tree, node) {
 		delete(name)
-		focus_enter(app, source_window)
+		pane_move_abort(app, move)
 		return false
 	}
 	destination.tree.nodes[destination.tree.root] = pane
@@ -160,17 +161,7 @@ pane_to_window :: proc(
 	preview.workspace.name = name
 	app.next_workspace_number = number
 	workspace_pickers_refresh(app)
-	window_relayout(app, preview)
-	focus_enter(app, preview)
-	if source.tree.root == layout.INVALID_NODE {
-		for tab, index in workspace.tabs {
-			if tab == source {workspace_close_tab(app, workspace, index); break}
-		}
-	} else {
-		tab_update_title(app, source)
-		window_relayout(app, source_window)
-		focus_enter(app, source_window)
-	}
+	pane_move_finish(app, move, destination)
 	_ = window_activate(app, preview)
 	return true
 }
