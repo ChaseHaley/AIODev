@@ -1044,24 +1044,22 @@ parse :: proc(
 	}
 	schema := SCHEMA
 	seen: [len(SCHEMA)]bool
-	rest := strings.trim_prefix(text, "\xef\xbb\xbf")
-	line_number := 0
-	for raw_line in strings.split_lines_iterator(&rest) {
-		line_number += 1
-		line := strings.trim_space(raw_line)
-		if line == "" || line[0] == '#' {continue}
-		equal := strings.index_byte(line, '=')
-		if equal < 0 {
+	scanner := line_scanner_init(text)
+	for {
+		line, ok := line_next(&scanner)
+		if !ok {break}
+		if line.text == "" || line.text[0] == '#' {continue}
+		if !line.split {
 			issue, issue_error := problem(.Malformed_Line, allocator, "expected \"key = value\"")
 			if issue_error != nil {return {}, {}, issue_error}
-			err = add_diagnostic(&diagnostics, line_number, line, issue.(Problem))
+			err = add_diagnostic(&diagnostics, line.number, line.text, issue.(Problem))
 			if err != nil {return {}, {}, err}
 			continue
 		}
-		key := strings.trim_space(line[:equal])
-		value := strings.trim_space(line[equal + 1:])
+		key := line.key
+		value := line.value
 		if strings.has_prefix(key, KEY_BINDING_PREFIX) {
-			binding_error := parse_key_binding(&s, &diagnostics, key, value, line_number)
+			binding_error := parse_key_binding(&s, &diagnostics, key, value, line.number)
 			if binding_error != nil {return {}, {}, binding_error}
 			continue
 		}
@@ -1081,16 +1079,16 @@ parse :: proc(
 			}
 			issue, issue_error := problem(kind, allocator, ..parts)
 			if issue_error != nil {return {}, {}, issue_error}
-			err = add_diagnostic(&diagnostics, line_number, key, issue.(Problem))
+			err = add_diagnostic(&diagnostics, line.number, key, issue.(Problem))
 			if err != nil {return {}, {}, err}
 			if index < 0 {continue}
 		}
 		seen[index] = true
-		if key == "input.leader" {s.leader_line = line_number}
+		if key == "input.leader" {s.leader_line = line.number}
 		issue, assign_error := assign(&s, schema[index], value)
 		if assign_error != nil {return {}, {}, assign_error}
 		if p, present := issue.?; present {
-			err = add_diagnostic(&diagnostics, line_number, key, p)
+			err = add_diagnostic(&diagnostics, line.number, key, p)
 			if err != nil {return {}, {}, err}
 			default_issue, default_error := assign(&s, schema[index], schema[index].default_value)
 			if default_error != nil {return {}, {}, default_error}
@@ -1100,14 +1098,6 @@ parse :: proc(
 	resolve_colors(&s)
 	success = true
 	return s, diagnostics, nil
-}
-
-@(private, require_results)
-write_parts :: proc(b: ^strings.Builder, parts: ..string) -> runtime.Allocator_Error {
-	for part in parts {
-		if strings.write_string(b, part) != len(part) {return .Out_Of_Memory}
-	}
-	return nil
 }
 
 @(require_results)
@@ -1128,13 +1118,7 @@ default_text :: proc(
 		}
 		previous = group
 		write_parts(&builder, "# ", entry.description, "\n", entry.key, " = ") or_return
-		if entry.kind == .String {
-			write_parts(&builder, "\"") or_return
-		}
-		write_parts(&builder, entry.default_value) or_return
-		if entry.kind == .String {
-			write_parts(&builder, "\"") or_return
-		}
+		encode_value(&builder, entry, entry.default_value) or_return
 		write_parts(&builder, "\n") or_return
 	}
 	if len(extra_comments) > 0 {write_parts(&builder, "\n") or_return}

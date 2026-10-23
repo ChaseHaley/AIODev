@@ -53,12 +53,13 @@ edit_text :: proc(
 		message, err = strings.clone("Use a single line without NUL bytes.", allocator)
 		return
 	}
+	encoded, encoded_error := strings.builder_make(allocator)
+	if encoded_error != nil {err = encoded_error; return}
+	defer strings.builder_destroy(&encoded)
 	serialized := value
 	if entry := schema_find(key); entry != nil {
-		if entry.kind == .String {serialized = fmt.tprintf("\"%s\"", value)}
-		if (entry.kind == .Color || entry.kind == .Optional_Color) && value != "" {
-			if c, ok, _ := parse_color(value); ok {serialized = color_hex(c)}
-		}
+		if err = encode_value(&encoded, entry^, value); err != nil {return}
+		serialized = strings.to_string(encoded)
 		s, default_error := defaults(allocator)
 		if default_error != nil {err = default_error; return}
 		defer destroy(&s)
@@ -72,32 +73,27 @@ edit_text :: proc(
 	b, build_error := strings.builder_make(allocator)
 	if build_error != nil {err = build_error; return}
 	defer strings.builder_destroy(&b)
-	eol := strings.contains(text, "\r\n") ? "\r\n" : "\n"
-	rest := text
+	scanner := line_scanner_init(text)
+	if scanner.bom {
+		if err = write_parts(&b, UTF8_BOM); err != nil {return}
+	}
 	written := false
-	for len(rest) > 0 {
-		end := strings.index_byte(rest, '\n')
-		if end < 0 {end = len(rest) - 1}
-		raw := rest[:end + 1]
-		rest = rest[end + 1:]
-		line := strings.trim_space(strings.trim_prefix(raw, "\xef\xbb\xbf"))
-		equal := strings.index_byte(line, '=')
-		if equal >= 0 && strings.trim_space(line[:equal]) == key {
+	for {
+		line, ok := line_next(&scanner)
+		if !ok {break}
+		if line.split && line.key == key {
 			if written {continue}
-			if strings.has_prefix(raw, "\xef\xbb\xbf") {
-				if err = write_parts(&b, "\xef\xbb\xbf"); err != nil {return}
-			}
-			if err = write_parts(&b, key, " = ", serialized, eol); err != nil {return}
+			if err = write_parts(&b, key, " = ", serialized, scanner.eol); err != nil {return}
 			written = true
-		} else {
-			if err = write_parts(&b, raw); err != nil {return}
+			continue
 		}
+		if err = write_parts(&b, line.raw); err != nil {return}
 	}
 	if !written {
 		if len(text) > 0 && text[len(text) - 1] != '\n' {
-			if err = write_parts(&b, eol); err != nil {return}
+			if err = write_parts(&b, scanner.eol); err != nil {return}
 		}
-		if err = write_parts(&b, key, " = ", serialized, eol); err != nil {return}
+		if err = write_parts(&b, key, " = ", serialized, scanner.eol); err != nil {return}
 	}
 	updated, err = strings.clone(strings.to_string(b), allocator)
 	return
