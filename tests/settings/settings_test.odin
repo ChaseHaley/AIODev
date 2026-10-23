@@ -22,6 +22,8 @@ round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(d), 0)
 	testing.expect_value(t, s.font.family, "Cascadia Mono")
 	testing.expect_value(t, s.font.size, 12)
+	testing.expect_value(t, s.interface.hover_lift, 1.5)
+	testing.expect_value(t, s.interface.hover_gloss, 1.0)
 	testing.expect_value(t, s.shell.directory, "~")
 	testing.expect_value(t, s.window.columns, 120)
 	testing.expect_value(t, s.colors.palette[15], settings.Color{0xf4, 0xf4, 0xf7})

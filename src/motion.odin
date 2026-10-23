@@ -15,6 +15,8 @@ motion_active :: proc(app: ^App) -> bool {
 			}
 		}
 		if ui.motion_active(w.tab_underline) || ui.presence_active(w.pending_close.confirm.presence) { return true }
+		if ui.control_active(w.pending_close.confirm.hover_motion) { return true }
+		if ui.control_active(w.workspace_motion) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
@@ -37,6 +39,9 @@ update_motion :: proc(app: ^App) {
 	if notices_changed {mark_all_dirty(app)}
 	for w in app.windows {
 		p := &w.workspace_picker
+		if ui.control_update(&w.workspace_motion, w.workspace_hovered, false, app.animations, now) {
+			w.dirty = true
+		}
 		if p.mode == .Rename {
 			ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, app.animations, now)
 			if ui.motion_update(&p.rename_motion, now) { w.dirty = true }
@@ -95,6 +100,9 @@ update_motion :: proc(app: ^App) {
 		}
 		c := &w.pending_close.confirm
 		confirm_changed, _ := ui.presence_advance(&c.presence, app.animations, now)
+		if ui.control_update(&c.hover_motion, c.hover != .None, false, app.animations, now) {
+			confirm_changed = true
+		}
 		underline_changed := ui.motion_update(&w.tab_underline, now)
 		if underline_changed ||
 		   controls_changed ||

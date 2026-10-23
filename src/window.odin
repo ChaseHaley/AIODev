@@ -77,6 +77,8 @@ Window :: struct {
 	rename_open: bool,
 	rename_target: Rename_Target,
 	workspace_picker: Workspace_Picker,
+	workspace_hovered: bool,
+	workspace_motion: ui.Control_Motion,
 	caption_hover: int,
 	caption_armed: ui.Armed(int),
 	maximized: bool,
@@ -559,7 +561,18 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {
 		status, enabled := find_presentation(w, focused_session(app, w))
-		result := ui.find_draw(&w.find, &w.list, &w.ui_text, app.theme, status, enabled, size.x, size.y, w.scale)
+		result := ui.find_draw(
+			&w.find,
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			status,
+			enabled,
+			size.x,
+			size.y,
+			w.scale,
+			w.pointer,
+		)
 		if result != .Ok {
 			return frame, result
 		}
@@ -587,6 +600,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			content.body,
 			content.label,
 			content.note,
+			"",
+			w.pointer,
 		)
 		opacity, rise := ui.presence_fade(pc.confirm.presence, 4 * w.scale)
 		ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
@@ -611,6 +626,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			label,
 			note,
 			"Don't ask again",
+			w.pointer,
 		)
 		opacity, rise := ui.presence_fade(swap.confirm.presence, 4 * w.scale)
 		ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)

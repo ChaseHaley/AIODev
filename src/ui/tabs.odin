@@ -63,6 +63,7 @@ tab_draw :: proc(
 	marked: bool = false,
 	icon: string = "",
 	icon_atlas: render.Rect = {},
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	x := f32(index) * bar.tab_width
 	if position >= 0 {x = position}
@@ -71,7 +72,13 @@ tab_draw :: proc(
 	x += bar.x
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None {return .Ok}
 	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.chrome})
-	tile := render.Rect{x + 2 * scale, 6 * scale, max(0, width - 4 * scale), 28 * scale}
+	// A selected or marked tab is already raised; only an ordinary tab rises on hover.
+	lift := selected || marked ? 0 : hover_lift_at(theme, hover, scale)
+	tile := render.Rect{x + 2 * scale, 6 * scale - lift, max(0, width - 4 * scale), 28 * scale}
+	if lift > 0 {
+		if result := hover_shadow_draw(list, theme, tile, 7 * scale, hover, scale);
+		   result != .None {return .Ok}
+	}
 	if selected {
 		draw_rect(list, {rect = tile, color = theme.pane, radius = 7 * scale})
 		draw_rect(list, {rect = tile, color = theme.border, radius = 7 * scale, stroke = scale})
@@ -100,6 +107,7 @@ tab_draw :: proc(
 	if index < bar.count && width >= 56 * scale {
 		close := tab_close_rect(bar, index, scale)
 		close.x += x - bar.x - f32(index) * bar.tab_width
+		close.y -= lift
 		large := text^
 		text_set_size(&large, text.size_px * 1.5)
 		if result := draw_glyph_centered(&large, list, '×', close, theme.muted);
@@ -112,21 +120,26 @@ tab_draw :: proc(
 			list,
 			text,
 			theme,
-			{x + 10 * scale, 13 * scale, 14 * scale, 14 * scale},
+			{x + 10 * scale, 13 * scale - lift, 14 * scale, 14 * scale},
 			icon,
 			scale,
 			icon_atlas,
 		); result != .Ok {return result}
 	}
-	return draw_fading_text(
+	if result := draw_fading_text(
 		text,
 		list,
 		title,
 		x + 11 * scale + icon_width,
-		(bar.height - text.line_height) / 2 + text.ascent,
+		(bar.height - text.line_height) / 2 + text.ascent - lift,
 		selected ? theme.text : theme.muted,
 		max(0, width - (index < bar.count ? 44 : 22) * scale - icon_width),
-	)
+	); result != .Ok {return result}
+	if hover > 0 {
+		if result := hover_rim_draw(list, theme, tile, 7 * scale, hover, scale, pointer);
+		   result != .None {return .Ok}
+	}
+	return .Ok
 }
 
 tab_selection_update :: proc(marked: []bool, index, anchor: int, toggle, range: bool) {

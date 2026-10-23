@@ -51,6 +51,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Mouse_Move_Event:
 		if w := window_find(app, e.window); w != nil {
+			x, y := f32(e.x), f32(e.y)
+			w.pointer = {x, y}
+			if hovered := workspace_rect_contains(workspace_button_rect(w), x, y);
+			   hovered != w.workspace_hovered {
+				w.workspace_hovered, w.dirty = hovered, true
+			}
 			gesture_move(app, w, e)
 		}
 	case platform.Mouse_Leave_Event:
@@ -58,6 +64,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.find.hover = .None
 			w.tab_hover = -1
 			w.tab_pressed = false
+			w.workspace_hovered = false
 			w.workspace_picker.menu_hover = 0
 			ui.editor_hover_clear(&w.editor)
 			w.split_overlay = false

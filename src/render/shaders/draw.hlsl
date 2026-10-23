@@ -16,6 +16,7 @@ struct RectInstance {
     float softness;
     float stroke;
     uint fill;
+    float4 sheen;
 };
 
 struct GlyphInstance {
@@ -42,6 +43,7 @@ struct Vertex {
     nointerpolation uint flags : TEXCOORD4;
     float2 texel : TEXCOORD3;
     nointerpolation float3 extra : TEXCOORD5;
+    nointerpolation float4 sheen : TEXCOORD6;
 };
 
 float2 corner(uint id) {
@@ -64,6 +66,7 @@ Vertex rect_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
     o.edge = float2(r.radius, r.softness);
     o.extra.x = r.stroke;
     o.flags = r.fill;
+    o.sheen = r.sheen;
     return o;
 }
 
@@ -93,6 +96,18 @@ float4 rect_ps(Vertex i) : SV_Target {
         rgb = hsv_rgb(frac(atan2(d.y, d.x) / 6.2831853 + 1), saturate(length(d)), i.color.r);
     } else if (i.flags == 2) {
         rgb *= saturate(i.local.x / max(1, i.rect.z));
+    } else if (i.flags == 3) {
+        // A rim light: a band just inside the rounded edge, reaching out from the pointer,
+        // with a faint interior wash so the face is not perfectly flat.
+        float2 delta = i.local - i.sheen.xy;
+        float reach = saturate(1 - length(delta) / max(1, i.sheen.z));
+        float glow = reach * reach * 0.05;
+        // Peak the band half a pixel inside the edge, where coverage is full, so the rim
+        // reads as a crisp line instead of fading with the antialiased outline.
+        float half_width = max(0.5, i.sheen.w * 0.5);
+        float band = saturate(1 - abs((distance + half_width) / half_width));
+        band = band * band * (3 - 2 * band);
+        alpha *= band * reach + glow;
     }
     return float4(rgb * alpha, alpha);
 }

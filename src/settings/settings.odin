@@ -30,7 +30,7 @@ Input_Settings :: struct {
 	leader: string,
 }
 Interface_Settings :: struct {
-	font_size: f64,
+	font_size, hover_lift, hover_gloss: f64,
 }
 Tab_Settings :: struct {
 	confirm_close: bool,
@@ -243,6 +243,29 @@ SCHEMA :: [?]Schema_Entry {
 		14,
 		nil,
 		"Interface text size in points; independent of the terminal font.",
+	},
+	{
+		"interface.hover_lift",
+		"Hover Lift",
+		.Float,
+		offset_of(Settings, interface) + offset_of(Interface_Settings, hover_lift),
+		"1.5",
+		0,
+		4,
+		nil,
+		"How far interactive controls rise on hover, in DIPs. Zero disables the lift.",
+	},
+	{
+		"interface.hover_gloss",
+		"Hover Gloss",
+		.Float,
+		offset_of(Settings, interface) + offset_of(Interface_Settings, hover_gloss),
+		"1",
+		0,
+		2,
+		nil,
+		"Strength of the pointer-following rim light on hovered controls. One is the designed " +
+			"strength; zero disables it.",
 	},
 	{
 		"font.size",

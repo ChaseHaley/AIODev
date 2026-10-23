@@ -356,6 +356,7 @@ when AIO_CONTROL {
 			window := [?]control.State_Entry {
 				{"window.id", fmt.tprintf("%d", w.id)},
 				{"window.origin", fmt.tprintf("%d,%d", origin.x, origin.y)},
+				{"window.pointer", fmt.tprintf("%g,%g", w.pointer.x, w.pointer.y)},
 				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
 				{"rename.open", fmt.tprintf("%t", w.rename_open)},
@@ -424,6 +425,8 @@ when AIO_CONTROL {
 				{"tabs.x", fmt.tprintf("%g", window_tab_bar(app, w).x)},
 				{"workspace.id", fmt.tprintf("%d", w.workspace.id)},
 				{"workspace.name", w.workspace.name},
+				{"workspace.button", verify_workspace_rect(workspace_button_rect(w))},
+				{"workspace.button.hover", fmt.tprintf("%t", w.workspace_hovered)},
 				{"workspace.picker", fmt.tprintf("%t", workspace_picker_active(&w.workspace_picker))},
 				{"workspace.icon.preset", fmt.tprintf("%d", w.workspace.icon.preset)},
 				{"workspace.icon.emoji", w.workspace.icon.emoji},

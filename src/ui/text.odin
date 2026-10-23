@@ -12,6 +12,10 @@ import "core:slice"
 Theme :: struct {
 	window, chrome, pane, surface, border, text, muted, faint, accent, accent_text: render.Color,
 	selection, shadow, scrim, hover, pressed, focus, error, success, warning, info: render.Color,
+	// The shared raised-hover look. `rim` is the colour of the pointer-following edge light;
+	// lift and gloss are overridden from interface.hover_lift and interface.hover_gloss.
+	rim:        render.Color,
+	hover_lift, hover_gloss: f32,
 }
 
 theme_from :: proc(t: settings.Theme) -> Theme {
@@ -36,6 +40,11 @@ theme_from :: proc(t: settings.Theme) -> Theme {
 		success = colour.rgba(t.success),
 		warning = colour.rgba(t.warning),
 		info = colour.rgba(t.info),
+		// White light reads as a specular edge on dark surfaces; on light surfaces the
+		// accent tint is the part that survives against a white control.
+		rim = colour.rgba(t.light ? t.accent : t.text, t.light ? 0.60 : 0.80),
+		hover_lift = 1.5,
+		hover_gloss = 1,
 	}
 }
 

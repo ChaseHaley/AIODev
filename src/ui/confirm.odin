@@ -25,6 +25,7 @@ Confirm :: struct {
 	using presence: Presence,
 	focus, hover:   Confirm_Button,
 	armed:          Armed(Confirm_Button),
+	hover_motion:   Control_Motion,
 	extended:       bool,
 	show_option:    bool,
 	option:         bool,
@@ -51,6 +52,8 @@ CONFIRM_PRESENCE :: Presence_Spec {
 confirm_open :: proc(c: ^Confirm) {
 	presence_open(&c.presence, CONFIRM_PRESENCE)
 	c.focus, c.hover = .Accept, .None
+	c.motion = {}
+	c.hover_motion = {}
 	armed_cancel(&c.armed)
 }
 
@@ -185,19 +188,29 @@ confirm_button_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
-	r: render.Rect,
+	rect: render.Rect,
 	button: Confirm_Button,
 	label: string,
 	scale: f32,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	accept := button == .Accept
 	active := armed_is(c.armed, button)
+	hover := c.hover == button ? c.hover_motion.hover.value : 0
+	lift := hover_lift_at(theme, hover, scale)
+	r := rect
+	r.y -= lift
+	if lift > 0 {
+		if result := hover_shadow_draw(list, theme, r, 6 * scale, hover, scale);
+		   result != .None {return .Ok}
+	}
 	fill := accept ? theme.error : theme.border
-	if !accept && active {fill = theme.pressed} else if !accept && c.hover == button {
+	if !accept && active {fill = theme.pressed} else if !accept && hover > 0 {
 		fill = theme.hover
+		fill.a *= hover
 	}
 	draw_rect(list, {rect = r, color = fill, radius = 6 * scale})
-	if accept && (c.hover == button || active) {
+	if accept && (hover > 0 || active) {
 		draw_rect(
 			list,
 			{
@@ -210,7 +223,7 @@ confirm_button_draw :: proc(
 	if c.focus == button {focus_ring_draw(list, r, theme, scale)}
 	strong := text_styled(text, .Strong)
 	color := accept ? theme.accent_text : theme.text
-	return draw_text(
+	if result := draw_text(
 		&strong,
 		list,
 		label,
@@ -218,7 +231,12 @@ confirm_button_draw :: proc(
 		r.y + (r.height - strong.line_height) / 2 + strong.ascent,
 		color,
 		r.width - 8 * scale,
-	)
+	); result != .Ok {return result}
+	if hover > 0 {
+		if result := hover_rim_draw(list, theme, r, 6 * scale, hover, scale, pointer);
+		   result != .None {return .Ok}
+	}
+	return .Ok
 }
 
 confirm_draw :: proc(
@@ -230,8 +248,9 @@ confirm_draw :: proc(
 	title, body, accept_label: string,
 	note: string,
 	option_label: string = "",
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
-	l := confirm_layout(width, height, scale, c.extended)
+	l := confirm_layout(width, height, scale, c.extended, c.show_option)
 	s := scale
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
@@ -304,7 +323,7 @@ confirm_draw :: proc(
 			max(0, l.option.width - 26 * s),
 		); r != .Ok {return r}
 	}
-	if r := confirm_button_draw(c, list, text, theme, l.cancel, .Cancel, "Cancel", s);
+	if r := confirm_button_draw(c, list, text, theme, l.cancel, .Cancel, "Cancel", s, pointer);
 	   r != .Ok {return r}
-	return confirm_button_draw(c, list, text, theme, l.accept, .Accept, accept_label, s)
+	return confirm_button_draw(c, list, text, theme, l.accept, .Accept, accept_label, s, pointer)
 }

@@ -53,8 +53,14 @@ header_hit_test :: proc(l: Header_Layout, x, y: f32) -> Header_Action {
 		   y >= l.panel.y &&
 		   y < l.panel.y + l.panel.height {return Header_Action(i + 1)}
 	}
-	badge := render.Rect{l.badge.x - 3, l.badge.y - 3, l.badge.width + 12, l.badge.height + 6}
-	if contains(badge, x, y) {return .Badge}
+	// The badge's hover target extends a little past the glyph, but never outside the visible card.
+	if l.badge.width > 0 && l.panel.width > 0 && l.panel.height > 0 {
+		left := max(l.panel.x, l.badge.x - 3)
+		top := max(l.panel.y, l.badge.y - 3)
+		right := min(l.panel.x + l.panel.width, l.badge.x + l.badge.width + 9)
+		bottom := min(l.panel.y + l.panel.height, l.badge.y + l.badge.height + 3)
+		if x >= left && x < right && y >= top && y < bottom {return .Badge}
+	}
 	return .None
 }
 
@@ -182,6 +188,7 @@ header_draw :: proc(
 	zoomed := false,
 	icon_atlas: render.Rect = {},
 	badge_hovered := false,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	l := header_layout(area, scale, focused)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
@@ -236,21 +243,30 @@ header_draw :: proc(
 	}
 	for button, i in l.buttons {
 		if button.width == 0 {continue}
+		hover := controls[i].hover.value
+		b := button
+		b.y -= hover_lift_at(theme, hover, scale)
+		if hover > 0 {
+			if result := hover_shadow_draw(list, theme, b, 6 * scale, hover, scale);
+			   result != .None {return .Ok}
+		}
 		fill := theme.hover
-		fill.a *= controls[i].hover.value
-		draw_rect(list, {rect = button, color = fill, radius = 6 * scale})
+		fill.a *= hover
+		draw_rect(list, {rect = b, color = fill, radius = 6 * scale})
 		fill = i == 3 ? theme.error : theme.pressed
 		fill.a *= controls[i].press.value * (i == 3 ? 0.14 : 1)
-		draw_rect(list, {rect = button, color = fill, radius = 6 * scale})
+		draw_rect(list, {rect = b, color = fill, radius = 6 * scale})
 		if result := header_icon_draw(
 			list,
 			text,
-			button,
+			b,
 			Header_Action(i + 1),
-			controls[i].hover.value > 0 ? theme.text : theme.muted,
+			hover > 0 ? theme.text : theme.muted,
 			scale,
 			zoomed,
 		); result != .Ok {return result}
+		if result := hover_rim_draw(list, theme, b, 6 * scale, hover, scale, pointer);
+		   result != .None {return .Ok}
 	}
 	return .Ok
 }
@@ -281,6 +297,7 @@ split_overlay_draw :: proc(
 	l: Header_Layout,
 	controls: [4]Control_Motion,
 	scale: f32,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	if render.push_layer(list, l.panel, 8 * scale) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = theme.surface, radius = 8 * scale})
@@ -288,9 +305,15 @@ split_overlay_draw :: proc(
 	if result := draw_glyph_centered(text, list, '⠿', l.title, theme.muted);
 	   result != .Ok {return result}
 	buttons := l.buttons
-	for button, i in buttons[:2] {
+	for &button, i in buttons[:2] {
+		hover := controls[i].hover.value
+		button.y -= hover_lift_at(theme, hover, scale)
+		if hover > 0 {
+			if result := hover_shadow_draw(list, theme, button, 6 * scale, hover, scale);
+			   result != .None {return .Ok}
+		}
 		fill := theme.hover
-		fill.a *= controls[i].hover.value
+		fill.a *= hover
 		draw_rect(list, {rect = button, color = fill, radius = 6 * scale})
 		fill = theme.pressed
 		fill.a *= controls[i].press.value
@@ -300,10 +323,12 @@ split_overlay_draw :: proc(
 			text,
 			button,
 			Header_Action(i + 1),
-			controls[i].hover.value > 0 ? theme.text : theme.muted,
+			hover > 0 ? theme.text : theme.muted,
 			scale,
 			false,
 		); result != .Ok {return result}
+		if result := hover_rim_draw(list, theme, button, 6 * scale, hover, scale, pointer);
+		   result != .None {return .Ok}
 	}
 	return .Ok
 }

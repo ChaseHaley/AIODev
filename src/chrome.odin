@@ -95,6 +95,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				tab.marked,
 				icon,
 				atlas,
+				w.pointer,
 			); result != .Ok {return result}
 		}
 	}
@@ -126,6 +127,11 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		tab_control(w, bar.count).hover.value,
 		tab_control(w, bar.count).press.value,
 		0,
+		-1,
+		false,
+		"",
+		{},
+		w.pointer,
 	); result != .Ok {return result}
 	chevron := tab_chevron_rect(app, w)
 	if render.push_layer(&w.list, chevron) != .None {return .Ok}

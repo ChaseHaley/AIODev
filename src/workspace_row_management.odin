@@ -308,6 +308,9 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 		dot := render.Rect{r.x + r.width / 2 - 1.5 * s, r.y + 8.5 * s + f32(i) * 6 * s, 3 * s, 3 * s}
 		if render.push_rect(&w.list, {rect = dot, color = ink, radius = 1.5 * s}) != .None { return }
 	}
+	if hover > 0 {
+		if ui.hover_rim_draw(&w.list, app.theme, r, 5 * s, hover, s, w.pointer) != .None { return }
+	}
 }
 
 workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
@@ -360,6 +363,11 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if result := ui.draw_text(&w.ui_text, &w.list, title, item.x + 8 * s,
 			item.y + (item.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			enabled ? app.theme.text : app.theme.muted, max(0, item.width - 16 * s)); result != .Ok { return result }
+		if i == p.menu_selected && workspace_rect_contains(item, w.pointer.x, w.pointer.y) {
+			if ui.hover_rim_draw(&w.list, app.theme, item, 4 * s, 1, s, w.pointer) != .None {
+				return .Ok
+			}
+		}
 	}
 	return .Ok
 }

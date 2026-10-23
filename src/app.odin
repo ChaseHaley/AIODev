@@ -629,6 +629,8 @@ apply_fonts :: proc(app: ^App) {
 
 apply_theme :: proc(app: ^App) {
 	app.theme = ui.theme_from(settings.theme_resolve(app.settings.theme))
+	app.theme.hover_lift = f32(app.settings.interface.hover_lift)
+	app.theme.hover_gloss = f32(app.settings.interface.hover_gloss)
 }
 
 color :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {

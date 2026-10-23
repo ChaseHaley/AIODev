@@ -156,6 +156,7 @@ find_draw :: proc(
 	status: string,
 	enabled: bool,
 	width, height, scale: f32,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	input_text := text_styled(base, .Input)
 	text := &input_text
@@ -192,6 +193,10 @@ find_draw :: proc(
 		if enabled && active { focus_ring_draw(list, area, theme, scale) }
 		if result := draw_glyph_centered(text, list, i == 0 ? '↑' : '↓', area,
 			enabled ? theme.text : theme.faint); result != .Ok { return result }
+		if enabled && f.hover == action {
+			if result := hover_rim_draw(list, theme, area, 5 * scale, 1, scale, pointer);
+			   result != .None { return .Ok }
+		}
 	}
 	if l.query.width <= 0 { return .Ok }
 	box := Field_Box {

@@ -124,25 +124,52 @@ workspace_button_width :: proc(w: ^Window) -> f32 {
 	return min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
 }
 
+// The chip's visual and hit rectangle. Hit testing keeps this rectangle even while the
+// control is drawn lifted, so the hover never changes where the click target is.
+workspace_button_rect :: proc(w: ^Window) -> render.Rect {
+	width := workspace_button_width(w)
+	return {5 * w.scale, 6 * w.scale, max(0, width - 10 * w.scale), 28 * w.scale}
+}
+
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	width := workspace_button_width(w)
 	if width <= 12 * w.scale {return .Ok}
-	r := render.Rect{5 * w.scale, 6 * w.scale, max(0, width - 10 * w.scale), 28 * w.scale}
+	r := workspace_button_rect(w)
+	hover := w.workspace_motion.hover.value
+	lift := ui.hover_lift_at(app.theme, hover, w.scale)
+	r.y -= lift
 	if render.push_layer(&w.list, {0, 0, width, ui.TAB_HEIGHT * w.scale}) != .None {return .Ok}
+	if lift > 0 {
+		if result := ui.hover_shadow_draw(&w.list, app.theme, r, 6 * w.scale, hover, w.scale);
+		   result != .None {return .Ok}
+	}
 	fill := workspace_picker_active(&w.workspace_picker) ? app.theme.selection : app.theme.pane
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None { return .Ok }
+	if hover > 0 {
+		fill = app.theme.hover
+		fill.a *= hover
+		if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None {
+			return .Ok
+		}
+	}
 	if width >= 72 * w.scale {
-		icon := render.Rect{10 * w.scale, 8 * w.scale, 24 * w.scale, 24 * w.scale}
+		icon := render.Rect{r.x + 5 * w.scale, r.y + 2 * w.scale, 24 * w.scale, 24 * w.scale}
 		if result := workspace_icon_draw(w, w.workspace.icon, icon, app.theme.text);
 		   result != .Ok { return result }
 	}
-	label_width := workspace_button_indicator_rect(w).x - 48 * w.scale
+	indicator := workspace_button_indicator_rect(w)
+	indicator.y -= lift
+	label_width := indicator.x - (r.x + 35 * w.scale) - 8 * w.scale
 	if label_width >= 24 * w.scale {
-		if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, 40 * w.scale,
-			(ui.TAB_HEIGHT * w.scale - w.ui_text.line_height) / 2 + w.ui_text.ascent,
+		if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, r.x + 35 * w.scale,
+			r.y + (28 * w.scale - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			app.theme.text, label_width); result != .Ok { return result }
 	}
-	workspace_chevron_draw(&w.list, workspace_button_indicator_rect(w), app.theme.text, w.scale)
+	workspace_chevron_draw(&w.list, indicator, app.theme.text, w.scale)
+	if hover > 0 {
+		if result := ui.hover_rim_draw(&w.list, app.theme, r, 6 * w.scale, hover, w.scale, w.pointer);
+		   result != .None {return .Ok}
+	}
 	return .Ok
 }
 
@@ -535,6 +562,11 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			app.theme.muted,
 			detail_width,
 		); result != .Ok {return result}
+		// Rows are a reading surface: they take the pointer light but never the lift.
+		if workspace_rect_contains(row, w.pointer.x, w.pointer.y) {
+			if result := ui.hover_rim_draw(&w.list, app.theme, row, 5 * s, 1, s, w.pointer);
+			   result != .None {return .Ok}
+		}
 	}
 	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }
 	return workspace_row_menu_draw(app, w)

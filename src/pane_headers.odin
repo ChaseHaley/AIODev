@@ -81,6 +81,7 @@ pane_header_draw :: proc(
 			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale),
 			controls,
 			w.scale,
+			w.pointer,
 		)
 	}
 	icon_atlas: render.Rect
@@ -120,6 +121,7 @@ pane_header_draw :: proc(
 		w.tree.zoomed,
 		icon_atlas,
 		badge_hovered,
+		w.pointer,
 	)
 }
 

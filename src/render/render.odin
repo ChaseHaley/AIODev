@@ -14,12 +14,16 @@ Rect_Instance :: struct {
 	radius, softness: f32,
 	stroke:           f32,
 	fill:             u32,
+	// RECT_FILL_RIM only: local centre of the light, its reach, and the rim width, in pixels.
+	sheen:            [4]f32,
 }
 
 // RECT_FILL_HUE_WHEEL shades a circle by hue around the center and saturation outward, with color.r as
 // the HSV value. RECT_FILL_VALUE_RAMP darkens color.rgb to black at the left edge.
+// RECT_FILL_RIM keeps color.rgb as a rim light: alpha follows a pointer-shaped reach at the rounded edge.
 RECT_FILL_HUE_WHEEL :: u32(1)
 RECT_FILL_VALUE_RAMP :: u32(2)
+RECT_FILL_RIM :: u32(3)
 
 // A glyph quad. Coverage glyphs are tinted with color; with GLYPH_COLOR set, the glyph samples the
 // RGBA atlas and color.a only fades it.
