@@ -300,34 +300,18 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 		for pane in w.panes {if pane.node == d.target {return pane.rect, true}}
 		return {}, false
 	}
-	trial := d.destination.tree
-	trial.zoomed = false
-	trial.nodes = make(
-		[dynamic]layout.Node,
-		len(trial.nodes),
-		len(trial.nodes) + 2,
-		context.temp_allocator,
+	result := pane_trial_move(
+		app,
+		w,
+		&d.source.tree,
+		&d.destination.tree,
+		d.node,
+		d.target,
+		d.direction,
+		d.root,
 	)
-	copy(trial.nodes[:], d.destination.tree.nodes[:])
-	content := d.source.tree.nodes[d.node].(layout.Pane).content
-	moved := false
-	if d.destination != d.source {
-		source := d.source.tree
-		source.nodes = make([dynamic]layout.Node, len(source.nodes), context.temp_allocator)
-		copy(source.nodes[:], d.source.tree.nodes[:])
-		_, moved = layout.transfer_pane(&source, &trial, d.node, d.target, d.direction, d.root)
-	} else if d.root {_, moved = layout.dock_pane(&trial, d.node, d.direction)} else {_, moved = layout.move_pane(&trial, d.node, d.target, d.direction)}
-	if !moved {return {}, false}
-	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	layout.compute(&trial, window_content_area(app, w), window_gap(app, w), &rects)
-	before := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	original := d.destination.tree
-	original.zoomed = false
-	layout.compute(&original, window_content_area(app, w), window_gap(app, w), &before)
-	d.minimum_rejected = !pane_minimum_allows(app, w, rects[:], before[:], false)
-	if d.minimum_rejected {return {}, false}
-	for r in rects {if r.content == content {return r.rect, true}}
-	return {}, false
+	d.minimum_rejected = result.error == .Minimum
+	return result.rect, result.error == .None
 }
 
 // Tracks a header drag; returns whether the drag owns the pointer.
