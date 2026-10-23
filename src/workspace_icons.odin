@@ -43,7 +43,7 @@ workspace_icon_valid :: proc(value: string) -> bool {
 
 @(require_results)
 workspace_icon_set :: proc(app: ^App, workspace: ^Workspace, preset: int, emoji: string) -> bool {
-	if workspace == nil || workspace_find(app, workspace.id) != workspace {return false}
+	if !workspace_registered(app, workspace) {return false}
 	if preset < 0 || preset >= len(WORKSPACE_ICONS) {return false}
 	if emoji != "" && !workspace_icon_valid(emoji) {return false}
 	owned, err := strings.clone(emoji)

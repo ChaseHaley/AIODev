@@ -33,7 +33,7 @@ workspace_icon_tint :: proc(index: int, foreground: render.Color) -> render.Colo
 
 @(require_results)
 workspace_icon_color_set :: proc(app: ^App, workspace: ^Workspace, tint: int) -> bool {
-	if workspace == nil || workspace_find(app, workspace.id) != workspace { return false }
+	if !workspace_registered(app, workspace) { return false }
 	if tint < 0 || tint >= len(WORKSPACE_ICON_COLORS) { return false }
 	workspace.icon.tint = tint
 	mark_all_dirty(app)
