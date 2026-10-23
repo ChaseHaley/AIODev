@@ -49,12 +49,22 @@ rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	return {r.x + 16 * s, r.y + 45 * s, max(1, r.width - 32 * s), 36 * s}
 }
 
+rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
+	return {
+		field = &w.rename,
+		text = &w.ui_text,
+		rect = rename_field_rect(w),
+		inset = 10,
+		caret_width = 1,
+		radius = 5,
+		style = .Body,
+		scale = w.scale,
+	}
+}
+
 rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
-	field := rename_field_rect(w)
-	available := max(1, field.width - 20 * w.scale)
-	start := ui.field_view_start(&w.rename, &w.ui_text, available)
-	at := ui.field_offset_at(&w.rename, &w.ui_text, start, field.x + 10 * w.scale, x)
-	ui.field_pointer(&w.rename, at, pressed, extend)
+	box := rename_field_box(w)
+	ui.field_pointer(&w.rename, ui.field_box_offset(box, x), pressed, extend)
 	w.dirty = true
 }
 
@@ -90,19 +100,14 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	   .None {
 		return .Ok
 	}
-	if render.push_layer(&w.list, field, 5 * s) != .None {return .Ok}
-	if result := ui.field_draw(
-		&w.rename,
+	box := rename_field_box(w)
+	if result := ui.field_box_draw(
+		box,
 		&w.list,
-		&w.ui_text,
 		app.theme,
-		field.x + 10 * s,
-		field.y + (field.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
-		max(1, field.width - 20 * s),
+		ui.field_box_baseline(box),
 		true,
 		"Automatic title",
-		app.theme.text,
-		s,
 	); result != .Ok {return result}
 	if render.push_layer(&w.list, r) != .None {return .Ok}
 	hint := "Enter saves · Esc cancels · Empty restores automatic titles"
