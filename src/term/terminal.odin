@@ -667,3 +667,19 @@ configure :: proc(s: ^Session, scrollback_lines: int, cursor: Cursor_Style, blin
 geometry :: proc(s: ^Session) -> Geometry {
 	return s.geometry
 }
+
+// Test-only window onto the libghostty handle. `odin test` defines ODIN_TEST, so debug, release,
+// check and verify builds do not contain this proc at all. It holds the session mutex so a test can
+// inspect or configure the terminal while its reader thread is still feeding it.
+when ODIN_TEST {
+	@(require_results)
+	with_terminal :: proc(
+		s: ^Session,
+		inspect: proc(terminal: ghostty.Terminal, user: rawptr) -> bool,
+		user: rawptr,
+	) -> bool {
+		sync.mutex_lock(&s.mutex)
+		defer sync.mutex_unlock(&s.mutex)
+		return inspect(s.terminal, user)
+	}
+}
