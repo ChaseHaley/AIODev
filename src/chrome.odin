@@ -127,17 +127,43 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		tab_control(w, bar.count).press.value,
 		0,
 	); result != .Ok {return result}
-	x := bar.x + f32(bar.count) * bar.tab_width + bar.button_width
-	if render.push_layer(&w.list, {x, 0, bar.button_width, bar.height}) != .None {return .Ok}
+	chevron := tab_chevron_rect(app, w)
+	if render.push_layer(&w.list, chevron) != .None {return .Ok}
+	control := tab_control(w, bar.count + 1)
+	fill := app.theme.hover
+	fill.a *= control.hover.value
+	hover_rect := render.Rect {
+		chevron.x + 2 * w.scale,
+		6 * w.scale,
+		chevron.width - 4 * w.scale,
+		28 * w.scale,
+	}
+	if render.push_rect(&w.list, {rect = hover_rect, color = fill, radius = 6 * w.scale}) !=
+	   .None {return .Ok}
+	fill = app.theme.pressed
+	fill.a *= control.press.value
+	if render.push_rect(&w.list, {rect = hover_rect, color = fill, radius = 6 * w.scale}) !=
+	   .None {return .Ok}
+	label := "▾"
+	label_width := ui.text_width(&w.ui_text, label)
 	return ui.draw_text(
 		&w.ui_text,
 		&w.list,
-		"⌕",
-		x + 8 * w.scale,
+		label,
+		chevron.x + (chevron.width - label_width) / 2,
 		(bar.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 		app.theme.muted,
-		bar.button_width,
 	)
+}
+
+tab_chevron_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	bar := window_tab_bar(app, w)
+	return {
+		bar.x + f32(bar.count) * bar.tab_width + bar.button_width,
+		0,
+		bar.button_width,
+		bar.height,
+	}
 }
 
 tab_position :: proc(w: ^Window, index: int) -> f32 {

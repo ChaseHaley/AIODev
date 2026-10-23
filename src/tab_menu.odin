@@ -18,6 +18,8 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
 	if !w.workspace.tabs[index].marked {tab_select(app, w, index)} else {tab_select(app, w, index, true)}
 	if !gesture_cancel(app, w) {return}
+	w.tab_menu.open = false
+	w.profile_menu.open = false
 	w.tab_menu = {
 		open     = true,
 		position = {x, y},

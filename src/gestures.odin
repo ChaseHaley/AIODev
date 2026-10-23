@@ -67,6 +67,17 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		if ok {platform.window_caption_action(&app.platform, w.id, fired)}
 		return true
 	}
+	if w.pending_swap.confirm.open {
+		l := ui.confirm_layout(
+			f32(w.width),
+			f32(w.height),
+			w.scale,
+			false,
+			w.pending_swap.confirm.show_option,
+		)
+		pane_swap_outcome(app, w, ui.confirm_mouse(&w.pending_swap.confirm, l, e.button, false, x, y))
+		return true
+	}
 	if w.pending_close.confirm.open {
 		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended)
 		pending_close_outcome(app, w, ui.confirm_mouse(&w.pending_close.confirm, l, e.button, false, x, y))
@@ -125,6 +136,10 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		} else { w.tab_menu.open, w.dirty = false, true }
 		return
 	}
+	if w.profile_menu.open {
+		profile_menu_button(app, w, e)
+		return
+	}
 	if w.rename_open {
 		r, field := rename_rect(w), rename_field_rect(w)
 		x, y := f32(e.x), f32(e.y)
@@ -157,6 +172,28 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button == .Left && caption >= 0 && !w.pane_drag.pressed && !w.tab_drag.pressed {
 		ui.armed_press(&w.caption_armed, caption)
 		w.dirty = true
+		return
+	}
+	if w.pending_swap.confirm.open {
+		l := ui.confirm_layout(
+			f32(w.width),
+			f32(w.height),
+			w.scale,
+			false,
+			w.pending_swap.confirm.show_option,
+		)
+		pane_swap_outcome(
+			app,
+			w,
+			ui.confirm_mouse(
+				&w.pending_swap.confirm,
+				l,
+				e.button,
+				e.pressed,
+				f32(e.x),
+				f32(e.y),
+			),
+		)
 		return
 	}
 	if w.pending_close.confirm.open {
@@ -205,9 +242,11 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		if e.pressed {
 			if e.button == .Left && x >= 0 && x < bar.x {workspace_picker_open(app, w); return}
 			index := window_tab_hit(w, bar, x, y)
-			palette_x := bar.x + f32(bar.count) * bar.tab_width + bar.button_width
-			if e.button == .Left && x >= palette_x && x < palette_x + bar.button_width {
-				run_action(app, w, .Command_Palette)
+			chevron := tab_chevron_rect(app, w)
+			if e.button == .Left &&
+			   x >= chevron.x &&
+			   x < chevron.x + chevron.width {
+				profile_menu_open_new_tab(app, w, x, chevron.y + chevron.height)
 			} else if e.button == .Left && window_tab_close_hit(w, bar, x, y) >= 0 {
 				ui.armed_press(&w.tab_close_armed, index)
 			} else if index == bar.count && e.button == .Left {
@@ -289,6 +328,14 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		pointer_set(app, w, .Arrow)
 		return
 	}
+	if w.profile_menu.open {
+		if hit := profile_menu_hit(w, f32(e.x), f32(e.y));
+		   hit >= 0 && hit != w.profile_menu.menu.selected {
+			w.profile_menu.menu.selected, w.dirty = hit, true
+		}
+		pointer_set(app, w, .Arrow)
+		return
+	}
 	if w.rename_open {
 		field := rename_field_rect(w)
 		x, y := f32(e.x), f32(e.y)
@@ -301,6 +348,18 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover {w.caption_hover = caption; w.dirty = true}
+	if w.pending_swap.confirm.open {
+		l := ui.confirm_layout(
+			f32(w.width),
+			f32(w.height),
+			w.scale,
+			false,
+			w.pending_swap.confirm.show_option,
+		)
+		if ui.confirm_hover(&w.pending_swap.confirm, l, x, y) {w.dirty = true}
+		pointer_set(app, w, .Arrow)
+		return
+	}
 	if w.pending_close.confirm.open {
 		if ui.confirm_hover(
 			&w.pending_close.confirm,
@@ -314,6 +373,11 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		return
 	}
 	hover := window_tab_hit(w, window_tab_bar(app, w), x, y)
+	bar_height := window_tab_bar(app, w).height
+	chevron := tab_chevron_rect(app, w)
+	if x >= chevron.x && x < chevron.x + chevron.width && y >= 0 && y < bar_height {
+		hover = window_tab_bar(app, w).count + 1
+	}
 	if hover != w.tab_hover {
 		w.tab_hover = hover
 		w.dirty = true

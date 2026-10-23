@@ -32,7 +32,7 @@ tab_presentation_clear :: proc(presentation: ^Tab_Presentation) {
 @(require_results)
 tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int) -> bool {
 	appended := len(presentation.tab_positions)
-	if resize(&presentation.tab_controls, tab_count + 1) != nil {return false}
+	if resize(&presentation.tab_controls, tab_count + 2) != nil {return false}
 	if resize(&presentation.tab_positions, tab_count) != nil {return false}
 	for &position, i in presentation.tab_positions {
 		if i < appended {continue}

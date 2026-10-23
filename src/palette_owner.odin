@@ -55,6 +55,8 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	palette_release(app, w)
 	workspace_picker_cancel(w, focus_lost)
 	w.tab_menu.open = false
+	w.profile_menu.open = false
+	if w.pending_swap.confirm.open {pane_swap_finish(app, w, false)}
 	w.rename.dragging = false
 	if w.rename_open {rename_finish(app, w, false)}
 	if w.pending_close.confirm.open {pending_close_finish(app, w, false)}

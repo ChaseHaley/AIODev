@@ -76,6 +76,7 @@ Action :: enum u32 {
 	Follow_Theme_Colors,
 	Rename_Tab,
 	Rename_Pane,
+	Change_Pane_Shell,
 	Duplicate_Tab,
 	Move_Tab_Left,
 	Move_Tab_Right,
@@ -186,6 +187,7 @@ ACTIONS :: [Action]Action_Info {
 	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}},
 	.Rename_Tab = {"tab.rename", "Rename Tab", nil},
 	.Rename_Pane = {"pane.rename", "Rename Pane", nil},
+	.Change_Pane_Shell = {"pane.change_shell", "Change Pane Shell…", nil},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil},
 	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil},
 	.Move_Tab_Right = {"tab.move_right", "Move Tab Right", nil},
@@ -431,6 +433,18 @@ run_action :: proc(
 		rename_open(app, w, true)
 	case .Rename_Pane:
 		rename_open(app, w, false)
+	case .Change_Pane_Shell:
+		for pane in w.panes {
+			if pane.node != w.tree.focus || pane.content.kind != .Terminal {continue}
+			profile_menu_open_pane(
+				app,
+				w,
+				pane.node,
+				pane.rect.x + 8 * w.scale,
+				pane.rect.y + ui.HEADER_HEIGHT * w.scale,
+			)
+			break
+		}
 	case .Duplicate_Tab:
 		tab_duplicate(app, w)
 	case .Move_Tab_Left:

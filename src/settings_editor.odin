@@ -141,6 +141,80 @@ settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 	if ui.editor_add(
 		   p,
 		   {
+			   key = "profiles.add",
+			   title = "Add Profile",
+			   description = "Add a shell with its own command line and starting directory.",
+			   value = "Add Profile",
+			   kind = .Action,
+		   },
+		   "Profiles",
+	   ) !=
+	   nil {
+		ui.editor_destroy(p)
+		notify(app, .Error, "Could not allocate settings editor.")
+		return false
+	}
+	for &profile in s.profiles.items {
+		if profile.id == settings.PROFILE_DEFAULT_ID {continue}
+		group := fmt.tprintf("Profile: %s", profile.name)
+		if profile.detected {group = fmt.tprintf("Profile: %s (detected)", profile.name)}
+		rows := [?]ui.Editor_Row {
+			{
+				key = fmt.tprintf("profile.%s.name", profile.id),
+				title = "Profile Name",
+				description = "Shown in menus, tabs and the palette.",
+				value = profile.name,
+				kind = .Text,
+			},
+			{
+				key = fmt.tprintf("profile.%s.command", profile.id),
+				title = "Profile Command Line",
+				description = "Executable and arguments.",
+				value = profile.command,
+				default_value = settings.DEFAULT_PROFILE_COMMAND,
+				kind = .Text,
+			},
+			{
+				key = fmt.tprintf("profile.%s.directory", profile.id),
+				title = "Profile Starting Directory",
+				description = "Empty inherits the default starting directory.",
+				value = profile.directory,
+				default_value = settings.DEFAULT_PROFILE_DIRECTORY,
+				kind = .Text,
+			},
+			{
+				key = fmt.tprintf("profile.%s.icon", profile.id),
+				title = "Profile Icon",
+				description = "PNG path; empty uses the executable's text badge.",
+				value = profile.icon,
+				kind = .Text,
+			},
+			{
+				key = fmt.tprintf("profile.%s.hidden", profile.id),
+				title = "Hide from Menus",
+				description = "Hidden profiles stay available to open panes and shortcuts.",
+				value = profile.hidden ? "true" : "false",
+				kind = .Toggle,
+			},
+			{
+				key = fmt.tprintf("profile.%s.remove", profile.id),
+				title = "Remove Profile",
+				description = "Panes keep running; a restarted pane uses its recorded command.",
+				value = "Remove…",
+				kind = .Action,
+			},
+		}
+		for row in rows {
+			if ui.editor_add(p, row, group) != nil {
+				ui.editor_destroy(p)
+				notify(app, .Error, "Could not allocate settings editor.")
+				return false
+			}
+		}
+	}
+	if ui.editor_add(
+		   p,
+		   {
 			   key = "colors.follow_theme",
 			   title = "Follow Theme for Shell Colors",
 			   description = "Reset shell foreground and background together; preserve other color overrides.",
@@ -338,6 +412,15 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if outcome != .Save && outcome != .Reset {return}
 	row := ui.editor_row(p)
 	if row == nil {return}
+	if row.key == "profiles.add" {
+		editor_add_profile(app, w)
+		return
+	}
+	if strings.has_prefix(row.key, settings.PROFILE_PREFIX) &&
+	   strings.has_suffix(row.key, ".remove") {
+		editor_remove_profile(app, w, row.key)
+		return
+	}
 	if row.key == "colors.follow_theme" {editor_follow_theme(app, w); return}
 	if outcome == .Reset {ui.field_set(&p.value, row.default_value)}
 	value := ui.field_string(&p.value)
@@ -394,6 +477,103 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		text = "Saved. Initial size applies to new sessions."
 	}
 	ui.editor_message(p, text, false)
+}
+
+@(private)
+editor_profile_saved :: proc(
+	app: ^App,
+	w: ^Window,
+	updated, key, message: string,
+) -> bool {
+	result := settings.save(app.settings_path, w.editor.source, updated)
+	if result != .None {
+		text := "Could not save the profile. Check the settings path and permissions."
+		if result == .Conflict {
+			text = "File changed outside this editor. Close and reopen Settings to reload it."
+		}
+		ui.editor_message(&w.editor, text, true)
+		return false
+	}
+	reload_settings(app, false)
+	settings_reveal_page(
+		app,
+		&w.editor,
+		{key = key, search = .Preserve, reload = true, message = message},
+	)
+	return true
+}
+
+@(private)
+editor_add_profile :: proc(app: ^App, w: ^Window) {
+	id := ""
+	for number := 1; ; number += 1 {
+		candidate := fmt.tprintf("profile-%d", number)
+		if settings.profile_find(&app.settings.profiles, candidate) == nil {
+			id = candidate
+			break
+		}
+	}
+	text, clone_error := strings.clone(w.editor.source)
+	if clone_error != nil {
+		ui.editor_message(&w.editor, "Could not add the profile.", true)
+		return
+	}
+	for pair in ([?][2]string{
+		{"name", "New Profile"},
+		{"command", settings.DEFAULT_PROFILE_COMMAND},
+		{"directory", settings.DEFAULT_PROFILE_DIRECTORY},
+	}) {
+		key := fmt.tprintf("profile.%s.%s", id, pair[0])
+		updated, message, edit_error := settings.edit_text(text, key, pair[1])
+		delete(message)
+		if edit_error != nil || updated == "" {
+			delete(updated)
+			delete(text)
+			ui.editor_message(&w.editor, "Could not add the profile.", true)
+			return
+		}
+		delete(text)
+		text = updated
+	}
+	defer delete(text)
+	key := fmt.tprintf("profile.%s.name", id)
+	if editor_profile_saved(app, w, text, key, "Profile added. Change its command line or name.") {
+		return
+	}
+}
+
+@(private)
+editor_remove_profile :: proc(app: ^App, w: ^Window, row_key: string) {
+	key := strings.trim_suffix(row_key, ".remove")
+	id := strings.trim_prefix(key, settings.PROFILE_PREFIX)
+	profile := settings.profile_find(&app.settings.profiles, id)
+	if profile == nil {return}
+	if profile.detected {
+		hidden_key := fmt.tprintf("profile.%s.hidden", id)
+		updated, message, edit_error := settings.edit_text(w.editor.source, hidden_key, "true")
+		delete(message)
+		if edit_error != nil || updated == "" {
+			delete(updated)
+			ui.editor_message(&w.editor, "Could not hide the detected profile.", true)
+			return
+		}
+		defer delete(updated)
+		_ = editor_profile_saved(
+			app,
+			w,
+			updated,
+			"profiles.add",
+			"Detected profile hidden. Its profile.hidden line overrides detection.",
+		)
+		return
+	}
+	updated, remove_error := settings.remove_profile_text(w.editor.source, id)
+	if remove_error != nil {
+		ui.editor_message(&w.editor, "Could not remove the profile.", true)
+		return
+	}
+	defer delete(updated)
+	_ = editor_profile_saved(app, w, updated, "profiles.add", "Profile removed.")
 }
 
 editor_follow_theme :: proc(app: ^App, w: ^Window) {

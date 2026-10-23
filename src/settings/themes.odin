@@ -16,6 +16,7 @@ Theme_Settings :: struct {
 Pane_Settings :: struct {
 	gap, corner_radius:            int,
 	show_headers:                  bool,
+	confirm_shell_switch:          bool,
 	minimum_columns, minimum_rows: int,
 }
 Color_Overrides :: struct {

@@ -1,6 +1,7 @@
 package settings
 
 import "base:runtime"
+import "core:fmt"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -691,7 +692,6 @@ write_migrated_value :: proc(b: ^strings.Builder, raw: string) -> runtime.Alloca
 
 @(private)
 profile_order_text_valid :: proc(text: string) -> bool {
-	if strings.trim_space(text) == "" {return true}
 	parts, split_error := strings.split(text, ",", context.temp_allocator)
 	if split_error != nil {return false}
 	for part, i in parts {
@@ -704,6 +704,32 @@ profile_order_text_valid :: proc(text: string) -> bool {
 		}
 	}
 	return true
+}
+
+// Removes every profile.ID.* line while preserving comments, BOM and line endings.
+@(require_results)
+remove_profile_text :: proc(
+	text, id: string,
+	allocator := context.allocator,
+) -> (
+	string,
+	runtime.Allocator_Error,
+) {
+	builder, build_error := strings.builder_make(allocator)
+	if build_error != nil {return "", build_error}
+	defer strings.builder_destroy(&builder)
+	scanner := line_scanner_init(text)
+	if scanner.bom {
+		if err := write_parts(&builder, UTF8_BOM); err != nil {return "", err}
+	}
+	prefix := fmt.tprintf("%s%s.", PROFILE_PREFIX, id)
+	for {
+		line, ok := line_next(&scanner)
+		if !ok {break}
+		if line.split && strings.has_prefix(line.key, prefix) {continue}
+		if err := write_parts(&builder, line.raw); err != nil {return "", err}
+	}
+	return strings.clone(strings.to_string(builder), allocator)
 }
 
 // Serializes one profile row from the settings editor. The returned text is temporary and is

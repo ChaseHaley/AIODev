@@ -157,6 +157,11 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		tab_menu_key(app, w, logical)
 		return
 	}
+	if w.profile_menu.open {
+		if e.pressed {w.suppressed_key = e}
+		profile_menu_key(app, w, logical)
+		return
+	}
 	if suppressed, ok := w.suppressed_key.?; ok && !e.pressed && suppressed.key == e.key {
 		w.suppressed_key = nil
 		return
@@ -170,6 +175,12 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		pane_header_cancel(w)
 		if e.pressed {w.suppressed_key = e}
 		pending_close_outcome(app, w, ui.confirm_key(&w.pending_close.confirm, e))
+		return
+	}
+	if w.pending_swap.confirm.open {
+		pane_header_cancel(w)
+		if e.pressed {w.suppressed_key = e}
+		pane_swap_outcome(app, w, ui.confirm_key(&w.pending_swap.confirm, e))
 		return
 	}
 	if !palette_active(app, w) &&
@@ -288,8 +299,10 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if w.preparing {return}
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
 	if w.tab_menu.open {return}
+	if w.profile_menu.open {return}
 	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
 	if w.pending_close.confirm.open {return}
+	if w.pending_swap.confirm.open {return}
 	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
 		return
@@ -363,6 +376,11 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		w.dirty = true
 		return
 	}
+	if w.profile_menu.open {
+		ui.menu_wheel(&w.profile_menu.menu, int(math.sign(e.delta_y)))
+		w.dirty = true
+		return
+	}
 	w.wheel_remainder += e.delta_y * WHEEL_LINES
 	rows := int(w.wheel_remainder)
 	if rows == 0 {
@@ -370,6 +388,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	}
 	w.wheel_remainder -= f32(rows)
 	if w.pending_close.confirm.open {return}
+	if w.pending_swap.confirm.open {return}
 	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return

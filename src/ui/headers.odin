@@ -12,6 +12,7 @@ Header_Action :: enum {
 	Split_Down,
 	Zoom,
 	Close,
+	Badge,
 }
 Header_Layout :: struct {
 	panel, title, badge: render.Rect,
@@ -52,6 +53,8 @@ header_hit_test :: proc(l: Header_Layout, x, y: f32) -> Header_Action {
 		   y >= l.panel.y &&
 		   y < l.panel.y + l.panel.height {return Header_Action(i + 1)}
 	}
+	badge := render.Rect{l.badge.x - 3, l.badge.y - 3, l.badge.width + 12, l.badge.height + 6}
+	if contains(badge, x, y) {return .Badge}
 	return .None
 }
 
@@ -161,7 +164,7 @@ header_icon_draw :: proc(
 		large := text^
 		text_set_size(&large, text.size_px * 1.5)
 		return draw_glyph_centered(&large, list, '×', area, color)
-	case .None:
+	case .None, .Badge:
 	}
 	return .Ok
 }
@@ -178,6 +181,7 @@ header_draw :: proc(
 	controls: [4]Control_Motion,
 	zoomed := false,
 	icon_atlas: render.Rect = {},
+	badge_hovered := false,
 ) -> glyphs.Result {
 	l := header_layout(area, scale, focused)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
@@ -193,6 +197,17 @@ header_draw :: proc(
 	if l.title.width > 0 && l.badge.x + l.badge.width <= area.x + area.width {
 		if result := shell_badge_draw(list, text, theme, l.badge, icon, scale, icon_atlas);
 		   result != .Ok {return result}
+	}
+	if badge_hovered {
+		small := text_styled(text, .Small)
+		if result := draw_text(
+			&small,
+			list,
+			"▾",
+			l.badge.x + l.badge.width + 2 * scale,
+			l.badge.y + (l.badge.height - small.line_height) / 2 + small.ascent,
+			theme.muted,
+		); result != .Ok {return result}
 	}
 	strong := text_styled(text, focused ? .Strong : .Body)
 	small := text_styled(text, .Small)

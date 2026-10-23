@@ -156,6 +156,17 @@ SCHEMA :: [?]Schema_Entry {
 		"Show a header and controls on every terminal pane.",
 	},
 	{
+		"pane.confirm_shell_switch",
+		"Confirm Switching Pane Shells",
+		.Bool,
+		offset_of(Settings, pane) + offset_of(Pane_Settings, confirm_shell_switch),
+		"true",
+		0,
+		0,
+		nil,
+		"Ask before a running pane's shell is replaced, losing its session.",
+	},
+	{
 		"pane.minimum_columns",
 		"Minimum Pane Width",
 		.Int,
