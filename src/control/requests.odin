@@ -108,6 +108,45 @@ Command :: struct {
 Help :: struct {
 	command: string,
 }
+// Region_Kind says what the rectangle's units are. Window and Pixels are client pixels; Cells are
+// columns and rows of the focused pane.
+Region_Kind :: enum {
+	Window,
+	Pixels,
+	Cells,
+}
+Region :: struct {
+	kind:                Region_Kind,
+	x, y, width, height: int,
+}
+Capture :: struct {
+	region: Region,
+	output: string,
+}
+Pixels :: struct {
+	region:                Region,
+	rows, columns:         bool,
+	sample:                Position,
+	sampled:               bool,
+}
+Diff :: struct {
+	baseline: string,
+}
+Draw_Kind :: enum {
+	All,
+	Rect,
+	Glyph,
+}
+Draws :: struct {
+	region: Region,
+	kind:   Draw_Kind,
+}
+Perf :: struct {
+	reset: bool,
+}
+Vt :: struct {
+	recording: bool,
+}
 Request :: union {
 	Ping,
 	Screen,
@@ -127,6 +166,12 @@ Request :: union {
 	Window_Select,
 	Window_Move,
 	Help,
+	Capture,
+	Pixels,
+	Diff,
+	Draws,
+	Perf,
+	Vt,
 }
 Parse_Error :: struct {
 	argument: string,
@@ -182,6 +227,180 @@ assignment :: proc(s: string) -> (string, string, bool) {
 	i := strings.index_byte(s, '=')
 	if i <= 0 {return "", "", false}
 	return s[:i], s[i + 1:], true
+}
+
+// Reads a comma-separated list of nonnegative integers into out. The count must be between
+// minimum and len(out); a trailing comma or an empty part is invalid.
+@(private, require_results)
+integer_list :: proc(s: string, out: []int, minimum: int) -> (count: int, ok: bool) {
+	rest := s
+	for {
+		if count == len(out) {return 0, false}
+		separator := strings.index_byte(rest, ',')
+		part := rest
+		if separator >= 0 {part = rest[:separator]}
+		value, valid := number(part)
+		if !valid {return 0, false}
+		out[count] = value
+		count += 1
+		if separator < 0 {break}
+		rest = rest[separator + 1:]
+	}
+	return count, count >= minimum
+}
+
+@(private, require_results)
+pixel_region :: proc(s: string) -> (Region, bool) {
+	values: [4]int
+	count, ok := integer_list(s, values[:], len(values))
+	if !ok || count != len(values) || values[2] < 1 || values[3] < 1 {return {}, false}
+	return {.Pixels, values[0], values[1], values[2], values[3]}, true
+}
+
+@(private, require_results)
+cell_region :: proc(s: string) -> (Region, bool) {
+	values: [4]int
+	count, ok := integer_list(s, values[:], 2)
+	if !ok || (count != 2 && count != 4) {return {}, false}
+	width, height := 1, 1
+	if count == 4 {
+		width, height = values[2], values[3]
+		if width < 1 || height < 1 {return {}, false}
+	}
+	return {.Cells, values[0], values[1], width, height}, true
+}
+
+@(require_results)
+parse_capture :: proc(args: []string) -> (Request, Parse_Error) {
+	bad := Parse_Error{args[0], "use capture [--cell c,r[,w,h] | --region x,y,w,h] [--out <file>]"}
+	c := Capture {
+		region = {kind = .Window},
+	}
+	seen_cell, seen_region, seen_out := false, false, false
+	for i := 1; i < len(args); i += 2 {
+		if i + 1 >= len(args) {return {}, {args[i], "supply a value after this option"}}
+		value := args[i + 1]
+		switch args[i] {
+		case "--cell":
+			if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
+			r, ok := cell_region(value)
+			if !ok {return {}, {value, "use c,r[,w,h] with nonnegative cells and positive size"}}
+			c.region, seen_cell = r, true
+		case "--region":
+			if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
+			r, ok := pixel_region(value)
+			if !ok {return {}, {value, "use x,y,w,h with nonnegative origin and positive size"}}
+			c.region, seen_region = r, true
+		case "--out":
+			if seen_out {return {}, {args[i], "use --out once"}}
+			if value == "" || strings.contains(value, "\x00") {return {}, {value, "use a nonempty path"}}
+			c.output, seen_out = value, true
+		case:
+			return {}, {args[i], bad.advice}
+		}
+	}
+	return c, {}
+}
+
+@(require_results)
+parse_pixels :: proc(args: []string) -> (Request, Parse_Error) {
+	bad := Parse_Error{args[0], "use pixels [--cell | --region] [--rows | --columns] [--sample x,y]"}
+	p := Pixels {
+		region = {kind = .Window},
+	}
+	seen_cell, seen_region, seen_sample := false, false, false
+	for i := 1; i < len(args); {
+		switch args[i] {
+		case "--rows":
+			if p.rows || p.columns {return {}, {args[i], "use --rows or --columns once"}}
+			p.rows = true
+			i += 1
+		case "--columns":
+			if p.rows || p.columns {return {}, {args[i], "use --rows or --columns once"}}
+			p.columns = true
+			i += 1
+		case "--cell", "--region", "--sample":
+			if i + 1 >= len(args) {return {}, {args[i], "supply a value after this option"}}
+			value := args[i + 1]
+			switch args[i] {
+			case "--cell":
+				if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
+				r, ok := cell_region(value)
+				if !ok {return {}, {value, "use c,r[,w,h] with nonnegative cells and positive size"}}
+				p.region, seen_cell = r, true
+			case "--region":
+				if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
+				r, ok := pixel_region(value)
+				if !ok {return {}, {value, "use x,y,w,h with nonnegative origin and positive size"}}
+				p.region, seen_region = r, true
+			case "--sample":
+				if seen_sample {return {}, {args[i], "use --sample once"}}
+				position, ok := pair(value, ',')
+				if !ok {return {}, {value, "use nonnegative x,y pixels"}}
+				p.sample, p.sampled, seen_sample = position, true, true
+			}
+			i += 2
+		case:
+			return {}, {args[i], bad.advice}
+		}
+	}
+	if p.sampled && (p.rows || p.columns) {
+		return {}, {args[0], "use --sample without --rows or --columns"}
+	}
+	return p, {}
+}
+
+@(require_results)
+parse_draws :: proc(args: []string) -> (Request, Parse_Error) {
+	bad := Parse_Error{args[0], "use draws [--region x,y,w,h] [--kind rect|glyph]"}
+	d := Draws {
+		region = {kind = .Window},
+	}
+	seen_region, seen_kind := false, false
+	for i := 1; i < len(args); i += 2 {
+		if i + 1 >= len(args) {return {}, {args[i], "supply a value after this option"}}
+		value := args[i + 1]
+		switch args[i] {
+		case "--region":
+			if seen_region {return {}, {args[i], "use --region once"}}
+			r, ok := pixel_region(value)
+			if !ok {return {}, {value, "use x,y,w,h with nonnegative origin and positive size"}}
+			d.region, seen_region = r, true
+		case "--kind":
+			if seen_kind {return {}, {args[i], "use --kind once"}}
+			switch value {
+			case "rect":
+				d.kind = .Rect
+			case "glyph":
+				d.kind = .Glyph
+			case:
+				return {}, {value, "choose rect or glyph"}
+			}
+			seen_kind = true
+		case:
+			return {}, {args[i], bad.advice}
+		}
+	}
+	return d, {}
+}
+
+@(require_results)
+parse_perf :: proc(args: []string) -> (Request, Parse_Error) {
+	if len(args) == 1 {return Perf{}, {}}
+	if len(args) == 2 && args[1] == "--reset" {return Perf{true}, {}}
+	return {}, {args[0], "use perf [--reset]"}
+}
+
+@(require_results)
+parse_vt :: proc(args: []string) -> (Request, Parse_Error) {
+	if len(args) != 3 || args[1] != "record" {return {}, {args[0], "use vt record on|off"}}
+	switch args[2] {
+	case "on":
+		return Vt{true}, {}
+	case "off":
+		return Vt{false}, {}
+	}
+	return {}, {args[2], "choose on or off"}
 }
 
 request_destroy :: proc(r: ^Request) {
@@ -405,6 +624,20 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		return e, {}
 	case "mouse":
 		return parse_mouse(args)
+	case "capture":
+		return parse_capture(args)
+	case "pixels":
+		return parse_pixels(args)
+	case "diff":
+		if len(args) != 2 {return {}, bad}
+		if args[1] == "" {return {}, {args[1], "use a baseline capture path"}}
+		return Diff{args[1]}, {}
+	case "draws":
+		return parse_draws(args)
+	case "perf":
+		return parse_perf(args)
+	case "vt":
+		return parse_vt(args)
 	}
 	return {}, {args[0], "unknown command; use help"}
 }

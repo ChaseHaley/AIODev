@@ -3,8 +3,9 @@ package control
 import "core:strings"
 
 HELP_OVERVIEW :: `aioctl <command> [arguments]
-Inspect: ping, screen, cells, state, wait, expect.
+Inspect: ping, screen, cells, state, wait, expect, pixels, diff, draws, perf.
 Drive: type, key, run, mouse, focus, resize, dpi, tray, command, window.
+Record: vt record on|off.
 Use help <command> for grammar, evidence, output, and defaults.
 Coordinates and inclusive ranges are zero-based; quote each text argument in your shell.
 Expect prints one PASS or FAIL line; FAIL includes observed state.
@@ -218,6 +219,78 @@ Wheel lines are signed 32-bit integers; negative scrolls down. Drag uses start a
 Proves the app's mouse path without moving the desktop pointer or taking focus.
 Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start with error:.
 Options may appear in any order after positions.
+`,
+		)
+	case "capture":
+		put(
+			&w,
+			`capture [--cell <c,r[,w,h]> | --region <x,y,w,h>] [--out <file.png>]
+Renders the selected window's last built frame to an offscreen surface and writes a PNG.
+Defaults to the whole client area; --cell addresses columns and rows of the focused pane.
+--region uses client pixels with a positive size.
+--out defaults to <data>\captures\capture.png.
+Output: ok; capture <path> <width>x<height>
+Proves rasterization, blending, and pixel-grid alignment at the current DPI. It does not capture
+OS composition such as the frame color or shadow; use win32.ps1 -Shot for those.
+`,
+		)
+	case "pixels":
+		put(
+			&w,
+			`pixels [--cell | --region] [--rows | --columns] [--sample x,y]
+Reads pixels from the same offscreen render as capture, without writing a file.
+--rows (default) prints one line per row: <n> coverage=<0..1> colors=<n> color=#rrggbbaa.
+Coverage is the share of the dominant color; colors is the distinct color count.
+--columns prints columns instead. --sample prints one pixel: sample <x>,<y> #rrggbbaa.
+Use --sample for exact colors; use profiles for alignment and unintended-change checks.
+`,
+		)
+	case "diff":
+		put(
+			&w,
+			`diff <baseline.png>
+Captures the selected window and compares it with an earlier capture.
+Output: diff changed=<n> boxes=<x,y,w,h>[;...] with at most eight row bands, or diff unchanged.
+Fails when the baseline is missing, is not a PNG, or has a different size.
+Proves visual locality: only the intended cells changed.
+`,
+		)
+	case "draws":
+		put(
+			&w,
+			`draws [--region <x,y,w,h>] [--kind rect|glyph]
+Lists the selected window's last built frame in draw order.
+Without --region it prints summaries only:
+draws layers=<n> rects=<n> glyphs=<n>
+layer <i> clip=<x,y,w,h> rects=<n> glyphs=<n>
+With --region it lists intersecting instances:
+rect <i> <x,y> <w>x<h> <#rrggbbaa> radius=<r>
+glyph <i> <x,y> <w>x<h> <#rrggbbaa> flags=<n>
+--kind limits instance lines to rect or glyph. Coordinates are client pixels.
+`,
+		)
+	case "perf":
+		put(
+			&w,
+			`perf [--reset]
+Reads process-local build counters and frame timing as key=value lines:
+frames.presented, frames.built, frame.build.p50/p95/max, frame.render.p50/p95/max,
+input.latency.last/p50/p95/max, pty.bytes, pty.bytes_per_second, shape.calls,
+glyph.hits, glyph.misses, idle.presents, uptime.ms.
+--reset clears the counters after printing. Times are milliseconds.
+These are diagnostics for a candidate, not a benchmark receipt; use the TermBench recipe for
+performance gates.
+`,
+		)
+	case "vt":
+		put(
+			&w,
+			`vt record on|off
+Starts or stops recording the focused session's raw PTY output.
+Output on: ok; recording <path>
+Output off: ok; stopped <path> bytes=<n>
+The capture is written under the instance data directory and is not committed.
+Feed it to tools\vtreplay to reproduce screen and cell state without a shell.
 `,
 		)
 	case "window":

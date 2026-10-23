@@ -235,7 +235,7 @@ when AIO_CONTROL {
 
 	verify_needs_window :: proc(request: control.Request) -> bool {
 		#partial switch r in request {
-		case control.Ping, control.Help, control.State:
+		case control.Ping, control.Help, control.State, control.Perf:
 			return false
 		case control.Tray:
 			return r.action == .Hide
@@ -1092,6 +1092,18 @@ when AIO_CONTROL {
 			case control.Expect:
 				passed, err = control.evaluate(&out, r, &s, entries)
 			}
+		case control.Capture:
+			err = capture_read(app, &out, r)
+		case control.Pixels:
+			err = pixels_read(app, &out, r)
+		case control.Diff:
+			err = pixels_diff(app, &out, r)
+		case control.Draws:
+			err = draws_read(app, &out, r)
+		case control.Perf:
+			err = perf_read(app, &out, r)
+		case control.Vt:
+			err = vt_record(app, &out, r)
 		case:
 			err = .Invalid_Argument
 		}
@@ -1272,7 +1284,13 @@ when AIO_CONTROL {
 			     control.Cells,
 			     control.State,
 			     control.Expect,
-			     control.Help:
+			     control.Help,
+			     control.Capture,
+			     control.Pixels,
+			     control.Diff,
+			     control.Draws,
+			     control.Perf,
+			     control.Vt:
 				v.phase = .Read
 			case control.Wait:
 				v.phase = .Wait
