@@ -668,7 +668,8 @@ arrange_cancel :: proc(app: ^App, w: ^Window) {
 		if i >= len(app.windows) {continue}
 		other := app.windows[i]
 		if other != w &&
-		   (other.pane_drag.destination_window == w.id || other.pane_drag.preview_window == w.id) {
+		   (other.pane_drag.destination_window == id || other.pane_drag.preview_window == id) {
+			gesture_clear(app, other)
 			pane_drag_cancel(app, other)
 		}
 	}

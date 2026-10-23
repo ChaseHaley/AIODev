@@ -32,12 +32,8 @@ workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
 		if err !=
 		   nil {delete(name); notify(app, .Error, "Could not prepare workspace deletion."); return}
 	}
-	arrange_cancel(app, w)
+	if !gesture_cancel(app, w) {delete(name); delete(destination_name); return}
 	window_overlays_cancel(app, w)
-	leader_cancel(w)
-	pane_header_cancel(w)
-	ui.editor_release(&w.editor)
-	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
 	delete(w.close_confirm_workspace_name)
 	delete(w.close_confirm_destination_name)
 	w.close_confirm_workspace_name = name
@@ -135,7 +131,7 @@ workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	}
 	if owner != nil && !workspace_view_prepare(app, &prepared, destination) {return false}
 	if owner != nil {
-		arrange_cancel(app, owner)
+		if !gesture_cancel(app, owner) {return false}
 		focus_leave(app, owner)
 		tab_close_restore(owner)
 		workspace_view_move(&owner.resources, &prepared)

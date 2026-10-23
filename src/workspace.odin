@@ -360,11 +360,8 @@ tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int,
 tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
 	_, _, split := tab_close_scope(w.workspace, index)
 	if !split || !app.settings.tab.confirm_close {tab_close(app, w, index); return}
-	arrange_cancel(app, w)
-	leader_cancel(w)
-	pane_header_cancel(w)
+	if !gesture_cancel(app, w) {return}
 	palette_close(app, w)
-	w.selecting, w.autoscrolling = false, false
 	w.close_confirm_tab = w.workspace.tabs[index].id
 	w.close_confirm_workspace = 0
 	w.close_confirm.extended = false
@@ -471,7 +468,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	index := original_index
 	if index < 0 || index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[index]
-	for w in app.windows {if w.workspace == workspace {arrange_cancel(app, w)}}
+	for w in app.windows {if w.workspace == workspace {_ = gesture_cancel(app, w)}}
 	for current, i in workspace.tabs {if current == tab {index = i; break}}
 	was_selected := index == workspace.selected
 	if was_selected {
@@ -519,7 +516,7 @@ pane_remove :: proc(
 ) {
 	tab_index := original_tab_index
 	tab := workspace.tabs[tab_index]
-	for w in app.windows {if w.workspace == workspace {arrange_cancel(app, w)}}
+	for w in app.windows {if w.workspace == workspace {_ = gesture_cancel(app, w)}}
 	for current, i in workspace.tabs {if current == tab {tab_index = i; break}}
 	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
 	if !is_pane {return}

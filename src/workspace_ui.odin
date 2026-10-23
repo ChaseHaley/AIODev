@@ -129,7 +129,7 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	prepared: Workspace_View_Resources
 	if !workspace_view_init(app, &prepared, workspace) {return false}
 	defer workspace_view_destroy(&prepared)
-	arrange_cancel(app, w)
+	if !gesture_cancel(app, w) {return false}
 	focus_leave(app, w)
 	tab_close_restore(w)
 	w.tab_menu.open, w.rename_open, w.workspace_picker.open = false, false, false
@@ -278,14 +278,11 @@ workspace_picker_status_changed :: proc(app: ^App) {
 }
 
 workspace_picker_open :: proc(app: ^App, w: ^Window) {
-	arrange_cancel(app, w)
-	leader_cancel(w)
-	pane_header_cancel(w)
+	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
 	w.tab_menu.open, w.rename_open = false, false
 	w.close_confirm = {}
 	tab_close_restore(w)
-	w.selecting, w.autoscrolling = false, false
 	ui.field_set(&w.workspace_picker.query, "")
 	w.workspace_picker.open, w.workspace_picker.icons, w.workspace_picker.icon_colors = true, false, false
 	w.workspace_picker.menu_id, w.workspace_picker.rename_id, w.workspace_picker.icon_id = 0, 0, 0

@@ -37,6 +37,7 @@ Window :: struct {
 	surface: ^render.Surface,
 	ui_text: ui.Text,
 	using resources: Workspace_View_Resources,
+	gesture: Gesture_State,
 	dragging: Divider_Drag,
 	divider_click_node: layout.Node_Id,
 	divider_click_ns: i64,
@@ -206,10 +207,7 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
-	id := w.id
-	arrange_cancel(app, w)
-	// Cancelling a gesture which owns this preview may already have destroyed it.
-	if window_find(app, id) == nil {return}
+	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
