@@ -28,7 +28,8 @@ Pane_View :: struct {
 	style: term_view.Style,
 	frame: term_view.Frame,
 	header_controls: [4]ui.Control_Motion,
-	header_hover, header_pressed: ui.Header_Action,
+	header_hover:   ui.Header_Action,
+	header_armed:   ui.Armed(ui.Header_Action),
 }
 
 Window :: struct {
@@ -64,7 +65,7 @@ Window :: struct {
 	tab_underline: ui.Motion,
 	tab_hover: int,
 	tab_pressed: bool,
-	tab_close_pressed: int,
+	tab_close_armed: ui.Armed(int),
 	// Asks before a destructive close and holds its subject, live counts and presentation state.
 	pending_close: Pending_Close,
 	close_restore: [dynamic]u32,
@@ -73,7 +74,8 @@ Window :: struct {
 	rename_open: bool,
 	rename_target: Rename_Target,
 	workspace_picker: Workspace_Picker,
-	caption_hover, caption_pressed: int,
+	caption_hover: int,
+	caption_armed: ui.Armed(int),
 	maximized: bool,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
@@ -126,8 +128,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.list = render.draw_list_init()
 	ui.find_init(&w.find)
 	w.tab_hover = -1
-	w.tab_close_pressed = -1
-	w.caption_hover, w.caption_pressed = -1, -1
+	w.caption_hover = -1
 	w.divider_click_node = layout.INVALID_NODE
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true

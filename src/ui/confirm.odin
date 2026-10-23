@@ -21,9 +21,10 @@ Confirm_Outcome :: enum {
 
 // A modal question with Cancel and Accept buttons. Accept has the keyboard first so Enter confirms.
 Confirm :: struct {
-	using presence:        Presence,
-	focus, hover, pressed: Confirm_Button,
-	extended:              bool,
+	using presence: Presence,
+	focus, hover:   Confirm_Button,
+	armed:          Armed(Confirm_Button),
+	extended:       bool,
 }
 
 Confirm_Layout :: struct {
@@ -46,12 +47,14 @@ CONFIRM_PRESENCE :: Presence_Spec {
 
 confirm_open :: proc(c: ^Confirm) {
 	presence_open(&c.presence, CONFIRM_PRESENCE)
-	c.focus, c.hover, c.pressed = .Accept, .None, .None
+	c.focus, c.hover = .Accept, .None
+	armed_cancel(&c.armed)
 }
 
 confirm_close :: proc(c: ^Confirm) {
 	presence_close(&c.presence)
-	c.hover, c.pressed = .None, .None
+	c.hover = .None
+	armed_cancel(&c.armed)
 }
 
 confirm_layout :: proc(width, height, scale: f32, extended := false) -> Confirm_Layout {
@@ -109,13 +112,12 @@ confirm_mouse :: proc(
 	hit := confirm_hit(l, x, y)
 	if pressed {
 		if hit == .None && !confirm_contains(l, x, y) {return .Cancel}
-		c.pressed = hit
+		armed_press(&c.armed, hit)
 		if hit != .None {c.focus = hit}
 		return .Changed
 	}
-	armed := c.pressed
-	c.pressed = .None
-	if armed != .None && armed == hit {return hit == .Accept ? .Accept : .Cancel}
+	fired, ok := armed_release(&c.armed, hit)
+	if ok && fired != .None {return fired == .Accept ? .Accept : .Cancel}
 	return .Changed
 }
 
@@ -138,17 +140,18 @@ confirm_button_draw :: proc(
 	scale: f32,
 ) -> glyphs.Result {
 	accept := button == .Accept
+	active := armed_is(c.armed, button)
 	fill := accept ? theme.error : theme.border
-	if !accept &&
-	   c.pressed ==
-		   button {fill = theme.pressed} else if !accept && c.hover == button {fill = theme.hover}
+	if !accept && active {fill = theme.pressed} else if !accept && c.hover == button {
+		fill = theme.hover
+	}
 	draw_rect(list, {rect = r, color = fill, radius = 6 * scale})
-	if accept && (c.hover == button || c.pressed == button) {
+	if accept && (c.hover == button || active) {
 		draw_rect(
 			list,
 			{
 				rect = r,
-				color = c.pressed == button ? theme.pressed : theme.hover,
+				color = active ? theme.pressed : theme.hover,
 				radius = 6 * scale,
 			},
 		)

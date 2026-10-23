@@ -81,7 +81,7 @@ update_motion :: proc(app: ^App) {
 						ui.control_update(
 							&control,
 							pane.header_hover == ui.Header_Action(i + 1),
-							pane.header_pressed == ui.Header_Action(i + 1),
+							ui.armed_is(pane.header_armed, ui.Header_Action(i + 1)),
 							app.animations,
 							now,
 						) ||

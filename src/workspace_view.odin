@@ -130,7 +130,8 @@ workspace_adopt :: proc(
 		value  = f32(workspace.selected),
 		target = f32(workspace.selected),
 	}
-	w.tab_hover, w.tab_close_pressed, w.tab_pressed = -1, -1, false
+	w.tab_hover, w.tab_pressed = -1, false
+	ui.armed_cancel(&w.tab_close_armed)
 	window_relayout(app, w)
 	focus_enter(app, w)
 	return true
