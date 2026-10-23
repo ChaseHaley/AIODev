@@ -82,8 +82,10 @@ field_edit_clipboard_and_direct_consumer_events :: proc(t: ^testing.T) {
 		platform.Init_Result.Primary) {return}
 	defer testing.expect_value(t, platform.destroy(&s.platform), platform.Error.None)
 	previous, saved := platform.clipboard_get_text(&s.platform, context.allocator)
+	if !testing.expect(t, saved) {return}
 	defer {
-		if saved {testing.expect(t, platform.clipboard_set_text(&s.platform, previous)); delete(previous)}
+		testing.expect(t, platform.clipboard_set_text(&s.platform, previous))
+		delete(previous)
 	}
 	f: ui.Text_Field
 	defer delete(f.bytes)
