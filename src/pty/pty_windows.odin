@@ -17,6 +17,8 @@ Pty :: struct {
 	console_changed:             sync.Cond,
 	resizing:                    int,
 	closing:                     bool,
+	// Output bytes delivered to readers. The reader thread adds; diagnostics read atomically.
+	bytes_read:                  u64,
 }
 
 process_id :: proc(p: ^Pty) -> u32 {
@@ -412,7 +414,21 @@ read :: proc(p: ^Pty, buffer: []u8) -> (n: int, err: Error) {
 	if count == 0 {
 		return 0, .Closed
 	}
+	// The reader thread owns this counter; a diagnostics read may lag by the chunk in flight.
+	sync.atomic_add(&p.bytes_read, u64(count))
 	return int(count), .None
+}
+
+// output_bytes reports how much output this console has delivered to readers.
+@(require_results)
+output_bytes :: proc(p: ^Pty) -> u64 {
+	return sync.atomic_load(&p.bytes_read)
+}
+
+// reset_output_bytes clears the delivered total for a diagnostics reset. A chunk read at the same
+// moment may still land after the clear.
+reset_output_bytes :: proc(p: ^Pty) {
+	sync.atomic_store(&p.bytes_read, 0)
 }
 
 @(require_results)

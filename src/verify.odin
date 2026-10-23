@@ -4,6 +4,7 @@ import "aio:commands"
 import "aio:control"
 import "aio:input"
 import "aio:layout"
+import "aio:perf"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -26,6 +27,7 @@ _ :: commands
 _ :: control
 _ :: layout
 _ :: input
+_ :: perf
 _ :: platform
 _ :: render
 _ :: term
@@ -1188,6 +1190,7 @@ when AIO_CONTROL {
 		entries, state_error := verify_state(app)
 		if state_error != .None {verify_error(app, state_error); return}
 		if err := verify_before(app, entries); err != .None {verify_error(app, err); return}
+		perf.mark_input(&app.perf)
 		if err := verify_drive(app, v.pending.request);
 		   err != .None {verify_error(app, err); return}
 		if !app.running {

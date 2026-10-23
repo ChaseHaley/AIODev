@@ -5,6 +5,7 @@ import "aio:font"
 import "aio:glyphs"
 import "aio:instance"
 import platform_api "aio:platform"
+import "aio:perf"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -59,6 +60,7 @@ Session_Entry :: struct {
 
 App :: struct {
 	verify:                Verify,
+	perf:                  perf.Stats,
 	options:               instance.Options,
 	app_id:                string,
 	platform:              platform_api.Platform,
@@ -96,6 +98,7 @@ App :: struct {
 
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
+	perf.start(&app.perf)
 	if app.options.data_dir != "" {
 		path, err := filepath.join({app.options.data_dir, "settings.ini"})
 		if err != nil {
