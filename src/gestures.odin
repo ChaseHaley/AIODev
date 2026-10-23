@@ -104,20 +104,8 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 			return
 		}
 	}
-	if w.workspace_picker.open {
-		p := &w.workspace_picker
-		x, y := f32(e.x), f32(e.y)
-		if !e.pressed { p.query.dragging, w.rename.dragging = false, false; w.header_buttons -= {e.button}; return }
-		w.header_buttons += {e.button}
-		r, _ := workspace_picker_rect(w)
-		if p.menu_id != 0 && e.button == .Left {
-			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
-		} else if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
-			workspace_row_rename_finish(app, w, false)
-			p.open, p.menu_id, w.dirty = false, 0, true
-		} else if e.button == .Left {
-			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
-		}
+	if workspace_picker_active(&w.workspace_picker) {
+		workspace_picker_button(app, w, e)
 		return
 	}
 	if w.tab_menu.open {
@@ -277,14 +265,8 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e := event
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}
-	if w.workspace_picker.open {
-		if workspace_row_hover(app, w, e) { return }
-		if w.workspace_picker.query.dragging && .Left in e.buttons {
-			workspace_picker_pointer(app, w, f32(e.x), false, true)
-		} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
-			w.workspace_picker.selected, w.dirty = hit, true
-		}
-		pointer_set(app, w, .Arrow)
+	if workspace_picker_active(&w.workspace_picker) {
+		workspace_picker_hover(app, w, e)
 		return
 	}
 	if w.tab_menu.open {

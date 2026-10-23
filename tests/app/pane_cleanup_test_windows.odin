@@ -160,7 +160,7 @@ pane_cleanup_refreshes_another_windows_open_picker :: proc(t: ^testing.T) {
 	source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
 	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
 		source.tree.root, destination.tree.root, .Right, false)) { return }
-	testing.expect(t, observer.workspace_picker.open)
+	testing.expect(t, app.workspace_picker_active(&observer.workspace_picker))
 	testing.expect_value(t, len(observer.workspace_picker.rows), 2)
 	for row in observer.workspace_picker.rows { testing.expect(t, row.id != source_id) }
 	testing.expect(t, observer.workspace_picker.selected >= 0 && observer.workspace_picker.selected < 2)

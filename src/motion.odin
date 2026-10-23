@@ -8,7 +8,7 @@ motion_active :: proc(app: ^App) -> bool {
 	if app.palette_window != 0 && ui.motion_active(app.palette.motion) {return true}
 	if ui.notices_animating(&app.notices) {return true}
 	for w in app.windows {
-		if w.workspace_picker.open && ui.motion_active(w.workspace_picker.rename_motion) { return true }
+		if workspace_picker_active(&w.workspace_picker) && ui.motion_active(w.workspace_picker.rename_motion) { return true }
 		if ui.motion_active(w.tab_underline) || ui.motion_active(w.close_confirm.motion) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
@@ -40,7 +40,7 @@ update_motion :: proc(app: ^App) {
 	if notices_changed {mark_all_dirty(app)}
 	for w in app.windows {
 		p := &w.workspace_picker
-		if p.open && p.rename_id != 0 {
+		if p.mode == .Rename {
 			ui.motion_target(&p.rename_motion, 1, 140*time.Millisecond, .Decelerate, app.animations, now)
 			if ui.motion_update(&p.rename_motion, now) { w.dirty = true }
 		}

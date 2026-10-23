@@ -138,7 +138,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
-	if w.workspace_picker.open {
+	if workspace_picker_active(&w.workspace_picker) {
 		if e.pressed {w.suppressed_key = e}
 		workspace_picker_key(app, w, logical)
 		return
@@ -282,7 +282,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if w.preparing {return}
-	if w.workspace_picker.open {workspace_picker_text(app, w, text); return}
+	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
 	if w.tab_menu.open {return}
 	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
 	if w.close_confirm.open {return}
@@ -358,11 +358,8 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.preparing {return}
-	if w.workspace_picker.open {
-		p := &w.workspace_picker
-		if p.menu_id != 0 || p.rename_id != 0 { return }
-		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, workspace_picker_count(w)-1)
-		w.dirty = true
+	if workspace_picker_active(&w.workspace_picker) {
+		workspace_picker_wheel(w, e.delta_y)
 		return
 	}
 	if w.rename_open {return}
@@ -400,10 +397,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.dirty = true
 	if !focused {
 		if !gesture_cancel(app, w) {return}
-		icon_input := w.workspace_picker.open && w.workspace_picker.icons
-		window_overlays_cancel(app, w)
-		// The OS emoji picker may take focus before delivering its text to the icon field.
-		w.workspace_picker.open = icon_input
+		window_overlays_cancel(app, w, true)
 	}
 	if entry := focused_session(app, w); entry != nil {term.send_focus(entry.session, focused)}
 }
