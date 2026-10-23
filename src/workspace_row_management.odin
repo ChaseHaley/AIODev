@@ -97,8 +97,10 @@ workspace_row_rename_open :: proc(app: ^App, w: ^Window, id: u32) {
 workspace_row_rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 	p := &w.workspace_picker
 	if p.mode != .Rename { return }
-	if target := workspace_row_target(app, p.target_id); save && target != nil {
-		if !workspace_rename(app, target, ui.field_string(&w.rename)) {
+	if save {
+		outcome := rename_target_commit(app, w, Rename_Target{.Workspace, p.target_id},
+			ui.field_string(&w.rename))
+		if outcome == .Empty || outcome == .Failed {
 			p.rename_error, w.dirty = true, true
 			return
 		}

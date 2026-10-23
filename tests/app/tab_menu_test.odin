@@ -176,8 +176,8 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	w.width, w.height = 0, 0
 	menu_key(&f, {key = .Context_Menu})
 	menu_key(&f, {key = .Enter})
-	testing.expect(t, !w.tab_menu.open && w.rename_open && w.rename_tab)
-	testing.expect_value(t, w.rename_id, f.workspace.tabs[0].id)
+	testing.expect(t, !w.tab_menu.open && w.rename_open && w.rename_target.kind == app.Rename_Kind.Tab)
+	testing.expect_value(t, w.rename_target.id, f.workspace.tabs[0].id)
 }
 
 @(test)

@@ -40,7 +40,8 @@ workspace_number_manual_names_deletion_and_pending_previews :: proc(t: ^testing.
 	}
 	one := app.workspace_create_empty(&state)
 	if !testing.expect(t, one != nil) { return }
-	if !testing.expect(t, app.workspace_rename(&state, one, "Workspace 2")) { return }
+	if !testing.expect(t, app.rename_target_commit(&state, nil,
+		{app.Rename_Kind.Workspace, one.id}, "Workspace 2") == app.Rename_Outcome.Saved) { return }
 	preview := app.workspace_create_empty(&state, true)
 	if !testing.expect(t, preview != nil) { return }
 	three := app.workspace_create_empty(&state)
@@ -54,7 +55,8 @@ workspace_number_manual_names_deletion_and_pending_previews :: proc(t: ^testing.
 	delete(name)
 	testing.expect_value(t, state.next_workspace_number, u32(3))
 	testing.expect(t, app.workspace_discard_empty(&state, preview))
-	testing.expect(t, app.workspace_rename(&state, one, "Build tools"))
+	testing.expect(t, app.rename_target_commit(&state, nil,
+		{app.Rename_Kind.Workspace, one.id}, "Build tools") == app.Rename_Outcome.Saved)
 	testing.expect(t, app.workspace_discard_empty(&state, three))
 	four := app.workspace_create_empty(&state)
 	if !testing.expect(t, four != nil) { return }
