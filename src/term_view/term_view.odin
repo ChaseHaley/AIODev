@@ -265,8 +265,7 @@ Cell_Paint :: struct {
 	foreground, background: render.Color,
 	has_background:         bool,
 	style:                  ghostty.Style,
-	// The cell holds a wide cluster and its spacer follows.
-	wide:                   bool,
+	width:                  ghostty.Cell_Wide,
 }
 
 @(private)
@@ -278,26 +277,16 @@ paint_cell :: proc(
 	selected: bool,
 	mark: Search_Mark,
 ) -> Cell_Paint {
+	cell := term.read_render_cell(v.cells)
 	p := Cell_Paint {
 		foreground = color(b.colors.foreground),
-		style      = ghostty.sized(ghostty.Style),
+		style      = cell.style,
+		width      = cell.width,
 	}
-	styled: bool
-	if ghostty.render_state_row_cells_get(v.cells, .Has_Styling, &styled) == .Success && styled {
-		if ghostty.render_state_row_cells_get(v.cells, .Style, &p.style) != .Success {
-			p.style = ghostty.sized(ghostty.Style)
-		}
-	}
-	raw: ghostty.Cell
-	if ghostty.render_state_row_cells_get(v.cells, .Raw, &raw) == .Success {
-		width: ghostty.Cell_Wide
-		p.wide = ghostty.cell_get(raw, .Wide, &width) == .Success && width == .Wide
-	}
-	rgb: ghostty.Color_Rgb
-	if ghostty.render_state_row_cells_get(v.cells, .Fg_Color, &rgb) == .Success {
+	if rgb, ok := cell.foreground.?; ok {
 		p.foreground = color(rgb)
 	}
-	if ghostty.render_state_row_cells_get(v.cells, .Bg_Color, &rgb) == .Success {
+	if rgb, ok := cell.background.?; ok {
 		p.background, p.has_background = color(rgb), true
 	}
 	if p.style.inverse {
@@ -376,7 +365,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	c := b.cursor
 	if c.viewport_has_value && int(c.viewport_y) == y {
 		x := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
-		b.cursor_wide = c.wide_tail || (x >= 0 && x < len(v.paints) && v.paints[x].wide)
+		b.cursor_wide = c.wide_tail || (x >= 0 && x < len(v.paints) && v.paints[x].width == .Wide)
 	}
 	run_start, run_color, run_active := 0, render.Color{}, false
 	flush :: proc(b: ^Builder, start, end: int, top: f32, c: render.Color) {
@@ -419,15 +408,23 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		cursor_x = int(cursor.viewport_x)
 	}
 	for p, x in v.paints {
-		count: u32
-		if ghostty.render_state_row_cells_select(v.cells, u16(x)) != .Success ||
-		   ghostty.render_state_row_cells_get(v.cells, .Graphemes_Len, &count) != .Success {
-			log.error("term_view: reading row cell failed")
-			count = 0
+		span: []u32
+		if !p.style.invisible {
+			if ghostty.render_state_row_cells_select(v.cells, u16(x)) != .Success {
+				log.error("term_view: selecting row cell failed")
+			} else {
+				clear(&v.codepoints)
+				text, err := term.render_cell_graphemes(v.cells, p.width, &v.codepoints)
+				if err != .None {
+					log.errorf("term_view: reading cell graphemes failed: %v", err)
+				} else {
+					span = text
+				}
+			}
 		}
 		next_face := cell_face(p)
 		if p.style.invisible ||
-		   count == 0 ||
+		   len(span) == 0 ||
 		   previous != x - 1 ||
 		   next_face != face ||
 		   x == cursor_x ||
@@ -436,19 +433,13 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 			clear(&v.runes)
 			clear(&v.columns)
 		}
-		if p.style.invisible || count == 0 {continue}
-		if resize(&v.codepoints, int(count)) != nil ||
-		   reserve(&v.runes, len(v.runes) + int(count)) != nil ||
-		   reserve(&v.columns, len(v.columns) + int(count)) != nil {
+		if p.style.invisible || len(span) == 0 {continue}
+		if reserve(&v.runes, len(v.runes) + len(span)) != nil ||
+		   reserve(&v.columns, len(v.columns) + len(span)) != nil {
 			b.ok = false
 			return .Ok
 		}
-		if ghostty.render_state_row_cells_get(v.cells, .Graphemes_Buf, raw_data(v.codepoints)) !=
-		   .Success {
-			log.error("term_view: reading cell graphemes failed")
-			continue
-		}
-		for codepoint in v.codepoints {
+		for codepoint in span {
 			_, rune_err := append(&v.runes, rune(codepoint))
 			_, column_err := append(&v.columns, x)
 			if rune_err != nil || column_err != nil {
@@ -500,7 +491,9 @@ draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Re
 		last := max(cluster, (end < len(v.shaped) ? v.shaped[end].cluster : len(v.runes)) - 1)
 		x := v.columns[cluster]
 		p := v.paints[x]
-		span := f32(v.columns[last] - x + (v.paints[v.columns[last]].wide ? 2 : 1)) * m.cell_width
+		span :=
+			f32(v.columns[last] - x + (v.paints[v.columns[last]].width == .Wide ? 2 : 1)) *
+			m.cell_width
 		// D-042: a cluster wider than its cells shrinks to fit around the cell center, so it never
 		// covers a neighbor; a wide cluster is centered in its two cells. Wide clusters draw in
 		// color when the font defines color glyphs, so emoji presentation shows as emoji.
@@ -509,13 +502,13 @@ draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Re
 			scale = span / advance
 		}
 		left := b.origin.x + f32(x) * m.cell_width
-		if scale < 1 || p.wide {
+		if scale < 1 || p.width == .Wide {
 			left += (span - advance * scale) / 2
 		}
 		baseline := top + m.cell_height / 2 + (m.baseline - m.cell_height / 2) * scale
 		pen: f32
 		for g in v.shaped[start:end] {
-			entry, result := glyphs.glyph(b.cache, g.glyph, m.size_px * scale, p.wide)
+			entry, result := glyphs.glyph(b.cache, g.glyph, m.size_px * scale, p.width == .Wide)
 			if result != .Ok {return result}
 			place(
 				b,
