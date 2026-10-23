@@ -68,6 +68,21 @@ edit_text :: proc(
 		issue, assign_error := assign(&s, entry^, serialized)
 		if assign_error != nil {err = assign_error; return}
 		if p, ok := issue.?; ok {message = p.message; return}
+	} else if slot, legacy := legacy_shell_slot(key); legacy {
+		if value == "" && slot != 2 {
+			message, err = strings.clone("Shell command and starting directory cannot be empty.", allocator)
+			return
+		}
+		entry := legacy_shell_entry(slot)
+		if err = encode_value(&encoded, entry, value); err != nil {return}
+		serialized = strings.to_string(encoded)
+	} else if strings.has_prefix(key, PROFILE_PREFIX) {
+		profile_serialized, issue := profile_edit_text(key, value)
+		if issue != "" {
+			message, err = strings.clone(issue, allocator)
+			return
+		}
+		serialized = profile_serialized
 	} else if !strings.has_prefix(key, KEY_BINDING_PREFIX) {
 		message, err = strings.clone("Unknown setting.", allocator)
 		return

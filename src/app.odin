@@ -101,6 +101,7 @@ App :: struct {
 	windows:               [dynamic]^Window,
 	running:               bool,
 	tray_hint_shown:       bool,
+	settings_migration_noticed: bool,
 	process_deadline:      time.Tick,
 }
 
@@ -490,7 +491,7 @@ load_settings :: proc(app: ^App) {
 		app.settings_path = path
 	}
 	comments := binding_comments()
-	loaded, diagnostics, created, err := settings.load(
+	loaded, diagnostics, created, migrated, migration_error, err := settings.load(
 		app.settings_path,
 		extra_comments = comments[:],
 	)
@@ -517,6 +518,24 @@ load_settings :: proc(app: ^App) {
 	app.font_points = f32(loaded.font.size)
 	if created {
 		log.infof("created %s", app.settings_path)
+	}
+	if (migrated || migration_error != .None) && !app.settings_migration_noticed {
+		app.settings_migration_noticed = true
+		if migrated {
+			notify(
+				app,
+				.Info,
+				"Shell settings moved into profiles in settings.ini; existing shells are unchanged.",
+			)
+		} else {
+			log.errorf("migrating shell settings failed: %v", migration_error)
+			notify(
+				app,
+				.Error,
+				"Could not move shell settings into profiles. The old settings still apply; " +
+				"check the settings file permissions.",
+			)
+		}
 	}
 	show_settings_diagnostics(app, &diagnostics, err)
 }

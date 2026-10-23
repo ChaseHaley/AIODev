@@ -138,7 +138,7 @@ default_text_quotes_string_values :: proc(t: ^testing.T) {
 	defer delete(text)
 	testing.expect_value(t, text_error, nil)
 	testing.expect(t, strings.contains(text, "font.family = \"Cascadia Mono\"\n"))
-	testing.expect(t, strings.contains(text, "shell.command = \"pwsh.exe -NoLogo\"\n"))
+	testing.expect(t, strings.contains(text, "profile.default.command = \"pwsh.exe -NoLogo\"\n"))
 }
 
 @(test)

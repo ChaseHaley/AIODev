@@ -19,7 +19,10 @@ Font_Settings :: struct {
 	size, line_height: f64,
 }
 Shell_Settings :: struct {
+	// Legacy parse targets for the default profile. The file format uses profile.default.*;
+	// these remain so an unwritable file still launches and existing callers keep working.
 	command, directory, icon: string,
+	default_profile:          string,
 	refresh_environment:      bool,
 	report_directory:         bool,
 }
@@ -68,8 +71,10 @@ Settings :: struct {
 	theme:           Theme_Settings,
 	pane:            Pane_Settings,
 	tab:             Tab_Settings,
+	profiles:        Profiles,
 	allocator:       runtime.Allocator,
 	leader_line:     int,
+	default_profile_line: int,
 }
 KEY_BINDING_PREFIX :: "keys."
 Key_Binding :: struct {
@@ -185,16 +190,15 @@ SCHEMA :: [?]Schema_Entry {
 		"Ask before closing a tab that has more than one pane.",
 	},
 	{
-		"shell.icon",
-		"Shell Icon",
+		"shell.default_profile",
+		"Default Shell Profile",
 		.String,
-		offset_of(Settings, shell) + offset_of(Shell_Settings, icon),
-		"",
-		0,
-		32767,
+		offset_of(Settings, shell) + offset_of(Shell_Settings, default_profile),
+		"default",
+		1,
+		64,
 		nil,
-		"PNG image path for tabs and pane headers. Relative paths start beside settings.ini; " +
-			"empty uses the shell default.",
+		"Profile for new tabs, splits and the plus button. Profiles are ordered by profile.order.",
 	},
 	{
 		"input.leader",
@@ -250,28 +254,6 @@ SCHEMA :: [?]Schema_Entry {
 		4,
 		nil,
 		"Line height multiplier.",
-	},
-	{
-		"shell.command",
-		"Shell Command",
-		.String,
-		offset_of(Settings, shell) + offset_of(Shell_Settings, command),
-		"pwsh.exe -NoLogo",
-		1,
-		32767,
-		nil,
-		"Shell command line.",
-	},
-	{
-		"shell.directory",
-		"Starting Directory",
-		.String,
-		offset_of(Settings, shell) + offset_of(Shell_Settings, directory),
-		"~",
-		1,
-		32767,
-		nil,
-		"Initial directory; the caller expands the home prefix.",
 	},
 	{
 		"shell.refresh_environment",
@@ -756,6 +738,7 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 		allocator = allocator,
 	}
 	s.keys.allocator = allocator
+	profiles_init(&s.profiles, allocator)
 	for entry in SCHEMA {
 		issue, err := assign(&s, entry, entry.default_value)
 		if err != nil {
@@ -766,6 +749,21 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 			delete(p.message, allocator)
 			unreachable()
 		}
+	}
+	legacy_error: runtime.Allocator_Error
+	s.shell.command, legacy_error = strings.clone(DEFAULT_PROFILE_COMMAND, allocator)
+	if legacy_error != nil {
+		destroy(&s)
+		return {}, legacy_error
+	}
+	s.shell.directory, legacy_error = strings.clone(DEFAULT_PROFILE_DIRECTORY, allocator)
+	if legacy_error != nil {
+		destroy(&s)
+		return {}, legacy_error
+	}
+	if profile_error := profiles_finalize(&s); profile_error != nil {
+		destroy(&s)
+		return {}, profile_error
 	}
 	resolve_colors(&s)
 	return s, nil
@@ -782,6 +780,10 @@ destroy :: proc(s: ^Settings) {
 			delete((cast(^string)(uintptr(s) + entry.offset))^, s.allocator)
 		}
 	}
+	delete(s.shell.command, s.allocator)
+	delete(s.shell.directory, s.allocator)
+	delete(s.shell.icon, s.allocator)
+	profiles_destroy(&s.profiles)
 	s^ = {}
 }
 
@@ -896,6 +898,7 @@ parse :: proc(
 	}
 	schema := SCHEMA
 	seen: [len(SCHEMA)]bool
+	legacy_seen: [3]bool
 	scanner := line_scanner_init(text)
 	for {
 		line, ok := line_next(&scanner)
@@ -913,6 +916,37 @@ parse :: proc(
 		if strings.has_prefix(key, KEY_BINDING_PREFIX) {
 			binding_error := parse_key_binding(&s, &diagnostics, key, value, line.number)
 			if binding_error != nil {return {}, {}, binding_error}
+			continue
+		}
+		if strings.has_prefix(key, PROFILE_PREFIX) {
+			profile_error := parse_profile_key(&s, &diagnostics, key, value, line.number)
+			if profile_error != nil {return {}, {}, profile_error}
+			continue
+		}
+		if slot, legacy := legacy_shell_slot(key); legacy {
+			entry := legacy_shell_entry(slot)
+			if legacy_seen[slot] {
+				issue, issue_error := problem(
+					.Duplicate_Key,
+					allocator,
+					"duplicate key \"",
+					key,
+					"\"; last value wins",
+				)
+				if issue_error != nil {return {}, {}, issue_error}
+				err = add_diagnostic(&diagnostics, line.number, key, issue.(Problem))
+				if err != nil {return {}, {}, err}
+			}
+			legacy_seen[slot] = true
+			issue, assign_error := assign(&s, entry, value)
+			if assign_error != nil {return {}, {}, assign_error}
+			if p, present := issue.?; present {
+				err = add_diagnostic(&diagnostics, line.number, key, p)
+				if err != nil {return {}, {}, err}
+				reset_issue, reset_error := assign(&s, entry, entry.default_value)
+				if reset_error != nil {return {}, {}, reset_error}
+				assert(reset_issue == nil)
+			}
 			continue
 		}
 		index := -1
@@ -937,6 +971,7 @@ parse :: proc(
 		}
 		seen[index] = true
 		if key == "input.leader" {s.leader_line = line.number}
+		if key == "shell.default_profile" {s.default_profile_line = line.number}
 		issue, assign_error := assign(&s, schema[index], value)
 		if assign_error != nil {return {}, {}, assign_error}
 		if p, present := issue.?; present {
@@ -947,6 +982,7 @@ parse :: proc(
 			assert(default_issue == nil)
 		}
 	}
+	if profile_error := profiles_finalize(&s); profile_error != nil {return {}, {}, profile_error}
 	resolve_colors(&s)
 	success = true
 	return s, diagnostics, nil
@@ -973,6 +1009,20 @@ default_text :: proc(
 		encode_value(&builder, entry, entry.default_value) or_return
 		write_parts(&builder, "\n") or_return
 	}
+	write_parts(
+		&builder,
+		"\n# Profiles: profile.ID.name, .command, .directory, .icon and .hidden.\n",
+		"# profile.order controls menu order and Ctrl+Shift+1 to 9; unlisted IDs follow by ID.\n",
+		PROFILE_ORDER_KEY,
+		" = default\n\n",
+		"profile.default.name = \"PowerShell 7\"\n",
+		"profile.default.command = \"",
+		DEFAULT_PROFILE_COMMAND,
+		"\"\n",
+		"profile.default.directory = \"",
+		DEFAULT_PROFILE_DIRECTORY,
+		"\"\n",
+	) or_return
 	if len(extra_comments) > 0 {write_parts(&builder, "\n") or_return}
 	for line in extra_comments {
 		write_parts(&builder, "# ", line, "\n") or_return
@@ -989,6 +1039,8 @@ load :: proc(
 	s: Settings,
 	diagnostics: [dynamic]Diagnostic,
 	created: bool,
+	migrated: bool,
+	migration_error: Save_Error,
 	err: os.Error,
 ) {
 	data, read_error := os.read_entire_file(path, allocator)
@@ -998,6 +1050,25 @@ load :: proc(
 		s, diagnostics, parse_error = parse(string(data), allocator)
 		if parse_error != nil {
 			err = parse_error
+			return
+		}
+		updated, changed, migration_alloc := migrate_text(string(data), allocator)
+		if migration_alloc != nil {
+			destroy(&s)
+			diagnostics_destroy(&diagnostics)
+			err = migration_alloc
+			return
+		}
+		if changed {
+			defer delete(updated, allocator)
+			switch save(path, string(data), updated) {
+			case .None:
+				migrated = true
+			case .Conflict:
+				migration_error = .Conflict
+			case .IO:
+				migration_error = .IO
+			}
 		}
 		return
 	}
