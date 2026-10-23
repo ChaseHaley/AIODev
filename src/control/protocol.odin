@@ -6,6 +6,9 @@ import "core:strings"
 import "core:unicode/utf8"
 
 MAX_MESSAGE :: 4 * 1024 * 1024
+// Real requests use fewer than ten arguments. Capping the decoded array keeps a
+// small line from expanding into a large allocation before parsing.
+MAX_ARGUMENTS :: 64
 Wake :: struct {
 	procedure: proc(user: rawptr),
 	user:      rawptr,
@@ -61,6 +64,7 @@ decode_request :: proc(data: []u8, allocator := context.allocator) -> (^Message,
 	opening, opening_error := json.get_token(&tokens)
 	if opening_error != nil || opening.kind != .Open_Bracket {return nil, .Protocol}
 	allow_end := true
+	arguments := 0
 	for {
 		token, token_error := json.get_token(&tokens)
 		if token_error != nil {return nil, .Protocol}
@@ -68,6 +72,8 @@ decode_request :: proc(data: []u8, allocator := context.allocator) -> (^Message,
 			break
 		}
 		if token.kind != .String {return nil, .Protocol}
+		arguments += 1
+		if arguments > MAX_ARGUMENTS {return nil, .Protocol}
 		separator, separator_error := json.get_token(&tokens)
 		if separator_error != nil {return nil, .Protocol}
 		if separator.kind == .Close_Bracket {

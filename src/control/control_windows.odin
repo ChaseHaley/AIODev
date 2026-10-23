@@ -9,6 +9,11 @@ import w "core:sys/windows"
 import "core:thread"
 import "core:time"
 
+// Bounds one request-line read or response-line write; reaching it disconnects the
+// client. Requests that legitimately hold the channel (wait, run) wait in
+// await_response, which stays unbounded.
+SERVER_IO_TIMEOUT_MS :: 5000
+
 Server :: struct {
 	allocator:                 runtime.Allocator,
 	wake:                      Wake,
@@ -393,7 +398,14 @@ await_response :: proc(s: ^Server) -> ([]u8, Error) {
 serve_client :: proc(s: ^Server) -> Error {
 	r: Line_Reader
 	for {
-		data, read_error := read_line(&r, s.pipe, s.stop, time.tick_now(), -1, s.allocator)
+		data, read_error := read_line(
+			&r,
+			s.pipe,
+			s.stop,
+			time.tick_now(),
+			SERVER_IO_TIMEOUT_MS,
+			s.allocator,
+		)
 		if read_error != .None {return read_error}
 		m, decode_error := decode_request(data, s.allocator)
 		delete(data, s.allocator)
@@ -414,7 +426,13 @@ serve_client :: proc(s: ^Server) -> Error {
 			response, encode_error := encode(Response{false, strings.to_string(text)}, s.allocator)
 			strings.builder_destroy(&text)
 			if encode_error != .None {return encode_error}
-			write_error := write_line(s.pipe, response, s.stop, time.tick_now(), -1)
+			write_error := write_line(
+				s.pipe,
+				response,
+				s.stop,
+				time.tick_now(),
+				SERVER_IO_TIMEOUT_MS,
+			)
 			delete(response, s.allocator)
 			if write_error != .None {return write_error}
 			continue
@@ -434,7 +452,13 @@ serve_client :: proc(s: ^Server) -> Error {
 			finish_delivery(s, id)
 			return response_error
 		}
-		write_error := write_line(s.pipe, response, s.stop, time.tick_now(), -1)
+		write_error := write_line(
+			s.pipe,
+			response,
+			s.stop,
+			time.tick_now(),
+			SERVER_IO_TIMEOUT_MS,
+		)
 		delete(response, s.allocator)
 		finish_delivery(s, id)
 		if write_error != .None {return write_error}
@@ -451,7 +475,7 @@ server_thread :: proc(t: ^thread.Thread) {
 		}
 		err := serve_client(s)
 		clear_request(s)
-		if err != .Closed && err != .Protocol {
+		if err != .Closed && err != .Protocol && err != .Timeout {
 			log.errorf("control: serving client failed: %v", err)
 		}
 		if err == .Protocol {
@@ -460,7 +484,7 @@ server_thread :: proc(t: ^thread.Thread) {
 			)
 			if encode_error == .None {
 				if write_error := write_line(s.pipe, data, s.stop, time.tick_now(), 1000);
-				   write_error != .None {
+				   write_error != .None && write_error != .Timeout {
 					log.errorf("control: protocol reply failed: %v", write_error)
 				}
 				delete(data)
@@ -542,6 +566,7 @@ close :: proc(c: ^Client) {
 call :: proc(c: ^Client, args: []string, timeout_ms: int = 15000) -> (Response, Error) {
 	if c.pipe == nil {return {}, .Closed}
 	if timeout_ms < 0 || timeout_ms > int(max(i32)) {return {}, .Invalid_Argument}
+	if len(args) > MAX_ARGUMENTS {return {}, .Protocol}
 	allocator := c.allocator
 	data, encode_error := encode(args, allocator)
 	if encode_error != .None {return {}, encode_error}
