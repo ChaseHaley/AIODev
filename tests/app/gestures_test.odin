@@ -256,3 +256,73 @@ gestures_ui_motion_and_cancelled_buttons_send_no_terminal_packets :: proc(t: ^te
 gestures_terminal_press_motion_release_keep_reporting :: proc(t: ^testing.T) {
 	gesture_terminal_packets(t, true)
 }
+
+@(private)
+gesture_settings_header :: proc(w: ^app.Window) -> (ui.Header_Layout, bool) {
+	for pane in w.panes {
+		if pane.content.kind != .Settings {continue}
+		r := pane.rect
+		return ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, pane.node == w.tree.focus),
+			true
+	}
+	return {}, false
+}
+
+@(private)
+gesture_click_header :: proc(
+	s: ^app.App,
+	w: ^app.Window,
+	button: int,
+	h: ui.Header_Layout,
+) {
+	r := h.buttons[button]
+	gesture_button(s, w, .Left, true, r.x + r.width / 2, r.y + r.height / 2)
+	gesture_button(s, w, .Left, false, r.x + r.width / 2, r.y + r.height / 2)
+}
+
+// Settings is ordinary pane content, so its header controls run the same commands as a terminal.
+@(test)
+gestures_settings_header_split_buttons_create_terminal_panes :: proc(t: ^testing.T) {
+	for button in ([?]int{0, 1}) {
+		f: Palette_Fixture
+		defer palette_fixture_destroy(t, &f)
+		if !palette_fixture_create(t, &f, "gesture-settings-split") {return}
+		s, w := &f.state, f.state.windows[0]
+		app.editor_open(s, w)
+		if !testing.expect(t, app.settings_active(w)) {return}
+		sessions, tabs := len(s.sessions), len(w.workspace.tabs)
+		h, found := gesture_settings_header(w)
+		if !testing.expect(t, found) {return}
+		gesture_click_header(s, w, button, h)
+		testing.expect_value(t, len(w.panes), 2)
+		testing.expect_value(t, len(w.workspace.tabs), tabs)
+		testing.expect_value(t, len(s.sessions), sessions + 1)
+	}
+}
+
+@(test)
+gestures_settings_header_zoom_and_close_drive_the_settings_pane :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "gesture-settings-zoom-close") {return}
+	s, w := &f.state, f.state.windows[0]
+	app.editor_open(s, w)
+	if !testing.expect(t, app.settings_active(w)) {return}
+	h, found := gesture_settings_header(w)
+	if !testing.expect(t, found) {return}
+	gesture_click_header(s, w, 2, h)
+	if !testing.expect(t, w.tree.zoomed) {return}
+	h, found = gesture_settings_header(w)
+	if !testing.expect(t, found) {return}
+	gesture_click_header(s, w, 2, h)
+	testing.expect(t, !w.tree.zoomed)
+	sessions, tabs := len(s.sessions), len(w.workspace.tabs)
+	h, found = gesture_settings_header(w)
+	if !testing.expect(t, found) {return}
+	gesture_click_header(s, w, 3, h)
+	testing.expect(t, !w.editor.open)
+	testing.expect(t, !app.settings_active(w))
+	testing.expect_value(t, len(w.workspace.tabs), tabs - 1)
+	testing.expect_value(t, len(s.sessions), sessions)
+}
+

@@ -74,7 +74,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	}
 	w.tab_pressed, w.dirty = false, true
 	if e.button in w.header_buttons {
-		if settings_active(w) || palette_active(app, w) {pane_header_cancel(w)}
+		if palette_active(app, w) {pane_header_cancel(w)}
 		return pane_header_button(app, w, e)
 	}
 	if palette_active(app, w) {
