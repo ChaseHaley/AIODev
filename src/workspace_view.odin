@@ -82,3 +82,56 @@ workspace_view_rebind :: proc(destination, prepared: ^Workspace_View_Resources) 
 	clear(&destination.tab_controls)
 	workspace_view_destroy(prepared)
 }
+
+// How much of the incoming workspace is prepared before the window stops showing the old one.
+Workspace_Adoption :: enum {
+	// Selection keeps view and geometry storage; relayout reconciles it with the new workspace.
+	Retain,
+	// Deletion pre-flights every view, so the replacement is complete before the old workspace
+	// is released, and then moves the prepared storage over the old view.
+	Replace,
+}
+
+// Adopts workspace into w as its displayed workspace. Preparation depth, the presentation
+// reset, storage handover, anchor repair, relayout and focus re-entry happen in the one order
+// both selection and deletion need. The caller has already established that no other window
+// displays workspace and that it has a selected tab. A failure before the old view is released
+// leaves w displaying and holding its previous workspace.
+@(require_results)
+workspace_adopt :: proc(
+	app: ^App,
+	w: ^Window,
+	workspace: ^Workspace,
+	adoption: Workspace_Adoption,
+) -> bool {
+	prepared: Workspace_View_Resources
+	switch adoption {
+	case .Retain:
+		if !workspace_view_init(app, &prepared, workspace) {return false}
+	case .Replace:
+		if !workspace_view_prepare(app, &prepared, workspace) {return false}
+	}
+	defer workspace_view_destroy(&prepared)
+	if !gesture_cancel(app, w) {return false}
+	focus_leave(app, w)
+	tab_close_restore(w)
+	w.tab_menu.open, w.rename_open = false, false
+	workspace_picker_cancel(w)
+	pending_close_clear(&w.pending_close)
+	clear(&w.close_restore)
+	switch adoption {
+	case .Retain:
+		workspace_view_rebind(&w.resources, &prepared)
+	case .Replace:
+		workspace_view_move(&w.resources, &prepared)
+	}
+	if workspace.selection_anchor == 0 {tab_select_one(workspace, workspace.selected)}
+	w.tab_underline = {
+		value  = f32(workspace.selected),
+		target = f32(workspace.selected),
+	}
+	w.tab_hover, w.tab_close_pressed, w.tab_pressed = -1, -1, false
+	window_relayout(app, w)
+	focus_enter(app, w)
+	return true
+}

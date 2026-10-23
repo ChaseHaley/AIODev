@@ -52,8 +52,6 @@ workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	committed := false
 	defer if fresh &&
 	   !committed {workspace_delete_release(app, destination); workspace_pickers_refresh(app)}
-	prepared: Workspace_View_Resources
-	defer workspace_view_destroy(&prepared)
 	created_tab := destination != nil && len(destination.tabs) == 0
 	if created_tab && !tab_create(app, destination) {return false}
 	defer if created_tab && !fresh && !committed {workspace_close_tab(app, destination, 0)}
@@ -61,22 +59,8 @@ workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 		entry := session_find(app, app.next_session_id)
 		if entry == nil || term.status(entry.session).kind == .Failed {return false}
 	}
-	if owner != nil && !workspace_view_prepare(app, &prepared, destination) {return false}
-	if owner != nil {
-		if !gesture_cancel(app, owner) {return false}
-		focus_leave(app, owner)
-		tab_close_restore(owner)
-		workspace_view_move(&owner.resources, &prepared)
-		pending_close_clear(&owner.pending_close)
-		owner.tab_hover, owner.tab_close_pressed, owner.tab_pressed = -1, -1, false
-		owner.tab_underline = {
-			value  = f32(destination.selected),
-			target = f32(destination.selected),
-		}
-		if destination.selection_anchor == 0 {tab_select_one(destination, destination.selected)}
-		window_relayout(app, owner)
-		focus_enter(app, owner)
-	}
+	// Replacing pre-flights every view before the old workspace is released (D-053).
+	if owner != nil && !workspace_adopt(app, owner, destination, .Replace) {return false}
 	workspace_delete_release(app, workspace)
 	committed = true
 	workspace_pickers_refresh(app)

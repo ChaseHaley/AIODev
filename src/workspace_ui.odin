@@ -93,28 +93,9 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 		return window_activate(app, owner)
 	}
 	if len(workspace.tabs) == 0 && !tab_create(app, workspace) {return false}
-	// Load before changing ownership so an unreadable settings file leaves the old view intact.
-	prepared: Workspace_View_Resources
-	if !workspace_view_init(app, &prepared, workspace) {return false}
-	defer workspace_view_destroy(&prepared)
-	if !gesture_cancel(app, w) {return false}
-	focus_leave(app, w)
-	tab_close_restore(w)
-	w.tab_menu.open, w.rename_open = false, false
-	workspace_picker_cancel(w)
-	pending_close_clear(&w.pending_close)
-	clear(&w.close_restore)
-	workspace_view_rebind(&w.resources, &prepared)
-	if workspace.selection_anchor == 0 {tab_select_one(workspace, workspace.selected)}
-	w.tab_underline = {
-		value  = f32(workspace.selected),
-		target = f32(workspace.selected),
-	}
-	w.tab_hover, w.tab_close_pressed = -1, -1
-	w.tab_pressed = false
-	window_relayout(app, w)
-	focus_enter(app, w)
-	return true
+	// Loading happens inside adoption before ownership changes, so an unreadable settings file
+	// leaves the old view intact.
+	return workspace_adopt(app, w, workspace, .Retain)
 }
 
 workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
