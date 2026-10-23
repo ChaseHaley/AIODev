@@ -2,6 +2,7 @@ package platform
 
 import "base:runtime"
 import "core:log"
+import "core:strings"
 import w "core:sys/windows"
 import "core:unicode/utf16"
 
@@ -272,11 +273,34 @@ clipboard_get_text :: proc(
 	return converted, true
 }
 
+// True for a local filesystem path: a drive-absolute path or a colon-free relative path. URL
+// schemes, drive-relative names and UNC/device paths are refused, so this generic helper cannot
+// become a launch path for untrusted URLs or network shares.
 @(require_results)
-open_path :: proc(path: string) -> bool {
-	if len(path) == 0 {return false}
+open_path_allowed :: proc(path: string) -> bool {
+	if path == "" {return false}
 	for c in path {
 		if c == 0 {return false}
+	}
+	drive_absolute :=
+		len(path) >= 3 &&
+		path[1] == ':' &&
+		((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) &&
+		(path[2] == '\\' || path[2] == '/')
+	if drive_absolute {return true}
+	if strings.has_prefix(path, `\\`) || strings.has_prefix(path, "//") {return false}
+	for c in path {
+		if c == ':' {return false}
+		if c == '/' || c == '\\' {break}
+	}
+	return true
+}
+
+@(require_results)
+open_path :: proc(path: string) -> bool {
+	if !open_path_allowed(path) {
+		log.warnf("platform: refusing to open a non-local path")
+		return false
 	}
 	text := w.utf8_to_wstring(path, context.allocator)
 	if text == nil {return false}
