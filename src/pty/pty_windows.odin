@@ -233,6 +233,29 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	command := w.utf8_to_wstring(options.command_line, allocator)
 	if command == nil {return {}, {.Out_Of_Memory, 0}}
 	defer delete(command, allocator)
+	// Resolve a bare shell name once, before starting anything. Passing the result as
+	// lpApplicationName keeps CreateProcess from searching the current directory and relative
+	// PATH entries, which belong to the project being opened rather than to the terminal.
+	application: w.LPCWSTR
+	defer if application != nil {delete(application, allocator)}
+	token := executable_token(options.command_line)
+	if token != "" && !is_explicit_path(token) {
+		directories, directories_error := search_directories(allocator)
+		if directories_error != nil {return {}, {.Out_Of_Memory, 0}}
+		defer {
+			for directory in directories {delete(directory, allocator)}
+			delete(directories, allocator)
+		}
+		resolved, resolve_error := resolve_executable(
+			options.command_line,
+			directories,
+			allocator,
+		)
+		if resolve_error.kind != .None {return {}, resolve_error}
+		defer delete(resolved, allocator)
+		application = w.utf8_to_wstring(resolved, allocator)
+		if application == nil {return {}, {.Out_Of_Memory, 0}}
+	}
 	directory := w.utf8_to_wstring(options.working_directory, allocator)
 	if directory == nil {return {}, {.Out_Of_Memory, 0}}
 	defer delete(directory, allocator)
@@ -338,7 +361,7 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	)
 	if !bool(
 		w.CreateProcessW(
-			nil,
+			application,
 			command,
 			nil,
 			nil,

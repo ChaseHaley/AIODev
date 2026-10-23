@@ -82,4 +82,7 @@ foreign kernel32 {
 	AssignProcessToJobObject :: proc(hJob, hProcess: w.HANDLE) -> w.BOOL ---
 	TerminateJobObject :: proc(hJob: w.HANDLE, uExitCode: w.UINT) -> w.BOOL ---
 	CompareStringOrdinal :: proc(lpString1: ^u16, cchCount1: i32, lpString2: ^u16, cchCount2: i32, bIgnoreCase: w.BOOL) -> i32 ---
+	GetSystemDirectoryW :: proc(lpBuffer: w.LPWSTR, uSize: w.UINT) -> w.UINT ---
+	GetWindowsDirectoryW :: proc(lpBuffer: w.LPWSTR, uSize: w.UINT) -> w.UINT ---
+	SearchPathW :: proc(lpPath, lpFileName, lpExtension: w.LPCWSTR, nBufferLength: w.DWORD, lpBuffer: w.LPWSTR, lpFilePart: ^w.LPWSTR) -> w.DWORD ---
 }
