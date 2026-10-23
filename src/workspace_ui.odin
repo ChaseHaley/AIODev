@@ -25,9 +25,7 @@ workspace_index :: proc(app: ^App, index: int) -> ^Workspace {
 	if index < 0 {return nil}
 	at := 0
 	for workspace in app.workspaces {
-		if workspace.provisional {continue}
-		if owner := window_for_workspace(app, workspace);
-		   owner != nil && owner.preparing {continue}
+		if !workspace_eligible(app, workspace) {continue}
 		if at == index {return workspace}
 		at += 1
 	}
@@ -65,6 +63,8 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 
 @(require_results)
 workspace_discard_empty :: proc(app: ^App, workspace: ^Workspace) -> bool {
+	// Deliberately not workspace_eligible: a tear-off preview is provisional, and discarding it
+	// is how that preview workspace is torn down.
 	if workspace == nil ||
 	   len(workspace.tabs) != 0 ||
 	   window_for_workspace(app, workspace) != nil {
@@ -87,11 +87,8 @@ workspace_find :: proc(app: ^App, id: u32) -> ^Workspace {
 
 @(require_results)
 workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
-	if workspace == nil ||
-	   workspace.provisional ||
-	   workspace_find(app, workspace.id) != workspace {return false}
+	if !workspace_eligible(app, workspace) {return false}
 	if owner := window_for_workspace(app, workspace); owner != nil {
-		if owner.preparing {return false}
 		if owner == w {return true}
 		return window_activate(app, owner)
 	}
@@ -200,9 +197,7 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 		context.temp_allocator,
 	)
 	for workspace in app.workspaces {
-		if workspace.provisional {continue}
-		if owner := window_for_workspace(app, workspace);
-		   owner != nil && owner.preparing {continue}
+		if !workspace_eligible(app, workspace) {continue}
 		name := strings.to_lower(workspace.name, context.temp_allocator)
 		if query != "" && !strings.contains(name, query) {continue}
 		if _, err := append(

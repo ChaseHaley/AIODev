@@ -10,16 +10,15 @@ workspace_delete_destination :: proc(app: ^App, workspace: ^Workspace) -> ^Works
 	if index < 0 {return nil}
 	for offset in 1 ..< len(app.workspaces) {
 		candidate := app.workspaces[(index + offset) % len(app.workspaces)]
-		if !candidate.provisional && window_for_workspace(app, candidate) == nil {return candidate}
+		if workspace_eligible(app, candidate) &&
+		   window_for_workspace(app, candidate) == nil {return candidate}
 	}
 	return nil
 }
 
 workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
-	if w == nil || workspace == nil || w.preparing || workspace.provisional {return}
-	if workspace_find(app, workspace.id) != workspace {return}
+	if w == nil || w.preparing || !workspace_eligible(app, workspace) {return}
 	owner := window_for_workspace(app, workspace)
-	if owner != nil && owner.preparing {return}
 	destination := owner != nil ? workspace_delete_destination(app, workspace) : nil
 	pending_close_open_workspace(app, w, workspace, owner, destination)
 }
@@ -42,8 +41,8 @@ workspace_delete_release :: proc(app: ^App, workspace: ^Workspace) {
 @(private)
 @(require_results)
 workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
+	if !workspace_eligible(app, workspace) {return false}
 	owner := window_for_workspace(app, workspace)
-	if workspace.provisional || (owner != nil && owner.preparing) {return false}
 	destination := owner != nil ? workspace_delete_destination(app, workspace) : nil
 	fresh := destination == nil && (owner != nil || len(app.workspaces) == 1)
 	if fresh {

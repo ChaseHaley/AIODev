@@ -36,8 +36,7 @@ workspace_open_window :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 
 workspace_row_target :: proc(app: ^App, id: u32) -> ^Workspace {
 	workspace := workspace_find(app, id)
-	if workspace == nil || workspace.provisional { return nil }
-	if owner := window_for_workspace(app, workspace); owner != nil && owner.preparing { return nil }
+	if !workspace_eligible(app, workspace) { return nil }
 	return workspace
 }
 
