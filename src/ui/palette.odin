@@ -410,18 +410,18 @@ palette_mouse_press :: proc(
 	return .None, 0
 }
 
-@(private)
-query_offset :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, scale: f32) -> int {
-	input_text := text_styled(text, .Input)
-	origin := l.input.x + PALETTE_TEXT_INSET * scale
-	available := l.input.width - 2 * PALETTE_TEXT_INSET * scale
-	return field_offset_at(
-		&p.query,
-		&input_text,
-		field_view_start(&p.query, &input_text, available),
-		origin,
-		x,
-	)
+// The query field's box: the input row's width, with the label sharing its height above.
+palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {
+	return {
+		field = &p.query,
+		text = text,
+		rect = l.input,
+		inset = PALETTE_TEXT_INSET,
+		caret_width = 1.5,
+		radius = 0,
+		style = .Input,
+		scale = scale,
+	}
 }
 
 palette_input_contains :: proc(l: Palette_Layout, x, y: f32) -> bool {
@@ -437,15 +437,13 @@ palette_input_press :: proc(
 	x, scale: f32,
 	extend: bool,
 ) -> Outcome {
-	return(
-		field_pointer(&p.query, query_offset(p, l, text, x, scale), true, extend) == .None ? .None : .Changed \
-	)
+	at := field_box_offset(palette_query_box(p, l, text, scale), x)
+	return field_pointer(&p.query, at, true, extend) == .None ? .None : .Changed
 }
 
 palette_input_drag :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, scale: f32) -> Outcome {
-	return(
-		field_pointer(&p.query, query_offset(p, l, text, x, scale), false, true) == .None ? .None : .Changed \
-	)
+	at := field_box_offset(palette_query_box(p, l, text, scale), x)
+	return field_pointer(&p.query, at, false, true) == .None ? .None : .Changed
 }
 
 palette_input_release :: proc(p: ^Palette) -> bool {
@@ -502,14 +500,14 @@ palette_draw :: proc(
 	}
 	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
-	input_text := text_styled(text, .Input)
 	label_text := text_styled(text, .Label)
 	if l.input.width > 2*padding {
 		if result := draw_text(&label_text, list, "COMMANDS AND SETTINGS", l.input.x+padding, l.input.y+19*scale,
 			theme.faint); result != .Ok { return result }
-		if result := field_draw(&p.query, list, &input_text, theme, l.input.x + padding, l.input.y + 43*scale,
-			l.input.width - 2*padding, true, "Type a command or setting", theme.text, max(1, 1.5 * scale));
-			result != .Ok { return result }
+		box := palette_query_box(p, l, text, scale)
+		// The label shares the input's height, so the query line sits below the centre.
+		if result := field_box_draw(box, list, theme, l.input.y+43*scale, true,
+			"Type a command or setting"); result != .Ok { return result }
 	}
 	if l.rows == 0 || l.list.width <= 0 { return .Ok }
 	if render.push_layer(list, l.list) != .None { return .Ok }

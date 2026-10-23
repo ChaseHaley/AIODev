@@ -187,8 +187,15 @@ find_draw :: proc(
 			enabled ? theme.text : theme.faint); result != .Ok { return result }
 	}
 	if l.query.width <= 0 { return .Ok }
-	if render.push_layer(list, l.query) != .None { return .Ok }
-	baseline := l.query.y+(l.query.height-text.line_height)/2+text.ascent
-	return field_draw(&f.query, list, text, theme, l.query.x, baseline, l.query.width, true,
-		"Find in scrollback", theme.text, max(1, 1.5 * scale))
+	box := Field_Box {
+		field       = &f.query,
+		text        = base,
+		rect        = l.query,
+		inset       = 0,
+		caret_width = 1.5,
+		radius      = 0,
+		style       = .Input,
+		scale       = scale,
+	}
+	return field_box_draw(box, list, theme, field_box_baseline(box), true, "Find in scrollback")
 }

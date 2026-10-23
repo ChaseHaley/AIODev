@@ -303,9 +303,10 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		ui.text_set_size(&text, 16*scale)
 		l := ui.palette_layout(&p, w, h, scale)
 		if l.input.width > 100*scale && l.input.height >= 64*scale {
-			ui.palette_input_press(&p, l, &text, l.input.x+14*scale, scale, false)
+			frame := ui.field_box_text_rect(ui.palette_query_box(&p, l, &text, scale))
+			ui.palette_input_press(&p, l, &text, frame.x, scale, false)
 			testing.expect_value(t, p.query.cursor, 0)
-			ui.palette_input_drag(&p, l, &text, l.input.x+l.input.width-14*scale, scale)
+			ui.palette_input_drag(&p, l, &text, frame.x+frame.width, scale)
 			testing.expect_value(t, ui.palette_selection(&p), "setting")
 			testing.expect(t, ui.palette_input_release(&p) && !p.query.dragging)
 		}

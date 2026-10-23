@@ -121,6 +121,19 @@ workspace_row_rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	return {r.x+8*s, r.y+r.height+8*s-68*s*(1-p.rename_motion.value), max(0, r.width-16*s), 32*s}
 }
 
+workspace_row_rename_box :: proc(w: ^Window) -> ui.Field_Box {
+	return {
+		field = &w.rename,
+		text = &w.ui_text,
+		rect = workspace_row_rename_field_rect(w),
+		inset = 8,
+		caret_width = 1,
+		radius = 5,
+		style = .Body,
+		scale = w.scale,
+	}
+}
+
 workspace_row_icon_open :: proc(app: ^App, w: ^Window, id: u32) {
 	defer workspace_picker_layout_changed(w)
 	target := workspace_row_target(app, id)
@@ -304,9 +317,10 @@ workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_rect(&w.list, {rect = field, color = app.theme.accent, radius = 5*s, stroke = s}) != .None {
 		return .Ok
 	}
-	if result := ui.field_draw(&w.rename, &w.list, &w.ui_text, app.theme, field.x+8*s,
-		field.y+(field.height-w.ui_text.line_height)/2+w.ui_text.ascent, max(1, field.width-16*s),
-		true, "Workspace name", app.theme.text, s); result != .Ok { return result }
+	box := workspace_row_rename_box(w)
+	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), true,
+		"Workspace name"); result != .Ok { return result }
+	if render.push_layer(&w.list, clip) != .None { return .Ok }
 	hint := p.rename_error ? "Could not save name · Enter retries · Esc cancels" : "Enter saves · Esc cancels"
 	return ui.draw_fading_text(&w.ui_text, &w.list, hint, field.x, field.y+field.height+19*s,
 		app.theme.muted, field.width)

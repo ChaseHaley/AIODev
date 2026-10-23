@@ -397,6 +397,19 @@ workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
 	return {r.x+12*s, r.y+12*s, max(0, r.width-24*s), 32*s}
 }
 
+workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
+	return {
+		field = &w.workspace_picker.query,
+		text = &w.ui_text,
+		rect = workspace_picker_field_rect(w),
+		inset = 8,
+		caret_width = 1,
+		radius = 5,
+		style = .Body,
+		scale = w.scale,
+	}
+}
+
 workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_cell(w, workspace_icon_picker_layout(w), index) }
 	r, _ := workspace_picker_rect(w)
@@ -445,13 +458,9 @@ workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
 	defer workspace_picker_layout_changed(w)
 	if workspace_picker_icons(&w.workspace_picker) { w.workspace_picker.selected = len(WORKSPACE_ICONS) }
-	r := workspace_picker_field_rect(w)
-	f := &w.workspace_picker.query
-	if w.workspace_picker.mode == .Rename { r, f = workspace_row_rename_field_rect(w), &w.rename }
-	width := max(1, r.width-16*w.scale)
-	start := ui.field_view_start(f, &w.ui_text, width)
-	at := ui.field_offset_at(f, &w.ui_text, start, r.x + 8 * w.scale, x)
-	ui.field_pointer(f, at, pressed, extend)
+	box := workspace_picker_query_box(w)
+	if w.workspace_picker.mode == .Rename { box = workspace_row_rename_box(w) }
+	ui.field_pointer(box.field, ui.field_box_offset(box, x), pressed, extend)
 	w.dirty = true
 }
 
@@ -467,11 +476,12 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 7*s}) != .None { return .Ok }
 	if render.push_layer(&w.list, r, 7*s) != .None { return .Ok }
 	if workspace_picker_icons(p) { return workspace_icon_picker_draw(app, w) }
-	field := workspace_picker_field_rect(w)
+	box := workspace_picker_query_box(w)
+	field := box.rect
 	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5*s}) != .None { return .Ok }
-	if result := ui.field_draw(&p.query, &w.list, &w.ui_text, app.theme, field.x+8*s,
-		field.y+(field.height-w.ui_text.line_height)/2+w.ui_text.ascent, max(1, field.width-16*s),
-		p.mode == .List, "Search workspaces", app.theme.text, s); result != .Ok { return result }
+	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
+		p.mode == .List, "Search workspaces"); result != .Ok { return result }
+	if render.push_layer(&w.list, r, 7*s) != .None { return .Ok }
 	for visible in 0..<rows {
 		i := p.scroll+visible
 		if i >= workspace_picker_count(w) { break }

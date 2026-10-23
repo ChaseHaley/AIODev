@@ -449,13 +449,14 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 				}
 				testing.expect(t, !w.rename_open && w.workspace == f.current)
 				if rename {
+					frame := ui.field_box_text_rect(app.workspace_row_rename_box(w))
 					app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
-						x = i32(sample.x+8*scale), y = i32(sample.y+16*scale)})
+						x = i32(frame.x), y = i32(sample.y+16*scale)})
 					testing.expect_value(t, w.rename.cursor, 0)
-					app.workspace_picker_pointer(s, w, sample.x+sample.width-8*scale, false, true)
+					app.workspace_picker_pointer(s, w, frame.x+frame.width, false, true)
 					testing.expect_value(t, ui.field_selected_text(&w.rename), f.target.name)
 					app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = false,
-						x = i32(sample.x+sample.width-8*scale), y = i32(sample.y+16*scale)})
+						x = i32(frame.x+frame.width), y = i32(sample.y+16*scale)})
 					testing.expect(t, !w.rename.dragging)
 				}
 			}

@@ -865,6 +865,36 @@ filter_text_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	return r
 }
 
+// The value field of one row. Every row kind that shows editable text shares this box.
+@(private)
+value_box :: proc(p: ^Editor, parts: Row_Parts, text: ^Text, scale: f32) -> Field_Box {
+	return {
+		field = &p.value,
+		text = text,
+		rect = parts.field,
+		inset = 10,
+		caret_width = 1,
+		radius = 6,
+		style = .Input,
+		scale = scale,
+	}
+}
+
+// The search field, narrowed to leave room for the clear button when it is shown.
+@(private)
+filter_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
+	return {
+		field = &p.filter,
+		text = text,
+		rect = filter_text_rect(p, l),
+		inset = 10,
+		caret_width = 1,
+		radius = 6,
+		style = .Input,
+		scale = l.scale,
+	}
+}
+
 editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts {
 	s := l.scale
 	r := render.Rect {
@@ -1009,17 +1039,6 @@ contains :: proc(r: render.Rect, x, y: f32) -> bool {
 }
 
 @(private)
-field_available :: proc(r: render.Rect, scale: f32) -> f32 {
-	return max(1, r.width - 20 * scale)
-}
-
-@(private)
-field_offset :: proc(f: ^Text_Field, text: ^Text, r: render.Rect, x, scale: f32) -> int {
-	start := field_view_start(f, text, field_available(r, scale))
-	return field_offset_at(f, text, start, r.x + 10 * scale, x)
-}
-
-@(private)
 pick_color :: proc(p: ^Editor, c: Color_Parts, x, y: f32) {
 	if p.drag == .Wheel {
 		radius := c.wheel.width / 2
@@ -1098,13 +1117,7 @@ editor_press :: proc(
 	}
 	if contains(l.filter, x, y) {
 		if p.focus != .Search {stop_editing(p)}
-		input_text := text_styled(text, .Input)
-		field_pointer(
-			&p.filter,
-			field_offset(&p.filter, &input_text, filter_text_rect(p, l), x, s),
-			true,
-			extend,
-		)
+		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend)
 		p.drag = .Filter
 		return .Changed
 	}
@@ -1159,13 +1172,7 @@ editor_press :: proc(
 		}
 		if p.capturing {stop_editing(p)}
 		p.focus = .Control
-		input_text := text_styled(text, .Input)
-		field_pointer(
-			&p.value,
-			field_offset(&p.value, &input_text, parts.field, x, s),
-			true,
-			extend,
-		)
+		field_pointer(&p.value, field_box_offset(value_box(p, parts, text, s), x), true, extend)
 		p.drag = .Value
 		return .Changed
 	}
@@ -1184,23 +1191,21 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 	case .None:
 		return false
 	case .Filter:
-		input_text := text_styled(text, .Input)
 		return(
 			field_pointer(
 				&p.filter,
-				field_offset(&p.filter, &input_text, filter_text_rect(p, l), x, l.scale),
+				field_box_offset(filter_box(p, l, text), x),
 				false,
 				true,
 			) !=
 			.None \
 		)
 	case .Value:
-		input_text := text_styled(text, .Input)
 		parts := editor_row_parts(p, l, p.selected)
 		return(
 			field_pointer(
 				&p.value,
-				field_offset(&p.value, &input_text, parts.field, x, l.scale),
+				field_box_offset(value_box(p, parts, text, l.scale), x),
 				false,
 				true,
 			) !=
@@ -1323,36 +1328,6 @@ box_draw :: proc(
 	if focused {focus_ring_draw(list, r, theme, scale)}
 }
 
-@(private)
-field_box_draw :: proc(
-	f: ^Text_Field,
-	list: ^render.Draw_List,
-	base: ^Text,
-	theme: Theme,
-	r: render.Rect,
-	focused: bool,
-	placeholder: string,
-	scale: f32,
-) -> glyphs.Result {
-	input_text := text_styled(base, .Input)
-	box_draw(list, r, theme, focused, scale)
-	if render.push_layer(list, r, 6 * scale) != .None {return .Ok}
-	baseline := r.y + (r.height - input_text.line_height) / 2 + input_text.ascent
-	return field_draw(
-		f,
-		list,
-		&input_text,
-		theme,
-		r.x + 10 * scale,
-		baseline,
-		field_available(r, scale),
-		focused,
-		placeholder,
-		theme.text,
-		scale,
-	)
-}
-
 // Draws a control's resting value, or for the selected row its pending value and focus.
 @(private)
 control_draw :: proc(
@@ -1448,16 +1423,13 @@ control_draw :: proc(
 	if selected {
 		placeholder := row.kind == .Optional_Color ? "Theme default" : "Empty"
 		if row.kind == .Shortcut {placeholder = p.capturing ? "Press keys…" : "None"}
-		if r := field_box_draw(
-			&p.value,
-			list,
-			text,
-			theme,
-			parts.field,
-			focused && !p.capturing && row.kind != .Shortcut,
-			placeholder,
-			scale,
-		); r != .Ok {return r}
+		field_focused := focused && !p.capturing && row.kind != .Shortcut
+		box := value_box(p, parts, text, scale)
+		box_draw(list, parts.field, theme, field_focused, scale)
+		if r := field_box_draw(box, list, theme, field_box_baseline(box), field_focused, placeholder);
+		   r != .Ok {
+			return r
+		}
 		if p.capturing {
 			draw_rect(
 				list,
@@ -1686,26 +1658,14 @@ filter_draw :: proc(
 	focused: bool,
 ) -> glyphs.Result {
 	s := l.scale
+	box := filter_box(p, l, text)
 	box_draw(list, l.filter, theme, focused, s)
-	r := filter_text_rect(p, l)
-	if render.push_layer(list, r, 6 * s) != .None {return .Ok}
-	input_text := text_styled(text, .Input)
-	baseline := r.y + (r.height - input_text.line_height) / 2 + input_text.ascent
 	placeholder :=
 		l.outline.width > 0 ? "Search settings" : "Search settings, groups, and shortcuts"
-	if result := field_draw(
-		&p.filter,
-		list,
-		&input_text,
-		theme,
-		r.x + 10 * s,
-		baseline,
-		field_available(r, s),
-		focused,
-		placeholder,
-		theme.text,
-		s,
-	); result != .Ok {return result}
+	if result := field_box_draw(box, list, theme, field_box_baseline(box), focused, placeholder);
+	   result != .Ok {
+		return result
+	}
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}
 	if render.push_layer(list, l.page) != .None {return .Ok}
