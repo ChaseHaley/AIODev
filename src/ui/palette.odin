@@ -530,7 +530,7 @@ palette_draw :: proc(
 			theme.muted,
 		)
 	}
-	label_buffer: [64]u8
+	label_buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	for index in p.scroll ..< min(len(p.results), p.scroll + l.rows) {
 		item := p.results[index]
 		row := render.Rect {
@@ -554,34 +554,32 @@ palette_draw :: proc(
 		label_width: f32
 		if item.command != nil {
 			if shortcuts := commands.active_shortcuts(item.command); len(shortcuts) > 0 {
-				if label, err := commands.shortcut_label(shortcuts[0], label_buffer[:]);
-				   err == .None {
-					key_text := text_styled(text, .Keycap)
-					label_width = text_width(&key_text, label) + 12 * scale
-					x := row.x + row.width - padding - label_width
-					draw_rect(
-						list,
-						{
-							rect = {
-								x - 4 * scale,
-								row.y + 7 * scale,
-								label_width + 4 * scale,
-								row.height - 14 * scale,
-							},
-							color = theme.border,
-							radius = 4 * scale,
-							stroke = scale,
+				label := commands.shortcut_text(shortcuts[0], label_buffer[:])
+				key_text := text_styled(text, .Keycap)
+				label_width = text_width(&key_text, label) + 12 * scale
+				x := row.x + row.width - padding - label_width
+				draw_rect(
+					list,
+					{
+						rect = {
+							x - 4 * scale,
+							row.y + 7 * scale,
+							label_width + 4 * scale,
+							row.height - 14 * scale,
 						},
-					)
-					if result := draw_text(
-						&key_text,
-						list,
-						label,
-						x + 2 * scale,
-						row_baseline,
-						theme.muted,
-					); result != .Ok {return result}
-				}
+						color = theme.border,
+						radius = 4 * scale,
+						stroke = scale,
+					},
+				)
+				if result := draw_text(
+					&key_text,
+					list,
+					label,
+					x + 2 * scale,
+					row_baseline,
+					theme.muted,
+				); result != .Ok {return result}
 			}
 		}
 		title_width := row.width - 2 * padding - label_width - 16 * scale
