@@ -252,9 +252,7 @@ window_free :: proc(w: ^Window) {
 	ui.find_destroy(&w.find)
 	ui.editor_destroy(&w.editor)
 	delete(w.rename.bytes)
-	delete(w.workspace_picker.query.bytes)
-	delete(w.workspace_picker.saved_query.bytes)
-	delete(w.workspace_picker.rows)
+	workspace_picker_destroy(w)
 	delete(w.close_restore)
 	delete(w.close_confirm_workspace_name)
 	delete(w.close_confirm_destination_name)
@@ -308,6 +306,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
+	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
 		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 	}
@@ -622,7 +621,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if w.tab_menu.open {
 		if result := tab_menu_draw(app, w); result != .Ok {return frame, result}
 	}
-	if w.workspace_picker.open {
+	if workspace_picker_active(&w.workspace_picker) {
 		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
 	}
 	return frame, ui.notices_draw(

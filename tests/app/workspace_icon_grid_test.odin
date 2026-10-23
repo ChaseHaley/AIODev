@@ -15,7 +15,7 @@ workspace_icon_grid_layout_fits_dpi_and_scrolls_only_presets :: proc(t: ^testing
 		for width in ([?]i32{140, 244, 272, 600}) {
 			for height in ([?]i32{240, 300, 800}) {
 				w := app.Window{width = i32(f32(width)*scale), height = i32(f32(height)*scale), scale = scale}
-				w.workspace_picker.icons = true
+				w.workspace_picker.mode = .Icons
 				g := app.workspace_icon_picker_layout(&w)
 				testing.expect(t, g.columns >= 2 && g.columns <= 5)
 				testing.expect(t, g.panel.x+g.panel.width <= f32(w.width))
@@ -24,8 +24,7 @@ workspace_icon_grid_layout_fits_dpi_and_scrolls_only_presets :: proc(t: ^testing
 				testing.expect(t, g.divider.y < g.field.y && g.field.y+g.field.height < g.apply.y)
 				testing.expect(t, g.apply.y+g.apply.height <= g.panel.y+g.panel.height)
 				for i in 0..<len(app.WORKSPACE_ICONS) {
-					w.workspace_picker.selected = i
-					app.workspace_icon_picker_reveal(&w, g)
+					app.workspace_picker_select(&w, i)
 					cell := app.workspace_picker_row_rect(&w, i)
 					testing.expect_value(t, cell.width, 44*scale)
 					testing.expect(t, cell.x >= g.grid.x && cell.x+cell.width <= g.grid.x+g.grid.width)
@@ -54,7 +53,7 @@ workspace_icon_grid_layout_fits_dpi_and_scrolls_only_presets :: proc(t: ^testing
 workspace_icon_grid_keys_keep_grid_and_custom_editing_accessible :: proc(t: ^testing.T) {
 	state: app.App
 	w := app.Window{width = 600, height = 300, scale = 1}
-	w.workspace_picker.icons, w.workspace_picker.open = true, true
+	w.workspace_picker.mode = .Icons
 	defer delete(w.workspace_picker.query.bytes)
 	key :: proc(state: ^app.App, w: ^app.Window, e: platform.Key_Event, selected: int, t: ^testing.T) {
 		app.workspace_picker_key(state, w, e)
@@ -117,7 +116,7 @@ workspace_icon_grid_pointer_apply_cancel_and_invalid_custom_preserve_identity ::
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(cell.x+22), y = i32(cell.y+22)})
 	testing.expect_value(t, workspace.icon.preset, 7)
-	testing.expect(t, w.workspace_picker.open && !w.workspace_picker.icons)
+	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && !app.workspace_picker_icons(&w.workspace_picker))
 	app.workspace_icon_open(&state, &w)
 	app.workspace_picker_click(&state, &w, g.field.x+5, g.field.y+5, false)
 	testing.expect_value(t, w.workspace_picker.selected, len(app.WORKSPACE_ICONS))
@@ -129,7 +128,7 @@ workspace_icon_grid_pointer_apply_cancel_and_invalid_custom_preserve_identity ::
 	for invalid in ([?]string{"", "two words", "123456789012345678901234567890123"}) {
 		ui.field_set(&w.workspace_picker.query, invalid)
 		app.workspace_picker_click(&state, &w, g.apply.x+8, g.apply.y+8, false)
-		testing.expect(t, w.workspace_picker.icons)
+		testing.expect(t, app.workspace_picker_icons(&w.workspace_picker))
 		testing.expect(t, len(state.notices.items) > 0)
 		if len(state.notices.items) > 0 { testing.expect_value(t, state.notices.items[0].kind, ui.Notice_Kind.Error) }
 		testing.expect_value(t, workspace.icon.preset, 7)
@@ -150,15 +149,14 @@ workspace_icon_grid_pointer_apply_cancel_and_invalid_custom_preserve_identity ::
 	for i in 1..<5 {
 		app.handle_event(&state, platform.Mouse_Wheel_Event{window = w.id, x = 30, y = 100, delta_y = -1})
 		testing.expect_value(t, w.workspace_picker.selected, i)
-		app.workspace_icon_picker_reveal(&w, app.workspace_icon_picker_layout(&w))
 	}
 	testing.expect(t, w.workspace_picker.scroll > 0)
 	g = app.workspace_icon_picker_layout(&w)
 	app.workspace_picker_click(&state, &w, g.divider.x+1, g.divider.y, false)
-	testing.expect(t, w.workspace_picker.icons)
+	testing.expect(t, app.workspace_picker_icons(&w.workspace_picker))
 	testing.expect_value(t, workspace.icon.emoji, "1️⃣")
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = 1, y = 41})
-	testing.expect(t, !w.workspace_picker.open)
+	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, workspace.icon.emoji, "1️⃣")
 	testing.expect(t, w.workspace == &workspace && owner.workspace == &other)
 	testing.expect(t, app.window_for_workspace(&state, &workspace) == &w)
@@ -182,9 +180,10 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 	cache: glyphs.Cache
 	glyphs.init(&cache, fonts, device)
 	defer glyphs.destroy(&cache)
-	workspace := app.Workspace{icon = {preset = 2}}
+	workspace := app.Workspace{id = 1, icon = {preset = 2}}
 	w := app.Window{workspace = &workspace}
-	w.workspace_picker.icons, w.workspace_picker.selected = true, 7
+	w.workspace_picker.mode, w.workspace_picker.selected = .Icons, 7
+	w.workspace_picker.target_id = workspace.id
 	w.list = render.draw_list_init()
 	defer render.draw_list_destroy(&w.list)
 	defer delete(w.workspace_picker.query.bytes)
@@ -194,6 +193,8 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 		ui.text_set_size(&w.ui_text, 14*scale)
 		for mode in settings.Theme_Mode {
 			state := app.App{theme = ui.theme_from(settings.theme_resolve({.Studio, mode}))}
+			append(&state.workspaces, &workspace)
+			defer delete(state.workspaces)
 			render.draw_list_reset(&w.list)
 			testing.expect_value(t, app.workspace_picker_draw(&state, &w), glyphs.Result.Ok)
 			g := app.workspace_icon_picker_layout(&w)

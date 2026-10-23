@@ -26,7 +26,7 @@ workspace_dropdown_geometry_keeps_anchor_divider_and_rows_at_dpi :: proc(t: ^tes
 			last := app.workspace_picker_row_rect(&w, 1)
 			testing.expect_value(t, app.workspace_picker_hit(&w, last.x+1, last.y+last.height+3*scale), -1)
 			testing.expect_value(t, app.workspace_picker_hit(&w, r.x-1, r.y+100*scale), -1)
-			w.workspace_picker.icons = true
+			w.workspace_picker.mode = .Icons
 			r, _ = app.workspace_picker_rect(&w)
 			testing.expect(t, r.x+r.width <= f32(w.width) && r.y+r.height <= f32(w.height))
 			w.height = i32(300*scale)
@@ -48,7 +48,7 @@ workspace_icons_preserve_whole_unicode_sequences_transactionally :: proc(t: ^tes
 		testing.expect(t, app.workspace_icon_set(&state, workspace, 0, emoji))
 		testing.expect_value(t, workspace.icon.emoji, emoji)
 		w := app.Window{workspace = workspace}
-		w.workspace_picker.icons = true
+		w.workspace_picker.mode = .Icons
 		defer delete(w.workspace_picker.query.bytes)
 		for r in emoji {
 			// Windows delivers WM_CHAR-derived text one Unicode scalar at a time.
@@ -82,7 +82,7 @@ workspace_navigation_wraps_actions_and_consumes_closing_key_release :: proc(t: ^
 	defer delete(state.windows)
 	defer delete(w.workspace_picker.rows)
 	defer delete(w.workspace_picker.query.bytes)
-	w.workspace_picker.open = true
+	w.workspace_picker.mode = .List
 	append(&w.workspace_picker.rows, app.Workspace_Row{1, ""})
 	count := app.workspace_picker_count(&w)
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .P, modifiers = {.Control}, pressed = true})
@@ -94,7 +94,7 @@ workspace_navigation_wraps_actions_and_consumes_closing_key_release :: proc(t: ^
 	testing.expect_value(t, w.workspace_picker.selected, count-1)
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "")
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-	testing.expect(t, !w.workspace_picker.open)
+	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = false})
 	testing.expect(t, w.suppressed_key == nil)
 	w.tab_menu.open, w.tab_menu.count = true, 3

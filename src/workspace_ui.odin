@@ -15,20 +15,6 @@ Workspace_Row :: struct {
 	status: string,
 }
 
-Workspace_Picker :: struct {
-	open: bool,
-	icons: bool,
-	icon_colors: bool,
-	query: ui.Text_Field,
-	rows: [dynamic]Workspace_Row,
-	selected, scroll: int,
-	menu_id, rename_id, icon_id: u32,
-	menu_selected: int,
-	rename_motion: ui.Motion,
-	rename_error: bool,
-	saved_query: ui.Text_Field,
-}
-
 WORKSPACE_ACTIONS :: [?]Action{.New_Workspace, .New_Window}
 
 @(private)
@@ -131,7 +117,8 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	arrange_cancel(app, w)
 	focus_leave(app, w)
 	tab_close_restore(w)
-	w.tab_menu.open, w.rename_open, w.workspace_picker.open = false, false, false
+	w.tab_menu.open, w.rename_open = false, false
+	workspace_picker_cancel(w)
 	w.close_confirm = {}
 	clear(&w.close_restore)
 	ui.editor_destroy(&w.editor)
@@ -184,7 +171,7 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if width <= 12 * w.scale {return .Ok}
 	r := render.Rect{5 * w.scale, 6 * w.scale, max(0, width - 10 * w.scale), 28 * w.scale}
 	if render.push_layer(&w.list, {0, 0, width, ui.TAB_HEIGHT * w.scale}) != .None {return .Ok}
-	fill := w.workspace_picker.open ? app.theme.selection : app.theme.pane
+	fill := workspace_picker_active(&w.workspace_picker) ? app.theme.selection : app.theme.pane
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = 6*w.scale}) != .None { return .Ok }
 	if width >= 72*w.scale {
 		if result := workspace_icon_draw(w, w.workspace.icon, {10*w.scale, 8*w.scale, 24*w.scale, 24*w.scale},
@@ -224,6 +211,7 @@ workspace_status :: proc(app: ^App, workspace: ^Workspace) -> string {
 }
 
 workspace_picker_filter :: proc(app: ^App, w: ^Window) {
+	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	clear(&p.rows)
 	query := strings.to_lower(
@@ -251,27 +239,32 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 workspace_pickers_refresh :: proc(app: ^App) {
 	for w in app.windows {
 		p := &w.workspace_picker
-		if !p.open { continue }
-		if p.icons {
-			if workspace_row_target(app, p.icon_id) == nil { workspace_picker_return(app, w) }
+		if p.mode == .Closed { continue }
+		if workspace_picker_icons(p) {
+			if workspace_row_target(app, p.target_id) == nil { workspace_picker_return(app, w) }
 			continue
 		}
-		if workspace_row_target(app, p.menu_id) == nil { p.menu_id = 0 }
-		if workspace_row_target(app, p.rename_id) == nil { workspace_row_rename_finish(app, w, false) }
+		if p.mode == .Menu && workspace_row_target(app, p.target_id) == nil { workspace_picker_transition(w, .List) }
+		if p.mode == .Rename && workspace_row_target(app, p.target_id) == nil {
+			workspace_row_rename_finish(app, w, false)
+		}
 		id := p.selected >= 0 && p.selected < len(p.rows) ? p.rows[p.selected].id : 0
 		action := p.selected - len(p.rows)
 		workspace_picker_filter(app, w)
-		if workspace_row_index(w, p.menu_id) < 0 { p.menu_id = 0 }
-		if workspace_row_index(w, p.rename_id) < 0 { workspace_row_rename_finish(app, w, false) }
+		if p.mode == .Menu && workspace_row_index(w, p.target_id) < 0 { workspace_picker_transition(w, .List) }
+		if p.mode == .Rename && workspace_row_index(w, p.target_id) < 0 {
+			workspace_row_rename_finish(app, w, false)
+		}
 		if id != 0 {
 			for row, i in p.rows {if row.id == id {p.selected = i; break}}
 		} else {p.selected = len(p.rows) + clamp(action, 0, len(WORKSPACE_ACTIONS) - 1)}
+		workspace_picker_layout_changed(w)
 	}
 }
 
 workspace_picker_status_changed :: proc(app: ^App) {
 	for w in app.windows {
-		if !w.workspace_picker.open {continue}
+		if !workspace_picker_active(&w.workspace_picker) {continue}
 		for &row in w.workspace_picker.rows {
 			if workspace := workspace_find(app, row.id); workspace != nil {
 				row.status = workspace_status(app, workspace)
@@ -282,6 +275,7 @@ workspace_picker_status_changed :: proc(app: ^App) {
 }
 
 workspace_picker_open :: proc(app: ^App, w: ^Window) {
+	defer workspace_picker_layout_changed(w)
 	arrange_cancel(app, w)
 	leader_cancel(w)
 	pane_header_cancel(w)
@@ -291,10 +285,7 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	tab_close_restore(w)
 	w.selecting, w.autoscrolling = false, false
 	ui.field_set(&w.workspace_picker.query, "")
-	w.workspace_picker.open, w.workspace_picker.icons, w.workspace_picker.icon_colors = true, false, false
-	w.workspace_picker.menu_id, w.workspace_picker.rename_id, w.workspace_picker.icon_id = 0, 0, 0
-	w.workspace_picker.rename_motion = {}
-	w.rename.dragging = false
+	workspace_picker_transition(w, .List)
 	workspace_picker_filter(app, w)
 	for row, i in w.workspace_picker.rows {if row.id == w.workspace.id {w.workspace_picker.selected = i}}
 }
@@ -305,24 +296,25 @@ workspace_icon_open :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_picker_count :: proc(w: ^Window) -> int {
-	if w.workspace_picker.icons {
-		return w.workspace_picker.icon_colors ? len(WORKSPACE_ICON_COLORS)+1 : len(WORKSPACE_ICONS)+3
+	if workspace_picker_icons(&w.workspace_picker) {
+		return (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS)+1 : len(WORKSPACE_ICONS)+3
 	}
 	return len(w.workspace_picker.rows)+len(WORKSPACE_ACTIONS)
 }
 
 workspace_picker_choose :: proc(app: ^App, w: ^Window) {
+	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	index, count := p.selected, len(p.rows)
-	if p.icons {
-		if p.icon_colors { workspace_icon_color_choose(app, w); return }
+	if workspace_picker_icons(p) {
+		if p.mode == .Tint { workspace_icon_color_choose(app, w); return }
 		if index == len(WORKSPACE_ICONS)+2 { workspace_icon_color_open(app, w); return }
 		emoji := index >= len(WORKSPACE_ICONS) ? ui.field_string(&p.query) : ""
 		if index >= len(WORKSPACE_ICONS) && !workspace_icon_valid(emoji) {
 			notify(app, .Error, "Enter an emoji (up to 32 Unicode characters), then apply it.")
 			return
 		}
-		target := workspace_row_target(app, p.icon_id)
+		target := workspace_row_target(app, p.target_id)
 		if target == nil { workspace_picker_return(app, w); return }
 		if !workspace_icon_set(app, target, index < len(WORKSPACE_ICONS) ? index : 0, emoji) {
 			notify(app, .Error, "Could not change the workspace icon.")
@@ -331,7 +323,7 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 		workspace_picker_return(app, w)
 		return
 	}
-	p.open, w.dirty = false, true
+	workspace_picker_cancel(w)
 	if index < count {
 		if index >= 0 && !workspace_select(app, w, workspace_find(app, p.rows[index].id)) {
 			notify(app, .Error, "Could not select the workspace.")
@@ -346,15 +338,16 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
-	if w.workspace_picker.icon_colors { return }
-	if w.workspace_picker.menu_id != 0 { return }
-	if w.workspace_picker.rename_id != 0 {
+	defer workspace_picker_layout_changed(w)
+	if w.workspace_picker.mode == .Tint { return }
+	if w.workspace_picker.mode == .Menu { return }
+	if w.workspace_picker.mode == .Rename {
 		ui.field_text(&w.rename, value)
 		w.workspace_picker.rename_error, w.dirty = false, true
 		return
 	}
 	ui.field_text(&w.workspace_picker.query, value)
-	if w.workspace_picker.icons {
+	if workspace_picker_icons(&w.workspace_picker) {
 		w.workspace_picker.selected, w.dirty = len(WORKSPACE_ICONS), true
 		return
 	}
@@ -362,28 +355,29 @@ workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 }
 
 workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+	defer workspace_picker_layout_changed(w)
 	if !e.pressed {return}
 	p := &w.workspace_picker
 	if workspace_row_key(app, w, e) { return }
 	count := workspace_picker_count(w)
 	w.dirty = true
-	if p.icon_colors { workspace_icon_color_key(app, w, e); return }
-	if p.icons && workspace_icon_picker_key(w, e) { return }
+	if p.mode == .Tint { workspace_icon_color_key(app, w, e); return }
+	if workspace_picker_icons(p) && workspace_icon_picker_key(w, e) { return }
 	if step := ui.list_step(e); step != 0 {
 		p.selected = (p.selected + count + step) % count
 		return
 	}
 	#partial switch e.key {
 	case .Escape:
-		if p.icons { workspace_picker_return(app, w) } else { p.open = false }
+		if workspace_picker_icons(p) { workspace_picker_return(app, w) } else { workspace_picker_cancel(w) }
 	case .Tab: p.selected = (p.selected+count+(.Shift in e.modifiers ? -1 : 1))%count
 	case .Enter, .Numpad_Enter: workspace_picker_choose(app, w)
 	case .Delete:
-		if !p.icons && e.modifiers == {.Shift} && p.selected < len(p.rows) {
+		if !workspace_picker_icons(p) && e.modifiers == {.Shift} && p.selected < len(p.rows) {
 			workspace_delete_request(app, w, workspace_find(app, p.rows[p.selected].id))
 		} else {
 			change := ui.field_key(&p.query, e)
-			if p.icons && change != .None { p.selected = len(WORKSPACE_ICONS) }
+			if workspace_picker_icons(p) && change != .None { p.selected = len(WORKSPACE_ICONS) }
 			else if change == .Edited { workspace_picker_filter(app, w) }
 		}
 	case:
@@ -401,7 +395,7 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			}
 		case .None:
 			change := ui.field_key(&p.query, e)
-			if p.icons && change != .None { p.selected = len(WORKSPACE_ICONS) }
+			if workspace_picker_icons(p) && change != .None { p.selected = len(WORKSPACE_ICONS) }
 			else if change == .Edited { workspace_picker_filter(app, w) }
 		}
 	}
@@ -413,7 +407,7 @@ workspace_picker_header :: proc(w: ^Window) -> f32 {
 }
 
 workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
-	if w.workspace_picker.icons {
+	if workspace_picker_icons(&w.workspace_picker) {
 		g := workspace_icon_picker_layout(w)
 		return g.panel, g.visible_rows
 	}
@@ -422,33 +416,33 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 	width := min(380 * s, max(0, f32(w.width) - 10 * s))
 	header := workspace_picker_header(w)
 	extra := workspace_row_rename_height(w)
-	reserve := w.workspace_picker.rename_id != 0 ? 68*s : 0
+	reserve := w.workspace_picker.mode == .Rename ? 68*s : 0
 	rows := min(workspace_picker_count(w), max(1, int((f32(w.height)-y-header-24*s-reserve)/(34*s))))
 	height := min(max(0, f32(w.height)-y-5*s), header+f32(rows)*34*s+16*s+extra)
 	return {x, y, width, height}, rows
 }
 
 workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
-	if w.workspace_picker.icon_colors { return {} }
-	if w.workspace_picker.icons { return workspace_icon_picker_layout(w).field }
+	if w.workspace_picker.mode == .Tint { return {} }
+	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_layout(w).field }
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
 	return {r.x+12*s, r.y+12*s, max(0, r.width-24*s), 32*s}
 }
 
 workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
-	if w.workspace_picker.icons { return workspace_icon_picker_cell(w, workspace_icon_picker_layout(w), index) }
+	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_cell(w, workspace_icon_picker_layout(w), index) }
 	r, _ := workspace_picker_rect(w)
 	p, s := &w.workspace_picker, w.scale
-	gap := !p.icons && index >= len(p.rows) && p.scroll <= len(p.rows) ? 8*s : 0
-	rename_index := workspace_row_index(w, p.rename_id)
+	gap := !workspace_picker_icons(p) && index >= len(p.rows) && p.scroll <= len(p.rows) ? 8*s : 0
+	rename_index := workspace_row_index(w, workspace_picker_target(p, .Rename))
 	if rename_index >= p.scroll && index > rename_index { gap += workspace_row_rename_height(w) }
 	return {r.x+6*s, r.y+workspace_picker_header(w)+f32(index-p.scroll)*34*s+gap,
 		max(0, r.width-12*s), 34*s}
 }
 
 workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
-	if w.workspace_picker.icons { return workspace_icon_picker_hit(w, x, y) }
+	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_hit(w, x, y) }
 	r, rows := workspace_picker_rect(w)
 	if !workspace_rect_contains(r, x, y) {return -1}
 	for visible in 0 ..< rows {
@@ -465,10 +459,11 @@ workspace_picker_menu_button_rect :: proc(w: ^Window, index: int) -> render.Rect
 }
 
 workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
+	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	if workspace_row_click(app, w, x, y, extend) { return }
 	if hit := workspace_picker_hit(w, x, y); hit >= 0 {
-		if !p.icons && hit < len(p.rows) &&
+		if !workspace_picker_icons(p) && hit < len(p.rows) &&
 		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 			workspace_row_menu_open(app, w, p.rows[hit].id)
 			return
@@ -481,10 +476,11 @@ workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 }
 
 workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
-	if w.workspace_picker.icons { w.workspace_picker.selected = len(WORKSPACE_ICONS) }
+	defer workspace_picker_layout_changed(w)
+	if workspace_picker_icons(&w.workspace_picker) { w.workspace_picker.selected = len(WORKSPACE_ICONS) }
 	r := workspace_picker_field_rect(w)
 	f := &w.workspace_picker.query
-	if w.workspace_picker.rename_id != 0 { r, f = workspace_row_rename_field_rect(w), &w.rename }
+	if w.workspace_picker.mode == .Rename { r, f = workspace_row_rename_field_rect(w), &w.rename }
 	width := max(1, r.width-16*w.scale)
 	start := ui.field_view_start(f, &w.ui_text, width)
 	at := ui.field_offset_at(f, &w.ui_text, start, r.x + 8 * w.scale, x)
@@ -498,27 +494,22 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	s := w.scale
 	@(static, rodata) actions := WORKSPACE_ACTIONS
 	@(static, rodata) action_info := ACTIONS
-	if !p.icons {
-		if index := workspace_row_index(w, p.rename_id); index >= 0 { p.selected = index }
-		p.scroll = clamp(p.scroll, max(0, p.selected-rows+1), p.selected)
-		p.scroll = clamp(p.scroll, 0, max(0, workspace_picker_count(w)-rows))
-	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	shadow := render.Rect{r.x+2*s, r.y+3*s, r.width, r.height}
 	if render.push_rect(&w.list, {rect = shadow, color = app.theme.shadow, radius = 7*s}) != .None { return .Ok }
 	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 7*s}) != .None { return .Ok }
 	if render.push_layer(&w.list, r, 7*s) != .None { return .Ok }
-	if p.icons { return workspace_icon_picker_draw(app, w) }
+	if workspace_picker_icons(p) { return workspace_icon_picker_draw(app, w) }
 	field := workspace_picker_field_rect(w)
 	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5*s}) != .None { return .Ok }
 	if result := ui.field_draw(&p.query, &w.list, &w.ui_text, app.theme, field.x+8*s,
 		field.y+(field.height-w.ui_text.line_height)/2+w.ui_text.ascent, max(1, field.width-16*s),
-		p.rename_id == 0 && p.menu_id == 0, "Search workspaces", app.theme.text, s); result != .Ok { return result }
+		p.mode == .List, "Search workspaces", app.theme.text, s); result != .Ok { return result }
 	for visible in 0..<rows {
 		i := p.scroll+visible
 		if i >= workspace_picker_count(w) { break }
 		row := workspace_picker_row_rect(w, i)
-		if !p.icons && i == len(p.rows) {
+		if !workspace_picker_icons(p) && i == len(p.rows) {
 			divider := render.Rect{row.x + 6 * s, row.y - 5 * s, max(0, row.width - 12 * s), s}
 			if render.push_rect(&w.list, {rect = divider, color = app.theme.border}) !=
 			   .None {return .Ok}

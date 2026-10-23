@@ -41,29 +41,34 @@ workspace_icon_color_set :: proc(app: ^App, workspace: ^Workspace, tint: int) ->
 }
 
 workspace_icon_color_open :: proc(app: ^App, w: ^Window) {
-	target := workspace_row_target(app, w.workspace_picker.icon_id)
+	defer workspace_picker_layout_changed(w)
+	target := workspace_row_target(app, workspace_picker_target(&w.workspace_picker, .Icons))
 	if target == nil { workspace_picker_return(app, w); return }
 	p := &w.workspace_picker
-	p.icon_colors, p.selected, p.scroll = true, target.icon.tint, 0
+	workspace_picker_transition(w, .Tint, p.target_id)
+	p.selected, p.scroll = target.icon.tint, 0
 	p.query.dragging, w.dirty = false, true
 }
 
 workspace_icon_color_back :: proc(w: ^Window) {
+	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
-	p.icon_colors, p.selected, p.scroll = false, len(WORKSPACE_ICONS)+2, 0
+	workspace_picker_transition(w, .Icons, p.target_id)
+	p.selected, p.scroll = len(WORKSPACE_ICONS)+2, 0
 	w.dirty = true
 }
 
 workspace_icon_color_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	if p.selected == len(WORKSPACE_ICON_COLORS) { workspace_icon_color_back(w); return }
-	target := workspace_row_target(app, p.icon_id)
+	target := workspace_row_target(app, p.target_id)
 	if target == nil { workspace_picker_return(app, w); return }
 	if !workspace_icon_color_set(app, target, p.selected) { return }
 	workspace_picker_return(app, w)
 }
 
 workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	n := len(WORKSPACE_ICON_COLORS)
 	columns := workspace_icon_picker_layout(w).columns
@@ -82,15 +87,13 @@ workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		case .End: p.selected = n-1
 		}
 	}
-	workspace_icon_picker_reveal(w, workspace_icon_picker_layout(w))
 	w.dirty = true
 }
 
 workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	p, s := &w.workspace_picker, w.scale
 	g := workspace_icon_picker_layout(w)
-	workspace_icon_picker_reveal(w, g)
-	target := workspace_row_target(app, p.icon_id)
+	target := workspace_row_target(app, p.target_id)
 	if target == nil { return .Ok }
 	if result := ui.draw_text(&w.ui_text, &w.list, "Preset icon color", g.panel.x+12*s, g.panel.y+26*s,
 		app.theme.text, max(0, g.panel.width-24*s)); result != .Ok { return result }

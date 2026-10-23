@@ -75,7 +75,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	defer for handle in processes { if handle != nil { testing.expect(t, bool(win32.CloseHandle(handle))) } }
 	for cancel in ([?]int{0, 1, 2, 3}) {
 		app.workspace_delete_request(state, w, workspace)
-		testing.expect(t, w.close_confirm.open && !w.workspace_picker.open)
+		testing.expect(t, w.close_confirm.open && !app.workspace_picker_active(&w.workspace_picker))
 		title, body := app.close_confirm_text(state, w)
 		testing.expect(t, strings.contains(title, workspace.name))
 		testing.expect_value(t, body, "Close 3 tabs (4 panes); stop 3 sessions.")
@@ -146,7 +146,7 @@ workspace_delete_hidden_and_foreign_owner_leave_unrelated_runtimes :: proc(t: ^t
 	delete_key(state, one, .Enter)
 	testing.expect(t, app.workspace_find(state, foreign_id) == nil)
 	testing.expect(t, one.workspace == current && two.workspace != current)
-	testing.expect(t, !two.workspace_picker.open)
+	testing.expect(t, !app.workspace_picker_active(&two.workspace_picker))
 	testing.expect_value(t, len(state.windows), 2)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, term.process_id(current_session), current_pid)

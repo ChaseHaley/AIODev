@@ -141,7 +141,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
-	if w.workspace_picker.open {
+	if workspace_picker_active(&w.workspace_picker) {
 		if e.pressed {w.suppressed_key = e}
 		workspace_picker_key(app, w, logical)
 		return
@@ -285,7 +285,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if w.preparing {return}
-	if w.workspace_picker.open {workspace_picker_text(app, w, text); return}
+	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
 	if w.tab_menu.open {return}
 	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
 	if w.close_confirm.open {return}
@@ -361,20 +361,8 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 @(private)
 on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if w.preparing {return}
-	if w.workspace_picker.open {
-		p := &w.workspace_picker
-		x, y := f32(e.x), f32(e.y)
-		if !e.pressed { p.query.dragging, w.rename.dragging = false, false; w.header_buttons -= {e.button}; return }
-		w.header_buttons += {e.button}
-		r, _ := workspace_picker_rect(w)
-		if p.menu_id != 0 && e.button == .Left {
-			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
-		} else if x < r.x || x >= r.x+r.width || y < r.y || y >= r.y+r.height {
-			workspace_row_rename_finish(app, w, false)
-			p.open, p.menu_id, w.dirty = false, 0, true
-		} else if e.button == .Left {
-			workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
-		}
+	if workspace_picker_active(&w.workspace_picker) {
+		workspace_picker_button(app, w, e)
 		return
 	}
 	if w.tab_menu.open {
@@ -552,14 +540,8 @@ on_mouse_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private)
 on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	if w.preparing {return}
-	if w.workspace_picker.open {
-		if workspace_row_hover(app, w, e) { return }
-		if w.workspace_picker.query.dragging && .Left in e.buttons {
-			workspace_picker_pointer(app, w, f32(e.x), false, true)
-		} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
-			w.workspace_picker.selected, w.dirty = hit, true
-		}
-		pointer_set(app, w, .Arrow)
+	if workspace_picker_active(&w.workspace_picker) {
+		workspace_picker_hover(app, w, e)
 		return
 	}
 	if w.tab_menu.open {
@@ -677,11 +659,8 @@ on_mouse_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.preparing {return}
-	if w.workspace_picker.open {
-		p := &w.workspace_picker
-		if p.menu_id != 0 || p.rename_id != 0 { return }
-		p.selected = clamp(p.selected-int(math.sign(e.delta_y)), 0, workspace_picker_count(w)-1)
-		w.dirty = true
+	if workspace_picker_active(&w.workspace_picker) {
+		workspace_picker_wheel(w, e.delta_y)
 		return
 	}
 	if w.rename_open {return}
@@ -720,10 +699,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	if !focused {
 		w.find.pointer_down = false
 		w.find.pressed, w.find.hover = .None, .None
-		icon_input := w.workspace_picker.open && w.workspace_picker.icons
-		window_overlays_cancel(app, w)
-		// The OS emoji picker may take focus before delivering its text to the icon field.
-		w.workspace_picker.open = icon_input
+		window_overlays_cancel(app, w, true)
 		pane_header_clear(w)
 		w.tab_pressed = false
 		w.tab_hover = -1
