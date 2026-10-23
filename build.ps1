@@ -133,6 +133,19 @@ function Get-BuildId {
 $appFlags = @($flags | Where-Object { $_ -notlike '-vet-packages:*' }) +
     @('-vet-packages:main', '-vet-unused-procedures')
 
+# Generated bindings mirror their foreign sources; the style rules apply to hand-written application
+# code. Tests and tools are not gated yet; they carry the same drift and a separate pass owns it.
+function Invoke-StyleCheck {
+    Invoke-Odin build tools/stylecheck '-out:build/stylecheck.exe' -debug '-subsystem:console' @flags
+    $files = Get-ChildItem src -Recurse -Filter *.odin -File |
+        Where-Object {
+            $_.Name -ne 'win32_windows.odin' -and $_.FullName -notmatch '\\(ghostty|dwrite|shaders)\\'
+        } |
+        ForEach-Object FullName
+    & build/stylecheck.exe @files
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 switch ($Task) {
     'verify' {
         Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true') 'build/aiodev-verify.exe'
@@ -167,6 +180,7 @@ switch ($Task) {
         & build/aiodev.exe
     }
     'check' {
+        Invoke-StyleCheck
         foreach ($name in $sourcePackages) {
             Invoke-Odin check "src/$name" -no-entry-point @flags
         }
