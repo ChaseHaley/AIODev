@@ -8,9 +8,11 @@ motion_active :: proc(app: ^App) -> bool {
 	if app.palette_window != 0 && ui.presence_active(app.palette.presence) {return true}
 	if ui.notices_animating(&app.notices) {return true}
 	for w in app.windows {
-		if workspace_picker_active(&w.workspace_picker) &&
-		   ui.motion_active(w.workspace_picker.rename_motion) {
-			return true
+		if workspace_picker_active(&w.workspace_picker) {
+			if ui.motion_active(w.workspace_picker.rename_motion) ||
+			   ui.control_active(w.workspace_picker.menu_motion) {
+				return true
+			}
 		}
 		if ui.motion_active(w.tab_underline) || ui.presence_active(w.pending_close.confirm.presence) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
@@ -39,6 +41,8 @@ update_motion :: proc(app: ^App) {
 			ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, app.animations, now)
 			if ui.motion_update(&p.rename_motion, now) { w.dirty = true }
 		}
+		hovered := p.menu_hover != 0 && workspace_row_index(w, p.menu_hover) >= 0
+		if ui.control_update(&p.menu_motion, hovered, false, app.animations, now) { w.dirty = true }
 		positions_changed := false
 		for &position, i in w.tab_positions {
 			if !w.tab_drag.active || !w.workspace.tabs[i].marked {

@@ -296,14 +296,17 @@ workspace_chevron_draw :: proc(list: ^render.Draw_List, area: render.Rect, color
 
 workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 	r, s := workspace_picker_menu_button_rect(w, index), w.scale
-	menu := workspace_picker_target(&w.workspace_picker, .Menu)
-	if index == w.workspace_picker.selected ||
-	   menu == w.workspace_picker.rows[index].id {
-		if render.push_rect(&w.list, {rect = r, color = app.theme.pane, radius = 5 * s}) != .None { return }
+	p := &w.workspace_picker
+	hover := p.rows[index].id == p.menu_hover ? p.menu_motion.hover.value : 0
+	if hover > 0 {
+		fill := app.theme.hover
+		fill.a *= hover
+		if render.push_rect(&w.list, {rect = r, color = fill, radius = 5 * s}) != .None { return }
 	}
+	ink := hover > 0 ? app.theme.text : app.theme.muted
 	for i in 0..<3 {
 		dot := render.Rect{r.x + r.width / 2 - 1.5 * s, r.y + 8.5 * s + f32(i) * 6 * s, 3 * s, 3 * s}
-		if render.push_rect(&w.list, {rect = dot, color = app.theme.text, radius = 1.5 * s}) != .None { return }
+		if render.push_rect(&w.list, {rect = dot, color = ink, radius = 1.5 * s}) != .None { return }
 	}
 }
 

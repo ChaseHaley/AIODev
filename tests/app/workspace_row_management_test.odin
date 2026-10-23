@@ -345,6 +345,24 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 }
 
 @(test)
+workspace_ellipsis_hover_tracks_only_its_button :: proc(t: ^testing.T) {
+	f: Workspace134_Fixture
+	defer workspace134_destroy(&f)
+	if !workspace134_init(t, &f) { return }
+	s, w := &f.state, &f.w
+	row := app.workspace_picker_row_rect(w, 1)
+	button := app.workspace_picker_menu_button_rect(w, 1)
+	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
+	testing.expect_value(t, w.workspace_picker.menu_hover, w.workspace_picker.rows[1].id)
+	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(row.x+8), y = i32(row.y+row.height/2)})
+	testing.expect_value(t, w.workspace_picker.menu_hover, u32(0))
+	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
+	testing.expect_value(t, w.workspace_picker.menu_hover, w.workspace_picker.rows[1].id)
+	app.handle_event(s, platform.Mouse_Leave_Event{window = w.id})
+	testing.expect_value(t, w.workspace_picker.menu_hover, u32(0))
+}
+
+@(test)
 workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 	f: Workspace134_Fixture
 	defer workspace134_destroy(&f)

@@ -439,6 +439,7 @@ when AIO_CONTROL {
 				{"workspace.picker.row", verify_workspace_rect(
 					workspace_picker_row_rect(w, w.workspace_picker.selected))},
 				{"workspace.picker.menu_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Menu))},
+				{"workspace.picker.menu_hover", fmt.tprintf("%d", w.workspace_picker.menu_hover)},
 				{"workspace.picker.menu_selected", fmt.tprintf("%d", w.workspace_picker.menu_selected)},
 				{"workspace.picker.window_enabled", fmt.tprintf("%t", workspace_row_window_enabled(app, w,
 					workspace_picker_target(&w.workspace_picker, .Menu)))},

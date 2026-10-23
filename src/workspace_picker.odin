@@ -13,6 +13,8 @@ Workspace_Picker :: struct {
 	selected, scroll: int,
 	target_id: u32,
 	menu_selected: int,
+	menu_hover: u32,
+	menu_motion: ui.Control_Motion,
 	rename_motion: ui.Motion,
 	rename_error: bool,
 	saved_query: ui.Text_Field,
@@ -34,7 +36,7 @@ workspace_picker_target :: proc(p: ^Workspace_Picker, mode: Workspace_Picker_Mod
 workspace_picker_transition :: proc(w: ^Window, mode: Workspace_Picker_Mode, target_id: u32 = 0) {
 	p := &w.workspace_picker
 	p.mode, p.target_id = mode, target_id
-	p.menu_selected, p.rename_error, p.rename_motion = 0, false, {}
+	p.menu_hover, p.menu_selected, p.rename_error, p.rename_motion = 0, 0, false, {}
 	p.query.dragging, w.rename.dragging, w.dirty = false, false, true
 }
 
@@ -95,10 +97,20 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 
 workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	if workspace_row_hover(app, w, e) {return}
-	if w.workspace_picker.query.dragging && .Left in e.buttons {
-		workspace_picker_pointer(app, w, f32(e.x), false, true)
-	} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
+	p := &w.workspace_picker
+	x, y := f32(e.x), f32(e.y)
+	hover := u32(0)
+	if p.query.dragging && .Left in e.buttons {
+		workspace_picker_pointer(app, w, x, false, true)
+	} else if hit := workspace_picker_hit(w, x, y); hit >= 0 {
 		workspace_picker_select(w, hit)
+		if hit < len(p.rows) &&
+		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+			hover = p.rows[hit].id
+		}
+	}
+	if hover != p.menu_hover {
+		p.menu_hover, w.dirty = hover, true
 	}
 	pointer_set(app, w, .Arrow)
 }
