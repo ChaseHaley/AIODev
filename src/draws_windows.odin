@@ -26,8 +26,18 @@ when AIO_CONTROL {
 			fmt.sbprintf(out, "error: window hidden; run tray open")
 			return .Invalid_Argument
 		}
-		// draws.Kind mirrors control.Draw_Kind so the adapter only has to relabel the value.
-		filter := draws.Filter{kind = draws.Kind(request.kind)}
+		// draws.Kind mirrors control.Draw_Kind, but map explicitly so a protocol reorder fails here
+		// rather than silently relabelling the filter.
+		kind: draws.Kind
+		switch request.kind {
+		case .All:
+			kind = .All
+		case .Rect:
+			kind = .Rect
+		case .Glyph:
+			kind = .Glyph
+		}
+		filter := draws.Filter{kind = kind}
 		if request.region.kind == .Pixels {
 			region := render.Rect {
 				x      = f32(request.region.x),
