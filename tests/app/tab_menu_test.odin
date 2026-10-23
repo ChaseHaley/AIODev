@@ -94,6 +94,31 @@ tab_menu_exact_single_rows :: proc(t: ^testing.T) {
 	}
 }
 
+// The menu keeps the pointer as its anchor, clamped into the client, so it may sit
+// inside the caption band; its press handling runs before the caption's.
+@(test)
+tab_menu_anchors_at_the_pointer_inside_the_client :: proc(t: ^testing.T) {
+	f: Menu_Fixture
+	defer menu_fixture_destroy(&f)
+	if !menu_fixture_init(t, &f, 1) { return }
+	w := &f.w
+	w.width, w.height = 800, 600
+	app.tab_menu_open(&f.state, w, 0, 40, 20)
+	r, _ := app.tab_menu_rect(w)
+	testing.expect_value(t, r.x, f32(40))
+	testing.expect_value(t, r.y, f32(20))
+	testing.expect(t, r.y < ui.caption_claim_height(w.scale))
+	app.tab_menu_open(&f.state, w, 0, 1300, 1100)
+	r, _ = app.tab_menu_rect(w)
+	testing.expect_value(t, r.x, f32(w.width)-r.width-8*w.scale)
+	testing.expect_value(t, r.y, f32(w.height)-r.height-8*w.scale)
+	testing.expect(t, r.x+r.width <= f32(w.width) && r.y+r.height <= f32(w.height))
+	app.tab_menu_open(&f.state, w, 0, -50, -50)
+	r, _ = app.tab_menu_rect(w)
+	testing.expect_value(t, r.x, 8*w.scale)
+	testing.expect_value(t, r.y, 8*w.scale)
+}
+
 @(test)
 tab_menu_group_and_settings_capabilities :: proc(t: ^testing.T) {
 	f: Menu_Fixture

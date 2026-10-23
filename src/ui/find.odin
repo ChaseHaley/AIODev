@@ -87,12 +87,13 @@ find_text :: proc(f: ^Find_Bar, text: string) -> Find_Outcome {
 	return find_change(field_text(&f.query, text))
 }
 
-// Keep the overlay below title chrome so caption controls cannot intercept its pointer events.
+// Keep the overlay below the title chrome, where `caption_claim_height` says the caption
+// controls claim pointer input, so they cannot intercept its events.
 find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 	margin := FIND_MARGIN * scale
 	panel_width := max(0, min(FIND_WIDTH * scale, width - 2 * margin))
 	l: Find_Layout
-	l.panel = {max(0, width-margin-panel_width), TAB_HEIGHT*scale+margin, panel_width, FIND_HEIGHT*scale}
+	l.panel = {max(0, width-margin-panel_width), caption_claim_height(scale)+margin, panel_width, FIND_HEIGHT*scale}
 	padding, gap, button := FIND_PADDING*scale, 8*scale, 32*scale
 	inner := max(0, panel_width-2*padding)
 	stacked := inner < 80*scale+status_width+2*gap+2*button

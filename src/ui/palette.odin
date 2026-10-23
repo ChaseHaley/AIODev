@@ -343,8 +343,14 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	padding := PALETTE_PADDING * scale
 	input_height := PALETTE_INPUT_HEIGHT * scale
 	full_height := input_height + 1 + 2 * padding + PALETTE_MAX_ROWS * row_height
-	top := clamp(max(24 * scale, height * 0.12), border, max(border, height-border-full_height))
-	available := max(0, height-border-top)
+	// Caption controls claim pointer input in the title chrome and are hit before the
+	// palette, so the panel starts below that band and gives up rows rather than put its
+	// query or results where the chrome would take the press. When the client has no
+	// room outside the chrome the band ends at the client edge and no panel is left.
+	claim := min(height, caption_claim_height(scale))
+	top := max(max(24 * scale, height * 0.12), claim)
+	top = min(top, max(claim, height - border - full_height))
+	available := max(0, height - border - top)
 	p.visible_rows = clamp(int(max(0, available-input_height-1-2*padding) / row_height), 0, PALETTE_MAX_ROWS)
 	keep_selection_visible(p)
 	rows := min(max(1, len(p.results)), p.visible_rows)

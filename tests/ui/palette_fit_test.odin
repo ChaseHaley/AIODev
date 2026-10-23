@@ -31,7 +31,7 @@ palette_header_flood_fits_measured_narrow_viewport :: proc(t: ^testing.T) {
 }
 
 @(test)
-palette_fit_keeps_eight_rows_and_stable_query_top :: proc(t: ^testing.T) {
+palette_fit_keeps_rows_and_stable_query_top :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
@@ -39,12 +39,22 @@ palette_fit_keeps_eight_rows_and_stable_query_top :: proc(t: ^testing.T) {
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)
-	for viewport in ([?][3]f32{{926, 928, 2}, {695, 696, 1.5}, {926, 837, 2}, {1000, 800, 1}}) {
+	// A 46x18 client at 200% cannot hold eight rows below the caption claim, so it
+	// trades one row for a panel that keeps its pointer events.
+	for viewport in ([?][4]f32{
+		{926, 928, 2, 8},
+		{695, 696, 1.5, 8},
+		{926, 837, 2, 7},
+		{1000, 800, 1, 8},
+	}) {
 		w, h, scale := viewport[0], viewport[1], viewport[2]
+		expected := int(viewport[3])
 		ui.palette_open(&p, &registry)
 		ui.palette_text(&p, &registry, "setting")
 		l := ui.palette_layout(&p, w, h, scale)
-		testing.expectf(t, l.rows == 8, "expected eight rows at %gx%g scale %g, got %d", w, h, scale, l.rows)
+		testing.expectf(t, l.rows == expected, "expected %d rows at %gx%g scale %g, got %d",
+			expected, w, h, scale, l.rows)
+		testing.expect(t, l.panel.y >= min(h, ui.caption_claim_height(scale)))
 		testing.expect(t, l.panel.y >= scale && l.panel.y+l.panel.height+scale <= h)
 		top := l.panel.y
 		for query in ([?]string{"terminal setting", "terminal settings contrast", "zzzz setting", "setting"}) {
