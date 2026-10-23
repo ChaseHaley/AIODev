@@ -368,11 +368,7 @@ run_action :: proc(
 		pane_header_cancel(w)
 		editor_open(app, w)
 	case .Change_Shortcut:
-		editor_open(app, w)
-		if w.editor.open {
-			ui.field_set(&w.editor.filter, "keys.")
-			ui.editor_filter(&w.editor)
-		}
+		settings_reveal(app, w, {query = "keys.", search = .Scope})
 	case .Reload_Settings:
 		reload_settings(app)
 	case .Follow_Theme_Colors:
@@ -397,10 +393,7 @@ run_action :: proc(
 	case .Close_Other_Tabs, .Close_Right_Tabs:
 		tab_close_subset(app, w, action == .Close_Right_Tabs)
 	case .Tab_Settings:
-		editor_open(app, w)
-		ui.field_set(&w.editor.filter, "")
-		ui.editor_filter(&w.editor)
-		ui.editor_select_key(&w.editor, "tab.confirm_close")
+		settings_reveal(app, w, {key = "tab.confirm_close", search = .Clear})
 	case .Restart_Shell:
 		if entry != nil {
 			session_restart(app, entry)
