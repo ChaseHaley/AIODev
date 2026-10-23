@@ -178,8 +178,16 @@ tab_close_hit :: proc(bar: Tab_Bar, x, y, scale: f32) -> int {
 	return -1
 }
 
+// The title chrome claims pointer input over this height for its caption controls. The
+// claim is hit before any floating surface placed after the chrome, so such a surface
+// must start at or below this height; `caption_hit` and the surface layouts read the
+// same value so the claim and the exclusion cannot drift apart.
+caption_claim_height :: proc(scale: f32) -> f32 {
+	return TAB_HEIGHT * scale
+}
+
 caption_hit :: proc(width, x, y, scale: f32) -> int {
-	if y < 0 || y >= TAB_HEIGHT * scale || x < width - 138 * scale || x >= width {return -1}
+	if y < 0 || y >= caption_claim_height(scale) || x < width - 138 * scale || x >= width {return -1}
 	return clamp(int((x - width + 138 * scale) / (46 * scale)), 0, 2)
 }
 
