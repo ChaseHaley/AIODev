@@ -389,14 +389,11 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	}
 	ordered_remove(&workspace.tabs, index)
 	for w in app.windows {
-		if w.workspace == workspace &&
-		   index < len(w.tab_positions) {ordered_remove(&w.tab_positions, index)}
-		if w.workspace == workspace &&
-		   index < len(w.tab_controls) {ordered_remove(&w.tab_controls, index)}
+		if w.workspace == workspace {tab_presentation_remove(&w.presentation, index)}
 	}
 	tab_record_free(tab)
-	if index < workspace.selected {workspace.selected -= 1}
-	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs) - 1))
+	workspace.selected =
+		tab_presentation_selected_after_remove(workspace.selected, index, len(workspace.tabs))
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		w := app.windows[i]
 		if w.workspace != workspace {continue}
