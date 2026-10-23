@@ -1,6 +1,5 @@
 package main
 
-import "aio:layout"
 import "aio:term"
 
 workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
@@ -10,12 +9,9 @@ workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
 
 @(private)
 workspace_delete_release :: proc(app: ^App, workspace: ^Workspace) {
-	for tab in workspace.tabs {
-		for node in tab.tree.nodes {
-			if pane, ok := node.(layout.Pane); ok && pane.content.kind == .Terminal {
-				session_close(app, pane.content.id)
-			}
-		}
+	walk := workspace_session_panes(app, workspace)
+	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
+		session_close(app, pane.content.id)
 	}
 	for current, i in app.workspaces {
 		if current == workspace {ordered_remove(&app.workspaces, i); break}

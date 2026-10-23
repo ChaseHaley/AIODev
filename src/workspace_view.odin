@@ -43,9 +43,8 @@ workspace_view_prepare :: proc(
 	   reserve(&resources.panes, len(resources.tree.nodes)) != nil ||
 	   reserve(&resources.dividers, len(resources.tree.nodes)) != nil ||
 	   reserve(&resources.views, len(resources.tree.nodes)) != nil {return false}
-	for node in resources.tree.nodes {
-		pane, ok := node.(layout.Pane)
-		if !ok || pane.content.kind != .Terminal {continue}
+	walk := tab_session_panes(app, resources.tree, resources.workspace.selected)
+	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
 		view: term_view.View
 		if !term_view.create(&view) {return false}
 		append(&resources.views, Pane_View{content = pane.content, view = view, cache = render.draw_list_init()})

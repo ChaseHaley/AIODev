@@ -292,8 +292,7 @@ tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int,
 	group := workspace.tabs[index].marked
 	for tab, i in workspace.tabs {
 		if group ? !tab.marked : i != index {continue}
-		count := 0
-		for node in tab.tree.nodes {if _, ok := node.(layout.Pane); ok {count += 1}}
+		count := tab_pane_count(tab)
 		tabs, panes = tabs + 1, panes + count
 		split ||= count > 1
 	}
@@ -381,10 +380,12 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	if was_selected {
 		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
 	}
-	for node in tab.tree.nodes {
-		pane, ok := node.(layout.Pane)
-		if !ok {continue}
-		if pane.content.kind == .Terminal {session_close(app, pane.content.id); continue}
+	terminal := tab_session_panes(app, &tab.tree, index)
+	for pane, ok := workspace_pane_next(&terminal); ok; pane, ok = workspace_pane_next(&terminal) {
+		session_close(app, pane.content.id)
+	}
+	other := tab_other_panes(app, &tab.tree, index)
+	for _, ok := workspace_pane_next(&other); ok; _, ok = workspace_pane_next(&other) {
 		for w in app.windows {if w.workspace == workspace {ui.editor_destroy(&w.editor)}}
 	}
 	ordered_remove(&workspace.tabs, index)
@@ -443,17 +444,12 @@ pane_remove :: proc(
 close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 	if entry := session_find(app, id); entry != nil && entry.keep_open {return false}
 	for workspace in app.workspaces {
-		for tab, tab_index in workspace.tabs {
-			for node, node_index in tab.tree.nodes {
-				if pane, ok := node.(layout.Pane); ok && pane.content == {.Terminal, id} {
-					if len(workspace.tabs) == 1 && tab.tree.root == layout.Node_Id(node_index) {
-						return false
-					}
-					pane_remove(app, workspace, tab_index, layout.Node_Id(node_index))
-					return true
-				}
-			}
-		}
+		pane, found := workspace_first_session(app, workspace, id)
+		if !found {continue}
+		if len(workspace.tabs) == 1 &&
+		   workspace.tabs[pane.tab].tree.root == pane.node {return false}
+		pane_remove(app, workspace, pane.tab, pane.node)
+		return true
 	}
 	return false
 }

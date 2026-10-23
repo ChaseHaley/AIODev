@@ -1,7 +1,6 @@
 package main
 
 import "aio:glyphs"
-import "aio:layout"
 import "aio:platform"
 import "aio:render"
 import "aio:term"
@@ -150,22 +149,19 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 @(private)
 workspace_status :: proc(app: ^App, workspace: ^Workspace) -> string {
 	done, blocked := false, false
-	for tab in workspace.tabs {
-		for node in tab.tree.nodes {
-			pane, ok := node.(layout.Pane)
-			if !ok || pane.content.kind != .Terminal {continue}
-			entry := session_find(app, pane.content.id)
-			if entry == nil {continue}
-			done ||= entry.status == .Exited
-			blocked ||= entry.status == .Failed
-			statuses, err := term.program_status(entry.session, context.temp_allocator)
-			if err != nil {continue}
-			for status in statuses {
-				done ||= status.state == .Done
-				blocked ||= status.state == .Blocked || status.state == .Error
-			}
-			term.destroy_program_status(statuses, context.temp_allocator)
+	walk := workspace_session_panes(app, workspace)
+	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
+		entry := pane.session
+		if entry == nil {continue}
+		done ||= entry.status == .Exited
+		blocked ||= entry.status == .Failed
+		statuses, err := term.program_status(entry.session, context.temp_allocator)
+		if err != nil {continue}
+		for status in statuses {
+			done ||= status.state == .Done
+			blocked ||= status.state == .Blocked || status.state == .Error
 		}
+		term.destroy_program_status(statuses, context.temp_allocator)
 	}
 	if blocked {
 		return "Blocked"

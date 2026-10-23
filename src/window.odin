@@ -315,7 +315,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		} else {w.views[i].valid = false}
 	}
 	for pane in w.panes {
-		entry := session_find(app, pane.content.id)
+		entry := workspace_session_for_content(app, pane.content)
 		if entry == nil {
 			continue
 		}
