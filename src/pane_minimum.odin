@@ -66,28 +66,9 @@ pane_minimum_split :: proc(
 	direction: layout.Direction,
 	ratio: f32,
 ) -> bool {
-	trial := w.tree^
-	trial.zoomed = false
-	trial.nodes = make(
-		[dynamic]layout.Node,
-		len(trial.nodes),
-		len(trial.nodes) + 2,
-		context.temp_allocator,
-	)
-	copy(trial.nodes[:], w.tree.nodes[:])
-	if _, err := layout.split_direction(
-		&trial,
-		trial.focus,
-		direction,
-		ratio,
-		{.Terminal, app.next_session_id + 1},
-	); err != nil {notify(app, .Error, "Could not check the new pane size."); return false}
-	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	before := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	area, gap := window_content_area(app, w), window_gap(app, w)
-	layout.compute(&trial, area, gap, &rects)
-	original := w.tree^
-	original.zoomed = false
-	layout.compute(&original, area, gap, &before)
-	return pane_minimum_allows(app, w, rects[:], before[:], true)
+	result := pane_trial_split(app, w, direction, ratio)
+	if result.error != .None && result.error != .Minimum {
+		notify(app, .Error, "Could not check the new pane size.")
+	}
+	return result.error == .None
 }
