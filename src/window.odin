@@ -10,7 +10,6 @@ import "aio:term"
 import "aio:term_view"
 import "aio:ui"
 import "core:log"
-import "core:math"
 import "core:time"
 
 @(private)
@@ -302,10 +301,9 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	)
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
-	w.header_height = 0
-	if app.settings.pane.show_headers && !settings_active(w) {
-		w.header_height = math.round(ui.HEADER_HEIGHT * w.scale)
-	}
+	kind: layout.Content_Kind = .Terminal
+	if settings_active(w) {kind = .Settings}
+	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers, kind)
 	area := window_content_area(app, w)
 	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
 	layout.dividers(w.tree, area, window_gap(app, w), &w.dividers)
@@ -323,22 +321,20 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		if entry == nil {
 			continue
 		}
-		padding := pane_padding(app, w, entry)
-		columns, rows := term_view.grid_size(
+		box := pane_box(
 			w.metrics,
-			pane.rect.width,
-			max(0, pane.rect.height - w.header_height),
-			padding,
+			pane.rect,
+			pane_insets(app, w.scale, entry, pane.content.kind),
 		)
 		g := term.Geometry {
-			columns = columns,
-			rows = rows,
+			columns = box.columns,
+			rows = box.rows,
 			cell_width = u32(w.metrics.cell_width),
 			cell_height = u32(w.metrics.cell_height),
 			surface_width = u32(w.width),
 			surface_height = u32(w.height),
-			padding_left = u32(pane.rect.x + padding),
-			padding_top = u32(pane.rect.y + min(pane.rect.height, w.header_height) + padding),
+			padding_left = u32(box.origin.x),
+			padding_top = u32(box.origin.y),
 		}
 		if g != term.geometry(entry.session) {
 			term.resize(entry.session, g)
@@ -488,7 +484,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if entry == nil || view == nil {
 			continue
 		}
-		padding := pane_padding(app, w, entry)
 		content_focused :=
 			w.focused && pane.node == w.tree.focus && !palette_active(app, w) && !w.find.open
 		style := term_view.Style {
@@ -503,12 +498,13 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			focused = content_focused,
 			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
 		}
-		origin := [2]f32 {
-			pane.rect.x + padding,
-			pane.rect.y + min(pane.rect.height, w.header_height) + padding,
-		}
+		box := pane_box(
+			w.metrics,
+			pane.rect,
+			pane_insets(app, w.scale, entry, pane.content.kind),
+		)
 		result: glyphs.Result
-		frame, result = build_pane(app, w, pane, entry, view, origin, style)
+		frame, result = build_pane(app, w, pane, entry, view, box.origin, style)
 		if result != .Ok {
 			return frame, result
 		}

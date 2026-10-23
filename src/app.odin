@@ -11,7 +11,6 @@ import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:log"
-import "core:math"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -338,28 +337,24 @@ session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
 initial_geometry :: proc(app: ^App) -> term.Geometry {
 	scale := f32(platform_api.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
-	padding :=
-		math.round(f32(app.settings.window.padding) * scale) +
-		math.round(f32(app.settings.pane.gap) * scale)
-	geometry := term.Geometry {
-		columns      = u16(app.settings.window.columns),
-		rows         = u16(app.settings.window.rows),
-		cell_width   = u32(metrics.cell_width),
-		cell_height  = u32(metrics.cell_height),
-		padding_left = u32(padding),
-		padding_top  = u32(padding),
+	box, width, height := pane_box_for_grid(
+		app,
+		scale,
+		metrics,
+		u16(app.settings.window.columns),
+		u16(app.settings.window.rows),
+		pane_insets(app, scale, nil, .Terminal),
+	)
+	return {
+		columns = box.columns,
+		rows = box.rows,
+		cell_width = u32(metrics.cell_width),
+		cell_height = u32(metrics.cell_height),
+		padding_left = u32(box.origin.x),
+		padding_top = u32(box.origin.y),
+		surface_width = u32(width),
+		surface_height = u32(height),
 	}
-	geometry.surface_width =
-		u32(geometry.columns) * geometry.cell_width + 2 * geometry.padding_left
-	geometry.surface_height = u32(geometry.rows) * geometry.cell_height + 2 * geometry.padding_top
-	geometry.padding_top += u32(ui.TAB_HEIGHT * scale)
-	geometry.surface_height += u32(ui.TAB_HEIGHT * scale)
-	if app.settings.pane.show_headers {
-		header := u32(math.round(ui.HEADER_HEIGHT * scale))
-		geometry.padding_top += header
-		geometry.surface_height += header
-	}
-	return geometry
 }
 
 @(private)

@@ -1,10 +1,7 @@
 package main
 
 import "aio:layout"
-import "aio:term_view"
-import "aio:ui"
 import "core:fmt"
-import "core:math"
 
 pane_minimum_allows :: proc(
 	app: ^App,
@@ -23,17 +20,9 @@ pane_minimum_allows :: proc(
 			   old.rect.height <= pane.rect.height {unchanged = true; break}
 		}
 		if unchanged {continue}
-		padding := math.round(f32(app.settings.window.padding) * w.scale)
-		if entry := session_find(app, pane.content.id);
-		   entry != nil {padding = pane_padding(app, w, entry)}
-		header := app.settings.pane.show_headers ? math.round(ui.HEADER_HEIGHT * w.scale) : 0
-		columns, rows := term_view.grid_size(
-			w.metrics,
-			pane.rect.width,
-			max(0, pane.rect.height - header),
-			padding,
-		)
-		if int(columns) < minimum.minimum_columns || int(rows) < minimum.minimum_rows {
+		insets := pane_insets(app, w.scale, session_find(app, pane.content.id), pane.content.kind)
+		box := pane_box(w.metrics, pane.rect, insets)
+		if int(box.columns) < minimum.minimum_columns || int(box.rows) < minimum.minimum_rows {
 			if notify_failure {
 				notify(
 					app,
@@ -41,8 +30,8 @@ pane_minimum_allows :: proc(
 					fmt.tprintf(
 						"Can't create this pane: %d × %d content cells; minimum %d × %d. " +
 						"Change Minimum Pane Width and Height in Settings.",
-						columns,
-						rows,
+						box.columns,
+						box.rows,
 						minimum.minimum_columns,
 						minimum.minimum_rows,
 					),
@@ -56,7 +45,7 @@ pane_minimum_allows :: proc(
 
 pane_minimum_single :: proc(app: ^App, w: ^Window) -> bool {
 	area := window_content_area(app, w)
-	rects := [?]layout.Pane_Rect{{rect = area}}
+	rects := [?]layout.Pane_Rect{{content = {.Terminal, 0}, rect = area}}
 	return pane_minimum_allows(app, w, rects[:], nil, true)
 }
 
