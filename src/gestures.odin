@@ -61,9 +61,9 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		}
 		return true
 	}
-	if w.close_confirm.open {
-		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.close_confirm.extended)
-		close_confirm_outcome(app, w, ui.confirm_mouse(&w.close_confirm, l, e.button, false, x, y))
+	if w.pending_close.confirm.open {
+		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended)
+		pending_close_outcome(app, w, ui.confirm_mouse(&w.pending_close.confirm, l, e.button, false, x, y))
 		return true
 	}
 	w.tab_pressed, w.dirty = false, true
@@ -152,12 +152,12 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		w.caption_pressed, w.dirty = caption, true
 		return
 	}
-	if w.close_confirm.open {
-		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.close_confirm.extended)
-		close_confirm_outcome(
+	if w.pending_close.confirm.open {
+		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended)
+		pending_close_outcome(
 			app,
 			w,
-			ui.confirm_mouse(&w.close_confirm, l, e.button, e.pressed, f32(e.x), f32(e.y)),
+			ui.confirm_mouse(&w.pending_close.confirm, l, e.button, e.pressed, f32(e.x), f32(e.y)),
 		)
 		return
 	}
@@ -288,10 +288,10 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover {w.caption_hover = caption; w.dirty = true}
-	if w.close_confirm.open {
+	if w.pending_close.confirm.open {
 		if ui.confirm_hover(
-			&w.close_confirm,
-			ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.close_confirm.extended),
+			&w.pending_close.confirm,
+			ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended),
 			x,
 			y,
 		) {

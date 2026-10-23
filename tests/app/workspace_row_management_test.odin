@@ -45,8 +45,7 @@ workspace134_destroy :: proc(f: ^Workspace134_Fixture) {
 	delete(f.w.tab_positions)
 	delete(f.w.panes)
 	delete(f.w.dividers)
-	delete(f.w.close_confirm_workspace_name)
-	delete(f.w.close_confirm_destination_name)
+	app.pending_close_clear(&f.w.pending_close)
 }
 
 @(test)
@@ -135,14 +134,14 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	app.workspace_picker_key(s, w, {key = .P, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.menu_selected, 3)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = false})
-	testing.expect(t, !w.close_confirm.open)
+	testing.expect(t, !w.pending_close.confirm.open)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
-	testing.expect(t, w.close_confirm.open && !app.workspace_picker_active(&w.workspace_picker))
-	testing.expect_value(t, w.close_confirm_workspace, f.target.id)
-	testing.expect_value(t, w.close_confirm_owner, f.owner.id)
+	testing.expect(t, w.pending_close.confirm.open && !app.workspace_picker_active(&w.workspace_picker))
+	testing.expect_value(t, w.pending_close.workspace, f.target.id)
+	testing.expect_value(t, w.pending_close.owner, f.owner.id)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
 	app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-	testing.expect(t, !w.close_confirm.open)
+	testing.expect(t, !w.pending_close.confirm.open)
 	testing.expect_value(t, len(s.workspaces), 2)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
 	app.workspace_picker_open(s, w)
@@ -294,7 +293,7 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	w.workspace_picker.menu_selected = 3
 	testing.expect(t, app.workspace_discard_empty(s, other))
 	app.workspace_row_menu_choose(s, w)
-	testing.expect(t, !w.close_confirm.open)
+	testing.expect(t, !w.pending_close.confirm.open)
 	testing.expect_value(t, len(s.workspaces), 1)
 }
 

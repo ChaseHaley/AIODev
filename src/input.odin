@@ -162,10 +162,10 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		_ = gesture_cancel(app, w)
 		return
 	}
-	if w.close_confirm.open {
+	if w.pending_close.confirm.open {
 		pane_header_cancel(w)
 		if e.pressed {w.suppressed_key = e}
-		close_confirm_outcome(app, w, ui.confirm_key(&w.close_confirm, e))
+		pending_close_outcome(app, w, ui.confirm_key(&w.pending_close.confirm, e))
 		return
 	}
 	if !palette_active(app, w) &&
@@ -285,7 +285,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
 	if w.tab_menu.open {return}
 	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
-	if w.close_confirm.open {return}
+	if w.pending_close.confirm.open {return}
 	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
 		return
@@ -306,15 +306,15 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 }
 
 @(private)
-close_confirm_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Confirm_Outcome) {
+pending_close_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Confirm_Outcome) {
 	switch outcome {
 	case .None:
 	case .Changed:
 		w.dirty = true
 	case .Cancel:
-		close_confirm_finish(app, w, false)
+		pending_close_finish(app, w, false)
 	case .Accept:
-		close_confirm_finish(app, w, true)
+		pending_close_finish(app, w, true)
 	}
 }
 
@@ -374,7 +374,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	w.wheel_remainder -= f32(rows)
-	if w.close_confirm.open {return}
+	if w.pending_close.confirm.open {return}
 	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return

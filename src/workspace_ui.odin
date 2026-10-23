@@ -120,7 +120,7 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	tab_close_restore(w)
 	w.tab_menu.open, w.rename_open = false, false
 	workspace_picker_cancel(w)
-	w.close_confirm = {}
+	pending_close_clear(&w.pending_close)
 	clear(&w.close_restore)
 	workspace_view_rebind(&w.resources, &prepared)
 	if workspace.selection_anchor == 0 {tab_select_one(workspace, workspace.selected)}
@@ -275,7 +275,7 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	defer workspace_picker_layout_changed(w)
 	window_overlays_cancel(app, w)
 	w.tab_menu.open, w.rename_open = false, false
-	w.close_confirm = {}
+	pending_close_clear(&w.pending_close)
 	tab_close_restore(w)
 	ui.field_set(&w.workspace_picker.query, "")
 	workspace_picker_transition(w, .List)

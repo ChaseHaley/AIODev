@@ -333,7 +333,7 @@ when AIO_CONTROL {
 			editor_title := ""
 			if row := ui.editor_row(&w.editor);
 			   row != nil {editor_key, editor_title = row.key, row.title}
-			confirm_title, confirm_body := close_confirm_text(app, w)
+			confirm := pending_close_text(app, &w.pending_close, w.workspace)
 			picker_rect, _ := workspace_picker_rect(w)
 			slider := render.Rect{}
 			page: ui.Editor_Layout
@@ -400,10 +400,10 @@ when AIO_CONTROL {
 					),
 				},
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
-				{"confirm.open", fmt.tprintf("%t", w.close_confirm.open)},
-				{"confirm.title", w.close_confirm.open ? confirm_title : ""},
-				{"confirm.body", w.close_confirm.open ? confirm_body : ""},
-				{"confirm.workspace", fmt.tprintf("%d", w.close_confirm_workspace)},
+				{"confirm.open", fmt.tprintf("%t", w.pending_close.confirm.open)},
+				{"confirm.title", w.pending_close.confirm.open ? confirm.title : ""},
+				{"confirm.body", w.pending_close.confirm.open ? confirm.body : ""},
+				{"confirm.workspace", fmt.tprintf("%d", w.pending_close.workspace)},
 				{"leader.indicator", w.leader_until != {} ? "pane-status-line" : "none"},
 				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
 				{"window.dpi", fmt.tprintf("%d", u32(w.scale * 96))},
