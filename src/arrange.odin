@@ -283,7 +283,8 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 		panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
 		reorders_tab :=
 			pane_source_workspace(app, d.source) == w.workspace && d.node == d.source.tree.root
-		d.minimum_rejected = !reorders_tab && !pane_minimum_allows(app, w, panes[:], nil, false)
+		d.minimum_rejected = !reorders_tab &&
+			!pane_minimum_allows(app, w, panes[:], nil, notify_failure = false)
 		if d.minimum_rejected {return {}, false}
 		r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
 		return {
@@ -590,6 +591,25 @@ pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) 
 	}
 }
 
+// The label a drop would produce, independent of its drawing.
+@(require_results)
+pane_drag_label :: proc(d: ^Pane_Drag) -> string {
+	switch {
+	case d.new_window:
+		return "+ New window"
+	case d.new_tab:
+		if d.destination == d.source && d.node == d.source.tree.root {
+			return "Move tab to end"
+		}
+		return "+ New tab"
+	case d.swap:
+		return "Swap panes"
+	case d.root:
+		return "Dock to workspace edge"
+	}
+	return "Move pane here"
+}
+
 pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	d := &w.pane_drag
 	for source in app.windows {
@@ -615,8 +635,7 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		   {rect = r, color = accent, radius = radius, stroke = 2 * w.scale},
 	   ) !=
 	   .None {return .Ok}
-	label :=
-		d.new_window ? "+ New window" : d.new_tab ? (d.destination == d.source && d.node == d.source.tree.root ? "Move tab to end" : "+ New tab") : d.swap ? "Swap panes" : d.root ? "Dock to workspace edge" : "Move pane here"
+	label := pane_drag_label(d)
 	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
 	label_color := app.theme.text

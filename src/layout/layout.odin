@@ -398,8 +398,13 @@ place_dividers :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dyn
 divider_hit_test :: proc(dividers: []Divider, x, y, tolerance: f32) -> (Divider, bool) {
 	for d in dividers {
 		r := d.rect
-		if d.axis ==
-		   .Horizontal {r.x -= tolerance; r.width += 2 * tolerance} else {r.y -= tolerance; r.height += 2 * tolerance}
+		if d.axis == .Horizontal {
+			r.x -= tolerance
+			r.width += 2 * tolerance
+		} else {
+			r.y -= tolerance
+			r.height += 2 * tolerance
+		}
 		if x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height {return d, true}
 	}
 	return {}, false
@@ -493,7 +498,11 @@ place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction
 	added := allocate_node(l, pane)
 	before := direction == .Left || direction == .Up
 	axis: Axis = direction == .Left || direction == .Right ? .Horizontal : .Vertical
-	branch := allocate_node(l, Split{axis, 0.5, before ? added : target, before ? target : added})
+	first, second := target, added
+	if before {
+		first, second = added, target
+	}
+	branch := allocate_node(l, Split{axis, 0.5, first, second})
 	if parent == INVALID_NODE {l.root = branch} else {
 		s := l.nodes[parent].(Split)
 		if s.first == target {s.first = branch} else {s.second = branch}

@@ -255,7 +255,8 @@ resolve_colors :: proc(s: ^Settings) {
 	}
 }
 
-// The theme color that an empty optional color setting uses. Selection text has none: empty keeps cell colors.
+// The theme color that an empty optional color setting uses. Selection text has none:
+// empty keeps cell colors.
 theme_color :: proc(s: ^Settings, key: string) -> (Color, bool) {
 	for entry in COLOR_ENTRIES {
 		if entry.key != key {continue}

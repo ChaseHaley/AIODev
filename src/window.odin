@@ -183,8 +183,12 @@ window_show_prepared :: proc(app: ^App, w: ^Window) -> bool {
 
 @(require_results)
 window_activate :: proc(app: ^App, w: ^Window) -> bool {
-	err :=
-		app.options.inactive ? platform.window_show_inactive(&app.platform, w.id) : platform.window_focus(&app.platform, w.id)
+	err: platform.Error
+	if app.options.inactive {
+		err = platform.window_show_inactive(&app.platform, w.id)
+	} else {
+		err = platform.window_focus(&app.platform, w.id)
+	}
 	if err != .None {
 		log.errorf("activating the workspace window failed: %v", err)
 		notify(app, .Error, "Could not activate the existing workspace window.")
@@ -542,7 +546,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		}
 	}
 	if palette_visible(app, w) {
-		opacity, rise := ui.presence_fade(app.palette.presence, 4*w.scale)
+		opacity, rise := ui.presence_fade(app.palette.presence, 4 * w.scale)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
 			opacity, rise,

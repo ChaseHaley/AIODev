@@ -80,7 +80,7 @@ palette_init :: proc(
 	err: runtime.Allocator_Error
 	capacity := 0
 	for s in settings {
-		capacity = max(capacity, len(s.group)+len(PALETTE_SETTING_SUFFIX)+2+len(s.title))
+		capacity = max(capacity, len(s.group) + len(PALETTE_SETTING_SUFFIX) + 2 + len(s.title))
 	}
 	p.haystack, err = make([dynamic]u8, 0, capacity, allocator)
 	if err != nil { return err }
@@ -166,7 +166,7 @@ setting_header_match :: proc(p: ^Palette, setting: int, query: string, highlight
 	count := 0
 	for pos in highlights {
 		if pos >= title_start {
-			highlights[count] = pos-title_start
+			highlights[count] = pos - title_start
 			count += 1
 		}
 	}
@@ -185,8 +185,8 @@ consider :: proc(
 	by_title, title_error := fuzzy.score(query, title, p.scratch)
 	by_group, group_error := fuzzy.score(query, group, p.scratch)
 	if title_error != .None || group_error != .None { return }
-	start := len(p.results)*width
-	highlights := p.positions[start:start+width]
+	start := len(p.results) * width
+	highlights := p.positions[start:start + width]
 	result := Palette_Result{command = command, setting = setting, score = by_group.score}
 	if by_title.matched {
 		if _, err := fuzzy.match_positions(query, title, highlights, p.scratch); err == .None {
@@ -241,8 +241,8 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 @(private)
 keep_selection_visible :: proc(p: ^Palette) {
 	rows := max(1, p.visible_rows)
-	p.selected = clamp(p.selected, 0, max(0, len(p.results)-1))
-	p.scroll = clamp(p.scroll, 0, max(0, len(p.results)-rows))
+	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
+	p.scroll = clamp(p.scroll, 0, max(0, len(p.results) - rows))
 	if p.selected < p.scroll {
 		p.scroll = p.selected
 	} else if p.selected >= p.scroll + rows {
@@ -341,8 +341,8 @@ palette_cut :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) -> Palette_Layout {
 	width, height := max(0, viewport_width), max(0, viewport_height)
 	scale := viewport_scale > 0 ? viewport_scale : 1
-	border := min(scale, width/2, height/2)
-	panel_width := min(PALETTE_WIDTH * scale, width - 2 * min(16 * scale, width/4))
+	border := min(scale, width / 2, height / 2)
+	panel_width := min(PALETTE_WIDTH * scale, width - 2 * min(16 * scale, width / 4))
 	row_height := PALETTE_ROW_HEIGHT * scale
 	padding := PALETTE_PADDING * scale
 	input_height := PALETTE_INPUT_HEIGHT * scale
@@ -355,13 +355,14 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	top := max(max(24 * scale, height * 0.12), claim)
 	top = min(top, max(claim, height - border - full_height))
 	available := max(0, height - border - top)
-	p.visible_rows = clamp(int(max(0, available-input_height-1-2*padding) / row_height), 0, PALETTE_MAX_ROWS)
+	rows_space := max(0, available - input_height - 1 - 2 * padding)
+	p.visible_rows = clamp(int(rows_space / row_height), 0, PALETTE_MAX_ROWS)
 	keep_selection_visible(p)
 	rows := min(max(1, len(p.results)), p.visible_rows)
 	input_height = min(input_height, available)
-	separator := min(f32(1), available-input_height)
-	padding = min(padding, max(0, available-input_height-separator)/2)
-	list_padding := min(padding, panel_width/2)
+	separator := min(f32(1), available - input_height)
+	padding = min(padding, max(0, available - input_height - separator) / 2)
+	list_padding := min(padding, panel_width / 2)
 	panel := render.Rect{
 		x = (width - panel_width) / 2,
 		y = top,
@@ -484,39 +485,36 @@ palette_draw :: proc(
 ) -> glyphs.Result {
 	l := palette_layout(p, width, height, scale)
 	panel := l.panel
-	radius := PALETTE_RADIUS * scale
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
 	layer_start, rect_start, glyph_start := len(list.layers), len(list.rects), len(list.glyphs)
-	bounded_rise := clamp(rise, 0, max(0, height-scale-panel.y-panel.height))
+	bounded_rise := clamp(rise, 0, max(0, height - scale - panel.y - panel.height))
 	defer fade_draw(list, layer_start, rect_start, glyph_start, opacity, bounded_rise)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
-	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
-	border := render.Rect {
-		panel.x - scale,
-		panel.y - scale,
-		panel.width + 2 * scale,
-		panel.height + 2 * scale,
+	frame := Panel {
+		rect     = panel,
+		radius   = PALETTE_RADIUS * scale,
+		scale    = scale,
+		shadow_y = 12,
+		softness = 32,
+		border   = .Expanded,
 	}
-	rects := [?]render.Rect_Instance {
-		{rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale},
-		{rect = border, color = theme.border, radius = radius + scale},
-		{rect = panel, color = theme.surface, radius = radius},
-		{rect = {panel.x, l.input.y + l.input.height, panel.width, scale}, color = theme.border},
-	}
-	for r in rects {
-		draw_rect(list, r)
-	}
+	if panel_draw(list, frame, theme) != .None {return .Ok}
+	draw_rect(list, {
+		rect  = {panel.x, l.input.y + l.input.height, panel.width, scale},
+		color = theme.border,
+	})
 	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
 	label_text := text_styled(text, .Label)
-	if l.input.width > 2*padding {
-		if result := draw_text(&label_text, list, "COMMANDS AND SETTINGS", l.input.x+padding, l.input.y+19*scale,
+	if l.input.width > 2 * padding {
+		label_x, label_y := l.input.x + padding, l.input.y + 19 * scale
+		if result := draw_text(&label_text, list, "COMMANDS AND SETTINGS", label_x, label_y,
 			theme.faint); result != .Ok { return result }
 		box := palette_query_box(p, l, text, scale)
 		// The label shares the input's height, so the query line sits below the centre.
-		if result := field_box_draw(box, list, theme, l.input.y+43*scale, true,
+		if result := field_box_draw(box, list, theme, l.input.y + 43 * scale, true,
 			"Type a command or setting"); result != .Ok { return result }
 	}
 	if l.rows == 0 || l.list.width <= 0 { return .Ok }
@@ -551,7 +549,7 @@ palette_draw :: proc(
 		if item.command == nil {
 			category = strings.concatenate({category, PALETTE_SETTING_SUFFIX}, context.temp_allocator)
 		}
-		if result := draw_text(&label_text, list, category, row.x+padding, row.y+13*scale, theme.faint);
+		if result := draw_text(&label_text, list, category, row.x + padding, row.y + 13 * scale, theme.faint);
 			result != .Ok { return result }
 		label_width: f32
 		if item.command != nil {

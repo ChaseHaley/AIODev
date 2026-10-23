@@ -151,7 +151,7 @@ tab_pointer_select :: proc(app: ^App, w: ^Window, index: int, toggle, range: boo
 			marked[i] = tab.marked
 			if tab.id == w.workspace.selection_anchor {anchor = i}
 		}
-		ui.tab_selection_update(marked, index, anchor, toggle, range)
+		ui.tab_selection_update(marked, index, anchor, toggle = toggle, range = range)
 		for tab, i in tabs {tab.marked = marked[i]}
 	}
 	if !range {w.workspace.selection_anchor = tabs[index].id}
@@ -184,7 +184,7 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 	pane, valid := source.tree.nodes[node].(layout.Pane)
 	if !valid || pane.content.kind != .Terminal {return false}
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
-	if !pane_minimum_allows(app, w, panes[:], nil, true) {return false}
+	if !pane_minimum_allows(app, w, panes[:], nil, notify_failure = true) {return false}
 	tab, record_error := tab_record_reserve(w.workspace)
 	if record_error != .None {
 		notify(app, .Error, "Could not create a tab. The pane was preserved.")

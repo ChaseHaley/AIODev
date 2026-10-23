@@ -39,7 +39,7 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 		menu.count += 1
 	}
 	menu.separators[menu.count] = true
-	menu.actions[menu.count+1] = .Tab_Settings
+	menu.actions[menu.count + 1] = .Tab_Settings
 	menu.count += 2
 	menu.selected = -1
 	tab_menu_step(w, 1)
@@ -65,7 +65,7 @@ tab_menu_label :: proc(w: ^Window, index: int) -> string {
 tab_menu_enabled :: proc(w: ^Window, index: int) -> bool {
 	if index < 0 || index >= w.tab_menu.count || w.tab_menu.separators[index] { return false }
 	#partial switch w.tab_menu.actions[index] {
-	case .Close_Right_Tabs: return w.workspace.selected+1 < len(w.workspace.tabs)
+	case .Close_Right_Tabs: return w.workspace.selected + 1 < len(w.workspace.tabs)
 	case .Close_Other_Tabs:
 		for tab in w.workspace.tabs { if !tab.marked { return true } }
 		return false
@@ -82,43 +82,43 @@ tab_menu_step :: proc(w: ^Window, step: int, wrap := true) {
 	for _ in 0..<menu.count {
 		index += direction
 		if !wrap && (index < 0 || index >= menu.count) { return }
-		index = (index+menu.count)%menu.count
+		index = (index + menu.count) % menu.count
 		if tab_menu_enabled(w, index) { menu.selected = index; return }
 	}
 }
 
 tab_menu_row_height :: proc(w: ^Window, index: int) -> f32 {
-	return (w.tab_menu.separators[index] ? 10 : 30)*w.scale
+	return (w.tab_menu.separators[index] ? 10 : 30) * w.scale
 }
 
 tab_menu_rect :: proc(w: ^Window) -> (render.Rect, int) {
 	s := w.scale
 	rows := 0
-	height := 8*s
+	height := 8 * s
 	for i in w.tab_menu.scroll..<w.tab_menu.count {
 		next := tab_menu_row_height(w, i)
-		if rows > 0 && height+next > f32(w.height)-16*s { break }
+		if rows > 0 && height + next > f32(w.height) - 16 * s { break }
 		height += next
 		rows += 1
 	}
-	width := min(300*s, f32(w.width)-16*s)
-	return {clamp(w.tab_menu.position.x, 8*s, max(8*s, f32(w.width)-width-8*s)),
-		clamp(w.tab_menu.position.y, 8*s, max(8*s, f32(w.height)-height-8*s)), width, height}, rows
+	width := min(300 * s, f32(w.width) - 16 * s)
+	return {clamp(w.tab_menu.position.x, 8 * s, max(8 * s, f32(w.width) - width - 8 * s)),
+		clamp(w.tab_menu.position.y, 8 * s, max(8 * s, f32(w.height) - height - 8 * s)), width, height}, rows
 }
 
 tab_menu_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	r, _ := tab_menu_rect(w)
-	y := r.y+4*w.scale
+	y := r.y + 4 * w.scale
 	for i in w.tab_menu.scroll..<index { y += tab_menu_row_height(w, i) }
-	return {r.x+4*w.scale, y, r.width-8*w.scale, tab_menu_row_height(w, index)}
+	return {r.x + 4 * w.scale, y, r.width - 8 * w.scale, tab_menu_row_height(w, index)}
 }
 
 tab_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 	r, rows := tab_menu_rect(w)
-	if x < r.x || x >= r.x+r.width || y < r.y+4*w.scale || y >= r.y+r.height-4*w.scale { return -1 }
-	for i in w.tab_menu.scroll..<w.tab_menu.scroll+rows {
+	if x < r.x || x >= r.x + r.width || y < r.y + 4 * w.scale || y >= r.y + r.height - 4 * w.scale { return -1 }
+	for i in w.tab_menu.scroll..<w.tab_menu.scroll + rows {
 		row := tab_menu_row_rect(w, i)
-		if y >= row.y && y < row.y+row.height { return i }
+		if y >= row.y && y < row.y + row.height { return i }
 	}
 	return -1
 }
@@ -151,36 +151,39 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	menu := &w.tab_menu
 	menu.scroll = clamp(menu.scroll, 0, max(0, menu.selected))
 	r, rows := tab_menu_rect(w)
-	for menu.scroll+rows <= menu.selected {
+	for menu.scroll + rows <= menu.selected {
 		menu.scroll += 1
 		r, rows = tab_menu_rect(w)
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = {r.x, r.y+5*s, r.width, r.height}, color = app.theme.shadow,
-		radius = 8*s, softness = 16*s}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 8*s}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = r, color = app.theme.border, radius = 8*s, stroke = s}) != .None {
-		return .Ok
+	frame := ui.Panel {
+		rect     = r,
+		radius   = 8 * s,
+		scale    = s,
+		shadow_y = 5,
+		softness = 16,
+		border   = .Stroked,
 	}
-	if render.push_layer(&w.list, r, 8*s) != .None { return .Ok }
+	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
+	if render.push_layer(&w.list, r, 8 * s) != .None { return .Ok }
 	for visible in 0..<rows {
-		i := menu.scroll+visible
+		i := menu.scroll + visible
 		if i >= menu.count { break }
 		row := tab_menu_row_rect(w, i)
 		if menu.separators[i] {
-			if render.push_rect(&w.list, {rect = {row.x+10*s, row.y+4*s, row.width-20*s, s},
+			if render.push_rect(&w.list, {rect = {row.x + 10 * s, row.y + 4 * s, row.width - 20 * s, s},
 				color = app.theme.border}) != .None { return .Ok }
 			continue
 		}
 		enabled := tab_menu_enabled(w, i)
 		if i == menu.selected && enabled {
-			if render.push_rect(&w.list, {rect = row, color = app.theme.selection, radius = 4*s}) != .None {
+			if render.push_rect(&w.list, {rect = row, color = app.theme.selection, radius = 4 * s}) != .None {
 				return .Ok
 			}
 		}
-		if result := ui.draw_text(&w.ui_text, &w.list, tab_menu_label(w, i), row.x+10*s,
-			row.y+(row.height-w.ui_text.line_height)/2+w.ui_text.ascent,
-			enabled ? app.theme.text : app.theme.muted, max(1, row.width-20*s)); result != .Ok { return result }
+		if result := ui.draw_text(&w.ui_text, &w.list, tab_menu_label(w, i), row.x + 10 * s,
+			row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
+			enabled ? app.theme.text : app.theme.muted, max(1, row.width - 20 * s)); result != .Ok { return result }
 	}
 	return .Ok
 }

@@ -203,10 +203,15 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 				run_action(app, w, .Command_Palette)
 			} else if e.button == .Left && window_tab_close_hit(w, bar, x, y) >= 0 {
 				w.tab_close_pressed = index
-			} else if index == bar.count &&
-			   e.button == .Left {tab_new(app, w)} else if index >= 0 && index < bar.count {
-				if e.button ==
-				   .Right {tab_menu_open(app, w, index, x, y)} else if e.button == .Middle {tab_close_request(app, w, index)} else if e.button == .Left {
+			} else if index == bar.count && e.button == .Left {
+				tab_new(app, w)
+			} else if index >= 0 && index < bar.count {
+				#partial switch e.button {
+				case .Right:
+					tab_menu_open(app, w, index, x, y)
+				case .Middle:
+					tab_close_request(app, w, index)
+				case .Left:
 					tab_pointer_select(
 						app,
 						w,
@@ -215,6 +220,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 						.Shift in e.modifiers,
 					)
 					tab_press(w, index, x, bar.tab_width, e.modifiers & {.Control, .Shift} != {})
+				case:
 				}
 			}
 		}

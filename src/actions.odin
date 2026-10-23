@@ -503,27 +503,30 @@ run_action :: proc(
 			layout.focus_direction(pane_action_rects(app, w), w.tree.focus, direction),
 		)
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
-		axis: layout.Axis =
-			action == .Resize_Left || action == .Resize_Right ? .Horizontal : .Vertical
-		delta: f32 = action == .Resize_Left || action == .Resize_Up ? -10 : 10
-		if layout.resize_pixels(
-			w.tree,
-			w.tree.focus,
-			axis,
-			delta,
-			w.dividers[:],
-		) {window_relayout(app, w)}
+		resize_pane(app, w, action, 10)
 	case .Resize_Left_Large, .Resize_Right_Large, .Resize_Up_Large, .Resize_Down_Large:
-		axis: layout.Axis =
-			action == .Resize_Left_Large || action == .Resize_Right_Large ? .Horizontal : .Vertical
-		delta: f32 = action == .Resize_Left_Large || action == .Resize_Up_Large ? -50 : 50
-		if layout.resize_pixels(
-			w.tree,
-			w.tree.focus,
-			axis,
-			delta,
-			w.dividers[:],
-		) {window_relayout(app, w)}
+		resize_pane(app, w, action, 50)
+	}
+}
+
+// Moves the divider on the pressed arrow's axis by `amount` pixels toward the pressed side.
+@(private)
+resize_pane :: proc(app: ^App, w: ^Window, action: Action, amount: f32) {
+	axis: layout.Axis
+	delta: f32
+	#partial switch action {
+	case .Resize_Left, .Resize_Left_Large:
+		axis, delta = .Horizontal, -amount
+	case .Resize_Right, .Resize_Right_Large:
+		axis, delta = .Horizontal, amount
+	case .Resize_Up, .Resize_Up_Large:
+		axis, delta = .Vertical, -amount
+	case .Resize_Down, .Resize_Down_Large:
+		axis, delta = .Vertical, amount
+	case:
+	}
+	if layout.resize_pixels(w.tree, w.tree.focus, axis, delta, w.dividers[:]) {
+		window_relayout(app, w)
 	}
 }
 
@@ -637,9 +640,9 @@ on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outc
 find_presentation :: proc(w: ^Window, entry: ^Session_Entry) -> (label: string, enabled: bool) {
 	if entry == nil || len(w.find.query.bytes) == 0 { return "0 of 0", false }
 	s := term.search_summary(entry.session)
-	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected+1, s.total), s.total > 0 }
+	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected + 1, s.total), s.total > 0 }
 	if s.total == 0 { return "0 of 0 · No matches", false }
-	return fmt.tprintf("%d of %d", s.selected+1, s.total), true
+	return fmt.tprintf("%d of %d", s.selected + 1, s.total), true
 }
 
 find_controls :: proc(w: ^Window, entry: ^Session_Entry) -> (l: ui.Find_Layout, enabled: bool) {

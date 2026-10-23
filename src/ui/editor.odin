@@ -1491,17 +1491,15 @@ popup_draw :: proc(
 	if r.width == 0 || row == nil {return .Ok}
 	s := l.scale
 	if render.push_layer(list, l.page) != .None {return .Ok}
-	draw_rect(
-		list,
-		{
-			rect = {r.x, r.y + 6 * s, r.width, r.height},
-			color = theme.shadow,
-			radius = 8 * s,
-			softness = 16 * s,
-		},
-	)
-	draw_rect(list, {rect = r, color = theme.surface, radius = 8 * s})
-	draw_rect(list, {rect = r, color = theme.border, radius = 8 * s, stroke = s})
+	frame := Panel {
+		rect     = r,
+		radius   = 8 * s,
+		scale    = s,
+		shadow_y = 6,
+		softness = 16,
+		border   = .Stroked,
+	}
+	if panel_draw(list, frame, theme) != .None {return .Ok}
 	if p.popup == .Shortcuts {
 		parts := shortcut_alternatives(row.value)
 		count := shortcut_popup_rows(p, l)
@@ -1867,8 +1865,12 @@ editor_draw :: proc(
 		if index == p.hover_reset && modified {
 			draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6 * s})
 		}
-		icon_color := modified ? (index == p.hover_reset ? theme.text : theme.muted) : theme.faint
-		if !modified {icon_color.a *= 0.5}
+		icon_color := theme.faint
+		if modified {
+			icon_color = index == p.hover_reset ? theme.text : theme.muted
+		} else {
+			icon_color.a *= 0.5
+		}
 		if result := draw_icon(text, list, ICON_UNDO, parts.reset, icon_color, 0.9);
 		   result != .Ok {return result}
 	}

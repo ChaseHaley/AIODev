@@ -127,7 +127,8 @@ selection_autoscroll :: proc(s: ^Session) -> Autoscroll {
 	return .None
 }
 
-// Scrolls history one row in the drag's autoscroll direction and extends the selection to the pointer's column.
+// Scrolls history one row in the drag's autoscroll direction and extends the selection to
+// the pointer's column.
 selection_autoscroll_tick :: proc(s: ^Session, x, y: f32) {
 	direction := selection_autoscroll(s)
 	if direction == .None {

@@ -5,14 +5,12 @@ import "aio:term_view"
 import "aio:ui"
 import "core:math"
 
-// The space a pane reserves inside its rectangle before terminal content.
 Pane_Insets :: struct {
 	padding: f32,
 	header:  f32,
 }
 
-// One pane's terminal grid coordinates: the pane rectangle, its insets, the grid
-// that fits and the top-left pixel the grid is drawn from.
+// One pane's grid geometry: rectangle, insets, fitting grid and draw origin.
 Pane_Box :: struct {
 	rect:    layout.Rect,
 	padding: f32,
@@ -22,8 +20,7 @@ Pane_Box :: struct {
 	origin:  [2]f32,
 }
 
-// D-050 keeps a header on every pane, and Settings can turn headers off. A
-// Settings pane fills its rectangle instead of drawing a header.
+// D-050 keeps a header on every pane unless headers are off; a Settings pane fills its rectangle.
 pane_header_height :: proc(scale: f32, show_headers: bool, kind: layout.Content_Kind) -> f32 {
 	if !show_headers || kind == .Settings {return 0}
 	return math.round(ui.HEADER_HEIGHT * scale)
@@ -61,8 +58,8 @@ pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Ins
 	}
 }
 
-// The client size that gives a single pane the requested grid, and the box that
-// pane will then receive. Inverse of pane_box across window_content_area.
+// The client size for a single pane's requested grid, and the box it then receives; inverse of
+// pane_box across window_content_area.
 pane_box_for_grid :: proc(
 	app: ^App,
 	scale: f32,

@@ -52,7 +52,8 @@ find_close :: proc(f: ^Find_Bar) {
 	field_set(&f.query, "")
 }
 
-// Handles a key while the find bar is open. Enter and Up move to older matches; Shift+Enter and Down to newer.
+// Handles a key while the find bar is open. Enter and Up move to older matches;
+// Shift+Enter and Down to newer.
 find_key :: proc(f: ^Find_Bar, e: platform.Key_Event) -> Find_Outcome {
 	if !e.pressed {
 		return .None
@@ -93,22 +94,27 @@ find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 	margin := FIND_MARGIN * scale
 	panel_width := max(0, min(FIND_WIDTH * scale, width - 2 * margin))
 	l: Find_Layout
-	l.panel = {max(0, width-margin-panel_width), caption_claim_height(scale)+margin, panel_width, FIND_HEIGHT*scale}
-	padding, gap, button := FIND_PADDING*scale, 8*scale, 32*scale
-	inner := max(0, panel_width-2*padding)
-	stacked := inner < 80*scale+status_width+2*gap+2*button
-	l.query = {l.panel.x+min(padding, panel_width), l.panel.y+4*scale, inner, button}
+	l.panel = {
+		max(0, width - margin - panel_width),
+		caption_claim_height(scale) + margin,
+		panel_width,
+		FIND_HEIGHT * scale,
+	}
+	padding, gap, button := FIND_PADDING * scale, 8 * scale, 32 * scale
+	inner := max(0, panel_width - 2 * padding)
+	stacked := inner < 80 * scale + status_width + 2 * gap + 2 * button
+	l.query = {l.panel.x + min(padding, panel_width), l.panel.y + 4 * scale, inner, button}
 	y := l.query.y
-	if stacked { y += FIND_HEIGHT*scale; l.panel.height += FIND_HEIGHT*scale }
+	if stacked { y += FIND_HEIGHT * scale; l.panel.height += FIND_HEIGHT * scale }
 	// On very narrow windows give the count its own row to keep every digit visible.
-	separate := inner < status_width+gap+2*button
+	separate := inner < status_width + gap + 2 * button
 	l.status = {l.query.x, y, min(status_width, inner), button}
-	if stacked && separate { y += FIND_HEIGHT*scale; l.panel.height += FIND_HEIGHT*scale }
-	button = min(button, inner/2)
-	l.newer = {l.query.x+inner-button, y, button, 32*scale}
-	l.older = {l.newer.x-button, y, button, 32*scale}
-	if !separate { l.status.x = l.older.x-gap-l.status.width }
-	if !stacked { l.query.width = max(0, l.status.x-gap-l.query.x) }
+	if stacked && separate { y += FIND_HEIGHT * scale; l.panel.height += FIND_HEIGHT * scale }
+	button = min(button, inner / 2)
+	l.newer = {l.query.x + inner - button, y, button, 32 * scale}
+	l.older = {l.newer.x - button, y, button, 32 * scale}
+	if !separate { l.status.x = l.older.x - gap - l.status.width }
+	if !stacked { l.query.width = max(0, l.status.x - gap - l.query.x) }
 	return l
 }
 
@@ -154,34 +160,32 @@ find_draw :: proc(
 	text := &input_text
 	l := find_layout(width, scale, text_width(text, status))
 	panel := l.panel
-	if panel.width <= 2*FIND_PADDING*scale { return .Ok }
+	if panel.width <= 2 * FIND_PADDING * scale { return .Ok }
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
-	radius := FIND_RADIUS * scale
-	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
-	border := render.Rect {
-		panel.x - scale,
-		panel.y - scale,
-		panel.width + 2 * scale,
-		panel.height + 2 * scale,
+	frame := Panel {
+		rect     = panel,
+		radius   = FIND_RADIUS * scale,
+		scale    = scale,
+		shadow_y = 12,
+		softness = 32,
+		border   = .Expanded,
 	}
-	draw_rect(list, {rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale})
-	draw_rect(list, {rect = border, color = theme.border, radius = radius + scale})
-	draw_rect(list, {rect = panel, color = theme.surface, radius = radius})
+	if panel_draw(list, frame, theme) != .None {return .Ok}
 	count := input_text
 	if measured := text_width(&count, status); measured > l.status.width && measured > 0 {
-		text_set_size(&count, count.size_px*l.status.width/measured)
+		text_set_size(&count, count.size_px * l.status.width / measured)
 	}
 	if result := draw_text(&count, list, status, l.status.x,
-		l.status.y+(l.status.height-count.line_height)/2+count.ascent, theme.text); result != .Ok {
+		l.status.y + (l.status.height - count.line_height) / 2 + count.ascent, theme.text); result != .Ok {
 		return result
 	}
 	for area, i in ([2]render.Rect{l.older, l.newer}) {
 		action: Find_Outcome = i == 0 ? .Older : .Newer
 		if enabled && (f.hover == action || f.pressed == action) {
 			draw_rect(list, {rect = area, color = f.pressed == action ? theme.pressed : theme.hover,
-				radius = 5*scale})
+				radius = 5 * scale})
 		}
 		if enabled && f.pressed == action { focus_ring_draw(list, area, theme, scale) }
 		if result := draw_glyph_centered(text, list, i == 0 ? '↑' : '↓', area,

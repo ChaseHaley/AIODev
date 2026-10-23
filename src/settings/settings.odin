@@ -158,7 +158,8 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		32767,
 		nil,
-		"Minimum content columns for a new pane or split. Zero disables the width check; existing panes may shrink.",
+		"Minimum content columns for a new pane or split. Zero disables the width check; " +
+			"existing panes may shrink.",
 	},
 	{
 		"pane.minimum_rows",
@@ -191,7 +192,8 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		32767,
 		nil,
-		"PNG image path for tabs and pane headers. Relative paths start beside settings.ini; empty uses the shell default.",
+		"PNG image path for tabs and pane headers. Relative paths start beside settings.ini; " +
+			"empty uses the shell default.",
 	},
 	{
 		"input.leader",
@@ -334,7 +336,8 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		4096,
 		nil,
-		"Named groups: editors:0:nvim,vim; tools:4:less,bat. First match wins; other processes use Content Padding.",
+		"Named groups: editors:0:nvim,vim; tools:4:less,bat. First match wins; " +
+			"other processes use Content Padding.",
 	},
 	{
 		"scrollback.lines",
@@ -378,7 +381,8 @@ SCHEMA :: [?]Schema_Entry {
 		1,
 		21,
 		nil,
-		"Minimum text contrast in light themes, including application colors. One preserves exact colors; dark themes stay unchanged.",
+		"Minimum text contrast in light themes, including application colors. " +
+			"One preserves exact colors; dark themes stay unchanged.",
 	},
 	{
 		"cursor.style",
@@ -661,7 +665,8 @@ assign :: proc(
 			return problem(
 				.Invalid_Value,
 				s.allocator,
-				"Use group:padding:process,process; group:padding:process. Padding is 0..1024; use executable names without paths.",
+				"Use group:padding:process,process; group:padding:process. " +
+			"Padding is 0..1024; use executable names without paths.",
 			)
 		}
 		if f64(len(value)) < entry.minimum || f64(len(value)) > entry.maximum {

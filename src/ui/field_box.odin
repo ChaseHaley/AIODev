@@ -3,11 +3,8 @@ package ui
 import "aio:glyphs"
 import "aio:render"
 
-// A one-line editable field drawn inside a rectangle. The text frame, caret and clip all come
-// from this description, so a surface cannot draw the box and hit-test it from different
-// numbers. Inset, caret width and corner radius are in device-independent pixels and `scale`
-// resolves them; the surface still owns the box's fill, border and focus ring, and the vertical
-// baseline, because the palette shares the box with a label above its query.
+// A one-line editable field drawn inside a rectangle. Draw and hit-test read the same numbers; the
+// surface still owns the fill, border, focus ring and baseline.
 Field_Box :: struct {
 	field:       ^Text_Field,
 	text:        ^Text,
@@ -19,7 +16,6 @@ Field_Box :: struct {
 	scale:       f32,
 }
 
-// The frame the field's text occupies: the rectangle narrowed by the inset on both sides.
 field_box_text_rect :: proc(box: Field_Box) -> render.Rect {
 	inset := box.inset * box.scale
 	return {box.rect.x + inset, box.rect.y, max(1, box.rect.width - 2 * inset), box.rect.height}
@@ -42,7 +38,7 @@ field_box_baseline :: proc(box: Field_Box) -> f32 {
 }
 
 // Draws the field at `baseline`, clipped to the box. A surface that draws more content in the
-// box's layer either draws it before this call or pushes its own layer afterwards.
+// box's layer draws it before this call or pushes its own layer afterwards.
 field_box_draw :: proc(
 	box: Field_Box,
 	list: ^render.Draw_List,
@@ -55,16 +51,16 @@ field_box_draw :: proc(
 	frame := field_box_text_rect(box)
 	if render.push_layer(list, box.rect, box.radius * box.scale) != .None {return .Ok}
 	return field_draw(
-		box.field,
-		list,
-		&text,
-		theme,
-		frame.x,
-		baseline,
-		frame.width,
-		focused,
-		placeholder,
-		theme.text,
-		max(1, box.caret_width * box.scale),
+		f           = box.field,
+		list        = list,
+		text        = &text,
+		theme       = theme,
+		x           = frame.x,
+		baseline    = baseline,
+		available   = frame.width,
+		focused     = focused,
+		placeholder = placeholder,
+		color       = theme.text,
+		caret_width = max(1, box.caret_width * box.scale),
 	)
 }
