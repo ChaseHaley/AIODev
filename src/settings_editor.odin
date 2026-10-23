@@ -94,6 +94,50 @@ settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 			return false
 		}
 	}
+	// The default profile's rows keep the shell command, directory and icon editable while the
+	// full Profiles group is built. They were previously schema rows; the file now uses
+	// profile.default.* and migrates the legacy keys on load.
+	if builtin := settings.profile_default(&s.profiles); builtin != nil {
+		rows := [?]ui.Editor_Row {
+			{
+				key = "profile.default.name",
+				title = "Profile Name",
+				description = "Shown in menus, tabs and the palette.",
+				value = builtin.name,
+				kind = .Text,
+			},
+			{
+				key = "profile.default.command",
+				title = "Profile Command Line",
+				description = "Executable and arguments for the default shell.",
+				value = builtin.command,
+				default_value = settings.DEFAULT_PROFILE_COMMAND,
+				kind = .Text,
+			},
+			{
+				key = "profile.default.directory",
+				title = "Profile Starting Directory",
+				description = "Initial directory for the default shell; the home prefix is expanded.",
+				value = builtin.directory,
+				default_value = settings.DEFAULT_PROFILE_DIRECTORY,
+				kind = .Text,
+			},
+			{
+				key = "profile.default.icon",
+				title = "Profile Icon",
+				description = "PNG path; empty uses the executable's text badge.",
+				value = builtin.icon,
+				kind = .Text,
+			},
+		}
+		for row in rows {
+			if ui.editor_add(p, row, "Profile: Default") != nil {
+				ui.editor_destroy(p)
+				notify(app, .Error, "Could not allocate settings editor.")
+				return false
+			}
+		}
+	}
 	if ui.editor_add(
 		   p,
 		   {
@@ -270,7 +314,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if alpha {text = "Saved and applied; the color's alpha is ignored."}
 	if warning != "" {text = fmt.tprintf("Saved. %s", warning)}
 	if row.key == "shell.command" ||
-	   row.key == "shell.directory" {text = "Saved. Applies to new or restarted shells."}
+	   row.key == "shell.directory" ||
+	   strings.has_prefix(row.key, settings.PROFILE_PREFIX) &&
+		   (strings.has_suffix(row.key, ".command") || strings.has_suffix(row.key, ".directory")) {
+		text = "Saved. Applies to new or restarted shells."
+	}
 	if row.key == "window.columns" || row.key == "window.rows" {
 		text = "Saved. Initial size applies to new sessions."
 	}
