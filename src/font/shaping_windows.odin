@@ -3,6 +3,7 @@ package font
 import dw "aio:dwrite"
 import "base:runtime"
 import "core:slice"
+import "core:unicode"
 import windows "core:sys/windows"
 import "core:unicode/utf16"
 import "core:unicode/utf8"
@@ -95,8 +96,9 @@ shaping_destroy :: proc(p: ^Shaping) {
 // Appends shaped glyphs in visual order; runes no font can display emit no glyph.
 // clusters gives each rune's grapheme cluster id (equal ids are adjacent); nil makes every
 // rune its own cluster. A multi-rune cluster the primary face cannot fully display, or one
-// that requests emoji presentation, is shaped whole in the system fallback font, so ZWJ
-// sequences, flags, keycaps, and skin tones become the single glyph the fallback font defines.
+// that requests emoji presentation, is shaped whole in the system fallback font when one
+// fallback face covers it, so ZWJ sequences, flags, keycaps, and skin tones become the single
+// glyph the fallback font defines.
 @(require_results)
 shape :: proc(
 	s: ^System,
@@ -262,14 +264,16 @@ same_starts :: proc(starts: []bool, clusters: []int) -> bool {
 	return true
 }
 
-// A multi-rune cluster goes to the fallback font when the primary face lacks one of its runes
-// or the cluster asks for emoji presentation.
+// A multi-rune cluster goes to the fallback font when the primary face lacks a rune of it
+// or the cluster asks for emoji presentation. A rune the primary lacks that draws nothing (a
+// joiner, a tag) is no reason to leave: the cluster stays where its visible runes draw, and the
+// fallback face is reserved for clusters one face can draw whole.
 @(private)
 needs_fallback :: proc(coverage: []u16, runes: []rune) -> bool {
 	if len(runes) < 2 {return false}
 	if emoji_presentation(runes) {return true}
-	for c in coverage {
-		if c == 0 {return true}
+	for c, i in coverage {
+		if c == 0 && unicode.is_graphic(runes[i]) {return true}
 	}
 	return false
 }
@@ -331,7 +335,7 @@ pictograph :: proc(r: rune) -> bool {
 }
 
 // Shapes one cluster in the font DirectWrite's system fallback picks for the whole cluster.
-// When no font maps it, each rune falls back on its own, as single runes do.
+// When no single face covers it, each rune falls back on its own, as single runes do.
 @(private, require_results)
 shape_fallback :: proc(
 	s: ^System,
@@ -344,36 +348,12 @@ shape_fallback :: proc(
 	p := &s.shaping
 	if resize(&p.text, len(runes) * 2) != nil {return .Out_Of_Memory}
 	n := utf16.encode(p.text[:], runes)
-	source: dw.Analysis_Source
-	if !dw.analysis_source_init(&source, p.text[:n], windows.L("en-us")) {
-		return .Invalid_Argument
-	}
-	weight, slant := style_values(style)
-	mapped: u32
-	font: ^dw.IFont
-	scale: f32 = 1
-	base_family := family_name(s, family)
-	if emoji_presentation(runes) {base_family = windows.L("Segoe UI Emoji")}
-	hr := s.fallback->MapCharacters(
-		&source.interface,
-		0,
-		u32(n),
-		s.collection,
-		base_family,
-		weight,
-		slant,
-		.Normal,
-		&mapped,
-		&font,
-		&scale,
-	)
-	defer release(font)
-	if checked(hr, "MapCharacters(cluster)") && font != nil && mapped > 0 && valid_size(scale) {
-		id, err := face_intern(s, font)
-		if err == .Out_Of_Memory {return err}
-		if err == .None {
-			return shape_span(s, id, runes, base, size, scale)
-		}
+	map_base := Fallback_Base.Family
+	if emoji_presentation(runes) {map_base = .Emoji}
+	mapping, covered, err := fallback_resolve(s, family, style, p.text[:n], map_base)
+	if err == .Out_Of_Memory {return err}
+	if covered {
+		return shape_span(s, mapping.face, runes, base, size, mapping.scale)
 	}
 	for r, i in runes {
 		g, found := glyph_lookup(s, family, style, r)
