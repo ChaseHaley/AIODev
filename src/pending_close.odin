@@ -1,6 +1,5 @@
 package main
 
-import "aio:layout"
 import "aio:platform"
 import "aio:ui"
 import "core:fmt"
@@ -94,7 +93,8 @@ pending_close_open_workspace :: proc(
 	pc.destination = destination != nil ? destination.id : 0
 	pc.owner = owner != nil ? owner.id : 0
 	pc.tab = 0
-	pc.tabs, pc.panes, pc.sessions = pending_close_workspace_counts(workspace)
+	counts := workspace_pane_counts(workspace)
+	pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
 	ui.confirm_open(&pc.confirm)
 	pc.confirm.extended = true
 	w.dirty = true
@@ -126,7 +126,8 @@ pending_close_text :: proc(
 		name := pc.workspace_name
 		if found := workspace_find(app, pc.workspace); pc.confirm.open && found != nil {
 			name = found.name
-			pc.tabs, pc.panes, pc.sessions = pending_close_workspace_counts(found)
+			counts := workspace_pane_counts(found)
+			pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
 		}
 		text.title = fmt.tprintf("Delete #%d “%s”?", pc.workspace, name)
 		text.body = fmt.tprintf(
@@ -169,18 +170,4 @@ pending_close_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	case .Workspace:
 		if accept {workspace_delete_accept(app, w)}
 	}
-}
-
-@(private)
-pending_close_workspace_counts :: proc(workspace: ^Workspace) -> (tabs, panes, sessions: int) {
-	tabs = len(workspace.tabs)
-	for tab in workspace.tabs {
-		for node in tab.tree.nodes {
-			if pane, ok := node.(layout.Pane); ok {
-				panes += 1
-				if pane.content.kind == .Terminal {sessions += 1}
-			}
-		}
-	}
-	return
 }

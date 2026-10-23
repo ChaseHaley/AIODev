@@ -18,13 +18,11 @@ pane_source_workspace :: proc(app: ^App, source: ^Tab) -> ^Workspace {
 @(private)
 pane_window_source_allows :: proc(workspace: ^Workspace) -> bool {
 	if workspace == nil {return false}
+	walk := workspace_panes(nil, workspace)
 	count := 0
-	for tab in workspace.tabs {
-		for node in tab.tree.nodes {
-			if _, pane := node.(layout.Pane); !pane {continue}
-			count += 1
-			if count > 1 {return true}
-		}
+	for _, ok := workspace_pane_next(&walk); ok; _, ok = workspace_pane_next(&walk) {
+		count += 1
+		if count > 1 {return true}
 	}
 	return false
 }
@@ -79,10 +77,15 @@ pane_window_preview_create :: proc(
 	node: layout.Node_Id,
 	x, y: i32,
 ) -> ^Window {
-	if !pane_window_source_allows(pane_source_workspace(app, source)) {return nil}
-	if int(node) >= len(source.tree.nodes) {return nil}
-	pane, ok := source.tree.nodes[node].(layout.Pane)
-	if !ok || pane.content.kind != .Terminal {return nil}
+	source_workspace := pane_source_workspace(app, source)
+	if !pane_window_source_allows(source_workspace) {return nil}
+	pane, terminal := workspace_session_pane_at(
+		app,
+		source_workspace,
+		tab_index_by_id(source_workspace, source.id),
+		node,
+	)
+	if !terminal {return nil}
 	workspace := workspace_create_empty(app, true)
 	if workspace == nil {return nil}
 	success := false
@@ -122,16 +125,21 @@ pane_to_window :: proc(
 	if preview == nil ||
 	   !preview.preparing ||
 	   workspace == nil || source_window.workspace != workspace ||
-	   !pane_window_source_allows(workspace) ||
-	   int(node) >= len(source.tree.nodes) {
+	   !pane_window_source_allows(workspace) {
 		return false
 	}
-	pane, valid := source.tree.nodes[node].(layout.Pane)
+	pane, terminal := workspace_session_pane_at(
+		app,
+		workspace,
+		tab_index_by_id(workspace, source.id),
+		node,
+	)
 	destination := selected_tab(preview.workspace)
-	if !valid ||
+	if !terminal ||
 	   destination == nil ||
 	   destination.tree.nodes[destination.tree.root].(layout.Pane).content !=
 		   pane.content {return false}
+	layout_pane := source.tree.nodes[node].(layout.Pane)
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
@@ -143,8 +151,8 @@ pane_to_window :: proc(
 		pane_move_abort(app, move)
 		return false
 	}
-	destination.tree.nodes[destination.tree.root] = pane
-	destination.tree.next_pane_order = pane.order
+	destination.tree.nodes[destination.tree.root] = layout_pane
+	destination.tree.next_pane_order = layout_pane.order
 	preview.preparing = false
 	preview.workspace.provisional = false
 	preview.workspace.name = name

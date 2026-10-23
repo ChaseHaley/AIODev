@@ -69,10 +69,8 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if tab.title != "" {title = tab.title}
 			icon: string
 			atlas := render.Rect{}
-			pane, terminal := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-			if terminal && pane.content.kind == .Terminal {
-				if entry := session_find(app, pane.content.id);
-				   entry != nil {icon = entry.header.icon}
+			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {
+				if pane.session != nil {icon = pane.session.header.icon}
 				result: glyphs.Result
 				atlas, result = shell_icon_atlas(app)
 				if result != .Ok {return result}
