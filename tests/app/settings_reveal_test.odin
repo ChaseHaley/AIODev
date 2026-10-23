@@ -127,27 +127,27 @@ settings_reveal_tab_selects_the_confirm_close_row :: proc(t: ^testing.T) {
 settings_reveal_theme_preserves_the_search_across_a_reload_and_posts_its_message :: proc(t: ^testing.T) {
 	f: Reveal_Fixture
 	defer reveal_fixture_destroy(t, &f)
-	if !reveal_fixture_create(t, &f, "shell.command = pwsh.exe\n") {return}
+	if !reveal_fixture_create(t, &f, "profile.default.command = pwsh.exe\n") {return}
 	e := &f.editor
-	ui.field_set(&e.filter, "shell")
+	ui.field_set(&e.filter, "profile")
 	ui.editor_filter(e)
 	// The reload is what adds the settings rows; this page only has the fixture's rows.
-	testing.expect(t, !ui.editor_select_key(e, "shell.command"))
-	if !testing.expect_value(t, os.write_entire_file(f.path, "shell.command = cmd.exe\n"), nil) {
+	testing.expect(t, !ui.editor_select_key(e, "profile.default.command"))
+	if !testing.expect_value(t, os.write_entire_file(f.path, "profile.default.command = cmd.exe\n"), nil) {
 		return
 	}
 	app.settings_reveal_page(
 		&f.state,
 		e,
 		{
-			key = "shell.command",
+			key = "profile.default.command",
 			search = .Preserve,
 			reload = true,
 			message = "Shell foreground and background now follow the theme.",
 		},
 	)
-	testing.expect_value(t, ui.field_string(&e.filter), "shell")
-	testing.expect_value(t, reveal_row_key(e), "shell.command")
+	testing.expect_value(t, ui.field_string(&e.filter), "profile")
+	testing.expect_value(t, reveal_row_key(e), "profile.default.command")
 	testing.expect_value(t, ui.editor_row(e).value, "cmd.exe")
 	testing.expect_value(t, e.message, "Shell foreground and background now follow the theme.")
 	testing.expect(t, !e.error)

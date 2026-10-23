@@ -58,10 +58,11 @@ tab_create :: proc(
 	workspace: ^Workspace,
 	command: string = "",
 	directory: string = "",
+	profile_id: string = "",
 ) -> bool {
 	tab, record_error := tab_record_reserve(workspace)
 	if record_error != .None {return false}
-	if !session_open(app, command, directory) {
+	if !session_open(app, command, directory, profile_id) {
 		tab_record_free(tab)
 		return false
 	}
@@ -160,6 +161,23 @@ tab_pointer_select :: proc(app: ^App, w: ^Window, index: int, toggle, range: boo
 tab_new :: proc(app: ^App, w: ^Window) {
 	if !pane_minimum_single(app, w) {return}
 	if !tab_create(app, w.workspace) {
+		notify(app, .Error, "Could not create a tab.")
+		return
+	}
+	tab_select(app, w, len(w.workspace.tabs) - 1)
+}
+
+// Opens the Nth visible profile from profile.order, matching the profile.open_N shortcuts.
+tab_new_profile :: proc(app: ^App, w: ^Window, index: int) {
+	if !pane_minimum_single(app, w) {return}
+	indices: [settings.PROFILE_LIMIT]int
+	count := settings.profiles_in_order(&app.settings.profiles, indices[:], visible_only = true)
+	if index < 0 || index >= count {
+		notify(app, .Error, "That shell profile is not available.")
+		return
+	}
+	profile := &app.settings.profiles.items[indices[index]]
+	if !tab_create(app, w.workspace, profile_id = profile.id) {
 		notify(app, .Error, "Could not create a tab.")
 		return
 	}
@@ -323,7 +341,7 @@ tab_duplicate :: proc(app: ^App, w: ^Window) {
 	directory, err := settings.directory_label(raw, context.temp_allocator)
 	if err != nil {notify(app, .Error, "Could not resolve the pane directory."); return}
 	if directory == "" {directory = entry.header.launch_directory}
-	if !tab_create(app, w.workspace, entry.header.command, directory) {
+	if !tab_create(app, w.workspace, entry.header.command, directory, entry.profile_id) {
 		notify(app, .Error, "Could not duplicate the tab.")
 		return
 	}

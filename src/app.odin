@@ -57,12 +57,14 @@ Session_Entry :: struct {
 	process_name_length: int,
 	header:              Pane_Header_Metadata,
 	name:                string,
+	profile_id:          string,
 }
 
 // Release only the entry's owned memory; callers own removal from app.sessions.
 session_entry_destroy :: proc(entry: ^Session_Entry) {
 	pane_header_destroy(&entry.header)
 	delete(entry.name)
+	delete(entry.profile_id)
 	term.destroy(entry.session)
 }
 
@@ -325,17 +327,25 @@ wake_platform :: proc(user: rawptr) {
 }
 
 @(private)
-session_config :: proc(app: ^App, geometry: term.Geometry) -> term.Config {
-	directory, err := settings.expand_home(app.settings.shell.directory, context.temp_allocator)
+session_config :: proc(
+	app: ^App,
+	geometry: term.Geometry,
+	profile: ^settings.Profile,
+	command_override: string = "",
+) -> term.Config {
+	directory_text := app.settings.shell.directory
+	command := app.settings.shell.command
+	if profile != nil {
+		directory_text, command = profile.directory, profile.command
+	}
+	if command_override != "" {command = command_override}
+	directory, err := settings.expand_home(directory_text, context.temp_allocator)
 	if err != nil {
 		log.errorf("expanding the shell directory failed: %v", err)
-		directory = app.settings.shell.directory
+		directory = directory_text
 	}
 	return {
-		command_line = settings.shell_command_line(
-			app.settings.shell.command,
-			app.settings.shell.report_directory,
-		),
+		command_line = settings.shell_command_line(command, app.settings.shell.report_directory),
 		refresh_environment = app.settings.shell.refresh_environment,
 		working_directory = directory,
 		geometry = geometry,
@@ -368,14 +378,26 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 }
 
 @(private)
-session_open :: proc(app: ^App, command: string = "", directory: string = "") -> bool {
+session_open :: proc(
+	app: ^App,
+	command: string = "",
+	directory: string = "",
+	profile_id: string = "",
+) -> bool {
+	profile, _ := settings.profile_resolve(&app.settings, profile_id)
 	geometry := initial_geometry(app)
-	config := session_config(app, geometry)
-	if command != "" {config.command_line = command}
+	config := session_config(app, geometry, profile, command)
 	if directory != "" {config.working_directory = directory}
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
+		return false
+	}
+	resolved_id := profile_id
+	if resolved_id == "" && profile != nil {resolved_id = profile.id}
+	owned_id, id_error := strings.clone(resolved_id)
+	if id_error != nil {
+		term.destroy(session)
 		return false
 	}
 	app.next_session_id += 1
@@ -385,8 +407,10 @@ session_open :: proc(app: ^App, command: string = "", directory: string = "") ->
 			id = app.next_session_id,
 			session = session,
 			status = term.status(session).kind,
+			profile_id = owned_id,
 		},
 	); allocation_error != nil {
+		delete(owned_id)
 		term.destroy(session)
 		return false
 	}
@@ -420,7 +444,16 @@ session_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
 
 session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	geometry := term.geometry(entry.session)
-	config := session_config(app, geometry)
+	profile, requested := settings.profile_resolve(&app.settings, entry.profile_id)
+	config := session_config(app, geometry, profile)
+	// A removed or unusable profile restarts from the exact line it last launched, without
+	// applying the directory-reporting wrapper a second time.
+	if !requested && entry.profile_id != "" && entry.header.command != "" {
+		config.command_line = entry.header.command
+		if entry.header.launch_directory != "" {
+			config.working_directory = entry.header.launch_directory
+		}
+	}
 	term.restart(entry.session, config)
 	pane_header_launch(&entry.header, config)
 	pane_header_refresh(entry)

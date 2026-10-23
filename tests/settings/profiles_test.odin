@@ -89,6 +89,33 @@ profile.too.many.extra = x
 }
 
 @(test)
+profile_resolution_falls_back_to_default :: proc(t: ^testing.T) {
+	s, diagnostics, err := settings.parse(`profile.pwsh.command = pwsh.exe -NoLogo
+profile.empty.hidden = true
+shell.default_profile = pwsh
+`)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	profile, requested := settings.profile_resolve(&s, "pwsh")
+	testing.expect(t, requested)
+	testing.expect_value(t, profile.id, "pwsh")
+	profile, requested = settings.profile_resolve(&s, "")
+	testing.expect(t, requested)
+	testing.expect_value(t, profile.id, "pwsh")
+	profile, requested = settings.profile_resolve(&s, "missing")
+	testing.expect(t, !requested)
+	testing.expect_value(t, profile.id, "pwsh")
+	profile, requested = settings.profile_resolve(&s, "empty")
+	testing.expect(t, !requested)
+	testing.expect_value(t, profile.id, "pwsh")
+	profile, requested = settings.profile_resolve(&s, "default")
+	testing.expect(t, requested)
+	testing.expect_value(t, profile.id, "default")
+}
+
+@(test)
 migration_rewrites_legacy_shell_keys :: proc(t: ^testing.T) {
 	source := "# keep\r\nshell.command = cmd.exe /k echo hi\r\n" +
 		`shell.directory = D:\work` + "\r\nfont.size = 12\r\n"

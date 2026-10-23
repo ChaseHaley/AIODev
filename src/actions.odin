@@ -100,6 +100,15 @@ Action :: enum u32 {
 	Workspace_8,
 	Workspace_9,
 	Show_Build_Info,
+	Profile_1,
+	Profile_2,
+	Profile_3,
+	Profile_4,
+	Profile_5,
+	Profile_6,
+	Profile_7,
+	Profile_8,
+	Profile_9,
 }
 
 @(private)
@@ -278,6 +287,51 @@ ACTIONS :: [Action]Action_Info {
 		"Use Theme for Shell Foreground and Background",
 		nil,
 	},
+	.Profile_1 = {
+		"profile.open_1",
+		"New Tab with Profile 1",
+		{{.Digit_1, {.Control, .Shift}}},
+	},
+	.Profile_2 = {
+		"profile.open_2",
+		"New Tab with Profile 2",
+		{{.Digit_2, {.Control, .Shift}}},
+	},
+	.Profile_3 = {
+		"profile.open_3",
+		"New Tab with Profile 3",
+		{{.Digit_3, {.Control, .Shift}}},
+	},
+	.Profile_4 = {
+		"profile.open_4",
+		"New Tab with Profile 4",
+		{{.Digit_4, {.Control, .Shift}}},
+	},
+	.Profile_5 = {
+		"profile.open_5",
+		"New Tab with Profile 5",
+		{{.Digit_5, {.Control, .Shift}}},
+	},
+	.Profile_6 = {
+		"profile.open_6",
+		"New Tab with Profile 6",
+		{{.Digit_6, {.Control, .Shift}}},
+	},
+	.Profile_7 = {
+		"profile.open_7",
+		"New Tab with Profile 7",
+		{{.Digit_7, {.Control, .Shift}}},
+	},
+	.Profile_8 = {
+		"profile.open_8",
+		"New Tab with Profile 8",
+		{{.Digit_8, {.Control, .Shift}}},
+	},
+	.Profile_9 = {
+		"profile.open_9",
+		"New Tab with Profile 9",
+		{{.Digit_9, {.Control, .Shift}}},
+	},
 }
 
 @(require_results)
@@ -404,6 +458,16 @@ run_action :: proc(
 		app.running = false
 	case .New_Tab:
 		tab_new(app, w)
+	case .Profile_1,
+	     .Profile_2,
+	     .Profile_3,
+	     .Profile_4,
+	     .Profile_5,
+	     .Profile_6,
+	     .Profile_7,
+	     .Profile_8,
+	     .Profile_9:
+		tab_new_profile(app, w, int(action) - int(Action.Profile_1))
 	case .New_Workspace:
 		workspace_new(app, w, false)
 	case .Change_Workspace:

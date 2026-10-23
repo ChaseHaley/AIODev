@@ -450,6 +450,16 @@ profile_default :: proc(p: ^Profiles) -> ^Profile {
 	return profile_find(p, PROFILE_DEFAULT_ID)
 }
 
+// The profile a launch should use. An unknown or commandless ID falls back to the default
+// profile; `requested` is false so a restart can prefer the session's recorded command line.
+profile_resolve :: proc(s: ^Settings, id: string) -> (profile: ^Profile, requested: bool) {
+	if id == "" {return profile_default(&s.profiles), true}
+	if found := profile_find(&s.profiles, id); found != nil && found.command != "" {
+		return found, true
+	}
+	return profile_default(&s.profiles), false
+}
+
 profile_visible :: proc(profile: ^Profile) -> bool {
 	return !profile.hidden && profile.command != ""
 }
