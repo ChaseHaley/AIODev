@@ -182,14 +182,12 @@ ghostty_button :: proc(button: input.Mouse_Button) -> ghostty.Mouse_Button {
 
 @(private)
 encoder_size :: proc(g: Geometry) -> ghostty.Mouse_Encoder_Size {
-	grid_width := u32(g.columns) * g.cell_width
-	grid_height := u32(g.rows) * g.cell_height
+	extent := grid_extent(g)
 	size := ghostty.sized(ghostty.Mouse_Encoder_Size)
 	size.screen_width, size.screen_height = g.surface_width, g.surface_height
 	size.cell_width, size.cell_height = g.cell_width, g.cell_height
 	size.padding_left, size.padding_top = g.padding_left, g.padding_top
-	size.padding_right = g.surface_width - min(g.surface_width, g.padding_left + grid_width)
-	size.padding_bottom = g.surface_height - min(g.surface_height, g.padding_top + grid_height)
+	size.padding_right, size.padding_bottom = extent.padding_right, extent.padding_bottom
 	return size
 }
 
