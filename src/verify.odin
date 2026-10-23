@@ -1107,7 +1107,16 @@ when AIO_CONTROL {
 		case:
 			err = .Invalid_Argument
 		}
-		if err != .None {verify_error(app, err); return}
+		if err != .None {
+			// Evidence commands explain bad input, files, or devices in their own words.
+			text := strings.to_string(out)
+			if strings.has_prefix(text, "error:") {
+				verify_reply(app, false, text)
+				return
+			}
+			verify_error(app, err)
+			return
+		}
 		verify_reply(app, passed, strings.to_string(out))
 	}
 
