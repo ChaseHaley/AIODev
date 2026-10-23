@@ -328,7 +328,7 @@ SCHEMA :: [?]Schema_Entry {
 		"Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap.",
 	},
 	{
-		"process.padding_groups",
+		PADDING_GROUPS_KEY,
 		"Process Padding Groups",
 		.String,
 		offset_of(Settings, process) + offset_of(Process_Settings, padding_groups),
@@ -336,7 +336,7 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		4096,
 		nil,
-		"Named groups: editors:0:nvim,vim; tools:4:less,bat. First match wins; " +
+		"Named groups: " + PADDING_GROUPS_EXAMPLE + ". First match wins; " +
 			"other processes use Content Padding.",
 	},
 	{
@@ -661,13 +661,9 @@ assign :: proc(
 	p := rawptr(uintptr(s) + entry.offset)
 	switch entry.kind {
 	case .String:
-		if entry.key == "process.padding_groups" && !process_groups_valid(value) {
-			return problem(
-				.Invalid_Value,
-				s.allocator,
-				"Use group:padding:process,process; group:padding:process. " +
-			"Padding is 0..1024; use executable names without paths.",
-			)
+		if entry.key == PADDING_GROUPS_KEY && !padding_groups_valid(value) {
+			buffer: [192]u8
+			return problem(.Invalid_Value, s.allocator, padding_groups_rules(buffer[:]))
 		}
 		if f64(len(value)) < entry.minimum || f64(len(value)) > entry.maximum {
 			return range_problem(entry, value, s.allocator)

@@ -43,3 +43,66 @@ process_padding_groups_reject_malformed_rules :: proc(t: ^testing.T) {
 		settings.diagnostics_destroy(&diagnostics)
 	}
 }
+
+@(test)
+padding_groups_description_and_error_text_show_the_grammar_example :: proc(t: ^testing.T) {
+	entry := settings.schema_find(settings.PADDING_GROUPS_KEY)
+	if testing.expect(t, entry != nil) {
+		testing.expect(t, strings.contains(entry.description, settings.PADDING_GROUPS_EXAMPLE))
+	}
+	s, diagnostics, err := settings.parse(
+		settings.PADDING_GROUPS_KEY + " = " + settings.PADDING_GROUPS_EXAMPLE,
+	)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	testing.expect_value(t, s.process.padding_groups, settings.PADDING_GROUPS_EXAMPLE)
+
+	broken, broken_diagnostics, broken_error := settings.parse(
+		settings.PADDING_GROUPS_KEY + " = broken",
+	)
+	defer settings.destroy(&broken)
+	defer settings.diagnostics_destroy(&broken_diagnostics)
+	testing.expect_value(t, broken_error, nil)
+	testing.expect_value(t, len(broken_diagnostics), 1)
+	testing.expect(
+		t,
+		strings.contains(broken_diagnostics[0].message, settings.PADDING_GROUPS_EXAMPLE),
+	)
+	testing.expect(t, strings.contains(broken_diagnostics[0].message, "0..1024"))
+}
+
+@(test)
+padding_group_names_validation_accepts_are_the_names_lookup_matches :: proc(t: ^testing.T) {
+	s, diagnostics, err := settings.parse(
+		"window.padding = 8\nprocess.padding_groups = odd:3:my app,weird'name,a.b,vim",
+	)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	for name in ([?]string{"my app", "WEIRD'NAME", "a.b", "VIM.EXE"}) {
+		padding, matched := settings.process_padding(&s, name)
+		testing.expect(t, matched && padding == 3, name)
+	}
+}
+
+@(test)
+padding_group_lookup_skips_a_malformed_group_that_validation_rejects :: proc(t: ^testing.T) {
+	s := settings.Settings{}
+	s.window.padding = 8
+	s.process.padding_groups = "bad:0:vim*; tools:4:bat"
+	padding, matched := settings.process_padding(&s, "bat")
+	testing.expect(t, matched && padding == 4)
+	padding, matched = settings.process_padding(&s, "vim*")
+	testing.expect(t, !matched && padding == 8)
+
+	parsed, diagnostics, err := settings.parse(
+		fmt.tprintf("%s = %s", settings.PADDING_GROUPS_KEY, s.process.padding_groups),
+	)
+	defer settings.destroy(&parsed)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(diagnostics), 1)
+}
