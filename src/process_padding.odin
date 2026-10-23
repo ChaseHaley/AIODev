@@ -9,12 +9,12 @@ import "core:time"
 @(private)
 PROCESS_INTERVAL :: 500 * time.Millisecond
 
-pane_padding :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) -> f32 {
+pane_padding :: proc(app: ^App, scale: f32, entry: ^Session_Entry) -> f32 {
 	padding := app.settings.window.padding
 	if entry != nil {
 		if value, ok := entry.process_padding.?; ok {padding = value}
 	}
-	return math.round(f32(padding) * w.scale)
+	return math.round(f32(padding) * scale)
 }
 
 update_process_padding :: proc(app: ^App) {

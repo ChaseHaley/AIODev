@@ -445,7 +445,7 @@ when AIO_CONTROL {
 				{"window.preview_visible", fmt.tprintf("%t", w.preview_visible)},
 				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
-				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w, entry))},
+				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
 				{
 					"session.process",
 					entry != nil ? string(entry.process_name[:entry.process_name_length]) : "",
@@ -935,17 +935,13 @@ when AIO_CONTROL {
 		case control.Dpi:
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case control.Resize:
-			padding :=
-				pane_padding(app, w, focused_session(app, w)) +
-				f32(
-					ui.pane_area(f32(w.width), f32(w.height), 0, f32(app.settings.pane.gap), w.scale).x,
-				)
-			width := i32(f32(r.columns) * w.metrics.cell_width + 2 * padding)
-			height := i32(
-				f32(r.rows) * w.metrics.cell_height +
-				2 * padding +
-				window_tab_bar(app, w).height +
-				w.header_height,
+			_, width, height := pane_box_for_grid(
+				app,
+				w.scale,
+				w.metrics,
+				u16(r.columns),
+				u16(r.rows),
+				pane_insets(app, w.scale, focused_session(app, w), .Terminal),
 			)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) !=
 			   .None {return .System}
