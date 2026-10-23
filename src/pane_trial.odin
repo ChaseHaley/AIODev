@@ -16,7 +16,7 @@ Pane_Trial_Result :: struct {
 	error: Pane_Trial_Error,
 }
 
-@(private)
+@(private, require_results)
 pane_trial_copy :: proc(original: ^layout.Layout, allocator: runtime.Allocator) -> (layout.Layout, bool) {
 	trial := original^
 	nodes, err := make([dynamic]layout.Node, len(original.nodes), len(original.nodes) + 2, allocator)
@@ -26,7 +26,7 @@ pane_trial_copy :: proc(original: ^layout.Layout, allocator: runtime.Allocator) 
 	return trial, true
 }
 
-@(private)
+@(private, require_results)
 pane_trial_evaluate :: proc(
 	app: ^App,
 	w: ^Window,
