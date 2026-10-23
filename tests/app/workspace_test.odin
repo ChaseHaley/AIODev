@@ -146,7 +146,11 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect(t, app.settings_active(w))
 	testing.expect(t, w.editor.open && len(w.editor.rows) > 0)
 	testing.expect(t, app.selected_tab(original) == settings_tab)
+	panes, controls, positions := raw_data(w.panes), raw_data(w.tab_controls), raw_data(w.tab_positions)
 	if !testing.expect(t, app.workspace_select(&state, w, two)) { return }
+	testing.expect_value(t, raw_data(w.panes), panes)
+	testing.expect_value(t, raw_data(w.tab_controls), controls)
+	testing.expect_value(t, raw_data(w.tab_positions), positions)
 	testing.expect_value(t, os.remove(path), nil)
 	testing.expect(t, !app.workspace_select(&state, w, original))
 	testing.expect(t, w.workspace == two && !w.editor.open)

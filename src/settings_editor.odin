@@ -49,8 +49,7 @@ shortcut_group :: proc(name: string) -> string {
 
 // Fills the editor from the settings file; the settings tab shows it.
 @(private)
-settings_load :: proc(app: ^App, w: ^Window) -> bool {
-	p := &w.editor
+settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 	ui.editor_destroy(p)
 	data, err := os.read_entire_file(app.settings_path, context.allocator)
 	if err != nil {
@@ -187,7 +186,7 @@ editor_open :: proc(app: ^App, w: ^Window) {
 		tab_select(app, w, index)
 		return
 	}
-	if !settings_load(app, w) {return}
+	if !settings_load(app, &w.editor) {return}
 	tab, err := new(Tab)
 	if err != nil || layout.init(&tab.tree, {.Settings, 0}) != nil {
 		if tab != nil {layout.destroy(&tab.tree); free(tab)}
@@ -312,7 +311,7 @@ editor_follow_theme :: proc(app: ^App, w: ^Window) {
 	reload_settings(app, false)
 	if w.editor.open {
 		filter := strings.clone(ui.field_string(&w.editor.filter), context.temp_allocator)
-		if !settings_load(app, w) {return}
+		if !settings_load(app, &w.editor) {return}
 		ui.field_set(&w.editor.filter, filter)
 		ui.editor_filter(&w.editor)
 		ui.editor_select_key(&w.editor, "colors.follow_theme")

@@ -118,6 +118,21 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.process_id(first_session), first_pid)
 	testing.expect_value(t, len(state.sessions), 2)
 
+	first = state.windows[1]
+	app.run_action(&state, first, .Settings_UI)
+	app.window_close(&state, first)
+	testing.expect_value(t, os.remove(path), nil)
+	testing.expect(t, !app.window_open(&state, state.workspaces[0]))
+	testing.expect_value(t, len(state.windows), 1)
+	testing.expect_value(t, len(state.sessions), 2)
+	testing.expect_value(t, term.process_id(first_session), first_pid)
+	testing.expect_value(t, term.process_id(second_session), second_pid)
+	testing.expect_value(t, os.write_entire_file(path, settings), nil)
+	if !testing.expect(t, app.window_open(&state, state.workspaces[0])) {return}
+	first = state.windows[1]
+	testing.expect(t, first.editor.open && app.settings_active(first))
+	app.tab_close(&state, first, 1)
+
 	context.allocator = runtime.nil_allocator()
 	opened = app.window_open(&state, second_workspace)
 	context.allocator = allocator

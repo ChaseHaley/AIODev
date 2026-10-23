@@ -1,9 +1,7 @@
 package main
 
 import "aio:layout"
-import "aio:render"
 import "aio:term"
-import "aio:term_view"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"
@@ -97,51 +95,6 @@ workspace_delete_text :: proc(app: ^App, w: ^Window) -> (title, body, note: stri
 	return
 }
 
-// Preparation owns all fallible view resources; the old window stays attached until it succeeds.
-@(private)
-@(require_results)
-workspace_delete_prepare_view :: proc(
-	app: ^App,
-	workspace: ^Workspace,
-	prepared: ^Window,
-) -> bool {
-	prepared.workspace, prepared.tree = workspace, &selected_tab(workspace).tree
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, prepared) {return false}
-	if resize(&prepared.tab_controls, len(workspace.tabs) + 1) != nil ||
-	   resize(&prepared.tab_positions, len(workspace.tabs)) != nil ||
-	   reserve(&prepared.panes, len(prepared.tree.nodes)) != nil ||
-	   reserve(&prepared.dividers, len(prepared.tree.nodes)) != nil ||
-	   reserve(&prepared.views, len(prepared.tree.nodes)) != nil {return false}
-	for &position, i in prepared.tab_positions {position.value, position.target = f32(i), f32(i)}
-	for node in prepared.tree.nodes {
-		pane, ok := node.(layout.Pane)
-		if !ok || pane.content.kind != .Terminal {continue}
-		view: term_view.View
-		if !term_view.create(&view) {return false}
-		append(
-			&prepared.views,
-			Pane_View{content = pane.content, view = view, cache = render.draw_list_init()},
-		)
-	}
-	return true
-}
-
-@(private)
-workspace_delete_view_destroy :: proc(prepared: ^Window) {
-	for &pane in prepared.views {
-		term_view.destroy(&pane.view)
-		render.draw_list_destroy(&pane.cache)
-	}
-	delete(prepared.views)
-	delete(prepared.tab_controls)
-	delete(prepared.tab_positions)
-	delete(prepared.panes)
-	delete(prepared.dividers)
-	ui.editor_destroy(&prepared.editor)
-	prepared.views, prepared.tab_controls, prepared.tab_positions = nil, nil, nil
-	prepared.panes, prepared.dividers = nil, nil
-}
-
 @(private)
 workspace_delete_release :: proc(app: ^App, workspace: ^Workspace) {
 	for tab in workspace.tabs {
@@ -171,8 +124,8 @@ workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	committed := false
 	defer if fresh &&
 	   !committed {workspace_delete_release(app, destination); workspace_pickers_refresh(app)}
-	prepared: Window
-	defer workspace_delete_view_destroy(&prepared)
+	prepared: Workspace_View_Resources
+	defer workspace_view_destroy(&prepared)
 	created_tab := destination != nil && len(destination.tabs) == 0
 	if created_tab && !tab_create(app, destination) {return false}
 	defer if created_tab && !fresh && !committed {workspace_close_tab(app, destination, 0)}
@@ -180,19 +133,12 @@ workspace_delete_commit :: proc(app: ^App, workspace: ^Workspace) -> bool {
 		entry := session_find(app, app.next_session_id)
 		if entry == nil || term.status(entry.session).kind == .Failed {return false}
 	}
-	if owner != nil && !workspace_delete_prepare_view(app, destination, &prepared) {return false}
+	if owner != nil && !workspace_view_prepare(app, &prepared, destination) {return false}
 	if owner != nil {
 		arrange_cancel(app, owner)
 		focus_leave(app, owner)
 		tab_close_restore(owner)
-		workspace_delete_view_destroy(owner)
-		owner.editor, prepared.editor = prepared.editor, {}
-		owner.views, prepared.views = prepared.views, nil
-		owner.tab_controls, prepared.tab_controls = prepared.tab_controls, nil
-		owner.tab_positions, prepared.tab_positions = prepared.tab_positions, nil
-		owner.panes, prepared.panes = prepared.panes, nil
-		owner.dividers, prepared.dividers = prepared.dividers, nil
-		owner.workspace, owner.tree = destination, &selected_tab(destination).tree
+		workspace_view_move(&owner.resources, &prepared)
 		owner.close_confirm = {}
 		owner.close_confirm_workspace = 0
 		owner.tab_hover, owner.tab_close_pressed, owner.tab_pressed = -1, -1, false

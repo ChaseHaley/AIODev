@@ -36,19 +36,14 @@ Window :: struct {
 	id: platform.Window_Id,
 	surface: ^render.Surface,
 	ui_text: ui.Text,
-	workspace: ^Workspace,
-	tree: ^layout.Layout,
-	dividers: [dynamic]layout.Divider,
+	using resources: Workspace_View_Resources,
 	dragging: Divider_Drag,
 	divider_click_node: layout.Node_Id,
 	divider_click_ns: i64,
 	pane_drag: Pane_Drag,
 	tab_drag: Tab_Drag,
-	tab_positions: [dynamic]ui.Motion,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
 	split_overlay: bool,
-	panes: [dynamic]layout.Pane_Rect,
-	views: [dynamic]Pane_View,
 	list: render.Draw_List,
 	width, height: i32,
 	header_height: f32,
@@ -65,10 +60,8 @@ Window :: struct {
 	pointer: [2]f32,
 	pointer_shape: platform.Cursor_Shape,
 	find: ui.Find_Bar,
-	editor: ui.Editor,
 	leader_until: time.Tick,
 	tab_underline: ui.Motion,
-	tab_controls: [dynamic]ui.Control_Motion,
 	tab_hover: int,
 	tab_pressed: bool,
 	tab_close_pressed: int,
@@ -138,21 +131,16 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.ui_text = app.ui_text
 	w.metrics = window_metrics(app, w.scale)
 	w.list = render.draw_list_init()
-	w.panes = make([dynamic]layout.Pane_Rect)
-	w.views = make([dynamic]Pane_View)
 	ui.find_init(&w.find)
 	w.tab_hover = -1
 	w.tab_close_pressed = -1
 	w.caption_hover, w.caption_pressed = -1, -1
 	w.divider_click_node = layout.INVALID_NODE
-	w.tab_controls = make([dynamic]ui.Control_Motion)
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
 	w.dirty = true
-	w.workspace = workspace
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, w) {window_free(w); return nil}
+	if !workspace_view_init(app, &w.resources, workspace) {window_free(w); return nil}
 	if w.workspace.selection_anchor == 0 {tab_select_one(w.workspace, w.workspace.selected)}
-	w.tree = &selected_tab(w.workspace).tree
 	g := initial_geometry(app)
 	if entry := focused_session(app, w); entry != nil {g = term.geometry(entry.session)}
 	desc := platform.Window_Desc {
@@ -240,17 +228,9 @@ window_close :: proc(app: ^App, w: ^Window) {
 
 @(private)
 window_free :: proc(w: ^Window) {
-	for &pane in w.views {
-		term_view.destroy(&pane.view)
-		render.draw_list_destroy(&pane.cache)
-	}
-	delete(w.views)
-	delete(w.tab_controls)
-	delete(w.tab_positions)
+	workspace_view_destroy(&w.resources)
 	delete(w.tab_drag.order)
-	delete(w.panes)
 	ui.find_destroy(&w.find)
-	ui.editor_destroy(&w.editor)
 	delete(w.rename.bytes)
 	delete(w.workspace_picker.query.bytes)
 	delete(w.workspace_picker.saved_query.bytes)
@@ -259,7 +239,6 @@ window_free :: proc(w: ^Window) {
 	delete(w.close_confirm_workspace_name)
 	delete(w.close_confirm_destination_name)
 	render.draw_list_destroy(&w.list)
-	delete(w.dividers)
 	free(w)
 }
 
