@@ -546,13 +546,14 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		}
 	}
 	if palette_visible(app, w) {
+		opacity, rise := ui.presence_fade(app.palette.presence, 4*w.scale)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
-			app.palette.motion.value, app.palette.open ? 4*w.scale*(1-app.palette.motion.value) : 0,
+			opacity, rise,
 		)
 		if result != .Ok { return frame, result }
 	}
-	if pc := &w.pending_close; pc.confirm.open || pc.confirm.motion.value > 0 {
+	if pc := &w.pending_close; ui.presence_visible(pc.confirm.presence) {
 		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
 		content := pending_close_text(app, pc, w.workspace)
 		result := ui.confirm_draw(
@@ -568,14 +569,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			content.label,
 			content.note,
 		)
-		ui.fade_draw(
-			&w.list,
-			layers,
-			rects,
-			glyph_count,
-			pc.confirm.motion.value,
-			pc.confirm.open ? 4 * w.scale * (1 - pc.confirm.motion.value) : 0,
-		)
+		opacity, rise := ui.presence_fade(pc.confirm.presence, 4 * w.scale)
+		ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
 		if result != .Ok {return frame, result}
 	}
 	if w.rename_open {

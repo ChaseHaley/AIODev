@@ -8,6 +8,7 @@ import "aio:render"
 import "base:runtime"
 import "core:slice"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 
 @(private) PALETTE_MAX_ROWS :: 8
@@ -18,6 +19,10 @@ import "core:unicode/utf8"
 @(private) PALETTE_RADIUS :: 10
 @(private) PALETTE_TEXT_INSET :: 14
 @(private) PALETTE_SETTING_SUFFIX :: " SETTING"
+@(private) PALETTE_PRESENCE :: Presence_Spec {
+	open  = 120 * time.Millisecond,
+	close = 90 * time.Millisecond,
+}
 
 Outcome :: enum {
 	None,
@@ -42,8 +47,7 @@ Palette_Result :: struct {
 }
 
 Palette :: struct {
-	open: bool,
-	motion: Motion,
+	using presence: Presence,
 	query: Text_Field,
 	selected, scroll: int,
 	visible_rows: int,
@@ -94,14 +98,14 @@ palette_destroy :: proc(p: ^Palette) {
 }
 
 palette_open :: proc(p: ^Palette, registry: ^commands.Registry) {
-	p.open = true
+	presence_open(&p.presence, PALETTE_PRESENCE)
 	field_set(&p.query, "")
 	p.selected, p.scroll = 0, 0
 	refresh(p, registry)
 }
 
 palette_close :: proc(p: ^Palette) {
-	p.open = false
+	presence_close(&p.presence)
 	p.query.dragging = false
 }
 

@@ -8,6 +8,7 @@ import "aio:render"
 import "aio:settings"
 import "aio:term_view"
 import "aio:ui"
+import "core:time"
 
 @(private)
 Notice_Allocations :: struct { backing: runtime.Allocator, calls: int }
@@ -40,6 +41,40 @@ notice_severities_have_unique_words_symbols_and_readable_theme_colors :: proc(t:
 			}
 		}
 	}
+}
+
+@(test)
+notices_hold_a_removed_clone_until_its_close_settles :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	ui.notices_set_animations(&n, true)
+	now := time.tick_now()
+	ui.notices_put(&n, 1, .Info, "closing", 0)
+	ui.notices_animate(&n, now)
+	testing.expect_value(t, len(n.items), 1)
+	testing.expect(t, ui.notices_clear(&n, 1))
+	testing.expect_value(t, len(n.items), 0)
+	testing.expect_value(t, len(n.fading), 1)
+	testing.expect(t, ui.notices_animating(&n))
+	testing.expect(t, ui.notices_animate(&n, time.tick_add(now, time.Second)))
+	testing.expect_value(t, len(n.fading), 0)
+	testing.expect(t, !ui.notices_animating(&n))
+	testing.expect(t, !ui.notices_animate(&n, time.tick_add(now, 2*time.Second)))
+	testing.expect_value(t, len(n.fading), 0)
+}
+
+@(test)
+notices_without_animations_free_a_removed_clone_immediately :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	ui.notices_put(&n, 1, .Info, "snapped", 0)
+	testing.expect_value(t, len(n.items), 1)
+	testing.expect(t, ui.notices_clear(&n, 1))
+	testing.expect_value(t, len(n.items), 0)
+	testing.expect_value(t, len(n.fading), 0)
+	testing.expect(t, !ui.notices_animating(&n))
 }
 
 @(test)

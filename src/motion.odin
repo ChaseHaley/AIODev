@@ -5,11 +5,11 @@ import "aio:ui"
 import "core:time"
 
 motion_active :: proc(app: ^App) -> bool {
-	if app.palette_window != 0 && ui.motion_active(app.palette.motion) {return true}
+	if app.palette_window != 0 && ui.presence_active(app.palette.presence) {return true}
 	if ui.notices_animating(&app.notices) {return true}
 	for w in app.windows {
 		if workspace_picker_active(&w.workspace_picker) && ui.motion_active(w.workspace_picker.rename_motion) { return true }
-		if ui.motion_active(w.tab_underline) || ui.motion_active(w.pending_close.confirm.motion) { return true }
+		if ui.motion_active(w.tab_underline) || ui.presence_active(w.pending_close.confirm.presence) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
@@ -23,18 +23,10 @@ motion_active :: proc(app: ^App) -> bool {
 update_motion :: proc(app: ^App) {
 	now := time.tick_now()
 	p := &app.palette
-	ui.motion_target(
-		&p.motion,
-		p.open ? 1 : 0,
-		(p.open ? 120 : 90) * time.Millisecond,
-		p.open ? .Decelerate : .Accelerate,
-		app.animations,
-		now,
-	)
-	palette_changed := ui.motion_update(&p.motion, now)
+	palette_changed, palette_settled := ui.presence_advance(&p.presence, app.animations, now)
 	if owner := window_find(app, app.palette_window); owner != nil {
 		if palette_changed {owner.dirty = true}
-		if !p.open && p.motion.value == 0 {palette_release(app, owner)}
+		if palette_settled {palette_release(app, owner)}
 	}
 	notices_changed := ui.notices_animate(&app.notices, now)
 	if notices_changed {mark_all_dirty(app)}
@@ -95,15 +87,7 @@ update_motion :: proc(app: ^App) {
 			}
 		}
 		c := &w.pending_close.confirm
-		ui.motion_target(
-			&c.motion,
-			c.open ? 1 : 0,
-			(c.open ? 120 : 90) * time.Millisecond,
-			c.open ? .Decelerate : .Accelerate,
-			app.animations,
-			now,
-		)
-		confirm_changed := ui.motion_update(&c.motion, now)
+		confirm_changed, _ := ui.presence_advance(&c.presence, app.animations, now)
 		underline_changed := ui.motion_update(&w.tab_underline, now)
 		if underline_changed ||
 		   controls_changed ||
