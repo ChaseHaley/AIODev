@@ -362,26 +362,19 @@ glyph_lookup :: proc(s: ^System, family: Family, style: Style, r: rune) -> (Glyp
 	if cached, ok := s.cache[key]; ok {
 		return cached.glyph, cached.found
 	}
-	name := family_name(s, family)
 	// Reserve below half full so the insertion cannot allocate after DirectWrite succeeds.
 	if reserve(&s.cache, (len(s.cache) + 1) * 2) != nil {
 		return {}, false
 	}
-	result := lookup_uncached(s, family.faces[style], style, r, name)
+	result := lookup_uncached(s, family, style, r)
 	s.cache[key] = result
 	return result.glyph, result.found
 }
 
 @(private, require_results)
-lookup_uncached :: proc(
-	s: ^System,
-	primary: Face_Id,
-	style: Style,
-	r: rune,
-	name: windows.wstring,
-) -> Lookup_Result {
+lookup_uncached :: proc(s: ^System, family: Family, style: Style, r: rune) -> Lookup_Result {
 	code := u32(r)
-	id := primary
+	id := family.faces[style]
 	face := face_get(s, id)
 	index: u16
 	if !checked(face.handle->GetGlyphIndices(&code, 1, &index), "GetGlyphIndices") {
@@ -390,7 +383,7 @@ lookup_uncached :: proc(
 	scale: f32 = 1
 	if index == 0 {
 		text: [2]u16
-		length: u32 = 1
+		length := 1
 		if code < 0x10000 {
 			text[0] = u16(code)
 		} else {
@@ -398,35 +391,11 @@ lookup_uncached :: proc(
 			text[0], text[1] = u16(high), u16(low)
 			length = 2
 		}
-		source: dw.Analysis_Source
-		if !dw.analysis_source_init(&source, text[:length], windows.L("en-us")) {
+		mapping, found, _ := fallback_resolve(s, family, style, text[:length])
+		if !found {
 			return {}
 		}
-		weight, slant := style_values(style)
-		mapped: u32
-		font: ^dw.IFont
-		hr := s.fallback->MapCharacters(
-			&source.interface,
-			0,
-			length,
-			s.collection,
-			name,
-			weight,
-			slant,
-			.Normal,
-			&mapped,
-			&font,
-			&scale,
-		)
-		defer release(font)
-		if !checked(hr, "MapCharacters") || font == nil || mapped < length || !valid_size(scale) {
-			return {}
-		}
-		err: Error
-		id, err = face_intern(s, font)
-		if err != .None {
-			return {}
-		}
+		id, scale = mapping.face, mapping.scale
 		face = face_get(s, id)
 		if !checked(face.handle->GetGlyphIndices(&code, 1, &index), "GetGlyphIndices(fallback)") ||
 		   index == 0 {
