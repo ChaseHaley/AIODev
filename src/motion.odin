@@ -9,7 +9,7 @@ motion_active :: proc(app: ^App) -> bool {
 	if ui.notices_animating(&app.notices) {return true}
 	for w in app.windows {
 		if workspace_picker_active(&w.workspace_picker) && ui.motion_active(w.workspace_picker.rename_motion) { return true }
-		if ui.motion_active(w.tab_underline) || ui.motion_active(w.close_confirm.motion) { return true }
+		if ui.motion_active(w.tab_underline) || ui.motion_active(w.pending_close.confirm.motion) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
@@ -94,7 +94,7 @@ update_motion :: proc(app: ^App) {
 				}
 			}
 		}
-		c := &w.close_confirm
+		c := &w.pending_close.confirm
 		ui.motion_target(
 			&c.motion,
 			c.open ? 1 : 0,

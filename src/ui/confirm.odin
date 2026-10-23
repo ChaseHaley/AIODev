@@ -167,7 +167,7 @@ confirm_draw :: proc(
 	theme: Theme,
 	width, height, scale: f32,
 	title, body, accept_label: string,
-	note := "Turn this off with Confirm Closing Split Tabs in Settings.",
+	note: string,
 ) -> glyphs.Result {
 	l := confirm_layout(width, height, scale, c.extended)
 	s := scale

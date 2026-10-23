@@ -317,44 +317,7 @@ tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int,
 tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
 	_, _, split := tab_close_scope(w.workspace, index)
 	if !split || !app.settings.tab.confirm_close {tab_close(app, w, index); return}
-	if !gesture_cancel(app, w) {return}
-	palette_close(app, w)
-	w.close_confirm_tab = w.workspace.tabs[index].id
-	w.close_confirm_workspace = 0
-	w.close_confirm.extended = false
-	w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)
-	ui.confirm_open(&w.close_confirm)
-	w.dirty = true
-}
-
-// Counts follow panes that exit while the question is open, then stay fixed while it fades out.
-close_confirm_text :: proc(app: ^App, w: ^Window) -> (title, body: string) {
-	if w.close_confirm_workspace != 0 {
-		title, body, _ = workspace_delete_text(app, w)
-		return
-	}
-	if index := tab_index_by_id(w.workspace, w.close_confirm_tab);
-	   w.close_confirm.open && index >= 0 {
-		w.close_confirm_tabs, w.close_confirm_panes, _ = tab_close_scope(w.workspace, index)
-	}
-	tabs, panes := w.close_confirm_tabs, w.close_confirm_panes
-	if tabs > 1 {
-		return fmt.tprintf("Close %d tabs with %d panes?", tabs, panes),
-			"The shells running in them will exit."
-	}
-	return fmt.tprintf("Close this tab and its %d panes?", panes),
-		"The shells running in it will exit."
-}
-
-close_confirm_finish :: proc(app: ^App, w: ^Window, accept: bool) {
-	if w.close_confirm_workspace != 0 {workspace_delete_finish(app, w, accept); return}
-	ui.confirm_close(&w.close_confirm)
-	w.dirty = true
-	if accept {
-		if index := tab_index_by_id(w.workspace, w.close_confirm_tab);
-		   index >= 0 {tab_close(app, w, index)}
-	}
-	tab_close_restore(w)
+	pending_close_open_tab(app, w, index)
 }
 
 tab_duplicate :: proc(app: ^App, w: ^Window) {
@@ -408,7 +371,7 @@ tab_close_subset :: proc(app: ^App, w: ^Window, right: bool) {
 		if tab.marked && first < 0 {first = i}
 	}
 	if first >= 0 {tab_close_request(app, w, first)}
-	if !w.close_confirm.open {tab_close_restore(w)}
+	if !w.pending_close.confirm.open {tab_close_restore(w)}
 }
 
 tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {

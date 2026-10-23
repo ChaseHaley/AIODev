@@ -76,10 +76,10 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	defer for handle in processes { if handle != nil { testing.expect(t, bool(win32.CloseHandle(handle))) } }
 	for cancel in ([?]int{0, 1, 2, 3}) {
 		app.workspace_delete_request(state, w, workspace)
-		testing.expect(t, w.close_confirm.open && !app.workspace_picker_active(&w.workspace_picker))
-		title, body := app.close_confirm_text(state, w)
-		testing.expect(t, strings.contains(title, workspace.name))
-		testing.expect_value(t, body, "Close 3 tabs (4 panes); stop 3 sessions.")
+		testing.expect(t, w.pending_close.confirm.open && !app.workspace_picker_active(&w.workspace_picker))
+		text := app.pending_close_text(state, &w.pending_close, w.workspace)
+		testing.expect(t, strings.contains(text.title, workspace.name))
+		testing.expect_value(t, text.body, "Close 3 tabs (4 panes); stop 3 sessions.")
 		switch cancel {
 		case 0: delete_key(state, w, .Escape)
 		case 1: delete_key(state, w, .Tab); delete_key(state, w, .Enter)
@@ -92,7 +92,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 		case 3:
 			app.handle_event(state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true})
 		}
-		testing.expect(t, !w.close_confirm.open && w.workspace == workspace)
+		testing.expect(t, !w.pending_close.confirm.open && w.workspace == workspace)
 		testing.expect_value(t, len(workspace.tabs), 3)
 		testing.expect_value(t, len(state.sessions), 3)
 		testing.expect_value(t, win32.WaitForSingleObject(process, 0), win32.WAIT_TIMEOUT)
@@ -106,7 +106,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	testing.expect(t, w.workspace.id > id && w.tree == &app.selected_tab(w.workspace).tree)
 	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
-	testing.expect(t, !w.editor.open && !w.tab_menu.open && !w.close_confirm.open)
+	testing.expect(t, !w.editor.open && !w.tab_menu.open && !w.pending_close.confirm.open)
 	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
 	for handle in processes { testing.expect_value(t, win32.WaitForSingleObject(handle, 1000), win32.WAIT_OBJECT_0) }
 	app.tick(state)
@@ -173,7 +173,7 @@ workspace_delete_destination_failure_and_changed_ownership_reconfirm :: proc(t: 
 	session := app.focused_session(state, w).session
 	pid := term.process_id(session)
 	app.workspace_delete_request(state, w, target)
-	testing.expect_value(t, w.close_confirm_destination, destination.id)
+	testing.expect_value(t, w.pending_close.destination, destination.id)
 	testing.expect_value(t, os.remove(f.path), nil)
 	delete_key(state, w, .Enter)
 	testing.expect(t, w.workspace == target && app.workspace_find(state, target_id) == target)
@@ -183,8 +183,8 @@ workspace_delete_destination_failure_and_changed_ownership_reconfirm :: proc(t: 
 	app.workspace_delete_request(state, w, target)
 	if !testing.expect(t, app.window_open(state, destination)) { return }
 	delete_key(state, w, .Enter)
-	testing.expect(t, w.close_confirm.open && w.workspace == target)
-	testing.expect_value(t, w.close_confirm_destination, u32(0))
+	testing.expect(t, w.pending_close.confirm.open && w.workspace == target)
+	testing.expect_value(t, w.pending_close.destination, u32(0))
 	delete_key(state, w, .Escape)
 	app.window_close(state, state.windows[1])
 	app.workspace_delete_request(state, w, target)
@@ -238,7 +238,7 @@ workspace_delete_allocation_failures_preserve_original_until_prepared :: proc(t:
 		app.workspace_delete_request(state, w, original)
 		failure.remaining, failure.failed = allowed, false
 		context.allocator = allocator
-		app.close_confirm_finish(state, w, true)
+		app.pending_close_finish(state, w, true)
 		context.allocator = backing
 		failure.failed = true
 		if app.workspace_find(state, id) == nil { break }
@@ -267,7 +267,7 @@ workspace_delete_allocation_failures_preserve_original_until_prepared :: proc(t:
 		app.workspace_delete_request(state, w, original)
 		failure.remaining, failure.failed = allowed, false
 		context.allocator = allocator
-		app.close_confirm_finish(state, w, true)
+		app.pending_close_finish(state, w, true)
 		context.allocator = backing
 		failure.failed = true
 		testing.expect(t, failure.remaining == 0)
@@ -290,11 +290,11 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	id := target.id
 	target.provisional = true
 	app.workspace_delete_request(state, w, target)
-	testing.expect(t, !w.close_confirm.open)
+	testing.expect(t, !w.pending_close.confirm.open)
 	target.provisional = false
 	w.preparing = true
 	app.workspace_delete_request(state, w, target)
-	testing.expect(t, !w.close_confirm.open)
+	testing.expect(t, !w.pending_close.confirm.open)
 	w.preparing = false
 	app.workspace_new(state, w, true)
 	requester := state.windows[1]
@@ -310,7 +310,7 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	delete_key(state, w, .Enter)
 	testing.expect(t, app.workspace_find(state, id) == nil)
 	delete_key(state, requester, .Enter)
-	testing.expect(t, !requester.close_confirm.open)
+	testing.expect(t, !requester.pending_close.confirm.open)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, len(state.workspaces), 2)
 	app.tick(state)

@@ -57,7 +57,7 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	w.tab_menu.open = false
 	w.rename.dragging = false
 	if w.rename_open {rename_finish(app, w, false)}
-	if w.close_confirm.open {close_confirm_finish(app, w, false)}
-	w.close_confirm = {}
+	if w.pending_close.confirm.open {pending_close_finish(app, w, false)}
+	pending_close_clear(&w.pending_close)
 	w.dirty = true
 }
