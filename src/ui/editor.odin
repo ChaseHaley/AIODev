@@ -1220,6 +1220,35 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 
 // Hover state for row highlights and reset buttons; returns whether the page must redraw.
 editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
+	// An open dropdown highlights the option under the pointer, like the menus.
+	if p.popup != .None {
+		if row := editor_row(p); row != nil {
+			popup := editor_popup_rect(p, l)
+			visible := int((y - popup.y - 4 * l.scale) / (CHOICE_HEIGHT * l.scale))
+			option := render.Rect {
+				popup.x + 4 * l.scale,
+				popup.y + 4 * l.scale + f32(visible) * CHOICE_HEIGHT * l.scale,
+				popup.width - 8 * l.scale,
+				CHOICE_HEIGHT * l.scale,
+			}
+			if contains(popup, x, y) && visible >= 0 && contains(option, x, y) {
+				index, valid := visible, false
+				#partial switch p.popup {
+				case .Choice:
+					valid = index < len(row.choices)
+				case .Shortcuts:
+					index += p.popup_scroll
+					count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
+					valid = index <= count
+				case .Color, .None:
+				}
+				if valid && index != p.popup_index {
+					p.popup_index = index
+					return true
+				}
+			}
+		}
+	}
 	item, reset, outline := -1, -1, -1
 	if p.popup == .None && contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
@@ -1463,6 +1492,7 @@ popup_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	r := editor_popup_rect(p, l)
 	row := editor_row(p)
@@ -1493,6 +1523,10 @@ popup_draw :: proc(
 			}
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
+			if contains(option, pointer.x, pointer.y) {
+				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer);
+				   result != .None {return .Ok}
+			}
 			label := i < len(parts) ? parts[i] : "+ Add shortcut"
 			if result := draw_text(
 				text,
@@ -1526,6 +1560,10 @@ popup_draw :: proc(
 			}
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
+			if contains(option, pointer.x, pointer.y) {
+				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer);
+				   result != .None {return .Ok}
+			}
 			if name == field_string(&p.value) {
 				draw_rect(
 					list,
@@ -1870,5 +1908,5 @@ editor_draw :: proc(
 		if result := draw_icon(text, list, ICON_UNDO, parts.reset, icon_color, 0.9);
 		   result != .Ok {return result}
 	}
-	return popup_draw(p, l, list, text, theme)
+	return popup_draw(p, l, list, text, theme, pointer)
 }
