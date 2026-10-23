@@ -64,6 +64,12 @@ Pane_Rect :: struct {
 	order:   u64,
 }
 
+@(private)
+Partition :: struct {
+	available:          f32,
+	first, second, bar: Rect,
+}
+
 Layout :: struct {
 	nodes:           [dynamic]Node,
 	root, focus:     Node_Id,
@@ -286,10 +292,9 @@ resize_pixels :: proc(
 		if s.axis == axis {
 			for d in dividers {
 				if d.node != parent {continue}
-				available :=
-					axis == .Horizontal ? d.area.width - d.rect.width : d.area.height - d.rect.height
-				if available <= 0 {return false}
-				return resize(l, node, axis, delta / available)
+				p := partition(d.area, axis, s.ratio, extent(d.rect, axis))
+				if p.available <= 0 {return false}
+				return resize(l, node, axis, delta / p.available)
 			}
 			return false
 		}
@@ -336,27 +341,38 @@ compute :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect, hono
 }
 
 @(private)
+extent :: proc(r: Rect, axis: Axis) -> f32 {
+	return axis == .Horizontal ? r.width : r.height
+}
+
+@(private, require_results)
+partition :: proc(area: Rect, axis: Axis, ratio: f32, gap: f32) -> Partition {
+	p := Partition{first = area, second = area, bar = area}
+	switch axis {
+	case .Horizontal:
+		p.available = max(0, area.width - gap)
+		p.first.width = clamp(math.round(p.available * ratio), 0, p.available)
+		p.second.x, p.second.width = area.x + p.first.width + gap, p.available - p.first.width
+		p.bar.x, p.bar.width = area.x + p.first.width, gap
+	case .Vertical:
+		p.available = max(0, area.height - gap)
+		p.first.height = clamp(math.round(p.available * ratio), 0, p.available)
+		p.second.y, p.second.height = area.y + p.first.height + gap, p.available - p.first.height
+		p.bar.y, p.bar.height = area.y + p.first.height, gap
+	}
+	return p
+}
+
+@(private)
 place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
 	switch node in l.nodes[id] {
 	case Vacant:
 	case Pane:
 		append(out, Pane_Rect{id, node.content, area, node.order})
 	case Split:
-		first, second := area, area
-		switch node.axis {
-		case .Horizontal:
-			available := max(0, area.width - gap)
-			first.width = clamp(math.round(available * node.ratio), 0, available)
-			second.x = area.x + first.width + gap
-			second.width = available - first.width
-		case .Vertical:
-			available := max(0, area.height - gap)
-			first.height = clamp(math.round(available * node.ratio), 0, available)
-			second.y = area.y + first.height + gap
-			second.height = available - first.height
-		}
-		place(l, node.first, first, gap, out)
-		place(l, node.second, second, gap, out)
+		p := partition(area, node.axis, node.ratio, gap)
+		place(l, node.first, p.first, gap, out)
+		place(l, node.second, p.second, gap, out)
 	}
 }
 
@@ -368,29 +384,10 @@ dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 @(private)
 place_dividers :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 	if s, ok := l.nodes[id].(Split); ok {
-		first, second, bar := area, area, area
-		if s.axis == .Horizontal {
-			first.width = clamp(
-				math.round(max(0, area.width - gap) * s.ratio),
-				0,
-				max(0, area.width - gap),
-			)
-			second.x, second.width =
-				area.x + first.width + gap, max(0, area.width - gap) - first.width
-			bar.x, bar.width = area.x + first.width, gap
-		} else {
-			first.height = clamp(
-				math.round(max(0, area.height - gap) * s.ratio),
-				0,
-				max(0, area.height - gap),
-			)
-			second.y, second.height =
-				area.y + first.height + gap, max(0, area.height - gap) - first.height
-			bar.y, bar.height = area.y + first.height, gap
-		}
-		append(out, Divider{id, s.axis, area, bar})
-		place_dividers(l, s.first, first, gap, out)
-		place_dividers(l, s.second, second, gap, out)
+		p := partition(area, s.axis, s.ratio, gap)
+		append(out, Divider{id, s.axis, area, p.bar})
+		place_dividers(l, s.first, p.first, gap, out)
+		place_dividers(l, s.second, p.second, gap, out)
 	}
 }
 
@@ -415,10 +412,12 @@ drag_divider :: proc(l: ^Layout, d: Divider, x, y, gap: f32) -> bool {
 	if int(d.node) >= len(l.nodes) {return false}
 	s, ok := l.nodes[d.node].(Split)
 	if !ok {return false}
-	available := d.axis == .Horizontal ? d.area.width - gap : d.area.height - gap
-	if available <= 0 {return false}
-	position := d.axis == .Horizontal ? x - d.area.x - gap / 2 : y - d.area.y - gap / 2
-	s.ratio = clamp(position / available, 0.05, 0.95)
+	p := partition(d.area, d.axis, s.ratio, gap)
+	if p.available <= 0 {return false}
+	thickness := extent(p.bar, d.axis)
+	position :=
+		d.axis == .Horizontal ? x - d.area.x - thickness / 2 : y - d.area.y - thickness / 2
+	s.ratio = clamp(position / p.available, 0.05, 0.95)
 	l.nodes[d.node] = s
 	return true
 }
