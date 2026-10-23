@@ -4,6 +4,7 @@ import "aio:commands"
 import "aio:control"
 import "aio:input"
 import "aio:layout"
+import "aio:perf"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -26,6 +27,7 @@ _ :: commands
 _ :: control
 _ :: layout
 _ :: input
+_ :: perf
 _ :: platform
 _ :: render
 _ :: term
@@ -235,7 +237,7 @@ when AIO_CONTROL {
 
 	verify_needs_window :: proc(request: control.Request) -> bool {
 		#partial switch r in request {
-		case control.Ping, control.Help, control.State:
+		case control.Ping, control.Help, control.State, control.Perf:
 			return false
 		case control.Tray:
 			return r.action == .Hide
@@ -1092,10 +1094,31 @@ when AIO_CONTROL {
 			case control.Expect:
 				passed, err = control.evaluate(&out, r, &s, entries)
 			}
+		case control.Capture:
+			err = capture_read(app, &out, r)
+		case control.Pixels:
+			err = pixels_read(app, &out, r)
+		case control.Diff:
+			err = pixels_diff(app, &out, r)
+		case control.Draws:
+			err = draws_read(app, &out, r)
+		case control.Perf:
+			err = perf_read(app, &out, r)
+		case control.Vt:
+			err = vt_record(app, &out, r)
 		case:
 			err = .Invalid_Argument
 		}
-		if err != .None {verify_error(app, err); return}
+		if err != .None {
+			// Evidence commands explain bad input, files, or devices in their own words.
+			text := strings.to_string(out)
+			if strings.has_prefix(text, "error:") {
+				verify_reply(app, false, text)
+				return
+			}
+			verify_error(app, err)
+			return
+		}
 		verify_reply(app, passed, strings.to_string(out))
 	}
 
@@ -1167,6 +1190,7 @@ when AIO_CONTROL {
 		entries, state_error := verify_state(app)
 		if state_error != .None {verify_error(app, state_error); return}
 		if err := verify_before(app, entries); err != .None {verify_error(app, err); return}
+		perf.mark_input(&app.perf)
 		if err := verify_drive(app, v.pending.request);
 		   err != .None {verify_error(app, err); return}
 		if !app.running {
@@ -1272,7 +1296,13 @@ when AIO_CONTROL {
 			     control.Cells,
 			     control.State,
 			     control.Expect,
-			     control.Help:
+			     control.Help,
+			     control.Capture,
+			     control.Pixels,
+			     control.Diff,
+			     control.Draws,
+			     control.Perf,
+			     control.Vt:
 				v.phase = .Read
 			case control.Wait:
 				v.phase = .Wait

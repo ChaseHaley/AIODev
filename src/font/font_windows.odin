@@ -19,6 +19,9 @@ System :: struct {
 	cache:      map[Lookup_Key]Lookup_Result,
 	gamma:      Text_Gamma,
 	shaping:    Shaping,
+	// Real DirectWrite shaping runs since startup. The render thread owns the counter, so it
+	// needs no lock and perf_read sees it from that same thread.
+	shape_calls: u64,
 }
 
 @(private)

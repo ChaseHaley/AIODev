@@ -42,6 +42,14 @@ parse_commands :: proc(t: ^testing.T) {
 		{"mouse", "drag", "-100,20", "30,-40", "--screen", "--mods", "Ctrl"},
 		{"mouse", "wheel", "-100,-20", "-3", "--screen"},
 		{"window", "select", "18446744073709551615"}, {"window", "move", "-2147483648,2147483647"},
+		{"capture"}, {"capture", "--out", "before.png"}, {"capture", "--cell", "0,0"},
+		{"capture", "--cell", "0,0,10,2", "--out", "region.png"},
+		{"capture", "--region", "0,0,120,32"},
+		{"pixels"}, {"pixels", "--rows"}, {"pixels", "--columns"}, {"pixels", "--sample", "3,4"},
+		{"pixels", "--cell", "1,2,3,4", "--rows"},
+		{"diff", "before.png"}, {"draws"}, {"draws", "--kind", "rect"},
+		{"draws", "--region", "1,2,3,4", "--kind", "glyph"},
+		{"perf"}, {"perf", "--reset"}, {"vt", "record", "on"}, {"vt", "record", "off"},
 	}
 	for args in cases {
 		r, err := control.parse(args)
@@ -119,6 +127,22 @@ parse_errors :: proc(t: ^testing.T) {
 		{"mouse", "move", "0,0", "--screen", "--screen"},
 		{"mouse", "move", "0,0", "--px", "--screen"},
 		{"mouse", "move", "0,0", "--screen", "--px"},
+		{"capture", "--cell"}, {"capture", "--cell", "1"}, {"capture", "--cell", "1,2,0,1"},
+		{"capture", "--cell", "-1,2"}, {"capture", "--cell", "1,2,3"},
+		{"capture", "--region", "1,2,3"}, {"capture", "--region", "1,2,0,1"},
+		{"capture", "--cell", "1,2", "--region", "0,0,1,1"},
+		{"capture", "--out", ""}, {"capture", "--out", "a", "--out", "b"},
+		{"capture", "--bad", "1"},
+		{"pixels", "--sample", "1"}, {"pixels", "--sample", "-1,0"},
+		{"pixels", "--rows", "--columns"}, {"pixels", "--rows", "--rows"},
+		{"pixels", "--sample", "1,2", "--rows"}, {"pixels", "extra"},
+		{"diff"}, {"diff", ""}, {"diff", "a", "b"},
+		{"draws", "--kind", "bad"}, {"draws", "--kind"},
+		{"draws", "--region", "0,0,0,1"},
+		{"draws", "--region", "0,0,1,1", "--region", "1,1,1,1"},
+		{"perf", "x"}, {"perf", "--reset", "x"}, {"perf", "--bad"},
+		{"vt"}, {"vt", "record"}, {"vt", "record", "yes"}, {"vt", "other", "on"},
+		{"vt", "record", "on", "x"},
 	}
 	for args in cases {
 		r, err := control.parse(args)
@@ -137,7 +161,8 @@ help_and_pipe_name :: proc(t: ^testing.T) {
 	testing.expect_value(t, control.help(&b), control.Error.None)
 	testing.expect_value(t, strings.to_string(b), control.HELP_OVERVIEW)
 	for command in ([]string{"ping", "screen", "cells", "state", "wait", "expect", "type", "key",
-		"run", "mouse", "focus", "resize", "dpi", "tray", "command", "window", "help"}) {
+		"run", "mouse", "focus", "resize", "dpi", "tray", "command", "window", "help", "capture",
+		"pixels", "diff", "draws", "perf", "vt"}) {
 		strings.builder_reset(&b)
 		testing.expect_value(t, control.help(&b, command), control.Error.None)
 		testing.expect(t, strings.has_prefix(strings.to_string(b), command))
@@ -169,4 +194,38 @@ window_requests_preserve_screen_coordinates_and_target_ids :: proc(t: ^testing.T
 	testing.expect_value(t, m.position, control.Position{-1920, -240})
 	testing.expect_value(t, m.end, control.Position{200, -300})
 	testing.expect(t, m.screen && !m.pixels)
+}
+
+@(test)
+evidence_requests_default_to_the_whole_window :: proc(t: ^testing.T) {
+	capture, capture_error := control.parse({"capture"})
+	testing.expect_value(t, capture_error.advice, "")
+	testing.expect_value(t, capture.(control.Capture).region.kind, control.Region_Kind.Window)
+	testing.expect_value(t, capture.(control.Capture).output, "")
+
+	pixels, pixels_error := control.parse({"pixels"})
+	testing.expect_value(t, pixels_error.advice, "")
+	testing.expect_value(t, pixels.(control.Pixels).region.kind, control.Region_Kind.Window)
+	testing.expect(t, !pixels.(control.Pixels).rows && !pixels.(control.Pixels).columns)
+
+	cell, cell_error := control.parse({"capture", "--cell", "4,5"})
+	testing.expect_value(t, cell_error.advice, "")
+	region := cell.(control.Capture).region
+	testing.expect_value(t, region.kind, control.Region_Kind.Cells)
+	testing.expect_value(t, region.x, 4)
+	testing.expect_value(t, region.y, 5)
+	testing.expect_value(t, region.width, 1)
+	testing.expect_value(t, region.height, 1)
+
+	sample, sample_error := control.parse({"pixels", "--sample", "2,3"})
+	testing.expect_value(t, sample_error.advice, "")
+	testing.expect_value(t, sample.(control.Pixels).sample, control.Position{2, 3})
+
+	draws, draws_error := control.parse({"draws", "--kind", "glyph"})
+	testing.expect_value(t, draws_error.advice, "")
+	testing.expect_value(t, draws.(control.Draws).kind, control.Draw_Kind.Glyph)
+
+	vt, vt_error := control.parse({"vt", "record", "on"})
+	testing.expect_value(t, vt_error.advice, "")
+	testing.expect(t, vt.(control.Vt).recording)
 }
