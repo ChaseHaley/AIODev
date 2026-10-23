@@ -204,31 +204,26 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 	if err != nil {return "Could not validate settings.", ""}
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
-	probe := App {
-		settings      = s,
-		settings_path = path,
-		registry      = commands.create(),
-	}
-	defer commands.destroy(&probe.registry)
-	defer ui.notices_destroy(&probe.notices)
-	if register_actions(&probe.registry) != .None {return "Could not validate shortcuts.", ""}
-	before := len(diagnostics)
-	apply_bindings(&probe, &diagnostics)
-	for d in diagnostics[before:] {
-		message := fmt.tprintf("%s: %s", d.key, d.message)
-		if d.kind == .Shortcut_Warning {
-			// The diagnostics are freed on return, before the caller formats the warning.
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	if register_actions(&registry) != .None {return "Could not validate shortcuts.", ""}
+	report, report_error := binding_report(&registry, &s)
+	for issue in report.issues {
+		message := binding_issue_text(issue, path)
+		if issue.severity == .Shortcut_Warning {
+			// Parsed settings are freed on return; clone the location-free identity for the caller.
 			if warning ==
-			   "" {warning = strings.clone(diagnostic_identity(d), context.temp_allocator)}
+			   "" {warning = strings.clone(diagnostic_identity_text(issue.severity, message), context.temp_allocator)}
+		} else if issue.kind == .Duplicate_Shortcut {
+			return fmt.tprintf(
+				"Assigned to %s. Choose another shortcut.",
+				issue.conflict.winner.title,
+			), ""
 		} else {
-			if at := strings.index(d.message, "already used by "); at >= 0 {
-				other := d.message[at + len("already used by "):]
-				if end := strings.index(other, " ("); end >= 0 {other = other[:end]}
-				return fmt.tprintf("Assigned to %s. Choose another shortcut.", other), ""
-			}
-			return message, ""
+			return fmt.tprintf("%s: %s", issue.key, message), ""
 		}
 	}
+	if report_error != nil {return "Could not validate shortcuts.", ""}
 	return "", warning
 }
 

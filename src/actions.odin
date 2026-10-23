@@ -8,7 +8,6 @@ import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:log"
-import "core:slice"
 import "core:strings"
 import "core:time"
 
@@ -678,17 +677,6 @@ binding_comments :: proc() -> [len(Action) + 1]string {
 }
 
 @(private)
-binding_diagnostic :: proc(
-	app: ^App,
-	diagnostics: ^[dynamic]settings.Diagnostic,
-	binding: settings.Key_Binding,
-	message: string,
-) {
-	key := fmt.tprintf("%s%s", settings.KEY_BINDING_PREFIX, binding.name)
-	settings_diagnostic(app, diagnostics, binding.line, key, message)
-}
-
-@(private)
 settings_diagnostic :: proc(
 	app: ^App,
 	diagnostics: ^[dynamic]settings.Diagnostic,
@@ -704,155 +692,14 @@ settings_diagnostic :: proc(
 
 @(private)
 apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
-	overrides: [len(Action)]commands.Override
-	lines: [len(Action)]int
-	count := 0
-	for binding, i in app.settings.keys {
-		command := commands.find(&app.registry, binding.name)
-		if command == nil {
-			binding_diagnostic(
-				app,
-				diagnostics,
-				binding,
-				fmt.tprintf("unknown command \"%s\"", binding.name),
-			)
-			continue
-		}
-		storage := make([]commands.Shortcut, len(binding.value) + 1, context.temp_allocator)
-		n, err := commands.parse_shortcuts(binding.value, storage)
-		if err != .None {
-			message := fmt.tprintf("cannot parse shortcut \"%s\"", binding.value)
-			binding_diagnostic(app, diagnostics, binding, message)
-			continue
-		}
-		unsupported := false
-		for shortcut in storage[:n] {
-			if .Leader in shortcut.modifiers &&
-			   (shortcut.key == .Unidentified || is_modifier_key(shortcut.key)) {
-				unsupported = true
-			}
-		}
-		if unsupported {
-			binding_diagnostic(
-				app,
-				diagnostics,
-				binding,
-				"Leader shortcuts require a nonmodifier key.",
-			)
-			continue
-		}
-		overrides[count] = {command.id, storage[:n]}
-		lines[count] = i
-		count += 1
+	report, report_error := binding_report(&app.registry, &app.settings)
+	for issue in report.issues {
+		message := binding_issue_text(issue, app.settings_path)
+		settings_diagnostic(app, diagnostics, issue.line, issue.key, message, issue.severity)
 	}
-	errors: [len(Action)]commands.Error
-	if commands.rebind(&app.registry, overrides[:count], errors[:count]) != .None {
+	if report_error != nil {
 		notify(app, .Error, "Could not allocate shortcut bindings.")
 		return
 	}
-	applied_lines: [len(Action)]int
-	for error, i in errors[:count] {
-		if error == .None {applied_lines[int(overrides[i].id)] = app.settings.keys[lines[i]].line}
-	}
-	for error, i in errors[:count] {
-		if error == .None {continue}
-		binding := app.settings.keys[lines[i]]
-		message := fmt.tprintf("cannot apply shortcuts for \"%s\": %v", binding.name, error)
-		if error == .Duplicate_Shortcut {
-			for shortcut in overrides[i].shortcuts {
-				other := commands.find_by_shortcut(&app.registry, shortcut)
-				if other != nil && other.id != overrides[i].id {
-					buffer: [128]u8
-					label, label_error := commands.shortcut_label(shortcut, buffer[:])
-					assert(label_error == .None)
-					message = fmt.tprintf(
-						"shortcut \"%s\" for %s (%s at %s) already used by %s (%s at %s)",
-						label,
-						commands.find(&app.registry, binding.name).title,
-						binding.name,
-						binding_origin(app, binding.line),
-						other.title,
-						other.name,
-						binding_origin(app, applied_lines[int(other.id)]),
-					)
-					break
-				}
-			}
-		}
-		binding_diagnostic(app, diagnostics, binding, message)
-	}
-	app.leader = nil
-	if app.settings.input.leader != "" {
-		leader, valid := commands.parse_shortcut(app.settings.input.leader)
-		if !valid ||
-		   .Leader in leader.modifiers ||
-		   leader.key == .Unidentified ||
-		   is_modifier_key(leader.key) {
-			settings_diagnostic(
-				app,
-				diagnostics,
-				app.settings.leader_line,
-				"input.leader",
-				"Use one ordinary shortcut.",
-			)
-		} else {
-			app.leader = leader
-			// Decide once across every matching identity mode before removing any
-			// chord, so a later direct binding cannot leave partial removals behind.
-			winner: ^commands.Command
-			for &other in app.registry.items {
-				for shortcut in commands.active_shortcuts(&other) {
-					if commands.prefix_conflicts(leader, shortcut) &&
-						applied_lines[int(other.id)] >= app.settings.leader_line &&
-					   (winner == nil ||
-							   applied_lines[int(other.id)] > applied_lines[int(winner.id)]) {
-						winner = &other
-					}
-				}
-			}
-			leader_wins := winner == nil
-			if !leader_wins {app.leader = nil}
-			for &other in app.registry.items {
-				// Copy because unbind compacts the active shortcut array.
-				shortcuts := slice.clone(commands.active_shortcuts(&other), context.temp_allocator)
-				for shortcut in shortcuts {
-					if !commands.prefix_conflicts(leader, shortcut) {continue}
-					if leader_wins {_ = commands.unbind(&app.registry, other.id, shortcut)}
-					message := fmt.tprintf(
-						"input.leader (%s) vs %s (%s); %s wins [%s:%d; %s]",
-						app.settings.input.leader,
-						other.title,
-						other.name,
-						leader_wins ? "input.leader" : winner.name,
-						binding_file(app),
-						app.settings.leader_line,
-						binding_origin(app, applied_lines[int(other.id)]),
-					)
-					settings_diagnostic(
-						app,
-						diagnostics,
-						app.settings.leader_line,
-						"input.leader",
-						message,
-						.Shortcut_Warning,
-					)
-				}
-			}
-		}
-	}
-}
-
-@(private)
-binding_origin :: proc(app: ^App, line: int) -> string {
-	if line > 0 {return fmt.tprintf("%s:%d", binding_file(app), line)}
-	return "defaults"
-}
-
-@(private)
-binding_file :: proc(app: ^App) -> string {
-	i := max(
-		strings.last_index_byte(app.settings_path, '/'),
-		strings.last_index_byte(app.settings_path, '\\'),
-	)
-	return app.settings_path[i + 1:]
+	app.leader = report.leader
 }

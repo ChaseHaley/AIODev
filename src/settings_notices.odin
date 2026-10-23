@@ -8,12 +8,18 @@ import "core:strings"
 
 @(private)
 diagnostic_identity :: proc(d: settings.Diagnostic) -> string {
-	if d.kind == .Shortcut_Warning {
+	return diagnostic_identity_text(d.kind, d.message)
+}
+
+@(private)
+diagnostic_identity_text :: proc(kind: settings.Diagnostic_Kind, message: string) -> string {
+	if kind == .Shortcut_Warning {
 		// Saving unrelated settings can move source lines without changing the conflict.
-		if at := strings.last_index(d.message, " [");
-		   at > 0 {return strings.trim_space(d.message[:at])}
+		if at := strings.last_index(message, " ["); at > 0 {
+			return strings.trim_space(message[:at])
+		}
 	}
-	return d.message
+	return message
 }
 
 settings_diagnostics_equal :: proc(a, b: []settings.Diagnostic) -> bool {
