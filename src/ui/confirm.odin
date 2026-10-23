@@ -181,24 +181,15 @@ confirm_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
 	p := l.panel
-	draw_rect(
-		list,
-		{
-			rect = {p.x, p.y + 12 * s, p.width, p.height},
-			color = theme.shadow,
-			radius = 10 * s,
-			softness = 32 * s,
-		},
-	)
-	draw_rect(
-		list,
-		{
-			rect = {p.x - s, p.y - s, p.width + 2 * s, p.height + 2 * s},
-			color = theme.border,
-			radius = 11 * s,
-		},
-	)
-	draw_rect(list, {rect = p, color = theme.surface, radius = 10 * s})
+	frame := Panel {
+		rect     = p,
+		radius   = 10 * s,
+		scale    = s,
+		shadow_y = 12,
+		softness = 32,
+		border   = .Expanded,
+	}
+	if panel_draw(list, frame, theme) != .None {return .Ok}
 	strong := text_styled(text, .Strong)
 	text_set_size(&strong, strong.size_px * 1.15)
 	inner := p.width - 40 * s

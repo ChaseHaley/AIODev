@@ -169,13 +169,15 @@ notices_draw :: proc(
 		box_height := f32(lines + 1) * text.line_height + 2 * padding + 4 * scale
 		box := render.Rect{width - margin - box_width, bottom - box_height, box_width, box_height}
 		label, symbol, accent := notice_style(item.kind, theme)
-		shadow := render.Rect{box.x, box.y + 12 * scale, box.width, box.height}
-		draw_rect(
-			list,
-			{rect = shadow, color = theme.shadow, radius = 8 * scale, softness = 32 * scale},
-		)
-		draw_rect(list, {rect = box, color = theme.surface, radius = 8 * scale})
-		draw_rect(list, {rect = box, color = theme.border, radius = 8 * scale, stroke = scale})
+		frame := Panel {
+			rect     = box,
+			radius   = 8 * scale,
+			scale    = scale,
+			shadow_y = 12,
+			softness = 32,
+			border   = .Stroked,
+		}
+		if panel_draw(list, frame, theme) != .None {return .Ok}
 		draw_rect(
 			list,
 			{rect = {box.x, box.y, 4 * scale, box.height}, color = accent, radius = 2 * scale},

@@ -156,12 +156,15 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		r, rows = tab_menu_rect(w)
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = {r.x, r.y + 5 * s, r.width, r.height}, color = app.theme.shadow,
-		radius = 8 * s, softness = 16 * s}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 8 * s}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = r, color = app.theme.border, radius = 8 * s, stroke = s}) != .None {
-		return .Ok
+	frame := ui.Panel {
+		rect     = r,
+		radius   = 8 * s,
+		scale    = s,
+		shadow_y = 5,
+		softness = 16,
+		border   = .Stroked,
 	}
+	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
 	if render.push_layer(&w.list, r, 8 * s) != .None { return .Ok }
 	for visible in 0..<rows {
 		i := menu.scroll + visible

@@ -164,17 +164,15 @@ find_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
-	radius := FIND_RADIUS * scale
-	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
-	border := render.Rect {
-		panel.x - scale,
-		panel.y - scale,
-		panel.width + 2 * scale,
-		panel.height + 2 * scale,
+	frame := Panel {
+		rect     = panel,
+		radius   = FIND_RADIUS * scale,
+		scale    = scale,
+		shadow_y = 12,
+		softness = 32,
+		border   = .Expanded,
 	}
-	draw_rect(list, {rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale})
-	draw_rect(list, {rect = border, color = theme.border, radius = radius + scale})
-	draw_rect(list, {rect = panel, color = theme.surface, radius = radius})
+	if panel_draw(list, frame, theme) != .None {return .Ok}
 	count := input_text
 	if measured := text_width(&count, status); measured > l.status.width && measured > 0 {
 		text_set_size(&count, count.size_px * l.status.width / measured)

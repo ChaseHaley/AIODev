@@ -1491,17 +1491,15 @@ popup_draw :: proc(
 	if r.width == 0 || row == nil {return .Ok}
 	s := l.scale
 	if render.push_layer(list, l.page) != .None {return .Ok}
-	draw_rect(
-		list,
-		{
-			rect = {r.x, r.y + 6 * s, r.width, r.height},
-			color = theme.shadow,
-			radius = 8 * s,
-			softness = 16 * s,
-		},
-	)
-	draw_rect(list, {rect = r, color = theme.surface, radius = 8 * s})
-	draw_rect(list, {rect = r, color = theme.border, radius = 8 * s, stroke = s})
+	frame := Panel {
+		rect     = r,
+		radius   = 8 * s,
+		scale    = s,
+		shadow_y = 6,
+		softness = 16,
+		border   = .Stroked,
+	}
+	if panel_draw(list, frame, theme) != .None {return .Ok}
 	if p.popup == .Shortcuts {
 		parts := shortcut_alternatives(row.value)
 		count := shortcut_popup_rows(p, l)

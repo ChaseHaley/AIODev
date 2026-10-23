@@ -459,13 +459,14 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	@(static, rodata) actions := WORKSPACE_ACTIONS
 	@(static, rodata) action_info := ACTIONS
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	shadow := render.Rect_Instance {
-		rect   = {r.x + 2 * s, r.y + 3 * s, r.width, r.height},
-		color  = app.theme.shadow,
-		radius = 7 * s,
+	frame := ui.Panel {
+		rect     = r,
+		radius   = 7 * s,
+		scale    = s,
+		shadow_x = 2,
+		shadow_y = 3,
 	}
-	if render.push_rect(&w.list, shadow) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 7 * s}) != .None { return .Ok }
+	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
 	if render.push_layer(&w.list, r, 7 * s) != .None { return .Ok }
 	if workspace_picker_icons(p) { return workspace_icon_picker_draw(app, w) }
 	box := workspace_picker_query_box(w)

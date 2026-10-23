@@ -485,7 +485,6 @@ palette_draw :: proc(
 ) -> glyphs.Result {
 	l := palette_layout(p, width, height, scale)
 	panel := l.panel
-	radius := PALETTE_RADIUS * scale
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
@@ -493,22 +492,19 @@ palette_draw :: proc(
 	bounded_rise := clamp(rise, 0, max(0, height - scale - panel.y - panel.height))
 	defer fade_draw(list, layer_start, rect_start, glyph_start, opacity, bounded_rise)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
-	shadow := render.Rect{panel.x, panel.y + 12 * scale, panel.width, panel.height}
-	border := render.Rect {
-		panel.x - scale,
-		panel.y - scale,
-		panel.width + 2 * scale,
-		panel.height + 2 * scale,
+	frame := Panel {
+		rect     = panel,
+		radius   = PALETTE_RADIUS * scale,
+		scale    = scale,
+		shadow_y = 12,
+		softness = 32,
+		border   = .Expanded,
 	}
-	rects := [?]render.Rect_Instance {
-		{rect = shadow, color = theme.shadow, radius = radius, softness = 32 * scale},
-		{rect = border, color = theme.border, radius = radius + scale},
-		{rect = panel, color = theme.surface, radius = radius},
-		{rect = {panel.x, l.input.y + l.input.height, panel.width, scale}, color = theme.border},
-	}
-	for r in rects {
-		draw_rect(list, r)
-	}
+	if panel_draw(list, frame, theme) != .None {return .Ok}
+	draw_rect(list, {
+		rect  = {panel.x, l.input.y + l.input.height, panel.width, scale},
+		color = theme.border,
+	})
 	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
 	label_text := text_styled(text, .Label)

@@ -333,12 +333,15 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if p.mode != .Menu { return .Ok }
 	r := workspace_row_menu_rect(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = {r.x + 2 * s, r.y + 3 * s, r.width, r.height},
-		color = app.theme.shadow, radius = 6 * s}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 6 * s}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = r, color = app.theme.border, radius = 6 * s, stroke = s}) != .None {
-		return .Ok
+	frame := ui.Panel {
+		rect     = r,
+		radius   = 6 * s,
+		scale    = s,
+		shadow_x = 2,
+		shadow_y = 3,
+		border   = .Stroked,
 	}
+	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
 	if render.push_layer(&w.list, r, 6 * s) != .None { return .Ok }
 	titles := [?]string{"Rename", "Change Icon", workspace_row_window_title(app, p.target_id), "Delete…"}
 	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
