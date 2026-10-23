@@ -23,9 +23,7 @@ configure_press_event :: proc(s: ^Session) -> Error {
 
 @(private)
 viewport_ref :: proc(s: ^Session, x, y: f32) -> (ghostty.Grid_Ref, bool) {
-	g := s.geometry
-	column := clamp(int((x - f32(g.padding_left)) / f32(g.cell_width)), 0, int(g.columns) - 1)
-	row := clamp(int((y - f32(g.padding_top)) / f32(g.cell_height)), 0, int(g.rows) - 1)
+	column, row := cell_at(s.geometry, x, y)
 	point := ghostty.Point {
 		tag = .Viewport,
 		value = {coordinate = {x = u16(column), y = u32(row)}},
@@ -136,7 +134,7 @@ selection_autoscroll_tick :: proc(s: ^Session, x, y: f32) {
 	}
 	g := s.geometry
 	geometry := gesture_geometry(g)
-	column := clamp(int((x - f32(g.padding_left)) / f32(g.cell_width)), 0, int(g.columns) - 1)
+	column := cell_column(g, x)
 	coordinate := ghostty.Point_Coordinate{u16(column), direction == .Up ? 0 : u32(g.rows) - 1}
 	position := ghostty.Surface_Position{f64(x), f64(y)}
 	event := s.autoscroll_event

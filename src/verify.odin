@@ -823,12 +823,8 @@ when AIO_CONTROL {
 		entry := focused_session(app, w)
 		if entry == nil {return {}, false}
 		g := term.geometry(entry.session)
-		if p.x >= int(g.columns) || p.y >= int(g.rows) {return {}, false}
-		return {
-				i32(g.padding_left) + i32((f32(p.x) + 0.5) * w.metrics.cell_width),
-				i32(g.padding_top) + i32((f32(p.y) + 0.5) * w.metrics.cell_height),
-			},
-			true
+		point, ok := term.cell_center(g, p.x, p.y)
+		return point, ok
 	}
 
 	@(require_results)
