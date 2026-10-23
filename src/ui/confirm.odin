@@ -8,6 +8,7 @@ import "core:time"
 
 Confirm_Button :: enum {
 	None,
+	Option,
 	Cancel,
 	Accept,
 }
@@ -25,10 +26,12 @@ Confirm :: struct {
 	focus, hover:   Confirm_Button,
 	armed:          Armed(Confirm_Button),
 	extended:       bool,
+	show_option:    bool,
+	option:         bool,
 }
 
 Confirm_Layout :: struct {
-	panel, cancel, accept: render.Rect,
+	panel, option, cancel, accept: render.Rect,
 }
 
 @(private)
@@ -57,7 +60,7 @@ confirm_close :: proc(c: ^Confirm) {
 	armed_cancel(&c.armed)
 }
 
-confirm_layout :: proc(width, height, scale: f32, extended := false) -> Confirm_Layout {
+confirm_layout :: proc(width, height, scale: f32, extended := false, show_option := false) -> Confirm_Layout {
 	s := scale
 	panel_width := min((extended ? 540 : CONFIRM_WIDTH) * s, max(0, width - 32 * s))
 	panel := render.Rect {
@@ -75,10 +78,20 @@ confirm_layout :: proc(width, height, scale: f32, extended := false) -> Confirm_
 	}
 	cancel := accept
 	cancel.x -= CONFIRM_BUTTON_WIDTH * s + 8 * s
-	return {panel, cancel, accept}
+	option := render.Rect{}
+	if show_option {
+		option = {
+			panel.x + 16 * s,
+			y,
+			max(0, cancel.x - 8 * s - panel.x - 16 * s),
+			CONFIRM_BUTTON_HEIGHT * s,
+		}
+	}
+	return {panel, option, cancel, accept}
 }
 
 confirm_hit :: proc(l: Confirm_Layout, x, y: f32) -> Confirm_Button {
+	if l.option.width > 0 && contains(l.option, x, y) {return .Option}
 	if contains(l.accept, x, y) {return .Accept}
 	if contains(l.cancel, x, y) {return .Cancel}
 	return .None
@@ -86,15 +99,48 @@ confirm_hit :: proc(l: Confirm_Layout, x, y: f32) -> Confirm_Button {
 
 confirm_contains :: proc(l: Confirm_Layout, x, y: f32) -> bool {return contains(l.panel, x, y)}
 
+@(private)
+confirm_cycle :: proc(c: ^Confirm, step: int) {
+	order: [3]Confirm_Button
+	count := 0
+	if c.show_option {
+		order[count] = .Option
+		count += 1
+	}
+	order[count], order[count + 1] = .Cancel, .Accept
+	count += 2
+	index := 0
+	for button, i in order[:count] {if button == c.focus {index = i}}
+	index = (index + step + count) % count
+	c.focus = order[index]
+}
+
 confirm_key :: proc(c: ^Confirm, e: platform.Key_Event) -> Confirm_Outcome {
 	if !e.pressed {return .None}
+	if c.show_option && .Alt in e.modifiers && e.key == .D {
+		c.option = !c.option
+		c.focus = .Option
+		return .Changed
+	}
 	#partial switch e.key {
 	case .Escape:
 		return .Cancel
-	case .Enter, .Numpad_Enter, .Space:
+	case .Enter, .Numpad_Enter:
 		return c.focus == .Cancel ? .Cancel : .Accept
-	case .Tab, .Arrow_Left, .Arrow_Right:
-		c.focus = c.focus == .Accept ? .Cancel : .Accept
+	case .Space:
+		if c.focus == .Option {
+			c.option = !c.option
+			return .Changed
+		}
+		return c.focus == .Cancel ? .Cancel : .Accept
+	case .Tab:
+		confirm_cycle(c, .Shift in e.modifiers ? -1 : 1)
+		return .Changed
+	case .Arrow_Left, .Arrow_Up:
+		confirm_cycle(c, -1)
+		return .Changed
+	case .Arrow_Right, .Arrow_Down:
+		confirm_cycle(c, 1)
 		return .Changed
 	}
 	return .None
@@ -111,6 +157,11 @@ confirm_mouse :: proc(
 	if button != .Left {return .None}
 	hit := confirm_hit(l, x, y)
 	if pressed {
+		if hit == .Option {
+			c.option = !c.option
+			c.focus = .Option
+			return .Changed
+		}
 		if hit == .None && !confirm_contains(l, x, y) {return .Cancel}
 		armed_press(&c.armed, hit)
 		if hit != .None {c.focus = hit}
@@ -178,6 +229,7 @@ confirm_draw :: proc(
 	width, height, scale: f32,
 	title, body, accept_label: string,
 	note: string,
+	option_label: string = "",
 ) -> glyphs.Result {
 	l := confirm_layout(width, height, scale, c.extended)
 	s := scale
@@ -228,6 +280,30 @@ confirm_draw :: proc(
 		theme.faint,
 		inner,
 	); r != .Ok {return r}
+	if c.show_option && option_label != "" {
+		box := render.Rect {
+			l.option.x,
+			l.option.y + (l.option.height - 15 * s) / 2,
+			15 * s,
+			15 * s,
+		}
+		draw_rect(list, {rect = box, color = theme.border, radius = 3 * s})
+		if c.option {
+			draw_rect(list, {rect = box, color = theme.accent, radius = 3 * s})
+			if r := draw_glyph_centered(&small, list, '✓', box, theme.accent_text);
+			   r != .Ok {return r}
+		}
+		if c.focus == .Option {focus_ring_draw(list, box, theme, s)}
+		if r := draw_text(
+			&small,
+			list,
+			option_label,
+			box.x + 23 * s,
+			box.y + (box.height - small.line_height) / 2 + small.ascent,
+			theme.muted,
+			max(0, l.option.width - 26 * s),
+		); r != .Ok {return r}
+	}
 	if r := confirm_button_draw(c, list, text, theme, l.cancel, .Cancel, "Cancel", s);
 	   r != .Ok {return r}
 	return confirm_button_draw(c, list, text, theme, l.accept, .Accept, accept_label, s)

@@ -1,6 +1,7 @@
 package settings
 
 import "base:runtime"
+import "core:fmt"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -464,6 +465,60 @@ profile_visible :: proc(profile: ^Profile) -> bool {
 	return !profile.hidden && profile.command != ""
 }
 
+// A profile found on this machine rather than written in settings.ini.
+Detected_Profile :: struct {
+	id, name, command, directory: string,
+}
+
+@(private)
+profile_remove_at :: proc(p: ^Profiles, index: int) {
+	if index < 0 || index >= len(p.items) {return}
+	profile := &p.items[index]
+	for field in ([?]string {
+		profile.id,
+		profile.name,
+		profile.command,
+		profile.directory,
+		profile.icon,
+	}) {delete(field, p.allocator)}
+	ordered_remove(&p.items, index)
+}
+
+// Detection is rebuilt from the machine on every load; entries the file owns stay.
+profiles_begin_detection :: proc(p: ^Profiles) {
+	for i := len(p.items) - 1; i >= 0; i -= 1 {
+		if p.items[i].detected {profile_remove_at(p, i)}
+	}
+}
+
+// Fills unset fields from a detected shell. File fields and hidden flags win.
+@(require_results)
+profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allocator_Error {
+	p := &s.profiles
+	profile := profile_find(p, detected.id)
+	created := profile == nil
+	if created {
+		profile, _ = profiles_add(p, detected.id, 0)
+		if profile == nil {return nil}
+	}
+	if created {profile.detected = true}
+	if !profile.name_set {
+		if err := profile_own(&profile.name, detected.name, p.allocator); err != nil {return err}
+		profile.name_set = true
+	}
+	if !profile.command_set {
+		if err := profile_own(&profile.command, detected.command, p.allocator);
+		   err != nil {return err}
+		profile.command_set = true
+	}
+	if !profile.directory_set {
+		if err := profile_own(&profile.directory, detected.directory, p.allocator);
+		   err != nil {return err}
+		profile.directory_set = true
+	}
+	return nil
+}
+
 // Fills `out` with profile indices: explicit profile.order first, then unlisted IDs sorted by
 // ID. Hidden profiles and profiles without a command are skipped when `visible_only` is set.
 // Returns the number written; `out` must hold at least len(p.items) entries.
@@ -637,7 +692,6 @@ write_migrated_value :: proc(b: ^strings.Builder, raw: string) -> runtime.Alloca
 
 @(private)
 profile_order_text_valid :: proc(text: string) -> bool {
-	if strings.trim_space(text) == "" {return true}
 	parts, split_error := strings.split(text, ",", context.temp_allocator)
 	if split_error != nil {return false}
 	for part, i in parts {
@@ -650,6 +704,32 @@ profile_order_text_valid :: proc(text: string) -> bool {
 		}
 	}
 	return true
+}
+
+// Removes every profile.ID.* line while preserving comments, BOM and line endings.
+@(require_results)
+remove_profile_text :: proc(
+	text, id: string,
+	allocator := context.allocator,
+) -> (
+	string,
+	runtime.Allocator_Error,
+) {
+	builder, build_error := strings.builder_make(allocator)
+	if build_error != nil {return "", build_error}
+	defer strings.builder_destroy(&builder)
+	scanner := line_scanner_init(text)
+	if scanner.bom {
+		if err := write_parts(&builder, UTF8_BOM); err != nil {return "", err}
+	}
+	prefix := fmt.tprintf("%s%s.", PROFILE_PREFIX, id)
+	for {
+		line, ok := line_next(&scanner)
+		if !ok {break}
+		if line.split && strings.has_prefix(line.key, prefix) {continue}
+		if err := write_parts(&builder, line.raw); err != nil {return "", err}
+	}
+	return strings.clone(strings.to_string(builder), allocator)
 }
 
 // Serializes one profile row from the settings editor. The returned text is temporary and is

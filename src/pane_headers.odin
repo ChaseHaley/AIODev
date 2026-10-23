@@ -95,6 +95,15 @@ pane_header_draw :: proc(
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
 		directory, icon = entry.header.directory, entry.header.icon
 	}
+	badge_hovered := false
+	if entry != nil {
+		layout := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, pane.node == w.tree.focus)
+		badge_hovered =
+			w.pointer.x >= layout.badge.x - 3 * w.scale &&
+			w.pointer.x < layout.badge.x + layout.badge.width + 9 * w.scale &&
+			w.pointer.y >= layout.badge.y - 3 * w.scale &&
+			w.pointer.y < layout.badge.y + layout.badge.height + 3 * w.scale
+	}
 	return ui.header_draw(
 		&w.list,
 		&w.ui_text,
@@ -110,6 +119,7 @@ pane_header_draw :: proc(
 		controls,
 		w.tree.zoomed,
 		icon_atlas,
+		badge_hovered,
 	)
 }
 
@@ -162,6 +172,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 				.Split_Down  = "pane.split_down",
 				.Zoom        = "pane.zoom",
 				.Close       = "pane.close",
+				.Badge       = "",
 			}
 			if command := commands.find(&app.registry, names[chosen]);
 			   command != nil {run_action(app, w, Action(command.id))}
@@ -173,6 +184,17 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 		w.header_buttons += {e.button}
 		if e.button == .Left {
 			pane_focus(app, w, pane.node)
+			if action == .Badge {
+				if workspace_session_for_content(app, pane.content) == nil {return true}
+				profile_menu_open_pane(
+					app,
+					w,
+					pane.node,
+					pane.rect.x + 8 * w.scale,
+					pane.rect.y + ui.HEADER_HEIGHT * w.scale,
+				)
+				return true
+			}
 			for &view in w.views {
 				if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
 			}

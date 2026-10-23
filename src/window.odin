@@ -69,8 +69,10 @@ Window :: struct {
 	tab_close_armed: ui.Armed(int),
 	// Asks before a destructive close and holds its subject, live counts and presentation state.
 	pending_close: Pending_Close,
+	pending_swap:  Pane_Swap,
 	close_restore: [dynamic]u32,
 	tab_menu: Tab_Menu,
+	profile_menu: Profile_Menu,
 	rename: ui.Text_Field,
 	rename_open: bool,
 	rename_target: Rename_Target,
@@ -128,6 +130,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.metrics = window_metrics(app, w.scale)
 	w.list = render.draw_list_init()
 	ui.find_init(&w.find)
+	profile_menu_init(&w.profile_menu)
 	w.tab_hover = -1
 	w.caption_hover = -1
 	w.divider_click_node = layout.INVALID_NODE
@@ -227,10 +230,12 @@ window_free :: proc(w: ^Window) {
 	workspace_view_destroy(&w.resources)
 	delete(w.tab_drag.order)
 	ui.find_destroy(&w.find)
+	profile_menu_destroy(&w.profile_menu)
 	delete(w.rename.bytes)
 	workspace_picker_destroy(w)
 	delete(w.close_restore)
 	pending_close_clear(&w.pending_close)
+	pane_swap_clear(&w.pending_swap)
 	render.draw_list_destroy(&w.list)
 	free(w)
 }
@@ -590,8 +595,32 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if w.rename_open {
 		if result := rename_draw(app, w); result != .Ok {return frame, result}
 	}
+	if swap := &w.pending_swap; ui.presence_visible(swap.confirm.presence) {
+		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
+		title, body, note, label := pane_swap_text(swap)
+		result := ui.confirm_draw(
+			&swap.confirm,
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			size.x,
+			size.y,
+			w.scale,
+			title,
+			body,
+			label,
+			note,
+			"Don't ask again",
+		)
+		opacity, rise := ui.presence_fade(swap.confirm.presence, 4 * w.scale)
+		ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
+		if result != .Ok {return frame, result}
+	}
 	if w.tab_menu.open {
 		if result := tab_menu_draw(app, w); result != .Ok {return frame, result}
+	}
+	if w.profile_menu.open {
+		if result := profile_menu_draw(app, w); result != .Ok {return frame, result}
 	}
 	if workspace_picker_active(&w.workspace_picker) {
 		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}

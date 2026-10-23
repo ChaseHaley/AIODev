@@ -545,6 +545,7 @@ load_settings :: proc(app: ^App) {
 	}
 	settings.destroy(&app.settings)
 	app.settings = loaded
+	detect_shell_profiles(app)
 	app.process_deadline = {}
 	for &entry in app.sessions {entry.process_padding = nil}
 	apply_bindings(app, &diagnostics)

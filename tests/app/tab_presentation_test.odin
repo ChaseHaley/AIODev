@@ -12,7 +12,7 @@ tab_presentation_resize_keeps_storage_and_initialises_only_appended_entries :: p
 	defer app.tab_presentation_destroy(&presentation)
 	app.tab_presentation_init(&presentation)
 	if !testing.expect(t, app.tab_presentation_resize(&presentation, 3)) {return}
-	testing.expect_value(t, len(presentation.tab_controls), 4)
+	testing.expect_value(t, len(presentation.tab_controls), 5)
 	testing.expect_value(t, len(presentation.tab_positions), 3)
 	presentation.tab_positions[1] = ui.Motion{from = 4, value = 5, target = 6}
 	controls, positions := raw_data(presentation.tab_controls), raw_data(presentation.tab_positions)
@@ -78,7 +78,7 @@ tab_presentation_remove_keeps_the_control_trailing_and_clamps_the_selection :: p
 	for i in 0 ..< 4 {presentation.tab_positions[i] = ui.Motion{value = f32(i + 5)}}
 	app.tab_presentation_remove(&presentation, 3)
 	testing.expect_value(t, len(presentation.tab_positions), 3)
-	testing.expect_value(t, len(presentation.tab_controls), 4)
+	testing.expect_value(t, len(presentation.tab_controls), 5)
 	testing.expect_value(t, presentation.tab_positions[0].value, f32(5))
 	testing.expect_value(t, presentation.tab_positions[2].value, f32(7))
 	// Closing the last selected tab, an earlier tab, and the only tab.
