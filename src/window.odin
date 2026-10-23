@@ -286,15 +286,8 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
-	if resize(&w.tab_controls, len(w.workspace.tabs) + 1) != nil {
-		log.error("resizing tab control states failed")
-	}
-	old_positions := len(w.tab_positions)
-	if resize(&w.tab_positions, len(w.workspace.tabs)) != nil {
-		log.error("resizing tab positions failed")
-	}
-	for &position, i in w.tab_positions {
-		if i >= old_positions {position.value, position.target = f32(i), f32(i)}
+	if !tab_presentation_resize(&w.presentation, len(w.workspace.tabs)) {
+		log.error("resizing tab presentation values failed")
 	}
 	bar := window_tab_bar(app, w)
 	platform.window_title_bar(

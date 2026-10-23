@@ -120,28 +120,10 @@ tab_move :: proc(app: ^App, w: ^Window, from, to: int) {
 	tab := tabs[from]
 	ordered_remove(tabs, from)
 	inject_at(tabs, to, tab)
-	if from < len(w.tab_controls) && to < len(w.tab_controls) {
-		control := w.tab_controls[from]
-		ordered_remove(&w.tab_controls, from)
-		inject_at(&w.tab_controls, to, control)
-	}
-	if from < len(w.tab_positions) && to < len(w.tab_positions) {
-		position := w.tab_positions[from]
-		ordered_remove(&w.tab_positions, from)
-		inject_at(&w.tab_positions, to, position)
-	}
-	selected := w.workspace.selected
-	switch {
-	case selected == from:
-		selected = to
-	case from < selected && selected <= to:
-		selected -= 1
-	case to <= selected && selected < from:
-		selected += 1
-	}
-	w.workspace.selected = selected
+	tab_presentation_move(&w.presentation, from, to)
+	w.workspace.selected = tab_presentation_selected_after_move(w.workspace.selected, from, to)
 	w.tree = &selected_tab(w.workspace).tree
-	ui.motion_target(&w.tab_underline, f32(selected), 0, .Linear, false, time.tick_now())
+	ui.motion_target(&w.tab_underline, f32(w.workspace.selected), 0, .Linear, false, time.tick_now())
 	mark_all_dirty(app)
 }
 
