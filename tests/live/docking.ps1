@@ -159,9 +159,13 @@ try {
     $grab = Grab
     Invoke-Aio mouse down $grab --px
     Invoke-Aio mouse move (Px ($tabX+$width*2.5) 18) --px
-    Assert-Equal (Read-State)['panes.drop.shown'] false 'Settings rejects pane destination'
+    Assert-Equal (Read-State)['panes.drop.shown'] true 'Settings accepts pane destination'
     Invoke-Aio mouse up (Px ($tabX+$width*2.5) 18) --px
-    Assert-Equal (Read-State)['tabs.selected'] 1 'invalid drop restores source tab'
+    $s = Read-State
+    Assert-Equal $s['tabs.selected'] 3 'Settings drop selects the destination tab'
+    Assert-Equal $s['tab.1.panes'] 2 'Settings drop leaves the source tab'
+    Assert-Equal $s['panes.count'] 2 'Settings drop adds the pane to the settings tab'
+    Assert-Equal $s['sessions.count'] $count 'Settings drop starts no runtime'
     $grab = Grab
     Invoke-Aio mouse down $grab --px
     Invoke-Aio mouse move (Px ($tabX+$width*1.5) 18) --px

@@ -366,7 +366,7 @@ try {
     Assert-Equal $d['sessions.count'] $sessions 'remote new tab starts no runtime'
     Assert-Equal (Window-State $source)['panes.count'] 1 'source keeps its last pane'
 
-    # Settings rejects a pane: its tab offers no destination and the drop changes nothing.
+    # Settings accepts a pane: its tab offers a split destination and the terminal joins it.
     Select-Window $destination
     Invoke-Aio command settings.open | Out-Null
     $d = Read-State
@@ -375,16 +375,23 @@ try {
     $d = Read-State
     $settingsTab = Screen $d ((Tab-X $d)+[double]$d['tabs.width']*($settingsIndex-0.5)) ([double]$d['tabs.height']/2)
     Assert-Hit $settingsTab $d 'destination Settings tab'
+    Select-Window $source
+    Invoke-Aio command pane.split_right | Out-Null
+    Invoke-Aio wait text 'PS ' | Out-Null
+    $sessions = (Read-State)['sessions.count']
     Begin-Drag $source | Out-Null
     Invoke-Aio mouse move $settingsTab --screen | Out-Null
     Start-Sleep -Milliseconds 500
     Invoke-Aio mouse move $settingsTab --screen | Out-Null
-    Assert-Equal (Read-State)['panes.drop.shown'] false 'remote Settings tab rejects the pane'
+    Assert-Equal (Read-State)['panes.drop.shown'] true 'remote Settings tab accepts the pane'
     Invoke-Aio mouse up $settingsTab --screen | Out-Null
     $d = Window-State $destination
-    Assert-Equal $d['tabs.selected'] 1 'Settings rejection keeps the destination tab'
-    Assert-Equal $d['tabs.count'] $settingsIndex 'Settings rejection adds no tab'
-    Assert-Equal (Window-State $source)['panes.count'] 1 'Settings rejection keeps the source pane'
+    Assert-Equal $d['tabs.selected'] $settingsIndex 'Settings drop keeps the destination tab'
+    Assert-Equal $d['tabs.count'] $settingsIndex 'Settings drop adds no tab'
+    Assert-Equal $d["tab.$settingsIndex.panes"] 2 'Settings tab gains the dragged pane'
+    Assert-Equal $d['sessions.count'] $sessions 'Settings drop starts no runtime'
+    $sourceState = Window-State $source
+    Assert-Equal $sourceState['panes.count'] 1 'Settings drop keeps the rest of the source pane'
 
     # Minimum size: an oversize requirement rejects both a remote edge and a tear-off window.
     Select-Window $source
