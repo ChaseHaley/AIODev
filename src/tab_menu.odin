@@ -187,6 +187,13 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if result := ui.draw_text(&w.ui_text, &w.list, tab_menu_label(w, i), row.x + 10 * s,
 			row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			enabled ? app.theme.text : app.theme.muted, max(1, row.width - 20 * s)); result != .Ok { return result }
+		if i == menu.selected && enabled &&
+		   w.pointer.x >= row.x && w.pointer.x < row.x + row.width &&
+		   w.pointer.y >= row.y && w.pointer.y < row.y + row.height {
+			if ui.hover_rim_draw(&w.list, app.theme, row, 4 * s, 1, s, w.pointer) != .None {
+				return .Ok
+			}
+		}
 	}
 	return .Ok
 }

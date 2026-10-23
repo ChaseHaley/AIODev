@@ -160,6 +160,7 @@ menu_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, height, scale: f32,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	if !m.open {return .Ok}
 	if m.selected >= len(m.items) {m.selected = len(m.items) - 1}
@@ -245,6 +246,10 @@ menu_draw :: proc(
 			item.enabled ? theme.text : theme.muted,
 			max(1, row.x + row.width - 18 * scale - shortcut_width - label_x),
 		); result != .Ok {return result}
+		if i == m.selected && item.enabled && contains(row, pointer.x, pointer.y) {
+			if result := hover_rim_draw(list, theme, row, 4 * scale, 1, scale, pointer);
+			   result != .None {return .Ok}
+		}
 	}
 	return .Ok
 }

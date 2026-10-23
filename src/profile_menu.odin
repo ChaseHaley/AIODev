@@ -228,5 +228,6 @@ profile_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		f32(w.width),
 		f32(w.height),
 		w.scale,
+		w.pointer,
 	)
 }
