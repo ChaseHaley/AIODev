@@ -1,5 +1,6 @@
 package term_view
 
+import "aio:colour"
 import "aio:font"
 import "aio:ghostty"
 import "aio:glyphs"
@@ -118,7 +119,7 @@ grid_size :: proc(m: Metrics, width, height, padding: f32) -> (columns, rows: u1
 
 @(private)
 color :: proc(c: ghostty.Color_Rgb, alpha: f32 = 1) -> render.Color {
-	return {f32(c.r) / 255, f32(c.g) / 255, f32(c.b) / 255, alpha}
+	return colour.rgba(term.color_from_ghostty(c), alpha)
 }
 
 @(private)

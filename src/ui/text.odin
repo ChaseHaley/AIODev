@@ -1,5 +1,6 @@
 package ui
 
+import "aio:colour"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
@@ -14,30 +15,27 @@ Theme :: struct {
 }
 
 theme_from :: proc(t: settings.Theme) -> Theme {
-	rgb :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {
-		return {f32(c.r) / 255, f32(c.g) / 255, f32(c.b) / 255, alpha}
-	}
 	return {
-		window = rgb(t.window),
-		chrome = rgb(t.chrome),
-		pane = rgb(t.pane),
-		surface = rgb(t.raised),
-		text = rgb(t.text),
-		muted = rgb(t.muted),
-		faint = rgb(t.faint),
-		accent = rgb(t.accent),
-		accent_text = rgb(t.accent_text),
-		border = rgb(t.text, t.light ? 0.09 : 0.08),
-		hover = rgb(t.text, t.light ? 0.04 : 0.05),
-		pressed = rgb(t.text, t.light ? 0.08 : 0.09),
-		selection = rgb(t.accent, t.light ? 0.10 : 0.14),
-		focus = rgb(t.accent, 0.50),
+		window = colour.rgba(t.window),
+		chrome = colour.rgba(t.chrome),
+		pane = colour.rgba(t.pane),
+		surface = colour.rgba(t.raised),
+		text = colour.rgba(t.text),
+		muted = colour.rgba(t.muted),
+		faint = colour.rgba(t.faint),
+		accent = colour.rgba(t.accent),
+		accent_text = colour.rgba(t.accent_text),
+		border = colour.rgba(t.text, t.light ? 0.09 : 0.08),
+		hover = colour.rgba(t.text, t.light ? 0.04 : 0.05),
+		pressed = colour.rgba(t.text, t.light ? 0.08 : 0.09),
+		selection = colour.rgba(t.accent, t.light ? 0.10 : 0.14),
+		focus = colour.rgba(t.accent, 0.50),
 		shadow = {0, 0, 0, t.light ? 0.12 : 0.35},
 		scrim = {0, 0, 0, t.light ? 0.08 : 0.18},
-		error = rgb(t.danger),
-		success = rgb(t.success),
-		warning = rgb(t.warning),
-		info = rgb(t.info),
+		error = colour.rgba(t.danger),
+		success = colour.rgba(t.success),
+		warning = colour.rgba(t.warning),
+		info = colour.rgba(t.info),
 	}
 }
 
