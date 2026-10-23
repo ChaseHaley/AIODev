@@ -91,16 +91,12 @@ workspace_view_rebind :: proc(destination, prepared: ^Workspace_View_Resources) 
 Workspace_Adoption :: enum {
 	// Selection keeps view and geometry storage; relayout reconciles it with the new workspace.
 	Retain,
-	// Deletion pre-flights every view, so the replacement is complete before the old workspace
-	// is released, and then moves the prepared storage over the old view.
+	// Deletion pre-flights every view and then moves the prepared storage over the old one.
 	Replace,
 }
 
-// Adopts workspace into w as its displayed workspace. Preparation depth, the presentation
-// reset, storage handover, anchor repair, relayout and focus re-entry happen in the one order
-// both selection and deletion need. The caller has already established that no other window
-// displays workspace and that it has a selected tab. A failure before the old view is released
-// leaves w displaying and holding its previous workspace.
+// The one order selection and deletion both need. The caller has established exclusive ownership
+// and a selected tab; a failure before the handover leaves the previous workspace displayed.
 @(require_results)
 workspace_adopt :: proc(
 	app: ^App,

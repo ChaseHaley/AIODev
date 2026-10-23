@@ -3,10 +3,6 @@ package main
 import "aio:settings"
 import "core:strings"
 
-// A name typed into a rename field. The stable id finds the destination when the field is
-// committed, so a target closed while the field is open reports .Missing instead of writing
-// through a stale pointer. Tab ids are numbered per workspace, so a tab target resolves inside
-// the presenting window's tab strip.
 Rename_Kind :: enum {Tab, Pane, Workspace}
 
 Rename_Target :: struct {
@@ -21,8 +17,9 @@ Rename_Outcome :: enum {
 	Failed,  // The cleaned name could not be stored.
 }
 
-// w is the window presenting the field: a tab target belongs to its tab strip, and tab and pane
-// names refresh that window's titles. Workspace names repaint every window and need no field.
+// Resolves the target by id at commit, so a target closed while the field is open reports .Missing
+// instead of writing through a stale pointer. w presents the field: a tab target belongs to its
+// strip, and tab and pane names refresh its titles; workspace names repaint every window.
 @(require_results)
 rename_target_commit :: proc(
 	app: ^App,
