@@ -258,6 +258,50 @@ multiple_shortcuts :: proc(t: ^testing.T) {
 }
 
 @(test)
+shortcut_set_text_has_one_join_and_one_parse_policy :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	bindings := [?]commands.Shortcut{{.C, {.Control, .Shift}}, {.Insert, {.Control}}, {.V, {.Alt}}}
+	set := commands.Shortcut_Set{bindings[:], 2}
+	testing.expect_value(t, commands.shortcut_set_text(set, context.temp_allocator),
+		"Ctrl+Shift+C, Ctrl+Insert")
+	testing.expect_value(t, commands.shortcut_set_text({bindings[:], 0}, context.temp_allocator), "")
+	testing.expect_value(t, commands.shortcut_set_text({}, context.temp_allocator), "")
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	testing.expect_value(t, commands.shortcut_text(bindings[0], buffer[:]), "Ctrl+Shift+C")
+	alternatives := commands.shortcut_alternatives(
+		" Ctrl+Shift+C ,ctrl+insert ",
+		context.temp_allocator,
+	)
+	testing.expect_value(t, len(alternatives), 2)
+	testing.expect_value(t, alternatives[0], "Ctrl+Shift+C")
+	testing.expect_value(t, alternatives[1], "Ctrl+Insert")
+	testing.expect_value(t, len(commands.shortcut_alternatives("", context.temp_allocator)), 0)
+	testing.expect_value(t, len(commands.shortcut_alternatives("  ", context.temp_allocator)), 0)
+	raw := commands.shortcut_alternatives(" Ctrl+Bogus , F5 ", context.temp_allocator)
+	testing.expect_value(t, len(raw), 2)
+	testing.expect_value(t, raw[0], "Ctrl+Bogus")
+	testing.expect_value(t, raw[1], "F5")
+	testing.expect_value(t, len(commands.shortcut_alternatives("Ctrl+Bogus,", context.temp_allocator)), 2)
+	testing.expect_value(t, commands.shortcut_alternatives_text(raw, context.temp_allocator),
+		"Ctrl+Bogus, F5")
+	testing.expect_value(
+		t,
+		commands.shortcut_alternatives_text([]string{" Ctrl+C ", "", "F5"}, context.temp_allocator),
+		"Ctrl+C, F5",
+	)
+	testing.expect_value(t, commands.shortcut_alternatives_text(nil, context.temp_allocator), "")
+	text := commands.shortcut_set_text(set, context.temp_allocator)
+	testing.expect_value(
+		t,
+		commands.shortcut_alternatives_text(
+			commands.shortcut_alternatives(text, context.temp_allocator),
+			context.temp_allocator,
+		),
+		text,
+	)
+}
+
+@(test)
 rebinding :: proc(t: ^testing.T) {
 	state := Failure{context.allocator, 16}
 	registry := commands.create(runtime.Allocator{failing_allocator, &state})
