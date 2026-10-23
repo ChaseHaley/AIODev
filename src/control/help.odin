@@ -12,6 +12,55 @@ Requests use the isolated instance's local, current-user-only control pipe.
 Client commands launch, doctor, and stop are documented by aioctl.
 `
 
+@(private)
+put_attribute_names :: proc(
+	w: ^Writer,
+	kinds: bit_set[Attribute_Kind],
+	separator: string,
+	width := 100,
+) {
+	column := 0
+	if n := len(w.out.buf); n > 0 {
+		start := n
+		for start > 0 && w.out.buf[start - 1] != '\n' {
+			start -= 1
+		}
+		column = n - start
+	}
+	first := true
+	for entry in ATTRIBUTE_CATALOGUE {
+		if entry.kind not_in kinds {continue}
+		if !first {
+			if width > 0 && column + len(separator) + len(entry.name) > width {
+				trimmed := separator
+				for len(trimmed) > 0 && trimmed[len(trimmed) - 1] == ' ' {
+					trimmed = trimmed[:len(trimmed) - 1]
+				}
+				put(w, trimmed)
+				put(w, "\n")
+				column = 0
+			} else {
+				put(w, separator)
+				column += len(separator)
+			}
+		}
+		put(w, entry.name)
+		column += len(entry.name)
+		first = false
+	}
+}
+
+@(private)
+put_underline_names :: proc(w: ^Writer, include_none: bool, separator: string) {
+	first := true
+	for name, i in UNDERLINES {
+		if i == 0 && !include_none {continue}
+		if !first {put(w, separator)}
+		put(w, name)
+		first = false
+	}
+}
+
 @(require_results)
 help :: proc(out: ^strings.Builder, command: string = "") -> Error {
 	w := Writer {
@@ -49,9 +98,15 @@ Proves exact text and attributes in a visible row of the focused pane. Defaults 
 Header: row <row> cols <first>-<last>. Each following line is a maximal attribute run.
 Example: 5-9 "world" fg=#ff0000 bold underline=curly
 Text escapes quotes and backslashes, and controls as \xNN. Wide spacers add no text.
-Attributes, in order: fg, bg, bold, italic, faint, blink, inverse, invisible, strike, overline,
-underline, underline-color, selected, wide. Only nondefaults appear; colors are resolved #rrggbb.
-Underline values: single, double, curly, dotted, dashed. Default trailing blanks: 12-119 blank.
+Attributes, in order: `,
+		)
+		put_attribute_names(&w, ~{.Text}, ", ")
+		put(&w, `. Only nondefaults appear; colors are resolved #rrggbb.
+Underline values: `)
+		put_underline_names(&w, false, ", ")
+		put(
+			&w,
+			`. Default trailing blanks: 12-119 blank.
 Out-of-grid rows or columns fail.
 `,
 		)
@@ -95,9 +150,22 @@ expect cell <col>,<row> <attr>=<value>...
 expect state <key>=<value>
 Proves terminal or app state now; no waiting or defaults. Exactly one PASS or FAIL line.
 Text searches each trimmed row independently; reported positions are terminal columns, not bytes.
-Cell attributes: text=<s>, fg/bg/underline-color=default|#rrggbb,
-underline=none|single|double|curly|dotted|dashed, and true|false for
-bold, italic, faint, blink, inverse, invisible, strike, overline, selected, wide.
+Cell attributes: `,
+		)
+		put_attribute_names(&w, {.Text}, "")
+		put(&w, `=<s>, `)
+		put_attribute_names(&w, {.Color}, "/")
+		put(&w, `=default|#rrggbb,
+`)
+		put_attribute_names(&w, {.Underline}, "")
+		put(&w, `=`)
+		put_underline_names(&w, true, "|")
+		put(&w, `, and true|false for
+`)
+		put_attribute_names(&w, {.Flag}, ", ")
+		put(
+			&w,
+			`.
 State compares a supplied key and value exactly; a missing key fails.
 Example: PASS cell 0,1 "X" underline=single
 Failure includes expected and observed values plus cell content, cursor, or recent rows.

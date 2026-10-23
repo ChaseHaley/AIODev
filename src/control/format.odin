@@ -148,43 +148,6 @@ format_screen :: proc(out: ^strings.Builder, s: ^term.Snapshot, rows := Range{})
 }
 
 @(private)
-Attributes :: struct {
-	fg, bg, underline_color: Maybe(term.Color),
-	flags:                   bit_set[Attribute_Flag],
-	underline:               i32,
-}
-
-@(private)
-Attribute_Flag :: enum {
-	Bold,
-	Italic,
-	Faint,
-	Blink,
-	Inverse,
-	Invisible,
-	Strike,
-	Overline,
-	Selected,
-	Wide,
-}
-
-@(private)
-FLAG_NAMES :: [Attribute_Flag]string {
-	.Bold      = "bold",
-	.Italic    = "italic",
-	.Faint     = "faint",
-	.Blink     = "blink",
-	.Inverse   = "inverse",
-	.Invisible = "invisible",
-	.Strike    = "strike",
-	.Overline  = "overline",
-	.Selected  = "selected",
-	.Wide      = "wide",
-}
-@(private)
-UNDERLINES :: [?]string{"none", "single", "double", "curly", "dotted", "dashed"}
-
-@(private)
 attributes :: proc(s: ^term.Snapshot, c: ^term.Snapshot_Cell) -> Attributes {
 	a := Attributes {
 		fg        = c.foreground,
@@ -247,47 +210,18 @@ attributes_at :: proc(s: ^term.Snapshot, column, row: int) -> Attributes {
 }
 
 @(private)
-color_text :: proc(c: Maybe(term.Color), buffer: []u8) -> string {
-	if rgb, ok := c.?; ok {return fmt.bprintf(buffer, "#%02x%02x%02x", rgb[0], rgb[1], rgb[2])}
-	return "default"
-}
-
-@(private)
 attribute_text :: proc(w: ^Writer, a: Attributes) {
-	@(static, rodata)
-	names := FLAG_NAMES
-	@(static, rodata)
-	underlines := UNDERLINES
 	buffer: [16]u8
-	if a.fg != nil {
-		put(w, " fg=")
-		put(w, color_text(a.fg, buffer[:]))
-	}
-	if a.bg != nil {
-		put(w, " bg=")
-		put(w, color_text(a.bg, buffer[:]))
-	}
-	for flag in Attribute_Flag.Bold ..= Attribute_Flag.Overline {
-		if flag in a.flags {
-			put(w, " ")
-			put(w, names[flag])
+	for entry in ATTRIBUTE_CATALOGUE {
+		if entry.kind == .Text {continue}
+		value, set := attribute_value(entry, a, buffer[:])
+		if !set {continue}
+		put(w, " ")
+		put(w, entry.name)
+		if entry.kind != .Flag {
+			put(w, "=")
+			put(w, value)
 		}
-	}
-	if a.underline > 0 && a.underline < len(UNDERLINES) {
-		put(w, " underline=")
-		put(w, underlines[a.underline])
-	}
-	if a.underline_color != nil {
-		put(w, " underline-color=")
-		put(w, color_text(a.underline_color, buffer[:]))
-	}
-	if .Selected in a.flags {
-		put(w, " ")
-		put(w, names[.Selected])
-	}
-	if .Wide in a.flags {
-		put(w, " ")
-		put(w, names[.Wide])
 	}
 }
 
@@ -396,34 +330,6 @@ format_state :: proc(out: ^strings.Builder, entries: []State_Entry) -> Error {
 		put(&w, "\n")
 	}
 	return w.error
-}
-
-@(private)
-observed_attribute :: proc(
-	c: ^term.Snapshot_Cell,
-	a: Attributes,
-	key: string,
-	buffer: []u8,
-) -> string {
-	@(static, rodata)
-	underlines := UNDERLINES
-	switch key {
-	case "text":
-		return c.text
-	case "fg":
-		return color_text(a.fg, buffer)
-	case "bg":
-		return color_text(a.bg, buffer)
-	case "underline-color":
-		return color_text(a.underline_color, buffer)
-	case "underline":
-		if a.underline >= 0 && a.underline < len(UNDERLINES) {return underlines[a.underline]}
-		return "unknown"
-	}
-	for name, flag in FLAG_NAMES {
-		if name == key {return flag in a.flags ? "true" : "false"}
-	}
-	return "unknown"
 }
 
 @(require_results)
@@ -558,11 +464,9 @@ evaluate :: proc(
 			for item in request.attributes {
 				key, value, valid := assignment(item)
 				if !valid || !valid_attribute(item) {return false, .Invalid_Argument}
-				actual := observed_attribute(c, a, key, buffer[:])
-				matches := actual == value
-				if key == "fg" || key == "bg" || key == "underline-color" {
-					matches = strings.equal_fold(actual, value)
-				}
+				actual, kind, found := observed_attribute(c, a, key, buffer[:])
+				if !found {return false, .Invalid_Argument}
+				matches := kind == .Color ? strings.equal_fold(actual, value) : actual == value
 				if !matches {
 					passed = false
 					failed_key, expected, observed = key, value, actual

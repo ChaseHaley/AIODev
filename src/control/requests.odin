@@ -184,46 +184,6 @@ assignment :: proc(s: string) -> (string, string, bool) {
 	return s[:i], s[i + 1:], true
 }
 
-@(private)
-valid_attribute :: proc(s: string) -> bool {
-	k, v, ok := assignment(s)
-	if !ok {return false}
-	switch k {
-	case "text":
-		return true
-	case "fg", "bg", "underline-color":
-		if v == "default" {return true}
-		if len(v) != 7 || v[0] != '#' {return false}
-		for c in v[1:] {
-			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
-				return false
-			}
-		}
-		return true
-	case "underline":
-		return(
-			v == "none" ||
-			v == "single" ||
-			v == "double" ||
-			v == "curly" ||
-			v == "dotted" ||
-			v == "dashed" \
-		)
-	case "bold",
-	     "italic",
-	     "faint",
-	     "blink",
-	     "inverse",
-	     "invisible",
-	     "strike",
-	     "overline",
-	     "selected",
-	     "wide":
-		return v == "true" || v == "false"
-	}
-	return false
-}
-
 request_destroy :: proc(r: ^Request) {
 	if k, ok := r^.(Key); ok {
 		delete(k.chords)
