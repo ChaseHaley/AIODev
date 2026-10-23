@@ -213,10 +213,12 @@ try {
     Invoke-Aio wait text 'PS '
     Assert-True ($d['workspace.id'] -ne $sourceWorkspace) 'new window displays a distinct workspace'
     Invoke-Aio command workspace.rename | Out-Null
-    Invoke-Aio expect state rename.open=true
+    Invoke-Aio expect state "workspace.picker.rename_target=$($d['workspace.id'])"
+    Invoke-Aio expect state rename.open=false
     Invoke-Aio type 'Destination' | Out-Null
     Invoke-Aio key Enter | Out-Null
     Invoke-Aio expect state workspace.name=Destination
+    Invoke-Aio key Esc | Out-Null
     $destinationWorkspace = $d['workspace.id']
     Select-Window $source
     Invoke-Aio command workspace.change | Out-Null
@@ -557,7 +559,7 @@ try {
     Assert-True (-not ((Window-Ids) -contains $source)) 'existing-window transfer closes the exhausted source view'
     $d = Window-State $destination
     Assert-Equal $d['windows.count'] ($beforeWindows-1) 'existing-window final-pane transfer creates no window'
-    Assert-Equal $d['workspaces.count'] $beforeWorkspaces 'existing-window transfer retains the empty workspace'
+    Assert-Equal $d['workspaces.count'] ([int]$beforeWorkspaces-1) 'existing-window transfer removes the exhausted workspace'
     Assert-Equal $d['session.id'] $last 'existing-window transfer preserves final-pane runtime identity'
     Assert-Equal $d['sessions.count'] $sessions 'existing-window final-pane transfer closes no runtime'
     Invoke-Aio expect text LAST_PRESERVED
