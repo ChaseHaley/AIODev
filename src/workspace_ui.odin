@@ -126,21 +126,17 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	}
 	if len(workspace.tabs) == 0 && !tab_create(app, workspace) {return false}
 	// Load before changing ownership so an unreadable settings file leaves the old view intact.
-	prepared: Window
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, &prepared) {return false}
+	prepared: Workspace_View_Resources
+	if !workspace_view_init(app, &prepared, workspace) {return false}
+	defer workspace_view_destroy(&prepared)
 	arrange_cancel(app, w)
 	focus_leave(app, w)
 	tab_close_restore(w)
 	w.tab_menu.open, w.rename_open, w.workspace_picker.open = false, false, false
 	w.close_confirm = {}
 	clear(&w.close_restore)
-	ui.editor_destroy(&w.editor)
-	w.editor = prepared.editor
-	w.workspace = workspace
-	w.tree = &selected_tab(workspace).tree
+	workspace_view_rebind(&w.resources, &prepared)
 	if workspace.selection_anchor == 0 {tab_select_one(workspace, workspace.selected)}
-	clear(&w.tab_positions)
-	clear(&w.tab_controls)
 	w.tab_underline = {
 		value  = f32(workspace.selected),
 		target = f32(workspace.selected),

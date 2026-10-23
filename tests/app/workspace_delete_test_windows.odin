@@ -3,6 +3,7 @@ package app_test
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -313,5 +314,79 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, len(state.workspaces), 2)
 	app.tick(state)
+}
+
+@(test)
+workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
+	f: Delete_Fixture
+	defer delete_fixture_destroy(t, &f)
+	if !delete_fixture_init(t, &f) {return}
+	state := &f.state
+	w := state.windows[0]
+	app.pane_split(state, w, .Right)
+	if !testing.expect_value(t, len(state.sessions), 2) {return}
+	workspace := w.workspace
+	live_views := raw_data(w.views)
+	session := state.sessions[0].session
+	pid, geometry := term.process_id(session), term.geometry(session)
+	backing := context.allocator
+	tracker: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&tracker, backing)
+	defer mem.tracking_allocator_destroy(&tracker)
+	tracking := mem.tracking_allocator(&tracker)
+	failure := Delete_Fail_Allocator{backing = tracking}
+	allocator := runtime.Allocator{delete_fail_allocation, &failure}
+	for allowed in 0 ..< 5 {
+		prepared: app.Workspace_View_Resources
+		failure.remaining, failure.failed = allowed, false
+		context.allocator = allocator
+		ok := app.workspace_view_prepare(state, &prepared, workspace)
+		app.workspace_view_destroy(&prepared)
+		context.allocator = backing
+		testing.expect(t, !ok && failure.failed)
+		testing.expect_value(t, len(tracker.allocation_map), 0)
+		testing.expect(t, prepared.workspace == nil && prepared.tree == nil)
+		testing.expect_value(t, raw_data(w.views), live_views)
+		testing.expect(t, w.workspace == workspace && w.tree == &app.selected_tab(workspace).tree)
+		testing.expect_value(t, term.geometry(session), geometry)
+		testing.expect_value(t, term.process_id(session), pid)
+	}
+	failure.failed = true
+	context.allocator = tracking
+	defer context.allocator = backing
+	prepared, receiver: app.Workspace_View_Resources
+	defer app.workspace_view_destroy(&receiver)
+	defer app.workspace_view_destroy(&prepared)
+	if !testing.expect(t, app.workspace_view_prepare(state, &prepared, workspace)) {return}
+	if !testing.expect(t, app.workspace_view_prepare(state, &receiver, workspace)) {return}
+	testing.expect_value(t, len(prepared.views), 2)
+	views := raw_data(prepared.views)
+	app.workspace_view_move(&receiver, &prepared)
+	app.workspace_view_destroy(&prepared)
+	app.workspace_view_destroy(&prepared)
+	testing.expect(t, prepared.workspace == nil && prepared.tree == nil)
+	testing.expect(t, raw_data(prepared.views) == nil && raw_data(prepared.tab_controls) == nil)
+	testing.expect(t, raw_data(prepared.tab_positions) == nil && raw_data(prepared.panes) == nil)
+	testing.expect(t, raw_data(prepared.dividers) == nil && prepared.editor.source == "")
+	testing.expect_value(t, raw_data(receiver.views), views)
+	testing.expect(t, receiver.workspace == workspace && receiver.tree == w.tree)
+	testing.expect_value(t, raw_data(w.views), live_views)
+	testing.expect_value(t, term.geometry(session), geometry)
+	testing.expect_value(t, term.process_id(session), pid)
+	app.workspace_view_destroy(&receiver)
+	testing.expect_value(t, len(tracker.allocation_map), 0)
+	testing.expect_value(t, term.status(session).kind, term.Status_Kind.Running)
+	context.allocator = backing
+	app.run_action(state, w, .Settings_UI)
+	context.allocator = tracking
+	if !testing.expect(t, app.workspace_view_prepare(state, &prepared, workspace)) {return}
+	source := prepared.editor.source
+	app.workspace_view_move(&receiver, &prepared)
+	app.workspace_view_destroy(&prepared)
+	testing.expect(t, prepared.editor.source == "" && len(prepared.editor.rows) == 0)
+	testing.expect(t, receiver.editor.open && len(receiver.editor.rows) > 0)
+	testing.expect_value(t, receiver.editor.source, source)
+	app.workspace_view_destroy(&receiver)
+	testing.expect_value(t, len(tracker.allocation_map), 0)
 }
 
