@@ -118,7 +118,21 @@ try {
     Invoke-Aio key Esc
     Invoke-Aio expect state workspace.picker=false
 
-    Write-Output 'PASS raised hover on chip, tab and picker row'
+    # Both values are ordinary settings: without a restart, zero lift and zero gloss
+    # must reach the theme and remove the raised effect.
+    $settings = Join-Path $data 'settings.ini'
+    $text = [IO.File]::ReadAllText($settings).TrimEnd()
+    [IO.File]::WriteAllText($settings, $text + "`ninterface.hover_lift = 0`ninterface.hover_gloss = 0`n")
+    Invoke-Aio command settings.reload
+    Invoke-Aio wait idle
+    Invoke-Aio expect state theme.hover_lift=0
+    Invoke-Aio expect state theme.hover_gloss=0
+    Invoke-Aio mouse move (Point $chip) --px
+    Invoke-Aio wait idle
+    Invoke-Aio expect state workspace.button.hover=true
+    Shot 'chip-hover-no-lift-no-gloss'
+
+    Write-Output 'PASS raised hover on chip, tab and picker row; lift and gloss settings apply live'
 } finally {
     Invoke-Aio stop
 }

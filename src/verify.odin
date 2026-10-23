@@ -357,6 +357,8 @@ when AIO_CONTROL {
 				{"window.id", fmt.tprintf("%d", w.id)},
 				{"window.origin", fmt.tprintf("%d,%d", origin.x, origin.y)},
 				{"window.pointer", fmt.tprintf("%g,%g", w.pointer.x, w.pointer.y)},
+				{"theme.hover_lift", fmt.tprintf("%g", app.theme.hover_lift)},
+				{"theme.hover_gloss", fmt.tprintf("%g", app.theme.hover_gloss)},
 				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
 				{"rename.open", fmt.tprintf("%t", w.rename_open)},
