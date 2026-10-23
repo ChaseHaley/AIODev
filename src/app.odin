@@ -58,6 +58,13 @@ Session_Entry :: struct {
 	name:                string,
 }
 
+// Release only the entry's owned memory; callers own removal from app.sessions.
+session_entry_destroy :: proc(entry: ^Session_Entry) {
+	pane_header_destroy(&entry.header)
+	delete(entry.name)
+	term.destroy(entry.session)
+}
+
 App :: struct {
 	verify:                Verify,
 	perf:                  perf.Stats,
@@ -186,9 +193,7 @@ app_destroy :: proc(app: ^App) {
 	}
 	delete(app.windows)
 	for &entry in app.sessions {
-		pane_header_destroy(&entry.header)
-		delete(entry.name)
-		term.destroy(entry.session)
+		session_entry_destroy(&entry)
 	}
 	delete(app.sessions)
 	for workspace in app.workspaces {workspace_destroy(workspace)}

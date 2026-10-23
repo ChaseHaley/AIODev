@@ -653,16 +653,10 @@ find_controls :: proc(w: ^Window, entry: ^Session_Entry) -> (l: ui.Find_Layout, 
 
 @(private)
 binding_comment :: proc(info: Action_Info) -> string {
-	labels := make([]string, len(info.shortcuts), context.temp_allocator)
-	for shortcut, i in info.shortcuts {
-		buffer: [128]u8
-		label, err := commands.shortcut_label(shortcut, buffer[:])
-		assert(err == .None)
-		labels[i] = fmt.tprintf("%s", label)
-	}
 	if len(info.shortcuts) == 0 {return fmt.tprintf("keys.%s =", info.name)}
-	joined := strings.join(labels[:len(info.shortcuts)], ", ", context.temp_allocator)
-	return fmt.tprintf("keys.%s = %s", info.name, joined)
+	set := commands.Shortcut_Set{info.shortcuts, len(info.shortcuts)}
+	value := commands.shortcut_set_text(set, context.temp_allocator)
+	return fmt.tprintf("keys.%s = %s", info.name, value)
 }
 
 @(private)

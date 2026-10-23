@@ -20,10 +20,7 @@ shell_executable :: proc(command: string) -> string {
 	for c, i in text {
 		if c == '/' || c == '\\' {start = i + 1}
 	}
-	text = text[start:]
-	if len(text) >= 4 &&
-	   strings.equal_fold(text[len(text) - 4:], ".exe") {text = text[:len(text) - 4]}
-	return text
+	return executable_stem(text[start:])
 }
 
 shell_icon :: proc(executable, override: string) -> string {
