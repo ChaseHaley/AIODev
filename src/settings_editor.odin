@@ -184,17 +184,19 @@ editor_open :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	if !settings_load(app, &w.editor) {return}
-	tab, err := new(Tab)
-	if err != nil || layout.init(&tab.tree, {.Settings, 0}) != nil {
-		if tab != nil {layout.destroy(&tab.tree); free(tab)}
+	tab, record_error := tab_record_reserve(w.workspace)
+	if record_error != .None {
 		ui.editor_destroy(&w.editor)
 		notify(app, .Error, "Could not open the settings tab.")
 		return
 	}
-	w.workspace.next_tab_id += 1
-	tab.id = w.workspace.next_tab_id
-	tab.title = strings.clone("Settings")
-	append(&w.workspace.tabs, tab)
+	if layout.init(&tab.tree, {.Settings, 0}) != nil {
+		tab_record_free(tab)
+		ui.editor_destroy(&w.editor)
+		notify(app, .Error, "Could not open the settings tab.")
+		return
+	}
+	tab_record_commit(app, w.workspace, tab)
 	tab_select(app, w, len(w.workspace.tabs) - 1)
 }
 

@@ -32,17 +32,11 @@ pane_window_source_allows :: proc(workspace: ^Workspace) -> bool {
 // Preview tabs borrow their source runtime; discarding one must never close its session.
 @(private)
 pane_preview_workspace_discard :: proc(app: ^App, workspace: ^Workspace) {
-	for tab in workspace.tabs {
-		layout.destroy(&tab.tree)
-		delete(tab.title)
-		delete(tab.name)
-		free(tab)
-	}
+	for tab in workspace.tabs {tab_record_free(tab)}
 	clear(&workspace.tabs)
-	if !workspace_discard_empty(
-		app,
-		workspace,
-	) {log.error("discarding the pane preview workspace failed")}
+	if !workspace_discard_empty(app, workspace) {
+		log.error("discarding the pane preview workspace failed")
+	}
 }
 
 pane_window_preview_discard :: proc(app: ^App, id: platform.Window_Id) {
@@ -93,20 +87,15 @@ pane_window_preview_create :: proc(
 	if workspace == nil {return nil}
 	success := false
 	defer if !success {pane_preview_workspace_discard(app, workspace)}
-	tab, err := new(Tab)
-	if err != nil {return nil}
-	if reserve(&workspace.tabs, 1) != nil {free(tab); return nil}
-	if layout.init(&tab.tree, pane.content) !=
-	   nil {layout.destroy(&tab.tree); free(tab); return nil}
-	workspace.next_tab_id += 1
-	tab.id = workspace.next_tab_id
-	append(&workspace.tabs, tab)
+	tab, record_error := tab_record_reserve(workspace)
+	if record_error != .None {return nil}
+	if layout.init(&tab.tree, pane.content) != nil {tab_record_free(tab); return nil}
 	if node == source.tree.root && source.name != "" {
 		name, name_error := strings.clone(source.name)
-		if name_error != nil {return nil}
+		if name_error != nil {tab_record_free(tab); return nil}
 		tab.name = name
 	}
-	tab_update_title(app, tab)
+	tab_record_commit(app, workspace, tab)
 	preview := window_prepare(app, workspace)
 	if preview == nil {return nil}
 	defer if !success {window_close(app, preview)}

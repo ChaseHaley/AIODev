@@ -59,21 +59,19 @@ tab_create :: proc(
 	command: string = "",
 	directory: string = "",
 ) -> bool {
-	tab, err := new(Tab)
-	if err != nil {return false}
-	if reserve(&workspace.tabs, len(workspace.tabs) + 1) != nil {free(tab); return false}
-	if !session_open(app, command, directory) {free(tab); return false}
+	tab, record_error := tab_record_reserve(workspace)
+	if record_error != .None {return false}
+	if !session_open(app, command, directory) {
+		tab_record_free(tab)
+		return false
+	}
 	id := app.next_session_id
 	if layout.init(&tab.tree, {.Terminal, id}) != nil {
 		session_close(app, id)
-		layout.destroy(&tab.tree)
-		free(tab)
+		tab_record_free(tab)
 		return false
 	}
-	workspace.next_tab_id += 1
-	tab.id = workspace.next_tab_id
-	tab_update_title(app, tab)
-	append(&workspace.tabs, tab)
+	tab_record_commit(app, workspace, tab)
 	return true
 }
 
@@ -90,12 +88,7 @@ session_close :: proc(app: ^App, id: u32) {
 }
 
 workspace_destroy :: proc(workspace: ^Workspace) {
-	for tab in workspace.tabs {
-		layout.destroy(&tab.tree)
-		delete(tab.title)
-		delete(tab.name)
-		free(tab)
-	}
+	for tab in workspace.tabs {tab_record_free(tab)}
 	delete(workspace.tabs)
 	delete(workspace.name)
 	delete(workspace.icon.emoji)
@@ -192,12 +185,8 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 	if !valid || pane.content.kind != .Terminal {return false}
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
 	if !pane_minimum_allows(app, w, panes[:], nil, true) {return false}
-	tab, err := new(Tab)
-	if err !=
-	   nil {notify(app, .Error, "Could not create a tab. The pane was preserved."); return false}
-	success := false
-	defer if !success {free(tab)}
-	if reserve(&w.workspace.tabs, len(w.workspace.tabs) + 1) != nil {
+	tab, record_error := tab_record_reserve(w.workspace)
+	if record_error != .None {
 		notify(app, .Error, "Could not create a tab. The pane was preserved.")
 		return false
 	}
@@ -205,14 +194,12 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 	tree, separated := layout.separate_pane(&source.tree, node)
 	if !separated {
 		pane_move_abort(app, move)
+		tab_record_free(tab)
 		notify(app, .Error, "Could not move the pane. The layout was preserved.")
 		return false
 	}
 	tab.tree = tree
-	w.workspace.next_tab_id += 1
-	tab.id = w.workspace.next_tab_id
-	append(&w.workspace.tabs, tab)
-	success = true
+	tab_record_commit(app, w.workspace, tab)
 	pane_move_finish(app, move, tab)
 	return true
 }
@@ -407,10 +394,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 		if w.workspace == workspace &&
 		   index < len(w.tab_controls) {ordered_remove(&w.tab_controls, index)}
 	}
-	layout.destroy(&tab.tree)
-	delete(tab.title)
-	delete(tab.name)
-	free(tab)
+	tab_record_free(tab)
 	if index < workspace.selected {workspace.selected -= 1}
 	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs) - 1))
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
@@ -475,21 +459,6 @@ close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 		}
 	}
 	return false
-}
-
-@(private)
-tab_update_title :: proc(app: ^App, tab: ^Tab) {
-	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	if pane.content.kind == .Settings {return}
-	title: string
-	if entry := session_find(app, pane.content.id); entry != nil {
-		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
-	}
-	if tab.name != "" {title = tab.name}
-	owned, err := strings.clone(title)
-	if err != nil {log.error("copying the tab title failed"); return}
-	delete(tab.title)
-	tab.title = owned
 }
 
 session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
