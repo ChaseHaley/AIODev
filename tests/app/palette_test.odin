@@ -211,6 +211,27 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 }
 
 @(test)
+palette_without_animations_releases_its_owner_in_the_closing_step :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "snap") { return }
+	s := &f.state
+	first := s.windows[0]
+	app.palette_open(s, first)
+	app.update_motion(s)
+	testing.expect(t, app.palette_active(s, first) && app.palette_visible(s, first))
+	testing.expect_value(t, s.palette_window, first.id)
+	app.palette_close(s, first)
+	testing.expect(t, app.palette_visible(s, first) && !app.palette_active(s, first))
+	app.update_motion(s)
+	testing.expect(t, !app.palette_visible(s, first))
+	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
+	testing.expect_value(t, s.palette.motion.value, f32(0))
+	app.update_motion(s)
+	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
+}
+
+@(test)
 palette_fade_invalidates_only_owner_and_releases_after_settling :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)

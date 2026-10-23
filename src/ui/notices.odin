@@ -13,6 +13,11 @@ NOTICE_MARGIN :: 16
 NOTICE_PADDING :: 12
 @(private)
 NOTICE_MAX_LINES :: 4
+@(private)
+NOTICE_PRESENCE :: Presence_Spec {
+	open  = 160 * time.Millisecond,
+	close = 120 * time.Millisecond,
+}
 
 Notice_Kind :: enum u8 {
 	Info,
@@ -43,12 +48,12 @@ notice_style :: proc(
 }
 
 Notice :: struct {
-	key:     u32,
-	kind:    Notice_Kind,
-	text:    string,
-	sticky:  bool,
-	expires: time.Tick,
-	motion:  Motion,
+	key:            u32,
+	kind:           Notice_Kind,
+	text:           string,
+	sticky:         bool,
+	expires:        time.Tick,
+	using presence: Presence,
 }
 
 Notices :: struct {
@@ -95,16 +100,11 @@ notices_put :: proc(
 		text   = owned,
 		sticky = duration == 0,
 	}
-	motion_target(
-		&notice.motion,
-		1,
-		160 * time.Millisecond,
-		.Decelerate,
-		n.animations,
-		time.tick_now(),
-	)
+	now := time.tick_now()
+	presence_open(&notice.presence, NOTICE_PRESENCE)
+	_, _ = presence_advance(&notice.presence, n.animations, now)
 	if !notice.sticky {
-		notice.expires = time.tick_add(time.tick_now(), duration)
+		notice.expires = time.tick_add(now, duration)
 	}
 	if _, append_err := append(&n.items, notice); append_err != nil {
 		delete(owned, n.items.allocator)
@@ -205,14 +205,8 @@ notices_draw :: proc(
 				return result
 			}
 		}
-		fade_draw(
-			list,
-			layers,
-			rects,
-			glyph_count,
-			item.motion.value,
-			item.motion.target > 0 ? 6 * scale * (1 - item.motion.value) : 0,
-		)
+		opacity, rise := presence_fade(item.presence, 6 * scale)
+		fade_draw(list, layers, rects, glyph_count, opacity, rise)
 		bottom = box.y - 8 * scale
 		if bottom < margin {
 			break
@@ -224,24 +218,30 @@ notices_draw :: proc(
 @(private)
 notices_remove :: proc(n: ^Notices, index: int) {
 	item := n.items[index]
-	if n.animations {
-		motion_target(&item.motion, 0, 120 * time.Millisecond, .Accelerate, true, time.tick_now())
-		if _, err := append(&n.fading, item); err != nil {delete(item.text, n.items.allocator)}
-	} else {delete(item.text, n.items.allocator)}
+	presence_close(&item.presence)
+	if _, settled := presence_advance(&item.presence, n.animations, time.tick_now()); settled {
+		delete(item.text, n.items.allocator)
+	} else if _, err := append(&n.fading, item); err != nil {
+		delete(item.text, n.items.allocator)
+	}
 	ordered_remove(&n.items, index)
 }
 
 notices_animating :: proc(n: ^Notices) -> bool {
-	for item in n.items {if motion_active(item.motion) {return true}}
+	for item in n.items {if presence_active(item.presence) {return true}}
 	return len(n.fading) > 0
 }
 
 notices_animate :: proc(n: ^Notices, now: time.Tick) -> bool {
 	changed := false
-	for &item in n.items {changed = motion_update(&item.motion, now) || changed}
+	for &item in n.items {
+		item_changed, _ := presence_advance(&item.presence, n.animations, now)
+		changed = item_changed || changed
+	}
 	for i := len(n.fading) - 1; i >= 0; i -= 1 {
-		changed = motion_update(&n.fading[i].motion, now) || changed
-		if !motion_active(n.fading[i].motion) {
+		item_changed, settled := presence_advance(&n.fading[i].presence, n.animations, now)
+		changed = item_changed || changed
+		if settled {
 			delete(n.fading[i].text, n.items.allocator)
 			ordered_remove(&n.fading, i)
 		}

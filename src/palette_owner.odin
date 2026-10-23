@@ -13,7 +13,7 @@ palette_visible :: proc(app: ^App, w: ^Window) -> bool {
 		w != nil &&
 		w.id != 0 &&
 		app.palette_window == w.id &&
-		(app.palette.open || app.palette.motion.value > 0) \
+		ui.presence_visible(app.palette.presence) \
 	)
 }
 
@@ -26,7 +26,7 @@ palette_close :: proc(app: ^App, w: ^Window) {
 palette_release :: proc(app: ^App, w: ^Window) {
 	if w == nil || w.id == 0 || app.palette_window != w.id {return}
 	palette_close(app, w)
-	app.palette.motion = {}
+	ui.presence_reset(&app.palette.presence)
 	app.palette_window = 0
 }
 

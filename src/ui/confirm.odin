@@ -4,6 +4,7 @@ import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
+import "core:time"
 
 Confirm_Button :: enum {
 	None,
@@ -20,9 +21,8 @@ Confirm_Outcome :: enum {
 
 // A modal question with Cancel and Accept buttons. Accept has the keyboard first so Enter confirms.
 Confirm :: struct {
-	open:                  bool,
+	using presence:        Presence,
 	focus, hover, pressed: Confirm_Button,
-	motion:                Motion,
 	extended:              bool,
 }
 
@@ -38,13 +38,20 @@ CONFIRM_HEIGHT :: 150
 CONFIRM_BUTTON_WIDTH :: 96
 @(private)
 CONFIRM_BUTTON_HEIGHT :: 30
+@(private)
+CONFIRM_PRESENCE :: Presence_Spec {
+	open  = 120 * time.Millisecond,
+	close = 90 * time.Millisecond,
+}
 
 confirm_open :: proc(c: ^Confirm) {
-	c.open, c.focus, c.hover, c.pressed = true, .Accept, .None, .None
+	presence_open(&c.presence, CONFIRM_PRESENCE)
+	c.focus, c.hover, c.pressed = .Accept, .None, .None
 }
 
 confirm_close :: proc(c: ^Confirm) {
-	c.open, c.hover, c.pressed = false, .None, .None
+	presence_close(&c.presence)
+	c.hover, c.pressed = .None, .None
 }
 
 confirm_layout :: proc(width, height, scale: f32, extended := false) -> Confirm_Layout {
