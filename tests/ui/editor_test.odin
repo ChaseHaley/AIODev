@@ -230,6 +230,27 @@ editor_inline_controls_produce_values :: proc(t: ^testing.T) {
 }
 
 @(test)
+editor_choice_popup_highlights_the_option_under_the_pointer :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	ui.editor_hover_clear(&p)
+	l := page(&p)
+	testing.expect(t, ui.editor_select_key(&p, "cursor.style"))
+	ui.editor_key(&p, key({key = .Enter}))
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Choice)
+	popup := ui.editor_popup_rect(&p, l)
+	second := popup.y + 4 + 30 * 1.5
+	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, second))
+	testing.expect_value(t, p.popup_index, 1)
+	// The same option reports no change once it is already highlighted.
+	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, second))
+	// Below the popup must not steal the highlight from the open list.
+	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, popup.y+popup.height+40))
+	testing.expect_value(t, p.popup_index, 1)
+}
+
+@(test)
 editor_reset_buttons_and_pointer_shapes :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)

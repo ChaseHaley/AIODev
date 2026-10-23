@@ -54,6 +54,25 @@ hover_rim_draws_a_pointer_centred_line_and_honours_gloss :: proc(t: ^testing.T) 
 }
 
 @(test)
+hover_rim_present_reports_whether_the_frame_carries_a_pointer_light :: proc(t: ^testing.T) {
+	theme := ui.theme_from(settings.theme_resolve({.Studio, .Dark}))
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	if !testing.expect_value(t, render.push_layer(&list, {0, 0, 200, 100}), render.Error.None) {
+		return
+	}
+	testing.expect(t, !ui.hover_rim_present(&list))
+	if !testing.expect_value(
+		t,
+		ui.hover_rim_draw(&list, theme, {10, 20, 100, 30}, 6, 1, 1, {60, 35}),
+		render.Error.None,
+	) {
+		return
+	}
+	testing.expect(t, ui.hover_rim_present(&list))
+}
+
+@(test)
 hover_shadow_sits_under_the_lifted_rect :: proc(t: ^testing.T) {
 	theme := ui.theme_from(settings.theme_resolve({.Studio, .Dark}))
 	list := render.draw_list_init()

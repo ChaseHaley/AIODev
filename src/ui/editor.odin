@@ -1220,6 +1220,35 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 
 // Hover state for row highlights and reset buttons; returns whether the page must redraw.
 editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
+	// An open dropdown highlights the option under the pointer, like the menus.
+	if p.popup != .None {
+		if row := editor_row(p); row != nil {
+			popup := editor_popup_rect(p, l)
+			visible := int((y - popup.y - 4 * l.scale) / (CHOICE_HEIGHT * l.scale))
+			option := render.Rect {
+				popup.x + 4 * l.scale,
+				popup.y + 4 * l.scale + f32(visible) * CHOICE_HEIGHT * l.scale,
+				popup.width - 8 * l.scale,
+				CHOICE_HEIGHT * l.scale,
+			}
+			if contains(popup, x, y) && visible >= 0 && contains(option, x, y) {
+				index, valid := visible, false
+				#partial switch p.popup {
+				case .Choice:
+					valid = index < len(row.choices)
+				case .Shortcuts:
+					index += p.popup_scroll
+					count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
+					valid = index <= count
+				case .Color, .None:
+				}
+				if valid && index != p.popup_index {
+					p.popup_index = index
+					return true
+				}
+			}
+		}
+	}
 	item, reset, outline := -1, -1, -1
 	if p.popup == .None && contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
@@ -1463,6 +1492,7 @@ popup_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	r := editor_popup_rect(p, l)
 	row := editor_row(p)
@@ -1493,6 +1523,10 @@ popup_draw :: proc(
 			}
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
+			if contains(option, pointer.x, pointer.y) {
+				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer);
+				   result != .None {return .Ok}
+			}
 			label := i < len(parts) ? parts[i] : "+ Add shortcut"
 			if result := draw_text(
 				text,
@@ -1526,6 +1560,10 @@ popup_draw :: proc(
 			}
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
+			if contains(option, pointer.x, pointer.y) {
+				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer);
+				   result != .None {return .Ok}
+			}
 			if name == field_string(&p.value) {
 				draw_rect(
 					list,
@@ -1632,6 +1670,7 @@ filter_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	focused: bool,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	s := l.scale
 	box := filter_box(p, l, text)
@@ -1645,7 +1684,11 @@ filter_draw :: proc(
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}
 	if render.push_layer(list, l.page) != .None {return .Ok}
-	if p.hover_clear {draw_rect(list, {rect = clear, color = theme.hover, radius = 5 * s})}
+	if p.hover_clear {
+		draw_rect(list, {rect = clear, color = theme.hover, radius = 5 * s})
+		if result := hover_rim_draw(list, theme, clear, 5 * s, 1, s, pointer);
+		   result != .None {return .Ok}
+	}
 	return draw_icon(text, list, ICON_CLEAR, clear, p.hover_clear ? theme.text : theme.muted, 0.7)
 }
 
@@ -1656,6 +1699,7 @@ outline_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	if l.outline.width == 0 {return .Ok}
 	s := l.scale
@@ -1695,6 +1739,10 @@ outline_draw :: proc(
 		} else if entry == p.hover_outline {
 			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
 		}
+		if entry == p.hover_outline {
+			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer);
+			   result != .None {return .Ok}
+		}
 		baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
 		label := fmt.tprintf("%d", item.count)
 		label_width := text_width(&small, label)
@@ -1726,6 +1774,7 @@ editor_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	focused: bool,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	s := l.scale
 	p.visible_rows = l.rows
@@ -1759,9 +1808,9 @@ editor_draw :: proc(
 		p.error ? theme.error : theme.muted,
 		max(1, status_right - status_x),
 	); r != .Ok {return r}
-	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search);
+	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search, pointer);
 	   r != .Ok {return r}
-	if r := outline_draw(p, l, list, text, theme); r != .Ok {return r}
+	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}
 	if len(p.items) == 0 && filtering(p) {
 		if render.push_layer(list, l.page) != .None {return .Ok}
 		return draw_text(
@@ -1786,6 +1835,11 @@ editor_draw :: proc(
 			}
 		} else if index == p.hover_item {
 			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
+		}
+		if index == p.hover_item {
+			// A row is a reading surface: it takes the pointer light but never the lift.
+			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer);
+			   result != .None {return .Ok}
 		}
 		if item.row < 0 {
 			baseline := r.y + r.height - 14 * s
@@ -1842,6 +1896,8 @@ editor_draw :: proc(
 		modified := row.value != row.default_value
 		if index == p.hover_reset && modified {
 			draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6 * s})
+			if result := hover_rim_draw(list, theme, parts.reset, 6 * s, 1, s, pointer);
+			   result != .None {return .Ok}
 		}
 		icon_color := theme.faint
 		if modified {
@@ -1852,5 +1908,5 @@ editor_draw :: proc(
 		if result := draw_icon(text, list, ICON_UNDO, parts.reset, icon_color, 0.9);
 		   result != .Ok {return result}
 	}
-	return popup_draw(p, l, list, text, theme)
+	return popup_draw(p, l, list, text, theme, pointer)
 }
