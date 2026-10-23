@@ -60,7 +60,10 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.tab_pressed = false
 			ui.editor_hover_clear(&w.editor)
 			w.split_overlay = false
-			for &view in w.views {view.header_hover, view.header_pressed = .None, .None}
+			for &view in w.views {
+				view.header_hover = .None
+				ui.armed_cancel(&view.header_armed)
+			}
 			w.dirty = true
 		}
 	case platform.Mouse_Wheel_Event:
@@ -329,16 +332,7 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		run_action(app, w, Action(id))
 	case .Open_Setting:
 		w.dirty = true
-		editor_open(app, w)
-		if w.editor.open {
-			ui.field_set(&w.editor.filter, "")
-			ui.editor_filter(&w.editor)
-		}
-		if w.editor.open &&
-		   ui.editor_select_key(&w.editor, app.palette.chosen) &&
-		   ui.editor_row(&w.editor).kind != .Shortcut {
-			w.editor.focus = .Control
-		}
+		settings_reveal(app, w, {key = app.palette.chosen, search = .Clear, focus = .Control})
 	}
 }
 

@@ -290,8 +290,7 @@ tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int,
 	group := workspace.tabs[index].marked
 	for tab, i in workspace.tabs {
 		if group ? !tab.marked : i != index {continue}
-		count := 0
-		for node in tab.tree.nodes {if _, ok := node.(layout.Pane); ok {count += 1}}
+		count := tab_pane_count(tab)
 		tabs, panes = tabs + 1, panes + count
 		split ||= count > 1
 	}
@@ -379,22 +378,21 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	if was_selected {
 		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
 	}
-	for node in tab.tree.nodes {
-		pane, ok := node.(layout.Pane)
-		if !ok {continue}
-		if pane.content.kind == .Terminal {session_close(app, pane.content.id); continue}
+	terminal := tab_session_panes(app, &tab.tree, index)
+	for pane, ok := workspace_pane_next(&terminal); ok; pane, ok = workspace_pane_next(&terminal) {
+		session_close(app, pane.content.id)
+	}
+	other := tab_other_panes(app, &tab.tree, index)
+	for _, ok := workspace_pane_next(&other); ok; _, ok = workspace_pane_next(&other) {
 		for w in app.windows {if w.workspace == workspace {ui.editor_destroy(&w.editor)}}
 	}
 	ordered_remove(&workspace.tabs, index)
 	for w in app.windows {
-		if w.workspace == workspace &&
-		   index < len(w.tab_positions) {ordered_remove(&w.tab_positions, index)}
-		if w.workspace == workspace &&
-		   index < len(w.tab_controls) {ordered_remove(&w.tab_controls, index)}
+		if w.workspace == workspace {tab_presentation_remove(&w.presentation, index)}
 	}
 	tab_record_free(tab)
-	if index < workspace.selected {workspace.selected -= 1}
-	workspace.selected = clamp(workspace.selected, 0, max(0, len(workspace.tabs) - 1))
+	workspace.selected =
+		tab_presentation_selected_after_remove(workspace.selected, index, len(workspace.tabs))
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		w := app.windows[i]
 		if w.workspace != workspace {continue}
@@ -444,17 +442,12 @@ pane_remove :: proc(
 close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 	if entry := session_find(app, id); entry != nil && entry.keep_open {return false}
 	for workspace in app.workspaces {
-		for tab, tab_index in workspace.tabs {
-			for node, node_index in tab.tree.nodes {
-				if pane, ok := node.(layout.Pane); ok && pane.content == {.Terminal, id} {
-					if len(workspace.tabs) == 1 && tab.tree.root == layout.Node_Id(node_index) {
-						return false
-					}
-					pane_remove(app, workspace, tab_index, layout.Node_Id(node_index))
-					return true
-				}
-			}
-		}
+		pane, found := workspace_first_session(app, workspace, id)
+		if !found {continue}
+		if len(workspace.tabs) == 1 &&
+		   workspace.tabs[pane.tab].tree.root == pane.node {return false}
+		pane_remove(app, workspace, pane.tab, pane.node)
+		return true
 	}
 	return false
 }

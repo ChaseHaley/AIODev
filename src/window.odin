@@ -29,7 +29,8 @@ Pane_View :: struct {
 	style: term_view.Style,
 	frame: term_view.Frame,
 	header_controls: [4]ui.Control_Motion,
-	header_hover, header_pressed: ui.Header_Action,
+	header_hover:   ui.Header_Action,
+	header_armed:   ui.Armed(ui.Header_Action),
 }
 
 Window :: struct {
@@ -65,7 +66,7 @@ Window :: struct {
 	tab_underline: ui.Motion,
 	tab_hover: int,
 	tab_pressed: bool,
-	tab_close_pressed: int,
+	tab_close_armed: ui.Armed(int),
 	// Asks before a destructive close and holds its subject, live counts and presentation state.
 	pending_close: Pending_Close,
 	close_restore: [dynamic]u32,
@@ -74,7 +75,8 @@ Window :: struct {
 	rename_open: bool,
 	rename_target: Rename_Target,
 	workspace_picker: Workspace_Picker,
-	caption_hover, caption_pressed: int,
+	caption_hover: int,
+	caption_armed: ui.Armed(int),
 	maximized: bool,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
@@ -127,8 +129,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.list = render.draw_list_init()
 	ui.find_init(&w.find)
 	w.tab_hover = -1
-	w.tab_close_pressed = -1
-	w.caption_hover, w.caption_pressed = -1, -1
+	w.caption_hover = -1
 	w.divider_click_node = layout.INVALID_NODE
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
@@ -287,15 +288,8 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
-	if resize(&w.tab_controls, len(w.workspace.tabs) + 1) != nil {
-		log.error("resizing tab control states failed")
-	}
-	old_positions := len(w.tab_positions)
-	if resize(&w.tab_positions, len(w.workspace.tabs)) != nil {
-		log.error("resizing tab positions failed")
-	}
-	for &position, i in w.tab_positions {
-		if i >= old_positions {position.value, position.target = f32(i), f32(i)}
+	if !tab_presentation_resize(&w.presentation, len(w.workspace.tabs)) {
+		log.error("resizing tab presentation values failed")
 	}
 	bar := window_tab_bar(app, w)
 	platform.window_title_bar(
@@ -322,7 +316,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		} else {w.views[i].valid = false}
 	}
 	for pane in w.panes {
-		entry := session_find(app, pane.content.id)
+		entry := workspace_session_for_content(app, pane.content)
 		if entry == nil {
 			continue
 		}

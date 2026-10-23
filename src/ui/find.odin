@@ -12,10 +12,10 @@ import "aio:render"
 @(private) FIND_RADIUS :: 8
 
 Find_Bar :: struct {
-	open: bool,
+	open:  bool,
 	query: Text_Field,
-	hover, pressed: Find_Outcome,
-	pointer_down: bool,
+	hover: Find_Outcome,
+	armed: Armed(Find_Outcome),
 }
 
 Find_Layout :: struct { panel, query, status, older, newer: render.Rect }
@@ -40,15 +40,15 @@ find_destroy :: proc(f: ^Find_Bar) {
 
 find_open :: proc(f: ^Find_Bar) {
 	f.open = true
-	f.hover, f.pressed = .None, .None
-	f.pointer_down = false
+	f.hover = .None
+	armed_cancel(&f.armed)
 	field_set(&f.query, "")
 }
 
 find_close :: proc(f: ^Find_Bar) {
 	f.open = false
-	f.hover, f.pressed = .None, .None
-	f.pointer_down = false
+	f.hover = .None
+	armed_cancel(&f.armed)
 	field_set(&f.query, "")
 }
 
@@ -138,11 +138,12 @@ find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mo
 	pressed: bool, x, y: f32) -> Find_Outcome {
 	if button != .Left { return .None }
 	hit := enabled ? find_hit(l, x, y) : .None
-	f.pointer_down = pressed
-	if pressed { f.pressed = hit; return .Moved }
-	armed := f.pressed
-	f.pressed = .None
-	if armed != .None && hit == armed { return armed }
+	if pressed {
+		armed_press(&f.armed, hit)
+		return .Moved
+	}
+	fired, ok := armed_release(&f.armed, hit)
+	if ok && fired != .None { return fired }
 	return .Moved
 }
 
@@ -183,11 +184,12 @@ find_draw :: proc(
 	}
 	for area, i in ([2]render.Rect{l.older, l.newer}) {
 		action: Find_Outcome = i == 0 ? .Older : .Newer
-		if enabled && (f.hover == action || f.pressed == action) {
-			draw_rect(list, {rect = area, color = f.pressed == action ? theme.pressed : theme.hover,
+		active := armed_is(f.armed, action)
+		if enabled && (f.hover == action || active) {
+			draw_rect(list, {rect = area, color = active ? theme.pressed : theme.hover,
 				radius = 5 * scale})
 		}
-		if enabled && f.pressed == action { focus_ring_draw(list, area, theme, scale) }
+		if enabled && active { focus_ring_draw(list, area, theme, scale) }
 		if result := draw_glyph_centered(text, list, i == 0 ? '↑' : '↓', area,
 			enabled ? theme.text : theme.faint); result != .Ok { return result }
 	}

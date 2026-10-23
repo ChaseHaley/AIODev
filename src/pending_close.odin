@@ -1,7 +1,5 @@
 package main
 
-import "aio:layout"
-import "aio:platform"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"
@@ -13,14 +11,13 @@ Pending_Close_Kind :: enum {
 }
 
 // The destructive close being asked about, the subject that must still be live when it is
-// accepted, and the counts and names the prompt shows.
+// accepted, and the counts and names the prompt shows. The plan is the workspace subject's
+// identity and policy; a tab close leaves it empty.
 Pending_Close :: struct {
 	confirm:          ui.Confirm,
 	kind:             Pending_Close_Kind,
 	tab:              u32,
-	workspace:        u32,
-	owner:            platform.Window_Id,
-	destination:      u32,
+	using plan:       Workspace_Delete_Plan,
 	workspace_name:   string,
 	destination_name: string,
 	tabs, panes, sessions: int,
@@ -48,7 +45,7 @@ pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int) {
 	pc.workspace_name, pc.destination_name = "", ""
 	pc.kind = .Tab
 	pc.tab = w.workspace.tabs[index].id
-	pc.workspace, pc.destination, pc.owner = 0, 0, 0
+	pc.plan = {}
 	pc.tabs, pc.panes, _ = tab_close_scope(w.workspace, index)
 	pc.sessions = 0
 	pc.confirm.extended = false
@@ -62,14 +59,14 @@ pending_close_open_workspace :: proc(
 	app: ^App,
 	w: ^Window,
 	workspace: ^Workspace,
-	owner: ^Window,
-	destination: ^Workspace,
+	plan: Workspace_Delete_Plan,
 ) {
 	name, err := strings.clone(workspace.name)
 	if err != nil {
 		notify(app, .Error, "Could not prepare workspace deletion.")
 		return
 	}
+	destination := plan.destination != 0 ? workspace_find(app, plan.destination) : nil
 	destination_name: string
 	if destination != nil {
 		destination_name, err = strings.clone(destination.name)
@@ -90,11 +87,10 @@ pending_close_open_workspace :: proc(
 	delete(pc.destination_name)
 	pc.workspace_name, pc.destination_name = name, destination_name
 	pc.kind = .Workspace
-	pc.workspace = workspace.id
-	pc.destination = destination != nil ? destination.id : 0
-	pc.owner = owner != nil ? owner.id : 0
+	pc.plan = plan
 	pc.tab = 0
-	pc.tabs, pc.panes, pc.sessions = pending_close_workspace_counts(workspace)
+	counts := workspace_pane_counts(workspace)
+	pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
 	ui.confirm_open(&pc.confirm)
 	pc.confirm.extended = true
 	w.dirty = true
@@ -124,11 +120,12 @@ pending_close_text :: proc(
 		text.note = "Turn this off with Confirm Closing Split Tabs in Settings."
 	case .Workspace:
 		name := pc.workspace_name
-		if found := workspace_find(app, pc.workspace); pc.confirm.open && found != nil {
+		if found := workspace_find(app, pc.plan.workspace); pc.confirm.open && found != nil {
 			name = found.name
-			pc.tabs, pc.panes, pc.sessions = pending_close_workspace_counts(found)
+			counts := workspace_pane_counts(found)
+			pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
 		}
-		text.title = fmt.tprintf("Delete #%d “%s”?", pc.workspace, name)
+		text.title = fmt.tprintf("Delete #%d “%s”?", pc.plan.workspace, name)
 		text.body = fmt.tprintf(
 			"Close %d tabs (%d panes); stop %d sessions.",
 			pc.tabs,
@@ -137,12 +134,12 @@ pending_close_text :: proc(
 		)
 		text.label = "Delete"
 		switch {
-		case pc.owner == 0:
+		case pc.plan.owner == 0:
 			text.note = "Other workspaces and their sessions stay open."
-		case pc.destination != 0:
+		case pc.plan.destination != 0:
 			text.note = fmt.tprintf(
 				"Switch its window to #%d “%s”.",
-				pc.destination,
+				pc.plan.destination,
 				pc.destination_name,
 			)
 		case:
@@ -169,18 +166,4 @@ pending_close_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	case .Workspace:
 		if accept {workspace_delete_accept(app, w)}
 	}
-}
-
-@(private)
-pending_close_workspace_counts :: proc(workspace: ^Workspace) -> (tabs, panes, sessions: int) {
-	tabs = len(workspace.tabs)
-	for tab in workspace.tabs {
-		for node in tab.tree.nodes {
-			if pane, ok := node.(layout.Pane); ok {
-				panes += 1
-				if pane.content.kind == .Terminal {sessions += 1}
-			}
-		}
-	}
-	return
 }

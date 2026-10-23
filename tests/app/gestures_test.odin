@@ -41,7 +41,7 @@ gestures_header_multiple_buttons_release_outside_over_caption :: proc(t: ^testin
 	gesture_button(s, w, .Right, false, -20, f32(w.height)+20)
 	gesture_button(s, w, .Middle, false, -20, f32(w.height)+20)
 	testing.expect(t, w.header_buttons == {})
-	testing.expect_value(t, w.caption_pressed, -1)
+	testing.expect(t, !ui.armed_down(w.caption_armed))
 	testing.expect_value(t, len(w.panes), 2)
 	testing.expect(t, app.window_find(s, w.id) == w && !w.tree.zoomed)
 }
@@ -100,7 +100,7 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = w.width+10, y = w.height+10,
 		buttons = {.Left}})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
-	testing.expect(t, !w.selecting && !w.autoscrolling && !w.find.pointer_down)
+	testing.expect(t, !w.selecting && !w.autoscrolling && !ui.armed_down(w.find.armed))
 	testing.expect_value(t, w.tree.focus, focus)
 	app.editor_open(s, w)
 	l := app.settings_layout(w)

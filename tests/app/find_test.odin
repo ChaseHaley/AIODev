@@ -40,7 +40,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	append(&workspace.tabs, &tabs[0], &tabs[1])
 	defer delete(workspace.tabs)
 	w := app.Window{id = 138, workspace = &workspace, tree = &tabs[0].tree,
-		width = 1000, height = 600, scale = 1, caption_pressed = -1, tab_close_pressed = -1,
+		width = 1000, height = 600, scale = 1,
 		divider_click_node = layout.INVALID_NODE}
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
 	w.metrics = term_view.compute_metrics(fonts, w.ui_text.family, 14, 1)
@@ -78,18 +78,18 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y})
 	testing.expect(t, workspace.tabs[1] == &tabs[0])
 	testing.expect_value(t, workspace.selected, 1)
-	testing.expect(t, !w.find.pointer_down)
+	testing.expect(t, !ui.armed_down(w.find.armed))
 	clear(&w.tab_positions)
 	bar = app.window_tab_bar(&state, &w)
 	close := ui.tab_close_rect(bar, workspace.selected, w.scale)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x+close.width/2), y = i32(close.y+close.height/2)})
-	if !testing.expect_value(t, w.tab_close_pressed, workspace.selected) { return }
+	if !testing.expect_value(t, ui.armed_target(w.tab_close_armed), workspace.selected) { return }
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
-	testing.expect_value(t, w.tab_close_pressed, -1)
+	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	testing.expect_value(t, len(workspace.tabs), 2)
 	// Keep the divider regression independent when running against the known broken dispatcher.
-	w.tab_close_pressed = -1
+	ui.armed_cancel(&w.tab_close_armed)
 	_, split_error := layout.split(w.tree, w.tree.focus, .Horizontal, 0.5, {.Terminal, 140})
 	if !testing.expect_value(t, split_error, nil) { return }
 	layout.dividers(w.tree, app.window_content_area(&state, &w), app.window_gap(&state, &w), &w.dividers)
@@ -101,7 +101,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 	testing.expect_value(t, w.dragging.count, 0)
-	testing.expect(t, !w.find.pointer_down && w.find.open)
+	testing.expect(t, !ui.armed_down(w.find.armed) && w.find.open)
 }
 
 // Uses real ConPTY output and the app event dispatcher, without creating or showing a native window.
@@ -135,7 +135,7 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	if !testing.expect_value(t, layout.init(&tree, {.Terminal, 138}), nil) { return }
 	defer layout.destroy(&tree)
 	w := app.Window{id = 138, workspace = &workspace, tree = &tree, width = 1000, height = 600,
-		scale = 1, caption_pressed = -1, tab_close_pressed = -1}
+		scale = 1}
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
 	ui.find_init(&w.find)
 	defer ui.find_destroy(&w.find)
@@ -192,20 +192,22 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 		y = i32(l.older.y+16), button = .Left, pressed = true})
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = w.width-20, y = 20, button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
-	testing.expect(t, !w.find.pointer_down)
-	testing.expect_value(t, w.caption_pressed, -1)
+	testing.expect(t, !ui.armed_down(w.find.armed))
+	testing.expect(t, !ui.armed_down(w.caption_armed))
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left, pressed = true})
 	w.dirty = false
 	app.handle_event(&state, platform.Capture_Lost_Event{w.id})
-	testing.expect(t, !w.find.pointer_down && w.find.pressed == .None && w.dirty)
+	testing.expect(t, !ui.armed_down(w.find.armed) &&
+		ui.armed_target(w.find.armed) == .None && w.dirty)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left, pressed = true})
 	app.handle_event(&state, platform.Focus_Event{window = w.id, focused = false})
-	testing.expect(t, !w.find.pointer_down && w.find.pressed == .None && w.find.open)
+	testing.expect(t, !ui.armed_down(w.find.armed) &&
+		ui.armed_target(w.find.armed) == .None && w.find.open)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
@@ -223,9 +225,9 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	testing.expect_value(t, term.search_summary(other).selected, -1)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left, pressed = true})
-	testing.expect(t, w.find.pointer_down && w.find.pressed == .None)
+	testing.expect(t, ui.armed_down(w.find.armed) && ui.armed_target(w.find.armed) == .None)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 5, y = 5, button = .Left})
-	testing.expect(t, !w.find.pointer_down)
+	testing.expect(t, !ui.armed_down(w.find.armed))
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !w.find.open && !term.search_summary(session).active)
 	bar, _ := term.scrollbar(session)

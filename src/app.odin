@@ -1,5 +1,6 @@
 package main
 
+import "aio:colour"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
@@ -578,7 +579,7 @@ apply_theme :: proc(app: ^App) {
 }
 
 color :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {
-	return {f32(c.r) / 255, f32(c.g) / 255, f32(c.b) / 255, alpha}
+	return colour.rgba(c, alpha)
 }
 
 @(private)

@@ -1,7 +1,7 @@
 package control
 
+import "aio:colour"
 import "aio:term"
-import "core:fmt"
 
 Attribute_Kind :: enum {
 	Text,
@@ -80,7 +80,7 @@ attribute_entry :: proc(name: string) -> (Attribute, bool) {
 
 @(private, require_results)
 color_text :: proc(c: Maybe(term.Color), buffer: []u8) -> string {
-	if rgb, ok := c.?; ok {return fmt.bprintf(buffer, "#%02x%02x%02x", rgb[0], rgb[1], rgb[2])}
+	if rgb, ok := c.?; ok {return colour.format(rgb, buffer)}
 	return "default"
 }
 
@@ -120,13 +120,8 @@ underline_index :: proc(name: string) -> int {
 @(private, require_results)
 valid_color :: proc(value: string) -> bool {
 	if value == "default" {return true}
-	if len(value) != 7 || value[0] != '#' {return false}
-	for c in value[1:] {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
-			return false
-		}
-	}
-	return true
+	_, valid, _ := colour.parse(value, .Strict)
+	return valid
 }
 
 @(private, require_results)

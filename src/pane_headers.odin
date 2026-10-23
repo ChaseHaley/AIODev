@@ -112,7 +112,10 @@ pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_A
 }
 
 pane_header_cancel :: proc(w: ^Window) {
-	for &view in w.views {view.header_hover, view.header_pressed = .None, .None}
+	for &view in w.views {
+		view.header_hover = .None
+		ui.armed_cancel(&view.header_armed)
+	}
 }
 
 // The terminal must not receive either half of a header click, including a release outside it.
@@ -130,10 +133,12 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 		chosen: ui.Header_Action
 		for &view in w.views {
 			if e.button == .Left {
-				if hit &&
-				   view.content == pane.content &&
-				   view.header_pressed == action {chosen = action}
-				view.header_pressed = .None
+				fired, ok := ui.armed_release(
+					&view.header_armed,
+					hit && view.content == pane.content ? action : ui.Header_Action.None,
+				)
+				// A view armed with no action must not clear another view's choice.
+				if ok && fired != .None {chosen = fired}
 			}
 		}
 		if chosen != .None {
@@ -155,7 +160,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 		if e.button == .Left {
 			pane_focus(app, w, pane.node)
 			for &view in w.views {
-				if view.content == pane.content {view.header_pressed = action}
+				if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
 			}
 			if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
 		}

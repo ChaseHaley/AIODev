@@ -29,9 +29,11 @@ snapshot_result :: proc(result: ghostty.Result, operation: string) -> Error {
 	return result == .Out_Of_Memory ? .Out_Of_Memory : .Terminal_Failed
 }
 
+// snapshot_color keeps the cell-read seam stable: the value contract lives in the colour module,
+// and this names the byte conversion the snapshot and frame share.
 @(private)
 snapshot_color :: proc(rgb: ghostty.Color_Rgb) -> Color {
-	return {rgb.r, rgb.g, rgb.b}
+	return color_from_ghostty(rgb)
 }
 
 @(require_results)
@@ -108,36 +110,19 @@ snapshot_read_cell :: proc(
 	c: ^Snapshot_Cell,
 	text: ^[dynamic]u8,
 ) -> Error {
-	raw: ghostty.Cell
-	c.style = ghostty.sized(ghostty.Style)
-	keys := [?]ghostty.Render_State_Row_Cells_Data{.Raw, .Style, .Selected}
-	values := [?]rawptr{&raw, &c.style, &c.selected}
-	result := ghostty.render_state_row_cells_get_multi(cells, len(keys), &keys[0], &values[0], nil)
-	if err := snapshot_result(result, "reading cell"); err != .None {return err}
-	if err := snapshot_result(ghostty.cell_get(raw, .Wide, &c.width), "reading cell width");
-	   err != .None {return err}
-	color_keys := [?]ghostty.Render_State_Row_Cells_Data{.Fg_Color, .Bg_Color}
-	for key, i in color_keys {
-		rgb: ghostty.Color_Rgb
-		result = ghostty.render_state_row_cells_get(cells, key, &rgb)
-		if result == .Invalid_Value {continue}
-		if err := snapshot_result(result, "reading cell color"); err != .None {return err}
-		if i == 0 {c.foreground = snapshot_color(rgb)} else {c.background = snapshot_color(rgb)}
+	cell := read_render_cell(cells)
+	c.width, c.style = cell.width, cell.style
+	c.foreground = nil
+	if rgb, ok := cell.foreground.?; ok {c.foreground = snapshot_color(rgb)}
+	c.background = nil
+	if rgb, ok := cell.background.?; ok {c.background = snapshot_color(rgb)}
+	selected: bool
+	if ghostty.render_state_row_cells_get(cells, .Selected, &selected) == .Success {
+		c.selected = selected
 	}
-	if c.width == .Spacer_Tail || c.width == .Spacer_Head {return .None}
-	buffer: ghostty.Buffer
-	result = ghostty.render_state_row_cells_get(cells, .Graphemes_Utf8, &buffer)
-	if result == .Success {return .None}
-	if result != .Out_Of_Space {
-		return snapshot_result(result, "measuring cell text")
-	}
-	start := len(text)
-	if buffer.len > uint(max(int) - start) {return .Out_Of_Memory}
-	if runtime.resize(text, start + int(buffer.len)) != nil {return .Out_Of_Memory}
-	buffer.ptr, buffer.cap = raw_data(text^[start:]), buffer.len
-	result = ghostty.render_state_row_cells_get(cells, .Graphemes_Utf8, &buffer)
-	if err := snapshot_result(result, "reading cell text"); err != .None {return err}
-	c.text = string(text^[start:start + int(buffer.len)])
+	span, err := render_cell_graphemes(cells, cell.width, text)
+	if err != .None {return err}
+	c.text = string(span)
 	return .None
 }
 

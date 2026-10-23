@@ -1,5 +1,6 @@
 package settings
 
+import "aio:colour"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
@@ -730,24 +731,7 @@ assign :: proc(
 			(cast(^Maybe(Color))p)^ = nil
 			return nil, nil
 		}
-		valid := len(value) == 7 && value[0] == '#'
-		color: Color
-		if valid {
-			for c, i in value[1:] {
-				digit: u8
-				switch {
-				case c >= '0' && c <= '9':
-					digit = u8(c - '0')
-				case c >= 'a' && c <= 'f':
-					digit = u8(c - 'a') + 10
-				case c >= 'A' && c <= 'F':
-					digit = u8(c - 'A') + 10
-				case:
-					valid = false
-				}
-				color[i / 2] = color[i / 2] * 16 + digit
-			}
-		}
+		color, valid, _ := colour.parse(value, .Strict)
 		if !valid {
 			return problem(
 				.Invalid_Value,

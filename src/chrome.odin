@@ -49,6 +49,9 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			return .Ok
 		}
 	}
+	// A disarmed caption control must not be drawn as button 0.
+	caption_pressed := -1
+	if ui.armed_down(w.caption_armed) {caption_pressed = ui.armed_target(w.caption_armed)}
 	if result := ui.caption_draw(
 		&w.list,
 		&w.ui_text,
@@ -56,7 +59,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		f32(w.width),
 		w.scale,
 		w.caption_hover,
-		w.caption_pressed,
+		caption_pressed,
 		w.maximized,
 	); result != .Ok {return result}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
@@ -69,10 +72,8 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if tab.title != "" {title = tab.title}
 			icon: string
 			atlas := render.Rect{}
-			pane, terminal := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-			if terminal && pane.content.kind == .Terminal {
-				if entry := session_find(app, pane.content.id);
-				   entry != nil {icon = entry.header.icon}
+			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {
+				if pane.session != nil {icon = pane.session.header.icon}
 				result: glyphs.Result
 				atlas, result = shell_icon_atlas(app)
 				if result != .Ok {return result}

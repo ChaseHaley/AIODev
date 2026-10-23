@@ -17,6 +17,17 @@ Colors :: struct {
 	palette:                        [16]Color,
 }
 
+// color_from_ghostty converts libghostty's RGB struct to the opaque colour value every caller
+// shares.
+color_from_ghostty :: proc(rgb: ghostty.Color_Rgb) -> Color {
+	return {rgb.r, rgb.g, rgb.b}
+}
+
+// ghostty_from_color is the inverse of color_from_ghostty.
+ghostty_from_color :: proc(c: Color) -> ghostty.Color_Rgb {
+	return {c.r, c.g, c.b}
+}
+
 Geometry :: struct {
 	columns, rows:                 u16,
 	cell_width, cell_height:       u32,
@@ -547,13 +558,11 @@ resize :: proc(s: ^Session, geometry: Geometry) {
 }
 
 set_colors :: proc(s: ^Session, colors: Colors) {
-	rgb :: proc(c: Color) -> ghostty.Color_Rgb {
-		return {c.r, c.g, c.b}
-	}
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	foreground, background, cursor :=
-		rgb(colors.foreground), rgb(colors.background), rgb(colors.cursor)
+	foreground := ghostty_from_color(colors.foreground)
+	background := ghostty_from_color(colors.background)
+	cursor := ghostty_from_color(colors.cursor)
 	palette: [256]ghostty.Color_Rgb
 	ok := ghostty.terminal_set(s.terminal, .Color_Foreground, &foreground) == .Success
 	ok &&= ghostty.terminal_set(s.terminal, .Color_Background, &background) == .Success
@@ -561,7 +570,7 @@ set_colors :: proc(s: ^Session, colors: Colors) {
 	ok &&= ghostty.terminal_set(s.terminal, .Color_Palette, nil) == .Success
 	ok &&= ghostty.terminal_get(s.terminal, .Color_Palette_Default, &palette) == .Success
 	for color, i in colors.palette {
-		palette[i] = rgb(color)
+		palette[i] = ghostty_from_color(color)
 	}
 	ok &&= ghostty.terminal_set(s.terminal, .Color_Palette, &palette) == .Success
 	if !ok {

@@ -295,15 +295,15 @@ editor_follow_theme :: proc(app: ^App, w: ^Window) {
 	}
 	reload_settings(app, false)
 	if w.editor.open {
-		filter := strings.clone(ui.field_string(&w.editor.filter), context.temp_allocator)
-		if !settings_load(app, &w.editor) {return}
-		ui.field_set(&w.editor.filter, filter)
-		ui.editor_filter(&w.editor)
-		ui.editor_select_key(&w.editor, "colors.follow_theme")
-		ui.editor_message(
+		settings_reveal_page(
+			app,
 			&w.editor,
-			"Shell foreground and background now follow the theme.",
-			false,
+			{
+				key = "colors.follow_theme",
+				search = .Preserve,
+				reload = true,
+				message = "Shell foreground and background now follow the theme.",
+			},
 		)
 	} else {notify(app, .Info, "Shell foreground and background now follow the theme.")}
 }
