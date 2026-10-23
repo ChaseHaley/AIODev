@@ -233,6 +233,11 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		}
 		return
 	}
+	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) { return }
+	if pane_header_button(app, w, e) { return }
+	if e.pressed && !w.selecting {
+		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
+	}
 	if settings_active(w) {
 		if e.button == .Left && e.pressed {
 			editor_outcome(
@@ -249,11 +254,6 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 			)
 		}
 		return
-	}
-	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) { return }
-	if pane_header_button(app, w, e) { return }
-	if e.pressed && !w.selecting {
-		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
 	}
 	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
@@ -352,15 +352,6 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		}
 		return
 	}
-	if settings_active(w) {
-		l := settings_layout(w)
-		changed := ui.editor_hover(&w.editor, l, x, y)
-		if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
-		if changed {w.dirty = true}
-		over_text := y >= window_tab_bar(app, w).height && ui.editor_over_text(&w.editor, l, x, y)
-		pointer_set(app, w, over_text ? .Text : .Arrow)
-		return
-	}
 	if w.find.open && !w.selecting {
 		l, available := find_controls(w, focused_session(app, w))
 		if ui.find_hover(&w.find, l, available, x, y) { w.dirty = true }
@@ -377,9 +368,21 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
 	bar := window_tab_bar(app, w)
 	if y < bar.height {shape = .Arrow}
-	if resize, found := divider_cursor(w, x, y); found && w.header_buttons == {} {shape = resize}
+	resize, over_divider := divider_cursor(w, x, y)
+	if over_divider && w.header_buttons == {} {shape = resize}
 	pointer_set(app, w, shape)
 	if over_header || w.header_buttons != {} {return}
+	if enabled && !over_divider {
+		if pane, found := settings_pane_under_pointer(w, x, y); found {
+			l := settings_layout_for(w, pane.rect)
+			changed := ui.editor_hover(&w.editor, l, x, y)
+			if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
+			if changed {w.dirty = true}
+			over_text := ui.editor_over_text(&w.editor, l, x, y)
+			pointer_set(app, w, over_text ? .Text : .Arrow)
+			return
+		}
+	}
 	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
 		return

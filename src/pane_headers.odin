@@ -58,6 +58,11 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
+@(private)
+SETTINGS_HEADER_TITLE :: "Settings"
+@(private)
+SETTINGS_HEADER_ICON :: "⚙"
+
 pane_header_draw :: proc(
 	app: ^App,
 	w: ^Window,
@@ -78,9 +83,18 @@ pane_header_draw :: proc(
 			w.scale,
 		)
 	}
-	icon, result := shell_icon_atlas(app)
-	if result != .Ok {return result}
-	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
+	icon_atlas: render.Rect
+	if entry != nil {
+		value, result := shell_icon_atlas(app)
+		if result != .Ok {return result}
+		icon_atlas = value
+	}
+	title, directory, icon := SETTINGS_HEADER_TITLE, "", SETTINGS_HEADER_ICON
+	if entry != nil {
+		// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
+		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
+		directory, icon = entry.header.directory, entry.header.icon
+	}
 	return ui.header_draw(
 		&w.list,
 		&w.ui_text,
@@ -89,13 +103,13 @@ pane_header_draw :: proc(
 		app.theme.pane,
 		f32(app.settings.pane.corner_radius) * w.scale,
 		w.scale,
-		entry.name != "" ? entry.name : pane_header_title(&entry.header),
-		entry.header.directory,
-		entry.header.icon,
+		title,
+		directory,
+		icon,
 		pane.node == w.tree.focus,
 		controls,
 		w.tree.zoomed,
-		icon,
+		icon_atlas,
 	)
 }
 

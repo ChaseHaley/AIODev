@@ -186,32 +186,103 @@ settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 }
 
 settings_tab_index :: proc(workspace: ^Workspace) -> int {
-	for tab, i in workspace.tabs {
-		if root, ok := tab.tree.nodes[tab.tree.root].(layout.Pane);
-		   ok && root.content.kind == .Settings {return i}
-	}
-	return -1
+	tab, _, found := settings_pane_location(workspace)
+	return found ? tab : -1
 }
 
-// Whether the window shows its settings tab, which then takes keyboard and pointer input.
+// The layout node of the settings pane, wherever it sits in its tab.
+settings_pane_node :: proc(workspace: ^Workspace) -> (layout.Node_Id, bool) {
+	_, node, found := settings_pane_location(workspace)
+	return node, found
+}
+
+@(private)
+settings_pane_location :: proc(
+	workspace: ^Workspace,
+) -> (
+	tab: int,
+	node: layout.Node_Id,
+	found: bool,
+) {
+	if workspace == nil {return -1, layout.INVALID_NODE, false}
+	for candidate, tab_index in workspace.tabs {
+		walk := tab_other_panes(nil, &candidate.tree, tab_index)
+		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
+			if pane.content.kind == .Settings {return tab_index, pane.node, true}
+		}
+	}
+	return -1, layout.INVALID_NODE, false
+}
+
+// Whether the window shows a focused settings pane, which then takes keyboard input.
 settings_active :: proc(w: ^Window) -> bool {
-	if w.tree == nil || w.tree.root == layout.INVALID_NODE {return false}
-	pane, ok := w.tree.nodes[w.tree.root].(layout.Pane)
+	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return false}
+	pane, ok := w.tree.nodes[w.tree.focus].(layout.Pane)
 	return ok && pane.content.kind == .Settings
 }
 
-settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {
-	r := len(w.panes) > 0 ? w.panes[0].rect : {}
-	return ui.editor_layout({r.x, r.y, r.width, r.height}, w.scale)
+// The rectangle of the settings pane the window should address, preferring the focused one.
+@(private)
+settings_pane_rect :: proc(w: ^Window) -> layout.Rect {
+	if w.tree != nil && w.tree.focus != layout.INVALID_NODE {
+		for pane in w.panes {
+			if pane.node == w.tree.focus && pane.content.kind == .Settings {return pane.rect}
+		}
+	}
+	for pane in w.panes {
+		if pane.content.kind == .Settings {return pane.rect}
+	}
+	return {}
 }
 
-// Selects the settings tab, creating it and loading the settings file when the workspace has none.
+@(require_results)
+settings_layout_for :: proc(w: ^Window, rect: layout.Rect) -> ui.Editor_Layout {
+	return ui.editor_layout(
+		{rect.x, rect.y + w.header_height, rect.width, max(0, rect.height - w.header_height)},
+		w.scale,
+	)
+}
+
+settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {
+	return settings_layout_for(w, settings_pane_rect(w))
+}
+
+// The settings pane under a point, so pointer routing follows the pane rather than the focus.
+settings_pane_under_pointer :: proc(
+	w: ^Window,
+	x, y: f32,
+) -> (
+	layout.Pane_Rect,
+	bool,
+) {
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found || pane.content.kind != .Settings {return {}, false}
+	return pane, true
+}
+
+// Keeps the window's settings page matching its workspace: load one when a settings pane arrives
+// from another workspace, and release it when the last settings pane leaves.
+workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
+	if workspace == nil {return}
+	present := workspace_has_content(workspace, {.Settings, 0})
+	for w in app.windows {
+		if w.workspace != workspace {continue}
+		if present {
+			if !w.editor.open && app.settings_path != "" {_ = settings_load(app, &w.editor)}
+		} else if w.editor.open {
+			ui.editor_destroy(&w.editor)
+		}
+	}
+}
+
+// Selects the settings pane, creating it and loading the settings file when the workspace has none.
 editor_open :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
 	palette_close(app, w)
 	find_close(w, focused_session(app, w))
 	if index := settings_tab_index(w.workspace); index >= 0 {
 		tab_select(app, w, index)
+		if node, found := settings_pane_node(w.workspace); found {pane_focus(app, w, node)}
 		return
 	}
 	if !settings_load(app, &w.editor) {return}

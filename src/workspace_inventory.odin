@@ -77,6 +77,15 @@ tab_session_panes :: proc(
 	return {app = app, tree = tree, tab = tab, scope = .Sessions}
 }
 
+// Every pane in one tab tree, including the panes that own no session.
+workspace_tab_panes :: proc(
+	app: ^App,
+	tree: ^layout.Layout,
+	tab: int,
+) -> Workspace_Pane_Walk {
+	return {app = app, tree = tree, tab = tab, scope = .All}
+}
+
 // Every pane in one tab tree that is not Terminal.
 tab_other_panes :: proc(
 	app: ^App,
@@ -149,9 +158,9 @@ workspace_first_session :: proc(
 	return {}, false
 }
 
-// The Terminal pane at a tab's node, when that node is content that owns a session.
+// The pane at a tab's node, whatever content it shows.
 @(require_results)
-workspace_session_pane_at :: proc(
+workspace_pane_at :: proc(
 	app: ^App,
 	workspace: ^Workspace,
 	tab: int,
@@ -161,13 +170,56 @@ workspace_session_pane_at :: proc(
 	tree := &workspace.tabs[tab].tree
 	if int(node) >= len(tree.nodes) {return {}, false}
 	pane, ok := tree.nodes[node].(layout.Pane)
-	if !ok || !pane_owns_session(pane.content.kind) {return {}, false}
+	if !ok {return {}, false}
 	return Workspace_Pane{
 		tab = tab,
 		node = node,
 		content = pane.content,
 		session = workspace_session_for_content(app, pane.content),
 	}, true
+}
+
+// The Terminal pane at a tab's node, when that node is content that owns a session.
+@(require_results)
+workspace_session_pane_at :: proc(
+	app: ^App,
+	workspace: ^Workspace,
+	tab: int,
+	node: layout.Node_Id,
+) -> (Workspace_Pane, bool) {
+	pane, ok := workspace_pane_at(app, workspace, tab, node)
+	if !ok || !pane_owns_session(pane.content.kind) {return {}, false}
+	return pane, true
+}
+
+// Whether any pane in the workspace shows `content`.
+@(require_results)
+workspace_has_content :: proc(workspace: ^Workspace, content: layout.Content) -> bool {
+	if workspace == nil {return false}
+	for tab in workspace.tabs {
+		for node in tab.tree.nodes {
+			if pane, ok := node.(layout.Pane); ok && pane.content == content {return true}
+		}
+	}
+	return false
+}
+
+// Whether `content` is shown outside `excluded`, which is how a pane move detects a duplicate
+// of content that may appear only once in a workspace.
+@(require_results)
+workspace_content_outside_tab :: proc(
+	workspace: ^Workspace,
+	content: layout.Content,
+	excluded: ^Tab,
+) -> bool {
+	if workspace == nil {return false}
+	for tab in workspace.tabs {
+		if tab == excluded {continue}
+		for node in tab.tree.nodes {
+			if pane, ok := node.(layout.Pane); ok && pane.content == content {return true}
+		}
+	}
+	return false
 }
 
 // The Terminal pane a tab focuses, or false when the focus is not session content.

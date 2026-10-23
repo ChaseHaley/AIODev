@@ -25,7 +25,7 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	menu := &w.tab_menu
 	count := 0
 	for tab in w.workspace.tabs {if tab.marked {count += 1}}
-	if count == 1 && !settings_active(w) {
+	if count == 1 {
 		menu.actions[0], menu.actions[1] = .Rename_Tab, .Duplicate_Tab
 		menu.separators[2] = true
 		menu.count = 3
@@ -65,6 +65,7 @@ tab_menu_label :: proc(w: ^Window, index: int) -> string {
 tab_menu_enabled :: proc(w: ^Window, index: int) -> bool {
 	if index < 0 || index >= w.tab_menu.count || w.tab_menu.separators[index] { return false }
 	#partial switch w.tab_menu.actions[index] {
+	case .Duplicate_Tab: return !settings_active(w)
 	case .Close_Right_Tabs: return w.workspace.selected + 1 < len(w.workspace.tabs)
 	case .Close_Other_Tabs:
 		for tab in w.workspace.tabs { if !tab.marked { return true } }

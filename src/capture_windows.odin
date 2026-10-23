@@ -71,15 +71,14 @@ when AIO_CONTROL {
 				return {}, "the selected window has no focused pane; address the region in pixels"
 			}
 			rect: layout.Rect
-			kind: layout.Content_Kind
 			visible := false
 			for pane in w.panes {
 				if pane.content.id != entry.id {continue}
-				rect, kind, visible = pane.rect, pane.content.kind, true
+				rect, visible = pane.rect, true
 				break
 			}
 			if !visible {return {}, "the focused pane is not visible; select its tab or use --region"}
-			box := pane_box(w.metrics, rect, pane_insets(app, w.scale, entry, kind))
+			box := pane_box(w.metrics, rect, pane_insets(app, w.scale, entry))
 			if region.x + region.width > int(box.columns) ||
 			   region.y + region.height > int(box.rows) {
 				return {}, fmt.tprintf(

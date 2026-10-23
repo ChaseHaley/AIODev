@@ -36,6 +36,8 @@ pane_move_abort :: proc(app: ^App, move: Pane_Move) {
 pane_move_finish :: proc(app: ^App, move: Pane_Move, destination: ^Tab) {
 	w := window_find(app, move.destination)
 	if move.source.tree.root != layout.INVALID_NODE {tab_update_title(app, move.source)}
+	// The moved content may have been Settings, so each side's page follows what it now shows.
+	workspace_settings_sync(app, move.workspace)
 	index := tab_index_by_id(w.workspace, destination.id)
 	tab_select_one(w.workspace, index)
 	w.workspace.selected = index
@@ -55,6 +57,7 @@ pane_move_finish :: proc(app: ^App, move: Pane_Move, destination: ^Tab) {
 			if selected_tab(move.workspace) == move.source {focus_enter(app, owner)}
 		}
 	}
+	workspace_settings_sync(app, w.workspace)
 }
 
 pane_rearrange :: proc(

@@ -535,7 +535,7 @@ separate_pane :: proc(
 ) {
 	if int(node) >= len(source.nodes) {return {}, false}
 	pane, ok := source.nodes[node].(Pane)
-	if !ok || pane.content.kind != .Terminal {return {}, false}
+	if !ok {return {}, false}
 	destination: Layout
 	if init(&destination, pane.content, allocator) != nil {destroy(&destination); return {}, false}
 	if !remove(source, node) {destroy(&destination); return {}, false}
@@ -559,11 +559,12 @@ transfer_pane :: proc(
 	   int(node) >= len(source.nodes) ||
 	   int(target) >= len(destination.nodes) {return INVALID_NODE, false}
 	pane, ok := source.nodes[node].(Pane)
-	if !ok || pane.content.kind != .Terminal {return INVALID_NODE, false}
+	if !ok {return INVALID_NODE, false}
 	if _, target_ok := destination.nodes[target].(Pane); !target_ok {return INVALID_NODE, false}
+	// Content is a reference owned elsewhere, so it may appear once in a tree. A terminal or a
+	// Settings pane can join any destination that does not already show the same content.
 	for n in destination.nodes {
-		if p, is_pane := n.(Pane);
-		   is_pane && (p.content.kind != .Terminal || p.content == pane.content) {
+		if p, is_pane := n.(Pane); is_pane && p.content == pane.content {
 			return INVALID_NODE, false
 		}
 	}

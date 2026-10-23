@@ -201,8 +201,9 @@ pane_trial_move_minimum_and_invalid_operations_are_detached :: proc(t: ^testing.
 	settings_tree: layout.Layout
 	testing.expect_value(t, layout.init(&settings_tree, {.Settings, 0}), nil)
 	defer layout.destroy(&settings_tree)
+	// A terminal may join a settings tab; the 1000-cell minimum still refuses the trial.
 	testing.expect_value(t, app.pane_trial_move(&state, &w, &source, &settings_tree, 0, 0,
-		.Right, false, context.allocator).error, app.Pane_Trial_Error.Invalid)
+		.Right, false, context.allocator).error, app.Pane_Trial_Error.Minimum)
 }
 
 @(private="file")

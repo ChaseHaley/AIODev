@@ -133,9 +133,18 @@ transfer_preserves_content_and_handles_sole_source :: proc(t: ^testing.T) {
 	settings: layout.Layout
 	testing.expect_value(t, layout.init(&settings, {.Settings, 0}), nil)
 	defer layout.destroy(&settings)
-	_, transferred := layout.transfer_pane(&l, &settings, 0, 0, .Down, true)
-	testing.expect(t, !transferred)
-	testing.expect_value(t, l.root, layout.Node_Id(0))
+	moved, transferred := layout.transfer_pane(&l, &settings, 0, 0, .Down, true)
+	testing.expect(t, transferred)
+	testing.expect_value(t, settings.nodes[moved].(layout.Pane).content, terminal(1))
+	testing.expect_value(t, l.root, layout.INVALID_NODE)
+	duplicate: layout.Layout
+	testing.expect_value(t, layout.init(&duplicate, {.Settings, 0}), nil)
+	defer layout.destroy(&duplicate)
+	before_destination := settings.root
+	_, repeated := layout.transfer_pane(&duplicate, &settings, 0, moved, .Right, false)
+	testing.expect(t, !repeated)
+	testing.expect_value(t, duplicate.root, layout.Node_Id(0))
+	testing.expect_value(t, settings.root, before_destination)
 	_, invalid := layout.transfer_pane(&l, &l, 0, 0, .Right, false)
 	testing.expect(t, !invalid)
 }

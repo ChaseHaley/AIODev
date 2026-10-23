@@ -166,6 +166,14 @@ tab_new :: proc(app: ^App, w: ^Window) {
 	tab_select(app, w, len(w.workspace.tabs) - 1)
 }
 
+// Settings is one page per workspace, so two panes must never show it at once. Terminal content is
+// keyed by session and cannot collide.
+@(require_results)
+pane_content_can_join :: proc(content: layout.Content, destination: ^Workspace, source: ^Tab) -> bool {
+	if content.kind != .Settings {return true}
+	return !workspace_content_outside_tab(destination, content, source)
+}
+
 @(require_results)
 pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -> bool {
 	source_workspace := pane_source_workspace(app, source)
@@ -180,7 +188,9 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 		return false
 	}
 	pane, valid := source.tree.nodes[node].(layout.Pane)
-	if !valid || pane.content.kind != .Terminal {return false}
+	if !valid {return false}
+	destination_workspace := w.workspace
+	if !pane_content_can_join(pane.content, destination_workspace, source) {return false}
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
 	if !pane_minimum_allows(app, w, panes[:], nil, notify_failure = true) {return false}
 	tab, record_error := tab_record_reserve(w.workspace)
@@ -215,6 +225,9 @@ pane_transfer :: proc(
 	destination_index := -1
 	for tab, index in w.workspace.tabs {if tab == destination {destination_index = index; break}}
 	if source_workspace == nil || destination_index < 0 || source == destination {return false}
+	if int(node) >= len(source.tree.nodes) || int(target) >= len(destination.tree.nodes) {return false}
+	pane, valid := source.tree.nodes[node].(layout.Pane)
+	if !valid || !pane_content_can_join(pane.content, w.workspace, source) {return false}
 	move := pane_move_begin(app, w, source, source_workspace)
 	_, moved := layout.transfer_pane(
 		&source.tree,
@@ -239,7 +252,6 @@ pane_split :: proc(
 	ratio: f32 = 0.5,
 	focus := true,
 ) {
-	if settings_active(w) {return}
 	if !pane_minimum_split(app, w, direction, ratio) {return}
 	if !session_open(app) {notify(app, .Error, "Could not create a pane."); return}
 	id := app.next_session_id
@@ -382,15 +394,12 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	for pane, ok := workspace_pane_next(&terminal); ok; pane, ok = workspace_pane_next(&terminal) {
 		session_close(app, pane.content.id)
 	}
-	other := tab_other_panes(app, &tab.tree, index)
-	for _, ok := workspace_pane_next(&other); ok; _, ok = workspace_pane_next(&other) {
-		for w in app.windows {if w.workspace == workspace {ui.editor_destroy(&w.editor)}}
-	}
 	ordered_remove(&workspace.tabs, index)
 	for w in app.windows {
 		if w.workspace == workspace {tab_presentation_remove(&w.presentation, index)}
 	}
 	tab_record_free(tab)
+	workspace_settings_sync(app, workspace)
 	workspace.selected =
 		tab_presentation_selected_after_remove(workspace.selected, index, len(workspace.tabs))
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
@@ -427,7 +436,8 @@ pane_remove :: proc(
 		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
 	}
 	if !layout.remove(&tab.tree, node) {return}
-	session_close(app, pane.content.id)
+	if pane_owns_session(pane.content.kind) {session_close(app, pane.content.id)}
+	workspace_settings_sync(app, workspace)
 	tab_update_title(app, tab)
 	if visible {
 		for w in app.windows {

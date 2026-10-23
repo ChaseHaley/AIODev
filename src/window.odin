@@ -300,9 +300,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	)
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
-	kind: layout.Content_Kind = .Terminal
-	if settings_active(w) {kind = .Settings}
-	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers, kind)
+	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers)
 	area := window_content_area(app, w)
 	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
 	layout.dividers(w.tree, area, window_gap(app, w), &w.dividers)
@@ -310,20 +308,28 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		visible := false
 		for pane in w.panes {visible ||= pane.content == w.views[i].content}
 		if !visible {
-			term_view.destroy(&w.views[i].view)
-			render.draw_list_destroy(&w.views[i].cache)
+			if w.views[i].content.kind == .Terminal {
+				term_view.destroy(&w.views[i].view)
+				render.draw_list_destroy(&w.views[i].cache)
+			}
 			ordered_remove(&w.views, i)
 		} else {w.views[i].valid = false}
 	}
 	for pane in w.panes {
 		entry := workspace_session_for_content(app, pane.content)
 		if entry == nil {
+			if pane.content.kind == .Settings && pane_view(w, pane.content) == nil {
+				cached := Pane_View{content = pane.content}
+				if _, err := append(&w.views, cached); err != nil {
+					log.error("storing a pane's header state failed")
+				}
+			}
 			continue
 		}
 		box := pane_box(
 			w.metrics,
 			pane.rect,
-			pane_insets(app, w.scale, entry, pane.content.kind),
+			pane_insets(app, w.scale, entry),
 		)
 		g := term.Geometry {
 			columns = box.columns,
@@ -479,13 +485,15 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
 			result := ui.editor_draw(
 				&w.editor,
-				settings_layout(w),
+				settings_layout_for(w, pane.rect),
 				&w.list,
 				&w.ui_text,
 				app.theme,
-				w.focused && !palette_active(app, w),
+				w.focused && pane.node == w.tree.focus && !palette_active(app, w),
 			)
 			if result != .Ok {return frame, result}
+			if header_result := pane_header_draw(app, w, pane, nil);
+			   header_result != .Ok {return frame, header_result}
 			window_card_outline(app, w, pane)
 			continue
 		}
@@ -511,7 +519,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		box := pane_box(
 			w.metrics,
 			pane.rect,
-			pane_insets(app, w.scale, entry, pane.content.kind),
+			pane_insets(app, w.scale, entry),
 		)
 		result: glyphs.Result
 		frame, result = build_pane(app, w, pane, entry, view, box.origin, style)

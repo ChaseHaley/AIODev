@@ -79,13 +79,13 @@ pane_window_preview_create :: proc(
 ) -> ^Window {
 	source_workspace := pane_source_workspace(app, source)
 	if !pane_window_source_allows(source_workspace) {return nil}
-	pane, terminal := workspace_session_pane_at(
+	pane, valid := workspace_pane_at(
 		app,
 		source_workspace,
 		tab_index_by_id(source_workspace, source.id),
 		node,
 	)
-	if !terminal {return nil}
+	if !valid {return nil}
 	workspace := workspace_create_empty(app, true)
 	if workspace == nil {return nil}
 	success := false
@@ -128,14 +128,14 @@ pane_to_window :: proc(
 	   !pane_window_source_allows(workspace) {
 		return false
 	}
-	pane, terminal := workspace_session_pane_at(
+	pane, valid := workspace_pane_at(
 		app,
 		workspace,
 		tab_index_by_id(workspace, source.id),
 		node,
 	)
 	destination := selected_tab(preview.workspace)
-	if !terminal ||
+	if !valid ||
 	   destination == nil ||
 	   destination.tree.nodes[destination.tree.root].(layout.Pane).content !=
 		   pane.content {return false}

@@ -7,7 +7,7 @@ import "aio:ui"
 
 rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
 	tab := selected_tab(w.workspace)
-	if tab == nil || settings_active(w) {return}
+	if tab == nil {return}
 	target, value := Rename_Target{.Tab, tab.id}, tab.name
 	if !tab_name {
 		entry := focused_session(app, w)

@@ -374,8 +374,14 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return
 	}
-	if settings_active(w) {
-		ui.editor_wheel(&w.editor, settings_layout(w), f32(e.x), f32(e.y), rows)
+	if pane, found := settings_pane_under_pointer(w, f32(e.x), f32(e.y)); found {
+		ui.editor_wheel(
+			&w.editor,
+			settings_layout_for(w, pane.rect),
+			f32(e.x),
+			f32(e.y),
+			rows,
+		)
 		w.dirty = true
 		return
 	}

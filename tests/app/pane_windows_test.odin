@@ -57,9 +57,12 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	app.run_action(&state, source_window, .Settings_UI)
 	settings_tab := app.selected_tab(source_workspace)
 	workspace_id = state.next_workspace_id
-	testing.expect(t, app.pane_window_preview_create(&state, settings_tab, settings_tab.tree.root, 80, 80) == nil)
-	testing.expect_value(t, state.next_workspace_id, workspace_id)
-	settings_preview := app.pane_window_preview_create(&state, source, node, 80, 80)
+	settings_preview := app.pane_window_preview_create(&state, settings_tab, settings_tab.tree.root, 80, 80)
+	if !testing.expect(t, settings_preview != nil) { return }
+	app.pane_window_preview_discard(&state, settings_preview.id)
+	testing.expect(t, state.next_workspace_id > workspace_id)
+	testing.expect_value(t, len(state.workspaces), 1)
+	settings_preview = app.pane_window_preview_create(&state, source, node, 80, 80)
 	if !testing.expect(t, settings_preview != nil) { return }
 	app.pane_window_preview_discard(&state, settings_preview.id)
 	testing.expect_value(t, state.next_workspace_number, workspace_number)

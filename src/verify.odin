@@ -951,7 +951,7 @@ when AIO_CONTROL {
 				w.metrics,
 				u16(r.columns),
 				u16(r.rows),
-				pane_insets(app, w.scale, focused_session(app, w), .Terminal),
+				pane_insets(app, w.scale, focused_session(app, w)),
 			)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) !=
 			   .None {return .System}

@@ -43,11 +43,14 @@ workspace_view_prepare :: proc(
 	   reserve(&resources.panes, len(resources.tree.nodes)) != nil ||
 	   reserve(&resources.dividers, len(resources.tree.nodes)) != nil ||
 	   reserve(&resources.views, len(resources.tree.nodes)) != nil {return false}
-	walk := tab_session_panes(app, resources.tree, resources.workspace.selected)
+	walk := workspace_tab_panes(app, resources.tree, resources.workspace.selected)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-		view: term_view.View
-		if !term_view.create(&view) {return false}
-		append(&resources.views, Pane_View{content = pane.content, view = view, cache = render.draw_list_init()})
+		entry := Pane_View{content = pane.content}
+		if pane.session != nil {
+			if !term_view.create(&entry.view) {return false}
+			entry.cache = render.draw_list_init()
+		} else if pane.content.kind != .Settings {continue}
+		append(&resources.views, entry)
 	}
 	prepared = true
 	return true
@@ -55,8 +58,10 @@ workspace_view_prepare :: proc(
 
 workspace_view_destroy :: proc(resources: ^Workspace_View_Resources) {
 	for &pane in resources.views {
-		term_view.destroy(&pane.view)
-		render.draw_list_destroy(&pane.cache)
+		if pane.content.kind == .Terminal {
+			term_view.destroy(&pane.view)
+			render.draw_list_destroy(&pane.cache)
+		}
 	}
 	delete(resources.views)
 	tab_presentation_destroy(&resources.presentation)

@@ -20,9 +20,10 @@ Pane_Box :: struct {
 	origin:  [2]f32,
 }
 
-// D-050 keeps a header on every pane unless headers are off; a Settings pane fills its rectangle.
-pane_header_height :: proc(scale: f32, show_headers: bool, kind: layout.Content_Kind) -> f32 {
-	if !show_headers || kind == .Settings {return 0}
+// D-050 keeps a header on every pane unless headers are off; content kind never changes the
+// geometry a pane receives.
+pane_header_height :: proc(scale: f32, show_headers: bool) -> f32 {
+	if !show_headers {return 0}
 	return math.round(ui.HEADER_HEIGHT * scale)
 }
 
@@ -30,11 +31,10 @@ pane_insets :: proc(
 	app: ^App,
 	scale: f32,
 	entry: ^Session_Entry,
-	kind: layout.Content_Kind,
 ) -> Pane_Insets {
 	return {
 		padding = pane_padding(app, scale, entry),
-		header = pane_header_height(scale, app.settings.pane.show_headers, kind),
+		header = pane_header_height(scale, app.settings.pane.show_headers),
 	}
 }
 

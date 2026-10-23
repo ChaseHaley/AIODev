@@ -44,7 +44,7 @@ box_applied :: proc(
 		app.window_gap(state, &local), &rects, false)
 	if !testing.expect_value(t, len(rects), 1) {return {}}
 	return app.pane_box(local.metrics, rects[0].rect,
-		app.pane_insets(state, local.scale, nil, kind))
+		app.pane_insets(state, local.scale, nil))
 }
 
 @(test)
@@ -59,7 +59,7 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 					state.settings.pane.show_headers = headers
 					workspace: app.Workspace
 					w := box_window(&workspace, scale)
-					insets := app.pane_insets(&state, scale, nil, .Terminal)
+					insets := app.pane_insets(&state, scale, nil)
 					testing.expect_value(t, insets.header,
 						headers ? math.round(ui.HEADER_HEIGHT * scale) : 0)
 					for grid in ([?][2]u16{{80, 24}, {40, 10}, {1, 1}}) {
@@ -107,7 +107,7 @@ pane_minimum_refusal_reports_the_grid_the_layout_applies_at_every_scale :: proc(
 			// A new tab or split guards a terminal pane, which is what the layout
 			// applies next whichever tab is on screen.
 			applied := box_applied(t, &state, &w, .Terminal)
-			testing.expect_value(t, shown.header, settings_tab ? 0 : applied.header)
+			testing.expect_value(t, shown.header, applied.header)
 			state.settings.pane.minimum_columns = int(applied.columns)
 			state.settings.pane.minimum_rows = int(applied.rows)
 			testing.expect(t, app.pane_minimum_single(&state, &w))

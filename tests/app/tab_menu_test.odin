@@ -142,10 +142,13 @@ tab_menu_group_and_settings_capabilities :: proc(t: ^testing.T) {
 	layout.destroy(&settings_tab.tree)
 	testing.expect_value(t, layout.init(&settings_tab.tree, {.Settings, 0}), nil)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
-	testing.expect_value(t, w.tab_menu.count, 5)
-	for label, i in ([?]string{"Close to the Right", "Close Others", "Close", "", "Tab Settings"}) {
+	testing.expect_value(t, w.tab_menu.count, 8)
+	for label, i in ([?]string{"Rename", "Duplicate", "", "Close to the Right",
+		"Close Others", "Close", "", "Tab Settings"}) {
 		testing.expect_value(t, app.tab_menu_label(w, i), label)
 	}
+	// A settings pane has no runtime to duplicate, but its tab still renames and closes normally.
+	testing.expect(t, app.tab_menu_enabled(w, 0) && !app.tab_menu_enabled(w, 1))
 	for tab in f.workspace.tabs { tab.marked = true }
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
 	testing.expect_value(t, w.tab_menu.count, 4)

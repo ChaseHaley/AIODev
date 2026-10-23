@@ -131,6 +131,70 @@ pane_move_completion_selects_titles_and_relayouts_all_destinations :: proc(t: ^t
 }
 
 @(private="file")
+move_find_pane :: proc(
+	tree: ^layout.Layout,
+	content: layout.Content,
+) -> (
+	layout.Node_Id,
+	bool,
+) {
+	for node, i in tree.nodes {
+		if pane, ok := node.(layout.Pane); ok && pane.content == content {
+			return layout.Node_Id(i), true
+		}
+	}
+	return layout.INVALID_NODE, false
+}
+
+// Settings is content like any other: a terminal can join its tab, its pane can move into a
+// terminal tab, and only the one-page-per-workspace rule remains.
+@(test)
+settings_content_moves_like_any_other_pane_and_stays_unique :: proc(t: ^testing.T) {
+	f: Move_Fixture
+	defer move_fixture_destroy(t, &f)
+	if !move_fixture_init(t, &f) {return}
+	state := &f.state
+	source := app.selected_tab(f.source.workspace)
+	destination := app.selected_tab(f.destination.workspace)
+	layout.destroy(&destination.tree)
+	if !testing.expect_value(t, layout.init(&destination.tree, {.Settings, 0}), nil) {return}
+	f.destination.tree = &destination.tree
+
+	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
+		f.node, destination.tree.root, .Right, false)) {return}
+	settings_node, settings_found := move_find_pane(&destination.tree, {.Settings, 0})
+	_, terminal_found := move_find_pane(&destination.tree, {.Terminal, 1})
+	testing.expect(t, settings_found && terminal_found)
+	// The arriving terminal has focus; settings follows the focused pane instead of the tab root.
+	testing.expect(t, !app.settings_active(f.destination))
+	app.pane_focus(state, f.destination, settings_node)
+	testing.expect(t, app.settings_active(f.destination))
+
+	if !testing.expect(t, app.pane_transfer(state, f.source, destination, source,
+		settings_node, source.tree.focus, .Right, false)) {return}
+	_, moved_to_source := move_find_pane(&source.tree, {.Settings, 0})
+	_, left_destination := move_find_pane(&destination.tree, {.Settings, 0})
+	testing.expect(t, moved_to_source && !left_destination)
+	testing.expect(t, app.settings_active(f.source))
+
+	observer := app.selected_tab(f.observer.workspace)
+	layout.destroy(&observer.tree)
+	if !testing.expect_value(t, layout.init(&observer.tree, {.Settings, 0}), nil) {return}
+	f.observer.tree = &observer.tree
+	source_settings, found := move_find_pane(&source.tree, {.Settings, 0})
+	if !testing.expect(t, found) {return}
+	source_root, observer_root := source.tree.root, observer.tree.root
+	testing.expect(t, !app.pane_transfer(state, f.observer, source, observer,
+		source_settings, observer.tree.root, .Right, false))
+	testing.expect_value(t, source.tree.root, source_root)
+	testing.expect_value(t, observer.tree.root, observer_root)
+	testing.expect(t, !app.pane_to_tab(state, f.observer, source, source_settings))
+	testing.expect_value(t, len(f.source.workspace.tabs), 1)
+	testing.expect_value(t, len(f.observer.workspace.tabs), 1)
+}
+
+
+@(private="file")
 Move_Failure :: struct {backing: runtime.Allocator, remaining: int, failed: bool}
 
 @(private="file")

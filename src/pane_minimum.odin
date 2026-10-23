@@ -20,7 +20,7 @@ pane_minimum_allows :: proc(
 			   old.rect.height <= pane.rect.height {unchanged = true; break}
 		}
 		if unchanged {continue}
-		insets := pane_insets(app, w.scale, session_find(app, pane.content.id), pane.content.kind)
+		insets := pane_insets(app, w.scale, session_find(app, pane.content.id))
 		box := pane_box(w.metrics, pane.rect, insets)
 		if int(box.columns) < minimum.minimum_columns || int(box.rows) < minimum.minimum_rows {
 			if notify_failure {

@@ -415,11 +415,7 @@ pane_drag_target_move :: proc(
 	on_tab := window_tab_hit(w, bar, x, y)
 	new_tab := !swap && ui.tab_drop_hit(bar, f32(w.width), w.scale, x, y)
 	if on_tab >= 0 && on_tab < bar.count {
-		tab := w.workspace.tabs[on_tab]
-		if root, settings := tab.tree.nodes[tab.tree.root].(layout.Pane);
-		   settings && root.content.kind == .Settings {
-			destination = nil
-		} else {destination = tab}
+		destination = w.workspace.tabs[on_tab]
 	}
 	if destination != nil && destination != selected_tab(w.workspace) && on_tab >= 0 && !swap {
 		if d.hover != destination {
