@@ -482,6 +482,7 @@ palette_draw :: proc(
 	theme: Theme,
 	width, height, scale: f32,
 	opacity: f32 = 1, rise: f32 = 0,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	l := palette_layout(p, width, height, scale)
 	panel := l.panel
@@ -541,6 +542,10 @@ palette_draw :: proc(
 		}
 		if index == p.selected {
 			draw_rect(list, {rect = row, color = theme.selection, radius = 6 * scale})
+			if contains(row, pointer.x, pointer.y) {
+				if result := hover_rim_draw(list, theme, row, 6 * scale, 1, scale, pointer);
+				   result != .None {return .Ok}
+			}
 		}
 		row_baseline := row.y + 31 * scale
 		category :=

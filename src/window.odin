@@ -61,6 +61,8 @@ Window :: struct {
 	autoscroll_deadline: time.Tick,
 	pointer: [2]f32,
 	pointer_shape: platform.Cursor_Shape,
+	// The last frame drew a pointer-following rim, so pointer movement must repaint it.
+	gloss_hovered: bool,
 	find: ui.Find_Bar,
 	leader_until: time.Tick,
 	tab_underline: ui.Motion,
@@ -456,6 +458,7 @@ window_render :: proc(app: ^App, w: ^Window) {
 		}
 	}
 	build_ms := perf.since_ms(build_start)
+	w.gloss_hovered = ui.hover_rim_present(&w.list)
 	render_start := time.tick_now()
 	err := render.frame_render(app.device, w.surface, &w.list, background)
 	render_ms := perf.since_ms(render_start)
@@ -497,6 +500,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 				&w.ui_text,
 				app.theme,
 				w.focused && pane.node == w.tree.focus && !palette_active(app, w),
+				w.pointer,
 			)
 			if result != .Ok {return frame, result}
 			if header_result := pane_header_draw(app, w, pane, nil);
@@ -581,7 +585,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		opacity, rise := ui.presence_fade(app.palette.presence, 4 * w.scale)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
-			opacity, rise,
+			opacity, rise, w.pointer,
 		)
 		if result != .Ok { return frame, result }
 	}

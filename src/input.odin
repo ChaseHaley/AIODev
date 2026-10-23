@@ -52,6 +52,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 	case platform.Mouse_Move_Event:
 		if w := window_find(app, e.window); w != nil {
 			x, y := f32(e.x), f32(e.y)
+			if w.pointer != ([2]f32{x, y}) && w.gloss_hovered {w.dirty = true}
 			w.pointer = {x, y}
 			if hovered := workspace_rect_contains(workspace_button_rect(w), x, y);
 			   hovered != w.workspace_hovered {

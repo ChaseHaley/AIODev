@@ -72,8 +72,8 @@ tab_draw :: proc(
 	x += bar.x
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None {return .Ok}
 	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.chrome})
-	// A selected or marked tab is already raised; only an ordinary tab rises on hover.
-	lift := selected || marked ? 0 : hover_lift_at(theme, hover, scale)
+	// Every tab rises on hover; the selected tab keeps its pane fill while it moves.
+	lift := hover_lift_at(theme, hover, scale)
 	tile := render.Rect{x + 2 * scale, 6 * scale - lift, max(0, width - 4 * scale), 28 * scale}
 	if lift > 0 {
 		if result := hover_shadow_draw(list, theme, tile, 7 * scale, hover, scale);
@@ -211,6 +211,7 @@ caption_draw :: proc(
 	width, scale: f32,
 	hover, pressed: int,
 	maximized: bool,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	if render.push_layer(list, {0, 0, width, TAB_HEIGHT * scale}) != .None {return .Ok}
 	for i in 0 ..< 3 {
@@ -223,6 +224,10 @@ caption_draw :: proc(
 		}
 		icon := ([3]rune{'\ue921', maximized ? '\ue923' : '\ue922', '\ue8bb'})[i]
 		if result := draw_icon(text, list, icon, r, ink, 0.4); result != .Ok {return result}
+		if i == hover {
+			if result := hover_rim_draw(list, theme, r, 0, 1, scale, pointer);
+			   result != .None {return .Ok}
+		}
 	}
 	return .Ok
 }

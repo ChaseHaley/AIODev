@@ -1632,6 +1632,7 @@ filter_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	focused: bool,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	s := l.scale
 	box := filter_box(p, l, text)
@@ -1645,7 +1646,11 @@ filter_draw :: proc(
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}
 	if render.push_layer(list, l.page) != .None {return .Ok}
-	if p.hover_clear {draw_rect(list, {rect = clear, color = theme.hover, radius = 5 * s})}
+	if p.hover_clear {
+		draw_rect(list, {rect = clear, color = theme.hover, radius = 5 * s})
+		if result := hover_rim_draw(list, theme, clear, 5 * s, 1, s, pointer);
+		   result != .None {return .Ok}
+	}
 	return draw_icon(text, list, ICON_CLEAR, clear, p.hover_clear ? theme.text : theme.muted, 0.7)
 }
 
@@ -1656,6 +1661,7 @@ outline_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	if l.outline.width == 0 {return .Ok}
 	s := l.scale
@@ -1695,6 +1701,10 @@ outline_draw :: proc(
 		} else if entry == p.hover_outline {
 			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
 		}
+		if entry == p.hover_outline {
+			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer);
+			   result != .None {return .Ok}
+		}
 		baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
 		label := fmt.tprintf("%d", item.count)
 		label_width := text_width(&small, label)
@@ -1726,6 +1736,7 @@ editor_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	focused: bool,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	s := l.scale
 	p.visible_rows = l.rows
@@ -1759,9 +1770,9 @@ editor_draw :: proc(
 		p.error ? theme.error : theme.muted,
 		max(1, status_right - status_x),
 	); r != .Ok {return r}
-	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search);
+	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search, pointer);
 	   r != .Ok {return r}
-	if r := outline_draw(p, l, list, text, theme); r != .Ok {return r}
+	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}
 	if len(p.items) == 0 && filtering(p) {
 		if render.push_layer(list, l.page) != .None {return .Ok}
 		return draw_text(
@@ -1786,6 +1797,11 @@ editor_draw :: proc(
 			}
 		} else if index == p.hover_item {
 			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
+		}
+		if index == p.hover_item {
+			// A row is a reading surface: it takes the pointer light but never the lift.
+			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer);
+			   result != .None {return .Ok}
 		}
 		if item.row < 0 {
 			baseline := r.y + r.height - 14 * s
@@ -1842,6 +1858,8 @@ editor_draw :: proc(
 		modified := row.value != row.default_value
 		if index == p.hover_reset && modified {
 			draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6 * s})
+			if result := hover_rim_draw(list, theme, parts.reset, 6 * s, 1, s, pointer);
+			   result != .None {return .Ok}
 		}
 		icon_color := theme.faint
 		if modified {

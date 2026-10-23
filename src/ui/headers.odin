@@ -215,6 +215,8 @@ header_draw :: proc(
 			l.badge.y + (l.badge.height - small.line_height) / 2 + small.ascent,
 			theme.muted,
 		); result != .Ok {return result}
+		if result := hover_rim_draw(list, theme, l.badge, 4 * scale, 1, scale, pointer);
+		   result != .None {return .Ok}
 	}
 	strong := text_styled(text, focused ? .Strong : .Body)
 	small := text_styled(text, .Small)

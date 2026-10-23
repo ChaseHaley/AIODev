@@ -56,3 +56,13 @@ hover_rim_draw :: proc(
 		},
 	)
 }
+
+// The rim is centred on the live pointer, so a window showing one must repaint on pointer
+// movement even when no hover state changed. Callers use this after building a frame to know
+// whether the next movement inside the window needs a frame of its own.
+hover_rim_present :: proc(list: ^render.Draw_List) -> bool {
+	for rect in list.rects {
+		if rect.fill == render.RECT_FILL_RIM {return true}
+	}
+	return false
+}

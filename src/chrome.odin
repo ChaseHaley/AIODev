@@ -61,6 +61,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		w.caption_hover,
 		caption_pressed,
 		w.maximized,
+		w.pointer,
 	); result != .Ok {return result}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
 	if bar.count == 0 {return .Ok}
@@ -104,10 +105,21 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		moving := w.tab_drag.active
 		for position in w.tab_positions {moving ||= ui.motion_active(position)}
 		if moving {x = bar.x + tab_position(w, w.workspace.selected) * bar.tab_width + 10 * w.scale}
+		// The selected tab rises with its hover, so its underline rises with it.
+		lift := ui.hover_lift_at(
+			app.theme,
+			tab_control(w, w.workspace.selected).hover.value,
+			w.scale,
+		)
 		if render.push_rect(
 			   &w.list,
 			   {
-				   rect = {x, 30 * w.scale, max(0, bar.tab_width - 20 * w.scale), 2 * w.scale},
+				   rect = {
+					   x,
+					   30 * w.scale - lift,
+					   max(0, bar.tab_width - 20 * w.scale),
+					   2 * w.scale,
+				   },
 				   color = app.theme.accent,
 				   radius = w.scale,
 			   },
@@ -136,30 +148,50 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	chevron := tab_chevron_rect(app, w)
 	if render.push_layer(&w.list, chevron) != .None {return .Ok}
 	control := tab_control(w, bar.count + 1)
-	fill := app.theme.hover
-	fill.a *= control.hover.value
-	hover_rect := render.Rect {
+	hover := control.hover.value
+	lift := ui.hover_lift_at(app.theme, hover, w.scale)
+	tile := render.Rect {
 		chevron.x + 2 * w.scale,
-		6 * w.scale,
+		6 * w.scale - lift,
 		chevron.width - 4 * w.scale,
 		28 * w.scale,
 	}
-	if render.push_rect(&w.list, {rect = hover_rect, color = fill, radius = 6 * w.scale}) !=
-	   .None {return .Ok}
+	if lift > 0 {
+		if result := ui.hover_shadow_draw(&w.list, app.theme, tile, 6 * w.scale, hover, w.scale);
+		   result != .None {return .Ok}
+	}
+	fill := app.theme.hover
+	fill.a *= hover
+	if render.push_rect(&w.list, {rect = tile, color = fill, radius = 6 * w.scale}) != .None {
+		return .Ok
+	}
 	fill = app.theme.pressed
 	fill.a *= control.press.value
-	if render.push_rect(&w.list, {rect = hover_rect, color = fill, radius = 6 * w.scale}) !=
-	   .None {return .Ok}
+	if render.push_rect(&w.list, {rect = tile, color = fill, radius = 6 * w.scale}) != .None {
+		return .Ok
+	}
 	label := "▾"
 	label_width := ui.text_width(&w.ui_text, label)
-	return ui.draw_text(
+	if result := ui.draw_text(
 		&w.ui_text,
 		&w.list,
 		label,
 		chevron.x + (chevron.width - label_width) / 2,
-		(bar.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
+		(bar.height - w.ui_text.line_height) / 2 + w.ui_text.ascent - lift,
 		app.theme.muted,
-	)
+	); result != .Ok {return result}
+	if hover > 0 {
+		if result := ui.hover_rim_draw(
+			&w.list,
+			app.theme,
+			tile,
+			6 * w.scale,
+			hover,
+			w.scale,
+			w.pointer,
+		); result != .None {return .Ok}
+	}
+	return .Ok
 }
 
 tab_chevron_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
