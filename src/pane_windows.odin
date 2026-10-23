@@ -102,7 +102,7 @@ pane_window_preview_create :: proc(
 	if !pane_window_preview_position(app, preview, x, y) {return nil}
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
-	if !pane_minimum_allows(app, preview, panes[:], nil, false) {return nil}
+	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = false) {return nil}
 	if !window_show_prepared(app, preview) {return nil}
 	workspace_pickers_refresh(app)
 	success = true
@@ -134,7 +134,7 @@ pane_to_window :: proc(
 		   pane.content {return false}
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
-	if !pane_minimum_allows(app, preview, panes[:], nil, true) {return false}
+	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
 	name, number := workspace_default_name(app)
 	if number == 0 {return false}
 	move := pane_move_begin(app, preview, source, workspace)

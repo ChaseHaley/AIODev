@@ -51,16 +51,16 @@ field_box_draw :: proc(
 	frame := field_box_text_rect(box)
 	if render.push_layer(list, box.rect, box.radius * box.scale) != .None {return .Ok}
 	return field_draw(
-		box.field,
-		list,
-		&text,
-		theme,
-		frame.x,
-		baseline,
-		frame.width,
-		focused,
-		placeholder,
-		theme.text,
-		max(1, box.caret_width * box.scale),
+		f           = box.field,
+		list        = list,
+		text        = &text,
+		theme       = theme,
+		x           = frame.x,
+		baseline    = baseline,
+		available   = frame.width,
+		focused     = focused,
+		placeholder = placeholder,
+		color       = theme.text,
+		caret_width = max(1, box.caret_width * box.scale),
 	)
 }

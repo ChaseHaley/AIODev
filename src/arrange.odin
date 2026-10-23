@@ -283,7 +283,8 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 		panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
 		reorders_tab :=
 			pane_source_workspace(app, d.source) == w.workspace && d.node == d.source.tree.root
-		d.minimum_rejected = !reorders_tab && !pane_minimum_allows(app, w, panes[:], nil, false)
+		d.minimum_rejected = !reorders_tab &&
+			!pane_minimum_allows(app, w, panes[:], nil, notify_failure = false)
 		if d.minimum_rejected {return {}, false}
 		r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
 		return {
