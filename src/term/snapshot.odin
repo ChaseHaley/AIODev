@@ -152,26 +152,59 @@ snapshot_cell :: proc(s: ^Snapshot, column, row: int) -> ^Snapshot_Cell {
 	return &s.cells[row * int(s.columns) + column]
 }
 
+// One row's displayed text laid out by column: a wide glyph's text sits at its first
+// column, the columns it covers are empty, and spacer halves are empty. The strings
+// refer to the snapshot's cell text.
+Row_Map :: struct {
+	columns: []string,
+	text:    string,
+}
+
+@(require_results)
+row_map :: proc(
+	s: ^Snapshot,
+	row: int,
+	allocator := context.allocator,
+) -> (
+	Row_Map,
+	Error,
+) {
+	if row < 0 || row >= int(s.rows) {return {}, .None}
+	m: Row_Map
+	ok := false
+	defer if !ok {row_map_destroy(&m, allocator)}
+	cells := s.cells[row * int(s.columns):(row + 1) * int(s.columns)]
+	columns, columns_error := make([]string, len(cells), allocator)
+	if columns_error != nil {return {}, .Out_Of_Memory}
+	m.columns = columns
+	count := 0
+	for c, x in cells {
+		if c.width == .Spacer_Tail || c.width == .Spacer_Head {continue}
+		text := c.text
+		if text == "" {text = " "}
+		m.columns[x] = text
+		count += len(text)
+	}
+	buffer, buffer_error := make([]u8, count, allocator)
+	if buffer_error != nil {return {}, .Out_Of_Memory}
+	at := 0
+	for text in m.columns {at += copy(buffer[at:], text)}
+	for at > 0 && buffer[at - 1] == ' ' {at -= 1}
+	m.text = string(buffer[:at])
+	ok = true
+	return m, .None
+}
+
+row_map_destroy :: proc(m: ^Row_Map, allocator := context.allocator) {
+	delete(m.columns, allocator)
+	delete(m.text, allocator)
+	m^ = {}
+}
+
 @(require_results)
 row_text :: proc(s: ^Snapshot, row: int, allocator := context.allocator) -> (string, Error) {
-	if row < 0 || row >= int(s.rows) {return "", .None}
-	count := 0
-	for c in s.cells[row * int(s.columns):(row + 1) * int(s.columns)] {
-		if c.width == .Spacer_Tail || c.width == .Spacer_Head {continue}
-		count += max(1, len(c.text))
-	}
-	buffer, err := make([]u8, count, allocator)
-	if err != nil {return "", .Out_Of_Memory}
-	at := 0
-	for c in s.cells[row * int(s.columns):(row + 1) * int(s.columns)] {
-		if c.width == .Spacer_Tail || c.width == .Spacer_Head {continue}
-		if len(c.text) == 0 {
-			buffer[at] = ' '
-			at += 1
-		} else {
-			at += copy(buffer[at:], c.text)
-		}
-	}
-	for at > 0 && buffer[at - 1] == ' ' {at -= 1}
-	return string(buffer[:at]), .None
+	m, err := row_map(s, row, allocator)
+	if err != .None {return "", err}
+	delete(m.columns, allocator)
+	return m.text, .None
 }

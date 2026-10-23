@@ -225,19 +225,6 @@ attribute_text :: proc(w: ^Writer, a: Attributes) {
 	}
 }
 
-@(private)
-cell_text :: proc(w: ^Writer, cells: []term.Snapshot_Cell) {
-	put(w, "\"")
-	for c in cells {
-		if c.width == .Spacer_Head || c.width == .Spacer_Tail {
-			continue
-		}
-		text := c.text == "" ? " " : c.text
-		escaped(w, text)
-	}
-	put(w, "\"")
-}
-
 @(require_results)
 format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -> Error {
 	if s == nil {return .Invalid_Argument}
@@ -253,11 +240,12 @@ format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -
 	put(&w, "-")
 	integer(&w, last)
 	put(&w, "\n")
-	row := s.cells[request.row * int(s.columns):(request.row + 1) * int(s.columns)]
+	m, map_error := term.row_map(s, request.row, out.buf.allocator)
+	if map_error != .None {return .Out_Of_Memory}
+	defer term.row_map_destroy(&m, out.buf.allocator)
 	text_last := last
 	for text_last >= first {
-		c := &row[text_last]
-		if (c.text != "" && c.text != " ") ||
+		if (m.columns[text_last] != "" && m.columns[text_last] != " ") ||
 		   attributes_at(s, text_last, request.row) != (Attributes{}) {
 			break
 		}
@@ -275,8 +263,9 @@ format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -
 			end += 1
 		}
 		span(&w, start, end)
-		put(&w, " ")
-		cell_text(&w, row[start:end + 1])
+		put(&w, " \"")
+		for column in start ..= end {escaped(&w, m.columns[column])}
+		put(&w, "\"")
 		attribute_text(&w, a)
 		put(&w, "\n")
 		start = end + 1
@@ -378,9 +367,9 @@ evaluate :: proc(
 		recent: [2]int
 		recent_count := 0
 		for row in 0 ..< int(s.rows) {
-			text, err := term.row_text(s, row, out.buf.allocator)
-			if err != .None {return false, .Out_Of_Memory}
-			if text != "" {
+			m, map_error := term.row_map(s, row, out.buf.allocator)
+			if map_error != .None {return false, .Out_Of_Memory}
+			if m.text != "" {
 				if recent_count == len(recent) {
 					recent[0], recent[1] = recent[1], row
 				} else {
@@ -388,24 +377,21 @@ evaluate :: proc(
 					recent_count += 1
 				}
 			}
-			index := strings.index(text, request.text)
+			index := strings.index(m.text, request.text)
 			if index >= 0 {
-				// Map a UTF-8 byte match to terminal columns, including wide cells.
+				// A match may begin inside a cell's text; it is reported at the cell's first column.
 				at := 0
-				for column in 0 ..< int(s.columns) {
-					c := term.snapshot_cell(s, column, row)
-					if c.width == .Spacer_Head || c.width == .Spacer_Tail {
-						continue
-					}
-					if index < at + max(1, len(c.text)) {
+				for text, column in m.columns {
+					if text == "" {continue}
+					if index < at + len(text) {
 						position = {column, row}
 						break
 					}
-					at += max(1, len(c.text))
+					at += len(text)
 				}
 				found = true
 			}
-			delete(text, out.buf.allocator)
+			term.row_map_destroy(&m, out.buf.allocator)
 			if found {
 				break
 			}
