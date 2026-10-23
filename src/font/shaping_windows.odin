@@ -242,6 +242,19 @@ shape :: proc(
 	return shape_append(out, entry.glyphs[:])
 }
 
+// shape_calls reports real DirectWrite shaping runs. Shaping-cache hits, Hangul precomposition,
+// and glyph lookups that never reach the analyzer are excluded. Shaping and this read both run on
+// the render thread, so the counter needs no lock.
+@(require_results)
+shape_calls :: proc(s: ^System) -> u64 {
+	return s.shape_calls
+}
+
+// reset_shape_calls clears the shaping total for a diagnostics reset.
+reset_shape_calls :: proc(s: ^System) {
+	s.shape_calls = 0
+}
+
 @(private)
 cluster_starts :: proc(clusters: []int, i: int) -> bool {
 	return clusters == nil || i == 0 || clusters[i] != clusters[i - 1]
@@ -378,6 +391,7 @@ shape_append :: proc(out: ^[dynamic]Shaped_Glyph, glyphs: []Shaped_Glyph) -> Err
 @(private, require_results)
 shape_span :: proc(s: ^System, id: Face_Id, runes: []rune, base: int, size, scale: f32) -> Error {
 	p := &s.shaping
+	s.shape_calls += 1
 	if resize(&p.text, len(runes) * 2) != nil || resize(&p.rune_map, len(runes) * 2) != nil {
 		return .Out_Of_Memory
 	}

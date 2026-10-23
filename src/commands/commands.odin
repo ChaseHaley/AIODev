@@ -402,6 +402,53 @@ shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 	return string(out[:length]), .None
 }
 
+// Every label fits: six modifier prefixes plus the longest key label stay well under this.
+SHORTCUT_TEXT_CAP :: 128
+
+// The separator between a set's labels and between a field's alternatives.
+SHORTCUT_SEPARATOR :: ", "
+
+// Shortcut text is total: out holds SHORTCUT_TEXT_CAP bytes, a label always fits them, so a short
+// write is a programmer error and callers consume text without a failure branch of their own.
+@(require_results)
+shortcut_text :: proc(shortcut: Shortcut, out: []u8) -> string {
+	label, err := shortcut_label(shortcut, out)
+	assert(err == .None)
+	return label
+}
+
+// The stored text of alternatives: each trimmed, empty ones dropped, joined by SHORTCUT_SEPARATOR.
+// Allocation failure yields the empty text.
+@(require_results)
+shortcut_alternatives_text :: proc(alternatives: []string, allocator := context.allocator) -> string {
+	builder, builder_error := strings.builder_make(allocator)
+	if builder_error != nil {return ""}
+	defer strings.builder_destroy(&builder)
+	first := true
+	for alternative in alternatives {
+		text := strings.trim_space(alternative)
+		if text == "" {continue}
+		if !first {strings.write_string(&builder, SHORTCUT_SEPARATOR)}
+		strings.write_string(&builder, text)
+		first = false
+	}
+	text, clone_error := strings.clone(strings.to_string(builder), allocator)
+	if clone_error != nil {return ""}
+	return text
+}
+
+// The stored text of a set: its labels in order, joined by SHORTCUT_SEPARATOR.
+@(require_results)
+shortcut_set_text :: proc(set: Shortcut_Set, allocator := context.allocator) -> string {
+	labels := make([]string, set.count, context.temp_allocator)
+	buffer: [SHORTCUT_TEXT_CAP]u8
+	for shortcut, i in set.items[:set.count] {
+		label := shortcut_text(shortcut, buffer[:])
+		labels[i], _ = strings.clone(label, context.temp_allocator)
+	}
+	return shortcut_alternatives_text(labels, allocator)
+}
+
 active_shortcuts :: proc(command: ^Command) -> []Shortcut {
 	return command.shortcuts.items[:command.shortcuts.count]
 }
@@ -494,7 +541,7 @@ parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 		modifiers += {modifier}
 		rest = strings.trim_space(rest[plus + 1:])
 	}
-	buffer: [128]u8
+	buffer: [SHORTCUT_TEXT_CAP]u8
 	for key in input.Key {
 		label, err := shortcut_label({key, {}}, buffer[:])
 		if err != .None {return {}, false}
@@ -525,4 +572,26 @@ parse_shortcuts :: proc(text: string, out: []Shortcut) -> (int, Error) {
 		if !found {return 0, .Invalid_Shortcut}
 	}
 	return count, .None
+}
+
+// The alternatives of a stored value, as display-ready labels: the canonical label of each parsed
+// shortcut, or, when the value does not parse, its comma-separated parts as typed, trimmed, so the
+// settings editor still shows what the field holds.
+@(require_results)
+shortcut_alternatives :: proc(text: string, allocator := context.allocator) -> []string {
+	if strings.trim_space(text) == "" {return nil}
+	storage := make([]Shortcut, len(text) + 1, context.temp_allocator)
+	count, err := parse_shortcuts(text, storage)
+	if err != .None {
+		parts, _ := strings.split(text, ",", allocator)
+		for &part in parts {part = strings.trim_space(part)}
+		return parts
+	}
+	labels := make([]string, count, allocator)
+	buffer: [SHORTCUT_TEXT_CAP]u8
+	for shortcut, i in storage[:count] {
+		label := shortcut_text(shortcut, buffer[:])
+		labels[i], _ = strings.clone(label, allocator)
+	}
+	return labels
 }

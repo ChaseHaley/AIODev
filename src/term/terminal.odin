@@ -4,6 +4,7 @@ import "aio:ghostty"
 import "aio:pty"
 import "base:runtime"
 import "core:log"
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -67,6 +68,15 @@ Error :: enum {
 	Terminal_Failed,
 }
 
+// Record_Start_Error reports why a capture could not begin. Stopping reports its own success
+// because a stop after a disk error still has a path and byte count worth printing.
+Record_Start_Error :: enum {
+	None,
+	Already_Recording,
+	File_Failed,
+	Out_Of_Memory,
+}
+
 @(private)
 WRITE_QUEUE_LIMIT :: 4 * 1024 * 1024
 @(private)
@@ -110,6 +120,8 @@ Session :: struct {
 	program_statuses:                                         [PROGRAM_STATUS_LIMIT]Stored_Status,
 	program_status_count:                                     int,
 	read_buffer:                                              [READ_CHUNK]u8,
+	// The mutex guards the capture: the reader thread appends, the main thread starts and stops.
+	recording:                                                Recording,
 }
 
 @(private)
@@ -118,6 +130,16 @@ Write_Queue :: struct {
 	ready:   sync.Cond,
 	pending: [dynamic]u8,
 	closed:  bool,
+}
+
+// Recording owns the capture file for one session. `path` and `bytes` outlive `file` so a stop can
+// still report what was written after a disk error ended the capture early.
+@(private)
+Recording :: struct {
+	file:   ^os.File,
+	path:   string,
+	bytes:  u64,
+	active: bool,
 }
 
 @(require_results)
@@ -139,6 +161,9 @@ create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^
 	if err := ghostty_create(s, config); err != .None {
 		return nil, err
 	}
+	// Applied here rather than in ghostty_create so a headless replay can keep libghostty's default
+	// palette: a capture stores bytes, not the theme that drew them.
+	set_colors(s, config.colors)
 	spawn(s, config)
 	ok = true
 	return s, .None
@@ -148,6 +173,8 @@ destroy :: proc(s: ^Session) {
 	if s.spawned {
 		stop_process(s)
 	}
+	record_close(&s.recording)
+	delete(s.recording.path, s.allocator)
 	ghostty.selection_gesture_event_free(s.press_event)
 	ghostty.selection_gesture_event_free(s.drag_event)
 	ghostty.selection_gesture_event_free(s.release_event)
@@ -225,7 +252,6 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 	   .Success {
 		return .Terminal_Failed
 	}
-	set_colors(s, config.colors)
 	results := [?]ghostty.Result {
 		ghostty.key_encoder_new(nil, &s.key_encoder),
 		ghostty.key_event_new(nil, &s.key_event),
@@ -371,6 +397,7 @@ reader_main :: proc(s: ^Session) {
 		}
 		sync.mutex_lock(&s.mutex)
 		ghostty.terminal_vt_write(s.terminal, raw_data(chunk), uint(n))
+		record_chunk(s, chunk)
 		sync.mutex_unlock(&s.mutex)
 		mark_changed(s)
 		notify(s)
@@ -675,6 +702,99 @@ configure :: proc(s: ^Session, scrollback_lines: int, cursor: Cursor_Style, blin
 
 geometry :: proc(s: ^Session) -> Geometry {
 	return s.geometry
+}
+
+// record_start begins capturing this session's raw PTY output at `path`. The header is written
+// immediately so a replay knows the geometry even when the process produces no output at all.
+@(require_results)
+record_start :: proc(s: ^Session, path: string) -> Record_Start_Error {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	if s.recording.active {
+		return .Already_Recording
+	}
+	owned, clone_error := strings.clone(path, s.allocator)
+	if clone_error != nil {
+		return .Out_Of_Memory
+	}
+	file, open_error := os.create(owned)
+	if open_error != nil {
+		log.errorf("term: creating the capture %s failed: %v", owned, open_error)
+		delete(owned, s.allocator)
+		return .File_Failed
+	}
+	header := capture_header(s.geometry.columns, s.geometry.rows)
+	if _, ok := record_write(file, header[:]); !ok {
+		log.errorf("term: writing the capture header to %s failed", owned)
+		record_close_file(file)
+		delete(owned, s.allocator)
+		return .File_Failed
+	}
+	delete(s.recording.path, s.allocator)
+	s.recording = {file = file, path = owned, active = true}
+	return .None
+}
+
+// record_stop ends the capture and reports what it wrote. The path borrows session memory that
+// stays valid until the session is destroyed or another capture starts. `stopped` is false when
+// this session was not recording.
+@(require_results)
+record_stop :: proc(s: ^Session) -> (path: string, bytes: u64, stopped: bool) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	if !s.recording.active {
+		return "", 0, false
+	}
+	record_close_file(s.recording.file)
+	s.recording.file, s.recording.active = nil, false
+	return s.recording.path, s.recording.bytes, true
+}
+
+// record_chunk appends one PTY chunk while the session records. A failed write ends the capture
+// instead of retrying every chunk: the app must keep running, and one log line is enough evidence.
+@(private)
+record_chunk :: proc(s: ^Session, data: []u8) {
+	if s.recording.file == nil {
+		return
+	}
+	n, written := record_write(s.recording.file, data)
+	s.recording.bytes += u64(n)
+	if written {
+		return
+	}
+	log.errorf("term: appending to the capture %s failed; recording stopped", s.recording.path)
+	record_close_file(s.recording.file)
+	s.recording.file = nil
+}
+
+// record_close closes an open capture but keeps the path and byte count for the stop report.
+@(private)
+record_close :: proc(r: ^Recording) {
+	record_close_file(r.file)
+	r.file, r.active = nil, false
+}
+
+// record_write writes every byte of `data`; a short write or a closed file cannot be resumed.
+@(private, require_results)
+record_write :: proc(file: ^os.File, data: []u8) -> (written: int, ok: bool) {
+	for written < len(data) {
+		n, err := os.write(file, data[written:])
+		if err != nil || n <= 0 {
+			return written, false
+		}
+		written += n
+	}
+	return written, true
+}
+
+@(private)
+record_close_file :: proc(file: ^os.File) {
+	if file == nil {
+		return
+	}
+	if err := os.close(file); err != nil {
+		log.errorf("term: closing a capture failed: %v", err)
+	}
 }
 
 // Test-only window onto the libghostty handle. `odin test` defines ODIN_TEST, so debug, release,

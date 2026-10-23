@@ -6,6 +6,7 @@ import "aio:font"
 import "aio:glyphs"
 import "aio:instance"
 import platform_api "aio:platform"
+import "aio:perf"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -58,8 +59,16 @@ Session_Entry :: struct {
 	name:                string,
 }
 
+// Release only the entry's owned memory; callers own removal from app.sessions.
+session_entry_destroy :: proc(entry: ^Session_Entry) {
+	pane_header_destroy(&entry.header)
+	delete(entry.name)
+	term.destroy(entry.session)
+}
+
 App :: struct {
 	verify:                Verify,
+	perf:                  perf.Stats,
 	options:               instance.Options,
 	app_id:                string,
 	platform:              platform_api.Platform,
@@ -97,6 +106,7 @@ App :: struct {
 
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
+	perf.start(&app.perf)
 	if app.options.data_dir != "" {
 		path, err := filepath.join({app.options.data_dir, "settings.ini"})
 		if err != nil {
@@ -184,9 +194,7 @@ app_destroy :: proc(app: ^App) {
 	}
 	delete(app.windows)
 	for &entry in app.sessions {
-		pane_header_destroy(&entry.header)
-		delete(entry.name)
-		term.destroy(entry.session)
+		session_entry_destroy(&entry)
 	}
 	delete(app.sessions)
 	for workspace in app.workspaces {workspace_destroy(workspace)}

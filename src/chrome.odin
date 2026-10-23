@@ -177,9 +177,8 @@ window_leader_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if w.leader_until == {} {return .Ok}
 	leader, enabled := app.leader.?
 	if !enabled {return .Ok}
-	buffer: [128]u8
-	label, err := commands.shortcut_label(leader, buffer[:])
-	if err != .None {return .Ok}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	label := commands.shortcut_text(leader, buffer[:])
 	for pane in w.panes {
 		if pane.node != w.tree.focus {continue}
 		r := pane.rect

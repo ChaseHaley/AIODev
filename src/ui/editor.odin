@@ -349,7 +349,7 @@ max_scroll :: proc(p: ^Editor) -> int {return max(0, len(p.items) - max(1, p.vis
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 	if p.popup == .Shortcuts && contains(editor_popup_rect(p, l), x, y) {
 		if row := editor_row(p); row != nil {
-			last := len(shortcut_alternatives(row.value))
+			last := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			visible := shortcut_popup_rows(p, l)
 			p.popup_scroll = clamp(p.popup_scroll - rows, 0, max(0, last - visible + 1))
 			p.popup_index = clamp(
@@ -472,36 +472,19 @@ start_capture :: proc(p: ^Editor, index: int = 0) {
 }
 
 @(private)
-shortcut_alternatives :: proc(value: string) -> []string {
-	if strings.trim_space(value) == "" {return nil}
-	shortcuts := make([]commands.Shortcut, len(value) + 1, context.temp_allocator)
-	count, err := commands.parse_shortcuts(value, shortcuts)
-	if err != .None {return strings.split(value, ",", context.temp_allocator)}
-	labels := make([]string, count, context.temp_allocator)
-	for shortcut, i in shortcuts[:count] {
-		buffer: [128]u8
-		if label, result := commands.shortcut_label(shortcut, buffer[:]); result == .None {
-			labels[i] = strings.clone(label, context.temp_allocator)
-		}
-	}
-	return labels
-}
-
-@(private)
 shortcut_replace :: proc(p: ^Editor, row: ^Editor_Row, label: string) {
-	parts := shortcut_alternatives(row.value)
-	labels := make([]string, len(parts) + 1, context.temp_allocator)
-	count := 0
-	for part, i in parts {
-		if count >= len(labels) {break}
-		value := i == p.shortcut_index ? label : strings.trim_space(part)
-		if value != "" {labels[count] = value; count += 1}
-	}
-	if p.shortcut_index >= len(parts) && label != "" && count < len(labels) {
-		labels[count] = label
+	parts := commands.shortcut_alternatives(row.value, context.temp_allocator)
+	alternatives := make([]string, len(parts) + 1, context.temp_allocator)
+	copy(alternatives, parts)
+	count := len(parts)
+	if p.shortcut_index < count {
+		alternatives[p.shortcut_index] = label
+	} else if label != "" {
+		alternatives[count] = label
 		count += 1
 	}
-	field_set(&p.value, strings.join(labels[:count], ", ", context.temp_allocator))
+	text := commands.shortcut_alternatives_text(alternatives[:count], context.temp_allocator)
+	field_set(&p.value, text)
 }
 
 @(private)
@@ -581,9 +564,8 @@ capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> Edit
 		editor_message(p, "Typing keys need Ctrl, Alt, or the leader.", true)
 		return .Changed
 	}
-	buffer: [128]u8
-	label, err := commands.shortcut_label(chord, buffer[:])
-	if err != .None {return .None}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	label := commands.shortcut_text(chord, buffer[:])
 	if binding {
 		shortcut_replace(p, row, label)
 		p.captured = 1
@@ -636,7 +618,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Editor_Outcome, bool) {
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	if p.popup == .Shortcuts {
-		count := len(shortcut_alternatives(row.value))
+		count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 		last := count
 		#partial switch e.key {
 		case .Escape:
@@ -963,7 +945,7 @@ shortcut_popup_rows :: proc(p: ^Editor, l: Editor_Layout) -> int {
 	row := editor_row(p)
 	if row == nil {return 0}
 	return min(
-		len(shortcut_alternatives(row.value)) + 1,
+		len(commands.shortcut_alternatives(row.value, context.temp_allocator)) + 1,
 		8,
 		max(1, int((l.page.height - 16 * l.scale) / (CHOICE_HEIGHT * l.scale))),
 	)
@@ -1079,7 +1061,7 @@ editor_press :: proc(
 			return choose(p, row, int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s)))
 		}
 		if p.popup == .Shortcuts {
-			count := len(shortcut_alternatives(row.value))
+			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			index := clamp(
 				int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s)) + p.popup_scroll,
 				0,
@@ -1497,7 +1479,7 @@ popup_draw :: proc(
 	}
 	if panel_draw(list, frame, theme) != .None {return .Ok}
 	if p.popup == .Shortcuts {
-		parts := shortcut_alternatives(row.value)
+		parts := commands.shortcut_alternatives(row.value, context.temp_allocator)
 		count := shortcut_popup_rows(p, l)
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - count + 1), p.popup_index)
 		for visible in 0 ..< count {
@@ -1511,7 +1493,7 @@ popup_draw :: proc(
 			}
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
-			label := i < len(parts) ? strings.trim_space(parts[i]) : "+ Add shortcut"
+			label := i < len(parts) ? parts[i] : "+ Add shortcut"
 			if result := draw_text(
 				text,
 				list,

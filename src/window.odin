@@ -3,6 +3,7 @@ package main
 import "aio:glyphs"
 import "aio:input"
 import "aio:layout"
+import "aio:perf"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -433,19 +434,30 @@ window_render :: proc(app: ^App, w: ^Window) {
 		log.error("waiting for the swap chain failed")
 	}
 	background := app.theme.window
+	build_start := time.tick_now()
 	for _ in 0 ..< 2 {
 		_, result := build_frame(app, w)
 		if result == .Ok {
+			perf.mark_built(&app.perf)
 			break
 		}
 	}
+	build_ms := perf.since_ms(build_start)
+	render_start := time.tick_now()
 	err := render.frame_render(app.device, w.surface, &w.list, background)
+	render_ms := perf.since_ms(render_start)
 	if err == .Device_Lost {
 		recover_device(app)
 		return
 	}
 	if err != .None {
 		log.errorf("rendering a frame failed: %v", err)
+	}
+	// A failed render still built a draw list, but only a presented frame can carry an input
+	// latency sample; counting successes alone keeps frames.presented meaningful. The render
+	// start tick is the idle predicate's clock, so a frame reads the clock only twice.
+	if err == .None {
+		perf.record_frame(&app.perf, build_ms, render_ms, perf.idle_at(&app.perf, render_start))
 	}
 	w.dirty = false
 }

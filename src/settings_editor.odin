@@ -10,19 +10,6 @@ import "core:os"
 import "core:strings"
 
 @(private)
-shortcuts_text :: proc(shortcuts: commands.Shortcut_Set) -> string {
-	labels := make([]string, shortcuts.count, context.temp_allocator)
-	set := shortcuts
-	for shortcut, i in set.items[:set.count] {
-		buffer: [128]u8
-		label, err := commands.shortcut_label(shortcut, buffer[:])
-		if err != .None {return ""}
-		labels[i] = fmt.tprintf("%s", label)
-	}
-	return strings.join(labels[:shortcuts.count], ", ", context.temp_allocator)
-}
-
-@(private)
 shortcut_group :: proc(name: string) -> string {
 	switch ui.command_category(name) {
 	case "Application":
@@ -124,14 +111,14 @@ settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 		return false
 	}
 	for command in app.registry.items {
-		value := shortcuts_text(command.shortcuts)
+		value := commands.shortcut_set_text(command.shortcuts, context.temp_allocator)
 		for binding in s.keys {if binding.name == command.name {value = binding.value; break}}
 		row := ui.Editor_Row {
 			key           = fmt.tprintf("keys.%s", command.name),
 			title         = command.title,
 			description   = "",
 			value         = value,
-			default_value = shortcuts_text(command.defaults),
+			default_value = commands.shortcut_set_text(command.defaults, context.temp_allocator),
 			kind          = .Shortcut,
 		}
 		if ui.editor_add(p, row, shortcut_group(command.name)) != nil {

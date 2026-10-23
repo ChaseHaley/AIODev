@@ -33,6 +33,8 @@ Cache :: struct {
 	glyphs:     map[Glyph_Key]Entry,
 	sprites:    map[Sprite_Key]Entry,
 	generation: u64,
+	hits:       u64,
+	misses:     u64,
 }
 
 @(private)
@@ -118,8 +120,10 @@ glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry,
 	validate(c)
 	key := Glyph_Key{g.face, g.index, u32(math.round(size_px * g.scale * 64)), color}
 	if entry, found := c.glyphs[key]; found {
+		c.hits += 1
 		return entry, .Ok
 	}
+	c.misses += 1
 	bitmap, err := font.glyph_rasterize(c.fonts, g, size_px, c.allocator, color)
 	if err != .None {
 		log.errorf("glyphs: rasterizing glyph %v of face %v failed: %v", g.index, g.face, err)
@@ -142,6 +146,19 @@ glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry,
 	}
 	c.glyphs[key] = entry
 	return entry, .Ok
+}
+
+// glyph_counts reports glyph() atlas lookups since the cache was created: hits reused an entry,
+// misses rasterized and uploaded one. Sprites (underline decorations) are not counted. Rendering
+// owns both counters, so a diagnostics read needs no lock.
+@(require_results)
+glyph_counts :: proc(c: ^Cache) -> (hits, misses: u64) {
+	return c.hits, c.misses
+}
+
+// reset_counts clears the lookup totals for a diagnostics reset.
+reset_counts :: proc(c: ^Cache) {
+	c.hits, c.misses = 0, 0
 }
 
 // Returns a cell-wide decoration; its offset centers it vertically on the pen position.
