@@ -125,7 +125,7 @@ pending_close_text :: proc(
 			counts := workspace_pane_counts(found)
 			pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
 		}
-		text.title = fmt.tprintf("Delete #%d “%s”?", pc.plan.workspace, name)
+		text.title = fmt.tprintf("Delete “%s”?", name)
 		text.body = fmt.tprintf(
 			"Close %d tabs (%d panes); stop %d sessions.",
 			pc.tabs,
