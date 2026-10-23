@@ -198,6 +198,19 @@ when AIO_CONTROL {
 			path, join_error = filepath.join({directory, "capture.png"})
 			if join_error != nil {return .Out_Of_Memory}
 		}
+		if request.output != "" {
+			// An explicit --out may point into a directory the caller has not created yet; the
+			// default path above already owns its captures directory.
+			directory := filepath.dir(path)
+			if directory != "" && directory != "." {
+				if mkdir_error := os.mkdir_all(directory); mkdir_error != nil {
+					return evidence_error(
+						out,
+						fmt.tprintf("cannot create %s (%v); check the path", directory, mkdir_error),
+					)
+				}
+			}
+		}
 		if pixels.png_write(path, image) != .None {
 			return evidence_error(
 				out,

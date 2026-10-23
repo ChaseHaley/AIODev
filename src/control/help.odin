@@ -241,8 +241,9 @@ OS composition such as the frame color or shadow; use win32.ps1 -Shot for those.
 Reads pixels from the same offscreen render as capture, without writing a file.
 --rows (default) prints one line per row: <n> coverage=<0..1> colors=<n> color=#rrggbbaa.
 Coverage is the share of the dominant color; colors is the distinct color count.
---columns prints columns instead. --sample prints one pixel: sample <x>,<y> #rrggbbaa.
-Use --sample for exact colors; use profiles for alignment and unintended-change checks.
+--columns prints columns instead. --sample prints one pixel: sample <x>,<y> #rrggbbaa,
+where x,y are relative to the resolved region. Use --sample for exact colors; use profiles for
+alignment and unintended-change checks.
 `,
 		)
 	case "diff":
