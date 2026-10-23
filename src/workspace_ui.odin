@@ -374,22 +374,11 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			else if change == .Edited { workspace_picker_filter(app, w) }
 		}
 	case:
-		switch clipboard_chord(e) {
-		case .Copy:
-			clipboard_copy(app, ui.field_selected_text(&p.query))
-		case .Cut:
-			if clipboard_copy(
-				app,
-				ui.field_selected_text(&p.query),
-			) {workspace_picker_text(app, w, "")}
-		case .Paste:
-			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-				workspace_picker_text(app, w, text)
-			}
-		case .None:
-			change := ui.field_key(&p.query, e)
-			if workspace_picker_icons(p) && change != .None { p.selected = len(WORKSPACE_ICONS) }
-			else if change == .Edited { workspace_picker_filter(app, w) }
+		edit := field_edit_key(app, &p.query, e)
+		if workspace_picker_icons(p) && (edit.change != .None || edit.pasted) {
+			p.selected = len(WORKSPACE_ICONS)
+		} else if edit.change == .Edited || edit.pasted {
+			workspace_picker_filter(app, w)
 		}
 	}
 	w.dirty = true

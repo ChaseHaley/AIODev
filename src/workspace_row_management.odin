@@ -182,16 +182,7 @@ workspace_row_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool 
 					workspace_picker_count(w)
 			}
 		case:
-			switch clipboard_chord(e) {
-			case .Copy: clipboard_copy(app, ui.field_selected_text(&w.rename))
-			case .Cut:
-				if clipboard_copy(app, ui.field_selected_text(&w.rename)) { ui.field_text(&w.rename, "") }
-			case .Paste:
-				if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-					ui.field_text(&w.rename, text)
-				}
-			case .None: ui.field_key(&w.rename, e)
-			}
+			field_edit_key(app, &w.rename, e)
 			p.rename_error = false
 		}
 		return true
