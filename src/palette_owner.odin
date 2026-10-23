@@ -35,14 +35,8 @@ palette_open :: proc(app: ^App, w: ^Window) {
 	if previous := window_find(app, app.palette_window); previous != nil && previous != w {
 		palette_release(app, previous)
 	}
+	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
-	arrange_cancel(app, w)
-	leader_cancel(w)
-	pane_header_cancel(w)
-	w.selecting, w.autoscrolling = false, false
-	w.split_overlay = false
-	w.tab_pressed, w.tab_close_pressed = false, -1
-	ui.editor_release(&w.editor)
 	entry := focused_session(app, w)
 	has_selection := entry != nil && term.has_selection(entry.session)
 	registered := commands.set_enabled(

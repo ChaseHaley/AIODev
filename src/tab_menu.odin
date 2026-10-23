@@ -17,9 +17,7 @@ Tab_Menu :: struct {
 tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
 	if !w.workspace.tabs[index].marked {tab_select(app, w, index)} else {tab_select(app, w, index, true)}
-	arrange_cancel(app, w)
-	leader_cancel(w)
-	pane_header_cancel(w)
+	if !gesture_cancel(app, w) {return}
 	w.tab_menu = {
 		open     = true,
 		position = {x, y},

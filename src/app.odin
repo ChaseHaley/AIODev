@@ -522,8 +522,7 @@ reload_settings :: proc(app: ^App, announce := true) {
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		if i >= len(app.windows) {continue}
 		window := app.windows[i]
-		leader_cancel(window)
-		arrange_cancel(app, window)
+		_ = gesture_cancel(app, window)
 	}
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)

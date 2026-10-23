@@ -18,8 +18,7 @@ rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
 		if entry == nil {return}
 		value, id = entry.name, entry.id
 	}
-	arrange_cancel(app, w)
-	leader_cancel(w)
+	if !gesture_cancel(app, w) {return}
 	palette_close(app, w)
 	ui.field_set(&w.rename, value)
 	ui.field_select_all(&w.rename)

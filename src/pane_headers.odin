@@ -111,11 +111,6 @@ pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_A
 	return {}, .None, false
 }
 
-pane_header_clear :: proc(w: ^Window) {
-	w.header_buttons = {}
-	pane_header_cancel(w)
-}
-
 pane_header_cancel :: proc(w: ^Window) {
 	for &view in w.views {view.header_hover, view.header_pressed = .None, .None}
 }
