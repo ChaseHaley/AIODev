@@ -7,6 +7,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
+import "aio:ui"
 
 @(private="file")
 Adoption_Fixture :: struct { state: app.App, directory, path: string }
@@ -38,7 +39,8 @@ adoption_fixture_destroy :: proc(t: ^testing.T, f: ^Adoption_Fixture) {
 // Every presentation value a caller must not have to teach either path separately.
 @(private="file")
 adoption_dirty_presentation :: proc(w: ^app.Window) {
-	w.tab_hover, w.tab_pressed, w.tab_close_pressed = 1, true, 2
+	w.tab_hover, w.tab_pressed = 1, true
+	ui.armed_press(&w.tab_close_armed, 2)
 	w.tab_underline = {value = 9, target = 9}
 	w.tab_menu.open, w.rename_open = true, true
 	w.workspace_picker.mode = .List
@@ -55,7 +57,7 @@ adoption_expect_postcondition :: proc(
 	testing.expect(t, w.tree == &app.selected_tab(workspace).tree)
 	testing.expect_value(t, w.tab_hover, -1)
 	testing.expect(t, !w.tab_pressed)
-	testing.expect_value(t, w.tab_close_pressed, -1)
+	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	testing.expect_value(t, w.tab_underline.value, f32(workspace.selected))
 	testing.expect_value(t, w.tab_underline.target, f32(workspace.selected))
 	testing.expect(t, !w.tab_menu.open && !w.rename_open)
@@ -143,7 +145,7 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	testing.expect_value(t, raw_data(w.panes), panes)
 	testing.expect_value(t, w.tab_hover, 1)
 	testing.expect(t, w.tab_pressed)
-	testing.expect_value(t, w.tab_close_pressed, 2)
+	testing.expect_value(t, ui.armed_target(w.tab_close_armed), 2)
 	testing.expect_value(t, w.tab_underline.value, f32(9))
 	testing.expect_value(t, w.tab_underline.target, f32(9))
 	testing.expect(t, w.workspace_picker.mode == .List)
