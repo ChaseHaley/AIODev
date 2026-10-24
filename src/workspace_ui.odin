@@ -146,8 +146,10 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	active := workspace_picker_active(&w.workspace_picker)
 	fill := active ? app.theme.selection : app.theme.pane
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None { return .Ok }
-	// An open picker already tints the chip; the paper fill would paint over it.
-	if hover > 0 && !active {
+	// An open picker already tints the chip; an opaque paper fill would paint over it, while a
+	// translucent dark fill can pass over without hiding it.
+	skip_fill := ui.hover_fill_opaque(app.theme) && active
+	if hover > 0 && !skip_fill {
 		fill = app.theme.hover
 		fill.a *= hover
 		if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None {
@@ -169,8 +171,16 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	workspace_chevron_draw(&w.list, indicator, app.theme.text, w.scale)
 	if hover > 0 {
-		if result := ui.hover_rim_draw(&w.list, app.theme, r, 6 * w.scale, hover, w.scale, w.pointer);
-		   result != .None {return .Ok}
+		if result := ui.hover_rim_draw(
+			&w.list,
+			app.theme,
+			r,
+			6 * w.scale,
+			hover,
+			w.scale,
+			w.pointer,
+			!skip_fill,
+		); result != .None {return .Ok}
 	}
 	return .Ok
 }
@@ -564,10 +574,19 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			app.theme.muted,
 			detail_width,
 		); result != .Ok {return result}
-		// Rows are a reading surface: they take the pointer light but never the lift.
+		// Rows are a reading surface: they take the pointer light but never the lift. The
+		// selected row keeps its tint, so it takes no paper hairline.
 		if workspace_rect_contains(row, w.pointer.x, w.pointer.y) {
-			if result := ui.hover_rim_draw(&w.list, app.theme, row, 5 * s, 1, s, w.pointer);
-			   result != .None {return .Ok}
+			if result := ui.hover_rim_draw(
+				&w.list,
+				app.theme,
+				row,
+				5 * s,
+				1,
+				s,
+				w.pointer,
+				i != p.selected,
+			); result != .None {return .Ok}
 		}
 	}
 	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }

@@ -298,7 +298,10 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 	r, s := workspace_picker_menu_button_rect(w, index), w.scale
 	p := &w.workspace_picker
 	hover := p.rows[index].id == p.menu_hover ? p.menu_motion.hover.value : 0
-	if hover > 0 {
+	// The button sits inside the row, so an opaque paper fill would punch a hole in the row's
+	// selection tint. It takes the light and keeps the tint instead.
+	skip_fill := ui.hover_fill_opaque(app.theme) && index == p.selected
+	if hover > 0 && !skip_fill {
 		fill := app.theme.hover
 		fill.a *= hover
 		if render.push_rect(&w.list, {rect = r, color = fill, radius = 5 * s}) != .None { return }
@@ -309,7 +312,16 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 		if render.push_rect(&w.list, {rect = dot, color = ink, radius = 1.5 * s}) != .None { return }
 	}
 	if hover > 0 {
-		if ui.hover_rim_draw(&w.list, app.theme, r, 5 * s, hover, s, w.pointer) != .None { return }
+		if ui.hover_rim_draw(
+			&w.list,
+			app.theme,
+			r,
+			5 * s,
+			hover,
+			s,
+			w.pointer,
+			!skip_fill,
+		) != .None { return }
 	}
 }
 
@@ -364,7 +376,8 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			item.y + (item.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			enabled ? app.theme.text : app.theme.muted, max(0, item.width - 16 * s)); result != .Ok { return result }
 		if i == p.menu_selected && workspace_rect_contains(item, w.pointer.x, w.pointer.y) {
-			if ui.hover_rim_draw(&w.list, app.theme, item, 4 * s, 1, s, w.pointer) != .None {
+			// The menu item carries the selection tint, so it takes no paper hairline.
+			if ui.hover_rim_draw(&w.list, app.theme, item, 4 * s, 1, s, w.pointer, false) != .None {
 				return .Ok
 			}
 		}

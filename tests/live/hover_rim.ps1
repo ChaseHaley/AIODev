@@ -132,6 +132,8 @@ try {
     Invoke-Aio wait idle
     Invoke-Aio command tab.select_1
     Invoke-Aio wait idle
+    Invoke-Aio expect state tabs.count=2
+    Invoke-Aio expect state tabs.selected=1
     $state = Read-State
     $x = [double]$state['tabs.x']
     $width = [double]$state['tabs.width']

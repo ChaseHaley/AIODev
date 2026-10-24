@@ -89,8 +89,10 @@ tab_draw :: proc(
 	}
 	fill := theme.hover
 	fill.a *= hover
-	// A marked tab already carries the selection tint; the paper fill would paint over it.
-	if !(marked && !selected) {
+	// A marked tab already carries the selection tint; an opaque paper fill would paint over
+	// it, while a translucent dark fill can pass over without hiding it.
+	skip_fill := hover_fill_opaque(theme) && marked && !selected
+	if !skip_fill {
 		draw_rect(list, {rect = tile, color = fill, radius = 7 * scale})
 	}
 	fill = theme.pressed
@@ -139,7 +141,7 @@ tab_draw :: proc(
 		max(0, width - (index < bar.count ? 44 : 22) * scale - icon_width),
 	); result != .Ok {return result}
 	if hover > 0 {
-		if result := hover_rim_draw(list, theme, tile, 7 * scale, hover, scale, pointer);
+		if result := hover_rim_draw(list, theme, tile, 7 * scale, hover, scale, pointer, !skip_fill);
 		   result != .None {return .Ok}
 	}
 	return .Ok
@@ -228,7 +230,9 @@ caption_draw :: proc(
 		icon := ([3]rune{'\ue921', maximized ? '\ue923' : '\ue922', '\ue8bb'})[i]
 		if result := draw_icon(text, list, icon, r, ink, 0.4); result != .Ok {return result}
 		if i == hover {
-			if result := hover_rim_draw(list, theme, r, 0, 1, scale, pointer);
+			// The buttons are flush with the window edge and some carry a forced fill, so the
+			// paper hairline would read as a stray border.
+			if result := hover_rim_draw(list, theme, r, 0, 1, scale, pointer, false);
 			   result != .None {return .Ok}
 		}
 	}

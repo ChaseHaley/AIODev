@@ -215,7 +215,8 @@ header_draw :: proc(
 			l.badge.y + (l.badge.height - small.line_height) / 2 + small.ascent,
 			theme.muted,
 		); result != .Ok {return result}
-		if result := hover_rim_draw(list, theme, l.badge, 4 * scale, 1, scale, pointer);
+		// The badge carries its own tinted keycap, so it takes the light but no paper hairline.
+		if result := hover_rim_draw(list, theme, l.badge, 4 * scale, 1, scale, pointer, false);
 		   result != .None {return .Ok}
 	}
 	strong := text_styled(text, focused ? .Strong : .Body)

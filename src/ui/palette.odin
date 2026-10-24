@@ -543,7 +543,8 @@ palette_draw :: proc(
 		if index == p.selected {
 			draw_rect(list, {rect = row, color = theme.selection, radius = 6 * scale})
 			if contains(row, pointer.x, pointer.y) {
-				if result := hover_rim_draw(list, theme, row, 6 * scale, 1, scale, pointer);
+				// The row carries the selection tint, not the paper fill, so no hairline.
+				if result := hover_rim_draw(list, theme, row, 6 * scale, 1, scale, pointer, false);
 				   result != .None {return .Ok}
 			}
 		}

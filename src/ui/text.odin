@@ -32,10 +32,10 @@ theme_from :: proc(t: settings.Theme) -> Theme {
 		accent = colour.rgba(t.accent),
 		accent_text = colour.rgba(t.accent_text),
 		border = colour.rgba(t.text, t.light ? 0.09 : 0.08),
-		// A light-mode hover is paper: an opaque pane-white fill that can never darken the
-		// tile. Its shape comes from the hairline and the seat, not from ink. Dark mode keeps
-		// the translucent lift.
-		hover = t.light ? colour.rgba(t.pane) : colour.rgba(t.text, 0.05),
+		// Light mode's hover is paper: the opaque raised-surface colour, so the seat drawn
+		// underneath cannot show through and darken the tile, and its shape comes from the
+		// hairline and the seat rather than from ink. Dark mode keeps the translucent lift.
+		hover = t.light ? colour.rgba(t.raised) : colour.rgba(t.text, 0.05),
 		pressed = colour.rgba(t.text, t.light ? 0.08 : 0.09),
 		selection = colour.rgba(t.accent, t.light ? 0.10 : 0.14),
 		focus = colour.rgba(t.accent, 0.50),

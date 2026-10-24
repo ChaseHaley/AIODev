@@ -73,15 +73,21 @@ hover_rim_present_reports_whether_the_frame_carries_a_pointer_light :: proc(t: ^
 }
 
 @(test)
-light_hover_is_opaque_paper_and_keeps_the_rim_faint :: proc(t: ^testing.T) {
-	light := ui.theme_from(settings.theme_resolve({.Studio, .Light}))
+light_hover_is_paper_and_keeps_the_rim_faint :: proc(t: ^testing.T) {
 	dark := ui.theme_from(settings.theme_resolve({.Studio, .Dark}))
-	// The light fill is the pane colour at full alpha, so the seat drawn underneath cannot
-	// show through and darken the tile.
-	testing.expect_value(t, light.hover.a, f32(1))
-	testing.expect(t, light.hover == light.pane, "light hover equals the pane colour")
-	testing.expect(t, light.hover_edge.a > 0, "light hover draws a hairline")
-	testing.expect(t, light.rim.a <= 0.25, "light rim stays a hint")
+	// Every light theme takes the raised-surface colour at full alpha, so the seat drawn
+	// underneath cannot show through and darken the tile, and no theme hovers darker than the
+	// surface it sits on.
+	for name in ([?]settings.Theme_Name{.Studio, .Tide, .Ember}) {
+		light := ui.theme_from(settings.theme_resolve({name, .Light}))
+		testing.expect_value(t, light.hover.a, f32(1))
+		testing.expect(t, light.hover == light.surface, "light hover equals the raised surface")
+		testing.expect(t, light.surface.r >= light.pane.r, "surface is not darker than a pane")
+		testing.expect(t, light.surface.g >= light.pane.g, "surface is not darker than a pane")
+		testing.expect(t, light.surface.b >= light.pane.b, "surface is not darker than a pane")
+		testing.expect(t, light.hover_edge.a > 0, "light hover draws a hairline")
+		testing.expect(t, light.rim.a <= 0.25, "light rim stays a hint")
+	}
 	// Dark mode is unchanged.
 	testing.expect_value(t, dark.hover.a, f32(0.05))
 	testing.expect_value(t, dark.rim.a, f32(0.80))
@@ -109,6 +115,18 @@ light_hover_rim_draws_the_hairline_before_the_light :: proc(t: ^testing.T) {
 	testing.expect_value(t, list.rects[0].color, theme.hover_edge)
 	testing.expect_value(t, list.rects[1].fill, render.RECT_FILL_RIM)
 
+	// The hairline fades with the hover ramp and scales with the window.
+	if !testing.expect_value(
+		t,
+		ui.hover_rim_draw(&list, theme, rect, 6, 0.5, 2, {60, 35}),
+		render.Error.None,
+	) {
+		return
+	}
+	if !testing.expect_value(t, len(list.rects), 4) {return}
+	testing.expect_value(t, list.rects[2].stroke, f32(2))
+	testing.expect_value(t, list.rects[2].color.a, theme.hover_edge.a * 0.5)
+
 	// Zero gloss drops the light and keeps the shape.
 	theme.hover_gloss = 0
 	if !testing.expect_value(
@@ -118,8 +136,29 @@ light_hover_rim_draws_the_hairline_before_the_light :: proc(t: ^testing.T) {
 	) {
 		return
 	}
-	if !testing.expect_value(t, len(list.rects), 3) {return}
-	testing.expect_value(t, list.rects[2].stroke, f32(1))
+	if !testing.expect_value(t, len(list.rects), 5) {return}
+	testing.expect_value(t, list.rects[4].stroke, f32(1))
+}
+
+@(test)
+light_hover_with_zero_gloss_reports_no_pointer_light :: proc(t: ^testing.T) {
+	theme := ui.theme_from(settings.theme_resolve({.Studio, .Light}))
+	theme.hover_gloss = 0
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	if !testing.expect_value(t, render.push_layer(&list, {0, 0, 200, 100}), render.Error.None) {
+		return
+	}
+	if !testing.expect_value(
+		t,
+		ui.hover_rim_draw(&list, theme, {10, 20, 100, 30}, 6, 1, 1, {60, 35}),
+		render.Error.None,
+	) {
+		return
+	}
+	// The hairline is a plain rect, not a rim: a window without gloss must still idle.
+	if !testing.expect_value(t, len(list.rects), 1) {return}
+	testing.expect(t, !ui.hover_rim_present(&list))
 }
 
 @(test)

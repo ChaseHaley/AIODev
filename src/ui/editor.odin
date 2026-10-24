@@ -1524,7 +1524,8 @@ popup_draw :: proc(
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
 			if contains(option, pointer.x, pointer.y) {
-				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer);
+				// Options carry the selection tint, not the paper fill, so no hairline.
+				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
 			}
 			label := i < len(parts) ? parts[i] : "+ Add shortcut"
@@ -1561,7 +1562,8 @@ popup_draw :: proc(
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
 			if contains(option, pointer.x, pointer.y) {
-				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer);
+				// Options carry the selection tint, not the paper fill, so no hairline.
+				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
 			}
 			if name == field_string(&p.value) {
@@ -1740,7 +1742,8 @@ outline_draw :: proc(
 			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
 		}
 		if entry == p.hover_outline {
-			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer);
+			// The current group keeps its accent bar; the hairline would ink it.
+			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer, !current);
 			   result != .None {return .Ok}
 		}
 		baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
@@ -1837,8 +1840,9 @@ editor_draw :: proc(
 			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
 		}
 		if index == p.hover_item {
-			// A row is a reading surface: it takes the pointer light but never the lift.
-			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer);
+			// A row is a reading surface: it takes the pointer light but never the lift. A
+			// selected row keeps its tint and any error ring, so it takes no hairline.
+			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer, !selected);
 			   result != .None {return .Ok}
 		}
 		if item.row < 0 {
@@ -1895,8 +1899,10 @@ editor_draw :: proc(
 		if row.kind == .Action {continue}
 		modified := row.value != row.default_value
 		if index == p.hover_reset && modified {
-			draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6 * s})
-			if result := hover_rim_draw(list, theme, parts.reset, 6 * s, 1, s, pointer);
+			if !selected {
+				draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6 * s})
+			}
+			if result := hover_rim_draw(list, theme, parts.reset, 6 * s, 1, s, pointer, !selected);
 			   result != .None {return .Ok}
 		}
 		icon_color := theme.faint

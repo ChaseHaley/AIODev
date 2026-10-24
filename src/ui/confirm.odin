@@ -210,15 +210,8 @@ confirm_button_draw :: proc(
 		fill.a *= hover
 	}
 	draw_rect(list, {rect = r, color = fill, radius = 6 * scale})
-	if accept && (hover > 0 || active) {
-		draw_rect(
-			list,
-			{
-				rect = r,
-				color = active ? theme.pressed : theme.hover,
-				radius = 6 * scale,
-			},
-		)
+	if accept && active {
+		draw_rect(list, {rect = r, color = theme.pressed, radius = 6 * scale})
 	}
 	if c.focus == button {focus_ring_draw(list, r, theme, scale)}
 	strong := text_styled(text, .Strong)
@@ -233,7 +226,8 @@ confirm_button_draw :: proc(
 		r.width - 8 * scale,
 	); result != .Ok {return result}
 	if hover > 0 {
-		if result := hover_rim_draw(list, theme, r, 6 * scale, hover, scale, pointer);
+		// The destructive button keeps its error fill, so it takes no paper hairline.
+		if result := hover_rim_draw(list, theme, r, 6 * scale, hover, scale, pointer, !accept);
 		   result != .None {return .Ok}
 	}
 	return .Ok
