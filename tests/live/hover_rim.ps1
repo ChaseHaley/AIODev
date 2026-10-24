@@ -118,9 +118,35 @@ try {
     Invoke-Aio key Esc
     Invoke-Aio expect state workspace.picker=false
 
+    # Light themes use the paper fill, so the same tab must lighten instead of darkening.
+    # The capture is the evidence; the theme switch proves the light values reach the draw path.
+    $settings = Join-Path $data 'settings.ini'
+    $text = [IO.File]::ReadAllText($settings).TrimEnd()
+    [IO.File]::WriteAllText($settings, $text + "`ntheme.mode = light`n")
+    Invoke-Aio command settings.reload
+    Invoke-Aio wait idle
+    Invoke-Aio expect state theme.mode=light
+    # The first tab is selected and already white; hover a second, ordinary tab so the
+    # paper fill is the thing under review.
+    Invoke-Aio command tab.new
+    Invoke-Aio wait idle
+    Invoke-Aio command tab.select_1
+    Invoke-Aio wait idle
+    $state = Read-State
+    $x = [double]$state['tabs.x']
+    $width = [double]$state['tabs.width']
+    Invoke-Aio mouse move "$([int]($x + $width*1.5)),18" --px
+    Invoke-Aio wait idle
+    Shot 'tab-hover-light'
+    $text = [IO.File]::ReadAllText($settings)
+    $text = [regex]::Replace($text, '(?m)^theme\.mode\s*=.*\r?\n?', '')
+    [IO.File]::WriteAllText($settings, $text.TrimEnd() + "`ntheme.mode = dark`n")
+    Invoke-Aio command settings.reload
+    Invoke-Aio wait idle
+    Invoke-Aio expect state theme.mode=dark
+
     # Both values are ordinary settings: without a restart, zero lift and zero gloss
     # must reach the theme and remove the raised effect.
-    $settings = Join-Path $data 'settings.ini'
     $text = [IO.File]::ReadAllText($settings).TrimEnd()
     [IO.File]::WriteAllText($settings, $text + "`ninterface.hover_lift = 0`ninterface.hover_gloss = 0`n")
     Invoke-Aio command settings.reload
