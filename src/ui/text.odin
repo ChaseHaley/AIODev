@@ -13,8 +13,10 @@ Theme :: struct {
 	window, chrome, pane, surface, border, text, muted, faint, accent, accent_text: render.Color,
 	selection, shadow, scrim, hover, pressed, focus, error, success, warning, info: render.Color,
 	// The shared raised-hover look. `rim` is the colour of the pointer-following edge light;
-	// lift and gloss are overridden from interface.hover_lift and interface.hover_gloss.
+	// `hover_edge` is the hairline that holds a light fill's shape. lift and gloss are
+	// overridden from interface.hover_lift and interface.hover_gloss.
 	rim:        render.Color,
+	hover_edge: render.Color,
 	hover_lift, hover_gloss: f32,
 }
 
@@ -30,7 +32,10 @@ theme_from :: proc(t: settings.Theme) -> Theme {
 		accent = colour.rgba(t.accent),
 		accent_text = colour.rgba(t.accent_text),
 		border = colour.rgba(t.text, t.light ? 0.09 : 0.08),
-		hover = colour.rgba(t.text, t.light ? 0.04 : 0.05),
+		// A light-mode hover is paper: an opaque pane-white fill that can never darken the
+		// tile. Its shape comes from the hairline and the seat, not from ink. Dark mode keeps
+		// the translucent lift.
+		hover = t.light ? colour.rgba(t.pane) : colour.rgba(t.text, 0.05),
 		pressed = colour.rgba(t.text, t.light ? 0.08 : 0.09),
 		selection = colour.rgba(t.accent, t.light ? 0.10 : 0.14),
 		focus = colour.rgba(t.accent, 0.50),
@@ -40,9 +45,10 @@ theme_from :: proc(t: settings.Theme) -> Theme {
 		success = colour.rgba(t.success),
 		warning = colour.rgba(t.warning),
 		info = colour.rgba(t.info),
-		// White light reads as a specular edge on dark surfaces; on light surfaces the
-		// accent tint is the part that survives against a white control.
-		rim = colour.rgba(t.light ? t.accent : t.text, t.light ? 0.60 : 0.80),
+		// White light reads as a specular edge on dark surfaces. On a white control the rim
+		// must stay faint, or it becomes the dark edge the paper fill exists to avoid.
+		rim = colour.rgba(t.light ? t.accent : t.text, t.light ? 0.20 : 0.80),
+		hover_edge = t.light ? colour.rgba(t.text, 0.10) : render.Color{0, 0, 0, 0},
 		hover_lift = 1.5,
 		hover_gloss = 1,
 	}

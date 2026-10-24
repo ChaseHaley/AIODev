@@ -33,8 +33,9 @@ hover_shadow_draw :: proc(
 	)
 }
 
-// Draws the pointer-following rim light. Call after the control's content; the band lives on
-// the rounded edge, so it never covers an inset label or glyph. `pointer` is in window pixels.
+// Draws the pointer-following rim light and the hairline that holds a light fill's shape.
+// Call after the control's content; the band lives on the rounded edge, so it never covers an
+// inset label or glyph. `pointer` is in window pixels.
 hover_rim_draw :: proc(
 	list: ^render.Draw_List,
 	theme: Theme,
@@ -42,9 +43,26 @@ hover_rim_draw :: proc(
 	radius, hover, scale: f32,
 	pointer: [2]f32,
 ) -> render.Error {
-	if hover <= 0 || theme.hover_gloss <= 0 || rect.width <= 0 || rect.height <= 0 {return .None}
+	if hover <= 0 || rect.width <= 0 || rect.height <= 0 {return .None}
+	alpha := clamp(hover, 0, 1)
+	// Light mode's fill is the same white as most surfaces, so the hairline is what keeps a
+	// hovered control readable. Dark mode leaves this transparent.
+	if theme.hover_edge.a > 0 {
+		edge := theme.hover_edge
+		edge.a *= alpha
+		if result := render.push_rect(
+			list,
+			{
+				rect = rect,
+				color = edge,
+				radius = radius,
+				stroke = max(1, scale),
+			},
+		); result != .None {return result}
+	}
+	if theme.hover_gloss <= 0 {return .None}
 	color := theme.rim
-	color.a = min(color.a * clamp(hover, 0, 1) * theme.hover_gloss, 1)
+	color.a = min(color.a * alpha * theme.hover_gloss, 1)
 	return render.push_rect(
 		list,
 		{

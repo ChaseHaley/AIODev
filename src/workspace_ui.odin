@@ -143,9 +143,11 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if result := ui.hover_shadow_draw(&w.list, app.theme, r, 6 * w.scale, hover, w.scale);
 		   result != .None {return .Ok}
 	}
-	fill := workspace_picker_active(&w.workspace_picker) ? app.theme.selection : app.theme.pane
+	active := workspace_picker_active(&w.workspace_picker)
+	fill := active ? app.theme.selection : app.theme.pane
 	if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None { return .Ok }
-	if hover > 0 {
+	// An open picker already tints the chip; the paper fill would paint over it.
+	if hover > 0 && !active {
 		fill = app.theme.hover
 		fill.a *= hover
 		if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None {

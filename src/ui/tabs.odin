@@ -89,7 +89,10 @@ tab_draw :: proc(
 	}
 	fill := theme.hover
 	fill.a *= hover
-	draw_rect(list, {rect = tile, color = fill, radius = 7 * scale})
+	// A marked tab already carries the selection tint; the paper fill would paint over it.
+	if !(marked && !selected) {
+		draw_rect(list, {rect = tile, color = fill, radius = 7 * scale})
+	}
 	fill = theme.pressed
 	fill.a *= pressed
 	draw_rect(list, {rect = tile, color = fill, radius = 7 * scale})
