@@ -219,11 +219,19 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 			on_palette_outcome(
 				app,
 				w,
-				ui.palette_input_press(p, l, &w.ui_text, f32(e.x), w.scale, .Shift in e.modifiers),
+				ui.palette_input_press(
+					p,
+					l,
+					&w.ui_text,
+					f32(e.x),
+					f32(e.y),
+					w.scale,
+					.Shift in e.modifiers,
+				),
 				0,
 			)
 		} else if e.pressed {
-			outcome, id := ui.palette_mouse_press(p, l, f32(e.x), f32(e.y))
+			outcome, id := ui.palette_mouse_press(p, &app.registry, l, f32(e.x), f32(e.y))
 			on_palette_outcome(app, w, outcome, id)
 		}
 		return

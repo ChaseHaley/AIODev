@@ -141,6 +141,7 @@ app_init :: proc(app: ^App) -> bool {
 	if ui.palette_init(&app.palette, palette_settings[:]) != nil {
 		return false
 	}
+	palette_set_sources(app)
 	load_settings(app)
 	font_error: font.Error
 	app.fonts, font_error = font.system_create()

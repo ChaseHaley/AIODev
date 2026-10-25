@@ -110,6 +110,10 @@ Action :: enum u32 {
 	Profile_7,
 	Profile_8,
 	Profile_9,
+	Palette_Tabs,
+	Palette_Workspaces,
+	Palette_Settings,
+	Palette_Commands,
 }
 
 @(private)
@@ -334,6 +338,10 @@ ACTIONS :: [Action]Action_Info {
 		"New Tab with Profile 9",
 		{{.Digit_9, {.Control, .Shift}}},
 	},
+	.Palette_Tabs = {"app.palette_tabs", "Show Palette: Tabs", nil},
+	.Palette_Workspaces = {"app.palette_workspaces", "Show Palette: Workspaces", nil},
+	.Palette_Settings = {"app.palette_settings", "Show Palette: Settings", nil},
+	.Palette_Commands = {"app.palette_commands", "Show Palette: Commands", nil},
 }
 
 @(require_results)
@@ -350,6 +358,22 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 		if err := commands.register(registry, command); err != .None {return err}
 	}
 	return .None
+}
+
+// The mode a direct-open action selects; only the four palette actions have one.
+palette_action_mode :: proc(action: Action) -> ui.Palette_Mode {
+	#partial switch action {
+	case .Palette_Tabs:
+		return .Tabs
+	case .Palette_Workspaces:
+		return .Workspaces
+	case .Palette_Settings:
+		return .Settings
+	case .Palette_Commands:
+		return .Commands
+	case:
+		return .All
+	}
 }
 
 shortcut_action :: proc(app: ^App, e: platform.Key_Event) -> (Action, bool) {
@@ -380,6 +404,13 @@ run_action :: proc(
 			return
 		}
 		palette_open(app, w)
+	case .Palette_Tabs, .Palette_Workspaces, .Palette_Settings, .Palette_Commands:
+		mode := palette_action_mode(action)
+		if palette_active(app, w) {
+			ui.palette_set_mode(&app.palette, &app.registry, mode)
+			return
+		}
+		palette_open_mode(app, w, mode)
 	case .Copy:
 		if entry != nil {
 			copy_selection(app, entry, true)

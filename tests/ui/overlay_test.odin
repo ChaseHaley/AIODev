@@ -66,11 +66,13 @@ palette_starts_below_the_caption_claim_and_fits_its_area :: proc(t: ^testing.T) 
 		testing.expect(t, l.input.y+l.input.height <= l.panel.y+l.panel.height)
 	}
 	l := ui.palette_layout(&p, 926, 928, 2)
-	testing.expect_value(t, l.panel.y, f32(93))
-	testing.expect_value(t, l.rows, 8)
+	// The section headers and footer fit inside the caption claim, so the panel starts at
+	// the claim and keeps six of the eight result rows.
+	testing.expect_value(t, l.panel.y, f32(80))
+	testing.expect_value(t, l.rows, 6)
 	l = ui.palette_layout(&p, 926, 837, 2)
 	testing.expect_value(t, l.panel.y, f32(80))
-	testing.expect_value(t, l.rows, 7)
+	testing.expect_value(t, l.rows, 5)
 	// The panel used to start at y 1.5 here, over the caption controls.
 	l = ui.palette_layout(&p, 463, 240, 1.5)
 	testing.expect_value(t, l.panel.y, f32(60))

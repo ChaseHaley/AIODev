@@ -40,11 +40,12 @@ palette_fit_keeps_rows_and_stable_query_top :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)
 	// A 46x18 client at 200% cannot hold eight rows below the caption claim, so it
-	// trades one row for a panel that keeps its pointer events.
+	// trades rows for a panel that keeps its pointer events. All mode also spends
+	// height on the two visible section headers and the footer.
 	for viewport in ([?][4]f32{
-		{926, 928, 2, 8},
-		{695, 696, 1.5, 8},
-		{926, 837, 2, 7},
+		{926, 928, 2, 6},
+		{695, 696, 1.5, 6},
+		{926, 837, 2, 5},
 		{1000, 800, 1, 8},
 	}) {
 		w, h, scale := viewport[0], viewport[1], viewport[2]
@@ -141,15 +142,25 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 
 @(private)
 palette_fit_visible :: proc(t: ^testing.T, p: ^ui.Palette, l: ui.Palette_Layout, width, height: f32) {
-	for r in ([?]render.Rect{l.panel, l.input, l.list}) {
+	// Navigation changes the window, so measure again before checking what is drawn.
+	current := ui.palette_layout(p, width, height, l.row_height / 42)
+	for r in ([?]render.Rect{current.panel, current.input, current.list}) {
 		testing.expect(t, r.x >= 0 && r.y >= 0 && r.width >= 0 && r.height >= 0)
 		testing.expectf(t, r.x+r.width <= width+0.001 && r.y+r.height <= height+0.001,
 			"%v outside %gx%g", r, width, height)
 	}
-	testing.expect(t, p.scroll >= 0 && p.scroll <= max(0, len(p.results)-max(1, p.visible_rows)))
-	if l.rows > 0 && len(p.results) > 0 {
-		testing.expect(t, p.selected >= p.scroll && p.selected < p.scroll+l.rows)
-		testing.expect(t, l.list.y+f32(p.selected-p.scroll+1)*l.row_height <= height+0.001)
+	testing.expect(t, p.scroll >= 0 && p.scroll <= max(0, len(p.results)-1))
+	if current.rows > 0 && len(p.results) > 0 {
+		testing.expect(t, p.selected >= p.scroll && p.selected < p.scroll+current.rows)
+		headers := 0
+		for index in p.scroll ..= p.selected {
+			if ui.palette_section_header(p, index) {headers += 1}
+		}
+		bottom :=
+			current.list.y +
+			f32(headers) * current.header_height +
+			f32(p.selected-p.scroll+1) * current.row_height
+		testing.expect(t, bottom <= height+0.001)
 	}
 }
 
@@ -206,12 +217,22 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 				ui.palette_scroll(&p, -10000)
 				testing.expect_value(t, p.scroll, len(p.results)-p.visible_rows)
 				palette_fit_visible(t, &p, l, w, h)
-				x, y := l.list.x+l.list.width/2, l.list.y+l.list.height-l.row_height/2
+				l = ui.palette_layout(&p, w, h, scale)
+				last := p.scroll + l.rows - 1
+				headers := 0
+				for index in p.scroll ..= last {
+					if ui.palette_section_header(&p, index) {headers += 1}
+				}
+				x := l.list.x + l.list.width/2
+				y := l.list.y +
+					f32(headers) * l.header_height +
+					f32(last-p.scroll) * l.row_height +
+					l.row_height/2
 				ui.palette_mouse_move(&p, l, x, y)
-				testing.expect_value(t, p.selected, len(p.results)-1)
+				testing.expect_value(t, p.selected, last)
 				palette_fit_visible(t, &p, l, w, h)
 				expected := ui.palette_result_name(&p, p.results[p.selected])
-				outcome, _ := ui.palette_mouse_press(&p, l, x, y)
+				outcome, _ := ui.palette_mouse_press(&p, &registry, l, x, y)
 				testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
 				testing.expect_value(t, p.chosen, expected)
 				ui.palette_open(&p, &registry)
@@ -228,8 +249,9 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	ui.palette_text(&p, &registry, "setting")
 	normal := ui.palette_layout(&p, 1000, 800, 1)
 	testing.expect_value(t, normal.rows, 8)
-	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 417})
-	testing.expect_value(t, normal.list, render.Rect{228, 169, 544, 336})
+	// All mode adds two section headers above the eight rows and a footer below them.
+	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 475})
+	testing.expect_value(t, normal.list, render.Rect{228, 169, 544, 380})
 	ui.palette_key(&p, &registry, key({key = .End}))
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	selected_text := ui.palette_selection(&p)
@@ -270,7 +292,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, l.rows, 1)
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect_value(t, ui.palette_mouse_move(&p, l, l.list.x+1, l.list.y+1), ui.Outcome.None)
-	outcome, _ = ui.palette_mouse_press(&p, l, l.list.x+1, l.list.y+1)
+	outcome, _ = ui.palette_mouse_press(&p, &registry, l, l.list.x+1, l.list.y+1)
 	testing.expect_value(t, outcome, ui.Outcome.None)
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.None)
@@ -314,13 +336,20 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		l := ui.palette_layout(&p, w, h, scale)
 		if l.input.width > 100*scale && l.input.height >= 64*scale {
 			frame := ui.field_box_text_rect(ui.palette_query_box(&p, l, &text, scale))
-			ui.palette_input_press(&p, l, &text, frame.x, scale, false)
+			ui.palette_input_press(&p, l, &text, frame.x, l.input.y + 40*scale, scale, false)
 			testing.expect_value(t, p.query.cursor, 0)
 			ui.palette_input_drag(&p, l, &text, frame.x+frame.width, scale)
 			testing.expect_value(t, ui.palette_selection(&p), "setting")
 			testing.expect(t, ui.palette_input_release(&p) && !p.query.dragging)
 		}
 		ui.palette_key(&p, &registry, key({key = .End}))
+		l = ui.palette_layout(&p, w, h, scale)
+		headers := 0
+		for index in p.scroll ..= p.selected {
+			if ui.palette_section_header(&p, index) {headers += 1}
+		}
+		selected_y := l.list.y + f32(headers) * l.header_height +
+			f32(p.selected-p.scroll) * l.row_height
 		for mode in settings.Theme_Mode {
 			theme := ui.theme_from(settings.theme_resolve({.Studio, mode}))
 			render.draw_list_reset(&list)
@@ -330,7 +359,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 				if instance.color != theme.selection { continue }
 				selected_rows += 1
 				testing.expect_value(t, instance.rect, render.Rect{l.list.x,
-					l.list.y+f32(p.selected-p.scroll)*l.row_height, l.list.width, l.row_height})
+					selected_y, l.list.width, l.row_height})
 				testing.expect(t, instance.rect.y+instance.rect.height <= h)
 			}
 			testing.expect_value(t, selected_rows, l.rows > 0 ? 1 : 0)

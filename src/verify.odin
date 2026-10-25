@@ -283,6 +283,8 @@ when AIO_CONTROL {
 			{"palette.window", fmt.tprintf("%d", app.palette_window)},
 			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
 			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
+			{"palette.mode", owns_palette ? ui.palette_mode_word(p.mode) : "all"},
+			{"palette.chip", owns_palette ? ui.palette_mode_prefix(p.mode) : ""},
 			{"palette.selected", fmt.tprintf("%d", owns_palette ? p.selected : 0)},
 			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)}, {"palette.item", item},
 			{"palette.scroll", fmt.tprintf("%d", owns_palette ? p.scroll : 0)},
