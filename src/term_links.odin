@@ -37,8 +37,9 @@ link_hover_clear :: proc(w: ^Window) {
 @(private, require_results)
 link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	pane, found := layout.hit_test(w.panes[:], x, y)
-	entry := found ? session_find(app, pane.content.id) : nil
-	state := found ? link_pane(w, pane.content) : nil
+	terminal := found && pane.content.kind == .Terminal
+	entry := terminal ? session_find(app, pane.content.id) : nil
+	state := terminal ? link_pane(w, pane.content) : nil
 	if entry == nil || state == nil || !term_view.links_refresh(&state.view, entry.session) {
 		link_hover_clear(w)
 		return false
@@ -65,7 +66,7 @@ link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private, require_results)
 link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found {
+	if !found || pane.content.kind != .Terminal {
 		return false
 	}
 	entry := session_find(app, pane.content.id)

@@ -415,9 +415,9 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 		if ghostty.grid_ref_row(&ref, &row) != .Success {
 			return false
 		}
-		wrap, has_links := false, false
-		row_keys := [?]ghostty.Row_Data{.Wrap_Continuation, .Hyperlink}
-		row_values := [?]rawptr{&wrap, &has_links}
+		wrap := false
+		row_keys := [?]ghostty.Row_Data{.Wrap_Continuation}
+		row_values := [?]rawptr{&wrap}
 		if ghostty.row_get_multi(row, len(row_keys), &row_keys[0], &row_values[0], nil) != .Success {
 			return false
 		}
@@ -436,7 +436,7 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 				m.occupied[index] = true
 			}
 			uri := ""
-			if linked && has_links {
+			if linked {
 				needed: uint
 				query := ghostty.grid_ref_hyperlink_uri(&cell_ref, nil, 0, &needed)
 				if (query == .Success || query == .Out_Of_Space) &&
