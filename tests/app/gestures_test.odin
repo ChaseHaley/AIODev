@@ -209,12 +209,15 @@ gesture_terminal_packets :: proc(t: ^testing.T, report: bool) {
 	}
 	if !testing.expect(t, term.mouse_tracking(session)) {return}
 	if report {
-		gesture_button(s, w, .Left, true, 100, 200)
-		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = 110, y = 200, buttons = {.Left}})
-		gesture_button(s, w, .Left, false, 110, 200)
+		pane := w.panes[0].rect
+		px, py := pane.x + 30, pane.y + 30
+		gesture_button(s, w, .Left, true, px, py)
+		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(px + 10), y = i32(py), buttons = {.Left}})
+		gesture_button(s, w, .Left, false, px + 10, py)
 	} else {
-		bar := app.window_tab_bar(s, w)
-		close := ui.tab_close_rect(bar, 0, w.scale)
+		layout, _ := app.rail_current_layout(s, w)
+		row := app.rail_row_index_for_tab(w.rail_rows[:], w.workspace, 0)
+		close := ui.rail_close_rect(layout, row, w.scale)
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)
 		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = 100, y = 200, buttons = {.Left}})
 		app.handle_event(s, platform.Capture_Lost_Event{w.id})
@@ -325,4 +328,3 @@ gestures_settings_header_zoom_and_close_drive_the_settings_pane :: proc(t: ^test
 	testing.expect_value(t, len(w.workspace.tabs), tabs - 1)
 	testing.expect_value(t, len(s.sessions), sessions)
 }
-

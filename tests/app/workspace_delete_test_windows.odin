@@ -336,14 +336,15 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	tracking := mem.tracking_allocator(&tracker)
 	failure := Delete_Fail_Allocator{backing = tracking}
 	allocator := runtime.Allocator{delete_fail_allocation, &failure}
-	for allowed in 0 ..< 5 {
+	for allowed in 0 ..< 16 {
 		prepared: app.Workspace_View_Resources
 		failure.remaining, failure.failed = allowed, false
 		context.allocator = allocator
 		ok := app.workspace_view_prepare(state, &prepared, workspace)
 		app.workspace_view_destroy(&prepared)
 		context.allocator = backing
-		testing.expect(t, !ok && failure.failed)
+		if ok {break}
+		testing.expect(t, failure.failed)
 		testing.expect_value(t, len(tracker.allocation_map), 0)
 		testing.expect(t, prepared.workspace == nil && prepared.tree == nil)
 		testing.expect_value(t, raw_data(w.views), live_views)
@@ -365,8 +366,8 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	app.workspace_view_destroy(&prepared)
 	app.workspace_view_destroy(&prepared)
 	testing.expect(t, prepared.workspace == nil && prepared.tree == nil)
-	testing.expect(t, raw_data(prepared.views) == nil && raw_data(prepared.tab_controls) == nil)
-	testing.expect(t, raw_data(prepared.tab_positions) == nil && raw_data(prepared.panes) == nil)
+	testing.expect(t, raw_data(prepared.views) == nil && raw_data(prepared.panes) == nil)
+	testing.expect(t, raw_data(prepared.dividers) == nil)
 	testing.expect(t, raw_data(prepared.dividers) == nil && prepared.editor.source == "")
 	testing.expect_value(t, raw_data(receiver.views), views)
 	testing.expect(t, receiver.workspace == workspace && receiver.tree == w.tree)
@@ -389,4 +390,3 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	app.workspace_view_destroy(&receiver)
 	testing.expect_value(t, len(tracker.allocation_map), 0)
 }
-

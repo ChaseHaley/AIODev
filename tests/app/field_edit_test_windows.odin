@@ -139,8 +139,6 @@ field_edit_clipboard_and_direct_consumer_events :: proc(t: ^testing.T) {
 		delete(w.workspace_picker.rows)
 		delete(w.workspace_picker.query.bytes)
 		delete(w.workspace_picker.saved_query.bytes)
-		delete(w.tab_controls)
-		delete(w.tab_positions)
 		delete(w.panes)
 		delete(w.dividers)
 	}

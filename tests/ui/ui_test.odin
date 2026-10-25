@@ -202,38 +202,61 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 }
 
 @(test)
-tab_bar_controls_in_narrow_windows :: proc(t: ^testing.T) {
-	single := ui.tab_bar_layout(1000, 1, 1)
-	testing.expect_value(t, single.height, f32(40))
-	testing.expect_value(t, ui.tab_bar_hit_test(single, 1, 1), 0)
-	testing.expect_value(t, ui.tab_bar_hit_test(single, 225, 1), 1)
-	testing.expect_value(t, ui.tab_bar_layout(1000, 1, 0), ui.Tab_Bar{})
-	bar := ui.tab_bar_layout(500, 2, 3)
-	testing.expect_value(t, bar.height, f32(80))
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, 0, 0), 0)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.tab_width, 10), 1)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.tab_width*3, 10), 3)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, 500, 10), -1)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, 10, 80), -1)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, -1, 10), -1)
-	narrow := ui.tab_bar_layout(20, 1, 10)
-	testing.expect_value(t, ui.tab_bar_hit_test(narrow, 1, 1), 10)
+rail_rows_scroll_clip_and_hit_only_the_visible_list :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5, 2}) {
+		area := render.Rect{0, 40 * scale, ui.RAIL_WIDTH * scale, 200 * scale}
+		layout := ui.rail_layout(area, scale, 20, 0)
+		testing.expect_value(t, layout.row_height, ui.RAIL_ROW_HEIGHT * scale)
+		testing.expect_value(t, layout.list.height, (200 - 32) * scale)
+		testing.expect_value(t, layout.footer.y, area.y + layout.list.height)
+		testing.expect(t, ui.rail_scroll_max(layout) > 0)
+		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, area.y + 8 * scale), 0)
+		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, area.y - 1), -1)
+		testing.expect_value(t, ui.rail_row_hit(layout, area.x - 1, area.y + 8 * scale), -1)
+		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, layout.footer.y + 4), -1)
+		testing.expect(t, ui.rail_footer_hit(layout, area.x + 20 * scale, layout.footer.y + 4))
+		testing.expect(t, !ui.rail_footer_hit(layout, area.x + 20 * scale, layout.footer.y - 1))
+
+		scroll := ui.rail_scroll_max(layout) / 2
+		scrolled := ui.rail_layout(area, scale, 20, scroll)
+		testing.expect_value(t, scrolled.scroll, scroll)
+		// The first row has scrolled under the list's top padding; the row at the top edge is the
+		// one whose rect now intersects the pointer.
+		testing.expect_value(
+			t,
+			ui.rail_row_hit(scrolled, area.x + 20 * scale, area.y + 8 * scale),
+			int((8 - 4 + scroll) / (ui.RAIL_ROW_HEIGHT * scale)),
+		)
+		expect_clamped := ui.rail_scroll_clamped(layout, -10)
+		testing.expect_value(t, expect_clamped, f32(0))
+		expect_clamped = ui.rail_scroll_clamped(layout, 1e6)
+		testing.expect_value(t, expect_clamped, ui.rail_scroll_max(layout))
+		revealed := ui.rail_reveal_row(layout, 12)
+		row := ui.rail_row_rect(ui.rail_layout(area, scale, 20, revealed), 12)
+		testing.expect(t, row.y >= layout.list.y - 0.01 && row.y + row.height <= layout.list.y + layout.list.height + 0.01)
+		testing.expect_value(t, ui.rail_reveal_row(ui.rail_layout(area, scale, 20, revealed), 0), 4 * scale)
+	}
 }
 
 @(test)
-tab_close_targets_and_caption_buttons_are_distinct :: proc(t: ^testing.T) {
-	for scale in ([?]f32{1, 1.5, 1.75, 2}) {
-		bar := ui.tab_bar_layout(900*scale, scale, 3)
-		for i in 0..<bar.count {
-			r := ui.tab_close_rect(bar, i, scale)
-			testing.expect_value(t, ui.tab_close_hit(bar, r.x+r.width/2, r.y+r.height/2, scale), i)
-			testing.expect_value(t, ui.tab_close_hit(bar, f32(i)*bar.tab_width+10*scale, 20*scale, scale), -1)
+rail_close_targets_and_caption_buttons_are_distinct :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.25, 1.5, 1.75, 2}) {
+		area := render.Rect{0, 40 * scale, ui.RAIL_WIDTH * scale, 600 * scale}
+		layout := ui.rail_layout(area, scale, 3, 0)
+		for i in 0 ..< layout.count {
+			r := ui.rail_close_rect(layout, i, scale)
+			testing.expect_value(t, ui.rail_close_hit(layout, r.x + r.width / 2, r.y + r.height / 2, scale), i)
+			testing.expect_value(t, ui.rail_close_hit(layout, r.x - 2 * scale, r.y + r.height / 2, scale), -1)
 		}
-		testing.expect_value(t, ui.tab_close_hit(bar, 670*scale, 20*scale, scale), -1)
-		for i in 0..<3 {
-			testing.expect_value(t, ui.caption_hit(1200*scale, (1085+f32(i)*46)*scale, 20*scale, scale), i)
+		testing.expect_value(t, ui.rail_close_hit(layout, area.x + area.width - 6 * scale, layout.footer.y + 4, scale), -1)
+		for i in 0 ..< 3 {
+			testing.expect_value(
+				t,
+				ui.caption_hit(1200 * scale, (1085 + f32(i) * 46) * scale, 20 * scale, scale),
+				i,
+			)
 		}
-		testing.expect_value(t, ui.caption_hit(1200*scale, 300*scale, 20*scale, scale), -1)
+		testing.expect_value(t, ui.caption_hit(1200 * scale, 300 * scale, 20 * scale, scale), -1)
 	}
 }
 

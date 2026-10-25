@@ -41,8 +41,6 @@ workspace134_destroy :: proc(f: ^Workspace134_Fixture) {
 	delete(f.w.workspace_picker.query.bytes)
 	delete(f.w.workspace_picker.saved_query.bytes)
 	delete(f.w.rename.bytes)
-	delete(f.w.tab_controls)
-	delete(f.w.tab_positions)
 	delete(f.w.panes)
 	delete(f.w.dividers)
 	app.pending_close_clear(&f.w.pending_close)

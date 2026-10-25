@@ -1,0 +1,538 @@
+package main
+
+import "aio:glyphs"
+import "aio:render"
+import "aio:ui"
+import "core:fmt"
+import "core:time"
+
+RAIL_NEW_TAB_ROW :: -2
+
+Rail_Row_Kind :: enum {
+	Workspace,
+	Tab,
+}
+
+Rail_Row :: struct {
+	kind:      Rail_Row_Kind,
+	workspace: ^Workspace,
+	tab:       int,
+}
+
+// A manual visibility choice survives resizes on the same side of the dock threshold. Crossing
+// the threshold returns the window to automatic behaviour, so a docked rail docks again when
+// the window widens and a narrow window hides it again.
+Rail_Override :: enum {
+	Auto,
+	Shown,
+	Hidden,
+}
+
+@(require_results)
+rail_rows_build :: proc(app: ^App, w: ^Window, rows: ^[dynamic]Rail_Row) -> bool {
+	clear(rows)
+	if w == nil || w.workspace == nil {return true}
+	if app.settings.tabs.vertical_scope == .Workspace {
+		for _, tab in w.workspace.tabs {
+			if _, err := append(rows, Rail_Row{.Tab, w.workspace, tab}); err != nil {
+				clear(rows)
+				return false
+			}
+		}
+		return true
+	}
+	for workspace in app.workspaces {
+		if !workspace_eligible(app, workspace) {continue}
+		if _, err := append(rows, Rail_Row{.Workspace, workspace, -1}); err != nil {
+			clear(rows)
+			return false
+		}
+		for _, tab in workspace.tabs {
+			if _, err := append(rows, Rail_Row{.Tab, workspace, tab}); err != nil {
+				clear(rows)
+				return false
+			}
+		}
+	}
+	return true
+}
+
+rail_auto_at :: proc(width: i32, scale: f32) -> bool {
+	return f32(width) >= ui.RAIL_DOCK_MIN_WIDTH * scale
+}
+
+rail_adaptive_update :: proc(w: ^Window) {
+	auto := rail_auto_at(w.width, w.scale)
+	if auto == w.rail_auto {return}
+	w.rail_auto, w.rail_override = auto, .Auto
+	w.rail_was_overlay = false
+	// A crossing must not leave the previous presentation behind: wide turns the docked rail on,
+	// narrow turns every rail state off until the toggle asks for an overlay.
+	if auto {
+		w.rail_slide.value, w.rail_slide.target = 1, 1
+	} else {
+		w.rail_slide.value, w.rail_slide.target = 0, 0
+	}
+}
+
+rail_visible :: proc(w: ^Window) -> bool {
+	switch w.rail_override {
+	case .Hidden:
+		return false
+	case .Shown:
+		return true
+	case .Auto:
+		return w.rail_auto
+	}
+	return false
+}
+
+rail_docked :: proc(w: ^Window) -> bool {
+	return rail_visible(w) && w.rail_auto
+}
+
+rail_overlay :: proc(w: ^Window) -> bool {
+	return rail_visible(w) && !w.rail_auto
+}
+
+rail_area :: proc(w: ^Window) -> render.Rect {
+	return {
+		0,
+		ui.TITLE_BAR_HEIGHT * w.scale,
+		ui.rail_pixel_width(w.scale),
+		max(0, f32(w.height) - ui.TITLE_BAR_HEIGHT * w.scale),
+	}
+}
+
+@(require_results)
+rail_current_layout :: proc(app: ^App, w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+	if !rail_rows_build(app, w, &w.rail_rows) {return {}, false}
+	layout = ui.rail_layout(rail_area(w), w.scale, len(w.rail_rows), w.rail_scroll)
+	w.rail_scroll = layout.scroll
+	return layout, true
+}
+
+rail_row_index_for_tab :: proc(rows: []Rail_Row, workspace: ^Workspace, tab: int) -> int {
+	for row, i in rows {
+		if row.kind == .Tab && row.workspace == workspace && row.tab == tab {return i}
+	}
+	return -1
+}
+
+rail_reveal_active :: proc(app: ^App, w: ^Window) {
+	layout, ok := rail_current_layout(app, w)
+	if !ok {return}
+	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, w.workspace.selected)
+	if index < 0 {return}
+	scroll := ui.rail_reveal_row(layout, index)
+	if scroll != w.rail_scroll {
+		w.rail_scroll, w.dirty = scroll, true
+	}
+}
+
+rail_toggle_rect :: proc(w: ^Window) -> render.Rect {
+	s := w.scale
+	x := workspace_button_width(w) + 2 * s
+	width := min(ui.RAIL_TOGGLE_WIDTH * s, max(0, f32(w.width) - 140 * s - x))
+	return {x, 4 * s, width, 32 * s}
+}
+
+rail_toggle_hit :: proc(w: ^Window, x, y: f32) -> bool {
+	r := rail_toggle_rect(w)
+	return r.width >= 24 * w.scale && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+rail_toggle :: proc(app: ^App, w: ^Window) {
+	was_docked := rail_docked(w)
+	now := time.tick_now()
+	if rail_visible(w) {
+		was_overlay := rail_overlay(w)
+		w.rail_override = .Hidden
+		if was_overlay {
+			w.rail_was_overlay = true
+			ui.motion_target(&w.rail_slide, 0, 140 * time.Millisecond, .Decelerate, app.animations, now)
+		} else {
+			w.rail_was_overlay = false
+			w.rail_slide.value, w.rail_slide.target = 0, 0
+		}
+	} else {
+		w.rail_override = .Shown
+		if !w.rail_auto {
+			w.rail_was_overlay = true
+			ui.motion_target(&w.rail_slide, 1, 140 * time.Millisecond, .Decelerate, app.animations, now)
+		} else {
+			w.rail_was_overlay = false
+			w.rail_slide.value, w.rail_slide.target = 1, 1
+		}
+	}
+	if was_docked != rail_docked(w) {window_relayout(app, w)}
+	w.dirty = true
+}
+
+rail_overlay_dismiss :: proc(app: ^App, w: ^Window) {
+	if !rail_overlay(w) {return}
+	w.rail_override = .Auto
+	w.rail_was_overlay = true
+	ui.motion_target(&w.rail_slide, 0, 140 * time.Millisecond, .Decelerate, app.animations, time.tick_now())
+	w.dirty = true
+}
+
+@(require_results)
+rail_tab_close_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> int {
+	layout, ok := rail_current_layout(app, w)
+	if !ok {return -1}
+	row := ui.rail_row_hit(layout, x, y)
+	if row < 0 || w.rail_rows[row].kind != .Tab || w.rail_rows[row].workspace != w.workspace {
+		return -1
+	}
+	return ui.rail_close_hit(layout, x, y, w.scale) >= 0 ? w.rail_rows[row].tab : -1
+}
+
+rail_row_rect_for_tab :: proc(app: ^App, w: ^Window, tab: int) -> render.Rect {
+	layout, ok := rail_current_layout(app, w)
+	if !ok {return {}}
+	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, tab)
+	return ui.rail_row_rect(layout, index)
+}
+
+// Selects the workspace a rail row names. A workspace owned by another window activates that
+// window instead of rewriting ownership here.
+rail_select_workspace :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
+	if workspace == w.workspace {return true}
+	if !workspace_select(app, w, workspace) {
+		notify(app, .Error, "Could not select the workspace.")
+		return false
+	}
+	return true
+}
+
+rail_select_tab :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) -> bool {
+	if workspace == nil || tab < 0 || tab >= len(workspace.tabs) {return false}
+	if workspace != w.workspace {
+		if !rail_select_workspace(app, w, workspace) {return false}
+		if w.workspace == workspace {
+			tab_select(app, w, tab)
+			return true
+		}
+		// The workspace belongs to another window: activation is the selection.
+		owner := window_for_workspace(app, workspace)
+		if owner == nil || owner == w {return false}
+		tab_select(app, owner, tab)
+		return true
+	}
+	tab_select(app, w, tab)
+	return true
+}
+
+rail_row_activate :: proc(app: ^App, w: ^Window, index: int) {
+	if index < 0 || index >= len(w.rail_rows) {return}
+	row := w.rail_rows[index]
+	activated := false
+	switch row.kind {
+	case .Workspace:
+		activated = rail_select_workspace(app, w, row.workspace)
+	case .Tab:
+		activated = rail_select_tab(app, w, row.workspace, row.tab)
+	}
+	if activated {rail_overlay_dismiss(app, w)}
+	w.dirty = true
+}
+
+rail_new_tab :: proc(app: ^App, w: ^Window) {
+	tab_new(app, w)
+	rail_overlay_dismiss(app, w)
+}
+
+@(require_results)
+rail_pane_target :: proc(app: ^App, w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool) {
+	if !rail_visible(w) {return -1, false, false}
+	area := rail_area(w)
+	if x < area.x || x >= area.x + area.width || y < area.y || y >= area.y + area.height {
+		return -1, false, false
+	}
+	layout, built := rail_current_layout(app, w)
+	if !built {return -1, false, false}
+	if ui.rail_footer_hit(layout, x, y) {return -1, true, true}
+	row := ui.rail_row_hit(layout, x, y)
+	if row < 0 {return -1, true, true}
+	entry := w.rail_rows[row]
+	if entry.kind == .Tab && entry.workspace == w.workspace {return entry.tab, false, true}
+	return -1, false, false
+}
+
+@(require_results)
+rail_new_tab_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	layout, ok := rail_current_layout(app, w)
+	if !ok {return {}}
+	return ui.rail_footer_tile(layout)
+}
+
+@(private)
+rail_tab_rows :: proc(rows: []Rail_Row, workspace: ^Workspace, out: ^[dynamic]int) {
+	clear(out)
+	for row, i in rows {
+		if row.kind == .Tab && row.workspace == workspace {append(out, i)}
+	}
+}
+
+@(private)
+rail_text_baseline :: proc(w: ^Window, row: render.Rect) -> f32 {
+	return row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
+}
+
+@(private)
+rail_row_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	layout: ui.Rail_Layout,
+	index: int,
+) -> glyphs.Result {
+	row := w.rail_rows[index]
+	s := w.scale
+	hover := w.rail_hover == index
+	pressed := w.rail_pressed == index
+	rect := ui.rail_row_rect(layout, index)
+	if rect.width <= 0 || rect.y + rect.height <= layout.list.y || rect.y >= layout.list.y + layout.list.height {
+		return .Ok
+	}
+	switch row.kind {
+	case .Workspace:
+		tile := render.Rect{rect.x + 2 * s, rect.y + 2 * s, max(0, rect.width - 4 * s), rect.height - 4 * s}
+		current := row.workspace == w.workspace
+		if current || hover || pressed {
+			fill := current ? app.theme.selection : app.theme.hover
+			if pressed {fill = app.theme.pressed}
+			ui.draw_rect(&w.list, {rect = tile, color = fill, radius = 6 * s})
+		}
+		icon := render.Rect{tile.x + 6 * s, tile.y + 6 * s, 20 * s, 20 * s}
+		if result := workspace_icon_draw(w, row.workspace.icon, icon, app.theme.text);
+		   result != .Ok {return result}
+		label_x := tile.x + 32 * s
+		if result := ui.draw_fading_text(
+			&w.ui_text,
+			&w.list,
+			row.workspace.name,
+			label_x,
+			rail_text_baseline(w, tile),
+			current ? app.theme.text : app.theme.muted,
+			max(0, tile.x + tile.width - 8 * s - label_x),
+		); result != .Ok {return result}
+		if hover && !current {
+			if result := ui.hover_rim_draw(
+				&w.list,
+				app.theme,
+				tile,
+				6 * s,
+				1,
+				s,
+				w.pointer,
+			); result != .None {return .Ok}
+		}
+	case .Tab:
+		tile := ui.rail_tab_tile(layout, rect)
+		selected := row.workspace == w.workspace && row.tab == w.workspace.selected
+		marked := row.workspace.tabs[row.tab].marked
+		if selected {
+			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+				color = app.theme.selection, radius = 6 * s})
+			ui.draw_rect(&w.list, {rect = {tile.x + 1 * s, tile.y + 8 * s, 2 * s, tile.height - 16 * s},
+				color = app.theme.accent, radius = s})
+		} else if marked {
+			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+				color = app.theme.selection, radius = 6 * s})
+			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+				color = app.theme.accent, radius = 6 * s, stroke = s})
+		} else if hover || pressed {
+			fill := pressed ? app.theme.pressed : app.theme.hover
+			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+				color = fill, radius = 6 * s})
+		}
+		title := fmt.tprintf("Tab %d", row.tab + 1)
+		if row.tab < len(row.workspace.tabs) && row.workspace.tabs[row.tab].title != "" {
+			title = row.workspace.tabs[row.tab].title
+		}
+		icon: string
+		atlas := render.Rect{}
+		if pane, terminal := workspace_focused_session_pane(app, row.workspace, row.tab); terminal {
+			if pane.session != nil {icon = pane.session.header.icon}
+			result: glyphs.Result
+			atlas, result = shell_icon_atlas(app)
+			if result != .Ok {return result}
+		}
+		has_badge := icon != "" || atlas.width > 0
+		label_x := tile.x + 8 * s
+		if has_badge {
+			label_x = tile.x + 28 * s
+			if result := ui.shell_badge_draw(
+				&w.list,
+				&w.ui_text,
+				app.theme,
+				{tile.x + 8 * s, tile.y + 8 * s, 16 * s, 16 * s},
+				icon,
+				s,
+				atlas,
+			); result != .Ok {return result}
+		}
+		current := row.workspace == w.workspace
+		close := ui.rail_close_rect(layout, index, s)
+		show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
+		if show_close {
+			large := w.ui_text
+			ui.text_set_size(&large, w.ui_text.size_px * 1.35)
+			if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.muted);
+			   result != .Ok {return result}
+		}
+		label_right := show_close ? close.x - 4 * s : tile.x + tile.width - 8 * s
+		if result := ui.draw_fading_text(
+			&w.ui_text,
+			&w.list,
+			title,
+			label_x,
+			rail_text_baseline(w, tile),
+			selected ? app.theme.text : app.theme.muted,
+			max(0, label_right - label_x),
+		); result != .Ok {return result}
+		if hover && !selected {
+			if result := ui.hover_rim_draw(
+				&w.list,
+				app.theme,
+				{tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+				6 * s,
+				1,
+				s,
+				w.pointer,
+			); result != .None {return .Ok}
+		}
+	}
+	return .Ok
+}
+
+@(private)
+rail_drop_indicator_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout) -> glyphs.Result {
+	if !w.tab_drag.active || w.tab_drag.elsewhere {return .Ok}
+	positions := make([dynamic]int, context.temp_allocator)
+	rail_tab_rows(w.rail_rows[:], w.workspace, &positions)
+	if len(positions) == 0 {return .Ok}
+	s := w.scale
+	y: f32
+	if w.tab_drag.slot >= len(positions) {
+		last := ui.rail_row_rect(layout, positions[len(positions) - 1])
+		y = last.y + last.height
+	} else {
+		y = ui.rail_row_rect(layout, positions[w.tab_drag.slot]).y
+	}
+	first := ui.rail_row_rect(layout, positions[0])
+	ui.draw_rect(
+		&w.list,
+		{
+			rect = {first.x + ui.RAIL_TAB_INDENT * s, y - s, max(0, first.width - ui.RAIL_TAB_INDENT * s), 2 * s},
+			color = app.theme.accent,
+			radius = s,
+		},
+	)
+	return .Ok
+}
+
+rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	draw_overlay :=
+		rail_overlay(w) ||
+		(w.rail_was_overlay && !rail_docked(w) && w.rail_slide.value > 0)
+	if !rail_docked(w) && !draw_overlay {return .Ok}
+	layout, ok := rail_current_layout(app, w)
+	if !ok {return .Ok}
+	area := layout.area
+	if draw_overlay {
+		area.x -= (1 - w.rail_slide.value) * area.width
+		layout = ui.rail_layout(area, w.scale, len(w.rail_rows), w.rail_scroll)
+	}
+	if area.x + area.width <= 0 {return .Ok}
+	if render.push_layer(&w.list, area) != .None {return .Ok}
+	if draw_overlay {
+		frame := ui.Panel {
+			rect     = area,
+			radius   = 0,
+			scale    = w.scale,
+			shadow_x = 2,
+			softness = 14,
+			border   = .Stroked,
+		}
+		if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
+	} else {
+		ui.draw_rect(&w.list, {rect = area, color = app.theme.chrome})
+		ui.draw_rect(
+			&w.list,
+			{rect = {area.x + area.width - w.scale, area.y, w.scale, area.height}, color = app.theme.border},
+		)
+	}
+	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
+	for index in 0 ..< len(w.rail_rows) {
+		if result := rail_row_draw(app, w, layout, index); result != .Ok {return result}
+	}
+	if result := rail_drop_indicator_draw(app, w, layout); result != .Ok {return result}
+	if render.push_layer(&w.list, layout.footer) != .None {return .Ok}
+	tile := ui.rail_footer_tile(layout)
+	hover := w.rail_hover == RAIL_NEW_TAB_ROW
+	pressed := w.rail_pressed == RAIL_NEW_TAB_ROW
+	if hover || pressed {
+		fill := pressed ? app.theme.pressed : app.theme.hover
+		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = 6 * w.scale})
+	}
+	plus := ui.text_styled(&w.ui_text, .Strong)
+	baseline := rail_text_baseline(w, tile)
+	plus_width := ui.text_width(&plus, "+")
+	if result := ui.draw_text(
+		&plus,
+		&w.list,
+		"+",
+		tile.x + 8 * w.scale,
+		baseline,
+		app.theme.accent,
+	); result != .Ok {return result}
+	return ui.draw_fading_text(
+		&w.ui_text,
+		&w.list,
+		"New tab",
+		tile.x + 8 * w.scale + plus_width + 6 * w.scale,
+		baseline,
+		app.theme.muted,
+		max(0, tile.width - 28 * w.scale - plus_width),
+	)
+}
+
+rail_toggle_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	r := rail_toggle_rect(w)
+	if r.width < 24 * w.scale {return .Ok}
+	if render.push_layer(
+		   &w.list,
+		   {0, 0, f32(w.width), ui.TITLE_BAR_HEIGHT * w.scale},
+	   ) != .None {return .Ok}
+	hover := w.rail_toggle_hovered
+	pressed := ui.armed_down(w.rail_toggle_armed)
+	if hover || pressed {
+		fill := pressed ? app.theme.pressed : app.theme.hover
+		ui.draw_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale})
+	}
+	icon := render.Rect{r.x + (r.width - 16 * w.scale) / 2, r.y + 8 * w.scale, 16 * w.scale, 16 * w.scale}
+	ink := rail_visible(w) ? app.theme.text : app.theme.muted
+	ui.draw_rect(
+		&w.list,
+		{rect = {icon.x, icon.y + w.scale, icon.width, icon.height - 2 * w.scale},
+			color = ink, radius = 3 * w.scale, stroke = w.scale},
+	)
+	ui.draw_rect(
+		&w.list,
+		{rect = {icon.x + 5 * w.scale, icon.y + 4 * w.scale, w.scale, icon.height - 8 * w.scale}, color = ink},
+	)
+	if hover {
+		if result := ui.hover_rim_draw(
+			&w.list,
+			app.theme,
+			r,
+			6 * w.scale,
+			1,
+			w.scale,
+			w.pointer,
+		); result != .None {return .Ok}
+	}
+	return .Ok
+}

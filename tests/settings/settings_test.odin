@@ -388,3 +388,30 @@ key_bindings :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(parsed.keys), 0)
 	testing.expect_value(t, len(parsed_diagnostics), 0)
 }
+
+@(test)
+vertical_scope_defaults_to_all_and_reports_an_invalid_choice_by_line :: proc(t: ^testing.T) {
+	defaults, default_error := settings.defaults()
+	if !testing.expect_value(t, default_error, nil) {return}
+	defer settings.destroy(&defaults)
+	testing.expect_value(t, defaults.tabs.vertical_scope, settings.Tabs_Scope.All)
+
+	s, diagnostics, parse_error := settings.parse("tabs.vertical_scope = workspace\n")
+	if !testing.expect_value(t, parse_error, nil) {return}
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, s.tabs.vertical_scope, settings.Tabs_Scope.Workspace)
+	testing.expect_value(t, len(diagnostics), 0)
+
+	invalid, invalid_diagnostics, invalid_error := settings.parse(
+		"theme.mode = dark\ntabs.vertical_scope = panes\n",
+	)
+	if !testing.expect_value(t, invalid_error, nil) {return}
+	defer settings.destroy(&invalid)
+	defer settings.diagnostics_destroy(&invalid_diagnostics)
+	testing.expect_value(t, invalid.tabs.vertical_scope, settings.Tabs_Scope.All)
+	if !testing.expect_value(t, len(invalid_diagnostics), 1) {return}
+	testing.expect_value(t, invalid_diagnostics[0].line, 2)
+	testing.expect_value(t, invalid_diagnostics[0].key, "tabs.vertical_scope")
+	testing.expect_value(t, invalid_diagnostics[0].kind, settings.Diagnostic_Kind.Invalid_Value)
+}

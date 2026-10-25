@@ -10,7 +10,18 @@ function Invoke-Aio {
     $out = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
 }
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 function Read-State {
     $lines = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect state.' }
@@ -109,8 +120,8 @@ try {
     Invoke-Aio command tab.new
     Invoke-Aio wait text 'PS '
     $s = Read-State
-    $width, $tabX = [double]$s['tabs.width'], (Tab-X $s)
-    $destination = Px ($tabX+$width*1.5) 18
+
+    $destination = Tab-Point 2
     Invoke-Aio command tab.select_1
     $grab = Grab
     Invoke-Aio mouse down $grab --px
@@ -142,37 +153,39 @@ try {
     $s = Read-State
     $sole = $s['session.id']
     $count = $s['sessions.count']
-    $width = [double]$s['tabs.width']
+
     $grab = Grab
-    $tabX = Tab-X $s
+
     Invoke-Aio mouse move $grab --px
     Shot sole-pane-grip
-    Invoke-Aio mouse drag $grab (Px ($tabX+$width/2) 18) --px
+    Invoke-Aio mouse drag $grab (Tab-Point 1) --px
     $s = Read-State
     Assert-Equal $s['tabs.count'] 2 'successful sole-pane transfer closes empty source tab'
     Assert-Equal $s['session.id'] $sole 'sole-pane runtime preserved'
     Assert-Equal $s['sessions.count'] $count 'sole-pane transfer closes no runtime'
     Invoke-Aio command settings.open
     $s = Read-State
-    $width, $tabX = [double]$s['tabs.width'], (Tab-X $s)
+
     Invoke-Aio command tab.select_1
     $grab = Grab
     Invoke-Aio mouse down $grab --px
-    Invoke-Aio mouse move (Px ($tabX+$width*2.5) 18) --px
+    Invoke-Aio mouse move (Tab-Point 3) --px
     Assert-Equal (Read-State)['panes.drop.shown'] true 'Settings accepts pane destination'
-    Invoke-Aio mouse up (Px ($tabX+$width*2.5) 18) --px
+    Invoke-Aio mouse up (Tab-Point 3) --px
     $s = Read-State
     Assert-Equal $s['tabs.selected'] 3 'Settings drop selects the destination tab'
     Assert-Equal $s['tab.1.panes'] 2 'Settings drop leaves the source tab'
     Assert-Equal $s['panes.count'] 2 'Settings drop adds the pane to the settings tab'
     Assert-Equal $s['sessions.count'] $count 'Settings drop starts no runtime'
+    $selectedBefore = (Read-State)['tabs.selected']
     $grab = Grab
     Invoke-Aio mouse down $grab --px
-    Invoke-Aio mouse move (Px ($tabX+$width*1.5) 18) --px
+    Invoke-Aio mouse move (Tab-Point 2) --px
     Start-Sleep -Milliseconds 450
     Invoke-Aio focus out
-    Invoke-Aio mouse up (Px ($tabX+$width*1.5) 18) --px
-    Assert-Equal (Read-State)['tabs.selected'] 1 'focus loss restores original tab'
+    Invoke-Aio mouse up (Tab-Point 2) --px
+    Invoke-Aio expect state "tabs.selected=$selectedBefore"
+    Write-Output 'PASS focus loss restores the tab selected at press'
     Assert-Equal (Read-State)['panes.dragging'] false 'focus loss cancels docking'
     Write-Output 'PASS root and cross-tab docking journey'
 } finally {

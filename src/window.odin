@@ -66,10 +66,20 @@ Window :: struct {
 	gloss_hovered: bool,
 	find: ui.Find_Bar,
 	leader_until: time.Tick,
-	tab_underline: ui.Motion,
-	tab_hover: int,
-	tab_pressed: bool,
-	tab_close_armed: ui.Armed(int),
+	// Vertical tab rail: rows, scroll, adaptive visibility and the overlay slide.
+	rail_rows:           [dynamic]Rail_Row,
+	rail_auto:           bool,
+	rail_override:       Rail_Override,
+	rail_scroll:         f32,
+	rail_hover:          int,
+	rail_pressed:        int,
+	rail_toggle_hovered: bool,
+	rail_toggle_armed:   ui.Armed(bool),
+	rail_slide:          ui.Motion,
+	// True while an overlay is visible or sliding out, so a docked rail hidden by a width
+	// crossing cannot leave a phantom rail over the pane.
+	rail_was_overlay:    bool,
+	tab_close_armed:     ui.Armed(int),
 	// Asks before a destructive close and holds its subject, live counts and presentation state.
 	pending_close: Pending_Close,
 	pending_swap:  Pane_Swap,
@@ -134,9 +144,10 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.ui_text = app.ui_text
 	w.metrics = window_metrics(app, w.scale)
 	w.list = render.draw_list_init()
+	w.rail_rows = make([dynamic]Rail_Row)
 	ui.find_init(&w.find)
 	profile_menu_init(&w.profile_menu)
-	w.tab_hover = -1
+	w.rail_hover, w.rail_pressed = -1, -1
 	w.caption_hover = -1
 	w.divider_click_node = layout.INVALID_NODE
 	w.pointer_shape = .Text
@@ -173,6 +184,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	}
 	window_set_dpi(app, w, platform.window_dpi(&app.platform, id))
 	window_apply_settings(app, w)
+	rail_reveal_active(app, w)
 	if platform.window_set_cursor(&app.platform, id, .Text) != .None {
 		log.error("setting the window cursor failed")
 	}
@@ -234,6 +246,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 window_free :: proc(w: ^Window) {
 	workspace_view_destroy(&w.resources)
 	delete(w.tab_drag.order)
+	delete(w.rail_rows)
 	ui.find_destroy(&w.find)
 	profile_menu_destroy(&w.profile_menu)
 	delete(w.rename.bytes)
@@ -259,6 +272,7 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 		return
 	}
 	w.scale = f32(dpi) / 96
+	rail_adaptive_update(w)
 	window_apply_settings(app, w)
 }
 
@@ -278,6 +292,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 	if width <= 0 || height <= 0 {
 		return
 	}
+	rail_adaptive_update(w)
 	if err := render.surface_resize(app.device, w.surface, width, height); err != .None {
 		log.errorf("resizing the window surface failed: %v", err)
 		if err == .Device_Lost {
@@ -298,16 +313,16 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
-	if !tab_presentation_resize(&w.presentation, len(w.workspace.tabs)) {
-		log.error("resizing tab presentation values failed")
-	}
-	bar := window_tab_bar(app, w)
+	bar_height := ui.TITLE_BAR_HEIGHT * w.scale
+	toggle := rail_toggle_rect(w)
 	platform.window_title_bar(
 		&app.platform,
 		w.id,
-		i32(bar.height),
-		i32(bar.x + f32(bar.count) * bar.tab_width + 2 * bar.button_width),
+		i32(bar_height),
+		i32(max(workspace_button_width(w), toggle.x + toggle.width)),
 	)
+	rail_layout_state, rail_ok := rail_current_layout(app, w)
+	if rail_ok {w.rail_scroll = rail_layout_state.scroll}
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
 	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers)
@@ -372,6 +387,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 			}
 		}
 	}
+	rail_reveal_active(app, w)
 }
 
 @(private)
@@ -567,6 +583,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		reset_blink(w)
 	}
 	if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
+	if result := rail_draw(app, w); result != .Ok {return frame, result}
 	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
 	size := [2]f32{f32(w.width), f32(w.height)}

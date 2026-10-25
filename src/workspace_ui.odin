@@ -33,9 +33,12 @@ workspace_index :: proc(app: ^App, index: int) -> ^Workspace {
 
 workspace_select_index :: proc(app: ^App, w: ^Window, index: int) {
 	workspace := workspace_index(app, index)
-	if workspace != nil && !workspace_select(app, w, workspace) {
+	if workspace == nil {return}
+	if !workspace_select(app, w, workspace) {
 		notify(app, .Error, "Could not select the workspace.")
+		return
 	}
+	rail_overlay_dismiss(app, w)
 }
 
 @(require_results)
@@ -138,7 +141,7 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	hover := w.workspace_motion.hover.value
 	lift := ui.hover_lift_at(app.theme, hover, w.scale)
 	r.y -= lift
-	if render.push_layer(&w.list, {0, 0, width, ui.TAB_HEIGHT * w.scale}) != .None {return .Ok}
+	if render.push_layer(&w.list, {0, 0, width, ui.TITLE_BAR_HEIGHT * w.scale}) != .None {return .Ok}
 	if lift > 0 {
 		if result := ui.hover_shadow_draw(&w.list, app.theme, r, 6 * w.scale, hover, w.scale);
 		   result != .None {return .Ok}
@@ -399,7 +402,7 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 		return g.panel, g.visible_rows
 	}
 	s := w.scale
-	x, y := 5 * s, ui.TAB_HEIGHT * s
+	x, y := 5 * s, ui.TITLE_BAR_HEIGHT * s
 	width := min(380 * s, max(0, f32(w.width) - 10 * s))
 	header := workspace_picker_header(w)
 	extra := workspace_row_rename_height(w)

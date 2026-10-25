@@ -426,8 +426,23 @@ when AIO_CONTROL {
 				{"window.scale", fmt.tprintf("%g", w.scale)},
 				{"window.focused", fmt.tprintf("%t", w.focused)},
 				{"window.maximized", fmt.tprintf("%t", w.maximized)},
-				{"tabs.width", fmt.tprintf("%g", window_tab_bar(app, w).tab_width)},
-				{"tabs.x", fmt.tprintf("%g", window_tab_bar(app, w).x)},
+				{"rail.visible", fmt.tprintf("%t", rail_visible(w))},
+				{"rail.docked", fmt.tprintf("%t", rail_docked(w))},
+				{"rail.overlay", fmt.tprintf("%t", rail_overlay(w))},
+				{"rail.scroll", fmt.tprintf("%g", w.rail_scroll)},
+				{"rail.slide", fmt.tprintf("%g", w.rail_slide.value)},
+				{"rail.rows", fmt.tprintf("%d", len(w.rail_rows))},
+				{"rail.row.height", fmt.tprintf("%g", ui.RAIL_ROW_HEIGHT * w.scale)},
+				{"rail.toggle", verify_workspace_rect(rail_toggle_rect(w))},
+				{"title.height", fmt.tprintf("%g", ui.TITLE_BAR_HEIGHT * w.scale)},
+				{
+					"title.controls_end",
+					fmt.tprintf(
+						"%d",
+						i32(max(workspace_button_width(w), rail_toggle_rect(w).x + rail_toggle_rect(w).width)),
+					),
+				},
+				{"title.caption_start", fmt.tprintf("%g", f32(w.width) - 138 * w.scale)},
 				{"workspace.id", fmt.tprintf("%d", w.workspace.id)},
 				{"workspace.name", w.workspace.name},
 				{"workspace.button", verify_workspace_rect(workspace_button_rect(w))},
@@ -469,7 +484,7 @@ when AIO_CONTROL {
 				{"link.hover", link_hover},
 				{"link.uri", link_uri},
 				{"link.spans", fmt.tprintf("%d", link_spans)},
-				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
+				{"rail.new_tab", verify_workspace_rect(rail_new_tab_rect(app, w))},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
 				{
@@ -493,6 +508,37 @@ when AIO_CONTROL {
 				}
 				if _, err := append(&entries, ..row[:]); err != nil { return nil, .Out_Of_Memory }
 			}
+			layout, layout_ok := rail_current_layout(app, w)
+			if layout_ok {
+				for row, i in w.rail_rows {
+					rect := ui.rail_row_rect(layout, i)
+					kind := row.kind == .Workspace ? "workspace" : "tab"
+					title := ""
+					if row.kind == .Workspace {
+						title = row.workspace.name
+					} else if row.tab >= 0 && row.tab < len(row.workspace.tabs) {
+						title = row.workspace.tabs[row.tab].title
+					}
+					selected := false
+					marked := false
+					if row.kind == .Workspace {
+						selected = row.workspace == w.workspace
+					} else {
+						selected = row.workspace == w.workspace && row.tab == w.workspace.selected
+						marked = row.workspace.tabs[row.tab].marked
+					}
+					row_state := [?]control.State_Entry{
+						{fmt.tprintf("rail.row.%d.kind", i + 1), kind},
+						{fmt.tprintf("rail.row.%d.title", i + 1), title},
+						{fmt.tprintf("rail.row.%d.rect", i + 1), verify_workspace_rect(rect)},
+						{fmt.tprintf("rail.row.%d.selected", i + 1), fmt.tprintf("%t", selected)},
+						{fmt.tprintf("rail.row.%d.marked", i + 1), fmt.tprintf("%t", marked)},
+						{fmt.tprintf("rail.row.%d.workspace", i + 1), fmt.tprintf("%d", row.workspace.id)},
+						{fmt.tprintf("rail.row.%d.tab", i + 1), fmt.tprintf("%d", row.tab + 1)},
+					}
+					if _, err := append(&entries, ..row_state[:]); err != nil { return nil, .Out_Of_Memory }
+				}
+			}
 		} else {
 			hidden := [?]control.State_Entry {
 				{"window.id", "0"},
@@ -515,6 +561,7 @@ when AIO_CONTROL {
 		workspace := &empty
 		if w != nil {
 			workspace = w.workspace
+			_, _ = rail_current_layout(app, w)
 		} else if len(app.workspaces) > 0 {
 			workspace = app.workspaces[0]
 		}
@@ -530,13 +577,21 @@ when AIO_CONTROL {
 		   err != nil {return nil, .Out_Of_Memory}
 		for tab, i in workspace.tabs {
 			prefix := fmt.tprintf("tab.%d", i + 1)
+			row_index := -1
+			row_rect := render.Rect{}
+			close_rect := render.Rect{}
+			if w != nil {
+				row_index = rail_row_index_for_tab(w.rail_rows[:], workspace, i)
+				row_rect = rail_row_rect_for_tab(app, w, i)
+				layout, _ := rail_current_layout(app, w)
+				close_rect = ui.rail_close_rect(layout, row_index, w.scale)
+			}
 			tab_state := [?]control.State_Entry {
 				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
 				{fmt.tprintf("%s.marked", prefix), fmt.tprintf("%t", tab.marked)},
-				{
-					fmt.tprintf("%s.position", prefix),
-					fmt.tprintf("%g", w != nil ? tab_position(w, i) : f32(i)),
-				},
+				{fmt.tprintf("%s.rail_row", prefix), fmt.tprintf("%d", row_index)},
+				{fmt.tprintf("%s.rect", prefix), verify_workspace_rect(row_rect)},
+				{fmt.tprintf("%s.close", prefix), verify_workspace_rect(close_rect)},
 				{fmt.tprintf("%s.focus", prefix), fmt.tprintf("%d", tab.tree.focus)},
 				{fmt.tprintf("%s.title", prefix), tab.title},
 				{fmt.tprintf("%s.zoomed", prefix), fmt.tprintf("%t", tab.tree.zoomed)},

@@ -23,7 +23,7 @@ tab_record_reserve :: proc(workspace: ^Workspace) -> (^Tab, Tab_Record_Error) {
 	return tab, .None
 }
 
-// Capacity was reserved, so the append cannot leave a half-built record in the strip.
+// Capacity was reserved, so the append cannot leave a half-built record in the rail.
 tab_record_commit :: proc(app: ^App, workspace: ^Workspace, tab: ^Tab) {
 	workspace.next_tab_id += 1
 	tab.id = workspace.next_tab_id
@@ -37,6 +37,25 @@ tab_record_free :: proc(tab: ^Tab) {
 	delete(tab.title)
 	delete(tab.name)
 	free(tab)
+}
+
+// The selected position after the tab at `from` moves to `to`.
+tab_selected_after_move :: proc(selected, from, to: int) -> int {
+	switch {
+	case selected == from:
+		return to
+	case from < selected && selected <= to:
+		return selected - 1
+	case to <= selected && selected < from:
+		return selected + 1
+	}
+	return selected
+}
+
+// The selected position after `index` closes, clamped to the `count` tabs that remain.
+tab_selected_after_remove :: proc(selected, index, count: int) -> int {
+	shifted := index < selected ? selected - 1 : selected
+	return clamp(shifted, 0, max(0, count - 1))
 }
 
 // One rule for construction and later refreshes: the tab's own name, else its content's title.

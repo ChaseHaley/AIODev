@@ -12,7 +12,18 @@ function Invoke-Aio {
     $result | Write-Output
 }
 
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 
 function Read-State {
     $lines = & $ctl --name $name state
@@ -25,16 +36,6 @@ function Read-State {
     return $values
 }
 
-# Title-bar points from live state: a tab center (one-based) or the new-tab button.
-function Tab-Point([int] $Index) {
-    $s = Read-State
-    return "$([int]((Tab-X $s)+[double]$s['tabs.width']*($Index-0.5))),15"
-}
-function New-Tab-Point {
-    $s = Read-State
-    $x = (Tab-X $s)+[double]$s['tabs.width']*[int]$s['tabs.count']+16*[double]$s['window.scale']
-    return "$([int]$x),15"
-}
 
 function Assert-Value($Actual, $Expected, [string] $Label) {
     if ($Actual -ne $Expected) { throw "$Label expected $Expected, observed $Actual" }

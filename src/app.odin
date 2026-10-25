@@ -604,6 +604,7 @@ reload_settings :: proc(app: ^App, announce := true) {
 	}
 	for window in app.windows {
 		window_apply_settings(app, window)
+		rail_reveal_active(app, window)
 	}
 	shell_icon_load(app)
 }

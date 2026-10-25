@@ -26,10 +26,14 @@ function Set-Option([string] $Key, [string] $Value) {
     $text = [regex]::Replace($text, '(?m)^'+[regex]::Escape($Key)+' = .*\r?\n?', '')
     [IO.File]::WriteAllText($settings, $text.TrimEnd()+"`n$Key = $Value`n")
 }
-function Tab-Center([int] $Index) {
-    $state = Read-State
-    return "$([int]([double]$state['tabs.x']+[double]$state['tabs.width']*($Index-0.5))),20"
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
 }
+function Tab-Center([int] $Index) { return Tab-Point $Index }
 function Assert-Menu([string[]] $Labels, [int[]] $Disabled = @()) {
     Invoke-Aio expect state tab_menu.open=true
     Invoke-Aio expect state "tab_menu.count=$($Labels.Count)"

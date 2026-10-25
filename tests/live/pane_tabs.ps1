@@ -8,7 +8,18 @@ function Invoke-Aio {
     $out = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
 }
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 function Read-State {
     $out = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read state.' }
@@ -26,11 +37,7 @@ function Grab {
     $scale = [double]$s['window.scale']
     return "$([int]($r[0]+60*$scale)),$([int]($r[1]+14*$scale))"
 }
-function Drop-Point {
-    $s = Read-State
-    $x = (Tab-X $s)+[double]$s['tabs.width']*[int]$s['tabs.count']+16*[double]$s['window.scale']
-    return "$([int]$x),$([int](20*[double]$s['window.scale']))"
-}
+function Drop-Point { return New-Tab-Point }
 function Shot($Label) {
     & "$repo/tools/win32.ps1" -Name $name -Shot "$directory/$Label.png" -Frame | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }

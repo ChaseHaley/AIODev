@@ -63,8 +63,8 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 	case platform.Mouse_Leave_Event:
 		if w := window_find(app, e.window); w != nil {
 			w.find.hover = .None
-			w.tab_hover = -1
-			w.tab_pressed = false
+			w.rail_hover, w.rail_pressed = -1, -1
+			w.rail_toggle_hovered = false
 			w.workspace_hovered = false
 			w.workspace_picker.menu_hover = 0
 			ui.editor_hover_clear(&w.editor)
@@ -192,16 +192,24 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		pane_swap_outcome(app, w, ui.confirm_key(&w.pending_swap.confirm, e))
 		return
 	}
+	if e.pressed && e.key == .Escape && rail_overlay(w) {
+		w.suppressed_key = e
+		rail_overlay_dismiss(app, w)
+		return
+	}
 	if !palette_active(app, w) &&
 	   e.pressed &&
 	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
-		bar := window_tab_bar(app, w)
+		row := rail_row_rect_for_tab(app, w, w.workspace.selected)
+		if row.height <= 0 {
+			row = {16, ui.TITLE_BAR_HEIGHT * w.scale, 1, 1}
+		}
 		tab_menu_open(
 			app,
 			w,
 			w.workspace.selected,
-			bar.x + f32(w.workspace.selected) * bar.tab_width,
-			bar.height,
+			row.x + 16 * w.scale,
+			row.y + row.height,
 		)
 		w.suppressed_key = e
 		return
@@ -394,6 +402,19 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.profile_menu.open {
 		ui.menu_wheel(&w.profile_menu.menu, int(math.sign(e.delta_y)))
 		w.dirty = true
+		return
+	}
+	rail_area_rect := rail_area(w)
+	if rail_visible(w) &&
+	   f32(e.x) >= rail_area_rect.x &&
+	   f32(e.x) < rail_area_rect.x + rail_area_rect.width &&
+	   f32(e.y) >= rail_area_rect.y &&
+	   f32(e.y) < rail_area_rect.y + rail_area_rect.height {
+		if layout, ok := rail_current_layout(app, w); ok {
+			step := f32(math.sign(e.delta_y)) * 3 * layout.row_height
+			w.rail_scroll = ui.rail_scroll_clamped(layout, w.rail_scroll - step)
+			w.dirty = true
+		}
 		return
 	}
 	w.wheel_remainder += e.delta_y * WHEEL_LINES

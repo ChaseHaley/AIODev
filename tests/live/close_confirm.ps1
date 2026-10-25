@@ -25,11 +25,17 @@ function Shot([string] $Label) {
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $directory "$Label.png") -Frame | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
 }
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
-function Tab-Point([double] $Index) {
+function Tab-Point([int] $Index) {
     $s = Read-State
-    $width = [double]$s['tabs.width']
-    return "$([int]((Tab-X $s)+$width*($Index-0.5))),20"
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
 }
 # Mirrors ui.confirm_layout so the journey clicks the dialog's real buttons.
 function Button-Point([string] $Button) {

@@ -27,8 +27,18 @@ function Read-State {
     }
     return $state
 }
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
-function Tab-Center([int] $Index) { $s = Read-State; return "$([int]((Tab-X $s)+[double]$s['tabs.width']*($Index-0.5))),20" }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 Invoke-Aio launch --fresh
 try {
     Invoke-Aio command pane.split_right
@@ -65,7 +75,7 @@ try {
     Invoke-Aio expect state panes.drop.shown=false
     Invoke-Aio mouse up '7,350' --px
     Invoke-Aio expect state panes.count=3
-    $drop = "$([int]((Tab-X $paneState)+[double]$paneState['tabs.width']+16)),20"
+    $drop = New-Tab-Point
     Invoke-Aio mouse drag $grab $drop --px
     Invoke-Aio expect state tabs.count=1
     Invoke-Aio expect state panes.count=3
@@ -92,7 +102,7 @@ try {
     Invoke-Aio command settings.reload
     Write-Output 'PASS sixth persisted shortcut alternative dispatches'
 
-    Invoke-Aio mouse click (Tab-Center 1) --button right --px
+    Invoke-Aio mouse click (Tab-Point 1) --button right --px
     Invoke-Aio expect state tab_menu.open=true
     Invoke-Aio expect state tab_menu.count=8
     Invoke-Aio expect state tab_menu.row.1.label=Rename
@@ -111,13 +121,13 @@ try {
     Invoke-Aio expect state settings.key=tab.confirm_close
     Invoke-Aio expect state settings.filter=
     Invoke-Aio key Menu
-    Invoke-Aio expect state tab_menu.count=5
+    Invoke-Aio expect state tab_menu.count=8
     Invoke-Aio key Esc
     Invoke-Aio command tab.close
     Invoke-Aio command tab.new
     Invoke-Aio command tab.new
-    Invoke-Aio mouse click (Tab-Center 1) --mods Ctrl --px
-    Invoke-Aio mouse click (Tab-Center 1) --button right --px
+    Invoke-Aio mouse click (Tab-Point 1) --mods Ctrl --px
+    Invoke-Aio mouse click (Tab-Point 1) --button right --px
     Invoke-Aio expect state tab_menu.count=4
     Invoke-Aio expect state 'tab_menu.row.1.label=Close Others'
     Invoke-Aio expect state 'tab_menu.row.2.label=Close 2 Selected Tabs'
@@ -149,15 +159,15 @@ try {
     $image.Save($iconPath, [Drawing.Imaging.ImageFormat]::Png)
     $graphics.Dispose()
     $image.Dispose()
-    Set-Option shell.icon shell.png
+    Set-Option profile.default.icon shell.png
     Invoke-Aio command settings.reload
     Invoke-Aio expect state shell.icon.loaded=true
     Shot image-icon
-    Set-Option shell.icon missing.png
+    Set-Option profile.default.icon missing.png
     Invoke-Aio command settings.reload
     Invoke-Aio expect state shell.icon.loaded=false
     Invoke-Aio expect state 'session.header.icon=>_'
-    Set-Option shell.icon shell.png
+    Set-Option profile.default.icon shell.png
     Set-Option theme.mode light
     Invoke-Aio command settings.reload
     Invoke-Aio run 'Clear-Host; $e=[char]27; [Console]::WriteLine("${e}[37mArgument ${e}[97mNumber ${e}[2mPrediction${e}[0m")'

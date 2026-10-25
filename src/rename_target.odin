@@ -19,7 +19,7 @@ Rename_Outcome :: enum {
 
 // Resolves the target by id at commit, so a target closed while the field is open reports .Missing
 // instead of writing through a stale pointer. w presents the field: a tab target belongs to its
-// strip, and tab and pane names refresh its titles; workspace names repaint every window.
+// rail, and tab and pane names refresh its titles; workspace names repaint every window.
 @(require_results)
 rename_target_commit :: proc(
 	app: ^App,

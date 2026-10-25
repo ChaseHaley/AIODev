@@ -203,7 +203,6 @@ wrap :: proc(t: ^Text, s: string, width: f32, out: ^[dynamic]string) {
 	}
 }
 
-@(private)
 draw_rect :: proc(list: ^render.Draw_List, instance: render.Rect_Instance) {
 	if render.push_rect(list, instance) != .None {
 		log.error("ui: the draw list ran out of memory")

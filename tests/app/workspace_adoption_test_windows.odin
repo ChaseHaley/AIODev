@@ -39,9 +39,9 @@ adoption_fixture_destroy :: proc(t: ^testing.T, f: ^Adoption_Fixture) {
 // Every presentation value a caller must not have to teach either path separately.
 @(private="file")
 adoption_dirty_presentation :: proc(w: ^app.Window) {
-	w.tab_hover, w.tab_pressed = 1, true
+	w.rail_hover, w.rail_pressed = 1, 1
+	w.rail_scroll = 99
 	ui.armed_press(&w.tab_close_armed, 2)
-	w.tab_underline = {value = 9, target = 9}
 	w.tab_menu.open, w.rename_open = true, true
 	w.workspace_picker.mode = .List
 }
@@ -55,12 +55,11 @@ adoption_expect_postcondition :: proc(
 ) {
 	testing.expect_value(t, w.workspace, workspace)
 	testing.expect(t, w.tree == &app.selected_tab(workspace).tree)
-	testing.expect_value(t, w.tab_hover, -1)
-	testing.expect(t, !w.tab_pressed)
+	testing.expect_value(t, w.rail_hover, -1)
+	testing.expect_value(t, w.rail_pressed, -1)
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
-	testing.expect_value(t, w.tab_underline.value, f32(workspace.selected))
-	testing.expect_value(t, w.tab_underline.target, f32(workspace.selected))
-	testing.expect(t, !w.tab_menu.open && !w.rename_open)
+	testing.expect_value(t, w.tab_menu.open, false)
+	testing.expect_value(t, w.rename_open, false)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, w.pending_close.kind, app.Pending_Close_Kind.None)
 	testing.expect(t, len(w.close_restore) == 0)
@@ -80,13 +79,11 @@ workspace_adopt_retains_or_replaces_storage_with_one_postcondition :: proc(t: ^t
 	two := app.workspace_create_empty(state)
 	if !testing.expect(t, two != nil) { return }
 	if !testing.expect(t, app.tab_create(state, two)) { return }
-	panes, controls, positions := raw_data(w.panes), raw_data(w.tab_controls), raw_data(w.tab_positions)
+	panes := raw_data(w.panes)
 	adoption_dirty_presentation(w)
 	if !testing.expect(t, app.workspace_adopt(state, w, two, .Retain)) { return }
 	adoption_expect_postcondition(t, state, w, two)
 	testing.expect_value(t, raw_data(w.panes), panes)
-	testing.expect_value(t, raw_data(w.tab_controls), controls)
-	testing.expect_value(t, raw_data(w.tab_positions), positions)
 	testing.expect_value(t, len(w.views), 1)
 	retained := raw_data(w.panes)
 	adoption_dirty_presentation(w)
@@ -143,11 +140,10 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	testing.expect(t, w.tree == &app.selected_tab(one).tree)
 	testing.expect_value(t, raw_data(w.views), views)
 	testing.expect_value(t, raw_data(w.panes), panes)
-	testing.expect_value(t, w.tab_hover, 1)
-	testing.expect(t, w.tab_pressed)
+	testing.expect_value(t, w.rail_hover, 1)
+	testing.expect_value(t, w.rail_pressed, 1)
 	testing.expect_value(t, ui.armed_target(w.tab_close_armed), 2)
-	testing.expect_value(t, w.tab_underline.value, f32(9))
-	testing.expect_value(t, w.tab_underline.target, f32(9))
+	testing.expect_value(t, w.rail_scroll, f32(99))
 	testing.expect(t, w.workspace_picker.mode == .List)
 	app.tick(state)
 }

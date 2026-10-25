@@ -98,7 +98,18 @@ function Invoke-Aio {
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
     $out | Write-Output
 }
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 function Read-State {
     $lines = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect state.' }
@@ -324,15 +335,23 @@ try {
     Assert-Equal (Window-State $source)['panes.count'] 2 'source keeps its remaining panes'
 
     # Remote tab hover: dwelling over another window's background tab selects it; Escape restores it.
+    # A narrow destination keeps its rail hidden, so the drag starts first and the overlay is opened
+    # with the keyboard before the pointer enters it; a mouse click would cancel the drag.
     Select-Window $destination
     Invoke-Aio command tab.new | Out-Null
     Invoke-Aio wait text 'PS '
     Invoke-Aio command tab.select_1 | Out-Null
     $d = Read-State
     $sessions = $d['sessions.count']
-    $tab2 =Screen $d ((Tab-X $d)+[double]$d['tabs.width']*1.5) ([double]$d['tabs.height']/2)
+    $r2 = Rect $d['tab.2.rect']; $tab2 = Screen $d ($r2[0]+$r2[2]/2) ($r2[1]+$r2[3]/2)
     Assert-Hit $tab2 $d 'destination tab'
     Begin-Drag $source | Out-Null
+    Select-Window $destination
+    if ((Read-State)['rail.visible'] -eq 'false') {
+        Invoke-Aio key Ctrl+Shift+B | Out-Null
+        Start-Sleep -Milliseconds 220
+    }
+    Select-Window $source
     Invoke-Aio mouse move $tab2 --screen | Out-Null
     Start-Sleep -Milliseconds 500
     Invoke-Aio mouse move $tab2 --screen | Out-Null
@@ -344,23 +363,30 @@ try {
     Assert-Equal $d['tabs.selected'] 1 'Escape restores the destination tab'
     Assert-Equal $d['tab.2.panes'] 1 'Escape leaves the hovered tab unchanged'
 
-    # Empty tab-strip space in another window creates a tab there from the running pane.
+    # The rail footer in another window creates a tab there from the running pane.
+    Select-Window $destination
     $d = Window-State $destination
     $tabs = [int]$d['tabs.count']
-    $strip = Screen $d ((Tab-X $d)+[double]$d['tabs.width']*$tabs+16*[double]$d['window.scale']) ([double]$d['tabs.height']/2)
-    Assert-Hit $strip $d 'destination empty strip'
+    $stripRect = Rect $d['rail.new_tab']; $strip = Screen $d ($stripRect[0]+$stripRect[2]/2) ($stripRect[1]+$stripRect[3]/2)
+    Assert-Hit $strip $d 'destination rail footer'
     $s = Begin-Drag $source
     $third = $s['session.id']
+    Select-Window $destination
+    if ((Read-State)['rail.visible'] -eq 'false') {
+        Invoke-Aio key Ctrl+Shift+B | Out-Null
+        Start-Sleep -Milliseconds 220
+    }
+    Select-Window $source
     Invoke-Aio mouse move $strip --screen | Out-Null
     $s = Read-State
-    Assert-Equal $s['panes.drop.window'] $destination 'empty strip targets the destination'
-    Assert-Equal $s['panes.drop.new_tab'] true 'remote empty strip offers a new tab'
+    Assert-Equal $s['panes.drop.window'] $destination 'rail footer targets the destination'
+    Assert-Equal $s['panes.drop.new_tab'] true 'remote rail footer offers a new tab'
     Assert-Equal $s['panes.drop.shown'] true 'remote new-tab indicator is shown'
     Start-Sleep -Milliseconds 300
     Shot $d remote-new-tab
     Invoke-Aio mouse up $strip --screen | Out-Null
     $d = Window-State $destination
-    Assert-Equal $d['tabs.count'] ($tabs+1) 'remote strip drop appends a tab'
+    Assert-Equal $d['tabs.count'] ($tabs+1) 'remote footer drop appends a tab'
     Assert-Equal $d['tabs.selected'] ($tabs+1) 'new remote tab is selected'
     Assert-Equal $d['session.id'] $third 'new remote tab hosts the dragged runtime'
     Assert-Equal $d['sessions.count'] $sessions 'remote new tab starts no runtime'
@@ -373,16 +399,21 @@ try {
     $settingsIndex = [int]$d['tabs.selected']
     Invoke-Aio command tab.select_1 | Out-Null
     $d = Read-State
-    $settingsTab = Screen $d ((Tab-X $d)+[double]$d['tabs.width']*($settingsIndex-0.5)) ([double]$d['tabs.height']/2)
+    $settingsRect = Rect $d["tab.$settingsIndex.rect"]; $settingsTab = Screen $d ($settingsRect[0]+$settingsRect[2]/2) ($settingsRect[1]+$settingsRect[3]/2)
     Assert-Hit $settingsTab $d 'destination Settings tab'
     Select-Window $source
     Invoke-Aio command pane.split_right | Out-Null
     Invoke-Aio wait text 'PS ' | Out-Null
     $sessions = (Read-State)['sessions.count']
     Begin-Drag $source | Out-Null
+    Select-Window $destination
+    if ((Read-State)['rail.visible'] -eq 'false') {
+        Invoke-Aio key Ctrl+Shift+B | Out-Null
+        Start-Sleep -Milliseconds 220
+    }
+    Select-Window $source
     Invoke-Aio mouse move $settingsTab --screen | Out-Null
     Start-Sleep -Milliseconds 500
-    Invoke-Aio mouse move $settingsTab --screen | Out-Null
     Assert-Equal (Read-State)['panes.drop.shown'] true 'remote Settings tab accepts the pane'
     Invoke-Aio mouse up $settingsTab --screen | Out-Null
     $d = Window-State $destination
@@ -392,7 +423,27 @@ try {
     Assert-Equal $d['sessions.count'] $sessions 'Settings drop starts no runtime'
     $sourceState = Window-State $source
     Assert-Equal $sourceState['panes.count'] 1 'Settings drop keeps the rest of the source pane'
-
+    # A tab shown under another window's root selects that tab in its owner window.
+    Select-Window $source
+    if ((Read-State)['rail.visible'] -eq 'false') {
+        Invoke-Aio key Ctrl+Shift+B | Out-Null
+        Start-Sleep -Milliseconds 220
+    }
+    $s = Read-State
+    $foreignRow = 0
+    for ($i = 1; $i -le [int]$s['rail.rows']; $i++) {
+        if ($s["rail.row.$i.workspace"] -eq $destinationWorkspace -and
+            $s["rail.row.$i.kind"] -eq 'tab' -and [int]$s["rail.row.$i.tab"] -eq 1) {
+            $foreignRow = $i
+            break
+        }
+    }
+    if ($foreignRow -eq 0) { throw 'the source rail does not list the other workspace tab' }
+    $foreignRect = Rect $s["rail.row.$foreignRow.rect"]
+    $foreignTab = Screen $s ($foreignRect[0]+$foreignRect[2]/2) ($foreignRect[1]+$foreignRect[3]/2)
+    Invoke-Aio mouse click $foreignTab --screen | Out-Null
+    $d = Window-State $destination
+    Assert-Equal $d['tabs.selected'] 1 'tab under another window root selects there'
     # Minimum size: an oversize requirement rejects both a remote edge and a tear-off window.
     Select-Window $source
     Invoke-Aio command pane.split_right | Out-Null

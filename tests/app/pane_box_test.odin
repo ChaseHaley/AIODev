@@ -15,13 +15,15 @@ box_metrics :: proc(scale: f32) -> term_view.Metrics {
 
 @(private="file")
 box_window :: proc(workspace: ^app.Workspace, scale: f32) -> app.Window {
-	return {
+	w := app.Window {
 		workspace = workspace,
 		scale = scale,
 		metrics = box_metrics(scale),
 		width = i32(1000 * scale),
 		height = i32(650 * scale),
 	}
+	app.rail_adaptive_update(&w)
+	return w
 }
 
 // The grid one single-pane tab receives at this window size, through the same
@@ -74,6 +76,7 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 						testing.expect_value(t, box.columns, grid.x)
 						testing.expect_value(t, box.rows, grid.y)
 						w.width, w.height = width, height
+						app.rail_adaptive_update(&w)
 						applied := box_applied(t, &state, &w, .Terminal)
 						testing.expect_value(t, applied.rect, box.rect)
 						testing.expect_value(t, applied.columns, grid.x)

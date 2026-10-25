@@ -55,8 +55,6 @@ menu_fixture_destroy :: proc(f: ^Menu_Fixture) {
 	delete(f.w.rename.bytes)
 	delete(f.w.panes)
 	delete(f.w.dividers)
-	delete(f.w.tab_positions)
-	delete(f.w.tab_controls)
 	ui.editor_destroy(&f.w.editor)
 	_ = platform.destroy(&f.state.platform)
 }

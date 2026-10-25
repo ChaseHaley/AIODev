@@ -34,6 +34,13 @@ function Check([bool] $Condition, [string] $Label) {
     if (-not $Condition) { throw "FAIL $Label" }
     Write-Output "PASS $Label"
 }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 function Shot([string] $Label) {
     Invoke-Aio wait idle | Out-Null
     if (-not $Capture) { return }
@@ -97,12 +104,10 @@ try {
 
     # Leave the chip, then hover an ordinary tab so the tab lift and rim are exercised too.
     $size = $state['window.size'] -split 'x'
-    Invoke-Aio mouse move "20,$([int]([double]$size[1] - 40))" --px
+    Invoke-Aio mouse move "400,$([int]([double]$size[1] - 40))" --px
     Invoke-Aio wait idle
     Invoke-Aio expect state workspace.button.hover=false
-    $x = [double]$state['tabs.x']
-    $width = [double]$state['tabs.width']
-    Invoke-Aio mouse move "$([int]($x + $width/2)),18" --px
+    Invoke-Aio mouse move (Tab-Point 1) --px
     Invoke-Aio wait idle
     Shot 'tab-hover'
 
@@ -135,9 +140,7 @@ try {
     Invoke-Aio expect state tabs.count=2
     Invoke-Aio expect state tabs.selected=1
     $state = Read-State
-    $x = [double]$state['tabs.x']
-    $width = [double]$state['tabs.width']
-    Invoke-Aio mouse move "$([int]($x + $width*1.5)),18" --px
+    Invoke-Aio mouse move (Tab-Point 2) --px
     Invoke-Aio wait idle
     Shot 'tab-hover-light'
     $text = [IO.File]::ReadAllText($settings)

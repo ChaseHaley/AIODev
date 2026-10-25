@@ -49,7 +49,18 @@ function Pane-Rects {
     return $rects
 }
 
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 function Px([double] $X, [double] $Y) { return "$([int]$X),$([int]$Y)" }
 
 function Shot([string] $Label) {
@@ -111,19 +122,19 @@ try {
     $s = Read-State
     $ids = 1..[int]$s['tabs.count'] | ForEach-Object { $s["tab.$_.id"] }
     $count = $ids.Count
-    $tabWidth = [double]$s['tabs.width']
-    $tabX = Tab-X $s
+    $first = Tab-Point 1
+    $third = Tab-Point 3
     Invoke-Aio command tab.select_1
-    Invoke-Aio mouse drag (Px ($tabX+$tabWidth/2) (18*$scale)) (Px ($tabX+$tabWidth*2.6) (18*$scale)) --px
+    Invoke-Aio mouse drag $first $third --px
     $s = Read-State
     Assert-Value $s['tab.3.id'] $ids[0] 'dragged tab lands at its drop position'
     Assert-Value $s['tab.1.id'] $ids[1] 'other tabs shift to make room'
     Assert-Value $s['tabs.selected'] 3 'dragged tab stays selected'
     $before = (1..$count | ForEach-Object { $s["tab.$_.id"] }) -join ','
-    Invoke-Aio mouse down (Px ($tabX+$tabWidth*2.5) (18*$scale)) --px
-    Invoke-Aio mouse move (Px ($tabX+$tabWidth*0.5) (18*$scale)) --px
+    Invoke-Aio mouse down $third --px
+    Invoke-Aio mouse move $first --px
     Invoke-Aio key Esc
-    Invoke-Aio mouse up (Px ($tabX+$tabWidth*0.5) (18*$scale)) --px
+    Invoke-Aio mouse up $first --px
     $s = Read-State
     Assert-Value ((1..$count | ForEach-Object { $s["tab.$_.id"] }) -join ',') $before 'Escape cancels a tab drag'
 

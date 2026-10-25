@@ -41,14 +41,12 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	defer delete(workspace.tabs)
 	w := app.Window{id = 138, workspace = &workspace, tree = &tabs[0].tree,
 		width = 1000, height = 600, scale = 1,
-		divider_click_node = layout.INVALID_NODE}
+		divider_click_node = layout.INVALID_NODE, rail_auto = true}
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
 	w.metrics = term_view.compute_metrics(fonts, w.ui_text.family, 14, 1)
 	ui.find_init(&w.find)
 	defer ui.find_destroy(&w.find)
 	defer {
-		delete(w.tab_positions)
-		delete(w.tab_controls)
 		delete(w.panes)
 		delete(w.dividers)
 		for &view in w.views {
@@ -60,17 +58,19 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	state: app.App
 	append(&state.windows, &w)
 	defer delete(state.windows)
+	append(&state.workspaces, &workspace)
+	defer delete(state.workspaces)
 	append(&state.sessions, app.Session_Entry{id = 138, session = session})
 	defer delete(state.sessions)
 	defer app.tab_drag_cancel(&state, &w)
-	bar := app.window_tab_bar(&state, &w)
-	app.tab_press(&w, 0, bar.x+20, bar.tab_width, false)
+	row := app.rail_row_rect_for_tab(&state, &w, 0)
+	app.tab_press(&state, &w, 0, row.y + row.height / 2, false)
 	if !testing.expect(t, w.tab_drag.pressed) { return }
 	// Seed the gesture and overlay together; moves and releases use the real app dispatcher.
 	ui.find_open(&w.find)
 	if !testing.expect(t, w.find.open) { return }
-	l, _ := app.find_controls(&w, &state.sessions[0])
-	x, y := i32(l.older.x+16), i32(l.older.y+16)
+	target := app.rail_row_rect_for_tab(&state, &w, 1)
+	x, y := i32(target.x + 20), i32(target.y + target.height / 2)
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
 	if !testing.expect(t, w.tab_drag.active && workspace.tabs[1] == &tabs[0]) { return }
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
@@ -79,9 +79,9 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	testing.expect(t, workspace.tabs[1] == &tabs[0])
 	testing.expect_value(t, workspace.selected, 1)
 	testing.expect(t, !ui.armed_down(w.find.armed))
-	clear(&w.tab_positions)
-	bar = app.window_tab_bar(&state, &w)
-	close := ui.tab_close_rect(bar, workspace.selected, w.scale)
+	layout_state, _ := app.rail_current_layout(&state, &w)
+	row_index := app.rail_row_index_for_tab(w.rail_rows[:], &workspace, workspace.selected)
+	close := ui.rail_close_rect(layout_state, row_index, w.scale)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x+close.width/2), y = i32(close.y+close.height/2)})
 	if !testing.expect_value(t, ui.armed_target(w.tab_close_armed), workspace.selected) { return }

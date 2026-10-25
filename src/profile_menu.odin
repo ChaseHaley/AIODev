@@ -25,7 +25,7 @@ Profile_Menu_Entry :: struct {
 	profile_id:    string,
 }
 
-// The same menu surface serves the tab-strip chevron and a pane's shell badge.
+// The same menu surface serves the tab rail's new-tab button and a pane's shell badge.
 Profile_Menu :: struct {
 	using menu: ui.Menu,
 	mode:       Profile_Menu_Mode,
@@ -161,6 +161,7 @@ profile_menu_choose :: proc(app: ^App, w: ^Window) {
 		switch menu.mode {
 		case .New_Tab:
 			tab_new_profile(app, w, entry.visible_index)
+			rail_overlay_dismiss(app, w)
 		case .Swap_Pane:
 			pane_shell_swap_request(app, w, menu.pane, entry.profile_id)
 		case .None:

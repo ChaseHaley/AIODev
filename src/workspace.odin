@@ -131,6 +131,7 @@ tab_select :: proc(app: ^App, w: ^Window, index: int, preserve_selection := fals
 	w.workspace.selected = index
 	w.tree = &selected_tab(w.workspace).tree
 	window_relayout(app, w)
+	rail_reveal_active(app, w)
 	focus_enter(app, w)
 }
 
@@ -165,6 +166,7 @@ tab_new :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	tab_select(app, w, len(w.workspace.tabs) - 1)
+	rail_overlay_dismiss(app, w)
 }
 
 // Opens the Nth visible profile from profile.order, matching the profile.open_N shortcuts.
@@ -182,6 +184,7 @@ tab_new_profile :: proc(app: ^App, w: ^Window, index: int) {
 		return
 	}
 	tab_select(app, w, len(w.workspace.tabs) - 1)
+	rail_overlay_dismiss(app, w)
 }
 
 // Settings is one page per workspace, so two panes must never show it at once. Terminal content is
@@ -346,6 +349,7 @@ tab_duplicate :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	tab_select(app, w, len(w.workspace.tabs) - 1)
+	rail_overlay_dismiss(app, w)
 }
 
 tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {
@@ -413,13 +417,9 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 		session_close(app, pane.content.id)
 	}
 	ordered_remove(&workspace.tabs, index)
-	for w in app.windows {
-		if w.workspace == workspace {tab_presentation_remove(&w.presentation, index)}
-	}
 	tab_record_free(tab)
 	workspace_settings_sync(app, workspace)
-	workspace.selected =
-		tab_presentation_selected_after_remove(workspace.selected, index, len(workspace.tabs))
+	workspace.selected = tab_selected_after_remove(workspace.selected, index, len(workspace.tabs))
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		w := app.windows[i]
 		if w.workspace != workspace {continue}
@@ -429,6 +429,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 		} else {
 			w.tree = &selected_tab(workspace).tree
 			window_relayout(app, w)
+			rail_reveal_active(app, w)
 			if was_selected {focus_enter(app, w)}
 		}
 	}
@@ -499,6 +500,7 @@ window_update_title :: proc(app: ^App, w: ^Window) {
 	tab := selected_tab(w.workspace)
 	tab_update_title(app, tab)
 	title := tab.title != "" ? tab.title : app.app_id
+	if !app.platform_ready {return}
 	if platform.window_set_title(&app.platform, w.id, title) != .None {
 		log.error("setting the window title failed")
 	}

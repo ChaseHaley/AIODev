@@ -71,18 +71,26 @@ pane_box_for_grid :: proc(
 	width, height: i32,
 ) {
 	inset := math.round(f32(app.settings.pane.gap) * scale)
-	tab := ui.TAB_HEIGHT * scale
+	top := ui.TITLE_BAR_HEIGHT * scale
 	box.rect = {
 		x      = inset,
-		y      = tab + inset,
+		y      = top + inset,
 		width  = f32(columns) * metrics.cell_width + 2 * insets.padding,
 		height = f32(rows) * metrics.cell_height + 2 * insets.padding + insets.header,
 	}
-	width = i32(box.rect.width + 2 * inset)
+	base_width := box.rect.width + 2 * inset
+	rail := f32(0)
+	// Include the rail only when the resulting window would dock it. The rule is the same one
+	// the window applies after the resize, so the requested grid is not widened by a hidden rail.
+	if f32(i32(base_width)) >= ui.RAIL_DOCK_MIN_WIDTH * scale {
+		rail = ui.rail_pixel_width(scale)
+		box.rect.x += rail
+	}
+	width = i32(box.rect.width + 2 * inset + rail)
 	// A fractional DPI tab bar would otherwise truncate the client height below
 	// the requested row count.
-	height = i32(math.ceil(box.rect.height + tab + 2 * inset))
-	box.rect.height = f32(height) - tab - 2 * inset
+	height = i32(math.ceil(box.rect.height + top + 2 * inset))
+	box.rect.height = f32(height) - top - 2 * inset
 	box.padding = insets.padding
 	box.header = insets.header
 	box.columns = columns

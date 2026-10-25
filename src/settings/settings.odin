@@ -35,6 +35,13 @@ Interface_Settings :: struct {
 Tab_Settings :: struct {
 	confirm_close: bool,
 }
+Tabs_Scope :: enum int {
+	All,
+	Workspace,
+}
+Tabs_Settings :: struct {
+	vertical_scope: Tabs_Scope,
+}
 Window_Settings :: struct {
 	columns, rows, padding: int,
 }
@@ -71,6 +78,7 @@ Settings :: struct {
 	theme:           Theme_Settings,
 	pane:            Pane_Settings,
 	tab:             Tab_Settings,
+	tabs:            Tabs_Settings,
 	profiles:        Profiles,
 	allocator:       runtime.Allocator,
 	leader_line:     int,
@@ -199,6 +207,18 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		nil,
 		"Ask before closing a tab that has more than one pane.",
+	},
+	{
+		"tabs.vertical_scope",
+		"Vertical Tab List",
+		.Enum,
+		offset_of(Settings, tabs) + offset_of(Tabs_Settings, vertical_scope),
+		"all",
+		0,
+		0,
+		{"all", "workspace"},
+		"Which tabs the vertical rail lists: all open workspaces and their tabs, " +
+			"or only the active workspace's tabs.",
 	},
 	{
 		"shell.default_profile",

@@ -1,24 +1,22 @@
 package ui_test
 
 import "core:testing"
+import "aio:render"
 import "aio:ui"
 
 @(test)
-pane_tab_drop_region_excludes_tabs_and_caption_buttons :: proc(t: ^testing.T) {
+rail_tab_tiles_indent_without_leaving_the_row :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 1.75}) {
-		for width in ([?]f32{360, 800, 1400}) {
-			for count in ([?]int{1, 3, 8}) {
-				bar := ui.tab_bar_layout((width-218)*scale, scale, count)
-				r := ui.tab_drop_region(bar, width*scale, scale)
-				testing.expect(t, r.width > 0)
-				testing.expect_value(t, r.x, f32(count)*bar.tab_width)
-				testing.expect(t, r.x+r.width <= (width-138)*scale)
-				testing.expect(t, ui.tab_drop_hit(bar, width*scale, scale, r.x, 20*scale))
-				testing.expect(t, !ui.tab_drop_hit(bar, width*scale, scale, r.x-1, 20*scale))
-				testing.expect(t, !ui.tab_drop_hit(bar, width*scale, scale, r.x+r.width, 20*scale))
-				testing.expect(t, !ui.tab_drop_hit(bar, width*scale, scale, r.x+1, 40*scale))
-			}
-		}
+		area := render.Rect{0, 40 * scale, ui.RAIL_WIDTH * scale, 400 * scale}
+		layout := ui.rail_layout(area, scale, 3, 0)
+		row := ui.rail_row_rect(layout, 1)
+		tile := ui.rail_tab_tile(layout, row)
+		testing.expect_value(t, tile.x, row.x + ui.RAIL_TAB_INDENT * scale)
+		testing.expect_value(t, tile.x + tile.width, row.x + row.width)
+		testing.expect_value(t, tile.y, row.y)
+		testing.expect_value(t, tile.height, row.height)
+		testing.expect(t, ui.rail_row_contains(layout, 1, tile.x + 1, tile.y + 1))
+		testing.expect(t, tile.x > row.x && ui.rail_row_contains(layout, 1, tile.x - 1, tile.y + 1))
 	}
 }
 

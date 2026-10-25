@@ -184,5 +184,6 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	if w.rename_open {rename_finish(app, w, false)}
 	if w.pending_close.confirm.open {pending_close_finish(app, w, false)}
 	pending_close_clear(&w.pending_close)
+	rail_overlay_dismiss(app, w)
 	w.dirty = true
 }

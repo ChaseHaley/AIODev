@@ -9,7 +9,18 @@ function Invoke-Aio {
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
     $out | Write-Output
 }
-function Tab-X($State) { if (-not $State.ContainsKey('tabs.x')) { throw 'State lacks tabs.x; the tab strip offset is unknown.' }; return [double]$State['tabs.x'] }
+function Tab-Point([int] $Index) {
+    $s = Read-State
+    $key = "tab.$Index.rect"
+    if (-not $s.ContainsKey($key)) { throw "State lacks $key; the tab rail row is unknown." }
+    $r = $s[$key] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
+function New-Tab-Point {
+    $s = Read-State
+    $r = $s['rail.new_tab'] -split ','
+    return "$([int]([double]$r[0]+[double]$r[2]/2)),$([int]([double]$r[1]+[double]$r[3]/2))"
+}
 function Read-State {
     $out = & $ctl --name $name state
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read state.' }
@@ -39,20 +50,20 @@ try {
     Invoke-Aio command settings.open
     Invoke-Aio command tab.select_1
     $tabs = Read-State
-    $x = [int]$origin[0] + [int]((Tab-X $tabs) + 1.5 * [double]$tabs['tabs.width'])
-    $y = [int]$origin[1] + [int](0.5 * [double]$tabs['tabs.height'])
+    $r2 = $tabs['tab.2.rect'] -split ',' | ForEach-Object { [double]$_ }
+    $x = [int]$origin[0] + [int]($r2[0] + $r2[2]/2)
+    $y = [int]$origin[1] + [int]($r2[1] + $r2[3]/2)
     Invoke-Aio mouse click "$x,$y" --screen
     Invoke-Aio expect state settings.active=true
     Invoke-Aio expect state tabs.selected=2
-    # tabs.x is the strip's left edge: just left of it is the workspace button, just right is tab 1.
-    $left = [int]$origin[0] + [int](Tab-X $tabs)
-    if ((Tab-X $tabs) -le 8) { throw 'tabs.x leaves no room for the root workspace button.' }
-    Invoke-Aio mouse click "$($left - 8),$y" --screen
+    $chip = $tabs['workspace.button'] -split ',' | ForEach-Object { [double]$_ }
+    Invoke-Aio mouse click "$([int]$origin[0] + [int]($chip[0]+$chip[2]/2)),$([int]$origin[1] + [int]($chip[1]+$chip[3]/2))" --screen
     Invoke-Aio expect state workspace.picker=true
     Invoke-Aio expect state tabs.selected=2
     Invoke-Aio key Esc
     Invoke-Aio expect state workspace.picker=false
-    Invoke-Aio mouse click "$($left + 8),$y" --screen
+    $r1 = $tabs['tab.1.rect'] -split ',' | ForEach-Object { [double]$_ }
+    Invoke-Aio mouse click "$([int]$origin[0] + [int]($r1[0]+$r1[2]/2)),$([int]$origin[1] + [int]($r1[1]+$r1[3]/2))" --screen
     Invoke-Aio expect state tabs.selected=1
     Invoke-Aio expect state workspace.picker=false
     Invoke-Aio command tab.select_1

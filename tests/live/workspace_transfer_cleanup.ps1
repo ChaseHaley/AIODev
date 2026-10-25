@@ -78,8 +78,9 @@ try {
     $destinationTab = $s['tab.1.id']
     $origin = @($s['window.origin'] -split ',' | ForEach-Object { [double]$_ })
     if ($Mode -eq 'Tab') {
-        $targetX = [int]($origin[0] + [double]$s['tabs.x'] + [double]$s['tabs.width'] + 16*[double]$s['window.scale'])
-        $targetY = [int]($origin[1] + [double]$s['tabs.height']/2)
+        $r = @($s['rail.new_tab'] -split ',' | ForEach-Object { [double]$_ })
+        $targetX = [int]($origin[0] + $r[0] + $r[2]/2)
+        $targetY = [int]($origin[1] + $r[1] + $r[3]/2)
     } else {
         $r = @($s["pane.$($s['panes.focused']).rect"] -split ',' | ForEach-Object { [double]$_ })
         $targetX = [int]($origin[0]+$r[0]+$r[2]*0.75)
@@ -88,6 +89,14 @@ try {
     $target = "$targetX,$targetY"
 
     Begin-Drag
+    if ($Mode -eq 'Tab') {
+        Select-Window $destination
+        if ((Read-State)['rail.visible'] -eq 'false') {
+            Invoke-Aio key Ctrl+Shift+B | Out-Null
+            Start-Sleep -Milliseconds 220
+        }
+        Select-Window $script:source
+    }
     Invoke-Aio mouse move $target --screen | Out-Null
     Invoke-Aio expect state "panes.drop.window=$destination" | Out-Null
     Invoke-Aio expect state panes.drop.shown=true | Out-Null
@@ -101,6 +110,14 @@ try {
     Save-State cancelled
 
     Begin-Drag
+    if ($Mode -eq 'Tab') {
+        Select-Window $destination
+        if ((Read-State)['rail.visible'] -eq 'false') {
+            Invoke-Aio key Ctrl+Shift+B | Out-Null
+            Start-Sleep -Milliseconds 220
+        }
+        Select-Window $script:source
+    }
     Invoke-Aio mouse move $target --screen | Out-Null
     Invoke-Aio expect state "panes.drop.window=$destination" | Out-Null
     Invoke-Aio expect state panes.drop.shown=true | Out-Null

@@ -16,9 +16,9 @@ workspace_icon_picker_layout :: proc(w: ^Window) -> Workspace_Icon_Layout {
 	columns := clamp(int((width - 20 * s) / (48 * s)), 1, 5)
 	count := (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
 	rows := (count + columns - 1) / columns
-	available := max(0, f32(w.height) - (ui.TAB_HEIGHT + 5) * s)
+	available := max(0, f32(w.height) - (ui.TITLE_BAR_HEIGHT + 5) * s)
 	height := min(available, (146 + f32(rows) * 48) * s)
-	panel := render.Rect{5 * s, ui.TAB_HEIGHT * s, width, height}
+	panel := render.Rect{5 * s, ui.TITLE_BAR_HEIGHT * s, width, height}
 	grid_height := max(0, height - 150 * s)
 	visible := clamp(int((grid_height + 4 * s) / (48 * s)), 0, rows)
 	grid_width := max(0, min(width - 24 * s, f32(columns) * 48 * s - 4 * s))

@@ -114,6 +114,7 @@ Action :: enum u32 {
 	Palette_Workspaces,
 	Palette_Settings,
 	Palette_Commands,
+	Toggle_Tabs_Rail,
 }
 
 @(private)
@@ -342,6 +343,11 @@ ACTIONS :: [Action]Action_Info {
 	.Palette_Workspaces = {"app.palette_workspaces", "Show Palette: Workspaces", nil},
 	.Palette_Settings = {"app.palette_settings", "Show Palette: Settings", nil},
 	.Palette_Commands = {"app.palette_commands", "Show Palette: Commands", nil},
+	.Toggle_Tabs_Rail = {
+		"view.tabs_rail",
+		"Show or Hide the Tab Rail",
+		{{.B, {.Control, .Shift}}},
+	},
 }
 
 @(require_results)
@@ -539,16 +545,25 @@ run_action :: proc(
 		pane_close(app, w)
 	case .Next_Tab:
 		tab_select(app, w, (w.workspace.selected + 1) % len(w.workspace.tabs))
+		rail_overlay_dismiss(app, w)
 	case .Previous_Tab:
 		tab_select(
 			app,
 			w,
 			(w.workspace.selected + len(w.workspace.tabs) - 1) % len(w.workspace.tabs),
 		)
+		rail_overlay_dismiss(app, w)
 	case .Tab_1, .Tab_2, .Tab_3, .Tab_4, .Tab_5, .Tab_6, .Tab_7, .Tab_8, .Tab_9:
-		tab_select(app, w, int(action) - int(Action.Tab_1))
+		index := int(action) - int(Action.Tab_1)
+		if index >= 0 && index < len(w.workspace.tabs) {
+			tab_select(app, w, index)
+			rail_overlay_dismiss(app, w)
+		}
 	case .Last_Tab:
-		tab_select(app, w, len(w.workspace.tabs) - 1)
+		if len(w.workspace.tabs) > 0 {
+			tab_select(app, w, len(w.workspace.tabs) - 1)
+			rail_overlay_dismiss(app, w)
+		}
 	case .Close_Tab:
 		tab_close_request(app, w, w.workspace.selected)
 	case .Focus_Previous, .Focus_Next:
@@ -608,6 +623,8 @@ run_action :: proc(
 		resize_pane(app, w, action, 10)
 	case .Resize_Left_Large, .Resize_Right_Large, .Resize_Up_Large, .Resize_Down_Large:
 		resize_pane(app, w, action, 50)
+	case .Toggle_Tabs_Rail:
+		rail_toggle(app, w)
 	}
 }
 

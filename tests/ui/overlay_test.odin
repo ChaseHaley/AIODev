@@ -12,7 +12,7 @@ caption_claim_and_hit_test_share_one_boundary :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.25, 1.5, 2, 3}) {
 		width := 1000 * scale
 		claim := ui.caption_claim_height(scale)
-		testing.expect_value(t, claim, ui.TAB_HEIGHT * scale)
+		testing.expect_value(t, claim, ui.TITLE_BAR_HEIGHT * scale)
 		testing.expect_value(t, ui.caption_hit(width, width - 10 * scale, claim, scale), -1)
 		testing.expect_value(t, ui.caption_hit(width, width - 10 * scale, claim - 1, scale), 2)
 		for i in 0 ..< 3 {

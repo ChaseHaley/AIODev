@@ -16,7 +16,7 @@ workspace_dropdown_geometry_keeps_anchor_divider_and_rows_at_dpi :: proc(t: ^tes
 			append(&w.workspace_picker.rows, app.Workspace_Row{1, ""}, app.Workspace_Row{2, ""})
 			r, visible := app.workspace_picker_rect(&w)
 			testing.expect_value(t, r.x, 5*scale)
-			testing.expect_value(t, r.y, ui.TAB_HEIGHT*scale)
+			testing.expect_value(t, r.y, ui.TITLE_BAR_HEIGHT*scale)
 			testing.expect(t, r.x+r.width <= f32(w.width) && r.y+r.height <= f32(w.height))
 			testing.expect_value(t, visible, 2+len(app.WORKSPACE_ACTIONS))
 			for i in 0..<visible {

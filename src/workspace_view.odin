@@ -10,7 +10,6 @@ Workspace_View_Resources :: struct {
 	tree: ^layout.Layout,
 	editor: ui.Editor,
 	views: [dynamic]Pane_View,
-	using presentation: Tab_Presentation,
 	panes: [dynamic]layout.Pane_Rect,
 	dividers: [dynamic]layout.Divider,
 }
@@ -20,7 +19,6 @@ workspace_view_init :: proc(app: ^App, resources: ^Workspace_View_Resources, wor
 	resources.workspace, resources.tree = workspace, &selected_tab(workspace).tree
 	resources.views = make([dynamic]Pane_View)
 	resources.panes = make([dynamic]layout.Pane_Rect)
-	tab_presentation_init(&resources.presentation)
 	if settings_tab_index(workspace) >= 0 && !settings_load(app, &resources.editor) {
 		workspace_view_destroy(resources)
 		return false
@@ -39,8 +37,7 @@ workspace_view_prepare :: proc(
 	if !workspace_view_init(app, resources, workspace) {return false}
 	prepared := false
 	defer if !prepared {workspace_view_destroy(resources)}
-	if !tab_presentation_resize(&resources.presentation, len(workspace.tabs)) ||
-	   reserve(&resources.panes, len(resources.tree.nodes)) != nil ||
+	if reserve(&resources.panes, len(resources.tree.nodes)) != nil ||
 	   reserve(&resources.dividers, len(resources.tree.nodes)) != nil ||
 	   reserve(&resources.views, len(resources.tree.nodes)) != nil {return false}
 	walk := workspace_tab_panes(app, resources.tree, resources.workspace.selected)
@@ -64,7 +61,6 @@ workspace_view_destroy :: proc(resources: ^Workspace_View_Resources) {
 		}
 	}
 	delete(resources.views)
-	tab_presentation_destroy(&resources.presentation)
 	delete(resources.panes)
 	delete(resources.dividers)
 	ui.editor_destroy(&resources.editor)
@@ -82,7 +78,6 @@ workspace_view_rebind :: proc(destination, prepared: ^Workspace_View_Resources) 
 	assert(destination != prepared)
 	destination.editor, prepared.editor = prepared.editor, destination.editor
 	destination.workspace, destination.tree = prepared.workspace, prepared.tree
-	tab_presentation_clear(&destination.presentation)
 	workspace_view_destroy(prepared)
 }
 
@@ -125,13 +120,10 @@ workspace_adopt :: proc(
 		workspace_view_move(&w.resources, &prepared)
 	}
 	if workspace.selection_anchor == 0 {tab_select_one(workspace, workspace.selected)}
-	w.tab_underline = {
-		value  = f32(workspace.selected),
-		target = f32(workspace.selected),
-	}
-	w.tab_hover, w.tab_pressed = -1, false
 	ui.armed_cancel(&w.tab_close_armed)
+	w.rail_hover, w.rail_pressed = -1, -1
 	window_relayout(app, w)
+	rail_reveal_active(app, w)
 	focus_enter(app, w)
 	return true
 }
