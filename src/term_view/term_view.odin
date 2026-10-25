@@ -27,6 +27,8 @@ Style :: struct {
 	minimum_contrast:                                                 f32,
 	focused:                                                          bool,
 	cursor_phase_visible:                                             bool,
+	// The link under the pointer is view state, not cell style: it only adds an underline overlay.
+	hover:                                                            Maybe(term.Link_Range),
 }
 
 Frame :: struct {
@@ -47,6 +49,7 @@ View :: struct {
 	columns:    [dynamic]int,
 	shaped:     [dynamic]font.Shaped_Glyph,
 	contrast:   Contrast_Cache,
+	links:      term.Link_Map,
 }
 
 @(require_results)
@@ -58,7 +61,8 @@ create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	v.runes = make([dynamic]rune, allocator)
 	v.columns = make([dynamic]int, allocator)
 	v.shaped = make([dynamic]font.Shaped_Glyph, allocator)
-	ok := ghostty.render_state_new(nil, &v.state) == .Success
+	ok := term.link_map_create(&v.links, allocator)
+	ok &&= ghostty.render_state_new(nil, &v.state) == .Success
 	ok &&= ghostty.render_state_row_iterator_new(nil, &v.rows) == .Success
 	ok &&= ghostty.render_state_row_cells_new(nil, &v.cells) == .Success
 	if !ok {
@@ -71,6 +75,7 @@ destroy :: proc(v: ^View) {
 	ghostty.render_state_row_cells_free(v.cells)
 	ghostty.render_state_row_iterator_free(v.rows)
 	ghostty.render_state_free(v.state)
+	term.link_map_destroy(&v.links)
 	delete(v.codepoints)
 	delete(v.highlights)
 	delete(v.marks)
@@ -79,6 +84,16 @@ destroy :: proc(v: ^View) {
 	delete(v.columns)
 	delete(v.shaped)
 	v^ = {}
+}
+
+// links_refresh rescans only when the terminal changed since the last scan. Hover hit-testing
+// then reads the stored spans without touching libghostty.
+@(require_results)
+links_refresh :: proc(v: ^View, s: ^term.Session) -> bool {
+	if v.links.valid && v.links.generation == term.generation(s) {
+		return true
+	}
+	return term.link_map_scan(&v.links, s)
 }
 
 // Cell size comes from the regular face's advance and line metrics, rounded to whole pixels so
@@ -399,6 +414,25 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 			return result
 		}
 	}
+	if hover, has := b.style.hover.?; has {
+		first, last := hover_columns(hover, y, b.columns)
+		for x := max(first, 0); x <= last && x < len(v.paints); x += 1 {
+			p := v.paints[x]
+			if p.width == .Spacer_Tail || p.width == .Spacer_Head {continue}
+			if ghostty.Sgr_Underline(p.style.underline) != .None {continue}
+			width := m.cell_width * (p.width == .Wide ? 2 : 1)
+			rect(
+				b,
+				{
+					b.origin.x + f32(x) * m.cell_width,
+					top + m.baseline + m.underline_offset,
+					width,
+					m.underline_thickness,
+				},
+				p.foreground,
+			)
+		}
+	}
 	clear(&v.runes)
 	clear(&v.columns)
 	face: font.Style
@@ -451,6 +485,23 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		face, previous = next_face, x
 	}
 	return draw_run(v, b, face, top)
+}
+
+@(private, require_results)
+hover_columns :: proc(r: term.Link_Range, row, columns: int) -> (first, last: int) {
+	if row < r.first_row || row > r.last_row {
+		return 1, 0
+	}
+	if r.first_row == r.last_row {
+		return max(r.first_column, 0), min(r.last_column, columns - 1)
+	}
+	if row == r.first_row {
+		return max(r.first_column, 0), columns - 1
+	}
+	if row == r.last_row {
+		return 0, min(r.last_column, columns - 1)
+	}
+	return 0, columns - 1
 }
 
 @(private)

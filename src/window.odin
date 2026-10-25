@@ -31,6 +31,7 @@ Pane_View :: struct {
 	header_controls: [4]ui.Control_Motion,
 	header_hover:   ui.Header_Action,
 	header_armed:   ui.Armed(ui.Header_Action),
+	hover:          Maybe(term.Link_Range),
 }
 
 Window :: struct {
@@ -510,11 +511,16 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		}
 		entry := session_find(app, pane.content.id)
 		view := pane_view(w, pane.content)
+		state := link_pane(w, pane.content)
 		if entry == nil || view == nil {
 			continue
 		}
 		content_focused :=
 			w.focused && pane.node == w.tree.focus && !palette_active(app, w) && !w.find.open
+		hover: Maybe(term.Link_Range)
+		if state != nil {
+			hover = state.hover
+		}
 		style := term_view.Style {
 			family = app.family,
 			selection_background = color(c.selection_background),
@@ -526,6 +532,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			minimum_contrast = app.settings.theme.mode == .Light ? f32(app.settings.terminal.minimum_contrast) : 1,
 			focused = content_focused,
 			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
+			hover = hover,
 		}
 		box := pane_box(
 			w.metrics,

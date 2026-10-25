@@ -29,6 +29,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.caption_armed)
 	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
+	link_hover_clear(w)
 	if palette_active(app, w) {ui.palette_input_release(&app.palette)}
 	ui.editor_hover_clear(&w.editor)
 	ui.editor_release(&w.editor)
@@ -298,8 +299,14 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if entry == nil {
 		return
 	}
+	if e.button == .Left && e.pressed && !w.selecting && .Control in e.modifiers {
+		if link_click(app, w, x, y) {
+			return
+		}
+	}
 	if e.button == .Left && (w.selecting || !reports_mouse(entry, e.modifiers)) {
 		if e.pressed {
+			link_hover_clear(w)
 			w.selecting = true
 			term.selection_press(entry.session, x, y, e.time_ns)
 		}
@@ -318,10 +325,12 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}
 	if workspace_picker_active(&w.workspace_picker) {
+		link_hover_clear(w)
 		workspace_picker_hover(app, w, e)
 		return
 	}
 	if w.tab_menu.open {
+		link_hover_clear(w)
 		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); tab_menu_enabled(w, hit) && hit != w.tab_menu.selected {
 			w.tab_menu.selected, w.dirty = hit, true
 		}
@@ -329,6 +338,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		return
 	}
 	if w.profile_menu.open {
+		link_hover_clear(w)
 		if hit := profile_menu_hit(w, f32(e.x), f32(e.y));
 		   hit >= 0 && hit != w.profile_menu.menu.selected {
 			w.profile_menu.menu.selected, w.dirty = hit, true
@@ -337,6 +347,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		return
 	}
 	if w.rename_open {
+		link_hover_clear(w)
 		field := rename_field_rect(w)
 		x, y := f32(e.x), f32(e.y)
 		inside :=
@@ -349,6 +360,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover {w.caption_hover = caption; w.dirty = true}
 	if w.pending_swap.confirm.open {
+		link_hover_clear(w)
 		l := ui.confirm_layout(
 			f32(w.width),
 			f32(w.height),
@@ -361,6 +373,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		return
 	}
 	if w.pending_close.confirm.open {
+		link_hover_clear(w)
 		if ui.confirm_hover(
 			&w.pending_close.confirm,
 			ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended),
@@ -400,6 +413,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		}
 	}
 	if palette_active(app, w) {
+		link_hover_clear(w)
 		split_overlay_update(w, x, y, false)
 		pane_header_pointer(w, x, y, false)
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -420,6 +434,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		l, available := find_controls(w, focused_session(app, w))
 		if ui.find_hover(&w.find, l, available, x, y) { w.dirty = true }
 		if ui.find_contains(l, x, y) || ui.armed_down(w.find.armed) {
+			link_hover_clear(w)
 			split_overlay_update(w, x, y, false)
 			pane_header_pointer(w, x, y, false)
 			pointer_set(app, w, ui.find_hit(l, x, y) == .None ? .Text : .Arrow)
@@ -434,6 +449,13 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	if y < bar.height {shape = .Arrow}
 	resize, over_divider := divider_cursor(w, x, y)
 	if over_divider && w.header_buttons == {} {shape = resize}
+	link_hovered := false
+	if enabled && !over_header && !over_divider && w.header_buttons == {} && y >= bar.height {
+		link_hovered = link_hover_update(app, w, x, y)
+	} else {
+		link_hover_clear(w)
+	}
+	if link_hovered {shape = .Hand}
 	pointer_set(app, w, shape)
 	if over_header || w.header_buttons != {} {return}
 	if enabled && !over_divider {

@@ -68,6 +68,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.workspace_hovered = false
 			w.workspace_picker.menu_hover = 0
 			ui.editor_hover_clear(&w.editor)
+			link_hover_clear(w)
 			w.split_overlay = false
 			for &view in w.views {
 				view.header_hover = .None

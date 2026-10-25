@@ -5,6 +5,7 @@ import "core:log"
 import "core:strings"
 import w "core:sys/windows"
 import "core:unicode/utf16"
+import "aio:links"
 
 @(require_results)
 window_show_inactive :: proc(p: ^Platform, id: Window_Id) -> Error {
@@ -322,6 +323,26 @@ open_path :: proc(path: string) -> bool {
 		return false
 	}
 	text := w.utf8_to_wstring(path, context.allocator)
+	if text == nil {return false}
+	defer delete(text)
+	result := w.ShellExecuteW(nil, nil, text, nil, nil, w.SW_SHOWNORMAL)
+	if uintptr(result) <= SHELL_EXECUTE_ERROR_MAX {
+		log.errorf("ShellExecuteW failed: code %d", uintptr(result))
+		return false
+	}
+	return true
+}
+
+// open_url hands a web target to the system's default browser. It never runs a command shell:
+// the URI is passed straight to ShellExecuteW after the shared allowlist has refused every
+// non-http(s) scheme, Windows path shape, credential form and control character.
+@(require_results)
+open_url :: proc(uri: string) -> bool {
+	if !links.allowed(uri) {
+		log.warnf("platform: refusing to open a non-web target")
+		return false
+	}
+	text := w.utf8_to_wstring(uri, context.allocator)
 	if text == nil {return false}
 	defer delete(text)
 	result := w.ShellExecuteW(nil, nil, text, nil, nil, w.SW_SHOWNORMAL)

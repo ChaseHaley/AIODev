@@ -345,6 +345,7 @@ when AIO_CONTROL {
 			   row != nil {editor_key, editor_title = row.key, row.title}
 			confirm := pending_close_text(app, &w.pending_close, w.workspace)
 			picker_rect, _ := workspace_picker_rect(w)
+			link_hover, link_uri, link_spans := verify_link_hover(w)
 			slider := render.Rect{}
 			page: ui.Editor_Layout
 			if settings_active(w) {
@@ -462,6 +463,10 @@ when AIO_CONTROL {
 				{"workspace.picker.icon_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Icons))},
 				{"window.preparing", fmt.tprintf("%t", w.preparing)},
 				{"window.preview_visible", fmt.tprintf("%t", w.preview_visible)},
+				{"pointer.shape", strings.to_lower(fmt.tprintf("%v", w.pointer_shape), context.temp_allocator)},
+				{"link.hover", link_hover},
+				{"link.uri", link_uri},
+				{"link.spans", fmt.tprintf("%d", link_spans)},
 				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
@@ -681,6 +686,35 @@ when AIO_CONTROL {
 			}
 		}
 		return entries[:], .None
+	}
+
+	// Hover state and the link count are enough to prove the interaction from a control journey
+	// without reading pixels: the range and target name the cells under the pointer, and the
+	// cursor shape is what the OS was asked to show.
+	verify_link_hover :: proc(w: ^Window) -> (hover, uri: string, spans: int) {
+		hover = "none"
+		for &view, i in w.views {
+			spans += len(view.view.links.spans)
+			range, ok := view.hover.?
+			if !ok || hover != "none" {
+				continue
+			}
+			hover = fmt.tprintf(
+				"%d,%d-%d,%d",
+				range.first_row,
+				range.first_column,
+				range.last_row,
+				range.last_column,
+			)
+			if _, target, found := term.link_at(
+				&w.views[i].view.links,
+				range.first_column,
+				range.first_row,
+			); found {
+				uri = target
+			}
+		}
+		return
 	}
 
 	verify_find_count :: proc(w: ^Window, entry: ^Session_Entry) -> string {

@@ -36,3 +36,27 @@ open_path_accepts_only_local_paths :: proc(t: ^testing.T) {
 		)
 	}
 }
+
+// The opener repeats the allowlist at the last boundary. Refused targets must return without
+// reaching ShellExecuteW, so this test can run without a browser or any visible window.
+@(test)
+open_url_refuses_everything_but_plain_web_targets :: proc(t: ^testing.T) {
+	for uri in ([?]string {
+		"",
+		"file:///C:/Windows/win.ini",
+		"ssh://example.com/repo",
+		"javascript:alert(1)",
+		"data:text/html,hello",
+		"mailto:someone@example.com",
+		"ftp://example.com/file",
+		`\\server\share\file`,
+		`http://\\server\share`,
+		"http://C:/Windows",
+		"http://",
+		"http:///path",
+		"http://user@example.com",
+		"http://exa mple.com",
+	}) {
+		testing.expectf(t, !p.open_url(uri), "opened refused target %q", uri)
+	}
+}

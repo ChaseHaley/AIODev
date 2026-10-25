@@ -105,6 +105,8 @@ App :: struct {
 	tray_hint_shown:       bool,
 	settings_migration_noticed: bool,
 	process_deadline:      time.Tick,
+	// Tests replace this to observe Ctrl+click without launching a browser.
+	open_url:              proc(uri: string) -> bool,
 }
 
 @(require_results)
@@ -504,6 +506,7 @@ update_sessions :: proc(app: ^App) {
 		generation := window_generation(app, window)
 		if generation != window.generation {
 			window.generation = generation
+			link_hover_refresh(app, window)
 			window.dirty = true
 		}
 	}
