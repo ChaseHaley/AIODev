@@ -34,6 +34,9 @@ allowed_accepts_only_plain_web_targets :: proc(t: ^testing.T) {
 		{"http://exa mple.com", "space", false},
 		{"http://example.com/\x00", "NUL", false},
 		{"http://example.com/\t", "tab", false},
+		{"http://example.com/\u0085", "C1 control", false},
+		{"http://example.com/\u2028", "line separator", false},
+		{"http://example.com/\u00a0", "non-breaking space", false},
 		{"https://example.com/a\\b", "backslash in path", false},
 		{"", "empty", false},
 		{"C:\\Users\\file.txt", "plain path", false},
@@ -88,6 +91,19 @@ find_keeps_targets_and_drops_prose_punctuation :: proc(t: ^testing.T) {
 		{"https://example.com/?a=(b)", {"https://example.com/?a=(b)"}, "balanced query parens"},
 		{"see https://example.com/a\u2026", {"https://example.com/a"}, "unicode ellipsis"},
 		{"\u201chttps://example.com/a\u201d", {"https://example.com/a"}, "curly quotes"},
+		{
+			"https://example.com/a,https://example.com/b",
+			{"https://example.com/a", "https://example.com/b"},
+			"adjacent comma-separated targets",
+		},
+		{
+			"https://a;https://b",
+			{"https://a", "https://b"},
+			"adjacent semicolon-separated targets",
+		},
+		{"\u770b https://example.com/a\u3002", {"https://example.com/a"}, "CJK full stop"},
+		{"https://example.com/a\u00a0", {"https://example.com/a"}, "non-breaking space"},
+		{"https://example.com/a\u2014", {"https://example.com/a"}, "em dash"},
 	}
 	for c in cases {
 		ranges: [dynamic]links.Range

@@ -170,6 +170,28 @@ osc8_link_wraps_as_one_range :: proc(t: ^testing.T) {
 }
 
 @(test)
+osc8_link_across_a_hard_break_keeps_both_segments :: proc(t: ^testing.T) {
+	text :=
+		"\x1b]8;;https://example.com/two\x1b\\" +
+		"AAAA\r\nBBBB" +
+		"\x1b]8;;\x1b\\"
+	source, ok := link_source(t, text, 20, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	range, uri, found := term.link_at(&m, 0, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, "https://example.com/two")
+	testing.expect_value(t, range, term.Link_Range{0, 0, 0, 3})
+	_, tail_uri, tail_found := term.link_at(&m, 0, 1)
+	testing.expect(t, tail_found)
+	testing.expect_value(t, tail_uri, "https://example.com/two")
+	testing.expect_value(t, len(m.spans), 2)
+}
+
+@(test)
 a_url_starting_above_the_viewport_is_clickable_where_drawn :: proc(t: ^testing.T) {
 	text := "https://example.com/" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	source, ok := link_source(t, text, 20, 3)
@@ -202,6 +224,27 @@ a_url_running_below_the_viewport_keeps_its_full_target :: proc(t: ^testing.T) {
 	_, uri, found := term.link_at(&m, 0, 2)
 	testing.expect(t, found, "the visible start of a URL continuing below is a target")
 	testing.expect_value(t, uri, "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+}
+
+@(test)
+an_overlong_line_does_not_hide_other_links :: proc(t: ^testing.T) {
+	text := strings.builder_make()
+	defer strings.builder_destroy(&text)
+	chunk := strings.repeat("a", 1000)
+	defer delete(chunk)
+	for _ in 0 ..< 70 {
+		strings.write_string(&text, chunk)
+	}
+	strings.write_string(&text, "\r\nhttps://example.com/ok")
+	source, ok := link_source(t, strings.to_string(text), 200, 4)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, uri, found := term.link_at(&m, 0, 3)
+	testing.expect(t, found, "a separate line stays a target beside an overlong one")
+	testing.expect_value(t, uri, "https://example.com/ok")
 }
 
 @(test)

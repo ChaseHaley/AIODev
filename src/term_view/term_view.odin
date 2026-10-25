@@ -416,15 +416,36 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	}
 	if hover, has := b.style.hover.?; has {
 		first, last := hover_columns(hover, y, b.columns)
-		for x := max(first, 0); x <= last && x < len(v.paints); x += 1 {
+		x := max(first, 0)
+		for x <= last && x < len(v.paints) {
 			p := v.paints[x]
-			if p.width == .Spacer_Tail || p.width == .Spacer_Head {continue}
-			if ghostty.Sgr_Underline(p.style.underline) != .None {continue}
+			if p.width == .Spacer_Tail || p.width == .Spacer_Head {
+				x += 1
+				continue
+			}
+			if ghostty.Sgr_Underline(p.style.underline) != .None {
+				x += 1
+				continue
+			}
+			start := x
 			width := m.cell_width * (p.width == .Wide ? 2 : 1)
+			x += 1
+			if p.width == .Narrow {
+				for x <= last && x < len(v.paints) {
+					next := v.paints[x]
+					if next.width != .Narrow ||
+					   next.foreground != p.foreground ||
+					   ghostty.Sgr_Underline(next.style.underline) != .None {
+						break
+					}
+					width += m.cell_width
+					x += 1
+				}
+			}
 			rect(
 				b,
 				{
-					b.origin.x + f32(x) * m.cell_width,
+					b.origin.x + f32(start) * m.cell_width,
 					top + m.baseline + m.underline_offset,
 					width,
 					m.underline_thickness,

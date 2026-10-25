@@ -314,7 +314,6 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	if e.button == .Left && (w.selecting || !reports_mouse(entry, e.modifiers)) {
 		if e.pressed {
-			link_hover_clear(w)
 			w.selecting = true
 			term.selection_press(entry.session, x, y, e.time_ns)
 		}

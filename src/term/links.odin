@@ -280,6 +280,16 @@ screen_top :: proc(terminal: ghostty.Terminal) -> (u32, bool) {
 }
 
 @(private, require_results)
+has_space :: proc(bytes: []u8) -> bool {
+	for c in bytes {
+		if c == ' ' || c == '\t' {
+			return true
+		}
+	}
+	return false
+}
+
+@(private, require_results)
 prefix_bytes :: proc(
 	m: ^Link_Map,
 	terminal: ghostty.Terminal,
@@ -306,11 +316,15 @@ prefix_bytes :: proc(
 	}
 	before := len(m.line_text)
 	for i := count - 1; i >= 0; i -= 1 {
+		row_start := len(m.line_text)
 		if !append_screen_row(m, terminal, rows[i], columns) {
 			return 0, false
 		}
 		if len(m.line_text) - before > PREFIX_BYTE_LIMIT {
 			return 0, false
+		}
+		if has_space(m.line_text[row_start:]) {
+			break
 		}
 	}
 	return len(m.line_text) - before, true
@@ -333,6 +347,7 @@ suffix_bytes :: proc(
 	cursor := top + u32(rows)
 	count := 0
 	for count < PREFIX_ROW_LIMIT && row_continues(terminal, .Screen, cursor) {
+		row_start := len(m.line_text)
 		if !append_screen_row(m, terminal, cursor, columns) {
 			return 0, false
 		}
@@ -340,6 +355,9 @@ suffix_bytes :: proc(
 		cursor += 1
 		if len(m.line_text) - before > PREFIX_BYTE_LIMIT {
 			return 0, false
+		}
+		if has_space(m.line_text[row_start:]) {
+			break
 		}
 	}
 	return len(m.line_text) - before, true
@@ -493,15 +511,19 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 	for y < rows {
 		clear(&m.line_text)
 		clear(&m.line_cell)
+		end := y
+		for end + 1 < rows && m.row_wrap[end + 1] {
+			end += 1
+		}
 		if y == 0 && m.row_wrap[0] {
 			if _, ok := prefix_bytes(m, terminal, columns); !ok {
-				return false
+				y = end + 1
+				continue
 			}
 		}
-		end := y
-		for {
-			start := m.row_start[end]
-			length := m.row_length[end]
+		for row := y; row <= end; row += 1 {
+			start := m.row_start[row]
+			length := m.row_length[row]
 			if !append_range(
 				&m.line_text,
 				&m.line_cell,
@@ -510,14 +532,11 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 			) {
 				return false
 			}
-			if end + 1 >= rows || !m.row_wrap[end + 1] {
-				break
-			}
-			end += 1
 		}
 		if end == rows - 1 {
 			if _, ok := suffix_bytes(m, terminal, columns, rows); !ok {
-				return false
+				y = end + 1
+				continue
 			}
 		}
 		clear(&m.urls)

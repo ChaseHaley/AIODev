@@ -138,6 +138,21 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 	testing.expect(t, hovered)
 	testing.expect_value(t, hover, term.Link_Range{0, 0, 0, 22})
 
+	g := term.geometry(entry.session)
+	grid_point, grid_ok := link_point(t, &f, 0, 0)
+	if !grid_ok {return}
+	app.handle_event(
+		s,
+		platform.Mouse_Move_Event {
+			window = w.id,
+			x = grid_point.x - i32(g.cell_width / 2) - 1,
+			y = grid_point.y,
+		},
+	)
+	testing.expect_value(t, w.pointer_shape, platform.Cursor_Shape.Text)
+	_, still_hovered := view.hover.?
+	testing.expect(t, !still_hovered, "padding beside the grid is not a link cell")
+
 	term.select_all(entry.session)
 	before, selected := term.selection_text(entry.session, context.temp_allocator)
 	testing.expect(t, selected)

@@ -17,7 +17,16 @@ allowed :: proc(uri: string) -> bool {
 		return false
 	}
 	for c in uri {
-		if c <= 0x20 || c == 0x7f || c == '\\' || c == '"' || c == '<' || c == '>' {
+		if c <= 0x20 ||
+		   c == 0x7f ||
+		   (c >= 0x80 && c <= 0x9f) ||
+		   c == 0x00a0 ||
+		   c == 0x2028 ||
+		   c == 0x2029 ||
+		   c == '\\' ||
+		   c == '"' ||
+		   c == '<' ||
+		   c == '>' {
 			return false
 		}
 	}
@@ -112,6 +121,10 @@ find :: proc(text: string, out: ^[dynamic]Range) -> bool {
 			   c == '`' || c == '|' {
 				break
 			}
+			if (c == ',' || c == ';') &&
+			   (scheme_starts(text, end + 1, "https") || scheme_starts(text, end + 1, "http")) {
+				break
+			}
 			end += 1
 		}
 		trimmed := trim_prose(text, start, end)
@@ -202,12 +215,21 @@ trim_prose :: proc(text: string, start, end: int) -> int {
 			trim -= 1
 		case:
 			switch {
-			case strings.has_suffix(text[start:trim], "\u2026"):
+			case strings.has_suffix(text[start:trim], "\u2026"),
+			     strings.has_suffix(text[start:trim], "\u3002"),
+			     strings.has_suffix(text[start:trim], "\u3001"),
+			     strings.has_suffix(text[start:trim], "\u300d"),
+			     strings.has_suffix(text[start:trim], "\u300f"),
+			     strings.has_suffix(text[start:trim], "\uff09"),
+			     strings.has_suffix(text[start:trim], "\uff0c"),
+			     strings.has_suffix(text[start:trim], "\u2014"),
+			     strings.has_suffix(text[start:trim], "\u2013"):
 				trim -= 3
 			case strings.has_suffix(text[start:trim], "\u2019"),
 			     strings.has_suffix(text[start:trim], "\u201d"):
 				trim -= 3
-			case strings.has_suffix(text[start:trim], "\u00bb"):
+			case strings.has_suffix(text[start:trim], "\u00bb"),
+			     strings.has_suffix(text[start:trim], "\u00a0"):
 				trim -= 2
 			case:
 				return trim
