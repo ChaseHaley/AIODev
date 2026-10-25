@@ -305,3 +305,79 @@ profile_editor_writes_dynamic_keys :: proc(t: ^testing.T) {
 		delete(m)
 	}
 }
+
+@(test)
+profile_names_are_unique_case_insensitively_and_ignore_self :: proc(t: ^testing.T) {
+	s, diagnostics, err := settings.parse(`profile.pwsh.name = PowerShell
+profile.cmd.name = Command Prompt
+`)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	testing.expect(t, settings.profile_name_taken(&s.profiles, "cmd", "powerShell"))
+	testing.expect(t, settings.profile_name_taken(&s.profiles, "cmd", "  PowerShell  "))
+	testing.expect(t, !settings.profile_name_taken(&s.profiles, "pwsh", "POWERSHELL"))
+	testing.expect(t, !settings.profile_name_taken(&s.profiles, "cmd", "pwsh"))
+	testing.expect(t, !settings.profile_name_taken(&s.profiles, "cmd", ""))
+}
+
+@(test)
+profile_order_moves_do_not_duplicate_ids :: proc(t: ^testing.T) {
+	ids := [?]string{"default", "pwsh", "cmd"}
+	out: [3]string
+	moved := settings.profile_move(ids[:], 0, 2, out[:])
+	testing.expect_value(t, len(moved), 3)
+	testing.expect_value(t, moved[0], "pwsh")
+	testing.expect_value(t, moved[1], "default")
+	testing.expect_value(t, moved[2], "cmd")
+
+	moved = settings.profile_move(ids[:], 2, 0, out[:])
+	testing.expect_value(t, moved[0], "cmd")
+	testing.expect_value(t, moved[1], "default")
+	testing.expect_value(t, moved[2], "pwsh")
+
+	moved = settings.profile_move(ids[:], 1, 1, out[:])
+	testing.expect_value(t, moved[0], "default")
+	testing.expect_value(t, moved[1], "pwsh")
+	testing.expect_value(t, moved[2], "cmd")
+}
+
+@(test)
+profile_order_text_lists_the_table_then_the_rest :: proc(t: ^testing.T) {
+	others := [?]string{"cmd", "wsl-ubuntu"}
+	text, text_error := settings.profile_order_text(
+		[]string{"pwsh", "default"},
+		others[:],
+		context.allocator,
+	)
+	defer delete(text)
+	testing.expect_value(t, text_error, nil)
+	testing.expect_value(t, text, "pwsh, default, cmd, wsl-ubuntu")
+}
+
+@(test)
+default_and_hidden_writes_use_the_existing_keys :: proc(t: ^testing.T) {
+	first, first_message, first_error := settings.edit_text("", "shell.default_profile", "pwsh")
+	defer delete(first)
+	defer delete(first_message)
+	testing.expect_value(t, first_error, nil)
+	testing.expect_value(t, first_message, "")
+	second, second_message, second_error := settings.edit_text(first, "profile.pwsh.hidden", "true")
+	defer delete(second)
+	defer delete(second_message)
+	testing.expect_value(t, second_error, nil)
+	testing.expect_value(t, second_message, "")
+	parsed, diagnostics, parse_error := settings.parse(second)
+	defer settings.destroy(&parsed)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	testing.expect_value(t, parsed.shell.default_profile, "pwsh")
+	pwsh := settings.profile_find(&parsed.profiles, "pwsh")
+	if testing.expect(t, pwsh != nil) {
+		testing.expect_value(t, pwsh.hidden, true)
+		testing.expect_value(t, pwsh.hidden_set, true)
+	}
+	testing.expect(t, !strings.has_prefix(second, "profile.pwsh.hidden"))
+}

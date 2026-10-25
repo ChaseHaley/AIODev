@@ -50,7 +50,7 @@ settings_reveal_page :: proc(app: ^App, p: ^ui.Editor, reveal: Settings_Reveal) 
 	if reveal.reload && !settings_load(app, p) {return}
 	ui.field_set(&p.filter, query)
 	ui.editor_filter(p)
-	selected := reveal.key != "" && ui.editor_select_key(p, reveal.key)
+	selected := reveal.key != "" && ui.editor_reveal(p, reveal.key)
 	if reveal.focus == .Control && selected {
 		// Shortcut rows capture chords instead of typing, so they keep focus in the search.
 		if row := ui.editor_row(p); row != nil && row.kind != .Shortcut {p.focus = .Control}

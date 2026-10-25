@@ -565,6 +565,91 @@ text_less :: proc(a, b: string) -> bool {
 	return len(a) < len(b)
 }
 
+// Whether `id` already has an explicit place in profile.order. Detected profiles that are only
+// detected keep their implicit ID order; a drag must not write them into the file.
+profile_order_has :: proc(p: ^Profiles, id: string) -> bool {
+	for known in p.order {
+		if known == id {return true}
+	}
+	return false
+}
+
+// Whether another profile already shows `name`. Surrounding space and case are ignored, and the
+// profile named by `id` is skipped so re-saving an unchanged name is allowed.
+profile_name_taken :: proc(p: ^Profiles, id, name: string) -> bool {
+	target := strings.trim_space(name)
+	if target == "" {return false}
+	for &profile in p.items {
+		if profile.id == id {continue}
+		if strings.equal_fold(strings.trim_space(profile.name), target) {return true}
+	}
+	return false
+}
+
+// Moves the profile at `from` into the gap before `to`, which is indexed in `ids` before the move.
+// `out` receives the reordered IDs and must hold at least len(ids) entries.
+profile_move :: proc(ids: []string, from, to: int, out: []string) -> []string {
+	count := min(len(ids), len(out))
+	if count == 0 {return out[:0]}
+	index := clamp(from, 0, count - 1)
+	slot := clamp(to, 0, count)
+	if slot > index {slot -= 1}
+	written := 0
+	for id, i in ids[:count] {
+		if i == index {continue}
+		if written == slot {
+			out[written] = ids[index]
+			written += 1
+		}
+		out[written] = id
+		written += 1
+	}
+	if written < count {
+		out[written] = ids[index]
+		written += 1
+	}
+	return out[:written]
+}
+
+// The order text after a move: the given IDs in order, then every other ID in `others` that is
+// not already listed. Stale IDs are dropped because nothing reads them.
+@(require_results)
+profile_order_text :: proc(
+	ids, others: []string,
+	allocator := context.allocator,
+) -> (
+	text: string,
+	alloc_error: runtime.Allocator_Error,
+) {
+	builder := strings.builder_make(allocator) or_return
+	defer strings.builder_destroy(&builder)
+	first := true
+	for id in ids {
+		if id == "" {continue}
+		if !first {
+			if write_error := write_parts(&builder, ", "); write_error != nil {
+				return "", write_error
+			}
+		}
+		if write_error := write_parts(&builder, id); write_error != nil {return "", write_error}
+		first = false
+	}
+	for id in others {
+		if id == "" {continue}
+		listed := false
+		for known in ids {listed ||= known == id}
+		if listed {continue}
+		if !first {
+			if write_error := write_parts(&builder, ", "); write_error != nil {
+				return "", write_error
+			}
+		}
+		if write_error := write_parts(&builder, id); write_error != nil {return "", write_error}
+		first = false
+	}
+	return strings.clone(strings.to_string(builder), allocator)
+}
+
 // Rewrites the legacy shell keys into profile.default.* and adds the new selection keys. Returns
 // the owned replacement text only when something changed, so an already migrated file is not
 // rewritten on every load. Comments, the BOM and the line ending convention are preserved.

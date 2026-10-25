@@ -24,20 +24,39 @@ Row_Kind :: enum {
 	Optional_Color,
 	Shortcut,
 	Action,
+	// One row per profile, its inline editor, the add row and the collapsed detected section.
+	Profile,
+	Profile_Add,
+	Profile_Icon,
+	Detected_Header,
+	Detected,
+}
+
+// Facts the profile table draws beside a row. Ordinary settings rows leave these unset.
+Editor_Row_Flag :: enum {
+	Default,
+	Hidden,
+	// The profile already has an explicit profile.order entry.
+	Listed,
 }
 
 // Strings are owned by the editor except `choices`, which borrows static schema names. An empty optional
-// color shows `fallback`, the theme color it resolves to.
+// color shows `fallback`, the theme color it resolves to. Profile rows also own `profile`, `badge`,
+// `detail` (extra search text) and `note` (an inline problem).
 Editor_Row :: struct {
 	key, title, description, value, default_value, fallback: string,
 	group:                                                   int,
 	kind:                                                    Row_Kind,
 	minimum, maximum:                                        f64,
 	choices:                                                 []string,
+	profile, badge, detail, note:                            string,
+	flags:                                                   bit_set[Editor_Row_Flag],
 }
 
 Editor_Group :: struct {
 	title: string,
+	// The Profiles group draws column captions on its header line.
+	table: bool,
 }
 
 // One page line: a group header, with its matching row count, when row is -1. Headers are never selected.
@@ -52,6 +71,7 @@ Editor_Drag :: enum {
 	Slider,
 	Wheel,
 	Ramp,
+	Profile_Order,
 }
 
 // Keyboard focus: the search field, the selected row's control, or its key-position switch.
@@ -66,6 +86,28 @@ Editor_Popup :: enum {
 	Choice,
 	Color,
 	Shortcuts,
+}
+
+// The profile table's sub-controls, in Tab and Left/Right order.
+Profile_Control :: enum {
+	Radio,
+	Hidden,
+	Expand,
+	Duplicate,
+	Remove,
+	Enable,
+}
+
+// A profile write the page owner must perform. Expansion, collapse and section toggles stay inside
+// the editor; these outcomes name a settings key the owner writes.
+Profile_Action :: enum {
+	None,
+	Default,
+	Hidden,
+	Order,
+	Enable,
+	Duplicate,
+	Remove,
 }
 
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
@@ -92,12 +134,31 @@ Editor :: struct {
 	source:                                                            string,
 	message:                                                           string,
 	error:                                                             bool,
+	// Table state: the one expanded profile, the detected section, the focused control on a profile
+	// row, and the drag that rewrites profile.order.
+	expanded, remove_confirm:                                          string,
+	detected_open:                                                     bool,
+	profile_control:                                                   Profile_Control,
+	action:                                                            Profile_Action,
+	action_id, action_value:                                           string,
+	drag_id:                                                           string,
+	drag_from, drag_target:                                            int,
+	hover_profile_item:                                                int,
+	hover_profile_control:                                             Profile_Control,
+	error_key, error_profile, error_text:                              string,
 }
 Editor_Outcome :: enum {
 	None,
 	Changed,
 	Save,
 	Reset,
+	Profile_Action,
+}
+
+// Table state a settings reload keeps: expansion, an open removal question and the detected section.
+Editor_View :: struct {
+	expanded, remove_confirm: string,
+	detected_open:            bool,
 }
 
 // Wide pages put the search field and a group outline in a left column; narrow ones have no outline.
@@ -109,9 +170,9 @@ Editor_Layout :: struct {
 
 // The parts of one setting row; zero-sized parts do not exist for its kind.
 Row_Parts :: struct {
-	row, reset, field, toggle, slider, swatch, positions: render.Rect,
-	text_right:                                           f32,
-	positions_label_below:                                bool,
+	row, reset, field, toggle, slider, swatch, positions, clear: render.Rect,
+	text_right:                                                 f32,
+	positions_label_below:                                      bool,
 }
 
 CAPTURE_HINT :: "Press a shortcut. Enter saves this alternative, Esc cancels, Backspace removes it."
@@ -131,12 +192,29 @@ ICON_UNDO :: ''
 ICON_CHEVRON_DOWN :: ''
 @(private)
 ICON_CLEAR :: ''
+@(private)
+ICON_CHEVRON_RIGHT :: '\uE76C'
+@(private)
+ICON_COPY :: '\uE8C8'
+@(private)
+ICON_TRASH :: '\uE74D'
+@(private)
+ICON_PLUS :: '\uE710'
 
 editor_destroy :: proc(p: ^Editor) {
 	for row in p.rows {
-		for s in ([?]string{row.key, row.title, row.description, row.value, row.default_value, row.fallback}) {
-			delete(s)
-		}
+		for s in ([?]string {
+			row.key,
+			row.title,
+			row.description,
+			row.value,
+			row.default_value,
+			row.fallback,
+			row.profile,
+			row.badge,
+			row.detail,
+			row.note,
+		}) {delete(s)}
 	}
 	for group in p.groups {delete(group.title)}
 	delete(p.rows)
@@ -146,7 +224,83 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.value.bytes)
 	delete(p.source)
 	delete(p.message)
+	delete(p.expanded)
+	delete(p.remove_confirm)
+	delete(p.action_id)
+	delete(p.action_value)
+	delete(p.drag_id)
+	delete(p.error_key)
+	delete(p.error_profile)
+	delete(p.error_text)
 	p^ = {}
+}
+
+// Copies the table state a reload must keep. The caller frees the result with editor_view_destroy
+// after editor_restore, which moves the strings into the rebuilt page.
+@(require_results)
+editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime.Allocator_Error) {
+	view.detected_open = p.detected_open
+	view.expanded = strings.clone(p.expanded) or_return
+	view.remove_confirm = strings.clone(p.remove_confirm) or_return
+	return
+}
+
+editor_view_destroy :: proc(view: ^Editor_View) {
+	delete(view.expanded)
+	delete(view.remove_confirm)
+	view^ = {}
+}
+
+// Restores a previous view, dropping a profile that no longer exists. A reload after a successful
+// save must land back on the same expanded row.
+editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
+	p.detected_open = view.detected_open
+	p.expanded, view.expanded = view.expanded, ""
+	p.remove_confirm, view.remove_confirm = view.remove_confirm, ""
+	if p.expanded != "" && !editor_has_profile_row(p, p.expanded) {delete(p.expanded); p.expanded = ""}
+	if p.remove_confirm != "" &&
+	   (!editor_has_profile_row(p, p.remove_confirm) || p.remove_confirm != p.expanded) {
+		delete(p.remove_confirm)
+		p.remove_confirm = ""
+	}
+}
+
+@(private)
+editor_has_profile_row :: proc(p: ^Editor, id: string) -> bool {
+	for row in p.rows {
+		if row.kind == .Profile && row.profile == id {return true}
+	}
+	return false
+}
+
+// Records the settings write a table action asks for. The page owner performs it and clears it.
+editor_action_set :: proc(p: ^Editor, action: Profile_Action, id, value: string) {
+	editor_action_clear(p)
+	p.action = action
+	p.action_id = strings.clone(id)
+	p.action_value = strings.clone(value)
+}
+
+editor_action_clear :: proc(p: ^Editor) {
+	delete(p.action_id)
+	delete(p.action_value)
+	p.action = .None
+	p.action_id, p.action_value = "", ""
+}
+
+// Marks one field row with an inline problem. The status line keeps the long form.
+editor_error_set :: proc(p: ^Editor, profile, key, text: string) {
+	editor_error_clear(p)
+	p.error_key = strings.clone(key)
+	p.error_profile = strings.clone(profile)
+	p.error_text = strings.clone(text)
+}
+
+editor_error_clear :: proc(p: ^Editor) {
+	delete(p.error_key)
+	delete(p.error_profile)
+	delete(p.error_text)
+	p.error_key, p.error_profile, p.error_text = "", "", ""
 }
 
 @(require_results)
@@ -159,19 +313,36 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		   err != nil {delete(title); return err}
 		group_index = len(p.groups) - 1
 	}
-	owned: [6]string
+	owned: [10]string
 	success := false
 	defer if !success {for s in owned {delete(s)}}
-	for s, i in ([?]string{row.key, row.title, row.description, row.value, row.default_value, row.fallback}) {
-		owned[i] = strings.clone(s) or_return
-	}
+	for s, i in ([?]string {
+		row.key,
+		row.title,
+		row.description,
+		row.value,
+		row.default_value,
+		row.fallback,
+		row.profile,
+		row.badge,
+		row.detail,
+		row.note,
+	}) {owned[i] = strings.clone(s) or_return}
 	added := row
 	added.key, added.title, added.description, added.value, added.default_value, added.fallback =
 		owned[0], owned[1], owned[2], owned[3], owned[4], owned[5]
+	added.profile, added.badge, added.detail, added.note = owned[6], owned[7], owned[8], owned[9]
 	added.group = group_index
 	_, err := append(&p.rows, added)
 	success = err == nil
 	return err
+}
+
+// Marks a group as the profile table so its header carries the column captions.
+editor_group_table :: proc(p: ^Editor, group: string) {
+	for &g in p.groups {
+		if g.title == group {g.table = true}
+	}
 }
 
 editor_message :: proc(p: ^Editor, text: string, error: bool) {
@@ -213,6 +384,10 @@ sync_color :: proc(p: ^Editor) {
 @(private)
 stop_editing :: proc(p: ^Editor) {
 	if p.error || p.capturing || p.popup == .Shortcuts {editor_message(p, "", false)}
+	if p.error_text != "" {
+		editor_message(p, "", false)
+		editor_error_clear(p)
+	}
 	p.focus, p.capturing, p.leader_pending, p.captured = .Search, false, false, 0
 	p.drag, p.popup = .None, .None
 	if row := editor_row(p); row != nil {
@@ -223,6 +398,10 @@ stop_editing :: proc(p: ^Editor) {
 
 editor_select :: proc(p: ^Editor, index: int) {
 	if p.error || p.capturing || p.popup == .Shortcuts {editor_message(p, "", false)}
+	if p.error_text != "" {
+		editor_message(p, "", false)
+		editor_error_clear(p)
+	}
 	p.jump_group = -1
 	p.selected = clamp(index, 0, max(0, len(p.items) - 1))
 	p.capturing, p.leader_pending, p.captured, p.drag, p.popup = false, false, 0, .None, .None
@@ -232,6 +411,7 @@ editor_select :: proc(p: ^Editor, index: int) {
 		p.hsv = {0, 0, 1}
 		sync_color(p)
 	}
+	p.profile_control = .Radio
 	if row == nil || row.kind == .Shortcut || p.focus == .Positions {p.focus = .Search}
 	if p.selected < p.scroll {p.scroll = p.selected}
 	if p.selected >= p.scroll + max(1, p.visible_rows) {
@@ -247,6 +427,26 @@ editor_select_key :: proc(p: ^Editor, key: string) -> bool {
 		}
 	}
 	return false
+}
+
+// Selects a settings key, opening the profile row that owns it first. A palette jump or a reveal
+// must be able to land on a field the collapsed table is not showing.
+editor_reveal :: proc(p: ^Editor, key: string) -> bool {
+	for row in p.rows {
+		if row.key != key {continue}
+		field := row.kind != .Profile && row.kind != .Detected
+		if field && row.profile != "" && p.expanded != row.profile {
+			delete(p.expanded)
+			p.expanded = strings.clone(row.profile)
+			if p.remove_confirm != "" {
+				delete(p.remove_confirm)
+				p.remove_confirm = ""
+			}
+			editor_rebuild(p)
+		}
+		break
+	}
+	return editor_select_key(p, key)
 }
 
 // Each query word matches as written or, for plurals such as "panes", without its final s.
@@ -271,6 +471,25 @@ row_matches :: proc(words: []string, haystack: string, fuzzy: bool = false) -> b
 	return true
 }
 
+// Whether a row belongs to the page in the current expansion state, before search ranks it.
+@(private)
+row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
+	#partial switch row.kind {
+	case .Profile, .Profile_Add, .Detected_Header:
+		return true
+	case .Detected:
+		return p.detected_open
+	case .Action:
+		confirm :=
+			strings.has_suffix(row.key, ".remove.cancel") ||
+			strings.has_suffix(row.key, ".remove.confirm")
+		if confirm {
+			return p.remove_confirm != "" && p.expanded == row.profile && row.profile == p.remove_confirm
+		}
+	}
+	return row.profile == "" || row.profile == p.expanded
+}
+
 // Rebuilds the visible lines, keeping the current selection when it stays visible.
 editor_rebuild :: proc(p: ^Editor) {
 	selected := Editor_Item{-1, -1, 0}
@@ -281,13 +500,16 @@ editor_rebuild :: proc(p: ^Editor) {
 	ranks := make([]u8, len(p.rows), context.temp_allocator)
 	best: u8
 	for row, i in p.rows {
+		if !row_available(p, row) {continue}
 		haystack := strings.to_lower(
 			fmt.tprintf(
-				"%s %s %s %s %s",
+				"%s %s %s %s %s %s %s",
 				row.key,
 				row.title,
 				p.groups[row.group].title,
 				row.description,
+				row.detail,
+				row.badge,
 				row.kind == .Shortcut ? row.value : "",
 			),
 			context.temp_allocator,
@@ -326,6 +548,103 @@ editor_filter :: proc(p: ^Editor) {
 	for item, index in p.items {if item.row >= 0 {first = index; break}}
 	p.scroll, p.outline_scroll = 0, 0
 	editor_select(p, first)
+}
+
+// Opens one profile's inline editor and closes any other. The table's row key is profile.ID.
+editor_profile_expand :: proc(p: ^Editor, id: string) {
+	if id == "" {return}
+	if p.expanded != id {
+		delete(p.expanded)
+		p.expanded = strings.clone(id)
+		if p.remove_confirm != "" && p.remove_confirm != id {
+			delete(p.remove_confirm)
+			p.remove_confirm = ""
+		}
+	}
+	editor_rebuild(p)
+	editor_select_key(p, fmt.tprintf("profile.%s", id))
+}
+
+editor_profile_collapse :: proc(p: ^Editor) {
+	if p.expanded == "" {return}
+	id := strings.clone(p.expanded, context.temp_allocator)
+	delete(p.expanded)
+	p.expanded = ""
+	if p.remove_confirm != "" {
+		delete(p.remove_confirm)
+		p.remove_confirm = ""
+	}
+	editor_rebuild(p)
+	editor_select_key(p, fmt.tprintf("profile.%s", id))
+}
+
+editor_profile_toggle :: proc(p: ^Editor, id: string) {
+	if p.expanded == id {editor_profile_collapse(p)} else {editor_profile_expand(p, id)}
+}
+
+// The detected section is collapsed until asked for; a reload keeps its state.
+editor_detected_toggle :: proc(p: ^Editor) {
+	p.detected_open = !p.detected_open
+	editor_rebuild(p)
+	editor_select_key(p, "profiles.detected")
+}
+
+// Asks for confirmation inside the row's own editor. The confirm and cancel rows become visible.
+editor_profile_remove_ask :: proc(p: ^Editor, id: string) {
+	if id == "" || id == settings.PROFILE_DEFAULT_ID {return}
+	if p.expanded != id {editor_profile_expand(p, id)}
+	delete(p.remove_confirm)
+	p.remove_confirm = strings.clone(id)
+	editor_rebuild(p)
+	editor_select_key(p, fmt.tprintf("profile.%s.remove.confirm", id))
+}
+
+editor_profile_remove_cancel :: proc(p: ^Editor) {
+	if p.remove_confirm == "" {return}
+	id := strings.clone(p.remove_confirm, context.temp_allocator)
+	delete(p.remove_confirm)
+	p.remove_confirm = ""
+	editor_rebuild(p)
+	editor_select_key(p, fmt.tprintf("profile.%s.remove", id))
+}
+
+// The profile table's index for a page item, counting only table rows before it.
+@(private)
+profile_index_at :: proc(p: ^Editor, item_index: int) -> int {
+	count := 0
+	for item, index in p.items {
+		if index >= item_index {break}
+		if item.row >= 0 && p.rows[item.row].kind == .Profile {count += 1}
+	}
+	return count
+}
+
+@(private)
+profile_row_count :: proc(p: ^Editor) -> int {
+	count := 0
+	for item in p.items {
+		if item.row >= 0 && p.rows[item.row].kind == .Profile {count += 1}
+	}
+	return count
+}
+
+// The insertion line's y for a drag target: the top of the slot's row, or the bottom of the last one.
+@(private)
+profile_drop_y :: proc(p: ^Editor, l: Editor_Layout) -> f32 {
+	slot := 0
+	for item, index in p.items {
+		if item.row < 0 || p.rows[item.row].kind != .Profile {continue}
+		if slot == p.drag_target {
+			return l.list.y + f32(index - p.scroll) * l.row_height
+		}
+		slot += 1
+	}
+	last := -1
+	for item, index in p.items {
+		if item.row >= 0 && p.rows[item.row].kind == .Profile {last = index}
+	}
+	if last < 0 {return l.list.y}
+	return l.list.y + f32(last - p.scroll + 1) * l.row_height
 }
 
 // Moves the selection by `delta` lines, passing over group headers in the direction of travel.
@@ -584,8 +903,54 @@ text_kind :: proc(kind: Row_Kind) -> bool {
 		kind == .Integer ||
 		kind == .Number ||
 		kind == .Color ||
-		kind == .Optional_Color \
+		kind == .Optional_Color ||
+		kind == .Profile_Icon \
 	)
+}
+
+// Moves the focus ring across a table row's controls. A detected row has only Enable.
+@(private)
+profile_control_step :: proc(p: ^Editor, row: ^Editor_Row, step: int) {
+	order: [5]Profile_Control
+	count := 0
+	if row.kind == .Detected {
+		order[0] = .Enable
+		count = 1
+	} else {
+		order[0], order[1], order[2], order[3], order[4] =
+			.Radio, .Hidden, .Expand, .Duplicate, .Remove
+		count = row.profile == settings.PROFILE_DEFAULT_ID ? 4 : 5
+	}
+	index := 0
+	for control, i in order[:count] {if control == p.profile_control {index = i}}
+	p.profile_control = order[(index + step + count) % count]
+}
+
+// Runs the control under the focus ring. Radio, Hidden, Duplicate, Remove and Enable name a
+// settings write the page owner performs; Expand stays inside the editor.
+@(private)
+profile_activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
+	switch p.profile_control {
+	case .Radio:
+		editor_action_set(p, .Default, row.profile, "")
+		return .Profile_Action
+	case .Hidden:
+		editor_action_set(p, .Hidden, row.profile, .Hidden in row.flags ? "false" : "true")
+		return .Profile_Action
+	case .Expand:
+		editor_profile_toggle(p, row.profile)
+		return .Changed
+	case .Duplicate:
+		editor_action_set(p, .Duplicate, row.profile, "")
+		return .Profile_Action
+	case .Remove:
+		editor_profile_remove_ask(p, row.profile)
+		return .Changed
+	case .Enable:
+		editor_action_set(p, .Enable, row.profile, "")
+		return .Profile_Action
+	}
+	return .None
 }
 
 // Activates the selected row from the keyboard: toggles flip, lists open, fields take the keyboard.
@@ -607,9 +972,19 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Color, .Optional_Color:
 		p.focus, p.popup = .Control, .Color
 		field_select_all(&p.value)
-	case .Text, .Integer, .Number:
+	case .Text, .Integer, .Number, .Profile_Icon:
 		p.focus = .Control
 		field_select_all(&p.value)
+	case .Profile:
+		if p.focus == .Control {return profile_activate(p, row)}
+		editor_profile_toggle(p, row.profile)
+	case .Profile_Add:
+		return .Save
+	case .Detected_Header:
+		editor_detected_toggle(p)
+	case .Detected:
+		editor_action_set(p, .Enable, row.profile, "")
+		return .Profile_Action
 	}
 	return .Changed
 }
@@ -684,6 +1059,18 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	}
 	#partial switch e.key {
 	case .Escape:
+		if p.remove_confirm != "" {
+			editor_profile_remove_cancel(p)
+			return .Changed
+		}
+		// Escape leaves an expanded field first, then collapses the row from its table line.
+		if row != nil &&
+		   row.profile != "" &&
+		   row.profile == p.expanded &&
+		   (p.focus != .Control || row.kind == .Profile) {
+			editor_profile_collapse(p)
+			return .Changed
+		}
 		if p.focus != .Search {
 			stop_editing(p)
 			return .Changed
@@ -693,11 +1080,19 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		editor_filter(p)
 		return .Changed
 	case .Tab:
-		stops := row != nil && row.kind == .Shortcut ? 3 : 2
-		if row == nil {stops = 1}
+		stops := 2
+		if row == nil || row.kind == .Profile_Add || row.kind == .Detected_Header {stops = 1}
+		if row != nil && row.kind == .Shortcut {stops = 3}
 		focus := (int(p.focus) + (.Shift in e.modifiers ? stops - 1 : 1)) % stops
 		p.popup = .None
-		if Editor_Focus(focus) == .Control && row != nil {return activate(p, row)}
+		if Editor_Focus(focus) == .Control && row != nil {
+			if row.kind == .Profile || row.kind == .Detected {
+				p.focus = .Control
+				p.profile_control = row.kind == .Detected ? .Enable : .Radio
+				return .Changed
+			}
+			return activate(p, row)
+		}
 		if p.focus == .Control {stop_editing(p)}
 		p.focus = Editor_Focus(focus)
 		return .Changed
@@ -721,14 +1116,43 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 			p.popup = .None
 			return .Save
 		}
+		if row.kind == .Profile && p.focus == .Control {return profile_activate(p, row)}
 		return activate(p, row)
 	case .Space:
 		if p.focus == .Positions {p.physical = !p.physical; return .Changed}
-		if p.focus == .Control && row != nil && row.kind == .Toggle {return flip_toggle(p)}
+		if row == nil {return .None}
+		if p.focus == .Control && (row.kind == .Profile || row.kind == .Detected) {
+			return profile_activate(p, row)
+		}
+		if p.focus == .Control && row.kind == .Toggle {return flip_toggle(p)}
 	case .Arrow_Left, .Arrow_Right:
 		left := e.key == .Arrow_Left
+		if row != nil && (row.kind == .Profile || row.kind == .Detected) {
+			if p.focus == .Control {
+				profile_control_step(p, row, left ? -1 : 1)
+				return .Changed
+			}
+			if row.kind == .Profile {
+				if left {editor_profile_collapse(p)} else {editor_profile_expand(p, row.profile)}
+				return .Changed
+			}
+		}
 		if p.focus == .Control && row != nil && row.kind == .Choice {
 			return choose(p, row, choice_index(row, field_string(&p.value)) + (left ? -1 : 1))
+		}
+	case .D:
+		if control {break}
+		// Row shortcuts only run from the row's own control focus. While the search has focus,
+		// the same letters belong to the filter.
+		if p.focus == .Control && row != nil && row.kind == .Profile {
+			editor_action_set(p, .Default, row.profile, "")
+			return .Profile_Action
+		}
+	case .Delete, .Backspace:
+		if control {break}
+		if p.focus == .Control && row != nil && row.kind == .Profile {
+			editor_profile_remove_ask(p, row.profile)
+			return .Changed
 		}
 	case .R:
 		if control {return row == nil ? .None : .Reset}
@@ -755,6 +1179,12 @@ editor_text :: proc(p: ^Editor, text: string) {
 		if field_text(&p.value, text) == .Edited {sync_color(p)}
 		return
 	}
+	if p.focus == .Control &&
+	   row != nil &&
+	   (row.kind == .Profile ||
+			   row.kind == .Detected ||
+			   row.kind == .Detected_Header ||
+			   row.kind == .Profile_Add) {return}
 	p.focus, p.popup = .Search, .None
 	if field_text(&p.filter, text) == .Edited {
 		editor_filter(p)
@@ -917,6 +1347,13 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.text_right = parts.slider.x - 12 * s
 	case .Text:
 		parts.field = field(right, cy, min(360, r.width / s * 0.42), s)
+	case .Profile_Icon:
+		edge := r.x + r.width - 12 * s
+		parts.clear = {edge - 52 * s, cy - 13 * s, 52 * s, 26 * s}
+		parts.field = field(parts.clear.x - 8 * s, cy, min(300, r.width / s * 0.38), s)
+		parts.swatch = {parts.field.x - 42 * s, cy - 15 * s, 30 * s, 30 * s}
+		parts.reset = {}
+		parts.text_right = parts.swatch.x - 12 * s
 	case .Color, .Optional_Color:
 		parts.field = field(right, cy, 120, s)
 		parts.swatch = {parts.field.x - 38 * s, cy - 15 * s, 30 * s, 30 * s}
@@ -933,10 +1370,19 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 				parts.positions_label_below = true
 			}
 		}
+	case .Profile, .Profile_Add, .Detected_Header, .Detected:
+		parts.reset = {}
 	}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
 	parts.text_right -= 16 * s
 	return parts
+}
+
+// The table cells of the item at `index`. The editor's row rect is the only shared part.
+editor_profile_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Profile_Parts {
+	if index < 0 || index >= len(p.items) || p.items[index].row < 0 {return {}}
+	row := &p.rows[p.items[index].row]
+	return profile_row_parts(row.kind, editor_row_parts(p, l, index).row, l.scale)
 }
 
 // The open dropdown or color picker for the selected row, flipped above it when there is no room below.
@@ -1116,16 +1562,71 @@ editor_press :: proc(
 	if index != p.selected {editor_select(p, index)}
 	row := editor_row(p)
 	parts := editor_row_parts(p, l, index)
+	if row.kind == .Profile || row.kind == .Detected || row.kind == .Profile_Add ||
+	   row.kind == .Detected_Header {
+		table := profile_row_parts(row.kind, parts.row, s)
+		switch {
+		case row.kind == .Profile && contains(table.handle, x, y):
+			if filtering(p) {return .Changed}
+			p.drag = .Profile_Order
+			delete(p.drag_id)
+			p.drag_id = strings.clone(row.profile)
+			p.drag_from = profile_index_at(p, index)
+			p.drag_target = p.drag_from
+			return .Changed
+		case row.kind == .Profile && contains(table.radio, x, y):
+			p.focus, p.profile_control = .Control, .Radio
+			editor_action_set(p, .Default, row.profile, "")
+			return .Profile_Action
+		case row.kind == .Profile && contains(table.toggle, x, y):
+			p.focus, p.profile_control = .Control, .Hidden
+			editor_action_set(p, .Hidden, row.profile, .Hidden in row.flags ? "false" : "true")
+			return .Profile_Action
+		case row.kind == .Profile && contains(table.expand, x, y):
+			p.focus, p.profile_control = .Control, .Expand
+			editor_profile_toggle(p, row.profile)
+			return .Changed
+		case row.kind == .Profile && contains(table.duplicate, x, y):
+			p.focus, p.profile_control = .Control, .Duplicate
+			editor_action_set(p, .Duplicate, row.profile, "")
+			return .Profile_Action
+		case row.kind == .Profile &&
+		     row.profile != settings.PROFILE_DEFAULT_ID &&
+		     contains(table.remove, x, y):
+			p.focus, p.profile_control = .Control, .Remove
+			editor_profile_remove_ask(p, row.profile)
+			return .Changed
+		case row.kind == .Detected && contains(table.enable, x, y):
+			p.focus, p.profile_control = .Control, .Enable
+			editor_action_set(p, .Enable, row.profile, "")
+			return .Profile_Action
+		case row.kind == .Detected_Header:
+			editor_detected_toggle(p)
+			return .Changed
+		case row.kind == .Profile_Add:
+			return .Save
+		case row.kind == .Profile:
+			if row.profile == settings.PROFILE_DEFAULT_ID && contains(table.remove, x, y) {
+				return .Changed
+			}
+			editor_profile_toggle(p, row.profile)
+			return .Changed
+		}
+		return .Changed
+	}
 	switch {
 	case contains(parts.reset, x, y):
 		return .Reset
+	case contains(parts.clear, x, y):
+		field_set(&p.value, "")
+		return .Save
 	case contains(parts.toggle, x, y):
 		p.focus = .Control
 		return flip_toggle(p)
 	case contains(parts.positions, x, y):
 		p.physical = !p.physical
 		return .Changed
-	case contains(parts.swatch, x, y):
+	case contains(parts.swatch, x, y) && row.kind != .Profile_Icon:
 		p.focus, p.popup = .Control, .Color
 		return .Changed
 	case contains(parts.slider, x, y) ||
@@ -1196,6 +1697,28 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 		)
 	case .Slider:
 		slide(p, row, editor_row_parts(p, l, p.selected).slider, x)
+	case .Profile_Order:
+		index := clamp(p.scroll + int((y - l.list.y) / l.row_height), 0, len(p.items))
+		slot := 0
+		for item, i in p.items {
+			if i >= index {break}
+			if item.row >= 0 && p.rows[item.row].kind == .Profile {slot += 1}
+		}
+		if index < len(p.items) && p.items[index].row >= 0 {
+			target := p.rows[p.items[index].row]
+			if target.kind == .Profile {
+				top := l.list.y + f32(index - p.scroll) * l.row_height
+				if y >= top + l.row_height / 2 {slot += 1}
+			}
+		} else if index >= len(p.items) {
+			slot = profile_row_count(p)
+		}
+		slot = clamp(slot, 0, profile_row_count(p))
+		if slot != p.drag_target {
+			p.drag_target = slot
+			return true
+		}
+		return false
 	case .Wheel, .Ramp:
 		pick_color(
 			p,
@@ -1208,11 +1731,46 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 }
 
 // Ends a pointer drag; a slider drag saves the value it settled on and a color drag previews until
-// the picker closes or Enter saves.
+// the picker closes or Enter saves. Dropping a profile row produces the profile.order rewrite.
 editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	drag := p.drag
 	p.drag = .None
 	p.filter.dragging, p.value.dragging = false, false
+	if drag == .Profile_Order {
+		defer {
+			delete(p.drag_id)
+			p.drag_id = ""
+		}
+		if p.drag_target == p.drag_from {return .Changed}
+		ids: [settings.PROFILE_LIMIT]string
+		others: [settings.PROFILE_LIMIT]string
+		moved: [settings.PROFILE_LIMIT]string
+		table_count, other_count := 0, 0
+		for row in p.rows {
+			if row.kind == .Profile {
+				if table_count < len(ids) {ids[table_count] = row.profile}
+				table_count += 1
+			} else if row.kind == .Detected && .Listed in row.flags {
+				if other_count < len(others) {others[other_count] = row.profile}
+				other_count += 1
+			}
+		}
+		table_count = min(table_count, len(ids))
+		other_count = min(other_count, len(others))
+		order, order_error := settings.profile_order_text(
+			settings.profile_move(
+				ids[:table_count],
+				p.drag_from,
+				p.drag_target,
+				moved[:table_count],
+			),
+			others[:other_count],
+			context.temp_allocator,
+		)
+		if order_error != nil {return .Changed}
+		editor_action_set(p, .Order, p.drag_id, order)
+		return .Profile_Action
+	}
 	row := editor_row(p)
 	if row == nil || (drag != .Slider && drag != .Wheel && drag != .Ramp) {return .None}
 	return field_string(&p.value) == row.value ? .Changed : .Save
@@ -1250,11 +1808,34 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 		}
 	}
 	item, reset, outline := -1, -1, -1
+	profile_item, profile_control := -1, Profile_Control.Radio
 	if p.popup == .None && contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
 		if index < len(p.items) && p.items[index].row >= 0 {
 			item = index
-			if contains(editor_row_parts(p, l, index).reset, x, y) {reset = index}
+			parts := editor_row_parts(p, l, index)
+			if contains(parts.reset, x, y) {reset = index}
+			row := &p.rows[p.items[index].row]
+			if row.kind == .Profile || row.kind == .Detected {
+				table := profile_row_parts(row.kind, parts.row, l.scale)
+				profile_item = index
+				switch {
+				case contains(table.radio, x, y):
+					profile_control = .Radio
+				case contains(table.toggle, x, y):
+					profile_control = .Hidden
+				case contains(table.expand, x, y):
+					profile_control = .Expand
+				case contains(table.duplicate, x, y):
+					profile_control = .Duplicate
+				case row.profile != settings.PROFILE_DEFAULT_ID && contains(table.remove, x, y):
+					profile_control = .Remove
+				case contains(table.enable, x, y):
+					profile_control = .Enable
+				case:
+					profile_item = -1
+				}
+			}
 		}
 	}
 	if p.popup == .None && contains(l.outline, x, y) {
@@ -1265,15 +1846,19 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if item == p.hover_item &&
 	   reset == p.hover_reset &&
 	   outline == p.hover_outline &&
-	   clear == p.hover_clear {
+	   clear == p.hover_clear &&
+	   profile_item == p.hover_profile_item &&
+	   profile_control == p.hover_profile_control {
 		return false
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
+	p.hover_profile_item, p.hover_profile_control = profile_item, profile_control
 	return true
 }
 
 editor_hover_clear :: proc(p: ^Editor) {
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
+	p.hover_profile_item, p.hover_profile_control = -1, .Radio
 }
 
 // Whether the pointer is over editable text, which shows a text cursor.
@@ -1333,6 +1918,420 @@ box_draw :: proc(
 ) {
 	draw_rect(list, {rect = r, color = theme.border, radius = 6 * scale})
 	if focused {focus_ring_draw(list, r, theme, scale)}
+}
+
+// The square text badge a pane header and the profile table use for a shell.
+@(private)
+profile_badge_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	badge: string,
+	rect: render.Rect,
+	theme: Theme,
+	scale: f32,
+	muted: bool,
+) {
+	if rect.width <= 0 {return}
+	draw_rect(list, {rect = rect, color = theme.surface, radius = 6 * scale})
+	draw_rect(list, {rect = rect, color = theme.border, radius = 6 * scale, stroke = scale})
+	small := text_styled(text, .Small)
+	width := min(rect.width - 4 * scale, text_width(&small, badge))
+	draw_text(
+		&small,
+		list,
+		badge,
+		rect.x + (rect.width - width) / 2,
+		rect.y + (rect.height - small.line_height) / 2 + small.ascent,
+		muted ? theme.muted : theme.text,
+		width,
+	)
+}
+
+// A 22px radio dot with a pointer and keyboard focus state.
+@(private)
+profile_radio_draw :: proc(
+	list: ^render.Draw_List,
+	rect: render.Rect,
+	on, focused, hovered: bool,
+	theme: Theme,
+	scale: f32,
+) {
+	if rect.width <= 0 {return}
+	if hovered {
+		hover := render.Rect {
+			rect.x - 4 * scale,
+			rect.y - 4 * scale,
+			rect.width + 8 * scale,
+			rect.height + 8 * scale,
+		}
+		draw_rect(list, {rect = hover, color = theme.hover, radius = hover.width / 2})
+	}
+	dot := render.Rect {
+		rect.x + rect.width / 2 - 8 * scale,
+		rect.y + rect.height / 2 - 8 * scale,
+		16 * scale,
+		16 * scale,
+	}
+	draw_rect(list, {rect = dot, color = on ? theme.accent : theme.border, radius = 8 * scale})
+	draw_rect(list, {rect = dot, color = theme.border, radius = 8 * scale, stroke = scale})
+	if on {
+		inner := render.Rect{dot.x + 4 * scale, dot.y + 4 * scale, 8 * scale, 8 * scale}
+		draw_rect(list, {rect = inner, color = theme.accent_text, radius = 4 * scale})
+	}
+	if focused {focus_ring_draw(list, dot, theme, scale)}
+}
+
+// A small icon button inside a table row.
+@(private)
+profile_button_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	rect: render.Rect,
+	icon: rune,
+	theme: Theme,
+	scale: f32,
+	focused, hovered, enabled: bool,
+) -> glyphs.Result {
+	if rect.width <= 0 {return .Ok}
+	if enabled && (hovered || focused) {
+		draw_rect(
+			list,
+			{rect = rect, color = hovered ? theme.hover : theme.selection, radius = 5 * scale},
+		)
+	}
+	color := enabled ? theme.muted : theme.faint
+	if hovered || focused {color = theme.text}
+	if focused {focus_ring_draw(list, rect, theme, scale)}
+	return draw_icon(text, list, icon, rect, color, 0.75)
+}
+
+// Six dots make the order grip without depending on an icon glyph.
+@(private)
+profile_grip_draw :: proc(
+	list: ^render.Draw_List,
+	rect: render.Rect,
+	theme: Theme,
+	scale: f32,
+	strong: bool,
+) {
+	if rect.width <= 0 {return}
+	dot := 2 * scale
+	gap := 4 * scale
+	left := rect.x + rect.width / 2 - (dot + gap) / 2
+	top := rect.y + rect.height / 2 - (dot * 2 + gap * 2) / 2
+	color := strong ? theme.muted : theme.faint
+	for row in 0 ..< 3 {
+		for column in 0 ..< 2 {
+			draw_rect(
+				list,
+				{
+					rect = {
+						left + f32(column) * (dot + gap),
+						top + f32(row) * (dot + gap),
+						dot,
+						dot,
+					},
+					color = color,
+					radius = dot / 2,
+				},
+			)
+		}
+	}
+}
+
+@(private)
+profile_row_draw :: proc(
+	p: ^Editor,
+	row: ^Editor_Row,
+	parts: Row_Parts,
+	index: int,
+	selected: bool,
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	scale: f32,
+) -> glyphs.Result {
+	table := profile_row_parts(.Profile, parts.row, scale)
+	small := text_styled(text, .Small)
+	cy := parts.row.y + parts.row.height / 2
+	focused := selected && p.focus == .Control
+	hovered := index == p.hover_profile_item
+	strong := (selected || index == p.hover_item) && !(.Hidden in row.flags)
+	profile_grip_draw(list, table.handle, theme, scale, selected || index == p.hover_item)
+	badge := render.Rect {table.icon.x, cy - 13 * scale, 26 * scale, 26 * scale}
+	profile_badge_draw(list, text, row.badge, badge, theme, scale, .Hidden in row.flags)
+	name_color := strong ? theme.text : theme.muted
+	if .Hidden in row.flags {name_color = theme.muted}
+	name_baseline := parts.row.y + 21 * scale
+	if row.note == "" {name_baseline = cy - text.line_height / 2 + text.ascent}
+	if result := draw_text(
+		text,
+		list,
+		row.title,
+		table.name.x,
+		name_baseline,
+		name_color,
+		max(1, table.name.width),
+	); result != .Ok {return result}
+	if row.note != "" {
+		if result := draw_text(
+			&small,
+			list,
+			row.note,
+			table.name.x,
+			parts.row.y + 39 * scale,
+			theme.error,
+			max(1, table.name.width),
+		); result != .Ok {return result}
+	}
+	if result := draw_fading_text(
+		&small,
+		list,
+		row.description,
+		table.command.x,
+		cy - small.line_height / 2 + small.ascent,
+		theme.muted,
+		max(1, table.command.width),
+	); result != .Ok {return result}
+	if table.directory.width > 0 {
+		if result := draw_fading_text(
+			&small,
+			list,
+			row.value,
+			table.directory.x,
+			cy - small.line_height / 2 + small.ascent,
+			theme.faint,
+			max(1, table.directory.width),
+		); result != .Ok {return result}
+	}
+	radio_focus := focused && p.profile_control == .Radio
+	profile_radio_draw(
+		list,
+		table.radio,
+		.Default in row.flags,
+		radio_focus,
+		hovered && p.hover_profile_control == .Radio,
+		theme,
+		scale,
+	)
+	switch_draw(
+		list,
+		table.toggle,
+		.Hidden in row.flags,
+		focused && p.profile_control == .Hidden,
+		theme,
+		scale,
+	)
+	if table.expand.width > 0 {
+		controls := [?]struct {
+			rect: render.Rect,
+			icon: rune,
+			kind: Profile_Control,
+		} {
+			{table.expand, p.expanded == row.profile ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT, .Expand},
+			{table.duplicate, ICON_COPY, .Duplicate},
+			{table.remove, ICON_TRASH, .Remove},
+		}
+		for control in controls {
+			enabled := !(control.kind == .Remove && row.profile == settings.PROFILE_DEFAULT_ID)
+			if result := profile_button_draw(
+				list,
+				text,
+				control.rect,
+				control.icon,
+				theme,
+				scale,
+				enabled && focused && p.profile_control == control.kind,
+				enabled && hovered && p.hover_profile_control == control.kind,
+				enabled,
+			); result != .Ok {return result}
+		}
+	}
+	if p.error_profile != "" && p.error_profile == row.profile {
+		draw_rect(list, {rect = parts.row, color = theme.error, radius = 6 * scale, stroke = scale})
+	}
+	return .Ok
+}
+
+// Column captions for the profile table's group header line.
+@(private)
+profile_columns_draw :: proc(
+	row: render.Rect,
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	scale: f32,
+) -> glyphs.Result {
+	label := text_styled(text, .Label)
+	columns := profile_columns(row, scale)
+	baseline := row.y + row.height - 12 * scale
+	captions := [?]struct {
+		rect: render.Rect,
+		name: string,
+	} {
+		{columns.name, "Profile"},
+		{columns.command, "Command line"},
+		{columns.directory, "Directory"},
+		{columns.default, "Default"},
+		{columns.hidden, "Hidden"},
+	}
+	for caption in captions {
+		if caption.rect.width < 34 * scale {continue}
+		if result := draw_text(
+			&label,
+			list,
+			caption.name,
+			caption.rect.x,
+			baseline,
+			theme.faint,
+			caption.rect.width,
+		); result != .Ok {return result}
+	}
+	return .Ok
+}
+
+// The Add Profile row closes the main table.
+@(private)
+profile_add_draw :: proc(
+	row: ^Editor_Row,
+	row_rect: render.Rect,
+	selected: bool,
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	scale: f32,
+) -> glyphs.Result {
+	small := text_styled(text, .Small)
+	icon := render.Rect {
+		row_rect.x + 12 * scale,
+		row_rect.y + row_rect.height / 2 - 9 * scale,
+		18 * scale,
+		18 * scale,
+	}
+	if result := draw_icon(text, list, ICON_PLUS, icon, theme.accent, 0.8); result != .Ok {
+		return result
+	}
+	color := selected ? theme.text : theme.muted
+	return draw_text(
+		&small,
+		list,
+		row.title,
+		icon.x + icon.width + 8 * scale,
+		row_rect.y + (row_rect.height - small.line_height) / 2 + small.ascent,
+		color,
+		max(1, row_rect.width - 60 * scale),
+	)
+}
+
+// The collapsed section that holds shells detection found but the file has not enabled.
+@(private)
+profile_detected_header_draw :: proc(
+	p: ^Editor,
+	row: ^Editor_Row,
+	parts: Row_Parts,
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	scale: f32,
+) -> glyphs.Result {
+	draw_rect(
+		list,
+		{
+			rect = {
+				parts.row.x + 10 * scale,
+				parts.row.y + 10 * scale,
+				parts.row.width - 20 * scale,
+				scale,
+			},
+			color = theme.border,
+		},
+	)
+	chevron := profile_row_parts(.Detected_Header, parts.row, scale).chevron
+	if result := draw_icon(
+		text,
+		list,
+		p.detected_open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT,
+		chevron,
+		theme.muted,
+		0.75,
+	); result != .Ok {return result}
+	small := text_styled(text, .Small)
+	if result := draw_text(
+		&small,
+		list,
+		row.title,
+		chevron.x + chevron.width + 4 * scale,
+		parts.row.y + (parts.row.height - small.line_height) / 2 + small.ascent,
+		theme.muted,
+		max(1, parts.row.width * 0.55),
+	); result != .Ok {return result}
+	count := fmt.tprintf("%s not enabled", row.value)
+	return draw_text(
+		&small,
+		list,
+		count,
+		parts.row.x + parts.row.width - 14 * scale - text_width(&small, count),
+		parts.row.y + (parts.row.height - small.line_height) / 2 + small.ascent,
+		theme.faint,
+	)
+}
+
+// One detected-but-not-enabled profile: identity, command, Enable, and a radio when it is the
+// configured default.
+@(private)
+profile_detected_draw :: proc(
+	p: ^Editor,
+	row: ^Editor_Row,
+	parts: Row_Parts,
+	index: int,
+	selected: bool,
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	scale: f32,
+) -> glyphs.Result {
+	table := profile_row_parts(.Detected, parts.row, scale)
+	small := text_styled(text, .Small)
+	cy := parts.row.y + parts.row.height / 2
+	profile_badge_draw(list, text, row.badge, table.icon, theme, scale, true)
+	if result := draw_text(
+		text,
+		list,
+		row.title,
+		table.name.x,
+		cy - text.line_height / 2 + text.ascent,
+		theme.muted,
+		max(1, table.name.width),
+	); result != .Ok {return result}
+	if result := draw_fading_text(
+		&small,
+		list,
+		row.description,
+		table.command.x,
+		cy - small.line_height / 2 + small.ascent,
+		theme.faint,
+		max(1, table.command.width),
+	); result != .Ok {return result}
+	focused := selected && p.focus == .Control
+	hovered := index == p.hover_profile_item
+	// A detected profile the file already names as default reads as default here even though its
+	// radio is not a write target until the profile is enabled.
+	if .Default in row.flags {
+		profile_radio_draw(list, table.radio, true, false, false, theme, scale)
+	}
+	if hovered && p.hover_profile_control == .Enable {
+		draw_rect(list, {rect = table.enable, color = theme.hover, radius = 6 * scale})
+	}
+	box_draw(list, table.enable, theme, focused && p.profile_control == .Enable, scale)
+	label := "Enable"
+	return draw_text(
+		&small,
+		list,
+		label,
+		table.enable.x + (table.enable.width - text_width(&small, label)) / 2,
+		table.enable.y + (table.enable.height - small.line_height) / 2 + small.ascent,
+		theme.text,
+	)
 }
 
 // Draws a control's resting value, or for the selected row its pending value and focus.
@@ -1426,6 +2425,10 @@ control_draw :: proc(
 		)
 		if selected && p.popup == .Color {focus_ring_draw(list, parts.swatch, theme, scale)}
 	case .Text, .Shortcut:
+	case .Profile_Icon:
+		profile_badge_draw(list, text, row.badge, parts.swatch, theme, scale, false)
+	case .Profile, .Profile_Add, .Detected_Header, .Detected:
+		return .Ok
 	}
 	if selected {
 		placeholder := row.kind == .Optional_Color ? "Theme default" : "Empty"
@@ -1847,6 +2850,8 @@ editor_draw :: proc(
 		}
 		if item.row < 0 {
 			baseline := r.y + r.height - 14 * s
+			table_group := p.groups[item.group].table
+			if table_group {baseline = r.y + 22 * s}
 			if index >
 			   0 {draw_rect(list, {rect = {r.x + 10 * s, r.y + 10 * s, r.width - 20 * s, s}, color = theme.border})}
 			if result := draw_text(
@@ -1867,9 +2872,60 @@ editor_draw :: proc(
 				baseline,
 				theme.faint,
 			); result != .Ok {return result}
+			if table_group {
+				if result := profile_columns_draw(r, list, text, theme, s); result != .Ok {
+					return result
+				}
+			}
 			continue
 		}
 		row := &p.rows[item.row]
+		if row.kind == .Profile {
+			if result := profile_row_draw(p, row, parts, index, selected, list, text, theme, s);
+			   result != .Ok {
+				return result
+			}
+			continue
+		}
+		if row.kind == .Detected {
+			if result := profile_detected_draw(
+				p,
+				row,
+				parts,
+				index,
+				selected,
+				list,
+				text,
+				theme,
+				s,
+			); result != .Ok {return result}
+			continue
+		}
+		if row.kind == .Detected_Header {
+			if result := profile_detected_header_draw(p, row, parts, list, text, theme, s);
+			   result != .Ok {
+				return result
+			}
+			continue
+		}
+		if row.kind == .Profile_Add {
+			if result := profile_add_draw(row, r, selected, list, text, theme, s);
+			   result != .Ok {
+				return result
+			}
+			continue
+		}
+		if row.profile != "" {
+			// Expanded editors carry an accent rail so they read as part of the row above.
+			draw_rect(
+				list,
+				{
+					rect = {r.x + 2 * s, r.y + 6 * s, 3 * s, r.height - 12 * s},
+					color = theme.accent,
+					radius = 1.5 * s,
+				},
+			)
+		}
 		text_width_limit := max(1, parts.text_right - r.x - 30 * s)
 		baseline := r.y + 21 * s
 		if row.description == "" {baseline = r.y + (r.height - text.line_height) / 2 + text.ascent}
@@ -1882,7 +2938,22 @@ editor_draw :: proc(
 			theme.text,
 			text_width_limit,
 		); result != .Ok {return result}
-		if result := draw_text(
+		note := row.note
+		note_error := note != ""
+		if p.error_key == row.key && p.error_text != "" {
+			note, note_error = p.error_text, true
+		}
+		if note_error {
+			if result := draw_text(
+				&small,
+				list,
+				note,
+				r.x + 30 * s,
+				r.y + 39 * s,
+				theme.error,
+				text_width_limit,
+			); result != .Ok {return result}
+		} else if result := draw_text(
 			&small,
 			list,
 			row.description,
@@ -1894,6 +2965,22 @@ editor_draw :: proc(
 		if result := control_draw(p, row, parts, selected, list, text, theme, l.list, s);
 		   result != .Ok {
 			return result
+		}
+		if row.kind == .Profile_Icon {
+			if render.push_layer(list, l.list) != .None {return .Ok}
+			box_draw(list, parts.clear, theme, false, s)
+			label := "Clear"
+			if result := draw_text(
+				text,
+				list,
+				label,
+				parts.clear.x + (parts.clear.width - text_width(text, label)) / 2,
+				parts.clear.y + (parts.clear.height - text.line_height) / 2 + text.ascent,
+				theme.muted,
+			); result != .Ok {return result}
+		}
+		if p.error_key == row.key {
+			draw_rect(list, {rect = r, color = theme.error, radius = 6 * s, stroke = s})
 		}
 		if render.push_layer(list, l.list) != .None {return .Ok}
 		if row.kind == .Action {continue}
@@ -1913,6 +3000,17 @@ editor_draw :: proc(
 		}
 		if result := draw_icon(text, list, ICON_UNDO, parts.reset, icon_color, 0.9);
 		   result != .Ok {return result}
+	}
+	if p.drag == .Profile_Order {
+		y := profile_drop_y(p, l)
+		draw_rect(
+			list,
+			{
+				rect = {l.list.x + 10 * s, y - s, l.list.width - 20 * s, 2 * s},
+				color = theme.accent,
+				radius = s,
+			},
+		)
 	}
 	return popup_draw(p, l, list, text, theme, pointer)
 }

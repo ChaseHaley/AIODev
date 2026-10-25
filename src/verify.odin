@@ -381,6 +381,30 @@ when AIO_CONTROL {
 				{"settings.title", editor_title},
 				{"settings.message", w.editor.message},
 				{"settings.error", fmt.tprintf("%t", w.editor.error)},
+				{"settings.profile.expanded", w.editor.expanded},
+				{"settings.profile.default", app.settings.profiles.default_id},
+				{"settings.profile.detected_open", fmt.tprintf("%t", w.editor.detected_open)},
+				{"settings.profile.removing", w.editor.remove_confirm},
+				{"settings.profile.action", fmt.tprintf("%v", w.editor.action)},
+				{"settings.profile.error_key", w.editor.error_key},
+				{"settings.profile.error", w.editor.error_text},
+				{"settings.profile.control", fmt.tprintf("%v", w.editor.profile_control)},
+				{
+					"settings.profile.directory_shown",
+					fmt.tprintf("%t", ui.profile_columns(page.list, page.scale).directory_shown),
+				},
+				{"settings.profile.rows", verify_profile_rows(w, page, .Profile)},
+				{"settings.profile.detected_rows", verify_profile_rows(w, page, .Detected)},
+				{
+					"settings.profile.detected_header",
+					verify_profile_rows(w, page, .Detected_Header),
+				},
+				{"settings.profile.app_count", fmt.tprintf("%d", len(app.settings.profiles.items))},
+				{"settings.profile.app_detected", verify_detected_count(app)},
+				{"settings.profile.group", fmt.tprintf("%d", verify_profile_group(&w.editor))},
+				{"settings.profile.dragging", fmt.tprintf("%t", w.editor.drag == .Profile_Order)},
+				{"settings.profile.drag_target", fmt.tprintf("%d", w.editor.drag_target)},
+				{"settings.profile.drag_id", w.editor.drag_id},
 				{
 					"settings.slider",
 					fmt.tprintf("%g,%g,%g,%g", slider.x, slider.y, slider.width, slider.height),
@@ -800,6 +824,51 @@ when AIO_CONTROL {
 
 	verify_workspace_rect :: proc(r: render.Rect) -> string {
 		return fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)
+	}
+
+	// One table row per item as id@x,y,w,h, so a live journey can aim a drag at the grip.
+	verify_profile_rows :: proc(
+		w: ^Window,
+		page: ui.Editor_Layout,
+		kind: ui.Row_Kind,
+	) -> string {
+		builder := strings.builder_make(context.temp_allocator)
+		first := true
+		for item, index in w.editor.items {
+			if item.row < 0 {continue}
+			row := &w.editor.rows[item.row]
+			if row.kind != kind {continue}
+			if !first {strings.write_byte(&builder, ';')}
+			first = false
+			rect := ui.editor_row_parts(&w.editor, page, index).row
+			strings.write_string(
+				&builder,
+				fmt.tprintf(
+					"%s@%g,%g,%g,%g",
+					row.profile,
+					rect.x,
+					rect.y,
+					rect.width,
+					rect.height,
+				),
+			)
+		}
+		return strings.to_string(builder)
+	}
+
+	verify_detected_count :: proc(app: ^App) -> string {
+		count := 0
+		for &profile in app.settings.profiles.items {
+			if profile.detected {count += 1}
+		}
+		return fmt.tprintf("%d", count)
+	}
+
+	verify_profile_group :: proc(p: ^ui.Editor) -> int {
+		for group, index in p.groups {
+			if group.title == "Profiles" {return index}
+		}
+		return -1
 	}
 
 	verify_workspace_index :: proc(app: ^App, w: ^Window) -> int {
