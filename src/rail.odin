@@ -62,6 +62,7 @@ rail_auto_at :: proc(width: i32, scale: f32) -> bool {
 }
 
 rail_adaptive_update :: proc(w: ^Window) {
+	if w.tabs_horizontal {return}
 	auto := rail_auto_at(w.width, w.scale)
 	if auto == w.rail_auto {return}
 	w.rail_auto, w.rail_override = auto, .Auto
@@ -76,6 +77,7 @@ rail_adaptive_update :: proc(w: ^Window) {
 }
 
 rail_visible :: proc(w: ^Window) -> bool {
+	if w.tabs_horizontal {return false}
 	switch w.rail_override {
 	case .Hidden:
 		return false
@@ -106,6 +108,7 @@ rail_area :: proc(w: ^Window) -> render.Rect {
 
 @(require_results)
 rail_current_layout :: proc(app: ^App, w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+	if w.tabs_horizontal {return {}, false}
 	if !rail_rows_build(app, w, &w.rail_rows) {return {}, false}
 	layout = ui.rail_layout(rail_area(w), w.scale, len(w.rail_rows), w.rail_scroll)
 	w.rail_scroll = layout.scroll
@@ -120,6 +123,7 @@ rail_row_index_for_tab :: proc(rows: []Rail_Row, workspace: ^Workspace, tab: int
 }
 
 rail_reveal_active :: proc(app: ^App, w: ^Window) {
+	if w.tabs_horizontal {return}
 	layout, ok := rail_current_layout(app, w)
 	if !ok {return}
 	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, w.workspace.selected)
@@ -138,11 +142,13 @@ rail_toggle_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 rail_toggle_hit :: proc(w: ^Window, x, y: f32) -> bool {
+	if w.tabs_horizontal {return false}
 	r := rail_toggle_rect(w)
 	return r.width >= 24 * w.scale && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
 rail_toggle :: proc(app: ^App, w: ^Window) {
+	if w.tabs_horizontal {return}
 	was_docked := rail_docked(w)
 	now := time.tick_now()
 	if rail_visible(w) {
@@ -434,6 +440,7 @@ rail_drop_indicator_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout) 
 }
 
 rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	if w.tabs_horizontal {return .Ok}
 	draw_overlay :=
 		rail_overlay(w) ||
 		(w.rail_was_overlay && !rail_docked(w) && w.rail_slide.value > 0)
@@ -500,6 +507,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 }
 
 rail_toggle_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	if w.tabs_horizontal {return .Ok}
 	r := rail_toggle_rect(w)
 	if r.width < 24 * w.scale {return .Ok}
 	if render.push_layer(

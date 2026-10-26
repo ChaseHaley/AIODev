@@ -23,6 +23,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.find.armed)
 	w.find.hover = .None
 	pane_header_cancel(w)
+	w.tab_hover, w.tab_pressed = -1, false
 	w.rail_hover, w.rail_pressed = -1, -1
 	w.rail_toggle_hovered = false
 	ui.armed_cancel(&w.rail_toggle_armed)
@@ -90,7 +91,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		pending_close_outcome(app, w, ui.confirm_mouse(&w.pending_close.confirm, l, e.button, false, x, y))
 		return true
 	}
-	w.rail_pressed, w.dirty = -1, true
+	w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
 	if e.button in w.header_buttons {
 		if palette_active(app, w) {pane_header_cancel(w)}
 		return pane_header_button(app, w, e)
@@ -101,9 +102,19 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	}
 	if e.button != .Left {return false}
 	if ui.armed_down(w.tab_close_armed) {
-		fired, ok := ui.armed_release(&w.tab_close_armed, rail_tab_close_hit(app, w, x, y))
+		hit := -1
+		if w.tabs_horizontal {
+			hit = window_tab_close_hit(app, w, window_tab_bar(app, w), x, y)
+		} else {
+			hit = rail_tab_close_hit(app, w, x, y)
+		}
+		id := w.id
+		fired, ok := ui.armed_release(&w.tab_close_armed, hit)
 		if ok {tab_close_request(app, w, fired)}
-		rail_overlay_dismiss(app, w)
+		// Closing the last tab frees this window through hide_to_tray.
+		if current := window_find(app, id); current != nil {
+			rail_overlay_dismiss(app, current)
+		}
 		return true
 	}
 	if w.dragging.count > 0 {w.dragging = {}; return true}
@@ -256,6 +267,49 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		workspace_picker_open(app, w)
 		return
 	}
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		w.tab_pressed =
+			e.pressed && e.button == .Left && window_tab_hit(app, w, bar, x, y) >= 0
+		if y < bar.height {
+			if e.pressed {
+				index := window_tab_hit(app, w, bar, x, y)
+				chevron := tab_chevron_rect(app, w)
+				if e.button == .Left && x >= chevron.x && x < chevron.x + chevron.width {
+					profile_menu_open_new_tab(app, w, x, chevron.y + chevron.height)
+				} else if e.button == .Left && window_tab_close_hit(app, w, bar, x, y) >= 0 {
+					ui.armed_press(&w.tab_close_armed, index)
+				} else if index == bar.count && e.button == .Left {
+					tab_new(app, w)
+				} else if index >= 0 && index < bar.count {
+					#partial switch e.button {
+					case .Right:
+						tab_menu_open(app, w, index, x, y)
+					case .Middle:
+						tab_close_request(app, w, index)
+					case .Left:
+						tab_pointer_select(
+							app,
+							w,
+							index,
+							.Control in e.modifiers,
+							.Shift in e.modifiers,
+						)
+						tab_press(
+							app,
+							w,
+							index,
+							x,
+							y,
+							e.modifiers & {.Control, .Shift} != {},
+						)
+					case:
+					}
+				}
+			}
+			return
+		}
+	}
 	area := rail_area(w)
 	if rail_visible(w) &&
 	   x >= area.x &&
@@ -301,8 +355,12 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 				return
 			}
 			if e.button == .Middle {
+				id := w.id
 				if entry.workspace == w.workspace {tab_close_request(app, w, entry.tab)}
-				rail_overlay_dismiss(app, w)
+				// Closing the last tab frees this window through hide_to_tray.
+				if current := window_find(app, id); current != nil {
+					rail_overlay_dismiss(app, current)
+				}
 				return
 			}
 			if e.button == .Left {
@@ -310,7 +368,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 					if !rail_select_tab(app, w, entry.workspace, entry.tab) {return}
 					rail_overlay_dismiss(app, w)
 					if w.workspace != entry.workspace {return}
-					tab_press(app, w, entry.tab, y, false)
+					tab_press(app, w, entry.tab, x, y, false)
 					return
 				}
 				tab_pointer_select(
@@ -323,7 +381,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 				// Selecting in an overlay closes it before a drag could begin; reorder belongs to
 				// the docked rail where the indicator and rows stay visible.
 				if rail_visible(w) {
-					tab_press(app, w, entry.tab, y, e.modifiers & {.Control, .Shift} != {})
+					tab_press(app, w, entry.tab, x, y, e.modifiers & {.Control, .Shift} != {})
 				}
 			}
 		}
@@ -440,13 +498,24 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		pointer_set(app, w, .Arrow)
 		return
 	}
-	toggle_hover := rail_toggle_hit(w, x, y)
+	toggle_hover := !w.tabs_horizontal && rail_toggle_hit(w, x, y)
 	if toggle_hover != w.rail_toggle_hovered {
 		w.rail_toggle_hovered, w.dirty = toggle_hover, true
 	}
 	rail_hover := -1
 	rail_area_rect := rail_area(w)
-	if rail_visible(w) &&
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		hover := window_tab_hit(app, w, bar, x, y)
+		chevron := tab_chevron_rect(app, w)
+		if x >= chevron.x && x < chevron.x + chevron.width && y >= 0 && y < bar.height {
+			hover = bar.count + 1
+		}
+		if hover != w.tab_hover {
+			w.tab_hover = hover
+			w.dirty = true
+		}
+	} else if rail_visible(w) &&
 	   x >= rail_area_rect.x &&
 	   x < rail_area_rect.x + rail_area_rect.width &&
 	   y >= rail_area_rect.y &&

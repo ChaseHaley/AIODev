@@ -66,6 +66,11 @@ Window :: struct {
 	gloss_hovered: bool,
 	find: ui.Find_Bar,
 	leader_until: time.Tick,
+	// Tab placement: horizontal restores the title-bar strip and the presentation arrays below.
+	tabs_horizontal: bool,
+	tab_underline:   ui.Motion,
+	tab_hover:       int,
+	tab_pressed:     bool,
 	// Vertical tab rail: rows, scroll, adaptive visibility and the overlay slide.
 	rail_rows:           [dynamic]Rail_Row,
 	rail_auto:           bool,
@@ -147,7 +152,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.rail_rows = make([dynamic]Rail_Row)
 	ui.find_init(&w.find)
 	profile_menu_init(&w.profile_menu)
-	w.rail_hover, w.rail_pressed = -1, -1
+	w.tab_hover, w.rail_hover, w.rail_pressed = -1, -1, -1
 	w.caption_hover = -1
 	w.divider_click_node = layout.INVALID_NODE
 	w.pointer_shape = .Text
@@ -155,6 +160,10 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.dirty = true
 	if !workspace_view_init(app, &w.resources, workspace) {window_free(w); return nil}
 	if w.workspace.selection_anchor == 0 {tab_select_one(w.workspace, w.workspace.selected)}
+	w.tab_underline = {
+		value  = f32(w.workspace.selected),
+		target = f32(w.workspace.selected),
+	}
 	g := initial_geometry(app)
 	if entry := focused_session(app, w); entry != nil {g = term.geometry(entry.session)}
 	desc := platform.Window_Desc {
@@ -283,6 +292,29 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	if platform.window_set_frame_color(&app.platform, w.id, theme.chrome, theme.text) != .None {
 		log.error("setting the window frame color failed")
 	}
+	horizontal := app.settings.tabs.orientation == .Horizontal
+	placement_changed := horizontal != w.tabs_horizontal
+	w.tabs_horizontal = horizontal
+	if placement_changed {
+		w.tab_hover, w.tab_pressed = -1, false
+	}
+	if placement_changed && !horizontal {
+		// Returning from the strip restores the rail's automatic state; a manual hide or overlay
+		// does not survive the mode switch.
+		w.rail_override, w.rail_was_overlay = .Auto, false
+		rail_adaptive_update(w)
+		if w.rail_auto {
+			w.rail_slide.value, w.rail_slide.target = 1, 1
+		} else {
+			w.rail_slide.value, w.rail_slide.target = 0, 0
+		}
+	}
+	if placement_changed && horizontal {
+		// The rail rows hold workspace pointers from the old surface and are not read again until
+		// the rail returns, when relayout rebuilds them.
+		clear(&w.rail_rows)
+		w.rail_hover, w.rail_pressed = -1, -1
+	}
 	window_relayout(app, w)
 }
 
@@ -314,15 +346,23 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	bar_height := ui.TITLE_BAR_HEIGHT * w.scale
-	toggle := rail_toggle_rect(w)
+	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
+	if tab_count != len(w.tab_positions) {
+		w.tab_hover, w.tab_pressed = -1, false
+	}
+	if !tab_presentation_resize(&w.presentation, tab_count) {
+		log.error("resizing tab presentation values failed")
+	}
 	platform.window_title_bar(
 		&app.platform,
 		w.id,
 		i32(bar_height),
-		i32(max(workspace_button_width(w), toggle.x + toggle.width)),
+		i32(window_title_controls_end(app, w)),
 	)
-	rail_layout_state, rail_ok := rail_current_layout(app, w)
-	if rail_ok {w.rail_scroll = rail_layout_state.scroll}
+	if !w.tabs_horizontal {
+		rail_layout_state, rail_ok := rail_current_layout(app, w)
+		if rail_ok {w.rail_scroll = rail_layout_state.scroll}
+	}
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
 	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers)

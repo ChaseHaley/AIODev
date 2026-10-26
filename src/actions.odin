@@ -115,6 +115,7 @@ Action :: enum u32 {
 	Palette_Settings,
 	Palette_Commands,
 	Toggle_Tabs_Rail,
+	Toggle_Tabs_Orientation,
 }
 
 @(private)
@@ -347,6 +348,11 @@ ACTIONS :: [Action]Action_Info {
 		"view.tabs_rail",
 		"Show or Hide the Tab Rail",
 		{{.B, {.Control, .Shift}}},
+	},
+	.Toggle_Tabs_Orientation = {
+		"view.tabs_orientation",
+		"Switch Between Vertical and Horizontal Tabs",
+		{{.L, {.Control, .Shift}}},
 	},
 }
 
@@ -624,7 +630,9 @@ run_action :: proc(
 	case .Resize_Left_Large, .Resize_Right_Large, .Resize_Up_Large, .Resize_Down_Large:
 		resize_pane(app, w, action, 50)
 	case .Toggle_Tabs_Rail:
-		rail_toggle(app, w)
+		if !w.tabs_horizontal {rail_toggle(app, w)}
+	case .Toggle_Tabs_Orientation:
+		toggle_tab_orientation(app)
 	}
 }
 

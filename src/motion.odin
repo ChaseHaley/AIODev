@@ -15,9 +15,12 @@ motion_active :: proc(app: ^App) -> bool {
 			}
 		}
 		if ui.motion_active(w.rail_slide) ||
+		   ui.motion_active(w.tab_underline) ||
 		   ui.presence_active(w.pending_close.confirm.presence) { return true }
 		if ui.control_active(w.pending_close.confirm.hover_motion) { return true }
 		if ui.control_active(w.workspace_motion) { return true }
+		for control in w.tab_controls { if ui.control_active(control) { return true } }
+		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
 		if w.header_height > 0 || w.split_overlay {
 			for pane in w.views {for control in pane.header_controls {if ui.control_active(control) {return true}}}
@@ -51,6 +54,41 @@ update_motion :: proc(app: ^App) {
 		if rail_changed && !ui.motion_active(w.rail_slide) && !rail_overlay(w) {
 			w.rail_was_overlay = false
 		}
+		tabs_changed := false
+		for &position, i in w.tab_positions {
+			if i >= len(w.workspace.tabs) {continue}
+			if !w.tab_drag.active || !w.workspace.tabs[i].marked {
+				ui.motion_target(
+					&position,
+					f32(i),
+					140 * time.Millisecond,
+					.Decelerate,
+					app.animations,
+					now,
+				)
+			}
+			tabs_changed = ui.motion_update(&position, now) || tabs_changed
+		}
+		ui.motion_target(
+			&w.tab_underline,
+			f32(w.workspace.selected),
+			140 * time.Millisecond,
+			.Decelerate,
+			app.animations,
+			now,
+		)
+		for &control, i in w.tab_controls {
+			tabs_changed =
+				ui.control_update(
+					&control,
+					w.tab_hover == i,
+					w.tab_pressed && w.tab_hover == i,
+					app.animations,
+					now,
+				) ||
+				tabs_changed
+		}
+		tabs_changed = ui.motion_update(&w.tab_underline, now) || tabs_changed
 		pane_drag_animate(app, w, app.animations, now)
 		controls_changed := false
 		if w.header_height > 0 || w.split_overlay {
@@ -73,7 +111,7 @@ update_motion :: proc(app: ^App) {
 		if ui.control_update(&c.hover_motion, c.hover != .None, false, app.animations, now) {
 			confirm_changed = true
 		}
-		if rail_changed || controls_changed || confirm_changed {w.dirty = true}
+		if rail_changed || tabs_changed || controls_changed || confirm_changed {w.dirty = true}
 	}
 }
 

@@ -63,6 +63,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 	case platform.Mouse_Leave_Event:
 		if w := window_find(app, e.window); w != nil {
 			w.find.hover = .None
+			w.tab_hover, w.tab_pressed = -1, false
 			w.rail_hover, w.rail_pressed = -1, -1
 			w.rail_toggle_hovered = false
 			w.workspace_hovered = false
@@ -200,17 +201,28 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if !palette_active(app, w) &&
 	   e.pressed &&
 	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
-		row := rail_row_rect_for_tab(app, w, w.workspace.selected)
-		if row.height <= 0 {
-			row = {16, ui.TITLE_BAR_HEIGHT * w.scale, 1, 1}
+		if w.tabs_horizontal {
+			bar := window_tab_bar(app, w)
+			tab_menu_open(
+				app,
+				w,
+				w.workspace.selected,
+				bar.x + tab_position(w, w.workspace.selected) * bar.tab_width,
+				bar.height,
+			)
+		} else {
+			row := rail_row_rect_for_tab(app, w, w.workspace.selected)
+			if row.height <= 0 {
+				row = {16, ui.TITLE_BAR_HEIGHT * w.scale, 1, 1}
+			}
+			tab_menu_open(
+				app,
+				w,
+				w.workspace.selected,
+				row.x + 16 * w.scale,
+				row.y + row.height,
+			)
 		}
-		tab_menu_open(
-			app,
-			w,
-			w.workspace.selected,
-			row.x + 16 * w.scale,
-			row.y + row.height,
-		)
 		w.suppressed_key = e
 		return
 	}

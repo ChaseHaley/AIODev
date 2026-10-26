@@ -82,7 +82,8 @@ pane_box_for_grid :: proc(
 	rail := f32(0)
 	// Include the rail only when the resulting window would dock it. The rule is the same one
 	// the window applies after the resize, so the requested grid is not widened by a hidden rail.
-	if f32(i32(base_width)) >= ui.RAIL_DOCK_MIN_WIDTH * scale {
+	if app.settings.tabs.orientation == .Vertical &&
+	   f32(i32(base_width)) >= ui.RAIL_DOCK_MIN_WIDTH * scale {
 		rail = ui.rail_pixel_width(scale)
 		box.rect.x += rail
 	}

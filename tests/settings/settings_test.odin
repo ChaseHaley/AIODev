@@ -390,6 +390,32 @@ key_bindings :: proc(t: ^testing.T) {
 }
 
 @(test)
+tab_orientation_defaults_to_vertical_and_accepts_horizontal :: proc(t: ^testing.T) {
+	defaults, default_error := settings.defaults()
+	if !testing.expect_value(t, default_error, nil) {return}
+	defer settings.destroy(&defaults)
+	testing.expect_value(t, defaults.tabs.orientation, settings.Tabs_Orientation.Vertical)
+
+	s, diagnostics, parse_error := settings.parse("tabs.orientation = horizontal\n")
+	if !testing.expect_value(t, parse_error, nil) {return}
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, s.tabs.orientation, settings.Tabs_Orientation.Horizontal)
+	testing.expect_value(t, len(diagnostics), 0)
+
+	invalid, invalid_diagnostics, invalid_error := settings.parse(
+		"theme.mode = dark\ntabs.orientation = diagonal\n",
+	)
+	if !testing.expect_value(t, invalid_error, nil) {return}
+	defer settings.destroy(&invalid)
+	defer settings.diagnostics_destroy(&invalid_diagnostics)
+	testing.expect_value(t, invalid.tabs.orientation, settings.Tabs_Orientation.Vertical)
+	if !testing.expect_value(t, len(invalid_diagnostics), 1) {return}
+	testing.expect_value(t, invalid_diagnostics[0].line, 2)
+	testing.expect_value(t, invalid_diagnostics[0].key, "tabs.orientation")
+}
+
+@(test)
 vertical_scope_defaults_to_all_and_reports_an_invalid_choice_by_line :: proc(t: ^testing.T) {
 	defaults, default_error := settings.defaults()
 	if !testing.expect_value(t, default_error, nil) {return}

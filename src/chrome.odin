@@ -16,7 +16,7 @@ window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 		f32(app.settings.pane.gap),
 		w.scale,
 	)
-	if rail_docked(w) && !w.preparing {
+	if !w.tabs_horizontal && rail_docked(w) && !w.preparing {
 		rail_width := min(ui.rail_pixel_width(w.scale), r.width)
 		r.x += rail_width
 		r.width -= rail_width
@@ -61,6 +61,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		w.pointer,
 	); result != .Ok {return result}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
+	if w.tabs_horizontal {return window_tab_strip_draw(app, w)}
 	return rail_toggle_draw(app, w)
 }
 

@@ -160,7 +160,13 @@ pending_close_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	case .None:
 	case .Tab:
 		if accept {
-			if index := tab_index_by_id(w.workspace, pc.tab); index >= 0 {tab_close(app, w, index)}
+			if index := tab_index_by_id(w.workspace, pc.tab); index >= 0 {
+				id := w.id
+				tab_close(app, w, index)
+				// Closing the last tab frees this window through hide_to_tray.
+				if current := window_find(app, id); current != nil {tab_close_restore(current)}
+				return
+			}
 		}
 		tab_close_restore(w)
 	case .Workspace:

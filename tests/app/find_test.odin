@@ -64,7 +64,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	defer delete(state.sessions)
 	defer app.tab_drag_cancel(&state, &w)
 	row := app.rail_row_rect_for_tab(&state, &w, 0)
-	app.tab_press(&state, &w, 0, row.y + row.height / 2, false)
+	app.tab_press(&state, &w, 0, row.x + 20, row.y + row.height / 2, false)
 	if !testing.expect(t, w.tab_drag.pressed) { return }
 	// Seed the gesture and overlay together; moves and releases use the real app dispatcher.
 	ui.find_open(&w.find)

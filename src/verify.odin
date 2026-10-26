@@ -450,6 +450,12 @@ when AIO_CONTROL {
 				{"window.scale", fmt.tprintf("%g", w.scale)},
 				{"window.focused", fmt.tprintf("%t", w.focused)},
 				{"window.maximized", fmt.tprintf("%t", w.maximized)},
+				{"tabs.orientation", w.tabs_horizontal ? "horizontal" : "vertical"},
+				{"tabs.width", fmt.tprintf("%g", window_tab_bar(app, w).tab_width)},
+				{"tabs.x", fmt.tprintf("%g", window_tab_bar(app, w).x)},
+				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
+				{"tabs.new_tab", verify_workspace_rect(window_tab_new_rect(app, w))},
+				{"tabs.chevron", verify_workspace_rect(tab_chevron_rect(app, w))},
 				{"rail.visible", fmt.tprintf("%t", rail_visible(w))},
 				{"rail.docked", fmt.tprintf("%t", rail_docked(w))},
 				{"rail.overlay", fmt.tprintf("%t", rail_overlay(w))},
@@ -461,10 +467,7 @@ when AIO_CONTROL {
 				{"title.height", fmt.tprintf("%g", ui.TITLE_BAR_HEIGHT * w.scale)},
 				{
 					"title.controls_end",
-					fmt.tprintf(
-						"%d",
-						i32(max(workspace_button_width(w), rail_toggle_rect(w).x + rail_toggle_rect(w).width)),
-					),
+					fmt.tprintf("%d", i32(window_title_controls_end(app, w))),
 				},
 				{"title.caption_start", fmt.tprintf("%g", f32(w.width) - 138 * w.scale)},
 				{"workspace.id", fmt.tprintf("%d", w.workspace.id)},
@@ -604,18 +607,27 @@ when AIO_CONTROL {
 			row_index := -1
 			row_rect := render.Rect{}
 			close_rect := render.Rect{}
+			position := f32(i)
+			strip_rect := render.Rect{}
+			strip_close := render.Rect{}
 			if w != nil {
 				row_index = rail_row_index_for_tab(w.rail_rows[:], workspace, i)
 				row_rect = rail_row_rect_for_tab(app, w, i)
 				layout, _ := rail_current_layout(app, w)
 				close_rect = ui.rail_close_rect(layout, row_index, w.scale)
+				position = tab_position(w, i)
+				strip_rect = window_tab_rect(app, w, i)
+				strip_close = window_tab_close_rect(app, w, i)
 			}
 			tab_state := [?]control.State_Entry {
 				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
 				{fmt.tprintf("%s.marked", prefix), fmt.tprintf("%t", tab.marked)},
+				{fmt.tprintf("%s.position", prefix), fmt.tprintf("%g", position)},
 				{fmt.tprintf("%s.rail_row", prefix), fmt.tprintf("%d", row_index)},
 				{fmt.tprintf("%s.rect", prefix), verify_workspace_rect(row_rect)},
 				{fmt.tprintf("%s.close", prefix), verify_workspace_rect(close_rect)},
+				{fmt.tprintf("%s.strip_rect", prefix), verify_workspace_rect(strip_rect)},
+				{fmt.tprintf("%s.strip_close", prefix), verify_workspace_rect(strip_close)},
 				{fmt.tprintf("%s.focus", prefix), fmt.tprintf("%d", tab.tree.focus)},
 				{fmt.tprintf("%s.title", prefix), tab.title},
 				{fmt.tprintf("%s.zoomed", prefix), fmt.tprintf("%t", tab.tree.zoomed)},

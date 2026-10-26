@@ -423,6 +423,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		w := app.windows[i]
 		if w.workspace != workspace {continue}
+		tab_presentation_remove(&w.presentation, index)
 		if len(workspace.tabs) == 0 {
 			w.tree = nil
 			hide_to_tray(app, w)

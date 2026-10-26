@@ -42,7 +42,8 @@ Pane_Drag :: struct {
 Tab_Drag :: struct {
 	grabbed:                   ^Tab,
 	order:                     [dynamic]^Tab,
-	start_y, offset:           f32,
+	start_x, start_y:          f32,
+	offset_x, offset_y:        f32,
 	rank, slot:                int,
 	pressed, active, modified: bool,
 	// A drop over another workspace's rows has no model support, so release restores the order.
@@ -104,14 +105,28 @@ divider_cursor :: proc(w: ^Window, x, y: f32) -> (platform.Cursor_Shape, bool) {
 	return .Horizontal in axes ? .Resize_Horizontal : .Resize_Vertical, true
 }
 
-tab_press :: proc(app: ^App, w: ^Window, index: int, y: f32, modified: bool) {
+tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) {
 	if index < 0 || index >= len(w.workspace.tabs) || !w.workspace.tabs[index].marked {return}
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		if bar.tab_width <= 0 {return}
+		w.tab_drag = {
+			grabbed  = w.workspace.tabs[index],
+			start_x  = x,
+			start_y  = y,
+			offset_x = x - (bar.x + tab_position(w, index) * bar.tab_width),
+			pressed  = true,
+			modified = modified,
+		}
+		return
+	}
 	row := rail_row_rect_for_tab(app, w, index)
 	if row.height <= 0 {return}
 	w.tab_drag = {
 		grabbed  = w.workspace.tabs[index],
+		start_x  = x,
 		start_y  = y,
-		offset   = (y - row.y) / row.height,
+		offset_y = (y - row.y) / row.height,
 		pressed  = true,
 		modified = modified,
 	}
@@ -124,6 +139,7 @@ tab_move :: proc(app: ^App, w: ^Window, from, to: int) {
 	tab := tabs[from]
 	ordered_remove(tabs, from)
 	inject_at(tabs, to, tab)
+	tab_presentation_move(&w.presentation, from, to)
 	w.workspace.selected = tab_selected_after_move(w.workspace.selected, from, to)
 	w.tree = &selected_tab(w.workspace).tree
 	rail_reveal_active(app, w)
@@ -133,7 +149,8 @@ tab_move :: proc(app: ^App, w: ^Window, from, to: int) {
 tab_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	d := &w.tab_drag
 	if !d.pressed {return false}
-	if !d.active && abs(y - d.start_y) < DRAG_THRESHOLD * w.scale {return false}
+	since := w.tabs_horizontal ? abs(x - d.start_x) : abs(y - d.start_y)
+	if !d.active && since < DRAG_THRESHOLD * w.scale {return false}
 	if !d.active {
 		order, err := make([dynamic]^Tab, len(w.workspace.tabs))
 		if err != nil {
@@ -146,6 +163,61 @@ tab_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		for tab in order {if tab == d.grabbed {break}; if tab.marked {d.rank += 1}}
 		d.active = true
 	}
+	if w.tabs_horizontal {return tab_drag_move_strip(app, w, x)}
+	return tab_drag_move_rail(app, w, x, y)
+}
+
+@(private)
+tab_drag_apply_slot :: proc(app: ^App, w: ^Window, slot: int) -> bool {
+	d := &w.tab_drag
+	marked, mark_error := make([]bool, len(d.order), context.temp_allocator)
+	if mark_error !=
+	   nil {tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return false}
+	count := 0
+	for tab, i in d.order {marked[i] = tab.marked; if tab.marked {count += 1}}
+	if len(d.order) - count <= 0 {return false}
+	order, order_error := make([]int, len(d.order), context.temp_allocator)
+	if order_error !=
+	   nil {tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return false}
+	if !ui.tab_group_order(marked, slot, order) {return false}
+	for original, to in order {
+		for tab, from in w.workspace.tabs {
+			if tab == d.order[original] {tab_move(app, w, from, to); break}
+		}
+	}
+	d.slot = slot
+	w.dirty = true
+	return true
+}
+
+@(private)
+tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
+	d := &w.tab_drag
+	bar := window_tab_bar(app, w)
+	if bar.tab_width <= 0 {return true}
+	count := 0
+	for tab in d.order {if tab.marked {count += 1}}
+	if len(d.order) - count <= 0 {return true}
+	first := clamp(
+		(x - bar.x - d.offset_x) / bar.tab_width - f32(d.rank),
+		0,
+		f32(len(d.order) - count),
+	)
+	if !tab_drag_apply_slot(app, w, int(math.floor(first + 0.5))) {return true}
+	rank, now := 0, time.tick_now()
+	for tab, i in w.workspace.tabs {
+		if !tab.marked {continue}
+		if i < len(w.tab_positions) {
+			ui.motion_target(&w.tab_positions[i], first + f32(rank), 0, .Linear, false, now)
+		}
+		rank += 1
+	}
+	return true
+}
+
+@(private)
+tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	d := &w.tab_drag
 	layout, ok := rail_current_layout(app, w)
 	if !ok || !rail_visible(w) || layout.list.height <= 0 || layout.row_height <= 0 {
 		d.elsewhere = true
@@ -168,31 +240,16 @@ tab_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	positions := make([dynamic]int, context.temp_allocator)
 	rail_tab_rows(w.rail_rows[:], w.workspace, &positions)
 	if len(positions) == 0 {return true}
-	marked, mark_error := make([]bool, len(d.order), context.temp_allocator)
-	if mark_error !=
-	   nil {tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return true}
 	count := 0
-	for tab, i in d.order {marked[i] = tab.marked; if tab.marked {count += 1}}
+	for tab in d.order {if tab.marked {count += 1}}
 	if len(d.order) - count <= 0 {return true}
 	first_row := ui.rail_row_rect(layout, positions[0])
 	first :=
 		(y - first_row.y) / layout.row_height -
-		d.offset -
+		d.offset_y -
 		f32(d.rank)
 	first = clamp(first, 0, f32(len(d.order) - count))
-	slot := int(math.floor(first + 0.5))
-	order, order_error := make([]int, len(d.order), context.temp_allocator)
-	if order_error !=
-	   nil {tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return true}
-	if !ui.tab_group_order(marked, slot, order) {return true}
-	for original, to in order {
-		for tab, from in w.workspace.tabs {
-			if tab == d.order[original] {tab_move(app, w, from, to); break}
-		}
-	}
-	d.slot = slot
-	w.dirty = true
-	return true
+	return tab_drag_apply_slot(app, w, int(math.floor(first + 0.5)))
 }
 
 tab_drag_cancel :: proc(app: ^App, w: ^Window) {
@@ -289,6 +346,16 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 		d.minimum_rejected = !reorders_tab &&
 			!pane_minimum_allows(app, w, panes[:], nil, notify_failure = false)
 		if d.minimum_rejected {return {}, false}
+		if w.tabs_horizontal {
+			r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
+			return {
+					r.x + 2 * w.scale,
+					6 * w.scale,
+					max(0, min(180 * w.scale, r.width) - 4 * w.scale),
+					28 * w.scale,
+				},
+				true
+		}
 		r := rail_new_tab_rect(app, w)
 		inset := 2 * w.scale
 		return {
@@ -435,14 +502,25 @@ pane_drag_target_move :: proc(
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
 	on_tab := -1
-	rail_tab, rail_new_tab, over_rail := rail_pane_target(app, w, x, y)
-	if over_rail {
-		if rail_tab >= 0 {
+	over_rail, rail_new_tab := false, false
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		on_tab = window_tab_hit(app, w, bar, x, y)
+		if on_tab >= 0 && on_tab < bar.count {
+			destination = w.workspace.tabs[on_tab]
+		}
+	} else {
+		rail_tab, new_tab_target, over := rail_pane_target(app, w, x, y)
+		over_rail, rail_new_tab = over, new_tab_target
+		if over && rail_tab >= 0 {
 			on_tab = rail_tab
 			if rail_tab < len(w.workspace.tabs) {destination = w.workspace.tabs[rail_tab]}
 		}
 	}
-	new_tab := !swap && over_rail && rail_new_tab
+	new_tab := !swap &&
+		(w.tabs_horizontal
+				? ui.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
+				: over_rail && rail_new_tab)
 	if destination != nil && destination != selected_tab(w.workspace) && on_tab >= 0 && !swap {
 		if d.hover != destination {
 			d.hover, d.hover_until = destination, time.tick_add(now, 350 * time.Millisecond)

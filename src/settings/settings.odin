@@ -39,7 +39,12 @@ Tabs_Scope :: enum int {
 	All,
 	Workspace,
 }
+Tabs_Orientation :: enum int {
+	Vertical,
+	Horizontal,
+}
 Tabs_Settings :: struct {
+	orientation:    Tabs_Orientation,
 	vertical_scope: Tabs_Scope,
 }
 Window_Settings :: struct {
@@ -209,6 +214,18 @@ SCHEMA :: [?]Schema_Entry {
 		"Ask before closing a tab that has more than one pane.",
 	},
 	{
+		"tabs.orientation",
+		"Tab Orientation",
+		.Enum,
+		offset_of(Settings, tabs) + offset_of(Tabs_Settings, orientation),
+		"vertical",
+		0,
+		0,
+		{"vertical", "horizontal"},
+		"Draw tabs in a vertical rail along the left or in a horizontal strip in the title bar. " +
+			"Switch at any time with Ctrl+Shift+L.",
+	},
+	{
 		"tabs.vertical_scope",
 		"Vertical Tab List",
 		.Enum,
@@ -218,7 +235,7 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		{"all", "workspace"},
 		"Which tabs the vertical rail lists: all open workspaces and their tabs, " +
-			"or only the active workspace's tabs.",
+			"or only the active workspace's tabs. The horizontal strip always shows the active workspace.",
 	},
 	{
 		"shell.default_profile",
