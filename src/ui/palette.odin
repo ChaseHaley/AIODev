@@ -127,10 +127,10 @@ Palette_Mode_Info :: struct {
 
 @(private) PALETTE_CHIP_WIDTHS := [Palette_Mode]f32 {
 	.All = 0,
-	.Tabs = 78,
-	.Workspaces = 122,
-	.Settings = 104,
-	.Commands = 104,
+	.Tabs = 88,
+	.Workspaces = 132,
+	.Settings = 114,
+	.Commands = 122,
 }
 
 @(private) PALETTE_FOOTER_MODES := [?]Palette_Mode {
@@ -942,19 +942,6 @@ chip_rect :: proc(p: ^Palette, l: Palette_Layout, scale: f32) -> render.Rect {
 	return {l.input.x + inset, y, width, height}
 }
 
-// The query text starts after the chip when one is present; draw and hit-test share this box.
-@(private)
-palette_text_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {
-	box := palette_query_box(p, l, text, scale)
-	if p.mode != .All && l.chip.width > 0 {
-		shift := l.chip.width + PALETTE_CHIP_GAP * scale
-		box.rect.x += shift
-		box.rect.width = max(0, box.rect.width - shift)
-		box.inset = 0
-	}
-	return box
-}
-
 @(private)
 row_header :: proc(p: ^Palette, index: int) -> bool {
 	return p.mode == .All && palette_section_header(p, index)
@@ -1193,7 +1180,7 @@ palette_mouse_press :: proc(
 
 // The query field's box: the input row's width, with the label sharing its height above.
 palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {
-	return {
+	box := Field_Box {
 		field = &p.query,
 		text = text,
 		rect = l.input,
@@ -1203,6 +1190,14 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 		style = .Input,
 		scale = scale,
 	}
+	if p.mode != .All && l.chip.width > 0 {
+		left := l.chip.x + l.chip.width + PALETTE_CHIP_GAP * scale
+		right := box.rect.x + box.rect.width - PALETTE_TEXT_INSET * scale
+		box.rect.x = left
+		box.rect.width = max(0, right - left)
+		box.inset = 0
+	}
+	return box
 }
 
 palette_input_contains :: proc(l: Palette_Layout, x, y: f32) -> bool {
@@ -1225,7 +1220,7 @@ palette_input_press :: proc(
 	}
 	closed_menu := p.mode_menu
 	p.mode_menu, p.menu_hover = false, -1
-	at := field_box_offset(palette_text_box(p, l, text, scale), x)
+	at := field_box_offset(palette_query_box(p, l, text, scale), x)
 	if field_pointer(&p.query, at, true, extend) == .None {
 		return closed_menu ? .Changed : .None
 	}
@@ -1235,7 +1230,7 @@ palette_input_press :: proc(
 palette_input_drag :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, scale: f32) -> Outcome {
 	closed_menu := p.mode_menu
 	p.mode_menu, p.menu_hover = false, -1
-	at := field_box_offset(palette_text_box(p, l, text, scale), x)
+	at := field_box_offset(palette_query_box(p, l, text, scale), x)
 	if field_pointer(&p.query, at, false, true) == .None {
 		return closed_menu ? .Changed : .None
 	}
@@ -1390,25 +1385,25 @@ palette_draw :: proc(
 				radius = 5 * scale,
 				stroke = scale,
 			})
-			chip_text := text_styled(text, .Keycap)
+			chip_text := text_styled(text, .Small)
 			baseline := chip.y + (chip.height - chip_text.line_height) / 2 + chip_text.ascent
 			info := PALETTE_MODES[p.mode]
 			prefix_width := text_width(&chip_text, info.prefix)
 			if result := draw_text(&chip_text, list, info.prefix, chip.x + 7 * scale, baseline,
 				theme.accent); result != .Ok {return result}
-			word_x := chip.x + 9 * scale + prefix_width
+			word_x := chip.x + 12 * scale + prefix_width
 			word_width := max(0, chip.x + chip.width - word_x - 16 * scale)
 			if result := draw_text(&chip_text, list, info.word, word_x, baseline, theme.text,
 				word_width); result != .Ok {return result}
 			// A two-pixel chevron reads as a menu affordance without relying on a font glyph.
 			center_x := chip.x + chip.width - 9 * scale
-			center_y := chip.y + chip.height / 2 - 3 * scale
-			for row in 0 ..< 4 {
+			center_y := chip.y + chip.height / 2 - 2 * scale
+			for row in 0 ..< 3 {
 				for direction in ([?]f32{-1, 1}) {
 					draw_rect(list, {
 						rect = {
 							center_x + direction * f32(row) * scale - scale,
-							center_y + f32(row) * scale,
+							center_y + f32(2 - row) * scale,
 							2 * scale,
 							2 * scale,
 						},
@@ -1418,9 +1413,14 @@ palette_draw :: proc(
 				}
 			}
 		}
-		box := palette_text_box(p, l, text, scale)
+		box := palette_query_box(p, l, text, scale)
+		input_text := text_styled(text, .Input)
+		baseline := l.input.y + 43 * scale
+		if l.chip.height > 0 {
+			baseline = l.chip.y + (l.chip.height - input_text.line_height) / 2 + input_text.ascent
+		}
 		if box.rect.width > 1 {
-			if result := field_box_draw(box, list, theme, l.input.y + 43 * scale, true,
+			if result := field_box_draw(box, list, theme, baseline, true,
 				PALETTE_MODES[p.mode].placeholder); result != .Ok { return result }
 		}
 	}

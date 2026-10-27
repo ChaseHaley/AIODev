@@ -15,7 +15,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.gesture.cancelled += w.gesture.buttons | w.header_buttons
 	if ui.armed_down(w.find.armed) || w.selecting || w.dragging.count > 0 ||
 	   w.tab_drag.pressed || w.pane_drag.pressed || ui.armed_down(w.tab_close_armed) ||
-	   ui.armed_down(w.caption_armed) || ui.armed_down(w.rail_toggle_armed) ||
+	   ui.armed_down(w.caption_armed) || ui.armed_down(w.tab_orientation_button_armed) ||
 	   w.editor.drag != .None || w.rename.dragging || w.workspace_picker.query.dragging {
 		w.gesture.cancelled += {.Left}
 	}
@@ -25,8 +25,8 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	pane_header_cancel(w)
 	w.tab_hover, w.tab_pressed = -1, false
 	w.rail_hover, w.rail_pressed = -1, -1
-	w.rail_toggle_hovered = false
-	ui.armed_cancel(&w.rail_toggle_armed)
+	w.tab_orientation_button_hovered = false
+	ui.armed_cancel(&w.tab_orientation_button_armed)
 	ui.armed_cancel(&w.tab_close_armed)
 	w.caption_hover = -1
 	ui.armed_cancel(&w.caption_armed)
@@ -60,10 +60,10 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		return true
 	}
 	if e.button == .Left &&
-	   ui.armed_down(w.rail_toggle_armed) {
-		fired, ok := ui.armed_release(&w.rail_toggle_armed, rail_toggle_hit(w, x, y))
+	   ui.armed_down(w.tab_orientation_button_armed) {
+		fired, ok := ui.armed_release(&w.tab_orientation_button_armed, tab_orientation_button_hit(w, x, y))
 		w.dirty = true
-		if ok && fired {rail_toggle(app, w)}
+		if ok && fired {toggle_tab_orientation(app)}
 		return true
 	}
 	if e.button == .Left && ui.armed_down(w.caption_armed) && !w.pane_drag.pressed && !w.tab_drag.pressed {
@@ -249,8 +249,8 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	x, y := f32(e.x), f32(e.y)
 
-	if e.pressed && e.button == .Left && rail_toggle_hit(w, x, y) {
-		ui.armed_press(&w.rail_toggle_armed, true)
+	if e.pressed && e.button == .Left && tab_orientation_button_hit(w, x, y) {
+		ui.armed_press(&w.tab_orientation_button_armed, true)
 		return
 	}
 
@@ -263,6 +263,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		}
 	}
 	if e.pressed && e.button == .Left && y < ui.TITLE_BAR_HEIGHT * w.scale &&
+	   x >= tab_orientation_button_rect(w).x + tab_orientation_button_rect(w).width &&
 	   x < workspace_button_width(w) {
 		workspace_picker_open(app, w)
 		return
@@ -498,9 +499,9 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		pointer_set(app, w, .Arrow)
 		return
 	}
-	toggle_hover := !w.tabs_horizontal && rail_toggle_hit(w, x, y)
-	if toggle_hover != w.rail_toggle_hovered {
-		w.rail_toggle_hovered, w.dirty = toggle_hover, true
+	toggle_hover := tab_orientation_button_hit(w, x, y)
+	if toggle_hover != w.tab_orientation_button_hovered {
+		w.tab_orientation_button_hovered, w.dirty = toggle_hover, true
 	}
 	rail_hover := -1
 	rail_area_rect := rail_area(w)

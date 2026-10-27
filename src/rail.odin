@@ -134,16 +134,13 @@ rail_reveal_active :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-rail_toggle_rect :: proc(w: ^Window) -> render.Rect {
+tab_orientation_button_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
-	x := workspace_button_width(w) + 2 * s
-	width := min(ui.RAIL_TOGGLE_WIDTH * s, max(0, f32(w.width) - 140 * s - x))
-	return {x, 4 * s, width, 32 * s}
+	return {4 * s, 4 * s, ui.RAIL_TOGGLE_WIDTH * s, 32 * s}
 }
 
-rail_toggle_hit :: proc(w: ^Window, x, y: f32) -> bool {
-	if w.tabs_horizontal {return false}
-	r := rail_toggle_rect(w)
+tab_orientation_button_hit :: proc(w: ^Window, x, y: f32) -> bool {
+	r := tab_orientation_button_rect(w)
 	return r.width >= 24 * w.scale && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
@@ -337,7 +334,7 @@ rail_row_draw :: proc(
 	case .Tab:
 		tile := ui.rail_tab_tile(layout, rect)
 		selected := row.workspace == w.workspace && row.tab == w.workspace.selected
-		marked := row.workspace.tabs[row.tab].marked
+		marked := row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
 		if selected {
 			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
 				color = app.theme.selection, radius = 6 * s})
@@ -506,31 +503,31 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	)
 }
 
-rail_toggle_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	if w.tabs_horizontal {return .Ok}
-	r := rail_toggle_rect(w)
+tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	r := tab_orientation_button_rect(w)
 	if r.width < 24 * w.scale {return .Ok}
 	if render.push_layer(
 		   &w.list,
 		   {0, 0, f32(w.width), ui.TITLE_BAR_HEIGHT * w.scale},
 	   ) != .None {return .Ok}
-	hover := w.rail_toggle_hovered
-	pressed := ui.armed_down(w.rail_toggle_armed)
+	hover := w.tab_orientation_button_hovered
+	pressed := ui.armed_down(w.tab_orientation_button_armed)
 	if hover || pressed {
 		fill := pressed ? app.theme.pressed : app.theme.hover
 		ui.draw_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale})
 	}
 	icon := render.Rect{r.x + (r.width - 16 * w.scale) / 2, r.y + 8 * w.scale, 16 * w.scale, 16 * w.scale}
-	ink := rail_visible(w) ? app.theme.text : app.theme.muted
+	ink := app.theme.text
 	ui.draw_rect(
 		&w.list,
 		{rect = {icon.x, icon.y + w.scale, icon.width, icon.height - 2 * w.scale},
 			color = ink, radius = 3 * w.scale, stroke = w.scale},
 	)
-	ui.draw_rect(
-		&w.list,
-		{rect = {icon.x + 5 * w.scale, icon.y + 4 * w.scale, w.scale, icon.height - 8 * w.scale}, color = ink},
-	)
+	divider := render.Rect{icon.x + 5 * w.scale, icon.y + 4 * w.scale, w.scale, icon.height - 8 * w.scale}
+	if w.tabs_horizontal {
+		divider = {icon.x + 3 * w.scale, icon.y + 5 * w.scale, icon.width - 6 * w.scale, w.scale}
+	}
+	ui.draw_rect(&w.list, {rect = divider, color = ink})
 	if hover {
 		if result := ui.hover_rim_draw(
 			&w.list,

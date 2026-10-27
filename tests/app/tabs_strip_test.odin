@@ -3,6 +3,8 @@ package app_test
 import "core:testing"
 import app "../../src"
 import "aio:layout"
+import "aio:commands"
+import "aio:input"
 import "aio:platform"
 import "aio:settings"
 import "aio:ui"
@@ -157,4 +159,59 @@ tab_orientation_toggle_switches_the_setting_without_a_settings_file :: proc(t: ^
 	testing.expect_value(t, state.settings.tabs.orientation, settings.Tabs_Orientation.Horizontal)
 	app.toggle_tab_orientation(&state)
 	testing.expect_value(t, state.settings.tabs.orientation, settings.Tabs_Orientation.Vertical)
+}
+
+@(test)
+tab_orientation_button_stays_left_of_workspace_in_both_modes :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5, 2}) {
+		w := app.Window{width = 1000, height = 700, scale = scale}
+		expected := app.tab_orientation_button_rect(&w)
+		for width in ([?]i32{300, 720, 1400}) {
+			w.width = width
+			for horizontal in ([?]bool{false, true}) {
+				w.tabs_horizontal = horizontal
+				r := app.tab_orientation_button_rect(&w)
+				testing.expect_value(t, r, expected)
+				testing.expect(t, r.width >= 24 * scale)
+				testing.expect(t, app.tab_orientation_button_hit(&w, r.x + r.width / 2, r.y + r.height / 2))
+				testing.expect(t, r.x + r.width < app.workspace_button_rect(&w).x)
+			}
+		}
+	}
+}
+
+@(test)
+tab_orientation_button_click_switches_both_directions :: proc(t: ^testing.T) {
+	state: app.App
+	defer ui.notices_destroy(&state.notices)
+	defer delete(state.windows)
+	w := app.Window{id = 71, width = 1000, height = 700, scale = 1}
+	for expected in ([?]settings.Tabs_Orientation{.Horizontal, .Vertical}) {
+		r := app.tab_orientation_button_rect(&w)
+		for pressed in ([?]bool{true, false}) {
+			app.gesture_button(&state, &w, platform.Mouse_Button_Event {
+				window = w.id, button = .Left, pressed = pressed,
+				x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2),
+			})
+		}
+		testing.expect_value(t, state.settings.tabs.orientation, expected)
+		// The fixture has no surface; set the window's mode as applying settings would.
+		w.tabs_horizontal = expected == .Horizontal
+	}
+}
+
+@(test)
+ctrl_shift_digits_select_workspaces_instead_of_opening_profiles :: proc(t: ^testing.T) {
+	registry: commands.Registry
+	defer commands.destroy(&registry)
+	registry = commands.create()
+	if !testing.expect_value(t, app.register_actions(&registry), commands.Error.None) {return}
+	for index in 0 ..< 9 {
+		key := input.Key(int(input.Key.Digit_1) + index)
+		command := commands.find_by_key(&registry, key, {.Control, .Shift}, 0)
+		if !testing.expect(t, command != nil) {return}
+		testing.expect_value(t, command.id, commands.Command_Id(int(app.Action.Workspace_1) + index))
+		profile := commands.find(&registry, commands.Command_Id(int(app.Action.Profile_1) + index))
+		testing.expect_value(t, len(commands.active_shortcuts(profile)), 0)
+	}
 }

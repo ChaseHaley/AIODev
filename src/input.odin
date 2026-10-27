@@ -65,7 +65,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.find.hover = .None
 			w.tab_hover, w.tab_pressed = -1, false
 			w.rail_hover, w.rail_pressed = -1, -1
-			w.rail_toggle_hovered = false
+			w.tab_orientation_button_hovered = false
 			w.workspace_hovered = false
 			w.workspace_picker.menu_hover = 0
 			ui.editor_hover_clear(&w.editor)

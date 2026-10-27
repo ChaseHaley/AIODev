@@ -76,7 +76,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 		testing.expect(t, commands.find(&state.registry, name) != nil)
 	}
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
-		x = 12, y = 20})
+		x = i32(app.workspace_button_rect(w).x + 12 * w.scale), y = 20})
 	testing.expect(t, app.workspace_picker_active(&w.workspace_picker))
 	app.handle_event(&state, platform.Text_Event{window = w.id, text = "missing"})
 	testing.expect_value(t, len(w.workspace_picker.rows), 0)

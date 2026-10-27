@@ -61,8 +61,9 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		w.pointer,
 	); result != .Ok {return result}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
+	if result := tab_orientation_button_draw(app, w); result != .Ok {return result}
 	if w.tabs_horizontal {return window_tab_strip_draw(app, w)}
-	return rail_toggle_draw(app, w)
+	return .Ok
 }
 
 window_gap :: proc(app: ^App, w: ^Window) -> f32 {

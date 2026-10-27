@@ -89,7 +89,7 @@ window_tab_close_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) 
 window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 	left := workspace_button_width(w)
 	if !w.tabs_horizontal {
-		toggle := rail_toggle_rect(w)
+		toggle := tab_orientation_button_rect(w)
 		return max(left, toggle.x + toggle.width)
 	}
 	bar := window_tab_bar(app, w)

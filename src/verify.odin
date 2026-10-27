@@ -463,7 +463,8 @@ when AIO_CONTROL {
 				{"rail.slide", fmt.tprintf("%g", w.rail_slide.value)},
 				{"rail.rows", fmt.tprintf("%d", len(w.rail_rows))},
 				{"rail.row.height", fmt.tprintf("%g", ui.RAIL_ROW_HEIGHT * w.scale)},
-				{"rail.toggle", verify_workspace_rect(rail_toggle_rect(w))},
+				{"rail.toggle", verify_workspace_rect(tab_orientation_button_rect(w))},
+				{"tabs.orientation_button", verify_workspace_rect(tab_orientation_button_rect(w))},
 				{"title.height", fmt.tprintf("%g", ui.TITLE_BAR_HEIGHT * w.scale)},
 				{
 					"title.controls_end",
@@ -552,7 +553,7 @@ when AIO_CONTROL {
 						selected = row.workspace == w.workspace
 					} else {
 						selected = row.workspace == w.workspace && row.tab == w.workspace.selected
-						marked = row.workspace.tabs[row.tab].marked
+						marked = row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
 					}
 					row_state := [?]control.State_Entry{
 						{fmt.tprintf("rail.row.%d.kind", i + 1), kind},

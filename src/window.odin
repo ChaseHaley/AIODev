@@ -78,8 +78,8 @@ Window :: struct {
 	rail_scroll:         f32,
 	rail_hover:          int,
 	rail_pressed:        int,
-	rail_toggle_hovered: bool,
-	rail_toggle_armed:   ui.Armed(bool),
+	tab_orientation_button_hovered: bool,
+	tab_orientation_button_armed:   ui.Armed(bool),
 	rail_slide:          ui.Motion,
 	// True while an overlay is visible or sliding out, so a docked rail hidden by a width
 	// crossing cannot leave a phantom rail over the pane.

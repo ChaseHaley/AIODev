@@ -123,15 +123,17 @@ workspace_rename_open :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_button_width :: proc(w: ^Window) -> f32 {
-	available := max(0, f32(w.width) - 218 * w.scale)
-	return min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
+	left := (ui.RAIL_TOGGLE_WIDTH + 8) * w.scale
+	available := max(0, f32(w.width) - 218 * w.scale - left)
+	return left + min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
 }
 
 // The chip's visual and hit rectangle. Hit testing keeps this rectangle even while the
 // control is drawn lifted, so the hover never changes where the click target is.
 workspace_button_rect :: proc(w: ^Window) -> render.Rect {
 	width := workspace_button_width(w)
-	return {5 * w.scale, 6 * w.scale, max(0, width - 10 * w.scale), 28 * w.scale}
+	left := (ui.RAIL_TOGGLE_WIDTH + 8) * w.scale
+	return {left + 5 * w.scale, 6 * w.scale, max(0, width - left - 10 * w.scale), 28 * w.scale}
 }
 
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {

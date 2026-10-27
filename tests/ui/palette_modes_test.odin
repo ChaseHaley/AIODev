@@ -436,3 +436,24 @@ palette_opens_in_all_and_mode_bindings_do_not_persist :: proc(t: ^testing.T) {
 		"Search all",
 	))
 }
+
+@(test)
+palette_category_chip_and_query_never_overlap :: proc(t: ^testing.T) {
+	p: ui.Palette
+	registry := mode_palette(t, &p, nil, nil, nil)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	text: ui.Text
+	for scale in ([?]f32{1, 1.5, 2}) {
+		for mode in ([?]ui.Palette_Mode{.Tabs, .Workspaces, .Settings, .Commands}) {
+			ui.palette_open_mode(&p, &registry, mode)
+			for width in ([?]f32{240, 560, 1200}) {
+				l := ui.palette_layout(&p, width * scale, 700 * scale, scale)
+				box := ui.palette_query_box(&p, l, &text, scale)
+				r := ui.field_box_text_rect(box)
+				testing.expect(t, r.x >= l.chip.x + l.chip.width + 8 * scale)
+				testing.expect(t, r.x + r.width <= l.input.x + l.input.width - 14 * scale)
+			}
+		}
+	}
+}
