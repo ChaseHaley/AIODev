@@ -540,23 +540,11 @@ when AIO_CONTROL {
 			if layout_ok {
 				for row, i in w.rail_rows {
 					rect := ui.rail_row_rect(layout, i)
-					kind := row.kind == .Workspace ? "workspace" : "tab"
-					title := ""
-					if row.kind == .Workspace {
-						title = row.workspace.name
-					} else if row.tab >= 0 && row.tab < len(row.workspace.tabs) {
-						title = row.workspace.tabs[row.tab].title
-					}
-					selected := false
-					marked := false
-					if row.kind == .Workspace {
-						selected = row.workspace == w.workspace
-					} else {
-						selected = row.workspace == w.workspace && row.tab == w.workspace.selected
-						marked = row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
-					}
+					title := row.workspace.tabs[row.tab].title
+					selected := row.tab == w.workspace.selected
+					marked := row.workspace.tabs[row.tab].marked
 					row_state := [?]control.State_Entry{
-						{fmt.tprintf("rail.row.%d.kind", i + 1), kind},
+						{fmt.tprintf("rail.row.%d.kind", i + 1), "tab"},
 						{fmt.tprintf("rail.row.%d.title", i + 1), title},
 						{fmt.tprintf("rail.row.%d.rect", i + 1), verify_workspace_rect(rect)},
 						{fmt.tprintf("rail.row.%d.selected", i + 1), fmt.tprintf("%t", selected)},

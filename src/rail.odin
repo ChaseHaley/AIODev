@@ -8,13 +8,7 @@ import "core:time"
 
 RAIL_NEW_TAB_ROW :: -2
 
-Rail_Row_Kind :: enum {
-	Workspace,
-	Tab,
-}
-
 Rail_Row :: struct {
-	kind:      Rail_Row_Kind,
 	workspace: ^Workspace,
 	tab:       int,
 }
@@ -32,26 +26,10 @@ Rail_Override :: enum {
 rail_rows_build :: proc(app: ^App, w: ^Window, rows: ^[dynamic]Rail_Row) -> bool {
 	clear(rows)
 	if w == nil || w.workspace == nil {return true}
-	if app.settings.tabs.vertical_scope == .Workspace {
-		for _, tab in w.workspace.tabs {
-			if _, err := append(rows, Rail_Row{.Tab, w.workspace, tab}); err != nil {
-				clear(rows)
-				return false
-			}
-		}
-		return true
-	}
-	for workspace in app.workspaces {
-		if !workspace_eligible(app, workspace) {continue}
-		if _, err := append(rows, Rail_Row{.Workspace, workspace, -1}); err != nil {
+	for _, tab in w.workspace.tabs {
+		if _, err := append(rows, Rail_Row{w.workspace, tab}); err != nil {
 			clear(rows)
 			return false
-		}
-		for _, tab in workspace.tabs {
-			if _, err := append(rows, Rail_Row{.Tab, workspace, tab}); err != nil {
-				clear(rows)
-				return false
-			}
 		}
 	}
 	return true
@@ -117,7 +95,7 @@ rail_current_layout :: proc(app: ^App, w: ^Window) -> (layout: ui.Rail_Layout, o
 
 rail_row_index_for_tab :: proc(rows: []Rail_Row, workspace: ^Workspace, tab: int) -> int {
 	for row, i in rows {
-		if row.kind == .Tab && row.workspace == workspace && row.tab == tab {return i}
+		if row.workspace == workspace && row.tab == tab {return i}
 	}
 	return -1
 }
@@ -185,7 +163,7 @@ rail_tab_close_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> int {
 	layout, ok := rail_current_layout(app, w)
 	if !ok {return -1}
 	row := ui.rail_row_hit(layout, x, y)
-	if row < 0 || w.rail_rows[row].kind != .Tab || w.rail_rows[row].workspace != w.workspace {
+	if row < 0 || w.rail_rows[row].workspace != w.workspace {
 		return -1
 	}
 	return ui.rail_close_hit(layout, x, y, w.scale) >= 0 ? w.rail_rows[row].tab : -1
@@ -196,49 +174,6 @@ rail_row_rect_for_tab :: proc(app: ^App, w: ^Window, tab: int) -> render.Rect {
 	if !ok {return {}}
 	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, tab)
 	return ui.rail_row_rect(layout, index)
-}
-
-// Selects the workspace a rail row names. A workspace owned by another window activates that
-// window instead of rewriting ownership here.
-rail_select_workspace :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
-	if workspace == w.workspace {return true}
-	if !workspace_select(app, w, workspace) {
-		notify(app, .Error, "Could not select the workspace.")
-		return false
-	}
-	return true
-}
-
-rail_select_tab :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) -> bool {
-	if workspace == nil || tab < 0 || tab >= len(workspace.tabs) {return false}
-	if workspace != w.workspace {
-		if !rail_select_workspace(app, w, workspace) {return false}
-		if w.workspace == workspace {
-			tab_select(app, w, tab)
-			return true
-		}
-		// The workspace belongs to another window: activation is the selection.
-		owner := window_for_workspace(app, workspace)
-		if owner == nil || owner == w {return false}
-		tab_select(app, owner, tab)
-		return true
-	}
-	tab_select(app, w, tab)
-	return true
-}
-
-rail_row_activate :: proc(app: ^App, w: ^Window, index: int) {
-	if index < 0 || index >= len(w.rail_rows) {return}
-	row := w.rail_rows[index]
-	activated := false
-	switch row.kind {
-	case .Workspace:
-		activated = rail_select_workspace(app, w, row.workspace)
-	case .Tab:
-		activated = rail_select_tab(app, w, row.workspace, row.tab)
-	}
-	if activated {rail_overlay_dismiss(app, w)}
-	w.dirty = true
 }
 
 rail_new_tab :: proc(app: ^App, w: ^Window) {
@@ -259,7 +194,7 @@ rail_pane_target :: proc(app: ^App, w: ^Window, x, y: f32) -> (tab: int, new_tab
 	row := ui.rail_row_hit(layout, x, y)
 	if row < 0 {return -1, true, true}
 	entry := w.rail_rows[row]
-	if entry.kind == .Tab && entry.workspace == w.workspace {return entry.tab, false, true}
+	if entry.workspace == w.workspace {return entry.tab, false, true}
 	return -1, false, false
 }
 
@@ -274,7 +209,7 @@ rail_new_tab_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 rail_tab_rows :: proc(rows: []Rail_Row, workspace: ^Workspace, out: ^[dynamic]int) {
 	clear(out)
 	for row, i in rows {
-		if row.kind == .Tab && row.workspace == workspace {append(out, i)}
+		if row.workspace == workspace {append(out, i)}
 	}
 }
 
@@ -298,114 +233,79 @@ rail_row_draw :: proc(
 	if rect.width <= 0 || rect.y + rect.height <= layout.list.y || rect.y >= layout.list.y + layout.list.height {
 		return .Ok
 	}
-	switch row.kind {
-	case .Workspace:
-		tile := render.Rect{rect.x + 2 * s, rect.y + 2 * s, max(0, rect.width - 4 * s), rect.height - 4 * s}
-		current := row.workspace == w.workspace
-		if current || hover || pressed {
-			fill := current ? app.theme.selection : app.theme.hover
-			if pressed {fill = app.theme.pressed}
-			ui.draw_rect(&w.list, {rect = tile, color = fill, radius = 6 * s})
-		}
-		icon := render.Rect{tile.x + 6 * s, tile.y + 6 * s, 20 * s, 20 * s}
-		if result := workspace_icon_draw(w, row.workspace.icon, icon, app.theme.text);
+	tile := ui.rail_tab_tile(layout, rect)
+	selected := row.workspace == w.workspace && row.tab == w.workspace.selected
+	marked := row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
+	if selected {
+		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+			color = app.theme.selection, radius = 6 * s})
+		ui.draw_rect(&w.list, {rect = {tile.x + 1 * s, tile.y + 8 * s, 2 * s, tile.height - 16 * s},
+			color = app.theme.accent, radius = s})
+	} else if marked {
+		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+			color = app.theme.selection, radius = 6 * s})
+		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+			color = app.theme.accent, radius = 6 * s, stroke = s})
+	} else if hover || pressed {
+		fill := pressed ? app.theme.pressed : app.theme.hover
+		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+			color = fill, radius = 6 * s})
+	}
+	title := fmt.tprintf("Tab %d", row.tab + 1)
+	if row.tab < len(row.workspace.tabs) && row.workspace.tabs[row.tab].title != "" {
+		title = row.workspace.tabs[row.tab].title
+	}
+	icon: string
+	atlas := render.Rect{}
+	if pane, terminal := workspace_focused_session_pane(app, row.workspace, row.tab); terminal {
+		if pane.session != nil {icon = pane.session.header.icon}
+		result: glyphs.Result
+		atlas, result = shell_icon_atlas(app)
+		if result != .Ok {return result}
+	}
+	has_badge := icon != "" || atlas.width > 0
+	label_x := tile.x + 8 * s
+	if has_badge {
+		label_x = tile.x + 28 * s
+		if result := ui.shell_badge_draw(
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			{tile.x + 8 * s, tile.y + 8 * s, 16 * s, 16 * s},
+			icon,
+			s,
+			atlas,
+		); result != .Ok {return result}
+	}
+	current := row.workspace == w.workspace
+	close := ui.rail_close_rect(layout, index, s)
+	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
+	if show_close {
+		large := w.ui_text
+		ui.text_set_size(&large, w.ui_text.size_px * 1.35)
+		if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.muted);
 		   result != .Ok {return result}
-		label_x := tile.x + 32 * s
-		if result := ui.draw_fading_text(
-			&w.ui_text,
+	}
+	label_right := show_close ? close.x - 4 * s : tile.x + tile.width - 8 * s
+	if result := ui.draw_fading_text(
+		&w.ui_text,
+		&w.list,
+		title,
+		label_x,
+		rail_text_baseline(w, tile),
+		selected ? app.theme.text : app.theme.muted,
+		max(0, label_right - label_x),
+	); result != .Ok {return result}
+	if hover && !selected {
+		if result := ui.hover_rim_draw(
 			&w.list,
-			row.workspace.name,
-			label_x,
-			rail_text_baseline(w, tile),
-			current ? app.theme.text : app.theme.muted,
-			max(0, tile.x + tile.width - 8 * s - label_x),
-		); result != .Ok {return result}
-		if hover && !current {
-			if result := ui.hover_rim_draw(
-				&w.list,
-				app.theme,
-				tile,
-				6 * s,
-				1,
-				s,
-				w.pointer,
-			); result != .None {return .Ok}
-		}
-	case .Tab:
-		tile := ui.rail_tab_tile(layout, rect)
-		selected := row.workspace == w.workspace && row.tab == w.workspace.selected
-		marked := row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
-		if selected {
-			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-				color = app.theme.selection, radius = 6 * s})
-			ui.draw_rect(&w.list, {rect = {tile.x + 1 * s, tile.y + 8 * s, 2 * s, tile.height - 16 * s},
-				color = app.theme.accent, radius = s})
-		} else if marked {
-			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-				color = app.theme.selection, radius = 6 * s})
-			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-				color = app.theme.accent, radius = 6 * s, stroke = s})
-		} else if hover || pressed {
-			fill := pressed ? app.theme.pressed : app.theme.hover
-			ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-				color = fill, radius = 6 * s})
-		}
-		title := fmt.tprintf("Tab %d", row.tab + 1)
-		if row.tab < len(row.workspace.tabs) && row.workspace.tabs[row.tab].title != "" {
-			title = row.workspace.tabs[row.tab].title
-		}
-		icon: string
-		atlas := render.Rect{}
-		if pane, terminal := workspace_focused_session_pane(app, row.workspace, row.tab); terminal {
-			if pane.session != nil {icon = pane.session.header.icon}
-			result: glyphs.Result
-			atlas, result = shell_icon_atlas(app)
-			if result != .Ok {return result}
-		}
-		has_badge := icon != "" || atlas.width > 0
-		label_x := tile.x + 8 * s
-		if has_badge {
-			label_x = tile.x + 28 * s
-			if result := ui.shell_badge_draw(
-				&w.list,
-				&w.ui_text,
-				app.theme,
-				{tile.x + 8 * s, tile.y + 8 * s, 16 * s, 16 * s},
-				icon,
-				s,
-				atlas,
-			); result != .Ok {return result}
-		}
-		current := row.workspace == w.workspace
-		close := ui.rail_close_rect(layout, index, s)
-		show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
-		if show_close {
-			large := w.ui_text
-			ui.text_set_size(&large, w.ui_text.size_px * 1.35)
-			if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.muted);
-			   result != .Ok {return result}
-		}
-		label_right := show_close ? close.x - 4 * s : tile.x + tile.width - 8 * s
-		if result := ui.draw_fading_text(
-			&w.ui_text,
-			&w.list,
-			title,
-			label_x,
-			rail_text_baseline(w, tile),
-			selected ? app.theme.text : app.theme.muted,
-			max(0, label_right - label_x),
-		); result != .Ok {return result}
-		if hover && !selected {
-			if result := ui.hover_rim_draw(
-				&w.list,
-				app.theme,
-				{tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-				6 * s,
-				1,
-				s,
-				w.pointer,
-			); result != .None {return .Ok}
-		}
+			app.theme,
+			{tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
+			6 * s,
+			1,
+			s,
+			w.pointer,
+		); result != .None {return .Ok}
 	}
 	return .Ok
 }

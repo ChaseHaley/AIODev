@@ -5,7 +5,7 @@ import "aio:render"
 import "aio:ui"
 
 @(test)
-rail_tab_tiles_indent_without_leaving_the_row :: proc(t: ^testing.T) {
+rail_tab_tiles_fill_the_flat_workspace_list_row :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 1.75}) {
 		area := render.Rect{0, 40 * scale, ui.RAIL_WIDTH * scale, 400 * scale}
 		layout := ui.rail_layout(area, scale, 3, 0)
@@ -16,7 +16,8 @@ rail_tab_tiles_indent_without_leaving_the_row :: proc(t: ^testing.T) {
 		testing.expect_value(t, tile.y, row.y)
 		testing.expect_value(t, tile.height, row.height)
 		testing.expect(t, ui.rail_row_contains(layout, 1, tile.x + 1, tile.y + 1))
-		testing.expect(t, tile.x > row.x && ui.rail_row_contains(layout, 1, tile.x - 1, tile.y + 1))
+		testing.expect_value(t, tile.x, row.x)
+		testing.expect_value(t, tile.width, row.width)
 	}
 }
 

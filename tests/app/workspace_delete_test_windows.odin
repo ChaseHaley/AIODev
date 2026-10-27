@@ -17,6 +17,86 @@ import win32 "core:sys/windows"
 @(private="file")
 Delete_Fixture :: struct { state: app.App, directory, path: string }
 
+@(test)
+last_tab_group_removes_workspace_and_reuses_window_then_last_pane_exits :: proc(t: ^testing.T) {
+	f: Delete_Fixture
+	defer delete_fixture_destroy(t, &f)
+	if !delete_fixture_init(t, &f) {return}
+	state := &f.state
+	w := state.windows[0]
+	window_id := w.id
+	fallback := w.workspace
+	survivor := state.sessions[0].session
+	survivor_pid := term.process_id(survivor)
+	app.workspace_new(state, w, false)
+	closed_id := w.workspace.id
+	process := delete_process_handle(t, app.focused_session(state, w).session)
+	defer if process != nil {testing.expect(t, bool(win32.CloseHandle(process)))}
+	app.tab_new(state, w)
+	for tab in w.workspace.tabs {tab.marked = true}
+	app.tab_close(state, w, w.workspace.selected)
+	testing.expect(t, app.workspace_find(state, closed_id) == nil)
+	testing.expect_value(t, len(state.workspaces), 1)
+	testing.expect_value(t, len(state.windows), 1)
+	testing.expect_value(t, len(state.sessions), 1)
+	testing.expect(t, state.windows[0] == w && w.id == window_id && w.workspace == fallback)
+	testing.expect_value(t, w.tree, &app.selected_tab(fallback).tree)
+	testing.expect_value(t, term.process_id(survivor), survivor_pid)
+	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
+	testing.expect(t, state.running && !state.tray_hint_shown)
+	app.tick(state)
+	app.pane_close(state, w)
+	testing.expect(t, !state.running)
+	testing.expect_value(t, len(state.workspaces), 0)
+	testing.expect_value(t, len(state.windows), 0)
+	testing.expect_value(t, len(state.sessions), 0)
+}
+
+@(test)
+last_tab_reuses_existing_workspace_owner_without_creating_a_replacement :: proc(t: ^testing.T) {
+	f: Delete_Fixture
+	defer delete_fixture_destroy(t, &f)
+	if !delete_fixture_init(t, &f) {return}
+	state := &f.state
+	one := state.windows[0]
+	workspace := one.workspace
+	survivor := state.sessions[0].session
+	survivor_pid := term.process_id(survivor)
+	app.workspace_new(state, one, true)
+	two := state.windows[1]
+	closed_id := two.workspace.id
+	app.tab_close(state, two, 0)
+	testing.expect(t, app.workspace_find(state, closed_id) == nil)
+	testing.expect_value(t, len(state.windows), 1)
+	testing.expect_value(t, len(state.workspaces), 1)
+	testing.expect_value(t, len(state.sessions), 1)
+	testing.expect(t, state.windows[0] == one && one.workspace == workspace && state.running)
+	testing.expect_value(t, term.process_id(survivor), survivor_pid)
+	testing.expect(t, !state.tray_hint_shown)
+}
+
+@(test)
+last_settings_tab_closes_the_app_after_split_close_confirmation :: proc(t: ^testing.T) {
+	f: Delete_Fixture
+	defer delete_fixture_destroy(t, &f)
+	if !delete_fixture_init(t, &f) {return}
+	state := &f.state
+	w := state.windows[0]
+	app.pane_split(state, w, .Right)
+	app.tab_close_request(state, w, 0)
+	testing.expect(t, w.pending_close.confirm.open)
+	delete_key(state, w, .Escape)
+	testing.expect(t, state.running && len(w.workspace.tabs) == 1)
+	app.run_action(state, w, .Settings_UI)
+	app.tab_close(state, w, 0)
+	testing.expect_value(t, len(state.sessions), 0)
+	testing.expect(t, state.running && len(w.workspace.tabs) == 1)
+	app.tab_close_request(state, w, 0)
+	testing.expect(t, !state.running)
+	testing.expect_value(t, len(state.workspaces), 0)
+	testing.expect_value(t, len(state.windows), 0)
+}
+
 @(private="file")
 delete_fixture_init :: proc(t: ^testing.T, f: ^Delete_Fixture) -> bool {
 	var_error: os.Error

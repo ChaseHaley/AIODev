@@ -416,28 +416,18 @@ tab_orientation_defaults_to_vertical_and_accepts_horizontal :: proc(t: ^testing.
 }
 
 @(test)
-vertical_scope_defaults_to_all_and_reports_an_invalid_choice_by_line :: proc(t: ^testing.T) {
-	defaults, default_error := settings.defaults()
-	if !testing.expect_value(t, default_error, nil) {return}
-	defer settings.destroy(&defaults)
-	testing.expect_value(t, defaults.tabs.vertical_scope, settings.Tabs_Scope.All)
-
-	s, diagnostics, parse_error := settings.parse("tabs.vertical_scope = workspace\n")
-	if !testing.expect_value(t, parse_error, nil) {return}
-	defer settings.destroy(&s)
-	defer settings.diagnostics_destroy(&diagnostics)
-	testing.expect_value(t, s.tabs.vertical_scope, settings.Tabs_Scope.Workspace)
-	testing.expect_value(t, len(diagnostics), 0)
-
-	invalid, invalid_diagnostics, invalid_error := settings.parse(
-		"theme.mode = dark\ntabs.vertical_scope = panes\n",
-	)
-	if !testing.expect_value(t, invalid_error, nil) {return}
-	defer settings.destroy(&invalid)
-	defer settings.diagnostics_destroy(&invalid_diagnostics)
-	testing.expect_value(t, invalid.tabs.vertical_scope, settings.Tabs_Scope.All)
-	if !testing.expect_value(t, len(invalid_diagnostics), 1) {return}
-	testing.expect_value(t, invalid_diagnostics[0].line, 2)
-	testing.expect_value(t, invalid_diagnostics[0].key, "tabs.vertical_scope")
-	testing.expect_value(t, invalid_diagnostics[0].kind, settings.Diagnostic_Kind.Invalid_Value)
+retired_vertical_scope_is_ignored_and_absent_from_the_schema :: proc(t: ^testing.T) {
+	for source in ([?]string{
+		"tabs.vertical_scope = all\n",
+		"tabs.vertical_scope = workspace\n",
+		"tabs.vertical_scope = panes\n",
+	}) {
+		s, diagnostics, parse_error := settings.parse(source)
+		if !testing.expect_value(t, parse_error, nil) {return}
+		testing.expect_value(t, len(diagnostics), 0)
+		testing.expect_value(t, s.tabs.orientation, settings.Tabs_Orientation.Vertical)
+		settings.destroy(&s)
+		settings.diagnostics_destroy(&diagnostics)
+	}
+	for entry in settings.SCHEMA {testing.expect(t, entry.key != "tabs.vertical_scope")}
 }

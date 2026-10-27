@@ -111,7 +111,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		id := w.id
 		fired, ok := ui.armed_release(&w.tab_close_armed, hit)
 		if ok {tab_close_request(app, w, fired)}
-		// Closing the last tab frees this window through hide_to_tray.
+		// Closing the last tab may retire this window.
 		if current := window_find(app, id); current != nil {
 			rail_overlay_dismiss(app, current)
 		}
@@ -335,55 +335,38 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		entry := w.rail_rows[row]
 		if !e.pressed {return}
 		if e.button == .Left {w.rail_pressed = row}
-		#partial switch entry.kind {
-		case .Workspace:
-			if e.button == .Left {rail_row_activate(app, w, row)}
-		case .Tab:
-			if entry.tab < 0 || entry.tab >= len(entry.workspace.tabs) {return}
-			close_index := ui.rail_close_hit(layout, x, y, w.scale)
-			if e.button == .Left && close_index >= 0 && entry.workspace == w.workspace {
-				ui.armed_press(&w.tab_close_armed, entry.tab)
-				return
+		if entry.tab < 0 || entry.tab >= len(entry.workspace.tabs) {return}
+		close_index := ui.rail_close_hit(layout, x, y, w.scale)
+		if e.button == .Left && close_index >= 0 && entry.workspace == w.workspace {
+			ui.armed_press(&w.tab_close_armed, entry.tab)
+			return
+		}
+		if e.button == .Right {
+			tab_menu_open(app, w, entry.tab, x, y)
+			rail_overlay_dismiss(app, w)
+			return
+		}
+		if e.button == .Middle {
+			id := w.id
+			if entry.workspace == w.workspace {tab_close_request(app, w, entry.tab)}
+			// Closing the last tab may retire this window.
+			if current := window_find(app, id); current != nil {
+				rail_overlay_dismiss(app, current)
 			}
-			if e.button == .Right {
-				if entry.workspace != w.workspace {
-					if !rail_select_tab(app, w, entry.workspace, entry.tab) {return}
-					rail_overlay_dismiss(app, w)
-					if w.workspace != entry.workspace {return}
-				}
-				tab_menu_open(app, w, entry.tab, x, y)
-				rail_overlay_dismiss(app, w)
-				return
-			}
-			if e.button == .Middle {
-				id := w.id
-				if entry.workspace == w.workspace {tab_close_request(app, w, entry.tab)}
-				// Closing the last tab frees this window through hide_to_tray.
-				if current := window_find(app, id); current != nil {
-					rail_overlay_dismiss(app, current)
-				}
-				return
-			}
-			if e.button == .Left {
-				if entry.workspace != w.workspace {
-					if !rail_select_tab(app, w, entry.workspace, entry.tab) {return}
-					rail_overlay_dismiss(app, w)
-					if w.workspace != entry.workspace {return}
-					tab_press(app, w, entry.tab, x, y, false)
-					return
-				}
-				tab_pointer_select(
-					app,
-					w,
-					entry.tab,
-					.Control in e.modifiers,
-					.Shift in e.modifiers,
-				)
-				// Selecting in an overlay closes it before a drag could begin; reorder belongs to
-				// the docked rail where the indicator and rows stay visible.
-				if rail_visible(w) {
-					tab_press(app, w, entry.tab, x, y, e.modifiers & {.Control, .Shift} != {})
-				}
+			return
+		}
+		if e.button == .Left {
+			tab_pointer_select(
+				app,
+				w,
+				entry.tab,
+				.Control in e.modifiers,
+				.Shift in e.modifiers,
+			)
+			// Selecting in an overlay closes it before a drag could begin; reorder belongs to
+			// the docked rail where the indicator and rows stay visible.
+			if rail_visible(w) {
+				tab_press(app, w, entry.tab, x, y, e.modifiers & {.Control, .Shift} != {})
 			}
 		}
 		return

@@ -9,7 +9,7 @@ RAIL_WIDTH :: f32(208)
 RAIL_ROW_HEIGHT :: f32(32)
 RAIL_FOOTER_HEIGHT :: f32(32)
 RAIL_PADDING :: f32(4)
-RAIL_TAB_INDENT :: f32(18)
+RAIL_TAB_INDENT :: f32(0)
 RAIL_TOGGLE_WIDTH :: f32(32)
 // A docked 208 rail leaves about 500 DIPs of pane at this width, roughly 60 columns at the
 // default font. Narrower than that the rail takes more than a third of the window.

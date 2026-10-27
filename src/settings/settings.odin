@@ -35,17 +35,12 @@ Interface_Settings :: struct {
 Tab_Settings :: struct {
 	confirm_close: bool,
 }
-Tabs_Scope :: enum int {
-	All,
-	Workspace,
-}
 Tabs_Orientation :: enum int {
 	Vertical,
 	Horizontal,
 }
 Tabs_Settings :: struct {
-	orientation:    Tabs_Orientation,
-	vertical_scope: Tabs_Scope,
+	orientation: Tabs_Orientation,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -224,18 +219,6 @@ SCHEMA :: [?]Schema_Entry {
 		{"vertical", "horizontal"},
 		"Draw tabs in a vertical rail along the left or in a horizontal strip in the title bar. " +
 			"Switch at any time with Ctrl+Shift+L.",
-	},
-	{
-		"tabs.vertical_scope",
-		"Vertical Tab List",
-		.Enum,
-		offset_of(Settings, tabs) + offset_of(Tabs_Settings, vertical_scope),
-		"all",
-		0,
-		0,
-		{"all", "workspace"},
-		"Which tabs the vertical rail lists: all open workspaces and their tabs, " +
-			"or only the active workspace's tabs. The horizontal strip always shows the active workspace.",
 	},
 	{
 		"shell.default_profile",
@@ -984,6 +967,8 @@ parse :: proc(
 		}
 		key := line.key
 		value := line.value
+		// Retired scope values must not make an existing settings file invalid.
+		if key == "tabs.vertical_scope" {continue}
 		if strings.has_prefix(key, KEY_BINDING_PREFIX) {
 			binding_error := parse_key_binding(&s, &diagnostics, key, value, line.number)
 			if binding_error != nil {return {}, {}, binding_error}

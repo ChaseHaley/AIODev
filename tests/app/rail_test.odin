@@ -40,7 +40,7 @@ rail_workspace_destroy :: proc(state: ^app.App) {
 }
 
 @(test)
-rail_rows_build_the_workspace_tree_and_flatten_it_for_the_workspace_scope :: proc(t: ^testing.T) {
+rail_rows_show_only_the_current_workspace_and_follow_switches :: proc(t: ^testing.T) {
 	state: app.App
 	defer rail_workspace_destroy(&state)
 	one := rail_workspace(&state, 1, "Build")
@@ -48,34 +48,21 @@ rail_rows_build_the_workspace_tree_and_flatten_it_for_the_workspace_scope :: pro
 	rail_tab(one, 2)
 	two := rail_workspace(&state, 2, "Tests")
 	rail_tab(two, 3)
-	three := rail_workspace(&state, 3, "Docs")
-	rail_tab(three, 4)
-	rail_tab(three, 5)
-	rail_tab(three, 6)
-
-	w := app.Window{workspace = one, width = 1200, height = 700, scale = 1}
+	w := app.Window{workspace = one}
 	rows := make([dynamic]app.Rail_Row)
 	defer delete(rows)
 	testing.expect(t, app.rail_rows_build(&state, &w, &rows))
-	if !testing.expect_value(t, len(rows), 9) {return}
-	testing.expect_value(t, rows[0].kind, app.Rail_Row_Kind.Workspace)
-	testing.expect_value(t, rows[0].workspace, one)
-	testing.expect_value(t, rows[1].kind, app.Rail_Row_Kind.Tab)
-	testing.expect_value(t, rows[1].tab, 0)
-	testing.expect_value(t, rows[2].tab, 1)
-	testing.expect_value(t, rows[3].workspace, two)
-	testing.expect_value(t, rows[4].workspace, two)
-	testing.expect_value(t, rows[5].workspace, three)
-	testing.expect_value(t, rows[7].tab, 1)
-	testing.expect_value(t, app.rail_row_index_for_tab(rows[:], three, 2), 8)
-
-	state.settings.tabs.vertical_scope = .Workspace
-	testing.expect(t, app.rail_rows_build(&state, &w, &rows))
 	if !testing.expect_value(t, len(rows), 2) {return}
-	testing.expect_value(t, rows[0].kind, app.Rail_Row_Kind.Tab)
-	testing.expect_value(t, rows[0].workspace, one)
-	testing.expect_value(t, rows[1].tab, 1)
-	for row in rows {testing.expect_value(t, row.kind, app.Rail_Row_Kind.Tab)}
+	for row, i in rows {
+		testing.expect_value(t, row.workspace, one)
+		testing.expect_value(t, row.tab, i)
+	}
+	testing.expect_value(t, app.rail_row_index_for_tab(rows[:], two, 0), -1)
+	w.workspace = two
+	testing.expect(t, app.rail_rows_build(&state, &w, &rows))
+	if !testing.expect_value(t, len(rows), 1) {return}
+	testing.expect_value(t, rows[0].workspace, two)
+	testing.expect_value(t, rows[0].tab, 0)
 }
 
 @(test)

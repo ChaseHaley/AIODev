@@ -49,8 +49,6 @@ pane_move_finish :: proc(app: ^App, move: Pane_Move, destination: ^Tab) {
 		for tab, source_index in move.workspace.tabs {
 			if tab == move.source {workspace_close_tab(app, move.workspace, source_index); break}
 		}
-		// Closing the exhausted tab may have freed its window and the source tab.
-		if move.workspace != w.workspace {_ = workspace_discard_empty(app, move.workspace)}
 	} else if move.workspace != w.workspace {
 		if owner := window_for_workspace(app, move.workspace); owner != nil {
 			window_relayout(app, owner)
@@ -58,6 +56,8 @@ pane_move_finish :: proc(app: ^App, move: Pane_Move, destination: ^Tab) {
 		}
 	}
 	workspace_settings_sync(app, w.workspace)
+	// A transfer has already focused its destination; its exhausted source window can retire.
+	workspace_close_empty(app, move.workspace, replace_window = false)
 }
 
 pane_rearrange :: proc(

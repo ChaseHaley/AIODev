@@ -46,7 +46,7 @@ Tab_Drag :: struct {
 	offset_x, offset_y:        f32,
 	rank, slot:                int,
 	pressed, active, modified: bool,
-	// A drop over another workspace's rows has no model support, so release restores the order.
+	// A release outside the tab surface restores the original order.
 	elsewhere:                   bool,
 }
 
@@ -226,12 +226,6 @@ tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	}
 	area := rail_area(w)
 	if x < area.x || x >= area.x + area.width || y < area.y || y >= area.y + area.height {
-		d.elsewhere = true
-		w.dirty = true
-		return true
-	}
-	index := ui.rail_row_hit(layout, x, y)
-	if index >= 0 && w.rail_rows[index].workspace != w.workspace {
 		d.elsewhere = true
 		w.dirty = true
 		return true

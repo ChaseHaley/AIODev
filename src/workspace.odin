@@ -314,6 +314,7 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 		}
 	} else {workspace_close_tab(app, workspace, index)}
 	if group && len(workspace.tabs) > 0 {tab_select_one(workspace, workspace.selected)}
+	workspace_close_empty(app, workspace)
 }
 
 // The tabs a close of `index` affects, its whole selected group when marked, and their panes.
@@ -426,7 +427,6 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 		tab_presentation_remove(&w.presentation, index)
 		if len(workspace.tabs) == 0 {
 			w.tree = nil
-			hide_to_tray(app, w)
 		} else {
 			w.tree = &selected_tab(workspace).tree
 			window_relayout(app, w)
@@ -449,7 +449,11 @@ pane_remove :: proc(
 	for current, i in workspace.tabs {if current == tab {tab_index = i; break}}
 	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
 	if !is_pane {return}
-	if tab.tree.root == node {workspace_close_tab(app, workspace, tab_index); return}
+	if tab.tree.root == node {
+		workspace_close_tab(app, workspace, tab_index)
+		workspace_close_empty(app, workspace)
+		return
+	}
 	visible := tab_index == workspace.selected
 	was_focused := visible && tab.tree.focus == node
 	if was_focused {

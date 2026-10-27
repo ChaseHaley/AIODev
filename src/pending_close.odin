@@ -163,7 +163,7 @@ pending_close_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 			if index := tab_index_by_id(w.workspace, pc.tab); index >= 0 {
 				id := w.id
 				tab_close(app, w, index)
-				// Closing the last tab frees this window through hide_to_tray.
+				// Closing the last tab may retire this window.
 				if current := window_find(app, id); current != nil {tab_close_restore(current)}
 				return
 			}
