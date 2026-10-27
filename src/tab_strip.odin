@@ -135,7 +135,7 @@ toggle_tab_orientation :: proc(app: ^App) {
 		app.settings.tabs.orientation = next == "horizontal" ? .Horizontal : .Vertical
 		for window in app.windows {
 			window_apply_settings(app, window)
-			rail_reveal_active(app, window)
+			rail_reveal_active(window)
 		}
 	}
 	label := next == "horizontal" ? "Horizontal" : "Vertical"

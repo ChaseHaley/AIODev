@@ -133,7 +133,7 @@ workspace_adopt :: proc(
 	ui.armed_cancel(&w.tab_close_armed)
 	w.rail_hover, w.rail_pressed = -1, -1
 	window_relayout(app, w)
-	rail_reveal_active(app, w)
+	rail_reveal_active(w)
 	focus_enter(app, w)
 	return true
 }

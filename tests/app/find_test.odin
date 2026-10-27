@@ -63,13 +63,13 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	append(&state.sessions, app.Session_Entry{id = 138, session = session})
 	defer delete(state.sessions)
 	defer app.tab_drag_cancel(&state, &w)
-	row := app.rail_row_rect_for_tab(&state, &w, 0)
+	row := app.rail_row_rect_for_tab(&w, 0)
 	app.tab_press(&state, &w, 0, row.x + 20, row.y + row.height / 2, false)
 	if !testing.expect(t, w.tab_drag.pressed) { return }
 	// Seed the gesture and overlay together; moves and releases use the real app dispatcher.
 	ui.find_open(&w.find)
 	if !testing.expect(t, w.find.open) { return }
-	target := app.rail_row_rect_for_tab(&state, &w, 1)
+	target := app.rail_row_rect_for_tab(&w, 1)
 	x, y := i32(target.x + 20), i32(target.y + target.height / 2)
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
 	if !testing.expect(t, w.tab_drag.active && workspace.tabs[1] == &tabs[0]) { return }
@@ -79,7 +79,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	testing.expect(t, workspace.tabs[1] == &tabs[0])
 	testing.expect_value(t, workspace.selected, 1)
 	testing.expect(t, !ui.armed_down(w.find.armed))
-	layout_state, _ := app.rail_current_layout(&state, &w)
+	layout_state, _ := app.rail_current_layout(&w)
 	row_index := app.rail_row_index_for_tab(w.rail_rows[:], &workspace, workspace.selected)
 	close := ui.rail_close_rect(layout_state, row_index, w.scale)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,

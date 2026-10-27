@@ -193,7 +193,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	}
 	window_set_dpi(app, w, platform.window_dpi(&app.platform, id))
 	window_apply_settings(app, w)
-	rail_reveal_active(app, w)
+	rail_reveal_active(w)
 	if platform.window_set_cursor(&app.platform, id, .Text) != .None {
 		log.error("setting the window cursor failed")
 	}
@@ -360,7 +360,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		i32(window_title_controls_end(app, w)),
 	)
 	if !w.tabs_horizontal {
-		rail_layout_state, rail_ok := rail_current_layout(app, w)
+		rail_layout_state, rail_ok := rail_current_layout(w)
 		if rail_ok {w.rail_scroll = rail_layout_state.scroll}
 	}
 	pane_header_cancel(w)
@@ -427,7 +427,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 			}
 		}
 	}
-	rail_reveal_active(app, w)
+	rail_reveal_active(w)
 }
 
 @(private)

@@ -512,7 +512,7 @@ when AIO_CONTROL {
 				{"link.hover", link_hover},
 				{"link.uri", link_uri},
 				{"link.spans", fmt.tprintf("%d", link_spans)},
-				{"rail.new_tab", verify_workspace_rect(rail_new_tab_rect(app, w))},
+				{"rail.new_tab", verify_workspace_rect(rail_new_tab_rect(w))},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
 				{
@@ -536,7 +536,7 @@ when AIO_CONTROL {
 				}
 				if _, err := append(&entries, ..row[:]); err != nil { return nil, .Out_Of_Memory }
 			}
-			layout, layout_ok := rail_current_layout(app, w)
+			layout, layout_ok := rail_current_layout(w)
 			if layout_ok {
 				for row, i in w.rail_rows {
 					rect := ui.rail_row_rect(layout, i)
@@ -577,7 +577,7 @@ when AIO_CONTROL {
 		workspace := &empty
 		if w != nil {
 			workspace = w.workspace
-			_, _ = rail_current_layout(app, w)
+			_, _ = rail_current_layout(w)
 		} else if len(app.workspaces) > 0 {
 			workspace = app.workspaces[0]
 		}
@@ -601,8 +601,8 @@ when AIO_CONTROL {
 			strip_close := render.Rect{}
 			if w != nil {
 				row_index = rail_row_index_for_tab(w.rail_rows[:], workspace, i)
-				row_rect = rail_row_rect_for_tab(app, w, i)
-				layout, _ := rail_current_layout(app, w)
+				row_rect = rail_row_rect_for_tab(w, i)
+				layout, _ := rail_current_layout(w)
 				close_rect = ui.rail_close_rect(layout, row_index, w.scale)
 				position = tab_position(w, i)
 				strip_rect = window_tab_rect(app, w, i)

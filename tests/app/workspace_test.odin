@@ -123,14 +123,14 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	app.run_action(&state, w, .Settings_UI)
 	if !testing.expect(t, app.settings_active(w)) { return }
 	settings_tab := app.selected_tab(original)
-	layout, layout_ok := app.rail_current_layout(&state, w)
+	layout, layout_ok := app.rail_current_layout(w)
 	if !testing.expect(t, layout_ok && app.rail_docked(w)) { return }
-	row0 := app.rail_row_rect_for_tab(&state, w, 0)
-	row1 := app.rail_row_rect_for_tab(&state, w, 1)
+	row0 := app.rail_row_rect_for_tab(w, 0)
+	row1 := app.rail_row_rect_for_tab(w, 1)
 	row0_index := app.rail_row_index_for_tab(w.rail_rows[:], original, 0)
 	testing.expect_value(t, ui.rail_row_hit(layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), row0_index)
 	close := ui.rail_close_rect(layout, row0_index + 1, w.scale)
-	testing.expect_value(t, app.rail_tab_close_hit(&state, w,
+	testing.expect_value(t, app.rail_tab_close_hit(w,
 		close.x + close.width / 2, close.y + close.height / 2), 1)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row0.x + 20 * w.scale), y = i32(row0.y + 16 * w.scale)})

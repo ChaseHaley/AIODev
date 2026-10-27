@@ -120,7 +120,7 @@ tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) 
 		}
 		return
 	}
-	row := rail_row_rect_for_tab(app, w, index)
+	row := rail_row_rect_for_tab(w, index)
 	if row.height <= 0 {return}
 	w.tab_drag = {
 		grabbed  = w.workspace.tabs[index],
@@ -142,7 +142,7 @@ tab_move :: proc(app: ^App, w: ^Window, from, to: int) {
 	tab_presentation_move(&w.presentation, from, to)
 	w.workspace.selected = tab_selected_after_move(w.workspace.selected, from, to)
 	w.tree = &selected_tab(w.workspace).tree
-	rail_reveal_active(app, w)
+	rail_reveal_active(w)
 	mark_all_dirty(app)
 }
 
@@ -218,7 +218,7 @@ tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 @(private)
 tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	d := &w.tab_drag
-	layout, ok := rail_current_layout(app, w)
+	layout, ok := rail_current_layout(w)
 	if !ok || !rail_visible(w) || layout.list.height <= 0 || layout.row_height <= 0 {
 		d.elsewhere = true
 		w.dirty = true
@@ -350,7 +350,7 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 				},
 				true
 		}
-		r := rail_new_tab_rect(app, w)
+		r := rail_new_tab_rect(w)
 		inset := 2 * w.scale
 		return {
 				r.x + inset,
@@ -504,7 +504,7 @@ pane_drag_target_move :: proc(
 			destination = w.workspace.tabs[on_tab]
 		}
 	} else {
-		rail_tab, new_tab_target, over := rail_pane_target(app, w, x, y)
+		rail_tab, new_tab_target, over := rail_pane_target(w, x, y)
 		over_rail, rail_new_tab = over, new_tab_target
 		if over && rail_tab >= 0 {
 			on_tab = rail_tab

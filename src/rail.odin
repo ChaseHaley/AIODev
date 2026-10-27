@@ -23,7 +23,7 @@ Rail_Override :: enum {
 }
 
 @(require_results)
-rail_rows_build :: proc(app: ^App, w: ^Window, rows: ^[dynamic]Rail_Row) -> bool {
+rail_rows_build :: proc(w: ^Window, rows: ^[dynamic]Rail_Row) -> bool {
 	clear(rows)
 	if w == nil || w.workspace == nil {return true}
 	for _, tab in w.workspace.tabs {
@@ -85,9 +85,9 @@ rail_area :: proc(w: ^Window) -> render.Rect {
 }
 
 @(require_results)
-rail_current_layout :: proc(app: ^App, w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
-	if !rail_rows_build(app, w, &w.rail_rows) {return {}, false}
+	if !rail_rows_build(w, &w.rail_rows) {return {}, false}
 	layout = ui.rail_layout(rail_area(w), w.scale, len(w.rail_rows), w.rail_scroll)
 	w.rail_scroll = layout.scroll
 	return layout, true
@@ -100,9 +100,9 @@ rail_row_index_for_tab :: proc(rows: []Rail_Row, workspace: ^Workspace, tab: int
 	return -1
 }
 
-rail_reveal_active :: proc(app: ^App, w: ^Window) {
+rail_reveal_active :: proc(w: ^Window) {
 	if w.tabs_horizontal {return}
-	layout, ok := rail_current_layout(app, w)
+	layout, ok := rail_current_layout(w)
 	if !ok {return}
 	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, w.workspace.selected)
 	if index < 0 {return}
@@ -159,8 +159,8 @@ rail_overlay_dismiss :: proc(app: ^App, w: ^Window) {
 }
 
 @(require_results)
-rail_tab_close_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> int {
-	layout, ok := rail_current_layout(app, w)
+rail_tab_close_hit :: proc(w: ^Window, x, y: f32) -> int {
+	layout, ok := rail_current_layout(w)
 	if !ok {return -1}
 	row := ui.rail_row_hit(layout, x, y)
 	if row < 0 || w.rail_rows[row].workspace != w.workspace {
@@ -169,8 +169,8 @@ rail_tab_close_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> int {
 	return ui.rail_close_hit(layout, x, y, w.scale) >= 0 ? w.rail_rows[row].tab : -1
 }
 
-rail_row_rect_for_tab :: proc(app: ^App, w: ^Window, tab: int) -> render.Rect {
-	layout, ok := rail_current_layout(app, w)
+rail_row_rect_for_tab :: proc(w: ^Window, tab: int) -> render.Rect {
+	layout, ok := rail_current_layout(w)
 	if !ok {return {}}
 	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, tab)
 	return ui.rail_row_rect(layout, index)
@@ -182,13 +182,13 @@ rail_new_tab :: proc(app: ^App, w: ^Window) {
 }
 
 @(require_results)
-rail_pane_target :: proc(app: ^App, w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool) {
+rail_pane_target :: proc(w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool) {
 	if !rail_visible(w) {return -1, false, false}
 	area := rail_area(w)
 	if x < area.x || x >= area.x + area.width || y < area.y || y >= area.y + area.height {
 		return -1, false, false
 	}
-	layout, built := rail_current_layout(app, w)
+	layout, built := rail_current_layout(w)
 	if !built {return -1, false, false}
 	if ui.rail_footer_hit(layout, x, y) {return -1, true, true}
 	row := ui.rail_row_hit(layout, x, y)
@@ -199,8 +199,8 @@ rail_pane_target :: proc(app: ^App, w: ^Window, x, y: f32) -> (tab: int, new_tab
 }
 
 @(require_results)
-rail_new_tab_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
-	layout, ok := rail_current_layout(app, w)
+rail_new_tab_rect :: proc(w: ^Window) -> render.Rect {
+	layout, ok := rail_current_layout(w)
 	if !ok {return {}}
 	return ui.rail_footer_tile(layout)
 }
@@ -342,7 +342,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		rail_overlay(w) ||
 		(w.rail_was_overlay && !rail_docked(w) && w.rail_slide.value > 0)
 	if !rail_docked(w) && !draw_overlay {return .Ok}
-	layout, ok := rail_current_layout(app, w)
+	layout, ok := rail_current_layout(w)
 	if !ok {return .Ok}
 	area := layout.area
 	if draw_overlay {

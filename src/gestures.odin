@@ -106,7 +106,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		if w.tabs_horizontal {
 			hit = window_tab_close_hit(app, w, window_tab_bar(app, w), x, y)
 		} else {
-			hit = rail_tab_close_hit(app, w, x, y)
+			hit = rail_tab_close_hit(w, x, y)
 		}
 		id := w.id
 		fired, ok := ui.armed_release(&w.tab_close_armed, hit)
@@ -317,7 +317,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	   x < area.x + area.width &&
 	   y >= area.y &&
 	   y < area.y + area.height {
-		layout, ok := rail_current_layout(app, w)
+		layout, ok := rail_current_layout(w)
 		if !ok {return}
 		if e.pressed && e.button == .Left && ui.rail_footer_hit(layout, x, y) {
 			w.rail_pressed = RAIL_NEW_TAB_ROW
@@ -504,7 +504,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	   x < rail_area_rect.x + rail_area_rect.width &&
 	   y >= rail_area_rect.y &&
 	   y < rail_area_rect.y + rail_area_rect.height {
-		if layout, ok := rail_current_layout(app, w); ok {
+		if layout, ok := rail_current_layout(w); ok {
 			rail_hover = ui.rail_row_hit(layout, x, y)
 			if rail_hover < 0 && ui.rail_footer_hit(layout, x, y) {
 				rail_hover = RAIL_NEW_TAB_ROW

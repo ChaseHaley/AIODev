@@ -131,7 +131,7 @@ tab_select :: proc(app: ^App, w: ^Window, index: int, preserve_selection := fals
 	w.workspace.selected = index
 	w.tree = &selected_tab(w.workspace).tree
 	window_relayout(app, w)
-	rail_reveal_active(app, w)
+	rail_reveal_active(w)
 	focus_enter(app, w)
 }
 
@@ -430,7 +430,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 		} else {
 			w.tree = &selected_tab(workspace).tree
 			window_relayout(app, w)
-			rail_reveal_active(app, w)
+			rail_reveal_active(w)
 			if was_selected {focus_enter(app, w)}
 		}
 	}

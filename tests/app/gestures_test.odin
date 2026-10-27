@@ -215,7 +215,7 @@ gesture_terminal_packets :: proc(t: ^testing.T, report: bool) {
 		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(px + 10), y = i32(py), buttons = {.Left}})
 		gesture_button(s, w, .Left, false, px + 10, py)
 	} else {
-		layout, _ := app.rail_current_layout(s, w)
+		layout, _ := app.rail_current_layout(w)
 		row := app.rail_row_index_for_tab(w.rail_rows[:], w.workspace, 0)
 		close := ui.rail_close_rect(layout, row, w.scale)
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)

@@ -51,7 +51,7 @@ rail_rows_show_only_the_current_workspace_and_follow_switches :: proc(t: ^testin
 	w := app.Window{workspace = one}
 	rows := make([dynamic]app.Rail_Row)
 	defer delete(rows)
-	testing.expect(t, app.rail_rows_build(&state, &w, &rows))
+	testing.expect(t, app.rail_rows_build(&w, &rows))
 	if !testing.expect_value(t, len(rows), 2) {return}
 	for row, i in rows {
 		testing.expect_value(t, row.workspace, one)
@@ -59,7 +59,7 @@ rail_rows_show_only_the_current_workspace_and_follow_switches :: proc(t: ^testin
 	}
 	testing.expect_value(t, app.rail_row_index_for_tab(rows[:], two, 0), -1)
 	w.workspace = two
-	testing.expect(t, app.rail_rows_build(&state, &w, &rows))
+	testing.expect(t, app.rail_rows_build(&w, &rows))
 	if !testing.expect_value(t, len(rows), 1) {return}
 	testing.expect_value(t, rows[0].workspace, two)
 	testing.expect_value(t, rows[0].tab, 0)
@@ -134,7 +134,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 
 	w.rail_override = .Shown
 	testing.expect(t, app.rail_overlay(&w))
-	row := app.rail_row_rect_for_tab(&state, &w, 0)
+	row := app.rail_row_rect_for_tab(&w, 0)
 	app.handle_event(
 		&state,
 		platform.Mouse_Button_Event {
@@ -232,13 +232,13 @@ rail_close_and_multiselect_keep_the_selected_group_and_remaining_tab :: proc(t: 
 		rail_auto = true,
 	}
 	append(&state.windows, &w)
-	row1 := app.rail_row_rect_for_tab(&state, &w, 1)
+	row1 := app.rail_row_rect_for_tab(&w, 1)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row1.x + 20), y = i32(row1.y + 16), modifiers = {.Control}})
 	testing.expect(t, one.marked && two.marked && !three.marked)
 	testing.expect_value(t, workspace.selected, 1)
 
-	layout_state, ok := app.rail_current_layout(&state, &w)
+	layout_state, ok := app.rail_current_layout(&w)
 	if !testing.expect(t, ok) {return}
 	row_index := app.rail_row_index_for_tab(w.rail_rows[:], workspace, 1)
 	close := ui.rail_close_rect(layout_state, row_index, w.scale)
@@ -280,16 +280,16 @@ rail_footer_and_empty_space_are_new_tab_drop_targets :: proc(t: ^testing.T) {
 		rail_auto = true,
 	}
 	append(&state.windows, &w)
-	layout_state, ok := app.rail_current_layout(&state, &w)
+	layout_state, ok := app.rail_current_layout(&w)
 	if !testing.expect(t, ok) {return}
 	footer := ui.rail_footer_tile(layout_state)
-	_, new_tab, target := app.rail_pane_target(&state, &w, footer.x + 8, footer.y + 8)
+	_, new_tab, target := app.rail_pane_target(&w, footer.x + 8, footer.y + 8)
 	testing.expect(t, target && new_tab)
 	empty_y := layout_state.list.y + layout_state.list.height - 4
-	_, new_tab, target = app.rail_pane_target(&state, &w, footer.x + 8, empty_y)
+	_, new_tab, target = app.rail_pane_target(&w, footer.x + 8, empty_y)
 	testing.expect(t, target && new_tab)
-	row := app.rail_row_rect_for_tab(&state, &w, 0)
-	on_tab, on_new, on_target := app.rail_pane_target(&state, &w, row.x + 20, row.y + 16)
+	row := app.rail_row_rect_for_tab(&w, 0)
+	on_tab, on_new, on_target := app.rail_pane_target(&w, row.x + 20, row.y + 16)
 	testing.expect(t, on_target && !on_new)
 	testing.expect_value(t, on_tab, 0)
 }

@@ -50,6 +50,12 @@ last_tab_group_removes_workspace_and_reuses_window_then_last_pane_exits :: proc(
 	testing.expect_value(t, len(state.workspaces), 0)
 	testing.expect_value(t, len(state.windows), 0)
 	testing.expect_value(t, len(state.sessions), 0)
+	// Already-queued open events must not resurrect work or index an empty registry during shutdown.
+	app.handle_event(state, platform.Activate_Request_Event{})
+	app.handle_event(state, platform.Tray_Event{})
+	testing.expect(t, !state.running)
+	testing.expect_value(t, len(state.workspaces), 0)
+	testing.expect_value(t, len(state.windows), 0)
 }
 
 @(test)

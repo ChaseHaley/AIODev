@@ -119,6 +119,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 }
 
 show_window :: proc(app: ^App) {
+	if len(app.workspaces) == 0 {return}
 	if len(app.windows) == 0 {
 		workspace := app.workspaces[0]
 		if len(workspace.tabs) == 0 && !tab_create(app, workspace) {
@@ -211,7 +212,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 				bar.height,
 			)
 		} else {
-			row := rail_row_rect_for_tab(app, w, w.workspace.selected)
+			row := rail_row_rect_for_tab(w, w.workspace.selected)
 			if row.height <= 0 {
 				row = {16, ui.TITLE_BAR_HEIGHT * w.scale, 1, 1}
 			}
@@ -422,7 +423,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	   f32(e.x) < rail_area_rect.x + rail_area_rect.width &&
 	   f32(e.y) >= rail_area_rect.y &&
 	   f32(e.y) < rail_area_rect.y + rail_area_rect.height {
-		if layout, ok := rail_current_layout(app, w); ok {
+		if layout, ok := rail_current_layout(w); ok {
 			step := f32(math.sign(e.delta_y)) * 3 * layout.row_height
 			w.rail_scroll = ui.rail_scroll_clamped(layout, w.rail_scroll - step)
 			w.dirty = true
