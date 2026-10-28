@@ -423,7 +423,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		baseline,
 		app.theme.accent,
 	); result != .Ok {return result}
-	if result := ui.draw_fading_text(
+	return ui.draw_fading_text(
 		&w.ui_text,
 		&w.list,
 		"New tab",
