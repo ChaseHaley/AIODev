@@ -90,6 +90,29 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 }
 
 @(test)
+pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.1, 1.5, 2}) {
+		for width in ([?]f32{144, 288, 480}) {
+			state: app.App
+			state.settings.tabs.orientation = .Vertical
+			workspace: app.Workspace
+			w := box_window(&workspace, scale)
+			w.rail_width = width
+			insets := app.pane_insets(&state, scale, nil)
+			box, client_width, client_height := app.pane_box_for_grid(
+				&state, scale, w.metrics, 120, 24, insets, width,
+			)
+			w.width, w.height = client_width, client_height
+			app.rail_adaptive_update(&w)
+			applied := box_applied(t, &state, &w, .Terminal)
+			testing.expect_value(t, applied.rect, box.rect)
+			testing.expect_value(t, applied.columns, u16(120))
+			testing.expect_value(t, applied.rows, u16(24))
+		}
+	}
+}
+
+@(test)
 pane_minimum_refusal_reports_the_grid_the_layout_applies_at_every_scale :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 2}) {
 		for settings_tab in ([?]bool{false, true}) {

@@ -459,6 +459,9 @@ when AIO_CONTROL {
 				{"tabs.chevron", verify_workspace_rect(tab_chevron_rect(app, w))},
 				{"rail.visible", fmt.tprintf("%t", rail_visible(w))},
 				{"rail.docked", fmt.tprintf("%t", rail_docked(w))},
+				{"rail.rect", verify_workspace_rect(rail_area(w))},
+				{"rail.resize", verify_workspace_rect(rail_resize_rect(w))},
+				{"rail.resizing", fmt.tprintf("%t", w.rail_resizing)},
 				{"rail.overlay", fmt.tprintf("%t", rail_overlay(w))},
 				{"rail.scroll", fmt.tprintf("%g", w.rail_scroll)},
 				{"rail.slide", fmt.tprintf("%g", w.rail_slide.value)},
@@ -1120,6 +1123,7 @@ when AIO_CONTROL {
 				u16(r.columns),
 				u16(r.rows),
 				pane_insets(app, w.scale, focused_session(app, w)),
+				w.rail_width > 0 ? w.rail_width : ui.RAIL_WIDTH,
 			)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) !=
 			   .None {return .System}

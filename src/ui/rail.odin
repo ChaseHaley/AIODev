@@ -6,6 +6,8 @@ import "core:math"
 // The vertical tab rail. Width, row rhythm and the dock threshold are shared with the window
 // chrome and the settings-free startup geometry, so they live here rather than in one caller.
 RAIL_WIDTH :: f32(208)
+RAIL_MIN_WIDTH :: f32(144)
+RAIL_MAX_WIDTH :: f32(480)
 RAIL_ROW_HEIGHT :: f32(32)
 RAIL_FOOTER_HEIGHT :: f32(32)
 RAIL_PADDING :: f32(4)
@@ -17,8 +19,10 @@ RAIL_DOCK_MIN_WIDTH :: f32(720)
 
 // Whole-pixel rail width: a fractional width subtracted from an integer client width loses a
 // column at some DPI scales, so every rail and pane geometry reads this value.
-rail_pixel_width :: proc(scale: f32) -> f32 {
-	return math.round(RAIL_WIDTH * scale)
+rail_pixel_width :: proc(scale: f32, width: f32 = RAIL_WIDTH, available: f32 = 0) -> f32 {
+	maximum := RAIL_MAX_WIDTH * scale
+	if available > 0 {maximum = min(maximum, available / 2)}
+	return math.round(clamp(width * scale, min(RAIL_MIN_WIDTH * scale, maximum), maximum))
 }
 
 Rail_Layout :: struct {

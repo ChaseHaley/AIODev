@@ -66,6 +66,7 @@ pane_box_for_grid :: proc(
 	metrics: term_view.Metrics,
 	columns, rows: u16,
 	insets: Pane_Insets,
+	rail_width: f32 = ui.RAIL_WIDTH,
 ) -> (
 	box: Pane_Box,
 	width, height: i32,
@@ -84,7 +85,7 @@ pane_box_for_grid :: proc(
 	// the window applies after the resize, so the requested grid is not widened by a hidden rail.
 	if app.settings.tabs.orientation == .Vertical &&
 	   f32(i32(base_width)) >= ui.RAIL_DOCK_MIN_WIDTH * scale {
-		rail = ui.rail_pixel_width(scale)
+		rail = ui.rail_pixel_width(scale, rail_width)
 		box.rect.x += rail
 	}
 	width = i32(box.rect.width + 2 * inset + rail)

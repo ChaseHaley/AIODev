@@ -78,6 +78,9 @@ Window :: struct {
 	rail_scroll:         f32,
 	rail_hover:          int,
 	rail_pressed:        int,
+	rail_width:          f32,
+	rail_resizing:       bool,
+	rail_resize_offset:  f32,
 	tab_orientation_button_hovered: bool,
 	tab_orientation_button_armed:   ui.Armed(bool),
 	rail_slide:          ui.Motion,
@@ -296,6 +299,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	placement_changed := horizontal != w.tabs_horizontal
 	w.tabs_horizontal = horizontal
 	if placement_changed {
+		rail_resize_cancel(w)
 		w.tab_hover, w.tab_pressed = -1, false
 	}
 	if placement_changed && !horizontal {

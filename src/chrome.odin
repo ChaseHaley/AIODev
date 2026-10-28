@@ -17,7 +17,7 @@ window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 		w.scale,
 	)
 	if !w.tabs_horizontal && rail_docked(w) && !w.preparing {
-		rail_width := min(ui.rail_pixel_width(w.scale), r.width)
+		rail_width := min(rail_width_pixels(w), r.width)
 		r.x += rail_width
 		r.width -= rail_width
 	}

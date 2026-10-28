@@ -43,6 +43,7 @@ rail_adaptive_update :: proc(w: ^Window) {
 	if w.tabs_horizontal {return}
 	auto := rail_auto_at(w.width, w.scale)
 	if auto == w.rail_auto {return}
+	rail_resize_cancel(w)
 	w.rail_auto, w.rail_override = auto, .Auto
 	w.rail_was_overlay = false
 	// A crossing must not leave the previous presentation behind: wide turns the docked rail on,
@@ -79,9 +80,37 @@ rail_area :: proc(w: ^Window) -> render.Rect {
 	return {
 		0,
 		ui.TITLE_BAR_HEIGHT * w.scale,
-		ui.rail_pixel_width(w.scale),
+		rail_width_pixels(w),
 		max(0, f32(w.height) - ui.TITLE_BAR_HEIGHT * w.scale),
 	}
+}
+
+rail_width_pixels :: proc(w: ^Window) -> f32 {
+	width := w.rail_width > 0 ? w.rail_width : ui.RAIL_WIDTH
+	return ui.rail_pixel_width(w.scale, width, f32(w.width))
+}
+
+rail_resize_rect :: proc(w: ^Window) -> render.Rect {
+	if w.preparing || !rail_visible(w) {return {}}
+	area := rail_area(w)
+	return {area.x + area.width - 3 * w.scale, area.y, 6 * w.scale, area.height}
+}
+
+rail_resize_hit :: proc(w: ^Window, x, y: f32) -> bool {
+	r := rail_resize_rect(w)
+	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+rail_resize_cancel :: proc(w: ^Window) {
+	if w.rail_resizing {w.gesture.cancelled += {.Left}}
+	w.rail_resizing = false
+}
+
+rail_resize_move :: proc(app: ^App, w: ^Window, x: f32) {
+	width := ui.rail_pixel_width(w.scale, (x - w.rail_resize_offset) / w.scale, f32(w.width))
+	if width == rail_width_pixels(w) {return}
+	w.rail_width = width / w.scale
+	window_relayout(app, w)
 }
 
 @(require_results)
@@ -124,6 +153,7 @@ tab_orientation_button_hit :: proc(w: ^Window, x, y: f32) -> bool {
 
 rail_toggle :: proc(app: ^App, w: ^Window) {
 	if w.tabs_horizontal {return}
+	rail_resize_cancel(w)
 	was_docked := rail_docked(w)
 	now := time.tick_now()
 	if rail_visible(w) {
@@ -152,6 +182,7 @@ rail_toggle :: proc(app: ^App, w: ^Window) {
 
 rail_overlay_dismiss :: proc(app: ^App, w: ^Window) {
 	if !rail_overlay(w) {return}
+	rail_resize_cancel(w)
 	w.rail_override = .Auto
 	w.rail_was_overlay = true
 	ui.motion_target(&w.rail_slide, 0, 140 * time.Millisecond, .Decelerate, app.animations, time.tick_now())
@@ -392,7 +423,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		baseline,
 		app.theme.accent,
 	); result != .Ok {return result}
-	return ui.draw_fading_text(
+	if result := ui.draw_fading_text(
 		&w.ui_text,
 		&w.list,
 		"New tab",
