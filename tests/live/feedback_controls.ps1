@@ -41,6 +41,7 @@ function New-Tab-Point {
 }
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio command pane.split_right
     Invoke-Aio expect state panes.count=2
     $splitState = Read-State

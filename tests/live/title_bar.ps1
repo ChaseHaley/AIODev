@@ -51,6 +51,7 @@ function Shot-Client([string] $Label) {
 }
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     $initial = Read-State
     Assert-Value $initial['rail.row.height'] 32 'rail rows keep the 32 DIP rhythm'
     Assert-Value $initial['rail.docked'] true 'rail docks in a wide window'

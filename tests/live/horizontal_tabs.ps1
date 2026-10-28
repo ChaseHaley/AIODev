@@ -48,11 +48,23 @@ function Click([string] $Point) {
 Invoke-Aio launch --fresh
 try {
     $initial = Read-State
-    Assert-Value $initial['tabs.orientation'] vertical 'the default tab placement stays vertical'
-    Assert-Value $initial['rail.visible'] true 'the default rail is visible'
+    Assert-Value $initial['tabs.orientation'] horizontal 'the default tab placement is horizontal'
+    Assert-Value $initial['rail.visible'] false 'the default has no vertical rail'
+    Invoke-Aio command view.tabs_orientation
+    $paletteVertical = Read-State
+    Assert-Value $paletteVertical['tabs.orientation'] vertical 'the palette action switches to vertical tabs'
+    Assert-Value @($paletteVertical.Values | Where-Object { $_ -match '(Horizontal|Vertical) tabs\.' }).Count 0 'the palette action switches quietly'
+    Invoke-Aio command view.tabs_orientation
+    Assert-Value (Read-State)['tabs.orientation'] horizontal 'the palette action switches back to horizontal tabs'
+    Invoke-Aio key Ctrl+Shift+L
+    $vertical = Read-State
+    Assert-Value $vertical['tabs.orientation'] vertical 'Ctrl+Shift+L switches to vertical tabs'
+    Assert-Value $vertical['rail.visible'] true 'the vertical rail remains available'
+    Assert-Value @($vertical.Values | Where-Object { $_ -match '(Horizontal|Vertical) tabs\.' }).Count 0 'switching to vertical is quiet'
     Invoke-Aio key Ctrl+Shift+L
     $horizontal = Read-State
     Assert-Value $horizontal['tabs.orientation'] horizontal 'Ctrl+Shift+L switches to horizontal tabs'
+    Assert-Value @($horizontal.Values | Where-Object { $_ -match '(Horizontal|Vertical) tabs\.' }).Count 0 'switching to horizontal is quiet'
     Assert-Value $horizontal['rail.visible'] false 'the vertical rail leaves horizontal mode'
     if ([double]$horizontal['title.controls_end'] -ge [double]$horizontal['title.caption_start']) {
         throw 'the horizontal strip does not leave a caption drag region'
@@ -92,6 +104,7 @@ try {
     Assert-Value $back['tabs.orientation'] vertical 'Ctrl+Shift+L returns to vertical tabs'
     Assert-Value $back['settings.value'] vertical 'the open Settings page follows the shortcut'
     Assert-Value $back['rail.visible'] true 'the rail returns in vertical mode'
+    Assert-Value @($back.Values | Where-Object { $_ -match '(Horizontal|Vertical) tabs\.' }).Count 0 'switching with Settings open is quiet'
     if ([double]$back['rail.rows'] -lt 2) { throw 'the returned rail has no rows' }
     Write-Output 'PASS the returned rail has rows'
     Invoke-Aio key Ctrl+A

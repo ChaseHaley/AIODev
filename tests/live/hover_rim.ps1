@@ -86,6 +86,7 @@ public static class HoverRimCapture {
 
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio wait text 'PS '
     $state = Read-State
     $chip = Rect $state 'workspace.button'

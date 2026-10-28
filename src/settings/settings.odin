@@ -213,7 +213,7 @@ SCHEMA :: [?]Schema_Entry {
 		"Tab Orientation",
 		.Enum,
 		offset_of(Settings, tabs) + offset_of(Tabs_Settings, orientation),
-		"vertical",
+		"horizontal",
 		0,
 		0,
 		{"vertical", "horizontal"},

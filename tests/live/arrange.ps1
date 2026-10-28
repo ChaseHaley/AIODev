@@ -69,6 +69,7 @@ function Shot([string] $Label) {
 
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     $s = Read-State
     $scale = [double]$s['window.scale']
     Assert-Value $s['panes.header_height'] (28*$scale) 'single pane has a persistent header row'

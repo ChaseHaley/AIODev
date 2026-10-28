@@ -66,6 +66,7 @@ function Set-Gap([int] $Gap) {
 }
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     [IO.File]::AppendAllText($path, "`npane.minimum_columns = 0`npane.minimum_rows = 0`n")
     foreach ($dpi in @(96,144,168)) {
         Invoke-Aio dpi $dpi

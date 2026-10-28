@@ -67,6 +67,7 @@ $original = [AioAnimations]::Read()
 try {
     [AioAnimations]::Write($false)
     Invoke-Aio launch --fresh
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio expect state ui.animations=false
     Invoke-Aio key Ctrl+Shift+P
     Invoke-Aio expect state ui.animating=false

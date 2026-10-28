@@ -208,6 +208,7 @@ function Begin-Drag([string] $SourceId) {
 
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio wait text 'PS '
     $s = Read-State
     $script:appPid = $s['app.pid']

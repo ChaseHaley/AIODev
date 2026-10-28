@@ -157,8 +157,10 @@ tab_orientation_toggle_switches_the_setting_without_a_settings_file :: proc(t: ^
 	testing.expect_value(t, state.settings.tabs.orientation, settings.Tabs_Orientation.Vertical)
 	app.toggle_tab_orientation(&state)
 	testing.expect_value(t, state.settings.tabs.orientation, settings.Tabs_Orientation.Horizontal)
+	testing.expect_value(t, len(state.notices.items), 0)
 	app.toggle_tab_orientation(&state)
 	testing.expect_value(t, state.settings.tabs.orientation, settings.Tabs_Orientation.Vertical)
+	testing.expect_value(t, len(state.notices.items), 0)
 }
 
 @(test)
@@ -195,6 +197,7 @@ tab_orientation_button_click_switches_both_directions :: proc(t: ^testing.T) {
 			})
 		}
 		testing.expect_value(t, state.settings.tabs.orientation, expected)
+		testing.expect_value(t, len(state.notices.items), 0)
 		// The fixture has no surface; set the window's mode as applying settings would.
 		w.tabs_horizontal = expected == .Horizontal
 	}

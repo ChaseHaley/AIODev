@@ -15,9 +15,14 @@ function Shot($label){Aio mouse move '1100,650' --px | Out-Null; Start-Sleep -Mi
 Aio launch --fresh | Out-Null
 try {
     $initial=State
+    Equal $initial['tabs.orientation'] horizontal 'horizontal tabs are the default'
     $button=$initial['tabs.orientation_button']
     Click $button
+    Equal (State)['tabs.orientation'] vertical 'button changes horizontal to vertical'
+    Equal @((State).Values | Where-Object { $_ -match '(Horizontal|Vertical) tabs\.' }).Count 0 'button switches to vertical quietly'
+    Click $button
     Equal (State)['tabs.orientation'] horizontal 'button changes vertical to horizontal'
+    Equal @((State).Values | Where-Object { $_ -match '(Horizontal|Vertical) tabs\.' }).Count 0 'button switches to horizontal quietly'
     Equal (State)['tabs.orientation_button'] $button 'button is stationary in horizontal mode'
     Click $button
     Equal (State)['tabs.orientation'] vertical 'button changes horizontal to vertical'

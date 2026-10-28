@@ -52,6 +52,7 @@ function Begin-Drag {
 
 try {
     Invoke-Aio launch --fresh | Out-Null
+    Invoke-Aio key Ctrl+Shift+L | Out-Null
     $initial = Read-State
     Write-Host "RECEIPT app=$($initial['app.pid']) build=$($initial['app.build']) instance=$Name"
     $script:source = $initial['window.id']

@@ -34,6 +34,7 @@ function Read-State {
 
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio wait text 'PS '
     $initial = Read-State
     $windowId = $initial['window.id']

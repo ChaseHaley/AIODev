@@ -44,6 +44,7 @@ function Await-Exit([System.Diagnostics.Process] $Process) {
 
 Aio launch --fresh | Out-Null
 try {
+    Aio key Ctrl+Shift+L | Out-Null
     $initial = State
     $process = Get-Process -Id ([int]$initial['app.pid'])
     $null = $process.Handle
@@ -90,8 +91,7 @@ try {
     $null = $process.Handle
     Equal $fresh['workspaces.count'] 1 'relaunch creates one fresh workspace'
     Equal $fresh['tabs.count'] 1 'relaunch has no deleted tabs to restore'
-    Aio key Ctrl+Shift+L | Out-Null
-    Equal (State)['tabs.orientation'] horizontal 'horizontal orientation remains available'
+    Equal $fresh['tabs.orientation'] horizontal 'relaunch uses the horizontal default'
     Aio key Ctrl+Shift+W | Out-Null
     Await-Exit $process
 } finally {

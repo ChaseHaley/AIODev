@@ -44,6 +44,7 @@ function Shot($Label) {
 }
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio wait text 'PS '
     foreach ($dpi in @(96,144,168)) {
         Invoke-Aio dpi $dpi

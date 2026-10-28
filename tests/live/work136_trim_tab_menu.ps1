@@ -68,6 +68,7 @@ $single = @('Rename', 'Duplicate', '-', 'Close to the Right', 'Close Others', 'C
 Invoke-Aio launch --fresh
 Start-Transcript -LiteralPath (Join-Path $directory 'journey.log') | Out-Null
 try {
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio doctor
     Invoke-Aio mouse click (Tab-Center 1) --button right --px
     Assert-Menu $single @(4,5)

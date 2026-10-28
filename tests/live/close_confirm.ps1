@@ -57,6 +57,7 @@ function Open-Split-Tab {
 }
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio wait text 'PS '
     Invoke-Aio command pane.split_right
     Invoke-Aio wait text 'PS '

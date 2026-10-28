@@ -60,6 +60,7 @@ function Assert-Isolated([string] $Marker, [string[]] $Others) {
 $savedClipboard = Get-Clipboard -Raw
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     $state = Read-State
     $node = $state['panes.focused']
     Assert-Value ($state["pane.$node.rect"] -split ',')[1] 45 'single-tab bar visible'

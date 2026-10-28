@@ -53,6 +53,7 @@ function Shot([string] $Label) {
 }
 Invoke-Aio launch --fresh
 try {
+    Invoke-Aio key Ctrl+Shift+L
     $session = (Read-State)['session.id']
     Invoke-Aio run 'Write-Output GROUP_MARKER'
     foreach ($i in 2..6) { Invoke-Aio command tab.new }

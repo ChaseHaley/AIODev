@@ -138,8 +138,6 @@ toggle_tab_orientation :: proc(app: ^App) {
 			rail_reveal_active(window)
 		}
 	}
-	label := next == "horizontal" ? "Horizontal" : "Vertical"
-	notify(app, .Info, fmt.tprintf("%s tabs. Ctrl+Shift+L switches back.", label))
 }
 
 @(private)

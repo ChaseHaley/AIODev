@@ -56,7 +56,8 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	path := strings.concatenate({directory, "/settings.ini"})
 	defer delete(path)
 	defer os.remove(path)
-	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n" +
+		"tabs.orientation = vertical\n"
 	if !testing.expect_value(t, os.write_entire_file(path, settings), nil) { return }
 	state := app.App{options = {data_dir = directory, inactive = true}}
 	state.app_id = fmt.aprintf("AIODev.Test.Workspaces.%d", os.get_pid())
