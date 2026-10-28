@@ -37,14 +37,15 @@ Rail_Layout :: struct {
 }
 
 rail_layout :: proc(area: render.Rect, scale: f32, count: int, scroll: f32) -> Rail_Layout {
-	footer_height := RAIL_FOOTER_HEIGHT * scale
-	list_height := max(0, area.height - footer_height)
+	footer_height := min(RAIL_FOOTER_HEIGHT * scale, max(0, area.height))
+	content_height := f32(max(0, count)) * RAIL_ROW_HEIGHT * scale + 2 * RAIL_PADDING * scale
+	list_height := min(content_height, max(0, area.height - footer_height))
 	layout := Rail_Layout {
 		area           = area,
 		list           = {area.x, area.y, area.width, list_height},
 		footer         = {area.x, area.y + list_height, area.width, footer_height},
 		row_height     = RAIL_ROW_HEIGHT * scale,
-		content_height = f32(max(0, count)) * RAIL_ROW_HEIGHT * scale + 2 * RAIL_PADDING * scale,
+		content_height = content_height,
 		count          = count,
 		scale          = scale,
 	}
@@ -138,6 +139,23 @@ rail_footer_tile :: proc(layout: Rail_Layout) -> render.Rect {
 		max(0, layout.footer.width - 2 * padding),
 		max(0, layout.footer.height - 2 * padding),
 	}
+}
+
+rail_profile_rect :: proc(layout: Rail_Layout) -> render.Rect {
+	tile := rail_footer_tile(layout)
+	width := min(tile.width, 28 * layout.scale)
+	return {tile.x + tile.width - width, tile.y, width, tile.height}
+}
+
+rail_profile_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {
+	r := rail_profile_rect(layout)
+	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+rail_new_tab_tile :: proc(layout: Rail_Layout) -> render.Rect {
+	tile := rail_footer_tile(layout)
+	tile.width = max(0, tile.width - rail_profile_rect(layout).width)
+	return tile
 }
 
 rail_tab_tile :: proc(layout: Rail_Layout, row: render.Rect) -> render.Rect {

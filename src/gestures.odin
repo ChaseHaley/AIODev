@@ -288,6 +288,8 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 					ui.armed_press(&w.tab_close_armed, index)
 				} else if index == bar.count && e.button == .Left {
 					tab_new(app, w)
+				} else if index == bar.count && e.button == .Right {
+					profile_menu_open_new_tab(app, w, x, bar.height)
 				} else if index >= 0 && index < bar.count {
 					#partial switch e.button {
 					case .Right:
@@ -332,8 +334,14 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		layout, ok := rail_current_layout(w)
 		if !ok {return}
 		if e.pressed && e.button == .Left && ui.rail_footer_hit(layout, x, y) {
-			w.rail_pressed = RAIL_NEW_TAB_ROW
-			rail_new_tab(app, w)
+			if ui.rail_profile_hit(layout, x, y) {
+				w.rail_pressed = RAIL_PROFILE_ROW
+				tile := rail_profile_rect(w)
+				profile_menu_open_new_tab(app, w, tile.x, tile.y + tile.height)
+			} else {
+				w.rail_pressed = RAIL_NEW_TAB_ROW
+				rail_new_tab(app, w)
+			}
 			return
 		}
 		row := ui.rail_row_hit(layout, x, y)
@@ -519,7 +527,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		if layout, ok := rail_current_layout(w); ok {
 			rail_hover = ui.rail_row_hit(layout, x, y)
 			if rail_hover < 0 && ui.rail_footer_hit(layout, x, y) {
-				rail_hover = RAIL_NEW_TAB_ROW
+				rail_hover = ui.rail_profile_hit(layout, x, y) ? RAIL_PROFILE_ROW : RAIL_NEW_TAB_ROW
 			}
 		}
 	}

@@ -202,6 +202,7 @@ profile_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 profile_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	if !w.profile_menu.open {return false}
 	if !e.pressed {
+		w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
 		if e.button in w.header_buttons {w.header_buttons -= {e.button}}
 		return true
 	}

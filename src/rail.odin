@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:time"
 
 RAIL_NEW_TAB_ROW :: -2
+RAIL_PROFILE_ROW :: -3
 
 Rail_Row :: struct {
 	workspace: ^Workspace,
@@ -233,7 +234,13 @@ rail_pane_target :: proc(w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool)
 rail_new_tab_rect :: proc(w: ^Window) -> render.Rect {
 	layout, ok := rail_current_layout(w)
 	if !ok {return {}}
-	return ui.rail_footer_tile(layout)
+	return ui.rail_new_tab_tile(layout)
+}
+
+rail_profile_rect :: proc(w: ^Window) -> render.Rect {
+	layout, ok := rail_current_layout(w)
+	if !ok {return {}}
+	return ui.rail_profile_rect(layout)
 }
 
 @(private)
@@ -405,7 +412,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	if result := rail_drop_indicator_draw(app, w, layout); result != .Ok {return result}
 	if render.push_layer(&w.list, layout.footer) != .None {return .Ok}
-	tile := ui.rail_footer_tile(layout)
+	tile := ui.rail_new_tab_tile(layout)
 	hover := w.rail_hover == RAIL_NEW_TAB_ROW
 	pressed := w.rail_pressed == RAIL_NEW_TAB_ROW
 	if hover || pressed {
@@ -431,7 +438,27 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		baseline,
 		app.theme.muted,
 		max(0, tile.width - 28 * w.scale - plus_width),
-	)
+	); result != .Ok {return result}
+	if hover {
+		if ui.hover_rim_draw(&w.list, app.theme, tile, 6 * w.scale, 1, w.scale, w.pointer) != .None {
+			return .Ok
+		}
+	}
+	chevron := ui.rail_profile_rect(layout)
+	profile_hover := w.rail_hover == RAIL_PROFILE_ROW
+	profile_pressed := w.rail_pressed == RAIL_PROFILE_ROW
+	if profile_hover || profile_pressed {
+		fill := profile_pressed ? app.theme.pressed : app.theme.hover
+		ui.draw_rect(&w.list, {rect = chevron, color = fill, radius = 6 * w.scale})
+	}
+	if result := ui.draw_glyph_centered(&w.ui_text, &w.list, '▾', chevron, app.theme.muted);
+	   result != .Ok {return result}
+	if profile_hover {
+		if ui.hover_rim_draw(&w.list, app.theme, chevron, 6 * w.scale, 1, w.scale, w.pointer) != .None {
+			return .Ok
+		}
+	}
+	return .Ok
 }
 
 tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {

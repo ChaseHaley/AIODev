@@ -518,6 +518,9 @@ when AIO_CONTROL {
 				{"link.uri", link_uri},
 				{"link.spans", fmt.tprintf("%d", link_spans)},
 				{"rail.new_tab", verify_workspace_rect(rail_new_tab_rect(w))},
+				{"rail.profile", verify_workspace_rect(rail_profile_rect(w))},
+				{"profile_menu.open", fmt.tprintf("%t", w.profile_menu.open)},
+				{"profile_menu.count", fmt.tprintf("%d", w.profile_menu.count)},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
 				{
@@ -739,6 +742,7 @@ when AIO_CONTROL {
 				{"session.exit", fmt.tprintf("%d", status.exit_code)},
 				{"session.title", term.title(s, context.temp_allocator)},
 				{"session.header.title", pane_header_title(&entry.header)},
+				{"session.profile", entry.profile_id},
 				{"session.header.directory", entry.header.directory},
 				{
 					"session.header.icon",
