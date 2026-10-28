@@ -5,7 +5,7 @@ import app "../../src"
 import "aio:platform"
 import "aio:ui"
 
-@(private)
+@(private, require_results)
 rail_resize_fixture :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) -> bool {
 	if !palette_fixture_create(t, f, name) {return false}
 	f.state.settings.tabs.orientation = .Vertical
