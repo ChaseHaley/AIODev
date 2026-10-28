@@ -1205,6 +1205,10 @@ palette_input_contains :: proc(l: Palette_Layout, x, y: f32) -> bool {
 	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
+palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
+	return palette_input_contains(l, x, y) && !contains(l.chip, x, y) && !contains(l.menu, x, y)
+}
+
 // Places the caret, or with `extend` grows the selection, and starts a drag selection.
 palette_input_press :: proc(
 	p: ^Palette,

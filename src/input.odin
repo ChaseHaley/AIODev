@@ -524,6 +524,7 @@ leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> Leader_Resul
 @(private)
 pointer_set :: proc(app: ^App, w: ^Window, shape: platform.Cursor_Shape) {
 	if shape == w.pointer_shape {return}
+	when AIO_CONTROL {app.verify.pointer_updates += 1}
 	if platform.window_set_cursor(&app.platform, w.id, shape) != .None {
 		log.error("setting the pointer cursor failed")
 	} else {w.pointer_shape = shape}

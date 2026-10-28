@@ -536,7 +536,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		split_overlay_update(w, x, y, false)
 		pane_header_pointer(w, x, y, false)
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
-		pointer_set(app, w, ui.palette_input_contains(l, x, y) ? .Text : .Arrow)
+		pointer_set(app, w, ui.palette_over_text(l, x, y) ? .Text : .Arrow)
 		if app.palette.query.dragging && .Left in e.buttons {
 			on_palette_outcome(
 				app,
@@ -585,19 +585,19 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		link_hover_clear(w)
 	}
 	if link_hovered {shape = .Hand}
-	pointer_set(app, w, shape)
-	if over_header || w.header_buttons != {} {return}
-	if enabled && !over_divider {
+	over_settings := false
+	if enabled && !over_header && w.header_buttons == {} && !over_divider {
 		if pane, found := settings_pane_under_pointer(w, x, y); found {
 			l := settings_layout_for(w, pane.rect)
 			changed := ui.editor_hover(&w.editor, l, x, y)
 			if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
 			if changed {w.dirty = true}
-			over_text := ui.editor_over_text(&w.editor, l, x, y)
-			pointer_set(app, w, over_text ? .Text : .Arrow)
-			return
+			shape = ui.editor_over_text(&w.editor, l, x, y) ? .Text : .Arrow
+			over_settings = true
 		}
 	}
+	pointer_set(app, w, shape)
+	if over_header || w.header_buttons != {} || over_settings {return}
 	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
 		return
