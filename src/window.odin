@@ -510,13 +510,8 @@ window_render :: proc(app: ^App, w: ^Window) {
 	}
 	background := app.theme.window
 	build_start := time.tick_now()
-	for _ in 0 ..< 2 {
-		_, result := build_frame(app, w)
-		if result == .Ok {
-			perf.mark_built(&app.perf)
-			break
-		}
-	}
+	if !window_build_frame(app, w) {return}
+	perf.mark_built(&app.perf)
 	build_ms := perf.since_ms(build_start)
 	w.gloss_hovered = ui.hover_rim_present(&w.list)
 	render_start := time.tick_now()
@@ -538,9 +533,23 @@ window_render :: proc(app: ^App, w: ^Window) {
 	w.dirty = false
 }
 
+// Only a completed draw list may be submitted or counted as built. Failed construction keeps
+// the window dirty, so a later healthy attempt can recover without waiting for new terminal output.
+@(require_results)
+window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
+	build := render.frame_build_begin(&w.list, app.device)
+	for {
+		_, _ = build_frame(app, w)
+		switch render.frame_build_finish(&build) {
+		case .Ready: return true
+		case .Retry:
+		case .Failed: return false
+		}
+	}
+}
+
 @(private)
 build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
-	render.draw_list_reset(&w.list)
 	frame: term_view.Frame
 	blinking := false
 	c := app.settings.colors
@@ -755,7 +764,7 @@ build_pane :: proc(
 		   cached.style != style {
 			cached.valid = false
 			render.draw_list_reset(&cached.cache)
-			if render.push_layer(&cached.cache, clip, radius) != .None {return {}, .Ok}
+			_ = render.push_layer(&cached.cache, clip, radius)
 			frame, result := term_view.build(
 				view,
 				entry.session,
@@ -767,14 +776,15 @@ build_pane :: proc(
 				style,
 			)
 			if result != .Ok {return frame, result}
-			cached.frame, cached.style = frame, style
-			cached.generation, cached.atlas_generation =
-				generation, render.atlas_generation(app.device)
-			cached.valid = true
-			cached.builds += 1
+			if cached.cache.error == .None {
+				cached.frame, cached.style = frame, style
+				cached.generation, cached.atlas_generation =
+					generation, render.atlas_generation(app.device)
+				cached.valid = true
+				cached.builds += 1
+			}
 		}
-		if render.append_list(&w.list, &cached.cache) !=
-		   .None {log.error("copying a pane frame failed")}
+		_ = render.append_list(&w.list, &cached.cache)
 		return cached.frame, .Ok
 	}
 	return {}, .Ok

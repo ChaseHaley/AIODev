@@ -167,7 +167,25 @@ pane_window_preview_render :: proc(app: ^App, w: ^Window) {
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the pane preview failed")
 	}
-	render.draw_list_reset(&w.list)
+	build := render.frame_build_begin(&w.list, app.device)
+	for {
+		pane_window_preview_draw(app, w)
+		switch render.frame_build_finish(&build) {
+		case .Ready:
+		case .Retry: continue
+		case .Failed: return
+		}
+		break
+	}
+	if err := render.frame_render(app.device, w.surface, &w.list, app.theme.window); err != .None {
+		if err ==
+		   .Device_Lost {recover_device(app)} else {log.errorf("drawing the pane preview failed: %v", err)}
+	}
+	w.dirty = false
+}
+
+@(private)
+pane_window_preview_draw :: proc(app: ^App, w: ^Window) {
 	width, height := f32(w.width), f32(w.height)
 	if render.push_layer(&w.list, {0, 0, width, height}) != .None {return}
 	if render.push_rect(&w.list, {rect = {0, 0, width, height}, color = app.theme.window}) !=
@@ -214,9 +232,4 @@ pane_window_preview_render :: proc(app: ^App, w: ^Window) {
 			max(1, width - 48 * w.scale),
 		)
 	}
-	if err := render.frame_render(app.device, w.surface, &w.list, app.theme.window); err != .None {
-		if err ==
-		   .Device_Lost {recover_device(app)} else {log.errorf("drawing the pane preview failed: %v", err)}
-	}
-	w.dirty = false
 }

@@ -166,9 +166,7 @@ draw_glyph :: proc(
 	}
 	left, top := math.round(x + entry.offset.x), math.round(baseline + entry.offset.y)
 	at := render.Rect{left, top, entry.size.x, entry.size.y}
-	if render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c}) != .None {
-		log.error("ui: the draw list ran out of memory")
-	}
+	_ = render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c})
 	return .Ok
 }
 
@@ -204,9 +202,7 @@ wrap :: proc(t: ^Text, s: string, width: f32, out: ^[dynamic]string) {
 }
 
 draw_rect :: proc(list: ^render.Draw_List, instance: render.Rect_Instance) {
-	if render.push_rect(list, instance) != .None {
-		log.error("ui: the draw list ran out of memory")
-	}
+	_ = render.push_rect(list, instance)
 }
 
 Text_Style :: enum {
@@ -300,9 +296,7 @@ draw_glyph_centered :: proc(
 		entry.size.x,
 		entry.size.y,
 	}
-	if render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c}) != .None {
-		log.error("ui: the draw list ran out of memory")
-	}
+	_ = render.push_glyph(list, {rect = at, atlas = entry.atlas, color = c})
 	return .Ok
 }
 
@@ -374,13 +368,10 @@ draw_cluster_centered :: proc(
 				entry.size.y,
 			}
 			flags := entry.color ? render.GLYPH_COLOR : 0
-			if render.push_glyph(
-				   list,
-				   {rect = at, atlas = entry.atlas, color = c, flags = flags},
-			   ) !=
-			   .None {
-				log.error("ui: the draw list ran out of memory")
-			}
+			_ = render.push_glyph(
+				list,
+				{rect = at, atlas = entry.atlas, color = c, flags = flags},
+			)
 		}
 		pen += g.advance * fit
 	}

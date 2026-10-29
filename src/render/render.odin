@@ -48,6 +48,12 @@ Draw_List :: struct {
 	layers: [dynamic]Layer,
 	rects:  [dynamic]Rect_Instance,
 	glyphs: [dynamic]Glyph_Instance,
+	// The first failed write invalidates the whole list until the next build.
+	error: Error,
+	// Completed frames belong to this atlas; zero leaves standalone lists unbound.
+	atlas_generation: u64,
+	// Resetting an attempt preserves diagnostics; only healthy completion rearms them.
+	failure_reported: bool,
 }
 
 Atlas_Slot :: struct {
@@ -75,6 +81,8 @@ Error :: enum {
 	Surface_Failed,
 	Wait_Failed,
 	Timeout,
+	Atlas_Invalidated,
+	Construction_Failed,
 }
 
 draw_list_init :: proc(allocator := context.allocator) -> Draw_List {
@@ -89,6 +97,8 @@ draw_list_reset :: proc(list: ^Draw_List) {
 	clear(&list.layers)
 	clear(&list.rects)
 	clear(&list.glyphs)
+	list.error = .None
+	list.atlas_generation = 0
 }
 
 draw_list_destroy :: proc(list: ^Draw_List) {
@@ -100,9 +110,14 @@ draw_list_destroy :: proc(list: ^Draw_List) {
 
 @(require_results)
 append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
+	if list.error != .None {return list.error}
+	if source.error != .None {list.error = source.error; return list.error}
 	if reserve(&list.layers, len(list.layers) + len(source.layers)) != nil ||
 	   reserve(&list.rects, len(list.rects) + len(source.rects)) != nil ||
-	   reserve(&list.glyphs, len(list.glyphs) + len(source.glyphs)) != nil {return .Out_Of_Memory}
+	   reserve(&list.glyphs, len(list.glyphs) + len(source.glyphs)) != nil {
+		list.error = .Out_Of_Memory
+		return list.error
+	}
 	rect_offset, glyph_offset := len(list.rects), len(list.glyphs)
 	append(&list.rects, ..source.rects[:])
 	append(&list.glyphs, ..source.glyphs[:])
@@ -117,6 +132,7 @@ append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
 
 @(require_results)
 push_layer :: proc(list: ^Draw_List, clip: Rect, radius: f32 = 0) -> Error {
+	if list.error != .None {return list.error}
 	layer := Layer {
 		clip        = clip,
 		radius      = radius,
@@ -124,16 +140,18 @@ push_layer :: proc(list: ^Draw_List, clip: Rect, radius: f32 = 0) -> Error {
 		glyph_start = len(list.glyphs),
 	}
 	if _, err := append(&list.layers, layer); err != nil {
-		return .Out_Of_Memory
+		list.error = .Out_Of_Memory
 	}
-	return .None
+	return list.error
 }
 
 @(require_results)
 push_rect :: proc(list: ^Draw_List, instance: Rect_Instance) -> Error {
+	if list.error != .None {return list.error}
 	assert(len(list.layers) > 0, "push_layer must precede push_rect")
 	if _, err := append(&list.rects, instance); err != nil {
-		return .Out_Of_Memory
+		list.error = .Out_Of_Memory
+		return list.error
 	}
 	list.layers[len(list.layers) - 1].rect_count += 1
 	return .None
@@ -141,9 +159,11 @@ push_rect :: proc(list: ^Draw_List, instance: Rect_Instance) -> Error {
 
 @(require_results)
 push_glyph :: proc(list: ^Draw_List, instance: Glyph_Instance) -> Error {
+	if list.error != .None {return list.error}
 	assert(len(list.layers) > 0, "push_layer must precede push_glyph")
 	if _, err := append(&list.glyphs, instance); err != nil {
-		return .Out_Of_Memory
+		list.error = .Out_Of_Memory
+		return list.error
 	}
 	list.layers[len(list.layers) - 1].glyph_count += 1
 	return .None

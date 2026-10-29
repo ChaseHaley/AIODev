@@ -166,14 +166,11 @@ Builder :: struct {
 	columns:     int,
 	// The cursor sits on a wide cluster, so it covers two cells.
 	cursor_wide: bool,
-	ok:          bool,
 }
 
 @(private)
 rect :: proc(b: ^Builder, r: render.Rect, c: render.Color) {
-	if render.push_rect(b.list, {rect = r, color = c}) != .None {
-		b.ok = false
-	}
+	_ = render.push_rect(b.list, {rect = r, color = c})
 }
 
 @(private)
@@ -188,14 +185,11 @@ place :: proc(b: ^Builder, entry: glyphs.Entry, pen: [2]f32, c: render.Color) {
 		entry.size.y,
 	}
 	flags := entry.color ? render.GLYPH_COLOR : 0
-	if render.push_glyph(b.list, {rect = at, atlas = entry.atlas, color = c, flags = flags}) !=
-	   .None {
-		b.ok = false
-	}
+	_ = render.push_glyph(b.list, {rect = at, atlas = entry.atlas, color = c, flags = flags})
 }
 
 // Renders the session's current screen into the draw list's current layer, origin at the top-left cell.
-// .Atlas_Reset means the glyph atlas overflowed mid-frame: reset the draw list and build again.
+// The result only short-circuits atlas resets. Draw-list failures stay on the list for frame completion.
 build :: proc(
 	v: ^View,
 	session: ^term.Session,
@@ -209,6 +203,7 @@ build :: proc(
 	Frame,
 	glyphs.Result,
 ) {
+	if list.error != .None {return {}, .Ok}
 	term.capture(session, v.state, &v.highlights)
 	b := Builder {
 		list    = list,
@@ -219,7 +214,6 @@ build :: proc(
 		colors  = ghostty.sized(ghostty.Render_State_Colors),
 		cursor  = ghostty.sized(ghostty.Render_State_Cursor),
 		origin  = origin,
-		ok      = true,
 	}
 	columns: u16
 	ok := ghostty.render_state_get(v.state, .Cols, &columns) == .Success
@@ -227,7 +221,7 @@ build :: proc(
 	ok &&= ghostty.render_state_get(v.state, .Cursor, &b.cursor) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Row_Iterator, &v.rows) == .Success
 	if !ok {
-		log.error("term_view: reading the render state failed")
+		list.error = .Construction_Failed
 		return {}, .Ok
 	}
 	b.columns = int(columns)
@@ -239,11 +233,10 @@ build :: proc(
 		if result := build_row(v, &b, y); result != .Ok {
 			return frame, result
 		}
+		if list.error != .None {return frame, .Ok}
 	}
+	if list.error != .None {return frame, .Ok}
 	build_cursor(&b)
-	if !b.ok {
-		log.error("term_view: the draw list ran out of memory")
-	}
 	if result := ghostty.render_state_clean(v.state); result != .Success {
 		log.errorf("term_view: cleaning the render state failed: %v", result)
 	}
@@ -363,10 +356,11 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	selection := ghostty.sized(ghostty.Render_State_Row_Selection)
 	selected := ghostty.render_state_row_get(v.rows, .Selection, &selection) == .Success
 	if ghostty.render_state_row_get(v.rows, .Cells, &v.cells) != .Success {
+		b.list.error = .Construction_Failed
 		return .Ok
 	}
 	if !mark_row(v, y, b.columns) {
-		b.ok = false
+		b.list.error = .Out_Of_Memory
 		return .Ok
 	}
 	clear(&v.paints)
@@ -374,7 +368,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		mark := x < len(v.marks) ? v.marks[x] : .None
 		p := paint_cell(v, b, x, y, selection, selected, mark)
 		if _, err := append(&v.paints, p); err != nil {
-			b.ok = false
+			b.list.error = .Out_Of_Memory
 			return .Ok
 		}
 	}
@@ -467,16 +461,16 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		span: []u32
 		if !p.style.invisible {
 			if ghostty.render_state_row_cells_select(v.cells, u16(x)) != .Success {
-				log.error("term_view: selecting row cell failed")
-			} else {
-				clear(&v.codepoints)
-				text, err := term.render_cell_graphemes(v.cells, p.width, &v.codepoints)
-				if err != .None {
-					log.errorf("term_view: reading cell graphemes failed: %v", err)
-				} else {
-					span = text
-				}
+				b.list.error = .Construction_Failed
+				return .Ok
 			}
+			clear(&v.codepoints)
+			text, err := term.render_cell_graphemes(v.cells, p.width, &v.codepoints)
+			if err != .None {
+				b.list.error = err == .Out_Of_Memory ? .Out_Of_Memory : .Construction_Failed
+				return .Ok
+			}
+			span = text
 		}
 		next_face := cell_face(p)
 		if p.style.invisible ||
@@ -492,14 +486,14 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		if p.style.invisible || len(span) == 0 {continue}
 		if reserve(&v.runes, len(v.runes) + len(span)) != nil ||
 		   reserve(&v.columns, len(v.columns) + len(span)) != nil {
-			b.ok = false
+			b.list.error = .Out_Of_Memory
 			return .Ok
 		}
 		for codepoint in span {
 			_, rune_err := append(&v.runes, rune(codepoint))
 			_, column_err := append(&v.columns, x)
 			if rune_err != nil || column_err != nil {
-				b.ok = false
+				b.list.error = .Out_Of_Memory
 				return .Ok
 			}
 		}
@@ -656,6 +650,7 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
 
 @(private)
 build_cursor :: proc(b: ^Builder) {
+	if b.list.error != .None {return}
 	c := b.cursor
 	if !c.visible || !c.viewport_has_value || !b.style.cursor_phase_visible {
 		return
@@ -676,10 +671,7 @@ build_cursor :: proc(b: ^Builder) {
 		return
 	}
 	clip := b.list.layers[len(b.list.layers) - 1].clip
-	if render.push_layer(b.list, clip) != .None {
-		b.ok = false
-		return
-	}
+	if render.push_layer(b.list, clip) != .None {return}
 	stroke := max(1, m.underline_thickness)
 	switch {
 	case !b.style.focused || c.visual_style == .Block_Hollow:

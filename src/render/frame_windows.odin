@@ -71,6 +71,10 @@ scissor :: proc(clip: Rect, s: ^Surface) -> d3d.RECT {
 
 @(require_results)
 frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) -> Error {
+	if list.error != .None {return list.error}
+	if list.atlas_generation != 0 && list.atlas_generation != atlas_generation(d) {
+		return .Atlas_Invalidated
+	}
 	assert(s.owner == d)
 	if err := instance_upload(d, &d.rects, list.rects[:]); err != .None {
 		return err
