@@ -547,13 +547,7 @@ load_settings :: proc(app: ^App) {
 		}
 		loaded = defaults
 	}
-	settings.destroy(&app.settings)
-	app.settings = loaded
-	detect_shell_profiles(app)
-	app.process_deadline = {}
-	for &entry in app.sessions {entry.process_padding = nil}
-	apply_bindings(app, &diagnostics)
-	app.font_points = f32(loaded.font.size)
+	settings_apply_revision(app, loaded, &diagnostics, err)
 	if created {
 		log.infof("created %s", app.settings_path)
 	}
@@ -575,25 +569,41 @@ load_settings :: proc(app: ^App) {
 			)
 		}
 	}
-	show_settings_diagnostics(app, &diagnostics, err)
 }
 
-reload_settings :: proc(app: ^App, announce := true) {
+@(private)
+settings_apply_revision :: proc(
+	app: ^App,
+	loaded: settings.Settings,
+	diagnostics: ^[dynamic]settings.Diagnostic,
+	read_error: os.Error = nil,
+) {
+	settings.destroy(&app.settings)
+	app.settings = loaded
+	detect_shell_profiles(app)
+	app.process_deadline = {}
+	for &entry in app.sessions {entry.process_padding = nil}
+	apply_bindings(app, diagnostics)
+	app.font_points = f32(loaded.font.size)
+	show_settings_diagnostics(app, diagnostics, read_error)
+}
+
+@(private)
+settings_prepare_reload :: proc(app: ^App) {
 	refresh_animations(app)
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		if i >= len(app.windows) {continue}
 		window := app.windows[i]
 		_ = gesture_cancel(app, window)
 	}
+}
+
+reload_settings :: proc(app: ^App, announce := true) {
+	settings_prepare_reload(app)
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
 	load_settings(app)
-	apply_fonts(app)
-	apply_theme(app)
-	for entry in app.sessions {
-		term.set_colors(entry.session, terminal_colors(app.settings.colors))
-		configure_session(app, entry.session)
-	}
+	settings_apply_running(app)
 	if announce {
 		if previous_shell != app.settings.shell.command ||
 		   previous_directory != app.settings.shell.directory {
@@ -601,6 +611,16 @@ reload_settings :: proc(app: ^App, announce := true) {
 		} else if app.settings_read_error == nil && len(app.settings_diagnostics) == 0 {
 			notify(app, .Info, "Settings reloaded.")
 		}
+	}
+}
+
+@(private)
+settings_apply_running :: proc(app: ^App) {
+	apply_fonts(app)
+	apply_theme(app)
+	for entry in app.sessions {
+		term.set_colors(entry.session, terminal_colors(app.settings.colors))
+		configure_session(app, entry.session)
 	}
 	for window in app.windows {
 		window_apply_settings(app, window)

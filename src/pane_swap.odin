@@ -134,11 +134,10 @@ pane_swap_opt_out :: proc(app: ^App) {
 		notify(app, .Error, "Could not save the shell-switch warning preference.")
 		return
 	}
-	if settings.save(app.settings_path, string(data), updated) != .None {
+	if settings_commit(app, string(data), updated) != .None {
 		notify(app, .Error, "Could not save the shell-switch warning preference.")
 		return
 	}
-	reload_settings(app, false)
 	notify(app, .Info, "Won't ask again. Turn it back on in Settings.")
 }
 

@@ -116,20 +116,9 @@ toggle_tab_orientation :: proc(app: ^App) {
 			notify(app, .Error, "Could not save the tab orientation.")
 			return
 		}
-		if settings.save(app.settings_path, string(data), updated) != .None {
+		if settings_commit(app, string(data), updated) != .None {
 			notify(app, .Error, "Could not save the tab orientation.")
 			return
-		}
-		reload_settings(app, false)
-		for window in app.windows {
-			if !window.editor.open {continue}
-			// The shortcut wrote the file outside the open editor; reload its source so the next
-			// inline save does not hit the conflict guard.
-			settings_reveal_page(
-				app,
-				&window.editor,
-				{search = .Preserve, reload = true},
-			)
 		}
 	} else {
 		app.settings.tabs.orientation = next == "horizontal" ? .Horizontal : .Vertical

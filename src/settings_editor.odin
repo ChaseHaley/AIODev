@@ -57,19 +57,32 @@ profile_command_exists :: proc(command: string) -> bool {
 // Fills the editor from the settings file; the settings tab shows it.
 @(private)
 settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
-	view, view_error := ui.editor_view_take(p)
+	data, err := os.read_entire_file(app.settings_path, context.temp_allocator)
+	if err != nil {
+		notify(app, .Error, "Could not read settings. Check the settings path and permissions.")
+		return false
+	}
+	return settings_load_source(app, p, string(data))
+}
+
+// Builds a replacement before releasing the old page, so a failed refresh keeps its draft.
+@(private)
+settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> bool {
+	view, view_error := ui.editor_view_take(editor)
 	defer ui.editor_view_destroy(&view)
 	if view_error != nil {
 		notify(app, .Error, "Could not allocate settings editor.")
 		return false
 	}
-	ui.editor_destroy(p)
-	data, err := os.read_entire_file(app.settings_path, context.allocator)
-	if err != nil {
-		notify(app, .Error, "Could not read settings. Check the settings path and permissions.")
+	replacement: ui.Editor
+	p := &replacement
+	defer ui.editor_destroy(&replacement)
+	owned_source, source_error := strings.clone(source)
+	if source_error != nil {
+		notify(app, .Error, "Could not allocate settings editor.")
 		return false
 	}
-	p.source = string(data)
+	p.source = owned_source
 	s, diagnostics, parse_error := settings.parse(p.source)
 	defer settings.diagnostics_destroy(&diagnostics)
 	if parse_error != nil {
@@ -373,6 +386,8 @@ settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 			true,
 		)
 	}
+	ui.editor_destroy(editor)
+	editor^, replacement = replacement, {}
 	return true
 }
 
@@ -562,7 +577,9 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	}
 	if row.key == "colors.follow_theme" {editor_follow_theme(app, w); return}
 	if outcome == .Reset {ui.field_set(&p.value, row.default_value)}
-	value := ui.field_string(&p.value)
+	key := strings.clone(row.key, context.temp_allocator)
+	kind := row.kind
+	value := strings.clone(ui.field_string(&p.value), context.temp_allocator)
 	alpha := false
 	if (row.kind == .Color || row.kind == .Optional_Color) && value != "" {
 		if c, ok, has_alpha := settings.parse_color(value); ok {
@@ -586,8 +603,8 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 			return
 		}
 	}
-	if result := settings.save(app.settings_path, p.source, updated); result != .None {
-		delete(updated)
+	defer delete(updated)
+	if result := settings_commit(app, p.source, updated, p); result != .None {
 		text := "Could not save settings. Check the settings path and permissions."
 		if result == .Conflict {
 			text = "File changed outside this editor. Close and reopen Settings to reload it."
@@ -595,18 +612,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		ui.editor_message(p, text, true)
 		return
 	}
-	delete(p.source)
-	p.source = updated
-	delete(row.value)
-	row.value = strings.clone(value)
-	ui.field_set(&p.value, value)
-	if row.kind == .Shortcut {p.focus, p.capturing = .Search, false}
-	reload_settings(app, false)
-	p.leader = app.leader
+	if kind == .Shortcut {p.focus, p.capturing = .Search, false}
 	text := "Saved and applied."
 	if alpha {text = "Saved and applied; the color's alpha is ignored."}
 	if warning != "" {text = fmt.tprintf("Saved. %s", warning)}
-	if row.key == "window.columns" || row.key == "window.rows" {
+	if key == "window.columns" || key == "window.rows" {
 		text = "Saved. Initial size applies to new sessions."
 	}
 	ui.editor_message(p, text, false)
@@ -658,7 +668,7 @@ editor_profile_write :: proc(
 		delete(updated)
 		return false
 	}
-	result := settings.save(app.settings_path, w.editor.source, updated)
+	result := settings_commit(app, w.editor.source, updated, &w.editor)
 	delete(updated)
 	if result != .None {
 		text := "Could not save the profile. Check the settings path and permissions."
@@ -668,11 +678,11 @@ editor_profile_write :: proc(
 		ui.editor_message(&w.editor, text, true)
 		return false
 	}
-	reload_settings(app, false)
+	w.editor.focus = .Search
 	settings_reveal_page(
 		app,
 		&w.editor,
-		{key = select_key, search = .Preserve, reload = true, message = message, focus = focus},
+		{key = select_key, search = .Preserve, message = message, focus = focus},
 	)
 	return true
 }
@@ -792,7 +802,7 @@ editor_profile_saved :: proc(
 	w: ^Window,
 	updated, key, message: string,
 ) -> bool {
-	result := settings.save(app.settings_path, w.editor.source, updated)
+	result := settings_commit(app, w.editor.source, updated, &w.editor)
 	if result != .None {
 		text := "Could not save the profile. Check the settings path and permissions."
 		if result == .Conflict {
@@ -801,11 +811,11 @@ editor_profile_saved :: proc(
 		ui.editor_message(&w.editor, text, true)
 		return false
 	}
-	reload_settings(app, false)
+	w.editor.focus = .Search
 	settings_reveal_page(
 		app,
 		&w.editor,
-		{key = key, search = .Preserve, reload = true, message = message},
+		{key = key, search = .Preserve, message = message},
 	)
 	return true
 }
@@ -1054,7 +1064,7 @@ editor_follow_theme :: proc(app: ^App, w: ^Window) {
 	updated, edit_error := settings.follow_theme_text(source)
 	if edit_error != nil {notify(app, .Error, "Could not prepare theme colors."); return}
 	defer delete(updated)
-	result := settings.save(app.settings_path, source, updated)
+	result := settings_commit(app, source, updated, w.editor.open ? &w.editor : nil)
 	if result != .None {
 		text := "Could not save theme colors. Check the settings path and permissions."
 		if result == .Conflict {
@@ -1063,15 +1073,14 @@ editor_follow_theme :: proc(app: ^App, w: ^Window) {
 		if w.editor.open {ui.editor_message(&w.editor, text, true)} else {notify(app, .Error, text)}
 		return
 	}
-	reload_settings(app, false)
 	if w.editor.open {
+		w.editor.focus = .Search
 		settings_reveal_page(
 			app,
 			&w.editor,
 			{
 				key = "colors.follow_theme",
 				search = .Preserve,
-				reload = true,
 				message = "Shell foreground and background now follow the theme.",
 			},
 		)
