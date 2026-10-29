@@ -85,6 +85,21 @@ profile.third.command = missing.exe
 }
 
 @(test)
+profile_table_facts_keep_detected_and_explicit_names_separate :: proc(t: ^testing.T) {
+	s, diagnostics, error := settings.parse("profile.alpha.name = Alpha\nprofile.alpha.command = cmd.exe\n")
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, error, nil)
+	testing.expect_value(t, settings.profile_detect(&s, {"one", " ALPHA ", "cmd.exe", "~"}), nil)
+	testing.expect_value(t, settings.profile_detect(&s, {"two", "alpha", "cmd.exe", "~"}), nil)
+	table, table_error := ui.profile_table_build(&s.profiles, always_exists)
+	defer ui.profile_table_destroy(&table)
+	testing.expect_value(t, table_error, nil)
+	for row in table.rows {if row.id == "alpha" {testing.expect_value(t, row.note, "")}}
+	for row in table.detected {testing.expect_value(t, row.note, "Another profile uses this name.")}
+}
+
+@(test)
 profile_columns_drop_the_directory_before_any_cell_overlaps :: proc(t: ^testing.T) {
 	directory_min := f32(ui.PROFILE_DIRECTORY_MIN_WIDTH)
 	actions_min := f32(ui.PROFILE_ACTIONS_MIN_WIDTH)

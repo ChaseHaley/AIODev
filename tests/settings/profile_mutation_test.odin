@@ -22,6 +22,35 @@ mutation_order :: proc(t: ^testing.T, s: ^settings.Settings, expected: []string)
 }
 
 @(test)
+profile_generated_names_remain_editable_after_repeated_add_and_duplicate :: proc(t: ^testing.T) {
+	source := strings.clone("profile.alpha.name = Alpha\nprofile.alpha.command = cmd.exe\n")
+	defer delete(source)
+	changes := [?]settings.Profile_Mutation {
+		{kind = .Add}, {kind = .Add}, {kind = .Add},
+		{kind = .Duplicate, id = "alpha"}, {kind = .Duplicate, id = "alpha"},
+		{kind = .Duplicate, id = "alpha"},
+	}
+	expected := [?]string{"New Profile", "New Profile 2", "New Profile 3", "Alpha copy", "Alpha copy 2", "Alpha copy 3"}
+	for change, index in changes {
+		s := mutation_parse(t, source)
+		defer settings.destroy(&s)
+		testing.expect_value(t, settings.profile_detect(&s, {"found", expected[index], "cmd.exe", "~"}), nil)
+		text, id, issue, error := settings.profile_mutate(source, &s.profiles, change)
+		defer delete(id)
+		defer delete(issue)
+		if !testing.expect_value(t, error, settings.Profile_Mutation_Error.None) {delete(text); return}
+		after := mutation_parse(t, text)
+		defer settings.destroy(&after)
+		profile := settings.profile_find(&after.profiles, id)
+		if !testing.expect(t, profile != nil) {delete(text); return}
+		testing.expect_value(t, profile.name, expected[index])
+		testing.expect(t, !settings.profile_value_facts(profile.name, &after.profiles, id).name_taken)
+		delete(source)
+		source = text
+	}
+}
+
+@(test)
 profile_mutation_add_owns_fields_id_and_eligible_order :: proc(t: ^testing.T) {
 	source :: "\xef\xbb\xbf# keep café\r\nfont.size = 14\r\nprofile.order = stale, default\r\n"
 	s := mutation_parse(t, source)

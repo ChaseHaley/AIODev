@@ -59,6 +59,12 @@ profile_mutate :: proc(
 			count = 4
 			if change.kind == .Duplicate {values.name = fmt.tprintf("%s copy", profile.name)}
 		}
+		if change.kind != .Enable {
+			base := values.name
+			for number := 2; profile_value_facts(values.name, profiles).name_taken; number += 1 {
+				values.name = fmt.tprintf("%s %d", base, number)
+			}
+		}
 		pairs := [5][2]string {
 			{"name", values.name}, {"command", values.command}, {"directory", values.directory},
 			{"hidden", "false"}, {"icon", values.icon},

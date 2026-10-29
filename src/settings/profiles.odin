@@ -3,7 +3,6 @@ package settings
 import "base:runtime"
 import "core:fmt"
 import "core:strings"
-import "core:unicode/utf8"
 
 PROFILE_PREFIX :: "profile."
 PROFILE_ORDER_KEY :: "profile.order"
@@ -166,7 +165,7 @@ profile_text_value :: proc(input: string) -> (text, issue: string) {
 		}
 		text = text[1:len(text) - 1]
 	}
-	if !utf8.valid_string(text) || strings.contains(text, "\x00") {
+	if !profile_value_facts(text).valid {
 		return "", "expected UTF-8 text without NUL bytes"
 	}
 	return text, ""
@@ -325,7 +324,8 @@ parse_profile_key :: proc(
 	if text_issue != "" {
 		return diagnostic_append(diagnostics, line, key, text_issue, .Invalid_Value)
 	}
-	if text == "" && field == "name" {
+	facts := profile_value_facts(text)
+	if facts.empty && field == "name" {
 		return diagnostic_append(
 			diagnostics,
 			line,
@@ -334,7 +334,7 @@ parse_profile_key :: proc(
 			.Invalid_Value,
 		)
 	}
-	if text == "" && field == "command" {
+	if facts.empty && field == "command" {
 		return diagnostic_append(
 			diagnostics,
 			line,
@@ -570,18 +570,6 @@ text_less :: proc(a, b: string) -> bool {
 profile_order_has :: proc(p: ^Profiles, id: string) -> bool {
 	for known in p.order {
 		if known == id {return true}
-	}
-	return false
-}
-
-// Whether another profile already shows `name`. Surrounding space and case are ignored, and the
-// profile named by `id` is skipped so re-saving an unchanged name is allowed.
-profile_name_taken :: proc(p: ^Profiles, id, name: string) -> bool {
-	target := strings.trim_space(name)
-	if target == "" {return false}
-	for &profile in p.items {
-		if profile.id == id {continue}
-		if strings.equal_fold(strings.trim_space(profile.name), target) {return true}
 	}
 	return false
 }
@@ -841,9 +829,10 @@ profile_edit_text :: proc(key, value: string) -> (serialized, issue: string) {
 		if value != "true" && value != "false" {return "", "Expected true or false."}
 		return value, ""
 	}
-	if field == "name" && value == "" {return "", "A profile needs a name."}
-	if field == "command" && value == "" {return "", "A profile needs a command line."}
-	if !utf8.valid_string(value) || strings.contains(value, "\x00") {
+	facts := profile_value_facts(value)
+	if field == "name" && facts.empty {return "", "A profile needs a name."}
+	if field == "command" && facts.empty {return "", "A profile needs a command line."}
+	if !facts.valid {
 		return "", "Expected UTF-8 text without NUL bytes."
 	}
 	builder, build_error := strings.builder_make(context.temp_allocator)

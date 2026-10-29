@@ -226,6 +226,69 @@ profile_table_rejects_empty_duplicate_and_missing_commands :: proc(t: ^testing.T
 }
 
 @(test)
+profile_table_and_inline_save_agree_on_detected_names :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "name-facts", PROFILE_FIXTURE_SETTINGS) {return}
+	testing.expect_value(t, settings.profile_detect(&f.state.settings, {"found", "  ALPHA  ", "cmd.exe", "~"}), nil)
+	e := profile_open(&f)
+	table, error := ui.profile_table_build(&f.state.settings.profiles)
+	defer ui.profile_table_destroy(&table)
+	testing.expect_value(t, error, nil)
+	for row in table.rows {if row.id == "alpha" {testing.expect_value(t, row.note, "")}}
+	for row in table.detected {if row.id == "found" {testing.expect_value(t, row.note, "")}}
+	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha")) {return}
+	profile_press(&f, {key = .Enter})
+	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.name")) {return}
+	ui.field_set(&e.value, "Alpha")
+	e.focus = .Control
+	app.editor_outcome(&f.state, f.state.windows[0], .Save)
+	testing.expect(t, !e.error)
+	testing.expect(t, profile_file_has(f.path, `profile.alpha.name = "Alpha"`))
+	testing.expect_value(t, profile_value(&f, "alpha", "name"), "Alpha")
+	before := profile_file_text(f.path)
+	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.name")) {return}
+	ui.field_set(&e.value, "  bETA  ")
+	e.focus = .Control
+	app.editor_outcome(&f.state, f.state.windows[0], .Save)
+	testing.expect_value(t, e.error_text, "Another profile uses this name.")
+	testing.expect_value(t, profile_file_text(f.path), before)
+	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.command")) {return}
+	ui.field_set(&e.value, " \t ")
+	e.focus = .Control
+	app.editor_outcome(&f.state, f.state.windows[0], .Save)
+	testing.expect_value(t, e.error_text, "A profile needs a command line.")
+	testing.expect_value(t, profile_file_text(f.path), before)
+}
+
+@(test)
+profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "generated-names", PROFILE_FIXTURE_SETTINGS) {return}
+	e := profile_open(&f)
+	for key, index in ([?]string{"profiles.add", "profiles.add", "profile.alpha.duplicate", "profile.alpha.duplicate"}) {
+		if !testing.expect(t, ui.editor_reveal(e, key)) {return}
+		app.editor_outcome(&f.state, f.state.windows[0], .Save)
+		if !testing.expect(t, !e.error) {return}
+		id := fmt.tprintf("profile-%d", index + 1)
+		profile := settings.profile_find(&f.state.settings.profiles, id)
+		if !testing.expect(t, profile != nil) {return}
+		name := strings.clone(profile.name, context.temp_allocator)
+		table, error := ui.profile_table_build(&f.state.settings.profiles)
+		defer ui.profile_table_destroy(&table)
+		testing.expect_value(t, error, nil)
+		for row in table.rows {if row.id == id {testing.expect_value(t, row.note, "")}}
+		if !testing.expect(t, ui.editor_reveal(e, fmt.tprintf("profile.%s.name", id))) {return}
+		ui.field_set(&e.value, name)
+		e.focus = .Control
+		app.editor_outcome(&f.state, f.state.windows[0], .Save)
+		testing.expect(t, !e.error)
+		testing.expect_value(t, profile_value(&f, id, "name"), name)
+	}
+}
+
+@(test)
 profile_table_enables_a_detected_shell_and_duplicates_and_removes :: proc(t: ^testing.T) {
 	f: Profile_Fixture
 	defer profile_fixture_destroy(t, &f)

@@ -61,17 +61,12 @@ profile_row_note :: proc(
 	profiles: ^settings.Profiles,
 	profile: ^settings.Profile,
 ) -> string {
-	if strings.trim_space(profile.name) == "" {return "A profile needs a name."}
-	if strings.trim_space(profile.command) == "" {return "A profile needs a command line."}
-	// Enabled profiles are compared with each other, and detected candidates with each other: a
-	// detected shell that merely shares a default name is not yet a duplicate in the table.
-	target := strings.trim_space(profile.name)
-	for &other in profiles.items {
-		if other.id == profile.id || other.detected != profile.detected {continue}
-		if strings.equal_fold(strings.trim_space(other.name), target) {
-			return "Another profile uses this name."
-		}
-	}
+	name := settings.profile_value_facts(profile.name, profiles, profile.id)
+	command := settings.profile_value_facts(profile.command)
+	if !name.valid || !command.valid {return "Expected UTF-8 text without NUL bytes."}
+	if name.empty {return "A profile needs a name."}
+	if command.empty {return "A profile needs a command line."}
+	if name.name_taken {return "Another profile uses this name."}
 	return ""
 }
 

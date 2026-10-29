@@ -676,16 +676,20 @@ editor_profile_field :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row) {
 	key := strings.clone(row.key, context.temp_allocator)
 	profile := strings.clone(row.profile, context.temp_allocator)
 	value := strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
+	facts := settings.profile_value_facts(value)
 	problem: string
 	switch {
+	case !facts.valid:
+		problem = "Expected UTF-8 text without NUL bytes."
 	case strings.has_suffix(key, ".name"):
-		if strings.trim_space(value) == "" {
+		facts = settings.profile_value_facts(value, &app.settings.profiles, profile)
+		if facts.empty {
 			problem = "A profile needs a name."
-		} else if settings.profile_name_taken(&app.settings.profiles, profile, value) {
+		} else if facts.name_taken {
 			problem = "Another profile uses this name."
 		}
 	case strings.has_suffix(key, ".command"):
-		if strings.trim_space(value) == "" {
+		if facts.empty {
 			problem = "A profile needs a command line."
 		} else if !profile_command_exists(value) {
 			problem = fmt.tprintf(

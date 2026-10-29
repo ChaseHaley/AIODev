@@ -315,11 +315,42 @@ profile.cmd.name = Command Prompt
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect(t, settings.profile_name_taken(&s.profiles, "cmd", "powerShell"))
-	testing.expect(t, settings.profile_name_taken(&s.profiles, "cmd", "  PowerShell  "))
-	testing.expect(t, !settings.profile_name_taken(&s.profiles, "pwsh", "POWERSHELL"))
-	testing.expect(t, !settings.profile_name_taken(&s.profiles, "cmd", "pwsh"))
-	testing.expect(t, !settings.profile_name_taken(&s.profiles, "cmd", ""))
+	testing.expect(t, settings.profile_value_facts("powerShell", &s.profiles, "cmd").name_taken)
+	testing.expect(t, settings.profile_value_facts("  PowerShell  ", &s.profiles, "cmd").name_taken)
+	testing.expect(t, !settings.profile_value_facts("POWERSHELL", &s.profiles, "pwsh").name_taken)
+	testing.expect(t, !settings.profile_value_facts("pwsh", &s.profiles, "cmd").name_taken)
+	testing.expect(t, !settings.profile_value_facts("", &s.profiles, "cmd").name_taken)
+}
+
+@(test)
+profile_text_facts_match_load_and_edit_validation :: proc(t: ^testing.T) {
+	for value in ([?]string{"", " \t ", "\xe2\x80\x83"}) {
+		facts := settings.profile_value_facts(value)
+		testing.expect(t, facts.valid && facts.empty)
+		for key in ([?]string{"profile.alpha.name", "profile.alpha.command"}) {
+			_, issue := settings.profile_edit_text(key, value)
+			testing.expect(t, issue != "")
+		}
+	}
+	for value in ([?]string{"bad\x00text", "\xff"}) {
+		testing.expect(t, !settings.profile_value_facts(value).valid)
+		_, issue := settings.profile_edit_text("profile.alpha.directory", value)
+		testing.expect_value(t, issue, "Expected UTF-8 text without NUL bytes.")
+	}
+	s, diagnostics, error := settings.parse("profile.alpha.name = \" \t \"\n" +
+		"profile.alpha.command = \"\xe2\x80\x83\"\nprofile.beta.command = cmd.exe\n")
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, error, nil)
+	testing.expect_value(t, len(diagnostics), 2)
+	alpha := settings.profile_find(&s.profiles, "alpha")
+	if !testing.expect(t, alpha != nil) {return}
+	testing.expect_value(t, alpha.name, "alpha")
+	testing.expect_value(t, alpha.command, "")
+	testing.expect(t, settings.profile_find(&s.profiles, "beta") != nil)
+	serialized, issue := settings.profile_edit_text("profile.alpha.name", "  café  ")
+	testing.expect_value(t, issue, "")
+	testing.expect_value(t, serialized, "\"  café  \"")
 }
 
 @(test)
