@@ -549,7 +549,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	row := ui.editor_row(p)
 	if row == nil {return}
 	if row.key == "profiles.add" {
-		editor_add_profile(app, w)
+		editor_profile_mutate(app, w, {kind = .Add})
 		return
 	}
 	if row.profile != "" && row.kind == .Action {
@@ -558,11 +558,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 			return
 		}
 		if strings.has_suffix(row.key, ".remove.confirm") {
-			editor_remove_profile(app, w, row.profile)
+			editor_profile_mutate(app, w, {kind = .Remove, id = row.profile})
 			return
 		}
 		if strings.has_suffix(row.key, ".duplicate") {
-			editor_duplicate_profile(app, w, row.profile)
+			editor_profile_mutate(app, w, {kind = .Duplicate, id = row.profile})
 			return
 		}
 		if strings.has_suffix(row.key, ".remove") {
@@ -627,25 +627,6 @@ editor_profile_fail :: proc(w: ^Window, profile, key, text: string) {
 	ui.editor_error_set(&w.editor, profile, key, text)
 	ui.editor_message(&w.editor, text, true)
 	w.dirty = true
-}
-
-// Applies one settings edit to the page's source string, keeping the replacement text. The
-// returned problem is temporary; empty means the edit is ready to save.
-@(private)
-editor_profile_apply :: proc(text: ^string, key, value: string) -> (problem: string) {
-	updated, message, err := settings.edit_text(text^, key, value)
-	defer delete(message)
-	if err != nil {
-		delete(updated)
-		return "Could not allocate the profile change."
-	}
-	if message != "" {
-		delete(updated)
-		return strings.clone(message, context.temp_allocator)
-	}
-	delete(text^)
-	text^ = updated
-	return ""
 }
 
 // Writes one settings key, saves the file and reloads the page on the named row. Refusing leaves
@@ -726,58 +707,6 @@ editor_profile_field :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row) {
 	_ = editor_profile_write(app, w, key, value, key, message, focus)
 }
 
-// The order text with `id` appended when missing. It names the user profiles and the default in
-// their current effective order. Detected profiles stay unlisted unless they were already listed,
-// so enabling one adds only that ID rather than every shell found on the machine.
-@(private)
-editor_profile_order_with :: proc(s: ^settings.Settings, id: string) -> (string, bool) {
-	ids := make([]int, len(s.profiles.items), context.temp_allocator)
-	count := settings.profiles_in_order(&s.profiles, ids)
-	ordered := make([]string, count + 1, context.temp_allocator)
-	listed, written := false, 0
-	for index in ids[:count] {
-		profile := &s.profiles.items[index]
-		if profile.detected && profile.id != id && !settings.profile_order_has(&s.profiles, profile.id) {
-			continue
-		}
-		ordered[written] = profile.id
-		if ordered[written] == id {listed = true}
-		written += 1
-	}
-	if !listed {
-		ordered[written] = id
-		written += 1
-	}
-	text, err := settings.profile_order_text(ordered[:written], nil, context.temp_allocator)
-	return text, err == nil
-}
-
-// As above, but inserts a new ID directly after its source.
-@(private)
-editor_profile_order_after :: proc(s: ^settings.Settings, after, id: string) -> (string, bool) {
-	ids := make([]int, len(s.profiles.items), context.temp_allocator)
-	count := settings.profiles_in_order(&s.profiles, ids)
-	ordered := make([]string, count + 1, context.temp_allocator)
-	written, inserted := 0, false
-	for index in ids[:count] {
-		profile := &s.profiles.items[index]
-		if profile.detected && !settings.profile_order_has(&s.profiles, profile.id) {continue}
-		ordered[written] = profile.id
-		written += 1
-		if ordered[written - 1] == after {
-			ordered[written] = id
-			written += 1
-			inserted = true
-		}
-	}
-	if !inserted {
-		ordered[written] = id
-		written += 1
-	}
-	text, err := settings.profile_order_text(ordered[:written], nil, context.temp_allocator)
-	return text, err == nil
-}
-
 @(private)
 editor_profile_set_expanded :: proc(p: ^ui.Editor, id: string) {
 	if p.remove_confirm != "" && p.remove_confirm != id {
@@ -786,14 +715,6 @@ editor_profile_set_expanded :: proc(p: ^ui.Editor, id: string) {
 	}
 	delete(p.expanded)
 	p.expanded = strings.clone(id)
-}
-
-@(private)
-editor_profile_next_id :: proc(app: ^App) -> string {
-	for number := 1; ; number += 1 {
-		candidate := fmt.tprintf("profile-%d", number)
-		if settings.profile_find(&app.settings.profiles, candidate) == nil {return candidate}
-	}
 }
 
 @(private)
@@ -821,193 +742,44 @@ editor_profile_saved :: proc(
 }
 
 @(private)
-editor_add_profile :: proc(app: ^App, w: ^Window) {
-	if len(app.settings.profiles.items) >= settings.PROFILE_LIMIT {
-		ui.editor_message(&w.editor, "Profile limit reached. Remove one before adding another.", true)
-		return
-	}
-	id := editor_profile_next_id(app)
-	text, clone_error := strings.clone(w.editor.source)
-	if clone_error != nil {
-		ui.editor_message(&w.editor, "Could not add the profile.", true)
-		return
-	}
-	defer delete(text)
-	for pair in ([?][2]string{
-		{"name", "New Profile"},
-		{"command", settings.DEFAULT_PROFILE_COMMAND},
-		{"directory", settings.DEFAULT_PROFILE_DIRECTORY},
-	}) {
-		key := fmt.tprintf("profile.%s.%s", id, pair[0])
-		if problem := editor_profile_apply(&text, key, pair[1]); problem != "" {
-			ui.editor_message(&w.editor, problem, true)
-			return
+editor_profile_mutate :: proc(app: ^App, w: ^Window, change: settings.Profile_Mutation) {
+	updated, id, issue, error := settings.profile_mutate(w.editor.source, &app.settings.profiles, change)
+	defer delete(updated)
+	defer delete(id)
+	defer delete(issue)
+	if error == .Unavailable {return}
+	if error != .None {
+		message := "Could not prepare the profile change."
+		if error == .Edit {message = issue}
+		if error == .Limit {
+			message = "Profile limit reached. Remove one before duplicating."
+			if change.kind == .Add {
+				message = "Profile limit reached. Remove one before adding another."
+			}
 		}
-	}
-	order, ordered := editor_profile_order_with(&app.settings, id)
-	if !ordered {
-		ui.editor_message(&w.editor, "Could not add the profile.", true)
+		ui.editor_message(&w.editor, message, true)
 		return
 	}
-	if problem := editor_profile_apply(&text, settings.PROFILE_ORDER_KEY, order); problem != "" {
-		ui.editor_message(&w.editor, problem, true)
-		return
+	key := fmt.tprintf("profile.%s", id)
+	message: string
+	switch change.kind {
+	case .Add:
+		message = "Profile added. Change its command line or name."
+	case .Duplicate:
+		message = "Profile duplicated. Change its name or command line."
+	case .Enable:
+		message = "Detected profile enabled. It now has explicit profile lines in the settings file."
+	case .Remove:
+		message, key = "Profile removed.", "profiles.add"
+	case .Move:
+		message = "Profile order saved. Menus and Ctrl+Shift+1 to 9 follow it."
 	}
-	editor_profile_set_expanded(&w.editor, id)
-	_ = editor_profile_saved(
-		app,
-		w,
-		text,
-		fmt.tprintf("profile.%s", id),
-		"Profile added. Change its command line or name.",
-	)
-}
-
-@(private)
-editor_duplicate_profile :: proc(app: ^App, w: ^Window, id: string) {
-	if len(app.settings.profiles.items) >= settings.PROFILE_LIMIT {
-		ui.editor_message(&w.editor, "Profile limit reached. Remove one before duplicating.", true)
-		return
+	if change.kind == .Add || change.kind == .Duplicate || change.kind == .Enable {
+		editor_profile_set_expanded(&w.editor, id)
+	} else if change.kind == .Remove && w.editor.expanded == id {
+		editor_profile_set_expanded(&w.editor, "")
 	}
-	source := settings.profile_find(&app.settings.profiles, id)
-	if source == nil {return}
-	text, clone_error := strings.clone(w.editor.source)
-	if clone_error != nil {
-		ui.editor_message(&w.editor, "Could not duplicate the profile.", true)
-		return
-	}
-	defer delete(text)
-	new_id := editor_profile_next_id(app)
-	pairs := [5][2]string {
-		{"name", fmt.tprintf("%s copy", source.name)},
-		{"command", source.command},
-		{"directory", source.directory},
-		{"hidden", "false"},
-		{"", ""},
-	}
-	count := 4
-	if source.icon != "" {
-		pairs[4] = {"icon", source.icon}
-		count = 5
-	}
-	for pair in pairs[:count] {
-		key := fmt.tprintf("profile.%s.%s", new_id, pair[0])
-		if problem := editor_profile_apply(&text, key, pair[1]); problem != "" {
-			ui.editor_message(&w.editor, problem, true)
-			return
-		}
-	}
-	order, ordered := editor_profile_order_after(&app.settings, id, new_id)
-	if !ordered {
-		ui.editor_message(&w.editor, "Could not duplicate the profile.", true)
-		return
-	}
-	if problem := editor_profile_apply(&text, settings.PROFILE_ORDER_KEY, order); problem != "" {
-		ui.editor_message(&w.editor, problem, true)
-		return
-	}
-	editor_profile_set_expanded(&w.editor, new_id)
-	_ = editor_profile_saved(
-		app,
-		w,
-		text,
-		fmt.tprintf("profile.%s", new_id),
-		"Profile duplicated. Change its name or command line.",
-	)
-}
-
-@(private)
-editor_enable_profile :: proc(app: ^App, w: ^Window, id: string) {
-	profile := settings.profile_find(&app.settings.profiles, id)
-	if profile == nil {return}
-	text, clone_error := strings.clone(w.editor.source)
-	if clone_error != nil {
-		ui.editor_message(&w.editor, "Could not enable the detected profile.", true)
-		return
-	}
-	defer delete(text)
-	for pair in ([?][2]string{
-		{"name", profile.name},
-		{"command", profile.command},
-		{"directory", profile.directory},
-		{"hidden", "false"},
-	}) {
-		key := fmt.tprintf("profile.%s.%s", id, pair[0])
-		if problem := editor_profile_apply(&text, key, pair[1]); problem != "" {
-			ui.editor_message(&w.editor, problem, true)
-			return
-		}
-	}
-	order, ordered := editor_profile_order_with(&app.settings, id)
-	if !ordered {
-		ui.editor_message(&w.editor, "Could not enable the detected profile.", true)
-		return
-	}
-	if problem := editor_profile_apply(&text, settings.PROFILE_ORDER_KEY, order); problem != "" {
-		ui.editor_message(&w.editor, problem, true)
-		return
-	}
-	editor_profile_set_expanded(&w.editor, id)
-	_ = editor_profile_saved(
-		app,
-		w,
-		text,
-		fmt.tprintf("profile.%s", id),
-		"Detected profile enabled. It now has explicit profile lines in the settings file.",
-	)
-}
-
-@(private)
-editor_order_without :: proc(s: ^settings.Settings, remove: string) -> (string, bool) {
-	ids := make([]int, len(s.profiles.items), context.temp_allocator)
-	count := settings.profiles_in_order(&s.profiles, ids)
-	ordered := make([]string, count, context.temp_allocator)
-	written := 0
-	for index in ids[:count] {
-		profile := &s.profiles.items[index]
-		if profile.id == remove {continue}
-		if profile.detected && !settings.profile_order_has(&s.profiles, profile.id) {continue}
-		ordered[written] = profile.id
-		written += 1
-	}
-	text, err := settings.profile_order_text(ordered[:written], nil, context.temp_allocator)
-	return text, err == nil
-}
-
-@(private)
-editor_remove_profile :: proc(app: ^App, w: ^Window, id: string) {
-	if id == settings.PROFILE_DEFAULT_ID {return}
-	profile := settings.profile_find(&app.settings.profiles, id)
-	if profile == nil {return}
-	updated, remove_error := settings.remove_profile_text(w.editor.source, id)
-	if remove_error != nil {
-		ui.editor_message(&w.editor, "Could not remove the profile.", true)
-		return
-	}
-	final := updated
-	defer delete(final)
-	if app.settings.profiles.default_id == id {
-		if problem := editor_profile_apply(
-			&final,
-			"shell.default_profile",
-			settings.PROFILE_DEFAULT_ID,
-		); problem != "" {
-			ui.editor_message(&w.editor, problem, true)
-			return
-		}
-	}
-	if order, ordered := editor_order_without(&app.settings, id); ordered {
-		edited, message, edit_error := settings.edit_text(final, settings.PROFILE_ORDER_KEY, order)
-		delete(message)
-		if edit_error == nil && edited != "" {
-			delete(final)
-			final = edited
-		} else {
-			delete(edited)
-		}
-	}
-	if w.editor.expanded == id {editor_profile_set_expanded(&w.editor, "")}
-	_ = editor_profile_saved(app, w, final, "profiles.add", "Profile removed.")
+	_ = editor_profile_saved(app, w, updated, key, message)
 }
 
 @(private)
@@ -1016,6 +788,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window) {
 	action := p.action
 	id := strings.clone(p.action_id, context.temp_allocator)
 	value := strings.clone(p.action_value, context.temp_allocator)
+	slot := p.action_slot
 	ui.editor_action_clear(p)
 	select_key := fmt.tprintf("profile.%s", id)
 	switch action {
@@ -1040,20 +813,13 @@ editor_profile_action :: proc(app: ^App, w: ^Window) {
 			hidden ? "Profile hidden from menus." : "Profile shown in menus.",
 		)
 	case .Order:
-		_ = editor_profile_write(
-			app,
-			w,
-			settings.PROFILE_ORDER_KEY,
-			value,
-			select_key,
-			"Profile order saved. Menus and Ctrl+Shift+1 to 9 follow it.",
-		)
+		editor_profile_mutate(app, w, {kind = .Move, id = id, slot = slot})
 	case .Enable:
-		editor_enable_profile(app, w, id)
+		editor_profile_mutate(app, w, {kind = .Enable, id = id})
 	case .Duplicate:
-		editor_duplicate_profile(app, w, id)
+		editor_profile_mutate(app, w, {kind = .Duplicate, id = id})
 	case .Remove:
-		editor_remove_profile(app, w, id)
+		editor_profile_mutate(app, w, {kind = .Remove, id = id})
 	}
 }
 

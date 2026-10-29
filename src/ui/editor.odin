@@ -99,7 +99,7 @@ Profile_Control :: enum {
 }
 
 // A profile write the page owner must perform. Expansion, collapse and section toggles stay inside
-// the editor; these outcomes name a settings key the owner writes.
+// the editor; these outcomes describe a mutation for the page owner.
 Profile_Action :: enum {
 	None,
 	Default,
@@ -140,6 +140,7 @@ Editor :: struct {
 	detected_open:                                                     bool,
 	profile_control:                                                   Profile_Control,
 	action:                                                            Profile_Action,
+	action_slot:                                                       int,
 	action_id, action_value:                                           string,
 	drag_id:                                                           string,
 	drag_from, drag_target:                                            int,
@@ -285,6 +286,7 @@ editor_action_clear :: proc(p: ^Editor) {
 	delete(p.action_id)
 	delete(p.action_value)
 	p.action = .None
+	p.action_slot = 0
 	p.action_id, p.action_value = "", ""
 }
 
@@ -1731,7 +1733,7 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 }
 
 // Ends a pointer drag; a slider drag saves the value it settled on and a color drag previews until
-// the picker closes or Enter saves. Dropping a profile row produces the profile.order rewrite.
+// the picker closes or Enter saves. Dropping a profile row names its ID and insertion slot.
 editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	drag := p.drag
 	p.drag = .None
@@ -1742,33 +1744,8 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 			p.drag_id = ""
 		}
 		if p.drag_target == p.drag_from {return .Changed}
-		ids: [settings.PROFILE_LIMIT]string
-		others: [settings.PROFILE_LIMIT]string
-		moved: [settings.PROFILE_LIMIT]string
-		table_count, other_count := 0, 0
-		for row in p.rows {
-			if row.kind == .Profile {
-				if table_count < len(ids) {ids[table_count] = row.profile}
-				table_count += 1
-			} else if row.kind == .Detected && .Listed in row.flags {
-				if other_count < len(others) {others[other_count] = row.profile}
-				other_count += 1
-			}
-		}
-		table_count = min(table_count, len(ids))
-		other_count = min(other_count, len(others))
-		order, order_error := settings.profile_order_text(
-			settings.profile_move(
-				ids[:table_count],
-				p.drag_from,
-				p.drag_target,
-				moved[:table_count],
-			),
-			others[:other_count],
-			context.temp_allocator,
-		)
-		if order_error != nil {return .Changed}
-		editor_action_set(p, .Order, p.drag_id, order)
+		editor_action_set(p, .Order, p.drag_id, "")
+		p.action_slot = p.drag_target
 		return .Profile_Action
 	}
 	row := editor_row(p)

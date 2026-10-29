@@ -332,7 +332,7 @@ editor_profile_default_row_has_no_remove_action :: proc(t: ^testing.T) {
 }
 
 @(test)
-editor_profile_drag_rewrites_the_order_text :: proc(t: ^testing.T) {
+editor_profile_drag_requests_an_insertion_slot :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	profile_editor_fixture(t, &p)
@@ -349,7 +349,8 @@ editor_profile_drag_rewrites_the_order_text :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Profile_Action)
 	testing.expect_value(t, p.action, ui.Profile_Action.Order)
 	testing.expect_value(t, p.action_id, "alpha")
-	testing.expect_value(t, p.action_value, "beta, alpha, gamma")
+	testing.expect_value(t, p.action_slot, 2)
+	testing.expect_value(t, p.action_value, "")
 }
 
 @(test)
