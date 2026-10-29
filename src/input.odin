@@ -182,18 +182,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		_ = gesture_cancel(app, w)
 		return
 	}
-	if w.pending_close.confirm.open {
-		pane_header_cancel(w)
-		if e.pressed {w.suppressed_key = e}
-		pending_close_outcome(app, w, ui.confirm_key(&w.pending_close.confirm, e))
-		return
-	}
-	if w.pending_swap.confirm.open {
-		pane_header_cancel(w)
-		if e.pressed {w.suppressed_key = e}
-		pane_swap_outcome(app, w, ui.confirm_key(&w.pending_swap.confirm, e))
-		return
-	}
+	if confirmation_key(app, w, e) {return}
 	if e.pressed && e.key == .Escape && rail_overlay(w) {
 		w.suppressed_key = e
 		rail_overlay_dismiss(app, w)
@@ -331,8 +320,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if w.tab_menu.open {return}
 	if w.profile_menu.open {return}
 	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
-	if w.pending_close.confirm.open {return}
-	if w.pending_swap.confirm.open {return}
+	if confirmation_current(w) != nil {return}
 	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
 		return
@@ -349,19 +337,6 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
 		term.send_text(entry.session, text)
 		reset_blink(w)
-	}
-}
-
-@(private)
-pending_close_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Confirm_Outcome) {
-	switch outcome {
-	case .None:
-	case .Changed:
-		w.dirty = true
-	case .Cancel:
-		pending_close_finish(app, w, false)
-	case .Accept:
-		pending_close_finish(app, w, true)
 	}
 }
 
@@ -436,8 +411,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	w.wheel_remainder -= f32(rows)
-	if w.pending_close.confirm.open {return}
-	if w.pending_swap.confirm.open {return}
+	if confirmation_current(w) != nil {return}
 	if palette_active(app, w) {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return

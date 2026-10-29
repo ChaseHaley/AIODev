@@ -264,8 +264,7 @@ window_free :: proc(w: ^Window) {
 	delete(w.rename.bytes)
 	workspace_picker_destroy(w)
 	delete(w.close_restore)
-	pending_close_clear(&w.pending_close)
-	pane_swap_clear(&w.pending_swap)
+	confirmation_clear(w)
 	render.draw_list_destroy(&w.list)
 	free(w)
 }
@@ -657,53 +656,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		)
 		if result != .Ok { return frame, result }
 	}
-	if pc := &w.pending_close; ui.presence_visible(pc.confirm.presence) {
-		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
-		content := pending_close_text(app, pc, w.workspace)
-		result := ui.confirm_draw(
-			&pc.confirm,
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			size.x,
-			size.y,
-			w.scale,
-			content.title,
-			content.body,
-			content.label,
-			content.note,
-			"",
-			w.pointer,
-		)
-		opacity, rise := ui.presence_fade(pc.confirm.presence, 4 * w.scale)
-		ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
-		if result != .Ok {return frame, result}
-	}
 	if w.rename_open {
 		if result := rename_draw(app, w); result != .Ok {return frame, result}
 	}
-	if swap := &w.pending_swap; ui.presence_visible(swap.confirm.presence) {
-		layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
-		title, body, note, label := pane_swap_text(swap)
-		result := ui.confirm_draw(
-			&swap.confirm,
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			size.x,
-			size.y,
-			w.scale,
-			title,
-			body,
-			label,
-			note,
-			"Don't ask again",
-			w.pointer,
-		)
-		opacity, rise := ui.presence_fade(swap.confirm.presence, 4 * w.scale)
-		ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
-		if result != .Ok {return frame, result}
-	}
+	if result := confirmation_draw(app, w); result != .Ok {return frame, result}
 	if w.tab_menu.open {
 		if result := tab_menu_draw(app, w); result != .Ok {return frame, result}
 	}

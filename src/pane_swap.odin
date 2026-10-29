@@ -91,18 +91,6 @@ pane_swap_text :: proc(swap: ^Pane_Swap) -> (title, body, note, label: string) {
 	return
 }
 
-pane_swap_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Confirm_Outcome) {
-	switch outcome {
-	case .None:
-	case .Changed:
-		w.dirty = true
-	case .Cancel:
-		pane_swap_finish(app, w, false)
-	case .Accept:
-		pane_swap_finish(app, w, true)
-	}
-}
-
 pane_swap_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	swap := &w.pending_swap
 	if !swap.confirm.open {return}

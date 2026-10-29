@@ -21,6 +21,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	}
 	w.gesture.buttons, w.gesture.reported, w.header_buttons = {}, {}, {}
 	ui.armed_cancel(&w.find.armed)
+	confirmation_release(w)
 	w.find.hover = .None
 	pane_header_cancel(w)
 	w.tab_hover, w.tab_pressed = -1, false
@@ -81,22 +82,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		if ok {platform.window_caption_action(&app.platform, w.id, fired)}
 		return true
 	}
-	if w.pending_swap.confirm.open {
-		l := ui.confirm_layout(
-			f32(w.width),
-			f32(w.height),
-			w.scale,
-			false,
-			w.pending_swap.confirm.show_option,
-		)
-		pane_swap_outcome(app, w, ui.confirm_mouse(&w.pending_swap.confirm, l, e.button, false, x, y))
-		return true
-	}
-	if w.pending_close.confirm.open {
-		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended)
-		pending_close_outcome(app, w, ui.confirm_mouse(&w.pending_close.confirm, l, e.button, false, x, y))
-		return true
-	}
+	if confirmation_button(app, w, e) {return true}
 	w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
 	if e.button in w.header_buttons {
 		if palette_active(app, w) {pane_header_cancel(w)}
@@ -181,37 +167,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		w.dirty = true
 		return
 	}
-	if w.pending_swap.confirm.open {
-		l := ui.confirm_layout(
-			f32(w.width),
-			f32(w.height),
-			w.scale,
-			false,
-			w.pending_swap.confirm.show_option,
-		)
-		pane_swap_outcome(
-			app,
-			w,
-			ui.confirm_mouse(
-				&w.pending_swap.confirm,
-				l,
-				e.button,
-				e.pressed,
-				f32(e.x),
-				f32(e.y),
-			),
-		)
-		return
-	}
-	if w.pending_close.confirm.open {
-		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended)
-		pending_close_outcome(
-			app,
-			w,
-			ui.confirm_mouse(&w.pending_close.confirm, l, e.button, e.pressed, f32(e.x), f32(e.y)),
-		)
-		return
-	}
+	if confirmation_button(app, w, e) {return}
 	w.dirty = true
 
 	if palette_active(app, w) {
@@ -351,32 +307,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
 	if caption != w.caption_hover {w.caption_hover = caption; w.dirty = true}
-	if w.pending_swap.confirm.open {
-		link_hover_clear(w)
-		l := ui.confirm_layout(
-			f32(w.width),
-			f32(w.height),
-			w.scale,
-			false,
-			w.pending_swap.confirm.show_option,
-		)
-		if ui.confirm_hover(&w.pending_swap.confirm, l, x, y) {w.dirty = true}
-		pointer_set(app, w, .Arrow)
-		return
-	}
-	if w.pending_close.confirm.open {
-		link_hover_clear(w)
-		if ui.confirm_hover(
-			&w.pending_close.confirm,
-			ui.confirm_layout(f32(w.width), f32(w.height), w.scale, w.pending_close.confirm.extended),
-			x,
-			y,
-		) {
-			w.dirty = true
-		}
-		pointer_set(app, w, .Arrow)
-		return
-	}
+	if confirmation_hover(app, w, x, y) {return}
 	toggle_hover := tab_orientation_button_hit(w, x, y)
 	if toggle_hover != w.tab_orientation_button_hovered {
 		w.tab_orientation_button_hovered, w.dirty = toggle_hover, true

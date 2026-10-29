@@ -16,8 +16,7 @@ motion_active :: proc(app: ^App) -> bool {
 		}
 		if ui.motion_active(w.rail_slide) ||
 		   ui.motion_active(w.tab_underline) ||
-		   ui.presence_active(w.pending_close.confirm.presence) { return true }
-		if ui.control_active(w.pending_close.confirm.hover_motion) { return true }
+		   confirmation_active(w) { return true }
 		if ui.control_active(w.workspace_motion) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
@@ -106,12 +105,8 @@ update_motion :: proc(app: ^App) {
 				}
 			}
 		}
-		c := &w.pending_close.confirm
-		confirm_changed, _ := ui.presence_advance(&c.presence, app.animations, now)
-		if ui.control_update(&c.hover_motion, c.hover != .None, false, app.animations, now) {
-			confirm_changed = true
-		}
-		if rail_changed || tabs_changed || controls_changed || confirm_changed {w.dirty = true}
+		confirmation_advance(app, w, now)
+		if rail_changed || tabs_changed || controls_changed {w.dirty = true}
 	}
 }
 
