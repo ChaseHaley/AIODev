@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
@@ -83,6 +84,25 @@ window_tab_close_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) 
 	   y >= r.y &&
 	   y < r.y + r.height {return index}
 	return -1
+}
+
+strip_tab_interaction_hit :: proc(
+	app: ^App,
+	w: ^Window,
+	x, y: f32,
+	button: input.Mouse_Button,
+) -> Tab_Interaction_Hit {
+	bar := window_tab_bar(app, w)
+	if y >= bar.height {return {}}
+	chevron := tab_chevron_rect(app, w)
+	if button == .Left && x >= chevron.x && x < chevron.x + chevron.width {
+		return {kind = .Profiles, menu_anchor = {x, chevron.y + chevron.height}}
+	}
+	index := window_tab_hit(app, w, bar, x, y)
+	if index == bar.count {return {kind = .New_Tab, menu_anchor = {x, bar.height}}}
+	if index < 0 {return {kind = .Empty}}
+	kind: Tab_Interaction_Kind = window_tab_close_hit(app, w, bar, x, y) >= 0 ? .Close : .Tab
+	return {kind = kind, index = index}
 }
 
 // The rightmost point the title chrome claims before the native caption buttons start.

@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
@@ -190,17 +191,6 @@ rail_overlay_dismiss :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
 }
 
-@(require_results)
-rail_tab_close_hit :: proc(w: ^Window, x, y: f32) -> int {
-	layout, ok := rail_current_layout(w)
-	if !ok {return -1}
-	row := ui.rail_row_hit(layout, x, y)
-	if row < 0 || w.rail_rows[row].workspace != w.workspace {
-		return -1
-	}
-	return ui.rail_close_hit(layout, x, y, w.scale) >= 0 ? w.rail_rows[row].tab : -1
-}
-
 rail_row_rect_for_tab :: proc(w: ^Window, tab: int) -> render.Rect {
 	layout, ok := rail_current_layout(w)
 	if !ok {return {}}
@@ -208,9 +198,28 @@ rail_row_rect_for_tab :: proc(w: ^Window, tab: int) -> render.Rect {
 	return ui.rail_row_rect(layout, index)
 }
 
-rail_new_tab :: proc(app: ^App, w: ^Window) {
-	tab_new(app, w)
-	rail_overlay_dismiss(app, w)
+rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Button) -> Tab_Interaction_Hit {
+	area := rail_area(w)
+	if !rail_visible(w) || x < area.x || x >= area.x + area.width ||
+	   y < area.y || y >= area.y + area.height {return {}}
+	layout, ok := rail_current_layout(w)
+	if !ok {return {kind = .Empty}}
+	if ui.rail_footer_hit(layout, x, y) {
+		if button == .Left && ui.rail_profile_hit(layout, x, y) {
+			tile := rail_profile_rect(w)
+			return {kind = .Profiles, menu_anchor = {tile.x, tile.y + tile.height}}
+		}
+		tile := ui.rail_footer_tile(layout)
+		return {kind = .New_Tab, menu_anchor = {tile.x, tile.y + tile.height}}
+	}
+	row := ui.rail_row_hit(layout, x, y)
+	if row < 0 {return {kind = .Empty}}
+	entry := w.rail_rows[row]
+	if entry.workspace != w.workspace || entry.tab < 0 || entry.tab >= len(w.workspace.tabs) {
+		return {kind = .Empty}
+	}
+	kind: Tab_Interaction_Kind = ui.rail_close_hit(layout, x, y, w.scale) >= 0 ? .Close : .Tab
+	return {kind = kind, index = entry.tab}
 }
 
 @(require_results)

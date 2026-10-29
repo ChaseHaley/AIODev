@@ -107,22 +107,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		return true
 	}
 	if e.button != .Left {return false}
-	if ui.armed_down(w.tab_close_armed) {
-		hit := -1
-		if w.tabs_horizontal {
-			hit = window_tab_close_hit(app, w, window_tab_bar(app, w), x, y)
-		} else {
-			hit = rail_tab_close_hit(w, x, y)
-		}
-		id := w.id
-		fired, ok := ui.armed_release(&w.tab_close_armed, hit)
-		if ok {tab_close_request(app, w, fired)}
-		// Closing the last tab may retire this window.
-		if current := window_find(app, id); current != nil {
-			rail_overlay_dismiss(app, current)
-		}
-		return true
-	}
+	if tab_interaction_release(app, w, x, y) {return true}
 	if w.dragging.count > 0 {w.dragging = {}; return true}
 	if w.tab_drag.pressed {tab_drag_release(app, w); rail_overlay_dismiss(app, w); return true}
 	if w.pane_drag.pressed {_ = pane_drag_release(app, w); return true}
@@ -274,123 +259,13 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		workspace_picker_open(app, w)
 		return
 	}
-	if w.tabs_horizontal {
-		bar := window_tab_bar(app, w)
-		w.tab_pressed =
-			e.pressed && e.button == .Left && window_tab_hit(app, w, bar, x, y) >= 0
-		if y < bar.height {
-			if e.pressed {
-				index := window_tab_hit(app, w, bar, x, y)
-				chevron := tab_chevron_rect(app, w)
-				if e.button == .Left && x >= chevron.x && x < chevron.x + chevron.width {
-					profile_menu_open_new_tab(app, w, x, chevron.y + chevron.height)
-				} else if e.button == .Left && window_tab_close_hit(app, w, bar, x, y) >= 0 {
-					ui.armed_press(&w.tab_close_armed, index)
-				} else if index == bar.count && e.button == .Left {
-					tab_new(app, w)
-				} else if index == bar.count && e.button == .Right {
-					profile_menu_open_new_tab(app, w, x, bar.height)
-				} else if index >= 0 && index < bar.count {
-					#partial switch e.button {
-					case .Right:
-						tab_menu_open(app, w, index, x, y)
-					case .Middle:
-						tab_close_request(app, w, index)
-					case .Left:
-						tab_pointer_select(
-							app,
-							w,
-							index,
-							.Control in e.modifiers,
-							.Shift in e.modifiers,
-						)
-						tab_press(
-							app,
-							w,
-							index,
-							x,
-							y,
-							e.modifiers & {.Control, .Shift} != {},
-						)
-					case:
-					}
-				}
-			}
-			return
-		}
-	}
 	if e.button == .Left && rail_resize_hit(w, x, y) {
 		w.rail_resizing = true
 		w.rail_resize_offset = x - rail_width_pixels(w)
 		pointer_set(app, w, .Resize_Horizontal)
 		return
 	}
-	area := rail_area(w)
-	if rail_visible(w) &&
-	   x >= area.x &&
-	   x < area.x + area.width &&
-	   y >= area.y &&
-	   y < area.y + area.height {
-		layout, ok := rail_current_layout(w)
-		if !ok {return}
-		if e.pressed && e.button == .Left && ui.rail_footer_hit(layout, x, y) {
-			if ui.rail_profile_hit(layout, x, y) {
-				w.rail_pressed = RAIL_PROFILE_ROW
-				tile := rail_profile_rect(w)
-				profile_menu_open_new_tab(app, w, tile.x, tile.y + tile.height)
-			} else {
-				w.rail_pressed = RAIL_NEW_TAB_ROW
-				rail_new_tab(app, w)
-			}
-			return
-		}
-		row := ui.rail_row_hit(layout, x, y)
-		if row < 0 {
-			if e.pressed && e.button == .Right && ui.rail_footer_hit(layout, x, y) {
-				tile := ui.rail_footer_tile(layout)
-				profile_menu_open_new_tab(app, w, tile.x, tile.y + tile.height)
-			}
-			return
-		}
-		entry := w.rail_rows[row]
-		if !e.pressed {return}
-		if e.button == .Left {w.rail_pressed = row}
-		if entry.tab < 0 || entry.tab >= len(entry.workspace.tabs) {return}
-		close_index := ui.rail_close_hit(layout, x, y, w.scale)
-		if e.button == .Left && close_index >= 0 && entry.workspace == w.workspace {
-			ui.armed_press(&w.tab_close_armed, entry.tab)
-			return
-		}
-		if e.button == .Right {
-			tab_menu_open(app, w, entry.tab, x, y)
-			rail_overlay_dismiss(app, w)
-			return
-		}
-		if e.button == .Middle {
-			id := w.id
-			if entry.workspace == w.workspace {tab_close_request(app, w, entry.tab)}
-			// Closing the last tab may retire this window.
-			if current := window_find(app, id); current != nil {
-				rail_overlay_dismiss(app, current)
-			}
-			return
-		}
-		if e.button == .Left {
-			tab_pointer_select(
-				app,
-				w,
-				entry.tab,
-				.Control in e.modifiers,
-				.Shift in e.modifiers,
-			)
-			// Selecting in an overlay closes it before a drag could begin; reorder belongs to
-			// the docked rail where the indicator and rows stay visible.
-			if rail_visible(w) {
-				tab_press(app, w, entry.tab, x, y, e.modifiers & {.Control, .Shift} != {})
-			}
-		}
-		return
-	}
+	if tab_interaction_press(app, w, e) {return}
 	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) { return }
 	if pane_header_button(app, w, e) { return }
 	if e.pressed && !w.selecting {

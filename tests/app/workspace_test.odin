@@ -131,8 +131,9 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	row0_index := app.rail_row_index_for_tab(w.rail_rows[:], original, 0)
 	testing.expect_value(t, ui.rail_row_hit(layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), row0_index)
 	close := ui.rail_close_rect(layout, row0_index + 1, w.scale)
-	testing.expect_value(t, app.rail_tab_close_hit(w,
-		close.x + close.width / 2, close.y + close.height / 2), 1)
+	hit := app.rail_tab_interaction_hit(w, close.x + close.width / 2, close.y + close.height / 2, .Left)
+	testing.expect_value(t, hit.kind, app.Tab_Interaction_Kind.Close)
+	testing.expect_value(t, hit.index, 1)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row0.x + 20 * w.scale), y = i32(row0.y + 16 * w.scale)})
 	testing.expect_value(t, original.selected, 0)
