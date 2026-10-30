@@ -21,6 +21,7 @@ motion_active :: proc(app: ^App) -> bool {
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
+		if ui.editor_profiles_animating(&w.editor) { return true }
 		if w.header_height > 0 || w.split_overlay {
 			for pane in w.views {for control in pane.header_controls {if ui.control_active(control) {return true}}}
 		}
@@ -89,6 +90,7 @@ update_motion :: proc(app: ^App) {
 		}
 		tabs_changed = ui.motion_update(&w.tab_underline, now) || tabs_changed
 		pane_drag_animate(app, w, app.animations, now)
+		if ui.editor_profiles_animate(&w.editor, app.animations, now) {w.dirty = true}
 		controls_changed := false
 		if w.header_height > 0 || w.split_overlay {
 			for &pane in w.views {

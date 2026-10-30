@@ -12,6 +12,7 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 
 Row_Kind :: enum {
@@ -111,6 +112,15 @@ Profile_Action :: enum {
 	Remove,
 }
 
+// A profile block's drawn first line while rows reorder. Like the tab strip's positions, the grabbed
+// block follows the pointer and the others ease into place; entries exist from a reorder drag's start
+// until every block settles.
+Profile_Position :: struct {
+	id:       string,
+	position: Motion,
+	lifted:   bool,
+}
+
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
 // in `value` until it is saved.
 Editor :: struct {
@@ -145,6 +155,9 @@ Editor :: struct {
 	action_id, action_value:                                           string,
 	drag_id:                                                           string,
 	drag_from, drag_target:                                            int,
+	// The pointer's line offset inside the grabbed profile row.
+	drag_grab:                                                         f32,
+	profile_positions:                                                 [dynamic]Profile_Position,
 	hover_profile_item:                                                int,
 	hover_profile_control:                                             Profile_Control,
 	error_key, error_profile, error_text:                              string,
@@ -157,10 +170,12 @@ Editor_Outcome :: enum {
 	Profile_Action,
 }
 
-// Table state a settings reload keeps: expansion, an open removal question and the detected section.
+// Table state a settings reload keeps: expansion, an open removal question, the detected section and
+// profile rows still settling after a reorder.
 Editor_View :: struct {
 	expanded, remove_confirm: string,
 	detected_open:            bool,
+	profile_positions:        [dynamic]Profile_Position,
 }
 
 // Wide pages put the search field and a group outline in a left column; narrow ones have no outline.
@@ -219,6 +234,8 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.action_id)
 	delete(p.action_value)
 	delete(p.drag_id)
+	profile_positions_clear(&p.profile_positions)
+	delete(p.profile_positions)
 	delete(p.error_key)
 	delete(p.error_profile)
 	delete(p.error_text)
@@ -232,12 +249,15 @@ editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime
 	view.detected_open = p.detected_open
 	view.expanded = strings.clone(p.expanded) or_return
 	view.remove_confirm = strings.clone(p.remove_confirm) or_return
+	view.profile_positions, p.profile_positions = p.profile_positions, {}
 	return
 }
 
 editor_view_destroy :: proc(view: ^Editor_View) {
 	delete(view.expanded)
 	delete(view.remove_confirm)
+	profile_positions_clear(&view.profile_positions)
+	delete(view.profile_positions)
 	view^ = {}
 }
 
@@ -247,6 +267,9 @@ editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
 	p.detected_open = view.detected_open
 	p.expanded, view.expanded = view.expanded, ""
 	p.remove_confirm, view.remove_confirm = view.remove_confirm, ""
+	profile_positions_clear(&p.profile_positions)
+	delete(p.profile_positions)
+	p.profile_positions, view.profile_positions = view.profile_positions, {}
 	if p.expanded != "" && !editor_has_profile_row(p, p.expanded) {delete(p.expanded); p.expanded = ""}
 	if p.remove_confirm != "" &&
 	   (!editor_has_profile_row(p, p.remove_confirm) || p.remove_confirm != p.expanded) {
@@ -637,23 +660,197 @@ profile_row_count :: proc(p: ^Editor) -> int {
 	return count
 }
 
-// The insertion line's y for a drag target: the top of the slot's row, or the bottom of the last one.
+// A profile's table row and the inline editor rows under it, as page lines.
 @(private)
-profile_drop_y :: proc(p: ^Editor, l: Editor_Layout) -> f32 {
-	slot := 0
+Profile_Block :: struct {
+	start, count: int,
+}
+
+// The profile table's blocks in table order. An expanded profile's block includes its editor rows.
+@(private)
+profile_blocks :: proc(p: ^Editor) -> []Profile_Block {
+	blocks := make([dynamic]Profile_Block, context.temp_allocator)
 	for item, index in p.items {
 		if item.row < 0 || p.rows[item.row].kind != .Profile {continue}
-		if slot == p.drag_target {
-			return l.list.y + f32(index - p.scroll) * l.row_height
+		id := p.rows[item.row].profile
+		end := index + 1
+		for end < len(p.items) && p.items[end].row >= 0 {
+			row := p.rows[p.items[end].row]
+			if row.kind == .Profile || row.kind == .Detected || row.profile != id {break}
+			end += 1
 		}
-		slot += 1
+		append(&blocks, Profile_Block{index, end - index})
 	}
-	last := -1
-	for item, index in p.items {
-		if item.row >= 0 && p.rows[item.row].kind == .Profile {last = index}
+	return blocks[:]
+}
+
+// Where block `index` belongs: its own line, or while a reorder drag is active, its line with the
+// grabbed block's lines opened at the slot the pointer is nearest.
+@(private)
+profile_block_line :: proc(p: ^Editor, blocks: []Profile_Block, index: int) -> int {
+	if p.drag != .Profile_Order || p.drag_from >= len(blocks) {return blocks[index].start}
+	slot := p.drag_target <= p.drag_from ? p.drag_target : p.drag_target - 1
+	line, others := blocks[0].start, 0
+	for block, i in blocks {
+		if i == p.drag_from {continue}
+		if others == slot {line += blocks[p.drag_from].count}
+		if i == index {return line}
+		line += block.count
+		others += 1
 	}
-	if last < 0 {return l.list.y}
-	return l.list.y + f32(last - p.scroll + 1) * l.row_height
+	return line
+}
+
+@(private)
+profile_positions_clear :: proc(positions: ^[dynamic]Profile_Position) {
+	for entry in positions {delete(entry.id)}
+	clear(positions)
+}
+
+@(private)
+profile_position :: proc(p: ^Editor, id: string) -> ^Profile_Position {
+	for &entry in p.profile_positions {if entry.id == id {return &entry}}
+	return nil
+}
+
+// How many lines from its own place the page line at `index` is drawn while profile rows reorder.
+@(private)
+editor_line_shift :: proc(p: ^Editor, index: int) -> f32 {
+	if len(p.profile_positions) == 0 || index < 0 || index >= len(p.items) || p.items[index].row < 0 {
+		return 0
+	}
+	row := p.rows[p.items[index].row]
+	if row.profile == "" || row.kind == .Detected {return 0}
+	start := index
+	for start >= 0 && (p.items[start].row < 0 || p.rows[p.items[start].row].kind != .Profile) {
+		start -= 1
+	}
+	if start < 0 || p.rows[p.items[start].row].profile != row.profile {return 0}
+	entry := profile_position(p, row.profile)
+	return entry == nil ? 0 : entry.position.value - f32(start)
+}
+
+// Whether the page line at `index` belongs to the block a reorder drag lifted, which draws on top.
+@(private)
+editor_line_lifted :: proc(p: ^Editor, index: int) -> bool {
+	if len(p.profile_positions) == 0 || p.items[index].row < 0 {return false}
+	row := p.rows[p.items[index].row]
+	if row.profile == "" || row.kind == .Detected {return false}
+	entry := profile_position(p, row.profile)
+	return entry != nil && entry.lifted
+}
+
+// Starts presenting every profile block at its drawn line, keeping blocks still settling where
+// they are, and lifts the grabbed one.
+@(private)
+profile_positions_begin :: proc(p: ^Editor, grabbed: string) {
+	for block in profile_blocks(p) {
+		id := p.rows[p.items[block.start].row].profile
+		entry := profile_position(p, id)
+		if entry == nil {
+			owned, clone_error := strings.clone(id)
+			if clone_error != nil {continue}
+			line := f32(block.start)
+			if _, append_error := append(
+				&p.profile_positions,
+				Profile_Position{id = owned, position = {value = line, target = line}},
+			); append_error != nil {delete(owned); continue}
+			entry = &p.profile_positions[len(p.profile_positions) - 1]
+		}
+		entry.lifted = id == grabbed
+	}
+}
+
+// Moves the grabbed profile block with the pointer and opens its slot among the others, as the tab
+// strip does. drag_target keeps the profile.order insertion slot the drop will save.
+@(private)
+profile_drag_move :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> bool {
+	blocks := profile_blocks(p)
+	if p.drag_from >= len(blocks) {return false}
+	grabbed := blocks[p.drag_from]
+	first := blocks[0].start
+	last := blocks[len(blocks) - 1].start + blocks[len(blocks) - 1].count
+	top := clamp(
+		(y - l.list.y) / l.row_height + f32(p.scroll) - p.drag_grab,
+		f32(first),
+		f32(last - grabbed.count),
+	)
+	slot, others, line := 0, 0, first
+	nearest := abs(top - f32(line))
+	for block, i in blocks {
+		if i == p.drag_from {continue}
+		line += block.count
+		others += 1
+		if distance := abs(top - f32(line)); distance < nearest {slot, nearest = others, distance}
+	}
+	p.drag_target = slot <= p.drag_from ? slot : slot + 1
+	if entry := profile_position(p, p.rows[p.items[grabbed.start].row].profile); entry != nil {
+		motion_target(&entry.position, top, 0, .Linear, false, time.tick_now())
+	}
+	return true
+}
+
+// Eases profile blocks toward their lines; returns whether the page must redraw. Positions are
+// dropped once the drag has ended and every block has settled.
+editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bool {
+	if len(p.profile_positions) == 0 {return false}
+	blocks := profile_blocks(p)
+	dragging := p.drag == .Profile_Order
+	changed, moving := false, false
+	for i := 0; i < len(p.profile_positions); {
+		entry := &p.profile_positions[i]
+		block := -1
+		for b, index in blocks {
+			if p.rows[p.items[b.start].row].profile == entry.id {block = index; break}
+		}
+		if block < 0 {
+			delete(entry.id)
+			ordered_remove(&p.profile_positions, i)
+			changed = true
+			continue
+		}
+		if !dragging || !entry.lifted {
+			line := f32(profile_block_line(p, blocks, block))
+			motion_target(&entry.position, line, 140 * time.Millisecond, .Decelerate, enabled, now)
+		}
+		changed = motion_update(&entry.position, now) || changed
+		moving ||= motion_active(entry.position)
+		i += 1
+	}
+	if !dragging && !moving {profile_positions_clear(&p.profile_positions)}
+	return changed
+}
+
+// The page lines to draw, in paint order. Profile rows that are reordering may be drawn away from
+// their own lines, so every profile line is considered and the lifted block paints last.
+@(private)
+editor_drawn_lines :: proc(p: ^Editor, l: Editor_Layout) -> []int {
+	first, last := p.scroll, min(len(p.items), p.scroll + l.rows)
+	if len(p.profile_positions) == 0 {
+		lines := make([]int, max(0, last - first), context.temp_allocator)
+		for &line, i in lines {line = first + i}
+		return lines
+	}
+	if blocks := profile_blocks(p); len(blocks) > 0 {
+		first = min(first, blocks[0].start)
+		last = max(last, blocks[len(blocks) - 1].start + blocks[len(blocks) - 1].count)
+	}
+	lines := make([dynamic]int, 0, last - first, context.temp_allocator)
+	for lifted in ([?]bool{false, true}) {
+		for index in first ..< last {
+			if editor_line_lifted(p, index) != lifted {continue}
+			drawn := f32(index - p.scroll) + editor_line_shift(p, index)
+			if drawn <= -1 || drawn >= f32(l.rows) {continue}
+			append(&lines, index)
+		}
+	}
+	return lines[:]
+}
+
+// Whether profile rows are moving, or have settled after a drop and still need releasing.
+editor_profiles_animating :: proc(p: ^Editor) -> bool {
+	for entry in p.profile_positions {if motion_active(entry.position) {return true}}
+	return p.drag != .Profile_Order && len(p.profile_positions) > 0
 }
 
 // Moves the selection by `delta` lines, passing over group headers in the direction of travel.
@@ -1329,7 +1526,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	s := l.scale
 	r := render.Rect {
 		l.list.x,
-		l.list.y + f32(index - p.scroll) * l.row_height,
+		l.list.y + (f32(index - p.scroll) + editor_line_shift(p, index)) * l.row_height,
 		l.list.width,
 		l.row_height,
 	}
@@ -1596,6 +1793,8 @@ editor_press :: proc(
 			p.drag_id = strings.clone(row.profile)
 			p.drag_from = profile_index_at(p, index)
 			p.drag_target = p.drag_from
+			p.drag_grab = (y - parts.row.y) / l.row_height
+			profile_positions_begin(p, row.profile)
 			return .Changed
 		case row.kind == .Profile && contains(table.radio, x, y):
 			p.focus, p.profile_control = .Control, .Radio
@@ -1721,27 +1920,7 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 	case .Slider:
 		slide(p, row, editor_row_parts(p, l, p.selected).slider, x)
 	case .Profile_Order:
-		index := clamp(p.scroll + int((y - l.list.y) / l.row_height), 0, len(p.items))
-		slot := 0
-		for item, i in p.items {
-			if i >= index {break}
-			if item.row >= 0 && p.rows[item.row].kind == .Profile {slot += 1}
-		}
-		if index < len(p.items) && p.items[index].row >= 0 {
-			target := p.rows[p.items[index].row]
-			if target.kind == .Profile {
-				top := l.list.y + f32(index - p.scroll) * l.row_height
-				if y >= top + l.row_height / 2 {slot += 1}
-			}
-		} else if index >= len(p.items) {
-			slot = profile_row_count(p)
-		}
-		slot = clamp(slot, 0, profile_row_count(p))
-		if slot != p.drag_target {
-			p.drag_target = slot
-			return true
-		}
-		return false
+		return profile_drag_move(p, l, y)
 	case .Wheel, .Ramp:
 		pick_color(
 			p,
@@ -1807,7 +1986,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	}
 	item, reset, outline := -1, -1, -1
 	profile_item, profile_control := -1, Profile_Control.Radio
-	if p.popup == .None && contains(l.list, x, y) {
+	if p.popup == .None && p.drag != .Profile_Order && contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
 		if index < len(p.items) && p.items[index].row >= 0 {
 			item = index
@@ -2850,7 +3029,7 @@ editor_draw :: proc(
 		)
 	}
 	if render.push_layer(list, l.list) != .None {return .Ok}
-	for index in p.scroll ..< min(len(p.items), p.scroll + l.rows) {
+	for index in editor_drawn_lines(p, l) {
 		item := p.items[index]
 		parts := editor_row_parts(p, l, index)
 		r := parts.row
@@ -3020,17 +3199,6 @@ editor_draw :: proc(
 			icon_color.a *= 0.5
 		}
 		icon_draw(list, .Undo, parts.reset, icon_color, ICON_BUTTON, s)
-	}
-	if p.drag == .Profile_Order {
-		y := profile_drop_y(p, l)
-		draw_rect(
-			list,
-			{
-				rect = {l.list.x + 10 * s, y - s, l.list.width - 20 * s, 2 * s},
-				color = theme.accent,
-				radius = s,
-			},
-		)
 	}
 	return popup_draw(p, l, list, text, theme, pointer)
 }

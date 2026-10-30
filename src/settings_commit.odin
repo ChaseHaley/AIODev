@@ -48,6 +48,7 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	replacement.expanded, view.expanded = view.expanded, ""
 	replacement.remove_confirm, view.remove_confirm = view.remove_confirm, ""
 	replacement.detected_open = view.detected_open
+	replacement.profile_positions, view.profile_positions = view.profile_positions, {}
 	if !settings_load_source(app, &replacement, revision) {return}
 	ui.field_set(&replacement.filter, ui.field_string(&p.filter))
 	ui.editor_filter(&replacement)

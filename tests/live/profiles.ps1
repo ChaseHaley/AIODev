@@ -173,8 +173,8 @@ try {
     Invoke-Aio mouse down "$($alpha.x + 20),$($alpha.y + $alpha.h / 2)" --px | Out-Null
     Assert-Value (Read-State)['settings.profile.dragging'] 'true' 'order drag starts on the handle'
     Invoke-Aio mouse move "$($gamma.x + 40),$($gamma.y + $gamma.h - 4)" --px | Out-Null
-    if ([int](Read-State)['settings.profile.drag_target'] -lt 1) { throw 'No drop indicator target.' }
-    Write-Output 'PASS order drag paints a drop target'
+    if ([int](Read-State)['settings.profile.drag_target'] -lt 1) { throw 'No reorder slot.' }
+    Write-Output 'PASS order drag opens a slot'
     Invoke-Aio mouse up "$($gamma.x + 40),$($gamma.y + $gamma.h - 4)" --px | Out-Null
     Assert-FileLine 'profile.order = beta, gamma, alpha, default' 'order drag rewrites profile.order'
 
