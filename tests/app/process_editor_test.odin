@@ -84,3 +84,52 @@ process_editor_always_confirms_deletion_and_rejects_changed_subjects :: proc(t: 
 	testing.expect_value(t, s.settings.process.padding_groups, "Tools:8:less")
 	testing.expect(t, !p.process_dirty)
 }
+
+@(test)
+process_editor_uncommitted_field_cannot_follow_a_different_groups_positional_key :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !process_app_fixture(t, &f, "process-draft-conflict") {return}
+	s := &f.state
+	writer, peer := &s.windows[0].editor, &s.windows[1].editor
+	app.settings_reveal_page(s, peer, {key = "process.group.1.program.1", focus = .Control})
+	ui.field_set(&peer.value, "pending-program")
+	before := strings.clone(peer.source, context.temp_allocator)
+	updated := commit_text(t, writer.source, settings.PADDING_GROUPS_KEY, "Different:4:codex;Tools:8:less")
+	testing.expect_value(t, app.settings_commit(s, writer.source, updated, writer), settings.Save_Error.None)
+	testing.expect_value(t, peer.source, before)
+	testing.expect_value(t, ui.field_string(&peer.value), "pending-program")
+	app.editor_outcome(s, s.windows[1], .Save)
+	testing.expect(t, peer.error)
+	testing.expect_value(t, s.settings.process.padding_groups, "Different:4:codex;Tools:8:less")
+}
+
+@(test)
+process_editor_drop_outside_window_cancels_the_last_valid_target :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !process_app_fixture(t, &f, "process-outside-drop") {return}
+	s, w := &f.state, f.state.windows[0]
+	p := &w.editor
+	testing.expect(t, ui.editor_reveal(p, "process.group.1"))
+	p.scroll = p.selected
+	l := app.settings_layout(w)
+	p.visible_rows = l.rows
+	first := ui.editor_row_parts(p, l, p.selected).row
+	second := first
+	for item, index in p.items {
+		if item.row >= 0 && p.rows[item.row].key == "process.group.2" {
+			second = ui.editor_row_parts(p, l, index).row
+		}
+	}
+	app.gesture_button(s, w, {window = w.id, button = .Left, pressed = true,
+		x = i32(first.x + 18 * w.scale), y = i32(first.y + first.height / 2)})
+	testing.expect_value(t, p.drag, ui.Editor_Drag.Process_Order)
+	app.gesture_move(s, w, {window = w.id, buttons = {.Left},
+		x = i32(second.x + 60), y = i32(second.y + second.height - 2)})
+	testing.expect(t, p.drag_target > 0)
+	app.gesture_move(s, w, {window = w.id, buttons = {.Left}, x = -10, y = -10})
+	app.gesture_button(s, w, {window = w.id, button = .Left, pressed = false, x = -10, y = -10})
+	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:nvim,vim;Tools:8:less")
+	testing.expect_value(t, p.drag, ui.Editor_Drag.None)
+}

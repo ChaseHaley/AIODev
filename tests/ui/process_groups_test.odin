@@ -2,6 +2,7 @@ package ui_test
 
 import "aio:settings"
 import "aio:ui"
+import "base:runtime"
 import "core:strings"
 import "core:testing"
 
@@ -127,4 +128,55 @@ process_groups_drag_escape_and_required_delete_outcome :: proc(t: ^testing.T) {
 	value, problem = ui.editor_process_value(&p)
 	testing.expect_value(t, value, "")
 	testing.expect_value(t, problem, "")
+}
+
+@(private)
+Process_Failure_Allocator :: struct {backing: runtime.Allocator, remaining: int}
+
+@(private)
+process_failure_allocate :: proc(
+	data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,
+	old_memory: rawptr, old_size: int, location := #caller_location,
+) -> ([]u8, runtime.Allocator_Error) {
+	failure := cast(^Process_Failure_Allocator)data
+	if size > 0 && (mode == .Alloc || mode == .Alloc_Non_Zeroed ||
+	   mode == .Resize || mode == .Resize_Non_Zeroed) {
+		if failure.remaining == 0 {return nil, .Out_Of_Memory}
+		failure.remaining -= 1
+	}
+	return failure.backing.procedure(failure.backing.data, mode, size, alignment,
+		old_memory, old_size, location)
+}
+
+@(test)
+process_groups_partial_load_and_caption_allocation_failures_are_safe :: proc(t: ^testing.T) {
+	backing := context.allocator
+	for limit in 0 ..< 100 {
+		failure := Process_Failure_Allocator{backing, limit}
+		context.allocator = {process_failure_allocate, &failure}
+		p: ui.Editor
+		_ = ui.editor_process_load(&p, "Editors:0:nvim,vim;Tools:8:less", 12)
+		ui.editor_destroy(&p)
+		context.allocator = backing
+	}
+	for limit in 0 ..< 2 {
+		p: ui.Editor
+		process_fixture(t, &p)
+		testing.expect(t, ui.editor_reveal(&p, "process.group.1.name"))
+		p.focus = .Control
+		ui.field_set(&p.value, "Replacement")
+		failure := Process_Failure_Allocator{backing, limit}
+		context.allocator = {process_failure_allocate, &failure}
+		kept := ui.editor_process_capture(&p)
+		context.allocator = backing
+		testing.expect(t, !kept)
+		testing.expect(t, p.error)
+		testing.expect_value(t, ui.editor_row(&p).value, "Editors")
+		for row in p.rows {
+			if row.process == 1 && row.process_field == .Group {
+				testing.expect_value(t, row.title, "Editors")
+			}
+		}
+		ui.editor_destroy(&p)
+	}
 }

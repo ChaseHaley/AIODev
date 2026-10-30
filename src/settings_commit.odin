@@ -37,6 +37,10 @@ settings_commit :: proc(
 
 @(private)
 settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preserve_draft: bool) {
+	if !ui.editor_process_capture(p) {
+		notify(app, .Error, "Could not preserve the active program draft.")
+		return
+	}
 	replacement: ui.Editor
 	defer ui.editor_destroy(&replacement)
 	view, view_error := ui.editor_view_take(p)

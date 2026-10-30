@@ -64,8 +64,9 @@ editor_process_load :: proc(p: ^Editor, value: string, fallback: int) -> runtime
 		id := p.process_next
 		process_row_add(p, id, .Group, "", group.name, fmt.tprintf("%d", group.padding)) or_return
 		header := &p.rows[len(p.rows) - 1]
+		detail := strings.concatenate({settings.PADDING_GROUPS_KEY, " ", group.processes}) or_return
 		delete(header.detail)
-		header.detail = strings.concatenate({settings.PADDING_GROUPS_KEY, " ", group.processes}) or_return
+		header.detail = detail
 		process_row_add(p, id, .Name, ".name", "Name", group.name) or_return
 		process_row_add(p, id, .Padding, ".padding", "Padding", fmt.tprintf("%d", group.padding)) or_return
 		names := settings.Padding_Processes{rest = group.processes}
@@ -91,16 +92,25 @@ editor_process_capture :: proc(p: ^Editor) -> bool {
 	if value == row.value {return true}
 	owned, err := strings.clone(value)
 	if err != nil {editor_message(p, "Could not keep the program draft.", true); return false}
+	caption: string
+	if row.process_field == .Name || row.process_field == .Padding {
+		caption, err = strings.clone(value)
+		if err != nil {
+			delete(owned)
+			editor_message(p, "Could not keep the program draft.", true)
+			return false
+		}
+	}
+	defer delete(caption)
 	delete(row.value)
 	row.value = owned
 	p.process_dirty = true
 	if row.process_field == .Name || row.process_field == .Padding {
 		for &header in p.rows {
 			if header.process != row.process || header.process_field != .Group {continue}
-			copy_value, copy_error := strings.clone(value)
-			if copy_error != nil {return true}
-			if row.process_field == .Name {delete(header.title); header.title = copy_value}
-			else {delete(header.value); header.value = copy_value}
+			if row.process_field == .Name {delete(header.title); header.title = caption}
+			else {delete(header.value); header.value = caption}
+			caption = ""
 			break
 		}
 	}
@@ -409,8 +419,9 @@ editor_process_draw :: proc(
 ) -> glyphs.Result {
 	s, r := scale, parts.row
 	baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
+	buffer: [128]u8
 	if row.process_field == .Fallback {
-		return draw_text(text, list, fmt.tprintf("Other programs use Content Padding · %d DIP.",
+		return draw_text(text, list, fmt.bprintf(buffer[:], "Other programs use Content Padding · %d DIP.",
 			p.process_fallback), r.x + 12 * s, baseline, theme.muted, max(1, r.width - 24 * s))
 	}
 	if row.process_field == .Group {
@@ -423,7 +434,7 @@ editor_process_draw :: proc(
 		if result := draw_icon(text, list,
 			p.process_expanded == row.process ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT,
 			chevron, theme.muted, 0.8); result != .Ok {return result}
-		amount := fmt.tprintf("%s DIP", row.value)
+		amount := fmt.bprintf(buffer[:], "%s DIP", row.value)
 		x := chevron.x - 8 * s - text_width(text, amount)
 		if result := draw_text(text, list, amount, x, baseline, theme.muted, max(1, chevron.x - x));
 		   result != .Ok {return result}

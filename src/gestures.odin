@@ -106,6 +106,11 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	}
 	if w.tab_drag.pressed {tab_drag_release(app, w); rail_overlay_dismiss(app, w); return true}
 	if w.pane_drag.pressed {_ = pane_drag_release(app, w); return true}
+	if w.editor.drag == .Process_Order {
+		_ = ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
+		editor_outcome(app, w, ui.editor_release(&w.editor))
+		return true
+	}
 	if settings_active(w) {editor_outcome(app, w, ui.editor_release(&w.editor)); return true}
 	if w.selecting {selection_finish(app, w, x, y); return true}
 	return false

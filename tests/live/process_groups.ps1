@@ -71,6 +71,10 @@ try{
     Aio mouse down "$($first.x+18),$($first.y+$first.h/2)" --px|Out-Null
     Expect (State)['settings.process.dragging'] true 'six-dot handle starts order drag'
     Aio mouse move "$($second.x+60),$($second.y+$second.h-3)" --px|Out-Null
+    Aio mouse move '5,100' --px|Out-Null;Aio mouse up '5,100' --px|Out-Null
+    Expect (State)['settings.process.value'] 'Editors:4:vim,micro;Tools:8:less' 'outside drop cancels order change'
+    Aio mouse down "$($first.x+18),$($first.y+$first.h/2)" --px|Out-Null
+    Aio mouse move "$($second.x+60),$($second.y+$second.h-3)" --px|Out-Null
     Aio mouse up "$($second.x+60),$($second.y+$second.h-3)" --px|Out-Null
     Expect (State)['settings.process.value'] 'Tools:8:less;Editors:4:vim,micro' 'drop saves first-match order'
     Trash 2
