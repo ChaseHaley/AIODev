@@ -33,6 +33,9 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 		menu.count = 3
 	}
 	if count == 1 {
+		menu.actions[menu.count] = .Move_Tab_Workspace
+		menu.actions[menu.count + 1] = .Move_Tab_New_Workspace
+		menu.count += 2
 		menu.actions[menu.count] = .Close_Right_Tabs
 		menu.count += 1
 	}

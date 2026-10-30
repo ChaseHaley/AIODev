@@ -219,6 +219,7 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 	)
 	for workspace in app.workspaces {
 		if !workspace_eligible(app, workspace) {continue}
+		if p.move.workspace == workspace.id {continue}
 		name := strings.to_lower(workspace.name, context.temp_allocator)
 		if query != "" && !strings.contains(name, query) {continue}
 		if _, err := append(
@@ -295,13 +296,21 @@ workspace_picker_count :: proc(w: ^Window) -> int {
 	if workspace_picker_icons(&w.workspace_picker) {
 		return (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) + 1 : len(WORKSPACE_ICONS) + 3
 	}
-	return len(w.workspace_picker.rows) + len(WORKSPACE_ACTIONS)
+	return len(w.workspace_picker.rows) + (w.workspace_picker.move.workspace != 0 ? 1 : len(WORKSPACE_ACTIONS))
 }
 
 workspace_picker_choose :: proc(app: ^App, w: ^Window) {
-	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	index, count := p.selected, len(p.rows)
+	if p.move.workspace != 0 {
+		if index < 0 || index > count {return}
+		request := p.move
+		id := index < count ? p.rows[index].id : 0
+		workspace_picker_cancel(w)
+		workspace_move_choose(app, w, request, id)
+		return
+	}
+	defer workspace_picker_layout_changed(w)
 	if workspace_picker_icons(p) {
 		if p.mode == .Tint { workspace_icon_color_choose(app, w); return }
 		if index == len(WORKSPACE_ICONS) + 2 { workspace_icon_color_open(app, w); return }
@@ -351,7 +360,8 @@ workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 }
 
 workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
-	defer workspace_picker_layout_changed(w)
+	window_id := w.id
+	defer if window_find(app, window_id) == w {workspace_picker_layout_changed(w)}
 	if !e.pressed {return}
 	p := &w.workspace_picker
 	if workspace_row_key(app, w, e) { return }
@@ -367,9 +377,10 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	case .Escape:
 		if workspace_picker_icons(p) { workspace_picker_return(app, w) } else { workspace_picker_cancel(w) }
 	case .Tab: p.selected = (p.selected + count + (.Shift in e.modifiers ? -1 : 1)) % count
-	case .Enter, .Numpad_Enter: workspace_picker_choose(app, w)
+	case .Enter, .Numpad_Enter: workspace_picker_choose(app, w); return
 	case .Delete:
-		if !workspace_picker_icons(p) && e.modifiers == {.Shift} && p.selected < len(p.rows) {
+		if p.move.workspace == 0 && !workspace_picker_icons(p) &&
+		   e.modifiers == {.Shift} && p.selected < len(p.rows) {
 			workspace_delete_request(app, w, workspace_find(app, p.rows[p.selected].id))
 		} else {
 			change := ui.field_key(&p.query, e)
@@ -460,11 +471,12 @@ workspace_picker_menu_button_rect :: proc(w: ^Window, index: int) -> render.Rect
 }
 
 workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
-	defer workspace_picker_layout_changed(w)
+	window_id := w.id
+	defer if window_find(app, window_id) == w {workspace_picker_layout_changed(w)}
 	p := &w.workspace_picker
 	if workspace_row_click(app, w, x, y, extend) { return }
 	if hit := workspace_picker_hit(w, x, y); hit >= 0 {
-		if !workspace_picker_icons(p) && hit < len(p.rows) &&
+		if p.move.workspace == 0 && !workspace_picker_icons(p) && hit < len(p.rows) &&
 		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 			workspace_row_menu_open(app, w, p.rows[hit].id)
 			return
@@ -539,7 +551,8 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if program := status_picker_text(app, workspace); program != "" {
 				detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
 			}
-		} else {label = action_info[actions[i - len(p.rows)]].title}
+		} else if p.move.workspace != 0 {label = "Move to New Workspace"}
+		else {label = action_info[actions[i - len(p.rows)]].title}
 		baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
 		label_x := row.x + 8 * s
 		if has_icon {
@@ -552,7 +565,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			label_x += 30 * s
 		}
 		right := row.x + row.width - 8 * s
-		if has_icon {
+		if has_icon && p.move.workspace == 0 {
 			workspace_row_ellipsis_draw(app, w, i)
 			right -= 36 * s
 		}

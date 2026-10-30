@@ -121,6 +121,10 @@ Action :: enum u32 {
 	Status_Panel,
 	Status_Board,
 	Status_Dismiss_Finished,
+	Move_Pane_Workspace,
+	Move_Pane_New_Workspace,
+	Move_Tab_Workspace,
+	Move_Tab_New_Workspace,
 }
 
 @(private)
@@ -132,6 +136,10 @@ Action_Info :: struct {
 @(private)
 ACTIONS :: [Action]Action_Info {
 	.Show_Build_Info = {"app.build_info", "Show Build Info", nil},
+	.Move_Pane_Workspace = {"pane.move_workspace", "Move Pane to Workspace…", nil},
+	.Move_Pane_New_Workspace = {"pane.move_new_workspace", "Move Pane to New Workspace", nil},
+	.Move_Tab_Workspace = {"tab.move_workspace", "Move Tab to Workspace…", nil},
+	.Move_Tab_New_Workspace = {"tab.move_new_workspace", "Move Tab to New Workspace", nil},
 	.New_Workspace = {"workspace.new", "New Workspace", nil},
 	.Change_Workspace = {"workspace.change", "Change Workspace…", nil},
 	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil},
@@ -498,6 +506,10 @@ run_action :: proc(
 		}
 	case .Duplicate_Tab:
 		tab_duplicate(app, w)
+	case .Move_Pane_Workspace, .Move_Tab_Workspace:
+		workspace_move_open(app, w, action == .Move_Tab_Workspace)
+	case .Move_Pane_New_Workspace, .Move_Tab_New_Workspace:
+		workspace_move_new(app, w, action == .Move_Tab_New_Workspace)
 	case .Move_Tab_Left:
 		tab_move(app, w, w.workspace.selected, max(0, w.workspace.selected - 1))
 	case .Move_Tab_Right:

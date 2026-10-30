@@ -162,6 +162,7 @@ workspace_picker_return :: proc(app: ^App, w: ^Window) {
 
 workspace_row_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 	p := &w.workspace_picker
+	if p.move.workspace != 0 {return false}
 	if workspace_picker_icons(p) { return false }
 	if p.mode == .Menu {
 		w.dirty = true
