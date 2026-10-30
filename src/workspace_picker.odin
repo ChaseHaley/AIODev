@@ -100,19 +100,24 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Eve
 	p := &w.workspace_picker
 	x, y := f32(e.x), f32(e.y)
 	hover := u32(0)
+	shape := platform.Cursor_Shape.Arrow
 	if p.query.dragging && .Left in e.buttons {
 		workspace_picker_pointer(app, w, x, false, true)
+		shape = .Text
 	} else if hit := workspace_picker_hit(w, x, y); hit >= 0 {
+		shape = .Hand
 		workspace_picker_select(w, hit)
 		if hit < len(p.rows) &&
 		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 			hover = p.rows[hit].id
 		}
+	} else if workspace_rect_contains(workspace_picker_field_rect(w), x, y) {
+		shape = .Text
 	}
 	if hover != p.menu_hover {
 		p.menu_hover, w.dirty = hover, true
 	}
-	pointer_set(app, w, .Arrow)
+	pointer_set(app, w, shape)
 }
 
 workspace_picker_wheel :: proc(w: ^Window, delta: f32) {

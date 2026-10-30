@@ -57,7 +57,7 @@ confirmation_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if c == nil {return false}
 	link_hover_clear(w)
 	if ui.confirm_hover(c, confirmation_layout(w, c), x, y) {w.dirty = true}
-	pointer_set(app, w, .Arrow)
+	pointer_set(app, w, c.hover != .None ? .Hand : .Arrow)
 	return true
 }
 

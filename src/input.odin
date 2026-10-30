@@ -524,7 +524,10 @@ leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> Leader_Resul
 pointer_set :: proc(app: ^App, w: ^Window, shape: platform.Cursor_Shape) {
 	if shape == w.pointer_shape {return}
 	when AIO_CONTROL {app.verify.pointer_updates += 1}
-	if platform.window_set_cursor(&app.platform, w.id, shape) != .None {
-		log.error("setting the pointer cursor failed")
-	} else {w.pointer_shape = shape}
+	// A window without a native window yet, or any longer, has no pointer to change.
+	#partial switch platform.window_set_cursor(&app.platform, w.id, shape) {
+	case .None: w.pointer_shape = shape
+	case .Invalid_Window:
+	case: log.error("setting the pointer cursor failed")
+	}
 }

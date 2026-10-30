@@ -262,10 +262,9 @@ workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> b
 workspace_row_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
 	p := &w.workspace_picker
 	if p.mode == .Menu {
-		if hit := workspace_row_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
-			p.menu_selected, w.dirty = hit, true
-		}
-		pointer_set(app, w, .Arrow)
+		hit := workspace_row_menu_hit(w, f32(e.x), f32(e.y))
+		if hit >= 0 {p.menu_selected, w.dirty = hit, true}
+		pointer_set(app, w, hit >= 0 ? .Hand : .Arrow)
 		return true
 	}
 	if p.mode == .Rename {

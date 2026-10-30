@@ -1885,6 +1885,69 @@ editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	return text_kind(kind) && contains(editor_row_parts(p, l, index).field, x, y)
 }
 
+// The pointer for the page: text over editable text, a hand over anything a click changes.
+editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Cursor_Shape {
+	s := l.scale
+	if popup := editor_popup_rect(p, l); contains(popup, x, y) {
+		row := editor_row(p)
+		if row == nil {return .Arrow}
+		option := int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s))
+		#partial switch p.popup {
+		case .Choice:
+			if option >= 0 && option < len(row.choices) {return .Hand}
+		case .Shortcuts:
+			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
+			if option >= 0 && option + p.popup_scroll <= count {return .Hand}
+		case .Color:
+			c := color_parts(popup, row.kind == .Optional_Color, s)
+			ramp := render.Rect{c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}
+			if contains(c.wheel, x, y) || contains(ramp, x, y) || contains(c.no_color, x, y) {
+				return .Hand
+			}
+		}
+		return .Arrow
+	}
+	if contains(editor_clear_rect(p, l), x, y) {return .Hand}
+	if contains(filter_text_rect(p, l), x, y) {return .Text}
+	if contains(l.outline, x, y) {
+		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
+		return entry < len(outline_entries(p)) ? .Hand : .Arrow
+	}
+	if !contains(l.list, x, y) {return .Arrow}
+	index := p.scroll + int((y - l.list.y) / l.row_height)
+	if index >= len(p.items) || p.items[index].row < 0 {return .Arrow}
+	row := &p.rows[p.items[index].row]
+	parts := editor_row_parts(p, l, index)
+	#partial switch row.kind {
+	case .Profile, .Detected_Header, .Profile_Add:
+		return .Hand
+	case .Detected:
+		return contains(profile_row_parts(row.kind, parts.row, s).enable, x, y) ? .Hand : .Arrow
+	}
+	slider := render.Rect {
+		parts.slider.x - 8 * s,
+		parts.slider.y - 10 * s,
+		parts.slider.width + 16 * s,
+		parts.slider.height + 20 * s,
+	}
+	switch {
+	case contains(parts.reset, x, y),
+	     contains(parts.clear, x, y),
+	     contains(parts.toggle, x, y),
+	     contains(parts.positions, x, y),
+	     contains(parts.swatch, x, y) && row.kind != .Profile_Icon,
+	     parts.slider.width > 0 && contains(slider, x, y):
+		return .Hand
+	case contains(parts.field, x, y):
+		#partial switch row.kind {
+		case .Choice, .Shortcut, .Action:
+			return .Hand
+		}
+		return .Text
+	}
+	return .Arrow
+}
+
 @(private)
 row_preview :: proc(row: ^Editor_Row, value: string) -> string {
 	#partial switch row.kind {

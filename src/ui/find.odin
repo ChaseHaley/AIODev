@@ -126,6 +126,12 @@ find_hit :: proc(l: Find_Layout, x, y: f32) -> Find_Outcome {
 	return .None
 }
 
+// Text over the query, a hand over an enabled match button.
+find_pointer :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> platform.Cursor_Shape {
+	if enabled && find_hit(l, x, y) != .None {return .Hand}
+	return contains(l.query, x, y) ? .Text : .Arrow
+}
+
 find_hover :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, x, y: f32) -> bool {
 	hit := enabled ? find_hit(l, x, y) : .None
 	if hit == f.hover { return false }

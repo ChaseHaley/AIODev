@@ -60,12 +60,29 @@ try {
         $chipX = $panel[0] + 34*$scale
         $chipY = $panel[1] + 40*$scale
         Assert-Move ($panel[0] + $panel[2] - 20*$scale) $chipY text "palette query at $dpi DPI"
-        Assert-Move $chipX $chipY arrow "t: dropdown chip at $dpi DPI"
+        Assert-Move $chipX $chipY hand "t: dropdown chip at $dpi DPI"
         Invoke-Aio mouse click "$([int]$chipX),$([int]$chipY)" --px
-        Assert-Move ($panel[0] + 50*$scale) ($panel[1] + 85*$scale) arrow "mode menu at $dpi DPI"
+        Assert-Move ($panel[0] + 50*$scale) ($panel[1] + 85*$scale) hand "mode menu row at $dpi DPI"
         Invoke-Aio key Esc
     }
     Invoke-Aio key Esc
+    Invoke-Aio command tab.new
+    Invoke-Aio command tab.select_1
+    foreach ($orientation in @('horizontal', 'vertical')) {
+        if ((Read-State)['tabs.orientation'] -ne $orientation) { Invoke-Aio command view.tabs_orientation }
+        foreach ($dpi in @(96, 144)) {
+            Invoke-Aio dpi $dpi
+            $state = Read-State
+            $prefix = $orientation -eq 'horizontal' ? 'strip_' : ''
+            $selected = Rect $state "tab.1.$($prefix)rect"
+            $close = Rect $state "tab.1.$($prefix)close"
+            $other = Rect $state "tab.2.$($prefix)rect"
+            $label = "$orientation tabs at $dpi DPI"
+            Assert-Move ($selected[0] + 6) ($selected[1] + $selected[3]/2) arrow "selected tab body, $label"
+            Assert-Move ($close[0] + $close[2]/2) ($close[1] + $close[3]/2) hand "selected tab close, $label"
+            Assert-Move ($other[0] + 6) ($other[1] + $other[3]/2) hand "unselected tab, $label"
+        }
+    }
 } finally {
     & $ctl --name $name stop | Out-Null
 }

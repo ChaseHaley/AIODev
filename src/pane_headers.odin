@@ -226,13 +226,13 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 	return true
 }
 
-pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> bool {
+pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.Header_Action) {
 	pane, action, hit := pane_header_hit(w, x, y)
 	for &view in w.views {
 		hover := enabled && hit && view.content == pane.content ? action : ui.Header_Action.None
 		if hover != view.header_hover {view.header_hover = hover; w.dirty = true}
 	}
-	return enabled && hit
+	return enabled && hit, enabled && hit ? action : .None
 }
 
 // Shows a single pane's split controls while the pointer is within the top band of its card.

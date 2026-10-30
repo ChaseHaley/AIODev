@@ -501,10 +501,13 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 
 status_inbox_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	items := status_items(app, w, false)
-	if index := status_inbox_hit(app, w, items, x, y); index >= 0 && index != w.status.selected {
+	index := status_inbox_hit(app, w, items, x, y)
+	if index >= 0 && index != w.status.selected {
 		w.status.selected, w.dirty = index, true
 	}
-	pointer_set(app, w, .Arrow)
+	surface, _, _ := status_inbox_layout(app, w, items)
+	dismiss_all := status_rect_contains(status_dismiss_all_rect(w, surface), x, y)
+	pointer_set(app, w, index >= 0 || dismiss_all ? .Hand : .Arrow)
 }
 
 status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
@@ -935,7 +938,7 @@ status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		w.status.hover_surface, w.status.hover, w.dirty = surface, hover, true
 	}
 	if surface == .None {return false}
-	pointer_set(app, w, .Arrow)
+	pointer_set(app, w, hover >= 0 || side_hover ? .Hand : .Arrow)
 	return true
 }
 

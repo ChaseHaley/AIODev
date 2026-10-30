@@ -297,19 +297,23 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	}
 	if w.tab_menu.open {
 		link_hover_clear(w)
-		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); tab_menu_enabled(w, hit) && hit != w.tab_menu.selected {
+		hit := tab_menu_hit(w, f32(e.x), f32(e.y))
+		enabled := tab_menu_enabled(w, hit)
+		if enabled && hit != w.tab_menu.selected {
 			w.tab_menu.selected, w.dirty = hit, true
 		}
-		pointer_set(app, w, .Arrow)
+		pointer_set(app, w, enabled ? .Hand : .Arrow)
 		return
 	}
 	if w.profile_menu.open {
 		link_hover_clear(w)
-		if hit := profile_menu_hit(w, f32(e.x), f32(e.y));
-		   hit >= 0 && hit != w.profile_menu.menu.selected {
-			w.profile_menu.menu.selected, w.dirty = hit, true
+		shape := platform.Cursor_Shape.Arrow
+		if hit := profile_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
+			if hit != w.profile_menu.menu.selected {w.profile_menu.menu.selected, w.dirty = hit, true}
+			item := w.profile_menu.menu.items[hit]
+			if item.enabled && !item.separator {shape = .Hand}
 		}
-		pointer_set(app, w, .Arrow)
+		pointer_set(app, w, shape)
 		return
 	}
 	if w.status.inbox_open {
@@ -389,7 +393,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		split_overlay_update(w, x, y, false)
 		pane_header_pointer(w, x, y, false)
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
-		pointer_set(app, w, ui.palette_over_text(l, x, y) ? .Text : .Arrow)
+		pointer_set(app, w, ui.palette_pointer(&app.palette, l, x, y))
 		if app.palette.query.dragging && .Left in e.buttons {
 			on_palette_outcome(
 				app,
@@ -409,7 +413,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			link_hover_clear(w)
 			split_overlay_update(w, x, y, false)
 			pane_header_pointer(w, x, y, false)
-			pointer_set(app, w, ui.find_hit(l, x, y) == .None ? .Text : .Arrow)
+			pointer_set(app, w, ui.find_pointer(l, available, x, y))
 			return
 		}
 	}
@@ -427,14 +431,19 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	   y < rail_area_rect.y + rail_area_rect.height {
 		split_overlay_update(w, x, y, false)
 		pane_header_pointer(w, x, y, false)
-		pointer_set(app, w, .Arrow)
+		pointer_set(app, w, chrome_pointer(app, w, x, y))
 		return
 	}
 	enabled := !w.selecting
 	split_overlay_update(w, x, y, enabled)
-	over_header := pane_header_pointer(w, x, y, enabled)
+	over_header, header_action := pane_header_pointer(w, x, y, enabled)
 	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
-	if y < ui.TITLE_BAR_HEIGHT * w.scale {shape = .Arrow}
+	if over_header && header_action != .None && w.header_buttons == {} {shape = .Hand}
+	if y < ui.TITLE_BAR_HEIGHT * w.scale {
+		shape = w.header_buttons == {} ? chrome_pointer(app, w, x, y) : .Arrow
+	}
+	entry := pane_at(app, w, e.x, e.y)
+	if shape == .Text && entry == nil && !w.selecting {shape = .Arrow}
 	resize, over_divider := divider_cursor(w, x, y)
 	if over_divider && w.header_buttons == {} {shape = resize}
 	link_hovered := false
@@ -452,13 +461,12 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			changed := ui.editor_hover(&w.editor, l, x, y)
 			if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
 			if changed {w.dirty = true}
-			shape = ui.editor_over_text(&w.editor, l, x, y) ? .Text : .Arrow
+			shape = ui.editor_pointer(&w.editor, l, x, y)
 			over_settings = true
 		}
 	}
 	pointer_set(app, w, shape)
 	if over_header || w.header_buttons != {} || over_settings {return}
-	entry := pane_at(app, w, e.x, e.y)
 	if entry == nil {
 		return
 	}

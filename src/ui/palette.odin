@@ -1209,6 +1209,18 @@ palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
 	return palette_input_contains(l, x, y) && !contains(l.chip, x, y) && !contains(l.menu, x, y)
 }
 
+// Text over the query, a hand over the mode chip, mode menu rows, footer modes and results.
+palette_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> platform.Cursor_Shape {
+	if p.mode_menu && menu_row_at(l, x, y) >= 0 {return .Hand}
+	if p.mode != .All && contains(l.chip, x, y) {return .Hand}
+	if palette_over_text(l, x, y) {return .Text}
+	// Outside the query, an open mode menu takes the next click only to close.
+	if p.mode_menu {return .Arrow}
+	if _, found := hint_at(l, x, y); found {return .Hand}
+	if row_at(p, l, x, y) >= 0 {return .Hand}
+	return .Arrow
+}
+
 // Places the caret, or with `extend` grows the selection, and starts a drag selection.
 palette_input_press :: proc(
 	p: ^Palette,
