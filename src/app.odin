@@ -545,6 +545,7 @@ load_settings :: proc(app: ^App) {
 	loaded, diagnostics, created, migrated, migration_error, err := settings.load(
 		app.settings_path,
 		extra_comments = comments[:],
+		themes_directory = settings.theme_directory(),
 	)
 	defer settings.diagnostics_destroy(&diagnostics)
 	if err != nil {

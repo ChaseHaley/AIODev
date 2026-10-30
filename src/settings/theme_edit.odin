@@ -21,15 +21,24 @@ Theme_Edit_Error :: enum {
 theme_color_edit :: proc(
 	source, token_key, value: string,
 	allocator := context.allocator,
+	themes_directory: string = "",
 ) -> (
 	updated, created, issue: string,
 	error: Theme_Edit_Error,
 ) {
 	if _, found := token_find(token_key); !found {return "", "", "", .Unavailable}
-	s, diagnostics, parse_error := parse(source, allocator)
+	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
 	if parse_error != nil {return "", "", "", .Allocation}
 	diagnostics_destroy(&diagnostics)
 	defer destroy(&s)
+	if custom := custom_theme_find(&s, s.theme.name); custom != nil && custom.external {
+		copy, id, copy_error := theme_duplicate(source, allocator, themes_directory)
+		defer delete(copy, allocator)
+		if copy_error != .None {return "", "", "", copy_error}
+		updated, _, issue, error = theme_color_edit(copy, token_key, value, allocator, themes_directory)
+		if error != .None {delete(id, allocator); return}
+		return updated, id, issue, error
+	}
 	revision, clone_error := strings.clone(source, allocator)
 	if clone_error != nil {return "", "", "", .Allocation}
 	defer delete(revision, allocator)
@@ -69,11 +78,12 @@ theme_color_edit :: proc(
 theme_duplicate :: proc(
 	source: string,
 	allocator := context.allocator,
+	themes_directory: string = "",
 ) -> (
 	updated, created: string,
 	error: Theme_Edit_Error,
 ) {
-	s, diagnostics, parse_error := parse(source, allocator)
+	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
 	if parse_error != nil {return "", "", .Allocation}
 	diagnostics_destroy(&diagnostics)
 	defer destroy(&s)
@@ -120,15 +130,17 @@ theme_duplicate :: proc(
 theme_rename :: proc(
 	source, new_id: string,
 	allocator := context.allocator,
+	themes_directory: string = "",
 ) -> (
 	updated, issue: string,
 	error: Theme_Edit_Error,
 ) {
-	s, diagnostics, parse_error := parse(source, allocator)
+	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
 	if parse_error != nil {return "", "", .Allocation}
 	diagnostics_destroy(&diagnostics)
 	defer destroy(&s)
 	if !theme_custom(&s) {return "", "", .Unavailable}
+	if custom_theme_find(&s, s.theme.name).external {return "", "", .Unavailable}
 	if !theme_id_valid(new_id) {
 		return "", "Use lowercase letters, digits, - and _, and no built-in theme name.", .Invalid
 	}
@@ -173,16 +185,17 @@ theme_rename :: proc(
 theme_delete :: proc(
 	source: string,
 	allocator := context.allocator,
+	themes_directory: string = "",
 ) -> (
 	updated, selected: string,
 	error: Theme_Edit_Error,
 ) {
-	s, diagnostics, parse_error := parse(source, allocator)
+	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
 	if parse_error != nil {return "", "", .Allocation}
 	diagnostics_destroy(&diagnostics)
 	defer destroy(&s)
 	custom := custom_theme_find(&s, s.theme.name)
-	if custom == nil {return "", "", .Unavailable}
+	if custom == nil || custom.external {return "", "", .Unavailable}
 	revision, clone_error := strings.clone(source, allocator)
 	if clone_error != nil {return "", "", .Allocation}
 	defer delete(revision, allocator)
@@ -231,6 +244,7 @@ theme_edit_line :: proc(
 	error: Theme_Edit_Error,
 ) {
 	updated, message, alloc_error := edit_text(text^, key, value, allocator)
+	defer delete(message, allocator)
 	if alloc_error != nil {
 		delete(updated, allocator)
 		delete(message, allocator)
@@ -240,7 +254,6 @@ theme_edit_line :: proc(
 		delete(updated, allocator)
 		return strings.clone(message, context.temp_allocator), .Invalid
 	}
-	delete(message, allocator)
 	delete(text^, allocator)
 	text^ = updated
 	return

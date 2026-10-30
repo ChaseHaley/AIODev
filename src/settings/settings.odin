@@ -748,6 +748,7 @@ parse_key_binding :: proc(
 parse :: proc(
 	text: string,
 	allocator := context.allocator,
+	themes_directory: string = "",
 ) -> (
 	Settings,
 	[dynamic]Diagnostic,
@@ -856,6 +857,10 @@ parse :: proc(
 		}
 	}
 	if profile_error := profiles_finalize(&s); profile_error != nil {return {}, {}, profile_error}
+	if themes_directory != "" {
+		if file_error := theme_files_load(&s, &diagnostics, themes_directory);
+		   file_error != nil {return {}, {}, file_error}
+	}
 	if theme_error := resolve_theme(&s, &diagnostics); theme_error != nil {return {}, {}, theme_error}
 	success = true
 	return s, diagnostics, nil
@@ -910,6 +915,7 @@ load :: proc(
 	path: string,
 	allocator := context.allocator,
 	extra_comments: []string = nil,
+	themes_directory: string = "",
 ) -> (
 	s: Settings,
 	diagnostics: [dynamic]Diagnostic,
@@ -940,7 +946,7 @@ load :: proc(
 			}
 		}
 		parse_error: runtime.Allocator_Error
-		s, diagnostics, parse_error = parse(text, allocator)
+		s, diagnostics, parse_error = parse(text, allocator, themes_directory)
 		if parse_error != nil {err = parse_error}
 		return
 	}
@@ -959,7 +965,7 @@ load :: proc(
 	err = os.write_entire_file(path, text)
 	if err != nil {return}
 	default_error: runtime.Allocator_Error
-	s, default_error = defaults(allocator)
+	s, diagnostics, default_error = parse(text, allocator, themes_directory)
 	if default_error != nil {
 		err = default_error
 		return

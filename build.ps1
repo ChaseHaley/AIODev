@@ -104,6 +104,9 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     $stem = $Output -replace '\.exe$', ''
     Remove-Item -LiteralPath "$stem.obj", "$stem.ll" -ErrorAction SilentlyContinue
     Copy-Conpty (Split-Path $Output)
+    $themeDestination = Join-Path (Split-Path $Output) 'themes'
+    New-Item -ItemType Directory -Force $themeDestination | Out-Null
+    Copy-Item -Path 'themes/*.json' -Destination $themeDestination -Force
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
@@ -167,6 +170,7 @@ switch ($Task) {
         Copy-Item -LiteralPath 'tools/install.ps1' -Destination "$stage/install.ps1"
         Copy-Item -LiteralPath 'vendor/ghostty/LICENSE' -Destination "$stage/Ghostty-LICENSE.txt"
         Copy-Conpty $stage
+        Copy-Item -LiteralPath 'themes' -Destination $stage -Recurse -Force
         Copy-Item -LiteralPath 'vendor/conpty/LICENSE' -Destination "$stage/ConPTY-LICENSE.txt"
         [IO.File]::WriteAllText((Join-Path $PWD "$stage/build.txt"), "$buildId`r`n")
         $archive = "build/AIODev-$buildId-windows-x64.zip"

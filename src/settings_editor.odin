@@ -83,7 +83,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		return false
 	}
 	p.source = owned_source
-	s, diagnostics, parse_error := settings.parse(p.source)
+	s, diagnostics, parse_error := settings.parse(p.source, themes_directory = settings.theme_directory())
 	defer settings.diagnostics_destroy(&diagnostics)
 	if parse_error != nil {
 		ui.editor_destroy(p)
@@ -566,6 +566,14 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	case "theme.duplicate":
 		editor_theme_duplicate(app, w)
 		return
+	case "theme.export":
+		path, error := settings.theme_export(&app.settings, settings.theme_directory())
+		if error != nil {
+			ui.editor_message(p, "Could not export theme. Check the themes folder permissions.", true)
+		} else {
+			ui.editor_message(p, fmt.tprintf("Theme saved to %s", path), false)
+		}
+		return
 	case "theme.delete":
 		editor_theme_delete(app, w)
 		return
@@ -844,7 +852,7 @@ settings_theme_choices :: proc(s: ^settings.Settings) -> []string {
 // effect; a custom theme's Reset returns a color to its built-in base.
 @(private)
 settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
-	if custom := settings.custom_theme_find(s, s.theme.name); custom != nil {
+	if custom := settings.custom_theme_find(s, s.theme.name); custom != nil && !custom.external {
 		rows := [?]ui.Editor_Row {
 			{
 				key = "theme.rename",
@@ -876,20 +884,22 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 			if ui.editor_add(p, row, "Theme") != nil {return false}
 		}
 	} else {
-		modes := settings.THEME_MODES
 		row := ui.Editor_Row {
 			key         = "theme.duplicate",
 			title       = "Save as New Theme",
-			description = fmt.tprintf(
-				"Start a custom theme from %s-%s. Changing any color below does this automatically.",
-				s.theme.name,
-				modes[s.theme.mode],
-			),
+			description = fmt.tprintf("Copy %s into a custom theme you can edit.", s.theme.name),
 			value       = "Save Copy",
 			kind        = .Action,
 		}
 		if ui.editor_add(p, row, "Theme") != nil {return false}
 	}
+	if ui.editor_add(p, {
+		key = "theme.export",
+		title = "Export Theme File",
+		description = "Save a portable JSON file in the themes folder. Share it with its schema file.",
+		kind = .Action,
+		value = "Export",
+	}, "Theme") != nil {return false}
 	base := settings.theme_base(s)
 	tokens := settings.THEME_TOKENS
 	for token in settings.Theme_Token {
@@ -951,7 +961,9 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 		_, _, alpha := settings.parse_color(value)
 		alpha_dropped = alpha && tokens[token].kind != .Translucent
 	}
-	updated, created, issue, error := settings.theme_color_edit(w.editor.source, token_key, value)
+	updated, created, issue, error := settings.theme_color_edit(
+		w.editor.source, token_key, value, themes_directory = settings.theme_directory(),
+	)
 	defer delete(updated)
 	defer delete(created)
 	if error != .None {
@@ -971,7 +983,9 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 
 @(private)
 editor_theme_duplicate :: proc(app: ^App, w: ^Window) {
-	updated, created, error := settings.theme_duplicate(w.editor.source)
+	updated, created, error := settings.theme_duplicate(
+		w.editor.source, themes_directory = settings.theme_directory(),
+	)
 	defer delete(updated)
 	defer delete(created)
 	if error == .Invalid {

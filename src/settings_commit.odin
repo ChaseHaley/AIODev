@@ -17,7 +17,7 @@ settings_commit :: proc(
 	previous, previous_error := strings.clone(expected, context.temp_allocator)
 	revision, revision_error := strings.clone(updated, context.temp_allocator)
 	if previous_error != nil || revision_error != nil {return .IO}
-	loaded, diagnostics, parse_error := settings.parse(revision)
+	loaded, diagnostics, parse_error := settings.parse(revision, themes_directory = settings.theme_directory())
 	defer settings.destroy(&loaded)
 	defer settings.diagnostics_destroy(&diagnostics)
 	if parse_error != nil {return .IO}

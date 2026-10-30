@@ -1,0 +1,13 @@
+{
+  "$schema": "./theme.schema.json",
+  "version": 1,
+  "id": "creator-example",
+  "name": "Creator Example",
+  "description": "Start here: choose a built-in base and add semantic colors with editor autocomplete.",
+  "base": "studio-dark",
+  "colors": {
+    "accent": "#82aaff",
+    "tab_indicator": "#82aaff",
+    "pane_focus": "#82aaff80"
+  }
+}

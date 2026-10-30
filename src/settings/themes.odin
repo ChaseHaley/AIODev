@@ -237,6 +237,7 @@ Custom_Theme :: struct {
 	colors:    [Theme_Token]Theme_Color,
 	overrides: bit_set[Theme_Token],
 	base_set:  bool,
+	external:  bool,
 }
 
 @(private)
