@@ -117,7 +117,7 @@ SCHEMA :: [?]Schema_Entry {
 		1,
 		64,
 		nil,
-		"Color theme: studio, tide, ember, or the ID of a custom theme.",
+		"Color theme: studio, tide, ember, tokyonight-night, tokyonight-storm, tokyonight-moon, or a custom ID.",
 	},
 	{
 		"theme.mode",

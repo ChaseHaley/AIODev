@@ -7,7 +7,7 @@ import "aio:settings"
 
 @(test)
 builtin_themes_resolve_after_parsing :: proc(t: ^testing.T) {
-	backgrounds := [settings.Theme_Name][settings.Theme_Mode]settings.Color{
+	backgrounds := #partial [settings.Theme_Name][settings.Theme_Mode]settings.Color{
 		.Studio = {.Dark = {0x12, 0x12, 0x15}, .Light = {0xff, 0xff, 0xff}},
 		.Tide = {.Dark = {0x15, 0x1e, 0x26}, .Light = {0xf8, 0xfa, 0xfc}},
 		.Ember = {.Dark = {0x22, 0x1d, 0x1a}, .Light = {0xfb, 0xf8, 0xf5}},
@@ -27,6 +27,31 @@ builtin_themes_resolve_after_parsing :: proc(t: ^testing.T) {
 			testing.expect_value(t, s.colors.foreground, theme.colors[.Text].rgb)
 			testing.expect_value(t, theme, settings.builtin_theme({settings.Theme_Name(i), settings.Theme_Mode(j)}))
 		}
+	}
+}
+
+@(test)
+tokyo_variants_resolve_and_support_custom_bases :: proc(t: ^testing.T) {
+	cases := [?]struct {name: string, background, ansi_red: settings.Color} {
+		{"tokyonight-night", {0x1a, 0x1b, 0x26}, {0xf7, 0x76, 0x8e}},
+		{"tokyonight-storm", {0x24, 0x28, 0x3b}, {0xf7, 0x76, 0x8e}},
+		{"tokyonight-moon", {0x22, 0x24, 0x36}, {0xff, 0x75, 0x7f}},
+	}
+	for fixture in cases {
+		text := fmt.tprintf("theme.name = %s\ntheme.mode = dark\n", fixture.name)
+		s, d, err := settings.parse(text)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&d)
+		testing.expect_value(t, err, nil)
+		testing.expect_value(t, len(d), 0)
+		testing.expect_value(t, s.colors.background, fixture.background)
+		testing.expect_value(t, s.colors.palette[1], fixture.ansi_red)
+		base, ok := settings.builtin_parse(fmt.tprintf("%s-light", fixture.name))
+		testing.expect(t, ok)
+		day := settings.builtin_theme(base)
+		testing.expect(t, day.light)
+		testing.expect_value(t, day.colors[.Background].rgb, settings.Color{0xe1, 0xe2, 0xe7})
+		testing.expect_value(t, day.colors[.Palette_1].rgb, settings.Color{0xf5, 0x2a, 0x65})
 	}
 }
 

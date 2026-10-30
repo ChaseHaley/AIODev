@@ -8,6 +8,9 @@ Theme_Name :: enum int {
 	Studio,
 	Tide,
 	Ember,
+	Tokyo_Night,
+	Tokyo_Storm,
+	Tokyo_Moon,
 }
 Theme_Mode :: enum int {
 	Dark,
@@ -17,6 +20,9 @@ THEME_NAMES :: [Theme_Name]string {
 	.Studio = "studio",
 	.Tide   = "tide",
 	.Ember  = "ember",
+	.Tokyo_Night = "tokyonight-night",
+	.Tokyo_Storm = "tokyonight-storm",
+	.Tokyo_Moon = "tokyonight-moon",
 }
 THEME_MODES :: [Theme_Mode]string {
 	.Dark  = "dark",
@@ -406,8 +412,9 @@ theme_color_parse :: proc(
 
 @(private)
 builtin_colors :: proc(b: Builtin_Theme) -> Builtin_Colors {
+	if b.name >= .Tokyo_Night {return tokyo_colors(b)}
 	@(static, rodata)
-	themes := [Theme_Name][Theme_Mode]Builtin_Colors {
+	themes := #partial [Theme_Name][Theme_Mode]Builtin_Colors {
 		.Studio = {
 			.Dark = {
 				window = {0x0c, 0x0c, 0x0e},
