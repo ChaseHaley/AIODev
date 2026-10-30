@@ -2,6 +2,7 @@ package control
 
 import "base:runtime"
 import "core:encoding/json"
+import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -13,9 +14,12 @@ Wake :: struct {
 	procedure: proc(user: rawptr),
 	user:      rawptr,
 }
+// `status` carries a CLI exit status (commands.Status); zero is left off the wire, so verification
+// replies keep their two-key form.
 Response :: struct {
-	ok:   bool,
-	text: string,
+	ok:     bool,
+	text:   string,
+	status: u8,
 }
 
 @(private)
@@ -45,18 +49,31 @@ message_destroy :: proc(m: ^Message) {
 	free(m, m.allocator)
 }
 
+// The verification channel's pipe; only verify builds serve it.
 @(require_results)
 pipe_name :: proc(app_id: string, allocator := context.allocator) -> (string, Error) {
+	return instance_pipe_name(app_id, ".control", allocator)
+}
+
+// The CLI's pipe, served while the control.enabled setting is on.
+@(require_results)
+cli_pipe_name :: proc(app_id: string, allocator := context.allocator) -> (string, Error) {
+	return instance_pipe_name(app_id, ".cli", allocator)
+}
+
+@(private, require_results)
+instance_pipe_name :: proc(app_id, suffix: string, allocator: runtime.Allocator) -> (string, Error) {
 	if app_id == "" || strings.contains_any(app_id, "\\/\x00") || !utf8.valid_string(app_id) {
 		return "", .Invalid_Argument
 	}
-	s, err := strings.concatenate({`\\.\pipe\`, app_id, ".control"}, allocator)
+	s, err := strings.concatenate({`\\.\pipe\`, app_id, suffix}, allocator)
 	if err != nil {return "", .Out_Of_Memory}
 	return s, .None
 }
 
+// A raw server hands requests over unparsed, for callers with their own grammar.
 @(private, require_results)
-decode_request :: proc(data: []u8, allocator := context.allocator) -> (^Message, Error) {
+decode_request :: proc(data: []u8, raw: bool, allocator := context.allocator) -> (^Message, Error) {
 	if len(data) > MAX_MESSAGE {return nil, .Protocol}
 	text := strings.trim_space(string(data))
 	if len(text) == 0 || text[0] != '[' {return nil, .Protocol}
@@ -100,8 +117,20 @@ decode_request :: proc(data: []u8, allocator := context.allocator) -> (^Message,
 			return nil, .Protocol
 		}
 	}
-	m.request, m.parse_error = parse(m.args, allocator)
+	if !raw {m.request, m.parse_error = parse(m.args, allocator)}
 	return m, .None
+}
+
+@(private, require_results)
+encode_response :: proc(response: Response, allocator := context.allocator) -> ([]u8, Error) {
+	if response.status == 0 {
+		Plain :: struct {
+			ok:   bool,
+			text: string,
+		}
+		return encode(Plain{response.ok, response.text}, allocator)
+	}
+	return encode(response, allocator)
 }
 
 @(private, require_results)
@@ -123,8 +152,8 @@ decode_response :: proc(data: []u8, allocator: runtime.Allocator) -> (Response, 
 	tokens := json.make_tokenizer(string(data), .JSON)
 	opening, opening_error := json.get_token(&tokens)
 	if opening_error != nil || opening.kind != .Open_Brace {return {}, .Protocol}
-	seen_ok, seen_text := false, false
-	for _ in 0 ..< 2 {
+	seen_ok, seen_text, seen_status := false, false, false
+	for _ in 0 ..< 3 {
 		key_token, key_error := json.get_token(&tokens)
 		if key_error != nil || key_token.kind != .String {return {}, .Protocol}
 		key: string
@@ -132,7 +161,7 @@ decode_response :: proc(data: []u8, allocator: runtime.Allocator) -> (Response, 
 			delete(key, allocator)
 			return {}, .Out_Of_Memory
 		}
-		is_ok, is_text := key == "ok", key == "text"
+		is_ok, is_text, is_status := key == "ok", key == "text", key == "status"
 		delete(key, allocator)
 		colon, colon_error := json.get_token(&tokens)
 		if colon_error != nil || colon.kind != .Colon {return {}, .Protocol}
@@ -142,6 +171,11 @@ decode_response :: proc(data: []u8, allocator: runtime.Allocator) -> (Response, 
 			seen_ok = true
 		} else if is_text && !seen_text && value.kind == .String {
 			seen_text = true
+		} else if is_status && !seen_status && value.kind == .Float {
+			// The tokenizer reports every number as Float; a status is plain decimal digits.
+			status, valid := strconv.parse_uint(value.text, 10)
+			if !valid || status > uint(max(u8)) {return {}, .Protocol}
+			seen_status = true
 		} else {
 			return {}, .Protocol
 		}

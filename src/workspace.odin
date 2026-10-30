@@ -80,6 +80,9 @@ tab_create :: proc(
 session_close :: proc(app: ^App, id: u32) {
 	for &entry, i in app.sessions {
 		if entry.id == id {
+			status := term.status(entry.session)
+			app.closed_sessions[app.closed_next] = {id, status.kind, status.exit_code}
+			app.closed_next = (app.closed_next + 1) % len(app.closed_sessions)
 			session_entry_destroy(&entry)
 			ordered_remove(&app.sessions, i)
 			return
@@ -276,17 +279,73 @@ pane_split :: proc(
 	ratio: f32 = 0.5,
 	focus := true,
 ) {
-	if !pane_minimum_split(app, w, direction, ratio) {return}
-	if !session_open(app) {notify(app, .Error, "Could not create a pane."); return}
+	tab := w.workspace.selected
+	switch _, err := pane_split_at(app, w, w.workspace, tab, w.tree.focus, direction, ratio, focus, {}, true);
+	     err {
+	case .None, .Minimum:
+	case .Check:
+		notify(app, .Error, "Could not check the new pane size.")
+	case .Session:
+		notify(app, .Error, "Could not create a pane.")
+	case .Layout:
+		notify(app, .Error, "Could not split the pane.")
+	}
+}
+
+// What a new pane runs; empty fields take the profile's or settings' values.
+Pane_Launch :: struct {
+	command, directory, profile: string,
+}
+
+Pane_Split_Error :: enum {
+	None,
+	Minimum, // The new pane would be smaller than the minimum pane size.
+	Check,   // The size check itself failed.
+	Session,
+	Layout,
+}
+
+// Splits `node` of the workspace's tab at `tab_index` and returns the new pane's session id. w shows
+// the workspace, or is nil when no window does; only a shown tab is relaid out, and focus selects the
+// tab first.
+@(require_results)
+pane_split_at :: proc(
+	app: ^App,
+	w: ^Window,
+	workspace: ^Workspace,
+	tab_index: int,
+	node: layout.Node_Id,
+	direction: layout.Direction,
+	ratio: f32,
+	focus: bool,
+	launch: Pane_Launch,
+	notify_minimum: bool,
+) -> (
+	u32,
+	Pane_Split_Error,
+) {
+	tab := workspace.tabs[tab_index]
+	if w != nil {
+		trial := pane_trial_split(app, w, direction, ratio, tree = &tab.tree, node = node,
+			notify_failure = notify_minimum)
+		if trial.error == .Minimum {return 0, .Minimum}
+		if trial.error != .None {return 0, .Check}
+	}
+	if !session_open(app, launch.command, launch.directory, launch.profile) {return 0, .Session}
 	id := app.next_session_id
-	node, err := layout.split_direction(w.tree, w.tree.focus, direction, ratio, {.Terminal, id})
+	added, err := layout.split_direction(&tab.tree, node, direction, ratio, {.Terminal, id})
 	if err != nil {
 		session_close(app, id)
-		notify(app, .Error, "Could not split the pane.")
-		return
+		return 0, .Layout
 	}
-	if focus {pane_focus(app, w, node)}
-	window_relayout(app, w)
+	if w == nil {return id, .None}
+	visible := workspace.selected == tab_index
+	if focus {
+		if !visible {tab_select(app, w, tab_index)}
+		pane_focus(app, w, added)
+	}
+	if visible || focus {window_relayout(app, w)}
+	return id, .None
 }
 
 pane_zoom :: proc(app: ^App, w: ^Window) {

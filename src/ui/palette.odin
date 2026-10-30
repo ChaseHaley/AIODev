@@ -667,7 +667,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	workspaces := (p.mode == .All || p.mode == .Workspaces) ? count_of(p.workspaces) : 0
 	enabled_commands := 0
 	if p.mode == .All || p.mode == .Commands {
-		for command in registry.items {if !command.disabled {enabled_commands += 1}}
+		for command in registry.items {if !command.disabled && !command.hidden {enabled_commands += 1}}
 	}
 	setting_count := (p.mode == .All || p.mode == .Settings) ? len(p.settings) : 0
 	candidates := tabs + workspaces + setting_count + enabled_commands
@@ -739,7 +739,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	if p.mode == .All || p.mode == .Commands {
 		start := len(p.ordered)
 		for &command in registry.items {
-			if command.disabled {continue}
+			if command.disabled || command.hidden {continue}
 			if empty {
 				append(&p.ordered, Palette_Result{kind = .Command, command = &command, setting = -1,
 					rank = PALETTE_NO_RANK})

@@ -23,6 +23,7 @@ Server :: struct {
 	pending:                   ^Message,
 	active, serial, completed: u64,
 	response:                  []u8,
+	raw:                       bool,
 }
 Client :: struct {
 	pipe:       w.HANDLE,
@@ -111,14 +112,24 @@ security_descriptor :: proc(allocator: runtime.Allocator) -> (w.PSECURITY_DESCRI
 	return descriptor, .None
 }
 
+// A raw server delivers each request's arguments unparsed; otherwise it answers verification grammar
+// errors itself.
 @(require_results)
-create :: proc(name: string, wake: Wake, allocator := context.allocator) -> (^Server, Error) {
+create :: proc(
+	name: string,
+	wake: Wake,
+	allocator := context.allocator,
+	raw := false,
+) -> (
+	^Server,
+	Error,
+) {
 	if !valid_pipe_name(name) {
 		return nil, .Invalid_Argument
 	}
 	s, allocation_error := new(Server, allocator)
 	if allocation_error != nil {return nil, .Out_Of_Memory}
-	s.allocator, s.wake = allocator, wake
+	s.allocator, s.wake, s.raw = allocator, wake, raw
 	ok := false
 	defer if !ok {
 		destroy(s)
@@ -184,7 +195,7 @@ poll :: proc(s: ^Server) -> ^Message {
 
 @(require_results)
 respond :: proc(s: ^Server, id: u64, response: Response) -> Error {
-	data, err := encode(response, s.allocator)
+	data, err := encode_response(response, s.allocator)
 	if err != .None {return err}
 	sync.mutex_lock(&s.mutex)
 	if id == 0 || s.active != id || s.response != nil {
@@ -407,7 +418,7 @@ serve_client :: proc(s: ^Server) -> Error {
 			s.allocator,
 		)
 		if read_error != .None {return read_error}
-		m, decode_error := decode_request(data, s.allocator)
+		m, decode_error := decode_request(data, s.raw, s.allocator)
 		delete(data, s.allocator)
 		if decode_error != .None {return decode_error}
 		if m.parse_error.advice != "" {
@@ -423,7 +434,10 @@ serve_client :: proc(s: ^Server) -> Error {
 				strings.builder_destroy(&text)
 				return writer.error
 			}
-			response, encode_error := encode(Response{false, strings.to_string(text)}, s.allocator)
+			response, encode_error := encode_response(
+				Response{ok = false, text = strings.to_string(text)},
+				s.allocator,
+			)
 			strings.builder_destroy(&text)
 			if encode_error != .None {return encode_error}
 			write_error := write_line(
@@ -479,8 +493,8 @@ server_thread :: proc(t: ^thread.Thread) {
 			log.errorf("control: serving client failed: %v", err)
 		}
 		if err == .Protocol {
-			data, encode_error := encode(
-				Response{false, "protocol error: use a JSON string array, at most 4 MiB"},
+			data, encode_error := encode_response(
+				Response{ok = false, text = "protocol error: use a JSON string array, at most 4 MiB"},
 			)
 			if encode_error == .None {
 				if write_error := write_line(s.pipe, data, s.stop, time.tick_now(), 1000);

@@ -2,11 +2,13 @@ package main
 
 import "aio:colour"
 import "aio:commands"
+import "aio:control"
 import "aio:font"
 import "aio:glyphs"
 import "aio:instance"
 import platform_api "aio:platform"
 import "aio:perf"
+import "aio:pty"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -117,7 +119,29 @@ App :: struct {
 	// Tests replace this to observe Ctrl+click without launching a browser.
 	open_url:              proc(uri: string) -> bool,
 	open_file:             proc(path, approved: string) -> bool,
+	// The CLI pipe, present while control.enabled is on.
+	cli:                   ^control.Server,
+	// The directory holding aio.exe beside this executable, added to each shell's PATH; empty
+	// when aio.exe is missing.
+	cli_directory:         string,
+	// How the most recently closed sessions ended, oldest overwritten first. A pane closes as its
+	// program exits, so a CLI wait that polls afterwards still learns the exit code.
+	closed_sessions:       [32]Closed_Session,
+	closed_next:           int,
 }
+
+Closed_Session :: struct {
+	id:        u32,
+	status:    term.Status_Kind,
+	exit_code: u32,
+}
+
+@(private)
+PANE_VARIABLE :: "AIODEV_PANE"
+@(private)
+INSTANCE_VARIABLE :: "AIODEV_INSTANCE"
+@(private)
+CLI_EXECUTABLE :: "aio.exe"
 
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
@@ -152,6 +176,13 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	palette_set_sources(app)
+	if executable, err := os.get_executable_path(context.temp_allocator); err == nil {
+		directory := filepath.dir(executable)
+		if cli, join_error := filepath.join({directory, CLI_EXECUTABLE}, context.temp_allocator);
+		   join_error == nil && os.exists(cli) {
+			app.cli_directory = strings.clone(directory)
+		}
+	}
 	load_settings(app)
 	font_error: font.Error
 	app.fonts, font_error = font.system_create()
@@ -199,12 +230,16 @@ app_init :: proc(app: ^App) -> bool {
 		if !window_open(app, workspace) {return false}
 	}
 	verify_start(app)
+	control_cli_sync(app)
 	app.running = true
 	return true
 }
 
 app_destroy :: proc(app: ^App) {
 	verify_destroy(app)
+	control.destroy(app.cli)
+	app.cli = nil
+	delete(app.cli_directory)
 	for len(app.windows) > 0 {
 		window_close(app, app.windows[len(app.windows) - 1])
 	}
@@ -289,6 +324,7 @@ tick :: proc(app: ^App) {
 		}
 	}
 	verify_tick(app)
+	control_cli_tick(app)
 	layout_state_tick(app)
 	free_all(context.temp_allocator)
 }
@@ -356,9 +392,12 @@ wake_platform :: proc(user: rawptr) {
 	}
 }
 
+// `pane` is the session id the launch serves. The shell learns it from AIODEV_PANE, so the aio command
+// line acts on "here" by default, and finds aio itself on PATH.
 @(private)
 session_config :: proc(
 	app: ^App,
+	pane: u32,
 	geometry: term.Geometry,
 	profile: ^settings.Profile,
 	command_override: string = "",
@@ -374,8 +413,13 @@ session_config :: proc(
 		log.errorf("expanding the shell directory failed: %v", err)
 		directory = directory_text
 	}
+	environment := make([dynamic]pty.Env_Var, 0, 2, context.temp_allocator)
+	append(&environment, pty.Env_Var{PANE_VARIABLE, fmt.tprintf("%d", pane)})
+	if app.options.name != "" {append(&environment, pty.Env_Var{INSTANCE_VARIABLE, app.options.name})}
 	return {
 		command_line = settings.shell_command_line(command, app.settings.shell.report_directory),
+		environment = environment[:],
+		path_append = app.cli_directory,
 		refresh_environment = app.settings.shell.refresh_environment,
 		working_directory = directory,
 		geometry = geometry,
@@ -417,7 +461,7 @@ session_open :: proc(
 ) -> bool {
 	profile, _ := settings.profile_resolve(&app.settings, profile_id)
 	geometry := initial_geometry(app)
-	config := session_config(app, geometry, profile, command)
+	config := session_config(app, app.next_session_id + 1, geometry, profile, command)
 	if directory != "" {config.working_directory = directory}
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
@@ -476,7 +520,7 @@ session_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
 session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	geometry := term.geometry(entry.session)
 	profile, requested := settings.profile_resolve(&app.settings, entry.profile_id)
-	config := session_config(app, geometry, profile)
+	config := session_config(app, entry.id, geometry, profile)
 	// A removed or unusable profile restarts from the exact line it last launched, without
 	// applying the directory-reporting wrapper a second time.
 	if !requested && entry.profile_id != "" && entry.header.command != "" {
@@ -565,10 +609,10 @@ load_settings :: proc(app: ^App) {
 		}
 		app.settings_path = path
 	}
-	comments := binding_comments()
+	comments, comment_count := binding_comments()
 	loaded, diagnostics, created, migrated, migration_error, err := settings.load(
 		app.settings_path,
-		extra_comments = comments[:],
+		extra_comments = comments[:comment_count],
 		themes_directory = settings.theme_directory(),
 	)
 	defer settings.diagnostics_destroy(&diagnostics)
@@ -667,6 +711,7 @@ settings_apply_running :: proc(app: ^App) {
 	}
 	status_apply_settings(app)
 	shell_icon_load(app)
+	control_cli_sync(app)
 }
 
 // Resolves the configured terminal font, falling back to fonts every Windows install has.

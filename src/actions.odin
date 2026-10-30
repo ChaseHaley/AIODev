@@ -125,6 +125,12 @@ Action :: enum u32 {
 	Move_Pane_New_Workspace,
 	Move_Tab_Workspace,
 	Move_Tab_New_Workspace,
+	Pane_List,
+	Pane_Status,
+	Pane_Read,
+	Pane_Send,
+	Pane_Focus,
+	App_Commands,
 }
 
 @(private)
@@ -368,18 +374,29 @@ ACTIONS :: [Action]Action_Info {
 	.Status_Panel = {"status.panel", "Show or Hide the Activity Panel", {{.Y, {.Control, .Shift}}}},
 	.Status_Board = {"status.board", "Show the Program Status Board", {{.G, {.Control, .Shift}}}},
 	.Status_Dismiss_Finished = {"status.dismiss_finished", "Dismiss Finished Program Status", nil},
+	.Pane_List = {"pane.list", "List Panes", nil},
+	.Pane_Status = {"pane.status", "Show Pane Status", nil},
+	.Pane_Read = {"pane.read", "Read Pane Screen", nil},
+	.Pane_Send = {"pane.send", "Send Text to Pane", nil},
+	.Pane_Focus = {"pane.focus", "Focus Pane", nil},
+	.App_Commands = {"app.commands", "List Commands", nil},
 }
 
 @(require_results)
 register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 	@(static, rodata)
 	actions := ACTIONS
+	@(static, rodata)
+	arguments := ACTION_ARGUMENTS
 	for info, action in actions {
 		command := commands.Command {
 			id = commands.Command_Id(action),
 			name = info.name,
 			title = info.title,
 			shortcuts = {info.shortcuts, len(info.shortcuts)},
+			arguments = arguments[action].accepted,
+			required = arguments[action].required,
+			hidden = arguments[action].hidden,
 		}
 		if err := commands.register(registry, command); err != .None {return err}
 	}
@@ -663,6 +680,8 @@ run_action :: proc(
 		status_board_toggle(app, w)
 	case .Status_Dismiss_Finished:
 		status_dismiss_finished(app, w)
+	case .Pane_List, .Pane_Status, .Pane_Read, .Pane_Send, .Pane_Focus, .App_Commands:
+	// command_invoke answers these; they have no form that acts on a window's focus.
 	}
 }
 
@@ -816,18 +835,23 @@ binding_comment :: proc(info: Action_Info) -> string {
 	return fmt.tprintf("keys.%s = %s", info.name, value)
 }
 
+// The settings file's shortcut comments: a heading, then one line per command a key can run.
 @(private)
-binding_comments :: proc() -> [len(Action) + 1]string {
-	lines: [len(Action) + 1]string
+binding_comments :: proc() -> (lines: [len(Action) + 1]string, count: int) {
 	lines[0] =
 		"Shortcuts: uncomment a line to change it. Separate several with commas; " +
 		"leave the value empty to remove them."
+	count = 1
 	@(static, rodata)
 	actions := ACTIONS
+	@(static, rodata)
+	arguments := ACTION_ARGUMENTS
 	for info, action in actions {
-		lines[int(action) + 1] = binding_comment(info)
+		if arguments[action].hidden {continue}
+		lines[count] = binding_comment(info)
+		count += 1
 	}
-	return lines
+	return
 }
 
 @(private)

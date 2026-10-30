@@ -36,6 +36,8 @@ group_title :: proc(key: string) -> string {
 		return "Cursor"
 	case "colors":
 		return "Colors"
+	case "control":
+		return "Command Line"
 	}
 	return "Other"
 }

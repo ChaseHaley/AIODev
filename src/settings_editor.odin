@@ -338,6 +338,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		return false
 	}
 	for command in app.registry.items {
+		if command.hidden {continue}
 		value := commands.shortcut_set_text(command.shortcuts, context.temp_allocator)
 		for binding in s.keys {if binding.name == command.name {value = binding.value; break}}
 		row := ui.Editor_Row {
@@ -1132,7 +1133,7 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	if e.pressed && !literal && !editor_owns(logical) {
 		if action, found := shortcut_action(app, e); found {
-			run_action(app, w, action)
+			command_run(app, w, action, .Key)
 			return
 		}
 	}

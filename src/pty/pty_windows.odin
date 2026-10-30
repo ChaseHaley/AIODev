@@ -134,6 +134,32 @@ apply_environment_override :: proc(
 	return {}
 }
 
+// Adds `directory` as the last PATH entry, or sets PATH to it when the block has none.
+@(private, require_results)
+append_path :: proc(
+	entries: ^[dynamic]Environment_Entry,
+	directory: string,
+	allocator: runtime.Allocator,
+) -> Spawn_Error {
+	path_name := [4]u16{'P', 'A', 'T', 'H'}
+	for &existing in entries^ {
+		if compare_environment(environment_name(existing.text), path_name[:]) != CSTR_EQUAL {continue}
+		addition := w.utf8_to_wstring(directory, allocator)
+		if addition == nil {return {.Out_Of_Memory, 0}}
+		defer delete(addition, allocator)
+		added := slice.from_ptr(cast(^u16)addition, len(addition))
+		combined, err := make([]u16, len(existing.text) + 1 + len(added) + 1, allocator)
+		if err != nil {return {.Out_Of_Memory, 0}}
+		copy(combined, existing.text)
+		combined[len(existing.text)] = ';'
+		copy(combined[len(existing.text) + 1:], added)
+		delete(existing.owned, allocator)
+		existing = {text = combined[:len(combined) - 1], owned = cstring16(raw_data(combined))}
+		return {}
+	}
+	return apply_environment_override(entries, {"PATH", directory}, allocator)
+}
+
 @(private)
 sort_environment :: proc(entries: []Environment_Entry) {
 	slice.sort_by(entries, proc(a, b: Environment_Entry) -> bool {
@@ -166,6 +192,7 @@ environment_block :: proc(
 	overrides: []Env_Var,
 	allocator: runtime.Allocator,
 	refresh: bool,
+	path_append: string = "",
 ) -> (
 	[]u16,
 	Spawn_Error,
@@ -210,6 +237,9 @@ environment_block :: proc(
 		if err := apply_environment_override(&entries, item, allocator); err.kind != .None {
 			return nil, err
 		}
+	}
+	if path_append != "" {
+		if err := append_path(&entries, path_append, allocator); err.kind != .None {return nil, err}
 	}
 	sort_environment(entries[:])
 	return serialize_environment(entries[:], allocator)
@@ -272,6 +302,7 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 		options.environment,
 		allocator,
 		options.refresh_environment,
+		options.path_append,
 	)
 	if env_err.kind != .None {
 		return {}, env_err

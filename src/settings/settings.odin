@@ -68,6 +68,10 @@ Status_Settings :: struct {
 Window_Settings :: struct {
 	columns, rows, padding: int,
 }
+// The CLI pipe exists only while `enabled` is on (D-046).
+Control_Settings :: struct {
+	enabled: bool,
+}
 Scrollback_Settings :: struct {
 	lines: int,
 }
@@ -106,6 +110,7 @@ Settings :: struct {
 	tab:             Tab_Settings,
 	tabs:            Tabs_Settings,
 	status:          Status_Settings,
+	control:         Control_Settings,
 	profiles:        Profiles,
 	allocator:       runtime.Allocator,
 	leader_line:     int,
@@ -722,6 +727,19 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		nil,
 		"Blink the cursor.",
+	},
+	{
+		"control.enabled",
+		"Command Line Control",
+		.Bool,
+		offset_of(Settings, control) + offset_of(Control_Settings, enabled),
+		"false",
+		0,
+		0,
+		nil,
+		"Accept commands from the aio command line, which scripts and coding agents use to open " +
+			"tabs and panes, send them text and read their screens. Only programs running as you " +
+			"on this computer can connect.",
 	},
 }
 Diagnostic_Kind :: enum {

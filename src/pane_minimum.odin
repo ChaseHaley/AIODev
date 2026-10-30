@@ -43,21 +43,8 @@ pane_minimum_allows :: proc(
 	return true
 }
 
-pane_minimum_single :: proc(app: ^App, w: ^Window) -> bool {
+pane_minimum_single :: proc(app: ^App, w: ^Window, notify_failure := true) -> bool {
 	area := window_content_area(app, w)
 	rects := [?]layout.Pane_Rect{{content = {.Terminal, 0}, rect = area}}
-	return pane_minimum_allows(app, w, rects[:], nil, notify_failure = true)
-}
-
-pane_minimum_split :: proc(
-	app: ^App,
-	w: ^Window,
-	direction: layout.Direction,
-	ratio: f32,
-) -> bool {
-	result := pane_trial_split(app, w, direction, ratio)
-	if result.error != .None && result.error != .Minimum {
-		notify(app, .Error, "Could not check the new pane size.")
-	}
-	return result.error == .None
+	return pane_minimum_allows(app, w, rects[:], nil, notify_failure)
 }

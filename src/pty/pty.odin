@@ -7,6 +7,8 @@ Env_Var :: struct {
 Spawn_Options :: struct {
 	command_line, working_directory: string,
 	environment:                     []Env_Var,
+	// A directory added at the end of the child's PATH, after the overrides apply.
+	path_append:                     string,
 	cols, rows:                      u16,
 	refresh_environment:             bool,
 }

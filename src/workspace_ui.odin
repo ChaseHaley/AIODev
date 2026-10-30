@@ -338,7 +338,7 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 	if index - count >= 0 && index - count < len(WORKSPACE_ACTIONS) {
 		@(static, rodata)
 		actions := WORKSPACE_ACTIONS
-		run_action(app, w, actions[index - count])
+		command_run(app, w, actions[index - count], .Menu)
 	}
 }
 

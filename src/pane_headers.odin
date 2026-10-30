@@ -197,7 +197,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 				.Badge       = "",
 			}
 			if command := commands.find(&app.registry, names[chosen]);
-			   command != nil {run_action(app, w, Action(command.id))}
+			   command != nil {command_run(app, w, Action(command.id), .Menu)}
 		}
 		return true
 	}

@@ -133,7 +133,7 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 	if !tab_menu_enabled(w, w.tab_menu.selected) { return }
 	action := w.tab_menu.actions[w.tab_menu.selected]
 	w.tab_menu.open = false
-	run_action(app, w, action)
+	command_run(app, w, action, .Menu)
 }
 
 tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {

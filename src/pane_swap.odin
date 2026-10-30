@@ -152,7 +152,7 @@ pane_shell_swap :: proc(
 		return
 	}
 	geometry := term.geometry(entry.session)
-	config := session_config(app, geometry, profile)
+	config := session_config(app, entry.id, geometry, profile)
 	raw_directory := term.working_directory(entry.session, context.temp_allocator)
 	carry :=
 		raw_directory != "" &&
