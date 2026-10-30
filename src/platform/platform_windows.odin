@@ -883,7 +883,8 @@ window_is_focused :: proc(p: ^Platform, id: Window_Id) -> bool {
 window_focus :: proc(p: ^Platform, id: Window_Id) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
-	w.ShowWindow(window.hwnd, w.SW_RESTORE)
+	// SW_RESTORE would also un-maximize; only restore when minimized.
+	if w.IsIconic(window.hwnd) {w.ShowWindow(window.hwnd, w.SW_RESTORE)}
 	if !os_ok(w.SetForegroundWindow(window.hwnd), "SetForegroundWindow") {return .Os}
 	w.SetFocus(window.hwnd)
 	if w.GetFocus() != window.hwnd {
