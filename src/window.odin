@@ -586,6 +586,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			if result != .Ok {return frame, result}
 			if header_result := pane_header_draw(app, w, pane, nil);
 			   header_result != .Ok {return frame, header_result}
+			window_card_dim(app, w, pane, app.theme.pane)
 			window_card_outline(app, w, pane)
 			continue
 		}
@@ -644,6 +645,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		}
 		if header_result := pane_header_draw(app, w, pane, entry);
 		   header_result != .Ok {return frame, header_result}
+		window_card_dim(app, w, pane, frame.background)
 		window_card_outline(app, w, pane)
 	}
 	if blinking != w.blinking {

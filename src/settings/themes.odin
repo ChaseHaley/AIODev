@@ -18,6 +18,7 @@ Pane_Settings :: struct {
 	show_headers:                  bool,
 	confirm_shell_switch:          bool,
 	minimum_columns, minimum_rows: int,
+	focus_border, unfocused_dim:   int,
 }
 Theme_Color :: colour.Translucent
 
