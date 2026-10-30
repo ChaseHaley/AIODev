@@ -277,7 +277,7 @@ tick :: proc(app: ^App) {
 		}
 		update_blink(window)
 		update_autoscroll(app, window)
-		status_spin_tick(window, time.tick_now())
+		status_spin_tick(window)
 		if window.taskbar_workspace != window.workspace {
 			window.taskbar_workspace = window.workspace
 			status_taskbar_update(app, window)
@@ -295,6 +295,10 @@ tick :: proc(app: ^App) {
 
 @(private)
 wait_timeout :: proc(app: ^App) -> u32 {
+	// Spinner frames are already paced by the swap chain, including on high-refresh displays.
+	for window in app.windows {
+		if status_spin_active(window) {return 0}
+	}
 	if motion_active(app) {return 16}
 	INFINITE :: max(u32)
 	deadline, found := ui.notices_deadline(&app.notices)
@@ -325,10 +329,6 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		if window.autoscrolling &&
 		   (!found || time.tick_diff(window.autoscroll_deadline, deadline) > 0) {
 			deadline, found = window.autoscroll_deadline, true
-		}
-		if window.status_spin_deadline != {} &&
-		   (!found || time.tick_diff(window.status_spin_deadline, deadline) > 0) {
-			deadline, found = window.status_spin_deadline, true
 		}
 	}
 	for entry in app.sessions {

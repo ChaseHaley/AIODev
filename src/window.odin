@@ -108,9 +108,8 @@ Window :: struct {
 	wheel_remainder: f32,
 	blinking, cursor_phase_visible: bool,
 	blink_deadline: time.Tick,
-	// A frame that drew a program status spinner repaints at STATUS_SPIN_INTERVAL until one does not.
+	// A frame that drew a spinner requests display-paced frames until one does not.
 	status_spinning: bool,
-	status_spin_deadline: time.Tick,
 	taskbar_state: platform.Progress_State,
 	taskbar_percent: int,
 	taskbar_workspace: ^Workspace,

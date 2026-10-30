@@ -8,6 +8,50 @@ import "aio:settings"
 import "aio:term"
 import "aio:ui"
 
+@(test)
+program_status_spinner_requests_every_display_frame :: proc(t: ^testing.T) {
+	w := app.Window{status_spinning = true, width = 800, height = 600}
+	app.status_spin_tick(&w)
+	w.dirty = false
+	app.status_spin_tick(&w)
+	testing.expect(t, w.dirty, "visible spinner must advance at 240 Hz, not wait for an 80 ms timer")
+}
+
+@(test)
+program_status_spinner_stops_when_not_drawn_or_window_has_no_extent :: proc(t: ^testing.T) {
+	windows := [3]app.Window{
+		{width = 800, height = 600},
+		{status_spinning = true},
+		{status_spinning = true, width = 800, height = 600, preparing = true},
+	}
+	for w in windows {
+		window := w
+		app.status_spin_tick(&window)
+		testing.expect(t, !window.dirty && !app.status_spin_active(&window))
+	}
+}
+
+@(test)
+program_status_static_marks_do_not_request_animation :: proc(t: ^testing.T) {
+	a := app.App{animations = true}
+	w: app.Window
+	marks := [3]ui.Status_Mark{
+		{glyph = .Working, progress = 30},
+		{glyph = .Done, progress = -1},
+		{glyph = .Blocked, progress = -1},
+	}
+	for mark in marks {
+		testing.expect_value(t, app.status_phase(&a, &w, mark), f32(0))
+		testing.expect(t, !w.status_spinning)
+	}
+	a.animations = false
+	testing.expect_value(t, app.status_phase(&a, &w, {glyph = .Working, progress = -1}), f32(0))
+	testing.expect(t, !w.status_spinning)
+	a.animations = true
+	_ = app.status_phase(&a, &w, {glyph = .Working, progress = -1})
+	testing.expect(t, w.status_spinning)
+}
+
 @(private="file")
 Status_Fixture :: struct {
 	state:     app.App,
