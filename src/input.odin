@@ -103,8 +103,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		if w := window_find(app, e.window); w != nil {
 			if w.preparing {_ = gesture_cancel(app, w)} else {hide_to_tray(app, w)}
 		}
-	case platform.Tray_Event, platform.Activate_Request_Event:
+	case platform.Tray_Event:
 		show_window(app)
+	case platform.Activate_Request_Event:
+		// Launching AIODev again means a fresh workspace window, as New Window does. With every
+		// window hidden to the tray, it reopens the existing view instead.
+		if len(app.windows) == 0 {show_window(app)} else {workspace_new(app, nil, true)}
 	case platform.Tray_Menu_Event:
 		switch e.id {
 		case TRAY_OPEN:

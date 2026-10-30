@@ -38,6 +38,7 @@ foreign user32 {
 	GetKeyboardLayout :: proc(idThread: w.DWORD) -> HKL ---
 	ToUnicodeEx :: proc(wVirtKey, wScanCode: w.UINT, lpKeyState: ^w.BYTE, pwszBuff: w.LPWSTR, cchBuff: w.INT, wFlags: w.UINT, dwhkl: HKL) -> w.INT ---
 	FlashWindowEx :: proc(pfwi: ^FLASHWINFO) -> w.BOOL ---
+	AllowSetForegroundWindow :: proc(dwProcessId: w.DWORD) -> w.BOOL ---
 }
 
 @(default_calling_convention = "system")

@@ -191,6 +191,12 @@ init :: proc(p: ^Platform, app_id: string, allocator := context.allocator) -> In
 			log.error("primary host is unavailable")
 			return .Failed
 		}
+		// The launched process owns the foreground; hand it to the primary so its window can take it.
+		primary_pid: w.DWORD
+		w.GetWindowThreadProcessId(host, &primary_pid)
+		if primary_pid == 0 || !bool(AllowSetForegroundWindow(primary_pid)) {
+			log.errorf("AllowSetForegroundWindow failed: %d", w.GetLastError())
+		}
 		if !os_ok(w.PostMessageW(host, ACTIVATE_MESSAGE, 0, 0), "PostMessageW") {return .Failed}
 		return .Secondary
 	}

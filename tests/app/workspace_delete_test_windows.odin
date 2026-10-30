@@ -59,6 +59,28 @@ last_tab_group_removes_workspace_and_reuses_window_then_last_pane_exits :: proc(
 }
 
 @(test)
+second_launch_opens_new_workspace_window_and_reopens_from_tray :: proc(t: ^testing.T) {
+	f: Delete_Fixture
+	defer delete_fixture_destroy(t, &f)
+	if !delete_fixture_init(t, &f) {return}
+	state := &f.state
+	one := state.windows[0]
+	app.handle_event(state, platform.Activate_Request_Event{})
+	if !testing.expect_value(t, len(state.windows), 2) {return}
+	two := state.windows[1]
+	testing.expect_value(t, len(state.workspaces), 2)
+	testing.expect_value(t, len(state.sessions), 2)
+	testing.expect(t, two.workspace != one.workspace && len(two.workspace.tabs) == 1)
+	state.tray_hint_shown = true // Keeps the test from raising a real tray balloon.
+	app.hide_to_tray(state, two)
+	app.hide_to_tray(state, one)
+	testing.expect_value(t, len(state.windows), 0)
+	app.handle_event(state, platform.Activate_Request_Event{})
+	testing.expect_value(t, len(state.windows), 1)
+	testing.expect_value(t, len(state.workspaces), 2)
+}
+
+@(test)
 last_tab_reuses_existing_workspace_owner_without_creating_a_replacement :: proc(t: ^testing.T) {
 	f: Delete_Fixture
 	defer delete_fixture_destroy(t, &f)
