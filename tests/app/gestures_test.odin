@@ -243,7 +243,7 @@ gesture_terminal_packets :: proc(t: ^testing.T, report: bool) {
 	text := gesture_screen(session)
 	if report {
 		testing.expectf(t, strings.contains(text, "MOUSE_BYTES=1B5B3C30") &&
-			strings.contains(text, "1B5B3C3335") && strings.contains(text, "6D"),
+			strings.contains(text, "1B5B3C3332") && strings.contains(text, "6D"),
 			"missing press/motion/release reports: %s", text)
 	} else {
 		testing.expectf(t, strings.contains(text, "MOUSE_BYTES=none"), "unexpected mouse packets: %s", text)

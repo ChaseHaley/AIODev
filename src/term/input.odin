@@ -249,6 +249,11 @@ send_mouse :: proc(
 	target: Maybe(ghostty.Mouse_Button)
 	if b, ok := button.?; ok {
 		target = ghostty_button(b)
+	} else if action == .Motion {
+		for held in pressed {
+			target = ghostty_button(held)
+			break
+		}
 	}
 	buffer: [64]u8
 	sync.mutex_lock(&s.mutex)

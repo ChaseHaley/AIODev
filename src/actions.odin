@@ -420,7 +420,9 @@ run_action :: proc(
 		}
 		palette_open_mode(app, w, mode)
 	case .Copy:
-		if entry != nil {
+		if w.find.open {
+			clipboard_copy(app, ui.field_selected_text(&w.find.query))
+		} else if entry != nil {
 			copy_selection(app, entry, true)
 		}
 	case .Paste:
