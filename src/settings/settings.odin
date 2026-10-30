@@ -45,6 +45,10 @@ Status_Scope :: enum int {
 	All,
 	Workspace,
 }
+Status_Panel_Side :: enum int {
+	Right,
+	Left,
+}
 Status_Keep :: enum int {
 	Focus,
 	Dismiss,
@@ -52,6 +56,7 @@ Status_Keep :: enum int {
 // Program status (OSC 7501). Each surface and state can be turned off on its own; `enabled` turns
 // the whole protocol off, so programs see the terminal as unsupported.
 Status_Settings :: struct {
+	panel_side: Status_Panel_Side,
 	enabled, tab_indicators, active_tab_indicator, pane_headers, workspace_picker: bool,
 	inbox, panel, board, taskbar:                                                 bool,
 	show_idle, show_working, show_blocked, show_done, show_error:                 bool,
@@ -305,8 +310,18 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		0,
 		nil,
-		"Show a docked list of every program reporting status: under the tabs in vertical view, " +
-			"at the right in horizontal view.",
+		"Show a docked list of every program reporting status.",
+	},
+	{
+		"status.panel_side",
+		"Activity Panel Side",
+		.Enum,
+		offset_of(Settings, status) + offset_of(Status_Settings, panel_side),
+		"right",
+		0,
+		0,
+		{"right", "left"},
+		"Dock Activity at the far right or far left of the workspace.",
 	},
 	{
 		"status.board",

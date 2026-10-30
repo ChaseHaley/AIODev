@@ -19,6 +19,7 @@ GHOST_DURATION :: 120 * time.Millisecond
 // Splits whose dividers meet under the pointer move together, outermost first.
 Divider_Drag :: struct {
 	nodes: [4]layout.Node_Id,
+	offsets: [4]f32,
 	count: int,
 }
 
@@ -52,6 +53,20 @@ Tab_Drag :: struct {
 
 @(private)
 divider_hits :: proc(w: ^Window, x, y: f32, out: []layout.Divider) -> int {
+	if rail_overlay(w) {
+		area := rail_area(w)
+		for d in w.dividers {
+			if d.node != RAIL_DIVIDER {continue}
+			if x < area.x || x >= d.rect.x + d.rect.width + 3 * w.scale ||
+			   y < area.y || y >= area.y + area.height {break}
+			docks: [2]layout.Divider
+			count := 0
+			for dock in w.dividers {
+				if dock_divider(dock.node) {docks[count] = dock; count += 1}
+			}
+			return layout.divider_hit_all(docks[:count], x, y, 3 * w.scale, out)
+		}
+	}
 	return layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, out, 10 * w.scale, 2 * w.scale)
 }
 
@@ -61,10 +76,15 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 	n := divider_hits(w, x, y, hits[:])
 	if n == 0 {return false}
 	w.selecting, w.autoscrolling = false, false
-	if hits[0].node == w.divider_click_node && time_ns - w.divider_click_ns <= DOUBLE_CLICK_NS {
+	if hits[0].node == w.divider_click_node && time_ns > w.divider_click_ns &&
+	   time_ns - w.divider_click_ns <= DOUBLE_CLICK_NS {
 		w.divider_click_node = layout.INVALID_NODE
 		balanced := false
-		for d in hits[:n] {balanced = layout.balance_related(w.tree, d.node) || balanced}
+		for d in hits[:n] {
+			if d.node == RAIL_DIVIDER {w.rail_width = 0; balanced = true}
+			else if d.node == ACTIVITY_DIVIDER {w.status.panel_width = 0; balanced = true}
+			else {balanced = layout.balance_related(w.tree, d.node) || balanced}
+		}
 		if balanced {window_relayout(app, w)}
 		return true
 	}
@@ -72,7 +92,16 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 	w.dragging = {
 		count = n,
 	}
-	for d, i in hits[:n] {w.dragging.nodes[i] = d.node}
+	for d, i in hits[:n] {
+		w.dragging.nodes[i] = d.node
+		if dock_divider(d.node) {
+			position := d.node == RAIL_DIVIDER ? rail_area(w).x + rail_width_pixels(w) :
+				(app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) :
+					f32(w.width) - status_panel_dock_width(app, w))
+			w.dragging.offsets[i] = x - position
+		}
+		if d.node == RAIL_DIVIDER {w.rail_resizing = true}
+	}
 	return true
 }
 
@@ -80,14 +109,20 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 // because an outer split resizes the region of the splits nested inside it.
 divider_drag :: proc(app: ^App, w: ^Window, x, y: f32) {
 	gap := window_gap(app, w)
-	area := window_content_area(app, w)
 	moved := false
-	for node in w.dragging.nodes[:w.dragging.count] {
+	for node, i in w.dragging.nodes[:w.dragging.count] {
+		if dock_divider(node) {
+			dock_divider_drag(app, w, node, x - w.dragging.offsets[i])
+			w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
+			window_dividers(app, w)
+			moved = true
+			continue
+		}
 		for d in w.dividers {
 			if d.node != node {continue}
 			if layout.drag_divider(w.tree, d, x, y, gap) {
 				moved = true
-				layout.dividers(w.tree, area, gap, &w.dividers)
+				window_dividers(app, w)
 			}
 			break
 		}

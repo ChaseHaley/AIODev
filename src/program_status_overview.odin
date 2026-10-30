@@ -37,6 +37,9 @@ Status_Surface :: enum {
 }
 
 Status_Overview :: struct {
+	panel_width: f32,
+	panel_side_armed: ui.Armed(bool),
+	panel_side_hover: bool,
 	inbox_open, board_open: bool,
 	// Keyboard selection in the inbox, and the item under the pointer on any surface.
 	selected:               int,
@@ -547,33 +550,40 @@ status_inbox_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
 	s := &app.settings.status
 	if !s.enabled || !s.panel || w.preparing {return false}
-	return w.tabs_horizontal || rail_docked(w)
+	return true
 }
 
-// The rail gives the bottom of its height to the panel in vertical view.
-status_panel_rail_height :: proc(app: ^App, w: ^Window) -> f32 {
-	if w.tabs_horizontal || !status_panel_visible(app, w) {return 0}
-	area := rail_area(w)
-	return math.round(clamp(area.height * 0.45, min(160 * w.scale, area.height / 2), area.height / 2))
-}
-
-// The width horizontal view takes from the panes, including the gap that separates the panel.
 status_panel_dock_width :: proc(app: ^App, w: ^Window) -> f32 {
-	if !w.tabs_horizontal || !status_panel_visible(app, w) {return 0}
-	return math.round(min(STATUS_PANEL_WIDTH * w.scale, f32(w.width) / 3))
+	if !status_panel_visible(app, w) {return 0}
+	width := w.status.panel_width > 0 ? w.status.panel_width : STATUS_PANEL_WIDTH
+	available := f32(w.width) - (rail_docked(w) ? rail_width_pixels(w) : 0)
+	return ui.rail_pixel_width(w.scale, width, available)
 }
 
 status_panel_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	if !status_panel_visible(app, w) {return {}}
-	if !w.tabs_horizontal {
-		area := rail_area(w)
-		height := status_panel_rail_height(app, w)
-		return {area.x, area.y + area.height - height, area.width, height}
-	}
 	content := window_content_area(app, w)
 	gap := window_gap(app, w)
 	width := status_panel_dock_width(app, w) - gap
+	if app.settings.status.panel_side == .Left {
+		return {gap, content.y, max(0, width), content.height}
+	}
 	return {content.x + content.width + gap, content.y, max(0, width), content.height}
+}
+
+status_panel_side_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	r := status_panel_rect(app, w)
+	if r.width <= 0 {return {}}
+	return {r.x + r.width - 28 * w.scale, r.y + 3 * w.scale, 24 * w.scale, 24 * w.scale}
+}
+
+status_panel_side_toggle :: proc(app: ^App) {
+	next := app.settings.status.panel_side == .Right ? "left" : "right"
+	if _, has_file := settings_save_value(app, "status.panel_side", next, "Could not save Activity side.");
+	   !has_file {
+		app.settings.status.panel_side = next == "left" ? .Left : .Right
+		for window in app.windows {window_relayout(app, window)}
+	}
 }
 
 @(private)
@@ -597,17 +607,10 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if panel.width <= 0 || panel.height <= 0 {return .Ok}
 	s := w.scale
 	if render.push_layer(&w.list, panel) != .None {return .Ok}
-	if w.tabs_horizontal {
+	{
 		radius := f32(app.settings.pane.corner_radius) * s
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.pane, radius = radius})
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.pane_border, radius = radius, stroke = max(1, s)})
-	} else {
-		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar})
-		ui.draw_rect(&w.list, {rect = {panel.x, panel.y, panel.width - s, s}, color = app.theme.border})
-		ui.draw_rect(
-			&w.list,
-			{rect = {panel.x + panel.width - s, panel.y, s, panel.height}, color = app.theme.border},
-		)
 	}
 	items := status_items(app, w, true)
 	small := ui.text_styled(&w.ui_text, .Small)
@@ -620,6 +623,14 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		panel.y + 9 * s + small.ascent,
 		app.theme.faint,
 	); result != .Ok {return result}
+	button := status_panel_side_rect(app, w)
+	hover := status_rect_contains(button, w.pointer.x, w.pointer.y)
+	if hover {ui.draw_rect(&w.list, {rect = button, color = app.theme.pane_border, radius = 3 * s})}
+	icon := render.Rect{button.x + 5 * s, button.y + 6 * s, 14 * s, 12 * s}
+	ui.draw_rect(&w.list, {rect = icon, color = app.theme.faint, stroke = s})
+	left := app.settings.status.panel_side == .Right
+	stripe := render.Rect{left ? icon.x + 3 * s : icon.x + icon.width - 4 * s, icon.y, s, icon.height}
+	ui.draw_rect(&w.list, {rect = stripe, color = app.theme.faint})
 	list := status_panel_list(app, w, panel)
 	if render.push_layer(&w.list, list) != .None {return .Ok}
 	if len(items) == 0 {
@@ -684,6 +695,10 @@ status_panel_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 	if !e.pressed || !status_panel_contains(app, w, x, y) {return false}
 	w.header_buttons += {e.button}
 	if e.button != .Left {return true}
+	if status_rect_contains(status_panel_side_rect(app, w), x, y) {
+		ui.armed_press(&w.status.panel_side_armed, true)
+		return true
+	}
 	items := status_items(app, w, true)
 	index, row := status_panel_hit(app, w, items, x, y)
 	if index < 0 {return true}
@@ -902,6 +917,8 @@ status_board_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 
 // Pointer hover for every overview surface; true when an overview took the pointer.
 status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	side_hover := status_rect_contains(status_panel_side_rect(app, w), x, y)
+	if side_hover != w.status.panel_side_hover {w.status.panel_side_hover, w.dirty = side_hover, true}
 	pill := status_rect_contains(status_pill_rect(app, w), x, y)
 	if pill != w.status.pill_hover {w.status.pill_hover, w.dirty = pill, true}
 	surface := Status_Surface.None
@@ -910,6 +927,7 @@ status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		surface = .Board
 		hover = status_board_hit(w, status_items(app, w, false), x, y)
 	} else if status_panel_contains(app, w, x, y) {
+		if _, over := divider_cursor(w, x, y); over {return false}
 		surface = .Panel
 		hover, _ = status_panel_hit(app, w, status_items(app, w, true), x, y)
 	}

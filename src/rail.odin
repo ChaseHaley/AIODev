@@ -80,7 +80,7 @@ rail_overlay :: proc(w: ^Window) -> bool {
 
 rail_area :: proc(w: ^Window) -> render.Rect {
 	return {
-		0,
+		w.dock_left_width,
 		ui.TITLE_BAR_HEIGHT * w.scale,
 		rail_width_pixels(w),
 		max(0, f32(w.height) - ui.TITLE_BAR_HEIGHT * w.scale),
@@ -98,21 +98,10 @@ rail_resize_rect :: proc(w: ^Window) -> render.Rect {
 	return {area.x + area.width - 3 * w.scale, area.y, 6 * w.scale, area.height}
 }
 
-rail_resize_hit :: proc(w: ^Window, x, y: f32) -> bool {
-	r := rail_resize_rect(w)
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-}
-
 rail_resize_cancel :: proc(w: ^Window) {
 	if w.rail_resizing {w.gesture.cancelled += {.Left}}
+	if w.rail_resizing {w.dragging = {}}
 	w.rail_resizing = false
-}
-
-rail_resize_move :: proc(app: ^App, w: ^Window, x: f32) {
-	width := ui.rail_pixel_width(w.scale, (x - w.rail_resize_offset) / w.scale, f32(w.width))
-	if width == rail_width_pixels(w) {return}
-	w.rail_width = width / w.scale
-	window_relayout(app, w)
 }
 
 @(require_results)
@@ -120,7 +109,6 @@ rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
 	if !rail_rows_build(w, &w.rail_rows) {return {}, false}
 	area := rail_area(w)
-	area.height = max(0, area.height - w.status_rail_reserve)
 	layout = ui.rail_layout(area, w.scale, len(w.rail_rows), w.rail_scroll)
 	w.rail_scroll = layout.scroll
 	return layout, true
@@ -180,7 +168,7 @@ rail_toggle :: proc(app: ^App, w: ^Window) {
 			w.rail_slide.value, w.rail_slide.target = 1, 1
 		}
 	}
-	if was_docked != rail_docked(w) {window_relayout(app, w)}
+	if was_docked != rail_docked(w) {window_relayout(app, w)} else {window_dividers(app, w)}
 	w.dirty = true
 }
 
@@ -188,6 +176,7 @@ rail_overlay_dismiss :: proc(app: ^App, w: ^Window) {
 	if !rail_overlay(w) {return}
 	rail_resize_cancel(w)
 	w.rail_override = .Auto
+	window_dividers(app, w)
 	w.rail_was_overlay = true
 	ui.motion_target(&w.rail_slide, 0, 140 * time.Millisecond, .Decelerate, app.animations, time.tick_now())
 	w.dirty = true

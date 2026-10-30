@@ -22,6 +22,7 @@ window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 		r.width -= rail_width
 	}
 	r.width = max(0, r.width - status_panel_dock_width(app, w))
+	if app.settings.status.panel_side == .Left {r.x += status_panel_dock_width(app, w)}
 	return {r.x, r.y, r.width, r.height}
 }
 

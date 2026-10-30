@@ -79,7 +79,7 @@ Window :: struct {
 	rail_pressed:        int,
 	rail_width:          f32,
 	rail_resizing:       bool,
-	rail_resize_offset:  f32,
+	dock_left_width:     f32,
 	tab_orientation_button_hovered: bool,
 	tab_orientation_button_armed:   ui.Armed(bool),
 	rail_slide:          ui.Motion,
@@ -114,8 +114,6 @@ Window :: struct {
 	taskbar_percent: int,
 	taskbar_workspace: ^Workspace,
 	status: Status_Overview,
-	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
-	status_rail_reserve: f32,
 }
 
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
@@ -349,7 +347,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
-	w.status_rail_reserve = status_panel_rail_height(app, w)
+	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
 		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -381,7 +379,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers)
 	area := window_content_area(app, w)
 	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
-	layout.dividers(w.tree, area, window_gap(app, w), &w.dividers)
+	window_dividers(app, w)
 	for i := len(w.views) - 1; i >= 0; i -= 1 {
 		visible := false
 		for pane in w.panes {visible ||= pane.content == w.views[i].content}

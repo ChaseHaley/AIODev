@@ -33,6 +33,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.caption_armed)
 	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
 	w.rail_resizing = false
+	ui.armed_cancel(&w.status.panel_side_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
 	link_hover_clear(w)
 	if palette_active(app, w) {ui.palette_input_release(&app.palette)}
@@ -55,9 +56,12 @@ gesture_cancel :: proc(app: ^App, w: ^Window) -> bool {
 @(private)
 gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	x, y := f32(e.x), f32(e.y)
-	if e.button == .Left && w.rail_resizing {
-		rail_resize_move(app, w, x)
-		w.rail_resizing = false
+	if e.button == .Left && ui.armed_down(w.status.panel_side_armed) {
+		w.header_buttons -= {.Left}
+		w.dirty = true
+		_, ok := ui.armed_release(&w.status.panel_side_armed,
+			status_rect_contains(status_panel_side_rect(app, w), x, y))
+		if ok {status_panel_side_toggle(app)}
 		return true
 	}
 	if e.button == .Left && w.find.open && ui.armed_down(w.find.armed) {
@@ -94,7 +98,11 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	}
 	if e.button != .Left {return false}
 	if tab_interaction_release(app, w, x, y) {return true}
-	if w.dragging.count > 0 {w.dragging = {}; return true}
+	if w.dragging.count > 0 {
+		divider_drag(app, w, x, y)
+		w.dragging, w.rail_resizing = {}, false
+		return true
+	}
 	if w.tab_drag.pressed {tab_drag_release(app, w); rail_overlay_dismiss(app, w); return true}
 	if w.pane_drag.pressed {_ = pane_drag_release(app, w); return true}
 	if settings_active(w) {editor_outcome(app, w, ui.editor_release(&w.editor)); return true}
@@ -227,18 +235,12 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		status_inbox_toggle(app, w)
 		return
 	}
+	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) {return}
 	if status_panel_button(app, w, e) {return}
 	if e.pressed && w.status.board_open {
 		w.status.board_open = false
 	}
-	if e.button == .Left && rail_resize_hit(w, x, y) {
-		w.rail_resizing = true
-		w.rail_resize_offset = x - rail_width_pixels(w)
-		pointer_set(app, w, .Resize_Horizontal)
-		return
-	}
 	if tab_interaction_press(app, w, e) {return}
-	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) { return }
 	if pane_header_button(app, w, e) { return }
 	if e.pressed && !w.selecting {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
@@ -367,18 +369,9 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		w.dirty = true
 	}
 	if w.dragging.count > 0 {
-		if .Left not_in e.buttons {w.dragging = {}; return}
+		if .Left not_in e.buttons {w.dragging, w.rail_resizing = {}, false; return}
 		divider_drag(app, w, x, y)
 		return
-	}
-	if w.rail_resizing {
-		if .Left not_in e.buttons {
-			w.rail_resizing = false
-		} else {
-			rail_resize_move(app, w, x)
-			pointer_set(app, w, .Resize_Horizontal)
-			return
-		}
 	}
 	if w.tab_drag.pressed {
 		if .Left not_in e.buttons {tab_drag_cancel(app, w)} else if tab_drag_move(app, w, x, y) {return}
@@ -420,11 +413,11 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			return
 		}
 	}
-	if rail_resize_hit(w, x, y) {
+	if resize, over := divider_cursor(w, x, y); over {
 		split_overlay_update(w, x, y, false)
 		pane_header_pointer(w, x, y, false)
 		link_hover_clear(w)
-		pointer_set(app, w, .Resize_Horizontal)
+		pointer_set(app, w, resize)
 		return
 	}
 	if rail_visible(w) &&
