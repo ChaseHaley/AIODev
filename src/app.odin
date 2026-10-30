@@ -116,6 +116,7 @@ App :: struct {
 	layout_deadline:       time.Tick,
 	// Tests replace this to observe Ctrl+click without launching a browser.
 	open_url:              proc(uri: string) -> bool,
+	open_file:             proc(path: string, confirmed: bool) -> bool,
 }
 
 @(require_results)

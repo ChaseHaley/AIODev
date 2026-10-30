@@ -40,6 +40,7 @@ Link_Map :: struct {
 	columns, rows:         int,
 	generation:            u64,
 	valid:                 bool,
+	relative_files:        bool,
 }
 
 @(private)
@@ -471,7 +472,9 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 					}
 				}
 			}
-			usable := uri != "" && links.allowed(uri)
+			file_buffer: [4096]u8
+			_, file_ok := links.resolve_file(uri, "", file_buffer[:])
+			usable := uri != "" && (links.allowed(uri) || file_ok)
 			if usable &&
 			   run_active &&
 			   x == run_last + 1 &&
@@ -540,7 +543,8 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 			}
 		}
 		clear(&m.urls)
-		if !links.find(string(m.line_text[:]), &m.urls) {
+		if !links.find(string(m.line_text[:]), &m.urls) ||
+		   !links.find_files(string(m.line_text[:]), m.relative_files, &m.urls) {
 			return false
 		}
 		for url in m.urls {
@@ -595,6 +599,12 @@ link_map_scan_locked :: proc(
 	columns, rows: int,
 ) -> bool {
 	m.valid = false
+	pwd: ghostty.String
+	m.relative_files = false
+	if ghostty.terminal_get(terminal, .Pwd, &pwd) == .Success && pwd.len > 0 {
+		buffer: [4096]u8
+		_, m.relative_files = links.resolve_file(string(pwd.ptr[:pwd.len]), "", buffer[:])
+	}
 	clear(&m.spans)
 	clear(&m.text)
 	clear(&m.row_text)

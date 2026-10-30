@@ -57,7 +57,7 @@ osc8_links_are_read_and_scheme_filtered :: proc(t: ^testing.T) {
 	source, ok := link_source(
 		t,
 		"\x1b]8;;https://example.com/a\x1b\\LINK\x1b]8;;\x1b\\" +
-		"\x1b[2;1H\x1b]8;;file:///C:/Windows\x1b\\BAD\x1b]8;;\x1b\\" +
+		"\x1b[2;1H\x1b]8;;file://remote/C:/Windows\x1b\\BAD\x1b]8;;\x1b\\" +
 		"\x1b[3;1H\x1b]8;;http://second.example\x1b\\OK\x1b]8;;\x1b\\",
 		24,
 		3,
@@ -101,7 +101,7 @@ osc8_takes_precedence_over_detected_urls :: proc(t: ^testing.T) {
 
 	blocked, blocked_ok := link_source(
 		t,
-		"\x1b]8;;file:///C:/x\x1b\\https://\x1b]8;;\x1b\\plain.example",
+		"\x1b]8;;file://remote/C:/x\x1b\\https://\x1b]8;;\x1b\\plain.example",
 		40,
 		2,
 	)
@@ -274,3 +274,20 @@ hover_hit_testing_follows_scrollback :: proc(t: ^testing.T) {
 	_, _, other := term.link_at(&m, 0, 4)
 	testing.expect(t, !other)
 }
+
+@(test)
+reported_local_cwd_enables_relative_file_links :: proc(t: ^testing.T) {
+	for cwd in ([?]string{"file://localhost/C:/repo", "file://remote/C:/repo", "C:\\repo", ""}) {
+		text := fmt.tprintf("\x1b]7;%s\x07src/main.odin:12:4", cwd)
+		source, ok := link_source(t, text, 50, 2)
+		if !ok {continue}
+		defer link_source_destroy(&source)
+		m, scanned := link_map(t, source)
+		if !scanned {continue}
+		defer term.link_map_destroy(&m)
+		_, uri, found := term.link_at(&m, 1, 0)
+		testing.expect_value(t, found, cwd == "file://localhost/C:/repo" || cwd == "C:\\repo")
+		if found {testing.expect_value(t, uri, "src/main.odin:12:4")}
+	}
+}
+

@@ -90,6 +90,7 @@ Window :: struct {
 	// Asks before a destructive close and holds its subject, live counts and presentation state.
 	pending_close: Pending_Close,
 	pending_swap:  Pane_Swap,
+	pending_file:  Pending_File,
 	close_restore: [dynamic]u32,
 	tab_menu: Tab_Menu,
 	profile_menu: Profile_Menu,

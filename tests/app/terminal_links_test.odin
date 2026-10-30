@@ -13,6 +13,7 @@ import app "../../src"
 Open_Stub :: struct {
 	uri:   string,
 	calls: int,
+	confirmed: bool,
 }
 
 // Only the link tests use the stub; they hold this lock so the package's parallel runner cannot
@@ -213,7 +214,7 @@ terminal_links_prefer_osc8_and_ignore_blocked_schemes :: proc(t: ^testing.T) {
 		&f,
 		"\x1b[2J\x1b[3J\x1b[H" +
 		"\x1b]8;;https://osc.example\x1b\\https://plain.example\x1b]8;;\x1b\\" +
-		"\x1b[2;1H\x1b]8;;file:///C:/Windows\x1b\\BLOCKED\x1b]8;;\x1b\\",
+		"\x1b[2;1H\x1b]8;;file://remote/C:/Windows\x1b\\BLOCKED\x1b]8;;\x1b\\",
 	)
 	if !link_move(t, &f, 0, 0) {return}
 	testing.expect_value(t, w.pointer_shape, platform.Cursor_Shape.Hand)
@@ -266,4 +267,46 @@ terminal_links_hover_at_nonzero_scroll_offset :: proc(t: ^testing.T) {
 	link_click(t, &f, 3, rows - 1, true)
 	testing.expect_value(t, Open_Stub_State.calls, 1)
 	testing.expect_value(t, Open_Stub_State.uri, "https://example.com/scrolled")
+}
+
+@(test)
+active_terminal_file_waits_for_confirmation_and_can_be_cancelled :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "terminal-active-file") {return}
+	s, w := &f.state, f.state.windows[0]
+	app.terminal_file_request(s, w, `C:\Windows\System32\cmd.exe`)
+	testing.expect(t, w.pending_file.confirm.open)
+	app.confirmation_cancel(s, w)
+	testing.expect(t, !w.pending_file.confirm.open)
+}
+
+link_file_stub :: proc(path: string, confirmed: bool) -> bool {
+	Open_Stub_State.calls += 1
+	Open_Stub_State.confirmed = confirmed
+	return path != ""
+}
+
+@(test)
+ctrl_click_active_file_opens_only_after_explicit_acceptance :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "terminal-confirm-file") {return}
+	s, w := &f.state, f.state.windows[0]
+	s.open_file = link_file_stub
+	Open_Stub_State = {}
+	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[H" +
+		"\x1b]8;;file:///C:/Windows/System32/cmd.exe\x1b\\EXEC\x1b]8;;\x1b\\")
+	link_click(t, &f, 0, 0, true)
+	testing.expect(t, w.pending_file.confirm.open)
+	testing.expect_value(t, Open_Stub_State.calls, 0)
+	_ = app.confirmation_key(s, w, {key = .Enter, pressed = true})
+	testing.expect(t, !w.pending_file.confirm.open, "Enter initially cancels")
+	link_click(t, &f, 0, 0, true)
+	_ = app.confirmation_key(s, w, {key = .Tab, pressed = true})
+	_ = app.confirmation_key(s, w, {key = .Enter, pressed = true})
+	testing.expect_value(t, Open_Stub_State.calls, 1)
+	testing.expect(t, Open_Stub_State.confirmed)
 }

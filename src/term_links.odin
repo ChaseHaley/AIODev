@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:links"
 import "aio:platform"
 import "aio:term"
 import "aio:term_view"
@@ -102,6 +103,14 @@ link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	_, uri, hit := term.link_at(&state.view.links, column, row)
 	if !hit {
 		return false
+	}
+	if !links.allowed(uri) {
+		cwd := term.working_directory(entry.session, context.temp_allocator)
+		buffer: [4096]u8
+		path, ok := links.resolve_file(uri, cwd, buffer[:])
+		if ok {terminal_file_request(app, w, path)}
+		else {notify(app, .Error, "That local file is not available.")}
+		return true
 	}
 	if !open_link(app, uri) {
 		notify(app, .Error, "Could not open the link.")
