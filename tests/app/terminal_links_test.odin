@@ -281,9 +281,9 @@ active_terminal_file_waits_for_confirmation_and_can_be_cancelled :: proc(t: ^tes
 	testing.expect(t, !w.pending_file.confirm.open)
 }
 
-link_file_stub :: proc(path: string, confirmed: bool) -> bool {
+link_file_stub :: proc(path, approved: string) -> bool {
 	Open_Stub_State.calls += 1
-	Open_Stub_State.confirmed = confirmed
+	Open_Stub_State.confirmed = approved != ""
 	return path != ""
 }
 

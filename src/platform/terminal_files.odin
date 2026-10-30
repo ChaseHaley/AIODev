@@ -1,7 +1,7 @@
 ﻿package platform
 
-// Terminal_File owns the canonical clicked path and effective shortcut target. Preparation is
-// click-only; an active type always needs confirmation, including shortcuts carrying arguments.
+// Terminal_File owns the canonical clicked path and effective target. Preparation is click-only;
+// an active type always needs confirmation, and every shortcut is active. The target is what opens.
 Terminal_File :: struct {
 	path, target: string,
 	confirm:      bool,

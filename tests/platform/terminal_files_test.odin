@@ -41,6 +41,27 @@ terminal_file_preparation_checks_real_files_before_classifying :: proc(t: ^testi
 	testing.expect(t, ok, "folders use the default handler too")
 }
 
+// Dispatch opens only an approved target, and a changed or unapproved target is refused before
+// ShellExecute, so nothing here launches a process.
+@(test)
+terminal_file_dispatch_refuses_unapproved_or_changed_targets :: proc(t: ^testing.T) {
+	context.logger = {}
+	directory, err := os.make_directory_temp("", "aio-terminal-dispatch-*", context.allocator)
+	if !testing.expect_value(t, err, nil) {return}
+	defer delete(directory)
+	defer os.remove(directory)
+	document := strings.concatenate({directory, `\document.txt`})
+	defer delete(document)
+	defer os.remove(document)
+	script := strings.concatenate({directory, `\script.bat`})
+	defer delete(script)
+	defer os.remove(script)
+	if !testing.expect_value(t, os.write_entire_file(document, "fixture"), nil) {return}
+	if !testing.expect_value(t, os.write_entire_file(script, "fixture"), nil) {return}
+	testing.expect(t, !platform.open_terminal_file(script, ""), "an active type needs an approved target")
+	testing.expect(t, !platform.open_terminal_file(document, `C:\elsewhere.bat`), "a changed target is refused")
+}
+
 // OneDrive marks every synced item with a cloud reparse tag. Machines without it skip.
 @(test)
 terminal_file_preparation_accepts_cloud_placeholders :: proc(t: ^testing.T) {

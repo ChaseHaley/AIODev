@@ -4,6 +4,7 @@ import "aio:ghostty"
 import "aio:links"
 import "aio:platform"
 import "base:runtime"
+import "core:strings"
 import "core:sync"
 import "core:unicode/utf8"
 
@@ -424,6 +425,7 @@ append_span :: proc(m: ^Link_Map, y, first, last, start, length: int) -> bool {
 
 @(private, require_results)
 scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) -> bool {
+	hosts := platform.local_hosts()
 	for y in 0 ..< rows {
 		m.row_start[y] = len(m.row_text)
 		point := ghostty.Point{tag = .Viewport, value = {coordinate = {x = 0, y = u32(y)}}}
@@ -485,7 +487,7 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 			usable := uri != "" && links.allowed(uri)
 			if uri != "" && !usable {
 				file_buffer: [4096]u8 = ---
-				_, usable = links.resolve_file(uri, "", platform.local_hosts(), file_buffer[:])
+				_, usable = links.resolve_file(uri, "", hosts, file_buffer[:])
 			}
 			if run_active {
 				if !append_span(m, y, run_first, run_last, run_start, run_length) {
@@ -547,8 +549,12 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 			}
 		}
 		clear(&m.urls)
-		if !links.find(string(m.line_text[:]), &m.urls) ||
-		   !links.find_files(string(m.line_text[:]), m.relative_files, &m.urls) {
+		line := string(m.line_text[:])
+		if !links.find(line, &m.urls) {
+			return false
+		}
+		// Only lines with a dot or a separator can hold a file target, and this lock is held.
+		if strings.contains_any(line, "./\\") && !links.find_files(line, m.relative_files, &m.urls) {
 			return false
 		}
 		for url in m.urls {

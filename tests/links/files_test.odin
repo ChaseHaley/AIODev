@@ -25,6 +25,8 @@ file_targets_resolve_only_against_local_reported_directories :: proc(t: ^testing
 		{`file://box.lan/C:/a.txt`, "", `C:/a.txt`},
 		{`readme.md`, `file://BOX/C:/repo`, `C:/repo\readme.md`},
 		{`file://other/C:/a.txt`, "", ""},
+		{"C:\\COM\u00b9.txt", "", ""},
+		{"C:\\lpt\u00b3\\a.txt", "", ""},
 	}
 	hosts := [?]string{"box", "box.lan", ""}
 	for c in cases {
@@ -52,9 +54,37 @@ file_detection_requires_a_cwd_for_relative_names :: proc(t: ^testing.T) {
 }
 
 @(test)
+quoted_targets_start_after_an_assignment :: proc(t: ^testing.T) {
+	text := `path="C:\My Dir\a.txt" and "src/b c.odin"`
+	ranges: [dynamic]links.Range
+	defer delete(ranges)
+	testing.expect(t, links.find_files(text, true, &ranges))
+	testing.expect_value(t, len(ranges), 2)
+	if len(ranges) == 2 {
+		testing.expect_value(t, text[ranges[0].start:ranges[0].end], `C:\My Dir\a.txt`)
+		testing.expect_value(t, text[ranges[1].start:ranges[1].end], `src/b c.odin`)
+	}
+}
+
+@(test)
+relative_names_need_evidence_of_a_file :: proc(t: ^testing.T) {
+	text := `e.g v1.2 3.14 1/2 node.js notes.txt .gitignore`
+	ranges: [dynamic]links.Range
+	defer delete(ranges)
+	testing.expect(t, links.find_files(text, true, &ranges))
+	testing.expect_value(t, len(ranges), 3)
+	if len(ranges) == 3 {
+		testing.expect_value(t, text[ranges[0].start:ranges[0].end], "node.js")
+		testing.expect_value(t, text[ranges[1].start:ranges[1].end], "notes.txt")
+		testing.expect_value(t, text[ranges[2].start:ranges[2].end], ".gitignore")
+	}
+}
+
+@(test)
 active_file_types_need_confirmation_even_without_pathext :: proc(t: ^testing.T) {
 	for path in ([?]string{`C:\a.EXE`, `C:\a.ps1`, `C:\a.lnk`, `C:\a.url`, `C:\a.msi`,
-		`C:\a.hta`, `C:\a.scf`, `C:\a.library-ms`, `C:\a.settingcontent-ms`, `C:\a.appref-ms`}) {
+		`C:\a.hta`, `C:\a.scf`, `C:\a.library-ms`, `C:\a.settingcontent-ms`, `C:\a.appref-ms`,
+		`C:\a.msu`, `C:\a.search-ms`, `C:\a.iqy`, `C:\a.xll`, `C:\a.iso`, `C:\a.vhdx`}) {
 		testing.expectf(t, links.file_needs_confirmation(path, ""), "%s must be confirmed", path)
 	}
 	testing.expect(t, links.file_needs_confirmation(`C:\a.custom`, ".EXE;;.CUSTOM;"))

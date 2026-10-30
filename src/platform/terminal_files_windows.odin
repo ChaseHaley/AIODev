@@ -114,6 +114,8 @@ Shell_Link :: struct #raw_union {
 Shell_Link_Vtable :: struct {
 	using unknown_vtable: w.IUnknown_VTable,
 	GetPath: proc "system" (this: ^Shell_Link, path: ^u16, count: i32, data: rawptr, flags: u32) -> w.HRESULT,
+	GetIDList, SetIDList, GetDescription, SetDescription, GetWorkingDirectory, SetWorkingDirectory: rawptr,
+	GetArguments: proc "system" (this: ^Shell_Link, arguments: ^u16, count: i32) -> w.HRESULT,
 }
 @(private)
 Persist_File :: struct #raw_union {
@@ -128,7 +130,8 @@ Persist_File_Vtable :: struct {
 }
 
 // Read the stored target without Resolve: no tracking search, network lookup, UI or link mutation.
-// An unresolved, non-filesystem or remote target is refused. Every .lnk still requires confirmation.
+// An unresolved, non-filesystem or remote target is refused, and so is a shortcut with arguments,
+// because a plain open of its target cannot carry them.
 @(private, require_results)
 shortcut_target :: proc(path: string) -> (string, bool) {
 	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
@@ -166,6 +169,11 @@ shortcut_target :: proc(path: string) -> (string, bool) {
 	if result = link->GetPath(&target[0], i32(len(target)), nil, 4); result != 0 {
 		log.errorf("IShellLink.GetPath failed: %x", u32(result)); return "", false
 	}
+	arguments: [4096]u16
+	if result = link->GetArguments(&arguments[0], i32(len(arguments))); result < 0 {
+		log.errorf("IShellLink.GetArguments failed: %x", u32(result)); return "", false
+	}
+	if arguments[0] != 0 {return "", false}
 	n := 0
 	for n < len(target) && target[n] != 0 {n += 1}
 	if n == 0 || n == len(target) {return "", false}
@@ -196,14 +204,17 @@ prepare_terminal_file :: proc(path: string) -> (file: Terminal_File, ok: bool) {
 	return file, true
 }
 
-// Recheck after confirmation; never promote a replaced document into an unconfirmed active type.
+// approved is the target the user confirmed, or empty when no confirmation was shown. The dispatch
+// rechecks the path and opens only the validated target, never the .lnk, so the shell does not
+// resolve a shortcut again at launch and a retargeted shortcut is refused rather than opened.
 @(require_results)
-open_terminal_file :: proc(path: string, confirmed := false) -> bool {
+open_terminal_file :: proc(path, approved: string) -> bool {
 	file, ok := prepare_terminal_file(path)
 	if !ok {return false}
 	defer terminal_file_destroy(&file)
-	if file.confirm && !confirmed {return false}
-	text := w.utf8_to_wstring(file.path, context.temp_allocator)
+	if file.confirm && approved == "" {return false}
+	if approved != "" && file.target != approved {return false}
+	text := w.utf8_to_wstring(file.target, context.temp_allocator)
 	if text == nil {return false}
 	verb := [5]u16{'o', 'p', 'e', 'n', 0}
 	info := w.SHELLEXECUTEINFOW{cbSize = size_of(w.SHELLEXECUTEINFOW),

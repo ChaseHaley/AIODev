@@ -29,7 +29,8 @@ path_characters :: proc(path: string) -> bool {
 			if part[len(part) - 1] == '.' || part[len(part) - 1] == ' ' {return false}
 			base := part
 			if dot := strings.index_byte(part, '.'); dot >= 0 {base = part[:dot]}
-			for reserved in ([?]string{"con", "prn", "aux", "nul", "conin$", "conout$"}) {
+			for reserved in ([?]string{"con", "prn", "aux", "nul", "conin$", "conout$",
+				"com\u00b9", "com\u00b2", "com\u00b3", "lpt\u00b9", "lpt\u00b2", "lpt\u00b3"}) {
 				if strings.equal_fold(base, reserved) {return false}
 			}
 			if len(base) == 4 && base[3] >= '0' && base[3] <= '9' &&
@@ -149,7 +150,6 @@ resolve_file :: proc(target, cwd: string, hosts: []string, buffer: []u8) -> (str
 	return string(buffer[:len(base) + 1 + len(path)]), true
 }
 
-// Bare names need a dot or a directory separator to avoid turning ordinary prose into links.
 // Quoted paths may contain spaces. The original byte range retains compiler location suffixes.
 // Printed file URIs need an empty or localhost authority; machine names are honoured in OSC 8.
 @(require_results)
@@ -177,16 +177,41 @@ find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 		if end > start {
 			candidate := text[start:end]
 			shaped := strings.contains_any(candidate, ".\\/")
+			absolute := local_absolute(strip_location(candidate)) ||
+				len(candidate) >= 5 && strings.equal_fold(candidate[:5], "file:")
 			cwd := relative ? "C:/" : ""
-			if shaped {
+			if shaped && (absolute || relative_plausible(candidate)) {
 				if _, ok := resolve_file(candidate, cwd, nil, buffer[:]); ok {
 					if _, err := append(out, Range{start, end}); err != nil {return false}
 				}
 			}
 		}
-		if at < len(text) {at += 1}
+		// A quote that ends an unquoted token may open the next quoted token, so it is left in place.
+		if at < len(text) && (quote != 0 || (text[at] != '"' && text[at] != '`')) {at += 1}
 	}
 	return true
+}
+
+// Relative names need a letter in their final segment. A bare name also needs an extension of two
+// or more characters with a letter, so "e.g", "v1.2" and "1/2" stay prose. "and/or" still passes.
+@(private, require_results)
+relative_plausible :: proc(path: string) -> bool {
+	name := strip_location(path)
+	last := name
+	if i := strings.last_index_any(name, "/\\"); i >= 0 {last = name[i + 1:]}
+	if !has_letter(last) {return false}
+	if strings.contains_any(name, "/\\") {return true}
+	dot := strings.last_index_byte(name, '.')
+	return dot >= 0 && len(name) - dot - 1 >= 2 && has_letter(name[dot + 1:])
+}
+
+@(private, require_results)
+has_letter :: proc(text: string) -> bool {
+	for i in 0 ..< len(text) {
+		c := text[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {return true}
+	}
+	return false
 }
 
 // Includes shell-active formats absent from a stock PATHEXT. Empty PATHEXT entries never match.
@@ -204,6 +229,9 @@ file_needs_confirmation :: proc(path, pathext: string) -> bool {
 		".library-ms", ".settingcontent-ms", ".appref-ms", ".application", ".gadget", ".inf", ".ins",
 		".isp", ".sct", ".wsc", ".appx", ".appxbundle", ".msix", ".msixbundle", ".appinstaller",
 		".py", ".pyw", ".pl", ".rb", ".sh", ".bash", ".jar", ".jnlp", ".diagcab",
+		".msu", ".search-ms", ".searchconnector-ms", ".xll", ".wll", ".xlam", ".ppam", ".iqy",
+		".slk", ".iso", ".vhd", ".vhdx", ".msh", ".msh1", ".msh2", ".mshxml", ".msh1xml",
+		".msh2xml", ".ps1xml", ".cdxml",
 	}) {
 		if strings.equal_fold(ext, active) {return true}
 	}
