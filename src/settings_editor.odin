@@ -456,6 +456,7 @@ settings_pane_under_pointer :: proc(
 workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
 	if workspace == nil {return}
 	present := workspace_has_content(workspace, {.Settings, 0})
+	if !present {workspace.settings_scroll = 0}
 	for w in app.windows {
 		if w.workspace != workspace {continue}
 		if present {

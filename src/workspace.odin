@@ -27,6 +27,7 @@ Workspace :: struct {
 	selected: int,
 	next_tab_id: u32,
 	selection_anchor: u32,
+	settings_scroll: int,
 }
 
 @(require_results)
