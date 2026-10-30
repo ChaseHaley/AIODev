@@ -264,9 +264,14 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			literal = true
 		case .None:
 			if action, found := shortcut_action(app, e); found {
-				w.suppressed_key = e
-				run_action(app, w, action)
-				return
+				suppressed, consumed := w.suppressed_key.?
+				repeated := e.repeat && consumed && suppressed.key == e.key
+				// A fullscreen program owns its selection; only a native selection claims its copy key.
+				if action != .Copy || w.find.open || repeated || term.has_selection(entry.session) {
+					w.suppressed_key = e
+					if !repeated || action != .Copy {run_action(app, w, action)}
+					return
+				}
 			}
 		}
 	}
