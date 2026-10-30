@@ -24,6 +24,11 @@ Rect_Instance :: struct {
 RECT_FILL_HUE_WHEEL :: u32(1)
 RECT_FILL_VALUE_RAMP :: u32(2)
 RECT_FILL_RIM :: u32(3)
+// Round-capped strokes of width `stroke`. SEGMENT runs from sheen.xy to sheen.zw; ARC is centred on
+// sheen.xy with `radius`, starting at angle sheen.z and sweeping sheen.w radians clockwise on screen.
+// Both are in pixels local to `rect`, which must contain the stroke.
+RECT_FILL_SEGMENT :: u32(4)
+RECT_FILL_ARC :: u32(5)
 
 // A glyph quad. Coverage glyphs are tinted with color; with GLYPH_COLOR set, the glyph samples the
 // RGBA atlas and color.a only fades it.
@@ -155,6 +160,39 @@ push_rect :: proc(list: ^Draw_List, instance: Rect_Instance) -> Error {
 	}
 	list.layers[len(list.layers) - 1].rect_count += 1
 	return .None
+}
+
+@(require_results)
+push_segment :: proc(list: ^Draw_List, a, b: [2]f32, width: f32, color: Color) -> Error {
+	half := width / 2
+	lo := [2]f32{min(a.x, b.x), min(a.y, b.y)} - half
+	hi := [2]f32{max(a.x, b.x), max(a.y, b.y)} + half
+	return push_rect(
+		list,
+		{
+			rect = {lo.x, lo.y, hi.x - lo.x, hi.y - lo.y},
+			color = color,
+			stroke = width,
+			fill = RECT_FILL_SEGMENT,
+			sheen = {a.x - lo.x, a.y - lo.y, b.x - lo.x, b.y - lo.y},
+		},
+	)
+}
+
+@(require_results)
+push_arc :: proc(list: ^Draw_List, center: [2]f32, radius, start, sweep, width: f32, color: Color) -> Error {
+	extent := radius + width / 2
+	return push_rect(
+		list,
+		{
+			rect = {center.x - extent, center.y - extent, 2 * extent, 2 * extent},
+			color = color,
+			radius = radius,
+			stroke = width,
+			fill = RECT_FILL_ARC,
+			sheen = {extent, extent, start, sweep},
+		},
+	)
 }
 
 @(require_results)

@@ -447,3 +447,28 @@ rounded_layers_clip_content_and_outline_has_no_fill :: proc(t: ^testing.T) {
 	expect_pixel(t, outline, 32, 16, 16, {0, 0, 0, 0})
 	expect_pixel(t, outline, 32, 16, 3, {0, 255, 0, 255})
 }
+
+@(test)
+segments_and_arcs_draw_round_capped_strokes :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, 32, 32)
+	if !ok {
+		return
+	}
+	defer fixture_destroy(&f)
+	layer(t, &f.list, {0, 0, 32, 32})
+	testing.expect_value(t, render.push_segment(&f.list, {2, 2}, {14, 14}, 2, {1, 1, 1, 1}), render.Error.None)
+	testing.expect_value(
+		t,
+		render.push_arc(&f.list, {16, 16}, 8, 0, math.PI, 2, {1, 1, 1, 1}),
+		render.Error.None,
+	)
+	pixels := render_pixels(t, &f)
+	defer delete(pixels)
+	expect_pixel(t, pixels, 32, 8, 8, {255, 255, 255, 255})
+	expect_pixel(t, pixels, 32, 9, 8, {202, 202, 202, 202}, 2)
+	expect_pixel(t, pixels, 32, 8, 2, {})
+	// The arc sweeps clockwise from the right through the bottom, so the top half stays empty.
+	expect_pixel(t, pixels, 32, 15, 24, {251, 251, 251, 251}, 1)
+	expect_pixel(t, pixels, 32, 15, 7, {})
+	expect_pixel(t, pixels, 32, 24, 16, {251, 251, 251, 251}, 1)
+}
