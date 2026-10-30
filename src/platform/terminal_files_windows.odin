@@ -4,17 +4,62 @@ import "aio:links"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:sync"
 import w "core:sys/windows"
+import "core:unicode/utf16"
 
 foreign import terminal_kernel32 "system:kernel32.lib"
 
 @(default_calling_convention = "system")
 foreign terminal_kernel32 {
 	GetDriveTypeW :: proc(root: w.LPCWSTR) -> u32 ---
+	GetComputerNameExW :: proc(format: u32, buffer: w.LPWSTR, size: ^u32) -> w.BOOL ---
 }
 
-// Refuse mapped drives and every reparse component before following a path. This also keeps
-// local junctions and symlinks from smuggling a remote share into a click-time existence check.
+@(private)
+Local_Hosts :: struct {
+	once:  sync.Once,
+	text:  [3][256]u8,
+	names: [3]string,
+	count: int,
+}
+@(private)
+local_hosts_state: Local_Hosts
+
+// This machine's DNS host, fully qualified and NetBIOS names, which local shells and ls write
+// into file URI authorities. Read once; callers on any thread borrow the result.
+local_hosts :: proc() -> []string {
+	sync.once_do(&local_hosts_state.once, proc() {
+		hosts := &local_hosts_state
+		for format in ([?]u32{1, 3, 0}) {
+			wide: [256]u16
+			size := u32(len(wide))
+			if !bool(GetComputerNameExW(format, &wide[0], &size)) || size == 0 {
+				log.errorf("GetComputerNameExW(%d) failed: %d", format, w.GetLastError())
+				continue
+			}
+			n := utf16.decode_to_utf8(hosts.text[hosts.count][:], wide[:size])
+			hosts.names[hosts.count] = string(hosts.text[hosts.count][:n])
+			hosts.count += 1
+		}
+	})
+	return local_hosts_state.names[:local_hosts_state.count]
+}
+
+// Sync providers such as OneDrive mark local placeholders with the cloud reparse tag family.
+// Those redirect nowhere, unlike junctions, symlinks and mount points, which stay refused.
+@(private, require_results)
+cloud_placeholder :: proc(path: cstring16) -> bool {
+	data: w.WIN32_FIND_DATAW
+	find := w.FindFirstFileW(path, &data)
+	if find == w.INVALID_HANDLE_VALUE {return false}
+	if !bool(w.FindClose(find)) {log.errorf("FindClose failed: %d", w.GetLastError())}
+	return data.dwFileAttributes & w.FILE_ATTRIBUTE_REPARSE_POINT != 0 &&
+		data.dwReserved0 & 0xffff0fff == 0x9000001a
+}
+
+// Refuse mapped drives and every non-placeholder reparse component before following a path.
+// This keeps local junctions and symlinks from smuggling a remote share into a click-time check.
 @(private, require_results)
 canonical_terminal_path :: proc(path: string) -> (string, bool) {
 	if !links.local_absolute(path) {return "", false}
@@ -34,11 +79,11 @@ canonical_terminal_path :: proc(path: string) -> (string, bool) {
 		saved := full[i]
 		full[i] = 0
 		attributes := w.GetFileAttributesW(cstring16(&full[0]))
+		refused := attributes == w.INVALID_FILE_ATTRIBUTES ||
+			attributes & w.FILE_ATTRIBUTE_DEVICE != 0 ||
+			attributes & w.FILE_ATTRIBUTE_REPARSE_POINT != 0 && !cloud_placeholder(cstring16(&full[0]))
 		full[i] = saved
-		if attributes == w.INVALID_FILE_ATTRIBUTES ||
-		   attributes & (w.FILE_ATTRIBUTE_DEVICE | w.FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
-			return "", false
-		}
+		if refused {return "", false}
 	}
 	handle := w.CreateFileW(cstring16(&full[0]), 0, w.FILE_SHARE_READ | w.FILE_SHARE_WRITE | w.FILE_SHARE_DELETE,
 		nil, w.OPEN_EXISTING, w.FILE_FLAG_BACKUP_SEMANTICS, nil)

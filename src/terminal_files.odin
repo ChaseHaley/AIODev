@@ -34,7 +34,7 @@ terminal_file_request :: proc(app: ^App, w: ^Window, path: string) {
 
 pending_file_text :: proc(pending: ^Pending_File) -> Pending_Close_Text {
 	return {
-		title = "Open executable file?",
+		title = "Open this file?",
 		body = filepath.base(pending.file.target),
 		note = pending.file.target,
 		label = "Open",

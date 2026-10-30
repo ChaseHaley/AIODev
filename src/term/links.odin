@@ -2,6 +2,7 @@ package term
 
 import "aio:ghostty"
 import "aio:links"
+import "aio:platform"
 import "base:runtime"
 import "core:sync"
 import "core:unicode/utf8"
@@ -472,16 +473,19 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 					}
 				}
 			}
-			file_buffer: [4096]u8
-			_, file_ok := links.resolve_file(uri, "", file_buffer[:])
-			usable := uri != "" && (links.allowed(uri) || file_ok)
-			if usable &&
+			// A run only holds a usable target, so its continuation needs no second classification.
+			if uri != "" &&
 			   run_active &&
 			   x == run_last + 1 &&
 			   len(uri) == run_length &&
 			   string(m.text[run_start:run_start + run_length]) == uri {
 				run_last = x
 				continue
+			}
+			usable := uri != "" && links.allowed(uri)
+			if uri != "" && !usable {
+				file_buffer: [4096]u8 = ---
+				_, usable = links.resolve_file(uri, "", platform.local_hosts(), file_buffer[:])
 			}
 			if run_active {
 				if !append_span(m, y, run_first, run_last, run_start, run_length) {
@@ -602,8 +606,9 @@ link_map_scan_locked :: proc(
 	pwd: ghostty.String
 	m.relative_files = false
 	if ghostty.terminal_get(terminal, .Pwd, &pwd) == .Success && pwd.len > 0 {
-		buffer: [4096]u8
-		_, m.relative_files = links.resolve_file(string(pwd.ptr[:pwd.len]), "", buffer[:])
+		buffer: [4096]u8 = ---
+		_, m.relative_files = links.resolve_file(
+			string(pwd.ptr[:pwd.len]), "", platform.local_hosts(), buffer[:])
 	}
 	clear(&m.spans)
 	clear(&m.text)

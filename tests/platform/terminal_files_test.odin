@@ -40,3 +40,14 @@ terminal_file_preparation_checks_real_files_before_classifying :: proc(t: ^testi
 	defer platform.terminal_file_destroy(&file)
 	testing.expect(t, ok, "folders use the default handler too")
 }
+
+// OneDrive marks every synced item with a cloud reparse tag. Machines without it skip.
+@(test)
+terminal_file_preparation_accepts_cloud_placeholders :: proc(t: ^testing.T) {
+	root := os.get_env("OneDrive", context.temp_allocator)
+	if root == "" || !os.exists(root) {return}
+	file, ok := platform.prepare_terminal_file(root)
+	defer platform.terminal_file_destroy(&file)
+	testing.expectf(t, ok, "%s is a local sync folder", root)
+	testing.expect(t, !file.confirm)
+}

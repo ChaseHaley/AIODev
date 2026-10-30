@@ -50,16 +50,25 @@ hex_digit :: proc(c: u8) -> int {
 	return -1
 }
 
-// URI decoding happens exactly once, before path validation. Remote authorities are refused
-// before any filesystem access. WSL shares are deliberately excluded with all other UNC paths.
 @(private, require_results)
-file_uri_path :: proc(uri: string, buffer: []u8) -> (string, bool) {
+local_authority :: proc(host: string, hosts: []string) -> bool {
+	if host == "" || strings.equal_fold(host, "localhost") {return true}
+	for name in hosts {
+		if name != "" && strings.equal_fold(host, name) {return true}
+	}
+	return false
+}
+
+// URI decoding happens exactly once, before path validation. Remote authorities are refused
+// before any filesystem access; hosts lists this machine's own names, which shells and ls
+// write into OSC 7 and OSC 8. WSL shares are deliberately excluded with all other UNC paths.
+@(private, require_results)
+file_uri_path :: proc(uri: string, hosts: []string, buffer: []u8) -> (string, bool) {
 	if len(uri) < 8 || !strings.equal_fold(uri[:7], "file://") {return "", false}
 	rest := uri[7:]
 	slash := strings.index_byte(rest, '/')
 	if slash < 0 {return "", false}
-	host := rest[:slash]
-	if host != "" && !strings.equal_fold(host, "localhost") {return "", false}
+	if !local_authority(rest[:slash], hosts) {return "", false}
 	raw := rest[slash + 1:]
 	at := 0
 	for i := 0; i < len(raw); i += 1 {
@@ -80,8 +89,27 @@ file_uri_path :: proc(uri: string, buffer: []u8) -> (string, bool) {
 	return path, local_absolute(path)
 }
 
+// Compiler locations: path:12, path:12:4, and the Odin and MSVC forms path(12), path(12,4)
+// and path(12:4).
 @(private, require_results)
 strip_location :: proc(path: string) -> string {
+	if strings.has_suffix(path, ")") {
+		open := strings.last_index_byte(path, '(')
+		if open > 0 {
+			digits, separated := 0, false
+			numbers := true
+			for c in transmute([]u8)path[open + 1:len(path) - 1] {
+				if c >= '0' && c <= '9' {digits += 1; continue}
+				if (c == ',' || c == ':') && digits > 0 && !separated {
+					separated, digits = true, 0
+					continue
+				}
+				numbers = false
+				break
+			}
+			if numbers && digits > 0 {return path[:open]}
+		}
+	}
 	end := len(path)
 	for _ in 0 ..< 2 {
 		at := end
@@ -95,9 +123,9 @@ strip_location :: proc(path: string) -> string {
 // Resolve a printed target using only a shell-reported local cwd. The returned string borrows
 // buffer; there is no filesystem access or allocation. File URIs name literal files, not locations.
 @(require_results)
-resolve_file :: proc(target, cwd: string, buffer: []u8) -> (string, bool) {
+resolve_file :: proc(target, cwd: string, hosts: []string, buffer: []u8) -> (string, bool) {
 	if len(target) >= 5 && strings.equal_fold(target[:5], "file:") {
-		path, ok := file_uri_path(target, buffer)
+		path, ok := file_uri_path(target, hosts, buffer)
 		if !ok {return "", false}
 		return path, true
 	}
@@ -110,7 +138,7 @@ resolve_file :: proc(target, cwd: string, buffer: []u8) -> (string, bool) {
 	if !path_characters(path) || path[0] == '/' || path[0] == '\\' {return "", false}
 	base := cwd
 	if len(cwd) >= 5 && strings.equal_fold(cwd[:5], "file:") {
-		decoded, ok := file_uri_path(cwd, buffer)
+		decoded, ok := file_uri_path(cwd, hosts, buffer)
 		if !ok {return "", false}
 		base = decoded
 	}
@@ -123,10 +151,11 @@ resolve_file :: proc(target, cwd: string, buffer: []u8) -> (string, bool) {
 
 // Bare names need a dot or a directory separator to avoid turning ordinary prose into links.
 // Quoted paths may contain spaces. The original byte range retains compiler location suffixes.
+// Printed file URIs need an empty or localhost authority; machine names are honoured in OSC 8.
 @(require_results)
 find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 	at := 0
-	buffer: [4096]u8
+	buffer: [4096]u8 = ---
 	for at < len(text) {
 		for at < len(text) && (text[at] <= ' ' || text[at] == '(' || text[at] == '[') {at += 1}
 		if at == len(text) {break}
@@ -150,7 +179,7 @@ find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 			shaped := strings.contains_any(candidate, ".\\/")
 			cwd := relative ? "C:/" : ""
 			if shaped {
-				if _, ok := resolve_file(candidate, cwd, buffer[:]); ok {
+				if _, ok := resolve_file(candidate, cwd, nil, buffer[:]); ok {
 					if _, err := append(out, Range{start, end}); err != nil {return false}
 				}
 			}

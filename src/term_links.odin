@@ -106,8 +106,8 @@ link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	}
 	if !links.allowed(uri) {
 		cwd := term.working_directory(entry.session, context.temp_allocator)
-		buffer: [4096]u8
-		path, ok := links.resolve_file(uri, cwd, buffer[:])
+		buffer: [4096]u8 = ---
+		path, ok := links.resolve_file(uri, cwd, platform.local_hosts(), buffer[:])
 		if ok {terminal_file_request(app, w, path)}
 		else {notify(app, .Error, "That local file is not available.")}
 		return true

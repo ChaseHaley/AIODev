@@ -16,25 +16,37 @@ file_targets_resolve_only_against_local_reported_directories :: proc(t: ^testing
 		{`\\server\share\a.txt`, "", ""},
 		{`C:\a.txt:stream`, "", ""},
 		{`file:///C:/a%00.txt`, "", ""},
+		{`C:\src\main.odin(42:3)`, "", `C:\src\main.odin`},
+		{`C:\src\main.cpp(42,3)`, "", `C:\src\main.cpp`},
+		{`C:\src\main.cpp(42)`, "", `C:\src\main.cpp`},
+		{`C:\src\notes(draft).txt`, "", `C:\src\notes(draft).txt`},
+		{`C:\src\main.odin(42:3:1)`, "", ""},
+		{`file://Box/C:/a.txt`, "", `C:/a.txt`},
+		{`file://box.lan/C:/a.txt`, "", `C:/a.txt`},
+		{`readme.md`, `file://BOX/C:/repo`, `C:/repo\readme.md`},
+		{`file://other/C:/a.txt`, "", ""},
 	}
+	hosts := [?]string{"box", "box.lan", ""}
 	for c in cases {
 		buffer: [4096]u8
-		path, ok := links.resolve_file(c.target, c.cwd, buffer[:])
-		testing.expect_value(t, ok, c.path != "")
+		path, ok := links.resolve_file(c.target, c.cwd, hosts[:], buffer[:])
+		testing.expectf(t, ok == (c.path != ""), "%s resolved %v", c.target, ok)
 		testing.expect_value(t, path, c.path)
 	}
 }
 
 @(test)
 file_detection_requires_a_cwd_for_relative_names :: proc(t: ^testing.T) {
-	text := `error C:\src\a.odin:12:4 and src/b.odin README.md`
+	text := `error C:\src\a.odin:12:4 and src/b.odin README.md C:\src\c.odin(7:2) Error:`
 	for relative in ([?]bool{false, true}) {
 		ranges: [dynamic]links.Range
 		defer delete(ranges)
 		testing.expect(t, links.find_files(text, relative, &ranges))
-		testing.expect_value(t, len(ranges), relative ? 3 : 1)
+		testing.expect_value(t, len(ranges), relative ? 4 : 2)
 		if len(ranges) > 0 {
 			testing.expect_value(t, text[ranges[0].start:ranges[0].end], `C:\src\a.odin:12:4`)
+			last := ranges[len(ranges) - 1]
+			testing.expect_value(t, text[last.start:last.end], `C:\src\c.odin(7:2)`)
 		}
 	}
 }

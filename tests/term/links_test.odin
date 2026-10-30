@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "aio:ghostty"
+import "aio:platform"
 import "aio:term"
 
 Link_Source :: struct {
@@ -277,7 +278,10 @@ hover_hit_testing_follows_scrollback :: proc(t: ^testing.T) {
 
 @(test)
 reported_local_cwd_enables_relative_file_links :: proc(t: ^testing.T) {
-	for cwd in ([?]string{"file://localhost/C:/repo", "file://remote/C:/repo", "C:\\repo", ""}) {
+	hosts := platform.local_hosts()
+	testing.expect(t, len(hosts) > 0, "this machine reports its own name")
+	machine := len(hosts) > 0 ? fmt.tprintf("file://%s/C:/repo", hosts[0]) : "file://localhost/C:/repo"
+	for cwd in ([?]string{"file://localhost/C:/repo", "file://remote/C:/repo", "C:\\repo", "", machine}) {
 		text := fmt.tprintf("\x1b]7;%s\x07src/main.odin:12:4", cwd)
 		source, ok := link_source(t, text, 50, 2)
 		if !ok {continue}
@@ -286,8 +290,21 @@ reported_local_cwd_enables_relative_file_links :: proc(t: ^testing.T) {
 		if !scanned {continue}
 		defer term.link_map_destroy(&m)
 		_, uri, found := term.link_at(&m, 1, 0)
-		testing.expect_value(t, found, cwd == "file://localhost/C:/repo" || cwd == "C:\\repo")
+		testing.expect_value(t, found, cwd != "file://remote/C:/repo" && cwd != "")
 		if found {testing.expect_value(t, uri, "src/main.odin:12:4")}
 	}
+}
+
+@(test)
+conemu_cwd_report_enables_relative_file_links :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "\x1b]9;9;C:\\repo\x07src/main.odin", 50, 2)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, uri, found := term.link_at(&m, 1, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, "src/main.odin")
 }
 
