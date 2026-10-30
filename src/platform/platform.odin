@@ -23,6 +23,14 @@ Window_Desc :: struct {
 	hidden, inactive: bool,
 	tabbed_title_bar: bool,
 }
+// Taskbar button progress. Paused and Error tint the bar; Indeterminate has no value.
+Progress_State :: enum {
+	None,
+	Indeterminate,
+	Normal,
+	Paused,
+	Error,
+}
 Cursor_Shape :: enum {
 	Arrow,
 	Text,

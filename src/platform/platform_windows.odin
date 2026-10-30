@@ -61,6 +61,9 @@ Platform :: struct {
 	modal_callback:             proc(user: rawptr),
 	modal_user:                 rawptr,
 	frequency:                  w.LARGE_INTEGER,
+	taskbar:                    ^w.ITaskbarList3,
+	taskbar_failed:             bool,
+	com_initialized:            bool,
 }
 
 @(require_results)
@@ -302,6 +305,7 @@ destroy :: proc(p: ^Platform) -> Error {
 		free(window, p.allocator)
 	}
 	tray_error := tray_destroy(p)
+	taskbar_destroy(p)
 	if first_error == .None {
 		first_error = tray_error
 	}
