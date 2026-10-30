@@ -571,14 +571,14 @@ load_settings :: proc(app: ^App) {
 			notify(
 				app,
 				.Info,
-				"Shell settings moved into profiles in settings.ini; existing shells are unchanged.",
+				"settings.ini was updated to the current format; existing shells are unchanged.",
 			)
 		} else {
-			log.errorf("migrating shell settings failed: %v", migration_error)
+			log.errorf("migrating settings failed: %v", migration_error)
 			notify(
 				app,
 				.Error,
-				"Could not move shell settings into profiles. The old settings still apply; " +
+				"Could not update settings.ini to the current format. Its settings still apply; " +
 				"check the settings file permissions.",
 			)
 		}
@@ -667,7 +667,7 @@ apply_fonts :: proc(app: ^App) {
 }
 
 apply_theme :: proc(app: ^App) {
-	app.theme = ui.theme_from(settings.theme_resolve(app.settings.theme))
+	app.theme = ui.theme_from(app.settings.active_theme)
 	app.theme.hover_lift = f32(app.settings.interface.hover_lift)
 	app.theme.hover_gloss = f32(app.settings.interface.hover_gloss)
 }

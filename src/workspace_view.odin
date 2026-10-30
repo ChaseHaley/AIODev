@@ -9,6 +9,8 @@ Workspace_View_Resources :: struct {
 	workspace: ^Workspace,
 	tree: ^layout.Layout,
 	editor: ui.Editor,
+	// Delete Theme was pressed once; pressing it again deletes the custom theme.
+	theme_delete_armed: bool,
 	views: [dynamic]Pane_View,
 	using presentation: Tab_Presentation,
 	panes: [dynamic]layout.Pane_Rect,

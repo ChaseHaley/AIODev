@@ -188,7 +188,7 @@ try {
     Open-Field colors.cursor
     Save-Value 'rgb(255, 136, 0)'
     Assert-Value (Read-State)['settings.value'] '#ff8800' 'pasted rgb color normalized'
-    if ([IO.File]::ReadAllText($path) -notmatch '(?m)^colors\.cursor = #ff8800\r?$') { throw 'Color not persisted as hex.' }
+    if ([IO.File]::ReadAllText($path) -notmatch '(?m)^theme\.custom\.[a-z0-9_-]+\.cursor = #ff8800\r?$') { throw 'Color not persisted as hex in a custom theme.' }
     Save-Value 'hsl(120, 100%, 25%)'
     Assert-Value (Read-State)['settings.value'] '#008000' 'pasted hsl color normalized'
     Close-Settings

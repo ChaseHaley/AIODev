@@ -116,13 +116,16 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		}
 		if entry.key == "font.size" {row.minimum, row.maximum = 6, 32}
 		if entry.key == "font.line_height" {row.minimum, row.maximum = 0.8, 2}
-		if entry.key == "theme.mode" &&
-		   (s.color_overrides.foreground != nil || s.color_overrides.background != nil) {
-			row.description = "Shell colors are pinned. Search Follow Theme to reset foreground and background."
+		if entry.key == "theme.mode" && settings.theme_custom(&s) {
+			row.description = "Switches built-in themes between dark and light. Custom themes keep their own colors."
 		}
 		switch entry.kind {
 		case .String:
 			row.kind = entry.key == "input.leader" ? .Shortcut : .Text
+			if entry.key == "theme.name" {
+				row.kind, row.choices = .Choice, settings_theme_choices(&s)
+				row.description = "Built-in or custom color theme. Changing any color saves a custom theme."
+			}
 		case .Int:
 			row.kind = .Integer
 		case .Float:
@@ -131,12 +134,6 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 			row.kind = .Toggle
 		case .Enum:
 			row.kind, row.choices = .Choice, entry.enum_names
-		case .Color:
-			row.kind = .Color
-		case .Optional_Color:
-			row.kind = .Optional_Color
-			if c, ok := settings.theme_color(&s, entry.key);
-			   ok {row.fallback = settings.color_hex(c)}
 		}
 		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {
 			ui.editor_destroy(p)
@@ -336,18 +333,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		}
 	}
 	ui.editor_group_table(p, profile_group)
-	if ui.editor_add(
-		   p,
-		   {
-			   key = "colors.follow_theme",
-			   title = "Follow Theme for Shell Colors",
-			   description = "Reset shell foreground and background together; preserve other color overrides.",
-			   value = "Use theme colors",
-			   kind = .Action,
-		   },
-		   "Colors",
-	   ) !=
-	   nil {
+	if !settings_add_theme_rows(p, &s) {
 		ui.editor_destroy(p)
 		notify(app, .Error, "Could not allocate settings editor.")
 		return false
@@ -575,17 +561,27 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		editor_profile_field(app, w, row)
 		return
 	}
-	if row.key == "colors.follow_theme" {editor_follow_theme(app, w); return}
+	if row.key != "theme.delete" {w.theme_delete_armed = false}
+	switch row.key {
+	case "theme.duplicate":
+		editor_theme_duplicate(app, w)
+		return
+	case "theme.delete":
+		editor_theme_delete(app, w)
+		return
+	case "theme.rename":
+		if outcome == .Reset {ui.field_set(&p.value, row.default_value)}
+		editor_theme_rename(app, w, ui.field_string(&p.value))
+		return
+	}
+	if strings.has_prefix(row.key, settings_color_prefix) {
+		editor_theme_color(app, w, row, outcome == .Reset)
+		return
+	}
 	if outcome == .Reset {ui.field_set(&p.value, row.default_value)}
 	key := strings.clone(row.key, context.temp_allocator)
 	kind := row.kind
 	value := strings.clone(ui.field_string(&p.value), context.temp_allocator)
-	alpha := false
-	if (row.kind == .Color || row.kind == .Optional_Color) && value != "" {
-		if c, ok, has_alpha := settings.parse_color(value); ok {
-			value, alpha = settings.color_hex(c), has_alpha
-		}
-	}
 	updated, message, err := settings.edit_text(p.source, row.key, value)
 	defer delete(message)
 	if err != nil || message != "" {
@@ -614,7 +610,6 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	}
 	if kind == .Shortcut {p.focus, p.capturing = .Search, false}
 	text := "Saved and applied."
-	if alpha {text = "Saved and applied; the color's alpha is ignored."}
 	if warning != "" {text = fmt.tprintf("Saved. %s", warning)}
 	if key == "window.columns" || key == "window.rows" {
 		text = "Saved. Initial size applies to new sessions."
@@ -827,34 +822,205 @@ editor_profile_action :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-editor_follow_theme :: proc(app: ^App, w: ^Window) {
-	data, err := os.read_entire_file(app.settings_path, context.temp_allocator)
-	if err != nil {notify(app, .Error, "Could not read settings."); return}
-	source := w.editor.open ? w.editor.source : string(data)
-	updated, edit_error := settings.follow_theme_text(source)
-	if edit_error != nil {notify(app, .Error, "Could not prepare theme colors."); return}
-	defer delete(updated)
-	result := settings_commit(app, source, updated, w.editor.open ? &w.editor : nil)
-	if result != .None {
-		text := "Could not save theme colors. Check the settings path and permissions."
-		if result == .Conflict {
-			text = "Settings changed outside the editor. Reopen Settings before resetting colors."
+@(private)
+settings_color_prefix :: "colors."
+
+// The theme selector lists the built-in themes, then custom themes in file order. The editor owns
+// its copy, so the slice may borrow the parsed settings.
+@(private)
+settings_theme_choices :: proc(s: ^settings.Settings) -> []string {
+	choices := make(
+		[dynamic]string,
+		0,
+		len(settings.Theme_Name) + len(s.themes),
+		context.temp_allocator,
+	)
+	for name in settings.THEME_NAMES {append(&choices, name)}
+	for theme in s.themes {append(&choices, theme.id)}
+	return choices[:]
+}
+
+// The active theme's management rows and one row per theme color. Every color shows the value in
+// effect; a custom theme's Reset returns a color to its built-in base.
+@(private)
+settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
+	if custom := settings.custom_theme_find(s, s.theme.name); custom != nil {
+		rows := [?]ui.Editor_Row {
+			{
+				key = "theme.rename",
+				title = "Theme ID",
+				description = "Renames this custom theme. Use lowercase letters, digits, - and _.",
+				value = custom.id,
+				default_value = custom.id,
+				kind = .Text,
+			},
+			{
+				key = "theme.duplicate",
+				title = "Save as New Theme",
+				description = "Copy this theme with all its colors and switch to the copy.",
+				value = "Save Copy",
+				kind = .Action,
+			},
+			{
+				key = "theme.delete",
+				title = "Delete Theme",
+				description = fmt.tprintf(
+					"Remove this custom theme and switch back to %s.",
+					settings.builtin_id(custom.base),
+				),
+				value = "Delete…",
+				kind = .Action,
+			},
 		}
-		if w.editor.open {ui.editor_message(&w.editor, text, true)} else {notify(app, .Error, text)}
+		for row in rows {
+			if ui.editor_add(p, row, "Theme") != nil {return false}
+		}
+	} else {
+		modes := settings.THEME_MODES
+		row := ui.Editor_Row {
+			key         = "theme.duplicate",
+			title       = "Save as New Theme",
+			description = fmt.tprintf(
+				"Start a custom theme from %s-%s. Changing any color below does this automatically.",
+				s.theme.name,
+				modes[s.theme.mode],
+			),
+			value       = "Save Copy",
+			kind        = .Action,
+		}
+		if ui.editor_add(p, row, "Theme") != nil {return false}
+	}
+	base := settings.theme_base(s)
+	tokens := settings.THEME_TOKENS
+	for token in settings.Theme_Token {
+		info := tokens[token]
+		row := ui.Editor_Row {
+			key           = fmt.tprintf("%s%s", settings_color_prefix, info.key),
+			title         = info.title,
+			description   = info.description,
+			value         = settings.theme_color_text(token, s.active_theme.colors[token]),
+			default_value = settings.theme_color_text(token, base.colors[token]),
+			kind          = info.kind == .Optional ? .Optional_Color : .Color,
+		}
+		group := settings.token_terminal(token) ? "Terminal Colors" : "Interface Colors"
+		if ui.editor_add(p, row, group) != nil {return false}
+	}
+	return true
+}
+
+// Commits a theme revision. The commit keeps the edited row selected; actions that replace their
+// row reveal `select_key` instead.
+@(private)
+editor_theme_commit :: proc(app: ^App, w: ^Window, updated, select_key, message: string) {
+	result := settings_commit(app, w.editor.source, updated, &w.editor)
+	if result != .None {
+		text := "Could not save the theme. Check the settings path and permissions."
+		if result == .Conflict {
+			text = "File changed outside this editor. Close and reopen Settings to reload it."
+		}
+		ui.editor_message(&w.editor, text, true)
 		return
 	}
-	if w.editor.open {
-		w.editor.focus = .Search
-		settings_reveal_page(
-			app,
+	if select_key == "" {
+		ui.editor_message(&w.editor, message, false)
+		return
+	}
+	settings_reveal_page(app, &w.editor, {key = select_key, search = .Preserve, message = message})
+}
+
+@(private)
+editor_theme_failed :: proc(w: ^Window, error: settings.Theme_Edit_Error, issue: string) {
+	text := issue
+	switch error {
+	case .None, .Invalid:
+	case .Allocation:
+		text = "Could not prepare the theme change."
+	case .Unavailable:
+		text = "Built-in themes cannot be renamed or deleted."
+	}
+	ui.editor_message(&w.editor, text, true)
+}
+
+@(private)
+editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bool) {
+	token_key := strings.clone(row.key[len(settings_color_prefix):], context.temp_allocator)
+	value := reset ? "" : strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
+	alpha_dropped := false
+	if token, found := settings.token_find(token_key); found && value != "" {
+		tokens := settings.THEME_TOKENS
+		_, _, alpha := settings.parse_color(value)
+		alpha_dropped = alpha && tokens[token].kind != .Translucent
+	}
+	updated, created, issue, error := settings.theme_color_edit(w.editor.source, token_key, value)
+	defer delete(updated)
+	defer delete(created)
+	if error != .None {
+		editor_theme_failed(w, error, issue)
+		return
+	}
+	if updated == w.editor.source {
+		ui.editor_message(&w.editor, "Built-in themes keep their colors; changing one saves a custom theme.", false)
+		return
+	}
+	message := "Saved and applied."
+	if created != "" {message = fmt.tprintf("Saved as new theme %s.", created)}
+	if alpha_dropped {message = fmt.tprintf("%s This color is opaque, so its alpha is ignored.", message)}
+	if reset {message = "Color returned to the base theme."}
+	editor_theme_commit(app, w, updated, "", message)
+}
+
+@(private)
+editor_theme_duplicate :: proc(app: ^App, w: ^Window) {
+	updated, created, error := settings.theme_duplicate(w.editor.source)
+	defer delete(updated)
+	defer delete(created)
+	if error == .Invalid {
+		ui.editor_message(&w.editor, "Custom theme limit reached. Delete one before saving another.", true)
+		return
+	}
+	if error != .None {
+		editor_theme_failed(w, error, "")
+		return
+	}
+	editor_theme_commit(app, w, updated, "theme.rename", fmt.tprintf("Saved as new theme %s.", created))
+}
+
+@(private)
+editor_theme_rename :: proc(app: ^App, w: ^Window, value: string) {
+	new_id := strings.clone(strings.trim_space(value), context.temp_allocator)
+	updated, issue, error := settings.theme_rename(w.editor.source, new_id)
+	defer delete(updated)
+	if error != .None {
+		editor_theme_failed(w, error, issue)
+		return
+	}
+	editor_theme_commit(app, w, updated, "theme.rename", fmt.tprintf("Theme renamed to %s.", new_id))
+}
+
+// Deleting discards colors that exist nowhere else, so it takes a second press.
+@(private)
+editor_theme_delete :: proc(app: ^App, w: ^Window) {
+	if !w.theme_delete_armed {
+		w.theme_delete_armed = true
+		ui.editor_message(
 			&w.editor,
-			{
-				key = "colors.follow_theme",
-				search = .Preserve,
-				message = "Shell foreground and background now follow the theme.",
-			},
+			fmt.tprintf(
+				"Delete theme %s and its colors? Press Delete Theme again to confirm.",
+				app.settings.theme.name,
+			),
+			true,
 		)
-	} else {notify(app, .Info, "Shell foreground and background now follow the theme.")}
+		return
+	}
+	w.theme_delete_armed = false
+	updated, selected, error := settings.theme_delete(w.editor.source)
+	defer delete(updated)
+	defer delete(selected)
+	if error != .None {
+		editor_theme_failed(w, error, "")
+		return
+	}
+	editor_theme_commit(app, w, updated, "theme.name", fmt.tprintf("Theme deleted. Using %s.", selected))
 }
 
 // Plain and shifted keys type or navigate, and these Ctrl chords edit text or move through the list.

@@ -40,7 +40,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar_height}) == .None {
 		if render.push_rect(
 			   &w.list,
-			   {rect = {0, 0, f32(w.width), bar_height}, color = app.theme.chrome},
+			   {rect = {0, 0, f32(w.width), bar_height}, color = app.theme.tab_bar},
 		   ) !=
 		   .None {
 			return .Ok
@@ -124,7 +124,7 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	}
 	if render.push_layer(&w.list, clip) != .None {return}
 	radius := f32(app.settings.pane.corner_radius) * w.scale
-	border := pane.node == w.tree.focus ? app.theme.focus : app.theme.border
+	border := pane.node == w.tree.focus ? app.theme.pane_focus : app.theme.pane_border
 	if render.push_rect(
 		   &w.list,
 		   {
@@ -145,7 +145,7 @@ window_shared_borders :: proc(app: ^App, w: ^Window) {
 		r := d.rect
 		if render.push_rect(
 			   &w.list,
-			   {rect = {r.x, r.y, r.width, r.height}, color = app.theme.border},
+			   {rect = {r.x, r.y, r.width, r.height}, color = app.theme.pane_border},
 		   ) !=
 		   .None {return}
 		for pane in w.panes {
@@ -165,7 +165,7 @@ window_shared_borders :: proc(app: ^App, w: ^Window) {
 				   &w.list,
 				   {
 					   rect = {segment.x, segment.y, segment.width, segment.height},
-					   color = app.theme.focus,
+					   color = app.theme.pane_focus,
 				   },
 			   ) !=
 			   .None {return}

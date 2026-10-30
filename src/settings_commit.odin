@@ -68,8 +68,8 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 		if next_row := ui.editor_row(&replacement); p.popup == .Color && next_row.kind == row.kind {
 			replacement.popup = .Color
 			before, after := ui.field_string(&p.value), ui.field_string(&replacement.value)
-			previous_color, previous_ok, _ := settings.parse_color(before == "" ? row.fallback : before)
-			next_color, next_ok, _ := settings.parse_color(after == "" ? next_row.fallback : after)
+			previous_color, previous_ok, _ := settings.parse_color(before)
+			next_color, next_ok, _ := settings.parse_color(after)
 			if previous_ok && next_ok && previous_color == next_color {replacement.hsv = p.hsv}
 		}
 	}

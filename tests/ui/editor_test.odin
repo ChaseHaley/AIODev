@@ -21,7 +21,7 @@ editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 		{{key = "cursor.style", title = "Cursor Style", description = "Shape", value = "block",
 			default_value = "block", kind = .Choice, choices = cursor_styles[:]}, "Cursor"},
 		{{key = "colors.cursor", title = "Cursor Color", description = "Cursor.", value = "",
-			kind = .Optional_Color, fallback = "#ffffff"}, "Colors"},
+			kind = .Optional_Color}, "Colors"},
 		{{key = "scrollback.lines", title = "Scrollback Lines", description = "History.", value = "10000",
 			default_value = "10000", kind = .Integer, minimum = 0, maximum = 10000000}, "Scrollback"},
 		{{key = "keys.pane.split_right", title = "Split Right", description = "Shortcut.", value = "Ctrl+Shift+O",

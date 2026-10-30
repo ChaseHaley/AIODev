@@ -29,10 +29,6 @@ value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
 		return (cast(^bool)p)^ ? "true" : "false"
 	case .Enum:
 		return entry.enum_names[(cast(^int)p)^]
-	case .Color:
-		return color_hex((cast(^Color)p)^)
-	case .Optional_Color:
-		if c, ok := (cast(^Maybe(Color))p)^.?; ok {return color_hex(c)}
 	}
 	return ""
 }
@@ -76,6 +72,13 @@ edit_text :: proc(
 		entry := legacy_shell_entry(slot)
 		if err = encode_value(&encoded, entry, value); err != nil {return}
 		serialized = strings.to_string(encoded)
+	} else if strings.has_prefix(key, CUSTOM_THEME_PREFIX) {
+		theme_serialized, issue := custom_theme_value(key, value, .Permissive)
+		if issue != "" {
+			message, err = strings.clone(issue, allocator)
+			return
+		}
+		serialized = theme_serialized
 	} else if strings.has_prefix(key, PROFILE_PREFIX) {
 		profile_serialized, issue := profile_edit_text(key, value)
 		if issue != "" {
@@ -120,28 +123,6 @@ Save_Error :: enum {
 	None,
 	Conflict,
 	IO,
-}
-
-@(require_results)
-follow_theme_text :: proc(
-	text: string,
-	allocator := context.allocator,
-) -> (
-	string,
-	runtime.Allocator_Error,
-) {
-	foreground, message, err := edit_text(text, "colors.foreground", "", allocator)
-	defer delete(message, allocator)
-	if err != nil {return "", err}
-	defer delete(foreground, allocator)
-	background, background_message, background_error := edit_text(
-		foreground,
-		"colors.background",
-		"",
-		allocator,
-	)
-	delete(background_message, allocator)
-	return background, background_error
 }
 
 @(require_results)

@@ -192,7 +192,7 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 		w.scale, w.width, w.height = scale, i32(600*scale), i32(400*scale)
 		ui.text_set_size(&w.ui_text, 14*scale)
 		for mode in settings.Theme_Mode {
-			state := app.App{theme = ui.theme_from(settings.theme_resolve({.Studio, mode}))}
+			state := app.App{theme = ui.theme_from(settings.builtin_theme({.Studio, mode}))}
 			append(&state.workspaces, &workspace)
 			defer delete(state.workspaces)
 			render.draw_list_reset(&w.list)

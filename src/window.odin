@@ -6,7 +6,6 @@ import "aio:layout"
 import "aio:perf"
 import "aio:platform"
 import "aio:render"
-import "aio:settings"
 import "aio:term"
 import "aio:term_view"
 import "aio:ui"
@@ -290,8 +289,9 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 window_apply_settings :: proc(app: ^App, w: ^Window) {
 	ui.text_set_size(&w.ui_text, f32(app.settings.interface.font_size) * w.scale * 96 / 72)
 	w.metrics = window_metrics(app, w.scale)
-	theme := settings.theme_resolve(app.settings.theme)
-	if platform.window_set_frame_color(&app.platform, w.id, theme.chrome, theme.text) != .None {
+	colors := app.settings.active_theme.colors
+	if platform.window_set_frame_color(&app.platform, w.id, colors[.Tab_Bar].rgb, colors[.Text].rgb) !=
+	   .None {
 		log.error("setting the window frame color failed")
 	}
 	horizontal := app.settings.tabs.orientation == .Horizontal
@@ -589,6 +589,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if state != nil {
 			hover = state.hover
 		}
+		minimum_contrast := f32(1)
+		if app.settings.active_theme.terminal_light {
+			minimum_contrast = f32(app.settings.terminal.minimum_contrast)
+		}
 		style := term_view.Style {
 			family = app.family,
 			selection_background = color(c.selection_background),
@@ -597,7 +601,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			search_background = color(c.search_background),
 			search_selected_background = color(c.search_selected_background),
 			cursor_text = color(c.cursor_text),
-			minimum_contrast = app.settings.theme.mode == .Light ? f32(app.settings.terminal.minimum_contrast) : 1,
+			minimum_contrast = minimum_contrast,
 			focused = content_focused,
 			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
 			hover = hover,

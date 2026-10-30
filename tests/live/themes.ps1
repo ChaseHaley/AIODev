@@ -79,16 +79,19 @@ try {
     }
     Set-Option theme.name studio
     Set-Option theme.mode dark
-    Set-Option colors.background '#102030'
-    Set-Option colors.foreground '#fedcba'
+    Set-Option theme.custom.ocean.base 'studio-dark'
+    Set-Option theme.custom.ocean.background '#102030'
+    Set-Option theme.custom.ocean.foreground '#fedcba'
+    Set-Option theme.custom.ocean.tab_bar '#203040'
+    Set-Option theme.name ocean
     Invoke-Aio command settings.reload
+    Invoke-Aio expect state terminal.background=#102030
     Invoke-Aio expect state "session.id=$session"
     Shot terminal-overrides
     Invoke-Aio key Ctrl+Shift+P
     Shot independent-interface-colors
     Invoke-Aio key Esc
-    Set-Option colors.background ''
-    Set-Option colors.foreground ''
+    Set-Option theme.name studio
     Invoke-Aio command settings.reload
     foreach ($count in @(1,2,4)) {
         while ([int](Read-State)['panes.count'] -lt $count) {

@@ -213,7 +213,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 					   max(0, bar.tab_width - 20 * w.scale),
 					   2 * w.scale,
 				   },
-				   color = app.theme.accent,
+				   color = app.theme.tab_indicator,
 				   radius = w.scale,
 			   },
 		   ) !=

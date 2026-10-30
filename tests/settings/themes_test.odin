@@ -1,11 +1,12 @@
 package settings_test
 
-import "core:testing"
 import "core:fmt"
+import "core:strings"
+import "core:testing"
 import "aio:settings"
 
 @(test)
-themes_resolve_after_parsing_and_preserve_terminal_overrides :: proc(t: ^testing.T) {
+builtin_themes_resolve_after_parsing :: proc(t: ^testing.T) {
 	backgrounds := [settings.Theme_Name][settings.Theme_Mode]settings.Color{
 		.Studio = {.Dark = {0x12, 0x12, 0x15}, .Light = {0xff, 0xff, 0xff}},
 		.Tide = {.Dark = {0x15, 0x1e, 0x26}, .Light = {0xf8, 0xfa, 0xfc}},
@@ -13,48 +14,87 @@ themes_resolve_after_parsing_and_preserve_terminal_overrides :: proc(t: ^testing
 	}
 	for name, i in ([?]string{"studio", "tide", "ember"}) {
 		for mode, j in ([?]string{"dark", "light"}) {
-			text := fmt.tprintf("colors.cursor = #abcdef\ntheme.mode = %s\ntheme.name = %s\n", mode, name)
+			text := fmt.tprintf("theme.mode = %s\ntheme.name = %s\n", mode, name)
 			s, d, err := settings.parse(text)
 			defer settings.destroy(&s)
 			defer settings.diagnostics_destroy(&d)
 			testing.expect_value(t, err, nil)
 			testing.expect_value(t, len(d), 0)
-			theme := settings.theme_resolve(s.theme)
-			testing.expect_value(t, theme.pane, backgrounds[settings.Theme_Name(i)][settings.Theme_Mode(j)])
-			testing.expect_value(t, s.colors.background, theme.pane)
-			testing.expect_value(t, s.colors.foreground, theme.text)
-			testing.expect_value(t, s.colors.palette, theme.terminal.palette)
-			testing.expect_value(t, s.colors.cursor, settings.Color{0xab, 0xcd, 0xef})
-			testing.expect_value(t, settings.value_text(&s, settings.schema_find("colors.background")^), "")
+			theme := s.active_theme
+			expected := backgrounds[settings.Theme_Name(i)][settings.Theme_Mode(j)]
+			testing.expect_value(t, theme.colors[.Pane].rgb, expected)
+			testing.expect_value(t, s.colors.background, expected)
+			testing.expect_value(t, s.colors.foreground, theme.colors[.Text].rgb)
+			testing.expect_value(t, theme, settings.builtin_theme({settings.Theme_Name(i), settings.Theme_Mode(j)}))
 		}
 	}
-	s, d, err := settings.parse("theme.name = tide\ntheme.mode = light\ncolors.background = #010203\n"+
-		"colors.palette.15 = #040506\ncolors.selection_background = #070809\ncolors.cursor =\n")
+}
+
+@(test)
+custom_theme_inherits_its_base_and_overrides_single_colors :: proc(t: ^testing.T) {
+	s, d, err := settings.parse(
+		"theme.mode = dark\ntheme.name = ocean\ntheme.custom.ocean.base = tide-light\n" +
+		"theme.custom.ocean.tab_bar = #010203\ntheme.custom.ocean.border = #04050680\n" +
+		"theme.custom.ocean.palette.15 = #070809\ntheme.custom.other.cursor = #0a0b0c\n",
+	)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	testing.expect_value(t, s.colors.background, settings.Color{1, 2, 3})
-	testing.expect_value(t, s.colors.palette[15], settings.Color{4, 5, 6})
-	testing.expect_value(t, s.colors.selection_background, settings.Color{7, 8, 9})
-	testing.expect_value(t, s.colors.cursor, settings.Color{0x14, 0x21, 0x2b})
-	testing.expect_value(t, settings.theme_resolve(s.theme).pane, settings.Color{0xf8, 0xfa, 0xfc})
+	testing.expect_value(t, len(s.themes), 2)
+	base := settings.builtin_theme({.Tide, .Light})
+	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
+	testing.expect_value(t, s.active_theme.colors[.Border], settings.Theme_Color{4, 5, 6, 0x80})
+	testing.expect_value(t, s.colors.palette[15], settings.Color{7, 8, 9})
+	testing.expect_value(t, s.active_theme.colors[.Cursor], base.colors[.Cursor])
+	testing.expect_value(t, s.active_theme.colors[.Window], base.colors[.Window])
+	testing.expect(t, s.active_theme.light)
+	testing.expect(t, settings.theme_custom(&s))
+	testing.expect_value(t, settings.theme_base(&s), base)
 }
 
 @(test)
-theme_and_shape_validation :: proc(t: ^testing.T) {
-	s, d, err := settings.parse("theme.name = unknown\ntheme.mode = auto\npane.gap = 25\npane.corner_radius = -1")
+theme_validation_reports_and_falls_back :: proc(t: ^testing.T) {
+	s, d, err := settings.parse(
+		"theme.name = unknown\ntheme.mode = auto\npane.gap = 25\npane.corner_radius = -1\n" +
+		"theme.custom.studio.cursor = #000000\ntheme.custom.Bad.cursor = #000000\n" +
+		"theme.custom.mine.nope = #000000\ntheme.custom.mine.cursor = #00000080\n" +
+		"theme.custom.mine.base = studio\ntheme.custom.mine = #000000\n",
+	)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
-	testing.expect_value(t, len(d), 4)
-	testing.expect_value(t, s.theme, settings.Theme_Settings{})
+	testing.expect_value(t, len(d), 10)
+	testing.expect_value(t, s.theme.name, "unknown")
+	testing.expect_value(t, s.active_theme, settings.builtin_theme({.Studio, .Dark}))
 	testing.expect_value(t, s.pane, settings.Pane_Settings{5, 7, true, true, 20, 5})
+	unknown := false
+	for diagnostic in d {
+		if diagnostic.key == "theme.name" && strings.contains(diagnostic.message, "unknown theme") {unknown = true}
+	}
+	testing.expect(t, unknown)
 	for fixture in ([?]string{"pane.gap = 0\npane.corner_radius = 0", "pane.gap = 24\npane.corner_radius = 16"}) {
 		limits, issues, parse_error := settings.parse(fixture)
 		defer settings.destroy(&limits)
 		defer settings.diagnostics_destroy(&issues)
 		testing.expect_value(t, parse_error, nil)
 		testing.expect_value(t, len(issues), 0)
+	}
+}
+
+@(test)
+custom_theme_ids_never_shadow_builtins :: proc(t: ^testing.T) {
+	testing.expect(t, settings.theme_id_valid("ocean"))
+	testing.expect(t, settings.theme_id_valid("studio-2"))
+	for id in ([?]string{"", "studio", "tide", "ember", "Ocean", "-x", "a b", "a.b"}) {
+		testing.expectf(t, !settings.theme_id_valid(id), "%q should be invalid", id)
+	}
+	b, ok := settings.builtin_parse("ember-light")
+	testing.expect(t, ok)
+	testing.expect_value(t, b, settings.Builtin_Theme{.Ember, .Light})
+	testing.expect_value(t, settings.builtin_id(b), "ember-light")
+	for text in ([?]string{"ember", "ember-", "-light", "embers-light", "ember-lights"}) {
+		_, valid := settings.builtin_parse(text)
+		testing.expectf(t, !valid, "%q should be rejected", text)
 	}
 }

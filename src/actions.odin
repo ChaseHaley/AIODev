@@ -73,7 +73,7 @@ Action :: enum u32 {
 	Resize_Down_Large,
 	Keep_Pane_Open,
 	Change_Shortcut,
-	Follow_Theme_Colors,
+	Customize_Colors,
 	Rename_Tab,
 	Rename_Pane,
 	Change_Pane_Shell,
@@ -290,11 +290,7 @@ ACTIONS :: [Action]Action_Info {
 	.Resize_Down_Large = {"pane.resize_down_large", "Resize Down by 50 Pixels", nil},
 	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil},
 	.Change_Shortcut = {"settings.change_shortcut", "Change Shortcut…", nil},
-	.Follow_Theme_Colors   = {
-		"settings.follow_theme_colors",
-		"Use Theme for Shell Foreground and Background",
-		nil,
-	},
+	.Customize_Colors = {"settings.customize_colors", "Customize Colors…", nil},
 	.Profile_1 = {
 		"profile.open_1",
 		"New Tab with Profile 1",
@@ -470,8 +466,8 @@ run_action :: proc(
 		settings_reveal(app, w, {query = "keys.", search = .Scope})
 	case .Reload_Settings:
 		reload_settings(app)
-	case .Follow_Theme_Colors:
-		editor_follow_theme(app, w)
+	case .Customize_Colors:
+		settings_reveal(app, w, {query = "colors.", search = .Scope})
 	case .Rename_Tab:
 		rename_open(app, w, true)
 	case .Rename_Pane:

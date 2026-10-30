@@ -9,9 +9,14 @@ import "core:log"
 import "core:math"
 import "core:slice"
 
+// Every interface color, resolved from the settings theme. Most fields are theme tokens; the
+// hover, pressed, shadow, scrim and rim effects derive from them because they model light rather
+// than name a role.
 Theme :: struct {
-	window, chrome, pane, surface, border, text, muted, faint, accent, accent_text: render.Color,
+	window, pane, surface, border, text, muted, faint, accent, accent_text: render.Color,
 	selection, shadow, scrim, hover, pressed, focus, error, success, warning, info: render.Color,
+	tab_bar, tab_text, tab_active, tab_active_text, tab_indicator, rail_active: render.Color,
+	pane_border, pane_focus: render.Color,
 	// The shared raised-hover look. `rim` is the colour of the pointer-following edge light;
 	// `hover_edge` is the hairline that holds a light fill's shape. lift and gloss are
 	// overridden from interface.hover_lift and interface.hover_gloss.
@@ -21,34 +26,46 @@ Theme :: struct {
 }
 
 theme_from :: proc(t: settings.Theme) -> Theme {
+	c :: proc(t: settings.Theme, token: settings.Theme_Token) -> render.Color {
+		value := t.colors[token]
+		return colour.rgba(value.rgb, f32(value.a) / 255)
+	}
+	text, raised, accent := t.colors[.Text].rgb, t.colors[.Surface].rgb, t.colors[.Accent].rgb
 	return {
-		window = colour.rgba(t.window),
-		chrome = colour.rgba(t.chrome),
-		pane = colour.rgba(t.pane),
-		surface = colour.rgba(t.raised),
-		text = colour.rgba(t.text),
-		muted = colour.rgba(t.muted),
-		faint = colour.rgba(t.faint),
-		accent = colour.rgba(t.accent),
-		accent_text = colour.rgba(t.accent_text),
-		border = colour.rgba(t.text, t.light ? 0.09 : 0.08),
+		window = c(t, .Window),
+		pane = c(t, .Pane),
+		surface = c(t, .Surface),
+		text = c(t, .Text),
+		muted = c(t, .Muted),
+		faint = c(t, .Faint),
+		accent = c(t, .Accent),
+		accent_text = c(t, .Accent_Text),
+		border = c(t, .Border),
+		selection = c(t, .Selection),
+		focus = c(t, .Focus),
+		error = c(t, .Danger),
+		success = c(t, .Success),
+		warning = c(t, .Warning),
+		info = c(t, .Info),
+		tab_bar = c(t, .Tab_Bar),
+		tab_text = c(t, .Tab_Text),
+		tab_active = c(t, .Tab_Active),
+		tab_active_text = c(t, .Tab_Active_Text),
+		tab_indicator = c(t, .Tab_Indicator),
+		rail_active = c(t, .Rail_Active),
+		pane_border = c(t, .Pane_Border),
+		pane_focus = c(t, .Pane_Focus),
 		// Light mode's hover is paper: the opaque raised-surface colour, so the seat drawn
 		// underneath cannot show through and darken the tile, and its shape comes from the
 		// hairline and the seat rather than from ink. Dark mode keeps the translucent lift.
-		hover = t.light ? colour.rgba(t.raised) : colour.rgba(t.text, 0.05),
-		pressed = colour.rgba(t.text, t.light ? 0.08 : 0.09),
-		selection = colour.rgba(t.accent, t.light ? 0.10 : 0.14),
-		focus = colour.rgba(t.accent, 0.50),
+		hover = t.light ? colour.rgba(raised) : colour.rgba(text, 0.05),
+		pressed = colour.rgba(text, t.light ? 0.08 : 0.09),
 		shadow = {0, 0, 0, t.light ? 0.12 : 0.35},
 		scrim = {0, 0, 0, t.light ? 0.08 : 0.18},
-		error = colour.rgba(t.danger),
-		success = colour.rgba(t.success),
-		warning = colour.rgba(t.warning),
-		info = colour.rgba(t.info),
 		// White light reads as a specular edge on dark surfaces. On a white control the rim
 		// must stay faint, or it becomes the dark edge the paper fill exists to avoid.
-		rim = colour.rgba(t.light ? t.accent : t.text, t.light ? 0.20 : 0.80),
-		hover_edge = t.light ? colour.rgba(t.text, 0.10) : render.Color{0, 0, 0, 0},
+		rim = colour.rgba(t.light ? accent : text, t.light ? 0.20 : 0.80),
+		hover_edge = t.light ? colour.rgba(text, 0.10) : render.Color{0, 0, 0, 0},
 		hover_lift = 1.5,
 		hover_gloss = 1,
 	}

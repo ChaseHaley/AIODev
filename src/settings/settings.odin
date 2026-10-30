@@ -1,6 +1,5 @@
 package settings
 
-import "aio:colour"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
@@ -73,9 +72,12 @@ Settings :: struct {
 	scrollback:      Scrollback_Settings,
 	terminal:        Terminal_Settings,
 	cursor:          Cursor_Settings,
+	// The active theme's terminal colors, derived from active_theme.
 	colors:          Color_Settings,
-	color_overrides: Color_Overrides,
 	theme:           Theme_Settings,
+	themes:          [dynamic]Custom_Theme,
+	active_theme:    Theme,
+	theme_line:      int,
 	pane:            Pane_Settings,
 	tab:             Tab_Settings,
 	tabs:            Tabs_Settings,
@@ -94,8 +96,6 @@ Kind :: enum {
 	Int,
 	Float,
 	Bool,
-	Color,
-	Optional_Color,
 	Enum,
 }
 Schema_Entry :: struct {
@@ -111,13 +111,13 @@ SCHEMA :: [?]Schema_Entry {
 	{
 		"theme.name",
 		"Theme",
-		.Enum,
+		.String,
 		offset_of(Settings, theme) + offset_of(Theme_Settings, name),
 		"studio",
-		0,
-		0,
-		{"studio", "tide", "ember"},
-		"Color theme: studio, tide, or ember.",
+		1,
+		64,
+		nil,
+		"Color theme: studio, tide, ember, or the ID of a custom theme.",
 	},
 	{
 		"theme.mode",
@@ -128,7 +128,7 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		0,
 		{"dark", "light"},
-		"Color theme mode: dark or light.",
+		"Variant of a built-in theme: dark or light. Custom themes keep their own colors.",
 	},
 	{
 		"pane.gap",
@@ -443,181 +443,6 @@ SCHEMA :: [?]Schema_Entry {
 		nil,
 		"Blink the cursor.",
 	},
-	{
-		key = COLOR_ENTRIES[0].key,
-		title = COLOR_ENTRIES[0].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[0].override_offset,
-		description = COLOR_ENTRIES[0].description,
-	},
-	{
-		key = COLOR_ENTRIES[1].key,
-		title = COLOR_ENTRIES[1].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[1].override_offset,
-		description = COLOR_ENTRIES[1].description,
-	},
-	{
-		key = COLOR_ENTRIES[2].key,
-		title = COLOR_ENTRIES[2].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[2].override_offset,
-		description = COLOR_ENTRIES[2].description,
-	},
-	{
-		key = COLOR_ENTRIES[3].key,
-		title = COLOR_ENTRIES[3].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[3].override_offset,
-		description = COLOR_ENTRIES[3].description,
-	},
-	{
-		key = COLOR_ENTRIES[4].key,
-		title = COLOR_ENTRIES[4].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[4].override_offset,
-		description = COLOR_ENTRIES[4].description,
-	},
-	{
-		key = COLOR_ENTRIES[5].key,
-		title = COLOR_ENTRIES[5].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[5].override_offset,
-		description = COLOR_ENTRIES[5].description,
-	},
-	{
-		key = COLOR_ENTRIES[6].key,
-		title = COLOR_ENTRIES[6].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[6].override_offset,
-		description = COLOR_ENTRIES[6].description,
-	},
-	{
-		key = COLOR_ENTRIES[7].key,
-		title = COLOR_ENTRIES[7].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[7].override_offset,
-		description = COLOR_ENTRIES[7].description,
-	},
-	{
-		key = COLOR_ENTRIES[8].key,
-		title = COLOR_ENTRIES[8].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[8].override_offset,
-		description = COLOR_ENTRIES[8].description,
-	},
-	{
-		key = COLOR_ENTRIES[9].key,
-		title = COLOR_ENTRIES[9].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[9].override_offset,
-		description = COLOR_ENTRIES[9].description,
-	},
-	{
-		key = COLOR_ENTRIES[10].key,
-		title = COLOR_ENTRIES[10].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[10].override_offset,
-		description = COLOR_ENTRIES[10].description,
-	},
-	{
-		key = COLOR_ENTRIES[11].key,
-		title = COLOR_ENTRIES[11].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[11].override_offset,
-		description = COLOR_ENTRIES[11].description,
-	},
-	{
-		key = COLOR_ENTRIES[12].key,
-		title = COLOR_ENTRIES[12].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[12].override_offset,
-		description = COLOR_ENTRIES[12].description,
-	},
-	{
-		key = COLOR_ENTRIES[13].key,
-		title = COLOR_ENTRIES[13].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[13].override_offset,
-		description = COLOR_ENTRIES[13].description,
-	},
-	{
-		key = COLOR_ENTRIES[14].key,
-		title = COLOR_ENTRIES[14].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[14].override_offset,
-		description = COLOR_ENTRIES[14].description,
-	},
-	{
-		key = COLOR_ENTRIES[15].key,
-		title = COLOR_ENTRIES[15].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[15].override_offset,
-		description = COLOR_ENTRIES[15].description,
-	},
-	{
-		key = COLOR_ENTRIES[16].key,
-		title = COLOR_ENTRIES[16].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[16].override_offset,
-		description = COLOR_ENTRIES[16].description,
-	},
-	{
-		key = COLOR_ENTRIES[17].key,
-		title = COLOR_ENTRIES[17].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[17].override_offset,
-		description = COLOR_ENTRIES[17].description,
-	},
-	{
-		key = COLOR_ENTRIES[18].key,
-		title = COLOR_ENTRIES[18].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[18].override_offset,
-		description = COLOR_ENTRIES[18].description,
-	},
-	{
-		key = COLOR_ENTRIES[19].key,
-		title = COLOR_ENTRIES[19].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[19].override_offset,
-		description = COLOR_ENTRIES[19].description,
-	},
-	{
-		key = COLOR_ENTRIES[20].key,
-		title = COLOR_ENTRIES[20].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[20].override_offset,
-		description = COLOR_ENTRIES[20].description,
-	},
-	{
-		key = COLOR_ENTRIES[21].key,
-		title = COLOR_ENTRIES[21].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[21].override_offset,
-		description = COLOR_ENTRIES[21].description,
-	},
-	{
-		key = COLOR_ENTRIES[22].key,
-		title = COLOR_ENTRIES[22].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[22].override_offset,
-		description = COLOR_ENTRIES[22].description,
-	},
-	{
-		key = COLOR_ENTRIES[23].key,
-		title = COLOR_ENTRIES[23].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[23].override_offset,
-		description = COLOR_ENTRIES[23].description,
-	},
-	{
-		key = COLOR_ENTRIES[24].key,
-		title = COLOR_ENTRIES[24].title,
-		kind = .Optional_Color,
-		offset = offset_of(Settings, color_overrides) + COLOR_ENTRIES[24].override_offset,
-		description = COLOR_ENTRIES[24].description,
-	},
 }
 Diagnostic_Kind :: enum {
 	Unknown_Key,
@@ -762,26 +587,6 @@ assign :: proc(
 		if err != nil {return nil, err}
 		defer delete(names, s.allocator)
 		return problem(.Invalid_Value, s.allocator, "\"", value, "\" is not one of ", names)
-	case .Color, .Optional_Color:
-		if entry.kind == .Optional_Color && value == "" {
-			(cast(^Maybe(Color))p)^ = nil
-			return nil, nil
-		}
-		color, valid, _ := colour.parse(value, .Strict)
-		if !valid {
-			return problem(
-				.Invalid_Value,
-				s.allocator,
-				"invalid color \"",
-				value,
-				"\", expected #rrggbb",
-			)
-		}
-		if entry.kind == .Color {
-			(cast(^Color)p)^ = color
-		} else {
-			(cast(^Maybe(Color))p)^ = color
-		}
 	}
 	return nil, nil
 }
@@ -792,6 +597,7 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 		allocator = allocator,
 	}
 	s.keys.allocator = allocator
+	s.themes.allocator = allocator
 	profiles_init(&s.profiles, allocator)
 	for entry in SCHEMA {
 		issue, err := assign(&s, entry, entry.default_value)
@@ -819,7 +625,10 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 		destroy(&s)
 		return {}, profile_error
 	}
-	resolve_colors(&s)
+	if theme_error := resolve_theme(&s, nil); theme_error != nil {
+		destroy(&s)
+		return {}, theme_error
+	}
 	return s, nil
 }
 
@@ -838,6 +647,8 @@ destroy :: proc(s: ^Settings) {
 	delete(s.shell.directory, s.allocator)
 	delete(s.shell.icon, s.allocator)
 	profiles_destroy(&s.profiles)
+	for theme in s.themes {delete(theme.id, s.allocator)}
+	delete(s.themes)
 	s^ = {}
 }
 
@@ -979,6 +790,11 @@ parse :: proc(
 			if profile_error != nil {return {}, {}, profile_error}
 			continue
 		}
+		if strings.has_prefix(key, CUSTOM_THEME_PREFIX) {
+			theme_error := parse_custom_theme_key(&s, &diagnostics, key, value, line.number)
+			if theme_error != nil {return {}, {}, theme_error}
+			continue
+		}
 		if slot, legacy := legacy_shell_slot(key); legacy {
 			entry := legacy_shell_entry(slot)
 			if legacy_seen[slot] {
@@ -1028,6 +844,7 @@ parse :: proc(
 		seen[index] = true
 		if key == "input.leader" {s.leader_line = line.number}
 		if key == "shell.default_profile" {s.default_profile_line = line.number}
+		if key == "theme.name" {s.theme_line = line.number}
 		issue, assign_error := assign(&s, schema[index], value)
 		if assign_error != nil {return {}, {}, assign_error}
 		if p, present := issue.?; present {
@@ -1039,7 +856,7 @@ parse :: proc(
 		}
 	}
 	if profile_error := profiles_finalize(&s); profile_error != nil {return {}, {}, profile_error}
-	resolve_colors(&s)
+	if theme_error := resolve_theme(&s, &diagnostics); theme_error != nil {return {}, {}, theme_error}
 	success = true
 	return s, diagnostics, nil
 }
@@ -1077,7 +894,9 @@ default_text :: proc(
 		"\"\n",
 		"profile.default.directory = \"",
 		DEFAULT_PROFILE_DIRECTORY,
-		"\"\n",
+		"\"\n\n",
+		"# Custom themes: theme.custom.ID.base names a built-in variant such as studio-dark, and\n",
+		"# theme.custom.ID.COLOR = #rrggbb overrides one color. Changing a color in Settings saves one.\n",
 	) or_return
 	if len(extra_comments) > 0 {write_parts(&builder, "\n") or_return}
 	for line in extra_comments {
@@ -1102,22 +921,16 @@ load :: proc(
 	data, read_error := os.read_entire_file(path, allocator)
 	defer delete(data, allocator)
 	if read_error == nil {
-		parse_error: runtime.Allocator_Error
-		s, diagnostics, parse_error = parse(string(data), allocator)
-		if parse_error != nil {
-			err = parse_error
-			return
-		}
-		updated, changed, migration_alloc := migrate_text(string(data), allocator)
+		text, changed, migration_alloc := migrate_settings_text(string(data), allocator)
 		if migration_alloc != nil {
-			destroy(&s)
-			diagnostics_destroy(&diagnostics)
 			err = migration_alloc
 			return
 		}
+		defer delete(text, allocator)
+		// A failed save still runs the migrated text, so the colors on screen match the file a
+		// later save writes.
 		if changed {
-			defer delete(updated, allocator)
-			switch save(path, string(data), updated) {
+			switch save(path, string(data), text) {
 			case .None:
 				migrated = true
 			case .Conflict:
@@ -1126,6 +939,9 @@ load :: proc(
 				migration_error = .IO
 			}
 		}
+		parse_error: runtime.Allocator_Error
+		s, diagnostics, parse_error = parse(text, allocator)
+		if parse_error != nil {err = parse_error}
 		return
 	}
 	if read_error != os.Error(os.General_Error.Not_Exist) {
@@ -1149,6 +965,34 @@ load :: proc(
 		return
 	}
 	created = true
+	return
+}
+
+// Applies every file migration in order. The result is owned whether or not it changed.
+@(require_results)
+migrate_settings_text :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	updated: string,
+	changed: bool,
+	err: runtime.Allocator_Error,
+) {
+	updated = strings.clone(text, allocator) or_return
+	profiles, profiles_changed := migrate_text(updated, allocator) or_return
+	if profiles_changed {
+		delete(updated, allocator)
+		updated, changed = profiles, true
+	}
+	themes, themes_changed, theme_error := migrate_theme_text(updated, allocator)
+	if theme_error != nil {
+		delete(updated, allocator)
+		return "", false, theme_error
+	}
+	if themes_changed {
+		delete(updated, allocator)
+		updated, changed = themes, true
+	}
 	return
 }
 

@@ -73,7 +73,7 @@ tab_draw :: proc(
 	if index == bar.count {x, width = f32(bar.count) * bar.tab_width, bar.button_width}
 	x += bar.x
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None {return .Ok}
-	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.chrome})
+	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.tab_bar})
 	// Every tab rises on hover; the selected tab keeps its pane fill while it moves.
 	lift := hover_lift_at(theme, hover, scale)
 	tile := render.Rect{x + 2 * scale, 6 * scale - lift, max(0, width - 4 * scale), 28 * scale}
@@ -82,7 +82,7 @@ tab_draw :: proc(
 		   result != .None {return .Ok}
 	}
 	if selected {
-		draw_rect(list, {rect = tile, color = theme.pane, radius = 7 * scale})
+		draw_rect(list, {rect = tile, color = theme.tab_active, radius = 7 * scale})
 		draw_rect(list, {rect = tile, color = theme.border, radius = 7 * scale, stroke = scale})
 	}
 	if marked && !selected {
@@ -105,7 +105,7 @@ tab_draw :: proc(
 			list,
 			{
 				rect = {x + 10 * scale, 30 * scale, max(0, width - 20 * scale), 2 * scale},
-				color = theme.accent,
+				color = theme.tab_indicator,
 				radius = scale,
 			},
 		)
@@ -117,7 +117,7 @@ tab_draw :: proc(
 		close.y -= lift
 		large := text^
 		text_set_size(&large, text.size_px * 1.5)
-		if result := draw_glyph_centered(&large, list, '×', close, theme.muted);
+		if result := draw_glyph_centered(&large, list, '×', close, theme.tab_text);
 		   result != .Ok {return result}
 	}
 	icon_width := f32(0)
@@ -139,7 +139,7 @@ tab_draw :: proc(
 		title,
 		x + 11 * scale + icon_width,
 		(bar.height - text.line_height) / 2 + text.ascent - lift,
-		selected ? theme.text : theme.muted,
+		selected ? theme.tab_active_text : theme.tab_text,
 		max(0, width - (index < bar.count ? 44 : 22) * scale - icon_width),
 	); result != .Ok {return result}
 	if hover > 0 {

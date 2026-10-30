@@ -32,7 +32,7 @@ round_trip :: proc(t: ^testing.T) {
 		testing.expect(t, strings.contains(text, entry.description))
 		testing.expect(t, strings.contains(text, entry.key))
 	}
-	testing.expect(t, strings.contains(text, "\n\n# Shell"))
+	testing.expect(t, strings.contains(text, "\n\n# Custom themes"))
 }
 
 @(test)
@@ -44,8 +44,9 @@ shell.command = cmd /c echo #hello
 shell.directory = ~
 cursor.style = underline
 cursor.blink = true
-colors.cursor = #aB12Ef
-colors.selection_foreground = #123456
+theme.name = mine
+theme.custom.mine.cursor = #aB12Ef
+theme.custom.mine.selection_foreground = #123456
 window.rows = 1`
 	s, d, err := settings.parse(fixture)
 	defer settings.destroy(&s)
@@ -84,7 +85,7 @@ missing separator
 font.size = 0
 cursor.blink = TRUE
 cursor.style = Block
-colors.cursor = blu
+theme.custom.mine.cursor = blu
 window.rows = 55
 window.rows = nope
 font.family = "broken
@@ -102,7 +103,7 @@ font.family = `
 		{3, "font.size", "0 is out of range 1..200", .Out_Of_Range},
 		{4, "cursor.blink", `invalid boolean "TRUE", expected true or false`, .Invalid_Value},
 		{5, "cursor.style", `"Block" is not one of block, bar, underline`, .Invalid_Value},
-		{6, "colors.cursor", `invalid color "blu", expected #rrggbb`, .Invalid_Value},
+		{6, "theme.custom.mine.cursor", `invalid color "blu", expected #rrggbb`, .Invalid_Value},
 		{8, "window.rows", `duplicate key "window.rows"; last value wins`, .Duplicate_Key},
 		{8, "window.rows", `invalid integer "nope", expected a decimal integer`, .Invalid_Value},
 		{9, "font.family", "expected a closing double quote", .Invalid_Value},
@@ -132,8 +133,9 @@ window.padding = 0
 scrollback.lines = 0
 font.size = 200
 font.line_height = 4
-colors.selection_foreground = #ffffff
-colors.selection_foreground =
+theme.name = mine
+theme.custom.mine.selection_foreground = #ffffff
+theme.custom.mine.selection_foreground =
 `)
 	testing.expect_value(t, parse_error, nil)
 	defer settings.destroy(&s)

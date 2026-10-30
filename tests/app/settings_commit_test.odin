@@ -16,6 +16,15 @@ commit_text :: proc(t: ^testing.T, source, key, value: string) -> string {
 }
 
 @(private)
+theme_commit_text :: proc(t: ^testing.T, source, token, value: string) -> string {
+	updated, created, issue, err := settings.theme_color_edit(source, token, value, context.temp_allocator)
+	testing.expect_value(t, err, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, issue, "")
+	_ = created
+	return updated
+}
+
+@(private)
 commit_open_pages :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) -> bool {
 	if !palette_fixture_create(t, f, name) {return false}
 	for window in f.state.windows {
@@ -193,17 +202,17 @@ settings_commit_rebuilds_a_clean_peers_picker_hsv_when_its_effective_color_chang
 	if !commit_open_pages(t, &f, "commit-peer-picker") {return}
 	s := &f.state
 	first, second := &s.windows[0].editor, &s.windows[1].editor
-	updated := commit_text(t, first.source, "colors.cursor", "#000000")
+	updated := theme_commit_text(t, first.source, "cursor", "#000000")
 	if !testing.expect_value(t, app.settings_commit(s, first.source, updated, first), settings.Save_Error.None) {return}
 	app.settings_reveal_page(s, second, {key = "colors.cursor", focus = .Control})
 	second.popup, second.hsv = .Color, {120, 0.75, 0}
-	updated = commit_text(t, first.source, "colors.cursor", "#408020")
+	updated = theme_commit_text(t, first.source, "cursor", "#408020")
 	if !testing.expect_value(t, app.settings_commit(s, first.source, updated, first), settings.Save_Error.None) {return}
 	testing.expect_value(t, second.popup, ui.Editor_Popup.Color)
 	testing.expect_value(t, ui.field_string(&second.value), "#408020")
 	h, saturation, value := settings.rgb_to_hsv({64, 128, 32})
 	testing.expect_value(t, second.hsv, [3]f32{h, saturation, value})
-	updated = commit_text(t, first.source, "colors.cursor", "#000000")
+	updated = theme_commit_text(t, first.source, "cursor", "#000000")
 	if !testing.expect_value(t, app.settings_commit(s, first.source, updated, first), settings.Save_Error.None) {return}
 	second.hsv = {120, 0.75, 0}
 	updated = commit_text(t, first.source, "pane.gap", "9")

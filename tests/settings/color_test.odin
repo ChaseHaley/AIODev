@@ -59,38 +59,27 @@ every_setting_has_a_friendly_title_and_group :: proc(t: ^testing.T) {
 }
 
 @(test)
-edit_text_normalizes_pasted_colors :: proc(t: ^testing.T) {
-	updated, message, err := settings.edit_text("colors.cursor = #000000\n", "colors.cursor", "rgb(255, 136, 0)")
+edit_text_normalizes_pasted_theme_colors :: proc(t: ^testing.T) {
+	key :: "theme.custom.mine.cursor"
+	updated, message, err := settings.edit_text(key + " = #000000\n", key, "rgb(255, 136, 0)")
 	defer delete(updated)
 	defer delete(message)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, message, "")
-	testing.expect_value(t, updated, "colors.cursor = #ff8800\n")
-	cleared, clear_message, clear_error := settings.edit_text(updated, "colors.cursor", "")
-	defer delete(cleared)
-	defer delete(clear_message)
-	testing.expect_value(t, clear_error, nil)
-	testing.expect_value(t, cleared, "colors.cursor = \n")
-	rejected, reason, reject_error := settings.edit_text(updated, "colors.cursor", "not a color")
+	testing.expect_value(t, updated, key + " = #ff8800\n")
+	border, border_message, border_error := settings.edit_text("", "theme.custom.mine.border", "rgba(255,136,0,0.5)")
+	defer delete(border)
+	defer delete(border_message)
+	testing.expect_value(t, border_error, nil)
+	testing.expect_value(t, border, "theme.custom.mine.border = #ff880080\n")
+	opaque, opaque_message, opaque_error := settings.edit_text("", "theme.custom.mine.border", "#ff8800ff")
+	defer delete(opaque)
+	defer delete(opaque_message)
+	testing.expect_value(t, opaque_error, nil)
+	testing.expect_value(t, opaque, "theme.custom.mine.border = #ff8800\n")
+	rejected, reason, reject_error := settings.edit_text(updated, key, "not a color")
 	defer delete(rejected)
 	defer delete(reason)
 	testing.expect_value(t, reject_error, nil)
 	testing.expect(t, reason != "")
-}
-
-@(test)
-theme_color_supplies_optional_color_fallbacks :: proc(t: ^testing.T) {
-	s, err := settings.defaults()
-	testing.expect_value(t, err, nil)
-	defer settings.destroy(&s)
-	cursor, ok := settings.theme_color(&s, "colors.cursor")
-	testing.expect(t, ok)
-	testing.expect_value(t, cursor, s.colors.cursor)
-	bright, bright_ok := settings.theme_color(&s, "colors.palette.15")
-	testing.expect(t, bright_ok)
-	testing.expect_value(t, bright, s.colors.palette[15])
-	for key in ([?]string{"colors.selection_foreground", "colors.palette.16", "colors.palette.x", "pane.gap"}) {
-		_, found := settings.theme_color(&s, key)
-		testing.expectf(t, !found, "%s has no theme color", key)
-	}
 }

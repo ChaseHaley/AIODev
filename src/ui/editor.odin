@@ -40,17 +40,16 @@ Editor_Row_Flag :: enum {
 	Listed,
 }
 
-// Strings are owned by the editor except `choices`, which borrows static schema names. An empty optional
-// color shows `fallback`, the theme color it resolves to. Profile rows also own `profile`, `badge`,
-// `detail` (extra search text) and `note` (an inline problem).
+// Strings and `choices` are owned by the editor. An empty optional color has no color at all. Profile
+// rows also own `profile`, `badge`, `detail` (extra search text) and `note` (an inline problem).
 Editor_Row :: struct {
-	key, title, description, value, default_value, fallback: string,
-	group:                                                   int,
-	kind:                                                    Row_Kind,
-	minimum, maximum:                                        f64,
-	choices:                                                 []string,
-	profile, badge, detail, note:                            string,
-	flags:                                                   bit_set[Editor_Row_Flag],
+	key, title, description, value, default_value: string,
+	group:                                         int,
+	kind:                                          Row_Kind,
+	minimum, maximum:                              f64,
+	choices:                                       []string,
+	profile, badge, detail, note:                  string,
+	flags:                                         bit_set[Editor_Row_Flag],
 }
 
 Editor_Group :: struct {
@@ -210,12 +209,13 @@ editor_destroy :: proc(p: ^Editor) {
 			row.description,
 			row.value,
 			row.default_value,
-			row.fallback,
 			row.profile,
 			row.badge,
 			row.detail,
 			row.note,
 		}) {delete(s)}
+		for choice in row.choices {delete(choice)}
+		delete(row.choices)
 	}
 	for group in p.groups {delete(group.title)}
 	delete(p.rows)
@@ -315,25 +315,34 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		   err != nil {delete(title); return err}
 		group_index = len(p.groups) - 1
 	}
-	owned: [10]string
+	owned: [9]string
+	choices: []string
 	success := false
-	defer if !success {for s in owned {delete(s)}}
+	defer if !success {
+		for s in owned {delete(s)}
+		for choice in choices {delete(choice)}
+		delete(choices)
+	}
 	for s, i in ([?]string {
 		row.key,
 		row.title,
 		row.description,
 		row.value,
 		row.default_value,
-		row.fallback,
 		row.profile,
 		row.badge,
 		row.detail,
 		row.note,
 	}) {owned[i] = strings.clone(s) or_return}
+	if len(row.choices) > 0 {
+		choices = make([]string, len(row.choices)) or_return
+		for choice, i in row.choices {choices[i] = strings.clone(choice) or_return}
+	}
 	added := row
-	added.key, added.title, added.description, added.value, added.default_value, added.fallback =
-		owned[0], owned[1], owned[2], owned[3], owned[4], owned[5]
-	added.profile, added.badge, added.detail, added.note = owned[6], owned[7], owned[8], owned[9]
+	added.key, added.title, added.description, added.value, added.default_value =
+		owned[0], owned[1], owned[2], owned[3], owned[4]
+	added.profile, added.badge, added.detail, added.note = owned[5], owned[6], owned[7], owned[8]
+	added.choices = choices
 	added.group = group_index
 	_, err := append(&p.rows, added)
 	success = err == nil
@@ -365,16 +374,18 @@ editor_editing :: proc(p: ^Editor) -> bool {return p.focus == .Control}
 @(private)
 filtering :: proc(p: ^Editor) -> bool {return strings.trim_space(field_string(&p.filter)) != ""}
 
+// A swatch shows a translucent color as it blends over the row.
 @(private)
-color_or_fallback :: proc(row: ^Editor_Row, value: string) -> string {
-	return value == "" ? row.fallback : value
+swatch_color :: proc(value: string) -> (render.Color, bool) {
+	c, ok := colour.parse_translucent(value, .Permissive)
+	return colour.rgba(c.rgb, f32(c.a) / 255), ok
 }
 
 @(private)
 sync_color :: proc(p: ^Editor) {
 	row := editor_row(p)
 	if row == nil || (row.kind != .Color && row.kind != .Optional_Color) {return}
-	c, ok, _ := settings.parse_color(color_or_fallback(row, field_string(&p.value)))
+	c, ok, _ := settings.parse_color(field_string(&p.value))
 	if !ok || settings.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2]) == c {return}
 	h, s, v := settings.rgb_to_hsv(c)
 	if s == 0 || v == 0 {h = p.hsv[0]}
@@ -1449,7 +1460,7 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 
 @(private)
 Color_Parts :: struct {
-	wheel, ramp, swatch, theme_default: render.Rect,
+	wheel, ramp, swatch, no_color: render.Rect,
 }
 
 @(private)
@@ -1460,7 +1471,7 @@ color_parts :: proc(popup: render.Rect, optional: bool, scale: f32) -> Color_Par
 	}
 	c.ramp = {popup.x + 168 * s, popup.y + 24 * s, 112 * s, 16 * s}
 	c.swatch = {popup.x + 168 * s, popup.y + 60 * s, 112 * s, 40 * s}
-	if optional {c.theme_default = {popup.x + 12 * s, popup.y + 166 * s, 140 * s, 28 * s}}
+	if optional {c.no_color = {popup.x + 12 * s, popup.y + 166 * s, 140 * s, 28 * s}}
 	return c
 }
 
@@ -1480,7 +1491,13 @@ pick_color :: proc(p: ^Editor, c: Color_Parts, x, y: f32) {
 	} else {
 		p.hsv[2] = clamp((x - c.ramp.x) / max(1, c.ramp.width), 0, 1)
 	}
-	field_set(&p.value, settings.color_hex(settings.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2])))
+	// The picker chooses hue, saturation and value; a translucent color keeps its typed alpha.
+	picked := settings.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2])
+	previous, _ := colour.parse_translucent(field_string(&p.value), .Permissive)
+	buffer: [colour.HEX_ALPHA_LENGTH]u8
+	text := colour.format_translucent({picked.r, picked.g, picked.b, previous.a}, buffer[:])
+	if previous.a == 0 {text = colour.format(picked, buffer[:])}
+	field_set(&p.value, text)
 }
 
 @(private)
@@ -1530,7 +1547,7 @@ editor_press :: proc(
 			p.drag = .Wheel
 		case contains({c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}, x, y):
 			p.drag = .Ramp
-		case contains(c.theme_default, x, y):
+		case contains(c.no_color, x, y):
 			field_set(&p.value, "")
 			p.popup = .None
 			return .Save
@@ -1853,7 +1870,7 @@ editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 row_preview :: proc(row: ^Editor_Row, value: string) -> string {
 	#partial switch row.kind {
 	case .Optional_Color:
-		if value == "" {return "Theme default"}
+		if value == "" {return "None"}
 	case .Shortcut:
 		if value == "" {return "None"}
 	}
@@ -2392,9 +2409,8 @@ control_draw :: proc(
 			{rect = thumb, color = theme.surface, radius = 7 * scale, stroke = 2 * scale},
 		)
 	case .Color, .Optional_Color:
-		shown := color_or_fallback(row, value)
-		if c, ok, _ := settings.parse_color(shown); ok {
-			draw_rect(list, {rect = parts.swatch, color = colour.rgba(c), radius = 6 * scale})
+		if c, ok := swatch_color(value); ok {
+			draw_rect(list, {rect = parts.swatch, color = c, radius = 6 * scale})
 		}
 		draw_rect(
 			list,
@@ -2408,7 +2424,7 @@ control_draw :: proc(
 		return .Ok
 	}
 	if selected {
-		placeholder := row.kind == .Optional_Color ? "Theme default" : "Empty"
+		placeholder := row.kind == .Optional_Color ? "None" : "Empty"
 		if row.kind == .Shortcut {placeholder = p.capturing ? "Press keys…" : "None"}
 		field_focused := focused && !p.capturing && row.kind != .Shortcut
 		box := value_box(p, parts, text, scale)
@@ -2617,8 +2633,8 @@ popup_draw :: proc(
 			stroke = 2 * s,
 		},
 	)
-	if color, ok, _ := settings.parse_color(color_or_fallback(row, field_string(&p.value))); ok {
-		draw_rect(list, {rect = c.swatch, color = colour.rgba(color), radius = 6 * s})
+	if color, ok := swatch_color(field_string(&p.value)); ok {
+		draw_rect(list, {rect = c.swatch, color = color, radius = 6 * s})
 	}
 	draw_rect(list, {rect = c.swatch, color = theme.border, radius = 6 * s, stroke = s})
 	small := text_styled(text, .Small)
@@ -2631,16 +2647,16 @@ popup_draw :: proc(
 		theme.muted,
 		c.swatch.width,
 	); result != .Ok {return result}
-	if c.theme_default.width == 0 {return .Ok}
-	box_draw(list, c.theme_default, theme, false, s)
+	if c.no_color.width == 0 {return .Ok}
+	box_draw(list, c.no_color, theme, false, s)
 	return draw_text(
 		text,
 		list,
-		"Use theme default",
-		c.theme_default.x + 10 * s,
-		c.theme_default.y + (c.theme_default.height - text.line_height) / 2 + text.ascent,
+		"No color",
+		c.no_color.x + 10 * s,
+		c.no_color.y + (c.no_color.height - text.line_height) / 2 + text.ascent,
 		theme.text,
-		c.theme_default.width - 20 * s,
+		c.no_color.width - 20 * s,
 	)
 }
 

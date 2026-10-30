@@ -285,9 +285,9 @@ rail_row_draw :: proc(
 	marked := row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
 	if selected {
 		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-			color = app.theme.selection, radius = 6 * s})
+			color = app.theme.rail_active, radius = 6 * s})
 		ui.draw_rect(&w.list, {rect = {tile.x + 1 * s, tile.y + 8 * s, 2 * s, tile.height - 16 * s},
-			color = app.theme.accent, radius = s})
+			color = app.theme.tab_indicator, radius = s})
 	} else if marked {
 		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
 			color = app.theme.selection, radius = 6 * s})
@@ -330,7 +330,7 @@ rail_row_draw :: proc(
 	if show_close {
 		large := w.ui_text
 		ui.text_set_size(&large, w.ui_text.size_px * 1.35)
-		if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.muted);
+		if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.tab_text);
 		   result != .Ok {return result}
 	}
 	label_right := show_close ? close.x - 4 * s : tile.x + tile.width - 8 * s
@@ -340,7 +340,7 @@ rail_row_draw :: proc(
 		title,
 		label_x,
 		rail_text_baseline(w, tile),
-		selected ? app.theme.text : app.theme.muted,
+		selected ? app.theme.tab_active_text : app.theme.tab_text,
 		max(0, label_right - label_x),
 	); result != .Ok {return result}
 	if hover && !selected {
@@ -409,7 +409,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 		if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
 	} else {
-		ui.draw_rect(&w.list, {rect = area, color = app.theme.chrome})
+		ui.draw_rect(&w.list, {rect = area, color = app.theme.tab_bar})
 		ui.draw_rect(
 			&w.list,
 			{rect = {area.x + area.width - w.scale, area.y, w.scale, area.height}, color = app.theme.border},

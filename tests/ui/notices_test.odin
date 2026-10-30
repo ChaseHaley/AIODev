@@ -27,7 +27,7 @@ notice_allocator :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, align
 notice_severities_have_unique_words_symbols_and_readable_theme_colors :: proc(t: ^testing.T) {
 	for name in settings.Theme_Name {
 		for mode in settings.Theme_Mode {
-			theme := ui.theme_from(settings.theme_resolve({name, mode}))
+			theme := ui.theme_from(settings.builtin_theme({name, mode}))
 			for kind in ui.Notice_Kind {
 				label, symbol, color := ui.notice_style(kind, theme)
 				testing.expect(t, len(label) > 0 && symbol != 0)
@@ -104,7 +104,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 		ui.text_set_size(&text, 16*scale)
 		for width in ([?]f32{320, 1000}) {
 			for mode in settings.Theme_Mode {
-				theme := ui.theme_from(settings.theme_resolve({.Studio, mode}))
+				theme := ui.theme_from(settings.builtin_theme({.Studio, mode}))
 				render.draw_list_reset(&list)
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
 					width*scale, 1000*scale, scale), glyphs.Result.Ok)

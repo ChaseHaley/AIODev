@@ -71,7 +71,7 @@ line_scanner_uses_lf_without_bom :: proc(t: ^testing.T) {
 
 @(test)
 grammar_reads_comments_empty_values_and_quoted_strings :: proc(t: ^testing.T) {
-	text := "# font.size = 10\ncolors.selection_foreground =\nfont.family = \"  Mono  \"\n"
+	text := "# font.size = 10\ntheme.custom.mine.selection_foreground =\nfont.family = \"  Mono  \"\n"
 	scanner := settings.line_scanner_init(text)
 	comment, comment_ok := settings.line_next(&scanner)
 	if !testing.expect(t, comment_ok) {return}
@@ -80,7 +80,7 @@ grammar_reads_comments_empty_values_and_quoted_strings :: proc(t: ^testing.T) {
 	testing.expect_value(t, comment.split, true)
 	empty, empty_ok := settings.line_next(&scanner)
 	if !testing.expect(t, empty_ok) {return}
-	testing.expect_value(t, empty.key, "colors.selection_foreground")
+	testing.expect_value(t, empty.key, "theme.custom.mine.selection_foreground")
 	testing.expect_value(t, empty.value, "")
 	testing.expect_value(t, empty.split, true)
 	quoted, quoted_ok := settings.line_next(&scanner)
@@ -109,9 +109,8 @@ value_encoder_covers_every_schema_kind :: proc(t: ^testing.T) {
 		{"pane.gap", "5", "5"},
 		{"font.size", "12.5", "12.5"},
 		{"cursor.blink", "true", "true"},
-		{"theme.name", "tide", "tide"},
-		{"colors.cursor", "#ABCDEF", "#abcdef"},
-		{"colors.foreground", "", ""},
+		{"theme.name", "tide", "\"tide\""},
+		{"theme.mode", "light", "light"},
 	}
 	for c in cases {
 		entry := settings.schema_find(c.key)
@@ -123,13 +122,6 @@ value_encoder_covers_every_schema_kind :: proc(t: ^testing.T) {
 		testing.expect_value(t, strings.to_string(b), c.expected)
 		strings.builder_destroy(&b)
 	}
-
-	b, build_error := strings.builder_make()
-	if !testing.expect_value(t, build_error, nil) {return}
-	defer strings.builder_destroy(&b)
-	color_entry := settings.Schema_Entry{kind = settings.Kind.Color}
-	testing.expect_value(t, settings.encode_value(&b, color_entry, "rgb(255, 136, 0)"), nil)
-	testing.expect_value(t, strings.to_string(b), "#ff8800")
 }
 
 @(test)

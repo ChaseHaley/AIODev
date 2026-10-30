@@ -73,7 +73,7 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 	ui.find_text(&f, "long query with a visible caret")
 	for name in settings.Theme_Name {
 		for mode in settings.Theme_Mode {
-			resolved := settings.theme_resolve({name, mode})
+			resolved := settings.builtin_theme({name, mode})
 			theme := ui.theme_from(resolved)
 			testing.expect(t, term_view.contrast_ratio(theme.text, theme.surface) >= 4.5)
 			for scale in ([?]f32{1, 1.5, 2}) {

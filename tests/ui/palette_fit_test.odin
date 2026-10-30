@@ -101,7 +101,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 		ui.palette_key(&p, &registry, key({key = .End}))
 		testing.expect_value(t, p.selected, len(p.results)-1)
 		for mode in settings.Theme_Mode {
-			theme := ui.theme_from(settings.theme_resolve({.Studio, mode}))
+			theme := ui.theme_from(settings.builtin_theme({.Studio, mode}))
 			theme.selection = {1, 0, 0, 1}
 			for progress in ([?]f32{0.01, 0.25, 0.5, 0.75, 1}) {
 				render.draw_list_reset(&list)
@@ -351,7 +351,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		selected_y := l.list.y + f32(headers) * l.header_height +
 			f32(p.selected-p.scroll) * l.row_height
 		for mode in settings.Theme_Mode {
-			theme := ui.theme_from(settings.theme_resolve({.Studio, mode}))
+			theme := ui.theme_from(settings.builtin_theme({.Studio, mode}))
 			render.draw_list_reset(&list)
 			testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), glyphs.Result.Ok)
 			selected_rows := 0

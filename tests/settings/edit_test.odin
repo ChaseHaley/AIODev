@@ -1,41 +1,160 @@
 package settings_test
 
 import "core:os"
-import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
 
 @(test)
-follow_theme_resets_only_shell_defaults_explicitly :: proc(t: ^testing.T) {
-	for pair in ([?][2]string{{"#0f1115", "#d6dae0"}, {"#123456", "#abcdef"}}) {
-		source := fmt.tprintf("# keep\r\ntheme.mode = light\r\ncolors.background = %s\r\n"+
-			"colors.foreground = %s\r\ncolors.palette.1 = #112233\r\n"+
-			"colors.cursor = #445566\r\nfont.size = 14\r\n", pair[0], pair[1])
-		before, issues, parse_error := settings.parse(source)
-		defer settings.destroy(&before)
-		defer settings.diagnostics_destroy(&issues)
-		testing.expect_value(t, parse_error, nil)
-		testing.expect(t, before.color_overrides.background != nil)
-		text, err := settings.follow_theme_text(source)
-		defer delete(text)
-		testing.expect_value(t, err, nil)
-		after, diagnostics, after_error := settings.parse(text)
-		defer settings.destroy(&after)
-		defer settings.diagnostics_destroy(&diagnostics)
-		testing.expect_value(t, after_error, nil)
-		testing.expect_value(t, len(diagnostics), 0)
-		testing.expect_value(t, after.colors.background, settings.theme_resolve(after.theme).terminal.background)
-		testing.expect_value(t, after.colors.foreground, settings.theme_resolve(after.theme).terminal.foreground)
-		testing.expect_value(t, after.colors.palette[1], settings.Color{0x11, 0x22, 0x33})
-		testing.expect_value(t, after.colors.cursor, settings.Color{0x44, 0x55, 0x66})
-		testing.expect(t, strings.has_prefix(text, "# keep\r\n"))
-		testing.expect_value(t, after.font.size, 14)
-		again, again_error := settings.follow_theme_text(text)
-		defer delete(again)
-		testing.expect_value(t, again_error, nil)
-		testing.expect_value(t, again, text)
+editing_a_builtin_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.T) {
+	source := "# keep\r\ntheme.name = tide\r\ntheme.mode = light\r\nfont.size = 14\r\n"
+	updated, created, issue, err := settings.theme_color_edit(source, "tab_bar", "rgb(1, 2, 3)")
+	defer delete(updated)
+	defer delete(created)
+	testing.expect_value(t, err, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, issue, "")
+	testing.expect_value(t, created, "tide-custom")
+	testing.expect(t, strings.has_prefix(updated, "# keep\r\n"))
+	testing.expect(t, strings.contains(updated, "theme.custom.tide-custom.base = tide-light\r\n"))
+	testing.expect(t, strings.contains(updated, "theme.custom.tide-custom.tab_bar = #010203\r\n"))
+	s, diagnostics, parse_error := settings.parse(updated)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	testing.expect_value(t, s.theme.name, "tide-custom")
+	testing.expect_value(t, s.font.size, 14)
+	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
+	base := settings.builtin_theme({.Tide, .Light})
+	testing.expect_value(t, s.active_theme.colors[.Text], base.colors[.Text])
+
+	again, again_created, _, again_error := settings.theme_color_edit(updated, "border", "#11223344")
+	defer delete(again)
+	defer delete(again_created)
+	testing.expect_value(t, again_error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, again_created, "")
+	testing.expect(t, strings.contains(again, "theme.custom.tide-custom.border = #11223344"))
+	testing.expect(t, !strings.contains(again, "tide-custom-2"))
+
+	reset, _, _, reset_error := settings.theme_color_edit(again, "tab_bar", "")
+	defer delete(reset)
+	testing.expect_value(t, reset_error, settings.Theme_Edit_Error.None)
+	testing.expect(t, !strings.contains(reset, "tab_bar"))
+	testing.expect(t, strings.contains(reset, "theme.custom.tide-custom.base"))
+
+	unchanged, none, _, unchanged_error := settings.theme_color_edit(source, "tab_bar", "")
+	defer delete(unchanged)
+	defer delete(none)
+	testing.expect_value(t, unchanged_error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, unchanged, source)
+	testing.expect_value(t, none, "")
+}
+
+@(test)
+theme_color_edit_rejects_values_the_color_cannot_take :: proc(t: ^testing.T) {
+	cases := [?][2]string{{"cursor", "not a color"}, {"tab_bar", "#12"}}
+	for c in cases {
+		updated, created, issue, err := settings.theme_color_edit("theme.name = studio\n", c[0], c[1])
+		testing.expect_value(t, err, settings.Theme_Edit_Error.Invalid)
+		testing.expect(t, issue != "")
+		testing.expect_value(t, updated, "")
+		delete(updated)
+		delete(created)
 	}
+	updated, created, _, err := settings.theme_color_edit("", "unknown_color", "#000000")
+	testing.expect_value(t, err, settings.Theme_Edit_Error.Unavailable)
+	delete(updated)
+	delete(created)
+}
+
+@(test)
+themes_duplicate_rename_and_delete_as_whole_blocks :: proc(t: ^testing.T) {
+	source := "theme.name = mine\ntheme.custom.mine.base = ember-dark\ntheme.custom.mine.cursor = #010203\n"
+	copy, created, err := settings.theme_duplicate(source)
+	defer delete(copy)
+	defer delete(created)
+	testing.expect_value(t, err, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, created, "mine-copy")
+	s, diagnostics, parse_error := settings.parse(copy)
+	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	testing.expect_value(t, s.theme.name, "mine-copy")
+	testing.expect_value(t, len(s.themes), 2)
+	testing.expect_value(t, s.active_theme.colors[.Cursor], settings.Theme_Color{1, 2, 3, 255})
+	testing.expect_value(t, settings.custom_theme_find(&s, "mine-copy").base, settings.Builtin_Theme{.Ember, .Dark})
+	settings.destroy(&s)
+	settings.diagnostics_destroy(&diagnostics)
+
+	renamed, issue, rename_error := settings.theme_rename(source, "night")
+	defer delete(renamed)
+	testing.expect_value(t, rename_error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, issue, "")
+	testing.expect_value(t, renamed, "theme.name = \"night\"\ntheme.custom.night.base = ember-dark\ntheme.custom.night.cursor = #010203\n")
+	for id in ([?]string{"studio", "Bad"}) {
+		refused, reason, refuse_error := settings.theme_rename(source, id)
+		testing.expect_value(t, refuse_error, settings.Theme_Edit_Error.Invalid)
+		testing.expect(t, reason != "")
+		delete(refused)
+	}
+	taken, taken_reason, taken_error := settings.theme_rename(copy, "mine")
+	testing.expect_value(t, taken_error, settings.Theme_Edit_Error.Invalid)
+	testing.expect_value(t, taken_reason, "Another theme uses this ID.")
+	delete(taken)
+
+	deleted, selected, delete_error := settings.theme_delete(source)
+	defer delete(deleted)
+	defer delete(selected)
+	testing.expect_value(t, delete_error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, selected, "ember")
+	testing.expect_value(t, deleted, "theme.name = \"ember\"\ntheme.mode = dark\n")
+
+	builtin_copy, builtin_created, builtin_error := settings.theme_duplicate("theme.name = tide\n")
+	defer delete(builtin_copy)
+	defer delete(builtin_created)
+	testing.expect_value(t, builtin_error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, builtin_created, "tide-custom")
+	for refuse in ([?]string{"theme.name = tide\n", ""}) {
+		_, _, unavailable := settings.theme_delete(refuse)
+		testing.expect_value(t, unavailable, settings.Theme_Edit_Error.Unavailable)
+		_, _, rename_unavailable := settings.theme_rename(refuse, "x")
+		testing.expect_value(t, rename_unavailable, settings.Theme_Edit_Error.Unavailable)
+	}
+}
+
+@(test)
+legacy_color_overrides_migrate_into_a_custom_theme :: proc(t: ^testing.T) {
+	source := "theme.name = tide\ntheme.mode = light\n\n" +
+		"# Shell foreground; empty follows the theme.\ncolors.foreground =\n" +
+		"# Default background color.\ncolors.background = #0f1115\n" +
+		"# mine\ncolors.palette.3 = #112233\ncolors.selection_foreground =\nfont.size = 13\n"
+	updated, migrated, err := settings.migrate_theme_text(source)
+	defer delete(updated)
+	testing.expect_value(t, err, nil)
+	testing.expect(t, migrated)
+	testing.expect(t, !strings.contains(updated, "colors."))
+	testing.expect(t, !strings.contains(updated, "empty follows"))
+	testing.expect(t, !strings.contains(updated, "Default background"))
+	testing.expect(t, strings.contains(updated, "# mine\n"))
+	s, diagnostics, parse_error := settings.parse(updated)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	testing.expect_value(t, s.theme.name, "tide-custom")
+	base := settings.builtin_theme({.Tide, .Light})
+	testing.expect_value(t, s.colors.background, settings.Color{0x0f, 0x11, 0x15})
+	testing.expect_value(t, s.colors.palette[3], settings.Color{0x11, 0x22, 0x33})
+	testing.expect_value(t, s.colors.foreground, base.colors[.Foreground].rgb)
+	testing.expect(t, s.colors.selection_foreground == nil)
+	testing.expect_value(t, s.font.size, 13)
+
+	empty_only, empty_migrated, empty_error := settings.migrate_theme_text("colors.cursor =\nfont.size = 13\n")
+	defer delete(empty_only)
+	testing.expect_value(t, empty_error, nil)
+	testing.expect(t, empty_migrated)
+	testing.expect_value(t, empty_only, "font.size = 13\n")
+	_, untouched, _ := settings.migrate_theme_text("font.size = 13\n")
+	testing.expect(t, !untouched)
 }
 
 @(test)
@@ -85,7 +204,8 @@ editor_rejects_invalid_values_without_output :: proc(t: ^testing.T) {
 	for pair in ([?][2]string{
 		{"font.size", "0"}, {"font.size", "NaN"}, {"font.size", "inf"},
 		{"cursor.style", "triangle"}, {"cursor.blink", "yes"},
-		{"window.rows", "2.5"}, {"colors.cursor", "#ffffff0"},
+		{"window.rows", "2.5"}, {"theme.custom.mine.cursor", "#ffffff0"},
+		{"theme.custom.mine.border", "#ffffff8"}, {"theme.custom.studio.cursor", "#ffffff"},
 		{"font.family", ""}, {"shell.command", "bad\ncommand"}, {"font.family", "\xff"},
 		{"unknown", "anything"}, {"keys.edit.copy", "bad\x00value"},
 	}) {
