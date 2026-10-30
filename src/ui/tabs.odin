@@ -66,6 +66,8 @@ tab_draw :: proc(
 	icon: string = "",
 	icon_atlas: render.Rect = {},
 	pointer: [2]f32 = {},
+	status: Status_Mark = {},
+	status_phase: f32 = 0,
 ) -> glyphs.Result {
 	x := f32(index) * bar.tab_width
 	if position >= 0 {x = position}
@@ -121,7 +123,27 @@ tab_draw :: proc(
 		   result != .Ok {return result}
 	}
 	icon_width := f32(0)
-	if index < bar.count && width >= 72 * scale && (icon != "" || icon_atlas.width > 0) {
+	if index < bar.count && status.glyph != .None {
+		status_progress_draw(
+			list,
+			theme,
+			{tile.x + 8 * scale, tile.y, max(0, tile.width - 16 * scale), tile.height - scale},
+			status,
+			scale,
+		)
+	}
+	if index < bar.count && width >= 56 * scale && status.glyph != .None {
+		icon_width = 22 * scale
+		if result := status_glyph_draw(
+			list,
+			text,
+			theme,
+			{x + 10 * scale, 13 * scale - lift, 14 * scale, 14 * scale},
+			status,
+			status_phase,
+			scale,
+		); result != .Ok {return result}
+	} else if index < bar.count && width >= 72 * scale && (icon != "" || icon_atlas.width > 0) {
 		icon_width = 22 * scale
 		if result := shell_badge_draw(
 			list,

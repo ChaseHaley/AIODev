@@ -189,6 +189,9 @@ header_draw :: proc(
 	icon_atlas: render.Rect = {},
 	badge_hovered := false,
 	pointer: [2]f32 = {},
+	status: Status_Mark = {},
+	status_text: string = "",
+	status_phase: f32 = 0,
 ) -> glyphs.Result {
 	l := header_layout(area, scale, focused)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
@@ -222,6 +225,39 @@ header_draw :: proc(
 	strong := text_styled(text, focused ? .Strong : .Body)
 	small := text_styled(text, .Small)
 	width := l.title.width
+	if status.glyph != .None && width >= 120 * scale {
+		pill_width := min(text_width(&small, status_text) + 30 * scale, width * 0.5)
+		pill := render.Rect {
+			l.title.x + width - pill_width,
+			l.panel.y + 5 * scale,
+			pill_width,
+			max(0, l.panel.height - 10 * scale),
+		}
+		tint := status_color(theme, status.glyph)
+		tint.a *= status.dim ? 0.08 : 0.16
+		draw_rect(list, {rect = pill, color = tint, radius = pill.height / 2})
+		if result := status_glyph_draw(
+			list,
+			text,
+			theme,
+			{pill.x + 6 * scale, pill.y + (pill.height - 12 * scale) / 2, 12 * scale, 12 * scale},
+			status,
+			status_phase,
+			scale,
+		); result != .Ok {return result}
+		ink := theme.muted
+		if status_blocked(status.glyph) || status.glyph == .Error {ink = status_color(theme, status.glyph)}
+		if result := draw_fading_text(
+			&small,
+			list,
+			status_text,
+			pill.x + 22 * scale,
+			pill.y + (pill.height - small.line_height) / 2 + small.ascent,
+			ink,
+			max(0, pill.width - 28 * scale),
+		); result != .Ok {return result}
+		width = max(0, width - pill_width - 8 * scale)
+	}
 	title_width := directory == "" ? width : min(width * 0.55, text_width(&strong, title))
 	baseline := l.panel.y + (l.panel.height - strong.line_height) / 2 + strong.ascent
 	if result := draw_fading_text(
