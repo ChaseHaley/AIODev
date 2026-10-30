@@ -109,8 +109,8 @@ value_encoder_covers_every_schema_kind :: proc(t: ^testing.T) {
 		{"pane.gap", "5", "5"},
 		{"font.size", "12.5", "12.5"},
 		{"cursor.blink", "true", "true"},
-		{"theme.name", "tide", "\"tide\""},
-		{"theme.mode", "light", "light"},
+		{"theme.name", "tide-dark", "\"tide-dark\""},
+		{"tabs.orientation", "vertical", "vertical"},
 	}
 	for c in cases {
 		entry := settings.schema_find(c.key)

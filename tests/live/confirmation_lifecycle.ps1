@@ -79,7 +79,7 @@ try {
     Equal (State)['session.profile'] alternate 'Enter switches the shell'
     Equal (State)['session.id'] $session 'switch retains session identity'
     Aio wait text '>'
-    [IO.File]::AppendAllText((Join-Path $directory 'settings.ini'), "`ntheme.mode = light`n")
+    [IO.File]::AppendAllText((Join-Path $directory 'settings.ini'), "`ntheme.name = studio-light`n")
     Aio command settings.reload
     Aio command pane.change_shell
     Aio key Enter

@@ -42,7 +42,7 @@ try {
     Invoke-Aio type '#112233'
     Invoke-Aio key Enter
     Invoke-Aio expect state settings.error=false
-    Invoke-Aio expect state "theme.name=$id-copy"
+    Invoke-Aio expect state "theme.name=$id-custom"
     Invoke-Aio expect state terminal.background=#112233
     $original = Get-Content -LiteralPath $fixture -Raw | ConvertFrom-Json
     if ($original.colors.background -ne '#102030') { throw 'Editing changed the shared file.' }
@@ -51,7 +51,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
     Invoke-Aio stop
     Invoke-Aio launch --settings $path
-    Invoke-Aio expect state "theme.name=$id-copy"
+    Invoke-Aio expect state "theme.name=$id-custom"
     Invoke-Aio expect state terminal.background=#112233
     Write-Output 'PASS file discovery, export, shared-file preservation, local copy and restart persistence'
 } finally {

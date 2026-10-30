@@ -50,15 +50,23 @@ theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
 		}
 	}
 	id, id_ok := object["id"].(json.String)
-	base, base_ok := object["base"].(json.String)
 	version, version_ok := object["version"].(json.Float)
 	colors, colors_ok := object["colors"].(json.Object)
-	if !id_ok || !theme_id_valid(string(id)) {return {}, "Invalid or reserved theme ID."}
+	if !id_ok || !theme_id_valid(string(id)) {return {}, "Invalid theme ID."}
 	if !version_ok || version != 1 {return {}, "Expected theme version 1."}
-	if !base_ok {return {}, "Expected a built-in base theme."}
 	if !colors_ok {return {}, "Expected a colors object."}
-	theme.base, base_ok = builtin_parse(string(base))
-	if !base_ok {return {}, "Unknown built-in base theme."}
+	if base, has_base := object["base"].(json.String); has_base {
+		if !theme_id_valid(string(base)) {return {}, "Invalid base theme ID."}
+		// Temporary like the ID below.
+		cloned, clone_error := strings.clone(theme_legacy_base(string(base)), context.temp_allocator)
+		if clone_error != nil {return {}, "Could not allocate base theme ID."}
+		theme.base = cloned
+	}
+	if name, has_name := object["name"].(json.String); has_name && name != "" {
+		cloned, clone_error := strings.clone(string(name), context.temp_allocator)
+		if clone_error != nil {return {}, "Could not allocate theme name."}
+		theme.name = cloned
+	}
 	for key, entry in colors {
 		token, known := token_find(key)
 		if !known {return {}, fmt.tprintf("Unknown theme color: %s", key)}
@@ -69,7 +77,7 @@ theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
 		theme.colors[token] = color
 		theme.overrides += {token}
 	}
-	// The caller consumes this temporary ID before the next scratch reset.
+	// The caller consumes these temporary IDs before the next scratch reset.
 	cloned, clone_error := strings.clone(string(id), context.temp_allocator)
 	if clone_error != nil {return {}, "Could not allocate theme ID."}
 	theme.id = cloned
@@ -136,30 +144,46 @@ theme_files_load :: proc(
 			   err != nil {return err}
 			continue
 		}
-		theme.id = stored.id
-		stored^ = theme
+		if err := custom_theme_store(s, stored, theme); err != nil {return err}
 	}
 	return nil
 }
 
+// A complete theme file: every color of `theme` in token order, so it needs no base. Empty
+// metadata is left out.
 @(require_results)
-theme_file_text :: proc(s: ^Settings, id: string, allocator := context.allocator) -> (string, bool) {
+theme_file_text :: proc(
+	id: string,
+	theme: Theme,
+	name := "",
+	description := "",
+	allocator := context.allocator,
+) -> (
+	string,
+	bool,
+) {
 	if !theme_id_valid(id) {return "", false}
-	base := Builtin_Theme{builtin_name(s), s.theme.mode}
-	if custom := custom_theme_find(s, s.theme.name); custom != nil {base = custom.base}
-	colors := make(map[string]string, context.temp_allocator)
-	for info, token in THEME_TOKENS {
-		colors[info.key] = theme_color_text(token, s.active_theme.colors[token])
+	quote :: proc(text: string) -> string {
+		data, error := json.marshal(text, allocator = context.temp_allocator)
+		return error == nil ? string(data) : `""`
 	}
-	document := struct {
-		schema: string `json:"$schema"`,
-		version: int,
-		id, base: string,
-		colors: map[string]string,
-	}{"./theme.schema.json", 1, id, builtin_id(base), colors}
-	data, error := json.marshal(document, {pretty = true, sort_maps_by_key = true}, allocator)
+	builder, error := strings.builder_make(context.temp_allocator)
 	if error != nil {return "", false}
-	return string(data), true
+	defer strings.builder_destroy(&builder)
+	if write_parts(&builder, "{\n  \"$schema\": \"./theme.schema.json\",\n  \"version\": 1,\n") != nil ||
+	   write_parts(&builder, "  \"id\": ", quote(id), ",\n") != nil {return "", false}
+	if name != "" && write_parts(&builder, "  \"name\": ", quote(name), ",\n") != nil {return "", false}
+	if description != "" &&
+	   write_parts(&builder, "  \"description\": ", quote(description), ",\n") != nil {return "", false}
+	if write_parts(&builder, "  \"colors\": {\n") != nil {return "", false}
+	for info, token in THEME_TOKENS {
+		separator := token == max(Theme_Token) ? "\n" : ",\n"
+		value := quote(theme_color_text(token, theme.colors[token]))
+		if write_parts(&builder, "    ", quote(info.key), ": ", value, separator) != nil {return "", false}
+	}
+	if write_parts(&builder, "  }\n}\n") != nil {return "", false}
+	text, clone_error := strings.clone(strings.to_string(builder), allocator)
+	return text, clone_error == nil
 }
 
 // Exclusive creation never replaces another creator's file, including repeated exports.
@@ -186,7 +210,8 @@ theme_export :: proc(s: ^Settings, directory: string) -> (path: string, error: o
 		file, open_error := os.open(path, os.O_WRONLY | os.O_CREATE | os.O_EXCL)
 		if open_error == .Exist {continue}
 		if open_error != nil {return "", open_error}
-		text, ok := theme_file_text(s, id, context.temp_allocator)
+		name := theme_display_name(s, s.theme.name)
+		text, ok := theme_file_text(id, s.active_theme, name, allocator = context.temp_allocator)
 		if !ok {
 			_ = os.close(file)
 			_ = os.remove(path)

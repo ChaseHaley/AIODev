@@ -5,7 +5,6 @@ import "core:testing"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
-import "aio:settings"
 import "aio:term_view"
 import "aio:ui"
 import "core:time"
@@ -25,14 +24,15 @@ notice_allocator :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, align
 
 @(test)
 notice_severities_have_unique_words_symbols_and_readable_theme_colors :: proc(t: ^testing.T) {
-	for name in settings.Theme_Name {
-		for mode in settings.Theme_Mode {
-			theme := ui.theme_from(settings.builtin_theme({name, mode}))
+	for file in SHIPPED_THEMES {
+		{
+			resolved := shipped_theme_file(file) or_continue
+			theme := ui.theme_from(resolved)
 			for kind in ui.Notice_Kind {
 				label, symbol, color := ui.notice_style(kind, theme)
 				testing.expect(t, len(label) > 0 && symbol != 0)
 				testing.expectf(t, term_view.contrast_ratio(color, theme.surface) >= 4.5,
-					"%v %v %v label contrast", name, mode, kind)
+					"%v %v label contrast", file.name, kind)
 				for other in ui.Notice_Kind {
 					if other == kind { continue }
 					other_label, other_symbol, other_color := ui.notice_style(other, theme)
@@ -103,8 +103,8 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 	for scale in ([?]f32{1, 1.75}) {
 		ui.text_set_size(&text, 16*scale)
 		for width in ([?]f32{320, 1000}) {
-			for mode in settings.Theme_Mode {
-				theme := ui.theme_from(settings.builtin_theme({.Studio, mode}))
+			for id in ([?]string{"studio-dark", "studio-light"}) {
+				theme := ui.theme_from(shipped_theme(id))
 				render.draw_list_reset(&list)
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
 					width*scale, 1000*scale, scale), glyphs.Result.Ok)

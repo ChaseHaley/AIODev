@@ -97,10 +97,10 @@ try {
     Invoke-Aio window select $second
     Invoke-Aio key Esc
     Invoke-Aio key Ctrl+A
-    Invoke-Aio type theme.mode
+    Invoke-Aio type theme.name
     Invoke-Aio key Tab Down Enter
     Assert-Value (Read-State)['settings.error'] false 'the second page can save after the first page'
-    Assert-Value (Read-State)['theme.mode'] light 'the light theme applies to both windows'
+    Assert-Value (Read-State)['theme.name'] studio-light 'the light theme applies to both windows'
     Invoke-Aio window select $first
     Assert-Value (Read-State)['settings.value'] 19 'a clean selected field follows the next publication'
     Shot light-saved

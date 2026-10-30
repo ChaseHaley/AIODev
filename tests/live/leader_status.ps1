@@ -91,7 +91,7 @@ try {
     Assert-Value $state['settings.capturing'] true 'recording continues after the leader chord'
     Invoke-Aio key Esc
     Invoke-Aio command tab.close
-    [IO.File]::AppendAllText($path, "`ntheme.mode = light`n")
+    [IO.File]::AppendAllText($path, "`ntheme.name = studio-light`n")
     Invoke-Aio command settings.reload
     Start-Sleep -Milliseconds 6500
     Invoke-Aio key Ctrl+B

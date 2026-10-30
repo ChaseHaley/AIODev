@@ -43,7 +43,7 @@ every_token_round_trips_through_a_custom_theme :: proc(t: ^testing.T) {
 			settings.theme_color_text(token, expected[token]),
 		)
 	}
-	s, diagnostics, err := settings.parse(strings.to_string(b))
+	s, diagnostics, err := settings.parse(strings.to_string(b), themes_directory = THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, err, nil)
@@ -62,15 +62,17 @@ every_token_round_trips_through_a_custom_theme :: proc(t: ^testing.T) {
 }
 
 @(test)
-builtin_light_matches_mode_and_selection_text_keeps_cell_colors :: proc(t: ^testing.T) {
-	for name in settings.Theme_Name {
-		for mode in settings.Theme_Mode {
-			theme := settings.builtin_theme({name, mode})
-			testing.expect_value(t, theme.light, mode == .Light)
-			testing.expect_value(t, theme.terminal_light, mode == .Light)
-			testing.expect_value(t, theme.colors[.Selection_Foreground].a, 0)
-			testing.expect(t, settings.theme_terminal(theme).selection_foreground == nil)
-			testing.expect_value(t, theme.colors[.Border].a, mode == .Light ? 23 : 20)
-		}
+shipped_light_matches_the_id_and_selection_text_keeps_cell_colors :: proc(t: ^testing.T) {
+	count := 0
+	for file in SHIPPED_THEMES {
+		theme := shipped_theme_file(file) or_continue
+		count += 1
+		light := strings.contains(file.name, "-light") || strings.contains(file.name, "-day")
+		testing.expectf(t, theme.light == light, "%s light", file.name)
+		testing.expectf(t, theme.terminal_light == light, "%s terminal light", file.name)
+		testing.expect_value(t, theme.colors[.Selection_Foreground].a, 0)
+		testing.expect(t, settings.theme_terminal(theme).selection_foreground == nil)
+		testing.expect_value(t, theme.colors[.Border].a, light ? 23 : 20)
 	}
+	testing.expect_value(t, count, 10)
 }

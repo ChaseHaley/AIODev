@@ -116,7 +116,7 @@ try {
     Invoke-Aio key Enter
     Assert-Equal (Read-State)['tabs.count'] 1 'confirming closes the whole group'
 
-    [IO.File]::AppendAllText($path, "`ntheme.mode = light`n")
+    [IO.File]::AppendAllText($path, "`ntheme.name = studio-light`n")
     Invoke-Aio command settings.reload
     Open-Split-Tab
     Invoke-Aio key Ctrl+Shift+W

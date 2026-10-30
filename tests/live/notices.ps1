@@ -29,7 +29,7 @@ function Assert-True([bool] $Condition, [string] $Label) {
 }
 function Configure([string] $Extra = '', [string] $Mode = 'dark', [string] $Family = 'Cascadia Mono') {
     $source = "shell.command = pwsh.exe -NoLogo -NoProfile`nfont.family = $Family`n" +
-        "cursor.blink = false`ntheme.mode = $Mode`n$Extra`n"
+        "cursor.blink = false`ntheme.name = studio-$Mode`n$Extra`n"
     [IO.File]::WriteAllText($path, $source)
     Invoke-Aio command settings.reload
 }

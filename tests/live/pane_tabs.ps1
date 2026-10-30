@@ -94,7 +94,7 @@ try {
     Assert-Value $s['tabs.count'] $tabs 'sole pane reuses its tab'
     Assert-Value $s['session.id'] $runtime 'sole pane runtime survives'
     Assert-Value $s["tab.$tabs.id"] $tabId 'sole tab moves to the end'
-    [IO.File]::AppendAllText("$directory/settings.ini", "`ntheme.mode = light`n")
+    [IO.File]::AppendAllText("$directory/settings.ini", "`ntheme.name = studio-light`n")
     Invoke-Aio command settings.reload
     Invoke-Aio command pane.split_right
     Invoke-Aio wait text 'PS '

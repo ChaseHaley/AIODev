@@ -57,8 +57,8 @@ try {
     foreach($variant in @(@{mode='light';dpi=192},@{mode='dark';dpi=144})){
         $settings=Join-Path $data 'settings.ini'
         $text=[IO.File]::ReadAllText($settings)
-        $text=[regex]::Replace($text,'(?m)^theme.mode\s*=.*\r?\n?','')
-        [IO.File]::WriteAllText($settings,$text.TrimEnd()+"`ntheme.mode = $($variant.mode)`n")
+        $text=[regex]::Replace($text,'(?m)^theme\.name\s*=.*\r?\n?','')
+        [IO.File]::WriteAllText($settings,$text.TrimEnd()+"`ntheme.name = studio-$($variant.mode)`n")
         Aio command settings.reload | Out-Null
         Aio dpi $variant.dpi | Out-Null
         Aio resize 60x18 | Out-Null

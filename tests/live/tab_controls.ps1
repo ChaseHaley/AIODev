@@ -67,7 +67,7 @@ try {
     Aio key Esc | Out-Null
     $settings=Join-Path $directory settings.ini
     $text=[IO.File]::ReadAllText($settings)
-    [IO.File]::WriteAllText($settings,$text+"`ntheme.mode = light`n")
+    [IO.File]::WriteAllText($settings,$text+"`ntheme.name = studio-light`n")
     Aio command settings.reload | Out-Null
     Aio command app.command_palette | Out-Null
     Aio type t: | Out-Null

@@ -14,32 +14,20 @@ theme_schema_text :: proc(allocator := context.allocator) -> (string, bool) {
   "title": "AIODev Theme",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "id", "base", "colors"],
+  "required": ["version", "id", "colors"],
   "properties": {
     "$schema": {"type": "string"},
     "version": {"const": 1},
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "maxLength": `,
-		fmt.tprintf("%d", PROFILE_ID_MAX_LENGTH), `, "not": {"enum": [`,
-	) != nil {return "", false}
-	for name, i in THEME_NAMES {
-		if i != .Studio && write_parts(&builder, ",") != nil {return "", false}
-		if write_parts(&builder, fmt.tprintf("%q", name)) != nil {return "", false}
-	}
-	if write_parts(&builder, `]}},
-    "name": {"type": "string"},
+		fmt.tprintf("%d", PROFILE_ID_MAX_LENGTH), `},
+    "name": {"type": "string", "description": "Display name shown in the theme selector; any text."},
     "author": {"type": "string"},
     "description": {"type": "string"},
-    "base": {"enum": [`,
-	) != nil {return "", false}
-	first := true
-	for _, name in THEME_NAMES {
-		for _, mode in THEME_MODES {
-			if !first && write_parts(&builder, ",") != nil {return "", false}
-			first = false
-			if write_parts(&builder, fmt.tprintf("%q", builtin_id({name, mode}))) != nil {return "", false}
-		}
-	}
-	if write_parts(&builder, `]},
+    "base": {
+      "type": "string",
+      "description": "ID of another theme that supplies the colors this file leaves out.",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
     "colors": {
       "type": "object",
       "additionalProperties": false,

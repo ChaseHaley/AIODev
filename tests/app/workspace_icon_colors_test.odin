@@ -3,7 +3,6 @@ package app_test
 import "core:testing"
 import app "../../src"
 import "aio:render"
-import "aio:settings"
 import "aio:term_view"
 import "aio:ui"
 
@@ -37,10 +36,11 @@ workspace143_tint_validation_reset_and_icon_changes_preserve_identity :: proc(t:
 }
 
 @(test)
-workspace143_colors_have_contrast_in_all_builtin_themes_and_selection_states :: proc(t: ^testing.T) {
-	for name in settings.Theme_Name {
-		for mode in settings.Theme_Mode {
-			theme := ui.theme_from(settings.builtin_theme({name, mode}))
+workspace143_colors_have_contrast_in_all_shipped_themes_and_selection_states :: proc(t: ^testing.T) {
+	for file in SHIPPED_THEMES {
+		{
+			resolved := shipped_theme_file(file) or_continue
+			theme := ui.theme_from(resolved)
 			testing.expect_value(t, app.workspace_icon_tint(0, theme.text), theme.text)
 			testing.expect_value(t, app.workspace_icon_tint(-1, theme.text), theme.text)
 			for tint in 1..<len(app.WORKSPACE_ICON_COLORS) {

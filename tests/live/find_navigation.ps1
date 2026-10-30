@@ -93,8 +93,7 @@ try {
     # Theme/DPI snapshots are translated app control evidence, not native monitor-transition proof.
     foreach ($theme in @('studio','tide','ember')) {
         foreach ($mode in @('dark','light')) {
-            Set-Option theme.name $theme
-            Set-Option theme.mode $mode
+            Set-Option theme.name "$theme-$mode"
             Invoke-Aio command settings.reload
             foreach ($dpi in @(96,144,192)) {
                 Invoke-Aio dpi $dpi

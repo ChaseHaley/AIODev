@@ -4,7 +4,6 @@ import "core:testing"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
-import "aio:settings"
 import "aio:term_view"
 import "aio:ui"
 
@@ -71,9 +70,9 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 	defer ui.find_destroy(&f)
 	ui.find_open(&f)
 	ui.find_text(&f, "long query with a visible caret")
-	for name in settings.Theme_Name {
-		for mode in settings.Theme_Mode {
-			resolved := settings.builtin_theme({name, mode})
+	for file in SHIPPED_THEMES {
+		{
+			resolved := shipped_theme_file(file) or_continue
 			theme := ui.theme_from(resolved)
 			testing.expect(t, term_view.contrast_ratio(theme.text, theme.surface) >= 4.5)
 			for scale in ([?]f32{1, 1.5, 2}) {

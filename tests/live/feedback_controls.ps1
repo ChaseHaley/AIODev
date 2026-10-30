@@ -169,7 +169,7 @@ try {
     Invoke-Aio expect state shell.icon.loaded=false
     Invoke-Aio expect state 'session.header.icon=>_'
     Set-Option profile.default.icon shell.png
-    Set-Option theme.mode light
+    Set-Option theme.name studio-light
     Invoke-Aio command settings.reload
     Invoke-Aio run 'Clear-Host; $e=[char]27; [Console]::WriteLine("${e}[37mArgument ${e}[97mNumber ${e}[2mPrediction${e}[0m")'
     Shot light-contrast

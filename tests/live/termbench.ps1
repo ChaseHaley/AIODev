@@ -95,7 +95,7 @@ $settings = @(
     'font.size = 12'
     'cursor.blink = false'
     ('process.padding_groups = ' + (ConvertTo-TermBenchSettingString $ProcessGroups))
-    ('theme.mode = ' + (ConvertTo-TermBenchSettingString $ThemeMode))
+    ('theme.name = ' + (ConvertTo-TermBenchSettingString "studio-$ThemeMode"))
 )
 if ($HideHeaders) { $settings += 'pane.show_headers = false' }
 if ($MinimumContrast -ne 4.5) { $settings += "terminal.minimum_contrast = $MinimumContrast" }

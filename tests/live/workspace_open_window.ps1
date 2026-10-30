@@ -162,8 +162,8 @@ try {
     Check ((Shell-Pid 'source_after') -eq $sourcePid) 'all workspace-window operations preserve requester shell PID'
     foreach($v in @(@{mode='light';dpi=192},@{mode='dark';dpi=144})){
         $path=Join-Path $data 'settings.ini';$text=[IO.File]::ReadAllText($path)
-        $text=[regex]::Replace($text,'(?m)^theme.mode\s*=.*\r?\n?','')
-        [IO.File]::WriteAllText($path,$text.TrimEnd()+"`ntheme.mode = $($v.mode)`n")
+        $text=[regex]::Replace($text,'(?m)^theme\.name\s*=.*\r?\n?','')
+        [IO.File]::WriteAllText($path,$text.TrimEnd()+"`ntheme.name = studio-$($v.mode)`n")
         Aio command settings.reload | Out-Null
         Aio dpi $v.dpi | Out-Null
         Aio resize 40x10 | Out-Null

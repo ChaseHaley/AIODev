@@ -133,8 +133,8 @@ try {
     foreach ($mode in @('dark', 'light')) {
         $path = Join-Path $data 'settings.ini'
         $text = [IO.File]::ReadAllText($path)
-        $text = [regex]::Replace($text, '(?m)^theme.mode\s*=.*\r?\n?', '')
-        [IO.File]::WriteAllText($path, $text.TrimEnd()+"`ntheme.mode = $mode`n")
+        $text = [regex]::Replace($text, '(?m)^theme\.name\s*=.*\r?\n?', '')
+        [IO.File]::WriteAllText($path, $text.TrimEnd()+"`ntheme.name = studio-$mode`n")
         Invoke-Aio command settings.reload
         foreach ($dpi in @(96, 144, 168, 192)) {
             Invoke-Aio dpi $dpi

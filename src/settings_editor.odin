@@ -8,6 +8,7 @@ import "aio:settings"
 import "aio:ui"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 
 @(private)
@@ -116,15 +117,13 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		}
 		if entry.key == "font.size" {row.minimum, row.maximum = 6, 32}
 		if entry.key == "font.line_height" {row.minimum, row.maximum = 0.8, 2}
-		if entry.key == "theme.mode" && settings.theme_custom(&s) {
-			row.description = "Switches built-in themes between dark and light. Custom themes keep their own colors."
-		}
 		switch entry.kind {
 		case .String:
 			row.kind = entry.key == "input.leader" ? .Shortcut : .Text
 			if entry.key == "theme.name" {
-				row.kind, row.choices = .Choice, settings_theme_choices(&s)
-				row.description = "Built-in or custom color theme. Changing any color saves a custom theme."
+				row.kind = .Choice
+				row.choices, row.choice_labels = settings_theme_choices(&s)
+				row.description = "Theme file or custom theme. Changing any color saves a custom theme."
 			}
 		case .Int:
 			row.kind = .Integer
@@ -581,6 +580,10 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		if outcome == .Reset {ui.field_set(&p.value, row.default_value)}
 		editor_theme_rename(app, w, ui.field_string(&p.value))
 		return
+	case "theme.display_name":
+		if outcome == .Reset {ui.field_set(&p.value, row.default_value)}
+		editor_theme_name(app, w, ui.field_string(&p.value))
+		return
 	}
 	if strings.has_prefix(row.key, settings_color_prefix) {
 		editor_theme_color(app, w, row, outcome == .Reset)
@@ -833,27 +836,47 @@ editor_profile_action :: proc(app: ^App, w: ^Window) {
 @(private)
 settings_color_prefix :: "colors."
 
-// The theme selector lists the built-in themes, then custom themes in file order. The editor owns
-// its copy, so the slice may borrow the parsed settings.
+// The theme selector lists theme files by display name, then custom themes in settings file order.
+// Choices are IDs and labels are display names. The editor owns its copies, so both slices may
+// borrow the parsed settings.
 @(private)
-settings_theme_choices :: proc(s: ^settings.Settings) -> []string {
-	choices := make(
-		[dynamic]string,
-		0,
-		len(settings.Theme_Name) + len(s.themes),
-		context.temp_allocator,
-	)
-	for name in settings.THEME_NAMES {append(&choices, name)}
-	for theme in s.themes {append(&choices, theme.id)}
-	return choices[:]
+settings_theme_choices :: proc(s: ^settings.Settings) -> (choices, labels: []string) {
+	files := make([dynamic]^settings.Custom_Theme, 0, len(s.themes), context.temp_allocator)
+	for &theme in s.themes {
+		if theme.external {append(&files, &theme)}
+	}
+	slice.sort_by(files[:], proc(a, b: ^settings.Custom_Theme) -> bool {
+		a_name, b_name := a.name != "" ? a.name : a.id, b.name != "" ? b.name : b.id
+		return a_name != b_name ? a_name < b_name : a.id < b.id
+	})
+	ids := make([dynamic]string, 0, len(s.themes), context.temp_allocator)
+	names := make([dynamic]string, 0, len(s.themes), context.temp_allocator)
+	for theme in files {
+		append(&ids, theme.id)
+		append(&names, settings.theme_display_name(s, theme.id))
+	}
+	for theme in s.themes {
+		if theme.external {continue}
+		append(&ids, theme.id)
+		append(&names, settings.theme_display_name(s, theme.id))
+	}
+	return ids[:], names[:]
 }
 
 // The active theme's management rows and one row per theme color. Every color shows the value in
-// effect; a custom theme's Reset returns a color to its built-in base.
+// effect; a custom theme's Reset returns a color to its base theme.
 @(private)
 settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
-	if custom := settings.custom_theme_find(s, s.theme.name); custom != nil && !custom.external {
+	if settings.theme_custom(s) {
+		custom := settings.custom_theme_find(s, s.theme.name)
 		rows := [?]ui.Editor_Row {
+			{
+				key = "theme.display_name",
+				title = "Theme Name",
+				description = "Shown in the theme selector. Any text; empty shows the theme ID.",
+				value = custom.name,
+				kind = .Text,
+			},
 			{
 				key = "theme.rename",
 				title = "Theme ID",
@@ -873,8 +896,8 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 				key = "theme.delete",
 				title = "Delete Theme",
 				description = fmt.tprintf(
-					"Remove this custom theme and switch back to %s.",
-					settings.builtin_id(custom.base),
+					"Remove this custom theme and switch to %s.",
+					settings.theme_display_name(s, settings.theme_delete_target(s, custom)),
 				),
 				value = "Delete…",
 				kind = .Action,
@@ -887,7 +910,10 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 		row := ui.Editor_Row {
 			key         = "theme.duplicate",
 			title       = "Save as New Theme",
-			description = fmt.tprintf("Copy %s into a custom theme you can edit.", s.theme.name),
+			description = fmt.tprintf(
+				"Copy %s into a custom theme you can edit.",
+				settings.theme_display_name(s, s.theme.name),
+			),
 			value       = "Save Copy",
 			kind        = .Action,
 		}
@@ -946,7 +972,7 @@ editor_theme_failed :: proc(w: ^Window, error: settings.Theme_Edit_Error, issue:
 	case .Allocation:
 		text = "Could not prepare the theme change."
 	case .Unavailable:
-		text = "Built-in themes cannot be renamed or deleted."
+		text = "Theme files cannot be renamed or deleted here."
 	}
 	ui.editor_message(&w.editor, text, true)
 }
@@ -971,7 +997,7 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 		return
 	}
 	if updated == w.editor.source {
-		ui.editor_message(&w.editor, "Built-in themes keep their colors; changing one saves a custom theme.", false)
+		ui.editor_message(&w.editor, "Theme files keep their colors; changing one saves a custom theme.", false)
 		return
 	}
 	message := "Saved and applied."
@@ -1002,13 +1028,29 @@ editor_theme_duplicate :: proc(app: ^App, w: ^Window) {
 @(private)
 editor_theme_rename :: proc(app: ^App, w: ^Window, value: string) {
 	new_id := strings.clone(strings.trim_space(value), context.temp_allocator)
-	updated, issue, error := settings.theme_rename(w.editor.source, new_id)
+	updated, issue, error := settings.theme_rename(
+		w.editor.source, new_id, themes_directory = settings.theme_directory(),
+	)
 	defer delete(updated)
 	if error != .None {
 		editor_theme_failed(w, error, issue)
 		return
 	}
 	editor_theme_commit(app, w, updated, "theme.rename", fmt.tprintf("Theme renamed to %s.", new_id))
+}
+
+@(private)
+editor_theme_name :: proc(app: ^App, w: ^Window, value: string) {
+	name := strings.trim_space(value)
+	key := fmt.tprintf("%s%s.name", settings.CUSTOM_THEME_PREFIX, app.settings.theme.name)
+	updated, message, err := settings.edit_text(w.editor.source, key, name)
+	defer delete(updated)
+	defer delete(message)
+	if err != nil || message != "" {
+		ui.editor_message(&w.editor, err != nil ? "Could not prepare the theme change." : message, true)
+		return
+	}
+	editor_theme_commit(app, w, updated, "theme.display_name", "Theme name saved.")
 }
 
 // Deleting discards colors that exist nowhere else, so it takes a second press.
@@ -1027,7 +1069,9 @@ editor_theme_delete :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	w.theme_delete_armed = false
-	updated, selected, error := settings.theme_delete(w.editor.source)
+	updated, selected, error := settings.theme_delete(
+		w.editor.source, themes_directory = settings.theme_directory(),
+	)
 	defer delete(updated)
 	defer delete(selected)
 	if error != .None {

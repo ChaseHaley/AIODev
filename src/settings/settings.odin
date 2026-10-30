@@ -113,22 +113,11 @@ SCHEMA :: [?]Schema_Entry {
 		"Theme",
 		.String,
 		offset_of(Settings, theme) + offset_of(Theme_Settings, name),
-		"studio",
+		DEFAULT_THEME_ID,
 		1,
 		64,
 		nil,
-		"Color theme: studio, tide, ember, tokyonight-night, tokyonight-storm, tokyonight-moon, or a custom ID.",
-	},
-	{
-		"theme.mode",
-		"Theme Mode",
-		.Enum,
-		offset_of(Settings, theme) + offset_of(Theme_Settings, mode),
-		"dark",
-		0,
-		0,
-		{"dark", "light"},
-		"Variant of a built-in theme: dark or light. Custom themes keep their own colors.",
+		"Color theme ID: a file in the themes folder, such as studio-light, or a custom theme.",
 	},
 	{
 		"pane.gap",
@@ -647,7 +636,11 @@ destroy :: proc(s: ^Settings) {
 	delete(s.shell.directory, s.allocator)
 	delete(s.shell.icon, s.allocator)
 	profiles_destroy(&s.profiles)
-	for theme in s.themes {delete(theme.id, s.allocator)}
+	for theme in s.themes {
+		delete(theme.id, s.allocator)
+		delete(theme.base, s.allocator)
+		delete(theme.name, s.allocator)
+	}
 	delete(s.themes)
 	s^ = {}
 }
@@ -779,8 +772,8 @@ parse :: proc(
 		}
 		key := line.key
 		value := line.value
-		// Retired scope values must not make an existing settings file invalid.
-		if key == "tabs.vertical_scope" {continue}
+		// Retired keys must not make an existing settings file invalid.
+		if key == "tabs.vertical_scope" || key == "theme.mode" {continue}
 		if strings.has_prefix(key, KEY_BINDING_PREFIX) {
 			binding_error := parse_key_binding(&s, &diagnostics, key, value, line.number)
 			if binding_error != nil {return {}, {}, binding_error}
@@ -861,6 +854,7 @@ parse :: proc(
 		if file_error := theme_files_load(&s, &diagnostics, themes_directory);
 		   file_error != nil {return {}, {}, file_error}
 	}
+	if default_error := theme_default_add(&s); default_error != nil {return {}, {}, default_error}
 	if theme_error := resolve_theme(&s, &diagnostics); theme_error != nil {return {}, {}, theme_error}
 	success = true
 	return s, diagnostics, nil
@@ -900,7 +894,7 @@ default_text :: proc(
 		"profile.default.directory = \"",
 		DEFAULT_PROFILE_DIRECTORY,
 		"\"\n\n",
-		"# Custom themes: theme.custom.ID.base names a built-in variant such as studio-dark, and\n",
+		"# Custom themes: theme.custom.ID.base names another theme such as studio-dark, and\n",
 		"# theme.custom.ID.COLOR = #rrggbb overrides one color. Changing a color in Settings saves one.\n",
 	) or_return
 	if len(extra_comments) > 0 {write_parts(&builder, "\n") or_return}
@@ -989,6 +983,11 @@ migrate_settings_text :: proc(
 	if profiles_changed {
 		delete(updated, allocator)
 		updated, changed = profiles, true
+	}
+	variant, variant_changed := migrate_theme_variant_text(updated, allocator) or_return
+	if variant_changed {
+		delete(updated, allocator)
+		updated, changed = variant, true
 	}
 	themes, themes_changed, theme_error := migrate_theme_text(updated, allocator)
 	if theme_error != nil {

@@ -128,10 +128,10 @@ try {
     # The capture is the evidence; the theme switch proves the light values reach the draw path.
     $settings = Join-Path $data 'settings.ini'
     $text = [IO.File]::ReadAllText($settings).TrimEnd()
-    [IO.File]::WriteAllText($settings, $text + "`ntheme.mode = light`n")
+    [IO.File]::WriteAllText($settings, $text + "`ntheme.name = studio-light`n")
     Invoke-Aio command settings.reload
     Invoke-Aio wait idle
-    Invoke-Aio expect state theme.mode=light
+    Invoke-Aio expect state theme.name=studio-light
     # The first tab is selected and already white; hover a second, ordinary tab so the
     # paper fill is the thing under review.
     Invoke-Aio command tab.new
@@ -145,11 +145,11 @@ try {
     Invoke-Aio wait idle
     Shot 'tab-hover-light'
     $text = [IO.File]::ReadAllText($settings)
-    $text = [regex]::Replace($text, '(?m)^theme\.mode\s*=.*\r?\n?', '')
-    [IO.File]::WriteAllText($settings, $text.TrimEnd() + "`ntheme.mode = dark`n")
+    $text = [regex]::Replace($text, '(?m)^theme\.name\s*=.*\r?\n?', '')
+    [IO.File]::WriteAllText($settings, $text.TrimEnd() + "`ntheme.name = studio-dark`n")
     Invoke-Aio command settings.reload
     Invoke-Aio wait idle
-    Invoke-Aio expect state theme.mode=dark
+    Invoke-Aio expect state theme.name=studio-dark
 
     # Both values are ordinary settings: without a restart, zero lift and zero gloss
     # must reach the theme and remove the raised effect.

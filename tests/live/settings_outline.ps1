@@ -99,7 +99,7 @@ try {
     Invoke-Aio expect state window.maximized=false
     & "$repo/tools/win32.ps1" -Name $name -Resize 1400x900 | Out-Null
     $path = "$repo/build/verify/$name/settings.ini"
-    [IO.File]::AppendAllText($path, "`ntheme.mode = light`n")
+    [IO.File]::AppendAllText($path, "`ntheme.name = studio-light`n")
     Invoke-Aio command settings.reload
     Shot outline-light
     Write-Output 'PASS settings outline navigation'

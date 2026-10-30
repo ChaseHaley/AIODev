@@ -199,8 +199,7 @@ try {
     Invoke-Aio expect state panes.count=4
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Resize $fullSize
     foreach ($theme in @(@('studio','dark'), @('studio','light'), @('tide','dark'))) {
-        Set-Option theme.name $theme[0]
-        Set-Option theme.mode $theme[1]
+        Set-Option theme.name "$($theme[0])-$($theme[1])"
         Invoke-Aio command settings.reload
         Shot "$($theme[0])-$($theme[1])-four"
     }

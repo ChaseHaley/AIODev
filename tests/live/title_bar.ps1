@@ -108,7 +108,7 @@ try {
     Shot leader-settings-175
     Invoke-Aio dpi 96
     $path = Join-Path $directory 'settings.ini'
-    [IO.File]::AppendAllText($path, "`ntheme.mode = light`n")
+    [IO.File]::AppendAllText($path, "`ntheme.name = studio-light`n")
     Invoke-Aio command settings.reload
     Shot light-title-bar
     Invoke-Aio command tab.close

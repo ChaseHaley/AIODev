@@ -300,10 +300,6 @@ when AIO_CONTROL {
 				"theme.name",
 				settings.value_text(&app.settings, settings.schema_find("theme.name")^),
 			},
-			{
-				"theme.mode",
-				settings.value_text(&app.settings, settings.schema_find("theme.mode")^),
-			},
 			{"terminal.foreground", settings.color_hex(app.settings.colors.foreground)},
 			{"terminal.background", settings.color_hex(app.settings.colors.background)},
 			{"ui.animations", fmt.tprintf("%t", app.animations)},

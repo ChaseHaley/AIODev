@@ -7,17 +7,17 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 
-THEME_FIXTURE :: `{"version":1,"id":"shared","base":"tide-dark","colors":{"tab_bar":"#123456","border":"#12345680","selection_foreground":""}}`
+THEME_FIXTURE :: `{"version":1,"id":"shared","base":"studio-dark","colors":{"tab_bar":"#123456","border":"#12345680","selection_foreground":""}}`
 
 @(test)
 theme_files_validate_and_inherit :: proc(t: ^testing.T) {
 	theme, issue := settings.theme_file_parse(THEME_FIXTURE)
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, theme.id, "shared")
-	resolved := settings.custom_theme_resolve(&theme)
+	resolved := settings.custom_theme_resolve(nil, &theme)
 	testing.expect_value(t, resolved.colors[.Tab_Bar], settings.Theme_Color{0x12, 0x34, 0x56, 255})
 	testing.expect_value(t, resolved.colors[.Border], settings.Theme_Color{0x12, 0x34, 0x56, 128})
-	base := settings.builtin_theme({.Tide, .Dark})
+	base := settings.theme_default()
 	testing.expect_value(t, resolved.colors[.Text], base.colors[.Text])
 	for invalid in ([?]string {
 		`{}`, `[]`, THEME_FIXTURE + `{}`, `{ "version": 1, "version": 1 }`,
@@ -25,12 +25,11 @@ theme_files_validate_and_inherit :: proc(t: ^testing.T) {
 		fixture_replace(THEME_FIXTURE, `"selection_foreground":""`, `"selection_foreground":"",`),
 		fixture_replace(THEME_FIXTURE, `"version":1`, `"version":2`),
 		fixture_replace(THEME_FIXTURE, `"shared"`, `"../escape"`),
-		fixture_replace(THEME_FIXTURE, `"shared"`, `"studio"`),
-		fixture_replace(THEME_FIXTURE, `"tide-dark"`, `"missing"`),
+		fixture_replace(THEME_FIXTURE, `"studio-dark"`, `"Bad Base"`),
 		fixture_replace(THEME_FIXTURE, `"tab_bar"`, `"typo"`),
 		fixture_replace(THEME_FIXTURE, `"#123456"`, `"#12345680"`),
 		fixture_replace(THEME_FIXTURE, `"#123456"`, `123`),
-		`{"version":1,"id":"shared","base":"tide-dark","colors":{},"extra":1}`,
+		`{"version":1,"id":"shared","colors":{},"extra":1}`,
 		`{"colors":[[[[[[]]]]]]}`,
 	}) {
 		_, problem := settings.theme_file_parse(invalid)
@@ -45,7 +44,7 @@ theme_export_roundtrips_every_color_and_preserves_files :: proc(t: ^testing.T) {
 	if temp_error != nil {return}
 	defer delete(directory)
 	defer os.remove_all(directory)
-	s, d, error := settings.parse("theme.name = tide\ntheme.mode = light\n")
+	s, d, error := settings.parse("theme.name = tide-light\n", themes_directory = THEMES)
 	testing.expect_value(t, error, nil)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
@@ -60,7 +59,7 @@ theme_export_roundtrips_every_color_and_preserves_files :: proc(t: ^testing.T) {
 	theme, issue := settings.theme_file_parse(string(data))
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, int(card(theme.overrides)), len(settings.THEME_TOKENS))
-	testing.expect_value(t, settings.custom_theme_resolve(&theme), s.active_theme)
+	testing.expect_value(t, settings.custom_theme_resolve(nil, &theme), s.active_theme)
 	loaded, diagnostics, load_error := settings.parse(
 		fmt.tprintf("theme.name = %s\n", theme.id), themes_directory = directory,
 	)
@@ -95,8 +94,8 @@ theme_discovery_isolates_bad_files_and_edits_shared_theme_as_copy :: proc(t: ^te
 	defer delete(created)
 	testing.expect_value(t, edit_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, issue, "")
-	testing.expect_value(t, created, "shared-copy")
-	copy, cd, ce := settings.parse(updated)
+	testing.expect_value(t, created, "shared-custom")
+	copy, cd, ce := settings.parse(updated, themes_directory = directory)
 	defer settings.destroy(&copy)
 	defer settings.diagnostics_destroy(&cd)
 	testing.expect_value(t, ce, nil)
@@ -107,12 +106,12 @@ theme_discovery_isolates_bad_files_and_edits_shared_theme_as_copy :: proc(t: ^te
 	testing.expect_value(t, re, nil)
 	testing.expect_value(t, string(data), THEME_FIXTURE)
 	local, ld, le := settings.parse(
-		"theme.name = shared\ntheme.custom.shared.base = ember-light\n", themes_directory = directory,
+		"theme.name = shared\ntheme.custom.shared.base = studio-dark\n", themes_directory = directory,
 	)
 	defer settings.destroy(&local)
 	defer settings.diagnostics_destroy(&ld)
 	testing.expect_value(t, le, nil)
-	testing.expect_value(t, local.active_theme, settings.builtin_theme({.Ember, .Light}))
+	testing.expect_value(t, local.active_theme, settings.theme_default())
 }
 
 @(test)

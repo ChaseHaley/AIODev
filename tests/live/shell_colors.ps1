@@ -33,7 +33,7 @@ Invoke-Aio launch --fresh
 try {
     $session = (Read-State)['session.id']
     Invoke-Aio run 'function prompt { "T> " }; Clear-Host; Write-Output THEME_READY'
-    Set-Option theme.mode light
+    Set-Option theme.name studio-light
     Set-Option colors.background '#0f1115'
     Set-Option colors.foreground '#d6dae0'
     Set-Option colors.palette.1 '#112233'
@@ -41,12 +41,12 @@ try {
     Invoke-Aio command settings.reload
     Invoke-Aio expect state terminal.background=#0f1115
     Invoke-Aio expect state terminal.foreground=#d6dae0
-    Invoke-Aio expect state theme.name=studio-custom
+    Invoke-Aio expect state theme.name=studio-light-custom
     Invoke-Aio expect state "session.id=$session"
     $saved = [IO.File]::ReadAllText($path)
     if ($saved -match '(?m)^colors\.') { throw 'Legacy color lines survived migration.' }
-    foreach ($entry in @('theme.custom.studio-custom.base = studio-light',
-                         'theme.custom.studio-custom.palette.1 = #112233')) {
+    foreach ($entry in @('theme.custom.studio-light-custom.base = studio-light',
+                         'theme.custom.studio-light-custom.palette.1 = #112233')) {
         if (-not $saved.Contains($entry)) { throw "Lost override: $entry" }
     }
     Write-Output 'PASS legacy color overrides migrate into a custom theme'
@@ -61,7 +61,7 @@ try {
     Invoke-Aio expect state "session.id=$session"
     Invoke-Aio expect text THEME_READY
     Write-Output 'PASS reset returns one color to the base theme'
-    Set-Option theme.name tide
+    Set-Option theme.name tide-dark
     Invoke-Aio command settings.reload
     Invoke-Aio command settings.open
     Invoke-Aio type colors.tab_bar
@@ -83,8 +83,8 @@ try {
     Invoke-Aio type '#203040'
     Invoke-Aio key Enter
     Invoke-Aio expect state settings.error=false
-    Invoke-Aio expect state theme.name=tide-custom
-    Shot builtin-edit-saves-theme
+    Invoke-Aio expect state theme.name=tide-dark-custom
+    Shot file-theme-edit-saves-theme
     Invoke-Aio command tab.close
     Invoke-Aio command tab.new
     Invoke-Aio wait text 'PS '
@@ -92,8 +92,8 @@ try {
     Copy-Item -LiteralPath $path -Destination $persisted
     Invoke-Aio stop
     Invoke-Aio launch --settings $persisted
-    Invoke-Aio expect state theme.name=tide-custom
-    Write-Output 'PASS editing a built-in color saves and persists a custom theme'
+    Invoke-Aio expect state theme.name=tide-dark-custom
+    Write-Output 'PASS editing a theme file color saves and persists a custom theme'
 } finally {
     & $ctl --name $name stop | Write-Output
 }

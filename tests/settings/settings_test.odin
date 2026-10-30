@@ -406,7 +406,7 @@ tab_orientation_defaults_to_horizontal_and_accepts_vertical :: proc(t: ^testing.
 	testing.expect_value(t, len(diagnostics), 0)
 
 	invalid, invalid_diagnostics, invalid_error := settings.parse(
-		"theme.mode = dark\ntabs.orientation = diagonal\n",
+		"pane.gap = 6\ntabs.orientation = diagonal\n",
 	)
 	if !testing.expect_value(t, invalid_error, nil) {return}
 	defer settings.destroy(&invalid)

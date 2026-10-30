@@ -3,15 +3,19 @@
   "title": "AIODev Theme",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "id", "base", "colors"],
+  "required": ["version", "id", "colors"],
   "properties": {
     "$schema": {"type": "string"},
     "version": {"const": 1},
-    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "maxLength": 32, "not": {"enum": ["studio","tide","ember","tokyonight-night","tokyonight-storm","tokyonight-moon"]}},
-    "name": {"type": "string"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "maxLength": 32},
+    "name": {"type": "string", "description": "Display name shown in the theme selector; any text."},
     "author": {"type": "string"},
     "description": {"type": "string"},
-    "base": {"enum": ["studio-dark","studio-light","tide-dark","tide-light","ember-dark","ember-light","tokyonight-night-dark","tokyonight-night-light","tokyonight-storm-dark","tokyonight-storm-light","tokyonight-moon-dark","tokyonight-moon-light"]},
+    "base": {
+      "type": "string",
+      "description": "ID of another theme that supplies the colors this file leaves out.",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
     "colors": {
       "type": "object",
       "additionalProperties": false,

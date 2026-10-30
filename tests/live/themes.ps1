@@ -49,11 +49,9 @@ try {
     Invoke-Aio run 'function prompt { "T> " }; Clear-Host; Write-Output THEME_READY'
     foreach ($theme in @('studio','tide','ember')) {
         foreach ($mode in @('dark','light')) {
-            Set-Option theme.name $theme
-            Set-Option theme.mode $mode
+            Set-Option theme.name "$theme-$mode"
             Invoke-Aio command settings.reload
-            Invoke-Aio expect state "theme.name=$theme"
-            Invoke-Aio expect state "theme.mode=$mode"
+            Invoke-Aio expect state "theme.name=$theme-$mode"
             Invoke-Aio expect state "session.id=$session"
             Invoke-Aio expect text THEME_READY
             Shot "$theme-$mode-pane"
@@ -68,7 +66,7 @@ try {
             Shot "$theme-$mode-find"
             Invoke-Aio key Esc
             Invoke-Aio key 'Ctrl+,'
-            Invoke-Aio type theme.mode
+            Invoke-Aio type theme.name
             Invoke-Aio key Tab
             Shot "$theme-$mode-settings"
             Invoke-Aio key Tab
@@ -77,8 +75,7 @@ try {
             Invoke-Aio command tab.close
         }
     }
-    Set-Option theme.name studio
-    Set-Option theme.mode dark
+    Set-Option theme.name studio-dark
     Set-Option theme.custom.ocean.base 'studio-dark'
     Set-Option theme.custom.ocean.background '#102030'
     Set-Option theme.custom.ocean.foreground '#fedcba'
@@ -91,7 +88,7 @@ try {
     Invoke-Aio key Ctrl+Shift+P
     Shot independent-interface-colors
     Invoke-Aio key Esc
-    Set-Option theme.name studio
+    Set-Option theme.name studio-dark
     Invoke-Aio command settings.reload
     foreach ($count in @(1,2,4)) {
         # The previous pass ends at the widest gap; splitting there can fall below the minimum
@@ -129,12 +126,11 @@ try {
     Invoke-Aio command tab.new
     Invoke-Aio expect state session.status=failed
     foreach ($mode in @('dark','light')) {
-        Set-Option theme.mode $mode
+        Set-Option theme.name "studio-$mode"
         Invoke-Aio command settings.reload
         Shot "failed-pane-$mode"
     }
-    Set-Option theme.name tide
-    Set-Option theme.mode dark
+    Set-Option theme.name tide-dark
     Invoke-Aio command settings.reload
     Shot failed-pane-tide
     Write-Output 'PASS six themes, terminal overrides, pane matrix, controls and failure surfaces'

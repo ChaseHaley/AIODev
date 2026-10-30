@@ -40,14 +40,16 @@ Editor_Row_Flag :: enum {
 	Listed,
 }
 
-// Strings and `choices` are owned by the editor. An empty optional color has no color at all. Profile
-// rows also own `profile`, `badge`, `detail` (extra search text) and `note` (an inline problem).
+// Strings, `choices` and `choice_labels` are owned by the editor. `choice_labels`, when present,
+// is what each choice displays; the choice itself is the saved value. An empty optional color has no
+// color at all. Profile rows also own `profile`, `badge`, `detail` (extra search text) and `note`
+// (an inline problem).
 Editor_Row :: struct {
 	key, title, description, value, default_value: string,
 	group:                                         int,
 	kind:                                          Row_Kind,
 	minimum, maximum:                              f64,
-	choices:                                       []string,
+	choices, choice_labels:                        []string,
 	profile, badge, detail, note:                  string,
 	flags:                                         bit_set[Editor_Row_Flag],
 }
@@ -216,6 +218,8 @@ editor_destroy :: proc(p: ^Editor) {
 		}) {delete(s)}
 		for choice in row.choices {delete(choice)}
 		delete(row.choices)
+		for label in row.choice_labels {delete(label)}
+		delete(row.choice_labels)
 	}
 	for group in p.groups {delete(group.title)}
 	delete(p.rows)
@@ -316,12 +320,14 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		group_index = len(p.groups) - 1
 	}
 	owned: [9]string
-	choices: []string
+	choices, labels: []string
 	success := false
 	defer if !success {
 		for s in owned {delete(s)}
 		for choice in choices {delete(choice)}
 		delete(choices)
+		for label in labels {delete(label)}
+		delete(labels)
 	}
 	for s, i in ([?]string {
 		row.key,
@@ -338,11 +344,16 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		choices = make([]string, len(row.choices)) or_return
 		for choice, i in row.choices {choices[i] = strings.clone(choice) or_return}
 	}
+	if len(row.choice_labels) > 0 {
+		assert(len(row.choice_labels) == len(row.choices))
+		labels = make([]string, len(row.choice_labels)) or_return
+		for label, i in row.choice_labels {labels[i] = strings.clone(label) or_return}
+	}
 	added := row
 	added.key, added.title, added.description, added.value, added.default_value =
 		owned[0], owned[1], owned[2], owned[3], owned[4]
 	added.profile, added.badge, added.detail, added.note = owned[5], owned[6], owned[7], owned[8]
-	added.choices = choices
+	added.choices, added.choice_labels = choices, labels
 	added.group = group_index
 	_, err := append(&p.rows, added)
 	success = err == nil
@@ -774,6 +785,14 @@ flip_toggle :: proc(p: ^Editor) -> Editor_Outcome {
 choice_index :: proc(row: ^Editor_Row, value: string) -> int {
 	for name, i in row.choices {if name == value {return i}}
 	return 0
+}
+
+// What a choice displays: its label, or the value itself.
+@(private)
+choice_label :: proc(row: ^Editor_Row, value: string) -> string {
+	if len(row.choice_labels) == 0 {return value}
+	for name, i in row.choices {if name == value && row.choice_labels[i] != "" {return row.choice_labels[i]}}
+	return value
 }
 
 @(private)
@@ -2375,7 +2394,7 @@ control_draw :: proc(
 		if r := draw_text(
 			&input_text,
 			list,
-			value,
+			choice_label(row, value),
 			parts.field.x + 10 * scale,
 			baseline,
 			theme.text,
@@ -2575,7 +2594,7 @@ popup_draw :: proc(
 			if result := draw_text(
 				text,
 				list,
-				name,
+				choice_label(row, name),
 				option.x + 12 * s,
 				option.y + (option.height - text.line_height) / 2 + text.ascent,
 				theme.text,
