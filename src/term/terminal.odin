@@ -43,6 +43,7 @@ Config :: struct {
 	geometry:                        Geometry,
 	scrollback_lines:                int,
 	colors:                          Colors,
+	ignore_program_status:           bool,
 }
 
 Wake :: struct {
@@ -119,6 +120,7 @@ Session :: struct {
 	program_status_changed:                                   bool,
 	program_statuses:                                         [PROGRAM_STATUS_LIMIT]Stored_Status,
 	program_status_count:                                     int,
+	program_status_enabled:                                   bool,
 	read_buffer:                                              [READ_CHUNK]u8,
 	// The mutex guards the capture: the reader thread appends, the main thread starts and stops.
 	recording:                                                Recording,
@@ -235,7 +237,7 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		{.Pwd_Changed, rawptr(title_changed)},
 		{.Reset, rawptr(title_changed)},
 		{.Render_Hold, rawptr(render_hold)},
-		{.Program_Status, rawptr(program_status)},
+		{.Program_Status, config.ignore_program_status ? nil : rawptr(program_status)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
 		{.Scrollback_Max_Lines, &scrollback},
 	}
@@ -245,6 +247,7 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 			return .Terminal_Failed
 		}
 	}
+	s.program_status_enabled = !config.ignore_program_status
 	if !apply_mode_defaults(s.terminal) {
 		return .Terminal_Failed
 	}

@@ -177,3 +177,63 @@ program_status_hierarchy_lifecycle_and_bound :: proc(t: ^testing.T) {
 		testing.expect_value(t, len(restarted), 0)
 	}
 }
+
+@(test)
+program_status_kind_progress_seen_and_switch :: proc(t: ^testing.T) {
+	wakes: Wakes
+	script :: "\"$e = [char]27; function Report($v) { [Console]::Write($e + ']7501;' + $v + [char]7) }; " +
+		"Report 'state=blocked:kind=auth:progress=40:app=deploy'; Report 'state=working:id=w:progress=101'; " +
+		"Report 'state=done:id=d'; Report 'state=error:id=x'; [Console]::WriteLine('SWITCH_ONE'); " +
+		"$null = [Console]::ReadLine(); Report 'state=done:id=dropped'; [Console]::WriteLine('SWITCH_TWO'); " +
+		"$null = [Console]::ReadLine(); Report 'state=done:id=back'; [Console]::WriteLine('SWITCH_THREE'); " +
+		"$null = [Console]::ReadLine()\""
+	s := start(t, POWERSHELL + script, &wakes)
+	if s == nil {
+		return
+	}
+	defer term.destroy(s)
+	if !await(t, s, shows, "SWITCH_ONE") {
+		return
+	}
+	one := term.program_status(s)
+	defer term.destroy_program_status(one)
+	testing.expect_value(t, len(one), 4)
+	if root := find_status(one, ""); testing.expect(t, root != nil) {
+		testing.expect_value(t, root.kind, term.Program_Status_Kind.Auth)
+		testing.expect_value(t, root.progress, i8(40))
+	}
+	if working := find_status(one, "w"); testing.expect(t, working != nil) {
+		testing.expect_value(t, working.progress, i8(-1))
+		testing.expect_value(t, working.kind, term.Program_Status_Kind.None)
+	}
+	testing.expect(t, !find_status(one, "d").seen)
+	_ = term.take_program_status_change(s)
+	term.program_status_acknowledge(s)
+	testing.expect(t, term.take_program_status_change(s))
+	term.program_status_acknowledge(s)
+	testing.expect(t, !term.take_program_status_change(s))
+	acknowledged := term.program_status(s)
+	defer term.destroy_program_status(acknowledged)
+	testing.expect(t, find_status(acknowledged, "d").seen && find_status(acknowledged, "x").seen)
+	testing.expect(t, !find_status(acknowledged, "").seen)
+	term.program_status_dismiss(s, "w")
+	term.program_status_dismiss(s, "x")
+	term.program_status_dismiss_finished(s)
+	remaining := term.program_status(s)
+	defer term.destroy_program_status(remaining)
+	testing.expect_value(t, len(remaining), 2)
+	testing.expect(t, find_status(remaining, "w") != nil && find_status(remaining, "d") == nil)
+	term.set_program_status_enabled(s, false)
+	cleared := term.program_status(s)
+	defer term.destroy_program_status(cleared)
+	testing.expect_value(t, len(cleared), 0)
+	two := status_step(t, s, "SWITCH_TWO")
+	defer term.destroy_program_status(two)
+	testing.expect_value(t, len(two), 0)
+	term.set_program_status_enabled(s, true)
+	three := status_step(t, s, "SWITCH_THREE")
+	defer term.destroy_program_status(three)
+	if testing.expect_value(t, len(three), 1) {
+		testing.expect_value(t, three[0].id, "back")
+	}
+}

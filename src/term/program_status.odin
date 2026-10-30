@@ -17,9 +17,20 @@ Program_Status_State :: enum i32 {
 	Error,
 }
 
+Program_Status_Kind :: enum i32 {
+	None,
+	Permission,
+	Question,
+	Auth,
+}
+
+// Progress is -1 when the program sent none. Seen marks a done or error record the user has looked at.
 Program_Status :: struct {
 	id, app, title, message: string,
 	state:                   Program_Status_State,
+	kind:                    Program_Status_Kind,
+	progress:                i8,
+	seen:                    bool,
 	updated_at:              time.Time,
 }
 
@@ -108,6 +119,8 @@ on_program_status :: proc "c" (
 	}
 	p := Program_Status {
 		state      = Program_Status_State(report.state),
+		kind       = Program_Status_Kind(report.kind),
+		progress   = report.progress,
 		updated_at = time.now(),
 	}
 	fields := [?]^string{&p.id, &p.app, &p.title, &p.message}
@@ -182,7 +195,8 @@ program_status :: proc(
 	}
 	for &p, i in result {
 		source := s.program_statuses[s.program_status_count - 1 - i].value
-		p.state, p.updated_at = source.state, source.updated_at
+		p.state, p.kind, p.progress = source.state, source.kind, source.progress
+		p.seen, p.updated_at = source.seen, source.updated_at
 		parts := [?]string{source.id, inherited_app(s, source), source.title, source.message}
 		fields := [?]^string{&p.id, &p.app, &p.title, &p.message}
 		for part, j in parts {
@@ -209,4 +223,62 @@ destroy_program_status :: proc(snapshot: []Program_Status, allocator := context.
 
 take_program_status_change :: proc(s: ^Session) -> bool {
 	return sync.atomic_exchange(&s.program_status_changed, false)
+}
+
+@(private)
+status_finished :: proc(state: Program_Status_State) -> bool {
+	return state == .Done || state == .Error
+}
+
+// Marks every done and error record seen, which is how the user acknowledges finished work.
+program_status_acknowledge :: proc(s: ^Session) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	for &record in s.program_statuses[:s.program_status_count] {
+		if status_finished(record.value.state) && !record.value.seen {
+			record.value.seen = true
+			sync.atomic_store(&s.program_status_changed, true)
+		}
+	}
+}
+
+// Removes done and error records, only the seen ones unless `all` is set.
+program_status_dismiss_finished :: proc(s: ^Session, all := false) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	for i := s.program_status_count - 1; i >= 0; i -= 1 {
+		value := s.program_statuses[i].value
+		if status_finished(value.state) && (all || value.seen) {
+			remove_program_status(s, i)
+		}
+	}
+}
+
+// Removes one done or error record. Running and blocked records belong to the program, not the user.
+program_status_dismiss :: proc(s: ^Session, id: string) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	for i in 0 ..< s.program_status_count {
+		value := s.program_statuses[i].value
+		if value.id == id && status_finished(value.state) {
+			remove_program_status(s, i)
+			return
+		}
+	}
+}
+
+// Disabling stops listening: reports are dropped, the support query goes unanswered so programs
+// see the protocol as unsupported, and every stored record is removed.
+set_program_status_enabled :: proc(s: ^Session, enabled: bool) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	if s.program_status_enabled == enabled {return}
+	callback: ghostty.Terminal_Program_Status_Fn = on_program_status
+	value := enabled ? rawptr(callback) : nil
+	if ghostty.terminal_set(s.terminal, .Program_Status, value) != .Success {
+		log.error("term: switching program status reports failed")
+		return
+	}
+	s.program_status_enabled = enabled
+	if !enabled {clear_program_status(s, false)}
 }
