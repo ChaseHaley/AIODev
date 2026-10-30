@@ -234,7 +234,7 @@ header_draw :: proc(
 		draw_rect(list, {rect = b, color = fill, radius = 6 * scale})
 		ink := hover > 0 ? theme.text : theme.muted
 		icon_draw(list, header_icon(Header_Action(i + 1), zoomed), b, ink, ICON_BUTTON, scale)
-		if result := hover_rim_draw(list, theme, b, 6 * scale, hover, scale, pointer);
+		if result := hover_rim_draw(list, theme, b, 6 * scale, hover, scale, pointer, compact = true);
 		   result != .None {return .Ok}
 	}
 	return .Ok
@@ -288,7 +288,7 @@ split_overlay_draw :: proc(
 		draw_rect(list, {rect = button, color = fill, radius = 6 * scale})
 		ink := hover > 0 ? theme.text : theme.muted
 		icon_draw(list, header_icon(Header_Action(i + 1), false), button, ink, ICON_BUTTON, scale)
-		if result := hover_rim_draw(list, theme, button, 6 * scale, hover, scale, pointer);
+		if result := hover_rim_draw(list, theme, button, 6 * scale, hover, scale, pointer, compact = true);
 		   result != .None {return .Ok}
 	}
 	return .Ok

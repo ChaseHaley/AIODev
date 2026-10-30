@@ -231,5 +231,5 @@ icon_button_draw :: proc(
 	fill.a *= press
 	draw_rect(list, {rect = b, color = fill, radius = radius * scale})
 	icon_draw(list, icon, b, hover > 0 || press > 0 ? theme.text : theme.muted, size, scale)
-	return hover_rim_draw(list, theme, b, radius * scale, hover, scale, pointer)
+	return hover_rim_draw(list, theme, b, radius * scale, hover, scale, pointer, compact = true)
 }

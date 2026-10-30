@@ -201,7 +201,7 @@ find_draw :: proc(
 		if enabled { ink = f.hover == action || active ? theme.text : theme.muted }
 		icon_draw(list, i == 0 ? .Arrow_Up : .Arrow_Down, area, ink, ICON_BUTTON, scale)
 		if enabled && f.hover == action {
-			if result := hover_rim_draw(list, theme, area, 5 * scale, 1, scale, pointer);
+			if result := hover_rim_draw(list, theme, area, 5 * scale, 1, scale, pointer, compact = true);
 			   result != .None { return .Ok }
 		}
 	}

@@ -37,6 +37,10 @@ hover_shadow_draw :: proc(
 // tint. A translucent dark fill can pass over one without hiding it.
 hover_fill_opaque :: proc(theme: Theme) -> bool {return theme.hover.a >= 1}
 
+// An icon button is too small for the light to diffuse across, so a compact one keeps this share
+// of the rim strength. The pointer still shows; the light stops ringing the whole button.
+COMPACT_GLOSS :: f32(0.3)
+
 // Draws the pointer-following rim light and the hairline that holds a light fill's shape.
 // Call after the control's content; the band lives on the rounded edge, so it never covers an
 // inset label or glyph. `pointer` is in window pixels.
@@ -47,6 +51,7 @@ hover_rim_draw :: proc(
 	radius, hover, scale: f32,
 	pointer: [2]f32,
 	edge := true,
+	compact := false,
 ) -> render.Error {
 	if hover <= 0 || rect.width <= 0 || rect.height <= 0 {return .None}
 	alpha := clamp(hover, 0, 1)
@@ -66,9 +71,11 @@ hover_rim_draw :: proc(
 			},
 		); result != .None {return result}
 	}
-	if theme.hover_gloss <= 0 {return .None}
+	gloss := theme.hover_gloss
+	if compact {gloss *= COMPACT_GLOSS}
+	if gloss <= 0 {return .None}
 	color := theme.rim
-	color.a = min(color.a * alpha * theme.hover_gloss, 1)
+	color.a = min(color.a * alpha * gloss, 1)
 	return render.push_rect(
 		list,
 		{
