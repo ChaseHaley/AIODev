@@ -44,6 +44,18 @@ function Open-Field([string] $Key, [switch] $NoFocus) {
     if (-not $NoFocus) { Invoke-Aio key Tab }
 }
 
+# Profile fields stay inside their collapsed table row: Enter expands it, and the directory is the
+# third inline field.
+function Open-Profile-Directory {
+    Close-Settings
+    Invoke-Aio key 'Ctrl+,'
+    Invoke-Aio type profile.default.directory
+    Assert-Value (Read-State)['settings.key'] 'profile.default' 'select default profile row'
+    Invoke-Aio key Enter
+    Invoke-Aio key Down Down Down
+    Assert-Value (Read-State)['settings.key'] 'profile.default.directory' 'select profile directory'
+}
+
 function Capture-Keys([string[]] $Chords) {
     if ((Read-State)['settings.popup'] -eq 'Shortcuts') { Invoke-Aio key Enter }
     Assert-Value (Read-State)['settings.capturing'] 'true' 'shortcut field records keys'
@@ -60,10 +72,14 @@ function Save-Value([string] $Value) {
 Invoke-Aio launch --fresh
 try {
     $originalSession = (Read-State)['session.id']
+    # aioctl writes legacy shell lines, so launch may show the one-time migration notice; a save
+    # must not replace or add a notice of its own.
+    $launchNotice = (Read-State)['notice.transient'] -replace ' \(\d+ms\)', ''
     Open-Field font.size
     Save-Value 14
     Assert-Value (Read-State)['settings.error'] 'false' 'valid font applied'
-    if ((Read-State).ContainsKey('notice.transient')) { throw 'An inline Settings save added a routine toast.' }
+    $saveNotice = (Read-State)['notice.transient'] -replace ' \(\d+ms\)', ''
+    if ($saveNotice -and $saveNotice -ne $launchNotice) { throw 'An inline Settings save added a routine toast.' }
     Write-Output 'PASS inline Settings save stays quiet'
     $saved = [IO.File]::ReadAllText($path)
     if ($saved -notmatch '(?m)^font.size = 14$') { throw 'Font size not persisted.' }
@@ -113,7 +129,8 @@ try {
     if ([IO.File]::ReadAllText($path) -notlike '*# external comment*future.key = retained*') {
         throw 'Unrelated text was lost.'
     }
-    Open-Field shell.directory
+    Open-Profile-Directory
+    Invoke-Aio key Tab
     Save-Value $repo
     if ((Read-State)['settings.message'] -notlike '*new or restarted shells*') { throw 'Missing restart guidance.' }
     Close-Settings
@@ -251,9 +268,7 @@ try {
     Copy-Item -LiteralPath $path -Destination $persisted
     Invoke-Aio stop
     Invoke-Aio launch --settings $persisted
-    Invoke-Aio key 'Ctrl+,'
-    Invoke-Aio type shell.directory
-    Invoke-Aio key Tab
+    Open-Profile-Directory
     if ((Read-State)['settings.value'] -notlike "*$repo*") { throw 'Settings did not survive relaunch.' }
     Write-Output 'PASS settings persist across process restart'
 } finally {

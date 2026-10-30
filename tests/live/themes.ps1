@@ -94,9 +94,15 @@ try {
     Set-Option theme.name studio
     Invoke-Aio command settings.reload
     foreach ($count in @(1,2,4)) {
+        # The previous pass ends at the widest gap; splitting there can fall below the minimum
+        # pane size, which the app rightly refuses.
+        Set-Option pane.gap 5
+        Invoke-Aio command settings.reload
         while ([int](Read-State)['panes.count'] -lt $count) {
-            if ([int](Read-State)['panes.count'] -eq 1) { Invoke-Aio command pane.split_right }
+            $before = [int](Read-State)['panes.count']
+            if ($before -eq 1) { Invoke-Aio command pane.split_right }
             else { Invoke-Aio command pane.split_down }
+            if ([int](Read-State)['panes.count'] -le $before) { throw "Split refused at $before panes." }
             Invoke-Aio wait text 'PS '
         }
         foreach ($gap in @(0,5,24)) {
@@ -118,9 +124,9 @@ try {
     }
     Set-Option pane.gap 5
     Set-Option pane.corner_radius 7
-    Set-Option shell.command 'aiodev_missing_visual_fixture.exe'
+    Set-Option profile.default.command '"aiodev_missing_visual_fixture.exe"'
     Invoke-Aio command settings.reload
-    Invoke-Aio command terminal.restart_shell
+    Invoke-Aio command tab.new
     Invoke-Aio expect state session.status=failed
     foreach ($mode in @('dark','light')) {
         Set-Option theme.mode $mode
