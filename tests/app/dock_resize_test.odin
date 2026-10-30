@@ -28,27 +28,33 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 				app.window_relayout(s, w)
 				panel := app.status_panel_rect(s, w)
 				content := app.window_content_area(s, w)
+				if side == .Left && orientation == .Vertical {
+					// The left panel shares the docked rail with the tab list instead of docking.
+					rail := app.rail_area(w)
+					testing.expect_value(t, panel.x, rail.x)
+					testing.expect_value(t, panel.width, rail.width)
+					testing.expect_value(t, panel.y + panel.height, rail.y + rail.height)
+					testing.expect_value(t, w.dock_left_width, 0)
+					testing.expect(t, w.status_rail_reserve > 0)
+					for d in w.dividers {testing.expect(t, d.node != app.ACTIVITY_DIVIDER)}
+					continue
+				}
 				if side == .Left {
 					testing.expect(t, panel.x + panel.width <= content.x)
-					if orientation == .Vertical {
-						testing.expect(t, panel.x + panel.width <= app.rail_area(w).x)
-					}
 				} else {testing.expect(t, panel.x >= content.x + content.width)}
 				for d in w.dividers {
 					if d.axis != .Vertical {continue}
 					x := side == .Left ? panel.x + panel.width : panel.x
 					y := d.rect.y + d.rect.height / 2
 					before := w.tree.nodes[d.node].(layout.Split).ratio
-					// In vertical mode the left dock meets the tab rail, not the pane divider.
-					junction := side == .Right || orientation == .Horizontal
-					pointer_expect_move(t, s, w, x, y, junction ? .Resize_All : .Resize_Horizontal)
+					pointer_expect_move(t, s, w, x, y, .Resize_All)
 					gesture_button(s, w, .Left, true, x, y)
-					testing.expect_value(t, w.dragging.count, junction ? 2 : 1)
+					testing.expect_value(t, w.dragging.count, 2)
 					dx := side == .Left ? 40 * scale : -40 * scale
 					rail_resize_drag_to(s, w, x + dx, y + 30 * scale)
 					after := app.status_panel_rect(s, w)
 					testing.expect_value(t, after.width - panel.width, 40 * scale)
-					if junction {testing.expect(t, w.tree.nodes[d.node].(layout.Split).ratio > before)}
+					testing.expect(t, w.tree.nodes[d.node].(layout.Split).ratio > before)
 					gesture_button(s, w, .Left, false, x + dx, y + 30 * scale)
 					testing.expect_value(t, w.dragging.count, 0)
 					break

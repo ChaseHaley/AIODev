@@ -109,6 +109,7 @@ rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
 	if !rail_rows_build(w, &w.rail_rows) {return {}, false}
 	area := rail_area(w)
+	area.height = max(0, area.height - w.status_rail_reserve)
 	layout = ui.rail_layout(area, w.scale, len(w.rail_rows), w.rail_scroll)
 	w.rail_scroll = layout.scroll
 	return layout, true
@@ -482,6 +483,31 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	return .Ok
 }
 
+Layout_Icon_Edge :: enum {
+	Top,
+	Left,
+	Right,
+}
+
+// Window layout buttons share one outline: a framed window with a line marking the docked edge.
+layout_icon_draw :: proc(app: ^App, w: ^Window, icon: render.Rect, edge: Layout_Icon_Edge) {
+	s, ink := w.scale, app.theme.text
+	ui.draw_rect(
+		&w.list,
+		{rect = {icon.x, icon.y + s, icon.width, icon.height - 2 * s}, color = ink, radius = 3 * s, stroke = s},
+	)
+	divider: render.Rect
+	switch edge {
+	case .Top:
+		divider = {icon.x + 3 * s, icon.y + 5 * s, icon.width - 6 * s, s}
+	case .Left:
+		divider = {icon.x + 5 * s, icon.y + 4 * s, s, icon.height - 8 * s}
+	case .Right:
+		divider = {icon.x + icon.width - 6 * s, icon.y + 4 * s, s, icon.height - 8 * s}
+	}
+	ui.draw_rect(&w.list, {rect = divider, color = ink})
+}
+
 tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	r := tab_orientation_button_rect(w)
 	if r.width < 24 * w.scale {return .Ok}
@@ -496,17 +522,7 @@ tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		ui.draw_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale})
 	}
 	icon := render.Rect{r.x + (r.width - 16 * w.scale) / 2, r.y + 8 * w.scale, 16 * w.scale, 16 * w.scale}
-	ink := app.theme.text
-	ui.draw_rect(
-		&w.list,
-		{rect = {icon.x, icon.y + w.scale, icon.width, icon.height - 2 * w.scale},
-			color = ink, radius = 3 * w.scale, stroke = w.scale},
-	)
-	divider := render.Rect{icon.x + 5 * w.scale, icon.y + 4 * w.scale, w.scale, icon.height - 8 * w.scale}
-	if w.tabs_horizontal {
-		divider = {icon.x + 3 * w.scale, icon.y + 5 * w.scale, icon.width - 6 * w.scale, w.scale}
-	}
-	ui.draw_rect(&w.list, {rect = divider, color = ink})
+	layout_icon_draw(app, w, icon, w.tabs_horizontal ? .Top : .Left)
 	if hover {
 		if result := ui.hover_rim_draw(
 			&w.list,

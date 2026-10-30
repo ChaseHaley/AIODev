@@ -45,6 +45,13 @@ try {
                     if ($side -ne 'right') { throw 'side toggle was not persisted' }
                 }
                 $panel = Rect $s 'activity.rect'
+                if ($orientation -eq 'vertical' -and $side -eq 'left') {
+                    # The left panel shares the rail with the tab list instead of docking.
+                    $rail = Rect $s 'rail.rect'
+                    Equal "$($panel[0]),$($panel[2])" "$($rail[0]),$($rail[2])" "$dpi DPI activity in rail"
+                    Aio capture --out "$data/$orientation-$side-$dpi.png" | Out-Null
+                    continue
+                }
                 $scale = [double]$s['window.scale']
                 $x = [int]$(if ($side -eq 'left') { $panel[0]+$panel[2] } else { $panel[0] })
                 $y = [int]($panel[1]+80*$scale)

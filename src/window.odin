@@ -114,6 +114,8 @@ Window :: struct {
 	taskbar_percent: int,
 	taskbar_workspace: ^Workspace,
 	status: Status_Overview,
+	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
+	status_rail_reserve: f32,
 }
 
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
@@ -348,6 +350,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
 	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
+	w.status_rail_reserve = status_panel_rail_height(app, w)
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
 		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
