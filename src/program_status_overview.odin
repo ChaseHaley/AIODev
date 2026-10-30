@@ -220,11 +220,7 @@ status_row_draw :: proc(
 	)
 	if show_dismiss {
 		close := status_dismiss_rect(w, r)
-		large := w.ui_text
-		ui.text_set_size(&large, w.ui_text.size_px * 1.35)
-		if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.muted); result != .Ok {
-			return result
-		}
+		ui.icon_draw(&w.list, .Close, close, app.theme.muted, ui.ICON_INDICATOR, s)
 	}
 	return .Ok
 }
@@ -651,15 +647,10 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme.faint,
 	); result != .Ok {return result}
 	button := status_panel_side_rect(app, w)
-	hover := w.status.panel_side_hover
-	pressed := ui.armed_down(w.status.panel_side_armed)
-	if hover || pressed {
-		fill := pressed ? app.theme.pressed : app.theme.hover
-		ui.draw_rect(&w.list, {rect = button, color = fill, radius = 6 * s})
-	}
-	icon := render.Rect{button.x + 4 * s, button.y + 4 * s, 16 * s, 16 * s}
-	layout_icon_draw(app, w, icon, app.settings.status.panel_side == .Left ? .Left : .Right)
-	if hover {_ = ui.hover_rim_draw(&w.list, app.theme, button, 6 * s, 1, s, w.pointer)}
+	hover := f32(int(w.status.panel_side_hover))
+	press := f32(int(ui.armed_down(w.status.panel_side_armed)))
+	icon: ui.Icon = app.settings.status.panel_side == .Left ? .Layout_Left : .Layout_Right
+	_ = ui.icon_button_draw(&w.list, app.theme, button, icon, hover, press, s, w.pointer)
 	list := status_panel_list(app, w, panel)
 	if render.push_layer(&w.list, list) != .None {return .Ok}
 	if len(items) == 0 {

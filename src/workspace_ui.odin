@@ -173,7 +173,8 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			r.y + (28 * w.scale - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			app.theme.text, label_width); result != .Ok { return result }
 	}
-	workspace_chevron_draw(&w.list, indicator, app.theme.text, w.scale)
+	chevron_ink := hover > 0 ? app.theme.text : app.theme.muted
+	ui.icon_draw(&w.list, .Chevron_Down, indicator, chevron_ink, ui.ICON_INDICATOR, w.scale)
 	if hover > 0 {
 		if result := ui.hover_rim_draw(
 			&w.list,

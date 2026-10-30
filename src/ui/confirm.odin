@@ -303,8 +303,7 @@ confirm_draw :: proc(
 		draw_rect(list, {rect = box, color = theme.border, radius = 3 * s})
 		if c.option {
 			draw_rect(list, {rect = box, color = theme.accent, radius = 3 * s})
-			if r := draw_glyph_centered(&small, list, '✓', box, theme.accent_text);
-			   r != .Ok {return r}
+			icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, s)
 		}
 		if c.focus == .Option {focus_ring_draw(list, box, theme, s)}
 		if r := draw_text(

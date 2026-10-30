@@ -188,21 +188,6 @@ OUTLINE_ROW_HEIGHT :: 30
 OUTLINE_WIDTH :: 220
 @(private)
 OUTLINE_MIN_PAGE :: 720
-@(private)
-ICON_UNDO :: ''
-@(private)
-ICON_CHEVRON_DOWN :: ''
-@(private)
-ICON_CLEAR :: ''
-@(private)
-ICON_CHEVRON_RIGHT :: '\uE76C'
-@(private)
-ICON_COPY :: '\uE8C8'
-@(private)
-ICON_TRASH :: '\uE74D'
-@(private)
-ICON_PLUS :: '\uE710'
-
 editor_destroy :: proc(p: ^Editor) {
 	for row in p.rows {
 		for s in ([?]string {
@@ -2061,14 +2046,14 @@ profile_radio_draw :: proc(
 @(private)
 profile_button_draw :: proc(
 	list: ^render.Draw_List,
-	text: ^Text,
 	rect: render.Rect,
-	icon: rune,
+	icon: Icon,
+	size: f32,
 	theme: Theme,
 	scale: f32,
 	focused, hovered, enabled: bool,
-) -> glyphs.Result {
-	if rect.width <= 0 {return .Ok}
+) {
+	if rect.width <= 0 {return}
 	if enabled && (hovered || focused) {
 		draw_rect(
 			list,
@@ -2078,41 +2063,7 @@ profile_button_draw :: proc(
 	color := enabled ? theme.muted : theme.faint
 	if hovered || focused {color = theme.text}
 	if focused {focus_ring_draw(list, rect, theme, scale)}
-	return draw_icon(text, list, icon, rect, color, 0.75)
-}
-
-// Six dots make the order grip without depending on an icon glyph.
-@(private)
-profile_grip_draw :: proc(
-	list: ^render.Draw_List,
-	rect: render.Rect,
-	theme: Theme,
-	scale: f32,
-	strong: bool,
-) {
-	if rect.width <= 0 {return}
-	dot := 2 * scale
-	gap := 4 * scale
-	left := rect.x + rect.width / 2 - (dot + gap) / 2
-	top := rect.y + rect.height / 2 - (dot * 2 + gap * 2) / 2
-	color := strong ? theme.muted : theme.faint
-	for row in 0 ..< 3 {
-		for column in 0 ..< 2 {
-			draw_rect(
-				list,
-				{
-					rect = {
-						left + f32(column) * (dot + gap),
-						top + f32(row) * (dot + gap),
-						dot,
-						dot,
-					},
-					color = color,
-					radius = dot / 2,
-				},
-			)
-		}
-	}
+	icon_draw(list, icon, rect, color, size, scale)
 }
 
 @(private)
@@ -2133,7 +2084,8 @@ profile_row_draw :: proc(
 	focused := selected && p.focus == .Control
 	hovered := index == p.hover_profile_item
 	strong := (selected || index == p.hover_item) && !(.Hidden in row.flags)
-	profile_grip_draw(list, table.handle, theme, scale, selected || index == p.hover_item)
+	grip_ink := selected || index == p.hover_item ? theme.muted : theme.faint
+	icon_draw(list, .Grip, table.handle, grip_ink, ICON_BUTTON, scale)
 	badge := render.Rect {table.icon.x, cy - 13 * scale, 26 * scale, 26 * scale}
 	profile_badge_draw(list, text, row.badge, badge, theme, scale, .Hidden in row.flags)
 	name_color := strong ? theme.text : theme.muted
@@ -2201,26 +2153,27 @@ profile_row_draw :: proc(
 	if table.expand.width > 0 {
 		controls := [?]struct {
 			rect: render.Rect,
-			icon: rune,
+			icon: Icon,
+			size: f32,
 			kind: Profile_Control,
 		} {
-			{table.expand, p.expanded == row.profile ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT, .Expand},
-			{table.duplicate, ICON_COPY, .Duplicate},
-			{table.remove, ICON_TRASH, .Remove},
+			{table.expand, p.expanded == row.profile ? .Chevron_Down : .Chevron_Right, ICON_INDICATOR, .Expand},
+			{table.duplicate, .Copy, ICON_BUTTON, .Duplicate},
+			{table.remove, .Trash, ICON_BUTTON, .Remove},
 		}
 		for control in controls {
 			enabled := !(control.kind == .Remove && row.profile == settings.PROFILE_DEFAULT_ID)
-			if result := profile_button_draw(
+			profile_button_draw(
 				list,
-				text,
 				control.rect,
 				control.icon,
+				control.size,
 				theme,
 				scale,
 				enabled && focused && p.profile_control == control.kind,
 				enabled && hovered && p.hover_profile_control == control.kind,
 				enabled,
-			); result != .Ok {return result}
+			)
 		}
 	}
 	if p.error_profile != "" && p.error_profile == row.profile {
@@ -2284,9 +2237,7 @@ profile_add_draw :: proc(
 		18 * scale,
 		18 * scale,
 	}
-	if result := draw_icon(text, list, ICON_PLUS, icon, theme.accent, 0.8); result != .Ok {
-		return result
-	}
+	icon_draw(list, .Add, icon, theme.muted, ICON_INDICATOR, scale)
 	color := selected ? theme.text : theme.muted
 	return draw_text(
 		&small,
@@ -2323,14 +2274,8 @@ profile_detected_header_draw :: proc(
 		},
 	)
 	chevron := profile_row_parts(.Detected_Header, parts.row, scale).chevron
-	if result := draw_icon(
-		text,
-		list,
-		p.detected_open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT,
-		chevron,
-		theme.muted,
-		0.75,
-	); result != .Ok {return result}
+	chevron_icon: Icon = p.detected_open ? .Chevron_Down : .Chevron_Right
+	icon_draw(list, chevron_icon, chevron, theme.muted, ICON_INDICATOR, scale)
 	small := text_styled(text, .Small)
 	if result := draw_text(
 		&small,
@@ -2469,7 +2414,8 @@ control_draw :: proc(
 			24 * scale,
 			parts.field.height,
 		}
-		return draw_icon(text, list, ICON_CHEVRON_DOWN, chevron, theme.muted, 0.8)
+		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
+		return .Ok
 	case .Integer, .Number:
 		number, ok := strconv.parse_f64(value)
 		if !ok {number, _ = strconv.parse_f64(row.value)}
@@ -2623,8 +2569,7 @@ popup_draw :: proc(
 					28 * s,
 					option.height,
 				}
-				if result := draw_icon(text, list, '', remove, theme.muted, 0.8);
-				   result != .Ok {return result}
+				icon_draw(list, .Close, remove, theme.muted, ICON_INDICATOR, s)
 			}
 		}
 		return .Ok
@@ -2769,7 +2714,8 @@ filter_draw :: proc(
 		if result := hover_rim_draw(list, theme, clear, 5 * s, 1, s, pointer);
 		   result != .None {return .Ok}
 	}
-	return draw_icon(text, list, ICON_CLEAR, clear, p.hover_clear ? theme.text : theme.muted, 0.7)
+	icon_draw(list, .Close, clear, p.hover_clear ? theme.text : theme.muted, ICON_INDICATOR, s)
+	return .Ok
 }
 
 @(private)
@@ -3073,8 +3019,7 @@ editor_draw :: proc(
 		} else {
 			icon_color.a *= 0.5
 		}
-		if result := draw_icon(text, list, ICON_UNDO, parts.reset, icon_color, 0.9);
-		   result != .Ok {return result}
+		icon_draw(list, .Undo, parts.reset, icon_color, ICON_BUTTON, s)
 	}
 	if p.drag == .Profile_Order {
 		y := profile_drop_y(p, l)

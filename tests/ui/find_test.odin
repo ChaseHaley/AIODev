@@ -87,17 +87,25 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 						// Count glyphs are emitted first and must include every visible character without an ellipsis.
 						visible := 0
 						for r in status { if r != ' ' { visible += 1 } }
-						if !testing.expect(t, len(list.glyphs) >= visible+2) { continue }
+						if !testing.expect(t, len(list.glyphs) >= visible) { continue }
 						for g in list.glyphs[:visible] {
 							testing.expect_value(t, g.color, theme.text)
 							testing.expect(t, g.rect.x >= l.status.x-2*scale &&
 								g.rect.x+g.rect.width <= l.status.x+l.status.width+2*scale)
 						}
-						for g in list.glyphs[visible:visible+2] { testing.expect_value(t, g.color, theme.text) }
+						arrows := 0
+						for r in list.rects {
+							if r.fill != render.RECT_FILL_SEGMENT { continue }
+							testing.expect_value(t, r.color, theme.muted)
+							arrows += 1
+						}
+						testing.expect_value(t, arrows, 6)
 						render.draw_list_reset(&list)
 						testing.expect_value(t, ui.find_draw(&f, &list, &text, theme, status, false,
 							width*scale, 400*scale, scale), glyphs.Result.Ok)
-						for g in list.glyphs[visible:visible+2] { testing.expect_value(t, g.color, theme.faint) }
+						for r in list.rects {
+							if r.fill == render.RECT_FILL_SEGMENT { testing.expect_value(t, r.color, theme.faint) }
+						}
 					}
 				}
 			}

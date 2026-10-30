@@ -229,7 +229,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme,
 		bar,
 		bar.count,
-		"+",
+		"",
 		false,
 		w.scale,
 		tab_control(w, bar.count).hover.value,
@@ -245,48 +245,18 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, chevron) != .None {return .Ok}
 	control := tab_control(w, bar.count + 1)
 	hover := control.hover.value
-	lift := ui.hover_lift_at(app.theme, hover, w.scale)
-	tile := render.Rect {
-		chevron.x + 2 * w.scale,
-		6 * w.scale - lift,
-		chevron.width - 4 * w.scale,
-		28 * w.scale,
-	}
-	if lift > 0 {
-		if result := ui.hover_shadow_draw(&w.list, app.theme, tile, 6 * w.scale, hover, w.scale);
-		   result != .None {return .Ok}
-	}
-	fill := app.theme.hover
-	fill.a *= hover
-	if render.push_rect(&w.list, {rect = tile, color = fill, radius = 6 * w.scale}) != .None {
-		return .Ok
-	}
-	fill = app.theme.pressed
-	fill.a *= control.press.value
-	if render.push_rect(&w.list, {rect = tile, color = fill, radius = 6 * w.scale}) != .None {
-		return .Ok
-	}
-	label := "▾"
-	label_width := ui.text_width(&w.ui_text, label)
-	if result := ui.draw_text(
-		&w.ui_text,
+	tile := render.Rect{chevron.x + 2 * w.scale, 6 * w.scale, chevron.width - 4 * w.scale, 28 * w.scale}
+	_ = ui.icon_button_draw(
 		&w.list,
-		label,
-		chevron.x + (chevron.width - label_width) / 2,
-		(bar.height - w.ui_text.line_height) / 2 + w.ui_text.ascent - lift,
-		app.theme.muted,
-	); result != .Ok {return result}
-	if hover > 0 {
-		if result := ui.hover_rim_draw(
-			&w.list,
-			app.theme,
-			tile,
-			6 * w.scale,
-			hover,
-			w.scale,
-			w.pointer,
-		); result != .None {return .Ok}
-	}
+		app.theme,
+		tile,
+		.Chevron_Down,
+		hover,
+		control.press.value,
+		w.scale,
+		w.pointer,
+		ui.ICON_INDICATOR,
+	)
 	return .Ok
 }
 

@@ -31,20 +31,20 @@ notice_style :: proc(
 	theme: Theme,
 ) -> (
 	label: string,
-	symbol: rune,
+	symbol: Icon,
 	color: render.Color,
 ) {
 	switch kind {
 	case .Info:
-		return "Info", 'i', theme.info
+		return "Info", .Info, theme.info
 	case .Warning:
-		return "Warning", '!', theme.warning
+		return "Warning", .Warning, theme.warning
 	case .Error:
-		return "Error", '×', theme.error
+		return "Error", .Error, theme.error
 	case .Success:
-		return "Success", '✓', theme.success
+		return "Success", .Success, theme.success
 	}
-	return "Info", 'i', theme.info
+	return "Info", .Info, theme.info
 }
 
 Notice :: struct {
@@ -183,10 +183,7 @@ notices_draw :: proc(
 			{rect = {box.x, box.y, 4 * scale, box.height}, color = accent, radius = 2 * scale},
 		)
 		badge := render.Rect{box.x + padding + 4 * scale, box.y + padding, 20 * scale, 20 * scale}
-		radius: f32 = item.kind == .Info || item.kind == .Error ? 10 : 3
-		draw_rect(list, {rect = badge, color = accent, radius = radius * scale, stroke = scale})
-		if result := draw_glyph_centered(text, list, symbol, badge, accent);
-		   result != .Ok {return result}
+		icon_draw(list, symbol, badge, accent, ICON_BUTTON, scale)
 		strong := text_styled(text, .Strong)
 		x := box.x + padding + 32 * scale
 		if result := draw_text(

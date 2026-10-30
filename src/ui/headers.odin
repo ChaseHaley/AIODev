@@ -4,8 +4,6 @@ import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: f32(28)
-@(private)
-GRIP_INSET :: f32(12)
 Header_Action :: enum {
 	None,
 	Split_Right,
@@ -109,70 +107,16 @@ shell_badge_draw :: proc(
 }
 
 @(private)
-header_icon_draw :: proc(
-	list: ^render.Draw_List,
-	text: ^Text,
-	area: render.Rect,
-	action: Header_Action,
-	color: render.Color,
-	scale: f32,
-	zoomed: bool,
-) -> glyphs.Result {
-	x, y := area.x + 5 * scale, area.y + 5 * scale
-	stroke := 1.5 * scale
-	switch action {
-	case .Split_Right, .Split_Down:
-		draw_rect(
-			list,
-			{
-				rect = {x, y, 12 * scale, 12 * scale},
-				color = color,
-				radius = scale,
-				stroke = stroke,
-			},
-		)
-		line: render.Rect
-		if action == .Split_Right {
-			line = {x + 6 * scale, y, stroke, 12 * scale}
-		} else {
-			line = {x, y + 6 * scale, 12 * scale, stroke}
-		}
-		draw_rect(list, {rect = line, color = color})
+header_icon :: proc(action: Header_Action, zoomed: bool) -> Icon {
+	#partial switch action {
+	case .Split_Down:
+		return .Split_Down
 	case .Zoom:
-		if zoomed {
-			draw_rect(
-				list,
-				{rect = {x + 3 * scale, y, 9 * scale, 9 * scale}, color = color, stroke = stroke},
-			)
-			draw_rect(
-				list,
-				{rect = {x, y + 3 * scale, 9 * scale, 9 * scale}, color = color, stroke = stroke},
-			)
-			return .Ok
-		}
-		for ox in ([?]f32{0, 8}) {
-			for oy in ([?]f32{0, 8}) {
-				// The second grip in each direction sits 12 points in, with its stroke
-				// pulled back so both grips read as one pair.
-				inset_y := oy == 0 ? 0 : GRIP_INSET * scale - stroke
-				inset_x := ox == 0 ? 0 : GRIP_INSET * scale - stroke
-				draw_rect(
-					list,
-					{rect = {x + ox * scale, y + inset_y, 4 * scale, stroke}, color = color},
-				)
-				draw_rect(
-					list,
-					{rect = {x + inset_x, y + oy * scale, stroke, 4 * scale}, color = color},
-				)
-			}
-		}
+		return zoomed ? .Restore : .Zoom
 	case .Close:
-		large := text^
-		text_set_size(&large, text.size_px * 1.5)
-		return draw_glyph_centered(&large, list, '×', area, color)
-	case .None, .Badge:
+		return .Close
 	}
-	return .Ok
+	return .Split_Right
 }
 
 header_draw :: proc(
@@ -209,15 +153,8 @@ header_draw :: proc(
 		   result != .Ok {return result}
 	}
 	if badge_hovered {
-		small := text_styled(text, .Small)
-		if result := draw_text(
-			&small,
-			list,
-			"▾",
-			l.badge.x + l.badge.width + 2 * scale,
-			l.badge.y + (l.badge.height - small.line_height) / 2 + small.ascent,
-			theme.muted,
-		); result != .Ok {return result}
+		chevron := render.Rect{l.badge.x + l.badge.width, l.badge.y, ICON_INDICATOR * scale, l.badge.height}
+		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
 		// The badge carries its own tinted keycap, so it takes the light but no paper hairline.
 		if result := hover_rim_draw(list, theme, l.badge, 4 * scale, 1, scale, pointer, false);
 		   result != .None {return .Ok}
@@ -295,15 +232,8 @@ header_draw :: proc(
 		fill = i == 3 ? theme.error : theme.pressed
 		fill.a *= controls[i].press.value * (i == 3 ? 0.14 : 1)
 		draw_rect(list, {rect = b, color = fill, radius = 6 * scale})
-		if result := header_icon_draw(
-			list,
-			text,
-			b,
-			Header_Action(i + 1),
-			hover > 0 ? theme.text : theme.muted,
-			scale,
-			zoomed,
-		); result != .Ok {return result}
+		ink := hover > 0 ? theme.text : theme.muted
+		icon_draw(list, header_icon(Header_Action(i + 1), zoomed), b, ink, ICON_BUTTON, scale)
 		if result := hover_rim_draw(list, theme, b, 6 * scale, hover, scale, pointer);
 		   result != .None {return .Ok}
 	}
@@ -341,8 +271,7 @@ split_overlay_draw :: proc(
 	if render.push_layer(list, l.panel, 8 * scale) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = theme.surface, radius = 8 * scale})
 	draw_rect(list, {rect = l.panel, color = theme.border, radius = 8 * scale, stroke = scale})
-	if result := draw_glyph_centered(text, list, '⠿', l.title, theme.muted);
-	   result != .Ok {return result}
+	icon_draw(list, .Grip, l.title, theme.muted, ICON_BUTTON, scale)
 	buttons := l.buttons
 	for &button, i in buttons[:2] {
 		hover := controls[i].hover.value
@@ -357,15 +286,8 @@ split_overlay_draw :: proc(
 		fill = theme.pressed
 		fill.a *= controls[i].press.value
 		draw_rect(list, {rect = button, color = fill, radius = 6 * scale})
-		if result := header_icon_draw(
-			list,
-			text,
-			button,
-			Header_Action(i + 1),
-			hover > 0 ? theme.text : theme.muted,
-			scale,
-			false,
-		); result != .Ok {return result}
+		ink := hover > 0 ? theme.text : theme.muted
+		icon_draw(list, header_icon(Header_Action(i + 1), false), button, ink, ICON_BUTTON, scale)
 		if result := hover_rim_draw(list, theme, button, 6 * scale, hover, scale, pointer);
 		   result != .None {return .Ok}
 	}

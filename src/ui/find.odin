@@ -197,8 +197,9 @@ find_draw :: proc(
 				radius = 5 * scale})
 		}
 		if enabled && active { focus_ring_draw(list, area, theme, scale) }
-		if result := draw_glyph_centered(text, list, i == 0 ? '↑' : '↓', area,
-			enabled ? theme.text : theme.faint); result != .Ok { return result }
+		ink := theme.faint
+		if enabled { ink = f.hover == action || active ? theme.text : theme.muted }
+		icon_draw(list, i == 0 ? .Arrow_Up : .Arrow_Down, area, ink, ICON_BUTTON, scale)
 		if enabled && f.hover == action {
 			if result := hover_rim_draw(list, theme, area, 5 * scale, 1, scale, pointer);
 			   result != .None { return .Ok }
