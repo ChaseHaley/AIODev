@@ -14,6 +14,8 @@ group_title :: proc(key: string) -> string {
 		return "Tabs"
 	case "tabs":
 		return "Tabs"
+	case "status":
+		return "Program Status"
 	case "shell":
 		return "Shell"
 	case "input":
