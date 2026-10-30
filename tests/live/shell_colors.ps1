@@ -55,10 +55,11 @@ try {
     Invoke-Aio expect state settings.key=colors.background
     Invoke-Aio key Ctrl+R
     Invoke-Aio expect state settings.error=false
+    Shot custom-theme-reset-color
+    Invoke-Aio command tab.close
     Invoke-Aio expect state terminal.background=#ffffff
     Invoke-Aio expect state "session.id=$session"
     Invoke-Aio expect text THEME_READY
-    Shot custom-theme-reset-color
     Write-Output 'PASS reset returns one color to the base theme'
     Set-Option theme.name tide
     Invoke-Aio command settings.reload
