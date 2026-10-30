@@ -106,6 +106,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 	@(static, rodata)
 	schema := settings.SCHEMA
 	for &entry in schema {
+		if entry.key == settings.PADDING_GROUPS_KEY {continue}
 		row := ui.Editor_Row {
 			key           = entry.key,
 			title         = entry.title,
@@ -139,6 +140,10 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 			notify(app, .Error, "Could not allocate settings editor.")
 			return false
 		}
+	}
+	if ui.editor_process_load(p, s.process.padding_groups, s.window.padding) != nil {
+		notify(app, .Error, "Could not build the program groups.")
+		return false
 	}
 	// Profiles are one dense table. The model rows come from the resolved profile list; each becomes
 	// a table row plus its inline editor rows, which stay hidden until the row expands.
@@ -526,6 +531,8 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p := &w.editor
 	if outcome == .None {return}
 	w.dirty = true
+	if outcome == .Process_Remove {editor_process_remove_ask(app, w); return}
+	if outcome == .Process_Save {editor_process_save(app, w); return}
 	if outcome == .Profile_Action {
 		editor_profile_action(app, w)
 		return
@@ -533,6 +540,12 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if outcome != .Save && outcome != .Reset {return}
 	row := ui.editor_row(p)
 	if row == nil {return}
+	if row.process_field != .None {
+		if row.process_field == .Add_Group || row.process_field == .Add_Program {
+			_ = ui.editor_process_activate(p, row)
+		} else {editor_process_save(app, w)}
+		return
+	}
 	if row.key == "profiles.add" {
 		editor_profile_mutate(app, w, {kind = .Add})
 		return

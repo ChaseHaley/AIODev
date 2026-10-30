@@ -23,7 +23,6 @@ PADDING_NAME_FORBIDDEN :: ":/\\*?\""
 
 // One `group:padding:process,process` entry. `valid` carries the parser's verdict so validation
 // rejects the file value and lookup skips only the group it cannot trust.
-@(private)
 Padding_Group :: struct {
 	name:      string,
 	padding:   int,
@@ -33,19 +32,18 @@ Padding_Group :: struct {
 
 // A cursor over the `;`-separated groups. A blank value has no groups; anywhere else an empty item
 // is malformed, which makes a trailing or doubled separator follow the same rule as an empty name.
-@(private)
 Padding_Groups :: struct {
 	rest: string,
 	done: bool,
 }
 
-@(private, require_results)
+@(require_results)
 padding_groups_scan :: proc(text: string) -> Padding_Groups {
 	if strings.trim_space(text) == "" {return {done = true}}
 	return {rest = text}
 }
 
-@(private, require_results)
+@(require_results)
 padding_groups_next :: proc(groups: ^Padding_Groups) -> (group: Padding_Group, more: bool) {
 	if groups.done {return {}, false}
 	text := groups.rest
@@ -59,13 +57,12 @@ padding_groups_next :: proc(groups: ^Padding_Groups) -> (group: Padding_Group, m
 	return group, true
 }
 
-@(private)
 Padding_Processes :: struct {
 	rest: string,
 	done: bool,
 }
 
-@(private, require_results)
+@(require_results)
 padding_processes_next :: proc(names: ^Padding_Processes) -> (name: string, more: bool) {
 	if names.done {return "", false}
 	name = names.rest
@@ -128,7 +125,7 @@ padding_groups_rules :: proc(buffer: []u8) -> string {
 
 // Padding-group names and shell command lines both identify an executable by a case-insensitive name
 // without a trailing ".exe".
-@(private, require_results)
+@(require_results)
 executable_stem :: proc(name: string) -> string {
 	text := strings.trim_space(name)
 	if len(text) > 4 && strings.equal_fold(text[len(text) - 4:], ".exe") {

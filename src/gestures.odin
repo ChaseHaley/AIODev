@@ -38,6 +38,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	link_hover_clear(w)
 	if palette_active(app, w) {ui.palette_input_release(&app.palette)}
 	ui.editor_hover_clear(&w.editor)
+	if w.editor.drag == .Process_Order {w.editor.drag = .None}
 	ui.editor_release(&w.editor)
 	leader_cancel(w)
 	w.dirty = true

@@ -26,6 +26,7 @@ Row_Kind :: enum {
 	Action,
 	// One row per profile, its inline editor, the add row and the collapsed detected section.
 	Profile,
+	Process_Group,
 	Profile_Add,
 	Profile_Icon,
 	Detected_Header,
@@ -52,6 +53,8 @@ Editor_Row :: struct {
 	choices, choice_labels:                        []string,
 	profile, badge, detail, note:                  string,
 	flags:                                         bit_set[Editor_Row_Flag],
+	process: int,
+	process_field: Process_Field,
 }
 
 Editor_Group :: struct {
@@ -73,6 +76,7 @@ Editor_Drag :: enum {
 	Wheel,
 	Ramp,
 	Profile_Order,
+	Process_Order,
 }
 
 // Keyboard focus: the search field, the selected row's control, or its key-position switch.
@@ -114,6 +118,10 @@ Profile_Action :: enum {
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
 // in `value` until it is saved.
 Editor :: struct {
+	process_expanded, process_next, process_next_program, process_fallback: int,
+	process_remove, process_drag_id, process_drag_from: int,
+	process_source: string,
+	process_dirty: bool,
 	open, capturing, leader_pending, hover_clear:                      bool,
 	// Captured shortcuts name physical key positions (Physical+) instead of layout characters.
 	physical:                                                          bool,
@@ -155,10 +163,13 @@ Editor_Outcome :: enum {
 	Save,
 	Reset,
 	Profile_Action,
+	Process_Save,
+	Process_Remove,
 }
 
 // Table state a settings reload keeps: expansion, an open removal question and the detected section.
 Editor_View :: struct {
+	process_expanded: int,
 	expanded, remove_confirm: string,
 	detected_open:            bool,
 }
@@ -203,30 +214,33 @@ ICON_TRASH :: '\uE74D'
 @(private)
 ICON_PLUS :: '\uE710'
 
+editor_row_destroy :: proc(row: ^Editor_Row) {
+	for s in ([?]string {
+		row.key,
+		row.title,
+		row.description,
+		row.value,
+		row.default_value,
+		row.profile,
+		row.badge,
+		row.detail,
+		row.note,
+	}) {delete(s)}
+	for choice in row.choices {delete(choice)}
+	delete(row.choices)
+	for label in row.choice_labels {delete(label)}
+	delete(row.choice_labels)
+}
+
 editor_destroy :: proc(p: ^Editor) {
-	for row in p.rows {
-		for s in ([?]string {
-			row.key,
-			row.title,
-			row.description,
-			row.value,
-			row.default_value,
-			row.profile,
-			row.badge,
-			row.detail,
-			row.note,
-		}) {delete(s)}
-		for choice in row.choices {delete(choice)}
-		delete(row.choices)
-		for label in row.choice_labels {delete(label)}
-		delete(row.choice_labels)
-	}
+	for &row in p.rows {editor_row_destroy(&row)}
 	for group in p.groups {delete(group.title)}
 	delete(p.rows)
 	delete(p.groups)
 	delete(p.items)
 	delete(p.filter.bytes)
 	delete(p.value.bytes)
+	delete(p.process_source)
 	delete(p.source)
 	delete(p.message)
 	delete(p.expanded)
@@ -244,6 +258,7 @@ editor_destroy :: proc(p: ^Editor) {
 // after editor_restore, which moves the strings into the rebuilt page.
 @(require_results)
 editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime.Allocator_Error) {
+	view.process_expanded = p.process_expanded
 	view.detected_open = p.detected_open
 	view.expanded = strings.clone(p.expanded) or_return
 	view.remove_confirm = strings.clone(p.remove_confirm) or_return
@@ -259,6 +274,7 @@ editor_view_destroy :: proc(view: ^Editor_View) {
 // Restores a previous view, dropping a profile that no longer exists. A reload after a successful
 // save must land back on the same expanded row.
 editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
+	p.process_expanded = view.process_expanded
 	p.detected_open = view.detected_open
 	p.expanded, view.expanded = view.expanded, ""
 	p.remove_confirm, view.remove_confirm = view.remove_confirm, ""
@@ -421,6 +437,7 @@ stop_editing :: proc(p: ^Editor) {
 }
 
 editor_select :: proc(p: ^Editor, index: int) {
+	if !editor_process_capture(p) {return}
 	if p.error || p.capturing || p.popup == .Shortcuts {editor_message(p, "", false)}
 	if p.error_text != "" {
 		editor_message(p, "", false)
@@ -456,6 +473,18 @@ editor_select_key :: proc(p: ^Editor, key: string) -> bool {
 // Selects a settings key, opening the profile row that owns it first. A palette jump or a reveal
 // must be able to land on a field the collapsed table is not showing.
 editor_reveal :: proc(p: ^Editor, key: string) -> bool {
+	target := key
+	if key == settings.PADDING_GROUPS_KEY {
+		target = process_key(0, ".add")
+		for row in p.rows {if row.process_field == .Group {target = row.key; break}}
+	}
+	for row in p.rows {
+		if row.key == target && row.process > 0 && row.process_field != .Group {
+			p.process_expanded = row.process
+			editor_rebuild(p)
+			break
+		}
+	}
 	for row in p.rows {
 		if row.key != key {continue}
 		field := row.kind != .Profile && row.kind != .Detected
@@ -470,7 +499,7 @@ editor_reveal :: proc(p: ^Editor, key: string) -> bool {
 		}
 		break
 	}
-	return editor_select_key(p, key)
+	return editor_select_key(p, target)
 }
 
 // Each query word matches as written or, for plurals such as "panes", without its final s.
@@ -498,6 +527,9 @@ row_matches :: proc(words: []string, haystack: string, fuzzy: bool = false) -> b
 // Whether a row belongs to the page in the current expansion state, before search ranks it.
 @(private)
 row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
+	if row.process_field != .None {
+		return row.process == 0 || row.process_field == .Group || row.process == p.process_expanded
+	}
 	#partial switch row.kind {
 	case .Profile, .Profile_Add, .Detected_Header:
 		return true
@@ -962,6 +994,8 @@ profile_control_step :: proc(p: ^Editor, row: ^Editor_Row, step: int) {
 // settings write the page owner performs; Expand stays inside the editor.
 @(private)
 profile_activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
+	if row.process_field == .Group || row.process_field == .Add_Group ||
+	   row.process_field == .Add_Program {return editor_process_activate(p, row)}
 	switch p.profile_control {
 	case .Radio:
 		editor_action_set(p, .Default, row.profile, "")
@@ -1007,6 +1041,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Text, .Integer, .Number, .Profile_Icon:
 		p.focus = .Control
 		field_select_all(&p.value)
+	case .Process_Group:
 	case .Profile:
 		if p.focus == .Control {return profile_activate(p, row)}
 		editor_profile_toggle(p, row.profile)
@@ -1075,6 +1110,7 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	if p.capturing && row != nil {return capture_key(p, row, raw)}
 	e := raw
 	e.key = commands.logical_key(raw.key, raw.unshifted)
+	if result, handled := editor_process_key(p, row, e); handled {return result}
 	if p.popup != .None && row != nil {
 		if outcome, handled := popup_key(p, row, e); handled {return outcome}
 	}
@@ -1358,6 +1394,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	parts.text_right = right
 	if item.row < 0 {return parts}
 	row := p.rows[item.row]
+	if row.process_field != .None {return editor_process_field_parts(&row, parts, s)}
 	field := proc(right, cy, width, s: f32) -> render.Rect {return {
 			right - width * s,
 			cy - 15 * s,
@@ -1402,7 +1439,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 				parts.positions_label_below = true
 			}
 		}
-	case .Profile, .Profile_Add, .Detected_Header, .Detected:
+	case .Process_Group, .Profile, .Profile_Add, .Detected_Header, .Detected:
 		parts.reset = {}
 	}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
@@ -1600,6 +1637,9 @@ editor_press :: proc(
 	if index != p.selected {editor_select(p, index)}
 	row := editor_row(p)
 	parts := editor_row_parts(p, l, index)
+	if row.process_field != .None {
+		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {return result}
+	}
 	if row.kind == .Profile || row.kind == .Detected || row.kind == .Profile_Add ||
 	   row.kind == .Detected_Header {
 		table := profile_row_parts(row.kind, parts.row, s)
@@ -1735,6 +1775,8 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 		)
 	case .Slider:
 		slide(p, row, editor_row_parts(p, l, p.selected).slider, x)
+	case .Process_Order:
+		return editor_process_drag(p, l, x, y)
 	case .Profile_Order:
 		index := clamp(p.scroll + int((y - l.list.y) / l.row_height), 0, len(p.items))
 		slot := 0
@@ -1774,6 +1816,14 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	drag := p.drag
 	p.drag = .None
 	p.filter.dragging, p.value.dragging = false, false
+	if drag == .Process_Order {
+		if p.drag_target < 0 {return .Changed}
+		slot := p.drag_target
+		if slot > p.process_drag_from {slot -= 1}
+		if slot == p.process_drag_from {return .Changed}
+		editor_process_move(p, p.process_drag_id, slot)
+		return .Process_Save
+	}
 	if drag == .Profile_Order {
 		defer {
 			delete(p.drag_id)
@@ -1918,6 +1968,11 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 	if index >= len(p.items) || p.items[index].row < 0 {return .Arrow}
 	row := &p.rows[p.items[index].row]
 	parts := editor_row_parts(p, l, index)
+	if row.process_field == .Group {
+		cells := editor_process_parts(parts.row, s)
+		if contains(cells.handle, x, y) {return editor_process_orderable(p) ? .Resize_All : .Arrow}
+		return .Hand
+	}
 	#partial switch row.kind {
 	case .Profile, .Detected_Header, .Profile_Add:
 		return .Hand
@@ -2502,7 +2557,7 @@ control_draw :: proc(
 	case .Text, .Shortcut:
 	case .Profile_Icon:
 		profile_badge_draw(list, text, row.badge, parts.swatch, theme, scale, false)
-	case .Profile, .Profile_Add, .Detected_Header, .Detected:
+	case .Process_Group, .Profile, .Profile_Add, .Detected_Header, .Detected:
 		return .Ok
 	}
 	if selected {
@@ -2955,6 +3010,11 @@ editor_draw :: proc(
 			continue
 		}
 		row := &p.rows[item.row]
+		if row.process_field != .None {
+			if result := editor_process_draw(p, row, parts, selected, list, text, theme, s);
+			   result != .Ok {return result}
+			continue
+		}
 		if row.kind == .Profile {
 			if result := profile_row_draw(p, row, parts, index, selected, list, text, theme, s);
 			   result != .Ok {
@@ -3076,6 +3136,7 @@ editor_draw :: proc(
 		if result := draw_icon(text, list, ICON_UNDO, parts.reset, icon_color, 0.9);
 		   result != .Ok {return result}
 	}
+	if p.drag == .Process_Order {editor_process_drag_draw(p, l, list, theme)}
 	if p.drag == .Profile_Order {
 		y := profile_drop_y(p, l)
 		draw_rect(

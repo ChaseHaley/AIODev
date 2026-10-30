@@ -48,13 +48,21 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	replacement.expanded, view.expanded = view.expanded, ""
 	replacement.remove_confirm, view.remove_confirm = view.remove_confirm, ""
 	replacement.detected_open = view.detected_open
+	replacement.process_expanded = view.process_expanded
 	if !settings_load_source(app, &replacement, revision) {return}
+	if p.process_dirty {
+		if preserve_draft && p.process_source != replacement.process_source {return}
+		if ui.editor_process_copy_draft(p, &replacement) != nil {
+			notify(app, .Error, "Could not preserve program drafts.")
+			return
+		}
+	}
 	ui.field_set(&replacement.filter, ui.field_string(&p.filter))
 	ui.editor_filter(&replacement)
 	row := ui.editor_row(p)
 	selected := row != nil && ui.editor_reveal(&replacement, row.key)
 	draft := preserve_draft && row != nil &&
-	         (ui.field_string(&p.value) != row.value || p.capturing)
+	         (ui.field_string(&p.value) != row.value || p.capturing || p.process_dirty)
 	// Removing a field being edited is a semantic conflict. Keep that page and its old source
 	// intact, so saving cannot silently recreate a removed profile or discard its draft.
 	if draft && !selected {return}

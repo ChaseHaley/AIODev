@@ -378,6 +378,13 @@ when AIO_CONTROL {
 				{"settings.title", editor_title},
 				{"settings.message", w.editor.message},
 				{"settings.error", fmt.tprintf("%t", w.editor.error)},
+				{"settings.process.rows", verify_process_rows(w, page)},
+				{"settings.process.expanded", fmt.tprintf("%d", w.editor.process_expanded)},
+				{"settings.process.dragging", fmt.tprintf("%t", w.editor.drag == .Process_Order)},
+				{"settings.process.drag_target", fmt.tprintf("%d", w.editor.drag_target)},
+				{"settings.process.value", app.settings.process.padding_groups},
+				{"settings.process.confirming", fmt.tprintf("%t", w.process_remove_confirm.open)},
+				{"settings.process.confirm_option", fmt.tprintf("%t", w.process_remove_confirm.show_option)},
 				{"settings.profile.expanded", w.editor.expanded},
 				{"settings.profile.default", app.settings.profiles.default_id},
 				{"settings.profile.detected_open", fmt.tprintf("%t", w.editor.detected_open)},
@@ -838,6 +845,22 @@ when AIO_CONTROL {
 
 	verify_workspace_rect :: proc(r: render.Rect) -> string {
 		return fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)
+	}
+
+	verify_process_rows :: proc(w: ^Window, page: ui.Editor_Layout) -> string {
+		builder := strings.builder_make(context.temp_allocator)
+		first := true
+		for item, index in w.editor.items {
+			if item.row < 0 {continue}
+			row := &w.editor.rows[item.row]
+			if row.process_field == .None {continue}
+			r := ui.editor_row_parts(&w.editor, page, index).row
+			if !first {strings.write_byte(&builder, ';')}
+			first = false
+			strings.write_string(&builder,
+				fmt.tprintf("%s@%g,%g,%g,%g", row.key, r.x, r.y, r.width, r.height))
+		}
+		return strings.to_string(builder)
 	}
 
 	// One table row per item as id@x,y,w,h, so a live journey can aim a drag at the grip.

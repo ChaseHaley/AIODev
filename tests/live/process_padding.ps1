@@ -75,9 +75,9 @@ try {
     Write-Output 'PASS configured process polling draws no idle frames'
     # The same setting can be edited and persisted through Settings.
     Invoke-Aio command settings.open
-    Invoke-Aio type process.padding_groups
-    Invoke-Aio key Tab Ctrl+A
-    Invoke-Aio type 'editors:0:nvim; shells:6:pwsh'
+    Invoke-Aio type process
+    Invoke-Aio key Enter Down Down Tab Ctrl+A
+    Invoke-Aio type '6'
     Invoke-Aio key Enter
     if ((Read-State)['settings.error'] -ne 'false') { throw 'Settings rejected a valid group.' }
     Invoke-Aio command tab.select_1

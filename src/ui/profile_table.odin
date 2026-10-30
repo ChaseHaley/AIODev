@@ -252,7 +252,7 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 		}
 	case .Detected_Header:
 		parts.chevron = {row.x + 12 * s, cy - 11 * s, 22 * s, 22 * s}
-	case .Profile_Add, .Text, .Integer, .Number, .Toggle, .Choice, .Color, .Optional_Color,
+	case .Process_Group, .Profile_Add, .Text, .Integer, .Number, .Toggle, .Choice, .Color, .Optional_Color,
 	     .Shortcut, .Action, .Profile_Icon:
 	}
 	return parts
