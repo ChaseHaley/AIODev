@@ -88,8 +88,14 @@ start :: proc() -> int {
 	if log_error != nil {
 		log.errorf("opening the log file failed: %v", log_error)
 	}
+	if path, path_error := layout_path_create(options); path_error != nil {
+		log.errorf("locating the saved layout failed: %v", path_error)
+	} else {
+		app.layout_path = path
+	}
 	if !app_init(&app) {return 1}
 	run(&app)
+	layout_state_save(&app)
 	return 0
 }
 
@@ -102,14 +108,8 @@ file_logger_create :: proc(
 	string,
 	os.Error,
 ) {
-	root := options.data_dir
-	if root == "" {
-		base, found := os.lookup_env("LOCALAPPDATA", context.temp_allocator)
-		if !found {return {}, "", os.General_Error.Env_Var_Not_Found}
-		path, err := filepath.join({base, instance.APP_NAME}, context.temp_allocator)
-		if err != nil {return {}, "", err}
-		root = path
-	}
+	root, root_error := local_data_root(options)
+	if root_error != nil {return {}, "", root_error}
 	directory, directory_error := filepath.join({root, "logs"}, context.temp_allocator)
 	if directory_error != nil {return {}, "", directory_error}
 	if err := os.mkdir_all(directory); err != nil {return {}, "", err}
@@ -120,4 +120,21 @@ file_logger_create :: proc(
 	file, err := os.open(path, os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
 	if err != nil {return {}, path, err}
 	return log.create_file_logger(file, level), path, nil
+}
+
+// Machine-local state: the instance's data directory, else %LOCALAPPDATA%\AIODev.
+@(private, require_results)
+local_data_root :: proc(options: instance.Options) -> (string, os.Error) {
+	if options.data_dir != "" {return options.data_dir, nil}
+	base, found := os.lookup_env("LOCALAPPDATA", context.temp_allocator)
+	if !found {return "", os.General_Error.Env_Var_Not_Found}
+	return filepath.join({base, instance.APP_NAME}, context.temp_allocator)
+}
+
+@(private, require_results)
+layout_path_create :: proc(options: instance.Options) -> (path: string, err: os.Error) {
+	root := local_data_root(options) or_return
+	os.mkdir_all(root) or_return
+	name := instance.layout_file_name(options, context.temp_allocator) or_return
+	return filepath.join({root, name})
 }

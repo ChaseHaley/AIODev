@@ -134,6 +134,7 @@ show_help :: proc(args: []string) -> int {
 	case "launch":
 		fmt.print(
 			`launch [--fresh] [--settings <file>] [--shell <command>] [--size <cols>x<rows>] [--keep-env]
+       [--keep-layout]
 Starts build\aiodev-verify.exe without activation; refuses an existing named instance.
 Data and evidence: <repo>\build\verify\<name>\; --fresh deletes only that directory.
 Defaults: pwsh -NoLogo -NoProfile -NoExit with isolated PSReadLine history and predictions off;
@@ -143,6 +144,7 @@ History is saved to <data dir>\history.txt; apostrophes in the path are escaped 
 --settings is copied unchanged; doctor warns that its shell history is not isolated.
 Size dimensions are 1..1000.
 --settings copies a settings file instead; omit --shell and --size when using it.
+The saved workspace layout is deleted so each launch starts with one tab, unless --keep-layout.
 NO_COLOR is removed unless --keep-env. Tries job breakaway, then retries without it.
 Readiness: matching pipe PID, ping, wait text "PS ", wait idle; overall deadline 20 seconds.
 Failure stops the launched process and prints log tails. Success:
@@ -459,6 +461,13 @@ launch :: proc(o: Options, p: Paths) -> int {
 	}
 	if err := os.write_entire_file(fmt.tprintf("%s\\settings.ini", p.data), text); err != nil {
 		return fail(fmt.tprintf("cannot write settings (%v); check data-directory permissions", err))
+	}
+	if !o.keep_layout {
+		name, name_error := instance.layout_file_name({name = o.name}, context.temp_allocator)
+		if name_error != nil { return fail("cannot name the saved layout; retry") }
+		if err := os.remove(fmt.tprintf("%s\\%s", p.data, name)); err != nil && err != .Not_Exist {
+			return fail(fmt.tprintf("cannot remove the saved layout (%v); check permissions", err))
+		}
 	}
 	success := false
 	defer if !success {

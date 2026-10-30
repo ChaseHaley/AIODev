@@ -105,6 +105,10 @@ App :: struct {
 	tray_hint_shown:       bool,
 	settings_migration_noticed: bool,
 	process_deadline:      time.Tick,
+	// Empty disables layout saving and restoring; only the real launch sets it.
+	layout_path:           string,
+	layout_saved:          string,
+	layout_deadline:       time.Tick,
 	// Tests replace this to observe Ctrl+click without launching a browser.
 	open_url:              proc(uri: string) -> bool,
 }
@@ -167,9 +171,6 @@ app_init :: proc(app: ^App) -> bool {
 	shell_icon_load(app)
 	apply_fonts(app)
 	apply_theme(app)
-	workspace := workspace_create_empty(app)
-	if workspace == nil {return false}
-	if !tab_create(app, workspace) {return false}
 	if platform_api.tray_create(&app.platform, app.app_id) != .None {
 		log.error("creating the tray icon failed")
 	}
@@ -185,8 +186,11 @@ app_init :: proc(app: ^App) -> bool {
 		proc(user: rawptr) {tick((^App)(user))},
 		app,
 	)
-	if !window_open(app, workspace) {
-		return false
+	if !layout_state_restore(app) {
+		workspace := workspace_create_empty(app)
+		if workspace == nil {return false}
+		if !tab_create(app, workspace) {return false}
+		if !window_open(app, workspace) {return false}
 	}
 	verify_start(app)
 	app.running = true
@@ -224,6 +228,8 @@ app_destroy :: proc(app: ^App) {
 	settings.diagnostics_destroy(&app.settings_diagnostics)
 	delete(app.settings_path)
 	delete(app.log_path)
+	delete(app.layout_path)
+	delete(app.layout_saved)
 	delete(app.app_id)
 	if app.platform_ready {
 		if platform_api.destroy(&app.platform) != .None {
@@ -250,6 +256,7 @@ tick :: proc(app: ^App) {
 	for event in events {
 		handle_event(app, event)
 	}
+	if len(events) > 0 {layout_state_touch(app)}
 	update_sessions(app)
 	update_process_padding(app)
 	update_motion(app)
@@ -271,6 +278,7 @@ tick :: proc(app: ^App) {
 		}
 	}
 	verify_tick(app)
+	layout_state_tick(app)
 	free_all(context.temp_allocator)
 }
 
@@ -282,6 +290,10 @@ wait_timeout :: proc(app: ^App) -> u32 {
 	if app.process_deadline != {} &&
 	   (!found || time.tick_diff(app.process_deadline, deadline) > 0) {
 		deadline, found = app.process_deadline, true
+	}
+	if app.layout_deadline != {} &&
+	   (!found || time.tick_diff(app.layout_deadline, deadline) > 0) {
+		deadline, found = app.layout_deadline, true
 	}
 	if next, pending := verify_deadline(app);
 	   pending && (!found || time.tick_diff(next, deadline) > 0) {
@@ -481,6 +493,7 @@ update_sessions :: proc(app: ^App) {
 		}
 		if term.take_status_change(s) {
 			workspace_status_changed = true
+			layout_state_touch(app)
 			status := term.status(s)
 			if status.kind != entry.status {
 				entry.status = status.kind
@@ -489,6 +502,7 @@ update_sessions :: proc(app: ^App) {
 			if status.kind == .Exited && close_exited_session(app, entry.id) {continue}
 		}
 		if term.take_title_change(s) {
+			layout_state_touch(app)
 			pane_header_refresh(entry)
 			session_titles_changed(app, entry.id)
 		}

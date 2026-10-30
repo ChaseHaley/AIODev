@@ -100,6 +100,8 @@ $settings = @(
 if ($HideHeaders) { $settings += 'pane.show_headers = false' }
 if ($MinimumContrast -ne 4.5) { $settings += "terminal.minimum_contrast = $MinimumContrast" }
 [IO.File]::WriteAllLines((Join-Path $data 'settings.ini'), $settings)
+# Each run measures one fresh tab, not the layout an earlier run left behind.
+Remove-Item -LiteralPath (Join-Path $data "layout.bench-$Label.json") -ErrorAction Ignore
 if ($Executable -eq '') { $Executable = Join-Path $repo 'build/release/aiodev.exe' }
 $Executable = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Executable)
 $arguments = '--no-activate --instance bench-' + $Label + ' --data-dir "' + $data + '"'

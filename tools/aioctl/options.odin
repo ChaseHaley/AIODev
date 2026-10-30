@@ -10,6 +10,7 @@ import "aio:instance"
 
 USAGE :: `aioctl [--name <name>] <command> [args...]
 launch [--fresh] [--settings <file>] [--shell <command>] [--size <cols>x<rows>] [--keep-env]
+       [--keep-layout]
 doctor
 stop
 help [<command>]
@@ -21,7 +22,7 @@ Exit codes: 0 success, 1 failed check or request, 2 usage error.
 Options :: struct {
 	name: string,
 	args: []string,
-	fresh, keep_env: bool,
+	fresh, keep_env, keep_layout: bool,
 	settings, shell: string,
 	columns, rows: int,
 }
@@ -49,12 +50,13 @@ parse_options :: proc(args: []string) -> (Options, string) {
 	case "doctor", "stop":
 		if len(args) != 1 { return {}, "remove the extra arguments; use help" }
 	case "launch":
-		seen: [5]bool
+		seen: [6]bool
 		for i := 1; i < len(args); i += 1 {
 			index := -1
 			switch args[i] {
 			case "--fresh": index, o.fresh = 0, true
 			case "--keep-env": index, o.keep_env = 1, true
+			case "--keep-layout": index, o.keep_layout = 5, true
 			case "--settings", "--shell", "--size":
 				flag := args[i]
 				index = flag == "--settings" ? 2 : (flag == "--shell" ? 3 : 4)

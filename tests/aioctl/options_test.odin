@@ -14,13 +14,13 @@ defaults_and_options :: proc(t: ^testing.T) {
 	testing.expect_value(t, o.columns, 120)
 	testing.expect_value(t, o.rows, 32)
 	o, err = ctl.parse_options({"--name", "test_1-X", "launch", "--fresh", "--shell", "cmd.exe",
-		"--size", "80x24", "--keep-env"})
+		"--size", "80x24", "--keep-env", "--keep-layout"})
 	testing.expect_value(t, err, "")
 	testing.expect_value(t, o.name, "test_1-X")
 	testing.expect_value(t, o.shell, "cmd.exe")
 	testing.expect_value(t, o.columns, 80)
 	testing.expect_value(t, o.rows, 24)
-	testing.expect(t, o.fresh && o.keep_env)
+	testing.expect(t, o.fresh && o.keep_env && o.keep_layout)
 	for args in ([][]string{{"help"}, {"help", "launch"}, {"doctor"}, {"stop"},
 		{"launch", "--settings", "x.ini", "--fresh"}, {"key", "Ctrl+Shift+P"},
 		{"wait", "text", "PS ", "--timeout", "100"}, {"type", ""}, {"type", "é漢😀"},
@@ -54,6 +54,7 @@ usage_errors :: proc(t: ^testing.T) {
 		{"launch", "--size", "1x-1"}, {"launch", "--size", "1x2x3"},
 		{"launch", "--size", "99999999999999999999999x2"},
 		{"launch", "--fresh", "--fresh"}, {"launch", "--keep-env", "--keep-env"},
+		{"launch", "--keep-layout", "--keep-layout"},
 		{"launch", "--shell", "x", "--shell", "y"}, {"launch", "--shell", ""},
 		{"launch", "--shell", "bad\nvalue"}, {"launch", "--shell", "\xff"},
 		{"launch", "--settings", "x", "--size", "1x2"},

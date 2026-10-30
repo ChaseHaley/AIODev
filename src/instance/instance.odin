@@ -97,3 +97,15 @@ log_file_name :: proc(
 	if options.name == "" {return strings.clone("aiodev.log", allocator)}
 	return strings.concatenate({"aiodev.", options.name, ".log"}, allocator)
 }
+
+@(require_results)
+layout_file_name :: proc(
+	options: Options,
+	allocator: runtime.Allocator,
+) -> (
+	string,
+	runtime.Allocator_Error,
+) {
+	if options.name == "" {return strings.clone("layout.json", allocator)}
+	return strings.concatenate({"layout.", options.name, ".json"}, allocator)
+}
