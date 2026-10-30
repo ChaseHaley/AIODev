@@ -44,7 +44,7 @@ Tab_Drag :: struct {
 	order:                     [dynamic]^Tab,
 	start_x, start_y:          f32,
 	offset_x, offset_y:        f32,
-	rank, slot:                int,
+	rank:                      int,
 	pressed, active, modified: bool,
 	// A release outside the tab surface restores the original order.
 	elsewhere:                   bool,
@@ -185,7 +185,6 @@ tab_drag_apply_slot :: proc(app: ^App, w: ^Window, slot: int) -> bool {
 			if tab == d.order[original] {tab_move(app, w, from, to); break}
 		}
 	}
-	d.slot = slot
 	w.dirty = true
 	return true
 }
@@ -204,6 +203,12 @@ tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 		f32(len(d.order) - count),
 	)
 	if !tab_drag_apply_slot(app, w, int(math.floor(first + 0.5))) {return true}
+	tab_drag_follow_pointer(w, first)
+	return true
+}
+
+@(private)
+tab_drag_follow_pointer :: proc(w: ^Window, first: f32) {
 	rank, now := 0, time.tick_now()
 	for tab, i in w.workspace.tabs {
 		if !tab.marked {continue}
@@ -212,7 +217,6 @@ tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 		}
 		rank += 1
 	}
-	return true
 }
 
 @(private)
@@ -231,19 +235,20 @@ tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		return true
 	}
 	d.elsewhere = false
-	positions := make([dynamic]int, context.temp_allocator)
-	rail_tab_rows(w.rail_rows[:], w.workspace, &positions)
-	if len(positions) == 0 {return true}
+	if layout.count == 0 {return true}
 	count := 0
 	for tab in d.order {if tab.marked {count += 1}}
 	if len(d.order) - count <= 0 {return true}
-	first_row := ui.rail_row_rect(layout, positions[0])
+	first_row := ui.rail_row_rect(layout, 0)
 	first :=
 		(y - first_row.y) / layout.row_height -
 		d.offset_y -
 		f32(d.rank)
 	first = clamp(first, 0, f32(len(d.order) - count))
-	return tab_drag_apply_slot(app, w, int(math.floor(first + 0.5)))
+	if !tab_drag_apply_slot(app, w, int(math.floor(first + 0.5))) {return true}
+	first = clamp(first + (w.rail_scroll - layout.scroll) / layout.row_height, 0, f32(len(d.order) - count))
+	tab_drag_follow_pointer(w, first)
+	return true
 }
 
 tab_drag_cancel :: proc(app: ^App, w: ^Window) {

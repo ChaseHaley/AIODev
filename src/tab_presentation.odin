@@ -2,7 +2,7 @@ package main
 
 import "aio:ui"
 
-// Horizontal-strip presentation indexed by tab position. Both arrays stay aligned with the
+// Tab presentation indexed by tab position. Both arrays stay aligned with the
 // workspace tab list; controls carry one extra trailing entry for the new-tab button and one
 // for the profile chevron.
 Tab_Presentation :: struct {

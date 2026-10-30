@@ -331,7 +331,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	   y >= rail_area_rect.y &&
 	   y < rail_area_rect.y + rail_area_rect.height {
 		if layout, ok := rail_current_layout(w); ok {
-			rail_hover = ui.rail_row_hit(layout, x, y)
+			rail_hover = rail_tab_hit(w, layout, x, y)
 			if rail_hover < 0 && ui.rail_footer_hit(layout, x, y) {
 				rail_hover = ui.rail_profile_hit(layout, x, y) ? RAIL_PROFILE_ROW : RAIL_NEW_TAB_ROW
 			}

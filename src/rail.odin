@@ -195,7 +195,38 @@ rail_row_rect_for_tab :: proc(w: ^Window, tab: int) -> render.Rect {
 	layout, ok := rail_current_layout(w)
 	if !ok {return {}}
 	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, tab)
-	return ui.rail_row_rect(layout, index)
+	return rail_tab_rect(w, layout, index)
+}
+
+@(private)
+rail_tab_rect :: proc(w: ^Window, layout: ui.Rail_Layout, index: int) -> render.Rect {
+	r := ui.rail_row_rect(layout, index)
+	if index < 0 || index >= len(w.rail_rows) {return r}
+	r.y += (tab_position(w, w.rail_rows[index].tab) - f32(index)) * layout.row_height
+	return r
+}
+
+@(private)
+rail_tab_close_rect :: proc(w: ^Window, layout: ui.Rail_Layout, index: int) -> render.Rect {
+	r := ui.rail_close_rect(layout, index, w.scale)
+	if index < 0 || index >= len(w.rail_rows) {return r}
+	r.y += (tab_position(w, w.rail_rows[index].tab) - f32(index)) * layout.row_height
+	return r
+}
+
+rail_tab_hit :: proc(w: ^Window, layout: ui.Rail_Layout, x, y: f32) -> int {
+	if x < layout.list.x || x >= layout.list.x + layout.list.width ||
+	   y < layout.list.y || y >= layout.list.y + layout.list.height {return -1}
+	for pass in 0 ..< 2 {
+		for index := len(w.rail_rows) - 1; index >= 0; index -= 1 {
+			row := w.rail_rows[index]
+			foreground := w.tab_drag.active && row.workspace.tabs[row.tab].marked
+			if foreground != (pass == 0) {continue}
+			r := rail_tab_rect(w, layout, index)
+			if x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height {return index}
+		}
+	}
+	return -1
 }
 
 rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Button) -> Tab_Interaction_Hit {
@@ -212,13 +243,15 @@ rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Butt
 		tile := ui.rail_footer_tile(layout)
 		return {kind = .New_Tab, menu_anchor = {tile.x, tile.y + tile.height}}
 	}
-	row := ui.rail_row_hit(layout, x, y)
+	row := rail_tab_hit(w, layout, x, y)
 	if row < 0 {return {kind = .Empty}}
 	entry := w.rail_rows[row]
 	if entry.workspace != w.workspace || entry.tab < 0 || entry.tab >= len(w.workspace.tabs) {
 		return {kind = .Empty}
 	}
-	kind: Tab_Interaction_Kind = ui.rail_close_hit(layout, x, y, w.scale) >= 0 ? .Close : .Tab
+	close := rail_tab_close_rect(w, layout, row)
+	on_close := x >= close.x && x < close.x + close.width && y >= close.y && y < close.y + close.height
+	kind: Tab_Interaction_Kind = on_close ? .Close : .Tab
 	return {kind = kind, index = entry.tab}
 }
 
@@ -232,7 +265,7 @@ rail_pane_target :: proc(w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool)
 	layout, built := rail_current_layout(w)
 	if !built {return -1, false, false}
 	if ui.rail_footer_hit(layout, x, y) {return -1, true, true}
-	row := ui.rail_row_hit(layout, x, y)
+	row := rail_tab_hit(w, layout, x, y)
 	if row < 0 {return -1, true, true}
 	entry := w.rail_rows[row]
 	if entry.workspace == w.workspace {return entry.tab, false, true}
@@ -253,14 +286,6 @@ rail_profile_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 @(private)
-rail_tab_rows :: proc(rows: []Rail_Row, workspace: ^Workspace, out: ^[dynamic]int) {
-	clear(out)
-	for row, i in rows {
-		if row.workspace == workspace {append(out, i)}
-	}
-}
-
-@(private)
 rail_text_baseline :: proc(w: ^Window, row: render.Rect) -> f32 {
 	return row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
 }
@@ -271,14 +296,19 @@ rail_row_draw :: proc(
 	w: ^Window,
 	layout: ui.Rail_Layout,
 	index: int,
+	moving: bool,
 ) -> glyphs.Result {
 	row := w.rail_rows[index]
 	s := w.scale
 	hover := w.rail_hover == index
 	pressed := w.rail_pressed == index
-	rect := ui.rail_row_rect(layout, index)
+	rect := rail_tab_rect(w, layout, index)
 	if rect.width <= 0 || rect.y + rect.height <= layout.list.y || rect.y >= layout.list.y + layout.list.height {
 		return .Ok
+	}
+	if moving {
+		if render.push_layer(&w.list, layout.list) != .None {return .Ok}
+		if rail_docked(w) {ui.draw_rect(&w.list, {rect = rect, color = app.theme.tab_bar})}
 	}
 	tile := ui.rail_tab_tile(layout, rect)
 	selected := row.workspace == w.workspace && row.tab == w.workspace.selected
@@ -325,7 +355,7 @@ rail_row_draw :: proc(
 		); result != .Ok {return result}
 	}
 	current := row.workspace == w.workspace
-	close := ui.rail_close_rect(layout, index, s)
+	close := rail_tab_close_rect(w, layout, index)
 	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
 	if show_close {
 		large := w.ui_text
@@ -354,32 +384,6 @@ rail_row_draw :: proc(
 			w.pointer,
 		); result != .None {return .Ok}
 	}
-	return .Ok
-}
-
-@(private)
-rail_drop_indicator_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout) -> glyphs.Result {
-	if !w.tab_drag.active || w.tab_drag.elsewhere {return .Ok}
-	positions := make([dynamic]int, context.temp_allocator)
-	rail_tab_rows(w.rail_rows[:], w.workspace, &positions)
-	if len(positions) == 0 {return .Ok}
-	s := w.scale
-	y: f32
-	if w.tab_drag.slot >= len(positions) {
-		last := ui.rail_row_rect(layout, positions[len(positions) - 1])
-		y = last.y + last.height
-	} else {
-		y = ui.rail_row_rect(layout, positions[w.tab_drag.slot]).y
-	}
-	first := ui.rail_row_rect(layout, positions[0])
-	ui.draw_rect(
-		&w.list,
-		{
-			rect = {first.x + ui.RAIL_TAB_INDENT * s, y - s, max(0, first.width - ui.RAIL_TAB_INDENT * s), 2 * s},
-			color = app.theme.accent,
-			radius = s,
-		},
-	)
 	return .Ok
 }
 
@@ -416,10 +420,15 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		)
 	}
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
-	for index in 0 ..< len(w.rail_rows) {
-		if result := rail_row_draw(app, w, layout, index); result != .Ok {return result}
+	moving := w.tab_drag.active
+	for position in w.tab_positions {moving ||= ui.motion_active(position)}
+	for pass in 0 ..< (w.tab_drag.active ? 2 : 1) {
+		foreground := pass == 1
+		for row, index in w.rail_rows {
+			if (w.tab_drag.active && row.workspace.tabs[row.tab].marked) != foreground {continue}
+			if result := rail_row_draw(app, w, layout, index, moving); result != .Ok {return result}
+		}
 	}
-	if result := rail_drop_indicator_draw(app, w, layout); result != .Ok {return result}
 	if render.push_layer(&w.list, layout.footer) != .None {return .Ok}
 	tile := ui.rail_new_tab_tile(layout)
 	hover := w.rail_hover == RAIL_NEW_TAB_ROW
