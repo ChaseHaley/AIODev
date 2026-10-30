@@ -45,6 +45,7 @@ Notice_Key :: enum u32 {
 	Copy,
 	Paste,
 	Build_Info,
+	Program_Status,
 }
 
 Session_Entry :: struct {
@@ -58,6 +59,9 @@ Session_Entry :: struct {
 	header:              Pane_Header_Metadata,
 	name:                string,
 	profile_id:          string,
+	// The program status records last copied from the session, and the last notice they raised.
+	statuses:            []term.Program_Status,
+	status_notified:     time.Tick,
 }
 
 // Release only the entry's owned memory; callers own removal from app.sessions.
@@ -65,6 +69,7 @@ session_entry_destroy :: proc(entry: ^Session_Entry) {
 	pane_header_destroy(&entry.header)
 	delete(entry.name)
 	delete(entry.profile_id)
+	status_release(entry)
 	term.destroy(entry.session)
 }
 
@@ -271,6 +276,11 @@ tick :: proc(app: ^App) {
 		}
 		update_blink(window)
 		update_autoscroll(app, window)
+		status_spin_tick(window, time.tick_now())
+		if window.taskbar_workspace != window.workspace {
+			window.taskbar_workspace = window.workspace
+			status_taskbar_update(app, window)
+		}
 		if window.preparing && !window.preview_visible {window.dirty = false; continue}
 		if window.dirty {
 			window_render(app, window)
@@ -314,6 +324,10 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		if window.autoscrolling &&
 		   (!found || time.tick_diff(window.autoscroll_deadline, deadline) > 0) {
 			deadline, found = window.autoscroll_deadline, true
+		}
+		if window.status_spin_deadline != {} &&
+		   (!found || time.tick_diff(window.status_spin_deadline, deadline) > 0) {
+			deadline, found = window.status_spin_deadline, true
 		}
 	}
 	for entry in app.sessions {
@@ -366,6 +380,7 @@ session_config :: proc(
 		geometry = geometry,
 		scrollback_lines = app.settings.scrollback.lines,
 		colors = terminal_colors(app.settings.colors),
+		ignore_program_status = !app.settings.status.enabled,
 	}
 }
 
@@ -506,7 +521,12 @@ update_sessions :: proc(app: ^App) {
 			pane_header_refresh(entry)
 			session_titles_changed(app, entry.id)
 		}
-		workspace_status_changed = term.take_program_status_change(s) || workspace_status_changed
+		if term.take_program_status_change(s) {
+			workspace_status_changed = true
+			status_refresh(app, entry)
+			if status_watched(app, entry) {term.program_status_acknowledge(s)}
+			mark_all_dirty(app)
+		}
 		if term.take_bell(s) {
 			for window in app.windows {
 				if !window.focused &&
@@ -516,7 +536,10 @@ update_sessions :: proc(app: ^App) {
 			}
 		}
 	}
-	if workspace_status_changed {workspace_picker_status_changed(app)}
+	if workspace_status_changed {
+		workspace_picker_status_changed(app)
+		for window in app.windows {status_taskbar_update(app, window)}
+	}
 	for window in app.windows {
 		generation := window_generation(app, window)
 		if generation != window.generation {
@@ -641,6 +664,7 @@ settings_apply_running :: proc(app: ^App) {
 		window_apply_settings(app, window)
 		rail_reveal_active(window)
 	}
+	status_apply_settings(app)
 	shell_icon_load(app)
 }
 

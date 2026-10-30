@@ -183,5 +183,6 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	if w.rename_open {rename_finish(app, w, false)}
 	confirmation_cancel(app, w)
 	rail_overlay_dismiss(app, w)
+	status_overview_cancel(w)
 	w.dirty = true
 }

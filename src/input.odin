@@ -177,6 +177,15 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		profile_menu_key(app, w, logical)
 		return
 	}
+	if w.status.inbox_open {
+		if e.pressed {w.suppressed_key = e}
+		status_inbox_key(app, w, logical)
+		return
+	}
+	if w.status.board_open && status_board_key(app, w, logical) {
+		w.suppressed_key = e
+		return
+	}
 	if suppressed, ok := w.suppressed_key.?; ok && !e.pressed && suppressed.key == e.key {
 		w.suppressed_key = nil
 		return
@@ -401,6 +410,12 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		w.dirty = true
 		return
 	}
+	if w.status.inbox_open {
+		status_inbox_wheel(app, w, e.delta_y)
+		return
+	}
+	if w.status.board_open {return}
+	if status_panel_wheel(app, w, f32(e.x), f32(e.y), e.delta_y) {return}
 	rail_area_rect := rail_area(w)
 	if rail_visible(w) &&
 	   f32(e.x) >= rail_area_rect.x &&
@@ -452,6 +467,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		window_overlays_cancel(app, w, true)
 	}
 	if entry := focused_session(app, w); entry != nil {term.send_focus(entry.session, focused)}
+	if focused {status_focus_enter(app, w)}
 }
 
 @(private)

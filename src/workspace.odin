@@ -96,6 +96,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 
 focus_leave :: proc(app: ^App, w: ^Window) {
 	window_overlays_cancel(app, w)
+	status_focus_leave(app, w)
 	leader_cancel(w)
 	if entry := focused_session(app, w); entry != nil {
 		term.send_focus(entry.session, false)
@@ -112,6 +113,7 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 		term.send_focus(entry.session, w.focused)
 	}
 	reset_blink(w)
+	status_focus_enter(app, w)
 	w.dirty = true
 	window_update_title(app, w)
 }

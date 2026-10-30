@@ -107,6 +107,15 @@ Window :: struct {
 	wheel_remainder: f32,
 	blinking, cursor_phase_visible: bool,
 	blink_deadline: time.Tick,
+	// A frame that drew a program status spinner repaints at STATUS_SPIN_INTERVAL until one does not.
+	status_spinning: bool,
+	status_spin_deadline: time.Tick,
+	taskbar_state: platform.Progress_State,
+	taskbar_percent: int,
+	taskbar_workspace: ^Workspace,
+	status: Status_Overview,
+	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
+	status_rail_reserve: f32,
 }
 
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
@@ -340,6 +349,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
+	w.status_rail_reserve = status_panel_rail_height(app, w)
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
 		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -552,6 +562,7 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	frame: term_view.Frame
 	blinking := false
+	w.status_spinning = false
 	c := app.settings.colors
 	selection_foreground: Maybe(render.Color)
 	if fg, ok := c.selection_foreground.?; ok {
@@ -640,6 +651,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	}
 	if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
 	if result := rail_draw(app, w); result != .Ok {return frame, result}
+	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
 	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
 	size := [2]f32{f32(w.width), f32(w.height)}
@@ -682,6 +694,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if workspace_picker_active(&w.workspace_picker) {
 		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
 	}
+	if result := status_board_draw(app, w); result != .Ok {return frame, result}
+	if result := status_inbox_draw(app, w); result != .Ok {return frame, result}
 	return frame, ui.notices_draw(
 		&app.notices,
 		&w.list,

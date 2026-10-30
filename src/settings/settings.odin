@@ -317,7 +317,7 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		0,
 		nil,
-		"Allow the full-window board of program status, opened with Ctrl+Shift+O.",
+		"Allow the full-window board of program status, opened with Ctrl+Shift+G.",
 	},
 	{
 		"status.taskbar",

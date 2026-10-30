@@ -116,6 +116,11 @@ Action :: enum u32 {
 	Palette_Commands,
 	Toggle_Tabs_Rail,
 	Toggle_Tabs_Orientation,
+	Status_Next,
+	Status_Inbox,
+	Status_Panel,
+	Status_Board,
+	Status_Dismiss_Finished,
 }
 
 @(private)
@@ -350,6 +355,11 @@ ACTIONS :: [Action]Action_Info {
 		"Switch Between Vertical and Horizontal Tabs",
 		{{.L, {.Control, .Shift}}},
 	},
+	.Status_Next = {"status.next", "Go to the Next Program That Needs You", {{.J, {.Control, .Shift}}}},
+	.Status_Inbox = {"status.inbox", "Show the Program Status Inbox", {{.I, {.Control, .Shift}}}},
+	.Status_Panel = {"status.panel", "Show or Hide the Activity Panel", {{.Y, {.Control, .Shift}}}},
+	.Status_Board = {"status.board", "Show the Program Status Board", {{.G, {.Control, .Shift}}}},
+	.Status_Dismiss_Finished = {"status.dismiss_finished", "Dismiss Finished Program Status", nil},
 }
 
 @(require_results)
@@ -631,6 +641,16 @@ run_action :: proc(
 		if !w.tabs_horizontal {rail_toggle(app, w)}
 	case .Toggle_Tabs_Orientation:
 		toggle_tab_orientation(app)
+	case .Status_Next:
+		status_next_attention(app, w)
+	case .Status_Inbox:
+		status_inbox_toggle(app, w)
+	case .Status_Panel:
+		settings_toggle_bool(app, "status.panel", &app.settings.status.panel)
+	case .Status_Board:
+		status_board_toggle(app, w)
+	case .Status_Dismiss_Finished:
+		status_dismiss_finished(app, w)
 	}
 }
 

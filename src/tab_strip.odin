@@ -13,7 +13,7 @@ import "core:os"
 // layout. Vertical mode uses the rail instead.
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	if w.workspace == nil {return {}}
-	left := workspace_button_width(w)
+	left := workspace_button_width(w) + status_pill_width(app, w)
 	bar := ui.tab_bar_layout(
 		max(0, f32(w.width) - 218 * w.scale - left),
 		w.scale,
@@ -107,7 +107,7 @@ strip_tab_interaction_hit :: proc(
 
 // The rightmost point the title chrome claims before the native caption buttons start.
 window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
-	left := workspace_button_width(w)
+	left := workspace_button_width(w) + status_pill_width(app, w)
 	if !w.tabs_horizontal {
 		toggle := tab_orientation_button_rect(w)
 		return max(left, toggle.x + toggle.width)
@@ -117,30 +117,30 @@ window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 	return max(left, bar.x + f32(bar.count) * bar.tab_width + 2 * bar.button_width)
 }
 
+// Saves one setting through the file so the change survives and every window applies it. Without a
+// settings file, as in tests, the caller applies the value itself.
+@(require_results)
+settings_save_value :: proc(app: ^App, key, value, failure: string) -> (saved, has_file: bool) {
+	if app.settings_path == "" {return false, false}
+	data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
+	if read_error != nil {
+		notify(app, .Error, failure)
+		return false, true
+	}
+	updated, message, edit_error := settings.edit_text(string(data), key, value)
+	defer delete(updated)
+	defer delete(message)
+	if edit_error != nil || message != "" || settings_commit(app, string(data), updated) != .None {
+		notify(app, .Error, failure)
+		return false, true
+	}
+	return true, true
+}
+
 toggle_tab_orientation :: proc(app: ^App) {
 	next := app.settings.tabs.orientation == .Horizontal ? "vertical" : "horizontal"
-	if app.settings_path != "" {
-		data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
-		if read_error != nil {
-			notify(app, .Error, "Could not read the settings file to switch tab orientation.")
-			return
-		}
-		updated, message, edit_error := settings.edit_text(
-			string(data),
-			"tabs.orientation",
-			next,
-		)
-		defer delete(updated)
-		defer delete(message)
-		if edit_error != nil || message != "" {
-			notify(app, .Error, "Could not save the tab orientation.")
-			return
-		}
-		if settings_commit(app, string(data), updated) != .None {
-			notify(app, .Error, "Could not save the tab orientation.")
-			return
-		}
-	} else {
+	if _, has_file := settings_save_value(app, "tabs.orientation", next, "Could not save the tab orientation.");
+	   !has_file {
 		app.settings.tabs.orientation = next == "horizontal" ? .Horizontal : .Vertical
 		for window in app.windows {
 			window_apply_settings(app, window)
@@ -173,6 +173,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				if result != .Ok {return result}
 			}
 			x := tab_position(w, i) * bar.tab_width
+			status := status_tab_mark(app, w, w.workspace, i)
 			if result := ui.tab_draw(
 				&w.list,
 				&w.ui_text,
@@ -190,6 +191,8 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				icon,
 				atlas,
 				w.pointer,
+				status,
+				status_phase(app, w, status),
 			); result != .Ok {return result}
 		}
 	}
@@ -285,4 +288,12 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		); result != .None {return .Ok}
 	}
 	return .Ok
+}
+
+settings_toggle_bool :: proc(app: ^App, key: string, target: ^bool) {
+	value := target^ ? "false" : "true"
+	if _, has_file := settings_save_value(app, key, value, "Could not save the setting."); has_file {return}
+	target^ = !target^
+	for window in app.windows {window_apply_settings(app, window)}
+	status_apply_settings(app)
 }

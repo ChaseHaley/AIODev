@@ -133,6 +133,14 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		profile_menu_button(app, w, e)
 		return
 	}
+	if w.status.inbox_open {
+		status_inbox_button(app, w, e)
+		return
+	}
+	if w.status.board_open && e.pressed && f32(e.y) >= ui.TITLE_BAR_HEIGHT * w.scale {
+		status_board_button(app, w, e)
+		return
+	}
 	if w.rename_open {
 		r, field := rename_rect(w), rename_field_rect(w)
 		x, y := f32(e.x), f32(e.y)
@@ -215,6 +223,14 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		workspace_picker_open(app, w)
 		return
 	}
+	if e.pressed && e.button == .Left && status_rect_contains(status_pill_rect(app, w), x, y) {
+		status_inbox_toggle(app, w)
+		return
+	}
+	if status_panel_button(app, w, e) {return}
+	if e.pressed && w.status.board_open {
+		w.status.board_open = false
+	}
 	if e.button == .Left && rail_resize_hit(w, x, y) {
 		w.rail_resizing = true
 		w.rail_resize_offset = x - rail_width_pixels(w)
@@ -292,6 +308,15 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			w.profile_menu.menu.selected, w.dirty = hit, true
 		}
 		pointer_set(app, w, .Arrow)
+		return
+	}
+	if w.status.inbox_open {
+		link_hover_clear(w)
+		status_inbox_move(app, w, f32(e.x), f32(e.y))
+		return
+	}
+	if e.buttons == {} && status_overview_move(app, w, f32(e.x), f32(e.y)) {
+		link_hover_clear(w)
 		return
 	}
 	if w.rename_open {

@@ -3,7 +3,6 @@ package main
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
-import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"
@@ -199,13 +198,6 @@ workspace_status :: proc(app: ^App, workspace: ^Workspace) -> string {
 		if entry == nil {continue}
 		done ||= entry.status == .Exited
 		blocked ||= entry.status == .Failed
-		statuses, err := term.program_status(entry.session, context.temp_allocator)
-		if err != nil {continue}
-		for status in statuses {
-			done ||= status.state == .Done
-			blocked ||= status.state == .Blocked || status.state == .Error
-		}
-		term.destroy_program_status(statuses, context.temp_allocator)
 	}
 	if blocked {
 		return "Blocked"
@@ -542,6 +534,9 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			else if window_for_workspace(app, workspace) != nil { detail = "Open in window" }
 			if p.rows[i].status != "" && detail != p.rows[i].status {
 				detail = fmt.tprintf("%s · %s", detail, p.rows[i].status)
+			}
+			if program := status_picker_text(app, workspace); program != "" {
+				detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
 			}
 		} else {label = action_info[actions[i - len(p.rows)]].title}
 		baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent

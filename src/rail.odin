@@ -119,7 +119,9 @@ rail_resize_move :: proc(app: ^App, w: ^Window, x: f32) {
 rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
 	if !rail_rows_build(w, &w.rail_rows) {return {}, false}
-	layout = ui.rail_layout(rail_area(w), w.scale, len(w.rail_rows), w.rail_scroll)
+	area := rail_area(w)
+	area.height = max(0, area.height - w.status_rail_reserve)
+	layout = ui.rail_layout(area, w.scale, len(w.rail_rows), w.rail_scroll)
 	w.rail_scroll = layout.scroll
 	return layout, true
 }
@@ -340,9 +342,21 @@ rail_row_draw :: proc(
 		atlas, result = shell_icon_atlas(app)
 		if result != .Ok {return result}
 	}
+	status := status_tab_mark(app, w, row.workspace, row.tab)
 	has_badge := icon != "" || atlas.width > 0
 	label_x := tile.x + 8 * s
-	if has_badge {
+	if status.glyph != .None {
+		label_x = tile.x + 28 * s
+		ui.status_progress_draw(
+			&w.list,
+			app.theme,
+			{tile.x + 8 * s, tile.y + s, max(0, tile.width - 16 * s), tile.height - 3 * s},
+			status,
+			s,
+		)
+		if result := status_mark_draw(app, w, {tile.x + 9 * s, tile.y + 9 * s, 14 * s, 14 * s}, status);
+		   result != .Ok {return result}
+	} else if has_badge {
 		label_x = tile.x + 28 * s
 		if result := ui.shell_badge_draw(
 			&w.list,

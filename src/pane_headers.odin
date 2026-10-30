@@ -8,6 +8,7 @@ import "aio:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "core:fmt"
 import "core:log"
 import "core:strings"
 
@@ -105,6 +106,22 @@ pane_header_draw :: proc(
 			w.pointer.y >= layout.badge.y - 3 * w.scale &&
 			w.pointer.y < layout.badge.y + layout.badge.height + 3 * w.scale
 	}
+	status: ui.Status_Mark
+	status_text: string
+	if entry != nil && app.settings.status.pane_headers {
+		summary: Status_Summary
+		status_summary_add(app, &summary, entry)
+		if summary.found {
+			status = status_mark(summary.top)
+			buffer: [8]u8
+			headline := ui.status_headline(status, buffer[:])
+			status_text = strings.clone(headline, context.temp_allocator)
+			if summary.top.message != "" {
+				status_text = fmt.tprintf("%s · %s", headline, summary.top.message)
+				if status.glyph == .Working && status.progress < 0 {status_text = summary.top.message}
+			}
+		}
+	}
 	return ui.header_draw(
 		&w.list,
 		&w.ui_text,
@@ -122,6 +139,9 @@ pane_header_draw :: proc(
 		icon_atlas,
 		badge_hovered,
 		w.pointer,
+		status,
+		status_text,
+		status_phase(app, w, status),
 	)
 }
 
