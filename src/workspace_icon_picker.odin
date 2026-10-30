@@ -103,11 +103,20 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if result := ui.draw_text(&w.ui_text, &w.list, "Icon", g.panel.x + 12 * s, g.panel.y + 26 * s,
 		app.theme.text, max(0, g.panel.width - 106 * s)); result != .Ok { return result }
 	color_button := workspace_icon_color_button(w)
-	color_fill := p.selected == len(WORKSPACE_ICONS) + 2 ? app.theme.selection : app.theme.pane
-	button := render.Rect_Instance{rect = color_button, radius = 5 * s, color = color_fill}
-	if render.push_rect(&w.list, button) != .None { return .Ok }
-	if result := ui.draw_text(&w.ui_text, &w.list, "Color...", color_button.x + 8 * s, color_button.y + 20 * s,
-		app.theme.text, max(0, color_button.width - 16 * s)); result != .Ok { return result }
+	if p.selected == len(WORKSPACE_ICONS) + 2 {
+		button := render.Rect_Instance{rect = color_button, radius = 5 * s, color = app.theme.selection}
+		if render.push_rect(&w.list, button) != .None { return .Ok }
+	}
+	dot_size := 18 * s
+	dot := render.Rect{
+		color_button.x + (color_button.width - dot_size) / 2,
+		color_button.y + (color_button.height - dot_size) / 2,
+		dot_size, dot_size,
+	}
+	wheel := render.Rect_Instance{
+		rect = dot, radius = dot_size / 2, color = {1, 0, 0, 1}, fill = render.RECT_FILL_HUE_WHEEL,
+	}
+	if render.push_rect(&w.list, wheel) != .None { return .Ok }
 	if render.push_layer(&w.list, g.grid) != .None { return .Ok }
 	for i in 0..<len(WORKSPACE_ICONS) {
 		row := i / g.columns - p.scroll
@@ -146,5 +155,5 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 workspace_icon_color_button :: proc(w: ^Window) -> render.Rect {
 	g := workspace_icon_picker_layout(w)
 	s := w.scale
-	return {g.panel.x + max(0, g.panel.width - 82 * s), g.panel.y + 6 * s, min(70 * s, g.panel.width), 28 * s}
+	return {g.panel.x + max(0, g.panel.width - 40 * s), g.panel.y + 6 * s, min(28 * s, g.panel.width), 28 * s}
 }
