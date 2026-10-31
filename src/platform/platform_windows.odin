@@ -56,6 +56,7 @@ Platform :: struct {
 	icon:                       w.HICON,
 	tray_requested, tray_added: bool,
 	tray_data:                  w.NOTIFYICONDATAW,
+	tray_notify_token:          u64,
 	menu:                       w.HMENU,
 	menu_ids:                   []u32,
 	modal_callback:             proc(user: rawptr),
@@ -1120,6 +1121,9 @@ window_proc :: proc "system" (
 		   code == w.NIN_SELECT ||
 		   code == NIN_KEYSELECT {
 			enqueue(p, Tray_Event{})
+		}
+		if code == NIN_BALLOONUSERCLICK {
+			enqueue(p, Tray_Notification_Event{p.tray_notify_token})
 		}
 		if code == w.WM_CONTEXTMENU || code == w.WM_RBUTTONUP {
 			tray_popup(p)

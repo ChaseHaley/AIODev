@@ -105,6 +105,10 @@ Tray_Event :: struct {}
 Tray_Menu_Event :: struct {
 	id: u32,
 }
+// A click on a native notification raised by tray_notify, carrying back the token it was given.
+Tray_Notification_Event :: struct {
+	token: u64,
+}
 Activate_Request_Event :: struct {}
 Settings_Event :: struct {}
 Wake_Event :: struct {}
@@ -122,6 +126,7 @@ Event :: union {
 	Close_Request_Event,
 	Tray_Event,
 	Tray_Menu_Event,
+	Tray_Notification_Event,
 	Activate_Request_Event,
 	Settings_Event,
 	Wake_Event,

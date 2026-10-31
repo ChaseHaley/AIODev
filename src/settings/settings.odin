@@ -437,7 +437,7 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		0,
 		nil,
-		"Show a notice and flash the window when a program needs you.",
+		"Send a system notification and flash the window when a program needs you.",
 	},
 	{
 		"status.notify_error",
@@ -448,7 +448,7 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		0,
 		nil,
-		"Show a notice and flash the window when a program fails.",
+		"Send a system notification and flash the window when a program fails.",
 	},
 	{
 		"status.notify_done",
@@ -459,7 +459,7 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		0,
 		nil,
-		"Show a notice and flash the window when a program finishes.",
+		"Send a system notification and flash the window when a program finishes.",
 	},
 	{
 		"status.notify_focused",
