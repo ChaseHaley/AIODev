@@ -146,15 +146,27 @@ tray_popup :: proc(p: ^Platform) {
 	record_os(p, w.PostMessageW(p.host.hwnd, w.WM_NULL, 0, 0), "PostMessageW(tray)")
 }
 
+// NOTIFYICONDATAW fields are fixed-width; cut on a rune boundary so no surrogate pair is split.
+@(private, require_results)
+clamp_utf16_units :: proc(s: string, max_units: int) -> string {
+	units := 0
+	for i, c in s {
+		units += c > 0xffff ? 2 : 1
+		if units > max_units {return s[:i]}
+	}
+	return s
+}
+
+// A click on the notification reports `token` back in a Tray_Notification_Event; 0 means no target.
 @(require_results)
-tray_notify :: proc(p: ^Platform, title, text: string) -> Error {
+tray_notify :: proc(p: ^Platform, title, text: string, token: u64 = 0) -> Error {
 	if !p.tray_added {return .Not_Initialized}
-	if len(title) > 63 || len(text) > 255 {return .Invalid_Argument}
 	data := p.tray_data
 	data.uFlags = w.NIF_INFO
 	data.dwInfoFlags = NIIF_INFO
-	utf16.encode_string(data.szInfoTitle[:63], title)
-	utf16.encode_string(data.szInfo[:255], text)
+	utf16.encode_string(data.szInfoTitle[:63], clamp_utf16_units(title, 63))
+	utf16.encode_string(data.szInfo[:255], clamp_utf16_units(text, 255))
+	p.tray_notify_token = token
 	if !os_ok(w.Shell_NotifyIconW(w.NIM_MODIFY, &data), "Shell_NotifyIconW(notify)") {return .Os}
 	return .None
 }

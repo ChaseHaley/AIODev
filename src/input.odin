@@ -105,6 +105,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Tray_Event:
 		show_window(app)
+	case platform.Tray_Notification_Event:
+		if e.token == 0 {
+			show_window(app)
+		} else {
+			status_notification_clicked(app, u32(e.token))
+		}
 	case platform.Activate_Request_Event:
 		// Launching AIODev again means a fresh workspace window, as New Window does. With every
 		// window hidden to the tray, it reopens the existing view instead.

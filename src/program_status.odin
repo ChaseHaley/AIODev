@@ -16,11 +16,9 @@ import "core:time"
 
 @(private)
 STATUS_SPIN_PERIOD_MS :: 1200
-// At most one notice per pane in this interval keeps a chatty program from flooding the notices.
+// At most one notification per pane in this interval keeps a chatty program from flooding them.
 @(private)
 STATUS_NOTICE_INTERVAL :: 5 * time.Second
-@(private)
-STATUS_NOTICE_DURATION :: 8 * time.Second
 
 Status_Summary :: struct {
 	top:                                  term.Program_Status,
@@ -334,18 +332,29 @@ status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term
 status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Status) {
 	buffer: [8]u8
 	headline := ui.status_headline(status_mark(record), buffer[:])
-	text := fmt.tprintf("%s: %s", status_record_name(entry, record), headline)
-	if record.message != "" {text = fmt.tprintf("%s · %s", text, record.message)}
-	text = fmt.tprintf("%s (%s)", text, status_crumb(app, entry))
-	kind: ui.Notice_Kind = record.state == .Error ? .Error : record.state == .Done ? .Success : .Warning
-	ui.notices_put(&app.notices, u32(Notice_Key.Program_Status), kind, text, STATUS_NOTICE_DURATION)
-	mark_all_dirty(app)
+	title := fmt.tprintf("%s: %s", status_record_name(entry, record), headline)
+	text := status_crumb(app, entry)
+	if record.message != "" {text = fmt.tprintf("%s · %s", record.message, text)}
+	if platform_api.tray_notify(&app.platform, title, text, u64(entry.id)) != .None {
+		log.error("showing the program status notification failed")
+	}
 	target := window_for_workspace(app, status_workspace_of(app, entry.id))
 	if target == nil && len(app.windows) > 0 {target = app.windows[0]}
 	if target != nil && !target.focused &&
 	   platform_api.window_flash(&app.platform, target.id) != .None {
 		log.error("flashing the window for program status failed")
 	}
+}
+
+// A click on a status notification jumps to the pane that sent it, reopening a window if all
+// were hidden to the tray.
+status_notification_clicked :: proc(app: ^App, session: u32) {
+	if len(app.windows) == 0 {show_window(app)}
+	if len(app.windows) == 0 {return}
+	target := window_for_workspace(app, status_workspace_of(app, session))
+	if target == nil {target = app.windows[0]}
+	if !window_activate(app, target) {return}
+	if !status_reveal(app, target, session) {notify(app, .Error, "Could not show that pane.")}
 }
 
 // Shows the pane a record came from, switching workspace, tab and focus as needed.

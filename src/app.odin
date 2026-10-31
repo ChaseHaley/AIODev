@@ -47,7 +47,6 @@ Notice_Key :: enum u32 {
 	Copy,
 	Paste,
 	Build_Info,
-	Program_Status,
 }
 
 Session_Entry :: struct {
