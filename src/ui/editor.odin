@@ -123,13 +123,14 @@ Profile_Position :: struct {
 	id:       string,
 	position: Motion,
 	lifted:   bool,
+	process:  bool,
 }
 
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
 // in `value` until it is saved.
 Editor :: struct {
 	process_expanded, process_next, process_next_program, process_fallback: int,
-	process_remove, process_drag_id, process_drag_from: int,
+	process_remove, process_drag_id: int,
 	process_source: string,
 	process_dirty: bool,
 	open, capturing, leader_pending, hover_clear:                      bool,
@@ -692,23 +693,45 @@ profile_row_count :: proc(p: ^Editor) -> int {
 	return count
 }
 
-// A profile's table row and the inline editor rows under it, as page lines.
+// A reorderable block's first row and the inline editor rows under it, as page lines: a profile
+// with its expanded editor, or a process group with its fields.
 @(private)
 Profile_Block :: struct {
 	start, count: int,
 }
 
-// The profile table's blocks in table order. An expanded profile's block includes its editor rows.
+@(private)
+order_dragging :: proc(p: ^Editor) -> bool {
+	return p.drag == .Profile_Order || p.drag == .Process_Order
+}
+
+// Whether the blocks reordering, or still settling, are process groups rather than profiles.
+@(private)
+order_processes :: proc(p: ^Editor) -> bool {
+	if p.drag == .Process_Order {return true}
+	if p.drag == .Profile_Order {return false}
+	return len(p.profile_positions) > 0 && p.profile_positions[0].process
+}
+
+@(private)
+order_head :: proc(row: Editor_Row, processes: bool) -> bool {
+	return processes ? row.process_field == .Group : row.kind == .Profile
+}
+
+// The reorderable blocks in page order. An expanded block includes its editor rows.
 @(private)
 profile_blocks :: proc(p: ^Editor) -> []Profile_Block {
 	blocks := make([dynamic]Profile_Block, context.temp_allocator)
+	processes := order_processes(p)
 	for item, index in p.items {
-		if item.row < 0 || p.rows[item.row].kind != .Profile {continue}
-		id := p.rows[item.row].profile
+		if item.row < 0 || !order_head(p.rows[item.row], processes) {continue}
+		head := p.rows[item.row]
 		end := index + 1
 		for end < len(p.items) && p.items[end].row >= 0 {
 			row := p.rows[p.items[end].row]
-			if row.kind == .Profile || row.kind == .Detected || row.profile != id {break}
+			if processes {
+				if row.process != head.process || row.process_field == .Group {break}
+			} else if row.kind == .Profile || row.kind == .Detected || row.profile != head.profile {break}
 			end += 1
 		}
 		append(&blocks, Profile_Block{index, end - index})
@@ -716,11 +739,18 @@ profile_blocks :: proc(p: ^Editor) -> []Profile_Block {
 	return blocks[:]
 }
 
+// The identity a block's position is kept under across a settings reload.
+@(private)
+profile_block_id :: proc(p: ^Editor, block: Profile_Block) -> string {
+	row := p.rows[p.items[block.start].row]
+	return order_processes(p) ? row.key : row.profile
+}
+
 // Where block `index` belongs: its own line, or while a reorder drag is active, its line with the
 // grabbed block's lines opened at the slot the pointer is nearest.
 @(private)
 profile_block_line :: proc(p: ^Editor, blocks: []Profile_Block, index: int) -> int {
-	if p.drag != .Profile_Order || p.drag_from >= len(blocks) {return blocks[index].start}
+	if !order_dragging(p) || p.drag_from >= len(blocks) {return blocks[index].start}
 	slot := p.drag_target <= p.drag_from ? p.drag_target : p.drag_target - 1
 	line, others := blocks[0].start, 0
 	for block, i in blocks {
@@ -745,39 +775,53 @@ profile_position :: proc(p: ^Editor, id: string) -> ^Profile_Position {
 	return nil
 }
 
-// How many lines from its own place the page line at `index` is drawn while profile rows reorder.
+// The position of the block the page line at `index` belongs to, and that block's first line.
 @(private)
-editor_line_shift :: proc(p: ^Editor, index: int) -> f32 {
+profile_line_entry :: proc(p: ^Editor, index: int) -> (entry: ^Profile_Position, start: int) {
 	if len(p.profile_positions) == 0 || index < 0 || index >= len(p.items) || p.items[index].row < 0 {
-		return 0
+		return nil, 0
 	}
 	row := p.rows[p.items[index].row]
-	if row.profile == "" || row.kind == .Detected {return 0}
-	start := index
-	for start >= 0 && (p.items[start].row < 0 || p.rows[p.items[start].row].kind != .Profile) {
+	processes := p.profile_positions[0].process
+	if processes ? row.process <= 0 : row.profile == "" || row.kind == .Detected {return nil, 0}
+	start = index
+	for start >= 0 && (p.items[start].row < 0 || !order_head(p.rows[p.items[start].row], processes)) {
 		start -= 1
 	}
-	if start < 0 || p.rows[p.items[start].row].profile != row.profile {return 0}
-	entry := profile_position(p, row.profile)
+	if start < 0 {return nil, 0}
+	head := p.rows[p.items[start].row]
+	if processes {
+		if head.process != row.process {return nil, 0}
+		return profile_position(p, head.key), start
+	}
+	if head.profile != row.profile {return nil, 0}
+	return profile_position(p, row.profile), start
+}
+
+// How many lines from its own place the page line at `index` is drawn while rows reorder.
+@(private)
+editor_line_shift :: proc(p: ^Editor, index: int) -> f32 {
+	entry, start := profile_line_entry(p, index)
 	return entry == nil ? 0 : entry.position.value - f32(start)
 }
 
 // Whether the page line at `index` belongs to the block a reorder drag lifted, which draws on top.
 @(private)
 editor_line_lifted :: proc(p: ^Editor, index: int) -> bool {
-	if len(p.profile_positions) == 0 || p.items[index].row < 0 {return false}
-	row := p.rows[p.items[index].row]
-	if row.profile == "" || row.kind == .Detected {return false}
-	entry := profile_position(p, row.profile)
+	entry, _ := profile_line_entry(p, index)
 	return entry != nil && entry.lifted
 }
 
-// Starts presenting every profile block at its drawn line, keeping blocks still settling where
-// they are, and lifts the grabbed one.
+// Starts presenting every block at its drawn line, keeping blocks still settling where they are,
+// and lifts the grabbed one. Call after setting the drag kind.
 @(private)
 profile_positions_begin :: proc(p: ^Editor, grabbed: string) {
+	processes := order_processes(p)
+	if len(p.profile_positions) > 0 && p.profile_positions[0].process != processes {
+		profile_positions_clear(&p.profile_positions)
+	}
 	for block in profile_blocks(p) {
-		id := p.rows[p.items[block.start].row].profile
+		id := profile_block_id(p, block)
 		entry := profile_position(p, id)
 		if entry == nil {
 			owned, clone_error := strings.clone(id)
@@ -785,7 +829,7 @@ profile_positions_begin :: proc(p: ^Editor, grabbed: string) {
 			line := f32(block.start)
 			if _, append_error := append(
 				&p.profile_positions,
-				Profile_Position{id = owned, position = {value = line, target = line}},
+				Profile_Position{id = owned, position = {value = line, target = line}, process = processes},
 			); append_error != nil {delete(owned); continue}
 			entry = &p.profile_positions[len(p.profile_positions) - 1]
 		}
@@ -793,8 +837,8 @@ profile_positions_begin :: proc(p: ^Editor, grabbed: string) {
 	}
 }
 
-// Moves the grabbed profile block with the pointer and opens its slot among the others, as the tab
-// strip does. drag_target keeps the profile.order insertion slot the drop will save.
+// Moves the grabbed block with the pointer and opens its slot among the others, as the tab strip
+// does. drag_target keeps the insertion slot the drop will save.
 @(private)
 profile_drag_move :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> bool {
 	blocks := profile_blocks(p)
@@ -816,24 +860,24 @@ profile_drag_move :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> bool {
 		if distance := abs(top - f32(line)); distance < nearest {slot, nearest = others, distance}
 	}
 	p.drag_target = slot <= p.drag_from ? slot : slot + 1
-	if entry := profile_position(p, p.rows[p.items[grabbed.start].row].profile); entry != nil {
+	if entry := profile_position(p, profile_block_id(p, grabbed)); entry != nil {
 		motion_target(&entry.position, top, 0, .Linear, false, time.tick_now())
 	}
 	return true
 }
 
-// Eases profile blocks toward their lines; returns whether the page must redraw. Positions are
+// Eases reordering blocks toward their lines; returns whether the page must redraw. Positions are
 // dropped once the drag has ended and every block has settled.
 editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bool {
 	if len(p.profile_positions) == 0 {return false}
 	blocks := profile_blocks(p)
-	dragging := p.drag == .Profile_Order
+	dragging := order_dragging(p)
 	changed, moving := false, false
 	for i := 0; i < len(p.profile_positions); {
 		entry := &p.profile_positions[i]
 		block := -1
 		for b, index in blocks {
-			if p.rows[p.items[b.start].row].profile == entry.id {block = index; break}
+			if profile_block_id(p, b) == entry.id {block = index; break}
 		}
 		if block < 0 {
 			delete(entry.id)
@@ -853,8 +897,8 @@ editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bo
 	return changed
 }
 
-// The page lines to draw, in paint order. Profile rows that are reordering may be drawn away from
-// their own lines, so every profile line is considered and the lifted block paints last.
+// The page lines to draw, in paint order. Rows that are reordering may be drawn away from their own
+// lines, so every block line is considered and the lifted block paints last.
 @(private)
 editor_drawn_lines :: proc(p: ^Editor, l: Editor_Layout) -> []int {
 	first, last := p.scroll, min(len(p.items), p.scroll + l.rows)
@@ -879,10 +923,10 @@ editor_drawn_lines :: proc(p: ^Editor, l: Editor_Layout) -> []int {
 	return lines[:]
 }
 
-// Whether profile rows are moving, or have settled after a drop and still need releasing.
+// Whether reordering rows are moving, or have settled after a drop and still need releasing.
 editor_profiles_animating :: proc(p: ^Editor) -> bool {
 	for entry in p.profile_positions {if motion_active(entry.position) {return true}}
-	return p.drag != .Profile_Order && len(p.profile_positions) > 0
+	return !order_dragging(p) && len(p.profile_positions) > 0
 }
 
 // Moves the selection by `delta` lines, passing over group headers in the direction of travel.
@@ -1820,7 +1864,13 @@ editor_press :: proc(
 	row := editor_row(p)
 	parts := editor_row_parts(p, l, index)
 	if row.process_field != .None {
-		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {return result}
+		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {
+			if p.drag == .Process_Order {
+				p.drag_grab = (y - parts.row.y) / l.row_height
+				profile_positions_begin(p, row.key)
+			}
+			return result
+		}
 	}
 	if row.kind == .Profile || row.kind == .Detected || row.kind == .Profile_Add ||
 	   row.kind == .Detected_Header {
@@ -1960,7 +2010,10 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 	case .Slider:
 		slide(p, row, editor_row_parts(p, l, p.selected).slider, x)
 	case .Process_Order:
-		return editor_process_drag(p, l, x, y)
+		moved := profile_drag_move(p, l, y)
+		// A drop outside the page keeps the saved order; the group eases back to its place.
+		if !contains(l.list, x, y) {p.drag_target = p.drag_from}
+		return moved
 	case .Profile_Order:
 		return profile_drag_move(p, l, y)
 	case .Wheel, .Ramp:
@@ -1981,10 +2034,9 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	p.drag = .None
 	p.filter.dragging, p.value.dragging = false, false
 	if drag == .Process_Order {
-		if p.drag_target < 0 {return .Changed}
 		slot := p.drag_target
-		if slot > p.process_drag_from {slot -= 1}
-		if slot == p.process_drag_from {return .Changed}
+		if slot > p.drag_from {slot -= 1}
+		if slot == p.drag_from {return .Changed}
 		editor_process_move(p, p.process_drag_id, slot)
 		return .Process_Save
 	}
@@ -3260,6 +3312,5 @@ editor_draw :: proc(
 		}
 		icon_draw(list, .Undo, parts.reset, icon_color, ICON_BUTTON, s)
 	}
-	if p.drag == .Process_Order {editor_process_drag_draw(p, l, list, theme)}
 	return popup_draw(p, l, list, text, theme, pointer)
 }

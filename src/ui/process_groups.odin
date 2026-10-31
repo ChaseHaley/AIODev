@@ -351,13 +351,13 @@ editor_process_press :: proc(
 		if contains(cells.handle, x, y) {
 			if !editor_process_orderable(p) {return .Changed, true}
 			p.process_drag_id = row.process
-			p.process_drag_from = 0
+			p.drag_from = 0
 			for candidate in p.rows {
 				if candidate.process_field != .Group {continue}
 				if candidate.process == row.process {break}
-				p.process_drag_from += 1
+				p.drag_from += 1
 			}
-			p.drag, p.drag_target = .Process_Order, p.process_drag_from
+			p.drag, p.drag_target = .Process_Order, p.drag_from
 			return .Changed, true
 		}
 		if contains(cells.remove, x, y) {
@@ -381,36 +381,6 @@ editor_process_orderable :: proc(p: ^Editor) -> bool {
 		if item.row >= 0 && p.rows[item.row].process_field == .Group {visible += 1}
 	}
 	return total == visible
-}
-
-editor_process_drag :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
-	previous := p.drag_target
-	p.drag_target = -1
-	if !contains(l.list, x, y) {return previous != -1}
-	slot := 0
-	for item, index in p.items {
-		if item.row < 0 || p.rows[item.row].process_field != .Group {continue}
-		top := l.list.y + f32(index - p.scroll) * l.row_height
-		if y < top + l.row_height / 2 {break}
-		slot += 1
-	}
-	p.drag_target = slot
-	return previous != slot
-}
-
-editor_process_drag_draw :: proc(p: ^Editor, l: Editor_Layout, list: ^render.Draw_List, theme: Theme) {
-	if p.drag_target < 0 {return}
-	slot := 0
-	y := l.list.y
-	for item, index in p.items {
-		if item.row < 0 || p.rows[item.row].process_field != .Group {continue}
-		y = l.list.y + f32(index - p.scroll) * l.row_height
-		if slot == p.drag_target {break}
-		y += l.row_height
-		slot += 1
-	}
-	draw_rect(list, {rect = {l.list.x + 8 * l.scale, y - l.scale,
-		l.list.width - 16 * l.scale, 2 * l.scale}, color = theme.accent})
 }
 
 editor_process_draw :: proc(

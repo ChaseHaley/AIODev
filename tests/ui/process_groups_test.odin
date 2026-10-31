@@ -5,6 +5,7 @@ import "aio:ui"
 import "base:runtime"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 @(private)
 process_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
@@ -179,4 +180,46 @@ process_groups_partial_load_and_caption_allocation_failures_are_safe :: proc(t: 
 		}
 		ui.editor_destroy(&p)
 	}
+}
+
+@(test)
+process_groups_drag_reflows_whole_groups_like_profiles :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	process_fixture(t, &p)
+	l := ui.editor_layout({0, 0, 1100, 900}, 1)
+	p.visible_rows = l.rows
+	testing.expect(t, ui.editor_reveal(&p, "process.group.1.name"))
+	header := profile_item_index(&p, "process.group.1")
+	name := profile_item_index(&p, "process.group.1.name")
+	tools := profile_item_index(&p, "process.group.2")
+	header_row := ui.editor_row_parts(&p, l, header).row
+	name_row := ui.editor_row_parts(&p, l, name).row
+	tools_row := ui.editor_row_parts(&p, l, tools).row
+	handle := ui.editor_process_parts(header_row, 1).handle
+	x, y := handle.x + handle.width / 2, handle.y + handle.height / 2
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, p.drag, ui.Editor_Drag.Process_Order)
+
+	// The grabbed group follows the pointer with its fields.
+	testing.expect(t, ui.editor_drag(&p, l, nil, x, y + 10))
+	testing.expect(t, abs(ui.editor_row_parts(&p, l, header).row.y - header_row.y - 10) < 0.01)
+	testing.expect(t, abs(ui.editor_row_parts(&p, l, name).row.y - name_row.y - 10) < 0.01)
+	testing.expect_value(t, ui.editor_row_parts(&p, l, tools).row.y, tools_row.y)
+
+	// Past the next group's midpoint, that group eases up into the grabbed group's place.
+	testing.expect(t, ui.editor_drag(&p, l, nil, x, tools_row.y + tools_row.height * 2))
+	testing.expect(t, ui.editor_profiles_animate(&p, true, time.tick_now()))
+	testing.expect(t, ui.editor_profiles_animating(&p))
+	ui.editor_profiles_animate(&p, false, time.tick_now())
+	testing.expect_value(t, ui.editor_row_parts(&p, l, tools).row.y, header_row.y)
+
+	// Dropping saves the new order, then every row settles on its own line.
+	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Process_Save)
+	value, problem := ui.editor_process_value(&p)
+	testing.expect_value(t, problem, "")
+	testing.expect(t, strings.has_prefix(value, "Tools:"))
+	testing.expect(t, ui.editor_profiles_animating(&p))
+	ui.editor_profiles_animate(&p, false, time.tick_now())
+	testing.expect(t, !ui.editor_profiles_animating(&p))
 }
