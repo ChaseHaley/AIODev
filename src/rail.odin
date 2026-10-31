@@ -88,8 +88,8 @@ rail_area :: proc(w: ^Window) -> render.Rect {
 }
 
 rail_width_pixels :: proc(w: ^Window) -> f32 {
-	width := w.rail_width > 0 ? w.rail_width : ui.RAIL_WIDTH
-	return ui.rail_pixel_width(w.scale, width, f32(w.width))
+	width := w.rail_width > 0 ? w.rail_width : w.rail_default_width
+	return ui.rail_pixel_width(w.scale, width > 0 ? width : ui.RAIL_WIDTH, f32(w.width))
 }
 
 rail_resize_rect :: proc(w: ^Window) -> render.Rect {

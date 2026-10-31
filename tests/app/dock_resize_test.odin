@@ -4,6 +4,7 @@ import app "../../src"
 import "aio:layout"
 import "aio:platform"
 import "aio:settings"
+import "core:math"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -93,4 +94,83 @@ activity_side_button_persists_setting_and_cancels_outside_or_on_capture_loss :: 
 			testing.expect_value(t, window.dock_left_width > 0, side == .Left)
 		}
 	}
+}
+
+@(private)
+dock_click_at :: proc(s: ^app.App, w: ^app.Window, x, y: f32, time_ns: i64) {
+	for pressed in ([?]bool{true, false}) {
+		app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left,
+			pressed = pressed, x = i32(x), y = i32(y), time_ns = time_ns})
+	}
+}
+
+@(test)
+activity_in_rail_height_drags_clamps_and_double_click_resets_to_setting :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-height") {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.panel = true
+	s.settings.status.panel_side = .Left
+	s.settings.tabs.orientation = .Vertical
+	app.window_apply_settings(s, w)
+	for scale in ([?]f32{1, 1.5}) {
+		w.scale, w.width, w.height = scale, i32(1400 * scale), i32(900 * scale)
+		w.status.panel_height = 0
+		app.rail_adaptive_update(w)
+		app.window_relayout(s, w)
+		rail := app.rail_area(w)
+		panel := app.status_panel_rect(s, w)
+		testing.expect_value(t, panel.height, math.round(rail.height * 0.45))
+		x, y := rail.x + rail.width / 2, panel.y
+		pointer_expect_move(t, s, w, x, y, .Resize_Vertical)
+		gesture_button(s, w, .Left, true, x, y)
+		testing.expect_value(t, w.dragging.count, 1)
+		rail_resize_drag_to(s, w, x, y - 60 * scale)
+		testing.expect_value(t, app.status_panel_rect(s, w).height, panel.height + 60 * scale)
+		testing.expect_value(t, w.status_rail_reserve, panel.height + 60 * scale)
+		rail_resize_drag_to(s, w, x, rail.y)
+		testing.expect_value(t, app.status_panel_rect(s, w).y, rail.y + 96 * scale)
+		rail_resize_drag_to(s, w, x, rail.y + rail.height)
+		testing.expect_value(t, app.status_panel_rect(s, w).height, 80 * scale)
+		gesture_button(s, w, .Left, false, x, rail.y + rail.height)
+		testing.expect_value(t, w.dragging.count, 0)
+
+		s.settings.status.panel_height = 30
+		top := app.status_panel_rect(s, w).y
+		dock_click_at(s, w, x, top, 2_000_000_000)
+		dock_click_at(s, w, x, top, 2_200_000_000)
+		testing.expect_value(t, w.status.panel_height, 0)
+		testing.expect_value(t, app.status_panel_rect(s, w).height, math.round(rail.height * 0.3))
+		s.settings.status.panel_height = 45
+	}
+}
+
+@(test)
+dock_double_clicks_reset_widths_to_their_settings :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "dock-defaults") {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.panel = true
+	s.settings.status.panel_side = .Right
+	s.settings.tabs.orientation = .Vertical
+	s.settings.tabs.rail_width = 260
+	s.settings.status.panel_width = 360
+	w.scale, w.width, w.height = 1, 1400, 900
+	app.window_apply_settings(s, w)
+	app.rail_adaptive_update(w)
+	app.window_relayout(s, w)
+	testing.expect_value(t, app.rail_width_pixels(w), 260)
+	testing.expect_value(t, app.status_panel_dock_width(s, w), 360)
+	w.rail_width, w.status.panel_width = 180, 200
+	app.window_relayout(s, w)
+	y := f32(400)
+	dock_click_at(s, w, app.rail_width_pixels(w), y, 2_000_000_000)
+	dock_click_at(s, w, app.rail_width_pixels(w), y, 2_200_000_000)
+	testing.expect_value(t, app.rail_width_pixels(w), 260)
+	edge := f32(w.width) - app.status_panel_dock_width(s, w)
+	dock_click_at(s, w, edge, y, 3_000_000_000)
+	dock_click_at(s, w, edge, y, 3_200_000_000)
+	testing.expect_value(t, app.status_panel_dock_width(s, w), 360)
 }

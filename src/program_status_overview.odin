@@ -22,8 +22,11 @@ STATUS_ROW_HEIGHT :: f32(46)
 STATUS_GROUP_HEIGHT :: f32(24)
 @(private)
 STATUS_INBOX_WIDTH :: f32(420)
+// In the rail the panel keeps its header and a row, and the tabs keep the footer and two rows.
 @(private)
-STATUS_PANEL_WIDTH :: f32(300)
+STATUS_PANEL_RAIL_MIN :: f32(80)
+@(private)
+STATUS_RAIL_TABS_MIN :: f32(96)
 @(private)
 STATUS_CARD_HEIGHT :: f32(74)
 @(private)
@@ -37,7 +40,8 @@ Status_Surface :: enum {
 }
 
 Status_Overview :: struct {
-	panel_width: f32,
+	// A dragged width in DIPs and in-rail height as a share of the rail; zero follows the settings.
+	panel_width, panel_height: f32,
 	panel_side_armed: ui.Armed(bool),
 	panel_side_hover: bool,
 	inbox_open, board_open: bool,
@@ -560,13 +564,21 @@ status_panel_in_rail :: proc(app: ^App, w: ^Window) -> bool {
 // The rail gives the bottom of its height to the panel in vertical view.
 status_panel_rail_height :: proc(app: ^App, w: ^Window) -> f32 {
 	if !status_panel_in_rail(app, w) {return 0}
+	share := w.status.panel_height > 0 ? w.status.panel_height : f32(app.settings.status.panel_height) / 100
+	return status_panel_rail_clamp(w, rail_area(w).height * share)
+}
+
+// Whole-pixel panel height that leaves both the panel and the tab list usable.
+status_panel_rail_clamp :: proc(w: ^Window, height: f32) -> f32 {
 	area := rail_area(w)
-	return math.round(clamp(area.height * 0.45, min(160 * w.scale, area.height / 2), area.height / 2))
+	lowest := min(STATUS_PANEL_RAIL_MIN * w.scale, area.height / 2)
+	highest := max(lowest, area.height - STATUS_RAIL_TABS_MIN * w.scale)
+	return math.round(clamp(height, lowest, highest))
 }
 
 status_panel_dock_width :: proc(app: ^App, w: ^Window) -> f32 {
 	if !status_panel_visible(app, w) || status_panel_in_rail(app, w) {return 0}
-	width := w.status.panel_width > 0 ? w.status.panel_width : STATUS_PANEL_WIDTH
+	width := w.status.panel_width > 0 ? w.status.panel_width : f32(app.settings.status.panel_width)
 	available := f32(w.width) - (rail_docked(w) ? rail_width_pixels(w) : 0)
 	return ui.rail_pixel_width(w.scale, width, available)
 }

@@ -433,3 +433,24 @@ retired_vertical_scope_is_ignored_and_absent_from_the_schema :: proc(t: ^testing
 	}
 	for entry in settings.SCHEMA {testing.expect(t, entry.key != "tabs.vertical_scope")}
 }
+
+@(test)
+dock_size_settings_default_to_the_previous_sizes_and_clamp :: proc(t: ^testing.T) {
+	s, d, err := settings.parse("")
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&d)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, s.tabs.rail_width, 208)
+	testing.expect_value(t, s.status.panel_width, 300)
+	testing.expect_value(t, s.status.panel_height, 45)
+	bad, issues, bad_err := settings.parse(
+		"tabs.rail_width = 100\nstatus.panel_width = 900\nstatus.panel_height = 95\n",
+	)
+	defer settings.destroy(&bad)
+	defer settings.diagnostics_destroy(&issues)
+	testing.expect_value(t, bad_err, nil)
+	testing.expect_value(t, len(issues), 3)
+	testing.expect_value(t, bad.tabs.rail_width, 208)
+	testing.expect_value(t, bad.status.panel_width, 300)
+	testing.expect_value(t, bad.status.panel_height, 45)
+}

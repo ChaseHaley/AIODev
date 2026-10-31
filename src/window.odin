@@ -78,6 +78,8 @@ Window :: struct {
 	rail_hover:          int,
 	rail_pressed:        int,
 	rail_width:          f32,
+	// tabs.rail_width, the width a double-click on the rail edge returns to.
+	rail_default_width:  f32,
 	rail_resizing:       bool,
 	dock_left_width:     f32,
 	tab_orientation_button_hovered: bool,
@@ -163,6 +165,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.scale = f32(platform.primary_dpi(&app.platform)) / 96
 	w.ui_text = app.ui_text
 	w.metrics = window_metrics(app, w.scale)
+	w.rail_default_width = f32(app.settings.tabs.rail_width)
 	w.list = render.draw_list_init()
 	w.rail_rows = make([dynamic]Rail_Row)
 	ui.find_init(&w.find)
@@ -302,6 +305,7 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 window_apply_settings :: proc(app: ^App, w: ^Window) {
 	ui.text_set_size(&w.ui_text, f32(app.settings.interface.font_size) * w.scale * 96 / 72)
 	w.metrics = window_metrics(app, w.scale)
+	w.rail_default_width = f32(app.settings.tabs.rail_width)
 	colors := app.settings.active_theme.colors
 	if platform.window_set_frame_color(&app.platform, w.id, colors[.Tab_Bar].rgb, colors[.Text].rgb) !=
 	   .None {

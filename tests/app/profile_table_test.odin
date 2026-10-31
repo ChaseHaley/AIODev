@@ -160,7 +160,7 @@ profile_table_writes_default_hidden_and_order :: proc(t: ^testing.T) {
 
 	if !testing.expect(t, ui.editor_select_key(e, "profile.gamma")) {return}
 	e.scroll = 0
-	layout := ui.editor_layout({0, 40, 1200, 4000}, 1)
+	layout := ui.editor_layout({0, 40, 1200, 8000}, 1)
 	gamma := profile_item(e, "profile.gamma")
 	alpha := profile_item(e, "profile.alpha")
 	if !testing.expect(t, gamma >= 0 && alpha >= 0) {return}

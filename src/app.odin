@@ -438,6 +438,7 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 		u16(app.settings.window.columns),
 		u16(app.settings.window.rows),
 		pane_insets(app, scale, nil),
+		f32(app.settings.tabs.rail_width),
 	)
 	return {
 		columns = box.columns,

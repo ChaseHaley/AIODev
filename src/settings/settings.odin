@@ -40,6 +40,7 @@ Tabs_Orientation :: enum int {
 }
 Tabs_Settings :: struct {
 	orientation: Tabs_Orientation,
+	rail_width:  int,
 }
 Status_Scope :: enum int {
 	All,
@@ -57,6 +58,7 @@ Status_Keep :: enum int {
 // the whole protocol off, so programs see the terminal as unsupported.
 Status_Settings :: struct {
 	panel_side: Status_Panel_Side,
+	panel_width, panel_height: int,
 	enabled, tab_indicators, active_tab_indicator, pane_headers, workspace_picker: bool,
 	inbox, panel, board, taskbar:                                                 bool,
 	show_idle, show_working, show_blocked, show_done, show_error:                 bool,
@@ -263,6 +265,17 @@ SCHEMA :: [?]Schema_Entry {
 			"Switch at any time with Ctrl+Shift+L.",
 	},
 	{
+		"tabs.rail_width",
+		"Vertical Tab Width",
+		.Int,
+		offset_of(Settings, tabs) + offset_of(Tabs_Settings, rail_width),
+		"208",
+		144,
+		480,
+		nil,
+		"Width of the vertical tab rail in DIPs. Double-clicking its edge returns it to this width.",
+	},
+	{
 		"status.enabled",
 		"Program Status",
 		.Bool,
@@ -350,6 +363,29 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		{"right", "left"},
 		"Dock Activity at the far right or far left of the workspace.",
+	},
+	{
+		"status.panel_width",
+		"Activity Panel Width",
+		.Int,
+		offset_of(Settings, status) + offset_of(Status_Settings, panel_width),
+		"300",
+		144,
+		480,
+		nil,
+		"Width of the docked activity panel in DIPs. Double-clicking its edge returns it to this width.",
+	},
+	{
+		"status.panel_height",
+		"Activity Panel Height",
+		.Int,
+		offset_of(Settings, status) + offset_of(Status_Settings, panel_height),
+		"45",
+		20,
+		80,
+		nil,
+		"Share of the vertical tab rail the activity panel takes below the tabs, in percent. " +
+			"Double-clicking its edge returns it to this height.",
 	},
 	{
 		"status.board",

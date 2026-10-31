@@ -5,6 +5,8 @@ import "aio:ui"
 
 RAIL_DIVIDER :: layout.Node_Id(max(u32) - 1)
 ACTIVITY_DIVIDER :: layout.Node_Id(max(u32) - 2)
+// The edge between the tab list and an activity panel sharing the rail.
+ACTIVITY_HEIGHT_DIVIDER :: layout.Node_Id(max(u32) - 3)
 
 window_dividers :: proc(app: ^App, w: ^Window) {
 	if w.tree == nil {return}
@@ -16,7 +18,12 @@ window_dividers :: proc(app: ^App, w: ^Window) {
 			rect = {r.x + 3 * w.scale, r.y, max(1, gap), r.height}}
 		inject_at(&w.dividers, 0, d)
 	}
-	if status_panel_visible(app, w) && !status_panel_in_rail(app, w) {
+	if status_panel_in_rail(app, w) {
+		r := status_panel_rect(app, w)
+		d := layout.Divider{node = ACTIVITY_HEIGHT_DIVIDER, axis = .Vertical,
+			rect = {r.x, r.y, r.width, max(1, w.scale)}}
+		inject_at(&w.dividers, 0, d)
+	} else if status_panel_visible(app, w) {
 		r := status_panel_rect(app, w)
 		x := app.settings.status.panel_side == .Left ? r.x + r.width : r.x - gap
 		d := layout.Divider{node = ACTIVITY_DIVIDER, axis = .Horizontal,
@@ -26,15 +33,46 @@ window_dividers :: proc(app: ^App, w: ^Window) {
 }
 
 dock_divider :: proc(node: layout.Node_Id) -> bool {
-	return node == RAIL_DIVIDER || node == ACTIVITY_DIVIDER
+	return node == RAIL_DIVIDER || node == ACTIVITY_DIVIDER || node == ACTIVITY_HEIGHT_DIVIDER
 }
 
-dock_divider_drag :: proc(app: ^App, w: ^Window, node: layout.Node_Id, x: f32) {
-	width := x
+// Where a dock edge sits on its own axis: x for the side edges, y for the panel's top in the rail.
+dock_divider_position :: proc(app: ^App, w: ^Window, node: layout.Node_Id) -> f32 {
+	switch node {
+	case RAIL_DIVIDER:
+		return rail_area(w).x + rail_width_pixels(w)
+	case ACTIVITY_HEIGHT_DIVIDER:
+		return status_panel_rect(app, w).y
+	}
+	width := status_panel_dock_width(app, w)
+	return app.settings.status.panel_side == .Left ? width : f32(w.width) - width
+}
+
+dock_divider_drag :: proc(app: ^App, w: ^Window, node: layout.Node_Id, position: f32) {
+	if node == ACTIVITY_HEIGHT_DIVIDER {
+		area := rail_area(w)
+		if area.height <= 0 {return}
+		height := status_panel_rail_clamp(w, area.y + area.height - position)
+		w.status.panel_height = height / area.height
+		return
+	}
+	width := position
 	if node == RAIL_DIVIDER {width -= rail_area(w).x}
-	if node == ACTIVITY_DIVIDER && app.settings.status.panel_side == .Right {width = f32(w.width) - x}
+	if node == ACTIVITY_DIVIDER && app.settings.status.panel_side == .Right {width = f32(w.width) - position}
 	available := f32(w.width)
 	if node == ACTIVITY_DIVIDER && rail_docked(w) {available -= rail_width_pixels(w)}
 	width = ui.rail_pixel_width(w.scale, width / w.scale, available) / w.scale
 	if node == RAIL_DIVIDER {w.rail_width = width} else {w.status.panel_width = width}
+}
+
+// Double-clicking a dock edge returns it to the size its setting names.
+dock_divider_reset :: proc(w: ^Window, node: layout.Node_Id) {
+	switch node {
+	case RAIL_DIVIDER:
+		w.rail_width = 0
+	case ACTIVITY_DIVIDER:
+		w.status.panel_width = 0
+	case ACTIVITY_HEIGHT_DIVIDER:
+		w.status.panel_height = 0
+	}
 }

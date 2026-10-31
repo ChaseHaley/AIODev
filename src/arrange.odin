@@ -81,8 +81,7 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 		w.divider_click_node = layout.INVALID_NODE
 		balanced := false
 		for d in hits[:n] {
-			if d.node == RAIL_DIVIDER {w.rail_width = 0; balanced = true}
-			else if d.node == ACTIVITY_DIVIDER {w.status.panel_width = 0; balanced = true}
+			if dock_divider(d.node) {dock_divider_reset(w, d.node); balanced = true}
 			else {balanced = layout.balance_related(w.tree, d.node) || balanced}
 		}
 		if balanced {window_relayout(app, w)}
@@ -95,10 +94,8 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 	for d, i in hits[:n] {
 		w.dragging.nodes[i] = d.node
 		if dock_divider(d.node) {
-			position := d.node == RAIL_DIVIDER ? rail_area(w).x + rail_width_pixels(w) :
-				(app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) :
-					f32(w.width) - status_panel_dock_width(app, w))
-			w.dragging.offsets[i] = x - position
+			pointer := d.axis == .Vertical ? y : x
+			w.dragging.offsets[i] = pointer - dock_divider_position(app, w, d.node)
 		}
 		if d.node == RAIL_DIVIDER {w.rail_resizing = true}
 	}
@@ -112,8 +109,10 @@ divider_drag :: proc(app: ^App, w: ^Window, x, y: f32) {
 	moved := false
 	for node, i in w.dragging.nodes[:w.dragging.count] {
 		if dock_divider(node) {
-			dock_divider_drag(app, w, node, x - w.dragging.offsets[i])
+			pointer := node == ACTIVITY_HEIGHT_DIVIDER ? y : x
+			dock_divider_drag(app, w, node, pointer - w.dragging.offsets[i])
 			w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
+			w.status_rail_reserve = status_panel_rail_height(app, w)
 			window_dividers(app, w)
 			moved = true
 			continue

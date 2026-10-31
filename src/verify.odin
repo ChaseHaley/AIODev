@@ -1157,7 +1157,7 @@ when AIO_CONTROL {
 				u16(r.columns),
 				u16(r.rows),
 				pane_insets(app, w.scale, focused_session(app, w)),
-				w.rail_width > 0 ? w.rail_width : ui.RAIL_WIDTH,
+				w.rail_width > 0 ? w.rail_width : f32(app.settings.tabs.rail_width),
 			)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) !=
 			   .None {return .System}
