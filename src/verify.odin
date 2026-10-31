@@ -449,6 +449,9 @@ when AIO_CONTROL {
 				{"confirm.title", w.pending_close.confirm.open ? confirm.title : ""},
 				{"confirm.body", w.pending_close.confirm.open ? confirm.body : ""},
 				{"confirm.workspace", fmt.tprintf("%d", w.pending_close.workspace)},
+				{"file.open", fmt.tprintf("%t", w.pending_file.confirm.open)},
+				{"file.path", w.pending_file.file.path},
+				{"file.target", w.pending_file.file.target},
 				{"swap.open", fmt.tprintf("%t", w.pending_swap.confirm.open)},
 				{"swap.opacity", fmt.tprintf("%g", w.pending_swap.confirm.motion.value)},
 				{"swap.profile", w.pending_swap.profile_id},
@@ -917,7 +920,7 @@ when AIO_CONTROL {
 
 	verify_reply :: proc(app: ^App, ok: bool, text: string) {
 		v := &app.verify
-		if err := control.respond(v.server, v.pending.id, {ok, text}); err != .None {
+		if err := control.respond(v.server, v.pending.id, {ok = ok, text = text}); err != .None {
 			log.errorf("answering control request failed: %v", err)
 		}
 		verify_clear(v)
@@ -1162,7 +1165,10 @@ when AIO_CONTROL {
 			command := commands.find(&app.registry, r.name)
 			if command == nil || command.disabled {return .Invalid_Argument}
 			palette_close(app, w)
-			run_action(app, w, Action(command.id), r.direction, r.ratio, r.focus)
+			// Verification stands in for a person at the keyboard, acting on this window's focus.
+			invocation := commands.invocation(command.id, .Key)
+			invocation.direction, invocation.ratio, invocation.focus = r.direction, r.ratio, r.focus
+			_ = command_invoke(app, w, invocation)
 		case:
 			return .Invalid_Argument
 		}

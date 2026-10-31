@@ -74,17 +74,18 @@ tab_menu_exact_single_rows :: proc(t: ^testing.T) {
 	if !menu_fixture_init(t, &f, 1) { return }
 	w := &f.w
 	app.tab_menu_open(&f.state, w, 0, 10, 20)
-	if !testing.expect_value(t, w.tab_menu.count, 8) { return }
-	labels := [?]string{"Rename", "Duplicate", "", "Close to the Right", "Close Others", "Close", "", "Tab Settings"}
-	actions := [?]app.Action{.Rename_Tab, .Duplicate_Tab, {}, .Close_Right_Tabs,
+	if !testing.expect_value(t, w.tab_menu.count, 10) { return }
+	labels := [?]string{"Rename", "Duplicate", "", "Move Tab to Workspace…", "Move Tab to New Workspace",
+		"Close to the Right", "Close Others", "Close", "", "Tab Settings"}
+	actions := [?]app.Action{.Rename_Tab, .Duplicate_Tab, {}, .Move_Tab_Workspace, .Move_Tab_New_Workspace, .Close_Right_Tabs,
 		.Close_Other_Tabs, .Close_Tab, {}, .Tab_Settings}
 	for label, i in labels {
 		testing.expect_value(t, app.tab_menu_label(w, i), label)
 		testing.expect_value(t, w.tab_menu.separators[i], label == "")
 		if label != "" { testing.expect_value(t, w.tab_menu.actions[i], actions[i]) }
 	}
-	testing.expect(t, !app.tab_menu_enabled(w, 3) && !app.tab_menu_enabled(w, 4))
-	for index in ([?]int{2, 3, 4, 6}) {
+	testing.expect(t, !app.tab_menu_enabled(w, 5) && !app.tab_menu_enabled(w, 6))
+	for index in ([?]int{2, 5, 6, 8}) {
 		w.tab_menu.selected = index
 		app.tab_menu_choose(&f.state, w)
 		testing.expect(t, w.tab_menu.open)
@@ -133,15 +134,15 @@ tab_menu_group_and_settings_capabilities :: proc(t: ^testing.T) {
 	testing.expect(t, f.workspace.tabs[0].marked && f.workspace.tabs[2].marked)
 	testing.expect_value(t, f.workspace.selected, 2)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
-	testing.expect_value(t, w.tab_menu.count, 8)
+	testing.expect_value(t, w.tab_menu.count, 10)
 	testing.expect(t, !f.workspace.tabs[0].marked && !f.workspace.tabs[2].marked)
 	testing.expect(t, app.tab_menu_enabled(w, 3) && app.tab_menu_enabled(w, 4))
 	settings_tab := f.workspace.tabs[1]
 	layout.destroy(&settings_tab.tree)
 	testing.expect_value(t, layout.init(&settings_tab.tree, {.Settings, 0}), nil)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
-	testing.expect_value(t, w.tab_menu.count, 8)
-	for label, i in ([?]string{"Rename", "Duplicate", "", "Close to the Right",
+	testing.expect_value(t, w.tab_menu.count, 10)
+	for label, i in ([?]string{"Rename", "Duplicate", "", "Move Tab to Workspace…", "Move Tab to New Workspace", "Close to the Right",
 		"Close Others", "Close", "", "Tab Settings"}) {
 		testing.expect_value(t, app.tab_menu_label(w, i), label)
 	}
@@ -165,17 +166,17 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	menu_key(&f, {key = .Arrow_Down})
 	testing.expect_value(t, w.tab_menu.selected, 1)
 	menu_key(&f, {key = .Arrow_Down})
-	testing.expect_value(t, w.tab_menu.selected, 5)
+	testing.expect_value(t, w.tab_menu.selected, 3)
 	menu_key(&f, {key = .Arrow_Down})
-	testing.expect_value(t, w.tab_menu.selected, 7)
+	testing.expect_value(t, w.tab_menu.selected, 4)
 	menu_key(&f, {key = .N, modifiers = {.Control}})
-	testing.expect_value(t, w.tab_menu.selected, 0)
-	menu_key(&f, {key = .Y, unshifted = 'p', modifiers = {.Control}})
 	testing.expect_value(t, w.tab_menu.selected, 7)
+	menu_key(&f, {key = .Y, unshifted = 'p', modifiers = {.Control}})
+	testing.expect_value(t, w.tab_menu.selected, 4)
 	menu_key(&f, {key = .Home})
 	testing.expect_value(t, w.tab_menu.selected, 0)
 	menu_key(&f, {key = .End})
-	testing.expect_value(t, w.tab_menu.selected, 7)
+	testing.expect_value(t, w.tab_menu.selected, 9)
 	menu_key(&f, {key = .Escape})
 	testing.expect(t, !w.tab_menu.open && w.suppressed_key == nil)
 	menu_key(&f, {key = .F10, modifiers = {.Shift}})
@@ -195,7 +196,7 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	app.handle_event(&f.state, platform.Mouse_Wheel_Event{window = w.id, delta_y = -1})
 	testing.expect_value(t, w.tab_menu.selected, 1)
 	app.handle_event(&f.state, platform.Mouse_Wheel_Event{window = w.id, delta_y = -1})
-	testing.expect_value(t, w.tab_menu.selected, 5)
+	testing.expect_value(t, w.tab_menu.selected, 3)
 	app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = 799, y = 599})
 	testing.expect(t, !w.tab_menu.open)
@@ -229,7 +230,7 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 		testing.expect_value(t, len(w.close_restore), 0)
 	}
 	app.tab_menu_open(&f.state, w, 0, 10, 20)
-	w.tab_menu.selected = 3
+	w.tab_menu.selected = 5
 	app.tab_menu_choose(&f.state, w)
 	menu_key(&f, {key = .Enter})
 	testing.expect_value(t, len(f.workspace.tabs), 1)
@@ -298,7 +299,7 @@ tab_menu_draw_matches_labels_separators_and_disabled_rows :: proc(t: ^testing.T)
 		testing.expect_value(t, render.push_layer(&expected, {0, 0, f32(w.width), f32(w.height)}), render.Error.None)
 		testing.expect_value(t, app.tab_menu_draw(&f.state, w), glyphs.Result.Ok)
 		y := app.tab_menu_row_rect(w, 0).y
-		labels := [?]string{"Rename", "Duplicate", "", "Close to the Right",
+		labels := [?]string{"Rename", "Duplicate", "", "Move Tab to Workspace…", "Move Tab to New Workspace", "Close to the Right",
 			"Close Others", "Close", "", "Tab Settings"}
 		for label, i in labels {
 			row := app.tab_menu_row_rect(w, i)
@@ -313,7 +314,7 @@ tab_menu_draw_matches_labels_separators_and_disabled_rows :: proc(t: ^testing.T)
 			}
 			testing.expect_value(t, ui.draw_text(&w.ui_text, &expected, label, row.x+10*scale,
 				row.y+(row.height-w.ui_text.line_height)/2+w.ui_text.ascent,
-				i == 3 || i == 4 ? f.state.theme.muted : f.state.theme.text,
+				i == 5 || i == 6 ? f.state.theme.muted : f.state.theme.text,
 				max(1, row.width-20*scale)), glyphs.Result.Ok)
 		}
 		testing.expect_value(t, len(w.list.glyphs), len(expected.glyphs))

@@ -24,6 +24,10 @@ Command :: struct {
 	name, title:         string,
 	shortcuts, defaults: Shortcut_Set,
 	disabled:            bool,
+	// The arguments the command accepts, and those it cannot run without.
+	arguments, required: Arguments,
+	// Hidden commands serve the CLI and scripts: they stay out of the palette and shortcut lists.
+	hidden:              bool,
 }
 Error :: enum {
 	None,

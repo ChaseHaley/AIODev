@@ -16,7 +16,7 @@ window_dividers :: proc(app: ^App, w: ^Window) {
 			rect = {r.x + 3 * w.scale, r.y, max(1, gap), r.height}}
 		inject_at(&w.dividers, 0, d)
 	}
-	if status_panel_visible(app, w) {
+	if status_panel_visible(app, w) && !status_panel_in_rail(app, w) {
 		r := status_panel_rect(app, w)
 		x := app.settings.status.panel_side == .Left ? r.x + r.width : r.x - gap
 		d := layout.Divider{node = ACTIVITY_DIVIDER, axis = .Horizontal,

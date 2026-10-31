@@ -83,7 +83,30 @@ float3 hsv_rgb(float hue, float saturation, float value) {
     return value * lerp(1, k, saturation);
 }
 
+float segment_distance(float2 p, float2 a, float2 b) {
+    float2 pa = p - a, ba = b - a;
+    float h = saturate(dot(pa, ba) / max(dot(ba, ba), 1e-6));
+    return length(pa - ba * h);
+}
+
+// The arc runs clockwise on screen from angle s.z through s.w radians around s.xy.
+float arc_distance(float2 p, float4 s, float radius) {
+    float2 v = p - s.xy;
+    float t = atan2(v.y, v.x) - s.z;
+    t -= 6.2831853 * floor(t / 6.2831853);
+    if (t <= s.w) return abs(length(v) - radius);
+    float2 e0 = s.xy + radius * float2(cos(s.z), sin(s.z));
+    float2 e1 = s.xy + radius * float2(cos(s.z + s.w), sin(s.z + s.w));
+    return min(length(p - e0), length(p - e1));
+}
+
 float4 rect_ps(Vertex i) : SV_Target {
+    if (i.flags == 4 || i.flags == 5) {
+        float d = i.flags == 4 ? segment_distance(i.local, i.sheen.xy, i.sheen.zw)
+                               : arc_distance(i.local, i.sheen, i.edge.x);
+        float a = saturate(0.5 + i.extra.x * 0.5 - d) * i.color.a * clip_coverage(i.position.xy);
+        return float4(i.color.rgb * a, a);
+    }
     float radius = clamp(i.edge.x, 0, min(i.rect.z, i.rect.w) * 0.5);
     float2 q = abs(i.local - i.rect.zw * 0.5) - i.rect.zw * 0.5 + radius;
     float distance = length(max(q, 0)) + min(max(q.x, q.y), 0) - radius;

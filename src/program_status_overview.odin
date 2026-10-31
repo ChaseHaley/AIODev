@@ -220,11 +220,7 @@ status_row_draw :: proc(
 	)
 	if show_dismiss {
 		close := status_dismiss_rect(w, r)
-		large := w.ui_text
-		ui.text_set_size(&large, w.ui_text.size_px * 1.35)
-		if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.muted); result != .Ok {
-			return result
-		}
+		ui.icon_draw(&w.list, .Close, close, app.theme.muted, ui.ICON_INDICATOR, s)
 	}
 	return .Ok
 }
@@ -556,8 +552,20 @@ status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
 	return true
 }
 
+// Vertical view puts a left panel under the tabs in the docked rail.
+status_panel_in_rail :: proc(app: ^App, w: ^Window) -> bool {
+	return status_panel_visible(app, w) && app.settings.status.panel_side == .Left && rail_docked(w)
+}
+
+// The rail gives the bottom of its height to the panel in vertical view.
+status_panel_rail_height :: proc(app: ^App, w: ^Window) -> f32 {
+	if !status_panel_in_rail(app, w) {return 0}
+	area := rail_area(w)
+	return math.round(clamp(area.height * 0.45, min(160 * w.scale, area.height / 2), area.height / 2))
+}
+
 status_panel_dock_width :: proc(app: ^App, w: ^Window) -> f32 {
-	if !status_panel_visible(app, w) {return 0}
+	if !status_panel_visible(app, w) || status_panel_in_rail(app, w) {return 0}
 	width := w.status.panel_width > 0 ? w.status.panel_width : STATUS_PANEL_WIDTH
 	available := f32(w.width) - (rail_docked(w) ? rail_width_pixels(w) : 0)
 	return ui.rail_pixel_width(w.scale, width, available)
@@ -565,6 +573,11 @@ status_panel_dock_width :: proc(app: ^App, w: ^Window) -> f32 {
 
 status_panel_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	if !status_panel_visible(app, w) {return {}}
+	if status_panel_in_rail(app, w) {
+		area := rail_area(w)
+		height := status_panel_rail_height(app, w)
+		return {area.x, area.y + area.height - height, area.width, height}
+	}
 	content := window_content_area(app, w)
 	gap := window_gap(app, w)
 	width := status_panel_dock_width(app, w) - gap
@@ -610,10 +623,17 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if panel.width <= 0 || panel.height <= 0 {return .Ok}
 	s := w.scale
 	if render.push_layer(&w.list, panel) != .None {return .Ok}
-	{
+	if !status_panel_in_rail(app, w) {
 		radius := f32(app.settings.pane.corner_radius) * s
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.pane, radius = radius})
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.pane_border, radius = radius, stroke = max(1, s)})
+	} else {
+		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar})
+		ui.draw_rect(&w.list, {rect = {panel.x, panel.y, panel.width - s, s}, color = app.theme.border})
+		ui.draw_rect(
+			&w.list,
+			{rect = {panel.x + panel.width - s, panel.y, s, panel.height}, color = app.theme.border},
+		)
 	}
 	items := status_items(app, w, true)
 	small := ui.text_styled(&w.ui_text, .Small)
@@ -627,13 +647,10 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme.faint,
 	); result != .Ok {return result}
 	button := status_panel_side_rect(app, w)
-	hover := status_rect_contains(button, w.pointer.x, w.pointer.y)
-	if hover {ui.draw_rect(&w.list, {rect = button, color = app.theme.pane_border, radius = 3 * s})}
-	icon := render.Rect{button.x + 5 * s, button.y + 6 * s, 14 * s, 12 * s}
-	ui.draw_rect(&w.list, {rect = icon, color = app.theme.faint, stroke = s})
-	left := app.settings.status.panel_side == .Right
-	stripe := render.Rect{left ? icon.x + 3 * s : icon.x + icon.width - 4 * s, icon.y, s, icon.height}
-	ui.draw_rect(&w.list, {rect = stripe, color = app.theme.faint})
+	hover := f32(int(w.status.panel_side_hover))
+	press := f32(int(ui.armed_down(w.status.panel_side_armed)))
+	icon: ui.Icon = app.settings.status.panel_side == .Left ? .Layout_Left : .Layout_Right
+	_ = ui.icon_button_draw(&w.list, app.theme, button, icon, hover, press, s, w.pointer)
 	list := status_panel_list(app, w, panel)
 	if render.push_layer(&w.list, list) != .None {return .Ok}
 	if len(items) == 0 {

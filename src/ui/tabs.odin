@@ -117,10 +117,7 @@ tab_draw :: proc(
 		close := tab_close_rect(bar, index, scale)
 		close.x += x - bar.x - f32(index) * bar.tab_width
 		close.y -= lift
-		large := text^
-		text_set_size(&large, text.size_px * 1.5)
-		if result := draw_glyph_centered(&large, list, '×', close, theme.tab_text);
-		   result != .Ok {return result}
+		icon_draw(list, .Close, close, theme.tab_text, ICON_INDICATOR, scale)
 	}
 	icon_width := f32(0)
 	if index < bar.count && status.glyph != .None {
@@ -155,7 +152,9 @@ tab_draw :: proc(
 			icon_atlas,
 		); result != .Ok {return result}
 	}
-	if result := draw_fading_text(
+	if index == bar.count {
+		icon_draw(list, .Add, tile, hover > 0 || pressed > 0 ? theme.text : theme.muted, ICON_BUTTON, scale)
+	} else if result := draw_fading_text(
 		text,
 		list,
 		title,

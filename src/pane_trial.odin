@@ -49,6 +49,8 @@ pane_trial_evaluate :: proc(
 	return {error = .Invalid}
 }
 
+// Splits a copy of `tree` at `node` in w's content area. A nil tree means w's own tree at its focus;
+// any other tree belongs to a tab of w's workspace.
 @(require_results)
 pane_trial_split :: proc(
 	app: ^App,
@@ -56,21 +58,26 @@ pane_trial_split :: proc(
 	direction: layout.Direction,
 	ratio: f32,
 	allocator := context.temp_allocator,
+	tree: ^layout.Layout = nil,
+	node := layout.INVALID_NODE,
+	notify_failure := true,
 ) -> Pane_Trial_Result {
-	if int(w.tree.focus) >= len(w.tree.nodes) {return {error = .Invalid}}
-	if _, ok := w.tree.nodes[w.tree.focus].(layout.Pane); !ok {return {error = .Invalid}}
-	trial, copied := pane_trial_copy(w.tree, allocator)
+	original, target := tree, node
+	if original == nil {original, target = w.tree, w.tree.focus}
+	if int(target) >= len(original.nodes) {return {error = .Invalid}}
+	if _, ok := original.nodes[target].(layout.Pane); !ok {return {error = .Invalid}}
+	trial, copied := pane_trial_copy(original, allocator)
 	if !copied {return {error = .Allocation}}
 	defer layout.destroy(&trial)
 	added, err := layout.split_direction(
 		&trial,
-		trial.focus,
+		target,
 		direction,
 		ratio,
 		{.Terminal, app.next_session_id + 1},
 	)
 	if err != nil {return {error = .Allocation}}
-	return pane_trial_evaluate(app, w, w.tree, &trial, added, true)
+	return pane_trial_evaluate(app, w, original, &trial, added, notify_failure)
 }
 
 @(require_results)

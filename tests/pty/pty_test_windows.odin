@@ -45,12 +45,13 @@ wait_process :: proc(t: ^thread.Thread) {
 	pty.close_console(&r.p)
 }
 
-start :: proc(t: ^testing.T, r: ^Run, command: string, environment: []pty.Env_Var = nil) -> bool {
+start :: proc(t: ^testing.T, r: ^Run, command: string, environment: []pty.Env_Var = nil, path_append := "") -> bool {
 	testing.set_fail_timeout(t, 40 * time.Second)
 	p, err := pty.spawn({
 		command_line = command,
 		working_directory = "C:\\Windows\\System32",
 		environment = environment,
+		path_append = path_append,
 		cols = 80,
 		rows = 25,
 	})
@@ -275,6 +276,17 @@ environment :: proc(t: ^testing.T) {
 	})
 	testing.expect_value(t, err.kind, pty.Spawn_Error_Kind.Invalid_Environment)
 	pty.destroy(&p)
+}
+
+@(test)
+path_append_ends_path :: proc(t: ^testing.T) {
+	r: Run
+	// The last 17 characters of PATH: the separator and the appended directory.
+	if !start(t, &r, "cmd.exe /d /c \"echo TAIL[%PATH:~-17%]\"", nil, `C:\aio-path-test`) {
+		return
+	}
+	finish(t, &r)
+	testing.expect(t, contains(&r, `TAIL[;C:\aio-path-test]`))
 }
 
 @(test)

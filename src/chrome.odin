@@ -127,17 +127,32 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	}
 	if render.push_layer(&w.list, clip) != .None {return}
 	radius := f32(app.settings.pane.corner_radius) * w.scale
-	border := pane.node == w.tree.focus ? app.theme.pane_focus : app.theme.pane_border
+	border, stroke := app.theme.pane_border, max(1, w.scale)
+	if window_focus_outlined(app, w, pane) {
+		border, stroke = app.theme.pane_focus, max(1, f32(app.settings.pane.focus_border) * w.scale)
+	}
 	if render.push_rect(
 		   &w.list,
-		   {
-			   rect = {r.x, r.y, r.width, r.height},
-			   color = border,
-			   radius = radius,
-			   stroke = max(1, w.scale),
-		   },
+		   {rect = {r.x, r.y, r.width, r.height}, color = border, radius = radius, stroke = stroke},
 	   ) !=
 	   .None {return}
+}
+
+@(private)
+window_focus_outlined :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> bool {
+	return pane.node == w.tree.focus && app.settings.pane.focus_border > 0
+}
+
+// Fades an unfocused pane, header included, toward its own background so the focused pane alone
+// keeps full contrast; the outline drawn after it stays crisp.
+window_card_dim :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, background: render.Color) {
+	dim := app.settings.pane.unfocused_dim
+	if dim <= 0 || pane.node == w.tree.focus {return}
+	r := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
+	if render.push_layer(&w.list, r, f32(app.settings.pane.corner_radius) * w.scale) != .None {return}
+	veil := background
+	veil.a = f32(dim) / 100
+	if render.push_rect(&w.list, {rect = r, color = veil}) != .None {return}
 }
 
 @(private)
@@ -152,7 +167,7 @@ window_shared_borders :: proc(app: ^App, w: ^Window) {
 		   ) !=
 		   .None {return}
 		for pane in w.panes {
-			if pane.node != w.tree.focus {continue}
+			if !window_focus_outlined(app, w, pane) {continue}
 			p := pane.rect
 			segment := r
 			if d.axis == .Horizontal {

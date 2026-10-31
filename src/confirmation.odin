@@ -8,8 +8,13 @@ import "core:time"
 // The subjects retain their payload and acceptance policy. Event, motion and frame callers
 // only know this owner, including while a dismissed question finishes fading out.
 @(private)
-confirmation_subjects :: proc(w: ^Window) -> [3]^ui.Confirm {
-	return {&w.pending_close.confirm, &w.pending_swap.confirm, &w.process_remove_confirm}
+confirmation_subjects :: proc(w: ^Window) -> [4]^ui.Confirm {
+	return {
+		&w.pending_close.confirm,
+		&w.pending_swap.confirm,
+		&w.pending_file.confirm,
+		&w.process_remove_confirm,
+	}
 }
 
 confirmation_current :: proc(w: ^Window) -> ^ui.Confirm {
@@ -31,8 +36,9 @@ confirmation_outcome :: proc(app: ^App, w: ^Window, c: ^ui.Confirm, outcome: ui.
 	case .Accept, .Cancel:
 		// Acceptance may retire w. Nothing after the subject's completion may inspect it.
 		if c == &w.pending_close.confirm {pending_close_finish(app, w, outcome == .Accept)}
+		else if c == &w.pending_swap.confirm {pane_swap_finish(app, w, outcome == .Accept)}
 		else if c == &w.process_remove_confirm {editor_process_remove_finish(app, w, outcome == .Accept)}
-		else {pane_swap_finish(app, w, outcome == .Accept)}
+		else {pending_file_finish(app, w, outcome == .Accept)}
 	}
 }
 
@@ -73,15 +79,14 @@ confirmation_release :: proc(w: ^Window) {
 confirmation_clear :: proc(w: ^Window) {
 	pending_close_clear(&w.pending_close)
 	pane_swap_clear(&w.pending_swap)
-	delete(w.process_remove_name)
-	delete(w.process_remove_source)
-	w.process_remove_source = ""
-	w.process_remove_name, w.process_remove_confirm = "", {}
+	pending_file_clear(&w.pending_file)
+	process_remove_clear(w)
 }
 
 confirmation_cancel :: proc(app: ^App, w: ^Window) {
 	if w.pending_close.confirm.open {pending_close_finish(app, w, false)}
 	if w.pending_swap.confirm.open {pane_swap_finish(app, w, false)}
+	if w.pending_file.confirm.open {pending_file_finish(app, w, false)}
 	if w.process_remove_confirm.open {editor_process_remove_finish(app, w, false)}
 	// Close navigation drops its recorded subject immediately; shell switching keeps its
 	// existing fade-out policy and releases the cached profile when that fade settles.
@@ -103,12 +108,9 @@ confirmation_advance :: proc(app: ^App, w: ^Window, now: time.Tick) {
 		if changed || settled {w.dirty = true}
 		if settled {
 			if c == &w.pending_close.confirm {pending_close_clear(&w.pending_close)}
-			else if c == &w.process_remove_confirm {
-				delete(w.process_remove_name)
-				delete(w.process_remove_source)
-				w.process_remove_source = ""
-				w.process_remove_name, w.process_remove_confirm = "", {}
-			} else {pane_swap_clear(&w.pending_swap)}
+			else if c == &w.pending_swap.confirm {pane_swap_clear(&w.pending_swap)}
+			else if c == &w.process_remove_confirm {process_remove_clear(w)}
+			else {pending_file_clear(&w.pending_file)}
 		}
 	}
 }
@@ -120,6 +122,8 @@ confirmation_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		option: string
 		if c == &w.pending_close.confirm {
 			content = pending_close_text(app, &w.pending_close, w.workspace)
+		} else if c == &w.pending_file.confirm {
+			content = pending_file_text(&w.pending_file)
 		} else if c == &w.process_remove_confirm {
 			content.title, content.label = editor_process_remove_title(w), "Delete"
 		} else {
@@ -136,4 +140,11 @@ confirmation_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if result != .Ok {return result}
 	}
 	return .Ok
+}
+
+@(private)
+process_remove_clear :: proc(w: ^Window) {
+	delete(w.process_remove_name)
+	delete(w.process_remove_source)
+	w.process_remove_name, w.process_remove_source, w.process_remove_confirm = "", "", {}
 }

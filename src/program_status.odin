@@ -15,8 +15,6 @@ import "core:time"
 // reach these surfaces; nothing is inferred from screen contents or titles.
 
 @(private)
-STATUS_SPIN_INTERVAL :: 80 * time.Millisecond
-@(private)
 STATUS_SPIN_PERIOD_MS :: 1200
 // At most one notice per pane in this interval keeps a chatty program from flooding the notices.
 @(private)
@@ -212,8 +210,8 @@ status_indicator :: proc(summary: Status_Summary) -> (ui.Status_Mark, bool) {
 status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
 	if mark.glyph != .Working || mark.progress >= 0 || !app.animations {return 0}
 	w.status_spinning = true
-	elapsed := time.tick_now()._nsec / 1_000_000
-	return f32(elapsed % STATUS_SPIN_PERIOD_MS) / STATUS_SPIN_PERIOD_MS
+	period := i64(STATUS_SPIN_PERIOD_MS) * i64(time.Millisecond)
+	return f32(f64(time.tick_now()._nsec % period) / f64(period))
 }
 
 status_mark_draw :: proc(app: ^App, w: ^Window, area: render.Rect, mark: ui.Status_Mark) -> glyphs.Result {
@@ -230,16 +228,14 @@ status_tab_mark :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) 
 	return mark
 }
 
-// Repaints a window that drew a spinner at a low fixed rate; a window without one costs nothing.
-status_spin_tick :: proc(w: ^Window, now: time.Tick) {
-	if !w.status_spinning {
-		w.status_spin_deadline = {}
-		return
-	}
-	if w.status_spin_deadline == {} || time.tick_diff(w.status_spin_deadline, now) >= 0 {
-		if w.status_spin_deadline != {} {w.dirty = true}
-		w.status_spin_deadline = time.tick_add(now, STATUS_SPIN_INTERVAL)
-	}
+// Queue the next frame immediately. window_render waits on the swap chain before sampling the
+// phase, so display refresh paces animation without a timer cap or an extra sleep after Present.
+status_spin_active :: proc(w: ^Window) -> bool {
+	return w.status_spinning && w.width > 0 && w.height > 0 && (!w.preparing || w.preview_visible)
+}
+
+status_spin_tick :: proc(w: ^Window) {
+	if status_spin_active(w) {w.dirty = true}
 }
 
 status_pane_title :: proc(entry: ^Session_Entry) -> string {

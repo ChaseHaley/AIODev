@@ -40,11 +40,17 @@ process_id :: proc(s: ^Session) -> u32 {return pty.process_id(&s.pty)}
 Config :: struct {
 	command_line, working_directory: string,
 	refresh_environment:             bool,
+	// Up to MAX_HOST_ENVIRONMENT variables the host adds for this session, and a directory added
+	// to the end of its PATH.
+	environment:                     []pty.Env_Var,
+	path_append:                     string,
 	geometry:                        Geometry,
 	scrollback_lines:                int,
 	colors:                          Colors,
 	ignore_program_status:           bool,
 }
+
+MAX_HOST_ENVIRONMENT :: 4
 
 Wake :: struct {
 	procedure: proc(user: rawptr),
@@ -296,15 +302,18 @@ apply_mode_defaults :: proc(terminal: ghostty.Terminal) -> bool {
 
 @(private)
 spawn :: proc(s: ^Session, config: Config) {
-	environment := [?]pty.Env_Var {
-		{"TERM", "xterm-256color"},
-		{"COLORTERM", "truecolor"},
-		{"TERM_PROGRAM", "AIODev"},
+	environment: [3 + MAX_HOST_ENVIRONMENT]pty.Env_Var = {
+		0 = {"TERM", "xterm-256color"},
+		1 = {"COLORTERM", "truecolor"},
+		2 = {"TERM_PROGRAM", "AIODev"},
 	}
+	assert(len(config.environment) <= MAX_HOST_ENVIRONMENT)
+	count := 3 + copy(environment[3:], config.environment)
 	options := pty.Spawn_Options {
 		command_line        = config.command_line,
 		working_directory   = config.working_directory,
-		environment         = environment[:],
+		environment         = environment[:count],
+		path_append         = config.path_append,
 		cols                = config.geometry.columns,
 		rows                = config.geometry.rows,
 		refresh_environment = config.refresh_environment,

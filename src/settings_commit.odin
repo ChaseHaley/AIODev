@@ -53,6 +53,7 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	replacement.remove_confirm, view.remove_confirm = view.remove_confirm, ""
 	replacement.detected_open = view.detected_open
 	replacement.process_expanded = view.process_expanded
+	replacement.profile_positions, view.profile_positions = view.profile_positions, {}
 	if !settings_load_source(app, &replacement, revision) {return}
 	if p.process_dirty {
 		if preserve_draft && p.process_source != replacement.process_source {return}

@@ -109,6 +109,7 @@ rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
 	if !rail_rows_build(w, &w.rail_rows) {return {}, false}
 	area := rail_area(w)
+	area.height = max(0, area.height - w.status_rail_reserve)
 	layout = ui.rail_layout(area, w.scale, len(w.rail_rows), w.rail_scroll)
 	w.rail_scroll = layout.scroll
 	return layout, true
@@ -361,10 +362,7 @@ rail_row_draw :: proc(
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
 	if show_close {
-		large := w.ui_text
-		ui.text_set_size(&large, w.ui_text.size_px * 1.35)
-		if result := ui.draw_glyph_centered(&large, &w.list, '×', close, app.theme.tab_text);
-		   result != .Ok {return result}
+		ui.icon_draw(&w.list, .Close, close, app.theme.tab_text, ui.ICON_INDICATOR, s)
 	}
 	label_right := show_close ? close.x - 4 * s : tile.x + tile.width - 8 * s
 	if result := ui.draw_fading_text(
@@ -440,25 +438,16 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		fill := pressed ? app.theme.pressed : app.theme.hover
 		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = 6 * w.scale})
 	}
-	plus := ui.text_styled(&w.ui_text, .Strong)
-	baseline := rail_text_baseline(w, tile)
-	plus_width := ui.text_width(&plus, "+")
-	if result := ui.draw_text(
-		&plus,
-		&w.list,
-		"+",
-		tile.x + 8 * w.scale,
-		baseline,
-		app.theme.accent,
-	); result != .Ok {return result}
+	plus := render.Rect{tile.x + 8 * w.scale, tile.y, ui.ICON_INDICATOR * w.scale, tile.height}
+	ui.icon_draw(&w.list, .Add, plus, app.theme.muted, ui.ICON_INDICATOR, w.scale)
 	if result := ui.draw_fading_text(
 		&w.ui_text,
 		&w.list,
 		"New tab",
-		tile.x + 8 * w.scale + plus_width + 6 * w.scale,
-		baseline,
+		plus.x + plus.width + 6 * w.scale,
+		rail_text_baseline(w, tile),
 		app.theme.muted,
-		max(0, tile.width - 28 * w.scale - plus_width),
+		max(0, tile.width - 40 * w.scale),
 	); result != .Ok {return result}
 	if hover {
 		if ui.hover_rim_draw(&w.list, app.theme, tile, 6 * w.scale, 1, w.scale, w.pointer) != .None {
@@ -466,19 +455,19 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 	}
 	chevron := ui.rail_profile_rect(layout)
-	profile_hover := w.rail_hover == RAIL_PROFILE_ROW
-	profile_pressed := w.rail_pressed == RAIL_PROFILE_ROW
-	if profile_hover || profile_pressed {
-		fill := profile_pressed ? app.theme.pressed : app.theme.hover
-		ui.draw_rect(&w.list, {rect = chevron, color = fill, radius = 6 * w.scale})
-	}
-	if result := ui.draw_glyph_centered(&w.ui_text, &w.list, '▾', chevron, app.theme.muted);
-	   result != .Ok {return result}
-	if profile_hover {
-		if ui.hover_rim_draw(&w.list, app.theme, chevron, 6 * w.scale, 1, w.scale, w.pointer) != .None {
-			return .Ok
-		}
-	}
+	profile_hover := f32(int(w.rail_hover == RAIL_PROFILE_ROW))
+	profile_press := f32(int(w.rail_pressed == RAIL_PROFILE_ROW))
+	_ = ui.icon_button_draw(
+		&w.list,
+		app.theme,
+		chevron,
+		.Chevron_Down,
+		profile_hover,
+		profile_press,
+		w.scale,
+		w.pointer,
+		ui.ICON_INDICATOR,
+	)
 	return .Ok
 }
 
@@ -489,34 +478,9 @@ tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		   &w.list,
 		   {0, 0, f32(w.width), ui.TITLE_BAR_HEIGHT * w.scale},
 	   ) != .None {return .Ok}
-	hover := w.tab_orientation_button_hovered
-	pressed := ui.armed_down(w.tab_orientation_button_armed)
-	if hover || pressed {
-		fill := pressed ? app.theme.pressed : app.theme.hover
-		ui.draw_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale})
-	}
-	icon := render.Rect{r.x + (r.width - 16 * w.scale) / 2, r.y + 8 * w.scale, 16 * w.scale, 16 * w.scale}
-	ink := app.theme.text
-	ui.draw_rect(
-		&w.list,
-		{rect = {icon.x, icon.y + w.scale, icon.width, icon.height - 2 * w.scale},
-			color = ink, radius = 3 * w.scale, stroke = w.scale},
-	)
-	divider := render.Rect{icon.x + 5 * w.scale, icon.y + 4 * w.scale, w.scale, icon.height - 8 * w.scale}
-	if w.tabs_horizontal {
-		divider = {icon.x + 3 * w.scale, icon.y + 5 * w.scale, icon.width - 6 * w.scale, w.scale}
-	}
-	ui.draw_rect(&w.list, {rect = divider, color = ink})
-	if hover {
-		if result := ui.hover_rim_draw(
-			&w.list,
-			app.theme,
-			r,
-			6 * w.scale,
-			1,
-			w.scale,
-			w.pointer,
-		); result != .None {return .Ok}
-	}
+	hover := f32(int(w.tab_orientation_button_hovered))
+	press := f32(int(ui.armed_down(w.tab_orientation_button_armed)))
+	icon: ui.Icon = w.tabs_horizontal ? .Layout_Top : .Layout_Left
+	_ = ui.icon_button_draw(&w.list, app.theme, r, icon, hover, press, w.scale, w.pointer)
 	return .Ok
 }

@@ -107,7 +107,7 @@ pipe_round_trips_delayed_and_exclusive :: proc(t: ^testing.T) {
 		testing.expect_value(t, m.request.(control.Type).text, "hello\n\"\\world")
 		if i == 1 { time.sleep(40*time.Millisecond) }
 		testing.expect(t, !control.delivery_finished(s, m.id))
-		testing.expect_value(t, control.respond(s, m.id, {true, "reply\n\"\\"}), control.Error.None)
+		testing.expect_value(t, control.respond(s, m.id, {ok = true, text = "reply\n\"\\"}), control.Error.None)
 		await_delivery(t, s, m.id)
 		control.message_destroy(m)
 	}
@@ -141,8 +141,8 @@ pipe_disconnect_and_stale_reply :: proc(t: ^testing.T) {
 	defer thread.destroy(worker)
 	next := await_request(t, s)
 	if next != nil {
-		testing.expect_value(t, control.respond(s, m.id, {true, "stale"}), control.Error.Closed)
-		testing.expect_value(t, control.respond(s, next.id, {true, "reply\n\"\\"}), control.Error.None)
+		testing.expect_value(t, control.respond(s, m.id, {ok = true, text = "stale"}), control.Error.Closed)
+		testing.expect_value(t, control.respond(s, next.id, {ok = true, text = "reply\n\"\\"}), control.Error.None)
 		control.message_destroy(next)
 	}
 	thread.join(worker)
@@ -363,7 +363,7 @@ pipe_fragmented_and_coalesced_lines :: proc(t: ^testing.T) {
 		m := await_request(t, s)
 		if m == nil { return }
 		testing.expect_value(t, m.request.(control.Type).text, expected)
-		testing.expect_value(t, control.respond(s, m.id, {false, "observed failure"}), control.Error.None)
+		testing.expect_value(t, control.respond(s, m.id, {ok = false, text = "observed failure"}), control.Error.None)
 		control.message_destroy(m)
 		buffer: [128]u8
 		text := strings.builder_make()
@@ -400,7 +400,7 @@ pipe_delivery_blocked_then_disconnected :: proc(t: ^testing.T) {
 	defer control.message_destroy(m)
 	large := strings.repeat("x", 256*1024)
 	defer delete(large)
-	testing.expect_value(t, control.respond(s, m.id, {true, large}), control.Error.None)
+	testing.expect_value(t, control.respond(s, m.id, {ok = true, text = large}), control.Error.None)
 	testing.expect(t, !control.delivery_finished(s, m.id))
 	testing.expect(t, bool(w.CloseHandle(pipe)))
 	pipe = nil
@@ -459,7 +459,7 @@ pipe_unread_response_releases_instance :: proc(t: ^testing.T) {
 	defer control.message_destroy(m)
 	large := strings.repeat("x", 256*1024)
 	defer delete(large)
-	testing.expect_value(t, control.respond(s, m.id, {true, large}), control.Error.None)
+	testing.expect_value(t, control.respond(s, m.id, {ok = true, text = large}), control.Error.None)
 	testing.expect(t, !control.delivery_finished(s, m.id))
 	// Never read. The single instance must come back after the write stalls.
 	start := time.tick_now()
@@ -546,7 +546,7 @@ pipe_long_wait_and_response_stay_unbounded :: proc(t: ^testing.T) {
 	m := await_request(t, s)
 	if m == nil { return }
 	time.sleep(time.Duration(control.SERVER_IO_TIMEOUT_MS + 1000) * time.Millisecond)
-	testing.expect_value(t, control.respond(s, m.id, {true, "reply\n\"\\"}), control.Error.None)
+	testing.expect_value(t, control.respond(s, m.id, {ok = true, text = "reply\n\"\\"}), control.Error.None)
 	await_delivery(t, s, m.id)
 	control.message_destroy(m)
 	thread.join(worker)
@@ -564,7 +564,7 @@ pipe_long_wait_and_response_stay_unbounded :: proc(t: ^testing.T) {
 	defer control.message_destroy(next)
 	large := strings.repeat("x", 256*1024)
 	defer delete(large)
-	testing.expect_value(t, control.respond(s, next.id, {true, large}), control.Error.None)
+	testing.expect_value(t, control.respond(s, next.id, {ok = true, text = large}), control.Error.None)
 	buffer: [8192]u8
 	received := 0
 	saw_newline := false

@@ -33,6 +33,9 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 		menu.count = 3
 	}
 	if count == 1 {
+		menu.actions[menu.count] = .Move_Tab_Workspace
+		menu.actions[menu.count + 1] = .Move_Tab_New_Workspace
+		menu.count += 2
 		menu.actions[menu.count] = .Close_Right_Tabs
 		menu.count += 1
 	}
@@ -130,7 +133,7 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 	if !tab_menu_enabled(w, w.tab_menu.selected) { return }
 	action := w.tab_menu.actions[w.tab_menu.selected]
 	w.tab_menu.open = false
-	run_action(app, w, action)
+	command_run(app, w, action, .Menu)
 }
 
 tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {

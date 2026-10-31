@@ -53,6 +53,66 @@ hover_rim_draws_a_pointer_centred_line_and_honours_gloss :: proc(t: ^testing.T) 
 }
 
 @(test)
+compact_rim_keeps_a_share_of_the_light :: proc(t: ^testing.T) {
+	theme := ui.theme_from(shipped_theme("studio-dark"))
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	if !testing.expect_value(t, render.push_layer(&list, {0, 0, 200, 100}), render.Error.None) {
+		return
+	}
+	rect := render.Rect{10, 20, 22, 22}
+	if !testing.expect_value(
+		t,
+		ui.hover_rim_draw(&list, theme, rect, 6, 1, 1, {21, 31}),
+		render.Error.None,
+	) {
+		return
+	}
+	if !testing.expect_value(
+		t,
+		ui.hover_rim_draw(&list, theme, rect, 6, 1, 1, {21, 31}, compact = true),
+		render.Error.None,
+	) {
+		return
+	}
+	if !testing.expect_value(t, len(list.rects), 2) {return}
+	testing.expect_value(t, list.rects[0].color.a, theme.rim.a)
+	testing.expect_value(t, list.rects[1].color.a, theme.rim.a * ui.COMPACT_GLOSS)
+	testing.expect_value(t, list.rects[1].fill, render.RECT_FILL_RIM)
+
+	theme.hover_gloss = 0
+	if !testing.expect_value(
+		t,
+		ui.hover_rim_draw(&list, theme, rect, 6, 1, 1, {21, 31}, compact = true),
+		render.Error.None,
+	) {
+		return
+	}
+	testing.expect_value(t, len(list.rects), 2)
+}
+
+@(test)
+icon_buttons_draw_the_compact_rim :: proc(t: ^testing.T) {
+	theme := ui.theme_from(shipped_theme("studio-dark"))
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	if !testing.expect_value(t, render.push_layer(&list, {0, 0, 200, 100}), render.Error.None) {
+		return
+	}
+	if !testing.expect_value(
+		t,
+		ui.icon_button_draw(&list, theme, {10, 20, 22, 22}, .Close, 1, 0, 1, {21, 31}),
+		render.Error.None,
+	) {
+		return
+	}
+	if !testing.expect(t, len(list.rects) > 0) {return}
+	rim := list.rects[len(list.rects) - 1]
+	testing.expect_value(t, rim.fill, render.RECT_FILL_RIM)
+	testing.expect_value(t, rim.color.a, theme.rim.a * ui.COMPACT_GLOSS)
+}
+
+@(test)
 hover_rim_present_reports_whether_the_frame_carries_a_pointer_light :: proc(t: ^testing.T) {
 	theme := ui.theme_from(shipped_theme("studio-dark"))
 	list := render.draw_list_init()

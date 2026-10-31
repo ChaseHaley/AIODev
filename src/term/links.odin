@@ -2,7 +2,9 @@ package term
 
 import "aio:ghostty"
 import "aio:links"
+import "aio:platform"
 import "base:runtime"
+import "core:strings"
 import "core:sync"
 import "core:unicode/utf8"
 
@@ -40,6 +42,7 @@ Link_Map :: struct {
 	columns, rows:         int,
 	generation:            u64,
 	valid:                 bool,
+	relative_files:        bool,
 }
 
 @(private)
@@ -422,6 +425,7 @@ append_span :: proc(m: ^Link_Map, y, first, last, start, length: int) -> bool {
 
 @(private, require_results)
 scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) -> bool {
+	hosts := platform.local_hosts()
 	for y in 0 ..< rows {
 		m.row_start[y] = len(m.row_text)
 		point := ghostty.Point{tag = .Viewport, value = {coordinate = {x = 0, y = u32(y)}}}
@@ -471,14 +475,19 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 					}
 				}
 			}
-			usable := uri != "" && links.allowed(uri)
-			if usable &&
+			// A run only holds a usable target, so its continuation needs no second classification.
+			if uri != "" &&
 			   run_active &&
 			   x == run_last + 1 &&
 			   len(uri) == run_length &&
 			   string(m.text[run_start:run_start + run_length]) == uri {
 				run_last = x
 				continue
+			}
+			usable := uri != "" && links.allowed(uri)
+			if uri != "" && !usable {
+				file_buffer: [4096]u8 = ---
+				_, usable = links.resolve_file(uri, "", hosts, file_buffer[:])
 			}
 			if run_active {
 				if !append_span(m, y, run_first, run_last, run_start, run_length) {
@@ -540,7 +549,12 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 			}
 		}
 		clear(&m.urls)
-		if !links.find(string(m.line_text[:]), &m.urls) {
+		line := string(m.line_text[:])
+		if !links.find(line, &m.urls) {
+			return false
+		}
+		// Only lines with a dot or a separator can hold a file target, and this lock is held.
+		if strings.contains_any(line, "./\\") && !links.find_files(line, m.relative_files, &m.urls) {
 			return false
 		}
 		for url in m.urls {
@@ -595,6 +609,13 @@ link_map_scan_locked :: proc(
 	columns, rows: int,
 ) -> bool {
 	m.valid = false
+	pwd: ghostty.String
+	m.relative_files = false
+	if ghostty.terminal_get(terminal, .Pwd, &pwd) == .Success && pwd.len > 0 {
+		buffer: [4096]u8 = ---
+		_, m.relative_files = links.resolve_file(
+			string(pwd.ptr[:pwd.len]), "", platform.local_hosts(), buffer[:])
+	}
 	clear(&m.spans)
 	clear(&m.text)
 	clear(&m.row_text)

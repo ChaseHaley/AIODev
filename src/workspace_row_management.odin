@@ -162,6 +162,7 @@ workspace_picker_return :: proc(app: ^App, w: ^Window) {
 
 workspace_row_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 	p := &w.workspace_picker
+	if p.move.workspace != 0 {return false}
 	if workspace_picker_icons(p) { return false }
 	if p.mode == .Menu {
 		w.dirty = true
@@ -283,16 +284,6 @@ workspace_button_indicator_rect :: proc(w: ^Window) -> render.Rect {
 	return {max(0, width - 34 * w.scale), 6 * w.scale, min(width, 28 * w.scale), 28 * w.scale}
 }
 
-workspace_chevron_draw :: proc(list: ^render.Draw_List, area: render.Rect, color: render.Color, scale: f32) {
-	for i in 0..<6 {
-		for direction in ([?]f32{-1, 1}) {
-			r := render.Rect{area.x + area.width / 2 + direction * f32(i) * scale - scale,
-				area.y + area.height / 2 + (2 - f32(i)) * scale, 2 * scale, 2 * scale}
-			if render.push_rect(list, {rect = r, color = color, radius = 0.8 * scale}) != .None { return }
-		}
-	}
-}
-
 workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 	r, s := workspace_picker_menu_button_rect(w, index), w.scale
 	p := &w.workspace_picker
@@ -306,10 +297,7 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 		if render.push_rect(&w.list, {rect = r, color = fill, radius = 5 * s}) != .None { return }
 	}
 	ink := hover > 0 ? app.theme.text : app.theme.muted
-	for i in 0..<3 {
-		dot := render.Rect{r.x + r.width / 2 - 1.5 * s, r.y + 8.5 * s + f32(i) * 6 * s, 3 * s, 3 * s}
-		if render.push_rect(&w.list, {rect = dot, color = ink, radius = 1.5 * s}) != .None { return }
-	}
+	ui.icon_draw(&w.list, .More, r, ink, ui.ICON_BUTTON, s)
 	if hover > 0 {
 		if ui.hover_rim_draw(
 			&w.list,

@@ -27,6 +27,7 @@ workspace_view_init :: proc(app: ^App, resources: ^Workspace_View_Resources, wor
 		workspace_view_destroy(resources)
 		return false
 	}
+	resources.editor.scroll = workspace.settings_scroll
 	return true
 }
 
@@ -120,6 +121,8 @@ workspace_adopt :: proc(
 	workspace_picker_cancel(w)
 	pending_close_clear(&w.pending_close)
 	clear(&w.close_restore)
+	// Editor storage belongs to the window; its reading position belongs to the workspace.
+	w.workspace.settings_scroll = w.editor.scroll
 	switch adoption {
 	case .Retain:
 		workspace_view_rebind(&w.resources, &prepared)

@@ -343,6 +343,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		return false
 	}
 	for command in app.registry.items {
+		if command.hidden {continue}
 		value := commands.shortcut_set_text(command.shortcuts, context.temp_allocator)
 		for binding in s.keys {if binding.name == command.name {value = binding.value; break}}
 		row := ui.Editor_Row {
@@ -461,6 +462,7 @@ settings_pane_under_pointer :: proc(
 workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
 	if workspace == nil {return}
 	present := workspace_has_content(workspace, {.Settings, 0})
+	if !present {workspace.settings_scroll = 0}
 	for w in app.windows {
 		if w.workspace != workspace {continue}
 		if present {
@@ -1144,7 +1146,7 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	if e.pressed && !literal && !editor_owns(logical) {
 		if action, found := shortcut_action(app, e); found {
-			run_action(app, w, action)
+			command_run(app, w, action, .Key)
 			return
 		}
 	}

@@ -18,6 +18,7 @@ Workspace_Picker :: struct {
 	rename_motion: ui.Motion,
 	rename_error: bool,
 	saved_query: ui.Text_Field,
+	move: Workspace_Move_Request,
 }
 
 workspace_picker_active :: proc(p: ^Workspace_Picker) -> bool {
@@ -46,6 +47,7 @@ workspace_picker_cancel :: proc(w: ^Window, focus_lost := false) {
 	// Windows' emoji picker can take focus before delivering text to the icon field.
 	if focus_lost && workspace_picker_icons(p) {return}
 	workspace_picker_transition(w, .Closed)
+	p.move = {}
 }
 
 workspace_picker_destroy :: proc(w: ^Window) {
@@ -107,7 +109,7 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Eve
 	} else if hit := workspace_picker_hit(w, x, y); hit >= 0 {
 		shape = .Hand
 		workspace_picker_select(w, hit)
-		if hit < len(p.rows) &&
+		if p.move.workspace == 0 && hit < len(p.rows) &&
 		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 			hover = p.rows[hit].id
 		}

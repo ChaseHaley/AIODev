@@ -3,6 +3,7 @@ package term
 import "aio:ghostty"
 import "base:runtime"
 import "core:log"
+import "core:sync"
 
 Snapshot_Cell :: struct {
 	text:                   string,
@@ -192,4 +193,37 @@ row_text :: proc(s: ^Snapshot, row: int, allocator := context.allocator) -> (str
 	if err != .None {return "", err}
 	delete(m.columns, allocator)
 	return m.text, .None
+}
+
+// The session's visible rows as text, with trailing blank rows dropped. It reads through a render
+// state of its own, so it needs no view and does not wait out a program's synchronized update.
+@(require_results)
+screen_rows :: proc(s: ^Session, allocator := context.allocator) -> ([]string, Error) {
+	state: ghostty.Render_State
+	if err := snapshot_result(ghostty.render_state_new(nil, &state), "creating state"); err != .None {
+		return nil, err
+	}
+	defer ghostty.render_state_free(state)
+	sync.mutex_lock(&s.mutex)
+	result := ghostty.render_state_begin_update(state, s.terminal)
+	sync.mutex_unlock(&s.mutex)
+	if result == .Success {result = ghostty.render_state_end_update(state)}
+	if err := snapshot_result(result, "updating state"); err != .None {return nil, err}
+	shot, shot_error := snapshot(state, context.temp_allocator)
+	if shot_error != .None {return nil, shot_error}
+	rows, rows_error := make([dynamic]string, 0, int(shot.rows), allocator)
+	if rows_error != nil {return nil, .Out_Of_Memory}
+	used := 0
+	for row in 0 ..< int(shot.rows) {
+		text, err := row_text(&shot, row, allocator)
+		if err != .None {
+			for line in rows {delete(line, allocator)}
+			delete(rows)
+			return nil, err
+		}
+		append(&rows, text)
+		if text != "" {used = len(rows)}
+	}
+	for line in rows[used:] {delete(line, allocator)}
+	return rows[:used], .None
 }

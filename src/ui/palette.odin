@@ -118,11 +118,11 @@ Palette_Mode_Info :: struct {
 }
 
 // Identity never relies on colour: every row carries this shape plus its type word.
-@(private) PALETTE_KIND_GLYPHS := [Palette_Kind]string {
-	.Command = "»",
-	.Setting = "⚙",
-	.Tab = "▭",
-	.Workspace = "▦",
+@(private) PALETTE_KIND_ICONS := [Palette_Kind]Icon {
+	.Command = .Command,
+	.Setting = .Settings,
+	.Tab = .Layout_Top,
+	.Workspace = .Workspace,
 }
 
 @(private) PALETTE_CHIP_WIDTHS := [Palette_Mode]f32 {
@@ -667,7 +667,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	workspaces := (p.mode == .All || p.mode == .Workspaces) ? count_of(p.workspaces) : 0
 	enabled_commands := 0
 	if p.mode == .All || p.mode == .Commands {
-		for command in registry.items {if !command.disabled {enabled_commands += 1}}
+		for command in registry.items {if !command.disabled && !command.hidden {enabled_commands += 1}}
 	}
 	setting_count := (p.mode == .All || p.mode == .Settings) ? len(p.settings) : 0
 	candidates := tabs + workspaces + setting_count + enabled_commands
@@ -739,7 +739,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	if p.mode == .All || p.mode == .Commands {
 		start := len(p.ordered)
 		for &command in registry.items {
-			if command.disabled {continue}
+			if command.disabled || command.hidden {continue}
 			if empty {
 				append(&p.ordered, Palette_Result{kind = .Command, command = &command, setting = -1,
 					rank = PALETTE_NO_RANK})
@@ -1517,9 +1517,8 @@ palette_draw :: proc(
 			}
 			if result := draw_text(&label_text, list, type_label, type_x, row.y + 13 * scale,
 				theme.faint, type_width); result != .Ok {return result}
-			glyph_text := text_styled(text, .Small)
-			if result := draw_text(&glyph_text, list, PALETTE_KIND_GLYPHS[item.kind],
-				row.x + padding, row_baseline, theme.muted); result != .Ok {return result}
+			kind_icon := render.Rect{row.x + padding, row_baseline - 10 * scale, 12 * scale, 12 * scale}
+			icon_draw(list, PALETTE_KIND_ICONS[item.kind], kind_icon, theme.muted, ICON_INDICATOR, scale)
 			if shortcut_label != "" {
 				x := row.x + row.width - padding - label_width
 				draw_rect(

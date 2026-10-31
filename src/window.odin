@@ -94,6 +94,7 @@ Window :: struct {
 	process_remove_name: string,
 	process_remove_source: string,
 	process_remove_id: int,
+	pending_file:  Pending_File,
 	close_restore: [dynamic]u32,
 	tab_menu: Tab_Menu,
 	profile_menu: Profile_Menu,
@@ -111,13 +112,14 @@ Window :: struct {
 	wheel_remainder: f32,
 	blinking, cursor_phase_visible: bool,
 	blink_deadline: time.Tick,
-	// A frame that drew a program status spinner repaints at STATUS_SPIN_INTERVAL until one does not.
+	// A frame that drew a spinner requests display-paced frames until one does not.
 	status_spinning: bool,
-	status_spin_deadline: time.Tick,
 	taskbar_state: platform.Progress_State,
 	taskbar_percent: int,
 	taskbar_workspace: ^Workspace,
 	status: Status_Overview,
+	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
+	status_rail_reserve: f32,
 }
 
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
@@ -352,6 +354,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 window_relayout :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
 	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
+	w.status_rail_reserve = status_panel_rail_height(app, w)
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
 		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -587,6 +590,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			if result != .Ok {return frame, result}
 			if header_result := pane_header_draw(app, w, pane, nil);
 			   header_result != .Ok {return frame, header_result}
+			window_card_dim(app, w, pane, app.theme.pane)
 			window_card_outline(app, w, pane)
 			continue
 		}
@@ -645,6 +649,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		}
 		if header_result := pane_header_draw(app, w, pane, entry);
 		   header_result != .Ok {return frame, header_result}
+		window_card_dim(app, w, pane, frame.background)
 		window_card_outline(app, w, pane)
 	}
 	if blinking != w.blinking {

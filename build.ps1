@@ -107,6 +107,9 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     $themeDestination = Join-Path (Split-Path $Output) 'themes'
     New-Item -ItemType Directory -Force $themeDestination | Out-Null
     Copy-Item -Path 'themes/*.json' -Destination $themeDestination -Force
+    # The aio command line ships beside every app build; the app adds its directory to each shell's PATH.
+    [string[]] $cliMode = if ($Mode -contains '-o:speed') { '-o:speed' } else { '-debug' }
+    Invoke-Odin build src/cli "-out:$(Join-Path (Split-Path $Output) 'aio.exe')" @cliMode '-subsystem:console' @flags
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
@@ -167,6 +170,7 @@ switch ($Task) {
         $stage = 'build/package/AIODev'
         New-Item -ItemType Directory -Force $stage | Out-Null
         Copy-Item -LiteralPath 'build/release/aiodev.exe' -Destination "$stage/aiodev.exe"
+        Copy-Item -LiteralPath 'build/release/aio.exe' -Destination "$stage/aio.exe"
         Copy-Item -LiteralPath 'tools/install.ps1' -Destination "$stage/install.ps1"
         Copy-Item -LiteralPath 'vendor/ghostty/LICENSE' -Destination "$stage/Ghostty-LICENSE.txt"
         Copy-Conpty $stage

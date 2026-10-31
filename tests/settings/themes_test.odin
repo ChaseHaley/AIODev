@@ -104,6 +104,7 @@ custom_themes_stack_on_custom_bases_and_survive_cycles :: proc(t: ^testing.T) {
 theme_validation_reports_and_falls_back :: proc(t: ^testing.T) {
 	s, d, err := settings.parse(
 		"theme.name = unknown\ntheme.mode = auto\npane.gap = 25\npane.corner_radius = -1\n" +
+		"pane.focus_border = 9\npane.unfocused_dim = 91\n" +
 		"theme.custom.Bad.cursor = #000000\n" +
 		"theme.custom.mine.nope = #000000\ntheme.custom.mine.cursor = #00000080\n" +
 		"theme.custom.mine.base = Studio\ntheme.custom.mine = #000000\n",
@@ -111,16 +112,19 @@ theme_validation_reports_and_falls_back :: proc(t: ^testing.T) {
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
-	testing.expect_value(t, len(d), 8)
+	testing.expect_value(t, len(d), 10)
 	testing.expect_value(t, s.theme.name, "unknown")
 	testing.expect_value(t, s.active_theme, settings.theme_default())
-	testing.expect_value(t, s.pane, settings.Pane_Settings{5, 7, true, true, 20, 5})
+	testing.expect_value(t, s.pane, settings.Pane_Settings{5, 7, true, true, 20, 5, 1, 0})
 	unknown := false
 	for diagnostic in d {
 		if diagnostic.key == "theme.name" && strings.contains(diagnostic.message, "unknown theme") {unknown = true}
 	}
 	testing.expect(t, unknown)
-	for fixture in ([?]string{"pane.gap = 0\npane.corner_radius = 0", "pane.gap = 24\npane.corner_radius = 16"}) {
+	for fixture in ([?]string{
+		"pane.gap = 0\npane.corner_radius = 0\npane.focus_border = 0\npane.unfocused_dim = 0",
+		"pane.gap = 24\npane.corner_radius = 16\npane.focus_border = 8\npane.unfocused_dim = 90",
+	}) {
 		limits, issues, parse_error := settings.parse(fixture)
 		defer settings.destroy(&limits)
 		defer settings.diagnostics_destroy(&issues)

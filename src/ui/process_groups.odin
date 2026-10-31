@@ -426,14 +426,12 @@ editor_process_draw :: proc(
 	}
 	if row.process_field == .Group {
 		cells := editor_process_parts(r, s)
-		profile_grip_draw(list, cells.handle, theme, s, selected || p.drag == .Process_Order)
-		if result := draw_icon(text, list, ICON_TRASH, cells.remove, theme.muted, 0.9); result != .Ok {
-			return result
-		}
+		grip_ink := selected || p.drag == .Process_Order ? theme.muted : theme.faint
+		icon_draw(list, .Grip, cells.handle, grip_ink, ICON_BUTTON, s)
+		icon_draw(list, .Trash, cells.remove, theme.muted, ICON_BUTTON, s)
 		chevron := render.Rect{cells.remove.x - 26 * s, r.y + (r.height - 26 * s) / 2, 24 * s, 26 * s}
-		if result := draw_icon(text, list,
-			p.process_expanded == row.process ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT,
-			chevron, theme.muted, 0.8); result != .Ok {return result}
+		icon_draw(list, p.process_expanded == row.process ? .Chevron_Down : .Chevron_Right, chevron,
+			theme.muted, ICON_INDICATOR, s)
 		amount := fmt.bprintf(buffer[:], "%s DIP", row.value)
 		x := chevron.x - 8 * s - text_width(text, amount)
 		if result := draw_text(text, list, amount, x, baseline, theme.muted, max(1, chevron.x - x));
@@ -455,9 +453,7 @@ editor_process_draw :: proc(
 			max(1, parts.text_right - r.x - 36 * s)); result != .Ok {return result}
 	}
 	if row.process_field == .Program {
-		if result := draw_icon(text, list, ICON_CLEAR, parts.clear, theme.muted, 0.8); result != .Ok {
-			return result
-		}
+		icon_draw(list, .Close, parts.clear, theme.muted, ICON_INDICATOR, s)
 	}
 	return control_draw(p, row, parts, selected, list, text, theme, r, scale)
 }
