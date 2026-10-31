@@ -60,10 +60,6 @@ try {
     Invoke-Aio expect state 'find.count=1 of 11'
     Invoke-Aio key Shift+Enter
     Invoke-Aio expect state 'find.count=11 of 11'
-    Invoke-Aio key Up
-    Invoke-Aio expect state 'find.count=1 of 11'
-    Invoke-Aio key Down
-    Invoke-Aio expect state 'find.count=11 of 11'
     # A mismatched release, including over title chrome, must neither navigate nor change tabs.
     $before = Read-State
     Invoke-Aio mouse down (Point older) --px
@@ -89,7 +85,46 @@ try {
     Shot disabled-dark
     Invoke-Aio key Esc
     Invoke-Aio expect state find.open=false
-    Invoke-Aio expect state session.viewport=bottom
+    if ((Read-State)['session.viewport'] -eq 'bottom') { throw 'Closing find reset the viewport.' }
+    # Up and Down browse earlier searches like a prompt.
+    Invoke-Aio key Ctrl+Shift+F
+    Invoke-Aio expect state 'find.query='
+    Invoke-Aio key Up
+    Invoke-Aio expect state 'find.query=WORK138_absent_query'
+    Invoke-Aio key Up
+    Invoke-Aio expect state 'find.query=WORK138_line 59'
+    Invoke-Aio key Down
+    Invoke-Aio key Down
+    Invoke-Aio expect state 'find.query='
+    # Case sensitivity and regular expressions.
+    Invoke-Aio type 'work138_LINE 5'
+    Invoke-Aio expect state 'find.count=0 of 11'
+    Invoke-Aio key Alt+C
+    Invoke-Aio expect state find.case_sensitive=true
+    Invoke-Aio expect state 'find.matches=No matches'
+    Invoke-Aio key Alt+C
+    Invoke-Aio expect state 'find.count=0 of 11'
+    Invoke-Aio key Ctrl+A
+    Invoke-Aio type 'WORK138_line 5\d$'
+    Invoke-Aio key Alt+R
+    Invoke-Aio expect state find.regex=true
+    Invoke-Aio expect state 'find.matches=10 matches'
+    Step-Find older
+    Invoke-Aio expect state 'find.count=1 of 10'
+    Shot regex-dark
+    # A click on the terminal hands it the keyboard; the bar and its matches stay.
+    Invoke-Aio mouse click '200,400' --px
+    Invoke-Aio expect state find.focused=false
+    Invoke-Aio expect state find.open=true
+    Invoke-Aio expect state 'find.count=1 of 10'
+    Shot blurred-dark
+    Step-Find close
+    Invoke-Aio expect state find.open=false
+    if ((Read-State)['session.viewport'] -eq 'bottom') { throw 'The close button reset the viewport.' }
+    Invoke-Aio key Ctrl+Shift+F
+    Invoke-Aio key Alt+R
+    Invoke-Aio expect state find.regex=false
+    Invoke-Aio key Esc
     # Theme/DPI snapshots are translated app control evidence, not native monitor-transition proof.
     foreach ($theme in @('studio','tide','ember')) {
         foreach ($mode in @('dark','light')) {
@@ -126,8 +161,7 @@ try {
     Invoke-Aio expect state 'find.count=1 of 11'
     Invoke-Aio key Ctrl+Shift+F
     Invoke-Aio expect state find.open=false
-    Invoke-Aio expect state session.viewport=bottom
-    Write-Output 'PASS find count, pointer/key wrap, disabled controls, retained query focus, narrow DPI/theme and focused-pane scope'
+    Write-Output 'PASS find count, pointer/key wrap, history, case and regex, blur, close button, kept viewport, narrow DPI/theme and focused-pane scope'
 } finally {
     Invoke-Aio stop
 }

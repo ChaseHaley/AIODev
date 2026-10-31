@@ -68,7 +68,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	if e.button == .Left && w.find.open && ui.armed_down(w.find.armed) {
 		entry := focused_session(app, w)
 		l, enabled := find_controls(w, entry)
-		on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, false, x, y))
+		on_find_outcome(app, w, entry, ui.find_mouse(&w.find, l, enabled, e.button, false, x, y))
 		return true
 	}
 	if e.button == .Left &&
@@ -227,8 +227,13 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		entry := focused_session(app, w)
 		l, enabled := find_controls(w, entry)
 		if ui.armed_down(w.find.armed) || ui.find_contains(l, x, y) {
-			on_find_outcome(w, entry, ui.find_mouse(&w.find, l, enabled, e.button, e.pressed, x, y))
+			on_find_outcome(app, w, entry, ui.find_mouse(&w.find, l, enabled, e.button, e.pressed, x, y))
 			return
+		}
+		// A press elsewhere hands the keyboard back to the terminal; the bar and its matches stay.
+		if e.pressed && w.find.focused {
+			ui.find_blur(&w.find, &app.find_history)
+			w.dirty = true
 		}
 	}
 	if e.pressed && e.button == .Left && y < ui.TITLE_BAR_HEIGHT * w.scale &&

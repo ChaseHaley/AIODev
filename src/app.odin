@@ -99,6 +99,7 @@ App :: struct {
 	registry:              commands.Registry,
 	leader:                Maybe(commands.Shortcut),
 	palette:               ui.Palette,
+	find_history:          ui.Find_History,
 	palette_window:        platform_api.Window_Id,
 	notices:               ui.Notices,
 	sessions:              [dynamic]Session_Entry,
@@ -262,6 +263,7 @@ app_destroy :: proc(app: ^App) {
 		font.system_destroy(app.fonts)
 	}
 	ui.palette_destroy(&app.palette)
+	ui.find_history_destroy(&app.find_history)
 	ui.notices_destroy(&app.notices)
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)

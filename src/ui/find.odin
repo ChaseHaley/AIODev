@@ -4,21 +4,41 @@ import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
+import "core:strings"
 
-@(private) FIND_WIDTH :: 460
+@(private) FIND_WIDTH :: 520
 @(private) FIND_HEIGHT :: 40
 @(private) FIND_MARGIN :: 12
 @(private) FIND_PADDING :: 12
 @(private) FIND_RADIUS :: 8
+@(private) FIND_TOGGLE :: 28
+@(private) FIND_HISTORY_LIMIT :: 100
 
+// The bar stays open without the keyboard after a click elsewhere, so the terminal takes keys while
+// matches stay highlighted.
 Find_Bar :: struct {
-	open:  bool,
-	query: Text_Field,
-	hover: Find_Outcome,
-	armed: Armed(Find_Outcome),
+	open, focused:         bool,
+	query:                 Text_Field,
+	case_sensitive, regex: bool,
+	hover:                 Find_Outcome,
+	armed:                 Armed(Find_Outcome),
+	// History position while Up and Down browse it, or -1 while editing.
+	recall:                int,
+	// What was being typed before browsing began, restored by moving past the newest entry.
+	draft:                 Find_Entry,
 }
 
-Find_Layout :: struct { panel, query, status, older, newer: render.Rect }
+Find_Entry :: struct {
+	query:                 string,
+	case_sensitive, regex: bool,
+}
+
+// Searches shared by every window, oldest first.
+Find_History :: struct {
+	entries: [dynamic]Find_Entry,
+}
+
+Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, older, newer, close: render.Rect }
 
 Find_Outcome :: enum {
 	None,
@@ -27,49 +47,169 @@ Find_Outcome :: enum {
 	Older,
 	Newer,
 	Closed,
+	// Pointer targets; activating one returns Changed or Closed.
+	Case_Toggle,
+	Regex_Toggle,
+	Close,
 }
 
 find_init :: proc(f: ^Find_Bar, allocator := context.allocator) {
 	f.query.bytes = make([dynamic]u8, allocator)
+	f.recall = -1
 }
 
 find_destroy :: proc(f: ^Find_Bar) {
 	delete(f.query.bytes)
+	delete(f.draft.query)
 	f^ = {}
 }
 
-find_open :: proc(f: ^Find_Bar) {
-	f.open = true
-	f.hover = .None
-	armed_cancel(&f.armed)
-	field_set(&f.query, "")
+find_history_destroy :: proc(h: ^Find_History) {
+	for entry in h.entries { delete(entry.query) }
+	delete(h.entries)
+	h^ = {}
 }
 
-find_close :: proc(f: ^Find_Bar) {
-	f.open = false
-	f.hover = .None
-	armed_cancel(&f.armed)
-	field_set(&f.query, "")
+find_history_newest :: proc(h: ^Find_History) -> (Find_Entry, bool) {
+	if h == nil || len(h.entries) == 0 { return {}, false }
+	return h.entries[len(h.entries) - 1], true
 }
 
-// Handles a key while the find bar is open. Enter and Up move to older matches;
-// Shift+Enter and Down to newer.
-find_key :: proc(f: ^Find_Bar, e: platform.Key_Event) -> Find_Outcome {
+// Records the query as the newest search, moving an earlier copy of it.
+find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
+	query := field_string(&f.query)
+	if h == nil || len(query) == 0 { return }
+	for entry, i in h.entries {
+		if entry.query != query { continue }
+		if i == len(h.entries) - 1 {
+			h.entries[i].case_sensitive, h.entries[i].regex = f.case_sensitive, f.regex
+			return
+		}
+		delete(entry.query)
+		ordered_remove(&h.entries, i)
+		break
+	}
+	if len(h.entries) >= FIND_HISTORY_LIMIT {
+		delete(h.entries[0].query)
+		ordered_remove(&h.entries, 0)
+	}
+	copied, err := strings.clone(query)
+	if err != nil { return }
+	if _, append_error := append(&h.entries, Find_Entry{copied, f.case_sensitive, f.regex});
+	   append_error != nil {
+		delete(copied)
+	}
+}
+
+// Opens with the keyboard. `restore` refills the newest search, and `select` also selects it so typing
+// replaces it.
+find_open :: proc(f: ^Find_Bar, h: ^Find_History = nil, restore := false, select := false) {
+	f.open, f.focused = true, true
+	f.hover = .None
+	f.recall = -1
+	armed_cancel(&f.armed)
+	newest, found := find_history_newest(h)
+	field_set(&f.query, (restore || select) && found ? newest.query : "")
+	if select { field_select_all(&f.query) }
+}
+
+// Gives the open bar the keyboard again, selecting the query when `select` is set.
+find_focus :: proc(f: ^Find_Bar, select := false) {
+	f.focused = true
+	if select { field_select_all(&f.query) }
+}
+
+// Leaves the bar and its matches showing while the terminal takes the keyboard.
+find_blur :: proc(f: ^Find_Bar, h: ^Find_History = nil) {
+	if !f.focused { return }
+	find_history_add(h, f)
+	f.focused = false
+	f.recall = -1
+	armed_cancel(&f.armed)
+}
+
+find_close :: proc(f: ^Find_Bar, h: ^Find_History = nil) {
+	if f.open { find_history_add(h, f) }
+	f.open, f.focused = false, false
+	f.hover = .None
+	f.recall = -1
+	armed_cancel(&f.armed)
+}
+
+// Whether keys and text belong to the find bar rather than the terminal.
+find_has_keyboard :: proc(f: ^Find_Bar) -> bool { return f.open && f.focused }
+
+// Handles a key while the bar has the keyboard. Enter moves to older matches and Shift+Enter to newer;
+// Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular expressions.
+find_key :: proc(f: ^Find_Bar, e: platform.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
 	if !e.pressed {
 		return .None
 	}
+	alt := .Alt in e.modifiers && .Control not_in e.modifiers
 	#partial switch e.key {
 	case .Escape:
-		find_close(f)
 		return .Closed
 	case .Enter, .Numpad_Enter:
+		find_history_add(h, f)
+		f.recall = -1
 		return .Shift in e.modifiers ? .Newer : .Older
 	case .Arrow_Up:
-		return .Older
+		return find_recall(f, h, true)
 	case .Arrow_Down:
-		return .Newer
+		return find_recall(f, h, false)
+	case .C:
+		if alt { return find_toggle(f, .Case_Toggle) }
+	case .R:
+		if alt { return find_toggle(f, .Regex_Toggle) }
 	}
-	return find_change(field_key(&f.query, e))
+	outcome := find_change(field_key(&f.query, e))
+	if outcome == .Changed { f.recall = -1 }
+	return outcome
+}
+
+@(private)
+find_toggle :: proc(f: ^Find_Bar, target: Find_Outcome) -> Find_Outcome {
+	#partial switch target {
+	case .Case_Toggle:
+		f.case_sensitive = !f.case_sensitive
+	case .Regex_Toggle:
+		f.regex = !f.regex
+	case:
+		return .None
+	}
+	return .Changed
+}
+
+// Steps through history like a shell prompt. The first step skips an entry equal to the current query.
+@(private)
+find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Outcome {
+	if h == nil || len(h.entries) == 0 { return .None }
+	count := len(h.entries)
+	next := f.recall
+	switch {
+	case older && f.recall < 0:
+		next = count - 1
+		if h.entries[next].query == field_string(&f.query) { next -= 1 }
+		if next < 0 { return .None }
+		delete(f.draft.query)
+		f.draft = {}
+		if copied, err := strings.clone(field_string(&f.query)); err == nil {
+			f.draft = {copied, f.case_sensitive, f.regex}
+		}
+	case older:
+		if next == 0 { return .None }
+		next -= 1
+	case f.recall < 0:
+		return .None
+	case:
+		next += 1
+	}
+	entry := f.draft
+	if next < count { entry = h.entries[next] } else { next = -1 }
+	f.recall = next
+	field_set(&f.query, entry.query)
+	f.case_sensitive, f.regex = entry.case_sensitive, entry.regex
+	return .Changed
 }
 
 @(private)
@@ -85,11 +225,14 @@ find_change :: proc(change: Field_Change) -> Find_Outcome {
 }
 
 find_text :: proc(f: ^Find_Bar, text: string) -> Find_Outcome {
-	return find_change(field_text(&f.query, text))
+	outcome := find_change(field_text(&f.query, text))
+	if outcome == .Changed { f.recall = -1 }
+	return outcome
 }
 
 // Keep the overlay below the title chrome, where `caption_claim_height` says the caption
-// controls claim pointer input, so they cannot intercept its events.
+// controls claim pointer input, so they cannot intercept its events. The query, its toggles and the
+// close button share the first row; the count and arrows follow them or wrap below on narrow windows.
 find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 	margin := FIND_MARGIN * scale
 	panel_width := max(0, min(FIND_WIDTH * scale, width - 2 * margin))
@@ -100,56 +243,101 @@ find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 		panel_width,
 		FIND_HEIGHT * scale,
 	}
-	padding, gap, button := FIND_PADDING * scale, 8 * scale, 32 * scale
+	padding, gap, button, toggle := FIND_PADDING * scale, 8 * scale, 32 * scale, FIND_TOGGLE * scale
 	inner := max(0, panel_width - 2 * padding)
-	stacked := inner < 80 * scale + status_width + 2 * gap + 2 * button
-	l.query = {l.panel.x + min(padding, panel_width), l.panel.y + 4 * scale, inner, button}
-	y := l.query.y
-	if stacked { y += FIND_HEIGHT * scale; l.panel.height += FIND_HEIGHT * scale }
-	// On very narrow windows give the count its own row to keep every digit visible.
-	separate := inner < status_width + gap + 2 * button
-	l.status = {l.query.x, y, min(status_width, inner), button}
-	if stacked && separate { y += FIND_HEIGHT * scale; l.panel.height += FIND_HEIGHT * scale }
-	button = min(button, inner / 2)
-	l.newer = {l.query.x + inner - button, y, button, 32 * scale}
-	l.older = {l.newer.x - button, y, button, 32 * scale}
-	if !separate { l.status.x = l.older.x - gap - l.status.width }
-	if !stacked { l.query.width = max(0, l.status.x - gap - l.query.x) }
+	left := l.panel.x + min(padding, panel_width)
+	right := left + inner
+	y := l.panel.y + 4 * scale
+	controls := status_width + gap + 2 * button
+	stacked := inner < 80 * scale + 2 * toggle + gap + controls + gap + button
+	l.close = {right - button, y, button, button}
+	edge := l.close.x - gap
+	if !stacked {
+		l.newer = {edge - button, y, button, button}
+		l.older = {l.newer.x - button, y, button, button}
+		l.status = {l.older.x - gap - status_width, y, status_width, button}
+		edge = l.status.x - gap
+	}
+	l.regex_toggle = {edge - toggle, y, toggle, button}
+	l.case_toggle = {l.regex_toggle.x - toggle, y, toggle, button}
+	l.query = {left, y, max(0, l.case_toggle.x - left), button}
+	if stacked {
+		y += FIND_HEIGHT * scale
+		l.panel.height += FIND_HEIGHT * scale
+		// On very narrow windows give the count its own row to keep every digit visible.
+		separate := inner < controls
+		l.status = {left, y, min(status_width, inner), button}
+		if separate {
+			y += FIND_HEIGHT * scale
+			l.panel.height += FIND_HEIGHT * scale
+		}
+		l.newer = {right - button, y, button, button}
+		l.older = {l.newer.x - button, y, button, button}
+		if !separate { l.status.x = l.older.x - gap - l.status.width }
+	}
+	// Tiny windows squeeze the controls; clip them so none reaches outside the panel.
+	content := render.Rect{left, l.panel.y, inner, l.panel.height}
+	controls_rects := [?]^render.Rect {
+		&l.query, &l.case_toggle, &l.regex_toggle, &l.status, &l.older, &l.newer, &l.close,
+	}
+	for r in controls_rects { r^ = clip_rect(r^, content) }
 	return l
+}
+
+@(private)
+clip_rect :: proc(r, bounds: render.Rect) -> render.Rect {
+	x := clamp(r.x, bounds.x, bounds.x + bounds.width)
+	right := clamp(r.x + r.width, bounds.x, bounds.x + bounds.width)
+	return {x, r.y, max(0, right - x), r.height}
 }
 
 find_contains :: proc(l: Find_Layout, x, y: f32) -> bool { return contains(l.panel, x, y) }
 
-find_hit :: proc(l: Find_Layout, x, y: f32) -> Find_Outcome {
+// Toggles and close always respond; the arrows only when there are matches.
+find_hit :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> Find_Outcome {
+	if contains(l.close, x, y) { return .Close }
+	if contains(l.case_toggle, x, y) { return .Case_Toggle }
+	if contains(l.regex_toggle, x, y) { return .Regex_Toggle }
+	if !enabled { return .None }
 	if contains(l.older, x, y) { return .Older }
 	if contains(l.newer, x, y) { return .Newer }
 	return .None
 }
 
-// Text over the query, a hand over an enabled match button.
+// Text over the query, a hand over an enabled button.
 find_pointer :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> platform.Cursor_Shape {
-	if enabled && find_hit(l, x, y) != .None {return .Hand}
+	if find_hit(l, enabled, x, y) != .None {return .Hand}
 	return contains(l.query, x, y) ? .Text : .Arrow
 }
 
 find_hover :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, x, y: f32) -> bool {
-	hit := enabled ? find_hit(l, x, y) : .None
+	hit := find_hit(l, enabled, x, y)
 	if hit == f.hover { return false }
 	f.hover = hit
 	return true
 }
 
-// Like other chrome buttons, activate only on a matching left press/release. Query retains keyboard focus.
+// Like other chrome buttons, activate only on a matching left press/release. A press anywhere on the bar
+// gives it the keyboard.
 find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mouse_Button,
 	pressed: bool, x, y: f32) -> Find_Outcome {
 	if button != .Left { return .None }
-	hit := enabled ? find_hit(l, x, y) : .None
+	hit := find_hit(l, enabled, x, y)
 	if pressed {
+		f.focused = true
 		armed_press(&f.armed, hit)
 		return .Moved
 	}
 	fired, ok := armed_release(&f.armed, hit)
-	if ok && fired != .None { return fired }
+	if !ok { return .Moved }
+	#partial switch fired {
+	case .Older, .Newer:
+		return fired
+	case .Close:
+		return .Closed
+	case .Case_Toggle, .Regex_Toggle:
+		return find_toggle(f, fired)
+	}
 	return .Moved
 }
 
@@ -189,19 +377,43 @@ find_draw :: proc(
 		l.status.y + (l.status.height - count.line_height) / 2 + count.ascent, theme.text); result != .Ok {
 		return result
 	}
-	for area, i in ([2]render.Rect{l.older, l.newer}) {
-		action: Find_Outcome = i == 0 ? .Older : .Newer
-		active := armed_is(f.armed, action)
-		if enabled && (f.hover == action || active) {
-			draw_rect(list, {rect = area, color = active ? theme.pressed : theme.hover,
-				radius = 5 * scale})
+	buttons := [?]struct {
+		area:   render.Rect,
+		action: Find_Outcome,
+		icon:   Icon,
+		label:  string,
+		on:     bool,
+		live:   bool,
+	} {
+		{l.older, .Older, .Arrow_Up, "", false, enabled},
+		{l.newer, .Newer, .Arrow_Down, "", false, enabled},
+		{l.close, .Close, .Close, "", false, true},
+		{l.case_toggle, .Case_Toggle, {}, "Aa", f.case_sensitive, true},
+		{l.regex_toggle, .Regex_Toggle, {}, ".*", f.regex, true},
+	}
+	for b in buttons {
+		if b.area.width <= 0 { continue }
+		active := armed_is(f.armed, b.action)
+		hovered := b.live && f.hover == b.action
+		if b.on || hovered || (b.live && active) {
+			fill := theme.hover
+			if b.on { fill = theme.selection }
+			if b.live && active { fill = theme.pressed }
+			draw_rect(list, {rect = b.area, color = fill, radius = 5 * scale})
 		}
-		if enabled && active { focus_ring_draw(list, area, theme, scale) }
+		if b.live && active { focus_ring_draw(list, b.area, theme, scale) }
 		ink := theme.faint
-		if enabled { ink = f.hover == action || active ? theme.text : theme.muted }
-		icon_draw(list, i == 0 ? .Arrow_Up : .Arrow_Down, area, ink, ICON_BUTTON, scale)
-		if enabled && f.hover == action {
-			if result := hover_rim_draw(list, theme, area, 5 * scale, 1, scale, pointer, compact = true);
+		if b.live { ink = hovered || active || b.on ? theme.text : theme.muted }
+		if len(b.label) == 0 {
+			icon_draw(list, b.icon, b.area, ink, ICON_BUTTON, scale)
+		} else {
+			label := input_text
+			x := b.area.x + (b.area.width - text_width(&label, b.label)) / 2
+			baseline := b.area.y + (b.area.height - label.line_height) / 2 + label.ascent
+			if result := draw_text(&label, list, b.label, x, baseline, ink); result != .Ok { return result }
+		}
+		if hovered {
+			if result := hover_rim_draw(list, theme, b.area, 5 * scale, 1, scale, pointer, compact = true);
 			   result != .None { return .Ok }
 		}
 	}
@@ -216,5 +428,5 @@ find_draw :: proc(
 		style       = .Input,
 		scale       = scale,
 	}
-	return field_box_draw(box, list, theme, field_box_baseline(box), true, "Find in scrollback")
+	return field_box_draw(box, list, theme, field_box_baseline(box), f.focused, "Find in scrollback")
 }

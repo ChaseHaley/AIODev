@@ -605,7 +605,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			continue
 		}
 		content_focused :=
-			w.focused && pane.node == w.tree.focus && !palette_active(app, w) && !w.find.open
+			w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
+			!ui.find_has_keyboard(&w.find)
 		hover: Maybe(term.Link_Range)
 		if state != nil {
 			hover = state.hover

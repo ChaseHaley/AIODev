@@ -542,11 +542,15 @@ when AIO_CONTROL {
 					entry != nil ? string(entry.process_name[:entry.process_name_length]) : "",
 				},
 				{"find.open", fmt.tprintf("%t", w.find.open)},
+				{"find.focused", fmt.tprintf("%t", w.find.focused)},
+				{"find.case_sensitive", fmt.tprintf("%t", w.find.case_sensitive)},
+				{"find.regex", fmt.tprintf("%t", w.find.regex)},
 				{"find.query", ui.field_string(&w.find.query)},
 				{"find.matches", find_status(w, entry)},
 				{"find.count", verify_find_count(w, entry)},
-				{"find.older", verify_find_rect(w, entry, true)},
-				{"find.newer", verify_find_rect(w, entry, false)},
+				{"find.older", verify_find_rect(w, entry, .Older)},
+				{"find.newer", verify_find_rect(w, entry, .Newer)},
+				{"find.close", verify_find_rect(w, entry, .Close)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
 			for i in 0..<w.tab_menu.count {
@@ -840,10 +844,14 @@ when AIO_CONTROL {
 		return "No matches"
 	}
 
-	verify_find_rect :: proc(w: ^Window, entry: ^Session_Entry, older: bool) -> string {
+	verify_find_rect :: proc(w: ^Window, entry: ^Session_Entry, target: ui.Find_Outcome) -> string {
 		if !w.find.open { return "" }
 		l, _ := find_controls(w, entry)
-		return verify_workspace_rect(older ? l.older : l.newer)
+		#partial switch target {
+		case .Older: return verify_workspace_rect(l.older)
+		case .Newer: return verify_workspace_rect(l.newer)
+		}
+		return verify_workspace_rect(l.close)
 	}
 
 	verify_workspace_rect :: proc(r: render.Rect) -> string {

@@ -95,6 +95,71 @@ search_walks_scrollback_matches :: proc(t: ^testing.T) {
 }
 
 @(test)
+search_matches_case_and_expressions :: proc(t: ^testing.T) {
+	wakes: Wakes
+	s := start(t, LINES_200, &wakes)
+	if s == nil {
+		return
+	}
+	defer term.destroy(s)
+	if !await(t, s, exited, "exit") || !await(t, s, shows, "LINE_200") {
+		return
+	}
+	state: ghostty.Render_State
+	if !testing.expect_value(t, ghostty.render_state_new(nil, &state), ghostty.Result.Success) {
+		return
+	}
+	defer ghostty.render_state_free(state)
+	highlights := make([dynamic]term.Highlight)
+	defer delete(highlights)
+	exact := term.Search_Options{case_sensitive = true}
+	pattern := term.Search_Options{regex = true}
+
+	term.search_set_needle(s, "LINE_1", exact)
+	testing.expect_value(t, settle_search(t, s).total, 111)
+	term.search_set_needle(s, "line_1", exact)
+	testing.expect_value(t, settle_search(t, s).total, 0)
+	term.search_set_needle(s, `line_1\d$`, pattern)
+	testing.expect_value(t, settle_search(t, s).total, 10)
+	term.search_set_needle(s, `line_1\d$`, {case_sensitive = true, regex = true})
+	testing.expect_value(t, settle_search(t, s).total, 0)
+	term.search_set_needle(s, `LINE_[0-9][0-9][0-9]`, pattern)
+	testing.expect_value(t, settle_search(t, s).total, 101)
+	// Empty matches are skipped without stalling, and the scan still finds the non-empty ones.
+	term.search_set_needle(s, "7*", pattern)
+	testing.expect_value(t, settle_search(t, s).total, 38)
+
+	term.search_set_needle(s, "(", pattern)
+	summary := term.search_summary(s)
+	testing.expect(t, summary.active && summary.invalid && summary.complete)
+	testing.expect(t, !term.search_pending(s))
+	testing.expect(t, !term.search_select(s, true))
+
+	term.search_set_needle(s, "LINE_77$", pattern)
+	testing.expect_value(t, settle_search(t, s).total, 1)
+	testing.expect(t, term.search_select(s, true))
+	testing.expect_value(t, term.search_summary(s).selected, 0)
+	testing.expect(t, viewport_up(s) > 0)
+	settle_search(t, s)
+	testing.expect_value(t, term.search_summary(s).selected, 0)
+	testing.expect(t, term.capture(s, state, &highlights))
+	selected, found := selected_highlight(highlights[:])
+	testing.expect(t, found)
+	testing.expect_value(t, selected.first, 0)
+	testing.expect_value(t, selected.last, 6)
+	bar, _ := term.scrollbar(s)
+	testing.expect_value(t, u64(selected.row) + bar.offset, 76)
+
+	// Returning to the default mode hands the search back to libghostty.
+	term.search_set_needle(s, "line_77")
+	testing.expect_value(t, settle_search(t, s).total, 1)
+	term.search_set_needle(s, "")
+	testing.expect_value(t, term.search_summary(s), term.Search_Summary{selected = -1})
+	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect_value(t, len(highlights), 0)
+}
+
+@(test)
 search_follows_new_output :: proc(t: ^testing.T) {
 	wakes: Wakes
 	s := start(t, "cmd.exe /d /q /k prompt $G", &wakes)

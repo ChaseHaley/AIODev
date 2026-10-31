@@ -233,3 +233,79 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	bar, _ := term.scrollbar(session)
 	testing.expect_value(t, bar.offset+bar.len, bar.total)
 }
+
+// Clicking the terminal hands it the keyboard while matches stay; closing keeps the scrolled viewport.
+@(test)
+find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T) {
+	session, err := term.create({
+		command_line = "cmd.exe /d /c \"for /l %i in (1,1,200) do @echo LINE_%i\"",
+		working_directory = `C:\Windows\System32`, scrollback_lines = 1000,
+		geometry = {columns = 80, rows = 24, cell_width = 8, cell_height = 16,
+			surface_width = 640, surface_height = 384},
+	}, {})
+	if !testing.expect_value(t, err, term.Error.None) { return }
+	defer term.destroy(session)
+	start := time.tick_now()
+	for term.status(session).kind == .Running && time.tick_since(start) < 10*time.Second {
+		time.sleep(time.Millisecond)
+	}
+	fonts, font_error := font.system_create()
+	if !testing.expect_value(t, font_error, font.Error.None) { return }
+	defer font.system_destroy(fonts)
+	workspace: app.Workspace
+	tree: layout.Layout
+	if !testing.expect_value(t, layout.init(&tree, {.Terminal, 140}), nil) { return }
+	defer layout.destroy(&tree)
+	w := app.Window{id = 140, workspace = &workspace, tree = &tree, width = 1000, height = 600, scale = 1}
+	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
+	ui.find_init(&w.find)
+	defer ui.find_destroy(&w.find)
+	state: app.App
+	defer ui.find_history_destroy(&state.find_history)
+	append(&state.windows, &w)
+	defer delete(state.windows)
+	append(&state.sessions, app.Session_Entry{id = 140, session = session})
+	defer delete(state.sessions)
+	entry := &state.sessions[0]
+	up := proc(s: ^term.Session) -> u64 { bar, _ := term.scrollbar(s); return bar.total - (bar.offset + bar.len) }
+
+	app.find_toggle(&state, &w, entry)
+	testing.expect(t, ui.find_has_keyboard(&w.find))
+	app.handle_event(&state, platform.Text_Event{w.id, "line_7$"})
+	testing.expect(t, !w.find.regex)
+	app.handle_event(&state, platform.Key_Event{window = w.id, key = .R, modifiers = {.Alt}, pressed = true,
+		text = "r"})
+	testing.expect(t, w.find.regex)
+	testing.expect_value(t, ui.field_string(&w.find.query), "line_7$")
+	find_settle(t, session)
+	testing.expect_value(t, term.search_summary(session).total, 1)
+	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	scrolled := up(session)
+	testing.expect(t, scrolled > 0)
+
+	// A press on the terminal blurs the bar; it stays open and Escape is no longer its key.
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left,
+		pressed = true})
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left})
+	testing.expect(t, w.find.open && !w.find.focused)
+	testing.expect(t, term.search_summary(session).active)
+	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	testing.expect(t, w.find.open)
+	app.find_toggle(&state, &w, entry)
+	testing.expect(t, ui.find_has_keyboard(&w.find))
+	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	testing.expect(t, !w.find.open && !term.search_summary(session).active)
+	testing.expect_value(t, up(session), scrolled)
+
+	// The kept search reopens and runs; the close button closes without resetting the view either.
+	state.settings.terminal.find_keep_query = true
+	app.find_toggle(&state, &w, entry)
+	testing.expect_value(t, ui.field_string(&w.find.query), "line_7$")
+	testing.expect(t, term.search_summary(session).active)
+	l, _ := app.find_controls(&w, entry)
+	x, y := i32(l.close.x+16), i32(l.close.y+16)
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = true})
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
+	testing.expect(t, !w.find.open)
+	testing.expect_value(t, up(session), scrolled)
+}

@@ -268,11 +268,11 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 		testing.expect_value(t, p.query.anchor, anchor)
 	}
 	ui.palette_text(&p, &registry, "terminal setting")
-	testing.expect_value(t, len(p.results), 3)
+	testing.expect_value(t, len(p.results), 5)
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect_value(t, p.selected, 0)
 	l := ui.palette_layout(&p, 926, 928, 2)
-	testing.expect_value(t, l.rows, 3)
+	testing.expect_value(t, l.rows, 5)
 	ui.palette_key(&p, &registry, key({key = .End}))
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)

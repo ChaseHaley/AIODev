@@ -79,6 +79,7 @@ Scrollback_Settings :: struct {
 }
 Terminal_Settings :: struct {
 	copy_on_select, confirm_multiline_paste: bool,
+	find_keep_query, find_select_query:      bool,
 	minimum_contrast:                        f64,
 }
 Cursor_Settings :: struct {
@@ -729,6 +730,28 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		nil,
 		"Ask before pasting line breaks the shell would run as separate commands.",
+	},
+	{
+		"terminal.find_keep_query",
+		"Keep Last Search",
+		.Bool,
+		offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_keep_query),
+		"false",
+		0,
+		0,
+		nil,
+		"Start find with the last search filled in.",
+	},
+	{
+		"terminal.find_select_query",
+		"Select Last Search",
+		.Bool,
+		offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_select_query),
+		"false",
+		0,
+		0,
+		nil,
+		"Start find with the last search filled in and selected, so typing replaces it.",
 	},
 	{
 		"terminal.minimum_contrast",

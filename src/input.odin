@@ -267,9 +267,9 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	literal := false
 	if e.pressed {
-		if w.find.open && e.key == .Escape && w.leader_until == {} {
+		if ui.find_has_keyboard(&w.find) && e.key == .Escape && w.leader_until == {} {
 			w.suppressed_key = e
-			find_close(w, entry)
+			find_close(app, w, entry)
 			return
 		}
 		switch leader_key(app, w, e) {
@@ -282,7 +282,8 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 				suppressed, consumed := w.suppressed_key.?
 				repeated := e.repeat && consumed && suppressed.key == e.key
 				// A fullscreen program owns its selection; only a native selection claims its copy key.
-				if action != .Copy || w.find.open || repeated || term.has_selection(entry.session) {
+				if action != .Copy || ui.find_has_keyboard(&w.find) || repeated ||
+				   term.has_selection(entry.session) {
 					w.suppressed_key = e
 					if !repeated || action != .Copy {command_run(app, w, action, .Key)}
 					return
@@ -291,7 +292,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		}
 	}
 	// The find bar has the keyboard: keys edit the query and none reach the shell.
-	if w.find.open {
+	if ui.find_has_keyboard(&w.find) {
 		outcome: ui.Find_Outcome
 		switch clipboard_chord(logical) {
 		case .Copy:
@@ -304,12 +305,12 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		case .Paste:
 			paste_clipboard(app, w, entry)
 		case .None:
-			outcome = ui.find_key(&w.find, logical)
+			outcome = ui.find_key(&w.find, logical, &app.find_history)
 		}
 		if outcome == .Closed {
 			w.suppressed_key = e
 		}
-		on_find_outcome(w, entry, outcome)
+		on_find_outcome(app, w, entry, outcome)
 		return
 	}
 	if e.pressed {
@@ -354,8 +355,8 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 		w.dirty = true
 		return
 	}
-	if w.find.open {
-		on_find_outcome(w, focused_session(app, w), ui.find_text(&w.find, text))
+	if ui.find_has_keyboard(&w.find) {
+		on_find_outcome(app, w, focused_session(app, w), ui.find_text(&w.find, text))
 		return
 	}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {

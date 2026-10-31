@@ -14,6 +14,10 @@ Search_Summary :: struct {
 	total:            int,
 	// Position of the selected match counting from the newest, or -1 when none is selected.
 	selected:         int,
+	// The regular expression does not compile.
+	invalid:          bool,
+	// Changes when a refresh moves the scanner's results without changing the counts.
+	revision:         int,
 }
 
 // A run of matched cells on one viewport row; columns are inclusive.
@@ -22,8 +26,26 @@ Highlight :: struct {
 	selected:         bool,
 }
 
-// Starts a search of the session's scrollback and screens; an empty needle ends it.
-search_set_needle :: proc(s: ^Session, needle: string) {
+// Starts a search of the session's scrollback and screens; an empty needle ends it. Literal text without
+// case sensitivity uses libghostty's incremental search; other options use the row scanner.
+search_set_needle :: proc(s: ^Session, needle: string, options: Search_Options = {}) {
+	scanned := len(needle) > 0 && options != {}
+	if scanned || s.pattern.active {
+		pattern_set(s, scanned ? needle : "", options)
+	}
+	if scanned {
+		ghostty_set_needle(s, "")
+		mark_changed(s)
+		return
+	}
+	ghostty_set_needle(s, needle)
+}
+
+@(private)
+ghostty_set_needle :: proc(s: ^Session, needle: string) {
+	if !s.search_active && len(needle) == 0 {
+		return
+	}
 	value := ghostty.String{raw_data(needle), uint(len(needle))}
 	sync.mutex_lock(&s.mutex)
 	result := ghostty.search_set(s.search, .Needle, len(needle) > 0 ? &value : nil)
@@ -39,6 +61,9 @@ search_set_needle :: proc(s: ^Session, needle: string) {
 // Whether search_update has work: the search is still catching up or the terminal changed
 // since it last looked.
 search_pending :: proc(s: ^Session) -> bool {
+	if s.pattern.active {
+		return pattern_pending(s)
+	}
 	if !s.search_active {
 		return false
 	}
@@ -51,6 +76,10 @@ search_pending :: proc(s: ^Session) -> bool {
 
 // Advances the search for a bounded time. The terminal lock is held only while the search reads the terminal.
 search_update :: proc(s: ^Session) {
+	if s.pattern.active {
+		pattern_update(s, SEARCH_STEP_BUDGET)
+		return
+	}
 	if !s.search_active {
 		return
 	}
@@ -91,6 +120,9 @@ search_feed :: proc(s: ^Session) -> bool {
 // Selects the next older match, or the next newer one, wrapping at either end, and scrolls it into view.
 // Returns false when there is nothing to select.
 search_select :: proc(s: ^Session, older: bool) -> bool {
+	if s.pattern.active {
+		return pattern_select(s, older)
+	}
 	if !s.search_active {
 		return false
 	}
@@ -107,6 +139,18 @@ search_select :: proc(s: ^Session, older: bool) -> bool {
 search_summary :: proc(s: ^Session) -> Search_Summary {
 	summary := Search_Summary {
 		selected = -1,
+	}
+	if p := &s.pattern; p.active {
+		total := len(pattern_results(p))
+		summary = {
+			active   = true,
+			complete = p.complete || p.invalid,
+			total    = total,
+			selected = p.selected < 0 ? -1 : total - 1 - p.selected,
+			invalid  = p.invalid,
+			revision = p.revision,
+		}
+		return summary
 	}
 	if !s.search_active {
 		return summary
@@ -131,6 +175,10 @@ search_summary :: proc(s: ^Session) -> Search_Summary {
 @(private)
 collect_highlights :: proc(s: ^Session, out: ^[dynamic]Highlight) {
 	clear(out)
+	if s.pattern.active {
+		pattern_highlights(s, out)
+		return
+	}
 	if !s.search_active {
 		return
 	}

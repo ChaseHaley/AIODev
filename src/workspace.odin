@@ -104,7 +104,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	leader_cancel(w)
 	if entry := focused_session(app, w); entry != nil {
 		term.send_focus(entry.session, false)
-		if w.find.open {find_close(w, entry)}
+		if w.find.open {find_close(app, w, entry)}
 	}
 	w.selecting, w.autoscrolling = false, false
 	w.dragging = {}

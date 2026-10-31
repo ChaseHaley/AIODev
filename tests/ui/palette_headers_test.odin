@@ -20,7 +20,7 @@ palette_matches_real_setting_headers :: proc(t: ^testing.T) {
 	for query in ([?]string{"terminal setting", "terminal settings", "TeRmInAl SeTtInG", "trm sttng"}) {
 		ui.palette_open(&p, &registry)
 		ui.palette_text(&p, &registry, query)
-		testing.expectf(t, len(p.results) == 3, "%s matched %d instead of 3 Terminal settings", query,
+		testing.expectf(t, len(p.results) == 5, "%s matched %d instead of 5 Terminal settings", query,
 			len(p.results))
 		index := 0
 		for row in rows {

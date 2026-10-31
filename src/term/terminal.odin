@@ -108,6 +108,7 @@ Session :: struct {
 	search_matches:                                           [dynamic]ghostty.Selection,
 	search_active:                                            bool,
 	search_fed:                                               u64,
+	pattern:                                                  Pattern_Search,
 	status:                                                   Status_Kind,
 	exit_code:                                                u32,
 	failure:                                                  string,
@@ -162,6 +163,7 @@ create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^
 	s.geometry = config.geometry
 	s.queue.pending.allocator = allocator
 	s.search_matches.allocator = allocator
+	pattern_init(&s.pattern, s)
 	ok := false
 	defer if !ok {
 		destroy(s)
@@ -200,6 +202,7 @@ destroy :: proc(s: ^Session) {
 	delete(s.failure, s.allocator)
 	delete(s.queue.pending)
 	delete(s.search_matches)
+	pattern_destroy(&s.pattern, s)
 	free(s, s.allocator)
 }
 

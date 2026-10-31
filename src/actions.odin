@@ -455,7 +455,7 @@ run_action :: proc(
 		}
 		palette_open_mode(app, w, mode)
 	case .Copy:
-		if w.find.open {
+		if ui.find_has_keyboard(&w.find) {
 			clipboard_copy(app, ui.field_selected_text(&w.find.query))
 		} else if entry != nil {
 			copy_selection(app, entry, true)
@@ -472,11 +472,7 @@ run_action :: proc(
 		if entry == nil {return}
 		leader_cancel(w)
 		pane_header_cancel(w)
-		if w.find.open {
-			find_close(w, entry)
-		} else {
-			ui.find_open(&w.find)
-		}
+		find_toggle(app, w, entry)
 	case .Clear_Scrollback:
 		if entry != nil {
 			term.clear_scrollback(entry.session)
@@ -741,12 +737,12 @@ paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
 	if !ok || len(text) == 0 {
 		return
 	}
-	if w.find.open {
+	if ui.find_has_keyboard(&w.find) {
 		line := text
 		if end := strings.index_any(text, "\r\n"); end >= 0 {
 			line = text[:end]
 		}
-		on_find_outcome(w, entry, ui.find_text(&w.find, line))
+		on_find_outcome(app, w, entry, ui.find_text(&w.find, line))
 		return
 	}
 	if entry.status != .Running {
@@ -783,17 +779,35 @@ paste_confirm_cancel :: proc(app: ^App, w: ^Window) {
 	mark_all_dirty(app)
 }
 
-// Ends the search and returns the session to its live screen.
-find_close :: proc(w: ^Window, entry: ^Session_Entry) {
-	ui.find_close(&w.find)
+// Opens find, gives an open bar back the keyboard, or closes a bar that has it.
+find_toggle :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
+	t := app.settings.terminal
+	switch {
+	case !w.find.open:
+		ui.find_open(&w.find, &app.find_history, t.find_keep_query, t.find_select_query)
+		on_find_outcome(app, w, entry, .Changed)
+	case !w.find.focused:
+		ui.find_focus(&w.find, t.find_select_query)
+	case:
+		find_close(app, w, entry)
+	}
+	w.dirty = true
+}
+
+// Ends the search and leaves the viewport where the search put it.
+find_close :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
+	ui.find_close(&w.find, &app.find_history)
 	w.dirty = true
 	if entry != nil {
 		term.search_set_needle(entry.session, "")
-		term.scroll_to_bottom(entry.session)
 	}
 }
 
-on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outcome) {
+find_options :: proc(w: ^Window) -> term.Search_Options {
+	return {case_sensitive = w.find.case_sensitive, regex = w.find.regex}
+}
+
+on_find_outcome :: proc(app: ^App, w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outcome) {
 	if outcome == .None {
 		return
 	}
@@ -804,11 +818,13 @@ on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outc
 	switch outcome {
 	case .None, .Moved:
 	case .Changed:
-		term.search_set_needle(entry.session, ui.field_string(&w.find.query))
+		term.search_set_needle(entry.session, ui.field_string(&w.find.query), find_options(w))
 	case .Older, .Newer:
+		ui.find_history_add(&app.find_history, &w.find)
 		term.search_select(entry.session, outcome == .Older)
 	case .Closed:
-		find_close(w, entry)
+		find_close(app, w, entry)
+	case .Case_Toggle, .Regex_Toggle, .Close:
 	}
 }
 
@@ -816,6 +832,7 @@ on_find_outcome :: proc(w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outc
 find_presentation :: proc(w: ^Window, entry: ^Session_Entry) -> (label: string, enabled: bool) {
 	if entry == nil || len(w.find.query.bytes) == 0 { return "0 of 0", false }
 	s := term.search_summary(entry.session)
+	if s.invalid { return "Invalid expression", false }
 	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected + 1, s.total), s.total > 0 }
 	if s.total == 0 { return "0 of 0 · No matches", false }
 	return fmt.tprintf("%d of %d", s.selected + 1, s.total), true
