@@ -112,6 +112,11 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	if selected {
 		replacement.focus = p.focus
 		replacement.profile_control = p.profile_control
+		// A multiple choice saves each option as it flips; keep its popup open for the next one.
+		if next_row := ui.editor_row(&replacement); p.popup == .Choice && row.multiple && next_row.multiple {
+			replacement.popup, replacement.popup_index, replacement.popup_scroll =
+				.Choice, p.popup_index, p.popup_scroll
+		}
 		// A picker drag saves on release while its popup remains open. Keep its hue and
 		// saturation even at black, where rebuilding them from the saved RGB loses both.
 		if next_row := ui.editor_row(&replacement); p.popup == .Color && next_row.kind == row.kind {

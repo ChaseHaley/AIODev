@@ -4,6 +4,7 @@ import "core:testing"
 import "core:strings"
 import "aio:commands"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
 
 @(private, rodata)
@@ -474,4 +475,38 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	x, y := center(positions)
 	ui.editor_press(&p, l, nil, x, y, false)
 	testing.expect(t, p.physical)
+}
+
+@(test)
+editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	entry := settings.schema_find("status.notify_blocked")
+	if !testing.expect(t, entry != nil) {return}
+	row := ui.schema_row(entry^)
+	row.value = "banner, sound"
+	testing.expect(t, row.multiple)
+	testing.expect_value(t, ui.editor_add(&p, row, "Program Status"), nil)
+	p.open = true
+	ui.editor_filter(&p)
+	l := page(&p)
+	testing.expect(t, ui.editor_select_key(&p, "status.notify_blocked"))
+	ui.editor_key(&p, key({key = .Enter}))
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Choice)
+	testing.expect_value(t, p.popup_index, 0)
+	// Enter flips the highlighted option and leaves the list open for the next one.
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "sound")
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Choice)
+	ui.editor_key(&p, key({key = .Arrow_Down}))
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Space})), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "tray, sound")
+	popup := ui.editor_popup_rect(&p, l)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+4+30*3.5, false), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "tray")
+	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+4+30*1.5, false), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "none")
+	testing.expect_value(t, p.popup, ui.Editor_Popup.Choice)
+	ui.editor_key(&p, key({key = .Escape}))
+	testing.expect_value(t, p.popup, ui.Editor_Popup.None)
 }

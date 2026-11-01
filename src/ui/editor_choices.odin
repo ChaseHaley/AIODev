@@ -1,6 +1,8 @@
 package ui
 
 import "aio:render"
+import "aio:settings"
+import "core:strings"
 
 @(private)
 CHOICE_SEARCH_HEIGHT :: 36
@@ -74,4 +76,33 @@ choice_search_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Bo
 		rect = {r.x + 4 * s, r.y + 4 * s, r.width - 8 * s, 30 * s},
 		inset = 10, caret_width = 1, radius = 4, scale = s,
 	}
+}
+
+@(private)
+choice_set_has :: proc(row: ^Editor_Row, value: string, index: int) -> bool {
+	mask, _, ok := settings.set_parse(row.choices, value)
+	return ok && mask & (1 << u32(index)) != 0
+}
+
+// Flips one option and saves at once, leaving the popup open for the next option.
+@(private)
+choice_set_toggle :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
+	mask, _, _ := settings.set_parse(row.choices, field_string(&p.value))
+	field_set(&p.value, settings.set_text(row.choices, mask ~ (1 << u32(index))))
+	p.popup_index = index
+	return .Save
+}
+
+@(private)
+choice_set_label :: proc(row: ^Editor_Row, value: string) -> string {
+	mask, _, ok := settings.set_parse(row.choices, value)
+	if !ok {return value}
+	if mask == 0 {return "Off"}
+	b := strings.builder_make(context.temp_allocator)
+	for label, i in row.choice_labels {
+		if mask & (1 << u32(i)) == 0 {continue}
+		if strings.builder_len(b) > 0 {strings.write_string(&b, ", ")}
+		strings.write_string(&b, label)
+	}
+	return strings.to_string(b)
 }

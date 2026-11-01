@@ -88,7 +88,8 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 	case .Integer, .Number:
 		s.control = .Slider
 	case .Choice:
-		s.control = .Choice
+		// A multiple choice keeps its popup open between options, so it is edited on the page.
+		s.control = row.multiple ? .None : .Choice
 	case .Text:
 		s.control = entry.key == settings.PADDING_GROUPS_KEY ? .None : .Text
 	}

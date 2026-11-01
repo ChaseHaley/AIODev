@@ -76,7 +76,7 @@ encode_value :: proc(
 	switch entry.kind {
 	case .String:
 		return write_parts(b, "\"", value, "\"")
-	case .Int, .Float, .Bool, .Enum:
+	case .Int, .Float, .Bool, .Enum, .Set:
 		return write_parts(b, value)
 	}
 	return nil

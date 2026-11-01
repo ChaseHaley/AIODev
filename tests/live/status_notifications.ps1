@@ -33,10 +33,8 @@ try {
     Add-Content -LiteralPath "$data/settings.ini" -Value @'
 
 status.notify_focused = true
-status.sound_blocked = false
-status.banner_error = false
-status.sound_error = false
-status.notice_error = true
+status.notify_blocked = banner
+status.notify_error = notice
 '@
     Aio command settings.reload | Out-Null
     $null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
@@ -60,12 +58,14 @@ status.notice_error = true
     Expect ($toast[0] -match '&lt;&amp;&gt;') True 'program text is escaped as XML text'
 
     Aio key 'Ctrl+,' | Out-Null
-    Aio type status.banner_blocked | Out-Null
-    Expect (State)['settings.key'] status.banner_blocked 'banner setting is searchable'
+    Aio type status.notify_blocked | Out-Null
+    Expect (State)['settings.key'] status.notify_blocked 'blocked channels are searchable'
     Aio key Enter | Out-Null
-    Expect (State)['settings.value'] false 'banner toggle saves independently'
-    Expect ([IO.File]::ReadAllText("$data/settings.ini") -match 'status.banner_blocked\s*=\s*false') True 'banner choice persists'
+    Aio key Enter | Out-Null
+    Expect (State)['settings.value'] none 'banner option saves from the multiselect'
+    Expect ([IO.File]::ReadAllText("$data/settings.ini") -match 'status.notify_blocked\s*=\s*none') True 'banner choice persists'
     Aio capture --out "$data/banner-setting.png" | Out-Null
+    Aio key Esc | Out-Null
     Aio key Esc | Out-Null
     Aio command settings.open | Out-Null
     Aio command tab.close | Out-Null
@@ -87,7 +87,7 @@ status.notice_error = true
     try {
         Aio launch --fresh --shell 'pwsh.exe -NoLogo -NoProfile' | Out-Null
         Aio wait text 'PS ' --timeout 10000 | Out-Null
-        Add-Content -LiteralPath "$data/settings.ini" -Value "`nstatus.notify_focused = true`nstatus.sound_blocked = false"
+        Add-Content -LiteralPath "$data/settings.ini" -Value "`nstatus.notify_focused = true`nstatus.notify_blocked = banner"
         Aio command settings.reload | Out-Null
         $message = "Shared icon $([DateTime]::UtcNow.Ticks)"
         Report blocked shared-icon $message

@@ -38,6 +38,9 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 		row.kind = .Toggle
 	case .Enum:
 		row.kind, row.choices = .Choice, entry.enum_names
+	case .Set:
+		row.kind, row.multiple, row.choices = .Choice, true, entry.enum_names
+		row.choice_labels = settings.status_channel_labels[:]
 	}
 	switch entry.key {
 	case "font.size":

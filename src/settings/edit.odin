@@ -29,6 +29,8 @@ value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
 		return (cast(^bool)p)^ ? "true" : "false"
 	case .Enum:
 		return entry.enum_names[(cast(^int)p)^]
+	case .Set:
+		return set_text(entry.enum_names, (cast(^u32)p)^)
 	}
 	return ""
 }

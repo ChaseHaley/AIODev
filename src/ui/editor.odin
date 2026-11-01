@@ -56,6 +56,8 @@ Editor_Row :: struct {
 	step:                                          f64,
 	// A choice whose popup has a filter field, such as a font picker.
 	searchable:                                    bool,
+	// A choice whose value is any combination of `choices`, saved by settings.set_text.
+	multiple:                                      bool,
 	choices, choice_labels:                        []string,
 	// Shell fonts keep the other catalogue subset so the popup can switch without discovery.
 	other_font_choices:                            []string,
@@ -1068,9 +1070,10 @@ choice_index :: proc(row: ^Editor_Row, value: string) -> int {
 	return 0
 }
 
-// What a choice displays: its label, or the value itself.
+// What a choice displays: its label, or the value itself. A multiple choice lists its labels.
 @(private)
 choice_label :: proc(row: ^Editor_Row, value: string) -> string {
+	if row.multiple {return choice_set_label(row, value)}
 	if len(row.choice_labels) == 0 {return value}
 	for name, i in row.choices {if name == value && row.choice_labels[i] != "" {return row.choice_labels[i]}}
 	return value
@@ -1080,6 +1083,7 @@ choice_label :: proc(row: ^Editor_Row, value: string) -> string {
 choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
 	if len(row.choices) == 0 {return .None}
 	next := clamp(index, 0, len(row.choices) - 1)
+	if row.multiple {return choice_set_toggle(p, row, next)}
 	p.popup = .None
 	if row.choices[next] == field_string(&p.value) {return .Changed}
 	field_set(&p.value, row.choices[next])
@@ -1094,7 +1098,7 @@ open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
 		field_set(&p.choice_search, "")
 		choice_filter(p, row)
 	}
-	p.popup_index = choice_index(row, field_string(&p.value))
+	p.popup_index = row.multiple ? 0 : choice_index(row, field_string(&p.value))
 	p.popup_scroll = p.popup_index
 }
 
@@ -3042,7 +3046,12 @@ popup_draw :: proc(
 				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
 			}
-			if name == field_string(&p.value) {
+			if row.multiple {
+				if choice_set_has(row, field_string(&p.value), choice_source_index(p, row, i)) {
+					check := render.Rect{option.x + option.width - 28 * s, option.y, 24 * s, option.height}
+					icon_draw(list, .Check, check, theme.accent, ICON_INDICATOR, s)
+				}
+			} else if name == field_string(&p.value) {
 				draw_rect(
 					list,
 					{
@@ -3055,11 +3064,11 @@ popup_draw :: proc(
 			if result := draw_text(
 				text,
 				list,
-				choice_label(row, name),
+				row.multiple ? row.choice_labels[i] : choice_label(row, name),
 				option.x + 12 * s,
 				option.y + (option.height - text.line_height) / 2 + text.ascent,
 				theme.text,
-				option.width - 24 * s,
+				option.width - (row.multiple ? 44 : 24) * s,
 			); result != .Ok {return result}
 		}
 		total := editor_choice_count(p, row)

@@ -55,23 +55,37 @@ Status_Keep :: enum int {
 	Focus,
 	Dismiss,
 }
+// How one program status reaches you. Each state chooses any combination; none means silence.
+Status_Channel :: enum u8 {
+	Banner,
+	Tray,
+	Flash,
+	Sound,
+	Notice,
+}
+Status_Channels :: bit_set[Status_Channel;u32]
+// Saved names and Settings labels, in Status_Channel order.
+STATUS_CHANNEL_NAMES :: []string{"banner", "tray", "flash", "sound", "notice"}
+@(rodata)
+status_channel_labels := [len(Status_Channel)]string {
+	"Windows banner",
+	"Tray notification",
+	"Flash taskbar",
+	"Sound",
+	"In-app notice",
+}
 // Program status (OSC 7501). Each surface and state can be turned off on its own; `enabled` turns
 // the whole protocol off, so programs see the terminal as unsupported.
 Status_Settings :: struct {
-	notify_idle, notify_working: bool,
+	notify_idle, notify_working, notify_blocked, notify_error, notify_done: Status_Channels,
 	taskbar_working, taskbar_blocked, taskbar_error: bool,
-	banner_idle, tray_idle, flash_idle, sound_idle, notice_idle: bool,
-	banner_working, tray_working, flash_working, sound_working, notice_working: bool,
-	banner_blocked, tray_blocked, flash_blocked, sound_blocked, notice_blocked: bool,
-	banner_error, tray_error, flash_error, sound_error, notice_error: bool,
-	banner_done, tray_done, flash_done, sound_done, notice_done: bool,
 
 	panel_side: Status_Panel_Side,
 	panel_width, panel_height: int,
 	enabled, tab_indicators, active_tab_indicator, pane_headers, workspace_picker: bool,
 	inbox, panel, taskbar:                                                        bool,
 	show_idle, show_working, show_blocked, show_done, show_error:                 bool,
-	notify_blocked, notify_error, notify_done, notify_focused:                    bool,
+	notify_focused:                                                               bool,
 	scope:                                                                        Status_Scope,
 	keep_finished:                                                                Status_Keep,
 	ignore_apps:                                                                  string,
@@ -141,6 +155,8 @@ Kind :: enum {
 	Float,
 	Bool,
 	Enum,
+	// A Status_Channels set saved as comma-separated `enum_names`, or `none`.
+	Set,
 }
 Schema_Entry :: struct {
 	key, title:       string,
@@ -480,336 +496,61 @@ SCHEMA :: [?]Schema_Entry {
 	{
 		"status.notify_blocked",
 		"Notify When Blocked",
-		.Bool,
+		.Set,
 		offset_of(Settings, status) + offset_of(Status_Settings, notify_blocked),
-		"true",
+		"banner, sound",
 		0,
 		0,
-		nil,
-		"Enable configured notifications when a program needs you.",
+		STATUS_CHANNEL_NAMES,
+		"How to notify you when a program needs you.",
 	},
 	{
 		"status.notify_error",
 		"Notify on Errors",
-		.Bool,
+		.Set,
 		offset_of(Settings, status) + offset_of(Status_Settings, notify_error),
-		"true",
+		"banner, sound",
 		0,
 		0,
-		nil,
-		"Enable configured notifications when a program fails.",
+		STATUS_CHANNEL_NAMES,
+		"How to notify you when a program fails.",
 	},
 	{
 		"status.notify_done",
 		"Notify When Done",
-		.Bool,
+		.Set,
 		offset_of(Settings, status) + offset_of(Status_Settings, notify_done),
-		"false",
+		"none",
 		0,
 		0,
-		nil,
-		"Enable configured notifications when a program finishes.",
+		STATUS_CHANNEL_NAMES,
+		"How to notify you when a program finishes.",
 	},
 	{
 		"status.notify_idle",
 		"Notify When Idle",
-		.Bool,
+		.Set,
 		offset_of(Settings, status) + offset_of(Status_Settings, notify_idle),
-		"false",
+		"none",
 		0,
 		0,
-		nil,
-		"Enable configured notifications when a program becomes idle.",
-	},
-	{
-		"status.banner_idle",
-		"Idle: Windows Banner",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, banner_idle),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a native Windows notification banner.",
-	},
-	{
-		"status.tray_idle",
-		"Idle: Tray Notification",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, tray_idle),
-		"false",
-		0,
-		0,
-		nil,
-		"Send a notification through the Windows tray icon.",
-	},
-	{
-		"status.flash_idle",
-		"Idle: Flash Taskbar",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, flash_idle),
-		"false",
-		0,
-		0,
-		nil,
-		"Flash the taskbar button while the window is unfocused.",
-	},
-	{
-		"status.sound_idle",
-		"Idle: Notification Sound",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, sound_idle),
-		"true",
-		0,
-		0,
-		nil,
-		"Play a notification sound, with or without a visual notification.",
-	},
-	{
-		"status.notice_idle",
-		"Idle: In-App Notice",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, notice_idle),
-		"false",
-		0,
-		0,
-		nil,
-		"Show a notice inside AIODev.",
+		STATUS_CHANNEL_NAMES,
+		"How to notify you when a program becomes idle.",
 	},
 	{
 		"status.notify_working",
 		"Notify When Working",
-		.Bool,
+		.Set,
 		offset_of(Settings, status) + offset_of(Status_Settings, notify_working),
-		"false",
+		"none",
 		0,
 		0,
-		nil,
-		"Enable configured notifications when a program becomes working.",
-	},
-	{
-		"status.banner_working",
-		"Working: Windows Banner",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, banner_working),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a native Windows notification banner.",
-	},
-	{
-		"status.tray_working",
-		"Working: Tray Notification",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, tray_working),
-		"false",
-		0,
-		0,
-		nil,
-		"Send a notification through the Windows tray icon.",
-	},
-	{
-		"status.flash_working",
-		"Working: Flash Taskbar",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, flash_working),
-		"false",
-		0,
-		0,
-		nil,
-		"Flash the taskbar button while the window is unfocused.",
-	},
-	{
-		"status.sound_working",
-		"Working: Notification Sound",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, sound_working),
-		"true",
-		0,
-		0,
-		nil,
-		"Play a notification sound, with or without a visual notification.",
-	},
-	{
-		"status.notice_working",
-		"Working: In-App Notice",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, notice_working),
-		"false",
-		0,
-		0,
-		nil,
-		"Show a notice inside AIODev.",
-	},
-	{
-		"status.banner_blocked",
-		"Blocked: Windows Banner",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, banner_blocked),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a native Windows notification banner.",
-	},
-	{
-		"status.tray_blocked",
-		"Blocked: Tray Notification",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, tray_blocked),
-		"false",
-		0,
-		0,
-		nil,
-		"Send a notification through the Windows tray icon.",
-	},
-	{
-		"status.flash_blocked",
-		"Blocked: Flash Taskbar",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, flash_blocked),
-		"false",
-		0,
-		0,
-		nil,
-		"Flash the taskbar button while the window is unfocused.",
-	},
-	{
-		"status.sound_blocked",
-		"Blocked: Notification Sound",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, sound_blocked),
-		"true",
-		0,
-		0,
-		nil,
-		"Play a notification sound, with or without a visual notification.",
-	},
-	{
-		"status.notice_blocked",
-		"Blocked: In-App Notice",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, notice_blocked),
-		"false",
-		0,
-		0,
-		nil,
-		"Show a notice inside AIODev.",
-	},
-	{
-		"status.banner_error",
-		"Error: Windows Banner",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, banner_error),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a native Windows notification banner.",
-	},
-	{
-		"status.tray_error",
-		"Error: Tray Notification",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, tray_error),
-		"false",
-		0,
-		0,
-		nil,
-		"Send a notification through the Windows tray icon.",
-	},
-	{
-		"status.flash_error",
-		"Error: Flash Taskbar",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, flash_error),
-		"false",
-		0,
-		0,
-		nil,
-		"Flash the taskbar button while the window is unfocused.",
-	},
-	{
-		"status.sound_error",
-		"Error: Notification Sound",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, sound_error),
-		"true",
-		0,
-		0,
-		nil,
-		"Play a notification sound, with or without a visual notification.",
-	},
-	{
-		"status.notice_error",
-		"Error: In-App Notice",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, notice_error),
-		"false",
-		0,
-		0,
-		nil,
-		"Show a notice inside AIODev.",
-	},
-	{
-		"status.banner_done",
-		"Done: Windows Banner",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, banner_done),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a native Windows notification banner.",
-	},
-	{
-		"status.tray_done",
-		"Done: Tray Notification",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, tray_done),
-		"false",
-		0,
-		0,
-		nil,
-		"Send a notification through the Windows tray icon.",
-	},
-	{
-		"status.flash_done",
-		"Done: Flash Taskbar",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, flash_done),
-		"false",
-		0,
-		0,
-		nil,
-		"Flash the taskbar button while the window is unfocused.",
-	},
-	{
-		"status.sound_done",
-		"Done: Notification Sound",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, sound_done),
-		"true",
-		0,
-		0,
-		nil,
-		"Play a notification sound, with or without a visual notification.",
-	},
-	{
-		"status.notice_done",
-		"Done: In-App Notice",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, notice_done),
-		"false",
-		0,
-		0,
-		nil,
-		"Show a notice inside AIODev.",
+		STATUS_CHANNEL_NAMES,
+		"How to notify you when a program starts working.",
 	},
 	{
 		"status.taskbar_working",
-		"working: Taskbar Progress",
+		"Working: Taskbar Progress",
 		.Bool,
 		offset_of(Settings, status) + offset_of(Status_Settings, taskbar_working),
 		"true",
@@ -820,7 +561,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		"status.taskbar_blocked",
-		"blocked: Taskbar Progress",
+		"Blocked: Taskbar Progress",
 		.Bool,
 		offset_of(Settings, status) + offset_of(Status_Settings, taskbar_blocked),
 		"true",
@@ -831,7 +572,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		"status.taskbar_error",
-		"error: Taskbar Progress",
+		"Error: Taskbar Progress",
 		.Bool,
 		offset_of(Settings, status) + offset_of(Status_Settings, taskbar_error),
 		"true",
@@ -1287,8 +1028,57 @@ assign :: proc(
 		if err != nil {return nil, err}
 		defer delete(names, s.allocator)
 		return problem(.Invalid_Value, s.allocator, "\"", value, "\" is not one of ", names)
+	case .Set:
+		mask, unknown, ok := set_parse(entry.enum_names, value)
+		if !ok {
+			names, err := strings.join(entry.enum_names, ", ", s.allocator)
+			if err != nil {return nil, err}
+			defer delete(names, s.allocator)
+			return problem(
+				.Invalid_Value,
+				s.allocator,
+				"\"",
+				unknown,
+				"\" is not one of ",
+				names,
+				"; separate choices with commas, or use none",
+			)
+		}
+		(cast(^u32)p)^ = mask
 	}
 	return nil, nil
+}
+
+#assert(size_of(Status_Channels) == size_of(u32))
+
+// Reads `none` or comma-separated names; bit i is names[i]. On failure `unknown` is the bad part.
+set_parse :: proc(names: []string, value: string) -> (mask: u32, unknown: string, ok: bool) {
+	if strings.trim_space(value) == "none" {return 0, "", true}
+	rest := value
+	for part in strings.split_iterator(&rest, ",") {
+		name := strings.trim_space(part)
+		found := false
+		for candidate, i in names {
+			if candidate == name {
+				mask |= 1 << u32(i)
+				found = true
+				break
+			}
+		}
+		if !found {return 0, name, false}
+	}
+	return mask, "", true
+}
+
+// The canonical saved form: names in schema order, or `none`. Allocated from the temp allocator.
+set_text :: proc(names: []string, mask: u32) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	for name, i in names {
+		if mask & (1 << u32(i)) == 0 {continue}
+		if strings.builder_len(b) > 0 {strings.write_string(&b, ", ")}
+		strings.write_string(&b, name)
+	}
+	return strings.builder_len(b) == 0 ? "none" : strings.to_string(b)
 }
 
 @(require_results)
@@ -1699,6 +1489,11 @@ migrate_settings_text :: proc(
 	if variant_changed {
 		delete(updated, allocator)
 		updated, changed = variant, true
+	}
+	status, status_changed := migrate_status_notify_text(updated, allocator) or_return
+	if status_changed {
+		delete(updated, allocator)
+		updated, changed = status, true
 	}
 	themes, themes_changed, theme_error := migrate_theme_text(updated, allocator)
 	if theme_error != nil {

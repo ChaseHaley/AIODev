@@ -303,24 +303,20 @@ status_notification_channels :: proc(
 	state: term.Program_Status_State,
 ) -> Status_Notification_Channels {
 	if !s.enabled {return {}}
+	set: settings.Status_Channels
 	switch state {
 	case .Idle:
-		if !s.notify_idle {return {}}
-		return {s.banner_idle, s.tray_idle, s.flash_idle, s.sound_idle, s.notice_idle}
+		set = s.notify_idle
 	case .Working:
-		if !s.notify_working {return {}}
-		return {s.banner_working, s.tray_working, s.flash_working, s.sound_working, s.notice_working}
+		set = s.notify_working
 	case .Blocked:
-		if !s.notify_blocked {return {}}
-		return {s.banner_blocked, s.tray_blocked, s.flash_blocked, s.sound_blocked, s.notice_blocked}
+		set = s.notify_blocked
 	case .Error:
-		if !s.notify_error {return {}}
-		return {s.banner_error, s.tray_error, s.flash_error, s.sound_error, s.notice_error}
+		set = s.notify_error
 	case .Done:
-		if !s.notify_done {return {}}
-		return {s.banner_done, s.tray_done, s.flash_done, s.sound_done, s.notice_done}
+		set = s.notify_done
 	}
-	return {}
+	return {.Banner in set, .Tray in set, .Flash in set, .Sound in set, .Notice in set}
 }
 
 @(private)
