@@ -133,45 +133,10 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 			return
 		}
 	}
-	if workspace_picker_active(&w.workspace_picker) {
-		workspace_picker_button(app, w, e)
-		return
-	}
-	if w.tab_menu.open {
-		if !e.pressed {return}
-		w.header_buttons += {e.button}
-		if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
-			if tab_menu_enabled(w, hit) {
-				w.tab_menu.selected = hit
-				tab_menu_choose(app, w)
-			}
-		} else { w.tab_menu.open, w.dirty = false, true }
-		return
-	}
-	if w.profile_menu.open {
-		profile_menu_button(app, w, e)
-		return
-	}
-	if w.status.inbox_open {
-		status_inbox_button(app, w, e)
-		return
-	}
-	if w.rename_open {
-		r, field := rename_rect(w), rename_field_rect(w)
-		x, y := f32(e.x), f32(e.y)
-		if !e.pressed {w.rename.dragging = false}
-		if e.pressed {
-			if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height {
-				rename_finish(app, w, false)
-				w.header_buttons += {e.button}
-			} else if e.button == .Left &&
-			   x >= field.x &&
-			   x < field.x + field.width &&
-			   y >= field.y &&
-			   y < field.y + field.height {
-				rename_pointer(app, w, x, true, .Shift in e.modifiers)
-			}
-		}
+	x, y := f32(e.x), f32(e.y)
+	target := pointer_target(app, w, x, y)
+	if pointer_modal(target) {
+		modal_button(app, w, target, e)
 		return
 	}
 	if !e.pressed {
@@ -184,14 +149,14 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		}
 		return
 	}
-	x, y := f32(e.x), f32(e.y)
-	target := pointer_target(app, w, x, y)
 	if ui.armed_down(w.find.armed) {target = .Find} else if w.selecting {target = .Content}
 	w.dirty = true
 	// A press below the find bar hands the keyboard back to the terminal; the bar and its matches stay.
 	if target > .Find && w.find.focused {ui.find_blur(&w.find, &app.find_history)}
 	left := e.button == .Left
 	switch target {
+	case .Workspace_Picker, .Tab_Menu, .Profile_Menu, .Status_Inbox, .Rename:
+	// Modal surfaces were dispatched before held presses.
 	case .Caption:
 		if left && !w.pane_drag.pressed && !w.tab_drag.pressed {
 			ui.armed_press(&w.caption_armed, ui.caption_hit(f32(w.width), x, y, w.scale))
@@ -282,52 +247,13 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e := event
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}
-	if workspace_picker_active(&w.workspace_picker) || w.tab_menu.open || w.profile_menu.open ||
-	   w.status.inbox_open || w.rename_open {
-		terminal_scrollbar_hover_set(w, 0)
-	}
-	if workspace_picker_active(&w.workspace_picker) {
-		link_hover_clear(w)
-		workspace_picker_hover(app, w, e)
-		return
-	}
-	if w.tab_menu.open {
-		link_hover_clear(w)
-		hit := tab_menu_hit(w, f32(e.x), f32(e.y))
-		enabled := tab_menu_enabled(w, hit)
-		if enabled && hit != w.tab_menu.selected {
-			w.tab_menu.selected, w.dirty = hit, true
-		}
-		pointer_set(app, w, enabled ? .Hand : .Arrow)
-		return
-	}
-	if w.profile_menu.open {
-		link_hover_clear(w)
-		shape := platform.Cursor_Shape.Arrow
-		if hit := profile_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 {
-			if hit != w.profile_menu.menu.selected {w.profile_menu.menu.selected, w.dirty = hit, true}
-			item := w.profile_menu.menu.items[hit]
-			if item.enabled && !item.separator {shape = .Hand}
-		}
-		pointer_set(app, w, shape)
-		return
-	}
-	if w.status.inbox_open {
-		link_hover_clear(w)
-		status_inbox_move(app, w, f32(e.x), f32(e.y))
-		return
-	}
-	if w.rename_open {
-		link_hover_clear(w)
-		field := rename_field_rect(w)
-		x, y := f32(e.x), f32(e.y)
-		inside :=
-			x >= field.x && x < field.x + field.width && y >= field.y && y < field.y + field.height
-		if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
-		pointer_set(app, w, inside ? .Text : .Arrow)
-		return
-	}
 	x, y := f32(e.x), f32(e.y)
+	target := pointer_target(app, w, x, y)
+	if pointer_modal(target) {
+		pointer_hover(app, w, target, x, y)
+		modal_move(app, w, target, e)
+		return
+	}
 	if w.dragging.count > 0 {
 		if .Left not_in e.buttons {w.dragging, w.rail_resizing = {}, false; return}
 		divider_drag(app, w, x, y)
@@ -344,7 +270,6 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			return
 		}
 	}
-	target := pointer_target(app, w, x, y)
 	// A press that began on a surface keeps the pointer there until it is released.
 	if ui.armed_down(w.find.armed) {
 		target = .Find
@@ -353,6 +278,8 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	}
 	pointer_hover(app, w, target, x, y)
 	switch target {
+	case .Workspace_Picker, .Tab_Menu, .Profile_Menu, .Status_Inbox, .Rename:
+	// Modal surfaces were dispatched before held presses.
 	case .Caption, .Tab_Orientation, .Workspace_Button, .Status_Pill, .Tabs:
 		pointer_set(app, w, chrome_pointer(app, w, x, y))
 	case .Confirmation:
@@ -494,4 +421,63 @@ selection_finish :: proc(app: ^App, w: ^Window, x, y: f32) {
 	term.selection_release(entry.session, x, y)
 	if app.settings.terminal.copy_on_select {copy_selection(app, entry, false)}
 	w.dirty = true
+}
+
+// Presses and releases while a modal surface is open belong to it wherever they land.
+@(private)
+modal_button :: proc(app: ^App, w: ^Window, target: Pointer_Target, e: platform.Mouse_Button_Event) {
+	x, y := f32(e.x), f32(e.y)
+	#partial switch target {
+	case .Workspace_Picker:
+		workspace_picker_button(app, w, e)
+	case .Tab_Menu:
+		if !e.pressed {return}
+		w.header_buttons += {e.button}
+		if hit := tab_menu_hit(w, x, y); hit >= 0 && e.button == .Left {
+			if tab_menu_enabled(w, hit) {
+				w.tab_menu.selected = hit
+				tab_menu_choose(app, w)
+			}
+		} else {w.tab_menu.open, w.dirty = false, true}
+	case .Profile_Menu:
+		_ = profile_menu_button(app, w, e)
+	case .Status_Inbox:
+		status_inbox_button(app, w, e)
+	case .Rename:
+		if !e.pressed {w.rename.dragging = false; return}
+		if !rect_contains(rename_rect(w), x, y) {
+			rename_finish(app, w, false)
+			w.header_buttons += {e.button}
+		} else if e.button == .Left && rect_contains(rename_field_rect(w), x, y) {
+			rename_pointer(app, w, x, true, .Shift in e.modifiers)
+		}
+	}
+}
+
+// Moves while a modal surface is open: its own hover and cursor, and a rename field's text drag.
+@(private)
+modal_move :: proc(app: ^App, w: ^Window, target: Pointer_Target, e: platform.Mouse_Move_Event) {
+	x, y := f32(e.x), f32(e.y)
+	#partial switch target {
+	case .Workspace_Picker:
+		workspace_picker_hover(app, w, e)
+	case .Tab_Menu:
+		hit := tab_menu_hit(w, x, y)
+		enabled := tab_menu_enabled(w, hit)
+		if enabled && hit != w.tab_menu.selected {w.tab_menu.selected, w.dirty = hit, true}
+		pointer_set(app, w, enabled ? .Hand : .Arrow)
+	case .Profile_Menu:
+		shape := platform.Cursor_Shape.Arrow
+		if hit := profile_menu_hit(w, x, y); hit >= 0 {
+			if hit != w.profile_menu.menu.selected {w.profile_menu.menu.selected, w.dirty = hit, true}
+			item := w.profile_menu.menu.items[hit]
+			if item.enabled && !item.separator {shape = .Hand}
+		}
+		pointer_set(app, w, shape)
+	case .Status_Inbox:
+		status_inbox_move(app, w, x, y)
+	case .Rename:
+		if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
+		pointer_set(app, w, rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
+	}
 }

@@ -75,3 +75,30 @@ pointer_centre :: proc(r: render.Rect) -> [2]f32 {return {r.x + r.width / 2, r.y
 pointer_inside :: proc(r: render.Rect, x, y: f32) -> bool {
 	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
+
+// An open menu owns the whole window: surfaces beneath it lose their hover and no press reaches them.
+@(test)
+pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pointer-menu-modal") {return}
+	s, w := &f.state, f.state.windows[0]
+	w.width, w.height = i32(1400 * w.scale), i32(900 * w.scale)
+	app.window_relayout(s, w)
+	windows := len(s.windows)
+	caption := [2]f32{f32(w.width) - 23 * w.scale, 20 * w.scale}
+	pointer_expect_move(t, s, w, caption.x, caption.y, .Arrow)
+	testing.expect_value(t, w.caption_hover, 2)
+	app.tab_menu_open(s, w, 0, 40 * w.scale, 60 * w.scale)
+	if !testing.expect(t, w.tab_menu.open) {return}
+	testing.expect_value(t, app.pointer_target(s, w, caption.x, caption.y), app.Pointer_Target.Tab_Menu)
+	menu, _ := app.tab_menu_rect(w)
+	testing.expect(t, !pointer_inside(menu, caption.x, caption.y), "the caption must lie outside the menu")
+	pointer_expect_move(t, s, w, caption.x, caption.y + 1, .Arrow)
+	testing.expect_value(t, w.caption_hover, -1)
+	gesture_button(s, w, .Left, true, caption.x, caption.y)
+	gesture_button(s, w, .Left, false, caption.x, caption.y)
+	testing.expect(t, !w.tab_menu.open, "a press off the menu closes it")
+	testing.expect(t, ui.armed_down(w.caption_armed) == false, "the press must not reach the caption")
+	testing.expect_value(t, len(s.windows), windows)
+}
