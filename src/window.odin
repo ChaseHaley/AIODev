@@ -64,6 +64,9 @@ Window :: struct {
 	autoscrolling: bool,
 	autoscroll_deadline: time.Tick,
 	pointer: [2]f32,
+	tooltip: string,
+	tooltip_deadline: time.Tick,
+	tooltip_visible: bool,
 	pointer_shape: platform.Cursor_Shape,
 	// The last frame drew a pointer-following rim, so pointer movement must repaint it.
 	gloss_hovered: bool,
@@ -719,6 +722,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
 	}
 	if result := status_inbox_draw(app, w); result != .Ok {return frame, result}
+	if result := tooltip_draw(app, w); result != .Ok {return frame, result}
 	return frame, ui.notices_draw(
 		&app.notices,
 		&w.list,

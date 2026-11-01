@@ -96,9 +96,14 @@ pointer_move :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 	for surface in pointer_surfaces {
 		if surface.hover != nil {surface.hover(app, w, owner, e)}
 	}
+	tooltip_hover(app, w, owner, e)
 }
 
 pointer_press :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Button_Event) {
+	if e.pressed && w.tooltip != "" {
+		w.tooltip, w.tooltip_deadline, w.tooltip_visible = "", {}, false
+		w.dirty = true
+	}
 	pointer_surfaces[owner].press(app, w, e)
 }
 

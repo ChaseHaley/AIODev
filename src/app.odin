@@ -343,6 +343,7 @@ tick :: proc(app: ^App) {
 		}
 		update_blink(window)
 		update_autoscroll(app, window)
+		tooltip_tick(window)
 		status_spin_tick(window)
 		if window.taskbar_workspace != window.workspace {
 			window.taskbar_workspace = window.workspace
@@ -382,6 +383,10 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		deadline, found = next, true
 	}
 	for window in app.windows {
+		if window.tooltip_deadline != {} &&
+		   (!found || time.tick_diff(window.tooltip_deadline, deadline) > 0) {
+			deadline, found = window.tooltip_deadline, true
+		}
 		if next := window.pane_drag.hover_until;
 		   next != {} && (!found || time.tick_diff(next, deadline) > 0) {
 			deadline, found = next, true
