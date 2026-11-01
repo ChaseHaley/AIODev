@@ -57,6 +57,9 @@ Editor_Row :: struct {
 	// A choice whose popup has a filter field, such as a font picker.
 	searchable:                                    bool,
 	choices, choice_labels:                        []string,
+	// Shell fonts keep the other catalogue subset so the popup can switch without discovery.
+	other_font_choices:                            []string,
+	show_all_fonts:                                bool,
 	profile, badge, detail, note:                  string,
 	flags:                                         bit_set[Editor_Row_Flag],
 	process: int,
@@ -154,6 +157,7 @@ Editor :: struct {
 	selected, scroll, visible_rows, captured, shortcut_index:          int,
 	filter, value:                                                     Text_Field,
 	choice_search:                                                     Text_Field,
+	choice_toggle_focus:                                               bool,
 	choice_matches:                                                    [dynamic]int,
 	drag:                                                              Editor_Drag,
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
@@ -187,6 +191,7 @@ Editor_Outcome :: enum {
 	Profile_Action,
 	Process_Save,
 	Process_Remove,
+	Font_Filter,
 }
 
 // Table state a settings reload keeps: expansion, an open removal question, the detected section and
@@ -239,6 +244,8 @@ editor_row_destroy :: proc(row: ^Editor_Row) {
 	delete(row.choices)
 	for label in row.choice_labels {delete(label)}
 	delete(row.choice_labels)
+	for choice in row.other_font_choices {delete(choice)}
+	delete(row.other_font_choices)
 }
 
 editor_destroy :: proc(p: ^Editor) {
@@ -355,7 +362,7 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		group_index = len(p.groups) - 1
 	}
 	owned: [9]string
-	choices, labels: []string
+	choices, labels, other_fonts: []string
 	success := false
 	defer if !success {
 		for s in owned {delete(s)}
@@ -363,6 +370,8 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		delete(choices)
 		for label in labels {delete(label)}
 		delete(labels)
+		for choice in other_fonts {delete(choice)}
+		delete(other_fonts)
 	}
 	for s, i in ([?]string {
 		row.key,
@@ -384,11 +393,16 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		labels = make([]string, len(row.choice_labels)) or_return
 		for label, i in row.choice_labels {labels[i] = strings.clone(label) or_return}
 	}
+	if len(row.other_font_choices) > 0 {
+		other_fonts = make([]string, len(row.other_font_choices)) or_return
+		for choice, i in row.other_font_choices {other_fonts[i] = strings.clone(choice) or_return}
+	}
 	added := row
 	added.key, added.title, added.description, added.value, added.default_value =
 		owned[0], owned[1], owned[2], owned[3], owned[4]
 	added.profile, added.badge, added.detail, added.note = owned[5], owned[6], owned[7], owned[8]
 	added.choices, added.choice_labels = choices, labels
+	added.other_font_choices = other_fonts
 	added.group = group_index
 	_, err := append(&p.rows, added)
 	success = err == nil
@@ -1057,6 +1071,7 @@ choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
 @(private)
 open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
 	p.popup, p.focus = .Choice, .Control
+	p.choice_toggle_focus = false
 	if choice_searchable(row) {
 		field_set(&p.choice_search, "")
 		choice_filter(p, row)
@@ -1282,6 +1297,17 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Editor_Outcome, bool) {
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	if p.popup == .Choice && choice_searchable(row) {
+		if row.key == "font.family" && e.key == .Tab {
+			p.choice_toggle_focus = !p.choice_toggle_focus
+			return .Changed, true
+		}
+		if p.choice_toggle_focus {
+			if e.key == .Space || e.key == .Enter || e.key == .Numpad_Enter {
+				return choice_toggle_fonts(p, row), true
+			}
+			if e.key != .Escape && e.key != .Arrow_Down && e.key != .Arrow_Up {return .None, true}
+			p.choice_toggle_focus = false
+		}
 		#partial switch e.key {
 		case .Backspace, .Delete, .Arrow_Left, .Arrow_Right, .A, .Space:
 			if field_key(&p.choice_search, e) == .Edited {choice_filter(p, row)}
@@ -1487,6 +1513,7 @@ editor_text :: proc(p: ^Editor, text: string) {
 	if p.capturing || p.focus == .Positions {return}
 	row := editor_row(p)
 	if p.popup == .Choice && choice_searchable(row) {
+		if p.choice_toggle_focus {return}
 		if field_text(&p.choice_search, text) == .Edited {choice_filter(p, row)}
 		return
 	}
@@ -1847,7 +1874,12 @@ editor_press :: proc(
 			return .Changed
 		}
 		if p.popup == .Choice {
+			if contains(choice_font_toggle_rect(p, l), x, y) {
+				p.choice_toggle_focus = true
+				return choice_toggle_fonts(p, row)
+			}
 			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {
+				p.choice_toggle_focus = false
 				box := choice_search_box(p, l, text)
 				if text != nil {
 					field_pointer(&p.choice_search, field_box_offset(box, x), true, extend)
@@ -2222,6 +2254,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 		row := editor_row(p)
 		if row == nil {return .Arrow}
 		if p.popup == .Choice {
+			if contains(choice_font_toggle_rect(p, l), x, y) {return .Hand}
 			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {return .Text}
 			popup.y += choice_search_height(row, s)
 		}
@@ -2879,10 +2912,19 @@ popup_draw :: proc(
 		count := choice_popup_rows(p, row, l)
 		if choice_searchable(row) {
 			box := choice_search_box(p, l, text)
-			box_draw(list, box.rect, theme, true, s)
-			if result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Search fonts");
+			box_draw(list, box.rect, theme, !p.choice_toggle_focus, s)
+			if result := field_box_draw(box, list, theme, field_box_baseline(box),
+			                           !p.choice_toggle_focus, "Search fonts");
 			   result != .Ok {return result}
 			if render.push_layer(list, l.page) != .None {return .Ok}
+			if row.key == "font.family" {
+				toggle := choice_font_toggle_rect(p, l)
+				switch_draw(list, {toggle.x + toggle.width - 50 * s, toggle.y + 4 * s, 44 * s, 22 * s},
+				            row.show_all_fonts, p.choice_toggle_focus, theme, s)
+				if result := draw_text(text, list, "Show all fonts", toggle.x + 10 * s,
+				                       toggle.y + (toggle.height - text.line_height) / 2 + text.ascent,
+				                       theme.text, toggle.width - 70 * s); result != .Ok {return result}
+			}
 			r.y += choice_search_height(row, s)
 			r.height -= choice_search_height(row, s)
 			if count == 0 {

@@ -111,11 +111,15 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 	@(static, rodata)
 	schema := settings.SCHEMA
 	for &entry in schema {
-		if entry.key == settings.PADDING_GROUPS_KEY {continue}
+		if entry.key == settings.PADDING_GROUPS_KEY || entry.key == "font.show_all" {continue}
 		row := ui.schema_row(entry)
 		row.value = settings.value_text(&s, entry)
 		if choices, labels, live := setting_live_choices(&s, font_items, entry.key); live {
 			row.choices, row.choice_labels = choices, labels
+		}
+		if entry.key == "font.family" {
+			row.show_all_fonts = s.font.show_all
+			row.other_font_choices = font.family_choices(font_items, !s.font.show_all, row.value)
 		}
 		if entry.key == "theme.name" {
 			row.description = "Theme file or custom theme. Changing any color saves a custom theme."
@@ -434,10 +438,31 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 	return "", warning
 }
 
+@(private)
+editor_font_filter :: proc(app: ^App, w: ^Window) {
+	p := &w.editor
+	row := ui.editor_row(p)
+	if row == nil || row.key != "font.family" {return}
+	query := strings.clone(ui.field_string(&p.choice_search), context.temp_allocator)
+	focused := p.choice_toggle_focus
+	updated, message, err := settings.edit_text(p.source, "font.show_all", row.show_all_fonts ? "true" : "false")
+	defer delete(updated)
+	defer delete(message)
+	result: settings.Save_Error
+	if err == nil && message == "" {result = settings_commit(app, p.source, updated, p)}
+	if err != nil || message != "" || result != .None {
+		row.choices, row.other_font_choices = row.other_font_choices, row.choices
+		row.show_all_fonts = !row.show_all_fonts
+		ui.editor_message(p, "Could not save font filtering. Reopen Settings and try again.", true)
+	}
+	ui.editor_font_search_restore(p, query, focused)
+}
+
 editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p := &w.editor
 	if outcome == .None {return}
 	w.dirty = true
+	if outcome == .Font_Filter {editor_font_filter(app, w); return}
 	if outcome == .Process_Remove {editor_process_remove_ask(app, w); return}
 	if outcome == .Process_Save {editor_process_save(app, w); return}
 	if outcome == .Profile_Action {

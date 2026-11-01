@@ -169,8 +169,13 @@ app_init :: proc(app: ^App) -> bool {
 	@(static) palette_settings: [len(settings.SCHEMA)]ui.Palette_Setting
 	@(static, rodata)
 	schema := settings.SCHEMA
-	for entry, i in schema {palette_settings[i] = ui.palette_setting(entry)}
-	if ui.palette_init(&app.palette, palette_settings[:]) != nil {
+	setting_count := 0
+	for entry in schema {
+		if entry.key == "font.show_all" {continue}
+		palette_settings[setting_count] = ui.palette_setting(entry)
+		setting_count += 1
+	}
+	if ui.palette_init(&app.palette, palette_settings[:setting_count]) != nil {
 		return false
 	}
 	palette_set_sources(app)
