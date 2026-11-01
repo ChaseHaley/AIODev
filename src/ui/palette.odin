@@ -42,6 +42,8 @@ Outcome :: enum {
 	Closed,
 	Run,
 	Open_Setting,
+	// A setting control chose a new value; palette_chosen_value names it. The palette stays open.
+	Set_Setting,
 	Open_Tab,
 	Open_Workspace,
 }
@@ -140,9 +142,15 @@ Palette_Mode_Info :: struct {
 	.Commands,
 }
 
-// A setting the palette can open in the settings editor. The strings are static schema text.
+// A setting the palette can open in the settings editor, and the control it offers in place.
+// The strings are static schema text. A choice without `choices` asks Palette_Values for a live list.
 Palette_Setting :: struct {
-	key, title, group: string,
+	key, title, group:      string,
+	control:                Palette_Control,
+	minimum, maximum, step: f64,
+	choices:                []string,
+	// The choice list has a filter field, as the Settings page gives font pickers.
+	searchable:             bool,
 }
 
 // One searchable tab or workspace. The strings are borrowed from its live record, so an opened
@@ -197,16 +205,20 @@ Palette :: struct {
 	mode:           Palette_Mode,
 	mode_menu:      bool,
 	menu_hover:     int,
-	// The setting key of the last Open_Setting outcome.
-	chosen:    string,
-	chosen_id: u64,
-	scratch:   ^fuzzy.Scratch,
+	// The setting key of the last Open_Setting or Set_Setting outcome.
+	chosen:       string,
+	chosen_value: [dynamic]u8,
+	chosen_id:    u64,
+	scratch:      ^fuzzy.Scratch,
+	values:       Palette_Values,
+	edit:         Palette_Edit,
 }
 
 Palette_Layout :: struct {
 	panel, input, list, footer, chip, menu: render.Rect,
+	viewport:                               render.Rect,
 	hints:                                  [len(PALETTE_FOOTER_MODES)]render.Rect,
-	row_height, header_height:              f32,
+	row_height, header_height, scale:       f32,
 	rows, headers:                          int,
 }
 
@@ -220,6 +232,8 @@ palette_init :: proc(
 	p.results = make([dynamic]Palette_Result, allocator)
 	p.ordered = make([dynamic]Palette_Result, allocator)
 	p.positions = make([dynamic]int, allocator)
+	p.chosen_value = make([dynamic]u8, allocator)
+	edit_init(&p.edit, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
 	p.menu_hover = -1
@@ -241,6 +255,8 @@ palette_destroy :: proc(p: ^Palette) {
 	delete(p.ordered)
 	delete(p.positions)
 	delete(p.haystack)
+	delete(p.chosen_value)
+	edit_destroy(&p.edit)
 	p^ = {}
 }
 
@@ -265,6 +281,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 }
 
 palette_close :: proc(p: ^Palette) {
+	palette_edit_cancel(p)
 	presence_close(&p.presence)
 	p.query.dragging = false
 	p.mode_menu = false
@@ -658,6 +675,8 @@ less_result :: proc(a, b: Palette_Result) -> bool {
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
+	// An open control belongs to a row this refresh may move or remove.
+	palette_edit_cancel(p)
 	clear(&p.results)
 	clear(&p.ordered)
 	if !utf8.valid_string(query) {query = ""}
@@ -872,6 +891,8 @@ palette_key :: proc(
 	if !e.pressed {
 		return .None, 0
 	}
+	if p.edit.kind == .Choice || p.edit.kind == .Text {return edit_key(p, e), 0}
+	if p.edit.kind == .Slider {return .None, 0}
 	was_menu := p.mode_menu
 	if was_menu {
 		p.mode_menu = false
@@ -889,6 +910,19 @@ palette_key :: proc(
 		}
 	}
 	shift := .Shift in e.modifiers
+	// Alt+Left and Alt+Right step the selected setting; Ctrl+Enter operates its control.
+	if s := result_setting(p, p.selected); s != nil && s.control != .None {
+		setting := p.results[p.selected].setting
+		alt := .Alt in e.modifiers && .Control not_in e.modifiers
+		#partial switch e.key {
+		case .Arrow_Left:
+			if alt {return control_step(p, setting, -1), 0}
+		case .Arrow_Right:
+			if alt {return control_step(p, setting, 1), 0}
+		case .Enter, .Numpad_Enter:
+			if .Control in e.modifiers {return control_activate(p, setting), 0}
+		}
+	}
 	if step := list_step(e); step != 0 {return move(p, step), 0}
 	#partial switch e.key {
 	case .Escape:
@@ -911,6 +945,7 @@ palette_key :: proc(
 }
 
 palette_text :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -> Outcome {
+	if p.edit.kind != .None {return edit_text(p, text)}
 	closed_menu := p.mode_menu
 	p.mode_menu, p.menu_hover = false, -1
 	outcome := edited(p, registry, field_text(&p.query, text))
@@ -925,7 +960,10 @@ palette_paste :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -
 	return palette_text(p, registry, line)
 }
 
-palette_selection :: proc(p: ^Palette) -> string {return field_selected_text(&p.query)}
+palette_selection :: proc(p: ^Palette) -> string {
+	if field := edit_field(p); field != nil {return field_selected_text(field)}
+	return field_selected_text(&p.query)
+}
 
 palette_cut :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	if palette_selection(p) == "" {return .None}
@@ -1062,8 +1100,10 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		list          = list,
 		footer        = footer,
 		chip          = chip,
+		viewport      = {0, 0, width, height},
 		row_height    = row_height,
 		header_height = header_height,
+		scale         = scale,
 		rows          = rows,
 		headers       = headers,
 	}
@@ -1132,6 +1172,16 @@ hint_at :: proc(l: Palette_Layout, x, y: f32) -> (Palette_Mode, bool) {
 }
 
 palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
+	switch p.edit.kind {
+	case .Choice:
+		hover := popup_row_at(p, l, x, y)
+		if hover == p.edit.hover {return .None}
+		p.edit.hover = hover
+		return .Changed
+	case .Slider, .Text:
+		return .None
+	case .None:
+	}
 	if p.mode_menu {
 		hover := menu_row_at(l, x, y)
 		if hover == p.menu_hover {return .None}
@@ -1151,10 +1201,12 @@ palette_mouse_press :: proc(
 	registry: ^commands.Registry,
 	l: Palette_Layout,
 	x, y: f32,
+	text: ^Text = nil,
 ) -> (
 	Outcome,
 	commands.Command_Id,
 ) {
+	if outcome, handled := edit_press(p, l, text, x, y); handled {return outcome, 0}
 	if p.mode_menu {
 		if index := menu_row_at(l, x, y); index >= 0 {
 			palette_set_mode(p, registry, PALETTE_MENU_ORDER[index])
@@ -1168,6 +1220,7 @@ palette_mouse_press :: proc(
 		return .Changed, 0
 	}
 	if index := row_at(p, l, x, y); index >= 0 {
+		if outcome, handled := control_press(p, l, index, x, y); handled {return outcome, 0}
 		return run(p, index)
 	}
 	r := l.panel
@@ -1211,6 +1264,7 @@ palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
 
 // Text over the query, a hand over the mode chip, mode menu rows, footer modes and results.
 palette_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> platform.Cursor_Shape {
+	if shape, ok := control_pointer(p, l, x, y); ok {return shape}
 	if p.mode_menu && menu_row_at(l, x, y) >= 0 {return .Hand}
 	if p.mode != .All && contains(l.chip, x, y) {return .Hand}
 	if palette_over_text(l, x, y) {return .Text}
@@ -1229,6 +1283,7 @@ palette_input_press :: proc(
 	x, y, scale: f32,
 	extend: bool,
 ) -> Outcome {
+	palette_edit_cancel(p)
 	if p.mode != .All && contains(l.chip, x, y) {
 		p.mode_menu = !p.mode_menu
 		p.menu_hover = -1
@@ -1260,6 +1315,15 @@ palette_input_release :: proc(p: ^Palette) -> bool {
 }
 
 palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
+	switch p.edit.kind {
+	case .Choice:
+		return popup_wheel(p, rows)
+	case .Slider:
+		return .None
+	case .Text:
+		palette_edit_cancel(p)
+	case .None:
+	}
 	if p.mode_menu {
 		p.mode_menu, p.menu_hover = false, -1
 		return .Changed
@@ -1500,6 +1564,13 @@ palette_draw :: proc(
 					label_width = text_width(&key_text, shortcut_label) + 12 * scale
 				}
 			}
+			if s := result_setting(p, index); s != nil && s.control != .None {
+				control := control_rect(s, row, scale)
+				label_width = max(0, row.x + row.width - padding - control.x)
+				if result := draw_control(p, list, text, theme, l, item.setting, row); result != .Ok {
+					return result
+				}
+			}
 			detail := palette_result_context(p, item)
 			type_x := row.x + padding + PALETTE_GLYPH_WIDTH * scale
 			type_width := max(
@@ -1565,5 +1636,6 @@ palette_draw :: proc(
 		}
 	}
 	if result := draw_footer(p, list, text, theme, l, scale); result != .Ok {return result}
+	if result := draw_popup(p, list, text, theme, l); result != .Ok {return result}
 	return draw_mode_menu(p, list, text, theme, l, scale)
 }

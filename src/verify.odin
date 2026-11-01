@@ -270,6 +270,15 @@ when AIO_CONTROL {
 		if owns_palette && p.selected >= 0 && p.selected < len(p.results) {
 			item = ui.palette_result_name(p, p.results[p.selected])
 		}
+		// The saved value of the selected setting row, read the way its palette control reads it.
+		selected_value := ""
+		edit := ui.Palette_Edit_Kind.None
+		if owns_palette {
+			edit = ui.palette_editing(p)
+			if p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Setting {
+				selected_value, _ = palette_setting_value(app, item)
+			}
+		}
 		entries := make([dynamic]control.State_Entry, context.temp_allocator)
 		base := [?]control.State_Entry {
 			{"app.pid", fmt.tprintf("%d", os.get_pid())},
@@ -289,6 +298,8 @@ when AIO_CONTROL {
 			{"palette.selected", fmt.tprintf("%d", owns_palette ? p.selected : 0)},
 			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)}, {"palette.item", item},
 			{"palette.scroll", fmt.tprintf("%d", owns_palette ? p.scroll : 0)},
+			{"palette.edit", fmt.tprintf("%v", edit)},
+			{"palette.value", selected_value},
 			{"palette.rows", fmt.tprintf("%d", palette_layout.rows)},
 			{"palette.row_height", fmt.tprintf("%g", palette_layout.row_height)},
 			{"palette.panel", fmt.tprintf("%g,%g,%g,%g", palette_layout.panel.x, palette_layout.panel.y,

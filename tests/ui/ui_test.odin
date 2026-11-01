@@ -24,10 +24,10 @@ registry_create :: proc(t: ^testing.T) -> commands.Registry {
 }
 
 palette_settings := [?]ui.Palette_Setting{
-	{"pane.gap", "Pane Gap", "Panes"},
-	{"pane.show_headers", "Show Pane Headers", "Panes"},
-	{"font.size", "Font Size", "Font"},
-	{"terminal.copy_on_select", "Copy on Select", "Terminal"},
+	{key = "pane.gap", title = "Pane Gap", group = "Panes"},
+	{key = "pane.show_headers", title = "Show Pane Headers", group = "Panes"},
+	{key = "font.size", title = "Font Size", group = "Font"},
+	{key = "terminal.copy_on_select", title = "Copy on Select", group = "Terminal"},
 }
 
 key :: proc(k: platform.Key_Event) -> platform.Key_Event {

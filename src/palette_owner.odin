@@ -1,9 +1,12 @@
 package main
 
 import "aio:commands"
+import "aio:font"
 import "aio:layout"
+import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "core:os"
 
 palette_active :: proc(app: ^App, w: ^Window) -> bool {
 	return w != nil && w.id != 0 && app.palette_window == w.id && app.palette.open
@@ -185,4 +188,99 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	rail_overlay_dismiss(app, w)
 	status_overview_cancel(w)
 	w.dirty = true
+}
+
+// The control a setting offers in the palette, matching the Settings page. The leader shortcut
+// and program groups keep the jump to Settings, where their capture and group editors live.
+palette_setting :: proc(entry: settings.Schema_Entry) -> ui.Palette_Setting {
+	s := ui.Palette_Setting {
+		key     = entry.key,
+		title   = entry.title,
+		group   = settings.group_title(entry.key),
+		minimum = entry.minimum,
+		maximum = entry.maximum,
+		step    = 1,
+	}
+	switch entry.kind {
+	case .String:
+		switch entry.key {
+		case "input.leader", settings.PADDING_GROUPS_KEY:
+			s.control = .None
+		case "theme.name":
+			s.control = .Choice
+		case "font.family", "interface.font_family":
+			s.control, s.searchable = .Choice, true
+		case:
+			s.control = .Text
+		}
+	case .Int:
+		s.control = .Slider
+	case .Float:
+		s.control = .Slider
+		switch entry.key {
+		case "font.size", "interface.font_size":
+		case "font.line_height":
+			s.step = 0.05
+		case:
+			s.step = 0.1
+		}
+	case .Bool:
+		s.control = .Toggle
+	case .Enum:
+		s.control, s.choices = .Choice, entry.enum_names
+	}
+	// The Settings page narrows these tracks to the useful range.
+	if entry.key == "font.size" {s.minimum, s.maximum = 6, 32}
+	if entry.key == "font.line_height" {s.minimum, s.maximum = 0.8, 2}
+	return s
+}
+
+@(private)
+palette_setting_value :: proc(user: rawptr, key: string) -> (value, label: string) {
+	app := cast(^App)user
+	entry := settings.schema_find(key)
+	if entry == nil {return}
+	value = settings.value_text(&app.settings, entry^)
+	if key == "theme.name" {label = settings.theme_display_name(&app.settings, value)}
+	return
+}
+
+@(private)
+palette_setting_choices :: proc(user: rawptr, key: string) -> (choices, labels: []string) {
+	app := cast(^App)user
+	switch key {
+	case "theme.name":
+		return settings_theme_choices(&app.settings)
+	case "font.family", "interface.font_family":
+		installed, _ := font.installed_families(app.fonts)
+		all := key == "interface.font_family" || app.settings.font.show_all
+		current := key == "font.family" ? app.settings.font.family : app.settings.interface.font_family
+		return font.family_choices(installed, all, current), nil
+	}
+	return nil, nil
+}
+
+// Saves a value chosen on a palette control through the settings file, so it persists and every
+// window applies it. A refused value reports why, as the Settings page does.
+palette_setting_save :: proc(app: ^App, key, value: string) {
+	if app.settings_path == "" {return}
+	data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
+	if read_error != nil {
+		notify(app, .Error, "Could not read the settings file.")
+		return
+	}
+	updated, message, edit_error := settings.edit_text(string(data), key, value)
+	defer delete(updated)
+	defer delete(message)
+	if edit_error != nil {
+		notify(app, .Error, "Could not save the setting.")
+		return
+	}
+	if message != "" {
+		notify(app, .Error, message)
+		return
+	}
+	if settings_commit(app, string(data), updated) != .None {
+		notify(app, .Error, "Could not save the setting.")
+	}
 }

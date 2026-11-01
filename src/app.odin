@@ -169,13 +169,15 @@ app_init :: proc(app: ^App) -> bool {
 	@(static) palette_settings: [len(settings.SCHEMA)]ui.Palette_Setting
 	@(static, rodata)
 	schema := settings.SCHEMA
-	for entry, i in schema {
-		palette_settings[i] = {entry.key, entry.title, settings.group_title(entry.key)}
-	}
+	for entry, i in schema {palette_settings[i] = palette_setting(entry)}
 	if ui.palette_init(&app.palette, palette_settings[:]) != nil {
 		return false
 	}
 	palette_set_sources(app)
+	ui.palette_set_values(
+		&app.palette,
+		{user = app, value = palette_setting_value, choices = palette_setting_choices},
+	)
 	if executable, err := os.get_executable_path(context.temp_allocator); err == nil {
 		directory := filepath.dir(executable)
 		if cli, join_error := filepath.join({directory, CLI_EXECUTABLE}, context.temp_allocator);

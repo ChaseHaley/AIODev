@@ -15,7 +15,7 @@ palette_header_flood_fits_measured_narrow_viewport :: proc(t: ^testing.T) {
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
 	for entry, i in settings.SCHEMA {
-		rows[i] = {entry.key, entry.title, settings.group_title(entry.key)}
+		rows[i] = {key = entry.key, title = entry.title, group = settings.group_title(entry.key)}
 	}
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
@@ -35,7 +35,7 @@ palette_fit_keeps_rows_and_stable_query_top :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
-	for entry, i in settings.SCHEMA { rows[i] = {entry.key, entry.title, settings.group_title(entry.key)} }
+	for entry, i in settings.SCHEMA { rows[i] = {key = entry.key, title = entry.title, group = settings.group_title(entry.key)} }
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)
@@ -85,7 +85,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
-	for entry, i in settings.SCHEMA { rows[i] = {entry.key, entry.title, settings.group_title(entry.key)} }
+	for entry, i in settings.SCHEMA { rows[i] = {key = entry.key, title = entry.title, group = settings.group_title(entry.key)} }
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)
@@ -169,7 +169,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
-	for entry, i in settings.SCHEMA { rows[i] = {entry.key, entry.title, settings.group_title(entry.key)} }
+	for entry, i in settings.SCHEMA { rows[i] = {key = entry.key, title = entry.title, group = settings.group_title(entry.key)} }
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)
@@ -321,7 +321,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
-	for entry, i in settings.SCHEMA { rows[i] = {entry.key, entry.title, settings.group_title(entry.key)} }
+	for entry, i in settings.SCHEMA { rows[i] = {key = entry.key, title = entry.title, group = settings.group_title(entry.key)} }
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:], allocator), nil) { return }
 	defer ui.palette_destroy(&p)
