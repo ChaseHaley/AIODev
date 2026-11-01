@@ -132,7 +132,9 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     Copy-Item -Path 'themes/*.json' -Destination $themeDestination -Force
     # The aio command line ships beside every app build; the app adds its directory to each shell's PATH.
     [string[]] $cliMode = if ($Mode -contains '-o:speed') { '-o:speed' } else { '-debug' }
-    Invoke-Odin build src/cli "-out:$(Join-Path (Split-Path $Output) 'aio.exe')" @cliMode '-subsystem:console' @flags
+    $serverName = Split-Path $Output -Leaf
+    Invoke-Odin build src/cli "-out:$(Join-Path (Split-Path $Output) 'aio.exe')" @cliMode `
+        '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @flags
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {

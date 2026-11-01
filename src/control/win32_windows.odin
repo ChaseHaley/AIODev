@@ -16,6 +16,12 @@ foreign import advapi32 "system:advapi32.lib"
 @(private, default_calling_convention = "system")
 foreign kernel32 {
 	GetNamedPipeServerProcessId :: proc(Pipe: w.HANDLE, ServerProcessId: ^w.ULONG) -> w.BOOL ---
+	QueryFullProcessImageNameW :: proc(
+		hProcess: w.HANDLE,
+		dwFlags: w.DWORD,
+		lpExeName: w.LPWSTR,
+		lpdwSize: ^w.DWORD,
+	) -> w.BOOL ---
 }
 
 @(private, default_calling_convention = "system")

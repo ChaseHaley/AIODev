@@ -152,7 +152,12 @@ spawn_errors :: proc(t: ^testing.T) {
 	testing.expect_value(t, message_err, pty.Error.None)
 	defer delete(message)
 	testing.expect(t, strings.has_prefix(message, "Could not start \"aio_missing_executable_93820.exe\":" ))
-	directories := [2]string{"C:\\aio_missing_directory_93820", "C:\\Windows\\System32\\cmd.exe"}
+	directories := [4]string{
+		"C:\\aio_missing_directory_93820",
+		"C:\\Windows\\System32\\cmd.exe",
+		`\\server\share`,
+		`\\.\C:\Windows`,
+	}
 	for directory in directories {
 		bad, dir_err := expected_failure({
 			command_line = "cmd.exe", working_directory = directory, cols = 80, rows = 25,

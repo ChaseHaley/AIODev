@@ -6,6 +6,7 @@ import "aio:instance"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import w "core:sys/windows"
@@ -17,6 +18,9 @@ CONNECT_TIMEOUT_MS :: 1000
 CALL_TIMEOUT_MS :: 15000
 @(private)
 WAIT_INTERVAL :: 100 * time.Millisecond
+// The app executable built beside this CLI. build.ps1 supplies the exact name for verify builds.
+@(private)
+SERVER_NAME :: #config(AIO_SERVER_NAME, "aiodev.exe")
 
 @(private)
 interrupted: bool
@@ -64,6 +68,17 @@ start :: proc() -> commands.Status {
 	return status
 }
 
+// The process image this build expects behind the control pipe.
+@(private, require_results)
+server_identity :: proc(allocator := context.allocator) -> (control.Server_Identity, bool) {
+	executable, err := os.get_executable_path(allocator)
+	if err != nil {return {}, false}
+	defer delete(executable, allocator)
+	image, join_error := filepath.join({filepath.dir(executable), SERVER_NAME}, allocator)
+	if join_error != nil {return {}, false}
+	return {image = image}, true
+}
+
 // One request on its own connection, so other clients can interleave between a wait's polls.
 @(private, require_results)
 send :: proc(pipe: string, request: []string) -> (control.Response, commands.Status) {
@@ -76,6 +91,25 @@ send :: proc(pipe: string, request: []string) -> (control.Response, commands.Sta
 		return {}, .Unreachable
 	}
 	defer control.close(&client)
+	identity, identity_ok := server_identity(context.temp_allocator)
+	if !identity_ok {
+		fmt.eprintln("aio: could not locate the AIODev executable to verify the control pipe.")
+		return {}, .Unreachable
+	}
+	if verify_error := control.verify_server(&client, identity); verify_error != .None {
+		if verify_error == .Impostor {
+			fmt.eprintfln(
+				"aio: the control pipe is served by an unverified process (PID %d); refusing to send.",
+				client.process_id,
+			)
+			return {}, .Impostor
+		}
+		fmt.eprintfln(
+			"aio: could not verify the control pipe server (%v); refusing to send.",
+			verify_error,
+		)
+		return {}, .Unreachable
+	}
 	response, call_error := control.call(&client, request, CALL_TIMEOUT_MS)
 	if call_error != .None {
 		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
@@ -113,7 +147,9 @@ wait :: proc(o: Options, pipe, caller: string) -> commands.Status {
 		parsed := o.wait.exit &&
 			json.unmarshal_string(response.text, &reply, allocator = context.temp_allocator) == nil
 		if status != .Ok {
-			if status != .Unreachable {fmt.eprintfln("aio: %s", parsed ? reply.error : response.text)}
+			if status != .Unreachable && status != .Impostor {
+				fmt.eprintfln("aio: %s", parsed ? reply.error : response.text)
+			}
 			return status
 		}
 		if o.wait.exit {

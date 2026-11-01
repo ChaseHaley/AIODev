@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:pty"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
@@ -166,7 +167,15 @@ pane_shell_swap :: proc(
 		if label_error != nil {
 			log.errorf("resolving the pane directory failed: %v", label_error)
 		} else if label != "" {
-			config.working_directory = label
+			if pty.working_directory_is_local(label) {
+				config.working_directory = label
+			} else {
+				notify(
+					app,
+					.Warning,
+					"The pane's directory is remote or unavailable; using the profile's default.",
+				)
+			}
 		}
 	}
 	term.restart(entry.session, config)

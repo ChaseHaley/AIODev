@@ -257,9 +257,7 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	   !utf8.valid_string(options.command_line) {
 		return {}, {.Invalid_Argument, 0}
 	}
-	if len(options.working_directory) == 0 ||
-	   strings.contains(options.working_directory, "\x00") ||
-	   !utf8.valid_string(options.working_directory) {
+	if !working_directory_is_local(options.working_directory) {
 		return {}, {.Invalid_Working_Directory, ERROR_DIRECTORY}
 	}
 	command := w.utf8_to_wstring(options.command_line, allocator)
@@ -291,13 +289,6 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	directory := w.utf8_to_wstring(options.working_directory, allocator)
 	if directory == nil {return {}, {.Out_Of_Memory, 0}}
 	defer delete(directory, allocator)
-	attributes := w.GetFileAttributesW(directory)
-	if attributes == w.INVALID_FILE_ATTRIBUTES {
-		return {}, spawn_failure("GetFileAttributesW", .Invalid_Working_Directory, u32(w.GetLastError()))
-	}
-	if attributes & w.FILE_ATTRIBUTE_DIRECTORY == 0 {
-		return {}, {.Invalid_Working_Directory, ERROR_DIRECTORY}
-	}
 	environment, env_err := environment_block(
 		options.environment,
 		allocator,

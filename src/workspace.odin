@@ -2,6 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:platform"
+import "aio:pty"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
@@ -420,13 +421,33 @@ tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
 	pending_close_open_tab(app, w, index)
 }
 
+// Picks a usable launch directory without touching a remote path twice. `refused` reports that a
+// nonempty candidate was rejected, so the caller can tell the user why a different shell started.
+@(require_results)
+local_launch_directory :: proc(candidate, fallback: string) -> (directory: string, refused: bool) {
+	if candidate != "" {
+		if pty.working_directory_is_local(candidate) {return candidate, false}
+		refused = true
+	}
+	if fallback != "" && pty.working_directory_is_local(fallback) {return fallback, refused}
+	return "", refused
+}
+
 tab_duplicate :: proc(app: ^App, w: ^Window) {
 	entry := focused_session(app, w)
 	if entry == nil || !pane_minimum_single(app, w) {return}
 	raw := term.working_directory(entry.session, context.temp_allocator)
 	directory, err := settings.directory_label(raw, context.temp_allocator)
 	if err != nil {notify(app, .Error, "Could not resolve the pane directory."); return}
-	if directory == "" {directory = entry.header.launch_directory}
+	refused: bool
+	directory, refused = local_launch_directory(directory, entry.header.launch_directory)
+	if refused {
+		notify(
+			app,
+			.Warning,
+			"The pane's reported directory is remote or unavailable; using a local fallback.",
+		)
+	}
 	if !tab_create(app, w.workspace, entry.header.command, directory, entry.profile_id) {
 		notify(app, .Error, "Could not duplicate the tab.")
 		return

@@ -12,6 +12,16 @@ Error :: enum {
 	Timeout,
 	Closed,
 	System,
+	// The pipe answered, but its server process did not match the expected identity.
+	Impostor,
+}
+
+// The process a client expects behind a control pipe. A zero field is not checked; a client that
+// knows only the image still gets the image check.
+Server_Identity :: struct {
+	pid:     u32,
+	created: u64,
+	image:   string,
 }
 State_Entry :: struct {
 	key, value: string,

@@ -27,7 +27,7 @@ Wait    aio wait polls until the pane shows the text or its program exits; the d
         timeout is 30000 ms, and 0 waits without limit. --exit prints the exit code, even
         after the pane closed with its program, or closed when it was closed while running.
 Exit    0 ok, 1 failed, 2 bad command line, 3 pane missing or ambiguous,
-        4 AIODev unreachable, 130 interrupted.
+        4 AIODev unreachable, 5 control pipe server unverified, 130 interrupted.
 
 Turn on Command Line Control in AIODev's Settings (control.enabled) first.
 `

@@ -571,6 +571,91 @@ connect :: proc(name: string, timeout_ms: int, allocator := context.allocator) -
 	}
 }
 
+// Checks that the connected pipe's server is the process the caller expects. `aio` supplies the
+// sibling AIODev image; `aioctl` also supplies the recorded PID and creation time. A mismatch is
+// Impostor, so callers can distinguish a squatter from an absent AIODev.
+@(require_results)
+verify_server :: proc(client: ^Client, expected: Server_Identity) -> Error {
+	if client.pipe == nil {return .Closed}
+	if expected.pid == 0 && expected.created == 0 && expected.image == "" {
+		return .Invalid_Argument
+	}
+	if expected.pid != 0 && client.process_id != expected.pid {
+		log.errorf(
+			"control: pipe server PID %d does not match expected %d",
+			client.process_id,
+			expected.pid,
+		)
+		return .Impostor
+	}
+	handle := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, client.process_id)
+	if handle == nil {
+		log.errorf("control: OpenProcess(%d) failed: %v", client.process_id, w.GetLastError())
+		return .System
+	}
+	defer close_handle(&handle)
+	if expected.created != 0 {
+		created, exited, kernel, user: w.FILETIME
+		if !bool(w.GetProcessTimes(handle, &created, &exited, &kernel, &user)) {
+			log.errorf("control: GetProcessTimes failed: %v", w.GetLastError())
+			return .System
+		}
+		actual := u64(created.dwHighDateTime) << 32 | u64(created.dwLowDateTime)
+		if actual != expected.created {return .Impostor}
+	}
+	if expected.image != "" && !process_image_matches(handle, expected.image) {
+		log.errorf("control: pipe server image does not match %s", expected.image)
+		return .Impostor
+	}
+	return .None
+}
+
+@(private, require_results)
+process_image_matches :: proc(handle: w.HANDLE, expected: string) -> bool {
+	buffer: [32768]u16
+	size := u32(len(buffer))
+	if !bool(QueryFullProcessImageNameW(handle, 0, raw_data(buffer[:]), &size)) {
+		log.errorf("control: QueryFullProcessImageNameW failed: %v", w.GetLastError())
+		return false
+	}
+	text: [131072]u8
+	image := w.utf16_to_utf8(text[:], buffer[:size])
+	if image == "" {
+		log.errorf("control: WideCharToMultiByte failed: %v", w.GetLastError())
+		return false
+	}
+	actual, actual_ok := normalized_image_path(image)
+	if !actual_ok {return false}
+	want, want_ok := normalized_image_path(expected)
+	if !want_ok {return false}
+	return strings.equal_fold(actual, want)
+}
+
+@(private, require_results)
+normalized_image_path :: proc(path: string) -> (string, bool) {
+	wide := w.utf8_to_wstring(path, context.temp_allocator)
+	if wide == nil {return "", false}
+	full: [32768]u16
+	n := w.GetFullPathNameW(wide, u32(len(full)), cstring16(&full[0]), nil)
+	if n == 0 || n >= u32(len(full)) {return "", false}
+	long: [32768]u16
+	source := full[:n]
+	m := w.GetLongPathNameW(cstring16(&full[0]), cstring16(&long[0]), u32(len(long)))
+	if m > 0 && m < u32(len(long)) {source = long[:m]}
+	text, err := w.utf16_to_utf8(source, context.temp_allocator)
+	if err != nil {return "", false}
+	if strings.has_prefix(text, `\\?\UNC\`) {
+		joined, join_error := strings.concatenate(
+			{`\\`, text[len(`\\?\UNC\`):]},
+			context.temp_allocator,
+		)
+		if join_error != nil {return "", false}
+		return joined, true
+	}
+	if strings.has_prefix(text, `\\?\`) {return text[4:], true}
+	return text, true
+}
+
 close :: proc(c: ^Client) {
 	close_handle(&c.pipe)
 	c^ = {}

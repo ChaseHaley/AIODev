@@ -99,9 +99,11 @@ start :: proc() -> int {
 			o.name, o.name))
 	}
 	if o.args[0] == "stop" { return stop(o, p, r, h) }
-	c, err := verified_connect(p, r.pid, 500)
+	c, err := verified_connect(p, r, 500)
 	if err != .None {
-		return fail("control pipe unavailable or PID mismatch; run aioctl doctor, then stop and launch")
+		return fail(
+			"control pipe unavailable or server identity mismatch; run aioctl doctor, then stop and launch",
+		)
 	}
 	defer control.close(&c)
 	timeout := 15000
@@ -227,12 +229,13 @@ open_recorded :: proc(r: Record, p: Paths) -> (w.HANDLE, bool) {
 }
 
 @(private, require_results)
-verified_connect :: proc(p: Paths, pid: u32, timeout: int) -> (control.Client, control.Error) {
+verified_connect :: proc(p: Paths, r: Record, timeout: int) -> (control.Client, control.Error) {
 	c, err := control.connect(p.pipe, timeout)
 	if err != .None { return {}, err }
-	if c.process_id != pid {
+	identity := control.Server_Identity{pid = r.pid, created = r.created, image = p.executable}
+	if verify_error := control.verify_server(&c, identity); verify_error != .None {
 		control.close(&c)
-		return {}, .Invalid_Argument
+		return {}, verify_error
 	}
 	return c, .None
 }
@@ -500,7 +503,8 @@ launch :: proc(o: Options, p: Paths) -> int {
 	deadline :: 20000
 	connect_timeout := deadline-int(time.tick_since(start_time)/time.Millisecond)
 	if connect_timeout <= 0 { return fail("launch deadline expired; inspect the log tails") }
-	c, connection_error := verified_connect(p, info.dwProcessId, connect_timeout)
+	launch_identity := Record{pid = info.dwProcessId, created = created, executable = p.executable}
+	c, connection_error := verified_connect(p, launch_identity, connect_timeout)
 	if connection_error != .None {
 		return fail(fmt.tprintf("readiness pipe failed (%v); inspect the log tails", connection_error))
 	}
@@ -553,7 +557,7 @@ child_count :: proc(pid: u32) -> (int, bool) {
 
 @(private, require_results)
 stop :: proc(o: Options, p: Paths, r: Record, h: w.HANDLE) -> int {
-	c, err := verified_connect(p, r.pid, 500)
+	c, err := verified_connect(p, r, 500)
 	if err == .None {
 		response, call_error := control.call(&c, {"tray", "quit"}, 1000)
 		if call_error != .None || !response.ok {
@@ -593,7 +597,7 @@ check_line :: proc(ok: bool, description: string) -> bool {
 @(private, require_results)
 doctor :: proc(o: Options, p: Paths, r: Record, verified: bool) -> int {
 	failed := !check_line(verified, "recorded PID alive, creation time and repository image match")
-	c, err := verified_connect(p, r.pid, 500)
+	c, err := verified_connect(p, r, 500)
 	defer control.close(&c)
 	pipe_ok := err == .None && verified
 	ping: control.Response
@@ -602,7 +606,7 @@ doctor :: proc(o: Options, p: Paths, r: Record, verified: bool) -> int {
 		pipe_ok = err == .None && ping.ok
 	}
 	defer control.response_destroy(&ping)
-	failed = !check_line(pipe_ok, "pipe answers and server PID matches recorded PID") || failed
+	failed = !check_line(pipe_ok, "pipe answers and server identity matches recorded process") || failed
 	app_id, id_ok := response_field(ping.text, "app", context.temp_allocator)
 	isolated := pipe_ok && id_ok && app_id == p.app_id
 	failed = !check_line(isolated, "instance is isolated from the owner's default") || failed

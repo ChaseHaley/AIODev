@@ -9,6 +9,7 @@ import "core:testing"
 import app "../../src"
 import "aio:layout"
 import "aio:platform"
+import "aio:pty"
 
 @(private="file")
 decode :: proc(nodes: []app.Saved_Node, focus := 0) -> (layout.Layout, bool) {
@@ -203,6 +204,42 @@ layout_state_restores_workspaces_tabs_and_directories :: proc(t: ^testing.T) {
 	if !testing.expect(t, entry != nil) { return }
 	testing.expect_value(t, entry.name, "server")
 	testing.expect_value(t, entry.header.launch_directory, pane_directory)
+}
+
+@(test)
+layout_state_refuses_remote_saved_directories :: proc(t: ^testing.T) {
+	directory, directory_error := os.make_directory_temp("", "aio-layout-remote-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) {return}
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
+	layout_path := strings.concatenate({directory, "/layout.json"}, context.temp_allocator)
+	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) {return}
+	layout :: `{
+  "version": 1,
+  "workspace_number": 1,
+  "workspaces": [{
+    "name": "Remote",
+    "selected": 0,
+    "open": true,
+    "tabs": [{
+      "focus": 0,
+      "nodes": [{
+        "content": "Terminal",
+        "directory": "\\\\server\\share"
+      }]
+    }]
+  }]
+}`
+	if !testing.expect_value(t, os.write_entire_file(layout_path, layout), nil) {return}
+	f: Restore_Fixture
+	defer app.app_destroy(&f.state)
+	if !restore_start(t, &f, directory, layout_path, 4) {return}
+	if !testing.expect_value(t, len(f.state.sessions), 1) {return}
+	entry := &f.state.sessions[0]
+	testing.expect(t, entry.header.launch_directory != `\\server\share`)
+	testing.expect(t, pty.working_directory_is_local(entry.header.launch_directory))
 }
 
 @(test)

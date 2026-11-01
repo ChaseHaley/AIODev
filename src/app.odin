@@ -494,7 +494,18 @@ session_open :: proc(
 	profile, _ := settings.profile_resolve(&app.settings, profile_id)
 	geometry := initial_geometry(app)
 	config := session_config(app, app.next_session_id + 1, geometry, profile, command)
-	if directory != "" {config.working_directory = directory}
+	// Defense in depth: every caller filters its directory, but an untrusted one must never reach
+	// CreateProcess. Falling back here keeps the pane usable instead of failing the whole open.
+	launch_directory := directory
+	if launch_directory != "" && !pty.working_directory_is_local(launch_directory) {
+		notify(
+			app,
+			.Warning,
+			"The requested directory is remote or unavailable; using the profile's default.",
+		)
+		launch_directory = ""
+	}
+	if launch_directory != "" {config.working_directory = launch_directory}
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)

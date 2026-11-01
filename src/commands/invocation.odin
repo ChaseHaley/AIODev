@@ -23,6 +23,8 @@ Status :: enum u8 {
 	Usage       = 2,
 	Target      = 3,
 	Unreachable = 4,
+	// The pipe answered, but its server process was not the expected AIODev.
+	Impostor    = 5,
 	Interrupted = 130,
 }
 

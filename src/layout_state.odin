@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:pty"
 import "aio:settings"
 import "aio:term"
 import "core:encoding/json"
@@ -147,7 +148,8 @@ layout_pane_encode :: proc(app: ^App, content: layout.Content) -> Saved_Node {
 	if entry == nil {return saved}
 	raw := term.working_directory(entry.session, context.temp_allocator)
 	directory, err := settings.directory_label(raw, context.temp_allocator)
-	if err != nil || directory == "" {directory = entry.header.launch_directory}
+	if err != nil {directory = ""}
+	directory, _ = local_launch_directory(directory, entry.header.launch_directory)
 	saved.profile, saved.directory, saved.name = entry.profile_id, directory, entry.name
 	saved.keep_open = entry.keep_open
 	return saved
@@ -292,9 +294,16 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 
 @(private, require_results)
 layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> bool {
-	// A directory that no longer exists falls back to the profile's own.
+	// A directory that is remote or no longer exists falls back to the profile's own.
 	directory := saved.directory
-	if directory != "" && !os.is_dir(directory) {directory = ""}
+	if directory != "" && !pty.working_directory_is_local(directory) {
+		notify(
+			app,
+			.Warning,
+			"A saved pane directory is remote or unavailable; using the profile's default.",
+		)
+		directory = ""
+	}
 	if !session_open(app, "", directory, saved.profile) {return false}
 	entry := &app.sessions[len(app.sessions) - 1]
 	entry.keep_open = saved.keep_open

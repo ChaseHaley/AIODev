@@ -103,6 +103,39 @@ resolve_executable_uses_given_directories :: proc(t: ^testing.T) {
 }
 
 @(test)
+working_directories_stay_local :: proc(t: ^testing.T) {
+	cases := [?]struct {
+		path:  string,
+		local: bool,
+	} {
+		{`C:\Windows`, true},
+		{`C:/Windows`, true},
+		{`C:\`, true},
+		{`.`, true},
+		{`..`, true},
+		{`C:\aio_missing_directory_93820`, false},
+		{`C:\Windows\System32\cmd.exe`, false},
+		{`\\server\share`, false},
+		{`//server/share`, false},
+		{`\\?\C:\Windows`, false},
+		{`\\.\C:\Windows`, false},
+		{`\??\C:\Windows`, false},
+		{`\\?\UNC\server\share`, false},
+		{`C:relative`, false},
+		{`C:`, false},
+	}
+	for c in cases {
+		testing.expectf(
+			t,
+			pty.working_directory_is_local(c.path) == c.local,
+			"%q: expected local=%t",
+			c.path,
+			c.local,
+		)
+	}
+}
+
+@(test)
 search_directories_are_absolute :: proc(t: ^testing.T) {
 	directories, err := pty.search_directories(context.allocator)
 	testing.expect_value(t, err, nil)

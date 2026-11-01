@@ -29,6 +29,10 @@ ERROR_DIRECTORY :: 267
 CSTR_LESS_THAN :: 1
 @(private)
 CSTR_EQUAL :: 2
+@(private)
+DRIVE_NO_ROOT_DIR :: 1
+@(private)
+DRIVE_REMOTE :: 4
 
 @(private)
 STARTUPINFOEXW :: struct {
@@ -85,5 +89,6 @@ foreign kernel32 {
 	CompareStringOrdinal :: proc(lpString1: ^u16, cchCount1: i32, lpString2: ^u16, cchCount2: i32, bIgnoreCase: w.BOOL) -> i32 ---
 	GetSystemDirectoryW :: proc(lpBuffer: w.LPWSTR, uSize: w.UINT) -> w.UINT ---
 	GetWindowsDirectoryW :: proc(lpBuffer: w.LPWSTR, uSize: w.UINT) -> w.UINT ---
+	GetDriveTypeW :: proc(root: w.LPCWSTR) -> u32 ---
 	SearchPathW :: proc(lpPath, lpFileName, lpExtension: w.LPCWSTR, nBufferLength: w.DWORD, lpBuffer: w.LPWSTR, lpFilePart: ^w.LPWSTR) -> w.DWORD ---
 }
