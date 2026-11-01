@@ -128,3 +128,28 @@ pointer_release_reaches_the_press_owner :: proc(t: ^testing.T) {
 	testing.expect(t, w.find.open, "a caption press must not close the find bar on release")
 	testing.expect_value(t, len(s.windows), windows)
 }
+
+// A settings page under the find bar loses its row hover as soon as the bar takes the pointer.
+@(test)
+pointer_settings_hover_clears_under_the_find_bar :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pointer-settings-find") {return}
+	s, w := &f.state, f.state.windows[0]
+	w.width, w.height = i32(1400 * w.scale), i32(900 * w.scale)
+	app.window_relayout(s, w)
+	app.editor_open(s, w)
+	if !testing.expect(t, app.settings_active(w)) {return}
+	ui.find_open(&w.find)
+	fl, _ := app.find_controls(w, app.focused_session(s, w))
+	el := app.settings_layout(w)
+	row := [2]f32{el.list.x + el.list.width / 2, el.list.y + el.row_height / 2}
+	if !testing.expect(t, !pointer_inside(fl.panel, row.x, row.y), "the row must lie outside the bar") {return}
+	testing.expect_value(t, app.pointer_target(s, w, row.x, row.y), app.Pointer_Target.Settings_Page)
+	pointer_expect_move(t, s, w, row.x, row.y, .Arrow)
+	if !testing.expect(t, w.editor.hover_item >= 0, "the settings row must take the hover") {return}
+	close := pointer_centre(fl.close)
+	testing.expect_value(t, app.pointer_target(s, w, close.x, close.y), app.Pointer_Target.Find)
+	pointer_expect_move(t, s, w, close.x, close.y, .Hand)
+	testing.expect_value(t, w.editor.hover_item, -1)
+}

@@ -33,7 +33,9 @@ Pointer_Target :: enum u8 {
 	// Pane headers and a single pane's floating split controls.
 	Pane_Header,
 	Scrollbar,
-	// Pane content (terminal text, links, settings pages) and anything uncovered.
+	// A settings page shown in a pane.
+	Settings_Page,
+	// Terminal content, including its links, and anything uncovered.
 	Content,
 }
 
@@ -71,8 +73,9 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Divider          = {divider_claims, divider_hover, divider_pointer_press, divider_release},
 	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release},
 	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release},
-	.Pane_Header      = {header_claims, nil, header_press, nil},
+	.Pane_Header      = {header_claims, header_hover, header_press, nil},
 	.Scrollbar        = {scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release},
+	.Settings_Page    = {settings_claims, settings_hover, content_press, nil},
 	.Content          = {content_claims, content_hover, content_press, nil},
 }
 
@@ -346,8 +349,9 @@ find_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 
 @(private = "file")
 find_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
-	if owner != .Find {
+	if owner != .Find || !w.find.open {
 		if w.find.hover != .None {w.find.hover, w.dirty = .None, true}
+		if owner == .Find {pointer_set(app, w, .Arrow)}
 		return
 	}
 	x, y := move_point(e)
@@ -523,12 +527,23 @@ tabs_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> b
 	return true
 }
 
-// Pane headers. Their hover belongs to `content_hover`, which also shows a single pane's split controls.
+// Pane headers, and a single pane's split controls, which show while the pointer is in the pane's top
+// band and no surface above the pane covers it.
 
 @(private = "file")
 header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	_, _, hit := pane_header_hit(w, x, y)
 	return hit
+}
+
+@(private = "file")
+header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+	x, y := move_point(e)
+	in_pane := owner == .Pane_Header || owner == .Scrollbar || owner == .Settings_Page || owner == .Content
+	split_overlay_update(w, x, y, in_pane && !w.selecting)
+	over, action := pane_header_pointer(w, x, y, owner == .Pane_Header && !w.selecting)
+	if owner != .Pane_Header {return}
+	pointer_set(app, w, over && action != .None && w.header_buttons == {} ? .Hand : .Arrow)
 }
 
 @(private = "file")
@@ -565,22 +580,46 @@ scrollbar_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event)
 	return true
 }
 
-// Pane content and headers
+// Settings pages
+
+@(private = "file")
+settings_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	_, found := settings_pane_under_pointer(w, x, y)
+	return found
+}
+
+@(private = "file")
+settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+	if owner != .Settings_Page {
+		p := &w.editor
+		if p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
+		   p.hover_profile_item >= 0 {
+			ui.editor_hover_clear(p)
+			w.dirty = true
+		}
+		return
+	}
+	x, y := move_point(e)
+	pane, found := settings_pane_under_pointer(w, x, y)
+	if !found {
+		pointer_set(app, w, .Arrow)
+		return
+	}
+	l := settings_layout_for(w, pane.rect)
+	changed := ui.editor_hover(&w.editor, l, x, y)
+	if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
+	if changed {w.dirty = true}
+	pointer_set(app, w, ui.editor_pointer(&w.editor, l, x, y))
+}
+
+// Terminal content
 
 @(private = "file")
 content_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return true}
 
 @(private = "file")
 content_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
-	if owner == .Pane_Header || owner == .Content {
-		content_move(app, w, e)
-		return
-	}
-	x, y := move_point(e)
-	link_hover_clear(w)
-	// A single pane's split controls still appear while the pointer crosses its scrollbar.
-	split_overlay_update(w, x, y, owner == .Scrollbar)
-	pane_header_pointer(w, x, y, false)
+	if owner == .Content {content_move(app, w, e)} else {link_hover_clear(w)}
 }
 
 @(private = "file")

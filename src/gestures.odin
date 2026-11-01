@@ -201,56 +201,50 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			return
 		}
 	}
-	// A press that began on a surface keeps the pointer there until it is released.
-	if ui.armed_down(w.find.armed) {
-		target = .Find
-	} else if w.selecting || w.header_buttons != {} || w.editor.drag != .None || w.gesture.reported != {} {
-		target = .Content
-	}
+	target = pointer_held_target(w, e.buttons, target)
 	pointer_move(app, w, target, e)
 }
 
-// Moves over pane content and pane headers: header buttons, links, settings pages, the selection and
-// programs that report the mouse.
+// A held button keeps the pointer with the surface it was pressed on until release. The palette and a
+// confirmation already take the whole window while open, so a press on one that has since closed keeps
+// nothing. Captures that began without a recorded owner fall back to the surface holding them.
+@(private)
+pointer_held_target :: proc(w: ^Window, held: input.Mouse_Buttons, target: Pointer_Target) -> Pointer_Target {
+	for button in held {
+		owner, owned := w.gesture.owners[button].?
+		if owned && !pointer_modal(owner) && owner != .Palette && owner != .Confirmation {return owner}
+	}
+	switch {
+	case ui.armed_down(w.find.armed):
+		return .Find
+	case w.editor.drag != .None:
+		return .Settings_Page
+	case w.selecting || w.header_buttons != {} || w.gesture.reported != {}:
+		return .Content
+	}
+	return target
+}
+
+// Moves over terminal content: the text cursor, links, the selection and programs that report the
+// mouse. A button swallowed by another surface keeps the arrow and reaches no program.
 @(private)
 content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
-	enabled := !w.selecting
-	split_overlay_update(w, x, y, enabled)
-	over_header, header_action := pane_header_pointer(w, x, y, enabled)
-	shape: platform.Cursor_Shape = over_header || w.header_buttons != {} ? .Arrow : .Text
-	if over_header && header_action != .None && w.header_buttons == {} {shape = .Hand}
-	if y < ui.TITLE_BAR_HEIGHT * w.scale {
-		shape = w.header_buttons == {} ? chrome_pointer(app, w, x, y) : .Arrow
-	}
+	swallowed := w.header_buttons != {}
+	title := y < ui.TITLE_BAR_HEIGHT * w.scale
+	shape: platform.Cursor_Shape = swallowed ? .Arrow : .Text
+	if title && !swallowed {shape = chrome_pointer(app, w, x, y)}
 	entry := pane_at(app, w, e.x, e.y)
 	if shape == .Text && entry == nil && !w.selecting {shape = .Arrow}
 	resize, over_divider := divider_cursor(w, x, y)
-	if over_divider && w.header_buttons == {} {shape = resize}
-	link_hovered := false
-	if enabled && !over_header && !over_divider && w.header_buttons == {} &&
-	   y >= ui.TITLE_BAR_HEIGHT * w.scale {
-		link_hovered = link_hover_update(app, w, x, y)
-	} else {
+	if over_divider && !swallowed {shape = resize}
+	if !w.selecting && !over_divider && !swallowed && !title && link_hover_update(app, w, x, y) {
+		shape = .Hand
+	} else if w.selecting || over_divider || swallowed || title {
 		link_hover_clear(w)
 	}
-	if link_hovered {shape = .Hand}
-	over_settings := false
-	if enabled && !over_header && w.header_buttons == {} && !over_divider {
-		if pane, found := settings_pane_under_pointer(w, x, y); found {
-			l := settings_layout_for(w, pane.rect)
-			changed := ui.editor_hover(&w.editor, l, x, y)
-			if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
-			if changed {w.dirty = true}
-			shape = ui.editor_pointer(&w.editor, l, x, y)
-			over_settings = true
-		}
-	}
 	pointer_set(app, w, shape)
-	if over_header || w.header_buttons != {} || over_settings {return}
-	if entry == nil {
-		return
-	}
+	if swallowed || entry == nil {return}
 	if w.selecting {
 		term.selection_drag(entry.session, x, y)
 		w.pointer = {x, y}
