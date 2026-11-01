@@ -312,9 +312,8 @@ rail_row_draw :: proc(
 	icon: string
 	atlas := render.Rect{}
 	if pane, terminal := workspace_focused_session_pane(app, row.workspace, row.tab); terminal {
-		if pane.session != nil {icon = pane.session.header.icon}
 		result: glyphs.Result
-		atlas, result = shell_icon_atlas(app)
+		icon, atlas, result = pane_icon(app, pane.session, 16 * s)
 		if result != .Ok {return result}
 	}
 	status := status_tab_mark(app, w, row.workspace, row.tab)
@@ -322,8 +321,13 @@ rail_row_draw :: proc(
 	current := row.workspace == w.workspace
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
-	leading := status.glyph != .None || has_badge ? 20 * s : 0
+	leading := has_badge ? 20 * s : 0
 	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0
+	// Status sits at the right, before Close when it shows, with its place kept while tab status is on.
+	status_right := show_close ? close.x : tile.x + tile.width - 4 * s
+	if app.settings.status.enabled && app.settings.status.tab_indicators || status.glyph != .None {
+		trailing = tile.x + tile.width - status_right + 18 * s
+	}
 	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, tile,
 		{title = title, selected = selected, marked = marked, hovered = hover, pressed = pressed,
 		 leading = leading, trailing = trailing}, s, w.pointer); result != .Ok {return result}
@@ -335,9 +339,10 @@ rail_row_draw :: proc(
 			status,
 			s,
 		)
-		if result := status_mark_draw(app, w, {tile.x + 9 * s, tile.y + 9 * s, 14 * s, 14 * s}, status);
-		   result != .Ok {return result}
-	} else if has_badge {
+		mark := render.Rect{status_right - 16 * s, tile.y + 9 * s, 14 * s, 14 * s}
+		if result := status_mark_draw(app, w, mark, status); result != .Ok {return result}
+	}
+	if has_badge {
 		if result := ui.shell_badge_draw(
 			&w.list,
 			&w.ui_text,

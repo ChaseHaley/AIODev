@@ -68,6 +68,7 @@ tab_draw :: proc(
 	pointer: [2]f32 = {},
 	status: Status_Mark = {},
 	status_phase: f32 = 0,
+	status_slot: bool = false,
 ) -> glyphs.Result {
 	x := f32(index) * bar.tab_width
 	if position >= 0 {x = position}
@@ -119,8 +120,9 @@ tab_draw :: proc(
 		close.y -= lift
 		icon_draw(list, .Close, close, theme.tab_text, ICON_INDICATOR, scale)
 	}
-	icon_width := f32(0)
-	if index < bar.count && status.glyph != .None {
+	tab := index < bar.count
+	icon_width, status_width := f32(0), f32(0)
+	if tab && status.glyph != .None {
 		status_progress_draw(
 			list,
 			theme,
@@ -129,18 +131,24 @@ tab_draw :: proc(
 			scale,
 		)
 	}
-	if index < bar.count && width >= 56 * scale && status.glyph != .None {
-		icon_width = 22 * scale
-		if result := status_glyph_draw(
-			list,
-			text,
-			theme,
-			{x + 10 * scale, 13 * scale - lift, 14 * scale, 14 * scale},
-			status,
-			status_phase,
-			scale,
-		); result != .Ok {return result}
-	} else if index < bar.count && width >= 72 * scale && (icon != "" || icon_atlas.width > 0) {
+	// Status sits just before Close. Its place is kept while tab status is on, where the tab also
+	// fits the icon, so titles do not reflow as programs start and stop working.
+	if tab && width >= 56 * scale && (status_slot && width >= 90 * scale || status.glyph != .None) {
+		status_width = 18 * scale
+		if status.glyph != .None {
+			if result := status_glyph_draw(
+				list,
+				text,
+				theme,
+				{x + width - 44 * scale, 13 * scale - lift, 14 * scale, 14 * scale},
+				status,
+				status_phase,
+				scale,
+			); result != .Ok {return result}
+		}
+	}
+	// A tab too narrow for both drops the program icon before the status.
+	if tab && width >= 72 * scale + status_width && (icon != "" || icon_atlas.width > 0) {
 		icon_width = 22 * scale
 		if result := shell_badge_draw(
 			list,
@@ -161,7 +169,7 @@ tab_draw :: proc(
 		x + 11 * scale + icon_width,
 		(bar.height - text.line_height) / 2 + text.ascent - lift,
 		selected ? theme.tab_active_text : theme.tab_text,
-		max(0, width - (index < bar.count ? 44 : 22) * scale - icon_width),
+		max(0, width - (tab ? 44 : 22) * scale - icon_width - status_width),
 	); result != .Ok {return result}
 	if hover > 0 {
 		if result := hover_rim_draw(

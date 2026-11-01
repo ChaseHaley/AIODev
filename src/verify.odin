@@ -790,6 +790,8 @@ when AIO_CONTROL {
 				{"session.title", term.title(s, context.temp_allocator)},
 				{"session.header.title", pane_header_title(&entry.header)},
 				{"session.profile", entry.profile_id},
+				{"session.program", entry.program_path},
+				{"session.program.icon", fmt.tprintf("%t", verify_program_icon(app, entry))},
 				{"session.header.directory", entry.header.directory},
 				{
 					"session.header.icon",
@@ -1586,6 +1588,12 @@ when AIO_CONTROL {
 		case .Finish_Drive:
 			verify_finish_drive(app, w, now)
 		}
+	}
+	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {
+		for icon in app.processes.icons {
+			if icon.state == .Ready && entry.program_path != "" && icon.path == entry.program_path {return true}
+		}
+		return false
 	}
 } else {
 	Verify :: struct {}

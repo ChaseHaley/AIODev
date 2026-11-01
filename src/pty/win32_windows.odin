@@ -74,6 +74,7 @@ foreign kernel32 {
 	CreatePseudoConsole :: proc(size: w.COORD, hInput, hOutput: w.HANDLE, dwFlags: w.DWORD, phPC: ^HPCON) -> w.HRESULT ---
 	ResizePseudoConsole :: proc(hPC: HPCON, size: w.COORD) -> w.HRESULT ---
 	ClosePseudoConsole :: proc(hPC: HPCON) ---
+	QueryFullProcessImageNameW :: proc(hProcess: w.HANDLE, dwFlags: w.DWORD, lpExeName: w.LPWSTR, lpdwSize: ^w.DWORD) -> w.BOOL ---
 	InitializeProcThreadAttributeList :: proc(lpAttributeList: rawptr, dwAttributeCount, dwFlags: w.DWORD, lpSize: ^w.SIZE_T) -> w.BOOL ---
 	UpdateProcThreadAttribute :: proc(lpAttributeList: rawptr, dwFlags: w.DWORD, Attribute: w.DWORD_PTR, lpValue: rawptr, cbSize: w.SIZE_T, lpPreviousValue: rawptr, lpReturnSize: ^w.SIZE_T) -> w.BOOL ---
 	DeleteProcThreadAttributeList :: proc(lpAttributeList: rawptr) ---

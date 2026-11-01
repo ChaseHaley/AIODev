@@ -145,9 +145,8 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			icon: string
 			atlas := render.Rect{}
 			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {
-				if pane.session != nil {icon = pane.session.header.icon}
 				result: glyphs.Result
-				atlas, result = shell_icon_atlas(app)
+				icon, atlas, result = pane_icon(app, pane.session, 14 * w.scale)
 				if result != .Ok {return result}
 			}
 			x := tab_position(w, i) * bar.tab_width
@@ -171,6 +170,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				w.pointer,
 				status,
 				status_phase(app, w, status),
+				app.settings.status.enabled && app.settings.status.tab_indicators,
 			); result != .Ok {return result}
 		}
 	}

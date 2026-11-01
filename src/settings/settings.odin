@@ -40,8 +40,9 @@ Tabs_Orientation :: enum int {
 	Horizontal,
 }
 Tabs_Settings :: struct {
-	orientation: Tabs_Orientation,
-	rail_width:  int,
+	orientation:   Tabs_Orientation,
+	rail_width:    int,
+	program_icons: bool,
 }
 Status_Scope :: enum int {
 	All,
@@ -314,6 +315,18 @@ SCHEMA :: [?]Schema_Entry {
 		480,
 		nil,
 		"Width of the vertical tab rail in DIPs. Double-clicking its edge returns it to this width.",
+	},
+	{
+		"tabs.program_icons",
+		"Program Icons",
+		.Bool,
+		offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icons),
+		"true",
+		0,
+		0,
+		nil,
+		"Show the icon of the program running in a pane, such as Neovim or Claude Code, on its tab " +
+			"and pane header. Programs without an icon of their own keep the shell icon.",
 	},
 	{
 		"status.enabled",

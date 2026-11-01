@@ -86,16 +86,14 @@ pane_header_draw :: proc(
 		)
 	}
 	icon_atlas: render.Rect
-	if entry != nil {
-		value, result := shell_icon_atlas(app)
-		if result != .Ok {return result}
-		icon_atlas = value
-	}
 	title, directory, icon := SETTINGS_HEADER_TITLE, "", SETTINGS_HEADER_ICON
 	if entry != nil {
 		// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
-		directory, icon = entry.header.directory, entry.header.icon
+		directory = entry.header.directory
+		result: glyphs.Result
+		icon, icon_atlas, result = pane_icon(app, entry, 14 * w.scale)
+		if result != .Ok {return result}
 	}
 	badge_hovered := false
 	if entry != nil {

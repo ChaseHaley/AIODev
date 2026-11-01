@@ -63,6 +63,10 @@ Session_Entry :: struct {
 	// The program status records last copied from the session, and the last notice they raised.
 	statuses:            []term.Program_Status,
 	status_notified:     time.Tick,
+	// The program its icon names: the process adopted, its image path, and the last poll's choice.
+	program_id:          u32,
+	program_candidate:   u32,
+	program_path:        string,
 }
 
 // Release only the entry's owned memory; callers own removal from app.sessions.
@@ -71,6 +75,7 @@ session_entry_destroy :: proc(entry: ^Session_Entry) {
 	delete(entry.name)
 	delete(entry.profile_id)
 	status_release(entry)
+	delete(entry.program_path)
 	term.destroy(entry.session)
 }
 
@@ -92,6 +97,7 @@ App :: struct {
 	device:                ^render.Device,
 	cache:                 glyphs.Cache,
 	shell_icon:            Shell_Icon,
+	processes:             Process_Worker,
 	ui_text:               ui.Text,
 	ui_ready:              bool,
 	animations:            bool,
@@ -264,6 +270,7 @@ app_destroy :: proc(app: ^App) {
 			log.error("removing the tray icon failed")
 		}
 	}
+	process_worker_destroy(&app.processes)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)
@@ -309,7 +316,8 @@ tick :: proc(app: ^App) {
 	}
 	if len(events) > 0 {layout_state_touch(app)}
 	update_sessions(app)
-	update_process_padding(app)
+	update_processes(app)
+	if process_icons_adopt(&app.processes) {mark_all_dirty(app)}
 	update_motion(app)
 	if ui.notices_expire(&app.notices, time.tick_now()) {
 		mark_all_dirty(app)
