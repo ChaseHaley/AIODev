@@ -32,6 +32,10 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 		if rect_contains(status_panel_side_rect(app, w), x, y) {return "Move activity panel"}
 	case .Settings_Page:
 		if w.editor.hover_reset >= 0 {return "Reset setting"}
+	case .Palette:
+		if app.palette.reset_hover >= 0 && !app.palette.mode_menu && app.palette.edit.kind == .None {
+			return "Reset setting"
+		}
 	case .Pane_Header:
 		_, action, _ := pane_header_hit(w, x, y)
 		#partial switch action {
@@ -42,10 +46,7 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 		case:
 		}
 	case .Find:
-		l := ui.find_layout(f32(w.width), f32(w.height), w.scale)
-		status, enabled := find_presentation(w, focused_session(app, w))
-		_ = status
-		#partial switch ui.find_hit(l, enabled, x, y) {
+		#partial switch w.find.hover {
 		case .Case_Toggle: return "Match case"
 		case .Regex_Toggle: return "Use regular expression"
 		case .Older: return "Previous match"
