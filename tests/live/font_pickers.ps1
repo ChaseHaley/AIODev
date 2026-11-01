@@ -36,7 +36,8 @@ try {
     Invoke-Aio expect state settings.popup=Choice
     Shot shell-fonts
     $beforeSearch = (Read-State)['terminal.font_family']
-    Invoke-Aio type cOnSoLaS
+    Invoke-Aio key C O N S O L A S
+    Invoke-Aio expect state settings.choice_query=consolas
     Invoke-Aio expect state settings.choice_matches=1
     Invoke-Aio expect state settings.filter=font.family
     Invoke-Aio expect state "terminal.font_family=$beforeSearch"
@@ -63,7 +64,8 @@ try {
     Shot no-fonts-found
     Invoke-Aio key Ctrl+A Backspace
     Invoke-Aio expect state "settings.choice_matches=$allCount"
-    Invoke-Aio type 'segoe ui'
+    Invoke-Aio key Shift+S E G O E Space U I
+    Invoke-Aio expect state 'settings.choice_query=Segoe ui'
     Shot gui-search
     Invoke-Aio key Enter
     $gui = (Read-State)['ui.font_family']

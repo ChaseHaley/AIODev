@@ -91,3 +91,32 @@ font_search_filters_selects_and_cancels_without_editing_settings_search :: proc(
 		testing.expect_value(t, ui.field_string(&p.value), "Segoe UI")
 	}
 }
+
+@(test)
+font_search_accepts_translated_text_on_key_events :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	choices := [?]string{"Cascadia Mono", "Consolas"}
+	for font_key in ([?]string{"font.family", "interface.font_family"}) {
+		testing.expect_value(t, ui.editor_add(&p, {
+			key = font_key, title = "Font", kind = .Choice, value = "Consolas", choices = choices[:],
+		}, "Fonts"), nil)
+	}
+	p.open = true
+	ui.editor_filter(&p)
+	for font_key in ([?]string{"font.family", "interface.font_family"}) {
+		testing.expect(t, ui.editor_select_key(&p, font_key))
+		ui.editor_key(&p, key({key = .Enter}))
+		ui.editor_key(&p, key({key = .A, text = "a"}))
+		testing.expect_value(t, ui.field_string(&p.choice_search), "a")
+		ui.editor_key(&p, key({key = .B, text = "b"}))
+		testing.expect_value(t, ui.field_string(&p.choice_search), "ab")
+		ui.editor_key(&p, key({key = .Space, text = " "}))
+		testing.expect_value(t, ui.field_string(&p.choice_search), "ab ")
+		ui.editor_key(&p, key({key = .C, modifiers = {.Shift}, text = "C"}))
+		testing.expect_value(t, ui.field_string(&p.choice_search), "ab C")
+		testing.expect_value(t, ui.field_string(&p.filter), "")
+		testing.expect_value(t, ui.field_string(&p.value), "Consolas")
+		ui.editor_key(&p, key({key = .Escape}))
+	}
+}

@@ -1306,11 +1306,13 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	if p.popup == .Choice && choice_searchable(row) {
 		#partial switch e.key {
-		case .Backspace, .Delete, .Arrow_Left, .Arrow_Right, .A:
+		case .Backspace, .Delete, .Arrow_Left, .Arrow_Right, .A, .Space:
 			if field_key(&p.choice_search, e) == .Edited {choice_filter(p, row)}
 			return .Changed, true
-		case .Space:
-			return .None, true
+		}
+		if e.text != "" && e.text[0] >= ' ' && e.text[0] != 0x7f {
+			if field_key(&p.choice_search, e) == .Edited {choice_filter(p, row)}
+			return .Changed, true
 		}
 	}
 	if p.popup == .Shortcuts {
