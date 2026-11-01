@@ -129,7 +129,25 @@ try {
     $state = Read-State
     Assert-Equal $state['confirm.open'] false 'the setting turns the question off'
     Assert-Equal $state['tabs.count'] 1 'split tab closes immediately when off'
-    Write-Output 'PASS multi-pane tab close confirmation'
+    foreach ($status in @('working', 'blocked', 'idle', 'done', 'error')) {
+        Invoke-Aio command tab.new
+        Invoke-Aio wait text 'PS '
+        $report = "[Console]::Write([char]27 + ']7501;state=$($status):id=close-test:app=CloseTest' + [char]7); Start-Sleep -Seconds 60"
+        Invoke-Aio run $report
+        Invoke-Aio key Ctrl+Shift+W
+        $active = $status -in @('working', 'blocked')
+        Assert-Equal (Read-State)['confirm.open'] $active "$status close policy with split confirmation off"
+        if ($active) {
+            Assert-Equal (Read-State)['confirm.title'] 'Close tab with ongoing work?' 'ongoing-work question'
+            Shot "ongoing-$status"
+            Invoke-Aio key Esc
+            Assert-Equal (Read-State)['tabs.count'] 2 'cancel preserves ongoing work tab'
+            Invoke-Aio expect text 'Start-Sleep'
+            Invoke-Aio key Ctrl+Shift+W Enter
+        }
+        Assert-Equal (Read-State)['tabs.count'] 1 "$status close completed"
+    }
+    Write-Output 'PASS split and ongoing-work tab close confirmation'
 } finally {
     & $ctl --name $name stop | Out-Null
 }

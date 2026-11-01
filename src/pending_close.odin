@@ -118,6 +118,11 @@ pending_close_text :: proc(
 		}
 		text.label = "Close"
 		text.note = "Turn this off with Confirm Closing Split Tabs in Settings."
+		if index := tab_index_by_id(workspace, pc.tab); tab_close_has_work(app, workspace, index) {
+			text.title = pc.tabs > 1 ? "Close tabs with ongoing work?" : "Close tab with ongoing work?"
+			text.body = "Closing will interrupt this work."
+			text.note = ""
+		}
 	case .Workspace:
 		name := pc.workspace_name
 		if found := workspace_find(app, pc.plan.workspace); pc.confirm.open && found != nil {

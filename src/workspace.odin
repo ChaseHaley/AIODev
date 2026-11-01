@@ -393,10 +393,30 @@ tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int,
 	return
 }
 
-// Closes a tab, or its selected group, after asking when that would end more than one pane in a tab.
+// Reported running or blocked work always needs confirmation, including in selected groups.
+tab_close_has_work :: proc(app: ^App, workspace: ^Workspace, index: int) -> bool {
+	if index < 0 || index >= len(workspace.tabs) {return false}
+	group := workspace.tabs[index].marked
+	for tab, i in workspace.tabs {
+		if group ? !tab.marked : i != index {continue}
+		walk := tab_session_panes(app, &tab.tree, i)
+		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
+			if pane.session == nil {continue}
+			for record in pane.session.statuses {
+				if record.state == .Working || record.state == .Blocked {return true}
+			}
+		}
+	}
+	return false
+}
+
+// The split-tab preference does not disable protection for explicitly reported ongoing work.
 tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
 	_, _, split := tab_close_scope(w.workspace, index)
-	if !split || !app.settings.tab.confirm_close {tab_close(app, w, index); return}
+	if !tab_close_has_work(app, w.workspace, index) && (!split || !app.settings.tab.confirm_close) {
+		tab_close(app, w, index)
+		return
+	}
 	pending_close_open_tab(app, w, index)
 }
 

@@ -108,6 +108,28 @@ status_fixture_destroy :: proc(f: ^Status_Fixture) {
 }
 
 @(test)
+program_status_close_scope_protects_work_independent_of_presentation :: proc(t: ^testing.T) {
+	f: Status_Fixture
+	defer status_fixture_destroy(&f)
+	if !status_fixture_init(t, &f) {return}
+	f.state.settings.tab.confirm_close = false
+	f.state.settings.status.show_working = false
+	f.state.settings.status.show_blocked = false
+	testing.expect(t, app.tab_close_has_work(&f.state, f.workspace, 0))
+	testing.expect(t, app.tab_close_has_work(&f.state, f.workspace, 1))
+	f.first[0].state = .Idle
+	testing.expect(t, !app.tab_close_has_work(&f.state, f.workspace, 0))
+	f.workspace.tabs[0].marked = true
+	f.workspace.tabs[1].marked = true
+	testing.expect(t, app.tab_close_has_work(&f.state, f.workspace, 0))
+	f.second[0].state = .Done
+	testing.expect(t, !app.tab_close_has_work(&f.state, f.workspace, 0))
+	f.first[2].state = .Working
+	testing.expect(t, app.tab_close_has_work(&f.state, f.workspace, 0))
+	testing.expect(t, !app.tab_close_has_work(&f.state, f.workspace, -1))
+}
+
+@(test)
 program_status_ranks_attention_first :: proc(t: ^testing.T) {
 	blocked := term.Program_Status{state = .Blocked}
 	failed := term.Program_Status{state = .Error}
