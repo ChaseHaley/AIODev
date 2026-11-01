@@ -132,10 +132,14 @@ static void register_identity() {
     check_hresult(SHGetKnownFolderPath(FOLDERID_Programs, 0, nullptr, &programs));
     std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned_programs(programs, &CoTaskMemFree);
     std::wstring path(owned_programs.get());
-    path += L"\\AIODev Notifications.lnk";
+    path += L"\\AIODev.lnk";
     auto link = create_instance<IShellLinkW>(CLSID_ShellLink);
     check_hresult(link->SetPath(exe));
     check_hresult(link->SetIconLocation(exe, 0));
+    PWSTR profile = nullptr;
+    check_hresult(SHGetKnownFolderPath(FOLDERID_Profile, 0, nullptr, &profile));
+    std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned_profile(profile, &CoTaskMemFree);
+    check_hresult(link->SetWorkingDirectory(owned_profile.get()));
     auto properties = link.as<IPropertyStore>();
     PROPVARIANT value{};
     check_hresult(InitPropVariantFromString(APP_ID, &value));
@@ -144,6 +148,17 @@ static void register_identity() {
     check_hresult(result);
     check_hresult(properties->Commit());
     check_hresult(link.as<IPersistFile>()->Save(path.c_str(), TRUE));
+    auto legacy = std::wstring(owned_programs.get()) + L"\\AIODev Notifications.lnk";
+    if (GetFileAttributesW(legacy.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        auto old_link = create_instance<IShellLinkW>(CLSID_ShellLink);
+        if (SUCCEEDED(old_link.as<IPersistFile>()->Load(legacy.c_str(), STGM_READ))) {
+            wchar_t target[32768];
+            if (SUCCEEDED(old_link->GetPath(target, ARRAYSIZE(target), nullptr, SLGP_RAWPATH)) &&
+                _wcsicmp(target, exe) == 0) {
+                DeleteFileW(legacy.c_str());
+            }
+        }
+    }
 }
 
 extern "C" HRESULT aio_notifications_create(HWND window, UINT message, void **out) noexcept {
