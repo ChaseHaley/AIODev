@@ -102,3 +102,29 @@ pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T
 	testing.expect(t, ui.armed_down(w.caption_armed) == false, "the press must not reach the caption")
 	testing.expect_value(t, len(s.windows), windows)
 }
+
+// A release belongs to the surface that took the press, even over another surface's button.
+@(test)
+pointer_release_reaches_the_press_owner :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pointer-release-owner") {return}
+	s, w := &f.state, f.state.windows[0]
+	windows := len(s.windows)
+	ui.find_open(&w.find)
+	l, _ := app.find_controls(w, app.focused_session(s, w))
+	close := pointer_centre(l.close)
+	caption := [2]f32{f32(w.width) - 23 * w.scale, 20 * w.scale}
+	testing.expect_value(t, app.pointer_target(s, w, caption.x, caption.y), app.Pointer_Target.Caption)
+	gesture_button(s, w, .Left, true, close.x, close.y)
+	gesture_button(s, w, .Left, false, caption.x, caption.y)
+	testing.expect(t, w.find.open, "a release off the find close button must not close the bar")
+	testing.expect(t, !ui.armed_down(w.find.armed))
+	testing.expect_value(t, len(s.windows), windows)
+
+	gesture_button(s, w, .Left, true, caption.x, caption.y)
+	gesture_button(s, w, .Left, false, close.x, close.y)
+	testing.expect(t, !ui.armed_down(w.caption_armed))
+	testing.expect(t, w.find.open, "a caption press must not close the find bar on release")
+	testing.expect_value(t, len(s.windows), windows)
+}

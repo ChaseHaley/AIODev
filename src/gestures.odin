@@ -8,6 +8,8 @@ import "aio:ui"
 
 Gesture_State :: struct {
 	buttons, cancelled, reported: input.Mouse_Buttons,
+	// The surface each held button was pressed on, which receives its release.
+	owners:                       [input.Mouse_Button]Maybe(Pointer_Target),
 }
 
 @(private)
@@ -21,6 +23,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 		w.gesture.cancelled += {.Left}
 	}
 	w.gesture.buttons, w.gesture.reported, w.header_buttons = {}, {}, {}
+	w.gesture.owners = {}
 	ui.armed_cancel(&w.find.armed)
 	confirmation_release(w)
 	w.find.hover = .None
@@ -63,52 +66,16 @@ gesture_cancel :: proc(app: ^App, w: ^Window) -> bool {
 // Completion never falls through to fresh hit testing, even when its action removes w.
 @(private)
 gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button == .Left && w.scroll_drag {terminal_scrollbar_release(app, w, f32(e.x), f32(e.y)); return true}
-	x, y := f32(e.x), f32(e.y)
-	if e.button == .Left && ui.armed_down(w.status.panel_side_armed) {
-		w.header_buttons -= {.Left}
-		w.dirty = true
-		_, ok := ui.armed_release(&w.status.panel_side_armed,
-			status_rect_contains(status_panel_side_rect(app, w), x, y))
-		if ok {status_panel_side_toggle(app)}
-		return true
-	}
-	if e.button == .Left && ui.armed_down(w.title_action_armed) {
-		fired, ok := ui.armed_release(&w.title_action_armed, title_action_hit(w, x, y))
-		w.dirty = true
-		if ok {
-			switch fired {
-			case .None:
-			case .Settings: editor_open(app, w)
-			case .Palette: palette_open(app, w)
-			}
-		}
-		return true
-	}
-	if e.button == .Left && w.find.open && ui.armed_down(w.find.armed) {
-		entry := focused_session(app, w)
-		l, enabled := find_controls(w, entry)
-		on_find_outcome(app, w, entry, ui.find_mouse(&w.find, l, enabled, e.button, false, x, y))
-		return true
-	}
-	if e.button == .Left &&
-	   ui.armed_down(w.tab_orientation_button_armed) {
-		fired, ok := ui.armed_release(&w.tab_orientation_button_armed, tab_orientation_button_hit(w, x, y))
-		w.dirty = true
-		if ok && fired {toggle_tab_orientation(app)}
-		return true
-	}
-	if e.button == .Left && ui.armed_down(w.caption_armed) && !w.pane_drag.pressed && !w.tab_drag.pressed {
-		fired, ok := ui.armed_release(
-			&w.caption_armed,
-			ui.caption_hit(f32(w.width), x, y, w.scale),
-		)
-		w.dirty = true
-		if ok {platform.window_caption_action(&app.platform, w.id, fired)}
-		return true
+	owner, owned := w.gesture.owners[e.button].?
+	w.gesture.owners[e.button] = nil
+	if owned && pointer_release(app, w, owner, e) {return true}
+	// A press or drag that began without a recorded owner still finishes with the surface holding it.
+	for target in Pointer_Target {
+		if (!owned || target != owner) && pointer_release(app, w, target, e) {return true}
 	}
 	if confirmation_button(app, w, e) {return true}
 	w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
+	x, y := f32(e.x), f32(e.y)
 	if e.button in w.header_buttons {
 		if palette_active(app, w) {pane_header_cancel(w)}
 		return pane_header_button(app, w, e)
@@ -118,13 +85,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		return true
 	}
 	if e.button != .Left {return false}
-	if tab_interaction_release(app, w, x, y) {return true}
-	if w.dragging.count > 0 {
-		divider_drag(app, w, x, y)
-		w.dragging, w.rail_resizing = {}, false
-		return true
-	}
-	if w.tab_drag.pressed {tab_drag_release(app, w); rail_overlay_dismiss(app, w); return true}
+	// Pane content, and a pane drag the header began, finish here.
 	if w.pane_drag.pressed {_ = pane_drag_release(app, w); return true}
 	if w.editor.drag == .Process_Order {
 		_ = ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
@@ -151,6 +112,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
 	target := pointer_target(app, w, x, y)
 	if pointer_modal(target) {
+		if e.pressed {w.gesture.owners[e.button] = target}
 		pointer_press(app, w, target, e)
 		return
 	}
@@ -165,6 +127,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	if ui.armed_down(w.find.armed) {target = .Find} else if w.selecting {target = .Content}
+	w.gesture.owners[e.button] = target
 	w.dirty = true
 	// A press below the find bar hands the keyboard back to the terminal; the bar and its matches stay.
 	if target > .Find && w.find.focused {ui.find_blur(&w.find, &app.find_history)}
