@@ -381,6 +381,8 @@ when AIO_CONTROL {
 				{"settings.active", fmt.tprintf("%t", settings_active(w))},
 				{"settings.popup", fmt.tprintf("%v", w.editor.popup)},
 				{"settings.choice_count", fmt.tprintf("%d", choice_count)},
+				{"settings.choice_query", ui.field_string(&w.editor.choice_search)},
+				{"settings.choice_matches", fmt.tprintf("%d", len(w.editor.choice_matches))},
 				{"settings.capturing", fmt.tprintf("%t", w.editor.capturing)},
 				{"settings.title", editor_title},
 				{"settings.message", w.editor.message},

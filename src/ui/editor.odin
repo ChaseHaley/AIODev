@@ -74,6 +74,7 @@ Editor_Drag :: enum {
 	None,
 	Filter,
 	Value,
+	Choice_Search,
 	Slider,
 	Wheel,
 	Ramp,
@@ -148,6 +149,8 @@ Editor :: struct {
 	items:                                                             [dynamic]Editor_Item,
 	selected, scroll, visible_rows, captured, shortcut_index:          int,
 	filter, value:                                                     Text_Field,
+	choice_search:                                                     Text_Field,
+	choice_matches:                                                    [dynamic]int,
 	drag:                                                              Editor_Drag,
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
 	hsv:                                                               [3]f32,
@@ -242,6 +245,8 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.items)
 	delete(p.filter.bytes)
 	delete(p.value.bytes)
+	delete(p.choice_search.bytes)
+	delete(p.choice_matches)
 	delete(p.process_source)
 	delete(p.source)
 	delete(p.message)
@@ -951,9 +956,9 @@ max_scroll :: proc(p: ^Editor) -> int {return max(0, len(p.items) - max(1, p.vis
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 	if p.popup == .Choice && contains(editor_popup_rect(p, l), x, y) {
 		if row := editor_row(p); row != nil {
-			visible := choice_popup_rows(row, l)
-			p.popup_scroll = clamp(p.popup_scroll - rows, 0, max(0, len(row.choices) - visible))
-			p.popup_index = clamp(p.popup_index, p.popup_scroll, p.popup_scroll + visible - 1)
+			visible := choice_popup_rows(p, row, l)
+			p.popup_scroll = clamp(p.popup_scroll - rows, 0, max(0, editor_choice_count(p, row) - visible))
+			p.popup_index = clamp(p.popup_index, p.popup_scroll, max(0, p.popup_scroll + visible - 1))
 		}
 		return
 	}
@@ -1075,6 +1080,10 @@ choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
 @(private)
 open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
 	p.popup, p.focus = .Choice, .Control
+	if choice_searchable(row) {
+		field_set(&p.choice_search, "")
+		choice_filter(p, row)
+	}
 	p.popup_index = choice_index(row, field_string(&p.value))
 	p.popup_scroll = p.popup_index
 }
@@ -1295,6 +1304,15 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 @(private)
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Editor_Outcome, bool) {
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
+	if p.popup == .Choice && choice_searchable(row) {
+		#partial switch e.key {
+		case .Backspace, .Delete, .Arrow_Left, .Arrow_Right, .A:
+			if field_key(&p.choice_search, e) == .Edited {choice_filter(p, row)}
+			return .Changed, true
+		case .Space:
+			return .None, true
+		}
+	}
 	if p.popup == .Shortcuts {
 		count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 		last := count
@@ -1328,19 +1346,19 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 	case .Arrow_Up, .Arrow_Down, .P, .N:
 		if p.popup != .Choice || ((e.key == .P || e.key == .N) && !control) {return .None, false}
 		delta := e.key == .Arrow_Up || e.key == .P ? -1 : 1
-		p.popup_index = clamp(p.popup_index + delta, 0, len(row.choices) - 1)
+		p.popup_index = clamp(p.popup_index + delta, 0, max(0, editor_choice_count(p, row) - 1))
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - 7), p.popup_index)
 		return .Changed, true
 	case .Home, .End, .Page_Up, .Page_Down:
 		if p.popup != .Choice {return .None, false}
 		if e.key == .Home {p.popup_index = 0}
-		if e.key == .End {p.popup_index = len(row.choices) - 1}
+		if e.key == .End {p.popup_index = max(0, editor_choice_count(p, row) - 1)}
 		if e.key == .Page_Up {p.popup_index = max(0, p.popup_index - 8)}
-		if e.key == .Page_Down {p.popup_index = min(len(row.choices) - 1, p.popup_index + 8)}
+		if e.key == .Page_Down {p.popup_index = min(max(0, editor_choice_count(p, row) - 1), p.popup_index + 8)}
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - 7), p.popup_index)
 		return .Changed, true
 	case .Enter, .Numpad_Enter, .Space:
-		if p.popup == .Choice {return choose(p, row, p.popup_index), true}
+		if p.popup == .Choice {return choice_choose(p, row, p.popup_index), true}
 		if e.key == .Space {return .None, false}
 		p.popup = .None
 		return .Save, true
@@ -1489,6 +1507,10 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 editor_text :: proc(p: ^Editor, text: string) {
 	if p.capturing || p.focus == .Positions {return}
 	row := editor_row(p)
+	if p.popup == .Choice && choice_searchable(row) {
+		if field_text(&p.choice_search, text) == .Edited {choice_filter(p, row)}
+		return
+	}
 	if p.focus == .Control && row != nil && text_kind(row.kind) {
 		if field_text(&p.value, text) == .Edited {sync_color(p)}
 		return
@@ -1514,6 +1536,9 @@ editor_paste :: proc(p: ^Editor, text: string) {
 
 // The selected text of the focused field, for copying.
 editor_selection :: proc(p: ^Editor) -> string {
+	if p.popup == .Choice && choice_searchable(editor_row(p)) {
+		return field_selected_text(&p.choice_search)
+	}
 	switch p.focus {
 	case .Search:
 		return field_selected_text(&p.filter)
@@ -1527,6 +1552,11 @@ editor_selection :: proc(p: ^Editor) -> string {
 // Removes the selected text of the focused field after it was copied.
 editor_cut :: proc(p: ^Editor) {
 	if editor_selection(p) == "" {return}
+	if row := editor_row(p); p.popup == .Choice && choice_searchable(row) {
+		field_text(&p.choice_search, "")
+		choice_filter(p, row)
+		return
+	}
 	if p.focus == .Control {
 		if row := editor_row(p); row != nil && text_kind(row.kind) {
 			field_text(&p.value, "")
@@ -1713,8 +1743,10 @@ shortcut_popup_rows :: proc(p: ^Editor, l: Editor_Layout) -> int {
 }
 
 @(private)
-choice_popup_rows :: proc(row: ^Editor_Row, l: Editor_Layout) -> int {
-	return min(len(row.choices), 8, max(1, int((l.page.height - 24 * l.scale) / (CHOICE_HEIGHT * l.scale))))
+choice_popup_rows :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout) -> int {
+	header := choice_search_height(row, l.scale)
+	return min(editor_choice_count(p, row), 8,
+	           max(1, int((l.page.height - 24 * l.scale - header) / (CHOICE_HEIGHT * l.scale))))
 }
 
 editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
@@ -1734,16 +1766,16 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 			f32(count) * CHOICE_HEIGHT * s + 8 * s,
 		}
 	} else if p.popup == .Choice {
-		count := choice_popup_rows(row, l)
-		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - count + 1), p.popup_index)
-		p.popup_scroll = min(p.popup_scroll, max(0, len(row.choices) - count))
+		count := choice_popup_rows(p, row, l)
+		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - max(1, count) + 1), p.popup_index)
+		p.popup_scroll = min(p.popup_scroll, max(0, editor_choice_count(p, row) - count))
 		width := parts.field.width
 		if row.key == "font.family" || row.key == "interface.font_family" {width = max(width, 360 * s)}
 		r = {
 			parts.field.x,
 			parts.field.y + parts.field.height + 4 * s,
 			width,
-			f32(choice_popup_rows(row, l)) * CHOICE_HEIGHT * s + 8 * s,
+			f32(max(1, count)) * CHOICE_HEIGHT * s + 8 * s + choice_search_height(row, s),
 		}
 	} else {
 		r = {
@@ -1835,9 +1867,18 @@ editor_press :: proc(
 			return .Changed
 		}
 		if p.popup == .Choice {
+			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {
+				box := choice_search_box(p, l, text)
+				if text != nil {
+					field_pointer(&p.choice_search, field_box_offset(box, x), true, extend)
+				} else {field_select_all(&p.choice_search)}
+				p.drag = .Choice_Search
+				return .Changed
+			}
+			popup.y += choice_search_height(row, s)
 			index := int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s))
-			if y < popup.y + 4 * s || index >= choice_popup_rows(row, l) {return .None}
-			return choose(p, row, index + p.popup_scroll)
+			if y < popup.y + 4 * s || index >= choice_popup_rows(p, row, l) {return .None}
+			return choice_choose(p, row, index + p.popup_scroll)
 		}
 		if p.popup == .Shortcuts {
 			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
@@ -2040,6 +2081,9 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 			) !=
 			.None \
 		)
+	case .Choice_Search:
+		return field_pointer(&p.choice_search,
+		                     field_box_offset(choice_search_box(p, l, text), x), false, true) != .None
 	case .Slider:
 		slide(p, row, editor_row_parts(p, l, p.selected).slider, x)
 	case .Process_Order:
@@ -2066,6 +2110,7 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	drag := p.drag
 	p.drag = .None
 	p.filter.dragging, p.value.dragging = false, false
+	p.choice_search.dragging = false
 	if drag == .Process_Order {
 		slot := p.drag_target
 		if slot > p.drag_from {slot -= 1}
@@ -2094,6 +2139,10 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if p.popup != .None {
 		if row := editor_row(p); row != nil {
 			popup := editor_popup_rect(p, l)
+			if p.popup == .Choice {
+				popup.y += choice_search_height(row, l.scale)
+				popup.height -= choice_search_height(row, l.scale)
+			}
 			visible := int((y - popup.y - 4 * l.scale) / (CHOICE_HEIGHT * l.scale))
 			option := render.Rect {
 				popup.x + 4 * l.scale,
@@ -2106,7 +2155,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 				#partial switch p.popup {
 				case .Choice:
 					index += p.popup_scroll
-					valid = index < len(row.choices)
+					valid = index < editor_choice_count(p, row) && visible < choice_popup_rows(p, row, l)
 				case .Shortcuts:
 					index += p.popup_scroll
 					count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
@@ -2192,10 +2241,14 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 	if popup := editor_popup_rect(p, l); contains(popup, x, y) {
 		row := editor_row(p)
 		if row == nil {return .Arrow}
+		if p.popup == .Choice {
+			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {return .Text}
+			popup.y += choice_search_height(row, s)
+		}
 		option := int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s))
 		#partial switch p.popup {
 		case .Choice:
-			if option >= 0 && option + p.popup_scroll < len(row.choices) {return .Hand}
+			if option >= 0 && option + p.popup_scroll < editor_choice_count(p, row) {return .Hand}
 		case .Shortcuts:
 			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			if option >= 0 && option + p.popup_scroll <= count {return .Hand}
@@ -2859,10 +2912,24 @@ popup_draw :: proc(
 		return .Ok
 	}
 	if p.popup == .Choice {
-		count := choice_popup_rows(row, l)
+		count := choice_popup_rows(p, row, l)
+		if choice_searchable(row) {
+			box := choice_search_box(p, l, text)
+			box_draw(list, box.rect, theme, true, s)
+			if result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Search fonts");
+			   result != .Ok {return result}
+			if render.push_layer(list, l.page) != .None {return .Ok}
+			r.y += choice_search_height(row, s)
+			r.height -= choice_search_height(row, s)
+			if count == 0 {
+				return draw_text(text, list, "No fonts found", r.x + 14 * s,
+				                 r.y + (r.height - text.line_height) / 2 + text.ascent,
+				                 theme.muted, r.width - 28 * s)
+			}
+		}
 		for visible in 0 ..< count {
 			i := p.popup_scroll + visible
-			name := row.choices[i]
+			name := row.choices[choice_source_index(p, row, i)]
 			option := render.Rect {
 				r.x + 4 * s,
 				r.y + 4 * s + f32(visible) * CHOICE_HEIGHT * s,
@@ -2896,11 +2963,12 @@ popup_draw :: proc(
 				option.width - 24 * s,
 			); result != .Ok {return result}
 		}
-		if count > 0 && len(row.choices) > count {
+		total := editor_choice_count(p, row)
+		if count > 0 && total > count {
 			height := r.height - 8 * s
-			thumb := height * f32(count) / f32(len(row.choices))
+			thumb := height * f32(count) / f32(total)
 			y := r.y + 4 * s + (height - thumb) *
-			     f32(p.popup_scroll) / f32(len(row.choices) - count)
+			     f32(p.popup_scroll) / f32(total - count)
 			draw_rect(list, {
 				rect = {r.x + r.width - 4 * s, y, 2 * s, thumb},
 				color = theme.muted, radius = s,

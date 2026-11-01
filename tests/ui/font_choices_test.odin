@@ -1,6 +1,7 @@
 package ui_test
 
 import "aio:ui"
+import "aio:platform"
 import "core:testing"
 import "core:fmt"
 
@@ -20,13 +21,13 @@ long_choice_list_scroll_hit_testing_and_keyboard :: proc(t: ^testing.T) {
 	l := page(&p)
 	ui.editor_key(&p, key({key = .Enter}))
 	popup := ui.editor_popup_rect(&p, l)
-	testing.expect(t, popup.height <= 8*30+8)
+	testing.expect(t, popup.height <= 8*30+8+36)
 	testing.expect(t, popup.y >= l.page.y && popup.y+popup.height <= l.page.y+l.page.height)
 	ui.editor_wheel(&p, l, popup.x+10, popup.y+10, -12)
 	testing.expect_value(t, p.popup_scroll, 12)
-	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, popup.y+4+30*1.5))
+	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, popup.y+36+4+30*1.5))
 	testing.expect_value(t, p.popup_index, 13)
-	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+4+30*1.5, false), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+36+4+30*1.5, false), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "Font 13")
 	ui.editor_key(&p, key({key = .Enter}))
 	for _ in 0..<26 {ui.editor_key(&p, key({key = .Arrow_Down}))}
@@ -38,4 +39,55 @@ long_choice_list_scroll_hit_testing_and_keyboard :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .Enter}))
 	ui.editor_key(&p, key({key = .Escape}))
 	testing.expect_value(t, ui.field_string(&p.value), "Font 39")
+}
+
+@(test)
+font_search_filters_selects_and_cancels_without_editing_settings_search :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	choices := [?]string{"Cascadia Mono", "Consolas", "Cove Nerd Font", "Cove Nerd Font Mono", "Segoe UI"}
+	for font_key in ([?]string{"font.family", "interface.font_family"}) {
+		testing.expect_value(t, ui.editor_add(&p, {
+			key = font_key, title = "Font", kind = .Choice,
+			value = "Consolas", choices = choices[:],
+		}, "Fonts"), nil)
+	}
+	p.open = true
+	ui.editor_filter(&p)
+	for font_key in ([?]string{"font.family", "interface.font_family"}) {
+		testing.expect(t, ui.editor_select_key(&p, font_key))
+		ui.editor_key(&p, key({key = .Enter}))
+		ui.editor_text(&p, "nErD FoNt")
+		testing.expect_value(t, ui.editor_choice_count(&p, ui.editor_row(&p)), 2)
+		testing.expect_value(t, ui.field_string(&p.filter), "")
+		testing.expect_value(t, ui.field_string(&p.value), "Consolas")
+		ui.editor_key(&p, key({key = .Arrow_Down}))
+		testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
+		testing.expect_value(t, ui.field_string(&p.value), "Cove Nerd Font Mono")
+		ui.editor_key(&p, key({key = .Enter}))
+		testing.expect_value(t, ui.field_string(&p.choice_search), "")
+		ui.editor_text(&p, "missing font 12345")
+		testing.expect_value(t, ui.editor_choice_count(&p, ui.editor_row(&p)), 0)
+		testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.None)
+		ui.editor_key(&p, key({key = .End}))
+		ui.editor_key(&p, key({key = .Arrow_Down}))
+		testing.expect_value(t, p.popup, ui.Editor_Popup.Choice)
+		ui.editor_key(&p, key({key = .A, modifiers = {.Control}}))
+		testing.expect_value(t, ui.editor_selection(&p), "missing font 12345")
+		ui.editor_cut(&p)
+		testing.expect_value(t, ui.editor_choice_count(&p, ui.editor_row(&p)), 5)
+		ui.editor_paste(&p, "Segoe\r\nignored")
+		testing.expect_value(t, ui.editor_choice_count(&p, ui.editor_row(&p)), 1)
+		ui.editor_key(&p, key({key = .Backspace}))
+		testing.expect_value(t, ui.field_string(&p.choice_search), "Sego")
+		l := page(&p)
+		popup := ui.editor_popup_rect(&p, l)
+		testing.expect_value(t, ui.editor_pointer(&p, l, popup.x+14, popup.y+14), platform.Cursor_Shape.Text)
+		testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+14, popup.y+36+19, false), ui.Editor_Outcome.Save)
+		testing.expect_value(t, ui.field_string(&p.value), "Segoe UI")
+		ui.editor_key(&p, key({key = .Enter}))
+		ui.editor_text(&p, "Cascadia")
+		ui.editor_key(&p, key({key = .Escape}))
+		testing.expect_value(t, ui.field_string(&p.value), "Segoe UI")
+	}
 }

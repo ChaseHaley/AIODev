@@ -35,7 +35,13 @@ try {
     if ($monoCount -lt 2) {throw 'No installed terminal fonts found'}
     Invoke-Aio expect state settings.popup=Choice
     Shot shell-fonts
-    Invoke-Aio key Down Enter
+    $beforeSearch = (Read-State)['terminal.font_family']
+    Invoke-Aio type cOnSoLaS
+    Invoke-Aio expect state settings.choice_matches=1
+    Invoke-Aio expect state settings.filter=font.family
+    Invoke-Aio expect state "terminal.font_family=$beforeSearch"
+    Shot shell-search
+    Invoke-Aio key Enter
     $shell = (Read-State)['terminal.font_family']
     if ($shell -ne (Read-State)['settings.value']) {throw 'Shell family did not apply'}
     Write-Output "PASS shell dropdown discovers $monoCount terminal families and applies $shell"
@@ -50,16 +56,26 @@ try {
     Write-Output "PASS Show All Fonts expands to $allCount families; End scrolls; Escape cancels"
     Open-Field interface.font_family
     if ([int](Read-State)['settings.choice_count'] -ne $allCount) {throw 'GUI picker lacks installed fonts'}
-    Invoke-Aio key Down Enter
+    Invoke-Aio type no-such-font-xyz
+    Invoke-Aio expect state settings.choice_matches=0
+    Invoke-Aio key Enter
+    Invoke-Aio expect state settings.popup=Choice
+    Shot no-fonts-found
+    Invoke-Aio key Ctrl+A Backspace
+    Invoke-Aio expect state "settings.choice_matches=$allCount"
+    Invoke-Aio type 'segoe ui'
+    Shot gui-search
+    Invoke-Aio key Enter
     $gui = (Read-State)['ui.font_family']
     if ($gui -ne (Read-State)['settings.value']) {throw 'GUI family did not apply'}
     if ((Read-State)['terminal.font_family'] -ne $shell) {throw 'GUI choice changed shell font'}
     Shot gui-font
     Invoke-Aio dpi 168
     Invoke-Aio key Enter
-    Invoke-Aio key End
+    Invoke-Aio type 'nerd font'
     Shot gui-font-high-dpi
     Invoke-Aio key Esc
+    Write-Output 'PASS both pickers search without changing settings search; empty result cannot save; clear restores list'
     Write-Output "PASS independent GUI family $gui applies, including high DPI"
     $persisted = Join-Path $repo "build/verify/$name/persisted.ini"
     Copy-Item -LiteralPath (Join-Path $repo "build/verify/$name/settings.ini") -Destination $persisted
