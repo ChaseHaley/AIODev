@@ -1,3 +1,19 @@
+<#
+.SYNOPSIS
+Publishes an AIODev release to GitHub.
+
+.DESCRIPTION
+From a clean main in sync with the remote and with the GitHub CLI signed in: runs build.ps1 check,
+tags v<Version>, builds the package, writes notes from feat, fix and perf commit subjects since the
+previous tag, pushes main and the tag, and uploads the zip and its SHA256. Versions below 1.0 and
+versions with a suffix such as -beta.1 are prereleases.
+
+.EXAMPLE
+./tools/release.ps1 0.2.0 -DryRun
+
+.EXAMPLE
+./tools/release.ps1 0.2.0
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]

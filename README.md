@@ -54,19 +54,6 @@ Requirements:
 `vendor/ghostty` holds a prebuilt libghostty-vt pinned to `vendor/ghostty/REVISION`. Rebuilding it
 needs Zig 0.16: `tools/build_ghostty.ps1`.
 
-## Releasing
-
-From a clean `main`, with the GitHub CLI signed in:
-
-```powershell
-./tools/release.ps1 0.2.0 -DryRun   # check, package and draft notes; nothing is pushed
-./tools/release.ps1 0.2.0           # same, then push main and v0.2.0 and publish the release
-```
-
-The script tags `v<version>`, builds the package, writes release notes from the Conventional Commit
-`feat`, `fix` and `perf` subjects since the previous tag, and uploads the zip and its SHA256. Versions
-below 1.0 and versions with a suffix such as `-beta.1` are marked as prereleases.
-
 ## License
 
 AIODev is released under the [MIT License](LICENSE). Release packages include third-party
