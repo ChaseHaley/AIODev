@@ -136,13 +136,13 @@ palette_binding_draw :: proc(
 		return result
 	}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
-	label := "Add shortcut"
+	summary := Shortcut_Summary{additional = max(0, command.shortcuts.count - 1)}
 	if shortcuts := commands.active_shortcuts(command); len(shortcuts) > 0 {
-		label = commands.shortcut_text(shortcuts[0], buffer[:])
+		summary.first = commands.shortcut_text(shortcuts[0], buffer[:])
 	}
-	box_draw(list, parts.field, theme, contains(parts.field, pointer.x, pointer.y), l.scale)
-	key_text := text_styled(text, .Keycap)
-	return draw_text(&key_text, list, label, parts.field.x + 8 * l.scale,
-	                 parts.field.y + (parts.field.height - key_text.line_height) / 2 + key_text.ascent,
-	                 theme.muted, max(1, parts.field.width - 16 * l.scale))
+	parts.positions = {}
+	result := shortcut_field_draw(list, text, theme, parts, summary,
+	                              {focused = contains(parts.field, pointer.x, pointer.y)}, l.viewport, l.scale)
+	_ = render.push_layer(list, l.list)
+	return result
 }

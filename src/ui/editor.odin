@@ -1767,25 +1767,6 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	return parts
 }
 
-// Shared by Settings rows and the palette's embedded shortcut editor.
-@(private)
-shortcut_parts :: proc(parts: ^Row_Parts, scale: f32, selected: bool) {
-	s := scale
-	r := parts.row
-	cy := r.y + r.height / 2
-	right := parts.reset.x - 12 * s
-	width := clamp((right - r.x) / s * 0.45, 120, 240) * s
-	parts.field = {right - width, cy - 15 * s, width, 30 * s}
-	if !selected {return}
-	parts.positions = {parts.field.x - 148 * s, cy - 11 * s, 36 * s, 22 * s}
-	parts.text_right = parts.positions.x
-	if parts.positions.x - r.x < 190 * s {
-		parts.text_right = parts.field.x - 84 * s
-		parts.positions = {parts.text_right + 18 * s, r.y + 6 * s, 36 * s, 22 * s}
-		parts.positions_label_below = true
-	}
-}
-
 // The table cells of the item at `index`. The editor's row rect is the only shared part.
 editor_profile_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Profile_Parts {
 	if index < 0 || index >= len(p.items) || p.items[index].row < 0 {return {}}
@@ -2407,8 +2388,6 @@ row_preview :: proc(row: ^Editor_Row, value: string) -> string {
 	#partial switch row.kind {
 	case .Optional_Color:
 		if value == "" {return "None"}
-	case .Shortcut:
-		if value == "" {return "None"}
 	}
 	return value
 }
@@ -2876,7 +2855,13 @@ control_draw :: proc(
 			{rect = parts.swatch, color = theme.border, radius = 6 * scale, stroke = scale},
 		)
 		if selected && p.popup == .Color {focus_ring_draw(list, parts.swatch, theme, scale)}
-	case .Text, .Shortcut:
+	case .Shortcut:
+		return shortcut_field_draw(list, text, theme, parts, shortcut_summary(value), {
+			capturing = selected && p.capturing, focused = focused,
+			positions_focused = selected && p.focus == .Positions, physical = p.physical,
+			empty_label = strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) ? "Add shortcut" : "None",
+		}, page, scale)
+	case .Text:
 	case .Profile_Icon:
 		profile_badge_draw(list, text, row.badge, parts.swatch, theme, scale, false)
 	case .Process_Group, .Profile, .Profile_Add, .Detected_Header, .Detected:
@@ -2884,45 +2869,11 @@ control_draw :: proc(
 	}
 	if selected {
 		placeholder := row.kind == .Optional_Color ? "None" : "Empty"
-		if row.kind == .Shortcut {placeholder = p.capturing ? "Press keys…" : "None"}
-		field_focused := focused && !p.capturing && row.kind != .Shortcut
 		box := value_box(p, parts, text, scale)
-		box_draw(list, parts.field, theme, field_focused, scale)
-		if r := field_box_draw(box, list, theme, field_box_baseline(box), field_focused, placeholder);
+		box_draw(list, parts.field, theme, focused, scale)
+		if r := field_box_draw(box, list, theme, field_box_baseline(box), focused, placeholder);
 		   r != .Ok {
 			return r
-		}
-		if p.capturing {
-			draw_rect(
-				list,
-				{rect = parts.field, color = theme.accent, radius = 6 * scale, stroke = 2 * scale},
-			)
-		}
-		if parts.positions.width > 0 {
-			if render.push_layer(list, page) != .None {return .Ok}
-			switch_draw(list, parts.positions, p.physical, p.focus == .Positions, theme, scale)
-			small := text_styled(text, .Small)
-			label := "Key positions"
-			if parts.positions_label_below {
-				return draw_text(
-					&small,
-					list,
-					label,
-					parts.positions.x + (parts.positions.width - text_width(&small, label)) / 2,
-					parts.positions.y + parts.positions.height + 2 * scale + small.ascent,
-					theme.muted,
-				)
-			}
-			return draw_text(
-				&small,
-				list,
-				label,
-				parts.positions.x + parts.positions.width + 8 * scale,
-				parts.positions.y +
-				(parts.positions.height - small.line_height) / 2 +
-				small.ascent,
-				theme.muted,
-			)
 		}
 		return .Ok
 	}

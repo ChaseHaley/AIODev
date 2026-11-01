@@ -64,6 +64,21 @@ try {
     # Add a second alternative, then remove it without replacing the first.
     Invoke-Aio key Ctrl+Enter Down Enter Ctrl+Alt+F10 Enter | Out-Null
     Assert-Value (Read-State)['palette.value'] 'Ctrl+Alt+F9, Ctrl+Alt+F10' 'Add shortcut preserves alternatives'
+    Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-palette.png') | Out-Null
+    Invoke-Aio key Ctrl+Enter | Out-Null
+    Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-palette-menu.png') | Out-Null
+    Invoke-Aio key Esc Esc | Out-Null
+    Invoke-Aio command settings.open | Out-Null
+    Invoke-Aio type 'Split Right' | Out-Null
+    Assert-Value (Read-State)['settings.key'] 'keys.pane.split_right' 'Settings finds the same shortcut'
+    Assert-Value (Read-State)['settings.value'] 'Ctrl+Alt+F9, Ctrl+Alt+F10' 'Settings retains the full value'
+    Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-settings.png') | Out-Null
+    Invoke-Aio key Tab | Out-Null
+    Assert-Value (Read-State)['settings.popup'] 'Shortcuts' 'Settings opens the full alternatives list'
+    Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-settings-menu.png') | Out-Null
+    Invoke-Aio key Esc | Out-Null
+    Invoke-Aio command app.palette_commands | Out-Null
+    Invoke-Aio type 'Split Right' | Out-Null
     Invoke-Aio key Ctrl+Enter Down Delete | Out-Null
     Assert-Value (Read-State)['palette.value'] 'Ctrl+Alt+F9' 'Delete removes only the chosen alternative'
 
