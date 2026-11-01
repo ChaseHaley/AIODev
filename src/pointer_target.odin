@@ -492,6 +492,7 @@ divider_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 @(private = "file")
 divider_pointer_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button == .Left {_ = divider_press(app, w, f32(e.x), f32(e.y), e.time_ns)}
+	if e.button == .Right {dock_divider_menu_open(app, w, f32(e.x), f32(e.y))}
 }
 
 @(private = "file")

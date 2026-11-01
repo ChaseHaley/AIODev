@@ -2,6 +2,8 @@ package main
 
 import "aio:layout"
 import "aio:ui"
+import "core:fmt"
+import "core:math"
 
 RAIL_DIVIDER :: layout.Node_Id(max(u32) - 1)
 ACTIVITY_DIVIDER :: layout.Node_Id(max(u32) - 2)
@@ -75,4 +77,42 @@ dock_divider_reset :: proc(w: ^Window, node: layout.Node_Id) {
 	case ACTIVITY_HEIGHT_DIVIDER:
 		w.status.panel_height = 0
 	}
+}
+
+dock_divider_menu_open :: proc(app: ^App, w: ^Window, x, y: f32) {
+	hits: [4]layout.Divider
+	count := divider_hits(w, x, y, hits[:])
+	for hit in hits[:count] {
+		if !dock_divider(hit.node) {continue}
+		if !gesture_cancel(app, w) {return}
+		w.profile_menu.open = false
+		w.tab_menu = {open = true, count = 1, position = {x, y}, dock = hit.node}
+		w.dirty = true
+		return
+	}
+}
+
+dock_divider_save_default :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
+	key: string
+	size: f32
+	switch node {
+	case RAIL_DIVIDER:
+		key, size = "tabs.rail_width", rail_width_pixels(w) / w.scale
+	case ACTIVITY_DIVIDER:
+		key, size = "status.panel_width", status_panel_dock_width(app, w) / w.scale
+	case ACTIVITY_HEIGHT_DIVIDER:
+		area := rail_area(w)
+		if area.height <= 0 {return}
+		key, size = "status.panel_height", 100 * status_panel_rail_height(app, w) / area.height
+	case: return
+	}
+	value := int(math.round(size))
+	_, has_file := settings_save_value(app, key, fmt.tprintf("%d", value), "Could not save default size.")
+	if has_file {return}
+	switch node {
+	case RAIL_DIVIDER: app.settings.tabs.rail_width = value
+	case ACTIVITY_DIVIDER: app.settings.status.panel_width = value
+	case ACTIVITY_HEIGHT_DIVIDER: app.settings.status.panel_height = value
+	}
+	for window in app.windows {window_apply_settings(app, window); window_relayout(app, window)}
 }

@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:layout"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
@@ -12,6 +13,7 @@ Tab_Menu :: struct {
 	separators: [16]bool,
 	count, selected, scroll: int,
 	position: [2]f32,
+	dock: layout.Node_Id,
 }
 
 tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
@@ -52,6 +54,7 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 }
 
 tab_menu_label :: proc(w: ^Window, index: int) -> string {
+	if dock_divider(w.tab_menu.dock) {return "Set as Default Size"}
 	if w.tab_menu.separators[index] { return "" }
 	#partial switch w.tab_menu.actions[index] {
 	case .Rename_Tab: return "Rename"
@@ -69,6 +72,7 @@ tab_menu_label :: proc(w: ^Window, index: int) -> string {
 
 tab_menu_enabled :: proc(w: ^Window, index: int) -> bool {
 	if index < 0 || index >= w.tab_menu.count || w.tab_menu.separators[index] { return false }
+	if dock_divider(w.tab_menu.dock) {return true}
 	#partial switch w.tab_menu.actions[index] {
 	case .Duplicate_Tab: return !settings_active(w)
 	case .Close_Right_Tabs: return w.workspace.selected + 1 < len(w.workspace.tabs)
@@ -131,6 +135,11 @@ tab_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 
 tab_menu_choose :: proc(app: ^App, w: ^Window) {
 	if !tab_menu_enabled(w, w.tab_menu.selected) { return }
+	if dock_divider(w.tab_menu.dock) {
+		w.tab_menu.open = false
+		dock_divider_save_default(app, w, w.tab_menu.dock)
+		return
+	}
 	action := w.tab_menu.actions[w.tab_menu.selected]
 	w.tab_menu.open = false
 	command_run(app, w, action, .Menu)
