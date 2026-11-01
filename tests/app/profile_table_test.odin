@@ -134,6 +134,27 @@ profile_press :: proc(f: ^Profile_Fixture, key: platform.Key_Event) {
 }
 
 @(test)
+profile_show_in_menus_inverts_persistence_and_resets_to_shown :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "show-in-menus", PROFILE_FIXTURE_SETTINGS) {return}
+	e := profile_open(&f)
+	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha")) {return}
+	profile_press(&f, {key = .Enter})
+	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.hidden")) {return}
+	testing.expect_value(t, ui.editor_row(e).title, "Show in menus")
+	testing.expect_value(t, ui.editor_row(e).value, "true")
+	testing.expect_value(t, ui.editor_row(e).default_value, "true")
+	ui.field_set(&e.value, "false")
+	app.editor_outcome(&f.state, f.state.windows[0], .Save)
+	testing.expect(t, profile_file_has(f.path, "profile.alpha.hidden = true"))
+	testing.expect_value(t, ui.editor_row(e).value, "false")
+	app.editor_outcome(&f.state, f.state.windows[0], .Reset)
+	testing.expect(t, profile_file_has(f.path, "profile.alpha.hidden = false"))
+	testing.expect_value(t, ui.editor_row(e).value, "true")
+}
+
+@(test)
 profile_table_writes_default_hidden_and_order :: proc(t: ^testing.T) {
 	f: Profile_Fixture
 	defer profile_fixture_destroy(t, &f)

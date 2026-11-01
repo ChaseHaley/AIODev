@@ -123,6 +123,7 @@ profile_columns_drop_the_directory_before_any_cell_overlaps :: proc(t: ^testing.
 			testing.expect_value(t, columns.icon_shown, width >= icon_min)
 			cells := [?]struct{ name: string, rect: render.Rect } {
 				{"handle", columns.handle},
+				{"expand", columns.expand},
 				{"icon", columns.icon},
 				{"name", columns.name},
 				{"command", columns.command},
@@ -130,6 +131,12 @@ profile_columns_drop_the_directory_before_any_cell_overlaps :: proc(t: ^testing.
 				{"default", columns.default},
 				{"hidden", columns.hidden},
 				{"actions", columns.actions},
+			}
+			parts := ui.profile_row_parts(.Profile, {0, 0, width * scale, 52 * scale}, scale)
+			testing.expect(t, parts.expand.width > 0)
+			testing.expect(t, parts.expand.x >= parts.handle.x + parts.handle.width)
+			if columns.icon_shown {
+				testing.expect(t, parts.expand.x + parts.expand.width <= parts.icon.x)
 			}
 			for a, i in cells {
 				if a.rect.width <= 0 {continue}

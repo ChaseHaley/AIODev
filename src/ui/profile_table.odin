@@ -30,7 +30,7 @@ PROFILE_ICON_MIN_WIDTH :: 420
 
 // One column's cell inside a table row. Zero-sized cells are not shown.
 Profile_Columns :: struct {
-	handle, icon, name, command, directory, default, hidden, actions: render.Rect,
+	handle, expand, icon, name, command, directory, default, hidden, actions: render.Rect,
 	directory_shown, actions_shown, icon_shown:                      bool,
 }
 
@@ -136,12 +136,13 @@ profile_columns :: proc(row: render.Rect, scale: f32) -> Profile_Columns {
 	show_actions := row.width >= PROFILE_ACTIONS_MIN_WIDTH * s
 	show_directory := row.width >= PROFILE_DIRECTORY_MIN_WIDTH * s
 	handle_width := 20 * s
+	expand_width := 24 * s
 	icon_width := show_icon ? 30 * s : 0
 	default_width := 44 * s
 	hidden_width := 48 * s
-	actions_width := show_actions ? 76 * s : 0
-	fixed := handle_width + icon_width + default_width + hidden_width + actions_width
-	gap_count := 4
+	actions_width := show_actions ? 50 * s : 0
+	fixed := handle_width + expand_width + icon_width + default_width + hidden_width + actions_width
+	gap_count := 5
 	if show_icon {gap_count += 1}
 	if show_directory {gap_count += 1}
 	if show_actions {gap_count += 1}
@@ -168,6 +169,8 @@ profile_columns :: proc(row: render.Rect, scale: f32) -> Profile_Columns {
 	}
 	columns.handle = profile_cell(x, limit, handle_width, row)
 	x = columns.handle.x + columns.handle.width + gap
+	columns.expand = profile_cell(x, limit, expand_width, row)
+	x = columns.expand.x + columns.expand.width + gap
 	if show_icon {
 		columns.icon = profile_cell(x, limit, icon_width, row)
 		x = columns.icon.x + columns.icon.width + gap
@@ -209,6 +212,7 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 	case .Profile:
 		columns := profile_columns(row, s)
 		parts.handle = columns.handle
+		parts.expand = {columns.expand.x, cy - 12 * s, columns.expand.width, 24 * s}
 		parts.icon = columns.icon
 		parts.name = columns.name
 		parts.command = columns.command
@@ -226,11 +230,9 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 			22 * s,
 		}
 		if columns.actions.width > 0 {
-			size := min(24 * s, columns.actions.width / 3)
-			gap := max(0, (columns.actions.width - size * 3) / 2)
+			size := min(24 * s, columns.actions.width / 2)
+			gap := max(0, columns.actions.width - size * 2)
 			x := columns.actions.x
-			parts.expand = {x, cy - size / 2, size, size}
-			x += size + gap
 			parts.duplicate = {x, cy - size / 2, size, size}
 			x += size + gap
 			parts.remove = {x, cy - size / 2, size, size}

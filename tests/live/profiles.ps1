@@ -122,14 +122,22 @@ try {
     }
     Write-Output 'PASS table lists the three profiles'
 
-    Click-Row $profileRows 'alpha'
+    $alpha = Row $profileRows 'alpha'
+    $scale = [double] $state['window.dpi'] / 96
+    $expandX = $alpha.x + 50 * $scale
+    $expandY = $alpha.y + $alpha.h / 2
+    Invoke-Aio mouse click "$expandX,$expandY" --px | Out-Null
     $state = Read-State
-    Assert-Value $state['settings.profile.expanded'] 'alpha' 'row click expands Alpha inline'
+    Assert-Value $state['settings.profile.expanded'] 'alpha' 'left chevron expands Alpha inline'
+    Invoke-Aio mouse click "$expandX,$expandY" --px | Out-Null
+    Assert-Value (Read-State)['settings.profile.expanded'] '' 'left chevron collapses Alpha'
+    Invoke-Aio mouse click "$expandX,$expandY" --px | Out-Null
+    Invoke-Aio capture --out (Join-Path $repo 'build/profile-expanded.png') | Out-Null
     if ((Row $state['settings.profile.rows'] 'alpha') -eq $null) { throw 'Alpha row vanished.' }
 
     # Duplicate name: the row keeps the typed value and reports inline; the file is unchanged.
     $before = File-Text
-    Invoke-Aio key Down Enter Ctrl+A | Out-Null
+    Invoke-Aio key Down Ctrl+A | Out-Null
     Invoke-Aio type Beta | Out-Null
     Invoke-Aio key Enter | Out-Null
     $state = Read-State
@@ -155,13 +163,13 @@ try {
     $state = Read-State
     Assert-Value $state['settings.profile.default'] 'beta' 'one profile reads as default'
 
-    # Hidden toggle: Space on the hidden control writes profile.ID.hidden.
+    # Show in menus starts on; turning it off persists profile.ID.hidden = true.
     Invoke-Aio key Esc | Out-Null
     Jump-Profiles
     $state = Read-State
     Click-Row $state['settings.profile.rows'] 'gamma'
     Invoke-Aio key Tab Right Space | Out-Null
-    Assert-FileLine 'profile.gamma.hidden = true' 'hidden toggle writes profile.ID.hidden'
+    Assert-FileLine 'profile.gamma.hidden = true' 'turning Show in menus off hides the profile'
 
     # Drag the order handle: the row follows the pointer and the drop rewrites profile.order.
     Invoke-Aio key Esc | Out-Null

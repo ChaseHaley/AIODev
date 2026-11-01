@@ -217,10 +217,10 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 			},
 			{
 				key = fmt.tprintf("%s.hidden", prefix),
-				title = "Hide from menus",
-				description = "Hidden profiles stay available to open panes and shortcuts.",
-				value = row.hidden ? "true" : "false",
-				default_value = row.hidden ? "true" : "false",
+				title = "Show in menus",
+				description = "Include this profile in shell menus.",
+				value = row.hidden ? "false" : "true",
+				default_value = "true",
 				profile = row.id,
 				kind = .Toggle,
 			},
@@ -660,7 +660,10 @@ editor_profile_field :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row) {
 	if strings.has_suffix(key, ".command") || strings.has_suffix(key, ".directory") {
 		message = "Saved. Applies to new or restarted shells."
 	}
-	if strings.has_suffix(key, ".hidden") {focus = .None}
+	if strings.has_suffix(key, ".hidden") {
+		value = value == "true" ? "false" : "true"
+		focus = .None
+	}
 	_ = editor_profile_write(app, w, key, value, key, message, focus)
 }
 

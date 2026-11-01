@@ -1227,7 +1227,7 @@ profile_control_step :: proc(p: ^Editor, row: ^Editor_Row, step: int) {
 		count = 1
 	} else {
 		order[0], order[1], order[2], order[3], order[4] =
-			.Radio, .Hidden, .Expand, .Duplicate, .Remove
+			.Expand, .Radio, .Hidden, .Duplicate, .Remove
 		count = (row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags) ? 4 : 5
 	}
 	index := 0
@@ -2551,7 +2551,7 @@ profile_row_draw :: proc(
 	switch_draw(
 		list,
 		table.toggle,
-		.Hidden in row.flags,
+		.Hidden not_in row.flags,
 		focused && p.profile_control == .Hidden,
 		theme,
 		scale,
@@ -2568,6 +2568,7 @@ profile_row_draw :: proc(
 			{table.remove, .Trash, ICON_BUTTON, .Remove},
 		}
 		for control in controls {
+			if control.rect.width <= 0 {continue}
 			protected := row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags
 			if control.kind == .Remove && protected {continue}
 			profile_button_draw(
