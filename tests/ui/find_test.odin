@@ -8,6 +8,7 @@ import "aio:platform"
 import "aio:render"
 import "aio:term_view"
 import "aio:ui"
+import fixtures "../fixtures"
 
 @(test)
 find_layout_stacks_before_inline_query_falls_below_minimum :: proc(t: ^testing.T) {
@@ -80,9 +81,9 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 	defer ui.find_destroy(&f)
 	ui.find_open(&f)
 	ui.find_text(&f, "long query with a visible caret")
-	for file in SHIPPED_THEMES {
+	for file in fixtures.SHIPPED_THEMES {
 		{
-			resolved := shipped_theme_file(file) or_continue
+			resolved := fixtures.shipped_theme_file(file) or_continue
 			theme := ui.theme_from(resolved)
 			testing.expect(t, term_view.contrast_ratio(theme.text, theme.surface) >= 4.5)
 			for scale in ([?]f32{1, 1.5, 2}) {

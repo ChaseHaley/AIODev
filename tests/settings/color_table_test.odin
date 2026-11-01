@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
+import fixtures "../fixtures"
 
 @(test)
 theme_tokens_have_unique_keys_titles_and_valid_kinds :: proc(t: ^testing.T) {
@@ -64,8 +65,8 @@ every_token_round_trips_through_a_custom_theme :: proc(t: ^testing.T) {
 @(test)
 shipped_light_matches_the_id_and_selection_text_keeps_cell_colors :: proc(t: ^testing.T) {
 	count := 0
-	for file in SHIPPED_THEMES {
-		theme := shipped_theme_file(file) or_continue
+	for file in fixtures.SHIPPED_THEMES {
+		theme := fixtures.shipped_theme_file(file) or_continue
 		count += 1
 		light := strings.contains(file.name, "-light") || strings.contains(file.name, "-day")
 		testing.expectf(t, theme.light == light, "%s light", file.name)

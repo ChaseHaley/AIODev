@@ -4,6 +4,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
+import fixtures "../fixtures"
 
 @(test)
 editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.T) {
@@ -27,7 +28,7 @@ editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.
 	testing.expect_value(t, s.theme.name, "tide-light-custom")
 	testing.expect_value(t, s.font.size, 14)
 	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
-	base := shipped_theme("tide-light")
+	base := fixtures.shipped_theme("tide-light")
 	testing.expect_value(t, s.active_theme.colors[.Text], base.colors[.Text])
 
 	again, again_created, _, again_error := settings.theme_color_edit(updated, "border", "#11223344")
@@ -152,7 +153,7 @@ legacy_color_overrides_migrate_into_a_custom_theme :: proc(t: ^testing.T) {
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
 	testing.expect_value(t, s.theme.name, "tide-light-custom")
-	base := shipped_theme("tide-light")
+	base := fixtures.shipped_theme("tide-light")
 	testing.expect_value(t, s.colors.background, settings.Color{0x0f, 0x11, 0x15})
 	testing.expect_value(t, s.colors.palette[3], settings.Color{0x11, 0x22, 0x33})
 	testing.expect_value(t, s.colors.foreground, base.colors[.Foreground].rgb)

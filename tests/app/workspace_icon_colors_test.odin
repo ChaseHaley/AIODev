@@ -5,6 +5,7 @@ import app "../../src"
 import "aio:render"
 import "aio:term_view"
 import "aio:ui"
+import fixtures "../fixtures"
 
 @(test)
 workspace143_tint_validation_reset_and_icon_changes_preserve_identity :: proc(t: ^testing.T) {
@@ -37,9 +38,9 @@ workspace143_tint_validation_reset_and_icon_changes_preserve_identity :: proc(t:
 
 @(test)
 workspace143_colors_have_contrast_in_all_shipped_themes_and_selection_states :: proc(t: ^testing.T) {
-	for file in SHIPPED_THEMES {
+	for file in fixtures.SHIPPED_THEMES {
 		{
-			resolved := shipped_theme_file(file) or_continue
+			resolved := fixtures.shipped_theme_file(file) or_continue
 			theme := ui.theme_from(resolved)
 			testing.expect_value(t, app.workspace_icon_tint(0, theme.text), theme.text)
 			testing.expect_value(t, app.workspace_icon_tint(-1, theme.text), theme.text)

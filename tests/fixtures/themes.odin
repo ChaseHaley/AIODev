@@ -1,4 +1,4 @@
-package settings_test
+package fixtures_test
 
 import "aio:settings"
 import "base:runtime"

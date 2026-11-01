@@ -229,11 +229,18 @@ switch ($Task) {
         if ($targets.Count -eq 0) { throw 'No test packages found under tests/.' }
         New-Item -ItemType Directory -Force build/test | Out-Null
         Copy-Conpty 'build/test'
+        # Run every package so one failure does not hide the state of the rest.
+        $failed = @()
         foreach ($name in $targets) {
             if (-not (Test-Path "tests/$name")) { throw "No tests at tests/$name." }
             [string[]] $testDefines = @()
             if ($name -eq 'app') { $testDefines = @('-define:AIO_CONTROL=true') }
-            Invoke-Odin test "tests/$name" "-out:build/test/$name.exe" -debug -keep-executable @flags @testDefines
+            & odin test "tests/$name" "-out:build/test/$name.exe" -debug -keep-executable @flags @resource @testDefines
+            if ($LASTEXITCODE -ne 0) { $failed += $name }
+        }
+        if ($failed) {
+            Write-Output "Failed test packages: $($failed -join ', ')"
+            exit 1
         }
     }
 }

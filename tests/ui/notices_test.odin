@@ -8,6 +8,7 @@ import "aio:render"
 import "aio:term_view"
 import "aio:ui"
 import "core:time"
+import fixtures "../fixtures"
 
 @(private)
 Notice_Allocations :: struct { backing: runtime.Allocator, calls: int }
@@ -24,9 +25,9 @@ notice_allocator :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, align
 
 @(test)
 notice_severities_have_unique_words_symbols_and_readable_theme_colors :: proc(t: ^testing.T) {
-	for file in SHIPPED_THEMES {
+	for file in fixtures.SHIPPED_THEMES {
 		{
-			resolved := shipped_theme_file(file) or_continue
+			resolved := fixtures.shipped_theme_file(file) or_continue
 			theme := ui.theme_from(resolved)
 			for kind in ui.Notice_Kind {
 				label, symbol, color := ui.notice_style(kind, theme)
@@ -104,7 +105,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 		ui.text_set_size(&text, 16*scale)
 		for width in ([?]f32{320, 1000}) {
 			for id in ([?]string{"studio-dark", "studio-light"}) {
-				theme := ui.theme_from(shipped_theme(id))
+				theme := ui.theme_from(fixtures.shipped_theme(id))
 				render.draw_list_reset(&list)
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
 					width*scale, 1000*scale, scale), glyphs.Result.Ok)
@@ -133,7 +134,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				"This longer notice must remain bounded and keep its four-line limit."}) {
 				ui.notices_put(&n, 1, .Success, message, 0)
 				render.draw_list_reset(&list)
-				theme := ui.theme_from(shipped_theme("studio-dark"))
+				theme := ui.theme_from(fixtures.shipped_theme("studio-dark"))
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
 					width*scale, 1000*scale, scale), glyphs.Result.Ok)
 				box := list.rects[1].rect

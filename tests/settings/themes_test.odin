@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
+import fixtures "../fixtures"
 
 THEMES :: "themes"
 
@@ -32,7 +33,7 @@ shipped_themes_resolve_after_parsing :: proc(t: ^testing.T) {
 		testing.expect_value(t, s.colors.palette[1], fixture.ansi_red)
 		testing.expect_value(t, s.colors.foreground, theme.colors[.Foreground].rgb)
 		testing.expect_value(t, theme.light, fixture.light)
-		testing.expect_value(t, theme, shipped_theme(fixture.id))
+		testing.expect_value(t, theme, fixtures.shipped_theme(fixture.id))
 	}
 }
 
@@ -45,8 +46,8 @@ the_compiled_default_survives_an_empty_themes_folder :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(d), 1)
 	testing.expect_value(t, len(s.themes), 1)
 	testing.expect_value(t, s.themes[0].id, settings.DEFAULT_THEME_ID)
-	testing.expect_value(t, s.active_theme, shipped_theme(settings.DEFAULT_THEME_ID))
-	testing.expect_value(t, settings.theme_default(), shipped_theme(settings.DEFAULT_THEME_ID))
+	testing.expect_value(t, s.active_theme, fixtures.shipped_theme(settings.DEFAULT_THEME_ID))
+	testing.expect_value(t, settings.theme_default(), fixtures.shipped_theme(settings.DEFAULT_THEME_ID))
 
 	defaults, default_error := settings.defaults()
 	defer settings.destroy(&defaults)
@@ -68,7 +69,7 @@ custom_theme_inherits_its_base_and_overrides_single_colors :: proc(t: ^testing.T
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
 	testing.expect_value(t, len(s.themes), 16)
-	base := shipped_theme("tide-light")
+	base := fixtures.shipped_theme("tide-light")
 	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
 	testing.expect_value(t, s.active_theme.colors[.Border], settings.Theme_Color{4, 5, 6, 0x80})
 	testing.expect_value(t, s.colors.palette[15], settings.Color{7, 8, 9})
@@ -91,7 +92,7 @@ custom_themes_stack_on_custom_bases_and_survive_cycles :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	base := shipped_theme("ember-light")
+	base := fixtures.shipped_theme("ember-light")
 	testing.expect_value(t, s.active_theme.colors[.Cursor], settings.Theme_Color{1, 1, 1, 255})
 	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{2, 2, 2, 255})
 	testing.expect_value(t, s.active_theme.colors[.Window], base.colors[.Window])
@@ -190,7 +191,7 @@ legacy_theme_name_and_mode_become_one_theme_id :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	testing.expect_value(t, s.active_theme, shipped_theme("tokyonight-day"))
+	testing.expect_value(t, s.active_theme, fixtures.shipped_theme("tokyonight-day"))
 }
 
 @(test)

@@ -8,6 +8,7 @@ import "aio:glyphs"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
+import fixtures "../fixtures"
 
 @(test)
 palette_header_flood_fits_measured_narrow_viewport :: proc(t: ^testing.T) {
@@ -101,7 +102,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 		ui.palette_key(&p, &registry, key({key = .End}))
 		testing.expect_value(t, p.selected, len(p.results)-1)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			theme := ui.theme_from(shipped_theme(id))
+			theme := ui.theme_from(fixtures.shipped_theme(id))
 			theme.selection = {1, 0, 0, 1}
 			for progress in ([?]f32{0.01, 0.25, 0.5, 0.75, 1}) {
 				render.draw_list_reset(&list)
@@ -267,12 +268,14 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 		testing.expect_value(t, p.query.cursor, cursor)
 		testing.expect_value(t, p.query.anchor, anchor)
 	}
+	terminal := 0
+	for row in rows { if row.group == "Terminal" { terminal += 1 } }
 	ui.palette_text(&p, &registry, "terminal setting")
-	testing.expect_value(t, len(p.results), 5)
+	testing.expect_value(t, len(p.results), terminal)
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect_value(t, p.selected, 0)
 	l := ui.palette_layout(&p, 926, 928, 2)
-	testing.expect_value(t, l.rows, 5)
+	testing.expect_value(t, l.rows, terminal)
 	ui.palette_key(&p, &registry, key({key = .End}))
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
@@ -351,7 +354,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		selected_y := l.list.y + f32(headers) * l.header_height +
 			f32(p.selected-p.scroll) * l.row_height
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			theme := ui.theme_from(shipped_theme(id))
+			theme := ui.theme_from(fixtures.shipped_theme(id))
 			render.draw_list_reset(&list)
 			testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), glyphs.Result.Ok)
 			selected_rows := 0

@@ -17,11 +17,13 @@ palette_matches_real_setting_headers :: proc(t: ^testing.T) {
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)
+	terminal := 0
+	for row in rows { if row.group == "Terminal" { terminal += 1 } }
 	for query in ([?]string{"terminal setting", "terminal settings", "TeRmInAl SeTtInG", "trm sttng"}) {
 		ui.palette_open(&p, &registry)
 		ui.palette_text(&p, &registry, query)
-		testing.expectf(t, len(p.results) == 5, "%s matched %d instead of 5 Terminal settings", query,
-			len(p.results))
+		testing.expectf(t, len(p.results) == terminal, "%s matched %d instead of %d Terminal settings", query,
+			len(p.results), terminal)
 		index := 0
 		for row in rows {
 			if row.group != "Terminal" { continue }

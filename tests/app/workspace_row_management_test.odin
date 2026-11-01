@@ -10,6 +10,7 @@ import "aio:layout"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
+import fixtures "../fixtures"
 
 @(private="file")
 Workspace134_Fixture :: struct {
@@ -386,7 +387,7 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 		w.scale = scale
 		ui.text_set_size(&w.ui_text, 14*scale)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			s.theme = ui.theme_from(shipped_theme(id))
+			s.theme = ui.theme_from(fixtures.shipped_theme(id))
 			for width in ([?]i32{360, 460, 600, 900}) {
 				w.width = i32(f32(width)*scale)
 				f.current.name = ""
@@ -442,7 +443,7 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 		w.scale, w.width, w.height = scale, i32(600*scale), i32(400*scale)
 		ui.text_set_size(&w.ui_text, 14*scale)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			s.theme = ui.theme_from(shipped_theme(id))
+			s.theme = ui.theme_from(fixtures.shipped_theme(id))
 			for rename in ([?]bool{false, true}) {
 				render.draw_list_reset(&w.list)
 				app.workspace_row_menu_open(s, w, f.target.id)
