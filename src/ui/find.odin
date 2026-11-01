@@ -5,8 +5,9 @@ import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "core:strings"
+import "core:time"
 
-@(private) FIND_WIDTH :: 520
+@(private) FIND_WIDTH :: 440
 @(private) FIND_HEIGHT :: 40
 @(private) FIND_MARGIN :: 12
 @(private) FIND_PADDING :: 12
@@ -22,6 +23,7 @@ Find_Bar :: struct {
 	case_sensitive, regex: bool,
 	hover:                 Find_Outcome,
 	armed:                 Armed(Find_Outcome),
+	motion:                [Find_Outcome]Control_Motion,
 	// History position while Up and Down browse it, or -1 while editing.
 	recall:                int,
 	// What was being typed before browsing began, restored by moving past the newest entry.
@@ -106,6 +108,7 @@ find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 find_open :: proc(f: ^Find_Bar, h: ^Find_History = nil, restore := false, select := false) {
 	f.open, f.focused = true, true
 	f.hover = .None
+	f.motion = {}
 	f.recall = -1
 	armed_cancel(&f.armed)
 	newest, found := find_history_newest(h)
@@ -132,6 +135,7 @@ find_close :: proc(f: ^Find_Bar, h: ^Find_History = nil) {
 	if f.open { find_history_add(h, f) }
 	f.open, f.focused = false, false
 	f.hover = .None
+	f.motion = {}
 	f.recall = -1
 	armed_cancel(&f.armed)
 }
@@ -317,6 +321,21 @@ find_hover :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, x, y: f32) -> bo
 	return true
 }
 
+// Moves each button's hover and press toward the pointer and the armed press; true when a frame is due.
+find_animate :: proc(f: ^Find_Bar, animations: bool, now: time.Tick) -> bool {
+	changed := false
+	for &m, action in f.motion {
+		hovered := f.hover == action && action != .None
+		changed = control_update(&m, hovered, hovered && armed_is(f.armed, action), animations, now) || changed
+	}
+	return changed
+}
+
+find_animating :: proc(f: ^Find_Bar) -> bool {
+	for m in f.motion {if control_active(m) {return true}}
+	return false
+}
+
 // Like other chrome buttons, activate only on a matching left press/release. A press anywhere on the bar
 // gives it the keyboard.
 find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mouse_Button,
@@ -393,29 +412,23 @@ find_draw :: proc(
 	}
 	for b in buttons {
 		if b.area.width <= 0 { continue }
-		active := armed_is(f.armed, b.action)
-		hovered := b.live && f.hover == b.action
-		if b.on || hovered || (b.live && active) {
-			fill := theme.hover
-			if b.on { fill = theme.selection }
-			if b.live && active { fill = theme.pressed }
-			draw_rect(list, {rect = b.area, color = fill, radius = 5 * scale})
-		}
-		if b.live && active { focus_ring_draw(list, b.area, theme, scale) }
-		ink := theme.faint
-		if b.live { ink = hovered || active || b.on ? theme.text : theme.muted }
+		m := f.motion[b.action]
+		face, ink, err := button_draw(
+			list,
+			theme,
+			{rect = b.area, hover = m.hover.value, press = m.press.value, selected = b.on, disabled = !b.live},
+			scale,
+			pointer,
+		)
+		if err != .None { return .Ok }
 		if len(b.label) == 0 {
-			icon_draw(list, b.icon, b.area, ink, ICON_BUTTON, scale)
-		} else {
-			label := input_text
-			x := b.area.x + (b.area.width - text_width(&label, b.label)) / 2
-			baseline := b.area.y + (b.area.height - label.line_height) / 2 + label.ascent
-			if result := draw_text(&label, list, b.label, x, baseline, ink); result != .Ok { return result }
+			icon_draw(list, b.icon, face, ink, ICON_BUTTON, scale)
+			continue
 		}
-		if hovered {
-			if result := hover_rim_draw(list, theme, b.area, 5 * scale, 1, scale, pointer, compact = true);
-			   result != .None { return .Ok }
-		}
+		label := input_text
+		x := face.x + (face.width - text_width(&label, b.label)) / 2
+		baseline := face.y + (face.height - label.line_height) / 2 + label.ascent
+		if result := draw_text(&label, list, b.label, x, baseline, ink); result != .Ok { return result }
 	}
 	if l.query.width <= 0 { return .Ok }
 	box := Field_Box {

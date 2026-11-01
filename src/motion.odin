@@ -18,6 +18,7 @@ motion_active :: proc(app: ^App) -> bool {
 		   ui.motion_active(w.tab_underline) ||
 		   confirmation_active(w) { return true }
 		if ui.control_active(w.workspace_motion) { return true }
+		if w.find.open && ui.find_animating(&w.find) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
@@ -107,6 +108,7 @@ update_motion :: proc(app: ^App) {
 				}
 			}
 		}
+		if w.find.open && ui.find_animate(&w.find, app.animations, now) {w.dirty = true}
 		confirmation_advance(app, w, now)
 		if rail_changed || tabs_changed || controls_changed {w.dirty = true}
 	}

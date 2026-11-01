@@ -107,10 +107,11 @@ icon_buttons_draw_the_compact_rim :: proc(t: ^testing.T) {
 	) {
 		return
 	}
-	if !testing.expect(t, len(list.rects) > 0) {return}
-	rim := list.rects[len(list.rects) - 1]
-	testing.expect_value(t, rim.fill, render.RECT_FILL_RIM)
-	testing.expect_value(t, rim.color.a, theme.rim.a * ui.COMPACT_GLOSS)
+	rim: Maybe(render.Rect_Instance)
+	for rect in list.rects {if rect.fill == render.RECT_FILL_RIM {rim = rect}}
+	found, ok := rim.?
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, found.color.a, theme.rim.a * ui.COMPACT_GLOSS)
 }
 
 @(test)

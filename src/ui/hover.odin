@@ -42,8 +42,8 @@ hover_fill_opaque :: proc(theme: Theme) -> bool {return theme.hover.a >= 1}
 COMPACT_GLOSS :: f32(0.3)
 
 // Draws the pointer-following rim light and the hairline that holds a light fill's shape.
-// Call after the control's content; the band lives on the rounded edge, so it never covers an
-// inset label or glyph. `pointer` is in window pixels.
+// The band lives on the rounded edge, so it never covers an inset label or glyph and may be drawn
+// before or after the control's content. `pointer` is in window pixels.
 hover_rim_draw :: proc(
 	list: ^render.Draw_List,
 	theme: Theme,

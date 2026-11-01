@@ -206,30 +206,3 @@ icon_draw :: proc(
 		pen_path(p, {2, 9}, {8, 12.5}, {14, 9})
 	}
 }
-
-// Draws an icon button with the raised hover. `hover` and `press` run from 0 to 1; `radius` is in
-// DIPs. The icon is `text.muted` at rest and `text` while hovered or pressed.
-icon_button_draw :: proc(
-	list: ^render.Draw_List,
-	theme: Theme,
-	rect: render.Rect,
-	icon: Icon,
-	hover, press, scale: f32,
-	pointer: [2]f32,
-	size := ICON_BUTTON,
-	radius: f32 = 6,
-) -> render.Error {
-	b := rect
-	b.y -= hover_lift_at(theme, hover, scale)
-	if hover > 0 {
-		if err := hover_shadow_draw(list, theme, b, radius * scale, hover, scale); err != .None {return err}
-	}
-	fill := theme.hover
-	fill.a *= hover
-	draw_rect(list, {rect = b, color = fill, radius = radius * scale})
-	fill = theme.pressed
-	fill.a *= press
-	draw_rect(list, {rect = b, color = fill, radius = radius * scale})
-	icon_draw(list, icon, b, hover > 0 || press > 0 ? theme.text : theme.muted, size, scale)
-	return hover_rim_draw(list, theme, b, radius * scale, hover, scale, pointer, compact = true)
-}

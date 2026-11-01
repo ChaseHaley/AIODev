@@ -424,20 +424,23 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		}
 		return
 	}
-	if e.buttons == {} && status_overview_move(app, w, f32(e.x), f32(e.y)) {
-		link_hover_clear(w)
-		return
-	}
+	// The find bar floats over the Activity panel, so it takes the pointer first; a point off every
+	// panel row clears the panel's hover.
 	if w.find.open && !w.selecting {
 		l, available := find_controls(w, focused_session(app, w))
 		if ui.find_hover(&w.find, l, available, x, y) { w.dirty = true }
 		if ui.find_contains(l, x, y) || ui.armed_down(w.find.armed) {
 			link_hover_clear(w)
+			_ = status_overview_move(app, w, -1, -1)
 			split_overlay_update(w, x, y, false)
 			pane_header_pointer(w, x, y, false)
 			pointer_set(app, w, ui.find_pointer(l, available, x, y))
 			return
 		}
+	}
+	if e.buttons == {} && status_overview_move(app, w, f32(e.x), f32(e.y)) {
+		link_hover_clear(w)
+		return
 	}
 	if over_scrollbar {
 		link_hover_clear(w)

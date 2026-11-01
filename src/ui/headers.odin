@@ -219,23 +219,20 @@ header_draw :: proc(
 	}
 	for button, i in l.buttons {
 		if button.width == 0 {continue}
-		hover := controls[i].hover.value
-		b := button
-		b.y -= hover_lift_at(theme, hover, scale)
-		if hover > 0 {
-			if result := hover_shadow_draw(list, theme, b, 6 * scale, hover, scale);
-			   result != .None {return .Ok}
+		b := Button {
+			rect  = button,
+			hover = controls[i].hover.value,
+			press = controls[i].press.value,
 		}
-		fill := theme.hover
-		fill.a *= hover
-		draw_rect(list, {rect = b, color = fill, radius = 6 * scale})
-		fill = i == 3 ? theme.error : theme.pressed
-		fill.a *= controls[i].press.value * (i == 3 ? 0.14 : 1)
-		draw_rect(list, {rect = b, color = fill, radius = 6 * scale})
-		ink := hover > 0 ? theme.text : theme.muted
-		icon_draw(list, header_icon(Header_Action(i + 1), zoomed), b, ink, ICON_BUTTON, scale)
-		if result := hover_rim_draw(list, theme, b, 6 * scale, hover, scale, pointer, compact = true);
-		   result != .None {return .Ok}
+		// Close presses in a faint error tint rather than the neutral pressed fill.
+		if i == 3 {
+			danger := theme.error
+			danger.a *= 0.14
+			b.press_color = danger
+		}
+		face, ink, err := button_draw(list, theme, b, scale, pointer)
+		if err != .None {return .Ok}
+		icon_draw(list, header_icon(Header_Action(i + 1), zoomed), face, ink, ICON_BUTTON, scale)
 	}
 	return .Ok
 }
@@ -273,23 +270,18 @@ split_overlay_draw :: proc(
 	draw_rect(list, {rect = l.panel, color = theme.border, radius = 8 * scale, stroke = scale})
 	icon_draw(list, .Grip, l.title, theme.muted, ICON_BUTTON, scale)
 	buttons := l.buttons
-	for &button, i in buttons[:2] {
-		hover := controls[i].hover.value
-		button.y -= hover_lift_at(theme, hover, scale)
-		if hover > 0 {
-			if result := hover_shadow_draw(list, theme, button, 6 * scale, hover, scale);
-			   result != .None {return .Ok}
-		}
-		fill := theme.hover
-		fill.a *= hover
-		draw_rect(list, {rect = button, color = fill, radius = 6 * scale})
-		fill = theme.pressed
-		fill.a *= controls[i].press.value
-		draw_rect(list, {rect = button, color = fill, radius = 6 * scale})
-		ink := hover > 0 ? theme.text : theme.muted
-		icon_draw(list, header_icon(Header_Action(i + 1), false), button, ink, ICON_BUTTON, scale)
-		if result := hover_rim_draw(list, theme, button, 6 * scale, hover, scale, pointer, compact = true);
-		   result != .None {return .Ok}
+	for button, i in buttons[:2] {
+		if icon_button_draw(
+			   list,
+			   theme,
+			   button,
+			   header_icon(Header_Action(i + 1), false),
+			   controls[i].hover.value,
+			   controls[i].press.value,
+			   scale,
+			   pointer,
+		   ) !=
+		   .None {return .Ok}
 	}
 	return .Ok
 }
