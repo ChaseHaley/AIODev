@@ -36,7 +36,10 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.status.panel_side_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
 	link_hover_clear(w)
-	if palette_active(app, w) {ui.palette_input_release(&app.palette)}
+	if palette_active(app, w) {
+		ui.palette_input_release(&app.palette)
+		if ui.palette_slider_dragging(&app.palette) {ui.palette_edit_cancel(&app.palette)}
+	}
 	ui.editor_hover_clear(&w.editor)
 	if w.editor.drag == .Process_Order {w.editor.drag = .None}
 	ui.editor_release(&w.editor)
@@ -94,7 +97,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		return pane_header_button(app, w, e)
 	}
 	if palette_active(app, w) {
-		if e.button == .Left {ui.palette_input_release(&app.palette)}
+		if e.button == .Left {on_palette_outcome(app, w, ui.palette_pointer_release(&app.palette), 0)}
 		return true
 	}
 	if e.button != .Left {return false}
@@ -191,7 +194,8 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if palette_active(app, w) {
 		p := &app.palette
 		l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
-		if e.pressed && e.button == .Left && ui.palette_input_contains(l, f32(e.x), f32(e.y)) {
+		if e.pressed && e.button == .Left && ui.palette_input_contains(l, f32(e.x), f32(e.y)) &&
+		   !ui.palette_popup_contains(p, l, f32(e.x), f32(e.y)) {
 			on_palette_outcome(
 				app,
 				w,
@@ -207,7 +211,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 				0,
 			)
 		} else if e.pressed {
-			outcome, id := ui.palette_mouse_press(p, &app.registry, l, f32(e.x), f32(e.y))
+			outcome, id := ui.palette_mouse_press(p, &app.registry, l, f32(e.x), f32(e.y), &w.ui_text)
 			on_palette_outcome(app, w, outcome, id)
 		}
 		return
@@ -394,7 +398,11 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		pane_header_pointer(w, x, y, false)
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 		pointer_set(app, w, ui.palette_pointer(&app.palette, l, x, y))
-		if app.palette.query.dragging && .Left in e.buttons {
+		if ui.palette_slider_dragging(&app.palette) && .Left in e.buttons {
+			on_palette_outcome(app, w, ui.palette_slider_drag(&app.palette, l, x), 0)
+		} else if ui.palette_edit_text_dragging(&app.palette) && .Left in e.buttons {
+			on_palette_outcome(app, w, ui.palette_edit_drag(&app.palette, l, &w.ui_text, x), 0)
+		} else if app.palette.query.dragging && .Left in e.buttons {
 			on_palette_outcome(
 				app,
 				w,

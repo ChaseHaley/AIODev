@@ -152,7 +152,7 @@ palette_tab_cycles_all_five_modes :: proc(t: ^testing.T) {
 palette_modes_filter_and_group_by_domain :: proc(t: ^testing.T) {
 	tabs := Mode_Source{items = []ui.Palette_Item{{"aio", "pwsh", "Workspace 1", 1}, {"aio docs", "nvim", "Workspace 1", 2}}}
 	workspaces := Mode_Source{items = []ui.Palette_Item{{"aio workspace", "pwsh", "", 10}}}
-	rows := [?]ui.Palette_Setting{{"aio.key", "Use aio", "Panes"}}
+	rows := [?]ui.Palette_Setting{{key = "aio.key", title = "Use aio", group = "Panes"}}
 	p: ui.Palette
 	registry := mode_palette(t, &p, rows[:], &tabs, &workspaces)
 	defer commands.destroy(&registry)
@@ -201,7 +201,7 @@ palette_modes_filter_and_group_by_domain :: proc(t: ^testing.T) {
 palette_all_mode_without_a_query_keeps_commands_first :: proc(t: ^testing.T) {
 	tabs := Mode_Source{items = []ui.Palette_Item{{"AIODev", "pwsh", "Workspace 1", 1}}}
 	workspaces := Mode_Source{items = []ui.Palette_Item{{"Workspace 1", "pwsh", "", 10}}}
-	rows := [?]ui.Palette_Setting{{"pane.gap", "Pane Gap", "Panes"}}
+	rows := [?]ui.Palette_Setting{{key = "pane.gap", title = "Pane Gap", group = "Panes"}}
 	p: ui.Palette
 	registry := mode_palette(t, &p, rows[:], &tabs, &workspaces)
 	defer commands.destroy(&registry)
@@ -279,8 +279,8 @@ palette_ranking_is_exact_prefix_substring_then_natural_order :: proc(t: ^testing
 @(test)
 palette_settings_match_label_before_key :: proc(t: ^testing.T) {
 	rows := [?]ui.Palette_Setting {
-		{"aio.key", "Unrelated", "Panes"},
-		{"other.key", "AIO label", "Panes"},
+		{key = "aio.key", title = "Unrelated", group = "Panes"},
+		{key = "other.key", title = "AIO label", group = "Panes"},
 	}
 	p: ui.Palette
 	registry := mode_palette(t, &p, rows[:], nil, nil)
@@ -299,7 +299,7 @@ palette_settings_match_label_before_key :: proc(t: ^testing.T) {
 palette_activation_targets_carry_identity_and_kind :: proc(t: ^testing.T) {
 	tabs := Mode_Source{items = []ui.Palette_Item{{"AIODev", "pwsh", "", 7}}}
 	workspaces := Mode_Source{items = []ui.Palette_Item{{"AIODev", "pwsh", "", 9}}}
-	rows := [?]ui.Palette_Setting{{"pane.gap", "Pane Gap", "Panes"}}
+	rows := [?]ui.Palette_Setting{{key = "pane.gap", title = "Pane Gap", group = "Panes"}}
 	p: ui.Palette
 	registry := mode_palette(t, &p, rows[:], &tabs, &workspaces)
 	defer commands.destroy(&registry)

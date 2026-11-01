@@ -12,7 +12,7 @@ palette_matches_real_setting_headers :: proc(t: ^testing.T) {
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
 	for entry, i in settings.SCHEMA {
-		rows[i] = {entry.key, entry.title, settings.group_title(entry.key)}
+		rows[i] = {key = entry.key, title = entry.title, group = settings.group_title(entry.key)}
 	}
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
@@ -108,7 +108,7 @@ palette_header_results_keep_title_priority_and_query_navigation :: proc(t: ^test
 palette_header_title_positions_use_title_utf8_offsets :: proc(t: ^testing.T) {
 	registry := commands.create()
 	defer commands.destroy(&registry)
-	rows := [?]ui.Palette_Setting{{"test", "Café Size", "Thème"}}
+	rows := [?]ui.Palette_Setting{{key = "test", title = "Café Size", group = "Thème"}}
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)

@@ -40,7 +40,7 @@ palette_starts_below_the_caption_claim_and_fits_its_area :: proc(t: ^testing.T) 
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	rows: [len(settings.SCHEMA)]ui.Palette_Setting
-	for entry, i in settings.SCHEMA { rows[i] = {entry.key, entry.title, settings.group_title(entry.key)} }
+	for entry, i in settings.SCHEMA { rows[i] = {key = entry.key, title = entry.title, group = settings.group_title(entry.key)} }
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) { return }
 	defer ui.palette_destroy(&p)

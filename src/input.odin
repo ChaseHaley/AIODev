@@ -376,6 +376,10 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 	case .Open_Setting:
 		w.dirty = true
 		settings_reveal(app, w, {key = app.palette.chosen, search = .Clear, focus = .Control})
+	case .Set_Setting:
+		w.dirty = true
+		key, value := ui.palette_chosen_value(&app.palette)
+		palette_setting_save(app, key, value)
 	case .Open_Tab:
 		w.dirty = true
 		palette_activate_tab(app, w, app.palette.chosen_id)
