@@ -234,7 +234,6 @@ Text_Style :: enum {
 	Body,
 	Strong,
 	Small,
-	Label,
 	Input,
 	// The command palette's query: larger than other fields because it is the palette's focus.
 	Query,
@@ -249,8 +248,6 @@ text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 	#partial switch style {
 	case .Small:
 		size = 11
-	case .Label:
-		size = 10.5
 	case .Input:
 		size = 13
 	case .Query:
@@ -260,7 +257,7 @@ text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 	case .Keycap:
 		size = 10
 	}
-	if style == .Strong || style == .Label {copy.family = t.strong_family}
+	if style == .Strong {copy.family = t.strong_family}
 	text_set_size(&copy, t.size_px * size / 12)
 	return copy
 }
