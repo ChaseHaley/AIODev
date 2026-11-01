@@ -191,10 +191,6 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		status_inbox_key(app, w, logical)
 		return
 	}
-	if w.status.board_open && status_board_key(app, w, logical) {
-		w.suppressed_key = e
-		return
-	}
 	if suppressed, ok := w.suppressed_key.?; ok && !e.pressed && suppressed.key == e.key {
 		w.suppressed_key = nil
 		return
@@ -424,7 +420,6 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		status_inbox_wheel(app, w, e.delta_y)
 		return
 	}
-	if w.status.board_open {return}
 	if status_panel_wheel(app, w, f32(e.x), f32(e.y), e.delta_y) {return}
 	rail_area_rect := rail_area(w)
 	if rail_visible(w) &&

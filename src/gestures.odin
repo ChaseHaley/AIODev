@@ -151,10 +151,6 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		status_inbox_button(app, w, e)
 		return
 	}
-	if w.status.board_open && e.pressed && f32(e.y) >= ui.TITLE_BAR_HEIGHT * w.scale {
-		status_board_button(app, w, e)
-		return
-	}
 	if w.rename_open {
 		r, field := rename_rect(w), rename_field_rect(w)
 		x, y := f32(e.x), f32(e.y)
@@ -248,9 +244,6 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) {return}
 	if status_panel_button(app, w, e) {return}
-	if e.pressed && w.status.board_open {
-		w.status.board_open = false
-	}
 	if tab_interaction_press(app, w, e) {return}
 	if pane_header_button(app, w, e) { return }
 	if e.pressed && !w.selecting {
@@ -332,10 +325,6 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		status_inbox_move(app, w, f32(e.x), f32(e.y))
 		return
 	}
-	if e.buttons == {} && status_overview_move(app, w, f32(e.x), f32(e.y)) {
-		link_hover_clear(w)
-		return
-	}
 	if w.rename_open {
 		link_hover_clear(w)
 		field := rename_field_rect(w)
@@ -415,6 +404,10 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		} else {
 			on_palette_outcome(app, w, ui.palette_mouse_move(&app.palette, l, x, y), 0)
 		}
+		return
+	}
+	if e.buttons == {} && status_overview_move(app, w, f32(e.x), f32(e.y)) {
+		link_hover_clear(w)
 		return
 	}
 	if w.find.open && !w.selecting {

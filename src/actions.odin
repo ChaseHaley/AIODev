@@ -119,7 +119,6 @@ Action :: enum u32 {
 	Status_Next,
 	Status_Inbox,
 	Status_Panel,
-	Status_Board,
 	Status_Dismiss_Finished,
 	Move_Pane_Workspace,
 	Move_Pane_New_Workspace,
@@ -372,7 +371,6 @@ ACTIONS :: [Action]Action_Info {
 	.Status_Next = {"status.next", "Go to the Next Program That Needs You", {{.J, {.Control, .Shift}}}},
 	.Status_Inbox = {"status.inbox", "Show the Program Status Inbox", {{.I, {.Control, .Shift}}}},
 	.Status_Panel = {"status.panel", "Show or Hide the Activity Panel", {{.Y, {.Control, .Shift}}}},
-	.Status_Board = {"status.board", "Show the Program Status Board", {{.G, {.Control, .Shift}}}},
 	.Status_Dismiss_Finished = {"status.dismiss_finished", "Dismiss Finished Program Status", nil},
 	.Pane_List = {"pane.list", "List Panes", nil},
 	.Pane_Status = {"pane.status", "Show Pane Status", nil},
@@ -672,8 +670,6 @@ run_action :: proc(
 		status_inbox_toggle(app, w)
 	case .Status_Panel:
 		settings_toggle_bool(app, "status.panel", &app.settings.status.panel)
-	case .Status_Board:
-		status_board_toggle(app, w)
 	case .Status_Dismiss_Finished:
 		status_dismiss_finished(app, w)
 	case .Pane_List, .Pane_Status, .Pane_Read, .Pane_Send, .Pane_Focus, .App_Commands:

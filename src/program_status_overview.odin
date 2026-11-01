@@ -11,8 +11,7 @@ import "core:slice"
 import "core:strings"
 import "core:time"
 
-// The three program status overviews: a title-bar pill that opens the inbox, a docked activity
-// panel, and a full-window board. They list the same items; only grouping and order differ.
+// The inbox orders program status by urgency; the activity panel groups it by location.
 
 @(private)
 STATUS_PILL_WIDTH :: f32(52)
@@ -28,15 +27,12 @@ STATUS_PANEL_RAIL_MIN :: f32(80)
 @(private)
 STATUS_RAIL_TABS_MIN :: f32(96)
 @(private)
-STATUS_CARD_HEIGHT :: f32(74)
-@(private)
 STATUS_HEADER_HEIGHT :: f32(36)
 
 Status_Surface :: enum {
 	None,
 	Inbox,
 	Panel,
-	Board,
 }
 
 Status_Overview :: struct {
@@ -44,7 +40,7 @@ Status_Overview :: struct {
 	panel_width, panel_height: f32,
 	panel_side_armed: ui.Armed(bool),
 	panel_side_hover: bool,
-	inbox_open, board_open: bool,
+	inbox_open: bool,
 	// Keyboard selection in the inbox, and the item under the pointer on any surface.
 	selected:               int,
 	hover:                  int,
@@ -257,7 +253,7 @@ status_dismiss_item :: proc(app: ^App, item: Status_Item) {
 
 @(private)
 status_open_item :: proc(app: ^App, w: ^Window, item: Status_Item) {
-	w.status.inbox_open, w.status.board_open = false, false
+	w.status.inbox_open = false
 	w.dirty = true
 	if !status_reveal(app, w, item.session) {notify(app, .Error, "Could not show that pane.")}
 }
@@ -335,7 +331,6 @@ status_inbox_toggle :: proc(app: ^App, w: ^Window) {
 	}
 	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
-	w.status.board_open = false
 	w.status.inbox_open = true
 	w.status.selected, w.status.hover, w.status.inbox_scroll = 0, -1, 0
 	w.dirty = true
@@ -752,201 +747,6 @@ status_panel_wheel :: proc(app: ^App, w: ^Window, x, y, delta: f32) -> bool {
 }
 
 
-status_board_toggle :: proc(app: ^App, w: ^Window) {
-	if w.status.board_open {
-		w.status.board_open, w.dirty = false, true
-		return
-	}
-	s := &app.settings.status
-	if !s.enabled || !s.board {
-		notify(app, .Info, "The program status board is off. Turn on status.enabled and status.board.")
-		return
-	}
-	if !gesture_cancel(app, w) {return}
-	window_overlays_cancel(app, w)
-	w.status.inbox_open = false
-	w.status.board_open, w.status.hover = true, -1
-	w.dirty = true
-}
-
-@(private)
-status_board_column :: proc(record: term.Program_Status) -> int {
-	switch record.state {
-	case .Blocked:
-		return 0
-	case .Error:
-		return record.seen ? 2 : 0
-	case .Working:
-		return 1
-	case .Done:
-		return 2
-	case .Idle:
-		return 3
-	}
-	return 3
-}
-
-@(private)
-STATUS_BOARD_TITLES :: [4]string{"Needs you", "Running", "Finished", "Idle"}
-
-@(private)
-status_board_area :: proc(w: ^Window) -> render.Rect {
-	top := ui.TITLE_BAR_HEIGHT * w.scale
-	return {0, top, f32(w.width), max(0, f32(w.height) - top)}
-}
-
-// Card rectangles parallel to `items`; a card that does not fit has zero width.
-@(private)
-status_board_cards :: proc(
-	w: ^Window,
-	items: []Status_Item,
-) -> (
-	cards: []render.Rect,
-	hidden: [4]int,
-	columns: [4]render.Rect,
-) {
-	s := w.scale
-	area := status_board_area(w)
-	pad := 16 * s
-	gutter := 12 * s
-	top := area.y + 52 * s
-	width := max(0, (area.width - 2 * pad - 3 * gutter) / 4)
-	for i in 0 ..< 4 {
-		x := area.x + pad + f32(i) * (width + gutter)
-		columns[i] = {x, top, width, max(0, area.y + area.height - pad - top)}
-	}
-	cards = make([]render.Rect, len(items), context.temp_allocator)
-	next: [4]f32
-	for item, i in items {
-		column := status_board_column(item.record)
-		c := columns[column]
-		y := c.y + 28 * s + next[column]
-		height := STATUS_CARD_HEIGHT * s
-		if y + height > c.y + c.height - 20 * s {
-			hidden[column] += 1
-			continue
-		}
-		cards[i] = {c.x, y, c.width, height}
-		next[column] += height + 8 * s
-	}
-	return cards, hidden, columns
-}
-
-status_board_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	if !w.status.board_open {return .Ok}
-	s := w.scale
-	area := status_board_area(w)
-	if render.push_layer(&w.list, area) != .None {return .Ok}
-	ui.draw_rect(&w.list, {rect = area, color = app.theme.window})
-	items := status_items(app, w, false)
-	cards, hidden, columns := status_board_cards(w, items)
-	strong := ui.text_styled(&w.ui_text, .Strong)
-	small := ui.text_styled(&w.ui_text, .Small)
-	heading := "Program status"
-	heading_y := area.y + 18 * s + strong.ascent
-	if result := ui.draw_text(&strong, &w.list, heading, area.x + 16 * s, heading_y, app.theme.text);
-	   result != .Ok {return result}
-	scope := app.settings.status.scope == .All ? "All workspaces" : "This workspace"
-	note := fmt.tprintf("%s · %d reporting · Esc or Ctrl+Shift+G closes", scope, len(items))
-	if result := ui.draw_text(
-		&small,
-		&w.list,
-		note,
-		area.x + 24 * s + ui.text_width(&strong, heading),
-		area.y + 18 * s + strong.ascent,
-		app.theme.faint,
-	); result != .Ok {return result}
-	counts: [4]int
-	for item in items {counts[status_board_column(item.record)] += 1}
-	samples := [4]ui.Status_Mark {
-		{glyph = .Blocked},
-		{glyph = .Working, progress = 50},
-		{glyph = .Done},
-		{glyph = .Idle},
-	}
-	titles := STATUS_BOARD_TITLES
-	for c, i in columns {
-		if result := ui.status_glyph_draw(
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			{c.x, c.y + 3 * s, 12 * s, 12 * s},
-			samples[i],
-			0,
-			s,
-		); result != .Ok {return result}
-		label := fmt.tprintf("%s · %d", titles[i], counts[i])
-		label_y := c.y + 2 * s + small.ascent
-		if result := ui.draw_text(&small, &w.list, label, c.x + 18 * s, label_y, app.theme.muted);
-		   result != .Ok {return result}
-		if counts[i] == 0 {
-			if result := ui.draw_text(&small, &w.list, "None", c.x, c.y + 34 * s + small.ascent, app.theme.faint);
-			   result != .Ok {return result}
-		}
-		if hidden[i] > 0 {
-			more := fmt.tprintf("+%d more", hidden[i])
-			if result := ui.draw_text(
-				&small,
-				&w.list,
-				more,
-				c.x,
-				c.y + c.height - 16 * s + small.ascent,
-				app.theme.faint,
-			); result != .Ok {return result}
-		}
-	}
-	for item, i in items {
-		r := cards[i]
-		if r.width <= 0 {continue}
-		mark := status_mark(item.record)
-		edge := app.theme.border
-		if ui.status_blocked(mark.glyph) || mark.glyph == .Error && !mark.dim {
-			edge = ui.status_color(app.theme, mark.glyph)
-			edge.a *= 0.6
-		}
-		if w.status.hover_surface == .Board && w.status.hover == i {edge = app.theme.pane_focus}
-		ui.draw_rect(&w.list, {rect = r, color = app.theme.surface, radius = 8 * s})
-		ui.draw_rect(&w.list, {rect = r, color = edge, radius = 8 * s, stroke = max(1, s)})
-		inner := render.Rect{r.x + 2 * s, r.y + 2 * s, r.width - 4 * s, 46 * s}
-		if result := status_row_draw(app, w, inner, item, false, false, 0); result != .Ok {return result}
-		if result := ui.draw_fading_text(
-			&small,
-			&w.list,
-			item.crumb,
-			r.x + 32 * s,
-			r.y + r.height - 10 * s - small.line_height + small.ascent,
-			app.theme.faint,
-			max(0, r.width - 40 * s),
-		); result != .Ok {return result}
-	}
-	return .Ok
-}
-
-@(private)
-status_board_hit :: proc(w: ^Window, items: []Status_Item, x, y: f32) -> int {
-	cards, _, _ := status_board_cards(w, items)
-	for r, i in cards {
-		if status_rect_contains(r, x, y) {return i}
-	}
-	return -1
-}
-
-status_board_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	if !e.pressed {return}
-	w.header_buttons += {e.button}
-	if e.button != .Left {return}
-	items := status_items(app, w, false)
-	if index := status_board_hit(w, items, f32(e.x), f32(e.y)); index >= 0 {
-		status_open_item(app, w, items[index])
-	}
-}
-
-status_board_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
-	if !e.pressed || e.key != .Escape {return false}
-	w.status.board_open, w.dirty = false, true
-	return true
-}
-
 // Pointer hover for every overview surface; true when an overview took the pointer.
 status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	side_hover := status_rect_contains(status_panel_side_rect(app, w), x, y)
@@ -955,10 +755,7 @@ status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if pill != w.status.pill_hover {w.status.pill_hover, w.dirty = pill, true}
 	surface := Status_Surface.None
 	hover := -1
-	if w.status.board_open && y >= ui.TITLE_BAR_HEIGHT * w.scale {
-		surface = .Board
-		hover = status_board_hit(w, status_items(app, w, false), x, y)
-	} else if status_panel_contains(app, w, x, y) {
+	if status_panel_contains(app, w, x, y) {
 		if _, over := divider_cursor(w, x, y); over {return false}
 		surface = .Panel
 		hover, _ = status_panel_hit(app, w, status_items(app, w, true), x, y)
@@ -972,7 +769,7 @@ status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 status_overview_cancel :: proc(w: ^Window) {
-	if w.status.inbox_open || w.status.board_open {w.dirty = true}
-	w.status.inbox_open, w.status.board_open = false, false
+	if w.status.inbox_open {w.dirty = true}
+	w.status.inbox_open = false
 	w.status.hover_surface, w.status.hover, w.status.pill_hover = .None, -1, false
 }

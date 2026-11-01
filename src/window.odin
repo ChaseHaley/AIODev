@@ -709,7 +709,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if workspace_picker_active(&w.workspace_picker) {
 		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
 	}
-	if result := status_board_draw(app, w); result != .Ok {return frame, result}
 	if result := status_inbox_draw(app, w); result != .Ok {return frame, result}
 	return frame, ui.notices_draw(
 		&app.notices,
