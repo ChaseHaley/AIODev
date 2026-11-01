@@ -407,7 +407,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	pressed := w.rail_pressed == RAIL_NEW_TAB_ROW
 	if hover || pressed {
 		fill := pressed ? app.theme.pressed : app.theme.hover
-		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = 6 * w.scale})
+		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = ui.RADIUS_CONTROL * w.scale})
 	}
 	plus := render.Rect{tile.x + 8 * w.scale, tile.y, ui.ICON_INDICATOR * w.scale, tile.height}
 	ui.icon_draw(&w.list, .Add, plus, app.theme.muted, ui.ICON_INDICATOR, w.scale)
@@ -421,7 +421,8 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		max(0, tile.width - 40 * w.scale),
 	); result != .Ok {return result}
 	if hover {
-		if ui.hover_rim_draw(&w.list, app.theme, tile, 6 * w.scale, 1, w.scale, w.pointer) != .None {
+		radius := ui.RADIUS_CONTROL * w.scale
+		if ui.hover_rim_draw(&w.list, app.theme, tile, radius, 1, w.scale, w.pointer) != .None {
 			return .Ok
 		}
 	}

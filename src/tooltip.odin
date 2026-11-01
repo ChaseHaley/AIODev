@@ -40,8 +40,8 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	x := clamp(w.pointer.x + 12 * s, 4 * s, max(4 * s, f32(w.width) - width - 4 * s))
 	y := clamp(w.pointer.y + 18 * s, 4 * s, max(4 * s, f32(w.height) - height - 4 * s))
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
-	if ui.panel_draw(&w.list, {rect = {x, y, width, height}, radius = 5 * s,
+	if ui.panel_draw(&w.list, {rect = {x, y, width, height}, radius = ui.RADIUS_CONTROL * s,
 	   scale = s, shadow_y = 2, softness = 8, border = .Stroked}, app.theme) != .None {return .Ok}
 	return ui.draw_text(&w.ui_text, &w.list, w.tooltip, x + 8 * s,
-		y + (height + w.ui_text.ascent) / 2 - 2 * s, app.theme.text)
+		y + (height - w.ui_text.line_height) / 2 + w.ui_text.ascent, app.theme.text)
 }

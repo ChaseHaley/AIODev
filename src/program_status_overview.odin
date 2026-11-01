@@ -152,7 +152,9 @@ status_row_draw :: proc(
 	indent: f32,
 ) -> glyphs.Result {
 	s := w.scale
-	if highlighted {ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = 6 * s})}
+	if highlighted {
+		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
+	}
 	mark := status_mark(item.record)
 	left := r.x + 8 * s + indent
 	if result := status_mark_draw(app, w, {left, r.y + 8 * s, 14 * s, 14 * s}, mark); result != .Ok {
@@ -281,9 +283,9 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), ui.TITLE_BAR_HEIGHT * s}) != .None {return .Ok}
 	if w.status.inbox_open {
-		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = 6 * s})
+		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
 	} else if w.status.pill_hover {
-		ui.draw_rect(&w.list, {rect = r, color = app.theme.hover, radius = 6 * s})
+		ui.draw_rect(&w.list, {rect = r, color = app.theme.hover, radius = ui.RADIUS_CONTROL * s})
 	}
 	summary: Status_Summary
 	for workspace in app.workspaces {
@@ -315,7 +317,8 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		); result != .Ok {return result}
 	}
 	if w.status.pill_hover && !w.status.inbox_open {
-		if ui.hover_rim_draw(&w.list, app.theme, r, 6 * s, 1, s, w.pointer, compact = true) != .None {return .Ok}
+		radius := ui.RADIUS_CONTROL * s
+		if ui.hover_rim_draw(&w.list, app.theme, r, radius, 1, s, w.pointer, compact = true) != .None {return .Ok}
 	}
 	return .Ok
 }
@@ -388,16 +391,9 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	surface, list, footer_y := status_inbox_layout(app, w, items)
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
-	frame := ui.Panel {
-		rect     = surface,
-		radius   = 10 * s,
-		scale    = s,
-		shadow_y = 5,
-		softness = 16,
-		border   = .Stroked,
-	}
+	frame := ui.popover_panel(surface, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	if render.push_layer(&w.list, surface, 10 * s) != .None {return .Ok}
+	if render.push_layer(&w.list, surface, ui.RADIUS_POPOVER * s) != .None {return .Ok}
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Small)
 	scope := app.settings.status.scope == .All ? "All workspaces" : "This workspace"
@@ -445,7 +441,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		highlighted := i == w.status.selected
 		if result := status_row_draw(app, w, r, item, highlighted, true, 0); result != .Ok {return result}
 	}
-	if render.push_layer(&w.list, surface, 10 * s) != .None {return .Ok}
+	if render.push_layer(&w.list, surface, ui.RADIUS_POPOVER * s) != .None {return .Ok}
 	ui.draw_rect(&w.list, {rect = {surface.x, footer_y, surface.width, s}, color = app.theme.border})
 	hint := "Ctrl+Shift+J next that needs you · Enter go to pane · Delete dismiss"
 	return ui.draw_fading_text(

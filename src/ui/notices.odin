@@ -177,18 +177,11 @@ notices_draw :: proc(
 		box_width := min(max_width, content_width + 2 * padding + 32 * scale)
 		box_height := f32(lines + 1) * text.line_height + 2 * padding + 4 * scale
 		box := render.Rect{width - margin - box_width, bottom - box_height, box_width, box_height}
-		frame := Panel {
-			rect     = box,
-			radius   = 8 * scale,
-			scale    = scale,
-			shadow_y = 12,
-			softness = 32,
-			border   = .Stroked,
-		}
+		frame := popover_panel(box, scale)
 		if panel_draw(list, frame, theme) != .None {return .Ok}
 		draw_rect(
 			list,
-			{rect = {box.x, box.y, 4 * scale, box.height}, color = accent, radius = 2 * scale},
+			{rect = {box.x, box.y, 4 * scale, box.height}, color = accent, radius = RADIUS_MARK * scale},
 		)
 		badge := render.Rect{box.x + padding + 4 * scale, box.y + padding, 20 * scale, 20 * scale}
 		icon_draw(list, symbol, badge, accent, ICON_BUTTON, scale)

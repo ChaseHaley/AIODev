@@ -73,8 +73,8 @@ choice_search_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Bo
 	s := l.scale
 	return {
 		field = &p.choice_search, text = text,
-		rect = {r.x + 4 * s, r.y + 4 * s, r.width - 8 * s, 30 * s},
-		inset = 10, caret_width = 1, radius = 4, scale = s,
+		rect = {r.x + 4 * s, r.y + 4 * s, r.width - 8 * s, CONTROL_HEIGHT * s},
+		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_INNER, style = .Input, scale = s,
 	}
 }
 

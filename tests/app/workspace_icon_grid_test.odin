@@ -42,7 +42,7 @@ workspace_icon_grid_layout_fits_dpi_and_scrolls_only_presets :: proc(t: ^testing
 				if width >= 272 && height >= 300 {
 					testing.expect_value(t, g.columns, 5)
 					testing.expect_value(t, g.rows, 2)
-					testing.expect_value(t, g.panel.height, 242*scale)
+					testing.expect_value(t, g.panel.height, 232*scale)
 				}
 			}
 		}

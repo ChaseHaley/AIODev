@@ -17,18 +17,18 @@ workspace_icon_picker_layout :: proc(w: ^Window) -> Workspace_Icon_Layout {
 	count := (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
 	rows := (count + columns - 1) / columns
 	available := max(0, f32(w.height) - (ui.TITLE_BAR_HEIGHT + 5) * s)
-	height := min(available, (146 + f32(rows) * 48) * s)
+	height := min(available, (136 + f32(rows) * 48) * s)
 	panel := render.Rect{5 * s, ui.TITLE_BAR_HEIGHT * s, width, height}
-	grid_height := max(0, height - 150 * s)
+	grid_height := max(0, height - 140 * s)
 	visible := clamp(int((grid_height + 4 * s) / (48 * s)), 0, rows)
 	grid_width := max(0, min(width - 24 * s, f32(columns) * 48 * s - 4 * s))
 	grid := render.Rect{panel.x + (width - grid_width) / 2, panel.y + 40 * s, grid_width,
 		max(0, f32(visible) * 48 * s - 4 * s)}
-	footer_y := max(panel.y, panel.y + height - 102 * s)
-	field := render.Rect{panel.x + 12 * s, footer_y + 12 * s, max(0, width - 24 * s), 32 * s}
+	footer_y := max(panel.y, panel.y + height - (12 + 2 * ui.CONTROL_HEIGHT + 8 + 12) * s)
+	field := render.Rect{panel.x + 12 * s, footer_y + 12 * s, max(0, width - 24 * s), ui.CONTROL_HEIGHT * s}
 	return {panel = panel, grid = grid, columns = columns, rows = rows, visible_rows = visible,
 		divider = {field.x, footer_y, field.width, s}, field = field,
-		apply = {field.x, field.y + 40 * s, field.width, 34 * s}}
+		apply = {field.x, field.y + field.height + 8 * s, field.width, ui.CONTROL_HEIGHT * s}}
 }
 
 workspace_icon_picker_cell :: proc(w: ^Window, g: Workspace_Icon_Layout, index: int) -> render.Rect {
@@ -104,7 +104,9 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme.text, max(0, g.panel.width - 106 * s)); result != .Ok { return result }
 	color_button := workspace_icon_color_button(w)
 	if p.selected == len(WORKSPACE_ICONS) + 2 {
-		button := render.Rect_Instance{rect = color_button, radius = 5 * s, color = app.theme.selection}
+		button := render.Rect_Instance{
+			rect = color_button, radius = ui.RADIUS_CONTROL * s, color = app.theme.selection,
+		}
 		if render.push_rect(&w.list, button) != .None { return .Ok }
 	}
 	dot_size := 18 * s
@@ -123,7 +125,8 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if row < 0 || row >= g.visible_rows { continue }
 		cell := workspace_icon_picker_cell(w, g, i)
 		if i == p.selected {
-			if render.push_rect(&w.list, {rect = cell, color = app.theme.selection, radius = 5 * s}) != .None {
+			selection := render.Rect_Instance{rect = cell, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s}
+			if render.push_rect(&w.list, selection) != .None {
 				return .Ok
 			}
 		}
@@ -137,19 +140,24 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if render.push_rect(&w.list, {rect = mark, color = app.theme.accent, radius = s}) != .None { return .Ok }
 		}
 	}
-	if render.push_layer(&w.list, g.panel, 7 * s) != .None { return .Ok }
+	if render.push_layer(&w.list, g.panel, ui.RADIUS_POPOVER * s) != .None { return .Ok }
 	if render.push_rect(&w.list, {rect = g.divider, color = app.theme.border}) != .None { return .Ok }
-	field_fill := render.Rect_Instance{rect = g.field, color = app.theme.pane, radius = 5 * s}
+	field_fill := render.Rect_Instance{rect = g.field, color = app.theme.pane, radius = ui.RADIUS_CONTROL * s}
 	if render.push_rect(&w.list, field_fill) != .None { return .Ok }
-	if result := ui.field_draw(&p.query, &w.list, &w.ui_text, app.theme, g.field.x + 8 * s,
-		g.field.y + (g.field.height - w.ui_text.line_height) / 2 + w.ui_text.ascent, max(1, g.field.width - 16 * s),
-		p.selected == len(WORKSPACE_ICONS), "Custom emoji", app.theme.text, s); result != .Ok { return result }
+	box := workspace_picker_query_box(w)
+	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
+		p.selected == len(WORKSPACE_ICONS), "Custom emoji"); result != .Ok { return result }
+	if render.push_layer(&w.list, g.panel, ui.RADIUS_POPOVER * s) != .None { return .Ok }
+	inset := ui.CONTROL_INSET * s
 	fill := p.selected == len(WORKSPACE_ICONS) + 1 ? app.theme.selection : app.theme.pane
-	if render.push_rect(&w.list, {rect = g.apply, color = fill, radius = 5 * s}) != .None { return .Ok }
+	apply := render.Rect_Instance{rect = g.apply, color = fill, radius = ui.RADIUS_CONTROL * s}
+	if render.push_rect(&w.list, apply) != .None { return .Ok }
 	color := workspace_icon_valid(ui.field_string(&p.query)) ? app.theme.text : app.theme.muted
 	apply_baseline := g.apply.y + (g.apply.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
-	return ui.draw_text(&w.ui_text, &w.list, "Apply Custom Emoji", g.apply.x + 8 * s,
-		apply_baseline, color, max(0, g.apply.width - 16 * s))
+	label := "Apply Custom Emoji"
+	label_x := g.apply.x + max(inset, (g.apply.width - ui.text_width(&w.ui_text, label)) / 2)
+	return ui.draw_text(&w.ui_text, &w.list, label, label_x, apply_baseline, color,
+		max(0, g.apply.width - 2 * inset))
 }
 
 workspace_icon_color_button :: proc(w: ^Window) -> render.Rect {

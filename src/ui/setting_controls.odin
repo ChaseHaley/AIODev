@@ -93,9 +93,9 @@ slider_value :: proc(minimum, maximum: f64, fraction: f32) -> f64 {
 slider_draw :: proc(list: ^render.Draw_List, track: render.Rect, fraction: f32, theme: Theme, scale: f32) {
 	cy := track.y + track.height / 2
 	groove := render.Rect{track.x, cy - 2 * scale, track.width, 4 * scale}
-	draw_rect(list, {rect = groove, color = theme.border, radius = 2 * scale})
+	draw_rect(list, {rect = groove, color = theme.border, radius = RADIUS_MARK * scale})
 	groove.width *= fraction
-	draw_rect(list, {rect = groove, color = theme.accent, radius = 2 * scale})
+	draw_rect(list, {rect = groove, color = theme.accent, radius = RADIUS_MARK * scale})
 	thumb := render.Rect{track.x + track.width * fraction - 7 * scale, cy - 7 * scale, 14 * scale, 14 * scale}
 	draw_rect(list, {rect = thumb, color = theme.accent, radius = 7 * scale})
 	draw_rect(list, {rect = thumb, color = theme.surface, radius = 7 * scale, stroke = 2 * scale})
@@ -113,8 +113,9 @@ reset_button_draw :: proc(
 	scale: f32,
 ) -> render.Error {
 	if hovered && modified {
-		if !selected {draw_rect(list, {rect = rect, color = theme.hover, radius = 6 * scale})}
-		if err := hover_rim_draw(list, theme, rect, 6 * scale, 1, scale, pointer, !selected); err != .None {
+		if !selected {draw_rect(list, {rect = rect, color = theme.hover, radius = RADIUS_CONTROL * scale})}
+		radius := RADIUS_CONTROL * scale
+		if err := hover_rim_draw(list, theme, rect, radius, 1, scale, pointer, !selected); err != .None {
 			return err
 		}
 	}

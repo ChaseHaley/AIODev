@@ -68,3 +68,28 @@ panel_draw :: proc(list: ^render.Draw_List, panel: Panel, theme: Theme) -> rende
 	}
 	return .None
 }
+
+// The frame for a surface anchored to a control: menus, dropdown lists, pickers, the find bar,
+// the status inbox and notices.
+popover_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
+	return {
+		rect = rect,
+		radius = RADIUS_POPOVER * scale,
+		scale = scale,
+		shadow_y = 5,
+		softness = 16,
+		border = .Stroked,
+	}
+}
+
+// The frame for a centred surface over a scrim: the command palette, confirmations and rename.
+dialog_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
+	return {
+		rect = rect,
+		radius = RADIUS_DIALOG * scale,
+		scale = scale,
+		shadow_y = 12,
+		softness = 32,
+		border = .Expanded,
+	}
+}

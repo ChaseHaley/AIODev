@@ -162,16 +162,9 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		r, rows = tab_menu_rect(w)
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	frame := ui.Panel {
-		rect     = r,
-		radius   = 8 * s,
-		scale    = s,
-		shadow_y = 5,
-		softness = 16,
-		border   = .Stroked,
-	}
+	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
-	if render.push_layer(&w.list, r, 8 * s) != .None { return .Ok }
+	if render.push_layer(&w.list, r, ui.RADIUS_POPOVER * s) != .None { return .Ok }
 	for visible in 0..<rows {
 		i := menu.scroll + visible
 		if i >= menu.count { break }
@@ -183,7 +176,8 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 		enabled := tab_menu_enabled(w, i)
 		if i == menu.selected && enabled {
-			if render.push_rect(&w.list, {rect = row, color = app.theme.selection, radius = 4 * s}) != .None {
+			selection := render.Rect_Instance{rect = row, color = app.theme.selection, radius = ui.RADIUS_INNER * s}
+			if render.push_rect(&w.list, selection) != .None {
 				return .Ok
 			}
 		}
@@ -193,7 +187,7 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if i == menu.selected && enabled &&
 		   w.pointer.x >= row.x && w.pointer.x < row.x + row.width &&
 		   w.pointer.y >= row.y && w.pointer.y < row.y + row.height {
-			if ui.hover_rim_draw(&w.list, app.theme, row, 4 * s, 1, s, w.pointer) != .None {
+			if ui.hover_rim_draw(&w.list, app.theme, row, ui.RADIUS_INNER * s, 1, s, w.pointer) != .None {
 				return .Ok
 			}
 		}

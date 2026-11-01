@@ -81,16 +81,16 @@ tab_draw :: proc(
 	lift := hover_lift_at(theme, hover, scale)
 	tile := render.Rect{x + 2 * scale, 6 * scale - lift, max(0, width - 4 * scale), 28 * scale}
 	if lift > 0 {
-		if result := hover_shadow_draw(list, theme, tile, 7 * scale, hover, scale);
+		if result := hover_shadow_draw(list, theme, tile, RADIUS_CONTROL * scale, hover, scale);
 		   result != .None {return .Ok}
 	}
 	if selected {
-		draw_rect(list, {rect = tile, color = theme.tab_active, radius = 7 * scale})
-		draw_rect(list, {rect = tile, color = theme.border, radius = 7 * scale, stroke = scale})
+		draw_rect(list, {rect = tile, color = theme.tab_active, radius = RADIUS_CONTROL * scale})
+		draw_rect(list, {rect = tile, color = theme.border, radius = RADIUS_CONTROL * scale, stroke = scale})
 	}
 	if marked && !selected {
-		draw_rect(list, {rect = tile, color = theme.selection, radius = 7 * scale})
-		draw_rect(list, {rect = tile, color = theme.accent, radius = 7 * scale, stroke = scale})
+		draw_rect(list, {rect = tile, color = theme.selection, radius = RADIUS_CONTROL * scale})
+		draw_rect(list, {rect = tile, color = theme.accent, radius = RADIUS_CONTROL * scale, stroke = scale})
 	}
 	fill := theme.hover
 	fill.a *= hover
@@ -98,11 +98,11 @@ tab_draw :: proc(
 	// it, while a translucent dark fill can pass over without hiding it.
 	skip_fill := hover_fill_opaque(theme) && marked && !selected
 	if !skip_fill {
-		draw_rect(list, {rect = tile, color = fill, radius = 7 * scale})
+		draw_rect(list, {rect = tile, color = fill, radius = RADIUS_CONTROL * scale})
 	}
 	fill = theme.pressed
 	fill.a *= pressed
-	draw_rect(list, {rect = tile, color = fill, radius = 7 * scale})
+	draw_rect(list, {rect = tile, color = fill, radius = RADIUS_CONTROL * scale})
 	if selected && underline < 0 {
 		draw_rect(
 			list,
@@ -166,14 +166,14 @@ tab_draw :: proc(
 		text,
 		list,
 		title,
-		x + 11 * scale + icon_width,
+		x + 10 * scale + icon_width,
 		(bar.height - text.line_height) / 2 + text.ascent - lift,
 		selected ? theme.tab_active_text : theme.tab_text,
 		max(0, width - (tab ? 44 : 22) * scale - icon_width - status_width),
 	); result != .Ok {return result}
 	if hover > 0 {
 		if result := hover_rim_draw(
-			list, theme, tile, 7 * scale, hover, scale, pointer, !skip_fill, index == bar.count,
+			list, theme, tile, RADIUS_CONTROL * scale, hover, scale, pointer, !skip_fill, index == bar.count,
 		);
 		   result != .None {return .Ok}
 	}

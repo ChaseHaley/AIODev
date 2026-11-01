@@ -265,9 +265,10 @@ split_overlay_draw :: proc(
 	scale: f32,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {
-	if render.push_layer(list, l.panel, 8 * scale) != .None {return .Ok}
-	draw_rect(list, {rect = l.panel, color = theme.surface, radius = 8 * scale})
-	draw_rect(list, {rect = l.panel, color = theme.border, radius = 8 * scale, stroke = scale})
+	radius := RADIUS_POPOVER * scale
+	if render.push_layer(list, l.panel, radius) != .None {return .Ok}
+	draw_rect(list, {rect = l.panel, color = theme.surface, radius = radius})
+	draw_rect(list, {rect = l.panel, color = theme.border, radius = radius, stroke = scale})
 	icon_draw(list, .Grip, l.title, theme.muted, ICON_BUTTON, scale)
 	buttons := l.buttons
 	for button, i in buttons[:2] {

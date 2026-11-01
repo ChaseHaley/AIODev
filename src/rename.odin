@@ -34,19 +34,40 @@ rename_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	w.dirty = true
 }
 
+// Title, field and hint stacked inside the dialog padding, so the height follows the text.
+@(private = "file")
+rename_metrics :: proc(w: ^Window) -> (heading, hint: ui.Text) {
+	return ui.text_styled(&w.ui_text, .Heading), ui.text_styled(&w.ui_text, .Small)
+}
+
 rename_rect :: proc(w: ^Window) -> render.Rect {
-	width := min(440 * w.scale, f32(w.width) - 24 * w.scale)
+	s := w.scale
+	heading, hint := rename_metrics(w)
+	height :=
+		2 * ui.DIALOG_PADDING * s +
+		heading.line_height +
+		ui.CONTROL_HEIGHT * s +
+		hint.line_height +
+		(8 + 8) * s
+	width := min(440 * s, f32(w.width) - 24 * s)
 	return {
 		(f32(w.width) - width) / 2,
-		max(12 * w.scale, (f32(w.height) - 156 * w.scale) / 2),
+		max(12 * s, (f32(w.height) - height) / 2),
 		width,
-		156 * w.scale,
+		height,
 	}
 }
 
 rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	r, s := rename_rect(w), w.scale
-	return {r.x + 16 * s, r.y + 45 * s, max(1, r.width - 32 * s), 36 * s}
+	heading, _ := rename_metrics(w)
+	pad := ui.DIALOG_PADDING * s
+	return {
+		r.x + pad,
+		r.y + pad + heading.line_height + 8 * s,
+		max(1, r.width - 2 * pad),
+		ui.CONTROL_HEIGHT * s,
+	}
 }
 
 rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
@@ -54,10 +75,10 @@ rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
 		field = &w.rename,
 		text = &w.ui_text,
 		rect = rename_field_rect(w),
-		inset = 10,
+		inset = ui.CONTROL_INSET,
 		caret_width = 1,
-		radius = 5,
-		style = .Body,
+		radius = ui.RADIUS_CONTROL,
+		style = .Input,
 		scale = w.scale,
 	}
 }
@@ -71,35 +92,27 @@ rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
 rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	s := w.scale
 	r := rename_rect(w)
+	pad := ui.DIALOG_PADDING * s
+	heading, hint := rename_metrics(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
-	if render.push_rect(
-		   &w.list,
-		   {rect = {0, 0, f32(w.width), f32(w.height)}, color = {0, 0, 0, 0.35}},
-	   ) !=
-	   .None {
-		return .Ok
-	}
-	if render.push_rect(&w.list, {rect = r, color = app.theme.surface, radius = 10 * s}) !=
+	if render.push_rect(&w.list, {rect = {0, 0, f32(w.width), f32(w.height)}, color = app.theme.scrim}) !=
 	   .None {return .Ok}
+	frame := ui.dialog_panel(r, s)
+	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
 	title := w.rename_target.kind == .Tab ? "Rename Tab" : "Rename Pane"
 	if result := ui.draw_text(
-		&w.ui_text,
+		&heading,
 		&w.list,
 		title,
-		r.x + 16 * s,
-		r.y + 28 * s,
+		r.x + pad,
+		r.y + pad + heading.ascent,
 		app.theme.text,
 	); result != .Ok {return result}
 	field := rename_field_rect(w)
-	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5 * s}) !=
+	radius := ui.RADIUS_CONTROL * s
+	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = radius}) != .None {return .Ok}
+	if render.push_rect(&w.list, {rect = field, color = app.theme.accent, radius = radius, stroke = s}) !=
 	   .None {return .Ok}
-	if render.push_rect(
-		   &w.list,
-		   {rect = field, color = app.theme.accent, radius = 5 * s, stroke = s},
-	   ) !=
-	   .None {
-		return .Ok
-	}
 	box := rename_field_box(w)
 	if result := ui.field_box_draw(
 		box,
@@ -110,14 +123,13 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		"Automatic title",
 	); result != .Ok {return result}
 	if render.push_layer(&w.list, r) != .None {return .Ok}
-	hint := "Enter saves · Esc cancels · Empty restores automatic titles"
 	return ui.draw_text(
-		&w.ui_text,
+		&hint,
 		&w.list,
-		hint,
-		r.x + 16 * s,
-		r.y + 112 * s,
+		"Enter saves · Esc cancels · Empty restores automatic titles",
+		r.x + pad,
+		field.y + field.height + 8 * s + hint.ascent,
 		app.theme.muted,
-		max(1, r.width - 32 * s),
+		max(1, r.width - 2 * pad),
 	)
 }

@@ -218,10 +218,15 @@ Editor_Layout :: struct {
 	rows:                                            int,
 }
 
+// The vertical centre of the page header: the Settings title, the summary and Reset to Defaults.
+@(private)
+HEADER_CENTER :: 30
+
 editor_reset_all_rect :: proc(l: Editor_Layout) -> render.Rect {
 	right := max(l.filter.x + l.filter.width, l.list.x + l.list.width)
 	width := min(148 * l.scale, max(0, l.page.width - 160 * l.scale))
-	return {right - width, l.page.y + 10 * l.scale, width, 30 * l.scale}
+	y := l.page.y + (HEADER_CENTER - CONTROL_HEIGHT / 2) * l.scale
+	return {right - width, y, width, CONTROL_HEIGHT * l.scale}
 }
 
 // The parts of one setting row; zero-sized parts do not exist for its kind.
@@ -235,7 +240,7 @@ CAPTURE_HINT :: "Press a shortcut. Enter saves this alternative, Esc cancels, Ba
 @(private)
 ROW_HEIGHT :: 52
 @(private)
-CHOICE_HEIGHT :: 30
+CHOICE_HEIGHT :: CONTROL_HEIGHT
 @(private)
 OUTLINE_ROW_HEIGHT :: RAIL_ROW_HEIGHT
 @(private)
@@ -1635,7 +1640,7 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 	if area.width < OUTLINE_MIN_PAGE * s {
 		width := max(0, min(960 * s, area.width - 2 * pad))
 		x := area.x + max(pad, (area.width - width) / 2)
-		l.filter = {x, area.y + 52 * s, width, 34 * s}
+		l.filter = {x, area.y + 52 * s, width, CONTROL_HEIGHT * s}
 		top := l.filter.y + l.filter.height + 12 * s
 		l.rows = max(0, int((bottom - top) / l.row_height))
 		l.list = {x, top, width, f32(l.rows) * l.row_height}
@@ -1645,7 +1650,7 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 	gutter := 24 * s
 	width := max(0, min(960 * s, area.width - 2 * pad - OUTLINE_WIDTH * s - gutter))
 	outline_x := area.x + max(pad, (area.width - OUTLINE_WIDTH * s - gutter - width) / 2)
-	l.filter = {outline_x, area.y + 52 * s, OUTLINE_WIDTH * s, 34 * s}
+	l.filter = {outline_x, area.y + 52 * s, OUTLINE_WIDTH * s, CONTROL_HEIGHT * s}
 	outline_top := l.filter.y + l.filter.height + 12 * s
 	l.outline_row_height = OUTLINE_ROW_HEIGHT * s
 	l.outline = {outline_x, outline_top, OUTLINE_WIDTH * s, max(0, bottom - outline_top)}
@@ -1662,7 +1667,7 @@ editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	if len(p.filter.bytes) == 0 {return {}}
 	s := l.scale
 	return {
-		l.filter.x + l.filter.width - 30 * s,
+		l.filter.x + l.filter.width - 28 * s,
 		l.filter.y + (l.filter.height - 26 * s) / 2,
 		26 * s,
 		26 * s,
@@ -1683,9 +1688,9 @@ value_box :: proc(p: ^Editor, parts: Row_Parts, text: ^Text, scale: f32) -> Fiel
 		field = &p.value,
 		text = text,
 		rect = parts.field,
-		inset = 10,
+		inset = CONTROL_INSET,
 		caret_width = 1,
-		radius = 6,
+		radius = RADIUS_CONTROL,
 		style = .Input,
 		scale = scale,
 	}
@@ -1698,9 +1703,9 @@ filter_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
 		field = &p.filter,
 		text = text,
 		rect = filter_text_rect(p, l),
-		inset = 10,
+		inset = CONTROL_INSET,
 		caret_width = 1,
-		radius = 6,
+		radius = RADIUS_CONTROL,
 		style = .Input,
 		scale = l.scale,
 	}
@@ -1727,13 +1732,13 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	if row.process_field != .None {return editor_process_field_parts(&row, parts, s)}
 	field := proc(right, cy, width, s: f32) -> render.Rect {return {
 			right - width * s,
-			cy - 15 * s,
+			cy - CONTROL_HEIGHT / 2 * s,
 			width * s,
-			30 * s,
+			CONTROL_HEIGHT * s,
 		}}
 	switch row.kind {
 	case .Action:
-		parts.field = field(right, cy, 240, s)
+		parts.field = field(right, cy, 148, s)
 		parts.reset = {}
 	case .Toggle:
 		parts.toggle = {right - 44 * s, cy - 11 * s, 44 * s, 22 * s}
@@ -2425,7 +2430,7 @@ box_draw :: proc(
 	focused: bool,
 	scale: f32,
 ) {
-	draw_rect(list, {rect = r, color = theme.border, radius = 6 * scale})
+	draw_rect(list, {rect = r, color = theme.border, radius = RADIUS_CONTROL * scale})
 	if focused {focus_ring_draw(list, r, theme, scale)}
 }
 
@@ -2441,8 +2446,8 @@ profile_badge_draw :: proc(
 	muted: bool,
 ) {
 	if rect.width <= 0 {return}
-	draw_rect(list, {rect = rect, color = theme.surface, radius = 6 * scale})
-	draw_rect(list, {rect = rect, color = theme.border, radius = 6 * scale, stroke = scale})
+	draw_rect(list, {rect = rect, color = theme.surface, radius = RADIUS_CONTROL * scale})
+	draw_rect(list, {rect = rect, color = theme.border, radius = RADIUS_CONTROL * scale, stroke = scale})
 	small := text_styled(text, .Small)
 	width := min(rect.width - 4 * scale, text_width(&small, badge))
 	draw_text(
@@ -2505,7 +2510,7 @@ profile_button_draw :: proc(
 	if enabled && (hovered || focused) {
 		draw_rect(
 			list,
-			{rect = rect, color = hovered ? theme.hover : theme.selection, radius = 5 * scale},
+			{rect = rect, color = hovered ? theme.hover : theme.selection, radius = RADIUS_CONTROL * scale},
 		)
 	}
 	color := enabled ? theme.muted : theme.faint
@@ -2636,7 +2641,7 @@ profile_row_draw :: proc(
 		}
 	}
 	if p.error_profile != "" && p.error_profile == row.profile {
-		draw_rect(list, {rect = parts.row, color = theme.error, radius = 6 * scale, stroke = scale})
+		draw_rect(list, {rect = parts.row, color = theme.error, radius = RADIUS_CONTROL * scale, stroke = scale})
 	}
 	return .Ok
 }
@@ -2762,7 +2767,7 @@ profile_detected_draw :: proc(
 		profile_radio_draw(list, table.radio, true, false, false, theme, scale)
 	}
 	if hovered && p.hover_profile_control == .Enable {
-		draw_rect(list, {rect = table.enable, color = theme.hover, radius = 6 * scale})
+		draw_rect(list, {rect = table.enable, color = theme.hover, radius = RADIUS_CONTROL * scale})
 	}
 	box_draw(list, table.enable, theme, focused && p.profile_control == .Enable, scale)
 	label := "Enable"
@@ -2796,16 +2801,7 @@ control_draw :: proc(
 		parts.field.y + (parts.field.height - input_text.line_height) / 2 + input_text.ascent
 	switch row.kind {
 	case .Action:
-		box_draw(list, parts.field, theme, focused, scale)
-		return draw_text(
-			&input_text,
-			list,
-			value,
-			parts.field.x + 10 * scale,
-			baseline,
-			theme.text,
-			max(1, parts.field.width - 20 * scale),
-		)
+		return text_button_draw(list, text, theme, parts.field, value, focused, scale, {})
 	case .Toggle:
 		on := value == "true"
 		if row.profile != "" {
@@ -2848,11 +2844,11 @@ control_draw :: proc(
 		slider_draw(list, parts.slider, slider_fraction(row.minimum, row.maximum, number), theme, scale)
 	case .Color, .Optional_Color:
 		if c, ok := swatch_color(value); ok {
-			draw_rect(list, {rect = parts.swatch, color = c, radius = 6 * scale})
+			draw_rect(list, {rect = parts.swatch, color = c, radius = RADIUS_CONTROL * scale})
 		}
 		draw_rect(
 			list,
-			{rect = parts.swatch, color = theme.border, radius = 6 * scale, stroke = scale},
+			{rect = parts.swatch, color = theme.border, radius = RADIUS_CONTROL * scale, stroke = scale},
 		)
 		if selected && p.popup == .Color {focus_ring_draw(list, parts.swatch, theme, scale)}
 	case .Shortcut:
@@ -2905,14 +2901,7 @@ popup_draw :: proc(
 	if r.width == 0 || row == nil {return .Ok}
 	s := l.scale
 	if render.push_layer(list, l.page) != .None {return .Ok}
-	frame := Panel {
-		rect     = r,
-		radius   = 8 * s,
-		scale    = s,
-		shadow_y = 6,
-		softness = 16,
-		border   = .Stroked,
-	}
+	frame := popover_panel(r, s)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
 	if p.popup == .Shortcuts {
 		parts := commands.shortcut_alternatives(row.value, context.temp_allocator)
@@ -2928,10 +2917,10 @@ popup_draw :: proc(
 				CHOICE_HEIGHT * s,
 			}
 			if i ==
-			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
+			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_INNER * s})}
 			if contains(option, pointer.x, pointer.y) {
 				// Options carry the selection tint, not the paper fill, so no hairline.
-				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer, false);
+				if result := hover_rim_draw(list, theme, option, RADIUS_INNER * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
 			}
 			label := i < len(parts) ? parts[i] : "+ Add shortcut"
@@ -2991,10 +2980,10 @@ popup_draw :: proc(
 				CHOICE_HEIGHT * s,
 			}
 			if i ==
-			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = 5 * s})}
+			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_INNER * s})}
 			if contains(option, pointer.x, pointer.y) {
 				// Options carry the selection tint, not the paper fill, so no hairline.
-				if result := hover_rim_draw(list, theme, option, 5 * s, 1, s, pointer, false);
+				if result := hover_rim_draw(list, theme, option, RADIUS_INNER * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
 			}
 			if row.multiple {
@@ -3008,7 +2997,7 @@ popup_draw :: proc(
 					{
 						rect = {option.x, option.y + 8 * s, 3 * s, option.height - 16 * s},
 						color = theme.accent,
-						radius = 2 * s,
+						radius = RADIUS_MARK * s,
 					},
 				)
 			}
@@ -3065,16 +3054,16 @@ popup_draw :: proc(
 		{
 			rect = {mx - 6 * s, my - 6 * s, 12 * s, 12 * s},
 			color = {1, 1, 1, 1},
-			radius = 6 * s,
+			radius = RADIUS_CONTROL * s,
 			stroke = 2 * s,
 		},
 	)
 	full := colour.rgba(settings.hsv_to_rgb(p.hsv[0], p.hsv[1], 1))
 	draw_rect(
 		list,
-		{rect = c.ramp, color = full, radius = 4 * s, fill = render.RECT_FILL_VALUE_RAMP},
+		{rect = c.ramp, color = full, radius = RADIUS_INNER * s, fill = render.RECT_FILL_VALUE_RAMP},
 	)
-	draw_rect(list, {rect = c.ramp, color = theme.border, radius = 4 * s, stroke = s})
+	draw_rect(list, {rect = c.ramp, color = theme.border, radius = RADIUS_INNER * s, stroke = s})
 	marker := c.ramp.x + c.ramp.width * p.hsv[2]
 	draw_rect(
 		list,
@@ -3086,9 +3075,9 @@ popup_draw :: proc(
 		},
 	)
 	if color, ok := swatch_color(field_string(&p.value)); ok {
-		draw_rect(list, {rect = c.swatch, color = color, radius = 6 * s})
+		draw_rect(list, {rect = c.swatch, color = color, radius = RADIUS_CONTROL * s})
 	}
-	draw_rect(list, {rect = c.swatch, color = theme.border, radius = 6 * s, stroke = s})
+	draw_rect(list, {rect = c.swatch, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
 	small := text_styled(text, .Small)
 	if result := draw_text(
 		&small,
@@ -3135,8 +3124,8 @@ filter_draw :: proc(
 	if clear.width == 0 {return .Ok}
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	if p.hover_clear {
-		draw_rect(list, {rect = clear, color = theme.hover, radius = 5 * s})
-		if result := hover_rim_draw(list, theme, clear, 5 * s, 1, s, pointer);
+		draw_rect(list, {rect = clear, color = theme.hover, radius = RADIUS_CONTROL * s})
+		if result := hover_rim_draw(list, theme, clear, RADIUS_CONTROL * s, 1, s, pointer);
 		   result != .None {return .Ok}
 	}
 	icon_draw(list, .Close, clear, p.hover_clear ? theme.text : theme.muted, ICON_INDICATOR, s)
@@ -3211,11 +3200,11 @@ editor_draw :: proc(
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	strong := text_styled(text, .Strong)
 	small := text_styled(text, .Small)
-	heading := strong
-	text_set_size(&heading, strong.size_px * 1.4)
+	heading := text_styled(text, .Display)
 	x := l.filter.x
-	if r := draw_text(&heading, list, "Settings", x, l.page.y + 36 * s, theme.text);
-	   r != .Ok {return r}
+	// The summary shares the title's baseline.
+	header_baseline := l.page.y + HEADER_CENTER * s - heading.line_height / 2 + heading.ascent
+	if r := draw_text(&heading, list, "Settings", x, header_baseline, theme.text); r != .Ok {return r}
 	status := p.message
 	matches := 0
 	for item in p.items {matches += item.count}
@@ -3234,19 +3223,14 @@ editor_draw :: proc(
 		list,
 		status,
 		status_x,
-		l.page.y + 36 * s,
+		header_baseline,
 		p.error ? theme.error : theme.muted,
 		max(1, status_right - status_x),
 	); r != .Ok {return r}
 	reset := editor_reset_all_rect(l)
-	draw_rect(list, {rect = reset, color = theme.surface, radius = 5 * s})
-	if focused && p.focus == .Reset_All {focus_ring_draw(list, reset, theme, s)}
-	if contains(reset, pointer.x, pointer.y) {
-		if hover_rim_draw(list, theme, reset, 5 * s, 1, s, pointer, true) != .None {return .Ok}
-	}
-	if r := draw_text(text, list, "Reset to Defaults", reset.x + 10 * s,
-	                  reset.y + (reset.height - text.line_height) / 2 + text.ascent,
-	                  theme.text, max(0, reset.width - 20 * s)); r != .Ok {return r}
+	reset_focused := focused && p.focus == .Reset_All
+	if r := text_button_draw(list, text, theme, reset, "Reset to Defaults", reset_focused, s, pointer);
+	   r != .Ok {return r}
 	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search, pointer);
 	   r != .Ok {return r}
 	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}
@@ -3268,17 +3252,17 @@ editor_draw :: proc(
 		r := parts.row
 		selected := index == p.selected
 		if selected {
-			draw_rect(list, {rect = r, color = theme.selection, radius = 6 * s})
+			draw_rect(list, {rect = r, color = theme.selection, radius = RADIUS_CONTROL * s})
 			if p.error && item.row >= 0 && p.rows[item.row].kind == .Shortcut {
-				draw_rect(list, {rect = r, color = theme.error, radius = 6 * s, stroke = 2 * s})
+				draw_rect(list, {rect = r, color = theme.error, radius = RADIUS_CONTROL * s, stroke = 2 * s})
 			}
 		} else if index == p.hover_item {
-			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
+			draw_rect(list, {rect = r, color = theme.hover, radius = RADIUS_CONTROL * s})
 		}
 		if index == p.hover_item {
 			// A row is a reading surface: it takes the pointer light but never the lift. A
 			// selected row keeps its tint and any error ring, so it takes no hairline.
-			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer, !selected);
+			if result := hover_rim_draw(list, theme, r, RADIUS_CONTROL * s, 1, s, pointer, !selected);
 			   result != .None {return .Ok}
 		}
 		if item.row < 0 {
@@ -3411,7 +3395,7 @@ editor_draw :: proc(
 			); result != .Ok {return result}
 		}
 		if p.error_key == row.key {
-			draw_rect(list, {rect = r, color = theme.error, radius = 6 * s, stroke = s})
+			draw_rect(list, {rect = r, color = theme.error, radius = RADIUS_CONTROL * s, stroke = s})
 		}
 		if render.push_layer(list, l.list) != .None {return .Ok}
 		if row.kind == .Action {continue}

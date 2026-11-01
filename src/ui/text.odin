@@ -239,6 +239,10 @@ Text_Style :: enum {
 	Query,
 	// Command palette result titles.
 	Title,
+	// Dialog and popover titles: the title size, semibold.
+	Heading,
+	// The title of a full page such as Settings.
+	Display,
 	Keycap,
 }
 
@@ -252,12 +256,14 @@ text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 		size = 13
 	case .Query:
 		size = 19
-	case .Title:
+	case .Title, .Heading:
 		size = 13.5
+	case .Display:
+		size = 17
 	case .Keycap:
 		size = 10
 	}
-	if style == .Strong {copy.family = t.strong_family}
+	if style == .Strong || style == .Heading || style == .Display {copy.family = t.strong_family}
 	text_set_size(&copy, t.size_px * size / 12)
 	return copy
 }
@@ -303,8 +309,10 @@ focus_ring_draw :: proc(list: ^render.Draw_List, rect: render.Rect, theme: Theme
 		rect.width + 6 * scale,
 		rect.height + 6 * scale,
 	}
-	draw_rect(list, {rect = gap, color = theme.window, radius = 7 * scale, stroke = scale})
-	draw_rect(list, {rect = ring, color = theme.accent, radius = 9 * scale, stroke = 2 * scale})
+	// The ring follows a control's corner outward: one DIP of gap, then two of ring.
+	gap_radius, ring_radius := (RADIUS_CONTROL + 1) * scale, (RADIUS_CONTROL + 3) * scale
+	draw_rect(list, {rect = gap, color = theme.window, radius = gap_radius, stroke = scale})
+	draw_rect(list, {rect = ring, color = theme.accent, radius = ring_radius, stroke = 2 * scale})
 }
 
 // Centers the glyph's rasterized ink in `area`; draw_text instead places the pen on a baseline, which

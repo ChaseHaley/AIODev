@@ -6,7 +6,7 @@ import "aio:render"
 import "base:runtime"
 
 MENU_WIDTH :: f32(280)
-MENU_ROW_HEIGHT :: f32(30)
+MENU_ROW_HEIGHT :: POPOVER_ROW_HEIGHT
 MENU_SEPARATOR_HEIGHT :: f32(9)
 MENU_MAX_ITEMS :: 40
 
@@ -82,7 +82,7 @@ menu_layout :: proc(
 	bounds := m.bounds
 	if bounds.width <= 0 {bounds = {0, 0, width, height}}
 	rows := 0
-	content := 8 * scale
+	content := 2 * POPOVER_PADDING * scale
 	for i in m.scroll..<len(m.items) {
 		next := menu_row_height(m, i) * scale
 		if rows > 0 && content + next > bounds.height - 16 * scale {break}
@@ -98,12 +98,12 @@ menu_layout :: proc(
 
 menu_row_rect :: proc(m: ^Menu, index: int, width, height, scale: f32) -> render.Rect {
 	surface, _ := menu_layout(m, width, height, scale)
-	y := surface.y + 4 * scale
+	y := surface.y + POPOVER_PADDING * scale
 	for i in m.scroll..<index {y += menu_row_height(m, i) * scale}
 	return {
-		surface.x + 4 * scale,
+		surface.x + POPOVER_PADDING * scale,
 		y,
-		surface.width - 8 * scale,
+		surface.width - 2 * POPOVER_PADDING * scale,
 		menu_row_height(m, index) * scale,
 	}
 }
@@ -112,8 +112,8 @@ menu_hit :: proc(m: ^Menu, x, y, width, height, scale: f32) -> int {
 	surface, rows := menu_layout(m, width, height, scale)
 	if x < surface.x ||
 	   x >= surface.x + surface.width ||
-	   y < surface.y + 4 * scale ||
-	   y >= surface.y + surface.height - 4 * scale {return -1}
+	   y < surface.y + POPOVER_PADDING * scale ||
+	   y >= surface.y + surface.height - POPOVER_PADDING * scale {return -1}
 	for i in m.scroll..<m.scroll + rows {
 		row := menu_row_rect(m, i, width, height, scale)
 		if y >= row.y && y < row.y + row.height {return i}
@@ -176,16 +176,9 @@ menu_draw :: proc(
 		surface, rows = menu_layout(m, width, height, scale)
 	}
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
-	frame := Panel {
-		rect     = surface,
-		radius   = 8 * scale,
-		scale    = scale,
-		shadow_y = 5,
-		softness = 16,
-		border   = .Stroked,
-	}
+	frame := popover_panel(surface, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
-	if render.push_layer(list, surface, 8 * scale) != .None {return .Ok}
+	if render.push_layer(list, surface, RADIUS_POPOVER * scale) != .None {return .Ok}
 	small := text_styled(text, .Small)
 	for visible in 0..<rows {
 		i := m.scroll + visible
@@ -203,7 +196,7 @@ menu_draw :: proc(
 			continue
 		}
 		if i == m.selected && item.enabled {
-			if render.push_rect(list, {rect = row, color = theme.selection, radius = 4 * scale}) !=
+			if render.push_rect(list, {rect = row, color = theme.selection, radius = RADIUS_INNER * scale}) !=
 			   .None {return .Ok}
 		}
 		if item.checked {
@@ -212,7 +205,7 @@ menu_draw :: proc(
 				{
 					rect = {row.x + scale, row.y + 8 * scale, 3 * scale, row.height - 16 * scale},
 					color = theme.accent,
-					radius = 2 * scale,
+					radius = RADIUS_MARK * scale,
 				},
 			) != .None {return .Ok}
 		}
@@ -252,7 +245,7 @@ menu_draw :: proc(
 			max(1, row.x + row.width - 18 * scale - shortcut_width - label_x),
 		); result != .Ok {return result}
 		if i == m.selected && item.enabled && contains(row, pointer.x, pointer.y) {
-			if result := hover_rim_draw(list, theme, row, 4 * scale, 1, scale, pointer);
+			if result := hover_rim_draw(list, theme, row, RADIUS_INNER * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
 		}
 	}

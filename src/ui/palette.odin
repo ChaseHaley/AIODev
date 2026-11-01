@@ -17,7 +17,6 @@ import "core:unicode/utf8"
 @(private) PALETTE_ROW_HEIGHT :: 40
 @(private) PALETTE_FOOTER_HEIGHT :: 32
 @(private) PALETTE_PADDING :: 8
-@(private) PALETTE_RADIUS :: 10
 @(private) PALETTE_TEXT_INSET :: 14
 @(private) PALETTE_SETTING_SUFFIX :: " SETTING"
 @(private) PALETTE_CHIP_HEIGHT :: 25
@@ -1329,7 +1328,7 @@ draw_key_hint :: proc(
 		draw_rect(list, {
 			rect   = {pen, top, width, height},
 			color  = theme.border,
-			radius = 4 * scale,
+			radius = RADIUS_INNER * scale,
 			stroke = scale,
 		})
 		key_baseline := top + (height - keycap.line_height) / 2 + keycap.ascent
@@ -1352,11 +1351,11 @@ draw_mode_menu :: proc(
 ) -> glyphs.Result {
 	if l.menu.width <= 0 || l.menu.height <= 0 {return .Ok}
 	if render.push_layer(list, l.menu) != .None {return .Ok}
-	draw_rect(list, {rect = l.menu, color = theme.pane, radius = 7 * scale})
+	draw_rect(list, {rect = l.menu, color = theme.pane, radius = RADIUS_POPOVER * scale})
 	draw_rect(list, {
 		rect   = l.menu,
 		color  = theme.border,
-		radius = 7 * scale,
+		radius = RADIUS_POPOVER * scale,
 		stroke = scale,
 	})
 	inset := PALETTE_MENU_INSET * scale
@@ -1370,9 +1369,9 @@ draw_mode_menu :: proc(
 			row_height,
 		}
 		if p.mode == mode {
-			draw_rect(list, {rect = row, color = theme.selection, radius = 4 * scale})
+			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_INNER * scale})
 		} else if p.menu_hover == i {
-			draw_rect(list, {rect = row, color = theme.hover, radius = 4 * scale})
+			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_INNER * scale})
 		}
 		info := PALETTE_MODES[mode]
 		baseline := row.y + (row.height - mode_text.line_height) / 2 + mode_text.ascent
@@ -1408,14 +1407,7 @@ palette_draw :: proc(
 	bounded_rise := clamp(rise, 0, max(0, height - scale - panel.y - panel.height))
 	defer fade_draw(list, layer_start, rect_start, glyph_start, opacity, bounded_rise)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
-	frame := Panel {
-		rect     = panel,
-		radius   = PALETTE_RADIUS * scale,
-		scale    = scale,
-		shadow_y = 12,
-		softness = 32,
-		border   = .Expanded,
-	}
+	frame := dialog_panel(panel, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
 	draw_rect(list, {
 		rect  = {panel.x, l.input.y + l.input.height, panel.width, scale},
@@ -1425,11 +1417,11 @@ palette_draw :: proc(
 	padding := PALETTE_TEXT_INSET * scale
 	if l.chip.width > 0 {
 		chip := l.chip
-		draw_rect(list, {rect = chip, color = theme.pane, radius = 5 * scale})
+		draw_rect(list, {rect = chip, color = theme.pane, radius = RADIUS_CONTROL * scale})
 		draw_rect(list, {
 			rect   = chip,
 			color  = theme.border,
-			radius = 5 * scale,
+			radius = RADIUS_CONTROL * scale,
 			stroke = scale,
 		})
 		chip_text := text_styled(text, .Small)
@@ -1480,10 +1472,10 @@ palette_draw :: proc(
 			item := p.results[index]
 			row := render.Rect{l.list.x, l.list.y + f32(rows) * l.row_height, l.list.width, l.row_height}
 			if index == p.selected {
-				draw_rect(list, {rect = row, color = theme.selection, radius = 6 * scale})
+				draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
 				if contains(row, pointer.x, pointer.y) {
 					// The row carries the selection tint, not the paper fill, so no hairline.
-					if result := hover_rim_draw(list, theme, row, 6 * scale, 1, scale, pointer, false);
+					if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer, false);
 					   result != .None {return .Ok}
 				}
 			}

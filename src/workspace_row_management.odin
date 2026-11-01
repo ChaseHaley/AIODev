@@ -118,7 +118,7 @@ workspace_row_rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	if index < 0 { return {} }
 	r, s := workspace_picker_row_rect(w, index), w.scale
 	offset := 68 * s * (1 - p.rename_motion.value)
-	return {r.x + 8 * s, r.y + r.height + 8 * s - offset, max(0, r.width - 16 * s), 32 * s}
+	return {r.x + 8 * s, r.y + r.height + 8 * s - offset, max(0, r.width - 16 * s), ui.CONTROL_HEIGHT * s}
 }
 
 workspace_row_rename_box :: proc(w: ^Window) -> ui.Field_Box {
@@ -126,10 +126,10 @@ workspace_row_rename_box :: proc(w: ^Window) -> ui.Field_Box {
 		field = &w.rename,
 		text = &w.ui_text,
 		rect = workspace_row_rename_field_rect(w),
-		inset = 8,
+		inset = ui.CONTROL_INSET,
 		caret_width = 1,
-		radius = 5,
-		style = .Body,
+		radius = ui.RADIUS_CONTROL,
+		style = .Input,
 		scale = w.scale,
 	}
 }
@@ -221,15 +221,17 @@ workspace_row_menu_rect :: proc(w: ^Window) -> render.Rect {
 	if index < 0 { return {} }
 	row := workspace_picker_row_rect(w, index)
 	width := min(196 * s, max(0, f32(w.width) - 10 * s))
-	height := min((8 + 34 * f32(len(WORKSPACE_ROW_ACTIONS))) * s, max(0, f32(w.height) - 10 * s))
+	rows := f32(len(WORKSPACE_ROW_ACTIONS))
+	height := min((2 * ui.POPOVER_PADDING + ui.POPOVER_ROW_HEIGHT * rows) * s, max(0, f32(w.height) - 10 * s))
 	return {clamp(row.x + row.width - width, 5 * s, max(5 * s, f32(w.width) - width - 5 * s)),
 		clamp(row.y + row.height, 5 * s, max(5 * s, f32(w.height) - height - 5 * s)), width, height}
 }
 
 workspace_row_menu_item_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	r, s := workspace_row_menu_rect(w), w.scale
-	height := max(0, (r.height - 8 * s) / f32(len(WORKSPACE_ROW_ACTIONS)))
-	return {r.x + 4 * s, r.y + 4 * s + f32(index) * height, max(0, r.width - 8 * s), height}
+	pad := ui.POPOVER_PADDING * s
+	height := max(0, (r.height - 2 * pad) / f32(len(WORKSPACE_ROW_ACTIONS)))
+	return {r.x + pad, r.y + pad + f32(index) * height, max(0, r.width - 2 * pad), height}
 }
 
 workspace_row_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
@@ -294,7 +296,7 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 	if hover > 0 && !skip_fill {
 		fill := app.theme.hover
 		fill.a *= hover
-		if render.push_rect(&w.list, {rect = r, color = fill, radius = 5 * s}) != .None { return }
+		if render.push_rect(&w.list, {rect = r, color = fill, radius = ui.RADIUS_CONTROL * s}) != .None { return }
 	}
 	ink := hover > 0 ? app.theme.text : app.theme.muted
 	ui.icon_draw(&w.list, .More, r, ink, ui.ICON_BUTTON, s)
@@ -303,7 +305,7 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 			&w.list,
 			app.theme,
 			r,
-			5 * s,
+			ui.RADIUS_CONTROL * s,
 			hover,
 			s,
 			w.pointer,
@@ -320,8 +322,10 @@ workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	clip := render.Rect{row.x, row.y + row.height, row.width, workspace_row_rename_height(w)}
 	if render.push_layer(&w.list, clip) != .None { return .Ok }
 	field := workspace_row_rename_field_rect(w)
-	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5 * s}) != .None { return .Ok }
-	if render.push_rect(&w.list, {rect = field, color = app.theme.accent, radius = 5 * s, stroke = s}) != .None {
+	radius := ui.RADIUS_CONTROL * s
+	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = radius}) != .None { return .Ok }
+	outline := render.Rect_Instance{rect = field, color = app.theme.accent, radius = radius, stroke = s}
+	if render.push_rect(&w.list, outline) != .None {
 		return .Ok
 	}
 	box := workspace_row_rename_box(w)
@@ -338,16 +342,9 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if p.mode != .Menu { return .Ok }
 	r := workspace_row_menu_rect(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	frame := ui.Panel {
-		rect     = r,
-		radius   = 6 * s,
-		scale    = s,
-		shadow_x = 2,
-		shadow_y = 3,
-		border   = .Stroked,
-	}
+	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
-	if render.push_layer(&w.list, r, 6 * s) != .None { return .Ok }
+	if render.push_layer(&w.list, r, ui.RADIUS_POPOVER * s) != .None { return .Ok }
 	titles := [?]string{"Rename", "Change Icon", workspace_row_window_title(app, p.target_id), "Delete…"}
 	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
 	for title, i in titles {
@@ -355,16 +352,20 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			(actions[i] != .Open_Window || workspace_row_window_enabled(app, w, p.target_id))
 		item := workspace_row_menu_item_rect(w, i)
 		if i == p.menu_selected {
-			if render.push_rect(&w.list, {rect = item, color = app.theme.selection, radius = 4 * s}) != .None {
+			selection := render.Rect_Instance{rect = item, color = app.theme.selection, radius = ui.RADIUS_INNER * s}
+			if render.push_rect(&w.list, selection) != .None {
 				return .Ok
 			}
 		}
-		if result := ui.draw_text(&w.ui_text, &w.list, title, item.x + 8 * s,
+		inset := ui.CONTROL_INSET * s
+		if result := ui.draw_text(&w.ui_text, &w.list, title, item.x + inset,
 			item.y + (item.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
-			enabled ? app.theme.text : app.theme.muted, max(0, item.width - 16 * s)); result != .Ok { return result }
+			enabled ? app.theme.text : app.theme.muted, max(0, item.width - 2 * inset)); result != .Ok {
+			return result
+		}
 		if i == p.menu_selected && workspace_rect_contains(item, w.pointer.x, w.pointer.y) {
 			// The menu item carries the selection tint, so it takes no paper hairline.
-			if ui.hover_rim_draw(&w.list, app.theme, item, 4 * s, 1, s, w.pointer, false) != .None {
+			if ui.hover_rim_draw(&w.list, app.theme, item, ui.RADIUS_INNER * s, 1, s, w.pointer, false) != .None {
 				return .Ok
 			}
 		}

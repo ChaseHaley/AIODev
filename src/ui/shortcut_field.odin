@@ -62,9 +62,10 @@ shortcut_field_draw :: proc(
 	baseline := parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent
 	box_draw(list, parts.field, theme, state.focused && !state.capturing, scale)
 	if state.capturing {
-		draw_rect(list, {rect = parts.field, color = theme.accent, radius = 6 * scale, stroke = 2 * scale})
+		radius := RADIUS_CONTROL * scale
+		draw_rect(list, {rect = parts.field, color = theme.accent, radius = radius, stroke = 2 * scale})
 	}
-	if render.push_layer(list, parts.field, 6 * scale) != .None {return .Ok}
+	if render.push_layer(list, parts.field, RADIUS_CONTROL * scale) != .None {return .Ok}
 	first := summary.first
 	if first == "" {
 		empty := state.empty_label != "" ? state.empty_label : "Add shortcut"

@@ -552,7 +552,7 @@ popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f3
 	return {
 		field = &p.edit.filter, text = text,
 		rect = {popup.x + 4 * scale, popup.y + 4 * scale, popup.width - 8 * scale, 28 * scale},
-		inset = 10, caret_width = 1, radius = 4, style = .Input, scale = scale,
+		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_INNER, style = .Input, scale = scale,
 	}
 }
 
@@ -560,7 +560,7 @@ popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f3
 text_entry_box :: proc(p: ^Palette, control: render.Rect, text: ^Text, scale: f32) -> Field_Box {
 	return {
 		field = &p.edit.field, text = text, rect = control,
-		inset = 8, caret_width = 1, radius = 6, style = .Input, scale = scale,
+		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Input, scale = scale,
 	}
 }
 
@@ -774,8 +774,8 @@ draw_popup :: proc(
 	if popup.width <= 0 {return .Ok}
 	scale := l.scale
 	if render.push_layer(list, popup) != .None {return .Ok}
-	draw_rect(list, {rect = popup, color = theme.pane, radius = 7 * scale})
-	draw_rect(list, {rect = popup, color = theme.border, radius = 7 * scale, stroke = scale})
+	draw_rect(list, {rect = popup, color = theme.pane, radius = RADIUS_POPOVER * scale})
+	draw_rect(list, {rect = popup, color = theme.border, radius = RADIUS_POPOVER * scale, stroke = scale})
 	e := &p.edit
 	if popup_searchable(p) {
 		box := popup_search_box(p, popup, text, scale)
@@ -797,9 +797,9 @@ draw_popup :: proc(
 		row := render.Rect{popup.x + 3 * scale, top + f32(i - e.scroll) * row_height, popup.width - 6 * scale,
 			row_height}
 		if i == e.index {
-			draw_rect(list, {rect = row, color = theme.selection, radius = 4 * scale})
+			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_INNER * scale})
 		} else if i == e.hover {
-			draw_rect(list, {rect = row, color = theme.hover, radius = 4 * scale})
+			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_INNER * scale})
 		}
 		label := e.labels[choice] != "" ? e.labels[choice] : e.choices[choice]
 		saved := e.choices[choice] == current

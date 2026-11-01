@@ -143,20 +143,21 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	lift := ui.hover_lift_at(app.theme, hover, w.scale)
 	r.y -= lift
 	if render.push_layer(&w.list, {0, 0, width, ui.TITLE_BAR_HEIGHT * w.scale}) != .None {return .Ok}
+	radius := ui.RADIUS_CONTROL * w.scale
 	if lift > 0 {
-		if result := ui.hover_shadow_draw(&w.list, app.theme, r, 6 * w.scale, hover, w.scale);
+		if result := ui.hover_shadow_draw(&w.list, app.theme, r, radius, hover, w.scale);
 		   result != .None {return .Ok}
 	}
 	active := workspace_picker_active(&w.workspace_picker)
 	fill := active ? app.theme.selection : app.theme.pane
-	if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None { return .Ok }
+	if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None { return .Ok }
 	// An open picker already tints the chip; an opaque paper fill would paint over it, while a
 	// translucent dark fill can pass over without hiding it.
 	skip_fill := ui.hover_fill_opaque(app.theme) && active
 	if hover > 0 && !skip_fill {
 		fill = app.theme.hover
 		fill.a *= hover
-		if render.push_rect(&w.list, {rect = r, color = fill, radius = 6 * w.scale}) != .None {
+		if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None {
 			return .Ok
 		}
 	}
@@ -398,8 +399,9 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	w.dirty = true
 }
 
+// The search field sits in the row column, so its text lines up with the row labels.
 workspace_picker_header :: proc(w: ^Window) -> f32 {
-	return 56 * w.scale
+	return (ui.POPOVER_PADDING + ui.CONTROL_HEIGHT + 8) * w.scale
 }
 
 workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
@@ -415,7 +417,8 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 	reserve := w.workspace_picker.mode == .Rename ? 68 * s : 0
 	available := f32(w.height) - y - header - 24 * s - reserve
 	rows := min(workspace_picker_count(w), max(1, int(available / (34 * s))))
-	height := min(max(0, f32(w.height) - y - 5 * s), header + f32(rows) * 34 * s + 16 * s + extra)
+	content := header + f32(rows) * 34 * s + (8 + ui.POPOVER_PADDING) * s + extra
+	height := min(max(0, f32(w.height) - y - 5 * s), content)
 	return {x, y, width, height}, rows
 }
 
@@ -424,7 +427,8 @@ workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
 	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_layout(w).field }
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
-	return {r.x + 12 * s, r.y + 12 * s, max(0, r.width - 24 * s), 32 * s}
+	pad := ui.POPOVER_PADDING * s
+	return {r.x + pad, r.y + pad, max(0, r.width - 2 * pad), ui.CONTROL_HEIGHT * s}
 }
 
 workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
@@ -432,10 +436,10 @@ workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
 		field = &w.workspace_picker.query,
 		text = &w.ui_text,
 		rect = workspace_picker_field_rect(w),
-		inset = 8,
+		inset = ui.CONTROL_INSET,
 		caret_width = 1,
-		radius = 5,
-		style = .Body,
+		radius = ui.RADIUS_CONTROL,
+		style = .Input,
 		scale = w.scale,
 	}
 }
@@ -449,8 +453,9 @@ workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	gap := !workspace_picker_icons(p) && index >= len(p.rows) && p.scroll <= len(p.rows) ? 8 * s : 0
 	rename_index := workspace_row_index(w, workspace_picker_target(p, .Rename))
 	if rename_index >= p.scroll && index > rename_index { gap += workspace_row_rename_height(w) }
-	return {r.x + 6 * s, r.y + workspace_picker_header(w) + f32(index - p.scroll) * 34 * s + gap,
-		max(0, r.width - 12 * s), 34 * s}
+	pad := ui.POPOVER_PADDING * s
+	return {r.x + pad, r.y + workspace_picker_header(w) + f32(index - p.scroll) * 34 * s + gap,
+		max(0, r.width - 2 * pad), 34 * s}
 }
 
 workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
@@ -504,35 +509,32 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	@(static, rodata) actions := WORKSPACE_ACTIONS
 	@(static, rodata) action_info := ACTIONS
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	frame := ui.Panel {
-		rect     = r,
-		radius   = 7 * s,
-		scale    = s,
-		shadow_x = 2,
-		shadow_y = 3,
-	}
+	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
-	if render.push_layer(&w.list, r, 7 * s) != .None { return .Ok }
+	if render.push_layer(&w.list, r, ui.RADIUS_POPOVER * s) != .None { return .Ok }
 	if workspace_picker_icons(p) { return workspace_icon_picker_draw(app, w) }
 	box := workspace_picker_query_box(w)
 	field := box.rect
-	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = 5 * s}) != .None { return .Ok }
+	field_fill := render.Rect_Instance{rect = field, color = app.theme.pane, radius = ui.RADIUS_CONTROL * s}
+	if render.push_rect(&w.list, field_fill) != .None {
+		return .Ok
+	}
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
 		p.mode == .List, "Search workspaces"); result != .Ok { return result }
-	if render.push_layer(&w.list, r, 7 * s) != .None { return .Ok }
+	if render.push_layer(&w.list, r, ui.RADIUS_POPOVER * s) != .None { return .Ok }
 	for visible in 0..<rows {
 		i := p.scroll + visible
 		if i >= workspace_picker_count(w) { break }
 		row := workspace_picker_row_rect(w, i)
 		if !workspace_picker_icons(p) && i == len(p.rows) {
-			divider := render.Rect{row.x + 6 * s, row.y - 5 * s, max(0, row.width - 12 * s), s}
+			divider := render.Rect{row.x + 8 * s, row.y - 4 * s, max(0, row.width - 16 * s), s}
 			if render.push_rect(&w.list, {rect = divider, color = app.theme.border}) !=
 			   .None {return .Ok}
 		}
 		if i == p.selected {
 			if render.push_rect(
 				   &w.list,
-				   {rect = row, color = app.theme.selection, radius = 5 * s},
+				   {rect = row, color = app.theme.selection, radius = ui.RADIUS_INNER * s},
 			   ) !=
 			   .None {return .Ok}
 		}
@@ -554,17 +556,17 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		} else if p.move.workspace != 0 {label = "Move to New Workspace"}
 		else {label = action_info[actions[i - len(p.rows)]].title}
 		baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
-		label_x := row.x + 8 * s
+		label_x := row.x + ui.CONTROL_INSET * s
 		if has_icon {
 			if result := workspace_icon_draw(
 				w,
 				icon,
-				{row.x + 6 * s, row.y + 5 * s, 24 * s, 24 * s},
+				{row.x + 6 * s, row.y + (row.height - 24 * s) / 2, 24 * s, 24 * s},
 				app.theme.text,
 			); result != .Ok {return result}
 			label_x += 30 * s
 		}
-		right := row.x + row.width - 8 * s
+		right := row.x + row.width - ui.CONTROL_INSET * s
 		if has_icon && p.move.workspace == 0 {
 			workspace_row_ellipsis_draw(app, w, i)
 			right -= 36 * s
@@ -595,7 +597,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				&w.list,
 				app.theme,
 				row,
-				5 * s,
+				ui.RADIUS_INNER * s,
 				1,
 				s,
 				w.pointer,

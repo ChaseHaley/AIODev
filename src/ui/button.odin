@@ -1,5 +1,6 @@
 package ui
 
+import "aio:glyphs"
 import "aio:render"
 
 // The surface every chrome button shares: the raised hover (lift, seat shadow, fill, rim light),
@@ -79,4 +80,37 @@ icon_button_draw :: proc(
 	face, ink, err := button_draw(list, theme, b, scale, pointer)
 	icon_draw(list, icon, face, ink, size, scale)
 	return err
+}
+
+// A secondary text button: the raised surface with a hairline border and a centred label. The
+// pointer light shows while the pointer is over it; `focused` draws the keyboard focus ring.
+text_button_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	rect: render.Rect,
+	label: string,
+	focused: bool,
+	scale: f32,
+	pointer: [2]f32,
+) -> glyphs.Result {
+	if rect.width <= 0 {return .Ok}
+	radius := RADIUS_CONTROL * scale
+	draw_rect(list, {rect = rect, color = theme.surface, radius = radius})
+	draw_rect(list, {rect = rect, color = theme.border, radius = radius, stroke = scale})
+	if focused {focus_ring_draw(list, rect, theme, scale)}
+	if contains(rect, pointer.x, pointer.y) {
+		if hover_rim_draw(list, theme, rect, radius, 1, scale, pointer, true) != .None {return .Ok}
+	}
+	inset := CONTROL_INSET * scale
+	width := min(text_width(text, label), max(0, rect.width - 2 * inset))
+	return draw_text(
+		text,
+		list,
+		label,
+		rect.x + (rect.width - width) / 2,
+		rect.y + (rect.height - text.line_height) / 2 + text.ascent,
+		theme.text,
+		max(1, rect.width - 2 * inset),
+	)
 }

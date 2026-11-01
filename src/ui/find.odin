@@ -11,7 +11,6 @@ import "core:time"
 @(private) FIND_HEIGHT :: 40
 @(private) FIND_MARGIN :: 12
 @(private) FIND_PADDING :: 12
-@(private) FIND_RADIUS :: 8
 @(private) FIND_TOGGLE :: 28
 @(private) FIND_HISTORY_LIMIT :: 100
 
@@ -379,14 +378,7 @@ find_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
-	frame := Panel {
-		rect     = panel,
-		radius   = FIND_RADIUS * scale,
-		scale    = scale,
-		shadow_y = 12,
-		softness = 32,
-		border   = .Expanded,
-	}
+	frame := popover_panel(panel, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
 	count := input_text
 	if measured := text_width(&count, status); measured > l.status.width && measured > 0 {

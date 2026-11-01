@@ -38,11 +38,11 @@ Confirm_Layout :: struct {
 @(private)
 CONFIRM_WIDTH :: 380
 @(private)
-CONFIRM_HEIGHT :: 150
+CONFIRM_HEIGHT :: 144
 @(private)
 CONFIRM_BUTTON_WIDTH :: 96
 @(private)
-CONFIRM_BUTTON_HEIGHT :: 30
+CONFIRM_BUTTON_HEIGHT :: CONTROL_HEIGHT
 @(private)
 CONFIRM_PRESENCE :: Presence_Spec {
 	open  = 120 * time.Millisecond,
@@ -72,9 +72,10 @@ confirm_layout :: proc(width, height, scale: f32, extended := false, show_option
 		panel_width,
 		CONFIRM_HEIGHT * s,
 	}
-	y := panel.y + panel.height - 16 * s - CONFIRM_BUTTON_HEIGHT * s
+	pad := DIALOG_PADDING * s
+	y := panel.y + panel.height - pad - CONFIRM_BUTTON_HEIGHT * s
 	accept := render.Rect {
-		panel.x + panel.width - 16 * s - CONFIRM_BUTTON_WIDTH * s,
+		panel.x + panel.width - pad - CONFIRM_BUTTON_WIDTH * s,
 		y,
 		CONFIRM_BUTTON_WIDTH * s,
 		CONFIRM_BUTTON_HEIGHT * s,
@@ -84,9 +85,9 @@ confirm_layout :: proc(width, height, scale: f32, extended := false, show_option
 	option := render.Rect{}
 	if show_option {
 		option = {
-			panel.x + 16 * s,
+			panel.x + pad,
 			y,
-			max(0, cancel.x - 8 * s - panel.x - 16 * s),
+			max(0, cancel.x - 8 * s - panel.x - pad),
 			CONFIRM_BUTTON_HEIGHT * s,
 		}
 	}
@@ -201,7 +202,7 @@ confirm_button_draw :: proc(
 	r := rect
 	r.y -= lift
 	if lift > 0 {
-		if result := hover_shadow_draw(list, theme, r, 6 * scale, hover, scale);
+		if result := hover_shadow_draw(list, theme, r, RADIUS_CONTROL * scale, hover, scale);
 		   result != .None {return .Ok}
 	}
 	fill := accept ? theme.error : theme.border
@@ -209,9 +210,9 @@ confirm_button_draw :: proc(
 		fill = theme.hover
 		fill.a *= hover
 	}
-	draw_rect(list, {rect = r, color = fill, radius = 6 * scale})
+	draw_rect(list, {rect = r, color = fill, radius = RADIUS_CONTROL * scale})
 	if accept && active {
-		draw_rect(list, {rect = r, color = theme.pressed, radius = 6 * scale})
+		draw_rect(list, {rect = r, color = theme.pressed, radius = RADIUS_CONTROL * scale})
 	}
 	if c.focus == button {focus_ring_draw(list, r, theme, scale)}
 	strong := text_styled(text, .Strong)
@@ -227,7 +228,7 @@ confirm_button_draw :: proc(
 	); result != .Ok {return result}
 	if hover > 0 {
 		// The destructive button keeps its error fill, so it takes no paper hairline.
-		if result := hover_rim_draw(list, theme, r, 6 * scale, hover, scale, pointer, !accept);
+		if result := hover_rim_draw(list, theme, r, RADIUS_CONTROL * scale, hover, scale, pointer, !accept);
 		   result != .None {return .Ok}
 	}
 	return .Ok
@@ -249,60 +250,56 @@ confirm_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
 	p := l.panel
-	frame := Panel {
-		rect     = p,
-		radius   = 10 * s,
-		scale    = s,
-		shadow_y = 12,
-		softness = 32,
-		border   = .Expanded,
-	}
+	frame := dialog_panel(p, s)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
-	strong := text_styled(text, .Strong)
-	text_set_size(&strong, strong.size_px * 1.15)
-	inner := p.width - 40 * s
+	heading := text_styled(text, .Heading)
+	pad := DIALOG_PADDING * s
+	inner := p.width - 2 * pad
+	top := p.y + pad
 	if r := draw_fading_text(
-		&strong,
+		&heading,
 		list,
 		title,
-		p.x + 20 * s,
-		p.y + 20 * s + strong.ascent,
+		p.x + pad,
+		top + heading.ascent,
 		theme.text,
 		inner,
 	); r != .Ok {
 		return r
 	}
+	top += heading.line_height + 8 * s
 	small := text_styled(text, .Small)
 	if r := draw_text(
 		text,
 		list,
 		body,
-		p.x + 20 * s,
-		p.y + 54 * s + text.ascent,
+		p.x + pad,
+		top + text.ascent,
 		theme.muted,
 		inner,
 	); r != .Ok {
 		return r
 	}
+	top += text.line_height + 6 * s
 	if r := draw_fading_text(
 		&small,
 		list,
 		note,
-		p.x + 20 * s,
-		p.y + 78 * s + small.ascent,
+		p.x + pad,
+		top + small.ascent,
 		theme.faint,
 		inner,
 	); r != .Ok {return r}
 	if c.show_option && option_label != "" {
 		box := render.Rect {
 			l.option.x,
-			l.option.y + (l.option.height - 15 * s) / 2,
-			15 * s,
-			15 * s,
+			l.option.y + (l.option.height - 16 * s) / 2,
+			16 * s,
+			16 * s,
 		}
-		draw_rect(list, {rect = box, color = theme.border, radius = 3 * s})
+		draw_rect(list, {rect = box, color = theme.border, radius = RADIUS_INNER * s})
 		if c.option {
-			draw_rect(list, {rect = box, color = theme.accent, radius = 3 * s})
+			draw_rect(list, {rect = box, color = theme.accent, radius = RADIUS_INNER * s})
 			icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, s)
 		}
 		if c.focus == .Option {focus_ring_draw(list, box, theme, s)}
@@ -310,10 +307,10 @@ confirm_draw :: proc(
 			&small,
 			list,
 			option_label,
-			box.x + 23 * s,
+			box.x + box.width + 8 * s,
 			box.y + (box.height - small.line_height) / 2 + small.ascent,
 			theme.muted,
-			max(0, l.option.width - 26 * s),
+			max(0, l.option.width - box.width - 8 * s),
 		); r != .Ok {return r}
 	}
 	if r := confirm_button_draw(c, list, text, theme, l.cancel, .Cancel, "Cancel", s, pointer);

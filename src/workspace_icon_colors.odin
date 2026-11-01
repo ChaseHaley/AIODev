@@ -110,7 +110,7 @@ workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if row < 0 || row >= g.visible_rows { continue }
 		cell := workspace_icon_picker_cell(w, g, i)
 		if i == p.selected {
-			hover := render.Rect_Instance{rect = cell, color = app.theme.selection, radius = 5 * s}
+			hover := render.Rect_Instance{rect = cell, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s}
 	if render.push_rect(&w.list, hover) != .None { return .Ok }
 		}
 		icon := render.Rect{cell.x + 10 * s, cell.y + 8 * s, 24 * s, 24 * s}
@@ -121,15 +121,21 @@ workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				color = app.theme.accent, radius = s}) != .None { return .Ok }
 		}
 	}
-	if render.push_layer(&w.list, g.panel, 7 * s) != .None { return .Ok }
+	if render.push_layer(&w.list, g.panel, ui.RADIUS_POPOVER * s) != .None { return .Ok }
 	if render.push_rect(&w.list, {rect = g.divider, color = app.theme.border}) != .None { return .Ok }
 	@(static, rodata) colors := WORKSPACE_ICON_COLORS
 	label := p.selected < len(colors) ? colors[p.selected].name : "Emoji keep their original colors"
-	if result := ui.draw_fading_text(&w.ui_text, &w.list, label, g.field.x + 8 * s,
-		g.field.y + 22 * s, app.theme.text, max(0, g.field.width - 16 * s)); result != .Ok { return result }
+	inset := ui.CONTROL_INSET * s
+	middle := proc(r: render.Rect, t: ^ui.Text) -> f32 {return r.y + (r.height - t.line_height) / 2 + t.ascent}
+	if result := ui.draw_fading_text(&w.ui_text, &w.list, label, g.field.x + inset,
+		middle(g.field, &w.ui_text), app.theme.text, max(0, g.field.width - 2 * inset)); result != .Ok {
+		return result
+	}
 	fill := p.selected == len(colors) ? app.theme.selection : app.theme.pane
-	if render.push_rect(&w.list, {rect = g.apply, color = fill, radius = 5 * s}) != .None { return .Ok }
-	return ui.draw_text(&w.ui_text, &w.list, "Back to icons", g.apply.x + 8 * s,
-		g.apply.y + (g.apply.height - w.ui_text.line_height) / 2 + w.ui_text.ascent, app.theme.text,
-		max(0, g.apply.width - 16 * s))
+	apply := render.Rect_Instance{rect = g.apply, color = fill, radius = ui.RADIUS_CONTROL * s}
+	if render.push_rect(&w.list, apply) != .None { return .Ok }
+	back := "Back to icons"
+	back_x := g.apply.x + max(inset, (g.apply.width - ui.text_width(&w.ui_text, back)) / 2)
+	return ui.draw_text(&w.ui_text, &w.list, back, back_x, middle(g.apply, &w.ui_text), app.theme.text,
+		max(0, g.apply.width - 2 * inset))
 }
