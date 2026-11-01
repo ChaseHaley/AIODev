@@ -343,7 +343,7 @@ SCHEMA :: [?]Schema_Entry {
 		"Status on the Active Tab",
 		.Bool,
 		offset_of(Settings, status) + offset_of(Status_Settings, active_tab_indicator),
-		"false",
+		"true",
 		0,
 		0,
 		nil,
