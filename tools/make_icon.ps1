@@ -55,6 +55,7 @@ foreach ($size in $sizes) {
 }
 
 $output = Join-Path (Split-Path $PSScriptRoot -Parent) 'assets\aiodev.ico'
+[System.IO.File]::WriteAllBytes((Join-Path (Split-Path $output) 'aiodev-notification.png'), $entries[$sizes.Count - 1])
 $file = [System.IO.File]::Create($output)
 $writer = New-Object System.IO.BinaryWriter($file)
 try {

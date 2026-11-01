@@ -8,6 +8,9 @@
 #include <winrt/Windows.UI.Notifications.h>
 #include <algorithm>
 #include <atomic>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -52,10 +55,66 @@ struct Notifications {
     }
 };
 
+static std::wstring notification_icon() {
+    // IconUri needs an image file, not an executable containing icon resources.
+    auto resource = FindResourceW(nullptr, MAKEINTRESOURCEW(2), MAKEINTRESOURCEW(10));
+    check_bool(resource != nullptr);
+    auto size = SizeofResource(nullptr, resource);
+    check_bool(size != 0);
+    auto loaded = LoadResource(nullptr, resource);
+    check_bool(loaded != nullptr);
+    auto bytes = LockResource(loaded);
+    if (!bytes) throw_hresult(E_UNEXPECTED);
+    PWSTR local = nullptr;
+    check_hresult(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local));
+    std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned_local(local, &CoTaskMemFree);
+    std::wstring directory(owned_local.get());
+    directory += L"\\AIODev";
+    if (!CreateDirectoryW(directory.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        throw_last_error();
+    }
+    auto path = directory + L"\\notification-icon.png";
+    // Readers and other app windows keep using the published image without write conflicts.
+    {
+        std::ifstream existing(std::filesystem::path(path), std::ios::binary);
+        std::vector<char> content(size);
+        if (existing.read(content.data(), size) && existing.peek() == std::char_traits<char>::eof() &&
+            !existing.bad() && std::memcmp(content.data(), bytes, size) == 0) return path;
+    }
+    wchar_t temporary[MAX_PATH];
+    check_bool(GetTempFileNameW(directory.c_str(), L"aio", 0, temporary) != 0);
+    auto remove_temporary = [&] {
+        if (!DeleteFileW(temporary)) OutputDebugStringW(L"AIODev temporary notification icon cleanup failed\n");
+    };
+    auto file = CreateFileW(temporary, GENERIC_WRITE, 0, nullptr,
+                            TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        auto error = GetLastError();
+        remove_temporary();
+        throw_hresult(HRESULT_FROM_WIN32(error));
+    }
+    DWORD written = 0;
+    auto result = WriteFile(file, bytes, size, &written, nullptr);
+    auto error = result ? ERROR_SUCCESS : GetLastError();
+    auto closed = CloseHandle(file);
+    if (error == ERROR_SUCCESS && !closed) error = GetLastError();
+    if (error == ERROR_SUCCESS && written != size) error = ERROR_WRITE_FAULT;
+    if (error == ERROR_SUCCESS && !MoveFileExW(temporary, path.c_str(),
+                                               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        error = GetLastError();
+    }
+    if (error != ERROR_SUCCESS) {
+        remove_temporary();
+        throw_hresult(HRESULT_FROM_WIN32(error));
+    }
+    return path;
+}
+
 static void register_identity() {
     wchar_t exe[32768];
     auto length = GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
     if (!length || length >= ARRAYSIZE(exe)) throw_hresult(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER));
+    auto icon = notification_icon();
     check_hresult(SetCurrentProcessExplicitAppUserModelID(APP_ID));
     HKEY key = nullptr;
     check_hresult(HRESULT_FROM_WIN32(RegCreateKeyExW(HKEY_CURRENT_USER,
@@ -64,7 +123,7 @@ static void register_identity() {
     auto name_result = RegSetValueExW(key, L"DisplayName", 0, REG_SZ,
         reinterpret_cast<const BYTE *>(L"AIODev"), sizeof(L"AIODev"));
     auto icon_result = RegSetValueExW(key, L"IconUri", 0, REG_SZ,
-        reinterpret_cast<const BYTE *>(exe), (length + 1) * sizeof(wchar_t));
+        reinterpret_cast<const BYTE *>(icon.c_str()), static_cast<DWORD>((icon.size() + 1) * sizeof(wchar_t)));
     auto close_result = RegCloseKey(key);
     check_hresult(HRESULT_FROM_WIN32(name_result));
     check_hresult(HRESULT_FROM_WIN32(icon_result));
