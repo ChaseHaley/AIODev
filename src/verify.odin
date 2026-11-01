@@ -388,7 +388,7 @@ when AIO_CONTROL {
 				{"settings.profile.expanded", w.editor.expanded},
 				{"settings.profile.default", app.settings.profiles.default_id},
 				{"settings.profile.detected_open", fmt.tprintf("%t", w.editor.detected_open)},
-				{"settings.profile.removing", w.editor.remove_confirm},
+				{"settings.profile.removing", w.profile_remove_confirm.open ? w.profile_remove_id : ""},
 				{"settings.profile.action", fmt.tprintf("%v", w.editor.action)},
 				{"settings.profile.error_key", w.editor.error_key},
 				{"settings.profile.error", w.editor.error_text},

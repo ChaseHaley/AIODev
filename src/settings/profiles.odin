@@ -17,7 +17,7 @@ PROFILE_DEFAULT_FIELDS :: [3]string{"command", "directory", "icon"}
 // record whether the file or detection supplied them, so a later finalize can inherit the rest.
 Profile :: struct {
 	id, name, command, directory, icon: string,
-	hidden, detected:                  bool,
+	hidden, detected, builtin:         bool,
 	line:                              int,
 	name_set, command_set:             bool,
 	directory_set, icon_set:           bool,
@@ -462,7 +462,7 @@ profile_resolve :: proc(s: ^Settings, id: string) -> (profile: ^Profile, request
 }
 
 profile_visible :: proc(profile: ^Profile) -> bool {
-	return !profile.detected && !profile.hidden && profile.command != ""
+	return !profile.hidden && profile.command != ""
 }
 
 // A profile found on this machine rather than written in settings.ini.
@@ -502,6 +502,7 @@ profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allo
 		if profile == nil {return nil}
 	}
 	if created {profile.detected = true}
+	profile.builtin = true
 	if !profile.name_set {
 		if err := profile_own(&profile.name, detected.name, p.allocator); err != nil {return err}
 		profile.name_set = true

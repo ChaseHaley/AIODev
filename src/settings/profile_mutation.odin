@@ -29,10 +29,9 @@ profile_mutate :: proc(
 		return "", "", "", .Limit
 	}
 	if change.kind == .Enable && !profile.detected {return "", "", "", .Unavailable}
-	if change.kind == .Remove && (profile.id == PROFILE_DEFAULT_ID || profile.detected) {
+	if change.kind == .Remove && (profile.id == PROFILE_DEFAULT_ID || profile.builtin) {
 		return "", "", "", .Unavailable
 	}
-	if change.kind == .Move && profile.detected {return "", "", "", .Unavailable}
 	target := change.id
 	if change.kind == .Add || change.kind == .Duplicate {
 		for number := 1; ; number += 1 {

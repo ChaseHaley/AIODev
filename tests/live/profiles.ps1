@@ -178,28 +178,9 @@ try {
     Invoke-Aio mouse up "$($gamma.x + 40),$($gamma.y + $gamma.h - 4)" --px | Out-Null
     Assert-FileLine 'profile.order = beta, gamma, alpha, default' 'order drag rewrites profile.order'
 
-    # Detected section: open it, then Enable the first shell detection found on this PC.
     Jump-Profiles
     $state = Read-State
-    $header = Rect $state['settings.profile.detected_header']
-    if ($null -eq $header) { throw 'No detected section on this PC.' }
-    Invoke-Aio mouse click "$($header.x + 120),$($header.y + $header.h / 2)" --px | Out-Null
-    Assert-Value (Read-State)['settings.profile.detected_open'] 'true' 'detected section opens'
-    $state = Read-State
-    $detected = @(Rows $state['settings.profile.detected_rows'])
-    if ($detected.Count -eq 0) { throw 'No detected shell to enable on this PC.' }
-    $beforeCount = [int] $state['settings.profile.app_detected']
-    $target = $detected[0].id
-    Click-Row $state['settings.profile.detected_rows'] $target
-    Invoke-Aio key Enter | Out-Null
-    Assert-FileLine "profile.$target.hidden = false" 'Enable writes explicit overrides'
-    $state = Read-State
-    Assert-Value $state['settings.profile.expanded'] $target 'enabled profile opens in the main table'
-    if ([int] $state['settings.profile.app_detected'] -ne $beforeCount - 1) {
-        throw 'Enabled detected profile stayed in the detected section.'
-    }
-    Write-Output 'PASS enabling removes the detected row'
-
+    Assert-Value $state['settings.profile.detected_header'] '' 'no separate detected header'
     # Remove through the row confirmation.
     Invoke-Aio key Esc | Out-Null
     Jump-Profiles
@@ -207,8 +188,8 @@ try {
     $beforeCount = [int] $state['settings.profile.app_count']
     Click-Row $state['settings.profile.rows'] 'gamma'
     Invoke-Aio key Tab Delete | Out-Null
-    Assert-Value (Read-State)['settings.profile.removing'] 'gamma' 'Delete asks inside the row'
-    Invoke-Aio key Enter | Out-Null
+    Assert-Value (Read-State)['settings.profile.removing'] 'gamma' 'Delete opens shared confirmation'
+    Invoke-Aio key Left Enter | Out-Null
     $state = Read-State
     Assert-Value $state['settings.profile.removing'] '' 'confirmation removes the row'
     if ([int] $state['settings.profile.app_count'] -ne $beforeCount - 1) {

@@ -93,10 +93,10 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 	}
 	defer settings.destroy(&s)
 	// The page parses its own copy of the file; detection results live on the running settings.
-	// Reusing the cached results adds the detected section without touching the file or the disk.
+	// Reuse machine discovery without touching the file or the disk.
 	settings.profiles_begin_detection(&s.profiles)
 	for &detected in app.settings.profiles.items {
-		if !detected.detected {continue}
+		if !detected.builtin {continue}
 		_ = settings.profile_detect(
 			&s,
 			{detected.id, detected.name, detected.command, detected.directory},
@@ -160,6 +160,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		if row.is_default {flags += {.Default}}
 		if row.hidden {flags += {.Hidden}}
 		if row.listed {flags += {.Listed}}
+		if row.detected {flags += {.Protected}}
 		detail := fmt.tprintf(
 			"%s %s %s name command line starting directory icon hidden duplicate remove",
 			row.command,
@@ -233,38 +234,6 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 				profile = row.id,
 				kind = .Toggle,
 			},
-			{
-				key = fmt.tprintf("%s.duplicate", prefix),
-				title = "Duplicate Profile",
-				description = "Add a copy with its own command line and starting directory.",
-				value = "Duplicate",
-				profile = row.id,
-				kind = .Action,
-			},
-			{
-				key = fmt.tprintf("%s.remove", prefix),
-				title = "Remove Profile",
-				description = "Panes keep running; a restarted pane uses its recorded command.",
-				value = "Remove…",
-				profile = row.id,
-				kind = .Action,
-			},
-			{
-				key = fmt.tprintf("%s.remove.cancel", prefix),
-				title = "Cancel Removal",
-				description = "Keep this profile and leave the table as it is.",
-				value = "Cancel",
-				profile = row.id,
-				kind = .Action,
-			},
-			{
-				key = fmt.tprintf("%s.remove.confirm", prefix),
-				title = "Confirm Remove Profile",
-				description = "Remove every line this profile owns; running panes keep their shells.",
-				value = "Remove Profile",
-				profile = row.id,
-				kind = .Action,
-			},
 		}
 		remove_prefix := fmt.tprintf("%s.remove", prefix)
 		for field in rows {
@@ -291,50 +260,6 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		ui.editor_destroy(p)
 		notify(app, .Error, "Could not allocate the profile table.")
 		return false
-	}
-	if len(table.detected) > 0 {
-		names := make([dynamic]string, 0, len(table.detected), context.temp_allocator)
-		for row in table.detected {append(&names, fmt.tprintf("%s %s", row.name, row.command))}
-		if !settings_add_profile_row(
-			   p,
-			   {
-				   key = "profiles.detected",
-				   title = "Detected on this PC",
-				   description = "Shells found on this machine that the settings file has not enabled.",
-				   value = fmt.tprintf("%d", len(table.detected)),
-				   detail = strings.join(names[:], " ", context.temp_allocator),
-				   kind = .Detected_Header,
-			   },
-			   profile_group,
-		   ) {
-			ui.editor_destroy(p)
-			notify(app, .Error, "Could not allocate the profile table.")
-			return false
-		}
-		for row in table.detected {
-			flags: bit_set[ui.Editor_Row_Flag]
-			if row.is_default {flags += {.Default}}
-			if row.listed {flags += {.Listed}}
-			if !settings_add_profile_row(
-				p,
-				{
-					key = fmt.tprintf("profile.%s", row.id),
-					title = row.name,
-					description = row.command,
-					value = row.directory,
-					detail = fmt.tprintf("%s %s", row.command, row.directory),
-					profile = row.id,
-					badge = row.badge,
-					kind = .Detected,
-					flags = flags,
-				},
-				profile_group,
-			) {
-				ui.editor_destroy(p)
-				notify(app, .Error, "Could not allocate the profile table.")
-				return false
-			}
-		}
 	}
 	ui.editor_group_table(p, profile_group)
 	if !settings_add_theme_rows(p, &s) {
@@ -363,11 +288,6 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 	p.leader = app.leader
 	p.open = true
 	ui.editor_view_restore(p, &view)
-	// A configured default that is still only detected has no radio in the main table, so its
-	// section must be open for the default to remain visible.
-	for row in table.detected {
-		if row.is_default {p.detected_open = true}
-	}
 	ui.editor_hover_clear(p)
 	ui.editor_filter(p)
 	if len(diagnostics) > 0 {
@@ -844,7 +764,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window) {
 	case .Duplicate:
 		editor_profile_mutate(app, w, {kind = .Duplicate, id = id})
 	case .Remove:
-		editor_profile_mutate(app, w, {kind = .Remove, id = id})
+		editor_profile_remove_ask(app, w, id)
 	}
 }
 
@@ -1151,4 +1071,26 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		}
 	}
 	editor_outcome(app, w, ui.editor_key(p, e))
+}
+
+editor_profile_remove_ask :: proc(app: ^App, w: ^Window, id: string) {
+	profile := settings.profile_find(&app.settings.profiles, id)
+	if profile == nil || profile.builtin || id == settings.PROFILE_DEFAULT_ID {return}
+	delete(w.profile_remove_id)
+	w.profile_remove_id = strings.clone(id)
+	ui.confirm_open(&w.profile_remove_confirm)
+	w.profile_remove_confirm.focus = .Cancel
+	w.profile_remove_confirm.show_option = false
+	w.dirty = true
+}
+
+editor_profile_remove_finish :: proc(app: ^App, w: ^Window, accepted: bool) {
+	ui.confirm_close(&w.profile_remove_confirm)
+	if accepted {editor_profile_mutate(app, w, {kind = .Remove, id = w.profile_remove_id})}
+	w.dirty = true
+}
+
+profile_remove_clear :: proc(w: ^Window) {
+	delete(w.profile_remove_id)
+	w.profile_remove_id, w.profile_remove_confirm = "", {}
 }

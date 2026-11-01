@@ -40,6 +40,7 @@ Editor_Row_Flag :: enum {
 	Hidden,
 	// The profile already has an explicit profile.order entry.
 	Listed,
+	Protected,
 }
 
 // Strings, `choices` and `choice_labels` are owned by the editor. `choice_labels`, when present,
@@ -1209,7 +1210,7 @@ profile_control_step :: proc(p: ^Editor, row: ^Editor_Row, step: int) {
 	} else {
 		order[0], order[1], order[2], order[3], order[4] =
 			.Radio, .Hidden, .Expand, .Duplicate, .Remove
-		count = row.profile == settings.PROFILE_DEFAULT_ID ? 4 : 5
+		count = (row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags) ? 4 : 5
 	}
 	index := 0
 	for control, i in order[:count] {if control == p.profile_control {index = i}}
@@ -1236,8 +1237,8 @@ profile_activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 		editor_action_set(p, .Duplicate, row.profile, "")
 		return .Profile_Action
 	case .Remove:
-		editor_profile_remove_ask(p, row.profile)
-		return .Changed
+		editor_action_set(p, .Remove, row.profile, "")
+		return .Profile_Action
 	case .Enable:
 		editor_action_set(p, .Enable, row.profile, "")
 		return .Profile_Action
@@ -1445,8 +1446,9 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	case .Delete, .Backspace:
 		if control {break}
 		if p.focus == .Control && row != nil && row.kind == .Profile {
-			editor_profile_remove_ask(p, row.profile)
-			return .Changed
+			if row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags {return .Changed}
+			editor_action_set(p, .Remove, row.profile, "")
+			return .Profile_Action
 		}
 	case .R:
 		if control {return row == nil ? .None : .Reset}
@@ -1903,11 +1905,11 @@ editor_press :: proc(
 			editor_action_set(p, .Duplicate, row.profile, "")
 			return .Profile_Action
 		case row.kind == .Profile &&
-		     row.profile != settings.PROFILE_DEFAULT_ID &&
+		     row.profile != settings.PROFILE_DEFAULT_ID && .Protected not_in row.flags &&
 		     contains(table.remove, x, y):
 			p.focus, p.profile_control = .Control, .Remove
-			editor_profile_remove_ask(p, row.profile)
-			return .Changed
+			editor_action_set(p, .Remove, row.profile, "")
+			return .Profile_Action
 		case row.kind == .Detected && contains(table.enable, x, y):
 			p.focus, p.profile_control = .Control, .Enable
 			editor_action_set(p, .Enable, row.profile, "")
@@ -1918,7 +1920,8 @@ editor_press :: proc(
 		case row.kind == .Profile_Add:
 			return .Save
 		case row.kind == .Profile:
-			if row.profile == settings.PROFILE_DEFAULT_ID && contains(table.remove, x, y) {
+			if (row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags) &&
+			   contains(table.remove, x, y) {
 				return .Changed
 			}
 			editor_profile_toggle(p, row.profile)
@@ -2107,7 +2110,8 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 					profile_control = .Expand
 				case contains(table.duplicate, x, y):
 					profile_control = .Duplicate
-				case row.profile != settings.PROFILE_DEFAULT_ID && contains(table.remove, x, y):
+				case row.profile != settings.PROFILE_DEFAULT_ID && .Protected not_in row.flags &&
+				     contains(table.remove, x, y):
 					profile_control = .Remove
 				case contains(table.enable, x, y):
 					profile_control = .Enable
@@ -2448,7 +2452,8 @@ profile_row_draw :: proc(
 			{table.remove, .Trash, ICON_BUTTON, .Remove},
 		}
 		for control in controls {
-			enabled := !(control.kind == .Remove && row.profile == settings.PROFILE_DEFAULT_ID)
+			protected := row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags
+			enabled := !(control.kind == .Remove && protected)
 			profile_button_draw(
 				list,
 				control.rect,
@@ -2468,44 +2473,6 @@ profile_row_draw :: proc(
 	return .Ok
 }
 
-// Column captions for the profile table's group header line.
-@(private)
-profile_columns_draw :: proc(
-	row: render.Rect,
-	list: ^render.Draw_List,
-	text: ^Text,
-	theme: Theme,
-	scale: f32,
-) -> glyphs.Result {
-	label := text_styled(text, .Label)
-	columns := profile_columns(row, scale)
-	baseline := row.y + row.height - 12 * scale
-	captions := [?]struct {
-		rect: render.Rect,
-		name: string,
-	} {
-		{columns.name, "Profile"},
-		{columns.command, "Command line"},
-		{columns.directory, "Directory"},
-		{columns.default, "Default"},
-		{columns.hidden, "Hidden"},
-	}
-	for caption in captions {
-		if caption.rect.width < 34 * scale {continue}
-		if result := draw_text(
-			&label,
-			list,
-			caption.name,
-			caption.rect.x,
-			baseline,
-			theme.faint,
-			caption.rect.width,
-		); result != .Ok {return result}
-	}
-	return .Ok
-}
-
-// The Add Profile row closes the main table.
 @(private)
 profile_add_draw :: proc(
 	row: ^Editor_Row,
@@ -3157,8 +3124,6 @@ editor_draw :: proc(
 		}
 		if item.row < 0 {
 			baseline := r.y + r.height - 14 * s
-			table_group := p.groups[item.group].table
-			if table_group {baseline = r.y + 22 * s}
 			if index >
 			   0 {draw_rect(list, {rect = {r.x + 10 * s, r.y + 10 * s, r.width - 20 * s, s}, color = theme.border})}
 			if result := draw_text(
@@ -3179,11 +3144,6 @@ editor_draw :: proc(
 				baseline,
 				theme.faint,
 			); result != .Ok {return result}
-			if table_group {
-				if result := profile_columns_draw(r, list, text, theme, s); result != .Ok {
-					return result
-				}
-			}
 			continue
 		}
 		row := &p.rows[item.row]

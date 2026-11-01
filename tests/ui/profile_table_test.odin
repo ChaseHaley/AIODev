@@ -32,27 +32,27 @@ profile.order = cmd, pwsh
 }
 
 @(test)
-profile_table_builds_ordered_rows_and_separates_detected :: proc(t: ^testing.T) {
+profile_table_builds_one_ordered_list_including_detected :: proc(t: ^testing.T) {
 	s := profile_fixture_table(t)
 	defer settings.destroy(&s)
 	table, table_error := ui.profile_table_build(&s.profiles, always_exists)
 	defer ui.profile_table_destroy(&table)
 	testing.expect_value(t, table_error, nil)
-	testing.expect_value(t, len(table.rows), 5)
-	testing.expect_value(t, len(table.detected), 1)
+	testing.expect_value(t, len(table.rows), 6)
+	testing.expect_value(t, len(table.detected), 0)
 	testing.expect_value(t, table.rows[0].id, "cmd")
 	testing.expect_value(t, table.rows[1].id, "pwsh")
 	testing.expect_value(t, table.rows[2].id, "default")
 	testing.expect_value(t, table.rows[3].id, "missing")
 	testing.expect_value(t, table.rows[4].id, "ubuntu")
-	testing.expect_value(t, table.detected[0].id, "wsl-ubuntu")
+	testing.expect_value(t, table.rows[5].id, "wsl-ubuntu")
 	testing.expect_value(t, table.rows[0].badge, "C:")
 	testing.expect_value(t, table.rows[1].badge, ">_")
 	testing.expect_value(t, table.rows[4].badge, "$")
 	testing.expect(t, table.rows[0].hidden)
 	testing.expect(t, table.rows[2].is_default)
 	testing.expect(t, !table.rows[1].is_default)
-	testing.expect(t, table.detected[0].detected)
+	testing.expect(t, table.rows[5].detected)
 }
 
 @(test)
@@ -267,14 +267,10 @@ editor_profile_row_actions_write_default_hidden_and_remove :: proc(t: ^testing.T
 	ui.editor_action_clear(&p)
 
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Delete})), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.remove_confirm, "beta")
-	testing.expect_value(t, ui.editor_row(&p).key, "profile.beta.remove.confirm")
-	testing.expect(t, p.expanded == "beta")
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Delete})), ui.Editor_Outcome.Profile_Action)
+	testing.expect_value(t, p.action, ui.Profile_Action.Remove)
+	testing.expect_value(t, p.action_id, "beta")
 	testing.expect_value(t, p.remove_confirm, "")
-	testing.expect_value(t, ui.editor_row(&p).key, "profile.beta.remove")
-
 	ui.editor_error_set(&p, "beta", "profile.beta.name", "Another profile uses this name.")
 	testing.expect_value(t, p.error_text, "Another profile uses this name.")
 	ui.editor_select_key(&p, "profile.alpha")
@@ -480,4 +476,26 @@ editor_profile_column_captions_only_on_the_table_group :: proc(t: ^testing.T) {
 		testing.expect(t, group.table)
 	}
 	testing.expect(t, found)
+}
+
+@(test)
+profile_trash_requests_shared_confirmation_and_protects_detected :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	profile_editor_fixture(t, &p)
+	ui.editor_filter(&p)
+	layout := ui.editor_layout({0, 40, 1200, 4000}, 1)
+	testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
+	p.visible_rows = layout.rows
+	index := profile_item_index(&p, "profile.beta")
+	trash := ui.editor_profile_parts(&p, layout, index).remove
+	x, y := profile_center(trash)
+	testing.expect_value(t, ui.editor_press(&p, layout, nil, x, y, false), ui.Editor_Outcome.Profile_Action)
+	testing.expect_value(t, p.action, ui.Profile_Action.Remove)
+	testing.expect_value(t, p.action_id, "beta")
+	testing.expect_value(t, p.remove_confirm, "")
+	ui.editor_action_clear(&p)
+	ui.editor_row(&p).flags += {.Protected}
+	testing.expect_value(t, ui.editor_press(&p, layout, nil, x, y, false), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, p.action, ui.Profile_Action.None)
 }

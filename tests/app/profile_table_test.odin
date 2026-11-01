@@ -268,8 +268,13 @@ profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^tes
 	if !profile_fixture_create(t, &f, "generated-names", PROFILE_FIXTURE_SETTINGS) {return}
 	e := profile_open(&f)
 	for key, index in ([?]string{"profiles.add", "profiles.add", "profile.alpha.duplicate", "profile.alpha.duplicate"}) {
-		if !testing.expect(t, ui.editor_reveal(e, key)) {return}
-		app.editor_outcome(&f.state, f.state.windows[0], .Save)
+		if key == "profile.alpha.duplicate" {
+			e.action, e.action_id = .Duplicate, strings.clone("alpha")
+			app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
+		} else {
+			if !testing.expect(t, ui.editor_reveal(e, key)) {return}
+			app.editor_outcome(&f.state, f.state.windows[0], .Save)
+		}
 		if !testing.expect(t, !e.error) {return}
 		id := fmt.tprintf("profile-%d", index + 1)
 		profile := settings.profile_find(&f.state.settings.profiles, id)
@@ -289,7 +294,7 @@ profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^tes
 }
 
 @(test)
-profile_table_enables_a_detected_shell_and_duplicates_and_removes :: proc(t: ^testing.T) {
+profile_table_includes_detected_and_confirms_custom_removal :: proc(t: ^testing.T) {
 	f: Profile_Fixture
 	defer profile_fixture_destroy(t, &f)
 	if !profile_fixture_create(t, &f, "detected", PROFILE_FIXTURE_SETTINGS) {return}
@@ -304,55 +309,26 @@ profile_table_enables_a_detected_shell_and_duplicates_and_removes :: proc(t: ^te
 	testing.expect_value(t, settings.profiles_finalize(&f.state.settings), nil)
 	e := profile_open(&f)
 
-	if !testing.expect(t, ui.editor_select_key(e, "profiles.detected")) {return}
-	profile_press(&f, {key = .Enter})
-	testing.expect(t, e.detected_open)
-	if !testing.expect(t, ui.editor_select_key(e, "profile.fake-shell")) {return}
-	testing.expect_value(t, ui.editor_key(e, {key = .Enter, pressed = true}), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, e.action, ui.Profile_Action.Enable)
-	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
-	testing.expectf(
-		t,
-		profile_file_has(f.path, `profile.fake-shell.name = "Fake Shell"`),
-		"enable message=%s error=%s file:\n%s",
-		f.state.windows[0].editor.message,
-		f.state.windows[0].editor.error_text,
-		profile_file_text(f.path),
-	)
-	testing.expect(t, profile_file_has(f.path, `profile.fake-shell.command = "cmd.exe"`))
-	testing.expect(t, profile_file_has(f.path, `profile.fake-shell.directory = "~"`))
-	testing.expect(t, profile_file_has(f.path, "profile.fake-shell.hidden = false"))
-	testing.expect(t, profile_file_has(f.path, "profile.order = alpha, beta, gamma, default, fake-shell"))
-	enabled := settings.profile_find(&f.state.settings.profiles, "fake-shell")
-	if testing.expect(t, enabled != nil) {testing.expect(t, !enabled.detected)}
-
-	if !testing.expect(t, ui.editor_select_key(e, "profile.beta")) {return}
+	testing.expect(t, !ui.editor_select_key(e, "profiles.detected"))
+	testing.expect(t, ui.editor_select_key(e, "profile.fake-shell"))
+	testing.expect(t, .Protected in ui.editor_row(e).flags)
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect_value(t, e.remove_confirm, "beta")
-	if !testing.expect(t, ui.editor_select_key(e, "profile.beta.remove.confirm")) {return}
-	app.editor_outcome(&f.state, f.state.windows[0], .Save)
-	testing.expect(t, profile_file_lacks(f.path, "profile.beta."))
-	testing.expect(t, profile_file_has(f.path, "profile.order = alpha, gamma, default, fake-shell"))
-	testing.expect(t, settings.profile_find(&f.state.settings.profiles, "beta") == nil)
+	testing.expect(t, !f.state.windows[0].profile_remove_confirm.open)
+	testing.expect(t, settings.profile_visible(settings.profile_find(&f.state.settings.profiles, "fake-shell")))
+	app.editor_profile_remove_ask(&f.state, f.state.windows[0], "fake-shell")
+	testing.expect(t, !f.state.windows[0].profile_remove_confirm.open)
 
-	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha")) {return}
-	profile_press(&f, {key = .Enter})
-	ui.editor_profile_remove_ask(e, "alpha")
-	testing.expect_value(t, e.remove_confirm, "alpha")
-	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.duplicate")) {return}
-	app.editor_outcome(&f.state, f.state.windows[0], .Save)
-	testing.expect_value(t, e.remove_confirm, "")
-	testing.expectf(
-		t,
-		profile_file_has(f.path, `profile.profile-1.name = "Alpha copy"`),
-		"duplicate message=%s error=%s file:\n%s",
-		f.state.windows[0].editor.message,
-		f.state.windows[0].editor.error_text,
-		profile_file_text(f.path),
-	)
-	testing.expect(t, profile_file_has(f.path, "profile.order = alpha, profile-1, gamma, default, fake-shell"))
-	testing.expect_value(t, profile_value(&f, "profile-1", "command"), "cmd.exe")
+	testing.expect(t, ui.editor_select_key(e, "profile.beta"))
+	e.focus = .Control
+	profile_press(&f, {key = .Delete})
+	testing.expect(t, f.state.windows[0].profile_remove_confirm.open)
+	app.editor_profile_remove_finish(&f.state, f.state.windows[0], false)
+	testing.expect(t, !profile_file_lacks(f.path, "profile.beta.command"))
+	app.editor_profile_remove_ask(&f.state, f.state.windows[0], "beta")
+	app.editor_profile_remove_finish(&f.state, f.state.windows[0], true)
+	testing.expect(t, profile_file_lacks(f.path, "profile.beta."))
+	testing.expect(t, settings.profile_find(&f.state.settings.profiles, "beta") == nil)
 }
 
 @(test)
@@ -379,8 +355,8 @@ profile_table_keeps_the_built_in_default_and_resets_a_removed_default :: proc(t:
 	if !testing.expect(t, ui.editor_select_key(e, "profile.beta")) {return}
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect_value(t, e.remove_confirm, "beta")
-	app.editor_outcome(&f.state, f.state.windows[0], .Save)
+	testing.expect(t, f.state.windows[0].profile_remove_confirm.open)
+	app.editor_profile_remove_finish(&f.state, f.state.windows[0], true)
 	testing.expect(t, profile_file_lacks(f.path, "profile.beta."))
 	testing.expect(t, profile_file_has(f.path, `shell.default_profile = "default"`))
 	testing.expect_value(t, f.state.settings.profiles.default_id, "default")
@@ -413,7 +389,7 @@ profile_table_opens_detected_section_for_a_detected_default :: proc(t: ^testing.
 	)
 	testing.expect_value(t, settings.profiles_finalize(&f.state.settings), nil)
 	e := profile_open(&f)
-	testing.expect(t, e.detected_open)
+	testing.expect(t, !e.detected_open)
 	defaults := 0
 	for row in e.rows {
 		if .Default in row.flags {defaults += 1}

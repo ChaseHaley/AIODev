@@ -92,6 +92,8 @@ Window :: struct {
 	// Asks before a destructive close and holds its subject, live counts and presentation state.
 	pending_close: Pending_Close,
 	pending_swap:  Pane_Swap,
+	profile_remove_confirm: ui.Confirm,
+	profile_remove_id: string,
 	process_remove_confirm: ui.Confirm,
 	process_remove_name: string,
 	process_remove_source: string,

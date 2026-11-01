@@ -170,7 +170,7 @@ detected_only_profiles_are_replaced_on_reload :: proc(t: ^testing.T) {
 }
 
 @(test)
-visible_profiles_require_configuration_before_detection :: proc(t: ^testing.T) {
+detected_profiles_are_visible_by_default_and_can_be_hidden :: proc(t: ^testing.T) {
 	for configured in ([?]bool{false, true}) {
 		text := configured ? "profile.pwsh.hidden = false\n" : ""
 		s, diagnostics, err := settings.parse(text)
@@ -182,10 +182,10 @@ visible_profiles_require_configuration_before_detection :: proc(t: ^testing.T) {
 		), nil)
 		profile := settings.profile_find(&s.profiles, "pwsh")
 		if !testing.expect(t, profile != nil) {return}
-		testing.expect_value(t, settings.profile_visible(profile), configured)
+		testing.expect_value(t, settings.profile_visible(profile), true)
 		indices: [settings.PROFILE_LIMIT]int
 		count := settings.profiles_in_order(&s.profiles, indices[:], visible_only = true)
-		testing.expect_value(t, count, configured ? 2 : 1)
+		testing.expect_value(t, count, 2)
 		profile.hidden = true
 		testing.expect(t, !settings.profile_visible(profile))
 		profile.hidden = false

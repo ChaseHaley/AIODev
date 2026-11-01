@@ -91,7 +91,7 @@ profile_table_build :: proc(
 		profile := &profiles.items[index]
 		row := Profile_Row {
 			hidden     = profile.hidden,
-			detected   = profile.detected,
+			detected   = profile.builtin,
 			is_default = default != nil && profile.id == default.id,
 			listed     = settings.profile_order_has(profiles, profile.id),
 		}
@@ -115,7 +115,7 @@ profile_table_build :: proc(
 			note = fmt.tprintf("Command not found: %s.", executable)
 		}
 		row.note = strings.clone(note, allocator) or_return
-		target := profile.detected ? &table.detected : &table.rows
+		target := &table.rows
 		if _, append_error := append(target, row); append_error != nil {return {}, append_error}
 		row_ok = true
 	}
