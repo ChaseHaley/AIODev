@@ -16,9 +16,9 @@
 using namespace winrt;
 using namespace winrt::Windows::Data::Xml::Dom;
 using namespace winrt::Windows::UI::Notifications;
-constexpr wchar_t app_id[] = L"AIODev.ProgramStatus";
+constexpr wchar_t APP_ID[] = L"AIODev.ProgramStatus";
 
-struct pending_toast {
+struct Pending_Toast {
     ToastNotification toast{nullptr};
     ToastNotification::Activated_revoker activated;
     ToastNotification::Dismissed_revoker dismissed;
@@ -30,10 +30,10 @@ struct pending_toast {
         failed.revoke();
     }
 };
-struct notification_sink {
+struct Notification_Sink {
     std::mutex mutex;
     HWND window;
-    explicit notification_sink(HWND target) : window(target) {}
+    explicit Notification_Sink(HWND target) : window(target) {}
     void close() { std::lock_guard lock(mutex); window = nullptr; }
     void post(UINT message, WPARAM value) {
         std::lock_guard lock(mutex);
@@ -42,11 +42,11 @@ struct notification_sink {
         }
     }
 };
-struct notifications {
-    std::shared_ptr<notification_sink> window;
+struct Notifications {
+    std::shared_ptr<Notification_Sink> window;
     UINT message;
-    std::vector<pending_toast> pending;
-    ~notifications() {
+    std::vector<Pending_Toast> pending;
+    ~Notifications() {
         if (window) window->close();
         for (auto &item : pending) item.revoke();
     }
@@ -56,7 +56,7 @@ static void register_identity() {
     wchar_t exe[32768];
     auto length = GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
     if (!length || length >= ARRAYSIZE(exe)) throw_hresult(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER));
-    check_hresult(SetCurrentProcessExplicitAppUserModelID(app_id));
+    check_hresult(SetCurrentProcessExplicitAppUserModelID(APP_ID));
     HKEY key = nullptr;
     check_hresult(HRESULT_FROM_WIN32(RegCreateKeyExW(HKEY_CURRENT_USER,
         L"Software\\Classes\\AppUserModelId\\AIODev.ProgramStatus", 0, nullptr, 0,
@@ -71,17 +71,17 @@ static void register_identity() {
     check_hresult(HRESULT_FROM_WIN32(close_result));
     PWSTR programs = nullptr;
     check_hresult(SHGetKnownFolderPath(FOLDERID_Programs, 0, nullptr, &programs));
-    std::wstring path(programs);
-    CoTaskMemFree(programs);
+    std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned_programs(programs, &CoTaskMemFree);
+    std::wstring path(owned_programs.get());
     path += L"\\AIODev Notifications.lnk";
     auto link = create_instance<IShellLinkW>(CLSID_ShellLink);
     check_hresult(link->SetPath(exe));
     check_hresult(link->SetIconLocation(exe, 0));
     auto properties = link.as<IPropertyStore>();
     PROPVARIANT value{};
-    check_hresult(InitPropVariantFromString(app_id, &value));
+    check_hresult(InitPropVariantFromString(APP_ID, &value));
     auto result = properties->SetValue(PKEY_AppUserModel_ID, value);
-    PropVariantClear(&value);
+    check_hresult(PropVariantClear(&value));
     check_hresult(result);
     check_hresult(properties->Commit());
     check_hresult(link.as<IPersistFile>()->Save(path.c_str(), TRUE));
@@ -93,8 +93,8 @@ extern "C" HRESULT aio_notifications_create(HWND window, UINT message, void **ou
         check_hresult(RoInitialize(RO_INIT_SINGLETHREADED));
         try {
             register_identity();
-            auto state = std::make_unique<notifications>();
-            state->window = std::make_shared<notification_sink>(window);
+            auto state = std::make_unique<Notifications>();
+            state->window = std::make_shared<Notification_Sink>(window);
             state->message = message;
             *out = state.release();
         } catch (...) { RoUninitialize(); throw; }
@@ -104,7 +104,7 @@ extern "C" HRESULT aio_notifications_create(HWND window, UINT message, void **ou
 
 extern "C" void aio_notifications_destroy(void *state) noexcept {
     if (!state) return;
-    delete static_cast<notifications *>(state);
+    delete static_cast<Notifications *>(state);
     RoUninitialize();
 }
 
@@ -113,7 +113,7 @@ extern "C" HRESULT aio_notifications_show(
     const char **operation) noexcept {
     *operation = "prepare";
     try {
-        auto &state = *static_cast<notifications *>(context);
+        auto &state = *static_cast<Notifications *>(context);
         auto &items = state.pending;
         items.erase(std::remove_if(items.begin(), items.end(), [](auto &item) {
             if (!item.finished->load()) return false;
@@ -131,7 +131,7 @@ extern "C" HRESULT aio_notifications_show(
         texts.Item(1).AppendChild(xml.CreateTextNode(text));
         if (sound) xml.GetElementsByTagName(L"audio").Item(0).as<XmlElement>().SetAttribute(L"silent", L"false");
         *operation = "create toast";
-        pending_toast item;
+        Pending_Toast item;
         item.toast = ToastNotification(xml);
         item.finished = std::make_shared<std::atomic_bool>(false);
         auto finished = item.finished;
@@ -151,7 +151,7 @@ extern "C" HRESULT aio_notifications_show(
         });
         items.push_back(std::move(item));
         *operation = "create notifier";
-        auto notifier = ToastNotificationManager::CreateToastNotifier(app_id);
+        auto notifier = ToastNotificationManager::CreateToastNotifier(APP_ID);
         *operation = "show toast";
         notifier.Show(items.back().toast);
         return S_OK;
