@@ -57,7 +57,7 @@ Pointer_Surface :: struct {
 
 @(rodata)
 pointer_surfaces := [Pointer_Target]Pointer_Surface {
-	.Workspace_Picker = {picker_claims, picker_hover, workspace_picker_button, nil, nil},
+	.Workspace_Picker = {picker_claims, picker_hover, workspace_picker_button, nil, picker_tooltip},
 	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil, nil},
 	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil, nil},
 	.Status_Inbox     = {inbox_claims, inbox_hover, status_inbox_button, nil, nil},
@@ -106,10 +106,7 @@ pointer_move :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 }
 
 pointer_press :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Button_Event) {
-	if e.pressed && w.tooltip != "" {
-		w.tooltip, w.tooltip_deadline, w.tooltip_visible = "", {}, false
-		w.dirty = true
-	}
+	if e.pressed {tooltip_cancel(w)}
 	pointer_surfaces[owner].press(app, w, e)
 }
 
@@ -141,6 +138,14 @@ picker_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private = "file")
 picker_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
 	if owner == .Workspace_Picker {workspace_picker_hover(app, w, e)}
+}
+
+@(private = "file")
+picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	if w.workspace_picker.mode == .Icons && rect_contains(workspace_icon_color_button(w), x, y) {
+		return "Change icon color"
+	}
+	return ""
 }
 
 // Tab menu
@@ -579,7 +584,7 @@ tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 			if rect_contains(close, x, y) {return "Close tab"}
 		}
 		if ui.rail_footer_hit(layout, x, y) {
-			return ui.rail_profile_hit(layout, x, y) ? "Choose profile" : "New tab"
+			if ui.rail_profile_hit(layout, x, y) {return "Choose profile"}
 		}
 	}
 	return ""

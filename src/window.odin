@@ -66,6 +66,8 @@ Window :: struct {
 	pointer: [2]f32,
 	tooltip: string,
 	tooltip_deadline: time.Tick,
+	tooltip_warm_until: time.Tick,
+	tooltip_anchor: [2]f32,
 	tooltip_visible: bool,
 	pointer_shape: platform.Cursor_Shape,
 	// The last frame drew a pointer-following rim, so pointer movement must repaint it.

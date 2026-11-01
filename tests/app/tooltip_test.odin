@@ -53,3 +53,64 @@ tooltip_covers_palette_setting_reset :: proc(t: ^testing.T) {
 	testing.expect_value(t, w.tooltip, "Reset setting")
 	testing.expect(t, !w.tooltip_visible && w.tooltip_deadline != {})
 }
+
+@(test)
+tooltip_neighbor_buttons_skip_second_delay :: proc(t: ^testing.T) {
+	state: app.App
+	w := app.Window{width = 400, height = 300, scale = 1}
+	app.tooltip_hover(&state, &w, .Caption, platform.Mouse_Move_Event{x = 285, y = 20})
+	testing.expect_value(t, w.tooltip, "Minimize")
+	testing.expect(t, !w.tooltip_visible && w.tooltip_deadline != {})
+	w.tooltip_deadline = time.tick_add(time.tick_now(), -time.Millisecond)
+	app.tooltip_tick(&w)
+	testing.expect(t, w.tooltip_visible)
+
+	app.tooltip_hover(&state, &w, .Caption, platform.Mouse_Move_Event{x = 330, y = 20})
+	testing.expect_value(t, w.tooltip, "Maximize")
+	testing.expect(t, w.tooltip_visible && w.tooltip_deadline == {})
+	app.tooltip_hover(&state, &w, .Content, platform.Mouse_Move_Event{x = 355, y = 20})
+	app.tooltip_hover(&state, &w, .Caption, platform.Mouse_Move_Event{x = 375, y = 20})
+	testing.expect_value(t, w.tooltip, "Close window")
+	testing.expect(t, w.tooltip_visible && w.tooltip_deadline == {})
+
+	app.tooltip_hover(&state, &w, .Content, platform.Mouse_Move_Event{x = 0, y = 20})
+	app.tooltip_hover(&state, &w, .Tab_Orientation, platform.Mouse_Move_Event{x = 100, y = 20})
+	testing.expect(t, !w.tooltip_visible && w.tooltip_deadline != {})
+}
+
+@(test)
+tooltip_workspace_color_wheel :: proc(t: ^testing.T) {
+	state: app.App
+	w := app.Window{width = 900, height = 600, scale = 1}
+	w.workspace_picker.mode = .Icons
+	r := app.workspace_icon_color_button(&w)
+	app.tooltip_hover(&state, &w, .Workspace_Picker,
+		platform.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
+	testing.expect_value(t, w.tooltip, "Change icon color")
+	testing.expect(t, !w.tooltip_visible && w.tooltip_deadline != {})
+}
+
+@(test)
+tooltip_skips_labeled_vertical_new_tab :: proc(t: ^testing.T) {
+	state: app.App
+	w := app.Window{width = 900, height = 600, scale = 1, rail_auto = true}
+	l := ui.rail_layout({0, ui.TITLE_BAR_HEIGHT, ui.RAIL_WIDTH, 560}, 1, 0, 0)
+	r := ui.rail_new_tab_tile(l)
+	app.tooltip_hover(&state, &w, .Tabs,
+		platform.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
+	testing.expect_value(t, w.tooltip, "")
+	testing.expect(t, w.tooltip_deadline == {})
+}
+
+@(test)
+tooltip_neighbor_grace_expires :: proc(t: ^testing.T) {
+	state: app.App
+	w := app.Window{width = 400, height = 300, scale = 1}
+	app.tooltip_hover(&state, &w, .Caption, platform.Mouse_Move_Event{x = 285, y = 20})
+	w.tooltip_deadline = time.tick_add(time.tick_now(), -time.Millisecond)
+	app.tooltip_tick(&w)
+	app.tooltip_hover(&state, &w, .Content, platform.Mouse_Move_Event{x = 310, y = 20})
+	w.tooltip_warm_until = time.tick_add(time.tick_now(), -time.Millisecond)
+	app.tooltip_hover(&state, &w, .Caption, platform.Mouse_Move_Event{x = 330, y = 20})
+	testing.expect(t, !w.tooltip_visible && w.tooltip_deadline != {})
+}

@@ -62,7 +62,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Mouse_Leave_Event:
 		if w := window_find(app, e.window); w != nil {
-			w.tooltip, w.tooltip_deadline, w.tooltip_visible = "", {}, false
+			tooltip_cancel(w)
 			w.find.hover = .None
 			w.tab_hover, w.tab_pressed = -1, false
 			w.rail_hover, w.rail_pressed = -1, -1
