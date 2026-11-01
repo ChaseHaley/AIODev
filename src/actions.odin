@@ -844,7 +844,7 @@ find_presentation :: proc(w: ^Window, entry: ^Session_Entry) -> (label: string, 
 	s := term.search_summary(entry.session)
 	if s.invalid { return "Invalid expression", false }
 	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected + 1, s.total), s.total > 0 }
-	if s.total == 0 { return "0 of 0 · No matches", false }
+	if s.total == 0 { return "0 of 0", false }
 	return fmt.tprintf("%d of %d", s.selected + 1, s.total), true
 }
 

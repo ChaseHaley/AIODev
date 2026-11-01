@@ -89,7 +89,7 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 			for scale in ([?]f32{1, 1.5, 2}) {
 				ui.text_set_size(&text, 14*scale)
 				for width in ([?]f32{240, 300, 1000}) {
-					for status in ([?]string{"0 of 0", "123456 of 987654", "0 of 0 · No matches", "0 of 31 · Searching…"}) {
+					for status in ([?]string{"0 of 0", "123456 of 987654", "0 of 31 · Searching…"}) {
 						render.draw_list_reset(&list)
 						input := ui.text_styled(&text, .Input)
 						l := ui.find_layout(width*scale, scale, ui.text_width(&input, status))

@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
 $directory = Join-Path $repo "build/verify/$Name"
-$noMatches = '0 of 0 '+[char]0xB7+' No matches'
+$noMatches = '0 of 0'
 function Invoke-Aio {
     $out = & $ctl --name $Name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }

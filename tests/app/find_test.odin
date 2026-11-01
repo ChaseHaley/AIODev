@@ -214,7 +214,7 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	app.handle_event(&state, platform.Text_Event{w.id, "absent"})
 	find_settle(t, session)
 	label, enabled = app.find_presentation(&w, &state.sessions[0])
-	testing.expect(t, strings.contains(label, "No matches") && strings.contains(label, "0 of 0"))
+		testing.expect_value(t, label, "0 of 0")
 	testing.expect(t, !enabled)
 	l, _ = app.find_controls(&w, &state.sessions[0])
 	for down in ([2]bool{true, false}) {
