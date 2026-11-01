@@ -157,18 +157,26 @@ notices_draw :: proc(
 		return .Ok
 	}
 	margin, padding := NOTICE_MARGIN * scale, NOTICE_PADDING * scale
-	box_width := min(NOTICE_WIDTH * scale, width - 2 * margin)
+	max_width := min(NOTICE_WIDTH * scale, max(0, width - 2 * margin))
+	if max_width <= 0 {return .Ok}
 	bottom := height - margin
 	for i := len(n.items) + len(n.fading) - 1; i >= 0; i -= 1 {
 		item: Notice
 		if i < len(n.items) {item = n.items[i]} else {item = n.fading[i - len(n.items)]}
 		layers, rects, glyph_count := len(list.layers), len(list.rects), len(list.glyphs)
-		content_width := max(scale, box_width - 2 * padding - 32 * scale)
+		content_width := max(scale, max_width - 2 * padding - 32 * scale)
 		wrap(text, item.text, content_width, &n.lines)
 		lines := min(len(n.lines), NOTICE_MAX_LINES)
+		label, symbol, accent := notice_style(item.kind, theme)
+		strong := text_styled(text, .Strong)
+		measured_width := text_width(&strong, label)
+		for line in n.lines[:lines] {
+			measured_width = max(measured_width, text_width(text, line))
+		}
+		content_width = min(content_width, measured_width)
+		box_width := min(max_width, content_width + 2 * padding + 32 * scale)
 		box_height := f32(lines + 1) * text.line_height + 2 * padding + 4 * scale
 		box := render.Rect{width - margin - box_width, bottom - box_height, box_width, box_height}
-		label, symbol, accent := notice_style(item.kind, theme)
 		frame := Panel {
 			rect     = box,
 			radius   = 8 * scale,
@@ -184,7 +192,6 @@ notices_draw :: proc(
 		)
 		badge := render.Rect{box.x + padding + 4 * scale, box.y + padding, 20 * scale, 20 * scale}
 		icon_draw(list, symbol, badge, accent, ICON_BUTTON, scale)
-		strong := text_styled(text, .Strong)
 		x := box.x + padding + 32 * scale
 		if result := draw_text(
 			&strong,
@@ -198,8 +205,8 @@ notices_draw :: proc(
 		for line, index in n.lines[:lines] {
 			baseline :=
 				box.y + padding + f32(index + 1) * text.line_height + 4 * scale + text.ascent
-			max_width := index == lines - 1 && len(n.lines) > lines ? content_width : 0
-			if result := draw_text(text, list, line, x, baseline, theme.text, max_width);
+			line_limit := index == lines - 1 && len(n.lines) > lines ? content_width : 0
+			if result := draw_text(text, list, line, x, baseline, theme.text, line_limit);
 			   result != .Ok {
 				return result
 			}

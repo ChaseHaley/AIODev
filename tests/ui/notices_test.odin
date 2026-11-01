@@ -125,4 +125,30 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 			}
 		}
 	}
+	for kind in ui.Notice_Kind {ui.notices_clear(&n, u32(kind)+1)}
+	for scale in ([?]f32{1, 1.5, 2}) {
+		ui.text_set_size(&text, 16*scale)
+		for width in ([?]f32{160, 320, 1000}) {
+			for message in ([?]string{"", "Copied", "A useful message with enough text to wrap at narrow widths. " +
+				"This longer notice must remain bounded and keep its four-line limit."}) {
+				ui.notices_put(&n, 1, .Success, message, 0)
+				render.draw_list_reset(&list)
+				theme := ui.theme_from(shipped_theme("studio-dark"))
+				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
+					width*scale, 1000*scale, scale), glyphs.Result.Ok)
+				box := list.rects[1].rect
+				testing.expect(t, box.width <= min(520, width-32)*scale)
+				testing.expect(t, box.x >= 16*scale)
+				testing.expect_value(t, box.x+box.width, (width-16)*scale)
+				label, _, _ := ui.notice_style(.Success, theme)
+				strong := ui.text_styled(&text, .Strong)
+				visible_width := ui.text_width(&strong, label)
+				for line in n.lines[:min(len(n.lines), 4)] {
+					visible_width = max(visible_width, ui.text_width(&text, line))
+				}
+				testing.expect_value(t, box.width, min(min(520, width-32)*scale, visible_width+56*scale))
+				if len(message) < 10 && width == 1000 {testing.expect(t, box.width < 200*scale)}
+			}
+		}
+	}
 }
