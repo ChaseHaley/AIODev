@@ -164,7 +164,9 @@ tab_draw :: proc(
 		max(0, width - (index < bar.count ? 44 : 22) * scale - icon_width),
 	); result != .Ok {return result}
 	if hover > 0 {
-		if result := hover_rim_draw(list, theme, tile, 7 * scale, hover, scale, pointer, !skip_fill);
+		if result := hover_rim_draw(
+			list, theme, tile, 7 * scale, hover, scale, pointer, !skip_fill, index == bar.count,
+		);
 		   result != .None {return .Ok}
 	}
 	return .Ok

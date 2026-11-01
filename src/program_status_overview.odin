@@ -315,7 +315,7 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		); result != .Ok {return result}
 	}
 	if w.status.pill_hover && !w.status.inbox_open {
-		if ui.hover_rim_draw(&w.list, app.theme, r, 6 * s, 1, s, w.pointer) != .None {return .Ok}
+		if ui.hover_rim_draw(&w.list, app.theme, r, 6 * s, 1, s, w.pointer, compact = true) != .None {return .Ok}
 	}
 	return .Ok
 }
