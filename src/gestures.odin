@@ -32,6 +32,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.caption_hover = -1
 	ui.armed_cancel(&w.caption_armed)
 	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
+	w.scroll_drag = false
 	w.rail_resizing = false
 	ui.armed_cancel(&w.status.panel_side_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
@@ -59,6 +60,7 @@ gesture_cancel :: proc(app: ^App, w: ^Window) -> bool {
 // Completion never falls through to fresh hit testing, even when its action removes w.
 @(private)
 gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+	if e.button == .Left && w.scroll_drag {w.scroll_drag = false; return true}
 	x, y := f32(e.x), f32(e.y)
 	if e.button == .Left && ui.armed_down(w.status.panel_side_armed) {
 		w.header_buttons -= {.Left}
@@ -250,6 +252,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if status_panel_button(app, w, e) {return}
 	if tab_interaction_press(app, w, e) {return}
 	if pane_header_button(app, w, e) { return }
+	if terminal_scrollbar_button(app, w, e) {return}
 	if e.pressed && !w.selecting {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
 	}
@@ -294,6 +297,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 }
 
 gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
+	if w.scroll_drag {terminal_scrollbar_move(app, w, f32(event.y)); return}
 	if w.preparing {return}
 	e := event
 	e.buttons -= w.gesture.cancelled
@@ -428,6 +432,11 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			pointer_set(app, w, ui.find_pointer(l, available, x, y))
 			return
 		}
+	}
+	if !w.selecting && terminal_scrollbar_hover(app, w, x, y) {
+		link_hover_clear(w)
+		pointer_set(app, w, .Arrow)
+		return
 	}
 	if resize, over := divider_cursor(w, x, y); over {
 		split_overlay_update(w, x, y, false)

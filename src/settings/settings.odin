@@ -90,6 +90,7 @@ Terminal_Settings :: struct {
 	copy_on_select, confirm_multiline_paste: bool,
 	find_keep_query, find_select_query:      bool,
 	minimum_contrast:                        f64,
+	scroll_page_length:                      f64,
 }
 Cursor_Settings :: struct {
 	style: Cursor_Style,
@@ -150,6 +151,12 @@ Schema_Entry :: struct {
 	description:      string,
 }
 SCHEMA :: [?]Schema_Entry {
+	{
+		"terminal.scroll_page_length", "Scroll Page Length", .Float,
+		offset_of(Settings, terminal) + offset_of(Terminal_Settings, scroll_page_length),
+		"0.5", 0.01, 1, nil,
+		"Fraction of the visible page used by the configured page scrolling commands.",
+	},
 	{
 		"theme.name",
 		"Theme",

@@ -20,6 +20,8 @@ Action :: enum u32 {
 	Clear_Scrollback,
 	Scroll_Page_Up,
 	Scroll_Page_Down,
+	Scroll_Partial_Up,
+	Scroll_Partial_Down,
 	Font_Size_Increase,
 	Font_Size_Decrease,
 	Font_Size_Reset,
@@ -192,6 +194,12 @@ ACTIONS :: [Action]Action_Info {
 		"Scroll Down One Page",
 		{{.Page_Down, {.Shift}}},
 	},
+	.Scroll_Partial_Up = {
+		"terminal.scroll_partial_up", "Scroll Up Configured Page Length", {{.Page_Up, {.Control}}},
+	},
+	.Scroll_Partial_Down = {
+		"terminal.scroll_partial_down", "Scroll Down Configured Page Length", {{.Page_Down, {.Control}}},
+	},
 	.Font_Size_Increase = {
 		"view.font_size_increase",
 		"Increase Font Size",
@@ -233,21 +241,21 @@ ACTIONS :: [Action]Action_Info {
 	.Next_Tab              = {
 		"tab.next",
 		"Next Tab",
-		{{.Tab, {.Control}}, {.Arrow_Right, {.Control, .Shift}}, {.Page_Down, {.Control}}},
+		{{.Tab, {.Control}}},
 	},
 	.Previous_Tab          = {
 		"tab.previous",
 		"Previous Tab",
-		{{.Tab, {.Control, .Shift}}, {.Arrow_Left, {.Control, .Shift}}, {.Page_Up, {.Control}}},
+		{{.Tab, {.Control, .Shift}}},
 	},
-	.Tab_1 = {"tab.select_1", "Select Tab 1", {{.Digit_1, {.Alt}}}},
-	.Tab_2 = {"tab.select_2", "Select Tab 2", {{.Digit_2, {.Alt}}}},
-	.Tab_3 = {"tab.select_3", "Select Tab 3", {{.Digit_3, {.Alt}}}},
-	.Tab_4 = {"tab.select_4", "Select Tab 4", {{.Digit_4, {.Alt}}}},
-	.Tab_5 = {"tab.select_5", "Select Tab 5", {{.Digit_5, {.Alt}}}},
-	.Tab_6 = {"tab.select_6", "Select Tab 6", {{.Digit_6, {.Alt}}}},
-	.Tab_7 = {"tab.select_7", "Select Tab 7", {{.Digit_7, {.Alt}}}},
-	.Tab_8 = {"tab.select_8", "Select Tab 8", {{.Digit_8, {.Alt}}}},
+	.Tab_1 = {"tab.select_1", "Select Tab 1", nil},
+	.Tab_2 = {"tab.select_2", "Select Tab 2", nil},
+	.Tab_3 = {"tab.select_3", "Select Tab 3", nil},
+	.Tab_4 = {"tab.select_4", "Select Tab 4", nil},
+	.Tab_5 = {"tab.select_5", "Select Tab 5", nil},
+	.Tab_6 = {"tab.select_6", "Select Tab 6", nil},
+	.Tab_7 = {"tab.select_7", "Select Tab 7", nil},
+	.Tab_8 = {"tab.select_8", "Select Tab 8", nil},
 	.Tab_9 = {"tab.select_9", "Select Tab 9", nil},
 	.Split_Right = {"pane.split_right", "Split Right", {{.O, {.Control, .Shift}}}},
 	.Split_Down = {"pane.split_down", "Split Down", {{.E, {.Control, .Shift}}}},
@@ -289,7 +297,7 @@ ACTIONS :: [Action]Action_Info {
 		"Focus Next Pane",
 		{{.Bracket_Right, {.Control, .Super}}},
 	},
-	.Last_Tab = {"tab.last", "Select Last Tab", {{.Digit_9, {.Alt}}}},
+	.Last_Tab = {"tab.last", "Select Last Tab", nil},
 	.Close_Tab = {"tab.close", "Close Selected Tabs", {{.W, {.Control, .Shift}}}},
 	.Split = {"pane.split", "Split Pane", nil},
 	.Split_Left = {"pane.split_left", "Split Left", nil},
@@ -479,6 +487,12 @@ run_action :: proc(
 		if entry != nil {
 			page := max(1, int(term.geometry(entry.session).rows) - 1)
 			term.scroll_viewport(entry.session, action == .Scroll_Page_Up ? -page : page)
+		}
+	case .Scroll_Partial_Up, .Scroll_Partial_Down:
+		if entry != nil {
+			rows := f64(term.geometry(entry.session).rows) * app.settings.terminal.scroll_page_length
+			page := max(1, int(rows + 0.5))
+			term.scroll_viewport(entry.session, action == .Scroll_Partial_Up ? -page : page)
 		}
 	case .Font_Size_Increase:
 		set_font_points(app, app.font_points + 1)

@@ -39,6 +39,9 @@ Window :: struct {
 	ui_text: ui.Text,
 	using resources: Workspace_View_Resources,
 	gesture: Gesture_State,
+	scroll_drag: bool,
+	scroll_session: u32,
+	scroll_grab: f32,
 	dragging: Divider_Drag,
 	divider_click_node: layout.Node_Id,
 	divider_click_ns: i64,
@@ -657,6 +660,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		}
 		if header_result := pane_header_draw(app, w, pane, entry);
 		   header_result != .Ok {return frame, header_result}
+		terminal_scrollbar_draw(app, w, pane, entry)
 		window_card_dim(app, w, pane, frame.background)
 		window_card_outline(app, w, pane)
 	}
