@@ -46,11 +46,23 @@ try {
     $shell = (Read-State)['terminal.font_family']
     if ($shell -ne (Read-State)['settings.value']) {throw 'Shell family did not apply'}
     Write-Output "PASS shell dropdown discovers $monoCount terminal families and applies $shell"
-    Open-Field font.show_all
     Open-Field font.family
+    Invoke-Aio key Tab Space
+    Invoke-Aio expect state settings.popup=Choice
     $allCount = [int](Read-State)['settings.choice_count']
     if ($allCount -le $monoCount) {throw 'Show All Fonts did not expand the list'}
-    Invoke-Aio key End
+    Invoke-Aio key Tab
+    Invoke-Aio type Segoe
+    Invoke-Aio key Tab Space
+    Invoke-Aio expect state settings.choice_query=Segoe
+    Invoke-Aio expect state settings.choice_matches=0
+    Invoke-Aio expect state settings.popup=Choice
+    Invoke-Aio expect state "terminal.font_family=$shell"
+    Shot shell-filtered-empty
+    Invoke-Aio key Space
+    Invoke-Aio expect state settings.choice_query=Segoe
+    if ([int](Read-State)['settings.choice_matches'] -lt 1) {throw 'Toggle did not refilter the current search'}
+    Invoke-Aio key Tab Ctrl+A Backspace End
     Shot all-fonts-end
     Invoke-Aio key Esc
     if ((Read-State)['terminal.font_family'] -ne $shell) {throw 'Cancel changed shell font'}
@@ -85,6 +97,11 @@ try {
     Invoke-Aio launch --settings $persisted
     Invoke-Aio expect state "ui.font_family=$gui"
     Invoke-Aio expect state "terminal.font_family=$shell"
+    Open-Field font.family
+    if ([int](Read-State)['settings.choice_count'] -ne $allCount) {throw 'Show All preference did not persist'}
+    Invoke-Aio dpi 168
+    Shot shell-toggle-high-dpi
+    Invoke-Aio key Esc
     Write-Output 'PASS both font choices survive relaunch'
 } finally {
     & $ctl --name $name stop | Out-Null
