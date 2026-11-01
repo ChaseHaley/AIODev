@@ -305,21 +305,6 @@ rail_row_draw :: proc(
 	tile := ui.rail_tab_tile(layout, rect)
 	selected := row.workspace == w.workspace && row.tab == w.workspace.selected
 	marked := row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
-	if selected {
-		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-			color = app.theme.rail_active, radius = 6 * s})
-		ui.draw_rect(&w.list, {rect = {tile.x + 1 * s, tile.y + 8 * s, 2 * s, tile.height - 16 * s},
-			color = app.theme.tab_indicator, radius = s})
-	} else if marked {
-		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-			color = app.theme.selection, radius = 6 * s})
-		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-			color = app.theme.accent, radius = 6 * s, stroke = s})
-	} else if hover || pressed {
-		fill := pressed ? app.theme.pressed : app.theme.hover
-		ui.draw_rect(&w.list, {rect = {tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-			color = fill, radius = 6 * s})
-	}
 	title := fmt.tprintf("Tab %d", row.tab + 1)
 	if row.tab < len(row.workspace.tabs) && row.workspace.tabs[row.tab].title != "" {
 		title = row.workspace.tabs[row.tab].title
@@ -334,9 +319,15 @@ rail_row_draw :: proc(
 	}
 	status := status_tab_mark(app, w, row.workspace, row.tab)
 	has_badge := icon != "" || atlas.width > 0
-	label_x := tile.x + 8 * s
+	current := row.workspace == w.workspace
+	close := rail_tab_close_rect(w, layout, index)
+	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
+	leading := status.glyph != .None || has_badge ? 20 * s : 0
+	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0
+	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, tile,
+		{title = title, selected = selected, marked = marked, hovered = hover, pressed = pressed,
+		 leading = leading, trailing = trailing}, s, w.pointer); result != .Ok {return result}
 	if status.glyph != .None {
-		label_x = tile.x + 28 * s
 		ui.status_progress_draw(
 			&w.list,
 			app.theme,
@@ -347,7 +338,6 @@ rail_row_draw :: proc(
 		if result := status_mark_draw(app, w, {tile.x + 9 * s, tile.y + 9 * s, 14 * s, 14 * s}, status);
 		   result != .Ok {return result}
 	} else if has_badge {
-		label_x = tile.x + 28 * s
 		if result := ui.shell_badge_draw(
 			&w.list,
 			&w.ui_text,
@@ -358,32 +348,8 @@ rail_row_draw :: proc(
 			atlas,
 		); result != .Ok {return result}
 	}
-	current := row.workspace == w.workspace
-	close := rail_tab_close_rect(w, layout, index)
-	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
 	if show_close {
 		ui.icon_draw(&w.list, .Close, close, app.theme.tab_text, ui.ICON_INDICATOR, s)
-	}
-	label_right := show_close ? close.x - 4 * s : tile.x + tile.width - 8 * s
-	if result := ui.draw_fading_text(
-		&w.ui_text,
-		&w.list,
-		title,
-		label_x,
-		rail_text_baseline(w, tile),
-		selected ? app.theme.tab_active_text : app.theme.tab_text,
-		max(0, label_right - label_x),
-	); result != .Ok {return result}
-	if hover && !selected {
-		if result := ui.hover_rim_draw(
-			&w.list,
-			app.theme,
-			{tile.x, tile.y + 1 * s, tile.width, tile.height - 2 * s},
-			6 * s,
-			1,
-			s,
-			w.pointer,
-		); result != .None {return .Ok}
 	}
 	return .Ok
 }

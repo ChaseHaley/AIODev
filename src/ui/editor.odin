@@ -214,7 +214,7 @@ ROW_HEIGHT :: 52
 @(private)
 CHOICE_HEIGHT :: 30
 @(private)
-OUTLINE_ROW_HEIGHT :: 30
+OUTLINE_ROW_HEIGHT :: RAIL_ROW_HEIGHT
 @(private)
 OUTLINE_WIDTH :: 220
 @(private)
@@ -3119,37 +3119,13 @@ outline_draw :: proc(
 			l.outline.width,
 			l.outline_row_height,
 		}
-		current := item.group == active
-		if current {
-			draw_rect(list, {rect = r, color = theme.selection, radius = 6 * s})
-			draw_rect(
-				list,
-				{
-					rect = {r.x, r.y + 8 * s, 3 * s, r.height - 16 * s},
-					color = theme.accent,
-					radius = 2 * s,
-				},
-			)
-		} else if entry == p.hover_outline {
-			draw_rect(list, {rect = r, color = theme.hover, radius = 6 * s})
-		}
-		if entry == p.hover_outline {
-			// The current group keeps its accent bar; the hairline would ink it.
-			if result := hover_rim_draw(list, theme, r, 6 * s, 1, s, pointer, !current);
-			   result != .None {return .Ok}
-		}
 		baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
 		label := fmt.tprintf("%d", item.count)
 		label_width := text_width(&small, label)
-		if result := draw_text(
-			text,
-			list,
-			p.groups[item.group].title,
-			r.x + 14 * s,
-			baseline,
-			current ? theme.text : theme.muted,
-			max(1, r.width - label_width - 34 * s),
-		); result != .Ok {return result}
+		if result := navigation_row_draw(list, text, theme, r,
+			{title = p.groups[item.group].title, selected = item.group == active,
+			 hovered = entry == p.hover_outline, trailing = label_width + 10 * s}, s, pointer);
+		   result != .Ok {return result}
 		if result := draw_text(
 			&small,
 			list,
