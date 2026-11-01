@@ -6,6 +6,7 @@ import "aio:input"
 import "aio:layout"
 import "aio:perf"
 import "aio:platform"
+import "aio:program_art"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -33,6 +34,7 @@ _ :: render
 _ :: term
 _ :: ui
 _ :: settings
+_ :: program_art
 
 AIO_CONTROL :: #config(AIO_CONTROL, false)
 
@@ -791,6 +793,8 @@ when AIO_CONTROL {
 				{"session.header.title", pane_header_title(&entry.header)},
 				{"session.profile", entry.profile_id},
 				{"session.program", entry.program_path},
+				{"session.program.name", entry.program_name},
+				{"session.program.source", verify_program_source(app, entry)},
 				{"session.program.icon", fmt.tprintf("%t", verify_program_icon(app, entry))},
 				{"session.header.directory", entry.header.directory},
 				{
@@ -1589,11 +1593,28 @@ when AIO_CONTROL {
 			verify_finish_drive(app, w, now)
 		}
 	}
+	// Whether the pane's program has an icon ready to draw at any size, from whichever source.
 	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {
+		if entry.program_name == "" {return false}
+		file, has_file := program_icon_file(app, entry)
+		art := entry.program_has_art ? program_art.canonical(entry.program_art) : ""
 		for icon in app.processes.icons {
-			if icon.state == .Ready && entry.program_path != "" && icon.path == entry.program_path {return true}
+			if icon.state != .Ready {continue}
+			switch icon.source {
+			case .File:
+				if has_file && icon.path == file {return true}
+			case .Artwork:
+				if art != "" && icon.path == art {return true}
+			case .Executable:
+				if entry.program_path != "" && icon.path == entry.program_path {return true}
+			}
 		}
 		return false
+	}
+	verify_program_source :: proc(app: ^App, entry: ^Session_Entry) -> string {
+		if entry.program_name == "" {return ""}
+		source, _, _, found := program_icon_source(app, entry, 16)
+		return found ? strings.to_lower(fmt.tprintf("%v", source), context.temp_allocator) : ""
 	}
 } else {
 	Verify :: struct {}

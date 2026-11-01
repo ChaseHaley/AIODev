@@ -1,14 +1,17 @@
 package main
 
 import platform_api "aio:platform"
+import "aio:program_art"
 import "aio:pty"
+import "core:image/png"
 import "core:log"
 import "core:mem"
+import "core:slice"
 import "core:sync"
 import "core:thread"
 
 // Process work that must not stall a frame: the process snapshot behind padding groups and
-// program icons (about 10 ms with a few hundred processes), and reading icons from executables.
+// program icons (about 10 ms with a few hundred processes), and reading or drawing their icons.
 // The main thread asks, the worker answers and wakes it, and the main thread adopts the answer.
 Process_Worker :: struct {
 	icons:           [PROGRAM_ICON_LIMIT]Program_Icon,
@@ -32,7 +35,9 @@ Process_Worker :: struct {
 @(private)
 Program_Icon_Job :: struct {
 	index:  int,
+	source: Program_Icon_Source,
 	path:   string,
+	colour: [3]u8,
 	size:   int,
 	pixels: []u8,
 	found:  bool,
@@ -92,7 +97,7 @@ process_worker_main :: proc(t: ^thread.Thread) {
 		} else {
 			job := pop_front(&pw.jobs)
 			sync.mutex_unlock(&pw.mutex)
-			job.found = platform_api.executable_icon(job.path, job.size, job.pixels)
+			job.found = program_icon_read(job)
 			sync.mutex_lock(&pw.mutex)
 			_, _ = append(&pw.done, job)
 			sync.mutex_unlock(&pw.mutex)
@@ -131,7 +136,9 @@ process_icon_request :: proc(pw: ^Process_Worker, index: int, platform: ^platfor
 	sync.mutex_lock(&pw.mutex)
 	job := Program_Icon_Job {
 		index  = index,
+		source = icon.source,
 		path   = icon.path,
+		colour = icon.colour,
 		size   = icon.size,
 		pixels = icon.pixels,
 	}
@@ -140,16 +147,74 @@ process_icon_request :: proc(pw: ^Process_Worker, index: int, platform: ^platfor
 	sync.mutex_unlock(&pw.mutex)
 }
 
-// Takes finished icon reads; reports whether one produced an icon to draw.
-process_icons_adopt :: proc(pw: ^Process_Worker) -> bool {
-	if pw.worker == nil {return false}
-	ready := false
+// Takes finished icon reads; reports whether one produced an icon to draw, and the path of a user's
+// PNG that could not be read, valid until the icon is reused.
+process_icons_adopt :: proc(pw: ^Process_Worker) -> (ready: bool, unreadable: string) {
+	if pw.worker == nil {return}
 	sync.mutex_lock(&pw.mutex)
 	for job in pw.done {
 		pw.icons[job.index].state = job.found ? .Ready : .Missing
 		ready ||= job.found
+		if !job.found && job.source == .File {unreadable = pw.icons[job.index].path}
 	}
 	clear(&pw.done)
 	sync.mutex_unlock(&pw.mutex)
-	return ready
+	return
+}
+
+// Runs on the worker: reads or draws one icon into its job's pixels.
+@(private)
+program_icon_read :: proc(job: Program_Icon_Job) -> bool {
+	switch job.source {
+	case .Executable:
+		return platform_api.executable_icon(job.path, job.size, job.pixels)
+	case .Artwork:
+		art, found := program_art.find(job.path)
+		return found && program_art.draw(art, job.size, job.colour, job.pixels)
+	case .File:
+		return program_icon_png(job.path, job.size, job.pixels)
+	}
+	return false
+}
+
+// A user's PNG fitted into size x size, centred, each pixel averaging the source pixels it covers.
+// Limited like Shell Icon, since the decoder reads the whole file before checking it.
+@(private)
+program_icon_png :: proc(path: string, size: int, pixels: []u8) -> bool {
+	if !platform_api.local_file_within_limit(path, SHELL_ICON_MAX_BYTES) {return false}
+	header, header_error := png.load(path, {.return_header})
+	defer png.destroy(header)
+	if header_error != nil ||
+	   header == nil ||
+	   header.width < 1 ||
+	   header.height < 1 ||
+	   header.width > 1024 ||
+	   header.height > 1024 {return false}
+	image, image_error := png.load(path, {.alpha_add_if_missing, .alpha_premultiply})
+	defer png.destroy(image)
+	if image_error != nil || image == nil || image.depth != 8 || image.channels != 4 {return false}
+	source := image.pixels.buf[:]
+	longest := max(image.width, image.height)
+	width, height := max(1, image.width * size / longest), max(1, image.height * size / longest)
+	left, top := (size - width) / 2, (size - height) / 2
+	slice.fill(pixels[:size * size * 4], 0)
+	for y in 0 ..< height {
+		y0 := y * image.height / height
+		y1 := max(y0 + 1, (y + 1) * image.height / height)
+		for x in 0 ..< width {
+			x0 := x * image.width / width
+			x1 := max(x0 + 1, (x + 1) * image.width / width)
+			sum: [4]u32
+			for sy in y0 ..< y1 {
+				for sx in x0 ..< x1 {
+					from := (sy * image.width + sx) * 4
+					for c in 0 ..< 4 {sum[c] += u32(source[from + c])}
+				}
+			}
+			count := u32((x1 - x0) * (y1 - y0))
+			to := ((top + y) * size + left + x) * 4
+			for c in 0 ..< 4 {pixels[to + c] = u8((sum[c] + count / 2) / count)}
+		}
+	}
+	return true
 }

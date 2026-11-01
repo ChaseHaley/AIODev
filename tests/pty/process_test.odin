@@ -50,3 +50,23 @@ process_program_skips_console_hosts_and_keeps_a_sibling_choice :: proc(t: ^testi
 	testing.expect_value(t, pty.process_program(processes[:2], 2, nil, 0), -1)
 	testing.expect_value(t, pty.process_program(processes[:], 7, {"self"}, 0), -1)
 }
+
+@(test)
+launcher_arguments_name_the_program_they_run :: proc(t: ^testing.T) {
+	for test in ([?]struct {
+			arguments: []string,
+			name:      string,
+		} {
+			{{"node", `C:\Users\me\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`}, "codex"},
+			{{"node.exe", "--no-warnings", "/home/me/node_modules/@google/gemini-cli/dist/index.js"}, "gemini-cli"},
+			{{"node", `C:\npm\node_modules\opencode-ai\bin\opencode`, "run"}, "opencode-ai"},
+			{{"cmd.exe", "/d", "/s", "/c", `"C:\Program Files\nodejs\npx.cmd" vite`}, "npx"},
+			{{"cmd", "/c", `C:\tools\codex.cmd --help`}, "codex"},
+			{{"bun", "x", "tool"}, "x"},
+			{{"node"}, ""},
+			{{"node", "--inspect"}, ""},
+			{nil, ""},
+		}) {
+		testing.expect_value(t, pty.process_script(test.arguments), test.name)
+	}
+}

@@ -40,9 +40,10 @@ Tabs_Orientation :: enum int {
 	Horizontal,
 }
 Tabs_Settings :: struct {
-	orientation:   Tabs_Orientation,
-	rail_width:    int,
-	program_icons: bool,
+	orientation:        Tabs_Orientation,
+	rail_width:         int,
+	program_icons:      bool,
+	program_icon_files: string,
 }
 Status_Scope :: enum int {
 	All,
@@ -325,8 +326,20 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		0,
 		nil,
-		"Show the icon of the program running in a pane, such as Neovim or Claude Code, on its tab " +
-			"and pane header. Programs without an icon of their own keep the shell icon.",
+		"Show the icon of the program running in a pane, such as Neovim, Codex or Claude Code, on " +
+			"its tab and pane header.",
+	},
+	{
+		PROGRAM_ICON_FILES_KEY,
+		"Program Icon Files",
+		.String,
+		offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icon_files),
+		"",
+		0,
+		4096,
+		nil,
+		"Your own PNG icons for programs, used instead of built-in ones: " +
+			PROGRAM_ICON_FILES_EXAMPLE + ".",
 	},
 	{
 		"status.enabled",
@@ -980,6 +993,10 @@ assign :: proc(
 		if entry.key == PADDING_GROUPS_KEY && !padding_groups_valid(value) {
 			buffer: [192]u8
 			return problem(.Invalid_Value, s.allocator, padding_groups_rules(buffer[:]))
+		}
+		if entry.key == PROGRAM_ICON_FILES_KEY && !program_icon_files_valid(value) {
+			buffer: [256]u8
+			return problem(.Invalid_Value, s.allocator, program_icon_files_rules(buffer[:]))
 		}
 		if f64(len(value)) < entry.minimum || f64(len(value)) > entry.maximum {
 			return range_problem(entry, value, s.allocator)

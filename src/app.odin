@@ -8,6 +8,7 @@ import "aio:glyphs"
 import "aio:instance"
 import platform_api "aio:platform"
 import "aio:perf"
+import "aio:program_art"
 import "aio:pty"
 import "aio:render"
 import "aio:settings"
@@ -63,10 +64,16 @@ Session_Entry :: struct {
 	// The program status records last copied from the session, and the last notice they raised.
 	statuses:            []term.Program_Status,
 	status_notified:     time.Tick,
-	// The program its icon names: the process adopted, its image path, and the last poll's choice.
+	// The program its icon names: the process adopted, its image path, and the last poll's choice;
+	// the name icons are looked up by and its bundled artwork; and whether the process is a WSL or
+	// SSH bridge, named by what its programs report.
 	program_id:          u32,
 	program_candidate:   u32,
 	program_path:        string,
+	program_name:        string,
+	program_art:         program_art.Art,
+	program_has_art:     bool,
+	program_bridge:      bool,
 }
 
 // Release only the entry's owned memory; callers own removal from app.sessions.
@@ -76,6 +83,7 @@ session_entry_destroy :: proc(entry: ^Session_Entry) {
 	delete(entry.profile_id)
 	status_release(entry)
 	delete(entry.program_path)
+	delete(entry.program_name)
 	term.destroy(entry.session)
 }
 
@@ -317,7 +325,12 @@ tick :: proc(app: ^App) {
 	if len(events) > 0 {layout_state_touch(app)}
 	update_sessions(app)
 	update_processes(app)
-	if process_icons_adopt(&app.processes) {mark_all_dirty(app)}
+	if ready, unreadable := process_icons_adopt(&app.processes); ready || unreadable != "" {
+		if unreadable != "" {
+			notify(app, .Error, fmt.tprintf("Could not read %s as a PNG program icon.", unreadable))
+		}
+		mark_all_dirty(app)
+	}
 	update_motion(app)
 	if ui.notices_expire(&app.notices, time.tick_now()) {
 		mark_all_dirty(app)
@@ -733,6 +746,7 @@ settings_apply_running :: proc(app: ^App) {
 	}
 	status_apply_settings(app)
 	shell_icon_load(app)
+	program_icons_reload(app)
 	control_cli_sync(app)
 }
 

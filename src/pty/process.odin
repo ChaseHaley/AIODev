@@ -85,3 +85,33 @@ process_stem_is :: proc(executable, name: string) -> bool {
 	if len(stem) > 4 && strings.equal_fold(stem[len(stem) - 4:], ".exe") {stem = stem[:len(stem) - 4]}
 	return name != "" && strings.equal_fold(stem, name)
 }
+
+// The program a launcher such as Node or cmd runs, named from its arguments: the package of a
+// script under node_modules (without its scope), otherwise the file stem of the first argument
+// that is not an option. Empty when the arguments name nothing.
+process_script :: proc(arguments: []string) -> string {
+	for argument, i in arguments {
+		if i == 0 || argument == "" || argument[0] == '-' || argument[0] == '/' && len(argument) <= 3 {
+			continue
+		}
+		text := strings.trim(argument, "\" ")
+		if at := strings.last_index(text, "node_modules"); at >= 0 && at + 13 <= len(text) {
+			parts := strings.split_multi(text[at + 13:], {"\\", "/"}, context.temp_allocator)
+			if len(parts) > 1 && strings.has_prefix(parts[0], "@") {return parts[1]}
+			return parts[0]
+		}
+		// cmd receives a whole quoted command as one argument: keep up to the script's extension.
+		lower := strings.to_lower(text, context.temp_allocator)
+		end := -1
+		for extension in ([]string{".cmd", ".bat", ".exe", ".js", ".mjs", ".cjs", ".py", ".ps1"}) {
+			if at := strings.index(lower, extension); at >= 0 && (end < 0 || at < end) {
+				end = at
+			}
+		}
+		if end < 0 {end = strings.index_any(text, " \"")}
+		if end >= 0 {text = text[:end]}
+		if slash := strings.last_index_any(text, "\\/"); slash >= 0 {text = text[slash + 1:]}
+		return text
+	}
+	return ""
+}

@@ -57,24 +57,71 @@ process_snapshot_destroy :: proc(snapshot: []Process_Info, allocator := context.
 // without being its descendant; those, exited processes and denied access return no path.
 @(require_results)
 process_image :: proc(id, root: u32, allocator := context.allocator) -> (string, bool) {
-	process := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, id)
-	if process == nil {return "", false}
+	process, opened := open_descendant(id, root)
+	if !opened {return "", false}
 	defer close_process(process)
-	shell := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, root)
-	if shell == nil {return "", false}
-	defer close_process(shell)
-	created, shell_created, unused: w.FILETIME
-	if !bool(w.GetProcessTimes(process, &created, &unused, &unused, &unused)) ||
-	   !bool(w.GetProcessTimes(shell, &shell_created, &unused, &unused, &unused)) {
-		log.errorf("GetProcessTimes failed: %v", w.GetLastError())
-		return "", false
-	}
-	if filetime(created) < filetime(shell_created) {return "", false}
 	buffer: [4096]u16
 	length := w.DWORD(len(buffer))
 	if !bool(QueryFullProcessImageNameW(process, 0, raw_data(buffer[:]), &length)) {return "", false}
 	path, err := w.utf16_to_utf8(buffer[:length], allocator)
 	return path, err == nil
+}
+
+// The command line arguments of root's child or descendant, under the same guard as process_image.
+// The caller deletes each argument and the slice.
+@(require_results)
+process_arguments :: proc(id, root: u32, allocator := context.allocator) -> ([]string, bool) {
+	process, opened := open_descendant(id, root)
+	if !opened {return nil, false}
+	defer close_process(process)
+	// ProcessCommandLineInformation: a UNICODE_STRING followed by its characters. Needs Windows 8.1.
+	COMMAND_LINE_CLASS :: w.PROCESS_INFO_CLASS(60)
+	STATUS_INFO_LENGTH_MISMATCH :: 0xC0000004
+	size: u32
+	status := w.NtQueryInformationProcess(process, COMMAND_LINE_CLASS, nil, 0, &size)
+	if status != STATUS_INFO_LENGTH_MISMATCH || size < size_of(w.UNICODE_STRING) || size > 1 << 17 {
+		return nil, false
+	}
+	buffer := make([]u8, size, context.temp_allocator)
+	if w.NtQueryInformationProcess(process, COMMAND_LINE_CLASS, raw_data(buffer), size, &size) != 0 {
+		return nil, false
+	}
+	line := (^w.UNICODE_STRING)(raw_data(buffer))
+	wide := make([]u16, int(line.Length / 2) + 1, context.temp_allocator)
+	copy(wide, line.Buffer[:line.Length / 2])
+	count: i32
+	argv := w.CommandLineToArgvW(w.wstring(raw_data(wide)), &count)
+	if argv == nil {return nil, false}
+	defer w.LocalFree(argv)
+	arguments := make([]string, int(count), allocator)
+	for i in 0 ..< int(count) {
+		value, err := w.wstring_to_utf8(argv[i], -1, allocator)
+		if err != nil {
+			for a in arguments[:i] {delete(a, allocator)}
+			delete(arguments, allocator)
+			return nil, false
+		}
+		arguments[i] = value
+	}
+	return arguments, true
+}
+
+@(private, require_results)
+open_descendant :: proc(id, root: u32) -> (w.HANDLE, bool) {
+	process := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, id)
+	if process == nil {return nil, false}
+	shell := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, root)
+	if shell == nil {close_process(process); return nil, false}
+	defer close_process(shell)
+	created, shell_created, unused: w.FILETIME
+	if !bool(w.GetProcessTimes(process, &created, &unused, &unused, &unused)) ||
+	   !bool(w.GetProcessTimes(shell, &shell_created, &unused, &unused, &unused)) {
+		log.errorf("GetProcessTimes failed: %v", w.GetLastError())
+		close_process(process)
+		return nil, false
+	}
+	if filetime(created) < filetime(shell_created) {close_process(process); return nil, false}
+	return process, true
 }
 
 @(private)
