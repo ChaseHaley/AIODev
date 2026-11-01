@@ -151,6 +151,9 @@ Palette_Setting :: struct {
 	choices:                []string,
 	// The choice list has a filter field, as the Settings page gives font pickers.
 	searchable:             bool,
+	// A reset button restores `default_value`, as on the Settings page.
+	resettable:             bool,
+	default_value:          string,
 }
 
 // One searchable tab or workspace. The strings are borrowed from its live record, so an opened
@@ -212,6 +215,7 @@ Palette :: struct {
 	scratch:      ^fuzzy.Scratch,
 	values:       Palette_Values,
 	edit:         Palette_Edit,
+	reset_hover:  int,
 }
 
 Palette_Layout :: struct {
@@ -237,6 +241,7 @@ palette_init :: proc(
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
 	p.menu_hover = -1
+	p.reset_hover = -1
 	err: runtime.Allocator_Error
 	capacity := 0
 	for s in settings {
@@ -276,6 +281,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	p.mode = mode
 	p.mode_menu = false
 	p.menu_hover = -1
+	p.reset_hover = -1
 	p.chosen, p.chosen_id = "", 0
 	refresh(p, registry)
 }
@@ -1188,9 +1194,13 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome
 		p.menu_hover = hover
 		return .Changed
 	}
+	// The reset button lights only under the pointer, so entering or leaving it redraws.
+	reset := reset_at(p, l, x, y)
+	reset_changed := reset != p.reset_hover
+	p.reset_hover = reset
 	index := row_at(p, l, x, y)
 	if index < 0 || index == p.selected {
-		return .None
+		return reset_changed ? .Changed : .None
 	}
 	p.selected = index
 	return .Changed
@@ -1220,6 +1230,7 @@ palette_mouse_press :: proc(
 		return .Changed, 0
 	}
 	if index := row_at(p, l, x, y); index >= 0 {
+		if outcome, handled := reset_press(p, l, index, x, y); handled {return outcome, 0}
 		if outcome, handled := control_press(p, l, index, x, y); handled {return outcome, 0}
 		return run(p, index)
 	}
@@ -1564,9 +1575,12 @@ palette_draw :: proc(
 					label_width = text_width(&key_text, shortcut_label) + 12 * scale
 				}
 			}
-			if s := result_setting(p, index); s != nil && s.control != .None {
-				control := control_rect(s, row, scale)
-				label_width = max(0, row.x + row.width - padding - control.x)
+			if s := result_setting(p, index); s != nil {
+				left := row.x + row.width - padding
+				if s.control != .None {left = min(left, control_rect(s, row, scale).x)}
+				if s.resettable {left = min(left, reset_rect(s, row, scale).x)}
+				label_width = max(0, row.x + row.width - padding - left)
+				if result := draw_reset(p, list, theme, l, index, row, pointer); result != .Ok {return result}
 				if result := draw_control(p, list, text, theme, l, item.setting, row); result != .Ok {
 					return result
 				}

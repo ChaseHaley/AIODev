@@ -16,6 +16,10 @@ import "core:strings"
 @(private) PALETTE_CHOICE_WIDTH :: 176
 @(private) PALETTE_TEXT_WIDTH :: 196
 @(private) PALETTE_POPUP_ROW :: 26
+// The reset button matches the Settings page: a square at the row's right edge, before the control.
+@(private) PALETTE_RESET_SIZE :: 26
+@(private) PALETTE_RESET_INSET :: 8
+@(private) PALETTE_RESET_GAP :: 12
 @(private) PALETTE_POPUP_ROWS :: 8
 @(private) PALETTE_POPUP_SEARCH :: 32
 // Keyboard steps across a wide range move a twentieth of the track instead of one unit.
@@ -389,6 +393,7 @@ edit_text :: proc(p: ^Palette, text: string) -> Outcome {
 @(private)
 control_rect :: proc(s: ^Palette_Setting, row: render.Rect, scale: f32) -> render.Rect {
 	right := row.x + row.width - PALETTE_TEXT_INSET * scale
+	if s.resettable {right = reset_rect(s, row, scale).x - PALETTE_RESET_GAP * scale}
 	cy := row.y + row.height / 2
 	switch s.control {
 	case .None:
@@ -407,6 +412,72 @@ control_rect :: proc(s: ^Palette_Setting, row: render.Rect, scale: f32) -> rende
 		return {right - w, cy - h / 2, w, h}
 	}
 	return {}
+}
+
+// The reset-to-default button of a setting row, or nothing for a setting without one.
+@(private)
+reset_rect :: proc(s: ^Palette_Setting, row: render.Rect, scale: f32) -> render.Rect {
+	if !s.resettable {return {}}
+	size := PALETTE_RESET_SIZE * scale
+	x := row.x + row.width - (PALETTE_RESET_INSET + PALETTE_RESET_SIZE) * scale
+	return {x, row.y + (row.height - size) / 2, size, size}
+}
+
+@(private)
+setting_modified :: proc(p: ^Palette, s: ^Palette_Setting) -> bool {
+	value, _ := setting_value(p, s)
+	return value != s.default_value
+}
+
+// The setting row whose reset button is under the pointer, or -1.
+@(private)
+reset_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
+	index := row_at(p, l, x, y)
+	s := result_setting(p, index)
+	if s == nil {return -1}
+	row, _ := row_rect(p, l, index)
+	return contains(reset_rect(s, row, l.scale), x, y) ? index : -1
+}
+
+// A press on a reset button saves the default. An unmodified setting has nothing to reset.
+@(private)
+reset_press :: proc(p: ^Palette, l: Palette_Layout, index: int, x, y: f32) -> (Outcome, bool) {
+	if reset_at(p, l, x, y) != index {return .None, false}
+	s := result_setting(p, index)
+	p.selected = index
+	if !setting_modified(p, s) {return .Changed, true}
+	return choose_value(p, s, s.default_value), true
+}
+
+@(private)
+draw_reset :: proc(
+	p: ^Palette,
+	list: ^render.Draw_List,
+	theme: Theme,
+	l: Palette_Layout,
+	index: int,
+	row: render.Rect,
+	pointer: [2]f32,
+) -> glyphs.Result {
+	s := result_setting(p, index)
+	rect := reset_rect(s, row, l.scale)
+	if rect.width <= 0 {return .Ok}
+	scale := l.scale
+	modified := setting_modified(p, s)
+	hovered := modified && contains(rect, pointer.x, pointer.y)
+	selected := index == p.selected
+	if hovered {
+		if !selected {draw_rect(list, {rect = rect, color = theme.hover, radius = 6 * scale})}
+		if hover_rim_draw(list, theme, rect, 6 * scale, 1, scale, pointer, !selected) != .None {return .Ok}
+	}
+	color := theme.faint
+	if modified {
+		color = hovered ? theme.text : theme.muted
+	} else {
+		color.a *= 0.5
+	}
+	icon_draw(list, .Undo, rect, color, ICON_BUTTON, scale)
+	return .Ok
 }
 
 @(private)
@@ -638,7 +709,9 @@ control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.
 	}
 	index := row_at(p, l, x, y)
 	s := result_setting(p, index)
-	if s == nil || s.control == .None {return .Arrow, false}
+	if s == nil {return .Arrow, false}
+	if reset_at(p, l, x, y) == index {return .Hand, true}
+	if s.control == .None {return .Arrow, false}
 	row, _ := row_rect(p, l, index)
 	if contains(control_rect(s, row, l.scale), x, y) {return .Hand, true}
 	return .Arrow, false

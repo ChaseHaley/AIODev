@@ -27,6 +27,15 @@ function Shot([string] $Label) {
     if ($LASTEXITCODE -ne 0) { throw "Screenshot failed: $Label" }
 }
 
+function Read-State {
+    $state = @{}
+    foreach ($line in (Invoke-Aio state)) {
+        $pair = $line -split '=', 2
+        if ($pair.Count -eq 2) { $state[$pair[0]] = $pair[1].Trim('"') }
+    }
+    return $state
+}
+
 function Search([string] $Query, [string] $Key) {
     Invoke-Aio key Ctrl+A Backspace
     Invoke-Aio type $Query
@@ -50,6 +59,18 @@ try {
     Invoke-Aio key Alt+Right Alt+Right
     Invoke-Aio expect state 'palette.value=7'
     Write-Output 'PASS Alt+Right steps a slider'
+    Shot 'slider-modified'
+
+    # The first all-mode result sits under its section header; its reset button is the row's last 34 DIPs.
+    $state = Read-State
+    $list = $state['palette.list'] -split ','
+    $scale = [double]$state['palette.row_height'] / 42
+    $x = [double]$list[0] + [double]$list[2] - 21 * $scale
+    $y = [double]$list[1] + 22 * $scale + 21 * $scale
+    Invoke-Aio mouse click "$([int]$x),$([int]$y)" --px
+    Invoke-Aio expect state 'palette.value=5'
+    Invoke-Aio expect state 'palette.open=true'
+    Write-Output 'PASS the reset button restores the default in place'
 
     Search 'cursor style' 'cursor.style'
     Invoke-Aio key Ctrl+Enter

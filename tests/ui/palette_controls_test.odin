@@ -40,13 +40,15 @@ control_set :: proc(v: ^Control_Values, key, value: string) {
 
 @(private)
 CONTROL_ROWS := [?]ui.Palette_Setting {
-	{key = "cursor.blink", title = "Cursor Blink", group = "Cursor", control = .Toggle},
+	{key = "cursor.blink", title = "Cursor Blink", group = "Cursor", control = .Toggle, resettable = true,
+		default_value = "false"},
 	{key = "pane.gap", title = "Pane Gap", group = "Panes", control = .Slider, minimum = 0, maximum = 24,
-		step = 1},
+		step = 1, resettable = true, default_value = "5"},
 	{key = "cursor.style", title = "Cursor Style", group = "Cursor", control = .Choice,
 		choices = {"block", "bar", "underline"}},
 	{key = "status.ignore_apps", title = "Ignored Apps", group = "Status", control = .Text},
-	{key = "input.leader", title = "Leader Key", group = "Input", control = .None},
+	{key = "input.leader", title = "Leader Key", group = "Input", control = .None, resettable = true,
+		default_value = "ctrl+b"},
 	{key = "font.family", title = "Font Family", group = "Font", control = .Choice,
 		searchable = true},
 }
@@ -230,7 +232,7 @@ palette_toggle_click_changes_value_and_title_click_jumps :: proc(t: ^testing.T) 
 
 	l := ui.palette_layout(&p, 1000, 800, 1)
 	row_y := l.list.y + l.row_height / 2
-	toggle_x := l.list.x + l.list.width - 14 - 18
+	toggle_x := l.list.x + l.list.width - 46 - 18
 	outcome, _ := ui.palette_mouse_press(&p, &registry, l, toggle_x, row_y)
 	_, value := ui.palette_chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
@@ -251,7 +253,7 @@ palette_slider_drag_saves_on_release :: proc(t: ^testing.T) {
 
 	l := ui.palette_layout(&p, 1000, 800, 1)
 	row_y := l.list.y + l.row_height * 1.5
-	right := l.list.x + l.list.width - 14
+	right := l.list.x + l.list.width - 46
 	track_left := right - 156 + 7
 	track_right := track_left + 98
 	outcome, _ := ui.palette_mouse_press(&p, &registry, l, track_left + 2, row_y)
@@ -263,4 +265,37 @@ palette_slider_drag_saves_on_release :: proc(t: ^testing.T) {
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "24")
 	testing.expect(t, !ui.palette_slider_dragging(&p), "release ends the drag")
+}
+
+@(test)
+palette_reset_button_restores_the_default_and_ignores_an_unchanged_setting :: proc(t: ^testing.T) {
+	p: ui.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+
+	l := ui.palette_layout(&p, 1000, 800, 1)
+	reset_x := l.list.x + l.list.width - 8 - 13
+	blink_y := l.list.y + l.row_height / 2
+	outcome, _ := ui.palette_mouse_press(&p, &registry, l, reset_x, blink_y)
+	_, value := ui.palette_chosen_value(&p)
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	testing.expect_value(t, value, "false")
+	testing.expect(t, p.open, "a reset keeps the palette open")
+
+	gap_y := l.list.y + l.row_height * 1.5
+	outcome, _ = ui.palette_mouse_press(&p, &registry, l, reset_x, gap_y)
+	testing.expect_value(t, outcome, ui.Outcome.Changed)
+	testing.expect_value(t, p.selected, 1)
+
+	// A jump-only setting still has its reset button.
+	leader_y := l.list.y + l.row_height * 4.5
+	control_set(&v, "input.leader", "ctrl+a")
+	outcome, _ = ui.palette_mouse_press(&p, &registry, l, reset_x, leader_y)
+	key: string
+	key, value = ui.palette_chosen_value(&p)
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	testing.expect_value(t, key, "input.leader")
+	testing.expect_value(t, value, "ctrl+b")
 }

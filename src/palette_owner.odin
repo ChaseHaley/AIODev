@@ -194,12 +194,15 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 // and program groups keep the jump to Settings, where their capture and group editors live.
 palette_setting :: proc(entry: settings.Schema_Entry) -> ui.Palette_Setting {
 	s := ui.Palette_Setting {
-		key     = entry.key,
-		title   = entry.title,
-		group   = settings.group_title(entry.key),
-		minimum = entry.minimum,
-		maximum = entry.maximum,
-		step    = 1,
+		key           = entry.key,
+		title         = entry.title,
+		group         = settings.group_title(entry.key),
+		minimum       = entry.minimum,
+		maximum       = entry.maximum,
+		step          = 1,
+		default_value = entry.default_value,
+		// Program groups have their own editor without a single reset; every other row has one.
+		resettable    = entry.key != settings.PADDING_GROUPS_KEY,
 	}
 	switch entry.kind {
 	case .String:
