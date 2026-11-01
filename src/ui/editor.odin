@@ -2478,7 +2478,8 @@ profile_row_draw :: proc(
 	name_color := strong ? theme.text : theme.muted
 	if .Hidden in row.flags {name_color = theme.muted}
 	name_baseline := parts.row.y + 21 * scale
-	if row.note == "" {name_baseline = cy - text.line_height / 2 + text.ascent}
+	auto_detected := .Protected in row.flags
+	if row.note == "" && !auto_detected {name_baseline = cy - text.line_height / 2 + text.ascent}
 	if result := draw_text(
 		text,
 		list,
@@ -2488,14 +2489,15 @@ profile_row_draw :: proc(
 		name_color,
 		max(1, table.name.width),
 	); result != .Ok {return result}
-	if row.note != "" {
+	if row.note != "" || auto_detected {
+		note := row.note != "" ? row.note : "Auto-detected"
 		if result := draw_text(
 			&small,
 			list,
-			row.note,
+			note,
 			table.name.x,
 			parts.row.y + 39 * scale,
-			theme.error,
+			row.note != "" ? theme.error : theme.muted,
 			max(1, table.name.width),
 		); result != .Ok {return result}
 	}
@@ -2550,7 +2552,7 @@ profile_row_draw :: proc(
 		}
 		for control in controls {
 			protected := row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags
-			enabled := !(control.kind == .Remove && protected)
+			if control.kind == .Remove && protected {continue}
 			profile_button_draw(
 				list,
 				control.rect,
@@ -2558,9 +2560,9 @@ profile_row_draw :: proc(
 				control.size,
 				theme,
 				scale,
-				enabled && focused && p.profile_control == control.kind,
-				enabled && hovered && p.hover_profile_control == control.kind,
-				enabled,
+				focused && p.profile_control == control.kind,
+				hovered && p.hover_profile_control == control.kind,
+				true,
 			)
 		}
 	}

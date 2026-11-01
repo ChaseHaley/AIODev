@@ -15,8 +15,10 @@ PROFILE_DEFAULT_FIELDS :: [3]string{"command", "directory", "icon"}
 
 // One named shell. Fields are the effective values after profiles_finalize; the `_set` flags
 // record whether the file or detection supplied them, so a later finalize can inherit the rest.
+// detection_id preserves discovery identity when the built-in default represents a machine shell.
 Profile :: struct {
 	id, name, command, directory, icon: string,
+	detection_id:                     string,
 	hidden, detected, builtin:         bool,
 	line:                              int,
 	name_set, command_set:             bool,
@@ -46,6 +48,7 @@ profiles_destroy :: proc(p: ^Profiles) {
 			profile.command,
 			profile.directory,
 			profile.icon,
+			profile.detection_id,
 		}) {delete(field, p.allocator)}
 	}
 	delete(p.items)
@@ -480,6 +483,7 @@ profile_remove_at :: proc(p: ^Profiles, index: int) {
 		profile.command,
 		profile.directory,
 		profile.icon,
+		profile.detection_id,
 	}) {delete(field, p.allocator)}
 	ordered_remove(&p.items, index)
 }
@@ -496,12 +500,34 @@ profiles_begin_detection :: proc(p: ^Profiles) {
 profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allocator_Error {
 	p := &s.profiles
 	profile := profile_find(p, detected.id)
+	// The built-in default already represents this shell. Keep its stable ID rather than
+	// adding a second machine profile; explicitly configured profiles keep their own identity.
+	metadata_only := profile != nil && profile.id != PROFILE_DEFAULT_ID &&
+		!profile.name_set && !profile.command_set &&
+		!profile.directory_set && !profile.icon_set
+	if profile == nil || metadata_only {
+		default := profile_find(p, PROFILE_DEFAULT_ID)
+		if default != nil && strings.equal_fold(
+			strings.trim_space(default.command), strings.trim_space(detected.command),
+		) {
+			if err := profile_own(&default.detection_id, detected.id, p.allocator);
+			   err != nil {return err}
+			default.builtin = true
+			if metadata_only {
+				for item, index in p.items {
+					if item.id == detected.id {profile_remove_at(p, index); break}
+				}
+			}
+			return nil
+		}
+	}
 	created := profile == nil
 	if created {
 		profile, _ = profiles_add(p, detected.id, 0)
 		if profile == nil {return nil}
 	}
 	if created {profile.detected = true}
+	if err := profile_own(&profile.detection_id, detected.id, p.allocator); err != nil {return err}
 	profile.builtin = true
 	if !profile.name_set {
 		if err := profile_own(&profile.name, detected.name, p.allocator); err != nil {return err}
@@ -521,7 +547,7 @@ profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allo
 }
 
 // Fills `out` with profile indices: explicit profile.order first, then unlisted IDs sorted by
-// ID. Detected-only, hidden and commandless profiles are skipped when `visible_only` is set.
+// ID. Hidden and commandless profiles are skipped when `visible_only` is set.
 // Returns the number written; `out` must hold at least len(p.items) entries.
 profiles_in_order :: proc(p: ^Profiles, out: []int, visible_only := false) -> int {
 	count := 0

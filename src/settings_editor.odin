@@ -98,9 +98,10 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 	settings.profiles_begin_detection(&s.profiles)
 	for &detected in app.settings.profiles.items {
 		if !detected.builtin {continue}
+		id := detected.detection_id != "" ? detected.detection_id : detected.id
 		_ = settings.profile_detect(
 			&s,
-			{detected.id, detected.name, detected.command, detected.directory},
+			{id, detected.name, detected.command, detected.directory},
 		)
 	}
 	_ = settings.profiles_finalize(&s)

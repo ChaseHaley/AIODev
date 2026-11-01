@@ -294,6 +294,21 @@ profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^tes
 }
 
 @(test)
+profile_table_reuses_detected_default_identity_on_reopen :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "default-identity",
+		"profile.order = default, pwsh\nprofile.pwsh.hidden = true\n",
+	) {return}
+	for _ in 0 ..< 2 {
+		e := profile_open(&f)
+		testing.expect(t, !ui.editor_select_key(e, "profile.pwsh"))
+		testing.expect(t, ui.editor_select_key(e, "profile.default"))
+		testing.expect(t, .Protected in ui.editor_row(e).flags)
+	}
+}
+
+@(test)
 profile_table_includes_detected_and_confirms_custom_removal :: proc(t: ^testing.T) {
 	f: Profile_Fixture
 	defer profile_fixture_destroy(t, &f)

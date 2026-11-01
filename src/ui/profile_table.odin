@@ -12,7 +12,7 @@ Profile_Row :: struct {
 	hidden, detected, is_default, listed:           bool,
 }
 
-// The user profiles in profile.order order and the detected shells that are not overridden.
+// Configured and machine profiles in profile.order order.
 Profile_Table :: struct {
 	rows, detected: [dynamic]Profile_Row,
 	allocator:      runtime.Allocator,
@@ -70,8 +70,8 @@ profile_row_note :: proc(
 	return ""
 }
 
-// Builds the table from the resolved profile list. Detection marks its own rows, so only file
-// profiles take part in the main table; duplicate names and unreadable commands become row notes.
+// Builds one table from the resolved profile list. Duplicate names and unreadable commands
+// become row notes; builtin marks machine profiles, including ones with file overrides.
 @(require_results)
 profile_table_build :: proc(
 	profiles: ^settings.Profiles,

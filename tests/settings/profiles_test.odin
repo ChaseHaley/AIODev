@@ -6,6 +6,31 @@ import "core:testing"
 import "aio:settings"
 
 @(test)
+detected_default_shell_has_one_identity :: proc(t: ^testing.T) {
+	for text in ([?]string{
+		"",
+		"profile.order = default, pwsh\nprofile.pwsh.hidden = true\n",
+		"profile.default.command = cmd.exe\n",
+	}) {
+		s, diagnostics, err := settings.parse(text)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&diagnostics)
+		testing.expect_value(t, err, nil)
+		default := settings.profile_find(&s.profiles, "default")
+		if !testing.expect(t, default != nil) {return}
+		detected := settings.Detected_Profile{"pwsh", "PowerShell 7", "pwsh.exe -NoLogo", "~"}
+		if default.command == "cmd.exe" {detected = {"cmd", "Command Prompt", "cmd.exe", "~"}}
+		testing.expect_value(t, settings.profile_detect(&s, detected), nil)
+		testing.expect_value(t, len(s.profiles.items), 1)
+		default = settings.profile_find(&s.profiles, "default")
+		if testing.expect(t, default != nil) {testing.expect(t, default.builtin)}
+		settings.profiles_begin_detection(&s.profiles)
+		testing.expect_value(t, settings.profile_detect(&s, detected), nil)
+		testing.expect_value(t, len(s.profiles.items), 1)
+	}
+}
+
+@(test)
 defaults_include_built_in_profile :: proc(t: ^testing.T) {
 	s, err := settings.defaults()
 	testing.expect_value(t, err, nil)
@@ -172,7 +197,7 @@ detected_only_profiles_are_replaced_on_reload :: proc(t: ^testing.T) {
 @(test)
 detected_profiles_are_visible_by_default_and_can_be_hidden :: proc(t: ^testing.T) {
 	for configured in ([?]bool{false, true}) {
-		text := configured ? "profile.pwsh.hidden = false\n" : ""
+		text := configured ? "profile.pwsh.name = My PowerShell\nprofile.pwsh.hidden = false\n" : ""
 		s, diagnostics, err := settings.parse(text)
 		defer settings.destroy(&s)
 		defer settings.diagnostics_destroy(&diagnostics)
@@ -180,12 +205,13 @@ detected_profiles_are_visible_by_default_and_can_be_hidden :: proc(t: ^testing.T
 		testing.expect_value(t, settings.profile_detect(
 			&s, {"pwsh", "PowerShell 7", "pwsh.exe -NoLogo", "~"},
 		), nil)
-		profile := settings.profile_find(&s.profiles, "pwsh")
+		id := configured ? "pwsh" : "default"
+		profile := settings.profile_find(&s.profiles, id)
 		if !testing.expect(t, profile != nil) {return}
 		testing.expect_value(t, settings.profile_visible(profile), true)
 		indices: [settings.PROFILE_LIMIT]int
 		count := settings.profiles_in_order(&s.profiles, indices[:], visible_only = true)
-		testing.expect_value(t, count, 2)
+		testing.expect_value(t, count, configured ? 2 : 1)
 		profile.hidden = true
 		testing.expect(t, !settings.profile_visible(profile))
 		profile.hidden = false
