@@ -13,6 +13,8 @@ ACTIVATE_MESSAGE :: w.WM_APP + 1
 @(private)
 TRAY_MESSAGE :: w.WM_APP + 2
 @(private)
+NOTIFICATION_MESSAGE :: w.WM_APP + 3
+@(private)
 EVENT_CAPACITY :: 2048
 @(private)
 TEXT_CAPACITY :: 65536
@@ -57,6 +59,7 @@ Platform :: struct {
 	tray_requested, tray_added: bool,
 	tray_data:                  w.NOTIFYICONDATAW,
 	tray_notify_token:          u64,
+	notifications:              rawptr,
 	menu:                       w.HMENU,
 	menu_ids:                   []u32,
 	modal_callback:             proc(user: rawptr),
@@ -295,6 +298,8 @@ init :: proc(p: ^Platform, app_id: string, allocator := context.allocator) -> In
 @(require_results)
 destroy :: proc(p: ^Platform) -> Error {
 	if p == nil {return .None}
+	aio_notifications_destroy(p.notifications)
+	p.notifications = nil
 	first_error := p.error
 	for window in p.windows {
 		if !os_ok(w.DestroyWindow(window.hwnd), "DestroyWindow") {
@@ -1113,6 +1118,12 @@ window_proc :: proc "system" (
 	switch message {
 	case ACTIVATE_MESSAGE:
 		enqueue(p, Activate_Request_Event{})
+		return 0
+	case NOTIFICATION_MESSAGE:
+		enqueue(p, Tray_Notification_Event{u64(wp)})
+		return 0
+	case NOTIFICATION_MESSAGE + 1:
+		enqueue(p, Notification_Error_Event{u32(wp)})
 		return 0
 	case TRAY_MESSAGE:
 		code := u32(uintptr(lp) & 0xffff)

@@ -159,11 +159,12 @@ clamp_utf16_units :: proc(s: string, max_units: int) -> string {
 
 // A click on the notification reports `token` back in a Tray_Notification_Event; 0 means no target.
 @(require_results)
-tray_notify :: proc(p: ^Platform, title, text: string, token: u64 = 0) -> Error {
+tray_notify :: proc(p: ^Platform, title, text: string, token: u64 = 0, sound := true) -> Error {
 	if !p.tray_added {return .Not_Initialized}
 	data := p.tray_data
 	data.uFlags = w.NIF_INFO
 	data.dwInfoFlags = NIIF_INFO
+	if !sound {data.dwInfoFlags |= 0x10} // NIIF_NOSOUND
 	utf16.encode_string(data.szInfoTitle[:63], clamp_utf16_units(title, 63))
 	utf16.encode_string(data.szInfo[:255], clamp_utf16_units(text, 255))
 	p.tray_notify_token = token

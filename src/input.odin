@@ -111,6 +111,9 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		} else {
 			status_notification_clicked(app, u32(e.token))
 		}
+	case platform.Notification_Error_Event:
+		log.errorf("Windows notification delivery failed: HRESULT 0x%x", e.code)
+		notify(app, .Error, "Windows could not deliver a status notification.")
 	case platform.Activate_Request_Event:
 		// Launching AIODev again means a fresh workspace window, as New Window does. With every
 		// window hidden to the tray, it reopens the existing view instead.

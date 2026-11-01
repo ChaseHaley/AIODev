@@ -5,6 +5,7 @@ import "aio:glyphs"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
+import "aio:settings"
 import "core:fmt"
 import "core:log"
 import "core:strings"
@@ -292,18 +293,40 @@ status_focus_leave :: proc(app: ^App, w: ^Window) {
 	if entry := focused_session(app, w); entry != nil {term.program_status_dismiss_finished(entry.session)}
 }
 
+Status_Notification_Channels :: struct {
+	banner, tray, flash, sound, notice: bool,
+}
+
+// A pure routing policy shared by transition eligibility and delivery.
+status_notification_channels :: proc(
+	s: ^settings.Status_Settings,
+	state: term.Program_Status_State,
+) -> Status_Notification_Channels {
+	if !s.enabled {return {}}
+	switch state {
+	case .Idle:
+		if !s.notify_idle {return {}}
+		return {s.banner_idle, s.tray_idle, s.flash_idle, s.sound_idle, s.notice_idle}
+	case .Working:
+		if !s.notify_working {return {}}
+		return {s.banner_working, s.tray_working, s.flash_working, s.sound_working, s.notice_working}
+	case .Blocked:
+		if !s.notify_blocked {return {}}
+		return {s.banner_blocked, s.tray_blocked, s.flash_blocked, s.sound_blocked, s.notice_blocked}
+	case .Error:
+		if !s.notify_error {return {}}
+		return {s.banner_error, s.tray_error, s.flash_error, s.sound_error, s.notice_error}
+	case .Done:
+		if !s.notify_done {return {}}
+		return {s.banner_done, s.tray_done, s.flash_done, s.sound_done, s.notice_done}
+	}
+	return {}
+}
+
 @(private)
 status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
-	s := &app.settings.status
-	#partial switch record.state {
-	case .Blocked:
-		return s.notify_blocked
-	case .Error:
-		return s.notify_error
-	case .Done:
-		return s.notify_done
-	}
-	return false
+	c := status_notification_channels(&app.settings.status, record.state)
+	return c.banner || c.tray || c.flash || c.sound || c.notice
 }
 
 @(private)
@@ -335,12 +358,38 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	title := fmt.tprintf("%s: %s", status_record_name(entry, record), headline)
 	text := status_crumb(app, entry)
 	if record.message != "" {text = fmt.tprintf("%s · %s", record.message, text)}
-	if platform_api.tray_notify(&app.platform, title, text, u64(entry.id)) != .None {
-		log.error("showing the program status notification failed")
+	c := status_notification_channels(&app.settings.status, record.state)
+	sound_delivered := false
+	if c.banner {
+		if platform_api.notification_show(&app.platform, title, text, entry.id, c.sound) == .None {
+			sound_delivered = c.sound
+		} else {
+			notify(app, .Error, "Windows could not show a status notification. Check notification settings.")
+		}
+	}
+	if c.tray {
+		result := platform_api.tray_notify(
+			&app.platform, title, text, u64(entry.id), c.sound && !sound_delivered,
+		)
+		if result == .None {
+			sound_delivered = c.sound
+		} else {
+			notify(app, .Error, "Windows could not show a tray notification.")
+		}
+	}
+	if c.sound && !sound_delivered && platform_api.notification_sound() != .None {
+		log.error("playing program status sound failed")
+	}
+	if c.notice {
+		kind: ui.Notice_Kind = .Info
+		if record.state == .Blocked {kind = .Warning}
+		if record.state == .Error {kind = .Error}
+		if record.state == .Done {kind = .Success}
+		notify(app, kind, fmt.tprintf("%s: %s", title, text))
 	}
 	target := window_for_workspace(app, status_workspace_of(app, entry.id))
 	if target == nil && len(app.windows) > 0 {target = app.windows[0]}
-	if target != nil && !target.focused &&
+	if c.flash && target != nil && !target.focused &&
 	   platform_api.window_flash(&app.platform, target.id) != .None {
 		log.error("flashing the window for program status failed")
 	}
@@ -434,10 +483,11 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 				if !status_shown(app, record) {continue}
 				#partial switch record.state {
 				case .Error:
-					failed ||= !record.seen
+					failed ||= s.taskbar_error && !record.seen
 				case .Blocked:
-					blocked = true
+					blocked ||= s.taskbar_blocked
 				case .Working:
+					if !s.taskbar_working {continue}
 					working = true
 					if record.progress >= 0 {
 						least = min(least, int(record.progress))

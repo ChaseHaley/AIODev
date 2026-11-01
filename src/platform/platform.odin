@@ -109,6 +109,9 @@ Tray_Menu_Event :: struct {
 Tray_Notification_Event :: struct {
 	token: u64,
 }
+Notification_Error_Event :: struct {
+	code: u32,
+}
 Activate_Request_Event :: struct {}
 Settings_Event :: struct {}
 Wake_Event :: struct {}
@@ -127,6 +130,7 @@ Event :: union {
 	Tray_Event,
 	Tray_Menu_Event,
 	Tray_Notification_Event,
+	Notification_Error_Event,
 	Activate_Request_Event,
 	Settings_Event,
 	Wake_Event,

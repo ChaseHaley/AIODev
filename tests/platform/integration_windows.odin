@@ -370,6 +370,8 @@ tray_menu_validation :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.Tray"), p.Init_Result.Primary) { return }
 	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
 	testing.expect_value(t, p.tray_notify(&platform, "title", "text"), p.Error.Not_Initialized)
+	empty: p.Platform
+	testing.expect_value(t, p.notification_show(&empty, "title", "text", 1, false), p.Error.Not_Initialized)
 	invalid := []p.Tray_Menu_Item{{id = 0, title = "invalid"}}
 	duplicate := []p.Tray_Menu_Item{{id = 1}, {id = 1}}
 	valid := []p.Tray_Menu_Item{
