@@ -47,7 +47,7 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 			testing.expect_value(t, w.profile_menu.items[expected].label, row.name)
 			expected += 1
 		}
-		testing.expect_value(t, w.profile_menu.count, expected + 3)
+		testing.expect_value(t, w.profile_menu.count, expected + (mode == .New_Tab ? 0 : 3))
 	}
 }
 

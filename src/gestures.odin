@@ -16,6 +16,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	if ui.armed_down(w.find.armed) || w.selecting || w.dragging.count > 0 || w.rail_resizing ||
 	   w.tab_drag.pressed || w.pane_drag.pressed || ui.armed_down(w.tab_close_armed) ||
 	   ui.armed_down(w.caption_armed) || ui.armed_down(w.tab_orientation_button_armed) ||
+	   ui.armed_down(w.title_action_armed) ||
 	   w.editor.drag != .None || w.rename.dragging || w.workspace_picker.query.dragging {
 		w.gesture.cancelled += {.Left}
 	}
@@ -26,6 +27,8 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	pane_header_cancel(w)
 	w.tab_hover, w.tab_pressed = -1, false
 	w.rail_hover, w.rail_pressed = -1, -1
+	w.title_action_hover = .None
+	ui.armed_cancel(&w.title_action_armed)
 	w.tab_orientation_button_hovered = false
 	ui.armed_cancel(&w.tab_orientation_button_armed)
 	ui.armed_cancel(&w.tab_close_armed)
@@ -68,6 +71,18 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		_, ok := ui.armed_release(&w.status.panel_side_armed,
 			status_rect_contains(status_panel_side_rect(app, w), x, y))
 		if ok {status_panel_side_toggle(app)}
+		return true
+	}
+	if e.button == .Left && ui.armed_down(w.title_action_armed) {
+		fired, ok := ui.armed_release(&w.title_action_armed, title_action_hit(w, x, y))
+		w.dirty = true
+		if ok {
+			switch fired {
+			case .None:
+			case .Settings: editor_open(app, w)
+			case .Palette: palette_open(app, w)
+			}
+		}
 		return true
 	}
 	if e.button == .Left && w.find.open && ui.armed_down(w.find.armed) {

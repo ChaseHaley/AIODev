@@ -7,6 +7,7 @@ import "aio:ui"
 // whose click changes something; the selected tab is already shown, so only its close button
 // takes a hand. Caption buttons keep the arrow, as native windows do.
 chrome_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> platform.Cursor_Shape {
+	if title_action_hit(w, x, y) != .None {return .Hand}
 	if tab_orientation_button_hit(w, x, y) {return .Hand}
 	if y >= 0 && y < ui.TITLE_BAR_HEIGHT * w.scale && x < workspace_button_width(w) {
 		toggle := tab_orientation_button_rect(w)

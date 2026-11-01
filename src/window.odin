@@ -86,6 +86,8 @@ Window :: struct {
 	rail_default_width:  f32,
 	rail_resizing:       bool,
 	dock_left_width:     f32,
+	title_action_hover: Title_Action,
+	title_action_armed: ui.Armed(Title_Action),
 	tab_orientation_button_hovered: bool,
 	tab_orientation_button_armed:   ui.Armed(bool),
 	rail_slide:          ui.Motion,

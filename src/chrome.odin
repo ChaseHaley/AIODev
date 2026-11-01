@@ -64,6 +64,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	); result != .Ok {return result}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
 	if result := status_pill_draw(app, w); result != .Ok {return result}
+	title_actions_draw(app, w)
 	if result := tab_orientation_button_draw(app, w); result != .Ok {return result}
 	if w.tabs_horizontal {return window_tab_strip_draw(app, w)}
 	return .Ok

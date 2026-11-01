@@ -506,6 +506,8 @@ when AIO_CONTROL {
 				{"rail.row.height", fmt.tprintf("%g", ui.RAIL_ROW_HEIGHT * w.scale)},
 				{"rail.toggle", verify_workspace_rect(tab_orientation_button_rect(w))},
 				{"tabs.orientation_button", verify_workspace_rect(tab_orientation_button_rect(w))},
+				{"title.settings", verify_workspace_rect(title_action_rect(w, .Settings))},
+				{"title.palette", verify_workspace_rect(title_action_rect(w, .Palette))},
 				{"title.height", fmt.tprintf("%g", ui.TITLE_BAR_HEIGHT * w.scale)},
 				{
 					"title.controls_end",

@@ -122,7 +122,7 @@ workspace_rename_open :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_button_width :: proc(w: ^Window) -> f32 {
-	left := (ui.RAIL_TOGGLE_WIDTH + 8) * w.scale
+	left := title_actions_end(w)
 	available := max(0, f32(w.width) - 218 * w.scale - left)
 	return left + min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
 }
@@ -131,7 +131,7 @@ workspace_button_width :: proc(w: ^Window) -> f32 {
 // control is drawn lifted, so the hover never changes where the click target is.
 workspace_button_rect :: proc(w: ^Window) -> render.Rect {
 	width := workspace_button_width(w)
-	left := (ui.RAIL_TOGGLE_WIDTH + 8) * w.scale
+	left := title_actions_end(w)
 	return {left + 5 * w.scale, 6 * w.scale, max(0, width - left - 10 * w.scale), 28 * w.scale}
 }
 

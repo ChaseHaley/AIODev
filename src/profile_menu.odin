@@ -116,17 +116,19 @@ profile_menu_open :: proc(
 			{action = .Profile, visible_index = i, profile_id = profile.id},
 		)
 	}
-	profile_menu_push(menu, {separator = true}, {})
-	profile_menu_push(
-		menu,
-		{label = "Settings", shortcut = "Ctrl+,", enabled = true},
-		{action = .Settings},
-	)
-	profile_menu_push(
-		menu,
-		{label = "Command Palette", shortcut = "Ctrl+Shift+P", enabled = true},
-		{action = .Palette},
-	)
+	if mode == .Swap_Pane {
+		profile_menu_push(menu, {separator = true}, {})
+		profile_menu_push(
+			menu,
+			{label = "Settings", shortcut = "Ctrl+,", enabled = true},
+			{action = .Settings},
+		)
+		profile_menu_push(
+			menu,
+			{label = "Command Palette", shortcut = "Ctrl+Shift+P", enabled = true},
+			{action = .Palette},
+		)
+	}
 	ui.menu_anchor(&menu.menu, x, y)
 	menu.menu.open = true
 	menu.menu.selected = -1

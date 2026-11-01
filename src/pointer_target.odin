@@ -21,6 +21,7 @@ Pointer_Target :: enum u8 {
 	// The command palette takes the rest of the window while it is open.
 	Palette,
 	Tab_Orientation,
+	Title_Action,
 	// The find bar floats over panes, headers and the Activity panel.
 	Find,
 	Workspace_Button,
@@ -58,6 +59,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Confirmation     = {confirmation_claims, confirmation_pointer_hover, confirmation_press},
 	.Palette          = {palette_claims, palette_hover, palette_press},
 	.Tab_Orientation  = {orientation_claims, orientation_hover, orientation_press},
+	.Title_Action = {title_action_claims, title_action_pointer_hover, title_action_press},
 	.Find             = {find_claims, find_pointer_hover, find_press},
 	.Workspace_Button = {workspace_button_claims, workspace_button_hover, workspace_button_press},
 	.Status_Pill      = {pill_claims, pill_hover, pill_press},
@@ -329,8 +331,7 @@ find_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private = "file")
 workspace_button_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	toggle := tab_orientation_button_rect(w)
-	return y >= 0 && y < ui.TITLE_BAR_HEIGHT * w.scale && x >= toggle.x + toggle.width &&
+	return y >= 0 && y < ui.TITLE_BAR_HEIGHT * w.scale && x >= title_actions_end(w) &&
 		x < workspace_button_width(w)
 }
 
@@ -499,3 +500,21 @@ content_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 	pane_header_pointer(w, x, y, false)
 }
 
+@(private = "file")
+title_action_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return title_action_hit(w, x, y) != .None
+}
+
+@(private = "file")
+title_action_pointer_hover :: proc(
+	app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event,
+) {
+	hover := owner == .Title_Action ? title_action_hit(w, f32(e.x), f32(e.y)) : Title_Action.None
+	if hover != w.title_action_hover {w.title_action_hover, w.dirty = hover, true}
+	if hover != .None {pointer_set(app, w, .Hand)}
+}
+
+@(private = "file")
+title_action_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	if e.button == .Left {ui.armed_press(&w.title_action_armed, title_action_hit(w, f32(e.x), f32(e.y)))}
+}
