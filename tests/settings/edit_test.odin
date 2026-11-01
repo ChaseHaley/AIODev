@@ -81,7 +81,7 @@ themes_duplicate_rename_and_delete_as_whole_blocks :: proc(t: ^testing.T) {
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
 	testing.expect_value(t, s.theme.name, "mine-copy")
-	testing.expect_value(t, len(s.themes), 12)
+	testing.expect_value(t, len(s.themes), 16)
 	testing.expect_value(t, s.active_theme.colors[.Cursor], settings.Theme_Color{1, 2, 3, 255})
 	testing.expect_value(t, settings.custom_theme_find(&s, "mine-copy").base, "ember-dark")
 	settings.destroy(&s)

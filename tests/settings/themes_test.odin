@@ -67,7 +67,7 @@ custom_theme_inherits_its_base_and_overrides_single_colors :: proc(t: ^testing.T
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	testing.expect_value(t, len(s.themes), 12)
+	testing.expect_value(t, len(s.themes), 16)
 	base := shipped_theme("tide-light")
 	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
 	testing.expect_value(t, s.active_theme.colors[.Border], settings.Theme_Color{4, 5, 6, 0x80})

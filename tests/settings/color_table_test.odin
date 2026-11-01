@@ -74,5 +74,5 @@ shipped_light_matches_the_id_and_selection_text_keeps_cell_colors :: proc(t: ^te
 		testing.expect(t, settings.theme_terminal(theme).selection_foreground == nil)
 		testing.expect_value(t, theme.colors[.Border].a, light ? 23 : 20)
 	}
-	testing.expect_value(t, count, 10)
+	testing.expect_value(t, count, 14)
 }
