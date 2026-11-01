@@ -985,7 +985,7 @@ SCHEMA :: [?]Schema_Entry {
 		"Report PowerShell Directory",
 		.Bool,
 		offset_of(Settings, shell) + offset_of(Shell_Settings, report_directory),
-		"false",
+		"true",
 		0,
 		0,
 		nil,

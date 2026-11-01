@@ -79,3 +79,15 @@ header_settings_reload_and_serialize_through_the_shared_schema :: proc(t: ^testi
 	testing.expect_value(t, s.shell.icon, "λ")
 	testing.expect_value(t, settings.value_text(&s, settings.schema_find("pane.show_headers")^), "false")
 }
+
+@(test)
+directory_reporting_defaults_on_and_respects_explicit_opt_out :: proc(t: ^testing.T) {
+	for text in ([?]string{"", "shell.report_directory = false"}) {
+		s, diagnostics, err := settings.parse(text)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&diagnostics)
+		testing.expect_value(t, err, nil)
+		testing.expect_value(t, len(diagnostics), 0)
+		testing.expect_value(t, s.shell.report_directory, text == "")
+	}
+}
