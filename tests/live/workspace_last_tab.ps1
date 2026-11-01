@@ -52,6 +52,7 @@ try {
     $workspace = $initial['workspace.id']
     $session = $initial['session.id']
     Aio command workspace.new | Out-Null
+    Aio key Enter | Out-Null
     Aio command tab.new | Out-Null
     Current-Rail
     Aio command tab.close | Out-Null
@@ -65,6 +66,7 @@ try {
     Equal $s['session.id'] $session 'fallback preserves the existing runtime'
     Current-Rail
     Aio command window.new | Out-Null
+    Aio key Enter | Out-Null
     $s = State
     Aio window select $s['window.2.id'] | Out-Null
     Aio command tab.close | Out-Null

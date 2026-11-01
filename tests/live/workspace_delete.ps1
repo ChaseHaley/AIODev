@@ -181,6 +181,8 @@ try {
         Write-Output "PASS cancel-$cancel preserves exact tab/pane/session identity $identity"
     }
     Invoke-Aio command workspace.new
+    Invoke-Aio type "Workspace 2" | Out-Null
+    Invoke-Aio key Enter | Out-Null
     $unrelated = Shell-Process unrelated
     Invoke-Aio run '$global:deleteMarker = "UNRELATED_" + "SURVIVED"'
     Row-Menu-Delete 'Disposable tabs and panes'
@@ -189,6 +191,8 @@ try {
     Invoke-Aio key Esc
     Invoke-Aio expect state sessions.count=4
     Invoke-Aio command window.new
+    Invoke-Aio type "Workspace 3" | Out-Null
+    Invoke-Aio key Enter | Out-Null
     $secondWindow = (Read-State)['window.2.id']
     if (-not $secondWindow -or $secondWindow -eq $firstWindow) { throw 'New Window did not create another owner' }
     Invoke-Aio window select $secondWindow

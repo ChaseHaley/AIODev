@@ -3,7 +3,11 @@ package main
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
+import "core:strings"
+
+Name_Dialog_Mode :: enum {Rename, New_Workspace, New_Window, Move_Workspace, Tearoff}
 
 rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
 	tab := selected_tab(w.workspace)
@@ -15,15 +19,59 @@ rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
 		target, value = {.Pane, entry.id}, entry.name
 	}
 	if !gesture_cancel(app, w) {return}
+	if w.rename_open {rename_finish(app, w, false)}
 	palette_close(app, w)
 	ui.field_set(&w.rename, value)
 	ui.field_select_all(&w.rename)
+	w.rename_mode = .Rename
 	w.rename_target, w.rename_open, w.dirty = target, true, true
 }
 
+workspace_name_open :: proc(app: ^App, w: ^Window, mode: Name_Dialog_Mode) {
+	if !gesture_cancel(app, w) {return}
+	if w.rename_open {rename_finish(app, w, false)}
+	name := workspace_default_name(app)
+	if name == "" {notify(app, .Error, "Could not generate a workspace name."); return}
+	defer delete(name)
+	palette_close(app, w)
+	workspace_picker_cancel(w)
+	ui.field_set(&w.rename, name)
+	ui.field_select_all(&w.rename)
+	w.rename_mode, w.rename_open, w.dirty = mode, true, true
+}
+
 rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
+	mode := w.rename_mode
+	drag := w.rename_drag
+	if save && mode != .Rename {
+		name := settings.display_title(strings.trim_space(ui.field_string(&w.rename)), context.temp_allocator)
+		if name == "" {return}
+		for workspace in app.workspaces {
+			if !workspace.provisional && strings.equal_fold(workspace.name, name) {
+				notify(app, .Error, "A workspace already uses that name.")
+				return
+			}
+		}
+		w.rename_open, w.rename_mode, w.dirty = false, .Rename, true
+		if mode == .Tearoff {
+			if !pane_to_window(app, w, drag.source, drag.node, drag.preview_window, name) {
+				pane_window_preview_discard(app, drag.preview_window)
+				pane_drag_restore(app, w, drag)
+				notify(app, .Error, "Could not move the pane. The source was preserved.")
+			}
+		} else if mode == .Move_Workspace {
+			workspace_move_choose(app, w, w.rename_move, 0, name)
+		} else {
+			workspace_new_commit(app, w, mode == .New_Window, name)
+		}
+		return
+	}
+	w.rename_open, w.rename_mode, w.dirty = false, .Rename, true
+	if !save && mode == .Tearoff {
+		pane_window_preview_discard(app, drag.preview_window)
+		pane_drag_restore(app, w, drag)
+	}
 	if save {_ = rename_target_commit(app, w, w.rename_target, ui.field_string(&w.rename))}
-	w.rename_open, w.dirty = false, true
 }
 
 rename_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
@@ -100,6 +148,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	frame := ui.dialog_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
 	title := w.rename_target.kind == .Tab ? "Rename Tab" : "Rename Pane"
+	if w.rename_mode != .Rename {title = "New Workspace"}
 	if result := ui.draw_text(
 		&heading,
 		&w.list,
@@ -120,13 +169,15 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme,
 		ui.field_box_baseline(box),
 		true,
-		"Automatic title",
+		w.rename_mode == .Rename ? "Automatic title" : "Workspace name",
 	); result != .Ok {return result}
 	if render.push_layer(&w.list, r) != .None {return .Ok}
+	message := "Enter saves · Esc cancels · Empty restores automatic titles"
+	if w.rename_mode != .Rename {message = "Enter creates · Esc cancels"}
 	return ui.draw_text(
 		&hint,
 		&w.list,
-		"Enter saves · Esc cancels · Empty restores automatic titles",
+		message,
 		r.x + pad,
 		field.y + field.height + 8 * s + hint.ascent,
 		app.theme.muted,

@@ -29,6 +29,7 @@ try {
     $one = (Read-State)['settings.scroll']
     if ([int]$one -le 1) { throw 'First Settings page did not scroll.' }
     Invoke-Aio command workspace.new
+    Invoke-Aio key Enter | Out-Null
     Invoke-Aio command workspace.select_1
     Assert-Scroll $one 'Settings scroll survives a workspace without Settings'
     Invoke-Aio command workspace.select_2

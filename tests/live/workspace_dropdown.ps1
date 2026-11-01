@@ -43,6 +43,7 @@ try {
     $firstId = $first['workspace.id']
     $firstSession = $first['session.id']
     Invoke-Aio command workspace.new
+    Invoke-Aio key Enter | Out-Null
     Invoke-Aio wait text 'PS '
     $secondId = (Read-State)['workspace.id']
     Invoke-Aio command workspace.rename

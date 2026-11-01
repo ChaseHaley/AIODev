@@ -119,6 +119,7 @@ pane_to_window :: proc(
 	source: ^Tab,
 	node: layout.Node_Id,
 	preview_id: platform.Window_Id,
+	chosen_name: string = "",
 ) -> bool {
 	preview := window_find(app, preview_id)
 	workspace := pane_source_workspace(app, source)
@@ -143,8 +144,15 @@ pane_to_window :: proc(
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
-	name, number := workspace_default_name(app)
-	if number == 0 {return false}
+	name: string
+	if chosen_name == "" {
+		name = workspace_default_name(app)
+	} else {
+		owned, err := strings.clone(chosen_name)
+		if err != nil {return false}
+		name = owned
+	}
+	if name == "" {return false}
 	move := pane_move_begin(app, preview, source, workspace)
 	if !layout.remove(&source.tree, node) {
 		delete(name)
@@ -156,7 +164,6 @@ pane_to_window :: proc(
 	preview.preparing = false
 	preview.workspace.provisional = false
 	preview.workspace.name = name
-	app.next_workspace_number = number
 	workspace_pickers_refresh(app)
 	pane_move_finish(app, move, destination)
 	_ = window_activate(app, preview)

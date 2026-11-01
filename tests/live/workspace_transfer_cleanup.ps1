@@ -67,6 +67,8 @@ try {
     $movedRuntime = (Read-State)['session.id']
     $movedPid = Shell-Receipt moved
     Invoke-Aio command window.new | Out-Null
+    Invoke-Aio type "Workspace 2" | Out-Null
+    Invoke-Aio key Enter | Out-Null
     $inventory = Read-State
     $destination = $inventory['window.2.id']
     Select-Window $destination
@@ -103,6 +105,7 @@ try {
     Invoke-Aio expect state panes.drop.shown=true | Out-Null
     Invoke-Aio key Esc | Out-Null
     Invoke-Aio mouse up $target --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     Invoke-Aio expect state workspaces.count=2 | Out-Null
     Invoke-Aio expect state windows.count=2 | Out-Null
     Invoke-Aio expect state "workspace.id=$sourceWorkspace" | Out-Null
@@ -126,6 +129,7 @@ try {
     Invoke-Aio expect state "panes.drop.new_tab=$newTab" | Out-Null
     Save-State before-commit
     Invoke-Aio mouse up $target --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     Select-Window $destination
     Save-State after-commit
     $expected = if ($Remaining -eq 'None') { 1 } else { 2 }
@@ -150,6 +154,8 @@ try {
         Invoke-Aio expect state workspace.picker.count=2 | Out-Null
         Invoke-Aio key Esc | Out-Null
         Invoke-Aio command workspace.new | Out-Null
+        Invoke-Aio type "Workspace 3" | Out-Null
+        Invoke-Aio key Enter | Out-Null
         Invoke-Aio expect state workspace.id=3 | Out-Null
         Invoke-Aio expect state 'workspace.name=Workspace 3' | Out-Null
     } else {

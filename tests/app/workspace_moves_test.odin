@@ -42,6 +42,7 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	app.workspace_picker_cancel(w)
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(original)), 2)
 	app.run_action(&state, w, .Move_Pane_New_Workspace)
+	app.rename_finish(&state, w, true)
 	two := w.workspace
 	testing.expect(t, two != original)
 	testing.expect_value(t, len(two.tabs), 1)
@@ -72,11 +73,13 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	testing.expect_value(t, len(state.sessions), 3)
 	testing.expect_value(t, term.process_id(session), pid)
 	app.run_action(&state, w, .Move_Tab_New_Workspace)
+	app.rename_finish(&state, w, true)
 	three := w.workspace
 	testing.expect(t, three != original)
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(three)), 2)
 	app.run_action(&state, w, .Settings_UI)
 	app.run_action(&state, w, .Move_Pane_New_Workspace)
+	app.rename_finish(&state, w, true)
 	settings_workspace := w.workspace
 	testing.expect(t, settings_workspace != three)
 	testing.expect(t, app.settings_active(w))

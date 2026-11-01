@@ -31,6 +31,7 @@ settings_scroll_survives_workspace_round_trips :: proc(t: ^testing.T) {
 	initial_scroll := w.editor.scroll
 	w.editor.scroll = 24
 	app.run_action(&state, w, .New_Workspace)
+	app.rename_finish(&state, w, true)
 	two := w.workspace
 	if !testing.expect(t, two != one) {return}
 	if !testing.expect(t, app.workspace_select(&state, w, one)) {return}

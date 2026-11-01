@@ -9,6 +9,7 @@ import app "../../src"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
+import "aio:ui"
 
 @(test)
 pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
@@ -35,7 +36,6 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	pid := term.process_id(session)
 	geometry := term.geometry(session)
 	workspace_id := state.next_workspace_id
-	workspace_number := state.next_workspace_number
 	tab_id := source_workspace.next_tab_id
 	last_preview := app.pane_window_preview_create(&state, source, node, 80, 80)
 	testing.expect(t, last_preview == nil)
@@ -65,7 +65,6 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	settings_preview = app.pane_window_preview_create(&state, source, node, 80, 80)
 	if !testing.expect(t, settings_preview != nil) { return }
 	app.pane_window_preview_discard(&state, settings_preview.id)
-	testing.expect_value(t, state.next_workspace_number, workspace_number)
 	app.tab_close(&state, source_window, 1)
 	testing.expect_value(t, len(source_workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
@@ -83,7 +82,6 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	failed = app.pane_window_preview_create(&state, source, node, 80, 80)
 	state.settings.pane.minimum_columns = minimum
 	testing.expect(t, failed == nil)
-	testing.expect_value(t, state.next_workspace_number, workspace_number)
 	testing.expect(t, state.next_workspace_id > workspace_id)
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(state.workspaces), 1)
@@ -93,7 +91,6 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	if !testing.expect(t, preview != nil) { return }
 	testing.expect(t, preview.preparing)
 	testing.expect_value(t, preview.workspace.name, "")
-	testing.expect_value(t, state.next_workspace_number, workspace_number)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, term.process_id(session), pid)
 	testing.expect_value(t, term.geometry(session), geometry)
@@ -114,7 +111,6 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	app.pane_window_preview_discard(&state, preview_id)
 	testing.expect(t, app.window_find(&state, preview_id) == nil)
 	testing.expect_value(t, state.next_workspace_id, preview_workspace_id)
-	testing.expect_value(t, state.next_workspace_number, workspace_number)
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, term.geometry(session), geometry)
@@ -132,7 +128,6 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	preview_id = preview.id
 	app.tab_close(&state, source_window, 1)
 	testing.expect(t, !app.pane_to_window(&state, source_window, source, node, preview_id))
-	testing.expect_value(t, state.next_workspace_number, workspace_number)
 	testing.expect(t, preview.preparing && preview.workspace.provisional)
 	testing.expect_value(t, source.tree.root, node)
 	testing.expect_value(t, len(state.sessions), 1)
@@ -159,16 +154,42 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect(t, !failed_commit)
 	testing.expect(t, preview.preparing && preview.workspace.provisional)
 	testing.expect_value(t, source.tree.root, node)
-	testing.expect_value(t, state.next_workspace_number, workspace_number)
-	// The sole pane of one tab can move while another tab keeps the workspace populated.
-	if !testing.expect(t, app.pane_to_window(&state, source_window, source, node, preview_id)) { return }
+	// A tear-off asks before changing the source; cancellation releases only the borrowed preview.
+	source_window.pane_drag = {source = source, node = node, active = true,
+		shown = true, new_window = true, preview_window = preview_id}
+	testing.expect(t, app.pane_drag_release(&state, source_window))
+	testing.expect(t, source_window.rename_open && source_window.rename_mode == .Tearoff)
+	testing.expect_value(t, source.tree.root, node)
+	app.workspace_new(&state, source_window, false)
+	testing.expect(t, source_window.rename_open && source_window.rename_mode == .New_Workspace)
+	app.rename_finish(&state, source_window, false)
+	testing.expect(t, app.window_find(&state, preview_id) == nil)
+	testing.expect_value(t, term.process_id(session), pid)
+	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
+	if !testing.expect(t, preview != nil) {return}
+	preview_id = preview.id
+	source_window.pane_drag = {source = source, node = node, active = true,
+		shown = true, new_window = true, preview_window = preview_id}
+	testing.expect(t, app.pane_drag_release(&state, source_window))
+	app.rename_open(&state, source_window, true)
+	testing.expect(t, source_window.rename_open && source_window.rename_mode == .Rename)
+	testing.expect(t, app.window_find(&state, preview_id) == nil)
+	app.rename_finish(&state, source_window, false)
+	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
+	if !testing.expect(t, preview != nil) {return}
+	preview_id, preview_workspace_id = preview.id, preview.workspace.id
+	source_window.pane_drag = {source = source, node = node, active = true,
+		shown = true, new_window = true, preview_window = preview_id}
+	testing.expect(t, app.pane_drag_release(&state, source_window))
+	_ = ui.field_text(&source_window.rename, "Detached tools")
+	app.rename_finish(&state, source_window, true)
+	testing.expect_value(t, preview.workspace.name, "Detached tools")
 	testing.expect_value(t, len(state.windows), 2)
 	testing.expect(t, app.window_find(&state, preview_id) == preview)
 	testing.expect(t, !preview.preparing)
-	testing.expect_value(t, preview.workspace.name, "Workspace 2")
+	testing.expect(t, preview.workspace.name != "" && preview.workspace.name != source_workspace.name)
 	testing.expect_value(t, preview.workspace.id, preview_workspace_id)
 	testing.expect(t, preview.workspace.id > 2)
-	testing.expect_value(t, state.next_workspace_number, u32(2))
 	testing.expect_value(t, len(source_workspace.tabs), 1)
 	testing.expect_value(t, len(preview.panes), 1)
 	testing.expect_value(t, preview.panes[0].content, layout.Content{.Terminal, state.sessions[0].id})

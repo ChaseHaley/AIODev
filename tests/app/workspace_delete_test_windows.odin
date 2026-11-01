@@ -29,6 +29,7 @@ last_tab_group_removes_workspace_and_reuses_window_then_last_pane_exits :: proc(
 	survivor := state.sessions[0].session
 	survivor_pid := term.process_id(survivor)
 	app.workspace_new(state, w, false)
+	app.rename_finish(state, w, true)
 	closed_id := w.workspace.id
 	process := delete_process_handle(t, app.focused_session(state, w).session)
 	defer if process != nil {testing.expect(t, bool(win32.CloseHandle(process)))}
@@ -66,6 +67,8 @@ second_launch_opens_new_workspace_window_and_reopens_from_tray :: proc(t: ^testi
 	state := &f.state
 	one := state.windows[0]
 	app.handle_event(state, platform.Activate_Request_Event{})
+	testing.expect(t, one.rename_open && one.rename_mode == .New_Window)
+	app.rename_finish(state, one, true)
 	if !testing.expect_value(t, len(state.windows), 2) {return}
 	two := state.windows[1]
 	testing.expect_value(t, len(state.workspaces), 2)
@@ -91,6 +94,7 @@ last_tab_reuses_existing_workspace_owner_without_creating_a_replacement :: proc(
 	survivor := state.sessions[0].session
 	survivor_pid := term.process_id(survivor)
 	app.workspace_new(state, one, true)
+	app.rename_finish(state, one, true)
 	two := state.windows[1]
 	closed_id := two.workspace.id
 	app.tab_close(state, two, 0)
@@ -232,10 +236,12 @@ workspace_delete_hidden_and_foreign_owner_leave_unrelated_runtimes :: proc(t: ^t
 	hidden_process := delete_process_handle(t, state.sessions[0].session)
 	defer if hidden_process != nil { testing.expect(t, bool(win32.CloseHandle(hidden_process))) }
 	app.workspace_new(state, one, false)
+	app.rename_finish(state, one, true)
 	current := one.workspace
 	current_session := app.focused_session(state, one).session
 	current_pid := term.process_id(current_session)
 	app.workspace_new(state, one, true)
+	app.rename_finish(state, one, true)
 	two := state.windows[1]
 	displayed := two.workspace
 	foreign_id := displayed.id
@@ -276,6 +282,7 @@ workspace_delete_destination_failure_and_changed_ownership_reconfirm :: proc(t: 
 	context.logger = log.nil_logger()
 	app.run_action(state, w, .Settings_UI)
 	app.workspace_new(state, w, false)
+	app.rename_finish(state, w, true)
 	target := w.workspace
 	target_id := target.id
 	session := app.focused_session(state, w).session
@@ -367,6 +374,7 @@ workspace_delete_allocation_failures_preserve_original_until_prepared :: proc(t:
 	testing.expect_value(t, len(state.sessions), 1)
 	// Existing hidden destinations isolate view allocation failures from runtime creation.
 	app.workspace_new(state, w, false)
+	app.rename_finish(state, w, true)
 	original = w.workspace
 	id = original.id
 	session = app.focused_session(state, w).session
@@ -405,6 +413,7 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	testing.expect(t, !w.pending_close.confirm.open)
 	w.preparing = false
 	app.workspace_new(state, w, true)
+	app.rename_finish(state, w, true)
 	requester := state.windows[1]
 	requester_workspace := requester.workspace
 	app.workspace_delete_request(state, requester, target)

@@ -107,7 +107,7 @@ layout_state_encode_round_trips_structure :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, json.unmarshal(transmute([]u8)text, &decoded,
 		allocator = context.temp_allocator), nil) { return }
 	testing.expect_value(t, decoded.version, app.LAYOUT_STATE_VERSION)
-	testing.expect_value(t, decoded.workspace_number, u32(2))
+	testing.expect_value(t, decoded.workspace_number, u32(0))
 	if !testing.expect_value(t, len(decoded.workspaces), 1) { return }
 	saved := decoded.workspaces[0]
 	testing.expect_value(t, saved.name, "Notes")

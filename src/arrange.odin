@@ -625,7 +625,13 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	if !d.active {return false}
 	w.dirty = true
 	if d.new_window {
-		if d.shown && pane_to_window(app, w, d.source, d.node, d.preview_window) {return true}
+		if d.shown {
+			workspace_name_open(app, w, .Tearoff)
+			if w.rename_open && w.rename_mode == .Tearoff {
+				w.rename_drag = d
+				return true
+			}
+		}
 		pane_window_preview_discard(app, d.preview_window)
 		pane_drag_restore(app, w, d)
 		return true

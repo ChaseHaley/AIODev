@@ -70,6 +70,7 @@ try {
     Invoke-Aio key Tab Ctrl+A
     Invoke-Aio type 19
     Invoke-Aio command window.new
+    Invoke-Aio key Enter | Out-Null
     $windows = Read-State
     Assert-Value $windows['windows.count'] 2 'the second window is created'
     $second = @($windows.Keys | Where-Object { $_ -match '^window\.\d+\.id$' } |

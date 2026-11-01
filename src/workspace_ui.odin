@@ -45,10 +45,9 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 	if app.next_workspace_id == max(u32) {return nil}
 	workspace, err := new(Workspace)
 	if err != nil {return nil}
-	number: u32
 	if !provisional {
-		workspace.name, number = workspace_default_name(app)
-		if number == 0 {free(workspace); return nil}
+		workspace.name = workspace_default_name(app)
+		if workspace.name == "" {free(workspace); return nil}
 	}
 	workspace.id = app.next_workspace_id + 1
 	workspace.provisional = provisional
@@ -57,7 +56,6 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 		return nil
 	}
 	app.next_workspace_id = workspace.id
-	if !provisional {app.next_workspace_number = number}
 	workspace_pickers_refresh(app)
 	return workspace
 }
@@ -100,8 +98,21 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 }
 
 workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
+	owner := w
+	if owner == nil && len(app.windows) > 0 {owner = app.windows[0]}
+	if owner == nil {return}
+	if w == nil && !window_activate(app, owner) {return}
+	workspace_name_open(app, owner, new_window ? .New_Window : .New_Workspace)
+}
+
+workspace_new_commit :: proc(app: ^App, w: ^Window, new_window: bool, name: string) {
 	workspace := workspace_create_empty(app)
 	if workspace == nil {notify(app, .Error, "Could not create a workspace."); return}
+	if rename_target_commit(app, w, {.Workspace, workspace.id}, name) != .Saved {
+		_ = workspace_discard_empty(app, workspace)
+		notify(app, .Error, "Could not name the workspace.")
+		return
+	}
 	if !tab_create(app, workspace) {
 		_ = workspace_discard_empty(app, workspace)
 		notify(app, .Error, "Could not create the workspace shell.")

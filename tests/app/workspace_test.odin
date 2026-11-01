@@ -21,7 +21,7 @@ workspace_empty_factory_preserves_ids_and_ownership :: proc(t: ^testing.T) {
 	one := app.workspace_create_empty(&state)
 	if !testing.expect(t, one != nil) { return }
 	testing.expect_value(t, one.id, u32(1))
-	testing.expect_value(t, one.name, "Workspace 1")
+	testing.expect(t, one.name != "" && !strings.has_prefix(one.name, "Workspace "))
 	testing.expect_value(t, len(one.tabs), 0)
 	testing.expect_value(t, len(state.sessions), 0)
 	testing.expect(t, app.workspace_discard_empty(&state, one))
@@ -29,7 +29,7 @@ workspace_empty_factory_preserves_ids_and_ownership :: proc(t: ^testing.T) {
 	if !testing.expect(t, two != nil) { return }
 	defer testing.expect(t, app.workspace_discard_empty(&state, two))
 	testing.expect_value(t, two.id, u32(2))
-	testing.expect_value(t, two.name, "Workspace 2")
+	testing.expect(t, two.name != "" && !strings.has_prefix(two.name, "Workspace "))
 	owner := app.Window{workspace = two}
 	append(&state.windows, &owner)
 	testing.expect(t, !app.workspace_discard_empty(&state, two))
@@ -85,6 +85,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	app.run_action(&state, w, .New_Workspace)
+	app.rename_finish(&state, w, true)
 	if !testing.expect_value(t, len(state.workspaces), 2) { return }
 	if !testing.expect_value(t, len(state.sessions), 2) { return }
 	two := w.workspace
@@ -115,7 +116,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 		{app.Rename_Kind.Workspace, two.id}, " \n\t ") == app.Rename_Outcome.Empty)
 	testing.expect_value(t, two.name, "Build tools")
 	app.run_action(&state, w, .Change_Workspace)
-	app.handle_event(&state, platform.Text_Event{window = w.id, text = "WORKSPACE 1"})
+	app.handle_event(&state, platform.Text_Event{window = w.id, text = original.name})
 	testing.expect_value(t, len(w.workspace_picker.rows), 1)
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect(t, w.workspace == original)
@@ -160,6 +161,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect_value(t, os.write_entire_file(path, settings), nil)
 	if !testing.expect(t, app.workspace_select(&state, w, original)) { return }
 	app.run_action(&state, w, .New_Window)
+	app.rename_finish(&state, w, true)
 	if !testing.expect_value(t, len(state.windows), 2) { return }
 	other := state.windows[1]
 	three := other.workspace

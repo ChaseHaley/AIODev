@@ -133,6 +133,7 @@ pending_close_stale_owner_reopens_question :: proc(t: ^testing.T) {
 	w := state.windows[0]
 	first := w.workspace
 	app.workspace_new(state, w, true)
+	app.rename_finish(state, w, true)
 	if !testing.expect_value(t, len(state.windows), 2) { return }
 	owner := state.windows[1]
 	target := owner.workspace

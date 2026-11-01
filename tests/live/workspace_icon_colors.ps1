@@ -73,6 +73,8 @@ try {
     Aio expect state workspace.icon.tint=0
     Aio key Esc Esc | Out-Null
     Aio command workspace.new | Out-Null
+    Aio type "Workspace 2" | Out-Null
+    Aio key Enter | Out-Null
     $targetSession=(State)['session.id']
     Aio expect state workspace.id=2
     Aio command workspace.select_1 | Out-Null
@@ -153,6 +155,8 @@ try {
     Aio expect state workspace.icon.tint=0
     Shot 'theme-default-reset'
     Aio command window.new | Out-Null
+    Aio type "Workspace 3" | Out-Null
+    Aio key Enter | Out-Null
     $owner=(State)['window.2.id']
     Aio window select $owner | Out-Null
     $foreignSession=(State)['session.id']

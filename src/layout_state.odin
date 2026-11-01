@@ -106,7 +106,6 @@ layout_state_encode :: proc(app: ^App, allocator := context.allocator) -> (strin
 	}
 	state := Layout_State {
 		version          = LAYOUT_STATE_VERSION,
-		workspace_number = app.next_workspace_number,
 		workspaces       = workspaces[:],
 	}
 	data, err := json.marshal(state, {pretty = true, use_enum_names = true}, allocator)
@@ -212,7 +211,6 @@ layout_state_restore :: proc(app: ^App) -> bool {
 		if first == nil {first = workspace}
 		if saved.open && window_open(app, workspace) && opened == nil {opened = workspace}
 	}
-	app.next_workspace_number = max(app.next_workspace_number, state.workspace_number)
 	if opened == nil && first != nil && window_open(app, first) {opened = first}
 	return opened != nil
 }
