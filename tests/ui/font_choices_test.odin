@@ -12,7 +12,7 @@ long_choice_list_scroll_hit_testing_and_keyboard :: proc(t: ^testing.T) {
 	choices: [40]string
 	for &choice, i in choices {choice = fmt.tprintf("Font %02d", i)}
 	testing.expect_value(t, ui.editor_add(&p, {
-		key = "font.family", title = "Shell Font", kind = .Choice,
+		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true,
 		value = choices[0], choices = choices[:],
 	}, "Font"), nil)
 	p.open = true
@@ -48,7 +48,7 @@ font_search_filters_selects_and_cancels_without_editing_settings_search :: proc(
 	choices := [?]string{"Cascadia Mono", "Consolas", "Cove Nerd Font", "Cove Nerd Font Mono", "Segoe UI"}
 	for font_key in ([?]string{"font.family", "interface.font_family"}) {
 		testing.expect_value(t, ui.editor_add(&p, {
-			key = font_key, title = "Font", kind = .Choice,
+			key = font_key, title = "Font", kind = .Choice, searchable = true,
 			value = "Consolas", choices = choices[:],
 		}, "Fonts"), nil)
 	}
@@ -99,7 +99,7 @@ font_search_accepts_translated_text_on_key_events :: proc(t: ^testing.T) {
 	choices := [?]string{"Cascadia Mono", "Consolas"}
 	for font_key in ([?]string{"font.family", "interface.font_family"}) {
 		testing.expect_value(t, ui.editor_add(&p, {
-			key = font_key, title = "Font", kind = .Choice, value = "Consolas", choices = choices[:],
+			key = font_key, title = "Font", kind = .Choice, searchable = true, value = "Consolas", choices = choices[:],
 		}, "Fonts"), nil)
 	}
 	p.open = true

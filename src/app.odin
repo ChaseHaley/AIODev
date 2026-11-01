@@ -169,7 +169,7 @@ app_init :: proc(app: ^App) -> bool {
 	@(static) palette_settings: [len(settings.SCHEMA)]ui.Palette_Setting
 	@(static, rodata)
 	schema := settings.SCHEMA
-	for entry, i in schema {palette_settings[i] = palette_setting(entry)}
+	for entry, i in schema {palette_settings[i] = ui.palette_setting(entry)}
 	if ui.palette_init(&app.palette, palette_settings[:]) != nil {
 		return false
 	}

@@ -112,39 +112,13 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 	schema := settings.SCHEMA
 	for &entry in schema {
 		if entry.key == settings.PADDING_GROUPS_KEY {continue}
-		row := ui.Editor_Row {
-			key           = entry.key,
-			title         = entry.title,
-			description   = entry.description,
-			value         = settings.value_text(&s, entry),
-			default_value = entry.default_value,
-			minimum       = entry.minimum,
-			maximum       = entry.maximum,
+		row := ui.schema_row(entry)
+		row.value = settings.value_text(&s, entry)
+		if choices, labels, live := setting_live_choices(&s, font_items, entry.key); live {
+			row.choices, row.choice_labels = choices, labels
 		}
-		if entry.key == "font.size" {row.minimum, row.maximum = 6, 32}
-		if entry.key == "font.line_height" {row.minimum, row.maximum = 0.8, 2}
-		switch entry.kind {
-		case .String:
-			row.kind = entry.key == "input.leader" ? .Shortcut : .Text
-			if entry.key == "theme.name" {
-				row.kind = .Choice
-				row.choices, row.choice_labels = settings_theme_choices(&s)
-				row.description = "Theme file or custom theme. Changing any color saves a custom theme."
-			}
-			if entry.key == "font.family" || entry.key == "interface.font_family" {
-				row.kind = .Choice
-				row.choices = font.family_choices(
-					font_items, entry.key == "interface.font_family" || s.font.show_all, row.value,
-				)
-			}
-		case .Int:
-			row.kind = .Integer
-		case .Float:
-			row.kind = .Number
-		case .Bool:
-			row.kind = .Toggle
-		case .Enum:
-			row.kind, row.choices = .Choice, entry.enum_names
+		if entry.key == "theme.name" {
+			row.description = "Theme file or custom theme. Changing any color saves a custom theme."
 		}
 		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {
 			ui.editor_destroy(p)
@@ -781,6 +755,28 @@ editor_profile_action :: proc(app: ^App, w: ^Window) {
 
 @(private)
 settings_color_prefix :: "colors."
+
+// The choices of a setting whose list depends on installed themes or fonts; `live` is false for the
+// rest. A font list always includes the current family, even when it is not installed.
+setting_live_choices :: proc(
+	s: ^settings.Settings,
+	fonts: []font.Family_Info,
+	key: string,
+) -> (
+	choices, labels: []string,
+	live: bool,
+) {
+	switch key {
+	case "theme.name":
+		choices, labels = settings_theme_choices(s)
+		return choices, labels, true
+	case "font.family":
+		return font.family_choices(fonts, s.font.show_all, s.font.family), nil, true
+	case "interface.font_family":
+		return font.family_choices(fonts, true, s.interface.font_family), nil, true
+	}
+	return nil, nil, false
+}
 
 // The theme selector lists theme files by display name, then custom themes in settings file order.
 // Choices are IDs and labels are display names. The editor owns its copies, so both slices may

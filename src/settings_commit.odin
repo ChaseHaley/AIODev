@@ -2,6 +2,7 @@ package main
 
 import "aio:settings"
 import "aio:ui"
+import "core:os"
 import "core:strings"
 
 // Saves and publishes exactly one internal revision. Only pages based on expected advance:
@@ -33,6 +34,31 @@ settings_commit :: proc(
 		window.dirty = true
 	}
 	return .None
+}
+
+// Saves one setting through the file so the change survives and every window applies it. A value
+// the schema refuses reports why; other failures report `failure`. Without a settings file, as in
+// tests, the caller applies the value itself.
+@(require_results)
+settings_save_value :: proc(app: ^App, key, value, failure: string) -> (saved, has_file: bool) {
+	if app.settings_path == "" {return false, false}
+	data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
+	if read_error != nil {
+		notify(app, .Error, failure)
+		return false, true
+	}
+	updated, message, edit_error := settings.edit_text(string(data), key, value)
+	defer delete(updated)
+	defer delete(message)
+	if edit_error == nil && message != "" {
+		notify(app, .Error, message)
+		return false, true
+	}
+	if edit_error != nil || settings_commit(app, string(data), updated) != .None {
+		notify(app, .Error, failure)
+		return false, true
+	}
+	return true, true
 }
 
 @(private)

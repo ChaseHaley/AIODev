@@ -3,10 +3,8 @@ package main
 import "aio:glyphs"
 import "aio:input"
 import "aio:render"
-import "aio:settings"
 import "aio:ui"
 import "core:fmt"
-import "core:os"
 
 // Horizontal tab-strip geometry and drawing. The strip shares the 40 DIP title bar with the
 // workspace chip and the caption controls, so both the tab bar and the controls end read the same
@@ -115,26 +113,6 @@ window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 {return max(left, bar.x + 2 * bar.button_width)}
 	return max(left, bar.x + f32(bar.count) * bar.tab_width + 2 * bar.button_width)
-}
-
-// Saves one setting through the file so the change survives and every window applies it. Without a
-// settings file, as in tests, the caller applies the value itself.
-@(require_results)
-settings_save_value :: proc(app: ^App, key, value, failure: string) -> (saved, has_file: bool) {
-	if app.settings_path == "" {return false, false}
-	data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
-	if read_error != nil {
-		notify(app, .Error, failure)
-		return false, true
-	}
-	updated, message, edit_error := settings.edit_text(string(data), key, value)
-	defer delete(updated)
-	defer delete(message)
-	if edit_error != nil || message != "" || settings_commit(app, string(data), updated) != .None {
-		notify(app, .Error, failure)
-		return false, true
-	}
-	return true, true
 }
 
 toggle_tab_orientation :: proc(app: ^App) {

@@ -1,14 +1,11 @@
 package ui
 
-import "core:strings"
-
 @(private)
 CHOICE_SEARCH_HEIGHT :: 36
 
 @(private)
 choice_searchable :: proc(row: ^Editor_Row) -> bool {
-	return row != nil && row.kind == .Choice &&
-	       (row.key == "font.family" || row.key == "interface.font_family")
+	return row != nil && row.kind == .Choice && row.searchable
 }
 
 editor_choice_count :: proc(p: ^Editor, row: ^Editor_Row) -> int {
@@ -23,13 +20,7 @@ choice_source_index :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> int {
 // Keep the installed choices intact; only the popup's index map changes while searching.
 @(private)
 choice_filter :: proc(p: ^Editor, row: ^Editor_Row) {
-	clear(&p.choice_matches)
-	query := strings.to_lower(field_string(&p.choice_search), context.temp_allocator)
-	for name, i in row.choices {
-		if strings.contains(strings.to_lower(name, context.temp_allocator), query) {
-			append(&p.choice_matches, i)
-		}
-	}
+	choice_matches_filter(&p.choice_matches, row.choices, row.choice_labels, field_string(&p.choice_search))
 	p.popup_index, p.popup_scroll = 0, 0
 }
 

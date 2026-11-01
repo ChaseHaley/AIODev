@@ -425,8 +425,10 @@ typography_sliders_use_whole_points_and_fine_line_height_steps :: proc(t: ^testi
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	for row in ([?]ui.Editor_Row{
-		{key = "font.size", title = "Font Size", value = "12", kind = .Number, minimum = 6, maximum = 32},
-		{key = "font.line_height", title = "Line Height", value = "1", kind = .Number, minimum = 0.8, maximum = 2},
+		{key = "font.size", title = "Font Size", value = "12", kind = .Number, minimum = 6, maximum = 32,
+			step = 1},
+		{key = "font.line_height", title = "Line Height", value = "1", kind = .Number, minimum = 0.8,
+			maximum = 2, step = 0.05},
 	}) { testing.expect_value(t, ui.editor_add(&p, row, "Font"), nil) }
 	ui.editor_filter(&p)
 	l := page(&p)

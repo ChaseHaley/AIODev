@@ -52,6 +52,10 @@ Editor_Row :: struct {
 	group:                                         int,
 	kind:                                          Row_Kind,
 	minimum, maximum:                              f64,
+	// The rounding of a numeric row; zero rounds by kind.
+	step:                                          f64,
+	// A choice whose popup has a filter field, such as a font picker.
+	searchable:                                    bool,
 	choices, choice_labels:                        []string,
 	profile, badge, detail, note:                  string,
 	flags:                                         bit_set[Editor_Row_Flag],
@@ -1021,33 +1025,6 @@ editor_jump :: proc(p: ^Editor, entry: int) {
 }
 
 @(private)
-number_text :: proc(row: ^Editor_Row, value: f64) -> string {
-	if row.kind == .Integer || row.key == "font.size" || row.key == "interface.font_size" {
-		return fmt.tprintf("%d", int(math.round(value)))
-	}
-	if row.key == "font.line_height" {return fmt.tprintf("%.2f", math.round(value * 20) / 20)}
-	return fmt.tprintf("%g", math.round(value * 10) / 10)
-}
-
-// Wide ranges such as scrollback lines use a logarithmic track so small values stay reachable.
-@(private)
-slider_fraction :: proc(row: ^Editor_Row, value: f64) -> f32 {
-	span := row.maximum - row.minimum
-	if span <= 0 {return 0}
-	v := clamp(value, row.minimum, row.maximum)
-	if span > 1000 {return f32(math.ln(v - row.minimum + 1) / math.ln(span + 1))}
-	return f32((v - row.minimum) / span)
-}
-
-@(private)
-slider_value :: proc(row: ^Editor_Row, fraction: f32) -> f64 {
-	f := f64(clamp(fraction, 0, 1))
-	span := row.maximum - row.minimum
-	if span > 1000 {return row.minimum + math.exp(f * math.ln(span + 1)) - 1}
-	return row.minimum + f * span
-}
-
-@(private)
 flip_toggle :: proc(p: ^Editor) -> Editor_Outcome {
 	field_set(&p.value, field_string(&p.value) == "true" ? "false" : "true")
 	return .Save
@@ -1848,7 +1825,8 @@ pick_color :: proc(p: ^Editor, c: Color_Parts, x, y: f32) {
 
 @(private)
 slide :: proc(p: ^Editor, row: ^Editor_Row, slider: render.Rect, x: f32) {
-	field_set(&p.value, number_text(row, slider_value(row, (x - slider.x) / max(1, slider.width))))
+	number := slider_value(row.minimum, row.maximum, (x - slider.x) / max(1, slider.width))
+	field_set(&p.value, number_text(row_step(row), number))
 }
 
 // A press inside the page; `extend` (Shift) grows a text selection instead of moving the caret.
@@ -2758,23 +2736,7 @@ control_draw :: proc(
 	case .Integer, .Number:
 		number, ok := strconv.parse_f64(value)
 		if !ok {number, _ = strconv.parse_f64(row.value)}
-		fraction := slider_fraction(row, number)
-		track := parts.slider
-		groove := render.Rect{track.x, track.y + 4 * scale, track.width, 4 * scale}
-		draw_rect(list, {rect = groove, color = theme.border, radius = 2 * scale})
-		groove.width *= fraction
-		draw_rect(list, {rect = groove, color = theme.accent, radius = 2 * scale})
-		thumb := render.Rect {
-			track.x + track.width * fraction - 7 * scale,
-			track.y - 1 * scale,
-			14 * scale,
-			14 * scale,
-		}
-		draw_rect(list, {rect = thumb, color = theme.accent, radius = 7 * scale})
-		draw_rect(
-			list,
-			{rect = thumb, color = theme.surface, radius = 7 * scale, stroke = 2 * scale},
-		)
+		slider_draw(list, parts.slider, slider_fraction(row.minimum, row.maximum, number), theme, scale)
 	case .Color, .Optional_Color:
 		if c, ok := swatch_color(value); ok {
 			draw_rect(list, {rect = parts.swatch, color = c, radius = 6 * scale})
@@ -3348,20 +3310,8 @@ editor_draw :: proc(
 		if render.push_layer(list, l.list) != .None {return .Ok}
 		if row.kind == .Action {continue}
 		modified := row.value != row.default_value
-		if index == p.hover_reset && modified {
-			if !selected {
-				draw_rect(list, {rect = parts.reset, color = theme.hover, radius = 6 * s})
-			}
-			if result := hover_rim_draw(list, theme, parts.reset, 6 * s, 1, s, pointer, !selected);
-			   result != .None {return .Ok}
-		}
-		icon_color := theme.faint
-		if modified {
-			icon_color = index == p.hover_reset ? theme.text : theme.muted
-		} else {
-			icon_color.a *= 0.5
-		}
-		icon_draw(list, .Undo, parts.reset, icon_color, ICON_BUTTON, s)
+		if reset_button_draw(list, theme, parts.reset, modified, index == p.hover_reset, selected, pointer, s) !=
+		   .None {return .Ok}
 	}
 	return popup_draw(p, l, list, text, theme, pointer)
 }

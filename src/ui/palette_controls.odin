@@ -3,7 +3,7 @@ package ui
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
-import "core:fmt"
+import "aio:settings"
 import "core:math"
 import "core:strconv"
 import "core:strings"
@@ -62,6 +62,36 @@ Palette_Edit :: struct {
 	matches:         [dynamic]int,
 	index, scroll:   int,
 	hover:           int,
+}
+
+// A setting's palette entry, built from the row shape the Settings page uses. Settings whose page
+// control is a key capture or a group editor stay jump-only. Program groups have no reset there,
+// so they have none here.
+palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
+	row := schema_row(entry)
+	s := Palette_Setting {
+		key           = entry.key,
+		title         = entry.title,
+		group         = settings.group_title(entry.key),
+		minimum       = row.minimum,
+		maximum       = row.maximum,
+		step          = row.step,
+		choices       = row.choices,
+		searchable    = row.searchable,
+		default_value = entry.default_value,
+		resettable    = entry.key != settings.PADDING_GROUPS_KEY,
+	}
+	#partial switch row.kind {
+	case .Toggle:
+		s.control = .Toggle
+	case .Integer, .Number:
+		s.control = .Slider
+	case .Choice:
+		s.control = .Choice
+	case .Text:
+		s.control = entry.key == settings.PADDING_GROUPS_KEY ? .None : .Text
+	}
+	return s
 }
 
 palette_set_values :: proc(p: ^Palette, values: Palette_Values) {p.values = values}
@@ -126,36 +156,10 @@ setting_value :: proc(p: ^Palette, s: ^Palette_Setting) -> (value, label: string
 	return
 }
 
-// Sliders on wide ranges, such as scrollback lines, use a logarithmic track like the Settings page.
-@(private)
-range_fraction :: proc(minimum, maximum, value: f64) -> f32 {
-	span := maximum - minimum
-	if span <= 0 {return 0}
-	v := clamp(value, minimum, maximum)
-	if span > 1000 {return f32(math.ln(v - minimum + 1) / math.ln(span + 1))}
-	return f32((v - minimum) / span)
-}
-
-@(private)
-range_value :: proc(minimum, maximum: f64, fraction: f32) -> f64 {
-	f := f64(clamp(fraction, 0, 1))
-	span := maximum - minimum
-	if span > 1000 {return minimum + math.exp(f * math.ln(span + 1)) - 1}
-	return minimum + f * span
-}
-
 @(private)
 snap :: proc(s: ^Palette_Setting, value: f64) -> f64 {
 	step := s.step > 0 ? s.step : 1
 	return clamp(math.round(value / step) * step, s.minimum, s.maximum)
-}
-
-@(private)
-number_format :: proc(s: ^Palette_Setting, value: f64, buffer: []u8) -> string {
-	step := s.step > 0 ? s.step : 1
-	if step >= 1 {return fmt.bprintf(buffer, "%d", int(math.round(value)))}
-	if step >= 0.1 {return fmt.bprintf(buffer, "%.1f", value)}
-	return fmt.bprintf(buffer, "%.2f", value)
 }
 
 @(private)
@@ -179,8 +183,7 @@ choose_value :: proc(p: ^Palette, s: ^Palette_Setting, value: string) -> Outcome
 
 @(private)
 choose_number :: proc(p: ^Palette, s: ^Palette_Setting, value: f64) -> Outcome {
-	buffer: [64]u8
-	return choose_value(p, s, number_format(s, snap(s, value), buffer[:]))
+	return choose_value(p, s, number_text(s.step > 0 ? s.step : 1, snap(s, value)))
 }
 
 @(private)
@@ -190,8 +193,8 @@ step_number :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome
 	if (s.maximum - s.minimum) / step <= PALETTE_UNIT_STEPS {
 		return choose_number(p, s, current + f64(direction) * step)
 	}
-	fraction := range_fraction(s.minimum, s.maximum, current) + f32(direction) * PALETTE_STEP_FRACTION
-	next := snap(s, range_value(s.minimum, s.maximum, fraction))
+	fraction := slider_fraction(s.minimum, s.maximum, current) + f32(direction) * PALETTE_STEP_FRACTION
+	next := snap(s, slider_value(s.minimum, s.maximum, fraction))
 	// Snapping can land back on the current value near the low end of a logarithmic track.
 	if next == current {next = snap(s, current + f64(direction) * step)}
 	return choose_number(p, s, next)
@@ -219,12 +222,7 @@ step_choice :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome
 @(private)
 choice_filter_update :: proc(p: ^Palette) {
 	e := &p.edit
-	clear(&e.matches)
-	query := strings.to_lower(field_string(&e.filter), context.temp_allocator)
-	for choice, i in e.choices {
-		label := e.labels[i] != "" ? e.labels[i] : choice
-		if strings.contains(strings.to_lower(label, context.temp_allocator), query) {append(&e.matches, i)}
-	}
+	choice_matches_filter(&e.matches, e.choices[:], e.labels[:], field_string(&e.filter))
 	e.index, e.scroll = 0, 0
 }
 
@@ -462,21 +460,9 @@ draw_reset :: proc(
 	s := result_setting(p, index)
 	rect := reset_rect(s, row, l.scale)
 	if rect.width <= 0 {return .Ok}
-	scale := l.scale
-	modified := setting_modified(p, s)
-	hovered := modified && contains(rect, pointer.x, pointer.y)
-	selected := index == p.selected
-	if hovered {
-		if !selected {draw_rect(list, {rect = rect, color = theme.hover, radius = 6 * scale})}
-		if hover_rim_draw(list, theme, rect, 6 * scale, 1, scale, pointer, !selected) != .None {return .Ok}
-	}
-	color := theme.faint
-	if modified {
-		color = hovered ? theme.text : theme.muted
-	} else {
-		color.a *= 0.5
-	}
-	icon_draw(list, .Undo, rect, color, ICON_BUTTON, scale)
+	hovered := contains(rect, pointer.x, pointer.y)
+	modified, selected := setting_modified(p, s), index == p.selected
+	_ = reset_button_draw(list, theme, rect, modified, hovered, selected, pointer, l.scale)
 	return .Ok
 }
 
@@ -601,7 +587,7 @@ control_press :: proc(p: ^Palette, l: Palette_Layout, index: int, x, y: f32) -> 
 		palette_edit_cancel(p)
 		p.edit.kind, p.edit.setting = .Slider, setting
 		track := slider_track(control, l.scale)
-		p.edit.number = snap(s, range_value(s.minimum, s.maximum, (x - track.x) / max(1, track.width)))
+		p.edit.number = snap(s, slider_value(s.minimum, s.maximum, (x - track.x) / max(1, track.width)))
 		return .Changed, true
 	}
 	return control_activate(p, setting), true
@@ -614,7 +600,7 @@ palette_slider_drag :: proc(p: ^Palette, l: Palette_Layout, x: f32) -> Outcome {
 	s := &p.settings[p.edit.setting]
 	track := slider_track(edit_control(p, l), l.scale)
 	if track.width <= 0 {return .None}
-	number := snap(s, range_value(s.minimum, s.maximum, (x - track.x) / track.width))
+	number := snap(s, slider_value(s.minimum, s.maximum, (x - track.x) / track.width))
 	if number == p.edit.number {return .None}
 	p.edit.number = number
 	return .Changed
@@ -749,18 +735,8 @@ draw_control :: proc(
 		switch_draw(list, control, value == "true", false, theme, scale)
 	case .Slider:
 		number := editing && p.edit.kind == .Slider ? p.edit.number : setting_number(p, s)
-		fraction := range_fraction(s.minimum, s.maximum, number)
-		track := slider_track(control, scale)
-		cy := control.y + control.height / 2
-		groove := render.Rect{track.x, cy - 2 * scale, track.width, 4 * scale}
-		draw_rect(list, {rect = groove, color = theme.border, radius = 2 * scale})
-		groove.width *= fraction
-		draw_rect(list, {rect = groove, color = theme.accent, radius = 2 * scale})
-		thumb := render.Rect{track.x + track.width * fraction - 7 * scale, cy - 7 * scale, 14 * scale, 14 * scale}
-		draw_rect(list, {rect = thumb, color = theme.accent, radius = 7 * scale})
-		draw_rect(list, {rect = thumb, color = theme.surface, radius = 7 * scale, stroke = 2 * scale})
-		buffer: [64]u8
-		shown := number_format(s, number, buffer[:])
+		slider_draw(list, slider_track(control, scale), slider_fraction(s.minimum, s.maximum, number), theme, scale)
+		shown := number_text(s.step > 0 ? s.step : 1, number)
 		number_box := slider_number_rect(control, scale)
 		width := text_width(&input_text, shown)
 		return draw_text(&input_text, list, shown, number_box.x + number_box.width - width, baseline,
