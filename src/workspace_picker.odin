@@ -19,6 +19,7 @@ Workspace_Picker :: struct {
 	rename_error: bool,
 	saved_query: ui.Text_Field,
 	move: Workspace_Move_Request,
+	drag: bool,
 }
 
 workspace_picker_active :: proc(p: ^Workspace_Picker) -> bool {
@@ -48,6 +49,7 @@ workspace_picker_cancel :: proc(w: ^Window, focus_lost := false) {
 	if focus_lost && workspace_picker_icons(p) {return}
 	workspace_picker_transition(w, .Closed)
 	p.move = {}
+	p.drag = false
 }
 
 workspace_picker_destroy :: proc(w: ^Window) {

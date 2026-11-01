@@ -308,7 +308,8 @@ workspace_picker_count :: proc(w: ^Window) -> int {
 	if workspace_picker_icons(&w.workspace_picker) {
 		return (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) + 1 : len(WORKSPACE_ICONS) + 3
 	}
-	return len(w.workspace_picker.rows) + (w.workspace_picker.move.workspace != 0 ? 1 : len(WORKSPACE_ACTIONS))
+	p := &w.workspace_picker
+	return len(p.rows) + (p.move.workspace != 0 && !p.drag ? 1 : len(WORKSPACE_ACTIONS))
 }
 
 workspace_picker_choose :: proc(app: ^App, w: ^Window) {
@@ -564,8 +565,9 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if program := status_picker_text(app, workspace); program != "" {
 				detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
 			}
-		} else if p.move.workspace != 0 {label = "Move to New Workspace"}
-		else {label = action_info[actions[i - len(p.rows)]].title}
+		} else if p.move.workspace != 0 {
+			label = i == len(p.rows) ? "Move to New Workspace" : "Move to New Window"
+		} else {label = action_info[actions[i - len(p.rows)]].title}
 		baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
 		label_x := row.x + ui.CONTROL_INSET * s
 		if has_icon {

@@ -35,6 +35,9 @@ Pane_Drag :: struct {
 	destination_window, preview_window:          platform.Window_Id,
 	destination_original:                        ^Tab,
 	new_window, preview_failed:                  bool,
+	picker_window:                              platform.Window_Id,
+	picker_pointer:                             [2]f32,
+	picker_hit:                                 int,
 	ghost:                                       [4]ui.Motion,
 	reveal:                                      ui.Motion,
 }
@@ -338,6 +341,7 @@ pane_drag_cancel :: proc(app: ^App, w: ^Window) {
 	d := w.pane_drag
 	w.pane_drag = {}
 	if !d.pressed {return}
+	pane_workspace_drag_close(app, d)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
 	pane_drag_restore(app, w, d)
@@ -455,6 +459,8 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}
 	}
 	if destination == nil || destination.id != previous {
+		pane_workspace_drag_close(app, d^)
+		d.picker_window = 0
 		if old := window_find(app, previous); old != nil && old != w {
 			for tab, i in old.workspace.tabs {
 				if tab == d.destination_original {tab_select(app, old, i, true); break}
@@ -531,6 +537,7 @@ pane_drag_target_move :: proc(
 	swap, changed_window: bool,
 ) -> bool {
 	d := &source_window.pane_drag
+	if pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
 	title_height := ui.TITLE_BAR_HEIGHT * w.scale
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
@@ -624,6 +631,10 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	w.pane_drag = {}
 	if !d.active {return false}
 	w.dirty = true
+	if d.picker_window != 0 {
+		pane_workspace_drag_release(app, w, d)
+		return true
+	}
 	if d.new_window {
 		if d.shown {
 			workspace_name_open(app, w, .Tearoff)
