@@ -94,6 +94,7 @@ Editor_Focus :: enum {
 	Search,
 	Control,
 	Positions,
+	Reset_All,
 }
 
 Editor_Popup :: enum {
@@ -188,6 +189,7 @@ Editor_Outcome :: enum {
 	Changed,
 	Save,
 	Reset,
+	Reset_All,
 	Profile_Action,
 	Process_Save,
 	Process_Remove,
@@ -208,6 +210,12 @@ Editor_Layout :: struct {
 	page, filter, list, outline:                     render.Rect,
 	row_height, outline_row_height, status_x, scale: f32,
 	rows:                                            int,
+}
+
+editor_reset_all_rect :: proc(l: Editor_Layout) -> render.Rect {
+	right := max(l.filter.x + l.filter.width, l.list.x + l.list.width)
+	width := min(148 * l.scale, max(0, l.page.width - 160 * l.scale))
+	return {right - width, l.page.y + 10 * l.scale, width, 30 * l.scale}
 }
 
 // The parts of one setting row; zero-sized parts do not exist for its kind.
@@ -1378,6 +1386,11 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	if p.capturing && row != nil {return capture_key(p, row, raw)}
 	e := raw
 	e.key = commands.logical_key(raw.key, raw.unshifted)
+	if p.focus == .Reset_All && p.popup == .None {
+		if e.key == .Enter || e.key == .Numpad_Enter || e.key == .Space {return .Reset_All}
+		if e.key == .Escape {p.focus = .Search; return .Changed}
+		if e.key != .Tab {return .None}
+	}
 	if result, handled := editor_process_key(p, row, e); handled {return result}
 	if p.popup != .None && row != nil {
 		if outcome, handled := popup_key(p, row, e); handled {return outcome}
@@ -1419,7 +1432,9 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		stops := 2
 		if row == nil || row.kind == .Profile_Add || row.kind == .Detected_Header {stops = 1}
 		if row != nil && row.kind == .Shortcut {stops = 3}
-		focus := (int(p.focus) + (.Shift in e.modifiers ? stops - 1 : 1)) % stops
+		current := p.focus == .Reset_All ? stops : int(p.focus)
+		focus := (current + (.Shift in e.modifiers ? stops : 1)) % (stops + 1)
+		if focus == stops {p.focus, p.popup = .Reset_All, .None; return .Changed}
 		p.popup = .None
 		if Editor_Focus(focus) == .Control && row != nil {
 			if row.kind == .Profile || row.kind == .Detected {
@@ -1495,7 +1510,7 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		if control {return row == nil ? .None : .Reset}
 	}
 	switch p.focus {
-	case .Positions:
+	case .Positions, .Reset_All:
 		return .None
 	case .Control:
 		if row != nil && text_kind(row.kind) {
@@ -1510,7 +1525,7 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 }
 
 editor_text :: proc(p: ^Editor, text: string) {
-	if p.capturing || p.focus == .Positions {return}
+	if p.capturing || p.focus == .Positions || p.focus == .Reset_All {return}
 	row := editor_row(p)
 	if p.popup == .Choice && choice_searchable(row) {
 		if p.choice_toggle_focus {return}
@@ -1550,7 +1565,7 @@ editor_selection :: proc(p: ^Editor) -> string {
 		return field_selected_text(&p.filter)
 	case .Control:
 		if !p.capturing {return field_selected_text(&p.value)}
-	case .Positions:
+	case .Positions, .Reset_All:
 	}
 	return ""
 }
@@ -1865,6 +1880,7 @@ editor_press :: proc(
 	extend: bool,
 ) -> Editor_Outcome {
 	s := l.scale
+	if p.popup == .None && contains(editor_reset_all_rect(l), x, y) {return .Reset_All}
 	if p.popup != .None {
 		popup := editor_popup_rect(p, l)
 		row := editor_row(p)
@@ -2274,6 +2290,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 		}
 		return .Arrow
 	}
+	if contains(editor_reset_all_rect(l), x, y) {return .Hand}
 	if contains(editor_clear_rect(p, l), x, y) {return .Hand}
 	if contains(filter_text_rect(p, l), x, y) {return .Text}
 	if contains(l.outline, x, y) {
@@ -3176,6 +3193,7 @@ editor_draw :: proc(
 	status_x := x + text_width(&heading, "Settings") + 16 * s
 	status_right := l.filter.x + l.filter.width
 	if l.outline.width > 0 {status_x, status_right = l.status_x, l.list.x + l.list.width}
+	status_right = min(status_right, editor_reset_all_rect(l).x - 12 * s)
 	if r := draw_text(
 		&small,
 		list,
@@ -3185,6 +3203,15 @@ editor_draw :: proc(
 		p.error ? theme.error : theme.muted,
 		max(1, status_right - status_x),
 	); r != .Ok {return r}
+	reset := editor_reset_all_rect(l)
+	draw_rect(list, {rect = reset, color = theme.surface, radius = 5 * s})
+	if focused && p.focus == .Reset_All {focus_ring_draw(list, reset, theme, s)}
+	if contains(reset, pointer.x, pointer.y) {
+		if hover_rim_draw(list, theme, reset, 5 * s, 1, s, pointer, true) != .None {return .Ok}
+	}
+	if r := draw_text(text, list, "Reset to Defaults", reset.x + 10 * s,
+	                  reset.y + (reset.height - text.line_height) / 2 + text.ascent,
+	                  theme.text, max(0, reset.width - 20 * s)); r != .Ok {return r}
 	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search, pointer);
 	   r != .Ok {return r}
 	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}

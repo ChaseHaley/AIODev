@@ -9,13 +9,14 @@ import "core:fmt"
 // The subjects retain their payload and acceptance policy. Event, motion and frame callers
 // only know this owner, including while a dismissed question finishes fading out.
 @(private)
-confirmation_subjects :: proc(w: ^Window) -> [5]^ui.Confirm {
+confirmation_subjects :: proc(w: ^Window) -> [6]^ui.Confirm {
 	return {
 		&w.pending_close.confirm,
 		&w.pending_swap.confirm,
 		&w.pending_file.confirm,
 		&w.process_remove_confirm,
 		&w.profile_remove_confirm,
+		&w.settings_reset_confirm,
 	}
 }
 
@@ -39,6 +40,7 @@ confirmation_outcome :: proc(app: ^App, w: ^Window, c: ^ui.Confirm, outcome: ui.
 		// Acceptance may retire w. Nothing after the subject's completion may inspect it.
 		if c == &w.pending_close.confirm {pending_close_finish(app, w, outcome == .Accept)}
 		else if c == &w.pending_swap.confirm {pane_swap_finish(app, w, outcome == .Accept)}
+		else if c == &w.settings_reset_confirm {settings_reset_finish(app, w, outcome == .Accept)}
 		else if c == &w.profile_remove_confirm {editor_profile_remove_finish(app, w, outcome == .Accept)}
 		else if c == &w.process_remove_confirm {editor_process_remove_finish(app, w, outcome == .Accept)}
 		else {pending_file_finish(app, w, outcome == .Accept)}
@@ -85,6 +87,7 @@ confirmation_clear :: proc(w: ^Window) {
 	pending_file_clear(&w.pending_file)
 	process_remove_clear(w)
 	profile_remove_clear(w)
+	settings_reset_clear(w)
 }
 
 confirmation_cancel :: proc(app: ^App, w: ^Window) {
@@ -93,6 +96,7 @@ confirmation_cancel :: proc(app: ^App, w: ^Window) {
 	if w.pending_file.confirm.open {pending_file_finish(app, w, false)}
 	if w.profile_remove_confirm.open {editor_profile_remove_finish(app, w, false)}
 	if w.process_remove_confirm.open {editor_process_remove_finish(app, w, false)}
+	if w.settings_reset_confirm.open {settings_reset_finish(app, w, false)}
 	// Close navigation drops its recorded subject immediately; shell switching keeps its
 	// existing fade-out policy and releases the cached profile when that fade settles.
 	pending_close_clear(&w.pending_close)
@@ -115,6 +119,7 @@ confirmation_advance :: proc(app: ^App, w: ^Window, now: time.Tick) {
 			if c == &w.pending_close.confirm {pending_close_clear(&w.pending_close)}
 			else if c == &w.pending_swap.confirm {pane_swap_clear(&w.pending_swap)}
 			else if c == &w.profile_remove_confirm {profile_remove_clear(w)}
+			else if c == &w.settings_reset_confirm {settings_reset_clear(w)}
 			else if c == &w.process_remove_confirm {process_remove_clear(w)}
 			else {pending_file_clear(&w.pending_file)}
 		}
@@ -130,6 +135,9 @@ confirmation_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			content = pending_close_text(app, &w.pending_close, w.workspace)
 		} else if c == &w.pending_file.confirm {
 			content = pending_file_text(&w.pending_file)
+		} else if c == &w.settings_reset_confirm {
+			content.title, content.label = "Reset all settings?", "Reset"
+			content.body = "Restore factory defaults, including shortcuts, profiles, themes and program rules."
 		} else if c == &w.profile_remove_confirm {
 			content.title, content.label = fmt.tprintf("Delete %s?", w.profile_remove_id), "Delete"
 		} else if c == &w.process_remove_confirm {

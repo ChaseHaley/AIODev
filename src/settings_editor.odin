@@ -463,6 +463,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p := &w.editor
 	if outcome == .None {return}
 	w.dirty = true
+	if outcome == .Reset_All {settings_reset_ask(app, w); return}
 	if outcome == .Font_Filter {editor_font_filter(app, w); return}
 	if outcome == .Process_Remove {editor_process_remove_ask(app, w); return}
 	if outcome == .Process_Save {editor_process_save(app, w); return}
