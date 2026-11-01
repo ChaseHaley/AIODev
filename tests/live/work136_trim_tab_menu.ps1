@@ -93,7 +93,6 @@ try {
 
     Set-Option shell.command 'pwsh.exe -NoLogo -NoProfile'
     Set-Option shell.directory 'C:\Windows'
-    Set-Option shell.report_directory false
     Invoke-Aio command settings.reload
     Invoke-Aio command tab.new
     Set-Option shell.command 'cmd.exe /D /Q'

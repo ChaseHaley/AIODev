@@ -23,20 +23,6 @@ shell_badges_follow_the_launched_executable_and_explicit_override :: proc(t: ^te
 }
 
 @(test)
-powershell_directory_hook_only_wraps_opted_in_interactive_shells :: proc(t: ^testing.T) {
-	for command in ([?]string{"pwsh.exe -NoLogo -NoProfile", "powershell.exe -NoLogo"}) {
-		testing.expect_value(t, settings.shell_command_line(command, false), command)
-		wrapped := settings.shell_command_line(command, true)
-		testing.expect(t, strings.contains(wrapped, "__AIODevPrompt"))
-		testing.expect(t, strings.contains(wrapped, "]7;"))
-	}
-	for command in ([?]string{"pwsh -c Write-Host", "pwsh -File test.ps1", "pwsh -EncodedCommand ABC",
-		"pwsh -NonInteractive", "cmd.exe /d", "wsl.exe"}) {
-		testing.expect_value(t, settings.shell_command_line(command, true), command)
-	}
-}
-
-@(test)
 display_titles_strip_controls_and_cap_at_a_complete_utf8_rune :: proc(t: ^testing.T) {
 	title := settings.display_title("hello\n\t\x7f\u0085world 🧪")
 	defer delete(title)
@@ -78,16 +64,4 @@ header_settings_reload_and_serialize_through_the_shared_schema :: proc(t: ^testi
 	testing.expect(t, !s.pane.show_headers)
 	testing.expect_value(t, s.shell.icon, "λ")
 	testing.expect_value(t, settings.value_text(&s, settings.schema_find("pane.show_headers")^), "false")
-}
-
-@(test)
-directory_reporting_defaults_on_and_respects_explicit_opt_out :: proc(t: ^testing.T) {
-	for text in ([?]string{"", "shell.report_directory = false"}) {
-		s, diagnostics, err := settings.parse(text)
-		defer settings.destroy(&s)
-		defer settings.diagnostics_destroy(&diagnostics)
-		testing.expect_value(t, err, nil)
-		testing.expect_value(t, len(diagnostics), 0)
-		testing.expect_value(t, s.shell.report_directory, text == "")
-	}
 }

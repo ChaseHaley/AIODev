@@ -32,27 +32,6 @@ shell_icon :: proc(executable, override: string) -> string {
 	return ">_"
 }
 
-shell_command_line :: proc(command: string, report_directory: bool) -> string {
-	executable := shell_executable(command)
-	if !report_directory ||
-	   !(strings.equal_fold(executable, "pwsh") ||
-			   strings.equal_fold(executable, "powershell")) {return command}
-	for arg in strings.fields(command, context.temp_allocator) {
-		if len(arg) < 2 || arg[0] != '-' {continue}
-		name := arg[1:]
-		for option in ([?]string{"command", "commandwithargs", "encodedcommand", "file", "noninteractive"}) {
-			if len(name) <= len(option) &&
-			   strings.equal_fold(name, option[:len(name)]) {return command}
-		}
-	}
-	script :=
-		"$global:__AIODevPrompt=$function:prompt; function global:prompt { " +
-		"try { if ($PWD.Provider.Name -eq 'FileSystem') { " +
-		"[Console]::Write(([char]27).ToString()+']7;'+([uri]$PWD.ProviderPath).AbsoluteUri+([char]7)) " +
-		"} } catch {}; & $global:__AIODevPrompt }"
-	return fmt.tprintf("%s -NoExit -Command \"%s\"", command, script)
-}
-
 display_title :: proc(raw: string, allocator := context.allocator) -> string {
 	bytes := make([dynamic]u8, 0, min(1024, len(raw)), allocator)
 	for r in raw {

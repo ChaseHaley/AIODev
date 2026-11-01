@@ -7,7 +7,12 @@ $name = 'shell-metadata'
 $path = Join-Path $repo "build/verify/$name/settings.ini"
 $variable = 'AIODEV_TEST_' + [Guid]::NewGuid().ToString('N')
 function Invoke-Aio {
-    $result = & $ctl --name $name @args
+    $arguments = @($args)
+    if ($arguments[0] -eq 'run') {
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($arguments[1]))
+        $arguments[1] = "& ([scriptblock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('$encoded'))))"
+    }
+    $result = & $ctl --name $name @arguments
     if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
     $result | Write-Output
 }
@@ -66,17 +71,16 @@ try {
     Invoke-Aio run ('[Console]::WriteLine("SPLIT="+$env:' + $variable + ')')
     Invoke-Aio wait text 'SPLIT=fresh-value'
     Write-Output 'PASS new tabs and splits see environment changes after app launch'
-    Set-Option shell.report_directory true
     Set-Option shell.command 'pwsh.exe -NoLogo -NoProfile'
     Invoke-Aio command settings.reload
     Invoke-Aio command tab.new
-    Invoke-Aio run 'Set-Location C:\Windows; Write-Output ("DIRECTORY_"+"READY")'
+    Invoke-Aio run 'Set-Location C:\Windows; [Console]::Write(([char]27).ToString()+"]7;file:///C:/Windows"+([char]7)); Write-Output ("DIRECTORY_"+"READY")'
     Invoke-Aio wait text DIRECTORY_READY
     Invoke-Aio expect state 'session.header.directory=C:\Windows'
-    Invoke-Aio run 'Set-Location C:\Windows\System32; Write-Output ("DIRECTORY_"+"SECOND")'
+    Invoke-Aio run 'Set-Location C:\Windows\System32; [Console]::Write(([char]27).ToString()+"]7;file:///C:/Windows/System32"+([char]7)); Write-Output ("DIRECTORY_"+"SECOND")'
     Invoke-Aio wait text DIRECTORY_SECOND
     Invoke-Aio expect state 'session.header.directory=C:\Windows\System32'
-    Write-Output 'PASS opt-in PowerShell directory reporting follows Set-Location'
+    Write-Output 'PASS standard OSC 7 reports update the directory without injected prompt hooks'
 } finally {
     [Environment]::SetEnvironmentVariable($variable, $null, 'User')
     & $ctl --name $name stop | Write-Output

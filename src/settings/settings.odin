@@ -23,7 +23,6 @@ Shell_Settings :: struct {
 	command, directory, icon: string,
 	default_profile:          string,
 	refresh_environment:      bool,
-	report_directory:         bool,
 }
 Input_Settings :: struct {
 	leader: string,
@@ -979,17 +978,6 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		nil,
 		"Read current Windows environment variables for new and restarted shells; keep launcher-only variables.",
-	},
-	{
-		"shell.report_directory",
-		"Report PowerShell Directory",
-		.Bool,
-		offset_of(Settings, shell) + offset_of(Shell_Settings, report_directory),
-		"true",
-		0,
-		0,
-		nil,
-		"Wrap the interactive PowerShell prompt to report its directory. Applies to new and restarted shells.",
 	},
 	{
 		"window.columns",
