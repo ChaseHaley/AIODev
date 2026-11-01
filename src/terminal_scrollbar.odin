@@ -105,17 +105,21 @@ terminal_scrollbar_move :: proc(app: ^App, w: ^Window, y: f32) {
 	w.scroll_drag = false
 }
 
+// The session whose visible track holds the point, or 0.
+terminal_scrollbar_at :: proc(app: ^App, w: ^Window, x, y: f32) -> u32 {
+	for pane in w.panes {
+		if pane.content.kind == .Settings {continue}
+		entry := session_find(app, pane.content.id)
+		track, _, _, visible := terminal_scrollbar_geometry(app, w, pane, entry)
+		if visible && scrollbar_contains(track, x, y) {return entry.id}
+	}
+	return 0
+}
+
 // Records which pane's track is under the pointer, repainting only when that changes.
 terminal_scrollbar_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	hovered: u32
-	if !w.selecting {
-		for pane in w.panes {
-			if pane.content.kind == .Settings {continue}
-			entry := session_find(app, pane.content.id)
-			track, _, _, visible := terminal_scrollbar_geometry(app, w, pane, entry)
-			if visible && scrollbar_contains(track, x, y) {hovered = entry.id; break}
-		}
-	}
+	if !w.selecting {hovered = terminal_scrollbar_at(app, w, x, y)}
 	terminal_scrollbar_hover_set(w, hovered)
 	return hovered != 0
 }

@@ -70,7 +70,13 @@ icon_button_draw :: proc(
 	size := ICON_BUTTON,
 	radius: f32 = 6,
 ) -> render.Error {
-	face, ink, err := button_draw(list, theme, {rect = rect, hover = hover, press = press, radius = radius}, scale, pointer)
+	b := Button {
+		rect   = rect,
+		hover  = hover,
+		press  = press,
+		radius = radius,
+	}
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
 	icon_draw(list, icon, face, ink, size, scale)
 	return err
 }

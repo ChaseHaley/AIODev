@@ -184,91 +184,73 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		}
 		return
 	}
-	caption := ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale)
-	if e.button == .Left && caption >= 0 && !w.pane_drag.pressed && !w.tab_drag.pressed {
-		ui.armed_press(&w.caption_armed, caption)
-		w.dirty = true
-		return
-	}
-	if confirmation_button(app, w, e) {return}
+	x, y := f32(e.x), f32(e.y)
+	target := pointer_target(app, w, x, y)
+	if ui.armed_down(w.find.armed) {target = .Find} else if w.selecting {target = .Content}
 	w.dirty = true
-
-	if palette_active(app, w) {
+	// A press below the find bar hands the keyboard back to the terminal; the bar and its matches stay.
+	if target > .Find && w.find.focused {ui.find_blur(&w.find, &app.find_history)}
+	left := e.button == .Left
+	switch target {
+	case .Caption:
+		if left && !w.pane_drag.pressed && !w.tab_drag.pressed {
+			ui.armed_press(&w.caption_armed, ui.caption_hit(f32(w.width), x, y, w.scale))
+		}
+	case .Confirmation:
+		_ = confirmation_button(app, w, e)
+	case .Palette:
 		p := &app.palette
 		l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
-		if e.pressed && e.button == .Left && ui.palette_input_contains(l, f32(e.x), f32(e.y)) &&
-		   !ui.palette_popup_contains(p, l, f32(e.x), f32(e.y)) {
+		if left && ui.palette_input_contains(l, x, y) && !ui.palette_popup_contains(p, l, x, y) {
 			on_palette_outcome(
 				app,
 				w,
-				ui.palette_input_press(
-					p,
-					l,
-					&w.ui_text,
-					f32(e.x),
-					f32(e.y),
-					w.scale,
-					.Shift in e.modifiers,
-				),
+				ui.palette_input_press(p, l, &w.ui_text, x, y, w.scale, .Shift in e.modifiers),
 				0,
 			)
-		} else if e.pressed {
-			outcome, id := ui.palette_mouse_press(p, &app.registry, l, f32(e.x), f32(e.y), &w.ui_text)
+		} else {
+			outcome, id := ui.palette_mouse_press(p, &app.registry, l, x, y, &w.ui_text)
 			on_palette_outcome(app, w, outcome, id)
 		}
-		return
-	}
-	x, y := f32(e.x), f32(e.y)
-
-	if e.pressed && e.button == .Left && tab_orientation_button_hit(w, x, y) {
-		ui.armed_press(&w.tab_orientation_button_armed, true)
-		return
-	}
-
-	if w.find.open && !w.selecting {
+	case .Tab_Orientation:
+		if left {ui.armed_press(&w.tab_orientation_button_armed, true)}
+	case .Find:
 		entry := focused_session(app, w)
 		l, enabled := find_controls(w, entry)
-		if ui.armed_down(w.find.armed) || ui.find_contains(l, x, y) {
-			on_find_outcome(app, w, entry, ui.find_mouse(&w.find, l, enabled, e.button, e.pressed, x, y))
-			return
-		}
-		// A press elsewhere hands the keyboard back to the terminal; the bar and its matches stay.
-		if e.pressed && w.find.focused {
-			ui.find_blur(&w.find, &app.find_history)
-			w.dirty = true
-		}
+		on_find_outcome(app, w, entry, ui.find_mouse(&w.find, l, enabled, e.button, true, x, y))
+	case .Workspace_Button:
+		if left {workspace_picker_open(app, w)}
+	case .Status_Pill:
+		if left {status_inbox_toggle(app, w)}
+	case .Divider:
+		if left {_ = divider_press(app, w, x, y, e.time_ns)}
+	case .Status_Panel:
+		_ = status_panel_button(app, w, e)
+	case .Tabs:
+		_ = tab_interaction_press(app, w, e)
+	case .Pane_Header:
+		_ = pane_header_button(app, w, e)
+	case .Scrollbar:
+		_ = terminal_scrollbar_button(app, w, e)
+	case .Content:
+		content_press(app, w, e)
 	}
-	if e.pressed && e.button == .Left && y < ui.TITLE_BAR_HEIGHT * w.scale &&
-	   x >= tab_orientation_button_rect(w).x + tab_orientation_button_rect(w).width &&
-	   x < workspace_button_width(w) {
-		workspace_picker_open(app, w)
-		return
-	}
-	if e.pressed && e.button == .Left && status_rect_contains(status_pill_rect(app, w), x, y) {
-		status_inbox_toggle(app, w)
-		return
-	}
-	if e.button == .Left && e.pressed && divider_press(app, w, x, y, e.time_ns) {return}
-	if status_panel_button(app, w, e) {return}
-	if tab_interaction_press(app, w, e) {return}
-	if pane_header_button(app, w, e) { return }
-	if terminal_scrollbar_button(app, w, e) {return}
-	if e.pressed && !w.selecting {
+}
+
+// A press on pane content focuses the pane, then reaches a settings page, a link, the selection or a
+// program that reports the mouse.
+@(private)
+content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	x, y := f32(e.x), f32(e.y)
+	if !w.selecting {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
 	}
 	if settings_active(w) {
-		if e.button == .Left && e.pressed {
+		if e.button == .Left {
 			editor_outcome(
 				app,
 				w,
-				ui.editor_press(
-					&w.editor,
-					settings_layout(w),
-					&w.ui_text,
-					x,
-					y,
-					.Shift in e.modifiers,
-				),
+				ui.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y, .Shift in e.modifiers),
 			)
 		}
 		return
@@ -277,16 +259,14 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if entry == nil {
 		return
 	}
-	if e.button == .Left && e.pressed && !w.selecting && .Control in e.modifiers {
+	if e.button == .Left && !w.selecting && .Control in e.modifiers {
 		if link_click(app, w, x, y) {
 			return
 		}
 	}
 	if e.button == .Left && (w.selecting || !reports_mouse(entry, e.modifiers)) {
-		if e.pressed {
-			w.selecting = true
-			term.selection_press(entry.session, x, y, e.time_ns)
-		}
+		w.selecting = true
+		term.selection_press(entry.session, x, y, e.time_ns)
 		w.dirty = true
 		return
 	}
@@ -302,11 +282,9 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e := event
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}
-	over_scrollbar := false
-	if workspace_picker_active(&w.workspace_picker) || w.tab_menu.open || w.profile_menu.open {
+	if workspace_picker_active(&w.workspace_picker) || w.tab_menu.open || w.profile_menu.open ||
+	   w.status.inbox_open || w.rename_open {
 		terminal_scrollbar_hover_set(w, 0)
-	} else {
-		over_scrollbar = terminal_scrollbar_hover(app, w, f32(e.x), f32(e.y))
 	}
 	if workspace_picker_active(&w.workspace_picker) {
 		link_hover_clear(w)
@@ -350,42 +328,6 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		return
 	}
 	x, y := f32(e.x), f32(e.y)
-	caption := ui.caption_hit(f32(w.width), x, y, w.scale)
-	if caption != w.caption_hover {w.caption_hover = caption; w.dirty = true}
-	if confirmation_hover(app, w, x, y) {return}
-	toggle_hover := tab_orientation_button_hit(w, x, y)
-	if toggle_hover != w.tab_orientation_button_hovered {
-		w.tab_orientation_button_hovered, w.dirty = toggle_hover, true
-	}
-	rail_hover := -1
-	rail_area_rect := rail_area(w)
-	if w.tabs_horizontal {
-		bar := window_tab_bar(app, w)
-		hover := window_tab_hit(app, w, bar, x, y)
-		chevron := tab_chevron_rect(app, w)
-		if x >= chevron.x && x < chevron.x + chevron.width && y >= 0 && y < bar.height {
-			hover = bar.count + 1
-		}
-		if hover != w.tab_hover {
-			w.tab_hover = hover
-			w.dirty = true
-		}
-	} else if rail_visible(w) &&
-	   x >= rail_area_rect.x &&
-	   x < rail_area_rect.x + rail_area_rect.width &&
-	   y >= rail_area_rect.y &&
-	   y < rail_area_rect.y + rail_area_rect.height {
-		if layout, ok := rail_current_layout(w); ok {
-			rail_hover = rail_tab_hit(w, layout, x, y)
-			if rail_hover < 0 && ui.rail_footer_hit(layout, x, y) {
-				rail_hover = ui.rail_profile_hit(layout, x, y) ? RAIL_PROFILE_ROW : RAIL_NEW_TAB_ROW
-			}
-		}
-	}
-	if rail_hover != w.rail_hover {
-		w.rail_hover = rail_hover
-		w.dirty = true
-	}
 	if w.dragging.count > 0 {
 		if .Left not_in e.buttons {w.dragging, w.rail_resizing = {}, false; return}
 		divider_drag(app, w, x, y)
@@ -402,10 +344,20 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			return
 		}
 	}
-	if palette_active(app, w) {
-		link_hover_clear(w)
-		split_overlay_update(w, x, y, false)
-		pane_header_pointer(w, x, y, false)
+	target := pointer_target(app, w, x, y)
+	// A press that began on a surface keeps the pointer there until it is released.
+	if ui.armed_down(w.find.armed) {
+		target = .Find
+	} else if w.selecting || w.header_buttons != {} || w.editor.drag != .None || w.gesture.reported != {} {
+		target = .Content
+	}
+	pointer_hover(app, w, target, x, y)
+	switch target {
+	case .Caption, .Tab_Orientation, .Workspace_Button, .Status_Pill, .Tabs:
+		pointer_set(app, w, chrome_pointer(app, w, x, y))
+	case .Confirmation:
+		_ = confirmation_hover(app, w, x, y)
+	case .Palette:
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 		pointer_set(app, w, ui.palette_pointer(&app.palette, l, x, y))
 		if ui.palette_slider_dragging(&app.palette) && .Left in e.buttons {
@@ -422,48 +374,70 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		} else {
 			on_palette_outcome(app, w, ui.palette_mouse_move(&app.palette, l, x, y), 0)
 		}
-		return
-	}
-	// The find bar floats over the Activity panel, so it takes the pointer first; a point off every
-	// panel row clears the panel's hover.
-	if w.find.open && !w.selecting {
+	case .Find:
 		l, available := find_controls(w, focused_session(app, w))
-		if ui.find_hover(&w.find, l, available, x, y) { w.dirty = true }
-		if ui.find_contains(l, x, y) || ui.armed_down(w.find.armed) {
-			link_hover_clear(w)
-			_ = status_overview_move(app, w, -1, -1)
-			split_overlay_update(w, x, y, false)
-			pane_header_pointer(w, x, y, false)
-			pointer_set(app, w, ui.find_pointer(l, available, x, y))
-			return
+		pointer_set(app, w, ui.find_pointer(l, available, x, y))
+	case .Divider:
+		resize, _ := divider_cursor(w, x, y)
+		pointer_set(app, w, resize)
+	case .Status_Panel:
+	// `pointer_hover` already gave the panel the pointer and set its cursor.
+	case .Scrollbar:
+		pointer_set(app, w, .Arrow)
+	case .Pane_Header, .Content:
+		content_move(app, w, e)
+	}
+}
+
+// Tells every surface whether it owns the pointer, so hover leaves each surface the owner covers.
+// Pane headers, links and settings pages under `.Pane_Header` or `.Content` update in `content_move`.
+@(private)
+pointer_hover :: proc(app: ^App, w: ^Window, target: Pointer_Target, x, y: f32) {
+	caption := target == .Caption ? ui.caption_hit(f32(w.width), x, y, w.scale) : -1
+	if caption != w.caption_hover {w.caption_hover, w.dirty = caption, true}
+	toggle := target == .Tab_Orientation
+	if toggle != w.tab_orientation_button_hovered {w.tab_orientation_button_hovered, w.dirty = toggle, true}
+	tab_hover, rail_hover := -1, -1
+	if target == .Tabs && w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		tab_hover = window_tab_hit(app, w, bar, x, y)
+		chevron := tab_chevron_rect(app, w)
+		if x >= chevron.x && x < chevron.x + chevron.width && y >= 0 && y < bar.height {
+			tab_hover = bar.count + 1
+		}
+	} else if target == .Tabs {
+		if layout, ok := rail_current_layout(w); ok {
+			rail_hover = rail_tab_hit(w, layout, x, y)
+			if rail_hover < 0 && ui.rail_footer_hit(layout, x, y) {
+				rail_hover = ui.rail_profile_hit(layout, x, y) ? RAIL_PROFILE_ROW : RAIL_NEW_TAB_ROW
+			}
 		}
 	}
-	if e.buttons == {} && status_overview_move(app, w, f32(e.x), f32(e.y)) {
-		link_hover_clear(w)
-		return
+	if w.tabs_horizontal && tab_hover != w.tab_hover {w.tab_hover, w.dirty = tab_hover, true}
+	if rail_hover != w.rail_hover {w.rail_hover, w.dirty = rail_hover, true}
+	// Points off every surface clear the hovers of surfaces that hit test the point themselves.
+	off :: [2]f32{-1, -1}
+	if w.find.open {
+		at := target == .Find ? [2]f32{x, y} : off
+		l, available := find_controls(w, focused_session(app, w))
+		if ui.find_hover(&w.find, l, available, at.x, at.y) {w.dirty = true}
 	}
-	if over_scrollbar {
+	status := target == .Status_Panel || target == .Status_Pill ? [2]f32{x, y} : off
+	_ = status_overview_move(app, w, status.x, status.y)
+	terminal_scrollbar_hover_set(w, target == .Scrollbar ? terminal_scrollbar_at(app, w, x, y) : 0)
+	if target != .Pane_Header && target != .Content {
 		link_hover_clear(w)
-		pointer_set(app, w, .Arrow)
-		return
-	}
-	if resize, over := divider_cursor(w, x, y); over {
-		split_overlay_update(w, x, y, false)
+		// A single pane's split controls still appear while the pointer crosses its scrollbar.
+		split_overlay_update(w, x, y, target == .Scrollbar)
 		pane_header_pointer(w, x, y, false)
-		link_hover_clear(w)
-		pointer_set(app, w, resize)
-		return
 	}
-	if rail_visible(w) &&
-	   x >= rail_area_rect.x &&
-	   x < rail_area_rect.x + rail_area_rect.width &&
-	   y >= rail_area_rect.y &&
-	   y < rail_area_rect.y + rail_area_rect.height {
-		split_overlay_update(w, x, y, false)
-		pane_header_pointer(w, x, y, false)
-		pointer_set(app, w, chrome_pointer(app, w, x, y))
-		return
-	}
+}
+
+// Moves over pane content and pane headers: header buttons, links, settings pages, the selection and
+// programs that report the mouse.
+@(private)
+content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+	x, y := f32(e.x), f32(e.y)
 	enabled := !w.selecting
 	split_overlay_update(w, x, y, enabled)
 	over_header, header_action := pane_header_pointer(w, x, y, enabled)
