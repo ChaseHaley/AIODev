@@ -6,7 +6,6 @@ import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
 import "base:runtime"
-import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "core:time"
@@ -15,16 +14,15 @@ import "core:unicode/utf8"
 @(private) PALETTE_MAX_ROWS :: 8
 @(private) PALETTE_WIDTH :: 560
 @(private) PALETTE_INPUT_HEIGHT :: 64
-@(private) PALETTE_ROW_HEIGHT :: 42
-@(private) PALETTE_HEADER_HEIGHT :: 22
-@(private) PALETTE_FOOTER_HEIGHT :: 22
+@(private) PALETTE_ROW_HEIGHT :: 40
+@(private) PALETTE_FOOTER_HEIGHT :: 32
 @(private) PALETTE_PADDING :: 8
 @(private) PALETTE_RADIUS :: 10
 @(private) PALETTE_TEXT_INSET :: 14
 @(private) PALETTE_SETTING_SUFFIX :: " SETTING"
-@(private) PALETTE_CHIP_HEIGHT :: 24
-@(private) PALETTE_CHIP_TOP :: 28
-@(private) PALETTE_CHIP_GAP :: 8
+@(private) PALETTE_CHIP_HEIGHT :: 25
+@(private) PALETTE_CHIP_GAP :: 10
+@(private) PALETTE_KEYCAP_HEIGHT :: 18
 @(private) PALETTE_MENU_WIDTH :: 176
 @(private) PALETTE_MENU_ROW :: 26
 @(private) PALETTE_MENU_INSET :: 4
@@ -48,7 +46,7 @@ Outcome :: enum {
 	Open_Workspace,
 }
 
-// The kind a result belongs to. Every row states it, because a tab and a workspace can share a name.
+// The kind a result belongs to. A row names it only when another result shares its title.
 Palette_Kind :: enum {
 	Command,
 	Setting,
@@ -70,11 +68,7 @@ Palette_Mode_Info :: struct {
 }
 
 @(private) PALETTE_MODES := [Palette_Mode]Palette_Mode_Info {
-	.All = {
-		"All",
-		"",
-		"Search all, or t: w: s: c: · Tab cycles",
-	},
+	.All         = {"All", "", "Search"},
 	.Tabs        = {"Tabs", "t:", "Search tabs"},
 	.Workspaces  = {"Workspaces", "w:", "Search workspaces"},
 	.Settings    = {"Settings", "s:", "Search settings"},
@@ -97,29 +91,17 @@ Palette_Mode_Info :: struct {
 	.Commands,
 }
 
-// The fixed order for equal-ranked sections: the palette's original domains first.
-@(private) PALETTE_SECTION_ORDER := [Palette_Kind]int {
-	.Command = 0,
-	.Setting = 1,
-	.Tab = 2,
-	.Workspace = 3,
-}
-
-@(private) PALETTE_SECTION_WORDS := [Palette_Kind]string {
-	.Command = "COMMANDS",
-	.Setting = "SETTINGS",
-	.Tab = "TABS",
-	.Workspace = "WORKSPACES",
-}
+// The order of an empty query's list and of equal-ranked matches: the original domains first.
+@(private) PALETTE_DOMAIN_ORDER := [?]Palette_Kind{.Command, .Setting, .Tab, .Workspace}
 
 @(private) PALETTE_KIND_WORDS := [Palette_Kind]string {
-	.Command = "COMMAND",
-	.Setting = "SETTING",
-	.Tab = "TAB",
-	.Workspace = "WORKSPACE",
+	.Command = "Command",
+	.Setting = "Setting",
+	.Tab = "Tab",
+	.Workspace = "Workspace",
 }
 
-// Identity never relies on colour: every row carries this shape plus its type word.
+// Identity never relies on colour: every row carries this shape, and a type word on a title clash.
 @(private) PALETTE_KIND_ICONS := [Palette_Kind]Icon {
 	.Command = .Command,
 	.Setting = .Settings,
@@ -128,19 +110,21 @@ Palette_Mode_Info :: struct {
 }
 
 @(private) PALETTE_CHIP_WIDTHS := [Palette_Mode]f32 {
-	.All = 0,
-	.Tabs = 88,
-	.Workspaces = 132,
-	.Settings = 114,
-	.Commands = 122,
+	.All = 46,
+	.Tabs = 58,
+	.Workspaces = 94,
+	.Settings = 78,
+	.Commands = 90,
 }
 
-@(private) PALETTE_FOOTER_MODES := [?]Palette_Mode {
-	.Tabs,
-	.Workspaces,
-	.Settings,
-	.Commands,
+// One footer entry: its keycaps, joined by a slash, and what they do.
+Palette_Key_Hint :: struct {
+	keys:  [2]string,
+	label: string,
 }
+
+// At most navigate, three selection actions, and close.
+@(private) PALETTE_HINT_CAP :: 5
 
 // A setting the palette can open in the settings editor, and the control it offers in place.
 // The strings are static schema text. A choice without `choices` asks Palette_Values for a live list.
@@ -226,9 +210,8 @@ Palette :: struct {
 Palette_Layout :: struct {
 	panel, input, list, footer, chip, menu: render.Rect,
 	viewport:                               render.Rect,
-	hints:                                  [len(PALETTE_FOOTER_MODES)]render.Rect,
-	row_height, header_height, scale:       f32,
-	rows, headers:                          int,
+	row_height, scale:                      f32,
+	rows:                                   int,
 }
 
 @(require_results)
@@ -422,19 +405,20 @@ palette_result_title :: proc(p: ^Palette, r: Palette_Result) -> string {
 	return ""
 }
 
-// The faint context after the type word: a command category, a settings group, or a tab's workspace.
+// The muted right-side field of a tab row: its workspace, which tells same-named tabs apart.
 palette_result_context :: proc(p: ^Palette, r: Palette_Result) -> string {
-	switch r.kind {
-	case .Command:
-		return r.command != nil ? command_category(r.command.name) : ""
-	case .Setting:
-		return r.setting >= 0 && r.setting < len(p.settings) ? p.settings[r.setting].group : ""
-	case .Tab:
-		return source_item(p.tabs, r.source).owner
-	case .Workspace:
-		return ""
+	return r.kind == .Tab ? source_item(p.tabs, r.source).owner : ""
+}
+
+// Another result has the same title, so the row names its kind after the title.
+palette_title_collides :: proc(p: ^Palette, index: int) -> bool {
+	if index < 0 || index >= len(p.results) {return false}
+	title := palette_result_title(p, p.results[index])
+	if title == "" {return false}
+	for other, i in p.results {
+		if i != index && strings.equal_fold(palette_result_title(p, other), title) {return true}
 	}
-	return ""
+	return false
 }
 
 palette_target :: proc(p: ^Palette, r: Palette_Result) -> Palette_Target {
@@ -452,12 +436,6 @@ palette_target :: proc(p: ^Palette, r: Palette_Result) -> Palette_Target {
 		return {kind = .Workspace, id = r.id}
 	}
 	return {}
-}
-
-// A section header belongs above the first result of a kind, and above index zero.
-palette_section_header :: proc(p: ^Palette, index: int) -> bool {
-	if p.mode != .All || index < 0 || index >= len(p.results) {return false}
-	return index == 0 || p.results[index].kind != p.results[index - 1].kind
 }
 
 @(private)
@@ -644,34 +622,6 @@ consider_setting :: proc(p: ^Palette, setting: int, query: string, width: int) {
 }
 
 @(private)
-Section :: struct {
-	kind: Palette_Kind,
-	start, end, best: int,
-}
-
-@(private)
-section_better :: proc(a, b: Section) -> bool {
-	if a.best != b.best {return a.best < b.best}
-	return PALETTE_SECTION_ORDER[a.kind] < PALETTE_SECTION_ORDER[b.kind]
-}
-
-@(private)
-append_section :: proc(
-	p: ^Palette,
-	sections: ^[4]Section,
-	count: ^int,
-	kind: Palette_Kind,
-	start: int,
-) {
-	end := len(p.ordered)
-	if end == start {return}
-	best := PALETTE_NO_RANK
-	for result in p.ordered[start:end] {best = min(best, result.rank)}
-	sections[count^] = {kind = kind, start = start, end = end, best = best}
-	count^ += 1
-}
-
-@(private)
 count_of :: proc(source: Palette_Source) -> int {
 	if source.count == nil {return 0}
 	return max(0, source.count(source.user))
@@ -683,9 +633,9 @@ less_result :: proc(a, b: Palette_Result) -> bool {
 	return a.score > b.score
 }
 
-// Rebuilds the visible result list for the active mode. An empty query lists each domain in
-// natural order; otherwise label matches rank first, then secondary fields, and each section is
-// sorted by match class and score with insertion order breaking ties.
+// Rebuilds the visible result list for the active mode as one flat ranking. An empty query lists
+// each domain in natural order; otherwise label matches rank first, then secondary fields, by match
+// class and score, with the palette's domain order and then insertion order breaking ties.
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
@@ -705,8 +655,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	setting_count := (p.mode == .All || p.mode == .Settings) ? len(p.settings) : 0
 	candidates := tabs + workspaces + setting_count + enabled_commands
 	if !empty && width > 0 {resize(&p.positions, candidates * width)}
-	sections: [4]Section
-	section_count := 0
+	spans: [Palette_Kind][2]int
 	if p.mode == .All || p.mode == .Tabs {
 		start := len(p.ordered)
 		for index in 0 ..< tabs {
@@ -730,7 +679,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				)
 			}
 		}
-		append_section(p, &sections, &section_count, .Tab, start)
+		spans[.Tab] = {start, len(p.ordered)}
 	}
 	if p.mode == .All || p.mode == .Workspaces {
 		start := len(p.ordered)
@@ -755,7 +704,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				)
 			}
 		}
-		append_section(p, &sections, &section_count, .Workspace, start)
+		spans[.Workspace] = {start, len(p.ordered)}
 	}
 	if p.mode == .All || p.mode == .Settings {
 		start := len(p.ordered)
@@ -767,7 +716,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				consider_setting(p, setting, query, width)
 			}
 		}
-		append_section(p, &sections, &section_count, .Setting, start)
+		spans[.Setting] = {start, len(p.ordered)}
 	}
 	if p.mode == .All || p.mode == .Commands {
 		start := len(p.ordered)
@@ -792,26 +741,14 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				)
 			}
 		}
-		append_section(p, &sections, &section_count, .Command, start)
-	}
-	for section in sections[:section_count] {
-		if !empty {
-			slice.stable_sort_by(p.ordered[section.start:section.end], less_result)
-		}
-	}
-	// Order sections by their best match class, then by the palette's original domain order.
-	for i in 0 ..< section_count {
-		best := i
-		for j in i + 1 ..< section_count {
-			if section_better(sections[j], sections[best]) {best = j}
-		}
-		if best != i {sections[i], sections[best] = sections[best], sections[i]}
+		spans[.Command] = {start, len(p.ordered)}
 	}
 	if len(p.ordered) > 0 {
 		_ = reserve(&p.results, len(p.ordered))
-		for section in sections[:section_count] {
-			append(&p.results, ..p.ordered[section.start:section.end])
+		for kind in PALETTE_DOMAIN_ORDER {
+			append(&p.results, ..p.ordered[spans[kind][0]:spans[kind][1]])
 		}
+		if !empty {slice.stable_sort_by(p.results[:], less_result)}
 	}
 	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
 	keep_selection_visible(p)
@@ -989,63 +926,14 @@ palette_cut :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	return palette_text(p, registry, "")
 }
 
+// The mode chip sits at the query's left inset, centred in the input band, in every mode.
 @(private)
-chip_rect :: proc(p: ^Palette, l: Palette_Layout, scale: f32) -> render.Rect {
-	if p.mode == .All || l.input.width <= 0 {return {}}
+chip_rect :: proc(p: ^Palette, input: render.Rect, scale: f32) -> render.Rect {
+	if input.width <= 0 || input.height <= 0 {return {}}
 	inset := PALETTE_TEXT_INSET * scale
-	width := min(PALETTE_CHIP_WIDTHS[p.mode] * scale, max(0, l.input.width - 2 * inset))
-	y := l.input.y + PALETTE_CHIP_TOP * scale
-	height := min(PALETTE_CHIP_HEIGHT * scale, max(0, l.input.y + l.input.height - y))
-	return {l.input.x + inset, y, width, height}
-}
-
-@(private)
-row_header :: proc(p: ^Palette, index: int) -> bool {
-	return p.mode == .All && palette_section_header(p, index)
-}
-
-@(private)
-visible_extent :: proc(
-	p: ^Palette,
-	row_height, header_height, budget: f32,
-) -> (
-	rows, headers: int,
-	used: f32,
-) {
-	for index := p.scroll; index < len(p.results) && rows < p.visible_rows; index += 1 {
-		height := row_height
-		if row_header(p, index) {height += header_height}
-		if used + height > budget {break}
-		used += height
-		rows += 1
-		if row_header(p, index) {headers += 1}
-	}
-	return
-}
-
-// Keeps the selection inside the measured pixel window, which shrinks when headers take rows.
-@(private)
-layout_keep_visible :: proc(p: ^Palette, row_height, header_height, budget: f32) {
-	if len(p.results) == 0 {
-		p.selected, p.scroll = 0, 0
-		return
-	}
-	p.selected = clamp(p.selected, 0, len(p.results) - 1)
-	p.scroll = clamp(p.scroll, 0, len(p.results) - 1)
-	if p.selected < p.scroll {p.scroll = p.selected}
-	rows, _, _ := visible_extent(p, row_height, header_height, budget)
-	if rows == 0 || p.selected < p.scroll + rows {return}
-	// Pull the window back so the selection ends at its bottom edge.
-	start := p.selected
-	used: f32
-	for index := p.selected; index >= 0; index -= 1 {
-		height := row_height
-		if row_header(p, index) {height += header_height}
-		if used + height > budget {break}
-		used += height
-		start = index
-	}
-	p.scroll = start
+	width := min(PALETTE_CHIP_WIDTHS[p.mode] * scale, max(0, input.width / 2 - inset))
+	height := min(PALETTE_CHIP_HEIGHT * scale, input.height)
+	return {input.x + inset, input.y + (input.height - height) / 2, width, height}
 }
 
 palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) -> Palette_Layout {
@@ -1054,17 +942,10 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	border := min(scale, width / 2, height / 2)
 	panel_width := min(PALETTE_WIDTH * scale, width - 2 * min(16 * scale, width / 4))
 	row_height := PALETTE_ROW_HEIGHT * scale
-	header_height := PALETTE_HEADER_HEIGHT * scale
 	padding := PALETTE_PADDING * scale
 	footer_height := PALETTE_FOOTER_HEIGHT * scale
 	input_height := PALETTE_INPUT_HEIGHT * scale
-	full_height :=
-		input_height +
-		1 +
-		2 * padding +
-		PALETTE_MAX_ROWS * row_height +
-		f32(len(Palette_Kind)) * header_height +
-		footer_height
+	full_height := input_height + 1 + 2 * padding + PALETTE_MAX_ROWS * row_height + footer_height
 	// Caption controls claim pointer input in the title chrome and are hit before the
 	// palette, so the panel starts below that band and gives up rows rather than put its
 	// query or results where the chrome would take the press. When the client has no
@@ -1078,68 +959,46 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	remaining := max(0, available - input_height - separator)
 	padding = min(padding, remaining / 2)
 	footer_height = min(footer_height, max(0, remaining - 2 * padding))
-	// A last row matters more than the mouse hints on a very short client.
+	// A last row matters more than the key hints on a very short client.
 	if footer_height > 0 &&
 	   remaining - 2 * padding - footer_height < row_height &&
 	   remaining - 2 * padding >= row_height {
 		footer_height = 0
 	}
-	// Section headers add height rather than replacing result rows, so all mode keeps the
-	// eight-row cap; the panel's width and row metrics are unchanged.
 	rows_space := max(0, remaining - 2 * padding - footer_height)
 	p.visible_rows = clamp(int(rows_space / row_height), 0, PALETTE_MAX_ROWS)
-	layout_keep_visible(p, row_height, header_height, rows_space)
-	rows, headers, used := visible_extent(p, row_height, header_height, rows_space)
-	if len(p.results) == 0 && p.visible_rows > 0 {
-		rows, headers, used = 1, 0, row_height
-	}
+	keep_selection_visible(p)
+	rows := clamp(len(p.results) - p.scroll, 0, p.visible_rows)
+	if len(p.results) == 0 && p.visible_rows > 0 {rows = 1}
+	used := f32(rows) * row_height
 	list_padding := min(padding, panel_width / 2)
 	panel := render.Rect {
 		x      = (width - panel_width) / 2,
 		y      = top,
 		width  = panel_width,
-		height = input_height + separator + padding + used + max(footer_height, padding),
+		height = input_height + separator + 2 * padding + used + footer_height,
 	}
-	list := render.Rect {
-		panel.x + list_padding,
-		panel.y + input_height + separator + padding,
-		panel.width - 2 * list_padding,
-		used,
-	}
-	footer := render.Rect {
-		panel.x,
-		list.y + list.height,
-		panel.width,
-		footer_height,
-	}
-	chip := chip_rect(p, {input = {panel.x, panel.y, panel.width, input_height}}, scale)
+	input := render.Rect{panel.x, panel.y, panel.width, input_height}
 	l := Palette_Layout {
-		panel         = panel,
-		input         = {panel.x, panel.y, panel.width, input_height},
-		list          = list,
-		footer        = footer,
-		chip          = chip,
-		viewport      = {0, 0, width, height},
-		row_height    = row_height,
-		header_height = header_height,
-		scale         = scale,
-		rows          = rows,
-		headers       = headers,
+		panel      = panel,
+		input      = input,
+		list       = {panel.x + list_padding, input.y + input_height + separator + padding,
+			panel.width - 2 * list_padding, used},
+		chip       = chip_rect(p, input, scale),
+		viewport   = {0, 0, width, height},
+		row_height = row_height,
+		scale      = scale,
+		rows       = rows,
 	}
-	if footer.width > 0 && footer.height > 0 {
-		segment := footer.width / len(PALETTE_FOOTER_MODES)
-		for _, i in PALETTE_FOOTER_MODES {
-			l.hints[i] = {footer.x + f32(i) * segment, footer.y, segment, footer.height}
-		}
-	}
-	if p.mode_menu && chip.width > 0 {
+	if footer_height > 0 {l.footer = {panel.x, l.list.y + used + padding, panel.width, footer_height}}
+	if p.mode_menu && l.chip.width > 0 {
 		menu_width := min(PALETTE_MENU_WIDTH * scale, width - 2 * border)
 		menu_height :=
 			f32(len(PALETTE_MENU_ORDER) * PALETTE_MENU_ROW + 2 * PALETTE_MENU_INSET) * scale
-		x := clamp(chip.x, border, max(border, width - menu_width - border))
-		y := l.input.y + l.input.height + 4 * scale
+		x := clamp(l.chip.x, border, max(border, width - menu_width - border))
+		y := l.chip.y + l.chip.height + 4 * scale
 		if y + menu_height > height - border {
-			y = max(border, l.input.y - menu_height - 4 * scale)
+			y = max(border, l.chip.y - menu_height - 4 * scale)
 		}
 		y = clamp(y, border, max(border, height - menu_height - border))
 		l.menu = {x, y, menu_width, menu_height}
@@ -1150,22 +1009,11 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 @(private)
 row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 	r := l.list
-	if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height {
+	if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height || l.row_height <= 0 {
 		return -1
 	}
-	offset := y - r.y
-	offset_y: f32
-	rows := 0
-	for index := p.scroll; index < len(p.results) && rows < l.rows; index += 1 {
-		if row_header(p, index) {
-			if offset >= offset_y && offset < offset_y + l.header_height {return -1}
-			offset_y += l.header_height
-		}
-		if offset >= offset_y && offset < offset_y + l.row_height {return index}
-		offset_y += l.row_height
-		rows += 1
-	}
-	return -1
+	index := p.scroll + int((y - r.y) / l.row_height)
+	return index < len(p.results) && index - p.scroll < l.rows ? index : -1
 }
 
 @(private)
@@ -1177,17 +1025,6 @@ menu_row_at :: proc(l: Palette_Layout, x, y: f32) -> int {
 	index := int((y - l.menu.y - inset) / row_height)
 	if index < 0 || index >= len(PALETTE_MENU_ORDER) {return -1}
 	return index
-}
-
-@(private)
-hint_at :: proc(l: Palette_Layout, x, y: f32) -> (Palette_Mode, bool) {
-	for hint, i in l.hints {
-		if hint.width <= 0 || hint.height <= 0 {continue}
-		if x >= hint.x && x < hint.x + hint.width && y >= hint.y && y < hint.y + hint.height {
-			return PALETTE_FOOTER_MODES[i], true
-		}
-	}
-	return .All, false
 }
 
 palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
@@ -1241,10 +1078,6 @@ palette_mouse_press :: proc(
 		}
 		return .Changed, 0
 	}
-	if hint, found := hint_at(l, x, y); found {
-		palette_set_mode(p, registry, hint)
-		return .Changed, 0
-	}
 	if index := row_at(p, l, x, y); index >= 0 {
 		if p.results[index].kind == .Command {
 			row, _ := row_rect(p, l, index)
@@ -1264,7 +1097,7 @@ palette_mouse_press :: proc(
 	return .None, 0
 }
 
-// The query field's box: the input row's width, with the label sharing its height above.
+// The query field's box: the input band right of the mode chip.
 palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {
 	box := Field_Box {
 		field = &p.query,
@@ -1273,10 +1106,10 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 		inset = PALETTE_TEXT_INSET,
 		caret_width = 1.5,
 		radius = 0,
-		style = .Input,
+		style = .Query,
 		scale = scale,
 	}
-	if p.mode != .All && l.chip.width > 0 {
+	if l.chip.width > 0 {
 		left := l.chip.x + l.chip.width + PALETTE_CHIP_GAP * scale
 		right := box.rect.x + box.rect.width - PALETTE_TEXT_INSET * scale
 		box.rect.x = left
@@ -1295,15 +1128,14 @@ palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
 	return palette_input_contains(l, x, y) && !contains(l.chip, x, y) && !contains(l.menu, x, y)
 }
 
-// Text over the query, a hand over the mode chip, mode menu rows, footer modes and results.
+// Text over the query, a hand over the mode chip, mode menu rows and results.
 palette_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> platform.Cursor_Shape {
 	if shape, ok := control_pointer(p, l, x, y); ok {return shape}
 	if p.mode_menu && menu_row_at(l, x, y) >= 0 {return .Hand}
-	if p.mode != .All && contains(l.chip, x, y) {return .Hand}
+	if contains(l.chip, x, y) {return .Hand}
 	if palette_over_text(l, x, y) {return .Text}
 	// Outside the query, an open mode menu takes the next click only to close.
 	if p.mode_menu {return .Arrow}
-	if _, found := hint_at(l, x, y); found {return .Hand}
 	if row_at(p, l, x, y) >= 0 {return .Hand}
 	return .Arrow
 }
@@ -1317,7 +1149,7 @@ palette_input_press :: proc(
 	extend: bool,
 ) -> Outcome {
 	palette_edit_cancel(p)
-	if p.mode != .All && contains(l.chip, x, y) {
+	if contains(l.chip, x, y) {
 		p.mode_menu = !p.mode_menu
 		p.menu_hover = -1
 		return .Changed
@@ -1389,8 +1221,8 @@ draw_footer :: proc(
 		rect  = {l.footer.x, l.footer.y, l.footer.width, scale},
 		color = theme.border,
 	})
-	hint_text := text_styled(text, .Keycap)
 	if p.edit.kind == .Shortcut {
+		hint_text := text_styled(text, .Keycap)
 		message := p.binding.message
 		if !p.binding.error {
 			message = p.binding.capturing ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
@@ -1400,18 +1232,113 @@ draw_footer :: proc(
 		                 l.footer.y + (l.footer.height - hint_text.line_height) / 2 + hint_text.ascent,
 		                 p.binding.error ? theme.error : theme.muted, max(1, l.footer.width - 24 * scale))
 	}
-	buffer: [64]u8
-	for hint, i in l.hints {
-		if hint.width <= 0 {continue}
-		mode := PALETTE_FOOTER_MODES[i]
-		info := PALETTE_MODES[mode]
-		label := fmt.bprintf(buffer[:], "%s %s", info.prefix, info.word)
-		baseline := hint.y + (hint.height - hint_text.line_height) / 2 + hint_text.ascent
-		color := p.mode == mode ? theme.text : theme.faint
-		if result := draw_text(&hint_text, list, label, hint.x + 10 * scale, baseline, color,
-			max(0, hint.width - 20 * scale)); result != .Ok {return result}
+	hints: [PALETTE_HINT_CAP]Palette_Key_Hint
+	count := palette_key_hints(p, &hints)
+	if count == 0 {return .Ok}
+	keycap := text_styled(text, .Keycap)
+	label := text_styled(text, .Small)
+	inset, gap := 13 * scale, 12 * scale
+	baseline := l.footer.y + (l.footer.height - label.line_height) / 2 + label.ascent
+	// Close is pinned right; the other hints run left to right and stop before they would meet it.
+	last := hints[count - 1]
+	last_x := l.footer.x + l.footer.width - inset - key_hint_width(&keycap, &label, last, scale)
+	if result := draw_key_hint(list, &keycap, &label, theme, last, last_x, l.footer, baseline, scale);
+	   result != .Ok {return result}
+	x := l.footer.x + inset
+	for hint in hints[:count - 1] {
+		width := key_hint_width(&keycap, &label, hint, scale)
+		if x + width > last_x - gap {break}
+		if result := draw_key_hint(list, &keycap, &label, theme, hint, x, l.footer, baseline, scale);
+		   result != .Ok {return result}
+		x += width + gap
 	}
 	return .Ok
+}
+
+// The keys that apply to the current selection or open control, ending with the closing key.
+palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint) -> int {
+	count := 0
+	add :: proc(out: ^[PALETTE_HINT_CAP]Palette_Key_Hint, count: ^int, first, second, label: string) {
+		out[count^] = {keys = {first, second}, label = label}
+		count^ += 1
+	}
+	#partial switch p.edit.kind {
+	case .Choice:
+		add(out, &count, "Ctrl+N", "Ctrl+P", "Navigate")
+		add(out, &count, "Enter", "", "Choose")
+		add(out, &count, "Esc", "", "Cancel")
+		return count
+	case .Text:
+		add(out, &count, "Enter", "", "Apply")
+		add(out, &count, "Esc", "", "Cancel")
+		return count
+	}
+	if p.selected >= 0 && p.selected < len(p.results) {
+		add(out, &count, "Ctrl+N", "Ctrl+P", "Navigate")
+		switch p.results[p.selected].kind {
+		case .Command:
+			add(out, &count, "Enter", "", "Run command")
+			add(out, &count, "Ctrl+Enter", "", "Edit shortcut")
+		case .Setting:
+			add(out, &count, "Enter", "", "Go to setting")
+			if s := result_setting(p, p.selected); s != nil && s.control != .None {
+				add(out, &count, "Ctrl+Enter", "", "Change")
+				if s.control != .Text {add(out, &count, "Alt+←/→", "", "Adjust")}
+			}
+		case .Tab:
+			add(out, &count, "Enter", "", "Switch tab")
+		case .Workspace:
+			add(out, &count, "Enter", "", "Switch workspace")
+		}
+	}
+	add(out, &count, "Esc", "", "Close")
+	return count
+}
+
+@(private)
+key_hint_width :: proc(keycap, label: ^Text, hint: Palette_Key_Hint, scale: f32) -> f32 {
+	width := text_width(keycap, hint.keys[0]) + 10 * scale
+	if hint.keys[1] != "" {
+		width += text_width(label, "/") + 8 * scale + text_width(keycap, hint.keys[1]) + 10 * scale
+	}
+	return width + 5 * scale + text_width(label, hint.label)
+}
+
+@(private)
+draw_key_hint :: proc(
+	list: ^render.Draw_List,
+	keycap, label: ^Text,
+	theme: Theme,
+	hint: Palette_Key_Hint,
+	x: f32,
+	footer: render.Rect,
+	baseline: f32,
+	scale: f32,
+) -> glyphs.Result {
+	pen := x
+	height := min(PALETTE_KEYCAP_HEIGHT * scale, footer.height)
+	top := footer.y + (footer.height - height) / 2
+	for key, i in hint.keys {
+		if key == "" {continue}
+		if i > 0 {
+			pen += 4 * scale
+			if result := draw_text(label, list, "/", pen, baseline, theme.faint); result != .Ok {return result}
+			pen += text_width(label, "/") + 4 * scale
+		}
+		width := text_width(keycap, key) + 10 * scale
+		draw_rect(list, {
+			rect   = {pen, top, width, height},
+			color  = theme.border,
+			radius = 4 * scale,
+			stroke = scale,
+		})
+		key_baseline := top + (height - keycap.line_height) / 2 + keycap.ascent
+		if result := draw_text(keycap, list, key, pen + 5 * scale, key_baseline, theme.muted); result != .Ok {
+			return result
+		}
+		pen += width
+	}
+	return draw_text(label, list, hint.label, pen + 5 * scale, baseline, theme.muted)
 }
 
 @(private)
@@ -1496,99 +1423,62 @@ palette_draw :: proc(
 	})
 	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
-	label_text := text_styled(text, .Label)
-	if l.input.width > 2 * padding {
-		label_x, label_y := l.input.x + padding, l.input.y + 19 * scale
-		if result := draw_text(&label_text, list, "COMMAND PALETTE", label_x, label_y,
-			theme.faint); result != .Ok { return result }
-		if l.chip.width > 0 {
-			chip := l.chip
-			draw_rect(list, {rect = chip, color = theme.selection, radius = 5 * scale})
-			draw_rect(list, {
-				rect   = chip,
-				color  = theme.border,
-				radius = 5 * scale,
-				stroke = scale,
-			})
-			chip_text := text_styled(text, .Small)
-			baseline := chip.y + (chip.height - chip_text.line_height) / 2 + chip_text.ascent
-			info := PALETTE_MODES[p.mode]
-			prefix_width := text_width(&chip_text, info.prefix)
-			if result := draw_text(&chip_text, list, info.prefix, chip.x + 7 * scale, baseline,
-				theme.accent); result != .Ok {return result}
-			word_x := chip.x + 12 * scale + prefix_width
-			word_width := max(0, chip.x + chip.width - word_x - 16 * scale)
-			if result := draw_text(&chip_text, list, info.word, word_x, baseline, theme.text,
-				word_width); result != .Ok {return result}
-			// A two-pixel chevron reads as a menu affordance without relying on a font glyph.
-			center_x := chip.x + chip.width - 9 * scale
-			center_y := chip.y + chip.height / 2 - 2 * scale
-			for row in 0 ..< 3 {
-				for direction in ([?]f32{-1, 1}) {
-					draw_rect(list, {
-						rect = {
-							center_x + direction * f32(row) * scale - scale,
-							center_y + f32(2 - row) * scale,
-							2 * scale,
-							2 * scale,
-						},
-						color  = theme.muted,
-						radius = 0.8 * scale,
-					})
-				}
+	if l.chip.width > 0 {
+		chip := l.chip
+		draw_rect(list, {rect = chip, color = theme.pane, radius = 5 * scale})
+		draw_rect(list, {
+			rect   = chip,
+			color  = theme.border,
+			radius = 5 * scale,
+			stroke = scale,
+		})
+		chip_text := text_styled(text, .Small)
+		baseline := chip.y + (chip.height - chip_text.line_height) / 2 + chip_text.ascent
+		if result := draw_text(&chip_text, list, PALETTE_MODES[p.mode].word, chip.x + 8 * scale, baseline,
+			theme.text, max(0, chip.width - 26 * scale)); result != .Ok {return result}
+		// A two-pixel chevron reads as a menu affordance without relying on a font glyph.
+		center_x := chip.x + chip.width - 11 * scale
+		center_y := chip.y + chip.height / 2 - 2 * scale
+		for row in 0 ..< 3 {
+			for direction in ([?]f32{-1, 1}) {
+				draw_rect(list, {
+					rect = {
+						center_x + direction * f32(row) * scale - scale,
+						center_y + f32(2 - row) * scale,
+						2 * scale,
+						2 * scale,
+					},
+					color  = theme.muted,
+					radius = 0.8 * scale,
+				})
 			}
 		}
-		box := palette_query_box(p, l, text, scale)
-		input_text := text_styled(text, .Input)
-		baseline := l.input.y + 43 * scale
-		if l.chip.height > 0 {
-			baseline = l.chip.y + (l.chip.height - input_text.line_height) / 2 + input_text.ascent
-		}
-		if box.rect.width > 1 {
-			if result := field_box_draw(box, list, theme, baseline, true,
-				PALETTE_MODES[p.mode].placeholder); result != .Ok { return result }
-		}
 	}
+	box := palette_query_box(p, l, text, scale)
+	query_text := text_styled(text, .Query)
+	if box.rect.width > 1 {
+		baseline := l.input.y + (l.input.height - query_text.line_height) / 2 + query_text.ascent
+		if result := field_box_draw(box, list, theme, baseline, true,
+			PALETTE_MODES[p.mode].placeholder); result != .Ok { return result }
+	}
+	title_text := text_styled(text, .Title)
 	if l.rows > 0 && l.list.width > 0 {
 		if render.push_layer(list, l.list) != .None { return .Ok }
 		if len(p.results) == 0 {
-			row_baseline := l.list.y + (l.row_height - text.line_height) / 2 + text.ascent
-			if result := draw_text(
-				text,
-				list,
-				"No matching tabs, workspaces, settings or commands",
-				l.list.x + padding,
-				row_baseline,
-				theme.muted,
-			); result != .Ok {return result}
+			row_baseline := l.list.y + (l.row_height - title_text.line_height) / 2 + title_text.ascent
+			if result := draw_text(&title_text, list, "No results", l.list.x + padding, row_baseline,
+				theme.muted); result != .Ok {return result}
 		}
 	}
 	if len(p.results) > 0 && l.rows > 0 && l.list.width > 0 {
-		type_buffer: [160]u8
-		y := l.list.y
-		rows := 0
-		for index := p.scroll; index < len(p.results) && rows < l.rows; index += 1 {
+		small := text_styled(text, .Small)
+		kind_text := text_styled(text, .Keycap)
+		row_padding := PALETTE_PADDING * scale
+		for rows in 0 ..< l.rows {
+			index := p.scroll + rows
+			if index >= len(p.results) {break}
 			item := p.results[index]
-			if row_header(p, index) {
-				header := text_styled(text, .Label)
-				baseline := y + (l.header_height - header.line_height) / 2 + header.ascent
-				label := PALETTE_SECTION_WORDS[item.kind]
-				if result := draw_text(&header, list, label, l.list.x + padding, baseline,
-					theme.faint); result != .Ok {return result}
-				line_x := l.list.x + padding + text_width(&header, label) + 8 * scale
-				draw_rect(list, {
-					rect  = {line_x, y + l.header_height / 2, max(0, l.list.x + l.list.width - line_x),
-						scale},
-					color = theme.border,
-				})
-				y += l.header_height
-			}
-			row := render.Rect {
-				l.list.x,
-				y,
-				l.list.width,
-				l.row_height,
-			}
+			row := render.Rect{l.list.x, l.list.y + f32(rows) * l.row_height, l.list.width, l.row_height}
 			if index == p.selected {
 				draw_rect(list, {rect = row, color = theme.selection, radius = 6 * scale})
 				if contains(row, pointer.x, pointer.y) {
@@ -1597,53 +1487,52 @@ palette_draw :: proc(
 					   result != .None {return .Ok}
 				}
 			}
-			row_baseline := row.y + 31 * scale
-			label_width: f32
+			// The right edge of the title's room: the row's one functional field starts there.
+			side := row.x + row.width - row_padding
 			if item.command != nil {
 				parts := palette_binding_parts(row, scale)
-				left := parts.field.x
+				side = parts.field.x
 				if p.edit.kind == .Shortcut && p.binding_result == index && p.binding.popup == .None {
-					left = parts.positions.x
+					side = parts.positions.x
 				}
-				label_width = row.x + row.width - padding - left
 				if result := palette_binding_draw(p, item.command, index, row, list, text, theme, l, pointer);
 				   result != .Ok {return result}
 			}
 			if s := result_setting(p, index); s != nil {
-				left := row.x + row.width - padding
-				if s.control != .None {left = min(left, control_rect(s, row, scale).x)}
-				if s.resettable {left = min(left, reset_rect(s, row, scale).x)}
-				label_width = max(0, row.x + row.width - padding - left)
+				if s.control != .None {side = min(side, control_rect(s, row, scale).x)}
+				if s.resettable {side = min(side, reset_rect(s, row, scale).x)}
 				if result := draw_reset(p, list, theme, l, index, row, pointer); result != .Ok {return result}
 				if result := draw_control(p, list, text, theme, l, item.setting, row); result != .Ok {
 					return result
 				}
 			}
-			detail := palette_result_context(p, item)
-			type_x := row.x + padding + PALETTE_GLYPH_WIDTH * scale
-			type_width := max(
-				0,
-				row.width - 2 * padding - PALETTE_GLYPH_WIDTH * scale - label_width - 8 * scale,
-			)
-			type_label := PALETTE_KIND_WORDS[item.kind]
-			if detail != "" {
-				type_label = fmt.bprintf(
-					type_buffer[:],
-					"%s · %s",
-					type_label,
-					strings.to_upper(detail, context.temp_allocator),
-				)
+			row_baseline := row.y + (row.height - title_text.line_height) / 2 + title_text.ascent
+			if context_label := palette_result_context(p, item); context_label != "" {
+				room := max(0, (row.width - 2 * row_padding - PALETTE_GLYPH_WIDTH * scale) * 0.4)
+				label_width := min(text_width(&small, context_label), room)
+				side = row.x + row.width - row_padding - label_width
+				if result := draw_fading_text(&small, list, context_label, side, row_baseline, theme.muted,
+					label_width); result != .Ok {return result}
 			}
-			if result := draw_text(&label_text, list, type_label, type_x, row.y + 13 * scale,
-				theme.faint, type_width); result != .Ok {return result}
-			kind_icon := render.Rect{row.x + padding, row_baseline - 10 * scale, 12 * scale, 12 * scale}
+			icon_size := ICON_INDICATOR * scale
+			icon_y := row.y + (row.height - icon_size) / 2
+			kind_icon := render.Rect{row.x + row_padding, icon_y, icon_size, icon_size}
 			icon_draw(list, PALETTE_KIND_ICONS[item.kind], kind_icon, theme.muted, ICON_INDICATOR, scale)
-			title_x := row.x + padding + PALETTE_GLYPH_WIDTH * scale
-			title_width := row.width - 2 * padding - PALETTE_GLYPH_WIDTH * scale - label_width - 16 * scale
+			title := palette_result_title(p, item)
+			title_x := row.x + row_padding + PALETTE_GLYPH_WIDTH * scale
+			room := max(0, side - 12 * scale - title_x)
+			kind_width: f32
+			kind_word := ""
+			if palette_title_collides(p, index) {
+				kind_word = PALETTE_KIND_WORDS[item.kind]
+				kind_width = text_width(&kind_text, kind_word) + 6 * scale
+			}
+			title_width := min(text_width(&title_text, title), max(0, room - kind_width))
+			if title_width <= 0 {continue}
 			result := draw_text(
-				text,
+				&title_text,
 				list,
-				palette_result_title(p, item),
+				title,
 				title_x,
 				row_baseline,
 				theme.text,
@@ -1654,8 +1543,12 @@ palette_draw :: proc(
 			if result != .Ok {
 				return result
 			}
-			y += l.row_height
-			rows += 1
+			if kind_word != "" && room - title_width - 6 * scale > 0 {
+				if kind_result := draw_text(&kind_text, list, kind_word, title_x + title_width + 6 * scale,
+					row_baseline, theme.faint, max(0, room - title_width - 6 * scale)); kind_result != .Ok {
+					return kind_result
+				}
+			}
 		}
 	}
 	if result := draw_footer(p, list, text, theme, l, scale); result != .Ok {return result}

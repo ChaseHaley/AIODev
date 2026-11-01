@@ -178,9 +178,6 @@ palette_modes_filter_and_group_by_domain :: proc(t: ^testing.T) {
 		names := mode_names(&p)
 		for kind, i in c.kinds {testing.expect_value(t, kinds[i], kind)}
 		for name, i in c.names {testing.expect_value(t, names[i], name)}
-		for index in 0 ..< len(p.results) {
-			testing.expect(t, !ui.palette_section_header(&p, index))
-		}
 	}
 
 	ui.palette_open_mode(&p, &registry, .All)
@@ -191,10 +188,6 @@ palette_modes_filter_and_group_by_domain :: proc(t: ^testing.T) {
 	want := []ui.Palette_Kind{.Tab, .Tab, .Command, .Workspace, .Setting}
 	kinds := mode_kinds(&p)
 	for kind, i in want {testing.expect_value(t, kinds[i], kind)}
-	headers := []bool{true, false, true, true, true}
-	for expected, index in headers {
-		testing.expect_value(t, ui.palette_section_header(&p, index), expected)
-	}
 }
 
 @(test)
@@ -212,10 +205,7 @@ palette_all_mode_without_a_query_keeps_commands_first :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(p.results), 4)
 	kinds := mode_kinds(&p)
 	want := []ui.Palette_Kind{.Command, .Setting, .Tab, .Workspace}
-	for kind, i in want {
-		testing.expect_value(t, kinds[i], kind)
-		testing.expect(t, ui.palette_section_header(&p, i))
-	}
+	for kind, i in want {testing.expect_value(t, kinds[i], kind)}
 }
 
 @(test)
@@ -237,9 +227,13 @@ palette_duplicate_names_keep_tab_and_workspace_identity :: proc(t: ^testing.T) {
 	testing.expect_value(t, tab.id, u64(7))
 	testing.expect_value(t, workspace.kind, ui.Palette_Kind.Workspace)
 	testing.expect_value(t, workspace.id, u64(9))
-	testing.expect(t, ui.palette_section_header(&p, 0))
-	testing.expect(t, ui.palette_section_header(&p, 1))
+	// The shared title is the only reason either row names its kind.
+	testing.expect(t, ui.palette_title_collides(&p, 0))
+	testing.expect(t, ui.palette_title_collides(&p, 1))
 	testing.expect_value(t, ui.palette_result_context(&p, p.results[0]), "Workspace 2")
+	testing.expect_value(t, ui.palette_result_context(&p, p.results[1]), "")
+	ui.palette_text(&p, &registry, " ")
+	testing.expect_value(t, len(p.results), 0)
 }
 
 @(test)
@@ -330,7 +324,7 @@ palette_activation_targets_carry_identity_and_kind :: proc(t: ^testing.T) {
 }
 
 @(test)
-palette_chip_menu_and_footer_switch_without_typing :: proc(t: ^testing.T) {
+palette_chip_menu_switches_without_typing :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	p: ui.Palette
@@ -361,24 +355,18 @@ palette_chip_menu_and_footer_switch_without_typing :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.mode, ui.Palette_Mode.Settings)
 	testing.expect(t, !p.mode_menu)
 
+	// The footer is a key reference, not a mode switcher.
 	l = ui.palette_layout(&p, 1000, 800, 1)
-	testing.expect(t, l.hints[0].width > 0)
-	mode, _ = ui.palette_mouse_press(
-		&p,
-		&registry,
-		l,
-		l.hints[0].x + l.hints[0].width/2,
-		l.hints[0].y + l.hints[0].height/2,
-	)
-	testing.expect_value(t, mode, ui.Outcome.Changed)
-	testing.expect_value(t, p.mode, ui.Palette_Mode.Tabs)
+	testing.expect(t, l.footer.height > 0)
+	ui.palette_mouse_press(&p, &registry, l, l.footer.x + 20, l.footer.y + l.footer.height / 2)
+	testing.expect_value(t, p.mode, ui.Palette_Mode.Settings)
 
 	// A key closes the menu without losing the key press.
 	ui.palette_input_press(&p, l, &text, l.chip.x + 2, l.chip.y + 2, 1, false)
 	testing.expect(t, p.mode_menu)
 	ui.palette_key(&p, &registry, key({key = .Tab}))
 	testing.expect(t, !p.mode_menu)
-	testing.expect_value(t, p.mode, ui.Palette_Mode.Workspaces)
+	testing.expect_value(t, p.mode, ui.Palette_Mode.Commands)
 }
 
 @(test)
@@ -408,7 +396,7 @@ palette_menu_dismisses_and_can_return_to_all :: proc(t: ^testing.T) {
 	ui.palette_input_press(&p, l, &text, l.input.x + l.input.width - 20, l.input.y + 43, 1, false)
 	testing.expect(t, !p.mode_menu)
 
-	// The All row removes the chip.
+	// The All row returns to all results; its chip stays so the menu remains reachable.
 	ui.palette_input_press(&p, l, &text, l.chip.x + 4, l.chip.y + 4, 1, false)
 	l = ui.palette_layout(&p, 1000, 800, 1)
 	mode, _ := ui.palette_mouse_press(&p, &registry, l, l.menu.x + 20, l.menu.y + 4 + 13)
@@ -416,6 +404,8 @@ palette_menu_dismisses_and_can_return_to_all :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.mode, ui.Palette_Mode.All)
 	testing.expect_value(t, ui.palette_mode_prefix(p.mode), "")
 	testing.expect(t, !p.mode_menu)
+	l = ui.palette_layout(&p, 1000, 800, 1)
+	testing.expect(t, l.chip.width > 0)
 }
 
 @(test)
@@ -433,7 +423,7 @@ palette_opens_in_all_and_mode_bindings_do_not_persist :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.palette_query(&p), "")
 	testing.expect(t, strings.has_prefix(
 		ui.palette_mode_info(ui.Palette_Mode.All).placeholder,
-		"Search all",
+		"Search",
 	))
 }
 
@@ -456,4 +446,53 @@ palette_category_chip_and_query_never_overlap :: proc(t: ^testing.T) {
 			}
 		}
 	}
+}
+
+@(private)
+hint_labels :: proc(p: ^ui.Palette) -> []string {
+	hints: [5]ui.Palette_Key_Hint
+	count := ui.palette_key_hints(p, &hints)
+	labels := make([]string, count, context.temp_allocator)
+	for hint, i in hints[:count] {labels[i] = hint.label}
+	return labels
+}
+
+@(private)
+expect_hints :: proc(t: ^testing.T, p: ^ui.Palette, want: []string, loc := #caller_location) {
+	got := hint_labels(p)
+	if !testing.expect_value(t, len(got), len(want), loc) {return}
+	for label, i in want {testing.expect_value(t, got[i], label, loc)}
+}
+
+@(test)
+palette_footer_states_only_the_selected_results_keys :: proc(t: ^testing.T) {
+	tabs := Mode_Source{items = []ui.Palette_Item{{"gap notes", "pwsh", "Workspace 1", 1}}}
+	workspaces := Mode_Source{items = []ui.Palette_Item{{"gap work", "pwsh", "", 10}}}
+	rows := [?]ui.Palette_Setting {
+		{key = "pane.gap", title = "Gap Size", group = "Panes", control = .Slider, minimum = 0, maximum = 24, step = 1},
+		{key = "pane.gap_name", title = "Gap Name", group = "Panes", control = .Text},
+		{key = "pane.gap_note", title = "Gap Note", group = "Panes"},
+	}
+	p: ui.Palette
+	registry := mode_palette(t, &p, rows[:], &tabs, &workspaces)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	if !testing.expect_value(t, commands.register(&registry, {id = 3, name = "pane.gap_reset", title = "Gap Reset"}),
+		commands.Error.None) {return}
+	ui.palette_open_mode(&p, &registry, .Commands)
+	ui.palette_text(&p, &registry, "gap")
+	expect_hints(t, &p, {"Navigate", "Run command", "Edit shortcut", "Close"})
+	ui.palette_set_mode(&p, &registry, .Settings)
+	expect_hints(t, &p, {"Navigate", "Go to setting", "Change", "Adjust", "Close"})
+	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
+	// Typed values have no step, so Alt+arrows are not offered.
+	expect_hints(t, &p, {"Navigate", "Go to setting", "Change", "Close"})
+	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
+	expect_hints(t, &p, {"Navigate", "Go to setting", "Close"})
+	ui.palette_set_mode(&p, &registry, .Tabs)
+	expect_hints(t, &p, {"Navigate", "Switch tab", "Close"})
+	ui.palette_set_mode(&p, &registry, .Workspaces)
+	expect_hints(t, &p, {"Navigate", "Switch workspace", "Close"})
+	ui.palette_text(&p, &registry, "zzz")
+	expect_hints(t, &p, {"Close"})
 }

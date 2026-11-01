@@ -61,12 +61,12 @@ try {
     Write-Output 'PASS Alt+Right steps a slider'
     Shot 'slider-modified'
 
-    # The first all-mode result sits under its section header; its reset button is the row's last 34 DIPs.
+    # The first result is the list's first row; its reset button is the row's last 34 DIPs.
     $state = Read-State
     $list = $state['palette.list'] -split ','
-    $scale = [double]$state['palette.row_height'] / 42
+    $scale = [double]$state['palette.row_height'] / 40
     $x = [double]$list[0] + [double]$list[2] - 21 * $scale
-    $y = [double]$list[1] + 22 * $scale + 21 * $scale
+    $y = [double]$list[1] + 20 * $scale
     Invoke-Aio mouse click "$([int]$x),$([int]$y)" --px
     Invoke-Aio expect state 'palette.value=5'
     Invoke-Aio expect state 'palette.open=true'

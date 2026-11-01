@@ -236,6 +236,10 @@ Text_Style :: enum {
 	Small,
 	Label,
 	Input,
+	// The command palette's query: larger than other fields because it is the palette's focus.
+	Query,
+	// Command palette result titles.
+	Title,
 	Keycap,
 }
 
@@ -249,6 +253,10 @@ text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 		size = 10.5
 	case .Input:
 		size = 13
+	case .Query:
+		size = 19
+	case .Title:
+		size = 13.5
 	case .Keycap:
 		size = 10
 	}

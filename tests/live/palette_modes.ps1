@@ -82,11 +82,13 @@ try {
     $panel = @($state['palette.panel'] -split ',' | ForEach-Object { [double]$_ })
     $scale = [double]$state['window.scale']
     $chipX = [int]($panel[0] + 14*$scale + 20*$scale)
-    $chipY = [int]($panel[1] + 28*$scale + 12*$scale)
+    # The 25-DIP chip is centred in the 64-DIP query band.
+    $chipY = [int]($panel[1] + 32*$scale)
     Invoke-Aio mouse click "$chipX,$chipY" --px
     Shot 'chip-menu-open'
     $menuX = [int]($panel[0] + 14*$scale + 40*$scale)
-    $menuY = [int]($panel[1] + 68*$scale + 4*$scale + 2*26*$scale + 13*$scale)
+    # The menu opens 4 DIP below the chip; row three, Workspaces, after its 4-DIP inset.
+    $menuY = [int]($panel[1] + 44.5*$scale + 4*$scale + 4*$scale + 2*26*$scale + 13*$scale)
     Invoke-Aio mouse click "$menuX,$menuY" --px
     Invoke-Aio expect state 'palette.mode=workspaces'
     Assert-Match (Read-State)['palette.chip'] 'w:' 'chip menu selected workspaces'

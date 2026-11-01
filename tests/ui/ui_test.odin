@@ -287,13 +287,14 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	ui.palette_text(&p, &registry, "panes")
 	names := make([dynamic]string, context.temp_allocator)
 	for r in p.results { append(&names, ui.palette_result_name(&p, r)) }
-	// The better-ranked settings section comes first; the command's category match follows.
+	// One flat ranking: the title match, then the command's category match, then the
+	// setting's group match, which ranks below its key.
 	testing.expect_value(t, len(names), 3)
 	testing.expect_value(t, names[0], "pane.show_headers")
 	testing.expect(t, p.results[0].positions != nil)
-	testing.expect_value(t, names[1], "pane.gap")
+	testing.expect_value(t, names[1], "pane.split_right")
 	testing.expect(t, p.results[1].positions == nil)
-	testing.expect_value(t, names[2], "pane.split_right")
+	testing.expect_value(t, names[2], "pane.gap")
 	testing.expect(t, p.results[2].positions == nil)
 	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
 	testing.expect_value(t, p.selected, 1)
@@ -306,7 +307,8 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	ui.palette_key(&p, &registry, key({key = .End}))
 	testing.expect_value(t, ui.palette_query(&p), "panes")
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
-	testing.expect_value(t, outcome, ui.Outcome.Run)
+	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
+	testing.expect_value(t, p.chosen, "pane.gap")
 	testing.expect(t, !p.open)
 
 	ui.palette_open(&p, &registry)
@@ -314,8 +316,7 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	ui.palette_key(&p, &registry, key({key = .End}))
 	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Enter}))
-	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
-	testing.expect_value(t, p.chosen, "pane.gap")
+	testing.expect_value(t, outcome, ui.Outcome.Run)
 	testing.expect(t, !p.open)
 
 	ui.palette_open(&p, &registry)

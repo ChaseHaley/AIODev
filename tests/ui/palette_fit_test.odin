@@ -42,11 +42,11 @@ palette_fit_keeps_rows_and_stable_query_top :: proc(t: ^testing.T) {
 	defer ui.palette_destroy(&p)
 	// A 46x18 client at 200% cannot hold eight rows below the caption claim, so it
 	// trades rows for a panel that keeps its pointer events. All mode also spends
-	// height on the two visible section headers and the footer.
+	// height on the key footer.
 	for viewport in ([?][4]f32{
-		{926, 928, 2, 6},
-		{695, 696, 1.5, 6},
-		{926, 837, 2, 5},
+		{926, 928, 2, 7},
+		{695, 696, 1.5, 7},
+		{926, 837, 2, 6},
 		{1000, 800, 1, 8},
 	}) {
 		w, h, scale := viewport[0], viewport[1], viewport[2]
@@ -144,7 +144,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 @(private)
 palette_fit_visible :: proc(t: ^testing.T, p: ^ui.Palette, l: ui.Palette_Layout, width, height: f32) {
 	// Navigation changes the window, so measure again before checking what is drawn.
-	current := ui.palette_layout(p, width, height, l.row_height / 42)
+	current := ui.palette_layout(p, width, height, l.row_height / 40)
 	for r in ([?]render.Rect{current.panel, current.input, current.list}) {
 		testing.expect(t, r.x >= 0 && r.y >= 0 && r.width >= 0 && r.height >= 0)
 		testing.expectf(t, r.x+r.width <= width+0.001 && r.y+r.height <= height+0.001,
@@ -153,14 +153,7 @@ palette_fit_visible :: proc(t: ^testing.T, p: ^ui.Palette, l: ui.Palette_Layout,
 	testing.expect(t, p.scroll >= 0 && p.scroll <= max(0, len(p.results)-1))
 	if current.rows > 0 && len(p.results) > 0 {
 		testing.expect(t, p.selected >= p.scroll && p.selected < p.scroll+current.rows)
-		headers := 0
-		for index in p.scroll ..= p.selected {
-			if ui.palette_section_header(p, index) {headers += 1}
-		}
-		bottom :=
-			current.list.y +
-			f32(headers) * current.header_height +
-			f32(p.selected-p.scroll+1) * current.row_height
+		bottom := current.list.y + f32(p.selected-p.scroll+1) * current.row_height
 		testing.expect(t, bottom <= height+0.001)
 	}
 }
@@ -220,15 +213,8 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 				palette_fit_visible(t, &p, l, w, h)
 				l = ui.palette_layout(&p, w, h, scale)
 				last := p.scroll + l.rows - 1
-				headers := 0
-				for index in p.scroll ..= last {
-					if ui.palette_section_header(&p, index) {headers += 1}
-				}
 				x := l.list.x + l.list.width/2
-				y := l.list.y +
-					f32(headers) * l.header_height +
-					f32(last-p.scroll) * l.row_height +
-					l.row_height/2
+				y := l.list.y + f32(last-p.scroll) * l.row_height + l.row_height/2
 				ui.palette_mouse_move(&p, l, x, y)
 				testing.expect_value(t, p.selected, last)
 				palette_fit_visible(t, &p, l, w, h)
@@ -250,9 +236,9 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	ui.palette_text(&p, &registry, "setting")
 	normal := ui.palette_layout(&p, 1000, 800, 1)
 	testing.expect_value(t, normal.rows, 8)
-	// All mode adds two section headers above the eight rows and a footer below them.
-	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 475})
-	testing.expect_value(t, normal.list, render.Rect{228, 169, 544, 380})
+	// Eight flat rows sit between the query band and the key footer.
+	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 433})
+	testing.expect_value(t, normal.list, render.Rect{228, 169, 544, 320})
 	ui.palette_key(&p, &registry, key({key = .End}))
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	selected_text := ui.palette_selection(&p)
@@ -347,12 +333,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		}
 		ui.palette_key(&p, &registry, key({key = .End}))
 		l = ui.palette_layout(&p, w, h, scale)
-		headers := 0
-		for index in p.scroll ..= p.selected {
-			if ui.palette_section_header(&p, index) {headers += 1}
-		}
-		selected_y := l.list.y + f32(headers) * l.header_height +
-			f32(p.selected-p.scroll) * l.row_height
+		selected_y := l.list.y + f32(p.selected-p.scroll) * l.row_height
 		for id in ([?]string{"studio-dark", "studio-light"}) {
 			theme := ui.theme_from(fixtures.shipped_theme(id))
 			render.draw_list_reset(&list)

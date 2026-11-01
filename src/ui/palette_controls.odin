@@ -483,15 +483,8 @@ slider_number_rect :: proc(control: render.Rect, scale: f32) -> render.Rect {
 // The rectangle of result `index` when it is on screen.
 @(private)
 row_rect :: proc(p: ^Palette, l: Palette_Layout, index: int) -> (render.Rect, bool) {
-	y := l.list.y
-	rows := 0
-	for i := p.scroll; i < len(p.results) && rows < l.rows; i += 1 {
-		if row_header(p, i) {y += l.header_height}
-		if i == index {return {l.list.x, y, l.list.width, l.row_height}, true}
-		y += l.row_height
-		rows += 1
-	}
-	return {}, false
+	if index < p.scroll || index >= len(p.results) || index - p.scroll >= l.rows {return {}, false}
+	return {l.list.x, l.list.y + f32(index - p.scroll) * l.row_height, l.list.width, l.row_height}, true
 }
 
 @(private)
