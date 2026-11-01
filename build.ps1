@@ -127,6 +127,8 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     Copy-Conpty (Split-Path $Output)
     $themeDestination = Join-Path (Split-Path $Output) 'themes'
     New-Item -ItemType Directory -Force $themeDestination | Out-Null
+    # Start empty so themes removed from the repository do not linger in the build.
+    Get-ChildItem $themeDestination -Filter *.json -File | Remove-Item -Force
     Copy-Item -Path 'themes/*.json' -Destination $themeDestination -Force
     # The aio command line ships beside every app build; the app adds its directory to each shell's PATH.
     [string[]] $cliMode = if ($Mode -contains '-o:speed') { '-o:speed' } else { '-debug' }
