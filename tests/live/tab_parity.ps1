@@ -61,6 +61,7 @@ try {
         $dropdown = if ($orientation -eq 'vertical') { 'rail.profile' } else { 'tabs.chevron' }
         Click $s[$dropdown]
         Equal (State)['profile_menu.open'] true "$orientation has a visible profile dropdown"
+        Equal (State)['profile_menu.count'] 5 "$orientation lists only the two configured visible profiles and three app rows"
         Equal (State)['tabs.count'] $count 'opening the profile dropdown creates no tab'
         Aio key Home Enter
         Equal (State)['tabs.count'] ($count + 1) "$orientation profile menu creates one tab"

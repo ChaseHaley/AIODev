@@ -4,7 +4,52 @@ import app "../../src"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
+import "aio:settings"
+import "aio:ui"
 import "core:testing"
+
+@(test)
+profile_menu_matches_configured_settings_rows :: proc(t: ^testing.T) {
+	s: app.App
+	parsed, diagnostics, err := settings.parse(`profile.default.directory = ~/Projects/AIODev
+profile.cmd.name = Command Prompt
+profile.cmd.command = cmd.exe
+profile.windows-powershell.name = Windows PowerShell
+profile.windows-powershell.command = powershell.exe -NoLogo
+profile.hidden.command = cmd.exe
+profile.hidden.hidden = true
+profile.order = default, cmd, windows-powershell, pwsh, hidden
+`)
+	if !testing.expect_value(t, err, nil) {return}
+	s.settings = parsed
+	defer settings.destroy(&s.settings)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, settings.profile_detect(
+		&s.settings, {"pwsh", "PowerShell 7", "pwsh.exe -NoLogo", "~"},
+	), nil)
+	table, table_error := ui.profile_table_build(&s.settings.profiles)
+	if !testing.expect_value(t, table_error, nil) {return}
+	defer ui.profile_table_destroy(&table)
+	testing.expect_value(t, len(table.rows), 4)
+	testing.expect_value(t, len(table.detected), 1)
+	w: app.Window
+	app.profile_menu_init(&w.profile_menu)
+	defer app.profile_menu_destroy(&w.profile_menu)
+	for mode in ([?]app.Profile_Menu_Mode{.New_Tab, .Swap_Pane}) {
+		app.profile_menu_open(&s, &w, mode, 0, 0)
+		expected := 0
+		for row in table.rows {
+			if row.hidden || row.command == "" {continue}
+			if !testing.expect(t, expected < w.profile_menu.count) {return}
+			entry := w.profile_menu.entries[expected]
+			testing.expect_value(t, entry.profile_id, row.id)
+			testing.expect_value(t, entry.visible_index, expected)
+			testing.expect_value(t, w.profile_menu.items[expected].label, row.name)
+			expected += 1
+		}
+		testing.expect_value(t, w.profile_menu.count, expected + 3)
+	}
+}
 
 @(private="file")
 creation_click :: proc(s: ^app.App, w: ^app.Window, r: render.Rect, button: input.Mouse_Button) {

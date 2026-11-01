@@ -462,7 +462,7 @@ profile_resolve :: proc(s: ^Settings, id: string) -> (profile: ^Profile, request
 }
 
 profile_visible :: proc(profile: ^Profile) -> bool {
-	return !profile.hidden && profile.command != ""
+	return !profile.detected && !profile.hidden && profile.command != ""
 }
 
 // A profile found on this machine rather than written in settings.ini.
@@ -520,7 +520,7 @@ profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allo
 }
 
 // Fills `out` with profile indices: explicit profile.order first, then unlisted IDs sorted by
-// ID. Hidden profiles and profiles without a command are skipped when `visible_only` is set.
+// ID. Detected-only, hidden and commandless profiles are skipped when `visible_only` is set.
 // Returns the number written; `out` must hold at least len(p.items) entries.
 profiles_in_order :: proc(p: ^Profiles, out: []int, visible_only := false) -> int {
 	count := 0

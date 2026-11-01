@@ -170,6 +170,34 @@ detected_only_profiles_are_replaced_on_reload :: proc(t: ^testing.T) {
 }
 
 @(test)
+visible_profiles_require_configuration_before_detection :: proc(t: ^testing.T) {
+	for configured in ([?]bool{false, true}) {
+		text := configured ? "profile.pwsh.hidden = false\n" : ""
+		s, diagnostics, err := settings.parse(text)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&diagnostics)
+		if !testing.expect_value(t, err, nil) {return}
+		testing.expect_value(t, settings.profile_detect(
+			&s, {"pwsh", "PowerShell 7", "pwsh.exe -NoLogo", "~"},
+		), nil)
+		profile := settings.profile_find(&s.profiles, "pwsh")
+		if !testing.expect(t, profile != nil) {return}
+		testing.expect_value(t, settings.profile_visible(profile), configured)
+		indices: [settings.PROFILE_LIMIT]int
+		count := settings.profiles_in_order(&s.profiles, indices[:], visible_only = true)
+		testing.expect_value(t, count, configured ? 2 : 1)
+		profile.hidden = true
+		testing.expect(t, !settings.profile_visible(profile))
+		profile.hidden = false
+		command := profile.command
+		profile.command = ""
+		testing.expect(t, !settings.profile_visible(profile))
+		// Restore the owned command before destruction.
+		profile.command = command
+	}
+}
+
+@(test)
 migration_rewrites_legacy_shell_keys :: proc(t: ^testing.T) {
 	source := "# keep\r\nshell.command = cmd.exe /k echo hi\r\n" +
 		`shell.directory = D:\work` + "\r\nfont.size = 12\r\n"
