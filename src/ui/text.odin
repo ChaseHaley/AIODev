@@ -87,9 +87,12 @@ Text :: struct {
 }
 
 @(require_results)
-text_init :: proc(t: ^Text, fonts: ^font.System, cache: ^glyphs.Cache, size_px: f32) -> bool {
+text_init :: proc(
+	t: ^Text, fonts: ^font.System, cache: ^glyphs.Cache, size_px: f32, preferred: string = "",
+) -> bool {
 	t.fonts, t.cache = fonts, cache
-	for name in UI_FAMILIES {
+	for name in ([3]string{preferred, UI_FAMILIES[0], UI_FAMILIES[1]}) {
+		if name == "" {continue}
 		family, err := font.family_load(fonts, name)
 		if err == .None {
 			t.family, t.strong_family = family, family

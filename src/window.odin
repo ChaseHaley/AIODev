@@ -305,6 +305,7 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 }
 
 window_apply_settings :: proc(app: ^App, w: ^Window) {
+	w.ui_text = app.ui_text
 	ui.text_set_size(&w.ui_text, f32(app.settings.interface.font_size) * w.scale * 96 / 72)
 	w.metrics = window_metrics(app, w.scale)
 	w.rail_default_width = f32(app.settings.tabs.rail_width)

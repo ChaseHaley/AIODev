@@ -11,6 +11,7 @@ import "core:unicode/utf8"
 
 System :: struct {
 	allocator:  runtime.Allocator,
+	catalogue:  [dynamic]Family_Info,
 	factory:    ^dw.IFactory2,
 	collection: ^dw.IFontCollection,
 	fallback:   ^dw.IFontFallback,
@@ -141,6 +142,8 @@ system_destroy :: proc(s: ^System) {
 	for family in s.families {
 		delete(family.name, s.allocator)
 	}
+	for item in s.catalogue {delete(item.name, s.allocator)}
+	delete(s.catalogue)
 	delete(s.families)
 	delete(s.faces)
 	delete(s.cache)

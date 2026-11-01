@@ -15,6 +15,7 @@ Cursor_Style :: enum int {
 }
 Font_Settings :: struct {
 	family:            string,
+	show_all:          bool,
 	size, line_height: f64,
 }
 Shell_Settings :: struct {
@@ -28,6 +29,7 @@ Input_Settings :: struct {
 	leader: string,
 }
 Interface_Settings :: struct {
+	font_family:                      string,
 	font_size, hover_lift, hover_gloss: f64,
 }
 Tab_Settings :: struct {
@@ -903,7 +905,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		"font.family",
-		"Font Family",
+		"Shell Font",
 		.String,
 		offset_of(Settings, font) + offset_of(Font_Settings, family),
 		"Cascadia Mono",
@@ -911,6 +913,18 @@ SCHEMA :: [?]Schema_Entry {
 		256,
 		nil,
 		"Terminal font family.",
+	},
+	{
+		"font.show_all", "Show All Fonts", .Bool,
+		offset_of(Settings, font) + offset_of(Font_Settings, show_all),
+		"false", 0, 0, nil,
+		"Include proportional fonts in the shell font list.",
+	},
+	{
+		"interface.font_family", "GUI Font", .String,
+		offset_of(Settings, interface) + offset_of(Interface_Settings, font_family),
+		"Segoe UI Variable Text", 1, 256, nil,
+		"Font family for interface text; independent of the shells.",
 	},
 	{
 		"interface.font_size",

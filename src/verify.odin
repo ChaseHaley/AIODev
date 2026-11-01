@@ -304,6 +304,8 @@ when AIO_CONTROL {
 			{"terminal.background", settings.color_hex(app.settings.colors.background)},
 			{"ui.animations", fmt.tprintf("%t", app.animations)},
 			{"ui.font_points", fmt.tprintf("%g", app.settings.interface.font_size)},
+			{"ui.font_family", app.settings.interface.font_family},
+			{"terminal.font_family", app.settings.font.family},
 			{"shell.icon.loaded", fmt.tprintf("%t", app.shell_icon.width > 0)},
 			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
 			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
@@ -340,8 +342,12 @@ when AIO_CONTROL {
 			entry = focused_session(app, w)
 			editor_key := ""
 			editor_title := ""
+			choice_count := 0
 			if row := ui.editor_row(&w.editor);
-			   row != nil {editor_key, editor_title = row.key, row.title}
+			   row != nil {
+				editor_key, editor_title = row.key, row.title
+				choice_count = len(row.choices)
+			}
 			confirm := pending_close_text(app, &w.pending_close, w.workspace)
 			picker_rect, _ := workspace_picker_rect(w)
 			link_hover, link_uri, link_spans := verify_link_hover(w)
@@ -374,6 +380,7 @@ when AIO_CONTROL {
 				{"settings.editing", fmt.tprintf("%t", ui.editor_editing(&w.editor))},
 				{"settings.active", fmt.tprintf("%t", settings_active(w))},
 				{"settings.popup", fmt.tprintf("%v", w.editor.popup)},
+				{"settings.choice_count", fmt.tprintf("%d", choice_count)},
 				{"settings.capturing", fmt.tprintf("%t", w.editor.capturing)},
 				{"settings.title", editor_title},
 				{"settings.message", w.editor.message},

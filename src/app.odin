@@ -200,7 +200,7 @@ app_init :: proc(app: ^App) -> bool {
 	glyphs.init(&app.cache, app.fonts, app.device)
 	ui_size_px :=
 		f32(app.settings.interface.font_size) * f32(platform_api.primary_dpi(&app.platform)) / 72
-	if !ui.text_init(&app.ui_text, app.fonts, &app.cache, ui_size_px) {
+	if !ui.text_init(&app.ui_text, app.fonts, &app.cache, ui_size_px, app.settings.interface.font_family) {
 		log.error("no interface font is available")
 		return false
 	}
@@ -701,6 +701,9 @@ reload_settings :: proc(app: ^App, announce := true) {
 
 @(private)
 settings_apply_running :: proc(app: ^App) {
+	if !ui.text_init(
+		&app.ui_text, app.fonts, &app.cache, app.ui_text.size_px, app.settings.interface.font_family,
+	) {notify(app, .Error, "Could not load an interface font.")}
 	apply_fonts(app)
 	apply_theme(app)
 	for entry in app.sessions {

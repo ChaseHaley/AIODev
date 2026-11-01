@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:font"
 import "aio:layout"
 import "aio:platform"
 import "aio:pty"
@@ -103,6 +104,10 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		)
 	}
 	_ = settings.profiles_finalize(&s)
+	font_items, font_error := font.installed_families(app.fonts)
+	if font_error != .None && app.fonts != nil {
+		notify(app, .Error, "Could not discover installed fonts. Current families remain available.")
+	}
 	@(static, rodata)
 	schema := settings.SCHEMA
 	for &entry in schema {
@@ -125,6 +130,12 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 				row.kind = .Choice
 				row.choices, row.choice_labels = settings_theme_choices(&s)
 				row.description = "Theme file or custom theme. Changing any color saves a custom theme."
+			}
+			if entry.key == "font.family" || entry.key == "interface.font_family" {
+				row.kind = .Choice
+				row.choices = font.family_choices(
+					font_items, entry.key == "interface.font_family" || s.font.show_all, row.value,
+				)
 			}
 		case .Int:
 			row.kind = .Integer

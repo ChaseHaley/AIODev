@@ -121,7 +121,7 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.editor_select_key(&w.editor, "font.family")) {return}
 	parts := ui.editor_row_parts(&w.editor, l, w.editor.selected)
 	x, y = pointer_center(parts.field)
-	pointer_expect_move(t, s, w, x, y, .Text)
+	pointer_expect_move(t, s, w, x, y, .Hand)
 	x, y = pointer_center(parts.reset)
 	pointer_expect_move(t, s, w, x, y, .Hand)
 	h, found := gesture_settings_header(w)

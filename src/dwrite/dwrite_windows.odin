@@ -1013,3 +1013,16 @@ Reading_Direction :: enum i32 {
 	Top_To_Bottom = 2,
 	Bottom_To_Top = 3,
 }
+
+IFont1_UUID := &IID{0xacd16696, 0x8c14, 0x4f5d, {0x87, 0x7e, 0xfe, 0x3f, 0xc1, 0xd3, 0x27, 0x38}}
+IFont1 :: struct #raw_union {
+	#subtype iunknown: windows.IUnknown,
+	using vtable: ^IFont1_VTable,
+}
+IFont1_VTable :: struct {
+	using font_vtable: IFont_VTable,
+	GetMetrics1: proc "system" (this: ^IFont1, metrics: rawptr),
+	GetPanose: proc "system" (this: ^IFont1, panose: ^[10]u8),
+	GetUnicodeRanges: proc "system" (this: ^IFont1, count: u32, ranges: rawptr, actual: ^u32) -> windows.HRESULT,
+	IsMonospacedFont: proc "system" (this: ^IFont1) -> windows.BOOL,
+}
