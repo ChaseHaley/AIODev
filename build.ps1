@@ -168,6 +168,8 @@ switch ($Task) {
         Build-Release
         $buildId = Get-BuildId
         $stage = 'build/package/AIODev'
+        # Start empty: files left by another branch's package must never ship (WORK-252).
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
         New-Item -ItemType Directory -Force $stage | Out-Null
         Copy-Item -LiteralPath 'build/release/aiodev.exe' -Destination "$stage/aiodev.exe"
         Copy-Item -LiteralPath 'build/release/aio.exe' -Destination "$stage/aio.exe"
