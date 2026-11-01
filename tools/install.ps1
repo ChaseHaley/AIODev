@@ -8,8 +8,12 @@ if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
 }
 $destination = Join-Path $env:LOCALAPPDATA 'Programs\AIODev'
 New-Item -ItemType Directory -Force $destination | Out-Null
-foreach ($name in @('aiodev.exe', 'aio.exe', 'conpty.dll', 'OpenConsole.exe', 'Ghostty-LICENSE.txt', 'ConPTY-LICENSE.txt', 'build.txt')) {
+foreach ($name in @('aiodev.exe', 'aio.exe', 'conpty.dll', 'OpenConsole.exe', 'LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'build.txt')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $destination $name)
+}
+# Earlier packages shipped per-component license files; THIRD_PARTY_NOTICES.txt now holds them all.
+foreach ($name in @('Ghostty-LICENSE.txt', 'ConPTY-LICENSE.txt')) {
+    Remove-Item -LiteralPath (Join-Path $destination $name) -ErrorAction SilentlyContinue
 }
 $themeDestination = Join-Path $destination 'themes'
 New-Item -ItemType Directory -Force $themeDestination | Out-Null

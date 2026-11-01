@@ -197,12 +197,18 @@ switch ($Task) {
         Copy-Item -LiteralPath 'build/release/aiodev.exe' -Destination "$stage/aiodev.exe"
         Copy-Item -LiteralPath 'build/release/aio.exe' -Destination "$stage/aio.exe"
         Copy-Item -LiteralPath 'tools/install.ps1' -Destination "$stage/install.ps1"
-        Copy-Item -LiteralPath 'vendor/ghostty/LICENSE' -Destination "$stage/Ghostty-LICENSE.txt"
+        Copy-Item -LiteralPath 'LICENSE' -Destination "$stage/LICENSE.txt"
+        Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.txt' -Destination "$stage/THIRD_PARTY_NOTICES.txt"
         Copy-Conpty $stage
         Copy-Item -LiteralPath 'themes' -Destination $stage -Recurse -Force
-        Copy-Item -LiteralPath 'vendor/conpty/LICENSE' -Destination "$stage/ConPTY-LICENSE.txt"
         [IO.File]::WriteAllText((Join-Path $PWD "$stage/build.txt"), "$buildId`r`n")
-        $archive = "build/AIODev-$buildId-windows-x64.zip"
+        # A clean checkout of a release tag names the archive after the tag; anything else uses the revision.
+        $label = $buildId
+        if ($buildId -notmatch '\+dirty$|^unknown$') {
+            $tag = & git describe --tags --exact-match HEAD 2>$null
+            if ($LASTEXITCODE -eq 0 -and $tag) { $label = $tag.Trim() }
+        }
+        $archive = "build/AIODev-$label-windows-x64.zip"
         Compress-Archive -LiteralPath $stage -DestinationPath $archive -Force
         $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
         [IO.File]::WriteAllText((Join-Path $PWD "$archive.sha256"), "$hash  $(Split-Path $archive -Leaf)`r`n")
