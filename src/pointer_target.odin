@@ -51,32 +51,38 @@ Pointer_Surface :: struct {
 	// The release of a press the surface owned, wherever it lands; false passes it on to the shared
 	// completion for confirmations, swallowed buttons, the palette and pane content.
 	release: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool,
+	// The hovered control supplies a short label; the shared tooltip owns timing and drawing.
+	tooltip: proc(app: ^App, w: ^Window, x, y: f32) -> string,
 }
 
 @(rodata)
 pointer_surfaces := [Pointer_Target]Pointer_Surface {
-	.Workspace_Picker = {picker_claims, picker_hover, workspace_picker_button, nil},
-	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil},
-	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil},
-	.Status_Inbox     = {inbox_claims, inbox_hover, status_inbox_button, nil},
-	.Rename           = {rename_claims, rename_hover, rename_button, nil},
-	.Caption          = {caption_claims, caption_hover, caption_press, caption_release},
-	.Confirmation     = {confirmation_claims, confirmation_pointer_hover, confirmation_press, nil},
-	.Palette          = {palette_claims, palette_hover, palette_press, nil},
-	.Tab_Orientation  = {orientation_claims, orientation_hover, orientation_press, orientation_release},
+	.Workspace_Picker = {picker_claims, picker_hover, workspace_picker_button, nil, nil},
+	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil, nil},
+	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil, nil},
+	.Status_Inbox     = {inbox_claims, inbox_hover, status_inbox_button, nil, nil},
+	.Rename           = {rename_claims, rename_hover, rename_button, nil, nil},
+	.Caption          = {caption_claims, caption_hover, caption_press, caption_release, caption_tooltip},
+	.Confirmation     = {confirmation_claims, confirmation_pointer_hover, confirmation_press, nil, nil},
+	.Palette          = {palette_claims, palette_hover, palette_press, nil, palette_tooltip},
+	.Tab_Orientation  = {
+		orientation_claims, orientation_hover, orientation_press, orientation_release, orientation_tooltip,
+	},
 	.Title_Action     = {
 		title_action_claims, title_action_pointer_hover, title_action_press, title_action_release,
+		title_action_tooltip,
 	},
-	.Find             = {find_claims, find_pointer_hover, find_press, find_release},
-	.Workspace_Button = {workspace_button_claims, workspace_button_hover, workspace_button_press, nil},
-	.Status_Pill      = {pill_claims, pill_hover, pill_press, nil},
-	.Divider          = {divider_claims, divider_hover, divider_pointer_press, divider_release},
-	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release},
-	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release},
-	.Pane_Header      = {header_claims, header_hover, header_press, nil},
-	.Scrollbar        = {scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release},
-	.Settings_Page    = {settings_claims, settings_hover, content_press, nil},
-	.Content          = {content_claims, content_hover, content_press, nil},
+	.Find             = {find_claims, find_pointer_hover, find_press, find_release, find_tooltip},
+	.Workspace_Button = {workspace_button_claims, workspace_button_hover, workspace_button_press, nil,
+		workspace_button_tooltip},
+	.Status_Pill      = {pill_claims, pill_hover, pill_press, nil, pill_tooltip},
+	.Divider          = {divider_claims, divider_hover, divider_pointer_press, divider_release, nil},
+	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release, panel_tooltip},
+	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release, tabs_tooltip},
+	.Pane_Header      = {header_claims, header_hover, header_press, nil, header_tooltip},
+	.Scrollbar        = {scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release, nil},
+	.Settings_Page    = {settings_claims, settings_hover, content_press, nil, settings_tooltip},
+	.Content          = {content_claims, content_hover, content_press, nil, nil},
 }
 
 // The topmost surface whose area holds the point. Below the modal surfaces, callers handle presses
@@ -239,6 +245,16 @@ caption_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 }
 
 @(private = "file")
+caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	switch ui.caption_hit(f32(w.width), x, y, w.scale) {
+	case 0: return "Minimize"
+	case 1: return w.maximized ? "Restore" : "Maximize"
+	case 2: return "Close window"
+	case: return ""
+	}
+}
+
+@(private = "file")
 caption_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button != .Left || w.pane_drag.pressed || w.tab_drag.pressed {return}
 	ui.armed_press(&w.caption_armed, ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale))
@@ -301,6 +317,12 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 }
 
 @(private = "file")
+palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
+	p := &app.palette
+	return p.reset_hover >= 0 && !p.mode_menu && p.edit.kind == .None ? "Reset setting" : ""
+}
+
+@(private = "file")
 palette_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
 	p := &app.palette
@@ -326,6 +348,11 @@ orientation_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platf
 	hovered := owner == .Tab_Orientation
 	if hovered != w.tab_orientation_button_hovered {w.tab_orientation_button_hovered, w.dirty = hovered, true}
 	if hovered {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
+}
+
+@(private = "file")
+orientation_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
+	return w.tabs_horizontal ? "Show vertical tabs" : "Show horizontal tabs"
 }
 
 @(private = "file")
@@ -366,6 +393,19 @@ find_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: plat
 }
 
 @(private = "file")
+find_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
+	#partial switch w.find.hover {
+	case .Case_Toggle: return "Match case"
+	case .Regex_Toggle: return "Use regular expression"
+	case .Older: return "Previous match"
+	case .Newer: return "Next match"
+	case .Close: return "Close find"
+	case:
+	}
+	return ""
+}
+
+@(private = "file")
 find_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	entry := focused_session(app, w)
 	l, enabled := find_controls(w, entry)
@@ -400,6 +440,9 @@ workspace_button_hover :: proc(
 }
 
 @(private = "file")
+workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Workspaces"}
+
+@(private = "file")
 workspace_button_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button == .Left {workspace_picker_open(app, w)}
 }
@@ -417,6 +460,9 @@ pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mou
 	if hovered != w.status.pill_hover {w.status.pill_hover, w.dirty = hovered, true}
 	if hovered {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
 }
+
+@(private = "file")
+pill_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Activity"}
 
 @(private = "file")
 pill_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
@@ -469,6 +515,11 @@ panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mo
 }
 
 @(private = "file")
+panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
+	return rect_contains(status_panel_side_rect(app, w), x, y) ? "Move activity panel" : ""
+}
+
+@(private = "file")
 panel_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	_ = status_panel_button(app, w, e)
 }
@@ -516,6 +567,25 @@ tabs_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mou
 }
 
 @(private = "file")
+tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		if window_tab_close_hit(app, w, bar, x, y) >= 0 {return "Close tab"}
+		if x >= tab_chevron_rect(app, w).x {return "Choose profile"}
+		if window_tab_hit(app, w, bar, x, y) == bar.count {return "New tab"}
+	} else if layout, ok := rail_current_layout(w); ok {
+		if row := rail_tab_hit(w, layout, x, y); row >= 0 {
+			close := rail_tab_close_rect(w, layout, row)
+			if rect_contains(close, x, y) {return "Close tab"}
+		}
+		if ui.rail_footer_hit(layout, x, y) {
+			return ui.rail_profile_hit(layout, x, y) ? "Choose profile" : "New tab"
+		}
+	}
+	return ""
+}
+
+@(private = "file")
 tabs_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	_ = tab_interaction_press(app, w, e)
 }
@@ -549,6 +619,19 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 	over, action := pane_header_pointer(w, x, y, owner == .Pane_Header && !w.selecting)
 	if owner != .Pane_Header {return}
 	pointer_set(app, w, over && action != .None && w.header_buttons == {} ? .Hand : .Arrow)
+}
+
+@(private = "file")
+header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	_, action, _ := pane_header_hit(w, x, y)
+	#partial switch action {
+	case .Split_Right: return "Split right"
+	case .Split_Down: return "Split down"
+	case .Zoom: return w.tree.zoomed ? "Restore pane" : "Fullscreen pane"
+	case .Close: return "Close pane"
+	case:
+	}
+	return ""
 }
 
 @(private = "file")
@@ -617,6 +700,11 @@ settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	pointer_set(app, w, ui.editor_pointer(&w.editor, l, x, y))
 }
 
+@(private = "file")
+settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
+	return w.editor.hover_reset >= 0 ? "Reset setting" : ""
+}
+
 // Terminal content
 
 @(private = "file")
@@ -639,6 +727,16 @@ title_action_pointer_hover :: proc(
 	hover := owner == .Title_Action ? title_action_hit(w, f32(e.x), f32(e.y)) : Title_Action.None
 	if hover != w.title_action_hover {w.title_action_hover, w.dirty = hover, true}
 	if hover != .None {pointer_set(app, w, .Hand)}
+}
+
+@(private = "file")
+title_action_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	#partial switch title_action_hit(w, x, y) {
+	case .Settings: return "Settings"
+	case .Palette: return "Command palette"
+	case:
+	}
+	return ""
 }
 
 @(private = "file")
