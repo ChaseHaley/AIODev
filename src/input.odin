@@ -240,6 +240,11 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		pane_header_cancel(w)
 		if e.pressed {w.suppressed_key = e}
 		p := &app.palette
+		if ui.palette_editing(p) == .Shortcut {
+			outcome, id := ui.palette_key(p, &app.registry, e)
+			on_palette_outcome(app, w, outcome, id)
+			return
+		}
 		switch clipboard_chord(logical) {
 		case .Copy:
 			clipboard_copy(app, ui.palette_selection(p))
@@ -381,7 +386,8 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 	case .Set_Setting:
 		w.dirty = true
 		key, value := ui.palette_chosen_value(&app.palette)
-		_, _ = settings_save_value(app, key, value, "Could not save the setting.")
+		saved, _ := settings_save_value(app, key, value, "Could not save the setting.")
+		ui.palette_binding_saved(&app.palette, saved)
 	case .Open_Tab:
 		w.dirty = true
 		palette_activate_tab(app, w, app.palette.chosen_id)

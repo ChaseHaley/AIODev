@@ -278,6 +278,10 @@ when AIO_CONTROL {
 			if p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Setting {
 				selected_value, _ = palette_setting_value(app, item)
 			}
+			if p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].command != nil {
+				selected_value = commands.shortcut_set_text(p.results[p.selected].command.shortcuts,
+				                                           context.temp_allocator)
+			}
 		}
 		entries := make([dynamic]control.State_Entry, context.temp_allocator)
 		base := [?]control.State_Entry {

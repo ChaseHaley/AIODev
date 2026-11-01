@@ -53,6 +53,7 @@ palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 	)
 	assert(registered)
 	app.palette_window = w.id
+	app.palette.leader = app.leader
 	ui.palette_open_mode(&app.palette, &app.registry, mode)
 	ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true

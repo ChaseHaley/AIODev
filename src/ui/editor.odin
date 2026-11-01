@@ -1754,23 +1754,32 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.swatch = {parts.field.x - 38 * s, cy - 15 * s, 30 * s, 30 * s}
 		parts.text_right = parts.swatch.x - 12 * s
 	case .Shortcut:
-		parts.field = field(right, cy, clamp((right - r.x) / s * 0.45, 120, 240), s)
-		if index == p.selected {
-			parts.positions = {parts.field.x - 148 * s, cy - 11 * s, 36 * s, 22 * s}
-			parts.text_right = parts.positions.x
-			// Narrow rows stack the label under the switch so both stay inside the row.
-			if parts.positions.x - r.x < 190 * s {
-				parts.text_right = parts.field.x - 84 * s
-				parts.positions = {parts.text_right + 18 * s, r.y + 6 * s, 36 * s, 22 * s}
-				parts.positions_label_below = true
-			}
-		}
+		shortcut_parts(&parts, s, index == p.selected)
 	case .Process_Group, .Profile, .Profile_Add, .Detected_Header, .Detected:
 		parts.reset = {}
 	}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
 	parts.text_right -= 16 * s
 	return parts
+}
+
+// Shared by Settings rows and the palette's embedded shortcut editor.
+@(private)
+shortcut_parts :: proc(parts: ^Row_Parts, scale: f32, selected: bool) {
+	s := scale
+	r := parts.row
+	cy := r.y + r.height / 2
+	right := parts.reset.x - 12 * s
+	width := clamp((right - r.x) / s * 0.45, 120, 240) * s
+	parts.field = {right - width, cy - 15 * s, width, 30 * s}
+	if !selected {return}
+	parts.positions = {parts.field.x - 148 * s, cy - 11 * s, 36 * s, 22 * s}
+	parts.text_right = parts.positions.x
+	if parts.positions.x - r.x < 190 * s {
+		parts.text_right = parts.field.x - 84 * s
+		parts.positions = {parts.text_right + 18 * s, r.y + 6 * s, 36 * s, 22 * s}
+		parts.positions_label_below = true
+	}
 }
 
 // The table cells of the item at `index`. The editor's row rect is the only shared part.

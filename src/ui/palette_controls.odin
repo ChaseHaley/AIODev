@@ -49,6 +49,7 @@ Palette_Edit_Kind :: enum {
 	Slider,
 	Choice,
 	Text,
+	Shortcut,
 }
 
 // The one setting control being operated: a slider drag, an open choice list or a text entry.
@@ -135,6 +136,7 @@ edit_destroy :: proc(e: ^Palette_Edit) {
 // Ends any in-place edit without saving.
 palette_edit_cancel :: proc(p: ^Palette) {
 	if p.edit.kind == .None {return}
+	if p.edit.kind == .Shortcut {editor_destroy(&p.binding)}
 	edit_choices_clear(&p.edit)
 	p.edit.kind, p.edit.setting, p.edit.hover = .None, -1, -1
 	p.edit.field.dragging, p.edit.filter.dragging = false, false
@@ -325,7 +327,7 @@ edit_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
 		return .None
 	}
 	switch edit.kind {
-	case .None, .Slider:
+	case .None, .Slider, .Shortcut:
 		return .None
 	case .Text:
 		#partial switch e.key {
@@ -373,7 +375,7 @@ edit_field :: proc(p: ^Palette) -> ^Text_Field {
 		return &p.edit.field
 	case .Choice:
 		return popup_searchable(p) ? &p.edit.filter : nil
-	case .None, .Slider:
+	case .None, .Slider, .Shortcut:
 	}
 	return nil
 }
@@ -509,6 +511,7 @@ edit_control :: proc(p: ^Palette, l: Palette_Layout) -> render.Rect {
 
 // The open choice list, below its control or above it when the window has no room below.
 palette_popup_rect :: proc(p: ^Palette, l: Palette_Layout) -> render.Rect {
+	if p.edit.kind == .Shortcut {return editor_popup_rect(&p.binding, palette_binding_layout(p, l))}
 	if p.edit.kind != .Choice {return {}}
 	control := edit_control(p, l)
 	if control.width <= 0 {return {}}
@@ -628,7 +631,7 @@ popup_wheel :: proc(p: ^Palette, rows: int) -> Outcome {
 @(private)
 edit_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> (Outcome, bool) {
 	switch p.edit.kind {
-	case .None, .Slider:
+	case .None, .Slider, .Shortcut:
 		return .None, false
 	case .Choice:
 		popup := palette_popup_rect(p, l)
@@ -681,6 +684,14 @@ palette_edit_text_dragging :: proc(p: ^Palette) -> bool {
 @(private)
 control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.Cursor_Shape, bool) {
 	switch p.edit.kind {
+	case .Shortcut:
+		if contains(palette_popup_rect(p, l), x, y) {return .Hand, true}
+		row, _ := row_rect(p, l, p.binding_result)
+		parts := palette_binding_parts(row, l.scale)
+		if contains(parts.field, x, y) || contains(parts.positions, x, y) || contains(parts.reset, x, y) {
+			return .Hand, true
+		}
+		return .Arrow, false
 	case .Choice:
 		popup := palette_popup_rect(p, l)
 		if contains(popup, x, y) {

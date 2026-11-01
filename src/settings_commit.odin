@@ -54,10 +54,20 @@ settings_save_value :: proc(app: ^App, key, value, failure: string) -> (saved, h
 		notify(app, .Error, message)
 		return false, true
 	}
+	warning: string
+	if edit_error == nil && (strings.has_prefix(key, settings.KEY_BINDING_PREFIX) || key == "input.leader") {
+		problem: string
+		problem, warning = editor_validate_bindings(updated, app.settings_path)
+		if problem != "" {
+			notify(app, .Error, problem)
+			return false, true
+		}
+	}
 	if edit_error != nil || settings_commit(app, string(data), updated) != .None {
 		notify(app, .Error, failure)
 		return false, true
 	}
+	if warning != "" {notify(app, .Info, warning)}
 	return true, true
 }
 

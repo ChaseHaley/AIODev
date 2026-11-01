@@ -215,6 +215,11 @@ Palette :: struct {
 	scratch:      ^fuzzy.Scratch,
 	values:       Palette_Values,
 	edit:         Palette_Edit,
+	// Shortcut editing uses the same capture and alternatives control as Settings.
+	binding:      Editor,
+	binding_result: int,
+	chosen_key:   [dynamic]u8,
+	leader:       Maybe(commands.Shortcut),
 	reset_hover:  int,
 }
 
@@ -237,6 +242,7 @@ palette_init :: proc(
 	p.ordered = make([dynamic]Palette_Result, allocator)
 	p.positions = make([dynamic]int, allocator)
 	p.chosen_value = make([dynamic]u8, allocator)
+	p.chosen_key = make([dynamic]u8, allocator)
 	edit_init(&p.edit, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
@@ -254,6 +260,8 @@ palette_init :: proc(
 }
 
 palette_destroy :: proc(p: ^Palette) {
+	editor_destroy(&p.binding)
+	delete(p.chosen_key)
 	free(p.scratch, p.query.bytes.allocator)
 	delete(p.query.bytes)
 	delete(p.results)
@@ -897,6 +905,7 @@ palette_key :: proc(
 	if !e.pressed {
 		return .None, 0
 	}
+	if p.edit.kind == .Shortcut {return palette_binding_key(p, e), 0}
 	if p.edit.kind == .Choice || p.edit.kind == .Text {return edit_key(p, e), 0}
 	if p.edit.kind == .Slider {return .None, 0}
 	was_menu := p.mode_menu
@@ -916,6 +925,10 @@ palette_key :: proc(
 		}
 	}
 	shift := .Shift in e.modifiers
+	if (e.key == .Enter || e.key == .Numpad_Enter) && .Control in e.modifiers &&
+	   p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Command {
+		return palette_binding_open(p, p.selected), 0
+	}
 	// Alt+Left and Alt+Right step the selected setting; Ctrl+Enter operates its control.
 	if s := result_setting(p, p.selected); s != nil && s.control != .None {
 		setting := p.results[p.selected].setting
@@ -1179,6 +1192,8 @@ hint_at :: proc(l: Palette_Layout, x, y: f32) -> (Palette_Mode, bool) {
 
 palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
 	switch p.edit.kind {
+	case .Shortcut:
+		return editor_hover(&p.binding, palette_binding_layout(p, l), x, y) ? .Changed : .None
 	case .Choice:
 		hover := popup_row_at(p, l, x, y)
 		if hover == p.edit.hover {return .None}
@@ -1216,6 +1231,7 @@ palette_mouse_press :: proc(
 	Outcome,
 	commands.Command_Id,
 ) {
+	if p.edit.kind == .Shortcut {return palette_binding_press(p, l, text, x, y), 0}
 	if outcome, handled := edit_press(p, l, text, x, y); handled {return outcome, 0}
 	if p.mode_menu {
 		if index := menu_row_at(l, x, y); index >= 0 {
@@ -1230,6 +1246,12 @@ palette_mouse_press :: proc(
 		return .Changed, 0
 	}
 	if index := row_at(p, l, x, y); index >= 0 {
+		if p.results[index].kind == .Command {
+			row, _ := row_rect(p, l, index)
+			parts := palette_binding_parts(row, l.scale)
+			if contains(parts.reset, x, y) {return palette_binding_reset(p, index), 0}
+			if contains(parts.field, x, y) {return palette_binding_open(p, index), 0}
+		}
 		if outcome, handled := reset_press(p, l, index, x, y); handled {return outcome, 0}
 		if outcome, handled := control_press(p, l, index, x, y); handled {return outcome, 0}
 		return run(p, index)
@@ -1327,6 +1349,8 @@ palette_input_release :: proc(p: ^Palette) -> bool {
 
 palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
 	switch p.edit.kind {
+	case .Shortcut:
+		return .None
 	case .Choice:
 		return popup_wheel(p, rows)
 	case .Slider:
@@ -1366,6 +1390,16 @@ draw_footer :: proc(
 		color = theme.border,
 	})
 	hint_text := text_styled(text, .Keycap)
+	if p.edit.kind == .Shortcut {
+		message := p.binding.message
+		if !p.binding.error {
+			message = p.binding.capturing ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
+			          "Enter replaces · Delete removes · Esc cancels"
+		}
+		return draw_text(&hint_text, list, message, l.footer.x + 12 * scale,
+		                 l.footer.y + (l.footer.height - hint_text.line_height) / 2 + hint_text.ascent,
+		                 p.binding.error ? theme.error : theme.muted, max(1, l.footer.width - 24 * scale))
+	}
 	buffer: [64]u8
 	for hint, i in l.hints {
 		if hint.width <= 0 {continue}
@@ -1530,7 +1564,6 @@ palette_draw :: proc(
 		}
 	}
 	if len(p.results) > 0 && l.rows > 0 && l.list.width > 0 {
-		label_buffer: [commands.SHORTCUT_TEXT_CAP]u8
 		type_buffer: [160]u8
 		y := l.list.y
 		rows := 0
@@ -1565,15 +1598,16 @@ palette_draw :: proc(
 				}
 			}
 			row_baseline := row.y + 31 * scale
-			shortcut_label: string
 			label_width: f32
-			key_text: Text
 			if item.command != nil {
-				if shortcuts := commands.active_shortcuts(item.command); len(shortcuts) > 0 {
-					shortcut_label = commands.shortcut_text(shortcuts[0], label_buffer[:])
-					key_text = text_styled(text, .Keycap)
-					label_width = text_width(&key_text, shortcut_label) + 12 * scale
+				parts := palette_binding_parts(row, scale)
+				left := parts.field.x
+				if p.edit.kind == .Shortcut && p.binding_result == index && p.binding.popup == .None {
+					left = parts.positions.x
 				}
+				label_width = row.x + row.width - padding - left
+				if result := palette_binding_draw(p, item.command, index, row, list, text, theme, l, pointer);
+				   result != .Ok {return result}
 			}
 			if s := result_setting(p, index); s != nil {
 				left := row.x + row.width - padding
@@ -1604,31 +1638,6 @@ palette_draw :: proc(
 				theme.faint, type_width); result != .Ok {return result}
 			kind_icon := render.Rect{row.x + padding, row_baseline - 10 * scale, 12 * scale, 12 * scale}
 			icon_draw(list, PALETTE_KIND_ICONS[item.kind], kind_icon, theme.muted, ICON_INDICATOR, scale)
-			if shortcut_label != "" {
-				x := row.x + row.width - padding - label_width
-				draw_rect(
-					list,
-					{
-						rect = {
-							x - 4 * scale,
-							row.y + 7 * scale,
-							label_width + 4 * scale,
-							row.height - 14 * scale,
-						},
-						color  = theme.border,
-						radius = 4 * scale,
-						stroke = scale,
-					},
-				)
-				if result := draw_text(
-					&key_text,
-					list,
-					shortcut_label,
-					x + 2 * scale,
-					row_baseline,
-					theme.muted,
-				); result != .Ok {return result}
-			}
 			title_x := row.x + padding + PALETTE_GLYPH_WIDTH * scale
 			title_width := row.width - 2 * padding - PALETTE_GLYPH_WIDTH * scale - label_width - 16 * scale
 			result := draw_text(
@@ -1650,6 +1659,9 @@ palette_draw :: proc(
 		}
 	}
 	if result := draw_footer(p, list, text, theme, l, scale); result != .Ok {return result}
+	if p.edit.kind == .Shortcut {
+		return popup_draw(&p.binding, palette_binding_layout(p, l), list, text, theme, pointer)
+	}
 	if result := draw_popup(p, list, text, theme, l); result != .Ok {return result}
 	return draw_mode_menu(p, list, text, theme, l, scale)
 }
