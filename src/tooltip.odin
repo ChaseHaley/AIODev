@@ -85,7 +85,7 @@ tooltip_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 }
 
 tooltip_tick :: proc(w: ^Window) {
-	if w.tooltip_deadline == {} || time.tick_diff(w.tooltip_deadline, time.tick_now()) > 0 {return}
+	if w.tooltip_deadline == {} || time.tick_diff(time.tick_now(), w.tooltip_deadline) > 0 {return}
 	w.tooltip_deadline = {}
 	w.tooltip_visible = true
 	w.dirty = true
