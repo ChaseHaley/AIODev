@@ -91,6 +91,7 @@ Terminal_Settings :: struct {
 	find_keep_query, find_select_query:      bool,
 	minimum_contrast:                        f64,
 	scroll_page_length:                      f64,
+	scrollbar:                               bool,
 }
 Cursor_Settings :: struct {
 	style: Cursor_Style,
@@ -156,6 +157,12 @@ SCHEMA :: [?]Schema_Entry {
 		offset_of(Settings, terminal) + offset_of(Terminal_Settings, scroll_page_length),
 		"0.5", 0.01, 1, nil,
 		"Fraction of the visible page used by the configured page scrolling commands.",
+	},
+	{
+		"terminal.scrollbar", "Show Scrollbar", .Bool,
+		offset_of(Settings, terminal) + offset_of(Terminal_Settings, scrollbar),
+		"true", 0, 0, nil,
+		"Show a scrollbar on terminal panes with scrollback.",
 	},
 	{
 		"theme.name",

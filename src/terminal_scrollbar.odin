@@ -6,20 +6,44 @@ import "aio:render"
 import "aio:term"
 import "aio:ui"
 
+// The track is the whole expansion zone: the thumb is thin until the pointer enters the width it
+// would expand to, so it always grows under the pointer.
+@(private = "file")
+SCROLLBAR_TRACK :: 10
+@(private = "file")
+SCROLLBAR_THIN :: 4
+@(private = "file")
+SCROLLBAR_INSET :: 1
+
+Scrollbar_State :: enum {
+	Collapsed,
+	Hovered,
+	Active,
+}
+
+terminal_scrollbar_state :: proc(w: ^Window, id: u32) -> Scrollbar_State {
+	if w.scroll_drag && w.scroll_session == id {return .Active}
+	if w.scroll_hover == id {return .Hovered}
+	return .Collapsed
+}
+
 terminal_scrollbar_geometry :: proc(
 	app: ^App, w: ^Window, pane: layout.Pane_Rect, entry: ^Session_Entry,
 ) -> (track, thumb: render.Rect, bar: term.Scrollbar, visible: bool) {
-	if entry == nil {return}
+	if entry == nil || !app.settings.terminal.scrollbar {return}
 	ok: bool
 	bar, ok = term.scrollbar(entry.session)
 	if !ok || bar.total <= bar.len {return}
-	header := pane_header_height(w.scale, app.settings.pane.show_headers)
-	track = {pane.rect.x + pane.rect.width - 12 * w.scale, pane.rect.y + header,
-		10 * w.scale, max(0, pane.rect.height - header - 4 * w.scale)}
+	s := w.scale
+	header := pane_header_height(s, app.settings.pane.show_headers)
+	track = {pane.rect.x + pane.rect.width - (SCROLLBAR_TRACK + 2) * s, pane.rect.y + header,
+		SCROLLBAR_TRACK * s, max(0, pane.rect.height - header - 4 * s)}
 	if track.height <= 0 {return}
-	height := min(track.height, max(24 * w.scale, track.height * f32(bar.len) / f32(bar.total)))
+	height := min(track.height, max(24 * s, track.height * f32(bar.len) / f32(bar.total)))
 	top := (track.height - height) * f32(bar.offset) / f32(bar.total - bar.len)
-	thumb = {track.x + 2 * w.scale, track.y + top, 6 * w.scale, height}
+	width := f32(SCROLLBAR_THIN) * s
+	if terminal_scrollbar_state(w, entry.id) != .Collapsed {width = track.width - 2 * SCROLLBAR_INSET * s}
+	thumb = {track.x + track.width - SCROLLBAR_INSET * s - width, track.y + top, width, height}
 	visible = true
 	return
 }
@@ -28,7 +52,23 @@ terminal_scrollbar_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, e
 	track, thumb, _, visible := terminal_scrollbar_geometry(app, w, pane, entry)
 	if !visible {return}
 	if render.push_layer(&w.list, track, 0) != .None {return}
-	ui.draw_rect(&w.list, {rect = thumb, color = app.theme.muted, radius = 3 * w.scale})
+	t := app.theme
+	color := t.scrollbar
+	switch terminal_scrollbar_state(w, entry.id) {
+	case .Collapsed:
+	case .Hovered:
+		color = t.scrollbar_hover
+		ui.draw_rect(&w.list, {rect = track, color = t.scrollbar_track, radius = track.width / 2})
+	case .Active:
+		color = t.scrollbar_active
+		ui.draw_rect(&w.list, {rect = track, color = t.scrollbar_track, radius = track.width / 2})
+	}
+	ui.draw_rect(&w.list, {rect = thumb, color = color, radius = thumb.width / 2})
+}
+
+@(private = "file")
+scrollbar_contains :: proc(r: render.Rect, x, y: f32) -> bool {
+	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
 terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
@@ -38,8 +78,7 @@ terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Butto
 		if pane.content.kind == .Settings {continue}
 		entry := session_find(app, pane.content.id)
 		track, thumb, bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
-		if !visible || x < track.x || x >= track.x + track.width ||
-		   y < track.y || y >= track.y + track.height {continue}
+		if !visible || !scrollbar_contains(track, x, y) {continue}
 		if y < thumb.y || y >= thumb.y + thumb.height {
 			term.scroll_viewport(entry.session, y < thumb.y ? -int(bar.len) : int(bar.len))
 		} else {
@@ -66,13 +105,26 @@ terminal_scrollbar_move :: proc(app: ^App, w: ^Window, y: f32) {
 	w.scroll_drag = false
 }
 
+// Records which pane's track is under the pointer, repainting only when that changes.
 terminal_scrollbar_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	for pane in w.panes {
-		if pane.content.kind == .Settings {continue}
-		entry := session_find(app, pane.content.id)
-		track, _, _, visible := terminal_scrollbar_geometry(app, w, pane, entry)
-		if visible && x >= track.x && x < track.x + track.width &&
-		   y >= track.y && y < track.y + track.height {return true}
+	hovered: u32
+	if !w.selecting {
+		for pane in w.panes {
+			if pane.content.kind == .Settings {continue}
+			entry := session_find(app, pane.content.id)
+			track, _, _, visible := terminal_scrollbar_geometry(app, w, pane, entry)
+			if visible && scrollbar_contains(track, x, y) {hovered = entry.id; break}
+		}
 	}
-	return false
+	terminal_scrollbar_hover_set(w, hovered)
+	return hovered != 0
+}
+
+terminal_scrollbar_hover_set :: proc(w: ^Window, id: u32) {
+	if w.scroll_hover != id {w.scroll_hover, w.dirty = id, true}
+}
+
+terminal_scrollbar_release :: proc(app: ^App, w: ^Window, x, y: f32) {
+	w.scroll_drag, w.dirty = false, true
+	terminal_scrollbar_hover(app, w, x, y)
 }

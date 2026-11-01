@@ -41,6 +41,7 @@ Window :: struct {
 	gesture: Gesture_State,
 	scroll_drag: bool,
 	scroll_session: u32,
+	scroll_hover: u32,
 	scroll_grab: f32,
 	dragging: Divider_Drag,
 	divider_click_node: layout.Node_Id,

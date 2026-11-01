@@ -60,7 +60,7 @@ gesture_cancel :: proc(app: ^App, w: ^Window) -> bool {
 // Completion never falls through to fresh hit testing, even when its action removes w.
 @(private)
 gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button == .Left && w.scroll_drag {w.scroll_drag = false; return true}
+	if e.button == .Left && w.scroll_drag {terminal_scrollbar_release(app, w, f32(e.x), f32(e.y)); return true}
 	x, y := f32(e.x), f32(e.y)
 	if e.button == .Left && ui.armed_down(w.status.panel_side_armed) {
 		w.header_buttons -= {.Left}
@@ -302,6 +302,12 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e := event
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}
+	over_scrollbar := false
+	if workspace_picker_active(&w.workspace_picker) || w.tab_menu.open || w.profile_menu.open {
+		terminal_scrollbar_hover_set(w, 0)
+	} else {
+		over_scrollbar = terminal_scrollbar_hover(app, w, f32(e.x), f32(e.y))
+	}
 	if workspace_picker_active(&w.workspace_picker) {
 		link_hover_clear(w)
 		workspace_picker_hover(app, w, e)
@@ -433,7 +439,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			return
 		}
 	}
-	if !w.selecting && terminal_scrollbar_hover(app, w, x, y) {
+	if over_scrollbar {
 		link_hover_clear(w)
 		pointer_set(app, w, .Arrow)
 		return
