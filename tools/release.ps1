@@ -96,6 +96,6 @@ if ($DryRun) {
 
 git push $Remote main
 git push $Remote $tag
-$prerelease = if ($Version -match '^0\.|-') { @('--prerelease') } else { @() }
+$prerelease = @(if ($Version -match '^0\.|-') { '--prerelease' })
 gh release create $tag $archive "$archive.sha256" --title "AIODev $tag" --notes-file $notesPath @prerelease
 Write-Output "Released $tag"
