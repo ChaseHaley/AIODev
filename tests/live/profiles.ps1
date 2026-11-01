@@ -184,7 +184,12 @@ try {
     if ([int](Read-State)['settings.profile.drag_target'] -lt 1) { throw 'No reorder slot.' }
     Write-Output 'PASS order drag opens a slot'
     Invoke-Aio mouse up "$($gamma.x + 40),$($gamma.y + $gamma.h - 4)" --px | Out-Null
-    Assert-FileLine 'profile.order = beta, gamma, alpha, default' 'order drag rewrites profile.order'
+    Assert-Contains (File-Text) 'profile.order = beta, gamma, alpha,' 'order drag rewrites profile.order'
+    Jump-Profiles
+    $orderedRows = @(Rows (Read-State)['settings.profile.rows'])
+    Assert-Value $orderedRows[0].id 'beta' 'saved order starts with Beta after release'
+    Assert-Value $orderedRows[1].id 'gamma' 'saved order keeps Gamma second'
+    Assert-Value $orderedRows[2].id 'alpha' 'saved order keeps Alpha third'
 
     Jump-Profiles
     $state = Read-State
@@ -205,6 +210,51 @@ try {
     }
     if ((File-Text) -match '(?m)^profile\.gamma\.') { throw 'Removed profile left file lines.' }
     Write-Output 'PASS confirmation removes profile lines'
+
+    # Profiles is a jump-only palette destination, including after a previous Settings search.
+    Invoke-Aio command app.palette_settings | Out-Null
+    Invoke-Aio type profiles | Out-Null
+    Assert-Value (Read-State)['palette.item'] 'profiles' 'palette finds Profiles'
+    Invoke-Aio key Enter | Out-Null
+    Assert-Value (Read-State)['settings.key'] 'profile.beta' 'palette jumps to the profile table'
+
+    Jump-Profiles
+    $state = Read-State
+    for ($i = 0; $i -lt 100 -and (Read-State)['settings.key'] -ne 'profiles.add'; $i++) {
+        Invoke-Aio key Down | Out-Null
+    }
+    Assert-Value (Read-State)['settings.key'] 'profiles.add' 'Add Profile is reachable after table rows'
+    $scroll = (Read-State)['settings.scroll']
+    Invoke-Aio key Enter | Out-Null
+    Assert-Value (Read-State)['settings.scroll'] $scroll 'adding preserves Settings scroll'
+    Invoke-Aio key Tab Delete | Out-Null
+    Assert-Value (Read-State)['settings.profile.remove_title'] 'Delete New Profile?' 'confirmation uses display name'
+    $scroll = (Read-State)['settings.scroll']
+    Invoke-Aio capture --out (Join-Path $repo 'build/profile-confirmation.png') | Out-Null
+    Invoke-Aio key Left Enter | Out-Null
+    Assert-Value (Read-State)['settings.scroll'] $scroll 'deleting preserves Settings scroll'
+
+    # Split Settings until its row actions collapse into an overflow menu.
+    for ($i = 0; $i -lt 2; $i++) {
+        Invoke-Aio command pane.split_right | Out-Null
+        Invoke-Aio command settings.open | Out-Null
+        $beta = Row (Read-State)['settings.profile.rows'] 'beta'
+        if ($beta.w -lt 520 * $scale) { break }
+    }
+    Invoke-Aio command app.palette_settings | Out-Null
+    Invoke-Aio type profiles | Out-Null
+    Invoke-Aio key Enter | Out-Null
+    $beta = Row (Read-State)['settings.profile.rows'] 'beta'
+    if ($beta.w -ge 520 * $scale) { throw 'Settings did not narrow enough for overflow.' }
+    Invoke-Aio mouse click "$($beta.x + $beta.w - 22 * $scale),$($beta.y + $beta.h / 2)" --px | Out-Null
+    $state = Read-State
+    Assert-Value $state['settings.profile.menu_open'] 'true' 'ellipsis opens hidden profile actions'
+    $expectedCount = if ($beta.w -lt 340 * $scale) { 4 } else { 2 }
+    Assert-Value $state['settings.profile.menu_count'] $expectedCount 'overflow contains every omitted action'
+    Invoke-Aio capture --out (Join-Path $repo 'build/profile-overflow.png') | Out-Null
+    Invoke-Aio key End Up Enter | Out-Null
+    Assert-FileLine 'profile.profile-1.name = "Beta copy"' 'overflow Duplicate remains functional'
+    Assert-Value (Read-State)['settings.profile.menu_open'] 'false' 'choosing an action closes overflow'
 
     # Only profile and shell keys are present; the table introduced no new settings key.
     foreach ($line in [IO.File]::ReadAllLines($path)) {

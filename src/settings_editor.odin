@@ -591,6 +591,7 @@ editor_profile_write :: proc(
 	key, value, select_key, message: string,
 	focus := Reveal_Focus.None,
 ) -> bool {
+	scroll := w.editor.scroll
 	updated, edit_message, err := settings.edit_text(w.editor.source, key, value)
 	defer delete(edit_message)
 	if err != nil || edit_message != "" {
@@ -618,6 +619,7 @@ editor_profile_write :: proc(
 		&w.editor,
 		{key = select_key, search = .Preserve, message = message, focus = focus},
 	)
+	w.editor.scroll = clamp(scroll, 0, max(0, len(w.editor.items) - max(1, w.editor.visible_rows)))
 	return true
 }
 
@@ -683,6 +685,7 @@ editor_profile_saved :: proc(
 	w: ^Window,
 	updated, key, message: string,
 ) -> bool {
+	scroll := w.editor.scroll
 	result := settings_commit(app, w.editor.source, updated, &w.editor)
 	if result != .None {
 		text := "Could not save the profile. Check the settings path and permissions."
@@ -698,6 +701,7 @@ editor_profile_saved :: proc(
 		&w.editor,
 		{key = key, search = .Preserve, message = message},
 	)
+	w.editor.scroll = clamp(scroll, 0, max(0, len(w.editor.items) - max(1, w.editor.visible_rows)))
 	return true
 }
 
@@ -1108,6 +1112,12 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		}
 	}
 	editor_outcome(app, w, ui.editor_key(p, e))
+}
+
+editor_profile_remove_title :: proc(app: ^App, w: ^Window) -> string {
+	profile := settings.profile_find(&app.settings.profiles, w.profile_remove_id)
+	if profile == nil {return "Delete profile?"}
+	return fmt.tprintf("Delete %s?", profile.name)
 }
 
 editor_profile_remove_ask :: proc(app: ^App, w: ^Window, id: string) {

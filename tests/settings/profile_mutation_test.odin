@@ -6,6 +6,22 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 
+@(test)
+profile_move_includes_machine_rows_in_the_visible_order :: proc(t: ^testing.T) {
+	source :: "profile.alpha.name = Alpha\nprofile.alpha.command = cmd.exe\nprofile.order = alpha, default\n"
+	s := mutation_parse(t, source)
+	defer settings.destroy(&s)
+	testing.expect_value(t, settings.profile_detect(&s, {"found", "Found", "other.exe", "~"}), nil)
+	text, id, issue, error := settings.profile_mutate(source, &s.profiles, {kind = .Move, id = "found", slot = 0})
+	defer delete(text)
+	defer delete(id)
+	defer delete(issue)
+	if !testing.expect_value(t, error, settings.Profile_Mutation_Error.None) {return}
+	after := mutation_parse(t, text)
+	defer settings.destroy(&after)
+	mutation_order(t, &after, {"found", "alpha", "default"})
+}
+
 mutation_parse :: proc(t: ^testing.T, source: string) -> settings.Settings {
 	s, diagnostics, error := settings.parse(source)
 	defer settings.diagnostics_destroy(&diagnostics)
@@ -165,9 +181,9 @@ profile_mutation_move_owns_main_table_and_listed_detection_order :: proc(t: ^tes
 	testing.expect_value(t, settings.profile_detect(&s, {"found", "Found", "cmd.exe", "~"}), nil)
 	testing.expect_value(t, settings.profile_detect(&s, {"other", "Other", "cmd.exe", "~"}), nil)
 	for change in ([?]struct {slot: int, order: []string} {
-		{0, {"beta", "alpha", "default", "found"}},
-		{2, {"alpha", "beta", "default", "found"}},
-		{99, {"alpha", "default", "beta", "found"}},
+		{0, {"beta", "found", "alpha", "default", "other"}},
+		{2, {"found", "alpha", "beta", "default", "other"}},
+		{99, {"found", "alpha", "default", "other", "beta"}},
 	}) {
 		text, id, issue, error := settings.profile_mutate(
 			source, &s.profiles, {kind = .Move, id = "beta", slot = change.slot},
@@ -190,7 +206,7 @@ profile_mutation_rejects_ineligible_requests_without_a_revision :: proc(t: ^test
 	testing.expect_value(t, settings.profile_detect(&s, {"found", "Found", "cmd.exe", "~"}), nil)
 	for change in ([?]settings.Profile_Mutation {
 		{kind = .Remove, id = "default"}, {kind = .Remove, id = "found"},
-		{kind = .Move, id = "found"}, {kind = .Enable, id = "default"},
+		{kind = .Enable, id = "default"},
 		{kind = .Duplicate, id = "missing"},
 	}) {
 		text, id, issue, error := settings.profile_mutate("", &s.profiles, change)

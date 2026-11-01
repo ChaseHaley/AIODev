@@ -22,6 +22,8 @@ Menu :: struct {
 	items:                [dynamic]Menu_Item,
 	selected, scroll:     int,
 	anchor_x, anchor_y:   f32,
+	// An embedded menu may stay inside its owning pane; zero uses the whole window.
+	bounds:               render.Rect,
 }
 
 menu_init :: proc(m: ^Menu, allocator := context.allocator) {
@@ -77,17 +79,20 @@ menu_layout :: proc(
 	render.Rect,
 	int,
 ) {
+	bounds := m.bounds
+	if bounds.width <= 0 {bounds = {0, 0, width, height}}
 	rows := 0
 	content := 8 * scale
 	for i in m.scroll..<len(m.items) {
 		next := menu_row_height(m, i) * scale
-		if rows > 0 && content + next > height - 16 * scale {break}
+		if rows > 0 && content + next > bounds.height - 16 * scale {break}
 		content += next
 		rows += 1
 	}
-	surface_width := min(MENU_WIDTH * scale, width - 16 * scale)
-	x := clamp(m.anchor_x, 8 * scale, max(8 * scale, width - surface_width - 8 * scale))
-	y := clamp(m.anchor_y, 8 * scale, max(8 * scale, height - content - 8 * scale))
+	surface_width := min(MENU_WIDTH * scale, max(0, bounds.width - 16 * scale))
+	left, top := bounds.x + 8 * scale, bounds.y + 8 * scale
+	x := clamp(m.anchor_x, left, max(left, bounds.x + bounds.width - surface_width - 8 * scale))
+	y := clamp(m.anchor_y, top, max(top, bounds.y + bounds.height - content - 8 * scale))
 	return {x, y, surface_width, content}, rows
 }
 

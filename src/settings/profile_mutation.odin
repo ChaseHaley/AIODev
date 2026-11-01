@@ -32,7 +32,6 @@ profile_mutate :: proc(
 	if change.kind == .Remove && (profile.id == PROFILE_DEFAULT_ID || profile.builtin) {
 		return "", "", "", .Unavailable
 	}
-	if change.kind == .Move && profile.detected {return "", "", "", .Unavailable}
 
 	target := change.id
 	if change.kind == .Add || change.kind == .Duplicate {
@@ -79,21 +78,15 @@ profile_mutate :: proc(
 		}
 	}
 	indices: [PROFILE_LIMIT]int
-	ordered, detected, moved: [PROFILE_LIMIT]string
+	ordered, moved: [PROFILE_LIMIT]string
 	count := profiles_in_order(profiles, indices[:])
-	written, other_count, from := 0, 0, -1
+	written, from := 0, -1
 	for index in indices[:count] {
 		item := &profiles.items[index]
 		if change.kind == .Remove && item.id == target {continue}
 		if item.detected {
-			if change.kind == .Move {
-				if profile_order_has(profiles, item.id) {
-					detected[other_count] = item.id
-					other_count += 1
-				}
-				continue
-			}
-			if !(change.kind == .Enable && item.id == target) && !profile_order_has(profiles, item.id) {
+			if change.kind != .Move && !(change.kind == .Enable && item.id == target) &&
+			   !profile_order_has(profiles, item.id) {
 				continue
 			}
 		}
@@ -112,7 +105,7 @@ profile_mutate :: proc(
 	}
 	order := ordered[:written]
 	if change.kind == .Move {order = profile_move(order, from, change.slot, moved[:])}
-	order_text, order_error := profile_order_text(order, detected[:other_count], allocator)
+	order_text, order_error := profile_order_text(order, nil, allocator)
 	defer delete(order_text, allocator)
 	if order_error != nil {return "", "", "", .Allocation}
 	if issue, error = profile_mutation_edit(&revision, PROFILE_ORDER_KEY, order_text, allocator);

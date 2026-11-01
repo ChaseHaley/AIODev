@@ -98,10 +98,10 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	// intact, so saving cannot silently recreate a removed profile or discard its draft.
 	if draft && !selected {return}
 	replacement.filter.cursor, replacement.filter.anchor = p.filter.cursor, p.filter.anchor
+	replacement.scroll = clamp(p.scroll, 0, max(0, len(replacement.items) - max(1, p.visible_rows)))
 	if selected {
 		replacement.focus = p.focus
 		replacement.profile_control = p.profile_control
-		replacement.scroll = clamp(p.scroll, 0, max(0, len(replacement.items) - 1))
 		// A picker drag saves on release while its popup remains open. Keep its hue and
 		// saturation even at black, where rebuilding them from the saved RGB loses both.
 		if next_row := ui.editor_row(&replacement); p.popup == .Color && next_row.kind == row.kind {

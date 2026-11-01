@@ -592,8 +592,8 @@ text_less :: proc(a, b: string) -> bool {
 	return len(a) < len(b)
 }
 
-// Whether `id` already has an explicit place in profile.order. Detected profiles that are only
-// detected keep their implicit ID order; a drag must not write them into the file.
+// Whether `id` already has an explicit place in profile.order. Unlisted machine profiles use
+// implicit ID order until the owner reorders the table.
 profile_order_has :: proc(p: ^Profiles, id: string) -> bool {
 	for known in p.order {
 		if known == id {return true}

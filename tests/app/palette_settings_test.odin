@@ -6,6 +6,23 @@ import "aio:ui"
 import "core:testing"
 
 @(test)
+palette_profiles_result_jumps_to_the_profile_table :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "profiles-jump") {return}
+	s := &f.state
+	w := s.windows[0]
+	app.palette_open_mode(s, w, .Settings)
+	ui.palette_text(&s.palette, &s.registry, "profiles")
+	if !testing.expect(t, len(s.palette.results) > 0) {return}
+	testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "profiles")
+	outcome, _ := ui.palette_key(&s.palette, &s.registry, {key = .Enter, pressed = true})
+	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
+	app.settings_reveal(s, w, {key = "profiles", search = .Clear})
+	testing.expect_value(t, ui.editor_row(&w.editor).kind, ui.Row_Kind.Profile)
+}
+
+@(test)
 palette_toggle_saves_through_the_settings_file_and_stays_open :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)

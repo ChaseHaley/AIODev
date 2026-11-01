@@ -19,6 +19,9 @@ Icon :: enum {
 	Layout_Left,
 	Layout_Right,
 	More,
+	More_Vertical,
+	Eye,
+	Eye_Off,
 	Grip,
 	Copy,
 	Trash,
@@ -157,6 +160,13 @@ icon_draw :: proc(
 		pen_path(p, {10, 2}, {10, 14})
 	case .More:
 		for x in ([?]f32{3, 8, 13}) {pen_dot(p, x, 8)}
+	case .More_Vertical:
+		for y in ([?]f32{3, 8, 13}) {pen_dot(p, 8, y)}
+	case .Eye, .Eye_Off:
+		pen_path(p, {1, 8}, {4, 4.5}, {8, 3.5}, {12, 4.5}, {15, 8})
+		pen_path(p, {1, 8}, {4, 11.5}, {8, 12.5}, {12, 11.5}, {15, 8})
+		pen_arc(p, 8, 8, 2, 0, 2 * math.PI)
+		if icon == .Eye_Off {pen_path(p, {2, 2}, {14, 14})}
 	case .Grip:
 		for y in ([?]f32{4, 8, 12}) {
 			pen_dot(p, 6, y)

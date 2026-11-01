@@ -166,7 +166,7 @@ app_init :: proc(app: ^App) -> bool {
 		log.errorf("registering commands failed: %v", err)
 		return false
 	}
-	@(static) palette_settings: [len(settings.SCHEMA)]ui.Palette_Setting
+	@(static) palette_settings: [len(settings.SCHEMA) + 1]ui.Palette_Setting
 	@(static, rodata)
 	schema := settings.SCHEMA
 	setting_count := 0
@@ -175,6 +175,8 @@ app_init :: proc(app: ^App) -> bool {
 		palette_settings[setting_count] = ui.palette_setting(entry)
 		setting_count += 1
 	}
+	palette_settings[setting_count] = {key = "profiles", title = "Profiles", group = "Profiles"}
+	setting_count += 1
 	if ui.palette_init(&app.palette, palette_settings[:setting_count]) != nil {
 		return false
 	}

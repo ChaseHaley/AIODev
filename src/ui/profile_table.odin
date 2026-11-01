@@ -30,7 +30,7 @@ PROFILE_ICON_MIN_WIDTH :: 420
 
 // One column's cell inside a table row. Zero-sized cells are not shown.
 Profile_Columns :: struct {
-	handle, expand, icon, name, command, directory, default, hidden, actions: render.Rect,
+	handle, expand, icon, name, command, directory, default, hidden, actions, more: render.Rect,
 	directory_shown, actions_shown, icon_shown:                      bool,
 }
 
@@ -138,14 +138,19 @@ profile_columns :: proc(row: render.Rect, scale: f32) -> Profile_Columns {
 	handle_width := 20 * s
 	expand_width := 24 * s
 	icon_width := show_icon ? 30 * s : 0
-	default_width := 44 * s
-	hidden_width := 48 * s
+	show_controls := row.width >= 340 * s
+	default_width := show_controls ? 44 * s : 0
+	hidden_width := show_controls ? 32 * s : 0
 	actions_width := show_actions ? 50 * s : 0
+	more_width := show_actions ? 0 : 24 * s
 	fixed := handle_width + expand_width + icon_width + default_width + hidden_width + actions_width
+	fixed += more_width
 	gap_count := 5
 	if show_icon {gap_count += 1}
 	if show_directory {gap_count += 1}
 	if show_actions {gap_count += 1}
+	if !show_actions {gap_count += 1}
+	if !show_controls {gap_count -= 2}
 	text_room := max(0, limit - x - fixed - f32(gap_count) * gap)
 	directory_width := f32(0)
 	if show_directory {
@@ -155,7 +160,7 @@ profile_columns :: proc(row: render.Rect, scale: f32) -> Profile_Columns {
 		}
 	}
 	remaining := text_room - (show_directory ? directory_width + gap : 0)
-	name_width := clamp(remaining * 0.36, 90 * s, 210 * s)
+	name_width := min(max(0, remaining), clamp(remaining * 0.36, 90 * s, 210 * s))
 	command_width := max(0, remaining - name_width)
 	if remaining > 0 && command_width < 60 * s {
 		name_width = max(0, name_width - (60 * s - command_width))
@@ -183,11 +188,14 @@ profile_columns :: proc(row: render.Rect, scale: f32) -> Profile_Columns {
 		columns.directory = profile_cell(x, limit, directory_width, row)
 		x = columns.directory.x + columns.directory.width + gap
 	}
-	columns.default = profile_cell(x, limit, default_width, row)
-	x = columns.default.x + columns.default.width + gap
-	columns.hidden = profile_cell(x, limit, hidden_width, row)
-	x = columns.hidden.x + columns.hidden.width + gap
+	if show_controls {
+		columns.default = profile_cell(x, limit, default_width, row)
+		x = columns.default.x + columns.default.width + gap
+		columns.hidden = profile_cell(x, limit, hidden_width, row)
+		x = columns.hidden.x + columns.hidden.width + gap
+	}
 	if show_actions {columns.actions = profile_cell(x, limit, actions_width, row)}
+	if !show_actions {columns.more = profile_cell(limit - more_width, limit, more_width, row)}
 	return columns
 }
 
@@ -200,7 +208,7 @@ profile_cell :: proc(x, limit, width: f32, row: render.Rect) -> render.Rect {
 Profile_Parts :: struct {
 	handle, icon, name, command, directory: render.Rect,
 	radio, toggle:                          render.Rect,
-	expand, duplicate, remove:              render.Rect,
+	expand, duplicate, remove, more:        render.Rect,
 	enable, chevron:                        render.Rect,
 }
 
@@ -217,18 +225,19 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 		parts.name = columns.name
 		parts.command = columns.command
 		parts.directory = columns.directory
-		parts.radio = {
+		if columns.default.width > 0 {parts.radio = {
 			columns.default.x + (columns.default.width - 22 * s) / 2,
 			cy - 11 * s,
 			22 * s,
 			22 * s,
-		}
-		parts.toggle = {
-			columns.hidden.x + (columns.hidden.width - 40 * s) / 2,
-			cy - 11 * s,
-			40 * s,
-			22 * s,
-		}
+		}}
+		if columns.hidden.width > 0 {parts.toggle = {
+			columns.hidden.x + (columns.hidden.width - 24 * s) / 2,
+			cy - 12 * s,
+			24 * s,
+			24 * s,
+		}}
+		parts.more = {columns.more.x, cy - 12 * s, columns.more.width, 24 * s}
 		if columns.actions.width > 0 {
 			size := min(24 * s, columns.actions.width / 2)
 			gap := max(0, columns.actions.width - size * 2)

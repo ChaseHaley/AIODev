@@ -9,6 +9,56 @@ import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
+@(test)
+profile_detected_row_drag_survives_publication_and_reopen :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "detected-order", PROFILE_FIXTURE_SETTINGS) {return}
+	id := ""
+	for profile in f.state.settings.profiles.items {
+		if profile.detected {id = strings.clone(profile.id, context.temp_allocator); break}
+	}
+	if !testing.expect(t, id != "") {return}
+	e := profile_open(&f)
+	l := ui.editor_layout({0, 40, 1200, 8000}, 1)
+	e.visible_rows = l.rows
+	item := profile_item(e, fmt.tprintf("profile.%s", id))
+	alpha := profile_item(e, "profile.alpha")
+	if !testing.expect(t, item >= 0 && alpha >= 0) {return}
+	handle := ui.editor_profile_parts(e, l, item).handle
+	target := ui.editor_row_parts(e, l, alpha).row
+	testing.expect_value(t, ui.editor_press(e, l, nil, handle.x + 10, handle.y + 20, false), ui.Editor_Outcome.Changed)
+	testing.expect(t, ui.editor_drag(e, l, nil, target.x + 40, target.y))
+	app.editor_outcome(&f.state, f.state.windows[0], ui.editor_release(e))
+	testing.expect(t, !e.error)
+	testing.expect_value(t, f.state.settings.profiles.order[0], id)
+	e = profile_open(&f)
+	for row in e.rows {
+		if row.kind == .Profile {
+			testing.expect_value(t, row.profile, id)
+			break
+		}
+	}
+}
+
+@(test)
+profile_add_and_remove_preserve_settings_scroll :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "viewport", PROFILE_FIXTURE_SETTINGS) {return}
+	e := profile_open(&f)
+	if !testing.expect(t, ui.editor_select_key(e, "profiles.add")) {return}
+	e.scroll = 35
+	app.editor_outcome(&f.state, f.state.windows[0], .Save)
+	testing.expect_value(t, e.scroll, 35)
+	ui.editor_action_set(e, .Remove, "profile-1", "")
+	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
+	testing.expect_value(t, app.editor_profile_remove_title(&f.state, f.state.windows[0]), "Delete New Profile?")
+	e.scroll = 35
+	app.editor_profile_remove_finish(&f.state, f.state.windows[0], true)
+	testing.expect_value(t, e.scroll, 35)
+}
+
 @(private)
 Profile_Fixture :: struct {
 	state:     app.App,
@@ -196,12 +246,17 @@ profile_table_writes_default_hidden_and_order :: proc(t: ^testing.T) {
 	app.editor_outcome(&f.state, f.state.windows[0], ui.editor_release(e))
 	testing.expectf(
 		t,
-		profile_file_has(f.path, "profile.order = gamma, alpha, beta, default"),
+		strings.contains(profile_file_text(f.path), "profile.order = gamma, alpha, beta,"),
 		"order file:\n%s",
 		profile_file_text(f.path),
 	)
 	if testing.expect(t, profile_item(e, "profile.gamma") >= 0) {
 		testing.expect_value(t, e.items[profile_item(e, "profile.gamma")].row >= 0, true)
+	}
+	ordered: [settings.PROFILE_LIMIT]int
+	count := settings.profiles_in_order(&f.state.settings.profiles, ordered[:])
+	if testing.expect(t, count > 0) {
+		testing.expect_value(t, f.state.settings.profiles.items[ordered[0]].id, "gamma")
 	}
 }
 

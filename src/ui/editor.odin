@@ -112,6 +112,7 @@ Profile_Control :: enum {
 	Duplicate,
 	Remove,
 	Enable,
+	More,
 }
 
 // A profile write the page owner must perform. Expansion, collapse and section toggles stay inside
@@ -139,6 +140,9 @@ Profile_Position :: struct {
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
 // in `value` until it is saved.
 Editor :: struct {
+	profile_menu: Menu,
+	profile_menu_controls: [4]Profile_Control,
+	profile_menu_parts: Profile_Parts,
 	process_expanded, process_next, process_next_program, process_fallback: int,
 	process_remove, process_drag_id: int,
 	process_source: string,
@@ -257,6 +261,7 @@ editor_row_destroy :: proc(row: ^Editor_Row) {
 }
 
 editor_destroy :: proc(p: ^Editor) {
+	menu_destroy(&p.profile_menu)
 	for &row in p.rows {editor_row_destroy(&row)}
 	for group in p.groups {delete(group.title)}
 	delete(p.rows)
@@ -515,6 +520,10 @@ editor_select_key :: proc(p: ^Editor, key: string) -> bool {
 // must be able to land on a field the collapsed table is not showing.
 editor_reveal :: proc(p: ^Editor, key: string) -> bool {
 	target := key
+	if key == "profiles" {
+		target = "profiles.add"
+		for row in p.rows {if row.kind == .Profile {target = row.key; break}}
+	}
 	if key == settings.PADDING_GROUPS_KEY {
 		target = process_key(0, ".add")
 		for row in p.rows {if row.process_field == .Group {target = row.key; break}}
@@ -980,6 +989,7 @@ max_scroll :: proc(p: ^Editor) -> int {return max(0, len(p.items) - max(1, p.vis
 
 // Scrolls the page, or the outline under the pointer, without moving the selection.
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
+	if p.profile_menu.open {menu_wheel(&p.profile_menu, rows); return}
 	if p.popup == .Choice && contains(editor_popup_rect(p, l), x, y) {
 		if row := editor_row(p); row != nil {
 			visible := choice_popup_rows(p, row, l)
@@ -1229,6 +1239,14 @@ profile_control_step :: proc(p: ^Editor, row: ^Editor_Row, step: int) {
 		order[0], order[1], order[2], order[3], order[4] =
 			.Expand, .Radio, .Hidden, .Duplicate, .Remove
 		count = (row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags) ? 4 : 5
+		if p.profile_menu_parts.more.width > 0 {
+			order[0] = .Expand
+			count = 1
+			if p.profile_menu_parts.radio.width > 0 {order[count] = .Radio; count += 1}
+			if p.profile_menu_parts.toggle.width > 0 {order[count] = .Hidden; count += 1}
+			order[count] = .More
+			count += 1
+		}
 	}
 	index := 0
 	for control, i in order[:count] {if control == p.profile_control {index = i}}
@@ -1260,6 +1278,9 @@ profile_activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Enable:
 		editor_action_set(p, .Enable, row.profile, "")
 		return .Profile_Action
+	case .More:
+		editor_profile_menu_open(p, row, p.profile_menu_parts)
+		return .Changed
 	}
 	return .None
 }
@@ -1382,10 +1403,18 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 // Takes the raw key event: capture needs the physical key, and navigation uses the layout's key.
 editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	if !raw.pressed {return .None}
+	if p.profile_menu.open {
+		if menu_key(&p.profile_menu, raw) == .Chosen {return editor_profile_menu_choose(p)}
+		return .Changed
+	}
 	row := editor_row(p)
 	if p.capturing && row != nil {return capture_key(p, row, raw)}
 	e := raw
 	e.key = commands.logical_key(raw.key, raw.unshifted)
+	if row != nil && row.kind == .Profile && e.key == .Context_Menu {
+		editor_profile_menu_open(p, row, p.profile_menu_parts)
+		return .Changed
+	}
 	if p.focus == .Reset_All && p.popup == .None {
 		if e.key == .Enter || e.key == .Numpad_Enter || e.key == .Space {return .Reset_All}
 		if e.key == .Escape {p.focus = .Search; return .Changed}
@@ -1880,6 +1909,16 @@ editor_press :: proc(
 	extend: bool,
 ) -> Editor_Outcome {
 	s := l.scale
+	p.profile_menu.bounds = l.page
+	if p.profile_menu.open {
+		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, s)
+		if hit >= 0 {
+			p.profile_menu.selected = hit
+			return editor_profile_menu_choose(p)
+		}
+		p.profile_menu.open = false
+		return .Changed
+	}
 	if p.popup == .None && contains(editor_reset_all_rect(l), x, y) {return .Reset_All}
 	if p.popup != .None {
 		popup := editor_popup_rect(p, l)
@@ -1977,6 +2016,9 @@ editor_press :: proc(
 	   row.kind == .Detected_Header {
 		table := profile_row_parts(row.kind, parts.row, s)
 		switch {
+		case row.kind == .Profile && contains(table.more, x, y):
+			editor_profile_menu_open(p, row, table)
+			return .Changed
 		case row.kind == .Profile && contains(table.handle, x, y):
 			if filtering(p) {return .Changed}
 			p.drag = .Profile_Order
@@ -2163,6 +2205,12 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 
 // Hover state for row highlights and reset buttons; returns whether the page must redraw.
 editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
+	if p.profile_menu.open {
+		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, l.scale)
+		if hit < 0 || hit == p.profile_menu.selected {return false}
+		p.profile_menu.selected = hit
+		return true
+	}
 	// An open dropdown highlights the option under the pointer, like the menus.
 	if p.popup != .None {
 		if row := editor_row(p); row != nil {
@@ -2210,6 +2258,8 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 				table := profile_row_parts(row.kind, parts.row, l.scale)
 				profile_item = index
 				switch {
+				case contains(table.more, x, y):
+					profile_control = .More
 				case contains(table.radio, x, y):
 					profile_control = .Radio
 				case contains(table.toggle, x, y):
@@ -2254,6 +2304,7 @@ editor_hover_clear :: proc(p: ^Editor) {
 
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
+	if p.profile_menu.open {return false}
 	if contains(editor_popup_rect(p, l), x, y) {return false}
 	if contains(filter_text_rect(p, l), x, y) {return true}
 	if !contains(l.list, x, y) {return false}
@@ -2265,6 +2316,7 @@ editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 
 // The pointer for the page: text over editable text, a hand over anything a click changes.
 editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Cursor_Shape {
+	if p.profile_menu.open {return .Hand}
 	s := l.scale
 	if popup := editor_popup_rect(p, l); contains(popup, x, y) {
 		row := editor_row(p)
@@ -2483,6 +2535,7 @@ profile_row_draw :: proc(
 	scale: f32,
 ) -> glyphs.Result {
 	table := profile_row_parts(.Profile, parts.row, scale)
+	if selected {p.profile_menu_parts = table}
 	small := text_styled(text, .Small)
 	cy := parts.row.y + parts.row.height / 2
 	focused := selected && p.focus == .Control
@@ -2491,7 +2544,9 @@ profile_row_draw :: proc(
 	grip_ink := selected || index == p.hover_item ? theme.muted : theme.faint
 	icon_draw(list, .Grip, table.handle, grip_ink, ICON_BUTTON, scale)
 	badge := render.Rect {table.icon.x, cy - 13 * scale, 26 * scale, 26 * scale}
-	profile_badge_draw(list, text, row.badge, badge, theme, scale, .Hidden in row.flags)
+	if table.icon.width > 0 {
+		profile_badge_draw(list, text, row.badge, badge, theme, scale, .Hidden in row.flags)
+	}
 	name_color := strong ? theme.text : theme.muted
 	if .Hidden in row.flags {name_color = theme.muted}
 	name_baseline := parts.row.y + 21 * scale
@@ -2539,7 +2594,7 @@ profile_row_draw :: proc(
 		); result != .Ok {return result}
 	}
 	radio_focus := focused && p.profile_control == .Radio
-	profile_radio_draw(
+	if table.radio.width > 0 {profile_radio_draw(
 		list,
 		table.radio,
 		.Default in row.flags,
@@ -2547,14 +2602,17 @@ profile_row_draw :: proc(
 		hovered && p.hover_profile_control == .Radio,
 		theme,
 		scale,
-	)
-	switch_draw(
+	)}
+	profile_button_draw(
 		list,
 		table.toggle,
-		.Hidden not_in row.flags,
-		focused && p.profile_control == .Hidden,
+		.Hidden in row.flags ? .Eye_Off : .Eye,
+		ICON_BUTTON,
 		theme,
 		scale,
+		focused && p.profile_control == .Hidden,
+		hovered && p.hover_profile_control == .Hidden,
+		true,
 	)
 	if table.expand.width > 0 {
 		controls := [?]struct {
@@ -2566,6 +2624,7 @@ profile_row_draw :: proc(
 			{table.expand, p.expanded == row.profile ? .Chevron_Down : .Chevron_Right, ICON_INDICATOR, .Expand},
 			{table.duplicate, .Copy, ICON_BUTTON, .Duplicate},
 			{table.remove, .Trash, ICON_BUTTON, .Remove},
+			{table.more, .More_Vertical, ICON_BUTTON, .More},
 		}
 		for control in controls {
 			if control.rect.width <= 0 {continue}
@@ -2757,6 +2816,11 @@ control_draw :: proc(
 		)
 	case .Toggle:
 		on := value == "true"
+		if row.profile != "" {
+			profile_button_draw(list, parts.toggle, on ? .Eye : .Eye_Off, ICON_BUTTON,
+			                    theme, scale, focused, false, true)
+			return .Ok
+		}
 		switch_draw(list, parts.toggle, on, focused, theme, scale)
 		label := on ? "On" : "Off"
 		return draw_text(
@@ -3173,6 +3237,7 @@ editor_draw :: proc(
 ) -> glyphs.Result {
 	s := l.scale
 	p.visible_rows = l.rows
+	p.profile_menu.bounds = l.page
 	p.scroll = clamp(p.scroll, 0, max_scroll(p))
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	strong := text_styled(text, .Strong)
@@ -3384,6 +3449,10 @@ editor_draw :: proc(
 		modified := row.value != row.default_value
 		if reset_button_draw(list, theme, parts.reset, modified, index == p.hover_reset, selected, pointer, s) !=
 		   .None {return .Ok}
+	}
+	if p.profile_menu.open {
+		return menu_draw(&p.profile_menu, list, text, theme,
+		                 l.page.x + l.page.width, l.page.y + l.page.height, s, pointer)
 	}
 	return popup_draw(p, l, list, text, theme, pointer)
 }

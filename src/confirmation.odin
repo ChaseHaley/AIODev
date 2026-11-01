@@ -4,7 +4,6 @@ import "aio:glyphs"
 import "aio:platform"
 import "aio:ui"
 import "core:time"
-import "core:fmt"
 
 // The subjects retain their payload and acceptance policy. Event, motion and frame callers
 // only know this owner, including while a dismissed question finishes fading out.
@@ -139,7 +138,7 @@ confirmation_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			content.title, content.label = "Reset all settings?", "Reset"
 			content.body = "Restore factory defaults, including shortcuts, profiles, themes and program rules."
 		} else if c == &w.profile_remove_confirm {
-			content.title, content.label = fmt.tprintf("Delete %s?", w.profile_remove_id), "Delete"
+			content.title, content.label = editor_profile_remove_title(app, w), "Delete"
 		} else if c == &w.process_remove_confirm {
 			content.title, content.label = editor_process_remove_title(w), "Delete"
 		} else {

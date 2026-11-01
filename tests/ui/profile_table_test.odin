@@ -6,6 +6,53 @@ import "aio:render"
 import "aio:settings"
 import "aio:ui"
 
+@(test)
+profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	profile_editor_fixture(t, &p)
+	l := ui.editor_layout({500, 40, 300, 700}, 1)
+	p.visible_rows = l.rows
+	testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
+	parts := ui.editor_profile_parts(&p, l, p.selected)
+	x, y := profile_center(parts.more)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
+	testing.expect(t, p.profile_menu.open)
+	surface, _ := ui.menu_layout(&p.profile_menu, 1200, 800, 1)
+	testing.expect(t, surface.x >= l.page.x && surface.x + surface.width <= l.page.x + l.page.width)
+	item := ui.menu_row_rect(&p.profile_menu, 2, 1200, 800, 1)
+	x, y = profile_center(item)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Profile_Action)
+	testing.expect_value(t, p.action, ui.Profile_Action.Duplicate)
+	testing.expect_value(t, p.action_id, "beta")
+}
+
+@(test)
+profile_overflow_menu_preserves_hidden_actions_and_protection :: proc(t: ^testing.T) {
+	for width in ([?]f32{480, 300, 180}) {
+		p: ui.Editor
+		defer ui.editor_destroy(&p)
+		profile_editor_fixture(t, &p)
+		testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
+		parts := ui.profile_row_parts(.Profile, {0, 0, width, 52}, 1)
+		testing.expect(t, parts.more.width > 0)
+		ui.editor_profile_menu_open(&p, ui.editor_row(&p), parts)
+		expected := width >= 340 ? 2 : 4
+		testing.expect_value(t, len(p.profile_menu.items), expected)
+		testing.expect_value(t, p.profile_menu.items[expected - 1].label, "Delete profile")
+		p.profile_menu.selected = expected - 2
+		testing.expect_value(t, ui.editor_key(&p, {key = .Enter, pressed = true}), ui.Editor_Outcome.Profile_Action)
+		testing.expect_value(t, p.action, ui.Profile_Action.Duplicate)
+		testing.expect_value(t, p.action_id, "beta")
+		testing.expect(t, !p.profile_menu.open)
+		ui.editor_row(&p).flags += {.Protected}
+		ui.editor_profile_menu_open(&p, ui.editor_row(&p), parts)
+		for item in p.profile_menu.items {testing.expect(t, item.label != "Delete profile")}
+		testing.expect_value(t, ui.editor_key(&p, {key = .Escape, pressed = true}), ui.Editor_Outcome.Changed)
+		testing.expect(t, !p.profile_menu.open)
+	}
+}
+
 @(private)
 always_exists :: proc(command: string) -> bool {return command != "missing.exe"}
 
@@ -116,6 +163,7 @@ profile_columns_drop_the_directory_before_any_cell_overlaps :: proc(t: ^testing.
 			420,
 			360,
 			300,
+			180,
 		}) {
 			columns := ui.profile_columns({0, 0, width * scale, 52 * scale}, scale)
 			testing.expect_value(t, columns.directory_shown, width >= directory_min)
@@ -131,6 +179,7 @@ profile_columns_drop_the_directory_before_any_cell_overlaps :: proc(t: ^testing.
 				{"default", columns.default},
 				{"hidden", columns.hidden},
 				{"actions", columns.actions},
+				{"more", columns.more},
 			}
 			parts := ui.profile_row_parts(.Profile, {0, 0, width * scale, 52 * scale}, scale)
 			testing.expect(t, parts.expand.width > 0)
