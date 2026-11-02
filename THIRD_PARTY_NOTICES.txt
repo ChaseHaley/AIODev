@@ -390,10 +390,6 @@ Source: https://github.com/yarnpkg/assets/blob/76d30ca2aebed5b73ea8131d972218fb8
 OCaml logo, released under the Unlicense (public domain).
 Source: https://ocaml.org/logo
 
-GNU Emacs logo by the Free Software Foundation, GNU General Public License,
-version 2 or later (https://www.gnu.org/licenses/old-licenses/gpl-2.0.html).
-Source: https://git.savannah.gnu.org/cgit/emacs.git/tree/etc/images/icons/hicolor/scalable/apps/emacs.svg
-
 GitHub Copilot logo, from Primer Octicons, MIT License.
 Source: https://primer.style/foundations/icons/copilot-24
 

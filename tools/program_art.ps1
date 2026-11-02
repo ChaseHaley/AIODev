@@ -41,7 +41,6 @@ $manifest = @(
     ,@('nvim,neovim', 'file:neovim', '')
     ,@('vim,gvim', 'si:vim', '')
     ,@('hx,helix', 'si:helix', '')
-    ,@('emacs,emacsclient', 'si:gnuemacs', '')
     # Runtimes and REPLs
     ,@('node,nodejs', 'si:nodedotjs', '')
     ,@('deno', 'si:deno', '')
