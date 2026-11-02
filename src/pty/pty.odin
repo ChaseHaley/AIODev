@@ -6,6 +6,8 @@ Env_Var :: struct {
 
 Spawn_Options :: struct {
 	command_line, working_directory: string,
+	// The console title the child starts with; empty leaves the executable path.
+	title:                           string,
 	environment:                     []Env_Var,
 	// A directory added at the end of the child's PATH, after the overrides apply.
 	path_append:                     string,

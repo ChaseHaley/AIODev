@@ -289,6 +289,14 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	directory := w.utf8_to_wstring(options.working_directory, allocator)
 	if directory == nil {return {}, {.Out_Of_Memory, 0}}
 	defer delete(directory, allocator)
+	// ConPTY reports the startup title as the first OSC title, so a profile launch is named after
+	// its profile, as in Windows Terminal, rather than the full executable path.
+	title: w.wstring
+	if options.title != "" {
+		title = w.utf8_to_wstring(options.title, allocator)
+		if title == nil {return {}, {.Out_Of_Memory, 0}}
+	}
+	defer if title != nil {delete(title, allocator)}
 	environment, env_err := environment_block(
 		options.environment,
 		allocator,
@@ -372,7 +380,11 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 		return {}, spawn_failure("SetInformationJobObject", .Job, u32(w.GetLastError()))
 	}
 	startup := STARTUPINFOEXW {
-		StartupInfo = {cb = size_of(STARTUPINFOEXW), dwFlags = w.STARTF_USESTDHANDLES},
+		StartupInfo = {
+			cb = size_of(STARTUPINFOEXW),
+			dwFlags = w.STARTF_USESTDHANDLES,
+			lpTitle = cast(w.LPWSTR)title,
+		},
 		lpAttributeList = raw_data(storage),
 	}
 	info: w.PROCESS_INFORMATION

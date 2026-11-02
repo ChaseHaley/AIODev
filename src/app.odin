@@ -438,11 +438,11 @@ session_config :: proc(
 	command_override: string = "",
 ) -> term.Config {
 	directory_text := app.settings.shell.directory
-	command := app.settings.shell.command
+	command, title := app.settings.shell.command, ""
 	if profile != nil {
-		directory_text, command = profile.directory, profile.command
+		directory_text, command, title = profile.directory, profile.command, profile.name
 	}
-	if command_override != "" {command = command_override}
+	if command_override != "" {command, title = command_override, ""}
 	directory, err := settings.expand_home(directory_text, context.temp_allocator)
 	if err != nil {
 		log.errorf("expanding the shell directory failed: %v", err)
@@ -453,6 +453,7 @@ session_config :: proc(
 	if app.options.name != "" {append(&environment, pty.Env_Var{INSTANCE_VARIABLE, app.options.name})}
 	return {
 		command_line = command,
+		title = title,
 		environment = environment[:],
 		path_append = app.cli_directory,
 		refresh_environment = app.settings.shell.refresh_environment,

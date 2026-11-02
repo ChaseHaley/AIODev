@@ -39,6 +39,7 @@ process_id :: proc(s: ^Session) -> u32 {return pty.process_id(&s.pty)}
 
 Config :: struct {
 	command_line, working_directory: string,
+	title:                           string,
 	refresh_environment:             bool,
 	// Up to MAX_HOST_ENVIRONMENT variables the host adds for this session, and a directory added
 	// to the end of its PATH.
@@ -315,6 +316,7 @@ spawn :: proc(s: ^Session, config: Config) {
 	options := pty.Spawn_Options {
 		command_line        = config.command_line,
 		working_directory   = config.working_directory,
+		title               = config.title,
 		environment         = environment[:count],
 		path_append         = config.path_append,
 		cols                = config.geometry.columns,

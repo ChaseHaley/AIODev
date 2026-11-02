@@ -1,6 +1,7 @@
 package pty_test
 
 import "aio:pty"
+import "core:fmt"
 import "core:mem"
 import "core:strings"
 import "core:sync"
@@ -45,13 +46,21 @@ wait_process :: proc(t: ^thread.Thread) {
 	pty.close_console(&r.p)
 }
 
-start :: proc(t: ^testing.T, r: ^Run, command: string, environment: []pty.Env_Var = nil, path_append := "") -> bool {
+start :: proc(
+	t: ^testing.T,
+	r: ^Run,
+	command: string,
+	environment: []pty.Env_Var = nil,
+	path_append := "",
+	title := "",
+) -> bool {
 	testing.set_fail_timeout(t, 40 * time.Second)
 	p, err := pty.spawn({
 		command_line = command,
 		working_directory = "C:\\Windows\\System32",
 		environment = environment,
 		path_append = path_append,
+		title = title,
 		cols = 80,
 		rows = 25,
 	})
@@ -135,6 +144,24 @@ output_and_exit :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.code, 37)
 	testing.expect(t, contains(&r, "AIO_OUTPUT"))
 	testing.expect(t, contains(&r, "\x1b[?9001h"))
+}
+
+@(test)
+startup_title_replaces_the_executable_path :: proc(t: ^testing.T) {
+	// Prompt tools in shell profiles reapply the current console title, which without a startup
+	// title is the shell's full path.
+	shell := "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+	command := fmt.tprintf(
+		"%s -NoLogo -NoProfile -Command \"$Host.UI.RawUI.WindowTitle = $Host.UI.RawUI.WindowTitle\"",
+		shell,
+	)
+	r: Run
+	if !start(t, &r, command, title = "My Profile") {
+		return
+	}
+	finish(t, &r)
+	testing.expect(t, contains(&r, "\x1b]0;My Profile\x1b\\"))
+	testing.expect(t, !contains(&r, "powershell.exe\x1b\\"))
 }
 
 @(test)
