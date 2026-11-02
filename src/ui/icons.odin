@@ -15,6 +15,8 @@ Icon :: enum {
 	Split_Down,
 	Zoom,
 	Restore,
+	Expand,
+	Collapse,
 	Layout_Top,
 	Layout_Left,
 	Layout_Right,
@@ -149,6 +151,16 @@ icon_draw :: proc(
 		pen_path(p, {10, 2}, {10, 6}, {14, 6})
 		pen_path(p, {14, 10}, {10, 10}, {10, 14})
 		pen_path(p, {2, 10}, {6, 10}, {6, 14})
+	case .Expand:
+		pen_path(p, {9, 7}, {14, 2})
+		pen_path(p, {10, 2}, {14, 2}, {14, 6})
+		pen_path(p, {7, 9}, {2, 14})
+		pen_path(p, {2, 10}, {2, 14}, {6, 14})
+	case .Collapse:
+		pen_path(p, {14, 2}, {9, 7})
+		pen_path(p, {9, 4}, {9, 7}, {12, 7})
+		pen_path(p, {2, 14}, {7, 9})
+		pen_path(p, {7, 12}, {7, 9}, {4, 9})
 	case .Layout_Top:
 		pen_box(p, 1, 2, 14, 12, 2)
 		pen_path(p, {1, 6}, {15, 6})

@@ -538,7 +538,7 @@ pane_drag_target_move :: proc(
 ) -> bool {
 	d := &source_window.pane_drag
 	if pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
-	title_height := ui.TITLE_BAR_HEIGHT * w.scale
+	title_height := window_title_height(w)
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
 	on_tab := -1

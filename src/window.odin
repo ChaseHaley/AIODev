@@ -27,7 +27,7 @@ Pane_View :: struct {
 	generation, atlas_generation, builds: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
-	header_controls: [4]ui.Control_Motion,
+	header_controls: [5]ui.Control_Motion,
 	header_hover:   ui.Header_Action,
 	header_armed:   ui.Armed(ui.Header_Action),
 	hover:          Maybe(term.Link_Range),
@@ -127,6 +127,8 @@ Window :: struct {
 	caption_hover: int,
 	caption_armed: ui.Armed(int),
 	maximized: bool,
+	pane_fill: Pane_Fill,
+	pane_fill_zoom: bool,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
@@ -386,7 +388,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {
 		return
 	}
-	bar_height := ui.TITLE_BAR_HEIGHT * w.scale
+	bar_height := window_title_height(w)
 	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
 	if tab_count != len(w.tab_positions) {
 		w.tab_hover, w.tab_pressed = -1, false
@@ -681,7 +683,9 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		w.blinking = blinking
 		reset_blink(w)
 	}
-	if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
+	if w.pane_fill != .Screen {
+		if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
+	}
 	if result := rail_draw(app, w); result != .Ok {return frame, result}
 	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
 	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}

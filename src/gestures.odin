@@ -240,7 +240,7 @@ pointer_held_target :: proc(w: ^Window, held: input.Mouse_Buttons, target: Point
 content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	swallowed := w.header_buttons != {}
-	title := y < ui.TITLE_BAR_HEIGHT * w.scale
+	title := y < window_title_height(w)
 	shape: platform.Cursor_Shape = swallowed ? .Arrow : .Text
 	if title && !swallowed {shape = chrome_pointer(app, w, x, y)}
 	entry := pane_at(app, w, e.x, e.y)

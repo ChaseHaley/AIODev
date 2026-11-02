@@ -430,7 +430,7 @@ find_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> b
 
 @(private = "file")
 workspace_button_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return y >= 0 && y < ui.TITLE_BAR_HEIGHT * w.scale && x >= title_actions_end(w) &&
+	return y >= 0 && y < window_title_height(w) && x >= title_actions_end(w) &&
 		x < workspace_button_width(w)
 }
 
@@ -633,7 +633,8 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	#partial switch action {
 	case .Split_Right: return "Split right"
 	case .Split_Down: return "Split down"
-	case .Zoom: return w.tree.zoomed ? "Restore pane" : "Fullscreen pane"
+	case .Zoom: return w.tree.zoomed ? "Restore pane" : "Maximize pane"
+	case .Fullscreen: return w.pane_fill != .None ? "Exit fullscreen" : "Fullscreen pane"
 	case .Close: return "Close pane"
 	case:
 	}

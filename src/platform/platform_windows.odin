@@ -39,6 +39,9 @@ Window :: struct {
 	has_previous_move:                bool,
 	tabbed_title_bar:                 bool,
 	title_height, title_controls_end: i32,
+	screen_full:                      bool,
+	saved_style:                      w.LONG_PTR,
+	saved_placement:                  w.WINDOWPLACEMENT,
 }
 Platform :: struct {
 	allocator:                  runtime.Allocator,
@@ -1248,6 +1251,59 @@ window_proc :: proc "system" (
 window_maximized :: proc(p: ^Platform, id: Window_Id) -> bool {
 	window := find_window(p, id)
 	return window != nil && bool(w.IsZoomed(window.hwnd))
+}
+
+// window_set_screen covers the monitor with no caption or frame, and restores the prior placement.
+window_set_screen :: proc(p: ^Platform, id: Window_Id, on: bool) -> Error {
+	window := find_window(p, id)
+	if window == nil {return .Invalid_Window}
+	if on == window.screen_full {return .None}
+	if on {
+		if !os_ok(w.GetWindowPlacement(window.hwnd, &window.saved_placement), "GetWindowPlacement") {
+			return .Os
+		}
+		info := w.MONITORINFO {
+			cbSize = size_of(w.MONITORINFO),
+		}
+		// MONITOR_DEFAULTTONEAREST: the monitor that holds most of the window, or the nearest one.
+		monitor := w.MonitorFromWindow(window.hwnd, w.Monitor_From_Flags(2))
+		if !os_ok(w.GetMonitorInfoW(monitor, &info), "GetMonitorInfoW") {return .Os}
+		window.saved_style = w.GetWindowLongPtrW(window.hwnd, w.GWL_STYLE)
+		style := window.saved_style & ~(w.LONG_PTR(w.WS_CAPTION) | w.LONG_PTR(w.WS_THICKFRAME))
+		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, style)
+		rect := info.rcMonitor
+		if !os_ok(
+			w.SetWindowPos(
+				window.hwnd,
+				w.HWND_TOP,
+				rect.left,
+				rect.top,
+				rect.right - rect.left,
+				rect.bottom - rect.top,
+				w.SWP_FRAMECHANGED | w.SWP_NOOWNERZORDER,
+			),
+			"SetWindowPos(screen)",
+		) {return .Os}
+	} else {
+		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, window.saved_style)
+		if !os_ok(w.SetWindowPlacement(window.hwnd, &window.saved_placement), "SetWindowPlacement") {
+			return .Os
+		}
+		if !os_ok(
+			w.SetWindowPos(
+				window.hwnd,
+				nil,
+				0,
+				0,
+				0,
+				0,
+				w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOZORDER | w.SWP_FRAMECHANGED,
+			),
+			"SetWindowPos(restore frame)",
+		) {return .Os}
+	}
+	window.screen_full = on
+	return .None
 }
 
 window_caption_action :: proc(p: ^Platform, id: Window_Id, index: int) {

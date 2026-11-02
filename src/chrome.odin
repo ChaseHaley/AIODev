@@ -12,7 +12,7 @@ window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 	r := ui.pane_area(
 		f32(w.width),
 		f32(w.height),
-		ui.TITLE_BAR_HEIGHT * w.scale,
+		window_title_height(w),
 		f32(app.settings.pane.gap),
 		w.scale,
 	)

@@ -70,7 +70,7 @@ pane_header_draw :: proc(
 	pane: layout.Pane_Rect,
 	entry: ^Session_Entry,
 ) -> glyphs.Result {
-	controls: [4]ui.Control_Motion
+	controls: [5]ui.Control_Motion
 	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
 	r := pane.rect
 	if w.header_height == 0 {
@@ -134,6 +134,7 @@ pane_header_draw :: proc(
 		pane.node == w.tree.focus,
 		controls,
 		w.tree.zoomed,
+		w.pane_fill != .None,
 		icon_atlas,
 		badge_hovered,
 		w.pointer,
@@ -191,6 +192,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 				.Split_Right = "pane.split_right",
 				.Split_Down  = "pane.split_down",
 				.Zoom        = "pane.zoom",
+				.Fullscreen  = "pane.fullscreen",
 				.Close       = "pane.close",
 				.Badge       = "",
 			}

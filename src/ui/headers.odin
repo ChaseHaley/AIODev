@@ -9,12 +9,13 @@ Header_Action :: enum {
 	Split_Right,
 	Split_Down,
 	Zoom,
+	Fullscreen,
 	Close,
 	Badge,
 }
 Header_Layout :: struct {
 	panel, title, badge: render.Rect,
-	buttons:             [4]render.Rect,
+	buttons:             [5]render.Rect,
 }
 
 header_layout :: proc(area: render.Rect, scale: f32, _: bool) -> Header_Layout {
@@ -27,7 +28,7 @@ header_layout :: proc(area: render.Rect, scale: f32, _: bool) -> Header_Layout {
 	button := HEIGHT_COMPACT * scale
 	end := area.x + area.width - SPACE_1 * scale
 	{
-		for i := 3; i >= 0; i -= 1 {
+		for i := 4; i >= 0; i -= 1 {
 			if end - button < area.x + SPACE_1 * scale {break}
 			l.buttons[i] = {
 				end - button,
@@ -111,12 +112,14 @@ shell_badge_draw :: proc(
 }
 
 @(private)
-header_icon :: proc(action: Header_Action, zoomed: bool) -> Icon {
+header_icon :: proc(action: Header_Action, zoomed, fullscreen: bool) -> Icon {
 	#partial switch action {
 	case .Split_Down:
 		return .Split_Down
 	case .Zoom:
-		return zoomed ? .Restore : .Zoom
+		return zoomed ? .Collapse : .Expand
+	case .Fullscreen:
+		return fullscreen ? .Restore : .Zoom
 	case .Close:
 		return .Close
 	}
@@ -132,8 +135,9 @@ header_draw :: proc(
 	radius, scale: f32,
 	title, directory, icon: string,
 	focused: bool,
-	controls: [4]Control_Motion,
+	controls: [5]Control_Motion,
 	zoomed := false,
+	fullscreen := false,
 	icon_atlas: render.Rect = {},
 	badge_hovered := false,
 	pointer: [2]f32 = {},
@@ -230,14 +234,21 @@ header_draw :: proc(
 			press = controls[i].press.value,
 		}
 		// Close presses in a faint error tint rather than the neutral pressed fill.
-		if i == 3 {
+		if i == 4 {
 			danger := theme.error
 			danger.a *= 0.14
 			b.press_color = danger
 		}
 		face, ink, err := button_draw(list, theme, b, scale, pointer)
 		if err != .None {return .Ok}
-		icon_draw(list, header_icon(Header_Action(i + 1), zoomed), face, ink, ICON_BUTTON, scale)
+		icon_draw(
+			list,
+			header_icon(Header_Action(i + 1), zoomed, fullscreen),
+			face,
+			ink,
+			ICON_BUTTON,
+			scale,
+		)
 	}
 	return .Ok
 }
@@ -269,7 +280,7 @@ split_overlay_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	l: Header_Layout,
-	controls: [4]Control_Motion,
+	controls: [5]Control_Motion,
 	scale: f32,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {
@@ -284,7 +295,7 @@ split_overlay_draw :: proc(
 			   list,
 			   theme,
 			   button,
-			   header_icon(Header_Action(i + 1), false),
+			   header_icon(Header_Action(i + 1), false, false),
 			   controls[i].hover.value,
 			   controls[i].press.value,
 			   scale,

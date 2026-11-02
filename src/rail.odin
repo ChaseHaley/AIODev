@@ -58,7 +58,7 @@ rail_adaptive_update :: proc(w: ^Window) {
 }
 
 rail_visible :: proc(w: ^Window) -> bool {
-	if w.tabs_horizontal {return false}
+	if w.tabs_horizontal || pane_fill_active(w) {return false}
 	switch w.rail_override {
 	case .Hidden:
 		return false
