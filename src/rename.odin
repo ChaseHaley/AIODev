@@ -9,9 +9,10 @@ import "core:strings"
 
 Name_Dialog_Mode :: enum {Rename, New_Workspace, New_Window, Move_Workspace, Tearoff}
 
-rename_open :: proc(app: ^App, w: ^Window, tab_name: bool) {
-	tab := selected_tab(w.workspace)
-	if tab == nil {return}
+// Renames tab `index`, or the focused pane when tab_name is false.
+rename_open :: proc(app: ^App, w: ^Window, tab_name: bool, index: int) {
+	if index < 0 || index >= len(w.workspace.tabs) {return}
+	tab := w.workspace.tabs[index]
 	target, value := Rename_Target{.Tab, tab.id}, tab.name
 	if !tab_name {
 		entry := focused_session(app, w)

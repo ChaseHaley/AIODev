@@ -304,7 +304,7 @@ rail_row_draw :: proc(
 	}
 	tile := ui.rail_tab_tile(layout, rect)
 	selected := row.workspace == w.workspace && row.tab == w.workspace.selected
-	marked := row.workspace == w.workspace && row.workspace.tabs[row.tab].marked
+	marked := row.workspace == w.workspace && tab_marked_shown(w, row.tab)
 	title := fmt.tprintf("Tab %d", row.tab + 1)
 	if row.tab < len(row.workspace.tabs) && row.workspace.tabs[row.tab].title != "" {
 		title = row.workspace.tabs[row.tab].title

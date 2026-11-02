@@ -146,7 +146,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	app.handle_event(s, platform.Text_Event{first.id, "retained"})
 	app.palette_open(s, first)
 	s.palette.query.dragging = true
-	app.rename_open(s, second, true)
+	app.rename_open(s, second, true, second.workspace.selected)
 	app.handle_event(s, platform.Text_Event{second.id, "unsaved"})
 	testing.expect(t, app.palette_active(s, first))
 	app.run_action(s, second, .Command_Palette)
@@ -162,7 +162,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect_value(t, term.process_id(s.sessions[1].session), second_pid)
 	testing.expect_value(t, app.selected_tab(second.workspace).name, "")
 	s.palette.query.dragging = true
-	app.rename_open(s, first, true)
+	app.rename_open(s, first, true, first.workspace.selected)
 	app.handle_event(s, platform.Focus_Event{first.id, false})
 	testing.expect(t, !first.rename_open)
 	testing.expect(t, app.palette_active(s, second) && s.palette.query.dragging)

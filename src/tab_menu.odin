@@ -14,21 +14,43 @@ Tab_Menu :: struct {
 	count, selected, scroll: int,
 	position: [2]f32,
 	dock: layout.Node_Id,
+	// The right-clicked tab. The menu acts on it, or on its marked group, without activating it.
+	tab: u32,
+}
+
+// The index of the tab the open menu acts on, or -1.
+tab_menu_target :: proc(w: ^Window) -> int {
+	if !w.tab_menu.open || w.tab_menu.tab == 0 {return -1}
+	return tab_index_by_id(w.workspace, w.tab_menu.tab)
+}
+
+// How many tabs the menu's actions cover: the marked group when the target is in it, else the target alone.
+tab_menu_scope :: proc(w: ^Window) -> int {
+	target := tab_menu_target(w)
+	if target < 0 || !w.workspace.tabs[target].marked {return 1}
+	count := 0
+	for tab in w.workspace.tabs {if tab.marked {count += 1}}
+	return count
+}
+
+// Whether tab `index` draws as marked. While the menu is open on an unmarked tab, only that tab does.
+tab_marked_shown :: proc(w: ^Window, index: int) -> bool {
+	target := tab_menu_target(w)
+	if target >= 0 && !w.workspace.tabs[target].marked {return index == target}
+	return w.workspace.tabs[index].marked
 }
 
 tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
-	if !w.workspace.tabs[index].marked {tab_select(app, w, index)} else {tab_select(app, w, index, true)}
 	if !gesture_cancel(app, w) {return}
-	w.tab_menu.open = false
 	w.profile_menu.open = false
 	w.tab_menu = {
 		open     = true,
 		position = {x, y},
+		tab      = w.workspace.tabs[index].id,
 	}
 	menu := &w.tab_menu
-	count := 0
-	for tab in w.workspace.tabs {if tab.marked {count += 1}}
+	count := tab_menu_scope(w)
 	if count == 1 {
 		menu.actions[0], menu.actions[1] = .Rename_Tab, .Duplicate_Tab
 		menu.separators[2] = true
@@ -62,8 +84,7 @@ tab_menu_label :: proc(w: ^Window, index: int) -> string {
 	case .Close_Right_Tabs: return "Close to the Right"
 	case .Close_Other_Tabs: return "Close Others"
 	case .Close_Tab:
-		count := 0
-		for tab in w.workspace.tabs { if tab.marked { count += 1 } }
+		count := tab_menu_scope(w)
 		return count > 1 ? fmt.tprintf("Close %d Selected Tabs", count) : "Close"
 	}
 	@(static, rodata) actions := ACTIONS
@@ -73,13 +94,18 @@ tab_menu_label :: proc(w: ^Window, index: int) -> string {
 tab_menu_enabled :: proc(w: ^Window, index: int) -> bool {
 	if index < 0 || index >= w.tab_menu.count || w.tab_menu.separators[index] { return false }
 	if dock_divider(w.tab_menu.dock) {return true}
+	// Tab rows need their target, which may have closed while the menu was open.
+	target := tab_menu_target(w)
 	#partial switch w.tab_menu.actions[index] {
-	case .Duplicate_Tab: return !settings_active(w)
-	case .Close_Right_Tabs: return w.workspace.selected + 1 < len(w.workspace.tabs)
-	case .Close_Other_Tabs:
-		for tab in w.workspace.tabs { if !tab.marked { return true } }
-		return false
-	case .Close_Tab: return len(w.workspace.tabs) > 0
+	case .Rename_Tab, .Move_Tab_Workspace, .Move_Tab_New_Workspace, .Close_Tab: return target >= 0
+	case .Duplicate_Tab:
+		if target < 0 {return false}
+		tree := &w.workspace.tabs[target].tree
+		if tree.focus == layout.INVALID_NODE {return false}
+		pane, ok := tree.nodes[tree.focus].(layout.Pane)
+		return ok && pane.content.kind != .Settings
+	case .Close_Right_Tabs: return target >= 0 && target + 1 < len(w.workspace.tabs)
+	case .Close_Other_Tabs: return target >= 0 && tab_menu_scope(w) < len(w.workspace.tabs)
 	}
 	return true
 }
@@ -142,8 +168,20 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	action := w.tab_menu.actions[w.tab_menu.selected]
+	target := tab_menu_target(w)
 	w.tab_menu.open = false
-	command_run(app, w, action, .Menu)
+	w.dirty = true
+	// tab_menu_enabled refused tab rows without a target, so target is valid for each of them.
+	#partial switch action {
+	case .Close_Tab: tab_close_request(app, w, target)
+	case .Close_Other_Tabs: tab_close_subset(app, w, false, target)
+	case .Close_Right_Tabs: tab_close_subset(app, w, true, target)
+	case .Rename_Tab: rename_open(app, w, true, target)
+	case .Duplicate_Tab: tab_duplicate(app, w, target)
+	case .Move_Tab_Workspace: workspace_move_open(app, w, true, target)
+	case .Move_Tab_New_Workspace: workspace_move_new(app, w, true, target)
+	case: command_run(app, w, action, .Menu)
+	}
 }
 
 tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {

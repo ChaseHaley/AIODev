@@ -72,10 +72,11 @@ tab_interaction_selection_context_and_drag_use_both_geometry_adapters :: proc(t:
 		interaction_marks(t, w, {true, false, true})
 		testing.expect(t, !w.tab_drag.pressed)
 		r := interaction_rect(s, w, 0)
+		selected := w.workspace.selected
 		interaction_button(s, w.id, r, .Right, true)
 		testing.expect(t, w.tab_menu.open)
 		interaction_marks(t, w, {true, false, true})
-		testing.expect_value(t, w.workspace.selected, 0)
+		testing.expect_value(t, w.workspace.selected, selected)
 		interaction_button(s, w.id, r, .Right, false)
 		app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 		interaction_button(s, w.id, r, .Left, true)

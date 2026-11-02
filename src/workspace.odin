@@ -399,8 +399,11 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 	if index < 0 || index >= len(workspace.tabs) {return}
 	group := workspace.tabs[index].marked
 	if group {
-		for i := len(workspace.tabs) - 1; i >= 0; i -= 1 {
-			if workspace.tabs[i].marked {workspace_close_tab(app, workspace, i)}
+		// Closing one tab can clear the marks on the rest, so the group is named by id before any close.
+		ids := make([dynamic]u32, 0, len(workspace.tabs), context.temp_allocator)
+		for tab in workspace.tabs {if tab.marked {_ = append(&ids, tab.id)}}
+		for id in ids {
+			if current := tab_index_by_id(workspace, id); current >= 0 {workspace_close_tab(app, workspace, current)}
 		}
 	} else {workspace_close_tab(app, workspace, index)}
 	if group && len(workspace.tabs) > 0 {tab_select_one(workspace, workspace.selected)}
@@ -460,8 +463,9 @@ local_launch_directory :: proc(candidate, fallback: string) -> (directory: strin
 	return "", refused
 }
 
-tab_duplicate :: proc(app: ^App, w: ^Window) {
-	entry := focused_session(app, w)
+tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
+	pane, _ := workspace_focused_session_pane(app, w.workspace, index)
+	entry := pane.session
 	if entry == nil || !pane_minimum_single(app, w) {return}
 	raw := term.working_directory(entry.session, context.temp_allocator)
 	directory, err := settings.directory_label(raw, context.temp_allocator)
@@ -497,17 +501,25 @@ tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {
 	}
 }
 
+// Puts back the marks a subset close replaced, falling back to the active tab when all of them closed.
 tab_close_restore :: proc(w: ^Window) {
 	if len(w.close_restore) == 0 {return}
+	kept := false
 	for tab in w.workspace.tabs {
 		tab.marked = false
 		for id in w.close_restore {tab.marked ||= tab.id == id}
+		kept ||= tab.marked
 	}
+	if !kept && len(w.workspace.tabs) > 0 {tab_select_one(w.workspace, w.workspace.selected)}
 	clear(&w.close_restore)
 	w.dirty = true
 }
 
-tab_close_subset :: proc(app: ^App, w: ^Window, right: bool) {
+// Closes the tabs right of `anchor`, or every tab outside it: its marked group when it is marked,
+// otherwise every other tab.
+tab_close_subset :: proc(app: ^App, w: ^Window, right: bool, anchor: int) {
+	if anchor < 0 || anchor >= len(w.workspace.tabs) {return}
+	group := w.workspace.tabs[anchor].marked
 	clear(&w.close_restore)
 	if reserve(&w.close_restore, len(w.workspace.tabs)) != nil {
 		notify(app, .Error, "Could not select tabs to close.")
@@ -516,7 +528,7 @@ tab_close_subset :: proc(app: ^App, w: ^Window, right: bool) {
 	for tab in w.workspace.tabs {if tab.marked {append(&w.close_restore, tab.id)}}
 	first := -1
 	for tab, i in w.workspace.tabs {
-		tab.marked = right ? i > w.workspace.selected : !tab.marked
+		tab.marked = right ? i > anchor : (group ? !tab.marked : i != anchor)
 		if tab.marked && first < 0 {first = i}
 	}
 	if first >= 0 {tab_close_request(app, w, first)}

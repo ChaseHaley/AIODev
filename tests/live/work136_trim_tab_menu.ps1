@@ -64,20 +64,20 @@ function Choose-Menu([string] $Label) {
     }
     throw "Menu lacks '$Label'"
 }
-$single = @('Rename', 'Duplicate', '-', 'Close to the Right', 'Close Others', 'Close', '-', 'Tab Settings')
+$single = @('Rename', 'Duplicate', '-', 'Move Tab to Workspace…', 'Move Tab to New Workspace', 'Close to the Right', 'Close Others', 'Close', '-', 'Tab Settings')
 Invoke-Aio launch --fresh
 Start-Transcript -LiteralPath (Join-Path $directory 'journey.log') | Out-Null
 try {
     Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio doctor
     Invoke-Aio mouse click (Tab-Center 1) --button right --px
-    Assert-Menu $single @(4,5)
+    Assert-Menu $single @(6,7)
     Click-Row 3
     Invoke-Aio expect state tab_menu.open=true
-    Click-Row 4
+    Click-Row 6
     Invoke-Aio expect state tab_menu.open=true
     Invoke-Aio expect state tabs.count=1
-    Invoke-Aio key Home Down Down
+    Invoke-Aio key Home Down Down Down Down
     Invoke-Aio expect state tab_menu.action=Close_Tab
     Invoke-Aio key Down
     Invoke-Aio expect state tab_menu.action=Tab_Settings
@@ -143,7 +143,7 @@ try {
 
     Invoke-Aio command tab.select_2
     Invoke-Aio key Shift+F10
-    Assert-Menu $single @(4)
+    Assert-Menu $single @(6)
     Choose-Menu 'Close Others'
     Invoke-Aio expect state confirm.open=true
     Invoke-Aio key Esc
@@ -158,18 +158,21 @@ try {
     Invoke-Aio command pane.split_right
     Invoke-Aio mouse click (Tab-Center 1) --button right --px
     Assert-Menu $single
-    Invoke-Aio expect state tab.1.marked=true
-    Invoke-Aio expect state tab.2.marked=false
+    Invoke-Aio expect state tabs.selected=2
+    Invoke-Aio expect state tab.1.marked=false
+    Invoke-Aio expect state tab.2.marked=true
     Choose-Menu 'Close to the Right'
     Invoke-Aio expect state confirm.open=true
     Invoke-Aio key Esc
-    Invoke-Aio expect state tab.1.marked=true
-    Invoke-Aio expect state tab.2.marked=false
-    Invoke-Aio key Menu
+    Invoke-Aio expect state tabs.selected=2
+    Invoke-Aio expect state tab.1.marked=false
+    Invoke-Aio expect state tab.2.marked=true
+    Invoke-Aio mouse click (Tab-Center 1) --button right --px
     Choose-Menu 'Close to the Right'
     Invoke-Aio key Enter
     Invoke-Aio expect state tabs.count=1
-    Write-Output 'PASS right click unselected tab selects alone; close subsets confirm, restore on cancel and close on accept'
+    Invoke-Aio expect state tab.1.marked=true
+    Write-Output 'PASS right click acts on an inactive tab without activating it; close subsets confirm, restore on cancel and close on accept'
 
     Invoke-Aio key Menu End Enter
     Invoke-Aio expect state settings.active=true
@@ -177,7 +180,7 @@ try {
     Invoke-Aio expect state settings.filter=
     Invoke-Aio type unrelated
     Invoke-Aio key Menu
-    Assert-Menu @('Close to the Right', 'Close Others', 'Close', '-', 'Tab Settings') @(1)
+    Assert-Menu $single @(2,6)
     Choose-Menu 'Tab Settings'
     Invoke-Aio expect state settings.key=tab.confirm_close
     Invoke-Aio expect state settings.filter=

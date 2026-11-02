@@ -64,7 +64,7 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 		switch scenario {
 		case 0: app.palette_open(s, w)
 		case 1: app.workspace_picker_open(s, w)
-		case 2: app.rename_open(s, w, true)
+		case 2: app.rename_open(s, w, true, w.workspace.selected)
 		case 3: app.tab_menu_open(s, w, 0, 20, 20)
 		case 4: app.workspace_delete_request(s, w, w.workspace)
 		case 5: app.editor_open(s, w)

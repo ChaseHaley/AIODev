@@ -8,20 +8,22 @@ Workspace_Move_Request :: struct {
 	whole_tab: bool,
 }
 
-workspace_move_request :: proc(w: ^Window, whole_tab: bool) -> Workspace_Move_Request {
-	return {w.workspace.id, selected_tab(w.workspace).id, w.tree.focus, whole_tab}
+// Moves tab `index`, or its focused pane when whole_tab is false.
+workspace_move_request :: proc(w: ^Window, whole_tab: bool, index: int) -> Workspace_Move_Request {
+	tab := w.workspace.tabs[index]
+	return {w.workspace.id, tab.id, tab.tree.focus, whole_tab}
 }
 
-workspace_move_open :: proc(app: ^App, w: ^Window, whole_tab: bool) {
-	request := workspace_move_request(w, whole_tab)
+workspace_move_open :: proc(app: ^App, w: ^Window, whole_tab: bool, index: int) {
+	request := workspace_move_request(w, whole_tab, index)
 	workspace_picker_open(app, w)
 	if w.workspace_picker.mode != .List {return}
 	w.workspace_picker.move = request
 	workspace_picker_filter(app, w)
 }
 
-workspace_move_new :: proc(app: ^App, w: ^Window, whole_tab: bool) {
-	request := workspace_move_request(w, whole_tab)
+workspace_move_new :: proc(app: ^App, w: ^Window, whole_tab: bool, index: int) {
+	request := workspace_move_request(w, whole_tab, index)
 	workspace_move_choose(app, w, request, 0)
 }
 

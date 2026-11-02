@@ -132,10 +132,13 @@ tab_menu_group_and_settings_capabilities :: proc(t: ^testing.T) {
 	testing.expect(t, w.tab_menu.separators[2])
 	testing.expect_value(t, app.tab_menu_label(w, 3), "Tab Settings")
 	testing.expect(t, f.workspace.tabs[0].marked && f.workspace.tabs[2].marked)
-	testing.expect_value(t, f.workspace.selected, 2)
+	// Right-clicking never activates a tab or changes the marks.
+	testing.expect_value(t, f.workspace.selected, 0)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
 	testing.expect_value(t, w.tab_menu.count, 10)
-	testing.expect(t, !f.workspace.tabs[0].marked && !f.workspace.tabs[2].marked)
+	testing.expect(t, f.workspace.tabs[0].marked && f.workspace.tabs[2].marked && !f.workspace.tabs[1].marked)
+	// An unmarked target shows as the only marked tab while its menu is open.
+	testing.expect(t, app.tab_marked_shown(w, 1) && !app.tab_marked_shown(w, 0) && !app.tab_marked_shown(w, 2))
 	testing.expect(t, app.tab_menu_enabled(w, 3) && app.tab_menu_enabled(w, 4))
 	settings_tab := f.workspace.tabs[1]
 	layout.destroy(&settings_tab.tree)
@@ -238,6 +241,29 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 }
 
 @(test)
+tab_menu_close_others_acts_on_an_unmarked_target :: proc(t: ^testing.T) {
+	f: Menu_Fixture
+	defer menu_fixture_destroy(&f)
+	if !menu_fixture_init(t, &f, 3) { return }
+	w := &f.w
+	_, split_error := layout.split_direction(&f.workspace.tabs[2].tree,
+		f.workspace.tabs[2].tree.root, .Right, 0.5, {.Terminal, 0})
+	testing.expect_value(t, split_error, nil)
+	app.tab_menu_open(&f.state, w, 1, 10, 20)
+	for candidate, i in w.tab_menu.actions[:w.tab_menu.count] {
+		if !w.tab_menu.separators[i] && candidate == .Close_Other_Tabs { w.tab_menu.selected = i; break }
+	}
+	app.tab_menu_choose(&f.state, w)
+	testing.expect_value(t, f.workspace.selected, 0)
+	testing.expect(t, w.pending_close.confirm.open && f.workspace.tabs[0].marked &&
+		!f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
+	menu_key(&f, {key = .Enter})
+	if !testing.expect_value(t, len(f.workspace.tabs), 1) { return }
+	testing.expect_value(t, f.workspace.tabs[0].id, 2)
+	testing.expect(t, f.workspace.tabs[0].marked)
+}
+
+@(test)
 tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	f: Menu_Fixture
 	defer menu_fixture_destroy(&f)
@@ -252,7 +278,7 @@ tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	testing.expect(t, w.pending_close.confirm.open && f.workspace.tabs[2].marked)
 	menu_key(&f, {key = .Escape})
 	testing.expect(t, f.workspace.tabs[0].marked && f.workspace.tabs[1].marked && !f.workspace.tabs[2].marked)
-	testing.expect_value(t, f.workspace.selected, 1)
+	testing.expect_value(t, f.workspace.selected, 0)
 	settings_tab := f.workspace.tabs[2]
 	layout.destroy(&settings_tab.tree)
 	testing.expect_value(t, layout.init(&settings_tab.tree, {.Settings, 0}), nil)

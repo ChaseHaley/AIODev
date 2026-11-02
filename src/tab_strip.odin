@@ -164,7 +164,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				tab_control(w, i).press.value,
 				0,
 				x,
-				tab.marked,
+				tab_marked_shown(w, i),
 				icon,
 				atlas,
 				w.pointer,

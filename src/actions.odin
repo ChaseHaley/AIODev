@@ -534,9 +534,9 @@ run_action :: proc(
 	case .Customize_Colors:
 		settings_reveal(app, w, {query = "colors.", search = .Scope})
 	case .Rename_Tab:
-		rename_open(app, w, true)
+		rename_open(app, w, true, w.workspace.selected)
 	case .Rename_Pane:
-		rename_open(app, w, false)
+		rename_open(app, w, false, w.workspace.selected)
 	case .Change_Pane_Shell:
 		for pane in w.panes {
 			if pane.node != w.tree.focus || pane.content.kind != .Terminal {continue}
@@ -550,11 +550,11 @@ run_action :: proc(
 			break
 		}
 	case .Duplicate_Tab:
-		tab_duplicate(app, w)
+		tab_duplicate(app, w, w.workspace.selected)
 	case .Move_Pane_Workspace, .Move_Tab_Workspace:
-		workspace_move_open(app, w, action == .Move_Tab_Workspace)
+		workspace_move_open(app, w, action == .Move_Tab_Workspace, w.workspace.selected)
 	case .Move_Pane_New_Workspace, .Move_Tab_New_Workspace:
-		workspace_move_new(app, w, action == .Move_Tab_New_Workspace)
+		workspace_move_new(app, w, action == .Move_Tab_New_Workspace, w.workspace.selected)
 	case .Move_Tab_Left:
 		tab_move(app, w, w.workspace.selected, max(0, w.workspace.selected - 1))
 	case .Move_Tab_Right:
@@ -567,7 +567,7 @@ run_action :: proc(
 	case .Move_Tab_Start, .Move_Tab_End:
 		tab_move_group(app, w, action == .Move_Tab_End)
 	case .Close_Other_Tabs, .Close_Right_Tabs:
-		tab_close_subset(app, w, action == .Close_Right_Tabs)
+		tab_close_subset(app, w, action == .Close_Right_Tabs, w.workspace.selected)
 	case .Tab_Settings:
 		settings_reveal(app, w, {key = "tab.confirm_close", search = .Clear})
 	case .Restart_Shell:

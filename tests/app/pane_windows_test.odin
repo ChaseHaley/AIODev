@@ -171,7 +171,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	source_window.pane_drag = {source = source, node = node, active = true,
 		shown = true, new_window = true, preview_window = preview_id}
 	testing.expect(t, app.pane_drag_release(&state, source_window))
-	app.rename_open(&state, source_window, true)
+	app.rename_open(&state, source_window, true, source_window.workspace.selected)
 	testing.expect(t, source_window.rename_open && source_window.rename_mode == .Rename)
 	testing.expect(t, app.window_find(&state, preview_id) == nil)
 	app.rename_finish(&state, source_window, false)

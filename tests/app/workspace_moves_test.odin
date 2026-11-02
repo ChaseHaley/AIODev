@@ -54,7 +54,7 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	name, name_error := strings.clone("Build pair")
 	if !testing.expect_value(t, name_error, nil) {return}
 	app.selected_tab(two).name = name
-	request := app.workspace_move_request(w, true)
+	request := app.workspace_move_request(w, true, w.workspace.selected)
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
 	failed := app.workspace_move_content(&state, w, request, original)
@@ -86,13 +86,13 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	testing.expect_value(t, len(state.sessions), 3)
 	if !testing.expect(t, app.workspace_select(&state, w, three)) {return}
 	app.run_action(&state, w, .Settings_UI)
-	settings_request := app.workspace_move_request(w, true)
+	settings_request := app.workspace_move_request(w, true, w.workspace.selected)
 	testing.expect(t, !app.workspace_move_content(&state, w, settings_request, settings_workspace))
 	settings_request.whole_tab = false
 	testing.expect(t, !app.workspace_move_content(&state, w, settings_request, settings_workspace))
 	settings_request.tab = max(u32)
 	testing.expect(t, !app.workspace_move_content(&state, w, settings_request, original))
-	testing.expect(t, !app.workspace_move_content(&state, w, app.workspace_move_request(w, true), three))
+	testing.expect(t, !app.workspace_move_content(&state, w, app.workspace_move_request(w, true, w.workspace.selected), three))
 	// A sole source tab can move into another window without leaving the picker callback on freed storage.
 	if !testing.expect(t, app.workspace_select(&state, w, original)) {return}
 	if !testing.expect(t, app.window_open(&state, settings_workspace)) {return}
