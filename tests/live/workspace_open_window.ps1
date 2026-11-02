@@ -81,6 +81,9 @@ public static class Workspace133Capture {
 }
 '@}
 Aio launch --fresh | Out-Null
+    Aio command workspace.rename | Out-Null
+    Aio type 'Workspace 1' | Out-Null
+    Aio key Enter | Out-Null
 try {
     Aio wait text 'PS ' | Out-Null
     Aio window move '20,60' | Out-Null
@@ -96,6 +99,7 @@ try {
     Aio expect state workspace.id=1
     Aio key Esc Esc | Out-Null
     Aio command workspace.new | Out-Null
+    Aio key Enter | Out-Null
     Aio wait text 'PS ' | Out-Null
     Rename 'Split target'
     $leftSession=(State)['session.id'];$leftPid=Shell-Pid 'left_before'
@@ -140,6 +144,7 @@ try {
     Check ((Shell-Pid 'right_reused') -eq $rightPid) 'reusing owner preserves right shell PID'
     Aio window select $requester | Out-Null
     Aio command workspace.new | Out-Null
+    Aio key Enter | Out-Null
     Aio wait text 'PS ' | Out-Null
     Rename 'Settings only'
     Aio command settings.open | Out-Null

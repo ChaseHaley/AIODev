@@ -24,6 +24,8 @@ rename_target_fixture_init :: proc(t: ^testing.T, f: ^Rename_Target_Fixture) -> 
 	f.state.app_id = "AIODev.Test.RenameTarget"
 	f.workspace = app.workspace_create_empty(&f.state)
 	if !testing.expect(t, f.workspace != nil) {return false}
+	testing.expect_value(t, app.rename_target_commit(&f.state, nil,
+		{app.Rename_Kind.Workspace, f.workspace.id}, "Workspace 1"), app.Rename_Outcome.Saved)
 	id, window_error := platform.window_create(&f.state.platform,
 		{hidden = true, width = 800, height = 600})
 	if !testing.expect_value(t, window_error, platform.Error.None) {return false}

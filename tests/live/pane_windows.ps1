@@ -219,6 +219,7 @@ try {
     # Root workspace controls: an explicit new window shows a distinct workspace; selecting an
     # already displayed workspace focuses its owner and leaves the requesting window unchanged.
     Invoke-Aio command window.new | Out-Null
+    Invoke-Aio key Enter | Out-Null
     Invoke-Aio expect state windows.count=2
     $destination = @(Window-Ids | Where-Object { $_ -ne $source })[0]
     $d = Window-State $destination
@@ -289,6 +290,7 @@ try {
     Shot $d remote-edge-preview
     Invoke-Aio key Esc | Out-Null
     Invoke-Aio mouse up $edge --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $s = Read-State
     Assert-Equal $s['panes.count'] 4 'Escape keeps the source layout'
     Assert-Equal $s['panes.drop.window'] 0 'Escape clears the drop target'
@@ -300,6 +302,7 @@ try {
     Invoke-Aio mouse move $edge --screen | Out-Null
     $preview = Rect (Read-State)['panes.drop.rect']
     Invoke-Aio mouse up $edge --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     Assert-Equal (Read-State)['panes.count'] 3 'source loses only the moved pane'
     $d = Window-State $destination
     Assert-Equal $d['panes.count'] 2 'destination gains the pane'
@@ -329,6 +332,7 @@ try {
     Start-Sleep -Milliseconds 300
     Shot $d remote-pane-preview
     Invoke-Aio mouse up $inside --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $d = Window-State $destination
     Assert-Equal $d['panes.count'] 3 'pane drop splits the targeted destination pane'
     Assert-Equal $d['session.id'] $second 'pane-targeted runtime is focused'
@@ -360,6 +364,7 @@ try {
     Select-Window $source
     Invoke-Aio key Esc | Out-Null
     Invoke-Aio mouse up $tab2 --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $d = Window-State $destination
     Assert-Equal $d['tabs.selected'] 1 'Escape restores the destination tab'
     Assert-Equal $d['tab.2.panes'] 1 'Escape leaves the hovered tab unchanged'
@@ -386,6 +391,7 @@ try {
     Start-Sleep -Milliseconds 300
     Shot $d remote-new-tab
     Invoke-Aio mouse up $strip --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $d = Window-State $destination
     Assert-Equal $d['tabs.count'] ($tabs+1) 'remote footer drop appends a tab'
     Assert-Equal $d['tabs.selected'] ($tabs+1) 'new remote tab is selected'
@@ -417,6 +423,7 @@ try {
     Start-Sleep -Milliseconds 500
     Assert-Equal (Read-State)['panes.drop.shown'] true 'remote Settings tab accepts the pane'
     Invoke-Aio mouse up $settingsTab --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $d = Window-State $destination
     Assert-Equal $d['tabs.selected'] $settingsIndex 'Settings drop keeps the destination tab'
     Assert-Equal $d['tabs.count'] $settingsIndex 'Settings drop adds no tab'
@@ -465,6 +472,7 @@ try {
     Assert-Equal $s['panes.drop.shown'] false 'minimum size rejects a tear-off window'
     Assert-Equal $s['panes.drop.preview_window'] 0 'rejected tear-off keeps no preview'
     Invoke-Aio mouse up $desktop --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $s = Read-State
     Assert-Equal $s['windows.count'] $windowsBefore 'minimum rejection opens no window'
     Assert-Equal $s['panes.count'] 2 'minimum rejection keeps the source layout'
@@ -500,6 +508,7 @@ try {
     Assert-Equal (Inventory $previewId 'preview_visible') true 'cached preview reappears over the desktop'
     Invoke-Aio key Esc | Out-Null
     Invoke-Aio mouse up $desktop --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $s = Read-State
     Assert-Equal $s['windows.count'] $windowsBefore 'Escape discards the preview window'
     Assert-True (-not ((Window-Ids) -contains $previewId)) 'discarded preview leaves the inventory'
@@ -519,6 +528,7 @@ try {
     Assert-Equal $s['windows.count'] $windowsBefore 'focus loss discards the preview window'
     Assert-True (-not ((Window-Ids) -contains $previewId)) 'focus-loss preview leaves the inventory'
     Invoke-Aio mouse up $desktop --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $s = Read-State
     Assert-Equal $s['windows.count'] $windowsBefore 'release after focus loss opens no window'
     Assert-Equal $s['panes.count'] 2 'focus-loss cancel keeps the source layout'
@@ -533,6 +543,7 @@ try {
     Invoke-Aio mouse move $desktop --screen | Out-Null
     $previewId = (Read-State)['panes.drop.preview_window']
     Invoke-Aio mouse up $desktop --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $s = Read-State
     Assert-Equal $s['windows.count'] ([int]$windowsBefore+1) 'tear-off commit adds a window'
     Assert-Equal $s['panes.count'] 1 'tear-off commit removes the pane from the source'
@@ -565,6 +576,7 @@ try {
     Assert-Equal $s['windows.count'] $count 'rejected preview creates no window'
     Assert-Equal $s['workspaces.count'] $workspaceCount 'rejected preview creates no workspace'
     Invoke-Aio mouse up $desktop2 --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $s = Read-State
     Assert-Equal $s['windows.count'] $count 'final-pane release creates no window'
     Assert-Equal $s['workspaces.count'] $workspaceCount 'final-pane release creates no workspace'
@@ -587,6 +599,7 @@ try {
     $soleId = (Read-State)['panes.drop.preview_window']
     Assert-True ($soleId -ne '0') 'one-pane tab in multi-pane workspace prepares a preview'
     Invoke-Aio mouse up $desktop2 --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     $ids = Window-Ids
     Assert-True ($ids -contains $source) 'multi-tab tear-off preserves the source window'
     Assert-Equal $ids.Count ($count+1) 'multi-tab tear-off adds one window'
@@ -615,6 +628,7 @@ try {
     Invoke-Aio mouse move $edge --screen | Out-Null
     Assert-Equal (Read-State)['panes.drop.shown'] true 'final workspace pane can target an existing window'
     Invoke-Aio mouse up $edge --screen | Out-Null
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
     Assert-True (-not ((Window-Ids) -contains $source)) 'existing-window transfer closes the exhausted source view'
     $d = Window-State $destination
     Assert-Equal $d['windows.count'] ($beforeWindows-1) 'existing-window final-pane transfer creates no window'

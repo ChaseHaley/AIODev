@@ -122,6 +122,8 @@ try {
     Invoke-Aio key Esc
 
     Invoke-Aio command workspace.new
+    Invoke-Aio type "Workspace 2" | Out-Null
+    Invoke-Aio key Enter | Out-Null
     Invoke-Aio wait text 'PS '
     $target = (Read-State)['workspace.id']
     Invoke-Aio command workspace.select_1
@@ -203,6 +205,8 @@ try {
     Invoke-Aio dpi 96
     Invoke-Aio resize 100x30
     Invoke-Aio command window.new
+    Invoke-Aio type "Workspace 3" | Out-Null
+    Invoke-Aio key Enter | Out-Null
     $foreign = Read-State
     $owner = $foreign['window.2.id']
     Invoke-Aio window select $owner

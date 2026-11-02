@@ -8,6 +8,7 @@ import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:log"
+import "core:math/rand"
 import "core:slice"
 import "core:strings"
 
@@ -32,21 +33,47 @@ Workspace :: struct {
 }
 
 @(require_results)
-workspace_default_name :: proc(app: ^App) -> (name: string, number: u32) {
-	number = app.next_workspace_number
-	for number < max(u32) {
-		number += 1
-		candidate := fmt.tprintf("Workspace %d", number)
+workspace_default_name :: proc(app: ^App) -> string {
+	adjectives := [?]string{
+		"Quiet", "Bright", "Gentle", "Brave", "Curious", "Happy", "Misty", "Sunny",
+		"Calm", "Clever", "Cozy", "Daring", "Distant", "Dreamy", "Eager", "Fair",
+		"Friendly", "Hidden", "Jolly", "Kind", "Lively", "Lucky", "Merry", "Nimble",
+		"Peaceful", "Playful", "Quick", "Soft", "Still", "Swift", "Warm", "Wild",
+	}
+	colors := [?]string{
+		"Amber", "Azure", "Blue", "Bronze", "Coral", "Crimson", "Emerald", "Golden",
+		"Green", "Indigo", "Ivory", "Jade", "Lavender", "Lilac", "Lime", "Maroon",
+		"Mint", "Olive", "Orange", "Peach", "Pearl", "Pink", "Plum", "Purple",
+		"Rose", "Ruby", "Saffron", "Scarlet", "Silver", "Teal", "Violet", "White",
+	}
+	nouns := [?]string{
+		"Badger", "Brook", "Canyon", "Cedar", "Cloud", "Comet", "Cove", "Dawn",
+		"Dune", "Falcon", "Fern", "Finch", "Forest", "Fox", "Glen", "Grove",
+		"Harbor", "Heron", "Hill", "Island", "Lake", "Lark", "Maple", "Meadow",
+		"Moon", "Otter", "Panda", "Pine", "River", "Sparrow", "Star", "Willow",
+	}
+	// Probe from a random phrase: even repeated collisions terminate without numbered suffixes.
+	count := len(adjectives) * len(colors) * len(nouns)
+	start := rand.int_max(count)
+	for offset in 0 ..< count {
+		index := (start + offset) % count
+		noun := index % len(nouns)
+		index /= len(nouns)
+		candidate := fmt.tprintf("%s %s %s", adjectives[index / len(colors)],
+			colors[index % len(colors)], nouns[noun])
 		occupied := false
 		for workspace in app.workspaces {
-			if !workspace.provisional && workspace.name == candidate {occupied = true; break}
+			if !workspace.provisional && strings.equal_fold(workspace.name, candidate) {
+				occupied = true
+				break
+			}
 		}
 		if occupied {continue}
 		owned, err := strings.clone(candidate)
-		if err != nil {return "", 0}
-		return owned, number
+		if err != nil {return ""}
+		return owned
 	}
-	return "", 0
+	return ""
 }
 
 selected_tab :: proc(workspace: ^Workspace) -> ^Tab {

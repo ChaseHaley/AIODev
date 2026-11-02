@@ -115,7 +115,7 @@ pane_move_completion_selects_titles_and_relayouts_all_destinations :: proc(t: ^t
 				return
 			}
 			testing.expect(t, !f.destination.preparing && !f.destination.workspace.provisional)
-			testing.expect_value(t, f.destination.workspace.name, "Workspace 4")
+			testing.expect(t, f.destination.workspace.name != "")
 		}
 		testing.expect_value(t, source.title, "remaining source")
 		testing.expect_value(t, destination.title, kind == 1 ? "" : "destination")
@@ -275,4 +275,37 @@ pane_move_completion_preserves_unrelated_selected_source_tab :: proc(t: ^testing
 	testing.expect_value(t, source.tree.nodes[source.tree.focus].(layout.Pane).content.id, u32(4))
 	testing.expect_value(t, len(f.source.panes), 1)
 	testing.expect_value(t, f.source.panes[0].content.id, u32(5))
+}
+
+@(test)
+pane_drag_dropdown_cancel_gap_scroll_and_last_pane_guard :: proc(t: ^testing.T) {
+	f: Move_Fixture
+	defer move_fixture_destroy(t, &f)
+	if !move_fixture_init(t, &f) {return}
+	state, w := &f.state, f.source
+	w.height = 260
+	for _ in 0 ..< 12 {if !testing.expect(t, app.workspace_create_empty(state) != nil) {return}}
+	app.pane_drag_press(state, w, f.node, 400, 200)
+	w.pane_drag.active = true
+	chip := app.workspace_button_rect(w)
+	testing.expect(t, app.pane_workspace_drag_move(state, w, w, chip.x + 4, chip.y + 4, false))
+	testing.expect(t, app.pane_workspace_drag_move(state, w, w, chip.x + 4, 37, false))
+	testing.expect_value(t, w.pane_drag.picker_hit, -1)
+	testing.expect(t, app.pane_workspace_drag_wheel(state, w, -1))
+	testing.expect_value(t, w.workspace_picker.scroll, 1)
+	app.handle_event(state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	testing.expect(t, !w.pane_drag.active && !app.workspace_picker_active(&w.workspace_picker))
+	testing.expect_value(t, app.tab_pane_count(app.selected_tab(w.workspace)), 2)
+	other := f.destination
+	app.pane_drag_press(state, other, other.tree.root, 400, 200)
+	other.pane_drag.active = true
+	chip = app.workspace_button_rect(other)
+	testing.expect(t, app.pane_workspace_drag_move(state, other, other, chip.x + 4, chip.y + 4, false))
+	row := app.workspace_picker_row_rect(other, len(other.workspace_picker.rows) + 1)
+	other.workspace_picker.scroll = len(other.workspace_picker.rows)
+	row = app.workspace_picker_row_rect(other, len(other.workspace_picker.rows) + 1)
+	testing.expect(t, app.pane_workspace_drag_move(state, other, other, row.x + 4, row.y + 4, false))
+	testing.expect_value(t, other.pane_drag.picker_hit, -1)
+	app.pane_drag_cancel(state, other)
+	testing.expect_value(t, len(state.windows), 3)
 }

@@ -1,92 +1,107 @@
 package app_test
 
 import "base:runtime"
-import "core:fmt"
 import "core:testing"
+import "core:strings"
+import "core:math/rand"
+import "aio:ui"
 import app "../../src"
 
 @(test)
-workspace_number_preview_cancel_keeps_committed_sequence :: proc(t: ^testing.T) {
+workspace_phrases_are_unique_and_previews_remain_unnamed :: proc(t: ^testing.T) {
 	state: app.App
 	defer delete(state.workspaces)
 	defer for len(state.workspaces) > 0 {
 		testing.expect(t, app.workspace_discard_empty(&state, state.workspaces[len(state.workspaces)-1]))
 	}
-	for number: u32 = 1; number <= 4; number += 1 {
+	for _ in 0 ..< 100 {
 		workspace := app.workspace_create_empty(&state)
-		if !testing.expect(t, workspace != nil) { return }
-		testing.expect_value(t, workspace.name, fmt.tprintf("Workspace %d", number))
+		if !testing.expect(t, workspace != nil) {return}
+		testing.expect_value(t, strings.count(workspace.name, " "), 2)
+		for other in state.workspaces {
+			if other != workspace {testing.expect(t, !strings.equal_fold(workspace.name, other.name))}
+		}
 	}
-	for id: u32 = 5; id <= 8; id += 1 {
-		preview := app.workspace_create_empty(&state, true)
-		if !testing.expect(t, preview != nil) { return }
-		testing.expect_value(t, preview.id, id)
-		testing.expect(t, app.workspace_index(&state, 4) == nil)
-		testing.expect(t, app.workspace_discard_empty(&state, preview))
-		testing.expect_value(t, state.next_workspace_id, id)
-	}
-	five := app.workspace_create_empty(&state)
-	if !testing.expect(t, five != nil) { return }
-	testing.expect_value(t, five.id, u32(9))
-	testing.expect_value(t, five.name, "Workspace 5")
-}
-
-@(test)
-workspace_number_manual_names_deletion_and_pending_previews :: proc(t: ^testing.T) {
-	state: app.App
-	defer delete(state.workspaces)
-	defer for len(state.workspaces) > 0 {
-		testing.expect(t, app.workspace_discard_empty(&state, state.workspaces[len(state.workspaces)-1]))
-	}
-	one := app.workspace_create_empty(&state)
-	if !testing.expect(t, one != nil) { return }
-	if !testing.expect(t, app.rename_target_commit(&state, nil,
-		{app.Rename_Kind.Workspace, one.id}, "Workspace 2") == app.Rename_Outcome.Saved) { return }
 	preview := app.workspace_create_empty(&state, true)
-	if !testing.expect(t, preview != nil) { return }
-	three := app.workspace_create_empty(&state)
-	if !testing.expect(t, three != nil) { return }
-	testing.expect_value(t, three.name, "Workspace 3")
-	testing.expect_value(t, three.id, u32(3))
-	testing.expect_value(t, one.name, "Workspace 2")
-	name, number := app.workspace_default_name(&state)
-	testing.expect_value(t, name, "Workspace 4")
-	testing.expect_value(t, number, u32(4))
-	delete(name)
-	testing.expect_value(t, state.next_workspace_number, u32(3))
+	if !testing.expect(t, preview != nil) {return}
+	testing.expect_value(t, preview.name, "")
 	testing.expect(t, app.workspace_discard_empty(&state, preview))
-	testing.expect(t, app.rename_target_commit(&state, nil,
-		{app.Rename_Kind.Workspace, one.id}, "Build tools") == app.Rename_Outcome.Saved)
-	testing.expect(t, app.workspace_discard_empty(&state, three))
-	four := app.workspace_create_empty(&state)
-	if !testing.expect(t, four != nil) { return }
-	testing.expect_value(t, four.id, u32(4))
-	testing.expect_value(t, four.name, "Workspace 4")
-	testing.expect_value(t, one.name, "Build tools")
+	// Rewind the generator to force a collision with a manually assigned name.
+	rng := rand.create(42)
+	context.random_generator = rand.default_random_generator(&rng)
+	name := app.workspace_default_name(&state)
+	defer delete(name)
+	workspace := app.workspace_create_empty(&state)
+	if !testing.expect(t, workspace != nil) {return}
+	testing.expect_value(t, app.rename_target_commit(&state, nil,
+		{app.Rename_Kind.Workspace, workspace.id}, name), app.Rename_Outcome.Saved)
+	rng = rand.create(42)
+	other := app.workspace_default_name(&state)
+	defer delete(other)
+	testing.expect(t, !strings.equal_fold(name, other))
 }
 
 @(test)
-workspace_number_failure_and_exhaustion_preserve_counters :: proc(t: ^testing.T) {
-	state := app.App{next_workspace_id = 7, next_workspace_number = 4}
+workspace_phrase_allocation_failure_preserves_identity :: proc(t: ^testing.T) {
+	state := app.App{next_workspace_id = 7}
 	defer delete(state.workspaces)
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
-	name, number := app.workspace_default_name(&state)
+	name := app.workspace_default_name(&state)
+	workspace := app.workspace_create_empty(&state)
 	context.allocator = allocator
 	testing.expect_value(t, name, "")
-	testing.expect_value(t, number, u32(0))
+	testing.expect(t, workspace == nil)
 	testing.expect_value(t, state.next_workspace_id, u32(7))
-	testing.expect_value(t, state.next_workspace_number, u32(4))
-	state.next_workspace_number = max(u32)
-	testing.expect(t, app.workspace_create_empty(&state) == nil)
-	testing.expect_value(t, state.next_workspace_id, u32(7))
-	preview := app.workspace_create_empty(&state, true)
-	if !testing.expect(t, preview != nil) { return }
-	testing.expect_value(t, preview.id, u32(8))
-	testing.expect(t, app.workspace_discard_empty(&state, preview))
-	state.next_workspace_number = 4
 	state.next_workspace_id = max(u32)
-	testing.expect(t, app.workspace_create_empty(&state, true) == nil)
 	testing.expect(t, app.workspace_create_empty(&state) == nil)
-	testing.expect_value(t, state.next_workspace_number, u32(4))
+}
+
+@(test)
+workspace_creation_prompt_selects_suggestion_and_cancels_without_mutation :: proc(t: ^testing.T) {
+	state: app.App
+	w: app.Window
+	append(&state.windows, &w)
+	defer delete(state.windows)
+	defer delete(w.rename.bytes)
+	app.workspace_new(&state, &w, false)
+	testing.expect(t, w.rename_open && w.rename_mode == .New_Workspace)
+	testing.expect(t, ui.field_string(&w.rename) != "")
+	testing.expect_value(t, ui.field_selected_text(&w.rename), ui.field_string(&w.rename))
+	testing.expect_value(t, len(state.workspaces), 0)
+	testing.expect_value(t, len(state.sessions), 0)
+	app.rename_key(&state, &w, {key = .Escape, pressed = true})
+	testing.expect(t, !w.rename_open)
+	testing.expect_value(t, state.next_workspace_id, u32(0))
+	app.workspace_new(&state, &w, true)
+	testing.expect(t, w.rename_open && w.rename_mode == .New_Window)
+	_ = ui.field_text(&w.rename, "  ")
+	app.rename_key(&state, &w, {key = .Enter, pressed = true})
+	testing.expect(t, w.rename_open)
+	testing.expect_value(t, len(state.workspaces), 0)
+	app.rename_finish(&state, &w, false)
+}
+
+@(test)
+workspace_creation_rechecks_name_claimed_while_prompt_is_open :: proc(t: ^testing.T) {
+	state: app.App
+	w: app.Window
+	append(&state.windows, &w)
+	defer delete(state.windows)
+	defer delete(w.rename.bytes)
+	ui.notices_init(&state.notices)
+	defer ui.notices_destroy(&state.notices)
+	app.workspace_new(&state, &w, false)
+	name, err := strings.clone(ui.field_string(&w.rename))
+	if !testing.expect_value(t, err, nil) {return}
+	workspace := new(app.Workspace)
+	workspace.name = name
+	append(&state.workspaces, workspace)
+	defer app.workspace_destroy(workspace)
+	defer delete(state.workspaces)
+	app.rename_finish(&state, &w, true)
+	testing.expect(t, w.rename_open)
+	testing.expect_value(t, len(state.workspaces), 1)
+	testing.expect_value(t, len(state.sessions), 0)
+	app.rename_finish(&state, &w, false)
 }

@@ -27,8 +27,10 @@ try {
     Click $button
     Equal (State)['tabs.orientation'] vertical 'button changes horizontal to vertical'
     Aio command workspace.new | Out-Null
+    Aio key Enter | Out-Null
     Aio command tab.new | Out-Null
     Aio command workspace.new | Out-Null
+    Aio key Enter | Out-Null
     Aio command tab.new | Out-Null
     foreach($index in 1,2,3){
         Aio key "Ctrl+Shift+$index" | Out-Null

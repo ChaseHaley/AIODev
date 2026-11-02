@@ -156,6 +156,7 @@ workspace_selection_and_deletion_share_adoption_order :: proc(t: ^testing.T) {
 	state, w := &f.state, f.state.windows[0]
 	one := w.workspace
 	app.workspace_new(state, w, false)
+	app.rename_finish(state, w, true)
 	two := w.workspace
 	if !testing.expect(t, two != one) { return }
 	adoption_dirty_presentation(w)

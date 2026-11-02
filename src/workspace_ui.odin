@@ -45,10 +45,9 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 	if app.next_workspace_id == max(u32) {return nil}
 	workspace, err := new(Workspace)
 	if err != nil {return nil}
-	number: u32
 	if !provisional {
-		workspace.name, number = workspace_default_name(app)
-		if number == 0 {free(workspace); return nil}
+		workspace.name = workspace_default_name(app)
+		if workspace.name == "" {free(workspace); return nil}
 	}
 	workspace.id = app.next_workspace_id + 1
 	workspace.provisional = provisional
@@ -57,7 +56,6 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 		return nil
 	}
 	app.next_workspace_id = workspace.id
-	if !provisional {app.next_workspace_number = number}
 	workspace_pickers_refresh(app)
 	return workspace
 }
@@ -100,8 +98,21 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 }
 
 workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
+	owner := w
+	if owner == nil && len(app.windows) > 0 {owner = app.windows[0]}
+	if owner == nil {return}
+	if w == nil && !window_activate(app, owner) {return}
+	workspace_name_open(app, owner, new_window ? .New_Window : .New_Workspace)
+}
+
+workspace_new_commit :: proc(app: ^App, w: ^Window, new_window: bool, name: string) {
 	workspace := workspace_create_empty(app)
 	if workspace == nil {notify(app, .Error, "Could not create a workspace."); return}
+	if rename_target_commit(app, w, {.Workspace, workspace.id}, name) != .Saved {
+		_ = workspace_discard_empty(app, workspace)
+		notify(app, .Error, "Could not name the workspace.")
+		return
+	}
 	if !tab_create(app, workspace) {
 		_ = workspace_discard_empty(app, workspace)
 		notify(app, .Error, "Could not create the workspace shell.")
@@ -301,7 +312,8 @@ workspace_picker_count :: proc(w: ^Window) -> int {
 	if workspace_picker_icons(&w.workspace_picker) {
 		return (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) + 1 : len(WORKSPACE_ICONS) + 3
 	}
-	return len(w.workspace_picker.rows) + (w.workspace_picker.move.workspace != 0 ? 1 : len(WORKSPACE_ACTIONS))
+	p := &w.workspace_picker
+	return len(p.rows) + (p.move.workspace != 0 && !p.drag ? 1 : len(WORKSPACE_ACTIONS))
 }
 
 workspace_picker_choose :: proc(app: ^App, w: ^Window) {
@@ -562,8 +574,9 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if program := status_picker_text(app, workspace); program != "" {
 				detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
 			}
-		} else if p.move.workspace != 0 {label = "Move to New Workspace"}
-		else {label = action_info[actions[i - len(p.rows)]].title}
+		} else if p.move.workspace != 0 {
+			label = i == len(p.rows) ? "Move to New Workspace" : "Move to New Window"
+		} else {label = action_info[actions[i - len(p.rows)]].title}
 		baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
 		label_x := row.x + ui.CONTROL_INSET * s
 		if has_icon {

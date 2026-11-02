@@ -25,10 +25,22 @@ workspace_move_new :: proc(app: ^App, w: ^Window, whole_tab: bool) {
 	workspace_move_choose(app, w, request, 0)
 }
 
-workspace_move_choose :: proc(app: ^App, w: ^Window, request: Workspace_Move_Request, id: u32) {
+workspace_move_choose :: proc(
+	app: ^App, w: ^Window, request: Workspace_Move_Request, id: u32, name: string = "",
+) {
+	if id == 0 && name == "" {
+		workspace_name_open(app, w, .Move_Workspace)
+		w.rename_move = request
+		return
+	}
 	destination := id == 0 ? workspace_create_empty(app) : workspace_find(app, id)
 	if destination == nil {
 		notify(app, .Error, "The destination workspace is unavailable.")
+		return
+	}
+	if id == 0 && rename_target_commit(app, w, {.Workspace, destination.id}, name) != .Saved {
+		_ = workspace_discard_empty(app, destination)
+		notify(app, .Error, "Could not name the workspace.")
 		return
 	}
 	if !workspace_move_content(app, w, request, destination) {

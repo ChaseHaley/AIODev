@@ -24,6 +24,10 @@ Workspace134_Fixture :: struct {
 workspace134_init :: proc(t: ^testing.T, f: ^Workspace134_Fixture) -> bool {
 	f.current, f.target = app.workspace_create_empty(&f.state), app.workspace_create_empty(&f.state)
 	if !testing.expect(t, f.current != nil && f.target != nil) { return false }
+	testing.expect_value(t, app.rename_target_commit(&f.state, nil,
+		{app.Rename_Kind.Workspace, f.current.id}, "Workspace 1"), app.Rename_Outcome.Saved)
+	testing.expect_value(t, app.rename_target_commit(&f.state, nil,
+		{app.Rename_Kind.Workspace, f.target.id}, "Workspace 2"), app.Rename_Outcome.Saved)
 	f.tree.root, f.tree.focus = layout.INVALID_NODE, layout.INVALID_NODE
 	f.w = {id = 1, workspace = f.current, tree = &f.tree, width = 600, height = 400, scale = 1}
 	f.owner = {id = 2, workspace = f.target, tree = &f.tree}

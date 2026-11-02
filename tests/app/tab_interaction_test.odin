@@ -174,6 +174,7 @@ tab_interaction_final_close_can_retire_the_event_window_in_both_adapters :: proc
 			s, survivor := &f.state, f.state.windows[0]
 			pid := term.process_id(app.focused_session(s, survivor).session)
 			app.workspace_new(s, survivor, true)
+			app.rename_finish(s, survivor, true)
 			w := s.windows[1]
 			interaction_placement(s, w, horizontal)
 			app.tab_new(s, w)
