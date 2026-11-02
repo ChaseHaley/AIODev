@@ -62,8 +62,8 @@ Action :: enum u32 {
 	Split_Left,
 	Split_Up,
 	Zoom_Pane,
+	Fill_Window_Pane,
 	Fullscreen_Pane,
-	Screen_Pane,
 	Balance_Panes,
 	Swap_Left,
 	Swap_Right,
@@ -304,9 +304,9 @@ ACTIONS :: [Action]Action_Info {
 	.Split = {"pane.split", "Split Pane", nil},
 	.Split_Left = {"pane.split_left", "Split Left", nil},
 	.Split_Up = {"pane.split_up", "Split Up", nil},
-	.Zoom_Pane = {"pane.zoom", "Toggle Pane Zoom", nil},
-	.Fullscreen_Pane = {"pane.fullscreen", "Toggle Pane Fullscreen", {{.Enter, {.Control, .Shift}}}},
-	.Screen_Pane = {"pane.screen", "Toggle Pane Screen Fullscreen", {{.F11, {}}}},
+	.Zoom_Pane = {"pane.zoom", "Zoom pane", nil},
+	.Fill_Window_Pane = {"pane.fill_window", "Fill window", {{.Enter, {.Control, .Shift}}}},
+	.Fullscreen_Pane = {"pane.fullscreen", "Fullscreen", {{.F11, {}}}},
 	.Balance_Panes = {"pane.balance", "Balance All Splits", nil},
 	.Swap_Left = {"pane.swap_left", "Swap Pane Left", nil},
 	.Swap_Right = {"pane.swap_right", "Swap Pane Right", nil},
@@ -643,9 +643,9 @@ run_action :: proc(
 		pane_split(app, w, .Up)
 	case .Zoom_Pane:
 		pane_zoom(app, w)
-	case .Fullscreen_Pane:
+	case .Fill_Window_Pane:
 		pane_fill_toggle(app, w, .Content)
-	case .Screen_Pane:
+	case .Fullscreen_Pane:
 		pane_fill_toggle(app, w, .Screen)
 	case .Balance_Panes:
 		layout.balance(w.tree)

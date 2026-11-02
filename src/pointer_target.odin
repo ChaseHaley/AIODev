@@ -633,8 +633,8 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	#partial switch action {
 	case .Split_Right: return "Split right"
 	case .Split_Down: return "Split down"
-	case .Zoom: return w.tree.zoomed ? "Restore pane" : "Maximize pane"
-	case .Fullscreen: return w.pane_fill != .None ? "Exit fullscreen" : "Fullscreen pane"
+	case .Zoom: return "Zoom"
+	case .Fill_Window: return w.pane_fill != .None ? "Exit fill window" : "Fill window"
 	case .Close: return "Close pane"
 	case:
 	}

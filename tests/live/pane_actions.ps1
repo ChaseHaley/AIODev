@@ -66,7 +66,7 @@ try {
     $bSession = (Read-State)['session.id']
     Invoke-Aio expect no-text PANE_A_ONLY
     Invoke-Aio key Ctrl+Shift+P
-    Invoke-Aio type 'Toggle Pane Zoom'
+    Invoke-Aio type 'Zoom pane'
     Invoke-Aio expect state palette.item=pane.zoom
     Invoke-Aio key Enter
     Invoke-Aio expect state tab.1.zoomed=true

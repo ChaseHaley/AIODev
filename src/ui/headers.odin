@@ -9,7 +9,7 @@ Header_Action :: enum {
 	Split_Right,
 	Split_Down,
 	Zoom,
-	Fullscreen,
+	Fill_Window,
 	Close,
 	Badge,
 }
@@ -118,7 +118,7 @@ header_icon :: proc(action: Header_Action, zoomed, fullscreen: bool) -> Icon {
 		return .Split_Down
 	case .Zoom:
 		return zoomed ? .Collapse : .Expand
-	case .Fullscreen:
+	case .Fill_Window:
 		return fullscreen ? .Restore : .Zoom
 	case .Close:
 		return .Close

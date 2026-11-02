@@ -192,7 +192,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 				.Split_Right = "pane.split_right",
 				.Split_Down  = "pane.split_down",
 				.Zoom        = "pane.zoom",
-				.Fullscreen  = "pane.fullscreen",
+				.Fill_Window = "pane.fill_window",
 				.Close       = "pane.close",
 				.Badge       = "",
 			}
