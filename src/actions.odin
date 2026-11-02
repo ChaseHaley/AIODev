@@ -121,6 +121,8 @@ Action :: enum u32 {
 	Toggle_Tabs_Rail,
 	Toggle_Tabs_Orientation,
 	Status_Next,
+	Focus_Back,
+	Focus_Forward,
 	Status_Inbox,
 	Status_Panel,
 	Status_Dismiss_Finished,
@@ -381,6 +383,16 @@ ACTIONS :: [Action]Action_Info {
 		{{.L, {.Control, .Shift}}},
 	},
 	.Status_Next = {"status.next", "Go to the Next Program That Needs You", {{.J, {.Control, .Shift}}}},
+	.Focus_Back = {
+		"pane.focus_back",
+		"Go Back to the Previous Pane",
+		{{.Bracket_Left, {.Control, .Shift}}},
+	},
+	.Focus_Forward = {
+		"pane.focus_forward",
+		"Go Forward to the Next Pane",
+		{{.Bracket_Right, {.Control, .Shift}}},
+	},
 	.Status_Inbox = {"status.inbox", "Show the Program Status Inbox", {{.I, {.Control, .Shift}}}},
 	.Status_Panel = {"status.panel", "Show or Hide the Activity Panel", {{.Y, {.Control, .Shift}}}},
 	.Status_Dismiss_Finished = {"status.dismiss_finished", "Dismiss Finished Program Status", nil},
@@ -688,6 +700,10 @@ run_action :: proc(
 		toggle_tab_orientation(app)
 	case .Status_Next:
 		status_next_attention(app, w)
+	case .Focus_Back:
+		focus_jump(app, w, -1)
+	case .Focus_Forward:
+		focus_jump(app, w, 1)
 	case .Status_Inbox:
 		status_inbox_toggle(app, w)
 	case .Status_Panel:

@@ -114,6 +114,7 @@ App :: struct {
 	leader:                Maybe(commands.Shortcut),
 	palette:               ui.Palette,
 	find_history:          ui.Find_History,
+	focus_jumps:           Focus_Jumps,
 	palette_window:        platform_api.Window_Id,
 	notices:               ui.Notices,
 	sessions:              [dynamic]Session_Entry,
@@ -287,6 +288,7 @@ app_destroy :: proc(app: ^App) {
 	}
 	ui.palette_destroy(&app.palette)
 	ui.find_history_destroy(&app.find_history)
+	focus_jumps_destroy(&app.focus_jumps)
 	ui.notices_destroy(&app.notices)
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
@@ -356,6 +358,7 @@ tick :: proc(app: ^App) {
 	}
 	verify_tick(app)
 	control_cli_tick(app)
+	focus_jumps_track(app)
 	layout_state_tick(app)
 	free_all(context.temp_allocator)
 }

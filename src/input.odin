@@ -486,6 +486,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
+	if focused {app.focus_jumps.window = w.id}
 	if !focused {
 		if !gesture_cancel(app, w) {return}
 		window_overlays_cancel(app, w, true)
