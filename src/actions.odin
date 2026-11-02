@@ -91,6 +91,8 @@ Action :: enum u32 {
 	Tab_Settings,
 	New_Workspace,
 	Change_Workspace,
+	Next_Workspace,
+	Previous_Workspace,
 	Rename_Workspace,
 	New_Window,
 	Delete_Workspace,
@@ -153,6 +155,8 @@ ACTIONS :: [Action]Action_Info {
 	.Move_Tab_New_Workspace = {"tab.move_new_workspace", "Move Tab to New Workspace", nil},
 	.New_Workspace = {"workspace.new", "New Workspace", nil},
 	.Change_Workspace = {"workspace.change", "Change Workspace…", nil},
+	.Next_Workspace = {"workspace.next", "Next Workspace", nil},
+	.Previous_Workspace = {"workspace.previous", "Previous Workspace", nil},
 	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil},
 	.New_Window = {"window.new", "New Window", {{.N, {.Control, .Shift}}}},
 	.Delete_Workspace = {"workspace.delete", "Delete Workspace…", nil},
@@ -590,6 +594,10 @@ run_action :: proc(
 		workspace_new(app, w, false)
 	case .Change_Workspace:
 		workspace_picker_open(app, w)
+	case .Next_Workspace:
+		workspace_select_step(app, w, 1)
+	case .Previous_Workspace:
+		workspace_select_step(app, w, -1)
 	case .Rename_Workspace:
 		workspace_rename_open(app, w)
 	case .Delete_Workspace:

@@ -40,6 +40,18 @@ workspace_select_index :: proc(app: ^App, w: ^Window, index: int) {
 	rail_overlay_dismiss(app, w)
 }
 
+// Steps through the same order as Select Workspace N, wrapping at either end.
+workspace_select_step :: proc(app: ^App, w: ^Window, step: int) {
+	count, current := 0, -1
+	for workspace in app.workspaces {
+		if !workspace_eligible(app, workspace) {continue}
+		if workspace == w.workspace {current = count}
+		count += 1
+	}
+	if count < 2 || current < 0 {return}
+	workspace_select_index(app, w, (current + step + count) % count)
+}
+
 @(require_results)
 workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 	if app.next_workspace_id == max(u32) {return nil}

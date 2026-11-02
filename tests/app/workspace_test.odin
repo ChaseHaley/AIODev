@@ -203,5 +203,11 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect_value(t, term.process_id(other_session), other_pid)
 	testing.expect_value(t, term.process_id(first_session), first_pid)
 	testing.expect_value(t, len(state.sessions), 3)
+	app.run_action(&state, w, .Next_Workspace)
+	testing.expect(t, w.workspace == original)
+	app.run_action(&state, w, .Previous_Workspace)
+	testing.expect(t, w.workspace == three)
+	app.run_action(&state, w, .Previous_Workspace)
+	testing.expect(t, w.workspace == two)
 	app.tick(&state)
 }
