@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+<!-- Neovim logo by Jason Long, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
+     Source: https://github.com/neovim/neovim.github.io/blob/6568b9011ddb2965dc5118d28f17d5b7ce7dd8da/static/logos/neovim-mark-flat.svg
+     Modified: transforms applied and coordinates scaled from the 601 x 736 view into a centred
+     24-unit square, rounded to 0.001. -->
+<path fill="#3C92D2" d="M2.234,5.199L3.087,4.337L7.288,10.598L7.288,23.837L2.234,18.789Z"/>
+<path fill="#57A143" d="M21.764,5.247L16.647,0.098L16.647,13.281L20.928,19.728L21.799,18.782Z"/>
+<path fill="#57A143" d="M7.288,0.13L20.429,20.191L16.752,23.87L3.603,3.853Z"/>
+</svg>

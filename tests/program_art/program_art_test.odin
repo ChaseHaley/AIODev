@@ -26,12 +26,48 @@ names_match_without_case_or_exe_and_resolve_to_their_canonical_entry :: proc(t: 
 @(test)
 brand_colours_parse_and_entries_without_one_use_the_theme :: proc(t: ^testing.T) {
 	claude, _ := program_art.find("claude")
-	colour, ok := program_art.brand(claude)
+	layers := claude.layers
+	layer, _ := program_art.next_layer(&layers)
+	colour, ok := program_art.brand(layer)
 	testing.expect(t, ok)
 	testing.expect_value(t, colour, [3]u8{0xD9, 0x77, 0x57})
 	opencode, _ := program_art.find("opencode")
-	_, ok = program_art.brand(opencode)
+	layers = opencode.layers
+	layer, _ = program_art.next_layer(&layers)
+	_, ok = program_art.brand(layer)
 	testing.expect(t, !ok)
+}
+
+// Neovim's flat mark: a blue left stroke under green right and diagonal strokes (WORK-290).
+@(test)
+layers_keep_their_own_colours_unless_painted_mono :: proc(t: ^testing.T) {
+	art, found := program_art.find("nvim")
+	if !testing.expect(t, found) {return}
+	size :: 24
+	pixels: [size * size * 4]u8
+	// A pixel inside the left stroke only, and one inside the right stroke only.
+	left, right := (16 * size + 4) * 4, (8 * size + 19) * 4
+	testing.expect(t, program_art.draw(art, size, {text = {200, 200, 200}}, pixels[:]))
+	testing.expect_value(t, pixel(pixels[:], left), [4]u8{0x3C, 0x92, 0xD2, 255})
+	testing.expect_value(t, pixel(pixels[:], right), [4]u8{0x57, 0xA1, 0x43, 255})
+	testing.expect(t, program_art.draw(art, size, {text = {200, 200, 200}, mono = true}, pixels[:]))
+	testing.expect_value(t, pixel(pixels[:], left), [4]u8{200, 200, 200, 255})
+	testing.expect_value(t, pixel(pixels[:], right), [4]u8{200, 200, 200, 255})
+}
+
+// A later layer covers an earlier one where they overlap, as SVG paints them.
+@(test)
+later_layers_paint_over_earlier_ones :: proc(t: ^testing.T) {
+	art := program_art.Art {
+		names  = "test",
+		layers = "FF0000:nonzero:M0 0H24V24H0Z|0000FF:nonzero:M0 0H12V24H0Z",
+	}
+	pixels: [4 * 4 * 4]u8
+	testing.expect(t, program_art.draw(art, 4, {}, pixels[:]))
+	testing.expect_value(t, pixel(pixels[:], 0), [4]u8{0, 0, 255, 255})
+	testing.expect_value(t, pixel(pixels[:], 12), [4]u8{255, 0, 0, 255})
+	art.layers = "FF0000:nonzero:M0 0H24V24H0Z|bad"
+	testing.expect(t, !program_art.draw(art, 4, {}, pixels[:]))
 }
 
 // Guards the generated table: every entry parses, names stay unique, and every path draws.
@@ -55,7 +91,7 @@ every_entry_draws_at_tab_and_header_sizes :: proc(t: ^testing.T) {
 		}
 		for size in ([?]int{14, 21, 32}) {
 			pixels := make([]u8, size * size * 4, context.temp_allocator)
-			testing.expect(t, program_art.draw(art, size, {255, 255, 255}, pixels), first)
+			testing.expect(t, program_art.draw(art, size, {text = {255, 255, 255}}, pixels), first)
 			covered, solid := 0, 0
 			for i := 3; i < len(pixels); i += 4 {
 				if pixels[i] > 0 {covered += 1}
@@ -72,7 +108,7 @@ every_entry_draws_at_tab_and_header_sizes :: proc(t: ^testing.T) {
 drawing_premultiplies_the_colour :: proc(t: ^testing.T) {
 	art, _ := program_art.find("git")
 	pixels: [16 * 16 * 4]u8
-	testing.expect(t, program_art.draw(art, 16, {200, 100, 50}, pixels[:]))
+	testing.expect(t, program_art.draw(art, 16, {text = {200, 100, 50}, mono = true}, pixels[:]))
 	for i := 0; i < len(pixels); i += 4 {
 		a := u32(pixels[i + 3])
 		testing.expect_value(t, u32(pixels[i]), (200 * a + 127) / 255)
@@ -80,4 +116,9 @@ drawing_premultiplies_the_colour :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, !program_art.draw(art, 0, {}, pixels[:]))
 	testing.expect(t, !program_art.draw(art, 17, {}, pixels[:]))
+}
+
+@(private)
+pixel :: proc(pixels: []u8, at: int) -> [4]u8 {
+	return {pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]}
 }

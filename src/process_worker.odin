@@ -37,7 +37,7 @@ Program_Icon_Job :: struct {
 	index:  int,
 	source: Program_Icon_Source,
 	path:   string,
-	colour: [3]u8,
+	paint:  program_art.Paint,
 	size:   int,
 	pixels: []u8,
 	found:  bool,
@@ -138,7 +138,7 @@ process_icon_request :: proc(pw: ^Process_Worker, index: int, platform: ^platfor
 		index  = index,
 		source = icon.source,
 		path   = icon.path,
-		colour = icon.colour,
+		paint  = icon.paint,
 		size   = icon.size,
 		pixels = icon.pixels,
 	}
@@ -170,7 +170,7 @@ program_icon_read :: proc(job: Program_Icon_Job) -> bool {
 		return platform_api.executable_icon(job.path, job.size, job.pixels)
 	case .Artwork:
 		art, found := program_art.find(job.path)
-		return found && program_art.draw(art, job.size, job.colour, job.pixels)
+		return found && program_art.draw(art, job.size, job.paint, job.pixels)
 	case .File:
 		return program_icon_png(job.path, job.size, job.pixels)
 	}

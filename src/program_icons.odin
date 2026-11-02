@@ -30,7 +30,8 @@ program_launchers := [?]string{"node", "bun", "deno", "npx", "pnpx", "bunx", "cm
 @(private, rodata)
 program_bridges := [?]string{"wsl", "ssh", "mosh", "mosh-client", "docker", "podman"}
 
-// Brand colours fainter than this against the tab background use the tab text colour instead.
+// Artwork with a brand colour fainter than this against the tab background uses the tab text
+// colour instead.
 @(private)
 PROGRAM_ART_CONTRAST :: 3
 
@@ -54,7 +55,7 @@ Program_Icon_Source :: enum u8 {
 Program_Icon :: struct {
 	source: Program_Icon_Source,
 	path:   string,
-	colour: [3]u8,
+	paint:  program_art.Paint,
 	size:   int,
 	pixels: []u8,
 	state:  Program_Icon_State,
@@ -64,7 +65,13 @@ Program_Icon :: struct {
 
 // Reuses a free icon or the least recently drawn finished one.
 @(private)
-program_icon_request :: proc(app: ^App, source: Program_Icon_Source, path: string, colour: [3]u8, size: int) {
+program_icon_request :: proc(
+	app: ^App,
+	source: Program_Icon_Source,
+	path: string,
+	paint: program_art.Paint,
+	size: int,
+) {
 	pw := &app.processes
 	index := -1
 	for icon, i in pw.icons {
@@ -88,7 +95,7 @@ program_icon_request :: proc(app: ^App, source: Program_Icon_Source, path: strin
 	icon^ = {
 		source = source,
 		path   = path_copy,
-		colour = colour,
+		paint  = paint,
 		size   = size,
 		pixels = pixels,
 		state  = .Pending,
@@ -103,7 +110,7 @@ program_icon_atlas :: proc(
 	app: ^App,
 	source: Program_Icon_Source,
 	path: string,
-	colour: [3]u8,
+	paint: program_art.Paint,
 	size: int,
 ) -> (
 	rect: render.Rect,
@@ -114,7 +121,7 @@ program_icon_atlas :: proc(
 	if path == "" || size < 1 || size > platform_api.EXECUTABLE_ICON_MAX {return {}, .Missing, .Ok}
 	pw.clock += 1
 	for &icon in pw.icons {
-		if icon.state == .Free || icon.source != source || icon.size != size || icon.colour != colour {
+		if icon.state == .Free || icon.source != source || icon.size != size || icon.paint != paint {
 			continue
 		}
 		if icon.path != path {continue}
@@ -129,7 +136,7 @@ program_icon_atlas :: proc(
 		r := icon.slot
 		return {f32(r.x), f32(r.y), f32(r.width), f32(r.height)}, .Ready, .Ok
 	}
-	program_icon_request(app, source, path, colour, size)
+	program_icon_request(app, source, path, paint, size)
 	return {}, .Pending, .Ok
 }
 
@@ -147,10 +154,10 @@ pane_icon :: proc(
 ) {
 	if entry == nil {return}
 	if app.settings.tabs.program_icons && entry.program_name != "" {
-		source, path, colour, found := program_icon_source(app, entry, int(math.round(size)))
+		source, path, paint, found := program_icon_source(app, entry, int(math.round(size)))
 		if found {
 			state: Program_Icon_State
-			atlas, state, result = program_icon_atlas(app, source, path, colour, int(math.round(size)))
+			atlas, state, result = program_icon_atlas(app, source, path, paint, int(math.round(size)))
 			if result != .Ok || state == .Ready {return}
 			atlas = {}
 		}
@@ -169,7 +176,7 @@ program_icon_source :: proc(
 ) -> (
 	source: Program_Icon_Source,
 	path: string,
-	colour: [3]u8,
+	paint: program_art.Paint,
 	found: bool,
 ) {
 	if file, ok := program_icon_file(app, entry); ok && !program_icon_missing(app, .File, file, {}, size) {
@@ -177,8 +184,8 @@ program_icon_source :: proc(
 	}
 	if entry.program_has_art {
 		name := program_art.canonical(entry.program_art)
-		art_colour := program_art_colour(app, entry.program_art)
-		if !program_icon_missing(app, .Artwork, name, art_colour, size) {return .Artwork, name, art_colour, true}
+		art_paint := program_art_paint(app, entry.program_art)
+		if !program_icon_missing(app, .Artwork, name, art_paint, size) {return .Artwork, name, art_paint, true}
 	}
 	if entry.program_path != "" && !program_icon_missing(app, .Executable, entry.program_path, {}, size) {
 		return .Executable, entry.program_path, {}, true
@@ -191,11 +198,11 @@ program_icon_missing :: proc(
 	app: ^App,
 	source: Program_Icon_Source,
 	path: string,
-	colour: [3]u8,
+	paint: program_art.Paint,
 	size: int,
 ) -> bool {
 	for &icon in app.processes.icons {
-		if icon.state == .Missing && icon.source == source && icon.size == size && icon.colour == colour &&
+		if icon.state == .Missing && icon.source == source && icon.size == size && icon.paint == paint &&
 		   icon.path == path {
 			icon.used = app.processes.clock
 			return true
@@ -222,16 +229,23 @@ program_icon_file :: proc(app: ^App, entry: ^Session_Entry) -> (string, bool) {
 	return path, true
 }
 
-// Artwork is drawn in its brand colour when that stands out from the tab background, otherwise in
-// the tab text colour, so dark logos stay visible on dark themes and light ones on light themes.
+// Artwork is drawn in its brand colours when every one stands out from the tab background,
+// otherwise wholly in the tab text colour, so dark logos stay visible on dark themes and light ones
+// on light themes, and a multi-colour logo is never partly recoloured.
 @(private)
-program_art_colour :: proc(app: ^App, art: program_art.Art) -> [3]u8 {
-	if brand, ok := program_art.brand(art); ok {
-		colour := render.Color{f32(brand.r) / 255, f32(brand.g) / 255, f32(brand.b) / 255, 1}
-		if term_view.contrast_ratio(colour, app.theme.tab_bar) >= PROGRAM_ART_CONTRAST {return brand}
-	}
+program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_art.Paint) {
 	text := app.theme.tab_text
-	return {u8(math.round(text.r * 255)), u8(math.round(text.g * 255)), u8(math.round(text.b * 255))}
+	paint.text = {u8(math.round(text.r * 255)), u8(math.round(text.g * 255)), u8(math.round(text.b * 255))}
+	layers := art.layers
+	for layer in program_art.next_layer(&layers) {
+		brand := program_art.brand(layer) or_continue
+		colour := render.Color{f32(brand.r) / 255, f32(brand.g) / 255, f32(brand.b) / 255, 1}
+		if term_view.contrast_ratio(colour, app.theme.tab_bar) < PROGRAM_ART_CONTRAST {
+			paint.mono = true
+			return
+		}
+	}
+	return
 }
 
 // Chooses the pane's program from this poll's snapshot; reports whether its icon may change. A
