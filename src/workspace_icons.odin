@@ -61,7 +61,7 @@ workspace_icon_draw :: proc(
 	color: render.Color,
 ) -> glyphs.Result {
 	if icon.emoji != "" {
-		return ui.draw_cluster_centered(&w.ui_text, &w.list, icon.emoji, area, color, 18 * w.scale)
+		return ui.draw_cluster_centered(&w.ui_text, &w.list, icon.emoji, area, color, area.height)
 	}
 	tint := workspace_icon_tint(icon.tint, color)
 	@(static, rodata)
@@ -70,5 +70,7 @@ workspace_icon_draw :: proc(
 	if !w.ui_text.has_icons {
 		return ui.draw_glyph_centered(&w.ui_text, &w.list, '◇', area, tint)
 	}
-	return ui.draw_icon(&w.ui_text, &w.list, preset.glyph, area, tint, 0.9)
+	// draw_icon sizes the font to 0.6 of `fraction`; Segoe Fluent Icons draw a glyph as wide as its em,
+	// so this fraction makes the glyph fill the box like every other 16 DIP leading icon.
+	return ui.draw_icon(&w.ui_text, &w.list, preset.glyph, area, tint, 1 / 0.6)
 }

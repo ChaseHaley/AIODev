@@ -146,7 +146,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			atlas := render.Rect{}
 			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {
 				result: glyphs.Result
-				icon, atlas, result = pane_icon(app, pane.session, 14 * w.scale)
+				icon, atlas, result = pane_icon(app, pane.session, ui.ICON_BUTTON * w.scale)
 				if result != .Ok {return result}
 			}
 			x := tab_position(w, i) * bar.tab_width
@@ -185,17 +185,13 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			tab_control(w, w.workspace.selected).hover.value,
 			w.scale,
 		)
+		underline := render.Rect{x, 30 * w.scale - lift, max(0, bar.tab_width - 20 * w.scale), 2 * w.scale}
 		if render.push_rect(
 			   &w.list,
 			   {
-				   rect = {
-					   x,
-					   30 * w.scale - lift,
-					   max(0, bar.tab_width - 20 * w.scale),
-					   2 * w.scale,
-				   },
+				   rect = underline,
 				   color = app.theme.tab_indicator,
-				   radius = w.scale,
+				   radius = ui.pill_radius(underline),
 			   },
 		   ) !=
 		   .None {return .Ok}

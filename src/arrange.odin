@@ -383,9 +383,9 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 			r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
 			return {
 					r.x + 2 * w.scale,
-					6 * w.scale,
+					(ui.TITLE_BAR_HEIGHT - ui.HEIGHT_TOOLBAR) / 2 * w.scale,
 					max(0, min(180 * w.scale, r.width) - 4 * w.scale),
-					28 * w.scale,
+					ui.HEIGHT_TOOLBAR * w.scale,
 				},
 				true
 		}

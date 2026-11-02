@@ -8,6 +8,10 @@ USAGE :: `stylecheck [--fix] <file.odin>...
 Checks the whitespace rules the source review found drifting:
   1. Binary +, -, *, / and % take one space on each side.
   2. No source line is wider than 110 columns.
+Interface code (src/ui and the src application package) also follows the design system:
+  3. A corner radius is RADIUS_CONTROL, RADIUS_OVERLAY, pill_radius() or a value derived from them.
+  4. Text takes its size from a Text_Style; only ui/text.odin and window.odin call text_set_size.
+A line, or the line before it, with a "design-exempt:" comment and its reason skips rules 3 and 4.
 Strings, rune literals and comments are skipped. --fix inserts the missing spaces and rewrites
 the file; it never changes anything else. Exit codes: 0 clean, 1 issues, 2 usage.
 `
@@ -17,6 +21,8 @@ MAX_WIDTH :: 110
 Rule :: enum {
 	Unspaced_Operator,
 	Line_Width,
+	Design_Radius,
+	Design_Text_Size,
 }
 
 Issue :: struct {
@@ -65,6 +71,7 @@ main :: proc() {
 			continue
 		}
 		scan(path, string(text), &issues)
+		if design_scope(path) {scan_design(path, string(text), &issues)}
 	}
 	for issue in issues {
 		fmt.printfln("%s:%d:%d: %s", issue.path, issue.line, issue.column, rule_text(issue.rule))
@@ -81,6 +88,10 @@ rule_text :: proc(rule: Rule) -> string {
 		return "put one space around a binary operator"
 	case .Line_Width:
 		return "keep the line within 110 columns"
+	case .Design_Radius:
+		return "use RADIUS_CONTROL, RADIUS_OVERLAY or pill_radius() for a corner radius"
+	case .Design_Text_Size:
+		return "take the text size from a Text_Style with text_styled"
 	}
 	return ""
 }
@@ -212,4 +223,74 @@ unspaced :: proc(text: string, at: int) -> bool {
 	left := is_word(before) || before == ')' || before == ']'
 	right := is_word(after) || after == '(' || after == '['
 	return left && right
+}
+
+// Interface code: the ui package and the application package at the top of src. The files that
+// define the design tokens and the type ramp are the only places that may use raw values.
+design_scope :: proc(path: string) -> bool {
+	p, _ := strings.replace_all(path, "\\", "/", context.temp_allocator)
+	if strings.has_suffix(p, "/ui/design.odin") || strings.has_suffix(p, "/ui/text.odin") {return false}
+	if index := strings.last_index(p, "/src/"); index >= 0 {
+		rest := p[index + len("/src/"):]
+		return strings.has_prefix(rest, "ui/") || !strings.contains(rest, "/")
+	}
+	return false
+}
+
+// Records design-system breaks line by line. Comments are ignored, and a "design-exempt:" comment on
+// the line or the line above excuses it.
+scan_design :: proc(path: string, text: string, issues: ^[dynamic]Issue) {
+	sizes_allowed := strings.has_suffix(path, "window.odin")
+	exempt_next := false
+	offset := 0
+	line_number := 0
+	rest := text
+	for raw in strings.split_lines_iterator(&rest) {
+		line_number += 1
+		start := offset
+		offset += len(raw) + 1
+		comment := strings.index(raw, "//")
+		exempt := exempt_next || strings.contains(raw, "design-exempt:")
+		exempt_next = comment >= 0 && strings.contains(raw[comment:], "design-exempt:")
+		if exempt {continue}
+		code := comment >= 0 ? raw[:comment] : raw
+		if column := radius_literal(code); column >= 0 {
+			append(issues, Issue{path, line_number, column + 1, start + column, .Design_Radius})
+		}
+		if !sizes_allowed {
+			if column := strings.index(code, "text_set_size("); column >= 0 {
+				append(issues, Issue{path, line_number, column + 1, start + column, .Design_Text_Size})
+			}
+		}
+	}
+}
+
+// The column of a `radius` assigned a number literal (other than 0) or a bare scale, or -1.
+radius_literal :: proc(code: string) -> int {
+	search := 0
+	for search < len(code) {
+		found := strings.index(code[search:], "radius")
+		if found < 0 {return -1}
+		at := search + found
+		search = at + len("radius")
+		if at > 0 && is_word(code[at - 1]) {continue}
+		i := search
+		if i < len(code) && is_word(code[i]) {continue}
+		for i < len(code) && code[i] == ' ' {i += 1}
+		if i < len(code) && code[i] == ':' {i += 1}
+		if i >= len(code) || code[i] != '=' || (i + 1 < len(code) && code[i + 1] == '=') {continue}
+		i += 1
+		for i < len(code) && code[i] == ' ' {i += 1}
+		value := code[i:]
+		if len(value) > 0 && value[0] >= '0' && value[0] <= '9' {
+			zero := value[0] == '0' && (len(value) == 1 || !(is_word(value[1]) || value[1] == '.'))
+			if !zero {return at}
+		}
+		for name in ([?]string{"scale", "s", "w.scale"}) {
+			if strings.has_prefix(value, name) && (len(value) == len(name) || !is_word(value[len(name)])) {
+				return at
+			}
+		}
+	}
+	return -1
 }

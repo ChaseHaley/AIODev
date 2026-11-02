@@ -46,7 +46,8 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 	case "font.size":
 		row.minimum, row.maximum, row.step = 6, 32, 1
 	case "interface.font_size":
-		row.step = 1
+		// 0.75 pt is one pixel at 96 DPI, so each step lands on a whole pixel size.
+		row.step = 0.75
 	case "font.line_height":
 		row.minimum, row.maximum, row.step = 0.8, 2, 0.05
 	}
@@ -93,12 +94,13 @@ slider_value :: proc(minimum, maximum: f64, fraction: f32) -> f64 {
 slider_draw :: proc(list: ^render.Draw_List, track: render.Rect, fraction: f32, theme: Theme, scale: f32) {
 	cy := track.y + track.height / 2
 	groove := render.Rect{track.x, cy - 2 * scale, track.width, 4 * scale}
-	draw_rect(list, {rect = groove, color = theme.border, radius = RADIUS_MARK * scale})
+	draw_rect(list, {rect = groove, color = theme.border, radius = pill_radius(groove)})
 	groove.width *= fraction
-	draw_rect(list, {rect = groove, color = theme.accent, radius = RADIUS_MARK * scale})
-	thumb := render.Rect{track.x + track.width * fraction - 7 * scale, cy - 7 * scale, 14 * scale, 14 * scale}
-	draw_rect(list, {rect = thumb, color = theme.accent, radius = 7 * scale})
-	draw_rect(list, {rect = thumb, color = theme.surface, radius = 7 * scale, stroke = 2 * scale})
+	draw_rect(list, {rect = groove, color = theme.accent, radius = pill_radius(groove)})
+	size := SLIDER_THUMB * scale
+	thumb := render.Rect{track.x + track.width * fraction - size / 2, cy - size / 2, size, size}
+	draw_rect(list, {rect = thumb, color = theme.accent, radius = pill_radius(thumb)})
+	draw_rect(list, {rect = thumb, color = theme.surface, radius = pill_radius(thumb), stroke = 2 * scale})
 }
 
 // A setting's reset button: faint while the value is the default, lit under the pointer otherwise.

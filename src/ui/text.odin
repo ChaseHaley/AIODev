@@ -230,41 +230,36 @@ draw_rect :: proc(list: ^render.Draw_List, instance: render.Rect_Instance) {
 	_ = render.push_rect(list, instance)
 }
 
+// The type ramp: four sizes and two weights. Body is the interface font size setting (13 DIPs by
+// default); the other sizes keep their ratio to it. Hierarchy comes from size first, then weight,
+// then the text colour roles, never from a size outside this ramp.
 Text_Style :: enum {
+	// Primary interface text: tabs, rows, menus, buttons, fields and palette results.
 	Body,
+	// Body emphasis: notice titles, group headings and the label of a primary or destructive button.
 	Strong,
-	Small,
-	Input,
-	// The command palette's query: larger than other fields because it is the palette's focus.
-	Query,
-	// Command palette result titles.
+	// Secondary text: descriptions, paths, hints, counts, shortcuts and keycaps.
+	Detail,
+	// The title of a dialog or overlay, semibold.
 	Title,
-	// Dialog and popover titles: the title size, semibold.
-	Heading,
-	// The title of a full page such as Settings.
+	// The one large element of a surface: the command palette query and a page title.
 	Display,
-	Keycap,
 }
 
 text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 	copy := t^
-	size := f32(12)
-	#partial switch style {
-	case .Small:
-		size = 11
-	case .Input:
-		size = 13
-	case .Query:
-		size = 19
-	case .Title, .Heading:
-		size = 13.5
+	ratio := f32(1)
+	switch style {
+	case .Body, .Strong:
+	case .Detail:
+		ratio = 11.0 / 13
+	case .Title:
+		ratio = 15.0 / 13
 	case .Display:
-		size = 17
-	case .Keycap:
-		size = 10
+		ratio = 20.0 / 13
 	}
-	if style == .Strong || style == .Heading || style == .Display {copy.family = t.strong_family}
-	text_set_size(&copy, t.size_px * size / 12)
+	if style == .Strong || style == .Title {copy.family = t.strong_family}
+	text_set_size(&copy, t.size_px * ratio)
 	return copy
 }
 

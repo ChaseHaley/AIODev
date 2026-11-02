@@ -79,7 +79,7 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	testing.expect(t, app.window_title_controls_end(&state, &w) < f32(w.width)-138)
 	testing.expect_value(t, app.window_tab_rect(&state, &w, 0).x, bar.x)
 	expect_close := app.window_tab_close_rect(&state, &w, 1)
-	testing.expect_value(t, expect_close.width, f32(22))
+	testing.expect_value(t, expect_close.width, ui.HEIGHT_COMPACT)
 }
 
 @(test)

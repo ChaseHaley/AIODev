@@ -147,7 +147,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				for line in n.lines[:min(len(n.lines), 4)] {
 					visible_width = max(visible_width, ui.text_width(&text, line))
 				}
-				testing.expect_value(t, box.width, min(min(520, width-32)*scale, visible_width+56*scale))
+				testing.expect_value(t, box.width, min(min(520, width-32)*scale, visible_width+52*scale))
 				if len(message) < 10 && width == 1000 {testing.expect(t, box.width < 200*scale)}
 			}
 		}

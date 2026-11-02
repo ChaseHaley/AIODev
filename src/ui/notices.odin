@@ -164,7 +164,9 @@ notices_draw :: proc(
 		item: Notice
 		if i < len(n.items) {item = n.items[i]} else {item = n.fading[i - len(n.items)]}
 		layers, rects, glyph_count := len(list.layers), len(list.rects), len(list.glyphs)
-		content_width := max(scale, max_width - 2 * padding - 32 * scale)
+		// The accent bar, the status icon and the gap after it lead the text.
+		leading := (4 + ICON_BUTTON + SPACE_2) * scale
+		content_width := max(scale, max_width - 2 * padding - leading)
 		wrap(text, item.text, content_width, &n.lines)
 		lines := min(len(n.lines), NOTICE_MAX_LINES)
 		label, symbol, accent := notice_style(item.kind, theme)
@@ -174,18 +176,18 @@ notices_draw :: proc(
 			measured_width = max(measured_width, text_width(text, line))
 		}
 		content_width = min(content_width, measured_width)
-		box_width := min(max_width, content_width + 2 * padding + 32 * scale)
-		box_height := f32(lines + 1) * text.line_height + 2 * padding + 4 * scale
+		box_width := min(max_width, content_width + 2 * padding + leading)
+		box_height := strong.line_height + SPACE_1 * scale + f32(lines) * text.line_height + 2 * padding
 		box := render.Rect{width - margin - box_width, bottom - box_height, box_width, box_height}
 		frame := popover_panel(box, scale)
 		if panel_draw(list, frame, theme) != .None {return .Ok}
-		draw_rect(
-			list,
-			{rect = {box.x, box.y, 4 * scale, box.height}, color = accent, radius = RADIUS_MARK * scale},
-		)
-		badge := render.Rect{box.x + padding + 4 * scale, box.y + padding, 20 * scale, 20 * scale}
+		bar := render.Rect{box.x, box.y, 4 * scale, box.height}
+		draw_rect(list, {rect = bar, color = accent, radius = pill_radius(bar)})
+		icon := ICON_BUTTON * scale
+		icon_y := box.y + padding + (strong.line_height - icon) / 2
+		badge := render.Rect{bar.x + bar.width + padding, icon_y, icon, icon}
 		icon_draw(list, symbol, badge, accent, ICON_BUTTON, scale)
-		x := box.x + padding + 32 * scale
+		x := badge.x + icon + SPACE_2 * scale
 		if result := draw_text(
 			&strong,
 			list,
@@ -196,8 +198,8 @@ notices_draw :: proc(
 			content_width,
 		); result != .Ok {return result}
 		for line, index in n.lines[:lines] {
-			baseline :=
-				box.y + padding + f32(index + 1) * text.line_height + 4 * scale + text.ascent
+			top := box.y + padding + strong.line_height + SPACE_1 * scale
+			baseline := top + f32(index) * text.line_height + text.ascent
 			line_limit := index == lines - 1 && len(n.lines) > lines ? content_width : 0
 			if result := draw_text(text, list, line, x, baseline, theme.text, line_limit);
 			   result != .Ok {
@@ -206,7 +208,7 @@ notices_draw :: proc(
 		}
 		opacity, rise := presence_fade(item.presence, 6 * scale)
 		fade_draw(list, layers, rects, glyph_count, opacity, rise)
-		bottom = box.y - 8 * scale
+		bottom = box.y - SPACE_2 * scale
 		if bottom < margin {
 			break
 		}

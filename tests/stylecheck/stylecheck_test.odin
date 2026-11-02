@@ -9,7 +9,7 @@ count :: proc(text: string) -> (operators, widths: int) {
 	defer delete(issues)
 	sc.scan("sample.odin", text, &issues)
 	for issue in issues {
-		switch issue.rule {
+		#partial switch issue.rule {
 		case .Unspaced_Operator:
 			operators += 1
 		case .Line_Width:
@@ -88,4 +88,56 @@ fix_is_idempotent :: proc(t: ^testing.T) {
 	once := sc.fix_text("x := a+b*c")
 	testing.expect_value(t, sc.fix_text(once), once)
 	testing.expect_value(t, once, "x := a + b * c")
+}
+
+design :: proc(path, text: string) -> (radii, sizes: int) {
+	issues: [dynamic]sc.Issue
+	defer delete(issues)
+	if !sc.design_scope(path) {return}
+	sc.scan_design(path, text, &issues)
+	for issue in issues {
+		#partial switch issue.rule {
+		case .Design_Radius:
+			radii += 1
+		case .Design_Text_Size:
+			sizes += 1
+		}
+	}
+	return
+}
+
+@(test)
+design_radius_uses_tokens :: proc(t: ^testing.T) {
+	radii, _ := design("C:/repo/src/ui/sample.odin",
+		"a := {radius = 6 * scale}\nb := {radius = s}\nc := {radius = 1.5 * s, stroke = s}\nd.radius = w.scale")
+	testing.expect_value(t, radii, 4)
+	radii, _ = design("C:/repo/src/ui/sample.odin",
+		"a := {radius = RADIUS_CONTROL * s}\nb := {radius = pill_radius(r)}\nc := {radius = 0}\n" +
+		"d := {radius = radius}\ne := {radius = knob / 2}\nf := {corner_radius = 7}\ng := radius == 3")
+	testing.expect_value(t, radii, 0)
+}
+
+@(test)
+design_text_sizes_come_from_styles :: proc(t: ^testing.T) {
+	_, sizes := design("C:/repo/src/tooltip.odin", "text_set_size(&t, 14)\n// text_set_size(&t, 14)")
+	testing.expect_value(t, sizes, 1)
+	_, sizes = design("C:/repo/src/window.odin", "ui.text_set_size(&w.ui_text, px)")
+	testing.expect_value(t, sizes, 0)
+}
+
+@(test)
+design_rules_cover_interface_code_only :: proc(t: ^testing.T) {
+	testing.expect(t, sc.design_scope(`C:\repo\src\ui\menu.odin`))
+	testing.expect(t, sc.design_scope("C:/repo/src/tab_strip.odin"))
+	testing.expect(t, !sc.design_scope("C:/repo/src/render/render.odin"))
+	testing.expect(t, !sc.design_scope("C:/repo/src/ui/design.odin"))
+	testing.expect(t, !sc.design_scope("C:/repo/src/ui/text.odin"))
+}
+
+@(test)
+design_exemptions_name_a_reason :: proc(t: ^testing.T) {
+	radii, sizes := design("C:/repo/src/ui/sample.odin",
+		"// design-exempt: drawn glyph\ntext_set_size(&s, 9)\nx := {radius = 3 * s} // design-exempt: dot")
+	testing.expect_value(t, radii, 0)
+	testing.expect_value(t, sizes, 0)
 }

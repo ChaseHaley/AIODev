@@ -24,7 +24,7 @@ tab_bar_caps_widths_and_hit_tests_tabs_actions_and_empty_space :: proc(t: ^testi
 	testing.expect_value(t, ui.tab_bar_hit_test(bar, new_tab+bar.button_width, 20), -1)
 
 	close := ui.tab_close_rect(bar, 1, 1)
-	testing.expect_value(t, close.width, f32(22))
+	testing.expect_value(t, close.width, f32(24))
 	testing.expect_value(t, ui.tab_close_hit(bar, close.x+close.width/2, close.y+close.height/2, 1), 1)
 
 	drop := ui.tab_drop_region(bar, 900, 1)
@@ -74,10 +74,10 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 			for g in list.glyphs {
 				if g.flags & render.GLYPH_COLOR == 0 {continue}
 				icon_found = true
-				testing.expect(t, g.rect.x >= left + 8 * scale && g.rect.x + g.rect.width <= left + 26 * scale)
+				testing.expect(t, g.rect.x >= left + 8 * scale && g.rect.x + g.rect.width <= left + 28 * scale)
 			}
 			for r in list.rects {
-				if r.color != ui.status_color(theme, .Done) || r.rect.width != 14 * scale {continue}
+				if r.color != ui.status_color(theme, .Done) || r.rect.width != ui.ICON_INDICATOR * scale {continue}
 				status_found = true
 				testing.expect(t, r.rect.x >= left + bar.tab_width - 46 * scale && r.rect.x + r.rect.width <= close.x + 4 * scale)
 			}

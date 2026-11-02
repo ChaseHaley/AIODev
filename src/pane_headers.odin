@@ -92,7 +92,7 @@ pane_header_draw :: proc(
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
 		directory = entry.header.directory
 		result: glyphs.Result
-		icon, icon_atlas, result = pane_icon(app, entry, 14 * w.scale)
+		icon, icon_atlas, result = pane_icon(app, entry, ui.ICON_BUTTON * w.scale)
 		if result != .Ok {return result}
 	}
 	badge_hovered := false

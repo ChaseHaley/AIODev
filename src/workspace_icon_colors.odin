@@ -102,8 +102,7 @@ workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	g := workspace_icon_picker_layout(w)
 	target := workspace_row_target(app, p.target_id)
 	if target == nil { return .Ok }
-	if result := ui.draw_text(&w.ui_text, &w.list, "Preset icon color", g.panel.x + 12 * s, g.panel.y + 26 * s,
-		app.theme.text, max(0, g.panel.width - 24 * s)); result != .Ok { return result }
+	if result := workspace_icon_picker_title(app, w, g, "Preset icon color"); result != .Ok { return result }
 	if render.push_layer(&w.list, g.grid) != .None { return .Ok }
 	for i in 0..<len(WORKSPACE_ICON_COLORS) {
 		row := i / g.columns - p.scroll
@@ -113,15 +112,17 @@ workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			hover := render.Rect_Instance{rect = cell, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s}
 	if render.push_rect(&w.list, hover) != .None { return .Ok }
 		}
-		icon := render.Rect{cell.x + 10 * s, cell.y + 8 * s, 24 * s, 24 * s}
+		size := ui.ICON_BUTTON * s
+		icon := render.Rect{cell.x + (cell.width - size) / 2, cell.y + 12 * s, size, size}
 		if result := workspace_icon_draw(w, {preset = target.icon.preset, tint = i}, icon,
 			app.theme.text); result != .Ok { return result }
 		if target.icon.tint == i {
-			if render.push_rect(&w.list, {rect = {cell.x + 14 * s, cell.y + 38 * s, 16 * s, 2 * s},
-				color = app.theme.accent, radius = s}) != .None { return .Ok }
+			mark := render.Rect{cell.x + 14 * s, cell.y + 38 * s, 16 * s, 2 * s}
+			if render.push_rect(&w.list, {rect = mark, color = app.theme.accent, radius = ui.pill_radius(mark)}) !=
+			   .None { return .Ok }
 		}
 	}
-	if render.push_layer(&w.list, g.panel, ui.RADIUS_POPOVER * s) != .None { return .Ok }
+	if render.push_layer(&w.list, g.panel, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	if render.push_rect(&w.list, {rect = g.divider, color = app.theme.border}) != .None { return .Ok }
 	@(static, rodata) colors := WORKSPACE_ICON_COLORS
 	label := p.selected < len(colors) ? colors[p.selected].name : "Emoji keep their original colors"

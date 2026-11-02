@@ -17,15 +17,16 @@ import "core:unicode/utf8"
 @(private) PALETTE_ROW_HEIGHT :: 40
 @(private) PALETTE_FOOTER_HEIGHT :: 32
 @(private) PALETTE_PADDING :: 8
-@(private) PALETTE_TEXT_INSET :: 14
+@(private) PALETTE_TEXT_INSET :: DIALOG_PADDING
 @(private) PALETTE_SETTING_SUFFIX :: " SETTING"
-@(private) PALETTE_CHIP_HEIGHT :: 25
-@(private) PALETTE_CHIP_GAP :: 10
-@(private) PALETTE_KEYCAP_HEIGHT :: 18
+@(private) PALETTE_CHIP_HEIGHT :: HEIGHT_COMPACT
+@(private) PALETTE_CHIP_GAP :: SPACE_2
+@(private) PALETTE_KEYCAP_HEIGHT :: 20
 @(private) PALETTE_MENU_WIDTH :: 176
-@(private) PALETTE_MENU_ROW :: 26
-@(private) PALETTE_MENU_INSET :: 4
-@(private) PALETTE_GLYPH_WIDTH :: 20
+@(private) PALETTE_MENU_ROW :: MENU_ROW_HEIGHT
+@(private) PALETTE_MENU_INSET :: OVERLAY_PADDING
+// A leading icon and the gap after it.
+@(private) PALETTE_GLYPH_WIDTH :: ICON_BUTTON + SPACE_2
 @(private) PALETTE_NO_RANK :: 99
 @(private) PALETTE_PRESENCE :: Presence_Spec {
 	open  = 120 * time.Millisecond,
@@ -109,11 +110,11 @@ Palette_Mode_Info :: struct {
 }
 
 @(private) PALETTE_CHIP_WIDTHS := [Palette_Mode]f32 {
-	.All = 46,
-	.Tabs = 58,
-	.Workspaces = 94,
-	.Settings = 78,
-	.Commands = 90,
+	.All = 48,
+	.Tabs = 60,
+	.Workspaces = 96,
+	.Settings = 80,
+	.Commands = 92,
 }
 
 // One footer entry: its keycaps, joined by a slash, and what they do.
@@ -1105,7 +1106,7 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 		inset = PALETTE_TEXT_INSET,
 		caret_width = 1.5,
 		radius = 0,
-		style = .Query,
+		style = .Display,
 		scale = scale,
 	}
 	if l.chip.width > 0 {
@@ -1221,7 +1222,7 @@ draw_footer :: proc(
 		color = theme.border,
 	})
 	if p.edit.kind == .Shortcut {
-		hint_text := text_styled(text, .Keycap)
+		hint_text := text_styled(text, .Detail)
 		message := p.binding.message
 		if !p.binding.error {
 			message = p.binding.capturing ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
@@ -1234,9 +1235,9 @@ draw_footer :: proc(
 	hints: [PALETTE_HINT_CAP]Palette_Key_Hint
 	count := palette_key_hints(p, &hints)
 	if count == 0 {return .Ok}
-	keycap := text_styled(text, .Keycap)
-	label := text_styled(text, .Small)
-	inset, gap := 13 * scale, 12 * scale
+	keycap := text_styled(text, .Detail)
+	label := text_styled(text, .Detail)
+	inset, gap := DIALOG_PADDING * scale, SPACE_4 * scale
 	baseline := l.footer.y + (l.footer.height - label.line_height) / 2 + label.ascent
 	// Close is pinned right; the other hints run left to right and stop before they would meet it.
 	last := hints[count - 1]
@@ -1296,11 +1297,12 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 
 @(private)
 key_hint_width :: proc(keycap, label: ^Text, hint: Palette_Key_Hint, scale: f32) -> f32 {
-	width := text_width(keycap, hint.keys[0]) + 10 * scale
+	pad := KEYCAP_PADDING * scale
+	width := text_width(keycap, hint.keys[0]) + 2 * pad
 	if hint.keys[1] != "" {
-		width += text_width(label, "/") + 8 * scale + text_width(keycap, hint.keys[1]) + 10 * scale
+		width += text_width(label, "/") + 2 * SPACE_1 * scale + text_width(keycap, hint.keys[1]) + 2 * pad
 	}
-	return width + 5 * scale + text_width(label, hint.label)
+	return width + SPACE_1 * scale + text_width(label, hint.label)
 }
 
 @(private)
@@ -1324,20 +1326,21 @@ draw_key_hint :: proc(
 			if result := draw_text(label, list, "/", pen, baseline, theme.faint); result != .Ok {return result}
 			pen += text_width(label, "/") + 4 * scale
 		}
-		width := text_width(keycap, key) + 10 * scale
+		width := text_width(keycap, key) + 2 * KEYCAP_PADDING * scale
 		draw_rect(list, {
 			rect   = {pen, top, width, height},
 			color  = theme.border,
-			radius = RADIUS_INNER * scale,
+			radius = RADIUS_CONTROL * scale,
 			stroke = scale,
 		})
 		key_baseline := top + (height - keycap.line_height) / 2 + keycap.ascent
-		if result := draw_text(keycap, list, key, pen + 5 * scale, key_baseline, theme.muted); result != .Ok {
+		key_x := pen + KEYCAP_PADDING * scale
+		if result := draw_text(keycap, list, key, key_x, key_baseline, theme.muted); result != .Ok {
 			return result
 		}
 		pen += width
 	}
-	return draw_text(label, list, hint.label, pen + 5 * scale, baseline, theme.muted)
+	return draw_text(label, list, hint.label, pen + SPACE_1 * scale, baseline, theme.muted)
 }
 
 @(private)
@@ -1351,37 +1354,37 @@ draw_mode_menu :: proc(
 ) -> glyphs.Result {
 	if l.menu.width <= 0 || l.menu.height <= 0 {return .Ok}
 	if render.push_layer(list, l.menu) != .None {return .Ok}
-	draw_rect(list, {rect = l.menu, color = theme.pane, radius = RADIUS_POPOVER * scale})
+	draw_rect(list, {rect = l.menu, color = theme.pane, radius = RADIUS_OVERLAY * scale})
 	draw_rect(list, {
 		rect   = l.menu,
 		color  = theme.border,
-		radius = RADIUS_POPOVER * scale,
+		radius = RADIUS_OVERLAY * scale,
 		stroke = scale,
 	})
 	inset := PALETTE_MENU_INSET * scale
 	row_height := (l.menu.height - 2 * inset) / f32(len(PALETTE_MENU_ORDER))
-	mode_text := text_styled(text, .Small)
+	mode_text := text^
 	for mode, i in PALETTE_MENU_ORDER {
 		row := render.Rect {
-			l.menu.x + 3 * scale,
+			l.menu.x + inset,
 			l.menu.y + inset + f32(i) * row_height,
-			l.menu.width - 6 * scale,
+			l.menu.width - 2 * inset,
 			row_height,
 		}
 		if p.mode == mode {
-			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_INNER * scale})
+			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
 		} else if p.menu_hover == i {
-			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_INNER * scale})
+			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_CONTROL * scale})
 		}
 		info := PALETTE_MODES[mode]
 		baseline := row.y + (row.height - mode_text.line_height) / 2 + mode_text.ascent
-		if result := draw_text(&mode_text, list, info.word, row.x + 9 * scale, baseline,
+		if result := draw_text(&mode_text, list, info.word, row.x + CONTROL_INSET * scale, baseline,
 			p.mode == mode ? theme.text : theme.muted); result != .Ok {return result}
 		if info.prefix != "" {
-			prefix_text := text_styled(text, .Keycap)
+			prefix_text := text_styled(text, .Detail)
 			width := text_width(&prefix_text, info.prefix)
 			if result := draw_text(&prefix_text, list, info.prefix,
-				row.x + row.width - width - 9 * scale, baseline, theme.faint); result != .Ok {
+				row.x + row.width - width - CONTROL_INSET * scale, baseline, theme.faint); result != .Ok {
 				return result
 			}
 		}
@@ -1424,36 +1427,28 @@ palette_draw :: proc(
 			radius = RADIUS_CONTROL * scale,
 			stroke = scale,
 		})
-		chip_text := text_styled(text, .Small)
+		chip_text := text_styled(text, .Detail)
 		baseline := chip.y + (chip.height - chip_text.line_height) / 2 + chip_text.ascent
-		if result := draw_text(&chip_text, list, PALETTE_MODES[p.mode].word, chip.x + 8 * scale, baseline,
-			theme.text, max(0, chip.width - 26 * scale)); result != .Ok {return result}
-		// A two-pixel chevron reads as a menu affordance without relying on a font glyph.
-		center_x := chip.x + chip.width - 11 * scale
-		center_y := chip.y + chip.height / 2 - 2 * scale
-		for row in 0 ..< 3 {
-			for direction in ([?]f32{-1, 1}) {
-				draw_rect(list, {
-					rect = {
-						center_x + direction * f32(row) * scale - scale,
-						center_y + f32(2 - row) * scale,
-						2 * scale,
-						2 * scale,
-					},
-					color  = theme.muted,
-					radius = 0.8 * scale,
-				})
-			}
+		chip_inset := CONTROL_INSET * scale
+		if result := draw_text(&chip_text, list, PALETTE_MODES[p.mode].word, chip.x + chip_inset, baseline,
+			theme.text, max(0, chip.width - 2 * chip_inset - (ICON_INDICATOR + SPACE_1) * scale));
+		   result != .Ok {return result}
+		chevron := render.Rect {
+			chip.x + chip.width - (CONTROL_INSET + ICON_INDICATOR) * scale,
+			chip.y,
+			ICON_INDICATOR * scale,
+			chip.height,
 		}
+		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
 	}
 	box := palette_query_box(p, l, text, scale)
-	query_text := text_styled(text, .Query)
+	query_text := text_styled(text, .Display)
 	if box.rect.width > 1 {
 		baseline := l.input.y + (l.input.height - query_text.line_height) / 2 + query_text.ascent
 		if result := field_box_draw(box, list, theme, baseline, true,
 			PALETTE_MODES[p.mode].placeholder); result != .Ok { return result }
 	}
-	title_text := text_styled(text, .Title)
+	title_text := text^
 	if l.rows > 0 && l.list.width > 0 {
 		if render.push_layer(list, l.list) != .None { return .Ok }
 		if len(p.results) == 0 {
@@ -1463,8 +1458,8 @@ palette_draw :: proc(
 		}
 	}
 	if len(p.results) > 0 && l.rows > 0 && l.list.width > 0 {
-		small := text_styled(text, .Small)
-		kind_text := text_styled(text, .Keycap)
+		small := text_styled(text, .Detail)
+		kind_text := text_styled(text, .Detail)
 		row_padding := PALETTE_PADDING * scale
 		for rows in 0 ..< l.rows {
 			index := p.scroll + rows
@@ -1506,10 +1501,10 @@ palette_draw :: proc(
 				if result := draw_fading_text(&small, list, context_label, side, row_baseline, theme.muted,
 					label_width); result != .Ok {return result}
 			}
-			icon_size := ICON_INDICATOR * scale
+			icon_size := ICON_BUTTON * scale
 			icon_y := row.y + (row.height - icon_size) / 2
 			kind_icon := render.Rect{row.x + row_padding, icon_y, icon_size, icon_size}
-			icon_draw(list, PALETTE_KIND_ICONS[item.kind], kind_icon, theme.muted, ICON_INDICATOR, scale)
+			icon_draw(list, PALETTE_KIND_ICONS[item.kind], kind_icon, theme.muted, ICON_BUTTON, scale)
 			title := palette_result_title(p, item)
 			title_x := row.x + row_padding + PALETTE_GLYPH_WIDTH * scale
 			room := max(0, side - 12 * scale - title_x)
@@ -1517,7 +1512,7 @@ palette_draw :: proc(
 			kind_word := ""
 			if palette_title_collides(p, index) {
 				kind_word = PALETTE_KIND_WORDS[item.kind]
-				kind_width = text_width(&kind_text, kind_word) + 6 * scale
+				kind_width = text_width(&kind_text, kind_word) + SPACE_2 * scale
 			}
 			title_width := min(text_width(&title_text, title), max(0, room - kind_width))
 			if title_width <= 0 {continue}
@@ -1535,9 +1530,9 @@ palette_draw :: proc(
 			if result != .Ok {
 				return result
 			}
-			if kind_word != "" && room - title_width - 6 * scale > 0 {
-				if kind_result := draw_text(&kind_text, list, kind_word, title_x + title_width + 6 * scale,
-					row_baseline, theme.faint, max(0, room - title_width - 6 * scale)); kind_result != .Ok {
+			if kind_word != "" && room - title_width - SPACE_2 * scale > 0 {
+				if kind_result := draw_text(&kind_text, list, kind_word, title_x + title_width + SPACE_2 * scale,
+					row_baseline, theme.faint, max(0, room - title_width - SPACE_2 * scale)); kind_result != .Ok {
 					return kind_result
 				}
 			}

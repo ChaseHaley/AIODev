@@ -89,7 +89,7 @@ status_glyph_draw :: proc(
 	case .Blocked, .Permission, .Question, .Auth, .Done, .Error:
 		draw_rect(list, {rect = r, color = ink, radius = size / 2})
 		symbol := text^
-		text_set_size(&symbol, size * 0.72)
+		text_set_size(&symbol, size * 0.72) // design-exempt: a glyph drawn as part of the status mark
 		paper := theme.window
 		if mark.glyph == .Auth && text.has_icons {
 			return draw_icon(text, list, STATUS_LOCK_ICON, r, paper, 0.95)

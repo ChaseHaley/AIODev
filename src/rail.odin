@@ -321,12 +321,12 @@ rail_row_draw :: proc(
 	current := row.workspace == w.workspace
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
-	leading := has_badge ? 20 * s : 0
+	leading := has_badge ? (ui.ICON_BUTTON + ui.SPACE_2) * s : 0
 	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0
 	// Status sits at the right, before Close when it shows, with its place kept while tab status is on.
 	status_right := show_close ? close.x : tile.x + tile.width - 4 * s
 	if app.settings.status.enabled && app.settings.status.tab_indicators || status.glyph != .None {
-		trailing = tile.x + tile.width - status_right + 18 * s
+		trailing = tile.x + tile.width - status_right + (ui.ICON_INDICATOR + ui.SPACE_1) * s
 	}
 	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, tile,
 		{title = title, selected = selected, marked = marked, hovered = hover, pressed = pressed,
@@ -339,7 +339,8 @@ rail_row_draw :: proc(
 			status,
 			s,
 		)
-		mark := render.Rect{status_right - 16 * s, tile.y + 9 * s, 14 * s, 14 * s}
+		size := ui.ICON_INDICATOR * s
+		mark := render.Rect{status_right - ui.SPACE_1 * s - size, tile.y + (tile.height - size) / 2, size, size}
 		if result := status_mark_draw(app, w, mark, status); result != .Ok {return result}
 	}
 	if has_badge {
@@ -347,7 +348,7 @@ rail_row_draw :: proc(
 			&w.list,
 			&w.ui_text,
 			app.theme,
-			{tile.x + 8 * s, tile.y + 8 * s, 16 * s, 16 * s},
+			{tile.x + ui.CONTROL_INSET * s, tile.y + (tile.height - 16 * s) / 2, 16 * s, 16 * s},
 			icon,
 			s,
 			atlas,
@@ -409,13 +410,14 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		fill := pressed ? app.theme.pressed : app.theme.hover
 		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = ui.RADIUS_CONTROL * w.scale})
 	}
-	plus := render.Rect{tile.x + 8 * w.scale, tile.y, ui.ICON_INDICATOR * w.scale, tile.height}
+	// The plus takes a leading icon's column so its label lines up with the tab titles.
+	plus := render.Rect{tile.x + ui.CONTROL_INSET * w.scale, tile.y, ui.ICON_BUTTON * w.scale, tile.height}
 	ui.icon_draw(&w.list, .Add, plus, app.theme.muted, ui.ICON_INDICATOR, w.scale)
 	if result := ui.draw_fading_text(
 		&w.ui_text,
 		&w.list,
 		"New tab",
-		plus.x + plus.width + 6 * w.scale,
+		plus.x + plus.width + ui.SPACE_2 * w.scale,
 		rail_text_baseline(w, tile),
 		app.theme.muted,
 		max(0, tile.width - 40 * w.scale),

@@ -304,18 +304,18 @@ tab_menu_draw_matches_labels_separators_and_disabled_rows :: proc(t: ^testing.T)
 		for label, i in labels {
 			row := app.tab_menu_row_rect(w, i)
 			testing.expect_value(t, row.y, y)
-			testing.expect_value(t, row.height, (label == "" ? 10 : 30)*scale)
+			testing.expect_value(t, row.height, (label == "" ? ui.MENU_SEPARATOR_HEIGHT : ui.MENU_ROW_HEIGHT)*scale)
 			y += row.height
 			testing.expect_value(t, app.tab_menu_hit(w, row.x+1, row.y+row.height/2), i)
 			if label == "" {
 				divider := w.list.rects[i == 2 ? 4 : 5]
-				testing.expect_value(t, divider.rect, render.Rect{row.x+10*scale, row.y+4*scale, row.width-20*scale, scale})
+				testing.expect_value(t, divider.rect, render.Rect{row.x+ui.CONTROL_INSET*scale, row.y+4*scale, row.width-2*ui.CONTROL_INSET*scale, scale})
 				continue
 			}
-			testing.expect_value(t, ui.draw_text(&w.ui_text, &expected, label, row.x+10*scale,
+			testing.expect_value(t, ui.draw_text(&w.ui_text, &expected, label, row.x+ui.CONTROL_INSET*scale,
 				row.y+(row.height-w.ui_text.line_height)/2+w.ui_text.ascent,
 				i == 5 || i == 6 ? f.state.theme.muted : f.state.theme.text,
-				max(1, row.width-20*scale)), glyphs.Result.Ok)
+				max(1, row.width-2*ui.CONTROL_INSET*scale)), glyphs.Result.Ok)
 		}
 		testing.expect_value(t, len(w.list.glyphs), len(expected.glyphs))
 		for glyph, i in w.list.glyphs { testing.expect_value(t, glyph, expected.glyphs[i]) }

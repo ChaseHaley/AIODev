@@ -67,7 +67,7 @@ palette_controls_match_the_settings_page_and_keep_complex_settings_jump_only :: 
 	testing.expect(t, !ui.palette_setting(settings.schema_find("theme.name")^).searchable)
 	gap := ui.palette_setting(settings.schema_find("pane.gap")^)
 	testing.expect(t, gap.resettable)
-	testing.expect_value(t, gap.default_value, "5")
+	testing.expect_value(t, gap.default_value, "4")
 	testing.expect(t, ui.palette_setting(settings.schema_find("input.leader")^).resettable)
 	testing.expect(t, !ui.palette_setting(settings.schema_find(settings.PADDING_GROUPS_KEY)^).resettable)
 }

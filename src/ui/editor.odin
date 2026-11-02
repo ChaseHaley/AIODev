@@ -225,8 +225,8 @@ HEADER_CENTER :: 30
 editor_reset_all_rect :: proc(l: Editor_Layout) -> render.Rect {
 	right := max(l.filter.x + l.filter.width, l.list.x + l.list.width)
 	width := min(148 * l.scale, max(0, l.page.width - 160 * l.scale))
-	y := l.page.y + (HEADER_CENTER - CONTROL_HEIGHT / 2) * l.scale
-	return {right - width, y, width, CONTROL_HEIGHT * l.scale}
+	y := l.page.y + (HEADER_CENTER - HEIGHT_STANDARD / 2) * l.scale
+	return {right - width, y, width, HEIGHT_STANDARD * l.scale}
 }
 
 // The parts of one setting row; zero-sized parts do not exist for its kind.
@@ -240,7 +240,7 @@ CAPTURE_HINT :: "Press a shortcut. Enter saves this alternative, Esc cancels, Ba
 @(private)
 ROW_HEIGHT :: 52
 @(private)
-CHOICE_HEIGHT :: CONTROL_HEIGHT
+CHOICE_HEIGHT :: HEIGHT_STANDARD
 @(private)
 OUTLINE_ROW_HEIGHT :: RAIL_ROW_HEIGHT
 @(private)
@@ -1640,7 +1640,7 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 	if area.width < OUTLINE_MIN_PAGE * s {
 		width := max(0, min(960 * s, area.width - 2 * pad))
 		x := area.x + max(pad, (area.width - width) / 2)
-		l.filter = {x, area.y + 52 * s, width, CONTROL_HEIGHT * s}
+		l.filter = {x, area.y + 52 * s, width, HEIGHT_STANDARD * s}
 		top := l.filter.y + l.filter.height + 12 * s
 		l.rows = max(0, int((bottom - top) / l.row_height))
 		l.list = {x, top, width, f32(l.rows) * l.row_height}
@@ -1650,7 +1650,7 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 	gutter := 24 * s
 	width := max(0, min(960 * s, area.width - 2 * pad - OUTLINE_WIDTH * s - gutter))
 	outline_x := area.x + max(pad, (area.width - OUTLINE_WIDTH * s - gutter - width) / 2)
-	l.filter = {outline_x, area.y + 52 * s, OUTLINE_WIDTH * s, CONTROL_HEIGHT * s}
+	l.filter = {outline_x, area.y + 52 * s, OUTLINE_WIDTH * s, HEIGHT_STANDARD * s}
 	outline_top := l.filter.y + l.filter.height + 12 * s
 	l.outline_row_height = OUTLINE_ROW_HEIGHT * s
 	l.outline = {outline_x, outline_top, OUTLINE_WIDTH * s, max(0, bottom - outline_top)}
@@ -1667,10 +1667,10 @@ editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	if len(p.filter.bytes) == 0 {return {}}
 	s := l.scale
 	return {
-		l.filter.x + l.filter.width - 28 * s,
-		l.filter.y + (l.filter.height - 26 * s) / 2,
-		26 * s,
-		26 * s,
+		l.filter.x + l.filter.width - (SPACE_1 + HEIGHT_COMPACT) * s,
+		l.filter.y + (l.filter.height - HEIGHT_COMPACT * s) / 2,
+		HEIGHT_COMPACT * s,
+		HEIGHT_COMPACT * s,
 	}
 }
 
@@ -1691,7 +1691,7 @@ value_box :: proc(p: ^Editor, parts: Row_Parts, text: ^Text, scale: f32) -> Fiel
 		inset = CONTROL_INSET,
 		caret_width = 1,
 		radius = RADIUS_CONTROL,
-		style = .Input,
+		style = .Body,
 		scale = scale,
 	}
 }
@@ -1706,7 +1706,7 @@ filter_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
 		inset = CONTROL_INSET,
 		caret_width = 1,
 		radius = RADIUS_CONTROL,
-		style = .Input,
+		style = .Body,
 		scale = l.scale,
 	}
 }
@@ -1724,44 +1724,44 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	}
 	item := p.items[index]
 	cy := r.y + r.height / 2
-	parts.reset = {r.x + r.width - 34 * s, cy - 13 * s, 26 * s, 26 * s}
-	right := parts.reset.x - 12 * s
+	parts.reset = reset_slot(r, s)
+	right := parts.reset.x - SPACE_3 * s
 	parts.text_right = right
 	if item.row < 0 {return parts}
 	row := p.rows[item.row]
 	if row.process_field != .None {return editor_process_field_parts(&row, parts, s)}
 	field := proc(right, cy, width, s: f32) -> render.Rect {return {
 			right - width * s,
-			cy - CONTROL_HEIGHT / 2 * s,
+			cy - HEIGHT_STANDARD / 2 * s,
 			width * s,
-			CONTROL_HEIGHT * s,
+			HEIGHT_STANDARD * s,
 		}}
 	switch row.kind {
 	case .Action:
 		parts.field = field(right, cy, 148, s)
 		parts.reset = {}
 	case .Toggle:
-		parts.toggle = {right - 44 * s, cy - 11 * s, 44 * s, 22 * s}
+		parts.toggle = {right - SWITCH_WIDTH * s, cy - SWITCH_HEIGHT / 2 * s, SWITCH_WIDTH * s, SWITCH_HEIGHT * s}
 		parts.text_right = parts.toggle.x - 48 * s
 	case .Choice:
 		parts.field = field(right, cy, 180, s)
 	case .Integer, .Number:
-		parts.field = field(right, cy, 90, s)
-		parts.slider = {parts.field.x - 176 * s, cy - 6 * s, 160 * s, 12 * s}
-		parts.text_right = parts.slider.x - 12 * s
+		parts.field = field(right, cy, 88, s)
+		parts.slider = {parts.field.x - 176 * s, cy - SLIDER_THUMB / 2 * s, 160 * s, SLIDER_THUMB * s}
+		parts.text_right = parts.slider.x - SPACE_3 * s
 	case .Text:
 		parts.field = field(right, cy, min(360, r.width / s * 0.42), s)
 	case .Profile_Icon:
-		edge := r.x + r.width - 12 * s
-		parts.clear = {edge - 52 * s, cy - 13 * s, 52 * s, 26 * s}
-		parts.field = field(parts.clear.x - 8 * s, cy, min(300, r.width / s * 0.38), s)
-		parts.swatch = {parts.field.x - 42 * s, cy - 15 * s, 30 * s, 30 * s}
+		edge := r.x + r.width - SPACE_3 * s
+		parts.clear = {edge - 56 * s, cy - HEIGHT_COMPACT / 2 * s, 56 * s, HEIGHT_COMPACT * s}
+		parts.field = field(parts.clear.x - SPACE_2 * s, cy, min(300, r.width / s * 0.38), s)
+		parts.swatch = swatch_slot(parts.field, s)
 		parts.reset = {}
-		parts.text_right = parts.swatch.x - 12 * s
+		parts.text_right = parts.swatch.x - SPACE_3 * s
 	case .Color, .Optional_Color:
 		parts.field = field(right, cy, 120, s)
-		parts.swatch = {parts.field.x - 38 * s, cy - 15 * s, 30 * s, 30 * s}
-		parts.text_right = parts.swatch.x - 12 * s
+		parts.swatch = swatch_slot(parts.field, s)
+		parts.text_right = parts.swatch.x - SPACE_3 * s
 	case .Shortcut:
 		shortcut_parts(&parts, s, index == p.selected)
 	case .Process_Group, .Profile, .Profile_Add, .Detected_Header, .Detected:
@@ -1770,6 +1770,31 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
 	parts.text_right -= 16 * s
 	return parts
+}
+
+// Group headings sit at the control inset; their settings indent one SPACE_6 step further.
+@(private)
+ITEM_INSET :: CONTROL_INSET + SPACE_6
+
+// Baselines for a title over a detail line, centred together in `row` with 2 DIPs between the
+// line boxes.
+stacked_baselines :: proc(row: render.Rect, first, second: ^Text, scale: f32) -> (f32, f32) {
+	gap := 2 * scale
+	top := row.y + (row.height - first.line_height - gap - second.line_height) / 2
+	return top + first.ascent, top + first.line_height + gap + second.ascent
+}
+
+// The reset button at a row's right edge, shared by Settings and the palette.
+reset_slot :: proc(row: render.Rect, s: f32) -> render.Rect {
+	size := HEIGHT_COMPACT * s
+	return {row.x + row.width - SPACE_2 * s - size, row.y + (row.height - size) / 2, size, size}
+}
+
+// A colour swatch the height of a standard field, SPACE_2 before it.
+@(private)
+swatch_slot :: proc(field: render.Rect, s: f32) -> render.Rect {
+	size := HEIGHT_STANDARD * s
+	return {field.x - SPACE_2 * s - size, field.y + (field.height - size) / 2, size, size}
 }
 
 // The table cells of the item at `index`. The editor's row rect is the only shared part.
@@ -2448,7 +2473,7 @@ profile_badge_draw :: proc(
 	if rect.width <= 0 {return}
 	draw_rect(list, {rect = rect, color = theme.surface, radius = RADIUS_CONTROL * scale})
 	draw_rect(list, {rect = rect, color = theme.border, radius = RADIUS_CONTROL * scale, stroke = scale})
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	width := min(rect.width - 4 * scale, text_width(&small, badge))
 	draw_text(
 		&small,
@@ -2486,11 +2511,11 @@ profile_radio_draw :: proc(
 		16 * scale,
 		16 * scale,
 	}
-	draw_rect(list, {rect = dot, color = on ? theme.accent : theme.border, radius = 8 * scale})
-	draw_rect(list, {rect = dot, color = theme.border, radius = 8 * scale, stroke = scale})
+	draw_rect(list, {rect = dot, color = on ? theme.accent : theme.border, radius = pill_radius(dot)})
+	draw_rect(list, {rect = dot, color = theme.border, radius = pill_radius(dot), stroke = scale})
 	if on {
 		inner := render.Rect{dot.x + 4 * scale, dot.y + 4 * scale, 8 * scale, 8 * scale}
-		draw_rect(list, {rect = inner, color = theme.accent_text, radius = 4 * scale})
+		draw_rect(list, {rect = inner, color = theme.accent_text, radius = pill_radius(inner)})
 	}
 	if focused {focus_ring_draw(list, dot, theme, scale)}
 }
@@ -2533,20 +2558,21 @@ profile_row_draw :: proc(
 ) -> glyphs.Result {
 	table := profile_row_parts(.Profile, parts.row, scale)
 	if selected {p.profile_menu_parts = table}
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	cy := parts.row.y + parts.row.height / 2
 	focused := selected && p.focus == .Control
 	hovered := index == p.hover_profile_item
 	strong := (selected || index == p.hover_item) && !(.Hidden in row.flags)
 	grip_ink := selected || index == p.hover_item ? theme.muted : theme.faint
 	icon_draw(list, .Grip, table.handle, grip_ink, ICON_BUTTON, scale)
-	badge := render.Rect {table.icon.x, cy - 13 * scale, 26 * scale, 26 * scale}
+	badge_size := HEIGHT_COMPACT * scale
+	badge := render.Rect {table.icon.x, cy - badge_size / 2, badge_size, badge_size}
 	if table.icon.width > 0 {
 		profile_badge_draw(list, text, row.badge, badge, theme, scale, .Hidden in row.flags)
 	}
 	name_color := strong ? theme.text : theme.muted
 	if .Hidden in row.flags {name_color = theme.muted}
-	name_baseline := parts.row.y + 21 * scale
+	name_baseline, note_baseline := stacked_baselines(parts.row, text, &small, scale)
 	auto_detected := .Protected in row.flags
 	if row.note == "" && !auto_detected {name_baseline = cy - text.line_height / 2 + text.ascent}
 	if result := draw_text(
@@ -2565,7 +2591,7 @@ profile_row_draw :: proc(
 			list,
 			note,
 			table.name.x,
-			parts.row.y + 39 * scale,
+			note_baseline,
 			row.note != "" ? theme.error : theme.muted,
 			max(1, table.name.width),
 		); result != .Ok {return result}
@@ -2656,21 +2682,21 @@ profile_add_draw :: proc(
 	theme: Theme,
 	scale: f32,
 ) -> glyphs.Result {
-	small := text_styled(text, .Small)
+	label := text^
 	icon := render.Rect {
-		row_rect.x + 12 * scale,
-		row_rect.y + row_rect.height / 2 - 9 * scale,
-		18 * scale,
-		18 * scale,
+		row_rect.x + SPACE_3 * scale,
+		row_rect.y + (row_rect.height - ICON_BUTTON * scale) / 2,
+		ICON_BUTTON * scale,
+		ICON_BUTTON * scale,
 	}
 	icon_draw(list, .Add, icon, theme.muted, ICON_INDICATOR, scale)
 	color := selected ? theme.text : theme.muted
 	return draw_text(
-		&small,
+		&label,
 		list,
 		row.title,
 		icon.x + icon.width + 8 * scale,
-		row_rect.y + (row_rect.height - small.line_height) / 2 + small.ascent,
+		row_rect.y + (row_rect.height - label.line_height) / 2 + label.ascent,
 		color,
 		max(1, row_rect.width - 60 * scale),
 	)
@@ -2691,9 +2717,9 @@ profile_detected_header_draw :: proc(
 		list,
 		{
 			rect = {
-				parts.row.x + 10 * scale,
-				parts.row.y + 10 * scale,
-				parts.row.width - 20 * scale,
+				parts.row.x + CONTROL_INSET * scale,
+				parts.row.y + SPACE_2 * scale,
+				parts.row.width - 2 * CONTROL_INSET * scale,
 				scale,
 			},
 			color = theme.border,
@@ -2702,7 +2728,7 @@ profile_detected_header_draw :: proc(
 	chevron := profile_row_parts(.Detected_Header, parts.row, scale).chevron
 	chevron_icon: Icon = p.detected_open ? .Chevron_Down : .Chevron_Right
 	icon_draw(list, chevron_icon, chevron, theme.muted, ICON_INDICATOR, scale)
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	if result := draw_text(
 		&small,
 		list,
@@ -2717,7 +2743,7 @@ profile_detected_header_draw :: proc(
 		&small,
 		list,
 		count,
-		parts.row.x + parts.row.width - 14 * scale - text_width(&small, count),
+		parts.row.x + parts.row.width - CONTROL_INSET * scale - text_width(&small, count),
 		parts.row.y + (parts.row.height - small.line_height) / 2 + small.ascent,
 		theme.faint,
 	)
@@ -2738,7 +2764,7 @@ profile_detected_draw :: proc(
 	scale: f32,
 ) -> glyphs.Result {
 	table := profile_row_parts(.Detected, parts.row, scale)
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	cy := parts.row.y + parts.row.height / 2
 	profile_badge_draw(list, text, row.badge, table.icon, theme, scale, true)
 	if result := draw_text(
@@ -2796,7 +2822,7 @@ control_draw :: proc(
 ) -> glyphs.Result {
 	value := selected ? field_string(&p.value) : row.value
 	focused := selected && p.focus == .Control
-	input_text := text_styled(text, .Input)
+	input_text := text_styled(text, .Body)
 	baseline :=
 		parts.field.y + (parts.field.height - input_text.line_height) / 2 + input_text.ascent
 	switch row.kind {
@@ -2825,15 +2851,15 @@ control_draw :: proc(
 			&input_text,
 			list,
 			choice_label(row, value),
-			parts.field.x + 10 * scale,
+			parts.field.x + CONTROL_INSET * scale,
 			baseline,
 			theme.text,
-			max(1, parts.field.width - 40 * scale),
+			max(1, parts.field.width - (2 * CONTROL_INSET + ICON_INDICATOR + SPACE_1) * scale),
 		); r != .Ok {return r}
 		chevron := render.Rect {
-			parts.field.x + parts.field.width - 30 * scale,
+			parts.field.x + parts.field.width - (CONTROL_INSET + ICON_INDICATOR) * scale,
 			parts.field.y,
-			24 * scale,
+			ICON_INDICATOR * scale,
 			parts.field.height,
 		}
 		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
@@ -2880,10 +2906,10 @@ control_draw :: proc(
 		&input_text,
 		list,
 		shown,
-		parts.field.x + 10 * scale,
+		parts.field.x + CONTROL_INSET * scale,
 		baseline,
 		color,
-		max(1, parts.field.width - 20 * scale),
+		max(1, parts.field.width - 2 * CONTROL_INSET * scale),
 	)
 }
 
@@ -2917,10 +2943,10 @@ popup_draw :: proc(
 				CHOICE_HEIGHT * s,
 			}
 			if i ==
-			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_INNER * s})}
+			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_CONTROL * s})}
 			if contains(option, pointer.x, pointer.y) {
 				// Options carry the selection tint, not the paper fill, so no hairline.
-				if result := hover_rim_draw(list, theme, option, RADIUS_INNER * s, 1, s, pointer, false);
+				if result := hover_rim_draw(list, theme, option, RADIUS_CONTROL * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
 			}
 			label := i < len(parts) ? parts[i] : "+ Add shortcut"
@@ -2928,16 +2954,16 @@ popup_draw :: proc(
 				text,
 				list,
 				label,
-				option.x + 10 * s,
+				option.x + CONTROL_INSET * s,
 				option.y + (option.height - text.line_height) / 2 + text.ascent,
 				theme.text,
-				option.width - 44 * s,
+				option.width - (2 * CONTROL_INSET + ICON_INDICATOR + SPACE_2) * s,
 			); result != .Ok {return result}
 			if i < len(parts) {
 				remove := render.Rect {
-					option.x + option.width - 28 * s,
+					option.x + option.width - (CONTROL_INSET + ICON_INDICATOR) * s,
 					option.y,
-					28 * s,
+					ICON_INDICATOR * s,
 					option.height,
 				}
 				icon_draw(list, .Close, remove, theme.muted, ICON_INDICATOR, s)
@@ -2956,16 +2982,23 @@ popup_draw :: proc(
 			if render.push_layer(list, l.page) != .None {return .Ok}
 			if row.key == "font.family" {
 				toggle := choice_font_toggle_rect(p, l)
-				switch_draw(list, {toggle.x + toggle.width - 50 * s, toggle.y + 4 * s, 44 * s, 22 * s},
-				            row.show_all_fonts, p.choice_toggle_focus, theme, s)
-				if result := draw_text(text, list, "Show all fonts", toggle.x + 10 * s,
+				switch_w, switch_h := SWITCH_WIDTH * s, SWITCH_HEIGHT * s
+				switch_rect := render.Rect {
+					toggle.x + toggle.width - CONTROL_INSET * s - switch_w,
+					toggle.y + (toggle.height - switch_h) / 2,
+					switch_w,
+					switch_h,
+				}
+				switch_draw(list, switch_rect, row.show_all_fonts, p.choice_toggle_focus, theme, s)
+				if result := draw_text(text, list, "Show all fonts", toggle.x + CONTROL_INSET * s,
 				                       toggle.y + (toggle.height - text.line_height) / 2 + text.ascent,
-				                       theme.text, toggle.width - 70 * s); result != .Ok {return result}
+				                       theme.text, switch_rect.x - toggle.x - 2 * CONTROL_INSET * s);
+				   result != .Ok {return result}
 			}
 			r.y += choice_search_height(row, s)
 			r.height -= choice_search_height(row, s)
 			if count == 0 {
-				return draw_text(text, list, "No fonts found", r.x + 14 * s,
+				return draw_text(text, list, "No fonts found", r.x + SPACE_3 * s,
 				                 r.y + (r.height - text.line_height) / 2 + text.ascent,
 				                 theme.muted, r.width - 28 * s)
 			}
@@ -2980,10 +3013,10 @@ popup_draw :: proc(
 				CHOICE_HEIGHT * s,
 			}
 			if i ==
-			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_INNER * s})}
+			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_CONTROL * s})}
 			if contains(option, pointer.x, pointer.y) {
 				// Options carry the selection tint, not the paper fill, so no hairline.
-				if result := hover_rim_draw(list, theme, option, RADIUS_INNER * s, 1, s, pointer, false);
+				if result := hover_rim_draw(list, theme, option, RADIUS_CONTROL * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
 			}
 			if row.multiple {
@@ -2992,14 +3025,8 @@ popup_draw :: proc(
 					icon_draw(list, .Check, check, theme.accent, ICON_INDICATOR, s)
 				}
 			} else if name == field_string(&p.value) {
-				draw_rect(
-					list,
-					{
-						rect = {option.x, option.y + 8 * s, 3 * s, option.height - 16 * s},
-						color = theme.accent,
-						radius = RADIUS_MARK * s,
-					},
-				)
+				mark := render.Rect{option.x, option.y + 8 * s, 3 * s, option.height - 16 * s}
+				draw_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)})
 			}
 			if result := draw_text(
 				text,
@@ -3017,10 +3044,8 @@ popup_draw :: proc(
 			thumb := height * f32(count) / f32(total)
 			y := r.y + 4 * s + (height - thumb) *
 			     f32(p.popup_scroll) / f32(total - count)
-			draw_rect(list, {
-				rect = {r.x + r.width - 4 * s, y, 2 * s, thumb},
-				color = theme.muted, radius = s,
-			})
+			bar := render.Rect{r.x + r.width - 4 * s, y, 2 * s, thumb}
+			draw_rect(list, {rect = bar, color = theme.muted, radius = pill_radius(bar)})
 		}
 		return .Ok
 	}
@@ -3045,7 +3070,7 @@ popup_draw :: proc(
 		{
 			rect = {mx - 7 * s, my - 7 * s, 14 * s, 14 * s},
 			color = {0, 0, 0, 0.6},
-			radius = 7 * s,
+			radius = pill_radius({0, 0, 14 * s, 14 * s}),
 			stroke = s,
 		},
 	)
@@ -3061,16 +3086,16 @@ popup_draw :: proc(
 	full := colour.rgba(settings.hsv_to_rgb(p.hsv[0], p.hsv[1], 1))
 	draw_rect(
 		list,
-		{rect = c.ramp, color = full, radius = RADIUS_INNER * s, fill = render.RECT_FILL_VALUE_RAMP},
+		{rect = c.ramp, color = full, radius = RADIUS_CONTROL * s, fill = render.RECT_FILL_VALUE_RAMP},
 	)
-	draw_rect(list, {rect = c.ramp, color = theme.border, radius = RADIUS_INNER * s, stroke = s})
+	draw_rect(list, {rect = c.ramp, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
 	marker := c.ramp.x + c.ramp.width * p.hsv[2]
 	draw_rect(
 		list,
 		{
 			rect = {marker - 3 * s, c.ramp.y - 3 * s, 6 * s, c.ramp.height + 6 * s},
 			color = {1, 1, 1, 1},
-			radius = 3 * s,
+			radius = pill_radius({0, 0, 6 * s, c.ramp.height + 6 * s}),
 			stroke = 2 * s,
 		},
 	)
@@ -3078,7 +3103,7 @@ popup_draw :: proc(
 		draw_rect(list, {rect = c.swatch, color = color, radius = RADIUS_CONTROL * s})
 	}
 	draw_rect(list, {rect = c.swatch, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	if result := draw_text(
 		&small,
 		list,
@@ -3094,10 +3119,10 @@ popup_draw :: proc(
 		text,
 		list,
 		"No color",
-		c.no_color.x + 10 * s,
+		c.no_color.x + CONTROL_INSET * s,
 		c.no_color.y + (c.no_color.height - text.line_height) / 2 + text.ascent,
 		theme.text,
-		c.no_color.width - 20 * s,
+		c.no_color.width - 2 * CONTROL_INSET * s,
 	)
 }
 
@@ -3156,7 +3181,7 @@ outline_draw :: proc(
 	}
 	p.outline_scroll = clamp(p.outline_scroll, 0, max(0, len(entries) - rows))
 	if render.push_layer(list, l.outline) != .None {return .Ok}
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	for entry in p.outline_scroll ..< min(len(entries), p.outline_scroll + rows) {
 		item := p.items[entries[entry]]
 		r := render.Rect {
@@ -3170,13 +3195,13 @@ outline_draw :: proc(
 		label_width := text_width(&small, label)
 		if result := navigation_row_draw(list, text, theme, r,
 			{title = p.groups[item.group].title, selected = item.group == active,
-			 hovered = entry == p.hover_outline, trailing = label_width + 10 * s}, s, pointer);
+			 hovered = entry == p.hover_outline, trailing = label_width + CONTROL_INSET * s}, s, pointer);
 		   result != .Ok {return result}
 		if result := draw_text(
 			&small,
 			list,
 			label,
-			r.x + r.width - 10 * s - label_width,
+			r.x + r.width - CONTROL_INSET * s - label_width,
 			baseline,
 			theme.faint,
 		); result != .Ok {return result}
@@ -3199,7 +3224,7 @@ editor_draw :: proc(
 	p.scroll = clamp(p.scroll, 0, max_scroll(p))
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	strong := text_styled(text, .Strong)
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	heading := text_styled(text, .Display)
 	x := l.filter.x
 	// The summary shares the title's baseline.
@@ -3240,7 +3265,7 @@ editor_draw :: proc(
 			text,
 			list,
 			"No matching settings or shortcuts",
-			l.list.x + 10 * s,
+			l.list.x + ITEM_INSET * s,
 			l.list.y + (l.row_height - text.line_height) / 2 + text.ascent,
 			theme.muted,
 		)
@@ -3266,14 +3291,16 @@ editor_draw :: proc(
 			   result != .None {return .Ok}
 		}
 		if item.row < 0 {
-			baseline := r.y + r.height - 14 * s
-			if index >
-			   0 {draw_rect(list, {rect = {r.x + 10 * s, r.y + 10 * s, r.width - 20 * s, s}, color = theme.border})}
+			baseline := r.y + r.height - SPACE_3 * s
+			inset := CONTROL_INSET * s
+			if index > 0 {
+				draw_rect(list, {rect = {r.x + inset, r.y + SPACE_2 * s, r.width - 2 * inset, s}, color = theme.border})
+			}
 			if result := draw_text(
 				&strong,
 				list,
 				p.groups[item.group].title,
-				r.x + 10 * s,
+				r.x + inset,
 				baseline,
 				theme.text,
 				max(1, r.width * 0.7),
@@ -3283,7 +3310,7 @@ editor_draw :: proc(
 				&small,
 				list,
 				label,
-				r.x + r.width - 14 * s - text_width(&small, label),
+				r.x + r.width - inset - text_width(&small, label),
 				baseline,
 				theme.faint,
 			); result != .Ok {return result}
@@ -3332,23 +3359,17 @@ editor_draw :: proc(
 		}
 		if row.profile != "" {
 			// Expanded editors carry an accent rail so they read as part of the row above.
-			draw_rect(
-				list,
-				{
-					rect = {r.x + 2 * s, r.y + 6 * s, 3 * s, r.height - 12 * s},
-					color = theme.accent,
-					radius = 1.5 * s,
-				},
-			)
+			rail := render.Rect{r.x + 2 * s, r.y + SPACE_2 * s, 3 * s, r.height - 2 * SPACE_2 * s}
+			draw_rect(list, {rect = rail, color = theme.accent, radius = pill_radius(rail)})
 		}
-		text_width_limit := max(1, parts.text_right - r.x - 30 * s)
-		baseline := r.y + 21 * s
+		text_width_limit := max(1, parts.text_right - r.x - ITEM_INSET * s)
+		baseline, detail_baseline := stacked_baselines(r, text, &small, s)
 		if row.description == "" {baseline = r.y + (r.height - text.line_height) / 2 + text.ascent}
 		if result := draw_text(
 			text,
 			list,
 			row.title,
-			r.x + 30 * s,
+			r.x + ITEM_INSET * s,
 			baseline,
 			theme.text,
 			text_width_limit,
@@ -3363,8 +3384,8 @@ editor_draw :: proc(
 				&small,
 				list,
 				note,
-				r.x + 30 * s,
-				r.y + 39 * s,
+				r.x + ITEM_INSET * s,
+				detail_baseline,
 				theme.error,
 				text_width_limit,
 			); result != .Ok {return result}
@@ -3372,8 +3393,8 @@ editor_draw :: proc(
 			&small,
 			list,
 			row.description,
-			r.x + 30 * s,
-			r.y + 39 * s,
+			r.x + ITEM_INSET * s,
+			detail_baseline,
 			theme.muted,
 			text_width_limit,
 		); result != .Ok {return result}

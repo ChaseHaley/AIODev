@@ -21,13 +21,13 @@ long_choice_list_scroll_hit_testing_and_keyboard :: proc(t: ^testing.T) {
 	l := page(&p)
 	ui.editor_key(&p, key({key = .Enter}))
 	popup := ui.editor_popup_rect(&p, l)
-	testing.expect(t, popup.height <= 8*30+8+66)
+	testing.expect(t, popup.height <= 8*32+8+68)
 	testing.expect(t, popup.y >= l.page.y && popup.y+popup.height <= l.page.y+l.page.height)
 	ui.editor_wheel(&p, l, popup.x+10, popup.y+10, -12)
 	testing.expect_value(t, p.popup_scroll, 12)
-	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, popup.y+66+4+30*1.5))
+	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, popup.y+68+4+32*1.5))
 	testing.expect_value(t, p.popup_index, 13)
-	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+66+4+30*1.5, false), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+68+4+32*1.5, false), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "Font 13")
 	ui.editor_key(&p, key({key = .Enter}))
 	for _ in 0..<26 {ui.editor_key(&p, key({key = .Arrow_Down}))}
@@ -83,7 +83,7 @@ font_search_filters_selects_and_cancels_without_editing_settings_search :: proc(
 		l := page(&p)
 		popup := ui.editor_popup_rect(&p, l)
 		testing.expect_value(t, ui.editor_pointer(&p, l, popup.x+14, popup.y+14), platform.Cursor_Shape.Text)
-		header := font_key == "font.family" ? 66 : 36
+		header := font_key == "font.family" ? 68 : 36
 		testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+14, popup.y+f32(header)+19, false), ui.Editor_Outcome.Save)
 		testing.expect_value(t, ui.field_string(&p.value), "Segoe UI")
 		ui.editor_key(&p, key({key = .Enter}))

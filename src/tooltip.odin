@@ -65,9 +65,9 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if tooltip_label(app, w, owner, w.pointer.x, w.pointer.y) != w.tooltip {return .Ok}
 	s := w.scale
 	width := ui.text_width(&w.ui_text, w.tooltip) + 16 * s
-	height := 26 * s
+	height := ui.HEIGHT_COMPACT * s
 	x := clamp(w.pointer.x + 12 * s, 4 * s, max(4 * s, f32(w.width) - width - 4 * s))
-	y := clamp(w.pointer.y + 18 * s, 4 * s, max(4 * s, f32(w.height) - height - 4 * s))
+	y := clamp(w.pointer.y + 16 * s, 4 * s, max(4 * s, f32(w.height) - height - 4 * s))
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	if ui.panel_draw(&w.list, {rect = {x, y, width, height}, radius = ui.RADIUS_CONTROL * s,
 	   scale = s, shadow_y = 2, softness = 8, border = .Stroked}, app.theme) != .None {return .Ok}

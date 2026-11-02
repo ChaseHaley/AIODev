@@ -79,7 +79,10 @@ tab_draw :: proc(
 	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.tab_bar})
 	// Every tab rises on hover; the selected tab keeps its pane fill while it moves.
 	lift := hover_lift_at(theme, hover, scale)
-	tile := render.Rect{x + 2 * scale, 6 * scale - lift, max(0, width - 4 * scale), 28 * scale}
+	tile_height := HEIGHT_TOOLBAR * scale
+	tile_y := (bar.height - tile_height) / 2 - lift
+	tile := render.Rect{x + 2 * scale, tile_y, max(0, width - 4 * scale), tile_height}
+	indicator, badge := ICON_INDICATOR * scale, ICON_BUTTON * scale
 	if lift > 0 {
 		if result := hover_shadow_draw(list, theme, tile, RADIUS_CONTROL * scale, hover, scale);
 		   result != .None {return .Ok}
@@ -104,14 +107,8 @@ tab_draw :: proc(
 	fill.a *= pressed
 	draw_rect(list, {rect = tile, color = fill, radius = RADIUS_CONTROL * scale})
 	if selected && underline < 0 {
-		draw_rect(
-			list,
-			{
-				rect = {x + 10 * scale, 30 * scale, max(0, width - 20 * scale), 2 * scale},
-				color = theme.tab_indicator,
-				radius = scale,
-			},
-		)
+		underline := render.Rect{x + 10 * scale, 30 * scale, max(0, width - 20 * scale), 2 * scale}
+		draw_rect(list, {rect = underline, color = theme.tab_indicator, radius = pill_radius(underline)})
 	}
 	if width <= 16 * scale {return .Ok}
 	if index < bar.count && width >= 56 * scale {
@@ -134,13 +131,13 @@ tab_draw :: proc(
 	// Status sits just before Close. Its place is kept while tab status is on, where the tab also
 	// fits the icon, so titles do not reflow as programs start and stop working.
 	if tab && width >= 56 * scale && (status_slot && width >= 90 * scale || status.glyph != .None) {
-		status_width = 18 * scale
+		status_width = (ICON_INDICATOR + SPACE_1) * scale
 		if status.glyph != .None {
 			if result := status_glyph_draw(
 				list,
 				text,
 				theme,
-				{x + width - 44 * scale, 13 * scale - lift, 14 * scale, 14 * scale},
+				{x + width - 44 * scale, tile.y + (tile.height - indicator) / 2, indicator, indicator},
 				status,
 				status_phase,
 				scale,
@@ -149,12 +146,12 @@ tab_draw :: proc(
 	}
 	// A tab too narrow for both drops the program icon before the status.
 	if tab && width >= 72 * scale + status_width && (icon != "" || icon_atlas.width > 0) {
-		icon_width = 22 * scale
+		icon_width = (ICON_BUTTON + SPACE_2) * scale
 		if result := shell_badge_draw(
 			list,
 			text,
 			theme,
-			{x + 10 * scale, 13 * scale - lift, 14 * scale, 14 * scale},
+			{tile.x + CONTROL_INSET * scale, tile.y + (tile.height - badge) / 2, badge, badge},
 			icon,
 			scale,
 			icon_atlas,
@@ -166,7 +163,7 @@ tab_draw :: proc(
 		text,
 		list,
 		title,
-		x + 10 * scale + icon_width,
+		tile.x + CONTROL_INSET * scale + icon_width,
 		(bar.height - text.line_height) / 2 + text.ascent - lift,
 		selected ? theme.tab_active_text : theme.tab_text,
 		max(0, width - (tab ? 44 : 22) * scale - icon_width - status_width),
@@ -182,7 +179,9 @@ tab_draw :: proc(
 
 tab_close_rect :: proc(bar: Tab_Bar, index: int, scale: f32) -> render.Rect {
 	if index < 0 || index >= bar.count || bar.tab_width < 56 * scale {return {}}
-	return {bar.x + f32(index + 1) * bar.tab_width - 28 * scale, 9 * scale, 22 * scale, 22 * scale}
+	button := HEIGHT_COMPACT * scale
+	x := bar.x + f32(index + 1) * bar.tab_width - 4 * scale - button
+	return {x, (bar.height - button) / 2, button, button}
 }
 
 tab_close_hit :: proc(bar: Tab_Bar, x, y, scale: f32) -> int {

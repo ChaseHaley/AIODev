@@ -42,7 +42,7 @@ CONFIRM_HEIGHT :: 144
 @(private)
 CONFIRM_BUTTON_WIDTH :: 96
 @(private)
-CONFIRM_BUTTON_HEIGHT :: CONTROL_HEIGHT
+CONFIRM_BUTTON_HEIGHT :: HEIGHT_STANDARD
 @(private)
 CONFIRM_PRESENCE :: Presence_Spec {
 	open  = 120 * time.Millisecond,
@@ -252,7 +252,7 @@ confirm_draw :: proc(
 	p := l.panel
 	frame := dialog_panel(p, s)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
-	heading := text_styled(text, .Heading)
+	heading := text_styled(text, .Title)
 	pad := DIALOG_PADDING * s
 	inner := p.width - 2 * pad
 	top := p.y + pad
@@ -268,7 +268,7 @@ confirm_draw :: proc(
 		return r
 	}
 	top += heading.line_height + 8 * s
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	if r := draw_text(
 		text,
 		list,
@@ -280,7 +280,7 @@ confirm_draw :: proc(
 	); r != .Ok {
 		return r
 	}
-	top += text.line_height + 6 * s
+	top += text.line_height + SPACE_1 * s
 	if r := draw_fading_text(
 		&small,
 		list,
@@ -297,9 +297,9 @@ confirm_draw :: proc(
 			16 * s,
 			16 * s,
 		}
-		draw_rect(list, {rect = box, color = theme.border, radius = RADIUS_INNER * s})
+		draw_rect(list, {rect = box, color = theme.border, radius = RADIUS_CONTROL * s})
 		if c.option {
-			draw_rect(list, {rect = box, color = theme.accent, radius = RADIUS_INNER * s})
+			draw_rect(list, {rect = box, color = theme.accent, radius = RADIUS_CONTROL * s})
 			icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, s)
 		}
 		if c.focus == .Option {focus_ring_draw(list, box, theme, s)}

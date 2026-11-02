@@ -16,7 +16,7 @@ import "core:time"
 @(private)
 STATUS_PILL_WIDTH :: f32(52)
 @(private)
-STATUS_ROW_HEIGHT :: f32(46)
+STATUS_ROW_HEIGHT :: f32(48)
 @(private)
 STATUS_GROUP_HEIGHT :: f32(24)
 @(private)
@@ -27,7 +27,10 @@ STATUS_PANEL_RAIL_MIN :: f32(80)
 @(private)
 STATUS_RAIL_TABS_MIN :: f32(96)
 @(private)
-STATUS_HEADER_HEIGHT :: f32(36)
+STATUS_HEADER_HEIGHT :: f32(40)
+// The inbox footer and the Activity panel's title band.
+STATUS_FOOTER_HEIGHT :: ui.HEIGHT_STANDARD
+STATUS_PANEL_HEADER :: ui.HEIGHT_STANDARD
 
 Status_Surface :: enum {
 	None,
@@ -138,7 +141,8 @@ status_dismissable :: proc(record: term.Program_Status) -> bool {
 @(private)
 status_dismiss_rect :: proc(w: ^Window, row: render.Rect) -> render.Rect {
 	s := w.scale
-	return {row.x + row.width - 28 * s, row.y + (row.height - 22 * s) / 2, 22 * s, 22 * s}
+	size := ui.HEIGHT_COMPACT * s
+	return {row.x + row.width - ui.SPACE_1 * s - size, row.y + (row.height - size) / 2, size, size}
 }
 
 // Two lines: name, state and age; then the message, with where it came from when `crumb` is set.
@@ -156,25 +160,27 @@ status_row_draw :: proc(
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
 	}
 	mark := status_mark(item.record)
-	left := r.x + 8 * s + indent
-	if result := status_mark_draw(app, w, {left, r.y + 8 * s, 14 * s, 14 * s}, mark); result != .Ok {
+	left := r.x + ui.CONTROL_INSET * s + indent
+	strong := ui.text_styled(&w.ui_text, .Strong)
+	small := ui.text_styled(&w.ui_text, .Detail)
+	line_one, line_two := ui.stacked_baselines(r, &strong, &small, s)
+	icon := ui.ICON_BUTTON * s
+	icon_y := line_one - strong.ascent + (strong.line_height - icon) / 2
+	if result := status_mark_draw(app, w, {left, icon_y, icon, icon}, mark); result != .Ok {
 		return result
 	}
-	strong := ui.text_styled(&w.ui_text, .Strong)
-	small := ui.text_styled(&w.ui_text, .Small)
 	quiet := status_finished_seen(item.record)
-	text_x := left + 22 * s
+	text_x := left + icon + ui.SPACE_2 * s
 	show_dismiss := highlighted && status_dismissable(item.record)
-	right := r.x + r.width - (show_dismiss ? 34 : 8) * s
+	right := r.x + r.width - (show_dismiss ? ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_1 : ui.CONTROL_INSET) * s
 	age := status_age(item.record.updated_at)
 	age_width := ui.text_width(&small, age)
-	line_one := r.y + 6 * s + strong.ascent
 	if !show_dismiss {
 		if result := ui.draw_text(&small, &w.list, age, right - age_width, line_one, app.theme.faint);
 		   result != .Ok {return result}
 	}
 	name := status_item_name(app, item)
-	name_room := max(0, right - age_width - 8 * s - text_x)
+	name_room := max(0, right - age_width - ui.SPACE_2 * s - text_x)
 	name_width := min(ui.text_width(&strong, name), name_room * 0.6)
 	if result := ui.draw_fading_text(
 		&strong,
@@ -195,10 +201,10 @@ status_row_draw :: proc(
 		&small,
 		&w.list,
 		headline,
-		text_x + name_width + 6 * s,
+		text_x + name_width + ui.SPACE_2 * s,
 		line_one,
 		headline_color,
-		max(0, name_room - name_width - 6 * s),
+		max(0, name_room - name_width - ui.SPACE_2 * s),
 	); result != .Ok {return result}
 	detail := item.record.message
 	if crumb {detail = detail == "" ? item.crumb : fmt.tprintf("%s · %s", item.crumb, detail)}
@@ -208,7 +214,7 @@ status_row_draw :: proc(
 			&w.list,
 			detail,
 			text_x,
-			r.y + 25 * s + small.ascent,
+			line_two,
 			app.theme.faint,
 			max(0, right - text_x),
 		); result != .Ok {return result}
@@ -229,15 +235,15 @@ status_row_draw :: proc(
 
 @(private)
 status_group_draw :: proc(app: ^App, w: ^Window, r: render.Rect, item: Status_Item) -> glyphs.Result {
-	small := ui.text_styled(&w.ui_text, .Small)
+	small := ui.text_styled(&w.ui_text, .Detail)
 	return ui.draw_fading_text(
 		&small,
 		&w.list,
 		item.crumb,
-		r.x + 8 * w.scale,
-		r.y + r.height - 6 * w.scale - small.line_height + small.ascent,
+		r.x + ui.CONTROL_INSET * w.scale,
+		r.y + r.height - ui.SPACE_1 * w.scale - small.line_height + small.ascent,
 		app.theme.faint,
-		max(0, r.width - 16 * w.scale),
+		max(0, r.width - 2 * ui.CONTROL_INSET * w.scale),
 	)
 }
 
@@ -269,7 +275,9 @@ status_pill_width :: proc(app: ^App, w: ^Window) -> f32 {
 status_pill_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	width := status_pill_width(app, w)
 	if width == 0 {return {}}
-	return {workspace_button_width(w) + 2 * w.scale, 6 * w.scale, width - 6 * w.scale, 28 * w.scale}
+	height := ui.HEIGHT_TOOLBAR * w.scale
+	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
+	return {workspace_button_width(w), top, width - ui.SPACE_1 * w.scale, height}
 }
 
 @(private)
@@ -299,8 +307,10 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if !shown {mark = {glyph = .Idle, progress = -1}}
 	count := status_needs(summary)
 	if count == 0 {count = summary.working}
-	glyph_x := count > 0 ? r.x + 8 * s : r.x + (r.width - 14 * s) / 2
-	if result := status_mark_draw(app, w, {glyph_x, r.y + 7 * s, 14 * s, 14 * s}, mark); result != .Ok {
+	icon := ui.ICON_BUTTON * s
+	glyph_x := count > 0 ? r.x + ui.CONTROL_INSET * s : r.x + (r.width - icon) / 2
+	glyph := render.Rect{glyph_x, r.y + (r.height - icon) / 2, icon, icon}
+	if result := status_mark_draw(app, w, glyph, mark); result != .Ok {
 		return result
 	}
 	if count > 0 {
@@ -353,19 +363,22 @@ status_inbox_layout :: proc(
 	anchor := status_pill_rect(app, w)
 	if anchor.width == 0 {anchor = workspace_button_rect(w)}
 	x := clamp(anchor.x, 8 * s, max(8 * s, f32(w.width) - width - 8 * s))
-	y := ui.TITLE_BAR_HEIGHT * s + 2 * s
+	y := (ui.TITLE_BAR_HEIGHT + ui.SPACE_1) * s
 	content := f32(max(1, len(items))) * STATUS_ROW_HEIGHT * s
 	room := max(STATUS_ROW_HEIGHT * s, f32(w.height) - y - 8 * s - 2 * STATUS_HEADER_HEIGHT * s)
 	height := min(content, room)
-	surface = {x, y, width, STATUS_HEADER_HEIGHT * s + height + 30 * s}
-	list = {x + 4 * s, y + STATUS_HEADER_HEIGHT * s, width - 8 * s, height}
+	surface = {x, y, width, STATUS_HEADER_HEIGHT * s + height + STATUS_FOOTER_HEIGHT * s}
+	pad := ui.OVERLAY_PADDING * s
+	list = {x + pad, y + STATUS_HEADER_HEIGHT * s, width - 2 * pad, height}
 	return surface, list, list.y + list.height
 }
 
 @(private)
 status_dismiss_all_rect :: proc(w: ^Window, surface: render.Rect) -> render.Rect {
 	s := w.scale
-	return {surface.x + surface.width - 130 * s, surface.y + 6 * s, 122 * s, 24 * s}
+	size := ui.HEIGHT_COMPACT * s
+	top := (STATUS_HEADER_HEIGHT * s - size) / 2
+	return {surface.x + surface.width - ui.SPACE_2 * s - 120 * s, surface.y + top, 120 * s, size}
 }
 
 @(private)
@@ -393,9 +406,9 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	frame := ui.popover_panel(surface, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	if render.push_layer(&w.list, surface, ui.RADIUS_POPOVER * s) != .None {return .Ok}
+	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
 	strong := ui.text_styled(&w.ui_text, .Strong)
-	small := ui.text_styled(&w.ui_text, .Small)
+	small := ui.text_styled(&w.ui_text, .Detail)
 	scope := app.settings.status.scope == .All ? "All workspaces" : "This workspace"
 	if result := ui.draw_text(
 		&strong,
@@ -441,7 +454,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		highlighted := i == w.status.selected
 		if result := status_row_draw(app, w, r, item, highlighted, true, 0); result != .Ok {return result}
 	}
-	if render.push_layer(&w.list, surface, ui.RADIUS_POPOVER * s) != .None {return .Ok}
+	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
 	ui.draw_rect(&w.list, {rect = {surface.x, footer_y, surface.width, s}, color = app.theme.border})
 	hint := "Ctrl+Shift+J next that needs you · Enter go to pane · Delete dismiss"
 	return ui.draw_fading_text(
@@ -449,7 +462,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		&w.list,
 		hint,
 		surface.x + 12 * s,
-		footer_y + (30 * s - small.line_height) / 2 + small.ascent,
+		footer_y + (STATUS_FOOTER_HEIGHT * s - small.line_height) / 2 + small.ascent,
 		app.theme.faint,
 		max(0, surface.width - 24 * s),
 	)
@@ -593,7 +606,9 @@ status_panel_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 status_panel_side_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	r := status_panel_rect(app, w)
 	if r.width <= 0 {return {}}
-	return {r.x + r.width - 28 * w.scale, r.y + 3 * w.scale, 24 * w.scale, 24 * w.scale}
+	size := ui.HEIGHT_COMPACT * w.scale
+	top := (STATUS_PANEL_HEADER * w.scale - size) / 2
+	return {r.x + r.width - ui.SPACE_1 * w.scale - size, r.y + top, size, size}
 }
 
 status_panel_side_toggle :: proc(app: ^App) {
@@ -608,7 +623,8 @@ status_panel_side_toggle :: proc(app: ^App) {
 @(private)
 status_panel_list :: proc(app: ^App, w: ^Window, panel: render.Rect) -> render.Rect {
 	s := w.scale
-	return {panel.x + 4 * s, panel.y + 30 * s, max(0, panel.width - 8 * s), max(0, panel.height - 34 * s)}
+	header, pad := STATUS_PANEL_HEADER * s, ui.OVERLAY_PADDING * s
+	return {panel.x + pad, panel.y + header, max(0, panel.width - 2 * pad), max(0, panel.height - header - pad)}
 }
 
 @(private)
@@ -639,15 +655,15 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		)
 	}
 	items := status_items(app, w, true)
-	small := ui.text_styled(&w.ui_text, .Small)
-	title := "ACTIVITY"
+	small := ui.text_styled(&w.ui_text, .Detail)
+	strong := ui.text_styled(&w.ui_text, .Strong)
 	if result := ui.draw_text(
-		&small,
+		&strong,
 		&w.list,
-		title,
-		panel.x + 12 * s,
-		panel.y + 9 * s + small.ascent,
-		app.theme.faint,
+		"Activity",
+		panel.x + ui.SPACE_3 * s,
+		panel.y + (STATUS_PANEL_HEADER * s - strong.line_height) / 2 + strong.ascent,
+		app.theme.text,
 	); result != .Ok {return result}
 	button := status_panel_side_rect(app, w)
 	hover := f32(int(w.status.panel_side_hover))

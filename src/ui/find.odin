@@ -370,9 +370,9 @@ find_draw :: proc(
 	width, height, scale: f32,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {
-	input_text := text_styled(base, .Input)
-	text := &input_text
-	l := find_layout(width, scale, text_width(text, status))
+	input_text := text_styled(base, .Body)
+	count := text_styled(base, .Detail)
+	l := find_layout(width, scale, text_width(&count, status))
 	panel := l.panel
 	if panel.width <= 2 * FIND_PADDING * scale { return .Ok }
 	if render.push_layer(list, {0, 0, width, height}) != .None {
@@ -380,12 +380,8 @@ find_draw :: proc(
 	}
 	frame := popover_panel(panel, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
-	count := input_text
-	if measured := text_width(&count, status); measured > l.status.width && measured > 0 {
-		text_set_size(&count, count.size_px * l.status.width / measured)
-	}
 	if result := draw_text(&count, list, status, l.status.x,
-		l.status.y + (l.status.height - count.line_height) / 2 + count.ascent, theme.text); result != .Ok {
+		l.status.y + (l.status.height - count.line_height) / 2 + count.ascent, theme.muted); result != .Ok {
 		return result
 	}
 	buttons := [?]struct {
@@ -430,7 +426,7 @@ find_draw :: proc(
 		inset       = 0,
 		caret_width = 1.5,
 		radius      = 0,
-		style       = .Input,
+		style       = .Body,
 		scale       = scale,
 	}
 	return field_box_draw(box, list, theme, field_box_baseline(box), f.focused, "Find in scrollback")

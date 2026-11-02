@@ -317,8 +317,8 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 		testing.expect_value(t, app.workspace_picker_hit(w, field.x+1, field.y+1), -1)
 		app.workspace_row_menu_open(s, w, id)
 		button := app.workspace_picker_menu_button_rect(w, w.workspace_picker.selected)
-		testing.expect_value(t, button.width, 32*scale)
-		testing.expect_value(t, button.height, 32*scale)
+		testing.expect_value(t, button.width, ui.HEIGHT_COMPACT*scale)
+		testing.expect_value(t, button.height, ui.HEIGHT_COMPACT*scale)
 		menu := app.workspace_row_menu_rect(w)
 		testing.expect(t, menu.x >= 0 && menu.y >= 0 && menu.x+menu.width <= f32(w.width))
 		testing.expect(t, menu.y+menu.height <= f32(w.height))
@@ -337,7 +337,7 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 		testing.expect_value(t, motion.value, f32(1))
 		app.workspace_row_rename_finish(s, w, false)
 		indicator := app.workspace_button_indicator_rect(w)
-		testing.expect_value(t, indicator.width, 28*scale)
+		testing.expect_value(t, indicator.width, ui.ICON_INDICATOR*scale)
 		testing.expect(t, indicator.x+indicator.width <= app.workspace_button_width(w))
 	}
 }

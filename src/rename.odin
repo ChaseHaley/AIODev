@@ -37,7 +37,7 @@ rename_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 // Title, field and hint stacked inside the dialog padding, so the height follows the text.
 @(private = "file")
 rename_metrics :: proc(w: ^Window) -> (heading, hint: ui.Text) {
-	return ui.text_styled(&w.ui_text, .Heading), ui.text_styled(&w.ui_text, .Small)
+	return ui.text_styled(&w.ui_text, .Title), ui.text_styled(&w.ui_text, .Detail)
 }
 
 rename_rect :: proc(w: ^Window) -> render.Rect {
@@ -46,7 +46,7 @@ rename_rect :: proc(w: ^Window) -> render.Rect {
 	height :=
 		2 * ui.DIALOG_PADDING * s +
 		heading.line_height +
-		ui.CONTROL_HEIGHT * s +
+		ui.HEIGHT_STANDARD * s +
 		hint.line_height +
 		(8 + 8) * s
 	width := min(440 * s, f32(w.width) - 24 * s)
@@ -66,7 +66,7 @@ rename_field_rect :: proc(w: ^Window) -> render.Rect {
 		r.x + pad,
 		r.y + pad + heading.line_height + 8 * s,
 		max(1, r.width - 2 * pad),
-		ui.CONTROL_HEIGHT * s,
+		ui.HEIGHT_STANDARD * s,
 	}
 }
 
@@ -78,7 +78,7 @@ rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
 		inset = ui.CONTROL_INSET,
 		caret_width = 1,
 		radius = ui.RADIUS_CONTROL,
-		style = .Input,
+		style = .Body,
 		scale = w.scale,
 	}
 }

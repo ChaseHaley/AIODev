@@ -850,7 +850,7 @@ find_presentation :: proc(w: ^Window, entry: ^Session_Entry) -> (label: string, 
 
 find_controls :: proc(w: ^Window, entry: ^Session_Entry) -> (l: ui.Find_Layout, enabled: bool) {
 	label, available := find_presentation(w, entry)
-	text := ui.text_styled(&w.ui_text, .Input)
+	text := ui.text_styled(&w.ui_text, .Detail)
 	return ui.find_layout(f32(w.width), w.scale, ui.text_width(&text, label)), available
 }
 

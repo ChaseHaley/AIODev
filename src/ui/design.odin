@@ -1,29 +1,42 @@
 package ui
 
-// Shape and spacing tokens from the Visual language note. Values are DIPs at scale 1; callers
-// multiply by the window scale. Spacing uses the steps 2, 4, 6, 8, 10, 12, 16 and 24.
+import "aio:render"
 
-// Indicator bars, checked marks and the small frames inside icons.
-RADIUS_MARK :: f32(2)
-// Rows and cells inside a popover, keycaps and checkboxes: the popover radius less its padding.
-RADIUS_INNER :: f32(4)
-// Buttons, fields, dropdowns, swatches, tooltips and list rows outside popovers.
-RADIUS_CONTROL :: f32(6)
-// Title bar tabs.
-RADIUS_TAB :: f32(7)
-// Surfaces anchored to a control: menus, dropdown lists, pickers, the find bar and notices.
-RADIUS_POPOVER :: f32(8)
-// Centred surfaces over a scrim: the command palette, confirmations and rename.
-RADIUS_DIALOG :: f32(10)
+// The AIODev design system. Every interface size, gap, corner and height comes from here; the
+// Visual language note explains each role. Values are DIPs at scale 1 and callers multiply by the
+// window scale. Text sizes live in Text_Style.
 
-// The padding between a popover's edge and its rows, so RADIUS_INNER rows nest concentrically.
-POPOVER_PADDING :: f32(4)
+// Spacing: a 4 DIP grid. Related things sit SPACE_2 apart, groups SPACE_4 apart.
+SPACE_1 :: f32(4)
+SPACE_2 :: f32(8)
+SPACE_3 :: f32(12)
+SPACE_4 :: f32(16)
+SPACE_6 :: f32(24)
+
+// Corners: in-page elements use RADIUS_CONTROL, anything floating or framing content uses
+// RADIUS_OVERLAY. Elements 8 DIPs tall or less, and round marks, use half their height instead.
+RADIUS_CONTROL :: f32(4)
+RADIUS_OVERLAY :: f32(8)
+
+// Heights. Compact controls sit inside a row or header, toolbar controls in the title bar, and
+// standard controls stand alone: buttons, fields, and the rows of menus and lists.
+HEIGHT_COMPACT :: f32(24)
+HEIGHT_TOOLBAR :: f32(28)
+HEIGHT_STANDARD :: f32(32)
+
+// Switches and slider thumbs share one size on every surface.
+SWITCH_WIDTH :: f32(40)
+SWITCH_HEIGHT :: f32(20)
+SLIDER_THUMB :: f32(16)
+
+// The text inset on each side of a keycap.
+KEYCAP_PADDING :: SPACE_1
+// The text inset inside a field, button or row.
+CONTROL_INSET :: SPACE_2
+// The padding between an overlay's edge and its rows. Row text therefore sits SPACE_3 from the edge.
+OVERLAY_PADDING :: SPACE_1
 // The inset of a dialog's title, body and buttons from its edge.
-DIALOG_PADDING :: f32(16)
+DIALOG_PADDING :: SPACE_4
 
-// The height of a button or one-line field in dialogs, popovers and settings rows.
-CONTROL_HEIGHT :: f32(30)
-// The height of a row inside a popover or dropdown list.
-POPOVER_ROW_HEIGHT :: f32(30)
-// The space between the text and the edge of a field or text button.
-CONTROL_INSET :: f32(10)
+// The radius that fully rounds the short side of `r`: for bars, grooves, underlines and dots.
+pill_radius :: proc(r: render.Rect) -> f32 {return min(r.width, r.height) / 2}

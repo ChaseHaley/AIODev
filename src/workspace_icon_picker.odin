@@ -12,23 +12,23 @@ Workspace_Icon_Layout :: struct {
 
 workspace_icon_picker_layout :: proc(w: ^Window) -> Workspace_Icon_Layout {
 	s := w.scale
-	width := min(272 * s, max(0, f32(w.width) - 10 * s))
+	width := min(272 * s, max(0, f32(w.width) - 2 * ui.SPACE_1 * s))
 	columns := clamp(int((width - 20 * s) / (48 * s)), 1, 5)
 	count := (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
 	rows := (count + columns - 1) / columns
-	available := max(0, f32(w.height) - (ui.TITLE_BAR_HEIGHT + 5) * s)
+	available := max(0, f32(w.height) - (ui.TITLE_BAR_HEIGHT + ui.SPACE_1) * s)
 	height := min(available, (136 + f32(rows) * 48) * s)
-	panel := render.Rect{5 * s, ui.TITLE_BAR_HEIGHT * s, width, height}
+	panel := render.Rect{ui.SPACE_1 * s, ui.TITLE_BAR_HEIGHT * s, width, height}
 	grid_height := max(0, height - 140 * s)
 	visible := clamp(int((grid_height + 4 * s) / (48 * s)), 0, rows)
 	grid_width := max(0, min(width - 24 * s, f32(columns) * 48 * s - 4 * s))
 	grid := render.Rect{panel.x + (width - grid_width) / 2, panel.y + 40 * s, grid_width,
 		max(0, f32(visible) * 48 * s - 4 * s)}
-	footer_y := max(panel.y, panel.y + height - (12 + 2 * ui.CONTROL_HEIGHT + 8 + 12) * s)
-	field := render.Rect{panel.x + 12 * s, footer_y + 12 * s, max(0, width - 24 * s), ui.CONTROL_HEIGHT * s}
+	footer_y := max(panel.y, panel.y + height - (12 + 2 * ui.HEIGHT_STANDARD + 8 + 12) * s)
+	field := render.Rect{panel.x + 12 * s, footer_y + 12 * s, max(0, width - 24 * s), ui.HEIGHT_STANDARD * s}
 	return {panel = panel, grid = grid, columns = columns, rows = rows, visible_rows = visible,
 		divider = {field.x, footer_y, field.width, s}, field = field,
-		apply = {field.x, field.y + field.height + 8 * s, field.width, ui.CONTROL_HEIGHT * s}}
+		apply = {field.x, field.y + field.height + 8 * s, field.width, ui.HEIGHT_STANDARD * s}}
 }
 
 workspace_icon_picker_cell :: proc(w: ^Window, g: Workspace_Icon_Layout, index: int) -> render.Rect {
@@ -100,8 +100,7 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	g := workspace_icon_picker_layout(w)
 	target := workspace_row_target(app, p.target_id)
 	if target == nil { return .Ok }
-	if result := ui.draw_text(&w.ui_text, &w.list, "Icon", g.panel.x + 12 * s, g.panel.y + 26 * s,
-		app.theme.text, max(0, g.panel.width - 106 * s)); result != .Ok { return result }
+	if result := workspace_icon_picker_title(app, w, g, "Icon"); result != .Ok { return result }
 	color_button := workspace_icon_color_button(w)
 	if p.selected == len(WORKSPACE_ICONS) + 2 {
 		button := render.Rect_Instance{
@@ -109,7 +108,7 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 		if render.push_rect(&w.list, button) != .None { return .Ok }
 	}
-	dot_size := 18 * s
+	dot_size := ui.ICON_BUTTON * s
 	dot := render.Rect{
 		color_button.x + (color_button.width - dot_size) / 2,
 		color_button.y + (color_button.height - dot_size) / 2,
@@ -130,24 +129,28 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				return .Ok
 			}
 		}
-		icon := render.Rect{cell.x + 10 * s, cell.y + 8 * s, 24 * s, 24 * s}
+		size := ui.ICON_BUTTON * s
+		icon := render.Rect{cell.x + (cell.width - size) / 2, cell.y + 12 * s, size, size}
 		tint := target != nil ? target.icon.tint : 0
 		preset := Workspace_Icon{preset = i, tint = tint}
 		if result := workspace_icon_draw(w, preset, icon, app.theme.text);
 		   result != .Ok { return result }
 		if target != nil && target.icon.emoji == "" && target.icon.preset == i {
 			mark := render.Rect{cell.x + 14 * s, cell.y + 38 * s, 16 * s, 2 * s}
-			if render.push_rect(&w.list, {rect = mark, color = app.theme.accent, radius = s}) != .None { return .Ok }
+			fill := render.Rect_Instance{rect = mark, color = app.theme.accent, radius = ui.pill_radius(mark)}
+			if render.push_rect(&w.list, fill) != .None {
+				return .Ok
+			}
 		}
 	}
-	if render.push_layer(&w.list, g.panel, ui.RADIUS_POPOVER * s) != .None { return .Ok }
+	if render.push_layer(&w.list, g.panel, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	if render.push_rect(&w.list, {rect = g.divider, color = app.theme.border}) != .None { return .Ok }
 	field_fill := render.Rect_Instance{rect = g.field, color = app.theme.pane, radius = ui.RADIUS_CONTROL * s}
 	if render.push_rect(&w.list, field_fill) != .None { return .Ok }
 	box := workspace_picker_query_box(w)
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
 		p.selected == len(WORKSPACE_ICONS), "Custom emoji"); result != .Ok { return result }
-	if render.push_layer(&w.list, g.panel, ui.RADIUS_POPOVER * s) != .None { return .Ok }
+	if render.push_layer(&w.list, g.panel, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	inset := ui.CONTROL_INSET * s
 	fill := p.selected == len(WORKSPACE_ICONS) + 1 ? app.theme.selection : app.theme.pane
 	apply := render.Rect_Instance{rect = g.apply, color = fill, radius = ui.RADIUS_CONTROL * s}
@@ -163,5 +166,21 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 workspace_icon_color_button :: proc(w: ^Window) -> render.Rect {
 	g := workspace_icon_picker_layout(w)
 	s := w.scale
-	return {g.panel.x + max(0, g.panel.width - 40 * s), g.panel.y + 6 * s, min(28 * s, g.panel.width), 28 * s}
+	size := ui.HEIGHT_COMPACT * s
+	top := (WORKSPACE_ICON_HEADER * s - size) / 2
+	x := g.panel.x + max(0, g.panel.width - ui.SPACE_2 * s - size)
+	return {x, g.panel.y + top, min(size, g.panel.width), size}
+}
+
+// The picker's header band: its title, in Strong as overlay titles are, and the colour button.
+WORKSPACE_ICON_HEADER :: 40
+
+workspace_icon_picker_title :: proc(
+	app: ^App, w: ^Window, g: Workspace_Icon_Layout, title: string,
+) -> glyphs.Result {
+	strong := ui.text_styled(&w.ui_text, .Strong)
+	s := w.scale
+	baseline := g.panel.y + (WORKSPACE_ICON_HEADER * s - strong.line_height) / 2 + strong.ascent
+	return ui.draw_text(&strong, &w.list, title, g.panel.x + ui.SPACE_3 * s, baseline,
+		app.theme.text, max(0, g.panel.width - (ui.SPACE_3 + 2 * ui.SPACE_2 + ui.HEIGHT_COMPACT) * s))
 }

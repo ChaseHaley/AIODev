@@ -128,8 +128,8 @@ profile_table_build :: proc(
 // fixed controls leave, and the Directory column is the first to go when the content narrows.
 profile_columns :: proc(row: render.Rect, scale: f32) -> Profile_Columns {
 	s := scale
-	pad := 10 * s
-	gap := 8 * s
+	pad := CONTROL_INSET * s
+	gap := SPACE_2 * s
 	limit := row.x + max(0, row.width - pad)
 	x := row.x + pad
 	show_icon := row.width >= PROFILE_ICON_MIN_WIDTH * s
@@ -137,11 +137,11 @@ profile_columns :: proc(row: render.Rect, scale: f32) -> Profile_Columns {
 	show_directory := row.width >= PROFILE_DIRECTORY_MIN_WIDTH * s
 	handle_width := 20 * s
 	expand_width := 24 * s
-	icon_width := show_icon ? 30 * s : 0
+	icon_width := show_icon ? HEIGHT_COMPACT * s : 0
 	show_controls := row.width >= 340 * s
 	default_width := show_controls ? 44 * s : 0
 	hidden_width := show_controls ? 32 * s : 0
-	actions_width := show_actions ? 50 * s : 0
+	actions_width := show_actions ? 2 * HEIGHT_COMPACT * s : 0
 	more_width := show_actions ? 0 : 24 * s
 	fixed := handle_width + expand_width + icon_width + default_width + hidden_width + actions_width
 	fixed += more_width
@@ -226,10 +226,10 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 		parts.command = columns.command
 		parts.directory = columns.directory
 		if columns.default.width > 0 {parts.radio = {
-			columns.default.x + (columns.default.width - 22 * s) / 2,
-			cy - 11 * s,
-			22 * s,
-			22 * s,
+			columns.default.x + (columns.default.width - SWITCH_HEIGHT * s) / 2,
+			cy - SWITCH_HEIGHT / 2 * s,
+			SWITCH_HEIGHT * s,
+			SWITCH_HEIGHT * s,
 		}}
 		if columns.hidden.width > 0 {parts.toggle = {
 			columns.hidden.x + (columns.hidden.width - 24 * s) / 2,
@@ -247,9 +247,11 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 			parts.remove = {x, cy - size / 2, size, size}
 		}
 	case .Detected:
-		parts.icon = {row.x + 12 * s, cy - 13 * s, 26 * s, 26 * s}
-		parts.enable = {row.x + row.width - 12 * s - 64 * s, cy - 15 * s, 64 * s, 30 * s}
-		parts.radio = {parts.enable.x - 12 * s - 22 * s, cy - 11 * s, 22 * s, 22 * s}
+		badge, radio := HEIGHT_COMPACT * s, SWITCH_HEIGHT * s
+		parts.icon = {row.x + SPACE_3 * s, cy - badge / 2, badge, badge}
+		field_h := HEIGHT_STANDARD * s
+		parts.enable = {row.x + row.width - SPACE_3 * s - 64 * s, cy - field_h / 2, 64 * s, field_h}
+		parts.radio = {parts.enable.x - SPACE_3 * s - radio, cy - radio / 2, radio, radio}
 		name_width := clamp(row.width * 0.24, 100 * s, 180 * s)
 		name_room := max(0, parts.radio.x - 12 * s - (parts.icon.x + parts.icon.width + 8 * s))
 		name_width = min(name_width, name_room)
@@ -262,7 +264,7 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 			row.height,
 		}
 	case .Detected_Header:
-		parts.chevron = {row.x + 12 * s, cy - 11 * s, 22 * s, 22 * s}
+		parts.chevron = {row.x + SPACE_3 * s, cy - HEIGHT_COMPACT / 2 * s, HEIGHT_COMPACT * s, HEIGHT_COMPACT * s}
 	case .Process_Group, .Profile_Add, .Text, .Integer, .Number, .Toggle, .Choice, .Color, .Optional_Color,
 	     .Shortcut, .Action, .Profile_Icon:
 	}

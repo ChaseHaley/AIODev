@@ -9,9 +9,8 @@ import "core:fmt"
 // Match the Settings shortcut row so capture, physical positions and its popup share geometry.
 palette_binding_parts :: proc(row: render.Rect, scale: f32) -> Row_Parts {
 	s := scale
-	cy := row.y + row.height / 2
 	parts := Row_Parts {
-		row = row, reset = {row.x + row.width - 34 * s, cy - 13 * s, 26 * s, 26 * s},
+		row = row, reset = reset_slot(row, s),
 	}
 	shortcut_parts(&parts, s, true)
 	return parts

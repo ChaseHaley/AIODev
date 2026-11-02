@@ -108,10 +108,10 @@ rail_close_rect :: proc(layout: Rail_Layout, index: int, scale: f32) -> render.R
 	row := rail_row_rect(layout, index)
 	if row.width <= 0 {return {}}
 	return {
-		row.x + row.width - 26 * scale,
-		row.y + (row.height - 22 * scale) / 2,
-		22 * scale,
-		22 * scale,
+		row.x + row.width - (SPACE_1 + HEIGHT_COMPACT) * scale,
+		row.y + (row.height - HEIGHT_COMPACT * scale) / 2,
+		HEIGHT_COMPACT * scale,
+		HEIGHT_COMPACT * scale,
 	}
 }
 

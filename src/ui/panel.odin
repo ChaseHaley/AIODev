@@ -74,7 +74,7 @@ panel_draw :: proc(list: ^render.Draw_List, panel: Panel, theme: Theme) -> rende
 popover_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
 	return {
 		rect = rect,
-		radius = RADIUS_POPOVER * scale,
+		radius = RADIUS_OVERLAY * scale,
 		scale = scale,
 		shadow_y = 5,
 		softness = 16,
@@ -86,7 +86,7 @@ popover_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
 dialog_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
 	return {
 		rect = rect,
-		radius = RADIUS_DIALOG * scale,
+		radius = RADIUS_OVERLAY * scale,
 		scale = scale,
 		shadow_y = 12,
 		softness = 32,

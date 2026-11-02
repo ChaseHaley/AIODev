@@ -8,20 +8,18 @@ import "core:math"
 import "core:strconv"
 import "core:strings"
 
-@(private) PALETTE_TOGGLE_WIDTH :: 36
-@(private) PALETTE_TOGGLE_HEIGHT :: 20
 @(private) PALETTE_SLIDER_WIDTH :: 112
 @(private) PALETTE_SLIDER_VALUE :: 44
-@(private) PALETTE_BOX_HEIGHT :: 26
+@(private) PALETTE_BOX_HEIGHT :: HEIGHT_COMPACT
 @(private) PALETTE_CHOICE_WIDTH :: 176
 @(private) PALETTE_TEXT_WIDTH :: 196
-@(private) PALETTE_POPUP_ROW :: 26
+@(private) PALETTE_POPUP_ROW :: MENU_ROW_HEIGHT
 // The reset button matches the Settings page: a square at the row's right edge, before the control.
-@(private) PALETTE_RESET_SIZE :: 26
-@(private) PALETTE_RESET_INSET :: 8
-@(private) PALETTE_RESET_GAP :: 12
+@(private) PALETTE_RESET_SIZE :: HEIGHT_COMPACT
+@(private) PALETTE_RESET_INSET :: SPACE_2
+@(private) PALETTE_RESET_GAP :: SPACE_3
 @(private) PALETTE_POPUP_ROWS :: 8
-@(private) PALETTE_POPUP_SEARCH :: 32
+@(private) PALETTE_POPUP_SEARCH :: HEIGHT_STANDARD
 // Keyboard steps across a wide range move a twentieth of the track instead of one unit.
 @(private) PALETTE_STEP_FRACTION :: 0.05
 @(private) PALETTE_UNIT_STEPS :: 60
@@ -400,7 +398,7 @@ control_rect :: proc(s: ^Palette_Setting, row: render.Rect, scale: f32) -> rende
 	case .None:
 		return {}
 	case .Toggle:
-		w, h := PALETTE_TOGGLE_WIDTH * scale, PALETTE_TOGGLE_HEIGHT * scale
+		w, h := SWITCH_WIDTH * scale, SWITCH_HEIGHT * scale
 		return {right - w, cy - h / 2, w, h}
 	case .Slider:
 		w, h := (PALETTE_SLIDER_WIDTH + PALETTE_SLIDER_VALUE) * scale, PALETTE_BOX_HEIGHT * scale
@@ -471,7 +469,8 @@ draw_reset :: proc(
 
 @(private)
 slider_track :: proc(control: render.Rect, scale: f32) -> render.Rect {
-	return {control.x + 7 * scale, control.y, PALETTE_SLIDER_WIDTH * scale - 14 * scale, control.height}
+	half := SLIDER_THUMB / 2 * scale
+	return {control.x + half, control.y, PALETTE_SLIDER_WIDTH * scale - 2 * half, control.height}
 }
 
 @(private)
@@ -511,7 +510,7 @@ palette_popup_rect :: proc(p: ^Palette, l: Palette_Layout) -> render.Rect {
 	if control.width <= 0 {return {}}
 	s := l.scale
 	rows := min(PALETTE_POPUP_ROWS, max(1, len(p.edit.matches)))
-	height := f32(rows * PALETTE_POPUP_ROW + 8) * s
+	height := (f32(rows) * PALETTE_POPUP_ROW + 2 * OVERLAY_PADDING) * s
 	if popup_searchable(p) {height += PALETTE_POPUP_SEARCH * s}
 	width := max(control.width, 220 * s)
 	x := clamp(control.x + control.width - width, s, max(s, l.viewport.width - width - s))
@@ -551,8 +550,8 @@ popup_row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f32) -> Field_Box {
 	return {
 		field = &p.edit.filter, text = text,
-		rect = {popup.x + 4 * scale, popup.y + 4 * scale, popup.width - 8 * scale, 28 * scale},
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_INNER, style = .Input, scale = scale,
+		rect = {popup.x + 4 * scale, popup.y + 4 * scale, popup.width - 8 * scale, HEIGHT_TOOLBAR * scale},
+		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
 	}
 }
 
@@ -560,7 +559,7 @@ popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f3
 text_entry_box :: proc(p: ^Palette, control: render.Rect, text: ^Text, scale: f32) -> Field_Box {
 	return {
 		field = &p.edit.field, text = text, rect = control,
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Input, scale = scale,
+		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
 	}
 }
 
@@ -724,7 +723,7 @@ draw_control :: proc(
 	if control.width <= 0 {return .Ok}
 	editing := p.edit.setting == setting
 	value, label := setting_value(p, s)
-	input_text := text_styled(text, .Input)
+	input_text := text_styled(text, .Body)
 	baseline := control.y + (control.height - input_text.line_height) / 2 + input_text.ascent
 	if editing && p.edit.kind == .Text {
 		box := text_entry_box(p, control, text, scale)
@@ -748,16 +747,22 @@ draw_control :: proc(
 			theme.muted, number_box.width)
 	case .Choice:
 		box_draw(list, control, theme, editing && p.edit.kind == .Choice, scale)
-		if result := draw_text(&input_text, list, label, control.x + 10 * scale, baseline, theme.text,
-			max(1, control.width - 36 * scale)); result != .Ok {return result}
-		chevron := render.Rect{control.x + control.width - 26 * scale, control.y, 20 * scale, control.height}
+		inset := CONTROL_INSET * scale
+		if result := draw_text(&input_text, list, label, control.x + inset, baseline, theme.text,
+			max(1, control.width - 2 * inset - (ICON_INDICATOR + SPACE_1) * scale)); result != .Ok {return result}
+		chevron := render.Rect {
+			control.x + control.width - inset - ICON_INDICATOR * scale,
+			control.y,
+			ICON_INDICATOR * scale,
+			control.height,
+		}
 		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
 	case .Text:
 		box_draw(list, control, theme, false, scale)
 		shown, color := value, theme.text
 		if shown == "" {shown, color = "Empty", theme.faint}
-		return draw_text(&input_text, list, shown, control.x + 8 * scale, baseline, color,
-			max(1, control.width - 16 * scale))
+		return draw_text(&input_text, list, shown, control.x + CONTROL_INSET * scale, baseline, color,
+			max(1, control.width - 2 * CONTROL_INSET * scale))
 	}
 	return .Ok
 }
@@ -774,8 +779,8 @@ draw_popup :: proc(
 	if popup.width <= 0 {return .Ok}
 	scale := l.scale
 	if render.push_layer(list, popup) != .None {return .Ok}
-	draw_rect(list, {rect = popup, color = theme.pane, radius = RADIUS_POPOVER * scale})
-	draw_rect(list, {rect = popup, color = theme.border, radius = RADIUS_POPOVER * scale, stroke = scale})
+	draw_rect(list, {rect = popup, color = theme.pane, radius = RADIUS_OVERLAY * scale})
+	draw_rect(list, {rect = popup, color = theme.border, radius = RADIUS_OVERLAY * scale, stroke = scale})
 	e := &p.edit
 	if popup_searchable(p) {
 		box := popup_search_box(p, popup, text, scale)
@@ -786,30 +791,37 @@ draw_popup :: proc(
 	}
 	top := popup_list_top(p, popup, scale)
 	row_height := PALETTE_POPUP_ROW * scale
-	item_text := text_styled(text, .Small)
+	item_text := text^
 	if len(e.matches) == 0 {
 		baseline := top + (row_height - item_text.line_height) / 2 + item_text.ascent
-		return draw_text(&item_text, list, "No matches", popup.x + 12 * scale, baseline, theme.muted)
+		return draw_text(&item_text, list, "No matches", popup.x + SPACE_3 * scale, baseline, theme.muted)
 	}
 	current, _ := setting_value(p, &p.settings[e.setting])
 	for i := e.scroll; i < len(e.matches) && i < e.scroll + PALETTE_POPUP_ROWS; i += 1 {
 		choice := e.matches[i]
-		row := render.Rect{popup.x + 3 * scale, top + f32(i - e.scroll) * row_height, popup.width - 6 * scale,
-			row_height}
+		pad := OVERLAY_PADDING * scale
+		row := render.Rect{popup.x + pad, top + f32(i - e.scroll) * row_height, popup.width - 2 * pad, row_height}
 		if i == e.index {
-			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_INNER * scale})
+			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
 		} else if i == e.hover {
-			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_INNER * scale})
+			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_CONTROL * scale})
 		}
 		label := e.labels[choice] != "" ? e.labels[choice] : e.choices[choice]
 		saved := e.choices[choice] == current
 		baseline := row.y + (row.height - item_text.line_height) / 2 + item_text.ascent
 		if saved {
-			check := render.Rect{row.x + row.width - 24 * scale, row.y, 20 * scale, row.height}
+			check := render.Rect {
+				row.x + row.width - (CONTROL_INSET + ICON_INDICATOR) * scale,
+				row.y,
+				ICON_INDICATOR * scale,
+				row.height,
+			}
 			icon_draw(list, .Check, check, theme.accent, ICON_INDICATOR, scale)
 		}
-		if result := draw_text(&item_text, list, label, row.x + 9 * scale, baseline,
-			saved ? theme.text : theme.muted, max(1, row.width - 40 * scale)); result != .Ok {return result}
+		inset := CONTROL_INSET * scale
+		if result := draw_text(&item_text, list, label, row.x + inset, baseline,
+			saved ? theme.text : theme.muted, max(1, row.width - 2 * inset - (ICON_INDICATOR + SPACE_2) * scale));
+		   result != .Ok {return result}
 	}
 	return .Ok
 }

@@ -296,14 +296,17 @@ editor_process_field_parts :: proc(row: ^Editor_Row, parts: Row_Parts, scale: f3
 	left := min(r.x + 120 * s, r.x + r.width * 0.38)
 	right := r.x + r.width - 40 * s
 	width := max(0, right - left)
-	if row.process_field == .Padding {width = min(width, 90 * s)}
-	result.field = {left, r.y + (r.height - 30 * s) / 2, width, 30 * s}
-	result.text_right = left - 8 * s
+	if row.process_field == .Padding {width = min(width, 88 * s)}
+	field_h, button := HEIGHT_STANDARD * s, HEIGHT_COMPACT * s
+	result.field = {left, r.y + (r.height - field_h) / 2, width, field_h}
+	result.text_right = left - SPACE_2 * s
 	if row.process_field == .Program {
-		result.clear = {r.x + r.width - 32 * s, r.y + (r.height - 26 * s) / 2, 26 * s, 26 * s}
+		clear_x := r.x + r.width - (SPACE_2 + HEIGHT_COMPACT) * s
+		result.clear = {clear_x, r.y + (r.height - button) / 2, button, button}
 	}
 	if row.process_field == .Add_Group || row.process_field == .Add_Program {
-		result.field = {r.x + 36 * s, r.y + (r.height - 30 * s) / 2, min(140 * s, r.width - 40 * s), 30 * s}
+		field_w := min(140 * s, r.width - 40 * s)
+		result.field = {r.x + ITEM_INSET * s, r.y + (r.height - field_h) / 2, field_w, field_h}
 	}
 	return result
 }
@@ -399,7 +402,7 @@ editor_process_draw :: proc(
 		grip_ink := selected || p.drag == .Process_Order ? theme.muted : theme.faint
 		icon_draw(list, .Grip, cells.handle, grip_ink, ICON_BUTTON, s)
 		icon_draw(list, .Trash, cells.remove, theme.muted, ICON_BUTTON, s)
-		chevron := render.Rect{cells.remove.x - 26 * s, r.y + (r.height - 26 * s) / 2, 24 * s, 26 * s}
+		chevron := render.Rect{cells.remove.x - HEIGHT_COMPACT * s, r.y, HEIGHT_COMPACT * s, r.height}
 		icon_draw(list, p.process_expanded == row.process ? .Chevron_Down : .Chevron_Right, chevron,
 			theme.muted, ICON_INDICATOR, s)
 		amount := fmt.bprintf(buffer[:], "%s DIP", row.value)

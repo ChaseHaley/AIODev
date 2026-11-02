@@ -6,8 +6,9 @@ import "aio:render"
 import "base:runtime"
 
 MENU_WIDTH :: f32(280)
-MENU_ROW_HEIGHT :: POPOVER_ROW_HEIGHT
-MENU_SEPARATOR_HEIGHT :: f32(9)
+MENU_ROW_HEIGHT :: HEIGHT_STANDARD
+// A hairline with SPACE_1 above and below.
+MENU_SEPARATOR_HEIGHT :: 2 * SPACE_1 + 1
 MENU_MAX_ITEMS :: 40
 
 Menu_Item :: struct {
@@ -82,7 +83,7 @@ menu_layout :: proc(
 	bounds := m.bounds
 	if bounds.width <= 0 {bounds = {0, 0, width, height}}
 	rows := 0
-	content := 2 * POPOVER_PADDING * scale
+	content := 2 * OVERLAY_PADDING * scale
 	for i in m.scroll..<len(m.items) {
 		next := menu_row_height(m, i) * scale
 		if rows > 0 && content + next > bounds.height - 16 * scale {break}
@@ -98,12 +99,12 @@ menu_layout :: proc(
 
 menu_row_rect :: proc(m: ^Menu, index: int, width, height, scale: f32) -> render.Rect {
 	surface, _ := menu_layout(m, width, height, scale)
-	y := surface.y + POPOVER_PADDING * scale
+	y := surface.y + OVERLAY_PADDING * scale
 	for i in m.scroll..<index {y += menu_row_height(m, i) * scale}
 	return {
-		surface.x + POPOVER_PADDING * scale,
+		surface.x + OVERLAY_PADDING * scale,
 		y,
-		surface.width - 2 * POPOVER_PADDING * scale,
+		surface.width - 2 * OVERLAY_PADDING * scale,
 		menu_row_height(m, index) * scale,
 	}
 }
@@ -112,8 +113,8 @@ menu_hit :: proc(m: ^Menu, x, y, width, height, scale: f32) -> int {
 	surface, rows := menu_layout(m, width, height, scale)
 	if x < surface.x ||
 	   x >= surface.x + surface.width ||
-	   y < surface.y + POPOVER_PADDING * scale ||
-	   y >= surface.y + surface.height - POPOVER_PADDING * scale {return -1}
+	   y < surface.y + OVERLAY_PADDING * scale ||
+	   y >= surface.y + surface.height - OVERLAY_PADDING * scale {return -1}
 	for i in m.scroll..<m.scroll + rows {
 		row := menu_row_rect(m, i, width, height, scale)
 		if y >= row.y && y < row.y + row.height {return i}
@@ -178,8 +179,9 @@ menu_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
 	frame := popover_panel(surface, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
-	if render.push_layer(list, surface, RADIUS_POPOVER * scale) != .None {return .Ok}
-	small := text_styled(text, .Small)
+	if render.push_layer(list, surface, RADIUS_OVERLAY * scale) != .None {return .Ok}
+	small := text_styled(text, .Detail)
+	inset := CONTROL_INSET * scale
 	for visible in 0..<rows {
 		i := m.scroll + visible
 		if i >= len(m.items) {break}
@@ -189,34 +191,29 @@ menu_draw :: proc(
 			if render.push_rect(
 				list,
 				{
-					rect = {row.x + 10 * scale, row.y + 4 * scale, row.width - 20 * scale, scale},
+					rect = {row.x + inset, row.y + 4 * scale, row.width - 2 * inset, scale},
 					color = theme.border,
 				},
 			) != .None {return .Ok}
 			continue
 		}
 		if i == m.selected && item.enabled {
-			if render.push_rect(list, {rect = row, color = theme.selection, radius = RADIUS_INNER * scale}) !=
+			if render.push_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale}) !=
 			   .None {return .Ok}
 		}
 		if item.checked {
-			if render.push_rect(
-				list,
-				{
-					rect = {row.x + scale, row.y + 8 * scale, 3 * scale, row.height - 16 * scale},
-					color = theme.accent,
-					radius = RADIUS_MARK * scale,
-				},
-			) != .None {return .Ok}
+			mark := render.Rect{row.x + scale, row.y + 8 * scale, 3 * scale, row.height - 16 * scale}
+			if render.push_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)}) !=
+			   .None {return .Ok}
 		}
-		label_x := row.x + 10 * scale
+		label_x := row.x + inset
 		if item.icon != "" || item.icon_atlas.width > 0 {
-			icon_width := 22 * scale
+			icon_width := (16 + SPACE_2) * scale
 			if result := shell_badge_draw(
 				list,
 				text,
 				theme,
-				{row.x + 8 * scale, row.y + (row.height - 16 * scale) / 2, 16 * scale, 16 * scale},
+				{label_x, row.y + (row.height - 16 * scale) / 2, 16 * scale, 16 * scale},
 				item.icon,
 				scale,
 				item.icon_atlas,
@@ -230,7 +227,7 @@ menu_draw :: proc(
 				&small,
 				list,
 				item.shortcut,
-				row.x + row.width - 10 * scale - shortcut_width,
+				row.x + row.width - inset - shortcut_width,
 				row.y + (row.height - small.line_height) / 2 + small.ascent,
 				theme.faint,
 			); result != .Ok {return result}
@@ -242,10 +239,10 @@ menu_draw :: proc(
 			label_x,
 			row.y + (row.height - text.line_height) / 2 + text.ascent,
 			item.enabled ? theme.text : theme.muted,
-			max(1, row.x + row.width - 18 * scale - shortcut_width - label_x),
+			max(1, row.x + row.width - inset - (shortcut_width > 0 ? shortcut_width + SPACE_2 * scale : 0) - label_x),
 		); result != .Ok {return result}
 		if i == m.selected && item.enabled && contains(row, pointer.x, pointer.y) {
-			if result := hover_rim_draw(list, theme, row, RADIUS_INNER * scale, 1, scale, pointer);
+			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
 		}
 	}

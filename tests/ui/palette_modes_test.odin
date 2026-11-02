@@ -347,8 +347,8 @@ palette_chip_menu_switches_without_typing :: proc(t: ^testing.T) {
 	testing.expect(t, p.mode_menu)
 	l = ui.palette_layout(&p, 1000, 800, 1)
 	if !testing.expect(t, l.menu.width > 0) {return}
-	// Row four (Settings) with the four-DIP inset and 26-DIP rows.
-	y := l.menu.y + 4 + 3*26 + 13
+	// Row four (Settings) with the four-DIP inset and standard menu rows.
+	y := l.menu.y + 4 + 3*ui.MENU_ROW_HEIGHT + ui.MENU_ROW_HEIGHT/2
 	mode, id := ui.palette_mouse_press(&p, &registry, l, l.menu.x + 20, y)
 	testing.expect_value(t, mode, ui.Outcome.Changed)
 	testing.expect_value(t, id, commands.Command_Id(0))

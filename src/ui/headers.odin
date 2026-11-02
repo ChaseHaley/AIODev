@@ -3,7 +3,7 @@ package ui
 import "aio:glyphs"
 import "aio:render"
 
-HEADER_HEIGHT :: f32(28)
+HEADER_HEIGHT :: HEIGHT_TOOLBAR
 Header_Action :: enum {
 	None,
 	Split_Right,
@@ -21,21 +21,25 @@ header_layout :: proc(area: render.Rect, scale: f32, _: bool) -> Header_Layout {
 	l := Header_Layout {
 		panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT * scale)},
 	}
-	l.badge = {area.x + 8 * scale, area.y + 7 * scale, 14 * scale, 14 * scale}
-	end := area.x + area.width - 5 * scale
+	// The badge and the last button's icon both sit SPACE_2 from the card's edges.
+	badge := ICON_BUTTON * scale
+	l.badge = {area.x + SPACE_2 * scale, area.y + (l.panel.height - badge) / 2, badge, badge}
+	button := HEIGHT_COMPACT * scale
+	end := area.x + area.width - SPACE_1 * scale
 	{
 		for i := 3; i >= 0; i -= 1 {
-			if end - 22 * scale < area.x + 4 * scale {break}
+			if end - button < area.x + SPACE_1 * scale {break}
 			l.buttons[i] = {
-				end - 22 * scale,
-				area.y + 3 * scale,
-				22 * scale,
-				min(22 * scale, l.panel.height),
+				end - button,
+				area.y + max(0, (l.panel.height - button) / 2),
+				button,
+				min(button, l.panel.height),
 			}
-			end -= 24 * scale
+			end -= button
 		}
 	}
-	l.title = {area.x + 28 * scale, area.y, max(0, end - area.x - 32 * scale), l.panel.height}
+	title_x := l.badge.x + l.badge.width + SPACE_2 * scale
+	l.title = {title_x, area.y, max(0, end - SPACE_2 * scale - title_x), l.panel.height}
 	return l
 }
 
@@ -92,8 +96,8 @@ shell_badge_draw :: proc(
 		   .None {return .Ok}
 		return .Ok
 	}
-	draw_rect(list, {rect = area, color = theme.selection, radius = 3 * scale})
-	label := text_styled(text, .Keycap)
+	draw_rect(list, {rect = area, color = theme.selection, radius = RADIUS_CONTROL * scale})
+	label := text_styled(text, .Detail)
 	x := area.x + max(0, (area.width - text_width(&label, icon)) / 2)
 	return draw_fading_text(
 		&label,
@@ -156,19 +160,20 @@ header_draw :: proc(
 		chevron := render.Rect{l.badge.x + l.badge.width, l.badge.y, ICON_INDICATOR * scale, l.badge.height}
 		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
 		// The badge carries its own tinted keycap, so it takes the light but no paper hairline.
-		if result := hover_rim_draw(list, theme, l.badge, 4 * scale, 1, scale, pointer, false);
+		if result := hover_rim_draw(list, theme, l.badge, RADIUS_CONTROL * scale, 1, scale, pointer, false);
 		   result != .None {return .Ok}
 	}
 	strong := text_styled(text, focused ? .Strong : .Body)
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	width := l.title.width
 	if status.glyph != .None && width >= 120 * scale {
-		pill_width := min(text_width(&small, status_text) + 30 * scale, width * 0.5)
+		// A pill pads its ends by SPACE_2: glyph, SPACE_1, then the status text.
+		pill_width := min(text_width(&small, status_text) + (SPACE_2 + 12 + SPACE_1 + SPACE_2) * scale, width * 0.5)
 		pill := render.Rect {
 			l.title.x + width - pill_width,
-			l.panel.y + 5 * scale,
+			l.panel.y + SPACE_1 * scale,
 			pill_width,
-			max(0, l.panel.height - 10 * scale),
+			max(0, l.panel.height - 2 * SPACE_1 * scale),
 		}
 		tint := status_color(theme, status.glyph)
 		tint.a *= status.dim ? 0.08 : 0.16
@@ -177,7 +182,7 @@ header_draw :: proc(
 			list,
 			text,
 			theme,
-			{pill.x + 6 * scale, pill.y + (pill.height - 12 * scale) / 2, 12 * scale, 12 * scale},
+			{pill.x + SPACE_2 * scale, pill.y + (pill.height - 12 * scale) / 2, 12 * scale, 12 * scale},
 			status,
 			status_phase,
 			scale,
@@ -188,12 +193,12 @@ header_draw :: proc(
 			&small,
 			list,
 			status_text,
-			pill.x + 22 * scale,
+			pill.x + (SPACE_2 + 12 + SPACE_1) * scale,
 			pill.y + (pill.height - small.line_height) / 2 + small.ascent,
 			ink,
-			max(0, pill.width - 28 * scale),
+			max(0, pill.width - (SPACE_2 + 12 + SPACE_1 + SPACE_2) * scale),
 		); result != .Ok {return result}
-		width = max(0, width - pill_width - 8 * scale)
+		width = max(0, width - pill_width - SPACE_2 * scale)
 	}
 	title_width := directory == "" ? width : min(width * 0.55, text_width(&strong, title))
 	baseline := l.panel.y + (l.panel.height - strong.line_height) / 2 + strong.ascent
@@ -241,18 +246,21 @@ header_draw :: proc(
 // Single-pane tabs keep their full terminal height, so their split controls float in a small pill at the
 // pane's top-right corner instead of a header row.
 split_overlay_layout :: proc(area: render.Rect, scale: f32) -> Header_Layout {
-	width, height := 80 * scale, 28 * scale
+	// A grip and two compact buttons in a toolbar-height pill, SPACE_2 from the pane's corner.
+	button := HEIGHT_COMPACT * scale
+	inset := (HEIGHT_TOOLBAR - HEIGHT_COMPACT) / 2 * scale
+	width, height := 3 * button + 2 * inset, HEIGHT_TOOLBAR * scale
 	l := Header_Layout {
 		panel = {
-			max(area.x, area.x + area.width - width - 6 * scale),
-			area.y + 6 * scale,
+			max(area.x, area.x + area.width - width - SPACE_2 * scale),
+			area.y + SPACE_2 * scale,
 			min(width, area.width),
 			min(height, area.height),
 		},
 	}
-	l.title = {l.panel.x + 3 * scale, l.panel.y + 3 * scale, 26 * scale, 22 * scale}
-	l.buttons[0] = {l.panel.x + 31 * scale, l.panel.y + 3 * scale, 22 * scale, 22 * scale}
-	l.buttons[1] = {l.panel.x + 55 * scale, l.panel.y + 3 * scale, 22 * scale, 22 * scale}
+	l.title = {l.panel.x + inset, l.panel.y + inset, button, button}
+	l.buttons[0] = {l.title.x + button, l.title.y, button, button}
+	l.buttons[1] = {l.buttons[0].x + button, l.title.y, button, button}
 	return l
 }
 
@@ -265,7 +273,7 @@ split_overlay_draw :: proc(
 	scale: f32,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {
-	radius := RADIUS_POPOVER * scale
+	radius := RADIUS_OVERLAY * scale
 	if render.push_layer(list, l.panel, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = theme.surface, radius = radius})
 	draw_rect(list, {rect = l.panel, color = theme.border, radius = radius, stroke = scale})

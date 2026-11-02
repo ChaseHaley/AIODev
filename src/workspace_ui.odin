@@ -132,7 +132,9 @@ workspace_button_width :: proc(w: ^Window) -> f32 {
 workspace_button_rect :: proc(w: ^Window) -> render.Rect {
 	width := workspace_button_width(w)
 	left := title_actions_end(w)
-	return {left + 5 * w.scale, 6 * w.scale, max(0, width - left - 10 * w.scale), 28 * w.scale}
+	height := ui.HEIGHT_TOOLBAR * w.scale
+	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
+	return {left + ui.SPACE_1 * w.scale, top, max(0, width - left - 2 * ui.SPACE_1 * w.scale), height}
 }
 
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
@@ -162,16 +164,18 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 	}
 	if width >= 72 * w.scale {
-		icon := render.Rect{r.x + 5 * w.scale, r.y + 2 * w.scale, 24 * w.scale, 24 * w.scale}
+		size := ui.ICON_BUTTON * w.scale
+		icon := render.Rect{r.x + ui.CONTROL_INSET * w.scale, r.y + (r.height - size) / 2, size, size}
 		if result := workspace_icon_draw(w, w.workspace.icon, icon, app.theme.text);
 		   result != .Ok { return result }
 	}
 	indicator := workspace_button_indicator_rect(w)
 	indicator.y -= lift
-	label_width := indicator.x - (r.x + 35 * w.scale) - 8 * w.scale
+	label_x := r.x + (ui.CONTROL_INSET + ui.ICON_BUTTON + ui.SPACE_2) * w.scale
+	label_width := indicator.x - label_x - ui.SPACE_2 * w.scale
 	if label_width >= 24 * w.scale {
-		if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, r.x + 35 * w.scale,
-			r.y + (28 * w.scale - w.ui_text.line_height) / 2 + w.ui_text.ascent,
+		if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, label_x,
+			r.y + (r.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			app.theme.text, label_width); result != .Ok { return result }
 	}
 	chevron_ink := hover > 0 ? app.theme.text : app.theme.muted
@@ -400,8 +404,11 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 }
 
 // The search field sits in the row column, so its text lines up with the row labels.
+// Workspace rows are standard rows; their icons are 16 DIP like every leading icon.
+WORKSPACE_ROW_HEIGHT :: ui.HEIGHT_STANDARD
+
 workspace_picker_header :: proc(w: ^Window) -> f32 {
-	return (ui.POPOVER_PADDING + ui.CONTROL_HEIGHT + 8) * w.scale
+	return (ui.OVERLAY_PADDING + ui.HEIGHT_STANDARD + 8) * w.scale
 }
 
 workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
@@ -410,15 +417,15 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 		return g.panel, g.visible_rows
 	}
 	s := w.scale
-	x, y := 5 * s, ui.TITLE_BAR_HEIGHT * s
-	width := min(380 * s, max(0, f32(w.width) - 10 * s))
+	x, y := ui.SPACE_1 * s, ui.TITLE_BAR_HEIGHT * s
+	width := min(380 * s, max(0, f32(w.width) - 2 * ui.SPACE_1 * s))
 	header := workspace_picker_header(w)
 	extra := workspace_row_rename_height(w)
-	reserve := w.workspace_picker.mode == .Rename ? 68 * s : 0
+	reserve := w.workspace_picker.mode == .Rename ? WORKSPACE_RENAME_HEIGHT * s : 0
 	available := f32(w.height) - y - header - 24 * s - reserve
-	rows := min(workspace_picker_count(w), max(1, int(available / (34 * s))))
-	content := header + f32(rows) * 34 * s + (8 + ui.POPOVER_PADDING) * s + extra
-	height := min(max(0, f32(w.height) - y - 5 * s), content)
+	rows := min(workspace_picker_count(w), max(1, int(available / (WORKSPACE_ROW_HEIGHT * s))))
+	content := header + f32(rows) * WORKSPACE_ROW_HEIGHT * s + (8 + ui.OVERLAY_PADDING) * s + extra
+	height := min(max(0, f32(w.height) - y - ui.SPACE_1 * s), content)
 	return {x, y, width, height}, rows
 }
 
@@ -427,8 +434,8 @@ workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
 	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_layout(w).field }
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
-	pad := ui.POPOVER_PADDING * s
-	return {r.x + pad, r.y + pad, max(0, r.width - 2 * pad), ui.CONTROL_HEIGHT * s}
+	pad := ui.OVERLAY_PADDING * s
+	return {r.x + pad, r.y + pad, max(0, r.width - 2 * pad), ui.HEIGHT_STANDARD * s}
 }
 
 workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
@@ -439,7 +446,7 @@ workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
 		inset = ui.CONTROL_INSET,
 		caret_width = 1,
 		radius = ui.RADIUS_CONTROL,
-		style = .Input,
+		style = .Body,
 		scale = w.scale,
 	}
 }
@@ -453,9 +460,10 @@ workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	gap := !workspace_picker_icons(p) && index >= len(p.rows) && p.scroll <= len(p.rows) ? 8 * s : 0
 	rename_index := workspace_row_index(w, workspace_picker_target(p, .Rename))
 	if rename_index >= p.scroll && index > rename_index { gap += workspace_row_rename_height(w) }
-	pad := ui.POPOVER_PADDING * s
-	return {r.x + pad, r.y + workspace_picker_header(w) + f32(index - p.scroll) * 34 * s + gap,
-		max(0, r.width - 2 * pad), 34 * s}
+	pad := ui.OVERLAY_PADDING * s
+	row_height := WORKSPACE_ROW_HEIGHT * s
+	return {r.x + pad, r.y + workspace_picker_header(w) + f32(index - p.scroll) * row_height + gap,
+		max(0, r.width - 2 * pad), row_height}
 }
 
 workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
@@ -472,7 +480,8 @@ workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 
 workspace_picker_menu_button_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	r := workspace_picker_row_rect(w, index)
-	return {r.x + r.width - 34 * w.scale, r.y + w.scale, 32 * w.scale, 32 * w.scale}
+	size := ui.HEIGHT_COMPACT * w.scale
+	return {r.x + r.width - ui.SPACE_1 * w.scale - size, r.y + (r.height - size) / 2, size, size}
 }
 
 workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
@@ -511,7 +520,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
-	if render.push_layer(&w.list, r, ui.RADIUS_POPOVER * s) != .None { return .Ok }
+	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	if workspace_picker_icons(p) { return workspace_icon_picker_draw(app, w) }
 	box := workspace_picker_query_box(w)
 	field := box.rect
@@ -521,7 +530,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
 		p.mode == .List, "Search workspaces"); result != .Ok { return result }
-	if render.push_layer(&w.list, r, ui.RADIUS_POPOVER * s) != .None { return .Ok }
+	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	for visible in 0..<rows {
 		i := p.scroll + visible
 		if i >= workspace_picker_count(w) { break }
@@ -534,7 +543,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if i == p.selected {
 			if render.push_rect(
 				   &w.list,
-				   {rect = row, color = app.theme.selection, radius = ui.RADIUS_INNER * s},
+				   {rect = row, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s},
 			   ) !=
 			   .None {return .Ok}
 		}
@@ -561,17 +570,18 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			if result := workspace_icon_draw(
 				w,
 				icon,
-				{row.x + 6 * s, row.y + (row.height - 24 * s) / 2, 24 * s, 24 * s},
+				{label_x, row.y + (row.height - ui.ICON_BUTTON * s) / 2, ui.ICON_BUTTON * s, ui.ICON_BUTTON * s},
 				app.theme.text,
 			); result != .Ok {return result}
-			label_x += 30 * s
+			label_x += (ui.ICON_BUTTON + ui.SPACE_2) * s
 		}
 		right := row.x + row.width - ui.CONTROL_INSET * s
 		if has_icon && p.move.workspace == 0 {
 			workspace_row_ellipsis_draw(app, w, i)
-			right -= 36 * s
+			right = row.x + row.width - (ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_2) * s
 		}
-		detail_width := min(ui.text_width(&w.ui_text, detail), max(0, (right - label_x) * 0.5))
+		detail_text := ui.text_styled(&w.ui_text, .Detail)
+		detail_width := min(ui.text_width(&detail_text, detail), max(0, (right - label_x) * 0.5))
 		if result := ui.draw_fading_text(
 			&w.ui_text,
 			&w.list,
@@ -579,10 +589,10 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			label_x,
 			baseline,
 			app.theme.text,
-			max(0, right - label_x - detail_width - 8 * s),
+			max(0, right - label_x - detail_width - ui.SPACE_2 * s),
 		); result != .Ok {return result}
 		if result := ui.draw_fading_text(
-			&w.ui_text,
+			&detail_text,
 			&w.list,
 			detail,
 			right - detail_width,
@@ -597,7 +607,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				&w.list,
 				app.theme,
 				row,
-				ui.RADIUS_INNER * s,
+				ui.RADIUS_CONTROL * s,
 				1,
 				s,
 				w.pointer,

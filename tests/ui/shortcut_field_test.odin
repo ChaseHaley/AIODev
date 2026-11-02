@@ -57,8 +57,8 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		testing.expect(t, parts.field.width <= 176 * scale)
 		render.draw_list_reset(&list)
 		_ = render.push_layer(&list, l.viewport)
-		input := ui.text_styled(&text, .Input)
-		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K", parts.field.x + 10 * scale,
+		input := ui.text_styled(&text, .Body)
+		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K", parts.field.x + ui.CONTROL_INSET * scale,
 		                     parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent,
 		                     theme.text), glyphs.Result.Ok)
 		if testing.expect(t, len(list.glyphs) > 0) {testing.expect_value(t, list.glyphs[0].rect, idle)}
@@ -76,7 +76,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		testing.expect_value(t, commands.set_shortcuts(&r, 1, {{.K, {.Control}}, {.K, {.Alt}}}), commands.Error.None)
 		render.draw_list_reset(&list)
 		_ = render.push_layer(&list, l.viewport)
-		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K, +1", parts.field.x + 10 * scale,
+		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K, +1", parts.field.x + ui.CONTROL_INSET * scale,
 		                     parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent,
 		                     theme.text), glyphs.Result.Ok)
 		expected := make([]render.Glyph_Instance, len(list.glyphs), context.temp_allocator)

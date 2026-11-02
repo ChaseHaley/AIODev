@@ -34,15 +34,16 @@ shortcut_parts :: proc(parts: ^Row_Parts, scale: f32, selected: bool) {
 	s := scale
 	r := parts.row
 	cy := r.y + r.height / 2
-	right := parts.reset.x - 12 * s
+	right := parts.reset.x - SPACE_3 * s
 	width := clamp((right - r.x) / s * 0.45, 120, SHORTCUT_FIELD_WIDTH) * s
-	parts.field = {right - width, cy - 15 * s, width, 30 * s}
+	parts.field = {right - width, cy - HEIGHT_STANDARD / 2 * s, width, HEIGHT_STANDARD * s}
 	if !selected {return}
-	parts.positions = {parts.field.x - 148 * s, cy - 11 * s, 36 * s, 22 * s}
+	switch_w, switch_h := SWITCH_WIDTH * s, SWITCH_HEIGHT * s
+	parts.positions = {parts.field.x - 148 * s, cy - switch_h / 2, switch_w, switch_h}
 	parts.text_right = parts.positions.x
 	if parts.positions.x - r.x < 190 * s {
 		parts.text_right = parts.field.x - 84 * s
-		parts.positions = {parts.text_right + 18 * s, r.y + 6 * s, 36 * s, 22 * s}
+		parts.positions = {parts.text_right + SPACE_3 * s, r.y + SPACE_1 * s, switch_w, switch_h}
 		parts.positions_label_below = true
 	}
 }
@@ -58,7 +59,7 @@ shortcut_field_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, parts: Row_Parts,
 	summary: Shortcut_Summary, state: Shortcut_Field_State, page: render.Rect, scale: f32,
 ) -> glyphs.Result {
-	input := text_styled(text, .Input)
+	input := text_styled(text, .Body)
 	baseline := parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent
 	box_draw(list, parts.field, theme, state.focused && !state.capturing, scale)
 	if state.capturing {
@@ -74,8 +75,8 @@ shortcut_field_draw :: proc(
 	buffer: [32]u8
 	suffix := summary.additional > 0 ? fmt.bprintf(buffer[:], ", +%d", summary.additional) : ""
 	suffix_width := text_width(&input, suffix)
-	room := max(1, parts.field.width - 20 * scale - suffix_width)
-	x := parts.field.x + 10 * scale
+	room := max(1, parts.field.width - 2 * CONTROL_INSET * scale - suffix_width)
+	x := parts.field.x + CONTROL_INSET * scale
 	ink := summary.first == "" ? theme.muted : theme.text
 	if result := draw_fading_text(&input, list, first, x, baseline, ink, room); result != .Ok {return result}
 	if suffix != "" {
@@ -85,14 +86,14 @@ shortcut_field_draw :: proc(
 	if parts.positions.width <= 0 {return .Ok}
 	if render.push_layer(list, page) != .None {return .Ok}
 	switch_draw(list, parts.positions, state.physical, state.positions_focused, theme, scale)
-	small := text_styled(text, .Small)
+	small := text_styled(text, .Detail)
 	label := "Key positions"
 	if parts.positions_label_below {
 		return draw_text(&small, list, label,
 		                 parts.positions.x + (parts.positions.width - text_width(&small, label)) / 2,
 		                 parts.positions.y + parts.positions.height + 2 * scale + small.ascent, theme.muted)
 	}
-	return draw_text(&small, list, label, parts.positions.x + parts.positions.width + 8 * scale,
+	return draw_text(&small, list, label, parts.positions.x + parts.positions.width + SPACE_2 * scale,
 	                 parts.positions.y + (parts.positions.height - small.line_height) / 2 + small.ascent,
 	                 theme.muted)
 }

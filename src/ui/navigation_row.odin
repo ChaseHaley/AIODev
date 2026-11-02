@@ -22,8 +22,8 @@ navigation_row_draw :: proc(
 	tile := render.Rect{rect.x, rect.y + s, rect.width, max(0, rect.height - 2 * s)}
 	if row.selected {
 		draw_rect(list, {rect = tile, color = theme.rail_active, radius = RADIUS_CONTROL * s})
-		draw_rect(list, {rect = {rect.x + s, rect.y + 8 * s, 2 * s, rect.height - 16 * s},
-			color = theme.tab_indicator, radius = s})
+		mark := render.Rect{rect.x + s, rect.y + 8 * s, 2 * s, rect.height - 16 * s}
+		draw_rect(list, {rect = mark, color = theme.tab_indicator, radius = pill_radius(mark)})
 	} else if row.marked {
 		draw_rect(list, {rect = tile, color = theme.selection, radius = RADIUS_CONTROL * s})
 		draw_rect(list, {rect = tile, color = theme.accent, radius = RADIUS_CONTROL * s, stroke = s})
@@ -35,10 +35,10 @@ navigation_row_draw :: proc(
 		text,
 		list,
 		row.title,
-		rect.x + 8 * s + row.leading,
+		rect.x + CONTROL_INSET * s + row.leading,
 		rect.y + (rect.height - text.line_height) / 2 + text.ascent,
 		row.selected ? theme.tab_active_text : theme.tab_text,
-		max(0, rect.width - 16 * s - row.leading - row.trailing),
+		max(0, rect.width - 2 * CONTROL_INSET * s - row.leading - row.trailing),
 	); result != .Ok {return result}
 	if row.hovered && !row.selected {
 		if hover_rim_draw(list, theme, tile, RADIUS_CONTROL * s, 1, s, pointer) != .None {return .Ok}
