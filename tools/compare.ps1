@@ -8,6 +8,7 @@ out into a cached worktree under build/compare; a path is built in place, uncomm
 included. Both sides are release builds in their own folders and run as separate instances with
 their own data folders, so they never share a window, a control pipe, settings or saved layout.
 Base opens on the left half of the monitor and Candidate on the right, each at the same size.
+-CandidateOnly skips Base and opens Candidate across the whole monitor.
 
 Settings: by default both start from defaults with no saved layout. -Settings copies one file into
 both; -MySettings copies your own settings.ini. Either way both sides read identical settings, so any
@@ -22,8 +23,12 @@ Main on the left, the design-system worktree on the right.
 The last release against main, both with your settings.
 
 .EXAMPLE
+.\tools\compare.ps1 -CandidateOnly -MySettings
+Only the current checkout, with your settings.
+
+.EXAMPLE
 .\tools\compare.ps1 -Stop
-Closes both compare windows.
+Closes the compare windows.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Run')]
 param(
@@ -46,6 +51,10 @@ param(
     # Reuse the previous builds instead of building again.
     [Parameter(ParameterSetName = 'Run')]
     [switch] $NoBuild,
+
+    # Build and open only the candidate, filling the monitor.
+    [Parameter(ParameterSetName = 'Run')]
+    [switch] $CandidateOnly,
 
     # Zero-based monitor index in the order Windows lists screens; the primary monitor by default.
     [Parameter(ParameterSetName = 'Run')]
@@ -202,9 +211,10 @@ $screen = if ($Monitor -ge 0) {
     $screens[$Monitor]
 } else { [System.Windows.Forms.Screen]::PrimaryScreen }
 $area = $screen.WorkingArea
-$half = [int][Math]::Floor($area.Width / 2)
+if ($CandidateOnly -and $PSBoundParameters.ContainsKey('Base')) { throw 'Use either -Base or -CandidateOnly.' }
+$width = if ($CandidateOnly) { $area.Width } else { [int][Math]::Floor($area.Width / 2) }
 
-$sides = @((Resolve-Side $Base 'Base'), (Resolve-Side $Candidate 'Candidate'))
+$sides = @(if (-not $CandidateOnly) { Resolve-Side $Base 'Base' }; Resolve-Side $Candidate 'Candidate')
 $running = @()
 for ($i = 0; $i -lt $sides.Count; $i++) {
     $side = $sides[$i]
@@ -217,11 +227,10 @@ for ($i = 0; $i -lt $sides.Count; $i++) {
     $window = Wait-Window $process.Id
     if ($window -eq [IntPtr]::Zero) { throw "$($side.Name) opened no window; see $data for its log." }
     [AIODevCompare.Win32]::ShowWindow($window, 9) | Out-Null
-    $x = $area.X + $i * $half
-    [AIODevCompare.Win32]::PlaceFrame($window, $x, $area.Y, $half, $area.Height)
+    [AIODevCompare.Win32]::PlaceFrame($window, $area.X + $i * $width, $area.Y, $width, $area.Height)
     $running += [pscustomobject]@{ name = $side.Name; pid = $process.Id; exe = (Resolve-Path $exe).Path }
-    $place = if ($i -eq 0) { 'left' } else { 'right' }
+    $place = if ($CandidateOnly) { 'full' } elseif ($i -eq 0) { 'left' } else { 'right' }
     Write-Output ("{0,-9} {1,-5} {2}  pid {3}" -f $side.Name, $place, $side.Label, $process.Id)
 }
 $running | ConvertTo-Json | Set-Content -LiteralPath $record
-Write-Output 'Close both with .\tools\compare.ps1 -Stop'
+Write-Output 'Close with .\tools\compare.ps1 -Stop'
