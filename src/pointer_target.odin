@@ -311,7 +311,7 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 	held := .Left in e.buttons
 	switch {
 	case held && ui.palette_scrollbar_dragging(p):
-		on_palette_outcome(app, w, ui.palette_scrollbar_drag(p, l, y), 0)
+		on_palette_outcome(app, w, ui.palette_scrollbar_drag(p, l, x, y), 0)
 	case held && ui.palette_slider_dragging(p):
 		on_palette_outcome(app, w, ui.palette_slider_drag(p, l, x), 0)
 	case held && ui.palette_edit_text_dragging(p):

@@ -5,6 +5,7 @@ import "aio:render"
 // The one scrollbar every scrolling surface shows: terminal panes, the command palette and dropdown
 // lists. The track is the whole expansion zone: the thumb is thin until the pointer enters the width
 // it would expand to, so it always grows under the pointer.
+@(private)
 SCROLLBAR_TRACK :: 10
 @(private = "file")
 SCROLLBAR_THIN :: 4
@@ -75,7 +76,6 @@ scrollbar_press :: proc(drag: ^Scroll_Drag, bar: Scrollbar, y: f32) -> int {
 	return e.offset
 }
 
-// The offset that puts the held point of the thumb under the pointer.
 scrollbar_drag :: proc(drag: Scroll_Drag, bar: Scrollbar, y: f32) -> int {
 	e := bar.extent
 	room := bar.track.height - bar.thumb.height

@@ -1232,8 +1232,10 @@ palette_scroll_to :: proc(p: ^Palette, offset: int) -> Outcome {
 
 palette_scrollbar_dragging :: proc(p: ^Palette) -> bool {return p.scroll_drag.active}
 
-palette_scrollbar_drag :: proc(p: ^Palette, l: Palette_Layout, y: f32) -> Outcome {
+// Tracks hover through the drag too, so the bar collapses on a release away from the track.
+palette_scrollbar_drag :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
 	if !p.scroll_drag.active || !l.bar_visible {return .None}
+	p.scroll_hover = scrollbar_contains(l.bar, x, y)
 	return palette_scroll_to(p, scrollbar_drag(p.scroll_drag, l.bar, y))
 }
 

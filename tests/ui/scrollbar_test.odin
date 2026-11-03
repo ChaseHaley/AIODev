@@ -1,5 +1,6 @@
 package ui_test
 
+import "core:fmt"
 import "core:testing"
 import "aio:commands"
 import "aio:render"
@@ -68,16 +69,67 @@ palette_scrollbar_pages_drags_and_keeps_rows_clear :: proc(t: ^testing.T) {
 	l = ui.palette_layout(&p, 1000, 800, 1)
 	_, _ = ui.palette_mouse_press(&p, &registry, l, x, l.bar.thumb.y + 1)
 	testing.expect(t, ui.palette_scrollbar_dragging(&p))
-	testing.expect_value(t, ui.palette_scrollbar_drag(&p, l, 10000), ui.Outcome.Changed)
+	testing.expect_value(t, ui.palette_scrollbar_drag(&p, l, x, 10000), ui.Outcome.Changed)
 	testing.expect_value(t, p.scroll, len(p.results) - p.visible_rows)
 	l = ui.palette_layout(&p, 1000, 800, 1)
 	testing.expect_value(t, p.scroll, len(p.results) - p.visible_rows)
-	_ = ui.palette_scrollbar_drag(&p, l, -10000)
+	// Released away from the track, the bar collapses without another pointer move.
+	_ = ui.palette_scrollbar_drag(&p, l, x - 500, -10000)
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect_value(t, ui.palette_pointer_release(&p), ui.Outcome.Changed)
 	testing.expect(t, !ui.palette_scrollbar_dragging(&p))
+	testing.expect_value(t, ui.scrollbar_state(p.scroll_hover, p.scroll_drag), ui.Scrollbar_State.Collapsed)
 
 	ui.palette_text(&p, &registry, "zzzzzzzz-nothing")
 	l = ui.palette_layout(&p, 1000, 800, 1)
 	testing.expect(t, !l.bar_visible)
+}
+
+@(test)
+choice_dropdown_scrollbar_pages_drags_and_keeps_options_clear :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	choices: [40]string
+	for &choice, i in choices {choice = fmt.tprintf("Font %02d", i)}
+	testing.expect_value(t, ui.editor_add(&p, {
+		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true,
+		value = choices[0], choices = choices[:],
+	}, "Font"), nil)
+	p.open = true
+	ui.editor_filter(&p)
+	testing.expect(t, ui.editor_select_key(&p, "font.family"))
+	l := page(&p)
+	ui.editor_key(&p, key({key = .Enter}))
+	popup := ui.editor_popup_rect(&p, l)
+	// The track is the popup's right edge, so the area just inside it is the bar.
+	x := popup.x + popup.width - 4
+	bottom := popup.y + popup.height - 8
+
+	testing.expect(t, ui.editor_hover(&p, l, x, bottom))
+	testing.expect(t, p.popup_bar_hover)
+	testing.expect(t, ui.editor_hover(&p, l, x - 20, bottom))
+	testing.expect(t, !p.popup_bar_hover)
+
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, bottom, false), ui.Editor_Outcome.Changed)
+	testing.expect(t, p.popup_scroll > 0)
+	testing.expect(t, p.popup_index >= p.popup_scroll)
+	testing.expect_value(t, p.drag, ui.Editor_Drag.None)
+
+	top := p.popup_scroll
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, popup.y + 68 + 6, false), ui.Editor_Outcome.Changed)
+	testing.expect(t, p.popup_scroll < top)
+
+	// At the top, the thumb starts at the track's top, so a press there grabs it.
+	for p.popup_scroll > 0 {_ = ui.editor_press(&p, l, nil, x, popup.y + 68 + 6, false)}
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, popup.y + 68 + 6, false), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, p.drag, ui.Editor_Drag.Popup_Scroll)
+	testing.expect(t, ui.editor_drag(&p, l, nil, x + 500, 10000))
+	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, p.drag, ui.Editor_Drag.None)
+	// A drag past the window's edge reaches the end: the wheel can scroll no further.
+	end := p.popup_scroll
+	ui.editor_wheel(&p, l, popup.x + 10, popup.y + 80, -100)
+	testing.expect_value(t, p.popup_scroll, end)
+	testing.expect(t, end > top)
+	testing.expect_value(t, ui.field_string(&p.value), "Font 00")
 }

@@ -39,7 +39,9 @@ terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Butto
 		bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
 		if !visible || !ui.scrollbar_contains(bar, x, y) {continue}
 		w.scroll_session = entry.id
-		term.scroll_viewport(entry.session, ui.scrollbar_press(&w.scroll_drag, bar, y) - bar.extent.offset)
+		if delta := ui.scrollbar_press(&w.scroll_drag, bar, y) - bar.extent.offset; delta != 0 {
+			term.scroll_viewport(entry.session, delta)
+		}
 		w.dirty = true
 		return true
 	}

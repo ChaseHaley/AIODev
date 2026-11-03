@@ -166,9 +166,8 @@ Editor :: struct {
 	filter, value:                                                     Text_Field,
 	choice_search:                                                     Text_Field,
 	choice_toggle_focus:                                               bool,
-	// The choice list's scrollbar.
 	popup_bar_hover:                                                   bool,
-	popup_bar:                                                         Scroll_Drag,
+	popup_bar_drag:                                                         Scroll_Drag,
 	choice_matches:                                                    [dynamic]int,
 	drag:                                                              Editor_Drag,
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
@@ -1105,7 +1104,7 @@ open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
 	}
 	p.popup_index = row.multiple ? 0 : choice_index(row, field_string(&p.value))
 	p.popup_scroll = p.popup_index
-	p.popup_bar_hover, p.popup_bar = false, {}
+	p.popup_bar_hover, p.popup_bar_drag = false, {}
 }
 
 @(private)
@@ -1832,7 +1831,6 @@ choice_scroll_to :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout, offset:
 	p.popup_index = clamp(p.popup_index, p.popup_scroll, max(0, p.popup_scroll + visible - 1))
 }
 
-// The choice list's scrollbar, beside the options and below any search field.
 @(private)
 choice_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, visible: bool) {
 	row := editor_row(p)
@@ -1843,10 +1841,9 @@ choice_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, visib
 	header := choice_search_height(row, s)
 	area := render.Rect{r.x, r.y + header + 4 * s, r.width - s, r.height - header - 8 * s}
 	extent := Scroll_Extent{editor_choice_count(p, row), choice_popup_rows(p, row, l), p.popup_scroll}
-	return scrollbar_layout(area, extent, scrollbar_state(p.popup_bar_hover, p.popup_bar), s)
+	return scrollbar_layout(area, extent, scrollbar_state(p.popup_bar_hover, p.popup_bar_drag), s)
 }
 
-// The right edge of a choice option: the popup's inner edge, or the scrollbar when one shows.
 @(private)
 choice_option_right :: proc(p: ^Editor, l: Editor_Layout, popup: render.Rect) -> f32 {
 	if bar, visible := choice_scrollbar(p, l); visible {return bar.track.x}
@@ -1997,8 +1994,8 @@ editor_press :: proc(
 				return .Changed
 			}
 			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
-				choice_scroll_to(p, row, l, scrollbar_press(&p.popup_bar, bar, y))
-				if p.popup_bar.active {p.drag = .Popup_Scroll}
+				choice_scroll_to(p, row, l, scrollbar_press(&p.popup_bar_drag, bar, y))
+				if p.popup_bar_drag.active {p.drag = .Popup_Scroll}
 				return .Changed
 			}
 			popup.y += choice_search_height(row, s)
@@ -2226,7 +2223,7 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 		bar, visible := choice_scrollbar(p, l)
 		if !visible {return false}
 		before := p.popup_scroll
-		choice_scroll_to(p, row, l, scrollbar_drag(p.popup_bar, bar, y))
+		choice_scroll_to(p, row, l, scrollbar_drag(p.popup_bar_drag, bar, y))
 		return p.popup_scroll != before
 	case .Wheel, .Ramp:
 		pick_color(
@@ -2247,7 +2244,7 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	p.filter.dragging, p.value.dragging = false, false
 	p.choice_search.dragging = false
 	if drag == .Popup_Scroll {
-		p.popup_bar = {}
+		p.popup_bar_drag = {}
 		return .Changed
 	}
 	if drag == .Process_Order {
@@ -2289,11 +2286,10 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 		p.popup_bar_hover = over
 		if row := editor_row(p); row != nil {
 			popup := editor_popup_rect(p, l)
-			right := popup.x + popup.width - 4 * l.scale
+			right := choice_option_right(p, l, popup)
 			if p.popup == .Choice {
 				popup.y += choice_search_height(row, l.scale)
 				popup.height -= choice_search_height(row, l.scale)
-				if bar_visible {right = bar.track.x}
 			}
 			visible := int((y - popup.y - 4 * l.scale) / (CHOICE_HEIGHT * l.scale))
 			option := render.Rect {
@@ -3094,7 +3090,7 @@ popup_draw :: proc(
 			); result != .Ok {return result}
 		}
 		if bar, visible := choice_scrollbar(p, l); visible {
-			scrollbar_draw(list, theme, bar, scrollbar_state(p.popup_bar_hover, p.popup_bar))
+			scrollbar_draw(list, theme, bar, scrollbar_state(p.popup_bar_hover, p.popup_bar_drag))
 		}
 		return .Ok
 	}
