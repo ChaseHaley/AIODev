@@ -10,6 +10,9 @@ their own data folders, so they never share a window, a control pipe, settings o
 Base opens on the left half of the monitor and Candidate on the right, each at the same size.
 -CandidateOnly skips Base and keeps Candidate's default window size.
 
+Each candidate is its own compare session, so previews from several worktrees or agent sessions stay
+open together. Running again with the same candidate replaces only that session's windows.
+
 Settings: by default both start from defaults with no saved layout. -Settings copies one file into
 both; -MySettings copies your own settings.ini. Either way both sides read identical settings, so any
 difference you see comes from the code.
@@ -28,7 +31,7 @@ Only the current checkout, with your settings.
 
 .EXAMPLE
 .\tools\compare.ps1 -Stop
-Closes the compare windows.
+Closes the current checkout's compare windows; -Candidate names another session, -All closes every one.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Run')]
 param(
@@ -36,6 +39,7 @@ param(
     [string] $Base = 'main',
 
     [Parameter(ParameterSetName = 'Run')]
+    [Parameter(ParameterSetName = 'Stop')]
     [string] $Candidate = '.',
 
     [Parameter(ParameterSetName = 'Run')]
@@ -61,19 +65,25 @@ param(
     [int] $Monitor = -1,
 
     [Parameter(ParameterSetName = 'Stop', Mandatory)]
-    [switch] $Stop
+    [switch] $Stop,
+
+    # With -Stop, close every compare session rather than only this candidate's.
+    [Parameter(ParameterSetName = 'Stop')]
+    [switch] $All
 )
 
 $ErrorActionPreference = 'Stop'
 $here = (Get-Location).Path
 
-# The compare folder lives in the main checkout so every worktree shares one cache and one pair.
+# The compare folder lives in the main checkout so every worktree shares one ref cache. Each candidate
+# gets its own session folder for checkout builds, data and its running record.
 $common = (& git -C $PSScriptRoot rev-parse --path-format=absolute --git-common-dir).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'compare.ps1 must run from inside an AIODev checkout.' }
 $repo = Split-Path $common -Parent
 $root = Join-Path $repo 'build/compare'
-$record = Join-Path $root 'running.json'
-New-Item -ItemType Directory -Force $root | Out-Null
+$sessions = Join-Path $root 'sessions'
+$refs = Join-Path $root 'refs'
+New-Item -ItemType Directory -Force $sessions, $refs | Out-Null
 
 Add-Type -AssemblyName System.Windows.Forms
 if (-not ('AIODevCompare.Win32' -as [type])) {
@@ -118,9 +128,9 @@ public static IntPtr LargestWindow(uint pid) {
 # Per-monitor awareness makes screen areas and window positions physical pixels, as the app uses.
 [AIODevCompare.Win32]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) | Out-Null
 
-function Stop-Compare {
-    if (-not (Test-Path $record)) { return }
-    foreach ($side in (Get-Content $record -Raw | ConvertFrom-Json)) {
+function Stop-Session([string] $Record) {
+    if (-not (Test-Path $Record)) { return }
+    foreach ($side in (Get-Content $Record -Raw | ConvertFrom-Json)) {
         $process = Get-Process -Id $side.pid -ErrorAction SilentlyContinue
         # Closing the window only hides AIODev to the tray, so end the throwaway instance and its
         # shells outright. The path check keeps a reused process ID from hitting another program.
@@ -130,50 +140,103 @@ function Stop-Compare {
             $process.WaitForExit(5000) | Out-Null
         }
     }
-    Remove-Item $record -Force
+    Remove-Item $Record -Force
+}
+
+function Test-Checkout([string] $Path) {
+    (Test-Path (Join-Path $Path 'build.ps1')) -and (Test-Path (Join-Path $Path 'src'))
+}
+
+# A session is named by its candidate: the checkout folder, or the ref as typed, so -Stop finds it
+# again after the ref moves.
+function Get-SessionKey([string] $Spec) {
+    $path = if ([IO.Path]::IsPathRooted($Spec)) { $Spec } else { Join-Path $here $Spec }
+    $identity = if (Test-Checkout $path) {
+        'path:' + (Resolve-Path $path).Path.TrimEnd('\', '/').ToLowerInvariant()
+    } else { "ref:$Spec" }
+    $hash = [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($identity))
+    return -join ($hash[0..3] | ForEach-Object { $_.ToString('x2') })
+}
+
+# Removes cached ref builds unused for two weeks, unless a session is still running one.
+function Clear-OldRefs {
+    $inUse = @(Get-ChildItem $sessions -Filter running.json -Recurse -ErrorAction SilentlyContinue |
+        ForEach-Object { (Get-Content $_.FullName -Raw | ConvertFrom-Json).exe })
+    foreach ($cache in Get-ChildItem $refs -Directory) {
+        $stamp = Join-Path $cache.FullName 'aiodev.exe.source'
+        $used = if (Test-Path $stamp) { (Get-Item $stamp).LastWriteTimeUtc } else { $cache.LastWriteTimeUtc }
+        if ($used -gt [DateTime]::UtcNow.AddDays(-14)) { continue }
+        if ($inUse -contains (Join-Path $cache.FullName 'aiodev.exe')) { continue }
+        & git -C $repo worktree remove --force (Join-Path $cache.FullName 'src') 2>&1 | Out-Null
+        Remove-Item -LiteralPath $cache.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # A side is a checkout path when one exists there; otherwise a ref checked out into the cache.
 function Resolve-Side([string] $Spec, [string] $Name) {
     $path = if ([IO.Path]::IsPathRooted($Spec)) { $Spec } else { Join-Path $here $Spec }
-    if ((Test-Path (Join-Path $path 'build.ps1')) -and (Test-Path (Join-Path $path 'src'))) {
+    if (Test-Checkout $path) {
         $source = (Resolve-Path $path).Path
         $branch = (& git -C $source rev-parse --abbrev-ref HEAD).Trim()
         $commit = (& git -C $source rev-parse --short HEAD).Trim()
         $dirty = if (& git -C $source status --porcelain) { '+dirty' } else { '' }
-        return [pscustomobject]@{ Name = $Name; Source = $source; Label = "$branch@$commit$dirty"; Cached = $false }
+        return [pscustomobject]@{
+            Name = $Name; Source = $source; Label = "$branch@$commit$dirty"; Cached = $false
+            Exe = Join-Path $session "$($Name.ToLower())/aiodev.exe"
+        }
     }
     $commit = (& git -C $repo rev-parse --verify --quiet "$Spec^{commit}")
     if ($LASTEXITCODE -ne 0 -or -not $commit) { throw "$Name '$Spec' is neither a checkout folder nor a git ref." }
     $commit = $commit.Trim()
-    $source = Join-Path $root "src-$($Name.ToLower())"
-    if (-not (Test-Path (Join-Path $source '.git'))) {
-        & git -C $repo worktree add --detach $source $commit 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Cannot create a worktree for $Spec at $source." }
-    } elseif ((& git -C $source rev-parse HEAD).Trim() -ne $commit) {
-        # The cache is ours alone, so a forced checkout loses nothing.
-        & git -C $source checkout --detach --force $commit 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Cannot check out $Spec in $source." }
-    }
+    # One cache per commit, shared by every session and never moved to another commit, so a running
+    # preview's source and executable stay put.
+    $cache = Join-Path $refs $commit.Substring(0, 12)
     $short = (& git -C $repo rev-parse --short $commit).Trim()
-    return [pscustomobject]@{ Name = $Name; Source = $source; Label = "$Spec@$short"; Cached = $true }
+    return [pscustomobject]@{
+        Name = $Name; Source = Join-Path $cache 'src'; Label = "$Spec@$short"; Cached = $true
+        Commit = $commit; Exe = Join-Path $cache 'aiodev.exe'
+    }
+}
+
+function Invoke-Build($Side) {
+    Write-Host "Building $($Side.Name): $($Side.Label)"
+    # Build output goes to the host so it never mixes into a function's return value.
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Side.Source 'build.ps1') release -OutputPath $Side.Exe |
+        Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "The $($Side.Name) build failed." }
 }
 
 function Build-Side($Side) {
-    $exe = Join-Path $root "$($Side.Name.ToLower())/aiodev.exe"
-    $stamp = "$exe.source"
-    $current = "$($Side.Source)|$($Side.Label)"
-    # A cached ref that already built at this commit needs no rebuild; a working checkout always does.
-    $fresh = $Side.Cached -and (Test-Path $exe) -and (Test-Path $stamp) -and (Get-Content $stamp -Raw).Trim() -eq $current
-    if (-not $NoBuild -and -not $fresh) {
-        Write-Host "Building $($Side.Name): $($Side.Label)"
-        # Build output goes to the host so it never mixes into this function's return value.
-        & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Side.Source 'build.ps1') release -OutputPath $exe |
-            Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "The $($Side.Name) build failed." }
-        Set-Content -LiteralPath $stamp -Value $current
+    $exe = $Side.Exe
+    if ($NoBuild) {
+        if (-not (Test-Path $exe)) { throw "No $($Side.Name) build at $exe; run without -NoBuild." }
+        return $exe
     }
-    if (-not (Test-Path $exe)) { throw "No $($Side.Name) build at $exe; run without -NoBuild." }
+    # A working checkout always rebuilds.
+    if (-not $Side.Cached) {
+        Invoke-Build $Side
+        return $exe
+    }
+    # Another session may be building the same commit; wait for it rather than building over it.
+    $lock = [Threading.Mutex]::new($false, "AIODevCompare-$($Side.Commit)")
+    try {
+        try { $lock.WaitOne() | Out-Null } catch [Threading.AbandonedMutexException] {}
+        $stamp = "$exe.source"
+        if ((Test-Path $exe) -and (Test-Path $stamp) -and (Get-Content $stamp -Raw).Trim() -eq $Side.Commit) {
+            # Marks the cache as used so Clear-OldRefs keeps it.
+            (Get-Item $stamp).LastWriteTimeUtc = [DateTime]::UtcNow
+            return $exe
+        }
+        if (-not (Test-Path (Join-Path $Side.Source '.git'))) {
+            & git -C $repo worktree add --detach $Side.Source $Side.Commit 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Cannot create a worktree for $($Side.Label) at $($Side.Source)." }
+        }
+        Invoke-Build $Side
+        Set-Content -LiteralPath $stamp -Value $Side.Commit
+    } finally {
+        $lock.ReleaseMutex()
+        $lock.Dispose()
+    }
     return $exe
 }
 
@@ -194,8 +257,16 @@ function Wait-Window([int] $ProcessId) {
     return [IntPtr]::Zero
 }
 
-Stop-Compare
+if ($Stop -and $All) {
+    Get-ChildItem $sessions -Filter running.json -Recurse | ForEach-Object { Stop-Session $_.FullName }
+    return
+}
+$key = Get-SessionKey $Candidate
+$session = Join-Path $sessions $key
+$record = Join-Path $session 'running.json'
+Stop-Session $record
 if ($Stop) { return }
+Clear-OldRefs
 
 $settingsSource = $null
 if ($Settings -and $MySettings) { throw 'Use either -Settings or -MySettings.' }
@@ -219,9 +290,9 @@ $running = @()
 for ($i = 0; $i -lt $sides.Count; $i++) {
     $side = $sides[$i]
     $exe = Build-Side $side
-    $data = Join-Path $root "$($side.Name.ToLower())/data"
+    $data = Join-Path $session "$($side.Name.ToLower())/data"
     Reset-Data $data $settingsSource
-    $instance = "compare-$($side.Name.ToLower())"
+    $instance = "cmp-$key-$($side.Name.ToLower())"
     $process = Start-Process -FilePath $exe -ArgumentList @('--instance', $instance, '--data-dir', "`"$data`"") `
         -WorkingDirectory $here -PassThru
     $window = Wait-Window $process.Id
@@ -234,5 +305,6 @@ for ($i = 0; $i -lt $sides.Count; $i++) {
     $place = if ($CandidateOnly) { 'default' } elseif ($i -eq 0) { 'left' } else { 'right' }
     Write-Output ("{0,-9} {1,-5} {2}  pid {3}" -f $side.Name, $place, $side.Label, $process.Id)
 }
-$running | ConvertTo-Json | Set-Content -LiteralPath $record
-Write-Output 'Close with .\tools\compare.ps1 -Stop'
+ConvertTo-Json @($running) | Set-Content -LiteralPath $record
+$close = if ($Candidate -eq '.') { '' } else { " -Candidate $Candidate" }
+Write-Output "Close with .\tools\compare.ps1 -Stop$close"
