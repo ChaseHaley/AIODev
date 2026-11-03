@@ -32,13 +32,15 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.rail_hover, w.rail_pressed = -1, -1
 	w.title_action_hover = .None
 	ui.armed_cancel(&w.title_action_armed)
+	ui.armed_cancel(&w.notice_armed)
+	w.notice_hover, w.notice_buttons = 0, {}
 	w.tab_orientation_button_hovered = false
 	ui.armed_cancel(&w.tab_orientation_button_armed)
 	ui.armed_cancel(&w.tab_close_armed)
 	w.caption_hover = -1
 	ui.armed_cancel(&w.caption_armed)
 	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
-	w.scroll_drag = false
+	w.scroll_drag = {}
 	w.rail_resizing = false
 	ui.armed_cancel(&w.status.panel_side_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
@@ -46,6 +48,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	if palette_active(app, w) {
 		ui.palette_input_release(&app.palette)
 		if ui.palette_slider_dragging(&app.palette) {ui.palette_edit_cancel(&app.palette)}
+		app.palette.scroll_drag = {}
 	}
 	ui.editor_hover_clear(&w.editor)
 	if w.editor.drag == .Process_Order {w.editor.drag = .None}
@@ -119,6 +122,10 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	target := pointer_target(app, w, x, y)
+	if !e.pressed && e.button in w.notice_buttons {
+		_ = gesture_complete(app, w, e)
+		return
+	}
 	if pointer_modal(target) {
 		if e.pressed {w.gesture.owners[e.button] = target}
 		pointer_press(app, w, target, e)
@@ -182,7 +189,7 @@ content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 }
 
 gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
-	if w.scroll_drag {terminal_scrollbar_move(app, w, f32(event.y)); return}
+	if w.scroll_drag.active {terminal_scrollbar_move(app, w, f32(event.y)); return}
 	if w.preparing {return}
 	e := event
 	e.buttons -= w.gesture.cancelled

@@ -8,6 +8,7 @@ import "aio:ui"
 // cursor and press all resolve through `pointer_target`, so the surface that shows a hover is the one
 // a press reaches, and the surfaces beneath it see the pointer leave.
 Pointer_Target :: enum u8 {
+	Notice,
 	// Modal surfaces take the whole window, including presses and releases that began elsewhere.
 	Workspace_Picker,
 	Tab_Menu,
@@ -57,6 +58,7 @@ Pointer_Surface :: struct {
 
 @(rodata)
 pointer_surfaces := [Pointer_Target]Pointer_Surface {
+	.Notice           = {notice_claims, notice_hover, notice_press, notice_release, notice_tooltip},
 	.Workspace_Picker = {picker_claims, picker_hover, workspace_picker_button, nil, picker_tooltip},
 	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil, nil},
 	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil, nil},
@@ -95,7 +97,9 @@ pointer_target :: proc(app: ^App, w: ^Window, x, y: f32) -> Pointer_Target {
 }
 
 // Whether the target takes the whole window ahead of held presses and drags.
-pointer_modal :: proc(target: Pointer_Target) -> bool {return target <= .Rename}
+pointer_modal :: proc(target: Pointer_Target) -> bool {
+	return target >= .Workspace_Picker && target <= .Rename
+}
 
 // Lets every surface see the move: the owner hovers and sets the cursor, the rest clear their hover.
 pointer_move :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -127,6 +131,52 @@ rect_contains :: proc(r: render.Rect, x, y: f32) -> bool {
 
 @(private = "file")
 move_point :: proc(e: platform.Mouse_Move_Event) -> (f32, f32) {return f32(e.x), f32(e.y)}
+
+@(private = "file")
+notice_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> ui.Notice_Hit {
+	return ui.notices_hit(&app.notices, &w.ui_text, f32(w.width), f32(w.height), w.scale, x, y)
+}
+
+@(private = "file")
+notice_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return notice_hit(app, w, x, y).contains
+}
+
+@(private = "file")
+notice_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+	hit := owner == .Notice ? notice_hit(app, w, f32(e.x), f32(e.y)) : ui.Notice_Hit{}
+	hover := hit.close ? hit.id : 0
+	if hover != w.notice_hover {w.notice_hover, w.dirty = hover, true}
+	if owner == .Notice {pointer_set(app, w, hit.close ? .Hand : .Arrow)}
+}
+
+@(private = "file")
+notice_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
+	return notice_hit(app, w, x, y).close ? "Dismiss notification" : ""
+}
+
+@(private = "file")
+notice_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	w.notice_buttons += {e.button}
+	if e.button != .Left {return}
+	hit := notice_hit(app, w, f32(e.x), f32(e.y))
+	ui.armed_press(&w.notice_armed, hit.close ? hit.id : 0)
+}
+
+@(private = "file")
+notice_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+	if e.button not_in w.notice_buttons {return false}
+	w.notice_buttons -= {e.button}
+	if e.button == .Left {
+		hit := notice_hit(app, w, f32(e.x), f32(e.y))
+		id, ok := ui.armed_release(&w.notice_armed, hit.close ? hit.id : 0)
+		if ok && id != 0 && ui.notices_dismiss(&app.notices, id) {
+			for window in app.windows {window.dirty = true}
+		}
+	}
+	w.notice_hover, w.dirty = 0, true
+	return true
+}
 
 // Workspace picker
 
@@ -310,6 +360,8 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 	pointer_set(app, w, ui.palette_pointer(p, l, x, y))
 	held := .Left in e.buttons
 	switch {
+	case held && ui.palette_scrollbar_dragging(p):
+		on_palette_outcome(app, w, ui.palette_scrollbar_drag(p, l, x, y), 0)
 	case held && ui.palette_slider_dragging(p):
 		on_palette_outcome(app, w, ui.palette_slider_drag(p, l, x), 0)
 	case held && ui.palette_edit_text_dragging(p):
@@ -670,7 +722,7 @@ scrollbar_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private = "file")
 scrollbar_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || !w.scroll_drag {return false}
+	if e.button != .Left || !w.scroll_drag.active {return false}
 	terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
 	return true
 }
@@ -688,7 +740,7 @@ settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	if owner != .Settings_Page {
 		p := &w.editor
 		if p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
-		   p.hover_profile_item >= 0 {
+		   p.hover_profile_item >= 0 || p.popup_bar_hover {
 			ui.editor_hover_clear(p)
 			w.dirty = true
 		}
@@ -697,6 +749,11 @@ settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	x, y := move_point(e)
 	pane, found := settings_pane_under_pointer(w, x, y)
 	if !found {
+		// A held scrollbar follows the pointer anywhere, as it does on every other surface, and
+		// collapses on release because the pointer is no longer over it.
+		if w.editor.popup_bar_hover {w.editor.popup_bar_hover, w.dirty = false, true}
+		if w.editor.drag == .Popup_Scroll && .Left in e.buttons &&
+		   ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y) {w.dirty = true}
 		pointer_set(app, w, .Arrow)
 		return
 	}

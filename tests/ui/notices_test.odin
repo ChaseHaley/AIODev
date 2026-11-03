@@ -110,7 +110,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
 					width*scale, 1000*scale, scale), glyphs.Result.Ok)
 				testing.expect(t, len(list.glyphs) > 0)
-				testing.expect_value(t, len(list.rects), 30)
+				testing.expect_value(t, len(list.rects), 46)
 				layers, rects, glyph_count, lines := cap(list.layers), cap(list.rects), cap(list.glyphs), cap(n.lines)
 				calls := allocations.calls
 				for _ in 0..<3 {
@@ -147,9 +147,39 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				for line in n.lines[:min(len(n.lines), 4)] {
 					visible_width = max(visible_width, ui.text_width(&text, line))
 				}
-				testing.expect_value(t, box.width, min(min(520, width-32)*scale, visible_width+52*scale))
+				testing.expect_value(t, box.width, min(min(520, width-32)*scale, visible_width+84*scale))
+				cx := box.x + box.width - 24*scale
+				cy := box.y + 24*scale
+				hit := ui.notices_hit(&n, &text, width*scale, 1000*scale, scale, cx, cy)
+				testing.expect(t, hit.contains && hit.close)
+				testing.expect_value(t, hit.id, n.items[0].id)
+				testing.expect(t, !ui.notices_hit(&n, &text, width*scale, 1000*scale, scale,
+					box.x-1, cy).contains)
 				if len(message) < 10 && width == 1000 {testing.expect(t, box.width < 200*scale)}
 			}
 		}
 	}
+}
+
+@(test)
+notices_dismiss_one_anonymous_notice_and_ignore_stale_identity :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	ui.notices_put(&n, 0, .Info, "first", time.Hour)
+	ui.notices_put(&n, 0, .Success, "second", 0)
+	first, second := n.items[0].id, n.items[1].id
+	testing.expect(t, first != second)
+	testing.expect(t, ui.notices_dismiss(&n, first))
+	testing.expect_value(t, len(n.items), 1)
+	testing.expect_value(t, n.items[0].id, second)
+	testing.expect(t, !ui.notices_dismiss(&n, first))
+	testing.expect(t, ui.notices_dismiss(&n, second))
+	testing.expect_value(t, len(n.items), 0)
+	ui.notices_put(&n, 7, .Warning, "old", time.Hour)
+	old := n.items[0].id
+	ui.notices_put(&n, 7, .Error, "new", time.Hour)
+	testing.expect(t, !ui.notices_dismiss(&n, old))
+	testing.expect_value(t, len(n.items), 1)
+	testing.expect_value(t, n.items[0].text, "new")
 }

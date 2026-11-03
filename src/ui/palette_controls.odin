@@ -605,6 +605,10 @@ palette_slider_drag :: proc(p: ^Palette, l: Palette_Layout, x: f32) -> Outcome {
 // Ends a pointer gesture: a released slider saves the value it shows.
 palette_pointer_release :: proc(p: ^Palette) -> Outcome {
 	p.query.dragging, p.edit.field.dragging, p.edit.filter.dragging = false, false, false
+	if p.scroll_drag.active {
+		p.scroll_drag = {}
+		return .Changed
+	}
 	if p.edit.kind != .Slider {return .None}
 	return choose_number(p, &p.settings[p.edit.setting], p.edit.number)
 }

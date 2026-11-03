@@ -310,6 +310,63 @@ palette_ranking_is_exact_prefix_substring_then_natural_order :: proc(t: ^testing
 }
 
 @(test)
+palette_workspace_query_returns_every_owned_tab_in_all_and_tabs_modes :: proc(t: ^testing.T) {
+	tabs := Mode_Source {
+		items = []ui.Palette_Item {
+			{"Editor", "nvim", "main", 1},
+			{"Shell", "pwsh", "main", 2},
+			{"Logs", "tail", "main", 3},
+			{"Other", "pwsh", "work", 4},
+		},
+	}
+	p: ui.Palette
+	registry := mode_palette(t, &p, nil, &tabs, nil)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	for query in ([?]string{"main", "MAIN", "mai", "ain"}) {
+		for mode in ([?]ui.Palette_Mode{.Tabs, .All}) {
+			ui.palette_open_mode(&p, &registry, mode)
+			ui.palette_text(&p, &registry, query)
+			if !testing.expect_value(t, len(p.results), 3) {continue}
+			for result, i in p.results {
+				testing.expect_value(t, result.kind, ui.Palette_Kind.Tab)
+				testing.expect_value(t, ui.palette_target(&p, result).id, u64(i + 1))
+				testing.expect_value(t, ui.palette_result_context(&p, result), "main")
+				testing.expect(t, !result.title_match)
+				testing.expect_value(t, len(result.positions), 0)
+			}
+		}
+	}
+	// Workspace names use the same literal match classes as tab and process titles.
+	ui.palette_open_mode(&p, &registry, .Tabs)
+	ui.palette_text(&p, &registry, "mn")
+	testing.expect_value(t, len(p.results), 0)
+}
+
+@(test)
+palette_tab_title_and_process_matches_rank_before_workspace_matches :: proc(t: ^testing.T) {
+	tabs := Mode_Source {
+		items = []ui.Palette_Item {
+			{"Editor", "nvim", "main", 1},
+			{"Shell", "main", "work", 2},
+			{"main", "pwsh", "work", 3},
+			{"Logs", "tail", "main", 4},
+		},
+	}
+	p: ui.Palette
+	registry := mode_palette(t, &p, nil, &tabs, nil)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	ui.palette_open_mode(&p, &registry, .Tabs)
+	ui.palette_text(&p, &registry, "main")
+	if !testing.expect_value(t, len(p.results), 4) {return}
+	for id, i in ([?]u64{3, 2, 1, 4}) {
+		testing.expect_value(t, ui.palette_target(&p, p.results[i]).id, id)
+		testing.expect_value(t, p.results[i].title_match, i == 0)
+	}
+}
+
+@(test)
 palette_settings_match_label_before_key :: proc(t: ^testing.T) {
 	rows := [?]ui.Palette_Setting {
 		{key = "aio.key", title = "Unrelated", group = "Panes"},

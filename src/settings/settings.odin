@@ -24,6 +24,7 @@ Shell_Settings :: struct {
 	command, directory, icon: string,
 	default_profile:          string,
 	refresh_environment:      bool,
+	integration:              bool,
 }
 Input_Settings :: struct {
 	leader: string,
@@ -762,6 +763,17 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		nil,
 		"Read current Windows environment variables for new and restarted shells; keep launcher-only variables.",
+	},
+	{
+		"shell.integration",
+		"Shell Integration",
+		.Bool,
+		offset_of(Settings, shell) + offset_of(Shell_Settings, integration),
+		"true",
+		0,
+		0,
+		nil,
+		"Report the PowerShell prompt's directory so splits open there. Applies to new shells.",
 	},
 	{
 		"window.columns",

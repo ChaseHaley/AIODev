@@ -205,6 +205,8 @@ Palette :: struct {
 	chosen_key:   [dynamic]u8,
 	leader:       Maybe(commands.Shortcut),
 	reset_hover:  int,
+	scroll_hover: bool,
+	scroll_drag:  Scroll_Drag,
 }
 
 Palette_Layout :: struct {
@@ -212,6 +214,8 @@ Palette_Layout :: struct {
 	viewport:                               render.Rect,
 	row_height, scale:                      f32,
 	rows:                                   int,
+	bar:                                    Scrollbar,
+	bar_visible:                            bool,
 }
 
 @(require_results)
@@ -273,6 +277,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	p.mode_menu = false
 	p.menu_hover = -1
 	p.reset_hover = -1
+	p.scroll_hover, p.scroll_drag = false, {}
 	p.chosen, p.chosen_id = "", 0
 	refresh(p, registry)
 }
@@ -282,6 +287,7 @@ palette_close :: proc(p: ^Palette) {
 	presence_close(&p.presence)
 	p.query.dragging = false
 	p.mode_menu = false
+	p.scroll_hover, p.scroll_drag = false, {}
 }
 
 palette_query :: proc(p: ^Palette) -> string {return field_string(&p.query)}
@@ -677,7 +683,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					item.label,
 					query,
 					width,
-					[]string{item.detail},
+					[]string{item.detail, item.owner},
 					false,
 				)
 			}
@@ -994,6 +1000,14 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		rows       = rows,
 	}
 	if footer_height > 0 {l.footer = {panel.x, l.list.y + used + padding, panel.width, footer_height}}
+	// The track replaces the list's right padding, inside the panel border.
+	extent := Scroll_Extent{len(p.results), p.visible_rows, p.scroll}
+	gutter := SCROLLBAR_TRACK * scale + border
+	area := render.Rect{panel.x + panel.width - gutter, l.list.y, SCROLLBAR_TRACK * scale, used}
+	state := scrollbar_state(p.scroll_hover, p.scroll_drag)
+	if l.bar, l.bar_visible = scrollbar_layout(area, extent, state, scale); l.bar_visible {
+		l.list.width = max(0, area.x - l.list.x)
+	}
 	if p.mode_menu && l.chip.width > 0 {
 		menu_width := min(PALETTE_MENU_WIDTH * scale, width - 2 * border)
 		menu_height :=
@@ -1049,9 +1063,11 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome
 		p.menu_hover = hover
 		return .Changed
 	}
-	// The reset button lights only under the pointer, so entering or leaving it redraws.
+	over_bar := l.bar_visible && scrollbar_contains(l.bar, x, y)
+	// The scrollbar and reset button light only under the pointer, so entering or leaving them redraws.
 	reset := reset_at(p, l, x, y)
-	reset_changed := reset != p.reset_hover
+	reset_changed := reset != p.reset_hover || over_bar != p.scroll_hover
+	p.scroll_hover = over_bar
 	p.reset_hover = reset
 	index := row_at(p, l, x, y)
 	if index < 0 || index == p.selected {
@@ -1079,6 +1095,10 @@ palette_mouse_press :: proc(
 		} else {
 			p.mode_menu, p.menu_hover = false, -1
 		}
+		return .Changed, 0
+	}
+	if l.bar_visible && scrollbar_contains(l.bar, x, y) {
+		palette_scroll_to(p, scrollbar_press(&p.scroll_drag, l.bar, y))
 		return .Changed, 0
 	}
 	if index := row_at(p, l, x, y); index >= 0 {
@@ -1139,6 +1159,7 @@ palette_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> platform.C
 	if palette_over_text(l, x, y) {return .Text}
 	// Outside the query, an open mode menu takes the next click only to close.
 	if p.mode_menu {return .Arrow}
+	if l.bar_visible && scrollbar_contains(l.bar, x, y) {return .Arrow}
 	if row_at(p, l, x, y) >= 0 {return .Hand}
 	return .Arrow
 }
@@ -1198,15 +1219,27 @@ palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
 		p.mode_menu, p.menu_hover = false, -1
 		return .Changed
 	}
-	if p.visible_rows == 0 || len(p.results) == 0 { return .None }
-	limit := max(0, len(p.results) - p.visible_rows)
-	scroll := clamp(p.scroll - rows, 0, limit)
-	if scroll == p.scroll {
-		return .None
-	}
+	return palette_scroll_to(p, p.scroll - rows)
+}
+
+// Scrolls the results to `offset`, keeping the selection on a visible row.
+@(private)
+palette_scroll_to :: proc(p: ^Palette, offset: int) -> Outcome {
+	if p.visible_rows == 0 || len(p.results) == 0 {return .None}
+	scroll := clamp(offset, 0, max(0, len(p.results) - p.visible_rows))
+	if scroll == p.scroll {return .None}
 	p.scroll = scroll
 	p.selected = clamp(p.selected, p.scroll, min(len(p.results), p.scroll + p.visible_rows) - 1)
 	return .Changed
+}
+
+palette_scrollbar_dragging :: proc(p: ^Palette) -> bool {return p.scroll_drag.active}
+
+// Tracks hover through the drag too, so the bar collapses on a release away from the track.
+palette_scrollbar_drag :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
+	if !p.scroll_drag.active || !l.bar_visible {return .None}
+	p.scroll_hover = scrollbar_contains(l.bar, x, y)
+	return palette_scroll_to(p, scrollbar_drag(p.scroll_drag, l.bar, y))
 }
 
 @(private)
@@ -1542,6 +1575,7 @@ palette_draw :: proc(
 			}
 		}
 	}
+	if l.bar_visible {scrollbar_draw(list, theme, l.bar, scrollbar_state(p.scroll_hover, p.scroll_drag))}
 	if result := draw_footer(p, list, text, theme, l, scale); result != .Ok {return result}
 	if p.edit.kind == .Shortcut {
 		return popup_draw(&p.binding, palette_binding_layout(p, l), list, text, theme, pointer)

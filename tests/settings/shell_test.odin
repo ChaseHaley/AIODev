@@ -65,3 +65,17 @@ header_settings_reload_and_serialize_through_the_shared_schema :: proc(t: ^testi
 	testing.expect_value(t, s.shell.icon, "λ")
 	testing.expect_value(t, settings.value_text(&s, settings.schema_find("pane.show_headers")^), "false")
 }
+
+@(test)
+shell_integration_wraps_only_interactive_powershell :: proc(t: ^testing.T) {
+	for command in ([?]string{"pwsh.exe -NoLogo -NoProfile", "powershell.exe -NoLogo",
+		"pwsh -ExecutionPolicy Bypass -NoLogo", `pwsh -wd C:\src`, `"C:\Program Files\PowerShell\7\pwsh.exe"`}) {
+		testing.expect_value(t, settings.shell_command_line(command, false), command)
+		wrapped := settings.shell_command_line(command, true)
+		testing.expect(t, strings.has_prefix(wrapped, strings.concatenate({command, " -NoExit -EncodedCommand "}, context.temp_allocator)), wrapped)
+	}
+	for command in ([?]string{"pwsh -c Write-Host", "pwsh -Command Get-Date", "pwsh -File test.ps1",
+		"pwsh test.ps1", "pwsh -EncodedCommand ABC", "pwsh -NonInteractive", "cmd.exe /d", "wsl.exe", ""}) {
+		testing.expect_value(t, settings.shell_command_line(command, true), command)
+	}
+}

@@ -238,7 +238,8 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, normal.rows, 8)
 	// Eight flat rows sit between the query band and the key footer.
 	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 433})
-	testing.expect_value(t, normal.list, render.Rect{228, 169, 544, 320})
+	// The scrollbar takes the list's right padding and 3 DIPs more, inside the panel border.
+	testing.expect_value(t, normal.list, render.Rect{228, 169, 541, 320})
 	ui.palette_key(&p, &registry, key({key = .End}))
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	selected_text := ui.palette_selection(&p)
