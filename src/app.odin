@@ -74,6 +74,8 @@ Session_Entry :: struct {
 	program_art:         program_art.Art,
 	program_has_art:     bool,
 	program_bridge:      bool,
+	// How the adopted program was started, as a reopened pane shows it; empty at the prompt.
+	program_command:     string,
 }
 
 // Release only the entry's owned memory; callers own removal from app.sessions.
@@ -84,6 +86,7 @@ session_entry_destroy :: proc(entry: ^Session_Entry) {
 	status_release(entry)
 	delete(entry.program_path)
 	delete(entry.program_name)
+	delete(entry.program_command)
 	term.destroy(entry.session)
 }
 
@@ -142,6 +145,8 @@ App :: struct {
 	// program exits, so a CLI wait that polls afterwards still learns the exit code.
 	closed_sessions:       [32]Closed_Session,
 	closed_next:           int,
+	// Panes and tabs closed explicitly, newest last, for Reopen Closed.
+	closed:                [dynamic]Closed_Item,
 }
 
 Closed_Session :: struct {
@@ -297,6 +302,7 @@ app_destroy :: proc(app: ^App) {
 	delete(app.log_path)
 	delete(app.layout_path)
 	delete(app.layout_saved)
+	closed_destroy(app)
 	delete(app.app_id)
 	if app.platform_ready {
 		if platform_api.destroy(&app.platform) != .None {
@@ -498,10 +504,15 @@ session_open :: proc(
 	command: string = "",
 	directory: string = "",
 	profile_id: string = "",
+	last_command: string = "",
 ) -> bool {
 	profile, _ := settings.profile_resolve(&app.settings, profile_id)
 	geometry := initial_geometry(app)
 	config := session_config(app, app.next_session_id + 1, geometry, profile, command)
+	// A reopened pane notes what it was running above the fresh shell's first prompt.
+	if shown := printable_command(last_command, context.temp_allocator); shown != "" {
+		config.preface = fmt.tprintf("\x1b[2mLast running: %s\x1b[0m\r\n", shown)
+	}
 	// Defense in depth: every caller filters its directory, but an untrusted one must never reach
 	// CreateProcess. Falling back here keeps the pane usable instead of failing the whole open.
 	launch_directory := directory

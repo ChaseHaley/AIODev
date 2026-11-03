@@ -792,6 +792,8 @@ when AIO_CONTROL {
 				{"session.title", term.title(s, context.temp_allocator)},
 				{"session.header.title", pane_header_title(&entry.header)},
 				{"session.profile", entry.profile_id},
+				{"session.name", entry.name},
+				{"session.command", entry.program_command},
 				{"session.program", entry.program_path},
 				{"session.program.name", entry.program_name},
 				{"session.program.source", verify_program_source(app, entry)},

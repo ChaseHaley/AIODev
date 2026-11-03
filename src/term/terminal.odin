@@ -49,6 +49,8 @@ Config :: struct {
 	scrollback_lines:                int,
 	colors:                          Colors,
 	ignore_program_status:           bool,
+	// Text written to the screen before the shell starts, which then draws below it.
+	preface:                         string,
 }
 
 MAX_HOST_ENVIRONMENT :: 4
@@ -175,6 +177,9 @@ create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^
 	// Applied here rather than in ghostty_create so a headless replay can keep libghostty's default
 	// palette: a capture stores bytes, not the theme that drew them.
 	set_colors(s, config.colors)
+	if config.preface != "" {
+		ghostty.terminal_vt_write(s.terminal, raw_data(config.preface), uint(len(config.preface)))
+	}
 	spawn(s, config)
 	ok = true
 	return s, .None
@@ -322,6 +327,7 @@ spawn :: proc(s: ^Session, config: Config) {
 		cols                = config.geometry.columns,
 		rows                = config.geometry.rows,
 		refresh_environment = config.refresh_environment,
+		inherit_cursor      = config.preface != "",
 	}
 	process, err := pty.spawn(options, s.allocator)
 	if err.kind != .None {

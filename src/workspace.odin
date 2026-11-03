@@ -410,9 +410,15 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 		ids := make([dynamic]u32, 0, len(workspace.tabs), context.temp_allocator)
 		for tab in workspace.tabs {if tab.marked {_ = append(&ids, tab.id)}}
 		for id in ids {
-			if current := tab_index_by_id(workspace, id); current >= 0 {workspace_close_tab(app, workspace, current)}
+			if current := tab_index_by_id(workspace, id); current >= 0 {
+				closed_record_tab(app, workspace, current)
+				workspace_close_tab(app, workspace, current)
+			}
 		}
-	} else {workspace_close_tab(app, workspace, index)}
+	} else {
+		closed_record_tab(app, workspace, index)
+		workspace_close_tab(app, workspace, index)
+	}
 	if group && len(workspace.tabs) > 0 {tab_select_one(workspace, workspace.selected)}
 	workspace_close_empty(app, workspace)
 }
@@ -476,8 +482,14 @@ local_launch_directory :: proc(candidate, fallback: string) -> (directory: strin
 // reports a reported directory that was remote or unavailable.
 @(require_results)
 pane_directory :: proc(app: ^App, entry: ^Session_Entry) -> (directory: string, refused: bool) {
+	return pane_directory_of(entry, pane_program(app, entry, term.process_id(entry.session)))
+}
+
+// pane_directory for a pane whose running program, if any, is already known.
+@(require_results)
+pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: string, refused: bool) {
 	root := term.process_id(entry.session)
-	if program := pane_program(app, entry, root); program != 0 {
+	if program != 0 {
 		path, found := pty.process_directory(program, root, context.temp_allocator)
 		if found && pty.working_directory_is_local(path) {return path, false}
 	}
@@ -501,8 +513,39 @@ pane_program :: proc(app: ^App, entry: ^Session_Entry, root: u32) -> u32 {
 	}
 	processes, err := pty.process_snapshot(context.temp_allocator)
 	if err != .None {return 0}
+	program, _ := pane_running(app, entry, processes)
+	return program
+}
+
+// The processes to read running programs from when a pane is remembered: nil while icon polling
+// tracks them, otherwise one snapshot taken now, in temporary memory.
+pane_processes :: proc(app: ^App) -> []pty.Process_Info {
+	if app.settings.tabs.program_icons || len(app.sessions) == 0 {return nil}
+	processes, err := pty.process_snapshot(context.temp_allocator)
+	return err == .None ? processes : nil
+}
+
+// The pane's running program and how it was started, in temporary memory: polling's choice, or the
+// one `processes` names; none without either.
+pane_running :: proc(
+	app: ^App,
+	entry: ^Session_Entry,
+	processes: []pty.Process_Info,
+) -> (
+	program: u32,
+	command: string,
+) {
+	if app.settings.tabs.program_icons {
+		program = entry.program_candidate != 0 ? entry.program_candidate : entry.program_id
+		return program, entry.program_command
+	}
+	root := term.process_id(entry.session)
 	index := pty.process_program(processes, root, program_reporters(entry), 0)
-	return index >= 0 ? processes[index].id : 0
+	if index < 0 {return}
+	program = processes[index].id
+	arguments, _ := pty.process_arguments(program, root, context.temp_allocator)
+	stem := settings.executable_stem(processes[index].executable)
+	return program, program_command(arguments, stem, context.temp_allocator)
 }
 
 @(private)
@@ -578,7 +621,13 @@ tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {
 }
 
 pane_close :: proc(app: ^App, w: ^Window) {
-	pane_remove(app, w.workspace, w.workspace.selected, w.tree.focus)
+	pane_close_at(app, w.workspace, w.workspace.selected, w.tree.focus)
+}
+
+// An explicit close, which Reopen Closed can undo.
+pane_close_at :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
+	closed_record_pane(app, workspace, tab_index, node)
+	pane_remove(app, workspace, tab_index, node)
 }
 
 @(private)

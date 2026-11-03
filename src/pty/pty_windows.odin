@@ -326,6 +326,8 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	api := conpty()
 	flags := u32(PSEUDOCONSOLE_RESIZE_QUIRK | PSEUDOCONSOLE_WIN32_INPUT_MODE)
 	if api.bundled {flags |= PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES}
+	// ConPTY then asks for the cursor position and draws below it; the terminal answers.
+	if options.inherit_cursor {flags |= PSEUDOCONSOLE_INHERIT_CURSOR}
 	result := api.create(size_cells, console_input, console_output, flags, &p.console)
 	if u32(result) == w.E_INVALIDARG {
 		result = api.create(size_cells, console_input, console_output, 0, &p.console)

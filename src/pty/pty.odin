@@ -13,6 +13,8 @@ Spawn_Options :: struct {
 	path_append:                     string,
 	cols, rows:                      u16,
 	refresh_environment:             bool,
+	// Keeps what the terminal already shows above the cursor instead of clearing the screen.
+	inherit_cursor:                  bool,
 }
 
 Spawn_Error_Kind :: enum {

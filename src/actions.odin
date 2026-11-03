@@ -138,6 +138,7 @@ Action :: enum u32 {
 	Pane_Send,
 	Pane_Focus,
 	App_Commands,
+	Reopen_Closed,
 }
 
 @(private)
@@ -406,6 +407,7 @@ ACTIONS :: [Action]Action_Info {
 	.Pane_Send = {"pane.send", "Send Text to Pane", nil},
 	.Pane_Focus = {"pane.focus", "Focus Pane", nil},
 	.App_Commands = {"app.commands", "List Commands", nil},
+	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.Z, {.Control, .Shift}}}},
 }
 
 @(require_results)
@@ -618,6 +620,8 @@ run_action :: proc(
 		workspace_new(app, w, true)
 	case .Close_Pane:
 		pane_close(app, w)
+	case .Reopen_Closed:
+		closed_reopen(app, w)
 	case .Next_Tab:
 		tab_select(app, w, (w.workspace.selected + 1) % len(w.workspace.tabs))
 		rail_overlay_dismiss(app, w)

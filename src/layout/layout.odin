@@ -131,6 +131,107 @@ split :: proc(
 	assert(int(node) < len(l.nodes))
 	_, is_pane := l.nodes[node].(Pane)
 	assert(is_pane, "only panes can be split")
+	return wrap(l, node, axis, ratio, content)
+}
+
+// Places a new pane beside `node`, which may be a pane or a whole split, taking `share` of the
+// space they then divide; `before` puts it left of or above the node. Reopening a closed pane uses
+// this to return it beside the panes it was split from.
+@(require_results)
+insert_beside :: proc(
+	l: ^Layout,
+	node: Node_Id,
+	axis: Axis,
+	before: bool,
+	share: f32,
+	content: Content,
+) -> (
+	Node_Id,
+	runtime.Allocator_Error,
+) {
+	if int(node) >= len(l.nodes) {return INVALID_NODE, .Invalid_Argument}
+	if _, vacant := l.nodes[node].(Vacant); vacant {return INVALID_NODE, .Invalid_Argument}
+	part := clamp(share, 0.05, 0.95)
+	added, err := wrap(l, node, axis, before ? part : 1 - part, content)
+	if err != nil || !before {return added, err}
+	parent := parent_of(l, added)
+	s := l.nodes[parent].(Split)
+	s.first, s.second = s.second, s.first
+	l.nodes[parent] = s
+	return added, nil
+}
+
+// Where a pane sits against the rest of its parent split: the sibling node, the split's axis,
+// whether the pane comes first, and the pane's share. False for a lone root pane.
+placement :: proc(
+	l: ^Layout,
+	node: Node_Id,
+) -> (
+	sibling: Node_Id,
+	axis: Axis,
+	before: bool,
+	share: f32,
+	ok: bool,
+) {
+	parent := parent_of(l, node)
+	if parent == INVALID_NODE {return}
+	s := l.nodes[parent].(Split)
+	before = s.first == node
+	sibling = before ? s.second : s.first
+	share = before ? s.ratio : 1 - s.ratio
+	return sibling, s.axis, before, share, true
+}
+
+// Appends the content of every pane under `node`, first to second.
+contents :: proc(l: ^Layout, node: Node_Id, out: ^[dynamic]Content) {
+	if int(node) >= len(l.nodes) {return}
+	switch n in l.nodes[node] {
+	case Vacant:
+	case Pane:
+		append(out, n.content)
+	case Split:
+		contents(l, n.first, out)
+		contents(l, n.second, out)
+	}
+}
+
+// The smallest node whose panes are exactly `group`, in any order, or INVALID_NODE.
+find_group :: proc(l: ^Layout, group: []Content) -> Node_Id {
+	if len(group) == 0 || l.root == INVALID_NODE || int(l.root) >= len(l.nodes) {return INVALID_NODE}
+	found := INVALID_NODE
+	group_match(l, l.root, group, &found)
+	return found
+}
+
+// Counts the panes under `node` when all of them are in `group`, or -1; the first node whose count
+// equals the group's size is the deepest such node.
+@(private)
+group_match :: proc(l: ^Layout, node: Node_Id, group: []Content, found: ^Node_Id) -> int {
+	count := -1
+	switch n in l.nodes[node] {
+	case Vacant:
+	case Pane:
+		for content in group {if content == n.content {count = 1; break}}
+	case Split:
+		first := group_match(l, n.first, group, found)
+		second := group_match(l, n.second, group, found)
+		if first >= 0 && second >= 0 {count = first + second}
+	}
+	if count == len(group) && found^ == INVALID_NODE {found^ = node}
+	return count
+}
+
+@(private, require_results)
+wrap :: proc(
+	l: ^Layout,
+	node: Node_Id,
+	axis: Axis,
+	ratio: f32,
+	content: Content,
+) -> (
+	Node_Id,
+	runtime.Allocator_Error,
+) {
 	if err := reserve(&l.nodes, len(l.nodes) + 2); err != nil {return INVALID_NODE, err}
 	parent := parent_of(l, node)
 	l.next_pane_order += 1

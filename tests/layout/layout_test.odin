@@ -221,3 +221,49 @@ pixel_resize_uses_the_matching_divider_extent :: proc(t: ^testing.T) {
 	testing.expect(t, !layout.resize_pixels(&l, l.root, .Horizontal, 10, dividers[:]))
 	testing.expect(t, !layout.resize_pixels(&l, right, .Vertical, 10, nil))
 }
+
+@(test)
+closed_pane_returns_beside_its_former_sibling_split :: proc(t: ^testing.T) {
+	// 1 | (2 / 3): close 1, then put it back beside the (2 / 3) split.
+	l: layout.Layout
+	testing.expect_value(t, layout.init(&l, terminal(1)), nil)
+	defer layout.destroy(&l)
+	two, err := layout.split(&l, l.root, .Horizontal, 0.3, terminal(2))
+	testing.expect_value(t, err, nil)
+	_, err = layout.split(&l, two, .Vertical, 0.5, terminal(3))
+	testing.expect_value(t, err, nil)
+	one := layout.Node_Id(0)
+	sibling, axis, before, share, ok := layout.placement(&l, one)
+	testing.expect(t, ok)
+	testing.expect_value(t, axis, layout.Axis.Horizontal)
+	testing.expect(t, before)
+	testing.expect_value(t, share, f32(0.3))
+	group := make([dynamic]layout.Content, context.temp_allocator)
+	layout.contents(&l, sibling, &group)
+	testing.expect_value(t, len(group), 2)
+	testing.expect(t, layout.remove(&l, one))
+	target := layout.find_group(&l, {terminal(3), terminal(2)})
+	testing.expect_value(t, target, l.root)
+	_, err = layout.insert_beside(&l, target, axis, before, share, terminal(4))
+	testing.expect_value(t, err, nil)
+	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+	layout.compute(&l, {0, 0, 100, 100}, 0, &rects)
+	testing.expect_value(t, len(rects), 3)
+	for rect in rects {
+		if rect.content == terminal(4) {testing.expect_value(t, rect.rect, layout.Rect{0, 0, 30, 100})}
+	}
+}
+
+@(test)
+find_group_needs_every_pane_together :: proc(t: ^testing.T) {
+	l: layout.Layout
+	testing.expect_value(t, layout.init(&l, terminal(1)), nil)
+	defer layout.destroy(&l)
+	_, err := layout.split(&l, l.root, .Horizontal, 0.5, terminal(2))
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, layout.find_group(&l, {terminal(2)}), layout.Node_Id(1))
+	testing.expect_value(t, layout.find_group(&l, {terminal(1), terminal(9)}), layout.INVALID_NODE)
+	testing.expect_value(t, layout.find_group(&l, {}), layout.INVALID_NODE)
+	_, _, _, _, ok := layout.placement(&l, l.root)
+	testing.expect(t, !ok)
+}

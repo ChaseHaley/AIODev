@@ -2,8 +2,6 @@ package main
 
 import "aio:layout"
 import "aio:pty"
-import "aio:settings"
-import "aio:term"
 import "core:encoding/json"
 import "core:log"
 import "core:math"
@@ -54,6 +52,8 @@ Saved_Node :: struct {
 	directory: string `json:"directory,omitempty"`,
 	name:      string `json:"name,omitempty"`,
 	keep_open: bool,
+	// What the pane was running, shown above the fresh shell's prompt when it comes back.
+	command:   string `json:"command,omitempty"`,
 }
 
 // Schedules a save check; repeated calls before it runs coalesce into one.
@@ -68,10 +68,11 @@ layout_state_tick :: proc(app: ^App) {
 	layout_state_save(app)
 }
 
-// Writes the current structure when it differs from the last write.
-layout_state_save :: proc(app: ^App) {
+// Writes the current structure when it differs from the last write. `fresh` reads running
+// programs now even without icon polling, as on quit.
+layout_state_save :: proc(app: ^App, fresh := false) {
 	if app.layout_path == "" {return}
-	text, ok := layout_state_encode(app, context.temp_allocator)
+	text, ok := layout_state_encode(app, context.temp_allocator, fresh ? pane_processes(app) : nil)
 	if !ok {log.error("encoding the workspace layout failed"); return}
 	if text == app.layout_saved {return}
 	if !layout_state_write(app.layout_path, text) {return}
@@ -82,7 +83,14 @@ layout_state_save :: proc(app: ^App) {
 }
 
 @(require_results)
-layout_state_encode :: proc(app: ^App, allocator := context.allocator) -> (string, bool) {
+layout_state_encode :: proc(
+	app: ^App,
+	allocator := context.allocator,
+	processes: []pty.Process_Info = nil,
+) -> (
+	string,
+	bool,
+) {
 	workspaces := make([dynamic]Saved_Workspace, 0, len(app.workspaces), context.temp_allocator)
 	for workspace in app.workspaces {
 		if workspace.provisional || len(workspace.tabs) == 0 {continue}
@@ -90,7 +98,9 @@ layout_state_encode :: proc(app: ^App, allocator := context.allocator) -> (strin
 		for tab, i in workspace.tabs {
 			nodes := make([dynamic]Saved_Node, 0, len(tab.tree.nodes), context.temp_allocator)
 			focus := 0
-			if layout_node_encode(app, &tab.tree, tab.tree.root, &nodes, &focus) < 0 {return "", false}
+			if layout_node_encode(app, &tab.tree, tab.tree.root, &nodes, &focus, processes) < 0 {
+				return "", false
+			}
 			tabs[i] = {name = tab.name, focus = focus, zoomed = tab.tree.zoomed, nodes = nodes[:]}
 		}
 		append(
@@ -120,6 +130,7 @@ layout_node_encode :: proc(
 	id: layout.Node_Id,
 	nodes: ^[dynamic]Saved_Node,
 	focus: ^int,
+	processes: []pty.Process_Info,
 ) -> int {
 	if int(id) >= len(tree.nodes) {return -1}
 	index := len(nodes)
@@ -127,12 +138,12 @@ layout_node_encode :: proc(
 	case layout.Vacant:
 		return -1
 	case layout.Pane:
-		append(nodes, layout_pane_encode(app, node.content))
+		append(nodes, layout_pane_encode(app, node.content, processes))
 		if id == tree.focus {focus^ = index}
 	case layout.Split:
 		append(nodes, Saved_Node{split = true, axis = node.axis, ratio = node.ratio})
-		first := layout_node_encode(app, tree, node.first, nodes, focus)
-		second := layout_node_encode(app, tree, node.second, nodes, focus)
+		first := layout_node_encode(app, tree, node.first, nodes, focus, processes)
+		second := layout_node_encode(app, tree, node.second, nodes, focus, processes)
 		if first < 0 || second < 0 {return -1}
 		nodes[index].first, nodes[index].second = first, second
 	}
@@ -140,17 +151,15 @@ layout_node_encode :: proc(
 }
 
 @(private)
-layout_pane_encode :: proc(app: ^App, content: layout.Content) -> Saved_Node {
+layout_pane_encode :: proc(app: ^App, content: layout.Content, processes: []pty.Process_Info) -> Saved_Node {
 	saved := Saved_Node{content = content.kind}
 	if content.kind != .Terminal {return saved}
 	entry := session_find(app, content.id)
 	if entry == nil {return saved}
-	raw := term.working_directory(entry.session, context.temp_allocator)
-	directory, err := settings.directory_label(raw, context.temp_allocator)
-	if err != nil {directory = ""}
-	directory, _ = local_launch_directory(directory, entry.header.launch_directory)
+	program, command := pane_running(app, entry, processes)
+	directory, _ := pane_directory_of(entry, program)
 	saved.profile, saved.directory, saved.name = entry.profile_id, directory, entry.name
-	saved.keep_open = entry.keep_open
+	saved.keep_open, saved.command = entry.keep_open, command
 	return saved
 }
 
@@ -302,7 +311,9 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> bool {
 		)
 		directory = ""
 	}
-	if !session_open(app, "", directory, saved.profile) {return false}
+	command := saved.command
+	if !utf8.valid_string(command) || len(command) > PROGRAM_COMMAND_LIMIT * 4 {command = ""}
+	if !session_open(app, "", directory, saved.profile, command) {return false}
 	entry := &app.sessions[len(app.sessions) - 1]
 	entry.keep_open = saved.keep_open
 	if saved.name != "" && utf8.valid_string(saved.name) {

@@ -95,7 +95,7 @@ start :: proc() -> int {
 	}
 	if !app_init(&app) {return 1}
 	run(&app)
-	layout_state_save(&app)
+	layout_state_save(&app, fresh = true)
 	return 0
 }
 

@@ -120,7 +120,7 @@ command_invoke :: proc(
 	case .Pane_Send:
 		return pane_send(entry, invocation.text, invocation.enter)
 	case .Close_Pane:
-		pane_remove(app, target.workspace, target.pane.tab, target.pane.node)
+		pane_close_at(app, target.workspace, target.pane.tab, target.pane.node)
 		return {}
 	case .New_Tab:
 		return control_tab_new(app, window, target.workspace, invocation)

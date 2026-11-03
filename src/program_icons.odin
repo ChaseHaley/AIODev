@@ -12,6 +12,7 @@ import "core:math"
 import "core:path/filepath"
 import "core:slice"
 import "core:strings"
+import "core:unicode/utf8"
 
 // Icons of the programs running in panes (WORK-272, WORK-279). A program is named by its
 // executable stem, the script a launcher runs, or the app a WSL or SSH session reports. Its icon
@@ -21,6 +22,9 @@ import "core:strings"
 
 @(private)
 PROGRAM_ICON_LIMIT :: 32
+// A remembered command longer than this is cut; it only reminds the user what ran.
+@(private)
+PROGRAM_COMMAND_LIMIT :: 240
 
 // Launchers run the program named by their arguments rather than being one.
 @(private, rodata)
@@ -257,15 +261,20 @@ program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Proces
 	candidate := index >= 0 ? processes[index].id : 0
 	previous := entry.program_candidate
 	entry.program_candidate = candidate
-	if candidate == 0 {return program_forget(entry)}
+	if candidate == 0 {
+		if !program_forget(entry) {return false}
+		layout_state_touch(app)
+		return true
+	}
 	if candidate != previous {return false}
 	stem := settings.executable_stem(processes[index].executable)
 	adopted := false
 	if candidate != entry.program_id {
 		path, ok := pty.process_image(candidate, root)
 		name := stem
+		arguments, _ := pty.process_arguments(candidate, root, context.temp_allocator)
 		if program_listed(program_launchers[:], stem) {
-			if script := program_script(app, candidate, root); script != "" {
+			if script := pty.process_script(arguments); program_known(app, script) {
 				name = script
 				// The launcher's own icon would show Node or cmd rather than the program.
 				delete(path)
@@ -275,6 +284,9 @@ program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Proces
 		delete(entry.program_path)
 		entry.program_id, entry.program_path = candidate, ok ? path : ""
 		program_name_set(entry, name)
+		delete(entry.program_command)
+		entry.program_command = program_command(arguments, stem)
+		layout_state_touch(app)
 		entry.program_bridge = program_listed(program_bridges[:], stem)
 		adopted = true
 	}
@@ -298,13 +310,54 @@ program_reporters :: proc(entry: ^Session_Entry) -> []string {
 	return apps[:]
 }
 
-// The program a launcher runs, when it has an icon to show; otherwise empty.
-@(private)
-program_script :: proc(app: ^App, id, root: u32) -> string {
-	arguments, ok := pty.process_arguments(id, root, context.temp_allocator)
-	if !ok {return ""}
-	script := pty.process_script(arguments)
-	return program_known(app, script) ? script : ""
+// How the program was started, as someone would type it: the executable's stem, or the script a
+// launcher runs, then the remaining arguments. Control characters are dropped so the text is safe
+// to write to a terminal. Empty when the arguments are unreadable.
+program_command :: proc(arguments: []string, stem: string, allocator := context.allocator) -> string {
+	if len(arguments) == 0 || stem == "" {return ""}
+	b := strings.builder_make(context.temp_allocator)
+	first := 1
+	if program_listed(program_launchers[:], stem) {
+		if script := pty.process_script(arguments); script != "" {
+			// The argument naming the script; anything after the script in it (cmd's quoted
+			// command) is kept.
+			for argument, i in arguments[1:] {
+				text := strings.trim(argument, "\" ")
+				lower := strings.to_lower(text, context.temp_allocator)
+				at := strings.index(lower, strings.to_lower(script, context.temp_allocator))
+				if at < 0 || argument == "" || argument[0] == '-' {continue}
+				strings.write_string(&b, script)
+				rest := text[at + len(script):]
+				if space := strings.index_byte(rest, ' '); space >= 0 {
+					rest = strings.trim_left(rest[space:], "\" ")
+					if rest != "" {strings.write_byte(&b, ' '); strings.write_string(&b, rest)}
+				}
+				first = i + 2
+				break
+			}
+		}
+	}
+	if strings.builder_len(b) == 0 {strings.write_string(&b, stem)}
+	for argument in arguments[min(first, len(arguments)):] {
+		strings.write_byte(&b, ' ')
+		quoted := argument == "" || strings.index_any(argument, " \t") >= 0
+		if quoted {strings.write_byte(&b, '"')}
+		strings.write_string(&b, argument)
+		if quoted {strings.write_byte(&b, '"')}
+	}
+	return printable_command(strings.to_string(b), allocator)
+}
+
+// The text without control characters, cut to PROGRAM_COMMAND_LIMIT bytes, so it can be written
+// to a terminal as plain text.
+printable_command :: proc(text: string, allocator := context.allocator) -> string {
+	out := strings.builder_make(allocator)
+	for r in text {
+		if r < 0x20 || r == 0x7f || r >= 0x80 && r < 0xa0 || r == utf8.RUNE_ERROR {continue}
+		if strings.builder_len(out) + utf8.rune_size(r) > PROGRAM_COMMAND_LIMIT {break}
+		strings.write_rune(&out, r)
+	}
+	return strings.to_string(out)
 }
 
 @(private)
@@ -333,6 +386,8 @@ program_forget :: proc(entry: ^Session_Entry) -> bool {
 	if entry.program_id == 0 && entry.program_candidate == 0 {return false}
 	delete(entry.program_path)
 	delete(entry.program_name)
+	delete(entry.program_command)
+	entry.program_command = ""
 	entry.program_id, entry.program_candidate, entry.program_path = 0, 0, ""
 	entry.program_name, entry.program_art = "", {}
 	entry.program_has_art, entry.program_bridge = false, false

@@ -14,6 +14,8 @@ foreign userenv {
 @(private)
 HPCON :: distinct rawptr
 @(private)
+PSEUDOCONSOLE_INHERIT_CURSOR :: 0x1
+@(private)
 PSEUDOCONSOLE_RESIZE_QUIRK :: 0x2
 @(private)
 PSEUDOCONSOLE_WIN32_INPUT_MODE :: 0x4
