@@ -310,6 +310,8 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 	pointer_set(app, w, ui.palette_pointer(p, l, x, y))
 	held := .Left in e.buttons
 	switch {
+	case held && ui.palette_scrollbar_dragging(p):
+		on_palette_outcome(app, w, ui.palette_scrollbar_drag(p, l, y), 0)
 	case held && ui.palette_slider_dragging(p):
 		on_palette_outcome(app, w, ui.palette_slider_drag(p, l, x), 0)
 	case held && ui.palette_edit_text_dragging(p):
@@ -670,7 +672,7 @@ scrollbar_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private = "file")
 scrollbar_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || !w.scroll_drag {return false}
+	if e.button != .Left || !w.scroll_drag.active {return false}
 	terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
 	return true
 }
@@ -688,7 +690,7 @@ settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	if owner != .Settings_Page {
 		p := &w.editor
 		if p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
-		   p.hover_profile_item >= 0 {
+		   p.hover_profile_item >= 0 || p.popup_bar_hover {
 			ui.editor_hover_clear(p)
 			w.dirty = true
 		}
@@ -697,6 +699,9 @@ settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	x, y := move_point(e)
 	pane, found := settings_pane_under_pointer(w, x, y)
 	if !found {
+		// A held scrollbar follows the pointer anywhere, as it does on every other surface.
+		if w.editor.drag == .Popup_Scroll && .Left in e.buttons &&
+		   ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y) {w.dirty = true}
 		pointer_set(app, w, .Arrow)
 		return
 	}

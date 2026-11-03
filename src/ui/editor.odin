@@ -89,6 +89,7 @@ Editor_Drag :: enum {
 	Ramp,
 	Profile_Order,
 	Process_Order,
+	Popup_Scroll,
 }
 
 // Keyboard focus: the search field, the selected row's control, or its key-position switch.
@@ -165,6 +166,9 @@ Editor :: struct {
 	filter, value:                                                     Text_Field,
 	choice_search:                                                     Text_Field,
 	choice_toggle_focus:                                               bool,
+	// The choice list's scrollbar.
+	popup_bar_hover:                                                   bool,
+	popup_bar:                                                         Scroll_Drag,
 	choice_matches:                                                    [dynamic]int,
 	drag:                                                              Editor_Drag,
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
@@ -998,11 +1002,7 @@ max_scroll :: proc(p: ^Editor) -> int {return max(0, len(p.items) - max(1, p.vis
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 	if p.profile_menu.open {menu_wheel(&p.profile_menu, rows); return}
 	if p.popup == .Choice && contains(editor_popup_rect(p, l), x, y) {
-		if row := editor_row(p); row != nil {
-			visible := choice_popup_rows(p, row, l)
-			p.popup_scroll = clamp(p.popup_scroll - rows, 0, max(0, editor_choice_count(p, row) - visible))
-			p.popup_index = clamp(p.popup_index, p.popup_scroll, max(0, p.popup_scroll + visible - 1))
-		}
+		if row := editor_row(p); row != nil {choice_scroll_to(p, row, l, p.popup_scroll - rows)}
 		return
 	}
 	if p.popup == .Shortcuts && contains(editor_popup_rect(p, l), x, y) {
@@ -1105,6 +1105,7 @@ open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
 	}
 	p.popup_index = row.multiple ? 0 : choice_index(row, field_string(&p.value))
 	p.popup_scroll = p.popup_index
+	p.popup_bar_hover, p.popup_bar = false, {}
 }
 
 @(private)
@@ -1823,6 +1824,35 @@ choice_popup_rows :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout) -> int
 	           max(1, int((l.page.height - 24 * l.scale - header) / (CHOICE_HEIGHT * l.scale))))
 }
 
+// Scrolls the choice list, keeping the highlighted option on a visible row.
+@(private)
+choice_scroll_to :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout, offset: int) {
+	visible := choice_popup_rows(p, row, l)
+	p.popup_scroll = clamp(offset, 0, max(0, editor_choice_count(p, row) - visible))
+	p.popup_index = clamp(p.popup_index, p.popup_scroll, max(0, p.popup_scroll + visible - 1))
+}
+
+// The choice list's scrollbar, beside the options and below any search field.
+@(private)
+choice_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, visible: bool) {
+	row := editor_row(p)
+	if p.popup != .Choice || row == nil {return}
+	r := editor_popup_rect(p, l)
+	if r.width == 0 {return}
+	s := l.scale
+	header := choice_search_height(row, s)
+	area := render.Rect{r.x, r.y + header + 4 * s, r.width - s, r.height - header - 8 * s}
+	extent := Scroll_Extent{editor_choice_count(p, row), choice_popup_rows(p, row, l), p.popup_scroll}
+	return scrollbar_layout(area, extent, scrollbar_state(p.popup_bar_hover, p.popup_bar), s)
+}
+
+// The right edge of a choice option: the popup's inner edge, or the scrollbar when one shows.
+@(private)
+choice_option_right :: proc(p: ^Editor, l: Editor_Layout, popup: render.Rect) -> f32 {
+	if bar, visible := choice_scrollbar(p, l); visible {return bar.track.x}
+	return popup.x + popup.width - 4 * l.scale
+}
+
 editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	row := editor_row(p)
 	if p.popup == .None || row == nil || p.selected < p.scroll || p.selected >= p.scroll + l.rows {
@@ -1964,6 +1994,11 @@ editor_press :: proc(
 					field_pointer(&p.choice_search, field_box_offset(box, x), true, extend)
 				} else {field_select_all(&p.choice_search)}
 				p.drag = .Choice_Search
+				return .Changed
+			}
+			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
+				choice_scroll_to(p, row, l, scrollbar_press(&p.popup_bar, bar, y))
+				if p.popup_bar.active {p.drag = .Popup_Scroll}
 				return .Changed
 			}
 			popup.y += choice_search_height(row, s)
@@ -2187,6 +2222,12 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 		return moved
 	case .Profile_Order:
 		return profile_drag_move(p, l, y)
+	case .Popup_Scroll:
+		bar, visible := choice_scrollbar(p, l)
+		if !visible {return false}
+		before := p.popup_scroll
+		choice_scroll_to(p, row, l, scrollbar_drag(p.popup_bar, bar, y))
+		return p.popup_scroll != before
 	case .Wheel, .Ramp:
 		pick_color(
 			p,
@@ -2205,6 +2246,10 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	p.drag = .None
 	p.filter.dragging, p.value.dragging = false, false
 	p.choice_search.dragging = false
+	if drag == .Popup_Scroll {
+		p.popup_bar = {}
+		return .Changed
+	}
 	if drag == .Process_Order {
 		slot := p.drag_target
 		if slot > p.drag_from {slot -= 1}
@@ -2236,18 +2281,25 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 		return true
 	}
 	// An open dropdown highlights the option under the pointer, like the menus.
+	bar_changed := false
 	if p.popup != .None {
+		bar, bar_visible := choice_scrollbar(p, l)
+		over := bar_visible && scrollbar_contains(bar, x, y)
+		bar_changed = over != p.popup_bar_hover
+		p.popup_bar_hover = over
 		if row := editor_row(p); row != nil {
 			popup := editor_popup_rect(p, l)
+			right := popup.x + popup.width - 4 * l.scale
 			if p.popup == .Choice {
 				popup.y += choice_search_height(row, l.scale)
 				popup.height -= choice_search_height(row, l.scale)
+				if bar_visible {right = bar.track.x}
 			}
 			visible := int((y - popup.y - 4 * l.scale) / (CHOICE_HEIGHT * l.scale))
 			option := render.Rect {
 				popup.x + 4 * l.scale,
 				popup.y + 4 * l.scale + f32(visible) * CHOICE_HEIGHT * l.scale,
-				popup.width - 8 * l.scale,
+				right - popup.x - 4 * l.scale,
 				CHOICE_HEIGHT * l.scale,
 			}
 			if contains(popup, x, y) && visible >= 0 && contains(option, x, y) {
@@ -2314,7 +2366,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	   clear == p.hover_clear &&
 	   profile_item == p.hover_profile_item &&
 	   profile_control == p.hover_profile_control {
-		return false
+		return bar_changed
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
 	p.hover_profile_item, p.hover_profile_control = profile_item, profile_control
@@ -2323,6 +2375,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 
 editor_hover_clear :: proc(p: ^Editor) {
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
+	p.popup_bar_hover = false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
 }
 
@@ -2346,6 +2399,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 		row := editor_row(p)
 		if row == nil {return .Arrow}
 		if p.popup == .Choice {
+			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {return .Arrow}
 			if contains(choice_font_toggle_rect(p, l), x, y) {return .Hand}
 			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {return .Text}
 			popup.y += choice_search_height(row, s)
@@ -3003,13 +3057,14 @@ popup_draw :: proc(
 				                 theme.muted, r.width - 28 * s)
 			}
 		}
+		right := choice_option_right(p, l, r)
 		for visible in 0 ..< count {
 			i := p.popup_scroll + visible
 			name := row.choices[choice_source_index(p, row, i)]
 			option := render.Rect {
 				r.x + 4 * s,
 				r.y + 4 * s + f32(visible) * CHOICE_HEIGHT * s,
-				r.width - 8 * s,
+				right - r.x - 4 * s,
 				CHOICE_HEIGHT * s,
 			}
 			if i ==
@@ -3038,14 +3093,8 @@ popup_draw :: proc(
 				option.width - (row.multiple ? 44 : 24) * s,
 			); result != .Ok {return result}
 		}
-		total := editor_choice_count(p, row)
-		if count > 0 && total > count {
-			height := r.height - 8 * s
-			thumb := height * f32(count) / f32(total)
-			y := r.y + 4 * s + (height - thumb) *
-			     f32(p.popup_scroll) / f32(total - count)
-			bar := render.Rect{r.x + r.width - 4 * s, y, 2 * s, thumb}
-			draw_rect(list, {rect = bar, color = theme.muted, radius = pill_radius(bar)})
+		if bar, visible := choice_scrollbar(p, l); visible {
+			scrollbar_draw(list, theme, bar, scrollbar_state(p.popup_bar_hover, p.popup_bar))
 		}
 		return .Ok
 	}
