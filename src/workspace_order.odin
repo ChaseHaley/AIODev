@@ -21,7 +21,7 @@ workspace_reorder :: proc(app: ^App, id, target_id: u32) -> bool {
 		for i := from; i > to; i -= 1 {app.workspaces[i] = app.workspaces[i - 1]}
 	}
 	app.workspaces[to] = workspace
-	workspace_pickers_refresh(app)
+	workspace_pickers_refresh(app, preserve_scroll = true)
 	layout_state_touch(app)
 	mark_all_dirty(app)
 	return true

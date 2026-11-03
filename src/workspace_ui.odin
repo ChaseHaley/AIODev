@@ -262,7 +262,7 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 }
 
 @(private)
-workspace_pickers_refresh :: proc(app: ^App) {
+workspace_pickers_refresh :: proc(app: ^App, preserve_scroll := false) {
 	for w in app.windows {
 		p := &w.workspace_picker
 		if p.mode == .Closed { continue }
@@ -279,6 +279,7 @@ workspace_pickers_refresh :: proc(app: ^App) {
 		}
 		id := p.selected >= 0 && p.selected < len(p.rows) ? p.rows[p.selected].id : 0
 		action := p.selected - len(p.rows)
+		scroll := p.scroll
 		workspace_picker_filter(app, w)
 		if p.mode == .Menu && workspace_row_index(w, p.target_id) < 0 { workspace_picker_transition(w, .List) }
 		if p.mode == .Rename && workspace_row_index(w, p.target_id) < 0 {
@@ -287,6 +288,7 @@ workspace_pickers_refresh :: proc(app: ^App) {
 		if id != 0 {
 			for row, i in p.rows {if row.id == id {p.selected = i; break}}
 		} else {p.selected = len(p.rows) + clamp(action, 0, len(WORKSPACE_ACTIONS) - 1)}
+		if preserve_scroll {p.scroll = scroll}
 		workspace_picker_layout_changed(w)
 	}
 }

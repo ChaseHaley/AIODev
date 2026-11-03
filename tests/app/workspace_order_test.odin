@@ -43,6 +43,9 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	testing.expect_value(t, grabbed.position.target, f32(1))
 	testing.expect_value(t, grabbed.position.duration, 140 * time.Millisecond)
 	testing.expect_value(t, grabbed.position.easing, ui.Easing.Decelerate)
+	app.workspace_row_menu_open(&state, &w, 1)
+	testing.expect_value(t, len(w.workspace_picker.order_positions), 4)
+	testing.expect_value(t, app.workspace_picker_row_rect(&w, 1).y, row.y + 40)
 	started = grabbed.position.started
 	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 70 * time.Millisecond))
 	testing.expect(t, grabbed.position.value > 1 && grabbed.position.value < 1.25)
@@ -52,8 +55,8 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 }
 
 @(private="file")
-order_fixture :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window) -> bool {
-	for _ in 0..<4 {
+order_fixture :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, count := 4) -> bool {
+	for _ in 0..<count {
 		workspace := app.workspace_create_empty(state)
 		if !testing.expect(t, workspace != nil) {return false}
 		tab := new(app.Tab)
@@ -72,6 +75,37 @@ order_destroy :: proc(state: ^app.App, w: ^app.Window) {
 	for workspace in state.workspaces {app.workspace_destroy(workspace)}
 	delete(state.workspaces)
 	delete(state.windows)
+}
+
+@(private="file")
+order_scrolled_drop :: proc(t: ^testing.T, enabled: bool) {
+	state: app.App
+	w: app.Window
+	defer order_destroy(&state, &w)
+	if !order_fixture(t, &state, &w, 20) {return}
+	state.animations = enabled
+	w.height = 240
+	w.workspace_picker.selected, w.workspace_picker.scroll = 6, 5
+	app.workspace_picker_layout_changed(&w)
+	row := app.workspace_picker_row_rect(&w, 6)
+	x, y := i32(row.x + 40), i32(row.y + row.height / 2)
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+		pressed = true, x = x, y = y})
+	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x,
+		y = y + 37, buttons = {.Left}})
+	before := app.workspace_picker_row_rect(&w, 6)
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+		x = x, y = y + 37})
+	testing.expect_value(t, w.workspace_picker.scroll, 5)
+	testing.expect_value(t, state.workspaces[7].id, u32(7))
+	after := app.workspace_picker_row_rect(&w, 7)
+	testing.expect_value(t, after.y, enabled ? before.y : row.y + row.height)
+}
+
+@(test)
+workspace_order_drop_keeps_scrolled_viewport_and_settlement_continuous :: proc(t: ^testing.T) {
+	order_scrolled_drop(t, true)
+	order_scrolled_drop(t, false)
 }
 
 @(test)

@@ -40,7 +40,8 @@ workspace_picker_target :: proc(p: ^Workspace_Picker, mode: Workspace_Picker_Mod
 workspace_picker_transition :: proc(w: ^Window, mode: Workspace_Picker_Mode, target_id: u32 = 0) {
 	p := &w.workspace_picker
 	p.mode, p.target_id = mode, target_id
-	workspace_order_reset(w)
+	p.order = {}
+	if mode == .Closed || mode == .Icons || mode == .Tint {clear(&p.order_positions)}
 	p.menu_hover, p.menu_selected, p.rename_error, p.rename_motion = 0, 0, false, {}
 	p.query.dragging, w.rename.dragging, w.dirty = false, false, true
 }
