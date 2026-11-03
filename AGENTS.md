@@ -41,6 +41,8 @@ read a note before changing it, never reuse an existing ID or filename, leave ot
 uncommitted changes alone, and when you finish changing notes, commit them in the vault
 (stage only your paths, Conventional Commit message) before ending the turn.
 
+Do all source work in your own git worktree and branch, never in this main checkout;
+other sessions edit and commit here concurrently (vault: Reference/Engineering/Commits.md).
 Commit completed, validated source work automatically using Conventional Commits.
 All project Markdown belongs in the vault; AGENTS.md and CLAUDE.md are the narrow
 exception for agent startup routing. Do not duplicate plans or backlogs here.
