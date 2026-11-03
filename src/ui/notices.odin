@@ -48,6 +48,7 @@ notice_style :: proc(
 }
 
 Notice :: struct {
+	id:             u64,
 	key:            u32,
 	kind:           Notice_Kind,
 	text:           string,
@@ -57,6 +58,7 @@ Notice :: struct {
 }
 
 Notices :: struct {
+	next_id:       u64,
 	items, fading: [dynamic]Notice,
 	animations:    bool,
 	lines:         [dynamic]string,
@@ -94,7 +96,9 @@ notices_put :: proc(
 	if err != nil {
 		return
 	}
+	n.next_id += 1
 	notice := Notice {
+		id     = n.next_id,
 		key    = key,
 		kind   = kind,
 		text   = owned,
@@ -119,6 +123,71 @@ notices_clear :: proc(n: ^Notices, key: u32) -> bool {
 		}
 	}
 	return false
+}
+
+notices_dismiss :: proc(n: ^Notices, id: u64) -> bool {
+	for item, i in n.items {
+		if item.id == id {notices_remove(n, i); return true}
+	}
+	return false
+}
+
+Notice_Hit :: struct {
+	id: u64,
+	close, contains: bool,
+}
+
+@(private)
+Notice_Layout :: struct {
+	box, close: render.Rect,
+	content_width, heading_height: f32,
+	lines: int,
+}
+
+@(private)
+notice_layout :: proc(
+	n: ^Notices, item: Notice, text: ^Text, width, bottom, scale: f32,
+) -> Notice_Layout {
+	padding := NOTICE_PADDING * scale
+	max_width := min(NOTICE_WIDTH * scale, max(0, width - 2 * NOTICE_MARGIN * scale))
+	leading := (4 + ICON_BUTTON + SPACE_2) * scale
+	trailing := (HEIGHT_COMPACT + SPACE_2) * scale
+	content_width := max(scale, max_width - 2 * padding - leading - trailing)
+	wrap(text, item.text, content_width, &n.lines)
+	lines := min(len(n.lines), NOTICE_MAX_LINES)
+	label, _, _ := notice_style(item.kind, {})
+	strong := text_styled(text, .Strong)
+	measured_width := text_width(&strong, label)
+	for line in n.lines[:lines] {measured_width = max(measured_width, text_width(text, line))}
+	content_width = min(content_width, measured_width)
+	box_width := min(max_width, content_width + 2 * padding + leading + trailing)
+	heading_height := max(strong.line_height, HEIGHT_COMPACT * scale)
+	box_height := heading_height + SPACE_1 * scale + f32(lines) * text.line_height + 2 * padding
+	box := render.Rect{width - NOTICE_MARGIN * scale - box_width, bottom - box_height, box_width, box_height}
+	size := HEIGHT_COMPACT * scale
+	close := render.Rect{box.x + box.width - padding - size, box.y + padding, size, size}
+	return {box, close, content_width, heading_height, lines}
+}
+
+notices_hit :: proc(
+	n: ^Notices, text: ^Text, width, height, scale, x, y: f32,
+) -> Notice_Hit {
+	if text.fonts == nil || width <= 2 * NOTICE_MARGIN * scale {return {}}
+	bottom := height - NOTICE_MARGIN * scale
+	for i := len(n.items) + len(n.fading) - 1; i >= 0; i -= 1 {
+		item := i < len(n.items) ? n.items[i] : n.fading[i - len(n.items)]
+		l := notice_layout(n, item, text, width, bottom, scale)
+		_, rise := presence_fade(item.presence, 6 * scale)
+		box, close := l.box, l.close
+		box.y += rise
+		close.y += rise
+		if contains(box, x, y) {
+			return {item.id, i < len(n.items) && contains(close, x, y), true}
+		}
+		bottom = l.box.y - SPACE_2 * scale
+		if bottom < NOTICE_MARGIN * scale {break}
+	}
+	return {}
 }
 
 // Removes expired notices and reports whether any were removed.
@@ -151,6 +220,9 @@ notices_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, height, scale: f32,
+	hover: u64 = 0,
+	pressed: u64 = 0,
+	pointer: [2]f32 = {},
 ) -> glyphs.Result {
 	if len(n.items) + len(n.fading) == 0 ||
 	   render.push_layer(list, {0, 0, width, height}) != .None {
@@ -164,41 +236,34 @@ notices_draw :: proc(
 		item: Notice
 		if i < len(n.items) {item = n.items[i]} else {item = n.fading[i - len(n.items)]}
 		layers, rects, glyph_count := len(list.layers), len(list.rects), len(list.glyphs)
-		// The accent bar, the status icon and the gap after it lead the text.
-		leading := (4 + ICON_BUTTON + SPACE_2) * scale
-		content_width := max(scale, max_width - 2 * padding - leading)
-		wrap(text, item.text, content_width, &n.lines)
-		lines := min(len(n.lines), NOTICE_MAX_LINES)
+		l := notice_layout(n, item, text, width, bottom, scale)
+		box, content_width, lines := l.box, l.content_width, l.lines
 		label, symbol, accent := notice_style(item.kind, theme)
 		strong := text_styled(text, .Strong)
-		measured_width := text_width(&strong, label)
-		for line in n.lines[:lines] {
-			measured_width = max(measured_width, text_width(text, line))
-		}
-		content_width = min(content_width, measured_width)
-		box_width := min(max_width, content_width + 2 * padding + leading)
-		box_height := strong.line_height + SPACE_1 * scale + f32(lines) * text.line_height + 2 * padding
-		box := render.Rect{width - margin - box_width, bottom - box_height, box_width, box_height}
 		frame := popover_panel(box, scale)
 		if panel_draw(list, frame, theme) != .None {return .Ok}
 		bar := render.Rect{box.x, box.y, 4 * scale, box.height}
 		draw_rect(list, {rect = bar, color = accent, radius = pill_radius(bar)})
 		icon := ICON_BUTTON * scale
-		icon_y := box.y + padding + (strong.line_height - icon) / 2
+		icon_y := box.y + padding + (l.heading_height - icon) / 2
 		badge := render.Rect{bar.x + bar.width + padding, icon_y, icon, icon}
 		icon_draw(list, symbol, badge, accent, ICON_BUTTON, scale)
+		if icon_button_draw(
+			list, theme, l.close, .Close, f32(int(hover == item.id)), f32(int(pressed == item.id)),
+			scale, pointer, radius = RADIUS_CONTROL,
+		) != .None {return .Ok}
 		x := badge.x + icon + SPACE_2 * scale
 		if result := draw_text(
 			&strong,
 			list,
 			label,
 			x,
-			box.y + padding + strong.ascent,
+			box.y + padding + (l.heading_height - strong.line_height) / 2 + strong.ascent,
 			accent,
 			content_width,
 		); result != .Ok {return result}
 		for line, index in n.lines[:lines] {
-			top := box.y + padding + strong.line_height + SPACE_1 * scale
+			top := box.y + padding + l.heading_height + SPACE_1 * scale
 			baseline := top + f32(index) * text.line_height + text.ascent
 			line_limit := index == lines - 1 && len(n.lines) > lines ? content_width : 0
 			if result := draw_text(text, list, line, x, baseline, theme.text, line_limit);

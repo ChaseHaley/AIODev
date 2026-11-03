@@ -32,6 +32,8 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.rail_hover, w.rail_pressed = -1, -1
 	w.title_action_hover = .None
 	ui.armed_cancel(&w.title_action_armed)
+	ui.armed_cancel(&w.notice_armed)
+	w.notice_hover, w.notice_buttons = 0, {}
 	w.tab_orientation_button_hovered = false
 	ui.armed_cancel(&w.tab_orientation_button_armed)
 	ui.armed_cancel(&w.tab_close_armed)
@@ -119,6 +121,10 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	target := pointer_target(app, w, x, y)
+	if !e.pressed && e.button in w.notice_buttons {
+		_ = gesture_complete(app, w, e)
+		return
+	}
 	if pointer_modal(target) {
 		if e.pressed {w.gesture.owners[e.button] = target}
 		pointer_press(app, w, target, e)
