@@ -266,6 +266,7 @@ workspace_pickers_refresh :: proc(app: ^App) {
 	for w in app.windows {
 		p := &w.workspace_picker
 		if p.mode == .Closed { continue }
+		if p.order.id != 0 && workspace_row_target(app, p.order.id) == nil {p.order = {}}
 		if workspace_picker_icons(p) {
 			if workspace_row_target(app, p.target_id) == nil { workspace_picker_return(app, w) }
 			continue
@@ -373,6 +374,7 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 
 workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 	defer workspace_picker_layout_changed(w)
+	w.workspace_picker.order = {}
 	if w.workspace_picker.mode == .Tint { return }
 	if w.workspace_picker.mode == .Menu { return }
 	if w.workspace_picker.mode == .Rename {
@@ -393,6 +395,11 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	defer if window_find(app, window_id) == w {workspace_picker_layout_changed(w)}
 	if !e.pressed {return}
 	p := &w.workspace_picker
+	if p.order.id != 0 {
+		p.order = {}
+		w.dirty = true
+		if e.key == .Escape {return}
+	}
 	if workspace_row_key(app, w, e) { return }
 	count := workspace_picker_count(w)
 	w.dirty = true
@@ -639,6 +646,14 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				i != p.selected,
 			); result != .None {return .Ok}
 		}
+	}
+	if p.order.active && p.order.target != 0 && p.order.target != p.order.id {
+		from, to := workspace_row_index(w, p.order.id), workspace_row_index(w, p.order.target)
+		row := workspace_picker_row_rect(w, to)
+		y := row.y
+		if from < to {y += row.height}
+		line := render.Rect{row.x, y - s, row.width, 2 * s}
+		if render.push_rect(&w.list, {rect = line, color = app.theme.accent}) != .None {return .Ok}
 	}
 	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }
 	return workspace_row_menu_draw(app, w)

@@ -6,8 +6,8 @@ import "aio:platform"
 import "aio:render"
 import "aio:ui"
 
-Workspace_Row_Action :: enum { Rename, Icon, Open_Window, Delete }
-WORKSPACE_ROW_ACTIONS :: [?]Workspace_Row_Action{.Rename, .Icon, .Open_Window, .Delete}
+Workspace_Row_Action :: enum { Rename, Icon, Open_Window, Delete, Move_Up, Move_Down }
+WORKSPACE_ROW_ACTIONS :: [?]Workspace_Row_Action{.Rename, .Icon, .Open_Window, .Move_Up, .Move_Down, .Delete}
 
 workspace_row_window_enabled :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 	target := workspace_row_target(app, id)
@@ -77,6 +77,10 @@ workspace_row_menu_choose :: proc(app: ^App, w: ^Window) {
 	case .Rename: workspace_row_rename_open(app, w, id)
 	case .Icon: workspace_row_icon_open(app, w, id)
 	case .Delete: workspace_delete_request(app, w, target)
+	case .Move_Up, .Move_Down:
+		step := actions[selected] == .Move_Up ? -1 : 1
+		_ = workspace_reorder(app, id, workspace_order_neighbor(app, id, step))
+		workspace_row_reveal(w, id)
 	}
 }
 
@@ -352,11 +356,16 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
 	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
-	titles := [?]string{"Rename", "Change Icon", workspace_row_window_title(app, p.target_id), "Delete…"}
+	titles := [?]string{
+		"Rename", "Change Icon", workspace_row_window_title(app, p.target_id), "Move Up", "Move Down", "Delete…",
+	}
 	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
 	for title, i in titles {
 		enabled := workspace_row_target(app, p.target_id) != nil &&
 			(actions[i] != .Open_Window || workspace_row_window_enabled(app, w, p.target_id))
+		if actions[i] == .Move_Up || actions[i] == .Move_Down {
+			enabled &&= workspace_order_neighbor(app, p.target_id, actions[i] == .Move_Up ? -1 : 1) != 0
+		}
 		item := workspace_row_menu_item_rect(w, i)
 		if i == p.menu_selected {
 			selection := render.Rect_Instance{rect = item, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s}

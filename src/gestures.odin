@@ -42,6 +42,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.rail_resizing = false
 	ui.armed_cancel(&w.status.panel_side_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
+	w.workspace_picker.order = {}
 	link_hover_clear(w)
 	if palette_active(app, w) {
 		ui.palette_input_release(&app.palette)
