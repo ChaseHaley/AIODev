@@ -106,9 +106,56 @@ process_arguments :: proc(id, root: u32, allocator := context.allocator) -> ([]s
 	return arguments, true
 }
 
+// The current directory of root or its descendant, under the same guard as process_image, read
+// from the process's parameters the way WezTerm does. PowerShell's Set-Location does not change
+// it; a shell reports that directory through OSC 7 instead. WoW64 processes return no directory.
+@(require_results)
+process_directory :: proc(id, root: u32, allocator := context.allocator) -> (string, bool) {
+	process, opened := open_descendant(id, root, w.PROCESS_QUERY_INFORMATION | w.PROCESS_VM_READ)
+	if !opened {return "", false}
+	defer close_process(process)
+	machine, native: w.USHORT
+	if !bool(w.IsWow64Process2(process, &machine, &native)) || machine != 0 {return "", false}
+	basic: w.PROCESS_BASIC_INFORMATION
+	size: u32
+	status := w.NtQueryInformationProcess(process, .ProcessBasicInformation, &basic, size_of(basic), &size)
+	if status != 0 || basic.PebBaseAddress == nil {return "", false}
+	// PEB.ProcessParameters and RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath on 64-bit Windows.
+	when size_of(uintptr) != 8 {return "", false}
+	PARAMETERS_OFFSET :: 0x20
+	DIRECTORY_OFFSET :: 0x38
+	parameters: uintptr
+	peb := uintptr(basic.PebBaseAddress)
+	if !read_memory(process, peb + PARAMETERS_OFFSET, &parameters, size_of(parameters)) || parameters == 0 {
+		return "", false
+	}
+	path: w.UNICODE_STRING
+	if !read_memory(process, parameters + DIRECTORY_OFFSET, &path, size_of(path)) ||
+	   path.Length == 0 || path.Length % 2 != 0 || path.Buffer == nil {
+		return "", false
+	}
+	wide := make([]u16, int(path.Length / 2), context.temp_allocator)
+	if !read_memory(process, uintptr(path.Buffer), raw_data(wide), int(path.Length)) {return "", false}
+	// DosPath keeps a trailing separator; a drive root keeps its own.
+	length := len(wide)
+	if length > 3 && wide[length - 1] == '\\' {length -= 1}
+	directory, err := w.utf16_to_utf8(wide[:length], allocator)
+	return directory, err == nil
+}
+
 @(private, require_results)
-open_descendant :: proc(id, root: u32) -> (w.HANDLE, bool) {
-	process := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, id)
+read_memory :: proc(process: w.HANDLE, address: uintptr, buffer: rawptr, size: int) -> bool {
+	read: w.SIZE_T
+	ok := w.ReadProcessMemory(process, rawptr(address), buffer, w.SIZE_T(size), &read)
+	return bool(ok) && int(read) == size
+}
+
+@(private, require_results)
+open_descendant :: proc(
+	id, root: u32,
+	access: u32 = w.PROCESS_QUERY_LIMITED_INFORMATION,
+) -> (w.HANDLE, bool) {
+	process := w.OpenProcess(access, false, id)
 	if process == nil {return nil, false}
 	shell := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, root)
 	if shell == nil {close_process(process); return nil, false}

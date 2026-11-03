@@ -33,3 +33,24 @@ process_image_names_live_descendants_only :: proc(t: ^testing.T) {
 	_, missing := pty.process_image(0xFFFFFFF0, current)
 	testing.expect(t, !missing)
 }
+
+@(test)
+process_directory_reads_a_child_directory_and_keeps_drive_roots :: proc(t: ^testing.T) {
+	current := w.GetCurrentProcessId()
+	for directory in ([?]string{`C:\Windows\System32`, `C:\`}) {
+		startup := w.STARTUPINFOW{cb = size_of(w.STARTUPINFOW)}
+		info: w.PROCESS_INFORMATION
+		command := w.utf8_to_wstring("cmd.exe /d /c ping -n 30 127.0.0.1 >nul", context.temp_allocator)
+		if !testing.expect(t, bool(w.CreateProcessW(nil, command, nil, nil, false, w.CREATE_NO_WINDOW, nil,
+			   w.utf8_to_wstring(directory, context.temp_allocator), &startup, &info))) {return}
+		path, ok := pty.process_directory(info.dwProcessId, current, context.temp_allocator)
+		w.TerminateProcess(info.hProcess, 0)
+		w.CloseHandle(info.hThread)
+		w.CloseHandle(info.hProcess)
+		testing.expect(t, ok)
+		testing.expect_value(t, path, directory)
+	}
+	// Processes that are not descendants are refused, as for process_image.
+	_, missing := pty.process_directory(0xFFFFFFF0, current, context.temp_allocator)
+	testing.expect(t, !missing)
+}
