@@ -252,11 +252,8 @@ program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_ar
 // new candidate is adopted only when a second poll still sees it, so a prompt helper or a short
 // command does not flash its icon, while returning to the shell shows at once.
 program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Process_Info, root: u32) -> bool {
-	records := slice.clone(entry.statuses, context.temp_allocator)
-	slice.sort_by(records, status_before)
-	apps := make([dynamic]string, 0, len(records), context.temp_allocator)
-	for record in records {if record.app != "" {append(&apps, record.app)}}
-	index := pty.process_program(processes, root, apps[:], entry.program_candidate)
+	apps := program_reporters(entry)
+	index := pty.process_program(processes, root, apps, entry.program_candidate)
 	candidate := index >= 0 ? processes[index].id : 0
 	previous := entry.program_candidate
 	entry.program_candidate = candidate
@@ -290,6 +287,15 @@ program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Proces
 	if strings.equal_fold(name, entry.program_name) {return adopted}
 	program_name_set(entry, name)
 	return true
+}
+
+// The apps the pane's program status names, most important first, in temporary memory.
+program_reporters :: proc(entry: ^Session_Entry) -> []string {
+	records := slice.clone(entry.statuses, context.temp_allocator)
+	slice.sort_by(records, status_before)
+	apps := make([dynamic]string, 0, len(records), context.temp_allocator)
+	for record in records {if record.app != "" {append(&apps, record.app)}}
+	return apps[:]
 }
 
 // The program a launcher runs, when it has an icon to show; otherwise empty.
