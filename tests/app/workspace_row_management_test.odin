@@ -134,7 +134,7 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), f.target.id)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
 	app.workspace_picker_key(s, w, {key = .P, modifiers = {.Control}, pressed = true})
-	testing.expect_value(t, w.workspace_picker.menu_selected, 3)
+	testing.expect_value(t, w.workspace_picker.menu_selected, len(app.WORKSPACE_ROW_ACTIONS) - 1)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = false})
 	testing.expect(t, !w.pending_close.confirm.open)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
@@ -157,7 +157,7 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Menu) == 0)
 	app.workspace_picker_key(s, w, {key = .Arrow_Right, pressed = true})
 	app.workspace_picker_key(s, w, {key = .Tab, modifiers = {.Shift}, pressed = true})
-	testing.expect_value(t, w.workspace_picker.menu_selected, 3)
+	testing.expect_value(t, w.workspace_picker.menu_selected, len(app.WORKSPACE_ROW_ACTIONS) - 1)
 	app.workspace_picker_key(s, w, {key = .Escape, pressed = true})
 	app.workspace_picker_key(s, w, {key = .N, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.selected, 2)
@@ -292,7 +292,7 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	other = app.workspace_create_empty(s)
 	if !testing.expect(t, other != nil) { return }
 	app.workspace_row_menu_open(s, w, other.id)
-	w.workspace_picker.menu_selected = 3
+	w.workspace_picker.menu_selected = len(app.WORKSPACE_ROW_ACTIONS) - 1
 	testing.expect(t, app.workspace_discard_empty(s, other))
 	app.workspace_row_menu_choose(s, w)
 	testing.expect(t, !w.pending_close.confirm.open)

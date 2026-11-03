@@ -20,6 +20,8 @@ Workspace_Picker :: struct {
 	saved_query: ui.Text_Field,
 	move: Workspace_Move_Request,
 	drag: bool,
+	order: Workspace_Order_Drag,
+	order_positions: [dynamic]Workspace_Order_Position,
 }
 
 workspace_picker_active :: proc(p: ^Workspace_Picker) -> bool {
@@ -38,6 +40,8 @@ workspace_picker_target :: proc(p: ^Workspace_Picker, mode: Workspace_Picker_Mod
 workspace_picker_transition :: proc(w: ^Window, mode: Workspace_Picker_Mode, target_id: u32 = 0) {
 	p := &w.workspace_picker
 	p.mode, p.target_id = mode, target_id
+	p.order = {}
+	if mode == .Closed || mode == .Icons || mode == .Tint {clear(&p.order_positions)}
 	p.menu_hover, p.menu_selected, p.rename_error, p.rename_motion = 0, 0, false, {}
 	p.query.dragging, w.rename.dragging, w.dirty = false, false, true
 }
@@ -56,6 +60,7 @@ workspace_picker_destroy :: proc(w: ^Window) {
 	delete(w.workspace_picker.query.bytes)
 	delete(w.workspace_picker.saved_query.bytes)
 	delete(w.workspace_picker.rows)
+	delete(w.workspace_picker.order_positions)
 	w.workspace_picker = {}
 }
 
@@ -85,6 +90,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 	if !e.pressed {
 		p.query.dragging, w.rename.dragging = false, false
 		w.header_buttons -= {e.button}
+		if e.button == .Left && p.order.id != 0 {workspace_order_release(app, w, e)}
 		return
 	}
 	w.header_buttons += {e.button}
@@ -95,11 +101,22 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 	} else if !workspace_rect_contains(r, x, y) {
 		workspace_picker_cancel(w)
 	} else if e.button == .Left {
+		if p.mode == .List && p.move.workspace == 0 {
+			if hit := workspace_picker_hit(w, x, y); hit >= 0 && hit < len(p.rows) &&
+			   !workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+				row := workspace_picker_row_rect(w, hit)
+				p.order = {id = p.rows[hit].id, start_x = x, start_y = y,
+					grab = (y - row.y) / row.height}
+				workspace_picker_select(w, hit)
+				return
+			}
+		}
 		workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
 	}
 }
 
 workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+	if workspace_order_hover(app, w, e) {return}
 	if workspace_row_hover(app, w, e) {return}
 	p := &w.workspace_picker
 	x, y := f32(e.x), f32(e.y)
@@ -127,5 +144,12 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Eve
 workspace_picker_wheel :: proc(w: ^Window, delta: f32) {
 	p := &w.workspace_picker
 	if p.mode == .Menu || p.mode == .Rename {return}
+	if p.order.active {
+		_, rows := workspace_picker_rect(w)
+		p.scroll = clamp(p.scroll - int(math.sign(delta)), 0, max(0, len(p.rows) - rows))
+		workspace_order_move(w, p.order.pointer_x, p.order.pointer_y)
+		w.dirty = true
+		return
+	}
 	workspace_picker_select(w, p.selected - int(math.sign(delta)))
 }

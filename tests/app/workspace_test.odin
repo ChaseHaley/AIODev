@@ -193,6 +193,8 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	app.tick(&state)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = other.id, button = .Left, pressed = true,
 		x = i32(r.x+20*other.scale), y = i32(r.y+17*other.scale)})
+	app.handle_event(&state, platform.Mouse_Button_Event{window = other.id, button = .Left,
+		x = i32(r.x+20*other.scale), y = i32(r.y+17*other.scale)})
 	testing.expect(t, other.workspace == two)
 	testing.expect(t, app.window_for_workspace(&state, three) == nil)
 	testing.expect_value(t, term.process_id(other_session), other_pid)
