@@ -11,6 +11,10 @@ Before project work, read these files from the vault:
 - `AIODev/System/Idea capture.md`: required conversational idea capture procedure.
 - `AIODev/Work/Work.md`: work dashboard; follow links to relevant individual records.
 - `AIODev/Engineering Standards.md`: follow its links to applicable engineering rules.
+- `AIODev/Validation Tooling/Recipes/Feature map.md`: current user-facing features
+  and verification routes. Read the index at session start; before changing or
+  verifying a feature, follow its entry to the relevant feature note and recipes.
+  Update affected entries when user paths, prerequisites, or proof change.
 
 When the owner expresses an actionable idea, wish, improvement, or deferred request,
 catalogue it in the vault during that turn. Search existing work first. Extend a
