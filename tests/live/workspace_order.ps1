@@ -39,7 +39,7 @@ try {
     $original = (Read-State)['workspace.name']
     foreach ($workspaceName in @('Alpha', 'Beta')) {
         Invoke-Aio command workspace.new | Out-Null
-		Invoke-Aio type $workspaceName | Out-Null
+        Invoke-Aio type $workspaceName | Out-Null
         Invoke-Aio key Enter | Out-Null
     }
     $before = Read-State
@@ -67,7 +67,12 @@ try {
     Invoke-Aio key Down Down | Out-Null
     $end = Row-Center
     Invoke-Aio mouse down $start --px | Out-Null
-    Invoke-Aio mouse move $end --px | Out-Null
+    $point = $start -split ',' | ForEach-Object { [int]$_ }
+    $floating = "$($point[0]),$($point[1]+40)"
+    Invoke-Aio mouse move $floating --px | Out-Null
+    $drawn = (Read-State)['workspace.picker.row'] -split ',' | ForEach-Object { [double]$_ }
+    Check ([math]::Abs(($drawn[1]+$drawn[3]/2)-($point[1]+40)) -lt 1) 'grabbed row follows pointer'
+    Invoke-Aio capture --out "$repo/build/verify/$Name/floating-row.png" | Out-Null
     Invoke-Aio key Esc | Out-Null
     Invoke-Aio mouse up $end --px | Out-Null
     Check-Order @('Beta', 'Alpha', $original)

@@ -6,6 +6,50 @@ import "aio:platform"
 import "aio:ui"
 import "core:encoding/json"
 import "core:testing"
+import "core:time"
+
+@(test)
+workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^testing.T) {
+	state: app.App
+	w: app.Window
+	defer order_destroy(&state, &w)
+	if !order_fixture(t, &state, &w) {return}
+	state.animations = true
+	row := app.workspace_picker_row_rect(&w, 0)
+	x, y := i32(row.x + 40), i32(row.y + row.height / 2)
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+		pressed = true, x = x, y = y})
+	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x,
+		y = y + 40, buttons = {.Left}})
+	testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, row.y + 40)
+	neighbour := app.workspace_order_position(&w.workspace_picker, 2)
+	if !testing.expect(t, neighbour != nil) {return}
+	testing.expect_value(t, neighbour.position.target, f32(0))
+	testing.expect_value(t, neighbour.position.duration, 140 * time.Millisecond)
+	testing.expect_value(t, neighbour.position.easing, ui.Easing.Decelerate)
+	started := neighbour.position.started
+	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 70 * time.Millisecond))
+	testing.expect(t, neighbour.position.value > 0 && neighbour.position.value < 1)
+	testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, row.y + 40)
+	testing.expect(t, app.workspace_order_lifted(&w.workspace_picker, 0))
+	testing.expect_value(t, app.workspace_picker_hit(&w, f32(x), f32(y + 40)), 0)
+	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+		x = x, y = y + 40})
+	testing.expect_value(t, state.workspaces[1].id, u32(1))
+	grabbed := app.workspace_order_position(&w.workspace_picker, 1)
+	if !testing.expect(t, grabbed != nil) {return}
+	testing.expect(t, grabbed.lifted)
+	testing.expect_value(t, grabbed.position.value, f32(1.25))
+	testing.expect_value(t, grabbed.position.target, f32(1))
+	testing.expect_value(t, grabbed.position.duration, 140 * time.Millisecond)
+	testing.expect_value(t, grabbed.position.easing, ui.Easing.Decelerate)
+	started = grabbed.position.started
+	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 70 * time.Millisecond))
+	testing.expect(t, grabbed.position.value > 1 && grabbed.position.value < 1.25)
+	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 140 * time.Millisecond))
+	testing.expect_value(t, len(w.workspace_picker.order_positions), 0)
+	testing.expect(t, !app.workspace_order_animating(&w.workspace_picker))
+}
 
 @(private="file")
 order_fixture :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window) -> bool {
@@ -92,6 +136,8 @@ workspace_order_drag_commits_on_release_and_cancel_preserves_order :: proc(t: ^t
 				pressed = true, x = x, y = y})
 			app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = end_y, buttons = {.Left}})
 			testing.expect(t, w.workspace_picker.order.active)
+			testing.expect_value(t, app.workspace_picker_row_rect(&w, 1).y, first.y)
+			testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, last.y)
 			testing.expect_value(t, state.workspaces[0].id, u32(1))
 			if cancel {
 				app.handle_event(&state, platform.Capture_Lost_Event{window = w.id})
@@ -100,6 +146,7 @@ workspace_order_drag_commits_on_release_and_cancel_preserves_order :: proc(t: ^t
 			testing.expect_value(t, state.workspaces[0].id, cancel ? u32(1) : u32(2))
 			testing.expect_value(t, w.workspace.id, u32(1))
 			testing.expect_value(t, w.workspace_picker.order.id, u32(0))
+			testing.expect_value(t, len(w.workspace_picker.order_positions), 0)
 			testing.expect(t, app.workspace_picker_active(&w.workspace_picker))
 		}
 		testing.expect(t, app.workspace_reorder(&state, 1, 2))

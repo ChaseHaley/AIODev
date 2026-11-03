@@ -5,6 +5,7 @@ import "aio:layout"
 import "aio:platform"
 import "aio:term"
 import "aio:ui"
+import "core:time"
 
 Gesture_State :: struct {
 	buttons, cancelled, reported: input.Mouse_Buttons,
@@ -43,6 +44,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.status.panel_side_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
 	w.workspace_picker.order = {}
+	_ = workspace_order_animate(w, app.animations, time.tick_now())
 	link_hover_clear(w)
 	if palette_active(app, w) {
 		ui.palette_input_release(&app.palette)

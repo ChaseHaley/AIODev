@@ -9,6 +9,7 @@ motion_active :: proc(app: ^App) -> bool {
 	if ui.notices_animating(&app.notices) {return true}
 	for w in app.windows {
 		if workspace_picker_active(&w.workspace_picker) {
+			if workspace_order_animating(&w.workspace_picker) {return true}
 			if ui.motion_active(w.workspace_picker.rename_motion) ||
 			   ui.control_active(w.workspace_picker.menu_motion) {
 				return true
@@ -42,6 +43,7 @@ update_motion :: proc(app: ^App) {
 	if notices_changed {mark_all_dirty(app)}
 	for w in app.windows {
 		p := &w.workspace_picker
+		if workspace_order_animate(w, app.animations, now) {w.dirty = true}
 		if ui.control_update(&w.workspace_motion, w.workspace_hovered, false, app.animations, now) {
 			w.dirty = true
 		}
