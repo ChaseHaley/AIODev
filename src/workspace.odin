@@ -308,8 +308,15 @@ pane_split :: proc(
 	focus := true,
 ) {
 	tab := w.workspace.selected
-	switch _, err := pane_split_at(app, w, w.workspace, tab, w.tree.focus, direction, ratio, focus, {}, true);
-	     err {
+	launch: Pane_Launch
+	if entry := focused_session(app, w); entry != nil {
+		refused: bool
+		launch.directory, refused = pane_directory(entry)
+		if refused {notify_directory_refused(app)}
+	}
+	switch _, err := pane_split_at(
+		app, w, w.workspace, tab, w.tree.focus, direction, ratio, focus, launch, true,
+	); err {
 	case .None, .Minimum:
 	case .Check:
 		notify(app, .Error, "Could not check the new pane size.")
@@ -463,22 +470,39 @@ local_launch_directory :: proc(candidate, fallback: string) -> (directory: strin
 	return "", refused
 }
 
+// Where a split or duplicate of the pane starts. As in kitty, a running program's own directory
+// wins over the shell's last OSC 7 report, which predates the program; then the shell process's
+// directory, which cmd and bash keep current, and finally where the pane was launched. `refused`
+// reports a reported directory that was remote or unavailable.
+@(require_results)
+pane_directory :: proc(entry: ^Session_Entry) -> (directory: string, refused: bool) {
+	root := term.process_id(entry.session)
+	if entry.program_id != 0 {
+		program, found := pty.process_directory(entry.program_id, root, context.temp_allocator)
+		if found && pty.working_directory_is_local(program) {return program, false}
+	}
+	raw := term.working_directory(entry.session, context.temp_allocator)
+	if reported, err := settings.directory_label(raw, context.temp_allocator); err == nil && reported != "" {
+		if pty.working_directory_is_local(reported) {return reported, false}
+		refused = true
+	}
+	path, ok := pty.process_directory(root, root, context.temp_allocator)
+	if ok && pty.working_directory_is_local(path) {return path, refused}
+	directory, _ = local_launch_directory("", entry.header.launch_directory)
+	return directory, refused
+}
+
+@(private)
+notify_directory_refused :: proc(app: ^App) {
+	notify(app, .Warning, "The pane's reported directory is remote or unavailable; using a local fallback.")
+}
+
 tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	pane, _ := workspace_focused_session_pane(app, w.workspace, index)
 	entry := pane.session
 	if entry == nil || !pane_minimum_single(app, w) {return}
-	raw := term.working_directory(entry.session, context.temp_allocator)
-	directory, err := settings.directory_label(raw, context.temp_allocator)
-	if err != nil {notify(app, .Error, "Could not resolve the pane directory."); return}
-	refused: bool
-	directory, refused = local_launch_directory(directory, entry.header.launch_directory)
-	if refused {
-		notify(
-			app,
-			.Warning,
-			"The pane's reported directory is remote or unavailable; using a local fallback.",
-		)
-	}
+	directory, refused := pane_directory(entry)
+	if refused {notify_directory_refused(app)}
 	if !tab_create(app, w.workspace, entry.header.command, directory, entry.profile_id) {
 		notify(app, .Error, "Could not duplicate the tab.")
 		return
