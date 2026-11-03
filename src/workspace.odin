@@ -311,7 +311,7 @@ pane_split :: proc(
 	launch: Pane_Launch
 	if entry := focused_session(app, w); entry != nil {
 		refused: bool
-		launch.directory, refused = pane_directory(entry)
+		launch.directory, refused = pane_directory(app, entry)
 		if refused {notify_directory_refused(app)}
 	}
 	switch _, err := pane_split_at(
@@ -475,11 +475,11 @@ local_launch_directory :: proc(candidate, fallback: string) -> (directory: strin
 // directory, which cmd and bash keep current, and finally where the pane was launched. `refused`
 // reports a reported directory that was remote or unavailable.
 @(require_results)
-pane_directory :: proc(entry: ^Session_Entry) -> (directory: string, refused: bool) {
+pane_directory :: proc(app: ^App, entry: ^Session_Entry) -> (directory: string, refused: bool) {
 	root := term.process_id(entry.session)
-	if entry.program_id != 0 {
-		program, found := pty.process_directory(entry.program_id, root, context.temp_allocator)
-		if found && pty.working_directory_is_local(program) {return program, false}
+	if program := pane_program(app, entry, root); program != 0 {
+		path, found := pty.process_directory(program, root, context.temp_allocator)
+		if found && pty.working_directory_is_local(path) {return path, false}
 	}
 	raw := term.working_directory(entry.session, context.temp_allocator)
 	if reported, err := settings.directory_label(raw, context.temp_allocator); err == nil && reported != "" {
@@ -492,6 +492,19 @@ pane_directory :: proc(entry: ^Session_Entry) -> (directory: string, refused: bo
 	return directory, refused
 }
 
+// The pane's running program. Icon polling already tracks it, including one seen once but not yet
+// adopted; without polling it is chosen the same way from a snapshot taken now (about 10 ms).
+@(private)
+pane_program :: proc(app: ^App, entry: ^Session_Entry, root: u32) -> u32 {
+	if app.settings.tabs.program_icons {
+		return entry.program_candidate != 0 ? entry.program_candidate : entry.program_id
+	}
+	processes, err := pty.process_snapshot(context.temp_allocator)
+	if err != .None {return 0}
+	index := pty.process_program(processes, root, program_reporters(entry), 0)
+	return index >= 0 ? processes[index].id : 0
+}
+
 @(private)
 notify_directory_refused :: proc(app: ^App) {
 	notify(app, .Warning, "The pane's reported directory is remote or unavailable; using a local fallback.")
@@ -501,7 +514,7 @@ tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	pane, _ := workspace_focused_session_pane(app, w.workspace, index)
 	entry := pane.session
 	if entry == nil || !pane_minimum_single(app, w) {return}
-	directory, refused := pane_directory(entry)
+	directory, refused := pane_directory(app, entry)
 	if refused {notify_directory_refused(app)}
 	if !tab_create(app, w.workspace, entry.header.command, directory, entry.profile_id) {
 		notify(app, .Error, "Could not duplicate the tab.")

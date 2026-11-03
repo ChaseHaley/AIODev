@@ -104,6 +104,16 @@ try {
     Invoke-Aio run 'Write-Output ("PROGRAM_AT="+$PWD.ProviderPath)'
     Invoke-Aio wait text 'PROGRAM_AT=C:\Windows\Fonts'
     Write-Output 'PASS splits from a running program open in its directory'
+    # Without icon polling the split finds the program itself, with no time for a poll to adopt it.
+    Set-Option tabs.program_icons false
+    Invoke-Aio command settings.reload
+    Invoke-Aio command tab.new
+    Invoke-Aio run 'cmd.exe /d /k "cd /d C:\Windows\Media"'
+    Invoke-Aio wait text 'C:\Windows\Media>'
+    Invoke-Aio command pane.split_right
+    Invoke-Aio run 'Write-Output ("UNPOLLED_"+($PWD.ProviderPath -eq "C:\Windows\Media"))'
+    Invoke-Aio wait text 'UNPOLLED_True'
+    Write-Output 'PASS splits find the running program without icon polling'
 } finally {
     [Environment]::SetEnvironmentVariable($variable, $null, 'User')
     & $ctl --name $name stop | Write-Output
