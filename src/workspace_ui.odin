@@ -262,10 +262,11 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 }
 
 @(private)
-workspace_pickers_refresh :: proc(app: ^App) {
+workspace_pickers_refresh :: proc(app: ^App, preserve_scroll := false) {
 	for w in app.windows {
 		p := &w.workspace_picker
 		if p.mode == .Closed { continue }
+		if p.order.id != 0 && workspace_row_target(app, p.order.id) == nil {p.order = {}}
 		if workspace_picker_icons(p) {
 			if workspace_row_target(app, p.target_id) == nil { workspace_picker_return(app, w) }
 			continue
@@ -278,6 +279,7 @@ workspace_pickers_refresh :: proc(app: ^App) {
 		}
 		id := p.selected >= 0 && p.selected < len(p.rows) ? p.rows[p.selected].id : 0
 		action := p.selected - len(p.rows)
+		scroll := p.scroll
 		workspace_picker_filter(app, w)
 		if p.mode == .Menu && workspace_row_index(w, p.target_id) < 0 { workspace_picker_transition(w, .List) }
 		if p.mode == .Rename && workspace_row_index(w, p.target_id) < 0 {
@@ -286,6 +288,7 @@ workspace_pickers_refresh :: proc(app: ^App) {
 		if id != 0 {
 			for row, i in p.rows {if row.id == id {p.selected = i; break}}
 		} else {p.selected = len(p.rows) + clamp(action, 0, len(WORKSPACE_ACTIONS) - 1)}
+		if preserve_scroll {p.scroll = scroll}
 		workspace_picker_layout_changed(w)
 	}
 }
@@ -373,6 +376,7 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 
 workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 	defer workspace_picker_layout_changed(w)
+	workspace_order_reset(w)
 	if w.workspace_picker.mode == .Tint { return }
 	if w.workspace_picker.mode == .Menu { return }
 	if w.workspace_picker.mode == .Rename {
@@ -393,6 +397,11 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	defer if window_find(app, window_id) == w {workspace_picker_layout_changed(w)}
 	if !e.pressed {return}
 	p := &w.workspace_picker
+	if p.order.id != 0 {
+		p.order = {}
+		w.dirty = true
+		if e.key == .Escape {return}
+	}
 	if workspace_row_key(app, w, e) { return }
 	count := workspace_picker_count(w)
 	w.dirty = true
@@ -475,7 +484,7 @@ workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
 	}
 }
 
-workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
+workspace_picker_slot_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	if workspace_picker_icons(&w.workspace_picker) {
 		return workspace_icon_picker_cell(w, workspace_icon_picker_layout(w), index)
 	}
@@ -490,14 +499,27 @@ workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 		max(0, r.width - 2 * pad), row_height}
 }
 
+workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
+	r := workspace_picker_slot_rect(w, index)
+	p := &w.workspace_picker
+	if index >= 0 && index < len(p.rows) && !workspace_picker_icons(p) {
+		if entry := workspace_order_position(p, p.rows[index].id); entry != nil {
+			r.y += (entry.position.value - f32(index)) * r.height
+		}
+	}
+	return r
+}
+
 workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_hit(w, x, y) }
-	r, rows := workspace_picker_rect(w)
+	r, _ := workspace_picker_rect(w)
 	if !workspace_rect_contains(r, x, y) {return -1}
-	for visible in 0 ..< rows {
-		i := w.workspace_picker.scroll + visible
-		if i >= workspace_picker_count(w) {break}
-		if workspace_rect_contains(workspace_picker_row_rect(w, i), x, y) {return i}
+	if y < r.y + workspace_picker_header(w) {return -1}
+	for lifted in ([?]bool{true, false}) {
+		for i in 0..<workspace_picker_count(w) {
+			if workspace_order_lifted(&w.workspace_picker, i) != lifted {continue}
+			if workspace_rect_contains(workspace_picker_row_rect(w, i), x, y) {return i}
+		}
 	}
 	return -1
 }
@@ -537,7 +559,7 @@ workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend:
 
 workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	p := &w.workspace_picker
-	r, rows := workspace_picker_rect(w)
+	r, _ := workspace_picker_rect(w)
 	s := w.scale
 	@(static, rodata) actions := WORKSPACE_ACTIONS
 	@(static, rodata) action_info := ACTIONS
@@ -555,91 +577,101 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
 		p.mode == .List, "Search workspaces"); result != .Ok { return result }
 	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
-	for visible in 0..<rows {
-		i := p.scroll + visible
-		if i >= workspace_picker_count(w) { break }
-		row := workspace_picker_row_rect(w, i)
-		if !workspace_picker_icons(p) && i == len(p.rows) {
-			divider := render.Rect{row.x + 8 * s, row.y - 4 * s, max(0, row.width - 16 * s), s}
-			if render.push_rect(&w.list, {rect = divider, color = app.theme.border}) !=
-			   .None {return .Ok}
-		}
-		if i == p.selected {
-			if render.push_rect(
-				   &w.list,
-				   {rect = row, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s},
-			   ) !=
-			   .None {return .Ok}
-		}
-		label, detail := "", ""
-		icon := Workspace_Icon{}
-		has_icon := false
-		if i < len(p.rows) {
-			workspace := workspace_find(app, p.rows[i].id)
-			if workspace == nil {continue}
-			label, detail, icon, has_icon = workspace.name, p.rows[i].status, workspace.icon, true
-			if workspace == w.workspace { detail = "Current" }
-			else if window_for_workspace(app, workspace) != nil { detail = "Open in window" }
-			if p.rows[i].status != "" && detail != p.rows[i].status {
-				detail = fmt.tprintf("%s · %s", detail, p.rows[i].status)
+	clip := render.Rect{r.x, r.y + workspace_picker_header(w), r.width,
+		max(0, r.height - workspace_picker_header(w) - ui.OVERLAY_PADDING * s)}
+	for lifted in ([?]bool{false, true}) {
+		if render.push_layer(&w.list, clip) != .None {return .Ok}
+		for i in 0..<workspace_picker_count(w) {
+			if workspace_order_lifted(p, i) != lifted {continue}
+			row := workspace_picker_row_rect(w, i)
+			if row.y + row.height <= clip.y || row.y >= clip.y + clip.height {continue}
+			if lifted {
+				if render.push_rect(&w.list, {rect = row, color = app.theme.surface,
+					radius = ui.RADIUS_CONTROL * s}) != .None {return .Ok}
 			}
-			if program := status_picker_text(app, workspace); program != "" {
-				detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
+			if !workspace_picker_icons(p) && i == len(p.rows) {
+				divider := render.Rect{row.x + 8 * s, row.y - 4 * s, max(0, row.width - 16 * s), s}
+				if render.push_rect(&w.list, {rect = divider, color = app.theme.border}) !=
+				   .None {return .Ok}
 			}
-		} else if p.move.workspace != 0 {
-			label = i == len(p.rows) ? "Move to New Workspace" : "Move to New Window"
-		} else {label = action_info[actions[i - len(p.rows)]].title}
-		baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
-		label_x := row.x + ui.CONTROL_INSET * s
-		if has_icon {
-			if result := workspace_icon_draw(
-				w,
-				icon,
-				{label_x, row.y + (row.height - ui.ICON_BUTTON * s) / 2, ui.ICON_BUTTON * s, ui.ICON_BUTTON * s},
-				app.theme.text,
-			); result != .Ok {return result}
-			label_x += (ui.ICON_BUTTON + ui.SPACE_2) * s
-		}
-		right := row.x + row.width - ui.CONTROL_INSET * s
-		if has_icon && p.move.workspace == 0 {
-			workspace_row_ellipsis_draw(app, w, i)
-			right = row.x + row.width - (ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_2) * s
-		}
-		detail_text := ui.text_styled(&w.ui_text, .Detail)
-		detail_width := min(ui.text_width(&detail_text, detail), max(0, (right - label_x) * 0.5))
-		if result := ui.draw_fading_text(
-			&w.ui_text,
-			&w.list,
-			label,
-			label_x,
-			baseline,
-			app.theme.text,
-			max(0, right - label_x - detail_width - ui.SPACE_2 * s),
-		); result != .Ok {return result}
-		if result := ui.draw_fading_text(
-			&detail_text,
-			&w.list,
-			detail,
-			right - detail_width,
-			baseline,
-			app.theme.muted,
-			detail_width,
-		); result != .Ok {return result}
-		// Rows are a reading surface: they take the pointer light but never the lift. The
-		// selected row keeps its tint, so it takes no paper hairline.
-		if workspace_rect_contains(row, w.pointer.x, w.pointer.y) {
-			if result := ui.hover_rim_draw(
+			if i == p.selected {
+				if render.push_rect(
+					   &w.list,
+					   {rect = row, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s},
+				   ) !=
+				   .None {return .Ok}
+			}
+			label, detail := "", ""
+			icon := Workspace_Icon{}
+			has_icon := false
+			if i < len(p.rows) {
+				workspace := workspace_find(app, p.rows[i].id)
+				if workspace == nil {continue}
+				label, detail, icon, has_icon = workspace.name, p.rows[i].status, workspace.icon, true
+				if workspace == w.workspace { detail = "Current" }
+				else if window_for_workspace(app, workspace) != nil { detail = "Open in window" }
+				if p.rows[i].status != "" && detail != p.rows[i].status {
+					detail = fmt.tprintf("%s · %s", detail, p.rows[i].status)
+				}
+				if program := status_picker_text(app, workspace); program != "" {
+					detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
+				}
+			} else if p.move.workspace != 0 {
+				label = i == len(p.rows) ? "Move to New Workspace" : "Move to New Window"
+			} else {label = action_info[actions[i - len(p.rows)]].title}
+			baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
+			label_x := row.x + ui.CONTROL_INSET * s
+			if has_icon {
+				if result := workspace_icon_draw(
+					w,
+					icon,
+					{label_x, row.y + (row.height - ui.ICON_BUTTON * s) / 2, ui.ICON_BUTTON * s, ui.ICON_BUTTON * s},
+					app.theme.text,
+				); result != .Ok {return result}
+				label_x += (ui.ICON_BUTTON + ui.SPACE_2) * s
+			}
+			right := row.x + row.width - ui.CONTROL_INSET * s
+			if has_icon && p.move.workspace == 0 {
+				workspace_row_ellipsis_draw(app, w, i)
+				right = row.x + row.width - (ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_2) * s
+			}
+			detail_text := ui.text_styled(&w.ui_text, .Detail)
+			detail_width := min(ui.text_width(&detail_text, detail), max(0, (right - label_x) * 0.5))
+			if result := ui.draw_fading_text(
+				&w.ui_text,
 				&w.list,
-				app.theme,
-				row,
-				ui.RADIUS_CONTROL * s,
-				1,
-				s,
-				w.pointer,
-				i != p.selected,
-			); result != .None {return .Ok}
+				label,
+				label_x,
+				baseline,
+				app.theme.text,
+				max(0, right - label_x - detail_width - ui.SPACE_2 * s),
+			); result != .Ok {return result}
+			if result := ui.draw_fading_text(
+				&detail_text,
+				&w.list,
+				detail,
+				right - detail_width,
+				baseline,
+				app.theme.muted,
+				detail_width,
+			); result != .Ok {return result}
+			// Rows are a reading surface: they take the pointer light but never the lift. The
+			// selected row keeps its tint, so it takes no paper hairline.
+			if workspace_rect_contains(row, w.pointer.x, w.pointer.y) {
+				if result := ui.hover_rim_draw(
+					&w.list,
+					app.theme,
+					row,
+					ui.RADIUS_CONTROL * s,
+					1,
+					s,
+					w.pointer,
+					i != p.selected,
+				); result != .None {return .Ok}
+			}
 		}
 	}
+	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
 	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }
 	return workspace_row_menu_draw(app, w)
 }
