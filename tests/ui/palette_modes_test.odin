@@ -3,6 +3,7 @@ package ui_test
 import "core:strings"
 import "core:testing"
 import "aio:commands"
+import "aio:font"
 import "aio:ui"
 
 @(private)
@@ -145,6 +146,44 @@ palette_tab_cycles_all_five_modes :: proc(t: ^testing.T) {
 		testing.expect_value(t, outcome, ui.Outcome.Changed)
 		testing.expect_value(t, p.mode, expected)
 		testing.expect_value(t, ui.palette_mode_prefix(p.mode) != "", expected != .All)
+	}
+	ui.palette_text(&p, &registry, "pane")
+	for expected in ([?]ui.Palette_Mode{.Commands, .Settings, .Workspaces, .Tabs, .All}) {
+		p.mode_menu = true
+		p.menu_hover = 2
+		p.selected, p.scroll = 3, 2
+		outcome, _ := ui.palette_key(&p, &registry, key({key = .Tab, modifiers = {.Shift}}))
+		testing.expect_value(t, outcome, ui.Outcome.Changed)
+		testing.expect_value(t, p.mode, expected)
+		testing.expect_value(t, ui.palette_query(&p), "pane")
+		testing.expect_value(t, p.selected, 0)
+		testing.expect_value(t, p.scroll, 0)
+		testing.expect(t, !p.mode_menu)
+		testing.expect_value(t, p.menu_hover, -1)
+	}
+}
+
+@(test)
+palette_mode_labels_fit_at_control_size :: proc(t: ^testing.T) {
+	fonts, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) {return}
+	defer font.system_destroy(fonts)
+	text: ui.Text
+	if !testing.expect(t, ui.text_init(&text, fonts, nil, 13)) {return}
+	registry := registry_create(t)
+	defer commands.destroy(&registry)
+	p: ui.Palette
+	if !testing.expect_value(t, ui.palette_init(&p, nil), nil) {return}
+	defer ui.palette_destroy(&p)
+	for scale in ([?]f32{1, 1.5, 2}) {
+		ui.text_set_size(&text, 13 * scale)
+		for mode in ([?]ui.Palette_Mode{.All, .Tabs, .Workspaces, .Settings, .Commands}) {
+			ui.palette_open_mode(&p, &registry, mode)
+			l := ui.palette_layout(&p, 560 * scale, 700 * scale, scale)
+			needed := ui.text_width(&text, ui.palette_mode_info(mode).word) +
+				(2 * ui.CONTROL_INSET + ui.ICON_INDICATOR + ui.SPACE_1) * scale
+			testing.expect(t, l.chip.width >= needed)
+		}
 	}
 }
 
