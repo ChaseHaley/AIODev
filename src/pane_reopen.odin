@@ -5,8 +5,8 @@ import "core:encoding/json"
 import "core:log"
 
 // Recently closed panes and tabs, so Reopen Closed brings the newest back as fresh shells in
-// their last directories, with their names and a note of what they were running. Only explicit
-// closes are kept; moves and shells that exit on their own are not.
+// their last directories, with their names and a note of what they were running. Closes and
+// shells that exit are kept; moves are not.
 CLOSED_LIMIT :: 20
 
 Closed_Item :: struct {

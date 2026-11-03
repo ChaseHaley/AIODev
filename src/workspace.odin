@@ -624,7 +624,7 @@ pane_close :: proc(app: ^App, w: ^Window) {
 	pane_close_at(app, w.workspace, w.workspace.selected, w.tree.focus)
 }
 
-// An explicit close, which Reopen Closed can undo.
+// A close Reopen Closed can undo, by request or because the shell exited.
 pane_close_at :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
 	closed_record_pane(app, workspace, tab_index, node)
 	pane_remove(app, workspace, tab_index, node)
@@ -708,7 +708,7 @@ close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 		if !found {continue}
 		if len(workspace.tabs) == 1 &&
 		   workspace.tabs[pane.tab].tree.root == pane.node {return false}
-		pane_remove(app, workspace, pane.tab, pane.node)
+		pane_close_at(app, workspace, pane.tab, pane.node)
 		return true
 	}
 	return false

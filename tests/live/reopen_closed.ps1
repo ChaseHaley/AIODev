@@ -50,6 +50,15 @@ try {
     Write-Output 'PASS pane reopens named, in its directory, noting its program'
     & "$repo/tools/win32.ps1" -Name $name -Shot "$repo/build/verify/$name/pane.png" -Frame | Out-Null
 
+    # A pane whose shell exits can be reopened too.
+    Invoke-Aio run 'exit' | Out-Null
+    Invoke-Aio expect state panes.count=1 | Out-Null
+    Invoke-Aio command pane.reopen_closed | Out-Null
+    Invoke-Aio expect state panes.count=2 | Out-Null
+    Invoke-Aio wait text 'reopen-closed-work>' | Out-Null
+    Await-State 'session.name' 'pinger'
+    Write-Output 'PASS pane whose shell exited reopens'
+
     # A closed split tab returns whole at its position.
     Invoke-Aio command tab.new | Out-Null
     Invoke-Aio wait text 'PS ' | Out-Null
