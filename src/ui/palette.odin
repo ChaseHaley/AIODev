@@ -674,7 +674,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					item.label,
 					query,
 					width,
-					[]string{item.detail},
+					[]string{item.detail, item.owner},
 					false,
 				)
 			}
