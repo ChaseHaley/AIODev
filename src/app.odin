@@ -455,7 +455,7 @@ session_config :: proc(
 	append(&environment, pty.Env_Var{PANE_VARIABLE, fmt.tprintf("%d", pane)})
 	if app.options.name != "" {append(&environment, pty.Env_Var{INSTANCE_VARIABLE, app.options.name})}
 	return {
-		command_line = command,
+		command_line = settings.shell_command_line(command, app.settings.shell.integration),
 		title = title,
 		environment = environment[:],
 		path_append = app.cli_directory,

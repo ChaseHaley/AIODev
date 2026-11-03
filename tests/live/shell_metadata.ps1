@@ -80,7 +80,40 @@ try {
     Invoke-Aio run 'Set-Location C:\Windows\System32; [Console]::Write(([char]27).ToString()+"]7;file:///C:/Windows/System32"+([char]7)); Write-Output ("DIRECTORY_"+"SECOND")'
     Invoke-Aio wait text DIRECTORY_SECOND
     Invoke-Aio expect state 'session.header.directory=C:\Windows\System32'
-    Write-Output 'PASS standard OSC 7 reports update the directory without injected prompt hooks'
+    Write-Output 'PASS standard OSC 7 reports update the directory'
+
+    # The harness profile runs -Command, which shell integration leaves alone; launch plain pwsh. The
+    # first line names a secret so PSReadLine keeps it out of the owner's history file.
+    Set-Option profile.default.command 'pwsh.exe -NoLogo -NoProfile'
+    Invoke-Aio command settings.reload
+    Invoke-Aio command tab.new
+    Invoke-Aio type 'Set-PSReadLineOption -HistorySaveStyle SaveNothing # secret'
+    Invoke-Aio key Enter
+    Invoke-Aio run 'Set-Location C:\Windows\Web; Write-Output ("HOOK_"+"READY")'
+    Invoke-Aio wait text HOOK_READY
+    Invoke-Aio expect state 'session.header.directory=C:\Windows\Web'
+    Write-Output 'PASS shell integration reports PowerShell Set-Location'
+    Invoke-Aio command pane.split_right
+    Invoke-Aio run 'Write-Output ("SPLIT_AT="+$PWD.ProviderPath)'
+    Invoke-Aio wait text 'SPLIT_AT=C:\Windows\Web'
+    Write-Output 'PASS splits open in the reported directory'
+    Invoke-Aio run 'cmd.exe /d /k "cd /d C:\Windows\Fonts"'
+    Invoke-Aio wait text 'C:\Windows\Fonts>'
+    Start-Sleep -Seconds 3
+    Invoke-Aio command pane.split_down
+    Invoke-Aio run 'Write-Output ("PROGRAM_AT="+$PWD.ProviderPath)'
+    Invoke-Aio wait text 'PROGRAM_AT=C:\Windows\Fonts'
+    Write-Output 'PASS splits from a running program open in its directory'
+    # Without icon polling the split finds the program itself, with no time for a poll to adopt it.
+    Set-Option tabs.program_icons false
+    Invoke-Aio command settings.reload
+    Invoke-Aio command tab.new
+    Invoke-Aio run 'cmd.exe /d /k "cd /d C:\Windows\Media"'
+    Invoke-Aio wait text 'C:\Windows\Media>'
+    Invoke-Aio command pane.split_right
+    Invoke-Aio run 'Write-Output ("UNPOLLED_"+($PWD.ProviderPath -eq "C:\Windows\Media"))'
+    Invoke-Aio wait text 'UNPOLLED_True'
+    Write-Output 'PASS splits find the running program without icon polling'
 } finally {
     [Environment]::SetEnvironmentVariable($variable, $null, 'User')
     & $ctl --name $name stop | Write-Output

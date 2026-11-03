@@ -8,6 +8,7 @@ import "aio:layout"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
+import "aio:ui"
 
 @(test)
 scrolling_defaults_preserve_only_tab_cycle_shortcuts :: proc(t: ^testing.T) {
@@ -50,16 +51,19 @@ scrollbar_drag_clamps_and_track_click_pages :: proc(t: ^testing.T) {
 	defer delete(w.panes)
 	append(&w.panes, layout.Pane_Rect{content = {id = 1}, rect = {0, 0, 800, 500}})
 	pane := w.panes[0]
-	track, thumb, before, visible := app.terminal_scrollbar_geometry(&state, &w, pane, &state.sessions[0])
+	bar, visible := app.terminal_scrollbar_geometry(&state, &w, pane, &state.sessions[0])
+	track, thumb := bar.track, bar.thumb
+	before, _ := term.scrollbar(&s)
 	testing.expect(t, visible && thumb.height >= 24)
 	testing.expect(t, app.terminal_scrollbar_button(&state, &w,
 		platform.Mouse_Button_Event{button = .Left, pressed = true, x = i32(track.x + 3), y = i32(track.y + 2)}))
 	after, _ := term.scrollbar(&s)
 	testing.expect_value(t, before.offset - after.offset, before.len)
-	_, thumb, _, _ = app.terminal_scrollbar_geometry(&state, &w, pane, &state.sessions[0])
+	bar, _ = app.terminal_scrollbar_geometry(&state, &w, pane, &state.sessions[0])
+	thumb = bar.thumb
 	testing.expect(t, app.terminal_scrollbar_button(&state, &w,
 		platform.Mouse_Button_Event{button = .Left, pressed = true, x = i32(track.x + 3), y = i32(thumb.y + 2)}))
-	testing.expect(t, w.scroll_drag)
+	testing.expect(t, w.scroll_drag.active)
 	app.terminal_scrollbar_move(&state, &w, -100)
 	after, _ = term.scrollbar(&s)
 	testing.expect_value(t, after.offset, 0)
@@ -88,27 +92,30 @@ scrollbar_expands_under_pointer_and_can_be_hidden :: proc(t: ^testing.T) {
 	append(&w.panes, layout.Pane_Rect{content = {id = 1}, rect = {0, 0, 800, 500}})
 	pane, entry := w.panes[0], &state.sessions[0]
 
-	track, thin, _, _ := app.terminal_scrollbar_geometry(&state, &w, pane, entry)
-	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), app.Scrollbar_State.Collapsed)
+	bar, _ := app.terminal_scrollbar_geometry(&state, &w, pane, entry)
+	track, thin := bar.track, bar.thumb
+	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), ui.Scrollbar_State.Collapsed)
 	testing.expect(t, thin.width < track.width)
 	// The zone is the expanded width, so its far edge from the thumb still expands it.
 	testing.expect(t, app.terminal_scrollbar_hover(&state, &w, track.x + 0.5, track.y + track.height - 1))
-	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), app.Scrollbar_State.Hovered)
-	_, wide, _, _ := app.terminal_scrollbar_geometry(&state, &w, pane, entry)
+	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), ui.Scrollbar_State.Hovered)
+	bar, _ = app.terminal_scrollbar_geometry(&state, &w, pane, entry)
+	wide := bar.thumb
 	testing.expect(t, wide.width > thin.width && wide.x >= track.x)
 	testing.expect_value(t, wide.x + wide.width, thin.x + thin.width)
 	testing.expect(t, !app.terminal_scrollbar_hover(&state, &w, track.x - 1, track.y + 10))
-	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), app.Scrollbar_State.Collapsed)
+	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), ui.Scrollbar_State.Collapsed)
 
-	_, thin, _, _ = app.terminal_scrollbar_geometry(&state, &w, pane, entry)
+	bar, _ = app.terminal_scrollbar_geometry(&state, &w, pane, entry)
+	thin = bar.thumb
 	testing.expect(t, app.terminal_scrollbar_button(&state, &w,
 		platform.Mouse_Button_Event{button = .Left, pressed = true, x = i32(track.x + track.width - 2), y = i32(thin.y + 2)}))
-	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), app.Scrollbar_State.Active)
+	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), ui.Scrollbar_State.Active)
 	app.terminal_scrollbar_release(&state, &w, track.x - 20, track.y + 10)
-	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), app.Scrollbar_State.Collapsed)
+	testing.expect_value(t, app.terminal_scrollbar_state(&w, 1), ui.Scrollbar_State.Collapsed)
 
 	state.settings.terminal.scrollbar = false
-	_, _, _, visible := app.terminal_scrollbar_geometry(&state, &w, pane, entry)
+	_, visible := app.terminal_scrollbar_geometry(&state, &w, pane, entry)
 	testing.expect(t, !visible)
 	testing.expect(t, !app.terminal_scrollbar_hover(&state, &w, track.x + 2, track.y + 10))
 }
