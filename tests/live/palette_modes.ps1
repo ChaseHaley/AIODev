@@ -44,6 +44,12 @@ function Shot([string] $Label) {
 
 if (-not $Prepared) { Invoke-Aio launch --fresh --size 120x36 }
 try {
+    Invoke-Aio command workspace.rename
+    Invoke-Aio key Ctrl+A
+    Invoke-Aio type 'Workspace palette test'
+    Invoke-Aio key Enter
+    Invoke-Aio key Esc
+    Invoke-Aio expect state 'workspace.name=Workspace palette test'
     # Give the one tab a name that proves the tab domain instead of relying on a shell title.
     Invoke-Aio command tab.rename
     Invoke-Aio type 'AIODev'
@@ -75,6 +81,13 @@ try {
     Invoke-Aio expect state 'palette.mode=all'
     Invoke-Aio expect state 'palette.chip='
     Write-Output 'PASS Tab cycles chips and returns to all'
+
+    foreach ($mode in @('commands', 'settings', 'workspaces', 'tabs', 'all')) {
+        Invoke-Aio key Shift+Tab
+        Invoke-Aio expect state "palette.mode=$mode"
+        Invoke-Aio expect state 'palette.query=aio'
+    }
+    Write-Output 'PASS Shift+Tab cycles modes backwards, wraps and preserves the query'
 
     Invoke-Aio key Tab
     Invoke-Aio expect state 'palette.mode=tabs'

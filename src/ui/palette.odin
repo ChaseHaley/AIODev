@@ -110,11 +110,11 @@ Palette_Mode_Info :: struct {
 }
 
 @(private) PALETTE_CHIP_WIDTHS := [Palette_Mode]f32 {
-	.All = 48,
-	.Tabs = 60,
-	.Workspaces = 96,
-	.Settings = 80,
-	.Commands = 92,
+	.All = 56,
+	.Tabs = 64,
+	.Workspaces = 112,
+	.Settings = 88,
+	.Commands = 104,
 }
 
 // One footer entry: its keycaps, joined by a slash, and what they do.
@@ -330,9 +330,12 @@ palette_parse_prefix :: proc(text: string) -> (mode: Palette_Mode, length: int) 
 	return .All, 0
 }
 
-palette_next_mode :: proc(mode: Palette_Mode) -> Palette_Mode {
+palette_next_mode :: proc(mode: Palette_Mode, reverse: bool = false) -> Palette_Mode {
 	for candidate, i in PALETTE_CYCLE {
-		if candidate == mode {return PALETTE_CYCLE[(i + 1) % len(PALETTE_CYCLE)]}
+		if candidate == mode {
+			step := reverse ? len(PALETTE_CYCLE) - 1 : 1
+			return PALETTE_CYCLE[(i + step) % len(PALETTE_CYCLE)]
+		}
 	}
 	return .All
 }
@@ -347,8 +350,8 @@ palette_set_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palett
 	refresh(p, registry)
 }
 
-palette_cycle_mode :: proc(p: ^Palette, registry: ^commands.Registry) {
-	palette_set_mode(p, registry, palette_next_mode(p.mode))
+palette_cycle_mode :: proc(p: ^Palette, registry: ^commands.Registry, reverse: bool = false) {
+	palette_set_mode(p, registry, palette_next_mode(p.mode, reverse))
 }
 
 // The category a command name belongs to, such as Panes for pane.split_right.
@@ -859,7 +862,7 @@ palette_key :: proc(
 	}
 	#partial switch e.key {
 	case .Tab:
-		palette_cycle_mode(p, registry)
+		palette_cycle_mode(p, registry, .Shift in e.modifiers)
 		return .Changed, 0
 	case .Backspace:
 		if p.mode != .All && p.query.cursor == 0 && p.query.anchor == 0 {
@@ -1453,14 +1456,15 @@ palette_draw :: proc(
 	padding := PALETTE_TEXT_INSET * scale
 	if l.chip.width > 0 {
 		chip := l.chip
-		draw_rect(list, {rect = chip, color = theme.pane, radius = RADIUS_CONTROL * scale})
+		chip_color := p.mode_menu || contains(chip, pointer.x, pointer.y) ? theme.hover : theme.pane
+		draw_rect(list, {rect = chip, color = chip_color, radius = RADIUS_CONTROL * scale})
 		draw_rect(list, {
 			rect   = chip,
 			color  = theme.border,
 			radius = RADIUS_CONTROL * scale,
 			stroke = scale,
 		})
-		chip_text := text_styled(text, .Detail)
+		chip_text := text_styled(text, .Body)
 		baseline := chip.y + (chip.height - chip_text.line_height) / 2 + chip_text.ascent
 		chip_inset := CONTROL_INSET * scale
 		if result := draw_text(&chip_text, list, PALETTE_MODES[p.mode].word, chip.x + chip_inset, baseline,
