@@ -182,6 +182,45 @@ try {
     Invoke-Aio expect state panes.count=2
     Invoke-Aio command pane.close
     Invoke-Aio expect state panes.count=1
+    # Every view ends on a split, and they move between each other in any order (WORK-307).
+    $size = (Read-State)['window.size']
+    Invoke-Aio command pane.split_right
+    Invoke-Aio wait text 'PS '
+    foreach ($view in @('pane.fill_window', 'pane.fullscreen', 'pane.zoom')) {
+        Invoke-Aio command $view
+        Invoke-Aio expect state panes.count=1
+        Invoke-Aio command pane.split_down
+        Invoke-Aio wait text 'PS '
+        Invoke-Aio expect state window.pane_view=Split
+        Invoke-Aio expect state tab.1.panes=3
+        Invoke-Aio expect state panes.count=3
+        Invoke-Aio expect state "window.size=$size"
+        Invoke-Aio command pane.close
+        Invoke-Aio expect state panes.count=2
+    }
+    Invoke-Aio command pane.zoom
+    Invoke-Aio expect state window.pane_view=Zoom
+    Invoke-Aio command pane.fullscreen
+    Invoke-Aio expect state window.pane_view=Screen_Over_Zoom
+    Invoke-Aio command pane.fill_window
+    Invoke-Aio expect state window.pane_view=Fill_Over_Zoom
+    Invoke-Aio command pane.fullscreen
+    Invoke-Aio expect state window.pane_view=Screen_Over_Zoom
+    Invoke-Aio command pane.fullscreen
+    Invoke-Aio expect state window.pane_view=Zoom
+    Invoke-Aio expect state "window.size=$size"
+    Invoke-Aio command pane.zoom
+    Invoke-Aio expect state panes.count=2
+    Invoke-Aio command pane.fill_window
+    Invoke-Aio command tab.new
+    Invoke-Aio wait text 'PS '
+    Invoke-Aio command pane.split_right
+    Invoke-Aio wait text 'PS '
+    Invoke-Aio expect state window.pane_view=Split
+    Invoke-Aio command tab.close
+    Invoke-Aio expect state tab.1.zoomed=false
+    Invoke-Aio expect state panes.count=2
+    Invoke-Aio command pane.close
     Write-Output 'PASS pane actions journey'
 } finally {
     Invoke-Aio stop

@@ -129,8 +129,7 @@ Window :: struct {
 	caption_hover: int,
 	caption_armed: ui.Armed(int),
 	maximized: bool,
-	pane_fill: Pane_Fill,
-	pane_fill_zoom: bool,
+	pane_fill: layout.Pane_Fill,
 	paste_confirm_until: time.Tick,
 	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
@@ -379,6 +378,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 
 // Recomputes pane rectangles and resizes every session to the grid that fits its pane.
 window_relayout :: proc(app: ^App, w: ^Window) {
+	pane_view_sync(app, w)
 	w.dirty = true
 	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
 	w.status_rail_reserve = status_panel_rail_height(app, w)
@@ -412,7 +412,11 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	for &view in w.views {view.header_controls = {}}
 	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers)
 	area := window_content_area(app, w)
-	layout.compute(w.tree, area, window_gap(app, w), &w.panes)
+	if pane_view_solo(w) {
+		layout.compute_focused(w.tree, area, &w.panes)
+	} else {
+		layout.compute(w.tree, area, window_gap(app, w), &w.panes)
+	}
 	window_dividers(app, w)
 	for i := len(w.views) - 1; i >= 0; i -= 1 {
 		visible := false

@@ -1049,7 +1049,8 @@ window_proc :: proc "system" (
 			border :=
 				w.GetSystemMetricsForDpi(w.SM_CYFRAME, w.GetDpiForWindow(hwnd)) +
 				w.GetSystemMetricsForDpi(w.SM_CXPADDEDBORDER, w.GetDpiForWindow(hwnd))
-			params.rgrc[0].top = top + (bool(w.IsZoomed(hwnd)) ? border : 0)
+			// A window maximized before going full screen stays zoomed underneath it, with no frame to hide.
+			params.rgrc[0].top = top + (!window.screen_full && bool(w.IsZoomed(hwnd)) ? border : 0)
 			return result
 		}
 		if message == w.WM_NCMOUSEMOVE || message == w.WM_NCLBUTTONDOWN {
@@ -1085,6 +1086,7 @@ window_proc :: proc "system" (
 		}
 		if message == w.WM_NCHITTEST {
 			result = w.DefWindowProcW(hwnd, message, wp, lp)
+			if window.screen_full {return result}
 			if result != w.HTCLIENT && result != w.HTCAPTION && result != w.HTTOP {return result}
 			point := w.POINT {
 				i32(cast(i16)u16(uintptr(lp) & 0xffff)),
@@ -1272,6 +1274,8 @@ window_set_screen :: proc(p: ^Platform, id: Window_Id, on: bool) -> Error {
 		style := window.saved_style & ~(w.LONG_PTR(w.WS_CAPTION) | w.LONG_PTR(w.WS_THICKFRAME))
 		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, style)
 		rect := info.rcMonitor
+		// Set first: moving the window recalculates its frame, which reads this.
+		window.screen_full = true
 		if !os_ok(
 			w.SetWindowPos(
 				window.hwnd,
@@ -1283,9 +1287,14 @@ window_set_screen :: proc(p: ^Platform, id: Window_Id, on: bool) -> Error {
 				w.SWP_FRAMECHANGED | w.SWP_NOOWNERZORDER,
 			),
 			"SetWindowPos(screen)",
-		) {return .Os}
+		) {
+			window.screen_full = false
+			_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, window.saved_style)
+			return .Os
+		}
 	} else {
 		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, window.saved_style)
+		window.screen_full = false
 		if !os_ok(w.SetWindowPlacement(window.hwnd, &window.saved_placement), "SetWindowPlacement") {
 			return .Os
 		}
@@ -1302,7 +1311,6 @@ window_set_screen :: proc(p: ^Platform, id: Window_Id, on: bool) -> Error {
 			"SetWindowPos(restore frame)",
 		) {return .Os}
 	}
-	window.screen_full = on
 	return .None
 }
 

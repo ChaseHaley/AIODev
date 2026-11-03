@@ -41,7 +41,7 @@ pane_trial_evaluate :: proc(
 	before, before_error := make([dynamic]layout.Pane_Rect, 0, len(original.nodes), allocator)
 	if before_error != nil {return {error = .Allocation}}
 	defer delete(before)
-	area, gap := window_content_area(app, w), window_gap(app, w)
+	area, gap := pane_view_split_area(app, w), window_gap(app, w)
 	layout.compute(trial, area, gap, &rects, false)
 	layout.compute(original, area, gap, &before, false)
 	if !pane_minimum_allows(app, w, rects[:], before[:], notify_failure) {return {error = .Minimum}}

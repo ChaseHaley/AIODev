@@ -490,6 +490,7 @@ when AIO_CONTROL {
 				{"window.scale", fmt.tprintf("%g", w.scale)},
 				{"window.focused", fmt.tprintf("%t", w.focused)},
 				{"window.maximized", fmt.tprintf("%t", w.maximized)},
+				{"window.pane_view", fmt.tprintf("%v", pane_view_current(w))},
 				{"tabs.orientation", w.tabs_horizontal ? "horizontal" : "vertical"},
 				{"tabs.width", fmt.tprintf("%g", window_tab_bar(app, w).tab_width)},
 				{"tabs.x", fmt.tprintf("%g", window_tab_bar(app, w).x)},

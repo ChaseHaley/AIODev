@@ -75,6 +75,8 @@ Layout :: struct {
 	root, focus:     Node_Id,
 	next_pane_order: u64,
 	zoomed:          bool,
+	// See panes_changed.
+	panes_changed:   bool,
 }
 
 init :: proc(
@@ -244,7 +246,7 @@ wrap :: proc(
 		if s.first == node {s.first = branch} else {s.second = branch}
 		l.nodes[parent] = s
 	}
-	l.zoomed = false
+	panes_changed(l)
 	return added, nil
 }
 
@@ -304,7 +306,7 @@ first_pane :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
 remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 	if int(node) >= len(l.nodes) {return false}
 	if _, ok := l.nodes[node].(Pane); !ok {return false}
-	if l.focus == node {l.zoomed = false}
+	if l.focus == node {panes_changed(l)}
 	parent := parent_of(l, node)
 	if parent == INVALID_NODE {
 		l.root, l.focus = INVALID_NODE, INVALID_NODE
@@ -608,7 +610,7 @@ place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction
 		if s.first == target {s.first = branch} else {s.second = branch}
 		l.nodes[parent] = s
 	}
-	l.zoomed = false
+	panes_changed(l)
 	return added
 }
 

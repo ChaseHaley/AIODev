@@ -322,7 +322,7 @@ gestures_settings_header_zoom_and_close_drive_the_settings_pane :: proc(t: ^test
 	sessions, tabs := len(s.sessions), len(w.workspace.tabs)
 	h, found = gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	gesture_click_header(s, w, 3, h)
+	gesture_click_header(s, w, 4, h)
 	testing.expect(t, !w.editor.open)
 	testing.expect(t, !app.settings_active(w))
 	testing.expect_value(t, len(w.workspace.tabs), tabs - 1)

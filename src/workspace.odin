@@ -154,7 +154,7 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	if w.tree.focus == node {return}
 	focus_leave(app, w)
 	w.tree.focus = node
-	if w.tree.zoomed {window_relayout(app, w)}
+	if pane_view_solo(w) {window_relayout(app, w)}
 	focus_enter(app, w)
 }
 
@@ -381,12 +381,6 @@ pane_split_at :: proc(
 	}
 	if visible || focus {window_relayout(app, w)}
 	return id, .None
-}
-
-pane_zoom :: proc(app: ^App, w: ^Window) {
-	w.tree.zoomed = !w.tree.zoomed
-	w.dragging = {}
-	window_relayout(app, w)
 }
 
 pane_keep_open :: proc(app: ^App, w: ^Window) {

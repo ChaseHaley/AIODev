@@ -666,11 +666,11 @@ run_action :: proc(
 	case .Split_Up:
 		pane_split(app, w, .Up)
 	case .Zoom_Pane:
-		pane_zoom(app, w)
+		pane_view_toggle(app, w, .Toggle_Zoom)
 	case .Fill_Window_Pane:
-		pane_fill_toggle(app, w, .Content)
+		pane_view_toggle(app, w, .Toggle_Fill)
 	case .Fullscreen_Pane:
-		pane_fill_toggle(app, w, .Screen)
+		pane_view_toggle(app, w, .Toggle_Screen)
 	case .Balance_Panes:
 		layout.balance(w.tree)
 		window_relayout(app, w)
@@ -750,7 +750,7 @@ resize_pane :: proc(app: ^App, w: ^Window, action: Action, amount: f32) {
 
 @(private)
 pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
-	if !w.tree.zoomed {return w.panes[:]}
+	if !pane_view_solo(w) {return w.panes[:]}
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(w.tree, window_content_area(app, w), window_gap(app, w), &rects, false)
 	return rects[:]

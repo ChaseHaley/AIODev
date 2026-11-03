@@ -686,7 +686,7 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	case .Split_Right: return "Split right"
 	case .Split_Down: return "Split down"
 	case .Zoom: return "Zoom"
-	case .Fill_Window: return w.pane_fill != .None ? "Exit fill window" : "Fill window"
+	case .Fill_Window: return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
 	case .Close: return "Close pane"
 	case:
 	}
