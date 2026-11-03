@@ -8,7 +8,7 @@ out into a cached worktree under build/compare; a path is built in place, uncomm
 included. Both sides are release builds in their own folders and run as separate instances with
 their own data folders, so they never share a window, a control pipe, settings or saved layout.
 Base opens on the left half of the monitor and Candidate on the right, each at the same size.
--CandidateOnly skips Base and opens Candidate across the whole monitor.
+-CandidateOnly skips Base and keeps Candidate's default window size.
 
 Settings: by default both start from defaults with no saved layout. -Settings copies one file into
 both; -MySettings copies your own settings.ini. Either way both sides read identical settings, so any
@@ -52,7 +52,7 @@ param(
     [Parameter(ParameterSetName = 'Run')]
     [switch] $NoBuild,
 
-    # Build and open only the candidate, filling the monitor.
+    # Build and open only the candidate at the app's default window size.
     [Parameter(ParameterSetName = 'Run')]
     [switch] $CandidateOnly,
 
@@ -227,9 +227,11 @@ for ($i = 0; $i -lt $sides.Count; $i++) {
     $window = Wait-Window $process.Id
     if ($window -eq [IntPtr]::Zero) { throw "$($side.Name) opened no window; see $data for its log." }
     [AIODevCompare.Win32]::ShowWindow($window, 9) | Out-Null
-    [AIODevCompare.Win32]::PlaceFrame($window, $area.X + $i * $width, $area.Y, $width, $area.Height)
+    if (-not $CandidateOnly) {
+        [AIODevCompare.Win32]::PlaceFrame($window, $area.X + $i * $width, $area.Y, $width, $area.Height)
+    }
     $running += [pscustomobject]@{ name = $side.Name; pid = $process.Id; exe = (Resolve-Path $exe).Path }
-    $place = if ($CandidateOnly) { 'full' } elseif ($i -eq 0) { 'left' } else { 'right' }
+    $place = if ($CandidateOnly) { 'default' } elseif ($i -eq 0) { 'left' } else { 'right' }
     Write-Output ("{0,-9} {1,-5} {2}  pid {3}" -f $side.Name, $place, $side.Label, $process.Id)
 }
 $running | ConvertTo-Json | Set-Content -LiteralPath $record
