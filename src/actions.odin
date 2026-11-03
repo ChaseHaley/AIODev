@@ -407,7 +407,7 @@ ACTIONS :: [Action]Action_Info {
 	.Pane_Send = {"pane.send", "Send Text to Pane", nil},
 	.Pane_Focus = {"pane.focus", "Focus Pane", nil},
 	.App_Commands = {"app.commands", "List Commands", nil},
-	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.Z, {.Control, .Shift}}}},
+	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}},
 }
 
 @(require_results)

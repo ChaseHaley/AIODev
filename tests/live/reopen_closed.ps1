@@ -41,7 +41,7 @@ try {
     # note of what it ran above the new prompt.
     Invoke-Aio command pane.close | Out-Null
     Invoke-Aio expect state panes.count=1 | Out-Null
-    Invoke-Aio command pane.reopen_closed | Out-Null
+    Invoke-Aio key Ctrl+Shift+R | Out-Null
     Invoke-Aio expect state panes.count=2 | Out-Null
     Invoke-Aio wait text 'Last running: PING -n 60 127.0.0.1' | Out-Null
     Invoke-Aio wait text 'reopen-closed-work>' | Out-Null
