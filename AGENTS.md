@@ -49,4 +49,5 @@ Do all source work in your own git worktree and branch, never in this main check
 other sessions edit and commit here concurrently (vault: Reference/Engineering/Commits.md).
 Commit completed, validated source work automatically using Conventional Commits.
 All project Markdown belongs in the vault; AGENTS.md and CLAUDE.md are the narrow
-exception for agent startup routing. Do not duplicate plans or backlogs here.
+exception for agent startup routing, and PRODUCT.md for the durable product context
+Impeccable loads from the repository root. Do not duplicate plans or backlogs here.
