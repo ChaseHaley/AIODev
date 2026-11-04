@@ -105,7 +105,14 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Close_Request_Event:
 		if w := window_find(app, e.window); w != nil {
-			if w.preparing {_ = gesture_cancel(app, w)} else {hide_to_tray(app, w)}
+			switch {
+			case w.preparing:
+				_ = gesture_cancel(app, w)
+			case w.linked:
+				pane_link_return(app, w)
+			case:
+				hide_to_tray(app, w)
+			}
 		}
 	case platform.Tray_Event:
 		show_window(app)
@@ -121,7 +128,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 	case platform.Activate_Request_Event:
 		// Launching AIODev again means a fresh workspace window, as New Window does. With every
 		// window hidden to the tray, it reopens the existing view instead.
-		if len(app.windows) == 0 {show_window(app)} else {workspace_new(app, nil, true, name_it = false)}
+		if window_primary(app) == nil {show_window(app)} else {workspace_new(app, nil, true, name_it = false)}
 	case platform.Tray_Menu_Event:
 		switch e.id {
 		case TRAY_OPEN:
@@ -137,7 +144,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 
 show_window :: proc(app: ^App) {
 	if len(app.workspaces) == 0 {return}
-	if len(app.windows) == 0 {
+	if window_primary(app) == nil {
 		workspace := app.workspaces[0]
 		if len(workspace.tabs) == 0 && !tab_create(app, workspace) {
 			notify(app, .Error, "Could not create a tab.")
@@ -148,13 +155,13 @@ show_window :: proc(app: ^App) {
 			return
 		}
 	}
-	_ = window_activate(app, app.windows[0])
+	_ = window_activate(app, window_primary(app))
 }
 
 hide_to_tray :: proc(app: ^App, w: ^Window) {
 	focus_leave(app, w)
 	window_close(app, w)
-	if len(app.windows) > 0 {return}
+	if window_primary(app) != nil {return}
 	if !app.tray_hint_shown {
 		app.tray_hint_shown = true
 		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use Quit to exit."
@@ -217,6 +224,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	if !palette_active(app, w) &&
 	   e.pressed &&
+	   !w.linked &&
 	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
 		if w.tabs_horizontal {
 			bar := window_tab_bar(app, w)
@@ -389,7 +397,11 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		command_run(app, w, Action(id), .Palette)
 	case .Open_Setting:
 		w.dirty = true
-		settings_reveal(app, w, {key = app.palette.chosen, search = .Clear, focus = .Control})
+		settings_reveal(
+			app,
+			pane_link_acting_window(app, w),
+			{key = app.palette.chosen, search = .Clear, focus = .Control},
+		)
 	case .Set_Setting:
 		w.dirty = true
 		key, value := ui.palette_chosen_value(&app.palette)
@@ -397,10 +409,10 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		ui.palette_binding_saved(&app.palette, saved)
 	case .Open_Tab:
 		w.dirty = true
-		palette_activate_tab(app, w, app.palette.chosen_id)
+		palette_activate_tab(app, pane_link_acting_window(app, w), app.palette.chosen_id)
 	case .Open_Workspace:
 		w.dirty = true
-		palette_activate_workspace(app, w, u32(app.palette.chosen_id))
+		palette_activate_workspace(app, pane_link_acting_window(app, w), u32(app.palette.chosen_id))
 	}
 }
 

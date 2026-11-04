@@ -113,7 +113,7 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 // a shell, not a name, so only the other paths start naming it in its chip.
 workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) {
 	owner := w
-	if owner == nil && len(app.windows) > 0 {owner = app.windows[0]}
+	if owner == nil {owner = window_primary(app)}
 	if owner == nil {return}
 	if !gesture_cancel(app, owner) {return}
 	workspace_picker_cancel(owner)

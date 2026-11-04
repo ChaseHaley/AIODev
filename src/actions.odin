@@ -139,6 +139,7 @@ Action :: enum u32 {
 	Pane_Focus,
 	App_Commands,
 	Reopen_Closed,
+	Linked_Window,
 }
 
 @(private)
@@ -408,6 +409,7 @@ ACTIONS :: [Action]Action_Info {
 	.Pane_Focus = {"pane.focus", "Focus Pane", nil},
 	.App_Commands = {"app.commands", "List Commands", nil},
 	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}},
+	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil},
 }
 
 @(require_results)
@@ -464,9 +466,23 @@ run_action :: proc(
 	split_focus := true,
 ) {
 	if (w.pane_drag.pressed || w.tab_drag.pressed) && !gesture_cancel(app, w) {return}
+	if w.linked {
+		switch pane_link_route(action) {
+		case .Local:
+		case .Host:
+			host := pane_link_acting_window(app, w)
+			if host != w {run_action(app, host, action, split_direction, split_ratio, split_focus)}
+			return
+		case .Refuse:
+			notify(app, .Info, "Return this pane to its tab first.")
+			return
+		}
+	}
 	entry := focused_session(app, w)
 	w.dirty = true
 	switch action {
+	case .Linked_Window:
+		pane_link_toggle(app, w)
 	case .Show_Build_Info:
 		show_build_info(app)
 	case .Command_Palette:

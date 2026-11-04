@@ -87,10 +87,22 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Content          = {content_claims, content_hover, content_press, nil, nil},
 }
 
+// The workspace and tab chrome a linked window does not draw.
+@(private = "file")
+POINTER_LINKED_ABSENT :: bit_set[Pointer_Target] {
+	.Tab_Orientation,
+	.Title_Action,
+	.Workspace_Button,
+	.Status_Pill,
+	.Status_Panel,
+	.Tabs,
+}
+
 // The topmost surface whose area holds the point. Below the modal surfaces, callers handle presses
 // and drags that already hold the pointer before acting on the answer.
 pointer_target :: proc(app: ^App, w: ^Window, x, y: f32) -> Pointer_Target {
 	for target in Pointer_Target {
+		if w.linked && target in POINTER_LINKED_ABSENT {continue}
 		if pointer_surfaces[target].claims(app, w, x, y) {return target}
 	}
 	return .Content
@@ -313,7 +325,7 @@ caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	switch ui.caption_hit(f32(w.width), x, y, w.scale) {
 	case 0: return "Minimize"
 	case 1: return w.maximized ? "Restore" : "Maximize"
-	case 2: return "Close window"
+	case 2: return w.linked ? "Return pane to tab" : "Close window"
 	case: return ""
 	}
 }

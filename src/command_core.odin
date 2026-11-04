@@ -136,6 +136,12 @@ command_invoke :: proc(
 	}
 	if window.workspace.selected != target.pane.tab {tab_select(app, window, target.pane.tab)}
 	pane_focus(app, window, target.pane.node)
+	if linked := pane_link_window_of(app, target.pane.content); linked != nil {
+		if action != .Pane_Focus {
+			run_action(app, linked, action, invocation.direction, invocation.ratio, invocation.focus)
+		}
+		return {}
+	}
 	if action == .Pane_Focus {
 		if !window_activate(app, window) {return outcome_failure(.Failed, "could not bring the window forward")}
 		return {}
@@ -159,9 +165,14 @@ pane_target_resolve :: proc(app: ^App, text: string, caller: u32) -> (Pane_Targe
 	case text == "", text == "focused":
 		w: ^Window
 		for window in app.windows {if window.focused {w = window; break}}
-		if w == nil && len(app.windows) > 0 {w = app.windows[0]}
+		if w == nil {w = window_primary(app)}
 		if w == nil || w.workspace == nil || w.tree == nil {
 			return {}, outcome_failure(.Target, "no window is open")
+		}
+		// A linked window's workspace is only a view; the pane's identity is in its tab.
+		if w.linked {
+			if target, found := pane_target_session(app, pane_link_content(w).id); found {return target, {}}
+			return {}, outcome_failure(.Target, "the focused window has no pane")
 		}
 		pane, found := workspace_pane_at(app, w.workspace, w.workspace.selected, w.tree.focus)
 		if !found {return {}, outcome_failure(.Target, "the focused window has no pane")}
@@ -224,6 +235,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 			entry := pane.session
 			if entry == nil || only != nil && only.pane.content != pane.content {continue}
 			status := term.status(entry.session)
+			linked := pane_link_window_of(app, pane.content)
 			report := Pane_Report {
 				id             = entry.id,
 				name           = entry.name,
@@ -232,8 +244,8 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 				workspace      = workspace.id,
 				workspace_name = workspace.name,
 				tab            = pane.tab + 1,
-				focused        = w != nil && w.focused && workspace.selected == pane.tab &&
-					w.tree.focus == pane.node,
+				focused        = linked != nil ? linked.focused : w != nil && w.focused &&
+					workspace.selected == pane.tab && w.tree.focus == pane.node,
 				status         = PANE_STATUS_WORDS[status.kind],
 				exit_code      = status.exit_code,
 				directory      = entry.header.launch_directory,

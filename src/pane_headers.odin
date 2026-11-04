@@ -126,7 +126,7 @@ pane_header_draw :: proc(
 		app.theme,
 		{r.x, r.y, r.width, r.height},
 		app.theme.pane,
-		f32(app.settings.pane.corner_radius) * w.scale,
+		window_pane_radius(app, w),
 		w.scale,
 		title,
 		directory,
@@ -238,7 +238,7 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.H
 // Shows a single pane's split controls while the pointer is within the top band of its card.
 split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
 	shown := false
-	if enabled && w.header_height == 0 && len(w.panes) == 1 {
+	if enabled && !w.linked && w.header_height == 0 && len(w.panes) == 1 {
 		r := w.panes[0].rect
 		shown = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + 40 * w.scale
 	}

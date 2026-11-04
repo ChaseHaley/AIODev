@@ -9,6 +9,7 @@ import "aio:ui"
 import "core:math"
 
 window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
+	if w.pane_fill == .Screen {return {0, 0, f32(w.width), f32(w.height)}}
 	r := ui.pane_area(
 		f32(w.width),
 		f32(w.height),
@@ -62,6 +63,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		w.maximized,
 		w.pointer,
 	); result != .Ok {return result}
+	if w.linked {return pane_link_title_draw(app, w)}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
 	if result := status_pill_draw(app, w); result != .Ok {return result}
 	title_actions_draw(app, w)
@@ -72,6 +74,12 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 
 window_gap :: proc(app: ^App, w: ^Window) -> f32 {
 	return ui.pane_gap(f32(app.settings.pane.gap), w.scale)
+}
+
+// Fullscreen has no surrounding card to reveal at rounded corners.
+window_pane_radius :: proc(app: ^App, w: ^Window) -> f32 {
+	if w.pane_fill == .Screen {return 0}
+	return f32(app.settings.pane.corner_radius) * w.scale
 }
 
 window_leader_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
@@ -98,7 +106,7 @@ window_leader_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 window_card_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	r := pane.rect
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return}
-	radius := f32(app.settings.pane.corner_radius) * w.scale
+	radius := window_pane_radius(app, w)
 	if render.push_rect(
 		   &w.list,
 		   {
@@ -111,6 +119,7 @@ window_card_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 }
 
 window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
+	if w.pane_fill == .Screen {return}
 	r := pane.rect
 	clip := render.Rect{0, 0, f32(w.width), f32(w.height)}
 	if app.settings.pane.gap == 0 {
@@ -127,7 +136,7 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		}
 	}
 	if render.push_layer(&w.list, clip) != .None {return}
-	radius := f32(app.settings.pane.corner_radius) * w.scale
+	radius := window_pane_radius(app, w)
 	border, stroke := app.theme.pane_border, max(1, w.scale)
 	if window_focus_outlined(app, w, pane) {
 		border, stroke = app.theme.pane_focus, max(1, f32(app.settings.pane.focus_border) * w.scale)
@@ -150,7 +159,7 @@ window_card_dim :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, backgroun
 	dim := app.settings.pane.unfocused_dim
 	if dim <= 0 || pane.node == w.tree.focus {return}
 	r := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
-	if render.push_layer(&w.list, r, f32(app.settings.pane.corner_radius) * w.scale) != .None {return}
+	if render.push_layer(&w.list, r, window_pane_radius(app, w)) != .None {return}
 	veil := background
 	veil.a = f32(dim) / 100
 	if render.push_rect(&w.list, {rect = r, color = veil}) != .None {return}

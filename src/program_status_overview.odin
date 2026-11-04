@@ -556,7 +556,7 @@ status_inbox_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
 	s := &app.settings.status
-	if !s.enabled || !s.panel || w.preparing || pane_fill_active(w) {return false}
+	if !s.enabled || !s.panel || w.preparing || w.linked || pane_fill_active(w) {return false}
 	return true
 }
 

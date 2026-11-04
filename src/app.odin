@@ -344,6 +344,7 @@ tick :: proc(app: ^App) {
 	}
 	// A dwell can create or discard the trailing preview window.
 	for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], time.tick_now())}
+	pane_links_sync(app)
 	for window in app.windows {
 		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
 			leader_cancel(window)
@@ -357,6 +358,7 @@ tick :: proc(app: ^App) {
 			status_taskbar_update(app, window)
 		}
 		if window.preparing {window.dirty = false; continue}
+		if window.linked && !window.link_shown {continue}
 		if window.dirty {
 			window_render(app, window)
 			verify_presented(app, window)
@@ -636,7 +638,7 @@ update_sessions :: proc(app: ^App) {
 		}
 		if term.take_bell(s) {
 			for window in app.windows {
-				if !window.focused &&
+				if !window.focused && (!window.linked || window.link_shown) &&
 				   platform_api.window_flash(&app.platform, window.id) != .None {
 					log.error("flashing the window failed")
 				}

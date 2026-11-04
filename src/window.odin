@@ -57,6 +57,11 @@ Window :: struct {
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
 	preparing: bool,
+	// Shows one pane of a tab instead of a workspace; see pane_links.odin. w.workspace is then a private
+	// view of that pane, and link_workspace is the id of the workspace that really holds it.
+	linked, link_shown: bool,
+	link_activate, link_maximize: bool,
+	link_workspace: u32,
 	generation: u64,
 	selecting: bool,
 	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
@@ -275,6 +280,7 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 window_close :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
+	view := w.linked ? w.workspace : nil
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
 			ordered_remove(&app.windows, i)
@@ -288,6 +294,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 		log.error("destroying the window failed")
 	}
 	window_free(w)
+	if view != nil {workspace_destroy(view)}
 }
 
 @(private)
@@ -333,7 +340,8 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	   .None {
 		log.error("setting the window frame color failed")
 	}
-	horizontal := app.settings.tabs.orientation == .Horizontal
+	// A linked window has no tabs to place, and the rail is the only placement that takes pane space.
+	horizontal := w.linked || app.settings.tabs.orientation == .Horizontal
 	placement_changed := horizontal != w.tabs_horizontal
 	w.tabs_horizontal = horizontal
 	if placement_changed {
@@ -410,7 +418,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	}
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
-	w.header_height = pane_header_height(w.scale, app.settings.pane.show_headers)
+	w.header_height = window_pane_insets(app, w, nil).header
 	area := window_content_area(app, w)
 	if pane_view_solo(w) {
 		layout.compute_focused(w.tree, area, &w.panes)
@@ -443,7 +451,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		box := pane_box(
 			w.metrics,
 			pane.rect,
-			pane_insets(app, w.scale, entry),
+			window_pane_insets(app, w, entry),
 		)
 		g := term.Geometry {
 			columns = box.columns,
@@ -657,7 +665,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		box := pane_box(
 			w.metrics,
 			pane.rect,
-			pane_insets(app, w.scale, entry),
+			window_pane_insets(app, w, entry),
 		)
 		result: glyphs.Result
 		frame, result = build_pane(app, w, pane, entry, view, box.origin, style)
@@ -675,7 +683,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height},
 				message,
 				w.scale,
-				f32(app.settings.pane.corner_radius) * w.scale,
+				window_pane_radius(app, w),
 			); message_result != .Ok {return frame, message_result}
 		}
 		if header_result := pane_header_draw(app, w, pane, entry);
@@ -801,7 +809,7 @@ build_pane :: proc(
 	glyphs.Result,
 ) {
 	clip := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
-	radius := f32(app.settings.pane.corner_radius) * w.scale
+	radius := window_pane_radius(app, w)
 	for &cached in w.views {
 		if cached.content != pane.content {continue}
 		if len(w.panes) == 1 {
