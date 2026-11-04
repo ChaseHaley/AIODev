@@ -3,7 +3,7 @@ package layout_test
 import "aio:layout"
 import "core:testing"
 
-// An independent statement of the rules: the last choice wins, leaving a fill uncovers the tab's zoom.
+// The last choice wins; turning off the current mode clears the whole view.
 @(private = "file")
 expected_view :: proc(view: layout.Pane_View, event: layout.Pane_View_Event) -> layout.Pane_View {
 	fill, zoomed := layout.pane_view_parts(view)
@@ -11,13 +11,28 @@ expected_view :: proc(view: layout.Pane_View, event: layout.Pane_View_Event) -> 
 	case .Toggle_Zoom:
 		return layout.pane_view_of(.None, fill != .None || !zoomed)
 	case .Toggle_Fill:
-		return layout.pane_view_of(fill == .Content ? .None : .Content, zoomed)
+		if fill == .Content {return .Split}
+		return layout.pane_view_of(.Content, zoomed)
 	case .Toggle_Screen:
-		return layout.pane_view_of(fill == .Screen ? .None : .Screen, zoomed)
+		if fill == .Screen {return .Split}
+		return layout.pane_view_of(.Screen, zoomed)
 	case .Panes_Changed:
 		return .Split
 	}
 	return .Split
+}
+
+@(test)
+pane_view_chained_modes_return_to_split_when_toggled_off :: proc(t: ^testing.T) {
+	for first in ([?]layout.Pane_View_Event{.Toggle_Zoom, .Toggle_Fill, .Toggle_Screen}) {
+		for last in ([?]layout.Pane_View_Event{.Toggle_Fill, .Toggle_Screen}) {
+			if first == last {continue}
+			view := layout.PANE_VIEW_TRANSITIONS[.Split][first]
+			view = layout.PANE_VIEW_TRANSITIONS[view][last]
+			view = layout.PANE_VIEW_TRANSITIONS[view][last]
+			testing.expect_value(t, view, layout.Pane_View.Split)
+		}
+	}
 }
 
 @(test)

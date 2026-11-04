@@ -10,7 +10,7 @@ Pane_Fill :: enum u8 {
 }
 
 // What a window shows of its selected tab. Zoom, fill and fullscreen are one choice: the one the owner
-// last made is the one in force, and the tab's zoom waits underneath a fill until the fill ends.
+// last made is the one in force, and turning it off clears the tab's zoom as well as the window's fill.
 Pane_View :: enum u8 {
 	Split,
 	Zoom,
@@ -53,7 +53,7 @@ PANE_VIEW_TRANSITIONS := [Pane_View][Pane_View_Event]Pane_View {
 	},
 	.Fill_Over_Zoom = {
 		.Toggle_Zoom = .Zoom,
-		.Toggle_Fill = .Zoom,
+		.Toggle_Fill = .Split,
 		.Toggle_Screen = .Screen_Over_Zoom,
 		.Panes_Changed = .Split,
 	},
@@ -66,7 +66,7 @@ PANE_VIEW_TRANSITIONS := [Pane_View][Pane_View_Event]Pane_View {
 	.Screen_Over_Zoom = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Fill_Over_Zoom,
-		.Toggle_Screen = .Zoom,
+		.Toggle_Screen = .Split,
 		.Panes_Changed = .Split,
 	},
 }

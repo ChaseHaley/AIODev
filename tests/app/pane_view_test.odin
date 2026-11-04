@@ -96,7 +96,7 @@ pane_view_zoom_and_fill_stay_coherent_in_any_order :: proc(t: ^testing.T) {
 }
 
 @(test)
-pane_view_fill_never_writes_the_tabs_zoom :: proc(t: ^testing.T) {
+pane_view_leaving_fill_clears_the_tabs_zoom :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
 	s, w, ok := view_fixture(t, &f, "view-fill-zoom")
@@ -109,7 +109,10 @@ pane_view_fill_never_writes_the_tabs_zoom :: proc(t: ^testing.T) {
 	app.run_action(s, w, .Fill_Window_Pane)
 	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Fill_Over_Zoom)
 	app.run_action(s, w, .Fill_Window_Pane)
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Zoom)
+	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Split)
+	testing.expect(t, !w.tree.zoomed)
+	testing.expect_value(t, len(w.panes), 2)
+	view_expect_coherent(t, s, w)
 }
 
 @(test)
@@ -124,7 +127,7 @@ pane_view_leaving_fullscreen_by_any_toggle_lands_where_the_table_says :: proc(t:
 		{.Fullscreen_Pane, false, .Split},
 		{.Zoom_Pane, true, .Zoom},
 		{.Fill_Window_Pane, true, .Fill_Over_Zoom},
-		{.Fullscreen_Pane, true, .Zoom},
+		{.Fullscreen_Pane, true, .Split},
 	}
 	for c in cases {
 		f: Palette_Fixture

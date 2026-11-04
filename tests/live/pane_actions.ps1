@@ -207,9 +207,26 @@ try {
     Invoke-Aio command pane.fullscreen
     Invoke-Aio expect state window.pane_view=Screen_Over_Zoom
     Invoke-Aio command pane.fullscreen
-    Invoke-Aio expect state window.pane_view=Zoom
+    Invoke-Aio expect state window.pane_view=Split
+    Invoke-Aio expect state tab.1.zoomed=false
+    Invoke-Aio expect state panes.count=2
     Invoke-Aio expect state "window.size=$size"
+    # Leaving Fill or Fullscreen after Zoom clears the whole view, even after switching fills.
+    foreach ($view in @('pane.fill_window', 'pane.fullscreen')) {
+        Invoke-Aio command pane.zoom
+        Invoke-Aio command $view
+        Invoke-Aio command $view
+        Invoke-Aio expect state window.pane_view=Split
+        Invoke-Aio expect state tab.1.zoomed=false
+        Invoke-Aio expect state panes.count=2
+        Invoke-Aio expect state "window.size=$size"
+    }
     Invoke-Aio command pane.zoom
+    Invoke-Aio command pane.fullscreen
+    Invoke-Aio command pane.fill_window
+    Invoke-Aio command pane.fill_window
+    Invoke-Aio expect state window.pane_view=Split
+    Invoke-Aio expect state tab.1.zoomed=false
     Invoke-Aio expect state panes.count=2
     Invoke-Aio command pane.fill_window
     Invoke-Aio command tab.new
