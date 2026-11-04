@@ -135,28 +135,97 @@ pane_link_window_of :: proc(app: ^App, content: layout.Content) -> ^Window {
 	return nil
 }
 
-// Settles the window's copy against its slot. Panes join and leave in the tab's tree, so a different set of
-// panes there replaces the copy; the same panes arranged differently came from this window and go back.
-pane_link_reconcile :: proc(app: ^App, w: ^Window) {
-	home, found := pane_link_locate(app, w)
-	if !found {return}
-	tree := &home.tab.tree
-	if layout.same_arrangement(tree, home.slot, w.tree, w.tree.root) {return}
-	if layout.same_panes(tree, home.slot, w.tree, w.tree.root) {
-		if _, stored := layout.link_view_store(tree, home.slot, w.tree); !stored {
+// The tab and node a pane really lives in, and whether that node is in a linked slot. A linked
+// window's tab is a private copy, so its pane resolves to the tab that owns it.
+pane_link_origin :: proc(
+	app: ^App,
+	source: ^Tab,
+	node: layout.Node_Id,
+) -> (
+	home: Pane_Link_Home,
+	linked, ok: bool,
+) {
+	if source == nil || int(node) >= len(source.tree.nodes) {return {}, false, false}
+	pane, is_pane := source.tree.nodes[node].(layout.Pane)
+	if !is_pane {return {}, false, false}
+	if found, is_linked := pane_link_home(app, pane.content); is_linked {
+		return found, true, true
+	}
+	workspace := pane_source_workspace(app, source)
+	if workspace == nil {return {}, false, false}
+	return {workspace = workspace, tab = source, node = node}, false, true
+}
+
+// A tab keeps one pane it can show. A pane may leave a tab that has another shown pane, or whose only
+// pane it is; it may not leave one that would otherwise hold only linked panes.
+@(require_results)
+pane_link_tab_can_lose :: proc(tab: ^Tab) -> bool {
+	if tab == nil {return false}
+	return layout.shown_pane_count(&tab.tree) > 1 || layout.pane_count(&tab.tree) <= 1
+}
+
+// Settles the window's copy against `home`'s slot. Panes join and leave in the tab's tree, so a
+// different set of panes there replaces the copy; the same panes arranged differently came from this
+// window and go back.
+pane_link_reconcile_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) -> Pane_Link_Home {
+	result := home
+	tree := &result.tab.tree
+	if !layout.slot_valid(tree, result.slot) {return result}
+	if layout.same_arrangement(tree, result.slot, w.tree, w.tree.root) {return result}
+	if layout.same_panes(tree, result.slot, w.tree, w.tree.root) {
+		if slot, stored := layout.link_view_store(tree, result.slot, w.tree); stored {
+			result.slot = slot
+		} else {
 			log.error("saving a linked window's arrangement failed")
 		}
 		layout_state_touch(app)
-		return
+		return result
 	}
 	_ = gesture_cancel(app, w)
 	focus_leave(app, w)
-	if layout.link_view_load(w.tree, tree, home.slot) != nil {
+	if layout.link_view_load(w.tree, tree, result.slot) != nil {
 		log.error("updating a linked window's panes failed")
 	}
 	window_relayout(app, w)
 	focus_enter(app, w)
 	layout_state_touch(app)
+	return result
+}
+
+pane_link_reconcile :: proc(app: ^App, w: ^Window) {
+	home, found := pane_link_locate(app, w)
+	if !found {return}
+	_ = pane_link_reconcile_at(app, w, home)
+}
+
+// Reloads a linked window from the slot `home` names.
+@(private)
+pane_link_refresh_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
+	if home.tab == nil || !layout.slot_valid(&home.tab.tree, home.slot) {return}
+	_ = gesture_cancel(app, w)
+	focus_leave(app, w)
+	if layout.link_view_load(w.tree, &home.tab.tree, home.slot) != nil {
+		log.error("updating a linked window's panes failed")
+	}
+	w.link_workspace = home.workspace.id
+	window_relayout(app, w)
+	focus_enter(app, w)
+	layout_state_touch(app)
+}
+
+// Refreshes a linked window after `content` left it. Its remaining panes name the slot, which a move may
+// have changed; a window with no panes left closes.
+pane_link_refresh_source :: proc(app: ^App, w: ^Window, content: layout.Content) {
+	if w == nil || !w.linked {return}
+	for node in w.tree.nodes {
+		pane := node.(layout.Pane) or_continue
+		if pane.content == content {continue}
+		if home, found := pane_link_home(app, pane.content); found {
+			pane_link_refresh_at(app, w, home)
+			return
+		}
+	}
+	pane_link_end(app, w)
 }
 
 // Records a pane this window just added, which the next sync would otherwise take for one that left.

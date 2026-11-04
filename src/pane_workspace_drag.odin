@@ -12,6 +12,8 @@ pane_workspace_drag_close :: proc(app: ^App, d: Pane_Drag) {
 
 pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap: bool) -> bool {
 	d := &source.pane_drag
+	home, _, found := pane_link_origin(app, d.source, d.node)
+	if !found {return false}
 	p := &w.workspace_picker
 	button := workspace_button_rect(w)
 	on_button := workspace_rect_contains(button, x, y)
@@ -27,7 +29,7 @@ pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap:
 	if d.picker_window != w.id || !p.drag {
 		window_overlays_cancel(app, w)
 		workspace_picker_transition(w, .List)
-		p.move = {source.workspace.id, d.source.id, d.node, false}
+		p.move = {home.workspace.id, home.tab.id, home.node, false}
 		p.drag = true
 		ui.field_set(&p.query, "")
 		workspace_picker_filter(app, w)
@@ -35,7 +37,7 @@ pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap:
 	}
 	d.picker_pointer = {x, y}
 	d.picker_hit = workspace_picker_hit(w, x, y)
-	if d.picker_hit == len(p.rows) + 1 && !pane_window_source_allows(source.workspace) {
+	if d.picker_hit == len(p.rows) + 1 && !pane_window_source_can_lose(app, d.source, d.node) {
 		d.picker_hit = -1
 	}
 	p.selected = d.picker_hit
@@ -68,7 +70,11 @@ pane_workspace_drag_release :: proc(app: ^App, source: ^Window, d: Pane_Drag) {
 	pane_workspace_drag_close(app, d)
 	if hit < 0 || hit > count + 1 {pane_drag_restore(app, source, d); return}
 	if hit <= count {
-		workspace_move_choose(app, source, request, id)
+		workspace_move_choose(app, pane_link_acting_window(app, source), request, id)
+		if source.linked {
+			pane, is_pane := d.source.tree.nodes[d.node].(layout.Pane)
+			if is_pane {pane_link_refresh_source(app, source, pane.content)}
+		}
 		return
 	}
 	if preview := pane_window_preview_create(app, d.source, d.node); preview != nil {

@@ -42,6 +42,18 @@ pane_count :: proc(l: ^Layout) -> int {
 	return count
 }
 
+// How many panes the tree shows in its own window; panes in a linked slot show in theirs.
+@(require_results)
+shown_pane_count :: proc(l: ^Layout) -> int {
+	return l.root == INVALID_NODE ? 0 : shown_count(l, l.root)
+}
+
+// Whether `slot` is still the marked root of a slot. A move that emptied it leaves a vacant node.
+@(require_results)
+slot_valid :: proc(l: ^Layout, slot: Node_Id) -> bool {
+	return int(slot) < len(l.nodes) && node_linked(l, slot)
+}
+
 find_content :: proc(l: ^Layout, content: Content) -> Node_Id {
 	for node, i in l.nodes {
 		if pane, ok := node.(Pane); ok && pane.content == content {return Node_Id(i)}
@@ -176,4 +188,118 @@ link_return_pane :: proc(l: ^Layout, node: Node_Id) -> (Node_Id, bool) {
 	direction: Direction
 	if axis == .Horizontal {direction = before ? .Left : .Right} else {direction = before ? .Up : .Down}
 	return place_pane(l, remaining, pane, direction), true
+}
+
+// Adds a pane to a slot, so it shows in the slot's window with the panes already there. `target` is a
+// pane inside the slot, or INVALID to take an edge of the slot itself. Wrapping the slot's root moves
+// the mark to the new split, which keeps every pane under it in the window.
+@(require_results)
+slot_insert_pane :: proc(
+	l: ^Layout,
+	slot: Node_Id,
+	pane: Pane,
+	target: Node_Id,
+	direction: Direction,
+	root: bool,
+) -> (Node_Id, bool) {
+	if !slot_valid(l, slot) {return INVALID_NODE, false}
+	target_node := target
+	if target_node == INVALID_NODE {target_node = slot}
+	if int(target_node) >= len(l.nodes) {return INVALID_NODE, false}
+	// The slot marks the panes it holds, not each pane; a pane inside it stays plain.
+	inserted := pane
+	inserted.linked = false
+	if !root && target_node != slot {
+		if link_root(l, target_node) != slot {return INVALID_NODE, false}
+		if reserve(&l.nodes, len(l.nodes) + 2) != nil {return INVALID_NODE, false}
+		return place_pane(l, target_node, inserted, direction), true
+	}
+	if reserve(&l.nodes, len(l.nodes) + 2) != nil {return INVALID_NODE, false}
+	added := allocate_node(l, inserted)
+	before := direction == .Left || direction == .Up
+	axis: Axis = direction == .Left || direction == .Right ? .Horizontal : .Vertical
+	first, second := slot, added
+	if before {first, second = added, slot}
+	branch := allocate_node(
+		l,
+		Split{axis = axis, ratio = 0.5, first = first, second = second, linked = true},
+	)
+	// The mark moves to the new split so the old slot's panes and the added pane all stay in the window.
+	node_set_linked(l, slot, false)
+	parent := parent_of(l, slot)
+	if parent == INVALID_NODE {
+		l.root = branch
+	} else {
+		s := l.nodes[parent].(Split)
+		if s.first == slot {s.first = branch} else {s.second = branch}
+		l.nodes[parent] = s
+	}
+	panes_changed(l)
+	return added, true
+}
+
+// Moves a pane from the same tree into a slot, which may be the one it is already in or another. A pane
+// from another slot leaves that slot behind; the pane shows only in the destination window.
+@(require_results)
+slot_take_pane :: proc(
+	l: ^Layout,
+	node, slot, target: Node_Id,
+	direction: Direction,
+	root: bool,
+) -> (Node_Id, bool) {
+	if !slot_valid(l, slot) || int(node) >= len(l.nodes) {return INVALID_NODE, false}
+	pane, is_pane := l.nodes[node].(Pane)
+	if !is_pane {return INVALID_NODE, false}
+	// Moving within one slot is an arrangement change, which belongs to its window.
+	current := link_root(l, node)
+	if current == slot {return INVALID_NODE, false}
+	if target != INVALID_NODE {
+		if int(target) >= len(l.nodes) {return INVALID_NODE, false}
+		if !root && link_root(l, target) != slot {return INVALID_NODE, false}
+	}
+	// A shown pane leaving its tab must leave a pane the tab can still show.
+	if current == INVALID_NODE && shown_count(l, l.root) <= 1 {return INVALID_NODE, false}
+	if reserve(&l.nodes, len(l.nodes) + 2) != nil {return INVALID_NODE, false}
+	if !remove(l, node) {return INVALID_NODE, false}
+	added, inserted := slot_insert_pane(l, slot, pane, target, direction, root)
+	if !inserted {return INVALID_NODE, false}
+	return added, true
+}
+
+// Moves a pane from another tree into a slot. Reserve before detaching, so allocation failure leaves
+// both trees untouched.
+@(require_results)
+transfer_pane_to_slot :: proc(
+	source, destination: ^Layout,
+	node, slot, target: Node_Id,
+	direction: Direction,
+	root: bool,
+) -> (Node_Id, bool) {
+	if source == destination || !slot_valid(destination, slot) {return INVALID_NODE, false}
+	if int(node) >= len(source.nodes) {return INVALID_NODE, false}
+	if target != INVALID_NODE && int(target) >= len(destination.nodes) {
+		return INVALID_NODE, false
+	}
+	pane, is_pane := source.nodes[node].(Pane)
+	if !is_pane {return INVALID_NODE, false}
+	if target != INVALID_NODE && !root && link_root(destination, target) != slot {
+		return INVALID_NODE, false
+	}
+	// A tab must keep a pane it can show when it still holds linked panes.
+	if link_root(source, node) == INVALID_NODE &&
+	   shown_count(source, source.root) <= 1 &&
+	   pane_count(source) > 1 {return INVALID_NODE, false}
+	// Content is a reference owned elsewhere, so it may appear once in a tree.
+	for n in destination.nodes {
+		if p, is_pane_node := n.(Pane); is_pane_node && p.content == pane.content {
+			return INVALID_NODE, false
+		}
+	}
+	if reserve(&destination.nodes, len(destination.nodes) + 2) != nil {return INVALID_NODE, false}
+	if !remove(source, node) {return INVALID_NODE, false}
+	destination.next_pane_order += 1
+	pane.order, pane.linked = destination.next_pane_order, false
+	added, inserted := slot_insert_pane(destination, slot, pane, target, direction, root)
+	if !inserted {return INVALID_NODE, false}
+	return added, true
 }

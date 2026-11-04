@@ -663,6 +663,8 @@ move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (N
 	pane, ok := l.nodes[node].(Pane)
 	target_pane, target_ok := l.nodes[target].(Pane)
 	if !ok || !target_ok || target_pane.linked {return INVALID_NODE, false}
+	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
+	pane.linked = false
 	focused := l.focus == node
 	if !remove(l, node) {return INVALID_NODE, false}
 	added := place_pane(l, target, pane, direction)
@@ -696,6 +698,8 @@ dock_pane :: proc(l: ^Layout, node: Node_Id, direction: Direction) -> (Node_Id, 
 	pane, ok := l.nodes[node].(Pane)
 	// Removing the only shown pane would bring linked panes back; docking has nothing to dock beside.
 	if !ok || shown_count(l, l.root) <= 1 {return INVALID_NODE, false}
+	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
+	pane.linked = false
 	focused := l.focus == node
 	if !remove(l, node) {return INVALID_NODE, false}
 	added := place_pane(l, l.root, pane, direction)
@@ -716,6 +720,8 @@ separate_pane :: proc(
 	if int(node) >= len(source.nodes) {return {}, false}
 	pane, ok := source.nodes[node].(Pane)
 	if !ok {return {}, false}
+	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
+	pane.linked = false
 	destination: Layout
 	if init(&destination, pane.content, allocator) != nil {destroy(&destination); return {}, false}
 	if !remove(source, node) {destroy(&destination); return {}, false}
@@ -740,6 +746,8 @@ transfer_pane :: proc(
 	   int(target) >= len(destination.nodes) {return INVALID_NODE, false}
 	pane, ok := source.nodes[node].(Pane)
 	if !ok {return INVALID_NODE, false}
+	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
+	pane.linked = false
 	if _, target_ok := destination.nodes[target].(Pane); !target_ok {return INVALID_NODE, false}
 	// Content is a reference owned elsewhere, so it may appear once in a tree. A terminal or a
 	// Settings pane can join any destination that does not already show the same content.
