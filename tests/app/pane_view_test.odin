@@ -4,6 +4,28 @@ import "core:testing"
 import app "../../src"
 import "aio:layout"
 
+@(test)
+pane_view_fullscreen_pane_reaches_every_client_edge :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, ok := view_fixture(t, &f, "view-screen-edges")
+	if !ok {return}
+	for scale in ([?]f32{1, 1.25, 1.75, 2}) {
+		w.scale = scale
+		for gap in ([?]int{0, 4, 24}) {
+			s.settings.pane.gap = gap
+			w.pane_fill = .Screen
+			app.window_relayout(s, w)
+			testing.expect_value(t, len(w.panes), 1)
+			testing.expect_value(t, w.panes[0].rect, layout.Rect{0, 0, f32(w.width), f32(w.height)})
+			w.pane_fill = .None
+			app.window_relayout(s, w)
+			testing.expect_value(t, len(w.panes), 2)
+			testing.expect(t, w.panes[0].rect.y >= app.window_title_height(w))
+		}
+	}
+}
+
 // A fullscreen state is set by hand because leaving one the platform never entered does nothing, so
 // these tests check every path out of it without covering the owner's monitor. tests/live enters it.
 @(private = "file")
