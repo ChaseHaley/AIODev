@@ -357,7 +357,7 @@ tick :: proc(app: ^App) {
 			window.taskbar_workspace = window.workspace
 			status_taskbar_update(app, window)
 		}
-		if window.preparing && !window.preview_visible {window.dirty = false; continue}
+		if window.preparing {window.dirty = false; continue}
 		if window.linked && !window.link_shown {continue}
 		if window.dirty {
 			window_render(app, window)

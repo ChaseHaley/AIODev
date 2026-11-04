@@ -128,7 +128,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 	case platform.Activate_Request_Event:
 		// Launching AIODev again means a fresh workspace window, as New Window does. With every
 		// window hidden to the tray, it reopens the existing view instead.
-		if window_primary(app) == nil {show_window(app)} else {workspace_new(app, nil, true)}
+		if window_primary(app) == nil {show_window(app)} else {workspace_new(app, nil, true, name_it = false)}
 	case platform.Tray_Menu_Event:
 		switch e.id {
 		case TRAY_OPEN:

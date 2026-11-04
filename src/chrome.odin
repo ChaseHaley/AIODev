@@ -150,14 +150,14 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 
 @(private)
 window_focus_outlined :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> bool {
-	return pane.node == w.tree.focus && app.settings.pane.focus_border > 0
+	return w.focused && pane.node == w.tree.focus && app.settings.pane.focus_border > 0
 }
 
 // Fades an unfocused pane, header included, toward its own background so the focused pane alone
 // keeps full contrast; the outline drawn after it stays crisp.
 window_card_dim :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, background: render.Color) {
 	dim := app.settings.pane.unfocused_dim
-	if dim <= 0 || pane.node == w.tree.focus {return}
+	if dim <= 0 || (w.focused && pane.node == w.tree.focus) {return}
 	r := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
 	if render.push_layer(&w.list, r, window_pane_radius(app, w)) != .None {return}
 	veil := background

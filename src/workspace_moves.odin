@@ -27,27 +27,20 @@ workspace_move_new :: proc(app: ^App, w: ^Window, whole_tab: bool, index: int) {
 	workspace_move_choose(app, w, request, 0)
 }
 
-workspace_move_choose :: proc(
-	app: ^App, w: ^Window, request: Workspace_Move_Request, id: u32, name: string = "",
-) {
-	if id == 0 && name == "" {
-		workspace_name_open(app, w, .Move_Workspace)
-		w.rename_move = request
-		return
-	}
+// An id of 0 moves the content into a new workspace, which takes a suggested name to edit in its chip.
+workspace_move_choose :: proc(app: ^App, w: ^Window, request: Workspace_Move_Request, id: u32) {
 	destination := id == 0 ? workspace_create_empty(app) : workspace_find(app, id)
 	if destination == nil {
 		notify(app, .Error, "The destination workspace is unavailable.")
 		return
 	}
-	if id == 0 && rename_target_commit(app, w, {.Workspace, destination.id}, name) != .Saved {
-		_ = workspace_discard_empty(app, destination)
-		notify(app, .Error, "Could not name the workspace.")
-		return
-	}
 	if !workspace_move_content(app, w, request, destination) {
 		if id == 0 {_ = workspace_discard_empty(app, destination)}
 		notify(app, .Error, "Could not move the content. The source was preserved.")
+		return
+	}
+	if id == 0 {
+		if owner := window_for_workspace(app, destination); owner != nil {workspace_name_begin(app, owner)}
 	}
 }
 

@@ -35,6 +35,9 @@ Pane_Drag :: struct {
 	destination_window, preview_window:          platform.Window_Id,
 	destination_original:                        ^Tab,
 	new_window, preview_failed:                  bool,
+	thumbnail:                                   platform.Thumbnail,
+	thumbnail_width, thumbnail_height:           i32,
+	thumbnail_shown, thumbnail_failed:           bool,
 	picker_window:                              platform.Window_Id,
 	picker_pointer:                             [2]f32,
 	picker_hit:                                 int,
@@ -341,6 +344,7 @@ pane_drag_cancel :: proc(app: ^App, w: ^Window) {
 	d := w.pane_drag
 	w.pane_drag = {}
 	if !d.pressed {return}
+	pane_drag_thumbnail_destroy(&d)
 	pane_workspace_drag_close(app, d)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
@@ -433,14 +437,6 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	d.pointer = {x, y}
 	sx, sy, screen_error := platform.window_to_screen(&app.platform, w.id, i32(x), i32(y))
 	if screen_error != .None {pane_drag_cancel(app, w); return true}
-	if preview := window_find(app, d.preview_window); preview != nil && preview.preview_visible {
-		if !pane_window_preview_position(
-			app,
-			preview,
-			sx,
-			sy,
-		) {pane_drag_cancel(app, w); return true}
-	}
 	id, tx, ty, hit_error := platform.window_at_point(&app.platform, sx, sy)
 	if hit_error != .None {pane_drag_cancel(app, w); return true}
 	destination := window_find(app, id)
@@ -482,30 +478,14 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 			pane_window_preview_discard(app, preview)
 		}
 		if tear_off && d.preview_window == 0 && !d.preview_failed {
-			if preview := pane_window_preview_create(app, d.source, d.node, sx, sy);
-			   preview != nil {
+			if preview := pane_window_preview_create(app, d.source, d.node); preview != nil {
 				d.preview_window = preview.id
 			} else {
 				d.preview_failed = true
 				notify(app, .Error, "Could not prepare a new window. The pane was preserved.")
 			}
 		}
-		if tear_off {
-			if preview := window_find(app, d.preview_window);
-			   preview != nil && !preview.preview_visible {
-				if !pane_window_preview_position(app, preview, sx, sy) ||
-				   !window_show_prepared(app, preview) {
-					pane_drag_cancel(app, w)
-					return true
-				}
-			}
-		}
-		if swap && d.preview_window != 0 {
-			if !pane_window_preview_hide(
-				app,
-				d.preview_window,
-			) {pane_drag_cancel(app, w); return true}
-		}
+		pane_drag_thumbnail_sync(app, w, d, tear_off && d.preview_window != 0, sx, sy)
 		rect, shown := pane_drag_preview(app, w)
 		d.shown = shown
 		values := [4]f32{rect.x, rect.y, rect.width, rect.height}
@@ -513,9 +493,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 		w.dirty = true
 		return true
 	}
-	if d.preview_window != 0 {
-		if !pane_window_preview_hide(app, d.preview_window) {pane_drag_cancel(app, w); return true}
-	}
+	pane_drag_thumbnail_sync(app, w, d, false, 0, 0)
 	if destination.id != previous &&
 	   destination != w {d.destination_original = selected_tab(destination.workspace)}
 	d.destination_window = destination.id
@@ -631,6 +609,7 @@ pane_drag_target_move :: proc(
 pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	d := w.pane_drag
 	w.pane_drag = {}
+	pane_drag_thumbnail_destroy(&d)
 	if !d.active {return false}
 	w.dirty = true
 	if d.picker_window != 0 {
@@ -638,15 +617,10 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		return true
 	}
 	if d.new_window {
-		if d.shown {
-			workspace_name_open(app, w, .Tearoff)
-			if w.rename_open && w.rename_mode == .Tearoff {
-				w.rename_drag = d
-				return true
-			}
-		}
+		if d.shown && pane_tear_off(app, w, d) {return true}
 		pane_window_preview_discard(app, d.preview_window)
 		pane_drag_restore(app, w, d)
+		if d.shown {notify(app, .Error, "Could not move the pane. The source was preserved.")}
 		return true
 	}
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
@@ -730,8 +704,6 @@ pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) 
 @(require_results)
 pane_drag_label :: proc(d: ^Pane_Drag) -> string {
 	switch {
-	case d.new_window:
-		return "+ New window"
 	case d.new_tab:
 		if d.destination == d.source && d.node == d.source.tree.root {
 			return "Move tab to end"
@@ -758,6 +730,14 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	r := render.Rect{d.ghost[0].value, d.ghost[1].value, d.ghost[2].value, d.ghost[3].value}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	radius := f32(app.settings.pane.corner_radius) * w.scale
+	// The thumbnail copies this pane live, so a tear-off marks it with an outline and nothing over its text.
+	if d.new_window {
+		_ = render.push_rect(
+			&w.list,
+			{rect = r, color = app.theme.accent, radius = radius, stroke = 2 * w.scale},
+		)
+		return .Ok
+	}
 	opacity := d.new_tab ? d.reveal.value : 1
 	fill := app.theme.accent
 	fill.a = 0.16 * opacity

@@ -95,7 +95,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect_value(t, term.process_id(first_session), first_pid)
 	testing.expect(t, !app.workspace_discard_empty(&state, original))
 	app.run_action(&state, w, .Rename_Workspace)
-	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == two.id && !w.rename_open)
+	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker) && w.rename_open && w.rename_mode == .Workspace)
 	app.handle_event(&state, platform.Text_Event{window = w.id, text = "  Build tools  "})
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect_value(t, two.name, "Build tools")

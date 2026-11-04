@@ -67,10 +67,9 @@ second_launch_opens_new_workspace_window_and_reopens_from_tray :: proc(t: ^testi
 	state := &f.state
 	one := state.windows[0]
 	app.handle_event(state, platform.Activate_Request_Event{})
-	testing.expect(t, one.rename_open && one.rename_mode == .New_Window)
-	app.rename_finish(state, one, true)
 	if !testing.expect_value(t, len(state.windows), 2) {return}
 	two := state.windows[1]
+	testing.expect(t, !one.rename_open && !two.rename_open)
 	testing.expect_value(t, len(state.workspaces), 2)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect(t, two.workspace != one.workspace && len(two.workspace.tabs) == 1)

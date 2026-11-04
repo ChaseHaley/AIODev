@@ -97,7 +97,9 @@ pane_header_draw :: proc(
 	}
 	badge_hovered := false
 	if entry != nil {
-		layout := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, pane.node == w.tree.focus)
+		layout := ui.header_layout(
+			{r.x, r.y, r.width, r.height}, w.scale, w.focused && pane.node == w.tree.focus,
+		)
 		badge_hovered =
 			w.pointer.x >= layout.badge.x - 3 * w.scale &&
 			w.pointer.x < layout.badge.x + layout.badge.width + 9 * w.scale &&
@@ -131,7 +133,7 @@ pane_header_draw :: proc(
 		title,
 		directory,
 		icon,
-		pane.node == w.tree.focus,
+		w.focused && pane.node == w.tree.focus,
 		controls,
 		pane_view_current(w) == .Zoom,
 		w.pane_fill == .Content,

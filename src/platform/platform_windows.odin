@@ -824,6 +824,120 @@ window_set_position :: proc(p: ^Platform, id: Window_Id, screen_x, screen_y: i32
 	return .None
 }
 
+// Moves the window's top-left corner to the point, staying inside the work area of the point's monitor.
+@(require_results)
+window_place_on_monitor :: proc(p: ^Platform, id: Window_Id, screen_x, screen_y: i32) -> Error {
+	window := find_window(p, id)
+	if window == nil {return .Invalid_Window}
+	frame: w.RECT
+	if !os_ok(w.GetWindowRect(window.hwnd, &frame), "GetWindowRect") {return .Os}
+	monitor := w.MonitorFromPoint({screen_x, screen_y}, .MONITOR_DEFAULTTONEAREST)
+	info := w.MONITORINFO{cbSize = size_of(w.MONITORINFO)}
+	if !os_ok(w.GetMonitorInfoW(monitor, &info), "GetMonitorInfoW") {return .Os}
+	area := info.rcWork
+	x := max(area.left, min(screen_x, area.right - (frame.right - frame.left)))
+	y := max(area.top, min(screen_y, area.bottom - (frame.bottom - frame.top)))
+	return window_set_position(p, id, x, y)
+}
+
+// A small always-on-top copy of part of a window, composed by the desktop window manager. It stays
+// live without the app drawing anything, and the pointer passes through it.
+Thumbnail :: struct {
+	hwnd: w.HWND,
+	link: w.HANDLE,
+}
+
+@(require_results)
+thumbnail_create :: proc(
+	p: ^Platform,
+	source: Window_Id,
+	region_x, region_y, region_width, region_height: i32,
+	width, height: i32,
+	border: [3]u8,
+) -> (
+	Thumbnail,
+	Error,
+) {
+	window := find_window(p, source)
+	if window == nil {return {}, .Invalid_Window}
+	if width <= 0 || height <= 0 || region_width <= 0 || region_height <= 0 {return {}, .Invalid_Argument}
+	hwnd := w.CreateWindowExW(
+		w.WS_EX_TOOLWINDOW | w.WS_EX_NOACTIVATE | w.WS_EX_TOPMOST | w.WS_EX_LAYERED | w.WS_EX_TRANSPARENT,
+		w.L("Static"),
+		nil,
+		w.WS_POPUP | SS_BLACKRECT,
+		0,
+		0,
+		width,
+		height,
+		nil,
+		nil,
+		p.instance,
+		nil,
+	)
+	if hwnd == nil {
+		log.errorf("CreateWindowExW(thumbnail) failed: %d", w.GetLastError())
+		return {}, .Os
+	}
+	thumbnail := Thumbnail{hwnd = hwnd}
+	if !os_ok(w.SetLayeredWindowAttributes(hwnd, 0, 255, w.LWA_ALPHA), "SetLayeredWindowAttributes") {
+		thumbnail_destroy(&thumbnail)
+		return {}, .Os
+	}
+	// Rounded corners and a border are Windows 11 attributes; older systems keep a plain rectangle.
+	corner := i32(DWMWCP_ROUND)
+	corner_attribute := u32(w.DWMWINDOWATTRIBUTE.DWMWA_WINDOW_CORNER_PREFERENCE)
+	_ = w.DwmSetWindowAttribute(hwnd, corner_attribute, &corner, size_of(corner))
+	color := u32(border[0]) | u32(border[1]) << 8 | u32(border[2]) << 16
+	border_attribute := u32(w.DWMWINDOWATTRIBUTE.DWMWA_BORDER_COLOR)
+	_ = w.DwmSetWindowAttribute(hwnd, border_attribute, &color, size_of(color))
+	if hr := DwmRegisterThumbnail(hwnd, window.hwnd, &thumbnail.link); hr < 0 {
+		log.errorf("DwmRegisterThumbnail failed: HRESULT %x", u32(hr))
+		thumbnail_destroy(&thumbnail)
+		return {}, .Os
+	}
+	properties := DWM_THUMBNAIL_PROPERTIES {
+		dwFlags               = DWM_TNP_RECTDESTINATION |
+			DWM_TNP_RECTSOURCE |
+			DWM_TNP_VISIBLE |
+			DWM_TNP_SOURCECLIENTAREAONLY,
+		rcDestination         = {0, 0, width, height},
+		rcSource              = {region_x, region_y, region_x + region_width, region_y + region_height},
+		fVisible              = true,
+		fSourceClientAreaOnly = true,
+	}
+	if hr := DwmUpdateThumbnailProperties(thumbnail.link, &properties); hr < 0 {
+		log.errorf("DwmUpdateThumbnailProperties failed: HRESULT %x", u32(hr))
+		thumbnail_destroy(&thumbnail)
+		return {}, .Os
+	}
+	return thumbnail, .None
+}
+
+// Shows the thumbnail at the point without activating it.
+thumbnail_place :: proc(thumbnail: Thumbnail, screen_x, screen_y: i32) {
+	flags := u32(w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW)
+	if !w.SetWindowPos(thumbnail.hwnd, w.HWND_TOPMOST, screen_x, screen_y, 0, 0, flags) {
+		log.errorf("SetWindowPos(thumbnail) failed: %d", w.GetLastError())
+	}
+}
+
+thumbnail_hide :: proc(thumbnail: Thumbnail) {
+	w.ShowWindow(thumbnail.hwnd, w.SW_HIDE)
+}
+
+thumbnail_destroy :: proc(thumbnail: ^Thumbnail) {
+	if thumbnail.link != nil {
+		if hr := DwmUnregisterThumbnail(thumbnail.link); hr < 0 {
+			log.errorf("DwmUnregisterThumbnail failed: HRESULT %x", u32(hr))
+		}
+	}
+	if thumbnail.hwnd != nil && !w.DestroyWindow(thumbnail.hwnd) {
+		log.errorf("DestroyWindow(thumbnail) failed: %d", w.GetLastError())
+	}
+	thumbnail^ = {}
+}
+
 @(require_results)
 window_set_client_size :: proc(p: ^Platform, id: Window_Id, width, height: i32) -> Error {
 	window := find_window(p, id)

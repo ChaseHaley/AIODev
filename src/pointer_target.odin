@@ -283,11 +283,20 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 	pointer_set(app, w, rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
 }
 
-// A press outside the field finishes the rename and is swallowed with its release.
+// A press outside the dialog finishes the rename and is swallowed with its release. The workspace chip
+// field is not modal: the press keeps the name typed so far and still reaches what it landed on.
 @(private = "file")
 rename_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if !e.pressed {w.rename.dragging = false; return}
 	x, y := f32(e.x), f32(e.y)
+	if w.rename_mode == .Workspace && !rect_contains(rename_rect(w), x, y) {
+		rename_finish(app, w, true)
+		if w.rename_open {rename_finish(app, w, false)}
+		target := pointer_target(app, w, x, y)
+		w.gesture.owners[e.button] = target
+		pointer_press(app, w, target, e)
+		return
+	}
 	if !rect_contains(rename_rect(w), x, y) {
 		rename_finish(app, w, false)
 		w.header_buttons += {e.button}
@@ -513,7 +522,10 @@ workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {retu
 
 @(private = "file")
 workspace_button_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	if e.button == .Left {workspace_picker_open(app, w)}
+	if e.button == .Left {
+		w.workspace_button_press_ns = e.time_ns
+		workspace_picker_open(app, w)
+	}
 }
 
 // Activity pill

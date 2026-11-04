@@ -131,6 +131,11 @@ function Shot($State, [string] $Label) {
     Write-Output "SHOT $Label window=$($State['window.id'])"
 }
 function Select-Window([string] $Id) { Invoke-Aio window select $Id | Out-Null }
+# A new workspace opens with its suggested name in an editable chip; Enter accepts it.
+function Accept-Name([string] $Id) {
+    Select-Window $Id
+    if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
+}
 function Window-State([string] $Id) { Select-Window $Id; return Read-State }
 function Window-Ids {
     $s = Read-State
@@ -208,6 +213,7 @@ function Begin-Drag([string] $SourceId) {
 
 Invoke-Aio launch --fresh
 try {
+    $defaultSize = (Read-State)['window.size']
     Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio wait text 'PS '
     $s = Read-State
@@ -219,19 +225,17 @@ try {
     # Root workspace controls: an explicit new window shows a distinct workspace; selecting an
     # already displayed workspace focuses its owner and leaves the requesting window unchanged.
     Invoke-Aio command window.new | Out-Null
-    Invoke-Aio key Enter | Out-Null
     Invoke-Aio expect state windows.count=2
     $destination = @(Window-Ids | Where-Object { $_ -ne $source })[0]
+    Accept-Name $destination
     $d = Window-State $destination
     Invoke-Aio wait text 'PS '
     Assert-True ($d['workspace.id'] -ne $sourceWorkspace) 'new window displays a distinct workspace'
     Invoke-Aio command workspace.rename | Out-Null
-    Invoke-Aio expect state "workspace.picker.rename_target=$($d['workspace.id'])"
-    Invoke-Aio expect state rename.open=false
+    Invoke-Aio expect state rename.open=true
     Invoke-Aio type 'Destination' | Out-Null
     Invoke-Aio key Enter | Out-Null
     Invoke-Aio expect state workspace.name=Destination
-    Invoke-Aio key Esc | Out-Null
     $destinationWorkspace = $d['workspace.id']
     Select-Window $source
     Invoke-Aio command workspace.change | Out-Null
@@ -481,8 +485,8 @@ try {
     Select-Window $source
     Set-Minimum 0 0
 
-    # Desktop tear-off: a prepared preview follows the pointer, is reused across window crossings,
-    # and Escape discards it without closing the borrowed runtime.
+    # Desktop tear-off: a small thumbnail follows the pointer while the destination stays hidden, both
+    # survive window crossings, and Escape discards them without closing the borrowed runtime.
     $s = Begin-Drag $source
     $torn = $s['session.id']
     $sourceGrid = $s['grid.size']
@@ -493,19 +497,21 @@ try {
     $previewId = $s['panes.drop.preview_window']
     Assert-True ($previewId -ne '0') 'tear-off prepares a preview window'
     Assert-Equal (Inventory $previewId 'preparing') true 'preview window is provisional'
-    Assert-Equal (Inventory $previewId 'preview_visible') true 'preview window is visible over the desktop'
+    Assert-Equal $s['panes.drop.thumbnail'] true 'thumbnail shows over the desktop'
+    $thumbnail = @($s['panes.drop.thumbnail_size'] -split 'x' | ForEach-Object { [int]$_ })
+    $thumbnailScale = [double]$s['window.scale']
+    Assert-True ($thumbnail[0] -gt 0 -and $thumbnail[0] -le 300*$thumbnailScale -and $thumbnail[1] -le 190*$thumbnailScale) 'thumbnail stays small'
     Assert-Equal $s['grid.size'] $sourceGrid 'source grid is preserved while previewing'
     Start-Sleep -Milliseconds 300
     Shot $s tear-off-preview-source
-    Shot @{ 'window.id' = $previewId; 'window.origin' = (Inventory $previewId 'origin') } tear-off-preview-window
     Invoke-Aio mouse move $edge --screen | Out-Null
     $s = Read-State
     Assert-Equal $s['panes.drop.window'] $destination 'returning over a window retargets it'
     Assert-Equal $s['panes.drop.preview_window'] $previewId 'cached preview survives a window crossing'
-    Assert-Equal (Inventory $previewId 'preview_visible') false 'cached preview hides over a window'
+    Assert-Equal $s['panes.drop.thumbnail'] false 'thumbnail hides over a window'
     Invoke-Aio mouse move $desktop --screen | Out-Null
     Assert-Equal (Read-State)['panes.drop.preview_window'] $previewId 'desktop reuses the same preview'
-    Assert-Equal (Inventory $previewId 'preview_visible') true 'cached preview reappears over the desktop'
+    Assert-Equal (Read-State)['panes.drop.thumbnail'] true 'thumbnail reappears over the desktop'
     Invoke-Aio key Esc | Out-Null
     Invoke-Aio mouse up $desktop --screen | Out-Null
     if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
@@ -548,6 +554,12 @@ try {
     Assert-Equal $s['windows.count'] ([int]$windowsBefore+1) 'tear-off commit adds a window'
     Assert-Equal $s['panes.count'] 1 'tear-off commit removes the pane from the source'
     Assert-Equal $s['sessions.count'] $sessions 'tear-off commit starts or closes no runtime'
+    $n = Window-State $previewId
+    Assert-Equal $n['rename.open'] true 'the new window asks for its name in its chip'
+    Assert-Equal $n['window.size'] $defaultSize 'tear-off opens at the default size'
+    Start-Sleep -Milliseconds 300
+    Shot $n tear-off-naming
+    Accept-Name $previewId
     $n = Window-State $previewId
     Assert-Equal $n['window.preparing'] false 'committed tear-off is an ordinary window'
     Assert-Equal $n['panes.count'] 1 'new window shows the torn-off pane'
@@ -600,6 +612,8 @@ try {
     Assert-True ($soleId -ne '0') 'one-pane tab in multi-pane workspace prepares a preview'
     Invoke-Aio mouse up $desktop2 --screen | Out-Null
     if ((Read-State)['rename.open'] -eq 'true') { Invoke-Aio key Enter | Out-Null }
+    Accept-Name $soleId
+    Select-Window $source
     $ids = Window-Ids
     Assert-True ($ids -contains $source) 'multi-tab tear-off preserves the source window'
     Assert-Equal $ids.Count ($count+1) 'multi-tab tear-off adds one window'
