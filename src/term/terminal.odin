@@ -361,12 +361,19 @@ spawn :: proc(s: ^Session, config: Config) {
 
 @(private)
 stop_process :: proc(s: ^Session) {
+	cancel_output := status(s).kind != .Exited
 	if err := pty.terminate(&s.pty); err != .None {
 		log.errorf("term: terminating the process tree failed: %v", err)
 	}
 	join_thread(&s.waiter)
 	// The waiter normally closes the console; closing again is harmless and covers a missing waiter.
 	pty.close_console(&s.pty)
+	// Natural exit keeps its final output; explicit shutdown need not wait for console pipe EOF.
+	if cancel_output {
+		if err := pty.cancel_reads(s.reader); err != .None {
+			log.errorf("term: cancelling process output failed: %v", err)
+		}
+	}
 	join_thread(&s.reader)
 	queue_close(&s.queue)
 	join_thread(&s.writer)
