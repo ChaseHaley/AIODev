@@ -70,7 +70,7 @@ pane_header_draw :: proc(
 	pane: layout.Pane_Rect,
 	entry: ^Session_Entry,
 ) -> glyphs.Result {
-	controls: [5]ui.Control_Motion
+	controls: [6]ui.Control_Motion
 	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
 	r := pane.rect
 	if w.header_height == 0 {
@@ -137,6 +137,7 @@ pane_header_draw :: proc(
 		controls,
 		pane_view_current(w) == .Zoom,
 		w.pane_fill == .Content,
+		w.linked,
 		icon_atlas,
 		badge_hovered,
 		w.pointer,
@@ -190,13 +191,14 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 		}
 		if chosen != .None {
 			names := [ui.Header_Action]string {
-				.None        = "",
-				.Split_Right = "pane.split_right",
-				.Split_Down  = "pane.split_down",
-				.Zoom        = "pane.zoom",
-				.Fill_Window = "pane.fill_window",
-				.Close       = "pane.close",
-				.Badge       = "",
+				.None          = "",
+				.Split_Right   = "pane.split_right",
+				.Split_Down    = "pane.split_down",
+				.Zoom          = "pane.zoom",
+				.Fill_Window   = "pane.fill_window",
+				.Linked_Window = "pane.linked_window",
+				.Close         = "pane.close",
+				.Badge         = "",
 			}
 			if command := commands.find(&app.registry, names[chosen]);
 			   command != nil {command_run(app, w, Action(command.id), .Menu)}
@@ -240,7 +242,7 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.H
 // Shows a single pane's split controls while the pointer is within the top band of its card.
 split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
 	shown := false
-	if enabled && !w.linked && w.header_height == 0 && len(w.panes) == 1 {
+	if enabled && w.header_height == 0 && len(w.panes) == 1 {
 		r := w.panes[0].rect
 		shown = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + 40 * w.scale
 	}

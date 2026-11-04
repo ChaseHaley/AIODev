@@ -27,7 +27,7 @@ Pane_View :: struct {
 	generation, atlas_generation, builds: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
-	header_controls: [5]ui.Control_Motion,
+	header_controls: [6]ui.Control_Motion,
 	header_hover:   ui.Header_Action,
 	header_armed:   ui.Armed(ui.Header_Action),
 	hover:          Maybe(term.Link_Range),
@@ -58,8 +58,8 @@ Window :: struct {
 	focused, dirty: bool,
 	focus_order: u64,
 	preparing: bool,
-	// Shows one pane of a tab instead of a workspace; see pane_links.odin. w.workspace is then a private
-	// view of that pane, and link_workspace is the id of the workspace that really holds it.
+	// Shows part of a tab instead of a workspace; see pane_links.odin. w.workspace is then a private
+	// view of those panes, and link_workspace is the id of the workspace that really holds them.
 	linked, link_shown: bool,
 	link_activate, link_maximize: bool,
 	link_workspace: u32,
@@ -420,7 +420,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	}
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
-	w.header_height = window_pane_insets(app, w, nil).header
+	w.header_height = pane_insets(app, w.scale, nil).header
 	area := window_content_area(app, w)
 	if pane_view_solo(w) {
 		layout.compute_focused(w.tree, area, &w.panes)
@@ -453,7 +453,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		box := pane_box(
 			w.metrics,
 			pane.rect,
-			window_pane_insets(app, w, entry),
+			pane_insets(app, w.scale, entry),
 		)
 		g := term.Geometry {
 			columns = box.columns,
@@ -667,7 +667,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		box := pane_box(
 			w.metrics,
 			pane.rect,
-			window_pane_insets(app, w, entry),
+			pane_insets(app, w.scale, entry),
 		)
 		result: glyphs.Result
 		frame, result = build_pane(app, w, pane, entry, view, box.origin, style)

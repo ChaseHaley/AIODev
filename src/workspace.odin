@@ -151,10 +151,14 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 }
 
 pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
-	if w.tree.focus == node {return}
+	if w.tree.focus == node || int(node) >= len(w.tree.nodes) {return}
 	// Status, jumps and scripts name a pane wherever it is; a linked one takes focus in its own window.
-	if pane, is_pane := w.tree.nodes[node].(layout.Pane); is_pane && pane.linked {
-		if linked := pane_link_window_of(app, pane.content); linked != nil {linked.link_activate = true}
+	pane, is_pane := w.tree.nodes[node].(layout.Pane)
+	if is_pane && layout.link_root(w.tree, node) != layout.INVALID_NODE {
+		if linked := pane_link_window_of(app, pane.content); linked != nil {
+			pane_focus(app, linked, layout.find_content(linked.tree, pane.content))
+			linked.link_activate = true
+		}
 		return
 	}
 	focus_leave(app, w)
@@ -322,7 +326,9 @@ pane_split :: proc(
 	switch _, err := pane_split_at(
 		app, w, w.workspace, tab, w.tree.focus, direction, ratio, focus, launch, true,
 	); err {
-	case .None, .Minimum:
+	case .None:
+		if w.linked {pane_link_store(app, w)}
+	case .Minimum:
 	case .Check:
 		notify(app, .Error, "Could not check the new pane size.")
 	case .Session:

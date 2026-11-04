@@ -143,26 +143,35 @@ layout_node_encode :: proc(
 		return -1
 	case layout.Pane:
 		saved := layout_pane_encode(app, node.content, processes)
-		if node.linked {
-			saved.linked = true
-			if linked := pane_link_window_of(app, node.content); linked != nil {
-				if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
-					window := make([]platform.Window_Placement, 1, context.temp_allocator)
-					window[0] = placement
-					saved.window = window
-				}
-			}
-		}
+		if node.linked {layout_link_encode(app, tree, id, &saved)}
 		append(nodes, saved)
 		if id == tree.focus {focus^ = index}
 	case layout.Split:
-		append(nodes, Saved_Node{split = true, axis = node.axis, ratio = node.ratio})
+		saved := Saved_Node{split = true, axis = node.axis, ratio = node.ratio}
+		if node.linked {layout_link_encode(app, tree, id, &saved)}
+		append(nodes, saved)
 		first := layout_node_encode(app, tree, node.first, nodes, focus, processes)
 		second := layout_node_encode(app, tree, node.second, nodes, focus, processes)
 		if first < 0 || second < 0 {return -1}
 		nodes[index].first, nodes[index].second = first, second
 	}
 	return index
+}
+
+// Marks a saved node as a linked slot and records where its window is.
+@(private)
+layout_link_encode :: proc(app: ^App, tree: ^layout.Layout, slot: layout.Node_Id, saved: ^Saved_Node) {
+	saved.linked = true
+	panes := make([dynamic]layout.Content, context.temp_allocator)
+	layout.contents(tree, slot, &panes)
+	if len(panes) == 0 {return}
+	linked := pane_link_window_of(app, panes[0])
+	if linked == nil {return}
+	if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
+		window := make([]platform.Window_Placement, 1, context.temp_allocator)
+		window[0] = placement
+		saved.window = window
+	}
 }
 
 @(private)
@@ -311,9 +320,11 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 	}
 	if name, err := strings.clone(saved.name); err == nil {tab.name = name}
 	tab_record_commit(app, workspace, tab)
-	for node, i in tab.tree.nodes {
-		pane := node.(layout.Pane) or_continue
-		if pane.linked {pane_link_restore(app, workspace, tab, layout.Node_Id(i), saved.nodes[i].window)}
+	for i in 0 ..< len(tab.tree.nodes) {
+		slot := layout.Node_Id(i)
+		if layout.link_root(&tab.tree, slot) == slot {
+			pane_link_restore(app, workspace, tab, slot, saved.nodes[i].window)
+		}
 	}
 	return true
 }
@@ -363,7 +374,7 @@ layout_tree_decode :: proc(saved: ^Saved_Tab, tree: ^layout.Layout) -> bool {
 	nodes, nodes_error := make([dynamic]layout.Node, count)
 	if nodes_error != nil {return false}
 	tree^ = {nodes = nodes}
-	if !layout_node_decode(saved.nodes, 0, visited, tree) {layout.destroy(tree); return false}
+	if !layout_node_decode(saved.nodes, 0, visited, tree, false) {layout.destroy(tree); return false}
 	for reached in visited {if !reached {layout.destroy(tree); return false}}
 	tree.root = 0
 	focus := saved.focus
@@ -382,6 +393,7 @@ layout_node_decode :: proc(
 	index: int,
 	visited: []bool,
 	tree: ^layout.Layout,
+	in_slot: bool,
 ) -> bool {
 	if index < 0 || index >= len(saved) || visited[index] {return false}
 	visited[index] = true
@@ -392,21 +404,30 @@ layout_node_decode :: proc(
 		tree.nodes[index] = layout.Pane {
 			content = {kind = node.content},
 			order   = tree.next_pane_order,
-			linked  = node.linked && node.content == .Terminal,
+			linked  = node.linked && !in_slot && node.content == .Terminal,
 		}
 		return true
 	}
 	if node.axis != .Horizontal && node.axis != .Vertical {return false}
 	if math.is_nan(node.ratio) {return false}
-	if !layout_node_decode(saved, node.first, visited, tree) ||
-	   !layout_node_decode(saved, node.second, visited, tree) {
+	// A slot holds no slots, and only terminals can have a linked window.
+	linked := node.linked && !in_slot
+	if !layout_node_decode(saved, node.first, visited, tree, in_slot || linked) ||
+	   !layout_node_decode(saved, node.second, visited, tree, in_slot || linked) {
 		return false
+	}
+	if linked {
+		panes := make([dynamic]layout.Content, context.temp_allocator)
+		layout.contents(tree, layout.Node_Id(node.first), &panes)
+		layout.contents(tree, layout.Node_Id(node.second), &panes)
+		for pane in panes {linked &&= pane.kind == .Terminal}
 	}
 	tree.nodes[index] = layout.Split {
 		axis   = node.axis,
 		ratio  = clamp(node.ratio, 0.05, 0.95),
 		first  = layout.Node_Id(node.first),
 		second = layout.Node_Id(node.second),
+		linked = linked,
 	}
 	return true
 }

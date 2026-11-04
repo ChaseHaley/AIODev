@@ -35,6 +35,15 @@ pane_window_source_allows :: proc(workspace: ^Workspace) -> bool {
 	return false
 }
 
+// Whether the pane can leave for a window of its own: its workspace keeps content, and its tab keeps a
+// pane it can show when the pane is not already linked.
+@(require_results)
+pane_window_source_can_lose :: proc(app: ^App, source: ^Tab, node: layout.Node_Id) -> bool {
+	home, linked, found := pane_link_origin(app, source, node)
+	if !found || !pane_window_source_allows(home.workspace) {return false}
+	return linked || pane_link_tab_can_lose(home.tab)
+}
+
 // Preview tabs borrow their source runtime; discarding one must never close its session.
 @(private)
 pane_preview_workspace_discard :: proc(app: ^App, workspace: ^Workspace) {
@@ -58,13 +67,16 @@ pane_window_preview_discard :: proc(app: ^App, id: platform.Window_Id) {
 // Prepares the hidden destination window of a tear-off, proving the pane fits before the drop.
 @(require_results)
 pane_window_preview_create :: proc(app: ^App, source: ^Tab, node: layout.Node_Id) -> ^Window {
-	source_workspace := pane_source_workspace(app, source)
+	home, linked, found := pane_link_origin(app, source, node)
+	if !found {return nil}
+	source_workspace := home.workspace
 	if !pane_window_source_allows(source_workspace) {return nil}
+	if !linked && !pane_link_tab_can_lose(home.tab) {return nil}
 	pane, valid := workspace_pane_at(
 		app,
 		source_workspace,
-		tab_index_by_id(source_workspace, source.id),
-		node,
+		tab_index_by_id(source_workspace, home.tab.id),
+		home.node,
 	)
 	if !valid {return nil}
 	workspace := workspace_create_empty(app, true)
@@ -74,8 +86,8 @@ pane_window_preview_create :: proc(app: ^App, source: ^Tab, node: layout.Node_Id
 	tab, record_error := tab_record_reserve(workspace)
 	if record_error != .None {return nil}
 	if layout.init(&tab.tree, pane.content) != nil {tab_record_free(tab); return nil}
-	if node == source.tree.root && source.name != "" {
-		name, name_error := strings.clone(source.name)
+	if home.node == home.tab.tree.root && home.tab.name != "" {
+		name, name_error := strings.clone(home.tab.name)
 		if name_error != nil {tab_record_free(tab); return nil}
 		tab.name = name
 	}
@@ -177,32 +189,40 @@ pane_to_window :: proc(
 	preview_id: platform.Window_Id,
 ) -> bool {
 	preview := window_find(app, preview_id)
-	workspace := pane_source_workspace(app, source)
+	home, linked, found := pane_link_origin(app, source, node)
+	if !found {return false}
+	workspace := home.workspace
 	if preview == nil ||
 	   !preview.preparing ||
-	   workspace == nil || source_window.workspace != workspace ||
+	   workspace == nil ||
+	   !(source_window.workspace == workspace ||
+			   (source_window.linked && source_window.link_workspace == workspace.id)) ||
 	   !pane_window_source_allows(workspace) {
 		return false
 	}
+	if !linked && !pane_link_tab_can_lose(home.tab) {return false}
 	pane, valid := workspace_pane_at(
 		app,
 		workspace,
-		tab_index_by_id(workspace, source.id),
-		node,
+		tab_index_by_id(workspace, home.tab.id),
+		home.node,
 	)
 	destination := selected_tab(preview.workspace)
 	if !valid ||
 	   destination == nil ||
 	   destination.tree.nodes[destination.tree.root].(layout.Pane).content !=
 		   pane.content {return false}
-	layout_pane := source.tree.nodes[node].(layout.Pane)
+	layout_pane := home.tab.tree.nodes[home.node].(layout.Pane)
+	// A pane that leaves its slot joins an ordinary window, where it must be shown.
+	layout_pane.linked = false
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
 	name := workspace_default_name(app)
 	if name == "" {return false}
-	move := pane_move_begin(app, preview, source, workspace)
-	if !layout.remove(&source.tree, node) {
+	was_linked := source_window.linked
+	move := pane_move_begin(app, preview, home.tab, workspace)
+	if !layout.remove(&home.tab.tree, home.node) {
 		delete(name)
 		pane_move_abort(app, move)
 		return false
@@ -214,6 +234,7 @@ pane_to_window :: proc(
 	preview.workspace.name = name
 	workspace_pickers_refresh(app)
 	pane_move_finish(app, move, destination)
+	if was_linked {pane_link_refresh_source(app, source_window, pane.content)}
 	if !window_show_prepared(app, preview) {return false}
 	_ = window_activate(app, preview)
 	return true

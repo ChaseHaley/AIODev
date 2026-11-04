@@ -49,7 +49,7 @@ try {
         $_ -match '^pane\.\d+\.rect$' -and $_ -ne "pane.$($splitState['panes.focused']).rect"
     } | Select-Object -First 1
     $inactiveRect = $splitState[$inactive] -split ',' | ForEach-Object { [double]$_ }
-    Invoke-Aio mouse click "$([int]($inactiveRect[0]+$inactiveRect[2]-64)),$([int]($inactiveRect[1]+14))" --px
+    Invoke-Aio mouse click "$([int]($inactiveRect[0]+$inactiveRect[2]-112)),$([int]($inactiveRect[1]+14))" --px
     Invoke-Aio expect state panes.count=3
     Invoke-Aio command pane.close
     Invoke-Aio expect state panes.count=2
