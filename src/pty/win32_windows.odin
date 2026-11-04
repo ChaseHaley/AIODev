@@ -77,6 +77,7 @@ JOBOBJECT_EXTENDED_LIMIT_INFORMATION :: struct {
 
 @(private, default_calling_convention = "system")
 foreign kernel32 {
+	CancelSynchronousIo :: proc(hThread: w.HANDLE) -> w.BOOL ---
 	CreatePseudoConsole :: proc(size: w.COORD, hInput, hOutput: w.HANDLE, dwFlags: w.DWORD, phPC: ^HPCON) -> w.HRESULT ---
 	ResizePseudoConsole :: proc(hPC: HPCON, size: w.COORD) -> w.HRESULT ---
 	ClosePseudoConsole :: proc(hPC: HPCON) ---
