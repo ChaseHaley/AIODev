@@ -101,15 +101,15 @@ try {
     Invoke-Aio command pane.split_right | Out-Null
     Invoke-Aio wait text 'PS ' | Out-Null
     Invoke-Aio command window.new | Out-Null
-    Invoke-Aio expect state rename.open=true | Out-Null
-    Invoke-Aio type FocusSecond | Out-Null
-    Invoke-Aio key Enter | Out-Null
-    Invoke-Aio wait text 'PS ' | Out-Null
     $s = Read-State
     $second = @($s.Keys | Where-Object { $_ -match '^window\.\d+\.id$' } |
         ForEach-Object { $s[$_] } | Where-Object { $_ -ne $first })[0]
     if (-not $second) { throw 'Second window was not created.' }
     Select-Window $second
+    Invoke-Aio expect state rename.open=true | Out-Null
+    Invoke-Aio type FocusSecond | Out-Null
+    Invoke-Aio key Enter | Out-Null
+    Invoke-Aio wait text 'PS ' | Out-Null
     Invoke-Aio command pane.split_right | Out-Null
     Invoke-Aio wait text 'PS ' | Out-Null
     Invoke-Aio window move '700,100' | Out-Null
