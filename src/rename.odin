@@ -10,9 +10,6 @@ import "core:strings"
 // A tab or pane renames in a dialog; a workspace names in place, in its chip.
 Rename_Mode :: enum {Rename, Workspace}
 
-@(private = "file")
-CHIP_FIELD_WIDTH :: f32(256)
-
 // Renames tab `index`, or the focused pane when tab_name is false.
 rename_open :: proc(app: ^App, w: ^Window, tab_name: bool, index: int) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
@@ -84,11 +81,7 @@ rename_metrics :: proc(w: ^Window) -> (heading, hint: ui.Text) {
 
 rename_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
-	if w.rename_mode == .Workspace {
-		chip := workspace_button_rect(w)
-		chip.width = max(chip.width, min(CHIP_FIELD_WIDTH * s, f32(w.width) - chip.x - ui.SPACE_2 * s))
-		return chip
-	}
+	if w.rename_mode == .Workspace {return workspace_button_rect(w)}
 	heading, hint := rename_metrics(w)
 	height :=
 		2 * ui.DIALOG_PADDING * s +
@@ -108,6 +101,7 @@ rename_rect :: proc(w: ^Window) -> render.Rect {
 rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	r, s := rename_rect(w), w.scale
 	if w.rename_mode == .Workspace {
+		// The field's inset puts the text exactly where the chip draws its label.
 		lead := (ui.CONTROL_INSET + ui.ICON_BUTTON) * s
 		return {r.x + lead, r.y, max(1, r.width - lead), r.height}
 	}
@@ -140,7 +134,7 @@ rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
 	w.dirty = true
 }
 
-// The chip grows in place over the tab strip, so nothing else in the window moves while naming.
+// The chip keeps its shape and size: its chevron gives way to a field holding the name.
 @(private = "file")
 workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	s := w.scale
@@ -148,8 +142,6 @@ workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	radius := ui.RADIUS_CONTROL * s
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	if render.push_rect(&w.list, {rect = r, color = app.theme.pane, radius = radius}) != .None {return .Ok}
-	frame := render.Rect_Instance{rect = r, color = app.theme.accent, radius = radius, stroke = s}
-	if render.push_rect(&w.list, frame) != .None {return .Ok}
 	size := ui.ICON_BUTTON * s
 	icon := render.Rect{r.x + ui.CONTROL_INSET * s, r.y + (r.height - size) / 2, size, size}
 	if result := workspace_icon_draw(w, w.workspace.icon, icon, app.theme.text); result != .Ok {return result}

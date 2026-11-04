@@ -157,7 +157,8 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	width := workspace_button_width(w)
 	if width <= 12 * w.scale {return .Ok}
 	r := workspace_button_rect(w)
-	hover := w.workspace_motion.hover.value
+	// While the chip holds the name field it stays flat, so nothing shows around the field.
+	hover := w.rename_open && w.rename_mode == .Workspace ? 0 : w.workspace_motion.hover.value
 	lift := ui.hover_lift_at(app.theme, hover, w.scale)
 	r.y -= lift
 	if render.push_layer(&w.list, {0, 0, width, ui.TITLE_BAR_HEIGHT * w.scale}) != .None {return .Ok}
