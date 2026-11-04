@@ -118,14 +118,18 @@ when AIO_CONTROL {
 
 	verify_window :: proc(app: ^App) -> ^Window {
 		if app.verify.target_window != 0 {
-			if w := window_find(app, app.verify.target_window); w != nil {return w}
-			app.verify.target_window = 0
-			app.verify.mouse_window, app.verify.buttons = 0, {}
+			if w := window_find(app, app.verify.target_window); w != nil {
+				// A hidden linked window presents no frames, so it cannot answer; the selection waits.
+				if !w.linked || w.link_shown {return w}
+			} else {
+				app.verify.target_window = 0
+				app.verify.mouse_window, app.verify.buttons = 0, {}
+			}
 		}
 		for w in app.windows {
 			if w.focused {return w}
 		}
-		return len(app.windows) > 0 ? app.windows[0] : nil
+		return window_primary(app)
 	}
 
 	verify_presented :: proc(app: ^App, w: ^Window) {
@@ -169,6 +173,7 @@ when AIO_CONTROL {
 		}
 		if v.pending == nil {return {}, false}
 		for w in app.windows {
+			if w.linked && !w.link_shown {continue}
 			if w.dirty && w.width > 0 && w.height > 0 {return now, true}
 		}
 		deadline := time.tick_add(
@@ -294,7 +299,7 @@ when AIO_CONTROL {
 			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
 			{"app.settings", app.settings_path},
 			{"app.log", app.log_path},
-			{"window.visible", fmt.tprintf("%t", len(app.windows) > 0)},
+			{"window.visible", fmt.tprintf("%t", window_primary(app) != nil)},
 			{"windows.count", fmt.tprintf("%d", len(app.windows))},
 			{"palette.window", fmt.tprintf("%d", app.palette_window)},
 			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
@@ -347,6 +352,8 @@ when AIO_CONTROL {
 					fmt.tprintf("%d", verify_workspace_index(app, window)),
 				},
 				{fmt.tprintf("%s.preparing", prefix), fmt.tprintf("%t", window.preparing)},
+				{fmt.tprintf("%s.linked", prefix), fmt.tprintf("%t", window.linked)},
+				{fmt.tprintf("%s.link_shown", prefix), fmt.tprintf("%t", window.link_shown)},
 				{
 					fmt.tprintf("%s.preview_visible", prefix),
 					fmt.tprintf("%t", window.preview_visible),
@@ -1202,7 +1209,7 @@ when AIO_CONTROL {
 				w.metrics,
 				u16(r.columns),
 				u16(r.rows),
-				pane_insets(app, w.scale, focused_session(app, w)),
+				window_pane_insets(app, w, focused_session(app, w)),
 				w.rail_width > 0 ? w.rail_width : f32(app.settings.tabs.rail_width),
 			)
 			if platform.window_set_client_size(&app.platform, w.id, width, height) !=

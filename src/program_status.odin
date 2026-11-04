@@ -384,7 +384,7 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 		notify(app, kind, fmt.tprintf("%s: %s", title, text))
 	}
 	target := window_for_workspace(app, status_workspace_of(app, entry.id))
-	if target == nil && len(app.windows) > 0 {target = app.windows[0]}
+	if target == nil {target = window_primary(app)}
 	if c.flash && target != nil && !target.focused &&
 	   platform_api.window_flash(&app.platform, target.id) != .None {
 		log.error("flashing the window for program status failed")
@@ -394,10 +394,10 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 // A click on a status notification jumps to the pane that sent it, reopening a window if all
 // were hidden to the tray.
 status_notification_clicked :: proc(app: ^App, session: u32) {
-	if len(app.windows) == 0 {show_window(app)}
-	if len(app.windows) == 0 {return}
+	if window_primary(app) == nil {show_window(app)}
+	if window_primary(app) == nil {return}
 	target := window_for_workspace(app, status_workspace_of(app, session))
-	if target == nil {target = app.windows[0]}
+	if target == nil {target = window_primary(app)}
 	if !window_activate(app, target) {return}
 	if !status_reveal(app, target, session) {notify(app, .Error, "Could not show that pane.")}
 }

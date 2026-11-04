@@ -152,6 +152,11 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 
 pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	if w.tree.focus == node {return}
+	// Status, jumps and scripts name a pane wherever it is; a linked one takes focus in its own window.
+	if pane, is_pane := w.tree.nodes[node].(layout.Pane); is_pane && pane.linked {
+		if linked := pane_link_window_of(app, pane.content); linked != nil {linked.link_activate = true}
+		return
+	}
 	focus_leave(app, w)
 	w.tree.focus = node
 	if pane_view_solo(w) {window_relayout(app, w)}
@@ -615,6 +620,13 @@ tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {
 }
 
 pane_close :: proc(app: ^App, w: ^Window) {
+	if w.linked {
+		home, found := pane_link_home(app, pane_link_content(w))
+		if found {
+			pane_close_at(app, home.workspace, tab_index_by_id(home.workspace, home.tab.id), home.node)
+		}
+		return
+	}
 	pane_close_at(app, w.workspace, w.workspace.selected, w.tree.focus)
 }
 

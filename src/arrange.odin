@@ -453,7 +453,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	   y < f32(w.height) {
 		destination, tx, ty = w, i32(x), i32(y)
 	}
-	if destination != nil && destination.preparing {destination = nil}
+	if destination != nil && (destination.preparing || destination.linked) {destination = nil}
 	previous := d.destination_window
 	if previous == w.id && destination != w && selected_tab(w.workspace) != d.source {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}

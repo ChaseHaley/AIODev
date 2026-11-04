@@ -4,6 +4,7 @@ import "aio:glyphs"
 import "aio:render"
 
 TITLE_BAR_HEIGHT :: f32(40)
+CAPTION_WIDTH :: f32(138)
 
 // The title chrome claims pointer input over this height for its caption controls. The
 // claim is hit before any floating surface placed after the chrome, so such a surface
@@ -14,8 +15,8 @@ caption_claim_height :: proc(scale: f32) -> f32 {
 }
 
 caption_hit :: proc(width, x, y, scale: f32) -> int {
-	if y < 0 || y >= caption_claim_height(scale) || x < width - 138 * scale || x >= width {return -1}
-	return clamp(int((x - width + 138 * scale) / (46 * scale)), 0, 2)
+	if y < 0 || y >= caption_claim_height(scale) || x < width - CAPTION_WIDTH * scale || x >= width {return -1}
+	return clamp(int((x - width + CAPTION_WIDTH * scale) / (46 * scale)), 0, 2)
 }
 
 caption_draw :: proc(

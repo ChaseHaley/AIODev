@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:platform"
 import "aio:pty"
 import "core:encoding/json"
 import "core:log"
@@ -54,6 +55,9 @@ Saved_Node :: struct {
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
+	linked:    bool,
+	// A linked pane's window, as a slice because only an empty one is left out of the file.
+	window:    []platform.Window_Placement `json:"window,omitempty"`,
 }
 
 // Schedules a save check; repeated calls before it runs coalesce into one.
@@ -138,7 +142,18 @@ layout_node_encode :: proc(
 	case layout.Vacant:
 		return -1
 	case layout.Pane:
-		append(nodes, layout_pane_encode(app, node.content, processes))
+		saved := layout_pane_encode(app, node.content, processes)
+		if node.linked {
+			saved.linked = true
+			if linked := pane_link_window_of(app, node.content); linked != nil {
+				if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
+					window := make([]platform.Window_Placement, 1, context.temp_allocator)
+					window[0] = placement
+					saved.window = window
+				}
+			}
+		}
+		append(nodes, saved)
 		if id == tree.focus {focus^ = index}
 	case layout.Split:
 		append(nodes, Saved_Node{split = true, axis = node.axis, ratio = node.ratio})
@@ -296,6 +311,10 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 	}
 	if name, err := strings.clone(saved.name); err == nil {tab.name = name}
 	tab_record_commit(app, workspace, tab)
+	for node, i in tab.tree.nodes {
+		pane := node.(layout.Pane) or_continue
+		if pane.linked {pane_link_restore(app, workspace, tab, layout.Node_Id(i), saved.nodes[i].window)}
+	}
 	return true
 }
 
@@ -353,6 +372,7 @@ layout_tree_decode :: proc(saved: ^Saved_Tab, tree: ^layout.Layout) -> bool {
 	}
 	tree.focus = layout.Node_Id(focus)
 	tree.zoomed = saved.zoomed
+	layout.links_repair(tree)
 	return true
 }
 
@@ -369,7 +389,11 @@ layout_node_decode :: proc(
 	if !node.split {
 		if node.content != .Terminal && node.content != .Settings {return false}
 		tree.next_pane_order += 1
-		tree.nodes[index] = layout.Pane{content = {kind = node.content}, order = tree.next_pane_order}
+		tree.nodes[index] = layout.Pane {
+			content = {kind = node.content},
+			order   = tree.next_pane_order,
+			linked  = node.linked && node.content == .Terminal,
+		}
 		return true
 	}
 	if node.axis != .Horizontal && node.axis != .Vertical {return false}

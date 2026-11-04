@@ -111,7 +111,7 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 
 workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
 	owner := w
-	if owner == nil && len(app.windows) > 0 {owner = app.windows[0]}
+	if owner == nil {owner = window_primary(app)}
 	if owner == nil {return}
 	if w == nil && !window_activate(app, owner) {return}
 	workspace_name_open(app, owner, new_window ? .New_Window : .New_Workspace)

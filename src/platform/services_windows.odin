@@ -7,6 +7,54 @@ import w "core:sys/windows"
 import "core:unicode/utf16"
 import "aio:links"
 
+// A window's restored rectangle in workspace coordinates, and whether it is maximized over it.
+Window_Placement :: struct {
+	left, top, right, bottom: i32,
+	maximized:                bool,
+}
+
+// Keeps the window's maximized state and raises it above other applications without taking focus.
+@(require_results)
+window_show_raised :: proc(p: ^Platform, id: Window_Id) -> Error {
+	window := find_window(p, id)
+	if window == nil {return .Invalid_Window}
+	flags := u32(w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW)
+	if !os_ok(w.SetWindowPos(window.hwnd, w.HWND_TOP, 0, 0, 0, 0, flags), "SetWindowPos(raise)") {return .Os}
+	return .None
+}
+
+window_maximize :: proc(p: ^Platform, id: Window_Id) {
+	if window := find_window(p, id); window != nil {w.ShowWindow(window.hwnd, w.SW_MAXIMIZE)}
+}
+
+@(require_results)
+window_placement :: proc(p: ^Platform, id: Window_Id) -> (Window_Placement, Error) {
+	window := find_window(p, id)
+	if window == nil {return {}, .Invalid_Window}
+	placement := w.WINDOWPLACEMENT {
+		length = size_of(w.WINDOWPLACEMENT),
+	}
+	if !os_ok(w.GetWindowPlacement(window.hwnd, &placement), "GetWindowPlacement") {return {}, .Os}
+	r := placement.rcNormalPosition
+	return {r.left, r.top, r.right, r.bottom, bool(w.IsZoomed(window.hwnd))}, .None
+}
+
+// Moves a hidden window to its restored rectangle and leaves it hidden. Windows pulls the rectangle back
+// on screen if its monitor has gone. Maximizing waits until the window is shown.
+@(require_results)
+window_set_placement :: proc(p: ^Platform, id: Window_Id, target: Window_Placement) -> Error {
+	window := find_window(p, id)
+	if window == nil {return .Invalid_Window}
+	placement := w.WINDOWPLACEMENT {
+		length = size_of(w.WINDOWPLACEMENT),
+	}
+	if !os_ok(w.GetWindowPlacement(window.hwnd, &placement), "GetWindowPlacement") {return .Os}
+	placement.showCmd = u32(w.SW_HIDE)
+	placement.rcNormalPosition = {target.left, target.top, target.right, target.bottom}
+	if !os_ok(w.SetWindowPlacement(window.hwnd, &placement), "SetWindowPlacement") {return .Os}
+	return .None
+}
+
 @(require_results)
 window_show_inactive :: proc(p: ^Platform, id: Window_Id) -> Error {
 	window := find_window(p, id)

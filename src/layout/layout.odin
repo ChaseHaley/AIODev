@@ -39,6 +39,8 @@ Divider :: struct {
 Pane :: struct {
 	content: Content,
 	order:   u64,
+	// Shown in its own window. The pane keeps its slot and takes no space here; see set_linked.
+	linked:  bool,
 }
 
 Split :: struct {
@@ -297,9 +299,66 @@ balance :: proc(l: ^Layout) {
 }
 
 @(private)
-first_pane :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
-	if s, ok := l.nodes[id].(Split); ok {return first_pane(l, s.first)}
-	return id
+first_shown :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
+	switch node in l.nodes[id] {
+	case Vacant:
+	case Pane:
+		if !node.linked {return id}
+	case Split:
+		if found := first_shown(l, node.first); found != INVALID_NODE {return found}
+		return first_shown(l, node.second)
+	}
+	return INVALID_NODE
+}
+
+@(private)
+shown_count :: proc(l: ^Layout, id: Node_Id) -> int {
+	switch node in l.nodes[id] {
+	case Vacant:
+	case Pane:
+		return node.linked ? 0 : 1
+	case Split:
+		return shown_count(l, node.first) + shown_count(l, node.second)
+	}
+	return 0
+}
+
+// Whether both sides of a split take space, which is what gives it a divider and a ratio that shows.
+@(private)
+split_divides :: proc(l: ^Layout, s: Split) -> bool {
+	return first_shown(l, s.first) != INVALID_NODE && first_shown(l, s.second) != INVALID_NODE
+}
+
+// Moves a pane to or from its own window. Its slot stays, so it returns exactly where it was. A tree must
+// keep one pane it can show and focus, so the last shown pane cannot leave.
+@(require_results)
+set_linked :: proc(l: ^Layout, node: Node_Id, linked: bool) -> bool {
+	if int(node) >= len(l.nodes) {return false}
+	pane, ok := l.nodes[node].(Pane)
+	if !ok || pane.linked == linked {return false}
+	if linked && (l.root == INVALID_NODE || shown_count(l, l.root) <= 1) {return false}
+	sibling, _, _, _, placed := placement(l, node)
+	pane.linked = linked
+	l.nodes[node] = pane
+	if linked && l.focus == node {l.focus = placed ? first_shown(l, sibling) : INVALID_NODE}
+	links_repair(l)
+	panes_changed(l)
+	return true
+}
+
+// Restores what the rest of the package relies on: some pane is shown, and focus is on a shown pane. Panes
+// return from their windows when none would be left, as when the last shown pane closes.
+links_repair :: proc(l: ^Layout) {
+	if l.root == INVALID_NODE {return}
+	if first_shown(l, l.root) == INVALID_NODE {
+		for &node in l.nodes {
+			if pane, ok := &node.(Pane); ok {pane.linked = false}
+		}
+	}
+	if int(l.focus) < len(l.nodes) {
+		if pane, ok := l.nodes[l.focus].(Pane); ok && !pane.linked {return}
+	}
+	l.focus = first_shown(l, l.root)
 }
 
 @(require_results)
@@ -321,10 +380,11 @@ remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 			if s.first == parent {s.first = sibling} else {s.second = sibling}
 			l.nodes[grandparent] = s
 		}
-		if l.focus == node {l.focus = first_pane(l, sibling)}
+		if l.focus == node {l.focus = first_shown(l, sibling)}
 		l.nodes[parent] = Vacant{}
 	}
 	l.nodes[node] = Vacant{}
+	links_repair(l)
 	return true
 }
 
@@ -371,7 +431,7 @@ resize :: proc(l: ^Layout, node: Node_Id, axis: Axis, delta: f32) -> bool {
 	parent := parent_of(l, node)
 	for parent != INVALID_NODE {
 		s := l.nodes[parent].(Split)
-		if s.axis == axis {
+		if s.axis == axis && split_divides(l, s) {
 			s.ratio = clamp(s.ratio + delta, 0.05, 0.95)
 			l.nodes[parent] = s
 			return true
@@ -392,7 +452,7 @@ resize_pixels :: proc(
 	parent := parent_of(l, node)
 	for parent != INVALID_NODE {
 		s := l.nodes[parent].(Split)
-		if s.axis == axis {
+		if s.axis == axis && split_divides(l, s) {
 			for d in dividers {
 				if d.node != parent {continue}
 				p := partition(d.area, axis, s.ratio, extent(d.rect, axis))
@@ -471,8 +531,12 @@ place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane
 	switch node in l.nodes[id] {
 	case Vacant:
 	case Pane:
-		append(out, Pane_Rect{id, node.content, area, node.order})
+		if !node.linked {append(out, Pane_Rect{id, node.content, area, node.order})}
 	case Split:
+		if !split_divides(l, node) {
+			place(l, first_shown(l, node.first) != INVALID_NODE ? node.first : node.second, area, gap, out)
+			return
+		}
 		p := partition(area, node.axis, node.ratio, gap)
 		place(l, node.first, p.first, gap, out)
 		place(l, node.second, p.second, gap, out)
@@ -487,6 +551,11 @@ dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 @(private)
 place_dividers :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 	if s, ok := l.nodes[id].(Split); ok {
+		if !split_divides(l, s) {
+			shown := first_shown(l, s.first) != INVALID_NODE ? s.first : s.second
+			place_dividers(l, shown, area, gap, out)
+			return
+		}
 		p := partition(area, s.axis, s.ratio, gap)
 		append(out, Divider{id, s.axis, area, p.bar})
 		place_dividers(l, s.first, p.first, gap, out)
@@ -555,16 +624,19 @@ run_units :: proc(l: ^Layout, id: Node_Id, axis: Axis) -> int {
 	if s, ok := l.nodes[id].(Split); ok && s.axis == axis {
 		return run_units(l, s.first, axis) + run_units(l, s.second, axis)
 	}
-	return 1
+	return first_shown(l, id) != INVALID_NODE ? 1 : 0
 }
 
 @(private)
 balance_run :: proc(l: ^Layout, id: Node_Id, axis: Axis) {
 	s, ok := l.nodes[id].(Split)
 	if !ok || s.axis != axis {return}
-	first := run_units(l, s.first, axis)
-	s.ratio = clamp(f32(first) / f32(first + run_units(l, s.second, axis)), 0.05, 0.95)
-	l.nodes[id] = s
+	first, second := run_units(l, s.first, axis), run_units(l, s.second, axis)
+	// A side in its own window keeps the share it returns to.
+	if first > 0 && second > 0 {
+		s.ratio = clamp(f32(first) / f32(first + second), 0.05, 0.95)
+		l.nodes[id] = s
+	}
 	balance_run(l, s.first, axis)
 	balance_run(l, s.second, axis)
 }
@@ -586,7 +658,8 @@ move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (N
 	   int(node) >= len(l.nodes) ||
 	   int(target) >= len(l.nodes) {return INVALID_NODE, false}
 	pane, ok := l.nodes[node].(Pane)
-	if _, target_ok := l.nodes[target].(Pane); !ok || !target_ok {return INVALID_NODE, false}
+	target_pane, target_ok := l.nodes[target].(Pane)
+	if !ok || !target_ok || target_pane.linked {return INVALID_NODE, false}
 	focused := l.focus == node
 	if !remove(l, node) {return INVALID_NODE, false}
 	added := place_pane(l, target, pane, direction)
@@ -618,7 +691,8 @@ place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction
 dock_pane :: proc(l: ^Layout, node: Node_Id, direction: Direction) -> (Node_Id, bool) {
 	if node == l.root || int(node) >= len(l.nodes) {return INVALID_NODE, false}
 	pane, ok := l.nodes[node].(Pane)
-	if !ok {return INVALID_NODE, false}
+	// Removing the only shown pane would bring linked panes back; docking has nothing to dock beside.
+	if !ok || shown_count(l, l.root) <= 1 {return INVALID_NODE, false}
 	focused := l.focus == node
 	if !remove(l, node) {return INVALID_NODE, false}
 	added := place_pane(l, l.root, pane, direction)

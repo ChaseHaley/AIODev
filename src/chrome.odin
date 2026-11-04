@@ -62,6 +62,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		w.maximized,
 		w.pointer,
 	); result != .Ok {return result}
+	if w.linked {return pane_link_title_draw(app, w)}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
 	if result := status_pill_draw(app, w); result != .Ok {return result}
 	title_actions_draw(app, w)
