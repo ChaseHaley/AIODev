@@ -28,9 +28,29 @@ FLASHWINFO :: struct {
 
 HKL :: distinct rawptr
 
+DWM_TNP_RECTDESTINATION :: 0x01
+DWM_TNP_RECTSOURCE :: 0x02
+DWM_TNP_VISIBLE :: 0x08
+DWM_TNP_SOURCECLIENTAREAONLY :: 0x10
+DWMWCP_ROUND :: 2
+SS_BLACKRECT :: 0x04
+
+// dwmapi.h declares this structure with one-byte packing.
+DWM_THUMBNAIL_PROPERTIES :: struct #packed {
+	dwFlags:               w.DWORD,
+	rcDestination:         w.RECT,
+	rcSource:              w.RECT,
+	opacity:               w.BYTE,
+	fVisible:              w.BOOL,
+	fSourceClientAreaOnly: w.BOOL,
+}
+
 @(default_calling_convention = "system")
 foreign dwmapi {
 	DwmDefWindowProc :: proc(hwnd: w.HWND, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM, result: ^w.LRESULT) -> w.BOOL ---
+	DwmRegisterThumbnail :: proc(destination, source: w.HWND, thumbnail: ^w.HANDLE) -> w.HRESULT ---
+	DwmUnregisterThumbnail :: proc(thumbnail: w.HANDLE) -> w.HRESULT ---
+	DwmUpdateThumbnailProperties :: proc(thumbnail: w.HANDLE, properties: ^DWM_THUMBNAIL_PROPERTIES) -> w.HRESULT ---
 }
 
 @(default_calling_convention = "system")

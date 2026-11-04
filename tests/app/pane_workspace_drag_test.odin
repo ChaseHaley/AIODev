@@ -7,6 +7,7 @@ import "core:testing"
 import app "../../src"
 import "aio:platform"
 import "aio:term"
+import "aio:ui"
 
 @(test)
 pane_drag_dropdown_preserves_runtime_for_each_destination :: proc(t: ^testing.T) {
@@ -52,12 +53,13 @@ pane_drag_dropdown_preserves_runtime_for_each_destination :: proc(t: ^testing.T)
 		app.handle_event(&state, platform.Mouse_Button_Event{window = w.id,
 			x = point.x, y = point.y, button = .Left, pressed = false})
 		testing.expect(t, !w.pane_drag.active && !app.workspace_picker_active(&w.workspace_picker))
-		if destination != 0 {
-			testing.expect(t, w.rename_open)
-			testing.expect_value(t, app.tab_pane_count(tab), 2)
-			app.rename_finish(&state, w, true)
-		}
 		owner := destination == 2 ? state.windows[len(state.windows) - 1] : w
+		// A new destination exists at once, with its suggested name open for editing in its own chip.
+		if destination != 0 {
+			testing.expect(t, owner.rename_open && owner.rename_mode == .Workspace)
+			testing.expect_value(t, ui.field_selected_text(&owner.rename), owner.workspace.name)
+			app.rename_finish(&state, owner, true)
+		}
 		testing.expect(t, owner.workspace != source)
 		testing.expect_value(t, app.focused_session(&state, owner).session, runtime)
 		testing.expect_value(t, term.process_id(runtime), pid)

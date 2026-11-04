@@ -37,7 +37,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	geometry := term.geometry(session)
 	workspace_id := state.next_workspace_id
 	tab_id := source_workspace.next_tab_id
-	last_preview := app.pane_window_preview_create(&state, source, node, 80, 80)
+	last_preview := app.pane_window_preview_create(&state, source, node)
 	testing.expect(t, last_preview == nil)
 	if last_preview != nil { app.pane_window_preview_discard(&state, last_preview.id) }
 	testing.expect_value(t, state.next_workspace_id, workspace_id)
@@ -57,12 +57,12 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	app.run_action(&state, source_window, .Settings_UI)
 	settings_tab := app.selected_tab(source_workspace)
 	workspace_id = state.next_workspace_id
-	settings_preview := app.pane_window_preview_create(&state, settings_tab, settings_tab.tree.root, 80, 80)
+	settings_preview := app.pane_window_preview_create(&state, settings_tab, settings_tab.tree.root)
 	if !testing.expect(t, settings_preview != nil) { return }
 	app.pane_window_preview_discard(&state, settings_preview.id)
 	testing.expect(t, state.next_workspace_id > workspace_id)
 	testing.expect_value(t, len(state.workspaces), 1)
-	settings_preview = app.pane_window_preview_create(&state, source, node, 80, 80)
+	settings_preview = app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, settings_preview != nil) { return }
 	app.pane_window_preview_discard(&state, settings_preview.id)
 	app.tab_close(&state, source_window, 1)
@@ -71,7 +71,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	if !testing.expect(t, app.tab_create(&state, source_workspace)) { return }
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
-	failed := app.pane_window_preview_create(&state, source, node, 80, 80)
+	failed := app.pane_window_preview_create(&state, source, node)
 	context.allocator = allocator
 	testing.expect(t, failed == nil)
 	testing.expect_value(t, len(state.windows), 1)
@@ -79,7 +79,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, source.tree.root, node)
 	minimum := state.settings.pane.minimum_columns
 	state.settings.pane.minimum_columns = 10_000
-	failed = app.pane_window_preview_create(&state, source, node, 80, 80)
+	failed = app.pane_window_preview_create(&state, source, node)
 	state.settings.pane.minimum_columns = minimum
 	testing.expect(t, failed == nil)
 	testing.expect(t, state.next_workspace_id > workspace_id)
@@ -87,7 +87,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, term.geometry(session), geometry)
 	testing.expect_value(t, term.process_id(session), pid)
-	preview := app.pane_window_preview_create(&state, source, node, 80, 80)
+	preview := app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, preview != nil) { return }
 	testing.expect(t, preview.preparing)
 	testing.expect_value(t, preview.workspace.name, "")
@@ -101,11 +101,6 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(preview.views), 0)
 	testing.expect_value(t, term.geometry(session), geometry)
 	app.window_set_dpi(&state, preview, 96)
-	testing.expect(t, app.pane_window_preview_hide(&state, preview.id))
-	testing.expect(t, !preview.preview_visible && preview.preparing)
-	testing.expect_value(t, term.geometry(session), geometry)
-	testing.expect(t, app.window_show_prepared(&state, preview))
-	testing.expect(t, preview.preview_visible && preview.preparing)
 	preview_id := preview.id
 	preview_workspace_id := preview.workspace.id
 	app.pane_window_preview_discard(&state, preview_id)
@@ -114,7 +109,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, term.geometry(session), geometry)
-	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
+	preview = app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, preview != nil) { return }
 	app.pane_drag_press(&state, source_window, node, 80, 80)
 	source_window.pane_drag.preview_window = preview.id
@@ -123,7 +118,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, term.geometry(session), geometry)
-	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
+	preview = app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, preview != nil) { return }
 	preview_id = preview.id
 	app.tab_close(&state, source_window, 1)
@@ -143,7 +138,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(state.workspaces), 1)
 	if !testing.expect(t, app.tab_create(&state, source_workspace)) { return }
-	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
+	preview = app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, preview != nil) { return }
 	preview_id = preview.id
 	preview_workspace_id = preview.workspace.id
@@ -154,35 +149,18 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect(t, !failed_commit)
 	testing.expect(t, preview.preparing && preview.workspace.provisional)
 	testing.expect_value(t, source.tree.root, node)
-	// A tear-off asks before changing the source; cancellation releases only the borrowed preview.
+	// The drop moves the pane at once, then names the new window in its own chip.
 	source_window.pane_drag = {source = source, node = node, active = true,
 		shown = true, new_window = true, preview_window = preview_id}
 	testing.expect(t, app.pane_drag_release(&state, source_window))
-	testing.expect(t, source_window.rename_open && source_window.rename_mode == .Tearoff)
-	testing.expect_value(t, source.tree.root, node)
-	app.workspace_new(&state, source_window, false)
-	testing.expect(t, source_window.rename_open && source_window.rename_mode == .New_Workspace)
-	app.rename_finish(&state, source_window, false)
-	testing.expect(t, app.window_find(&state, preview_id) == nil)
-	testing.expect_value(t, term.process_id(session), pid)
-	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
-	if !testing.expect(t, preview != nil) {return}
-	preview_id = preview.id
-	source_window.pane_drag = {source = source, node = node, active = true,
-		shown = true, new_window = true, preview_window = preview_id}
-	testing.expect(t, app.pane_drag_release(&state, source_window))
-	app.rename_open(&state, source_window, true, source_window.workspace.selected)
-	testing.expect(t, source_window.rename_open && source_window.rename_mode == .Rename)
-	testing.expect(t, app.window_find(&state, preview_id) == nil)
-	app.rename_finish(&state, source_window, false)
-	preview = app.pane_window_preview_create(&state, source, node, 100, 100)
-	if !testing.expect(t, preview != nil) {return}
-	preview_id, preview_workspace_id = preview.id, preview.workspace.id
-	source_window.pane_drag = {source = source, node = node, active = true,
-		shown = true, new_window = true, preview_window = preview_id}
-	testing.expect(t, app.pane_drag_release(&state, source_window))
-	_ = ui.field_text(&source_window.rename, "Detached tools")
-	app.rename_finish(&state, source_window, true)
+	testing.expect(t, !source_window.rename_open)
+	testing.expect(t, preview.rename_open && preview.rename_mode == .Workspace)
+	testing.expect_value(t, ui.field_selected_text(&preview.rename), preview.workspace.name)
+	geometry_default := app.initial_geometry(&state)
+	testing.expect_value(t, u32(preview.width), geometry_default.surface_width)
+	testing.expect_value(t, u32(preview.height), geometry_default.surface_height)
+	_ = ui.field_text(&preview.rename, "Detached tools")
+	app.rename_finish(&state, preview, true)
 	testing.expect_value(t, preview.workspace.name, "Detached tools")
 	testing.expect_value(t, len(state.windows), 2)
 	testing.expect(t, app.window_find(&state, preview_id) == preview)

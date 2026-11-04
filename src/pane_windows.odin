@@ -2,11 +2,19 @@ package main
 
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
-import "aio:ui"
 import "core:log"
 import "core:math"
 import "core:strings"
+
+@(private = "file")
+PANE_THUMBNAIL_WIDTH :: f32(300)
+@(private = "file")
+PANE_THUMBNAIL_HEIGHT :: f32(190)
+// The drop places the new window so the pointer rests on its title bar.
+@(private = "file")
+TEAR_OFF_GRAB_X :: f32(160)
+@(private = "file")
+TEAR_OFF_GRAB_Y :: f32(20)
 
 pane_source_workspace :: proc(app: ^App, source: ^Tab) -> ^Workspace {
 	for workspace in app.workspaces {
@@ -47,36 +55,9 @@ pane_window_preview_discard :: proc(app: ^App, id: platform.Window_Id) {
 	}
 }
 
+// Prepares the hidden destination window of a tear-off, proving the pane fits before the drop.
 @(require_results)
-pane_window_preview_hide :: proc(app: ^App, id: platform.Window_Id) -> bool {
-	w := window_find(app, id)
-	if w == nil || !w.preparing {return false}
-	if !w.preview_visible {return true}
-	if platform.window_hide(&app.platform, id) != .None {return false}
-	w.preview_visible, w.dirty = false, false
-	return true
-}
-
-@(require_results)
-pane_window_preview_position :: proc(app: ^App, w: ^Window, x, y: i32) -> bool {
-	offset := i32(math.round(16 * w.scale))
-	if platform.window_set_position(&app.platform, w.id, x + offset, y + offset) !=
-	   .None {return false}
-	dpi := platform.window_dpi(&app.platform, w.id)
-	if dpi != 0 && f32(dpi) / 96 != w.scale {window_set_dpi(app, w, dpi)}
-	width, height, err := platform.window_client_size(&app.platform, w.id)
-	if err != .None {return false}
-	if width != w.width || height != w.height {window_resize(app, w, width, height)}
-	return true
-}
-
-@(require_results)
-pane_window_preview_create :: proc(
-	app: ^App,
-	source: ^Tab,
-	node: layout.Node_Id,
-	x, y: i32,
-) -> ^Window {
+pane_window_preview_create :: proc(app: ^App, source: ^Tab, node: layout.Node_Id) -> ^Window {
 	source_workspace := pane_source_workspace(app, source)
 	if !pane_window_source_allows(source_workspace) {return nil}
 	pane, valid := workspace_pane_at(
@@ -102,14 +83,89 @@ pane_window_preview_create :: proc(
 	preview := window_prepare(app, workspace)
 	if preview == nil {return nil}
 	defer if !success {window_close(app, preview)}
-	if !pane_window_preview_position(app, preview, x, y) {return nil}
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = false) {return nil}
-	if !window_show_prepared(app, preview) {return nil}
 	workspace_pickers_refresh(app)
 	success = true
 	return preview
+}
+
+// Shows the dragged pane's thumbnail at the pointer, or hides it when the drop would not open a window.
+// A thumbnail that cannot be made costs only the picture: the tear-off still works.
+pane_drag_thumbnail_sync :: proc(app: ^App, w: ^Window, d: ^Pane_Drag, shown: bool, x, y: i32) {
+	if !shown {
+		if d.thumbnail_shown {platform.thumbnail_hide(d.thumbnail)}
+		d.thumbnail_shown = false
+		return
+	}
+	if d.thumbnail == {} && !d.thumbnail_failed {
+		d.thumbnail_failed = !pane_drag_thumbnail_create(app, w, d)
+	}
+	if d.thumbnail == {} {return}
+	offset := i32(math.round(16 * w.scale))
+	platform.thumbnail_place(d.thumbnail, x + offset, y + offset)
+	d.thumbnail_shown = true
+}
+
+@(private = "file")
+pane_drag_thumbnail_create :: proc(app: ^App, w: ^Window, d: ^Pane_Drag) -> bool {
+	for pane in w.panes {
+		if pane.node != d.node {continue}
+		r := pane.rect
+		if r.width <= 0 || r.height <= 0 {return false}
+		fit := min(PANE_THUMBNAIL_WIDTH * w.scale / r.width, PANE_THUMBNAIL_HEIGHT * w.scale / r.height, 1)
+		width, height := max(1, i32(r.width * fit)), max(1, i32(r.height * fit))
+		thumbnail, err := platform.thumbnail_create(
+			&app.platform,
+			w.id,
+			i32(r.x),
+			i32(r.y),
+			i32(r.width),
+			i32(r.height),
+			width,
+			height,
+			app.settings.active_theme.colors[.Accent].rgb,
+		)
+		if err != .None {return false}
+		d.thumbnail, d.thumbnail_width, d.thumbnail_height = thumbnail, width, height
+		return true
+	}
+	return false
+}
+
+pane_drag_thumbnail_destroy :: proc(d: ^Pane_Drag) {
+	if d.thumbnail != {} {platform.thumbnail_destroy(&d.thumbnail)}
+	d.thumbnail_shown = false
+}
+
+// Puts the pane in the prepared window at the pointer and starts naming it there.
+@(require_results)
+pane_tear_off :: proc(app: ^App, source_window: ^Window, d: Pane_Drag) -> bool {
+	preview := window_find(app, d.preview_window)
+	if preview == nil {return false}
+	x, y, screen_error := platform.window_to_screen(
+		&app.platform,
+		source_window.id,
+		i32(d.pointer.x),
+		i32(d.pointer.y),
+	)
+	if screen_error != .None {return false}
+	place_error := platform.window_place_on_monitor(
+		&app.platform,
+		preview.id,
+		x - i32(TEAR_OFF_GRAB_X * preview.scale),
+		y - i32(TEAR_OFF_GRAB_Y * preview.scale),
+	)
+	if place_error != .None {return false}
+	dpi := platform.window_dpi(&app.platform, preview.id)
+	if dpi != 0 && f32(dpi) / 96 != preview.scale {window_set_dpi(app, preview, dpi)}
+	width, height, size_error := platform.window_client_size(&app.platform, preview.id)
+	if size_error != .None {return false}
+	if width != preview.width || height != preview.height {window_resize(app, preview, width, height)}
+	if !pane_to_window(app, source_window, d.source, d.node, preview.id) {return false}
+	workspace_name_begin(app, preview)
+	return true
 }
 
 @(require_results)
@@ -119,7 +175,6 @@ pane_to_window :: proc(
 	source: ^Tab,
 	node: layout.Node_Id,
 	preview_id: platform.Window_Id,
-	chosen_name: string = "",
 ) -> bool {
 	preview := window_find(app, preview_id)
 	workspace := pane_source_workspace(app, source)
@@ -144,14 +199,7 @@ pane_to_window :: proc(
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
-	name: string
-	if chosen_name == "" {
-		name = workspace_default_name(app)
-	} else {
-		owned, err := strings.clone(chosen_name)
-		if err != nil {return false}
-		name = owned
-	}
+	name := workspace_default_name(app)
 	if name == "" {return false}
 	move := pane_move_begin(app, preview, source, workspace)
 	if !layout.remove(&source.tree, node) {
@@ -166,77 +214,7 @@ pane_to_window :: proc(
 	preview.workspace.name = name
 	workspace_pickers_refresh(app)
 	pane_move_finish(app, move, destination)
+	if !window_show_prepared(app, preview) {return false}
 	_ = window_activate(app, preview)
 	return true
-}
-
-pane_window_preview_render :: proc(app: ^App, w: ^Window) {
-	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
-		log.error("waiting for the pane preview failed")
-	}
-	build := render.frame_build_begin(&w.list, app.device)
-	for {
-		pane_window_preview_draw(app, w)
-		switch render.frame_build_finish(&build) {
-		case .Ready:
-		case .Retry: continue
-		case .Failed: return
-		}
-		break
-	}
-	if err := render.frame_render(app.device, w.surface, &w.list, app.theme.window); err != .None {
-		if err ==
-		   .Device_Lost {recover_device(app)} else {log.errorf("drawing the pane preview failed: %v", err)}
-	}
-	w.dirty = false
-}
-
-@(private)
-pane_window_preview_draw :: proc(app: ^App, w: ^Window) {
-	width, height := f32(w.width), f32(w.height)
-	if render.push_layer(&w.list, {0, 0, width, height}) != .None {return}
-	if render.push_rect(&w.list, {rect = {0, 0, width, height}, color = app.theme.window}) !=
-	   .None {return}
-	area := window_content_area(app, w)
-	if render.push_rect(
-		   &w.list,
-		   {
-			   rect = {area.x, area.y, area.width, area.height},
-			   color = app.theme.pane,
-			   radius = f32(app.settings.pane.corner_radius) * w.scale,
-			   stroke = 2 * w.scale,
-		   },
-	   ) !=
-	   .None {return}
-	strong := ui.text_styled(&w.ui_text, .Strong)
-	label := "+ New window"
-	_ = ui.draw_text(
-		&strong,
-		&w.list,
-		label,
-		24 * w.scale,
-		40 * w.scale + strong.ascent,
-		app.theme.accent,
-		max(1, width - 48 * w.scale),
-	)
-	_ = ui.draw_text(
-		&w.ui_text,
-		&w.list,
-		"Release to move this running pane. Esc cancels.",
-		24 * w.scale,
-		76 * w.scale + w.ui_text.ascent,
-		app.theme.text,
-		max(1, width - 48 * w.scale),
-	)
-	if tab := selected_tab(w.workspace); tab != nil {
-		_ = ui.draw_text(
-			&w.ui_text,
-			&w.list,
-			tab.title,
-			24 * w.scale,
-			108 * w.scale + w.ui_text.ascent,
-			app.theme.muted,
-			max(1, width - 48 * w.scale),
-		)
-	}
 }

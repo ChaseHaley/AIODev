@@ -617,7 +617,7 @@ run_action :: proc(
 	case .Previous_Workspace:
 		workspace_select_step(app, w, -1)
 	case .Rename_Workspace:
-		workspace_rename_open(app, w)
+		workspace_name_begin(app, w)
 	case .Delete_Workspace:
 		workspace_delete_request(app, w, w.workspace)
 	case .Change_Workspace_Icon:

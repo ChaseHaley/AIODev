@@ -56,7 +56,7 @@ Window :: struct {
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
-	preparing, preview_visible: bool,
+	preparing: bool,
 	// Shows one pane of a tab instead of a workspace; see pane_links.odin. w.workspace is then a private
 	// view of that pane, and link_workspace is the id of the workspace that really holds it.
 	linked, link_shown: bool,
@@ -125,9 +125,9 @@ Window :: struct {
 	rename: ui.Text_Field,
 	rename_open: bool,
 	rename_target: Rename_Target,
-	rename_mode: Name_Dialog_Mode,
-	rename_move: Workspace_Move_Request,
-	rename_drag: Pane_Drag,
+	rename_mode: Rename_Mode,
+	rename_error: bool,
+	workspace_button_press_ns: i64,
 	workspace_picker: Workspace_Picker,
 	workspace_hovered: bool,
 	workspace_motion: ui.Control_Motion,
@@ -252,7 +252,7 @@ window_show_prepared :: proc(app: ^App, w: ^Window) -> bool {
 		log.errorf("showing the window failed: %v", show_error)
 		return false
 	}
-	w.preview_visible, w.dirty = true, true
+	w.dirty = true
 	return true
 }
 
@@ -558,7 +558,6 @@ window_render :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 || w.surface == nil {
 		return
 	}
-	if w.preparing {pane_window_preview_render(app, w); return}
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}

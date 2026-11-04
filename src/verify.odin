@@ -354,10 +354,6 @@ when AIO_CONTROL {
 				{fmt.tprintf("%s.preparing", prefix), fmt.tprintf("%t", window.preparing)},
 				{fmt.tprintf("%s.linked", prefix), fmt.tprintf("%t", window.linked)},
 				{fmt.tprintf("%s.link_shown", prefix), fmt.tprintf("%t", window.link_shown)},
-				{
-					fmt.tprintf("%s.preview_visible", prefix),
-					fmt.tprintf("%t", window.preview_visible),
-				},
 			}
 			if _, err := append(&entries, ..inventory[:]); err != nil {return nil, .Out_Of_Memory}
 		}
@@ -564,7 +560,6 @@ when AIO_CONTROL {
 				{"workspace.picker.rename_error", fmt.tprintf("%t", w.workspace_picker.rename_error)},
 				{"workspace.picker.icon_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Icons))},
 				{"window.preparing", fmt.tprintf("%t", w.preparing)},
-				{"window.preview_visible", fmt.tprintf("%t", w.preview_visible)},
 				{"pointer.shape", strings.to_lower(fmt.tprintf("%v", w.pointer_shape), context.temp_allocator)},
 				{"pointer.updates", fmt.tprintf("%d", app.verify.pointer_updates)},
 				{"link.hover", link_hover},
@@ -737,6 +732,11 @@ when AIO_CONTROL {
 				{"panes.drop.new_window", fmt.tprintf("%t", w.pane_drag.new_window)},
 				{"panes.drop.window", fmt.tprintf("%d", w.pane_drag.destination_window)},
 				{"panes.drop.preview_window", fmt.tprintf("%d", w.pane_drag.preview_window)},
+				{"panes.drop.thumbnail", fmt.tprintf("%t", w.pane_drag.thumbnail_shown)},
+				{
+					"panes.drop.thumbnail_size",
+					fmt.tprintf("%dx%d", w.pane_drag.thumbnail_width, w.pane_drag.thumbnail_height),
+				},
 				{
 					"panes.drop.rect",
 					fmt.tprintf(

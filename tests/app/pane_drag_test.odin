@@ -20,6 +20,4 @@ pane_drag_label_names_each_drop :: proc(t: ^testing.T) {
 	drag.destination = &source
 	drag.node = source.tree.root
 	testing.expect_value(t, app.pane_drag_label(&drag), "Move tab to end")
-	drag.new_window = true
-	testing.expect_value(t, app.pane_drag_label(&drag), "+ New window")
 }
