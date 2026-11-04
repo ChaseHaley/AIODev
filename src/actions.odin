@@ -558,7 +558,7 @@ run_action :: proc(
 		rename_open(app, w, false, w.workspace.selected)
 	case .Change_Pane_Shell:
 		for pane in w.panes {
-			if pane.node != w.tree.focus || pane.content.kind != .Terminal {continue}
+			if pane.node != w.tree.focus || !pane_owns_session(pane.content.kind) {continue}
 			profile_menu_open_pane(
 				app,
 				w,

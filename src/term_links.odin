@@ -55,8 +55,8 @@ link_cell :: proc(entry: ^Session_Entry, x, y: f32) -> (column, row: int, ok: bo
 @(private, require_results)
 link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	pane, found := layout.hit_test(w.panes[:], x, y)
-	terminal := found && pane.content.kind == .Terminal
-	entry := terminal ? session_find(app, pane.content.id) : nil
+	entry := found ? workspace_session_for_content(app, pane.content) : nil
+	terminal := entry != nil
 	state := terminal ? link_pane(w, pane.content) : nil
 	if entry == nil || state == nil || !term_view.links_refresh(&state.view, entry.session) {
 		link_hover_clear(w)
@@ -88,10 +88,10 @@ link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private, require_results)
 link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found || pane.content.kind != .Terminal {
+	if !found {
 		return false
 	}
-	entry := session_find(app, pane.content.id)
+	entry := workspace_session_for_content(app, pane.content)
 	state := link_pane(w, pane.content)
 	if entry == nil || state == nil || !term_view.links_refresh(&state.view, entry.session) {
 		return false
@@ -134,7 +134,7 @@ link_hover_refresh :: proc(app: ^App, w: ^Window) {
 			pane.hover = nil
 			continue
 		}
-		entry := session_find(app, pane.content.id)
+		entry := workspace_session_for_content(app, pane.content)
 		if entry == nil || !term_view.links_refresh(&pane.view, entry.session) {
 			pane.hover = nil
 			continue

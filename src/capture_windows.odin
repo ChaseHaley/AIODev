@@ -73,7 +73,7 @@ when AIO_CONTROL {
 			rect: layout.Rect
 			visible := false
 			for pane in w.panes {
-				if pane.content.id != entry.id {continue}
+				if pane.content != {.Terminal, entry.id} {continue}
 				rect, visible = pane.rect, true
 				break
 			}

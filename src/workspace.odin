@@ -230,11 +230,11 @@ tab_new_profile :: proc(app: ^App, w: ^Window, index: int) {
 	rail_overlay_dismiss(app, w)
 }
 
-// Settings is one page per workspace, so two panes must never show it at once. Terminal content is
-// keyed by session and cannot collide.
+// One-per-workspace content must never show in two panes at once. Other content is keyed by its own
+// id and cannot collide.
 @(require_results)
 pane_content_can_join :: proc(content: layout.Content, destination: ^Workspace, source: ^Tab) -> bool {
-	if content.kind != .Settings {return true}
+	if !CONTENT_POLICY[content.kind].one_per_workspace {return true}
 	return !workspace_content_outside_tab(destination, content, source)
 }
 

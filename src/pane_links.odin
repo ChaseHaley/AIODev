@@ -297,7 +297,7 @@ pane_link_toggle :: proc(app: ^App, w: ^Window) {
 	node := w.tree.focus
 	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
 	if !is_pane {return}
-	if pane.content.kind != .Terminal {
+	if !CONTENT_POLICY[pane.content.kind].linkable {
 		notify(app, .Info, "Only a terminal pane can have a linked window.")
 		return
 	}

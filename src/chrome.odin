@@ -30,7 +30,7 @@ window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 window_generation :: proc(app: ^App, w: ^Window) -> u64 {
 	generation: u64
 	for pane in w.panes {
-		if entry := session_find(app, pane.content.id); entry != nil {
+		if entry := workspace_session_for_content(app, pane.content); entry != nil {
 			generation += term.generation(entry.session)
 		}
 	}

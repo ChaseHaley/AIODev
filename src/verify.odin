@@ -215,7 +215,7 @@ when AIO_CONTROL {
 		entry := focused_session(app, w)
 		if entry == nil {return {}, .Invalid_Argument}
 		for pane in w.views {
-			if pane.content.id != entry.id {continue}
+			if pane.content != {.Terminal, entry.id} {continue}
 			allocator := persistent ? context.allocator : context.temp_allocator
 			snapshot, err := term.snapshot(pane.view.state, allocator)
 			if err != .None {
@@ -629,7 +629,7 @@ when AIO_CONTROL {
 			if len(app.workspaces) > 0 {
 				if tab := selected_tab(app.workspaces[0]); tab != nil {
 					pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-					entry = session_find(app, pane.content.id)
+					entry = workspace_session_for_content(app, pane.content)
 				}
 			}
 		}
@@ -686,7 +686,7 @@ when AIO_CONTROL {
 			for node, n in tab.tree.nodes {
 				if pane, ok := node.(layout.Pane); ok {
 					count += 1
-					if session := session_find(app, pane.content.id); session != nil {
+					if session := workspace_session_for_content(app, pane.content); session != nil {
 						g := term.geometry(session.session)
 						if _, err := append(
 							&entries,
@@ -750,6 +750,7 @@ when AIO_CONTROL {
 			}
 			if _, err := append(&entries, ..pane_state[:]); err != nil {return nil, .Out_Of_Memory}
 			for view in w.views {
+				if !pane_owns_session(view.content.kind) {continue}
 				if _, err := append(
 					&entries,
 					control.State_Entry {

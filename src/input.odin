@@ -421,7 +421,7 @@ pane_at :: proc(app: ^App, w: ^Window, x, y: i32) -> ^Session_Entry {
 	pane, found := layout.hit_test(w.panes[:], f32(x), f32(y))
 	if w.selecting {return focused_session(app, w)}
 	if !found {return nil}
-	return session_find(app, pane.content.id)
+	return workspace_session_for_content(app, pane.content)
 }
 
 @(private)

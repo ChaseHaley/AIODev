@@ -432,7 +432,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		visible := false
 		for pane in w.panes {visible ||= pane.content == w.views[i].content}
 		if !visible {
-			if w.views[i].content.kind == .Terminal {
+			if pane_owns_session(w.views[i].content.kind) {
 				term_view.destroy(&w.views[i].view)
 				render.draw_list_destroy(&w.views[i].cache)
 			}
@@ -442,7 +442,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	for pane in w.panes {
 		entry := workspace_session_for_content(app, pane.content)
 		if entry == nil {
-			if pane.content.kind == .Settings && pane_view(w, pane.content) == nil {
+			if pane_view(w, pane.content) == nil {
 				cached := Pane_View{content = pane.content}
 				if _, err := append(&w.views, cached); err != nil {
 					log.error("storing a pane's header state failed")
@@ -506,7 +506,7 @@ focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 	if !is_pane {
 		return nil
 	}
-	return session_find(app, pane.content.id)
+	return workspace_session_for_content(app, pane.content)
 }
 
 update_blink :: proc(w: ^Window) {
@@ -616,25 +616,13 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	for pane in w.panes {
 		card := len(w.list.rects)
 		window_card_draw(app, w, pane)
-		if pane.content.kind == .Settings {
-			if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
-			result := ui.editor_draw(
-				&w.editor,
-				settings_layout_for(w, pane.rect),
-				&w.list,
-				&w.ui_text,
-				app.theme,
-				w.focused && pane.node == w.tree.focus && !palette_active(app, w),
-				w.pointer,
-			)
-			if result != .Ok {return frame, result}
-			if header_result := pane_header_draw(app, w, pane, nil);
-			   header_result != .Ok {return frame, header_result}
-			window_card_dim(app, w, pane, app.theme.pane)
-			window_card_outline(app, w, pane)
+		switch pane.content.kind {
+		case .Terminal:
+		case .Settings:
+			if result := settings_pane_draw(app, w, pane, card); result != .Ok {return frame, result}
 			continue
 		}
-		entry := session_find(app, pane.content.id)
+		entry := workspace_session_for_content(app, pane.content)
 		view := pane_view(w, pane.content)
 		state := link_pane(w, pane.content)
 		if entry == nil || view == nil {
