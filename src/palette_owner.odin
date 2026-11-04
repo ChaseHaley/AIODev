@@ -183,7 +183,10 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	w.tab_menu.open = false
 	w.profile_menu.open = false
 	w.rename.dragging = false
-	if w.rename_open {rename_finish(app, w, false)}
+	if w.rename_open {
+		if focus_lost && w.rename_mode == .Workspace {rename_finish(app, w, true)}
+		if w.rename_open {rename_finish(app, w, false)}
+	}
 	confirmation_cancel(app, w)
 	rail_overlay_dismiss(app, w)
 	status_overview_cancel(w)

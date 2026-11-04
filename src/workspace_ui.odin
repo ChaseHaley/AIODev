@@ -109,39 +109,32 @@ workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	return workspace_adopt(app, w, workspace, .Retain)
 }
 
-workspace_new :: proc(app: ^App, w: ^Window, new_window: bool) {
+// Creates the workspace and its shell at once, under a suggested name. Launching AIODev again asks for
+// a shell, not a name, so only the other paths start naming it in its chip.
+workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) {
 	owner := w
 	if owner == nil && len(app.windows) > 0 {owner = app.windows[0]}
 	if owner == nil {return}
-	if w == nil && !window_activate(app, owner) {return}
-	workspace_name_open(app, owner, new_window ? .New_Window : .New_Workspace)
-}
-
-workspace_new_commit :: proc(app: ^App, w: ^Window, new_window: bool, name: string) {
+	if !gesture_cancel(app, owner) {return}
+	workspace_picker_cancel(owner)
+	palette_close(app, owner)
 	workspace := workspace_create_empty(app)
 	if workspace == nil {notify(app, .Error, "Could not create a workspace."); return}
-	if rename_target_commit(app, w, {.Workspace, workspace.id}, name) != .Saved {
-		_ = workspace_discard_empty(app, workspace)
-		notify(app, .Error, "Could not name the workspace.")
-		return
-	}
 	if !tab_create(app, workspace) {
 		_ = workspace_discard_empty(app, workspace)
 		notify(app, .Error, "Could not create the workspace shell.")
 		return
 	}
-	opened := new_window ? window_open(app, workspace) : workspace_select(app, w, workspace)
+	opened := new_window ? window_open(app, workspace) : workspace_select(app, owner, workspace)
 	if !opened {
 		workspace_close_tab(app, workspace, 0)
 		_ = workspace_discard_empty(app, workspace)
 		notify(app, .Error, "Could not open the new workspace.")
+		return
 	}
 	mark_all_dirty(app)
-}
-
-workspace_rename_open :: proc(app: ^App, w: ^Window) {
-	workspace_picker_open(app, w)
-	workspace_row_rename_open(app, w, w.workspace.id)
+	if !name_it {return}
+	if target := window_for_workspace(app, workspace); target != nil {workspace_name_begin(app, target)}
 }
 
 workspace_button_width :: proc(w: ^Window) -> f32 {

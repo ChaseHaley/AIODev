@@ -3,6 +3,16 @@ param()
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
+# A new window opens with its suggested name in its own chip. Accept it, or type a title, and come back.
+function Finish-New-Window([string] $Title = '') {
+    $state = @{}
+    foreach ($line in (& $ctl --name $name state)) { $pair = $line -split '=', 2; $state[$pair[0]] = $pair[1].Trim('"') }
+    $newest = (1..[int]$state['windows.count'] | ForEach-Object { [int]$state["window.$_.id"] } | Measure-Object -Maximum).Maximum
+    & $ctl --name $name window select $newest | Out-Null
+    if ($Title -ne '') { & $ctl --name $name type $Title | Out-Null }
+    & $ctl --name $name key Enter | Out-Null
+    & $ctl --name $name window select $state['window.id'] | Out-Null
+}
 $name = 'workspace-last-tab'
 $directory = Join-Path $repo "build/verify/$name"
 
@@ -66,7 +76,7 @@ try {
     Equal $s['session.id'] $session 'fallback preserves the existing runtime'
     Current-Rail
     Aio command window.new | Out-Null
-    Aio key Enter | Out-Null
+    Finish-New-Window
     $s = State
     Aio window select $s['window.2.id'] | Out-Null
     Aio command tab.close | Out-Null

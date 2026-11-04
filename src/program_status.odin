@@ -230,7 +230,7 @@ status_tab_mark :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) 
 // Queue the next frame immediately. window_render waits on the swap chain before sampling the
 // phase, so display refresh paces animation without a timer cap or an extra sleep after Present.
 status_spin_active :: proc(w: ^Window) -> bool {
-	return w.status_spinning && w.width > 0 && w.height > 0 && (!w.preparing || w.preview_visible)
+	return w.status_spinning && w.width > 0 && w.height > 0 && !w.preparing
 }
 
 status_spin_tick :: proc(w: ^Window) {

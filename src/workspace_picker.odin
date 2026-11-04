@@ -96,6 +96,14 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 	w.header_buttons += {e.button}
 	x, y := f32(e.x), f32(e.y)
 	r, _ := workspace_picker_rect(w)
+	// The second press of a double-click on the chip lands here because the first opened this menu.
+	if e.button == .Left && w.workspace_button_press_ns != 0 &&
+	   workspace_rect_contains(workspace_button_rect(w), x, y) &&
+	   e.time_ns - w.workspace_button_press_ns <= DOUBLE_CLICK_NS {
+		w.header_buttons -= {e.button}
+		workspace_name_begin(app, w)
+		return
+	}
 	if p.mode == .Menu && e.button == .Left {
 		workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
 	} else if !workspace_rect_contains(r, x, y) {

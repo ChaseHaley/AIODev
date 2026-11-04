@@ -78,33 +78,25 @@ try {
     $drop = Row-Point ([int](State)['workspace.picker.count']-2)
     Aio mouse move $drop --px
     Aio mouse up $drop --px
-    Assert (State)['rename.open'] true 'New Workspace drop prompts for name'
-    Aio key Esc
-    Assert (State)['session.id'] $before['session.id'] 'cancelled creation preserves runtime'
-    Begin-Drag
-    $drop = Row-Point ([int](State)['workspace.picker.count']-2)
-    Aio mouse move $drop --px
-    Aio mouse up $drop --px
-    Aio key Enter
+    Assert (State)['rename.open'] true 'New Workspace drop names it in the chip'
     Assert (State)['workspaces.count'] 3 'New Workspace drop creates destination'
     Assert (State)['session.id'] $before['session.id'] 'New Workspace preserves runtime'
+    Aio key Esc
+    Assert (State)['rename.open'] false 'Escape keeps the suggested name'
+    Assert (State)['workspaces.count'] 3 'Escape keeps the new workspace'
     Aio command pane.split_right
     $before = State
     Begin-Drag
     $drop = Row-Point ([int](State)['workspace.picker.count']-1)
     Aio mouse move $drop --px
     Aio mouse up $drop --px
-    Assert (State)['rename.open'] true 'New Window drop prompts for name'
-    Aio key Esc
-    Assert (State)['windows.count'] 1 'cancelled New Window discards preview'
-    Assert (State)['session.id'] $before['session.id'] 'cancelled New Window preserves runtime'
-    Begin-Drag
-    $drop = Row-Point ([int](State)['workspace.picker.count']-1)
-    Aio mouse move $drop --px
-    Aio mouse up $drop --px
-    Aio key Enter
     Assert (State)['windows.count'] 2 'New Window drop opens destination'
     Assert (State)['sessions.count'] $before['sessions.count'] 'New Window creates no extra shell'
+    $s = State
+    $opened = @(1..[int]$s['windows.count'] | ForEach-Object { $s["window.$_.id"] } | Where-Object { $_ -ne $s['window.id'] })[0]
+    Aio window select $opened
+    Assert (State)['rename.open'] true 'New Window drop names it in the new chip'
+    Aio key Enter
 } finally {
     Aio stop
 }

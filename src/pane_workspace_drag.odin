@@ -1,7 +1,6 @@
 package main
 
 import "aio:layout"
-import "aio:platform"
 import "aio:ui"
 import "core:math"
 
@@ -72,19 +71,11 @@ pane_workspace_drag_release :: proc(app: ^App, source: ^Window, d: Pane_Drag) {
 		workspace_move_choose(app, source, request, id)
 		return
 	}
-	sx, sy, err := platform.window_to_screen(
-		&app.platform, source.id, i32(d.pointer.x), i32(d.pointer.y),
-	)
-	if err == .None {
-		if preview := pane_window_preview_create(app, d.source, d.node, sx, sy); preview != nil {
-			// Use ordinary tear-off completion, including any workspace creation dialog.
-			source.pane_drag = d
-			source.pane_drag.picker_window = 0
-			source.pane_drag.preview_window = preview.id
-			source.pane_drag.new_window, source.pane_drag.shown = true, true
-			_ = pane_drag_release(app, source)
-			return
-		}
+	if preview := pane_window_preview_create(app, d.source, d.node); preview != nil {
+		tear_off := d
+		tear_off.preview_window = preview.id
+		if pane_tear_off(app, source, tear_off) {return}
+		pane_window_preview_discard(app, preview.id)
 	}
 	pane_drag_restore(app, source, d)
 	notify(app, .Error, "Could not move the pane to a new window. The source was preserved.")

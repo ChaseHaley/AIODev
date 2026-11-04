@@ -124,7 +124,7 @@ gestures_cancel_preview_destruction_and_late_events_preserve_runtime :: proc(t: 
 	entry := app.focused_session(s, w)
 	id, pid, session := entry.id, term.process_id(entry.session), entry.session
 	source := app.selected_tab(w.workspace)
-	preview := app.pane_window_preview_create(s, source, w.tree.focus, 100, 100)
+	preview := app.pane_window_preview_create(s, source, w.tree.focus)
 	if !testing.expect(t, preview != nil) {return}
 	preview_id := preview.id
 	app.pane_drag_press(s, w, w.tree.focus, 30, 60)

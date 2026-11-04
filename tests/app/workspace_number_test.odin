@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:testing"
 import "core:strings"
 import "core:math/rand"
+import "aio:platform"
 import "aio:ui"
 import app "../../src"
 
@@ -58,50 +59,86 @@ workspace_phrase_allocation_failure_preserves_identity :: proc(t: ^testing.T) {
 }
 
 @(test)
-workspace_creation_prompt_selects_suggestion_and_cancels_without_mutation :: proc(t: ^testing.T) {
-	state: app.App
-	w: app.Window
-	append(&state.windows, &w)
-	defer delete(state.windows)
-	defer delete(w.rename.bytes)
-	app.workspace_new(&state, &w, false)
-	testing.expect(t, w.rename_open && w.rename_mode == .New_Workspace)
-	testing.expect(t, ui.field_string(&w.rename) != "")
-	testing.expect_value(t, ui.field_selected_text(&w.rename), ui.field_string(&w.rename))
-	testing.expect_value(t, len(state.workspaces), 0)
-	testing.expect_value(t, len(state.sessions), 0)
-	app.rename_key(&state, &w, {key = .Escape, pressed = true})
+workspace_creation_starts_naming_in_the_chip_and_keeps_the_suggestion :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "chip-naming") {return}
+	s, w := &f.state, f.state.windows[0]
+	count := len(s.workspaces)
+	app.workspace_new(s, w, false)
+	testing.expect_value(t, len(s.workspaces), count + 1)
+	testing.expect(t, w.rename_open && w.rename_mode == .Workspace)
+	suggestion := strings.clone(w.workspace.name, context.temp_allocator)
+	testing.expect(t, suggestion != "")
+	testing.expect_value(t, ui.field_selected_text(&w.rename), suggestion)
+	// Escape and an empty field both keep the suggested name; neither undoes the creation.
+	app.rename_key(s, w, {key = .Escape, pressed = true})
 	testing.expect(t, !w.rename_open)
-	testing.expect_value(t, state.next_workspace_id, u32(0))
-	app.workspace_new(&state, &w, true)
-	testing.expect(t, w.rename_open && w.rename_mode == .New_Window)
-	_ = ui.field_text(&w.rename, "  ")
-	app.rename_key(&state, &w, {key = .Enter, pressed = true})
-	testing.expect(t, w.rename_open)
-	testing.expect_value(t, len(state.workspaces), 0)
-	app.rename_finish(&state, &w, false)
+	testing.expect_value(t, w.workspace.name, suggestion)
+	testing.expect_value(t, len(s.workspaces), count + 1)
+	app.workspace_name_begin(s, w)
+	ui.field_set(&w.rename, "  ")
+	app.rename_key(s, w, {key = .Enter, pressed = true})
+	testing.expect(t, !w.rename_open)
+	testing.expect_value(t, w.workspace.name, suggestion)
+	// A new window takes the field, and a launch opens one without asking for a name.
+	app.workspace_new(s, w, true)
+	second := s.windows[len(s.windows) - 1]
+	testing.expect(t, second != w && second.rename_open && !w.rename_open)
+	app.rename_finish(s, second, false)
+	windows := len(s.windows)
+	app.workspace_new(s, nil, true, name_it = false)
+	testing.expect_value(t, len(s.windows), windows + 1)
+	testing.expect(t, !s.windows[len(s.windows) - 1].rename_open)
 }
 
 @(test)
-workspace_creation_rechecks_name_claimed_while_prompt_is_open :: proc(t: ^testing.T) {
-	state: app.App
-	w: app.Window
-	append(&state.windows, &w)
-	defer delete(state.windows)
-	defer delete(w.rename.bytes)
-	ui.notices_init(&state.notices)
-	defer ui.notices_destroy(&state.notices)
-	app.workspace_new(&state, &w, false)
-	name, err := strings.clone(ui.field_string(&w.rename))
-	if !testing.expect_value(t, err, nil) {return}
-	workspace := new(app.Workspace)
-	workspace.name = name
-	append(&state.workspaces, workspace)
-	defer app.workspace_destroy(workspace)
-	defer delete(state.workspaces)
-	app.rename_finish(&state, &w, true)
-	testing.expect(t, w.rename_open)
-	testing.expect_value(t, len(state.workspaces), 1)
-	testing.expect_value(t, len(state.sessions), 0)
-	app.rename_finish(&state, &w, false)
+workspace_chip_keeps_field_open_on_a_used_name_and_a_lost_focus_saves :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "chip-used-name") {return}
+	s, w := &f.state, f.state.windows[0]
+	first := strings.clone(w.workspace.name, context.temp_allocator)
+	app.workspace_new(s, w, false)
+	suggestion := strings.clone(w.workspace.name, context.temp_allocator)
+	ui.field_set(&w.rename, first)
+	app.rename_key(s, w, {key = .Enter, pressed = true})
+	testing.expect(t, w.rename_open && w.rename_error)
+	testing.expect_value(t, w.workspace.name, suggestion)
+	// The workspace's own name is not a conflict, in any letter case.
+	ui.field_set(&w.rename, strings.to_upper(suggestion, context.temp_allocator))
+	app.rename_finish(s, w, true)
+	testing.expect(t, !w.rename_open)
+	app.workspace_name_begin(s, w)
+	ui.field_set(&w.rename, "Typed then left")
+	app.handle_event(s, platform.Focus_Event{w.id, false})
+	testing.expect(t, !w.rename_open)
+	testing.expect_value(t, w.workspace.name, "Typed then left")
+	// A used name cannot survive losing focus: the field closes on the name the workspace has.
+	app.workspace_name_begin(s, w)
+	ui.field_set(&w.rename, first)
+	app.handle_event(s, platform.Focus_Event{w.id, false})
+	testing.expect(t, !w.rename_open && !w.rename_error)
+	testing.expect_value(t, w.workspace.name, "Typed then left")
+}
+
+@(test)
+every_new_window_opens_at_the_configured_size :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "default-window-size") {return}
+	s, w := &f.state, f.state.windows[0]
+	expected := app.initial_geometry(s)
+	// A hidden workspace remembers the much larger window its session last filled.
+	app.workspace_new(s, w, false)
+	app.rename_finish(s, w, false)
+	hidden := w.workspace
+	app.window_resize(s, w, 2400, 1400)
+	testing.expect(t, app.workspace_select(s, w, s.workspaces[0]))
+	app.window_resize(s, w, 2300, 1300)
+	testing.expect(t, app.window_open(s, hidden))
+	opened := app.window_for_workspace(s, hidden)
+	if !testing.expect(t, opened != nil) {return}
+	testing.expect_value(t, u32(opened.width), expected.surface_width)
+	testing.expect_value(t, u32(opened.height), expected.surface_height)
 }

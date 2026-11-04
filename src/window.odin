@@ -56,7 +56,7 @@ Window :: struct {
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
-	preparing, preview_visible: bool,
+	preparing: bool,
 	generation: u64,
 	selecting: bool,
 	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
@@ -120,9 +120,9 @@ Window :: struct {
 	rename: ui.Text_Field,
 	rename_open: bool,
 	rename_target: Rename_Target,
-	rename_mode: Name_Dialog_Mode,
-	rename_move: Workspace_Move_Request,
-	rename_drag: Pane_Drag,
+	rename_mode: Rename_Mode,
+	rename_error: bool,
+	workspace_button_press_ns: i64,
 	workspace_picker: Workspace_Picker,
 	workspace_hovered: bool,
 	workspace_motion: ui.Control_Motion,
@@ -203,8 +203,8 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 		value  = f32(w.workspace.selected),
 		target = f32(w.workspace.selected),
 	}
+	// Every new window opens at the configured size, whatever window its content last filled.
 	g := initial_geometry(app)
-	if entry := focused_session(app, w); entry != nil {g = term.geometry(entry.session)}
 	desc := platform.Window_Desc {
 		title = app.app_id,
 		inactive = app.options.inactive,
@@ -247,7 +247,7 @@ window_show_prepared :: proc(app: ^App, w: ^Window) -> bool {
 		log.errorf("showing the window failed: %v", show_error)
 		return false
 	}
-	w.preview_visible, w.dirty = true, true
+	w.dirty = true
 	return true
 }
 
@@ -550,7 +550,6 @@ window_render :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 || w.surface == nil {
 		return
 	}
-	if w.preparing {pane_window_preview_render(app, w); return}
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}

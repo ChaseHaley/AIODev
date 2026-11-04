@@ -9,6 +9,16 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ctl = Join-Path $Repository 'build/aioctl.exe'
+# A new window opens with its suggested name in its own chip. Accept it, or type a title, and come back.
+function Finish-New-Window([string] $Title = '') {
+    $state = @{}
+    foreach ($line in (& $ctl --name $name state)) { $pair = $line -split '=', 2; $state[$pair[0]] = $pair[1].Trim('"') }
+    $newest = (1..[int]$state['windows.count'] | ForEach-Object { [int]$state["window.$_.id"] } | Measure-Object -Maximum).Maximum
+    & $ctl --name $name window select $newest | Out-Null
+    if ($Title -ne '') { & $ctl --name $name type $Title | Out-Null }
+    & $ctl --name $name key Enter | Out-Null
+    & $ctl --name $name window select $state['window.id'] | Out-Null
+}
 $directory = Join-Path $Repository "build/verify/$Name"
 function Invoke-Aio {
     $out = & $ctl --name $Name @args
@@ -67,8 +77,7 @@ try {
     $movedRuntime = (Read-State)['session.id']
     $movedPid = Shell-Receipt moved
     Invoke-Aio command window.new | Out-Null
-    Invoke-Aio type "Workspace 2" | Out-Null
-    Invoke-Aio key Enter | Out-Null
+    Finish-New-Window "Workspace 2"
     $inventory = Read-State
     $destination = $inventory['window.2.id']
     Select-Window $destination
