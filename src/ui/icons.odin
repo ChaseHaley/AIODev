@@ -36,6 +36,8 @@ Icon :: enum {
 	Command,
 	Settings,
 	Workspace,
+	Window_Out,
+	Window_In,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -196,6 +198,14 @@ icon_draw :: proc(
 		pen_path(p, {2, 6}, {10, 6})
 		pen_arc(p, 10, 9.5, 3.5, -math.PI / 2, math.PI)
 		pen_path(p, {10, 13}, {7, 13})
+	case .Window_Out:
+		pen_path(p, {7, 2}, {2, 2}, {2, 14}, {14, 14}, {14, 9})
+		pen_path(p, {8, 8}, {14, 2})
+		pen_path(p, {10, 2}, {14, 2}, {14, 6})
+	case .Window_In:
+		pen_path(p, {7, 2}, {2, 2}, {2, 14}, {14, 14}, {14, 9})
+		pen_path(p, {14, 2}, {8, 8})
+		pen_path(p, {8, 4}, {8, 8}, {12, 8})
 	case .Check:
 		pen_path(p, {3, 8.5}, {6.5, 12}, {13, 4.5})
 	case .Info:

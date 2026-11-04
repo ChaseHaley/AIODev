@@ -10,12 +10,13 @@ Header_Action :: enum {
 	Split_Down,
 	Zoom,
 	Fill_Window,
+	Linked_Window,
 	Close,
 	Badge,
 }
 Header_Layout :: struct {
 	panel, title, badge: render.Rect,
-	buttons:             [5]render.Rect,
+	buttons:             [6]render.Rect,
 }
 
 header_layout :: proc(area: render.Rect, scale: f32, _: bool) -> Header_Layout {
@@ -28,7 +29,7 @@ header_layout :: proc(area: render.Rect, scale: f32, _: bool) -> Header_Layout {
 	button := HEIGHT_COMPACT * scale
 	end := area.x + area.width - SPACE_1 * scale
 	{
-		for i := 4; i >= 0; i -= 1 {
+		for i := len(l.buttons) - 1; i >= 0; i -= 1 {
 			if end - button < area.x + SPACE_1 * scale {break}
 			l.buttons[i] = {
 				end - button,
@@ -112,7 +113,7 @@ shell_badge_draw :: proc(
 }
 
 @(private)
-header_icon :: proc(action: Header_Action, zoomed, fullscreen: bool) -> Icon {
+header_icon :: proc(action: Header_Action, zoomed, fullscreen, linked: bool) -> Icon {
 	#partial switch action {
 	case .Split_Down:
 		return .Split_Down
@@ -120,6 +121,8 @@ header_icon :: proc(action: Header_Action, zoomed, fullscreen: bool) -> Icon {
 		return zoomed ? .Collapse : .Expand
 	case .Fill_Window:
 		return fullscreen ? .Restore : .Zoom
+	case .Linked_Window:
+		return linked ? .Window_In : .Window_Out
 	case .Close:
 		return .Close
 	}
@@ -135,9 +138,10 @@ header_draw :: proc(
 	radius, scale: f32,
 	title, directory, icon: string,
 	focused: bool,
-	controls: [5]Control_Motion,
+	controls: [6]Control_Motion,
 	zoomed := false,
 	fullscreen := false,
+	linked := false,
 	icon_atlas: render.Rect = {},
 	badge_hovered := false,
 	pointer: [2]f32 = {},
@@ -234,7 +238,7 @@ header_draw :: proc(
 			press = controls[i].press.value,
 		}
 		// Close presses in a faint error tint rather than the neutral pressed fill.
-		if i == 4 {
+		if Header_Action(i + 1) == .Close {
 			danger := theme.error
 			danger.a *= 0.14
 			b.press_color = danger
@@ -243,7 +247,7 @@ header_draw :: proc(
 		if err != .None {return .Ok}
 		icon_draw(
 			list,
-			header_icon(Header_Action(i + 1), zoomed, fullscreen),
+			header_icon(Header_Action(i + 1), zoomed, fullscreen, linked),
 			face,
 			ink,
 			ICON_BUTTON,
@@ -280,7 +284,7 @@ split_overlay_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	l: Header_Layout,
-	controls: [5]Control_Motion,
+	controls: [6]Control_Motion,
 	scale: f32,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {
@@ -295,7 +299,7 @@ split_overlay_draw :: proc(
 			   list,
 			   theme,
 			   button,
-			   header_icon(Header_Action(i + 1), false, false),
+			   header_icon(Header_Action(i + 1), false, false, false),
 			   controls[i].hover.value,
 			   controls[i].press.value,
 			   scale,

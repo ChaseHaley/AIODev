@@ -169,7 +169,7 @@ profile_menu_choose :: proc(app: ^App, w: ^Window) {
 		case .None:
 		}
 	case .Settings:
-		editor_open(app, w)
+		editor_open(app, pane_link_acting_window(app, w))
 	case .Palette:
 		palette_open(app, w)
 	}

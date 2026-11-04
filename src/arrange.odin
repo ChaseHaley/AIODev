@@ -453,7 +453,9 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	   y < f32(w.height) {
 		destination, tx, ty = w, i32(x), i32(y)
 	}
-	if destination != nil && (destination.preparing || destination.linked) {destination = nil}
+	if destination != nil && destination.preparing {destination = nil}
+	// A linked window arranges its own panes; panes reach or leave it through the header button.
+	if destination != nil && (destination.linked || w.linked) && destination != w {destination = nil}
 	previous := d.destination_window
 	if previous == w.id && destination != w && selected_tab(w.workspace) != d.source {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}
@@ -537,7 +539,7 @@ pane_drag_target_move :: proc(
 	swap, changed_window: bool,
 ) -> bool {
 	d := &source_window.pane_drag
-	if pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
+	if !w.linked && pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
 	title_height := window_title_height(w)
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
@@ -557,7 +559,7 @@ pane_drag_target_move :: proc(
 			if rail_tab < len(w.workspace.tabs) {destination = w.workspace.tabs[rail_tab]}
 		}
 	}
-	new_tab := !swap &&
+	new_tab := !swap && !w.linked &&
 		(w.tabs_horizontal
 				? ui.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
 				: over_rail && rail_new_tab)

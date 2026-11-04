@@ -78,7 +78,7 @@ when AIO_CONTROL {
 				break
 			}
 			if !visible {return {}, "the focused pane is not visible; select its tab or use --region"}
-			box := pane_box(w.metrics, rect, window_pane_insets(app, w, entry))
+			box := pane_box(w.metrics, rect, pane_insets(app, w.scale, entry))
 			if region.x + region.width > int(box.columns) ||
 			   region.y + region.height > int(box.rows) {
 				return {}, fmt.tprintf(

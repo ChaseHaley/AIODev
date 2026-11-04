@@ -469,6 +469,7 @@ run_action :: proc(
 	if w.linked {
 		switch pane_link_route(action) {
 		case .Local:
+			pane_link_reconcile(app, w)
 		case .Host:
 			host := pane_link_acting_window(app, w)
 			if host != w {run_action(app, host, action, split_direction, split_ratio, split_focus)}

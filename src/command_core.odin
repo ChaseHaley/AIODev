@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:layout"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
@@ -236,6 +237,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 			if entry == nil || only != nil && only.pane.content != pane.content {continue}
 			status := term.status(entry.session)
 			linked := pane_link_window_of(app, pane.content)
+			linked_focus := linked != nil && linked.focused && pane_link_content(linked) == pane.content
 			report := Pane_Report {
 				id             = entry.id,
 				name           = entry.name,
@@ -244,7 +246,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 				workspace      = workspace.id,
 				workspace_name = workspace.name,
 				tab            = pane.tab + 1,
-				focused        = linked != nil ? linked.focused : w != nil && w.focused &&
+				focused        = linked != nil ? linked_focus : w != nil && w.focused &&
 					workspace.selected == pane.tab && w.tree.focus == pane.node,
 				status         = PANE_STATUS_WORDS[status.kind],
 				exit_code      = status.exit_code,
@@ -355,12 +357,20 @@ control_split :: proc(
 ) -> Outcome {
 	if failure, ok := control_profile_check(app, invocation.profile); !ok {return failure}
 	launch := Pane_Launch{invocation.program, invocation.directory, invocation.profile}
+	// A linked pane splits in the window showing it, whose tree is the one that decides the new pane's size.
+	shown, workspace, tab, node := w, target.workspace, target.pane.tab, target.pane.node
+	linked := pane_link_window_of(app, target.pane.content)
+	if linked != nil {
+		pane_link_reconcile(app, linked)
+		shown, workspace, tab = linked, linked.workspace, 0
+		node = layout.find_content(linked.tree, target.pane.content)
+	}
 	id, err := pane_split_at(
 		app,
-		w,
-		target.workspace,
-		target.pane.tab,
-		target.pane.node,
+		shown,
+		workspace,
+		tab,
+		node,
 		invocation.direction,
 		invocation.ratio,
 		invocation.focus,
@@ -369,6 +379,7 @@ control_split :: proc(
 	)
 	switch err {
 	case .None:
+		if linked != nil {pane_link_store(app, linked)}
 	case .Minimum:
 		return outcome_failure(.Failed, "the pane is too small to split; change Minimum Pane Width and Height")
 	case .Check, .Layout:
@@ -376,7 +387,7 @@ control_split :: proc(
 	case .Session:
 		return outcome_failure(.Failed, "could not create a pane")
 	}
-	return control_created(app, w, id, invocation.name)
+	return control_created(app, shown, id, invocation.name)
 }
 
 @(private, require_results)

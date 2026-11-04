@@ -25,6 +25,8 @@ Closed_Record :: struct {
 	axis:   layout.Axis,
 	before: bool,
 	share:  f32,
+	// It was in a linked window, so it returns there when its neighbours still are.
+	linked: bool,
 }
 
 closed_destroy :: proc(app: ^App) {
@@ -76,6 +78,7 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 		axis   = axis,
 		before = before,
 		share  = share,
+		linked = layout.link_root(&tab.tree, node) != layout.INVALID_NODE,
 	}
 	closed_push(app, {workspace = workspace.id, tab = tab.id}, record)
 }
@@ -156,6 +159,10 @@ closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Close
 		}
 	}
 	if target == layout.INVALID_NODE {target = tab.tree.focus}
+	if record.linked && layout.link_root(&tab.tree, target) != layout.INVALID_NODE {
+		closed_reopen_linked(app, w, tab_index, target, record)
+		return
+	}
 	if !closed_fits(app, w, &tab.tree, target, record) {return}
 	if !layout_session_restore(app, &record.tab.nodes[0]) {
 		notify(app, .Error, "Could not reopen the pane.")
@@ -179,6 +186,49 @@ closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Close
 	pane_focus(app, w, added)
 	tab_update_title(app, tab)
 	window_relayout(app, w)
+}
+
+// The pane's neighbours are in a linked window, so it goes back among them there.
+@(private)
+closed_reopen_linked :: proc(
+	app: ^App,
+	w: ^Window,
+	tab_index: int,
+	home_target: layout.Node_Id,
+	record: ^Closed_Record,
+) {
+	tree := &w.workspace.tabs[tab_index].tree
+	group := make([dynamic]layout.Content, context.temp_allocator)
+	layout.contents(tree, home_target, &group)
+	linked := pane_link_window_of(app, group[0])
+	if linked == nil {return}
+	pane_link_reconcile(app, linked)
+	target := layout.find_group(linked.tree, group[:])
+	if target == layout.INVALID_NODE {target = layout.find_content(linked.tree, group[0])}
+	if !closed_fits(app, linked, linked.tree, target, record) {return}
+	if !layout_session_restore(app, &record.tab.nodes[0]) {
+		notify(app, .Error, "Could not reopen the pane.")
+		return
+	}
+	id := app.next_session_id
+	added, err := layout.insert_beside(
+		linked.tree,
+		target,
+		record.axis,
+		record.before,
+		record.share,
+		{.Terminal, id},
+	)
+	if err != nil {
+		session_close(app, id)
+		notify(app, .Error, "Could not reopen the pane.")
+		return
+	}
+	pane_link_store(app, linked)
+	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
+	pane_focus(app, linked, added)
+	linked.link_activate = true
+	window_relayout(app, linked)
 }
 
 // Whether the reopened pane and its neighbours keep the minimum pane size.

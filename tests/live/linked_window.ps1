@@ -176,6 +176,50 @@ try {
     Await { (Get-State)['windows.count'] -eq '1' } 'the toggle returning the pane'
     Write-Output 'PASS the command toggles both ways'
 
+    # A linked window takes splits of its own, which follow the tab with it.
+    $hostId = (Get-State)['window.1.id']
+    Invoke-Aio command pane.linked_window | Out-Null
+    Invoke-Aio expect state windows.count=2 | Out-Null
+    $linkedId = Get-LinkedId
+    Invoke-Aio window select $linkedId | Out-Null
+    Invoke-Aio command pane.split_down | Out-Null
+    Invoke-Aio expect state panes.count=2 | Out-Null
+    Invoke-Aio wait text 'PS ' | Out-Null
+    Invoke-Aio run "'split-marker-' + (40 + 4)" | Out-Null
+    Invoke-Aio wait text 'split-marker-44' | Out-Null
+    Save-Shot $linkedId 'linked-split.png'
+    Invoke-Aio window select $hostId | Out-Null
+    Invoke-Aio expect state panes.count=1 | Out-Null
+    Invoke-Aio command tab.select_2 | Out-Null
+    Await-Visible 1 'another tab hides a split linked window'
+    Invoke-Aio command tab.select_1 | Out-Null
+    Await-Visible 2 'its tab brings the split linked window back'
+    Invoke-Aio window select $linkedId | Out-Null
+    Invoke-Aio expect text 'split-marker-44' | Out-Null
+    Write-Output 'PASS a linked window holds its own split'
+
+    # The toggle returns the focused pane and keeps the other in the window.
+    Invoke-Aio command pane.linked_window | Out-Null
+    Invoke-Aio expect state windows.count=2 | Out-Null
+    Invoke-Aio expect state panes.count=1 | Out-Null
+    Invoke-Aio window select $hostId | Out-Null
+    Invoke-Aio expect state panes.count=2 | Out-Null
+    Write-Output 'PASS returning one pane keeps the rest in the window'
+
+    # Closing the window returns everything still in it, split included.
+    Invoke-Aio window select $linkedId | Out-Null
+    Invoke-Aio command pane.split_down | Out-Null
+    Invoke-Aio expect state panes.count=2 | Out-Null
+    Invoke-Aio wait text 'PS ' | Out-Null
+    [LinkedWindowNative]::Close((Get-Handle $linkedId))
+    Await { (Get-State)['windows.count'] -eq '1' } 'closing the split linked window'
+    Invoke-Aio window select $hostId | Out-Null
+    Invoke-Aio expect state panes.count=4 | Out-Null
+    Write-Output 'PASS closing a split linked window returns every pane'
+    Invoke-Aio command pane.close | Out-Null
+    Invoke-Aio command pane.close | Out-Null
+    Invoke-Aio expect state panes.count=2 | Out-Null
+
     # The shell exiting closes the pane, and its window with it.
     Invoke-Aio command pane.linked_window | Out-Null
     Invoke-Aio expect state windows.count=2 | Out-Null
@@ -193,6 +237,8 @@ try {
     Invoke-Aio expect state windows.count=2 | Out-Null
     $linkedId = Get-LinkedId
     Invoke-Aio window select $linkedId | Out-Null
+    Invoke-Aio command pane.split_down | Out-Null
+    Invoke-Aio expect state panes.count=2 | Out-Null
     Invoke-Aio window move '220,160' | Out-Null
     $origin = (Get-State)['window.origin']
     Invoke-Aio window select (Get-State)['window.1.id'] | Out-Null
@@ -206,7 +252,8 @@ try {
     Invoke-Aio window select $linkedId | Out-Null
     $restored = (Get-State)['window.origin']
     if ($restored -ne $origin) { throw "Restored at $restored, not $origin." }
-    Write-Output 'PASS the link and the window position survive a restart'
+    Invoke-Aio expect state panes.count=2 | Out-Null
+    Write-Output 'PASS the link, its split and the window position survive a restart'
     Write-Output 'PASS linked window'
 } finally {
     & $ctl --name $Name stop | Out-Null

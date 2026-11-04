@@ -38,14 +38,6 @@ pane_insets :: proc(
 	}
 }
 
-// A linked window's title bar names its one pane, and every control a header holds acts on a tree it does
-// not own, so the pane takes that row back.
-window_pane_insets :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) -> Pane_Insets {
-	insets := pane_insets(app, w.scale, entry)
-	if w.linked {insets.header = 0}
-	return insets
-}
-
 pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Insets) -> Pane_Box {
 	columns, rows := term_view.grid_size(
 		metrics,

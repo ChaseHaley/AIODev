@@ -47,6 +47,8 @@ Split :: struct {
 	axis:          Axis,
 	ratio:         f32,
 	first, second: Node_Id,
+	// Shown in its own window with every pane under it, which are not marked themselves; see links.odin.
+	linked:        bool,
 }
 
 Node :: union {
@@ -240,7 +242,8 @@ wrap :: proc(
 	parent := parent_of(l, node)
 	l.next_pane_order += 1
 	added := allocate_node(l, Pane{content = content, order = l.next_pane_order})
-	branch := allocate_node(l, Split{axis, clamp(ratio, 0.05, 0.95), node, added})
+	share := clamp(ratio, 0.05, 0.95)
+	branch := allocate_node(l, Split{axis = axis, ratio = share, first = node, second = added})
 	if parent == INVALID_NODE {
 		l.root = branch
 	} else {
@@ -291,7 +294,8 @@ swap :: proc(l: ^Layout, first, second: Node_Id) -> bool {
 
 balance :: proc(l: ^Layout) {
 	for node, i in l.nodes {
-		if s, ok := node.(Split); ok {
+		// A slot's arrangement belongs to the window showing it.
+		if s, ok := node.(Split); ok && link_root(l, Node_Id(i)) == INVALID_NODE {
 			s.ratio = 0.5
 			l.nodes[i] = s
 		}
@@ -305,6 +309,7 @@ first_shown :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
 	case Pane:
 		if !node.linked {return id}
 	case Split:
+		if node.linked {return INVALID_NODE}
 		if found := first_shown(l, node.first); found != INVALID_NODE {return found}
 		return first_shown(l, node.second)
 	}
@@ -318,7 +323,7 @@ shown_count :: proc(l: ^Layout, id: Node_Id) -> int {
 	case Pane:
 		return node.linked ? 0 : 1
 	case Split:
-		return shown_count(l, node.first) + shown_count(l, node.second)
+		return node.linked ? 0 : shown_count(l, node.first) + shown_count(l, node.second)
 	}
 	return 0
 }
@@ -329,17 +334,15 @@ split_divides :: proc(l: ^Layout, s: Split) -> bool {
 	return first_shown(l, s.first) != INVALID_NODE && first_shown(l, s.second) != INVALID_NODE
 }
 
-// Moves a pane to or from its own window. Its slot stays, so it returns exactly where it was. A tree must
-// keep one pane it can show and focus, so the last shown pane cannot leave.
+// Moves a pane, or a whole slot on its way back, to or from its own window. Its slot stays, so it returns
+// exactly where it was. A tree must keep one pane it can show and focus, so the last shown pane cannot leave.
 @(require_results)
 set_linked :: proc(l: ^Layout, node: Node_Id, linked: bool) -> bool {
 	if int(node) >= len(l.nodes) {return false}
-	pane, ok := l.nodes[node].(Pane)
-	if !ok || pane.linked == linked {return false}
+	if _, vacant := l.nodes[node].(Vacant); vacant || node_linked(l, node) == linked {return false}
 	if linked && (l.root == INVALID_NODE || shown_count(l, l.root) <= 1) {return false}
 	sibling, _, _, _, placed := placement(l, node)
-	pane.linked = linked
-	l.nodes[node] = pane
+	node_set_linked(l, node, linked)
 	if linked && l.focus == node {l.focus = placed ? first_shown(l, sibling) : INVALID_NODE}
 	links_repair(l)
 	panes_changed(l)
@@ -351,12 +354,10 @@ set_linked :: proc(l: ^Layout, node: Node_Id, linked: bool) -> bool {
 links_repair :: proc(l: ^Layout) {
 	if l.root == INVALID_NODE {return}
 	if first_shown(l, l.root) == INVALID_NODE {
-		for &node in l.nodes {
-			if pane, ok := &node.(Pane); ok {pane.linked = false}
-		}
+		for _, i in l.nodes {node_set_linked(l, Node_Id(i), false)}
 	}
 	if int(l.focus) < len(l.nodes) {
-		if pane, ok := l.nodes[l.focus].(Pane); ok && !pane.linked {return}
+		if _, ok := l.nodes[l.focus].(Pane); ok && link_root(l, l.focus) == INVALID_NODE {return}
 	}
 	l.focus = first_shown(l, l.root)
 }
@@ -380,6 +381,8 @@ remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 			if s.first == parent {s.first = sibling} else {s.second = sibling}
 			l.nodes[grandparent] = s
 		}
+		// The last two panes of a linked slot: the one that stays is the slot now.
+		if branch.linked {node_set_linked(l, sibling, true)}
 		if l.focus == node {l.focus = first_shown(l, sibling)}
 		l.nodes[parent] = Vacant{}
 	}
@@ -621,7 +624,7 @@ run_top :: proc(l: ^Layout, node: Node_Id, axis: Axis) -> Node_Id {
 
 @(private)
 run_units :: proc(l: ^Layout, id: Node_Id, axis: Axis) -> int {
-	if s, ok := l.nodes[id].(Split); ok && s.axis == axis {
+	if s, ok := l.nodes[id].(Split); ok && s.axis == axis && !s.linked {
 		return run_units(l, s.first, axis) + run_units(l, s.second, axis)
 	}
 	return first_shown(l, id) != INVALID_NODE ? 1 : 0
@@ -630,7 +633,7 @@ run_units :: proc(l: ^Layout, id: Node_Id, axis: Axis) -> int {
 @(private)
 balance_run :: proc(l: ^Layout, id: Node_Id, axis: Axis) {
 	s, ok := l.nodes[id].(Split)
-	if !ok || s.axis != axis {return}
+	if !ok || s.axis != axis || s.linked {return}
 	first, second := run_units(l, s.first, axis), run_units(l, s.second, axis)
 	// A side in its own window keeps the share it returns to.
 	if first > 0 && second > 0 {
@@ -677,7 +680,7 @@ place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction
 	if before {
 		first, second = added, target
 	}
-	branch := allocate_node(l, Split{axis, 0.5, first, second})
+	branch := allocate_node(l, Split{axis = axis, ratio = 0.5, first = first, second = second})
 	if parent == INVALID_NODE {l.root = branch} else {
 		s := l.nodes[parent].(Split)
 		if s.first == target {s.first = branch} else {s.second = branch}
