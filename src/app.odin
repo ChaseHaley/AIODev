@@ -120,6 +120,8 @@ App :: struct {
 	focus_jumps:           Focus_Jumps,
 	palette_window:        platform_api.Window_Id,
 	notices:               ui.Notices,
+	notice_window:         platform_api.Window_Id,
+	window_focus_order:    u64,
 	sessions:              [dynamic]Session_Entry,
 	workspaces:            [dynamic]^Workspace,
 	next_workspace_id:     u32,
@@ -345,6 +347,7 @@ tick :: proc(app: ^App) {
 	// A dwell can create or discard the trailing preview window.
 	for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], time.tick_now())}
 	pane_links_sync(app)
+	window_notices_sync(app)
 	for window in app.windows {
 		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
 			leader_cancel(window)

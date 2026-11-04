@@ -826,6 +826,9 @@ when AIO_CONTROL {
 				if _, err := append(&entries, ..grid[:]); err != nil {return nil, .Out_Of_Memory}
 			}
 		}
+		if _, err := append(&entries, control.State_Entry{
+			"notices.window", fmt.tprintf("%d", app.notice_window),
+		}); err != nil {return nil, .Out_Of_Memory}
 		for n in app.notices.items {
 			remaining := max(
 				i64(0),

@@ -56,6 +56,7 @@ Window :: struct {
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
+	focus_order: u64,
 	preparing: bool,
 	// Shows one pane of a tab instead of a workspace; see pane_links.odin. w.workspace is then a private
 	// view of that pane, and link_workspace is the id of the workspace that really holds it.
@@ -295,6 +296,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 	}
 	window_free(w)
 	if view != nil {workspace_destroy(view)}
+	window_notices_sync(app)
 }
 
 @(private)
@@ -745,6 +747,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	}
 	if result := status_inbox_draw(app, w); result != .Ok {return frame, result}
 	if result := tooltip_draw(app, w); result != .Ok {return frame, result}
+	if app.notice_window != w.id {return frame, .Ok}
 	return frame, ui.notices_draw(
 		&app.notices,
 		&w.list,

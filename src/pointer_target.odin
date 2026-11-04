@@ -146,6 +146,7 @@ move_point :: proc(e: platform.Mouse_Move_Event) -> (f32, f32) {return f32(e.x),
 
 @(private = "file")
 notice_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> ui.Notice_Hit {
+	if app.notice_window != w.id {return {}}
 	return ui.notices_hit(&app.notices, &w.ui_text, f32(w.width), f32(w.height), w.scale, x, y)
 }
 
