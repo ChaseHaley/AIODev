@@ -126,7 +126,7 @@ pane_header_draw :: proc(
 		app.theme,
 		{r.x, r.y, r.width, r.height},
 		app.theme.pane,
-		f32(app.settings.pane.corner_radius) * w.scale,
+		window_pane_radius(app, w),
 		w.scale,
 		title,
 		directory,

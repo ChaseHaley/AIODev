@@ -684,7 +684,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height},
 				message,
 				w.scale,
-				f32(app.settings.pane.corner_radius) * w.scale,
+				window_pane_radius(app, w),
 			); message_result != .Ok {return frame, message_result}
 		}
 		if header_result := pane_header_draw(app, w, pane, entry);
@@ -810,7 +810,7 @@ build_pane :: proc(
 	glyphs.Result,
 ) {
 	clip := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
-	radius := f32(app.settings.pane.corner_radius) * w.scale
+	radius := window_pane_radius(app, w)
 	for &cached in w.views {
 		if cached.content != pane.content {continue}
 		if len(w.panes) == 1 {

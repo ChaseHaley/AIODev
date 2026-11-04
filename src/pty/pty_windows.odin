@@ -6,6 +6,7 @@ import "core:log"
 import "core:slice"
 import "core:strings"
 import "core:sync"
+import "core:thread"
 import w "core:sys/windows"
 import "core:unicode/utf8"
 
@@ -442,7 +443,7 @@ read :: proc(p: ^Pty, buffer: []u8) -> (n: int, err: Error) {
 	request := u32(min(len(buffer), int(max(u32))))
 	if !bool(w.ReadFile(p.output, raw_data(buffer), request, &count, nil)) {
 		code := u32(w.GetLastError())
-		if code == w.ERROR_BROKEN_PIPE || code == w.ERROR_NO_DATA {
+		if code == w.ERROR_BROKEN_PIPE || code == w.ERROR_NO_DATA || code == w.ERROR_OPERATION_ABORTED {
 			return 0, .Closed
 		}
 		return 0, io_failure("ReadFile", .Read, code)
@@ -453,6 +454,27 @@ read :: proc(p: ^Pty, buffer: []u8) -> (n: int, err: Error) {
 	// The reader thread owns this counter; a diagnostics read may lag by the chunk in flight.
 	sync.atomic_add(&p.bytes_read, u64(count))
 	return int(count), .None
+}
+
+// A cancellation can miss between reads or race with a successful read. Retry until the dedicated
+// output reader exits; its owner must still join and destroy it before releasing the PTY.
+@(require_results)
+cancel_reads :: proc(reader: ^thread.Thread) -> Error {
+	if reader == nil {return .None}
+	for !thread.is_done(reader) {
+		if !bool(CancelSynchronousIo(reader.win32_thread)) {
+			code := u32(w.GetLastError())
+			if code != w.ERROR_NOT_FOUND {return io_failure("CancelSynchronousIo", .Read, code)}
+		}
+		switch w.WaitForSingleObject(reader.win32_thread, 1) {
+		case w.WAIT_OBJECT_0:
+			return .None
+		case w.WAIT_TIMEOUT:
+		case:
+			return io_failure("WaitForSingleObject(reader)", .Wait, u32(w.GetLastError()))
+		}
+	}
+	return .None
 }
 
 // output_bytes reports how much output this console has delivered to readers.
@@ -565,7 +587,7 @@ terminate :: proc(p: ^Pty) -> Error {
 }
 
 destroy :: proc(p: ^Pty) {
-	// The reader must have reached EOF (or never started); console close can otherwise block.
+	// The reader must have stopped (or never started); console close can otherwise block.
 	if err := terminate(p); err != .None {
 		log.errorf("pty termination during destroy failed: %v", err)
 	}
