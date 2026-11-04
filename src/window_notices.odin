@@ -17,8 +17,8 @@ window_notices_sync :: proc(app: ^App) {
 	if app.notice_window == id {return}
 	app.notice_window = id
 	for w in app.windows {
-		if w.notice_hover != 0 {tooltip_cancel(w)}
 		w.notice_hover = 0
+		w.notice_buttons = {}
 		ui.armed_cancel(&w.notice_armed)
 		w.dirty = true
 	}
