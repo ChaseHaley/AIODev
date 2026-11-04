@@ -499,7 +499,12 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.focused = focused
 	w.dirty = true
-	if focused {app.focus_jumps.window = w.id}
+	if focused {
+		app.focus_jumps.window = w.id
+		app.window_focus_order += 1
+		w.focus_order = app.window_focus_order
+	}
+	window_notices_sync(app)
 	if !focused {
 		if !gesture_cancel(app, w) {return}
 		window_overlays_cancel(app, w, true)
