@@ -208,8 +208,8 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 		value  = f32(w.workspace.selected),
 		target = f32(w.workspace.selected),
 	}
+	// Every new window opens at the configured size, whatever window its content last filled.
 	g := initial_geometry(app)
-	if entry := focused_session(app, w); entry != nil {g = term.geometry(entry.session)}
 	desc := platform.Window_Desc {
 		title = app.app_id,
 		inactive = app.options.inactive,

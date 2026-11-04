@@ -137,6 +137,27 @@ linked_window_follows_its_tab :: proc(t: ^testing.T) {
 }
 
 @(test)
+linked_window_opens_at_the_configured_size :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 11) {return}
+	if !fixture_split(t, &f) {return}
+	expected := app.initial_geometry(f.state)
+	app.window_resize(f.state, f.host, f.host.width + 300, f.host.height + 200)
+	session := app.session_find(f.state, f.content.id)
+	testing.expect(t, term.geometry(session.session).surface_width > expected.surface_width)
+	app.pane_link_toggle(f.state, f.host)
+	w := linked_window(&f)
+	if !testing.expect(t, w != nil) {return}
+	testing.expect_value(t, u32(w.width), expected.surface_width)
+	testing.expect_value(t, u32(w.height), expected.surface_height)
+	// The session held the larger window's geometry until now; it must take this window's.
+	geometry := term.geometry(session.session)
+	testing.expect_value(t, geometry.surface_width, expected.surface_width)
+	testing.expect_value(t, geometry.surface_height, expected.surface_height)
+}
+
+@(test)
 linked_pane_returns_to_its_slot :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_stop(t, &f)
