@@ -21,10 +21,14 @@ public static class FullscreenEdges {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT point);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
     [DllImport("user32.dll")] public static extern bool GetMonitorInfoW(IntPtr h, ref MONITORINFO info);
-    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll", SetLastError=true)]
+    public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 }
 '@
 $previousDpi = [FullscreenEdges]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($previousDpi -eq [IntPtr]::Zero) {
+    throw "SetThreadDpiAwarenessContext failed: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
 
 function Invoke-Aio {
     $result = & $ctl --name $name @args
@@ -115,7 +119,7 @@ try {
     Write-Output 'PASS fullscreen edges from normal and maximized placement'
 } finally {
     & $ctl --name $name stop | Write-Output
-    if ($previousDpi -ne [IntPtr]::Zero) {
-        $null = [FullscreenEdges]::SetThreadDpiAwarenessContext($previousDpi)
+    if ([FullscreenEdges]::SetThreadDpiAwarenessContext($previousDpi) -eq [IntPtr]::Zero) {
+        throw "Restore DPI context failed: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
     }
 }
