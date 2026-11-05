@@ -77,6 +77,37 @@ summary_lists_layers_only :: proc(t: ^testing.T) {
 }
 
 @(test)
+images_are_listed_between_rects_and_glyphs_when_present :: proc(t: ^testing.T) {
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	layer(t, &list, {0, 0, 100, 100})
+	glyph(t, &list, {0, 0, 8, 8}, {1, 1, 1, 1}, 1)
+	image := render.Image_Instance{rect = {1, 2, 30, 40}, uv = {0, 0, 1, 1}, key = 9}
+	testing.expect_value(t, render.push_image(&list, image), render.Error.None)
+	rect(t, &list, {0, 0, 10, 10}, {1, 1, 1, 1}, 0)
+	expect_rows(
+		t,
+		report(&list, {bounded = true, region = {0, 0, 100, 100}}),
+		{
+			"draws layers=1 rects=1 glyphs=1 images=1",
+			"layer 0 clip=0,0,100,100 rects=1 glyphs=1 images=1",
+			"rect 0 0,0 10x10 #ffffffff radius=0",
+			"image 0 1,2 30x40",
+			"glyph 0 0,0 8x8 #ffffffff flags=1",
+		},
+	)
+	expect_rows(
+		t,
+		report(&list, {bounded = true, region = {0, 0, 100, 100}, kind = .Rect}),
+		{
+			"draws layers=1 rects=1 glyphs=1 images=1",
+			"layer 0 clip=0,0,100,100 rects=1 glyphs=1 images=1",
+			"rect 0 0,0 10x10 #ffffffff radius=0",
+		},
+	)
+}
+
+@(test)
 instances_follow_draw_order_across_layers :: proc(t: ^testing.T) {
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)

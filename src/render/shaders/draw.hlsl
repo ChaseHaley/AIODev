@@ -7,6 +7,8 @@ cbuffer Frame : register(b0) {
     float3 padding;
     float4 round_clip;
     float clip_radius;
+    float4 image_rect;
+    float4 image_uv;
 };
 
 struct RectInstance {
@@ -33,6 +35,8 @@ StructuredBuffer<RectInstance> rects : register(t0);
 StructuredBuffer<GlyphInstance> glyphs : register(t1);
 Texture2D<float> atlas : register(t2);
 Texture2D<float4> color_atlas : register(t3);
+Texture2D<float4> image_texture : register(t4);
+SamplerState image_sampler : register(s0);
 
 struct Vertex {
     float4 position : SV_Position;
@@ -145,6 +149,19 @@ Vertex glyph_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
     o.flags = g.flags;
     o.extra.yz = float2(g.fade_start, g.fade_end);
     return o;
+}
+
+Vertex image_vs(uint vertex : SV_VertexID) {
+    float2 c = corner(vertex);
+    Vertex o = (Vertex)0;
+    o.position = clip_position(image_rect.xy + c * image_rect.zw);
+    o.texel = image_uv.xy + c * image_uv.zw;
+    return o;
+}
+
+// Images are premultiplied, so filtering between texels cannot darken a transparent edge.
+float4 image_ps(Vertex i) : SV_Target {
+    return image_texture.Sample(image_sampler, i.texel) * clip_coverage(i.position.xy);
 }
 
 // DirectWrite grayscale correction, after microsoft/terminal src/renderer/atlas/dwrite.hlsl (MIT).

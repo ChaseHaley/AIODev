@@ -262,11 +262,12 @@ Proves visual locality: only the intended cells changed.
 			`draws [--region <x,y,w,h>] [--kind rect|glyph]
 Lists the selected window's last built frame in draw order.
 Without --region it prints summaries only:
-draws layers=<n> rects=<n> glyphs=<n>
-layer <i> clip=<x,y,w,h> rects=<n> glyphs=<n>
+draws layers=<n> rects=<n> glyphs=<n> [images=<n>]
+layer <i> clip=<x,y,w,h> rects=<n> glyphs=<n> [images=<n>]
 With --region it lists intersecting instances:
 rect <i> <x,y> <w>x<h> <#rrggbbaa> radius=<r>
 glyph <i> <x,y> <w>x<h> <#rrggbbaa> flags=<n>
+image <i> <x,y> <w>x<h>, only without --kind
 --kind limits instance lines to rect or glyph. Coordinates are client pixels.
 `,
 		)

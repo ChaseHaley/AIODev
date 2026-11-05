@@ -50,6 +50,7 @@ View :: struct {
 	shaped:     [dynamic]font.Shaped_Glyph,
 	contrast:   Contrast_Cache,
 	links:      term.Link_Map,
+	images:     term.Image_Capture,
 }
 
 @(require_results)
@@ -65,6 +66,7 @@ create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	ok &&= ghostty.render_state_new(nil, &v.state) == .Success
 	ok &&= ghostty.render_state_row_iterator_new(nil, &v.rows) == .Success
 	ok &&= ghostty.render_state_row_cells_new(nil, &v.cells) == .Success
+	ok &&= term.image_capture_create(&v.images, allocator)
 	if !ok {
 		destroy(v)
 	}
@@ -76,6 +78,7 @@ destroy :: proc(v: ^View) {
 	ghostty.render_state_row_iterator_free(v.rows)
 	ghostty.render_state_free(v.state)
 	term.link_map_destroy(&v.links)
+	term.image_capture_destroy(&v.images)
 	delete(v.codepoints)
 	delete(v.highlights)
 	delete(v.marks)
@@ -204,7 +207,7 @@ build :: proc(
 	glyphs.Result,
 ) {
 	if list.error != .None {return {}, .Ok}
-	term.capture(session, v.state, &v.highlights)
+	term.capture(session, v.state, &v.highlights, &v.images)
 	b := Builder {
 		list    = list,
 		cache   = cache,
@@ -229,6 +232,16 @@ build :: proc(
 		background      = color(b.colors.background),
 		cursor_blinking = b.cursor.visible && b.cursor.blinking,
 	}
+	has_images := len(v.images.placements) > 0
+	if has_images {
+		images_upload(v, session, cache.device)
+		if images_present(v, .Below_Background) {
+			images_draw(v, &b, .Below_Background)
+			images_next_layer(&b)
+		}
+		// The cell layer draws these after its background rects and before its glyphs.
+		images_draw(v, &b, .Below_Text)
+	}
 	for y := 0; ghostty.render_state_row_iterator_next(v.rows); y += 1 {
 		if result := build_row(v, &b, y); result != .Ok {
 			return frame, result
@@ -237,6 +250,10 @@ build :: proc(
 	}
 	if list.error != .None {return frame, .Ok}
 	build_cursor(&b)
+	if has_images && images_present(v, .Above_Text) {
+		images_next_layer(&b)
+		images_draw(v, &b, .Above_Text)
+	}
 	if result := ghostty.render_state_clean(v.state); result != .Success {
 		log.errorf("term_view: cleaning the render state failed: %v", result)
 	}

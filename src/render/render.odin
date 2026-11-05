@@ -43,16 +43,25 @@ Glyph_Instance :: struct {
 GLYPH_COLOR :: u32(1)
 GLYPH_FADE :: u32(2)
 
+// A textured quad. `key` names a texture from image_upload; `uv` is the part of it to show, in 0..1.
+Image_Instance :: struct {
+	rect, uv: Rect,
+	key:      u64,
+}
+
+// A layer draws its rects, then its images, then its glyphs.
 Layer :: struct {
 	clip:                                             Rect,
 	radius:                                           f32,
 	rect_start, rect_count, glyph_start, glyph_count: int,
+	image_start, image_count:                         int,
 }
 
 Draw_List :: struct {
 	layers: [dynamic]Layer,
 	rects:  [dynamic]Rect_Instance,
 	glyphs: [dynamic]Glyph_Instance,
+	images: [dynamic]Image_Instance,
 	// The first failed write invalidates the whole list until the next build.
 	error: Error,
 	// Completed frames belong to this atlas; zero leaves standalone lists unbound.
@@ -95,6 +104,7 @@ draw_list_init :: proc(allocator := context.allocator) -> Draw_List {
 		layers = make([dynamic]Layer, allocator),
 		rects = make([dynamic]Rect_Instance, allocator),
 		glyphs = make([dynamic]Glyph_Instance, allocator),
+		images = make([dynamic]Image_Instance, allocator),
 	}
 }
 
@@ -102,6 +112,7 @@ draw_list_reset :: proc(list: ^Draw_List) {
 	clear(&list.layers)
 	clear(&list.rects)
 	clear(&list.glyphs)
+	clear(&list.images)
 	list.error = .None
 	list.atlas_generation = 0
 }
@@ -110,6 +121,7 @@ draw_list_destroy :: proc(list: ^Draw_List) {
 	delete(list.layers)
 	delete(list.rects)
 	delete(list.glyphs)
+	delete(list.images)
 	list^ = {}
 }
 
@@ -119,17 +131,21 @@ append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
 	if source.error != .None {list.error = source.error; return list.error}
 	if reserve(&list.layers, len(list.layers) + len(source.layers)) != nil ||
 	   reserve(&list.rects, len(list.rects) + len(source.rects)) != nil ||
-	   reserve(&list.glyphs, len(list.glyphs) + len(source.glyphs)) != nil {
+	   reserve(&list.glyphs, len(list.glyphs) + len(source.glyphs)) != nil ||
+	   reserve(&list.images, len(list.images) + len(source.images)) != nil {
 		list.error = .Out_Of_Memory
 		return list.error
 	}
 	rect_offset, glyph_offset := len(list.rects), len(list.glyphs)
+	image_offset := len(list.images)
 	append(&list.rects, ..source.rects[:])
 	append(&list.glyphs, ..source.glyphs[:])
+	append(&list.images, ..source.images[:])
 	for layer in source.layers {
 		adjusted := layer
 		adjusted.rect_start += rect_offset
 		adjusted.glyph_start += glyph_offset
+		adjusted.image_start += image_offset
 		append(&list.layers, adjusted)
 	}
 	return .None
@@ -143,6 +159,7 @@ push_layer :: proc(list: ^Draw_List, clip: Rect, radius: f32 = 0) -> Error {
 		radius      = radius,
 		rect_start  = len(list.rects),
 		glyph_start = len(list.glyphs),
+		image_start = len(list.images),
 	}
 	if _, err := append(&list.layers, layer); err != nil {
 		list.error = .Out_Of_Memory
@@ -204,6 +221,18 @@ push_glyph :: proc(list: ^Draw_List, instance: Glyph_Instance) -> Error {
 		return list.error
 	}
 	list.layers[len(list.layers) - 1].glyph_count += 1
+	return .None
+}
+
+@(require_results)
+push_image :: proc(list: ^Draw_List, instance: Image_Instance) -> Error {
+	if list.error != .None {return list.error}
+	assert(len(list.layers) > 0, "push_layer must precede push_image")
+	if _, err := append(&list.images, instance); err != nil {
+		list.error = .Out_Of_Memory
+		return list.error
+	}
+	list.layers[len(list.layers) - 1].image_count += 1
 	return .None
 }
 
