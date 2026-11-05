@@ -4,6 +4,7 @@ import app "../../src"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
+import "aio:ui"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -152,6 +153,35 @@ activity_view_button_saves_one_preference_and_cancels_outside_or_on_capture_loss
 	saved, _ = app.settings_save_value(s, "status.panel_view", "dense", "set view")
 	testing.expect(t, saved)
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Dense)
+}
+
+@(test)
+activity_view_change_repaints_every_window :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-view-windows") {return}
+	s := &f.state
+	if !testing.expect(t, len(s.windows) > 1) {return}
+	for window in s.windows {window.dirty = false}
+	app.status_panel_view_toggle(s)
+	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Dense)
+	for window in s.windows {testing.expect(t, window.dirty)}
+}
+
+@(test)
+activity_view_setting_shows_its_user_facing_names :: proc(t: ^testing.T) {
+	for entry in settings.SCHEMA {
+		if entry.key != "status.panel_view" {continue}
+		row := ui.schema_row(entry)
+		testing.expect_value(t, row.kind, ui.Row_Kind.Choice)
+		testing.expect_value(t, row.default_value, "comfy")
+		testing.expect_value(t, row.choices[0], "comfy")
+		testing.expect_value(t, row.choice_labels[0], "Comfy")
+		testing.expect_value(t, row.choices[1], "dense")
+		testing.expect_value(t, row.choice_labels[1], "Dense")
+		return
+	}
+	testing.expect(t, false, "status.panel_view is missing from the schema")
 }
 
 @(test)
