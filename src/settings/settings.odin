@@ -54,6 +54,13 @@ Status_Panel_Side :: enum int {
 	Right,
 	Left,
 }
+Status_Panel_View :: enum int {
+	Comfy,
+	Dense,
+}
+// What Settings shows for each view, in Status_Panel_View order.
+@(rodata)
+status_panel_view_labels := [len(Status_Panel_View)]string{"Comfy", "Dense"}
 Status_Keep :: enum int {
 	Focus,
 	Dismiss,
@@ -84,6 +91,7 @@ Status_Settings :: struct {
 	taskbar_working, taskbar_blocked, taskbar_error: bool,
 
 	panel_side: Status_Panel_Side,
+	panel_view: Status_Panel_View,
 	panel_width, panel_height: int,
 	enabled, tab_indicators, active_tab_indicator, pane_headers, workspace_picker: bool,
 	inbox, panel, taskbar:                                                        bool,
@@ -430,6 +438,17 @@ SCHEMA :: [?]Schema_Entry {
 		0,
 		{"right", "left"},
 		"Dock Activity at the far right or far left of the workspace.",
+	},
+	{
+		"status.panel_view",
+		"Activity Panel View",
+		.Enum,
+		offset_of(Settings, status) + offset_of(Status_Settings, panel_view),
+		"comfy",
+		0,
+		0,
+		{"comfy", "dense"},
+		"Comfy shows each task with its message. Dense fits more programs in compact rows.",
 	},
 	{
 		"status.panel_width",
