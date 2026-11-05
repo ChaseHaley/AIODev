@@ -52,6 +52,8 @@ Saved_Node :: struct {
 	profile:   string `json:"profile,omitempty"`,
 	directory: string `json:"directory,omitempty"`,
 	name:      string `json:"name,omitempty"`,
+	// The file a Markdown pane shows.
+	path:      string `json:"path,omitempty"`,
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
@@ -177,6 +179,9 @@ layout_link_encode :: proc(app: ^App, tree: ^layout.Layout, slot: layout.Node_Id
 @(private)
 layout_pane_encode :: proc(app: ^App, content: layout.Content, processes: []pty.Process_Info) -> Saved_Node {
 	saved := Saved_Node{content = content.kind}
+	if content.kind == .Markdown {
+		if pane := markdown_find(app, content.id); pane != nil {saved.path = pane.path}
+	}
 	if !pane_owns_session(content.kind) {return saved}
 	entry := session_find(app, content.id)
 	if entry == nil {return saved}
@@ -313,6 +318,11 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 		case .Settings:
 			restored = !settings_seen && !workspace_has_content(workspace, pane.content)
 			if restored {settings_seen = true} else {log.error("skipping a saved tab with a second settings page")}
+		case .Markdown:
+			path := saved.nodes[i].path
+			document := path != "" && utf8.valid_string(path) ? markdown_pane_create(app, path, false) : nil
+			restored = document != nil
+			if restored {pane.content.id = document.id}
 		}
 		if !restored {
 			layout_tab_discard(app, tab)

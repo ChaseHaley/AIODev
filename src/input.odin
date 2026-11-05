@@ -282,6 +282,10 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		settings_key(app, w, e)
 		return
 	}
+	if markdown_active(w) {
+		markdown_key(app, w, e)
+		return
+	}
 	entry := focused_session(app, w)
 	if entry == nil {
 		return
@@ -489,6 +493,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	if _, _, header := pane_header_hit(w, f32(e.x), f32(e.y)); header {return}
+	if markdown_wheel(app, w, f32(e.x), f32(e.y), rows) {return}
 	if entry := pane_at(app, w, e.x, e.y); entry != nil {
 		term.scroll(entry.session, rows, e.modifiers, f32(e.x), f32(e.y))
 		w.dirty = true

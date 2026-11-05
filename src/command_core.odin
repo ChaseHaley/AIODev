@@ -24,6 +24,7 @@ ACTION_ARGUMENTS :: #partial [Action]Action_Arguments {
 	.New_Tab      = {accepted = {.Focus, .Directory, .Name, .Profile, .Program}},
 	.Split        = {accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program}},
 	.Rename_Pane  = {accepted = {.Text}},
+	.Open_Markdown = {accepted = {.Text, .Direction, .Ratio, .Focus}},
 	.Pane_List    = {hidden = true},
 	.Pane_Status  = {hidden = true},
 	.Pane_Read    = {accepted = {.Lines}, hidden = true},
@@ -127,6 +128,8 @@ command_invoke :: proc(
 		return control_tab_new(app, window, target.workspace, invocation)
 	case .Split:
 		return control_split(app, window, target, invocation)
+	case .Open_Markdown:
+		return control_markdown_open(app, window, target, invocation)
 	}
 	if window == nil {return outcome_failure(.Failed, "the pane's workspace is not open in a window")}
 	if action == .Rename_Pane && .Text in invocation.given {

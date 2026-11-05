@@ -81,6 +81,7 @@ Action :: enum u32 {
 	Rename_Tab,
 	Rename_Pane,
 	Change_Pane_Shell,
+	Open_Markdown,
 	Duplicate_Tab,
 	Move_Tab_Left,
 	Move_Tab_Right,
@@ -230,6 +231,7 @@ ACTIONS :: [Action]Action_Info {
 	.Rename_Tab = {"tab.rename", "Rename Tab", nil},
 	.Rename_Pane = {"pane.rename", "Rename Pane", nil},
 	.Change_Pane_Shell = {"pane.change_shell", "Change Pane Shell…", nil},
+	.Open_Markdown = {"pane.open_markdown", "Open Markdown File…", nil},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil},
 	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil},
 	.Move_Tab_Right = {"tab.move_right", "Move Tab Right", nil},
@@ -504,6 +506,8 @@ run_action :: proc(
 			clipboard_copy(app, ui.field_selected_text(&w.find.query))
 		} else if entry != nil {
 			copy_selection(app, entry, true)
+		} else {
+			markdown_copy(app, w)
 		}
 	case .Paste:
 		if entry != nil {
@@ -512,6 +516,8 @@ run_action :: proc(
 	case .Select_All:
 		if entry != nil {
 			term.select_all(entry.session)
+		} else {
+			markdown_select_all(app, w)
 		}
 	case .Find:
 		if entry == nil {return}
@@ -526,12 +532,17 @@ run_action :: proc(
 		if entry != nil {
 			page := max(1, int(term.geometry(entry.session).rows) - 1)
 			term.scroll_viewport(entry.session, action == .Scroll_Page_Up ? -page : page)
+		} else {
+			markdown_page(app, w, action == .Scroll_Page_Up ? -1 : 1)
 		}
 	case .Scroll_Partial_Up, .Scroll_Partial_Down:
 		if entry != nil {
 			rows := f64(term.geometry(entry.session).rows) * app.settings.terminal.scroll_page_length
 			page := max(1, int(rows + 0.5))
 			term.scroll_viewport(entry.session, action == .Scroll_Partial_Up ? -page : page)
+		} else {
+			length := app.settings.terminal.scroll_page_length
+			markdown_page(app, w, action == .Scroll_Partial_Up ? -length : length)
 		}
 	case .Font_Size_Increase:
 		set_font_points(app, app.font_points + 1)
@@ -552,6 +563,8 @@ run_action :: proc(
 		reload_settings(app)
 	case .Customize_Colors:
 		settings_reveal(app, w, {query = "colors.", search = .Scope})
+	case .Open_Markdown:
+		markdown_open_picker(app, w)
 	case .Rename_Tab:
 		rename_open(app, w, true, w.workspace.selected)
 	case .Rename_Pane:

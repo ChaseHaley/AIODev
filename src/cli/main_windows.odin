@@ -60,6 +60,9 @@ start :: proc() -> commands.Status {
 	if pipe_error != .None {return .Failed}
 	defer delete(pipe)
 	if o.waiting {return wait(o, pipe, caller)}
+	if directory, directory_error := os.get_working_directory(context.temp_allocator); directory_error == nil {
+		o.args = absolute_file_argument(o.args, directory, context.temp_allocator)
+	}
 	response, status := send(pipe, request(o, caller, context.temp_allocator))
 	if status == .Unreachable {return status}
 	if response.text != "" {

@@ -81,7 +81,8 @@ pane_header_draw :: proc(
 		)
 	}
 	icon_atlas: render.Rect
-	title, directory, icon := content_title(app, pane.content), "", content_icon(pane.content.kind)
+	title, directory := content_title(app, pane.content), content_directory(app, pane.content)
+	icon := content_icon(pane.content.kind)
 	if entry != nil {
 		// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)

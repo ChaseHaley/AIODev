@@ -1,7 +1,9 @@
 package cli
 
 import "aio:instance"
+import "core:path/filepath"
 import "core:strconv"
+import "core:strings"
 
 // aio: the AIODev command line. Every command runs inside AIODev through the shared command core;
 // this program only carries the request, prints the reply and exits with its status (D-046).
@@ -16,6 +18,8 @@ name, such as aio tab.next; aio commands lists them all.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
+Files   aio pane.open_markdown [--direction right|down|left|up] [--focus] <file>
+            Shows a Markdown file beside the pane and updates it when the file changes.
 Common  aio tab.new [--cwd <dir>] [--name <name>] [--focus] [-- <program> [arguments]]
         aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
             Both print the new pane's id and leave focus where it is unless --focus.
@@ -33,6 +37,32 @@ Turn on Command Line Control in AIODev's Settings (control.enabled) first.
 `
 
 WAIT_DEFAULT_TIMEOUT_MS :: 30000
+
+// AIODev has its own working directory, so a relative file must be made absolute here. Returns args
+// unchanged for any other command.
+@(require_results)
+absolute_file_argument :: proc(
+	args: []string,
+	directory: string,
+	allocator := context.allocator,
+) -> []string {
+	if len(args) == 0 || args[0] != "pane.open_markdown" {return args}
+	result := make([]string, len(args), allocator)
+	copy(result, args)
+	for i := 1; i < len(result); i += 1 {
+		switch result[i] {
+		case "--focus":
+		case "--pane", "--direction", "--ratio":
+			i += 1
+		case:
+			if !filepath.is_abs(result[i]) && !strings.has_prefix(result[i], "--") {
+				joined, err := filepath.join({directory, result[i]}, allocator)
+				if err == nil {result[i] = joined}
+			}
+		}
+	}
+	return result
+}
 
 Wait :: struct {
 	pane, text: string,

@@ -379,8 +379,23 @@ when AIO_CONTROL {
 					slider = ui.editor_row_parts(&w.editor, page, w.editor.selected).slider
 				}
 			}
+			markdown_scroll, markdown_total := 0, 0
+			markdown_path, markdown_selected := "", ""
+			markdown_state := Markdown_State.Missing
+			if pane := markdown_focused(app, w); pane != nil {
+				markdown_scroll, markdown_total = pane.view.scroll, ui.markdown_total(&pane.view)
+				markdown_path, markdown_state = pane.path, pane.state
+				markdown_selected = ui.markdown_selected_text(&pane.view, &pane.document)
+			}
 			window := [?]control.State_Entry {
 				{"window.id", fmt.tprintf("%d", w.id)},
+				{"markdown.count", fmt.tprintf("%d", len(app.markdown_panes))},
+				{"markdown.active", fmt.tprintf("%t", markdown_active(w))},
+				{"markdown.path", markdown_path},
+				{"markdown.state", fmt.tprintf("%v", markdown_state)},
+				{"markdown.scroll", fmt.tprintf("%d", markdown_scroll)},
+				{"markdown.total", fmt.tprintf("%d", markdown_total)},
+				{"markdown.selection", markdown_selected},
 				{"window.origin", fmt.tprintf("%d,%d", origin.x, origin.y)},
 				{"window.pointer", fmt.tprintf("%g,%g", w.pointer.x, w.pointer.y)},
 				{"theme.hover_lift", fmt.tprintf("%g", app.theme.hover_lift)},

@@ -17,6 +17,7 @@ Content_Policy :: struct {
 CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	.Terminal = {owns_session = true, linkable = true},
 	.Settings = {one_per_workspace = true},
+	.Markdown = {},
 }
 
 // The title of content that does not title itself through a session.
@@ -26,8 +27,18 @@ content_title :: proc(app: ^App, content: layout.Content) -> string {
 	case .Terminal:
 	case .Settings:
 		return "Settings"
+	case .Markdown:
+		if pane := markdown_find(app, content.id); pane != nil {return pane.title}
 	}
 	return ""
+}
+
+// Where content lives, shown after its title. Sessions report their own directory.
+@(require_results)
+content_directory :: proc(app: ^App, content: layout.Content) -> string {
+	if content.kind != .Markdown {return ""}
+	pane := markdown_find(app, content.id)
+	return pane != nil ? pane.directory : ""
 }
 
 @(require_results)
@@ -36,6 +47,8 @@ content_icon :: proc(kind: layout.Content_Kind) -> string {
 	case .Terminal:
 	case .Settings:
 		return "⚙"
+	case .Markdown:
+		return "🗎"
 	}
 	return ""
 }

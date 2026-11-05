@@ -37,6 +37,8 @@ Window :: struct {
 	id: platform.Window_Id,
 	surface: ^render.Surface,
 	ui_text: ui.Text,
+	// The Markdown pane holding a selection or scrollbar drag, or 0.
+	markdown_held: u32,
 	using resources: Workspace_View_Resources,
 	gesture: Gesture_State,
 	scroll_drag: ui.Scroll_Drag,
@@ -620,6 +622,9 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		case .Terminal:
 		case .Settings:
 			if result := settings_pane_draw(app, w, pane, card); result != .Ok {return frame, result}
+			continue
+		case .Markdown:
+			if result := markdown_pane_draw(app, w, pane, card); result != .Ok {return frame, result}
 			continue
 		}
 		entry := workspace_session_for_content(app, pane.content)

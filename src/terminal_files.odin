@@ -17,6 +17,11 @@ pending_file_clear :: proc(pending: ^Pending_File) {
 terminal_file_request :: proc(app: ^App, w: ^Window, path: string) {
 	file, ok := platform.prepare_terminal_file(path)
 	if !ok {notify(app, .Error, "That local file is not available."); return}
+	if !file.confirm && markdown_is_path(file.target) {
+		defer platform.terminal_file_destroy(&file)
+		markdown_open_focused(app, w, file.target)
+		return
+	}
 	if !file.confirm {
 		defer platform.terminal_file_destroy(&file)
 		if !open_file_link(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
