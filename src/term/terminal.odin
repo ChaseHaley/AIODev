@@ -257,6 +257,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		{.Render_Hold, rawptr(render_hold)},
 		{.Program_Status, config.ignore_program_status ? nil : rawptr(program_status)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
+		// The engine's default byte cap otherwise prunes before our configured line limit.
+		{.Scrollback_Max_Bytes, nil},
 		{.Scrollback_Max_Lines, &scrollback},
 		{.Size, rawptr(size)},
 		{.Kitty_Image_Storage_Limit, &image_limit},
