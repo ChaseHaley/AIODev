@@ -698,6 +698,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if result := rail_draw(app, w); result != .Ok {return frame, result}
 	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
 	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
+	tab_drag_draw(app, w)
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {

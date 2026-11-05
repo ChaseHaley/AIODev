@@ -741,6 +741,13 @@ when AIO_CONTROL {
 				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
 				{"panes.dragging", fmt.tprintf("%t", w.pane_drag.active)},
 				{"tabs.dragging", fmt.tprintf("%t", w.tab_drag.active)},
+				{"tabs.drop.new_window", fmt.tprintf("%t", w.tab_drag.new_window)},
+				{"tabs.drop.preview_window", fmt.tprintf("%d", w.tab_drag.preview_window)},
+				{"tabs.drop.thumbnail", fmt.tprintf("%t", w.tab_drag.thumbnail.shown)},
+				{
+					"tabs.drop.thumbnail_size",
+					fmt.tprintf("%dx%d", w.tab_drag.thumbnail.width, w.tab_drag.thumbnail.height),
+				},
 				{"panes.drop.shown", fmt.tprintf("%t", w.pane_drag.shown)},
 				{"panes.drop.root", fmt.tprintf("%t", w.pane_drag.root)},
 				{"panes.drop.new_tab", fmt.tprintf("%t", w.pane_drag.new_tab)},
