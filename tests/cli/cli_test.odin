@@ -74,3 +74,15 @@ requests_carry_caller_and_format :: proc(t: ^testing.T) {
 	listing, _ := cli.parse_options({"commands"}, "")
 	testing.expect_value(t, cli.request(listing, "", context.temp_allocator)[2], "app.commands")
 }
+
+@(test)
+a_relative_markdown_file_becomes_absolute_before_it_is_sent :: proc(t: ^testing.T) {
+	args := []string{"pane.open_markdown", "--direction", "down", "--focus", `docs\plan.md`}
+	result := cli.absolute_file_argument(args, `C:\work`, context.temp_allocator)
+	testing.expect_value(t, result[2], "down")
+	testing.expect_value(t, result[4], `C:\work\docs\plan.md`)
+	absolute := []string{"pane.open_markdown", `D:\plan.md`}
+	testing.expect_value(t, cli.absolute_file_argument(absolute, `C:\work`, context.temp_allocator)[1], `D:\plan.md`)
+	other := []string{"pane.send", `docs\plan.md`}
+	testing.expect_value(t, cli.absolute_file_argument(other, `C:\work`, context.temp_allocator)[1], `docs\plan.md`)
+}

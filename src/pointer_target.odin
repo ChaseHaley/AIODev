@@ -36,6 +36,8 @@ Pointer_Target :: enum u8 {
 	Scrollbar,
 	// A settings page shown in a pane.
 	Settings_Page,
+	// A Markdown document shown in a pane.
+	Markdown_Page,
 	// Terminal content, including its links, and anything uncovered.
 	Content,
 }
@@ -84,6 +86,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Pane_Header      = {header_claims, header_hover, header_press, nil, header_tooltip},
 	.Scrollbar        = {scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release, nil},
 	.Settings_Page    = {settings_claims, settings_hover, content_press, nil, settings_tooltip},
+	.Markdown_Page    = {markdown_claims, markdown_hover, markdown_press, markdown_release, nil},
 	.Content          = {content_claims, content_hover, content_press, nil, nil},
 }
 

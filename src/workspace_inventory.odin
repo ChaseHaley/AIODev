@@ -34,9 +34,8 @@ Workspace_Pane_Walk :: struct {
 	scope:     Workspace_Pane_Scope,
 }
 
-@(private)
 pane_owns_session :: proc(kind: layout.Content_Kind) -> bool {
-	return kind == .Terminal
+	return CONTENT_POLICY[kind].owns_session
 }
 
 @(private)

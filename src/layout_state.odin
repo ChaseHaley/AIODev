@@ -52,6 +52,8 @@ Saved_Node :: struct {
 	profile:   string `json:"profile,omitempty"`,
 	directory: string `json:"directory,omitempty"`,
 	name:      string `json:"name,omitempty"`,
+	// The file a Markdown pane shows.
+	path:      string `json:"path,omitempty"`,
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
@@ -177,7 +179,10 @@ layout_link_encode :: proc(app: ^App, tree: ^layout.Layout, slot: layout.Node_Id
 @(private)
 layout_pane_encode :: proc(app: ^App, content: layout.Content, processes: []pty.Process_Info) -> Saved_Node {
 	saved := Saved_Node{content = content.kind}
-	if content.kind != .Terminal {return saved}
+	if content.kind == .Markdown {
+		if pane := markdown_find(app, content.id); pane != nil {saved.path = pane.path}
+	}
+	if !pane_owns_session(content.kind) {return saved}
 	entry := session_find(app, content.id)
 	if entry == nil {return saved}
 	program, command := pane_running(app, entry, processes)
@@ -305,18 +310,24 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 	for &node, i in tab.tree.nodes {
 		pane, is_pane := &node.(layout.Pane)
 		if !is_pane {continue}
-		if pane.content.kind == .Settings {
-			if !settings_seen && !workspace_has_content(workspace, pane.content) {
-				settings_seen = true
-				continue
-			}
-			log.error("skipping a saved tab with a second settings page")
-		} else if layout_session_restore(app, &saved.nodes[i]) {
-			pane.content.id = app.next_session_id
-			continue
+		restored := false
+		switch pane.content.kind {
+		case .Terminal:
+			restored = layout_session_restore(app, &saved.nodes[i])
+			if restored {pane.content.id = app.next_session_id}
+		case .Settings:
+			restored = !settings_seen && !workspace_has_content(workspace, pane.content)
+			if restored {settings_seen = true} else {log.error("skipping a saved tab with a second settings page")}
+		case .Markdown:
+			path := saved.nodes[i].path
+			document := path != "" && utf8.valid_string(path) ? markdown_pane_create(app, path, false) : nil
+			restored = document != nil
+			if restored {pane.content.id = document.id}
 		}
-		layout_tab_discard(app, tab)
-		return false
+		if !restored {
+			layout_tab_discard(app, tab)
+			return false
+		}
 	}
 	if name, err := strings.clone(saved.name); err == nil {tab.name = name}
 	tab_record_commit(app, workspace, tab)
@@ -357,7 +368,7 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> bool {
 layout_tab_discard :: proc(app: ^App, tab: ^Tab) {
 	for node in tab.tree.nodes {
 		pane := node.(layout.Pane) or_continue
-		if pane.content.kind == .Terminal && pane.content.id != 0 {session_close(app, pane.content.id)}
+		if pane_owns_session(pane.content.kind) && pane.content.id != 0 {session_close(app, pane.content.id)}
 	}
 	tab_record_free(tab)
 }
@@ -399,18 +410,18 @@ layout_node_decode :: proc(
 	visited[index] = true
 	node := saved[index]
 	if !node.split {
-		if node.content != .Terminal && node.content != .Settings {return false}
+		if node.content > max(layout.Content_Kind) {return false}
 		tree.next_pane_order += 1
 		tree.nodes[index] = layout.Pane {
 			content = {kind = node.content},
 			order   = tree.next_pane_order,
-			linked  = node.linked && !in_slot && node.content == .Terminal,
+			linked  = node.linked && !in_slot && CONTENT_POLICY[node.content].linkable,
 		}
 		return true
 	}
 	if node.axis != .Horizontal && node.axis != .Vertical {return false}
 	if math.is_nan(node.ratio) {return false}
-	// A slot holds no slots, and only terminals can have a linked window.
+	// A slot holds no slots, and only linkable content can have a linked window.
 	linked := node.linked && !in_slot
 	if !layout_node_decode(saved, node.first, visited, tree, in_slot || linked) ||
 	   !layout_node_decode(saved, node.second, visited, tree, in_slot || linked) {
@@ -420,7 +431,7 @@ layout_node_decode :: proc(
 		panes := make([dynamic]layout.Content, context.temp_allocator)
 		layout.contents(tree, layout.Node_Id(node.first), &panes)
 		layout.contents(tree, layout.Node_Id(node.second), &panes)
-		for pane in panes {linked &&= pane.kind == .Terminal}
+		for pane in panes {linked &&= CONTENT_POLICY[pane.kind].linkable}
 	}
 	tree.nodes[index] = layout.Split {
 		axis   = node.axis,

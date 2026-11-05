@@ -100,6 +100,11 @@ App :: struct {
 	settings_diagnostics:  [dynamic]settings.Diagnostic,
 	settings_read_error:   os.Error,
 	settings:              settings.Settings,
+	markdown_panes:        [dynamic]^Markdown_Pane,
+	next_markdown_id:      u32,
+	markdown_deadline:     time.Tick,
+	markdown_pick:         ^platform_api.File_Pick,
+	markdown_pick_window:  platform_api.Window_Id,
 	settings_path:         string,
 	log_path:              string,
 	fonts:                 ^font.System,
@@ -296,6 +301,7 @@ app_destroy :: proc(app: ^App) {
 	ui.palette_destroy(&app.palette)
 	ui.find_history_destroy(&app.find_history)
 	focus_jumps_destroy(&app.focus_jumps)
+	markdown_panes_destroy(app)
 	ui.notices_destroy(&app.notices)
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
@@ -371,6 +377,7 @@ tick :: proc(app: ^App) {
 	control_cli_tick(app)
 	focus_jumps_track(app)
 	layout_state_tick(app)
+	markdown_tick(app)
 	free_all(context.temp_allocator)
 }
 
@@ -390,6 +397,10 @@ wait_timeout :: proc(app: ^App) -> u32 {
 	if app.layout_deadline != {} &&
 	   (!found || time.tick_diff(app.layout_deadline, deadline) > 0) {
 		deadline, found = app.layout_deadline, true
+	}
+	if app.markdown_deadline != {} &&
+	   (!found || time.tick_diff(app.markdown_deadline, deadline) > 0) {
+		deadline, found = app.markdown_deadline, true
 	}
 	if next, pending := verify_deadline(app);
 	   pending && (!found || time.tick_diff(next, deadline) > 0) {

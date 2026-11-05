@@ -42,7 +42,7 @@ pane_shell_swap_request :: proc(
 	profile_id: string,
 ) {
 	pane, is_pane := w.tree.nodes[node].(layout.Pane)
-	if !is_pane || pane.content.kind != .Terminal {return}
+	if !is_pane || !pane_owns_session(pane.content.kind) {return}
 	entry := session_find(app, pane.content.id)
 	if entry == nil {return}
 	if entry.profile_id == profile_id {return}
@@ -139,7 +139,7 @@ pane_shell_swap :: proc(
 	profile_id: string,
 ) {
 	pane, is_pane := w.tree.nodes[node].(layout.Pane)
-	if !is_pane || pane.content.kind != .Terminal {return}
+	if !is_pane || !pane_owns_session(pane.content.kind) {return}
 	entry := session_find(app, pane.content.id)
 	if entry == nil {return}
 	profile, requested := settings.profile_resolve(&app.settings, profile_id)

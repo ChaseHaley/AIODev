@@ -53,6 +53,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 		if ui.palette_slider_dragging(&app.palette) {ui.palette_edit_cancel(&app.palette)}
 		app.palette.scroll_drag = {}
 	}
+	markdown_gesture_clear(app, w)
 	ui.editor_hover_clear(&w.editor)
 	if w.editor.drag == .Process_Order {w.editor.drag = .None}
 	ui.editor_release(&w.editor)

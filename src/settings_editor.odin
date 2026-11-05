@@ -2,6 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:font"
+import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
 import "aio:pty"
@@ -365,6 +366,25 @@ settings_pane_under_pointer :: proc(
 	pane, found := layout.hit_test(w.panes[:], x, y)
 	if !found || pane.content.kind != .Settings {return {}, false}
 	return pane, true
+}
+
+@(require_results)
+settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: int) -> glyphs.Result {
+	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
+	result := ui.editor_draw(
+		&w.editor,
+		settings_layout_for(w, pane.rect),
+		&w.list,
+		&w.ui_text,
+		app.theme,
+		w.focused && pane.node == w.tree.focus && !palette_active(app, w),
+		w.pointer,
+	)
+	if result != .Ok {return result}
+	if header := pane_header_draw(app, w, pane, nil); header != .Ok {return header}
+	window_card_dim(app, w, pane, app.theme.pane)
+	window_card_outline(app, w, pane)
+	return .Ok
 }
 
 // Keeps the window's settings page matching its workspace: load one when a settings pane arrives

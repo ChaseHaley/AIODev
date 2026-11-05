@@ -34,8 +34,7 @@ terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Butto
 	if !e.pressed || e.button != .Left {return false}
 	x, y := f32(e.x), f32(e.y)
 	for pane in w.panes {
-		if pane.content.kind == .Settings {continue}
-		entry := session_find(app, pane.content.id)
+		entry := workspace_session_for_content(app, pane.content)
 		bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
 		if !visible || !ui.scrollbar_contains(bar, x, y) {continue}
 		w.scroll_session = entry.id
@@ -50,8 +49,8 @@ terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Butto
 
 terminal_scrollbar_move :: proc(app: ^App, w: ^Window, y: f32) {
 	for pane in w.panes {
-		if pane.content.kind == .Settings || pane.content.id != w.scroll_session {continue}
-		entry := session_find(app, w.scroll_session)
+		entry := workspace_session_for_content(app, pane.content)
+		if entry == nil || entry.id != w.scroll_session {continue}
 		bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
 		if !visible {return}
 		term.scroll_viewport(entry.session, ui.scrollbar_drag(w.scroll_drag, bar, y) - bar.extent.offset)
@@ -64,8 +63,7 @@ terminal_scrollbar_move :: proc(app: ^App, w: ^Window, y: f32) {
 // The session whose visible track holds the point, or 0.
 terminal_scrollbar_at :: proc(app: ^App, w: ^Window, x, y: f32) -> u32 {
 	for pane in w.panes {
-		if pane.content.kind == .Settings {continue}
-		entry := session_find(app, pane.content.id)
+		entry := workspace_session_for_content(app, pane.content)
 		bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
 		if visible && ui.scrollbar_contains(bar, x, y) {return entry.id}
 	}

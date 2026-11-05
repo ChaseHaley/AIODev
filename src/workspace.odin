@@ -230,11 +230,11 @@ tab_new_profile :: proc(app: ^App, w: ^Window, index: int) {
 	rail_overlay_dismiss(app, w)
 }
 
-// Settings is one page per workspace, so two panes must never show it at once. Terminal content is
-// keyed by session and cannot collide.
+// One-per-workspace content must never show in two panes at once. Other content is keyed by its own
+// id and cannot collide.
 @(require_results)
 pane_content_can_join :: proc(content: layout.Content, destination: ^Workspace, source: ^Tab) -> bool {
-	if content.kind != .Settings {return true}
+	if !CONTENT_POLICY[content.kind].one_per_workspace {return true}
 	return !workspace_content_outside_tab(destination, content, source)
 }
 
@@ -371,27 +371,81 @@ pane_split_at :: proc(
 	Pane_Split_Error,
 ) {
 	tab := workspace.tabs[tab_index]
-	if w != nil {
-		trial := pane_trial_split(app, w, direction, ratio, tree = &tab.tree, node = node,
-			notify_failure = notify_minimum)
-		if trial.error == .Minimum {return 0, .Minimum}
-		if trial.error != .None {return 0, .Check}
+	if failure := pane_split_check(app, w, tab, node, direction, ratio, notify_minimum); failure != .None {
+		return 0, failure
 	}
 	if !session_open(app, launch.command, launch.directory, launch.profile) {return 0, .Session}
 	id := app.next_session_id
-	added, err := layout.split_direction(&tab.tree, node, direction, ratio, {.Terminal, id})
-	if err != nil {
+	if !pane_split_attach(app, w, workspace, tab_index, node, direction, ratio, focus, {.Terminal, id}) {
 		session_close(app, id)
 		return 0, .Layout
 	}
-	if w == nil {return id, .None}
+	return id, .None
+}
+
+// Splits `node` with content that exists already. See pane_split_at for how w and focus apply.
+@(require_results)
+pane_split_insert :: proc(
+	app: ^App,
+	w: ^Window,
+	workspace: ^Workspace,
+	tab_index: int,
+	node: layout.Node_Id,
+	direction: layout.Direction,
+	ratio: f32,
+	focus: bool,
+	content: layout.Content,
+	notify_minimum: bool,
+) -> Pane_Split_Error {
+	tab := workspace.tabs[tab_index]
+	if failure := pane_split_check(app, w, tab, node, direction, ratio, notify_minimum); failure != .None {
+		return failure
+	}
+	if !pane_split_attach(app, w, workspace, tab_index, node, direction, ratio, focus, content) {return .Layout}
+	return .None
+}
+
+@(private, require_results)
+pane_split_check :: proc(
+	app: ^App,
+	w: ^Window,
+	tab: ^Tab,
+	node: layout.Node_Id,
+	direction: layout.Direction,
+	ratio: f32,
+	notify_minimum: bool,
+) -> Pane_Split_Error {
+	if w == nil {return .None}
+	trial := pane_trial_split(app, w, direction, ratio, tree = &tab.tree, node = node,
+		notify_failure = notify_minimum)
+	if trial.error == .Minimum {return .Minimum}
+	if trial.error != .None {return .Check}
+	return .None
+}
+
+@(private, require_results)
+pane_split_attach :: proc(
+	app: ^App,
+	w: ^Window,
+	workspace: ^Workspace,
+	tab_index: int,
+	node: layout.Node_Id,
+	direction: layout.Direction,
+	ratio: f32,
+	focus: bool,
+	content: layout.Content,
+) -> bool {
+	tab := workspace.tabs[tab_index]
+	added, err := layout.split_direction(&tab.tree, node, direction, ratio, content)
+	if err != nil {return false}
+	if w == nil {return true}
 	visible := workspace.selected == tab_index
 	if focus {
 		if !visible {tab_select(app, w, tab_index)}
 		pane_focus(app, w, added)
 	}
 	if visible || focus {window_relayout(app, w)}
-	return id, .None
+	return true
 }
 
 pane_keep_open :: proc(app: ^App, w: ^Window) {
