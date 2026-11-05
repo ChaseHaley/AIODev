@@ -81,6 +81,160 @@ relative_names_need_evidence_of_a_file :: proc(t: ^testing.T) {
 }
 
 @(test)
+drive_paths_extend_across_spaces_only_with_evidence :: proc(t: ^testing.T) {
+	cases := [?]struct { text, target: string } {
+		{`C:\Program Files\App\read me.txt done`, `C:\Program Files\App\read me.txt`},
+		{`C:\Users\John Doe\Documents`, `C:\Users\John Doe\Documents`},
+		{`C:\My Dir\a.odin:12:4 failed`, `C:\My Dir\a.odin:12:4`},
+		{`C:\My Dir\a.odin(7,2) failed`, `C:\My Dir\a.odin(7,2)`},
+		{`C:\foo\bar.txt and src\x.odin`, `C:\foo\bar.txt`},
+		{`C:\Program Files`, `C:\Program`},
+		{`C:\Program, Files\x.txt`, `C:\Program`},
+		{`C:\a  b\c.txt`, `C:\a`},
+		{`C:\a --flag b\c.txt`, `C:\a`},
+		{`C:\a | b\c.txt`, `C:\a`},
+	}
+	for c in cases {
+		ranges: [dynamic]links.Range
+		defer delete(ranges)
+		testing.expect(t, links.find_files(c.text, false, &ranges))
+		testing.expectf(t, len(ranges) > 0, "%s found nothing", c.text)
+		if len(ranges) > 0 {
+			testing.expect_value(t, c.text[ranges[0].start:ranges[0].end], c.target)
+		}
+	}
+	two := `copy C:\a\b.txt C:\c\d.txt`
+	ranges: [dynamic]links.Range
+	defer delete(ranges)
+	testing.expect(t, links.find_files(two, false, &ranges))
+	testing.expect_value(t, len(ranges), 2)
+}
+
+@(test)
+row_breaks_only_join_words_that_did_not_fit :: proc(t: ^testing.T) {
+	edge := proc(tail, head: string, used, indent, columns: int) -> links.Row_Edge {
+		return {tail, head, tail, head, len(tail), len(head), used, indent, columns}
+	}
+	cases := [?]struct {
+		edge: links.Row_Edge,
+		join: links.Row_Join,
+	} {
+		{edge(`C:\Users\chal`, `e\AppData\x.txt`, 40, 0, 40), .Word},
+		{edge(`C:\Users\My`, `Folder\x.txt`, 39, 2, 40), .Word},
+		{edge(`C:\`, `Users\x.txt`, 40, 0, 40), .Direct},
+		{edge(`https://a.io/`, `path`, 40, 2, 40), .Direct},
+		{edge(`https://a.io/abc`, `def/g`, 40, 2, 40), .Direct},
+		{edge(`C:\aaaaaaaaaaaaaaaaaaaaaaaaa`, `bbbbbbbbbbbbbbb`, 39, 2, 40), .Direct},
+		{edge(`https://a.io/abc`, `for`, 40, 0, 40), .Word},
+		{edge(`C:\Program`, `Files\App\aaaaaaaaaaaaaaaaaaaaaaa.txt`, 20, 2, 40), .Word},
+		{edge(`C:\Program`, `Files`, 20, 0, 40), .None},
+		{edge(`anything`, ``, 40, 0, 40), .None},
+		{edge(``, `word`, 0, 0, 40), .None},
+		{edge(`plainword`, `next`, 40, 0, 40), .None},
+		{edge(`plainword`, `next.txt`, 40, 0, 40), .Word},
+	}
+	for c in cases {
+		testing.expect_value(t, links.row_join(c.edge), c.join)
+	}
+}
+
+@(test)
+candidates_run_longest_first_and_keep_the_target :: proc(t: ^testing.T) {
+	line := "run C:\\My Dir\\a.txt, now"
+	start := 4
+	end := start + len(`C:\My`)
+	ranges: [dynamic]links.Range
+	defer delete(ranges)
+	testing.expect(t, links.candidates(line, start, end, nil, &ranges))
+	got: [dynamic]string
+	defer delete(got)
+	for r in ranges {append(&got, line[r.start:r.end])}
+	testing.expect_value(t, len(got), 3)
+	if len(got) == 3 {
+		testing.expect_value(t, got[0], `C:\My Dir\a.txt, now`)
+		testing.expect_value(t, got[1], `C:\My Dir\a.txt`)
+		testing.expect_value(t, got[2], `C:\My`)
+	}
+}
+
+@(test)
+candidates_cut_where_a_word_was_broken_and_look_left_for_relative_names :: proc(t: ^testing.T) {
+	line := "C:\\a\\b.txtnext"
+	cut := [?]int{len(`C:\a\b.txt`)}
+	ranges: [dynamic]links.Range
+	defer delete(ranges)
+	testing.expect(t, links.candidates(line, 0, len(line), cut[:], &ranges))
+	testing.expect_value(t, len(ranges), 2)
+	if len(ranges) == 2 {
+		testing.expect_value(t, line[ranges[1].start:ranges[1].end], `C:\a\b.txt`)
+	}
+
+	relative := `in My Folder\a.txt`
+	clear(&ranges)
+	at := len(`in My `)
+	testing.expect(t, links.candidates(relative, at, len(relative), nil, &ranges))
+	spellings: [dynamic]string
+	defer delete(spellings)
+	for r in ranges {append(&spellings, relative[r.start:r.end])}
+	testing.expect_value(t, spellings[0], `Folder\a.txt`)
+	testing.expect_value(t, spellings[1], `My Folder\a.txt`)
+	testing.expect_value(t, spellings[2], `in My Folder\a.txt`)
+
+	clear(&ranges)
+	uri := `file:///C:/a.txt more`
+	testing.expect(t, links.candidates(uri, 0, len(`file:///C:/a.txt`), nil, &ranges))
+	testing.expect_value(t, len(ranges), 0)
+}
+
+@(test)
+row_breaks_read_as_a_space_or_as_nothing :: proc(t: ^testing.T) {
+	text := "C:\\My\nFolder\\ab\ncd.txt"
+	testing.expect_value(t, links.break_variants(text), 4)
+	buffer: [64]u8
+	spaces, ok := links.break_variant(text, 3, buffer[:])
+	testing.expect(t, ok)
+	testing.expect_value(t, spaces, `C:\My Folder\ab cd.txt`)
+	joined, joined_ok := links.break_variant(text, 0, buffer[:])
+	testing.expect(t, joined_ok)
+	testing.expect_value(t, joined, `C:\MyFolder\abcd.txt`)
+	mixed, mixed_ok := links.break_variant(text, 1, buffer[:])
+	testing.expect(t, mixed_ok)
+	testing.expect_value(t, mixed, `C:\My Folder\abcd.txt`)
+}
+
+@(test)
+selected_text_is_a_target_when_it_can_name_one :: proc(t: ^testing.T) {
+	cases := [?]struct {
+		raw:      string,
+		relative: bool,
+		target:   string,
+	} {
+		{`C:\Program Files\App`, false, `C:\Program Files\App`},
+		{"  C:\\Users\\John Doe\\My Fi\r\n     le.pdf  ", false, "C:\\Users\\John Doe\\My Fi\nle.pdf"},
+		{`"C:\My Dir\a.txt"`, false, `C:\My Dir\a.txt`},
+		{`C:\My Dir\a.txt.`, false, `C:\My Dir\a.txt`},
+		{"https://example.com/a\n  /b", false, "https://example.com/a\n/b"},
+		{`My Folder\a b.txt`, true, `My Folder\a b.txt`},
+		{`My Folder\a b.txt`, false, ""},
+		{`just some words`, true, ""},
+		{`\\server\share\a.txt`, true, ""},
+		{``, true, ""},
+	}
+	for c in cases {
+		line: [dynamic]u8
+		defer delete(line)
+		if !links.selection_line(c.raw, &line) {
+			testing.expect_value(t, c.target, "")
+			continue
+		}
+		text := string(line[:])
+		r, ok := links.selection_target(text, c.relative)
+		testing.expectf(t, ok == (c.target != ""), "%q gave %v", c.raw, ok)
+		if ok {testing.expect_value(t, text[r.start:r.end], c.target)}
+	}
+}
+
+@(test)
 active_file_types_need_confirmation_even_without_pathext :: proc(t: ^testing.T) {
 	for path in ([?]string{`C:\a.EXE`, `C:\a.ps1`, `C:\a.lnk`, `C:\a.url`, `C:\a.msi`,
 		`C:\a.hta`, `C:\a.scf`, `C:\a.library-ms`, `C:\a.settingcontent-ms`, `C:\a.appref-ms`,
