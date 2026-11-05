@@ -133,6 +133,57 @@ below_text_image_keeps_text_on_top_and_above_text_covers_it :: proc(t: ^testing.
 }
 
 @(test)
+decorations_stay_above_a_below_text_image :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	write(&f, "\x1b[38;2;255;255;255;4;9m  \x1b[0m\x1b[H")
+	place(&f, 1, {255, 0, 0}, 2, 1, -1)
+	_, pixels := render_frame(t, &f, {family = f.family})
+	width := int(f.metrics.cell_width) * COLUMNS
+	x := int(f.metrics.cell_width) / 2
+	underline := int(f.metrics.baseline + f.metrics.underline_offset)
+	strikethrough := int(f.metrics.baseline - f.metrics.strikethrough_offset)
+	for y in ([?]int{underline, strikethrough}) {
+		at := (y * width + x) * 4
+		testing.expect_value(t, [4]u8{pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]}, [4]u8{255, 255, 255, 255})
+	}
+	testing.expect_value(t, pixel_at(&f, pixels, 0, 0), BGRA_RED)
+}
+
+@(test)
+block_cursor_stays_above_a_below_text_image :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	place(&f, 1, {255, 0, 0}, 4, 1, -1)
+	style := term_view.Style {
+		family               = f.family,
+		focused              = true,
+		cursor_phase_visible = true,
+	}
+	_, pixels := render_frame(t, &f, style)
+	testing.expect(t, pixel_at(&f, pixels, 0, 0) != BGRA_RED)
+	testing.expect_value(t, pixel_at(&f, pixels, 1, 0), BGRA_RED)
+}
+
+@(test)
+placement_is_trimmed_to_the_cells_with_its_source_kept_aligned :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	write(&f, "\x1b[1;20H")
+	place(&f, 1, {255, 0, 0}, 2, 2)
+	write(&f, "\x1b[4;1H\n")
+	render_frame(t, &f, {family = f.family})
+	if !testing.expect_value(t, len(f.list.images), 1) {return}
+	image := f.list.images[0]
+	m := f.metrics
+	testing.expect_value(t, image.rect, render.Rect{19 * m.cell_width, 0, m.cell_width, m.cell_height})
+	testing.expect_value(t, image.uv, render.Rect{0, 0.5, 0.5, 0.5})
+}
+
+@(test)
 image_scrolls_with_the_text_and_is_clipped_by_the_pane :: proc(t: ^testing.T) {
 	f, ok := headless_create(t)
 	defer fixture_destroy(&f)
