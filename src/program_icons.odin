@@ -183,16 +183,39 @@ program_icon_source :: proc(
 	paint: program_art.Paint,
 	found: bool,
 ) {
-	if file, ok := program_icon_file(app, entry); ok && !program_icon_missing(app, .File, file, {}, size) {
-		return .File, file, {}, true
-	}
-	if entry.program_has_art {
-		name := program_art.canonical(entry.program_art)
-		art_paint := program_art_paint(app, entry.program_art)
-		if !program_icon_missing(app, .Artwork, name, art_paint, size) {return .Artwork, name, art_paint, true}
-	}
+	source, path, paint, found = program_named_source(app, entry.program_name, entry.program_art,
+		entry.program_has_art, size)
+	if found {return}
 	if entry.program_path != "" && !program_icon_missing(app, .Executable, entry.program_path, {}, size) {
 		return .Executable, entry.program_path, {}, true
+	}
+	return
+}
+
+// The user's PNG for a program's name, then its bundled artwork.
+@(private)
+program_named_source :: proc(
+	app: ^App,
+	name: string,
+	art: program_art.Art,
+	has_art: bool,
+	size: int,
+) -> (
+	source: Program_Icon_Source,
+	path: string,
+	paint: program_art.Paint,
+	found: bool,
+) {
+	if file, ok := program_named_file(app, name, art, has_art);
+	   ok && !program_icon_missing(app, .File, file, {}, size) {
+		return .File, file, {}, true
+	}
+	if has_art {
+		canonical := program_art.canonical(art)
+		art_paint := program_art_paint(app, art)
+		if !program_icon_missing(app, .Artwork, canonical, art_paint, size) {
+			return .Artwork, canonical, art_paint, true
+		}
 	}
 	return
 }
@@ -215,13 +238,13 @@ program_icon_missing :: proc(
 	return false
 }
 
-// The user's PNG for the pane's program, resolved like Shell Icon: home expanded, and relative to
+// The user's PNG for a program, resolved like Shell Icon: home expanded, and relative to
 // the settings folder. Its artwork's canonical name is tried after the program's own name.
 @(private)
-program_icon_file :: proc(app: ^App, entry: ^Session_Entry) -> (string, bool) {
-	file, ok := settings.program_icon_file(&app.settings, entry.program_name)
-	if !ok && entry.program_has_art {
-		file, ok = settings.program_icon_file(&app.settings, program_art.canonical(entry.program_art))
+program_named_file :: proc(app: ^App, name: string, art: program_art.Art, has_art: bool) -> (string, bool) {
+	file, ok := settings.program_icon_file(&app.settings, name)
+	if !ok && has_art {
+		file, ok = settings.program_icon_file(&app.settings, program_art.canonical(art))
 	}
 	if !ok {return "", false}
 	path, err := settings.expand_home(file, context.temp_allocator)

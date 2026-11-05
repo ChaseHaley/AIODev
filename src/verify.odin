@@ -1625,7 +1625,7 @@ when AIO_CONTROL {
 	// Whether the pane's program has an icon ready to draw at any size, from whichever source.
 	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {
 		if entry.program_name == "" {return false}
-		file, has_file := program_icon_file(app, entry)
+		file, has_file := program_named_file(app, entry.program_name, entry.program_art, entry.program_has_art)
 		art := entry.program_has_art ? program_art.canonical(entry.program_art) : ""
 		for icon in app.processes.icons {
 			if icon.state != .Ready {continue}

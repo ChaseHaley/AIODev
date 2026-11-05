@@ -73,6 +73,7 @@ Window :: struct {
 	autoscroll_deadline: time.Tick,
 	pointer: [2]f32,
 	tooltip: string,
+	tooltip_text: [1024]u8,
 	tooltip_deadline: time.Tick,
 	tooltip_warm_until: time.Tick,
 	tooltip_anchor: [2]f32,
