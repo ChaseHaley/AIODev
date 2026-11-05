@@ -75,49 +75,100 @@ tab_tear_off :: proc(
 	return true
 }
 
-// Every step that can fail comes before the first layout moves. Sessions never restart: each tree changes
-// owner whole, so panes keep their arrangement, and a linked window follows its panes to the new workspace.
-@(require_results)
-tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
-	workspace, destination := source_window.workspace, preview.workspace
-	if !preview.preparing || !tab_window_source_allows(workspace) {return false}
+@(private = "file", require_results)
+tabs_marked_count :: proc(workspace: ^Workspace) -> int {
 	count := 0
 	for tab in workspace.tabs {if tab.marked {count += 1}}
-	records, records_error := make([]^Tab, count, context.temp_allocator)
-	if records_error != nil {return false}
-	// The first tab takes over the preview's placeholder, which is already the window's selected tab.
-	records[0] = destination.tabs[0]
-	prepared := false
-	defer if !prepared {
-		for record in records[1:] {if record != nil {tab_record_free(record)}}
-	}
-	for i in 1 ..< count {
-		record, record_error := tab_record_reserve(destination)
-		if record_error != .None {return false}
-		records[i] = record
-	}
-	if reserve(&destination.tabs, count) != nil {return false}
-	name := workspace_default_name(app)
-	if name == "" {return false}
-	prepared = true
+	return count
+}
 
-	selected := selected_tab(workspace)
-	tab_select(app, source_window, tab_window_kept_index(workspace), true)
-	selected_index, at := 0, 0
+// A record for each of `count` tabs, in temporary memory. A placeholder already in the destination is first.
+@(private = "file", require_results)
+tab_records_reserve :: proc(
+	destination: ^Workspace,
+	count: int,
+	placeholder: ^Tab = nil,
+) -> (
+	[]^Tab,
+	bool,
+) {
+	records, records_error := make([]^Tab, count, context.temp_allocator)
+	if records_error != nil {return nil, false}
+	reserved := false
+	defer if !reserved {tab_records_free(records, placeholder)}
+	for &record, i in records {
+		if i == 0 && placeholder != nil {
+			record = placeholder
+			continue
+		}
+		created, record_error := tab_record_reserve(destination)
+		if record_error != .None {return nil, false}
+		record = created
+	}
+	if reserve(&destination.tabs, len(destination.tabs) + count) != nil {return nil, false}
+	reserved = true
+	return records, true
+}
+
+@(private = "file")
+tab_records_free :: proc(records: []^Tab, placeholder: ^Tab = nil) {
+	for record in records {if record != nil && record != placeholder {tab_record_free(record)}}
+}
+
+// Sessions never restart: each marked tab's tree changes owner whole, so panes keep their arrangement and a
+// linked window follows its panes. Records join the destination in order at `at`, and the emptied tabs leave
+// the source, whose window must already show a tab that stays or be closed. Returns the selected tab's place
+// in `records`.
+@(private = "file")
+tabs_carry :: proc(
+	app: ^App,
+	workspace, destination: ^Workspace,
+	records: []^Tab,
+	selected: ^Tab,
+	at: int,
+	has_placeholder := false,
+) -> int {
+	selected_index, index, insert := 0, 0, at
 	for tab in workspace.tabs {
 		if !tab.marked {continue}
-		record := records[at]
-		if tab == selected {selected_index = at}
-		if at == 0 {layout.destroy(&record.tree)}
+		record := records[index]
+		if tab == selected {selected_index = index}
+		placeholder := has_placeholder && index == 0
+		if placeholder {layout.destroy(&record.tree)}
 		record.tree, tab.tree = tab.tree, {root = layout.INVALID_NODE, focus = layout.INVALID_NODE}
 		record.name, tab.name = tab.name, ""
 		record.marked = true
-		if at == 0 {tab_update_title(app, record)} else {tab_record_commit(app, destination, record)}
-		at += 1
+		if placeholder {
+			tab_update_title(app, record)
+		} else {
+			tab_record_commit(app, destination, record, insert)
+			insert += 1
+		}
+		index += 1
 	}
 	for i := len(workspace.tabs) - 1; i >= 0; i -= 1 {
 		if workspace.tabs[i].tree.root == layout.INVALID_NODE {workspace_close_tab(app, workspace, i)}
 	}
+	return selected_index
+}
+
+// Every step that can fail comes before the first layout moves.
+@(require_results)
+tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
+	workspace, destination := source_window.workspace, preview.workspace
+	if !preview.preparing || !tab_window_source_allows(workspace) {return false}
+	// The first tab takes over the preview's placeholder, which is already the window's selected tab.
+	records, reserved := tab_records_reserve(destination, tabs_marked_count(workspace), destination.tabs[0])
+	if !reserved {return false}
+	name := workspace_default_name(app)
+	if name == "" {
+		tab_records_free(records, destination.tabs[0])
+		return false
+	}
+
+	selected := selected_tab(workspace)
+	tab_select(app, source_window, tab_window_kept_index(workspace), true)
+	selected_index := tabs_carry(app, workspace, destination, records, selected, 1, true)
 	tab_select_one(workspace, workspace.selected)
 
 	preview.preparing = false
