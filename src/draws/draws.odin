@@ -35,20 +35,21 @@ region_fits :: proc(region: render.Rect, width, height: int) -> bool {
 }
 
 // format_report writes the summary lines and, when the filter is bounded, one line per intersecting
-// instance. Instances follow frame_render: layers in order, and within a layer every rect before
-// every glyph. An instance's number is its index in that list array, which is its draw order.
+// instance. Instances follow frame_render: layers in order, and within a layer rects, then images,
+// then glyphs. An instance's number is its index in that list array, which is its draw order.
 format_report :: proc(out: ^strings.Builder, list: ^render.Draw_List, filter: Filter) {
 	fmt.sbprintf(
 		out,
-		"draws layers=%d rects=%d glyphs=%d\n",
+		"draws layers=%d rects=%d glyphs=%d",
 		len(list.layers),
 		len(list.rects),
 		len(list.glyphs),
 	)
+	write_image_count(out, len(list.images))
 	for layer, number in list.layers {
 		fmt.sbprintf(
 			out,
-			"layer %d clip=%d,%d,%d,%d rects=%d glyphs=%d\n",
+			"layer %d clip=%d,%d,%d,%d rects=%d glyphs=%d",
 			number,
 			rounded(layer.clip.x),
 			rounded(layer.clip.y),
@@ -57,8 +58,10 @@ format_report :: proc(out: ^strings.Builder, list: ^render.Draw_List, filter: Fi
 			layer.rect_count,
 			layer.glyph_count,
 		)
+		write_image_count(out, layer.image_count)
 		if !filter.bounded {continue}
 		if filter.kind != .Glyph {write_rects(out, list, layer, filter.region)}
+		if filter.kind == .All {write_images(out, list, layer, filter.region)}
 		if filter.kind != .Rect {write_glyphs(out, list, layer, filter.region)}
 	}
 }
@@ -125,6 +128,36 @@ write_rects :: proc(
 			rounded(instance.rect.height),
 			format_color(instance.color),
 			instance.radius,
+		)
+	}
+}
+
+// Ends a summary line. Images are rare, so a line only names them when there are some.
+@(private)
+write_image_count :: proc(out: ^strings.Builder, count: int) {
+	if count > 0 {fmt.sbprintf(out, " images=%d", count)}
+	strings.write_byte(out, '\n')
+}
+
+@(private)
+write_images :: proc(
+	out: ^strings.Builder,
+	list: ^render.Draw_List,
+	layer: render.Layer,
+	region: render.Rect,
+) {
+	first, last := owned_range(layer.image_start, layer.image_count, len(list.images))
+	for i in first ..< last {
+		instance := list.images[i]
+		if !intersects(instance.rect, region) {continue}
+		fmt.sbprintf(
+			out,
+			"image %d %d,%d %dx%d\n",
+			i,
+			rounded(instance.rect.x),
+			rounded(instance.rect.y),
+			rounded(instance.rect.width),
+			rounded(instance.rect.height),
 		)
 	}
 }

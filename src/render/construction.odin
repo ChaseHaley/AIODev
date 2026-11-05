@@ -40,6 +40,7 @@ frame_build_finish :: proc(build: ^Frame_Build) -> Frame_Build_Result {
 	clear(&list.layers)
 	clear(&list.rects)
 	clear(&list.glyphs)
+	clear(&list.images)
 	if !list.failure_reported {
 		log.errorf("constructing a frame failed: %v", list.error)
 		list.failure_reported = true

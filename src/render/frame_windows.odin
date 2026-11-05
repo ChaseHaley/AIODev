@@ -102,6 +102,8 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 	c->VSSetShaderResources(0, len(views), &views[0])
 	atlases := [2]^d3d.IShaderResourceView{d.atlas.view, d.color_atlas.view}
 	c->PSSetShaderResources(2, len(atlases), &atlases[0])
+	c->PSSetSamplers(0, 1, &d.image_sampler)
+	d.image_frame += 1
 	constants := Frame_Constants {
 		gamma_ratios      = gamma_ratios(d.gamma.gamma),
 		target_size       = {f32(s.width), f32(s.height)},
@@ -115,17 +117,29 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 		c->RSSetScissorRects(1, &clip)
 		constants.round_clip, constants.clip_radius = layer.clip, layer.radius
 		constants.rect_start, constants.glyph_start = u32(layer.rect_start), u32(layer.glyph_start)
-		mapped: d3d.MAPPED_SUBRESOURCE
-		if err := checked(d, c->Map(d.constants, 0, .WRITE_DISCARD, {}, &mapped), "Map constants");
-		   err != .None {
+		if err := constants_write(d, &constants); err != .None {
 			return err
 		}
-		mem.copy(mapped.pData, &constants, size_of(constants))
-		c->Unmap(d.constants, 0)
 		if layer.rect_count > 0 {
 			c->VSSetShader(d.rect_vs, nil, 0)
 			c->PSSetShader(d.rect_ps, nil, 0)
 			c->DrawInstanced(6, u32(layer.rect_count), 0, 0)
+		}
+		if layer.image_count > 0 {
+			c->VSSetShader(d.image_vs, nil, 0)
+			c->PSSetShader(d.image_ps, nil, 0)
+			for instance in list.images[layer.image_start:][:layer.image_count] {
+				entry, known := &d.images[instance.key]
+				if !known {continue}
+				entry.last_used = d.image_frame
+				if entry.view == nil {continue}
+				constants.image_rect, constants.image_uv = instance.rect, instance.uv
+				if err := constants_write(d, &constants); err != .None {
+					return err
+				}
+				c->PSSetShaderResources(4, 1, &entry.view)
+				c->DrawInstanced(6, 1, 0, 0)
+			}
 		}
 		if layer.glyph_count > 0 {
 			c->VSSetShader(d.glyph_vs, nil, 0)
@@ -133,8 +147,21 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 			c->DrawInstanced(6, u32(layer.glyph_count), 0, 0)
 		}
 	}
+	images_evict(d)
 	if s.chain == nil {
 		return .None
 	}
 	return checked(d, s.chain->Present(1, {}), "Present", .Surface_Failed)
+}
+
+@(private, require_results)
+constants_write :: proc(d: ^Device, constants: ^Frame_Constants) -> Error {
+	mapped: d3d.MAPPED_SUBRESOURCE
+	if err := checked(d, d.ctx->Map(d.constants, 0, .WRITE_DISCARD, {}, &mapped), "Map constants");
+	   err != .None {
+		return err
+	}
+	mem.copy(mapped.pData, constants, size_of(constants^))
+	d.ctx->Unmap(d.constants, 0)
+	return .None
 }

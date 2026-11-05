@@ -240,7 +240,10 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 	render_hold: ghostty.Terminal_Render_Hold_Fn = on_render_hold
 	program_status: ghostty.Terminal_Program_Status_Fn = on_program_status
 	semantic_prompt: ghostty.Terminal_Semantic_Prompt_Fn = on_semantic_prompt
+	size: ghostty.Terminal_Size_Fn = on_size
 	scrollback := uint(config.scrollback_lines)
+	image_limit := IMAGE_STORAGE_LIMIT
+	png_decoder_install()
 	options := [?]struct {
 		option: ghostty.Terminal_Option,
 		value:  rawptr,
@@ -255,6 +258,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		{.Program_Status, config.ignore_program_status ? nil : rawptr(program_status)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
 		{.Scrollback_Max_Lines, &scrollback},
+		{.Size, rawptr(size)},
+		{.Kitty_Image_Storage_Limit, &image_limit},
 	}
 	for item in options {
 		if ghostty.terminal_set(s.terminal, item.option, item.value) != .Success {
@@ -538,11 +543,13 @@ on_render_hold :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr, held: 
 	}
 }
 
-// Updates `state` from the terminal and, given `highlights`, replaces it with the visible search matches.
+// Updates `state` from the terminal and, given `highlights`, replaces it with the visible search
+// matches. Given `images`, it also reads the visible image placements.
 capture :: proc(
 	s: ^Session,
 	state: ghostty.Render_State,
 	highlights: ^[dynamic]Highlight = nil,
+	images: ^Image_Capture = nil,
 ) -> bool {
 	sync.mutex_lock(&s.mutex)
 	if s.held && time.tick_since(s.held_since) < RENDER_HOLD_LIMIT {
@@ -552,6 +559,9 @@ capture :: proc(
 	result := ghostty.render_state_begin_update(state, s.terminal)
 	if result == .Success && highlights != nil {
 		collect_highlights(s, highlights)
+	}
+	if result == .Success && images != nil {
+		collect_images(s, images)
 	}
 	sync.mutex_unlock(&s.mutex)
 	if result == .Success {
@@ -565,8 +575,8 @@ capture :: proc(
 }
 
 resize :: proc(s: ^Session, geometry: Geometry) {
-	s.geometry = geometry
 	sync.mutex_lock(&s.mutex)
+	s.geometry = geometry
 	result := ghostty.terminal_resize(
 		s.terminal,
 		geometry.columns,

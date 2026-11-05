@@ -25,6 +25,7 @@ Pane_View :: struct {
 	cache: render.Draw_List,
 	valid: bool,
 	generation, atlas_generation, builds: u64,
+	image_epoch: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
 	header_controls: [6]ui.Control_Motion,
@@ -827,6 +828,7 @@ build_pane :: proc(
 		if !cached.valid ||
 		   cached.generation != generation ||
 		   cached.atlas_generation != atlas ||
+		   cached.image_epoch != render.image_epoch(app.device) ||
 		   cached.style != style {
 			cached.valid = false
 			render.draw_list_reset(&cached.cache)
@@ -846,6 +848,7 @@ build_pane :: proc(
 				cached.frame, cached.style = frame, style
 				cached.generation, cached.atlas_generation =
 					generation, render.atlas_generation(app.device)
+				cached.image_epoch = render.image_epoch(app.device)
 				cached.valid = true
 				cached.builds += 1
 			}

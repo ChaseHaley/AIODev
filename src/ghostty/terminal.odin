@@ -79,6 +79,15 @@ Terminal_Render_Hold_Fn :: proc "c" (terminal: Terminal, userdata: rawptr, held:
 
 Terminal_Write_Pty_Fn :: proc "c" (terminal: Terminal, userdata: rawptr, data: [^]u8, len: uint)
 
+Size_Report_Size :: struct {
+	rows:        u16,
+	columns:     u16,
+	cell_width:  u32,
+	cell_height: u32,
+}
+
+Terminal_Size_Fn :: proc "c" (terminal: Terminal, userdata: rawptr, out_size: ^Size_Report_Size) -> bool
+
 Terminal_Mode_Config :: struct {
 	mode:  Mode,
 	value: bool,

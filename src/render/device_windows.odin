@@ -21,6 +21,14 @@ Device :: struct {
 	factory:            ^dxgi.IFactory2,
 	rect_vs, glyph_vs:  ^d3d.IVertexShader,
 	rect_ps, glyph_ps:  ^d3d.IPixelShader,
+	image_vs:           ^d3d.IVertexShader,
+	image_ps:           ^d3d.IPixelShader,
+	image_sampler:      ^d3d.ISamplerState,
+	images:             map[u64]Image_Texture,
+	image_bytes:        int,
+	image_budget:       int,
+	image_frame:        u64,
+	image_epoch:        u64,
 	blend:              ^d3d.IBlendState,
 	rasterizer:         ^d3d.IRasterizerState,
 	constants:          ^d3d.IBuffer,
@@ -55,6 +63,7 @@ Frame_Constants :: struct {
 	round_clip:              Rect,
 	clip_radius:             f32,
 	_padding:                [3]f32,
+	image_rect, image_uv:    Rect,
 }
 
 @(private)
@@ -193,6 +202,8 @@ device_create :: proc(allocator := context.allocator) -> (^Device, Error) {
 	d.allocator = allocator
 	d.generation = 1
 	d.gamma = DEFAULT_TEXT_GAMMA
+	d.images.allocator = allocator
+	d.image_budget = IMAGE_BUDGET_BYTES
 	ok := false
 	defer if !ok {
 		device_destroy(d)
@@ -226,6 +237,24 @@ device_create :: proc(allocator := context.allocator) -> (^Device, Error) {
 		return nil, err
 	}
 	if d.glyph_ps, err = pixel_shader(d, "glyph_ps"); err != .None {
+		return nil, err
+	}
+	if d.image_vs, err = vertex_shader(d, "image_vs"); err != .None {
+		return nil, err
+	}
+	if d.image_ps, err = pixel_shader(d, "image_ps"); err != .None {
+		return nil, err
+	}
+	sampler := d3d.SAMPLER_DESC {
+		Filter         = .MIN_MAG_MIP_LINEAR,
+		AddressU       = .CLAMP,
+		AddressV       = .CLAMP,
+		AddressW       = .CLAMP,
+		ComparisonFunc = .NEVER,
+		MaxLOD         = d3d.FLOAT32_MAX,
+	}
+	if err = checked(d, d.native->CreateSamplerState(&sampler, &d.image_sampler), "CreateSamplerState");
+	   err != .None {
 		return nil, err
 	}
 	blend: d3d.BLEND_DESC
@@ -287,6 +316,10 @@ device_destroy :: proc(d: ^Device) {
 	release(d.glyph_vs)
 	release(d.rect_ps)
 	release(d.glyph_ps)
+	images_destroy(d)
+	release(d.image_sampler)
+	release(d.image_vs)
+	release(d.image_ps)
 	release(d.factory)
 	release(d.ctx)
 	release(d.native)

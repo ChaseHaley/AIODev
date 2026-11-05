@@ -50,6 +50,7 @@ View :: struct {
 	shaped:     [dynamic]font.Shaped_Glyph,
 	contrast:   Contrast_Cache,
 	links:      term.Link_Map,
+	images:     term.Image_Capture,
 }
 
 @(require_results)
@@ -65,6 +66,7 @@ create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	ok &&= ghostty.render_state_new(nil, &v.state) == .Success
 	ok &&= ghostty.render_state_row_iterator_new(nil, &v.rows) == .Success
 	ok &&= ghostty.render_state_row_cells_new(nil, &v.cells) == .Success
+	ok &&= term.image_capture_create(&v.images, allocator)
 	if !ok {
 		destroy(v)
 	}
@@ -76,6 +78,7 @@ destroy :: proc(v: ^View) {
 	ghostty.render_state_row_iterator_free(v.rows)
 	ghostty.render_state_free(v.state)
 	term.link_map_destroy(&v.links)
+	term.image_capture_destroy(&v.images)
 	delete(v.codepoints)
 	delete(v.highlights)
 	delete(v.marks)
@@ -155,17 +158,21 @@ style_color :: proc(
 
 @(private)
 Builder :: struct {
-	list:        ^render.Draw_List,
-	cache:       ^glyphs.Cache,
-	fonts:       ^font.System,
-	metrics:     Metrics,
-	style:       Style,
-	colors:      ghostty.Render_State_Colors,
-	cursor:      ghostty.Render_State_Cursor,
-	origin:      [2]f32,
-	columns:     int,
+	list:              ^render.Draw_List,
+	cache:             ^glyphs.Cache,
+	fonts:             ^font.System,
+	metrics:           Metrics,
+	style:             Style,
+	colors:            ghostty.Render_State_Colors,
+	cursor:            ghostty.Render_State_Cursor,
+	origin:            [2]f32,
+	columns:           int,
+	// Only read when a frame has images, which clip to the grid.
+	rows:              int,
 	// The cursor sits on a wide cluster, so it covers two cells.
-	cursor_wide: bool,
+	cursor_wide:       bool,
+	// Below-text images took a pass of their own for the backgrounds that go under them.
+	backgrounds_drawn: bool,
 }
 
 @(private)
@@ -204,7 +211,7 @@ build :: proc(
 	glyphs.Result,
 ) {
 	if list.error != .None {return {}, .Ok}
-	term.capture(session, v.state, &v.highlights)
+	term.capture(session, v.state, &v.highlights, &v.images)
 	b := Builder {
 		list    = list,
 		cache   = cache,
@@ -229,6 +236,24 @@ build :: proc(
 		background      = color(b.colors.background),
 		cursor_blinking = b.cursor.visible && b.cursor.blinking,
 	}
+	has_images := len(v.images.placements) > 0
+	if has_images {
+		rows: u16
+		if ghostty.render_state_get(v.state, .Rows, &rows) != .Success {
+			list.error = .Construction_Failed
+			return {}, .Ok
+		}
+		b.rows = int(rows)
+		images_upload(v, session, cache.device)
+		if images_present(v, .Below_Background) {
+			images_draw(v, &b, .Below_Background)
+			images_next_layer(&b)
+		}
+		if images_present(v, .Below_Text) {
+			images_draw_below_text(v, &b)
+			if list.error != .None {return frame, .Ok}
+		}
+	}
 	for y := 0; ghostty.render_state_row_iterator_next(v.rows); y += 1 {
 		if result := build_row(v, &b, y); result != .Ok {
 			return frame, result
@@ -237,6 +262,10 @@ build :: proc(
 	}
 	if list.error != .None {return frame, .Ok}
 	build_cursor(&b)
+	if has_images && images_present(v, .Above_Text) {
+		images_next_layer(&b)
+		images_draw(v, &b, .Above_Text)
+	}
 	if result := ghostty.render_state_clean(v.state); result != .Success {
 		log.errorf("term_view: cleaning the render state failed: %v", result)
 	}
@@ -349,19 +378,18 @@ block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 	)
 }
 
+// Fills v.paints from the row iterator's current row. A failure stays on the list.
 @(private)
-build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
-	m := b.metrics
-	top := b.origin.y + f32(y) * m.cell_height
+row_paints :: proc(v: ^View, b: ^Builder, y: int) {
 	selection := ghostty.sized(ghostty.Render_State_Row_Selection)
 	selected := ghostty.render_state_row_get(v.rows, .Selection, &selection) == .Success
 	if ghostty.render_state_row_get(v.rows, .Cells, &v.cells) != .Success {
 		b.list.error = .Construction_Failed
-		return .Ok
+		return
 	}
 	if !mark_row(v, y, b.columns) {
 		b.list.error = .Out_Of_Memory
-		return .Ok
+		return
 	}
 	clear(&v.paints)
 	for x := 0; ghostty.render_state_row_cells_next(v.cells); x += 1 {
@@ -369,7 +397,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		p := paint_cell(v, b, x, y, selection, selected, mark)
 		if _, err := append(&v.paints, p); err != nil {
 			b.list.error = .Out_Of_Memory
-			return .Ok
+			return
 		}
 	}
 	c := b.cursor
@@ -377,6 +405,10 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		x := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
 		b.cursor_wide = c.wide_tail || (x >= 0 && x < len(v.paints) && v.paints[x].width == .Wide)
 	}
+}
+
+@(private)
+row_backgrounds :: proc(v: ^View, b: ^Builder, top: f32) {
 	run_start, run_color, run_active := 0, render.Color{}, false
 	flush :: proc(b: ^Builder, start, end: int, top: f32, c: render.Color) {
 		m := b.metrics
@@ -403,6 +435,15 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	if run_active {
 		flush(b, run_start, len(v.paints), top, run_color)
 	}
+}
+
+@(private)
+build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
+	m := b.metrics
+	top := b.origin.y + f32(y) * m.cell_height
+	row_paints(v, b, y)
+	if b.list.error != .None {return .Ok}
+	if !b.backgrounds_drawn {row_backgrounds(v, b, top)}
 	for p, x in v.paints {
 		if result := decorate(b, p, b.origin.x + f32(x) * m.cell_width, top); result != .Ok {
 			return result
