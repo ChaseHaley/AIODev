@@ -25,6 +25,7 @@ Image_Layer :: enum u8 {
 // is unique across every terminal in the process, so a texture cache can key on it alone.
 Image_Placement :: struct {
 	image_id:                  u32,
+	placement_id:              u32,
 	generation:                u64,
 	image_width, image_height: u32,
 	layer:                     Image_Layer,
@@ -80,11 +81,12 @@ collect_images :: proc(s: ^Session, c: ^Image_Capture) {
 		p: Image_Placement
 		placement_keys := [?]ghostty.Kitty_Graphics_Placement_Data {
 			.Image_Id,
+			.Placement_Id,
 			.X_Offset,
 			.Y_Offset,
 			.Z,
 		}
-		placement_values := [?]rawptr{&p.image_id, &p.offset_x, &p.offset_y, &p.z}
+		placement_values := [?]rawptr{&p.image_id, &p.placement_id, &p.offset_x, &p.offset_y, &p.z}
 		if ghostty.kitty_graphics_placement_get_multi(
 			   c.iterator,
 			   len(placement_keys),
@@ -120,8 +122,13 @@ collect_images :: proc(s: ^Session, c: ^Image_Capture) {
 			return
 		}
 	}
-	// Equal z keeps the protocol's order, so an image stays where its siblings expect it.
-	slice.stable_sort_by(c.placements[:], proc(a, b: Image_Placement) -> bool {return a.z < b.z})
+	// The protocol draws the lower image id below at equal z. It leaves one image's own placements
+	// undefined; ordering them by id stops overlaps changing between frames.
+	slice.sort_by(c.placements[:], proc(a, b: Image_Placement) -> bool {
+		if a.z != b.z {return a.z < b.z}
+		if a.image_id != b.image_id {return a.image_id < b.image_id}
+		return a.placement_id < b.placement_id
+	})
 }
 
 // image_pixels copies one image out as premultiplied RGBA, the format textures hold. It returns

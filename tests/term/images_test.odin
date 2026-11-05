@@ -178,6 +178,37 @@ z_sorts_placements_and_selects_their_layer :: proc(t: ^testing.T) {
 	testing.expect_value(t, found[2].layer, term.Image_Layer.Above_Text)
 }
 
+@(test)
+equal_z_draws_the_lower_image_id_below :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	send(&f, "a=T,f=24,s=2,v=2,i=9,C=1", RED_2X2[:])
+	send(&f, "a=T,f=24,s=2,v=2,i=7,C=1", RED_2X2[:])
+	send(&f, "a=T,f=24,s=2,v=2,i=8,C=1", RED_2X2[:])
+	found := placements(t, &f)
+	if !testing.expect_value(t, len(found), 3) {return}
+	testing.expect_value(t, found[0].image_id, 7)
+	testing.expect_value(t, found[1].image_id, 8)
+	testing.expect_value(t, found[2].image_id, 9)
+}
+
+@(test)
+equal_z_orders_one_images_placements_by_id :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	send(&f, "a=t,f=24,s=2,v=2,i=1", RED_2X2[:])
+	send(&f, "a=p,i=1,p=3,C=1")
+	send(&f, "a=p,i=1,p=1,C=1")
+	send(&f, "a=p,i=1,p=2,C=1")
+	found := placements(t, &f)
+	if !testing.expect_value(t, len(found), 3) {return}
+	testing.expect_value(t, found[0].placement_id, 1)
+	testing.expect_value(t, found[1].placement_id, 2)
+	testing.expect_value(t, found[2].placement_id, 3)
+}
+
 @(private = "file")
 expect_pixels :: proc(t: ^testing.T, f: ^Image_Fixture, expected: []u8, loc := #caller_location) {
 	found := placements(t, f)
