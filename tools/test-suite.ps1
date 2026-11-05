@@ -19,7 +19,7 @@ function Invoke-TestSuite {
         foreach ($name in $targets) {
             if ($name -notin $testPackages) { throw "No test package named $name." }
         }
-        Build-Notifications
+        Build-NativeLibraries
         New-Item -ItemType Directory -Force build/test | Out-Null
         Copy-Conpty 'build/test'
         if ('app' -in $targets -and $TestLane -ne 'Fast') {

@@ -24,6 +24,7 @@ ACTION_ARGUMENTS :: #partial [Action]Action_Arguments {
 	.New_Tab      = {accepted = {.Focus, .Directory, .Name, .Profile, .Program}},
 	.Split        = {accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program}},
 	.Rename_Pane  = {accepted = {.Text}},
+	.Open_Markdown = {accepted = {.Text, .Direction, .Ratio, .Focus}},
 	.Pane_List    = {hidden = true},
 	.Pane_Status  = {hidden = true},
 	.Pane_Read    = {accepted = {.Lines}, hidden = true},
@@ -114,7 +115,7 @@ command_invoke :: proc(
 	entry := target.pane.session
 	#partial switch action {
 	case .Pane_Status:
-		if entry == nil {return outcome_failure(.Failed, "that pane shows Settings, not a terminal")}
+		if entry == nil {return outcome_failure(.Failed, "that pane does not show a terminal")}
 		return {panes = pane_reports(app, &target)}
 	case .Pane_Read:
 		return pane_read(entry, invocation.lines)
@@ -127,10 +128,12 @@ command_invoke :: proc(
 		return control_tab_new(app, window, target.workspace, invocation)
 	case .Split:
 		return control_split(app, window, target, invocation)
+	case .Open_Markdown:
+		return control_markdown_open(app, window, target, invocation)
 	}
 	if window == nil {return outcome_failure(.Failed, "the pane's workspace is not open in a window")}
 	if action == .Rename_Pane && .Text in invocation.given {
-		if rename_target_commit(app, window, {.Pane, target.pane.content.id}, invocation.text) != .Saved {
+		if entry == nil || rename_target_commit(app, window, {.Pane, entry.id}, invocation.text) != .Saved {
 			return outcome_failure(.Failed, "could not rename the pane")
 		}
 		return {}
@@ -294,7 +297,7 @@ closed_pane_report :: proc(app: ^App, text: string, caller: u32) -> ([]Pane_Repo
 // The pane's visible rows, or its last `lines` rows when lines is positive.
 @(private)
 pane_read :: proc(entry: ^Session_Entry, lines: int) -> Outcome {
-	if entry == nil {return outcome_failure(.Failed, "that pane shows Settings, not a terminal")}
+	if entry == nil {return outcome_failure(.Failed, "that pane does not show a terminal")}
 	rows, err := term.screen_rows(entry.session, context.temp_allocator)
 	if err != .None {return outcome_failure(.Failed, "could not read the pane's screen")}
 	if lines > 0 && lines < len(rows) {rows = rows[len(rows) - lines:]}
@@ -304,7 +307,7 @@ pane_read :: proc(entry: ^Session_Entry, lines: int) -> Outcome {
 // Types text into the pane's program, then presses Enter when asked, as a person at the keyboard would.
 @(private)
 pane_send :: proc(entry: ^Session_Entry, text: string, enter: bool) -> Outcome {
-	if entry == nil {return outcome_failure(.Failed, "that pane shows Settings, not a terminal")}
+	if entry == nil {return outcome_failure(.Failed, "that pane does not show a terminal")}
 	if entry.status != .Running {return outcome_failure(.Failed, "the pane's program is not running")}
 	if text != "" && !term.send_text(entry.session, text) {
 		return outcome_failure(.Failed, "the pane is not accepting input")

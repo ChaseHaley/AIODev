@@ -42,7 +42,7 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	terminal := false
 	for node in tab.tree.nodes {
 		pane := node.(layout.Pane) or_continue
-		terminal ||= pane.content.kind == .Terminal
+		terminal ||= pane_owns_session(pane.content.kind)
 	}
 	if !terminal {return}
 	nodes := make([dynamic]Saved_Node, 0, len(tab.tree.nodes), context.temp_allocator)
@@ -63,7 +63,7 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 	tab := workspace.tabs[tab_index]
 	if int(node) >= len(tab.tree.nodes) {return}
 	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
-	if !is_pane || pane.content.kind != .Terminal {return}
+	if !is_pane || !pane_owns_session(pane.content.kind) {return}
 	sibling, axis, before, share, split := layout.placement(&tab.tree, node)
 	if !split {
 		closed_record_tab(app, workspace, tab_index)

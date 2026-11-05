@@ -277,3 +277,18 @@ warm_lookup_does_not_allocate :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, !state.failed)
 }
+
+@(test)
+variable_font_weights_stay_distinct :: proc(t: ^testing.T) {
+	system, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) {return}
+	defer font.system_destroy(system)
+	family, family_error := font.family_load(system, "Segoe UI Variable Text")
+	if family_error == .Family_Not_Found {return}
+	if !testing.expect_value(t, family_error, font.Error.None) {return}
+	testing.expect(t, family.faces[.Regular] != family.faces[.Bold])
+	strong, strong_error := font.family_load(system, "Segoe UI Variable Text", true)
+	if !testing.expect_value(t, strong_error, font.Error.None) {return}
+	testing.expect(t, strong.faces[.Regular] != family.faces[.Regular])
+	testing.expect(t, strong.faces[.Regular] != family.faces[.Bold])
+}

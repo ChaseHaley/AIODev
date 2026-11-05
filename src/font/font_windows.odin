@@ -33,6 +33,9 @@ Face :: struct {
 	files:       []File_Identity,
 	index:       u32,
 	simulations: dw.Font_Simulations,
+	// The named instances of a variable font share one file and index and differ only here.
+	weight:      dw.Font_Weight,
+	slant:       dw.Font_Style,
 }
 
 @(private)
@@ -174,6 +177,7 @@ face_intern :: proc(s: ^System, font: ^dw.IFont) -> (Face_Id, Error) {
 	face.glyph_count = face.handle->GetGlyphCount()
 	face.index = face.handle->GetIndex()
 	face.simulations = face.handle->GetSimulations()
+	face.weight, face.slant = font->GetWeight(), font->GetStyle()
 	face.handle->GetMetrics(&face.metrics)
 	if face.metrics.designUnitsPerEm == 0 {
 		return 0, .DirectWrite
@@ -221,6 +225,8 @@ face_intern :: proc(s: ^System, font: ^dw.IFont) -> (Face_Id, Error) {
 	for existing, i in s.faces {
 		if existing.index != face.index ||
 		   existing.simulations != face.simulations ||
+		   existing.weight != face.weight ||
+		   existing.slant != face.slant ||
 		   len(existing.files) != len(face.files) {
 			continue
 		}

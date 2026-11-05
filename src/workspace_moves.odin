@@ -58,11 +58,9 @@ workspace_move_content :: proc(
 	if index < 0 {return false}
 	source := source_workspace.tabs[index]
 	if request.whole_tab {
-		if workspace_has_content(destination, {.Settings, 0}) {
-			walk := workspace_tab_panes(app, &source.tree, index)
-			for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-				if pane.content.kind == .Settings {return false}
-			}
+		walk := workspace_tab_panes(app, &source.tree, index)
+		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
+			if !pane_content_can_join(pane.content, destination, source) {return false}
 		}
 	} else {
 		if int(request.node) >= len(source.tree.nodes) {return false}

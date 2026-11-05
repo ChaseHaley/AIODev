@@ -62,10 +62,8 @@ tab_selected_after_remove :: proc(selected, index, count: int) -> int {
 @(private)
 tab_update_title :: proc(app: ^App, tab: ^Tab) {
 	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	title: string
-	if pane.content.kind == .Settings {
-		title = "Settings"
-	} else if entry := session_find(app, pane.content.id); entry != nil {
+	title := content_title(app, pane.content)
+	if entry := workspace_session_for_content(app, pane.content); entry != nil {
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
 	}
 	if tab.name != "" {title = tab.name}

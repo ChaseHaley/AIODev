@@ -1,0 +1,253 @@
+package app_test
+
+import "aio:commands"
+import "aio:layout"
+import "aio:platform"
+import "core:fmt"
+import "core:os"
+import "core:strings"
+import "core:testing"
+import "core:time"
+import app "../../src"
+
+@(private = "file")
+Fixture :: struct {
+	state:     app.App,
+	directory: string,
+	file:      string,
+}
+
+@(private = "file")
+fixture_start :: proc(t: ^testing.T, f: ^Fixture, name: string, keep_directory := false) -> bool {
+	if !keep_directory {
+		directory, err := os.make_directory_temp("", "aio-markdown-*", context.allocator)
+		if !testing.expect_value(t, err, nil) {return false}
+		f.directory = directory
+		f.file = strings.concatenate({directory, "\\doc.md"})
+		settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
+		settings := idle_shell_settings(t, "cursor.blink = false\n")
+		if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) {return false}
+		if !testing.expect_value(t, os.write_entire_file(f.file, "# First\n\n[other](other.md)\n"), nil) {return false}
+	}
+	f.state = {options = {data_dir = f.directory, inactive = true}}
+	f.state.app_id = fmt.aprintf("AIODev.Test.Markdown.%s.%d", name, os.get_pid())
+	f.state.layout_path = strings.concatenate({f.directory, "/layout.json"})
+	if !testing.expect_value(t, platform.init(&f.state.platform, f.state.app_id), platform.Init_Result.Primary) {
+		return false
+	}
+	f.state.platform_ready = true
+	return testing.expect(t, app.app_init(&f.state))
+}
+
+@(private = "file")
+fixture_destroy :: proc(t: ^testing.T, f: ^Fixture) {
+	app.app_destroy(&f.state)
+	delete(f.file)
+	testing.expect_value(t, os.remove_all(f.directory), nil)
+	delete(f.directory)
+}
+
+@(private = "file")
+open :: proc(state: ^app.App, path: string, focus := false) -> app.Outcome {
+	args := focus ? []string{"pane.open_markdown", "--focus", path} : []string{"pane.open_markdown", path}
+	invocation, err := commands.parse_invocation(&state.registry, args, context.temp_allocator)
+	if err.advice != "" {return {status = .Usage, message = err.advice}}
+	return app.command_invoke(state, nil, invocation, state.sessions[0].id)
+}
+
+// Runs the poll now rather than waiting for its interval.
+@(private = "file")
+poll :: proc(state: ^app.App) {
+	state.markdown_deadline = time.tick_now()
+	app.markdown_tick(state)
+}
+
+@(test)
+markdown_paths_are_recognized_by_extension :: proc(t: ^testing.T) {
+	testing.expect(t, app.markdown_is_path("C:\\a\\Plan.md"))
+	testing.expect(t, app.markdown_is_path("C:\\a\\PLAN.MARKDOWN"))
+	testing.expect(t, !app.markdown_is_path("C:\\a\\plan.txt"))
+	testing.expect(t, !app.markdown_is_path("C:\\a.md\\plan"))
+}
+
+@(test)
+opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Open") {return}
+	w := f.state.windows[0]
+	before := w.tree.focus
+	opened := open(&f.state, f.file)
+	testing.expect_value(t, opened.status, commands.Status.Ok)
+	testing.expect_value(t, w.tree.focus, before)
+	if !testing.expect_value(t, len(f.state.markdown_panes), 1) {return}
+	pane := f.state.markdown_panes[0]
+	testing.expect_value(t, pane.state, app.Markdown_State.Loaded)
+	testing.expect_value(t, pane.title, "doc.md")
+	testing.expect(t, app.workspace_has_content(w.workspace, {.Markdown, pane.id}))
+	testing.expect_value(t, len(f.state.sessions), 1)
+}
+
+@(test)
+opening_a_shown_file_again_reuses_its_pane :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Reuse") {return}
+	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, strings.to_upper(f.file, context.temp_allocator)).status, commands.Status.Ok)
+	testing.expect_value(t, len(f.state.markdown_panes), 1)
+	testing.expect_value(t, app.tab_pane_count(f.state.windows[0].workspace.tabs[0]), 2)
+}
+
+@(test)
+opening_refuses_unavailable_files_and_active_types :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Refuse") {return}
+	missing := strings.concatenate({f.directory, "\\missing.md"}, context.temp_allocator)
+	testing.expect_value(t, open(&f.state, missing).status, commands.Status.Failed)
+	testing.expect_value(t, open(&f.state, "\\\\server\\share\\doc.md").status, commands.Status.Failed)
+	testing.expect_value(t, open(&f.state, "relative.md").status, commands.Status.Failed)
+	script := strings.concatenate({f.directory, "\\run.cmd"}, context.temp_allocator)
+	testing.expect_value(t, os.write_entire_file(script, "echo hi"), nil)
+	testing.expect_value(t, open(&f.state, script).status, commands.Status.Failed)
+	testing.expect_value(t, len(f.state.markdown_panes), 0)
+}
+
+@(test)
+a_markdown_id_is_never_read_as_a_session :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Collide") {return}
+	w := f.state.windows[0]
+	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	pane := f.state.markdown_panes[0]
+	// Both id spaces start at 1, so without the kind check this would find the first shell.
+	testing.expect(t, app.session_find(&f.state, pane.id) != nil)
+	testing.expect(t, app.workspace_session_for_content(&f.state, {.Markdown, pane.id}) == nil)
+	testing.expect(t, app.focused_session(&f.state, w) == nil)
+	testing.expect(t, app.markdown_active(w))
+	testing.expect(t, app.markdown_focused(&f.state, w) == pane)
+	counts := app.workspace_pane_counts(w.workspace)
+	testing.expect_value(t, counts.panes, 2)
+	testing.expect_value(t, counts.sessions, 1)
+}
+
+@(test)
+the_poll_follows_changes_to_the_file :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Poll") {return}
+	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	pane := f.state.markdown_panes[0]
+	revision := pane.revision
+	poll(&f.state)
+	testing.expect_value(t, pane.revision, revision)
+	testing.expect_value(t, os.write_entire_file(f.file, "# Rewritten with different length\n"), nil)
+	poll(&f.state)
+	testing.expect_value(t, pane.revision, revision + 1)
+	testing.expect_value(t, string(pane.document.text[:]), "Rewritten with different length")
+	testing.expect_value(t, os.remove(f.file), nil)
+	poll(&f.state)
+	testing.expect_value(t, pane.state, app.Markdown_State.Missing)
+	testing.expect_value(t, os.write_entire_file(f.file, "back"), nil)
+	poll(&f.state)
+	testing.expect_value(t, pane.state, app.Markdown_State.Loaded)
+	testing.expect_value(t, string(pane.document.text[:]), "back")
+}
+
+@(test)
+files_past_the_limit_are_not_read :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Limit") {return}
+	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	pane := f.state.markdown_panes[0]
+	large := make([]u8, 16 * 1024 * 1024 + 1)
+	defer delete(large)
+	testing.expect_value(t, os.write_entire_file(f.file, large), nil)
+	poll(&f.state)
+	testing.expect_value(t, pane.state, app.Markdown_State.Too_Large)
+}
+
+@(test)
+closing_the_pane_frees_it_and_stops_the_poll :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Close") {return}
+	w := f.state.windows[0]
+	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect(t, f.state.markdown_deadline != {})
+	app.pane_close_at(&f.state, w.workspace, w.workspace.selected, w.tree.focus)
+	testing.expect_value(t, len(f.state.markdown_panes), 1)
+	poll(&f.state)
+	testing.expect_value(t, len(f.state.markdown_panes), 0)
+	testing.expect(t, f.state.markdown_deadline == {})
+}
+
+@(test)
+only_one_per_workspace_content_is_refused_a_second_pane :: proc(t: ^testing.T) {
+	first, second: layout.Layout
+	testing.expect_value(t, layout.init(&first, {.Settings, 0}), nil)
+	defer layout.destroy(&first)
+	testing.expect_value(t, layout.init(&second, {.Markdown, 1}), nil)
+	defer layout.destroy(&second)
+	tabs := [2]app.Tab{{tree = first}, {tree = second}}
+	workspace: app.Workspace
+	append(&workspace.tabs, &tabs[0], &tabs[1])
+	defer delete(workspace.tabs)
+	testing.expect(t, !app.pane_content_can_join({.Settings, 0}, &workspace, nil))
+	testing.expect(t, app.pane_content_can_join({.Markdown, 1}, &workspace, nil))
+	testing.expect(t, app.pane_content_can_join({.Markdown, 2}, &workspace, nil))
+}
+
+@(test)
+layout_restore_reopens_files_and_keeps_a_pane_for_a_missing_one :: proc(t: ^testing.T) {
+	first: Fixture
+	if !fixture_start(t, &first, "RestoreA") {return}
+	defer delete(first.file)
+	defer delete(first.directory)
+	defer testing.expect_value(t, os.remove_all(first.directory), nil)
+	testing.expect_value(t, open(&first.state, first.file).status, commands.Status.Ok)
+	app.layout_state_save(&first.state)
+	app.app_destroy(&first.state)
+
+	second := Fixture{directory = first.directory}
+	if !fixture_start(t, &second, "RestoreB", true) {return}
+	if !testing.expect_value(t, len(second.state.markdown_panes), 1) {
+		app.app_destroy(&second.state)
+		return
+	}
+	restored := second.state.markdown_panes[0]
+	testing.expect_value(t, restored.state, app.Markdown_State.Missing)
+	poll(&second.state)
+	testing.expect_value(t, restored.state, app.Markdown_State.Loaded)
+	testing.expect(t, strings.equal_fold(restored.title, "doc.md"))
+	app.layout_state_save(&second.state)
+	app.app_destroy(&second.state)
+
+	testing.expect_value(t, os.remove(first.file), nil)
+	third := Fixture{directory = first.directory}
+	if !fixture_start(t, &third, "RestoreC", true) {return}
+	defer app.app_destroy(&third.state)
+	if !testing.expect_value(t, len(third.state.markdown_panes), 1) {return}
+	poll(&third.state)
+	testing.expect_value(t, third.state.markdown_panes[0].state, app.Markdown_State.Missing)
+}
+
+@(test)
+a_tampered_layout_path_is_never_read :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Tampered") {return}
+	pane := app.markdown_pane_create(&f.state, "\\\\server\\share\\doc.md", false)
+	if !testing.expect(t, pane != nil) {return}
+	workspace := f.state.windows[0].workspace
+	tree := &workspace.tabs[0].tree
+	_, err := layout.split_direction(tree, tree.focus, .Right, 0.5, {.Markdown, pane.id})
+	testing.expect_value(t, err, nil)
+	poll(&f.state)
+	testing.expect(t, !pane.verified)
+	testing.expect_value(t, pane.state, app.Markdown_State.Missing)
+	testing.expect_value(t, pane.revision, u64(0))
+}

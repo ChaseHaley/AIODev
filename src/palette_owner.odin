@@ -67,11 +67,10 @@ palette_tab_detail :: proc(app: ^App, tab: ^Tab) -> string {
 	}
 	pane, is_pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
 	if !is_pane {return ""}
-	if pane.content.kind == .Settings {return "Settings"}
-	if entry := session_find(app, pane.content.id); entry != nil {
+	if entry := workspace_session_for_content(app, pane.content); entry != nil {
 		return pane_header_title(&entry.header)
 	}
-	return ""
+	return content_title(app, pane.content)
 }
 
 @(private)

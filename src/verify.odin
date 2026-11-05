@@ -215,7 +215,7 @@ when AIO_CONTROL {
 		entry := focused_session(app, w)
 		if entry == nil {return {}, .Invalid_Argument}
 		for pane in w.views {
-			if pane.content.id != entry.id {continue}
+			if pane.content != {.Terminal, entry.id} {continue}
 			allocator := persistent ? context.allocator : context.temp_allocator
 			snapshot, err := term.snapshot(pane.view.state, allocator)
 			if err != .None {
@@ -379,8 +379,23 @@ when AIO_CONTROL {
 					slider = ui.editor_row_parts(&w.editor, page, w.editor.selected).slider
 				}
 			}
+			markdown_scroll, markdown_total := 0, 0
+			markdown_path, markdown_selected := "", ""
+			markdown_state := Markdown_State.Missing
+			if pane := markdown_focused(app, w); pane != nil {
+				markdown_scroll, markdown_total = pane.view.scroll, ui.markdown_total(&pane.view)
+				markdown_path, markdown_state = pane.path, pane.state
+				markdown_selected = ui.markdown_selected_text(&pane.view, &pane.document)
+			}
 			window := [?]control.State_Entry {
 				{"window.id", fmt.tprintf("%d", w.id)},
+				{"markdown.count", fmt.tprintf("%d", len(app.markdown_panes))},
+				{"markdown.active", fmt.tprintf("%t", markdown_active(w))},
+				{"markdown.path", markdown_path},
+				{"markdown.state", fmt.tprintf("%v", markdown_state)},
+				{"markdown.scroll", fmt.tprintf("%d", markdown_scroll)},
+				{"markdown.total", fmt.tprintf("%d", markdown_total)},
+				{"markdown.selection", markdown_selected},
 				{"window.origin", fmt.tprintf("%d,%d", origin.x, origin.y)},
 				{"window.pointer", fmt.tprintf("%g,%g", w.pointer.x, w.pointer.y)},
 				{"theme.hover_lift", fmt.tprintf("%g", app.theme.hover_lift)},
@@ -629,7 +644,7 @@ when AIO_CONTROL {
 			if len(app.workspaces) > 0 {
 				if tab := selected_tab(app.workspaces[0]); tab != nil {
 					pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-					entry = session_find(app, pane.content.id)
+					entry = workspace_session_for_content(app, pane.content)
 				}
 			}
 		}
@@ -686,7 +701,7 @@ when AIO_CONTROL {
 			for node, n in tab.tree.nodes {
 				if pane, ok := node.(layout.Pane); ok {
 					count += 1
-					if session := session_find(app, pane.content.id); session != nil {
+					if session := workspace_session_for_content(app, pane.content); session != nil {
 						g := term.geometry(session.session)
 						if _, err := append(
 							&entries,
@@ -750,6 +765,7 @@ when AIO_CONTROL {
 			}
 			if _, err := append(&entries, ..pane_state[:]); err != nil {return nil, .Out_Of_Memory}
 			for view in w.views {
+				if !pane_owns_session(view.content.kind) {continue}
 				if _, err := append(
 					&entries,
 					control.State_Entry {

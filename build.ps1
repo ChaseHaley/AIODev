@@ -63,26 +63,30 @@ if (Test-Path 'assets/aiodev.rc') { $resource = @('-resource:assets/aiodev.rc') 
 
 New-Item -ItemType Directory -Force build | Out-Null
 
-# C++/WinRT keeps the notification ABI and COM event ownership out of the Odin UI code.
-function Build-Notifications {
+function Build-NativeLibrary([string] $Name, [string] $Source, [string] $CompilerFlags) {
     $nativeRoot = Join-Path $PSScriptRoot 'build/native'
     New-Item -ItemType Directory -Force $nativeRoot | Out-Null
-    $library = Join-Path $nativeRoot 'notifications.lib'
-    $source = Join-Path $PSScriptRoot 'native/windows_notifications.cpp'
+    $library = Join-Path $nativeRoot "$Name.lib"
+    $source = Join-Path $PSScriptRoot $Source
     if ((Test-Path $library) -and (Get-Item $library).LastWriteTimeUtc -gt (Get-Item $source).LastWriteTimeUtc) { return }
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $visualStudio) { throw 'MSVC C++ tools are required for Windows notifications.' }
+    if (-not $visualStudio) { throw "MSVC C++ tools are required to build $Name." }
     $vcvars = Join-Path $visualStudio 'VC/Auxiliary/Build/vcvars64.bat'
-    $object = Join-Path $nativeRoot 'notifications.obj'
-    $batch = Join-Path $nativeRoot 'compile.cmd'
+    $object = Join-Path $nativeRoot "$Name.obj"
+    $batch = Join-Path $nativeRoot "compile-$Name.cmd"
     @("@echo off", "call `"$vcvars`" >nul 2>&1", 'if errorlevel 1 exit /b 1',
-      "cl /nologo /c /std:c++20 /EHsc /MT /O2 /W4 /WX /Fo`"$object`" `"$source`"",
+      "cl /nologo /c $CompilerFlags /Fo`"$object`" `"$source`"",
       'if errorlevel 1 exit /b 1', "lib /nologo /out:`"$library`" `"$object`"") | Set-Content -LiteralPath $batch
     & cmd /d /c $batch
-    if ($LASTEXITCODE -ne 0) { throw 'Windows notification bridge build failed.' }
+    if ($LASTEXITCODE -ne 0) { throw "$Name library build failed." }
 }
-if ($Task -ne 'test') { Build-Notifications }
+function Build-NativeLibraries {
+    # C++/WinRT keeps the notification ABI and COM event ownership out of the Odin UI code.
+    Build-NativeLibrary 'notifications' 'native/windows_notifications.cpp' '/std:c++20 /EHsc /MT /O2 /W4 /WX'
+    Build-NativeLibrary 'md4c' 'vendor/md4c/md4c.c' '/MT /O2 /W3'
+}
+if ($Task -ne 'test') { Build-NativeLibraries }
 
 # The bundled ConPTY (D-044) loads from beside each executable that opens consoles.
 function Copy-Conpty([string] $Directory) {

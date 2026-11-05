@@ -6,6 +6,7 @@ import "core:math"
 Content_Kind :: enum u8 {
 	Terminal,
 	Settings,
+	Markdown,
 }
 
 // A reference to content owned elsewhere; panes display content, they never own it.

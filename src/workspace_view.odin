@@ -52,7 +52,7 @@ workspace_view_prepare :: proc(
 		if pane.session != nil {
 			if !term_view.create(&entry.view) {return false}
 			entry.cache = render.draw_list_init()
-		} else if pane.content.kind != .Settings {continue}
+		}
 		append(&resources.views, entry)
 	}
 	prepared = true
@@ -61,7 +61,7 @@ workspace_view_prepare :: proc(
 
 workspace_view_destroy :: proc(resources: ^Workspace_View_Resources) {
 	for &pane in resources.views {
-		if pane.content.kind == .Terminal {
+		if pane_owns_session(pane.content.kind) {
 			term_view.destroy(&pane.view)
 			render.draw_list_destroy(&pane.cache)
 		}

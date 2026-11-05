@@ -59,11 +59,6 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
-@(private)
-SETTINGS_HEADER_TITLE :: "Settings"
-@(private)
-SETTINGS_HEADER_ICON :: "⚙"
-
 pane_header_draw :: proc(
 	app: ^App,
 	w: ^Window,
@@ -86,7 +81,8 @@ pane_header_draw :: proc(
 		)
 	}
 	icon_atlas: render.Rect
-	title, directory, icon := SETTINGS_HEADER_TITLE, "", SETTINGS_HEADER_ICON
+	title, directory := content_title(app, pane.content), content_directory(app, pane.content)
+	icon := content_icon(pane.content.kind)
 	if entry != nil {
 		// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)

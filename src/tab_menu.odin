@@ -103,7 +103,7 @@ tab_menu_enabled :: proc(w: ^Window, index: int) -> bool {
 		tree := &w.workspace.tabs[target].tree
 		if tree.focus == layout.INVALID_NODE {return false}
 		pane, ok := tree.nodes[tree.focus].(layout.Pane)
-		return ok && pane.content.kind != .Settings
+		return ok && pane_owns_session(pane.content.kind)
 	case .Close_Right_Tabs: return target >= 0 && target + 1 < len(w.workspace.tabs)
 	case .Close_Other_Tabs: return target >= 0 && tab_menu_scope(w) < len(w.workspace.tabs)
 	}
