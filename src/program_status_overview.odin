@@ -40,6 +40,7 @@ Status_Surface :: enum {
 Status_Panel_Button :: enum {
 	None,
 	Side,
+	View,
 }
 
 Status_Overview :: struct {
@@ -57,13 +58,13 @@ Status_Overview :: struct {
 	panel_scroll:           f32,
 }
 
-// One row in an overview. A group row names the pane the rows below it came from. The record's
-// strings borrow from the session's snapshot, so items live for one frame or event at most.
+// One report in an overview. The record's strings borrow from the session's snapshot, so items live
+// for one frame or event at most.
 Status_Item :: struct {
-	session: u32,
-	record:  term.Program_Status,
-	crumb:   string,
-	group:   bool,
+	session:   u32,
+	record:    term.Program_Status,
+	crumb:     string,
+	workspace: string,
 }
 
 @(private)
@@ -85,8 +86,8 @@ status_record_id_less :: proc(a, b: term.Program_Status) -> bool {
 	return a.id < b.id
 }
 
-// Every shown record in the window's scope, by urgency, or by place with a group row per pane.
-status_items :: proc(app: ^App, w: ^Window, by_location: bool) -> []Status_Item {
+// Every shown record in the window's scope, by urgency.
+status_items :: proc(app: ^App, w: ^Window) -> []Status_Item {
 	items := make([dynamic]Status_Item, context.temp_allocator)
 	if !app.settings.status.enabled {return items[:]}
 	for workspace in app.workspaces {
@@ -100,15 +101,12 @@ status_items :: proc(app: ^App, w: ^Window, by_location: bool) -> []Status_Item 
 			crumb := ""
 			for record in records {
 				if !status_shown(app, record) {continue}
-				if crumb == "" {
-					crumb = status_crumb_at(workspace, pane.tab, entry)
-					if by_location {append(&items, Status_Item{session = entry.id, crumb = crumb, group = true})}
-				}
+				if crumb == "" {crumb = status_crumb_at(workspace, pane.tab, entry)}
 				append(&items, Status_Item{session = entry.id, record = record, crumb = crumb})
 			}
 		}
 	}
-	if !by_location {slice.sort_by(items[:], status_item_less)}
+	slice.sort_by(items[:], status_item_less)
 	return items[:]
 }
 
@@ -149,22 +147,21 @@ status_dismiss_rect :: proc(w: ^Window, row: render.Rect) -> render.Rect {
 	return {row.x + row.width - ui.SPACE_1 * s - size, row.y + (row.height - size) / 2, size, size}
 }
 
-// Two lines: name, state and age; then the message, with where it came from when `crumb` is set.
+// Two lines: name, state and age; then where it came from and the message.
 @(private)
 status_row_draw :: proc(
 	app: ^App,
 	w: ^Window,
 	r: render.Rect,
 	item: Status_Item,
-	highlighted, crumb: bool,
-	indent: f32,
+	highlighted: bool,
 ) -> glyphs.Result {
 	s := w.scale
 	if highlighted {
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
 	}
 	mark := status_mark(item.record)
-	left := r.x + ui.CONTROL_INSET * s + indent
+	left := r.x + ui.CONTROL_INSET * s
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	line_one, line_two := ui.stacked_baselines(r, &strong, &small, s)
@@ -210,19 +207,16 @@ status_row_draw :: proc(
 		headline_color,
 		max(0, name_room - name_width - ui.SPACE_2 * s),
 	); result != .Ok {return result}
-	detail := item.record.message
-	if crumb {detail = detail == "" ? item.crumb : fmt.tprintf("%s · %s", item.crumb, detail)}
-	if detail != "" {
-		if result := ui.draw_fading_text(
-			&small,
-			&w.list,
-			detail,
-			text_x,
-			line_two,
-			app.theme.faint,
-			max(0, right - text_x),
-		); result != .Ok {return result}
-	}
+	detail := item.record.message == "" ? item.crumb : fmt.tprintf("%s · %s", item.crumb, item.record.message)
+	if result := ui.draw_fading_text(
+		&small,
+		&w.list,
+		detail,
+		text_x,
+		line_two,
+		app.theme.faint,
+		max(0, right - text_x),
+	); result != .Ok {return result}
 	ui.status_progress_draw(
 		&w.list,
 		app.theme,
@@ -235,25 +229,6 @@ status_row_draw :: proc(
 		ui.icon_draw(&w.list, .Close, close, app.theme.muted, ui.ICON_INDICATOR, s)
 	}
 	return .Ok
-}
-
-@(private)
-status_group_draw :: proc(app: ^App, w: ^Window, r: render.Rect, item: Status_Item) -> glyphs.Result {
-	small := ui.text_styled(&w.ui_text, .Detail)
-	return ui.draw_fading_text(
-		&small,
-		&w.list,
-		item.crumb,
-		r.x + ui.CONTROL_INSET * w.scale,
-		r.y + r.height - ui.SPACE_1 * w.scale - small.line_height + small.ascent,
-		app.theme.faint,
-		max(0, r.width - 2 * ui.CONTROL_INSET * w.scale),
-	)
-}
-
-@(private)
-status_item_height :: proc(w: ^Window, item: Status_Item) -> f32 {
-	return (item.group ? STATUS_GROUP_HEIGHT : STATUS_ROW_HEIGHT) * w.scale
 }
 
 @(private)
@@ -404,7 +379,7 @@ status_inbox_clamp :: proc(w: ^Window, list: render.Rect, count: int) {
 
 status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if !w.status.inbox_open {return .Ok}
-	items := status_items(app, w, false)
+	items := status_items(app, w)
 	surface, list, footer_y := status_inbox_layout(app, w, items)
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
@@ -456,7 +431,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		r := status_inbox_row_rect(w, list, w.status.inbox_scroll, i)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
 		highlighted := i == w.status.selected
-		if result := status_row_draw(app, w, r, item, highlighted, true, 0); result != .Ok {return result}
+		if result := status_row_draw(app, w, r, item, highlighted); result != .Ok {return result}
 	}
 	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
 	ui.draw_rect(&w.list, {rect = {surface.x, footer_y, surface.width, s}, color = app.theme.border})
@@ -484,7 +459,7 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 	if !e.pressed {return}
 	w.header_buttons += {e.button}
 	x, y := f32(e.x), f32(e.y)
-	items := status_items(app, w, false)
+	items := status_items(app, w)
 	surface, _, _ := status_inbox_layout(app, w, items)
 	w.dirty = true
 	if !status_rect_contains(surface, x, y) {
@@ -508,7 +483,7 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 }
 
 status_inbox_move :: proc(app: ^App, w: ^Window, x, y: f32) {
-	items := status_items(app, w, false)
+	items := status_items(app, w)
 	index := status_inbox_hit(app, w, items, x, y)
 	if index >= 0 && index != w.status.selected {
 		w.status.selected, w.dirty = index, true
@@ -520,7 +495,7 @@ status_inbox_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 
 status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
 	w.status.inbox_scroll -= f32(math.sign(delta)) * 3 * STATUS_ROW_HEIGHT * w.scale
-	items := status_items(app, w, false)
+	items := status_items(app, w)
 	_, list, _ := status_inbox_layout(app, w, items)
 	height := STATUS_ROW_HEIGHT * w.scale
 	w.status.inbox_scroll = clamp(w.status.inbox_scroll, 0, max(0, f32(len(items)) * height - list.height))
@@ -532,7 +507,7 @@ status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
 
 status_inbox_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if !e.pressed {return}
-	items := status_items(app, w, false)
+	items := status_items(app, w)
 	if step := ui.list_step(e); step != 0 {
 		w.status.selected = clamp(w.status.selected + step, 0, max(0, len(items) - 1))
 		w.dirty = true

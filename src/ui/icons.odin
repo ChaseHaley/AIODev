@@ -38,6 +38,9 @@ Icon :: enum {
 	Workspace,
 	Window_Out,
 	Window_In,
+	Terminal,
+	View_Comfy,
+	View_Dense,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -172,6 +175,15 @@ icon_draw :: proc(
 	case .Layout_Right:
 		pen_box(p, 1, 2, 14, 12, 2)
 		pen_path(p, {10, 2}, {10, 14})
+	case .Terminal:
+		pen_box(p, 1, 2, 14, 12, 2)
+		pen_path(p, {4, 5}, {7, 8}, {4, 11})
+		pen_path(p, {8.5, 11}, {12, 11})
+	case .View_Comfy:
+		pen_box(p, 2, 2, 12, 5, 1)
+		pen_box(p, 2, 9, 12, 5, 1)
+	case .View_Dense:
+		for y in ([?]f32{3, 6.5, 10, 13.5}) {pen_path(p, {2, y}, {14, y})}
 	case .More:
 		for x in ([?]f32{3, 8, 13}) {pen_dot(p, x, 8)}
 	case .More_Vertical:

@@ -602,7 +602,14 @@ panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mo
 
 @(private = "file")
 panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
-	return status_panel_button_at(app, w, x, y) == .Side ? "Move activity panel" : ""
+	switch status_panel_button_at(app, w, x, y) {
+	case .Side:
+		return "Move activity panel"
+	case .View:
+		return app.settings.status.panel_view == .Comfy ? "Switch to Dense" : "Switch to Comfy"
+	case .None:
+	}
+	return status_panel_row_tooltip(app, w, x, y)
 }
 
 @(private = "file")

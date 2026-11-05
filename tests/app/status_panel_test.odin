@@ -1,0 +1,204 @@
+package app_test
+
+import app "../../src"
+import "aio:platform"
+import "aio:settings"
+import "aio:term"
+import "core:os"
+import "core:strings"
+import "core:testing"
+import "core:time"
+
+@(private = "file")
+reports_of :: proc(
+	workspace: string,
+	records: ..term.Program_Status,
+) -> [dynamic]app.Status_Panel_Report {
+	reports := make([dynamic]app.Status_Panel_Report, context.temp_allocator)
+	copied := make([]term.Program_Status, len(records), context.temp_allocator)
+	copy(copied, records)
+	app.status_panel_tree_append(&reports, copied, 1, "crumb", workspace)
+	return reports
+}
+
+@(test)
+activity_tree_keeps_children_with_parents_and_treats_orphans_as_roots :: proc(t: ^testing.T) {
+	reports := reports_of(
+		"W",
+		{id = "a-b"},
+		{id = "a/c/d"},
+		{id = "a"},
+		{id = "z/orphan"},
+		{id = "a/b"},
+	)
+	expected := [?]struct {
+		id:    string,
+		depth: int,
+	}{{"a", 0}, {"a/b", 1}, {"a/c/d", 1}, {"a-b", 0}, {"z/orphan", 0}}
+	testing.expect_value(t, len(reports), len(expected))
+	for e, i in expected {
+		testing.expect_value(t, reports[i].item.record.id, e.id)
+		testing.expect_value(t, reports[i].depth, e.depth)
+	}
+	rooted := reports_of("W", {id = "x"}, {id = ""}, {id = "x/y"})
+	testing.expect_value(t, rooted[0].depth, 0)
+	testing.expect_value(t, rooted[1].depth, 1)
+	testing.expect_value(t, rooted[2].depth, 2)
+}
+
+@(test)
+activity_comfy_groups_by_workspace_with_fixed_row_heights :: proc(t: ^testing.T) {
+	reports := reports_of("One", {id = "a", state = .Working}, {id = "a/b", state = .Blocked})
+	more := reports_of("Two", {id = "c", state = .Done})
+	append(&reports, ..more[:])
+	rows, total := app.status_panel_project(.Comfy, reports[:], 1.5)
+	testing.expect_value(t, len(rows), 5)
+	testing.expect_value(t, rows[0].label, "One")
+	testing.expect(t, rows[1].report && rows[2].report && !rows[3].report && rows[4].report)
+	testing.expect_value(t, rows[2].depth, 1)
+	testing.expect_value(t, rows[3].label, "Two")
+	testing.expect_value(t, rows[0].height, 28 * 1.5)
+	testing.expect_value(t, rows[1].height, 56 * 1.5)
+	testing.expect_value(t, rows[0].y, 4 * 1.5)
+	// Later groups stand 8 DIPs from the row above them.
+	testing.expect_value(t, rows[3].y, rows[2].y + rows[2].height + 8 * 1.5)
+	testing.expect_value(t, total, rows[4].y + rows[4].height + 4 * 1.5)
+}
+
+@(test)
+activity_dense_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.T) {
+	reports := reports_of(
+		"W",
+		{id = "idle", state = .Idle},
+		{id = "seen", state = .Error, seen = true},
+		{id = "unseen", state = .Error},
+		{id = "working", state = .Working},
+		{id = "working/ask", state = .Blocked},
+		{id = "working/ask/run", state = .Working},
+		{id = "done", state = .Done},
+		{id = "plain", state = .Working},
+	)
+	rows, _ := app.status_panel_project(.Dense, reports[:], 1)
+	expected := [?]struct {
+		text:  string,
+		count: int,
+	} {
+		{"Needs you", 2},
+		{"unseen", 0},
+		{"working", 0},
+		{"working/ask", 0},
+		{"working/ask/run", 0},
+		{"Working", 1},
+		{"plain", 0},
+		{"Finished", 2},
+		{"done", 0},
+		{"seen", 0},
+		{"Idle", 1},
+		{"idle", 0},
+	}
+	testing.expect_value(t, len(rows), len(expected))
+	if len(rows) != len(expected) {return}
+	for e, i in expected {
+		row := rows[i]
+		testing.expect_value(t, row.report ? row.item.record.id : row.label, e.text)
+		testing.expect_value(t, row.count, e.count)
+	}
+	testing.expect(t, rows[0].attention)
+	testing.expect(t, !rows[5].attention)
+	testing.expect_value(t, rows[1].height, 32)
+	testing.expect_value(t, rows[3].height, 28)
+	testing.expect_value(t, rows[0].height, 28)
+}
+
+@(test)
+activity_views_project_nothing_without_reports :: proc(t: ^testing.T) {
+	for view in settings.Status_Panel_View {
+		rows, total := app.status_panel_project(view, nil, 1)
+		testing.expect_value(t, len(rows), 0)
+		testing.expect_value(t, total, 0)
+	}
+}
+
+@(test)
+activity_view_button_saves_one_preference_and_cancels_outside_or_on_capture_loss :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-view", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	saved, _ := app.settings_save_value(s, "status.panel", "true", "enable panel")
+	if !testing.expect(t, saved) {return}
+	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Comfy)
+	r := app.status_panel_view_rect(s, w)
+	side := app.status_panel_side_rect(s, w)
+	testing.expect(t, r.width > 0 && r.x + r.width <= side.x)
+	x, y := r.x + r.width / 2, r.y + r.height / 2
+	gesture_button(s, w, .Left, true, x, y)
+	gesture_button(s, w, .Left, false, 0, 0)
+	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Comfy)
+	gesture_button(s, w, .Left, true, x, y)
+	app.handle_event(s, platform.Capture_Lost_Event{w.id})
+	gesture_button(s, w, .Left, false, x, y)
+	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Comfy)
+	for next in ([?]settings.Status_Panel_View{.Dense, .Comfy}) {
+		gesture_button(s, w, .Left, true, x, y)
+		gesture_button(s, w, .Left, false, x, y)
+		testing.expect_value(t, s.settings.status.panel_view, next)
+		text, err := os.read_entire_file(f.path, context.temp_allocator)
+		testing.expect_value(t, err, nil)
+		expected := next == .Dense ? "status.panel_view = dense" : "status.panel_view = comfy"
+		testing.expect(t, strings.contains(string(text), expected))
+	}
+	// A Settings edit reaches the same preference the button reads.
+	saved, _ = app.settings_save_value(s, "status.panel_view", "dense", "set view")
+	testing.expect(t, saved)
+	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Dense)
+}
+
+@(test)
+activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-rows", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.panel = true
+	s.settings.status.enabled = true
+	s.settings.status.show_done = true
+	entry := app.focused_session(s, w)
+	if !testing.expect(t, entry != nil) {return}
+	previous := entry.statuses
+	defer {
+		delete(entry.statuses)
+		entry.statuses = previous
+	}
+	entry.statuses = make([]term.Program_Status, 2)
+	entry.statuses[0] = {id = "a", app = "claude", title = "Long task", message = "Reading", state = .Done,
+		progress = -1, updated_at = time.now()}
+	entry.statuses[1] = {id = "a/b", app = "codex", title = "Child", state = .Working, progress = 40,
+		updated_at = time.now()}
+	for view in settings.Status_Panel_View {
+		s.settings.status.panel_view = view
+		app.window_relayout(s, w)
+		rows, _ := app.status_panel_rows(s, w)
+		list := app.status_panel_rect(s, w)
+		found := 0
+		for row in rows {
+			if !row.report {continue}
+			found += 1
+			y := list.y + 32 * w.scale + row.y + row.height / 2
+			x := list.x + 40 * w.scale
+			index, _ := app.status_panel_hit(s, w, rows, x, y)
+			testing.expect_value(t, rows[index].item.record.id, row.item.record.id)
+			tip := app.status_panel_row_tooltip(s, w, x, y)
+			testing.expect(t, strings.contains(tip, row.item.record.title))
+			testing.expect(t, strings.contains(tip, row.item.crumb))
+			testing.expect(t, strings.contains(tip, row.item.record.app))
+			testing.expect_value(t, strings.count(tip, "\n"), 2)
+		}
+		testing.expect_value(t, found, 2)
+		if rows[0].report {continue}
+		// A label takes no clicks.
+		y := list.y + 32 * w.scale + rows[0].y + rows[0].height / 2
+		index, _ := app.status_panel_hit(s, w, rows, list.x + 40 * w.scale, y)
+		testing.expect_value(t, index, -1)
+	}
+}

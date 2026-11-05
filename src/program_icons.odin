@@ -171,6 +171,33 @@ pane_icon :: proc(
 	return
 }
 
+// The icon for a status report: what the reporting program's name draws, so a child reporter shows
+// its own agent, then the pane's icon. Pending while the named icon is read, so nothing lesser flashes.
+report_icon :: proc(
+	app: ^App,
+	entry: ^Session_Entry,
+	name: string,
+	size: f32,
+) -> (
+	atlas: render.Rect,
+	pending: bool,
+	result: glyphs.Result,
+) {
+	if app.settings.tabs.program_icons && name != "" {
+		pixels := int(math.round(size))
+		art, has_art := program_art.find(name)
+		source, path, paint, found := program_named_source(app, name, art, has_art, pixels)
+		if found {
+			state: Program_Icon_State
+			atlas, state, result = program_icon_atlas(app, source, path, paint, pixels)
+			if result != .Ok || state == .Ready {return}
+			if state == .Pending {return {}, true, .Ok}
+		}
+	}
+	_, atlas, result = pane_icon(app, entry, size)
+	return
+}
+
 // The first source in precedence order that has not turned out to be missing at this size.
 @(private)
 program_icon_source :: proc(

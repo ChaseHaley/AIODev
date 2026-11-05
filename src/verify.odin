@@ -523,6 +523,8 @@ when AIO_CONTROL {
 				{"activity.rect", verify_workspace_rect(status_panel_rect(app, w))},
 				{"activity.side_button", verify_workspace_rect(status_panel_side_rect(app, w))},
 				{"activity.side", app.settings.status.panel_side == .Left ? "left" : "right"},
+				{"activity.view_button", verify_workspace_rect(status_panel_view_rect(app, w))},
+				{"activity.view", app.settings.status.panel_view == .Comfy ? "comfy" : "dense"},
 				{"dividers.dragging", fmt.tprintf("%d", w.dragging.count)},
 				{"rail.overlay", fmt.tprintf("%t", rail_overlay(w))},
 				{"rail.scroll", fmt.tprintf("%g", w.rail_scroll)},
@@ -602,6 +604,19 @@ when AIO_CONTROL {
 				{"find.close", verify_find_rect(w, entry, .Close)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
+			activity_rows, _ := status_panel_rows(app, w)
+			activity_list := status_panel_list(app, w, status_panel_rect(app, w))
+			for row, i in activity_rows {
+				rect := verify_workspace_rect(status_panel_row_rect(w, activity_list, row))
+				text := row.report ? status_item_name(app, row.item) : row.label
+				row_state := [?]control.State_Entry {
+					{fmt.tprintf("activity.row.%d.rect", i), rect},
+					{fmt.tprintf("activity.row.%d.report", i), fmt.tprintf("%t", row.report)},
+					{fmt.tprintf("activity.row.%d.text", i), text},
+					{fmt.tprintf("activity.row.%d.depth", i), fmt.tprintf("%d", row.depth)},
+				}
+				if _, err := append(&entries, ..row_state[:]); err != nil { return nil, .Out_Of_Memory }
+			}
 			for i in 0..<w.tab_menu.count {
 				row := [?]control.State_Entry{
 					{fmt.tprintf("tab_menu.row.%d.label", i + 1), tab_menu_label(w, i)},
