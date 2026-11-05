@@ -366,19 +366,18 @@ block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 	)
 }
 
+// Fills v.paints from the row iterator's current row. A failure stays on the list.
 @(private)
-build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
-	m := b.metrics
-	top := b.origin.y + f32(y) * m.cell_height
+row_paints :: proc(v: ^View, b: ^Builder, y: int) {
 	selection := ghostty.sized(ghostty.Render_State_Row_Selection)
 	selected := ghostty.render_state_row_get(v.rows, .Selection, &selection) == .Success
 	if ghostty.render_state_row_get(v.rows, .Cells, &v.cells) != .Success {
 		b.list.error = .Construction_Failed
-		return .Ok
+		return
 	}
 	if !mark_row(v, y, b.columns) {
 		b.list.error = .Out_Of_Memory
-		return .Ok
+		return
 	}
 	clear(&v.paints)
 	for x := 0; ghostty.render_state_row_cells_next(v.cells); x += 1 {
@@ -386,7 +385,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		p := paint_cell(v, b, x, y, selection, selected, mark)
 		if _, err := append(&v.paints, p); err != nil {
 			b.list.error = .Out_Of_Memory
-			return .Ok
+			return
 		}
 	}
 	c := b.cursor
@@ -394,6 +393,10 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		x := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
 		b.cursor_wide = c.wide_tail || (x >= 0 && x < len(v.paints) && v.paints[x].width == .Wide)
 	}
+}
+
+@(private)
+row_backgrounds :: proc(v: ^View, b: ^Builder, top: f32) {
 	run_start, run_color, run_active := 0, render.Color{}, false
 	flush :: proc(b: ^Builder, start, end: int, top: f32, c: render.Color) {
 		m := b.metrics
@@ -420,6 +423,15 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	if run_active {
 		flush(b, run_start, len(v.paints), top, run_color)
 	}
+}
+
+@(private)
+build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
+	m := b.metrics
+	top := b.origin.y + f32(y) * m.cell_height
+	row_paints(v, b, y)
+	if b.list.error != .None {return .Ok}
+	row_backgrounds(v, b, top)
 	for p, x in v.paints {
 		if result := decorate(b, p, b.origin.x + f32(x) * m.cell_width, top); result != .Ok {
 			return result
