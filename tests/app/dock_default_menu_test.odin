@@ -13,7 +13,7 @@ import "core:testing"
 dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "dock-default-menu") {return}
+	if !palette_fixture_create(t, &f, "dock-default-menu", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	for scale in ([?]f32{1, 1.5}) {
 		for node in ([?]layout.Node_Id{app.RAIL_DIVIDER, app.ACTIVITY_DIVIDER, app.ACTIVITY_HEIGHT_DIVIDER}) {

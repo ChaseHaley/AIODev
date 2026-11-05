@@ -9,7 +9,7 @@ import "core:testing"
 palette_profiles_result_jumps_to_the_profile_table :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "profiles-jump") {return}
+	if !palette_fixture_create(t, &f, "profiles-jump", second_window = false) {return}
 	s := &f.state
 	w := s.windows[0]
 	app.palette_open_mode(s, w, .Settings)
@@ -26,7 +26,7 @@ palette_profiles_result_jumps_to_the_profile_table :: proc(t: ^testing.T) {
 palette_toggle_saves_through_the_settings_file_and_stays_open :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "inline-setting") {return}
+	if !palette_fixture_create(t, &f, "inline-setting", second_window = false) {return}
 	s := &f.state
 	w := s.windows[0]
 	app.palette_open_mode(s, w, .Settings)

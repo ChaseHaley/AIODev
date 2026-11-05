@@ -30,7 +30,7 @@ pane_view_fullscreen_pane_reaches_every_client_edge :: proc(t: ^testing.T) {
 // these tests check every path out of it without covering the owner's monitor. tests/live enters it.
 @(private = "file")
 view_fixture :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) -> (^app.App, ^app.Window, bool) {
-	if !palette_fixture_create(t, f, name) {return nil, nil, false}
+	if !palette_fixture_create(t, f, name, second_window = false) {return nil, nil, false}
 	s, w := &f.state, f.state.windows[0]
 	app.pane_split(s, w, .Right)
 	return s, w, testing.expect_value(t, len(w.panes), 2)
@@ -54,12 +54,12 @@ view_expect_coherent :: proc(t: ^testing.T, s: ^app.App, w: ^app.Window, loc := 
 
 @(test)
 pane_view_split_ends_every_view :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, ok := view_fixture(t, &f, "view-split")
+	if !ok {return}
 	for fill in layout.Pane_Fill {
 		for zoomed in ([?]bool{false, true}) {
-			f: Palette_Fixture
-			defer palette_fixture_destroy(t, &f)
-			s, w, ok := view_fixture(t, &f, "view-split")
-			if !ok {return}
 			w.pane_fill, w.tree.zoomed = fill, zoomed
 			app.window_relayout(s, w)
 			view_expect_coherent(t, s, w)
@@ -67,56 +67,49 @@ pane_view_split_ends_every_view :: proc(t: ^testing.T) {
 			testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Split)
 			testing.expect_value(t, len(w.panes), 3)
 			view_expect_coherent(t, s, w)
+			app.pane_close(s, w)
+			testing.expect_value(t, len(w.panes), 2)
 		}
 	}
 }
 
-@(test)
-pane_view_zoom_and_fill_stay_coherent_in_any_order :: proc(t: ^testing.T) {
-	f: Palette_Fixture
-	defer palette_fixture_destroy(t, &f)
-	s, w, ok := view_fixture(t, &f, "view-order")
-	if !ok {return}
-	actions := [?]app.Action{.Zoom_Pane, .Fill_Window_Pane}
-	events := [?]layout.Pane_View_Event{.Toggle_Zoom, .Toggle_Fill}
-	for first, i in actions {
-		for second, j in actions {
-			for third, k in actions {
-				sequence := [?]app.Action{first, second, third}
-				steps := [?]layout.Pane_View_Event{events[i], events[j], events[k]}
-				for action, step in sequence {
-					expected := layout.PANE_VIEW_TRANSITIONS[app.pane_view_current(w)][steps[step]]
-					app.run_action(s, w, action)
-					testing.expect_value(t, app.pane_view_current(w), expected)
-					view_expect_coherent(t, s, w)
-				}
-			}
-		}
-	}
-}
-
+// The layout suite owns the exhaustive transition table. Here each action must also update chrome
+// and pane geometry, including the regression where leaving Fill used to leave the tab zoomed.
 @(test)
 pane_view_leaving_fill_clears_the_tabs_zoom :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	s, w, ok := view_fixture(t, &f, "view-fill-zoom")
+	s, w, ok := view_fixture(t, &f, "view-actions")
 	if !ok {return}
-	app.run_action(s, w, .Fill_Window_Pane)
-	testing.expect(t, !w.tree.zoomed)
-	app.run_action(s, w, .Fill_Window_Pane)
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Split)
-	app.run_action(s, w, .Zoom_Pane)
-	app.run_action(s, w, .Fill_Window_Pane)
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Fill_Over_Zoom)
-	app.run_action(s, w, .Fill_Window_Pane)
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Split)
-	testing.expect(t, !w.tree.zoomed)
-	testing.expect_value(t, len(w.panes), 2)
-	view_expect_coherent(t, s, w)
+	cases := [?]struct {action: app.Action, expected: layout.Pane_View} {
+		{.Fill_Window_Pane, .Fill},
+		{.Zoom_Pane, .Zoom},
+		{.Fill_Window_Pane, .Fill_Over_Zoom},
+		{.Zoom_Pane, .Zoom},
+		{.Zoom_Pane, .Split},
+		{.Zoom_Pane, .Zoom},
+		{.Fill_Window_Pane, .Fill_Over_Zoom},
+		{.Fill_Window_Pane, .Split},
+		{.Fill_Window_Pane, .Fill},
+		{.Fill_Window_Pane, .Split},
+	}
+	for c in cases {
+		app.run_action(s, w, c.action)
+		testing.expect_value(t, app.pane_view_current(w), c.expected)
+		view_expect_coherent(t, s, w)
+		if c.expected == .Split {
+			testing.expect(t, !w.tree.zoomed)
+			testing.expect_value(t, len(w.panes), 2)
+		}
+	}
 }
 
 @(test)
 pane_view_leaving_fullscreen_by_any_toggle_lands_where_the_table_says :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, ok := view_fixture(t, &f, "view-screen")
+	if !ok {return}
 	cases := [?]struct {
 		action:   app.Action,
 		zoomed:   bool,
@@ -130,10 +123,6 @@ pane_view_leaving_fullscreen_by_any_toggle_lands_where_the_table_says :: proc(t:
 		{.Fullscreen_Pane, true, .Split},
 	}
 	for c in cases {
-		f: Palette_Fixture
-		defer palette_fixture_destroy(t, &f)
-		s, w, ok := view_fixture(t, &f, "view-screen")
-		if !ok {return}
 		w.pane_fill, w.tree.zoomed = .Screen, c.zoomed
 		app.run_action(s, w, c.action)
 		testing.expect_value(t, app.pane_view_current(w), c.expected)

@@ -30,7 +30,7 @@ rail_and_pane_junction_drags_both_axes :: proc(t: ^testing.T) {
 
 @(private, require_results)
 rail_resize_fixture :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) -> bool {
-	if !palette_fixture_create(t, f, name) {return false}
+	if !palette_fixture_create(t, f, name, second_window = false) {return false}
 	f.state.settings.tabs.orientation = .Vertical
 	app.window_apply_settings(&f.state, f.state.windows[0])
 	return true

@@ -30,7 +30,7 @@ fixture_start :: proc(t: ^testing.T, f: ^Fixture, run: int, reuse_directory := "
 		if !testing.expect_value(t, directory_error, nil) {return false}
 		f.directory = directory
 		path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
-		settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+		settings := idle_shell_settings(t, "cursor.blink = false\n")
 		if !testing.expect_value(t, os.write_entire_file(path, settings), nil) {return false}
 	} else {
 		f.directory = reuse_directory

@@ -23,8 +23,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	path := strings.concatenate({directory, "/settings.ini"})
 	defer delete(path)
 	defer os.remove(path)
-	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\n"+
-		"interface.font_size = 12\ncursor.blink = false\n"
+	settings := idle_shell_settings(t, "interface.font_size = 12\ncursor.blink = false\n")
 	if !testing.expect_value(t, os.write_entire_file(path, settings), nil) { return }
 	state := app.App{options = {data_dir = directory, inactive = true}}
 	state.app_id = fmt.aprintf("AIODev.Test.AppWindows.%d", os.get_pid())

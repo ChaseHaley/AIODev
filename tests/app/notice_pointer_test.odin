@@ -17,7 +17,7 @@ notice_close_point :: proc(w: ^app.Window) -> [2]f32 {
 notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "notice-pointer") {return}
+	if !palette_fixture_create(t, &f, "notice-pointer", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	ui.notices_set_animations(&s.notices, false)
 	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id)}

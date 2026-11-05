@@ -159,7 +159,7 @@ layout_state_restores_workspaces_tabs_and_directories :: proc(t: ^testing.T) {
 	layout_path := strings.concatenate({directory, "/layout.json"}, context.temp_allocator)
 	pane_directory := strings.concatenate({directory, "\\work"}, context.temp_allocator)
 	testing.expect_value(t, os.make_directory(pane_directory), nil)
-	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+	settings := idle_shell_settings(t, "cursor.blink = false\n")
 	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) { return }
 
 	first: Restore_Fixture
@@ -214,7 +214,7 @@ layout_state_refuses_remote_saved_directories :: proc(t: ^testing.T) {
 	defer testing.expect_value(t, os.remove_all(directory), nil)
 	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
 	layout_path := strings.concatenate({directory, "/layout.json"}, context.temp_allocator)
-	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+	settings := idle_shell_settings(t, "cursor.blink = false\n")
 	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) {return}
 	layout :: `{
   "version": 1,
@@ -250,7 +250,7 @@ layout_state_sets_aside_unreadable_files :: proc(t: ^testing.T) {
 	defer testing.expect_value(t, os.remove_all(directory), nil)
 	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
 	layout_path := strings.concatenate({directory, "/layout.json"}, context.temp_allocator)
-	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+	settings := idle_shell_settings(t, "cursor.blink = false\n")
 	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) { return }
 	if !testing.expect_value(t, os.write_entire_file(layout_path, "{not json"), nil) { return }
 	f: Restore_Fixture

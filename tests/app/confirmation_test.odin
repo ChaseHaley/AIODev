@@ -22,8 +22,8 @@ confirmation_fixture_init :: proc(t: ^testing.T, f: ^Confirmation_Fixture) -> bo
 	if !testing.expect_value(t, err, nil) {return false}
 	f.path = strings.concatenate({f.directory, "/settings.ini"})
 	if !testing.expect_value(t, os.write_entire_file(f.path,
-		"shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n" +
-		"profile.alternate.name = Alternate\nprofile.alternate.command = cmd.exe /d\n"), nil) {return false}
+		idle_shell_settings(t, "cursor.blink = false\n" +
+		"profile.alternate.name = Alternate\nprofile.alternate.command = cmd.exe /d\n")), nil) {return false}
 	f.state.options = {data_dir = f.directory, inactive = true}
 	f.state.app_id = fmt.aprintf("AIODev.Test.Confirmation.%d.%p", os.get_pid(), f)
 	if !testing.expect_value(t, platform.init(&f.state.platform, f.state.app_id), platform.Init_Result.Primary) {

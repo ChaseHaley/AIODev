@@ -123,7 +123,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 	defer sync.mutex_unlock(&Link_Test_Lock)
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "terminal-links") {return}
+	if !palette_fixture_create(t, &f, "terminal-links", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
@@ -203,7 +203,7 @@ terminal_links_prefer_osc8_and_ignore_blocked_schemes :: proc(t: ^testing.T) {
 	defer sync.mutex_unlock(&Link_Test_Lock)
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "terminal-links-osc8") {return}
+	if !palette_fixture_create(t, &f, "terminal-links-osc8", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
@@ -238,7 +238,7 @@ terminal_links_hover_at_nonzero_scroll_offset :: proc(t: ^testing.T) {
 	defer sync.mutex_unlock(&Link_Test_Lock)
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "terminal-links-scroll") {return}
+	if !palette_fixture_create(t, &f, "terminal-links-scroll", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
@@ -273,7 +273,7 @@ terminal_links_hover_at_nonzero_scroll_offset :: proc(t: ^testing.T) {
 active_terminal_file_waits_for_confirmation_and_can_be_cancelled :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "terminal-active-file") {return}
+	if !palette_fixture_create(t, &f, "terminal-active-file", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	app.terminal_file_request(s, w, `C:\Windows\System32\cmd.exe`)
 	testing.expect(t, w.pending_file.confirm.open)
@@ -293,7 +293,7 @@ ctrl_click_active_file_opens_only_after_explicit_acceptance :: proc(t: ^testing.
 	defer sync.mutex_unlock(&Link_Test_Lock)
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "terminal-confirm-file") {return}
+	if !palette_fixture_create(t, &f, "terminal-confirm-file", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	s.open_file = link_file_stub
 	Open_Stub_State = {}

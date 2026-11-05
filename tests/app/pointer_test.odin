@@ -24,7 +24,7 @@ pointer_expect_move :: proc(
 pointer_settings_page_and_fields_change_shape_once_per_move :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-settings") {return}
+	if !palette_fixture_create(t, &f, "pointer-settings", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	app.editor_open(s, w)
 	if !testing.expect(t, app.settings_active(w)) {return}
@@ -45,7 +45,7 @@ pointer_settings_page_and_fields_change_shape_once_per_move :: proc(t: ^testing.
 pointer_palette_chip_and_menu_use_hand_query_uses_text :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-palette") {return}
+	if !palette_fixture_create(t, &f, "pointer-palette", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	app.palette_open(s, w)
 	for mode in ui.Palette_Mode {
@@ -110,7 +110,7 @@ pointer_tabs_use_hand_except_on_the_selected_tab_body :: proc(t: ^testing.T) {
 pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-controls") {return}
+	if !palette_fixture_create(t, &f, "pointer-controls", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	app.editor_open(s, w)
 	if !testing.expect(t, app.settings_active(w)) {return}

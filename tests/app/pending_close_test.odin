@@ -19,7 +19,7 @@ pending_fixture_init :: proc(t: ^testing.T, f: ^Pending_Fixture) -> bool {
 	if !testing.expect_value(t, var_error, nil) { return false }
 	f.path = strings.concatenate({f.directory, "/settings.ini"})
 	if !testing.expect_value(t, os.write_entire_file(f.path,
-		"shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"), nil) { return false }
+		idle_shell_settings(t, "cursor.blink = false\n")), nil) { return false }
 	f.state.options = {data_dir = f.directory, inactive = true}
 	f.state.app_id = fmt.aprintf("AIODev.Test.Pending.%d.%p", os.get_pid(), f)
 	if !testing.expect_value(t, platform.init(&f.state.platform, f.state.app_id), platform.Init_Result.Primary) {

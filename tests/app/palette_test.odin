@@ -18,13 +18,12 @@ Palette_Fixture :: struct {
 }
 
 @(private, require_results)
-palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) -> bool {
+palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string, second_window := true) -> bool {
 	err: os.Error
 	f.directory, err = os.make_directory_temp("", "aio-palette-*", context.allocator)
 	if !testing.expect_value(t, err, nil) { return false }
 	f.path = strings.concatenate({f.directory, "/settings.ini"})
-	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile -Command \"Start-Sleep -Seconds 60\"\n"+
-		"interface.font_size = 12\ncursor.blink = false\n"
+	settings := idle_shell_settings(t, "interface.font_size = 12\ncursor.blink = false\n")
 	if !testing.expect_value(t, os.write_entire_file(f.path, settings), nil) { return false }
 	f.state.options = {data_dir = f.directory, inactive = true}
 	f.state.app_id = fmt.aprintf("AIODev.Test.Palette.%s.%d", name, os.get_pid())
@@ -32,15 +31,17 @@ palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string)
 		platform.Init_Result.Primary) { return false }
 	f.state.platform_ready = true
 	if !testing.expect(t, app.app_init(&f.state)) { return false }
-	workspace, allocation_error := new(app.Workspace)
-	if !testing.expect_value(t, allocation_error, nil) { return false }
-	if _, append_error := append(&f.state.workspaces, workspace); append_error != nil {
-		free(workspace)
-		testing.expect_value(t, append_error, nil)
-		return false
+	if second_window {
+		workspace, allocation_error := new(app.Workspace)
+		if !testing.expect_value(t, allocation_error, nil) { return false }
+		if _, append_error := append(&f.state.workspaces, workspace); append_error != nil {
+			free(workspace)
+			testing.expect_value(t, append_error, nil)
+			return false
+		}
+		if !testing.expect(t, app.tab_create(&f.state, workspace)) { return false }
+		if !testing.expect(t, app.window_open(&f.state, workspace)) { return false }
 	}
-	if !testing.expect(t, app.tab_create(&f.state, workspace)) { return false }
-	if !testing.expect(t, app.window_open(&f.state, workspace)) { return false }
 	app.tick(&f.state)
 	f.state.animations = false
 	app.update_motion(&f.state)

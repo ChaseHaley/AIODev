@@ -19,7 +19,7 @@ frame_fail_allocation :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, 
 window_failed_frame_keeps_dirty_and_cache_recovers :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "frame-failure") {return}
+	if !palette_fixture_create(t, &f, "frame-failure", second_window = false) {return}
 	context.logger = {}
 	s := &f.state
 	w := s.windows[0]

@@ -19,7 +19,7 @@ pane_drag_dropdown_preserves_runtime_for_each_destination :: proc(t: ^testing.T)
 	defer delete(path)
 	defer os.remove(path)
 	if !testing.expect_value(t, os.write_entire_file(path,
-		"shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"), nil) {return}
+		idle_shell_settings(t, "cursor.blink = false\n")), nil) {return}
 	state := app.App{options = {data_dir = directory, inactive = true}}
 	state.app_id = fmt.aprintf("AIODev.Test.PaneWorkspaceDrag.%d", os.get_pid())
 	defer app.app_destroy(&state)

@@ -13,7 +13,7 @@ import "core:testing"
 activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "activity-dock") {return}
+	if !palette_fixture_create(t, &f, "activity-dock", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	s.settings.status.panel = true
 	app.pane_split(s, w, .Down)
@@ -69,7 +69,7 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 activity_side_button_persists_setting_and_cancels_outside_or_on_capture_loss :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "activity-side") {return}
+	if !palette_fixture_create(t, &f, "activity-side", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	saved, _ := app.settings_save_value(s, "status.panel", "true", "enable panel")
 	if !testing.expect(t, saved) {return}
@@ -108,7 +108,7 @@ dock_click_at :: proc(s: ^app.App, w: ^app.Window, x, y: f32, time_ns: i64) {
 activity_in_rail_height_drags_clamps_and_double_click_resets_to_setting :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "activity-height") {return}
+	if !palette_fixture_create(t, &f, "activity-height", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	s.settings.status.panel = true
 	s.settings.status.panel_side = .Left
@@ -150,7 +150,7 @@ activity_in_rail_height_drags_clamps_and_double_click_resets_to_setting :: proc(
 dock_double_clicks_reset_widths_to_their_settings :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "dock-defaults") {return}
+	if !palette_fixture_create(t, &f, "dock-defaults", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	s.settings.status.panel = true
 	s.settings.status.panel_side = .Right

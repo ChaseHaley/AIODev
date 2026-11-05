@@ -11,7 +11,7 @@ import "core:testing"
 pointer_find_bar_over_activity_panel_owns_hover_cursor_and_press :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-find-activity") {return}
+	if !palette_fixture_create(t, &f, "pointer-find-activity", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	s.settings.status.panel = true
 	s.settings.status.panel_side = .Right
@@ -53,7 +53,7 @@ pointer_find_bar_over_activity_panel_owns_hover_cursor_and_press :: proc(t: ^tes
 pointer_held_find_press_keeps_the_pointer :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-find-held") {return}
+	if !palette_fixture_create(t, &f, "pointer-find-held", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	ui.find_open(&w.find)
 	l, _ := app.find_controls(w, app.focused_session(s, w))
@@ -81,7 +81,7 @@ pointer_inside :: proc(r: render.Rect, x, y: f32) -> bool {
 pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-menu-modal") {return}
+	if !palette_fixture_create(t, &f, "pointer-menu-modal", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	w.width, w.height = i32(1400 * w.scale), i32(900 * w.scale)
 	app.window_relayout(s, w)
@@ -108,7 +108,7 @@ pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T
 pointer_release_reaches_the_press_owner :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-release-owner") {return}
+	if !palette_fixture_create(t, &f, "pointer-release-owner", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	windows := len(s.windows)
 	ui.find_open(&w.find)
@@ -134,7 +134,7 @@ pointer_release_reaches_the_press_owner :: proc(t: ^testing.T) {
 pointer_settings_hover_clears_under_the_find_bar :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pointer-settings-find") {return}
+	if !palette_fixture_create(t, &f, "pointer-settings-find", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	w.width, w.height = i32(1400 * w.scale), i32(900 * w.scale)
 	app.window_relayout(s, w)
