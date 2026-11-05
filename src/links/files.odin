@@ -150,12 +150,14 @@ resolve_file :: proc(target, cwd: string, hosts: []string, buffer: []u8) -> (str
 	return string(buffer[:len(base) + 1 + len(path)]), true
 }
 
-// Quoted paths may contain spaces. The original byte range retains compiler location suffixes.
+// Quoted paths may contain spaces, and a drive path extends across spaces when later words show it
+// goes on. The original byte range retains compiler location suffixes and row breaks.
 // Printed file URIs need an empty or localhost authority; machine names are honoured in OSC 8.
 @(require_results)
 find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 	at := 0
 	buffer: [4096]u8 = ---
+	spaced: [4096]u8 = ---
 	for at < len(text) {
 		for at < len(text) && (text[at] <= ' ' || text[at] == '(' || text[at] == '[') {at += 1}
 		if at == len(text) {break}
@@ -174,8 +176,13 @@ find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 			at += 1
 		}
 		end := quote != 0 ? at : trim_prose(text, start, at)
+		if quote == 0 && end == at && end > start && local_absolute(strip_location(text[start:end])) {
+			end = spaced_end(text, start, at)
+			at = end
+		}
 		if end > start {
-			candidate := text[start:end]
+			candidate, spaced_ok := break_variant(text[start:end], break_variants(text[start:end]) - 1, spaced[:])
+			if !spaced_ok {continue}
 			shaped := strings.contains_any(candidate, ".\\/")
 			absolute := local_absolute(strip_location(candidate)) ||
 				len(candidate) >= 5 && strings.equal_fold(candidate[:5], "file:")

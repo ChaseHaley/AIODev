@@ -100,22 +100,94 @@ link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if !inside {
 		return false
 	}
-	_, uri, hit := term.link_at(&state.view.links, column, row)
-	if !hit {
-		return false
+	cwd := term.working_directory(entry.session, context.temp_allocator)
+	buffer: [4096]u8 = ---
+	selection, selected := term.link_selection_at(&state.view.links, column, row)
+	if selected {
+		if uri, web := link_selection_web(selection, buffer[:]); web {
+			if !open_link(app, uri) {notify(app, .Error, "Could not open the link.")}
+			return true
+		}
+		if path, exists := link_selection_file(selection, cwd, buffer[:]); exists {
+			terminal_file_request(app, w, path)
+			return true
+		}
 	}
-	if !links.allowed(uri) {
-		cwd := term.working_directory(entry.session, context.temp_allocator)
-		buffer: [4096]u8 = ---
-		path, ok := links.resolve_file(uri, cwd, platform.local_hosts(), buffer[:])
-		if ok {terminal_file_request(app, w, path)}
+	target, hit := term.link_detected_at(&state.view.links, column, row)
+	if !hit {
+		if selected {notify(app, .Error, "That local file is not available.")}
+		return selected
+	}
+	if !links.allowed(target.uri) {
+		path, exists := link_detected_file(target, cwd, buffer[:])
+		if exists {terminal_file_request(app, w, path)}
 		else {notify(app, .Error, "That local file is not available.")}
 		return true
 	}
-	if !open_link(app, uri) {
+	if !open_link(app, target.uri) {
 		notify(app, .Error, "Could not open the link.")
 	}
 	return true
+}
+
+// A click is the one moment the filesystem may settle what text means, under D-068. The limit keeps a
+// long line from stalling it with a run of failed checks.
+@(private)
+LINK_FILE_CHECKS :: 24
+
+// link_file_exists returns the path text names when the file is there. The result borrows buffer.
+@(private, require_results)
+link_file_exists :: proc(text, cwd: string, checks: ^int, buffer: []u8) -> (string, bool) {
+	path, valid := links.resolve_file(text, cwd, platform.local_hosts(), buffer)
+	if !valid || checks^ >= LINK_FILE_CHECKS {return "", false}
+	checks^ += 1
+	file, exists := platform.prepare_terminal_file(path)
+	if !exists {return "", false}
+	platform.terminal_file_destroy(&file)
+	return path, true
+}
+
+// What was underlined comes first, so a click opens what the user saw whenever it exists. Otherwise
+// the longest reading of the line that exists wins.
+@(private, require_results)
+link_detected_file :: proc(target: term.Link_Target, cwd: string, buffer: []u8) -> (string, bool) {
+	checks := 0
+	if path, exists := link_file_exists(target.uri, cwd, &checks, buffer); exists {return path, true}
+	ranges := make([dynamic]links.Range, context.temp_allocator)
+	if !links.candidates(target.line, target.start, target.end, target.cuts, &ranges) {return "", false}
+	for r in ranges {
+		if path, exists := link_break_readings(target.line[r.start:r.end], cwd, &checks, buffer); exists {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+@(private, require_results)
+link_break_readings :: proc(text, cwd: string, checks: ^int, buffer: []u8) -> (string, bool) {
+	spelling: [4096]u8 = ---
+	for mask := links.break_variants(text) - 1; mask >= 0; mask -= 1 {
+		reading, ok := links.break_variant(text, mask, spelling[:])
+		if !ok {continue}
+		if path, exists := link_file_exists(reading, cwd, checks, buffer); exists {return path, true}
+	}
+	return "", false
+}
+
+@(private, require_results)
+link_selection_file :: proc(selection: term.Link_Target, cwd: string, buffer: []u8) -> (string, bool) {
+	checks := 0
+	return link_break_readings(selection.line[selection.start:selection.end], cwd, &checks, buffer)
+}
+
+@(private, require_results)
+link_selection_web :: proc(selection: term.Link_Target, buffer: []u8) -> (string, bool) {
+	text := selection.line[selection.start:selection.end]
+	for mask := links.break_variants(text) - 1; mask >= 0; mask -= 1 {
+		reading, ok := links.break_variant(text, mask, buffer)
+		if ok && links.allowed(reading) {return reading, true}
+	}
+	return "", false
 }
 
 // link_hover_refresh keeps an underline honest while output or scrolling changes the grid under
