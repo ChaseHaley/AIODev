@@ -134,6 +134,172 @@ plain_urls_join_soft_wraps_and_trim_prose :: proc(t: ^testing.T) {
 }
 
 @(test)
+wide_characters_stay_whole_inside_a_target :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "C:\\日本語\\資料.txt", 40, 2)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	range, uri, found := term.link_at(&m, 5, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, "C:\\日本語\\資料.txt")
+	testing.expect_value(t, range, term.Link_Range{0, 0, 0, 17})
+}
+
+@(test)
+a_path_a_program_broke_at_the_edge_stays_one_target :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "see C:\\Users\\chale\\AppD\r\n  ata\\Local\\a.txt: done", 24, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	target, found := term.link_detected_at(&m, 10, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, target.range, term.Link_Range{0, 1, 4, 16})
+	testing.expect_value(t, target.uri, "C:\\Users\\chale\\AppData\\Local\\a.txt")
+	_, tail_found := term.link_detected_at(&m, 5, 1)
+	testing.expect(t, tail_found)
+	_, _, after := term.link_at(&m, 19, 1)
+	testing.expect(t, !after, "the sentence after the path is not part of it")
+}
+
+@(test)
+a_word_too_long_for_a_row_joins_without_a_space :: proc(t: ^testing.T) {
+	head := strings.repeat("d", 22)
+	defer delete(head)
+	tail := strings.repeat("e", 18)
+	defer delete(tail)
+	text := fmt.tprintf("C:\\%s\r\n  %s\\a.txt ok", head, tail)
+	source, ok := link_source(t, text, 25, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, uri, found := term.link_at(&m, 5, 1)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, fmt.tprintf("C:\\%s%s\\a.txt", head, tail))
+}
+
+@(test)
+a_url_a_program_broke_at_the_edge_stays_one_target :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "see https://example.com/abc\r\n/def and more", 27, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, uri, found := term.link_at(&m, 0, 1)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, "https://example.com/abc/def")
+}
+
+@(test)
+a_url_ending_at_the_edge_does_not_swallow_the_next_line :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "see https://example.com/abc\r\nfor details", 27, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, uri, found := term.link_at(&m, 10, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, "https://example.com/abc")
+	_, _, next := term.link_at(&m, 0, 1)
+	testing.expect(t, !next)
+}
+
+@(test)
+a_short_next_line_stays_separate :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "C:\\a\\b.txt\r\nC:\\c\\d.txt", 60, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, first, found := term.link_at(&m, 0, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, first, "C:\\a\\b.txt")
+	_, second, second_found := term.link_at(&m, 0, 1)
+	testing.expect(t, second_found)
+	testing.expect_value(t, second, "C:\\c\\d.txt")
+}
+
+@(test)
+a_spaced_path_a_program_wrapped_between_words_stays_one_target :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "see C:\\Program Files\\Some App\r\n  notes folder\\read me.txt ok", 34, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	range, uri, found := term.link_at(&m, 10, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, "C:\\Program Files\\Some App notes folder\\read me.txt")
+	testing.expect_value(t, range, term.Link_Range{0, 1, 4, 25})
+}
+
+@(test)
+a_selection_with_spaces_is_a_target_where_it_is_drawn :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "open C:\\My Files\\report for review", 50, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	testing.expect(t, term.link_test_select(source.terminal, 5, 0, 22, 0))
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	range, uri, found := term.link_at(&m, 20, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, uri, "C:\\My Files\\report")
+	testing.expect_value(t, range, term.Link_Range{0, 0, 5, 22})
+	_, _, beyond := term.link_at(&m, 30, 0)
+	testing.expect(t, !beyond)
+}
+
+@(test)
+a_selection_across_a_hard_break_joins_its_rows :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "C:\\My Files\\re\r\n  port.pdf", 50, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	testing.expect(t, term.link_test_select(source.terminal, 0, 0, 9, 1))
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	target, found := term.link_selection_at(&m, 3, 0)
+	testing.expect(t, found)
+	testing.expect_value(t, target.line, "C:\\My Files\\re\nport.pdf")
+	testing.expect_value(t, target.range, term.Link_Range{0, 1, 0, 9})
+}
+
+@(test)
+a_tall_selection_is_not_read_as_a_target :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "C:\\a.txt\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\nb", 50, 12)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	testing.expect(t, term.link_test_select(source.terminal, 0, 0, 0, 9))
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, found := term.link_selection_at(&m, 0, 1)
+	testing.expect(t, !found)
+}
+
+@(test)
+a_selection_of_prose_stays_ordinary_text :: proc(t: ^testing.T) {
+	source, ok := link_source(t, "nothing to open here", 50, 3)
+	if !ok {return}
+	defer link_source_destroy(&source)
+	testing.expect(t, term.link_test_select(source.terminal, 0, 0, 19, 0))
+	m, scanned := link_map(t, source)
+	if !scanned {return}
+	defer term.link_map_destroy(&m)
+	_, _, found := term.link_at(&m, 5, 0)
+	testing.expect(t, !found)
+}
+
+@(test)
 hard_line_break_ends_a_target :: proc(t: ^testing.T) {
 	source, ok := link_source(t, "https://example.com/very\r\nlong", 40, 2)
 	if !ok {return}

@@ -19,12 +19,12 @@ Link_Range :: struct {
 // Link_Span keeps its target in the map's byte buffer so a scan can grow without invalidating
 // earlier spans.
 Link_Span :: struct {
-	range:                   Link_Range,
-	uri_start, uri_length:   int,
+	range:                    Link_Range,
+	uri_start, uri_length:    int,
 	// A detected file keeps its whole line, so a click can check readings the scan could not settle.
-	line_start, line_length: int,
+	line_start, line_length:  int,
 	target_start, target_end: int,
-	cuts_start, cuts_length: int,
+	cuts_start, cuts_length:  int,
 }
 
 // Link_Target is what a click needs to open a span. Its strings and cuts borrow the map until the
@@ -794,10 +794,11 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 	return true
 }
 
-// A selection names a target only when it is linear and in view. It is read here rather than on every
-// pointer move: changing the selection already changes the generation that triggers this scan.
+// A selection names a target only when it is linear, in view and a few rows long. Those checks come
+// first because formatting a select-all would hold the session lock for the whole scrollback. It is
+// read here rather than on every pointer move: changing the selection already triggers this scan.
 @(private, require_results)
-scan_selection :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) -> bool {
+scan_selection :: proc(m: ^Link_Map, terminal: ghostty.Terminal) -> bool {
 	m.selection_active = false
 	selection := ghostty.sized(ghostty.Selection)
 	if ghostty.terminal_get(terminal, .Selection, &selection) != .Success || selection.rectangle {
@@ -808,9 +809,9 @@ scan_selection :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: 
 		return true
 	}
 	first, last := ghostty.Point_Coordinate{}, ghostty.Point_Coordinate{}
-	starts := ghostty.terminal_point_from_grid_ref(terminal, &ordered.start, .Viewport, &first) == .Success
-	ends := ghostty.terminal_point_from_grid_ref(terminal, &ordered.end, .Viewport, &last) == .Success
-	if !starts && !ends {
+	if ghostty.terminal_point_from_grid_ref(terminal, &ordered.start, .Viewport, &first) != .Success ||
+	   ghostty.terminal_point_from_grid_ref(terminal, &ordered.end, .Viewport, &last) != .Success ||
+	   int(last.y - first.y) >= links.SELECTION_ROWS {
 		return true
 	}
 	options := ghostty.sized(ghostty.Terminal_Selection_Format_Options)
@@ -840,10 +841,10 @@ scan_selection :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: 
 	}
 	m.selection_target = target
 	m.selection_range = {
-		first_row    = starts ? int(first.y) : 0,
-		first_column = starts ? int(first.x) : 0,
-		last_row     = ends ? int(last.y) : rows - 1,
-		last_column  = ends ? int(last.x) : columns - 1,
+		first_row    = int(first.y),
+		first_column = int(first.x),
+		last_row     = int(last.y),
+		last_column  = int(last.x),
 	}
 	m.selection_active = true
 	return true
@@ -900,7 +901,7 @@ link_map_scan_locked :: proc(
 	if !scan_lines(m, terminal, columns, rows) {
 		return false
 	}
-	if !scan_selection(m, terminal, columns, rows) {
+	if !scan_selection(m, terminal) {
 		return false
 	}
 	m.valid = true
