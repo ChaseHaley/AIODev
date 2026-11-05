@@ -115,13 +115,9 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 		c->RSSetScissorRects(1, &clip)
 		constants.round_clip, constants.clip_radius = layer.clip, layer.radius
 		constants.rect_start, constants.glyph_start = u32(layer.rect_start), u32(layer.glyph_start)
-		mapped: d3d.MAPPED_SUBRESOURCE
-		if err := checked(d, c->Map(d.constants, 0, .WRITE_DISCARD, {}, &mapped), "Map constants");
-		   err != .None {
+		if err := constants_write(d, &constants); err != .None {
 			return err
 		}
-		mem.copy(mapped.pData, &constants, size_of(constants))
-		c->Unmap(d.constants, 0)
 		if layer.rect_count > 0 {
 			c->VSSetShader(d.rect_vs, nil, 0)
 			c->PSSetShader(d.rect_ps, nil, 0)
@@ -137,4 +133,16 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 		return .None
 	}
 	return checked(d, s.chain->Present(1, {}), "Present", .Surface_Failed)
+}
+
+@(private, require_results)
+constants_write :: proc(d: ^Device, constants: ^Frame_Constants) -> Error {
+	mapped: d3d.MAPPED_SUBRESOURCE
+	if err := checked(d, d.ctx->Map(d.constants, 0, .WRITE_DISCARD, {}, &mapped), "Map constants");
+	   err != .None {
+		return err
+	}
+	mem.copy(mapped.pData, constants, size_of(constants^))
+	d.ctx->Unmap(d.constants, 0)
+	return .None
 }
