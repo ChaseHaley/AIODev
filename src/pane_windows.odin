@@ -7,9 +7,9 @@ import "core:math"
 import "core:strings"
 
 @(private = "file")
-PANE_THUMBNAIL_WIDTH :: f32(300)
+DRAG_THUMBNAIL_WIDTH :: f32(300)
 @(private = "file")
-PANE_THUMBNAIL_HEIGHT :: f32(190)
+DRAG_THUMBNAIL_HEIGHT :: f32(190)
 // The drop places the new window so the pointer rests on its title bar.
 @(private = "file")
 TEAR_OFF_GRAB_X :: f32(160)
@@ -79,88 +79,133 @@ pane_window_preview_create :: proc(app: ^App, source: ^Tab, node: layout.Node_Id
 		home.node,
 	)
 	if !valid {return nil}
+	name := home.node == home.tab.tree.root ? home.tab.name : ""
+	preview := window_preview_prepare(app, pane.content, name)
+	if preview == nil {return nil}
+	area := window_content_area(app, preview)
+	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
+	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = false) {
+		pane_window_preview_discard(app, preview.id)
+		return nil
+	}
+	return preview
+}
+
+// The hidden window a tear-off lands in, showing one tab that borrows `content` until the drop commits.
+@(require_results)
+window_preview_prepare :: proc(app: ^App, content: layout.Content, tab_name: string) -> ^Window {
 	workspace := workspace_create_empty(app, true)
 	if workspace == nil {return nil}
 	success := false
 	defer if !success {pane_preview_workspace_discard(app, workspace)}
 	tab, record_error := tab_record_reserve(workspace)
 	if record_error != .None {return nil}
-	if layout.init(&tab.tree, pane.content) != nil {tab_record_free(tab); return nil}
-	if home.node == home.tab.tree.root && home.tab.name != "" {
-		name, name_error := strings.clone(home.tab.name)
+	if layout.init(&tab.tree, content) != nil {tab_record_free(tab); return nil}
+	if tab_name != "" {
+		name, name_error := strings.clone(tab_name)
 		if name_error != nil {tab_record_free(tab); return nil}
 		tab.name = name
 	}
 	tab_record_commit(app, workspace, tab)
 	preview := window_prepare(app, workspace)
 	if preview == nil {return nil}
-	defer if !success {window_close(app, preview)}
-	area := window_content_area(app, preview)
-	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
-	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = false) {return nil}
 	workspace_pickers_refresh(app)
 	success = true
 	return preview
 }
 
-// Shows the dragged pane's thumbnail at the pointer, or hides it when the drop would not open a window.
+// A small live picture of what a drag would carry into a new window.
+Drag_Thumbnail :: struct {
+	image:         platform.Thumbnail,
+	width, height: i32,
+	shown, failed: bool,
+}
+
+// Shows the thumbnail of `region` at the pointer, or hides it when the drop would not open a window.
 // A thumbnail that cannot be made costs only the picture: the tear-off still works.
-pane_drag_thumbnail_sync :: proc(app: ^App, w: ^Window, d: ^Pane_Drag, shown: bool, x, y: i32) {
+drag_thumbnail_sync :: proc(
+	app: ^App,
+	w: ^Window,
+	t: ^Drag_Thumbnail,
+	region: layout.Rect,
+	shown: bool,
+	x, y: i32,
+) {
 	if !shown {
-		if d.thumbnail_shown {platform.thumbnail_hide(d.thumbnail)}
-		d.thumbnail_shown = false
+		if t.shown {platform.thumbnail_hide(t.image)}
+		t.shown = false
 		return
 	}
-	if d.thumbnail == {} && !d.thumbnail_failed {
-		d.thumbnail_failed = !pane_drag_thumbnail_create(app, w, d)
+	if t.image == {} && !t.failed {
+		t.failed = !drag_thumbnail_create(app, w, t, region)
 	}
-	if d.thumbnail == {} {return}
+	if t.image == {} {return}
 	offset := i32(math.round(16 * w.scale))
-	platform.thumbnail_place(d.thumbnail, x + offset, y + offset)
-	d.thumbnail_shown = true
+	platform.thumbnail_place(t.image, x + offset, y + offset)
+	t.shown = true
 }
 
 @(private = "file")
-pane_drag_thumbnail_create :: proc(app: ^App, w: ^Window, d: ^Pane_Drag) -> bool {
-	for pane in w.panes {
-		if pane.node != d.node {continue}
-		r := pane.rect
-		if r.width <= 0 || r.height <= 0 {return false}
-		fit := min(PANE_THUMBNAIL_WIDTH * w.scale / r.width, PANE_THUMBNAIL_HEIGHT * w.scale / r.height, 1)
-		width, height := max(1, i32(r.width * fit)), max(1, i32(r.height * fit))
-		thumbnail, err := platform.thumbnail_create(
-			&app.platform,
-			w.id,
-			i32(r.x),
-			i32(r.y),
-			i32(r.width),
-			i32(r.height),
-			width,
-			height,
-			app.settings.active_theme.colors[.Accent].rgb,
-		)
-		if err != .None {return false}
-		d.thumbnail, d.thumbnail_width, d.thumbnail_height = thumbnail, width, height
-		return true
-	}
-	return false
+drag_thumbnail_create :: proc(app: ^App, w: ^Window, t: ^Drag_Thumbnail, r: layout.Rect) -> bool {
+	if r.width <= 0 || r.height <= 0 {return false}
+	fit := min(DRAG_THUMBNAIL_WIDTH * w.scale / r.width, DRAG_THUMBNAIL_HEIGHT * w.scale / r.height, 1)
+	width, height := max(1, i32(r.width * fit)), max(1, i32(r.height * fit))
+	image, err := platform.thumbnail_create(
+		&app.platform,
+		w.id,
+		i32(r.x),
+		i32(r.y),
+		i32(r.width),
+		i32(r.height),
+		width,
+		height,
+		app.settings.active_theme.colors[.Accent].rgb,
+	)
+	if err != .None {return false}
+	t.image, t.width, t.height = image, width, height
+	return true
 }
 
-pane_drag_thumbnail_destroy :: proc(d: ^Pane_Drag) {
-	if d.thumbnail != {} {platform.thumbnail_destroy(&d.thumbnail)}
-	d.thumbnail_shown = false
+drag_thumbnail_destroy :: proc(t: ^Drag_Thumbnail) {
+	if t.image != {} {platform.thumbnail_destroy(&t.image)}
+	t.shown = false
 }
 
-// Puts the pane in the prepared window at the pointer and starts naming it there.
+// What a drag's pointer is over: the app window that would take a drop, if any, in its own coordinates.
+Drag_Point :: struct {
+	window:             ^Window,
+	screen_x, screen_y: i32,
+	x, y:               i32,
+}
+
 @(require_results)
-pane_tear_off :: proc(app: ^App, source_window: ^Window, d: Pane_Drag) -> bool {
-	preview := window_find(app, d.preview_window)
-	if preview == nil {return false}
+drag_point :: proc(app: ^App, w: ^Window, x, y: f32) -> (point: Drag_Point, ok: bool) {
+	sx, sy, screen_error := platform.window_to_screen(&app.platform, w.id, i32(x), i32(y))
+	if screen_error != .None {return {}, false}
+	id, tx, ty, hit_error := platform.window_at_point(&app.platform, sx, sy)
+	if hit_error != .None {return {}, false}
+	destination := window_find(app, id)
+	// Controller-driven client events may be delivered to an inactive, occluded source.
+	if app.options.inactive &&
+	   destination == nil &&
+	   x >= 0 &&
+	   y >= 0 &&
+	   x < f32(w.width) &&
+	   y < f32(w.height) {
+		destination, tx, ty = w, i32(x), i32(y)
+	}
+	if destination != nil && destination.preparing {destination = nil}
+	return {destination, sx, sy, tx, ty}, true
+}
+
+// Moves a prepared window so the pointer rests on its title bar, settled to the monitor it landed on.
+@(require_results)
+window_place_at_pointer :: proc(app: ^App, preview, source_window: ^Window, pointer: [2]f32) -> bool {
 	x, y, screen_error := platform.window_to_screen(
 		&app.platform,
 		source_window.id,
-		i32(d.pointer.x),
-		i32(d.pointer.y),
+		i32(pointer.x),
+		i32(pointer.y),
 	)
 	if screen_error != .None {return false}
 	place_error := platform.window_place_on_monitor(
@@ -175,6 +220,21 @@ pane_tear_off :: proc(app: ^App, source_window: ^Window, d: Pane_Drag) -> bool {
 	width, height, size_error := platform.window_client_size(&app.platform, preview.id)
 	if size_error != .None {return false}
 	if width != preview.width || height != preview.height {window_resize(app, preview, width, height)}
+	return true
+}
+
+pane_drag_thumbnail_sync :: proc(app: ^App, w: ^Window, d: ^Pane_Drag, shown: bool, x, y: i32) {
+	region: layout.Rect
+	for pane in w.panes {if pane.node == d.node {region = pane.rect; break}}
+	drag_thumbnail_sync(app, w, &d.thumbnail, region, shown, x, y)
+}
+
+// Puts the pane in the prepared window at the pointer and starts naming it there.
+@(require_results)
+pane_tear_off :: proc(app: ^App, source_window: ^Window, d: Pane_Drag) -> bool {
+	preview := window_find(app, d.preview_window)
+	if preview == nil {return false}
+	if !window_place_at_pointer(app, preview, source_window, d.pointer) {return false}
 	if !pane_to_window(app, source_window, d.source, d.node, preview.id) {return false}
 	workspace_name_begin(app, preview)
 	return true

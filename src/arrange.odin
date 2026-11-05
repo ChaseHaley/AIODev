@@ -36,9 +36,7 @@ Pane_Drag :: struct {
 	destination_original:                        ^Tab,
 	destination_original_index:                int,
 	new_window, preview_failed:                  bool,
-	thumbnail:                                   platform.Thumbnail,
-	thumbnail_width, thumbnail_height:           i32,
-	thumbnail_shown, thumbnail_failed:           bool,
+	thumbnail:                                   Drag_Thumbnail,
 	picker_window:                              platform.Window_Id,
 	picker_pointer:                             [2]f32,
 	picker_hit:                                 int,
@@ -352,7 +350,7 @@ pane_drag_cancel :: proc(app: ^App, w: ^Window) {
 	d := w.pane_drag
 	w.pane_drag = {}
 	if !d.pressed {return}
-	pane_drag_thumbnail_destroy(&d)
+	drag_thumbnail_destroy(&d.thumbnail)
 	pane_workspace_drag_close(app, d)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
@@ -463,21 +461,9 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 	   math.hypot(x - d.start.x, y - d.start.y) < DRAG_THRESHOLD * w.scale {return false}
 	d.active = true
 	d.pointer = {x, y}
-	sx, sy, screen_error := platform.window_to_screen(&app.platform, w.id, i32(x), i32(y))
-	if screen_error != .None {pane_drag_cancel(app, w); return true}
-	id, tx, ty, hit_error := platform.window_at_point(&app.platform, sx, sy)
-	if hit_error != .None {pane_drag_cancel(app, w); return true}
-	destination := window_find(app, id)
-	// Controller-driven client events may be delivered to an inactive, occluded source.
-	if app.options.inactive &&
-	   destination == nil &&
-	   x >= 0 &&
-	   y >= 0 &&
-	   x < f32(w.width) &&
-	   y < f32(w.height) {
-		destination, tx, ty = w, i32(x), i32(y)
-	}
-	if destination != nil && destination.preparing {destination = nil}
+	point, point_ok := drag_point(app, w, x, y)
+	if !point_ok {pane_drag_cancel(app, w); return true}
+	destination := point.window
 	previous := d.destination_window
 	if previous == w.id && destination != w && selected_tab(w.workspace) != d.source {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}
@@ -511,7 +497,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 				notify(app, .Error, "Could not prepare a new window. The pane was preserved.")
 			}
 		}
-		pane_drag_thumbnail_sync(app, w, d, tear_off && d.preview_window != 0, sx, sy)
+		pane_drag_thumbnail_sync(app, w, d, tear_off && d.preview_window != 0, point.screen_x, point.screen_y)
 		rect, shown := pane_drag_preview(app, w)
 		d.shown = shown
 		values := [4]f32{rect.x, rect.y, rect.width, rect.height}
@@ -531,8 +517,8 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 		app,
 		w,
 		destination,
-		f32(tx),
-		f32(ty),
+		f32(point.x),
+		f32(point.y),
 		swap,
 		previous != destination.id,
 	)
@@ -644,7 +630,7 @@ pane_drag_target_move :: proc(
 pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	d := w.pane_drag
 	w.pane_drag = {}
-	pane_drag_thumbnail_destroy(&d)
+	drag_thumbnail_destroy(&d.thumbnail)
 	if !d.active {return false}
 	w.dirty = true
 	if d.picker_window != 0 {

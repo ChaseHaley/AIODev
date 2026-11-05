@@ -747,10 +747,10 @@ when AIO_CONTROL {
 				{"panes.drop.new_window", fmt.tprintf("%t", w.pane_drag.new_window)},
 				{"panes.drop.window", fmt.tprintf("%d", w.pane_drag.destination_window)},
 				{"panes.drop.preview_window", fmt.tprintf("%d", w.pane_drag.preview_window)},
-				{"panes.drop.thumbnail", fmt.tprintf("%t", w.pane_drag.thumbnail_shown)},
+				{"panes.drop.thumbnail", fmt.tprintf("%t", w.pane_drag.thumbnail.shown)},
 				{
 					"panes.drop.thumbnail_size",
-					fmt.tprintf("%dx%d", w.pane_drag.thumbnail_width, w.pane_drag.thumbnail_height),
+					fmt.tprintf("%dx%d", w.pane_drag.thumbnail.width, w.pane_drag.thumbnail.height),
 				},
 				{
 					"panes.drop.rect",
