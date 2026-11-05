@@ -1,8 +1,13 @@
 package main
 
+import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
+import "aio:ui"
+import "core:fmt"
+import "core:math"
+import "core:time"
 
 // A drag carries the marked tabs. As with a pane, their workspace must keep content of its own.
 @(require_results)
@@ -26,12 +31,109 @@ tab_window_kept_index :: proc(workspace: ^Workspace) -> int {
 	return -1
 }
 
-// Tracks a tab drag past every app window, returning whether the drag now offers a new window.
+// Tabs another window's drag would add here: its tabs open a gap at `slot`, and a ghost shows them landing.
+Tab_Incoming :: struct {
+	source:      platform.Window_Id,
+	count, slot: int,
+	ghost:       ui.Motion,
+}
+
+@(private = "file", require_results)
+tabs_can_join :: proc(workspace, destination: ^Workspace) -> bool {
+	for tab in workspace.tabs {
+		if !tab.marked {continue}
+		for node in tab.tree.nodes {
+			pane := node.(layout.Pane) or_continue
+			if !pane_content_can_join(pane.content, destination, tab) {return false}
+		}
+	}
+	return true
+}
+
+// Where tabs dropped at a point in w would land, centring their group on the pointer. A drop away from the
+// tabs lands after them.
 @(require_results)
-tab_drag_tear_off_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+tab_drop_slot :: proc(app: ^App, w: ^Window, incoming: int, x, y: f32) -> int {
+	count := len(w.workspace.tabs)
+	offset, size: f32
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		if y >= bar.height {return count}
+		offset, size = x - bar.x, bar.tab_width
+	} else {
+		area := rail_area(w)
+		if !rail_visible(w) || x < area.x || x >= area.x + area.width || y < area.y {return count}
+		rail, built := rail_current_layout(w)
+		if !built {return count}
+		offset, size = y - ui.rail_row_rect(rail, 0).y, rail.row_height
+	}
+	if size <= 0 {return count}
+	return clamp(int(math.floor(offset / size - f32(incoming) / 2 + 0.5)), 0, count)
+}
+
+// Closes the gap in the window that was offered the drop.
+tab_incoming_close :: proc(app: ^App, id: platform.Window_Id) {
+	w := window_find(app, id)
+	if w == nil || w.tab_incoming.count == 0 {return}
+	w.tab_incoming = {}
+	w.dirty = true
+}
+
+// Offers the drop to `destination` at a point in its coordinates, moving any open gap there. Nil offers it to
+// no other window.
+tab_drag_over :: proc(app: ^App, w, destination: ^Window, x, y: f32) {
+	d := &w.tab_drag
+	if destination == nil || d.destination_window != destination.id {
+		tab_incoming_close(app, d.destination_window)
+	}
+	d.destination_window, d.destination_refused = 0, false
+	if destination == nil {return}
+	d.destination_window = destination.id
+	d.elsewhere = false
+	if d.new_window {w.dirty = true}
+	d.new_window = false
+	drag_thumbnail_sync(app, w, &d.thumbnail, {}, false, 0, 0)
+	if !tabs_can_join(w.workspace, destination.workspace) {
+		d.destination_refused = true
+		tab_incoming_close(app, destination.id)
+		return
+	}
+	incoming := &destination.tab_incoming
+	count := tabs_marked_count(w.workspace)
+	slot := tab_drop_slot(app, destination, count, x, y)
+	if incoming.count == 0 {
+		incoming^ = {
+			source = w.id,
+			count = count,
+			slot = slot,
+			ghost = {value = f32(slot), target = f32(slot)},
+		}
+		destination.dirty = true
+	} else if incoming.slot != slot {
+		incoming.slot = slot
+		ui.motion_target(
+			&incoming.ghost,
+			f32(slot),
+			140 * time.Millisecond,
+			.Decelerate,
+			app.animations,
+			time.tick_now(),
+		)
+		destination.dirty = true
+	}
+}
+
+// Tracks a tab drag leaving its window, returning whether the drag now offers another window or a new one.
+@(require_results)
+tab_drag_windows_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	d := &w.tab_drag
 	d.pointer = {x, y}
 	point, ok := drag_point(app, w, x, y)
+	if ok && !w.linked && point.window != nil && point.window != w && !point.window.linked {
+		tab_drag_over(app, w, point.window, f32(point.x), f32(point.y))
+		return true
+	}
+	tab_drag_over(app, w, nil, 0, 0)
 	tear_off := ok && point.window == nil && tab_window_source_allows(w.workspace)
 	if d.new_window != tear_off {w.dirty = true}
 	d.new_window = tear_off
@@ -190,9 +292,90 @@ tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 	return true
 }
 
-// The thumbnail copies the tab live, so the source marks it with an outline and nothing over its text.
-tab_drag_draw :: proc(app: ^App, w: ^Window) {
-	if !w.tab_drag.new_window || w.tab_drag.preview_window == 0 {return}
+// Moves the marked tabs into the workspace another window shows, inserting them at `slot`. Every step that
+// can fail comes before the first layout moves. Taking the source's last tabs closes its window and deletes
+// its workspace, so a caller must look `source_window` up before using it again.
+@(require_results)
+tabs_to_workspace :: proc(app: ^App, source_window, destination_window: ^Window, slot: int) -> bool {
+	workspace, destination := source_window.workspace, destination_window.workspace
+	if source_window == destination_window ||
+	   source_window.linked ||
+	   destination_window.linked ||
+	   destination_window.preparing ||
+	   !tabs_can_join(workspace, destination) {
+		return false
+	}
+	count := tabs_marked_count(workspace)
+	if count == 0 {return false}
+	records, reserved := tab_records_reserve(destination, count)
+	if !reserved {return false}
+	at := clamp(slot, 0, len(destination.tabs))
+	if !tab_presentation_reserve(&destination_window.presentation, len(destination.tabs) + count) {
+		tab_records_free(records)
+		return false
+	}
+
+	// The destination takes focus first, so Windows does not hand it to another app as the source closes.
+	_ = window_activate(app, destination_window)
+	focus_leave(app, destination_window)
+	selected := selected_tab(workspace)
+	kept := tab_window_kept_index(workspace)
+	if kept < 0 {
+		focus_leave(app, source_window)
+		window_close(app, source_window)
+	} else {
+		tab_select(app, source_window, kept, true)
+	}
+	for tab in destination.tabs {tab.marked = false}
+	selected_index := tabs_carry(app, workspace, destination, records, selected, at)
+	if kept >= 0 {
+		tab_select_one(workspace, workspace.selected)
+	} else {
+		workspace_close_empty(app, workspace, replace_window = false)
+	}
+
+	destination_window.tab_incoming = {}
+	destination_window.tab_hover = -1
+	tab_presentation_insert(&destination_window.presentation, at, count)
+	destination.selected = at + selected_index
+	destination.selection_anchor = records[selected_index].id
+	destination_window.tree = &records[selected_index].tree
+	workspace_pickers_refresh(app)
+	mark_all_dirty(app)
+	window_relayout(app, destination_window)
+	rail_reveal_active(destination_window)
+	focus_enter(app, destination_window)
+	workspace_settings_sync(app, destination)
+	return true
+}
+
+// Finishes a drag held over another window. A refused or failed drop puts the tabs back.
+tab_drag_release_on_window :: proc(app: ^App, w: ^Window) {
+	d := w.tab_drag
+	// Moving the tabs ends this window's gestures, which must not restore the order being kept.
+	w.tab_drag = {}
+	drag_thumbnail_destroy(&d.thumbnail)
+	w.dirty = true
+	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
+	d.preview_window = 0
+	destination := window_find(app, d.destination_window)
+	if destination != nil && !d.destination_refused {
+		if tabs_to_workspace(app, w, destination, destination.tab_incoming.slot) {
+			delete(d.order)
+			return
+		}
+	}
+	w.tab_drag = d
+	tab_drag_cancel(app, w)
+	if d.destination_refused {
+		notify(app, .Warning, "That workspace already has Settings open. The tabs stayed here.")
+	} else {
+		notify(app, .Error, "Could not move the tabs. Both windows were preserved.")
+	}
+}
+
+@(private = "file")
+tab_drag_outline :: proc(app: ^App, w: ^Window) {
 	area := window_content_area(app, w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return}
 	_ = render.push_rect(
@@ -204,4 +387,65 @@ tab_drag_draw :: proc(app: ^App, w: ^Window) {
 			stroke = 2 * w.scale,
 		},
 	)
+}
+
+// The arriving tabs in the gap they would take. With no tabs on screen, the content takes an outline instead.
+@(private = "file")
+tab_incoming_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	incoming := w.tab_incoming
+	r, clip: render.Rect
+	if w.tabs_horizontal && !pane_fill_active(w) {
+		bar := window_tab_bar(app, w)
+		inset, height := 2 * w.scale, ui.HEIGHT_TOOLBAR * w.scale
+		r = {
+			bar.x + incoming.ghost.value * bar.tab_width + inset,
+			(bar.height - height) / 2,
+			max(0, f32(incoming.count) * bar.tab_width - 2 * inset),
+			height,
+		}
+		clip = {0, 0, f32(w.width), bar.height}
+	} else if rail, built := rail_current_layout(w); built && rail_visible(w) {
+		first := ui.rail_row_rect(rail, 0)
+		r = {
+			first.x,
+			first.y + incoming.ghost.value * rail.row_height,
+			first.width,
+			f32(incoming.count) * rail.row_height,
+		}
+		clip = rail.list
+	} else {
+		tab_drag_outline(app, w)
+		return .Ok
+	}
+	if render.push_layer(&w.list, clip) != .None {return .Ok}
+	radius := ui.RADIUS_CONTROL * w.scale
+	fill := app.theme.accent
+	fill.a *= 0.16
+	if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None {return .Ok}
+	if render.push_rect(
+		   &w.list,
+		   {rect = r, color = app.theme.accent, radius = radius, stroke = 2 * w.scale},
+	   ) !=
+	   .None {return .Ok}
+	source := window_find(app, incoming.source)
+	if source == nil || source.tab_drag.grabbed == nil {return .Ok}
+	label := incoming.count == 1 ? source.tab_drag.grabbed.title : fmt.tprintf("%d tabs", incoming.count)
+	text := ui.text_styled(&w.ui_text, .Strong)
+	padding := ui.SPACE_2 * w.scale
+	return ui.draw_text(
+		&text,
+		&w.list,
+		label,
+		r.x + max(padding, (r.width - ui.text_width(&text, label)) / 2),
+		r.y + (r.height - text.line_height) / 2 + text.ascent,
+		app.theme.text,
+		max(1, r.width - 2 * padding),
+	)
+}
+
+// The thumbnail copies the tab live, so the source marks it with an outline and nothing over its text.
+tab_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+	if w.tab_drag.new_window && w.tab_drag.preview_window != 0 {tab_drag_outline(app, w)}
+	if w.tab_incoming.count > 0 {return tab_incoming_draw(app, w)}
+	return .Ok
 }

@@ -222,7 +222,10 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		if .Left not_in e.buttons {
 			tab_drag_cancel(app, w)
 		} else if tab_drag_move(app, w, x, y) {
-			if w.tab_drag.active {pointer_set(app, w, w.tab_drag.new_window ? .Resize_All : .Arrow)}
+			if w.tab_drag.active {
+				outside := w.tab_drag.new_window || w.tab_drag.destination_window != 0
+				pointer_set(app, w, outside ? .Resize_All : .Arrow)
+			}
 			return
 		}
 	}

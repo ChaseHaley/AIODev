@@ -57,6 +57,9 @@ Tab_Drag :: struct {
 	// Past every app window the drag offers a new window, prepared hidden before the drop.
 	new_window, preview_failed:  bool,
 	preview_window:              platform.Window_Id,
+	// Over another window the drop joins its workspace, unless content in the tabs cannot go there.
+	destination_window:          platform.Window_Id,
+	destination_refused:         bool,
 	pointer:                     [2]f32,
 	thumbnail:                   Drag_Thumbnail,
 }
@@ -206,7 +209,7 @@ tab_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		for tab in order {if tab == d.grabbed {break}; if tab.marked {d.rank += 1}}
 		d.active = true
 	}
-	if tab_drag_tear_off_move(app, w, x, y) {return true}
+	if tab_drag_windows_move(app, w, x, y) {return true}
 	if w.tabs_horizontal {return tab_drag_move_strip(app, w, x)}
 	return tab_drag_move_rail(app, w, x, y)
 }
@@ -300,6 +303,7 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 	w.tab_drag = {}
 	if d.pressed {w.dirty = true}
 	drag_thumbnail_destroy(&d.thumbnail)
+	tab_incoming_close(app, d.destination_window)
 	for tab, to in d.order {
 		for current, from in w.workspace.tabs {if current == tab {tab_move(app, w, from, to); break}}
 	}
@@ -308,6 +312,10 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 }
 
 tab_drag_release :: proc(app: ^App, w: ^Window) {
+	if w.tab_drag.destination_window != 0 {
+		tab_drag_release_on_window(app, w)
+		return
+	}
 	if w.tab_drag.new_window && w.tab_drag.preview_window != 0 {
 		d := w.tab_drag
 		// Moving the tabs ends this window's gestures, which must not restore the order being kept.
@@ -835,7 +843,10 @@ arrange_cancel :: proc(app: ^App, w: ^Window) {
 			gesture_clear(app, other)
 			pane_drag_cancel(app, other)
 		}
-		if i < len(app.windows) && app.windows[i] == other && other != w && other.tab_drag.preview_window == id {
+		if i < len(app.windows) &&
+		   app.windows[i] == other &&
+		   other != w &&
+		   (other.tab_drag.preview_window == id || other.tab_drag.destination_window == id) {
 			gesture_clear(app, other)
 			tab_drag_cancel(app, other)
 		}

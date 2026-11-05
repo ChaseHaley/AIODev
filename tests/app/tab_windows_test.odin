@@ -23,6 +23,238 @@ tab_drag_off_window :: proc(state: ^app.App, w: ^app.Window, index: int) -> bool
 	return app.tab_drag_move(state, w, -30_000, -30_000)
 }
 
+// Presses tab `index` and holds it over `destination` at a point in that window's coordinates.
+@(private = "file")
+tab_drag_over_window :: proc(state: ^app.App, w, destination: ^app.Window, index: int, x, y: f32) {
+	app.tab_press(state, w, index, 80, 20, false)
+	_ = app.tab_drag_move(state, w, -30_000, -30_000)
+	app.tab_drag_over(state, w, destination, x, y)
+}
+
+@(private = "file")
+Across_Fixture :: struct {
+	directory, path: string,
+}
+
+@(private = "file")
+across_begin :: proc(t: ^testing.T, state: ^app.App) -> (fixture: Across_Fixture, ok: bool) {
+	directory, directory_error := os.make_directory_temp("", "aio-tabs-across-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) {return}
+	fixture.directory = directory
+	fixture.path = strings.concatenate({directory, "/settings.ini"})
+	if !testing.expect_value(
+		t,
+		os.write_entire_file(fixture.path, idle_shell_settings(t, "cursor.blink = false\n")),
+		nil,
+	) {return}
+	state.options = {data_dir = directory, inactive = true}
+	state.app_id = fmt.aprintf("AIODev.Test.TabsAcross.%d", os.get_pid())
+	init := platform.init(&state.platform, state.app_id)
+	if !testing.expect_value(t, init, platform.Init_Result.Primary) {return}
+	state.platform_ready = true
+	return fixture, testing.expect(t, app.app_init(state))
+}
+
+@(private = "file")
+across_end :: proc(t: ^testing.T, state: ^app.App, fixture: Across_Fixture) {
+	app.app_destroy(state)
+	os.remove(fixture.path)
+	testing.expect_value(t, os.remove(fixture.directory), nil)
+	delete(fixture.path)
+	delete(fixture.directory)
+}
+
+// Tears a new tab off the first window, leaving two windows that each show one tab of their own workspace.
+@(private = "file")
+across_second_window :: proc(t: ^testing.T, state: ^app.App, first: ^app.Window) -> ^app.Window {
+	if !testing.expect(t, app.tab_create(state, first.workspace)) {return nil}
+	app.tab_select(state, first, 1)
+	testing.expect(t, tab_drag_off_window(state, first, 1))
+	second := app.window_find(state, first.tab_drag.preview_window)
+	if !testing.expect(t, second != nil) {return nil}
+	app.tab_drag_release(state, first)
+	app.rename_finish(state, second, true)
+	return second
+}
+
+@(test)
+tabs_dragged_to_another_window_join_its_workspace :: proc(t: ^testing.T) {
+	state: app.App
+	fixture, ok := across_begin(t, &state)
+	defer across_end(t, &state, fixture)
+	if !ok {return}
+	destination := state.windows[0]
+	source := across_second_window(t, &state, destination)
+	if source == nil {return}
+	home, workspace := destination.workspace, source.workspace
+	if !testing.expect(t, app.tab_create(&state, home)) {return}
+	if !testing.expect(t, app.tab_create(&state, workspace)) {return}
+	if !testing.expect(t, app.tab_create(&state, workspace)) {return}
+	app.tab_select(&state, destination, 0)
+	app.tab_select(&state, source, 0)
+	app.pane_split(&state, source, .Right)
+	first, second, third := workspace.tabs[0], workspace.tabs[1], workspace.tabs[2]
+	kept_first, kept_second := home.tabs[0], home.tabs[1]
+	first.name = strings.clone("Tools")
+	content := first.tree.nodes[first.tree.focus].(layout.Pane).content
+	session := app.session_find(&state, content.id).session
+	pid := term.process_id(session)
+	sessions, workspaces := len(state.sessions), len(state.workspaces)
+
+	// The arriving group centres on the pointer, or lands after the tabs when it is away from them.
+	testing.expect(t, destination.tabs_horizontal)
+	bar := app.window_tab_bar(&state, destination)
+	testing.expect_value(t, app.tab_drop_slot(&state, destination, 1, bar.x + bar.tab_width * 1.9, 10), 1)
+	testing.expect_value(t, app.tab_drop_slot(&state, destination, 1, bar.x + bar.tab_width * 2.1, 10), 2)
+	testing.expect_value(t, app.tab_drop_slot(&state, destination, 1, bar.x - 100, 10), 0)
+	testing.expect_value(t, app.tab_drop_slot(&state, destination, 1, 40, bar.height + 40), 2)
+	testing.expect_value(t, app.tab_drop_slot(&state, destination, 3, bar.x + bar.tab_width * 2, 10), 1)
+
+	// Holding over the window opens a gap that follows the pointer, and nothing moves yet.
+	tab_drag_over_window(&state, source, destination, 0, bar.x + bar.tab_width, 10)
+	testing.expect_value(t, source.tab_drag.destination_window, destination.id)
+	testing.expect_value(t, destination.tab_incoming.count, 1)
+	testing.expect_value(t, destination.tab_incoming.slot, 1)
+	// The strip shares its width with the arriving tab but does not count it as a tab.
+	testing.expect_value(t, app.window_tab_bar(&state, destination).count, 2)
+	testing.expect_value(t, len(home.tabs), 2)
+	testing.expect_value(t, len(workspace.tabs), 3)
+	app.tab_drag_over(&state, source, destination, bar.x + bar.tab_width * 2.5, 10)
+	testing.expect_value(t, destination.tab_incoming.slot, 2)
+
+	// Leaving the window closes the gap, and a cancel keeps both sides as they were.
+	app.tab_drag_over(&state, source, nil, 0, 0)
+	testing.expect_value(t, destination.tab_incoming.count, 0)
+	testing.expect_value(t, source.tab_drag.destination_window, platform.Window_Id(0))
+	app.tab_drag_over(&state, source, destination, bar.x, 10)
+	app.tab_drag_cancel(&state, source)
+	testing.expect_value(t, destination.tab_incoming.count, 0)
+	testing.expect_value(t, len(workspace.tabs), 3)
+	testing.expect(t, workspace.tabs[0] == first)
+
+	// Allocation failure at the drop leaves both sides whole.
+	allocator := context.allocator
+	context.allocator = runtime.nil_allocator()
+	testing.expect(t, !app.tabs_to_workspace(&state, source, destination, 1))
+	context.allocator = allocator
+	testing.expect_value(t, len(home.tabs), 2)
+	testing.expect_value(t, len(workspace.tabs), 3)
+	testing.expect_value(t, tab_pane_count(first), 2)
+
+	// The drop carries every pane, the running shells and the name to the slot, and focuses the tab there.
+	tab_drag_over_window(&state, source, destination, 0, bar.x + bar.tab_width, 10)
+	app.tab_drag_release(&state, source)
+	if !testing.expect_value(t, len(home.tabs), 3) {return}
+	moved := home.tabs[1]
+	testing.expect(t, home.tabs[0] == kept_first && home.tabs[2] == kept_second)
+	testing.expect_value(t, moved.name, "Tools")
+	testing.expect_value(t, tab_pane_count(moved), 2)
+	testing.expect(t, layout.find_content(&moved.tree, content) != layout.INVALID_NODE)
+	testing.expect_value(t, home.selected, 1)
+	testing.expect(t, destination.tree == &moved.tree)
+	testing.expect(t, moved.marked && !kept_first.marked && !kept_second.marked)
+	testing.expect_value(t, home.selection_anchor, moved.id)
+	testing.expect(t, moved.id != kept_first.id && moved.id != kept_second.id)
+	testing.expect_value(t, len(destination.tab_positions), 3)
+	testing.expect_value(t, len(destination.panes), 2)
+	testing.expect_value(t, destination.tab_incoming.count, 0)
+	testing.expect_value(t, len(state.sessions), sessions)
+	testing.expect_value(t, term.process_id(session), pid)
+	testing.expect_value(t, term.status(session).kind, term.Status_Kind.Running)
+	// The source keeps the tabs that stayed and shows the nearest of them.
+	testing.expect_value(t, len(workspace.tabs), 2)
+	testing.expect(t, workspace.tabs[0] == second && workspace.tabs[1] == third)
+	testing.expect(t, source.tree == &second.tree)
+	testing.expect(t, second.marked)
+	app.tick(&state)
+
+	// A drop that takes the last tabs closes their window and deletes their workspace, with no shell stopping.
+	// This group lands in a rail, in order, at the row under the pointer.
+	destination.tabs_horizontal, destination.rail_override = false, .Shown
+	app.window_relayout(&state, destination)
+	row := app.rail_row_rect_for_tab(destination, 0)
+	app.tab_pointer_select(&state, source, 0, false, false)
+	app.tab_pointer_select(&state, source, 1, true, false)
+	content_second := second.tree.nodes[second.tree.focus].(layout.Pane).content
+	content_third := third.tree.nodes[third.tree.focus].(layout.Pane).content
+	source_id, workspace_id := source.id, workspace.id
+	tab_drag_over_window(&state, source, destination, 1, row.x + 10, row.y + 1)
+	testing.expect_value(t, destination.tab_incoming.count, 2)
+	testing.expect_value(t, destination.tab_incoming.slot, 0)
+	app.tab_drag_release(&state, source)
+	testing.expect(t, app.window_find(&state, source_id) == nil)
+	testing.expect_value(t, len(state.windows), 1)
+	testing.expect(t, app.workspace_find(&state, workspace_id) == nil)
+	testing.expect_value(t, len(state.workspaces), workspaces - 1)
+	testing.expect(t, state.running)
+	if !testing.expect_value(t, len(home.tabs), 5) {return}
+	testing.expect(t, layout.find_content(&home.tabs[0].tree, content_second) != layout.INVALID_NODE)
+	testing.expect(t, layout.find_content(&home.tabs[1].tree, content_third) != layout.INVALID_NODE)
+	testing.expect(t, home.tabs[2] == kept_first && home.tabs[3] == moved && home.tabs[4] == kept_second)
+	testing.expect_value(t, len(state.sessions), sessions)
+	testing.expect_value(t, term.status(session).kind, term.Status_Kind.Running)
+	testing.expect(t, app.selected_tab(home) == home.tabs[1])
+	testing.expect(t, destination.tree == &home.tabs[1].tree)
+	app.tick(&state)
+}
+
+// A workspace holds one Settings pane, so a second cannot join it and the drop leaves everything in place.
+@(test)
+tab_with_settings_cannot_join_a_workspace_that_has_settings :: proc(t: ^testing.T) {
+	state: app.App
+	fixture, ok := across_begin(t, &state)
+	defer across_end(t, &state, fixture)
+	if !ok {return}
+	destination := state.windows[0]
+	source := across_second_window(t, &state, destination)
+	if source == nil {return}
+	app.editor_open(&state, destination)
+	app.editor_open(&state, source)
+	tabs, home_tabs := len(source.workspace.tabs), len(destination.workspace.tabs)
+	selected := source.workspace.selected
+	tab_drag_over_window(&state, source, destination, selected, 0, 10)
+	testing.expect(t, source.tab_drag.destination_refused)
+	testing.expect_value(t, destination.tab_incoming.count, 0)
+	app.tab_drag_release(&state, source)
+	testing.expect_value(t, len(source.workspace.tabs), tabs)
+	testing.expect_value(t, len(destination.workspace.tabs), home_tabs)
+	testing.expect(t, !source.tab_drag.pressed)
+
+	// Closing the destination cancels a drag held over it rather than leaving it pointing at nothing.
+	tab_drag_over_window(&state, source, destination, selected, 0, 10)
+	testing.expect(t, source.tab_drag.pressed)
+	app.window_close(&state, destination)
+	testing.expect(t, !source.tab_drag.pressed)
+	testing.expect_value(t, len(source.workspace.tabs), tabs)
+	app.tick(&state)
+}
+
+// A linked window belongs to its tab, so it outlives the window the tab left.
+@(test)
+linked_window_follows_a_tab_whose_window_closes :: proc(t: ^testing.T) {
+	state: app.App
+	fixture, ok := across_begin(t, &state)
+	defer across_end(t, &state, fixture)
+	if !ok {return}
+	destination := state.windows[0]
+	source := across_second_window(t, &state, destination)
+	if source == nil {return}
+	app.pane_split(&state, source, .Right)
+	app.pane_link_toggle(&state, source)
+	linked: ^app.Window
+	for window in state.windows {if window.linked {linked = window}}
+	if !testing.expect(t, linked != nil) {return}
+	source_id, workspace_id := source.id, source.workspace.id
+	tab_drag_over_window(&state, source, destination, 0, 0, 10)
+	app.tab_drag_release(&state, source)
+	app.pane_links_sync(&state)
+	testing.expect(t, app.window_find(&state, source_id) == nil)
+	testing.expect(t, app.workspace_find(&state, workspace_id) == nil)
+	testing.expect(t, app.window_find(&state, linked.id) == linked && linked.link_shown)
+	testing.expect_value(t, linked.link_workspace, destination.workspace.id)
+	app.tick(&state)
+}
+
 @(test)
 tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	directory, directory_error := os.make_directory_temp("", "aio-tab-windows-*", context.allocator)

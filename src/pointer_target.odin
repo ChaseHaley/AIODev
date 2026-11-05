@@ -691,8 +691,10 @@ tabs_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> b
 	w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
 	if tab_interaction_release(app, w, f32(e.x), f32(e.y)) {return true}
 	if !w.tab_drag.pressed {return false}
+	id := w.id
 	tab_drag_release(app, w)
-	rail_overlay_dismiss(app, w)
+	// The drop may have taken the window's last tab, and the window with it.
+	if window_find(app, id) != nil {rail_overlay_dismiss(app, w)}
 	return true
 }
 

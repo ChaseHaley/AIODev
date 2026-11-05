@@ -12,11 +12,13 @@ import "core:fmt"
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	if w.workspace == nil {return {}}
 	left := workspace_button_width(w) + status_pill_width(app, w)
+	// Tabs share their width with any that a drag would add, without counting as tabs yet.
 	bar := ui.tab_bar_layout(
 		max(0, f32(w.width) - 218 * w.scale - left),
 		w.scale,
-		len(w.workspace.tabs),
+		len(w.workspace.tabs) + w.tab_incoming.count,
 	)
+	bar.count -= min(bar.count, w.tab_incoming.count)
 	bar.x = left
 	bar.height = ui.TITLE_BAR_HEIGHT * w.scale
 	return bar
@@ -197,7 +199,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		   ) !=
 		   .None {return .Ok}
 	}
-	if w.pane_drag.active && w.pane_drag.new_tab {return .Ok}
+	if (w.pane_drag.active && w.pane_drag.new_tab) || w.tab_incoming.count > 0 {return .Ok}
 	if result := ui.tab_draw(
 		&w.list,
 		&w.ui_text,
