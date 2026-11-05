@@ -38,6 +38,7 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 		row.kind = .Toggle
 	case .Enum:
 		row.kind, row.choices = .Choice, entry.enum_names
+		if entry.key == "status.panel_view" {row.choice_labels = settings.status_panel_view_labels[:]}
 	case .Set:
 		row.kind, row.multiple, row.choices = .Choice, true, entry.enum_names
 		row.choice_labels = settings.status_channel_labels[:]

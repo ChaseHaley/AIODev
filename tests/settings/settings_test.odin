@@ -435,6 +435,27 @@ retired_vertical_scope_is_ignored_and_absent_from_the_schema :: proc(t: ^testing
 }
 
 @(test)
+activity_panel_view_defaults_to_comfy_and_refuses_unknown_values :: proc(t: ^testing.T) {
+	s, d, err := settings.parse("")
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&d)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, s.status.panel_view, settings.Status_Panel_View.Comfy)
+	dense, dense_issues, dense_err := settings.parse("status.panel_view = dense\n")
+	defer settings.destroy(&dense)
+	defer settings.diagnostics_destroy(&dense_issues)
+	testing.expect_value(t, dense_err, nil)
+	testing.expect_value(t, len(dense_issues), 0)
+	testing.expect_value(t, dense.status.panel_view, settings.Status_Panel_View.Dense)
+	bad, issues, bad_err := settings.parse("status.panel_view = roomy\n")
+	defer settings.destroy(&bad)
+	defer settings.diagnostics_destroy(&issues)
+	testing.expect_value(t, bad_err, nil)
+	testing.expect_value(t, len(issues), 1)
+	testing.expect_value(t, bad.status.panel_view, settings.Status_Panel_View.Comfy)
+}
+
+@(test)
 dock_size_settings_default_to_the_previous_sizes_and_clamp :: proc(t: ^testing.T) {
 	s, d, err := settings.parse("")
 	defer settings.destroy(&s)
