@@ -166,6 +166,11 @@ activity_view_change_repaints_every_window :: proc(t: ^testing.T) {
 	app.status_panel_view_toggle(s)
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Dense)
 	for window in s.windows {testing.expect(t, window.dirty)}
+	for window in s.windows {window.dirty = false}
+	saved, _ := app.settings_save_value(s, "status.panel_view", "comfy", "set view")
+	testing.expect(t, saved)
+	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Comfy)
+	for window in s.windows {testing.expect(t, window.dirty)}
 }
 
 @(test)
@@ -201,7 +206,8 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 		entry.statuses = previous
 	}
 	entry.statuses = make([]term.Program_Status, 2)
-	entry.statuses[0] = {id = "a", app = "claude", title = "Long task", message = "Reading", state = .Done,
+	entry.statuses[0] = {id = "a", app = "claude", title = "Long task",
+		message = strings.repeat("long message ", 200, context.temp_allocator), state = .Done,
 		progress = -1, updated_at = time.now()}
 	entry.statuses[1] = {id = "a/b", app = "codex", title = "Child", state = .Working, progress = 40,
 		updated_at = time.now()}
@@ -216,17 +222,29 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 			found += 1
 			y := list.y + 32 * w.scale + row.y + row.height / 2
 			x := list.x + 40 * w.scale
-			index, _ := app.status_panel_hit(s, w, rows, x, y)
+			index, rect := app.status_panel_hit(s, w, rows, x, y)
+			if !testing.expect(t, index >= 0) {continue}
 			testing.expect_value(t, rows[index].item.record.id, row.item.record.id)
+			// The same point misses once the list scrolls a row away, and the row follows the scroll.
+			w.status.panel_scroll = row.height
+			scrolled, moved := app.status_panel_hit(s, w, rows, x, y - row.height)
+			testing.expect_value(t, scrolled, index)
+			testing.expect_value(t, moved.y, rect.y - row.height)
+			w.status.panel_scroll = 0
 			tip := app.status_panel_row_tooltip(s, w, x, y)
 			testing.expect(t, strings.contains(tip, row.item.record.title))
 			testing.expect(t, strings.contains(tip, row.item.crumb))
 			testing.expect(t, strings.contains(tip, row.item.record.app))
 			testing.expect_value(t, strings.count(tip, "\n"), 2)
+			if row.item.record.state == .Done {
+				close := app.status_panel_dismiss_rect(s, w, rect)
+				cx, cy := close.x + close.width / 2, close.y + close.height / 2
+				testing.expect(t, rect.y <= close.y && close.y + close.height <= rect.y + rect.height)
+				testing.expect_value(t, app.status_panel_row_tooltip(s, w, cx, cy), "Dismiss")
+			}
 		}
 		testing.expect_value(t, found, 2)
 		if rows[0].report {continue}
-		// A label takes no clicks.
 		y := list.y + 32 * w.scale + rows[0].y + rows[0].height / 2
 		index, _ := app.status_panel_hit(s, w, rows, list.x + 40 * w.scale, y)
 		testing.expect_value(t, index, -1)

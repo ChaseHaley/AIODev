@@ -105,10 +105,23 @@ try {
     Equal ([int]((Find-Row $s 'Activity panel').Rect[3])) ([int](56 * [double]$s['window.scale'])) 'Comfy row height'
 
     # Settings and the header change one saved value.
-    Add-Content -LiteralPath $settings -Value "`nstatus.panel_view = dense"
-    Aio command settings.reload | Out-Null
+    Aio key 'Ctrl+,' | Out-Null
+    Aio type status.panel_view | Out-Null
+    Equal (State)['settings.key'] 'status.panel_view' 'Settings finds Activity Panel View'
+    Equal (State)['settings.value'] 'comfy' 'Settings shows the default view'
+    Aio key Enter | Out-Null
+    Aio capture --out "$data/settings-choices.png" | Out-Null
+    Aio key Down Enter | Out-Null
     $s = State
-    Equal $s['activity.view'] 'dense' 'saved Dense reaches the panel'
+    Equal $s['activity.view'] 'dense' 'Settings changes the view'
+    if (-not (Select-String -LiteralPath $settings -SimpleMatch 'status.panel_view = dense' -Quiet)) {
+        throw 'Settings did not save the view'
+    }
+    Write-Output 'PASS Settings saves the view'
+    Aio capture --out "$data/settings-dense.png" | Out-Null
+    Aio command settings.open | Out-Null
+    Aio command tab.close | Out-Null
+    $s = State
     $rows = Rows $s
     Equal ($rows[0].Text) 'Needs you' 'Dense leads with what needs you'
     Equal ([int]((Find-Row $s 'Activity panel').Rect[3])) ([int](32 * [double]$s['window.scale'])) 'Dense row height'
@@ -172,6 +185,16 @@ try {
         Start-Sleep -Milliseconds 200
         Aio capture --out "$data/rail-$view.png" | Out-Null
     }
+
+    # The in-rail panel resizes with either view showing.
+    $s = State
+    $panel = Rect $s 'activity.rect'
+    $x, $y = [int]($panel[0]+$panel[2]/2), [int]$panel[1]
+    $grab = $y - 1
+    Aio mouse down "$x,$grab" --px | Out-Null
+    Aio mouse move "$x,$($grab+60)" --px | Out-Null
+    Aio mouse up "$x,$($grab+60)" --px | Out-Null
+    Equal ((Rect (State) 'activity.rect')[3]) ($panel[3]-60) 'in-rail panel height follows the drag'
 
     # A short panel overflows and scrolls, and row rects follow the scroll.
     $s = State

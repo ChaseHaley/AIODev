@@ -11,8 +11,6 @@ import "core:math"
 import "core:slice"
 import "core:strings"
 
-// The docked Activity panel: where it sits, what it lists and how its rows respond.
-
 // Sizes in DIPs. The logos sit left and the state mark right in both views.
 @(private) STATUS_PANEL_LABEL_HEIGHT :: f32(28)
 @(private) STATUS_PANEL_GROUP_GAP :: f32(8)
@@ -83,7 +81,6 @@ status_panel_side_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	return {r.x + r.width - ui.SPACE_1 * w.scale - size, r.y + top, size, size}
 }
 
-// Left of the side button, in the same band.
 status_panel_view_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	r := status_panel_side_rect(app, w)
 	if r.width <= 0 {return {}}
@@ -333,7 +330,6 @@ status_panel_row_rect :: proc(w: ^Window, list: render.Rect, row: Status_Panel_R
 	return {list.x, list.y + row.y - w.status.panel_scroll, list.width, row.height}
 }
 
-// The row without the indent of its depth.
 @(private)
 status_panel_row_box :: proc(w: ^Window, r: render.Rect, row: Status_Panel_Row) -> render.Rect {
 	indent := f32(min(row.depth, STATUS_PANEL_DEPTH_MAX)) * STATUS_PANEL_INDENT * w.scale
@@ -349,7 +345,6 @@ status_panel_comfy_title_middle :: proc(w: ^Window, r: render.Rect) -> f32 {
 	return line_one - strong.ascent + strong.line_height / 2
 }
 
-@(private)
 status_panel_dismiss_rect :: proc(app: ^App, w: ^Window, r: render.Rect) -> render.Rect {
 	close := status_dismiss_rect(w, r)
 	if app.settings.status.panel_view == .Comfy {
@@ -364,7 +359,7 @@ status_panel_guide_draw :: proc(app: ^App, w: ^Window, box: render.Rect, middle:
 	line := max(1, math.round(w.scale))
 	x, y := math.round(box.x), math.round(middle)
 	ui.draw_rect(&w.list, {rect = {x, box.y, line, y - box.y}, color = app.theme.border})
-	ui.draw_rect(&w.list, {rect = {x, y, 8 * w.scale, line}, color = app.theme.border})
+	ui.draw_rect(&w.list, {rect = {x, y, ui.SPACE_2 * w.scale, line}, color = app.theme.border})
 }
 
 @(private)
@@ -380,7 +375,7 @@ status_panel_logo_draw :: proc(
 	atlas, pending, result := report_icon(app, session_find(app, item.session), item.record.app, extent)
 	if result != .Ok {return result}
 	if atlas.width > 0 {return ui.shell_badge_draw(&w.list, &w.ui_text, app.theme, area, "", s, atlas)}
-	if !pending {ui.icon_draw(&w.list, .Terminal, area, app.theme.muted, size, s)}
+	if !pending {ui.icon_draw(&w.list, .Terminal, area, app.theme.muted, ui.ICON_BUTTON, s)}
 	return .Ok
 }
 
@@ -478,12 +473,11 @@ status_panel_dense_draw :: proc(
 	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
 		return result
 	}
-	age := mark.progress >= 0 ? fmt.tprintf("%d%%", mark.progress) : status_age(item.record.updated_at)
-	age_width := ui.text_width(&small, age)
-	age_x := right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - age_width
-	if result := ui.draw_text(&small, &w.list, age, age_x, baseline, app.theme.faint); result != .Ok {
-		return result
-	}
+	progress_or_age := status_age(item.record.updated_at)
+	if mark.progress >= 0 {progress_or_age = fmt.tprintf("%d%%", mark.progress)}
+	age_x := right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - ui.text_width(&small, progress_or_age)
+	if result := ui.draw_text(&small, &w.list, progress_or_age, age_x, baseline, app.theme.faint);
+	   result != .Ok {return result}
 	text_x := left + (logo + ui.SPACE_2) * s
 	room := max(0, age_x - ui.SPACE_2 * s - text_x)
 	quiet := status_finished_seen(item.record) || item.record.state == .Idle
@@ -633,12 +627,13 @@ status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	buffer: [8]u8
 	state := ui.status_headline(status_mark(item.record), buffer[:])
 	if item.record.message != "" {
-		return fmt.tprintf("%s\n%s: %s\n%s", who, state, item.record.message, item.crumb)
+		// Half the tooltip at most, so a long message never pushes the location out of it.
+		message := tooltip_clip(item.record.message, TOOLTIP_LIMIT / 2)
+		return fmt.tprintf("%s\n%s: %s\n%s", who, state, message, item.crumb)
 	}
 	return fmt.tprintf("%s\n%s\n%s", who, state, item.crumb)
 }
 
-// The header button under the point, if any.
 status_panel_button_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Status_Panel_Button {
 	if status_rect_contains(status_panel_side_rect(app, w), x, y) {return .Side}
 	return status_rect_contains(status_panel_view_rect(app, w), x, y) ? .View : .None

@@ -14,16 +14,21 @@ import "core:unicode/utf8"
 @(private) TOOLTIP_NEIGHBOR_DISTANCE :: f32(80)
 
 @(private) TOOLTIP_LIMIT :: 1024
+@(private) TOOLTIP_MAX_WIDTH :: f32(480)
+
+@(private)
+tooltip_clip :: proc(text: string, limit: int) -> string {
+	if len(text) <= limit {return text}
+	end := limit
+	for end > 0 && !utf8.rune_start(text[end]) {end -= 1}
+	return text[:end]
+}
 
 @(private)
 tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -> string {
 	label := pointer_surfaces[owner].tooltip
 	if label == nil {return ""}
-	text := label(app, w, x, y)
-	if len(text) <= TOOLTIP_LIMIT {return text}
-	end := TOOLTIP_LIMIT
-	for end > 0 && !utf8.rune_start(text[end]) {end -= 1}
-	return text[:end]
+	return tooltip_clip(label(app, w, x, y), TOOLTIP_LIMIT)
 }
 
 // The window keeps its own copy, because a label may be built for one event in temporary memory.
@@ -80,11 +85,17 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	owner := pointer_target(app, w, w.pointer.x, w.pointer.y)
 	if tooltip_label(app, w, owner, w.pointer.x, w.pointer.y) != w.tooltip {return .Ok}
 	s := w.scale
-	lines := strings.split_lines(w.tooltip, context.temp_allocator)
-	limit := max(0, f32(w.width) - 8 * s)
+	room := max(0, min(TOOLTIP_MAX_WIDTH * s, f32(w.width) - 8 * s) - 16 * s)
+	lines := make([dynamic]string, context.temp_allocator)
+	wrapped := make([dynamic]string, context.temp_allocator)
+	rest := w.tooltip
+	for line in strings.split_lines_iterator(&rest) {
+		ui.wrap(&w.ui_text, line, room, &wrapped)
+		append(&lines, ..wrapped[:])
+	}
 	width := f32(0)
 	for line in lines {width = max(width, ui.text_width(&w.ui_text, line))}
-	width = min(width + 16 * s, limit)
+	width += 16 * s
 	height := ui.HEIGHT_COMPACT * s + f32(len(lines) - 1) * w.ui_text.line_height
 	x := clamp(w.pointer.x + 12 * s, 4 * s, max(4 * s, f32(w.width) - width - 4 * s))
 	y := clamp(w.pointer.y + 16 * s, 4 * s, max(4 * s, f32(w.height) - height - 4 * s))
@@ -94,8 +105,8 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	top := y + (height - f32(len(lines)) * w.ui_text.line_height) / 2
 	for line, i in lines {
 		baseline := top + f32(i) * w.ui_text.line_height + w.ui_text.ascent
-		if result := ui.draw_fading_text(&w.ui_text, &w.list, line, x + 8 * s, baseline, app.theme.text,
-			max(0, width - 16 * s)); result != .Ok {return result}
+		if result := ui.draw_text(&w.ui_text, &w.list, line, x + 8 * s, baseline, app.theme.text);
+		   result != .Ok {return result}
 	}
 	return .Ok
 }

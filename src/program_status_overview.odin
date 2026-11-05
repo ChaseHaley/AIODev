@@ -17,8 +17,6 @@ STATUS_PILL_WIDTH :: f32(52)
 @(private)
 STATUS_ROW_HEIGHT :: f32(48)
 @(private)
-STATUS_GROUP_HEIGHT :: f32(24)
-@(private)
 STATUS_INBOX_WIDTH :: f32(420)
 // In the rail the panel keeps its header and a row, and the tabs keep the footer and two rows.
 @(private)
@@ -102,7 +100,7 @@ status_items :: proc(app: ^App, w: ^Window) -> []Status_Item {
 			for record in records {
 				if !status_shown(app, record) {continue}
 				if crumb == "" {crumb = status_crumb_at(workspace, pane.tab, entry)}
-				append(&items, Status_Item{session = entry.id, record = record, crumb = crumb})
+				append(&items, Status_Item{entry.id, record, crumb, workspace.name})
 			}
 		}
 	}
