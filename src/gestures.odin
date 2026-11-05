@@ -43,7 +43,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
 	w.scroll_drag = {}
 	w.rail_resizing = false
-	ui.armed_cancel(&w.status.panel_side_armed)
+	ui.armed_cancel(&w.status.panel_button_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
 	w.workspace_picker.order = {}
 	_ = workspace_order_animate(w, app.animations, time.tick_now())

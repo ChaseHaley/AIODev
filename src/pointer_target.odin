@@ -595,14 +595,14 @@ panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mo
 		return
 	}
 	s := &w.status
-	if s.hover_surface != .None || s.hover >= 0 || s.panel_side_hover {
-		s.hover_surface, s.hover, s.panel_side_hover, w.dirty = .None, -1, false, true
+	if s.hover_surface != .None || s.hover >= 0 || s.panel_button_hover != .None {
+		s.hover_surface, s.hover, s.panel_button_hover, w.dirty = .None, -1, .None, true
 	}
 }
 
 @(private = "file")
 panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
-	return rect_contains(status_panel_side_rect(app, w), x, y) ? "Move activity panel" : ""
+	return status_panel_button_at(app, w, x, y) == .Side ? "Move activity panel" : ""
 }
 
 @(private = "file")
@@ -612,12 +612,13 @@ panel_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private = "file")
 panel_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || !ui.armed_down(w.status.panel_side_armed) {return false}
+	if e.button != .Left || !ui.armed_down(w.status.panel_button_armed) {return false}
 	w.header_buttons -= {.Left}
 	w.dirty = true
-	side := status_rect_contains(status_panel_side_rect(app, w), f32(e.x), f32(e.y))
-	_, ok := ui.armed_release(&w.status.panel_side_armed, side)
-	if ok {status_panel_side_toggle(app)}
+	button := status_panel_button_at(app, w, f32(e.x), f32(e.y))
+	if fired, ok := ui.armed_release(&w.status.panel_button_armed, button); ok {
+		status_panel_button_fire(app, fired)
+	}
 	return true
 }
 

@@ -66,6 +66,15 @@ status_panel_side_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	return {r.x + r.width - ui.SPACE_1 * w.scale - size, r.y + top, size, size}
 }
 
+// Runs a header button after a press and release both landed on it.
+status_panel_button_fire :: proc(app: ^App, button: Status_Panel_Button) {
+	switch button {
+	case .None:
+	case .Side:
+		status_panel_side_toggle(app)
+	}
+}
+
 status_panel_side_toggle :: proc(app: ^App) {
 	next := app.settings.status.panel_side == .Right ? "left" : "right"
 	if _, has_file := settings_save_value(app, "status.panel_side", next, "Could not save Activity side.");
@@ -82,14 +91,30 @@ status_panel_list :: proc(app: ^App, w: ^Window, panel: render.Rect) -> render.R
 	return {panel.x + pad, panel.y + header, max(0, panel.width - 2 * pad), max(0, panel.height - header - pad)}
 }
 
+// One row of the panel as this frame or event lays it out. Drawing, hit testing and tooltips read
+// the same rows, so they cannot disagree about where a row is. Rows borrow from `status_items`.
+Status_Panel_Row :: struct {
+	item:      Status_Item,
+	depth:     int,
+	y, height: f32,
+}
+
 @(private)
-status_panel_offsets :: proc(w: ^Window, items: []Status_Item) -> (offsets: []f32, total: f32) {
-	offsets = make([]f32, len(items), context.temp_allocator)
+status_panel_rows :: proc(app: ^App, w: ^Window) -> (rows: []Status_Panel_Row, total: f32) {
+	items := status_items(app, w, true)
+	rows = make([]Status_Panel_Row, len(items), context.temp_allocator)
 	for item, i in items {
-		offsets[i] = total
-		total += status_item_height(w, item)
+		height := status_item_height(w, item)
+		depth := min(3, strings.count(item.record.id, "/") + (item.record.id != "" ? 1 : 0))
+		rows[i] = {item = item, depth = depth, y = total, height = height}
+		total += height
 	}
-	return offsets, total
+	return rows, total
+}
+
+@(private)
+status_panel_row_rect :: proc(w: ^Window, list: render.Rect, row: Status_Panel_Row) -> render.Rect {
+	return {list.x, list.y + row.y - w.status.panel_scroll, list.width, row.height}
 }
 
 status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
@@ -109,7 +134,7 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			{rect = {panel.x + panel.width - s, panel.y, s, panel.height}, color = app.theme.border},
 		)
 	}
-	items := status_items(app, w, true)
+	rows, total := status_panel_rows(app, w)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	if result := ui.draw_text(
@@ -121,13 +146,13 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme.text,
 	); result != .Ok {return result}
 	button := status_panel_side_rect(app, w)
-	hover := f32(int(w.status.panel_side_hover))
-	press := f32(int(ui.armed_down(w.status.panel_side_armed)))
+	hover := f32(int(w.status.panel_button_hover == .Side))
+	press := f32(int(ui.armed_is(w.status.panel_button_armed, Status_Panel_Button.Side)))
 	icon: ui.Icon = app.settings.status.panel_side == .Left ? .Layout_Left : .Layout_Right
 	_ = ui.icon_button_draw(&w.list, app.theme, button, icon, hover, press, s, w.pointer)
 	list := status_panel_list(app, w, panel)
 	if render.push_layer(&w.list, list) != .None {return .Ok}
-	if len(items) == 0 {
+	if len(rows) == 0 {
 		return ui.draw_fading_text(
 			&small,
 			&w.list,
@@ -138,19 +163,17 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			max(0, list.width - 16 * s),
 		)
 	}
-	offsets, total := status_panel_offsets(w, items)
 	w.status.panel_scroll = clamp(w.status.panel_scroll, 0, max(0, total - list.height))
-	for item, i in items {
-		top := list.y + offsets[i] - w.status.panel_scroll
-		r := render.Rect{list.x, top, list.width, status_item_height(w, item)}
+	for row, i in rows {
+		r := status_panel_row_rect(w, list, row)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
-		if item.group {
-			if result := status_group_draw(app, w, r, item); result != .Ok {return result}
+		if row.item.group {
+			if result := status_group_draw(app, w, r, row.item); result != .Ok {return result}
 			continue
 		}
-		depth := f32(min(3, strings.count(item.record.id, "/") + (item.record.id != "" ? 1 : 0)))
 		highlighted := w.status.hover_surface == .Panel && w.status.hover == i
-		if result := status_row_draw(app, w, r, item, highlighted, false, depth * 12 * s); result != .Ok {
+		indent := f32(row.depth) * 12 * s
+		if result := status_row_draw(app, w, r, row.item, highlighted, false, indent); result != .Ok {
 			return result
 		}
 	}
@@ -161,22 +184,24 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 status_panel_hit :: proc(
 	app: ^App,
 	w: ^Window,
-	items: []Status_Item,
+	rows: []Status_Panel_Row,
 	x, y: f32,
 ) -> (
 	index: int,
-	row: render.Rect,
+	rect: render.Rect,
 ) {
-	panel := status_panel_rect(app, w)
-	list := status_panel_list(app, w, panel)
+	list := status_panel_list(app, w, status_panel_rect(app, w))
 	if !status_rect_contains(list, x, y) {return -1, {}}
-	offsets, _ := status_panel_offsets(w, items)
-	for item, i in items {
-		top := list.y + offsets[i] - w.status.panel_scroll
-		r := render.Rect{list.x, top, list.width, status_item_height(w, item)}
-		if !item.group && status_rect_contains(r, x, y) {return i, r}
+	for row, i in rows {
+		r := status_panel_row_rect(w, list, row)
+		if !row.item.group && status_rect_contains(r, x, y) {return i, r}
 	}
 	return -1, {}
+}
+
+// The header button under the point, if any.
+status_panel_button_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Status_Panel_Button {
+	return status_rect_contains(status_panel_side_rect(app, w), x, y) ? .Side : .None
 }
 
 status_panel_contains :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
@@ -189,19 +214,20 @@ status_panel_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 	if !e.pressed || !status_panel_contains(app, w, x, y) {return false}
 	w.header_buttons += {e.button}
 	if e.button != .Left {return true}
-	if status_rect_contains(status_panel_side_rect(app, w), x, y) {
-		ui.armed_press(&w.status.panel_side_armed, true)
+	if button := status_panel_button_at(app, w, x, y); button != .None {
+		ui.armed_press(&w.status.panel_button_armed, button)
 		return true
 	}
-	items := status_items(app, w, true)
-	index, row := status_panel_hit(app, w, items, x, y)
+	rows, _ := status_panel_rows(app, w)
+	index, rect := status_panel_hit(app, w, rows, x, y)
 	if index < 0 {return true}
-	if status_dismissable(items[index].record) && status_rect_contains(status_dismiss_rect(w, row), x, y) {
-		status_dismiss_item(app, items[index])
+	item := rows[index].item
+	if status_dismissable(item.record) && status_rect_contains(status_dismiss_rect(w, rect), x, y) {
+		status_dismiss_item(app, item)
 		w.dirty = true
 		return true
 	}
-	status_open_item(app, w, items[index])
+	status_open_item(app, w, item)
 	return true
 }
 

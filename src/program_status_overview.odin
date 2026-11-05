@@ -37,11 +37,16 @@ Status_Surface :: enum {
 	Panel,
 }
 
+Status_Panel_Button :: enum {
+	None,
+	Side,
+}
+
 Status_Overview :: struct {
 	// A dragged width in DIPs and in-rail height as a share of the rail; zero follows the settings.
 	panel_width, panel_height: f32,
-	panel_side_armed: ui.Armed(bool),
-	panel_side_hover: bool,
+	panel_button_armed: ui.Armed(Status_Panel_Button),
+	panel_button_hover: Status_Panel_Button,
 	inbox_open: bool,
 	// Keyboard selection in the inbox, and the item under the pointer on any surface.
 	selected:               int,
@@ -555,8 +560,8 @@ status_inbox_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 // Pointer hover for every overview surface; true when an overview took the pointer.
 status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	side_hover := status_rect_contains(status_panel_side_rect(app, w), x, y)
-	if side_hover != w.status.panel_side_hover {w.status.panel_side_hover, w.dirty = side_hover, true}
+	button := status_panel_button_at(app, w, x, y)
+	if button != w.status.panel_button_hover {w.status.panel_button_hover, w.dirty = button, true}
 	pill := status_rect_contains(status_pill_rect(app, w), x, y)
 	if pill != w.status.pill_hover {w.status.pill_hover, w.dirty = pill, true}
 	surface := Status_Surface.None
@@ -564,13 +569,14 @@ status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if status_panel_contains(app, w, x, y) {
 		if _, over := divider_cursor(w, x, y); over {return false}
 		surface = .Panel
-		hover, _ = status_panel_hit(app, w, status_items(app, w, true), x, y)
+		rows, _ := status_panel_rows(app, w)
+		hover, _ = status_panel_hit(app, w, rows, x, y)
 	}
 	if surface != w.status.hover_surface || hover != w.status.hover {
 		w.status.hover_surface, w.status.hover, w.dirty = surface, hover, true
 	}
 	if surface == .None {return false}
-	pointer_set(app, w, hover >= 0 || side_hover ? .Hand : .Arrow)
+	pointer_set(app, w, hover >= 0 || button != .None ? .Hand : .Arrow)
 	return true
 }
 
