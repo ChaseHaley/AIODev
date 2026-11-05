@@ -51,10 +51,20 @@ function Exit-TestBudget($Budget) {
     }
 }
 
-function Invoke-TestCommand([string] $Executable, [string[]] $Arguments, [int] $TimeoutSeconds) {
+function Invoke-TestCommand([string] $Executable, [string[]] $Arguments, [int] $TimeoutSeconds,
+    [string] $CapturePath) {
     # Start-Process needs a Windows command line even when ArgumentList receives an array.
     $line = ($Arguments | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }) -join ' '
-    $child = Start-Process -FilePath $Executable -ArgumentList $line -NoNewWindow -PassThru -ErrorAction Stop
+    $capture = $null
+    if ($CapturePath) {
+        $CapturePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CapturePath)
+        if (-not ('AioTestCapture' -as [type])) { Add-Type -Path "$PSScriptRoot/test-capture.cs" }
+        $capture = [AioTestCapture]::new($CapturePath)
+        try { $child = $capture.Start($Executable, $line, (Get-Location).Path) }
+        catch { $capture.Dispose(); throw }
+    } else {
+        $child = Start-Process -FilePath $Executable -ArgumentList $line -NoNewWindow -PassThru -ErrorAction Stop
+    }
     try {
         $watch = [Diagnostics.Stopwatch]::StartNew()
         while (-not $child.WaitForExit(200)) {
@@ -65,11 +75,24 @@ function Invoke-TestCommand([string] $Executable, [string[]] $Arguments, [int] $
         }
         return $child.ExitCode
     } finally {
-        # Kill descendants as well when the runner hangs or the invoking shell is cancelled.
-        if (-not $child.HasExited) {
-            & taskkill.exe /PID $child.Id /T /F | Out-Null
-            if (-not $child.WaitForExit(5000)) { throw "Cannot stop owned test process $($child.Id)." }
+        try {
+            # Kill descendants as well when the runner hangs or the invoking shell is cancelled.
+            if (-not $child.HasExited) {
+                & taskkill.exe /PID $child.Id /T /F | Out-Null
+                if (-not $child.WaitForExit(5000)) { throw "Cannot stop owned test process $($child.Id)." }
+            }
+            if ($capture) {
+                # Drain async output callbacks after the process exits, before taking the snapshot.
+                if (-not $capture.WaitForOutput(5000)) { throw 'Test output pipes did not close after process exit.' }
+                @{ Tests = @($capture.Tests); Fixtures = @($capture.Fixtures) } |
+                    ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$CapturePath.costs.json" -Encoding utf8
+                Get-Content -LiteralPath $CapturePath | Where-Object {
+                    $_ -notmatch 'Test #\d+ \S+ changed state to ' -and $_ -notmatch '^\[AIO-FIXTURE\]'
+                } | ForEach-Object { Write-Host $_ }
+            }
+        } finally {
+            if ($capture) { $capture.Dispose() }
+            $child.Dispose()
         }
-        $child.Dispose()
     }
 }

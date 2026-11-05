@@ -136,3 +136,48 @@ no_changes_reports_no_work :: proc(t: ^testing.T) {
 	gates.format_plan(&out, plan)
 	testing.expect_value(t, strings.to_string(out), "change: 0 paths\nplan: no changes\n")
 }
+
+@(test)
+leaf_packages_select_fast_app_checks :: proc(t: ^testing.T) {
+	for name in gates.FAST_APP_PACKAGES {
+		path := strings.concatenate({"src/", name, "/changed.odin"}, context.temp_allocator)
+		plan := gates.classify([]string{path})
+		defer gates.plan_destroy(&plan)
+		testing.expect(t, has_test(plan, "app") && has_test(plan, name))
+		testing.expect(t, !plan.app_all && !plan.fallback)
+		out := strings.builder_make()
+		defer strings.builder_destroy(&out)
+		gates.format_plan(&out, plan)
+		testing.expect(t, strings.contains(strings.to_string(out), "run: .\\build.ps1 test app -TestLane Fast\n"))
+	}
+}
+
+@(test)
+composed_native_persistence_and_mixed_changes_keep_all_app_checks :: proc(t: ^testing.T) {
+	for path in ([]string{"src/window.odin", "src/platform/platform_windows.odin",
+		"src/settings/settings.odin", "src/ui/palette.odin", "src/term/input.odin",
+		"src/unknown/module.odin", "tests/app/rail_test.odin"}) {
+		plan := gates.classify([]string{"src/fuzzy/fuzzy.odin", path})
+		defer gates.plan_destroy(&plan)
+		testing.expect(t, plan.app_all, path)
+		out := strings.builder_make()
+		defer strings.builder_destroy(&out)
+		gates.format_plan(&out, plan)
+		testing.expect(t, strings.contains(strings.to_string(out), "run: .\\build.ps1 test app\n"))
+	}
+}
+
+@(test)
+test_runner_scripts_require_the_full_gate :: proc(t: ^testing.T) {
+	for path in ([]string{"tools/test-suite.ps1", "tests/tools/test_capture.ps1", "tests/tools/idle_shell/main.odin"}) {
+		plan := gates.classify([]string{path})
+		defer gates.plan_destroy(&plan)
+		testing.expect(t, plan.fallback && plan.solo && plan.tooling)
+		out := strings.builder_make()
+		defer strings.builder_destroy(&out)
+		gates.format_plan(&out, plan)
+		text := strings.to_string(out)
+		testing.expect(t, strings.contains(text, "run: pwsh -NoProfile -File tests/tools/test_capture.ps1\n"))
+		testing.expect(t, strings.contains(text, "run: pwsh -NoProfile -File tests/tools/test_lanes.ps1\n"))
+	}
+}

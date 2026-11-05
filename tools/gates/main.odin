@@ -38,6 +38,10 @@ PERF_PREFIXES :: []string {
 }
 PERF_FILES :: []string{"src/window.odin"}
 
+// These packages have direct unit suites and no window/process ownership. Their app contracts are
+// checked by the fast lane per change; full native integration remains a batch obligation.
+FAST_APP_PACKAGES :: []string{"colour", "draws", "fuzzy", "links", "perf", "pixels", "program_art", "vector"}
+
 Plan :: struct {
 	allocator: runtime.Allocator,
 	paths:     []string,
@@ -47,6 +51,8 @@ Plan :: struct {
 	live:      bool,
 	solo:      bool,
 	perf:      bool,
+	app_all:   bool,
+	tooling:   bool,
 }
 
 // classify maps changed paths to tier obligations. It does not inspect the filesystem; finalize adds
@@ -74,6 +80,10 @@ plan_destroy :: proc(plan: ^Plan) {
 
 @(private)
 classify_path :: proc(plan: ^Plan, path: string) {
+	if path == "build.ps1" || strings.has_prefix(path, "tools/test-") ||
+	   strings.has_prefix(path, "tests/tools/") || path == "tests/app/lanes.json" {
+		plan.tooling = true
+	}
 	switch {
 	case strings.has_suffix(path, ".md"), path == ".gitignore", path == ".gitattributes":
 		return
@@ -84,7 +94,13 @@ classify_path :: proc(plan: ^Plan, path: string) {
 	case strings.has_prefix(path, "tools/"):
 		// Tools are compiled by check; a dedicated test package is optional.
 		parts := strings.split(path, "/", context.temp_allocator)
-		if len(parts) >= 2 {add_test(plan, parts[1])}
+		if len(parts) >= 3 {
+			add_test(plan, parts[1])
+		} else {
+			plan.fallback = true
+			plan.solo = true
+			add_reason(plan, "tool script")
+		}
 	case path == "build.ps1":
 		plan.fallback = true
 		plan.solo = true
@@ -104,10 +120,14 @@ classify_path :: proc(plan: ^Plan, path: string) {
 @(private)
 classify_source :: proc(plan: ^Plan, path: string) {
 	rest := path[len("src/"):]
-	// The app tests exercise the composed application and are cheap enough for every source change.
+	// Every source change keeps composed app coverage. Only explicit leaf packages use its fast lane.
 	add_test(plan, "app")
 	if separator := strings.index_byte(rest, '/'); separator >= 0 {
-		add_test(plan, rest[:separator])
+		name := rest[:separator]
+		add_test(plan, name)
+		plan.app_all ||= !in_list(name, FAST_APP_PACKAGES)
+	} else {
+		plan.app_all = true
 	}
 	if in_list(path, NATIVE_FILES) || has_prefix_any(path, NATIVE_PREFIXES) {
 		plan.live = true
@@ -132,13 +152,20 @@ classify_source :: proc(plan: ^Plan, path: string) {
 @(private)
 classify_test :: proc(plan: ^Plan, path: string) {
 	rest := path[len("tests/"):]
+	if strings.has_prefix(rest, "tools/") {
+		plan.fallback, plan.solo = true, true
+		add_reason(plan, "test tooling")
+		return
+	}
 	if strings.has_prefix(rest, "live/") {
 		plan.live = true
 		add_reason(plan, "live script")
 		return
 	}
 	if separator := strings.index_byte(rest, '/'); separator >= 0 {
-		add_test(plan, rest[:separator])
+		name := rest[:separator]
+		add_test(plan, name)
+		if name == "app" {plan.app_all = true}
 	}
 }
 
@@ -218,6 +245,12 @@ format_plan :: proc(out: ^strings.Builder, plan: Plan) {
 	} else {
 		fmt.sbprintf(out, "tier0.tests: %s\n", strings.join(plan.tests[:], " ", context.temp_allocator))
 	}
+	for name in plan.tests {
+		if name == "app" {
+			fmt.sbprintf(out, "tier0.app: %s\n", plan.app_all || plan.fallback ? "all" : "fast")
+			break
+		}
+	}
 	fmt.sbprintf(out, "tier0.fallback: %s\n", plan.fallback ? "full" : "no")
 	fmt.sbprintf(out, "tier1.live: %s\n", plan.live ? "required" : "no")
 	fmt.sbprintf(
@@ -233,7 +266,16 @@ format_plan :: proc(out: ^strings.Builder, plan: Plan) {
 		fmt.sbprintf(out, "run: .\\build.ps1 test\n")
 	} else {
 		for name in plan.tests {
-			fmt.sbprintf(out, "run: .\\build.ps1 test %s\n", name)
+			if name == "app" && !plan.app_all {
+				fmt.sbprintf(out, "run: .\\build.ps1 test app -TestLane Fast\n")
+			} else {
+				fmt.sbprintf(out, "run: .\\build.ps1 test %s\n", name)
+			}
+		}
+	}
+	if plan.tooling {
+		for script in ([]string{"test_budget", "test_capture", "test_lanes"}) {
+			fmt.sbprintf(out, "run: pwsh -NoProfile -File tests/tools/%s.ps1\n", script)
 		}
 	}
 }

@@ -15,10 +15,14 @@ import "aio:ui"
 Palette_Fixture :: struct {
 	state: app.App,
 	directory, path: string,
+	name: string,
 }
 
 @(private, require_results)
 palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string, second_window := true) -> bool {
+	f.name = name
+	start := time.tick_now()
+	defer {fixture_cost(name, "setup", start, len(f.state.windows), len(f.state.sessions))}
 	err: os.Error
 	f.directory, err = os.make_directory_temp("", "aio-palette-*", context.allocator)
 	if !testing.expect_value(t, err, nil) { return false }
@@ -50,6 +54,9 @@ palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string,
 
 @(private)
 palette_fixture_destroy :: proc(t: ^testing.T, f: ^Palette_Fixture) {
+	start := time.tick_now()
+	windows, sessions := len(f.state.windows), len(f.state.sessions)
+	defer fixture_cost(f.name, "cleanup", start, windows, sessions)
 	app.app_destroy(&f.state)
 	if f.path != "" { testing.expect_value(t, os.remove(f.path), nil); delete(f.path) }
 	if f.directory != "" { testing.expect_value(t, os.remove(f.directory), nil); delete(f.directory) }

@@ -48,15 +48,16 @@ gestures_header_multiple_buttons_release_outside_over_caption :: proc(t: ^testin
 
 @(test)
 gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "gesture-cancel") {return}
+	s, w := &f.state, f.state.windows[0]
+	app.pane_split(s, w, .Right)
+	ids := [?]u32{s.sessions[0].id, s.sessions[1].id, s.sessions[2].id}
+	pids := [?]u32{term.process_id(s.sessions[0].session), term.process_id(s.sessions[1].session),
+		term.process_id(s.sessions[2].session)}
 	for scenario in 0 ..< 8 {
-		f: Palette_Fixture
-		defer palette_fixture_destroy(t, &f)
-		if !palette_fixture_create(t, &f, "gesture-cancel") {return}
-		s, w := &f.state, f.state.windows[0]
-		app.pane_split(s, w, .Right)
-		ids := [?]u32{s.sessions[0].id, s.sessions[1].id, s.sessions[2].id}
-		pids := [?]u32{term.process_id(s.sessions[0].session), term.process_id(s.sessions[1].session),
-			term.process_id(s.sessions[2].session)}
+		testing.expect_value(t, len(w.panes), 2)
 		h := gesture_header(w)
 		close := h.buttons[3]
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)
@@ -82,6 +83,12 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 		}
 		testing.expect(t, !w.pane_drag.pressed && !w.tab_drag.pressed && w.header_buttons == {})
 		testing.expect(t, !w.selecting && !w.autoscrolling)
+		if scenario == 5 {
+			// Return to the same terminal tree after the Settings case, with every runtime intact.
+			if !testing.expect(t, app.settings_active(w)) {return}
+			app.tab_close(s, w, w.workspace.selected)
+			testing.expect_value(t, len(w.workspace.tabs), 1)
+		}
 	}
 }
 

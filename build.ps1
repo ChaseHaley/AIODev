@@ -13,6 +13,9 @@ param(
     [ValidatePattern('^[A-Za-z0-9_.,]*$')]
     [string] $TestNames,
 
+    [ValidateSet('All', 'Fast', 'Native')]
+    [string] $TestLane = 'All',
+
     [ValidateRange(1, 900)]
     [int] $TestTimeoutSeconds = 300
 )
@@ -21,6 +24,9 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 if ($OutputPath -and $Task -ne 'release') { throw 'OutputPath is supported for release builds.' }
 if ($TestNames -and ($Task -ne 'test' -or -not $Package)) { throw 'TestNames requires test and a package.' }
+if ($TestLane -ne 'All' -and ($Task -ne 'test' -or $Package -ne 'app')) {
+    throw 'TestLane requires test app.'
+}
 
 function Invoke-Odin {
     & odin @args
@@ -245,6 +251,6 @@ switch ($Task) {
     'test' {
         . "$PSScriptRoot/tools/test-suite.ps1"
         Invoke-TestSuite -TestPackages $testPackages -Package $Package -TestNames $TestNames `
-            -TestTimeoutSeconds $TestTimeoutSeconds -Flags $flags -Resource $resource
+            -TestLane $TestLane -TestTimeoutSeconds $TestTimeoutSeconds -Flags $flags -Resource $resource
     }
 }
