@@ -6,7 +6,7 @@ package main
 workspace_eligible :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	if !workspace_registered(app, workspace) || workspace.provisional {return false}
 	owner := window_for_workspace(app, workspace)
-	return owner == nil || !owner.preparing
+	return owner == nil || owner.phase != .Preparing
 }
 
 // Editing stored workspace data is not a display action, so it needs only the live record.

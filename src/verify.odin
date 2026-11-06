@@ -122,7 +122,7 @@ when AIO_CONTROL {
 		if app.verify.target_window != 0 {
 			if w := window_find(app, app.verify.target_window); w != nil {
 				// A hidden linked window presents no frames, so it cannot answer; the selection waits.
-				if !w.linked || w.link_shown {return w}
+				if w.phase != .Hidden {return w}
 			} else {
 				app.verify.target_window = 0
 				app.verify.mouse_window, app.verify.buttons = 0, {}
@@ -175,8 +175,7 @@ when AIO_CONTROL {
 		}
 		if v.pending == nil {return {}, false}
 		for w in app.windows {
-			if w.linked && !w.link_shown {continue}
-			if w.dirty && w.width > 0 && w.height > 0 {return now, true}
+			if w.dirty && window_drawable(w) {return now, true}
 		}
 		deadline := time.tick_add(
 			v.started,
@@ -301,7 +300,7 @@ when AIO_CONTROL {
 			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
 			{"app.settings", app.settings_path},
 			{"app.log", app.log_path},
-			{"window.visible", fmt.tprintf("%t", window_primary(app) != nil)},
+			{"window.visible", fmt.tprintf("%t", !app_tray_only(app))},
 			{"windows.count", fmt.tprintf("%d", len(app.windows))},
 			{"palette.window", fmt.tprintf("%d", app.palette_window)},
 			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
@@ -361,9 +360,12 @@ when AIO_CONTROL {
 					fmt.tprintf("%s.workspace_index", prefix),
 					fmt.tprintf("%d", verify_workspace_index(app, window)),
 				},
-				{fmt.tprintf("%s.preparing", prefix), fmt.tprintf("%t", window.preparing)},
-				{fmt.tprintf("%s.linked", prefix), fmt.tprintf("%t", window.linked)},
-				{fmt.tprintf("%s.link_shown", prefix), fmt.tprintf("%t", window.link_shown)},
+				{fmt.tprintf("%s.preparing", prefix), fmt.tprintf("%t", window.phase == .Preparing)},
+				{fmt.tprintf("%s.linked", prefix), fmt.tprintf("%t", window_linked(window))},
+				{
+					fmt.tprintf("%s.link_shown", prefix),
+					fmt.tprintf("%t", window_linked(window) && window.phase == .Shown),
+				},
 			}
 			if _, err := append(&entries, ..inventory[:]); err != nil {return nil, .Out_Of_Memory}
 		}
@@ -586,7 +588,7 @@ when AIO_CONTROL {
 				{"workspace.picker.rename_field", verify_workspace_rect(workspace_row_rename_field_rect(w))},
 				{"workspace.picker.rename_error", fmt.tprintf("%t", w.workspace_picker.rename_error)},
 				{"workspace.picker.icon_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Icons))},
-				{"window.preparing", fmt.tprintf("%t", w.preparing)},
+				{"window.preparing", fmt.tprintf("%t", w.phase == .Preparing)},
 				{"pointer.shape", strings.to_lower(fmt.tprintf("%v", w.pointer_shape), context.temp_allocator)},
 				{"pointer.updates", fmt.tprintf("%d", app.verify.pointer_updates)},
 				{"link.hover", link_hover},

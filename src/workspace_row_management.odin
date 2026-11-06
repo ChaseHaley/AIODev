@@ -11,7 +11,7 @@ WORKSPACE_ROW_ACTIONS :: [?]Workspace_Row_Action{.Rename, .Icon, .Open_Window, .
 
 workspace_row_window_enabled :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 	target := workspace_row_target(app, id)
-	return w != nil && !w.preparing && window_find(app, w.id) == w &&
+	return w != nil && w.phase != .Preparing && window_find(app, w.id) == w &&
 		target != nil && target != w.workspace
 }
 

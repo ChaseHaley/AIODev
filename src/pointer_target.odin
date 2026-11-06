@@ -107,7 +107,7 @@ POINTER_LINKED_ABSENT :: bit_set[Pointer_Target] {
 // and drags that already hold the pointer before acting on the answer.
 pointer_target :: proc(app: ^App, w: ^Window, x, y: f32) -> Pointer_Target {
 	for target in Pointer_Target {
-		if w.linked && target in POINTER_LINKED_ABSENT {continue}
+		if window_linked(w) && target in POINTER_LINKED_ABSENT {continue}
 		if pointer_surfaces[target].claims(app, w, x, y) {return target}
 	}
 	return .Content
@@ -353,7 +353,7 @@ caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	switch ui.caption_hit(f32(w.width), x, y, w.scale) {
 	case 0: return "Minimize"
 	case 1: return w.maximized ? "Restore" : "Maximize"
-	case 2: return w.linked ? "Return pane to tab" : "Close window"
+	case 2: return window_linked(w) ? "Return pane to tab" : "Close window"
 	case: return ""
 	}
 }
@@ -747,7 +747,7 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	case .Split_Down: return "Split down"
 	case .Zoom: return "Zoom"
 	case .Fill_Window: return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
-	case .Linked_Window: return w.linked ? "Return pane to tab" : "Move pane to linked window"
+	case .Linked_Window: return window_linked(w) ? "Return pane to tab" : "Move pane to linked window"
 	case .Close: return "Close pane"
 	case:
 	}

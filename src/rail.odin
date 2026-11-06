@@ -93,7 +93,7 @@ rail_width_pixels :: proc(w: ^Window) -> f32 {
 }
 
 rail_resize_rect :: proc(w: ^Window) -> render.Rect {
-	if w.preparing || !rail_visible(w) {return {}}
+	if w.phase == .Preparing || !rail_visible(w) {return {}}
 	area := rail_area(w)
 	return {area.x + area.width - 3 * w.scale, area.y, 6 * w.scale, area.height}
 }

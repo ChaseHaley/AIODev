@@ -73,12 +73,12 @@ workspace133_window_action_rechecks_requester_target_and_owner :: proc(t: ^testi
 	testing.expect_value(t, len(s.windows), 2)
 	testing.expect_value(t, app.workspace_row_window_title(s, f.target.id), "Show Existing Window")
 	testing.expect(t, app.workspace_row_window_enabled(s, w, f.target.id))
-	f.owner.preparing = true
+	f.owner.phase = .Preparing
 	testing.expect(t, !app.workspace_open_window(s, w, f.target.id))
-	f.owner.preparing = false
-	w.preparing = true
+	f.owner.phase = .Shown
+	w.phase = .Preparing
 	testing.expect(t, !app.workspace_open_window(s, w, f.target.id))
-	w.preparing = false
+	w.phase = .Shown
 	closed := app.Window{id = 99, workspace = f.current}
 	testing.expect(t, !app.workspace_open_window(s, &closed, f.target.id))
 	testing.expect(t, !app.workspace_open_window(s, w, max(u32)))
@@ -268,12 +268,12 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	if !workspace134_init(t, &f) { return }
 	s, w := &f.state, &f.w
 	app.workspace_row_menu_open(s, w, f.target.id)
-	f.owner.preparing = true
+	f.owner.phase = .Preparing
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
 	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && app.workspace_picker_target(&w.workspace_picker, .Menu) == 0)
 	app.workspace_row_menu_open(s, w, f.target.id)
 	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), u32(0))
-	f.owner.preparing = false
+	f.owner.phase = .Shown
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_text(s, w, "Stale")
 	f.owner.workspace = nil

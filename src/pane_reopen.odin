@@ -228,7 +228,7 @@ closed_reopen_linked :: proc(
 	pane_link_store(app, linked)
 	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
 	pane_focus(app, linked, added)
-	linked.link_activate = true
+	pane_link_activate(linked)
 	window_relayout(app, linked)
 }
 

@@ -419,10 +419,10 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	app.workspace_delete_request(state, w, target)
 	testing.expect(t, !w.pending_close.confirm.open)
 	target.provisional = false
-	w.preparing = true
+	w.phase = .Preparing
 	app.workspace_delete_request(state, w, target)
 	testing.expect(t, !w.pending_close.confirm.open)
-	w.preparing = false
+	w.phase = .Shown
 	app.workspace_new(state, w, true)
 	app.rename_finish(state, w, true)
 	requester := state.windows[1]

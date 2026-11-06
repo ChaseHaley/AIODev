@@ -15,7 +15,7 @@ workspace167_eligibility_subsets_match_their_callers :: proc(t: ^testing.T) {
 	if !testing.expect(t, first != nil && second != nil && third != nil && fourth != nil) {return}
 	defer {for workspace in state.workspaces {app.workspace_destroy(workspace)}}
 	second.provisional = true
-	preparing := app.Window{workspace = third, preparing = true}
+	preparing := app.Window{workspace = third, phase = .Preparing}
 	ready := app.Window{workspace = fourth}
 	append(&state.windows, &preparing)
 	append(&state.windows, &ready)

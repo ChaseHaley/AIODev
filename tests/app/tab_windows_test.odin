@@ -441,7 +441,7 @@ linked_window_follows_a_tab_whose_window_closes :: proc(t: ^testing.T) {
 	app.pane_split(&state, source, .Right)
 	app.pane_link_toggle(&state, source)
 	linked: ^app.Window
-	for window in state.windows {if window.linked {linked = window}}
+	for window in state.windows {if app.window_linked(window) {linked = window}}
 	if !testing.expect(t, linked != nil) {return}
 	source_id, workspace_id := source.id, source.workspace.id
 	tab_drag_over_window(&state, source, destination, 0, 0, 10)
@@ -449,8 +449,8 @@ linked_window_follows_a_tab_whose_window_closes :: proc(t: ^testing.T) {
 	app.pane_links_sync(&state)
 	testing.expect(t, app.window_find(&state, source_id) == nil)
 	testing.expect(t, app.workspace_find(&state, workspace_id) == nil)
-	testing.expect(t, app.window_find(&state, linked.id) == linked && linked.link_shown)
-	testing.expect_value(t, linked.link_workspace, destination.workspace.id)
+	testing.expect(t, app.window_find(&state, linked.id) == linked && linked.phase == .Shown)
+	testing.expect_value(t, app.window_link_workspace(linked), destination.workspace.id)
 	app.tick(&state)
 }
 
@@ -502,7 +502,7 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	testing.expect(t, source.tab_drag.new_window)
 	preview := app.window_find(&state, source.tab_drag.preview_window)
 	if !testing.expect(t, preview != nil) {return}
-	testing.expect(t, preview.preparing && preview.workspace.provisional)
+	testing.expect(t, preview.phase == .Preparing && preview.workspace.provisional)
 	testing.expect_value(t, len(state.sessions), sessions)
 	testing.expect_value(t, tab_pane_count(first), 2)
 	app.tab_drag_cancel(&state, source)
@@ -528,7 +528,7 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	failed := app.tabs_to_window(&state, source, preview)
 	context.allocator = allocator
 	testing.expect(t, !failed)
-	testing.expect(t, preview.preparing)
+	testing.expect(t, preview.phase == .Preparing)
 	testing.expect_value(t, tab_pane_count(first), 2)
 	testing.expect_value(t, len(workspace.tabs), 3)
 	app.tab_drag_cancel(&state, source)
@@ -539,7 +539,7 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	if !testing.expect(t, preview != nil) {return}
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(state.windows), 2)
-	testing.expect(t, !preview.preparing && !preview.workspace.provisional)
+	testing.expect(t, preview.phase == .Shown && !preview.workspace.provisional)
 	testing.expect(t, preview.workspace.name != "")
 	testing.expect(t, preview.rename_open && preview.rename_mode == .Workspace)
 	testing.expect(t, !source.rename_open)
@@ -591,9 +591,9 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	app.pane_split(&state, group, .Right)
 	app.pane_link_toggle(&state, group)
 	linked: ^app.Window
-	for window in state.windows {if window.linked {linked = window}}
+	for window in state.windows {if app.window_linked(window) {linked = window}}
 	if !testing.expect(t, linked != nil) {return}
-	testing.expect_value(t, linked.link_workspace, group.workspace.id)
+	testing.expect_value(t, app.window_link_workspace(linked), group.workspace.id)
 	carried := moved[1]
 	panes := layout.pane_count(&carried.tree)
 	app.tab_select(&state, group, 1)
@@ -605,7 +605,7 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	app.pane_links_sync(&state)
 	if !testing.expect_value(t, len(home.workspace.tabs), 1) {return}
 	testing.expect_value(t, layout.pane_count(&home.workspace.tabs[0].tree), panes)
-	testing.expect_value(t, linked.link_workspace, home.workspace.id)
-	testing.expect(t, app.window_find(&state, linked.id) == linked && linked.link_shown)
+	testing.expect_value(t, app.window_link_workspace(linked), home.workspace.id)
+	testing.expect(t, app.window_find(&state, linked.id) == linked && linked.phase == .Shown)
 	app.tick(&state)
 }

@@ -174,7 +174,7 @@ pane_target_resolve :: proc(app: ^App, text: string, caller: u32) -> (Pane_Targe
 			return {}, outcome_failure(.Target, "no window is open")
 		}
 		// A linked window's workspace is only a view; the pane's identity is in its tab.
-		if w.linked {
+		if window_linked(w) {
 			if target, found := pane_target_session(app, pane_link_content(w).id); found {return target, {}}
 			return {}, outcome_failure(.Target, "the focused window has no pane")
 		}

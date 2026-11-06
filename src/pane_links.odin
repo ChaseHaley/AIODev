@@ -131,7 +131,7 @@ pane_link_locate :: proc(app: ^App, w: ^Window) -> (Pane_Link_Home, bool) {
 
 pane_link_window_of :: proc(app: ^App, content: layout.Content) -> ^Window {
 	for w in app.windows {
-		if w.linked && layout.find_content(w.tree, content) != layout.INVALID_NODE {return w}
+		if window_linked(w) && layout.find_content(w.tree, content) != layout.INVALID_NODE {return w}
 	}
 	return nil
 }
@@ -208,7 +208,7 @@ pane_link_refresh_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
 	if layout.link_view_load(w.tree, &home.tab.tree, home.slot) != nil {
 		log.error("updating a linked window's panes failed")
 	}
-	w.link_workspace = home.workspace.id
+	pane_link_track(w, home)
 	window_relayout(app, w)
 	focus_enter(app, w)
 	layout_state_touch(app)
@@ -217,7 +217,7 @@ pane_link_refresh_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
 // Refreshes a linked window after `content` left it. Its remaining panes name the slot, which a move may
 // have changed; a window with no panes left closes.
 pane_link_refresh_source :: proc(app: ^App, w: ^Window, content: layout.Content) {
-	if w == nil || !w.linked {return}
+	if w == nil || !window_linked(w) {return}
 	for node in w.tree.nodes {
 		pane := node.(layout.Pane) or_continue
 		if pane.content == content {continue}
@@ -239,18 +239,10 @@ pane_link_store :: proc(app: ^App, w: ^Window) {
 	layout_state_touch(app)
 }
 
-// The first window that shows a workspace of its own, which is what callers mean by the app's window.
-window_primary :: proc(app: ^App) -> ^Window {
-	for w in app.windows {
-		if !w.linked {return w}
-	}
-	return nil
-}
-
 // The window showing the pane's tab, or the app's window when nothing shows it.
 @(private)
 pane_link_host :: proc(app: ^App, w: ^Window) -> ^Window {
-	if workspace := workspace_find(app, w.link_workspace); workspace != nil {
+	if workspace := workspace_find(app, window_link_workspace(w)); workspace != nil {
 		if host := window_for_workspace(app, workspace); host != nil {return host}
 	}
 	return window_primary(app)
@@ -258,7 +250,7 @@ pane_link_host :: proc(app: ^App, w: ^Window) -> ^Window {
 
 // The window a tab, workspace or settings choice made here should act in, brought forward.
 pane_link_acting_window :: proc(app: ^App, w: ^Window) -> ^Window {
-	if !w.linked {return w}
+	if !window_linked(w) {return w}
 	host := pane_link_host(app, w)
 	if host == nil {return w}
 	_ = window_activate(app, host)
@@ -284,15 +276,15 @@ pane_link_window_create :: proc(
 	tab_record_commit(app, view, tab)
 	w := window_prepare(app, view)
 	if w == nil {workspace_destroy(view); return nil}
-	w.preparing, w.linked = false, true
-	w.link_workspace = workspace.id
+	// Preparing → Hidden: the window stays off screen until pane_links_sync finds its tab shown.
+	w.phase, w.link = .Hidden, Window_Link{workspace = workspace.id}
 	window_apply_settings(app, w)
 	window_update_title(app, w)
 	return w
 }
 
 pane_link_toggle :: proc(app: ^App, w: ^Window) {
-	if w.linked {pane_link_return_focused(app, w); return}
+	if window_linked(w) {pane_link_return_focused(app, w); return}
 	tab := selected_tab(w.workspace)
 	if tab == nil {return}
 	node := w.tree.focus
@@ -315,7 +307,7 @@ pane_link_toggle :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	window_relayout(app, w)
-	linked.link_activate = true
+	pane_link_activate(linked)
 	layout_state_touch(app)
 }
 
@@ -372,31 +364,45 @@ pane_link_end :: proc(app: ^App, w: ^Window) {
 	window_close(app, w)
 }
 
+// Records the workspace that holds a linked window's panes, which a move may have changed.
+@(private)
+pane_link_track :: proc(w: ^Window, home: Pane_Link_Home) {
+	if link, linked := &w.link.?; linked {link.workspace = home.workspace.id}
+}
+
+// Activates a linked window once it is on screen: now, or when pane_links_sync next shows it.
+pane_link_activate :: proc(w: ^Window) {
+	if link, linked := &w.link.?; linked {link.activate = true}
+}
+
+// Hidden → Shown.
 @(private)
 pane_link_show :: proc(app: ^App, w: ^Window, host: ^Window) {
 	if platform.window_show_raised(&app.platform, w.id) != .None {
 		log.error("showing a linked window failed")
 		return
 	}
-	w.link_shown, w.dirty = true, true
-	if w.link_maximize && !app.options.inactive {
+	w.phase, w.dirty = .Shown, true
+	link := &w.link.?
+	if link.maximize && !app.options.inactive {
 		platform.window_maximize(&app.platform, w.id)
-		if !w.link_activate && host != nil {_ = window_activate(app, host)}
+		if !link.activate && host != nil {_ = window_activate(app, host)}
 	}
-	w.link_maximize = false
+	link.maximize = false
 }
 
+// Shown → Hidden.
 @(private)
 pane_link_hide :: proc(app: ^App, w: ^Window, host: ^Window) {
 	// Activating restores a minimized window, which would undo the minimize that caused this hide.
-	if w.focused && host != nil && host.width > 0 {_ = window_activate(app, host)}
+	if w.focused && host != nil && !window_minimized(host) {_ = window_activate(app, host)}
 	window_overlays_cancel(app, w)
 	tooltip_cancel(w)
 	if platform.window_hide(&app.platform, w.id) != .None {
 		log.error("hiding a linked window failed")
 		return
 	}
-	w.link_shown = false
+	w.phase = .Hidden
 	// A hidden window draws no frames, so nothing would ever stop these from waking the loop.
 	w.blinking, w.status_spinning = false, false
 }
@@ -407,25 +413,21 @@ pane_links_sync :: proc(app: ^App) {
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		if i >= len(app.windows) {continue}
 		w := app.windows[i]
-		if !w.linked {continue}
+		if !window_linked(w) {continue}
 		home, found := pane_link_locate(app, w)
 		if !found {pane_link_end(app, w); continue}
 		pane_link_reconcile(app, w)
-		w.link_workspace = home.workspace.id
+		pane_link_track(w, home)
 		host := window_for_workspace(app, home.workspace)
-		shown :=
-			host != nil &&
-			!host.preparing &&
-			host.width > 0 &&
-			host.height > 0 &&
-			selected_tab(home.workspace) == home.tab
-		if shown && !w.link_shown {
+		on_screen := host != nil && window_drawable(host) && selected_tab(home.workspace) == home.tab
+		if on_screen && w.phase == .Hidden {
 			pane_link_show(app, w, host)
-		} else if !shown && w.link_shown {
+		} else if !on_screen && w.phase == .Shown {
 			pane_link_hide(app, w, pane_link_host(app, w))
 		}
-		if w.link_activate && w.link_shown {_ = window_activate(app, w)}
-		w.link_activate = false
+		link := &w.link.?
+		if link.activate && w.phase == .Shown {_ = window_activate(app, w)}
+		link.activate = false
 	}
 }
 
@@ -466,7 +468,7 @@ pane_link_restore :: proc(
 		log.error("restoring a linked window's placement failed")
 		return
 	}
-	w.link_maximize = placement.maximized
+	if link, linked := &w.link.?; linked {link.maximize = placement.maximized}
 	if dpi := platform.window_dpi(&app.platform, w.id); dpi != 0 && f32(dpi) / 96 != w.scale {
 		window_set_dpi(app, w, dpi)
 	}

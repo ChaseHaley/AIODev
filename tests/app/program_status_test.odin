@@ -22,7 +22,7 @@ program_status_spinner_stops_when_not_drawn_or_window_has_no_extent :: proc(t: ^
 	windows := [3]app.Window{
 		{width = 800, height = 600},
 		{status_spinning = true},
-		{status_spinning = true, width = 800, height = 600, preparing = true},
+		{status_spinning = true, width = 800, height = 600, phase = .Preparing},
 	}
 	for w in windows {
 		window := w

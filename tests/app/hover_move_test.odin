@@ -12,7 +12,7 @@ pointer_movement_repaints_a_visible_rim_without_changing_hover :: proc(t: ^testi
 	w := app.Window {
 		id = 7,
 		// Preparing keeps the gesture path out of this test; the pointer still moves.
-		preparing = true,
+		phase = .Preparing,
 		pointer = {10, 10},
 	}
 	defer delete(state.windows)

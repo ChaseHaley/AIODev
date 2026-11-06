@@ -17,7 +17,7 @@ window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 		f32(app.settings.pane.gap),
 		w.scale,
 	)
-	if !w.tabs_horizontal && rail_docked(w) && !w.preparing {
+	if !w.tabs_horizontal && rail_docked(w) && w.phase != .Preparing {
 		rail_width := min(rail_width_pixels(w), r.width)
 		r.x += rail_width
 		r.width -= rail_width
@@ -63,7 +63,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		w.maximized,
 		w.pointer,
 	); result != .Ok {return result}
-	if w.linked {return pane_link_title_draw(app, w)}
+	if window_linked(w) {return pane_link_title_draw(app, w)}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
 	if result := status_pill_draw(app, w); result != .Ok {return result}
 	title_actions_draw(app, w)

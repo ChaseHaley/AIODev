@@ -133,7 +133,7 @@ pane_header_draw :: proc(
 		controls,
 		pane_view_current(w) == .Zoom,
 		w.pane_fill == .Content,
-		w.linked,
+		window_linked(w),
 		icon_atlas,
 		badge_hovered,
 		w.pointer,

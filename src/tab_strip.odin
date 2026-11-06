@@ -107,7 +107,7 @@ strip_tab_interaction_hit :: proc(
 
 // The rightmost point the title chrome claims before the native caption buttons start.
 window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
-	if w.linked {return 0}
+	if window_linked(w) {return 0}
 	left := workspace_button_width(w) + status_pill_width(app, w)
 	if !w.tabs_horizontal {
 		toggle := tab_orientation_button_rect(w)

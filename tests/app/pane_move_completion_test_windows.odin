@@ -107,14 +107,14 @@ pane_move_completion_selects_titles_and_relayouts_all_destinations :: proc(t: ^t
 			if !testing.expect(t, app.pane_to_tab(state, f.destination, source, f.node)) {return}
 			destination = app.selected_tab(f.destination.workspace)
 		case 2:
-			f.destination.preparing, f.destination.workspace.provisional = true, true
+			f.destination.phase, f.destination.workspace.provisional = .Preparing, true
 			delete(f.destination.workspace.name)
 			f.destination.workspace.name = ""
 			destination.tree.nodes[destination.tree.root] = source.tree.nodes[f.node]
 			if !testing.expect(t, app.pane_to_window(state, f.source, source, f.node, f.destination.id)) {
 				return
 			}
-			testing.expect(t, !f.destination.preparing && !f.destination.workspace.provisional)
+			testing.expect(t, f.destination.phase == .Shown && !f.destination.workspace.provisional)
 			testing.expect(t, f.destination.workspace.name != "")
 		}
 		testing.expect_value(t, source.title, "remaining source")
