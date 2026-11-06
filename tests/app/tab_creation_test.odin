@@ -35,7 +35,7 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 	w: app.Window
 	app.profile_menu_init(&w.profile_menu)
 	defer app.profile_menu_destroy(&w.profile_menu)
-	for mode in ([?]app.Profile_Menu_Mode{.New_Tab, .Swap_Pane}) {
+	for mode in ([?]app.Profile_Menu_Mode{app.Profile_Menu_New_Tab{}, app.Profile_Menu_Swap_Pane{}}) {
 		app.profile_menu_open(&s, &w, mode, 0, 0)
 		expected := 0
 		for row in table.rows {
@@ -47,7 +47,8 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 			testing.expect_value(t, w.profile_menu.items[expected].label, row.name)
 			expected += 1
 		}
-		testing.expect_value(t, w.profile_menu.count, expected + (mode == .New_Tab ? 0 : 3))
+		_, swap := mode.(app.Profile_Menu_Swap_Pane)
+		testing.expect_value(t, w.profile_menu.count, expected + (swap ? 3 : 0))
 	}
 }
 
@@ -80,19 +81,21 @@ profile.order = default, cmd, hidden
 		count := len(w.workspace.tabs)
 		chevron := horizontal ? app.tab_chevron_rect(s, w) : app.rail_profile_rect(w)
 		creation_click(s, w, chevron, .Left)
-		if !testing.expect(t, w.profile_menu.open) {return}
+		if !testing.expect(t, app.profile_menu_shown(w)) {return}
 		testing.expect_value(t, w.rail_pressed, -1)
 		testing.expect_value(t, len(w.workspace.tabs), count)
-		testing.expect_value(t, w.profile_menu.mode, app.Profile_Menu_Mode.New_Tab)
+		shown, _ := w.overlay.(app.Overlay_Profile_Menu)
+		_, new_tab := shown.mode.(app.Profile_Menu_New_Tab)
+		testing.expect(t, new_tab)
 		cmd := -1
 		for entry, i in w.profile_menu.entries[:w.profile_menu.count] {
 			testing.expect(t, entry.profile_id != "hidden")
 			if entry.profile_id == "cmd" {cmd = i}
 		}
 		if !testing.expect(t, cmd >= 0) {return}
-		w.profile_menu.selected = cmd
+		ui.menu_select(&w.profile_menu.menu, cmd)
 		app.handle_event(s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
-		testing.expect(t, !w.profile_menu.open)
+		testing.expect(t, !app.profile_menu_shown(w))
 		testing.expect_value(t, len(w.workspace.tabs), count + 1)
 		testing.expect_value(t, app.focused_session(s, w).profile_id, "cmd")
 		if !horizontal {testing.expect(t, !app.rail_overlay(w))}
@@ -100,13 +103,50 @@ profile.order = default, cmd, hidden
 		w.rail_override = .Shown
 		plus := horizontal ? app.window_tab_new_rect(s, w) : app.rail_new_tab_rect(w)
 		creation_click(s, w, plus, .Right)
-		testing.expect(t, w.profile_menu.open)
+		testing.expect(t, app.profile_menu_shown(w))
 		testing.expect_value(t, len(w.workspace.tabs), count + 1)
 		app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-		testing.expect(t, !w.profile_menu.open)
+		testing.expect(t, !app.profile_menu_shown(w))
 		testing.expect_value(t, w.rail_pressed, -1)
 		creation_click(s, w, plus, .Left)
 		testing.expect_value(t, len(w.workspace.tabs), count + 2)
 		testing.expect_value(t, app.focused_session(s, w).profile_id, "default")
 	}
+}
+
+// Regression: a shell menu held a node id, so another tab taking the window could leave it naming that
+// tab's pane. Choosing a profile from the old menu must never replace that pane's shell.
+@(test)
+profile_menu_does_not_swap_a_pane_that_reuses_the_targets_node :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	text :: `profile.default.command = cmd.exe
+profile.cmd.name = Command Prompt
+profile.cmd.command = cmd.exe
+profile.cmd.directory = ~
+profile.order = default, cmd
+`
+	if !profile_fixture_create(t, &f, "profile-menu-stale", text) {return}
+	s, w := &f.state, f.state.windows[0]
+	first := app.focused_session(s, w).id
+	app.tab_new(s, w)
+	second := app.focused_session(s, w).id
+	app.tab_select(s, w, 0)
+	node := w.tree.focus
+	app.profile_menu_open_pane(s, w, node, 20, 20)
+	cmd := -1
+	for entry, i in w.profile_menu.entries[:w.profile_menu.count] {
+		if entry.profile_id == "cmd" {cmd = i}
+	}
+	if !testing.expect(t, cmd >= 0) {return}
+	// Replace the displayed tree without a user focus-leave: asynchronous layout changes need not pass
+	// through tab_select's overlay cancellation.
+	w.workspace.selected = 1
+	w.tree = &w.workspace.tabs[1].tree
+	if !testing.expect(t, first != second && w.tree.focus == node && app.profile_menu_shown(w)) {return}
+	ui.menu_select(&w.profile_menu.menu, cmd)
+	app.profile_menu_choose(s, w)
+	testing.expect(t, !app.profile_menu_shown(w) && !w.pending_swap.confirm.open)
+	testing.expect_value(t, app.focused_session(s, w).profile_id, "default")
+	testing.expect_value(t, app.session_find(s, first).profile_id, "default")
 }

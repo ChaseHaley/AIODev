@@ -1141,6 +1141,7 @@ editor_profile_remove_title :: proc(app: ^App, w: ^Window) -> string {
 editor_profile_remove_ask :: proc(app: ^App, w: ^Window, id: string) {
 	profile := settings.profile_find(&app.settings.profiles, id)
 	if profile == nil || profile.builtin || id == settings.PROFILE_DEFAULT_ID {return}
+	overlay_open(app, w, nil)
 	delete(w.profile_remove_id)
 	w.profile_remove_id = strings.clone(id)
 	ui.confirm_open(&w.profile_remove_confirm)

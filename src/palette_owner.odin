@@ -5,44 +5,82 @@ import "aio:font"
 import "aio:layout"
 import "aio:settings"
 import "aio:term"
+import "aio:platform"
 import "aio:ui"
 
+// Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
+// mapping between them, so keeping a window through a closing fade needs no second hand-synced phase.
+Palette_Owner_State :: union {
+	Palette_Open,
+	Palette_Closing,
+}
+
+Palette_Open :: struct {window: platform.Window_Id}
+Palette_Closing :: struct {window: platform.Window_Id}
+
+palette_owner_state :: proc(app: ^App) -> Palette_Owner_State {
+	owner, owned := app.palette_owner.?
+	if !owned {return nil}
+	if app.palette.open {return Palette_Open{owner}}
+	return Palette_Closing{owner}
+}
+
+// Zero means unowned at the external window-id boundary, not in the stored owner.
+palette_owner_id :: proc(app: ^App) -> platform.Window_Id {
+	switch state in palette_owner_state(app) {
+	case nil: return 0
+	case Palette_Open: return state.window
+	case Palette_Closing: return state.window
+	}
+	return 0
+}
+
+@(private = "file")
+palette_owned_by :: proc(app: ^App, w: ^Window) -> bool {
+	return w != nil && w.id != 0 && palette_owner_id(app) == w.id
+}
+
+palette_owner_window :: proc(app: ^App) -> ^Window {
+	return window_find(app, palette_owner_id(app))
+}
+
 palette_active :: proc(app: ^App, w: ^Window) -> bool {
-	return w != nil && w.id != 0 && app.palette_window == w.id && app.palette.open
+	state, open := palette_owner_state(app).(Palette_Open)
+	return open && w != nil && state.window == w.id
 }
 
+// Open or Closing in w: the palette draws in w.
 palette_visible :: proc(app: ^App, w: ^Window) -> bool {
-	return(
-		w != nil &&
-		w.id != 0 &&
-		app.palette_window == w.id &&
-		ui.presence_visible(app.palette.presence) \
-	)
+	return palette_owned_by(app, w) && ui.presence_visible(app.palette.presence)
 }
 
+// Open to Closing: the palette fades out in w, which keeps it until the fade settles.
 palette_close :: proc(app: ^App, w: ^Window) {
-	if w == nil || w.id == 0 || app.palette_window != w.id {return}
+	if !palette_owned_by(app, w) {return}
 	ui.palette_close(&app.palette)
 	w.dirty = true
 }
 
+// Unowned at once, without a fade.
 palette_release :: proc(app: ^App, w: ^Window) {
-	if w == nil || w.id == 0 || app.palette_window != w.id {return}
+	if !palette_owned_by(app, w) {return}
 	palette_close(app, w)
 	ui.presence_reset(&app.palette.presence)
-	app.palette_window = 0
+	app.palette_owner = nil
 }
 
 palette_open :: proc(app: ^App, w: ^Window) {
 	palette_open_mode(app, w, .All)
 }
 
+// Opens the palette in w, taking it from any other window. Cancelling w's gesture can remove w, so the
+// palette leaves its previous window only once w is known to remain.
 palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 	if w == nil || w.id == 0 {return}
-	if previous := window_find(app, app.palette_window); previous != nil && previous != w {
+	if !gesture_cancel(app, w) {return}
+	if previous := palette_owner_window(app); previous != nil && previous != w {
 		palette_release(app, previous)
 	}
-	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
 	entry := focused_session(app, w)
 	has_selection := entry != nil && term.has_selection(entry.session)
@@ -52,7 +90,7 @@ palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 		has_selection,
 	)
 	assert(registered)
-	app.palette_window = w.id
+	app.palette_owner = w.id
 	app.palette.leader = app.leader
 	ui.palette_open_mode(&app.palette, &app.registry, mode)
 	ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -174,23 +212,6 @@ palette_activate_workspace :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 	workspace := workspace_find(app, id)
 	if workspace == nil {return false}
 	return workspace_select(app, w, workspace)
-}
-
-window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
-	palette_release(app, w)
-	workspace_picker_cancel(w, focus_lost)
-	w.tab_menu.open = false
-	w.profile_menu.open = false
-	document_menu_close(w)
-	w.rename.dragging = false
-	if w.rename_open {
-		if focus_lost && w.rename_mode == .Workspace {rename_finish(app, w, true)}
-		if w.rename_open {rename_finish(app, w, false)}
-	}
-	confirmation_cancel(app, w)
-	rail_overlay_dismiss(app, w)
-	status_overview_cancel(w)
-	w.dirty = true
 }
 
 @(private)

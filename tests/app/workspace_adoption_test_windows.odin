@@ -42,7 +42,7 @@ adoption_dirty_presentation :: proc(w: ^app.Window) {
 	w.rail_hover, w.rail_pressed = 1, 1
 	w.rail_scroll = 99
 	ui.armed_press(&w.tab_close_armed, 2)
-	w.tab_menu.open, w.rename_open = true, true
+	w.overlay = app.Overlay_Rename{kind = .Tab}
 	w.workspace_picker.mode = .List
 }
 
@@ -58,8 +58,7 @@ adoption_expect_postcondition :: proc(
 	testing.expect_value(t, w.rail_hover, -1)
 	testing.expect_value(t, w.rail_pressed, -1)
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
-	testing.expect_value(t, w.tab_menu.open, false)
-	testing.expect_value(t, w.rename_open, false)
+	testing.expect(t, w.overlay == nil)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, w.pending_close.kind, app.Pending_Close_Kind.None)
 	testing.expect(t, len(w.close_restore) == 0)

@@ -117,7 +117,7 @@ workspace_adopt :: proc(
 	if !gesture_cancel(app, w) {return false}
 	focus_leave(app, w)
 	tab_close_restore(w)
-	w.tab_menu.open, w.rename_open = false, false
+	overlay_close(app, w)
 	workspace_picker_cancel(w)
 	pending_close_clear(&w.pending_close)
 	clear(&w.close_restore)

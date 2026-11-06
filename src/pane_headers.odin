@@ -148,11 +148,7 @@ pane_header_draw :: proc(
 @(private)
 pane_header_documents :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Documents {
 	if !CONTENT_POLICY[pane.content.kind].documents {return {}}
-	menu := &w.document_menu
-	return {
-		shown = true,
-		open = menu.menu.open && menu.mode != .Link && menu.content == pane.content,
-	}
+	return {shown = true, open = document_menu_shown_for(w, pane.content)}
 }
 
 pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_Action, bool) {

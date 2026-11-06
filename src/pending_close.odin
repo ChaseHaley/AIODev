@@ -38,7 +38,7 @@ pending_close_clear :: proc(pc: ^Pending_Close) {
 pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
 	if !gesture_cancel(app, w) {return}
-	palette_close(app, w)
+	overlay_open(app, w, nil)
 	pc := &w.pending_close
 	delete(pc.workspace_name)
 	delete(pc.destination_name)

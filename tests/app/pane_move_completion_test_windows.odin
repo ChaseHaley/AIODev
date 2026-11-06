@@ -266,11 +266,11 @@ pane_move_completion_preserves_unrelated_selected_source_tab :: proc(t: ^testing
 	other.id = f.source.workspace.next_tab_id
 	append(&f.source.workspace.tabs, other)
 	f.source.workspace.selected, f.source.tree = 1, &other.tree
-	f.source.tab_menu.open = true
+	f.source.overlay = app.Overlay_Tab_Menu{tab = other.id}
 	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
 		f.node, destination.tree.root, .Right, false)) {return}
 	testing.expect(t, app.selected_tab(f.source.workspace) == other && f.source.tree == &other.tree)
-	testing.expect(t, f.source.tab_menu.open && f.source.selecting && !f.source.cursor_phase_visible)
+	testing.expect(t, app.tab_menu_shown(f.source) && f.source.selecting && !f.source.cursor_phase_visible)
 	testing.expect_value(t, f.source.wheel_remainder, f32(0.5))
 	testing.expect_value(t, source.tree.nodes[source.tree.focus].(layout.Pane).content.id, u32(4))
 	testing.expect_value(t, len(f.source.panes), 1)

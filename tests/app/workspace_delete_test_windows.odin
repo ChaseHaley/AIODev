@@ -69,7 +69,7 @@ second_launch_opens_new_workspace_window_and_reopens_from_tray :: proc(t: ^testi
 	app.handle_event(state, platform.Activate_Request_Event{})
 	if !testing.expect_value(t, len(state.windows), 2) {return}
 	two := state.windows[1]
-	testing.expect(t, !one.rename_open && !two.rename_open)
+	testing.expect(t, !app.rename_shown(one) && !app.rename_shown(two))
 	testing.expect_value(t, len(state.workspaces), 2)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect(t, two.workspace != one.workspace && len(two.workspace.tabs) == 1)
@@ -229,7 +229,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	testing.expect(t, w.workspace.id > id && w.tree == &app.selected_tab(w.workspace).tree)
 	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
-	testing.expect(t, !w.editor.open && !w.tab_menu.open && !w.pending_close.confirm.open)
+	testing.expect(t, !w.editor.open && !app.tab_menu_shown(w) && !w.pending_close.confirm.open)
 	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
 	for handle in processes { testing.expect_value(t, win32.WaitForSingleObject(handle, 1000), win32.WAIT_OBJECT_0) }
 	app.tick(state)

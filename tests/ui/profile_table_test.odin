@@ -17,7 +17,7 @@ profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testi
 	parts := ui.editor_profile_parts(&p, l, p.selected)
 	x, y := profile_center(parts.more)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
-	testing.expect(t, p.profile_menu.open)
+	testing.expect(t, profile_menu_open(&p))
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	surface, _ := ui.menu_layout(&p.profile_menu, 1200, 800, 1)
 	testing.expect(t, surface.x >= l.page.x && surface.x + surface.width <= l.page.x + l.page.width)
@@ -25,7 +25,7 @@ profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testi
 	x, y = profile_center(item)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Profile_Action)
 	expect_profile_request(t, &p, .Duplicate, "beta")
-	testing.expect(t, !p.profile_menu.open)
+	testing.expect(t, !profile_menu_open(&p))
 }
 
 @(test)
@@ -41,16 +41,22 @@ profile_overflow_menu_preserves_hidden_actions_and_protection :: proc(t: ^testin
 		expected := width >= 340 ? 2 : 4
 		testing.expect_value(t, len(p.profile_menu.items), expected)
 		testing.expect_value(t, p.profile_menu.items[expected - 1].label, "Delete profile")
-		p.profile_menu.selected = expected - 2
+		ui.menu_select(&p.profile_menu, expected - 2)
 		testing.expect_value(t, ui.editor_key(&p, {key = .Enter, pressed = true}), ui.Editor_Outcome.Profile_Action)
 		expect_profile_request(t, &p, .Duplicate, "beta")
-		testing.expect(t, !p.profile_menu.open)
+		testing.expect(t, !profile_menu_open(&p))
 		ui.editor_row(&p).flags += {.Protected}
 		ui.editor_profile_menu_open(&p, ui.editor_row(&p), parts)
 		for item in p.profile_menu.items {testing.expect(t, item.label != "Delete profile")}
 		testing.expect_value(t, ui.editor_key(&p, {key = .Escape, pressed = true}), ui.Editor_Outcome.Changed)
-		testing.expect(t, !p.profile_menu.open)
+		testing.expect(t, !profile_menu_open(&p))
 	}
+}
+
+@(private = "file")
+profile_menu_open :: proc(p: ^ui.Editor) -> bool {
+	_, open := p.mode.(ui.Editor_Profile_Menu)
+	return open
 }
 
 @(private)

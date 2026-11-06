@@ -219,7 +219,7 @@ picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 // Tab menu
 
 @(private = "file")
-tab_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return w.tab_menu.open}
+tab_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return tab_menu_shown(w)}
 
 @(private = "file")
 tab_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -240,13 +240,13 @@ tab_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 			w.tab_menu.selected = hit
 			tab_menu_choose(app, w)
 		}
-	} else {w.tab_menu.open, w.dirty = false, true}
+	} else {overlay_close(app, w)}
 }
 
 // Profile menu
 
 @(private = "file")
-profile_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return w.profile_menu.open}
+profile_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return profile_menu_shown(w)}
 
 @(private = "file")
 profile_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -254,7 +254,10 @@ profile_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: plat
 	x, y := move_point(e)
 	shape := platform.Cursor_Shape.Arrow
 	if hit := profile_menu_hit(w, x, y); hit >= 0 {
-		if hit != w.profile_menu.menu.selected {w.profile_menu.menu.selected, w.dirty = hit, true}
+		if hit != ui.menu_selected(&w.profile_menu.menu) {
+			ui.menu_select(&w.profile_menu.menu, hit)
+			w.dirty = true
+		}
 		item := w.profile_menu.menu.items[hit]
 		if item.enabled && !item.separator {shape = .Hand}
 	}
@@ -269,7 +272,7 @@ profile_menu_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 // Document menu
 
 @(private = "file")
-documents_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return w.document_menu.menu.open}
+documents_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return document_menu_shown(w)}
 
 @(private = "file")
 documents_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -301,7 +304,7 @@ inbox_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mo
 // Rename field
 
 @(private = "file")
-rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return w.rename_open}
+rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return rename_shown(w)}
 
 @(private = "file")
 rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -312,14 +315,14 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 }
 
 // A press outside the dialog finishes the rename and is swallowed with its release. The workspace chip
-// field is not modal: the press keeps the name typed so far and still reaches what it landed on.
+// field is not modal: the press leaves it, keeping the name typed so far when it can, and still reaches
+// what it landed on.
 @(private = "file")
 rename_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if !e.pressed {w.rename.dragging = false; return}
 	x, y := f32(e.x), f32(e.y)
-	if w.rename_mode == .Workspace && !rect_contains(rename_rect(w), x, y) {
-		rename_finish(app, w, true)
-		if w.rename_open {rename_finish(app, w, false)}
+	if chip_name_shown(w) && !rect_contains(rename_rect(w), x, y) {
+		overlay_close(app, w, .Leave)
 		target := pointer_target(app, w, x, y)
 		w.gesture.owners[e.button] = target
 		pointer_press(app, w, target, e)

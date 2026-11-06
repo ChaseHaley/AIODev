@@ -5,7 +5,7 @@ import "aio:ui"
 import "core:time"
 
 motion_active :: proc(app: ^App) -> bool {
-	if app.palette_window != 0 && ui.presence_active(app.palette.presence) {return true}
+	if palette_owner_id(app) != 0 && ui.presence_active(app.palette.presence) {return true}
 	if ui.notices_animating(&app.notices) {return true}
 	for w in app.windows {
 		if workspace_picker_active(&w.workspace_picker) {
@@ -36,7 +36,7 @@ update_motion :: proc(app: ^App) {
 	now := time.tick_now()
 	p := &app.palette
 	palette_changed, palette_settled := ui.presence_advance(&p.presence, app.animations, now)
-	if owner := window_find(app, app.palette_window); owner != nil {
+	if owner := palette_owner_window(app); owner != nil {
 		if palette_changed {owner.dirty = true}
 		if palette_settled {palette_release(app, owner)}
 	}

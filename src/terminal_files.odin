@@ -28,7 +28,7 @@ terminal_file_request :: proc(app: ^App, w: ^Window, path: string) {
 		return
 	}
 	if !gesture_cancel(app, w) {platform.terminal_file_destroy(&file); return}
-	confirmation_cancel(app, w)
+	overlay_open(app, w, nil)
 	pending_file_clear(&w.pending_file)
 	w.pending_file.file = file
 	w.pending_file.confirm.extended = true

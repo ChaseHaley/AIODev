@@ -123,14 +123,13 @@ Window :: struct {
 	process_remove_id: int,
 	pending_file:  Pending_File,
 	close_restore: [dynamic]u32,
+	// The surface over the content that takes input; see window_overlay.odin. The menus' rows and the
+	// rename field below are storage the surfaces reuse.
+	overlay: Window_Overlay,
 	tab_menu: Tab_Menu,
 	profile_menu: Profile_Menu,
 	document_menu: Document_Menu,
 	rename: ui.Text_Field,
-	rename_open: bool,
-	rename_target: Rename_Target,
-	rename_mode: Rename_Mode,
-	rename_error: bool,
 	workspace_button_press_ns: i64,
 	workspace_picker: Workspace_Picker,
 	workspace_hovered: bool,
@@ -318,7 +317,7 @@ window_free :: proc(w: ^Window) {
 	delete(w.rail_rows)
 	ui.find_destroy(&w.find)
 	profile_menu_destroy(&w.profile_menu)
-	document_menu_destroy(&w.document_menu)
+	document_menu_destroy(w)
 	delete(w.rename.bytes)
 	workspace_picker_destroy(w)
 	delete(w.close_restore)
@@ -729,17 +728,19 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		)
 		if result != .Ok { return frame, result }
 	}
-	if w.rename_open {
+	#partial switch _ in w.overlay {
+	case Overlay_Rename, Overlay_Chip_Name:
 		if result := rename_draw(app, w); result != .Ok {return frame, result}
 	}
 	if result := confirmation_draw(app, w); result != .Ok {return frame, result}
-	if w.tab_menu.open {
+	#partial switch _ in w.overlay {
+	case Overlay_Tab_Menu, Overlay_Divider_Menu:
 		if result := tab_menu_draw(app, w); result != .Ok {return frame, result}
-	}
-	if w.profile_menu.open {
+	case Overlay_Profile_Menu:
 		if result := profile_menu_draw(app, w); result != .Ok {return frame, result}
+	case Overlay_Document_Menu:
+		if result := document_menu_draw(app, w); result != .Ok {return frame, result}
 	}
-	if result := document_menu_draw(app, w); result != .Ok {return frame, result}
 	if workspace_picker_active(&w.workspace_picker) {
 		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
 	}

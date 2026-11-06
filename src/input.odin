@@ -184,30 +184,31 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		if e.pressed && e.key == .Escape {_ = gesture_cancel(app, w)}
 		return
 	}
-	if workspace_picker_active(&w.workspace_picker) {
+	kind := overlay_kind(app, w)
+	switch kind {
+	case .Workspace_Picker:
 		if e.pressed {w.suppressed_key = e}
 		workspace_picker_key(app, w, logical)
 		return
-	}
-	if w.rename_open {
+	case .Rename, .Chip_Name:
 		if e.pressed {w.suppressed_key = e}
 		rename_key(app, w, e)
 		return
-	}
-	if w.tab_menu.open {
+	case .Tab_Menu, .Divider_Menu:
 		if e.pressed {w.suppressed_key = e}
 		tab_menu_key(app, w, logical)
 		return
-	}
-	if w.profile_menu.open {
+	case .Profile_Menu:
 		if e.pressed {w.suppressed_key = e}
 		profile_menu_key(app, w, logical)
 		return
-	}
-	if w.document_menu.menu.open {
+	case .Document_Menu:
 		if e.pressed {w.suppressed_key = e}
 		document_menu_key(app, w, e, logical)
 		return
+	// A confirmation and the palette take keys below, after the inbox, a held key's release and the
+	// drags' Escape.
+	case .Confirmation, .Palette, .None:
 	}
 	if status_inbox_shown(w) {
 		if e.pressed {w.suppressed_key = e}
@@ -223,13 +224,16 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		_ = gesture_cancel(app, w)
 		return
 	}
-	if confirmation_key(app, w, e) {return}
+	if kind == .Confirmation {
+		_ = confirmation_key(app, w, e)
+		return
+	}
 	if e.pressed && e.key == .Escape && rail_overlay(w) {
 		w.suppressed_key = e
 		rail_overlay_dismiss(app, w)
 		return
 	}
-	if !palette_active(app, w) &&
+	if kind != .Palette &&
 	   e.pressed &&
 	   !window_linked(w) &&
 	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
@@ -258,7 +262,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		w.suppressed_key = e
 		return
 	}
-	if palette_active(app, w) {
+	if kind == .Palette {
 		pane_header_cancel(w)
 		if e.pressed {w.suppressed_key = e}
 		p := &app.palette
@@ -355,15 +359,23 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if w.phase == .Preparing {return}
-	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
-	if w.tab_menu.open {return}
-	if w.profile_menu.open {return}
-	if w.document_menu.menu.open {document_menu_text_input(app, w, text); return}
-	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
-	if confirmation_current(w) != nil {return}
-	if palette_active(app, w) {
+	switch overlay_kind(app, w) {
+	case .Workspace_Picker:
+		workspace_picker_text(app, w, text)
+		return
+	case .Tab_Menu, .Divider_Menu, .Profile_Menu, .Confirmation:
+		return
+	case .Document_Menu:
+		document_menu_text_input(app, w, text)
+		return
+	case .Rename, .Chip_Name:
+		ui.field_text(&w.rename, text)
+		w.dirty = true
+		return
+	case .Palette:
 		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
 		return
+	case .None:
 	}
 	if settings_active(w) {
 		ui.editor_text(&w.editor, text)
@@ -427,26 +439,26 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.phase == .Preparing {return}
 	if pane_workspace_drag_wheel(app, w, e.delta_y) || tab_workspace_drag_wheel(app, w, e.delta_y) {return}
-	if workspace_picker_active(&w.workspace_picker) {
+	kind := overlay_kind(app, w)
+	switch kind {
+	case .Workspace_Picker:
 		workspace_picker_wheel(w, e.delta_y)
 		return
-	}
-	if w.rename_open {return}
-	if w.tab_menu.open {
+	case .Rename, .Chip_Name:
+		return
+	case .Tab_Menu, .Divider_Menu:
 		tab_menu_step(w, -int(math.sign(e.delta_y)), false)
 		w.dirty = true
 		return
-	}
-	if w.profile_menu.open {
-		ui.menu_wheel(&w.profile_menu.menu, int(math.sign(e.delta_y)))
-		w.dirty = true
+	case .Profile_Menu:
+		profile_menu_wheel(w, int(math.sign(e.delta_y)))
 		return
-	}
-	if w.document_menu.menu.open {
-		w.document_menu.popout = false
-		ui.menu_wheel(&w.document_menu.menu, int(math.sign(e.delta_y)))
-		w.dirty = true
+	case .Document_Menu:
+		document_menu_wheel(app, w, int(math.sign(e.delta_y)))
 		return
+	// A confirmation and the palette take whole wheel rows below, after the inbox, the Activity panel and
+	// the rail.
+	case .Confirmation, .Palette, .None:
 	}
 	if status_inbox_shown(w) {
 		status_inbox_wheel(app, w, e.delta_y)
@@ -472,8 +484,8 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		return
 	}
 	w.wheel_remainder -= f32(rows)
-	if confirmation_current(w) != nil {return}
-	if palette_active(app, w) {
+	if kind == .Confirmation {return}
+	if kind == .Palette {
 		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
 		return
 	}

@@ -159,7 +159,7 @@ field_edit_clipboard_and_direct_consumer_events :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_string(&w.rename), "  漢🙂  ")
 	app.handle_event(&s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect_value(t, workspace.name, "漢🙂")
-	testing.expect(t, !w.rename_open && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
+	testing.expect(t, !app.rename_shown(&w) && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
 
 	app.workspace_picker_open(&s, &w)
 	testing.expect(t, platform.clipboard_set_text(&s.platform, "漢\n🙂"))

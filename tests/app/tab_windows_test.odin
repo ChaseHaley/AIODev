@@ -298,7 +298,7 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	named := source.workspace
 	testing.expect(t, named != workspace)
 	testing.expect_value(t, len(named.tabs), 1)
-	testing.expect(t, source.rename_open)
+	testing.expect(t, app.rename_shown(source))
 	app.rename_finish(&state, source, true)
 	testing.expect_value(t, len(state.workspaces), workspaces + 1)
 	if !testing.expect(t, app.workspace_select(&state, source, workspace)) {return}
@@ -312,7 +312,7 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(state.windows), 3)
 	testing.expect_value(t, len(workspace.tabs), 1)
-	for window in state.windows {if window.rename_open {app.rename_finish(&state, window, true)}}
+	for window in state.windows {if app.rename_shown(window) {app.rename_finish(&state, window, true)}}
 	if !testing.expect(t, tab_drag_to_row(&state, source, source, 0, new_window_row + 1)) {return}
 	testing.expect_value(t, source.tab_drag.picker_hit, -1)
 	app.tab_drag_release(&state, source)
@@ -541,8 +541,8 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.windows), 2)
 	testing.expect(t, preview.phase == .Shown && !preview.workspace.provisional)
 	testing.expect(t, preview.workspace.name != "")
-	testing.expect(t, preview.rename_open && preview.rename_mode == .Workspace)
-	testing.expect(t, !source.rename_open)
+	testing.expect(t, app.chip_name_shown(preview))
+	testing.expect(t, !app.rename_shown(source))
 	testing.expect_value(t, ui.field_selected_text(&preview.rename), preview.workspace.name)
 	app.rename_finish(&state, preview, true)
 	if !testing.expect_value(t, len(preview.workspace.tabs), 1) {return}
