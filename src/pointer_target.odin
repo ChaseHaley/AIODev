@@ -691,8 +691,7 @@ tabs_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> b
 	w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
 	if tab_interaction_release(app, w, f32(e.x), f32(e.y)) {return true}
 	if !w.tab_drag.pressed {return false}
-	tab_drag_release(app, w)
-	rail_overlay_dismiss(app, w)
+	tab_drag_finish(app, w)
 	return true
 }
 

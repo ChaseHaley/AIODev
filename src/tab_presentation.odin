@@ -42,6 +42,23 @@ tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int)
 	return true
 }
 
+@(require_results)
+tab_presentation_reserve :: proc(presentation: ^Tab_Presentation, tab_count: int) -> bool {
+	return reserve(&presentation.tab_controls, tab_count + 2) == nil &&
+		reserve(&presentation.tab_positions, tab_count) == nil
+}
+
+// Tabs arriving at `at` start settled in the gap opened for them, while the tabs after it keep their motion.
+// Capacity was reserved. A window yet to lay out has nothing to shift; its next relayout sizes the arrays.
+tab_presentation_insert :: proc(presentation: ^Tab_Presentation, at, count: int) {
+	if at > len(presentation.tab_positions) {return}
+	for i in 0 ..< count {
+		place := f32(at + i)
+		inject_at(&presentation.tab_controls, at + i, ui.Control_Motion{})
+		inject_at(&presentation.tab_positions, at + i, ui.Motion{value = place, target = place})
+	}
+}
+
 // Moves both presentation values with the tab, keeping every motion field it already has.
 tab_presentation_move :: proc(presentation: ^Tab_Presentation, from, to: int) {
 	if from == to || from < 0 || to < 0 {return}

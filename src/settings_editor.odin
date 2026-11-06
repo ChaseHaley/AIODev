@@ -403,31 +403,57 @@ workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
 	}
 }
 
-// Selects the settings pane, creating it and loading the settings file when the workspace has none.
-editor_open :: proc(app: ^App, w: ^Window) {
-	if !gesture_cancel(app, w) {return}
+// The workspace holding the settings pane, preferring w's own. Layouts saved before the app kept to one
+// settings pane may still hold several.
+@(private = "file", require_results)
+settings_workspace :: proc(app: ^App, w: ^Window) -> ^Workspace {
+	if settings_tab_index(w.workspace) >= 0 {return w.workspace}
+	for workspace in app.workspaces {
+		if workspace_eligible(app, workspace) && settings_tab_index(workspace) >= 0 {return workspace}
+	}
+	return nil
+}
+
+// Focuses the settings pane in the window showing its workspace, which w takes over when none does.
+@(private = "file")
+settings_focus :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> ^Window {
+	owner := window_for_workspace(app, workspace)
+	if owner == nil {
+		if !workspace_select(app, w, workspace) {
+			notify(app, .Error, "Could not show the settings tab.")
+			return nil
+		}
+		owner = w
+	}
+	tab_select(app, owner, settings_tab_index(workspace))
+	if node, found := settings_pane_node(workspace); found {pane_focus(app, owner, node)}
+	if owner != w {_ = window_activate(app, owner)}
+	return owner
+}
+
+// Focuses the settings tab wherever it is, or creates one here and loads the settings file. The app keeps a
+// single settings tab. Returns the window showing it, which may not be w, or nil if it could not be shown.
+editor_open :: proc(app: ^App, w: ^Window) -> ^Window {
+	if !gesture_cancel(app, w) {return nil}
 	palette_close(app, w)
 	find_close(app, w, focused_session(app, w))
-	if index := settings_tab_index(w.workspace); index >= 0 {
-		tab_select(app, w, index)
-		if node, found := settings_pane_node(w.workspace); found {pane_focus(app, w, node)}
-		return
-	}
-	if !settings_load(app, &w.editor) {return}
+	if workspace := settings_workspace(app, w); workspace != nil {return settings_focus(app, w, workspace)}
+	if !settings_load(app, &w.editor) {return nil}
 	tab, record_error := tab_record_reserve(w.workspace)
 	if record_error != .None {
 		ui.editor_destroy(&w.editor)
 		notify(app, .Error, "Could not open the settings tab.")
-		return
+		return nil
 	}
 	if layout.init(&tab.tree, {.Settings, 0}) != nil {
 		tab_record_free(tab)
 		ui.editor_destroy(&w.editor)
 		notify(app, .Error, "Could not open the settings tab.")
-		return
+		return nil
 	}
 	tab_record_commit(app, w.workspace, tab)
 	tab_select(app, w, len(w.workspace.tabs) - 1)
+	return w
 }
 
 @(private)

@@ -17,6 +17,7 @@ motion_active :: proc(app: ^App) -> bool {
 		}
 		if ui.motion_active(w.rail_slide) ||
 		   ui.motion_active(w.tab_underline) ||
+		   ui.motion_active(w.tab_incoming.ghost) ||
 		   confirmation_active(w) { return true }
 		if ui.control_active(w.workspace_motion) { return true }
 		if w.find.open && ui.find_animating(&w.find) { return true }
@@ -61,9 +62,10 @@ update_motion :: proc(app: ^App) {
 		for &position, i in w.tab_positions {
 			if i >= len(w.workspace.tabs) {continue}
 			if !w.tab_drag.active || !w.workspace.tabs[i].marked {
+				gap := i >= w.tab_incoming.slot ? w.tab_incoming.count : 0
 				ui.motion_target(
 					&position,
-					f32(i),
+					f32(i + gap),
 					140 * time.Millisecond,
 					.Decelerate,
 					app.animations,
@@ -72,6 +74,7 @@ update_motion :: proc(app: ^App) {
 			}
 			tabs_changed = ui.motion_update(&position, now) || tabs_changed
 		}
+		tabs_changed = ui.motion_update(&w.tab_incoming.ghost, now) || tabs_changed
 		ui.motion_target(
 			&w.tab_underline,
 			f32(w.workspace.selected),

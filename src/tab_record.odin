@@ -23,12 +23,16 @@ tab_record_reserve :: proc(workspace: ^Workspace) -> (^Tab, Tab_Record_Error) {
 	return tab, .None
 }
 
-// Capacity was reserved, so the append cannot leave a half-built record in the rail.
-tab_record_commit :: proc(app: ^App, workspace: ^Workspace, tab: ^Tab) {
+// Capacity was reserved, so the insert cannot leave a half-built record in the rail.
+tab_record_commit :: proc(app: ^App, workspace: ^Workspace, tab: ^Tab, at := -1) {
 	workspace.next_tab_id += 1
 	tab.id = workspace.next_tab_id
 	tab_update_title(app, tab)
-	append(&workspace.tabs, tab)
+	if at < 0 {
+		append(&workspace.tabs, tab)
+	} else {
+		inject_at(&workspace.tabs, at, tab)
+	}
 }
 
 // Preview tabs borrow their source pane's runtime, so freeing a record never closes sessions.

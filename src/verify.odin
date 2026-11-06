@@ -758,6 +758,9 @@ when AIO_CONTROL {
 				{"tabs.dragging", fmt.tprintf("%t", w.tab_drag.active)},
 				{"tabs.drop.new_window", fmt.tprintf("%t", w.tab_drag.new_window)},
 				{"tabs.drop.preview_window", fmt.tprintf("%d", w.tab_drag.preview_window)},
+				{"tabs.drop.window", fmt.tprintf("%d", w.tab_drag.destination_window)},
+				{"tabs.incoming.count", fmt.tprintf("%d", w.tab_incoming.count)},
+				{"tabs.incoming.slot", fmt.tprintf("%d", w.tab_incoming.slot)},
 				{"tabs.drop.thumbnail", fmt.tprintf("%t", w.tab_drag.thumbnail.shown)},
 				{
 					"tabs.drop.thumbnail_size",
