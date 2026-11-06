@@ -83,7 +83,7 @@ remove_program_status :: proc(s: ^Session, index: int) {
 }
 
 // Every removal but eviction at the limit comes through here, from the reader thread and the main
-// thread alike, so the caller holds the session mutex.
+// thread alike, so the caller holds the session mutex unless no thread can still reach the session.
 @(private)
 clear_program_status :: proc(s: ^Session, which: Status_Removal, id := "") {
 	for i := s.program_status_count - 1; i >= 0; i -= 1 {

@@ -331,9 +331,9 @@ status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
 }
 
 // A pane notifies at most once an interval, for the newest change that wants a notification. Once
-// it has, the throttle holds back every other change in the interval, those in the same refresh
-// included: they are coalesced into that one notification, not queued, and the overviews still show
-// each record. Seeing finished work changes no report, so it never notifies.
+// it has, the throttle drops every other change in the interval, those in the same refresh included:
+// they are not queued, and the overviews still show each record. Seeing finished work changes no
+// report, so it never notifies.
 @(private)
 status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term.Program_Status) {
 	if !app.settings.status.enabled {return}
