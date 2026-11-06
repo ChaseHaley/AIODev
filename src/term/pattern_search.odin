@@ -1,18 +1,15 @@
 package term
 
 import "aio:ghostty"
+import "aio:line_match"
 import "core:log"
 import "core:slice"
-import "core:strings"
 import "core:sync"
-import "core:text/regex"
 import "core:time"
 import "core:unicode/utf8"
 
 // libghostty matches literal text with ASCII case folding. Any other mode uses this scanner.
-Search_Options :: struct {
-	case_sensitive, regex: bool,
-}
+Search_Options :: line_match.Options
 
 // Rows read per terminal lock hold, so output ingestion is never blocked for long.
 @(private)
@@ -45,10 +42,7 @@ Chunk_Row :: struct {
 @(private)
 Pattern_Search :: struct {
 	active, invalid:  bool,
-	options:          Search_Options,
-	needle:           string,
-	iterator:         regex.Match_Iterator,
-	compiled:         bool,
+	matcher:          line_match.Matcher,
 	// Results oldest first. A refresh builds `found` and swaps it in, so drawn results never go partial.
 	matches, found:   [dynamic]Pattern_Match,
 	// Index into matches, or -1.
@@ -96,11 +90,7 @@ pattern_destroy :: proc(p: ^Pattern_Search, s: ^Session) {
 
 @(private)
 pattern_clear :: proc(p: ^Pattern_Search, s: ^Session) {
-	if p.compiled {
-		regex.destroy_iterator(p.iterator, s.allocator)
-	}
-	delete(p.needle, s.allocator)
-	p.needle, p.iterator, p.compiled = "", {}, false
+	line_match.destroy(&p.matcher)
 	p.active, p.invalid, p.complete, p.scanning = false, false, false, false
 	p.selected = -1
 	clear(&p.matches)
@@ -115,24 +105,16 @@ pattern_set :: proc(s: ^Session, needle: string, options: Search_Options) {
 	if len(needle) == 0 {
 		return
 	}
-	copied, err := strings.clone(needle, s.allocator)
-	if err != nil {
+	switch line_match.init(&p.matcher, needle, options, s.allocator) {
+	case .Out_Of_Memory:
 		log.error("term: copying the search text failed")
 		return
+	case .Invalid:
+		p.active, p.invalid = true, true
+		return
+	case .Ok:
 	}
-	p.needle, p.options, p.active = copied, options, true
-	if options.regex {
-		flags: regex.Flags = {.Unicode}
-		if !options.case_sensitive {
-			flags += {.Case_Insensitive}
-		}
-		iterator, compile_error := regex.create_iterator("", needle, flags, s.allocator)
-		if compile_error != nil {
-			p.invalid = true
-			return
-		}
-		p.iterator, p.compiled = iterator, true
-	}
+	p.active = true
 	p.fed = generation(s) - 1
 }
 
@@ -357,46 +339,12 @@ pattern_match_line :: proc(p: ^Pattern_Search) {
 	if end == 0 {
 		return
 	}
-	line := string(p.line_text[:end])
-	if !p.options.regex {
-		offset := 0
-		for {
-			found := strings.index(line[offset:], p.needle)
-			if found < 0 {
-				return
-			}
-			first := offset + found
-			offset = first + len(p.needle)
-			if !pattern_add(p, first, offset) {
-				return
-			}
-		}
-	}
-	it := &p.iterator
-	it.vm.memory = line
-	regex.reset(it)
+	line_match.begin(&p.matcher, string(p.line_text[:end]))
 	for {
-		capture, _, ok := regex.match_iterator(it)
-		if !ok {
+		first, match_end, ok := line_match.next(&p.matcher)
+		if !ok || !pattern_add(p, first, match_end) {
 			return
 		}
-		if len(capture.pos) > 0 && capture.pos[0][1] > capture.pos[0][0] {
-			if !pattern_add(p, capture.pos[0][0], capture.pos[0][1]) {
-				return
-			}
-		}
-		if !it.done {
-			continue
-		}
-		// The iterator stops after an empty match; resume one character later so `a*` still finds "aa".
-		at := it.vm.string_pointer
-		if at >= len(line) {
-			return
-		}
-		previous, size := utf8.decode_rune_in_string(line[at:])
-		it.done = false
-		it.vm.string_pointer = at + size
-		it.vm.last_rune = previous
 	}
 }
 
