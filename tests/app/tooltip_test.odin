@@ -25,7 +25,9 @@ tooltip_waits_for_its_hover_deadline :: proc(t: ^testing.T) {
 tooltip_covers_scrollback_find_buttons :: proc(t: ^testing.T) {
 	state: app.App
 	w := app.Window{width = 900, height = 600, scale = 1}
-	w.find.open = true
+	ui.find_init(&w.find)
+	defer ui.find_destroy(&w.find)
+	ui.find_open(&w.find)
 	l := ui.find_layout(900, 1, 50)
 	buttons := [?]struct{rect: render.Rect, label: string} {
 		{l.case_toggle, "Match case"},

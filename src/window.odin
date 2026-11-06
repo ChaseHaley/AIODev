@@ -712,7 +712,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if result := tab_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
 	size := [2]f32{f32(w.width), f32(w.height)}
-	if w.find.open {
+	if ui.find_is_open(&w.find) {
 		status, enabled := find_presentation(w, find_target(app, w))
 		result := ui.find_draw(
 			&w.find,

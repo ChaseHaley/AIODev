@@ -190,7 +190,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	kept := pane.view.scroll
 	testing.expect(t, kept > 0)
 	press(&f.state, w, .Escape)
-	testing.expect(t, !w.find.open && !pane.search.active)
+	testing.expect(t, !ui.find_is_open(&w.find) && pane.search.phase == .Off)
 	testing.expect_value(t, pane.view.scroll, kept)
 	app.run_action(&f.state, w, .Find)
 	testing.expect_value(t, ui.field_string(&w.find.query), "")
@@ -207,9 +207,9 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	for down in ([2]bool{true, false}) {
 		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = down})
 	}
-	testing.expect(t, w.find.open && !w.find.focused && pane.search.active)
+	testing.expect(t, ui.find_is_open(&w.find) && !ui.find_has_keyboard(&w.find) && pane.search.phase != .Off)
 	press(&f.state, w, .Escape)
-	testing.expect(t, w.find.open)
+	testing.expect(t, ui.find_is_open(&w.find))
 	press(&f.state, w, .Home)
 	testing.expect_value(t, pane.view.scroll, 0)
 
@@ -223,12 +223,25 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	poll(&f.state)
 	testing.expect_value(t, pane.state, app.Markdown_State.Missing)
 	testing.expect_value(t, find_count(w, pane), "0 of 0")
+	// A new query does not read the document the missing file left behind; the file's return does.
+	app.run_action(&f.state, w, .Find)
+	press(&f.state, w, .End)
+	app.handle_event(&f.state, platform.Text_Event{w.id, " last"})
+	testing.expect_value(t, ui.field_string(&w.find.query), "needle last")
+	testing.expect(t, !app.markdown_find_pending(&f.state))
+	app.markdown_find_tick(&f.state)
+	testing.expect_value(t, pane.search.next, 0)
+	testing.expect_value(t, find_count(w, pane), "0 of 0")
+	testing.expect_value(t, os.write_entire_file(f.file, "needle last\n"), nil)
+	poll(&f.state)
+	find_settle(&f.state)
+	testing.expect_value(t, find_count(w, pane), "0 of 1")
 
 	// Focus leaving the pane closes find and ends the search, as it does between terminals.
 	app.run_action(&f.state, w, .Focus_Next)
 	testing.expect(t, !app.markdown_active(w))
-	testing.expect(t, !w.find.open && !pane.search.active)
-	testing.expect(t, !term.search_summary(f.state.sessions[0].session).active)
+	testing.expect(t, !ui.find_is_open(&w.find) && pane.search.phase == .Off)
+	testing.expect(t, term.search_summary(f.state.sessions[0].session).progress == .Off)
 }
 
 @(test)

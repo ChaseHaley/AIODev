@@ -1,6 +1,7 @@
 package term_test
 
 import "core:fmt"
+import "core:mem"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -55,7 +56,7 @@ search_walks_scrollback_matches :: proc(t: ^testing.T) {
 	testing.expect(t, !term.search_select(s, true))
 	term.search_set_needle(s, "line_1")
 	summary := settle_search(t, s)
-	settled := term.Search_Summary{active = true, complete = true, total = 111, selected = -1}
+	settled := term.Search_Summary{progress = .Complete, total = 111, selected = -1}
 	testing.expect_value(t, summary, settled)
 	term.search_set_needle(s, "77")
 	summary = settle_search(t, s)
@@ -131,7 +132,7 @@ search_matches_case_and_expressions :: proc(t: ^testing.T) {
 
 	term.search_set_needle(s, "(", pattern)
 	summary := term.search_summary(s)
-	testing.expect(t, summary.active && summary.invalid && summary.complete)
+	testing.expect_value(t, summary.progress, term.Search_Progress.Invalid)
 	testing.expect(t, !term.search_pending(s))
 	testing.expect(t, !term.search_select(s, true))
 
@@ -157,6 +158,57 @@ search_matches_case_and_expressions :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.search_summary(s), term.Search_Summary{selected = -1})
 	testing.expect(t, term.capture(s, state, &highlights))
 	testing.expect_value(t, len(highlights), 0)
+}
+
+// Running out of memory ends the search in a state the find bar reports, rather than switching the
+// search off or presenting what a pass had read as the complete result.
+@(test)
+search_reports_out_of_memory :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 60 * time.Second)
+	context.logger = {}
+	a := Failing_Allocator{context.allocator, -1}
+	wakes: Wakes
+	s, err := term.create(config(LINES_200), {on_wake, &wakes}, mem.Allocator{fail_allocation, &a})
+	if !testing.expect_value(t, err, term.Error.None) {
+		return
+	}
+	defer term.destroy(s)
+	if !await(t, s, exited, "exit") || !await(t, s, shows, "LINE_200") {
+		return
+	}
+	state: ghostty.Render_State
+	if !testing.expect_value(t, ghostty.render_state_new(nil, &state), ghostty.Result.Success) {
+		return
+	}
+	defer ghostty.render_state_free(state)
+	highlights := make([dynamic]term.Highlight)
+	defer delete(highlights)
+	pattern := term.Search_Options{regex = true}
+	failed := term.Search_Summary{progress = .Failed, selected = -1}
+
+	// The needle cannot be copied.
+	a.remaining = 0
+	term.search_set_needle(s, "LINE_7", pattern)
+	a.remaining = -1
+	testing.expect_value(t, term.search_summary(s), failed)
+	testing.expect(t, !term.search_pending(s))
+	testing.expect(t, !term.search_select(s, true))
+
+	// The first pass cannot keep the text it reads.
+	term.search_set_needle(s, "LINE_7", pattern)
+	a.remaining = 0
+	term.search_update(s)
+	a.remaining = -1
+	testing.expect_value(t, term.search_summary(s), failed)
+	testing.expect(t, !term.search_pending(s))
+	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect_value(t, len(highlights), 0)
+
+	// The next needle searches again.
+	term.search_set_needle(s, "LINE_7", pattern)
+	summary := settle_search(t, s)
+	testing.expect_value(t, summary.progress, term.Search_Progress.Complete)
+	testing.expect(t, summary.total > 0)
 }
 
 @(test)

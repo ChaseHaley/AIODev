@@ -916,10 +916,10 @@ find_target_summary :: proc(target: Find_Target) -> (summary: term.Search_Summar
 find_toggle :: proc(app: ^App, w: ^Window, target: Find_Target) {
 	t := app.settings.terminal
 	switch {
-	case !w.find.open:
+	case !ui.find_is_open(&w.find):
 		ui.find_open(&w.find, &app.find_history, t.find_keep_query, t.find_select_query)
 		on_find_outcome(app, w, target, .Changed)
-	case !w.find.focused:
+	case !ui.find_has_keyboard(&w.find):
 		ui.find_focus(&w.find, t.find_select_query)
 	case:
 		find_close(app, w, target)
@@ -989,12 +989,17 @@ find_bar_key :: proc(app: ^App, w: ^Window, e, logical: platform.Key_Event) {
 	on_find_outcome(app, w, target, outcome)
 }
 
-// The find bar's match count: "3 of 17" once a match is selected.
+// The find bar's match count: "3 of 17" once a match is selected. A search that failed has found nothing.
 find_presentation :: proc(w: ^Window, target: Find_Target) -> (label: string, enabled: bool) {
 	s, ok := find_target_summary(target)
 	if !ok || len(w.find.query.bytes) == 0 { return "0 of 0", false }
-	if s.invalid { return "Invalid expression", false }
-	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected + 1, s.total), s.total > 0 }
+	switch s.progress {
+	case .Invalid:
+		return "Invalid expression", false
+	case .Searching:
+		return fmt.tprintf("%d of %d · Searching…", s.selected + 1, s.total), s.total > 0
+	case .Off, .Complete, .Failed:
+	}
 	if s.total == 0 { return "0 of 0", false }
 	return fmt.tprintf("%d of %d", s.selected + 1, s.total), true
 }

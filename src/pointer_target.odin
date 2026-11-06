@@ -480,14 +480,14 @@ orientation_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 
 @(private = "file")
 find_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	if !w.find.open {return false}
+	if !ui.find_is_open(&w.find) {return false}
 	l, _ := find_controls(w, find_target(app, w))
 	return ui.find_contains(l, x, y)
 }
 
 @(private = "file")
 find_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
-	if owner != .Find || !w.find.open {
+	if owner != .Find || !ui.find_is_open(&w.find) {
 		if w.find.hover != .None {w.find.hover, w.dirty = .None, true}
 		if owner == .Find {pointer_set(app, w, .Arrow)}
 		return
@@ -520,7 +520,7 @@ find_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private = "file")
 find_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || !w.find.open || !ui.armed_down(w.find.armed) {return false}
+	if e.button != .Left || !ui.find_is_open(&w.find) || !ui.armed_down(w.find.armed) {return false}
 	target := find_target(app, w)
 	l, enabled := find_controls(w, target)
 	on_find_outcome(app, w, target, ui.find_mouse(&w.find, l, enabled, e.button, false, f32(e.x), f32(e.y)))

@@ -43,7 +43,7 @@ pointer_find_bar_over_activity_panel_owns_hover_cursor_and_press :: proc(t: ^tes
 	testing.expect(t, w.find.regex)
 	gesture_button(s, w, .Left, true, close.x, close.y)
 	gesture_button(s, w, .Left, false, close.x, close.y)
-	testing.expect(t, !w.find.open)
+	testing.expect(t, !ui.find_is_open(&w.find))
 	testing.expect_value(t, app.pointer_target(s, w, close.x, close.y), app.Pointer_Target.Status_Panel)
 }
 
@@ -64,7 +64,7 @@ pointer_held_find_press_keeps_the_pointer :: proc(t: ^testing.T) {
 	pointer_expect_move(t, s, w, inside.x, inside.y, .Arrow)
 	testing.expect(t, !w.selecting)
 	gesture_button(s, w, .Left, false, inside.x, inside.y)
-	testing.expect(t, w.find.open, "releasing off the button must not close the bar")
+	testing.expect(t, ui.find_is_open(&w.find), "releasing off the button must not close the bar")
 	pointer_expect_move(t, s, w, inside.x, inside.y, .Text)
 }
 
@@ -118,14 +118,14 @@ pointer_release_reaches_the_press_owner :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.pointer_target(s, w, caption.x, caption.y), app.Pointer_Target.Caption)
 	gesture_button(s, w, .Left, true, close.x, close.y)
 	gesture_button(s, w, .Left, false, caption.x, caption.y)
-	testing.expect(t, w.find.open, "a release off the find close button must not close the bar")
+	testing.expect(t, ui.find_is_open(&w.find), "a release off the find close button must not close the bar")
 	testing.expect(t, !ui.armed_down(w.find.armed))
 	testing.expect_value(t, len(s.windows), windows)
 
 	gesture_button(s, w, .Left, true, caption.x, caption.y)
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect(t, !ui.armed_down(w.caption_armed))
-	testing.expect(t, w.find.open, "a caption press must not close the find bar on release")
+	testing.expect(t, ui.find_is_open(&w.find), "a caption press must not close the find bar on release")
 	testing.expect_value(t, len(s.windows), windows)
 }
 

@@ -677,8 +677,8 @@ when AIO_CONTROL {
 					"session.process",
 					entry != nil ? string(entry.process_name[:entry.process_name_length]) : "",
 				},
-				{"find.open", fmt.tprintf("%t", w.find.open)},
-				{"find.focused", fmt.tprintf("%t", w.find.focused)},
+				{"find.open", fmt.tprintf("%t", ui.find_is_open(&w.find))},
+				{"find.focused", fmt.tprintf("%t", ui.find_has_keyboard(&w.find))},
 				{"find.case_sensitive", fmt.tprintf("%t", w.find.case_sensitive)},
 				{"find.regex", fmt.tprintf("%t", w.find.regex)},
 				{"find.query", ui.field_string(&w.find.query)},
@@ -1015,13 +1015,13 @@ when AIO_CONTROL {
 		case s.selected >= 0: return fmt.tprintf("%d of %d", s.selected + 1, s.total)
 		case s.total == 1: return "1 match"
 		case s.total > 0: return fmt.tprintf("%d matches", s.total)
-		case !s.complete: return "Searching…"
+		case s.progress == .Searching: return "Searching…"
 		}
 		return "No matches"
 	}
 
 	verify_find_rect :: proc(w: ^Window, searched: Find_Target, target: ui.Find_Outcome) -> string {
-		if !w.find.open { return "" }
+		if !ui.find_is_open(&w.find) { return "" }
 		l, _ := find_controls(w, searched)
 		#partial switch target {
 		case .Older: return verify_workspace_rect(l.older)

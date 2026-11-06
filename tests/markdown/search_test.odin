@@ -2,6 +2,7 @@ package markdown_test
 
 import "aio:line_match"
 import "aio:markdown"
+import "base:runtime"
 import "core:testing"
 import "core:time"
 
@@ -90,7 +91,7 @@ an_invalid_expression_stays_active_and_finds_nothing :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
 	testing.expect_value(t, found(t, &f, "text (here)\n", "(", {regex = true}), 0)
-	testing.expect(t, f.search.active && f.search.invalid)
+	testing.expect_value(t, f.search.phase, markdown.Search_Phase.Invalid)
 	testing.expect(t, !markdown.search_pending(&f.search))
 	testing.expect(t, !markdown.search_select(&f.search, true))
 }
@@ -180,7 +181,64 @@ an_empty_needle_ends_the_search :: proc(t: ^testing.T) {
 	defer fixture_destroy(&f)
 	testing.expect_value(t, found(t, &f, "text\n", "text"), 1)
 	markdown.search_set(&f.search, "")
-	testing.expect(t, !f.search.active)
+	testing.expect_value(t, f.search.phase, markdown.Search_Phase.Off)
 	testing.expect_value(t, len(f.search.matches), 0)
 	testing.expect(t, !markdown.search_pending(&f.search))
+}
+
+@(private = "file")
+Fail_Allocator :: struct {
+	backing:   runtime.Allocator,
+	remaining: int,
+}
+
+@(private = "file")
+fail_allocation :: proc(
+	data: rawptr,
+	mode: runtime.Allocator_Mode,
+	size, alignment: int,
+	old_memory: rawptr,
+	old_size: int,
+	location := #caller_location,
+) -> ([]u8, runtime.Allocator_Error) {
+	a := (^Fail_Allocator)(data)
+	if size > 0 && (mode == .Alloc || mode == .Alloc_Non_Zeroed || mode == .Resize || mode == .Resize_Non_Zeroed) {
+		if a.remaining == 0 {return nil, .Out_Of_Memory}
+		a.remaining -= 1
+	}
+	return a.backing.procedure(a.backing.data, mode, size, alignment, old_memory, old_size, location)
+}
+
+// Running out of memory ends the search in a state the find bar reports, rather than switching the search
+// off or presenting the matches stored so far as all of them.
+@(test)
+running_out_of_memory_fails_the_search :: proc(t: ^testing.T) {
+	context.logger = {}
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !testing.expect(t, markdown.parse("a\n\na\n", &f.doc)) {return}
+	a := Fail_Allocator{context.allocator, 0}
+	context.allocator = {fail_allocation, &a}
+
+	// The needle cannot be copied.
+	markdown.search_set(&f.search, "a")
+	testing.expect_value(t, f.search.phase, markdown.Search_Phase.Failed)
+	testing.expect(t, !markdown.search_pending(&f.search))
+	testing.expect(t, !markdown.search_select(&f.search, false))
+
+	// The pass cannot store a match.
+	a.remaining = -1
+	markdown.search_set(&f.search, "a")
+	a.remaining = 0
+	settle(&f)
+	testing.expect_value(t, f.search.phase, markdown.Search_Phase.Failed)
+	testing.expect_value(t, len(f.search.matches), 0)
+	testing.expect(t, !markdown.search_select(&f.search, false))
+
+	// The next needle searches again.
+	a.remaining = -1
+	markdown.search_set(&f.search, "a")
+	settle(&f)
+	testing.expect_value(t, f.search.phase, markdown.Search_Phase.Complete)
+	testing.expect_value(t, len(f.search.matches), 2)
 }

@@ -12,21 +12,32 @@ Match :: struct {
 	start, end: int,
 }
 
-// Lives beside the document it searches and is told when that document changes.
+// Where a search stands. The matcher holds a needle in every phase but Off and Failed.
+Search_Phase :: enum u8 {
+	Off,
+	// The regular expression does not compile.
+	Invalid,
+	// A pass reads the document from `next`, publishing matches as it finds them.
+	Scanning,
+	Complete,
+	// Memory ran out; the search holds no needle and no matches.
+	Failed,
+}
+
+// Lives beside the document it searches and is told when that document changes. Only the procedures in
+// this file write it.
 Search :: struct {
-	active, invalid: bool,
-	// A pass has reached the end of the document.
-	complete:        bool,
-	matcher:         line_match.Matcher,
+	phase:    Search_Phase,
+	matcher:  line_match.Matcher,
 	// In document order, published as the pass finds them.
-	matches:         [dynamic]Match,
+	matches:  [dynamic]Match,
 	// Index into matches, or -1.
-	selected:        int,
-	// Where the selected match started before a reload, or -1.
-	keep:            int,
-	next:            int,
+	selected: int,
+	// While scanning, where the selected match started before a reload, or -1.
+	keep:     int,
+	next:     int,
 	// Changes when a pass finishes, so the window redraws.
-	revision:        int,
+	revision: int,
 }
 
 search_destroy :: proc(s: ^Search) {
@@ -39,34 +50,36 @@ search_destroy :: proc(s: ^Search) {
 search_set :: proc(s: ^Search, needle: string, options: line_match.Options = {}) {
 	line_match.destroy(&s.matcher)
 	clear(&s.matches)
-	s.active, s.invalid, s.complete = false, false, false
+	s.phase = .Off
 	s.selected, s.keep, s.next = -1, -1, 0
 	s.revision += 1
 	if len(needle) == 0 {return}
 	switch line_match.init(&s.matcher, needle, options) {
 	case .Out_Of_Memory:
 		log.error("markdown: copying the search text failed")
+		s.phase = .Failed
 	case .Invalid:
-		s.active, s.invalid = true, true
+		s.phase = .Invalid
 	case .Ok:
-		s.active = true
+		s.phase = .Scanning
 	}
 }
 
 // Searches a reloaded document again, keeping the selection on the same match or the next one.
 search_restart :: proc(s: ^Search) {
-	if !s.active || s.invalid {return}
+	if s.phase != .Scanning && s.phase != .Complete {return}
 	s.keep = -1
 	if s.selected >= 0 && s.selected < len(s.matches) {s.keep = s.matches[s.selected].start}
 	clear(&s.matches)
-	s.complete, s.selected, s.next = false, -1, 0
+	s.phase, s.selected, s.next = .Scanning, -1, 0
 }
 
 search_pending :: proc(s: ^Search) -> bool {
-	return s.active && !s.invalid && !s.complete
+	return s.phase == .Scanning
 }
 
-// Advances the pass for a bounded time, so a long document never stalls a frame.
+// Advances the pass for a bounded time, so a long document never stalls a frame. Running out of memory
+// ends the search rather than presenting part of the document's matches as all of them.
 search_update :: proc(s: ^Search, doc: ^Document, budget: time.Duration) {
 	if !search_pending(s) {return}
 	text := string(doc.text[:])
@@ -80,7 +93,7 @@ search_update :: proc(s: ^Search, doc: ^Document, budget: time.Duration) {
 			if !found {break}
 			if _, err := append(&s.matches, Match{s.next + first, s.next + end}); err != nil {
 				log.error("markdown: storing a search match failed")
-				search_finish(s)
+				search_fail(s)
 				return
 			}
 		}
@@ -92,12 +105,21 @@ search_update :: proc(s: ^Search, doc: ^Document, budget: time.Duration) {
 
 @(private)
 search_finish :: proc(s: ^Search) {
-	s.complete = true
+	s.phase = .Complete
 	s.revision += 1
 	if s.keep < 0 {return}
 	index := search_first_after(s.matches[:], s.keep)
 	s.selected = min(index, len(s.matches) - 1)
 	s.keep = -1
+}
+
+@(private)
+search_fail :: proc(s: ^Search) {
+	line_match.destroy(&s.matcher)
+	clear(&s.matches)
+	s.phase = .Failed
+	s.selected, s.keep = -1, -1
+	s.revision += 1
 }
 
 // The first match that starts at or after `offset`.
@@ -117,7 +139,7 @@ search_first_after :: proc(matches: []Match, offset: int) -> int {
 @(require_results)
 search_select :: proc(s: ^Search, upward: bool) -> bool {
 	total := len(s.matches)
-	if !s.active || total == 0 {return false}
+	if total == 0 {return false}
 	switch {
 	case s.selected < 0 || s.selected >= total:
 		s.selected = upward ? total - 1 : 0

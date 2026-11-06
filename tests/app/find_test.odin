@@ -68,7 +68,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	if !testing.expect(t, w.tab_drag.pressed) { return }
 	// Seed the gesture and overlay together; moves and releases use the real app dispatcher.
 	ui.find_open(&w.find)
-	if !testing.expect(t, w.find.open) { return }
+	if !testing.expect(t, ui.find_is_open(&w.find)) { return }
 	target := app.rail_row_rect_for_tab(&w, 1)
 	x, y := i32(target.x + 20), i32(target.y + target.height / 2)
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
@@ -101,7 +101,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 	testing.expect_value(t, w.dragging.count, 0)
-	testing.expect(t, !ui.armed_down(w.find.armed) && w.find.open)
+	testing.expect(t, !ui.armed_down(w.find.armed) && ui.find_is_open(&w.find))
 }
 
 // Uses real ConPTY output and the app event dispatcher, without creating or showing a native window.
@@ -155,7 +155,7 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	append(&state.windows, &other_window)
 	app.handle_event(&state, platform.Text_Event{other_window.id, "OTHER138"})
 	find_settle(t, other)
-	testing.expect(t, term.search_summary(other).active)
+	testing.expect(t, term.search_summary(other).progress != .Off)
 	ui.find_open(&w.find)
 	label, enabled := app.find_presentation(&w, &state.sessions[0])
 	testing.expect_value(t, label, "0 of 0")
@@ -207,7 +207,7 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 		y = i32(l.older.y+16), button = .Left, pressed = true})
 	app.handle_event(&state, platform.Focus_Event{window = w.id, focused = false})
 	testing.expect(t, !ui.armed_down(w.find.armed) &&
-		ui.armed_target(w.find.armed) == .None && w.find.open)
+		ui.armed_target(w.find.armed) == .None && ui.find_is_open(&w.find))
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
@@ -229,7 +229,7 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 5, y = 5, button = .Left})
 	testing.expect(t, !ui.armed_down(w.find.armed))
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-	testing.expect(t, !w.find.open && !term.search_summary(session).active)
+	testing.expect(t, !ui.find_is_open(&w.find) && term.search_summary(session).progress == .Off)
 	bar, _ := term.scrollbar(session)
 	testing.expect_value(t, bar.offset+bar.len, bar.total)
 }
@@ -287,25 +287,25 @@ find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left,
 		pressed = true})
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left})
-	testing.expect(t, w.find.open && !w.find.focused)
-	testing.expect(t, term.search_summary(session).active)
+	testing.expect(t, ui.find_is_open(&w.find) && !ui.find_has_keyboard(&w.find))
+	testing.expect(t, term.search_summary(session).progress != .Off)
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-	testing.expect(t, w.find.open)
+	testing.expect(t, ui.find_is_open(&w.find))
 	app.find_toggle(&state, &w, entry)
 	testing.expect(t, ui.find_has_keyboard(&w.find))
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-	testing.expect(t, !w.find.open && !term.search_summary(session).active)
+	testing.expect(t, !ui.find_is_open(&w.find) && term.search_summary(session).progress == .Off)
 	testing.expect_value(t, up(session), scrolled)
 
 	// The kept search reopens and runs; the close button closes without resetting the view either.
 	state.settings.terminal.find_keep_query = true
 	app.find_toggle(&state, &w, entry)
 	testing.expect_value(t, ui.field_string(&w.find.query), "line_7$")
-	testing.expect(t, term.search_summary(session).active)
+	testing.expect(t, term.search_summary(session).progress != .Off)
 	l, _ := app.find_controls(&w, entry)
 	x, y := i32(l.close.x+16), i32(l.close.y+16)
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = true})
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
-	testing.expect(t, !w.find.open)
+	testing.expect(t, !ui.find_is_open(&w.find))
 	testing.expect_value(t, up(session), scrolled)
 }
