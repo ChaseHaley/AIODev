@@ -65,7 +65,7 @@ pane_header_draw :: proc(
 	pane: layout.Pane_Rect,
 	entry: ^Session_Entry,
 ) -> glyphs.Result {
-	controls: [6]ui.Control_Motion
+	controls: [ui.HEADER_BUTTONS]ui.Control_Motion
 	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
 	r := pane.rect
 	if w.header_height == 0 {
@@ -93,9 +93,7 @@ pane_header_draw :: proc(
 	}
 	badge_hovered := false
 	if entry != nil {
-		layout := ui.header_layout(
-			{r.x, r.y, r.width, r.height}, w.scale, w.focused && pane.node == w.tree.focus,
-		)
+		layout := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
 		badge_hovered =
 			w.pointer.x >= layout.badge.x - 3 * w.scale &&
 			w.pointer.x < layout.badge.x + layout.badge.width + 9 * w.scale &&
@@ -149,7 +147,7 @@ pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_A
 	for pane in w.panes {
 		r := pane.rect
 		area := render.Rect{r.x, r.y, r.width, r.height}
-		l := ui.header_layout(area, w.scale, pane.node == w.tree.focus)
+		l := ui.header_layout(area, w.scale)
 		if w.header_height == 0 {l = ui.split_overlay_layout(area, w.scale)}
 		if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
 	}

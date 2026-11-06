@@ -406,7 +406,7 @@ header_button_moves_a_pane_to_a_linked_window_and_back :: proc(t: ^testing.T) {
 	button := int(ui.Header_Action.Linked_Window) - 1
 	click := proc(f: ^Fixture, w: ^app.Window, pane: layout.Pane_Rect, button: int) {
 		r := pane.rect
-		h := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, true)
+		h := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
 		gesture_click_header(f.state, w, button, h)
 	}
 	click(&f, f.host, f.host.panes[0], button)

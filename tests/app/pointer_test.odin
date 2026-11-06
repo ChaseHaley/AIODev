@@ -126,6 +126,6 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	pointer_expect_move(t, s, w, x, y, .Hand)
 	h, found := gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	x, y = pointer_center(h.buttons[0])
+	x, y = pointer_center(h.buttons[int(ui.Header_Action.Split_Right) - 1])
 	pointer_expect_move(t, s, w, x, y, .Hand)
 }

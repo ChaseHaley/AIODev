@@ -28,7 +28,7 @@ Pane_View :: struct {
 	image_epoch: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
-	header_controls: [6]ui.Control_Motion,
+	header_controls: [ui.HEADER_BUTTONS]ui.Control_Motion,
 	header_hover:   ui.Header_Action,
 	header_armed:   ui.Armed(ui.Header_Action),
 	hover:          Maybe(term.Link_Range),

@@ -4,6 +4,8 @@ import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
+// One slot per Header_Action from Split_Right through Close, in that order, left to right.
+HEADER_BUTTONS :: 6
 Header_Action :: enum {
 	None,
 	Split_Right,
@@ -16,10 +18,10 @@ Header_Action :: enum {
 }
 Header_Layout :: struct {
 	panel, title, badge: render.Rect,
-	buttons:             [6]render.Rect,
+	buttons:             [HEADER_BUTTONS]render.Rect,
 }
 
-header_layout :: proc(area: render.Rect, scale: f32, _: bool) -> Header_Layout {
+header_layout :: proc(area: render.Rect, scale: f32) -> Header_Layout {
 	l := Header_Layout {
 		panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT * scale)},
 	}
@@ -138,7 +140,7 @@ header_draw :: proc(
 	radius, scale: f32,
 	title, directory, icon: string,
 	focused: bool,
-	controls: [6]Control_Motion,
+	controls: [HEADER_BUTTONS]Control_Motion,
 	zoomed := false,
 	fullscreen := false,
 	linked := false,
@@ -150,7 +152,7 @@ header_draw :: proc(
 	status_phase: f32 = 0,
 	content_icon: Icon = .None,
 ) -> glyphs.Result {
-	l := header_layout(area, scale, focused)
+	l := header_layout(area, scale)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
 	if render.push_layer(list, l.panel) != .None {return .Ok}
@@ -281,7 +283,7 @@ split_overlay_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	l: Header_Layout,
-	controls: [6]Control_Motion,
+	controls: [HEADER_BUTTONS]Control_Motion,
 	scale: f32,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {

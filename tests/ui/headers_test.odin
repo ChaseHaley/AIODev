@@ -10,7 +10,7 @@ headers_keep_scaled_geometry_and_hit_targets_inside_visible_cards :: proc(t: ^te
 		for width in ([?]f32{0, 10, 27, 50, 100, 400}) {
 			for height in ([?]f32{0, 10, 200}) {
 				area := render.Rect{5, 8, width*scale, height*scale}
-				l := ui.header_layout(area, scale, true)
+				l := ui.header_layout(area, scale)
 				testing.expect_value(t, l.panel.height, min(height, 28)*scale)
 				for button, i in l.buttons {
 					if button.width == 0 { continue }
@@ -21,8 +21,6 @@ headers_keep_scaled_geometry_and_hit_targets_inside_visible_cards :: proc(t: ^te
 				testing.expect_value(t, ui.header_hit_test(l, area.x-1, area.y), ui.Header_Action.None)
 				testing.expect_value(t, ui.header_hit_test(l, area.x+area.width, area.y+5), ui.Header_Action.None)
 				testing.expect_value(t, ui.header_hit_test(l, area.x+5, l.panel.y+l.panel.height), ui.Header_Action.None)
-				inactive := ui.header_layout(area, scale, false)
-				testing.expect_value(t, inactive.buttons, l.buttons)
 			}
 		}
 	}

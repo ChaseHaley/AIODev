@@ -21,7 +21,7 @@ gesture_button :: proc(s: ^app.App, w: ^app.Window, button: input.Mouse_Button,
 @(private)
 gesture_header :: proc(w: ^app.Window) -> ui.Header_Layout {
 	r := w.panes[0].rect
-	return ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, true)
+	return ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
 }
 
 @(test)
@@ -59,7 +59,7 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 	for scenario in 0 ..< 8 {
 		testing.expect_value(t, len(w.panes), 2)
 		h := gesture_header(w)
-		close := h.buttons[3]
+		close := h.buttons[int(ui.Header_Action.Fill_Window) - 1]
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)
 		gesture_button(s, w, .Middle, true, h.title.x+4, h.title.y+4)
 		switch scenario {
@@ -272,7 +272,7 @@ gesture_settings_header :: proc(w: ^app.Window) -> (ui.Header_Layout, bool) {
 	for pane in w.panes {
 		if pane.content.kind != .Settings {continue}
 		r := pane.rect
-		return ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, pane.node == w.tree.focus),
+		return ui.header_layout({r.x, r.y, r.width, r.height}, w.scale),
 			true
 	}
 	return {}, false
