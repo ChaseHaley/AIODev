@@ -37,6 +37,7 @@ $manifest = @(
     ,@('kilocode,kilo', 'lobe:kilocode', '')
     ,@('junie', 'lobe:junie', '47E054')
     ,@('ollama', 'si:ollama', '')
+    ,@('omp,pi-coding-agent', 'file:omp', '')
     # Editors
     ,@('nvim,neovim', 'file:neovim', '')
     ,@('vim,gvim', 'si:vim', '')

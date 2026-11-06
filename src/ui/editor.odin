@@ -3365,6 +3365,8 @@ editor_draw :: proc(
 		if row.process_field != .None {
 			if result := editor_process_draw(p, row, parts, selected, list, text, theme, s);
 			   result != .Ok {return result}
+			// A selected text field leaves its own clip pushed; later rows draw in the list again.
+			if render.push_layer(list, l.list) != .None {return .Ok}
 			continue
 		}
 		if row.kind == .Profile {
