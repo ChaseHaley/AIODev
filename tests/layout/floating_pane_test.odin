@@ -14,7 +14,7 @@ pane_of :: proc(id: u32) -> layout.Content {return {.Terminal, id}}
 shown :: proc(l: ^layout.Layout) -> [dynamic]layout.Pane_Rect {
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(l, AREA, 0, &rects)
-	layout.floats_place(l, AREA, &rects)
+	layout.floats_place(l, AREA, 0, &rects)
 	return rects
 }
 
@@ -162,4 +162,63 @@ floating_bounds_stay_inside_the_area :: proc(t: ^testing.T) {
 	tiny := layout.float_bounds_clamp({0.5, 0.5, 0.001, 0.001})
 	testing.expect_value(t, tiny.width, layout.FLOAT_MINIMUM)
 	testing.expect_value(t, tiny.height, layout.FLOAT_MINIMUM)
+}
+
+@(test)
+floating_group_splits_minimizes_and_docks_as_one_window :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	a, b := two_tiled(t, &l)
+	testing.expect(t, layout.set_floating(&l, b, true, {0.2, 0.2, 0.6, 0.6}))
+	c, err := layout.split_direction(&l, b, .Right, 0.5, pane_of(3))
+	testing.expect_value(t, err, nil)
+	root := layout.float_root(&l, b)
+	testing.expect(t, root != layout.INVALID_NODE && root == layout.float_root(&l, c))
+	_, split_root := l.nodes[root].(layout.Split)
+	testing.expect(t, split_root, "splitting transfers the floating frame to the new branch")
+
+	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+	layout.compute(&l, AREA, 2, &rects)
+	layout.floats_place(&l, AREA, 2, &rects)
+	if testing.expect_value(t, len(rects), 3) {
+		testing.expect(t, rects[1].floating && rects[2].floating)
+		testing.expect_value(t, rects[0].node, a)
+		testing.expect_value(t, rects[0].rect, AREA)
+	}
+	frame, framed := layout.float_rect(&l, c, AREA)
+	testing.expect(t, framed)
+	testing.expect_value(t, frame, layout.Rect{20, 10, 60, 30})
+	dividers := make([dynamic]layout.Divider, context.temp_allocator)
+	layout.floats_dividers(&l, AREA, 2, &dividers)
+	testing.expect_value(t, len(dividers), 1)
+	outer_ratio := l.nodes[l.root].(layout.Split).ratio
+	testing.expect(t, layout.balance_related(&l, root))
+	testing.expect_value(t, l.nodes[l.root].(layout.Split).ratio, outer_ratio)
+
+	shown_count, minimized_count := layout.float_counts(&l)
+	testing.expect_value(t, shown_count, 1)
+	testing.expect_value(t, minimized_count, 0)
+	testing.expect(t, layout.float_minimize(&l, c, true))
+	testing.expect_value(t, len(shown(&l)), 1)
+	testing.expect(t, layout.focus_set(&l, b), "focus restores the whole group")
+	testing.expect(t, layout.set_floating(&l, c, false))
+	testing.expect_value(t, layout.float_root(&l, b), layout.INVALID_NODE)
+	testing.expect_value(t, layout.float_root(&l, c), layout.INVALID_NODE)
+	testing.expect_value(t, len(shown(&l)), 3)
+}
+
+@(test)
+closing_one_pane_keeps_the_remaining_split_pane_floating :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	_, b := two_tiled(t, &l)
+	bounds := layout.Rect{0.25, 0.15, 0.5, 0.7}
+	testing.expect(t, layout.set_floating(&l, b, true, bounds))
+	c, err := layout.split_direction(&l, b, .Down, 0.5, pane_of(3))
+	testing.expect_value(t, err, nil)
+	testing.expect(t, layout.remove(&l, c))
+	testing.expect_value(t, layout.float_root(&l, b), b)
+	floating, ok := layout.float_of(&l, b)
+	testing.expect(t, ok)
+	testing.expect_value(t, floating.bounds, bounds)
 }

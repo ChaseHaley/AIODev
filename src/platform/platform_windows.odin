@@ -1079,12 +1079,14 @@ window_set_cursor :: proc(p: ^Platform, id: Window_Id, shape: Cursor_Shape) -> E
 		window.cursor = nil
 	} else {
 		ids := #partial [Cursor_Shape]w.LPCWSTR {
-			.Arrow             = transmute(cstring16)w.IDC_ARROW,
-			.Text              = transmute(cstring16)w.IDC_IBEAM,
-			.Hand              = transmute(cstring16)w.IDC_HAND,
-			.Resize_Horizontal = transmute(cstring16)w.IDC_SIZEWE,
-			.Resize_Vertical   = transmute(cstring16)w.IDC_SIZENS,
-			.Resize_All        = transmute(cstring16)w.IDC_SIZEALL,
+			.Arrow                          = transmute(cstring16)w.IDC_ARROW,
+			.Text                           = transmute(cstring16)w.IDC_IBEAM,
+			.Hand                           = transmute(cstring16)w.IDC_HAND,
+			.Resize_Horizontal              = transmute(cstring16)w.IDC_SIZEWE,
+			.Resize_Vertical                = transmute(cstring16)w.IDC_SIZENS,
+			.Resize_Northwest_Southeast     = transmute(cstring16)w.IDC_SIZENWSE,
+			.Resize_Northeast_Southwest     = transmute(cstring16)w.IDC_SIZENESW,
+			.Resize_All                     = transmute(cstring16)w.IDC_SIZEALL,
 		}
 		window.cursor = w.LoadCursorW(nil, ids[shape])
 		if window.cursor == nil {

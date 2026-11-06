@@ -324,10 +324,6 @@ pane_split :: proc(
 	ratio: f32 = 0.5,
 	focus := true,
 ) {
-	if layout.is_floating(w.tree, w.tree.focus) {
-		notify(app, .Info, "A floating pane does not split; dock it first with Float or Dock Pane.")
-		return
-	}
 	tab := w.workspace.selected
 	launch: Pane_Launch
 	if entry := focused_session(app, w); entry != nil {

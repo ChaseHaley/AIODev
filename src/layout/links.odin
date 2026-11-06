@@ -106,7 +106,7 @@ node_copy :: proc(dest, source: ^Layout, id: Node_Id, adopt_order: bool) -> Node
 	case Vacant:
 	case Pane:
 		pane := node
-		pane.linked = false
+		pane_settle(&pane)
 		if adopt_order {
 			if existing := find_content(dest, pane.content); existing != INVALID_NODE {
 				pane.order = dest.nodes[existing].(Pane).order
@@ -120,7 +120,7 @@ node_copy :: proc(dest, source: ^Layout, id: Node_Id, adopt_order: bool) -> Node
 		return allocate_node(dest, pane)
 	case Split:
 		branch := node
-		branch.linked = false
+		branch.linked, branch.floating, branch.float = false, false, {}
 		branch.first = node_copy(dest, source, node.first, adopt_order)
 		branch.second = node_copy(dest, source, node.second, adopt_order)
 		return allocate_node(dest, branch)

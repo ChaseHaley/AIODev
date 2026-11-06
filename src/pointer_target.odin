@@ -564,7 +564,7 @@ workspace_button_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_E
 
 @(private = "file")
 pill_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return status_rect_contains(status_pill_rect(app, w), x, y)
+	return !floating_covers(w, x, y) && status_rect_contains(status_pill_rect(app, w), x, y)
 }
 
 @(private = "file")
@@ -586,8 +586,10 @@ pill_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private = "file")
 divider_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
+	if _, _, edge := floating_edge_at(w, x, y); edge {return false}
+	if rect_contains(w.float_capsule_group, x, y) {return false}
 	_, over := divider_cursor(w, x, y)
-	return over && !floating_covers(w, x, y)
+	return over
 }
 
 @(private = "file")
@@ -614,7 +616,9 @@ divider_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -
 // Activity panel
 
 @(private = "file")
-panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return status_panel_contains(app, w, x, y)}
+panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return !floating_covers(w, x, y) && status_panel_contains(app, w, x, y)
+}
 
 @(private = "file")
 panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -661,7 +665,7 @@ panel_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> 
 
 @(private = "file")
 tabs_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return tab_interaction_hit(app, w, x, y, .Left).kind != .Outside
+	return !floating_covers(w, x, y) && tab_interaction_hit(app, w, x, y, .Left).kind != .Outside
 }
 
 @(private = "file")
@@ -744,7 +748,7 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 
 @(private = "file")
 header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	_, action, _ := pane_header_hit(w, x, y)
+	pane, action, _ := pane_header_hit(w, x, y)
 	#partial switch action {
 	case .Documents: return "Documents"
 	case .Split_Right: return "Split right"
@@ -753,7 +757,7 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	case .Fill_Window: return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
 	case .Linked_Window: return w.linked ? "Return pane to tab" : "Move pane to linked window"
 	case .Minimize: return "Minimize"
-	case .Dock: return "Dock into the tab"
+	case .Dock: return pane.floating ? "Dock into the tab" : "Float above the tab"
 	case .Close: return "Close pane"
 	case:
 	}

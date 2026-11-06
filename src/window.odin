@@ -49,14 +49,18 @@ Window :: struct {
 	divider_click_node: layout.Node_Id,
 	divider_click_ns: i64,
 	pane_drag: Pane_Drag,
+	tab_drag: Tab_Drag,
 	// A floating pane moved by its header or resized by an edge; see floating_panes.odin.
 	float_drag: Float_Drag,
-	// The minimized floating pane whose capsule is under the pointer.
-	float_capsule_hover: Maybe(layout.Content),
-	float_capsule_armed: ui.Armed(layout.Content),
-	float_capsules: [dynamic]Float_Capsule,
-	float_capsule_widths: [dynamic]f32,
-	tab_drag: Tab_Drag,
+	// The minimized floating pane whose capsule is under the pointer, and their movable row.
+	float_capsule_hover:      Maybe(layout.Content),
+	float_capsule_armed:      ui.Armed(layout.Content),
+	float_capsule_drag:       Float_Capsule_Drag,
+	float_capsule_group:      render.Rect,
+	float_capsule_anchor:     [2]f32,
+	float_capsule_positioned: bool,
+	float_capsules:           [dynamic]Float_Capsule,
+	float_capsule_widths:     [dynamic]f32,
 	tab_incoming: Tab_Incoming,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
 	split_overlay: bool,
@@ -439,12 +443,13 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	for &view in w.views {view.header_controls = {}}
 	w.header_height = pane_insets(app, w.scale, nil).header
 	area := window_content_area(app, w)
+	gap := window_gap(app, w)
 	if pane_view_solo(w) {
 		layout.compute_focused(w.tree, area, &w.panes)
 	} else {
-		layout.compute(w.tree, area, window_gap(app, w), &w.panes)
+		layout.compute(w.tree, area, gap, &w.panes)
 	}
-	layout.floats_place(w.tree, area, &w.panes)
+	layout.floats_place(w.tree, floating_area(w), gap, &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
 	for &view in w.views {view.valid = false}
@@ -459,7 +464,8 @@ window_floats_layout :: proc(app: ^App, w: ^Window) {
 	if w.preparing || w.width <= 0 || w.height <= 0 || w.tree == nil {return}
 	tiled := len(window_tiled_rects(w))
 	resize(&w.panes, tiled)
-	layout.floats_place(w.tree, window_content_area(app, w), &w.panes)
+	layout.floats_place(w.tree, floating_area(w), window_gap(app, w), &w.panes)
+	window_dividers(app, w)
 	window_views_prune(w)
 	for pane in w.panes[tiled:] {
 		pane_fit(app, w, pane)
@@ -664,6 +670,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if w.pane_fill != .Screen {
 		if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
 	}
+	if result := rail_draw(app, w); result != .Ok {return frame, result}
+	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
 	for pane in w.panes {
 		if !pane.floating {continue}
 		result: glyphs.Result
@@ -675,8 +683,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		w.blinking = blinking
 		reset_blink(w)
 	}
-	if result := rail_draw(app, w); result != .Ok {return frame, result}
-	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
 	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := tab_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}

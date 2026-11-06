@@ -40,6 +40,7 @@ Icon :: enum {
 	Workspace,
 	Window_Out,
 	Window_In,
+	Float_Pane,
 	Terminal,
 	View_Comfy,
 	View_Dense,
@@ -135,6 +136,9 @@ icon_draw :: proc(
 	case .None:
 	case .Minimize:
 		pen_path(p, {3, 12}, {13, 12})
+	case .Float_Pane:
+		pen_path(p, {5, 5}, {5, 3}, {13, 3}, {13, 11}, {11, 11})
+		pen_box(p, 3, 5, 8, 8, 1)
 	case .Markdown:
 		pen_box(p, 1, 3, 14, 10, 2)
 		pen_path(p, {3.5, 10.5}, {3.5, 5.5}, {6, 8}, {8.5, 5.5}, {8.5, 10.5})

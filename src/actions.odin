@@ -717,7 +717,7 @@ run_action :: proc(
 			w,
 			layout.focus_cycle(
 				pane_action_rects(app, w),
-				layout.focus_tiled(w.tree),
+				pane_action_focus(w),
 				action == .Focus_Next ? 1 : -1,
 			),
 		)
@@ -762,13 +762,14 @@ run_action :: proc(
 			reset_blink(w)
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
-		// From a floating pane, the tiled pane it was opened over is where the step starts.
 		direction := layout.Direction(int(action) - int(Action.Focus_Left))
-		pane_focus(
-			app,
-			w,
-			layout.focus_direction(pane_action_rects(app, w), layout.focus_tiled(w.tree), direction),
-		)
+		start := pane_action_focus(w)
+		target := layout.focus_direction(pane_action_rects(app, w), start, direction)
+		// Leaving a floating group's outer edge continues from the tiled pane behind it.
+		if target == start && layout.is_floating(w.tree, start) {
+			target = layout.focus_direction(window_tiled_rects(w), layout.focus_tiled(w.tree), direction)
+		}
+		pane_focus(app, w, target)
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
 		resize_pane(app, w, action, 10)
 	case .Resize_Left_Large, .Resize_Right_Large, .Resize_Up_Large, .Resize_Down_Large:
@@ -815,13 +816,29 @@ resize_pane :: proc(app: ^App, w: ^Window, action: Action, amount: f32) {
 	}
 }
 
-// The tiled panes as they would be arranged, which directional focus, cycling and swaps move between.
+// The panes sharing the focused pane's arrangement: its floating group, or the tiled panes.
 @(private)
 pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
+	root := layout.float_root(w.tree, w.tree.focus)
+	if root != layout.INVALID_NODE {
+		floats := floating_rects(w)
+		start := -1
+		for pane, i in floats {
+			same := layout.float_root(w.tree, pane.node) == root
+			if same && start < 0 {start = i}
+			if !same && start >= 0 {return floats[start:i]}
+		}
+		if start >= 0 {return floats[start:]}
+	}
 	if !pane_view_solo(w) {return window_tiled_rects(w)}
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(w.tree, window_content_area(app, w), window_gap(app, w), &rects, false)
 	return rects[:]
+}
+
+@(private)
+pane_action_focus :: proc(w: ^Window) -> layout.Node_Id {
+	return layout.is_floating(w.tree, w.tree.focus) ? w.tree.focus : layout.focus_tiled(w.tree)
 }
 
 copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {

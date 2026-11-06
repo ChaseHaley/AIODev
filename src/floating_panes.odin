@@ -51,13 +51,20 @@ window_floats_shown :: proc(w: ^Window) -> bool {
 	return len(w.panes) > 0 && w.panes[len(w.panes) - 1].floating
 }
 
-// The rectangle a new floating pane takes: centred over the tiled panes, stepped from any already shown so
-// none hides another exactly.
+// Floating panes can cover the workspace chrome below the native title bar, including the vertical tab
+// rail and Activity panel.
+floating_area :: proc(w: ^Window) -> layout.Rect {
+	top := window_title_height(w)
+	return {0, top, f32(w.width), max(0, f32(w.height) - top)}
+}
+
+// The rectangle a new floating pane takes: centred over the window work area, stepped from any already
+// shown so none hides another exactly.
 @(private)
-floating_bounds_new :: proc(app: ^App, w: ^Window, tree: ^layout.Layout) -> layout.Rect {
+floating_bounds_new :: proc(w: ^Window, tree: ^layout.Layout) -> layout.Rect {
 	bounds := layout.Rect{0.2, 0.15, 0.6, 0.6}
 	if w == nil {return bounds}
-	area := window_content_area(app, w)
+	area := floating_area(w)
 	if area.width <= 0 || area.height <= 0 {return bounds}
 	shown, _ := layout.float_counts(tree)
 	step := f32(shown % 6) * FLOAT_CASCADE * w.scale
@@ -102,7 +109,7 @@ floating_attach :: proc(
 ) -> bool {
 	tab := workspace.tabs[tab_index]
 	shown := w != nil && !w.linked && w.workspace == workspace
-	node, err := layout.float_new(&tab.tree, content, floating_bounds_new(app, shown ? w : nil, &tab.tree))
+	node, err := layout.float_new(&tab.tree, content, floating_bounds_new(shown ? w : nil, &tab.tree))
 	if err != nil {return false}
 	layout_state_touch(app)
 	if !shown {return true}
@@ -133,7 +140,7 @@ floating_toggle :: proc(app: ^App, w: ^Window) {
 	node := w.tree.focus
 	if layout.is_floating(w.tree, node) {
 		if !layout.set_floating(w.tree, node, false) {return}
-	} else if !layout.set_floating(w.tree, node, true, floating_bounds_new(app, w, w.tree)) {
+	} else if !layout.set_floating(w.tree, node, true, floating_bounds_new(w, w.tree)) {
 		notify(app, .Info, "The tab keeps one tiled pane; split it before floating this one.")
 		return
 	}
@@ -141,7 +148,7 @@ floating_toggle :: proc(app: ^App, w: ^Window) {
 	layout_state_touch(app)
 }
 
-// Minimizes the focused floating pane, or brings back the one minimized last.
+// Minimizes the focused floating group, or brings back the group minimized last.
 floating_minimize_toggle :: proc(app: ^App, w: ^Window) {
 	if layout.is_floating(w.tree, w.tree.focus) {
 		floating_minimize(app, w, w.tree.focus)
@@ -155,7 +162,7 @@ floating_minimize_toggle :: proc(app: ^App, w: ^Window) {
 	pane_focus(app, w, node)
 }
 
-// Minimizes every shown floating pane, or when none is shown, brings every minimized one back.
+// Minimizes every shown floating group, or when none is shown, brings every minimized one back.
 floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 	shown, minimized := layout.float_counts(w.tree)
 	if shown == 0 && minimized == 0 {
@@ -164,7 +171,10 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 	}
 	focused := layout.is_floating(w.tree, w.tree.focus)
 	if focused {focus_leave(app, w)}
-	for _, i in w.tree.nodes {_ = layout.float_minimize(w.tree, layout.Node_Id(i), shown > 0)}
+	for _, i in w.tree.nodes {
+		root := layout.Node_Id(i)
+		if layout.float_is_root(w.tree, root) {_ = layout.float_minimize(w.tree, root, shown > 0)}
+	}
 	if shown == 0 {
 		latest := layout.float_latest(w.tree, false)
 		if latest != layout.INVALID_NODE {pane_focus(app, w, latest)}
@@ -175,14 +185,13 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 }
 
 floating_minimize :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
-	focused := w.tree.focus == node
+	focused := layout.float_root(w.tree, w.tree.focus) == layout.float_root(w.tree, node)
 	if focused {focus_leave(app, w)}
 	if !layout.float_minimize(w.tree, node, true) {return}
 	window_floats_layout(app, w)
 	if focused {focus_enter(app, w)}
 	layout_state_touch(app)
 }
-
 
 // Floating panes are the last of the window's panes, topmost last.
 floating_rects :: proc(w: ^Window) -> []layout.Pane_Rect {
@@ -196,42 +205,61 @@ window_tiled_rects :: proc(w: ^Window) -> []layout.Pane_Rect {
 	return w.panes[:tiled]
 }
 
-// The floating pane whose edge band holds the point, and which edges it would move. A point inside a
-// card, away from its edges, belongs to that card, and so does any edge of a card below it.
+// The topmost floating group whose frame contains the point.
+floating_frame_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, rect: layout.Rect, ok: bool) {
+	last := layout.INVALID_NODE
+	#reverse for candidate in floating_rects(w) {
+		group := layout.float_root(w.tree, candidate.node)
+		if group == last {continue}
+		last = group
+		frame, found := layout.float_rect(w.tree, group, floating_area(w))
+		if found && x >= frame.x && x < frame.x + frame.width &&
+		   y >= frame.y && y < frame.y + frame.height {return group, frame, true}
+	}
+	return layout.INVALID_NODE, {}, false
+}
+
+// The floating group whose outer edge band holds the point. Internal split edges remain dividers.
 floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edges: Float_Edges, ok: bool) {
 	band := FLOAT_EDGE * w.scale / 2
-	floats := floating_rects(w)
-	#reverse for candidate in floats {
-		r := candidate.rect
-		if x < r.x - band || x >= r.x + r.width + band || y < r.y - band || y >= r.y + r.height + band {
-			continue
-		}
+	last := layout.INVALID_NODE
+	#reverse for candidate in floating_rects(w) {
+		group := layout.float_root(w.tree, candidate.node)
+		if group == last {continue}
+		last = group
+		r, found := layout.float_rect(w.tree, group, floating_area(w))
+		if !found ||
+		   x < r.x - band || x >= r.x + r.width + band ||
+		   y < r.y - band || y >= r.y + r.height + band {continue}
 		if x < r.x + band {edges += {.Left}}
 		if x >= r.x + r.width - band {edges += {.Right}}
 		if y < r.y + band {edges += {.Top}}
 		if y >= r.y + r.height - band {edges += {.Bottom}}
 		if edges == {} {return {}, {}, false}
-		return candidate, edges, true
+		pane = candidate
+		pane.rect = r
+		return pane, edges, true
 	}
 	return {}, {}, false
 }
 
-// Whether a floating pane, its edge band or a capsule covers the point, hiding the dividers below it.
+// Whether a floating group, its edge band or the capsule row covers the point.
 floating_covers :: proc(w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
-	if pane, found := layout.hit_test(w.panes[:], x, y); found && pane.floating {return true}
-	_, capsule := floating_capsule_at(w, x, y).?
-	return capsule
+	if _, _, frame := floating_frame_at(w, x, y); frame {return true}
+	return rect_contains(w.float_capsule_group, x, y)
 }
 
-floating_drag_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, edges: Float_Edges, x, y: f32) {
+floating_drag_press :: proc(_: ^App, w: ^Window, pane: layout.Pane_Rect, edges: Float_Edges, x, y: f32) {
+	rect, found := layout.float_rect(w.tree, pane.node, floating_area(w))
+	if !found {return}
 	w.float_drag = {
 		pressed = true,
 		active  = edges != {},
 		content = pane.content,
 		edges   = edges,
 		start   = {x, y},
-		rect    = pane.rect,
+		rect    = rect,
 	}
 }
 
@@ -279,7 +307,7 @@ floating_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	}
 	node := layout.find_content(w.tree, d.content)
 	if !layout.is_floating(w.tree, node) {w.float_drag = {}; return false}
-	area := window_content_area(app, w)
+	area := floating_area(w)
 	if area.width <= 0 || area.height <= 0 {return true}
 	r := floating_drag_rect(area, d.rect, {dx, dy}, d.edges, w.scale)
 	bounds := floating_bounds_for_rect(area, r)
@@ -297,17 +325,26 @@ floating_drag_release :: proc(app: ^App, w: ^Window, x, y: f32) {
 
 @(private)
 floating_edge_cursor :: proc(edges: Float_Edges) -> platform.Cursor_Shape {
-	horizontal := edges & {.Left, .Right} != {}
-	vertical := edges & {.Top, .Bottom} != {}
-	if horizontal && vertical {return .Resize_All}
-	return horizontal ? .Resize_Horizontal : .Resize_Vertical
+	if (.Left in edges && .Top in edges) || (.Right in edges && .Bottom in edges) {
+		return .Resize_Northwest_Southeast
+	}
+	if (.Right in edges && .Top in edges) || (.Left in edges && .Bottom in edges) {
+		return .Resize_Northeast_Southwest
+	}
+	return edges & {.Left, .Right} != {} ? .Resize_Horizontal : .Resize_Vertical
 }
 
 Float_Capsule :: struct {
-	node:    layout.Node_Id,
+	root:    layout.Node_Id,
 	content: layout.Content,
 	rect:    render.Rect,
 	order:   u64,
+}
+
+Float_Capsule_Drag :: struct {
+	pressed, active: bool,
+	start:           [2]f32,
+	rect:            render.Rect,
 }
 
 floating_capsule_row_fit :: proc(widths: []f32, area_width, preferred_gap: f32) -> (start, gap: f32) {
@@ -324,7 +361,7 @@ floating_capsule_row_fit :: proc(widths: []f32, area_width, preferred_gap: f32) 
 			total += width
 		}
 	}
-	start = max(0, (area_width - total) / 2)
+	start = max(0, area_width - total)
 	return
 }
 
@@ -332,22 +369,29 @@ floating_capsule_row_fit :: proc(widths: []f32, area_width, preferred_gap: f32) 
 floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	clear(&w.float_capsules)
 	clear(&w.float_capsule_widths)
+	w.float_capsule_group = {}
 	if w.tree == nil || w.linked {return}
 	s := w.scale
-	for node, i in w.tree.nodes {
-		pane := node.(layout.Pane) or_continue
-		if !pane.floating || !pane.float.minimized {continue}
+	for _, i in w.tree.nodes {
+		root := layout.Node_Id(i)
+		if !layout.float_is_root(w.tree, root) {continue}
+		floating, ok := layout.float_of(w.tree, root)
+		if !ok || !floating.minimized {continue}
+		pane_id := layout.float_pane(w.tree, root)
+		if pane_id == layout.INVALID_NODE {continue}
+		pane := w.tree.nodes[pane_id].(layout.Pane) or_continue
 		capsule := Float_Capsule {
-			node = layout.Node_Id(i),
+			root = root,
 			content = pane.content,
-			order = pane.order,
+			order = layout.float_order(w.tree, root),
 		}
 		if _, err := append(&w.float_capsules, capsule); err != nil {
 			clear(&w.float_capsules)
 			log.error("storing floating pane capsules failed")
 			return
 		}
-		for j := len(w.float_capsules) - 1; j > 0 && w.float_capsules[j - 1].order > pane.order; j -= 1 {
+		for j := len(w.float_capsules) - 1; j > 0 &&
+		     w.float_capsules[j - 1].order > capsule.order; j -= 1 {
 			w.float_capsules[j - 1], w.float_capsules[j] = w.float_capsules[j], w.float_capsules[j - 1]
 		}
 	}
@@ -358,7 +402,8 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 		log.error("storing floating pane capsule widths failed")
 		return
 	}
-	area := window_content_area(app, w)
+	area := floating_area(w)
+	margin := ui.SPACE_3 * s
 	for &capsule, i in w.float_capsules {
 		text := ui.text_width(&label, floating_title(app, capsule.content))
 		w.float_capsule_widths[i] = clamp(
@@ -368,9 +413,23 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 		)
 		capsule.rect.height = ui.HEIGHT_STANDARD * s
 	}
-	start, gap := floating_capsule_row_fit(w.float_capsule_widths[:], area.width, ui.SPACE_2 * s)
-	x := area.x + start
-	y := area.y + area.height - ui.HEIGHT_STANDARD * s - ui.SPACE_3 * s
+	start, gap := floating_capsule_row_fit(
+		w.float_capsule_widths[:],
+		max(0, area.width - 2 * margin),
+		ui.SPACE_2 * s,
+	)
+	row_width := gap * f32(len(w.float_capsules) - 1)
+	for width in w.float_capsule_widths {row_width += width}
+	height := ui.HEIGHT_STANDARD * s
+	x := area.x + margin + start
+	y := area.y + area.height - height - margin
+	if w.float_capsule_positioned {
+		x = area.x + w.float_capsule_anchor.x * max(0, area.width - row_width)
+		y = area.y + w.float_capsule_anchor.y * max(0, area.height - height)
+	}
+	x = clamp(x, area.x, max(area.x, area.x + area.width - row_width))
+	y = clamp(y, area.y, max(area.y, area.y + area.height - height))
+	w.float_capsule_group = {x, y, row_width, height}
 	for &capsule, i in w.float_capsules {
 		capsule.rect.x, capsule.rect.y, capsule.rect.width = x, y, w.float_capsule_widths[i]
 		x += w.float_capsule_widths[i] + gap
@@ -389,6 +448,42 @@ floating_capsule_at :: proc(w: ^Window, x, y: f32) -> Maybe(Float_Capsule) {
 	return nil
 }
 
+floating_capsule_drag_press :: proc(w: ^Window, x, y: f32) -> bool {
+	if !rect_contains(w.float_capsule_group, x, y) {return false}
+	w.float_capsule_drag = {pressed = true, start = {x, y}, rect = w.float_capsule_group}
+	return true
+}
+
+// Follows the pointer while the minimized-pane row moves. False when no row drag is held.
+floating_capsule_drag_move :: proc(w: ^Window, x, y: f32) -> bool {
+	d := &w.float_capsule_drag
+	if !d.pressed {return false}
+	dx, dy := x - d.start.x, y - d.start.y
+	if !d.active {
+		if max(abs(dx), abs(dy)) < FLOAT_DRAG_THRESHOLD * w.scale {return true}
+		d.active = true
+		ui.armed_cancel(&w.float_capsule_armed)
+	}
+	area := floating_area(w)
+	r := d.rect
+	r.x = clamp(r.x + dx, area.x, max(area.x, area.x + area.width - r.width))
+	r.y = clamp(r.y + dy, area.y, max(area.y, area.y + area.height - r.height))
+	shift := [2]f32{r.x - w.float_capsule_group.x, r.y - w.float_capsule_group.y}
+	w.float_capsule_group = r
+	for &capsule in w.float_capsules {
+		capsule.rect.x += shift.x
+		capsule.rect.y += shift.y
+	}
+	x_travel, y_travel := max(0, area.width - r.width), max(0, area.height - r.height)
+	w.float_capsule_anchor = {
+		x_travel > 0 ? (r.x - area.x) / x_travel : 0,
+		y_travel > 0 ? (r.y - area.y) / y_travel : 0,
+	}
+	w.float_capsule_positioned = true
+	w.dirty = true
+	return true
+}
+
 floating_title :: proc(app: ^App, content: layout.Content) -> string {
 	if entry := workspace_session_for_content(app, content); entry != nil {
 		return entry.name != "" ? entry.name : pane_header_title(&entry.header)
@@ -402,6 +497,9 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	label := ui.text_styled(&w.ui_text, .Body)
+	capsule_theme := app.theme
+	capsule_theme.hover_lift = 0
+	capsule_theme.hover = {}
 	for capsule in capsules {
 		r := capsule.rect
 		radius := ui.pill_radius(r)
@@ -411,7 +509,7 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		hovered := w.float_capsule_hover == capsule.content
 		face, ink, err := ui.button_draw(
 			&w.list,
-			app.theme,
+			capsule_theme,
 			{
 				rect = r,
 				hover = hovered ? 1 : 0,
@@ -454,13 +552,12 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	return .Ok
 }
 
-// Pointer surface: floating pane edges and capsules. Headers, content and scrollbars of a floating pane
-// are reached through their own surfaces, which test the topmost pane.
+// Pointer surface: floating pane edges and the movable capsule row. Headers, content and scrollbars of
+// a floating pane are reached through their own surfaces, which test the topmost pane.
 
 floating_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
-	_, capsule := floating_capsule_at(w, x, y).?
-	return capsule
+	return rect_contains(w.float_capsule_group, x, y)
 }
 
 floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -475,14 +572,18 @@ floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 		pointer_set(app, w, .Hand)
 	} else if _, edges, edge := floating_edge_at(w, x, y); edge {
 		pointer_set(app, w, floating_edge_cursor(edges))
+	} else {
+		pointer_set(app, w, .Arrow)
 	}
 }
 
 floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	x, y := f32(e.x), f32(e.y)
-	if capsule, found := floating_capsule_at(w, x, y).?; found {
-		ui.armed_press(&w.float_capsule_armed, capsule.content)
+	if floating_capsule_drag_press(w, x, y) {
+		if capsule, found := floating_capsule_at(w, x, y).?; found {
+			ui.armed_press(&w.float_capsule_armed, capsule.content)
+		}
 		w.dirty = true
 		return
 	}
@@ -503,7 +604,12 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		pane_header_cancel(w)
 		return true
 	}
-	if !ui.armed_down(w.float_capsule_armed) {return false}
+	capsule_pressed := w.float_capsule_drag.pressed
+	capsule_moved := capsule_pressed && w.float_capsule_drag.active
+	if capsule_moved {_ = floating_capsule_drag_move(w, x, y)}
+	if capsule_pressed {w.float_capsule_drag = {}}
+	if capsule_moved {return true}
+	if !ui.armed_down(w.float_capsule_armed) {return capsule_pressed}
 	under: layout.Content
 	capsule, found := floating_capsule_at(w, x, y).?
 	if found {under = capsule.content}

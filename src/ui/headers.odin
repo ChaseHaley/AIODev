@@ -4,8 +4,8 @@ import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
-// One slot per Header_Action from Documents through Close, in that order, left to right. A tiled pane's
-// header leaves the floating slots empty, and a floating pane's header leaves the tiling slots empty.
+// One slot per Header_Action from Documents through Close, in that order, left to right. Floating panes
+// keep split controls and show Minimize; tiled panes keep their view controls. Both show Float or Dock.
 HEADER_BUTTONS :: 9
 @(private = "file")
 HEADER_TITLE_MINIMUM :: f32(40)
@@ -41,17 +41,24 @@ Header_Documents :: struct {
 	shown, open: bool,
 }
 
-// Whether a header shows the action's button: a floating pane has no split or view controls, and only it
-// can be minimized or docked.
+// Whether a header shows the action's button. Every pane can split and float or dock; view controls only
+// apply to the tiled layout, while only a floating pane can minimize.
 @(private = "file")
 header_shows :: proc(action: Header_Action, floating: bool) -> bool {
 	#partial switch action {
-	case .Documents, .Close:
+	case .Documents, .Split_Right, .Split_Down, .Dock, .Close:
 		return true
-	case .Minimize, .Dock:
+	case .Minimize:
 		return floating
 	}
 	return !floating
+}
+
+// The order controls give way in a narrow header: the Documents button first, then the tiled view
+// controls, so splitting, floating and closing stay longest.
+@(private = "file")
+HEADER_DROP_ORDER :: [?]Header_Action {
+	.Documents, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Minimize, .Dock, .Close,
 }
 
 header_layout :: proc(area: render.Rect, scale: f32, documents := true, floating := false) -> Header_Layout {
@@ -63,19 +70,32 @@ header_layout :: proc(area: render.Rect, scale: f32, documents := true, floating
 	l.badge = {area.x + SPACE_2 * scale, area.y + (l.panel.height - badge) / 2, badge, badge}
 	button := HEIGHT_COMPACT * scale
 	end := area.x + area.width - SPACE_1 * scale
+	// Buttons never cover the badge or the start of the title, which focus and drag the pane.
+	title_end := area.x + (SPACE_2 + ICON_BUTTON + SPACE_2 + HEADER_TITLE_MINIMUM) * scale
+	gap := 2 * SPACE_1 * scale + scale
+	shown: [HEADER_BUTTONS]bool
+	width: f32
+	for i in 0 ..< HEADER_BUTTONS {
+		action := Header_Action(i + 1)
+		if !header_shows(action, floating) || (action == .Documents && !documents) {continue}
+		shown[i] = true
+		width += button + (action == .Documents ? gap : 0)
+	}
+	for action in HEADER_DROP_ORDER {
+		if end - width >= title_end {break}
+		i := int(action) - 1
+		if !shown[i] {continue}
+		shown[i] = false
+		width -= button + (action == .Documents ? gap : 0)
+	}
 	{
 		placed: render.Rect
 		for i := len(l.buttons) - 1; i >= 0; i -= 1 {
-			if !header_shows(Header_Action(i + 1), floating) {continue}
+			if !shown[i] {continue}
 			if i == int(Header_Action.Documents) - 1 {
-				// It gives way first, so a narrow pane keeps its badge, some title and its own controls.
-				gap := 2 * SPACE_1 * scale + scale
-				title_end := area.x + (SPACE_2 + ICON_BUTTON + SPACE_2 + HEADER_TITLE_MINIMUM) * scale
-				if !documents || end - gap - button < title_end {break}
 				l.divider = header_divider(placed, l.panel.y, l.panel.height, scale)
 				end -= gap
 			}
-			if end - button < area.x + SPACE_1 * scale {break}
 			l.buttons[i] = {
 				end - button,
 				area.y + max(0, (l.panel.height - button) / 2),
@@ -174,7 +194,7 @@ header_icon :: proc(action: Header_Action, zoomed, fullscreen, linked: bool) -> 
 	case .Minimize:
 		return .Minimize
 	case .Dock:
-		return .Layout_Right
+		return .Float_Pane
 	case .Close:
 		return .Close
 	}
@@ -283,23 +303,24 @@ header_draw :: proc(
 	}
 	for button, i in l.buttons {
 		if button.width == 0 {continue}
+		action := Header_Action(i + 1)
 		b := Button {
 			rect  = button,
 			hover = controls[i].hover.value,
-			press = controls[i].press.value,
+			press = max(controls[i].press.value, floating && action == .Dock ? f32(1) : f32(0)),
 		}
 		// Close presses in a faint error tint rather than the neutral pressed fill.
-		if Header_Action(i + 1) == .Close {
+		if action == .Close {
 			danger := theme.error
 			danger.a *= 0.14
 			b.press_color = danger
 		}
-		if Header_Action(i + 1) == .Documents {b.selected = documents.open}
+		if action == .Documents {b.selected = documents.open}
 		face, ink, err := button_draw(list, theme, b, scale, pointer)
 		if err != .None {return .Ok}
 		icon_draw(
 			list,
-			header_icon(Header_Action(i + 1), zoomed, fullscreen, linked),
+			header_icon(action, zoomed, fullscreen, linked),
 			face,
 			ink,
 			ICON_BUTTON,

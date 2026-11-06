@@ -10,7 +10,7 @@ import "core:math"
 // src/floating_panes.odin.
 
 Float :: struct {
-	// Position and size as fractions of the tab's content area, so the pane follows window resizes.
+	// Position and size as fractions of the window work area, so the group follows window resizes.
 	bounds:    Rect,
 	// Higher draws above. Focus raises a pane; minimizing one restacks it, which orders restores.
 	stack:     u64,
@@ -35,18 +35,88 @@ float_bounds_clamp :: proc(bounds: Rect) -> Rect {
 }
 
 @(private)
-pane_floating :: proc(l: ^Layout, node: Node_Id) -> bool {
-	if int(node) >= len(l.nodes) {return false}
-	pane, ok := l.nodes[node].(Pane)
-	return ok && pane.floating
+node_float :: proc(l: ^Layout, id: Node_Id) -> (^Float, bool) {
+	if int(id) >= len(l.nodes) {return nil, false}
+	#partial switch &node in l.nodes[id] {
+	case Pane:
+		if node.floating {return &node.float, true}
+	case Split:
+		if node.floating {return &node.float, true}
+	}
+	return nil, false
 }
 
-// Whether the node is a pane the tiling shows, outside any linked slot.
+@(private)
+node_set_float :: proc(l: ^Layout, id: Node_Id, floating: bool, value: Float = {}) {
+	if int(id) >= len(l.nodes) {return}
+	#partial switch &node in l.nodes[id] {
+	case Pane:
+		node.floating, node.float = floating, floating ? value : Float{}
+	case Split:
+		node.floating, node.float = floating, floating ? value : Float{}
+	}
+}
+
+// The marked root of the floating pane group holding `id`, or INVALID_NODE when the pane is tiled.
+float_root :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
+	if int(id) >= len(l.nodes) {return INVALID_NODE}
+	for node := id; node != INVALID_NODE; node = parent_of(l, node) {
+		if _, floating := node_float(l, node); floating {return node}
+	}
+	return INVALID_NODE
+}
+
+float_is_root :: proc(l: ^Layout, id: Node_Id) -> bool {
+	_, floating := node_float(l, id)
+	return floating
+}
+
+@(private)
+pane_first :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
+	if int(id) >= len(l.nodes) {return INVALID_NODE}
+	switch node in l.nodes[id] {
+	case Vacant:
+	case Pane:
+		return id
+	case Split:
+		if pane := pane_first(l, node.first); pane != INVALID_NODE {return pane}
+		return pane_first(l, node.second)
+	}
+	return INVALID_NODE
+}
+
+// A pane inside the floating group holding `id`, for focus and capsule restoration.
+float_pane :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
+	root := float_root(l, id)
+	if root == INVALID_NODE && float_is_root(l, id) {root = id}
+	return root == INVALID_NODE ? INVALID_NODE : pane_first(l, root)
+}
+
+@(private)
+pane_order_first :: proc(l: ^Layout, id: Node_Id) -> u64 {
+	switch node in l.nodes[id] {
+	case Vacant:
+		return max(u64)
+	case Pane:
+		return node.order
+	case Split:
+		return min(pane_order_first(l, node.first), pane_order_first(l, node.second))
+	}
+	return max(u64)
+}
+
+float_order :: proc(l: ^Layout, id: Node_Id) -> u64 {
+	root := float_root(l, id)
+	if root == INVALID_NODE && float_is_root(l, id) {root = id}
+	return root == INVALID_NODE ? max(u64) : pane_order_first(l, root)
+}
+
+// Whether the node is a pane the tiling shows, outside any linked or floating slot.
 @(private)
 pane_tiled :: proc(l: ^Layout, node: Node_Id) -> bool {
 	if int(node) >= len(l.nodes) {return false}
-	pane, ok := l.nodes[node].(Pane)
-	return ok && !pane.floating && link_root(l, node) == INVALID_NODE
+	_, pane := l.nodes[node].(Pane)
+	return pane && float_root(l, node) == INVALID_NODE && link_root(l, node) == INVALID_NODE
 }
 
 // A pane that joins a tree by a move arrives tiled and shown.
@@ -57,15 +127,17 @@ pane_settle :: proc(pane: ^Pane) {
 
 @(private)
 float_clear :: proc(l: ^Layout, node: Node_Id) {
-	if pane, ok := &l.nodes[node].(Pane); ok {pane.floating, pane.float = false, {}}
+	node_set_float(l, node, false)
 }
 
 @(private)
 focus_valid :: proc(l: ^Layout, node: Node_Id) -> bool {
 	if int(node) >= len(l.nodes) {return false}
-	pane, ok := l.nodes[node].(Pane)
-	if !ok || link_root(l, node) != INVALID_NODE {return false}
-	return !pane.floating || !pane.float.minimized
+	if _, pane := l.nodes[node].(Pane); !pane || link_root(l, node) != INVALID_NODE {return false}
+	root := float_root(l, node)
+	if root == INVALID_NODE {return true}
+	floating, _ := node_float(l, root)
+	return !floating.minimized
 }
 
 // Where focus goes when a floating pane gives it up: the tiled pane it came from while that is still
@@ -84,12 +156,26 @@ focus_tiled :: proc(l: ^Layout) -> Node_Id {
 }
 
 is_floating :: proc(l: ^Layout, node: Node_Id) -> bool {
-	return pane_floating(l, node)
+	return float_root(l, node) != INVALID_NODE
 }
 
 float_of :: proc(l: ^Layout, node: Node_Id) -> (Float, bool) {
-	if !pane_floating(l, node) {return {}, false}
-	return l.nodes[node].(Pane).float, true
+	root := float_root(l, node)
+	if root == INVALID_NODE {return {}, false}
+	floating, _ := node_float(l, root)
+	return floating^, true
+}
+
+float_rect :: proc(l: ^Layout, node: Node_Id, area: Rect) -> (Rect, bool) {
+	floating, ok := float_of(l, node)
+	if !ok {return {}, false}
+	b := float_bounds_clamp(floating.bounds)
+	return Rect {
+		math.round(area.x + b.x * area.width),
+		math.round(area.y + b.y * area.height),
+		math.round(b.width * area.width),
+		math.round(b.height * area.height),
+	}, true
 }
 
 // Adds a floating pane above the tree. The tiled panes keep their places, focus and any zoom.
@@ -112,27 +198,32 @@ float_new :: proc(l: ^Layout, content: Content, bounds: Rect) -> (Node_Id, runti
 	return added, nil
 }
 
-// Floats a tiled pane above the others, or docks a floating one back into its slot. Floating takes a pane
-// out of the tiling, so the tiling must keep another pane to show, and a pane in a linked window stays there.
+// Floats a tiled pane above the others, or docks its whole floating group back into the slot. Floating
+// takes the slot out of the tiling, so the tiling must keep another pane to show.
 @(require_results)
 set_floating :: proc(l: ^Layout, node: Node_Id, floating: bool, bounds: Rect = {}) -> bool {
 	if int(node) >= len(l.nodes) {return false}
-	pane, ok := l.nodes[node].(Pane)
-	if !ok || pane.floating == floating {return false}
+	if _, pane := l.nodes[node].(Pane); !pane {return false}
+	root := float_root(l, node)
 	if floating {
-		if !pane_tiled(l, node) || l.root == INVALID_NODE || shown_count(l, l.root) <= 1 {return false}
+		if root != INVALID_NODE || !pane_tiled(l, node) || l.root == INVALID_NODE ||
+		   shown_count(l, l.root) <= 1 {return false}
 		l.next_float_stack += 1
-		pane.floating, pane.float = true, {bounds = float_bounds_clamp(bounds), stack = l.next_float_stack}
-		l.nodes[node] = pane
+		node_set_float(
+			l,
+			node,
+			true,
+			{bounds = float_bounds_clamp(bounds), stack = l.next_float_stack},
+		)
 		// Focus stays on the lifted pane; behind it is the tiled pane last focused, or its neighbour.
 		if l.focus == node && !pane_tiled(l, l.tiled_focus) {
 			sibling, _, _, _, _ := placement(l, node)
 			l.tiled_focus = first_shown(l, sibling)
 		}
 	} else {
-		pane.floating, pane.float = false, {}
+		if root == INVALID_NODE {return false}
+		node_set_float(l, root, false)
 	}
-	l.nodes[node] = pane
 	panes_changed(l)
 	links_repair(l)
 	return true
@@ -140,105 +231,151 @@ set_floating :: proc(l: ^Layout, node: Node_Id, floating: bool, bounds: Rect = {
 
 @(require_results)
 float_set_bounds :: proc(l: ^Layout, node: Node_Id, bounds: Rect) -> bool {
-	if !pane_floating(l, node) {return false}
-	pane := &l.nodes[node].(Pane)
+	root := float_root(l, node)
+	if root == INVALID_NODE {return false}
+	floating, _ := node_float(l, root)
 	clamped := float_bounds_clamp(bounds)
-	if pane.float.bounds == clamped {return false}
-	pane.float.bounds = clamped
+	if floating.bounds == clamped {return false}
+	floating.bounds = clamped
 	return true
 }
 
-// Hides a floating pane behind its capsule, or shows it again. Focus on a pane that hides returns to the
-// tiled pane it came from. A shown pane goes to the top.
+// Hides a floating group behind one capsule, or shows it again. Focus on a group that hides returns to
+// the tiled pane it came from. A shown group goes to the top.
 @(require_results)
 float_minimize :: proc(l: ^Layout, node: Node_Id, minimized: bool) -> bool {
-	if !pane_floating(l, node) {return false}
-	pane := &l.nodes[node].(Pane)
-	if pane.float.minimized == minimized {return false}
-	pane.float.minimized = minimized
+	root := float_root(l, node)
+	if root == INVALID_NODE {return false}
+	floating, _ := node_float(l, root)
+	if floating.minimized == minimized {return false}
+	floating.minimized = minimized
 	l.next_float_stack += 1
-	pane.float.stack = l.next_float_stack
-	if minimized && l.focus == node {l.focus = focus_behind(l)}
+	floating.stack = l.next_float_stack
+	if minimized && float_root(l, l.focus) == root {l.focus = focus_behind(l)}
 	return true
 }
 
-// Moves focus to a pane, remembering the tiled pane a floating one was opened over. A floating pane comes
-// to the top and out of its capsule; the result reports that change, which only the floats' layout shows.
+// Moves focus to a pane, remembering the tiled pane a floating group was opened over. A floating group
+// comes to the top and out of its capsule; the result reports the presentation change.
 focus_set :: proc(l: ^Layout, node: Node_Id) -> (floats_changed: bool) {
 	if int(node) >= len(l.nodes) {return false}
-	pane, ok := &l.nodes[node].(Pane)
-	if !ok {return false}
+	if _, pane := l.nodes[node].(Pane); !pane {return false}
 	if pane_tiled(l, node) {
 		l.tiled_focus = node
 	} else if pane_tiled(l, l.focus) {
 		l.tiled_focus = l.focus
 	}
-	if pane.floating {
-		if pane.float.minimized {pane.float.minimized, floats_changed = false, true}
-		if pane.float.stack != l.next_float_stack {
+	if root := float_root(l, node); root != INVALID_NODE {
+		floating, _ := node_float(l, root)
+		if floating.minimized {floating.minimized, floats_changed = false, true}
+		if floating.stack != l.next_float_stack {
 			l.next_float_stack += 1
-			pane.float.stack, floats_changed = l.next_float_stack, true
+			floating.stack, floats_changed = l.next_float_stack, true
 		}
 	}
 	l.focus = node
 	return
 }
 
-// Appends every shown floating pane, bottom first, with its rectangle inside `area`.
-floats_place :: proc(l: ^Layout, area: Rect, out: ^[dynamic]Pane_Rect) {
-	start := len(out)
-	for node, i in l.nodes {
-		pane := node.(Pane) or_continue
-		if !pane.floating || pane.float.minimized {continue}
-		b := float_bounds_clamp(pane.float.bounds)
-		rect := Rect {
-			math.round(area.x + b.x * area.width),
-			math.round(area.y + b.y * area.height),
-			math.round(b.width * area.width),
-			math.round(b.height * area.height),
+@(private)
+float_next :: proc(
+	l: ^Layout,
+	after_stack: u64,
+	after_index: int,
+	minimized: Maybe(bool) = nil,
+) -> (Node_Id, u64) {
+	found := INVALID_NODE
+	best_stack := max(u64)
+	best_index := max(int)
+	wanted, filtered := minimized.?
+	for _, i in l.nodes {
+		floating, ok := node_float(l, Node_Id(i))
+		if !ok || (filtered && floating.minimized != wanted) {continue}
+		if floating.stack < after_stack || (floating.stack == after_stack && i <= after_index) {continue}
+		if floating.stack < best_stack || (floating.stack == best_stack && i < best_index) {
+			found, best_stack, best_index = Node_Id(i), floating.stack, i
 		}
-		append(out, Pane_Rect{Node_Id(i), pane.content, rect, pane.order, true})
-		// Few panes float at once, so an insertion keeps them in stacking order.
-		for j := len(out) - 1; j > start; j -= 1 {
-			if float_stack(l, out[j - 1].node) <= float_stack(l, out[j].node) {break}
-			out[j - 1], out[j] = out[j], out[j - 1]
-		}
+	}
+	return found, best_stack
+}
+
+@(private)
+float_place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
+	switch node in l.nodes[id] {
+	case Vacant:
+	case Pane:
+		if !node.linked {append(out, Pane_Rect{id, node.content, area, node.order, true})}
+	case Split:
+		p := partition(area, node.axis, node.ratio, gap)
+		float_place(l, node.first, p.first, gap, out)
+		float_place(l, node.second, p.second, gap, out)
+	}
+}
+
+// Appends every shown floating group, bottom first, and every pane inside it.
+floats_place :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
+	stack: u64
+	index := -1
+	for {
+		root, next_stack := float_next(l, stack, index, false)
+		if root == INVALID_NODE {return}
+		rect, _ := float_rect(l, root, area)
+		float_place(l, root, rect, gap, out)
+		stack, index = next_stack, int(root)
 	}
 }
 
 @(private)
-float_stack :: proc(l: ^Layout, node: Node_Id) -> u64 {
-	return l.nodes[node].(Pane).float.stack
+float_place_dividers :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Divider) {
+	if split, ok := l.nodes[id].(Split); ok {
+		p := partition(area, split.axis, split.ratio, gap)
+		append(out, Divider{id, split.axis, area, p.bar})
+		float_place_dividers(l, split.first, p.first, gap, out)
+		float_place_dividers(l, split.second, p.second, gap, out)
+	}
 }
 
+// Appends dividers inside every shown floating group, bottom groups first.
+floats_dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {
+	stack: u64
+	index := -1
+	for {
+		root, next_stack := float_next(l, stack, index, false)
+		if root == INVALID_NODE {return}
+		rect, _ := float_rect(l, root, area)
+		float_place_dividers(l, root, rect, gap, out)
+		stack, index = next_stack, int(root)
+	}
+}
 
 // The floating pane to show or hide next: the most recently minimized one when `minimized`, otherwise the
 // topmost shown one; INVALID_NODE when there is none.
 float_latest :: proc(l: ^Layout, minimized: bool) -> Node_Id {
 	found := INVALID_NODE
 	best: u64
-	for node, i in l.nodes {
-		pane := node.(Pane) or_continue
-		if !pane.floating || pane.float.minimized != minimized {continue}
-		if found == INVALID_NODE || pane.float.stack > best {found, best = Node_Id(i), pane.float.stack}
+	for _, i in l.nodes {
+		floating, ok := node_float(l, Node_Id(i))
+		if !ok || floating.minimized != minimized {continue}
+		if found == INVALID_NODE || floating.stack > best {found, best = Node_Id(i), floating.stack}
 	}
-	return found
+	return found == INVALID_NODE ? INVALID_NODE : pane_first(l, found)
 }
 
-// How many floating panes are shown and how many are minimized.
+// How many floating groups are shown and how many are minimized.
 float_counts :: proc(l: ^Layout) -> (shown, minimized: int) {
-	for node in l.nodes {
-		pane := node.(Pane) or_continue
-		if !pane.floating {continue}
-		if pane.float.minimized {minimized += 1} else {shown += 1}
+	for _, i in l.nodes {
+		floating, ok := node_float(l, Node_Id(i))
+		if !ok {continue}
+		if floating.minimized {minimized += 1} else {shown += 1}
 	}
 	return
 }
 
-// Continues stacking above the highest saved floating pane, once a decoded tree holds them.
+// Continues stacking above the highest saved floating group, once a decoded tree holds them.
 float_stack_restore :: proc(l: ^Layout) {
-	for node in l.nodes {
-		pane := node.(Pane) or_continue
-		if pane.floating {l.next_float_stack = max(l.next_float_stack, pane.float.stack)}
+	for _, i in l.nodes {
+		if floating, ok := node_float(l, Node_Id(i)); ok {
+			l.next_float_stack = max(l.next_float_stack, floating.stack)
+		}
 	}
 }

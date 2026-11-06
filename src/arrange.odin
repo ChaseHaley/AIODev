@@ -64,6 +64,18 @@ Tab_Drag :: struct {
 
 @(private)
 divider_hits :: proc(w: ^Window, x, y: f32, out: []layout.Divider) -> int {
+	if root, _, covered := floating_frame_at(w, x, y); covered {
+		hits: [8]layout.Divider
+		n := layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, hits[:], 10 * w.scale, 2 * w.scale)
+		count := 0
+		for d in hits[:n] {
+			if dock_divider(d.node) || layout.float_root(w.tree, d.node) != root {continue}
+			if count >= len(out) {break}
+			out[count] = d
+			count += 1
+		}
+		return count
+	}
 	if rail_overlay(w) {
 		area := rail_area(w)
 		for d in w.dividers {
@@ -78,7 +90,16 @@ divider_hits :: proc(w: ^Window, x, y: f32, out: []layout.Divider) -> int {
 			return layout.divider_hit_all(docks[:count], x, y, 3 * w.scale, out)
 		}
 	}
-	return layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, out, 10 * w.scale, 2 * w.scale)
+	hits: [8]layout.Divider
+	n := layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, hits[:], 10 * w.scale, 2 * w.scale)
+	count := 0
+	for d in hits[:n] {
+		if !dock_divider(d.node) && layout.float_root(w.tree, d.node) != layout.INVALID_NODE {continue}
+		if count >= len(out) {break}
+		out[count] = d
+		count += 1
+	}
+	return count
 }
 
 // Starts a divider drag, or on a second click of the same divider balances the splits it belongs to.

@@ -15,6 +15,11 @@ floating_capsules_fit_inside_the_available_row :: proc(t: ^testing.T) {
 	for width in widths {end += width}
 	testing.expect(t, end <= 300)
 
+	roomy := []f32{80, 100}
+	start, gap = app.floating_capsule_row_fit(roomy, 300, 8)
+	testing.expect_value(t, start, f32(112))
+	testing.expect_value(t, gap, f32(8))
+
 	narrow := []f32{96, 96, 96, 96}
 	start, gap = app.floating_capsule_row_fit(narrow, 3, 8)
 	end = start + gap * f32(len(narrow) - 1)

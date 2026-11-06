@@ -113,6 +113,15 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	)
 	float_state, float_ok = layout.float_of(w.tree, float_node)
 	testing.expect(t, float_ok && !float_state.minimized)
+	float_split := invoke(&state, first, "pane.split", "--pane", float_id, "--direction", "right")
+	testing.expect_value(t, float_split.status, commands.Status.Ok)
+	float_split_node := layout.find_content(w.tree, {.Terminal, float_split.pane})
+	testing.expect_value(t, layout.float_root(w.tree, float_split_node), layout.float_root(w.tree, float_node))
+	float_split_id := strings.clone(fmt.tprintf("%d", float_split.pane))
+	defer delete(float_split_id)
+	testing.expect_value(
+		t, invoke(&state, first, "pane.close", "--pane", float_split_id).status, commands.Status.Ok,
+	)
 	testing.expect_value(t, invoke(&state, first, "pane.close", "--pane", float_id).status, commands.Status.Ok)
 
 	sessions := len(state.sessions)

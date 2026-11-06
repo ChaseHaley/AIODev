@@ -369,9 +369,6 @@ control_split :: proc(
 	invocation: commands.Invocation,
 ) -> Outcome {
 	if failure, ok := control_profile_check(app, invocation.profile); !ok {return failure}
-	if layout.is_floating(&target.workspace.tabs[target.pane.tab].tree, target.pane.node) {
-		return outcome_failure(.Failed, "a floating pane does not split; dock it first with pane.float")
-	}
 	launch := Pane_Launch{invocation.program, invocation.directory, invocation.profile}
 	// A linked pane splits in the window showing it, whose tree is the one that decides the new pane's size.
 	shown, workspace, tab, node := w, target.workspace, target.pane.tab, target.pane.node

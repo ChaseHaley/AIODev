@@ -48,7 +48,7 @@ headers_set_the_documents_button_apart_and_can_leave_it_out :: proc(t: ^testing.
 	small := ui.header_layout({5, 8, 198, 200}, 1)
 	testing.expect_value(t, small.buttons[documents].width, f32(0))
 	testing.expect_value(t, ui.header_hit_test(small, 5 + 35, 8 + 14), ui.Header_Action.None)
-	wide_enough := ui.header_layout({5, 8, 260, 200}, 1)
+	wide_enough := ui.header_layout({5, 8, 280, 200}, 1)
 	testing.expect(t, wide_enough.buttons[documents].width > 0)
 	testing.expect(t, wide_enough.buttons[documents].x >= wide_enough.badge.x + wide_enough.badge.width + 48)
 
@@ -57,6 +57,23 @@ headers_set_the_documents_button_apart_and_can_leave_it_out :: proc(t: ^testing.
 	testing.expect_value(t, narrow.buttons[documents].width, f32(0))
 	testing.expect_value(t, narrow.divider.width, f32(0))
 	testing.expect(t, narrow.buttons[documents + 1].width > 0)
+}
+
+@(test)
+pane_headers_offer_float_and_split_in_both_presentations :: proc(t: ^testing.T) {
+	area := render.Rect{0, 0, 480, 200}
+	tiled := ui.header_layout(area, 1, floating = false)
+	floating := ui.header_layout(area, 1, floating = true)
+	dock := int(ui.Header_Action.Dock) - 1
+	right := int(ui.Header_Action.Split_Right) - 1
+	down := int(ui.Header_Action.Split_Down) - 1
+	zoom := int(ui.Header_Action.Zoom) - 1
+	minimize := int(ui.Header_Action.Minimize) - 1
+	testing.expect(t, tiled.buttons[dock].width > 0 && floating.buttons[dock].width > 0)
+	testing.expect(t, tiled.buttons[right].width > 0 && floating.buttons[right].width > 0)
+	testing.expect(t, tiled.buttons[down].width > 0 && floating.buttons[down].width > 0)
+	testing.expect(t, tiled.buttons[zoom].width > 0 && floating.buttons[zoom].width == 0)
+	testing.expect(t, tiled.buttons[minimize].width == 0 && floating.buttons[minimize].width > 0)
 }
 
 @(test)

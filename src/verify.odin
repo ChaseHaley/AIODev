@@ -755,8 +755,8 @@ when AIO_CONTROL {
 							fmt.tprintf("%d", pane.content.id),
 						},
 					); err != nil {return nil, .Out_Of_Memory}
-					if pane.floating {
-						b := pane.float.bounds
+					if floating, floated := layout.float_of(&tab.tree, layout.Node_Id(n)); floated {
+						b := floating.bounds
 						floating_state := [?]control.State_Entry {
 							{
 								fmt.tprintf("%s.pane.%d.float", prefix, n),
@@ -764,10 +764,12 @@ when AIO_CONTROL {
 							},
 							{
 								fmt.tprintf("%s.pane.%d.minimized", prefix, n),
-								fmt.tprintf("%t", pane.float.minimized),
+								fmt.tprintf("%t", floating.minimized),
 							},
 						}
-						if _, err := append(&entries, ..floating_state[:]); err != nil {return nil, .Out_Of_Memory}
+						if _, err := append(&entries, ..floating_state[:]); err != nil {
+							return nil, .Out_Of_Memory
+						}
 					}
 				}
 			}
@@ -784,6 +786,16 @@ when AIO_CONTROL {
 				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
 				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
 				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(w)))},
+				{
+					"panes.capsule_group",
+					fmt.tprintf(
+						"%g,%g,%g,%g",
+						w.float_capsule_group.x,
+						w.float_capsule_group.y,
+						w.float_capsule_group.width,
+						w.float_capsule_group.height,
+					),
+				},
 				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
 				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},

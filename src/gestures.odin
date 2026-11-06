@@ -18,7 +18,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.gesture.cancelled += w.gesture.buttons | w.header_buttons
 	if ui.armed_down(w.find.armed) || w.selecting || w.dragging.count > 0 || w.rail_resizing ||
 	   w.tab_drag.pressed || w.pane_drag.pressed || w.float_drag.pressed ||
-	   ui.armed_down(w.tab_close_armed) ||
+	   w.float_capsule_drag.pressed || ui.armed_down(w.tab_close_armed) ||
 	   ui.armed_down(w.caption_armed) || ui.armed_down(w.tab_orientation_button_armed) ||
 	   ui.armed_down(w.title_action_armed) ||
 	   w.editor.drag != .None || w.rename.dragging || w.workspace_picker.query.dragging {
@@ -43,7 +43,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.caption_armed)
 	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
 	w.scroll_drag = {}
-	w.float_drag = {}
+	w.float_drag, w.float_capsule_drag = {}, {}
 	ui.armed_cancel(&w.float_capsule_armed)
 	w.float_capsule_hover = nil
 	w.rail_resizing = false
@@ -217,12 +217,21 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}
 	x, y := f32(e.x), f32(e.y)
+	if w.float_capsule_drag.pressed {
+		if .Left not_in e.buttons {
+			w.float_capsule_drag = {}
+			ui.armed_cancel(&w.float_capsule_armed)
+		} else if floating_capsule_drag_move(w, x, y) {
+			pointer_set(app, w, .Arrow)
+			return
+		}
+	}
 	if w.float_drag.pressed {
 		if .Left not_in e.buttons {
 			w.float_drag = {}
 		} else if floating_drag_move(app, w, x, y) {
 			edges := w.float_drag.edges
-			pointer_set(app, w, edges == {} ? .Resize_All : floating_edge_cursor(edges))
+			pointer_set(app, w, edges == {} ? .Arrow : floating_edge_cursor(edges))
 			return
 		}
 	}

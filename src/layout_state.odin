@@ -74,13 +74,13 @@ Saved_Float :: struct {
 	minimized:           bool,
 }
 
-// The saved form of a floating pane's place, in temporary memory, or nil for a tiled pane.
+// The saved form of a floating pane group's place, in temporary memory, or nil for a tiled node.
 @(private)
-layout_float_encode :: proc(pane: layout.Pane) -> []Saved_Float {
-	if !pane.floating {return nil}
+layout_float_encode :: proc(floating: bool, value: layout.Float) -> []Saved_Float {
+	if !floating {return nil}
 	saved := make([]Saved_Float, 1, context.temp_allocator)
-	b := pane.float.bounds
-	saved[0] = {b.x, b.y, b.width, b.height, pane.float.stack, pane.float.minimized}
+	b := value.bounds
+	saved[0] = {b.x, b.y, b.width, b.height, value.stack, value.minimized}
 	return saved
 }
 
@@ -184,12 +184,13 @@ layout_node_encode :: proc(
 	case layout.Pane:
 		saved := layout_pane_encode(app, node.content, processes)
 		if node.linked {layout_link_encode(app, tree, id, &saved)}
-		saved.float = layout_float_encode(node)
+		saved.float = layout_float_encode(node.floating, node.float)
 		append(nodes, saved)
 		if id == tree.focus {focus^ = index}
 	case layout.Split:
 		saved := Saved_Node{split = true, axis = node.axis, ratio = node.ratio}
 		if node.linked {layout_link_encode(app, tree, id, &saved)}
+		saved.float = layout_float_encode(node.floating, node.float)
 		append(nodes, saved)
 		first := layout_node_encode(app, tree, node.first, nodes, focus, processes)
 		second := layout_node_encode(app, tree, node.second, nodes, focus, processes)
@@ -433,7 +434,10 @@ layout_tree_decode :: proc(saved: ^Saved_Tab, tree: ^layout.Layout) -> bool {
 	nodes, nodes_error := make([dynamic]layout.Node, count)
 	if nodes_error != nil {return false}
 	tree^ = {nodes = nodes}
-	if !layout_node_decode(saved.nodes, 0, visited, tree, false) {layout.destroy(tree); return false}
+	if !layout_node_decode(saved.nodes, 0, visited, tree, false, false) {
+		layout.destroy(tree)
+		return false
+	}
 	for reached in visited {if !reached {layout.destroy(tree); return false}}
 	tree.root = 0
 	focus := saved.focus
@@ -453,7 +457,7 @@ layout_node_decode :: proc(
 	index: int,
 	visited: []bool,
 	tree: ^layout.Layout,
-	in_slot: bool,
+	in_slot, in_float: bool,
 ) -> bool {
 	if index < 0 || index >= len(saved) || visited[index] {return false}
 	visited[index] = true
@@ -461,12 +465,13 @@ layout_node_decode :: proc(
 	if !node.split {
 		if node.content > max(layout.Content_Kind) {return false}
 		tree.next_pane_order += 1
-		// A pane in a slot shows in its linked window, never floating.
-		floating := len(node.float) == 1 && !in_slot && !node.linked
+		// A pane inside a linked or floating group cannot introduce another detached group.
+		floating := len(node.float) == 1 && !in_slot && !in_float && !node.linked
+		linked := node.linked && !in_slot && !in_float && CONTENT_POLICY[node.content].linkable
 		tree.nodes[index] = layout.Pane {
 			content  = {kind = node.content},
 			order    = tree.next_pane_order,
-			linked   = node.linked && !in_slot && CONTENT_POLICY[node.content].linkable,
+			linked   = linked,
 			floating = floating,
 			float    = floating ? layout_float_decode(node.float[0]) : {},
 		}
@@ -474,10 +479,11 @@ layout_node_decode :: proc(
 	}
 	if node.axis != .Horizontal && node.axis != .Vertical {return false}
 	if math.is_nan(node.ratio) {return false}
-	// A slot holds no slots, and only linkable content can have a linked window.
-	linked := node.linked && !in_slot
-	if !layout_node_decode(saved, node.first, visited, tree, in_slot || linked) ||
-	   !layout_node_decode(saved, node.second, visited, tree, in_slot || linked) {
+	// A linked or floating slot holds no nested slots; only linkable content can have a linked window.
+	floating := len(node.float) == 1 && !in_slot && !in_float && !node.linked
+	linked := node.linked && !in_slot && !in_float && !floating
+	if !layout_node_decode(saved, node.first, visited, tree, in_slot || linked, in_float || floating) ||
+	   !layout_node_decode(saved, node.second, visited, tree, in_slot || linked, in_float || floating) {
 		return false
 	}
 	if linked {
@@ -492,6 +498,8 @@ layout_node_decode :: proc(
 		first  = layout.Node_Id(node.first),
 		second = layout.Node_Id(node.second),
 		linked = linked,
+		floating = floating,
+		float = floating ? layout_float_decode(node.float[0]) : {},
 	}
 	return true
 }

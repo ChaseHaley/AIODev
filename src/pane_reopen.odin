@@ -75,6 +75,7 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 	beside := make([dynamic]layout.Content, context.temp_allocator)
 	layout.contents(&tab.tree, sibling, &beside)
 	nodes := []Saved_Node{layout_pane_encode(app, pane.content, pane_processes(app))}
+	floating, is_floating := layout.float_of(&tab.tree, node)
 	record := Closed_Record {
 		tab    = {nodes = nodes},
 		beside = beside[:],
@@ -82,7 +83,7 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 		before = before,
 		share  = share,
 		linked = layout.link_root(&tab.tree, node) != layout.INVALID_NODE,
-		float  = layout_float_encode(pane),
+		float  = layout_float_encode(is_floating, floating),
 	}
 	closed_push(app, {workspace = workspace.id, tab = tab.id}, record)
 }
