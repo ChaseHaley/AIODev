@@ -1,5 +1,6 @@
 package main
 
+import "aio:layout"
 import "aio:platform"
 import "aio:ui"
 import "core:time"
@@ -19,7 +20,7 @@ motion_active :: proc(app: ^App) -> bool {
 		   ui.motion_active(w.tab_underline) ||
 		   ui.motion_active(w.tab_incoming.ghost) ||
 		   confirmation_active(w) { return true }
-		if ui.control_active(w.workspace_motion) { return true }
+		if ui.control_active(w.workspace_motion) || ui.control_active(w.float_grip_motion) { return true }
 		if w.find.open && ui.find_animating(&w.find) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
@@ -112,6 +113,15 @@ update_motion :: proc(app: ^App) {
 						controls_changed
 				}
 			}
+		}
+		// The grip under the pointer, or the one being dragged, takes the animation; a grip the pointer
+		// left keeps it while it fades.
+		grip := w.float_grip_hover
+		gripping := w.float_drag.pressed && w.float_drag.grip
+		if gripping {grip = layout.float_root(w.tree, layout.find_content(w.tree, w.float_drag.content))}
+		if grip != layout.INVALID_NODE {w.float_grip_shown = grip}
+		if ui.control_update(&w.float_grip_motion, grip != layout.INVALID_NODE, gripping, app.animations, now) {
+			w.dirty = true
 		}
 		if w.find.open && ui.find_animate(&w.find, app.animations, now) {w.dirty = true}
 		confirmation_advance(app, w, now)

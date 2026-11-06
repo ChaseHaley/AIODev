@@ -41,6 +41,8 @@ Float_Edges :: bit_set[Float_Edge]
 
 Float_Drag :: struct {
 	pressed, active: bool,
+	// The press began on a split floating window's grip.
+	grip:            bool,
 	// Content survives the node renumbering a close elsewhere in the tree can cause.
 	content:         layout.Content,
 	edges:           Float_Edges,
@@ -72,24 +74,49 @@ floating_grip_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, ok: bo
 	return group, true
 }
 
-// Draws a split floating window's grip strip, just before its panes.
+// Draws a split floating window's grip strip, just before its panes. The strip is a flat control: it takes
+// the shared hover fill, pointer gloss and pressed fill without lifting, and its handle brightens with
+// them.
 floating_grip_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 	frame, found := layout.float_rect(w.tree, root, floating_area(w))
 	if !found {return}
 	content := layout.float_content_rect(w.tree, root, frame, floating_grip(w))
 	if content.y <= frame.y {return}
-	strip := render.Rect{frame.x, frame.y, frame.width, content.y - frame.y + window_pane_radius(app, w)}
-	if render.push_layer(&w.list, {frame.x, frame.y, frame.width, content.y - frame.y}) != .None {return}
+	height := content.y - frame.y
+	radius := window_pane_radius(app, w)
+	if render.push_layer(&w.list, {frame.x, frame.y, frame.width, height}) != .None {return}
 	ui.draw_rect(
 		&w.list,
-		{rect = strip, color = color(app.settings.colors.background), radius = window_pane_radius(app, w)},
+		{
+			rect = {frame.x, frame.y, frame.width, height + radius},
+			color = color(app.settings.colors.background),
+			radius = radius,
+		},
 	)
-	dragged := layout.find_content(w.tree, w.float_drag.content)
-	moving := w.float_drag.pressed && layout.float_root(w.tree, dragged) == root
-	ink := w.float_grip_hover == root || moving ? app.theme.muted : app.theme.faint
 	s := w.scale
+	hover, press: f32
+	if w.float_grip_shown == root {
+		hover, press = w.float_grip_motion.hover.value, w.float_grip_motion.press.value
+	}
+	flat := app.theme
+	flat.hover_lift = 0
+	face_rect := render.Rect {
+		frame.x + ui.SPACE_1 * s,
+		frame.y + s,
+		max(0, frame.width - 2 * ui.SPACE_1 * s),
+		max(0, height - 2 * s),
+	}
+	face, ink, err := ui.button_draw(
+		&w.list,
+		flat,
+		{rect = face_rect, hover = hover, press = press, radius = face_rect.height / 2 / s},
+		s,
+		w.pointer,
+	)
+	if err != .None {return}
+	if hover <= 0 && press <= 0 {ink = app.theme.faint}
 	dot := max(1, 2 * s)
-	cx, cy := frame.x + frame.width / 2, frame.y + (content.y - frame.y) / 2
+	cx, cy := face.x + face.width / 2, face.y + face.height / 2
 	for row in 0 ..< 2 {
 		for column in 0 ..< 3 {
 			ui.draw_rect(
@@ -650,7 +677,13 @@ floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		node := w.tree.focus
 		if layout.float_root(w.tree, node) != root {node = layout.float_pane(w.tree, root)}
 		pane_focus(app, w, node)
-		for shown in w.panes {if shown.node == node {floating_drag_press(app, w, shown, {}, x, y); break}}
+		for shown in w.panes {
+			if shown.node != node {continue}
+			floating_drag_press(app, w, shown, {}, x, y)
+			w.float_drag.grip = w.float_drag.pressed
+			w.dirty = true
+			break
+		}
 		return
 	}
 	pane_focus(app, w, pane.node)

@@ -52,8 +52,11 @@ Window :: struct {
 	tab_drag: Tab_Drag,
 	// A floating pane moved by its header or resized by an edge; see floating_panes.odin.
 	float_drag: Float_Drag,
-	// The split floating window whose grip strip is under the pointer.
-	float_grip_hover: layout.Node_Id,
+	// The split floating window whose grip strip is under the pointer, and the grip the hover and press
+	// animation belongs to, which it keeps while fading out.
+	float_grip_hover:  layout.Node_Id,
+	float_grip_shown:  layout.Node_Id,
+	float_grip_motion: ui.Control_Motion,
 	// The minimized floating pane whose capsule is under the pointer, and their movable row.
 	float_capsule_hover:      Maybe(layout.Content),
 	float_capsule_armed:      ui.Armed(layout.Content),
@@ -220,6 +223,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.tab_hover, w.rail_hover, w.rail_pressed = -1, -1, -1
 	w.caption_hover = -1
 	w.divider_click_node, w.float_grip_hover = layout.INVALID_NODE, layout.INVALID_NODE
+	w.float_grip_shown = layout.INVALID_NODE
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
 	w.dirty = true
