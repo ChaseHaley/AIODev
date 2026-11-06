@@ -92,7 +92,9 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 				if i < len(expected) {testing.expect_value(t, glyph.atlas, expected[i].atlas)}
 			}
 			if editing {
-				testing.expect_value(t, ui.editor_row(&p.binding).value, "Ctrl+K, Alt+K")
+				if b := binding_editor(&p); testing.expect(t, b != nil) {
+					testing.expect_value(t, ui.editor_row(b).value, "Ctrl+K, Alt+K")
+				}
 				ui.palette_key(&p, &r, press(.Escape))
 			}
 		}

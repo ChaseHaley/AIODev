@@ -221,7 +221,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 				expected := ui.palette_result_name(&p, p.results[p.selected])
 				outcome, _ := ui.palette_mouse_press(&p, &registry, l, x, y)
 				testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
-				testing.expect_value(t, p.chosen, expected)
+				testing.expect_value(t, chosen_setting(&p), expected)
 				ui.palette_open(&p, &registry)
 				ui.palette_text(&p, &registry, "setting")
 				ui.palette_scroll(&p, -10000)
@@ -266,7 +266,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	ui.palette_key(&p, &registry, key({key = .End}))
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
-	testing.expect_value(t, p.chosen, "terminal.minimum_contrast")
+	testing.expect_value(t, chosen_setting(&p), "terminal.minimum_contrast")
 	ui.palette_open(&p, &registry)
 	ui.palette_text(&p, &registry, "terminal settings contrast")
 	l = ui.palette_layout(&p, 926, 928, 2)
@@ -286,9 +286,9 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, outcome, ui.Outcome.None)
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.None)
-	p.query.dragging = true
+	p.drag = ui.Query_Drag{}
 	ui.palette_close(&p)
-	testing.expect(t, !p.open && !p.query.dragging)
+	testing.expect(t, !p.open && p.drag == nil)
 }
 
 @(test)
@@ -330,7 +330,10 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 			testing.expect_value(t, p.query.cursor, 0)
 			ui.palette_input_drag(&p, l, &text, frame.x+frame.width, scale)
 			testing.expect_value(t, ui.palette_selection(&p), "setting")
-			testing.expect(t, ui.palette_input_release(&p) && !p.query.dragging)
+			_, selecting := p.drag.(ui.Query_Drag)
+			testing.expect(t, selecting)
+			testing.expect_value(t, ui.palette_pointer_release(&p), ui.Outcome.None)
+			testing.expect(t, p.drag == nil)
 		}
 		ui.palette_key(&p, &registry, key({key = .End}))
 		l = ui.palette_layout(&p, w, h, scale)

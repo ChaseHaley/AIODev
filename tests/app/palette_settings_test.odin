@@ -35,8 +35,9 @@ palette_toggle_saves_through_the_settings_file_and_stays_open :: proc(t: ^testin
 	testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "cursor.blink")
 	outcome, _ := ui.palette_key(&s.palette, &s.registry, {key = .Arrow_Right, modifiers = {.Alt}, pressed = true})
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
-	key, value := ui.palette_chosen_value(&s.palette)
-	saved, _ := app.settings_save_value(s, key, value, "Could not save the setting.")
+	chosen, chose := ui.palette_chosen_take(&s.palette).(ui.Chosen_Value)
+	if !testing.expect(t, chose) {return}
+	saved, _ := app.settings_save_value(s, chosen.key, chosen.value, "Could not save the setting.")
 	testing.expect(t, saved)
 	testing.expect(t, s.settings.cursor.blink, "the toggle reached the live settings")
 	testing.expect(t, app.palette_active(s, w), "the palette stays open")

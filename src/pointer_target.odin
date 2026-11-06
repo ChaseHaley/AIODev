@@ -407,25 +407,13 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 	p := &app.palette
 	l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
 	pointer_set(app, w, ui.palette_pointer(p, l, x, y))
-	held := .Left in e.buttons
-	switch {
-	case held && ui.palette_scrollbar_dragging(p):
-		on_palette_outcome(app, w, ui.palette_scrollbar_drag(p, l, x, y), 0)
-	case held && ui.palette_slider_dragging(p):
-		on_palette_outcome(app, w, ui.palette_slider_drag(p, l, x), 0)
-	case held && ui.palette_edit_text_dragging(p):
-		on_palette_outcome(app, w, ui.palette_edit_drag(p, l, &w.ui_text, x), 0)
-	case held && p.query.dragging:
-		on_palette_outcome(app, w, ui.palette_input_drag(p, l, &w.ui_text, x, w.scale), 0)
-	case:
-		on_palette_outcome(app, w, ui.palette_mouse_move(p, l, x, y), 0)
-	}
+	on_palette_outcome(app, w, ui.palette_pointer_move(p, l, &w.ui_text, x, y, .Left in e.buttons), 0)
 }
 
 @(private = "file")
 palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
 	p := &app.palette
-	return p.reset_hover >= 0 && p.edit.kind == .None ? "Reset setting" : ""
+	return p.reset_hover >= 0 && ui.palette_editing(p) == .None ? "Reset setting" : ""
 }
 
 @(private = "file")

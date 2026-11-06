@@ -102,7 +102,7 @@ palette_header_results_keep_title_priority_and_query_navigation :: proc(t: ^test
 	if !testing.expect_value(t, len(p.results), 1) { return }
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
-	testing.expect_value(t, p.chosen, "terminal.copy_on_select")
+	testing.expect_value(t, chosen_setting(&p), "terminal.copy_on_select")
 	testing.expect(t, !p.open)
 }
 

@@ -436,7 +436,7 @@ palette_scope_tabs_preserve_the_query_and_caret :: proc(t: ^testing.T) {
 			before := p.mode
 			ui.palette_mouse_move(&p, l, x, y)
 			testing.expect_value(t, p.mode, before)
-			p.query.dragging = true
+			p.drag = ui.Query_Drag{}
 			outcome, id := ui.palette_mouse_press(&p, &registry, l, x, y)
 			testing.expect_value(t, outcome, ui.Outcome.Changed)
 			testing.expect_value(t, id, commands.Command_Id(0))
@@ -444,7 +444,7 @@ palette_scope_tabs_preserve_the_query_and_caret :: proc(t: ^testing.T) {
 			testing.expect_value(t, ui.palette_query(&p), "pane")
 			testing.expect_value(t, p.query.cursor, 2)
 			testing.expect_value(t, p.query.anchor, 1)
-			testing.expect(t, !p.query.dragging && p.open)
+			testing.expect(t, p.drag == nil && p.open)
 			testing.expect_value(t, p.selected, 0)
 			testing.expect_value(t, p.scroll, 0)
 		}
@@ -474,7 +474,7 @@ palette_scope_tabs_cancel_an_unapplied_setting_edit :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
 	testing.expect_value(t, ui.palette_query(&p), "font")
 	testing.expect_value(t, p.mode, ui.Palette_Mode.Commands)
-	testing.expect_value(t, p.chosen, "")
+	testing.expect(t, ui.palette_chosen_take(&p) == nil)
 }
 
 @(test)

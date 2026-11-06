@@ -308,7 +308,7 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	testing.expect_value(t, ui.palette_query(&p), "panes")
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
-	testing.expect_value(t, p.chosen, "pane.gap")
+	testing.expect_value(t, chosen_setting(&p), "pane.gap")
 	testing.expect(t, !p.open)
 
 	ui.palette_open(&p, &registry)

@@ -16,9 +16,10 @@ palette_binding_parts :: proc(row: render.Rect, scale: f32) -> Row_Parts {
 	return parts
 }
 
-// The single embedded Settings row sits exactly over the selected palette command.
-palette_binding_layout :: proc(p: ^Palette, l: Palette_Layout) -> Editor_Layout {
-	row, _ := row_rect(p, l, p.binding_result)
+// The single embedded Settings row sits exactly over palette result `result`.
+@(private)
+palette_binding_layout :: proc(p: ^Palette, l: Palette_Layout, result: int) -> Editor_Layout {
+	row, _ := row_rect(p, l, result)
 	return {
 		page = l.viewport, list = {row.x, row.y - l.row_height, row.width, 2 * l.row_height},
 		row_height = l.row_height, scale = l.scale, rows = 2,
@@ -28,55 +29,64 @@ palette_binding_layout :: proc(p: ^Palette, l: Palette_Layout) -> Editor_Layout 
 palette_binding_open :: proc(p: ^Palette, index: int) -> Outcome {
 	if index < 0 || index >= len(p.results) || p.results[index].command == nil {return .None}
 	command := p.results[index].command
-	palette_edit_cancel(p)
+	edit_set(p, nil)
 	value := commands.shortcut_set_text(command.shortcuts, context.temp_allocator)
 	defaults := commands.shortcut_set_text(command.defaults, context.temp_allocator)
-	if editor_add(&p.binding, {
+	binding: Editor
+	if editor_add(&binding, {
 		key = fmt.tprintf("keys.%s", command.name), title = command.title,
 		value = value, default_value = defaults, kind = .Shortcut,
 	}, "Shortcuts") != nil {
-		editor_destroy(&p.binding)
+		editor_destroy(&binding)
 		return .None
 	}
-	editor_filter(&p.binding)
-	editor_select_key(&p.binding, p.binding.rows[0].key)
-	p.binding.leader = p.leader
-	p.binding.visible_rows = 2
-	p.binding.scroll = 0
-	p.selected, p.binding_result = index, index
-	p.edit.kind = .Shortcut
-	open_shortcuts(&p.binding)
+	editor_filter(&binding)
+	editor_select_key(&binding, binding.rows[0].key)
+	binding.leader = p.leader
+	binding.visible_rows = 2
+	// The synthetic group header stays above the inline row; selection must not scroll it away.
+	binding.scroll = 0
+	open_shortcuts(&binding)
+	p.selected = index
+	edit_set(p, Shortcut_Edit{editor = binding, result = index})
 	return .Changed
 }
 
-palette_binding_outcome :: proc(p: ^Palette, outcome: Editor_Outcome) -> Outcome {
+// The row stays open while its editor captures, lists alternatives or has the keyboard on key
+// positions; the editor leaving those states ends the inline edit.
+@(private)
+binding_open :: proc(b: ^Editor) -> bool {
+	switch _ in b.mode {
+	case Editor_Capturing, Editor_Shortcuts_Popup, Editor_Choice_Popup, Editor_Color_Popup, Editor_Positions:
+		return true
+	case Editor_Browsing, Editor_Editing, Editor_Reset_All, Editor_Profile_Menu:
+	}
+	return false
+}
+
+@(private)
+palette_binding_outcome :: proc(p: ^Palette, binding: ^Shortcut_Edit, outcome: Editor_Outcome) -> Outcome {
 	if outcome == .Save || outcome == .Reset {
-		row := editor_row(&p.binding)
-		value := outcome == .Reset ? row.default_value : field_string(&p.binding.value)
-		clear(&p.chosen_key)
-		append(&p.chosen_key, row.key)
-		p.chosen = string(p.chosen_key[:])
-		clear(&p.chosen_value)
-		append(&p.chosen_value, value)
-		return .Set_Setting
+		row := editor_row(&binding.editor)
+		value := outcome == .Reset ? row.default_value : field_string(&binding.editor.value)
+		return choose_setting(p, row.key, value, copy_key = true)
 	}
-	b := &p.binding
-	if editor_popup(b) == .None && !editor_capturing(b) && editor_focus(b) != .Positions {
-		palette_edit_cancel(p)
-	}
+	if !binding_open(&binding.editor) {edit_set(p, nil)}
 	return .Changed
 }
 
 // Keep a refused binding available to correct; saving ends only the inline editor.
 palette_binding_saved :: proc(p: ^Palette, saved: bool) {
-	if p.edit.kind != .Shortcut {return}
-	if saved {palette_edit_cancel(p)} else {
-		editor_mode_set(&p.binding, Editor_Capturing{})
+	binding, open := &p.edit.(Shortcut_Edit)
+	if !open {return}
+	if saved {edit_set(p, nil)} else {
+		editor_mode_set(&binding.editor, Editor_Capturing{})
 	}
 }
 
-palette_binding_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
-	return palette_binding_outcome(p, editor_key(&p.binding, e))
+@(private)
+palette_binding_key :: proc(p: ^Palette, binding: ^Shortcut_Edit, e: platform.Key_Event) -> Outcome {
+	return palette_binding_outcome(p, binding, editor_key(&binding.editor, e))
 }
 
 palette_binding_reset :: proc(p: ^Palette, index: int) -> Outcome {
@@ -84,26 +94,34 @@ palette_binding_reset :: proc(p: ^Palette, index: int) -> Outcome {
 	p.selected = index
 	if !palette_binding_modified(p.results[index].command) {return .Changed}
 	if palette_binding_open(p, index) == .None {return .None}
-	return palette_binding_outcome(p, .Reset)
+	return palette_binding_outcome(p, &p.edit.(Shortcut_Edit), .Reset)
 }
 
-palette_binding_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> Outcome {
-	layout := palette_binding_layout(p, l)
-	row, _ := row_rect(p, l, p.binding_result)
+@(private)
+palette_binding_press :: proc(
+	p: ^Palette,
+	binding: ^Shortcut_Edit,
+	l: Palette_Layout,
+	text: ^Text,
+	x, y: f32,
+) -> Outcome {
+	b := &binding.editor
+	layout := palette_binding_layout(p, l, binding.result)
+	row, _ := row_rect(p, l, binding.result)
 	parts := palette_binding_parts(row, l.scale)
-	if editor_popup(&p.binding) != .None && contains(editor_popup_rect(&p.binding, layout), x, y) {
-		return palette_binding_outcome(p, editor_press(&p.binding, layout, text, x, y, false))
+	if editor_popup(b) != .None && contains(editor_popup_rect(b, layout), x, y) {
+		return palette_binding_outcome(p, binding, editor_press(b, layout, text, x, y, false))
 	}
-	if contains(parts.reset, x, y) {return palette_binding_outcome(p, .Reset)}
-	if editor_popup(&p.binding) == .None && contains(parts.positions, x, y) {
-		p.binding.physical = !p.binding.physical
+	if contains(parts.reset, x, y) {return palette_binding_outcome(p, binding, .Reset)}
+	if editor_popup(b) == .None && contains(parts.positions, x, y) {
+		b.physical = !b.physical
 		return .Changed
 	}
 	if contains(parts.field, x, y) {
-		open_shortcuts(&p.binding)
+		open_shortcuts(b)
 		return .Changed
 	}
-	palette_edit_cancel(p)
+	edit_set(p, nil)
 	return .Changed
 }
 
@@ -127,10 +145,10 @@ palette_binding_draw :: proc(
 	modified := palette_binding_modified(command)
 	_ = reset_button_draw(list, theme, parts.reset, modified, contains(parts.reset, pointer.x, pointer.y),
 	                      index == p.selected, pointer, l.scale)
-	if p.edit.kind == .Shortcut && p.binding_result == index {
-		if editor_popup(&p.binding) != .None {parts.positions = {}}
-		result := control_draw(&p.binding, editor_row(&p.binding), parts, true, list, text, theme,
-		                       l.viewport, l.scale)
+	if binding, open := &p.edit.(Shortcut_Edit); open && binding.result == index {
+		b := &binding.editor
+		if editor_popup(b) != .None {parts.positions = {}}
+		result := control_draw(b, editor_row(b), parts, true, list, text, theme, l.viewport, l.scale)
 		_ = render.push_layer(list, l.list)
 		return result
 	}
