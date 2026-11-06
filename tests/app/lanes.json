@@ -18,6 +18,7 @@
     "pane_trial_move_minimum_and_invalid_operations_are_detached",
     "pane_trial_split_is_detached_and_matches_committed_geometry",
     "pointer_movement_repaints_a_visible_rim_without_changing_hover",
+    "process_snapshot_asked_for_while_one_is_taken_is_not_taken_twice",
     "program_command_reads_as_typed",
     "program_status_close_scope_protects_work_independent_of_presentation",
     "program_status_ignored_apps_match_whole_names",

@@ -14,21 +14,64 @@ import "core:thread"
 // program icons (about 10 ms with a few hundred processes), and reading or drawing their icons.
 // The main thread asks, the worker answers and wakes it, and the main thread adopts the answer.
 Process_Worker :: struct {
-	icons:           [PROGRAM_ICON_LIMIT]Program_Icon,
-	clock:           u64,
+	icons:     [PROGRAM_ICON_LIMIT]Program_Icon,
+	clock:     u64,
 	// Guards everything below except worker, platform and allocator, which are set before the thread
 	// starts. jobs and done reserve one job per pending icon up front, so the worker never grows them.
-	mutex:           sync.Mutex,
-	cond:            sync.Cond,
-	jobs:            [dynamic]Program_Icon_Job,
-	done:            [dynamic]Program_Icon_Job,
-	snapshot_wanted: bool,
-	snapshot_ready:  bool,
-	snapshot:        []pty.Process_Info,
-	stop:            bool,
-	worker:          ^thread.Thread,
-	platform:        ^platform_api.Platform,
-	allocator:       mem.Allocator,
+	mutex:     sync.Mutex,
+	cond:      sync.Cond,
+	jobs:      [dynamic]Program_Icon_Job,
+	done:      [dynamic]Program_Icon_Job,
+	snapshot:  Process_Snapshot,
+	stop:      bool,
+	worker:    ^thread.Thread,
+	platform:  ^platform_api.Platform,
+	allocator: mem.Allocator,
+}
+
+// One snapshot at a time: nil while none is wanted, then asked for, being taken by the worker, and
+// ready until the main thread takes it. Only the process_snapshot_* transitions below write it, with
+// pw.mutex held.
+Process_Snapshot :: union {
+	Process_Snapshot_Requested,
+	Process_Snapshot_Taking,
+	Process_Snapshot_Ready,
+}
+
+Process_Snapshot_Requested :: struct {}
+Process_Snapshot_Taking :: struct {}
+
+// Owned by the worker's allocator until taken. A failed snapshot is ready with no processes.
+Process_Snapshot_Ready :: struct {
+	processes: []pty.Process_Info,
+}
+
+// Reports whether the worker must be woken. A snapshot being taken or waiting to be taken already
+// answers the request, so it is not taken twice.
+process_snapshot_ask :: proc(s: ^Process_Snapshot) -> bool {
+	if s^ != nil {return false}
+	s^ = Process_Snapshot_Requested{}
+	return true
+}
+
+// Reports whether the worker should take a snapshot now.
+process_snapshot_begin :: proc(s: ^Process_Snapshot) -> bool {
+	if _, requested := s^.(Process_Snapshot_Requested); !requested {return false}
+	s^ = Process_Snapshot_Taking{}
+	return true
+}
+
+process_snapshot_finish :: proc(s: ^Process_Snapshot, processes: []pty.Process_Info) {
+	_, taking := s^.(Process_Snapshot_Taking)
+	assert(taking)
+	s^ = Process_Snapshot_Ready{processes}
+}
+
+// Hands over a ready snapshot, which the caller then owns.
+process_snapshot_collect :: proc(s: ^Process_Snapshot) -> (processes: []pty.Process_Info, ready: bool) {
+	snapshot := s^.(Process_Snapshot_Ready) or_return
+	s^ = nil
+	return snapshot.processes, true
 }
 
 // A pending icon's path and pixels are borrowed by its job; icons are never evicted while pending.
@@ -51,7 +94,9 @@ process_worker_destroy :: proc(pw: ^Process_Worker) {
 		sync.mutex_unlock(&pw.mutex)
 		thread.join(pw.worker)
 		thread.destroy(pw.worker)
-		pty.process_snapshot_destroy(pw.snapshot, pw.allocator)
+		if ready, ok := pw.snapshot.(Process_Snapshot_Ready); ok {
+			pty.process_snapshot_destroy(ready.processes, pw.allocator)
+		}
 	}
 	for &icon in pw.icons {
 		delete(icon.path)
@@ -83,16 +128,17 @@ process_worker_main :: proc(t: ^thread.Thread) {
 	pw := (^Process_Worker)(t.data)
 	for {
 		sync.mutex_lock(&pw.mutex)
-		for len(pw.jobs) == 0 && !pw.snapshot_wanted && !pw.stop {sync.cond_wait(&pw.cond, &pw.mutex)}
+		for len(pw.jobs) == 0 && !pw.stop {
+			if _, requested := pw.snapshot.(Process_Snapshot_Requested); requested {break}
+			sync.cond_wait(&pw.cond, &pw.mutex)
+		}
 		if pw.stop {sync.mutex_unlock(&pw.mutex); return}
-		if pw.snapshot_wanted {
-			pw.snapshot_wanted = false
+		if process_snapshot_begin(&pw.snapshot) {
 			sync.mutex_unlock(&pw.mutex)
 			snapshot, err := pty.process_snapshot(pw.allocator)
 			if err != .None {log.errorf("process snapshot failed: %v", err)}
 			sync.mutex_lock(&pw.mutex)
-			pty.process_snapshot_destroy(pw.snapshot, pw.allocator)
-			pw.snapshot, pw.snapshot_ready = snapshot, true
+			process_snapshot_finish(&pw.snapshot, snapshot)
 			sync.mutex_unlock(&pw.mutex)
 		} else {
 			job := pop_front(&pw.jobs)
@@ -108,30 +154,26 @@ process_worker_main :: proc(t: ^thread.Thread) {
 	}
 }
 
-// Asks for a snapshot unless one is already being taken or waits to be adopted.
 process_snapshot_request :: proc(pw: ^Process_Worker, platform: ^platform_api.Platform) {
 	if !process_worker_start(pw, platform) {return}
 	sync.mutex_lock(&pw.mutex)
 	defer sync.mutex_unlock(&pw.mutex)
-	if pw.snapshot_ready {return}
-	pw.snapshot_wanted = true
-	sync.cond_signal(&pw.cond)
+	if process_snapshot_ask(&pw.snapshot) {sync.cond_signal(&pw.cond)}
 }
 
-// The finished snapshot, if any; the caller destroys it with pw.allocator. A failed snapshot is
-// returned as ready with no processes.
+// The finished snapshot, if any; the caller destroys it with pw.allocator.
 process_snapshot_take :: proc(pw: ^Process_Worker) -> (snapshot: []pty.Process_Info, ready: bool) {
 	if pw.worker == nil {return}
 	sync.mutex_lock(&pw.mutex)
 	defer sync.mutex_unlock(&pw.mutex)
-	snapshot, ready = pw.snapshot, pw.snapshot_ready
-	pw.snapshot, pw.snapshot_ready = nil, false
-	return
+	return process_snapshot_collect(&pw.snapshot)
 }
 
+// Queues the read of a pending icon. The worker must already run, so no icon is left pending without
+// a job to settle it.
 @(private)
-process_icon_request :: proc(pw: ^Process_Worker, index: int, platform: ^platform_api.Platform) {
-	if !process_worker_start(pw, platform) {return}
+process_icon_request :: proc(pw: ^Process_Worker, index: int) {
+	assert(pw.worker != nil)
 	icon := &pw.icons[index]
 	sync.mutex_lock(&pw.mutex)
 	job := Program_Icon_Job {
@@ -153,7 +195,7 @@ process_icons_adopt :: proc(pw: ^Process_Worker) -> (ready: bool, unreadable: st
 	if pw.worker == nil {return}
 	sync.mutex_lock(&pw.mutex)
 	for job in pw.done {
-		pw.icons[job.index].state = job.found ? .Ready : .Missing
+		program_icon_move(&pw.icons[job.index], job.found ? .Ready : .Missing)
 		ready ||= job.found
 		if !job.found && job.source == .File {unreadable = pw.icons[job.index].path}
 	}

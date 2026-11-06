@@ -571,7 +571,7 @@ pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: st
 @(private)
 pane_program :: proc(app: ^App, entry: ^Session_Entry, root: u32) -> u32 {
 	if app.settings.tabs.program_icons {
-		return entry.program_candidate != 0 ? entry.program_candidate : entry.program_id
+		return program_polled(entry)
 	}
 	processes, err := pty.process_snapshot(context.temp_allocator)
 	if err != .None {return 0}
@@ -598,8 +598,8 @@ pane_running :: proc(
 	command: string,
 ) {
 	if app.settings.tabs.program_icons {
-		program = entry.program_candidate != 0 ? entry.program_candidate : entry.program_id
-		return program, entry.program_command
+		if adopted := program_adopted(entry); adopted != nil {command = adopted.command}
+		return program_polled(entry), command
 	}
 	root := term.process_id(entry.session)
 	index := pty.process_program(processes, root, program_reporters(entry), 0)

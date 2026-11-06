@@ -9,7 +9,6 @@ import "aio:instance"
 import "aio:layout"
 import platform_api "aio:platform"
 import "aio:perf"
-import "aio:program_art"
 import "aio:pty"
 import "aio:render"
 import "aio:settings"
@@ -65,18 +64,8 @@ Session_Entry :: struct {
 	// The program status records last copied from the session, and the last notice they raised.
 	statuses:            []term.Program_Status,
 	status_notified:     time.Tick,
-	// The program its icon names: the process adopted, its image path, and the last poll's choice;
-	// the name icons are looked up by and its bundled artwork; and whether the process is a WSL or
-	// SSH bridge, named by what its programs report.
-	program_id:          u32,
-	program_candidate:   u32,
-	program_path:        string,
-	program_name:        string,
-	program_art:         program_art.Art,
-	program_has_art:     bool,
-	program_bridge:      bool,
-	// How the adopted program was started, as a reopened pane shows it; empty at the prompt.
-	program_command:     string,
+	// The program its icon names and a reopened pane remembers, as process polling sees it.
+	program:             Program,
 	documents:           Document_List,
 }
 
@@ -87,9 +76,7 @@ session_entry_destroy :: proc(entry: ^Session_Entry) {
 	delete(entry.name)
 	delete(entry.profile_id)
 	status_release(entry)
-	delete(entry.program_path)
-	delete(entry.program_name)
-	delete(entry.program_command)
+	program_forget(entry)
 	term.destroy(entry.session)
 }
 

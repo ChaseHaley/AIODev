@@ -844,6 +844,8 @@ when AIO_CONTROL {
 				}
 				selection = text[:end]
 			}
+			program: Program_Adopted
+			if adopted := program_adopted(entry); adopted != nil {program = adopted^}
 			session := [?]control.State_Entry {
 				{"session.id", fmt.tprintf("%d", entry.id)},
 				{"session.message", session_message(status)},
@@ -857,9 +859,9 @@ when AIO_CONTROL {
 				{"session.header.title", pane_header_title(&entry.header)},
 				{"session.profile", entry.profile_id},
 				{"session.name", entry.name},
-				{"session.command", entry.program_command},
-				{"session.program", entry.program_path},
-				{"session.program.name", entry.program_name},
+				{"session.command", program.command},
+				{"session.program", program.path},
+				{"session.program.name", program.name},
 				{"session.program.source", verify_program_source(app, entry)},
 				{"session.program.icon", fmt.tprintf("%t", verify_program_icon(app, entry))},
 				{"session.header.directory", entry.header.directory},
@@ -1679,9 +1681,10 @@ when AIO_CONTROL {
 	}
 	// Whether the pane's program has an icon ready to draw at any size, from whichever source.
 	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {
-		if entry.program_name == "" {return false}
-		file, has_file := program_named_file(app, entry.program_name, entry.program_art, entry.program_has_art)
-		art := entry.program_has_art ? program_art.canonical(entry.program_art) : ""
+		program := program_adopted(entry)
+		if program == nil || program.name == "" {return false}
+		file, has_file := program_named_file(app, program.name, program.art, program.has_art)
+		art := program.has_art ? program_art.canonical(program.art) : ""
 		for icon in app.processes.icons {
 			if icon.state != .Ready {continue}
 			switch icon.source {
@@ -1690,14 +1693,15 @@ when AIO_CONTROL {
 			case .Artwork:
 				if art != "" && icon.path == art {return true}
 			case .Executable:
-				if entry.program_path != "" && icon.path == entry.program_path {return true}
+				if program.path != "" && icon.path == program.path {return true}
 			}
 		}
 		return false
 	}
 	verify_program_source :: proc(app: ^App, entry: ^Session_Entry) -> string {
-		if entry.program_name == "" {return ""}
-		source, _, _, found := program_icon_source(app, entry, 16)
+		program := program_adopted(entry)
+		if program == nil || program.name == "" {return ""}
+		source, _, _, found := program_icon_source(app, program, 16)
 		return found ? strings.to_lower(fmt.tprintf("%v", source), context.temp_allocator) : ""
 	}
 } else {
