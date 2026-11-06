@@ -36,8 +36,8 @@ capture_geometry :: proc(header: []u8) -> (columns, rows: u16, ok: bool) {
 }
 
 // create_headless builds the same libghostty terminal as create() with no process behind it, so
-// recorded bytes can be replayed offscreen. It starts no reader, waiter, or writer thread, and
-// `spawned` stays false, so destroy performs no process cleanup.
+// recorded bytes can be replayed offscreen. It starts no reader, waiter, or writer thread, and its
+// process phase stays nil, so destroy performs no process cleanup.
 @(require_results)
 create_headless :: proc(
 	geometry: Geometry,
@@ -64,9 +64,6 @@ create_headless :: proc(
 	if err := ghostty_create(s, config); err != .None {
 		return nil, err
 	}
-	sync.mutex_lock(&s.mutex)
-	s.status = .Running
-	sync.mutex_unlock(&s.mutex)
 	ok = true
 	return s, .None
 }

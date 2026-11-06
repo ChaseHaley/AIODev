@@ -73,7 +73,7 @@ send_key_vt :: proc(s: ^Session, event: platform.Key_Event) -> bool {
 
 @(private)
 send_input :: proc(s: ^Session, data: []u8, carries_text: bool) -> bool {
-	if !queue_push(&s.queue, data) {
+	if queue_push(&s.queue, data) != .Queued {
 		return false
 	}
 	if carries_text && len(data) > 0 {

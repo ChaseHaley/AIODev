@@ -183,6 +183,6 @@ pane_shell_swap :: proc(
 	entry.profile_id = owned_id
 	pane_header_launch(&entry.header, config)
 	pane_header_refresh(entry)
-	entry.status = term.status(entry.session).kind
+	session_status_sync(entry)
 	mark_all_dirty(app)
 }

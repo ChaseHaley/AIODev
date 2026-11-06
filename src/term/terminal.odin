@@ -72,19 +72,60 @@ Status :: struct {
 	message:   string,
 }
 
+// The session's child-process lifecycle; nil means no process: none spawned yet, a headless replay,
+// or one stop_process has released. Only the process_* transitions write Session.process, under
+// Session.mutex, so the main, reader and waiter threads always agree on one phase.
+@(private)
+Process :: union {
+	Process_Running,
+	Process_Exited,
+	Process_Failed,
+	Process_Stopping,
+}
+
+@(private)
+Process_Running :: struct {}
+
+// The process ended by itself. The waiter has closed the console, so the reader is draining the
+// final output to EOF.
+@(private)
+Process_Exited :: struct {
+	code: u32,
+}
+
+// Starting the process failed. The message belongs to the session allocator and may be empty.
+@(private)
+Process_Failed :: struct {
+	message: string,
+}
+
+// stop_process is taking the process down. A process that had already exited drains its final
+// output; one still running has its pending reads cancelled so closing a pane is fast (WORK-306).
+@(private)
+Process_Stopping :: struct {
+	drain: bool,
+}
+
 Error :: enum {
 	None,
 	Out_Of_Memory,
 	Terminal_Failed,
 }
 
-// Record_Start_Error reports why a capture could not begin. Stopping reports its own success
-// because a stop after a disk error still has a path and byte count worth printing.
+// Record_Start_Error reports why a capture could not begin.
 Record_Start_Error :: enum {
 	None,
 	Already_Recording,
 	File_Failed,
 	Out_Of_Memory,
+}
+
+// Record_Stop reports how a capture ended. Faulted means a disk error ended it early, so the file
+// holds only the bytes written before the error.
+Record_Stop :: enum {
+	Not_Recording,
+	Stopped,
+	Faulted,
 }
 
 @(private)
@@ -98,7 +139,7 @@ Session :: struct {
 	allocator:                                                runtime.Allocator,
 	callback_context:                                         runtime.Context,
 	wake:                                                     Wake,
-	// Guards the libghostty objects below and the status fields.
+	// Guards the libghostty objects below, the process phase and the render hold.
 	mutex:                                                    sync.Mutex,
 	terminal:                                                 ghostty.Terminal,
 	key_encoder:                                              ghostty.Key_Encoder,
@@ -112,13 +153,11 @@ Session :: struct {
 	search_active:                                            bool,
 	search_fed:                                               u64,
 	pattern:                                                  Pattern_Search,
-	status:                                                   Status_Kind,
-	exit_code:                                                u32,
-	failure:                                                  string,
-	held:                                                     bool,
-	held_since:                                               time.Tick,
+	process:                                                  Process,
+	// When synchronized output began holding frames; nil while frames are live. capture judges
+	// expiry, so a program that never releases the hold cannot freeze the pane.
+	render_hold:                                              Maybe(time.Tick),
 	geometry:                                                 Geometry,
-	spawned:                                                  bool,
 	pty:                                                      pty.Pty,
 	reader, writer, waiter:                                   ^thread.Thread,
 	queue:                                                    Write_Queue,
@@ -141,18 +180,48 @@ Write_Queue :: struct {
 	mutex:   sync.Mutex,
 	ready:   sync.Cond,
 	pending: [dynamic]u8,
-	closed:  bool,
+	state:   Write_Queue_State,
 }
 
-// Recording owns the capture file for one session. `path` and `bytes` outlive `file` so a stop can
-// still report what was written after a disk error ended the capture early.
+// Closed is the owner stopping the writer. Failed is a writer that lost the console's input: input
+// is dropped until stop_process reopens the queue for the next process.
+@(private)
+Write_Queue_State :: enum u8 {
+	Open,
+	Closed,
+	Failed,
+}
+
+@(private)
+Queue_Push :: enum u8 {
+	Queued,
+	Unavailable,
+	Full,
+}
+
+// Recording is one session's capture. `path` and `bytes` outlive it so a stop can still report what
+// was written after a disk error ended the capture early.
 @(private)
 Recording :: struct {
-	file:   ^os.File,
-	path:   string,
-	bytes:  u64,
-	active: bool,
+	state: Recording_State,
+	path:  string,
+	bytes: u64,
 }
+
+// nil when not recording.
+@(private)
+Recording_State :: union {
+	Recording_Active,
+	Recording_Faulted,
+}
+
+@(private)
+Recording_Active :: struct {
+	file: ^os.File,
+}
+
+@(private)
+Recording_Faulted :: struct {}
 
 @(require_results)
 create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^Session, Error) {
@@ -186,9 +255,7 @@ create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^
 }
 
 destroy :: proc(s: ^Session) {
-	if s.spawned {
-		stop_process(s)
-	}
+	stop_process(s)
 	record_close(&s.recording)
 	delete(s.recording.path, s.allocator)
 	ghostty.selection_gesture_event_free(s.press_event)
@@ -205,7 +272,6 @@ destroy :: proc(s: ^Session) {
 	ghostty.key_encoder_free(s.key_encoder)
 	ghostty.terminal_free(s.terminal)
 	clear_program_status(s, false)
-	delete(s.failure, s.allocator)
 	delete(s.queue.pending)
 	delete(s.search_matches)
 	pattern_destroy(&s.pattern, s)
@@ -213,15 +279,11 @@ destroy :: proc(s: ^Session) {
 }
 
 restart :: proc(s: ^Session, config: Config) {
-	if s.spawned {
-		stop_process(s)
-	}
+	stop_process(s)
 	sync.mutex_lock(&s.mutex)
 	ghostty.terminal_reset(s.terminal)
 	clear_program_status(s, false)
-	delete(s.failure, s.allocator)
-	s.failure = ""
-	s.held = false
+	s.render_hold = nil
 	sync.mutex_unlock(&s.mutex)
 	resize(s, config.geometry)
 	spawn(s, config)
@@ -342,41 +404,36 @@ spawn :: proc(s: ^Session, config: Config) {
 		if message_error != .None {
 			log.errorf("term: describing spawn failure %v failed: %v", err, message_error)
 		}
-		sync.mutex_lock(&s.mutex)
-		s.status, s.failure = .Failed, message
-		sync.atomic_store(&s.status_changed, true)
-		sync.mutex_unlock(&s.mutex)
+		process_apply(s, Process_Failed{message})
 		return
 	}
-	s.pty, s.spawned = process, true
-	sync.mutex_lock(&s.mutex)
-	s.status, s.exit_code = .Running, 0
-	sync.atomic_store(&s.status_changed, true)
-	sync.mutex_unlock(&s.mutex)
+	s.pty = process
+	process_apply(s, Process_Running{})
 	s.reader = thread.create_and_start_with_poly_data(s, reader_main, s.callback_context)
 	s.waiter = thread.create_and_start_with_poly_data(s, waiter_main, s.callback_context)
 	s.writer = thread.create_and_start_with_poly_data(s, writer_main, s.callback_context)
 	if s.reader == nil || s.waiter == nil || s.writer == nil {
 		log.error("term: creating session threads failed")
 		stop_process(s)
-		sync.mutex_lock(&s.mutex)
-		s.status = .Failed
-		sync.atomic_store(&s.status_changed, true)
-		sync.mutex_unlock(&s.mutex)
+		process_apply(s, Process_Failed{})
 	}
 }
 
+// Takes the process down and releases its threads and console; a session with no process only
+// forgets a failure.
 @(private)
 stop_process :: proc(s: ^Session) {
-	cancel_output := status(s).kind != .Exited
+	stopping, live := process_stop(s)
+	if !live {
+		return
+	}
 	if err := pty.terminate(&s.pty); err != .None {
 		log.errorf("term: terminating the process tree failed: %v", err)
 	}
 	join_thread(&s.waiter)
 	// The waiter normally closes the console; closing again is harmless and covers a missing waiter.
 	pty.close_console(&s.pty)
-	// Natural exit keeps its final output; explicit shutdown need not wait for console pipe EOF.
-	if cancel_output {
+	if !stopping.drain {
 		if err := pty.cancel_reads(s.reader); err != .None {
 			log.errorf("term: cancelling process output failed: %v", err)
 		}
@@ -388,7 +445,61 @@ stop_process :: proc(s: ^Session) {
 	queue_reset(&s.queue)
 	s.scanner = {}
 	sync.atomic_store(&s.win32_input, false)
-	s.spawned = false
+	process_apply(s, nil)
+}
+
+// The only writer of Session.process; the caller holds the session mutex. Leaving Failed frees its
+// message, and entering a phase the app shows flags a status change.
+@(private)
+process_enter :: proc(s: ^Session, next: Process) {
+	if failed, ok := s.process.(Process_Failed); ok {
+		delete(failed.message, s.allocator)
+	}
+	s.process = next
+	switch _ in next {
+	case Process_Running, Process_Exited, Process_Failed:
+		sync.atomic_store(&s.status_changed, true)
+	case Process_Stopping:
+	}
+}
+
+@(private)
+process_apply :: proc(s: ^Session, next: Process) {
+	sync.mutex_lock(&s.mutex)
+	process_enter(s, next)
+	sync.mutex_unlock(&s.mutex)
+}
+
+// The waiter saw the process end. A stop already under way keeps the decision it took.
+@(private)
+process_exited :: proc(s: ^Session, code: u32) {
+	sync.mutex_lock(&s.mutex)
+	if _, running := s.process.(Process_Running); running {
+		process_enter(s, Process_Exited{code})
+	}
+	sync.mutex_unlock(&s.mutex)
+}
+
+// Begins stop_process, deciding from the phase whether the reader drains or is cancelled. The
+// decision and the phase change are one step, so an exit the waiter reports afterwards cannot make
+// the stop wait for output it already chose to abandon. `live` is false when there is no process.
+@(private)
+process_stop :: proc(s: ^Session) -> (stopping: Process_Stopping, live: bool) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	switch _ in s.process {
+	case Process_Running:
+		stopping, live = {drain = false}, true
+	case Process_Exited:
+		stopping, live = {drain = true}, true
+	case Process_Failed:
+		process_enter(s, nil)
+		return
+	case Process_Stopping, nil:
+		return
+	}
+	process_enter(s, stopping)
+	return
 }
 
 @(private)
@@ -447,10 +558,7 @@ waiter_main :: proc(s: ^Session) {
 	if err != .None {
 		log.errorf("term: waiting for process exit failed: %v", err)
 	}
-	sync.mutex_lock(&s.mutex)
-	s.status, s.exit_code = .Exited, code
-	sync.atomic_store(&s.status_changed, true)
-	sync.mutex_unlock(&s.mutex)
+	process_exited(s, code)
 	// Closing the console after exit lets the reader drain the remaining output and reach EOF.
 	pty.close_console(&s.pty)
 	mark_changed(s)
@@ -463,10 +571,7 @@ writer_main :: proc(s: ^Session) {
 	defer delete(sending)
 	for queue_take(&s.queue, &sending) {
 		if err := pty.write(&s.pty, sending[:]); err != .None {
-			if err != .Closed {
-				log.errorf("term: writing process input failed: %v", err)
-			}
-			queue_close(&s.queue)
+			queue_fail(&s.queue, err)
 			return
 		}
 		clear(&sending)
@@ -474,27 +579,30 @@ writer_main :: proc(s: ^Session) {
 }
 
 @(private)
-queue_push :: proc(q: ^Write_Queue, data: []u8) -> bool {
+queue_push :: proc(q: ^Write_Queue, data: []u8) -> Queue_Push {
 	sync.mutex_lock(&q.mutex)
 	defer sync.mutex_unlock(&q.mutex)
-	if q.closed || len(q.pending) + len(data) > WRITE_QUEUE_LIMIT {
-		return false
+	if q.state != .Open {
+		return .Unavailable
+	}
+	if len(q.pending) + len(data) > WRITE_QUEUE_LIMIT {
+		return .Full
 	}
 	if _, err := append(&q.pending, ..data); err != nil {
-		return false
+		return .Full
 	}
 	sync.cond_signal(&q.ready)
-	return true
+	return .Queued
 }
 
 @(private)
 queue_take :: proc(q: ^Write_Queue, out: ^[dynamic]u8) -> bool {
 	sync.mutex_lock(&q.mutex)
 	defer sync.mutex_unlock(&q.mutex)
-	for len(q.pending) == 0 && !q.closed {
+	for len(q.pending) == 0 && q.state == .Open {
 		sync.cond_wait(&q.ready, &q.mutex)
 	}
-	if q.closed {
+	if q.state != .Open {
 		return false
 	}
 	q.pending, out^ = out^, q.pending
@@ -504,25 +612,47 @@ queue_take :: proc(q: ^Write_Queue, out: ^[dynamic]u8) -> bool {
 @(private)
 queue_close :: proc(q: ^Write_Queue) {
 	sync.mutex_lock(&q.mutex)
-	q.closed = true
+	q.state = .Closed
 	sync.cond_broadcast(&q.ready)
 	sync.mutex_unlock(&q.mutex)
+}
+
+// The writer lost the console's input. This is the one log line: later input is dropped quietly
+// until stop_process reopens the queue.
+@(private)
+queue_fail :: proc(q: ^Write_Queue, err: pty.Error) {
+	sync.mutex_lock(&q.mutex)
+	failed := q.state == .Open
+	if failed {
+		q.state = .Failed
+	}
+	sync.cond_broadcast(&q.ready)
+	sync.mutex_unlock(&q.mutex)
+	if !failed {
+		return
+	}
+	if err == .Closed {
+		log.info("term: the console closed its input; later input is dropped")
+	} else {
+		log.errorf("term: writing process input failed: %v; later input is dropped", err)
+	}
 }
 
 @(private)
 queue_reset :: proc(q: ^Write_Queue) {
 	sync.mutex_lock(&q.mutex)
 	clear(&q.pending)
-	q.closed = false
+	q.state = .Open
 	sync.mutex_unlock(&q.mutex)
 }
 
+// A closed or failed queue drops replies quietly: stopping expects it, and a failure logged once.
 @(private)
 on_write_pty :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr, data: [^]u8, len: uint) {
 	s := (^Session)(userdata)
 	context = s.callback_context
-	if !queue_push(&s.queue, data[:len]) {
-		log.warn("term: dropped a terminal reply because the input queue is unavailable")
+	if queue_push(&s.queue, data[:len]) == .Full {
+		log.warn("term: dropped a terminal reply because the input queue has no room")
 	}
 }
 
@@ -539,9 +669,10 @@ on_title_changed :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr) {
 @(private)
 on_render_hold :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr, held: bool) {
 	s := (^Session)(userdata)
-	s.held = held
 	if held {
-		s.held_since = time.tick_now()
+		s.render_hold = time.tick_now()
+	} else {
+		s.render_hold = nil
 	}
 }
 
@@ -554,7 +685,7 @@ capture :: proc(
 	images: ^Image_Capture = nil,
 ) -> bool {
 	sync.mutex_lock(&s.mutex)
-	if s.held && time.tick_since(s.held_since) < RENDER_HOLD_LIMIT {
+	if since, held := s.render_hold.?; held && time.tick_since(since) < RENDER_HOLD_LIMIT {
 		sync.mutex_unlock(&s.mutex)
 		return false
 	}
@@ -586,11 +717,13 @@ resize :: proc(s: ^Session, geometry: Geometry) {
 		geometry.cell_width,
 		geometry.cell_height,
 	)
+	_, failed := s.process.(Process_Failed)
+	live := s.process != nil && !failed
 	sync.mutex_unlock(&s.mutex)
 	if result != .Success {
 		log.errorf("term: resize to %vx%v failed: %v", geometry.columns, geometry.rows, result)
 	}
-	if s.spawned {
+	if live {
 		if err := pty.resize(&s.pty, geometry.columns, geometry.rows);
 		   err != .None && err != .Closed {
 			log.errorf("term: console resize failed: %v", err)
@@ -621,10 +754,18 @@ set_colors :: proc(s: ^Session, colors: Colors) {
 	mark_changed(s)
 }
 
+// What the app shows of the process. A session without one, such as a headless replay, reads as
+// Running because it has no exit to report; Stopping exists only inside stop_process.
 status :: proc(s: ^Session) -> Status {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	return {s.status, s.exit_code, s.failure}
+	#partial switch p in s.process {
+	case Process_Exited:
+		return {kind = .Exited, exit_code = p.code}
+	case Process_Failed:
+		return {kind = .Failed, message = p.message}
+	}
+	return {kind = .Running}
 }
 
 take_status_change :: proc(s: ^Session) -> bool {
@@ -752,7 +893,7 @@ geometry :: proc(s: ^Session) -> Geometry {
 record_start :: proc(s: ^Session, path: string) -> Record_Start_Error {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	if s.recording.active {
+	if s.recording.state != nil {
 		return .Already_Recording
 	}
 	owned, clone_error := strings.clone(path, s.allocator)
@@ -773,47 +914,53 @@ record_start :: proc(s: ^Session, path: string) -> Record_Start_Error {
 		return .File_Failed
 	}
 	delete(s.recording.path, s.allocator)
-	s.recording = {file = file, path = owned, active = true}
+	s.recording = {state = Recording_Active{file}, path = owned}
 	return .None
 }
 
-// record_stop ends the capture and reports what it wrote. The path borrows session memory that
-// stays valid until the session is destroyed or another capture starts. `stopped` is false when
-// this session was not recording.
+// record_stop ends the capture and reports how it ended and what it wrote. The path borrows session
+// memory that stays valid until the session is destroyed or another capture starts.
 @(require_results)
-record_stop :: proc(s: ^Session) -> (path: string, bytes: u64, stopped: bool) {
+record_stop :: proc(s: ^Session) -> (path: string, bytes: u64, result: Record_Stop) {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	if !s.recording.active {
-		return "", 0, false
+	switch _ in s.recording.state {
+	case Recording_Active:
+		result = .Stopped
+	case Recording_Faulted:
+		result = .Faulted
+	case:
+		return "", 0, .Not_Recording
 	}
-	record_close_file(s.recording.file)
-	s.recording.file, s.recording.active = nil, false
-	return s.recording.path, s.recording.bytes, true
+	record_close(&s.recording)
+	return s.recording.path, s.recording.bytes, result
 }
 
-// record_chunk appends one PTY chunk while the session records. A failed write ends the capture
+// record_chunk appends one PTY chunk while the session records. A failed write faults the capture
 // instead of retrying every chunk: the app must keep running, and one log line is enough evidence.
 @(private)
 record_chunk :: proc(s: ^Session, data: []u8) {
-	if s.recording.file == nil {
+	active, recording := s.recording.state.(Recording_Active)
+	if !recording {
 		return
 	}
-	n, written := record_write(s.recording.file, data)
+	n, written := record_write(active.file, data)
 	s.recording.bytes += u64(n)
 	if written {
 		return
 	}
 	log.errorf("term: appending to the capture %s failed; recording stopped", s.recording.path)
-	record_close_file(s.recording.file)
-	s.recording.file = nil
+	record_close_file(active.file)
+	s.recording.state = Recording_Faulted{}
 }
 
-// record_close closes an open capture but keeps the path and byte count for the stop report.
+// record_close ends any capture but keeps the path and byte count for the stop report.
 @(private)
 record_close :: proc(r: ^Recording) {
-	record_close_file(r.file)
-	r.file, r.active = nil, false
+	if active, ok := r.state.(Recording_Active); ok {
+		record_close_file(active.file)
+	}
+	r.state = nil
 }
 
 // record_write writes every byte of `data`; a short write or a closed file cannot be resumed.

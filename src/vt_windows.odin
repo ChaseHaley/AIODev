@@ -43,9 +43,17 @@ when AIO_CONTROL {
 			return vt_failure(out, .Invalid_Argument, "no focused session; focus a pane and retry")
 		}
 		if !request.recording {
-			path, bytes, stopped := term.record_stop(entry.session)
-			if !stopped {
+			path, bytes, ended := term.record_stop(entry.session)
+			switch ended {
+			case .Not_Recording:
 				return vt_failure(out, .Invalid_Argument, "this session is not recording")
+			case .Faulted:
+				return vt_failure(
+					out,
+					.System,
+					fmt.tprintf("writing the capture %s failed; it holds the first %d bytes", path, bytes),
+				)
+			case .Stopped:
 			}
 			fmt.sbprintf(out, "ok; stopped %s bytes=%d\n", path, bytes)
 			return .None

@@ -290,7 +290,8 @@ performance gates.
 			`vt record on|off
 Starts or stops recording the focused session's raw PTY output.
 Output on: ok; recording <path>
-Output off: ok; stopped <path> bytes=<n>
+Output off: ok; stopped <path> bytes=<n>, or an error naming the path and bytes kept when a
+disk error ended the capture early.
 The capture is written under the instance data directory and is not committed.
 Feed it to tools\vtreplay to reproduce screen and cell state without a shell.
 `,

@@ -176,8 +176,11 @@ output_and_exit_status :: proc(t: ^testing.T) {
 @(test)
 failed_spawn_reports_message :: proc(t: ^testing.T) {
 	wakes: Wakes
+	logger := context.logger
 	context.logger = {}
 	s := start(t, "aio_missing_program_5512.exe", &wakes)
+	// Expectations report through the runner's logger, so only the spawn runs silenced.
+	context.logger = logger
 	if s == nil {
 		return
 	}
@@ -245,6 +248,33 @@ restart_and_destroy_while_running :: proc(t: ^testing.T) {
 	started := time.tick_now()
 	term.destroy(s)
 	testing.expect(t, time.tick_since(started) < 10 * time.Second)
+}
+
+// A failed launch has no exit code: restarting an exited session into one must not report the old
+// process's code alongside the failure.
+@(test)
+restart_into_failed_spawn_drops_the_old_exit_code :: proc(t: ^testing.T) {
+	wakes: Wakes
+	s := start(t, "cmd.exe /d /c exit 9", &wakes)
+	if s == nil {
+		return
+	}
+	defer term.destroy(s)
+	if !await(t, s, exited, "exit") || !testing.expect_value(t, term.status(s).exit_code, 9) {
+		return
+	}
+	logger := context.logger
+	context.logger = {}
+	term.restart(s, config("aio_missing_program_5512.exe"))
+	context.logger = logger
+	status := term.status(s)
+	testing.expect_value(t, status.kind, term.Status_Kind.Failed)
+	testing.expect_value(t, status.exit_code, 0)
+	testing.expect(t, strings.has_prefix(status.message, "Could not start \"aio_missing_program_5512.exe\""))
+	term.restart(s, config("cmd.exe /d /c exit 4"))
+	if await(t, s, exited, "exit") {
+		testing.expect_value(t, term.status(s), term.Status{kind = .Exited, exit_code = 4})
+	}
 }
 
 @(test)
