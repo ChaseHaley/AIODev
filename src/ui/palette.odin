@@ -1330,7 +1330,7 @@ draw_modes :: proc(
 		width := min(text_width(&mode_text, word), room)
 		baseline := row.y + (row.height - mode_text.line_height) / 2 + mode_text.ascent
 		if result := draw_text(&mode_text, list, word, row.x + (row.width - width) / 2, baseline,
-			p.mode == mode ? theme.text : theme.muted, room); result != .Ok {return result}
+			p.mode == mode || p.mode_hover == i ? theme.text : theme.muted, room); result != .Ok {return result}
 	}
 	return .Ok
 }
