@@ -353,6 +353,8 @@ a_file_that_failed_to_parse_is_read_again_only_once_it_changes :: proc(t: ^testi
 	loaded, ok := pane.load.(app.Markdown_Loaded)
 	if !testing.expect(t, ok) {return}
 	markdown.document_destroy(&loaded.document)
+	// Parse OOM cannot be triggered deterministically here without also failing the file read, so
+	// install its result for the unchanged file and exercise the real poll from that state.
 	pane.load = app.Markdown_Failed{loaded.stamp}
 	revision := pane.revision
 	poll(&f.state)
@@ -471,6 +473,7 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
 	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
 	w := f.state.windows[0]
+	testing.expect(t, w.markdown_hover == nil, "a newly opened pane must not hover its first link")
 	pane := f.state.markdown_panes[0]
 	document := app.markdown_document(pane)
 	if !testing.expect(t, document != nil) {return}

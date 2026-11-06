@@ -152,7 +152,7 @@ markdown_pane_create :: proc(app: ^App, path: string, verified: bool) -> ^Markdo
 	}
 	app.next_markdown_id += 1
 	pane.id = app.next_markdown_id
-	if verified {_ = markdown_pane_verified(pane)}
+	if verified {markdown_pane_verified(pane)}
 	if app.markdown_deadline == {} {app.markdown_deadline = time.tick_add(time.tick_now(), MARKDOWN_POLL)}
 	return pane
 }
@@ -195,10 +195,9 @@ markdown_load_enter :: proc(pane: ^Markdown_Pane, next: Markdown_Load) -> bool {
 
 // The path passed the local-file checks; from now on the poll follows the file itself.
 @(private = "file")
-markdown_pane_verified :: proc(pane: ^Markdown_Pane) -> bool {
+markdown_pane_verified :: proc(pane: ^Markdown_Pane) {
 	_ = markdown_load_enter(pane, Markdown_Missing{})
 	_ = markdown_pane_load(pane)
-	return true
 }
 
 // Checks a restored path before anything reads it, then follows the file. Returns whether the pane
@@ -210,7 +209,8 @@ markdown_pane_poll :: proc(pane: ^Markdown_Pane) -> bool {
 	if !ok {return false}
 	defer platform.terminal_file_destroy(&file)
 	if file.confirm || !markdown_path_set(pane, file.target) {return false}
-	return markdown_pane_verified(pane)
+	markdown_pane_verified(pane)
+	return true
 }
 
 // Reads the file again only when its stamp differs from the one last seen, whatever came of that
