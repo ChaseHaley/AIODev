@@ -1,6 +1,19 @@
 package main
 
 import "aio:ui"
+import "aio:layout"
+
+tab_content_icon :: proc(tab: ^Tab) -> ui.Icon {
+	if int(tab.tree.focus) >= len(tab.tree.nodes) {return .None}
+	pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+	if !ok {return .None}
+	switch pane.content.kind {
+	case .Terminal: return .None
+	case .Settings: return .Settings
+	case .Markdown: return .Markdown
+	}
+	return .None
+}
 
 // Tab presentation indexed by tab position. Both arrays stay aligned with the
 // workspace tab list; controls carry one extra trailing entry for the new-tab button and one
@@ -40,6 +53,23 @@ tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int)
 		position.value, position.target = f32(i), f32(i)
 	}
 	return true
+}
+
+@(require_results)
+tab_presentation_reserve :: proc(presentation: ^Tab_Presentation, tab_count: int) -> bool {
+	return reserve(&presentation.tab_controls, tab_count + 2) == nil &&
+		reserve(&presentation.tab_positions, tab_count) == nil
+}
+
+// Tabs arriving at `at` start settled in the gap opened for them, while the tabs after it keep their motion.
+// Capacity was reserved. A window yet to lay out has nothing to shift; its next relayout sizes the arrays.
+tab_presentation_insert :: proc(presentation: ^Tab_Presentation, at, count: int) {
+	if at > len(presentation.tab_positions) {return}
+	for i in 0 ..< count {
+		place := f32(at + i)
+		inject_at(&presentation.tab_controls, at + i, ui.Control_Motion{})
+		inject_at(&presentation.tab_positions, at + i, ui.Motion{value = place, target = place})
+	}
 }
 
 // Moves both presentation values with the tab, keeping every motion field it already has.

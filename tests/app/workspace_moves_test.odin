@@ -85,7 +85,7 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	testing.expect(t, app.settings_active(w))
 	testing.expect_value(t, len(state.sessions), 3)
 	if !testing.expect(t, app.workspace_select(&state, w, three)) {return}
-	app.run_action(&state, w, .Settings_UI)
+	if !settings_tab_restore(t, &state, w) {return}
 	settings_request := app.workspace_move_request(w, true, w.workspace.selected)
 	testing.expect(t, !app.workspace_move_content(&state, w, settings_request, settings_workspace))
 	settings_request.whole_tab = false

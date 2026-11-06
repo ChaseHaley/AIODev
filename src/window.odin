@@ -50,6 +50,7 @@ Window :: struct {
 	divider_click_ns: i64,
 	pane_drag: Pane_Drag,
 	tab_drag: Tab_Drag,
+	tab_incoming: Tab_Incoming,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
 	split_overlay: bool,
 	list: render.Draw_List,
@@ -699,7 +700,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if result := rail_draw(app, w); result != .Ok {return frame, result}
 	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
 	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
-	tab_drag_draw(app, w)
+	if result := tab_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if w.find.open {

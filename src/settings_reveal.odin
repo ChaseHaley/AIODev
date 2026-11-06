@@ -30,11 +30,11 @@ Settings_Reveal :: struct {
 	reload: bool,
 }
 
-// Shows the settings tab, creating and loading it when the workspace has none, then reveals its row.
+// Shows the settings tab, creating and loading it when the app has none, then reveals its row.
 settings_reveal :: proc(app: ^App, w: ^Window, reveal: Settings_Reveal) {
-	editor_open(app, w)
-	if !settings_active(w) {return}
-	settings_reveal_page(app, &w.editor, reveal)
+	shown := editor_open(app, w)
+	if shown == nil || !settings_active(shown) {return}
+	settings_reveal_page(app, &shown.editor, reveal)
 }
 
 // The order is the invariant: the search is settled before the filter rebuilds the page, and the key
