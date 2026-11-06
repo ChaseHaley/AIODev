@@ -358,7 +358,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
 	if w.tab_menu.open {return}
 	if w.profile_menu.open {return}
-	if w.document_menu.menu.open {document_menu_text_input(w, text); return}
+	if w.document_menu.menu.open {document_menu_text_input(app, w, text); return}
 	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
 	if confirmation_current(w) != nil {return}
 	if palette_active(app, w) {

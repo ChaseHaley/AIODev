@@ -137,7 +137,7 @@ document_menu_own :: proc(menu: ^Document_Menu, text: string) -> string {
 @(private = "file")
 document_menu_push :: proc(menu: ^Document_Menu, item: ui.Menu_Item, entry: Document_Menu_Entry = {}) {
 	if menu.count >= ui.MENU_MAX_ITEMS {return}
-	_ = ui.menu_add(&menu.menu, item)
+	if ui.menu_add(&menu.menu, item) != nil {return}
 	menu.entries[menu.count] = entry
 	menu.count += 1
 }
@@ -264,6 +264,9 @@ document_menu_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> (x, y: f32) 
 		return r.x + r.width - width - ui.SPACE_2 * w.scale, r.y + ui.SPACE_2 * w.scale
 	}
 	button := l.buttons[int(ui.Header_Action.Documents) - 1]
+	if button.width == 0 {
+		return r.x + r.width - width - ui.SPACE_2 * w.scale, r.y + ui.HEADER_HEIGHT * w.scale + ui.SPACE_1 * w.scale
+	}
 	return button.x + button.width - width, button.y + button.height + ui.SPACE_1 * w.scale
 }
 
@@ -397,6 +400,7 @@ document_menu_pin :: proc(app: ^App, w: ^Window, level: Document_Level, document
 @(private = "file")
 document_menu_remove :: proc(app: ^App, w: ^Window, index: int) {
 	menu := &w.document_menu
+	if index < 0 || index >= menu.count {return}
 	entry := menu.entries[index]
 	if entry.action != .Open {return}
 	scopes, found := document_scopes(app, menu.content)
@@ -570,11 +574,14 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: platform.Key_Even
 	}
 }
 
-document_menu_text_input :: proc(w: ^Window, text: string) {
+document_menu_text_input :: proc(app: ^App, w: ^Window, text: string) {
 	menu := &w.document_menu
 	if !menu.url_open {return}
 	if ui.field_text(&menu.url, text) != .None {
-		menu.url_invalid = false
+		if menu.url_invalid {
+			menu.url_invalid = false
+			document_menu_build(app, w)
+		}
 		w.dirty = true
 	}
 }
