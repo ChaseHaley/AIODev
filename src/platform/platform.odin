@@ -16,6 +16,8 @@ Error :: enum {
 	Out_Of_Memory,
 	Os,
 	Queue_Full,
+	// A service failed to start earlier and is not tried again.
+	Unavailable,
 }
 Window_Desc :: struct {
 	title:            string,

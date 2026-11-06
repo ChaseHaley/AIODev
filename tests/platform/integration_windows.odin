@@ -364,6 +364,96 @@ mouse_and_modal_messages :: proc(t: ^testing.T) {
 	p.set_modal_loop_callback(&platform, nil, nil)
 }
 
+Modal_Poll :: struct {
+	platform:        ^p.Platform,
+	hwnd:            w.HWND,
+	resizes, closes: int,
+	posted:          bool,
+}
+
+modal_poll_count :: proc(state: ^Modal_Poll, events: []p.Event) {
+	for event in events {
+		#partial switch e in event {
+		case p.Resize_Event:
+			if e.width == 33 {state.resizes += 1}
+		case p.Close_Request_Event:
+			state.closes += 1
+		}
+	}
+}
+
+// The tick the modal loop runs polls inside the outer poll's dispatch. The outer poll must hand back
+// only what arrived after that tick, neither repeating what it handled nor dropping what followed.
+@(test)
+modal_loop_tick_inside_a_poll_keeps_each_event_once :: proc(t: ^testing.T) {
+	platform: p.Platform
+	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.ModalPoll"), p.Init_Result.Primary) { return }
+	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
+	id, err := p.window_create(&platform, {hidden = true, width = 160, height = 100})
+	if !testing.expect_value(t, err, p.Error.None) { return }
+	hwnd := w.HWND(p.window_native_handle(&platform, id))
+	_, _ = p.poll_events(&platform)
+	state := Modal_Poll{platform = &platform, hwnd = hwnd}
+	p.set_modal_loop_callback(&platform, proc(user: rawptr) {
+		state := (^Modal_Poll)(user)
+		events, _ := p.poll_events(state.platform)
+		modal_poll_count(state, events)
+		if !state.posted {
+			state.posted = true
+			w.PostMessageW(state.hwnd, w.WM_CLOSE, 0, 0)
+		}
+	}, &state)
+	defer p.set_modal_loop_callback(&platform, nil, nil)
+	w.SendMessageW(hwnd, w.WM_ENTERSIZEMOVE, 0, 0)
+	testing.expect(t, bool(w.PostMessageW(hwnd, w.WM_SIZE, 0, w.LPARAM(33 | (44 << 16)))))
+	events, poll_error := p.poll_events(&platform)
+	testing.expect_value(t, poll_error, p.Error.None)
+	modal_poll_count(&state, events)
+	w.SendMessageW(hwnd, w.WM_EXITSIZEMOVE, 0, 0)
+	events, poll_error = p.poll_events(&platform)
+	testing.expect_value(t, poll_error, p.Error.None)
+	modal_poll_count(&state, events)
+	testing.expect(t, state.posted)
+	testing.expect_value(t, state.resizes, 1)
+	testing.expect_value(t, state.closes, 1)
+}
+
+Modal_Depth :: struct {
+	hwnd:                  w.HWND,
+	calls, depth, deepest: int,
+}
+
+// A message the tick itself causes must not start a second tick inside it, and a tick that ends the
+// loop must leave it ended.
+@(test)
+modal_loop_tick_does_not_nest_and_may_end_the_loop :: proc(t: ^testing.T) {
+	platform: p.Platform
+	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.ModalDepth"), p.Init_Result.Primary) { return }
+	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
+	id, err := p.window_create(&platform, {hidden = true, width = 160, height = 100})
+	if !testing.expect_value(t, err, p.Error.None) { return }
+	state := Modal_Depth{hwnd = w.HWND(p.window_native_handle(&platform, id))}
+	p.set_modal_loop_callback(&platform, proc(user: rawptr) {
+		state := (^Modal_Depth)(user)
+		state.calls += 1
+		state.depth += 1
+		state.deepest = max(state.deepest, state.depth)
+		if state.calls == 1 {
+			w.SendMessageW(state.hwnd, w.WM_TIMER, 1, 0)
+			w.SendMessageW(state.hwnd, w.WM_SIZE, 0, w.LPARAM(20 | (20 << 16)))
+			w.SendMessageW(state.hwnd, w.WM_EXITSIZEMOVE, 0, 0)
+		}
+		state.depth -= 1
+	}, &state)
+	defer p.set_modal_loop_callback(&platform, nil, nil)
+	w.SendMessageW(state.hwnd, w.WM_ENTERSIZEMOVE, 0, 0)
+	w.SendMessageW(state.hwnd, w.WM_TIMER, 1, 0)
+	w.SendMessageW(state.hwnd, w.WM_TIMER, 1, 0)
+	testing.expect_value(t, state.calls, 1)
+	testing.expect_value(t, state.deepest, 1)
+	_, _ = p.poll_events(&platform)
+}
+
 @(test)
 tray_menu_validation :: proc(t: ^testing.T) {
 	platform: p.Platform

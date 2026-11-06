@@ -357,9 +357,11 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	c := status_notification_channels(&app.settings.status, record.state)
 	sound_delivered := false
 	if c.banner {
-		if platform_api.notification_show(&app.platform, title, text, entry.id, c.sound) == .None {
+		// Unavailable: notifications could not start, which the first banner already reported.
+		result := platform_api.notification_show(&app.platform, title, text, entry.id, c.sound)
+		if result == .None {
 			sound_delivered = c.sound
-		} else {
+		} else if result != .Unavailable {
 			notify(app, .Error, "Windows could not show a status notification. Check notification settings.")
 		}
 	}
