@@ -171,24 +171,6 @@ document_scope_list :: proc(scopes: Document_Scopes, level: Document_Level) -> ^
 	return nil
 }
 
-// Whether the pane drawn in `w` can see any pinned document. Read while drawing every header, so an
-// ordinary window takes the short path through the tab it is showing.
-@(require_results)
-documents_any :: proc(app: ^App, w: ^Window, content: layout.Content) -> bool {
-	if w.linked {
-		scopes, found := document_scopes(app, content)
-		if !found {return false}
-		for level in Document_Level {
-			if list := document_scope_list(scopes, level); list != nil && len(list) > 0 {return true}
-		}
-		return false
-	}
-	if len(w.workspace.documents) > 0 {return true}
-	if tab := selected_tab(w.workspace); tab != nil && len(tab.documents) > 0 {return true}
-	list := document_pane_list(app, content)
-	return list != nil && len(list) > 0
-}
-
 // Every document the pane can see, sorted by level and then by name. A document pinned at several
 // levels shows at its narrowest. The rows borrow from the lists.
 @(require_results)

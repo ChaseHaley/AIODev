@@ -252,7 +252,6 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	s.open_url = link_open_stub
 	defer s.open_url = nil
 	menu := &w.document_menu
-	testing.expect(t, !app.documents_any(s, w, w.panes[0].content))
 
 	// With nothing pinned the menu offers the ways to add, and what opened it keeps its place.
 	open_button(s, w)
@@ -280,16 +279,15 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	key(s, w, .Escape)
 	testing.expect_value(t, menu.mode, app.Document_Menu_Mode.List)
 	testing.expect(t, menu.menu.open)
-	testing.expect(t, !app.documents_any(s, w, w.panes[0].content))
 
 	scopes, found := app.document_scopes(s, w.panes[0].content)
 	if !testing.expect(t, found) {return}
+	testing.expect_value(t, len(scopes.pane) + len(scopes.tab) + len(scopes.workspace), 0)
 	_ = app.document_pin(scopes, .Tab, {target = "https://example.com/a"})
 	_ = app.document_pin(scopes, .Pane, {target = "https://example.com/b"})
 	app.document_menu_close(w)
 	testing.expect(t, !menu.menu.open)
 	open_button(s, w)
-	testing.expect(t, app.documents_any(s, w, w.panes[0].content))
 
 	// Levels are divided, and pane comes first.
 	first, second := row_of(w, .Open, "https://example.com/b"), row_of(w, .Open, "https://example.com/a")

@@ -35,7 +35,7 @@ header_divider :: proc(next: render.Rect, panel_y, panel_height, scale: f32) -> 
 
 // How a pane's Documents button shows. A pane that takes no pins has no button.
 Header_Documents :: struct {
-	shown, pinned, open: bool,
+	shown, open: bool,
 }
 
 header_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Header_Layout {
@@ -270,11 +270,9 @@ header_draw :: proc(
 			danger.a *= 0.14
 			b.press_color = danger
 		}
-		is_documents := Header_Action(i + 1) == .Documents
-		if is_documents {b.selected = documents.open}
+		if Header_Action(i + 1) == .Documents {b.selected = documents.open}
 		face, ink, err := button_draw(list, theme, b, scale, pointer)
 		if err != .None {return .Ok}
-		if is_documents && documents.pinned {ink = theme.text}
 		icon_draw(
 			list,
 			header_icon(Header_Action(i + 1), zoomed, fullscreen, linked),
@@ -344,7 +342,6 @@ split_overlay_draw :: proc(
 		}
 		face, ink, err := button_draw(list, theme, b, scale, pointer)
 		if err != .None {return .Ok}
-		if i == 0 && documents.pinned {ink = theme.text}
 		icon_draw(list, header_icon(Header_Action(i + 1), false, false, false), face, ink, ICON_BUTTON, scale)
 	}
 	if l.divider.width > 0 {draw_rect(list, {rect = l.divider, color = theme.border})}

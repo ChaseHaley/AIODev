@@ -68,7 +68,7 @@ pane_header_draw :: proc(
 	controls: [ui.HEADER_BUTTONS]ui.Control_Motion
 	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
 	r := pane.rect
-	documents := pane_header_documents(app, w, pane)
+	documents := pane_header_documents(w, pane)
 	if w.header_height == 0 {
 		if !w.split_overlay && !documents.open {return .Ok}
 		return ui.split_overlay_draw(
@@ -146,12 +146,11 @@ pane_header_draw :: proc(
 }
 
 @(private)
-pane_header_documents :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Documents {
+pane_header_documents :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Documents {
 	if !CONTENT_POLICY[pane.content.kind].documents {return {}}
 	menu := &w.document_menu
 	return {
 		shown = true,
-		pinned = documents_any(app, w, pane.content),
 		open = menu.menu.open && menu.mode != .Link && menu.content == pane.content,
 	}
 }

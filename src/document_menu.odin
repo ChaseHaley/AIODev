@@ -80,13 +80,13 @@ DOCUMENT_LEVEL_TIPS := [Document_Level]string {
 document_level_icon :: proc(level: Document_Level) -> ui.Icon {
 	switch level {
 	case .Pane:
-		return .Terminal
+		return .Split_Right
 	case .Tab:
 		return .Layout_Top
 	case .Workspace:
 		return .Workspace
 	}
-	return .Terminal
+	return .Split_Right
 }
 
 document_menu_init :: proc(menu: ^Document_Menu) {
