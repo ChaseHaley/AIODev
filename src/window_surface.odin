@@ -5,16 +5,30 @@ import "aio:platform"
 import "aio:render"
 import "core:log"
 
-// Every window draws through its own surface on the app's one graphics device. A window whose
-// surface is missing (nil) is blank until its next frame makes the surface again; a resize waits for
-// that. Only the procs here write app.device after startup, w.surface and w.surface_failed.
+// Every window draws through its own surface on the app's one graphics device. Only the procs here
+// write app.device after startup and w.surface; readers use window_surface.
+
+// No variant: the surface is missing, and the window's next frame makes it; a resize waits for that.
+// Failed: making it failed for a reason other than device loss, so it waits for a resize or a new
+// device instead of failing, and logging, on every frame.
+Window_Surface :: union {
+	^render.Surface,
+	Surface_Failed,
+}
+Surface_Failed :: struct {}
+
+// The surface the window draws on, or nil while it has none.
+window_surface :: proc(w: ^Window) -> ^render.Surface {
+	surface, _ := w.surface.(^render.Surface)
+	return surface
+}
 
 @(require_results)
 window_surface_create :: proc(app: ^App, w: ^Window) -> render.Error {
 	native := platform.window_native_handle(&app.platform, w.id)
 	surface, err := render.surface_create(app.device, native, max(w.width, 1), max(w.height, 1))
 	if err != .None {return err}
-	w.surface, w.surface_failed = surface, false
+	w.surface = surface
 	for &pane in w.views {pane.valid = false}
 	w.dirty = true
 	return .None
@@ -22,24 +36,29 @@ window_surface_create :: proc(app: ^App, w: ^Window) -> render.Error {
 
 // The window keeps asking for a frame, which is what makes the surface again.
 window_surface_release :: proc(w: ^Window) {
-	if w.surface != nil {render.surface_destroy(w.surface)}
+	if surface := window_surface(w); surface != nil {render.surface_destroy(surface)}
 	w.surface = nil
 	w.dirty = true
 }
 
 // Whether the window can draw, making a missing surface first. A device lost again, as it can be
-// while the driver is still resetting, starts another recovery. Any other failure is reported once
-// and waits for a resize or a new device.
+// while the driver is still resetting, starts another recovery. Any other failure is reported once.
 @(require_results)
 window_surface_ready :: proc(app: ^App, w: ^Window) -> bool {
-	if w.surface != nil {return true}
-	if w.surface_failed || !app.running {return false}
+	switch _ in w.surface {
+	case ^render.Surface:
+		return true
+	case Surface_Failed:
+		return false
+	case nil:
+	}
+	if !app.running {return false}
 	#partial switch err := window_surface_create(app, w); err {
 	case .None:
 		return true
 	case .Device_Lost:
 		recover_device(app)
-		return w.surface != nil
+		return window_surface(w) != nil
 	case:
 		window_surface_failed(w, err)
 	}
@@ -48,11 +67,13 @@ window_surface_ready :: proc(app: ^App, w: ^Window) -> bool {
 
 @(private)
 window_surface_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
-	if w.surface == nil {
-		w.surface_failed = false
+	surface := window_surface(w)
+	if surface == nil {
+		// The new size may be one a failed surface can be made at.
+		w.surface = nil
 		return
 	}
-	if err := render.surface_resize(app.device, w.surface, width, height); err != .None {
+	if err := render.surface_resize(app.device, surface, width, height); err != .None {
 		log.errorf("resizing the window surface failed: %v", err)
 		if err == .Device_Lost {recover_device(app)}
 	}
@@ -75,7 +96,6 @@ recover_device :: proc(app: ^App) {
 	apply_text_gamma(app)
 	glyphs.reset_device(&app.cache, device)
 	for w in app.windows {
-		w.surface_failed = false
 		surface_error := window_surface_create(app, w)
 		if surface_error != .None && surface_error != .Device_Lost {window_surface_failed(w, surface_error)}
 	}
@@ -84,5 +104,5 @@ recover_device :: proc(app: ^App) {
 @(private = "file")
 window_surface_failed :: proc(w: ^Window, err: render.Error) {
 	log.errorf("making the window surface failed: %v", err)
-	w.surface_failed = true
+	w.surface = Surface_Failed{}
 }

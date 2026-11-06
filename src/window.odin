@@ -36,10 +36,7 @@ Pane_View :: struct {
 
 Window :: struct {
 	id: platform.Window_Id,
-	surface: ^render.Surface,
-	// The missing surface could not be made for a reason other than device loss. It waits for a resize or
-	// a new device instead of failing, and logging, on every frame.
-	surface_failed: bool,
+	surface: Window_Surface,
 	ui_text: ui.Text,
 	// The Markdown pane holding a selection or scrollbar drag, or 0.
 	markdown_held: u32,
@@ -561,7 +558,8 @@ reset_blink :: proc(w: ^Window) {
 window_render :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {return}
 	if !window_surface_ready(app, w) {return}
-	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
+	surface := window_surface(w)
+	if err := render.frame_wait(surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}
 	background := app.theme.window
@@ -571,7 +569,7 @@ window_render :: proc(app: ^App, w: ^Window) {
 	build_ms := perf.since_ms(build_start)
 	w.gloss_hovered = ui.hover_rim_present(&w.list)
 	render_start := time.tick_now()
-	err := render.frame_render(app.device, w.surface, &w.list, background)
+	err := render.frame_render(app.device, surface, &w.list, background)
 	render_ms := perf.since_ms(render_start)
 	if err == .Device_Lost {
 		recover_device(app)

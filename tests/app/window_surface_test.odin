@@ -16,18 +16,18 @@ device_recovery_rebuilds_a_window_left_without_a_surface :: proc(t: ^testing.T) 
 	first, second := s.windows[0], s.windows[1]
 	app.window_surface_release(first)
 	app.window_resize(s, first, 640, 480)
-	testing.expect(t, first.surface == nil)
+	testing.expect(t, app.window_surface(first) == nil)
 	lost := s.device
 	app.recover_device(s)
 	testing.expect(t, s.running)
 	testing.expect(t, s.device != lost)
 	testing.expect(t, s.cache.device == s.device)
-	testing.expect(t, first.surface != nil)
-	testing.expect(t, second.surface != nil)
+	testing.expect(t, app.window_surface(first) != nil)
+	testing.expect(t, app.window_surface(second) != nil)
 	app.window_surface_release(second)
 	app.window_resize(s, second, 500, 400)
 	app.tick(s)
-	testing.expect(t, second.surface != nil)
+	testing.expect(t, app.window_surface(second) != nil)
 }
 
 // A driver still resetting can lose the recreated device too. The window's next attempt to make its
@@ -47,7 +47,7 @@ a_device_lost_again_while_remaking_a_surface_recovers_again :: proc(t: ^testing.
 		testing.expect(t, s.running)
 		testing.expect(t, s.device != lost)
 		testing.expect(t, !s.device.lost)
-		testing.expect(t, first.surface != nil)
+		testing.expect(t, app.window_surface(first) != nil)
 		testing.expect(t, !first.dirty)
 	}
 }
@@ -75,11 +75,13 @@ a_surface_that_cannot_be_made_is_reported_once_and_waits_for_a_resize :: proc(t:
 	first.dirty = true
 	app.tick(s)
 	context.logger = logger
-	testing.expect(t, first.surface == nil)
+	testing.expect(t, app.window_surface(first) == nil)
+	_, failed := first.surface.(app.Surface_Failed)
+	testing.expect(t, failed)
 	testing.expect_value(t, errors, 1)
 	app.window_resize(s, first, 800, 600)
 	app.tick(s)
-	testing.expect(t, first.surface != nil)
+	testing.expect(t, app.window_surface(first) != nil)
 }
 
 // The dialog's answer is only for the window it was opened from, so it must not outlive that window.
