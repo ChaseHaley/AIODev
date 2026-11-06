@@ -128,7 +128,7 @@ pane_link_drag_release :: proc(
 		)
 	}
 	if !moved {
-		pane_move_abort(app, move)
+		pane_move_enter(app, move)
 		return false
 	}
 	pane_link_drag_finish(
@@ -141,6 +141,8 @@ pane_link_drag_release :: proc(
 		destination_linked,
 		content,
 	)
+	// A linked source settles only its own window, so the window showing its tab is entered here.
+	pane_move_enter(app, move)
 	return true
 }
 

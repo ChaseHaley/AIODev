@@ -37,7 +37,7 @@ fixture_start :: proc(t: ^testing.T, f: ^Fixture, run: int, reuse_directory := "
 	}
 	f.state.options = {data_dir = f.directory, inactive = true}
 	f.state.app_id = fmt.aprintf("AIODev.Test.PaneLinks.%d.%d", os.get_pid(), run)
-	f.state.layout_path = strings.concatenate({f.directory, "/layout.json"})
+	app.layout_state_enable(f.state, strings.concatenate({f.directory, "/layout.json"}))
 	if !testing.expect_value(t, platform.init(&f.state.platform, f.state.app_id), platform.Init_Result.Primary) {
 		return false
 	}
@@ -686,6 +686,35 @@ dragging_a_linked_pane_into_another_linked_window_links_it_there :: proc(t: ^tes
 	testing.expect_value(t, len(f.state.windows), 1)
 	testing.expect_value(t, len(f.host.panes), 3)
 	testing.expect_value(t, app.tab_pane_count(second_tab), 3)
+}
+
+// Moving a linked pane also leaves its tab's host, even though the host keeps the pane it shows.
+@(test)
+dragging_a_linked_pane_to_another_workspace_gives_the_host_its_focus_back :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 90) {return}
+	if !fixture_split(t, &f) {return}
+	app.pane_link_toggle(f.state, f.host)
+	first := linked_window(&f)
+	if !testing.expect(t, first != nil) {return}
+	workspace := app.workspace_create_empty(f.state)
+	if !testing.expect(t, workspace != nil && app.tab_create(f.state, workspace)) {return}
+	if !testing.expect(t, app.window_open(f.state, workspace)) {return}
+	second := app.window_for_workspace(f.state, workspace)
+	testing.expect(t, focus_holds_shown(f.host))
+	drag_pane_to(
+		first,
+		second,
+		app.selected_tab(first.workspace),
+		app.selected_tab(second.workspace),
+		first.tree.focus,
+		second.tree.focus,
+		.Right,
+	)
+	testing.expect(t, app.pane_drag_release(f.state, first))
+	testing.expect(t, focus_holds_shown(f.host))
+	testing.expect(t, focus_holds_shown(second))
 }
 
 @(test)

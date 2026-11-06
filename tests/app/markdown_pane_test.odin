@@ -34,7 +34,7 @@ fixture_start :: proc(t: ^testing.T, f: ^Fixture, name: string, keep_directory :
 	}
 	f.state = {options = {data_dir = f.directory, inactive = true}}
 	f.state.app_id = fmt.aprintf("AIODev.Test.Markdown.%s.%d", name, os.get_pid())
-	f.state.layout_path = strings.concatenate({f.directory, "/layout.json"})
+	app.layout_state_enable(&f.state, strings.concatenate({f.directory, "/layout.json"}))
 	if !testing.expect_value(t, platform.init(&f.state.platform, f.state.app_id), platform.Init_Result.Primary) {
 		return false
 	}

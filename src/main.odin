@@ -91,7 +91,7 @@ start :: proc() -> int {
 	if path, path_error := layout_path_create(options); path_error != nil {
 		log.errorf("locating the saved layout failed: %v", path_error)
 	} else {
-		app.layout_path = path
+		layout_state_enable(&app, path)
 	}
 	if !app_init(&app) {return 1}
 	run(&app)

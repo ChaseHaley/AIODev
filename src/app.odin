@@ -125,10 +125,9 @@ App :: struct {
 	tray_hint_shown:       bool,
 	settings_migration_noticed: bool,
 	process_deadline:      time.Tick,
-	// Empty disables layout saving and restoring; only the real launch sets it.
-	layout_path:           string,
+	// Only the real launch enables it, which also turns restoring on.
+	layout_save:           Layout_Save,
 	layout_saved:          string,
-	layout_deadline:       time.Tick,
 	// Tests replace this to observe Ctrl+click without launching a browser.
 	open_url:              proc(uri: string) -> bool,
 	open_file:             proc(path, approved: string) -> bool,
@@ -294,7 +293,7 @@ app_destroy :: proc(app: ^App) {
 	settings.diagnostics_destroy(&app.settings_diagnostics)
 	delete(app.settings_path)
 	delete(app.log_path)
-	delete(app.layout_path)
+	layout_state_disable(app)
 	delete(app.layout_saved)
 	closed_destroy(app)
 	delete(app.app_id)
@@ -387,9 +386,9 @@ wait_timeout :: proc(app: ^App) -> u32 {
 	   (!found || time.tick_diff(app.process_deadline, deadline) > 0) {
 		deadline, found = app.process_deadline, true
 	}
-	if app.layout_deadline != {} &&
-	   (!found || time.tick_diff(app.layout_deadline, deadline) > 0) {
-		deadline, found = app.layout_deadline, true
+	if next, scheduled := layout_state_deadline(app);
+	   scheduled && (!found || time.tick_diff(next, deadline) > 0) {
+		deadline, found = next, true
 	}
 	if app.markdown_deadline != {} &&
 	   (!found || time.tick_diff(app.markdown_deadline, deadline) > 0) {

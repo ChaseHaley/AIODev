@@ -25,8 +25,10 @@ pane_move_begin :: proc(app: ^App, w: ^Window, source: ^Tab, workspace: ^Workspa
 	return move
 }
 
+// Gives focus back to every window the move left that is still open, after a failure or once the
+// destination is settled. A window that has entered its new pane already hears nothing again.
 @(private)
-pane_move_abort :: proc(app: ^App, move: Pane_Move) {
+pane_move_enter :: proc(app: ^App, move: Pane_Move) {
 	for i in 0 ..< move.count {
 		if window := window_find(app, move.departed[i]); window != nil {focus_enter(app, window)}
 	}

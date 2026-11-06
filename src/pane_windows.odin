@@ -284,7 +284,7 @@ pane_to_window :: proc(
 	move := pane_move_begin(app, preview, home.tab, workspace)
 	if !layout.remove(&home.tab.tree, home.node) {
 		delete(name)
-		pane_move_abort(app, move)
+		pane_move_enter(app, move)
 		return false
 	}
 	destination.tree.nodes[destination.tree.root] = layout_pane

@@ -61,6 +61,7 @@ Window :: struct {
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
 	focus_order: u64,
+	focus_bracket: Focus_Bracket,
 	phase: Window_Phase,
 	// Set once, when pane_link_window_create makes the window; see Window_Link.
 	link: Maybe(Window_Link),
@@ -207,6 +208,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.cursor_phase_visible = true
 	w.dirty = true
 	if !workspace_view_init(app, &w.resources, workspace) {window_free(w); return nil}
+	focus_init(w)
 	if w.workspace.selection_anchor == 0 {tab_select_one(w.workspace, w.workspace.selected)}
 	w.tab_underline = {
 		value  = f32(w.workspace.selected),

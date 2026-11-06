@@ -54,6 +54,11 @@ Requirements:
 `vendor/ghostty` holds a prebuilt libghostty-vt pinned to `vendor/ghostty/REVISION`. Rebuilding it
 needs Zig 0.16: `tools/build_ghostty.ps1`.
 
+Pane focus changes are bracketed in `src/focus_bracket.odin`: each window records the pane it
+entered, so repeating an enter or leave does not repeat a terminal focus report. Layout saving
+uses Disabled, Idle and Scheduled states in `src/layout_state.odin`; disabling it drops any
+pending save and releases its path.
+
 ## License
 
 AIODev is released under the [MIT License](LICENSE). Release packages include third-party
