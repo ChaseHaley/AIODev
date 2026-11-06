@@ -162,7 +162,7 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 	focus_leave(app, w)
 	window_close(app, w)
 	if window_primary(app) != nil {return}
-	if !app.tray_hint_shown {
+	if app.settings.window.tray_notification && !app.tray_hint_shown {
 		app.tray_hint_shown = true
 		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use Quit to exit."
 		if platform.tray_notify(&app.platform, "AIODev is still running", text) != .None {
@@ -177,7 +177,8 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
-	if w.pane_drag.active && w.pane_drag.picker_window != 0 {
+	if (w.pane_drag.active && w.pane_drag.picker_window != 0) ||
+	   (w.tab_drag.active && w.tab_drag.picker_window != 0) {
 		if e.pressed {w.suppressed_key = e}
 		if e.pressed && e.key == .Escape {_ = gesture_cancel(app, w)}
 		return
@@ -436,7 +437,7 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.preparing {return}
-	if pane_workspace_drag_wheel(app, w, e.delta_y) {return}
+	if pane_workspace_drag_wheel(app, w, e.delta_y) || tab_workspace_drag_wheel(app, w, e.delta_y) {return}
 	if workspace_picker_active(&w.workspace_picker) {
 		workspace_picker_wheel(w, e.delta_y)
 		return

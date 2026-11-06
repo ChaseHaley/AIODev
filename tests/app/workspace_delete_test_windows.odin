@@ -83,6 +83,18 @@ second_launch_opens_new_workspace_window_and_reopens_from_tray :: proc(t: ^testi
 }
 
 @(test)
+tray_hint_setting_can_suppress_the_first_hide_notice :: proc(t: ^testing.T) {
+	f: Delete_Fixture
+	defer delete_fixture_destroy(t, &f)
+	if !delete_fixture_init(t, &f) {return}
+	state := &f.state
+	state.settings.window.tray_notification = false
+	app.hide_to_tray(state, state.windows[0])
+	testing.expect_value(t, len(state.windows), 0)
+	testing.expect(t, !state.tray_hint_shown)
+}
+
+@(test)
 last_tab_reuses_existing_workspace_owner_without_creating_a_replacement :: proc(t: ^testing.T) {
 	f: Delete_Fixture
 	defer delete_fixture_destroy(t, &f)

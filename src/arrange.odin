@@ -37,10 +37,8 @@ Pane_Drag :: struct {
 	destination_original_index:                int,
 	new_window, preview_failed:                  bool,
 	thumbnail:                                   Drag_Thumbnail,
-	picker_window:                              platform.Window_Id,
-	picker_pointer:                             [2]f32,
-	picker_hit:                                 int,
-	ghost:                                       [4]ui.Motion,
+	using picker:                                Workspace_Drag,
+	ghost:                                      [4]ui.Motion,
 	reveal:                                      ui.Motion,
 }
 
@@ -57,8 +55,11 @@ Tab_Drag :: struct {
 	// Past every app window the drag offers a new window, prepared hidden before the drop.
 	new_window, preview_failed:  bool,
 	preview_window:              platform.Window_Id,
-	pointer:                     [2]f32,
+	// Over another window the drop joins its workspace.
+	destination_window:          platform.Window_Id,
+	pointer:                    [2]f32,
 	thumbnail:                   Drag_Thumbnail,
+	using picker:                Workspace_Drag,
 }
 
 @(private)
@@ -206,7 +207,7 @@ tab_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		for tab in order {if tab == d.grabbed {break}; if tab.marked {d.rank += 1}}
 		d.active = true
 	}
-	if tab_drag_tear_off_move(app, w, x, y) {return true}
+	if tab_drag_windows_move(app, w, x, y) {return true}
 	if w.tabs_horizontal {return tab_drag_move_strip(app, w, x)}
 	return tab_drag_move_rail(app, w, x, y)
 }
@@ -300,6 +301,8 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 	w.tab_drag = {}
 	if d.pressed {w.dirty = true}
 	drag_thumbnail_destroy(&d.thumbnail)
+	tab_incoming_close(app, d.destination_window)
+	workspace_drag_close(app, &d.picker)
 	for tab, to in d.order {
 		for current, from in w.workspace.tabs {if current == tab {tab_move(app, w, from, to); break}}
 	}
@@ -308,6 +311,14 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 }
 
 tab_drag_release :: proc(app: ^App, w: ^Window) {
+	if w.tab_drag.picker_window != 0 {
+		tab_workspace_drag_release(app, w)
+		return
+	}
+	if w.tab_drag.destination_window != 0 {
+		tab_drag_release_on_window(app, w)
+		return
+	}
 	if w.tab_drag.new_window && w.tab_drag.preview_window != 0 {
 		d := w.tab_drag
 		// Moving the tabs ends this window's gestures, which must not restore the order being kept.
@@ -335,6 +346,13 @@ tab_drag_release :: proc(app: ^App, w: ^Window) {
 	delete(d.order)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
+}
+
+// The drop may take the window's last tab, and the window with it.
+tab_drag_finish :: proc(app: ^App, w: ^Window) {
+	id := w.id
+	tab_drag_release(app, w)
+	if window_find(app, id) != nil {rail_overlay_dismiss(app, w)}
 }
 
 pane_drag_press :: proc(app: ^App, w: ^Window, node: layout.Node_Id, x, y: f32) {
@@ -377,7 +395,7 @@ pane_drag_cancel :: proc(app: ^App, w: ^Window) {
 	w.pane_drag = {}
 	if !d.pressed {return}
 	drag_thumbnail_destroy(&d.thumbnail)
-	pane_workspace_drag_close(app, d)
+	workspace_drag_close(app, &d.picker)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
 	pane_drag_restore(app, w, d)
@@ -495,8 +513,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}
 	}
 	if destination == nil || destination.id != previous {
-		pane_workspace_drag_close(app, d^)
-		d.picker_window = 0
+		workspace_drag_close(app, &d.picker)
 		if old := window_find(app, previous); old != nil && old != w {
 			for tab, i in old.workspace.tabs {
 				if tab == d.destination_original {tab_select(app, old, i, true); break}
@@ -835,7 +852,10 @@ arrange_cancel :: proc(app: ^App, w: ^Window) {
 			gesture_clear(app, other)
 			pane_drag_cancel(app, other)
 		}
-		if i < len(app.windows) && app.windows[i] == other && other != w && other.tab_drag.preview_window == id {
+		if i < len(app.windows) &&
+		   app.windows[i] == other &&
+		   other != w &&
+		   (other.tab_drag.preview_window == id || other.tab_drag.destination_window == id) {
 			gesture_clear(app, other)
 			tab_drag_cancel(app, other)
 		}

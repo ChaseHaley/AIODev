@@ -26,6 +26,7 @@ round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.interface.hover_gloss, 1.0)
 	testing.expect_value(t, s.shell.directory, "~")
 	testing.expect_value(t, s.window.columns, 120)
+	testing.expect(t, s.window.tray_notification)
 	testing.expect_value(t, s.colors.palette[15], settings.Color{0xf4, 0xf4, 0xf7})
 	testing.expect_value(t, s.colors.selection_foreground, nil)
 	for entry in settings.SCHEMA {
@@ -47,7 +48,8 @@ cursor.blink = true
 theme.name = mine
 theme.custom.mine.cursor = #aB12Ef
 theme.custom.mine.selection_foreground = #123456
-window.rows = 1`
+window.rows = 1
+window.tray_notification = false`
 	s, d, err := settings.parse(fixture)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
@@ -62,6 +64,7 @@ window.rows = 1`
 	testing.expect_value(t, s.colors.selection_foreground,
 		Maybe(settings.Color)(settings.Color{0x12, 0x34, 0x56}))
 	testing.expect_value(t, s.window.rows, 1)
+	testing.expect(t, !s.window.tray_notification)
 	crlf, crlf_allocated := strings.replace_all(fixture, "\n", "\r\n")
 	defer if crlf_allocated {
 		delete(crlf)

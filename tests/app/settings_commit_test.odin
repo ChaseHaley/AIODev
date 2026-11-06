@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:layout"
 import "aio:settings"
 import "aio:ui"
 import "core:os"
@@ -24,12 +25,23 @@ theme_commit_text :: proc(t: ^testing.T, source, token, value: string) -> string
 	return updated
 }
 
+// Opening Settings focuses an existing tab, so a second settings tab only comes from a layout saved with two.
+@(private)
+settings_tab_restore :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window) -> bool {
+	tab, record_error := app.tab_record_reserve(w.workspace)
+	if !testing.expect_value(t, record_error, app.Tab_Record_Error.None) {return false}
+	if !testing.expect_value(t, layout.init(&tab.tree, {.Settings, 0}), nil) {return false}
+	app.tab_record_commit(state, w.workspace, tab)
+	app.workspace_settings_sync(state, w.workspace)
+	app.tab_select(state, w, len(w.workspace.tabs) - 1)
+	return testing.expect(t, w.editor.open)
+}
+
 @(private)
 commit_open_pages :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) -> bool {
 	if !palette_fixture_create(t, f, name) {return false}
 	for window in f.state.windows {
-		app.editor_open(&f.state, window)
-		if !testing.expect(t, window.editor.open) {return false}
+		if !settings_tab_restore(t, &f.state, window) {return false}
 	}
 	return true
 }

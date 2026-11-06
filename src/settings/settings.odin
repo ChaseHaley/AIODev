@@ -103,6 +103,7 @@ Status_Settings :: struct {
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
+	tray_notification:      bool,
 }
 // The CLI pipe exists only while `enabled` is on (D-046).
 Control_Settings :: struct {
@@ -826,6 +827,18 @@ SCHEMA :: [?]Schema_Entry {
 		1024,
 		nil,
 		"Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap.",
+	},
+	{
+		"window.tray_notification",
+		"Notify When Closing to Tray",
+		.Bool,
+		offset_of(Settings, window) + offset_of(Window_Settings, tray_notification),
+		"true",
+		0,
+		0,
+		nil,
+		"Show the \"AIODev is still running\" notification the first time closing the last window " +
+			"hides AIODev to the tray.",
 	},
 	{
 		PADDING_GROUPS_KEY,

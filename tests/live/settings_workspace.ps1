@@ -32,20 +32,24 @@ try {
     Invoke-Aio key Enter | Out-Null
     Invoke-Aio command workspace.select_1
     Assert-Scroll $one 'Settings scroll survives a workspace without Settings'
+    $settingsWorkspace = (Read-State)['workspace.id']
+    $tabs = (Read-State)['tabs.count']
+    foreach ($round in 1..3) {
+        Invoke-Aio command workspace.select_2
+        Invoke-Aio command workspace.select_1
+        Assert-Scroll $one "the page retains its offset, round $round"
+    }
+    # Opening Settings elsewhere goes to the one tab, at its reading position.
     Invoke-Aio command workspace.select_2
     Invoke-Aio command settings.open
-    Invoke-Aio key Alt+Down Alt+Down Alt+Down Alt+Down
-    $two = (Read-State)['settings.scroll']
-    if ([int]$two -le [int]$one) { throw 'Second Settings page did not scroll farther.' }
-    foreach ($round in 1..3) {
-        Invoke-Aio command workspace.select_1
-        Assert-Scroll $one "workspace 1 retains its offset, round $round"
-        Invoke-Aio command workspace.select_2
-        Assert-Scroll $two "workspace 2 retains its offset, round $round"
-    }
+    $s = Read-State
+    if ($s['workspace.id'] -ne $settingsWorkspace) { throw 'Settings opened in a second workspace.' }
+    if ($s['tabs.count'] -ne $tabs) { throw 'Opening Settings again added a tab.' }
+    Assert-Scroll $one 'opening Settings again returns to the tab at its offset'
+    Write-Output 'PASS opening Settings again focuses the existing tab'
     Invoke-Aio command tab.close
-    Invoke-Aio command workspace.select_1
     Invoke-Aio command workspace.select_2
+    Invoke-Aio command workspace.select_1
     Invoke-Aio command settings.open
     if ([int](Read-State)['settings.scroll'] -gt 1) { throw 'Reopened Settings retained a closed page offset.' }
     Write-Output 'PASS closing Settings discards its saved offset'

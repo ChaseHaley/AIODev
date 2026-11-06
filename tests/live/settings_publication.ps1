@@ -86,34 +86,36 @@ try {
     $second = @($windows.Keys | Where-Object { $_ -match '^window\.\d+\.id$' } |
         ForEach-Object { $windows[$_] } | Where-Object { $_ -ne $first })[0]
     if (-not $second) { throw 'The second window has no ID.' }
+    # The app keeps one page, so opening Settings from the second window leaves the draft in the first.
     Invoke-Aio window select $second
+    $secondTabs = (Read-State)['tabs.count']
     Invoke-Aio command settings.open
-    Invoke-Aio type pane.gap
-    Invoke-Aio key Tab
-    Save-Value 9
+    Assert-Value (Read-State)['tabs.count'] $secondTabs 'the second window gains no settings tab'
     Invoke-Aio window select $first
-    Assert-Value (Read-State)['settings.key'] font.size 'the other page keeps its selected field'
-    Assert-Value (Read-State)['settings.value'] 19 'an inline save preserves the other windows draft'
+    Assert-Value (Read-State)['settings.key'] font.size 'the page keeps its selected field'
+    Assert-Value (Read-State)['settings.value'] 19 'the page keeps its draft'
     Invoke-Aio command view.tabs_orientation
-    Assert-Value (Read-State)['settings.value'] 19 'a disk writer also preserves the pending draft'
+    Assert-Value (Read-State)['settings.value'] 19 'a disk writer preserves the pending draft'
     Assert-Value (Read-State)['tabs.orientation'] vertical 'the orientation write applies'
     Shot dark-draft
     Invoke-Aio key Enter
     Assert-Value (Read-State)['settings.error'] false 'the preserved draft saves without an internal conflict'
     $saved = [IO.File]::ReadAllText($path)
-    foreach ($line in @('font.size = 19', 'pane.gap = 9', 'tabs.orientation = vertical')) {
+    foreach ($line in @('font.size = 19', 'tabs.orientation = vertical')) {
         if (-not $saved.Contains($line)) { throw "The combined settings file lacks $line" }
     }
-    Write-Output 'PASS the combined file keeps all three writers'
-    Invoke-Aio window select $second
+    Write-Output 'PASS the combined file keeps both writers'
     Invoke-Aio key Esc
     Invoke-Aio key Ctrl+A
     Invoke-Aio type theme.name
     Invoke-Aio key Tab Down Enter
-    Assert-Value (Read-State)['settings.error'] false 'the second page can save after the first page'
+    Assert-Value (Read-State)['settings.error'] false 'the page saves again after the first save'
     Assert-Value (Read-State)['theme.name'] studio-light 'the light theme applies to both windows'
-    Invoke-Aio window select $first
-    Assert-Value (Read-State)['settings.value'] 19 'a clean selected field follows the next publication'
+    Invoke-Aio key Esc
+    Invoke-Aio key Ctrl+A
+    Invoke-Aio type font.size
+    Invoke-Aio key Tab
+    Assert-Value (Read-State)['settings.value'] 19 'the saved field holds its value'
     Shot light-saved
     Invoke-Aio key Ctrl+A
     Invoke-Aio type 21
