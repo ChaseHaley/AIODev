@@ -389,15 +389,10 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			scale    = w.scale,
 			shadow_x = 2,
 			softness = 14,
-			border   = .Stroked,
 		}
 		if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
 	} else {
 		ui.draw_rect(&w.list, {rect = area, color = app.theme.tab_bar})
-		ui.draw_rect(
-			&w.list,
-			{rect = {area.x + area.width - w.scale, area.y, w.scale, area.height}, color = app.theme.border},
-		)
 	}
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
 	moving := w.tab_drag.active
