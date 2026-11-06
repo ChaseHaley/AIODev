@@ -50,11 +50,9 @@ picker152_destroy :: proc(t: ^testing.T, f: ^Picker152_Fixture) {
 picker152_compare :: proc(t: ^testing.T, a, b: ^Picker152_Fixture) {
 	wa, wb := a.state.windows[0], b.state.windows[0]
 	pa, pb := &wa.workspace_picker, &wb.workspace_picker
-	testing.expect_value(t, pa.mode, pb.mode)
+	testing.expect_value(t, pa.state, pb.state)
 	testing.expect_value(t, pa.selected, pb.selected)
 	testing.expect_value(t, pa.scroll, pb.scroll)
-	testing.expect_value(t, pa.target_id, pb.target_id)
-	testing.expect_value(t, pa.rename_error, pb.rename_error)
 	testing.expect_value(t, ui.field_string(&pa.query), ui.field_string(&pb.query))
 	testing.expect_value(t, ui.field_string(&pa.saved_query), ui.field_string(&pb.saved_query))
 	testing.expect_value(t, len(pa.rows), len(pb.rows))
@@ -62,16 +60,15 @@ picker152_compare :: proc(t: ^testing.T, a, b: ^Picker152_Fixture) {
 	testing.expect_value(t, row, app.workspace_picker_row_rect(wb, pb.selected))
 	x, y := row.x+row.width/2, row.y+row.height/2
 	testing.expect_value(t, app.workspace_picker_hit(wa, x, y), app.workspace_picker_hit(wb, x, y))
-	if pa.mode != .Closed {
+	if app.workspace_picker_active(pa) {
 		testing.expect_value(t, app.workspace_picker_hit(wa, x, y), pa.selected)
 	}
 	before := pb^
 	render.draw_list_reset(&wb.list)
 	testing.expect_value(t, app.workspace_picker_draw(&b.state, wb), glyphs.Result.Ok)
-	testing.expect_value(t, pb.mode, before.mode)
+	testing.expect_value(t, pb.state, before.state)
 	testing.expect_value(t, pb.selected, before.selected)
 	testing.expect_value(t, pb.scroll, before.scroll)
-	testing.expect_value(t, pb.target_id, before.target_id)
 }
 
 @(test)
@@ -132,7 +129,7 @@ workspace152_mode_changes_keep_filter_target_and_emoji_delivery_owned :: proc(t:
 	app.workspace_icon_color_open(s, w)
 	app.workspace_row_icon_open(s, w, 20)
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.saved_query), "Workspace 2")
-	testing.expect_value(t, w.workspace_picker.target_id, u32(20))
+	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Icons), u32(20))
 	app.handle_event(s, platform.Focus_Event{window = w.id, focused = false})
 	app.handle_event(s, platform.Text_Event{window = w.id, text = "🌈"})
 	app.handle_event(s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
@@ -143,15 +140,15 @@ workspace152_mode_changes_keep_filter_target_and_emoji_delivery_owned :: proc(t:
 	app.workspace_row_rename_open(s, w, 20)
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "Workspace 2")
 	app.handle_event(s, platform.Focus_Event{window = w.id, focused = false})
-	testing.expect_value(t, w.workspace_picker.mode, app.Workspace_Picker_Mode.Closed)
-	testing.expect_value(t, w.workspace_picker.target_id, u32(0))
+	testing.expect_value(t, app.workspace_picker_mode(&w.workspace_picker), app.Workspace_Picker_Mode.Closed)
+	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Icons), u32(0))
 	app.workspace_picker_open(s, w)
 	app.workspace_row_icon_open(s, w, 20)
 	app.workspace_icon_color_open(s, w)
 	testing.expect(t, app.workspace_discard_empty(s, app.workspace_find(s, 20)))
-	testing.expect_value(t, w.workspace_picker.mode, app.Workspace_Picker_Mode.List)
-	testing.expect_value(t, w.workspace_picker.target_id, u32(0))
+	testing.expect_value(t, app.workspace_picker_mode(&w.workspace_picker), app.Workspace_Picker_Mode.List)
+	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Icons), u32(0))
 	testing.expect_value(t, w.workspace.icon.tint, 0)
 	app.workspace_picker_cancel(w)
-	testing.expect_value(t, w.workspace_picker.target_id, u32(0))
+	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Icons), u32(0))
 }

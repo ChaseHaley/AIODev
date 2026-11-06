@@ -184,14 +184,14 @@ workspace134_inline_rename_edits_target_cancel_invalid_and_failure :: proc(t: ^t
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_text(s, w, "   ")
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
-	testing.expect(t, w.workspace_picker.rename_error && app.workspace_picker_target(&w.workspace_picker, .Rename) == f.target.id)
+	testing.expect(t, app.workspace_picker_rename_error(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == f.target.id)
 	testing.expect_value(t, f.target.name, "Build tools")
 	ui.field_set(&w.rename, "Retry")
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
 	context.allocator = allocator
-	testing.expect(t, w.workspace_picker.rename_error && app.workspace_picker_target(&w.workspace_picker, .Rename) == f.target.id)
+	testing.expect(t, app.workspace_picker_rename_error(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == f.target.id)
 	testing.expect_value(t, f.target.name, "Build tools")
 	app.workspace_picker_key(s, w, {key = .Escape, pressed = true})
 	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)

@@ -231,28 +231,29 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	// Hovering the chip opens the dropdown, and leaving it closes it.
 	if !testing.expect(t, tab_drag_to_row(&state, source, source, 0, home_row)) {return}
 	p := &source.workspace_picker
-	testing.expect(t, p.drag && p.move.whole_tab)
+	move, _ := app.workspace_picker_move(p)
+	testing.expect(t, app.workspace_picker_held(p) && move.request.whole_tab)
 	testing.expect_value(t, source.tab_drag.picker_window, source.id)
 	if !testing.expect_value(t, len(p.rows), 2) {return}
 	testing.expect_value(t, p.rows[home_row].id, home.id)
 	testing.expect_value(t, p.rows[unshown_row].id, unshown.id)
 	testing.expect_value(t, source.tab_drag.picker_hit, home_row)
 	testing.expect(t, !app.tab_workspace_drag_move(&state, source, source, 5, f32(source.height) - 5))
-	testing.expect(t, !p.drag)
+	testing.expect(t, !app.workspace_picker_held(p))
 	testing.expect_value(t, source.tab_drag.picker_window, platform.Window_Id(0))
 	app.tab_drag_cancel(&state, source)
 
 	// A cancel from the dropdown closes it and moves nothing, as does a drop between rows.
 	testing.expect(t, tab_drag_to_row(&state, source, source, 0, 0))
 	app.tab_drag_cancel(&state, source)
-	testing.expect(t, !p.drag)
+	testing.expect(t, !app.workspace_picker_held(p))
 	testing.expect_value(t, len(workspace.tabs), 5)
 	// Escape ends the whole drag, not just the dropdown, restoring any order it had changed.
 	first_tab := workspace.tabs[0]
 	testing.expect(t, tab_drag_to_row(&state, source, source, 0, 0))
 	app.tab_move(&state, source, 0, 1)
 	app.handle_event(&state, platform.Key_Event{window = source.id, key = .Escape, pressed = true})
-	testing.expect(t, !p.drag && !source.tab_drag.pressed)
+	testing.expect(t, !app.workspace_picker_held(p) && !source.tab_drag.pressed)
 	testing.expect(t, workspace.tabs[0] == first_tab)
 	app.handle_event(&state, platform.Key_Event{window = source.id, key = .Escape})
 	testing.expect(t, tab_drag_to_row(&state, source, source, 0, 0))
@@ -264,7 +265,7 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	moved_content := app.selected_tab(workspace).tree.nodes[0].(layout.Pane).content
 	if !testing.expect(t, tab_drag_to_row(&state, source, source, 0, home_row)) {return}
 	app.tab_drag_release(&state, source)
-	testing.expect(t, !p.drag)
+	testing.expect(t, !app.workspace_picker_held(p))
 	testing.expect_value(t, len(workspace.tabs), 4)
 	testing.expect(t, source.workspace == workspace)
 	testing.expect_value(t, len(home.tabs), 2)
@@ -275,9 +276,9 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	// The dropdown of another window works the same way.
 	testing.expect(t, tab_drag_to_row(&state, source, shown_elsewhere, 0, 0))
 	testing.expect_value(t, source.tab_drag.picker_window, shown_elsewhere.id)
-	testing.expect(t, shown_elsewhere.workspace_picker.drag)
+	testing.expect(t, app.workspace_picker_held(&shown_elsewhere.workspace_picker))
 	app.tab_drag_cancel(&state, source)
-	testing.expect(t, !shown_elsewhere.workspace_picker.drag)
+	testing.expect(t, !app.workspace_picker_held(&shown_elsewhere.workspace_picker))
 
 	// A workspace no window shows comes to this window, as for a pane, and the old one waits with its tabs.
 	if !testing.expect(t, tab_drag_to_row(&state, source, source, 0, unshown_row)) {return}

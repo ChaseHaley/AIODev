@@ -17,8 +17,8 @@ workspace_move_request :: proc(w: ^Window, whole_tab: bool, index: int) -> Works
 workspace_move_open :: proc(app: ^App, w: ^Window, whole_tab: bool, index: int) {
 	request := workspace_move_request(w, whole_tab, index)
 	workspace_picker_open(app, w)
-	if w.workspace_picker.mode != .List {return}
-	w.workspace_picker.move = request
+	if workspace_picker_mode(&w.workspace_picker) != .List {return}
+	workspace_picker_list_set(w, Workspace_Move_Target{request = request})
 	workspace_picker_filter(app, w)
 }
 

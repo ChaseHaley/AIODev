@@ -210,7 +210,8 @@ picker_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 
 @(private = "file")
 picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	if w.workspace_picker.mode == .Icons && rect_contains(workspace_icon_color_button(w), x, y) {
+	icons := workspace_picker_mode(&w.workspace_picker) == .Icons
+	if icons && rect_contains(workspace_icon_color_button(w), x, y) {
 		return "Change icon color"
 	}
 	return ""
@@ -550,10 +551,7 @@ workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {retu
 
 @(private = "file")
 workspace_button_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	if e.button == .Left {
-		w.workspace_button_press_ns = e.time_ns
-		workspace_picker_open(app, w)
-	}
+	if e.button == .Left {workspace_picker_chip_press(app, w, e.time_ns)}
 }
 
 // Activity pill

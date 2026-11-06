@@ -46,7 +46,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.status.panel_button_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
 	w.document_menu.url.dragging = false
-	w.workspace_picker.order = {}
+	workspace_order_end(w)
 	_ = workspace_order_animate(w, app.animations, time.tick_now())
 	link_hover_clear(w)
 	if palette_active(app, w) {

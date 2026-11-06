@@ -14,7 +14,8 @@ workspace_icon_picker_layout :: proc(w: ^Window) -> Workspace_Icon_Layout {
 	s := w.scale
 	width := min(272 * s, max(0, f32(w.width) - 2 * ui.SPACE_1 * s))
 	columns := clamp(int((width - 20 * s) / (48 * s)), 1, 5)
-	count := (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
+	tint := workspace_picker_mode(&w.workspace_picker) == .Tint
+	count := tint ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
 	rows := (count + columns - 1) / columns
 	available := max(0, f32(w.height) - (ui.TITLE_BAR_HEIGHT + ui.SPACE_1) * s)
 	height := min(available, (136 + f32(rows) * 48) * s)
@@ -32,8 +33,9 @@ workspace_icon_picker_layout :: proc(w: ^Window) -> Workspace_Icon_Layout {
 }
 
 workspace_icon_picker_cell :: proc(w: ^Window, g: Workspace_Icon_Layout, index: int) -> render.Rect {
-	count := (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
-	if w.workspace_picker.mode == .Tint {
+	tint := workspace_picker_mode(&w.workspace_picker) == .Tint
+	count := tint ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
+	if tint {
 		if index == count { return g.apply }
 	} else {
 		if index == count { return g.field }
@@ -48,7 +50,7 @@ workspace_icon_picker_cell :: proc(w: ^Window, g: Workspace_Icon_Layout, index: 
 
 workspace_icon_picker_reveal :: proc(w: ^Window, g: Workspace_Icon_Layout) {
 	p := &w.workspace_picker
-	count := (p.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
+	count := workspace_picker_mode(p) == .Tint ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
 	if p.selected >= 0 && p.selected < count && g.visible_rows > 0 {
 		row := p.selected / g.columns
 		p.scroll = clamp(p.scroll, row - g.visible_rows + 1, row)
@@ -59,7 +61,7 @@ workspace_icon_picker_reveal :: proc(w: ^Window, g: Workspace_Icon_Layout) {
 workspace_icon_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	g := workspace_icon_picker_layout(w)
 	if !workspace_rect_contains(g.panel, x, y) { return -1 }
-	colors := (w.workspace_picker.mode == .Tint)
+	colors := workspace_picker_mode(&w.workspace_picker) == .Tint
 	count := colors ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
 	if !colors && workspace_rect_contains(workspace_icon_color_button(w), x, y) { return count + 2 }
 	if workspace_rect_contains(g.apply, x, y) { return count + (colors ? 0 : 1) }
@@ -96,9 +98,9 @@ workspace_icon_picker_key :: proc(w: ^Window, e: platform.Key_Event) -> bool {
 
 workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	p, s := &w.workspace_picker, w.scale
-	if p.mode == .Tint { return workspace_icon_color_draw(app, w) }
+	if workspace_picker_mode(p) == .Tint { return workspace_icon_color_draw(app, w) }
 	g := workspace_icon_picker_layout(w)
-	target := workspace_row_target(app, p.target_id)
+	target := workspace_row_target(app, workspace_picker_target(p, .Icons))
 	if target == nil { return .Ok }
 	if result := workspace_icon_picker_title(app, w, g, "Icon"); result != .Ok { return result }
 	color_button := workspace_icon_color_button(w)

@@ -84,7 +84,7 @@ tooltip_neighbor_buttons_skip_second_delay :: proc(t: ^testing.T) {
 tooltip_workspace_color_wheel :: proc(t: ^testing.T) {
 	state: app.App
 	w := app.Window{width = 900, height = 600, scale = 1}
-	w.workspace_picker.mode = .Icons
+	w.workspace_picker.state = app.Workspace_Picker_Icons{}
 	r := app.workspace_icon_color_button(&w)
 	app.tooltip_hover(&state, &w, .Workspace_Picker,
 		platform.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
