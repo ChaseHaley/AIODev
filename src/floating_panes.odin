@@ -176,8 +176,6 @@ floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 			b.hover = w.float_header_controls[i].hover.value
 			b.press = w.float_header_controls[i].press.value
 		}
-		// Dock shows as on: the float is what it undoes.
-		if action == .Dock {b.selected = true}
 		if action == .Close {
 			danger := app.theme.error
 			danger.a *= 0.14
