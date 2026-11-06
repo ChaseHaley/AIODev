@@ -36,7 +36,7 @@ Outcome :: enum {
 	Closed,
 	Run,
 	Open_Setting,
-	// A setting control chose a new value; palette_chosen_value names it. The palette stays open.
+	// A setting control chose a new value; the owner takes it with palette_chosen_take. The palette stays open.
 	Set_Setting,
 	Open_Tab,
 	Open_Workspace,
