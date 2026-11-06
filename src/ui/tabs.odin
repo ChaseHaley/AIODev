@@ -69,6 +69,7 @@ tab_draw :: proc(
 	status: Status_Mark = {},
 	status_phase: f32 = 0,
 	status_slot: bool = false,
+	content_icon: Icon = .None,
 ) -> glyphs.Result {
 	x := f32(index) * bar.tab_width
 	if position >= 0 {x = position}
@@ -145,13 +146,20 @@ tab_draw :: proc(
 		}
 	}
 	// A tab too narrow for both drops the program icon before the status.
-	if tab && width >= 72 * scale + status_width && (icon != "" || icon_atlas.width > 0) {
+	if tab && width >= 72 * scale + status_width &&
+	   (content_icon != .None || icon != "" || icon_atlas.width > 0) {
 		icon_width = (ICON_BUTTON + SPACE_2) * scale
-		if result := shell_badge_draw(
+		area := render.Rect{
+			tile.x + CONTROL_INSET * scale, tile.y + (tile.height - badge) / 2, badge, badge,
+		}
+		if content_icon != .None {
+			icon_draw(list, content_icon, area,
+				selected ? theme.tab_active_text : theme.tab_text, ICON_BUTTON, scale)
+		} else if result := shell_badge_draw(
 			list,
 			text,
 			theme,
-			{tile.x + CONTROL_INSET * scale, tile.y + (tile.height - badge) / 2, badge, badge},
+			area,
 			icon,
 			scale,
 			icon_atlas,

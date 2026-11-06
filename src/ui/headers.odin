@@ -148,13 +148,17 @@ header_draw :: proc(
 	status: Status_Mark = {},
 	status_text: string = "",
 	status_phase: f32 = 0,
+	content_icon: Icon = .None,
 ) -> glyphs.Result {
 	l := header_layout(area, scale, focused)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
 	if render.push_layer(list, l.panel) != .None {return .Ok}
 	if l.title.width > 0 && l.badge.x + l.badge.width <= area.x + area.width {
-		if result := shell_badge_draw(list, text, theme, l.badge, icon, scale, icon_atlas);
+		if content_icon != .None {
+			icon_draw(list, content_icon, l.badge,
+				focused ? theme.text : theme.muted, ICON_BUTTON, scale)
+		} else if result := shell_badge_draw(list, text, theme, l.badge, icon, scale, icon_atlas);
 		   result != .Ok {return result}
 	}
 	if badge_hovered {

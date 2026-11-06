@@ -140,6 +140,7 @@ pane_header_draw :: proc(
 		status,
 		status_text,
 		status_phase(app, w, status),
+		content_icon = pane.content.kind == .Markdown ? .Markdown : .None,
 	)
 }
 
