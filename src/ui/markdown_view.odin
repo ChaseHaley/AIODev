@@ -127,10 +127,10 @@ Markdown_View :: struct {
 	revision:   u64,
 	height:     f32,
 	scroll:     int,
+	// The selection runs from anchor to head, byte offsets into the document; they are equal when
+	// nothing is selected. Only the selection procs below write them.
 	anchor:     int,
 	head:       int,
-	selecting:  bool,
-	hover_link: int,
 	scale:      f32,
 }
 
@@ -638,7 +638,17 @@ markdown_selected_text :: proc(v: ^Markdown_View, doc: ^markdown.Document) -> st
 }
 
 markdown_selection_clear :: proc(v: ^Markdown_View) {
-	v.anchor, v.head, v.selecting = 0, 0, false
+	v.anchor, v.head = 0, 0
+}
+
+// A press at `offset` starts a new selection unless `extend` keeps the anchor; a drag extends.
+markdown_select_at :: proc(v: ^Markdown_View, offset: int, extend: bool) {
+	if !extend {v.anchor = offset}
+	v.head = offset
+}
+
+markdown_select_all :: proc(v: ^Markdown_View, doc: ^markdown.Document) {
+	v.anchor, v.head = 0, len(doc.text)
 }
 
 // Scrolls a range of the text into view as a terminal does a match: left alone when it already shows,
@@ -742,6 +752,7 @@ markdown_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	find: Markdown_Find = {},
+	hover_link := -1,
 ) -> glyphs.Result {
 	if render.push_layer(list, g.area, 0) != .None {return .Ok}
 	origin_y := g.top - f32(v.scroll)
@@ -788,7 +799,7 @@ markdown_draw :: proc(
 			result := draw_run(v, doc, text, list, run, x, baseline, color, find, from, to)
 			if result != .Ok {return result}
 			thickness := max(1, math.round(v.scale))
-			if run.link >= 0 && int(run.link) == v.hover_link {
+			if run.link >= 0 && int(run.link) == hover_link {
 				rect := render.Rect{x, baseline + math.round(2 * v.scale), run.width, thickness}
 				draw_rect(list, {rect = rect, color = color})
 			}

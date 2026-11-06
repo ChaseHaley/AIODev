@@ -27,11 +27,59 @@ MARKDOWN_SIZE_LIMIT :: 16 * 1024 * 1024
 @(private)
 MARKDOWN_FIND_BUDGET :: 2 * time.Millisecond
 
-Markdown_State :: enum u8 {
-	Loaded,
-	Missing,
-	Too_Large,
-	Failed,
+// What a pane shows of its file. No variant: the path has not passed the local-file checks yet; a
+// path from the saved layout may be gone or point anywhere, so the poll must not read it until it
+// does. Only Loaded holds a document: a pane showing a message has nothing to draw, find or copy.
+// The others keep the stamp they last saw, so the poll reads the file again only once it changes.
+Markdown_Load :: union {
+	Markdown_Missing,
+	Markdown_Loaded,
+	Markdown_Too_Large,
+	Markdown_Failed,
+}
+Markdown_Missing :: struct {}
+Markdown_Loaded :: struct {
+	stamp:    Markdown_Stamp,
+	document: markdown.Document,
+}
+Markdown_Too_Large :: struct {
+	stamp: Markdown_Stamp,
+}
+// Parsing ran out of memory.
+Markdown_Failed :: struct {
+	stamp: Markdown_Stamp,
+}
+Markdown_Stamp :: struct {
+	modified: time.Time,
+	size:     i64,
+}
+
+// The pointer's hold on a Markdown pane in one window. No variant: nothing held. Selecting runs from
+// the press that places the anchor to the release; `grab` is where the pointer holds the thumb,
+// measured down from its top.
+Markdown_Gesture :: union {
+	Markdown_Selecting,
+	Markdown_Bar_Drag,
+}
+Markdown_Selecting :: struct {
+	pane: u32,
+}
+Markdown_Bar_Drag :: struct {
+	pane: u32,
+	grab: f32,
+}
+
+// What the pointer is over among a window's Markdown panes; one value, so one pane at most shows it.
+Markdown_Hover :: union {
+	Markdown_Bar_Hover,
+	Markdown_Link_Hover,
+}
+Markdown_Bar_Hover :: struct {
+	pane: u32,
+}
+Markdown_Link_Hover :: struct {
+	pane: u32,
+	link: int,
 }
 
 // Owned by App.markdown_panes; panes refer to it by id and the poll frees it once none does.
@@ -39,18 +87,11 @@ Markdown_Pane :: struct {
 	id:                     u32,
 	path, title, directory: string,
 	documents: Document_List,
-	// False until the path has passed the local-file checks. A path from the saved layout may be
-	// gone or point anywhere, so the poll must not touch it directly.
-	verified:               bool,
-	state:                  Markdown_State,
-	document:               markdown.Document,
+	load:                   Markdown_Load,
 	view:                   ui.Markdown_View,
 	search:                 markdown.Search,
+	// Counts loads, so a view lays out each new document once.
 	revision:               u64,
-	modified:               time.Time,
-	size:                   i64,
-	scroll_drag:            ui.Scroll_Drag,
-	bar_hover:              bool,
 }
 
 markdown_is_path :: proc(path: string) -> bool {
@@ -67,7 +108,7 @@ markdown_find :: proc(app: ^App, id: u32) -> ^Markdown_Pane {
 @(private)
 markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 	documents_destroy(&pane.documents)
-	markdown.document_destroy(&pane.document)
+	if document := markdown_document(pane); document != nil {markdown.document_destroy(document)}
 	ui.markdown_view_destroy(&pane.view)
 	markdown.search_destroy(&pane.search)
 	delete(pane.path)
@@ -111,28 +152,87 @@ markdown_pane_create :: proc(app: ^App, path: string, verified: bool) -> ^Markdo
 	}
 	app.next_markdown_id += 1
 	pane.id = app.next_markdown_id
-	pane.verified, pane.state = verified, .Missing
-	if verified {_ = markdown_pane_load(pane)}
+	if verified {_ = markdown_pane_verified(pane)}
 	if app.markdown_deadline == {} {app.markdown_deadline = time.tick_add(time.tick_now(), MARKDOWN_POLL)}
 	return pane
 }
 
-// Re-reads the file when it changed. A failed read keeps what is showing and tries again next poll,
-// because a writer can hold the file for a moment. Returns whether the pane shows something new.
-@(private, require_results)
+// The document the pane shows, or nil while it shows a message instead.
+@(require_results)
+markdown_document :: proc(pane: ^Markdown_Pane) -> ^markdown.Document {
+	loaded, ok := &pane.load.(Markdown_Loaded)
+	return ok ? &loaded.document : nil
+}
+
+// The only writer of pane.load. Leaving Loaded frees the document; entering it starts the view's
+// layout, the selection and any search over for the new text. Returns whether the pane shows
+// something new.
+@(private = "file", require_results)
+markdown_load_enter :: proc(pane: ^Markdown_Pane, next: Markdown_Load) -> bool {
+	changed := true
+	switch &current in pane.load {
+	case Markdown_Loaded:
+		markdown.document_destroy(&current.document)
+	case Markdown_Missing:
+		_, same := next.(Markdown_Missing)
+		changed = !same
+	case Markdown_Too_Large:
+		_, same := next.(Markdown_Too_Large)
+		changed = !same
+	case Markdown_Failed:
+		_, same := next.(Markdown_Failed)
+		changed = !same
+	case nil:
+	}
+	pane.load = next
+	if _, loaded := next.(Markdown_Loaded); loaded {
+		pane.revision += 1
+		ui.markdown_selection_clear(&pane.view)
+		markdown.search_restart(&pane.search)
+	}
+	return changed
+}
+
+// The path passed the local-file checks; from now on the poll follows the file itself.
+@(private = "file")
+markdown_pane_verified :: proc(pane: ^Markdown_Pane) -> bool {
+	_ = markdown_load_enter(pane, Markdown_Missing{})
+	_ = markdown_pane_load(pane)
+	return true
+}
+
+// Checks a restored path before anything reads it, then follows the file. Returns whether the pane
+// shows something new.
+@(private = "file", require_results)
+markdown_pane_poll :: proc(pane: ^Markdown_Pane) -> bool {
+	if pane.load != nil {return markdown_pane_load(pane)}
+	file, ok := platform.prepare_terminal_file(pane.path)
+	if !ok {return false}
+	defer platform.terminal_file_destroy(&file)
+	if file.confirm || !markdown_path_set(pane, file.target) {return false}
+	return markdown_pane_verified(pane)
+}
+
+// Reads the file again only when its stamp differs from the one last seen, whatever came of that
+// read. A failed read keeps what is showing and tries again next poll, because a writer can hold the
+// file for a moment. Returns whether the pane shows something new.
+@(private = "file", require_results)
 markdown_pane_load :: proc(pane: ^Markdown_Pane) -> bool {
 	info, stat_error := os.stat(pane.path, context.temp_allocator)
-	if stat_error != nil {
-		changed := pane.state != .Missing
-		pane.state, pane.modified, pane.size = .Missing, {}, 0
-		return changed
+	if stat_error != nil {return markdown_load_enter(pane, Markdown_Missing{})}
+	stamp := Markdown_Stamp{info.modification_time, info.size}
+	seen, known := Markdown_Stamp{}, false
+	switch current in pane.load {
+	case Markdown_Loaded:
+		seen, known = current.stamp, true
+	case Markdown_Too_Large:
+		seen, known = current.stamp, true
+	case Markdown_Failed:
+		seen, known = current.stamp, true
+	case Markdown_Missing, nil:
 	}
-	if pane.state == .Loaded && info.modification_time == pane.modified && info.size == pane.size {return false}
-	if info.size > MARKDOWN_SIZE_LIMIT {
-		changed := pane.state != .Too_Large
-		pane.state, pane.modified, pane.size = .Too_Large, info.modification_time, info.size
-		return changed
-	}
+	if known && seen == stamp {return false}
+	if info.size > MARKDOWN_SIZE_LIMIT {return markdown_load_enter(pane, Markdown_Too_Large{stamp})}
 	data, read_error := os.read_entire_file(pane.path, context.allocator)
 	if read_error != nil {
 		log.errorf("reading the Markdown file failed: %v", read_error)
@@ -142,17 +242,9 @@ markdown_pane_load :: proc(pane: ^Markdown_Pane) -> bool {
 	next: markdown.Document
 	if !markdown.parse(string(data), &next) {
 		log.error("parsing the Markdown file ran out of memory")
-		changed := pane.state != .Failed
-		pane.state = .Failed
-		return changed
+		return markdown_load_enter(pane, Markdown_Failed{stamp})
 	}
-	markdown.document_destroy(&pane.document)
-	pane.document = next
-	pane.state, pane.modified, pane.size = .Loaded, info.modification_time, info.size
-	pane.revision += 1
-	ui.markdown_selection_clear(&pane.view)
-	markdown.search_restart(&pane.search)
-	return true
+	return markdown_load_enter(pane, Markdown_Loaded{stamp, next})
 }
 
 // A pane not showing its document has nothing to find, whatever it last searched.
@@ -174,7 +266,7 @@ markdown_find_summary :: proc(pane: ^Markdown_Pane) -> term.Search_Summary {
 	case .Failed:
 		summary.progress = .Failed
 	}
-	if pane.state != .Loaded {
+	if markdown_document(pane) == nil {
 		if summary.progress == .Searching {summary.progress = .Complete}
 		return summary
 	}
@@ -183,7 +275,7 @@ markdown_find_summary :: proc(pane: ^Markdown_Pane) -> term.Search_Summary {
 }
 
 markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
-	if pane.state != .Loaded || !markdown.search_select(&pane.search, upward) {return}
+	if markdown_document(pane) == nil || !markdown.search_select(&pane.search, upward) {return}
 	match := pane.search.matches[pane.search.selected]
 	if shown, found := markdown_pane_rect(w, pane.id); found {
 		visible := int(markdown_geometry_of(w, shown.rect).area.height)
@@ -195,7 +287,7 @@ markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
 // parse waits until it loads again, which restarts the search.
 @(private = "file")
 markdown_find_due :: proc(pane: ^Markdown_Pane) -> bool {
-	return pane.state == .Loaded && markdown.search_pending(&pane.search)
+	return markdown_document(pane) != nil && markdown.search_pending(&pane.search)
 }
 
 @(require_results)
@@ -208,7 +300,7 @@ markdown_find_tick :: proc(app: ^App) {
 	for pane in app.markdown_panes {
 		if !markdown_find_due(pane) {continue}
 		before := markdown_find_summary(pane)
-		markdown.search_update(&pane.search, &pane.document, MARKDOWN_FIND_BUDGET)
+		markdown.search_update(&pane.search, markdown_document(pane), MARKDOWN_FIND_BUDGET)
 		if markdown_find_summary(pane) != before {mark_all_dirty(app)}
 	}
 }
@@ -236,15 +328,7 @@ markdown_tick :: proc(app: ^App) {
 			ordered_remove(&app.markdown_panes, i)
 			continue
 		}
-		if !pane.verified {
-			file, ok := platform.prepare_terminal_file(pane.path)
-			if !ok {continue}
-			defer platform.terminal_file_destroy(&file)
-			if file.confirm || !markdown_path_set(pane, file.target) {continue}
-			pane.verified = true
-			changed = true
-		}
-		changed = markdown_pane_load(pane) || changed
+		changed = markdown_pane_poll(pane) || changed
 	}
 	app.markdown_deadline = len(app.markdown_panes) > 0 ? time.tick_add(now, MARKDOWN_POLL) : {}
 	if changed {mark_all_dirty(app)}
@@ -440,8 +524,21 @@ markdown_bar :: proc(w: ^Window, pane: ^Markdown_Pane, rect: layout.Rect) -> (ui
 	area.width -= 2 * w.scale
 	area.height -= 4 * w.scale
 	extent := ui.Scroll_Extent{ui.markdown_total(&pane.view), int(area.height), pane.view.scroll}
-	state := ui.scrollbar_state(pane.bar_hover, pane.scroll_drag)
-	return ui.scrollbar_layout(area, extent, state, w.scale)
+	return ui.scrollbar_layout(area, extent, markdown_bar_state(w, pane.id), w.scale)
+}
+
+@(private, require_results)
+markdown_bar_state :: proc(w: ^Window, id: u32) -> ui.Scrollbar_State {
+	if drag, held := w.markdown_gesture.(Markdown_Bar_Drag); held && drag.pane == id {return .Active}
+	if hover, over := w.markdown_hover.(Markdown_Bar_Hover); over && hover.pane == id {return .Hovered}
+	return .Collapsed
+}
+
+// The link the pointer is over in pane `id`, or -1.
+@(private, require_results)
+markdown_link_hovered :: proc(w: ^Window, id: u32) -> int {
+	if hover, over := w.markdown_hover.(Markdown_Link_Hover); over && hover.pane == id {return hover.link}
+	return -1
 }
 
 // A pane that is not showing a document says why, once.
@@ -457,10 +554,10 @@ markdown_message_draw :: proc(
 	path := ""
 	if pane != nil {
 		path = pane.path
-		#partial switch pane.state {
-		case .Missing:
+		#partial switch _ in pane.load {
+		case nil, Markdown_Missing:
 			message = "This file is not available."
-		case .Too_Large:
+		case Markdown_Too_Large:
 			message = "This file is too large to show."
 		}
 	}
@@ -476,9 +573,10 @@ markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card:
 	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
 	pane := markdown_find(app, shown.content.id)
 	g := markdown_geometry_of(w, shown.rect)
-	if pane != nil && pane.state == .Loaded {
+	document := pane != nil ? markdown_document(pane) : nil
+	if document != nil {
 		view := &pane.view
-		ui.markdown_view_fit(view, &pane.document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
+		ui.markdown_view_fit(view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
 		ui.markdown_scroll_by(view, 0, int(g.area.height))
 		find: ui.Markdown_Find
 		if pane.search.phase != .Off {
@@ -491,12 +589,13 @@ markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card:
 				selected_background = color(c.search_selected_background),
 			}
 		}
-		if result := ui.markdown_draw(view, &pane.document, g, &w.list, &w.ui_text, app.theme, find);
+		hover := markdown_link_hovered(w, pane.id)
+		if result := ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover);
 		   result != .Ok {
 			return result
 		}
 		if bar, visible := markdown_bar(w, pane, shown.rect); visible {
-			ui.scrollbar_draw(&w.list, app.theme, bar, ui.scrollbar_state(pane.bar_hover, pane.scroll_drag))
+			ui.scrollbar_draw(&w.list, app.theme, bar, markdown_bar_state(w, pane.id))
 		}
 	} else if result := markdown_message_draw(app, w, pane, g); result != .Ok {return result}
 	if header := pane_header_draw(app, w, shown, nil); header != .Ok {return header}
@@ -533,15 +632,19 @@ markdown_page :: proc(app: ^App, w: ^Window, pages: f64) {
 
 markdown_copy :: proc(app: ^App, w: ^Window) {
 	if pane := markdown_focused(app, w); pane != nil {
-		text := ui.markdown_selected_text(&pane.view, &pane.document)
-		if text != "" {clipboard_copy(app, text)}
+		if document := markdown_document(pane); document != nil {
+			text := ui.markdown_selected_text(&pane.view, document)
+			if text != "" {clipboard_copy(app, text)}
+		}
 	}
 }
 
 markdown_select_all :: proc(app: ^App, w: ^Window) {
 	if pane := markdown_focused(app, w); pane != nil {
-		pane.view.anchor, pane.view.head = 0, len(pane.document.text)
-		w.dirty = true
+		if document := markdown_document(pane); document != nil {
+			ui.markdown_select_all(&pane.view, document)
+			w.dirty = true
+		}
 	}
 }
 
@@ -612,7 +715,7 @@ markdown_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 // same path as a file link printed in a terminal.
 @(private)
 markdown_link_open :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, link: int) {
-	uri := pane.document.links[link]
+	uri := markdown_document(pane).links[link]
 	if links.allowed(uri) {
 		if !open_link(app, uri) {notify(app, .Error, "Could not open the link.")}
 		return
@@ -632,62 +735,77 @@ markdown_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	return found && shown.content.kind == .Markdown
 }
 
-@(private)
-markdown_hover_clear :: proc(app: ^App, w: ^Window, except: ^Markdown_Pane) {
-	for shown in w.panes {
-		if shown.content.kind != .Markdown {continue}
-		pane := markdown_find(app, shown.content.id)
-		if pane == nil || pane == except {continue}
-		if pane.bar_hover || pane.view.hover_link >= 0 {w.dirty = true}
-		pane.bar_hover, pane.view.hover_link = false, -1
-	}
+@(private = "file")
+markdown_hover_set :: proc(w: ^Window, next: Markdown_Hover) {
+	if w.markdown_hover != next {w.markdown_hover, w.dirty = next, true}
 }
 
 markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
-	if w.markdown_held != 0 {
-		pane := markdown_find(app, w.markdown_held)
-		shown, found := markdown_pane_rect(w, w.markdown_held)
-		if pane == nil || !found {w.markdown_held = 0; return}
-		w.pointer = {x, y}
-		if pane.scroll_drag.active {
-			if bar, visible := markdown_bar(w, pane, shown.rect); visible {
-				pane.view.scroll = ui.scrollbar_drag(pane.scroll_drag, bar, y)
-				w.dirty = true
-			}
-			return
-		}
-		g := markdown_geometry_of(w, shown.rect)
-		if y < g.area.y {markdown_scroll(w, pane, shown, int(y - g.area.y))}
-		if y > g.area.y + g.area.height {markdown_scroll(w, pane, shown, int(y - g.area.y - g.area.height))}
-		pane.view.head = ui.markdown_offset_at(&pane.view, &pane.document, g, x, y)
-		pane.view.selecting = true
-		w.dirty = true
-		pointer_set(app, w, .Text)
+	if w.markdown_gesture != nil {
+		markdown_held_move(app, w, x, y)
 		return
 	}
 	if owner != .Markdown_Page {
-		markdown_hover_clear(app, w, nil)
+		markdown_hover_set(w, nil)
 		return
 	}
 	pane, shown := markdown_under_pointer(app, w, x, y)
-	markdown_hover_clear(app, w, pane)
-	if pane == nil {pointer_set(app, w, .Arrow); return}
-	bar, visible := markdown_bar(w, pane, shown.rect)
-	over_bar := visible && ui.scrollbar_contains(bar, x, y)
-	link := -1
-	if !over_bar && pane.state == .Loaded {
-		link = ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown.rect), x, y)
-	}
-	if over_bar != pane.bar_hover || link != pane.view.hover_link {w.dirty = true}
-	pane.bar_hover, pane.view.hover_link = over_bar, link
-	switch {
-	case over_bar:
+	if pane == nil {
+		markdown_hover_set(w, nil)
 		pointer_set(app, w, .Arrow)
-	case link >= 0:
-		pointer_set(app, w, .Hand)
-	case:
-		pointer_set(app, w, pane.state == .Loaded ? .Text : .Arrow)
+		return
+	}
+	hover: Markdown_Hover
+	shape := platform.Cursor_Shape.Arrow
+	bar, visible := markdown_bar(w, pane, shown.rect)
+	if visible && ui.scrollbar_contains(bar, x, y) {
+		hover = Markdown_Bar_Hover{pane.id}
+	} else if markdown_document(pane) != nil {
+		shape = .Text
+		if link := ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown.rect), x, y); link >= 0 {
+			hover, shape = Markdown_Link_Hover{pane.id, link}, .Hand
+		}
+	}
+	markdown_hover_set(w, hover)
+	pointer_set(app, w, shape)
+}
+
+// A held pane that left the window or stopped showing its document ends the gesture, since there is
+// nothing left for it to select or scroll.
+@(private = "file")
+markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
+	id: u32
+	switch g in w.markdown_gesture {
+	case Markdown_Selecting:
+		id = g.pane
+	case Markdown_Bar_Drag:
+		id = g.pane
+	case nil:
+		return
+	}
+	pane := markdown_find(app, id)
+	shown, found := markdown_pane_rect(w, id)
+	document := pane != nil ? markdown_document(pane) : nil
+	if !found || document == nil {
+		markdown_gesture_clear(app, w)
+		return
+	}
+	w.pointer = {x, y}
+	switch held in w.markdown_gesture {
+	case Markdown_Bar_Drag:
+		if bar, visible := markdown_bar(w, pane, shown.rect); visible {
+			pane.view.scroll = ui.scrollbar_drag({active = true, grab = held.grab}, bar, y)
+			w.dirty = true
+		}
+	case Markdown_Selecting:
+		g := markdown_geometry_of(w, shown.rect)
+		if y < g.area.y {markdown_scroll(w, pane, shown, int(y - g.area.y))}
+		if y > g.area.y + g.area.height {markdown_scroll(w, pane, shown, int(y - g.area.y - g.area.height))}
+		ui.markdown_select_at(&pane.view, ui.markdown_offset_at(&pane.view, document, g, x, y), true)
+		w.dirty = true
+		pointer_set(app, w, .Text)
+	case nil:
 	}
 }
 
@@ -696,11 +814,14 @@ markdown_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	pane, shown := markdown_under_pointer(app, w, x, y)
 	if shown.content.kind != .Markdown {return}
 	pane_focus(app, w, shown.node)
-	if pane == nil || pane.state != .Loaded || e.button != .Left {return}
+	if pane == nil || e.button != .Left {return}
+	document := markdown_document(pane)
+	if document == nil {return}
 	w.dirty = true
 	if bar, visible := markdown_bar(w, pane, shown.rect); visible && ui.scrollbar_contains(bar, x, y) {
-		pane.view.scroll = ui.scrollbar_press(&pane.scroll_drag, bar, y)
-		if pane.scroll_drag.active {w.markdown_held = pane.id}
+		drag: ui.Scroll_Drag
+		pane.view.scroll = ui.scrollbar_press(&drag, bar, y)
+		if drag.active {w.markdown_gesture = Markdown_Bar_Drag{pane.id, drag.grab}}
 		return
 	}
 	g := markdown_geometry_of(w, shown.rect)
@@ -710,24 +831,19 @@ markdown_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 			return
 		}
 	}
-	offset := ui.markdown_offset_at(&pane.view, &pane.document, g, x, y)
-	if .Shift not_in e.modifiers {pane.view.anchor = offset}
-	pane.view.head = offset
-	w.markdown_held = pane.id
+	offset := ui.markdown_offset_at(&pane.view, document, g, x, y)
+	ui.markdown_select_at(&pane.view, offset, .Shift in e.modifiers)
+	w.markdown_gesture = Markdown_Selecting{pane.id}
 }
 
 markdown_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || w.markdown_held == 0 {return false}
+	if e.button != .Left || w.markdown_gesture == nil {return false}
 	markdown_gesture_clear(app, w)
 	return true
 }
 
 markdown_gesture_clear :: proc(app: ^App, w: ^Window) {
-	if w.markdown_held == 0 {return}
-	if pane := markdown_find(app, w.markdown_held); pane != nil {
-		pane.scroll_drag = {}
-		pane.view.selecting = false
-	}
-	w.markdown_held = 0
+	if w.markdown_gesture == nil {return}
+	w.markdown_gesture = nil
 	w.dirty = true
 }

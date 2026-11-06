@@ -3,6 +3,7 @@ package app_test
 import "aio:commands"
 import "aio:input"
 import "aio:layout"
+import "aio:markdown"
 import "aio:platform"
 import "aio:term"
 import "aio:ui"
@@ -65,6 +66,23 @@ poll :: proc(state: ^app.App) {
 	app.markdown_tick(state)
 }
 
+// The pane's load variant by name, so a failed expectation says which it was.
+@(private = "file")
+load_name :: proc(pane: ^app.Markdown_Pane) -> string {
+	switch _ in pane.load {
+	case app.Markdown_Missing:
+		return "Missing"
+	case app.Markdown_Loaded:
+		return "Loaded"
+	case app.Markdown_Too_Large:
+		return "Too_Large"
+	case app.Markdown_Failed:
+		return "Failed"
+	case nil:
+	}
+	return "Unverified"
+}
+
 @(test)
 markdown_paths_are_recognized_by_extension :: proc(t: ^testing.T) {
 	testing.expect(t, app.markdown_is_path("C:\\a\\Plan.md"))
@@ -85,7 +103,7 @@ opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^tes
 	testing.expect_value(t, w.tree.focus, before)
 	if !testing.expect_value(t, len(f.state.markdown_panes), 1) {return}
 	pane := f.state.markdown_panes[0]
-	testing.expect_value(t, pane.state, app.Markdown_State.Loaded)
+	testing.expect_value(t, load_name(pane), "Loaded")
 	testing.expect_value(t, pane.title, "doc.md")
 	testing.expect(t, app.workspace_has_content(w.workspace, {.Markdown, pane.id}))
 	testing.expect_value(t, len(f.state.sessions), 1)
@@ -121,7 +139,9 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	w := f.state.windows[0]
 	if !testing.expect(t, app.markdown_active(w)) {return}
 	pane := f.state.markdown_panes[0]
-	ui.markdown_view_fit(&pane.view, &pane.document, pane.revision, &w.ui_text, f.state.family, 600, w.scale)
+	document := app.markdown_document(pane)
+	if !testing.expect(t, document != nil) {return}
+	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, 600, w.scale)
 
 	app.run_action(&f.state, w, .Find)
 	testing.expect(t, ui.find_has_keyboard(&w.find))
@@ -221,7 +241,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	testing.expect_value(t, find_count(w, pane), "1 of 2")
 	testing.expect_value(t, os.remove(f.file), nil)
 	poll(&f.state)
-	testing.expect_value(t, pane.state, app.Markdown_State.Missing)
+	testing.expect_value(t, load_name(pane), "Missing")
 	testing.expect_value(t, find_count(w, pane), "0 of 0")
 	// A new query does not read the document the missing file left behind; the file's return does.
 	app.run_action(&f.state, w, .Find)
@@ -311,14 +331,38 @@ the_poll_follows_changes_to_the_file :: proc(t: ^testing.T) {
 	testing.expect_value(t, os.write_entire_file(f.file, "# Rewritten with different length\n"), nil)
 	poll(&f.state)
 	testing.expect_value(t, pane.revision, revision + 1)
-	testing.expect_value(t, string(pane.document.text[:]), "Rewritten with different length")
+	if !testing.expect_value(t, load_name(pane), "Loaded") {return}
+	testing.expect_value(t, string(app.markdown_document(pane).text[:]), "Rewritten with different length")
 	testing.expect_value(t, os.remove(f.file), nil)
 	poll(&f.state)
-	testing.expect_value(t, pane.state, app.Markdown_State.Missing)
+	testing.expect_value(t, load_name(pane), "Missing")
 	testing.expect_value(t, os.write_entire_file(f.file, "back"), nil)
 	poll(&f.state)
-	testing.expect_value(t, pane.state, app.Markdown_State.Loaded)
-	testing.expect_value(t, string(pane.document.text[:]), "back")
+	if !testing.expect_value(t, load_name(pane), "Loaded") {return}
+	testing.expect_value(t, string(app.markdown_document(pane).text[:]), "back")
+}
+
+// Parsing fails only for want of memory, so the pane is put in Failed for the file as it stands.
+@(test)
+a_file_that_failed_to_parse_is_read_again_only_once_it_changes :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Failed") {return}
+	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	pane := f.state.markdown_panes[0]
+	loaded, ok := pane.load.(app.Markdown_Loaded)
+	if !testing.expect(t, ok) {return}
+	markdown.document_destroy(&loaded.document)
+	pane.load = app.Markdown_Failed{loaded.stamp}
+	revision := pane.revision
+	poll(&f.state)
+	poll(&f.state)
+	testing.expect_value(t, load_name(pane), "Failed")
+	testing.expect_value(t, pane.revision, revision)
+	testing.expect_value(t, os.write_entire_file(f.file, "# Fixed at another length\n"), nil)
+	poll(&f.state)
+	testing.expect_value(t, load_name(pane), "Loaded")
+	testing.expect_value(t, pane.revision, revision + 1)
 }
 
 @(test)
@@ -332,7 +376,7 @@ files_past_the_limit_are_not_read :: proc(t: ^testing.T) {
 	defer delete(large)
 	testing.expect_value(t, os.write_entire_file(f.file, large), nil)
 	poll(&f.state)
-	testing.expect_value(t, pane.state, app.Markdown_State.Too_Large)
+	testing.expect_value(t, load_name(pane), "Too_Large")
 }
 
 @(test)
@@ -384,9 +428,9 @@ layout_restore_reopens_files_and_keeps_a_pane_for_a_missing_one :: proc(t: ^test
 		return
 	}
 	restored := second.state.markdown_panes[0]
-	testing.expect_value(t, restored.state, app.Markdown_State.Missing)
+	testing.expect_value(t, load_name(restored), "Unverified")
 	poll(&second.state)
-	testing.expect_value(t, restored.state, app.Markdown_State.Loaded)
+	testing.expect_value(t, load_name(restored), "Loaded")
 	testing.expect(t, strings.equal_fold(restored.title, "doc.md"))
 	app.layout_state_save(&second.state)
 	app.app_destroy(&second.state)
@@ -397,7 +441,7 @@ layout_restore_reopens_files_and_keeps_a_pane_for_a_missing_one :: proc(t: ^test
 	defer app.app_destroy(&third.state)
 	if !testing.expect_value(t, len(third.state.markdown_panes), 1) {return}
 	poll(&third.state)
-	testing.expect_value(t, third.state.markdown_panes[0].state, app.Markdown_State.Missing)
+	testing.expect_value(t, load_name(third.state.markdown_panes[0]), "Unverified")
 }
 
 @(test)
@@ -412,7 +456,59 @@ a_tampered_layout_path_is_never_read :: proc(t: ^testing.T) {
 	_, err := layout.split_direction(tree, tree.focus, .Right, 0.5, {.Markdown, pane.id})
 	testing.expect_value(t, err, nil)
 	poll(&f.state)
-	testing.expect(t, !pane.verified)
-	testing.expect_value(t, pane.state, app.Markdown_State.Missing)
+	testing.expect_value(t, load_name(pane), "Unverified")
 	testing.expect_value(t, pane.revision, u64(0))
+}
+
+// A press holds its pane until release: the drag selects in it, and hover waits. Between presses one
+// value says what the pointer is over, so leaving the pane leaves nothing hovered.
+@(test)
+a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Pointer") {return}
+	source := "first paragraph\n\nsecond paragraph\n\n[link](https://a.example) after\n"
+	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
+	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	w := f.state.windows[0]
+	pane := f.state.markdown_panes[0]
+	document := app.markdown_document(pane)
+	if !testing.expect(t, document != nil) {return}
+	shown, terminal: layout.Pane_Rect
+	for candidate in w.panes {
+		if candidate.content.kind == .Markdown {shown = candidate} else {terminal = candidate}
+	}
+	if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
+	r := shown.rect
+	g := ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
+	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
+	line := f32(ui.markdown_line(&pane.view))
+	y := g.top + line / 2
+
+	button := proc(state: ^app.App, w: ^app.Window, x, y: f32, pressed: bool) {
+		app.handle_event(state, platform.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+			button = .Left, pressed = pressed})
+	}
+	button(&f.state, w, g.left + 1, y, true)
+	held, selecting := w.markdown_gesture.(app.Markdown_Selecting)
+	testing.expect(t, selecting && held.pane == pane.id)
+	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id, x = i32(g.left + g.width),
+		y = i32(y), buttons = {.Left}})
+	testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "first paragraph")
+	testing.expect(t, w.markdown_hover == nil)
+	button(&f.state, w, g.left + g.width, y, false)
+	testing.expect(t, w.markdown_gesture == nil)
+	testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "first paragraph")
+
+	link_y := y
+	for ui.markdown_link_at(&pane.view, g, g.left + 5, link_y) < 0 && link_y < g.area.y + g.area.height {
+		link_y += 1
+	}
+	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id, x = i32(g.left + 5), y = i32(link_y)})
+	link, over := w.markdown_hover.(app.Markdown_Link_Hover)
+	testing.expect(t, over && link.pane == pane.id && link.link == 0)
+	t_rect := terminal.rect
+	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id,
+		x = i32(t_rect.x + t_rect.width / 2), y = i32(t_rect.y + t_rect.height / 2)})
+	testing.expect(t, w.markdown_hover == nil)
 }
