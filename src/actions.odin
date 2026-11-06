@@ -419,16 +419,16 @@ ACTIONS :: [Action]Action_Info {
 	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}},
 	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil},
 	.Show_Documents = {"pane.documents", "Show Documents", nil},
-	.New_Floating = {"pane.new_floating", "New Floating Shell", {{.Backquote, {.Control, .Shift}}}},
+	.New_Floating = {"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}},
 	.Float_Pane = {"pane.float", "Float or Dock Pane", {{.Enter, {.Control, .Alt}}}},
 	.Minimize_Floating = {
 		"pane.minimize_floating",
-		"Minimize or Restore Floating Pane",
+		"Minimize or Restore Float",
 		{{.M, {.Control, .Shift}}},
 	},
 	.Minimize_All_Floating = {
 		"pane.minimize_all_floating",
-		"Minimize or Restore All Floating Panes",
+		"Minimize or Restore All Floats",
 		nil,
 	},
 }
@@ -505,7 +505,7 @@ run_action :: proc(
 	switch action {
 	case .Linked_Window:
 		if layout.is_floating(w.tree, w.tree.focus) {
-			notify(app, .Info, "Dock the floating pane before moving it to a linked window.")
+			notify(app, .Info, "Dock the float before moving its pane to a linked window.")
 			return
 		}
 		pane_link_toggle(app, w)

@@ -278,14 +278,14 @@ swapping_with_a_floating_pane_trades_contents_not_slots :: proc(t: ^testing.T) {
 }
 
 @(test)
-a_split_floating_window_keeps_a_grip_strip_above_its_panes :: proc(t: ^testing.T) {
+every_float_keeps_a_header_strip_above_its_panes :: proc(t: ^testing.T) {
 	l: layout.Layout
 	defer layout.destroy(&l)
 	two_tiled(t, &l)
 	lone, _ := layout.float_new(&l, pane_of(3), {0.2, 0.2, 0.6, 0.6})
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.floats_place(&l, AREA, 0, 5, &rects)
-	testing.expect_value(t, rects[0].rect, layout.Rect{20, 10, 60, 30})
+	testing.expect_value(t, rects[0].rect, layout.Rect{20, 15, 60, 25})
 	_, err := layout.split_direction(&l, lone, .Right, 0.5, pane_of(4))
 	testing.expect_value(t, err, nil)
 	clear(&rects)

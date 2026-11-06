@@ -52,11 +52,15 @@ Window :: struct {
 	tab_drag: Tab_Drag,
 	// A floating pane moved by its header or resized by an edge; see floating_panes.odin.
 	float_drag: Float_Drag,
-	// The split floating window whose grip strip is under the pointer, and the grip the hover and press
-	// animation belongs to, which it keeps while fading out.
-	float_grip_hover:  layout.Node_Id,
-	float_grip_shown:  layout.Node_Id,
-	float_grip_motion: ui.Control_Motion,
+	// The float header under the pointer and which part of it; the float the hover and press animation
+	// belongs to, which it keeps while fading out; and the header button pressed, with a pane of its float.
+	float_header_hover:    layout.Node_Id,
+	float_header_action:   Float_Header_Action,
+	float_header_shown:    layout.Node_Id,
+	float_header_motion:   ui.Control_Motion,
+	float_header_controls: [FLOAT_HEADER_BUTTONS]ui.Control_Motion,
+	float_header_armed:    ui.Armed(Float_Header_Action),
+	float_header_target:   layout.Content,
 	// The minimized floating pane whose capsule is under the pointer, and their movable row.
 	float_capsule_hover:      Maybe(layout.Content),
 	float_capsule_armed:      ui.Armed(layout.Content),
@@ -222,8 +226,8 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	document_menu_init(&w.document_menu)
 	w.tab_hover, w.rail_hover, w.rail_pressed = -1, -1, -1
 	w.caption_hover = -1
-	w.divider_click_node, w.float_grip_hover = layout.INVALID_NODE, layout.INVALID_NODE
-	w.float_grip_shown = layout.INVALID_NODE
+	w.divider_click_node, w.float_header_hover = layout.INVALID_NODE, layout.INVALID_NODE
+	w.float_header_shown = layout.INVALID_NODE
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true
 	w.dirty = true
@@ -455,7 +459,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	} else {
 		layout.compute(w.tree, area, gap, &w.panes)
 	}
-	layout.floats_place(w.tree, floating_area(w), gap, floating_grip(w), &w.panes)
+	layout.floats_place(w.tree, floating_area(w), gap, floating_header_height(w), &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
 	for &view in w.views {view.valid = false}
@@ -470,7 +474,7 @@ window_floats_layout :: proc(app: ^App, w: ^Window) {
 	if w.preparing || w.width <= 0 || w.height <= 0 || w.tree == nil {return}
 	tiled := len(window_tiled_rects(w))
 	resize(&w.panes, tiled)
-	layout.floats_place(w.tree, floating_area(w), window_gap(app, w), floating_grip(w), &w.panes)
+	layout.floats_place(w.tree, floating_area(w), window_gap(app, w), floating_header_height(w), &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
 	for pane in w.panes[tiled:] {
@@ -681,10 +685,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	group := layout.INVALID_NODE
 	for pane in w.panes {
 		if !pane.floating {continue}
-		// Each floating window's grip draws with it, so a higher window covers a lower one's grip.
+		// Each float's frame and header draw with it, so a higher float covers a lower one's.
 		if root := layout.float_root(w.tree, pane.node); root != group {
 			group = root
-			floating_grip_draw(app, w, root)
+			floating_header_draw(app, w, root)
 		}
 		result: glyphs.Result
 		frame, result = pane_draw(app, w, pane, &blinking)

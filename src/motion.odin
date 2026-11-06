@@ -20,7 +20,8 @@ motion_active :: proc(app: ^App) -> bool {
 		   ui.motion_active(w.tab_underline) ||
 		   ui.motion_active(w.tab_incoming.ghost) ||
 		   confirmation_active(w) { return true }
-		if ui.control_active(w.workspace_motion) || ui.control_active(w.float_grip_motion) { return true }
+		if ui.control_active(w.workspace_motion) || ui.control_active(w.float_header_motion) { return true }
+		for control in w.float_header_controls { if ui.control_active(control) { return true } }
 		if w.find.open && ui.find_animating(&w.find) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
@@ -114,15 +115,21 @@ update_motion :: proc(app: ^App) {
 				}
 			}
 		}
-		// The grip under the pointer, or the one being dragged, takes the animation; a grip the pointer
-		// left keeps it while it fades.
-		grip := w.float_grip_hover
-		gripping := w.float_drag.pressed && w.float_drag.grip
-		if gripping {grip = layout.float_root(w.tree, layout.find_content(w.tree, w.float_drag.content))}
-		if grip != layout.INVALID_NODE {w.float_grip_shown = grip}
-		if ui.control_update(&w.float_grip_motion, grip != layout.INVALID_NODE, gripping, app.animations, now) {
-			w.dirty = true
+		// The float header under the pointer, or the one moving its float, takes the animation; a header
+		// the pointer left keeps it while it fades.
+		header := w.float_header_hover
+		moving := w.float_drag.pressed && w.float_drag.header
+		if moving {header = layout.float_root(w.tree, layout.find_content(w.tree, w.float_drag.content))}
+		if header != layout.INVALID_NODE {w.float_header_shown = header}
+		active := header != layout.INVALID_NODE
+		changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
+		for &control, i in w.float_header_controls {
+			action := Float_Header_Action(i + 1)
+			over := w.float_header_hover != layout.INVALID_NODE && w.float_header_action == action
+			pressed := ui.armed_is(w.float_header_armed, action)
+			changed = ui.control_update(&control, over, pressed, app.animations, now) || changed
 		}
+		if changed {w.dirty = true}
 		if w.find.open && ui.find_animate(&w.find, app.animations, now) {w.dirty = true}
 		confirmation_advance(app, w, now)
 		if rail_changed || tabs_changed || controls_changed {w.dirty = true}

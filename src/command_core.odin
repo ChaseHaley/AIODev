@@ -417,7 +417,7 @@ control_floating_new :: proc(
 		launch.directory, _ = pane_directory(app, target.pane.session)
 	}
 	id, ok := floating_open(app, w, target.workspace, target.pane.tab, launch, invocation.focus)
-	if !ok {return outcome_failure(.Failed, "could not open a floating pane")}
+	if !ok {return outcome_failure(.Failed, "could not open a float")}
 	return control_created(app, w, id, invocation.name)
 }
 

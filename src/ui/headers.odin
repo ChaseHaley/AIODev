@@ -4,9 +4,10 @@ import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
-// One slot per Header_Action from Documents through Close, in that order, left to right. Floating panes
-// keep split controls and show Minimize; tiled panes keep their view controls. Both show Float or Dock.
-HEADER_BUTTONS :: 9
+// One slot per Header_Action from Documents through Close, in that order, left to right. A pane in a float
+// keeps its split controls; minimizing, docking and moving belong to the float header. Tiled panes add
+// their view controls and Float.
+HEADER_BUTTONS :: 8
 @(private = "file")
 HEADER_TITLE_MINIMUM :: f32(40)
 Header_Action :: enum {
@@ -17,7 +18,6 @@ Header_Action :: enum {
 	Zoom,
 	Fill_Window,
 	Linked_Window,
-	Minimize,
 	Dock,
 	Close,
 	Badge,
@@ -41,15 +41,13 @@ Header_Documents :: struct {
 	shown, open: bool,
 }
 
-// Whether a header shows the action's button. Every pane can split and float or dock; view controls only
-// apply to the tiled layout, while only a floating pane can minimize.
+// Whether a header shows the action's button. Every pane can split and close; view controls and Float
+// apply only to the tiled layout.
 @(private = "file")
 header_shows :: proc(action: Header_Action, floating: bool) -> bool {
 	#partial switch action {
-	case .Documents, .Split_Right, .Split_Down, .Dock, .Close:
+	case .Documents, .Split_Right, .Split_Down, .Close:
 		return true
-	case .Minimize:
-		return floating
 	}
 	return !floating
 }
@@ -58,7 +56,7 @@ header_shows :: proc(action: Header_Action, floating: bool) -> bool {
 // controls, so splitting, floating and closing stay longest.
 @(private = "file")
 HEADER_DROP_ORDER :: [?]Header_Action {
-	.Documents, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Minimize, .Dock, .Close,
+	.Documents, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
 }
 
 header_layout :: proc(area: render.Rect, scale: f32, documents := true, floating := false) -> Header_Layout {
@@ -191,8 +189,6 @@ header_icon :: proc(action: Header_Action, zoomed, fullscreen, linked: bool) -> 
 		return fullscreen ? .Restore : .Zoom
 	case .Linked_Window:
 		return linked ? .Window_In : .Window_Out
-	case .Minimize:
-		return .Minimize
 	case .Dock:
 		return .Float_Pane
 	case .Close:
@@ -307,7 +303,7 @@ header_draw :: proc(
 		b := Button {
 			rect  = button,
 			hover = controls[i].hover.value,
-			press = max(controls[i].press.value, floating && action == .Dock ? f32(1) : f32(0)),
+			press = controls[i].press.value,
 		}
 		// Close presses in a faint error tint rather than the neutral pressed fill.
 		if action == .Close {

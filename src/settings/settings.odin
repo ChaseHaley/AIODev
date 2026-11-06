@@ -261,15 +261,15 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		"pane.markdown_floating",
-		"Open Markdown Files Floating",
+		"Open Markdown Files in a Float",
 		.Bool,
 		offset_of(Settings, pane) + offset_of(Pane_Settings, markdown_floating),
 		"false",
 		0,
 		0,
 		nil,
-		"Open a Markdown file from a terminal link or Open Markdown File in a floating pane above the " +
-			"tab, so the panes already there keep their size.",
+		"Open a Markdown file from a terminal link or Open Markdown File in a float above the tab, so " +
+			"the panes already there keep their size.",
 	},
 	{
 		"pane.confirm_shell_switch",

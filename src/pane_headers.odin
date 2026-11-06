@@ -215,7 +215,6 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 				.Zoom          = "pane.zoom",
 				.Fill_Window   = "pane.fill_window",
 				.Linked_Window = "pane.linked_window",
-				.Minimize      = "pane.minimize_floating",
 				.Dock          = "pane.float",
 				.Close         = "pane.close",
 				.Badge         = "",
@@ -248,15 +247,8 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 			for &view in w.views {
 				if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
 			}
-			if action == .None {
-				// A lone floating pane moves by its header; in a split floating window the grip moves the
-				// window and headers rearrange panes, as in the tiling.
-				if pane.floating && layout.float_is_root(w.tree, pane.node) {
-					floating_drag_press(app, w, pane, {}, f32(e.x), f32(e.y))
-				} else {
-					pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))
-				}
-			}
+			// Every pane header rearranges panes; a float moves by its own float header.
+			if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
 		}
 	}
 	return true
