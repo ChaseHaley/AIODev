@@ -57,17 +57,21 @@ record_writes_a_header_and_reports_bytes :: proc(t: ^testing.T) {
 	session, session_error := term.create_headless(replay_geometry(20, 3), 100)
 	if !testing.expect_value(t, session_error, term.Error.None) {return}
 	defer term.destroy(session)
-	// A capture that cannot be created is an expected failure, not a test error.
+	// A capture that cannot be created is an expected failure, not a test error. Expectations
+	// report through the runner's logger, so only the failing start runs silenced.
+	logger := context.logger
 	context.logger = {}
-	testing.expect_value(t, term.record_start(session, missing), term.Record_Start_Error.File_Failed)
+	missing_error := term.record_start(session, missing)
+	context.logger = logger
+	testing.expect_value(t, missing_error, term.Record_Start_Error.File_Failed)
 	testing.expect_value(t, term.record_start(session, path), term.Record_Start_Error.None)
 	testing.expect_value(t, term.record_start(session, path), term.Record_Start_Error.Already_Recording)
-	stopped, bytes, ok := term.record_stop(session)
-	testing.expect(t, ok)
+	stopped, bytes, ended := term.record_stop(session)
+	testing.expect_value(t, ended, term.Record_Stop.Stopped)
 	testing.expect_value(t, stopped, path)
 	testing.expect_value(t, bytes, u64(0))
 	_, _, again := term.record_stop(session)
-	testing.expect(t, !again)
+	testing.expect_value(t, again, term.Record_Stop.Not_Recording)
 	data, read_error := os.read_entire_file(path, context.temp_allocator)
 	if !testing.expect_value(t, read_error, nil) {return}
 	testing.expect_value(t, len(data), term.CAPTURE_HEADER_SIZE)

@@ -13,14 +13,31 @@ import "core:unicode/utf8"
 Pty :: struct {
 	output, input, process, job: w.HANDLE,
 	id:                          u32,
-	console:                     HPCON,
-	console_mutex:               sync.Mutex, // Guards console ownership and active resize calls.
+	console_mutex:               sync.Mutex, // Guards console.
 	console_changed:             sync.Cond,
-	resizing:                    int,
-	closing:                     bool,
+	console:                     Console,
 	// Output bytes delivered to readers. The reader thread adds; diagnostics read atomically.
 	bytes_read:                  u64,
 }
+
+// The pseudoconsole's lifecycle; nil means closed or never created. Only spawn and close_console
+// change the phase, so closing is idempotent from any thread: a second close waits for the first.
+@(private)
+Console :: union {
+	Console_Open,
+	Console_Closing,
+}
+
+// `resizing` counts ResizePseudoConsole calls in flight, which ClosePseudoConsole must not overlap.
+@(private)
+Console_Open :: struct {
+	handle:   HPCON,
+	resizing: int,
+}
+
+// Admits no new resize; the handle is released once the resizes in flight have finished.
+@(private)
+Console_Closing :: distinct Console_Open
 
 process_id :: proc(p: ^Pty) -> u32 {
 	return p.id
@@ -329,13 +346,15 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	if api.bundled {flags |= PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES}
 	// ConPTY then asks for the cursor position and draws below it; the terminal answers.
 	if options.inherit_cursor {flags |= PSEUDOCONSOLE_INHERIT_CURSOR}
-	result := api.create(size_cells, console_input, console_output, flags, &p.console)
+	console: HPCON
+	result := api.create(size_cells, console_input, console_output, flags, &console)
 	if u32(result) == w.E_INVALIDARG {
-		result = api.create(size_cells, console_input, console_output, 0, &p.console)
+		result = api.create(size_cells, console_input, console_output, 0, &console)
 	}
 	if result < 0 {
 		return {}, spawn_failure("CreatePseudoConsole", .Console, u32(result))
 	}
+	p.console = Console_Open{handle = console}
 	close_handle(&console_input)
 	close_handle(&console_output)
 	size: w.SIZE_T
@@ -357,7 +376,7 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 			raw_data(storage),
 			0,
 			PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-			rawptr(p.console),
+			rawptr(console),
 			size_of(HPCON),
 			nil,
 			nil,
@@ -519,16 +538,23 @@ resize :: proc(p: ^Pty, cols, rows: u16) -> Error {
 		return .Invalid_Argument
 	}
 	sync.mutex_lock(&p.console_mutex)
-	console := p.console
-	if console == nil || p.closing {
+	open, is_open := &p.console.(Console_Open)
+	if !is_open {
 		sync.mutex_unlock(&p.console_mutex)
 		return .Closed
 	}
-	p.resizing += 1
+	open.resizing += 1
+	console := open.handle
 	sync.mutex_unlock(&p.console_mutex)
 	result := conpty().resize(console, {i16(cols), i16(rows)})
 	sync.mutex_lock(&p.console_mutex)
-	p.resizing -= 1
+	// A close may have begun meanwhile; it waits for this count to reach zero.
+	switch &c in p.console {
+	case Console_Open:
+		c.resizing -= 1
+	case Console_Closing:
+		c.resizing -= 1
+	}
 	sync.cond_broadcast(&p.console_changed)
 	sync.mutex_unlock(&p.console_mutex)
 	if result < 0 {
@@ -553,24 +579,28 @@ wait_exit :: proc(p: ^Pty) -> (code: u32, err: Error) {
 
 close_console :: proc(p: ^Pty) {
 	sync.mutex_lock(&p.console_mutex)
-	for p.closing {
+	closing: ^Console_Closing
+	for closing == nil {
+		switch c in p.console {
+		case nil:
+			sync.mutex_unlock(&p.console_mutex)
+			return
+		case Console_Closing:
+			sync.cond_wait(&p.console_changed, &p.console_mutex)
+		case Console_Open:
+			p.console = Console_Closing(c)
+			closing = &p.console.(Console_Closing)
+		}
+	}
+	for closing.resizing != 0 {
 		sync.cond_wait(&p.console_changed, &p.console_mutex)
 	}
-	if p.console == nil {
-		sync.mutex_unlock(&p.console_mutex)
-		return
-	}
-	p.closing = true
-	for p.resizing != 0 {
-		sync.cond_wait(&p.console_changed, &p.console_mutex)
-	}
-	console := p.console
-	p.console = nil
+	console := closing.handle
 	sync.mutex_unlock(&p.console_mutex)
 	// After exit, closing delivers EOF and may wait for the reader to drain output.
 	conpty().close(console)
 	sync.mutex_lock(&p.console_mutex)
-	p.closing = false
+	p.console = nil
 	sync.cond_broadcast(&p.console_changed)
 	sync.mutex_unlock(&p.console_mutex)
 }

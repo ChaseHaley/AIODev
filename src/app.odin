@@ -557,7 +557,6 @@ session_open :: proc(
 		Session_Entry {
 			id = app.next_session_id,
 			session = session,
-			status = term.status(session).kind,
 			profile_id = owned_id,
 		},
 	); allocation_error != nil {
@@ -566,6 +565,7 @@ session_open :: proc(
 		return false
 	}
 	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config)
+	session_status_sync(&app.sessions[len(app.sessions) - 1])
 	configure_session(app, session)
 	return true
 }
@@ -593,6 +593,16 @@ session_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
 	return nil
 }
 
+// Session_Entry.status is the frame's copy of the session's process phase, so drawing never takes
+// the session mutex. This is its only writer; it reports whether the copy changed.
+@(private)
+session_status_sync :: proc(entry: ^Session_Entry) -> (status: term.Status, changed: bool) {
+	status = term.status(entry.session)
+	changed = status.kind != entry.status
+	entry.status = status.kind
+	return
+}
+
 session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	geometry := term.geometry(entry.session)
 	profile, requested := settings.profile_resolve(&app.settings, entry.profile_id)
@@ -608,8 +618,7 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	term.restart(entry.session, config)
 	pane_header_launch(&entry.header, config)
 	pane_header_refresh(entry)
-	status := term.status(entry.session)
-	entry.status = status.kind
+	session_status_sync(entry)
 	mark_all_dirty(app)
 }
 
@@ -630,11 +639,8 @@ update_sessions :: proc(app: ^App) {
 		if term.take_status_change(s) {
 			workspace_status_changed = true
 			layout_state_touch(app)
-			status := term.status(s)
-			if status.kind != entry.status {
-				entry.status = status.kind
-				mark_all_dirty(app)
-			}
+			status, changed := session_status_sync(entry)
+			if changed {mark_all_dirty(app)}
 			if status.kind == .Exited && close_exited_session(app, entry.id) {continue}
 		}
 		if term.take_title_change(s) {
