@@ -339,6 +339,7 @@ tick :: proc(app: ^App) {
 	}
 	if len(events) > 0 {layout_state_touch(app)}
 	update_sessions(app)
+	markdown_find_tick(app)
 	update_processes(app)
 	if ready, unreadable := process_icons_adopt(&app.processes); ready || unreadable != "" {
 		if unreadable != "" {
@@ -432,6 +433,7 @@ wait_timeout :: proc(app: ^App) -> u32 {
 			return 0
 		}
 	}
+	if markdown_find_pending(app) {return 0}
 	if !found {
 		return INFINITE
 	}

@@ -8,6 +8,7 @@ import "aio:markdown"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
+import "aio:term"
 import "aio:ui"
 import "core:log"
 import "core:os"
@@ -22,6 +23,9 @@ MARKDOWN_POLL :: 500 * time.Millisecond
 // Far beyond any real document; a larger file would stall the frame that lays it out.
 @(private)
 MARKDOWN_SIZE_LIMIT :: 16 * 1024 * 1024
+// The same step as a terminal's search, so a long document never stalls a frame.
+@(private)
+MARKDOWN_FIND_BUDGET :: 2 * time.Millisecond
 
 Markdown_State :: enum u8 {
 	Loaded,
@@ -40,6 +44,7 @@ Markdown_Pane :: struct {
 	state:                  Markdown_State,
 	document:               markdown.Document,
 	view:                   ui.Markdown_View,
+	search:                 markdown.Search,
 	revision:               u64,
 	modified:               time.Time,
 	size:                   i64,
@@ -62,6 +67,7 @@ markdown_find :: proc(app: ^App, id: u32) -> ^Markdown_Pane {
 markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 	markdown.document_destroy(&pane.document)
 	ui.markdown_view_destroy(&pane.view)
+	markdown.search_destroy(&pane.search)
 	delete(pane.path)
 	delete(pane.title)
 	delete(pane.directory)
@@ -145,7 +151,49 @@ markdown_pane_load :: proc(pane: ^Markdown_Pane) -> bool {
 	pane.state, pane.modified, pane.size = .Loaded, info.modification_time, info.size
 	pane.revision += 1
 	ui.markdown_selection_clear(&pane.view)
+	markdown.search_restart(&pane.search)
 	return true
+}
+
+// A pane not showing its document has nothing to find, whatever it last searched.
+@(require_results)
+markdown_find_summary :: proc(pane: ^Markdown_Pane) -> term.Search_Summary {
+	s := &pane.search
+	if !s.active {return {selected = -1}}
+	if pane.state != .Loaded {return {active = true, complete = true, selected = -1, invalid = s.invalid}}
+	total := len(s.matches)
+	return {
+		active = true,
+		complete = s.complete || s.invalid,
+		total = total,
+		selected = s.selected,
+		invalid = s.invalid,
+		revision = s.revision,
+	}
+}
+
+markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
+	if pane.state != .Loaded || !markdown.search_select(&pane.search, upward) {return}
+	match := pane.search.matches[pane.search.selected]
+	if shown, found := markdown_pane_rect(w, pane.id); found {
+		visible := int(markdown_geometry_of(w, shown.rect).area.height)
+		ui.markdown_reveal(&pane.view, match.start, match.end, visible)
+	}
+}
+
+@(require_results)
+markdown_find_pending :: proc(app: ^App) -> bool {
+	for pane in app.markdown_panes {if markdown.search_pending(&pane.search) {return true}}
+	return false
+}
+
+markdown_find_tick :: proc(app: ^App) {
+	for pane in app.markdown_panes {
+		if !markdown.search_pending(&pane.search) {continue}
+		before := markdown_find_summary(pane)
+		markdown.search_update(&pane.search, &pane.document, MARKDOWN_FIND_BUDGET)
+		if markdown_find_summary(pane) != before {mark_all_dirty(app)}
+	}
 }
 
 @(private)
@@ -394,7 +442,19 @@ markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card:
 		view := &pane.view
 		ui.markdown_view_fit(view, &pane.document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
 		ui.markdown_scroll_by(view, 0, int(g.area.height))
-		if result := ui.markdown_draw(view, &pane.document, g, &w.list, &w.ui_text, app.theme); result != .Ok {
+		find: ui.Markdown_Find
+		if pane.search.active {
+			c := app.settings.colors
+			find = {
+				matches = pane.search.matches[:],
+				selected = pane.search.selected,
+				foreground = color(c.search_foreground),
+				background = color(c.search_background),
+				selected_background = color(c.search_selected_background),
+			}
+		}
+		if result := ui.markdown_draw(view, &pane.document, g, &w.list, &w.ui_text, app.theme, find);
+		   result != .Ok {
 			return result
 		}
 		if bar, visible := markdown_bar(w, pane, shown.rect); visible {
@@ -450,6 +510,11 @@ markdown_select_all :: proc(app: ^App, w: ^Window) {
 markdown_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	pane_header_cancel(w)
 	if e.pressed {w.suppressed_key = e}
+	has_find := ui.find_has_keyboard(&w.find)
+	if has_find && e.pressed && e.key == .Escape && w.leader_until == {} {
+		find_close(app, w, find_target(app, w))
+		return
+	}
 	literal := false
 	switch leader_key(app, w, e) {
 	case .Consumed:
@@ -460,7 +525,7 @@ markdown_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
-	if clipboard_chord(logical) == .Copy {
+	if !has_find && clipboard_chord(logical) == .Copy {
 		markdown_copy(app, w)
 		return
 	}
@@ -470,6 +535,10 @@ markdown_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			command_run(app, w, action, .Key)
 			return
 		}
+	}
+	if has_find {
+		find_bar_key(app, w, e, logical)
+		return
 	}
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	if modifiers == {.Control} && logical.key == .A {

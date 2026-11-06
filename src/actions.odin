@@ -2,6 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:layout"
+import "aio:markdown"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
@@ -189,7 +190,7 @@ ACTIONS :: [Action]Action_Info {
 		{{.V, {.Control, .Shift}}, {.Insert, {.Shift}}},
 	},
 	.Select_All = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}},
-	.Find = {"terminal.find", "Find in Scrollback", {{.F, {.Control, .Shift}}}},
+	.Find = {"terminal.find", "Find", {{.F, {.Control, .Shift}}}},
 	.Clear_Scrollback      = {
 		"terminal.clear_scrollback",
 		"Clear Scrollback",
@@ -510,7 +511,9 @@ run_action :: proc(
 			markdown_copy(app, w)
 		}
 	case .Paste:
-		if entry != nil {
+		if ui.find_has_keyboard(&w.find) {
+			find_paste(app, w)
+		} else if entry != nil {
 			paste_clipboard(app, w, entry)
 		}
 	case .Select_All:
@@ -520,10 +523,11 @@ run_action :: proc(
 			markdown_select_all(app, w)
 		}
 	case .Find:
-		if entry == nil {return}
+		target := find_target(app, w)
+		if target == nil {return}
 		leader_cancel(w)
 		pane_header_cancel(w)
-		find_toggle(app, w, entry)
+		find_toggle(app, w, target)
 	case .Clear_Scrollback:
 		if entry != nil {
 			term.clear_scrollback(entry.session)
@@ -806,19 +810,24 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 	}
 }
 
-// Pastes into the find bar when it is open, otherwise into the shell. Text the shell would run line by line
-// waits for a second paste within PASTE_CONFIRM_DURATION.
-paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
+// Pastes the clipboard's first line into the find bar.
+find_paste :: proc(app: ^App, w: ^Window) {
 	text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
 	if !ok || len(text) == 0 {
 		return
 	}
-	if ui.find_has_keyboard(&w.find) {
-		line := text
-		if end := strings.index_any(text, "\r\n"); end >= 0 {
-			line = text[:end]
-		}
-		on_find_outcome(app, w, entry, ui.find_text(&w.find, line))
+	line := text
+	if end := strings.index_any(text, "\r\n"); end >= 0 {
+		line = text[:end]
+	}
+	on_find_outcome(app, w, find_target(app, w), ui.find_text(&w.find, line))
+}
+
+// Pastes into the shell. Text the shell would run line by line waits for a second paste within
+// PASTE_CONFIRM_DURATION.
+paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
+	text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
+	if !ok || len(text) == 0 {
 		return
 	}
 	if entry.status != .Running {
@@ -855,67 +864,139 @@ paste_confirm_cancel :: proc(app: ^App, w: ^Window) {
 	mark_all_dirty(app)
 }
 
+// What the window's find bar searches: whatever its focused pane shows.
+Find_Target :: union {
+	^Session_Entry,
+	^Markdown_Pane,
+}
+
+@(require_results)
+find_target :: proc(app: ^App, w: ^Window) -> Find_Target {
+	if pane := markdown_focused(app, w); pane != nil {return pane}
+	if entry := focused_session(app, w); entry != nil {return entry}
+	return nil
+}
+
+@(private)
+find_target_set :: proc(target: Find_Target, needle: string, options: term.Search_Options = {}) {
+	switch t in target {
+	case ^Session_Entry:
+		if t != nil {term.search_set_needle(t.session, needle, options)}
+	case ^Markdown_Pane:
+		if t != nil {markdown.search_set(&t.search, needle, options)}
+	}
+}
+
+@(private)
+find_target_select :: proc(w: ^Window, target: Find_Target, older: bool) {
+	switch t in target {
+	case ^Session_Entry:
+		if t != nil {term.search_select(t.session, older)}
+	case ^Markdown_Pane:
+		if t != nil {markdown_find_select(w, t, older)}
+	}
+}
+
+@(require_results)
+find_target_summary :: proc(target: Find_Target) -> (summary: term.Search_Summary, ok: bool) {
+	switch t in target {
+	case ^Session_Entry:
+		if t != nil {return term.search_summary(t.session), true}
+	case ^Markdown_Pane:
+		if t != nil {return markdown_find_summary(t), true}
+	}
+	return {}, false
+}
+
 // Opens find, gives an open bar back the keyboard, or closes a bar that has it.
-find_toggle :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
+find_toggle :: proc(app: ^App, w: ^Window, target: Find_Target) {
 	t := app.settings.terminal
 	switch {
 	case !w.find.open:
 		ui.find_open(&w.find, &app.find_history, t.find_keep_query, t.find_select_query)
-		on_find_outcome(app, w, entry, .Changed)
+		on_find_outcome(app, w, target, .Changed)
 	case !w.find.focused:
 		ui.find_focus(&w.find, t.find_select_query)
 	case:
-		find_close(app, w, entry)
+		find_close(app, w, target)
 	}
 	w.dirty = true
 }
 
 // Ends the search and leaves the viewport where the search put it.
-find_close :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
+find_close :: proc(app: ^App, w: ^Window, target: Find_Target) {
 	ui.find_close(&w.find, &app.find_history)
 	w.dirty = true
-	if entry != nil {
-		term.search_set_needle(entry.session, "")
-	}
+	find_target_set(target, "")
 }
 
 find_options :: proc(w: ^Window) -> term.Search_Options {
 	return {case_sensitive = w.find.case_sensitive, regex = w.find.regex}
 }
 
-on_find_outcome :: proc(app: ^App, w: ^Window, entry: ^Session_Entry, outcome: ui.Find_Outcome) {
+on_find_outcome :: proc(app: ^App, w: ^Window, target: Find_Target, outcome: ui.Find_Outcome) {
 	if outcome == .None {
 		return
 	}
 	w.dirty = true
-	if entry == nil {
+	if target == nil {
 		return
 	}
 	switch outcome {
 	case .None, .Moved:
 	case .Changed:
-		term.search_set_needle(entry.session, ui.field_string(&w.find.query), find_options(w))
+		find_target_set(target, ui.field_string(&w.find.query), find_options(w))
 	case .Older, .Newer:
 		ui.find_history_add(&app.find_history, &w.find)
-		term.search_select(entry.session, outcome == .Older)
+		find_target_select(w, target, outcome == .Older)
 	case .Closed:
-		find_close(app, w, entry)
+		find_close(app, w, target)
 	case .Case_Toggle, .Regex_Toggle, .Close:
 	}
 }
 
+// A key while the bar has the keyboard edits the query; none reach the pane.
+find_bar_key :: proc(app: ^App, w: ^Window, e, logical: platform.Key_Event) {
+	outcome: ui.Find_Outcome
+	switch clipboard_chord(logical) {
+	case .Copy:
+		clipboard_copy(app, ui.field_selected_text(&w.find.query))
+	case .Cut:
+		if clipboard_copy(app, ui.field_selected_text(&w.find.query)) {outcome = ui.find_text(&w.find, "")}
+	case .Paste:
+		find_paste(app, w)
+	case .None:
+		outcome = ui.find_key(&w.find, logical, &app.find_history)
+	}
+	if outcome == .Closed {
+		w.suppressed_key = e
+	}
+	target := find_target(app, w)
+	// A terminal is read from its newest line up and a document from its first line down, so Enter
+	// follows the reading direction. The bar's arrows always point the way they move.
+	if _, document := target.(^Markdown_Pane); document {
+		#partial switch outcome {
+		case .Older:
+			outcome = .Newer
+		case .Newer:
+			outcome = .Older
+		}
+	}
+	on_find_outcome(app, w, target, outcome)
+}
+
 // The find bar's match count: "3 of 17" once a match is selected.
-find_presentation :: proc(w: ^Window, entry: ^Session_Entry) -> (label: string, enabled: bool) {
-	if entry == nil || len(w.find.query.bytes) == 0 { return "0 of 0", false }
-	s := term.search_summary(entry.session)
+find_presentation :: proc(w: ^Window, target: Find_Target) -> (label: string, enabled: bool) {
+	s, ok := find_target_summary(target)
+	if !ok || len(w.find.query.bytes) == 0 { return "0 of 0", false }
 	if s.invalid { return "Invalid expression", false }
 	if !s.complete { return fmt.tprintf("%d of %d · Searching…", s.selected + 1, s.total), s.total > 0 }
 	if s.total == 0 { return "0 of 0", false }
 	return fmt.tprintf("%d of %d", s.selected + 1, s.total), true
 }
 
-find_controls :: proc(w: ^Window, entry: ^Session_Entry) -> (l: ui.Find_Layout, enabled: bool) {
-	label, available := find_presentation(w, entry)
+find_controls :: proc(w: ^Window, target: Find_Target) -> (l: ui.Find_Layout, enabled: bool) {
+	label, available := find_presentation(w, target)
 	text := ui.text_styled(&w.ui_text, .Detail)
 	return ui.find_layout(f32(w.width), w.scale, ui.text_width(&text, label)), available
 }

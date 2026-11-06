@@ -317,26 +317,8 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			}
 		}
 	}
-	// The find bar has the keyboard: keys edit the query and none reach the shell.
 	if ui.find_has_keyboard(&w.find) {
-		outcome: ui.Find_Outcome
-		switch clipboard_chord(logical) {
-		case .Copy:
-			clipboard_copy(app, ui.field_selected_text(&w.find.query))
-		case .Cut:
-			if clipboard_copy(
-				app,
-				ui.field_selected_text(&w.find.query),
-			) {outcome = ui.find_text(&w.find, "")}
-		case .Paste:
-			paste_clipboard(app, w, entry)
-		case .None:
-			outcome = ui.find_key(&w.find, logical, &app.find_history)
-		}
-		if outcome == .Closed {
-			w.suppressed_key = e
-		}
-		on_find_outcome(app, w, entry, outcome)
+		find_bar_key(app, w, e, logical)
 		return
 	}
 	if e.pressed {
@@ -382,7 +364,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 		return
 	}
 	if ui.find_has_keyboard(&w.find) {
-		on_find_outcome(app, w, focused_session(app, w), ui.find_text(&w.find, text))
+		on_find_outcome(app, w, find_target(app, w), ui.find_text(&w.find, text))
 		return
 	}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {

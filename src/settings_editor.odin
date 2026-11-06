@@ -436,7 +436,7 @@ settings_focus :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> ^Window 
 editor_open :: proc(app: ^App, w: ^Window) -> ^Window {
 	if !gesture_cancel(app, w) {return nil}
 	palette_close(app, w)
-	find_close(app, w, focused_session(app, w))
+	find_close(app, w, find_target(app, w))
 	if workspace := settings_workspace(app, w); workspace != nil {return settings_focus(app, w, workspace)}
 	if !settings_load(app, &w.editor) {return nil}
 	tab, record_error := tab_record_reserve(w.workspace)

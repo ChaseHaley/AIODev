@@ -429,5 +429,5 @@ find_draw :: proc(
 		style       = .Body,
 		scale       = scale,
 	}
-	return field_box_draw(box, list, theme, field_box_baseline(box), f.focused, "Find in scrollback")
+	return field_box_draw(box, list, theme, field_box_baseline(box), f.focused, "Find")
 }
