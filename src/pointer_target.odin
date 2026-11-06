@@ -315,7 +315,7 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 // field is not modal: the press keeps the name typed so far and still reaches what it landed on.
 @(private = "file")
 rename_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	if !e.pressed {w.rename.dragging = false; return}
+	if !e.pressed {ui.field_release(&w.rename); return}
 	x, y := f32(e.x), f32(e.y)
 	if w.rename_mode == .Workspace && !rect_contains(rename_rect(w), x, y) {
 		rename_finish(app, w, true)

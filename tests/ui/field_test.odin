@@ -41,7 +41,8 @@ field_pointer_drag_selects_between_offsets :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_pointer(&f, 1, true, false), ui.Field_Change.Moved)
 	testing.expect_value(t, ui.field_pointer(&f, 6, false, false), ui.Field_Change.Moved)
 	testing.expect_value(t, ui.field_selected_text(&f), "éllo")
-	f.dragging = false
+	testing.expect(t, ui.field_release(&f))
+	testing.expect(t, !ui.field_release(&f), "a released field has no drag left to end")
 	testing.expect_value(t, ui.field_pointer(&f, 0, false, false), ui.Field_Change.None)
 	ui.field_pointer(&f, 0, true, true)
 	testing.expect_value(t, ui.field_selected_text(&f), "h")

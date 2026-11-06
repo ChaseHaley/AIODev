@@ -47,7 +47,8 @@ workspace_icon_color_open :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	workspace_picker_transition(w, .Tint, p.target_id)
 	p.selected, p.scroll = target.icon.tint, 0
-	p.query.dragging, w.dirty = false, true
+	ui.field_release(&p.query)
+	w.dirty = true
 }
 
 workspace_icon_color_back :: proc(w: ^Window) {

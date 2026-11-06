@@ -138,7 +138,8 @@ palette_edit_cancel :: proc(p: ^Palette) {
 	if p.edit.kind == .Shortcut {editor_destroy(&p.binding)}
 	edit_choices_clear(&p.edit)
 	p.edit.kind, p.edit.setting, p.edit.hover = .None, -1, -1
-	p.edit.field.dragging, p.edit.filter.dragging = false, false
+	field_release(&p.edit.field)
+	field_release(&p.edit.filter)
 }
 
 // The setting a result row shows, or nil when the row is not a setting.
@@ -604,7 +605,9 @@ palette_slider_drag :: proc(p: ^Palette, l: Palette_Layout, x: f32) -> Outcome {
 
 // Ends a pointer gesture: a released slider saves the value it shows.
 palette_pointer_release :: proc(p: ^Palette) -> Outcome {
-	p.query.dragging, p.edit.field.dragging, p.edit.filter.dragging = false, false, false
+	field_release(&p.query)
+	field_release(&p.edit.field)
+	field_release(&p.edit.filter)
 	if p.scroll_drag.active {
 		p.scroll_drag = {}
 		return .Changed
