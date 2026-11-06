@@ -53,6 +53,7 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 		focus  = focus,
 		zoomed = tab.tree.zoomed,
 		nodes  = nodes[:],
+		documents = tab.documents[:],
 	}
 	closed_push(app, {workspace = workspace.id}, {index = index, tab = saved})
 }

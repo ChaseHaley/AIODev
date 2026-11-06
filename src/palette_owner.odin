@@ -181,6 +181,7 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	workspace_picker_cancel(w, focus_lost)
 	w.tab_menu.open = false
 	w.profile_menu.open = false
+	document_menu_close(w)
 	w.rename.dragging = false
 	if w.rename_open {
 		if focus_lost && w.rename_mode == .Workspace {rename_finish(app, w, true)}

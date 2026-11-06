@@ -38,6 +38,7 @@ tab_record_commit :: proc(app: ^App, workspace: ^Workspace, tab: ^Tab, at := -1)
 // Preview tabs borrow their source pane's runtime, so freeing a record never closes sessions.
 tab_record_free :: proc(tab: ^Tab) {
 	layout.destroy(&tab.tree)
+	documents_destroy(&tab.documents)
 	delete(tab.title)
 	delete(tab.name)
 	free(tab)

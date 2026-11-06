@@ -84,6 +84,7 @@ profile_menu_open :: proc(
 	pane := layout.Node_Id(0),
 ) {
 	w.tab_menu.open = false
+	document_menu_close(w)
 	menu := &w.profile_menu
 	ui.menu_clear(&menu.menu)
 	menu.entries = {}

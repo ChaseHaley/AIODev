@@ -128,6 +128,7 @@ Window :: struct {
 	close_restore: [dynamic]u32,
 	tab_menu: Tab_Menu,
 	profile_menu: Profile_Menu,
+	document_menu: Document_Menu,
 	rename: ui.Text_Field,
 	rename_open: bool,
 	rename_target: Rename_Target,
@@ -202,6 +203,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.rail_rows = make([dynamic]Rail_Row)
 	ui.find_init(&w.find)
 	profile_menu_init(&w.profile_menu)
+	document_menu_init(&w.document_menu)
 	w.tab_hover, w.rail_hover, w.rail_pressed = -1, -1, -1
 	w.caption_hover = -1
 	w.divider_click_node = layout.INVALID_NODE
@@ -311,6 +313,7 @@ window_free :: proc(w: ^Window) {
 	delete(w.rail_rows)
 	ui.find_destroy(&w.find)
 	profile_menu_destroy(&w.profile_menu)
+	document_menu_destroy(&w.document_menu)
 	delete(w.rename.bytes)
 	workspace_picker_destroy(w)
 	delete(w.close_restore)
@@ -739,6 +742,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	if w.profile_menu.open {
 		if result := profile_menu_draw(app, w); result != .Ok {return frame, result}
 	}
+	if result := document_menu_draw(app, w); result != .Ok {return frame, result}
 	if workspace_picker_active(&w.workspace_picker) {
 		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
 	}

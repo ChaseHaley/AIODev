@@ -68,16 +68,18 @@ pane_header_draw :: proc(
 	controls: [ui.HEADER_BUTTONS]ui.Control_Motion
 	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
 	r := pane.rect
+	documents := pane_header_documents(app, w, pane)
 	if w.header_height == 0 {
-		if !w.split_overlay {return .Ok}
+		if !w.split_overlay && !documents.open {return .Ok}
 		return ui.split_overlay_draw(
 			&w.list,
 			&w.ui_text,
 			app.theme,
-			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale),
+			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale, documents.shown),
 			controls,
 			w.scale,
 			w.pointer,
+			documents,
 		)
 	}
 	icon_atlas: render.Rect
@@ -139,7 +141,19 @@ pane_header_draw :: proc(
 		status_text,
 		status_phase(app, w, status),
 		content_icon = pane.content.kind == .Markdown ? .Markdown : .None,
+		documents = documents,
 	)
+}
+
+@(private)
+pane_header_documents :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Documents {
+	if !CONTENT_POLICY[pane.content.kind].documents {return {}}
+	menu := &w.document_menu
+	return {
+		shown = true,
+		pinned = documents_any(app, w, pane.content),
+		open = menu.menu.open && menu.mode != .Link && menu.content == pane.content,
+	}
 }
 
 pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_Action, bool) {
@@ -147,8 +161,9 @@ pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_A
 	for pane in w.panes {
 		r := pane.rect
 		area := render.Rect{r.x, r.y, r.width, r.height}
-		l := ui.header_layout(area, w.scale)
-		if w.header_height == 0 {l = ui.split_overlay_layout(area, w.scale)}
+		documents := CONTENT_POLICY[pane.content.kind].documents
+		l := ui.header_layout(area, w.scale, documents)
+		if w.header_height == 0 {l = ui.split_overlay_layout(area, w.scale, documents)}
 		if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
 	}
 	return {}, .None, false
@@ -187,6 +202,7 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 		if chosen != .None {
 			names := [ui.Header_Action]string {
 				.None          = "",
+				.Documents     = "",
 				.Split_Right   = "pane.split_right",
 				.Split_Down    = "pane.split_down",
 				.Zoom          = "pane.zoom",
@@ -214,6 +230,10 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 					pane.rect.x + 8 * w.scale,
 					pane.rect.y + ui.HEADER_HEIGHT * w.scale,
 				)
+				return true
+			}
+			if action == .Documents {
+				document_menu_open_pane(app, w, pane)
 				return true
 			}
 			for &view in w.views {

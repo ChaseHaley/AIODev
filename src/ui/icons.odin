@@ -42,6 +42,9 @@ Icon :: enum {
 	View_Comfy,
 	View_Dense,
 	Markdown,
+	Document,
+	Folder,
+	Globe,
 	None,
 }
 
@@ -132,6 +135,15 @@ icon_draw :: proc(
 		pen_path(p, {3.5, 10.5}, {3.5, 5.5}, {6, 8}, {8.5, 5.5}, {8.5, 10.5})
 		pen_path(p, {11.5, 5.5}, {11.5, 10.5})
 		pen_path(p, {10, 9}, {11.5, 10.5}, {13, 9})
+	case .Document:
+		pen_path(p, {3, 2}, {10, 2}, {13, 5}, {13, 14}, {3, 14}, {3, 2})
+	case .Folder:
+		pen_path(p, {2, 3.5}, {6, 3.5}, {8, 5.5}, {14, 5.5}, {14, 13}, {2, 13}, {2, 3.5})
+	case .Globe:
+		pen_arc(p, 8, 8, 6.5, 0, 2 * math.PI)
+		pen_path(p, {1.5, 8}, {14.5, 8})
+		pen_path(p, {8, 1.5}, {5.5, 4.5}, {4.5, 8}, {5.5, 11.5}, {8, 14.5})
+		pen_path(p, {8, 1.5}, {10.5, 4.5}, {11.5, 8}, {10.5, 11.5}, {8, 14.5})
 	case .Close:
 		pen_path(p, {4, 4}, {12, 12})
 		pen_path(p, {12, 4}, {4, 12})

@@ -4,10 +4,11 @@ import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
-// One slot per Header_Action from Split_Right through Close, in that order, left to right.
-HEADER_BUTTONS :: 6
+// One slot per Header_Action from Documents through Close, in that order, left to right.
+HEADER_BUTTONS :: 7
 Header_Action :: enum {
 	None,
+	Documents,
 	Split_Right,
 	Split_Down,
 	Zoom,
@@ -19,9 +20,23 @@ Header_Action :: enum {
 Header_Layout :: struct {
 	panel, title, badge: render.Rect,
 	buttons:             [HEADER_BUTTONS]render.Rect,
+	// Sets the Documents button apart from the controls for the pane itself.
+	divider:             render.Rect,
 }
 
-header_layout :: proc(area: render.Rect, scale: f32) -> Header_Layout {
+// A hairline with SPACE_1 either side.
+@(private = "file")
+header_divider :: proc(next: render.Rect, panel_y, panel_height, scale: f32) -> render.Rect {
+	height := min(ICON_BUTTON * scale, panel_height)
+	return {next.x - SPACE_1 * scale - scale, panel_y + (panel_height - height) / 2, scale, height}
+}
+
+// How a pane's Documents button shows. A pane that takes no pins has no button.
+Header_Documents :: struct {
+	shown, pinned, open: bool,
+}
+
+header_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Header_Layout {
 	l := Header_Layout {
 		panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT * scale)},
 	}
@@ -32,6 +47,12 @@ header_layout :: proc(area: render.Rect, scale: f32) -> Header_Layout {
 	end := area.x + area.width - SPACE_1 * scale
 	{
 		for i := len(l.buttons) - 1; i >= 0; i -= 1 {
+			if i == int(Header_Action.Documents) - 1 {
+				gap := 2 * SPACE_1 * scale + scale
+				if !documents || end - gap - button < area.x + SPACE_1 * scale {break}
+				l.divider = header_divider(l.buttons[i + 1], l.panel.y, l.panel.height, scale)
+				end -= gap
+			}
 			if end - button < area.x + SPACE_1 * scale {break}
 			l.buttons[i] = {
 				end - button,
@@ -117,6 +138,8 @@ shell_badge_draw :: proc(
 @(private)
 header_icon :: proc(action: Header_Action, zoomed, fullscreen, linked: bool) -> Icon {
 	#partial switch action {
+	case .Documents:
+		return .Document
 	case .Split_Down:
 		return .Split_Down
 	case .Zoom:
@@ -151,8 +174,9 @@ header_draw :: proc(
 	status_text: string = "",
 	status_phase: f32 = 0,
 	content_icon: Icon = .None,
+	documents: Header_Documents = {shown = true},
 ) -> glyphs.Result {
-	l := header_layout(area, scale)
+	l := header_layout(area, scale, documents.shown)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
 	if render.push_layer(list, l.panel) != .None {return .Ok}
@@ -242,8 +266,11 @@ header_draw :: proc(
 			danger.a *= 0.14
 			b.press_color = danger
 		}
+		is_documents := Header_Action(i + 1) == .Documents
+		if is_documents {b.selected = documents.open}
 		face, ink, err := button_draw(list, theme, b, scale, pointer)
 		if err != .None {return .Ok}
+		if is_documents && documents.pinned {ink = theme.text}
 		icon_draw(
 			list,
 			header_icon(Header_Action(i + 1), zoomed, fullscreen, linked),
@@ -253,17 +280,20 @@ header_draw :: proc(
 			scale,
 		)
 	}
+	if l.divider.width > 0 {draw_rect(list, {rect = l.divider, color = theme.border})}
 	return .Ok
 }
 
 
 // Single-pane tabs keep their full terminal height, so their split controls float in a small pill at the
 // pane's top-right corner instead of a header row.
-split_overlay_layout :: proc(area: render.Rect, scale: f32) -> Header_Layout {
-	// A grip and two compact buttons in a toolbar-height pill, SPACE_2 from the pane's corner.
+split_overlay_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Header_Layout {
+	// A grip and compact buttons in a toolbar-height pill, SPACE_2 from the pane's corner.
 	button := HEIGHT_COMPACT * scale
 	inset := (HEIGHT_TOOLBAR - HEIGHT_COMPACT) / 2 * scale
+	gap := 2 * SPACE_1 * scale + scale
 	width, height := 3 * button + 2 * inset, HEIGHT_TOOLBAR * scale
+	if documents {width += button + gap}
 	l := Header_Layout {
 		panel = {
 			max(area.x, area.x + area.width - width - SPACE_2 * scale),
@@ -273,8 +303,14 @@ split_overlay_layout :: proc(area: render.Rect, scale: f32) -> Header_Layout {
 		},
 	}
 	l.title = {l.panel.x + inset, l.panel.y + inset, button, button}
-	l.buttons[0] = {l.title.x + button, l.title.y, button, button}
-	l.buttons[1] = {l.buttons[0].x + button, l.title.y, button, button}
+	x := l.title.x + button
+	if documents {
+		l.buttons[0] = {x, l.title.y, button, button}
+		x += button + gap
+	}
+	l.buttons[1] = {x, l.title.y, button, button}
+	l.buttons[2] = {x + button, l.title.y, button, button}
+	if documents {l.divider = header_divider(l.buttons[1], l.panel.y, l.panel.height, scale)}
 	return l
 }
 
@@ -286,6 +322,7 @@ split_overlay_draw :: proc(
 	controls: [HEADER_BUTTONS]Control_Motion,
 	scale: f32,
 	pointer: [2]f32 = {},
+	documents: Header_Documents = {},
 ) -> glyphs.Result {
 	radius := RADIUS_OVERLAY * scale
 	if render.push_layer(list, l.panel, radius) != .None {return .Ok}
@@ -293,18 +330,19 @@ split_overlay_draw :: proc(
 	draw_rect(list, {rect = l.panel, color = theme.border, radius = radius, stroke = scale})
 	icon_draw(list, .Grip, l.title, theme.muted, ICON_BUTTON, scale)
 	buttons := l.buttons
-	for button, i in buttons[:2] {
-		if icon_button_draw(
-			   list,
-			   theme,
-			   button,
-			   header_icon(Header_Action(i + 1), false, false, false),
-			   controls[i].hover.value,
-			   controls[i].press.value,
-			   scale,
-			   pointer,
-		   ) !=
-		   .None {return .Ok}
+	for button, i in buttons[:3] {
+		if button.width == 0 {continue}
+		b := Button {
+			rect     = button,
+			hover    = controls[i].hover.value,
+			press    = controls[i].press.value,
+			selected = i == 0 && documents.open,
+		}
+		face, ink, err := button_draw(list, theme, b, scale, pointer)
+		if err != .None {return .Ok}
+		if i == 0 && documents.pinned {ink = theme.text}
+		icon_draw(list, header_icon(Header_Action(i + 1), false, false, false), face, ink, ICON_BUTTON, scale)
 	}
+	if l.divider.width > 0 {draw_rect(list, {rect = l.divider, color = theme.border})}
 	return .Ok
 }

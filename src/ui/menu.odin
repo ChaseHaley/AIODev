@@ -9,7 +9,7 @@ MENU_WIDTH :: f32(280)
 MENU_ROW_HEIGHT :: HEIGHT_STANDARD
 // A hairline with SPACE_1 above and below.
 MENU_SEPARATOR_HEIGHT :: 2 * SPACE_1 + 1
-MENU_MAX_ITEMS :: 40
+MENU_MAX_ITEMS :: 64
 
 Menu_Item :: struct {
 	label, shortcut, icon: string,

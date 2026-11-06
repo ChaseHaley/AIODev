@@ -13,6 +13,7 @@ Pointer_Target :: enum u8 {
 	Workspace_Picker,
 	Tab_Menu,
 	Profile_Menu,
+	Document_Menu,
 	Status_Inbox,
 	Rename,
 	// Window caption buttons, which stay usable over every overlay.
@@ -64,6 +65,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Workspace_Picker = {picker_claims, picker_hover, workspace_picker_button, nil, picker_tooltip},
 	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil, nil},
 	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil, nil},
+	.Document_Menu    = {documents_claims, documents_hover, documents_press, nil, documents_tooltip},
 	.Status_Inbox     = {inbox_claims, inbox_hover, status_inbox_button, nil, nil},
 	.Rename           = {rename_claims, rename_hover, rename_button, nil, nil},
 	.Caption          = {caption_claims, caption_hover, caption_press, caption_release, caption_tooltip},
@@ -262,6 +264,28 @@ profile_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: plat
 @(private = "file")
 profile_menu_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	_ = profile_menu_button(app, w, e)
+}
+
+// Document menu
+
+@(private = "file")
+documents_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return w.document_menu.menu.open}
+
+@(private = "file")
+documents_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+	if owner != .Document_Menu {return}
+	x, y := move_point(e)
+	document_menu_hover(app, w, x, y, .Left in e.buttons)
+}
+
+@(private = "file")
+documents_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	document_menu_button(app, w, e)
+}
+
+@(private = "file")
+documents_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	return document_menu_tooltip(w, x, y)
 }
 
 // Activity inbox
@@ -718,6 +742,7 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	_, action, _ := pane_header_hit(w, x, y)
 	#partial switch action {
+	case .Documents: return "Documents"
 	case .Split_Right: return "Split right"
 	case .Split_Down: return "Split down"
 	case .Zoom: return "Zoom"

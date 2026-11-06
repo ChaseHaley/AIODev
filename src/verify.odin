@@ -588,6 +588,11 @@ when AIO_CONTROL {
 				{"rail.profile", verify_workspace_rect(rail_profile_rect(w))},
 				{"profile_menu.open", fmt.tprintf("%t", w.profile_menu.open)},
 				{"profile_menu.count", fmt.tprintf("%d", w.profile_menu.count)},
+				{"documents.open", fmt.tprintf("%t", w.document_menu.menu.open)},
+				{"documents.mode", strings.to_lower(fmt.tprintf("%v", w.document_menu.mode), context.temp_allocator)},
+				{"documents.count", fmt.tprintf("%d", w.document_menu.count)},
+				{"documents.popout", fmt.tprintf("%t", w.document_menu.popout)},
+				{"documents.url_open", fmt.tprintf("%t", w.document_menu.url_open)},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
 				{

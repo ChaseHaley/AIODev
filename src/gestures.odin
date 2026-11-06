@@ -45,6 +45,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.rail_resizing = false
 	ui.armed_cancel(&w.status.panel_button_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
+	w.document_menu.url.dragging = false
 	w.workspace_picker.order = {}
 	_ = workspace_order_animate(w, app.animations, time.tick_now())
 	link_hover_clear(w)
@@ -184,6 +185,12 @@ content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 	if e.button == .Left && !w.selecting && .Control in e.modifiers {
 		if link_click(app, w, x, y) {
+			return
+		}
+	}
+	if e.button == .Right && !w.selecting && .Control in e.modifiers {
+		if document_menu_open_link(app, w, x, y) {
+			w.header_buttons += {.Right}
 			return
 		}
 	}

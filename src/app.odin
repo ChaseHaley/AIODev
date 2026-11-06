@@ -6,6 +6,7 @@ import "aio:control"
 import "aio:font"
 import "aio:glyphs"
 import "aio:instance"
+import "aio:layout"
 import platform_api "aio:platform"
 import "aio:perf"
 import "aio:program_art"
@@ -76,10 +77,12 @@ Session_Entry :: struct {
 	program_bridge:      bool,
 	// How the adopted program was started, as a reopened pane shows it; empty at the prompt.
 	program_command:     string,
+	documents:           Document_List,
 }
 
 // Release only the entry's owned memory; callers own removal from app.sessions.
 session_entry_destroy :: proc(entry: ^Session_Entry) {
+	documents_destroy(&entry.documents)
 	pane_header_destroy(&entry.header)
 	delete(entry.name)
 	delete(entry.profile_id)
@@ -105,6 +108,10 @@ App :: struct {
 	markdown_deadline:     time.Tick,
 	markdown_pick:         ^platform_api.File_Pick,
 	markdown_pick_window:  platform_api.Window_Id,
+	// The file dialog behind Add File and Add Folder, and the pane it is choosing for.
+	document_pick:         ^platform_api.File_Pick,
+	document_pick_window:  platform_api.Window_Id,
+	document_pick_content: layout.Content,
 	settings_path:         string,
 	log_path:              string,
 	fonts:                 ^font.System,

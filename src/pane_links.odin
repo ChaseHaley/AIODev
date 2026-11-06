@@ -62,6 +62,7 @@ pane_link_route :: proc(action: Action) -> Pane_Link_Route {
 	     .Fill_Window_Pane,
 	     .Fullscreen_Pane,
 	     .Linked_Window,
+	     .Show_Documents,
 	     .Focus_Left,
 	     .Focus_Right,
 	     .Focus_Up,

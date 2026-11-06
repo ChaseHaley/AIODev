@@ -38,6 +38,7 @@ Markdown_State :: enum u8 {
 Markdown_Pane :: struct {
 	id:                     u32,
 	path, title, directory: string,
+	documents: Document_List,
 	// False until the path has passed the local-file checks. A path from the saved layout may be
 	// gone or point anywhere, so the poll must not touch it directly.
 	verified:               bool,
@@ -65,6 +66,7 @@ markdown_find :: proc(app: ^App, id: u32) -> ^Markdown_Pane {
 
 @(private)
 markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
+	documents_destroy(&pane.documents)
 	markdown.document_destroy(&pane.document)
 	ui.markdown_view_destroy(&pane.view)
 	markdown.search_destroy(&pane.search)
@@ -79,6 +81,7 @@ markdown_panes_destroy :: proc(app: ^App) {
 		platform.file_pick_destroy(app.markdown_pick)
 		app.markdown_pick = nil
 	}
+	document_pick_destroy(app)
 	for pane in app.markdown_panes {markdown_pane_destroy(pane)}
 	delete(app.markdown_panes)
 	app.markdown_panes = nil
@@ -207,6 +210,7 @@ markdown_referenced :: proc(app: ^App, id: u32) -> bool {
 // exists, and the file attributes it reads do not download a cloud placeholder.
 markdown_tick :: proc(app: ^App) {
 	markdown_pick_tick(app)
+	document_pick_tick(app)
 	if app.markdown_deadline == {} {return}
 	now := time.tick_now()
 	if time.tick_diff(now, app.markdown_deadline) > 0 {return}

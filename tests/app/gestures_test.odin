@@ -293,7 +293,7 @@ gesture_click_header :: proc(
 // Settings is ordinary pane content, so its header controls run the same commands as a terminal.
 @(test)
 gestures_settings_header_split_buttons_create_terminal_panes :: proc(t: ^testing.T) {
-	for button in ([?]int{0, 1}) {
+	for action in ([?]ui.Header_Action{.Split_Right, .Split_Down}) {
 		f: Palette_Fixture
 		defer palette_fixture_destroy(t, &f)
 		if !palette_fixture_create(t, &f, "gesture-settings-split") {return}
@@ -303,7 +303,7 @@ gestures_settings_header_split_buttons_create_terminal_panes :: proc(t: ^testing
 		sessions, tabs := len(s.sessions), len(w.workspace.tabs)
 		h, found := gesture_settings_header(w)
 		if !testing.expect(t, found) {return}
-		gesture_click_header(s, w, button, h)
+		gesture_click_header(s, w, int(action) - 1, h)
 		testing.expect_value(t, len(w.panes), 2)
 		testing.expect_value(t, len(w.workspace.tabs), tabs)
 		testing.expect_value(t, len(s.sessions), sessions + 1)
@@ -320,11 +320,11 @@ gestures_settings_header_zoom_and_close_drive_the_settings_pane :: proc(t: ^test
 	if !testing.expect(t, app.settings_active(w)) {return}
 	h, found := gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	gesture_click_header(s, w, 2, h)
+	gesture_click_header(s, w, int(ui.Header_Action.Zoom) - 1, h)
 	if !testing.expect(t, w.tree.zoomed) {return}
 	h, found = gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	gesture_click_header(s, w, 2, h)
+	gesture_click_header(s, w, int(ui.Header_Action.Zoom) - 1, h)
 	testing.expect(t, !w.tree.zoomed)
 	sessions, tabs := len(s.sessions), len(w.workspace.tabs)
 	h, found = gesture_settings_header(w)

@@ -32,6 +32,7 @@ Saved_Workspace :: struct {
 	selected: int,
 	open:     bool,
 	tabs:     []Saved_Tab,
+	documents: []Document `json:"documents,omitempty"`,
 }
 
 // Nodes are stored root first; splits refer to their children by index.
@@ -40,6 +41,7 @@ Saved_Tab :: struct {
 	focus:  int,
 	zoomed: bool,
 	nodes:  []Saved_Node,
+	documents: []Document `json:"documents,omitempty"`,
 }
 
 Saved_Node :: struct {
@@ -60,6 +62,7 @@ Saved_Node :: struct {
 	linked:    bool,
 	// A linked pane's window, as a slice because only an empty one is left out of the file.
 	window:    []platform.Window_Placement `json:"window,omitempty"`,
+	documents: []Document `json:"documents,omitempty"`,
 }
 
 // Schedules a save check; repeated calls before it runs coalesce into one.
@@ -107,7 +110,13 @@ layout_state_encode :: proc(
 			if layout_node_encode(app, &tab.tree, tab.tree.root, &nodes, &focus, processes) < 0 {
 				return "", false
 			}
-			tabs[i] = {name = tab.name, focus = focus, zoomed = tab.tree.zoomed, nodes = nodes[:]}
+			tabs[i] = {
+				name = tab.name,
+				focus = focus,
+				zoomed = tab.tree.zoomed,
+				nodes = nodes[:],
+				documents = tab.documents[:],
+			}
 		}
 		append(
 			&workspaces,
@@ -117,6 +126,7 @@ layout_state_encode :: proc(
 				selected = workspace.selected,
 				open = window_for_workspace(app, workspace) != nil,
 				tabs = tabs,
+				documents = workspace.documents[:],
 			},
 		)
 	}
@@ -180,7 +190,9 @@ layout_link_encode :: proc(app: ^App, tree: ^layout.Layout, slot: layout.Node_Id
 layout_pane_encode :: proc(app: ^App, content: layout.Content, processes: []pty.Process_Info) -> Saved_Node {
 	saved := Saved_Node{content = content.kind}
 	if content.kind == .Markdown {
-		if pane := markdown_find(app, content.id); pane != nil {saved.path = pane.path}
+		if pane := markdown_find(app, content.id); pane != nil {
+			saved.path, saved.documents = pane.path, pane.documents[:]
+		}
 	}
 	if !pane_owns_session(content.kind) {return saved}
 	entry := session_find(app, content.id)
@@ -189,6 +201,7 @@ layout_pane_encode :: proc(app: ^App, content: layout.Content, processes: []pty.
 	directory, _ := pane_directory_of(entry, program)
 	saved.profile, saved.directory, saved.name = entry.profile_id, directory, entry.name
 	saved.keep_open, saved.command = entry.keep_open, command
+	saved.documents = entry.documents[:]
 	return saved
 }
 
@@ -284,6 +297,7 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 		}
 	}
 	if icon.tint >= 0 && icon.tint < len(WORKSPACE_ICON_COLORS) {workspace.icon.tint = icon.tint}
+	documents_restore(&workspace.documents, saved.documents)
 	selected := saved.selected
 	for &tab, i in saved.tabs {
 		if !layout_tab_restore(app, workspace, &tab) && i <= saved.selected {selected -= 1}
@@ -322,7 +336,10 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 			path := saved.nodes[i].path
 			document := path != "" && utf8.valid_string(path) ? markdown_pane_create(app, path, false) : nil
 			restored = document != nil
-			if restored {pane.content.id = document.id}
+			if restored {
+				pane.content.id = document.id
+				documents_restore(&document.documents, saved.nodes[i].documents)
+			}
 		}
 		if !restored {
 			layout_tab_discard(app, tab)
@@ -330,6 +347,7 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 		}
 	}
 	if name, err := strings.clone(saved.name); err == nil {tab.name = name}
+	documents_restore(&tab.documents, saved.documents)
 	tab_record_commit(app, workspace, tab)
 	for i in 0 ..< len(tab.tree.nodes) {
 		slot := layout.Node_Id(i)
@@ -357,6 +375,7 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> bool {
 	if !session_open(app, "", directory, saved.profile, command) {return false}
 	entry := &app.sessions[len(app.sessions) - 1]
 	entry.keep_open = saved.keep_open
+	documents_restore(&entry.documents, saved.documents)
 	if saved.name != "" && utf8.valid_string(saved.name) {
 		if name, err := strings.clone(saved.name); err == nil {entry.name = name}
 	}

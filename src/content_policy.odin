@@ -11,13 +11,15 @@ Content_Policy :: struct {
 	one_per_workspace: bool,
 	// May have a linked window.
 	linkable:          bool,
+	// Has a Documents button and its own pinned documents.
+	documents:         bool,
 }
 
 @(rodata)
 CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
-	.Terminal = {owns_session = true, linkable = true},
+	.Terminal = {owns_session = true, linkable = true, documents = true},
 	.Settings = {one_per_workspace = true},
-	.Markdown = {},
+	.Markdown = {documents = true},
 }
 
 // The title of content that does not title itself through a session.

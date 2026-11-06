@@ -142,6 +142,7 @@ Action :: enum u32 {
 	App_Commands,
 	Reopen_Closed,
 	Linked_Window,
+	Show_Documents,
 }
 
 @(private)
@@ -413,6 +414,7 @@ ACTIONS :: [Action]Action_Info {
 	.App_Commands = {"app.commands", "List Commands", nil},
 	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}},
 	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil},
+	.Show_Documents = {"pane.documents", "Show Documents", nil},
 }
 
 @(require_results)
@@ -487,6 +489,8 @@ run_action :: proc(
 	switch action {
 	case .Linked_Window:
 		pane_link_toggle(app, w)
+	case .Show_Documents:
+		document_menu_open_focused(app, w)
 	case .Show_Build_Info:
 		show_build_info(app)
 	case .Command_Palette:

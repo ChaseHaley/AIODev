@@ -86,6 +86,7 @@ dock_divider_menu_open :: proc(app: ^App, w: ^Window, x, y: f32) {
 		if !dock_divider(hit.node) {continue}
 		if !gesture_cancel(app, w) {return}
 		w.profile_menu.open = false
+		document_menu_close(w)
 		w.tab_menu = {open = true, count = 1, position = {x, y}, dock = hit.node}
 		w.dirty = true
 		return

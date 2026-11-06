@@ -18,6 +18,7 @@ Tab :: struct {
 	tree: layout.Layout,
 	title: string,
 	name: string,
+	documents: Document_List,
 }
 
 Workspace :: struct {
@@ -30,6 +31,7 @@ Workspace :: struct {
 	next_tab_id: u32,
 	selection_anchor: u32,
 	settings_scroll: int,
+	documents: Document_List,
 }
 
 @(require_results)
@@ -120,6 +122,7 @@ session_close :: proc(app: ^App, id: u32) {
 
 workspace_destroy :: proc(workspace: ^Workspace) {
 	for tab in workspace.tabs {tab_record_free(tab)}
+	documents_destroy(&workspace.documents)
 	delete(workspace.tabs)
 	delete(workspace.name)
 	delete(workspace.icon.emoji)
@@ -618,10 +621,15 @@ tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	if entry == nil || !pane_minimum_single(app, w) {return}
 	directory, refused := pane_directory(app, entry)
 	if refused {notify_directory_refused(app)}
+	// Opening a session can move app.sessions, and `entry` with it.
+	pinned := entry.documents[:]
 	if !tab_create(app, w.workspace, entry.header.command, directory, entry.profile_id) {
 		notify(app, .Error, "Could not duplicate the tab.")
 		return
 	}
+	copy_tab := w.workspace.tabs[len(w.workspace.tabs) - 1]
+	documents_copy(&copy_tab.documents, w.workspace.tabs[index].documents[:])
+	documents_copy(&app.sessions[len(app.sessions) - 1].documents, pinned)
 	tab_select(app, w, len(w.workspace.tabs) - 1)
 	rail_overlay_dismiss(app, w)
 }

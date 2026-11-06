@@ -68,6 +68,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.rail_hover, w.rail_pressed = -1, -1
 			w.title_action_hover = .None
 			w.notice_hover = 0
+			w.document_menu.menu.hover_part = .Row
 			w.tab_orientation_button_hovered = false
 			w.workspace_hovered = false
 			w.workspace_picker.menu_hover = 0
@@ -201,6 +202,11 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if w.profile_menu.open {
 		if e.pressed {w.suppressed_key = e}
 		profile_menu_key(app, w, logical)
+		return
+	}
+	if w.document_menu.menu.open {
+		if e.pressed {w.suppressed_key = e}
+		document_menu_key(app, w, e, logical)
 		return
 	}
 	if w.status.inbox_open {
@@ -352,6 +358,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
 	if w.tab_menu.open {return}
 	if w.profile_menu.open {return}
+	if w.document_menu.menu.open {document_menu_text_input(w, text); return}
 	if w.rename_open {ui.field_text(&w.rename, text); w.dirty = true; return}
 	if confirmation_current(w) != nil {return}
 	if palette_active(app, w) {
@@ -432,6 +439,12 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	}
 	if w.profile_menu.open {
 		ui.menu_wheel(&w.profile_menu.menu, int(math.sign(e.delta_y)))
+		w.dirty = true
+		return
+	}
+	if w.document_menu.menu.open {
+		w.document_menu.popout = false
+		ui.menu_wheel(&w.document_menu.menu, int(math.sign(e.delta_y)))
 		w.dirty = true
 		return
 	}
