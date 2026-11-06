@@ -1,6 +1,7 @@
 package ui_test
 
 import "aio:font"
+import "aio:glyphs"
 import "aio:markdown"
 import "aio:render"
 import "aio:ui"
@@ -160,6 +161,85 @@ scrolling_stops_at_both_ends :: proc(t: ^testing.T) {
 	if !fixture_init(t, &short, "one line") {return}
 	fit(&short, 500)
 	testing.expect(t, !ui.markdown_scroll_by(&short.view, 100, 800))
+}
+
+@(test)
+revealing_centers_a_range_out_of_view_and_leaves_one_in_view :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	source := strings.concatenate({strings.repeat("paragraph\n\n", 60, context.temp_allocator), "needle\n"}, context.temp_allocator)
+	if !fixture_init(t, &f, source) {return}
+	fit(&f, 500)
+	start := strings.index(string(f.doc.text[:]), "needle")
+	first_word := 0
+	testing.expect(t, !ui.markdown_reveal(&f.view, first_word, first_word + 9, 300))
+	testing.expect_value(t, f.view.scroll, 0)
+	testing.expect(t, ui.markdown_reveal(&f.view, start, start + 6, 300))
+	testing.expect(t, f.view.scroll > 0)
+	// The end of the document cannot reach the middle, so scrolling stops at its limit.
+	testing.expect_value(t, f.view.scroll, ui.markdown_total(&f.view) - 300)
+	testing.expect(t, !ui.markdown_reveal(&f.view, start, start + 6, 300))
+	middle := strings.index(string(f.doc.text[:]), "paragraph") + 11 * 30
+	testing.expect(t, ui.markdown_reveal(&f.view, middle, middle + 9, 300))
+	scrolled := f.view.scroll
+	testing.expect(t, scrolled > 0 && scrolled < ui.markdown_total(&f.view) - 300)
+	testing.expect(t, !ui.markdown_reveal(&f.view, middle, middle + 9, 300))
+	testing.expect_value(t, f.view.scroll, scrolled)
+}
+
+@(test)
+revealing_a_range_with_no_text_changes_nothing :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, "short\n") {return}
+	testing.expect(t, !ui.markdown_reveal(&f.view, 0, 5, 300))
+	fit(&f, 500)
+	testing.expect(t, !ui.markdown_reveal(&f.view, 900, 905, 300))
+}
+
+@(test)
+matches_draw_in_find_colours_with_the_selected_one_distinct :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, "needle and needle, on a line\n") {return}
+	device, device_error := render.device_create()
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 14)) {return}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	g := ui.markdown_geometry(WIDE_AREA, 1)
+	fit(&f, g.width)
+	theme: ui.Theme
+	matches := [?]markdown.Match{{0, 6}, {11, 17}}
+	find := ui.Markdown_Find {
+		matches = matches[:],
+		selected = 1,
+		foreground = {0, 0, 0, 1},
+		background = {1, 0, 0, 1},
+		selected_background = {0, 1, 0, 1},
+	}
+	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme, find), glyphs.Result.Ok)
+	match_rect, selected_rect: render.Rect
+	match_count, selected_count := 0, 0
+	for rect in list.rects {
+		if rect.color == find.background {match_rect = rect.rect; match_count += 1}
+		if rect.color == find.selected_background {selected_rect = rect.rect; selected_count += 1}
+	}
+	testing.expect_value(t, match_count, 1)
+	testing.expect_value(t, selected_count, 1)
+	testing.expect(t, match_rect.width > 0 && selected_rect.x > match_rect.x + match_rect.width)
+	testing.expect_value(t, selected_rect.width, match_rect.width)
+
+	// Nothing active draws nothing extra.
+	render.draw_list_reset(&list)
+	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme), glyphs.Result.Ok)
+	for rect in list.rects {
+		testing.expect(t, rect.color != find.background && rect.color != find.selected_background)
+	}
 }
 
 @(test)

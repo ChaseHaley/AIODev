@@ -641,6 +641,64 @@ markdown_selection_clear :: proc(v: ^Markdown_View) {
 	v.anchor, v.head, v.selecting = 0, 0, false
 }
 
+// Scrolls a range of the text into view as a terminal does a match: left alone when it already shows,
+// otherwise with its first line at the middle. `visible` is the viewport's height.
+markdown_reveal :: proc(v: ^Markdown_View, start, end, visible: int) -> bool {
+	top, bottom := max(f32), min(f32)
+	scan: for line in v.lines {
+		for i in 0 ..< line.run_count {
+			run := v.runs[line.first_run + i]
+			if int(run.start) >= end {break scan}
+			if int(run.end) <= start {continue}
+			top, bottom = min(top, line.top), max(bottom, line.top + line.height)
+		}
+	}
+	if top > bottom {return false}
+	inset := SPACE_4 * v.scale
+	first, last := int(top + inset), int(math.ceil(bottom + inset))
+	if first >= v.scroll && last <= v.scroll + visible {return false}
+	return markdown_scroll_by(v, first - visible / 2 - v.scroll, visible)
+}
+
+// Find's matches, in the colours a terminal gives its own.
+Markdown_Find :: struct {
+	matches:                                      []markdown.Match,
+	selected:                                     int,
+	foreground, background, selected_background: render.Color,
+}
+
+// The first match that ends after `offset`.
+@(private = "file")
+match_after :: proc(matches: []markdown.Match, offset: int) -> int {
+	low, high := 0, len(matches)
+	for low < high {
+		middle := (low + high) / 2
+		if matches[middle].end <= offset {low = middle + 1} else {high = middle}
+	}
+	return low
+}
+
+@(private = "file")
+draw_matches :: proc(
+	v: ^Markdown_View,
+	doc: ^markdown.Document,
+	list: ^render.Draw_List,
+	find: Markdown_Find,
+	run: Run,
+	x, top, height: f32,
+) {
+	for i := match_after(find.matches, int(run.start));
+	    i < len(find.matches) && find.matches[i].start < int(run.end);
+	    i += 1 {
+		start, stop := max(find.matches[i].start, int(run.start)), min(find.matches[i].end, int(run.end))
+		left := string_advance(v, run.face, string(doc.text[run.start:start]))
+		middle := string_advance(v, run.face, string(doc.text[start:stop]))
+		color := i == find.selected ? find.selected_background : find.background
+		draw_rect(list, {rect = {x + left, top, middle, height}, color = color})
+	}
+}
+
+// Text in a match takes find's colour, except where the selection covers it, as in a terminal.
 @(private = "file")
 draw_run :: proc(
 	v: ^Markdown_View,
@@ -650,16 +708,24 @@ draw_run :: proc(
 	run: Run,
 	x, baseline: f32,
 	color: render.Color,
+	find: Markdown_Find,
+	selected_from, selected_to: int,
 ) -> glyphs.Result {
 	m := &v.faces[run.face]
 	shown := text^
 	shown.size_px = m.size_px
 	pen := x
-	for r in string(doc.text[run.start:run.end]) {
+	next := match_after(find.matches, int(run.start))
+	for r, at in string(doc.text[run.start:run.end]) {
 		advance := rune_advance(v, run.face, r)
 		if r != ' ' && r != '\t' && r != '\n' {
 			if g, found := font.glyph_lookup(v.fonts, m.family, m.style, r); found {
-				if result := draw_glyph(&shown, list, g, pen, baseline, color); result != .Ok {return result}
+				offset := int(run.start) + at
+				for next < len(find.matches) && find.matches[next].end <= offset {next += 1}
+				matched := next < len(find.matches) && find.matches[next].start <= offset
+				in_selection := offset >= selected_from && offset < selected_to
+				ink := matched && !in_selection ? find.foreground : color
+				if result := draw_glyph(&shown, list, g, pen, baseline, ink); result != .Ok {return result}
 			}
 		}
 		pen += advance
@@ -675,6 +741,7 @@ markdown_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
+	find: Markdown_Find = {},
 ) -> glyphs.Result {
 	if render.push_layer(list, g.area, 0) != .None {return .Ok}
 	origin_y := g.top - f32(v.scroll)
@@ -709,6 +776,7 @@ markdown_draw :: proc(
 				if done {icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, v.scale)}
 				continue
 			}
+			draw_matches(v, doc, list, find, run, x, line.top + origin_y, line.height)
 			if from < to && int(run.end) > from && int(run.start) < to {
 				start, stop := max(from, int(run.start)), min(to, int(run.end))
 				left := string_advance(v, run.face, string(doc.text[run.start:start]))
@@ -717,7 +785,8 @@ markdown_draw :: proc(
 				draw_rect(list, {rect = rect, color = theme.selection})
 			}
 			color := colors[run.color]
-			if result := draw_run(v, doc, text, list, run, x, baseline, color); result != .Ok {return result}
+			result := draw_run(v, doc, text, list, run, x, baseline, color, find, from, to)
+			if result != .Ok {return result}
 			thickness := max(1, math.round(v.scale))
 			if run.link >= 0 && int(run.link) == v.hover_link {
 				rect := render.Rect{x, baseline + math.round(2 * v.scale), run.width, thickness}

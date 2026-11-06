@@ -1,8 +1,11 @@
 package app_test
 
 import "aio:commands"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
+import "aio:term"
+import "aio:ui"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -86,6 +89,136 @@ opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^tes
 	testing.expect_value(t, pane.title, "doc.md")
 	testing.expect(t, app.workspace_has_content(w.workspace, {.Markdown, pane.id}))
 	testing.expect_value(t, len(f.state.sessions), 1)
+}
+
+@(private = "file")
+find_settle :: proc(state: ^app.App) {
+	for app.markdown_find_pending(state) {app.markdown_find_tick(state)}
+}
+
+@(private = "file")
+find_count :: proc(w: ^app.Window, pane: ^app.Markdown_Pane) -> string {
+	label, _ := app.find_presentation(w, pane)
+	return label
+}
+
+@(private = "file")
+press :: proc(state: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.Modifiers = {}) {
+	app.handle_event(state, platform.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true})
+	app.handle_event(state, platform.Key_Event{window = w.id, key = key, modifiers = modifiers})
+}
+
+// Drives the bar through the real dispatcher: the same keys, counts and steps as find in a terminal.
+@(test)
+find_in_a_document_behaves_as_it_does_in_a_terminal :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Find") {return}
+	body := strings.repeat("paragraph\n\n", 80, context.temp_allocator)
+	source := strings.concatenate({"needle first\n\n", body, "NEEDLE middle\n\n", body, "needle last\n"}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
+	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	w := f.state.windows[0]
+	if !testing.expect(t, app.markdown_active(w)) {return}
+	pane := f.state.markdown_panes[0]
+	ui.markdown_view_fit(&pane.view, &pane.document, pane.revision, &w.ui_text, f.state.family, 600, w.scale)
+
+	app.run_action(&f.state, w, .Find)
+	testing.expect(t, ui.find_has_keyboard(&w.find))
+	testing.expect_value(t, find_count(w, pane), "0 of 0")
+	app.handle_event(&f.state, platform.Text_Event{w.id, "needle"})
+	testing.expect_value(t, ui.field_string(&w.find.query), "needle")
+	find_settle(&f.state)
+	testing.expect_value(t, find_count(w, pane), "0 of 3")
+	testing.expect_value(t, pane.view.scroll, 0)
+
+	// Enter walks upward from the last match, Shift+Enter the other way, both wrapping.
+	press(&f.state, w, .Enter)
+	testing.expect_value(t, find_count(w, pane), "1 of 3")
+	testing.expect_value(t, pane.search.selected, 2)
+	scrolled := pane.view.scroll
+	testing.expect(t, scrolled > 0)
+	press(&f.state, w, .Enter)
+	testing.expect_value(t, find_count(w, pane), "2 of 3")
+	testing.expect(t, pane.view.scroll < scrolled)
+	press(&f.state, w, .Enter, {.Shift})
+	press(&f.state, w, .Enter, {.Shift})
+	testing.expect_value(t, find_count(w, pane), "3 of 3")
+	testing.expect_value(t, pane.search.selected, 0)
+
+	// Keys stay with the query rather than the document.
+	before := pane.view.scroll
+	press(&f.state, w, .End)
+	testing.expect_value(t, pane.view.scroll, before)
+
+	// Case and expression toggles, on their usual keys.
+	press(&f.state, w, .C, {.Alt})
+	testing.expect(t, w.find.case_sensitive)
+	find_settle(&f.state)
+	testing.expect_value(t, find_count(w, pane), "0 of 2")
+	press(&f.state, w, .C, {.Alt})
+	press(&f.state, w, .R, {.Alt})
+	testing.expect(t, w.find.regex)
+	app.handle_event(&f.state, platform.Text_Event{w.id, "("})
+	find_settle(&f.state)
+	testing.expect_value(t, find_count(w, pane), "Invalid expression")
+	press(&f.state, w, .Backspace)
+	press(&f.state, w, .R, {.Alt})
+	find_settle(&f.state)
+	testing.expect_value(t, find_count(w, pane), "0 of 3")
+
+	// Closing ends the search, leaves the view where it is and remembers the query.
+	press(&f.state, w, .Enter)
+	kept := pane.view.scroll
+	press(&f.state, w, .Escape)
+	testing.expect(t, !w.find.open && !pane.search.active)
+	testing.expect_value(t, pane.view.scroll, kept)
+	app.run_action(&f.state, w, .Find)
+	testing.expect_value(t, ui.field_string(&w.find.query), "")
+	press(&f.state, w, .Arrow_Up)
+	testing.expect_value(t, ui.field_string(&w.find.query), "needle")
+
+	// A press on the document hands it the keyboard; the bar and its matches stay.
+	find_settle(&f.state)
+	press(&f.state, w, .Enter)
+	shown: layout.Pane_Rect
+	for candidate in w.panes {if candidate.content.kind == .Markdown {shown = candidate}}
+	if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
+	x, y := i32(shown.rect.x + shown.rect.width / 2), i32(shown.rect.y + shown.rect.height / 2)
+	for down in ([2]bool{true, false}) {
+		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = down})
+	}
+	testing.expect(t, w.find.open && !w.find.focused && pane.search.active)
+	press(&f.state, w, .Escape)
+	testing.expect(t, w.find.open)
+	press(&f.state, w, .Home)
+	testing.expect_value(t, pane.view.scroll, 0)
+
+	// A rewrite keeps the search and its place, and a missing file has nothing to find.
+	testing.expect_value(t, find_count(w, pane), "1 of 3")
+	testing.expect_value(t, os.write_entire_file(f.file, "# Rewritten\n\nneedle first\n\nneedle last, longer\n"), nil)
+	poll(&f.state)
+	find_settle(&f.state)
+	testing.expect_value(t, find_count(w, pane), "1 of 2")
+	testing.expect_value(t, os.remove(f.file), nil)
+	poll(&f.state)
+	testing.expect_value(t, pane.state, app.Markdown_State.Missing)
+	testing.expect_value(t, find_count(w, pane), "0 of 0")
+
+	// Focus leaving the pane closes find and ends the search, as it does between terminals.
+	app.run_action(&f.state, w, .Focus_Next)
+	testing.expect(t, !app.markdown_active(w))
+	testing.expect(t, !w.find.open && !pane.search.active)
+	testing.expect(t, !term.search_summary(f.state.sessions[0].session).active)
+}
+
+@(test)
+a_pane_without_a_search_costs_no_wakeups :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Idle") {return}
+	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect(t, !app.markdown_find_pending(&f.state))
 }
 
 @(test)

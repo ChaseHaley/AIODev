@@ -2,6 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:layout"
+import "aio:markdown"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
@@ -189,7 +190,7 @@ ACTIONS :: [Action]Action_Info {
 		{{.V, {.Control, .Shift}}, {.Insert, {.Shift}}},
 	},
 	.Select_All = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}},
-	.Find = {"terminal.find", "Find in Scrollback", {{.F, {.Control, .Shift}}}},
+	.Find = {"terminal.find", "Find", {{.F, {.Control, .Shift}}}},
 	.Clear_Scrollback      = {
 		"terminal.clear_scrollback",
 		"Clear Scrollback",
@@ -866,10 +867,12 @@ paste_confirm_cancel :: proc(app: ^App, w: ^Window) {
 // What the window's find bar searches: whatever its focused pane shows.
 Find_Target :: union {
 	^Session_Entry,
+	^Markdown_Pane,
 }
 
 @(require_results)
 find_target :: proc(app: ^App, w: ^Window) -> Find_Target {
+	if pane := markdown_focused(app, w); pane != nil {return pane}
 	if entry := focused_session(app, w); entry != nil {return entry}
 	return nil
 }
@@ -879,14 +882,18 @@ find_target_set :: proc(target: Find_Target, needle: string, options: term.Searc
 	switch t in target {
 	case ^Session_Entry:
 		if t != nil {term.search_set_needle(t.session, needle, options)}
+	case ^Markdown_Pane:
+		if t != nil {markdown.search_set(&t.search, needle, options)}
 	}
 }
 
 @(private)
-find_target_select :: proc(target: Find_Target, older: bool) {
+find_target_select :: proc(w: ^Window, target: Find_Target, older: bool) {
 	switch t in target {
 	case ^Session_Entry:
 		if t != nil {term.search_select(t.session, older)}
+	case ^Markdown_Pane:
+		if t != nil {markdown_find_select(w, t, older)}
 	}
 }
 
@@ -895,6 +902,8 @@ find_target_summary :: proc(target: Find_Target) -> (summary: term.Search_Summar
 	switch t in target {
 	case ^Session_Entry:
 		if t != nil {return term.search_summary(t.session), true}
+	case ^Markdown_Pane:
+		if t != nil {return markdown_find_summary(t), true}
 	}
 	return {}, false
 }
@@ -939,7 +948,7 @@ on_find_outcome :: proc(app: ^App, w: ^Window, target: Find_Target, outcome: ui.
 		find_target_set(target, ui.field_string(&w.find.query), find_options(w))
 	case .Older, .Newer:
 		ui.find_history_add(&app.find_history, &w.find)
-		find_target_select(target, outcome == .Older)
+		find_target_select(w, target, outcome == .Older)
 	case .Closed:
 		find_close(app, w, target)
 	case .Case_Toggle, .Regex_Toggle, .Close:
