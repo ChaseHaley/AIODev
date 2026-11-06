@@ -294,7 +294,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
 	w.phase = .Closing
 	window_overlays_cancel(app, w)
-	view := window_linked(w) ? w.workspace : nil
+	view, id := window_linked(w) ? w.workspace : nil, w.id
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
 			ordered_remove(&app.windows, i)
@@ -310,6 +310,9 @@ window_close :: proc(app: ^App, w: ^Window) {
 	window_free(w)
 	if view != nil {workspace_destroy(view)}
 	window_notices_sync(app)
+	// A destroyed window never reports losing focus, so the jump list follows the notices to the window
+	// focused most recently.
+	if app.focus_jumps.window == id {app.focus_jumps.window = app.notice_window}
 }
 
 @(private)

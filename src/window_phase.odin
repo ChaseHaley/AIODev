@@ -43,10 +43,11 @@ window_drawable :: proc(w: ^Window) -> bool {
 	return w.phase == .Shown && !window_minimized(w)
 }
 
-// The first window that shows a workspace of its own, which is what callers mean by the app's window.
+// The first shown window with a workspace of its own, which is what callers mean by the app's window. A
+// preview is not one yet, and a closing window no longer is.
 window_primary :: proc(app: ^App) -> ^Window {
 	for w in app.windows {
-		if !window_linked(w) {return w}
+		if w.phase == .Shown && !window_linked(w) {return w}
 	}
 	return nil
 }

@@ -425,9 +425,10 @@ pane_links_sync :: proc(app: ^App) {
 		} else if !on_screen && w.phase == .Shown {
 			pane_link_hide(app, w, pane_link_host(app, w))
 		}
-		link := &w.link.?
-		if link.activate && w.phase == .Shown {_ = window_activate(app, w)}
-		link.activate = false
+		if link := &w.link.?; link.activate && w.phase == .Shown {
+			link.activate = false
+			_ = window_activate(app, w)
+		}
 	}
 }
 
