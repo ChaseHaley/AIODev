@@ -353,6 +353,8 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .F5}))
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "F5")
+	// Saving keeps the capture's message, so a refused save that resumes the capture still shows it.
+	testing.expect_value(t, p.message, ui.CAPTURE_HINT)
 
 	testing.expect(t, ui.editor_select_key(&p, "input.leader"))
 	ui.editor_key(&p, key({key = .Enter}))
@@ -362,6 +364,7 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect(t, !ui.editor_capturing(&p))
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Positions)
+	testing.expect_value(t, p.message, "")
 }
 
 @(test)

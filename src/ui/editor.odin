@@ -416,7 +416,7 @@ editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime
 	view.expanded = strings.clone(p.expanded) or_return
 	view.order, _ = order_kind(p)
 	view.profile_positions, p.profile_positions = p.profile_positions, {}
-	if _, settling := p.order.(Order_Settling); settling {p.order = nil}
+	if _, settling := p.order.(Order_Settling); settling {order_settle(p, view.order)}
 	return
 }
 
@@ -438,8 +438,7 @@ editor_view_hold :: proc(p: ^Editor, view: ^Editor_View) {
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
 	p.profile_positions, view.profile_positions = view.profile_positions, {}
-	p.order = nil
-	if len(p.profile_positions) > 0 {p.order = Order_Settling{view.order}}
+	order_settle(p, view.order)
 }
 
 // Restores a previous view, dropping a profile that no longer exists. A reload after a successful
@@ -692,11 +691,11 @@ editor_browse :: proc(p: ^Editor) {editor_mode_set(p, Editor_Browsing{})}
 // Moves the keyboard to the selected row's control.
 editor_focus_row :: proc(p: ^Editor) {editor_mode_set(p, Editor_Editing{})}
 
-// The only writer of p.mode. Leaving a capture or the alternatives list drops the hint they showed,
-// and the profile menu is open exactly while its state holds.
+// The only writer of p.mode. The profile menu is open exactly while its state holds. A capture's or
+// the alternatives list's hint is cleared by the moves that dismiss them, not by every exit: saving
+// keeps it, so a refused save that resumes the capture still shows it.
 @(private)
 editor_mode_set :: proc(p: ^Editor, next: Editor_Mode) {
-	if mode_shows_hint(p.mode) && !mode_shows_hint(next) {editor_message(p, "", false)}
 	_, menu := next.(Editor_Profile_Menu)
 	p.profile_menu.open = menu
 	p.mode = next
@@ -752,7 +751,7 @@ sync_color :: proc(p: ^Editor) {
 // Leaves the selected row's control, discarding an unsaved value.
 @(private)
 stop_editing :: proc(p: ^Editor) {
-	if p.error {editor_message(p, "", false)}
+	if p.error || mode_shows_hint(p.mode) {editor_message(p, "", false)}
 	if p.error_text != "" {
 		editor_message(p, "", false)
 		editor_error_clear(p)
@@ -769,7 +768,7 @@ stop_editing :: proc(p: ^Editor) {
 // the next row can take it.
 editor_select :: proc(p: ^Editor, index: int) {
 	if !editor_process_capture(p) {return}
-	if p.error {editor_message(p, "", false)}
+	if p.error || mode_shows_hint(p.mode) {editor_message(p, "", false)}
 	if p.error_text != "" {
 		editor_message(p, "", false)
 		editor_error_clear(p)
@@ -1061,9 +1060,16 @@ order_begin :: proc(p: ^Editor, block: Order_Block, from: int, grab: f32) {
 order_release :: proc(p: ^Editor) -> (drag: Order_Dragging, ok: bool) {
 	drag = p.order.(Order_Dragging) or_return
 	kind, _ := order_kind(p)
+	order_settle(p, kind)
+	return drag, true
+}
+
+// Ends a drag's hold on the blocks: they settle while any have a drawn position, else the reorder
+// is over. The caller has already freed or taken the grabbed block.
+@(private)
+order_settle :: proc(p: ^Editor, kind: Order_Kind) {
 	p.order = nil
 	if len(p.profile_positions) > 0 {p.order = Order_Settling{kind}}
-	return drag, true
 }
 
 // Drops a reorder drag without saving: the grabbed block eases back to its own place.
@@ -1253,7 +1259,7 @@ editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bo
 	}
 	if !dragging && !moving {
 		profile_positions_clear(&p.profile_positions)
-		p.order = nil
+		order_settle(p, .Profiles)
 	}
 	return changed
 }
@@ -1499,6 +1505,7 @@ capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> Edit
 			return .Changed
 		case .Tab:
 			editor_mode_set(p, Editor_Positions{})
+			editor_message(p, "", false)
 			return .Changed
 		}
 	}
@@ -2296,6 +2303,7 @@ editor_press :: proc(
 		r := editor_popup_rect(p, l)
 		row := editor_row(p)
 		if !contains(r, x, y) || row == nil {
+			if popup == .Shortcuts {editor_message(p, "", false)}
 			editor_mode_set(p, Editor_Editing{})
 			return .Changed
 		}
