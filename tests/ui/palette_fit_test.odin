@@ -44,9 +44,9 @@ palette_fit_keeps_rows_and_stable_query_top :: proc(t: ^testing.T) {
 	// trades rows for a panel that keeps its pointer events. All mode also spends
 	// height on the key footer.
 	for viewport in ([?][4]f32{
-		{926, 928, 2, 7},
-		{695, 696, 1.5, 7},
-		{926, 837, 2, 6},
+		{926, 928, 2, 6},
+		{695, 696, 1.5, 6},
+		{926, 837, 2, 5},
 		{1000, 800, 1, 8},
 	}) {
 		w, h, scale := viewport[0], viewport[1], viewport[2]
@@ -145,7 +145,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 palette_fit_visible :: proc(t: ^testing.T, p: ^ui.Palette, l: ui.Palette_Layout, width, height: f32) {
 	// Navigation changes the window, so measure again before checking what is drawn.
 	current := ui.palette_layout(p, width, height, l.row_height / 40)
-	for r in ([?]render.Rect{current.panel, current.input, current.list}) {
+	for r in ([?]render.Rect{current.panel, current.mode_bar, current.input, current.list}) {
 		testing.expect(t, r.x >= 0 && r.y >= 0 && r.width >= 0 && r.height >= 0)
 		testing.expectf(t, r.x+r.width <= width+0.001 && r.y+r.height <= height+0.001,
 			"%v outside %gx%g", r, width, height)
@@ -237,9 +237,9 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	normal := ui.palette_layout(&p, 1000, 800, 1)
 	testing.expect_value(t, normal.rows, 8)
 	// Eight flat rows sit between the query band and the key footer.
-	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 433})
+	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 477})
 	// The scrollbar takes the list's right padding and 3 DIPs more, inside the panel border.
-	testing.expect_value(t, normal.list, render.Rect{228, 169, 541, 320})
+	testing.expect_value(t, normal.list, render.Rect{228, 213, 541, 320})
 	ui.palette_key(&p, &registry, key({key = .End}))
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	selected_text := ui.palette_selection(&p)
@@ -262,7 +262,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect_value(t, p.selected, 0)
 	l := ui.palette_layout(&p, 926, 928, 2)
-	testing.expect_value(t, l.rows, terminal)
+	testing.expect_value(t, l.rows, min(terminal, p.visible_rows))
 	ui.palette_key(&p, &registry, key({key = .End}))
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)

@@ -4,6 +4,7 @@ import "core:strings"
 import "core:testing"
 import "aio:commands"
 import "aio:font"
+import "aio:platform"
 import "aio:ui"
 
 @(private)
@@ -149,8 +150,6 @@ palette_tab_cycles_all_five_modes :: proc(t: ^testing.T) {
 	}
 	ui.palette_text(&p, &registry, "pane")
 	for expected in ([?]ui.Palette_Mode{.Commands, .Settings, .Workspaces, .Tabs, .All}) {
-		p.mode_menu = true
-		p.menu_hover = 2
 		p.selected, p.scroll = 3, 2
 		outcome, _ := ui.palette_key(&p, &registry, key({key = .Tab, modifiers = {.Shift}}))
 		testing.expect_value(t, outcome, ui.Outcome.Changed)
@@ -158,8 +157,6 @@ palette_tab_cycles_all_five_modes :: proc(t: ^testing.T) {
 		testing.expect_value(t, ui.palette_query(&p), "pane")
 		testing.expect_value(t, p.selected, 0)
 		testing.expect_value(t, p.scroll, 0)
-		testing.expect(t, !p.mode_menu)
-		testing.expect_value(t, p.menu_hover, -1)
 	}
 }
 
@@ -181,8 +178,8 @@ palette_mode_labels_fit_at_control_size :: proc(t: ^testing.T) {
 			ui.palette_open_mode(&p, &registry, mode)
 			l := ui.palette_layout(&p, 560 * scale, 700 * scale, scale)
 			needed := ui.text_width(&text, ui.palette_mode_info(mode).word) +
-				(2 * ui.CONTROL_INSET + ui.ICON_INDICATOR + ui.SPACE_1) * scale
-			testing.expect(t, l.chip.width >= needed)
+				(2 * ui.CONTROL_INSET + ui.ICON_BUTTON + ui.SPACE_2) * scale
+			testing.expect(t, l.modes[mode].width >= needed)
 		}
 	}
 }
@@ -420,88 +417,64 @@ palette_activation_targets_carry_identity_and_kind :: proc(t: ^testing.T) {
 }
 
 @(test)
-palette_chip_menu_switches_without_typing :: proc(t: ^testing.T) {
+palette_scope_tabs_preserve_the_query_and_caret :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	p: ui.Palette
 	if !testing.expect_value(t, ui.palette_init(&p, nil), nil) {return}
 	defer ui.palette_destroy(&p)
-	ui.palette_open_mode(&p, &registry, .Tabs)
-	text: ui.Text
-	l := ui.palette_layout(&p, 1000, 800, 1)
-	if !testing.expect(t, l.chip.width > 0) {return}
-	outcome := ui.palette_input_press(
-		&p,
-		l,
-		&text,
-		l.chip.x + l.chip.width/2,
-		l.chip.y + l.chip.height/2,
-		1,
-		false,
-	)
-	testing.expect_value(t, outcome, ui.Outcome.Changed)
-	testing.expect(t, p.mode_menu)
-	l = ui.palette_layout(&p, 1000, 800, 1)
-	if !testing.expect(t, l.menu.width > 0) {return}
-	// Row four (Settings) with the four-DIP inset and standard menu rows.
-	y := l.menu.y + 4 + 3*ui.MENU_ROW_HEIGHT + ui.MENU_ROW_HEIGHT/2
-	mode, id := ui.palette_mouse_press(&p, &registry, l, l.menu.x + 20, y)
-	testing.expect_value(t, mode, ui.Outcome.Changed)
-	testing.expect_value(t, id, commands.Command_Id(0))
-	testing.expect_value(t, p.mode, ui.Palette_Mode.Settings)
-	testing.expect(t, !p.mode_menu)
-
-	// The footer is a key reference, not a mode switcher.
-	l = ui.palette_layout(&p, 1000, 800, 1)
-	testing.expect(t, l.footer.height > 0)
-	ui.palette_mouse_press(&p, &registry, l, l.footer.x + 20, l.footer.y + l.footer.height / 2)
-	testing.expect_value(t, p.mode, ui.Palette_Mode.Settings)
-
-	// A key closes the menu without losing the key press.
-	ui.palette_input_press(&p, l, &text, l.chip.x + 2, l.chip.y + 2, 1, false)
-	testing.expect(t, p.mode_menu)
-	ui.palette_key(&p, &registry, key({key = .Tab}))
-	testing.expect(t, !p.mode_menu)
-	testing.expect_value(t, p.mode, ui.Palette_Mode.Commands)
+	for scale in ([?]f32{1, 1.5, 2}) {
+		ui.palette_open(&p, &registry)
+		ui.palette_text(&p, &registry, "pane")
+		p.query.cursor, p.query.anchor = 2, 1
+		for mode in ([?]ui.Palette_Mode{.Tabs, .Workspaces, .Settings, .Commands, .All}) {
+			l := ui.palette_layout(&p, 560 * scale, 700 * scale, scale)
+			r := l.modes[mode]
+			x, y := r.x + r.width / 2, r.y + r.height / 2
+			testing.expect(t, !ui.palette_input_contains(l, x, y))
+			testing.expect_value(t, ui.palette_pointer(&p, l, x, y), platform.Cursor_Shape.Hand)
+			before := p.mode
+			ui.palette_mouse_move(&p, l, x, y)
+			testing.expect_value(t, p.mode, before)
+			p.query.dragging = true
+			outcome, id := ui.palette_mouse_press(&p, &registry, l, x, y)
+			testing.expect_value(t, outcome, ui.Outcome.Changed)
+			testing.expect_value(t, id, commands.Command_Id(0))
+			testing.expect_value(t, p.mode, mode)
+			testing.expect_value(t, ui.palette_query(&p), "pane")
+			testing.expect_value(t, p.query.cursor, 2)
+			testing.expect_value(t, p.query.anchor, 1)
+			testing.expect(t, !p.query.dragging && p.open)
+			testing.expect_value(t, p.selected, 0)
+			testing.expect_value(t, p.scroll, 0)
+		}
+		l := ui.palette_layout(&p, 560 * scale, 700 * scale, scale)
+		ui.palette_mouse_press(&p, &registry, l, l.footer.x + 20, l.footer.y + l.footer.height / 2)
+		testing.expect_value(t, p.mode, ui.Palette_Mode.All)
+	}
 }
 
 @(test)
-palette_menu_dismisses_and_can_return_to_all :: proc(t: ^testing.T) {
+palette_scope_tabs_cancel_an_unapplied_setting_edit :: proc(t: ^testing.T) {
 	registry := registry_create(t)
 	defer commands.destroy(&registry)
 	p: ui.Palette
-	if !testing.expect_value(t, ui.palette_init(&p, nil), nil) {return}
+	rows := [?]ui.Palette_Setting{{key = "font.family", title = "Font", control = .Text}}
+	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) {return}
 	defer ui.palette_destroy(&p)
-	text: ui.Text
-
-	ui.palette_open_mode(&p, &registry, .Tabs)
+	ui.palette_open_mode(&p, &registry, .Settings)
+	ui.palette_text(&p, &registry, "font")
+	ui.palette_key(&p, &registry, key({key = .Enter, modifiers = {.Control}}))
+	ui.palette_text(&p, &registry, "Unapplied font")
+	if !testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Text) {return}
 	l := ui.palette_layout(&p, 1000, 800, 1)
-	ui.palette_input_press(&p, l, &text, l.chip.x + 4, l.chip.y + 4, 1, false)
-	testing.expect(t, p.mode_menu)
-	// Typing dismisses the menu and keeps the text.
-	ui.palette_text(&p, &registry, "x")
-	testing.expect(t, !p.mode_menu)
-	testing.expect_value(t, ui.palette_query(&p), "x")
-	testing.expect_value(t, p.mode, ui.Palette_Mode.Tabs)
-
-	// A field press dismisses it too. An empty field avoids needing font metrics here.
-	ui.field_set(&p.query, "")
-	l = ui.palette_layout(&p, 1000, 800, 1)
-	ui.palette_input_press(&p, l, &text, l.chip.x + 4, l.chip.y + 4, 1, false)
-	testing.expect(t, p.mode_menu)
-	ui.palette_input_press(&p, l, &text, l.input.x + l.input.width - 20, l.input.y + 43, 1, false)
-	testing.expect(t, !p.mode_menu)
-
-	// The All row returns to all results; its chip stays so the menu remains reachable.
-	ui.palette_input_press(&p, l, &text, l.chip.x + 4, l.chip.y + 4, 1, false)
-	l = ui.palette_layout(&p, 1000, 800, 1)
-	mode, _ := ui.palette_mouse_press(&p, &registry, l, l.menu.x + 20, l.menu.y + 4 + 13)
-	testing.expect_value(t, mode, ui.Outcome.Changed)
-	testing.expect_value(t, p.mode, ui.Palette_Mode.All)
-	testing.expect_value(t, ui.palette_mode_prefix(p.mode), "")
-	testing.expect(t, !p.mode_menu)
-	l = ui.palette_layout(&p, 1000, 800, 1)
-	testing.expect(t, l.chip.width > 0)
+	r := l.modes[.Commands]
+	outcome, _ := ui.palette_mouse_press(&p, &registry, l, r.x + r.width / 2, r.y + r.height / 2)
+	testing.expect_value(t, outcome, ui.Outcome.Changed)
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
+	testing.expect_value(t, ui.palette_query(&p), "font")
+	testing.expect_value(t, p.mode, ui.Palette_Mode.Commands)
+	testing.expect_value(t, p.chosen, "")
 }
 
 @(test)
@@ -524,7 +497,7 @@ palette_opens_in_all_and_mode_bindings_do_not_persist :: proc(t: ^testing.T) {
 }
 
 @(test)
-palette_category_chip_and_query_never_overlap :: proc(t: ^testing.T) {
+palette_scope_and_query_never_overlap :: proc(t: ^testing.T) {
 	p: ui.Palette
 	registry := mode_palette(t, &p, nil, nil, nil)
 	defer commands.destroy(&registry)
@@ -537,7 +510,8 @@ palette_category_chip_and_query_never_overlap :: proc(t: ^testing.T) {
 				l := ui.palette_layout(&p, width * scale, 700 * scale, scale)
 				box := ui.palette_query_box(&p, l, &text, scale)
 				r := ui.field_box_text_rect(box)
-				testing.expect(t, r.x >= l.chip.x + l.chip.width + 8 * scale)
+				testing.expect(t, r.y >= l.mode_bar.y + l.mode_bar.height)
+				testing.expect(t, r.x >= l.input.x + (ui.DIALOG_PADDING + ui.ICON_BUTTON + ui.SPACE_3) * scale)
 				testing.expect(t, r.x + r.width <= l.input.x + l.input.width - 14 * scale)
 			}
 		}

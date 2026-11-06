@@ -34,6 +34,8 @@ Icon :: enum {
 	Error,
 	Success,
 	Command,
+	Search,
+	Grid,
 	Settings,
 	Workspace,
 	Window_Out,
@@ -258,6 +260,13 @@ icon_draw :: proc(
 	case .Command:
 		pen_path(p, {3, 4}, {7, 8}, {3, 12})
 		pen_path(p, {8.5, 12}, {13, 12})
+	case .Search:
+		pen_arc(p, 6.5, 6.5, 4.5, 0, 2 * math.PI)
+		pen_path(p, {10, 10}, {14, 14})
+	case .Grid:
+		for y in ([?]f32{2, 9}) {
+			for x in ([?]f32{2, 9}) {pen_box(p, x, y, 5, 5, 1)}
+		}
 	case .Settings:
 		pen_path(p, {2, 4.5}, {8, 4.5})
 		pen_arc(p, 10, 4.5, 2, 0, 2 * math.PI)

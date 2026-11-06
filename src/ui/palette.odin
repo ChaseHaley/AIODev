@@ -13,18 +13,14 @@ import "core:unicode/utf8"
 
 @(private) PALETTE_MAX_ROWS :: 8
 @(private) PALETTE_WIDTH :: 560
+@(private) PALETTE_MODE_HEIGHT :: HEIGHT_TOOLBAR + SPACE_4
 @(private) PALETTE_INPUT_HEIGHT :: 64
 @(private) PALETTE_ROW_HEIGHT :: 40
 @(private) PALETTE_FOOTER_HEIGHT :: 32
 @(private) PALETTE_PADDING :: 8
 @(private) PALETTE_TEXT_INSET :: DIALOG_PADDING
 @(private) PALETTE_SETTING_SUFFIX :: " SETTING"
-@(private) PALETTE_CHIP_HEIGHT :: HEIGHT_COMPACT
-@(private) PALETTE_CHIP_GAP :: SPACE_2
 @(private) PALETTE_KEYCAP_HEIGHT :: 20
-@(private) PALETTE_MENU_WIDTH :: 176
-@(private) PALETTE_MENU_ROW :: MENU_ROW_HEIGHT
-@(private) PALETTE_MENU_INSET :: OVERLAY_PADDING
 // A leading icon and the gap after it.
 @(private) PALETTE_GLYPH_WIDTH :: ICON_BUTTON + SPACE_2
 @(private) PALETTE_NO_RANK :: 99
@@ -54,7 +50,6 @@ Palette_Kind :: enum {
 	Workspace,
 }
 
-// The search domain carried by the removable query chip.
 Palette_Mode :: enum {
 	All,
 	Tabs,
@@ -68,7 +63,7 @@ Palette_Mode_Info :: struct {
 }
 
 @(private) PALETTE_MODES := [Palette_Mode]Palette_Mode_Info {
-	.All         = {"All", "", "Search"},
+	.All         = {"All", "", "Search anything"},
 	.Tabs        = {"Tabs", "t:", "Search tabs"},
 	.Workspaces  = {"Workspaces", "w:", "Search workspaces"},
 	.Settings    = {"Settings", "s:", "Search settings"},
@@ -83,12 +78,20 @@ Palette_Mode_Info :: struct {
 	.Commands,
 }
 
-@(private) PALETTE_MENU_ORDER := [?]Palette_Mode {
-	.All,
-	.Tabs,
-	.Workspaces,
-	.Settings,
-	.Commands,
+@(private) PALETTE_MODE_ICONS := [Palette_Mode]Icon {
+	.All = .Grid,
+	.Tabs = .Layout_Top,
+	.Workspaces = .Workspace,
+	.Settings = .Settings,
+	.Commands = .Command,
+}
+
+@(private) PALETTE_MODE_WIDTHS := [Palette_Mode]f32 {
+	.All = 72,
+	.Tabs = 80,
+	.Workspaces = 128,
+	.Settings = 104,
+	.Commands = 120,
 }
 
 // The order of an empty query's list and of equal-ranked matches: the original domains first.
@@ -107,14 +110,6 @@ Palette_Mode_Info :: struct {
 	.Setting = .Settings,
 	.Tab = .Layout_Top,
 	.Workspace = .Workspace,
-}
-
-@(private) PALETTE_CHIP_WIDTHS := [Palette_Mode]f32 {
-	.All = 56,
-	.Tabs = 64,
-	.Workspaces = 112,
-	.Settings = 88,
-	.Commands = 104,
 }
 
 // One footer entry: its keycaps, joined by a slash, and what they do.
@@ -190,8 +185,7 @@ Palette :: struct {
 	tabs:           Palette_Source,
 	workspaces:     Palette_Source,
 	mode:           Palette_Mode,
-	mode_menu:      bool,
-	menu_hover:     int,
+	mode_hover:     int,
 	// The setting key of the last Open_Setting or Set_Setting outcome.
 	chosen:       string,
 	chosen_value: [dynamic]u8,
@@ -210,7 +204,8 @@ Palette :: struct {
 }
 
 Palette_Layout :: struct {
-	panel, input, list, footer, chip, menu: render.Rect,
+	panel, mode_bar, input, list, footer:     render.Rect,
+	modes:                                  [Palette_Mode]render.Rect,
 	viewport:                               render.Rect,
 	row_height, scale:                      f32,
 	rows:                                   int,
@@ -233,7 +228,7 @@ palette_init :: proc(
 	edit_init(&p.edit, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
-	p.menu_hover = -1
+	p.mode_hover = -1
 	p.reset_hover = -1
 	err: runtime.Allocator_Error
 	capacity := 0
@@ -274,8 +269,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	field_set(&p.query, "")
 	p.selected, p.scroll = 0, 0
 	p.mode = mode
-	p.mode_menu = false
-	p.menu_hover = -1
+	p.mode_hover = -1
 	p.reset_hover = -1
 	p.scroll_hover, p.scroll_drag = false, {}
 	p.chosen, p.chosen_id = "", 0
@@ -286,7 +280,7 @@ palette_close :: proc(p: ^Palette) {
 	palette_edit_cancel(p)
 	presence_close(&p.presence)
 	p.query.dragging = false
-	p.mode_menu = false
+	p.mode_hover = -1
 	p.scroll_hover, p.scroll_drag = false, {}
 }
 
@@ -342,8 +336,6 @@ palette_next_mode :: proc(mode: Palette_Mode, reverse: bool = false) -> Palette_
 
 // A mode change is a new search: the old selection has no meaning in the new domain.
 palette_set_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
-	p.mode_menu = false
-	p.menu_hover = -1
 	if p.mode == mode {return}
 	p.mode = mode
 	p.selected, p.scroll = 0, 0
@@ -831,8 +823,6 @@ edited :: proc(p: ^Palette, registry: ^commands.Registry, change: Field_Change) 
 	if mode, length := palette_parse_prefix(field_string(&p.query)); length > 0 {
 		strip_prefix(&p.query, length)
 		p.mode = mode
-		p.mode_menu = false
-		p.menu_hover = -1
 	}
 	p.selected, p.scroll = 0, 0
 	refresh(p, registry)
@@ -854,12 +844,6 @@ palette_key :: proc(
 	if p.edit.kind == .Shortcut {return palette_binding_key(p, e), 0}
 	if p.edit.kind == .Choice || p.edit.kind == .Text {return edit_key(p, e), 0}
 	if p.edit.kind == .Slider {return .None, 0}
-	was_menu := p.mode_menu
-	if was_menu {
-		p.mode_menu = false
-		p.menu_hover = -1
-		if e.key == .Escape {return .Changed, 0}
-	}
 	#partial switch e.key {
 	case .Tab:
 		palette_cycle_mode(p, registry, .Shift in e.modifiers)
@@ -904,18 +888,12 @@ palette_key :: proc(
 	case .End:
 		if !shift {return move(p, len(p.results)), 0}
 	}
-	outcome := edited(p, registry, field_key(&p.query, e))
-	if outcome == .None && was_menu {outcome = .Changed}
-	return outcome, 0
+	return edited(p, registry, field_key(&p.query, e)), 0
 }
 
 palette_text :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -> Outcome {
 	if p.edit.kind != .None {return edit_text(p, text)}
-	closed_menu := p.mode_menu
-	p.mode_menu, p.menu_hover = false, -1
-	outcome := edited(p, registry, field_text(&p.query, text))
-	if outcome == .None && closed_menu {return .Changed}
-	return outcome
+	return edited(p, registry, field_text(&p.query, text))
 }
 
 // Pastes the first line of `text` over the query selection.
@@ -935,16 +913,6 @@ palette_cut :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	return palette_text(p, registry, "")
 }
 
-// The mode chip sits at the query's left inset, centred in the input band, in every mode.
-@(private)
-chip_rect :: proc(p: ^Palette, input: render.Rect, scale: f32) -> render.Rect {
-	if input.width <= 0 || input.height <= 0 {return {}}
-	inset := PALETTE_TEXT_INSET * scale
-	width := min(PALETTE_CHIP_WIDTHS[p.mode] * scale, max(0, input.width / 2 - inset))
-	height := min(PALETTE_CHIP_HEIGHT * scale, input.height)
-	return {input.x + inset, input.y + (input.height - height) / 2, width, height}
-}
-
 palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) -> Palette_Layout {
 	width, height := max(0, viewport_width), max(0, viewport_height)
 	scale := viewport_scale > 0 ? viewport_scale : 1
@@ -954,7 +922,9 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	padding := PALETTE_PADDING * scale
 	footer_height := PALETTE_FOOTER_HEIGHT * scale
 	input_height := PALETTE_INPUT_HEIGHT * scale
-	full_height := input_height + 1 + 2 * padding + PALETTE_MAX_ROWS * row_height + footer_height
+	mode_height := PALETTE_MODE_HEIGHT * scale
+	full_height := mode_height + input_height + 1 + 2 * padding +
+		PALETTE_MAX_ROWS * row_height + footer_height
 	// Caption controls claim pointer input in the title chrome and are hit before the
 	// palette, so the panel starts below that band and gives up rows rather than put its
 	// query or results where the chrome would take the press. When the client has no
@@ -963,9 +933,11 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	top := max(max(24 * scale, height * 0.12), claim)
 	top = min(top, max(claim, height - border - full_height))
 	available := max(0, height - border - top)
+	// Keep the query usable before spending a short client's remaining height on modes.
 	input_height = min(input_height, available)
-	separator := min(f32(1), available - input_height)
-	remaining := max(0, available - input_height - separator)
+	mode_height = min(mode_height, max(0, available - input_height))
+	separator := min(f32(1), available - input_height - mode_height)
+	remaining := max(0, available - input_height - mode_height - separator)
 	padding = min(padding, remaining / 2)
 	footer_height = min(footer_height, max(0, remaining - 2 * padding))
 	// A last row matters more than the key hints on a very short client.
@@ -985,19 +957,32 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		x      = (width - panel_width) / 2,
 		y      = top,
 		width  = panel_width,
-		height = input_height + separator + 2 * padding + used + footer_height,
+		height = mode_height + input_height + separator + 2 * padding + used + footer_height,
 	}
-	input := render.Rect{panel.x, panel.y, panel.width, input_height}
+	mode_bar := render.Rect{panel.x, panel.y, panel.width, mode_height}
+	input := render.Rect{panel.x, panel.y + mode_height, panel.width, input_height}
 	l := Palette_Layout {
 		panel      = panel,
+		mode_bar   = mode_bar,
 		input      = input,
 		list       = {panel.x + list_padding, input.y + input_height + separator + padding,
 			panel.width - 2 * list_padding, used},
-		chip       = chip_rect(p, input, scale),
 		viewport   = {0, 0, width, height},
 		row_height = row_height,
 		scale      = scale,
 		rows       = rows,
+	}
+	mode_inset := min(SPACE_2 * scale, panel.width / 2)
+	mode_space := max(0, panel.width - 2 * mode_inset)
+	minimum: f32
+	for minimum_width in PALETTE_MODE_WIDTHS {minimum += minimum_width * scale}
+	extra := max(0, mode_space - minimum) / f32(len(PALETTE_CYCLE))
+	fit := min(1, mode_space / minimum)
+	mode_x := panel.x + mode_inset
+	for mode in PALETTE_CYCLE {
+		mode_width := PALETTE_MODE_WIDTHS[mode] * scale * fit + extra
+		l.modes[mode] = {mode_x, panel.y, mode_width, mode_height}
+		mode_x += mode_width
 	}
 	if footer_height > 0 {l.footer = {panel.x, l.list.y + used + padding, panel.width, footer_height}}
 	// The track replaces the list's right padding, inside the panel border.
@@ -1007,18 +992,6 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	state := scrollbar_state(p.scroll_hover, p.scroll_drag)
 	if l.bar, l.bar_visible = scrollbar_layout(area, extent, state, scale); l.bar_visible {
 		l.list.width = max(0, area.x - l.list.x)
-	}
-	if p.mode_menu && l.chip.width > 0 {
-		menu_width := min(PALETTE_MENU_WIDTH * scale, width - 2 * border)
-		menu_height :=
-			f32(len(PALETTE_MENU_ORDER) * PALETTE_MENU_ROW + 2 * PALETTE_MENU_INSET) * scale
-		x := clamp(l.chip.x, border, max(border, width - menu_width - border))
-		y := l.chip.y + l.chip.height + 4 * scale
-		if y + menu_height > height - border {
-			y = max(border, l.chip.y - menu_height - 4 * scale)
-		}
-		y = clamp(y, border, max(border, height - menu_height - border))
-		l.menu = {x, y, menu_width, menu_height}
 	}
 	return l
 }
@@ -1034,14 +1007,11 @@ row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 }
 
 @(private)
-menu_row_at :: proc(l: Palette_Layout, x, y: f32) -> int {
-	if l.menu.width <= 0 || x < l.menu.x || x >= l.menu.x + l.menu.width {return -1}
-	inset := PALETTE_MENU_INSET * (l.row_height / PALETTE_ROW_HEIGHT)
-	if y < l.menu.y + inset || y >= l.menu.y + l.menu.height - inset {return -1}
-	row_height := (l.menu.height - 2 * inset) / f32(len(PALETTE_MENU_ORDER))
-	index := int((y - l.menu.y - inset) / row_height)
-	if index < 0 || index >= len(PALETTE_MENU_ORDER) {return -1}
-	return index
+mode_at :: proc(l: Palette_Layout, x, y: f32) -> int {
+	for mode, i in PALETTE_CYCLE {
+		if contains(l.modes[mode], x, y) {return i}
+	}
+	return -1
 }
 
 palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
@@ -1057,12 +1027,9 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome
 		return .None
 	case .None:
 	}
-	if p.mode_menu {
-		hover := menu_row_at(l, x, y)
-		if hover == p.menu_hover {return .None}
-		p.menu_hover = hover
-		return .Changed
-	}
+	hover := mode_at(l, x, y)
+	mode_changed := hover != p.mode_hover
+	p.mode_hover = hover
 	over_bar := l.bar_visible && scrollbar_contains(l.bar, x, y)
 	// The scrollbar and reset button light only under the pointer, so entering or leaving them redraws.
 	reset := reset_at(p, l, x, y)
@@ -1071,7 +1038,7 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome
 	p.reset_hover = reset
 	index := row_at(p, l, x, y)
 	if index < 0 || index == p.selected {
-		return reset_changed ? .Changed : .None
+		return reset_changed || mode_changed ? .Changed : .None
 	}
 	p.selected = index
 	return .Changed
@@ -1087,16 +1054,14 @@ palette_mouse_press :: proc(
 	Outcome,
 	commands.Command_Id,
 ) {
-	if p.edit.kind == .Shortcut {return palette_binding_press(p, l, text, x, y), 0}
-	if outcome, handled := edit_press(p, l, text, x, y); handled {return outcome, 0}
-	if p.mode_menu {
-		if index := menu_row_at(l, x, y); index >= 0 {
-			palette_set_mode(p, registry, PALETTE_MENU_ORDER[index])
-		} else {
-			p.mode_menu, p.menu_hover = false, -1
-		}
+	if index := mode_at(l, x, y); index >= 0 && !palette_popup_contains(p, l, x, y) {
+		palette_edit_cancel(p)
+		p.query.dragging = false
+		palette_set_mode(p, registry, PALETTE_CYCLE[index])
 		return .Changed, 0
 	}
+	if p.edit.kind == .Shortcut {return palette_binding_press(p, l, text, x, y), 0}
+	if outcome, handled := edit_press(p, l, text, x, y); handled {return outcome, 0}
 	if l.bar_visible && scrollbar_contains(l.bar, x, y) {
 		palette_scroll_to(p, scrollbar_press(&p.scroll_drag, l.bar, y))
 		return .Changed, 0
@@ -1120,7 +1085,6 @@ palette_mouse_press :: proc(
 	return .None, 0
 }
 
-// The query field's box: the input band right of the mode chip.
 palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {
 	box := Field_Box {
 		field = &p.query,
@@ -1132,13 +1096,10 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 		style = .Display,
 		scale = scale,
 	}
-	if l.chip.width > 0 {
-		left := l.chip.x + l.chip.width + PALETTE_CHIP_GAP * scale
-		right := box.rect.x + box.rect.width - PALETTE_TEXT_INSET * scale
-		box.rect.x = left
-		box.rect.width = max(0, right - left)
-		box.inset = 0
-	}
+	left := min(box.rect.width, (PALETTE_TEXT_INSET + ICON_BUTTON + SPACE_3) * scale)
+	box.rect.x += left
+	box.rect.width = max(0, box.rect.width - left - PALETTE_TEXT_INSET * scale)
+	box.inset = 0
 	return box
 }
 
@@ -1148,17 +1109,13 @@ palette_input_contains :: proc(l: Palette_Layout, x, y: f32) -> bool {
 }
 
 palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
-	return palette_input_contains(l, x, y) && !contains(l.chip, x, y) && !contains(l.menu, x, y)
+	return palette_input_contains(l, x, y)
 }
 
-// Text over the query, a hand over the mode chip, mode menu rows and results.
 palette_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> platform.Cursor_Shape {
 	if shape, ok := control_pointer(p, l, x, y); ok {return shape}
-	if p.mode_menu && menu_row_at(l, x, y) >= 0 {return .Hand}
-	if contains(l.chip, x, y) {return .Hand}
+	if mode_at(l, x, y) >= 0 {return .Hand}
 	if palette_over_text(l, x, y) {return .Text}
-	// Outside the query, an open mode menu takes the next click only to close.
-	if p.mode_menu {return .Arrow}
 	if l.bar_visible && scrollbar_contains(l.bar, x, y) {return .Arrow}
 	if row_at(p, l, x, y) >= 0 {return .Hand}
 	return .Arrow
@@ -1173,28 +1130,13 @@ palette_input_press :: proc(
 	extend: bool,
 ) -> Outcome {
 	palette_edit_cancel(p)
-	if contains(l.chip, x, y) {
-		p.mode_menu = !p.mode_menu
-		p.menu_hover = -1
-		return .Changed
-	}
-	closed_menu := p.mode_menu
-	p.mode_menu, p.menu_hover = false, -1
 	at := field_box_offset(palette_query_box(p, l, text, scale), x)
-	if field_pointer(&p.query, at, true, extend) == .None {
-		return closed_menu ? .Changed : .None
-	}
-	return .Changed
+	return field_pointer(&p.query, at, true, extend) == .None ? .None : .Changed
 }
 
 palette_input_drag :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, scale: f32) -> Outcome {
-	closed_menu := p.mode_menu
-	p.mode_menu, p.menu_hover = false, -1
 	at := field_box_offset(palette_query_box(p, l, text, scale), x)
-	if field_pointer(&p.query, at, false, true) == .None {
-		return closed_menu ? .Changed : .None
-	}
-	return .Changed
+	return field_pointer(&p.query, at, false, true) == .None ? .None : .Changed
 }
 
 palette_input_release :: proc(p: ^Palette) -> bool {
@@ -1214,10 +1156,6 @@ palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
 	case .Text:
 		palette_edit_cancel(p)
 	case .None:
-	}
-	if p.mode_menu {
-		p.mode_menu, p.menu_hover = false, -1
-		return .Changed
 	}
 	return palette_scroll_to(p, p.scroll - rows)
 }
@@ -1380,7 +1318,7 @@ draw_key_hint :: proc(
 }
 
 @(private)
-draw_mode_menu :: proc(
+draw_modes :: proc(
 	p: ^Palette,
 	list: ^render.Draw_List,
 	text: ^Text,
@@ -1388,42 +1326,42 @@ draw_mode_menu :: proc(
 	l: Palette_Layout,
 	scale: f32,
 ) -> glyphs.Result {
-	if l.menu.width <= 0 || l.menu.height <= 0 {return .Ok}
-	if render.push_layer(list, l.menu) != .None {return .Ok}
-	draw_rect(list, {rect = l.menu, color = theme.pane, radius = RADIUS_OVERLAY * scale})
+	if l.mode_bar.width <= 0 || l.mode_bar.height <= 0 {return .Ok}
+	if render.push_layer(list, l.mode_bar) != .None {return .Ok}
 	draw_rect(list, {
-		rect   = l.menu,
-		color  = theme.border,
-		radius = RADIUS_OVERLAY * scale,
-		stroke = scale,
+		rect = {l.mode_bar.x, l.mode_bar.y + l.mode_bar.height - scale, l.mode_bar.width, scale},
+		color = theme.border,
 	})
-	inset := PALETTE_MENU_INSET * scale
-	row_height := (l.menu.height - 2 * inset) / f32(len(PALETTE_MENU_ORDER))
-	mode_text := text^
-	for mode, i in PALETTE_MENU_ORDER {
-		row := render.Rect {
-			l.menu.x + inset,
-			l.menu.y + inset + f32(i) * row_height,
-			l.menu.width - 2 * inset,
-			row_height,
+	mode_text := text_styled(text, .Body)
+	for mode, i in PALETTE_CYCLE {
+		row := l.modes[mode]
+		inset := min(CONTROL_INSET * scale, row.width / 2)
+		if p.mode_hover == i {
+			hover := render.Rect{row.x, row.y + SPACE_1 * scale, row.width,
+				max(0, row.height - 2 * SPACE_1 * scale)}
+			draw_rect(list, {rect = hover, color = theme.hover, radius = RADIUS_CONTROL * scale})
 		}
 		if p.mode == mode {
-			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
-		} else if p.menu_hover == i {
-			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_CONTROL * scale})
+			line_height := min(2 * scale, row.height)
+			line := render.Rect{row.x + inset, row.y + row.height - line_height,
+				max(0, row.width - 2 * inset), line_height}
+			draw_rect(list, {rect = line, color = theme.accent, radius = pill_radius(line)})
 		}
-		info := PALETTE_MODES[mode]
+		room := max(0, row.width - 2 * inset)
+		if room <= 0 {continue}
+		word := PALETTE_MODES[mode].word
+		icon_size := min(ICON_BUTTON * scale, room)
+		gap := min(SPACE_2 * scale, max(0, room - icon_size))
+		text_room := max(0, room - icon_size - gap)
+		width := min(text_width(&mode_text, word), text_room)
+		x := row.x + (row.width - icon_size - gap - width) / 2
+		ink := p.mode == mode || p.mode_hover == i ? theme.text : theme.muted
+		icon := render.Rect{x, row.y, icon_size, row.height}
+		icon_draw(list, PALETTE_MODE_ICONS[mode], icon, ink, icon_size / scale, scale)
+		if text_room <= 0 {continue}
 		baseline := row.y + (row.height - mode_text.line_height) / 2 + mode_text.ascent
-		if result := draw_text(&mode_text, list, info.word, row.x + CONTROL_INSET * scale, baseline,
-			p.mode == mode ? theme.text : theme.muted); result != .Ok {return result}
-		if info.prefix != "" {
-			prefix_text := text_styled(text, .Detail)
-			width := text_width(&prefix_text, info.prefix)
-			if result := draw_text(&prefix_text, list, info.prefix,
-				row.x + row.width - width - CONTROL_INSET * scale, baseline, theme.faint); result != .Ok {
-				return result
-			}
-		}
+		if result := draw_text(&mode_text, list, word, x + icon_size + gap, baseline,
+			ink, text_room); result != .Ok {return result}
 	}
 	return .Ok
 }
@@ -1452,32 +1390,11 @@ palette_draw :: proc(
 		rect  = {panel.x, l.input.y + l.input.height, panel.width, scale},
 		color = theme.border,
 	})
+	if result := draw_modes(p, list, text, theme, l, scale); result != .Ok {return result}
 	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
-	if l.chip.width > 0 {
-		chip := l.chip
-		chip_color := p.mode_menu || contains(chip, pointer.x, pointer.y) ? theme.hover : theme.pane
-		draw_rect(list, {rect = chip, color = chip_color, radius = RADIUS_CONTROL * scale})
-		draw_rect(list, {
-			rect   = chip,
-			color  = theme.border,
-			radius = RADIUS_CONTROL * scale,
-			stroke = scale,
-		})
-		chip_text := text_styled(text, .Body)
-		baseline := chip.y + (chip.height - chip_text.line_height) / 2 + chip_text.ascent
-		chip_inset := CONTROL_INSET * scale
-		if result := draw_text(&chip_text, list, PALETTE_MODES[p.mode].word, chip.x + chip_inset, baseline,
-			theme.text, max(0, chip.width - 2 * chip_inset - (ICON_INDICATOR + SPACE_1) * scale));
-		   result != .Ok {return result}
-		chevron := render.Rect {
-			chip.x + chip.width - (CONTROL_INSET + ICON_INDICATOR) * scale,
-			chip.y,
-			ICON_INDICATOR * scale,
-			chip.height,
-		}
-		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
-	}
+	search := render.Rect{l.input.x + padding, l.input.y, ICON_BUTTON * scale, l.input.height}
+	icon_draw(list, .Search, search, theme.muted, ICON_BUTTON, scale)
 	box := palette_query_box(p, l, text, scale)
 	query_text := text_styled(text, .Display)
 	if box.rect.width > 1 {
@@ -1581,5 +1498,5 @@ palette_draw :: proc(
 		return popup_draw(&p.binding, palette_binding_layout(p, l), list, text, theme, pointer)
 	}
 	if result := draw_popup(p, list, text, theme, l); result != .Ok {return result}
-	return draw_mode_menu(p, list, text, theme, l, scale)
+	return .Ok
 }

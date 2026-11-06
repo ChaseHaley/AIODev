@@ -307,7 +307,7 @@ when AIO_CONTROL {
 			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
 			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
 			{"palette.mode", owns_palette ? ui.palette_mode_word(p.mode) : "all"},
-			{"palette.chip", owns_palette ? ui.palette_mode_prefix(p.mode) : ""},
+			{"palette.prefix", owns_palette ? ui.palette_mode_prefix(p.mode) : ""},
 			{"palette.selected", fmt.tprintf("%d", owns_palette ? p.selected : 0)},
 			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)}, {"palette.item", item},
 			{"palette.scroll", fmt.tprintf("%d", owns_palette ? p.scroll : 0)},
@@ -317,6 +317,8 @@ when AIO_CONTROL {
 			{"palette.row_height", fmt.tprintf("%g", palette_layout.row_height)},
 			{"palette.panel", fmt.tprintf("%g,%g,%g,%g", palette_layout.panel.x, palette_layout.panel.y,
 				palette_layout.panel.width, palette_layout.panel.height)},
+			{"palette.input", fmt.tprintf("%g,%g,%g,%g", palette_layout.input.x, palette_layout.input.y,
+				palette_layout.input.width, palette_layout.input.height)},
 			{"palette.list", fmt.tprintf("%g,%g,%g,%g", palette_layout.list.x, palette_layout.list.y,
 				palette_layout.list.width, palette_layout.list.height)},
 			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
@@ -336,6 +338,12 @@ when AIO_CONTROL {
 			{"workspaces.count", fmt.tprintf("%d", len(app.workspaces))},
 		}
 		if _, err := append(&entries, ..base[:]); err != nil {return nil, .Out_Of_Memory}
+		for mode in ui.Palette_Mode {
+			r := palette_layout.modes[mode]
+			entry := control.State_Entry{fmt.tprintf("palette.mode.%s", ui.palette_mode_word(mode)),
+				fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)}
+			if _, err := append(&entries, entry); err != nil {return nil, .Out_Of_Memory}
+		}
 		origin: [2]i32
 		for window, i in app.windows {
 			x, y, err := platform.window_to_screen(&app.platform, window.id, 0, 0)

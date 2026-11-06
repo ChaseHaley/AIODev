@@ -42,7 +42,7 @@ pointer_settings_page_and_fields_change_shape_once_per_move :: proc(t: ^testing.
 }
 
 @(test)
-pointer_palette_chip_and_menu_use_hand_query_uses_text :: proc(t: ^testing.T) {
+pointer_palette_scope_tabs_use_hand_query_uses_text :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "pointer-palette", second_window = false) {return}
@@ -53,15 +53,11 @@ pointer_palette_chip_and_menu_use_hand_query_uses_text :: proc(t: ^testing.T) {
 		l := ui.palette_layout(&s.palette, f32(w.width), f32(w.height), w.scale)
 		pointer_expect_move(t, s, w, l.input.x + l.input.width - 20 * w.scale,
 			l.input.y + l.input.height / 2, .Text)
-		if mode == .All {continue}
-		pointer_expect_move(t, s, w, l.chip.x + l.chip.width / 2,
-			l.chip.y + l.chip.height / 2, .Hand)
-		gesture_button(s, w, .Left, true, l.chip.x + 4, l.chip.y + 4)
-		gesture_button(s, w, .Left, false, l.chip.x + 4, l.chip.y + 4)
-		if !testing.expect(t, s.palette.mode_menu) {continue}
-		l = ui.palette_layout(&s.palette, f32(w.width), f32(w.height), w.scale)
-		pointer_expect_move(t, s, w, l.menu.x + l.menu.width / 2,
-			l.menu.y + l.menu.height / 2, .Hand)
+		r := l.modes[mode]
+		pointer_expect_move(t, s, w, r.x + r.width / 2, r.y + r.height / 2, .Hand)
+		gesture_button(s, w, .Left, true, r.x + r.width / 2, r.y + r.height / 2)
+		gesture_button(s, w, .Left, false, r.x + r.width / 2, r.y + r.height / 2)
+		testing.expect_value(t, s.palette.mode, mode)
 		pointer_expect_move(t, s, w, l.footer.x + l.footer.width - 4,
 			l.footer.y + l.footer.height / 2, .Arrow)
 	}

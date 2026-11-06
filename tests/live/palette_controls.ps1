@@ -56,8 +56,9 @@ try {
     Shot 'toggle-on'
 
     Search 'pane gap' 'pane.gap'
+    $defaultGap = [int](Read-State)['palette.value']
     Invoke-Aio key Alt+Right Alt+Right
-    Invoke-Aio expect state 'palette.value=7'
+    Invoke-Aio expect state "palette.value=$($defaultGap + 2)"
     Write-Output 'PASS Alt+Right steps a slider'
     Shot 'slider-modified'
 
@@ -68,7 +69,7 @@ try {
     $x = [double]$list[0] + [double]$list[2] - 21 * $scale
     $y = [double]$list[1] + 20 * $scale
     Invoke-Aio mouse click "$([int]$x),$([int]$y)" --px
-    Invoke-Aio expect state 'palette.value=5'
+    Invoke-Aio expect state "palette.value=$defaultGap"
     Invoke-Aio expect state 'palette.open=true'
     Write-Output 'PASS the reset button restores the default in place'
 

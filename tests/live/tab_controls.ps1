@@ -63,7 +63,7 @@ try {
     foreach($prefix in 't:','w:','s:','c:'){
         Aio key Ctrl+A | Out-Null
         Aio type $prefix | Out-Null
-        Equal (State)['palette.chip'] $prefix 'typed prefix selects category'
+        Equal (State)['palette.prefix'] $prefix 'typed prefix selects category'
         Shot ('category-'+$prefix.Substring(0,1))
     }
     Aio key Esc | Out-Null

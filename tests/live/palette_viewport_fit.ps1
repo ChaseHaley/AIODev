@@ -167,10 +167,10 @@ try {
     Assert-Fit 'one matching result'
     Shot 'single-result-highlights'
     $s = Read-State
-    $panel = @($s['palette.panel'] -split ',' | ForEach-Object { [double]$_ })
+    $input = @($s['palette.input'] -split ',' | ForEach-Object { [double]$_ })
     $scale = [double]$s['window.scale']
-    $start = "$([int]($panel[0]+14*$scale)),$([int]($panel[1]+38*$scale))"
-    $end = "$([int]($panel[0]+$panel[2]-14*$scale)),$([int]($panel[1]+38*$scale))"
+    $start = "$([int]($input[0]+44*$scale)),$([int]($input[1]+32*$scale))"
+    $end = "$([int]($input[0]+$input[2]-16*$scale)),$([int]($input[1]+32*$scale))"
     Invoke-Aio mouse drag $start $end --px
     Shot 'query-pointer-selection'
     Invoke-Aio type 'terminal setting'
