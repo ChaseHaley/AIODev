@@ -71,6 +71,11 @@ settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 // Builds a replacement before releasing the old page, so a failed refresh keeps its draft.
 @(private)
 settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> bool {
+	if ui.editor_loaded(editor) {
+		for window in app.windows {
+			if &window.editor == editor {theme_delete_disarm(&window.resources); break}
+		}
+	}
 	view, view_error := ui.editor_view_take(editor)
 	defer ui.editor_view_destroy(&view)
 	if view_error != nil {
@@ -85,8 +90,8 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		notify(app, .Error, "Could not allocate settings editor.")
 		return false
 	}
-	p.source = owned_source
-	s, diagnostics, parse_error := settings.parse(p.source, themes_directory = settings.theme_directory())
+	defer delete(owned_source)
+	s, diagnostics, parse_error := settings.parse(owned_source, themes_directory = settings.theme_directory())
 	defer settings.diagnostics_destroy(&diagnostics)
 	if parse_error != nil {
 		ui.editor_destroy(p)
@@ -121,7 +126,6 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		}
 		if entry.key == "font.family" {
 			row.show_all_fonts = s.font.show_all
-			row.other_font_choices = font.family_choices(font_items, !s.font.show_all, row.value)
 		}
 		if entry.key == "theme.name" {
 			row.description = "Theme file or custom theme. Changing any color saves a custom theme."
@@ -274,7 +278,6 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		}
 	}
 	p.leader = app.leader
-	p.open = true
 	ui.editor_view_restore(p, &view)
 	ui.editor_hover_clear(p)
 	ui.editor_filter(p)
@@ -285,6 +288,8 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 			true,
 		)
 	}
+	ui.editor_revision_open(p, owned_source)
+	owned_source = ""
 	ui.editor_destroy(editor)
 	editor^, replacement = replacement, {}
 	return true
@@ -393,9 +398,10 @@ workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
 	for w in app.windows {
 		if w.workspace != workspace {continue}
 		if present {
-			if !w.editor.open && app.settings_path != "" {_ = settings_load(app, &w.editor)}
-		} else if w.editor.open {
+			if !ui.editor_loaded(&w.editor) && app.settings_path != "" {_ = settings_load(app, &w.editor)}
+		} else if ui.editor_loaded(&w.editor) {
 			ui.editor_destroy(&w.editor)
+			theme_delete_disarm(&w.resources)
 		}
 	}
 }
@@ -482,6 +488,8 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 	return "", warning
 }
 
+// Saves the other font filter. Publication rebuilds the page with that filter's fonts, so the page
+// changes only once the file has.
 @(private)
 editor_font_filter :: proc(app: ^App, w: ^Window) {
 	p := &w.editor
@@ -489,14 +497,13 @@ editor_font_filter :: proc(app: ^App, w: ^Window) {
 	if row == nil || row.key != "font.family" {return}
 	query := strings.clone(ui.field_string(&p.choice_search), context.temp_allocator)
 	focused := ui.editor_choice_toggle_focused(p)
-	updated, message, err := settings.edit_text(p.source, "font.show_all", row.show_all_fonts ? "true" : "false")
+	source := ui.editor_source(p)
+	updated, message, err := settings.edit_text(source, "font.show_all", row.show_all_fonts ? "false" : "true")
 	defer delete(updated)
 	defer delete(message)
 	result: settings.Save_Error
-	if err == nil && message == "" {result = settings_commit(app, p.source, updated, p)}
+	if err == nil && message == "" {result = settings_commit(app, source, updated, p)}
 	if err != nil || message != "" || result != .None {
-		row.choices, row.other_font_choices = row.other_font_choices, row.choices
-		row.show_all_fonts = !row.show_all_fonts
 		ui.editor_message(p, "Could not save font filtering. Reopen Settings and try again.", true)
 	}
 	ui.editor_font_search_restore(p, query, focused)
@@ -504,11 +511,13 @@ editor_font_filter :: proc(app: ^App, w: ^Window) {
 
 editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p := &w.editor
+	defer ui.editor_revision_sync(p)
 	// The outcome that names a request is the only one that may act on it.
 	request := ui.editor_request_take(p)
 	defer ui.editor_request_destroy(&request)
 	if outcome == .None {return}
 	w.dirty = true
+	if !editor_theme_delete_press(p, outcome) {theme_delete_disarm(&w.resources)}
 	if outcome == .Reset_All {settings_reset_ask(app, w); return}
 	if outcome == .Font_Filter {editor_font_filter(app, w); return}
 	if outcome == .Process_Remove {
@@ -540,7 +549,6 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		editor_profile_field(app, w, row)
 		return
 	}
-	if row.key != "theme.delete" {w.theme_delete_armed = false}
 	switch row.key {
 	case "theme.duplicate":
 		editor_theme_duplicate(app, w)
@@ -573,7 +581,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	key := strings.clone(row.key, context.temp_allocator)
 	kind := row.kind
 	value := strings.clone(ui.field_string(&p.value), context.temp_allocator)
-	updated, message, err := settings.edit_text(p.source, row.key, value)
+	updated, message, err := settings.edit_text(ui.editor_source(p), row.key, value)
 	defer delete(message)
 	if err != nil || message != "" {
 		ui.editor_message(p, err != nil ? "Could not allocate settings change." : message, true)
@@ -591,7 +599,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		}
 	}
 	defer delete(updated)
-	if result := settings_commit(app, p.source, updated, p); result != .None {
+	if result := settings_commit(app, ui.editor_source(p), updated, p); result != .None {
 		text := "Could not save settings. Check the settings path and permissions."
 		if result == .Conflict {
 			text = "File changed outside this editor. Close and reopen Settings to reload it."
@@ -625,7 +633,7 @@ editor_profile_write :: proc(
 	focus := Reveal_Focus.None,
 ) -> bool {
 	scroll := w.editor.scroll
-	updated, edit_message, err := settings.edit_text(w.editor.source, key, value)
+	updated, edit_message, err := settings.edit_text(ui.editor_source(&w.editor), key, value)
 	defer delete(edit_message)
 	if err != nil || edit_message != "" {
 		ui.editor_message(
@@ -636,7 +644,7 @@ editor_profile_write :: proc(
 		delete(updated)
 		return false
 	}
-	result := settings_commit(app, w.editor.source, updated, &w.editor)
+	result := settings_commit(app, ui.editor_source(&w.editor), updated, &w.editor)
 	delete(updated)
 	if result != .None {
 		text := "Could not save the profile. Check the settings path and permissions."
@@ -709,7 +717,7 @@ editor_profile_saved :: proc(
 	updated, key, message: string,
 ) -> bool {
 	scroll := w.editor.scroll
-	result := settings_commit(app, w.editor.source, updated, &w.editor)
+	result := settings_commit(app, ui.editor_source(&w.editor), updated, &w.editor)
 	if result != .None {
 		text := "Could not save the profile. Check the settings path and permissions."
 		if result == .Conflict {
@@ -730,7 +738,9 @@ editor_profile_saved :: proc(
 
 @(private)
 editor_profile_mutate :: proc(app: ^App, w: ^Window, change: settings.Profile_Mutation) {
-	updated, id, issue, error := settings.profile_mutate(w.editor.source, &app.settings.profiles, change)
+	updated, id, issue, error := settings.profile_mutate(
+		ui.editor_source(&w.editor), &app.settings.profiles, change,
+	)
 	defer delete(updated)
 	defer delete(id)
 	defer delete(issue)
@@ -942,7 +952,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 // row reveal `select_key` instead.
 @(private)
 editor_theme_commit :: proc(app: ^App, w: ^Window, updated, select_key, message: string) {
-	result := settings_commit(app, w.editor.source, updated, &w.editor)
+	result := settings_commit(app, ui.editor_source(&w.editor), updated, &w.editor)
 	if result != .None {
 		text := "Could not save the theme. Check the settings path and permissions."
 		if result == .Conflict {
@@ -982,7 +992,7 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 		alpha_dropped = alpha && tokens[token].kind != .Translucent
 	}
 	updated, created, issue, error := settings.theme_color_edit(
-		w.editor.source, token_key, value, themes_directory = settings.theme_directory(),
+		ui.editor_source(&w.editor), token_key, value, themes_directory = settings.theme_directory(),
 	)
 	defer delete(updated)
 	defer delete(created)
@@ -990,7 +1000,7 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 		editor_theme_failed(w, error, issue)
 		return
 	}
-	if updated == w.editor.source {
+	if updated == ui.editor_source(&w.editor) {
 		ui.editor_message(&w.editor, "Theme files keep their colors; changing one saves a custom theme.", false)
 		return
 	}
@@ -1004,7 +1014,7 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 @(private)
 editor_theme_duplicate :: proc(app: ^App, w: ^Window) {
 	updated, created, error := settings.theme_duplicate(
-		w.editor.source, themes_directory = settings.theme_directory(),
+		ui.editor_source(&w.editor), themes_directory = settings.theme_directory(),
 	)
 	defer delete(updated)
 	defer delete(created)
@@ -1023,7 +1033,7 @@ editor_theme_duplicate :: proc(app: ^App, w: ^Window) {
 editor_theme_rename :: proc(app: ^App, w: ^Window, value: string) {
 	new_id := strings.clone(strings.trim_space(value), context.temp_allocator)
 	updated, issue, error := settings.theme_rename(
-		w.editor.source, new_id, themes_directory = settings.theme_directory(),
+		ui.editor_source(&w.editor), new_id, themes_directory = settings.theme_directory(),
 	)
 	defer delete(updated)
 	if error != .None {
@@ -1037,7 +1047,7 @@ editor_theme_rename :: proc(app: ^App, w: ^Window, value: string) {
 editor_theme_name :: proc(app: ^App, w: ^Window, value: string) {
 	name := strings.trim_space(value)
 	key := fmt.tprintf("%s%s.name", settings.CUSTOM_THEME_PREFIX, app.settings.theme.name)
-	updated, message, err := settings.edit_text(w.editor.source, key, name)
+	updated, message, err := settings.edit_text(ui.editor_source(&w.editor), key, name)
 	defer delete(updated)
 	defer delete(message)
 	if err != nil || message != "" {
@@ -1047,24 +1057,65 @@ editor_theme_name :: proc(app: ^App, w: ^Window, value: string) {
 	editor_theme_commit(app, w, updated, "theme.display_name", "Theme name saved.")
 }
 
+// Delete Theme's first press arms the theme its prompt names. Only the next press on the page, while
+// that theme is still the active one, deletes it. Anything else the page does, a new settings revision
+// and closing the page disarm it, so a confirmation never reaches a theme the prompt did not name.
+// theme_delete_arm and theme_delete_disarm are its only writers.
+Theme_Delete :: union {
+	Theme_Delete_Armed,
+}
+
+Theme_Delete_Armed :: struct {
+	// Owned.
+	theme: string,
+}
+
+@(private = "file")
+theme_delete_prompt :: proc(theme: string) -> string {
+	return fmt.tprintf("Delete theme %s and its colors? Press Delete Theme again to confirm.", theme)
+}
+
+@(private = "file")
+theme_delete_arm :: proc(resources: ^Workspace_View_Resources, theme: string) {
+	theme_delete_disarm(resources)
+	owned, err := strings.clone(theme)
+	if err != nil {
+		ui.editor_message(&resources.editor, "Could not prepare the theme deletion.", true)
+		return
+	}
+	resources.theme_delete = Theme_Delete_Armed{owned}
+	ui.editor_message(&resources.editor, theme_delete_prompt(theme), true)
+}
+
+// Also takes down the prompt, which would otherwise ask for a press that no longer deletes.
+theme_delete_disarm :: proc(resources: ^Workspace_View_Resources) {
+	armed, ok := resources.theme_delete.(Theme_Delete_Armed)
+	if !ok {return}
+	p := &resources.editor
+	if p.message == theme_delete_prompt(armed.theme) {ui.editor_message(p, "", false)}
+	delete(armed.theme)
+	resources.theme_delete = nil
+}
+
+// The press that answers the prompt, which leaves it armed until editor_theme_delete decides.
+@(private = "file")
+editor_theme_delete_press :: proc(p: ^ui.Editor, outcome: ui.Editor_Outcome) -> bool {
+	row := ui.editor_row(p)
+	return (outcome == .Save || outcome == .Reset) && row != nil && row.key == "theme.delete"
+}
+
 // Deleting discards colors that exist nowhere else, so it takes a second press.
 @(private)
 editor_theme_delete :: proc(app: ^App, w: ^Window) {
-	if !w.theme_delete_armed {
-		w.theme_delete_armed = true
-		ui.editor_message(
-			&w.editor,
-			fmt.tprintf(
-				"Delete theme %s and its colors? Press Delete Theme again to confirm.",
-				app.settings.theme.name,
-			),
-			true,
-		)
+	theme := app.settings.theme.name
+	armed, ok := w.theme_delete.(Theme_Delete_Armed)
+	if !ok || armed.theme != theme {
+		theme_delete_arm(&w.resources, theme)
 		return
 	}
-	w.theme_delete_armed = false
+	theme_delete_disarm(&w.resources)
 	updated, selected, error := settings.theme_delete(
-		w.editor.source, themes_directory = settings.theme_directory(),
+		ui.editor_source(&w.editor), themes_directory = settings.theme_directory(),
 	)
 	defer delete(updated)
 	defer delete(selected)
@@ -1096,6 +1147,8 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	p := &w.editor
 	w.dirty = true
 	if e.pressed {w.suppressed_key = e}
+	// Escape backs out of a delete prompt even when the page has nothing else to leave.
+	if e.pressed && e.key == .Escape {theme_delete_disarm(&w.resources)}
 	if ui.editor_capturing(p) {
 		editor_outcome(app, w, ui.editor_key(p, e))
 		return

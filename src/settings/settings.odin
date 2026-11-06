@@ -1479,12 +1479,15 @@ default_text :: proc(
 	return strings.clone(strings.to_string(builder), allocator)
 }
 
+// When requested, source_out receives the exact text parsed, after migration, owned by allocator.
+// The caller frees it with that allocator. On failure it is empty; omitted outputs cost no allocation.
 @(require_results)
 load :: proc(
 	path: string,
 	allocator := context.allocator,
 	extra_comments: []string = nil,
 	themes_directory: string = "",
+	source_out: ^string = nil,
 ) -> (
 	s: Settings,
 	diagnostics: [dynamic]Diagnostic,
@@ -1493,6 +1496,7 @@ load :: proc(
 	migration_error: Save_Error,
 	err: os.Error,
 ) {
+	if source_out != nil {source_out^ = ""}
 	data, read_error := os.read_entire_file(path, allocator)
 	defer delete(data, allocator)
 	if read_error == nil {
@@ -1516,7 +1520,8 @@ load :: proc(
 		}
 		parse_error: runtime.Allocator_Error
 		s, diagnostics, parse_error = parse(text, allocator, themes_directory)
-		if parse_error != nil {err = parse_error}
+		if parse_error != nil {err = parse_error; return}
+		if source_out != nil {source_out^, text = text, ""}
 		return
 	}
 	if read_error != os.Error(os.General_Error.Not_Exist) {
@@ -1539,6 +1544,7 @@ load :: proc(
 		err = default_error
 		return
 	}
+	if source_out != nil {source_out^, text = text, ""}
 	created = true
 	return
 }

@@ -59,8 +59,6 @@ Editor_Row :: struct {
 	// A choice whose value is any combination of `choices`, saved by settings.set_text.
 	multiple:                                      bool,
 	choices, choice_labels:                        []string,
-	// Shell fonts keep the other catalogue subset so the popup can switch without discovery.
-	other_font_choices:                            []string,
 	show_all_fonts:                                bool,
 	profile, badge, detail, note:                  string,
 	flags:                                         bit_set[Editor_Row_Flag],
@@ -259,6 +257,87 @@ Profile_Position :: struct {
 	lifted:   bool,
 }
 
+// The settings text a page shows; nil is Closed. The revision_ procs below own its transitions.
+// Fresh and Draft share a file revision, but Draft has pending work in the editor's value, capture
+// or program groups. Stale keeps that work and the older text when publication cannot reach it,
+// so a save checks the older text rather than overwriting a newer file.
+Editor_Revision :: union {
+	Editor_Fresh,
+	Editor_Draft,
+	Editor_Stale,
+}
+
+Editor_Fresh :: struct {
+	source: string,
+}
+
+Editor_Draft :: struct {
+	source: string,
+}
+
+Editor_Stale :: struct {
+	source: string,
+	reason: Editor_Stale_Reason,
+}
+
+Editor_Stale_Reason :: enum {
+	// The file no longer holds the page's text: an external edit, found when a save checks the file.
+	Changed_Outside,
+	// Adopting the revision would drop a draft: its row is gone, or its program groups changed.
+	Draft_Conflict,
+	// Building the replacement page failed.
+	Refresh_Failed,
+}
+
+editor_loaded :: proc(p: ^Editor) -> bool {
+	return p.revision != nil
+}
+
+// The text the page shows and saves against; empty for a closed page.
+editor_source :: proc(p: ^Editor) -> string {
+	switch r in p.revision {
+	case Editor_Fresh:
+		return r.source
+	case Editor_Draft:
+		return r.source
+	case Editor_Stale:
+		return r.source
+	}
+	return ""
+}
+
+// Takes ownership of the text only after a replacement page is built.
+editor_revision_open :: proc(p: ^Editor, source: string) {
+	editor_revision_close(p)
+	p.revision = Editor_Fresh{source}
+}
+
+editor_revision_close :: proc(p: ^Editor) {
+	delete(editor_source(p))
+	p.revision = nil
+}
+
+// Records the first revision the page missed, retaining its source and pending work.
+editor_revision_stale :: proc(p: ^Editor, reason: Editor_Stale_Reason) {
+	if !editor_loaded(p) {return}
+	if _, stale := p.revision.(Editor_Stale); stale {return}
+	p.revision = Editor_Stale{editor_source(p), reason}
+}
+
+// Runs when an edit or navigation finishes, never while drawing. The draft payload already lives in
+// the field, capture or program group; changing phase moves only the owned source string.
+editor_revision_sync :: proc(p: ^Editor) {
+	if !editor_loaded(p) {return}
+	if _, stale := p.revision.(Editor_Stale); stale {return}
+	source := editor_source(p)
+	if editor_draft(p) {p.revision = Editor_Draft{source}} else {p.revision = Editor_Fresh{source}}
+}
+
+editor_draft :: proc(p: ^Editor) -> bool {
+	row := editor_row(p)
+	return p.process_dirty || editor_capturing(p) || (row != nil && field_string(&p.value) != row.value)
+}
+
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
 // in `value` until it is saved.
 Editor :: struct {
@@ -268,7 +347,7 @@ Editor :: struct {
 	process_expanded, process_next, process_next_program, process_fallback: int,
 	process_source: string,
 	process_dirty: bool,
-	open, hover_clear:                                                 bool,
+	hover_clear:                                                       bool,
 	// Captured shortcuts name physical key positions (Physical+) instead of layout characters.
 	physical:                                                          bool,
 	mode:                                                              Editor_Mode,
@@ -288,7 +367,7 @@ Editor :: struct {
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
 	hsv:                                                               [3]f32,
 	leader:                                                            Maybe(commands.Shortcut),
-	source:                                                            string,
+	revision:                                                          Editor_Revision,
 	message:                                                           string,
 	error:                                                             bool,
 	// Table state: the one expanded profile, the detected section, the focused control on a profile
@@ -377,8 +456,6 @@ editor_row_destroy :: proc(row: ^Editor_Row) {
 	delete(row.choices)
 	for label in row.choice_labels {delete(label)}
 	delete(row.choice_labels)
-	for choice in row.other_font_choices {delete(choice)}
-	delete(row.other_font_choices)
 }
 
 editor_destroy :: proc(p: ^Editor) {
@@ -393,7 +470,7 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.choice_search.bytes)
 	delete(p.choice_matches)
 	delete(p.process_source)
-	delete(p.source)
+	editor_revision_close(p)
 	delete(p.message)
 	delete(p.expanded)
 	editor_request_destroy(&p.request)
@@ -557,7 +634,7 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		group_index = len(p.groups) - 1
 	}
 	owned: [9]string
-	choices, labels, other_fonts: []string
+	choices, labels: []string
 	success := false
 	defer if !success {
 		for s in owned {delete(s)}
@@ -565,8 +642,6 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		delete(choices)
 		for label in labels {delete(label)}
 		delete(labels)
-		for choice in other_fonts {delete(choice)}
-		delete(other_fonts)
 	}
 	for s, i in ([?]string {
 		row.key,
@@ -588,16 +663,11 @@ editor_add :: proc(p: ^Editor, row: Editor_Row, group: string) -> runtime.Alloca
 		labels = make([]string, len(row.choice_labels)) or_return
 		for label, i in row.choice_labels {labels[i] = strings.clone(label) or_return}
 	}
-	if len(row.other_font_choices) > 0 {
-		other_fonts = make([]string, len(row.other_font_choices)) or_return
-		for choice, i in row.other_font_choices {other_fonts[i] = strings.clone(choice) or_return}
-	}
 	added := row
 	added.key, added.title, added.description, added.value, added.default_value =
 		owned[0], owned[1], owned[2], owned[3], owned[4]
 	added.profile, added.badge, added.detail, added.note = owned[5], owned[6], owned[7], owned[8]
 	added.choices, added.choice_labels = choices, labels
-	added.other_font_choices = other_fonts
 	added.group = group_index
 	_, err := append(&p.rows, added)
 	success = err == nil
@@ -767,6 +837,7 @@ stop_editing :: proc(p: ^Editor) {
 // Selects a page line. Whatever the previous row had open closes; a field keeps the keyboard when
 // the next row can take it.
 editor_select :: proc(p: ^Editor, index: int) {
+	defer editor_revision_sync(p)
 	if !editor_process_capture(p) {return}
 	if p.error || mode_shows_hint(p.mode) {editor_message(p, "", false)}
 	if p.error_text != "" {
@@ -1651,9 +1722,8 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 			return .Changed, true
 		}
 		if choice.toggle_focus {
-			if e.key == .Space || e.key == .Enter || e.key == .Numpad_Enter {
-				return choice_toggle_fonts(p, row), true
-			}
+			// The page owner saves the other filter; the page it publishes lists those fonts.
+			if e.key == .Space || e.key == .Enter || e.key == .Numpad_Enter {return .Font_Filter, true}
 			if e.key != .Escape && e.key != .Arrow_Down && e.key != .Arrow_Up {return .None, true}
 			choice.toggle_focus = false
 			editor_mode_set(p, choice)
@@ -1724,6 +1794,7 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 // Takes the raw key event: capture needs the physical key, and navigation uses the layout's key.
 editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	if !raw.pressed {return .None}
+	defer editor_revision_sync(p)
 	if profile_menu_shown(p) {
 		if menu_key(&p.profile_menu, raw) == .Chosen {return editor_profile_menu_choose(p)}
 		// The menu closes itself on Escape; the keyboard stays on the row's More control.
@@ -1877,6 +1948,7 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 }
 
 editor_text :: proc(p: ^Editor, text: string) {
+	defer editor_revision_sync(p)
 	#partial switch _ in p.mode {
 	case Editor_Capturing, Editor_Positions, Editor_Reset_All:
 		return
@@ -1928,6 +2000,7 @@ editor_selection :: proc(p: ^Editor) -> string {
 
 // Removes the selected text of the focused field after it was copied.
 editor_cut :: proc(p: ^Editor) {
+	defer editor_revision_sync(p)
 	if editor_selection(p) == "" {return}
 	if row := editor_row(p); editor_popup(p) == .Choice && choice_searchable(row) {
 		field_text(&p.choice_search, "")
@@ -2286,6 +2359,7 @@ editor_press :: proc(
 	x, y: f32,
 	extend: bool,
 ) -> Editor_Outcome {
+	defer editor_revision_sync(p)
 	s := l.scale
 	p.profile_menu.bounds = l.page
 	if profile_menu_shown(p) {
@@ -2311,7 +2385,7 @@ editor_press :: proc(
 			if contains(choice_font_toggle_rect(p, l), x, y) {
 				choice.toggle_focus = true
 				editor_mode_set(p, choice)
-				return choice_toggle_fonts(p, row)
+				return .Font_Filter
 			}
 			if choice_searchable(row) && y < r.y + 4 * s + choice_search_height(row, s) {
 				box := choice_search_box(p, l, text)
@@ -2502,6 +2576,7 @@ editor_press :: proc(
 
 // Continues a pointer drag; returns whether anything changed.
 editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> bool {
+	defer editor_revision_sync(p)
 	if browsing, ok := p.mode.(Editor_Browsing); ok && browsing.selecting {
 		return field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), false, true) != .None
 	}

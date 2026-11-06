@@ -15,7 +15,6 @@ long_choice_list_scroll_hit_testing_and_keyboard :: proc(t: ^testing.T) {
 		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true,
 		value = choices[0], choices = choices[:],
 	}, "Font"), nil)
-	p.open = true
 	ui.editor_filter(&p)
 	testing.expect(t, ui.editor_select_key(&p, "font.family"))
 	l := page(&p)
@@ -52,7 +51,6 @@ font_search_filters_selects_and_cancels_without_editing_settings_search :: proc(
 			value = "Consolas", choices = choices[:],
 		}, "Fonts"), nil)
 	}
-	p.open = true
 	ui.editor_filter(&p)
 	for font_key in ([?]string{"font.family", "interface.font_family"}) {
 		testing.expect(t, ui.editor_select_key(&p, font_key))
@@ -103,7 +101,6 @@ font_search_accepts_translated_text_on_key_events :: proc(t: ^testing.T) {
 			key = font_key, title = "Font", kind = .Choice, searchable = true, value = "Consolas", choices = choices[:],
 		}, "Fonts"), nil)
 	}
-	p.open = true
 	ui.editor_filter(&p)
 	for font_key in ([?]string{"font.family", "interface.font_family"}) {
 		testing.expect(t, ui.editor_select_key(&p, font_key))
@@ -127,12 +124,10 @@ font_popup_toggle_keeps_search_and_family_and_supports_pointer_and_keyboard :: p
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	mono := [?]string{"Consolas", "Cove Nerd Font Mono"}
-	all := [?]string{"Consolas", "Cove Nerd Font", "Cove Nerd Font Mono", "Segoe UI"}
 	testing.expect_value(t, ui.editor_add(&p, {
 		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true, value = "Consolas",
-		choices = mono[:], other_font_choices = all[:],
+		choices = mono[:],
 	}, "Fonts"), nil)
-	p.open = true
 	ui.editor_filter(&p)
 	testing.expect(t, ui.editor_select_key(&p, "font.family"))
 	ui.editor_key(&p, key({key = .Enter}))
@@ -144,14 +139,14 @@ font_popup_toggle_keeps_search_and_family_and_supports_pointer_and_keyboard :: p
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
 	testing.expect_value(t, ui.field_string(&p.choice_search), "Segoe")
 	testing.expect_value(t, ui.field_string(&p.value), "Consolas")
-	testing.expect_value(t, ui.editor_choice_count(&p, ui.editor_row(&p)), 1)
-	testing.expect(t, ui.editor_row(&p).show_all_fonts)
+	// The page keeps its fonts until the owner saves the filter and publishes the other list.
+	testing.expect_value(t, ui.editor_choice_count(&p, ui.editor_row(&p)), 0)
+	testing.expect(t, !ui.editor_row(&p).show_all_fonts)
 	l := page(&p)
 	popup := ui.editor_popup_rect(&p, l)
 	testing.expect_value(t, ui.editor_pointer(&p, l, popup.x+14, popup.y+50), platform.Cursor_Shape.Hand)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+14, popup.y+50, false), ui.Editor_Outcome.Font_Filter)
 	testing.expect_value(t, ui.editor_choice_count(&p, ui.editor_row(&p)), 0)
-	testing.expect(t, !ui.editor_row(&p).show_all_fonts)
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect(t, !ui.editor_choice_toggle_focused(&p))
 	ui.editor_key(&p, key({key = .A, modifiers = {.Control}}))

@@ -9,8 +9,8 @@ Workspace_View_Resources :: struct {
 	workspace: ^Workspace,
 	tree: ^layout.Layout,
 	editor: ui.Editor,
-	// Delete Theme was pressed once; pressing it again deletes the custom theme.
-	theme_delete_armed: bool,
+	// Belongs to the settings page in editor and moves with it.
+	theme_delete: Theme_Delete,
 	views: [dynamic]Pane_View,
 	using presentation: Tab_Presentation,
 	panes: [dynamic]layout.Pane_Rect,
@@ -70,6 +70,7 @@ workspace_view_destroy :: proc(resources: ^Workspace_View_Resources) {
 	tab_presentation_destroy(&resources.presentation)
 	delete(resources.panes)
 	delete(resources.dividers)
+	theme_delete_disarm(resources)
 	ui.editor_destroy(&resources.editor)
 	resources^ = {}
 }
@@ -84,6 +85,7 @@ workspace_view_move :: proc(destination, source: ^Workspace_View_Resources) {
 workspace_view_rebind :: proc(destination, prepared: ^Workspace_View_Resources) {
 	assert(destination != prepared)
 	destination.editor, prepared.editor = prepared.editor, destination.editor
+	destination.theme_delete, prepared.theme_delete = prepared.theme_delete, destination.theme_delete
 	destination.workspace, destination.tree = prepared.workspace, prepared.tree
 	tab_presentation_clear(&destination.presentation)
 	workspace_view_destroy(prepared)

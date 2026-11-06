@@ -482,7 +482,9 @@ when AIO_CONTROL {
 				{"theme.hover_lift", fmt.tprintf("%g", app.theme.hover_lift)},
 				{"theme.hover_gloss", fmt.tprintf("%g", app.theme.hover_gloss)},
 				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
-				{"settings.open", fmt.tprintf("%t", w.editor.open)},
+				{"settings.open", fmt.tprintf("%t", ui.editor_loaded(&w.editor))},
+				{"settings.revision", verify_settings_revision(&w.editor)},
+				{"settings.theme_delete_armed", fmt.tprintf("%t", w.theme_delete != nil)},
 				{"rename.open", fmt.tprintf("%t", w.rename_open)},
 				{"rename.value", ui.field_string(&w.rename)},
 				{"tab_menu.open", fmt.tprintf("%t", w.tab_menu.open)},
@@ -1107,6 +1109,25 @@ when AIO_CONTROL {
 			if workspace == w.workspace {return i + 1}
 		}
 		return 0
+	}
+
+	verify_settings_revision :: proc(p: ^ui.Editor) -> string {
+		switch r in p.revision {
+		case ui.Editor_Fresh:
+			return "fresh"
+		case ui.Editor_Draft:
+			return "draft"
+		case ui.Editor_Stale:
+			switch r.reason {
+			case .Changed_Outside:
+				return "stale.changed_outside"
+			case .Draft_Conflict:
+				return "stale.draft_conflict"
+			case .Refresh_Failed:
+				return "stale.refresh_failed"
+			}
+		}
+		return "closed"
 	}
 
 	verify_error :: proc(app: ^App, err: control.Error) {

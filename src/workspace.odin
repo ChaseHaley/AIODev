@@ -130,6 +130,7 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 }
 
 focus_leave :: proc(app: ^App, w: ^Window) {
+	theme_delete_disarm(&w.resources)
 	window_overlays_cancel(app, w)
 	status_focus_leave(app, w)
 	leader_cancel(w)

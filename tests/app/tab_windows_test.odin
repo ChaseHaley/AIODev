@@ -407,14 +407,14 @@ settings_opens_once_and_focuses_the_existing_tab :: proc(t: ^testing.T) {
 	// A reveal reaches the page in the window showing it.
 	app.settings_reveal(&state, second, {key = "font.size", search = .Clear})
 	testing.expect_value(t, ui.editor_row(&first.editor).key, "font.size")
-	testing.expect(t, !second.editor.open)
+	testing.expect(t, !ui.editor_loaded(&second.editor))
 
 	// The tab can be dragged to another window, and the page goes with it.
 	tab_drag_over_window(&state, first, second, settings_index, 0, 10)
 	app.tab_drag_release(&state, first)
 	testing.expect_value(t, app.settings_tab_index(home), -1)
 	testing.expect(t, app.settings_tab_index(other) >= 0)
-	testing.expect(t, second.editor.open && !first.editor.open)
+	testing.expect(t, ui.editor_loaded(&second.editor) && !ui.editor_loaded(&first.editor))
 	testing.expect(t, app.editor_open(&state, first) == second)
 	testing.expect_value(t, len(other.tabs), other_tabs + 1)
 	testing.expect_value(t, app.settings_tab_index(home), -1)

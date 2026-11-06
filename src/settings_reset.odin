@@ -5,9 +5,9 @@ import "aio:ui"
 import "core:strings"
 
 settings_reset_ask :: proc(app: ^App, w: ^Window) {
-	if !w.editor.open {return}
+	if !ui.editor_loaded(&w.editor) {return}
 	settings_reset_clear(w)
-	value, err := strings.clone(w.editor.source)
+	value, err := strings.clone(ui.editor_source(&w.editor))
 	if err != nil {notify(app, .Error, "Could not prepare the settings reset."); return}
 	w.settings_reset_source = value
 	ui.confirm_open(&w.settings_reset_confirm)
@@ -23,17 +23,11 @@ settings_reset_finish :: proc(app: ^App, w: ^Window, accepted: bool) {
 	defaults, err := settings.default_text()
 	defer delete(defaults)
 	if err != nil {notify(app, .Error, "Could not prepare factory defaults."); return}
-	if result := settings_commit(app, w.settings_reset_source, defaults); result != .None {
+	// A full reset also discards pending fields and program drafts on every open page.
+	result := settings_save_revision(app, w.settings_reset_source, defaults, Publish_Reset{defaults})
+	if result != .None {
 		notify(app, .Error, "Could not reset settings. Reopen Settings and try again.")
 		return
-	}
-	// A full reset also discards pending fields and program drafts on every open page.
-	for window in app.windows {
-		if window.editor.open {
-			ui.editor_destroy(&window.editor)
-			_ = settings_load_source(app, &window.editor, defaults)
-			window.dirty = true
-		}
 	}
 	notify(app, .Info, "All settings restored to factory defaults.")
 }

@@ -11,8 +11,8 @@ import "core:testing"
 process_app_fixture :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) -> bool {
 	if !commit_open_pages(t, f, name) {return false}
 	p := &f.state.windows[0].editor
-	updated := commit_text(t, p.source, settings.PADDING_GROUPS_KEY, "Editors:0:nvim,vim;Tools:8:less")
-	return testing.expect_value(t, app.settings_commit(&f.state, p.source, updated, p), settings.Save_Error.None)
+	updated := commit_text(t, ui.editor_source(p), settings.PADDING_GROUPS_KEY, "Editors:0:nvim,vim;Tools:8:less")
+	return testing.expect_value(t, app.settings_commit(&f.state, ui.editor_source(p), updated, p), settings.Save_Error.None)
 }
 
 @(test)
@@ -35,8 +35,8 @@ process_editor_saves_runtime_rules_and_keeps_new_group_drafts_across_other_write
 	app.editor_outcome(s, w, .Save)
 	testing.expect(t, p.error)
 	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:helix,vim;Tools:8:less")
-	updated := commit_text(t, p.source, "pane.gap", "11")
-	testing.expect_value(t, app.settings_commit(s, p.source, updated), settings.Save_Error.None)
+	updated := commit_text(t, ui.editor_source(p), "pane.gap", "11")
+	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated), settings.Save_Error.None)
 	testing.expect(t, p.process_dirty)
 	testing.expect(t, ui.editor_reveal(p, "process.group.3.program.1"))
 	ui.editor_focus_row(p)
@@ -45,9 +45,9 @@ process_editor_saves_runtime_rules_and_keeps_new_group_drafts_across_other_write
 	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:helix,vim;Tools:8:less;Focus:8:claude")
 	testing.expect_value(t, s.settings.pane.gap, 11)
 	for window in s.windows {
-		testing.expect_value(t, window.editor.source, p.source)
+		testing.expect_value(t, ui.editor_source(&window.editor), ui.editor_source(p))
 	}
-	before := strings.clone(p.source, context.temp_allocator)
+	before := strings.clone(ui.editor_source(p), context.temp_allocator)
 	ui.field_set(&p.value, "a,b")
 	app.editor_outcome(s, w, .Save)
 	testing.expect(t, p.error)
@@ -70,8 +70,8 @@ process_editor_always_confirms_deletion_and_rejects_changed_subjects :: proc(t: 
 	app.editor_process_remove_finish(s, w, false)
 	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:nvim,vim;Tools:8:less")
 	app.editor_process_remove_ask(s, w, 1)
-	updated := commit_text(t, p.source, settings.PADDING_GROUPS_KEY, "Different:4:codex;Tools:8:less")
-	testing.expect_value(t, app.settings_commit(s, p.source, updated), settings.Save_Error.None)
+	updated := commit_text(t, ui.editor_source(p), settings.PADDING_GROUPS_KEY, "Different:4:codex;Tools:8:less")
+	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated), settings.Save_Error.None)
 	app.editor_process_remove_finish(s, w, true)
 	testing.expect_value(t, s.settings.process.padding_groups, "Different:4:codex;Tools:8:less")
 	testing.expect(t, p.error)
@@ -91,10 +91,10 @@ process_editor_uncommitted_field_cannot_follow_a_different_groups_positional_key
 	writer, peer := &s.windows[0].editor, &s.windows[1].editor
 	app.settings_reveal_page(s, peer, {key = "process.group.1.program.1", focus = .Control})
 	ui.field_set(&peer.value, "pending-program")
-	before := strings.clone(peer.source, context.temp_allocator)
-	updated := commit_text(t, writer.source, settings.PADDING_GROUPS_KEY, "Different:4:codex;Tools:8:less")
-	testing.expect_value(t, app.settings_commit(s, writer.source, updated, writer), settings.Save_Error.None)
-	testing.expect_value(t, peer.source, before)
+	before := strings.clone(ui.editor_source(peer), context.temp_allocator)
+	updated := commit_text(t, ui.editor_source(writer), settings.PADDING_GROUPS_KEY, "Different:4:codex;Tools:8:less")
+	testing.expect_value(t, app.settings_commit(s, ui.editor_source(writer), updated, writer), settings.Save_Error.None)
+	testing.expect_value(t, ui.editor_source(peer), before)
 	testing.expect_value(t, ui.field_string(&peer.value), "pending-program")
 	app.editor_outcome(s, s.windows[1], .Save)
 	testing.expect(t, peer.error)

@@ -6,6 +6,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
+import "aio:ui"
 
 @(test)
 settings_scroll_survives_workspace_round_trips :: proc(t: ^testing.T) {
@@ -27,7 +28,7 @@ settings_scroll_survives_workspace_round_trips :: proc(t: ^testing.T) {
 	w := state.windows[0]
 	one := w.workspace
 	app.run_action(&state, w, .Settings_UI)
-	if !testing.expect(t, w.editor.open) {return}
+	if !testing.expect(t, ui.editor_loaded(&w.editor)) {return}
 	initial_scroll := w.editor.scroll
 	w.editor.scroll = 24
 	app.run_action(&state, w, .New_Workspace)
@@ -58,7 +59,7 @@ settings_scroll_survives_workspace_round_trips :: proc(t: ^testing.T) {
 	testing.expect_value(t, w.editor.scroll, 24)
 	// Closing Settings discards its saved position instead of reviving it on the next open.
 	app.run_action(&state, w, .Close_Tab)
-	testing.expect(t, !w.editor.open)
+	testing.expect(t, !ui.editor_loaded(&w.editor))
 	if !testing.expect(t, app.workspace_select(&state, w, two)) {return}
 	if !testing.expect(t, app.workspace_select(&state, w, one)) {return}
 	app.run_action(&state, w, .Settings_UI)

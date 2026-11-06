@@ -31,6 +31,11 @@ the Vivaldi browser.
 The installer is per user: it copies AIODev to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your
 PATH and creates a Start menu shortcut. Settings live in `%LOCALAPPDATA%\AIODev`.
 
+Reload Settings refreshes open settings pages while keeping pending fields whose rows still exist.
+A save refuses to overwrite an external file edit; reload before saving that draft again. Delete Theme
+asks for a second press on the same theme; navigation, Escape, a settings revision or closing Settings
+ends that prompt.
+
 Releases are not code signed yet, so Windows SmartScreen may warn on first launch.
 
 ## Build from source

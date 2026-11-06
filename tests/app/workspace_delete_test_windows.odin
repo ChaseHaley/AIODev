@@ -229,7 +229,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	testing.expect(t, w.workspace.id > id && w.tree == &app.selected_tab(w.workspace).tree)
 	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
-	testing.expect(t, !w.editor.open && !w.tab_menu.open && !w.pending_close.confirm.open)
+	testing.expect(t, !ui.editor_loaded(&w.editor) && !w.tab_menu.open && !w.pending_close.confirm.open)
 	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
 	for handle in processes { testing.expect_value(t, win32.WaitForSingleObject(handle, 1000), win32.WAIT_OBJECT_0) }
 	app.tick(state)
@@ -315,7 +315,7 @@ workspace_delete_destination_failure_and_changed_ownership_reconfirm :: proc(t: 
 	app.window_close(state, state.windows[1])
 	app.workspace_delete_request(state, w, target)
 	delete_key(state, w, .Enter)
-	testing.expect(t, w.workspace == destination && w.editor.open)
+	testing.expect(t, w.workspace == destination && ui.editor_loaded(&w.editor))
 	testing.expect(t, app.workspace_find(state, target_id) == nil)
 	testing.expect_value(t, len(state.sessions), 1)
 	app.tick(state)
@@ -496,7 +496,7 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	testing.expect(t, prepared.workspace == nil && prepared.tree == nil)
 	testing.expect(t, raw_data(prepared.views) == nil && raw_data(prepared.panes) == nil)
 	testing.expect(t, raw_data(prepared.dividers) == nil)
-	testing.expect(t, raw_data(prepared.dividers) == nil && prepared.editor.source == "")
+	testing.expect(t, raw_data(prepared.dividers) == nil && ui.editor_source(&prepared.editor) == "")
 	testing.expect_value(t, raw_data(receiver.views), views)
 	testing.expect(t, receiver.workspace == workspace && receiver.tree == w.tree)
 	testing.expect_value(t, raw_data(w.views), live_views)
@@ -509,12 +509,12 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	app.run_action(state, w, .Settings_UI)
 	context.allocator = tracking
 	if !testing.expect(t, app.workspace_view_prepare(state, &prepared, workspace)) {return}
-	source := prepared.editor.source
+	source := ui.editor_source(&prepared.editor)
 	app.workspace_view_move(&receiver, &prepared)
 	app.workspace_view_destroy(&prepared)
-	testing.expect(t, prepared.editor.source == "" && len(prepared.editor.rows) == 0)
-	testing.expect(t, receiver.editor.open && len(receiver.editor.rows) > 0)
-	testing.expect_value(t, receiver.editor.source, source)
+	testing.expect(t, ui.editor_source(&prepared.editor) == "" && len(prepared.editor.rows) == 0)
+	testing.expect(t, ui.editor_loaded(&receiver.editor) && len(receiver.editor.rows) > 0)
+	testing.expect_value(t, ui.editor_source(&receiver.editor), source)
 	app.workspace_view_destroy(&receiver)
 	testing.expect_value(t, len(tracker.allocation_map), 0)
 }
