@@ -142,6 +142,13 @@ command_invoke :: proc(
 		return {}
 	}
 	if window.workspace.selected != target.pane.tab {tab_select(app, window, target.pane.tab)}
+	if action == .Minimize_Floating {
+		if floating, ok := layout.float_of(window.tree, target.pane.node); ok && floating.minimized {
+			pane_focus(app, window, target.pane.node)
+			layout_state_touch(app)
+			return {}
+		}
+	}
 	pane_focus(app, window, target.pane.node)
 	if linked := pane_link_window_of(app, target.pane.content); linked != nil {
 		if action != .Pane_Focus {

@@ -211,19 +211,6 @@ float_stack :: proc(l: ^Layout, node: Node_Id) -> u64 {
 	return l.nodes[node].(Pane).float.stack
 }
 
-// The minimized floating panes in the order they were opened, for their capsules.
-floats_minimized :: proc(l: ^Layout, out: ^[dynamic]Node_Id) {
-	clear(out)
-	for node, i in l.nodes {
-		pane := node.(Pane) or_continue
-		if !pane.floating || !pane.float.minimized {continue}
-		append(out, Node_Id(i))
-		for j := len(out) - 1; j > 0; j -= 1 {
-			if l.nodes[out[j - 1]].(Pane).order <= pane.order {break}
-			out[j - 1], out[j] = out[j], out[j - 1]
-		}
-	}
-}
 
 // The floating pane to show or hide next: the most recently minimized one when `minimized`, otherwise the
 // topmost shown one; INVALID_NODE when there is none.

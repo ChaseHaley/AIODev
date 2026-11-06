@@ -48,7 +48,6 @@ Icon :: enum {
 	Folder,
 	Globe,
 	Minimize,
-	Float,
 	None,
 }
 
@@ -136,9 +135,6 @@ icon_draw :: proc(
 	case .None:
 	case .Minimize:
 		pen_path(p, {3, 12}, {13, 12})
-	case .Float:
-		pen_box(p, 1, 2, 14, 12, 2)
-		pen_box(p, 6, 6, 6.5, 5, 1)
 	case .Markdown:
 		pen_box(p, 1, 3, 14, 10, 2)
 		pen_path(p, {3.5, 10.5}, {3.5, 5.5}, {6, 8}, {8.5, 5.5}, {8.5, 10.5})

@@ -54,6 +54,8 @@ Window :: struct {
 	// The minimized floating pane whose capsule is under the pointer.
 	float_capsule_hover: Maybe(layout.Content),
 	float_capsule_armed: ui.Armed(layout.Content),
+	float_capsules: [dynamic]Float_Capsule,
+	float_capsule_widths: [dynamic]f32,
 	tab_drag: Tab_Drag,
 	tab_incoming: Tab_Incoming,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
@@ -322,6 +324,8 @@ window_free :: proc(w: ^Window) {
 	delete(w.rename.bytes)
 	workspace_picker_destroy(w)
 	delete(w.close_restore)
+	delete(w.float_capsules)
+	delete(w.float_capsule_widths)
 	confirmation_clear(w)
 	render.draw_list_destroy(&w.list)
 	free(w)
@@ -445,6 +449,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	window_views_prune(w)
 	for &view in w.views {view.valid = false}
 	for pane in w.panes {pane_fit(app, w, pane)}
+	floating_capsules_refresh(app, w)
 	rail_reveal_active(w)
 }
 
@@ -460,6 +465,7 @@ window_floats_layout :: proc(app: ^App, w: ^Window) {
 		pane_fit(app, w, pane)
 		for &view in w.views {if view.content == pane.content {view.valid = false}}
 	}
+	floating_capsules_refresh(app, w)
 	w.dirty = true
 }
 
@@ -660,7 +666,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	}
 	for pane in w.panes {
 		if !pane.floating {continue}
-		floating_frame_draw(app, w, pane)
 		result: glyphs.Result
 		frame, result = pane_draw(app, w, pane, &blinking)
 		if result != .Ok {return frame, result}

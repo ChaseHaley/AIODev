@@ -783,7 +783,7 @@ when AIO_CONTROL {
 			pane_state := [?]control.State_Entry {
 				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
 				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
-				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(app, w)))},
+				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(w)))},
 				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
 				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},

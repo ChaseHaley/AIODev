@@ -5,7 +5,7 @@ import "aio:layout"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
-import "core:math"
+import "core:log"
 
 // Floating panes (WORK-045). A floating pane draws above its tab's tiled panes, so opening, moving,
 // minimizing or closing it never resizes or reflows them. It moves by its header, resizes by its edges,
@@ -183,23 +183,6 @@ floating_minimize :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	layout_state_touch(app)
 }
 
-// Draws the shadow a floating card casts on the panes below it; the card itself draws as any pane's.
-floating_frame_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
-	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return}
-	r := pane.rect
-	_ = ui.panel_draw(
-		&w.list,
-		{
-			rect = {r.x, r.y, r.width, r.height},
-			radius = window_pane_radius(app, w),
-			scale = w.scale,
-			shadow_y = 8,
-			softness = 28,
-			border = .Expanded,
-		},
-		app.theme,
-	)
-}
 
 // Floating panes are the last of the window's panes, topmost last.
 floating_rects :: proc(w: ^Window) -> []layout.Pane_Rect {
@@ -234,10 +217,10 @@ floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edge
 }
 
 // Whether a floating pane, its edge band or a capsule covers the point, hiding the dividers below it.
-floating_covers :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+floating_covers :: proc(w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
 	if pane, found := layout.hit_test(w.panes[:], x, y); found && pane.floating {return true}
-	_, capsule := floating_capsule_at(app, w, x, y).?
+	_, capsule := floating_capsule_at(w, x, y).?
 	return capsule
 }
 
@@ -249,6 +232,38 @@ floating_drag_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, edges
 		edges   = edges,
 		start   = {x, y},
 		rect    = pane.rect,
+	}
+}
+
+floating_drag_rect :: proc(
+	area, original: layout.Rect,
+	delta: [2]f32,
+	edges: Float_Edges,
+	scale: f32,
+) -> layout.Rect {
+	r := original
+	if edges == {} {
+		r.x = clamp(r.x + delta.x, area.x, area.x + area.width - r.width)
+		r.y = clamp(r.y + delta.y, area.y, area.y + area.height - r.height)
+		return r
+	}
+	min_width := min(FLOAT_MINIMUM_WIDTH * scale, area.width)
+	min_height := min(FLOAT_MINIMUM_HEIGHT * scale, area.height)
+	right, bottom := r.x + r.width, r.y + r.height
+	if .Left in edges {r.x = clamp(r.x + delta.x, area.x, right - min_width)}
+	if .Right in edges {right = clamp(right + delta.x, r.x + min_width, area.x + area.width)}
+	if .Top in edges {r.y = clamp(r.y + delta.y, area.y, bottom - min_height)}
+	if .Bottom in edges {bottom = clamp(bottom + delta.y, r.y + min_height, area.y + area.height)}
+	r.width, r.height = right - r.x, bottom - r.y
+	return r
+}
+
+floating_bounds_for_rect :: proc(area, rect: layout.Rect) -> layout.Rect {
+	return {
+		(rect.x - area.x) / area.width,
+		(rect.y - area.y) / area.height,
+		rect.width / area.width,
+		rect.height / area.height,
 	}
 }
 
@@ -266,26 +281,8 @@ floating_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if !layout.is_floating(w.tree, node) {w.float_drag = {}; return false}
 	area := window_content_area(app, w)
 	if area.width <= 0 || area.height <= 0 {return true}
-	r := d.rect
-	if d.edges == {} {
-		r.x = clamp(r.x + dx, area.x, area.x + area.width - r.width)
-		r.y = clamp(r.y + dy, area.y, area.y + area.height - r.height)
-	} else {
-		min_width := min(FLOAT_MINIMUM_WIDTH * w.scale, area.width)
-		min_height := min(FLOAT_MINIMUM_HEIGHT * w.scale, area.height)
-		right, bottom := r.x + r.width, r.y + r.height
-		if .Left in d.edges {r.x = clamp(r.x + dx, area.x, right - min_width)}
-		if .Right in d.edges {right = clamp(right + dx, r.x + min_width, area.x + area.width)}
-		if .Top in d.edges {r.y = clamp(r.y + dy, area.y, bottom - min_height)}
-		if .Bottom in d.edges {bottom = clamp(bottom + dy, r.y + min_height, area.y + area.height)}
-		r.width, r.height = right - r.x, bottom - r.y
-	}
-	bounds := layout.Rect {
-		(r.x - area.x) / area.width,
-		(r.y - area.y) / area.height,
-		r.width / area.width,
-		r.height / area.height,
-	}
+	r := floating_drag_rect(area, d.rect, {dx, dy}, d.edges, w.scale)
+	bounds := floating_bounds_for_rect(area, r)
 	if layout.float_set_bounds(w.tree, node, bounds) {window_floats_layout(app, w)}
 	return true
 }
@@ -306,52 +303,92 @@ floating_edge_cursor :: proc(edges: Float_Edges) -> platform.Cursor_Shape {
 	return horizontal ? .Resize_Horizontal : .Resize_Vertical
 }
 
-// Capsules
-
 Float_Capsule :: struct {
 	node:    layout.Node_Id,
 	content: layout.Content,
 	rect:    render.Rect,
+	order:   u64,
 }
 
-// One capsule per minimized floating pane, centred along the bottom of the tab's panes in temporary memory.
-floating_capsules :: proc(app: ^App, w: ^Window) -> []Float_Capsule {
-	if w.tree == nil || w.linked {return nil}
-	nodes := make([dynamic]layout.Node_Id, context.temp_allocator)
-	layout.floats_minimized(w.tree, &nodes)
-	if len(nodes) == 0 {return nil}
-	area := window_content_area(app, w)
+floating_capsule_row_fit :: proc(widths: []f32, area_width, preferred_gap: f32) -> (start, gap: f32) {
+	if len(widths) == 0 || area_width <= 0 {return}
+	gap = preferred_gap
+	total := gap * f32(len(widths) - 1)
+	for width in widths {total += width}
+	if total > area_width {
+		gap = len(widths) > 1 ? min(preferred_gap, area_width / f32(len(widths) * 4)) : 0
+		limit := max(0, (area_width - gap * f32(len(widths) - 1)) / f32(len(widths)))
+		total = gap * f32(len(widths) - 1)
+		for &width in widths {
+			width = min(width, limit)
+			total += width
+		}
+	}
+	start = max(0, (area_width - total) / 2)
+	return
+}
+
+// Cached geometry keeps title measurement and allocation out of frame building and pointer hit tests.
+floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
+	clear(&w.float_capsules)
+	clear(&w.float_capsule_widths)
+	if w.tree == nil || w.linked {return}
 	s := w.scale
+	for node, i in w.tree.nodes {
+		pane := node.(layout.Pane) or_continue
+		if !pane.floating || !pane.float.minimized {continue}
+		capsule := Float_Capsule {
+			node = layout.Node_Id(i),
+			content = pane.content,
+			order = pane.order,
+		}
+		if _, err := append(&w.float_capsules, capsule); err != nil {
+			clear(&w.float_capsules)
+			log.error("storing floating pane capsules failed")
+			return
+		}
+		for j := len(w.float_capsules) - 1; j > 0 && w.float_capsules[j - 1].order > pane.order; j -= 1 {
+			w.float_capsules[j - 1], w.float_capsules[j] = w.float_capsules[j], w.float_capsules[j - 1]
+		}
+	}
+	if len(w.float_capsules) == 0 {return}
 	label := ui.text_styled(&w.ui_text, .Body)
-	capsules := make([]Float_Capsule, len(nodes), context.temp_allocator)
-	height, gap := ui.HEIGHT_STANDARD * s, ui.SPACE_2 * s
-	total := -gap
-	for node, i in nodes {
-		content := w.tree.nodes[node].(layout.Pane).content
-		text := ui.text_width(&label, floating_title(app, content))
-		width := clamp(text + (ui.SPACE_3 + ui.ICON_BUTTON + ui.SPACE_2 + ui.SPACE_3) * s,
-			FLOAT_CAPSULE_MINIMUM * s, FLOAT_CAPSULE_MAXIMUM * s)
-		capsules[i] = {node = node, content = content, rect = {0, 0, math.round(width), height}}
-		total += math.round(width) + gap
+	if err := resize(&w.float_capsule_widths, len(w.float_capsules)); err != nil {
+		clear(&w.float_capsules)
+		log.error("storing floating pane capsule widths failed")
+		return
 	}
-	x := math.round(area.x + max(0, (area.width - total) / 2))
-	y := math.round(area.y + area.height - height - ui.SPACE_3 * s)
-	for &capsule in capsules {
-		capsule.rect.x, capsule.rect.y = x, y
-		x += capsule.rect.width + gap
+	area := window_content_area(app, w)
+	for &capsule, i in w.float_capsules {
+		text := ui.text_width(&label, floating_title(app, capsule.content))
+		w.float_capsule_widths[i] = clamp(
+			text + (ui.SPACE_3 + ui.ICON_BUTTON + ui.SPACE_2 + ui.SPACE_3) * s,
+			FLOAT_CAPSULE_MINIMUM * s,
+			FLOAT_CAPSULE_MAXIMUM * s,
+		)
+		capsule.rect.height = ui.HEIGHT_STANDARD * s
 	}
-	return capsules
+	start, gap := floating_capsule_row_fit(w.float_capsule_widths[:], area.width, ui.SPACE_2 * s)
+	x := area.x + start
+	y := area.y + area.height - ui.HEIGHT_STANDARD * s - ui.SPACE_3 * s
+	for &capsule, i in w.float_capsules {
+		capsule.rect.x, capsule.rect.y, capsule.rect.width = x, y, w.float_capsule_widths[i]
+		x += w.float_capsule_widths[i] + gap
+	}
+}
+
+floating_capsules :: proc(w: ^Window) -> []Float_Capsule {
+	return w.float_capsules[:]
 }
 
 @(private)
-floating_capsule_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Maybe(Float_Capsule) {
-	for capsule in floating_capsules(app, w) {
+floating_capsule_at :: proc(w: ^Window, x, y: f32) -> Maybe(Float_Capsule) {
+	for capsule in floating_capsules(w) {
 		if rect_contains(capsule.rect, x, y) {return capsule}
 	}
 	return nil
 }
 
-// The name a pane's header shows.
 floating_title :: proc(app: ^App, content: layout.Content) -> string {
 	if entry := workspace_session_for_content(app, content); entry != nil {
 		return entry.name != "" ? entry.name : pane_header_title(&entry.header)
@@ -360,7 +397,7 @@ floating_title :: proc(app: ^App, content: layout.Content) -> string {
 }
 
 floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	capsules := floating_capsules(app, w)
+	capsules := floating_capsules(w)
 	if len(capsules) == 0 {return .Ok}
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
@@ -420,9 +457,9 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 // Pointer surface: floating pane edges and capsules. Headers, content and scrollbars of a floating pane
 // are reached through their own surfaces, which test the topmost pane.
 
-floating_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+floating_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
-	_, capsule := floating_capsule_at(app, w, x, y).?
+	_, capsule := floating_capsule_at(w, x, y).?
 	return capsule
 }
 
@@ -430,7 +467,7 @@ floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	x, y := f32(e.x), f32(e.y)
 	hover: Maybe(layout.Content)
 	if owner == .Floating {
-		if capsule, found := floating_capsule_at(app, w, x, y).?; found {hover = capsule.content}
+		if capsule, found := floating_capsule_at(w, x, y).?; found {hover = capsule.content}
 	}
 	if hover != w.float_capsule_hover {w.float_capsule_hover, w.dirty = hover, true}
 	if owner != .Floating {return}
@@ -444,7 +481,7 @@ floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	x, y := f32(e.x), f32(e.y)
-	if capsule, found := floating_capsule_at(app, w, x, y).?; found {
+	if capsule, found := floating_capsule_at(w, x, y).?; found {
 		ui.armed_press(&w.float_capsule_armed, capsule.content)
 		w.dirty = true
 		return
@@ -468,7 +505,7 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	}
 	if !ui.armed_down(w.float_capsule_armed) {return false}
 	under: layout.Content
-	capsule, found := floating_capsule_at(app, w, x, y).?
+	capsule, found := floating_capsule_at(w, x, y).?
 	if found {under = capsule.content}
 	fired, ok := ui.armed_release(&w.float_capsule_armed, under)
 	w.dirty = true
@@ -479,7 +516,7 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	return true
 }
 
-floating_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
-	_, capsule := floating_capsule_at(app, w, x, y).?
+floating_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	_, capsule := floating_capsule_at(w, x, y).?
 	return capsule ? "Restore floating pane" : ""
 }

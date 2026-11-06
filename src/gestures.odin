@@ -294,7 +294,7 @@ content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	entry := pane_at(app, w, e.x, e.y)
 	if shape == .Text && entry == nil && !w.selecting {shape = .Arrow}
 	resize, over_divider := divider_cursor(w, x, y)
-	over_divider &&= !floating_covers(app, w, x, y)
+	over_divider &&= !floating_covers(w, x, y)
 	if over_divider && !swallowed {shape = resize}
 	if !w.selecting && !over_divider && !swallowed && !title && link_hover_update(app, w, x, y) {
 		shape = .Hand

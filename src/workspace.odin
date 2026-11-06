@@ -807,6 +807,12 @@ session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 	}
 	for window in app.windows {
 		window.dirty = true
+		if window.tree != nil {
+			node := layout.find_content(window.tree, {.Terminal, id})
+			if floating, ok := layout.float_of(window.tree, node); ok && floating.minimized {
+				floating_capsules_refresh(app, window)
+			}
+		}
 		if focused := focused_session(app, window); focused != nil && focused.id == id {
 			window_update_title(app, window)
 		}

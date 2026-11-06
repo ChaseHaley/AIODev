@@ -585,9 +585,9 @@ pill_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 // Dividers
 
 @(private = "file")
-divider_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+divider_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
 	_, over := divider_cursor(w, x, y)
-	return over && !floating_covers(app, w, x, y)
+	return over && !floating_covers(w, x, y)
 }
 
 @(private = "file")
