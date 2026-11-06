@@ -113,17 +113,21 @@ list_markers_are_found_as_they_read :: proc(t: ^testing.T) {
 }
 
 @(test)
-stepping_starts_at_the_end_going_up_and_wraps_both_ways :: proc(t: ^testing.T) {
+stepping_starts_at_either_end_and_wraps_both_ways :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
 	testing.expect_value(t, found(t, &f, "a\n\na\n\na\n", "a"), 3)
 	testing.expect_value(t, f.search.selected, -1)
-	for expected in ([?]int{2, 1, 0, 2}) {
-		testing.expect(t, markdown.search_select(&f.search, true))
+	for expected in ([?]int{0, 1, 2, 0}) {
+		testing.expect(t, markdown.search_select(&f.search, false))
 		testing.expect_value(t, f.search.selected, expected)
 	}
-	testing.expect(t, markdown.search_select(&f.search, false))
-	testing.expect_value(t, f.search.selected, 0)
+	testing.expect(t, markdown.search_select(&f.search, true))
+	testing.expect_value(t, f.search.selected, 2)
+	markdown.search_set(&f.search, "a")
+	settle(&f)
+	testing.expect(t, markdown.search_select(&f.search, true))
+	testing.expect_value(t, f.search.selected, 2)
 }
 
 @(test)

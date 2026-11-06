@@ -112,7 +112,8 @@ search_first_after :: proc(matches: []Match, offset: int) -> int {
 }
 
 // Selects the next match toward the top of the document, or toward the bottom, wrapping at either end.
-// As in a terminal, the first step up lands on the last match. False when there is nothing to select.
+// With none selected, stepping down starts at the first match and up at the last. False when there is
+// nothing to select.
 @(require_results)
 search_select :: proc(s: ^Search, upward: bool) -> bool {
 	total := len(s.matches)

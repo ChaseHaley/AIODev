@@ -166,15 +166,14 @@ markdown_find_summary :: proc(pane: ^Markdown_Pane) -> term.Search_Summary {
 		active = true,
 		complete = s.complete || s.invalid,
 		total = total,
-		// Counted from the end of the document, as a terminal counts from its newest line.
-		selected = s.selected < 0 ? -1 : total - 1 - s.selected,
+		selected = s.selected,
 		invalid = s.invalid,
 		revision = s.revision,
 	}
 }
 
-markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, older: bool) {
-	if pane.state != .Loaded || !markdown.search_select(&pane.search, older) {return}
+markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
+	if pane.state != .Loaded || !markdown.search_select(&pane.search, upward) {return}
 	match := pane.search.matches[pane.search.selected]
 	if shown, found := markdown_pane_rect(w, pane.id); found {
 		visible := int(markdown_geometry_of(w, shown.rect).area.height)

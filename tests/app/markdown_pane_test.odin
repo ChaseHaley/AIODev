@@ -108,9 +108,9 @@ press :: proc(state: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.
 	app.handle_event(state, platform.Key_Event{window = w.id, key = key, modifiers = modifiers})
 }
 
-// Drives the bar through the real dispatcher: the same keys, counts and steps as find in a terminal.
+// Drives the bar through the real dispatcher: the keys and bar of terminal find, reading top down.
 @(test)
-find_in_a_document_behaves_as_it_does_in_a_terminal :: proc(t: ^testing.T) {
+find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Find") {return}
@@ -132,19 +132,36 @@ find_in_a_document_behaves_as_it_does_in_a_terminal :: proc(t: ^testing.T) {
 	testing.expect_value(t, find_count(w, pane), "0 of 3")
 	testing.expect_value(t, pane.view.scroll, 0)
 
-	// Enter walks upward from the last match, Shift+Enter the other way, both wrapping.
+	// Enter walks down from the first match, which already shows; Shift+Enter goes back, both wrapping.
 	press(&f.state, w, .Enter)
 	testing.expect_value(t, find_count(w, pane), "1 of 3")
-	testing.expect_value(t, pane.search.selected, 2)
+	testing.expect_value(t, pane.search.selected, 0)
+	testing.expect_value(t, pane.view.scroll, 0)
+	press(&f.state, w, .Enter)
+	testing.expect_value(t, find_count(w, pane), "2 of 3")
 	scrolled := pane.view.scroll
 	testing.expect(t, scrolled > 0)
 	press(&f.state, w, .Enter)
-	testing.expect_value(t, find_count(w, pane), "2 of 3")
-	testing.expect(t, pane.view.scroll < scrolled)
-	press(&f.state, w, .Enter, {.Shift})
+	testing.expect_value(t, find_count(w, pane), "3 of 3")
+	testing.expect(t, pane.view.scroll > scrolled)
+	press(&f.state, w, .Enter)
+	testing.expect_value(t, find_count(w, pane), "1 of 3")
 	press(&f.state, w, .Enter, {.Shift})
 	testing.expect_value(t, find_count(w, pane), "3 of 3")
-	testing.expect_value(t, pane.search.selected, 0)
+	testing.expect_value(t, pane.search.selected, 2)
+
+	// The bar's arrows move the way they point, whichever way Enter goes.
+	l, _ := app.find_controls(w, pane)
+	for down in ([2]bool{true, false}) {
+		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x + 16),
+			y = i32(l.older.y + 16), button = .Left, pressed = down})
+	}
+	testing.expect_value(t, find_count(w, pane), "2 of 3")
+	for down in ([2]bool{true, false}) {
+		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = i32(l.newer.x + 16),
+			y = i32(l.newer.y + 16), button = .Left, pressed = down})
+	}
+	testing.expect_value(t, find_count(w, pane), "3 of 3")
 
 	// Keys stay with the query rather than the document.
 	before := pane.view.scroll
@@ -169,7 +186,9 @@ find_in_a_document_behaves_as_it_does_in_a_terminal :: proc(t: ^testing.T) {
 
 	// Closing ends the search, leaves the view where it is and remembers the query.
 	press(&f.state, w, .Enter)
+	press(&f.state, w, .Enter)
 	kept := pane.view.scroll
+	testing.expect(t, kept > 0)
 	press(&f.state, w, .Escape)
 	testing.expect(t, !w.find.open && !pane.search.active)
 	testing.expect_value(t, pane.view.scroll, kept)

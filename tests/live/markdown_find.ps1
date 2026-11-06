@@ -73,21 +73,28 @@ try {
     Expect 'markdown.scroll=0'
     Shot 'matches-dark'
 
-    # As in a terminal, the first step up selects the last match and scrolls it into view.
+    # Enter reads top down. The first match already shows, so the view stays put.
     Invoke-Aio key Enter | Out-Null
     Expect 'find.count=1 of 11'
-    $bottom = [int](Read-State)['markdown.scroll']
-    if ($bottom -le 0) { throw 'The selected match did not scroll into view.' }
-    Shot 'selected-dark'
+    Expect 'markdown.scroll=0'
+    # The next one is off screen and scrolls into view.
     Invoke-Aio key Enter | Out-Null
     Expect 'find.count=2 of 11'
+    $reached = [int](Read-State)['markdown.scroll']
+    if ($reached -le 0) { throw 'The selected match did not scroll into view.' }
+    Shot 'selected-dark'
     # A match that already shows does not move the view.
-    Expect "markdown.scroll=$bottom"
+    Invoke-Aio key Enter | Out-Null
+    Expect 'find.count=3 of 11'
+    Expect "markdown.scroll=$reached"
+    Invoke-Aio key Shift+Enter | Out-Null
+    Expect 'find.count=2 of 11'
     Invoke-Aio key Shift+Enter | Out-Null
     Expect 'find.count=1 of 11'
-    Step-Find newer
-    Expect 'find.count=11 of 11'
+    # The arrows move the way they point and wrap.
     Step-Find older
+    Expect 'find.count=11 of 11'
+    Step-Find newer
     Expect 'find.count=1 of 11'
 
     # A mismatched release neither navigates nor changes tabs.
@@ -176,7 +183,7 @@ try {
     Invoke-Aio key Enter | Out-Null
     Expect 'find.count=1 of 11'
     ($lines + '- entry 500') | Set-Content -LiteralPath $plan -Encoding utf8
-    Wait-For 'find.count' '2 of 12'
+    Wait-For 'find.count' '1 of 12'
     Invoke-Aio key Esc | Out-Null
 
     # Find is scoped to the focused pane, which closes it on the way out.

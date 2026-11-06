@@ -971,7 +971,18 @@ find_bar_key :: proc(app: ^App, w: ^Window, e, logical: platform.Key_Event) {
 	if outcome == .Closed {
 		w.suppressed_key = e
 	}
-	on_find_outcome(app, w, find_target(app, w), outcome)
+	target := find_target(app, w)
+	// A terminal is read from its newest line up and a document from its first line down, so Enter
+	// follows the reading direction. The bar's arrows always point the way they move.
+	if _, document := target.(^Markdown_Pane); document {
+		#partial switch outcome {
+		case .Older:
+			outcome = .Newer
+		case .Newer:
+			outcome = .Older
+		}
+	}
+	on_find_outcome(app, w, target, outcome)
 }
 
 // The find bar's match count: "3 of 17" once a match is selected.
