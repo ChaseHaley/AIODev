@@ -85,47 +85,61 @@ link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	return hit
 }
 
+@(private)
+Link_Resolution :: enum {
+	// Nothing under the pointer reads as a link.
+	None,
+	Web,
+	File,
+	// It reads as a local file, but none exists there.
+	Missing,
+}
+
+// What a click at the point would open. The filesystem settles file links here, under D-068. The
+// target borrows buffer or the pane's link state; copy it to keep it.
 @(private, require_results)
-link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+link_resolve :: proc(app: ^App, w: ^Window, x, y: f32, buffer: []u8) -> (Link_Resolution, string) {
 	pane, found := layout.hit_test(w.panes[:], x, y)
 	if !found {
-		return false
+		return .None, ""
 	}
 	entry := workspace_session_for_content(app, pane.content)
 	state := link_pane(w, pane.content)
 	if entry == nil || state == nil || !term_view.links_refresh(&state.view, entry.session) {
-		return false
+		return .None, ""
 	}
 	column, row, inside := link_cell(entry, x, y)
 	if !inside {
-		return false
+		return .None, ""
 	}
 	cwd := term.working_directory(entry.session, context.temp_allocator)
-	buffer: [4096]u8 = ---
 	selection, selected := term.link_selection_at(&state.view.links, column, row)
 	if selected {
-		if uri, web := link_selection_web(selection, buffer[:]); web {
-			if !open_link(app, uri) {notify(app, .Error, "Could not open the link.")}
-			return true
-		}
-		if path, exists := link_selection_file(selection, cwd, buffer[:]); exists {
-			terminal_file_request(app, w, path)
-			return true
-		}
+		if uri, web := link_selection_web(selection, buffer); web {return .Web, uri}
+		if path, exists := link_selection_file(selection, cwd, buffer); exists {return .File, path}
 	}
 	target, hit := term.link_detected_at(&state.view.links, column, row)
-	if !hit {
-		if selected {notify(app, .Error, "That local file is not available.")}
-		return selected
-	}
+	if !hit {return selected ? .Missing : .None, ""}
 	if !links.allowed(target.uri) {
-		path, exists := link_detected_file(target, cwd, buffer[:])
-		if exists {terminal_file_request(app, w, path)}
-		else {notify(app, .Error, "That local file is not available.")}
-		return true
+		path, exists := link_detected_file(target, cwd, buffer)
+		return exists ? .File : .Missing, path
 	}
-	if !open_link(app, target.uri) {
-		notify(app, .Error, "Could not open the link.")
+	return .Web, target.uri
+}
+
+@(private, require_results)
+link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	buffer: [4096]u8 = ---
+	resolution, target := link_resolve(app, w, x, y, buffer[:])
+	switch resolution {
+	case .None:
+		return false
+	case .Web:
+		if !open_link(app, target) {notify(app, .Error, "Could not open the link.")}
+	case .File:
+		terminal_file_request(app, w, target)
+	case .Missing:
+		notify(app, .Error, "That local file is not available.")
 	}
 	return true
 }
