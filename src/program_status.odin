@@ -508,7 +508,9 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 	}
 	if !force && state == w.taskbar_state && percent == w.taskbar_percent {return}
 	w.taskbar_state, w.taskbar_percent = state, percent
-	if platform_api.window_set_progress(&app.platform, w.id, state, percent) != .None {
+	// Unavailable: the taskbar list could not start, which its first use already logged.
+	if err := platform_api.window_set_progress(&app.platform, w.id, state, percent);
+	   err != .None && err != .Unavailable {
 		log.error("updating taskbar progress failed")
 	}
 }
