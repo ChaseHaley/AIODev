@@ -1,11 +1,15 @@
 package ui_test
 
+import "aio:font"
+import "aio:glyphs"
+import "aio:render"
 import "aio:settings"
 import "aio:ui"
 import "base:runtime"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import fixtures "../fixtures"
 
 @(private)
 process_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
@@ -74,6 +78,53 @@ process_groups_keep_incomplete_new_entries_as_drafts_and_validate_each_field :: 
 	process_edit(t, &p, "process.group.3.padding", "1024")
 	_, problem = ui.editor_process_value(&p)
 	testing.expect_value(t, problem, "")
+}
+
+@(test)
+process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
+	fonts, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) {return}
+	defer font.system_destroy(fonts)
+	device, device_error := render.device_create()
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, fonts, device)
+	defer glyphs.destroy(&cache)
+	text: ui.Text
+	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"))
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	process_fixture(t, &p)
+	page := ui.editor_layout({0, 0, 1000, 800}, 1)
+	p.visible_rows = page.rows
+	testing.expect(t, ui.editor_reveal(&p, "process.group.0.add"))
+	_ = ui.editor_process_activate(&p, ui.editor_row(&p))
+	testing.expect_value(t, ui.editor_row(&p).key, "process.group.3.name")
+	testing.expect_value(t, p.focus, ui.Editor_Focus.Control)
+	p.scroll = 0
+	testing.expect_value(t, ui.editor_draw(&p, page, &list, &text, theme, true), glyphs.Result.Ok)
+	// Each label below the focused field must paint inside its layer's clip, not the field's.
+	for key in ([?]string{"process.group.3.padding", "process.group.3.add", "process.group.0.add"}) {
+		row: render.Rect
+		for item, index in p.items {
+			if item.row >= 0 && p.rows[item.row].key == key {row = ui.editor_row_parts(&p, page, index).row}
+		}
+		if !testing.expectf(t, row.height > 0, "%s is not laid out", key) {continue}
+		visible := 0
+		for layer in list.layers {
+			c := layer.clip
+			for glyph in list.glyphs[layer.glyph_start:][:layer.glyph_count] {
+				x, y := glyph.rect.x + glyph.rect.width / 2, glyph.rect.y + glyph.rect.height / 2
+				in_row := y >= row.y && y < row.y + row.height
+				if in_row && x >= c.x && x < c.x + c.width && y >= c.y && y < c.y + c.height {visible += 1}
+			}
+		}
+		testing.expectf(t, visible > 0, "%s draws no visible text", key)
+	}
 }
 
 @(test)
