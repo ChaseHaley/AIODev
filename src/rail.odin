@@ -110,7 +110,7 @@ rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if !rail_rows_build(w, &w.rail_rows) {return {}, false}
 	area := rail_area(w)
 	area.height = max(0, area.height - w.status_rail_reserve)
-	layout = ui.rail_layout(area, w.scale, len(w.rail_rows), w.rail_scroll)
+	layout = ui.rail_layout(area, w.scale, len(w.rail_rows) + w.tab_incoming.count, w.rail_scroll)
 	w.rail_scroll = layout.scroll
 	return layout, true
 }
@@ -378,7 +378,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	area := layout.area
 	if draw_overlay {
 		area.x -= (1 - w.rail_slide.value) * area.width
-		layout = ui.rail_layout(area, w.scale, len(w.rail_rows), w.rail_scroll)
+		layout = ui.rail_layout(area, w.scale, len(w.rail_rows) + w.tab_incoming.count, w.rail_scroll)
 	}
 	if area.x + area.width <= 0 {return .Ok}
 	if render.push_layer(&w.list, area) != .None {return .Ok}
