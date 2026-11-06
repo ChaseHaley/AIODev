@@ -14,7 +14,7 @@ pane_of :: proc(id: u32) -> layout.Content {return {.Terminal, id}}
 shown :: proc(l: ^layout.Layout) -> [dynamic]layout.Pane_Rect {
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(l, AREA, 0, &rects)
-	layout.floats_place(l, AREA, 0, &rects)
+	layout.floats_place(l, AREA, 0, 0, &rects)
 	return rects
 }
 
@@ -179,7 +179,7 @@ floating_group_splits_minimizes_and_docks_as_one_window :: proc(t: ^testing.T) {
 
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(&l, AREA, 2, &rects)
-	layout.floats_place(&l, AREA, 2, &rects)
+	layout.floats_place(&l, AREA, 2, 0, &rects)
 	if testing.expect_value(t, len(rects), 3) {
 		testing.expect(t, rects[1].floating && rects[2].floating)
 		testing.expect_value(t, rects[0].node, a)
@@ -189,7 +189,7 @@ floating_group_splits_minimizes_and_docks_as_one_window :: proc(t: ^testing.T) {
 	testing.expect(t, framed)
 	testing.expect_value(t, frame, layout.Rect{20, 10, 60, 30})
 	dividers := make([dynamic]layout.Divider, context.temp_allocator)
-	layout.floats_dividers(&l, AREA, 2, &dividers)
+	layout.floats_dividers(&l, AREA, 2, 0, &dividers)
 	testing.expect_value(t, len(dividers), 1)
 	outer_ratio := l.nodes[l.root].(layout.Split).ratio
 	testing.expect(t, layout.balance_related(&l, root))
@@ -221,4 +221,79 @@ closing_one_pane_keeps_the_remaining_split_pane_floating :: proc(t: ^testing.T) 
 	floating, ok := layout.float_of(&l, b)
 	testing.expect(t, ok)
 	testing.expect_value(t, floating.bounds, bounds)
+}
+
+@(test)
+panes_move_into_and_out_of_a_floating_window :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	a, b := two_tiled(t, &l)
+	bounds := layout.Rect{0.2, 0.2, 0.6, 0.6}
+	f, _ := layout.float_new(&l, pane_of(3), bounds)
+	l.focus = b
+
+	// Beside a lone floating pane, the moved pane joins it and the frame moves to the new split.
+	moved, ok := layout.move_pane(&l, b, f, .Right)
+	testing.expect(t, ok)
+	root := layout.float_root(&l, moved)
+	testing.expect(t, root != layout.INVALID_NODE && root == layout.float_root(&l, f))
+	_, split_root := l.nodes[root].(layout.Split)
+	testing.expect(t, split_root)
+	floating, _ := layout.float_of(&l, f)
+	testing.expect_value(t, floating.bounds, bounds)
+	testing.expect_value(t, l.focus, moved)
+	shown_count, _ := layout.float_counts(&l)
+	testing.expect_value(t, shown_count, 1)
+
+	_, refused := layout.move_pane(&l, a, f, .Down)
+	testing.expect(t, !refused, "the tiling keeps its last pane")
+
+	// Out beside a tiled pane, it leaves the group, which keeps its frame around the pane that stays.
+	out, out_ok := layout.move_pane(&l, moved, a, .Left)
+	testing.expect(t, out_ok)
+	testing.expect_value(t, layout.float_root(&l, out), layout.INVALID_NODE)
+	testing.expect_value(t, layout.float_root(&l, f), f)
+	floating, _ = layout.float_of(&l, f)
+	testing.expect_value(t, floating.bounds, bounds)
+	testing.expect_value(t, len(shown(&l)), 3)
+
+	// Docking along an edge of the tiling takes the last floating pane out too.
+	docked, docked_ok := layout.dock_pane(&l, f, .Right)
+	testing.expect(t, docked_ok)
+	testing.expect_value(t, layout.float_root(&l, docked), layout.INVALID_NODE)
+	shown_count, _ = layout.float_counts(&l)
+	testing.expect_value(t, shown_count, 0)
+}
+
+@(test)
+swapping_with_a_floating_pane_trades_contents_not_slots :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	a, _ := two_tiled(t, &l)
+	f, _ := layout.float_new(&l, pane_of(3), {0.2, 0.2, 0.6, 0.6})
+	testing.expect(t, layout.swap(&l, a, f))
+	testing.expect_value(t, l.nodes[f].(layout.Pane).content, pane_of(1))
+	testing.expect_value(t, l.nodes[a].(layout.Pane).content, pane_of(3))
+	testing.expect(t, layout.is_floating(&l, f) && !layout.is_floating(&l, a))
+}
+
+@(test)
+a_split_floating_window_keeps_a_grip_strip_above_its_panes :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	two_tiled(t, &l)
+	lone, _ := layout.float_new(&l, pane_of(3), {0.2, 0.2, 0.6, 0.6})
+	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+	layout.floats_place(&l, AREA, 0, 5, &rects)
+	testing.expect_value(t, rects[0].rect, layout.Rect{20, 10, 60, 30})
+	_, err := layout.split_direction(&l, lone, .Right, 0.5, pane_of(4))
+	testing.expect_value(t, err, nil)
+	clear(&rects)
+	layout.floats_place(&l, AREA, 0, 5, &rects)
+	if testing.expect_value(t, len(rects), 2) {
+		for pane in rects {
+			testing.expect_value(t, pane.rect.y, f32(15))
+			testing.expect_value(t, pane.rect.height, f32(25))
+		}
+	}
 }

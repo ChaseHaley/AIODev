@@ -25,6 +25,9 @@ FLOAT_DRAG_THRESHOLD :: f32(3)
 // Capsule widths, in DIPs; the title takes what lies between.
 FLOAT_CAPSULE_MINIMUM :: f32(96)
 FLOAT_CAPSULE_MAXIMUM :: f32(200)
+// The strip along the top of a split floating window that moves the whole window, in DIPs. Its panes'
+// headers rearrange them instead.
+FLOAT_GRIP :: ui.SPACE_3
 
 Float_Edge :: enum u8 {
 	Left,
@@ -56,6 +59,54 @@ window_floats_shown :: proc(w: ^Window) -> bool {
 floating_area :: proc(w: ^Window) -> layout.Rect {
 	top := window_title_height(w)
 	return {0, top, f32(w.width), max(0, f32(w.height) - top)}
+}
+
+floating_grip :: proc(w: ^Window) -> f32 {return FLOAT_GRIP * w.scale}
+
+// The grip strip of the topmost split floating window under the point.
+floating_grip_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, ok: bool) {
+	group, frame, found := floating_frame_at(w, x, y)
+	if !found {return layout.INVALID_NODE, false}
+	content := layout.float_content_rect(w.tree, group, frame, floating_grip(w))
+	if y >= content.y {return layout.INVALID_NODE, false}
+	return group, true
+}
+
+// Draws a split floating window's grip strip, just before its panes.
+floating_grip_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
+	frame, found := layout.float_rect(w.tree, root, floating_area(w))
+	if !found {return}
+	content := layout.float_content_rect(w.tree, root, frame, floating_grip(w))
+	if content.y <= frame.y {return}
+	strip := render.Rect{frame.x, frame.y, frame.width, content.y - frame.y + window_pane_radius(app, w)}
+	if render.push_layer(&w.list, {frame.x, frame.y, frame.width, content.y - frame.y}) != .None {return}
+	ui.draw_rect(
+		&w.list,
+		{rect = strip, color = color(app.settings.colors.background), radius = window_pane_radius(app, w)},
+	)
+	dragged := layout.find_content(w.tree, w.float_drag.content)
+	moving := w.float_drag.pressed && layout.float_root(w.tree, dragged) == root
+	ink := w.float_grip_hover == root || moving ? app.theme.muted : app.theme.faint
+	s := w.scale
+	dot := max(1, 2 * s)
+	cx, cy := frame.x + frame.width / 2, frame.y + (content.y - frame.y) / 2
+	for row in 0 ..< 2 {
+		for column in 0 ..< 3 {
+			ui.draw_rect(
+				&w.list,
+				{
+					rect = {
+						cx + (f32(column) - 1) * 4 * s - dot / 2,
+						cy + (f32(row) - 0.5) * 4 * s - dot / 2,
+						dot,
+						dot,
+					},
+					color = ink,
+					radius = dot / 2,
+				},
+			)
+		}
+	}
 }
 
 // The rectangle a new floating pane takes: centred over the window work area, stepped from any already
@@ -552,21 +603,26 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	return .Ok
 }
 
-// Pointer surface: floating pane edges and the movable capsule row. Headers, content and scrollbars of
-// a floating pane are reached through their own surfaces, which test the topmost pane.
+// Pointer surface: floating pane edges, the grip of a split floating window and the movable capsule row.
+// Headers, content and scrollbars of a floating pane are reached through their own surfaces, which test
+// the topmost pane.
 
 floating_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
+	if _, grip := floating_grip_at(w, x, y); grip {return true}
 	return rect_contains(w.float_capsule_group, x, y)
 }
 
 floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	hover: Maybe(layout.Content)
+	grip := layout.INVALID_NODE
 	if owner == .Floating {
 		if capsule, found := floating_capsule_at(w, x, y).?; found {hover = capsule.content}
+		if root, over := floating_grip_at(w, x, y); over {grip = root}
 	}
 	if hover != w.float_capsule_hover {w.float_capsule_hover, w.dirty = hover, true}
+	if grip != w.float_grip_hover {w.float_grip_hover, w.dirty = grip, true}
 	if owner != .Floating {return}
 	if hover != nil {
 		pointer_set(app, w, .Hand)
@@ -588,7 +644,15 @@ floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		return
 	}
 	pane, edges, edge := floating_edge_at(w, x, y)
-	if !edge {return}
+	if !edge {
+		root, grip := floating_grip_at(w, x, y)
+		if !grip {return}
+		node := w.tree.focus
+		if layout.float_root(w.tree, node) != root {node = layout.float_pane(w.tree, root)}
+		pane_focus(app, w, node)
+		for shown in w.panes {if shown.node == node {floating_drag_press(app, w, shown, {}, x, y); break}}
+		return
+	}
 	pane_focus(app, w, pane.node)
 	// Focus raises the pane, which a resize then follows from its current rectangle.
 	for shown in w.panes {if shown.content == pane.content {pane = shown}}
@@ -623,6 +687,7 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 }
 
 floating_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	_, capsule := floating_capsule_at(w, x, y).?
-	return capsule ? "Restore floating pane" : ""
+	if _, capsule := floating_capsule_at(w, x, y).?; capsule {return "Restore floating pane"}
+	if _, grip := floating_grip_at(w, x, y); grip {return "Move floating window"}
+	return ""
 }

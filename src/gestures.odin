@@ -45,7 +45,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.scroll_drag = {}
 	w.float_drag, w.float_capsule_drag = {}, {}
 	ui.armed_cancel(&w.float_capsule_armed)
-	w.float_capsule_hover = nil
+	w.float_capsule_hover, w.float_grip_hover = nil, layout.INVALID_NODE
 	w.rail_resizing = false
 	ui.armed_cancel(&w.status.panel_button_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false

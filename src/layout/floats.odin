@@ -312,15 +312,23 @@ float_place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynami
 	}
 }
 
+// The part of a floating group's frame its panes fill. A split group keeps a `grip` strip along its top,
+// which moves the group; a single pane moves by its header and fills its frame.
+float_content_rect :: proc(l: ^Layout, root: Node_Id, frame: Rect, grip: f32) -> Rect {
+	if _, split := l.nodes[root].(Split); !split {return frame}
+	g := min(grip, frame.height)
+	return {frame.x, frame.y + g, frame.width, frame.height - g}
+}
+
 // Appends every shown floating group, bottom first, and every pane inside it.
-floats_place :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
+floats_place :: proc(l: ^Layout, area: Rect, gap, grip: f32, out: ^[dynamic]Pane_Rect) {
 	stack: u64
 	index := -1
 	for {
 		root, next_stack := float_next(l, stack, index, false)
 		if root == INVALID_NODE {return}
 		rect, _ := float_rect(l, root, area)
-		float_place(l, root, rect, gap, out)
+		float_place(l, root, float_content_rect(l, root, rect, grip), gap, out)
 		stack, index = next_stack, int(root)
 	}
 }
@@ -336,14 +344,14 @@ float_place_dividers :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out:
 }
 
 // Appends dividers inside every shown floating group, bottom groups first.
-floats_dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {
+floats_dividers :: proc(l: ^Layout, area: Rect, gap, grip: f32, out: ^[dynamic]Divider) {
 	stack: u64
 	index := -1
 	for {
 		root, next_stack := float_next(l, stack, index, false)
 		if root == INVALID_NODE {return}
 		rect, _ := float_rect(l, root, area)
-		float_place_dividers(l, root, rect, gap, out)
+		float_place_dividers(l, root, float_content_rect(l, root, rect, grip), gap, out)
 		stack, index = next_stack, int(root)
 	}
 }

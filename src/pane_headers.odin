@@ -249,7 +249,9 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 				if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
 			}
 			if action == .None {
-				if pane.floating {
+				// A lone floating pane moves by its header; in a split floating window the grip moves the
+				// window and headers rearrange panes, as in the tiling.
+				if pane.floating && layout.float_is_root(w.tree, pane.node) {
 					floating_drag_press(app, w, pane, {}, f32(e.x), f32(e.y))
 				} else {
 					pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))

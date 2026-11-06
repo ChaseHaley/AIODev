@@ -616,6 +616,12 @@ pane_drag_target_move :: proc(
 			if rail_tab < len(w.workspace.tabs) {destination = w.workspace.tabs[rail_tab]}
 		}
 	}
+	// A floating window covers the rail and the tiling's edge bands: a drop over it lands on its panes.
+	_, _, over_float := floating_frame_at(w, x, y)
+	if over_float {
+		on_tab, over_rail, rail_new_tab = -1, false, false
+		destination = selected_tab(w.workspace)
+	}
 	new_tab := !swap && !w.linked &&
 		(w.tabs_horizontal
 				? ui.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
@@ -644,7 +650,7 @@ pane_drag_target_move :: proc(
 	   x < f32(w.width) &&
 	   y >= title_height &&
 	   y < f32(w.height) {
-		if !swap &&
+		if !swap && !over_float &&
 		   (x < area.x + band ||
 				   x >= area.x + area.width - band ||
 				   y < area.y + band ||
