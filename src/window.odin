@@ -775,7 +775,7 @@ recover_device :: proc(app: ^App) {
 	if err != .None {
 		log.errorf("recreating the graphics device failed: %v", err)
 		app.device = nil
-		app.running = false
+		app_device_failed(app)
 		return
 	}
 	app.device = device

@@ -31,5 +31,5 @@ workspace_close_empty :: proc(app: ^App, workspace: ^Workspace, replace_window :
 	workspace_pickers_refresh(app)
 	mark_all_dirty(app)
 	for candidate in app.workspaces {if workspace_eligible(app, candidate) {return}}
-	app.running = false
+	app_quit(app)
 }

@@ -14,32 +14,49 @@ import "core:strings"
 @(private)
 CLI_REQUEST_HEADER :: 2
 
+// The CLI pipe's state; nil is off. A pipe that failed to start stays failed while control.enabled
+// stays on, so the settings syncs that follow do not retry it and repeat the notice; turning the
+// setting off and on tries again, as the notice says.
+Cli_Pipe :: union {
+	^control.Server,
+	Cli_Pipe_Failed,
+}
+Cli_Pipe_Failed :: struct {}
+
 // Starts or stops the CLI pipe to match control.enabled (D-046). Settings apply at startup, on
 // Reload Settings and on each Settings page change.
 control_cli_sync :: proc(app: ^App) {
-	enabled := app.settings.control.enabled
-	if enabled == (app.cli != nil) {return}
-	if !enabled {
-		control.destroy(app.cli)
-		app.cli = nil
+	if !app.settings.control.enabled {
+		control_cli_stop(app)
 		return
 	}
+	if app.cli != nil {return}
 	name, err := control.cli_pipe_name(app.app_id, context.temp_allocator)
-	if err == .None {app.cli, err = control.create(name, {wake_platform, &app.platform}, raw = true)}
+	server: ^control.Server
+	if err == .None {server, err = control.create(name, {wake_platform, &app.platform}, raw = true)}
 	if err != .None {
 		log.errorf("starting the command line pipe failed: %v", err)
 		notify(app, .Error, "Could not start command line control. Check the log, then turn it off and on.")
+		app.cli = Cli_Pipe_Failed{}
+		return
 	}
+	app.cli = server
+}
+
+control_cli_stop :: proc(app: ^App) {
+	if server, running := app.cli.(^control.Server); running {control.destroy(server)}
+	app.cli = nil
 }
 
 // Answers the pending CLI request, if any. The pipe serves one client at a time and no command
 // waits, so one request per tick keeps every reply prompt.
 control_cli_tick :: proc(app: ^App) {
-	if app.cli == nil {return}
-	message := control.poll(app.cli)
+	server, running := app.cli.(^control.Server)
+	if !running {return}
+	message := control.poll(server)
 	if message == nil {return}
 	defer control.message_destroy(message)
-	if err := control.respond(app.cli, message.id, control_cli_answer(app, message.args)); err != .None {
+	if err := control.respond(server, message.id, control_cli_answer(app, message.args)); err != .None {
 		log.errorf("answering the command line failed: %v", err)
 	}
 }

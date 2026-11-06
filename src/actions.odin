@@ -617,7 +617,7 @@ run_action :: proc(
 	case .Hide_To_Tray:
 		hide_to_tray(app, w)
 	case .Quit:
-		app.running = false
+		app_quit(app)
 	case .New_Tab:
 		tab_new(app, w)
 	case .Profile_1,

@@ -70,7 +70,7 @@ when app.AIO_CONTROL {
 		testing.expect(t, first.focused && !second.focused)
 		testing.expect_value(t, app.verify_drive(&state, control.Window_Select{99}), control.Error.Invalid_Argument)
 		testing.expect_value(t, state.verify.target_window, platform.Window_Id(22))
-		app.verify_clear(&state.verify)
+		app.verify_end(&state.verify)
 		testing.expect(t, app.verify_window(&state) == &second)
 		state.verify.mouse_window, state.verify.buttons = second.id, {.Left}
 		second.dragging.count = 1

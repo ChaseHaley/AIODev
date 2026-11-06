@@ -135,7 +135,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		case TRAY_OPEN:
 			show_window(app)
 		case TRAY_QUIT:
-			app.running = false
+			app_quit(app)
 		}
 	case platform.Settings_Event:
 		refresh_animations(app)
