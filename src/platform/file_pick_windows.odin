@@ -213,7 +213,9 @@ file_pick_finished :: proc(pick: ^File_Pick) -> (path: string, finished: bool) {
 	return pick.path, true
 }
 
-// Closes a dialog that is still open, waits for its thread and frees the pick.
+// Closes a dialog that is still open, waits for its thread and frees the pick. A dialog whose owner
+// still exists sends it messages while it opens and closes, so the wait answers those without
+// taking any posted message off the queue.
 file_pick_destroy :: proc(pick: ^File_Pick) {
 	if pick.thread != nil {
 		for !thread.is_done(pick.thread) {
@@ -223,6 +225,8 @@ file_pick_destroy :: proc(pick: ^File_Pick) {
 					return true
 				}, 0)
 			}
+			message: w.MSG
+			w.PeekMessageW(&message, nil, 0, 0, w.PM_NOREMOVE | w.PM_QS_SENDMESSAGE)
 			w.Sleep(10)
 		}
 		thread.destroy(pick.thread)

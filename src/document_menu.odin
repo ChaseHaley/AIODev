@@ -324,6 +324,12 @@ document_menu_show_pin :: proc(app: ^App, w: ^Window, content: layout.Content, d
 	document_menu_build(app, w, true)
 }
 
+// Add File and Add Folder choose for the document scope of `content`.
+Document_Pick :: struct {
+	using dialog: File_Dialog,
+	content:      layout.Content,
+}
+
 @(private = "file")
 document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 	menu := &w.document_menu
@@ -340,22 +346,21 @@ document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 		notify(app, .Error, "Could not show the file dialog.")
 		return
 	}
-	app.document_pick, app.document_pick_window = pick, w.id
-	app.document_pick_content = content
+	app.document_pick = Document_Pick{{pick, w.id}, content}
 }
 
-// Collects what the dialog chose once it closes. The window or pane may have gone in the meantime.
+// Collects what the dialog chose once it closes. The pane may have gone in the meantime.
 document_pick_tick :: proc(app: ^App) {
-	if app.document_pick == nil {return}
-	path, finished := platform.file_pick_finished(app.document_pick)
+	dialog, open := app.document_pick.?
+	if !open {return}
+	path, finished := platform.file_pick_finished(dialog.pick)
 	if !finished {return}
-	if w := window_find(app, app.document_pick_window); w != nil && path != "" {
-		if _, found := document_scopes(app, app.document_pick_content); found {
-			document_chosen(app, w, app.document_pick_content, path)
+	if w := window_find(app, dialog.window); w != nil && path != "" {
+		if _, found := document_scopes(app, dialog.content); found {
+			document_chosen(app, w, dialog.content, path)
 		}
 	}
-	platform.file_pick_destroy(app.document_pick)
-	app.document_pick = nil
+	document_pick_close(app)
 }
 
 @(private = "file")
@@ -369,9 +374,8 @@ document_chosen :: proc(app: ^App, w: ^Window, content: layout.Content, path: st
 	document_menu_show_pin(app, w, content, {file.path, os.is_dir(file.target)})
 }
 
-document_pick_destroy :: proc(app: ^App) {
-	if app.document_pick == nil {return}
-	platform.file_pick_destroy(app.document_pick)
+document_pick_close :: proc(app: ^App) {
+	if dialog, open := app.document_pick.?; open {platform.file_pick_destroy(dialog.pick)}
 	app.document_pick = nil
 }
 

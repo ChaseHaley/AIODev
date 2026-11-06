@@ -235,10 +235,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.id = id
 	w.width, w.height = desc.width, desc.height
 	append(&app.windows, w)
-	native := platform.window_native_handle(&app.platform, id)
-	render_error: render.Error
-	w.surface, render_error = render.surface_create(app.device, native, w.width, w.height)
-	if render_error != .None {
+	if render_error := window_surface_create(app, w); render_error != .None {
 		log.errorf("creating the window surface failed: %v", render_error)
 		window_close(app, w)
 		return nil
@@ -288,6 +285,7 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 window_close :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
+	file_dialogs_window_closed(app, w.id)
 	view := w.linked ? w.workspace : nil
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
@@ -295,9 +293,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 			break
 		}
 	}
-	if w.surface != nil {
-		render.surface_destroy(w.surface)
-	}
+	window_surface_release(w)
 	if platform.window_destroy(&app.platform, w.id) != .None {
 		log.error("destroying the window failed")
 	}
@@ -385,12 +381,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 		return
 	}
 	rail_adaptive_update(w)
-	if err := render.surface_resize(app.device, w.surface, width, height); err != .None {
-		log.errorf("resizing the window surface failed: %v", err)
-		if err == .Device_Lost {
-			recover_device(app)
-		}
-	}
+	window_surface_resize(app, w, width, height)
 	window_relayout(app, w)
 }
 
@@ -565,9 +556,9 @@ reset_blink :: proc(w: ^Window) {
 }
 
 window_render :: proc(app: ^App, w: ^Window) {
-	if w.width <= 0 || w.height <= 0 || w.surface == nil {
-		return
-	}
+	if w.width <= 0 || w.height <= 0 {return}
+	// The device recovery that left it missing has already reported why.
+	if w.surface == nil && window_surface_create(app, w) != .None {return}
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}
@@ -761,42 +752,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		ui.armed_target(w.notice_armed),
 		w.pointer,
 	)
-}
-
-// Rebuilds every graphics object after the GPU was reset or removed; sessions are untouched.
-recover_device :: proc(app: ^App) {
-	log.warn("the graphics device was lost; recreating it")
-	for w in app.windows {
-		render.surface_destroy(w.surface)
-		w.surface = nil
-	}
-	render.device_destroy(app.device)
-	device, err := render.device_create()
-	if err != .None {
-		log.errorf("recreating the graphics device failed: %v", err)
-		app.device = nil
-		app.running = false
-		return
-	}
-	app.device = device
-	apply_text_gamma(app)
-	glyphs.reset_device(&app.cache, device)
-	for w in app.windows {
-		native := platform.window_native_handle(&app.platform, w.id)
-		surface, surface_error := render.surface_create(
-			device,
-			native,
-			max(w.width, 1),
-			max(w.height, 1),
-		)
-		if surface_error != .None {
-			log.errorf("recreating a window surface failed: %v", surface_error)
-			continue
-		}
-		w.surface = surface
-		for &pane in w.views {pane.valid = false}
-		w.dirty = true
-	}
 }
 
 @(private)
