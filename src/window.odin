@@ -37,6 +37,9 @@ Pane_View :: struct {
 Window :: struct {
 	id: platform.Window_Id,
 	surface: ^render.Surface,
+	// The missing surface could not be made for a reason other than device loss. It waits for a resize or
+	// a new device instead of failing, and logging, on every frame.
+	surface_failed: bool,
 	ui_text: ui.Text,
 	// The Markdown pane holding a selection or scrollbar drag, or 0.
 	markdown_held: u32,
@@ -557,8 +560,7 @@ reset_blink :: proc(w: ^Window) {
 
 window_render :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {return}
-	// The device recovery that left it missing has already reported why.
-	if w.surface == nil && window_surface_create(app, w) != .None {return}
+	if !window_surface_ready(app, w) {return}
 	if err := render.frame_wait(w.surface, FRAME_WAIT_MS); err == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}

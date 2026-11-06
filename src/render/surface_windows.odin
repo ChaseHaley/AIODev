@@ -54,6 +54,7 @@ surface_create :: proc(
 	^Surface,
 	Error,
 ) {
+	if d.lost {return nil, .Device_Lost}
 	if !valid_size(width, height) {
 		return nil, .Invalid_Argument
 	}

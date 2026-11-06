@@ -1,5 +1,6 @@
 package app_test
 
+import "base:runtime"
 import "core:os"
 import "core:testing"
 import app "../../src"
@@ -27,6 +28,58 @@ device_recovery_rebuilds_a_window_left_without_a_surface :: proc(t: ^testing.T) 
 	app.window_resize(s, second, 500, 400)
 	app.tick(s)
 	testing.expect(t, second.surface != nil)
+}
+
+// A driver still resetting can lose the recreated device too. The window's next attempt to make its
+// surface must then recover again rather than leave the window blank.
+@(test)
+a_device_lost_again_while_remaking_a_surface_recovers_again :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "device-again") { return }
+	s := &f.state
+	first := s.windows[0]
+	for _ in 0 ..< 2 {
+		app.window_surface_release(first)
+		lost := s.device
+		lost.lost = true
+		app.tick(s)
+		testing.expect(t, s.running)
+		testing.expect(t, s.device != lost)
+		testing.expect(t, !s.device.lost)
+		testing.expect(t, first.surface != nil)
+		testing.expect(t, !first.dirty)
+	}
+}
+
+// Any other failure is reported once and waits for a change that could fix it, here a new size.
+@(test)
+a_surface_that_cannot_be_made_is_reported_once_and_waits_for_a_resize :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "surface-size") { return }
+	s := &f.state
+	first := s.windows[0]
+	errors := 0
+	logger := context.logger
+	context.logger = {
+		procedure = proc(data: rawptr, level: runtime.Logger_Level, _: string, _: runtime.Logger_Options,
+			_ := #caller_location) {
+			if level >= .Error {(^int)(data)^ += 1}
+		},
+		data = &errors,
+	}
+	app.window_surface_release(first)
+	app.window_resize(s, first, 16385, 600)
+	app.tick(s)
+	first.dirty = true
+	app.tick(s)
+	context.logger = logger
+	testing.expect(t, first.surface == nil)
+	testing.expect_value(t, errors, 1)
+	app.window_resize(s, first, 800, 600)
+	app.tick(s)
+	testing.expect(t, first.surface != nil)
 }
 
 // The dialog's answer is only for the window it was opened from, so it must not outlive that window.
