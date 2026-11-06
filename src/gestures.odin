@@ -20,7 +20,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	   w.tab_drag.pressed || w.pane_drag.pressed || ui.armed_down(w.tab_close_armed) ||
 	   ui.armed_down(w.caption_armed) || ui.armed_down(w.tab_orientation_button_armed) ||
 	   ui.armed_down(w.title_action_armed) ||
-	   w.editor.drag != .None || w.rename.dragging || w.workspace_picker.query.dragging {
+	   ui.editor_dragging(&w.editor) || w.rename.dragging || w.workspace_picker.query.dragging {
 		w.gesture.cancelled += {.Left}
 	}
 	w.gesture.buttons, w.gesture.reported, w.header_buttons = {}, {}, {}
@@ -56,8 +56,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	}
 	markdown_gesture_clear(app, w)
 	ui.editor_hover_clear(&w.editor)
-	if w.editor.drag == .Process_Order {w.editor.drag = .None}
-	ui.editor_release(&w.editor)
+	ui.editor_pointer_cancel(&w.editor)
 	leader_cancel(w)
 	w.dirty = true
 }
@@ -95,7 +94,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	if e.button != .Left {return false}
 	// Pane content, and a pane drag the header began, finish here.
 	if w.pane_drag.pressed {_ = pane_drag_release(app, w); return true}
-	if w.editor.drag == .Process_Order {
+	if ui.editor_order_dragging(&w.editor, .Process_Groups) {
 		_ = ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
 		editor_outcome(app, w, ui.editor_release(&w.editor))
 		return true
@@ -261,7 +260,7 @@ pointer_held_target :: proc(w: ^Window, held: input.Mouse_Buttons, target: Point
 	switch {
 	case ui.armed_down(w.find.armed):
 		return .Find
-	case w.editor.drag != .None:
+	case ui.editor_dragging(&w.editor):
 		return .Settings_Page
 	case w.selecting || w.header_buttons != {} || w.gesture.reported != {}:
 		return .Content

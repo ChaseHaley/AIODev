@@ -85,11 +85,7 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 		notify(app, .Error, "Could not refresh the settings page. Reopen Settings to reload it.")
 		return
 	}
-	replacement.expanded, view.expanded = view.expanded, ""
-	replacement.remove_confirm, view.remove_confirm = view.remove_confirm, ""
-	replacement.detected_open = view.detected_open
-	replacement.process_expanded = view.process_expanded
-	replacement.profile_positions, view.profile_positions = view.profile_positions, {}
+	ui.editor_view_hold(&replacement, &view)
 	if !settings_load_source(app, &replacement, revision) {return}
 	if p.process_dirty {
 		if preserve_draft && p.process_source != replacement.process_source {return}
@@ -103,44 +99,13 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	row := ui.editor_row(p)
 	selected := row != nil && ui.editor_reveal(&replacement, row.key)
 	draft := preserve_draft && row != nil &&
-	         (ui.field_string(&p.value) != row.value || p.capturing || p.process_dirty)
+	         (ui.field_string(&p.value) != row.value || ui.editor_capturing(p) || p.process_dirty)
 	// Removing a field being edited is a semantic conflict. Keep that page and its old source
 	// intact, so saving cannot silently recreate a removed profile or discard its draft.
 	if draft && !selected {return}
 	replacement.filter.cursor, replacement.filter.anchor = p.filter.cursor, p.filter.anchor
 	replacement.scroll = clamp(p.scroll, 0, max(0, len(replacement.items) - max(1, p.visible_rows)))
-	if selected {
-		replacement.focus = p.focus
-		replacement.profile_control = p.profile_control
-		// A multiple choice saves each option as it flips; keep its popup open for the next one.
-		if next_row := ui.editor_row(&replacement); p.popup == .Choice && row.multiple && next_row.multiple {
-			replacement.popup, replacement.popup_index, replacement.popup_scroll =
-				.Choice, p.popup_index, p.popup_scroll
-		}
-		// A picker drag saves on release while its popup remains open. Keep its hue and
-		// saturation even at black, where rebuilding them from the saved RGB loses both.
-		if next_row := ui.editor_row(&replacement); p.popup == .Color && next_row.kind == row.kind {
-			replacement.popup = .Color
-			before, after := ui.field_string(&p.value), ui.field_string(&replacement.value)
-			previous_color, previous_ok, _ := settings.parse_color(before)
-			next_color, next_ok, _ := settings.parse_color(after)
-			if previous_ok && next_ok && previous_color == next_color {replacement.hsv = p.hsv}
-		}
-	}
-	if draft {
-		delete(replacement.value.bytes)
-		replacement.value, p.value = p.value, {}
-		replacement.capturing, replacement.leader_pending = p.capturing, p.leader_pending
-		replacement.captured, replacement.physical = p.captured, p.physical
-		replacement.shortcut_index = p.shortcut_index
-		replacement.popup, replacement.popup_index, replacement.popup_scroll =
-			p.popup, p.popup_index, p.popup_scroll
-		replacement.hsv = p.hsv
-		ui.editor_message(&replacement, p.message, p.error)
-		if p.error_key != "" {
-			ui.editor_error_set(&replacement, p.error_profile, p.error_key, p.error_text)
-		}
-	}
+	if selected {ui.editor_carry(&replacement, p, draft)}
 	ui.editor_destroy(p)
 	p^, replacement = replacement, {}
 }

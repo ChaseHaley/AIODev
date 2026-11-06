@@ -53,7 +53,7 @@ settings_reveal_page :: proc(app: ^App, p: ^ui.Editor, reveal: Settings_Reveal) 
 	selected := reveal.key != "" && ui.editor_reveal(p, reveal.key)
 	if reveal.focus == .Control && selected {
 		// Shortcut rows capture chords instead of typing, so they keep focus in the search.
-		if row := ui.editor_row(p); row != nil && row.kind != .Shortcut {p.focus = .Control}
+		if row := ui.editor_row(p); row != nil && row.kind != .Shortcut {ui.editor_focus_row(p)}
 	}
 	if reveal.message != "" {ui.editor_message(p, reveal.message, false)}
 }

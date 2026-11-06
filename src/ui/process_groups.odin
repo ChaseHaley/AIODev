@@ -87,7 +87,7 @@ editor_process_load :: proc(p: ^Editor, value: string, fallback: int) -> runtime
 // without discarding the name entered just before it. Disk writes still require a valid whole list.
 editor_process_capture :: proc(p: ^Editor) -> bool {
 	row := editor_row(p)
-	if row == nil || row.process == 0 || p.focus != .Control || !text_kind(row.kind) {return true}
+	if row == nil || row.process == 0 || !editor_editing(p) || !text_kind(row.kind) {return true}
 	value := field_string(&p.value)
 	if value == row.value {return true}
 	owned, err := strings.clone(value)
@@ -128,7 +128,7 @@ process_select :: proc(p: ^Editor, key: string, focus: bool = false) {
 	// Items contain row offsets; discard them before rebuilding after structural row edits.
 	clear(&p.items)
 	editor_rebuild(p)
-	if editor_reveal(p, key) && focus {p.focus = .Control; field_select_all(&p.value)}
+	if editor_reveal(p, key) && focus {editor_mode_set(p, Editor_Editing{}); field_select_all(&p.value)}
 }
 
 editor_process_toggle :: proc(p: ^Editor, id: int) {
@@ -314,7 +314,6 @@ editor_process_field_parts :: proc(row: ^Editor_Row, parts: Row_Parts, scale: f3
 editor_process_key :: proc(
 	p: ^Editor, row: ^Editor_Row, e: platform.Key_Event,
 ) -> (Editor_Outcome, bool) {
-	if p.drag == .Process_Order && e.key == .Escape {p.drag = .None; return .Changed, true}
 	if row == nil || row.kind != .Process_Group {return .None, false}
 	if .Control in e.modifiers && (e.key == .Arrow_Up || e.key == .Arrow_Down) {
 		if !editor_process_orderable(p) {return .Changed, true}
@@ -338,8 +337,8 @@ editor_process_key :: proc(
 		if p.process_expanded == row.process {editor_process_toggle(p, row.process)}
 		return .Changed, true
 	case .Delete:
-		if p.focus == .Control {
-			p.process_remove = row.process
+		if editor_editing(p) {
+			editor_request_set(p, Process_Remove_Request{row.process})
 			return .Process_Remove, true
 		}
 	}
@@ -353,18 +352,17 @@ editor_process_press :: proc(
 		cells := editor_process_parts(parts.row, scale)
 		if contains(cells.handle, x, y) {
 			if !editor_process_orderable(p) {return .Changed, true}
-			p.process_drag_id = row.process
-			p.drag_from = 0
+			from := 0
 			for candidate in p.rows {
 				if candidate.process_field != .Group {continue}
 				if candidate.process == row.process {break}
-				p.drag_from += 1
+				from += 1
 			}
-			p.drag, p.drag_target = .Process_Order, p.drag_from
+			order_begin(p, Order_Group{row.process}, from, (y - parts.row.y) / parts.row.height)
 			return .Changed, true
 		}
 		if contains(cells.remove, x, y) {
-			p.process_remove = row.process
+			editor_request_set(p, Process_Remove_Request{row.process})
 			return .Process_Remove, true
 		}
 		editor_process_toggle(p, row.process)
@@ -399,7 +397,7 @@ editor_process_draw :: proc(
 	}
 	if row.process_field == .Group {
 		cells := editor_process_parts(r, s)
-		grip_ink := selected || p.drag == .Process_Order ? theme.muted : theme.faint
+		grip_ink := selected || editor_order_dragging(p, .Process_Groups) ? theme.muted : theme.faint
 		icon_draw(list, .Grip, cells.handle, grip_ink, ICON_BUTTON, s)
 		icon_draw(list, .Trash, cells.remove, theme.muted, ICON_BUTTON, s)
 		chevron := render.Rect{cells.remove.x - HEIGHT_COMPACT * s, r.y, HEIGHT_COMPACT * s, r.height}

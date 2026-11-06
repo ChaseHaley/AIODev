@@ -114,11 +114,11 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	gesture_button(s, w, .Left, true, l.filter.x+20, l.filter.y+l.filter.height/2)
 	if !testing.expect(t, w.editor.filter.dragging) {return}
 	gesture_button(s, w, .Left, false, -20, -20)
-	testing.expect(t, !w.editor.filter.dragging && w.editor.drag == .None)
+	testing.expect(t, !w.editor.filter.dragging && !ui.editor_dragging(&w.editor))
 	gesture_button(s, w, .Left, true, l.filter.x+20, l.filter.y+l.filter.height/2)
 	app.handle_event(s, platform.Capture_Lost_Event{w.id})
 	gesture_button(s, w, .Left, false, l.filter.x+20, l.filter.y+l.filter.height/2)
-	testing.expect(t, !w.editor.filter.dragging && w.editor.drag == .None)
+	testing.expect(t, !w.editor.filter.dragging && !ui.editor_dragging(&w.editor))
 }
 
 @(test)

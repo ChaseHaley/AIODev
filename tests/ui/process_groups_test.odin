@@ -21,7 +21,7 @@ process_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 @(private)
 process_edit :: proc(t: ^testing.T, p: ^ui.Editor, key, value: string) {
 	testing.expect(t, ui.editor_reveal(p, key))
-	p.focus = .Control
+	ui.editor_focus_row(p)
 	ui.field_set(&p.value, value)
 	testing.expect(t, ui.editor_process_capture(p))
 }
@@ -104,7 +104,7 @@ process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
 	testing.expect(t, ui.editor_reveal(&p, "process.group.0.add"))
 	_ = ui.editor_process_activate(&p, ui.editor_row(&p))
 	testing.expect_value(t, ui.editor_row(&p).key, "process.group.3.name")
-	testing.expect_value(t, p.focus, ui.Editor_Focus.Control)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	p.scroll = 0
 	testing.expect_value(t, ui.editor_draw(&p, page, &list, &text, theme, true), glyphs.Result.Ok)
 	// Each label below the focused field must paint inside its layer's clip, not the field's.
@@ -163,15 +163,28 @@ process_groups_drag_escape_and_required_delete_outcome :: proc(t: ^testing.T) {
 	l := ui.editor_layout({0, 0, 1100, 900}, 1)
 	p.visible_rows = l.rows
 	testing.expect(t, ui.editor_reveal(&p, "process.group.1"))
-	parts := ui.editor_process_parts(ui.editor_row_parts(&p, l, p.selected).row, 1)
+	row := ui.editor_row_parts(&p, l, p.selected).row
+	parts := ui.editor_process_parts(row, 1)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, parts.handle.x + 4, parts.handle.y + 4, false),
 		ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.drag, ui.Editor_Drag.Process_Order)
+	testing.expect(t, ui.editor_order_dragging(&p, .Process_Groups))
+	// Escape mid drag, after the pointer opened another slot, leaves no drag behind: the slot, the
+	// lift and the release all end with it, and the group eases back to its own place.
+	testing.expect(t, ui.editor_drag(&p, l, nil, parts.handle.x + 4, row.y + row.height * 3))
+	testing.expect(t, ui.editor_order_target(&p) > 0)
 	_ = ui.editor_key(&p, {key = .Escape, pressed = true})
-	testing.expect_value(t, p.drag, ui.Editor_Drag.None)
+	testing.expect(t, !ui.editor_dragging(&p))
+	testing.expect_value(t, ui.editor_order_target(&p), -1)
+	testing.expect(t, !ui.editor_drag(&p, l, nil, parts.handle.x + 4, row.y + row.height * 3))
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.None)
-	_ = ui.editor_press(&p, l, nil, parts.remove.x + 4, parts.remove.y + 4, false)
-	testing.expect_value(t, p.process_remove, 1)
+	ui.editor_profiles_animate(&p, false, time.tick_now())
+	testing.expect(t, !ui.editor_profiles_animating(&p))
+	testing.expect_value(t, ui.editor_row_parts(&p, l, p.selected).row.y, row.y)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, parts.remove.x + 4, parts.remove.y + 4, false),
+		ui.Editor_Outcome.Process_Remove)
+	request := ui.editor_request_take(&p)
+	defer ui.editor_request_destroy(&request)
+	testing.expect_value(t, request.(ui.Process_Remove_Request).group, 1)
 	value, problem := ui.editor_process_value(&p)
 	testing.expect_value(t, problem, "")
 	testing.expect(t, strings.has_prefix(value, "Editors:"))
@@ -215,7 +228,7 @@ process_groups_partial_load_and_caption_allocation_failures_are_safe :: proc(t: 
 		p: ui.Editor
 		process_fixture(t, &p)
 		testing.expect(t, ui.editor_reveal(&p, "process.group.1.name"))
-		p.focus = .Control
+		ui.editor_focus_row(&p)
 		ui.field_set(&p.value, "Replacement")
 		failure := Process_Failure_Allocator{backing, limit}
 		context.allocator = {process_failure_allocate, &failure}
@@ -250,7 +263,7 @@ process_groups_drag_reflows_whole_groups_like_profiles :: proc(t: ^testing.T) {
 	handle := ui.editor_process_parts(header_row, 1).handle
 	x, y := handle.x + handle.width / 2, handle.y + handle.height / 2
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.drag, ui.Editor_Drag.Process_Order)
+	testing.expect(t, ui.editor_order_dragging(&p, .Process_Groups))
 
 	// The grabbed group follows the pointer with its fields.
 	testing.expect(t, ui.editor_drag(&p, l, nil, x, y + 10))

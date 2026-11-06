@@ -26,11 +26,11 @@ editor_process_save :: proc(app: ^App, w: ^Window) {
 	ui.editor_message(p, "Saved and applied.", false)
 }
 
-editor_process_remove_ask :: proc(app: ^App, w: ^Window) {
+editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
 	if !ui.editor_process_capture(&w.editor) {return}
 	name := ""
 	for row in w.editor.rows {
-		if row.process == w.editor.process_remove && row.process_field == .Group {name = row.title; break}
+		if row.process == group && row.process_field == .Group {name = row.title; break}
 	}
 	if name == "" {return}
 	owned, err := strings.clone(name)
@@ -44,7 +44,7 @@ editor_process_remove_ask :: proc(app: ^App, w: ^Window) {
 	delete(w.process_remove_name)
 	delete(w.process_remove_source)
 	w.process_remove_name = owned
-	w.process_remove_source, w.process_remove_id = source, w.editor.process_remove
+	w.process_remove_source, w.process_remove_id = source, group
 	ui.confirm_open(&w.process_remove_confirm)
 	w.process_remove_confirm.focus = .Cancel
 	w.process_remove_confirm.show_option = false

@@ -72,15 +72,15 @@ settings_reveal_palette_clears_the_search_and_focuses_an_editable_row :: proc(t:
 	app.settings_reveal_page(&f.state, e, {key = "pane.gap", search = .Clear, focus = .Control})
 	testing.expect_value(t, ui.field_string(&e.filter), "")
 	testing.expect_value(t, reveal_row_key(e), "pane.gap")
-	testing.expect_value(t, e.focus, ui.Editor_Focus.Control)
+	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Control)
 	testing.expect_value(t, e.message, "")
 	app.settings_reveal_page(&f.state, e, {key = "keys.tab.new", search = .Clear, focus = .Control})
 	testing.expect_value(t, reveal_row_key(e), "keys.tab.new")
 	testing.expect_value(t, ui.editor_row(e).kind, ui.Row_Kind.Shortcut)
-	testing.expect_value(t, e.focus, ui.Editor_Focus.Search)
+	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
 	app.settings_reveal_page(&f.state, e, {key = "no.such.key", search = .Clear, focus = .Control})
 	testing.expect_value(t, reveal_row_key(e), "font.size")
-	testing.expect_value(t, e.focus, ui.Editor_Focus.Search)
+	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
 }
 
 // The shortcut action narrows the page to key bindings without selecting one of them.
@@ -101,7 +101,7 @@ settings_reveal_shortcut_scopes_the_search_to_key_bindings :: proc(t: ^testing.T
 		testing.expect(t, strings.has_prefix(e.rows[item.row].key, "keys."))
 	}
 	testing.expect_value(t, visible, 2)
-	testing.expect_value(t, e.focus, ui.Editor_Focus.Search)
+	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
 	testing.expect_value(t, e.message, "")
 }
 
@@ -117,7 +117,7 @@ settings_reveal_tab_selects_the_confirm_close_row :: proc(t: ^testing.T) {
 	app.settings_reveal_page(&f.state, e, {key = "tab.confirm_close", search = .Clear})
 	testing.expect_value(t, ui.field_string(&e.filter), "")
 	testing.expect_value(t, reveal_row_key(e), "tab.confirm_close")
-	testing.expect_value(t, e.focus, ui.Editor_Focus.Search)
+	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
 	testing.expect_value(t, e.message, "")
 }
 

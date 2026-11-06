@@ -39,7 +39,7 @@ process_editor_saves_runtime_rules_and_keeps_new_group_drafts_across_other_write
 	testing.expect_value(t, app.settings_commit(s, p.source, updated), settings.Save_Error.None)
 	testing.expect(t, p.process_dirty)
 	testing.expect(t, ui.editor_reveal(p, "process.group.3.program.1"))
-	p.focus = .Control
+	ui.editor_focus_row(p)
 	ui.field_set(&p.value, "claude")
 	app.editor_outcome(s, w, .Save)
 	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:helix,vim;Tools:8:less;Focus:8:claude")
@@ -63,22 +63,19 @@ process_editor_always_confirms_deletion_and_rejects_changed_subjects :: proc(t: 
 	if !process_app_fixture(t, &f, "process-delete") {return}
 	s, w := &f.state, f.state.windows[0]
 	p := &w.editor
-	p.process_remove = 1
-	app.editor_process_remove_ask(s, w)
+	app.editor_process_remove_ask(s, w, 1)
 	testing.expect(t, w.process_remove_confirm.open)
 	testing.expect(t, !w.process_remove_confirm.show_option)
 	testing.expect_value(t, w.process_remove_confirm.focus, ui.Confirm_Button.Cancel)
 	app.editor_process_remove_finish(s, w, false)
 	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:nvim,vim;Tools:8:less")
-	p.process_remove = 1
-	app.editor_process_remove_ask(s, w)
+	app.editor_process_remove_ask(s, w, 1)
 	updated := commit_text(t, p.source, settings.PADDING_GROUPS_KEY, "Different:4:codex;Tools:8:less")
 	testing.expect_value(t, app.settings_commit(s, p.source, updated), settings.Save_Error.None)
 	app.editor_process_remove_finish(s, w, true)
 	testing.expect_value(t, s.settings.process.padding_groups, "Different:4:codex;Tools:8:less")
 	testing.expect(t, p.error)
-	p.process_remove = 1
-	app.editor_process_remove_ask(s, w)
+	app.editor_process_remove_ask(s, w, 1)
 	testing.expect(t, !w.process_remove_confirm.show_option)
 	app.editor_process_remove_finish(s, w, true)
 	testing.expect_value(t, s.settings.process.padding_groups, "Tools:8:less")
@@ -124,12 +121,12 @@ process_editor_drop_outside_window_cancels_the_last_valid_target :: proc(t: ^tes
 	}
 	app.gesture_button(s, w, {window = w.id, button = .Left, pressed = true,
 		x = i32(first.x + 18 * w.scale), y = i32(first.y + first.height / 2)})
-	testing.expect_value(t, p.drag, ui.Editor_Drag.Process_Order)
+	testing.expect(t, ui.editor_order_dragging(p, .Process_Groups))
 	app.gesture_move(s, w, {window = w.id, buttons = {.Left},
 		x = i32(second.x + 60), y = i32(second.y + second.height - 2)})
-	testing.expect(t, p.drag_target > 0)
+	testing.expect(t, ui.editor_order_target(p) > 0)
 	app.gesture_move(s, w, {window = w.id, buttons = {.Left}, x = -10, y = -10})
 	app.gesture_button(s, w, {window = w.id, button = .Left, pressed = false, x = -10, y = -10})
 	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:nvim,vim;Tools:8:less")
-	testing.expect_value(t, p.drag, ui.Editor_Drag.None)
+	testing.expect(t, !ui.editor_dragging(p))
 }
