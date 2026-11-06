@@ -111,8 +111,8 @@ panes_changed :: proc(l: ^Layout) {
 	l.panes_changed = true
 }
 
-// Places only the focused pane in `area`.
+// Places only the focused tiled pane in `area`.
 compute_focused :: proc(l: ^Layout, area: Rect, out: ^[dynamic]Pane_Rect) {
 	clear(out)
-	if l.root != INVALID_NODE {place(l, l.focus, area, 0, out)}
+	if l.root != INVALID_NODE {place(l, focus_tiled(l), area, 0, out)}
 }

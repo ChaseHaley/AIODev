@@ -49,6 +49,11 @@ Window :: struct {
 	divider_click_node: layout.Node_Id,
 	divider_click_ns: i64,
 	pane_drag: Pane_Drag,
+	// A floating pane moved by its header or resized by an edge; see floating_panes.odin.
+	float_drag: Float_Drag,
+	// The minimized floating pane whose capsule is under the pointer.
+	float_capsule_hover: Maybe(layout.Content),
+	float_capsule_armed: ui.Armed(layout.Content),
 	tab_drag: Tab_Drag,
 	tab_incoming: Tab_Incoming,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
@@ -435,66 +440,93 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	} else {
 		layout.compute(w.tree, area, window_gap(app, w), &w.panes)
 	}
+	layout.floats_place(w.tree, area, &w.panes)
 	window_dividers(app, w)
+	window_views_prune(w)
+	for &view in w.views {view.valid = false}
+	for pane in w.panes {pane_fit(app, w, pane)}
+	rail_reveal_active(w)
+}
+
+// Lays out only the floating panes, after one opened, moved, resized, rose or was minimized. The tiled
+// panes keep their rectangles, grids and cached drawing.
+window_floats_layout :: proc(app: ^App, w: ^Window) {
+	if w.preparing || w.width <= 0 || w.height <= 0 || w.tree == nil {return}
+	tiled := len(window_tiled_rects(w))
+	resize(&w.panes, tiled)
+	layout.floats_place(w.tree, window_content_area(app, w), &w.panes)
+	window_views_prune(w)
+	for pane in w.panes[tiled:] {
+		pane_fit(app, w, pane)
+		for &view in w.views {if view.content == pane.content {view.valid = false}}
+	}
+	w.dirty = true
+}
+
+// Releases the views of content the window no longer shows.
+@(private)
+window_views_prune :: proc(w: ^Window) {
 	for i := len(w.views) - 1; i >= 0; i -= 1 {
 		visible := false
 		for pane in w.panes {visible ||= pane.content == w.views[i].content}
-		if !visible {
-			if pane_owns_session(w.views[i].content.kind) {
-				term_view.destroy(&w.views[i].view)
-				render.draw_list_destroy(&w.views[i].cache)
-			}
-			ordered_remove(&w.views, i)
-		} else {w.views[i].valid = false}
+		if visible {continue}
+		if pane_owns_session(w.views[i].content.kind) {
+			term_view.destroy(&w.views[i].view)
+			render.draw_list_destroy(&w.views[i].cache)
+		}
+		ordered_remove(&w.views, i)
 	}
-	for pane in w.panes {
-		entry := workspace_session_for_content(app, pane.content)
-		if entry == nil {
-			if pane_view(w, pane.content) == nil {
-				cached := Pane_View{content = pane.content}
-				if _, err := append(&w.views, cached); err != nil {
-					log.error("storing a pane's header state failed")
-				}
-			}
-			continue
-		}
-		box := pane_box(
-			w.metrics,
-			pane.rect,
-			pane_insets(app, w.scale, entry),
-		)
-		g := term.Geometry {
-			columns = box.columns,
-			rows = box.rows,
-			cell_width = u32(w.metrics.cell_width),
-			cell_height = u32(w.metrics.cell_height),
-			surface_width = u32(w.width),
-			surface_height = u32(w.height),
-			padding_left = u32(box.origin.x),
-			padding_top = u32(box.origin.y),
-		}
-		if g != term.geometry(entry.session) {
-			term.resize(entry.session, g)
-		}
+}
+
+// Sizes a pane's terminal to its rectangle and makes sure the window keeps a view for it.
+@(private)
+pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
+	entry := workspace_session_for_content(app, pane.content)
+	if entry == nil {
 		if pane_view(w, pane.content) == nil {
-			view: term_view.View
-			if !term_view.create(&view) {
-				log.error("creating a terminal view failed")
-				continue
-			}
-			cached := Pane_View {
-				content = pane.content,
-				view    = view,
-				cache   = render.draw_list_init(),
-			}
+			cached := Pane_View{content = pane.content}
 			if _, err := append(&w.views, cached); err != nil {
-				term_view.destroy(&view)
-				render.draw_list_destroy(&cached.cache)
-				log.error("storing a terminal view failed")
+				log.error("storing a pane's header state failed")
 			}
 		}
+		return
 	}
-	rail_reveal_active(w)
+	box := pane_box(
+		w.metrics,
+		pane.rect,
+		pane_insets(app, w.scale, entry, pane.floating),
+	)
+	g := term.Geometry {
+		columns = box.columns,
+		rows = box.rows,
+		cell_width = u32(w.metrics.cell_width),
+		cell_height = u32(w.metrics.cell_height),
+		surface_width = u32(w.width),
+		surface_height = u32(w.height),
+		padding_left = u32(box.origin.x),
+		padding_top = u32(box.origin.y),
+	}
+	// A floating pane that only moved keeps its grid, so its program sees no resize.
+	if g != term.geometry(entry.session) && !(pane.floating && term.reposition(entry.session, g)) {
+		term.resize(entry.session, g)
+	}
+	if pane_view(w, pane.content) == nil {
+		view: term_view.View
+		if !term_view.create(&view) {
+			log.error("creating a terminal view failed")
+			return
+		}
+		cached := Pane_View {
+			content = pane.content,
+			view    = view,
+			cache   = render.draw_list_init(),
+		}
+		if _, err := append(&w.views, cached); err != nil {
+			term_view.destroy(&view)
+			render.draw_list_destroy(&cached.cache)
+			log.error("storing a terminal view failed")
+		}
+	}
 }
 
 @(private)
@@ -616,89 +648,27 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 	frame: term_view.Frame
 	blinking := false
 	w.status_spinning = false
-	c := app.settings.colors
-	selection_foreground: Maybe(render.Color)
-	if fg, ok := c.selection_foreground.?; ok {
-		selection_foreground = color(fg)
-	}
+	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
 	for pane in w.panes {
-		card := len(w.list.rects)
-		window_card_draw(app, w, pane)
-		switch pane.content.kind {
-		case .Terminal:
-		case .Settings:
-			if result := settings_pane_draw(app, w, pane, card); result != .Ok {return frame, result}
-			continue
-		case .Markdown:
-			if result := markdown_pane_draw(app, w, pane, card); result != .Ok {return frame, result}
-			continue
-		}
-		entry := workspace_session_for_content(app, pane.content)
-		view := pane_view(w, pane.content)
-		state := link_pane(w, pane.content)
-		if entry == nil || view == nil {
-			continue
-		}
-		content_focused :=
-			w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
-			!ui.find_has_keyboard(&w.find)
-		hover: Maybe(term.Link_Range)
-		if state != nil {
-			hover = state.hover
-		}
-		minimum_contrast := f32(1)
-		if app.settings.active_theme.terminal_light {
-			minimum_contrast = f32(app.settings.terminal.minimum_contrast)
-		}
-		style := term_view.Style {
-			family = app.family,
-			selection_background = color(c.selection_background),
-			selection_foreground = selection_foreground,
-			search_foreground = color(c.search_foreground),
-			search_background = color(c.search_background),
-			search_selected_background = color(c.search_selected_background),
-			cursor_text = color(c.cursor_text),
-			minimum_contrast = minimum_contrast,
-			focused = content_focused,
-			cursor_phase_visible = !content_focused || w.cursor_phase_visible,
-			hover = hover,
-		}
-		box := pane_box(
-			w.metrics,
-			pane.rect,
-			pane_insets(app, w.scale, entry),
-		)
+		if pane.floating {continue}
 		result: glyphs.Result
-		frame, result = build_pane(app, w, pane, entry, view, box.origin, style)
-		if result != .Ok {
-			return frame, result
-		}
-		if card < len(w.list.rects) {w.list.rects[card].color = frame.background}
-		blinking ||= frame.cursor_blinking && content_focused
-		if entry.status != .Running {
-			message := session_message(term.status(entry.session))
-			if message_result := ui.pane_message_draw(
-				&w.list,
-				&w.ui_text,
-				app.theme,
-				{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height},
-				message,
-				w.scale,
-				window_pane_radius(app, w),
-			); message_result != .Ok {return frame, message_result}
-		}
-		if header_result := pane_header_draw(app, w, pane, entry);
-		   header_result != .Ok {return frame, header_result}
-		terminal_scrollbar_draw(app, w, pane, entry)
-		window_card_dim(app, w, pane, frame.background)
-		window_card_outline(app, w, pane)
-	}
-	if blinking != w.blinking {
-		w.blinking = blinking
-		reset_blink(w)
+		frame, result = pane_draw(app, w, pane, &blinking)
+		if result != .Ok {return frame, result}
 	}
 	if w.pane_fill != .Screen {
 		if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
+	}
+	for pane in w.panes {
+		if !pane.floating {continue}
+		floating_frame_draw(app, w, pane)
+		result: glyphs.Result
+		frame, result = pane_draw(app, w, pane, &blinking)
+		if result != .Ok {return frame, result}
+	}
+	if result := floating_capsules_draw(app, w); result != .Ok {return frame, result}
+	if blinking != w.blinking {
+		w.blinking = blinking
+		reset_blink(w)
 	}
 	if result := rail_draw(app, w); result != .Ok {return frame, result}
 	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
@@ -761,6 +731,86 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		ui.armed_target(w.notice_armed),
 		w.pointer,
 	)
+}
+
+// Draws one pane's card, content, header, scrollbar, dimming and outline.
+@(private)
+pane_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: layout.Pane_Rect,
+	blinking: ^bool,
+) -> (
+	frame: term_view.Frame,
+	result: glyphs.Result,
+) {
+	card := len(w.list.rects)
+	window_card_draw(app, w, pane)
+	switch pane.content.kind {
+	case .Terminal:
+	case .Settings:
+		return frame, settings_pane_draw(app, w, pane, card)
+	case .Markdown:
+		return frame, markdown_pane_draw(app, w, pane, card)
+	}
+	entry := workspace_session_for_content(app, pane.content)
+	view := pane_view(w, pane.content)
+	state := link_pane(w, pane.content)
+	if entry == nil || view == nil {return frame, .Ok}
+	c := app.settings.colors
+	selection_foreground: Maybe(render.Color)
+	if fg, ok := c.selection_foreground.?; ok {selection_foreground = color(fg)}
+	content_focused :=
+		w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
+		!ui.find_has_keyboard(&w.find)
+	hover: Maybe(term.Link_Range)
+	if state != nil {
+		hover = state.hover
+	}
+	minimum_contrast := f32(1)
+	if app.settings.active_theme.terminal_light {
+		minimum_contrast = f32(app.settings.terminal.minimum_contrast)
+	}
+	style := term_view.Style {
+		family = app.family,
+		selection_background = color(c.selection_background),
+		selection_foreground = selection_foreground,
+		search_foreground = color(c.search_foreground),
+		search_background = color(c.search_background),
+		search_selected_background = color(c.search_selected_background),
+		cursor_text = color(c.cursor_text),
+		minimum_contrast = minimum_contrast,
+		focused = content_focused,
+		cursor_phase_visible = !content_focused || w.cursor_phase_visible,
+		hover = hover,
+	}
+	box := pane_box(
+		w.metrics,
+		pane.rect,
+		pane_insets(app, w.scale, entry, pane.floating),
+	)
+	frame, result = build_pane(app, w, pane, entry, view, box.origin, style)
+	if result != .Ok {return frame, result}
+	if card < len(w.list.rects) {w.list.rects[card].color = frame.background}
+	blinking^ ||= frame.cursor_blinking && content_focused
+	if entry.status != .Running {
+		message := session_message(term.status(entry.session))
+		if message_result := ui.pane_message_draw(
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height},
+			message,
+			w.scale,
+			window_pane_radius(app, w),
+		); message_result != .Ok {return frame, message_result}
+	}
+	if header_result := pane_header_draw(app, w, pane, entry);
+	   header_result != .Ok {return frame, header_result}
+	terminal_scrollbar_draw(app, w, pane, entry)
+	window_card_dim(app, w, pane, frame.background)
+	window_card_outline(app, w, pane)
+	return frame, .Ok
 }
 
 // Rebuilds every graphics object after the GPU was reset or removed; sessions are untouched.

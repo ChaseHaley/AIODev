@@ -4,8 +4,9 @@ import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
-// One slot per Header_Action from Documents through Close, in that order, left to right.
-HEADER_BUTTONS :: 7
+// One slot per Header_Action from Documents through Close, in that order, left to right. A tiled pane's
+// header leaves the floating slots empty, and a floating pane's header leaves the tiling slots empty.
+HEADER_BUTTONS :: 9
 @(private = "file")
 HEADER_TITLE_MINIMUM :: f32(40)
 Header_Action :: enum {
@@ -16,6 +17,8 @@ Header_Action :: enum {
 	Zoom,
 	Fill_Window,
 	Linked_Window,
+	Minimize,
+	Dock,
 	Close,
 	Badge,
 }
@@ -38,7 +41,20 @@ Header_Documents :: struct {
 	shown, open: bool,
 }
 
-header_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Header_Layout {
+// Whether a header shows the action's button: a floating pane has no split or view controls, and only it
+// can be minimized or docked.
+@(private = "file")
+header_shows :: proc(action: Header_Action, floating: bool) -> bool {
+	#partial switch action {
+	case .Documents, .Close:
+		return true
+	case .Minimize, .Dock:
+		return floating
+	}
+	return !floating
+}
+
+header_layout :: proc(area: render.Rect, scale: f32, documents := true, floating := false) -> Header_Layout {
 	l := Header_Layout {
 		panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT * scale)},
 	}
@@ -48,13 +64,15 @@ header_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Heade
 	button := HEIGHT_COMPACT * scale
 	end := area.x + area.width - SPACE_1 * scale
 	{
+		placed: render.Rect
 		for i := len(l.buttons) - 1; i >= 0; i -= 1 {
+			if !header_shows(Header_Action(i + 1), floating) {continue}
 			if i == int(Header_Action.Documents) - 1 {
 				// It gives way first, so a narrow pane keeps its badge, some title and its own controls.
 				gap := 2 * SPACE_1 * scale + scale
 				title_end := area.x + (SPACE_2 + ICON_BUTTON + SPACE_2 + HEADER_TITLE_MINIMUM) * scale
 				if !documents || end - gap - button < title_end {break}
-				l.divider = header_divider(l.buttons[i + 1], l.panel.y, l.panel.height, scale)
+				l.divider = header_divider(placed, l.panel.y, l.panel.height, scale)
 				end -= gap
 			}
 			if end - button < area.x + SPACE_1 * scale {break}
@@ -64,6 +82,7 @@ header_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Heade
 				button,
 				min(button, l.panel.height),
 			}
+			placed = l.buttons[i]
 			end -= button
 		}
 	}
@@ -152,6 +171,10 @@ header_icon :: proc(action: Header_Action, zoomed, fullscreen, linked: bool) -> 
 		return fullscreen ? .Restore : .Zoom
 	case .Linked_Window:
 		return linked ? .Window_In : .Window_Out
+	case .Minimize:
+		return .Minimize
+	case .Dock:
+		return .Layout_Right
 	case .Close:
 		return .Close
 	}
@@ -179,8 +202,9 @@ header_draw :: proc(
 	status_phase: f32 = 0,
 	content_icon: Icon = .None,
 	documents: Header_Documents = {shown = true},
+	floating := false,
 ) -> glyphs.Result {
-	l := header_layout(area, scale, documents.shown)
+	l := header_layout(area, scale, documents.shown, floating)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
 	if render.push_layer(list, l.panel) != .None {return .Ok}

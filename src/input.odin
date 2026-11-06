@@ -68,6 +68,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.rail_hover, w.rail_pressed = -1, -1
 			w.title_action_hover = .None
 			w.notice_hover = 0
+			w.float_capsule_hover = nil
 			w.document_menu.menu.hover_part = .Row
 			w.tab_orientation_button_hovered = false
 			w.workspace_hovered = false
@@ -480,7 +481,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if pane, found := settings_pane_under_pointer(w, f32(e.x), f32(e.y)); found {
 		ui.editor_wheel(
 			&w.editor,
-			settings_layout_for(w, pane.rect),
+			settings_layout_for(w, pane),
 			f32(e.x),
 			f32(e.y),
 			rows,

@@ -755,16 +755,35 @@ when AIO_CONTROL {
 							fmt.tprintf("%d", pane.content.id),
 						},
 					); err != nil {return nil, .Out_Of_Memory}
+					if pane.floating {
+						b := pane.float.bounds
+						floating_state := [?]control.State_Entry {
+							{
+								fmt.tprintf("%s.pane.%d.float", prefix, n),
+								fmt.tprintf("%g,%g,%g,%g", b.x, b.y, b.width, b.height),
+							},
+							{
+								fmt.tprintf("%s.pane.%d.minimized", prefix, n),
+								fmt.tprintf("%t", pane.float.minimized),
+							},
+						}
+						if _, err := append(&entries, ..floating_state[:]); err != nil {return nil, .Out_Of_Memory}
+					}
 				}
 			}
-			if _, err := append(
-				&entries,
-				control.State_Entry{fmt.tprintf("%s.panes", prefix), fmt.tprintf("%d", count)},
-			); err != nil {return nil, .Out_Of_Memory}
+			shown_floats, minimized_floats := layout.float_counts(&tab.tree)
+			tab_floats := [?]control.State_Entry {
+				{fmt.tprintf("%s.panes", prefix), fmt.tprintf("%d", count)},
+				{fmt.tprintf("%s.floating", prefix), fmt.tprintf("%d", shown_floats)},
+				{fmt.tprintf("%s.minimized", prefix), fmt.tprintf("%d", minimized_floats)},
+			}
+			if _, err := append(&entries, ..tab_floats[:]); err != nil {return nil, .Out_Of_Memory}
 		}
 		if w != nil {
 			pane_state := [?]control.State_Entry {
-				{"panes.count", fmt.tprintf("%d", len(w.panes))},
+				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
+				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
+				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(app, w)))},
 				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
 				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},

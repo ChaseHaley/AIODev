@@ -165,8 +165,13 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 		return
 	}
 	focus_leave(app, w)
-	w.tree.focus = node
-	if pane_view_solo(w) {window_relayout(app, w)}
+	// A floating pane rises above the others, and comes out of its capsule, as it takes focus.
+	floats_changed := layout.focus_set(w.tree, node)
+	if pane_view_solo(w) && !layout.is_floating(w.tree, node) {
+		window_relayout(app, w)
+	} else if floats_changed {
+		window_floats_layout(app, w)
+	}
 	focus_enter(app, w)
 }
 
@@ -319,6 +324,10 @@ pane_split :: proc(
 	ratio: f32 = 0.5,
 	focus := true,
 ) {
+	if layout.is_floating(w.tree, w.tree.focus) {
+		notify(app, .Info, "A floating pane does not split; dock it first with Float or Dock Pane.")
+		return
+	}
 	tab := w.workspace.selected
 	launch: Pane_Launch
 	if entry := focused_session(app, w); entry != nil {
@@ -768,7 +777,8 @@ pane_remove :: proc(
 	if visible {
 		for w in app.windows {
 			if w.workspace != workspace {continue}
-			window_relayout(app, w)
+			// A floating pane's close leaves the tiled panes exactly as they were.
+			if pane.floating {window_floats_layout(app, w)} else {window_relayout(app, w)}
 			if was_focused {focus_enter(app, w)}
 		}
 	}

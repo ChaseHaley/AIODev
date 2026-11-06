@@ -32,6 +32,9 @@ Pointer_Target :: enum u8 {
 	Status_Panel,
 	// The tab strip band or the rail, including an overlay rail above the panes.
 	Tabs,
+	// A floating pane's resize edges and the capsules of minimized floating panes. A floating pane also
+	// hides the dividers below it.
+	Floating,
 	// Pane headers and a single pane's floating split controls.
 	Pane_Header,
 	Scrollbar,
@@ -85,6 +88,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Divider          = {divider_claims, divider_hover, divider_pointer_press, divider_release, nil},
 	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release, panel_tooltip},
 	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release, tabs_tooltip},
+	.Floating         = {floating_claims, floating_hover, floating_press, floating_release, floating_tooltip},
 	.Pane_Header      = {header_claims, header_hover, header_press, nil, header_tooltip},
 	.Scrollbar        = {scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release, nil},
 	.Settings_Page    = {settings_claims, settings_hover, content_press, nil, settings_tooltip},
@@ -583,7 +587,7 @@ pill_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private = "file")
 divider_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	_, over := divider_cursor(w, x, y)
-	return over
+	return over && !floating_covers(app, w, x, y)
 }
 
 @(private = "file")
@@ -748,6 +752,8 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	case .Zoom: return "Zoom"
 	case .Fill_Window: return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
 	case .Linked_Window: return w.linked ? "Return pane to tab" : "Move pane to linked window"
+	case .Minimize: return "Minimize"
+	case .Dock: return "Dock into the tab"
 	case .Close: return "Close pane"
 	case:
 	}
@@ -818,7 +824,7 @@ settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 		pointer_set(app, w, .Arrow)
 		return
 	}
-	l := settings_layout_for(w, pane.rect)
+	l := settings_layout_for(w, pane)
 	changed := ui.editor_hover(&w.editor, l, x, y)
 	if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
 	if changed {w.dirty = true}

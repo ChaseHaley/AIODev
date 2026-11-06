@@ -331,24 +331,22 @@ settings_active :: proc(w: ^Window) -> bool {
 
 // The rectangle of the settings pane the window should address, preferring the focused one.
 @(private)
-settings_pane_rect :: proc(w: ^Window) -> layout.Rect {
+settings_pane_rect :: proc(w: ^Window) -> layout.Pane_Rect {
 	if w.tree != nil && w.tree.focus != layout.INVALID_NODE {
 		for pane in w.panes {
-			if pane.node == w.tree.focus && pane.content.kind == .Settings {return pane.rect}
+			if pane.node == w.tree.focus && pane.content.kind == .Settings {return pane}
 		}
 	}
 	for pane in w.panes {
-		if pane.content.kind == .Settings {return pane.rect}
+		if pane.content.kind == .Settings {return pane}
 	}
 	return {}
 }
 
 @(require_results)
-settings_layout_for :: proc(w: ^Window, rect: layout.Rect) -> ui.Editor_Layout {
-	return ui.editor_layout(
-		{rect.x, rect.y + w.header_height, rect.width, max(0, rect.height - w.header_height)},
-		w.scale,
-	)
+settings_layout_for :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Editor_Layout {
+	rect, header := pane.rect, pane_header_of(w, pane)
+	return ui.editor_layout({rect.x, rect.y + header, rect.width, max(0, rect.height - header)}, w.scale)
 }
 
 settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {
@@ -373,7 +371,7 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: 
 	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
 	result := ui.editor_draw(
 		&w.editor,
-		settings_layout_for(w, pane.rect),
+		settings_layout_for(w, pane),
 		&w.list,
 		&w.ui_text,
 		app.theme,

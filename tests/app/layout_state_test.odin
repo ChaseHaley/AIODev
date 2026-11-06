@@ -78,6 +78,32 @@ layout_tree_decode_moves_focus_off_splits :: proc(t: ^testing.T) {
 }
 
 @(test)
+layout_tree_decode_restores_floating_panes :: proc(t: ^testing.T) {
+	float := []app.Saved_Float{{x = 0.9, y = 0.1, width = 0.5, height = math.nan_f32(), stack = 7}}
+	minimized := []app.Saved_Float{{x = 0.1, y = 0.1, width = 0.5, height = 0.5, stack = 3, minimized = true}}
+	nodes := []app.Saved_Node{
+		{split = true, first = 1, second = 4},
+		{split = true, first = 2, second = 3},
+		{},
+		{float = minimized},
+		{float = float},
+	}
+	tree, ok := decode(nodes, focus = 3)
+	defer layout.destroy(&tree)
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, tree.focus, layout.Node_Id(2))
+	shown, floated := tree.nodes[4].(layout.Pane)
+	testing.expect(t, floated && shown.floating && !shown.float.minimized)
+	testing.expect_value(t, shown.float.bounds, layout.Rect{0.2, 0.2, 0.6, 0.6})
+	hidden := tree.nodes[3].(layout.Pane)
+	testing.expect(t, hidden.floating && hidden.float.minimized)
+	testing.expect_value(t, layout.float_latest(&tree, false), layout.Node_Id(4))
+	added, err := layout.float_new(&tree, {.Terminal, 9}, {0.1, 0.1, 0.3, 0.3})
+	testing.expect_value(t, err, nil)
+	testing.expect(t, tree.nodes[added].(layout.Pane).float.stack > 7, "new panes open above restored ones")
+}
+
+@(test)
 layout_state_encode_round_trips_structure :: proc(t: ^testing.T) {
 	state: app.App
 	defer {

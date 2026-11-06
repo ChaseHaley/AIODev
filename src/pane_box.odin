@@ -21,7 +21,7 @@ Pane_Box :: struct {
 }
 
 // D-050 keeps a header on every pane unless headers are off; content kind never changes the
-// geometry a pane receives.
+// geometry a pane receives. A floating pane keeps its header either way, since it moves by it.
 pane_header_height :: proc(scale: f32, show_headers: bool) -> f32 {
 	if !show_headers {return 0}
 	return math.round(ui.HEADER_HEIGHT * scale)
@@ -31,11 +31,17 @@ pane_insets :: proc(
 	app: ^App,
 	scale: f32,
 	entry: ^Session_Entry,
+	floating := false,
 ) -> Pane_Insets {
 	return {
 		padding = pane_padding(app, scale, entry),
-		header = pane_header_height(scale, app.settings.pane.show_headers),
+		header = pane_header_height(scale, floating || app.settings.pane.show_headers),
 	}
+}
+
+// The header height of a pane the window shows.
+pane_header_of :: proc(w: ^Window, pane: layout.Pane_Rect) -> f32 {
+	return pane.floating ? pane_header_height(w.scale, true) : w.header_height
 }
 
 pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Insets) -> Pane_Box {

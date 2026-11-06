@@ -27,6 +27,8 @@ Closed_Record :: struct {
 	share:  f32,
 	// It was in a linked window, so it returns there when its neighbours still are.
 	linked: bool,
+	// It floated above its tab, so it returns floating at the same place.
+	float:  []Saved_Float `json:"float,omitempty"`,
 }
 
 closed_destroy :: proc(app: ^App) {
@@ -80,6 +82,7 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 		before = before,
 		share  = share,
 		linked = layout.link_root(&tab.tree, node) != layout.INVALID_NODE,
+		float  = layout_float_encode(pane),
 	}
 	closed_push(app, {workspace = workspace.id, tab = tab.id}, record)
 }
@@ -151,6 +154,10 @@ closed_reopen_tab :: proc(app: ^App, w: ^Window, record: ^Closed_Record) {
 @(private)
 closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Closed_Record) {
 	tab := w.workspace.tabs[tab_index]
+	if len(record.float) == 1 {
+		closed_reopen_floating(app, w, tab_index, record)
+		return
+	}
 	target := layout.find_group(&tab.tree, record.beside)
 	for content in record.beside {
 		if target != layout.INVALID_NODE {break}
@@ -187,6 +194,27 @@ closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Close
 	pane_focus(app, w, added)
 	tab_update_title(app, tab)
 	window_relayout(app, w)
+}
+
+@(private)
+closed_reopen_floating :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Closed_Record) {
+	if !layout_session_restore(app, &record.tab.nodes[0]) {
+		notify(app, .Error, "Could not reopen the pane.")
+		return
+	}
+	id := app.next_session_id
+	tab := w.workspace.tabs[tab_index]
+	bounds := layout_float_decode(record.float[0]).bounds
+	node, err := layout.float_new(&tab.tree, {.Terminal, id}, bounds)
+	if err != nil {
+		session_close(app, id)
+		notify(app, .Error, "Could not reopen the pane.")
+		return
+	}
+	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
+	pane_focus(app, w, node)
+	tab_update_title(app, tab)
+	window_floats_layout(app, w)
 }
 
 // The pane's neighbours are in a linked window, so it goes back among them there.

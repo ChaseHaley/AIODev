@@ -208,7 +208,7 @@ slot_insert_pane :: proc(
 	if int(target_node) >= len(l.nodes) {return INVALID_NODE, false}
 	// The slot marks the panes it holds, not each pane; a pane inside it stays plain.
 	inserted := pane
-	inserted.linked = false
+	pane_settle(&inserted)
 	if !root && target_node != slot {
 		if link_root(l, target_node) != slot {return INVALID_NODE, false}
 		if reserve(&l.nodes, len(l.nodes) + 2) != nil {return INVALID_NODE, false}
@@ -298,7 +298,8 @@ transfer_pane_to_slot :: proc(
 	if reserve(&destination.nodes, len(destination.nodes) + 2) != nil {return INVALID_NODE, false}
 	if !remove(source, node) {return INVALID_NODE, false}
 	destination.next_pane_order += 1
-	pane.order, pane.linked = destination.next_pane_order, false
+	pane_settle(&pane)
+	pane.order = destination.next_pane_order
 	added, inserted := slot_insert_pane(destination, slot, pane, target, direction, root)
 	if !inserted {return INVALID_NODE, false}
 	return added, true

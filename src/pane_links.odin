@@ -91,7 +91,7 @@ pane_link_route :: proc(action: Action) -> Pane_Link_Route {
 	     .Split_Down,
 	     .Change_Pane_Shell:
 		return .Local
-	case .Move_Pane_Workspace, .Move_Pane_New_Workspace:
+	case .Move_Pane_Workspace, .Move_Pane_New_Workspace, .Float_Pane:
 		return .Refuse
 	}
 	return .Host

@@ -69,7 +69,7 @@ pane_header_draw :: proc(
 	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
 	r := pane.rect
 	documents := pane_header_documents(w, pane)
-	if w.header_height == 0 {
+	if w.header_height == 0 && !pane.floating {
 		if !w.split_overlay && !documents.open {return .Ok}
 		return ui.split_overlay_draw(
 			&w.list,
@@ -95,7 +95,7 @@ pane_header_draw :: proc(
 	}
 	badge_hovered := false
 	if entry != nil {
-		layout := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
+		layout := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, documents.shown, pane.floating)
 		badge_hovered =
 			w.pointer.x >= layout.badge.x - 3 * w.scale &&
 			w.pointer.x < layout.badge.x + layout.badge.width + 9 * w.scale &&
@@ -142,6 +142,7 @@ pane_header_draw :: proc(
 		status_phase(app, w, status),
 		content_icon = pane.content.kind == .Markdown ? .Markdown : .None,
 		documents = documents,
+		floating = pane.floating,
 	)
 }
 
@@ -155,17 +156,21 @@ pane_header_documents :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_D
 	}
 }
 
+// The header under the point, on the topmost pane there: a floating pane covers the headers below it.
 pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_Action, bool) {
-	if w.header_height == 0 && !w.split_overlay {return {}, .None, false}
-	for pane in w.panes {
-		r := pane.rect
-		area := render.Rect{r.x, r.y, r.width, r.height}
-		documents := CONTENT_POLICY[pane.content.kind].documents
-		l := ui.header_layout(area, w.scale, documents)
-		if w.header_height == 0 {l = ui.split_overlay_layout(area, w.scale, documents)}
-		if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
-	}
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found || (!pane.floating && w.header_height == 0 && !w.split_overlay) {return {}, .None, false}
+	l := pane_header_layout(w, pane)
+	if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
 	return {}, .None, false
+}
+
+pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Layout {
+	r := pane.rect
+	area := render.Rect{r.x, r.y, r.width, r.height}
+	documents := CONTENT_POLICY[pane.content.kind].documents
+	if w.header_height == 0 && !pane.floating {return ui.split_overlay_layout(area, w.scale, documents)}
+	return ui.header_layout(area, w.scale, documents, pane.floating)
 }
 
 pane_header_cancel :: proc(w: ^Window) {
@@ -186,7 +191,10 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 			_ = pane_drag_release(app, w)
 			return true
 		}
-		if e.button == .Left {_ = pane_drag_release(app, w)}
+		if e.button == .Left {
+			_ = pane_drag_release(app, w)
+			floating_drag_release(app, w, f32(e.x), f32(e.y))
+		}
 		chosen: ui.Header_Action
 		for &view in w.views {
 			if e.button == .Left {
@@ -207,6 +215,8 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 				.Zoom          = "pane.zoom",
 				.Fill_Window   = "pane.fill_window",
 				.Linked_Window = "pane.linked_window",
+				.Minimize      = "pane.minimize_floating",
+				.Dock          = "pane.float",
 				.Close         = "pane.close",
 				.Badge         = "",
 			}
@@ -238,7 +248,13 @@ pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 			for &view in w.views {
 				if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
 			}
-			if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
+			if action == .None {
+				if pane.floating {
+					floating_drag_press(app, w, pane, {}, f32(e.x), f32(e.y))
+				} else {
+					pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))
+				}
+			}
 		}
 	}
 	return true
@@ -256,9 +272,12 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.H
 // Shows a single pane's split controls while the pointer is within the top band of its card.
 split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
 	shown := false
-	if enabled && w.header_height == 0 && len(w.panes) == 1 {
+	// Floating panes follow the tiled ones and never take the single pane's controls.
+	single := len(w.panes) > 0 && !w.panes[0].floating && (len(w.panes) == 1 || w.panes[1].floating)
+	if enabled && w.header_height == 0 && single {
 		r := w.panes[0].rect
-		shown = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + 40 * w.scale
+		top, found := layout.hit_test(w.panes[:], x, y)
+		shown = found && !top.floating && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + 40 * w.scale
 	}
 	if shown == w.split_overlay {return}
 	w.split_overlay = shown

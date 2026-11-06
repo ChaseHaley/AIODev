@@ -62,7 +62,35 @@ Saved_Node :: struct {
 	linked:    bool,
 	// A linked pane's window, as a slice because only an empty one is left out of the file.
 	window:    []platform.Window_Placement `json:"window,omitempty"`,
+	// A floating pane's place above the tiling, likewise a slice of at most one.
+	float:     []Saved_Float `json:"float,omitempty"`,
 	documents: []Document `json:"documents,omitempty"`,
+}
+
+// Bounds are fractions of the tab's content area; see layout.Float.
+Saved_Float :: struct {
+	x, y, width, height: f32,
+	stack:               u64,
+	minimized:           bool,
+}
+
+// The saved form of a floating pane's place, in temporary memory, or nil for a tiled pane.
+@(private)
+layout_float_encode :: proc(pane: layout.Pane) -> []Saved_Float {
+	if !pane.floating {return nil}
+	saved := make([]Saved_Float, 1, context.temp_allocator)
+	b := pane.float.bounds
+	saved[0] = {b.x, b.y, b.width, b.height, pane.float.stack, pane.float.minimized}
+	return saved
+}
+
+@(private)
+layout_float_decode :: proc(saved: Saved_Float) -> layout.Float {
+	return {
+		bounds = layout.float_bounds_clamp({saved.x, saved.y, saved.width, saved.height}),
+		stack = saved.stack,
+		minimized = saved.minimized,
+	}
 }
 
 // Schedules a save check; repeated calls before it runs coalesce into one.
@@ -156,6 +184,7 @@ layout_node_encode :: proc(
 	case layout.Pane:
 		saved := layout_pane_encode(app, node.content, processes)
 		if node.linked {layout_link_encode(app, tree, id, &saved)}
+		saved.float = layout_float_encode(node)
 		append(nodes, saved)
 		if id == tree.focus {focus^ = index}
 	case layout.Split:
@@ -413,6 +442,7 @@ layout_tree_decode :: proc(saved: ^Saved_Tab, tree: ^layout.Layout) -> bool {
 	}
 	tree.focus = layout.Node_Id(focus)
 	tree.zoomed = saved.zoomed
+	layout.float_stack_restore(tree)
 	layout.links_repair(tree)
 	return true
 }
@@ -431,10 +461,14 @@ layout_node_decode :: proc(
 	if !node.split {
 		if node.content > max(layout.Content_Kind) {return false}
 		tree.next_pane_order += 1
+		// A pane in a slot shows in its linked window, never floating.
+		floating := len(node.float) == 1 && !in_slot && !node.linked
 		tree.nodes[index] = layout.Pane {
-			content = {kind = node.content},
-			order   = tree.next_pane_order,
-			linked  = node.linked && !in_slot && CONTENT_POLICY[node.content].linkable,
+			content  = {kind = node.content},
+			order    = tree.next_pane_order,
+			linked   = node.linked && !in_slot && CONTENT_POLICY[node.content].linkable,
+			floating = floating,
+			float    = floating ? layout_float_decode(node.float[0]) : {},
 		}
 		return true
 	}
