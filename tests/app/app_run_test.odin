@@ -8,6 +8,8 @@ import "core:thread"
 import "core:time"
 import app "../../src"
 import "aio:control"
+import "aio:layout"
+import "aio:platform"
 
 when app.AIO_CONTROL {
 	@(test)
@@ -39,43 +41,45 @@ when app.AIO_CONTROL {
 	}
 
 	@(private = "file")
-	Quit_Client :: struct {
+	Harness_Client :: struct {
 		name:      string,
+		args:      []string,
 		allocator: runtime.Allocator,
 		response:  control.Response,
 		error:     control.Error,
 	}
 
 	@(private = "file")
-	quit_client :: proc(t: ^thread.Thread) {
-		c := (^Quit_Client)(t.data)
+	harness_client :: proc(t: ^thread.Thread) {
+		c := (^Harness_Client)(t.data)
 		context.allocator = c.allocator
 		client, err := control.connect(c.name, 2000)
 		if err != .None {c.error = err; return}
 		defer control.close(&client)
-		c.response, c.error = control.call(&client, {"tray", "quit"}, 5000)
+		c.response, c.error = control.call(&client, c.args, 5000)
 	}
 
-	// Sends tray quit to a harness with no window, ticking it until the reply is delivered and the
-	// app has stopped. Returns each run state seen, in order.
+	// Sends one request to the harness, ticking it until the reply is delivered and the app has
+	// stopped. Returns each run state seen, in order.
 	@(private = "file")
-	quit_through_harness :: proc(
+	request_through_harness :: proc(
 		t: ^testing.T,
 		state: ^app.App,
-		client: ^Quit_Client,
+		client: ^Harness_Client,
+		args: []string,
 	) -> (
 		runs: [dynamic]app.App_Run,
 	) {
 		runs = make([dynamic]app.App_Run, context.temp_allocator)
 		append(&runs, state.run)
-		id := fmt.tprintf("AIODev.Test.VerifyQuit.%d.%d", os.get_pid(), time.tick_now()._nsec)
+		id := fmt.tprintf("AIODev.Test.VerifyRun.%d.%d", os.get_pid(), time.tick_now()._nsec)
 		name, name_error := control.pipe_name(id, context.temp_allocator)
 		if !testing.expect_value(t, name_error, control.Error.None) {return}
 		server, server_error := control.create(name, {})
 		if !testing.expect_value(t, server_error, control.Error.None) {return}
 		state.verify.server = server
-		client.name, client.allocator = name, context.allocator
-		worker := thread.create(quit_client)
+		client.name, client.args, client.allocator = name, args, context.allocator
+		worker := thread.create(harness_client)
 		if !testing.expect(t, worker != nil) {return}
 		worker.data = client
 		thread.start(worker)
@@ -95,9 +99,9 @@ when app.AIO_CONTROL {
 	verification_quit_runs_until_its_reply_is_delivered :: proc(t: ^testing.T) {
 		state: app.App
 		defer app.verify_destroy(&state)
-		client: Quit_Client
+		client: Harness_Client
 		defer control.response_destroy(&client.response)
-		runs := quit_through_harness(t, &state, &client)
+		runs := request_through_harness(t, &state, &client, {"tray", "quit"})
 		testing.expect_value(t, client.error, control.Error.None)
 		testing.expect(t, client.response.ok)
 		testing.expect_value(t, client.response.text, "ok; quitting")
@@ -107,16 +111,51 @@ when app.AIO_CONTROL {
 		testing.expect_value(t, runs[2], app.App_Run.Quit)
 	}
 
-	// The harness used to set a stopped app running again to drain a quit, even once the device was
-	// lost and nothing could draw.
+	// Tray quit once the device is lost: nothing is held, and the reply says the app is ending.
 	@(test)
-	verification_quit_after_a_lost_device_does_not_resume_the_app :: proc(t: ^testing.T) {
+	verification_tray_quit_after_a_lost_device_holds_nothing :: proc(t: ^testing.T) {
 		state: app.App
 		defer app.verify_destroy(&state)
 		app.app_device_failed(&state)
-		client: Quit_Client
+		client: Harness_Client
 		defer control.response_destroy(&client.response)
-		runs := quit_through_harness(t, &state, &client)
+		runs := request_through_harness(t, &state, &client, {"tray", "quit"})
+		testing.expect_value(t, client.error, control.Error.None)
+		testing.expect(t, !client.response.ok)
+		testing.expect_value(t, client.response.text, "error: the graphics device was lost; AIODev is exiting")
+		if !testing.expect_value(t, len(runs), 1) {return}
+		testing.expect_value(t, runs[0], app.App_Run.Device_Failed)
+	}
+
+	// A drive that finds the app stopped used to set it running again to drain a quit, even when the
+	// device was lost and nothing could draw.
+	@(test)
+	verification_drive_after_a_lost_device_does_not_resume_the_app :: proc(t: ^testing.T) {
+		state := app.App{app_id = "AIODev.Test.VerifyDriveLostDevice"}
+		if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {
+			return
+		}
+		defer testing.expect_value(t, platform.destroy(&state.platform), platform.Error.None)
+		window_id, window_error := platform.window_create(&state.platform, {hidden = true, width = 160, height = 100})
+		if !testing.expect_value(t, window_error, platform.Error.None) {return}
+		workspace: app.Workspace
+		tab := app.Tab{id = 1}
+		if !testing.expect_value(t, layout.init(&tab.tree, {.Terminal, 0}), nil) {return}
+		defer layout.destroy(&tab.tree)
+		append(&workspace.tabs, &tab)
+		defer delete(workspace.tabs)
+		w := app.Window{id = window_id, workspace = &workspace, tree = &tab.tree, focused = true,
+			width = 160, height = 100}
+		defer delete(w.rail_rows)
+		append(&state.windows, &w)
+		defer delete(state.windows)
+		append(&state.workspaces, &workspace)
+		defer delete(state.workspaces)
+		defer app.verify_destroy(&state)
+		app.app_device_failed(&state)
+		client: Harness_Client
+		defer control.response_destroy(&client.response)
+		runs := request_through_harness(t, &state, &client, {"window", "select", fmt.tprintf("%d", window_id)})
 		testing.expect_value(t, client.error, control.Error.None)
 		testing.expect(t, !client.response.ok)
 		testing.expect_value(t, client.response.text, "error: the graphics device was lost; AIODev is exiting")
