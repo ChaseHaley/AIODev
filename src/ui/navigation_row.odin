@@ -18,6 +18,28 @@ navigation_row_draw :: proc(
 	scale: f32,
 	pointer: [2]f32,
 ) -> glyphs.Result {
+	if navigation_row_surface_draw(list, theme, rect, row, scale, pointer) != .None {return .Ok}
+	return draw_fading_text(
+		text,
+		list,
+		row.title,
+		rect.x + CONTROL_INSET * scale + row.leading,
+		rect.y + (rect.height - text.line_height) / 2 + text.ascent,
+		row.selected ? theme.tab_active_text : theme.tab_text,
+		max(0, rect.width - 2 * CONTROL_INSET * scale - row.leading - row.trailing),
+	)
+}
+
+// Shared by tab rows and Activity reports, whose content has its own layout.
+@(require_results)
+navigation_row_surface_draw :: proc(
+	list: ^render.Draw_List,
+	theme: Theme,
+	rect: render.Rect,
+	row: Navigation_Row,
+	scale: f32,
+	pointer: [2]f32,
+) -> render.Error {
 	s := scale
 	tile := render.Rect{rect.x, rect.y + s, rect.width, max(0, rect.height - 2 * s)}
 	if row.selected {
@@ -31,17 +53,8 @@ navigation_row_draw :: proc(
 		fill := row.pressed ? theme.pressed : theme.hover
 		draw_rect(list, {rect = tile, color = fill, radius = RADIUS_CONTROL * s})
 	}
-	if result := draw_fading_text(
-		text,
-		list,
-		row.title,
-		rect.x + CONTROL_INSET * s + row.leading,
-		rect.y + (rect.height - text.line_height) / 2 + text.ascent,
-		row.selected ? theme.tab_active_text : theme.tab_text,
-		max(0, rect.width - 2 * CONTROL_INSET * s - row.leading - row.trailing),
-	); result != .Ok {return result}
 	if row.hovered && !row.selected {
-		if hover_rim_draw(list, theme, tile, RADIUS_CONTROL * s, 1, s, pointer) != .None {return .Ok}
+		return hover_rim_draw(list, theme, tile, RADIUS_CONTROL * s, 1, s, pointer)
 	}
-	return .Ok
+	return .None
 }

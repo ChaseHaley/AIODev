@@ -152,13 +152,6 @@ header_draw :: proc(
 	l := header_layout(area, scale, focused)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
-	draw_rect(
-		list,
-		{
-			rect = {area.x, l.panel.y + l.panel.height - scale, area.width, scale},
-			color = theme.border,
-		},
-	)
 	if render.push_layer(list, l.panel) != .None {return .Ok}
 	if l.title.width > 0 && l.badge.x + l.badge.width <= area.x + area.width {
 		if result := shell_badge_draw(list, text, theme, l.badge, icon, scale, icon_atlas);

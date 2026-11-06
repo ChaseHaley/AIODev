@@ -67,6 +67,37 @@ function Set-View-Button($view) {
     if ($s['activity.view'] -ne $view) { Click $s 'activity.view_button' }
     Equal (State)['activity.view'] $view "header button shows $view"
 }
+function Surface-Proof($theme, $label) {
+    $s = State
+    $scale = [double]$s['window.scale']
+    $panel = Rect $s 'activity.rect'
+    $colors = (Get-Content -Raw (Join-Path $repo "themes/$theme.theme.json") | ConvertFrom-Json).colors
+    $expected = $colors.tab_bar.ToLower() + 'ff'
+    # Sample inside the standalone frame and the empty bottom edge of its title band.
+    foreach ($y in ($panel[1]+32*$scale-1), ($panel[1]+$panel[3]-12*$scale)) {
+        $sample = Aio pixels --region "$([int]($panel[0]+8*$scale)),$([int]$y),1,1" --sample '0,0'
+        Equal (($sample -split ' ')[-1]) $expected "$label tab background without header divider"
+    }
+    foreach ($key in ($s.Keys | Where-Object { $_ -match '^pane\.\d+\.rect$' })) {
+        $pane = Rect $s $key
+        $x = [int]($pane[0]+8*$scale)
+        $y = [int]($pane[1]+[double]$s['panes.header_height']-1)
+        $sample = Aio pixels --region "$x,$y,1,1" --sample '0,0'
+        Equal (($sample -split ' ')[-1]) ($colors.pane.ToLower()+'ff') "$label $key has no header divider"
+    }
+    $row = Find-Row $s 'Activity panel'
+    $x, $y = [int]$row.Rect[0], [int]($row.Rect[1]+$row.Rect[3]/2)
+    Aio mouse move "$([int]($x+3*$scale)),$y" --px | Out-Null
+    $near = Aio pixels --region "$x,$y,1,1" --sample '0,0'
+    Aio capture --out "$data/hover-left-$label.png" | Out-Null
+    Aio mouse move "$([int]($x+$row.Rect[2]-3*$scale)),$y" --px | Out-Null
+    $far = Aio pixels --region "$x,$y,1,1" --sample '0,0'
+    if ($near -eq $far) { throw "$label row rim did not follow the pointer" }
+    Write-Output "PASS $label row rim follows the pointer"
+    Aio capture --out "$data/hover-right-$label.png" | Out-Null
+    Aio mouse move (Middle (Find-Row $s 'Review layout').Rect) --px | Out-Null
+    Aio capture --out "$data/hover-child-$label.png" | Out-Null
+}
 
 $agents = @(
     @{ state = 'blocked'; id = 'a'; app = 'claude'; kind = 'permission'; title = 'Activity panel'; msg = 'Approve edits to src/layout.odin' }
@@ -168,6 +199,7 @@ try {
                 Aio mouse move '5,5' --px | Out-Null
                 Start-Sleep -Milliseconds 300
                 Aio capture --out "$data/$view-$theme-$dpi.png" | Out-Null
+                Surface-Proof $theme "$view-$theme-$dpi"
             }
         }
     }

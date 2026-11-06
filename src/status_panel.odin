@@ -411,9 +411,6 @@ status_panel_comfy_draw :: proc(
 	s := w.scale
 	item := row.item
 	box := status_panel_row_box(w, r, row)
-	if highlighted {
-		ui.draw_rect(&w.list, {rect = box, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
-	}
 	middle := status_panel_comfy_title_middle(w, r)
 	if row.depth > 0 {status_panel_guide_draw(app, w, box, middle)}
 	logo := row.depth > 0 ? STATUS_PANEL_COMFY_CHILD_LOGO : STATUS_PANEL_COMFY_LOGO
@@ -457,9 +454,6 @@ status_panel_dense_draw :: proc(
 	s := w.scale
 	item := row.item
 	box := status_panel_row_box(w, r, row)
-	if highlighted {
-		ui.draw_rect(&w.list, {rect = box, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
-	}
 	middle := r.y + r.height / 2
 	if row.depth > 0 {status_panel_guide_draw(app, w, box, middle)}
 	logo := row.depth > 0 ? STATUS_PANEL_DENSE_CHILD_LOGO : STATUS_PANEL_DENSE_LOGO
@@ -521,7 +515,7 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, panel) != .None {return .Ok}
 	if !status_panel_in_rail(app, w) {
 		radius := f32(app.settings.pane.corner_radius) * s
-		ui.draw_rect(&w.list, {rect = panel, color = app.theme.pane, radius = radius})
+		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar, radius = radius})
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.pane_border, radius = radius, stroke = max(1, s)})
 	} else {
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar})
@@ -543,9 +537,6 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		panel.y + (header - strong.line_height) / 2 + strong.ascent,
 		app.theme.text,
 	); result != .Ok {return result}
-	line := max(1, math.round(s))
-	divider := render.Rect{panel.x, panel.y + header - line, panel.width, line}
-	ui.draw_rect(&w.list, {rect = divider, color = app.theme.border})
 	view_icon: ui.Icon = app.settings.status.panel_view == .Comfy ? .View_Comfy : .View_Dense
 	side_icon: ui.Icon = app.settings.status.panel_side == .Left ? .Layout_Left : .Layout_Right
 	buttons := [?]struct {
@@ -581,6 +572,11 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
 		result: glyphs.Result
 		highlighted := w.status.hover_surface == .Panel && w.status.hover == i
+		if row.report {
+			box := status_panel_row_box(w, r, row)
+			if ui.navigation_row_surface_draw(&w.list, app.theme, box, {hovered = highlighted}, s,
+				w.pointer) != .None {return .Ok}
+		}
 		switch {
 		case !row.report:
 			result = status_panel_label_draw(app, w, r, row)
