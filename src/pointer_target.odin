@@ -457,7 +457,7 @@ orientation_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 @(private = "file")
 find_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if !w.find.open {return false}
-	l, _ := find_controls(w, focused_session(app, w))
+	l, _ := find_controls(w, find_target(app, w))
 	return ui.find_contains(l, x, y)
 }
 
@@ -469,7 +469,7 @@ find_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: plat
 		return
 	}
 	x, y := move_point(e)
-	l, available := find_controls(w, focused_session(app, w))
+	l, available := find_controls(w, find_target(app, w))
 	if ui.find_hover(&w.find, l, available, x, y) {w.dirty = true}
 	pointer_set(app, w, ui.find_pointer(l, available, x, y))
 }
@@ -489,17 +489,17 @@ find_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 
 @(private = "file")
 find_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	entry := focused_session(app, w)
-	l, enabled := find_controls(w, entry)
-	on_find_outcome(app, w, entry, ui.find_mouse(&w.find, l, enabled, e.button, true, f32(e.x), f32(e.y)))
+	target := find_target(app, w)
+	l, enabled := find_controls(w, target)
+	on_find_outcome(app, w, target, ui.find_mouse(&w.find, l, enabled, e.button, true, f32(e.x), f32(e.y)))
 }
 
 @(private = "file")
 find_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !w.find.open || !ui.armed_down(w.find.armed) {return false}
-	entry := focused_session(app, w)
-	l, enabled := find_controls(w, entry)
-	on_find_outcome(app, w, entry, ui.find_mouse(&w.find, l, enabled, e.button, false, f32(e.x), f32(e.y)))
+	target := find_target(app, w)
+	l, enabled := find_controls(w, target)
+	on_find_outcome(app, w, target, ui.find_mouse(&w.find, l, enabled, e.button, false, f32(e.x), f32(e.y)))
 	return true
 }
 

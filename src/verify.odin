@@ -597,11 +597,11 @@ when AIO_CONTROL {
 				{"find.case_sensitive", fmt.tprintf("%t", w.find.case_sensitive)},
 				{"find.regex", fmt.tprintf("%t", w.find.regex)},
 				{"find.query", ui.field_string(&w.find.query)},
-				{"find.matches", find_status(w, entry)},
-				{"find.count", verify_find_count(w, entry)},
-				{"find.older", verify_find_rect(w, entry, .Older)},
-				{"find.newer", verify_find_rect(w, entry, .Newer)},
-				{"find.close", verify_find_rect(w, entry, .Close)},
+				{"find.matches", find_status(w, find_target(app, w))},
+				{"find.count", verify_find_count(w, find_target(app, w))},
+				{"find.older", verify_find_rect(w, find_target(app, w), .Older)},
+				{"find.newer", verify_find_rect(w, find_target(app, w), .Newer)},
+				{"find.close", verify_find_rect(w, find_target(app, w), .Close)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
 			activity_rows, _ := status_panel_rows(app, w)
@@ -912,15 +912,15 @@ when AIO_CONTROL {
 		return
 	}
 
-	verify_find_count :: proc(w: ^Window, entry: ^Session_Entry) -> string {
-		label, _ := find_presentation(w, entry)
+	verify_find_count :: proc(w: ^Window, target: Find_Target) -> string {
+		label, _ := find_presentation(w, target)
 		return label
 	}
 
 	// Retain the original matches field for existing control journeys.
-	find_status :: proc(w: ^Window, entry: ^Session_Entry) -> string {
-		if entry == nil || len(w.find.query.bytes) == 0 { return "" }
-		s := term.search_summary(entry.session)
+	find_status :: proc(w: ^Window, target: Find_Target) -> string {
+		s, ok := find_target_summary(target)
+		if !ok || len(w.find.query.bytes) == 0 { return "" }
 		switch {
 		case s.selected >= 0: return fmt.tprintf("%d of %d", s.selected + 1, s.total)
 		case s.total == 1: return "1 match"
@@ -930,9 +930,9 @@ when AIO_CONTROL {
 		return "No matches"
 	}
 
-	verify_find_rect :: proc(w: ^Window, entry: ^Session_Entry, target: ui.Find_Outcome) -> string {
+	verify_find_rect :: proc(w: ^Window, searched: Find_Target, target: ui.Find_Outcome) -> string {
 		if !w.find.open { return "" }
-		l, _ := find_controls(w, entry)
+		l, _ := find_controls(w, searched)
 		#partial switch target {
 		case .Older: return verify_workspace_rect(l.older)
 		case .Newer: return verify_workspace_rect(l.newer)

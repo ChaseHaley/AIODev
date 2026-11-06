@@ -407,7 +407,7 @@ workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
 editor_open :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
 	palette_close(app, w)
-	find_close(app, w, focused_session(app, w))
+	find_close(app, w, find_target(app, w))
 	if index := settings_tab_index(w.workspace); index >= 0 {
 		tab_select(app, w, index)
 		if node, found := settings_pane_node(w.workspace); found {pane_focus(app, w, node)}
