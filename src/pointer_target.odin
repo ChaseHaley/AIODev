@@ -401,7 +401,7 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 @(private = "file")
 palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
 	p := &app.palette
-	return p.reset_hover >= 0 && !p.mode_menu && p.edit.kind == .None ? "Reset setting" : ""
+	return p.reset_hover >= 0 && p.edit.kind == .None ? "Reset setting" : ""
 }
 
 @(private = "file")

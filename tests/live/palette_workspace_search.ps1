@@ -39,7 +39,7 @@ function Assert-Tabs([string] $Label) {
         throw "${Label}: unexpected tab names $($names -join ',')"
     }
     Invoke-Aio state | Set-Content -LiteralPath "$directory/$Label-state.txt"
-    if ($Label -eq 'dropdown') {
+    if ($Label -eq 'scope-tab') {
         & "$repo/tools/win32.ps1" -Name $name -Shot "$directory/$Label.png" -Frame | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Screenshot failed: $Label" }
     }
@@ -87,15 +87,12 @@ try {
 
     Invoke-Aio command app.command_palette
     $state = Read-State
-    $panel = @($state['palette.panel'] -split ',' | ForEach-Object { [double]$_ })
-    $scale = [double]$state['window.scale']
-    $x = [int]($panel[0] + 34*$scale)
-    Invoke-Aio mouse click "$x,$([int]($panel[1] + 32*$scale))" --px
-    # Tabs is the second row of the mode chip menu.
-    $y = [int]($panel[1] + (44.5 + 4 + 4 + 26 + 13)*$scale)
+    $rect = @($state['palette.mode.tabs'] -split ',' | ForEach-Object { [double]$_ })
+    $x = [int]($rect[0] + $rect[2]/2)
+    $y = [int]($rect[1] + $rect[3]/2)
     Invoke-Aio mouse click "$x,$y" --px
     Invoke-Aio type 'main'
-    Assert-Tabs 'dropdown'
+    Assert-Tabs 'scope-tab'
     Invoke-Aio key Esc
 
     # Activate a workspace-matched tab from another workspace and verify its identity.
