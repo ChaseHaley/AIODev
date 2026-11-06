@@ -213,7 +213,6 @@ function Begin-Drag([string] $SourceId) {
 
 Invoke-Aio launch --fresh
 try {
-    $defaultSize = (Read-State)['window.size']
     Invoke-Aio key Ctrl+Shift+L
     Invoke-Aio wait text 'PS '
     $s = Read-State
@@ -229,6 +228,7 @@ try {
     $destination = @(Window-Ids | Where-Object { $_ -ne $source })[0]
     Accept-Name $destination
     $d = Window-State $destination
+    $defaultSize = $d['window.size']
     Invoke-Aio wait text 'PS '
     Assert-True ($d['workspace.id'] -ne $sourceWorkspace) 'new window displays a distinct workspace'
     Invoke-Aio command workspace.rename | Out-Null
@@ -435,32 +435,26 @@ try {
     Assert-Equal $d['sessions.count'] $sessions 'Settings drop starts no runtime'
     $sourceState = Window-State $source
     Assert-Equal $sourceState['panes.count'] 1 'Settings drop keeps the rest of the source pane'
-    # A tab shown under another window's root selects that tab in its owner window.
+    # D-064 scopes the rail to this window's current workspace.
     Select-Window $source
     if ((Read-State)['rail.visible'] -eq 'false') {
         Invoke-Aio key Ctrl+Shift+B | Out-Null
         Start-Sleep -Milliseconds 220
     }
     $s = Read-State
-    $foreignRow = 0
+    $localRows = 0
     for ($i = 1; $i -le [int]$s['rail.rows']; $i++) {
-        if ($s["rail.row.$i.workspace"] -eq $destinationWorkspace -and
-            $s["rail.row.$i.kind"] -eq 'tab' -and [int]$s["rail.row.$i.tab"] -eq 1) {
-            $foreignRow = $i
-            break
-        }
+        Assert-Equal $s["rail.row.$i.workspace"] $s['workspace.id'] 'rail tab belongs to the source workspace'
+        $localRows++
     }
-    if ($foreignRow -eq 0) { throw 'the source rail does not list the other workspace tab' }
-    $foreignRect = Rect $s["rail.row.$foreignRow.rect"]
-    $foreignTab = Screen $s ($foreignRect[0]+$foreignRect[2]/2) ($foreignRect[1]+$foreignRect[3]/2)
-    Invoke-Aio mouse click $foreignTab --screen | Out-Null
-    $d = Window-State $destination
-    Assert-Equal $d['tabs.selected'] 1 'tab under another window root selects there'
+    Assert-Equal $localRows $s['tabs.count'] 'rail lists every local tab'
     # Minimum size: an oversize requirement rejects both a remote edge and a tear-off window.
     Select-Window $source
     Invoke-Aio command pane.split_right | Out-Null
     Invoke-Aio wait text 'PS '
     $sessions = (Read-State)['sessions.count']
+    $destinationBeforeRejection = Window-State $destination
+    Select-Window $source
     Set-Minimum 10000 10000
     $windowsBefore = (Read-State)['windows.count']
     $d = Window-State $destination
@@ -481,7 +475,9 @@ try {
     Assert-Equal $s['windows.count'] $windowsBefore 'minimum rejection opens no window'
     Assert-Equal $s['panes.count'] 2 'minimum rejection keeps the source layout'
     Assert-Equal $s['sessions.count'] $sessions 'minimum rejection keeps every runtime'
-    Assert-Equal (Window-State $destination)['panes.count'] 3 'minimum rejection keeps the destination layout'
+    $destinationAfterRejection = Window-State $destination
+    Assert-Equal $destinationAfterRejection['tabs.selected'] $destinationBeforeRejection['tabs.selected'] 'minimum rejection keeps the destination tab'
+    Assert-Equal $destinationAfterRejection['panes.count'] $destinationBeforeRejection['panes.count'] 'minimum rejection keeps the destination layout'
     Select-Window $source
     Set-Minimum 0 0
 
@@ -578,7 +574,7 @@ try {
     $lastTab = $s['tab.1.id']
     $lastGrid = $s['grid.size']
     Begin-Drag $source | Out-Null
-    $desktop2 = "$($work[0]+60),$($work[3]-90)"
+    $desktop2 = "$($work[2]-60),$($work[3]-90)"
     Assert-Hit $desktop2 $null 'second desktop'
     Invoke-Aio mouse move $desktop2 --screen | Out-Null
     $s = Read-State

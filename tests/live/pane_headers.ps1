@@ -61,12 +61,12 @@ function Shot([string] $Label) {
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $directory "$Label.png")
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
 }
-function Header-Button([int] $Index) {
+function Header-Button([ValidateSet('split_right','split_down','zoom','close')][string] $Action) {
     $s = Read-State
     $r = $s["pane.$($s['panes.focused']).rect"] -split ',' | ForEach-Object { [double]$_ }
     $scale = [double]$s['window.scale']
-    # Right-to-left close, zoom, split-down and split-right, using the accepted22-DIP controls.
-    $x = [int]($r[0]+$r[2]-(16+24*(3-$Index))*$scale)
+    $slot = @{split_right=0; split_down=1; zoom=2; close=5}[$Action]
+    $x = [int]($r[0]+$r[2]-(16+24*(5-$slot))*$scale)
     $y = [int]($r[1]+14*$scale)
     Invoke-Aio mouse click "$x,$y" --px
 }
@@ -82,7 +82,8 @@ function Assert-Origin {
     Assert-Equal $grid[1] $rows 'terminal rows exclude header and padding'
 }
 function Assert-Idle {
-    Start-Sleep -Milliseconds 300
+    # Hover tooltips intentionally present once after 700 ms.
+    Start-Sleep -Milliseconds 1000
     $frames = (Read-State)['frames.presented']
     Start-Sleep -Milliseconds 450
     Assert-Equal (Read-State)['frames.presented'] $frames 'settled header draws no extra frames'
@@ -92,6 +93,9 @@ $originalAnimations = [AioHeaderAnimations]::Read()
 [AioHeaderAnimations]::Write($false)
 Invoke-Aio launch --fresh
 try {
+    $settingsText = [IO.File]::ReadAllText($path)
+    $profileCommand = [regex]::Match($settingsText, '(?m)^profile\.default\.command\s*=\s*(.*)$').Groups[1].Value.Trim()
+    $profileDirectory = [regex]::Match($settingsText, '(?m)^profile\.default\.directory\s*=\s*(.*)$').Groups[1].Value.Trim()
     Invoke-Aio expect state ui.animations=false
     Invoke-Aio expect state panes.header_height=28
     Invoke-Aio command pane.split_right
@@ -105,34 +109,35 @@ try {
     Invoke-Aio expect state panes.header_height=28
     $session = (Read-State)['session.id']
     Assert-Origin
-    Set-Option shell.command 'cmd.exe /d'
-    Set-Option shell.directory 'C:\Windows'
+    Set-Option profile.default.command 'cmd.exe /d'
+    Set-Option profile.default.directory 'C:\Windows'
     Invoke-Aio command settings.reload
     Invoke-Aio expect state "session.id=$session"
     Invoke-Aio expect state 'session.header.icon=>_'
     Invoke-Aio expect state 'session.header.directory=C:\Header Test'
-    Header-Button 1
+    Header-Button split_down
     Invoke-Aio wait text 'Microsoft Windows'
     Invoke-Aio expect state 'session.header.icon=C:'
     Invoke-Aio expect state session.header.directory=
     Invoke-Aio expect state panes.count=3
-    Header-Button 3
+    Header-Button close
     Invoke-Aio expect state panes.count=2
     Invoke-Aio expect state "session.id=$session"
-    Set-Option shell.command 'pwsh.exe -NoLogo'
+    Set-Option profile.default.command $profileCommand
+    Set-Option profile.default.directory $profileDirectory
     Invoke-Aio command settings.reload
-    Header-Button 2
+    Header-Button zoom
     Invoke-Aio expect state panes.count=1
     Invoke-Aio expect state panes.header_height=28
     Invoke-Aio expect state "session.id=$session"
     Shot zoomed
-    Header-Button 2
+    Header-Button zoom
     Invoke-Aio expect state panes.count=2
-    Header-Button 0
+    Header-Button split_right
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state panes.count=3
     $thirdNode = (Read-State)['panes.focused']
-    Header-Button 1
+    Header-Button split_down
     Invoke-Aio wait text 'PS '
     Invoke-Aio expect state panes.count=4
     $s = Read-State
@@ -203,8 +208,12 @@ try {
         Invoke-Aio command settings.reload
         Shot "$($theme[0])-$($theme[1])-four"
     }
+    $baseSize = $fullSize -split 'x' | ForEach-Object { [int]$_ }
     foreach ($dpi in @(96,144,168)) {
         Invoke-Aio dpi $dpi
+        $scaledSize = "$([int][math]::Ceiling($baseSize[0]*$dpi/96))x$([int][math]::Ceiling($baseSize[1]*$dpi/96))"
+        & (Join-Path $repo 'tools/win32.ps1') -Name $name -Resize $scaledSize
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot preserve the header fixture size across DPI.' }
         foreach ($gap in @(0,5,24)) {
             foreach ($radius in @(0,7)) {
                 Set-Option pane.gap "$gap"
@@ -244,6 +253,7 @@ try {
         Assert-Origin
     }
     Invoke-Aio dpi 96
+    & (Join-Path $repo 'tools/win32.ps1') -Name $name -Resize $fullSize
     Set-Option pane.show_headers false
     Invoke-Aio command settings.reload
     Invoke-Aio expect state panes.header_height=0
