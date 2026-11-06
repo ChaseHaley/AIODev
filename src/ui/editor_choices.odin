@@ -43,7 +43,7 @@ choice_search_height :: proc(row: ^Editor_Row, scale: f32) -> f32 {
 @(private)
 choice_font_toggle_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	row := editor_row(p)
-	if row == nil || row.key != "font.family" || p.popup != .Choice {return {}}
+	if row == nil || row.key != "font.family" || editor_popup(p) != .Choice {return {}}
 	r := editor_popup_rect(p, l)
 	s := l.scale
 	return {r.x + 4 * s, r.y + (4 + CHOICE_SEARCH_HEIGHT) * s, r.width - 8 * s, CHOICE_HEIGHT * s}
@@ -61,9 +61,8 @@ choice_toggle_fonts :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 editor_font_search_restore :: proc(p: ^Editor, query: string, toggle_focus: bool) {
 	row := editor_row(p)
 	if !choice_searchable(row) {return}
-	p.popup, p.focus = .Choice, .Control
+	editor_mode_set(p, Editor_Choice_Popup{toggle_focus = toggle_focus})
 	field_set(&p.choice_search, query)
-	p.choice_toggle_focus = toggle_focus
 	choice_filter(p, row)
 }
 

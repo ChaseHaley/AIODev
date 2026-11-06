@@ -35,7 +35,7 @@ palette_shortcut_replaces_one_alternative_and_cancels_without_running :: proc(t:
 	testing.expect_value(t, key, "keys.test.alpha")
 	testing.expect_value(t, value, "Ctrl+C, Ctrl+Shift+K")
 	ui.palette_binding_saved(&p, false)
-	testing.expect(t, p.binding.capturing, "a refused value stays editable")
+	testing.expect(t, ui.editor_capturing(&p.binding), "a refused value stays editable")
 	ui.palette_key(&p, &r, press(.Escape))
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
 	testing.expect(t, p.open)

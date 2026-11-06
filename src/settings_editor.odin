@@ -226,10 +226,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 				kind = .Toggle,
 			},
 		}
-		remove_prefix := fmt.tprintf("%s.remove", prefix)
 		for field in rows {
-			if row.id == settings.PROFILE_DEFAULT_ID &&
-			   strings.has_prefix(field.key, remove_prefix) {continue}
 			if !settings_add_profile_row(p, field, profile_group) {
 				ui.editor_destroy(p)
 				notify(app, .Error, "Could not allocate the profile table.")
@@ -491,7 +488,7 @@ editor_font_filter :: proc(app: ^App, w: ^Window) {
 	row := ui.editor_row(p)
 	if row == nil || row.key != "font.family" {return}
 	query := strings.clone(ui.field_string(&p.choice_search), context.temp_allocator)
-	focused := p.choice_toggle_focus
+	focused := ui.editor_choice_toggle_focused(p)
 	updated, message, err := settings.edit_text(p.source, "font.show_all", row.show_all_fonts ? "true" : "false")
 	defer delete(updated)
 	defer delete(message)
@@ -507,14 +504,22 @@ editor_font_filter :: proc(app: ^App, w: ^Window) {
 
 editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p := &w.editor
+	// The outcome that names a request is the only one that may act on it.
+	request := ui.editor_request_take(p)
+	defer ui.editor_request_destroy(&request)
 	if outcome == .None {return}
 	w.dirty = true
 	if outcome == .Reset_All {settings_reset_ask(app, w); return}
 	if outcome == .Font_Filter {editor_font_filter(app, w); return}
-	if outcome == .Process_Remove {editor_process_remove_ask(app, w); return}
+	if outcome == .Process_Remove {
+		if remove, ok := request.(ui.Process_Remove_Request); ok {
+			editor_process_remove_ask(app, w, remove.group)
+		}
+		return
+	}
 	if outcome == .Process_Save {editor_process_save(app, w); return}
 	if outcome == .Profile_Action {
-		editor_profile_action(app, w)
+		editor_profile_action(app, w, request)
 		return
 	}
 	if outcome != .Save && outcome != .Reset {return}
@@ -529,24 +534,6 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if row.key == "profiles.add" {
 		editor_profile_mutate(app, w, {kind = .Add})
 		return
-	}
-	if row.profile != "" && row.kind == .Action {
-		if strings.has_suffix(row.key, ".remove.cancel") {
-			ui.editor_profile_remove_cancel(p)
-			return
-		}
-		if strings.has_suffix(row.key, ".remove.confirm") {
-			editor_profile_mutate(app, w, {kind = .Remove, id = row.profile})
-			return
-		}
-		if strings.has_suffix(row.key, ".duplicate") {
-			editor_profile_mutate(app, w, {kind = .Duplicate, id = row.profile})
-			return
-		}
-		if strings.has_suffix(row.key, ".remove") {
-			ui.editor_profile_remove_ask(p, row.profile)
-			return
-		}
 	}
 	if row.profile != "" {
 		if outcome == .Reset {ui.field_set(&p.value, row.default_value)}
@@ -612,7 +599,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		ui.editor_message(p, text, true)
 		return
 	}
-	if kind == .Shortcut {p.focus, p.capturing = .Search, false}
+	if kind == .Shortcut {ui.editor_browse(p)}
 	text := "Saved and applied."
 	if warning != "" {text = fmt.tprintf("Saved. %s", warning)}
 	if key == "window.columns" || key == "window.rows" {
@@ -659,7 +646,7 @@ editor_profile_write :: proc(
 		ui.editor_message(&w.editor, text, true)
 		return false
 	}
-	w.editor.focus = .Search
+	ui.editor_browse(&w.editor)
 	settings_reveal_page(
 		app,
 		&w.editor,
@@ -716,16 +703,6 @@ editor_profile_field :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row) {
 }
 
 @(private)
-editor_profile_set_expanded :: proc(p: ^ui.Editor, id: string) {
-	if p.remove_confirm != "" && p.remove_confirm != id {
-		delete(p.remove_confirm)
-		p.remove_confirm = ""
-	}
-	delete(p.expanded)
-	p.expanded = strings.clone(id)
-}
-
-@(private)
 editor_profile_saved :: proc(
 	app: ^App,
 	w: ^Window,
@@ -741,7 +718,7 @@ editor_profile_saved :: proc(
 		ui.editor_message(&w.editor, text, true)
 		return false
 	}
-	w.editor.focus = .Search
+	ui.editor_browse(&w.editor)
 	settings_reveal_page(
 		app,
 		&w.editor,
@@ -785,51 +762,46 @@ editor_profile_mutate :: proc(app: ^App, w: ^Window, change: settings.Profile_Mu
 		message = "Profile order saved. Menus and Ctrl+Shift+1 to 9 follow it."
 	}
 	if change.kind == .Add || change.kind == .Duplicate || change.kind == .Enable {
-		editor_profile_set_expanded(&w.editor, id)
+		ui.editor_profile_set_expanded(&w.editor, id)
 	} else if change.kind == .Remove && w.editor.expanded == id {
-		editor_profile_set_expanded(&w.editor, "")
+		ui.editor_profile_set_expanded(&w.editor, "")
 	}
 	_ = editor_profile_saved(app, w, updated, key, message)
 }
 
+// Performs the profile write a table control asked for.
 @(private)
-editor_profile_action :: proc(app: ^App, w: ^Window) {
-	p := &w.editor
-	action := p.action
-	id := strings.clone(p.action_id, context.temp_allocator)
-	value := strings.clone(p.action_value, context.temp_allocator)
-	slot := p.action_slot
-	ui.editor_action_clear(p)
-	select_key := fmt.tprintf("profile.%s", id)
-	switch action {
-	case .None:
-	case .Default:
+editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request) {
+	#partial switch r in request {
+	case ui.Profile_Request:
+		switch r.action {
+		case .Default:
+			_ = editor_profile_write(
+				app,
+				w,
+				"shell.default_profile",
+				r.id,
+				fmt.tprintf("profile.%s", r.id),
+				"Default profile saved. New tabs, splits and the plus button use it.",
+			)
+		case .Enable:
+			editor_profile_mutate(app, w, {kind = .Enable, id = r.id})
+		case .Duplicate:
+			editor_profile_mutate(app, w, {kind = .Duplicate, id = r.id})
+		case .Remove:
+			editor_profile_remove_ask(app, w, r.id)
+		}
+	case ui.Profile_Hidden_Request:
 		_ = editor_profile_write(
 			app,
 			w,
-			"shell.default_profile",
-			id,
-			select_key,
-			"Default profile saved. New tabs, splits and the plus button use it.",
+			fmt.tprintf("profile.%s.hidden", r.id),
+			r.hidden ? "true" : "false",
+			fmt.tprintf("profile.%s", r.id),
+			r.hidden ? "Profile hidden from menus." : "Profile shown in menus.",
 		)
-	case .Hidden:
-		hidden := value == "true"
-		_ = editor_profile_write(
-			app,
-			w,
-			fmt.tprintf("profile.%s.hidden", id),
-			value,
-			select_key,
-			hidden ? "Profile hidden from menus." : "Profile shown in menus.",
-		)
-	case .Order:
-		editor_profile_mutate(app, w, {kind = .Move, id = id, slot = slot})
-	case .Enable:
-		editor_profile_mutate(app, w, {kind = .Enable, id = id})
-	case .Duplicate:
-		editor_profile_mutate(app, w, {kind = .Duplicate, id = id})
-	case .Remove:
-		editor_profile_remove_ask(app, w, id)
+	case ui.Profile_Order_Request:
+		editor_profile_mutate(app, w, {kind = .Move, id = r.id, slot = r.slot})
 	}
 }
 

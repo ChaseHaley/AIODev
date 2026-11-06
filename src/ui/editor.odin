@@ -79,20 +79,8 @@ Editor_Item :: struct {
 	group, row, count: int,
 }
 
-Editor_Drag :: enum {
-	None,
-	Filter,
-	Value,
-	Choice_Search,
-	Slider,
-	Wheel,
-	Ramp,
-	Profile_Order,
-	Process_Order,
-	Popup_Scroll,
-}
-
-// Keyboard focus: the search field, the selected row's control, or its key-position switch.
+// Keyboard focus as readers see it: the search field, the selected row's control, its key-position
+// switch, or Reset to Defaults. It is derived from Editor_Mode by editor_focus.
 Editor_Focus :: enum {
 	Search,
 	Control,
@@ -107,6 +95,113 @@ Editor_Popup :: enum {
 	Shortcuts,
 }
 
+// What the page is doing, one state at a time. Each state carries what is valid only in it, so a
+// capture cannot run under a popup, a colour drag cannot outlive its picker and the profile menu
+// cannot open over a list. editor_mode_set is the only writer. Reordering rows is Editor_Order.
+Editor_Mode :: union #no_nil {
+	Editor_Browsing,
+	Editor_Editing,
+	Editor_Positions,
+	Editor_Reset_All,
+	Editor_Capturing,
+	Editor_Choice_Popup,
+	Editor_Color_Popup,
+	Editor_Shortcuts_Popup,
+	Editor_Profile_Menu,
+}
+
+// The search field has the keyboard; `selecting` while the pointer drags a selection in it.
+Editor_Browsing :: struct {
+	selecting: bool,
+}
+
+// The selected row's control has the keyboard.
+Editor_Editing :: struct {
+	drag: Editing_Drag,
+}
+
+Editing_Drag :: enum {
+	None,
+	// The pointer drags a selection in the value field.
+	Value,
+	Slider,
+}
+
+Editor_Positions :: struct {}
+
+Editor_Reset_All :: struct {}
+
+// A shortcut field records the next chord. After the leader it waits for the key that follows.
+Editor_Capturing :: struct {
+	leader_pending: bool,
+}
+
+Editor_Choice_Popup :: struct {
+	// Tab moves the keyboard from the font search to its Show All Fonts switch.
+	toggle_focus: bool,
+	drag:         Choice_Drag,
+}
+
+// The pointer drags a selection in the popup's search field, or holds its scrollbar thumb.
+Choice_Drag :: union {
+	Choice_Search_Drag,
+	Scroll_Drag,
+}
+
+Choice_Search_Drag :: struct {}
+
+Editor_Color_Popup :: struct {
+	drag: Color_Drag,
+}
+
+Color_Drag :: enum {
+	None,
+	Wheel,
+	Ramp,
+}
+
+Editor_Shortcuts_Popup :: struct {}
+
+Editor_Profile_Menu :: struct {}
+
+Order_Kind :: enum {
+	Profiles,
+	Process_Groups,
+}
+
+// A reorder drag, then its blocks easing into place once it ends. Nil while nothing reorders;
+// profile_positions has entries only while Dragging or Settling. Only the order_ procs write it.
+Editor_Order :: union {
+	Order_Dragging,
+	Order_Settling,
+}
+
+Order_Dragging :: struct {
+	block:        Order_Block,
+	// The grabbed block's index among the blocks, and the insertion slot a drop saves.
+	from, target: int,
+	// The pointer's line offset inside the grabbed block.
+	grab:         f32,
+}
+
+// The grabbed block: a profile, whose owned ID a drop hands to its request, or a process group.
+Order_Block :: union #no_nil {
+	Order_Profile,
+	Order_Group,
+}
+
+Order_Profile :: struct {
+	id: string,
+}
+
+Order_Group :: struct {
+	id: int,
+}
+
+Order_Settling :: struct {
+	kind: Order_Kind,
+}
+
 // The profile table's sub-controls, in Tab and Left/Right order.
 Profile_Control :: enum {
 	Radio,
@@ -119,15 +214,40 @@ Profile_Control :: enum {
 }
 
 // A profile write the page owner must perform. Expansion, collapse and section toggles stay inside
-// the editor; these outcomes describe a mutation for the page owner.
+// the editor; these requests describe a mutation for the page owner.
 Profile_Action :: enum {
-	None,
 	Default,
-	Hidden,
-	Order,
 	Enable,
 	Duplicate,
 	Remove,
+}
+
+// A write the page owner performs, named by the outcome that reports it. The owner takes it with
+// editor_request_take as it handles that outcome, so a request never outlives it. Strings are owned.
+Editor_Request :: union {
+	Profile_Request,
+	Profile_Hidden_Request,
+	Profile_Order_Request,
+	Process_Remove_Request,
+}
+
+Profile_Request :: struct {
+	action: Profile_Action,
+	id:     string,
+}
+
+Profile_Hidden_Request :: struct {
+	id:     string,
+	hidden: bool,
+}
+
+Profile_Order_Request :: struct {
+	id:   string,
+	slot: int,
+}
+
+Process_Remove_Request :: struct {
+	group: int,
 }
 
 // A profile block's drawn first line while rows reorder. Like the tab strip's positions, the grabbed
@@ -137,7 +257,6 @@ Profile_Position :: struct {
 	id:       string,
 	position: Motion,
 	lifted:   bool,
-	process:  bool,
 }
 
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
@@ -147,14 +266,12 @@ Editor :: struct {
 	profile_menu_controls: [4]Profile_Control,
 	profile_menu_parts: Profile_Parts,
 	process_expanded, process_next, process_next_program, process_fallback: int,
-	process_remove, process_drag_id: int,
 	process_source: string,
 	process_dirty: bool,
-	open, capturing, leader_pending, hover_clear:                      bool,
+	open, hover_clear:                                                 bool,
 	// Captured shortcuts name physical key positions (Physical+) instead of layout characters.
 	physical:                                                          bool,
-	focus:                                                             Editor_Focus,
-	popup:                                                             Editor_Popup,
+	mode:                                                              Editor_Mode,
 	popup_index, popup_scroll, hover_item, hover_reset, hover_outline: int,
 	// The group last chosen in the outline stays highlighted until the page scrolls or the selection moves,
 	// since the final groups can be shown without reaching the top of the page.
@@ -162,14 +279,12 @@ Editor :: struct {
 	rows:                                                              [dynamic]Editor_Row,
 	groups:                                                            [dynamic]Editor_Group,
 	items:                                                             [dynamic]Editor_Item,
-	selected, scroll, visible_rows, captured, shortcut_index:          int,
+	// shortcut_index is the alternative a capture replaces; it outlives a refused save, which resumes it.
+	selected, scroll, visible_rows, shortcut_index:                    int,
 	filter, value:                                                     Text_Field,
 	choice_search:                                                     Text_Field,
-	choice_toggle_focus:                                               bool,
 	popup_bar_hover:                                                   bool,
-	popup_bar_drag:                                                         Scroll_Drag,
 	choice_matches:                                                    [dynamic]int,
-	drag:                                                              Editor_Drag,
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
 	hsv:                                                               [3]f32,
 	leader:                                                            Maybe(commands.Shortcut),
@@ -177,17 +292,12 @@ Editor :: struct {
 	message:                                                           string,
 	error:                                                             bool,
 	// Table state: the one expanded profile, the detected section, the focused control on a profile
-	// row, and the drag that rewrites profile.order.
-	expanded, remove_confirm:                                          string,
+	// row, and the reorder that rewrites profile.order or the process groups.
+	expanded:                                                          string,
 	detected_open:                                                     bool,
 	profile_control:                                                   Profile_Control,
-	action:                                                            Profile_Action,
-	action_slot:                                                       int,
-	action_id, action_value:                                           string,
-	drag_id:                                                           string,
-	drag_from, drag_target:                                            int,
-	// The pointer's line offset inside the grabbed profile row.
-	drag_grab:                                                         f32,
+	request:                                                           Editor_Request,
+	order:                                                             Editor_Order,
 	profile_positions:                                                 [dynamic]Profile_Position,
 	hover_profile_item:                                                int,
 	hover_profile_control:                                             Profile_Control,
@@ -205,13 +315,14 @@ Editor_Outcome :: enum {
 	Font_Filter,
 }
 
-// Table state a settings reload keeps: expansion, an open removal question, the detected section and
-// profile rows still settling after a reorder.
+// Table state a settings reload keeps: expansion, the detected section and blocks still settling
+// after a reorder, with the kind of block they are.
 Editor_View :: struct {
-	process_expanded: int,
-	expanded, remove_confirm: string,
-	detected_open:            bool,
-	profile_positions:        [dynamic]Profile_Position,
+	process_expanded:  int,
+	expanded:          string,
+	detected_open:     bool,
+	order:             Order_Kind,
+	profile_positions: [dynamic]Profile_Position,
 }
 
 // Wide pages put the search field and a group outline in a left column; narrow ones have no outline.
@@ -285,10 +396,8 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.source)
 	delete(p.message)
 	delete(p.expanded)
-	delete(p.remove_confirm)
-	delete(p.action_id)
-	delete(p.action_value)
-	delete(p.drag_id)
+	editor_request_destroy(&p.request)
+	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
 	delete(p.error_key)
@@ -298,41 +407,87 @@ editor_destroy :: proc(p: ^Editor) {
 }
 
 // Copies the table state a reload must keep. The caller frees the result with editor_view_destroy
-// after editor_restore, which moves the strings into the rebuilt page.
+// after editor_view_restore, which moves the strings into the rebuilt page. A drag keeps the pointer
+// on this page; its blocks settle on the rebuilt one.
 @(require_results)
 editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime.Allocator_Error) {
 	view.process_expanded = p.process_expanded
 	view.detected_open = p.detected_open
 	view.expanded = strings.clone(p.expanded) or_return
-	view.remove_confirm = strings.clone(p.remove_confirm) or_return
+	view.order, _ = order_kind(p)
 	view.profile_positions, p.profile_positions = p.profile_positions, {}
+	if _, settling := p.order.(Order_Settling); settling {order_settle(p, view.order)}
 	return
 }
 
 editor_view_destroy :: proc(view: ^Editor_View) {
 	delete(view.expanded)
-	delete(view.remove_confirm)
 	profile_positions_clear(&view.profile_positions)
 	delete(view.profile_positions)
 	view^ = {}
 }
 
-// Restores a previous view, dropping a profile that no longer exists. A reload after a successful
-// save must land back on the same expanded row.
-editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
+// Moves a view into a page about to load, without checking it against rows the page does not have
+// yet. Loading takes it back and restores it once they exist.
+editor_view_hold :: proc(p: ^Editor, view: ^Editor_View) {
 	p.process_expanded = view.process_expanded
 	p.detected_open = view.detected_open
+	delete(p.expanded)
 	p.expanded, view.expanded = view.expanded, ""
-	p.remove_confirm, view.remove_confirm = view.remove_confirm, ""
+	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
 	p.profile_positions, view.profile_positions = view.profile_positions, {}
+	order_settle(p, view.order)
+}
+
+// Restores a previous view, dropping a profile that no longer exists. A reload after a successful
+// save must land back on the same expanded row.
+editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
+	editor_view_hold(p, view)
 	if p.expanded != "" && !editor_has_profile_row(p, p.expanded) {delete(p.expanded); p.expanded = ""}
-	if p.remove_confirm != "" &&
-	   (!editor_has_profile_row(p, p.remove_confirm) || p.remove_confirm != p.expanded) {
-		delete(p.remove_confirm)
-		p.remove_confirm = ""
+}
+
+// Moves what the user was doing into a rebuilt page that has the same setting selected. The keyboard
+// focus survives, with a popup that saves as it changes: a multiple choice, or a colour picker whose
+// drag saved on release. A draft also keeps its unsaved value, capture or popup, and its message.
+// Pointer drags and the profile menu end with the page they belonged to.
+editor_carry :: proc(to, from: ^Editor, draft: bool) {
+	row, next := editor_row(from), editor_row(to)
+	to.profile_control = from.profile_control
+	mode := focus_mode(editor_focus(from))
+	popup := editor_popup(from)
+	if popup == .Choice && row.multiple && next.multiple {
+		mode = Editor_Choice_Popup{}
+		to.popup_index, to.popup_scroll = from.popup_index, from.popup_scroll
 	}
+	// A picker keeps its hue and saturation even at black, where rebuilding them from RGB loses both.
+	if popup == .Color && next.kind == row.kind {
+		mode = Editor_Color_Popup{}
+		previous_color, previous_ok, _ := settings.parse_color(field_string(&from.value))
+		next_color, next_ok, _ := settings.parse_color(field_string(&to.value))
+		if previous_ok && next_ok && previous_color == next_color {to.hsv = from.hsv}
+	}
+	if draft {
+		delete(to.value.bytes)
+		to.value, from.value = from.value, {}
+		to.physical, to.shortcut_index = from.physical, from.shortcut_index
+		to.popup_index, to.popup_scroll = from.popup_index, from.popup_scroll
+		to.hsv = from.hsv
+		#partial switch m in from.mode {
+		case Editor_Capturing:
+			mode = Editor_Capturing{leader_pending = m.leader_pending}
+		case Editor_Choice_Popup:
+			mode = Editor_Choice_Popup{}
+		case Editor_Color_Popup:
+			mode = Editor_Color_Popup{}
+		case Editor_Shortcuts_Popup:
+			mode = Editor_Shortcuts_Popup{}
+		}
+		editor_message(to, from.message, from.error)
+		if from.error_key != "" {editor_error_set(to, from.error_profile, from.error_key, from.error_text)}
+	}
+	editor_mode_set(to, mode)
 }
 
 @(private)
@@ -343,20 +498,37 @@ editor_has_profile_row :: proc(p: ^Editor, id: string) -> bool {
 	return false
 }
 
-// Records the settings write a table action asks for. The page owner performs it and clears it.
-editor_action_set :: proc(p: ^Editor, action: Profile_Action, id, value: string) {
-	editor_action_clear(p)
-	p.action = action
-	p.action_id = strings.clone(id)
-	p.action_value = strings.clone(value)
+// The only writer of p.request. The editor takes ownership of the request's strings.
+editor_request_set :: proc(p: ^Editor, request: Editor_Request) {
+	editor_request_destroy(&p.request)
+	p.request = request
 }
 
-editor_action_clear :: proc(p: ^Editor) {
-	delete(p.action_id)
-	delete(p.action_value)
-	p.action = .None
-	p.action_slot = 0
-	p.action_id, p.action_value = "", ""
+// Hands the pending request to the page owner, who frees it with editor_request_destroy.
+@(require_results)
+editor_request_take :: proc(p: ^Editor) -> Editor_Request {
+	request := p.request
+	p.request = nil
+	return request
+}
+
+editor_request_destroy :: proc(request: ^Editor_Request) {
+	switch r in request^ {
+	case Profile_Request:
+		delete(r.id)
+	case Profile_Hidden_Request:
+		delete(r.id)
+	case Profile_Order_Request:
+		delete(r.id)
+	case Process_Remove_Request:
+	}
+	request^ = nil
+}
+
+@(private)
+profile_request :: proc(p: ^Editor, action: Profile_Action, id: string) -> Editor_Outcome {
+	editor_request_set(p, Profile_Request{action, strings.clone(id)})
+	return .Profile_Action
 }
 
 // Marks one field row with an inline problem. The status line keeps the long form.
@@ -450,9 +622,109 @@ editor_row :: proc(p: ^Editor) -> ^Editor_Row {
 	return &p.rows[p.items[p.selected].row]
 }
 
-editor_capturing :: proc(p: ^Editor) -> bool {return p.open && p.capturing}
+editor_capturing :: proc(p: ^Editor) -> bool {
+	_, capturing := p.mode.(Editor_Capturing)
+	return capturing
+}
 
-editor_editing :: proc(p: ^Editor) -> bool {return p.focus == .Control}
+editor_focus :: proc(p: ^Editor) -> Editor_Focus {
+	#partial switch _ in p.mode {
+	case Editor_Browsing:
+		return .Search
+	case Editor_Positions:
+		return .Positions
+	case Editor_Reset_All:
+		return .Reset_All
+	}
+	return .Control
+}
+
+editor_popup :: proc(p: ^Editor) -> Editor_Popup {
+	#partial switch _ in p.mode {
+	case Editor_Choice_Popup:
+		return .Choice
+	case Editor_Color_Popup:
+		return .Color
+	case Editor_Shortcuts_Popup:
+		return .Shortcuts
+	}
+	return .None
+}
+
+editor_editing :: proc(p: ^Editor) -> bool {return editor_focus(p) == .Control}
+
+// Whether the keyboard is on the font search's Show All Fonts switch.
+editor_choice_toggle_focused :: proc(p: ^Editor) -> bool {
+	choice, open := p.mode.(Editor_Choice_Popup)
+	return open && choice.toggle_focus
+}
+
+// Whether the pointer holds anything on the page: a selection, a slider, a picker, a scrollbar thumb
+// or a reordering block.
+editor_dragging :: proc(p: ^Editor) -> bool {
+	if _, reordering := p.order.(Order_Dragging); reordering {return true}
+	switch m in p.mode {
+	case Editor_Browsing:
+		return m.selecting
+	case Editor_Editing:
+		return m.drag != .None
+	case Editor_Choice_Popup:
+		return m.drag != nil
+	case Editor_Color_Popup:
+		return m.drag != .None
+	case Editor_Positions, Editor_Reset_All, Editor_Capturing, Editor_Shortcuts_Popup, Editor_Profile_Menu:
+	}
+	return false
+}
+
+// Whether the pointer holds the choice list's scrollbar thumb.
+editor_scrollbar_dragging :: proc(p: ^Editor) -> bool {
+	choice, open := p.mode.(Editor_Choice_Popup)
+	if !open {return false}
+	_, holding := choice.drag.(Scroll_Drag)
+	return holding
+}
+
+// Moves the keyboard to the search field, closing whatever the selected row had open.
+editor_browse :: proc(p: ^Editor) {editor_mode_set(p, Editor_Browsing{})}
+
+// Moves the keyboard to the selected row's control.
+editor_focus_row :: proc(p: ^Editor) {editor_mode_set(p, Editor_Editing{})}
+
+// The only writer of p.mode. The profile menu is open exactly while its state holds. A capture's or
+// the alternatives list's hint is cleared by the moves that dismiss them, not by every exit: saving
+// keeps it, so a refused save that resumes the capture still shows it.
+@(private)
+editor_mode_set :: proc(p: ^Editor, next: Editor_Mode) {
+	_, menu := next.(Editor_Profile_Menu)
+	p.profile_menu.open = menu
+	p.mode = next
+}
+
+@(private)
+mode_shows_hint :: proc(mode: Editor_Mode) -> bool {
+	#partial switch _ in mode {
+	case Editor_Capturing, Editor_Shortcuts_Popup:
+		return true
+	}
+	return false
+}
+
+// The resting state with the keyboard at `focus`.
+@(private)
+focus_mode :: proc(focus: Editor_Focus) -> Editor_Mode {
+	switch focus {
+	case .Search:
+		return Editor_Browsing{}
+	case .Control:
+		return Editor_Editing{}
+	case .Positions:
+		return Editor_Positions{}
+	case .Reset_All:
+		return Editor_Reset_All{}
+	}
+	return Editor_Browsing{}
+}
 
 @(private)
 filtering :: proc(p: ^Editor) -> bool {return strings.trim_space(field_string(&p.filter)) != ""}
@@ -479,37 +751,41 @@ sync_color :: proc(p: ^Editor) {
 // Leaves the selected row's control, discarding an unsaved value.
 @(private)
 stop_editing :: proc(p: ^Editor) {
-	if p.error || p.capturing || p.popup == .Shortcuts {editor_message(p, "", false)}
+	if p.error || mode_shows_hint(p.mode) {editor_message(p, "", false)}
 	if p.error_text != "" {
 		editor_message(p, "", false)
 		editor_error_clear(p)
 	}
-	p.focus, p.capturing, p.leader_pending, p.captured = .Search, false, false, 0
-	p.drag, p.popup = .None, .None
+	editor_mode_set(p, Editor_Browsing{})
+	order_cancel(p)
 	if row := editor_row(p); row != nil {
 		field_set(&p.value, row.value)
 		sync_color(p)
 	}
 }
 
+// Selects a page line. Whatever the previous row had open closes; a field keeps the keyboard when
+// the next row can take it.
 editor_select :: proc(p: ^Editor, index: int) {
 	if !editor_process_capture(p) {return}
-	if p.error || p.capturing || p.popup == .Shortcuts {editor_message(p, "", false)}
+	if p.error || mode_shows_hint(p.mode) {editor_message(p, "", false)}
 	if p.error_text != "" {
 		editor_message(p, "", false)
 		editor_error_clear(p)
 	}
 	p.jump_group = -1
 	p.selected = clamp(index, 0, max(0, len(p.items) - 1))
-	p.capturing, p.leader_pending, p.captured, p.drag, p.popup = false, false, 0, .None, .None
 	row := editor_row(p)
+	focus := editor_focus(p)
+	if row == nil || row.kind == .Shortcut || focus == .Positions {focus = .Search}
+	editor_mode_set(p, focus_mode(focus))
+	order_cancel(p)
 	if row != nil {
 		field_set(&p.value, row.value)
 		p.hsv = {0, 0, 1}
 		sync_color(p)
 	}
 	p.profile_control = .Radio
-	if row == nil || row.kind == .Shortcut || p.focus == .Positions {p.focus = .Search}
 	if p.selected < p.scroll {p.scroll = p.selected}
 	if p.selected >= p.scroll + max(1, p.visible_rows) {
 		p.scroll = p.selected - max(1, p.visible_rows) + 1
@@ -549,12 +825,7 @@ editor_reveal :: proc(p: ^Editor, key: string) -> bool {
 		if row.key != key {continue}
 		field := row.kind != .Profile && row.kind != .Detected
 		if field && row.profile != "" && p.expanded != row.profile {
-			delete(p.expanded)
-			p.expanded = strings.clone(row.profile)
-			if p.remove_confirm != "" {
-				delete(p.remove_confirm)
-				p.remove_confirm = ""
-			}
+			editor_profile_set_expanded(p, row.profile)
 			editor_rebuild(p)
 		}
 		break
@@ -595,13 +866,6 @@ row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
 		return true
 	case .Detected:
 		return p.detected_open
-	case .Action:
-		confirm :=
-			strings.has_suffix(row.key, ".remove.cancel") ||
-			strings.has_suffix(row.key, ".remove.confirm")
-		if confirm {
-			return p.remove_confirm != "" && p.expanded == row.profile && row.profile == p.remove_confirm
-		}
 	}
 	return row.profile == "" || row.profile == p.expanded
 }
@@ -666,17 +930,17 @@ editor_filter :: proc(p: ^Editor) {
 	editor_select(p, first)
 }
 
+// Sets the one profile whose inline editor is open, "" for none; only a reload's view writes it
+// otherwise. A page about to reload calls this directly, since the reload rebuilds the page.
+editor_profile_set_expanded :: proc(p: ^Editor, id: string) {
+	delete(p.expanded)
+	p.expanded = strings.clone(id)
+}
+
 // Opens one profile's inline editor and closes any other. The table's row key is profile.ID.
 editor_profile_expand :: proc(p: ^Editor, id: string) {
 	if id == "" {return}
-	if p.expanded != id {
-		delete(p.expanded)
-		p.expanded = strings.clone(id)
-		if p.remove_confirm != "" && p.remove_confirm != id {
-			delete(p.remove_confirm)
-			p.remove_confirm = ""
-		}
-	}
+	if p.expanded != id {editor_profile_set_expanded(p, id)}
 	editor_rebuild(p)
 	editor_select_key(p, fmt.tprintf("profile.%s", id))
 }
@@ -684,12 +948,7 @@ editor_profile_expand :: proc(p: ^Editor, id: string) {
 editor_profile_collapse :: proc(p: ^Editor) {
 	if p.expanded == "" {return}
 	id := strings.clone(p.expanded, context.temp_allocator)
-	delete(p.expanded)
-	p.expanded = ""
-	if p.remove_confirm != "" {
-		delete(p.remove_confirm)
-		p.remove_confirm = ""
-	}
+	editor_profile_set_expanded(p, "")
 	editor_rebuild(p)
 	editor_select_key(p, fmt.tprintf("profile.%s", id))
 }
@@ -703,25 +962,6 @@ editor_detected_toggle :: proc(p: ^Editor) {
 	p.detected_open = !p.detected_open
 	editor_rebuild(p)
 	editor_select_key(p, "profiles.detected")
-}
-
-// Asks for confirmation inside the row's own editor. The confirm and cancel rows become visible.
-editor_profile_remove_ask :: proc(p: ^Editor, id: string) {
-	if id == "" || id == settings.PROFILE_DEFAULT_ID {return}
-	if p.expanded != id {editor_profile_expand(p, id)}
-	delete(p.remove_confirm)
-	p.remove_confirm = strings.clone(id)
-	editor_rebuild(p)
-	editor_select_key(p, fmt.tprintf("profile.%s.remove.confirm", id))
-}
-
-editor_profile_remove_cancel :: proc(p: ^Editor) {
-	if p.remove_confirm == "" {return}
-	id := strings.clone(p.remove_confirm, context.temp_allocator)
-	delete(p.remove_confirm)
-	p.remove_confirm = ""
-	editor_rebuild(p)
-	editor_select_key(p, fmt.tprintf("profile.%s.remove", id))
 }
 
 // The profile table's index for a page item, counting only table rows before it.
@@ -751,17 +991,91 @@ Profile_Block :: struct {
 	start, count: int,
 }
 
+// Which blocks are reordering or still settling, if any are.
 @(private)
-order_dragging :: proc(p: ^Editor) -> bool {
-	return p.drag == .Profile_Order || p.drag == .Process_Order
+order_kind :: proc(p: ^Editor) -> (kind: Order_Kind, ok: bool) {
+	switch o in p.order {
+	case Order_Dragging:
+		_, group := o.block.(Order_Group)
+		return group ? .Process_Groups : .Profiles, true
+	case Order_Settling:
+		return o.kind, true
+	}
+	return
 }
 
-// Whether the blocks reordering, or still settling, are process groups rather than profiles.
 @(private)
 order_processes :: proc(p: ^Editor) -> bool {
-	if p.drag == .Process_Order {return true}
-	if p.drag == .Profile_Order {return false}
-	return len(p.profile_positions) > 0 && p.profile_positions[0].process
+	kind, ok := order_kind(p)
+	return ok && kind == .Process_Groups
+}
+
+// Whether a reorder drag of `kind` holds the pointer.
+editor_order_dragging :: proc(p: ^Editor, kind: Order_Kind) -> bool {
+	_, dragging := p.order.(Order_Dragging)
+	current, _ := order_kind(p)
+	return dragging && current == kind
+}
+
+// The insertion slot a drop would save, or -1 without a reorder drag.
+editor_order_target :: proc(p: ^Editor) -> int {
+	drag, dragging := p.order.(Order_Dragging)
+	return dragging ? drag.target : -1
+}
+
+// The profile a reorder drag holds, or "".
+editor_order_profile :: proc(p: ^Editor) -> string {
+	drag, dragging := p.order.(Order_Dragging)
+	if !dragging {return ""}
+	profile, _ := drag.block.(Order_Profile)
+	return profile.id
+}
+
+@(private)
+order_block_free :: proc(block: Order_Block) {
+	if profile, held := block.(Order_Profile); held {delete(profile.id)}
+}
+
+// Starts a reorder drag, taking ownership of a profile block's ID. Blocks still settling from an
+// earlier drag of the same kind keep their drawn lines.
+@(private)
+order_begin :: proc(p: ^Editor, block: Order_Block, from: int, grab: f32) {
+	grabbed: string
+	kind := Order_Kind.Profiles
+	switch b in block {
+	case Order_Profile:
+		grabbed = b.id
+	case Order_Group:
+		grabbed, kind = process_key(b.id), .Process_Groups
+	}
+	if current, ok := order_kind(p); ok && current != kind {profile_positions_clear(&p.profile_positions)}
+	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
+	p.order = Order_Dragging{block, from, from, grab}
+	profile_positions_begin(p, grabbed)
+}
+
+// Ends a reorder drag, if one holds the pointer; its blocks settle from where they are drawn. The
+// caller owns the returned block.
+@(private)
+order_release :: proc(p: ^Editor) -> (drag: Order_Dragging, ok: bool) {
+	drag = p.order.(Order_Dragging) or_return
+	kind, _ := order_kind(p)
+	order_settle(p, kind)
+	return drag, true
+}
+
+// Ends a drag's hold on the blocks: they settle while any have a drawn position, else the reorder
+// is over. The caller has already freed or taken the grabbed block.
+@(private)
+order_settle :: proc(p: ^Editor, kind: Order_Kind) {
+	p.order = nil
+	if len(p.profile_positions) > 0 {p.order = Order_Settling{kind}}
+}
+
+// Drops a reorder drag without saving: the grabbed block eases back to its own place.
+@(private)
+order_cancel :: proc(p: ^Editor) {
+	if drag, ok := order_release(p); ok {order_block_free(drag.block)}
 }
 
 @(private)
@@ -801,12 +1115,13 @@ profile_block_id :: proc(p: ^Editor, block: Profile_Block) -> string {
 // grabbed block's lines opened at the slot the pointer is nearest.
 @(private)
 profile_block_line :: proc(p: ^Editor, blocks: []Profile_Block, index: int) -> int {
-	if !order_dragging(p) || p.drag_from >= len(blocks) {return blocks[index].start}
-	slot := p.drag_target <= p.drag_from ? p.drag_target : p.drag_target - 1
+	drag, dragging := p.order.(Order_Dragging)
+	if !dragging || drag.from >= len(blocks) {return blocks[index].start}
+	slot := drag.target <= drag.from ? drag.target : drag.target - 1
 	line, others := blocks[0].start, 0
 	for block, i in blocks {
-		if i == p.drag_from {continue}
-		if others == slot {line += blocks[p.drag_from].count}
+		if i == drag.from {continue}
+		if others == slot {line += blocks[drag.from].count}
 		if i == index {return line}
 		line += block.count
 		others += 1
@@ -833,7 +1148,7 @@ profile_line_entry :: proc(p: ^Editor, index: int) -> (entry: ^Profile_Position,
 		return nil, 0
 	}
 	row := p.rows[p.items[index].row]
-	processes := p.profile_positions[0].process
+	processes := order_processes(p)
 	if processes ? row.process <= 0 : row.profile == "" || row.kind == .Detected {return nil, 0}
 	start = index
 	for start >= 0 && (p.items[start].row < 0 || !order_head(p.rows[p.items[start].row], processes)) {
@@ -864,13 +1179,9 @@ editor_line_lifted :: proc(p: ^Editor, index: int) -> bool {
 }
 
 // Starts presenting every block at its drawn line, keeping blocks still settling where they are,
-// and lifts the grabbed one. Call after setting the drag kind.
+// and lifts the grabbed one. Call after the drag starts, which names the kind of block.
 @(private)
 profile_positions_begin :: proc(p: ^Editor, grabbed: string) {
-	processes := order_processes(p)
-	if len(p.profile_positions) > 0 && p.profile_positions[0].process != processes {
-		profile_positions_clear(&p.profile_positions)
-	}
 	for block in profile_blocks(p) {
 		id := profile_block_id(p, block)
 		entry := profile_position(p, id)
@@ -880,7 +1191,7 @@ profile_positions_begin :: proc(p: ^Editor, grabbed: string) {
 			line := f32(block.start)
 			if _, append_error := append(
 				&p.profile_positions,
-				Profile_Position{id = owned, position = {value = line, target = line}, process = processes},
+				Profile_Position{id = owned, position = {value = line, target = line}},
 			); append_error != nil {delete(owned); continue}
 			entry = &p.profile_positions[len(p.profile_positions) - 1]
 		}
@@ -889,28 +1200,30 @@ profile_positions_begin :: proc(p: ^Editor, grabbed: string) {
 }
 
 // Moves the grabbed block with the pointer and opens its slot among the others, as the tab strip
-// does. drag_target keeps the insertion slot the drop will save.
+// does. The drag's target keeps the insertion slot the drop will save.
 @(private)
 profile_drag_move :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> bool {
+	drag, dragging := &p.order.(Order_Dragging)
+	if !dragging {return false}
 	blocks := profile_blocks(p)
-	if p.drag_from >= len(blocks) {return false}
-	grabbed := blocks[p.drag_from]
+	if drag.from >= len(blocks) {return false}
+	grabbed := blocks[drag.from]
 	first := blocks[0].start
 	last := blocks[len(blocks) - 1].start + blocks[len(blocks) - 1].count
 	top := clamp(
-		(y - l.list.y) / l.row_height + f32(p.scroll) - p.drag_grab,
+		(y - l.list.y) / l.row_height + f32(p.scroll) - drag.grab,
 		f32(first),
 		f32(last - grabbed.count),
 	)
 	slot, others, line := 0, 0, first
 	nearest := abs(top - f32(line))
 	for block, i in blocks {
-		if i == p.drag_from {continue}
+		if i == drag.from {continue}
 		line += block.count
 		others += 1
 		if distance := abs(top - f32(line)); distance < nearest {slot, nearest = others, distance}
 	}
-	p.drag_target = slot <= p.drag_from ? slot : slot + 1
+	drag.target = slot <= drag.from ? slot : slot + 1
 	if entry := profile_position(p, profile_block_id(p, grabbed)); entry != nil {
 		motion_target(&entry.position, top, 0, .Linear, false, time.tick_now())
 	}
@@ -918,11 +1231,11 @@ profile_drag_move :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> bool {
 }
 
 // Eases reordering blocks toward their lines; returns whether the page must redraw. Positions are
-// dropped once the drag has ended and every block has settled.
+// dropped, and the reorder ends, once the drag has ended and every block has settled.
 editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bool {
 	if len(p.profile_positions) == 0 {return false}
 	blocks := profile_blocks(p)
-	dragging := order_dragging(p)
+	_, dragging := p.order.(Order_Dragging)
 	changed, moving := false, false
 	for i := 0; i < len(p.profile_positions); {
 		entry := &p.profile_positions[i]
@@ -944,7 +1257,10 @@ editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bo
 		moving ||= motion_active(entry.position)
 		i += 1
 	}
-	if !dragging && !moving {profile_positions_clear(&p.profile_positions)}
+	if !dragging && !moving {
+		profile_positions_clear(&p.profile_positions)
+		order_settle(p, .Profiles)
+	}
 	return changed
 }
 
@@ -977,7 +1293,14 @@ editor_drawn_lines :: proc(p: ^Editor, l: Editor_Layout) -> []int {
 // Whether reordering rows are moving, or have settled after a drop and still need releasing.
 editor_profiles_animating :: proc(p: ^Editor) -> bool {
 	for entry in p.profile_positions {if motion_active(entry.position) {return true}}
-	return !order_dragging(p) && len(p.profile_positions) > 0
+	_, settling := p.order.(Order_Settling)
+	return settling && len(p.profile_positions) > 0
+}
+
+@(private)
+profile_menu_shown :: proc(p: ^Editor) -> bool {
+	_, shown := p.mode.(Editor_Profile_Menu)
+	return shown
 }
 
 // Moves the selection by `delta` lines, passing over group headers in the direction of travel.
@@ -999,12 +1322,12 @@ max_scroll :: proc(p: ^Editor) -> int {return max(0, len(p.items) - max(1, p.vis
 
 // Scrolls the page, or the outline under the pointer, without moving the selection.
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
-	if p.profile_menu.open {menu_wheel(&p.profile_menu, rows); return}
-	if p.popup == .Choice && contains(editor_popup_rect(p, l), x, y) {
+	if profile_menu_shown(p) {menu_wheel(&p.profile_menu, rows); return}
+	if editor_popup(p) == .Choice && contains(editor_popup_rect(p, l), x, y) {
 		if row := editor_row(p); row != nil {choice_scroll_to(p, row, l, p.popup_scroll - rows)}
 		return
 	}
-	if p.popup == .Shortcuts && contains(editor_popup_rect(p, l), x, y) {
+	if editor_popup(p) == .Shortcuts && contains(editor_popup_rect(p, l), x, y) {
 		if row := editor_row(p); row != nil {
 			last := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			visible := shortcut_popup_rows(p, l)
@@ -1054,8 +1377,7 @@ editor_jump :: proc(p: ^Editor, entry: int) {
 	entries := outline_entries(p)
 	if entry < 0 || entry >= len(entries) {return}
 	header := entries[entry]
-	if p.focus != .Search {stop_editing(p)}
-	p.popup = .None
+	if editor_focus(p) != .Search {stop_editing(p)}
 	p.scroll = clamp(header, 0, max_scroll(p))
 	editor_select(p, header + 1)
 	p.scroll = clamp(header, 0, max_scroll(p))
@@ -1088,7 +1410,7 @@ choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
 	if len(row.choices) == 0 {return .None}
 	next := clamp(index, 0, len(row.choices) - 1)
 	if row.multiple {return choice_set_toggle(p, row, next)}
-	p.popup = .None
+	editor_mode_set(p, Editor_Editing{})
 	if row.choices[next] == field_string(&p.value) {return .Changed}
 	field_set(&p.value, row.choices[next])
 	return .Save
@@ -1096,20 +1418,19 @@ choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
 
 @(private)
 open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
-	p.popup, p.focus = .Choice, .Control
-	p.choice_toggle_focus = false
+	editor_mode_set(p, Editor_Choice_Popup{})
 	if choice_searchable(row) {
 		field_set(&p.choice_search, "")
 		choice_filter(p, row)
 	}
 	p.popup_index = row.multiple ? 0 : choice_index(row, field_string(&p.value))
 	p.popup_scroll = p.popup_index
-	p.popup_bar_hover, p.popup_bar_drag = false, {}
+	p.popup_bar_hover = false
 }
 
 @(private)
 start_capture :: proc(p: ^Editor, index: int = 0) {
-	p.focus, p.capturing, p.leader_pending, p.captured, p.popup = .Control, true, false, 0, .None
+	editor_mode_set(p, Editor_Capturing{})
 	p.shortcut_index = index
 	editor_message(
 		p,
@@ -1136,8 +1457,8 @@ shortcut_replace :: proc(p: ^Editor, row: ^Editor_Row, label: string) {
 
 @(private)
 open_shortcuts :: proc(p: ^Editor) {
-	p.popup_scroll = 0
-	p.popup, p.popup_index, p.focus = .Shortcuts, 0, .Control
+	editor_mode_set(p, Editor_Shortcuts_Popup{})
+	p.popup_scroll, p.popup_index = 0, 0
 	editor_message(
 		p,
 		"Choose an alternative to replace; Delete removes it. Add shortcut keeps the others.",
@@ -1167,24 +1488,23 @@ is_modifier :: proc(key: input.Key) -> bool {
 @(private)
 capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> Editor_Outcome {
 	if is_modifier(e.key) {return .None}
+	leader_pending := p.mode.(Editor_Capturing).leader_pending
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
-	if modifiers == {} && !p.leader_pending {
+	if modifiers == {} && !leader_pending {
 		#partial switch e.key {
 		case .Escape:
 			stop_editing(p)
-			editor_message(p, "", false)
 			return .Changed
 		case .Enter, .Numpad_Enter:
-			p.capturing = false
+			editor_mode_set(p, Editor_Editing{})
 			return .Save
 		case .Backspace, .Delete:
 			if strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) {
 				shortcut_replace(p, row, "")
 			} else {field_set(&p.value, "")}
-			p.captured = 0
 			return .Changed
 		case .Tab:
-			p.capturing, p.focus = false, .Positions
+			editor_mode_set(p, Editor_Positions{})
 			editor_message(p, "", false)
 			return .Changed
 		}
@@ -1198,28 +1518,22 @@ capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> Edit
 	if leader, ok := p.leader.?;
 	   ok &&
 	   binding &&
-	   !p.leader_pending &&
+	   !leader_pending &&
 	   commands.shortcut_matches(leader, e.key, modifiers, e.unshifted) {
-		p.leader_pending = true
+		editor_mode_set(p, Editor_Capturing{leader_pending = true})
 		editor_message(p, "Leader pressed; press the key that follows it.", false)
 		return .Changed
 	}
-	if p.leader_pending {
+	if leader_pending {
 		chord.modifiers += {.Leader}
-		p.leader_pending = false
+		editor_mode_set(p, Editor_Capturing{})
 	} else if modifiers & {.Control, .Alt, .Super} == {} && e.text != "" {
 		editor_message(p, "Typing keys need Ctrl, Alt, or the leader.", true)
 		return .Changed
 	}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	label := commands.shortcut_text(chord, buffer[:])
-	if binding {
-		shortcut_replace(p, row, label)
-		p.captured = 1
-	} else {
-		field_set(&p.value, label)
-		p.captured = 1
-	}
+	if binding {shortcut_replace(p, row, label)} else {field_set(&p.value, label)}
 	editor_message(p, CAPTURE_HINT, false)
 	return .Changed
 }
@@ -1270,23 +1584,19 @@ profile_activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	   row.process_field == .Add_Program {return editor_process_activate(p, row)}
 	switch p.profile_control {
 	case .Radio:
-		editor_action_set(p, .Default, row.profile, "")
-		return .Profile_Action
+		return profile_request(p, .Default, row.profile)
 	case .Hidden:
-		editor_action_set(p, .Hidden, row.profile, .Hidden in row.flags ? "false" : "true")
+		editor_request_set(p, Profile_Hidden_Request{strings.clone(row.profile), .Hidden not_in row.flags})
 		return .Profile_Action
 	case .Expand:
 		editor_profile_toggle(p, row.profile)
 		return .Changed
 	case .Duplicate:
-		editor_action_set(p, .Duplicate, row.profile, "")
-		return .Profile_Action
+		return profile_request(p, .Duplicate, row.profile)
 	case .Remove:
-		editor_action_set(p, .Remove, row.profile, "")
-		return .Profile_Action
+		return profile_request(p, .Remove, row.profile)
 	case .Enable:
-		editor_action_set(p, .Enable, row.profile, "")
-		return .Profile_Action
+		return profile_request(p, .Enable, row.profile)
 	case .More:
 		editor_profile_menu_open(p, row, p.profile_menu_parts)
 		return .Changed
@@ -1301,7 +1611,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Action:
 		return .Save
 	case .Toggle:
-		p.focus = .Control
+		editor_mode_set(p, Editor_Editing{})
 		return flip_toggle(p)
 	case .Choice:
 		open_choices(p, row)
@@ -1311,22 +1621,21 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 			settings.KEY_BINDING_PREFIX,
 		) {open_shortcuts(p)} else {start_capture(p)}
 	case .Color, .Optional_Color:
-		p.focus, p.popup = .Control, .Color
+		editor_mode_set(p, Editor_Color_Popup{})
 		field_select_all(&p.value)
 	case .Text, .Integer, .Number, .Profile_Icon:
-		p.focus = .Control
+		editor_mode_set(p, Editor_Editing{})
 		field_select_all(&p.value)
 	case .Process_Group:
 	case .Profile:
-		if p.focus == .Control {return profile_activate(p, row)}
+		if editor_focus(p) == .Control {return profile_activate(p, row)}
 		editor_profile_toggle(p, row.profile)
 	case .Profile_Add:
 		return .Save
 	case .Detected_Header:
 		editor_detected_toggle(p)
 	case .Detected:
-		editor_action_set(p, .Enable, row.profile, "")
-		return .Profile_Action
+		return profile_request(p, .Enable, row.profile)
 	}
 	return .Changed
 }
@@ -1334,17 +1643,20 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 @(private)
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Editor_Outcome, bool) {
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
-	if p.popup == .Choice && choice_searchable(row) {
+	popup := editor_popup(p)
+	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
 		if row.key == "font.family" && e.key == .Tab {
-			p.choice_toggle_focus = !p.choice_toggle_focus
+			choice.toggle_focus = !choice.toggle_focus
+			editor_mode_set(p, choice)
 			return .Changed, true
 		}
-		if p.choice_toggle_focus {
+		if choice.toggle_focus {
 			if e.key == .Space || e.key == .Enter || e.key == .Numpad_Enter {
 				return choice_toggle_fonts(p, row), true
 			}
 			if e.key != .Escape && e.key != .Arrow_Down && e.key != .Arrow_Up {return .None, true}
-			p.choice_toggle_focus = false
+			choice.toggle_focus = false
+			editor_mode_set(p, choice)
 		}
 		#partial switch e.key {
 		case .Backspace, .Delete, .Arrow_Left, .Arrow_Right, .A, .Space:
@@ -1356,7 +1668,7 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 			return .Changed, true
 		}
 	}
-	if p.popup == .Shortcuts {
+	if popup == .Shortcuts {
 		count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 		last := count
 		#partial switch e.key {
@@ -1376,7 +1688,7 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 			if p.popup_index < count {
 				p.shortcut_index = p.popup_index
 				shortcut_replace(p, row, "")
-				p.popup = .None
+				editor_mode_set(p, Editor_Editing{})
 				return .Save, true
 			}
 		}
@@ -1384,16 +1696,16 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 	}
 	#partial switch e.key {
 	case .Escape:
-		p.popup = .None
+		editor_mode_set(p, Editor_Editing{})
 		return .Changed, true
 	case .Arrow_Up, .Arrow_Down, .P, .N:
-		if p.popup != .Choice || ((e.key == .P || e.key == .N) && !control) {return .None, false}
+		if popup != .Choice || ((e.key == .P || e.key == .N) && !control) {return .None, false}
 		delta := e.key == .Arrow_Up || e.key == .P ? -1 : 1
 		p.popup_index = clamp(p.popup_index + delta, 0, max(0, editor_choice_count(p, row) - 1))
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - 7), p.popup_index)
 		return .Changed, true
 	case .Home, .End, .Page_Up, .Page_Down:
-		if p.popup != .Choice {return .None, false}
+		if popup != .Choice {return .None, false}
 		if e.key == .Home {p.popup_index = 0}
 		if e.key == .End {p.popup_index = max(0, editor_choice_count(p, row) - 1)}
 		if e.key == .Page_Up {p.popup_index = max(0, p.popup_index - 8)}
@@ -1401,36 +1713,44 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - 7), p.popup_index)
 		return .Changed, true
 	case .Enter, .Numpad_Enter, .Space:
-		if p.popup == .Choice {return choice_choose(p, row, p.popup_index), true}
+		if popup == .Choice {return choice_choose(p, row, p.popup_index), true}
 		if e.key == .Space {return .None, false}
-		p.popup = .None
+		editor_mode_set(p, Editor_Editing{})
 		return .Save, true
 	}
-	return .None, p.popup == .Choice
+	return .None, popup == .Choice
 }
 
 // Takes the raw key event: capture needs the physical key, and navigation uses the layout's key.
 editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	if !raw.pressed {return .None}
-	if p.profile_menu.open {
+	if profile_menu_shown(p) {
 		if menu_key(&p.profile_menu, raw) == .Chosen {return editor_profile_menu_choose(p)}
+		// The menu closes itself on Escape; the keyboard stays on the row's More control.
+		if !p.profile_menu.open {editor_mode_set(p, Editor_Editing{})}
 		return .Changed
 	}
 	row := editor_row(p)
-	if p.capturing && row != nil {return capture_key(p, row, raw)}
+	if editor_capturing(p) && row != nil {return capture_key(p, row, raw)}
 	e := raw
 	e.key = commands.logical_key(raw.key, raw.unshifted)
+	// Escape drops a reorder drag before anything else, and the block eases back to its place.
+	if _, reordering := p.order.(Order_Dragging); reordering && e.key == .Escape {
+		order_cancel(p)
+		return .Changed
+	}
 	if row != nil && row.kind == .Profile && e.key == .Context_Menu {
 		editor_profile_menu_open(p, row, p.profile_menu_parts)
 		return .Changed
 	}
-	if p.focus == .Reset_All && p.popup == .None {
+	focus := editor_focus(p)
+	if focus == .Reset_All {
 		if e.key == .Enter || e.key == .Numpad_Enter || e.key == .Space {return .Reset_All}
-		if e.key == .Escape {p.focus = .Search; return .Changed}
+		if e.key == .Escape {editor_mode_set(p, Editor_Browsing{}); return .Changed}
 		if e.key != .Tab {return .None}
 	}
 	if result, handled := editor_process_key(p, row, e); handled {return result}
-	if p.popup != .None && row != nil {
+	if editor_popup(p) != .None && row != nil {
 		if outcome, handled := popup_key(p, row, e); handled {return outcome}
 	}
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
@@ -1446,19 +1766,15 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	}
 	#partial switch e.key {
 	case .Escape:
-		if p.remove_confirm != "" {
-			editor_profile_remove_cancel(p)
-			return .Changed
-		}
 		// Escape leaves an expanded field first, then collapses the row from its table line.
 		if row != nil &&
 		   row.profile != "" &&
 		   row.profile == p.expanded &&
-		   (p.focus != .Control || row.kind == .Profile) {
+		   (focus != .Control || row.kind == .Profile) {
 			editor_profile_collapse(p)
 			return .Changed
 		}
-		if p.focus != .Search {
+		if focus != .Search {
 			stop_editing(p)
 			return .Changed
 		}
@@ -1470,20 +1786,20 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		stops := 2
 		if row == nil || row.kind == .Profile_Add || row.kind == .Detected_Header {stops = 1}
 		if row != nil && row.kind == .Shortcut {stops = 3}
-		current := p.focus == .Reset_All ? stops : int(p.focus)
-		focus := (current + (.Shift in e.modifiers ? stops : 1)) % (stops + 1)
-		if focus == stops {p.focus, p.popup = .Reset_All, .None; return .Changed}
-		p.popup = .None
-		if Editor_Focus(focus) == .Control && row != nil {
+		current := focus == .Reset_All ? stops : int(focus)
+		next := Editor_Focus((current + (.Shift in e.modifiers ? stops : 1)) % (stops + 1))
+		if int(next) == stops {editor_mode_set(p, Editor_Reset_All{}); return .Changed}
+		if editor_popup(p) != .None {editor_mode_set(p, Editor_Editing{})}
+		if next == .Control && row != nil {
 			if row.kind == .Profile || row.kind == .Detected {
-				p.focus = .Control
+				editor_mode_set(p, Editor_Editing{})
 				p.profile_control = row.kind == .Detected ? .Enable : .Radio
 				return .Changed
 			}
 			return activate(p, row)
 		}
-		if p.focus == .Control {stop_editing(p)}
-		p.focus = Editor_Focus(focus)
+		if focus == .Control {stop_editing(p)}
+		editor_mode_set(p, focus_mode(next))
 		return .Changed
 	case .Arrow_Up:
 		editor_step(p, -1); return .Changed
@@ -1500,24 +1816,24 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 		editor_step(p, max(1, p.visible_rows)); return .Changed
 	case .Enter, .Numpad_Enter:
 		if row == nil {return .None}
-		if p.focus == .Positions {p.physical = !p.physical; return .Changed}
-		if p.focus == .Control && text_kind(row.kind) {
-			p.popup = .None
+		if focus == .Positions {p.physical = !p.physical; return .Changed}
+		if focus == .Control && text_kind(row.kind) {
+			editor_mode_set(p, Editor_Editing{})
 			return .Save
 		}
-		if row.kind == .Profile && p.focus == .Control {return profile_activate(p, row)}
+		if row.kind == .Profile && focus == .Control {return profile_activate(p, row)}
 		return activate(p, row)
 	case .Space:
-		if p.focus == .Positions {p.physical = !p.physical; return .Changed}
+		if focus == .Positions {p.physical = !p.physical; return .Changed}
 		if row == nil {return .None}
-		if p.focus == .Control && (row.kind == .Profile || row.kind == .Detected) {
+		if focus == .Control && (row.kind == .Profile || row.kind == .Detected) {
 			return profile_activate(p, row)
 		}
-		if p.focus == .Control && row.kind == .Toggle {return flip_toggle(p)}
+		if focus == .Control && row.kind == .Toggle {return flip_toggle(p)}
 	case .Arrow_Left, .Arrow_Right:
 		left := e.key == .Arrow_Left
 		if row != nil && (row.kind == .Profile || row.kind == .Detected) {
-			if p.focus == .Control {
+			if focus == .Control {
 				profile_control_step(p, row, left ? -1 : 1)
 				return .Changed
 			}
@@ -1526,28 +1842,26 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 				return .Changed
 			}
 		}
-		if p.focus == .Control && row != nil && row.kind == .Choice {
+		if focus == .Control && row != nil && row.kind == .Choice {
 			return choose(p, row, choice_index(row, field_string(&p.value)) + (left ? -1 : 1))
 		}
 	case .D:
 		if control {break}
 		// Row shortcuts only run from the row's own control focus. While the search has focus,
 		// the same letters belong to the filter.
-		if p.focus == .Control && row != nil && row.kind == .Profile {
-			editor_action_set(p, .Default, row.profile, "")
-			return .Profile_Action
+		if focus == .Control && row != nil && row.kind == .Profile {
+			return profile_request(p, .Default, row.profile)
 		}
 	case .Delete, .Backspace:
 		if control {break}
-		if p.focus == .Control && row != nil && row.kind == .Profile {
+		if focus == .Control && row != nil && row.kind == .Profile {
 			if row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags {return .Changed}
-			editor_action_set(p, .Remove, row.profile, "")
-			return .Profile_Action
+			return profile_request(p, .Remove, row.profile)
 		}
 	case .R:
 		if control {return row == nil ? .None : .Reset}
 	}
-	switch p.focus {
+	switch focus {
 	case .Positions, .Reset_All:
 		return .None
 	case .Control:
@@ -1555,7 +1869,7 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 			if field_key(&p.value, e) == .Edited {sync_color(p)}
 			return .Changed
 		}
-		p.focus, p.popup = .Search, .None
+		editor_mode_set(p, Editor_Browsing{})
 	case .Search:
 	}
 	if field_key(&p.filter, e) == .Edited {editor_filter(p)}
@@ -1563,24 +1877,28 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 }
 
 editor_text :: proc(p: ^Editor, text: string) {
-	if p.capturing || p.focus == .Positions || p.focus == .Reset_All {return}
+	#partial switch _ in p.mode {
+	case Editor_Capturing, Editor_Positions, Editor_Reset_All:
+		return
+	}
 	row := editor_row(p)
-	if p.popup == .Choice && choice_searchable(row) {
-		if p.choice_toggle_focus {return}
+	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
+		if choice.toggle_focus {return}
 		if field_text(&p.choice_search, text) == .Edited {choice_filter(p, row)}
 		return
 	}
-	if p.focus == .Control && row != nil && text_kind(row.kind) {
+	focus := editor_focus(p)
+	if focus == .Control && row != nil && text_kind(row.kind) {
 		if field_text(&p.value, text) == .Edited {sync_color(p)}
 		return
 	}
-	if p.focus == .Control &&
+	if focus == .Control &&
 	   row != nil &&
 	   (row.kind == .Profile ||
 			   row.kind == .Detected ||
 			   row.kind == .Detected_Header ||
 			   row.kind == .Profile_Add) {return}
-	p.focus, p.popup = .Search, .None
+	if focus != .Search {editor_mode_set(p, Editor_Browsing{})}
 	if field_text(&p.filter, text) == .Edited {
 		editor_filter(p)
 	}
@@ -1595,14 +1913,14 @@ editor_paste :: proc(p: ^Editor, text: string) {
 
 // The selected text of the focused field, for copying.
 editor_selection :: proc(p: ^Editor) -> string {
-	if p.popup == .Choice && choice_searchable(editor_row(p)) {
+	if editor_popup(p) == .Choice && choice_searchable(editor_row(p)) {
 		return field_selected_text(&p.choice_search)
 	}
-	switch p.focus {
+	switch editor_focus(p) {
 	case .Search:
 		return field_selected_text(&p.filter)
 	case .Control:
-		if !p.capturing {return field_selected_text(&p.value)}
+		if !editor_capturing(p) {return field_selected_text(&p.value)}
 	case .Positions, .Reset_All:
 	}
 	return ""
@@ -1611,12 +1929,12 @@ editor_selection :: proc(p: ^Editor) -> string {
 // Removes the selected text of the focused field after it was copied.
 editor_cut :: proc(p: ^Editor) {
 	if editor_selection(p) == "" {return}
-	if row := editor_row(p); p.popup == .Choice && choice_searchable(row) {
+	if row := editor_row(p); editor_popup(p) == .Choice && choice_searchable(row) {
 		field_text(&p.choice_search, "")
 		choice_filter(p, row)
 		return
 	}
-	if p.focus == .Control {
+	if editor_focus(p) == .Control {
 		if row := editor_row(p); row != nil && text_kind(row.kind) {
 			field_text(&p.value, "")
 			sync_color(p)
@@ -1834,14 +2152,22 @@ choice_scroll_to :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout, offset:
 @(private)
 choice_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, visible: bool) {
 	row := editor_row(p)
-	if p.popup != .Choice || row == nil {return}
+	if editor_popup(p) != .Choice || row == nil {return}
 	r := editor_popup_rect(p, l)
 	if r.width == 0 {return}
 	s := l.scale
 	header := choice_search_height(row, s)
 	area := render.Rect{r.x, r.y + header + 4 * s, r.width - s, r.height - header - 8 * s}
 	extent := Scroll_Extent{editor_choice_count(p, row), choice_popup_rows(p, row, l), p.popup_scroll}
-	return scrollbar_layout(area, extent, scrollbar_state(p.popup_bar_hover, p.popup_bar_drag), s)
+	return scrollbar_layout(area, extent, scrollbar_state(p.popup_bar_hover, choice_bar_drag(p)), s)
+}
+
+// The choice list's scrollbar thumb drag; inactive unless the pointer holds it.
+@(private)
+choice_bar_drag :: proc(p: ^Editor) -> Scroll_Drag {
+	choice, _ := p.mode.(Editor_Choice_Popup)
+	bar, _ := choice.drag.(Scroll_Drag)
+	return bar
 }
 
 @(private)
@@ -1852,13 +2178,14 @@ choice_option_right :: proc(p: ^Editor, l: Editor_Layout, popup: render.Rect) ->
 
 editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	row := editor_row(p)
-	if p.popup == .None || row == nil || p.selected < p.scroll || p.selected >= p.scroll + l.rows {
+	popup := editor_popup(p)
+	if popup == .None || row == nil || p.selected < p.scroll || p.selected >= p.scroll + l.rows {
 		return {}
 	}
 	parts := editor_row_parts(p, l, p.selected)
 	s := l.scale
 	r: render.Rect
-	if p.popup == .Shortcuts {
+	if popup == .Shortcuts {
 		count := shortcut_popup_rows(p, l)
 		r = {
 			parts.field.x + parts.field.width - 320 * s,
@@ -1866,7 +2193,7 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 			320 * s,
 			f32(count) * CHOICE_HEIGHT * s + 8 * s,
 		}
-	} else if p.popup == .Choice {
+	} else if popup == .Choice {
 		count := choice_popup_rows(p, row, l)
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - max(1, count) + 1), p.popup_index)
 		p.popup_scroll = min(p.popup_scroll, max(0, editor_choice_count(p, row) - count))
@@ -1887,7 +2214,7 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 		}
 	}
 	if r.y + r.height > l.page.y + l.page.height - 8 * s {r.y = parts.row.y - r.height - 4 * s}
-	if p.popup == .Shortcuts || p.popup == .Choice {
+	if popup == .Shortcuts || popup == .Choice {
 		r.width = min(r.width, l.page.width - 16 * s)
 		r.x = clamp(
 			r.x,
@@ -1926,8 +2253,8 @@ contains :: proc(r: render.Rect, x, y: f32) -> bool {
 }
 
 @(private)
-pick_color :: proc(p: ^Editor, c: Color_Parts, x, y: f32) {
-	if p.drag == .Wheel {
+pick_color :: proc(p: ^Editor, c: Color_Parts, drag: Color_Drag, x, y: f32) {
+	if drag == .Wheel {
 		radius := c.wheel.width / 2
 		dx, dy := x - (c.wheel.x + radius), y - (c.wheel.y + radius)
 		hue := math.to_degrees(math.atan2(dy, dx))
@@ -1961,90 +2288,97 @@ editor_press :: proc(
 ) -> Editor_Outcome {
 	s := l.scale
 	p.profile_menu.bounds = l.page
-	if p.profile_menu.open {
+	if profile_menu_shown(p) {
 		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, s)
 		if hit >= 0 {
 			p.profile_menu.selected = hit
 			return editor_profile_menu_choose(p)
 		}
-		p.profile_menu.open = false
+		editor_mode_set(p, Editor_Editing{})
 		return .Changed
 	}
-	if p.popup == .None && contains(editor_reset_all_rect(l), x, y) {return .Reset_All}
-	if p.popup != .None {
-		popup := editor_popup_rect(p, l)
+	popup := editor_popup(p)
+	if popup == .None && contains(editor_reset_all_rect(l), x, y) {return .Reset_All}
+	if popup != .None {
+		r := editor_popup_rect(p, l)
 		row := editor_row(p)
-		if !contains(popup, x, y) || row == nil {
-			if p.popup == .Shortcuts {editor_message(p, "", false)}
-			p.popup = .None
+		if !contains(r, x, y) || row == nil {
+			if popup == .Shortcuts {editor_message(p, "", false)}
+			editor_mode_set(p, Editor_Editing{})
 			return .Changed
 		}
-		if p.popup == .Choice {
+		if choice, open := p.mode.(Editor_Choice_Popup); open {
 			if contains(choice_font_toggle_rect(p, l), x, y) {
-				p.choice_toggle_focus = true
+				choice.toggle_focus = true
+				editor_mode_set(p, choice)
 				return choice_toggle_fonts(p, row)
 			}
-			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {
-				p.choice_toggle_focus = false
+			if choice_searchable(row) && y < r.y + 4 * s + choice_search_height(row, s) {
 				box := choice_search_box(p, l, text)
 				if text != nil {
 					field_pointer(&p.choice_search, field_box_offset(box, x), true, extend)
 				} else {field_select_all(&p.choice_search)}
-				p.drag = .Choice_Search
+				editor_mode_set(p, Editor_Choice_Popup{drag = Choice_Search_Drag{}})
 				return .Changed
 			}
 			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
-				choice_scroll_to(p, row, l, scrollbar_press(&p.popup_bar_drag, bar, y))
-				if p.popup_bar_drag.active {p.drag = .Popup_Scroll}
+				held: Scroll_Drag
+				choice_scroll_to(p, row, l, scrollbar_press(&held, bar, y))
+				if held.active {
+					choice.drag = held
+					editor_mode_set(p, choice)
+				}
 				return .Changed
 			}
-			popup.y += choice_search_height(row, s)
-			index := int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s))
-			if y < popup.y + 4 * s || index >= choice_popup_rows(p, row, l) {return .None}
+			r.y += choice_search_height(row, s)
+			index := int((y - r.y - 4 * s) / (CHOICE_HEIGHT * s))
+			if y < r.y + 4 * s || index >= choice_popup_rows(p, row, l) {return .None}
 			return choice_choose(p, row, index + p.popup_scroll)
 		}
-		if p.popup == .Shortcuts {
+		if popup == .Shortcuts {
 			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			index := clamp(
-				int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s)) + p.popup_scroll,
+				int((y - r.y - 4 * s) / (CHOICE_HEIGHT * s)) + p.popup_scroll,
 				0,
 				count,
 			)
-			if index < count && x >= popup.x + popup.width - 32 * s {
+			if index < count && x >= r.x + r.width - 32 * s {
 				p.shortcut_index = index
 				shortcut_replace(p, row, "")
-				p.popup = .None
+				editor_mode_set(p, Editor_Editing{})
 				return .Save
 			}
 			start_capture(p, index)
 			return .Changed
 		}
-		c := color_parts(popup, row.kind == .Optional_Color, s)
+		c := color_parts(r, row.kind == .Optional_Color, s)
+		drag: Color_Drag
 		switch {
 		case contains(c.wheel, x, y):
-			p.drag = .Wheel
+			drag = .Wheel
 		case contains({c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}, x, y):
-			p.drag = .Ramp
+			drag = .Ramp
 		case contains(c.no_color, x, y):
 			field_set(&p.value, "")
-			p.popup = .None
+			editor_mode_set(p, Editor_Editing{})
 			return .Save
 		case:
 			return .None
 		}
-		pick_color(p, c, x, y)
+		editor_mode_set(p, Editor_Color_Popup{drag})
+		pick_color(p, c, drag, x, y)
 		return .Changed
 	}
 	if contains(editor_clear_rect(p, l), x, y) {
-		if p.focus != .Search {stop_editing(p)}
+		if editor_focus(p) != .Search {stop_editing(p)}
 		field_set(&p.filter, "")
 		editor_filter(p)
 		return .Changed
 	}
 	if contains(l.filter, x, y) {
-		if p.focus != .Search {stop_editing(p)}
+		if editor_focus(p) != .Search {stop_editing(p)}
 		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend)
-		p.drag = .Filter
+		editor_mode_set(p, Editor_Browsing{selecting = true})
 		return .Changed
 	}
 	if contains(l.outline, x, y) {
@@ -2060,13 +2394,7 @@ editor_press :: proc(
 	row := editor_row(p)
 	parts := editor_row_parts(p, l, index)
 	if row.process_field != .None {
-		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {
-			if p.drag == .Process_Order {
-				p.drag_grab = (y - parts.row.y) / l.row_height
-				profile_positions_begin(p, row.key)
-			}
-			return result
-		}
+		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {return result}
 	}
 	if row.kind == .Profile || row.kind == .Detected || row.kind == .Profile_Add ||
 	   row.kind == .Detected_Header {
@@ -2077,40 +2405,37 @@ editor_press :: proc(
 			return .Changed
 		case row.kind == .Profile && contains(table.handle, x, y):
 			if filtering(p) {return .Changed}
-			p.drag = .Profile_Order
-			delete(p.drag_id)
-			p.drag_id = strings.clone(row.profile)
-			p.drag_from = profile_index_at(p, index)
-			p.drag_target = p.drag_from
-			p.drag_grab = (y - parts.row.y) / l.row_height
-			profile_positions_begin(p, row.profile)
+			grab := (y - parts.row.y) / l.row_height
+			order_begin(p, Order_Profile{strings.clone(row.profile)}, profile_index_at(p, index), grab)
 			return .Changed
 		case row.kind == .Profile && contains(table.radio, x, y):
-			p.focus, p.profile_control = .Control, .Radio
-			editor_action_set(p, .Default, row.profile, "")
-			return .Profile_Action
+			editor_mode_set(p, Editor_Editing{})
+			p.profile_control = .Radio
+			return profile_request(p, .Default, row.profile)
 		case row.kind == .Profile && contains(table.toggle, x, y):
-			p.focus, p.profile_control = .Control, .Hidden
-			editor_action_set(p, .Hidden, row.profile, .Hidden in row.flags ? "false" : "true")
+			editor_mode_set(p, Editor_Editing{})
+			p.profile_control = .Hidden
+			editor_request_set(p, Profile_Hidden_Request{strings.clone(row.profile), .Hidden not_in row.flags})
 			return .Profile_Action
 		case row.kind == .Profile && contains(table.expand, x, y):
-			p.focus, p.profile_control = .Control, .Expand
+			editor_mode_set(p, Editor_Editing{})
+			p.profile_control = .Expand
 			editor_profile_toggle(p, row.profile)
 			return .Changed
 		case row.kind == .Profile && contains(table.duplicate, x, y):
-			p.focus, p.profile_control = .Control, .Duplicate
-			editor_action_set(p, .Duplicate, row.profile, "")
-			return .Profile_Action
+			editor_mode_set(p, Editor_Editing{})
+			p.profile_control = .Duplicate
+			return profile_request(p, .Duplicate, row.profile)
 		case row.kind == .Profile &&
 		     row.profile != settings.PROFILE_DEFAULT_ID && .Protected not_in row.flags &&
 		     contains(table.remove, x, y):
-			p.focus, p.profile_control = .Control, .Remove
-			editor_action_set(p, .Remove, row.profile, "")
-			return .Profile_Action
+			editor_mode_set(p, Editor_Editing{})
+			p.profile_control = .Remove
+			return profile_request(p, .Remove, row.profile)
 		case row.kind == .Detected && contains(table.enable, x, y):
-			p.focus, p.profile_control = .Control, .Enable
-			editor_action_set(p, .Enable, row.profile, "")
-			return .Profile_Action
+			editor_mode_set(p, Editor_Editing{})
+			p.profile_control = .Enable
+			return profile_request(p, .Enable, row.profile)
 		case row.kind == .Detected_Header:
 			editor_detected_toggle(p)
 			return .Changed
@@ -2133,13 +2458,13 @@ editor_press :: proc(
 		field_set(&p.value, "")
 		return .Save
 	case contains(parts.toggle, x, y):
-		p.focus = .Control
+		editor_mode_set(p, Editor_Editing{})
 		return flip_toggle(p)
 	case contains(parts.positions, x, y):
 		p.physical = !p.physical
 		return .Changed
 	case contains(parts.swatch, x, y) && row.kind != .Profile_Icon:
-		p.focus, p.popup = .Control, .Color
+		editor_mode_set(p, Editor_Color_Popup{})
 		return .Changed
 	case contains(parts.slider, x, y) ||
 	     contains(
@@ -2153,125 +2478,137 @@ editor_press :: proc(
 		     y,
 	     ) &&
 		     parts.slider.width > 0:
-		p.focus, p.drag = .Control, .Slider
+		editor_mode_set(p, Editor_Editing{drag = .Slider})
 		slide(p, row, parts.slider, x)
 		return .Changed
 	case contains(parts.field, x, y):
 		#partial switch row.kind {
 		case .Choice:
-			if p.popup == .Choice {p.popup = .None} else {open_choices(p, row)}
+			open_choices(p, row)
 			return .Changed
 		case .Shortcut:
 			return activate(p, row)
 		case .Action:
 			return .Save
 		}
-		if p.capturing {stop_editing(p)}
-		p.focus = .Control
+		if editor_capturing(p) {stop_editing(p)}
 		field_pointer(&p.value, field_box_offset(value_box(p, parts, text, s), x), true, extend)
-		p.drag = .Value
+		editor_mode_set(p, Editor_Editing{drag = .Value})
 		return .Changed
 	}
-	if p.capturing {
-		stop_editing(p)
-		editor_message(p, "", false)
-	}
+	if editor_capturing(p) {stop_editing(p)}
 	return .Changed
 }
 
 // Continues a pointer drag; returns whether anything changed.
 editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> bool {
+	if browsing, ok := p.mode.(Editor_Browsing); ok && browsing.selecting {
+		return field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), false, true) != .None
+	}
 	row := editor_row(p)
-	if row == nil && p.drag != .Filter {return false}
-	switch p.drag {
-	case .None:
-		return false
-	case .Filter:
-		return(
-			field_pointer(
-				&p.filter,
-				field_box_offset(filter_box(p, l, text), x),
-				false,
-				true,
-			) !=
-			.None \
-		)
-	case .Value:
-		parts := editor_row_parts(p, l, p.selected)
-		return(
-			field_pointer(
-				&p.value,
-				field_box_offset(value_box(p, parts, text, l.scale), x),
-				false,
-				true,
-			) !=
-			.None \
-		)
-	case .Choice_Search:
-		return field_pointer(&p.choice_search,
-		                     field_box_offset(choice_search_box(p, l, text), x), false, true) != .None
-	case .Slider:
-		slide(p, row, editor_row_parts(p, l, p.selected).slider, x)
-	case .Process_Order:
+	if row == nil {return false}
+	if drag, reordering := &p.order.(Order_Dragging); reordering {
 		moved := profile_drag_move(p, l, y)
 		// A drop outside the page keeps the saved order; the group eases back to its place.
-		if !contains(l.list, x, y) {p.drag_target = p.drag_from}
+		if _, group := drag.block.(Order_Group); group && !contains(l.list, x, y) {drag.target = drag.from}
 		return moved
-	case .Profile_Order:
-		return profile_drag_move(p, l, y)
-	case .Popup_Scroll:
-		bar, visible := choice_scrollbar(p, l)
-		if !visible {return false}
-		before := p.popup_scroll
-		choice_scroll_to(p, row, l, scrollbar_drag(p.popup_bar_drag, bar, y))
-		return p.popup_scroll != before
-	case .Wheel, .Ramp:
-		pick_color(
-			p,
-			color_parts(editor_popup_rect(p, l), row.kind == .Optional_Color, l.scale),
-			x,
-			y,
-		)
 	}
-	return true
+	switch m in p.mode {
+	case Editor_Editing:
+		switch m.drag {
+		case .None:
+			return false
+		case .Value:
+			parts := editor_row_parts(p, l, p.selected)
+			box := value_box(p, parts, text, l.scale)
+			return field_pointer(&p.value, field_box_offset(box, x), false, true) != .None
+		case .Slider:
+			slide(p, row, editor_row_parts(p, l, p.selected).slider, x)
+			return true
+		}
+	case Editor_Choice_Popup:
+		switch drag in m.drag {
+		case Choice_Search_Drag:
+			box := choice_search_box(p, l, text)
+			return field_pointer(&p.choice_search, field_box_offset(box, x), false, true) != .None
+		case Scroll_Drag:
+			bar, visible := choice_scrollbar(p, l)
+			if !visible {return false}
+			before := p.popup_scroll
+			choice_scroll_to(p, row, l, scrollbar_drag(drag, bar, y))
+			return p.popup_scroll != before
+		}
+	case Editor_Color_Popup:
+		if m.drag == .None {return false}
+		pick_color(p, color_parts(editor_popup_rect(p, l), row.kind == .Optional_Color, l.scale), m.drag, x, y)
+		return true
+	case Editor_Browsing, Editor_Positions, Editor_Reset_All, Editor_Capturing, Editor_Shortcuts_Popup,
+	     Editor_Profile_Menu:
+	}
+	return false
 }
 
-// Ends a pointer drag; a slider drag saves the value it settled on and a color drag previews until
-// the picker closes or Enter saves. Dropping a profile row names its ID and insertion slot.
+// Ends a pointer drag; a slider or colour drag saves the value it settled on. Dropping a profile
+// row names its ID and insertion slot.
 editor_release :: proc(p: ^Editor) -> Editor_Outcome {
-	drag := p.drag
-	p.drag = .None
 	p.filter.dragging, p.value.dragging = false, false
 	p.choice_search.dragging = false
-	if drag == .Popup_Scroll {
-		p.popup_bar_drag = {}
-		return .Changed
-	}
-	if drag == .Process_Order {
-		slot := p.drag_target
-		if slot > p.drag_from {slot -= 1}
-		if slot == p.drag_from {return .Changed}
-		editor_process_move(p, p.process_drag_id, slot)
-		return .Process_Save
-	}
-	if drag == .Profile_Order {
-		defer {
-			delete(p.drag_id)
-			p.drag_id = ""
-		}
-		if p.drag_target == p.drag_from {return .Changed}
-		editor_action_set(p, .Order, p.drag_id, "")
-		p.action_slot = p.drag_target
-		return .Profile_Action
+	if _, reordering := p.order.(Order_Dragging); reordering {return order_drop(p)}
+	settled := false
+	switch m in p.mode {
+	case Editor_Browsing:
+		if m.selecting {editor_mode_set(p, Editor_Browsing{})}
+	case Editor_Editing:
+		settled = m.drag == .Slider
+		if m.drag != .None {editor_mode_set(p, Editor_Editing{})}
+	case Editor_Choice_Popup:
+		if m.drag == nil {break}
+		editor_mode_set(p, Editor_Choice_Popup{toggle_focus = m.toggle_focus})
+		if _, bar := m.drag.(Scroll_Drag); bar {return .Changed}
+	case Editor_Color_Popup:
+		settled = m.drag != .None
+		if settled {editor_mode_set(p, Editor_Color_Popup{})}
+	case Editor_Positions, Editor_Reset_All, Editor_Capturing, Editor_Shortcuts_Popup, Editor_Profile_Menu:
 	}
 	row := editor_row(p)
-	if row == nil || (drag != .Slider && drag != .Wheel && drag != .Ramp) {return .None}
+	if row == nil || !settled {return .None}
 	return field_string(&p.value) == row.value ? .Changed : .Save
+}
+
+// Ends whatever the pointer holds without a result, for a gesture the system took away. A reorder
+// drag saves nothing; its block eases back.
+editor_pointer_cancel :: proc(p: ^Editor) {
+	order_cancel(p)
+	_ = editor_release(p)
+}
+
+// Drops a reorder drag at its target slot. A profile names its new place in a request; a process
+// group moves within the page's draft.
+@(private)
+order_drop :: proc(p: ^Editor) -> Editor_Outcome {
+	drag, dropped := order_release(p)
+	if !dropped {return .None}
+	switch block in drag.block {
+	case Order_Group:
+		slot := drag.target
+		if slot > drag.from {slot -= 1}
+		if slot == drag.from {return .Changed}
+		editor_process_move(p, block.id, slot)
+		return .Process_Save
+	case Order_Profile:
+		if drag.target == drag.from {
+			delete(block.id)
+			return .Changed
+		}
+		editor_request_set(p, Profile_Order_Request{block.id, drag.target})
+		return .Profile_Action
+	}
+	return .None
 }
 
 // Hover state for row highlights and reset buttons; returns whether the page must redraw.
 editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
-	if p.profile_menu.open {
+	if profile_menu_shown(p) {
 		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, l.scale)
 		if hit < 0 || hit == p.profile_menu.selected {return false}
 		p.profile_menu.selected = hit
@@ -2279,7 +2616,8 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	}
 	// An open dropdown highlights the option under the pointer, like the menus.
 	bar_changed := false
-	if p.popup != .None {
+	popup_open := editor_popup(p)
+	if popup_open != .None {
 		bar, bar_visible := choice_scrollbar(p, l)
 		over := bar_visible && scrollbar_contains(bar, x, y)
 		bar_changed = over != p.popup_bar_hover
@@ -2287,7 +2625,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 		if row := editor_row(p); row != nil {
 			popup := editor_popup_rect(p, l)
 			right := choice_option_right(p, l, popup)
-			if p.popup == .Choice {
+			if popup_open == .Choice {
 				popup.y += choice_search_height(row, l.scale)
 				popup.height -= choice_search_height(row, l.scale)
 			}
@@ -2300,7 +2638,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 			}
 			if contains(popup, x, y) && visible >= 0 && contains(option, x, y) {
 				index, valid := visible, false
-				#partial switch p.popup {
+				#partial switch popup_open {
 				case .Choice:
 					index += p.popup_scroll
 					valid = index < editor_choice_count(p, row) && visible < choice_popup_rows(p, row, l)
@@ -2319,7 +2657,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	}
 	item, reset, outline := -1, -1, -1
 	profile_item, profile_control := -1, Profile_Control.Radio
-	if p.popup == .None && p.drag != .Profile_Order && contains(l.list, x, y) {
+	if popup_open == .None && !editor_order_dragging(p, .Profiles) && contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
 		if index < len(p.items) && p.items[index].row >= 0 {
 			item = index
@@ -2351,7 +2689,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 			}
 		}
 	}
-	if p.popup == .None && contains(l.outline, x, y) {
+	if popup_open == .None && contains(l.outline, x, y) {
 		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
 		if entry < len(outline_entries(p)) {outline = entry}
 	}
@@ -2377,7 +2715,7 @@ editor_hover_clear :: proc(p: ^Editor) {
 
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
-	if p.profile_menu.open {return false}
+	if profile_menu_shown(p) {return false}
 	if contains(editor_popup_rect(p, l), x, y) {return false}
 	if contains(filter_text_rect(p, l), x, y) {return true}
 	if !contains(l.list, x, y) {return false}
@@ -2389,19 +2727,19 @@ editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 
 // The pointer for the page: text over editable text, a hand over anything a click changes.
 editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Cursor_Shape {
-	if p.profile_menu.open {return .Hand}
+	if profile_menu_shown(p) {return .Hand}
 	s := l.scale
 	if popup := editor_popup_rect(p, l); contains(popup, x, y) {
 		row := editor_row(p)
 		if row == nil {return .Arrow}
-		if p.popup == .Choice {
+		if editor_popup(p) == .Choice {
 			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {return .Arrow}
 			if contains(choice_font_toggle_rect(p, l), x, y) {return .Hand}
 			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {return .Text}
 			popup.y += choice_search_height(row, s)
 		}
 		option := int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s))
-		#partial switch p.popup {
+		#partial switch editor_popup(p) {
 		case .Choice:
 			if option >= 0 && option + p.popup_scroll < editor_choice_count(p, row) {return .Hand}
 		case .Shortcuts:
@@ -2610,7 +2948,7 @@ profile_row_draw :: proc(
 	if selected {p.profile_menu_parts = table}
 	small := text_styled(text, .Detail)
 	cy := parts.row.y + parts.row.height / 2
-	focused := selected && p.focus == .Control
+	focused := selected && editor_editing(p)
 	hovered := index == p.hover_profile_item
 	strong := (selected || index == p.hover_item) && !(.Hidden in row.flags)
 	grip_ink := selected || index == p.hover_item ? theme.muted : theme.faint
@@ -2835,7 +3173,7 @@ profile_detected_draw :: proc(
 		theme.faint,
 		max(1, table.command.width),
 	); result != .Ok {return result}
-	focused := selected && p.focus == .Control
+	focused := selected && editor_editing(p)
 	hovered := index == p.hover_profile_item
 	// A detected profile the file already names as default reads as default here even though its
 	// radio is not a write target until the profile is enabled.
@@ -2871,7 +3209,7 @@ control_draw :: proc(
 	scale: f32,
 ) -> glyphs.Result {
 	value := selected ? field_string(&p.value) : row.value
-	focused := selected && p.focus == .Control
+	focused := selected && editor_editing(p)
 	input_text := text_styled(text, .Body)
 	baseline :=
 		parts.field.y + (parts.field.height - input_text.line_height) / 2 + input_text.ascent
@@ -2926,11 +3264,11 @@ control_draw :: proc(
 			list,
 			{rect = parts.swatch, color = theme.border, radius = RADIUS_CONTROL * scale, stroke = scale},
 		)
-		if selected && p.popup == .Color {focus_ring_draw(list, parts.swatch, theme, scale)}
+		if selected && editor_popup(p) == .Color {focus_ring_draw(list, parts.swatch, theme, scale)}
 	case .Shortcut:
 		return shortcut_field_draw(list, text, theme, parts, shortcut_summary(value), {
-			capturing = selected && p.capturing, focused = focused,
-			positions_focused = selected && p.focus == .Positions, physical = p.physical,
+			capturing = selected && editor_capturing(p), focused = focused,
+			positions_focused = selected && editor_focus(p) == .Positions, physical = p.physical,
 			empty_label = strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) ? "Add shortcut" : "None",
 		}, page, scale)
 	case .Text:
@@ -2979,7 +3317,7 @@ popup_draw :: proc(
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	frame := popover_panel(r, s)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
-	if p.popup == .Shortcuts {
+	if editor_popup(p) == .Shortcuts {
 		parts := commands.shortcut_alternatives(row.value, context.temp_allocator)
 		count := shortcut_popup_rows(p, l)
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - count + 1), p.popup_index)
@@ -3021,13 +3359,14 @@ popup_draw :: proc(
 		}
 		return .Ok
 	}
-	if p.popup == .Choice {
+	if editor_popup(p) == .Choice {
 		count := choice_popup_rows(p, row, l)
 		if choice_searchable(row) {
 			box := choice_search_box(p, l, text)
-			box_draw(list, box.rect, theme, !p.choice_toggle_focus, s)
+			toggle_focus := editor_choice_toggle_focused(p)
+			box_draw(list, box.rect, theme, !toggle_focus, s)
 			if result := field_box_draw(box, list, theme, field_box_baseline(box),
-			                           !p.choice_toggle_focus, "Search fonts");
+			                           !toggle_focus, "Search fonts");
 			   result != .Ok {return result}
 			if render.push_layer(list, l.page) != .None {return .Ok}
 			if row.key == "font.family" {
@@ -3039,7 +3378,7 @@ popup_draw :: proc(
 					switch_w,
 					switch_h,
 				}
-				switch_draw(list, switch_rect, row.show_all_fonts, p.choice_toggle_focus, theme, s)
+				switch_draw(list, switch_rect, row.show_all_fonts, toggle_focus, theme, s)
 				if result := draw_text(text, list, "Show all fonts", toggle.x + CONTROL_INSET * s,
 				                       toggle.y + (toggle.height - text.line_height) / 2 + text.ascent,
 				                       theme.text, switch_rect.x - toggle.x - 2 * CONTROL_INSET * s);
@@ -3090,7 +3429,7 @@ popup_draw :: proc(
 			); result != .Ok {return result}
 		}
 		if bar, visible := choice_scrollbar(p, l); visible {
-			scrollbar_draw(list, theme, bar, scrollbar_state(p.popup_bar_hover, p.popup_bar_drag))
+			scrollbar_draw(list, theme, bar, scrollbar_state(p.popup_bar_hover, choice_bar_drag(p)))
 		}
 		return .Ok
 	}
@@ -3298,10 +3637,10 @@ editor_draw :: proc(
 		max(1, status_right - status_x),
 	); r != .Ok {return r}
 	reset := editor_reset_all_rect(l)
-	reset_focused := focused && p.focus == .Reset_All
+	reset_focused := focused && editor_focus(p) == .Reset_All
 	if r := text_button_draw(list, text, theme, reset, "Reset to Defaults", reset_focused, s, pointer);
 	   r != .Ok {return r}
-	if r := filter_draw(p, l, list, text, theme, focused && p.focus == .Search, pointer);
+	if r := filter_draw(p, l, list, text, theme, focused && editor_focus(p) == .Search, pointer);
 	   r != .Ok {return r}
 	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}
 	if len(p.items) == 0 && filtering(p) {
@@ -3471,7 +3810,7 @@ editor_draw :: proc(
 		if reset_button_draw(list, theme, parts.reset, modified, index == p.hover_reset, selected, pointer, s) !=
 		   .None {return .Ok}
 	}
-	if p.profile_menu.open {
+	if profile_menu_shown(p) {
 		return menu_draw(&p.profile_menu, list, text, theme,
 		                 l.page.x + l.page.width, l.page.y + l.page.height, s, pointer)
 	}

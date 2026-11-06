@@ -60,7 +60,8 @@ palette_binding_outcome :: proc(p: ^Palette, outcome: Editor_Outcome) -> Outcome
 		append(&p.chosen_value, value)
 		return .Set_Setting
 	}
-	if p.binding.popup == .None && !p.binding.capturing && p.binding.focus != .Positions {
+	b := &p.binding
+	if editor_popup(b) == .None && !editor_capturing(b) && editor_focus(b) != .Positions {
 		palette_edit_cancel(p)
 	}
 	return .Changed
@@ -70,7 +71,7 @@ palette_binding_outcome :: proc(p: ^Palette, outcome: Editor_Outcome) -> Outcome
 palette_binding_saved :: proc(p: ^Palette, saved: bool) {
 	if p.edit.kind != .Shortcut {return}
 	if saved {palette_edit_cancel(p)} else {
-		p.binding.capturing, p.binding.popup, p.binding.focus = true, .None, .Control
+		editor_mode_set(&p.binding, Editor_Capturing{})
 	}
 }
 
@@ -90,16 +91,15 @@ palette_binding_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y:
 	layout := palette_binding_layout(p, l)
 	row, _ := row_rect(p, l, p.binding_result)
 	parts := palette_binding_parts(row, l.scale)
-	if p.binding.popup != .None && contains(editor_popup_rect(&p.binding, layout), x, y) {
+	if editor_popup(&p.binding) != .None && contains(editor_popup_rect(&p.binding, layout), x, y) {
 		return palette_binding_outcome(p, editor_press(&p.binding, layout, text, x, y, false))
 	}
 	if contains(parts.reset, x, y) {return palette_binding_outcome(p, .Reset)}
-	if p.binding.popup == .None && contains(parts.positions, x, y) {
+	if editor_popup(&p.binding) == .None && contains(parts.positions, x, y) {
 		p.binding.physical = !p.binding.physical
 		return .Changed
 	}
 	if contains(parts.field, x, y) {
-		p.binding.capturing = false
 		open_shortcuts(&p.binding)
 		return .Changed
 	}
@@ -128,7 +128,7 @@ palette_binding_draw :: proc(
 	_ = reset_button_draw(list, theme, parts.reset, modified, contains(parts.reset, pointer.x, pointer.y),
 	                      index == p.selected, pointer, l.scale)
 	if p.edit.kind == .Shortcut && p.binding_result == index {
-		if p.binding.popup != .None {parts.positions = {}}
+		if editor_popup(&p.binding) != .None {parts.positions = {}}
 		result := control_draw(&p.binding, editor_row(&p.binding), parts, true, list, text, theme,
 		                       l.viewport, l.scale)
 		_ = render.push_layer(list, l.list)

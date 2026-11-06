@@ -18,13 +18,14 @@ profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testi
 	x, y := profile_center(parts.more)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
 	testing.expect(t, p.profile_menu.open)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	surface, _ := ui.menu_layout(&p.profile_menu, 1200, 800, 1)
 	testing.expect(t, surface.x >= l.page.x && surface.x + surface.width <= l.page.x + l.page.width)
 	item := ui.menu_row_rect(&p.profile_menu, 2, 1200, 800, 1)
 	x, y = profile_center(item)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Duplicate)
-	testing.expect_value(t, p.action_id, "beta")
+	expect_profile_request(t, &p, .Duplicate, "beta")
+	testing.expect(t, !p.profile_menu.open)
 }
 
 @(test)
@@ -42,8 +43,7 @@ profile_overflow_menu_preserves_hidden_actions_and_protection :: proc(t: ^testin
 		testing.expect_value(t, p.profile_menu.items[expected - 1].label, "Delete profile")
 		p.profile_menu.selected = expected - 2
 		testing.expect_value(t, ui.editor_key(&p, {key = .Enter, pressed = true}), ui.Editor_Outcome.Profile_Action)
-		testing.expect_value(t, p.action, ui.Profile_Action.Duplicate)
-		testing.expect_value(t, p.action_id, "beta")
+		expect_profile_request(t, &p, .Duplicate, "beta")
 		testing.expect(t, !p.profile_menu.open)
 		ui.editor_row(&p).flags += {.Protected}
 		ui.editor_profile_menu_open(&p, ui.editor_row(&p), parts)
@@ -55,6 +55,29 @@ profile_overflow_menu_preserves_hidden_actions_and_protection :: proc(t: ^testin
 
 @(private)
 always_exists :: proc(command: string) -> bool {return command != "missing.exe"}
+
+// Takes the page's pending request and checks it names `action` on `id`.
+@(private)
+expect_profile_request :: proc(
+	t: ^testing.T, p: ^ui.Editor, action: ui.Profile_Action, id: string, loc := #caller_location,
+) {
+	request := ui.editor_request_take(p)
+	defer ui.editor_request_destroy(&request)
+	r, ok := request.(ui.Profile_Request)
+	testing.expect(t, ok, loc = loc)
+	testing.expect_value(t, r.action, action, loc = loc)
+	testing.expect_value(t, r.id, id, loc = loc)
+}
+
+@(private)
+expect_hidden_request :: proc(t: ^testing.T, p: ^ui.Editor, id: string, hidden: bool, loc := #caller_location) {
+	request := ui.editor_request_take(p)
+	defer ui.editor_request_destroy(&request)
+	r, ok := request.(ui.Profile_Hidden_Request)
+	testing.expect(t, ok, loc = loc)
+	testing.expect_value(t, r.id, id, loc = loc)
+	testing.expect_value(t, r.hidden, hidden, loc = loc)
+}
 
 @(private)
 profile_center :: proc(r: render.Rect) -> (f32, f32) {return r.x + r.width / 2, r.y + r.height / 2}
@@ -230,13 +253,6 @@ profile_editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 			profile = "beta", badge = "C:", detail = "beta.exe ~", kind = .Profile}, "Profiles"},
 		{{key = "profile.beta.name", title = "Name", description = "Shown in menus.",
 			value = "Beta", profile = "beta", kind = .Text}, "Profiles"},
-		{{key = "profile.beta.remove", title = "Remove Profile", description = "Remove.",
-			value = "Remove…", profile = "beta", kind = .Action}, "Profiles"},
-		{{key = "profile.beta.remove.cancel", title = "Cancel Removal", description = "Keep.",
-			value = "Cancel", profile = "beta", kind = .Action}, "Profiles"},
-		{{key = "profile.beta.remove.confirm", title = "Confirm Remove Profile",
-			description = "Remove every line.", value = "Remove Profile", profile = "beta",
-			kind = .Action}, "Profiles"},
 		{{key = "profiles.add", title = "Add Profile", description = "Add a shell.",
 			value = "Add Profile", kind = .Profile_Add}, "Profiles"},
 		{{key = "profiles.detected", title = "Detected on this PC", value = "1",
@@ -297,19 +313,15 @@ editor_profile_row_actions_write_default_hidden_and_remove :: proc(t: ^testing.T
 	profile_editor_fixture(t, &p)
 	testing.expect(t, ui.editor_select_key(&p, "profile.alpha"))
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Tab})), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.focus, ui.Editor_Focus.Control)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	testing.expect_value(t, p.profile_control, ui.Profile_Control.Radio)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Default)
-	testing.expect_value(t, p.action_id, "alpha")
-	ui.editor_action_clear(&p)
+	expect_profile_request(t, &p, .Default, "alpha")
 
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Arrow_Right})), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, p.profile_control, ui.Profile_Control.Hidden)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Space, text = " "})), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Hidden)
-	testing.expect_value(t, p.action_value, "true")
-	ui.editor_action_clear(&p)
+	expect_hidden_request(t, &p, "alpha", true)
 
 	testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
 	ui.editor_profile_expand(&p, "beta")
@@ -318,15 +330,11 @@ editor_profile_row_actions_write_default_hidden_and_remove :: proc(t: ^testing.T
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Arrow_Right})), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, p.profile_control, ui.Profile_Control.Hidden)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Space, text = " "})), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Hidden)
-	testing.expect_value(t, p.action_value, "false")
-	ui.editor_action_clear(&p)
+	expect_hidden_request(t, &p, "beta", false)
 
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Delete})), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Remove)
-	testing.expect_value(t, p.action_id, "beta")
-	testing.expect_value(t, p.remove_confirm, "")
+	expect_profile_request(t, &p, .Remove, "beta")
 	ui.editor_error_set(&p, "beta", "profile.beta.name", "Another profile uses this name.")
 	testing.expect_value(t, p.error_text, "Another profile uses this name.")
 	ui.editor_select_key(&p, "profile.alpha")
@@ -345,15 +353,12 @@ editor_detected_section_toggles_and_enables :: proc(t: ^testing.T) {
 	testing.expect(t, profile_item_index(&p, "profile.gamma") >= 0)
 	testing.expect(t, ui.editor_select_key(&p, "profile.gamma"))
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Enable)
-	testing.expect_value(t, p.action_id, "gamma")
+	expect_profile_request(t, &p, .Enable, "gamma")
 
-	ui.editor_action_clear(&p)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Tab})), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, p.profile_control, ui.Profile_Control.Enable)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Space, text = " "})), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Enable)
-	testing.expect_value(t, p.action_id, "gamma")
+	expect_profile_request(t, &p, .Enable, "gamma")
 }
 
 @(test)
@@ -382,11 +387,9 @@ editor_profile_default_row_has_no_remove_action :: proc(t: ^testing.T) {
 	ui.editor_filter(&p)
 	testing.expect(t, ui.editor_select_key(&p, "profile.default"))
 	testing.expect(t, !ui.editor_select_key(&p, "profile.default.remove"))
-	ui.editor_profile_remove_ask(&p, "default")
-	testing.expect_value(t, p.remove_confirm, "")
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Tab})), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Delete})), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.remove_confirm, "")
+	testing.expect(t, p.request == nil)
 
 	layout := ui.editor_layout({0, 40, 1200, 4000}, 1)
 	index := profile_item_index(&p, "profile.default")
@@ -410,15 +413,61 @@ editor_profile_drag_requests_an_insertion_slot :: proc(t: ^testing.T) {
 	handle := ui.editor_profile_parts(&p, l, alpha_index).handle
 	x, y := profile_center(handle)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.drag, ui.Editor_Drag.Profile_Order)
+	testing.expect(t, ui.editor_order_dragging(&p, .Profiles))
+	testing.expect_value(t, ui.editor_order_profile(&p), "alpha")
 	beta_index := profile_item_index(&p, "profile.beta")
 	beta_row := ui.editor_row_parts(&p, l, beta_index).row
 	testing.expect(t, ui.editor_drag(&p, l, nil, beta_row.x + 40, beta_row.y + beta_row.height - 2))
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Order)
-	testing.expect_value(t, p.action_id, "alpha")
-	testing.expect_value(t, p.action_slot, 2)
-	testing.expect_value(t, p.action_value, "")
+	request := ui.editor_request_take(&p)
+	defer ui.editor_request_destroy(&request)
+	order, ok := request.(ui.Profile_Order_Request)
+	testing.expect(t, ok)
+	testing.expect_value(t, order.id, "alpha")
+	testing.expect_value(t, order.slot, 2)
+	testing.expect(t, !ui.editor_dragging(&p))
+	testing.expect_value(t, ui.editor_order_profile(&p), "")
+}
+
+// Escape ends a profile reorder drag whatever has the keyboard, and the drop saves nothing.
+@(test)
+editor_profile_drag_escape_cancels_without_a_request :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	profile_editor_fixture(t, &p)
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	alpha_index := profile_item_index(&p, "profile.alpha")
+	alpha_row := ui.editor_row_parts(&p, l, alpha_index).row
+	beta_row := ui.editor_row_parts(&p, l, profile_item_index(&p, "profile.beta")).row
+	x, y := profile_center(ui.editor_profile_parts(&p, l, alpha_index).handle)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Search)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
+	testing.expect(t, ui.editor_drag(&p, l, nil, x, beta_row.y + beta_row.height - 2))
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.Changed)
+	testing.expect(t, !ui.editor_dragging(&p))
+	testing.expect_value(t, ui.editor_order_profile(&p), "")
+	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.None)
+	testing.expect(t, p.request == nil)
+	ui.editor_profiles_animate(&p, false, time.tick_now())
+	testing.expect(t, !ui.editor_profiles_animating(&p))
+	testing.expect_value(t, ui.editor_row_parts(&p, l, alpha_index).row.y, alpha_row.y)
+}
+
+// A gesture the system takes away mid drop leaves nothing for the next outcome to act on.
+@(test)
+editor_profile_drag_pointer_cancel_leaves_no_request :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	profile_editor_fixture(t, &p)
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	alpha_index := profile_item_index(&p, "profile.alpha")
+	beta_row := ui.editor_row_parts(&p, l, profile_item_index(&p, "profile.beta")).row
+	x, y := profile_center(ui.editor_profile_parts(&p, l, alpha_index).handle)
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
+	testing.expect(t, ui.editor_drag(&p, l, nil, x, beta_row.y + beta_row.height - 2))
+	ui.editor_pointer_cancel(&p)
+	testing.expect(t, !ui.editor_dragging(&p))
+	testing.expect(t, p.request == nil)
 }
 
 @(test)
@@ -469,7 +518,7 @@ editor_profile_keyboard_moves_rows_expands_with_right_and_collapses_from_the_row
 	testing.expect_value(t, p.expanded, "beta")
 
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Tab})), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.focus, ui.Editor_Focus.Control)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	testing.expect_value(t, p.profile_control, ui.Profile_Control.Radio)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Arrow_Right})), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, p.profile_control, ui.Profile_Control.Hidden)
@@ -547,11 +596,8 @@ profile_trash_requests_shared_confirmation_and_protects_detected :: proc(t: ^tes
 	trash := ui.editor_profile_parts(&p, layout, index).remove
 	x, y := profile_center(trash)
 	testing.expect_value(t, ui.editor_press(&p, layout, nil, x, y, false), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, p.action, ui.Profile_Action.Remove)
-	testing.expect_value(t, p.action_id, "beta")
-	testing.expect_value(t, p.remove_confirm, "")
-	ui.editor_action_clear(&p)
+	expect_profile_request(t, &p, .Remove, "beta")
 	ui.editor_row(&p).flags += {.Protected}
 	testing.expect_value(t, ui.editor_press(&p, layout, nil, x, y, false), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.action, ui.Profile_Action.None)
+	testing.expect(t, p.request == nil)
 }

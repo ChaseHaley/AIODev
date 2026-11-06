@@ -1199,7 +1199,7 @@ draw_footer :: proc(
 		hint_text := text_styled(text, .Detail)
 		message := p.binding.message
 		if !p.binding.error {
-			message = p.binding.capturing ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
+			message = editor_capturing(&p.binding) ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
 			          "Enter replaces · Delete removes · Esc cancels"
 		}
 		return draw_text(&hint_text, list, message, l.footer.x + 12 * scale,
@@ -1433,7 +1433,7 @@ palette_draw :: proc(
 			if item.command != nil {
 				parts := palette_binding_parts(row, scale)
 				side = parts.field.x
-				if p.edit.kind == .Shortcut && p.binding_result == index && p.binding.popup == .None {
+				if p.edit.kind == .Shortcut && p.binding_result == index && editor_popup(&p.binding) == .None {
 					side = parts.positions.x
 				}
 				if result := palette_binding_draw(p, item.command, index, row, list, text, theme, l, pointer);

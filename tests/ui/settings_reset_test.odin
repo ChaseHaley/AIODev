@@ -20,8 +20,8 @@ settings_reset_all_button_accepts_keyboard_focus_without_rows :: proc(t: ^testin
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	testing.expect_value(t, ui.editor_key(&p, {key = .Tab, pressed = true, modifiers = {.Shift}}), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.focus, ui.Editor_Focus.Reset_All)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Reset_All)
 	testing.expect_value(t, ui.editor_key(&p, {key = .Enter, pressed = true}), ui.Editor_Outcome.Reset_All)
 	testing.expect_value(t, ui.editor_key(&p, {key = .Tab, pressed = true}), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.focus, ui.Editor_Focus.Search)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Search)
 }

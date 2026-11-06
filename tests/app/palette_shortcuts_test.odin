@@ -33,7 +33,7 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	testing.expect_value(t, ui.field_string(&s.palette.binding.value), "Ctrl+C")
 	palette_binding_press_key(s, {key = .C, modifiers = {.Control, .Shift}})
 	palette_binding_press_key(s, {key = .Enter})
-	testing.expect(t, s.palette.binding.capturing, "a conflicting binding remains editable")
+	testing.expect(t, ui.editor_capturing(&s.palette.binding), "a conflicting binding remains editable")
 	after, after_error := os.read_entire_file(f.path, context.temp_allocator)
 	testing.expect_value(t, after_error, nil)
 	testing.expect_value(t, string(after), string(before))

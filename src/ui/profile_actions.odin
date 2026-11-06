@@ -19,14 +19,15 @@ editor_profile_menu_open :: proc(p: ^Editor, row: ^Editor_Row, parts: Profile_Pa
 		p.profile_menu_controls[index] = item.control
 	}
 	menu_anchor(&p.profile_menu, parts.more.x, parts.more.y + parts.more.height)
-	p.profile_menu.open = len(p.profile_menu.items) > 0
-	p.focus = .Control
+	next: Editor_Mode = Editor_Editing{}
+	if len(p.profile_menu.items) > 0 {next = Editor_Profile_Menu{}}
+	editor_mode_set(p, next)
 	p.profile_control = .More
 }
 
 editor_profile_menu_choose :: proc(p: ^Editor) -> Editor_Outcome {
 	index := p.profile_menu.selected
-	p.profile_menu.open = false
+	editor_mode_set(p, Editor_Editing{})
 	if index < 0 || index >= len(p.profile_menu.items) {return .Changed}
 	row := editor_row(p)
 	if row == nil || row.kind != .Profile {return .Changed}

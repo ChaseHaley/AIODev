@@ -51,7 +51,7 @@ profile_add_and_remove_preserve_settings_scroll :: proc(t: ^testing.T) {
 	e.scroll = 35
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
 	testing.expect_value(t, e.scroll, 35)
-	ui.editor_action_set(e, .Remove, "profile-1", "")
+	ui.editor_request_set(e, ui.Profile_Request{.Remove, strings.clone("profile-1")})
 	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
 	testing.expect_value(t, app.editor_profile_remove_title(&f.state, f.state.windows[0]), "Delete New Profile?")
 	e.scroll = 35
@@ -214,7 +214,8 @@ profile_table_writes_default_hidden_and_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_row(e).key, "profile.beta")
 	testing.expect_value(t, ui.editor_key(e, {key = .Tab, pressed = true}), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, ui.editor_key(e, {key = .Enter, pressed = true}), ui.Editor_Outcome.Profile_Action)
-	testing.expect_value(t, e.action, ui.Profile_Action.Default)
+	request, requested := e.request.(ui.Profile_Request)
+	testing.expect(t, requested && request.action == .Default)
 	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
 	testing.expect(t, profile_file_has(f.path, `shell.default_profile = "beta"`))
 	testing.expect(t, strings.contains(f.state.windows[0].editor.message, "Default profile saved"))
@@ -275,7 +276,7 @@ profile_table_rejects_empty_duplicate_and_missing_commands :: proc(t: ^testing.T
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.name")) {return}
 	testing.expect_value(t, ui.editor_row(e).key, "profile.alpha.name")
 	ui.field_set(&e.value, "beta")
-	e.focus = .Control
+	ui.editor_focus_row(e)
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
 	testing.expect(t, f.state.windows[0].editor.error)
 	testing.expect_value(t, f.state.windows[0].editor.error_key, "profile.alpha.name")
@@ -289,13 +290,13 @@ profile_table_rejects_empty_duplicate_and_missing_commands :: proc(t: ^testing.T
 
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.name")) {return}
 	ui.field_set(&e.value, "   ")
-	e.focus = .Control
+	ui.editor_focus_row(e)
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
 	testing.expect_value(t, f.state.windows[0].editor.error_text, "A profile needs a name.")
 
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.command")) {return}
 	ui.field_set(&e.value, "missing.exe")
-	e.focus = .Control
+	ui.editor_focus_row(e)
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
 	testing.expect(t, strings.contains(f.state.windows[0].editor.error_text, "Command not found"))
 	testing.expect_value(t, profile_file_text(f.path), before)
@@ -317,7 +318,7 @@ profile_table_and_inline_save_agree_on_detected_names :: proc(t: ^testing.T) {
 	profile_press(&f, {key = .Enter})
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.name")) {return}
 	ui.field_set(&e.value, "Alpha")
-	e.focus = .Control
+	ui.editor_focus_row(e)
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
 	testing.expect(t, !e.error)
 	testing.expect(t, profile_file_has(f.path, `profile.alpha.name = "Alpha"`))
@@ -325,13 +326,13 @@ profile_table_and_inline_save_agree_on_detected_names :: proc(t: ^testing.T) {
 	before := profile_file_text(f.path)
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.name")) {return}
 	ui.field_set(&e.value, "  bETA  ")
-	e.focus = .Control
+	ui.editor_focus_row(e)
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
 	testing.expect_value(t, e.error_text, "Another profile uses this name.")
 	testing.expect_value(t, profile_file_text(f.path), before)
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.command")) {return}
 	ui.field_set(&e.value, " \t ")
-	e.focus = .Control
+	ui.editor_focus_row(e)
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
 	testing.expect_value(t, e.error_text, "A profile needs a command line.")
 	testing.expect_value(t, profile_file_text(f.path), before)
@@ -345,7 +346,7 @@ profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^tes
 	e := profile_open(&f)
 	for key, index in ([?]string{"profiles.add", "profiles.add", "profile.alpha.duplicate", "profile.alpha.duplicate"}) {
 		if key == "profile.alpha.duplicate" {
-			e.action, e.action_id = .Duplicate, strings.clone("alpha")
+			ui.editor_request_set(e, ui.Profile_Request{.Duplicate, strings.clone("alpha")})
 			app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
 		} else {
 			if !testing.expect(t, ui.editor_reveal(e, key)) {return}
@@ -362,7 +363,7 @@ profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^tes
 		for row in table.rows {if row.id == id {testing.expect_value(t, row.note, "")}}
 		if !testing.expect(t, ui.editor_reveal(e, fmt.tprintf("profile.%s.name", id))) {return}
 		ui.field_set(&e.value, name)
-		e.focus = .Control
+		ui.editor_focus_row(e)
 		app.editor_outcome(&f.state, f.state.windows[0], .Save)
 		testing.expect(t, !e.error)
 		testing.expect_value(t, profile_value(&f, id, "name"), name)
@@ -411,7 +412,7 @@ profile_table_includes_detected_and_confirms_custom_removal :: proc(t: ^testing.
 	testing.expect(t, !f.state.windows[0].profile_remove_confirm.open)
 
 	testing.expect(t, ui.editor_select_key(e, "profile.beta"))
-	e.focus = .Control
+	ui.editor_focus_row(e)
 	profile_press(&f, {key = .Delete})
 	testing.expect(t, f.state.windows[0].profile_remove_confirm.open)
 	app.editor_profile_remove_finish(&f.state, f.state.windows[0], false)
@@ -453,11 +454,9 @@ profile_table_keeps_the_built_in_default_and_resets_a_removed_default :: proc(t:
 	testing.expect_value(t, f.state.settings.profiles.default_id, "default")
 
 	if !testing.expect(t, ui.editor_select_key(e, "profile.default")) {return}
-	ui.editor_profile_remove_ask(e, "default")
-	testing.expect_value(t, e.remove_confirm, "")
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect_value(t, e.remove_confirm, "")
+	testing.expect(t, !f.state.windows[0].profile_remove_confirm.open)
 	testing.expect(t, settings.profile_find(&f.state.settings.profiles, "default") != nil)
 }
 

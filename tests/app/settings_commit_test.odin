@@ -73,7 +73,7 @@ settings_commit_publishes_across_writers_and_preserves_the_other_windows_draft :
 	testing.expect_value(t, ui.field_string(&second.value), "19")
 	testing.expect_value(t, second.value.cursor, 1)
 	testing.expect_value(t, second.value.anchor, 0)
-	testing.expect_value(t, second.focus, ui.Editor_Focus.Control)
+	testing.expect_value(t, ui.editor_focus(second), ui.Editor_Focus.Control)
 	testing.expect_value(t, second.message, "Pending field")
 	testing.expect(t, second.error)
 	updated = commit_text(t, first.source, "tabs.orientation", "vertical")
@@ -188,22 +188,22 @@ settings_commit_keeps_the_origins_color_picker_and_hsv_after_drag_release :: pro
 	p := profile_open(&f)
 	w := f.state.windows[0]
 	app.settings_reveal_page(&f.state, p, {key = "colors.cursor", focus = .Control})
-	cases := [?]struct {value: string, hsv: [3]f32, drag: ui.Editor_Drag} {
+	cases := [?]struct {value: string, hsv: [3]f32, drag: ui.Color_Drag} {
 		{"#000000", {120, 0.75, 0}, .Ramp},
 		{"#408020", {100, 0.75, 0.5}, .Wheel},
 	}
 	for entry in cases {
 		ui.field_set(&p.value, entry.value)
-		p.popup, p.hsv, p.drag = .Color, entry.hsv, entry.drag
+		p.mode, p.hsv = ui.Editor_Color_Popup{entry.drag}, entry.hsv
 		outcome := ui.editor_release(p)
 		if !testing.expect_value(t, outcome, ui.Editor_Outcome.Save) {return}
 		app.editor_outcome(&f.state, w, outcome)
 		testing.expect(t, !p.error)
 		testing.expect_value(t, ui.editor_row(p).key, "colors.cursor")
 		testing.expect_value(t, ui.field_string(&p.value), entry.value)
-		testing.expect_value(t, p.popup, ui.Editor_Popup.Color)
+		testing.expect_value(t, ui.editor_popup(p), ui.Editor_Popup.Color)
 		testing.expect_value(t, p.hsv, entry.hsv)
-		testing.expect_value(t, p.drag, ui.Editor_Drag.None)
+		testing.expect(t, !ui.editor_dragging(p))
 	}
 }
 
@@ -217,10 +217,10 @@ settings_commit_rebuilds_a_clean_peers_picker_hsv_when_its_effective_color_chang
 	updated := theme_commit_text(t, first.source, "cursor", "#000000")
 	if !testing.expect_value(t, app.settings_commit(s, first.source, updated, first), settings.Save_Error.None) {return}
 	app.settings_reveal_page(s, second, {key = "colors.cursor", focus = .Control})
-	second.popup, second.hsv = .Color, {120, 0.75, 0}
+	second.mode, second.hsv = ui.Editor_Color_Popup{}, {120, 0.75, 0}
 	updated = theme_commit_text(t, first.source, "cursor", "#408020")
 	if !testing.expect_value(t, app.settings_commit(s, first.source, updated, first), settings.Save_Error.None) {return}
-	testing.expect_value(t, second.popup, ui.Editor_Popup.Color)
+	testing.expect_value(t, ui.editor_popup(second), ui.Editor_Popup.Color)
 	testing.expect_value(t, ui.field_string(&second.value), "#408020")
 	h, saturation, value := settings.rgb_to_hsv({64, 128, 32})
 	testing.expect_value(t, second.hsv, [3]f32{h, saturation, value})
@@ -230,5 +230,5 @@ settings_commit_rebuilds_a_clean_peers_picker_hsv_when_its_effective_color_chang
 	updated = commit_text(t, first.source, "pane.gap", "9")
 	if !testing.expect_value(t, app.settings_commit(s, first.source, updated, first), settings.Save_Error.None) {return}
 	testing.expect_value(t, second.hsv, [3]f32{120, 0.75, 0})
-	testing.expect_value(t, second.popup, ui.Editor_Popup.Color)
+	testing.expect_value(t, ui.editor_popup(second), ui.Editor_Popup.Color)
 }
