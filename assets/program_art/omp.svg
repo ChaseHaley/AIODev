@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+<!-- omp (oh-my-pi) mark, MIT License, Copyright (c) 2025-2026 Can Bölük, (c) 2026 Stencil Labs, Inc.
+     Source: https://github.com/can1357/oh-my-pi/blob/72eb6be5a1d2121200019c11f12daa8ea0fb50bc/assets/hero.png
+     Modified: traced from the 179 x 171 pixel mark into a centred 24-unit square, rounded to
+     0.001, with the pink-to-blue gradient drawn as its middle colour. -->
+<path fill="#BE5DE4" d="M1,1.492L23,1.492L23,6.039L17.592,6.039L17.592,22.508L13.045,22.508L13.045,6.039L8.62,6.039L8.62,16.978L4.073,16.978L4.073,6.039L1,6.039Z"/>
+</svg>
