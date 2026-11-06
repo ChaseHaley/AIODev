@@ -198,9 +198,9 @@ tabs_dragged_to_another_window_join_its_workspace :: proc(t: ^testing.T) {
 	app.tick(&state)
 }
 
-// A workspace holds one Settings pane, so a second cannot join it and the drop leaves everything in place.
+// Closing the destination cancels a drag held over it rather than leaving it pointing at nothing.
 @(test)
-tab_with_settings_cannot_join_a_workspace_that_has_settings :: proc(t: ^testing.T) {
+closing_the_destination_cancels_a_tab_drag :: proc(t: ^testing.T) {
 	state: app.App
 	fixture, ok := across_begin(t, &state)
 	defer across_end(t, &state, fixture)
@@ -208,24 +208,62 @@ tab_with_settings_cannot_join_a_workspace_that_has_settings :: proc(t: ^testing.
 	destination := state.windows[0]
 	source := across_second_window(t, &state, destination)
 	if source == nil {return}
-	app.editor_open(&state, destination)
-	app.editor_open(&state, source)
-	tabs, home_tabs := len(source.workspace.tabs), len(destination.workspace.tabs)
-	selected := source.workspace.selected
-	tab_drag_over_window(&state, source, destination, selected, 0, 10)
-	testing.expect(t, source.tab_drag.destination_refused)
-	testing.expect_value(t, destination.tab_incoming.count, 0)
-	app.tab_drag_release(&state, source)
-	testing.expect_value(t, len(source.workspace.tabs), tabs)
-	testing.expect_value(t, len(destination.workspace.tabs), home_tabs)
-	testing.expect(t, !source.tab_drag.pressed)
-
-	// Closing the destination cancels a drag held over it rather than leaving it pointing at nothing.
-	tab_drag_over_window(&state, source, destination, selected, 0, 10)
+	tab_drag_over_window(&state, source, destination, 0, 0, 10)
 	testing.expect(t, source.tab_drag.pressed)
 	app.window_close(&state, destination)
 	testing.expect(t, !source.tab_drag.pressed)
-	testing.expect_value(t, len(source.workspace.tabs), tabs)
+	testing.expect_value(t, len(source.workspace.tabs), 1)
+	app.tick(&state)
+}
+
+// The app keeps one settings tab: opening it again from anywhere focuses that tab, wherever it has gone.
+@(test)
+settings_opens_once_and_focuses_the_existing_tab :: proc(t: ^testing.T) {
+	state: app.App
+	fixture, ok := across_begin(t, &state)
+	defer across_end(t, &state, fixture)
+	if !ok {return}
+	first := state.windows[0]
+	second := across_second_window(t, &state, first)
+	if second == nil {return}
+	home, other := first.workspace, second.workspace
+
+	testing.expect(t, app.editor_open(&state, first) == first)
+	settings_index := app.settings_tab_index(home)
+	if !testing.expect(t, settings_index >= 0) {return}
+	tabs, other_tabs := len(home.tabs), len(other.tabs)
+
+	// From another window: no new tab there, and the tab's own window shows it.
+	app.tab_select(&state, first, settings_index == 0 ? 1 : 0)
+	testing.expect(t, !app.settings_active(first))
+	testing.expect(t, app.editor_open(&state, second) == first)
+	testing.expect_value(t, len(other.tabs), other_tabs)
+	testing.expect_value(t, len(home.tabs), tabs)
+	testing.expect_value(t, home.selected, settings_index)
+	testing.expect(t, app.settings_active(first))
+	testing.expect(t, !app.settings_active(second))
+
+	// A reveal reaches the page in the window showing it.
+	app.settings_reveal(&state, second, {key = "font.size", search = .Clear})
+	testing.expect_value(t, ui.editor_row(&first.editor).key, "font.size")
+	testing.expect(t, !second.editor.open)
+
+	// The tab can be dragged to another window, and the page goes with it.
+	tab_drag_over_window(&state, first, second, settings_index, 0, 10)
+	app.tab_drag_release(&state, first)
+	testing.expect_value(t, app.settings_tab_index(home), -1)
+	testing.expect(t, app.settings_tab_index(other) >= 0)
+	testing.expect(t, second.editor.open && !first.editor.open)
+	testing.expect(t, app.editor_open(&state, first) == second)
+	testing.expect_value(t, len(other.tabs), other_tabs + 1)
+	testing.expect_value(t, app.settings_tab_index(home), -1)
+
+	// With no window showing its workspace, the window asking takes the workspace over.
+	app.window_close(&state, second)
+	testing.expect(t, app.editor_open(&state, first) == first)
+	testing.expect(t, first.workspace == other)
+	testing.expect(t, app.settings_active(first))
+	testing.expect_value(t, len(other.tabs), other_tabs + 1)
 	app.tick(&state)
 }
 

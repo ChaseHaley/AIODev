@@ -86,18 +86,13 @@ tab_drag_over :: proc(app: ^App, w, destination: ^Window, x, y: f32) {
 	if destination == nil || d.destination_window != destination.id {
 		tab_incoming_close(app, d.destination_window)
 	}
-	d.destination_window, d.destination_refused = 0, false
+	d.destination_window = 0
 	if destination == nil {return}
 	d.destination_window = destination.id
 	d.elsewhere = false
 	if d.new_window {w.dirty = true}
 	d.new_window = false
 	drag_thumbnail_sync(app, w, &d.thumbnail, {}, false, 0, 0)
-	if !tabs_can_join(w.workspace, destination.workspace) {
-		d.destination_refused = true
-		tab_incoming_close(app, destination.id)
-		return
-	}
 	incoming := &destination.tab_incoming
 	count := tabs_marked_count(w.workspace)
 	slot := tab_drop_slot(app, destination, count, x, y)
@@ -349,7 +344,7 @@ tabs_to_workspace :: proc(app: ^App, source_window, destination_window: ^Window,
 	return true
 }
 
-// Finishes a drag held over another window. A refused or failed drop puts the tabs back.
+// Finishes a drag held over another window. A failed drop puts the tabs back.
 tab_drag_release_on_window :: proc(app: ^App, w: ^Window) {
 	d := w.tab_drag
 	// Moving the tabs ends this window's gestures, which must not restore the order being kept.
@@ -359,19 +354,13 @@ tab_drag_release_on_window :: proc(app: ^App, w: ^Window) {
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
 	d.preview_window = 0
 	destination := window_find(app, d.destination_window)
-	if destination != nil && !d.destination_refused {
-		if tabs_to_workspace(app, w, destination, destination.tab_incoming.slot) {
-			delete(d.order)
-			return
-		}
+	if destination != nil && tabs_to_workspace(app, w, destination, destination.tab_incoming.slot) {
+		delete(d.order)
+		return
 	}
 	w.tab_drag = d
 	tab_drag_cancel(app, w)
-	if d.destination_refused {
-		notify(app, .Warning, "That workspace already has Settings open. The tabs stayed here.")
-	} else {
-		notify(app, .Error, "Could not move the tabs. Both windows were preserved.")
-	}
+	notify(app, .Error, "Could not move the tabs. Both windows were preserved.")
 }
 
 @(private = "file")

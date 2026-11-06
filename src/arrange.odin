@@ -55,10 +55,9 @@ Tab_Drag :: struct {
 	// Past every app window the drag offers a new window, prepared hidden before the drop.
 	new_window, preview_failed:  bool,
 	preview_window:              platform.Window_Id,
-	// Over another window the drop joins its workspace, unless content in the tabs cannot go there.
+	// Over another window the drop joins its workspace.
 	destination_window:          platform.Window_Id,
-	destination_refused:         bool,
-	pointer:                     [2]f32,
+	pointer:                    [2]f32,
 	thumbnail:                   Drag_Thumbnail,
 }
 
