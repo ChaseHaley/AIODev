@@ -357,6 +357,62 @@ closed_operations :: proc(t: ^testing.T) {
 	pty.destroy(&p)
 }
 
+@(private = "file")
+Console_Race :: struct {
+	p:          ^pty.Pty,
+	unexpected: pty.Error,
+}
+
+// Resizes until the console reports Closed; any other failure is recorded.
+@(private = "file")
+resize_until_closed :: proc(race: ^Console_Race) {
+	for i := 0;; i += 1 {
+		switch err := pty.resize(race.p, u16(80 + i % 20), 25); err {
+		case .None:
+		case .Closed:
+			return
+		case .Invalid_Argument, .Out_Of_Memory, .Read, .Write, .Resize, .Wait, .Terminate:
+			race.unexpected = err
+			return
+		}
+	}
+}
+
+@(private = "file")
+close_from_thread :: proc(p: ^pty.Pty) {
+	pty.close_console(p)
+}
+
+// Closing waits for resizes in flight and is idempotent across threads: every close returns, and
+// every resize either succeeds or reports Closed.
+@(test)
+concurrent_close_and_resize :: proc(t: ^testing.T) {
+	r: Run
+	if !start(t, &r, "cmd.exe /d /c ping -n 30 127.0.0.1 > nul") {return}
+	races: [2]Console_Race
+	threads: [4]^thread.Thread
+	for &race, i in races {
+		race.p = &r.p
+		threads[i] = thread.create_and_start_with_poly_data(&race, resize_until_closed)
+	}
+	time.sleep(20 * time.Millisecond)
+	for i in 2 ..< len(threads) {
+		threads[i] = thread.create_and_start_with_poly_data(&r.p, close_from_thread)
+	}
+	pty.close_console(&r.p)
+	for thread_handle in threads {
+		if !testing.expect(t, thread_handle != nil) {continue}
+		thread.join(thread_handle)
+		thread.destroy(thread_handle)
+	}
+	for race in races {
+		testing.expect_value(t, race.unexpected, pty.Error.None)
+	}
+	testing.expect_value(t, pty.resize(&r.p, 80, 25), pty.Error.Closed)
+	testing.expect_value(t, pty.terminate(&r.p), pty.Error.None)
+	finish(t, &r)
+}
+
 // build.ps1 places the bundled ConPTY beside every executable, so consoles get grapheme widths (D-044).
 @(test)
 uses_bundled_conpty :: proc(t: ^testing.T) {
