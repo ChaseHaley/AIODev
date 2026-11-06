@@ -18,7 +18,7 @@ terminal_scrollbar_geometry :: proc(
 	lines, ok := term.scrollbar(entry.session)
 	if !ok {return}
 	s := w.scale
-	header := pane_header_height(s, app.settings.pane.show_headers)
+	header := pane_header_of(w, pane)
 	area := render.Rect{pane.rect.x, pane.rect.y + header, pane.rect.width - 2 * s,
 		pane.rect.height - header - 4 * s}
 	extent := ui.Scroll_Extent{int(lines.total), int(lines.len), int(lines.offset)}
@@ -33,18 +33,17 @@ terminal_scrollbar_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, e
 terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	if !e.pressed || e.button != .Left {return false}
 	x, y := f32(e.x), f32(e.y)
-	for pane in w.panes {
-		entry := workspace_session_for_content(app, pane.content)
-		bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
-		if !visible || !ui.scrollbar_contains(bar, x, y) {continue}
-		w.scroll_session = entry.id
-		if delta := ui.scrollbar_press(&w.scroll_drag, bar, y) - bar.extent.offset; delta != 0 {
-			term.scroll_viewport(entry.session, delta)
-		}
-		w.dirty = true
-		return true
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found {return false}
+	entry := workspace_session_for_content(app, pane.content)
+	bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
+	if !visible || !ui.scrollbar_contains(bar, x, y) {return false}
+	w.scroll_session = entry.id
+	if delta := ui.scrollbar_press(&w.scroll_drag, bar, y) - bar.extent.offset; delta != 0 {
+		term.scroll_viewport(entry.session, delta)
 	}
-	return false
+	w.dirty = true
+	return true
 }
 
 terminal_scrollbar_move :: proc(app: ^App, w: ^Window, y: f32) {
@@ -60,13 +59,13 @@ terminal_scrollbar_move :: proc(app: ^App, w: ^Window, y: f32) {
 	w.scroll_drag = {}
 }
 
-// The session whose visible track holds the point, or 0.
+// The session whose visible track holds the point on the topmost pane there, or 0.
 terminal_scrollbar_at :: proc(app: ^App, w: ^Window, x, y: f32) -> u32 {
-	for pane in w.panes {
-		entry := workspace_session_for_content(app, pane.content)
-		bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
-		if visible && ui.scrollbar_contains(bar, x, y) {return entry.id}
-	}
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found {return 0}
+	entry := workspace_session_for_content(app, pane.content)
+	bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
+	if visible && ui.scrollbar_contains(bar, x, y) {return entry.id}
 	return 0
 }
 

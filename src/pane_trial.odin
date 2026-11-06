@@ -44,6 +44,8 @@ pane_trial_evaluate :: proc(
 	area, gap := pane_view_split_area(app, w), window_gap(app, w)
 	layout.compute(trial, area, gap, &rects, false)
 	layout.compute(original, area, gap, &before, false)
+	layout.floats_place(trial, floating_area(w), gap, floating_header_height(w), &rects)
+	layout.floats_place(original, floating_area(w), gap, floating_header_height(w), &before)
 	if !pane_minimum_allows(app, w, rects[:], before[:], notify_failure) {return {error = .Minimum}}
 	for pane in rects {if pane.node == added {return {rect = pane.rect}}}
 	return {error = .Invalid}

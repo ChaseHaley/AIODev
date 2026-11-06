@@ -39,6 +39,8 @@ Cursor_Shape :: enum {
 	Hand,
 	Resize_Horizontal,
 	Resize_Vertical,
+	Resize_Northwest_Southeast,
+	Resize_Northeast_Southwest,
 	Resize_All,
 	Hidden,
 }

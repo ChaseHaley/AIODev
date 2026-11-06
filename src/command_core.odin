@@ -25,6 +25,7 @@ ACTION_ARGUMENTS :: #partial [Action]Action_Arguments {
 	.Split        = {accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program}},
 	.Rename_Pane  = {accepted = {.Text}},
 	.Open_Markdown = {accepted = {.Text, .Direction, .Ratio, .Focus}},
+	.New_Floating = {accepted = {.Focus, .Directory, .Name, .Profile, .Program}},
 	.Pane_List    = {hidden = true},
 	.Pane_Status  = {hidden = true},
 	.Pane_Read    = {accepted = {.Lines}, hidden = true},
@@ -130,6 +131,8 @@ command_invoke :: proc(
 		return control_split(app, window, target, invocation)
 	case .Open_Markdown:
 		return control_markdown_open(app, window, target, invocation)
+	case .New_Floating:
+		return control_floating_new(app, window, target, invocation)
 	}
 	if window == nil {return outcome_failure(.Failed, "the pane's workspace is not open in a window")}
 	if action == .Rename_Pane && .Text in invocation.given {
@@ -139,6 +142,13 @@ command_invoke :: proc(
 		return {}
 	}
 	if window.workspace.selected != target.pane.tab {tab_select(app, window, target.pane.tab)}
+	if action == .Minimize_Floating {
+		if floating, ok := layout.float_of(window.tree, target.pane.node); ok && floating.minimized {
+			pane_focus(app, window, target.pane.node)
+			layout_state_touch(app)
+			return {}
+		}
+	}
 	pane_focus(app, window, target.pane.node)
 	if linked := pane_link_window_of(app, target.pane.content); linked != nil {
 		if action != .Pane_Focus {
@@ -391,6 +401,24 @@ control_split :: proc(
 		return outcome_failure(.Failed, "could not create a pane")
 	}
 	return control_created(app, shown, id, invocation.name)
+}
+
+// A shell floating above the target pane's tab, in the target's directory unless one is given.
+@(private)
+control_floating_new :: proc(
+	app: ^App,
+	w: ^Window,
+	target: Pane_Target,
+	invocation: commands.Invocation,
+) -> Outcome {
+	if failure, ok := control_profile_check(app, invocation.profile); !ok {return failure}
+	launch := Pane_Launch{invocation.program, invocation.directory, invocation.profile}
+	if launch.directory == "" && target.pane.session != nil {
+		launch.directory, _ = pane_directory(app, target.pane.session)
+	}
+	id, ok := floating_open(app, w, target.workspace, target.pane.tab, launch, invocation.focus)
+	if !ok {return outcome_failure(.Failed, "could not open a float")}
+	return control_created(app, w, id, invocation.name)
 }
 
 @(private, require_results)

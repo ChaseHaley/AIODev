@@ -1,5 +1,6 @@
 package main
 
+import "aio:layout"
 import "aio:platform"
 import "aio:ui"
 import "core:time"
@@ -19,13 +20,14 @@ motion_active :: proc(app: ^App) -> bool {
 		   ui.motion_active(w.tab_underline) ||
 		   ui.motion_active(w.tab_incoming.ghost) ||
 		   confirmation_active(w) { return true }
-		if ui.control_active(w.workspace_motion) { return true }
+		if ui.control_active(w.workspace_motion) || ui.control_active(w.float_header_motion) { return true }
+		for control in w.float_header_controls { if ui.control_active(control) { return true } }
 		if ui.find_is_open(&w.find) && ui.find_animating(&w.find) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
 		if ui.editor_profiles_animating(&w.editor) { return true }
-		if w.header_height > 0 || w.split_overlay {
+		if w.header_height > 0 || w.split_overlay || window_floats_shown(w) {
 			for pane in w.views {for control in pane.header_controls {if ui.control_active(control) {return true}}}
 		}
 	}
@@ -98,7 +100,7 @@ update_motion :: proc(app: ^App) {
 		pane_drag_animate(app, w, app.animations, now)
 		if ui.editor_profiles_animate(&w.editor, app.animations, now) {w.dirty = true}
 		controls_changed := false
-		if w.header_height > 0 || w.split_overlay {
+		if w.header_height > 0 || w.split_overlay || window_floats_shown(w) {
 			for &pane in w.views {
 				for &control, i in pane.header_controls {
 					controls_changed =
@@ -113,6 +115,21 @@ update_motion :: proc(app: ^App) {
 				}
 			}
 		}
+		// The float header under the pointer, or the one moving its float, takes the animation; a header
+		// the pointer left keeps it while it fades.
+		header := w.float_header_hover
+		moving := w.float_drag.pressed && w.float_drag.header
+		if moving {header = layout.float_root(w.tree, layout.find_content(w.tree, w.float_drag.content))}
+		if header != layout.INVALID_NODE {w.float_header_shown = header}
+		active := header != layout.INVALID_NODE
+		changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
+		for &control, i in w.float_header_controls {
+			action := Float_Header_Action(i + 1)
+			over := w.float_header_hover != layout.INVALID_NODE && w.float_header_action == action
+			pressed := ui.armed_is(w.float_header_armed, action)
+			changed = ui.control_update(&control, over, pressed, app.animations, now) || changed
+		}
+		if changed {w.dirty = true}
 		if ui.find_is_open(&w.find) && ui.find_animate(&w.find, app.animations, now) {w.dirty = true}
 		confirmation_advance(app, w, now)
 		if rail_changed || tabs_changed || controls_changed {w.dirty = true}

@@ -1,5 +1,6 @@
 package main
 
+import "aio:layout"
 import "aio:settings"
 import "core:strings"
 
@@ -40,6 +41,12 @@ rename_target_commit :: proc(
 		for tab in w.workspace.tabs {tab_update_title(app, tab)}
 		window_update_title(app, w)
 		w.dirty = true
+		if target.kind == .Pane && w.tree != nil {
+			node := layout.find_content(w.tree, {.Terminal, target.id})
+			if floating, ok := layout.float_of(w.tree, node); ok && floating.minimized {
+				floating_capsules_refresh(app, w)
+			}
+		}
 	case .Workspace:
 		for window in app.windows {window_relayout(app, window)}
 		workspace_pickers_refresh(app)

@@ -832,21 +832,56 @@ when AIO_CONTROL {
 							fmt.tprintf("%d", pane.content.id),
 						},
 					); err != nil {return nil, .Out_Of_Memory}
+					if floating, floated := layout.float_of(&tab.tree, layout.Node_Id(n)); floated {
+						b := floating.bounds
+						floating_state := [?]control.State_Entry {
+							{
+								fmt.tprintf("%s.pane.%d.float", prefix, n),
+								fmt.tprintf("%g,%g,%g,%g", b.x, b.y, b.width, b.height),
+							},
+							{
+								fmt.tprintf("%s.pane.%d.minimized", prefix, n),
+								fmt.tprintf("%t", floating.minimized),
+							},
+						}
+						if _, err := append(&entries, ..floating_state[:]); err != nil {
+							return nil, .Out_Of_Memory
+						}
+					}
 				}
 			}
-			if _, err := append(
-				&entries,
-				control.State_Entry{fmt.tprintf("%s.panes", prefix), fmt.tprintf("%d", count)},
-			); err != nil {return nil, .Out_Of_Memory}
+			shown_floats, minimized_floats := layout.float_counts(&tab.tree)
+			tab_floats := [?]control.State_Entry {
+				{fmt.tprintf("%s.panes", prefix), fmt.tprintf("%d", count)},
+				{fmt.tprintf("%s.floating", prefix), fmt.tprintf("%d", shown_floats)},
+				{fmt.tprintf("%s.minimized", prefix), fmt.tprintf("%d", minimized_floats)},
+			}
+			if _, err := append(&entries, ..tab_floats[:]); err != nil {return nil, .Out_Of_Memory}
 		}
 		if w != nil {
 			pane_state := [?]control.State_Entry {
-				{"panes.count", fmt.tprintf("%d", len(w.panes))},
+				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
+				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
+				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(w)))},
+				{
+					"panes.capsule_group",
+					fmt.tprintf(
+						"%g,%g,%g,%g",
+						w.float_capsule_group.x,
+						w.float_capsule_group.y,
+						w.float_capsule_group.width,
+						w.float_capsule_group.height,
+					),
+				},
 				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
 				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
 				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
 				{"panes.dragging", fmt.tprintf("%t", w.pane_drag.active)},
+				{"panes.float_dragging", fmt.tprintf("%t", w.float_drag.active)},
+				{"panes.float_header_hover", fmt.tprintf("%v", w.float_header_action)},
+				{"panes.float_header_hover_value", fmt.tprintf("%g", w.float_header_motion.hover.value)},
+				{"panes.float_header_press_value", fmt.tprintf("%g", w.float_header_motion.press.value)},
 				{"tabs.dragging", fmt.tprintf("%t", w.tab_drag.active)},
 				{"tabs.drop.new_window", fmt.tprintf("%t", w.tab_drag.new_window)},
 				{"tabs.drop.preview_window", fmt.tprintf("%d", w.tab_drag.preview_window)},

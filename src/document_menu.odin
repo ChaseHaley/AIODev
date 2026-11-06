@@ -257,10 +257,9 @@ document_menu_show :: proc(
 @(private = "file")
 document_menu_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> (x, y: f32) {
 	r := pane.rect
-	area := render.Rect{r.x, r.y, r.width, r.height}
-	l := w.header_height > 0 ? ui.header_layout(area, w.scale) : ui.split_overlay_layout(area, w.scale)
+	l := pane_header_layout(w, pane)
 	width := ui.MENU_WIDTH * w.scale
-	if w.header_height == 0 && len(w.panes) > 1 {
+	if w.header_height == 0 && !pane.floating && len(w.panes) > 1 && !w.panes[1].floating {
 		return r.x + r.width - width - ui.SPACE_2 * w.scale, r.y + ui.SPACE_2 * w.scale
 	}
 	button := l.buttons[int(ui.Header_Action.Documents) - 1]

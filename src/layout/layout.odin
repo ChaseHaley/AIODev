@@ -38,10 +38,14 @@ Divider :: struct {
 }
 
 Pane :: struct {
-	content: Content,
-	order:   u64,
+	content:  Content,
+	order:    u64,
 	// Shown in its own window. The pane keeps its slot and takes no space here; see set_linked.
-	linked:  bool,
+	linked:   bool,
+	// Drawn above the tiled panes at its own rectangle. It too keeps its slot and takes no space;
+	// see floats.odin.
+	floating: bool,
+	float:    Float,
 }
 
 Split :: struct {
@@ -50,6 +54,9 @@ Split :: struct {
 	first, second: Node_Id,
 	// Shown in its own window with every pane under it, which are not marked themselves; see links.odin.
 	linked:        bool,
+	// Drawn as one floating pane group with every pane under it; see floats.odin.
+	floating:      bool,
+	float:         Float,
 }
 
 Node :: union {
@@ -63,10 +70,11 @@ Rect :: struct {
 }
 
 Pane_Rect :: struct {
-	node:    Node_Id,
-	content: Content,
-	rect:    Rect,
-	order:   u64,
+	node:     Node_Id,
+	content:  Content,
+	rect:     Rect,
+	order:    u64,
+	floating: bool,
 }
 
 @(private)
@@ -76,12 +84,15 @@ Partition :: struct {
 }
 
 Layout :: struct {
-	nodes:           [dynamic]Node,
-	root, focus:     Node_Id,
-	next_pane_order: u64,
-	zoomed:          bool,
+	nodes:            [dynamic]Node,
+	root, focus:      Node_Id,
+	next_pane_order:  u64,
+	zoomed:           bool,
 	// See panes_changed.
-	panes_changed:   bool,
+	panes_changed:    bool,
+	// The tiled pane focus returns to when a floating pane gives it up; see focus_set.
+	tiled_focus:      Node_Id,
+	next_float_stack: u64,
 }
 
 init :: proc(
@@ -241,10 +252,19 @@ wrap :: proc(
 ) {
 	if err := reserve(&l.nodes, len(l.nodes) + 2); err != nil {return INVALID_NODE, err}
 	parent := parent_of(l, node)
+	floating_value: Float
+	floating, was_floating := node_float(l, node)
+	if was_floating {floating_value = floating^; node_set_float(l, node, false)}
 	l.next_pane_order += 1
 	added := allocate_node(l, Pane{content = content, order = l.next_pane_order})
 	share := clamp(ratio, 0.05, 0.95)
-	branch := allocate_node(l, Split{axis = axis, ratio = share, first = node, second = added})
+	branch := allocate_node(
+		l,
+		Split {
+			axis = axis, ratio = share, first = node, second = added,
+			floating = was_floating, float = floating_value,
+		},
+	)
 	if parent == INVALID_NODE {
 		l.root = branch
 	} else {
@@ -286,6 +306,7 @@ swap :: proc(l: ^Layout, first, second: Node_Id) -> bool {
 	if int(first) >= len(l.nodes) || int(second) >= len(l.nodes) || first == second {return false}
 	a, a_ok := l.nodes[first].(Pane)
 	b, b_ok := l.nodes[second].(Pane)
+	// Contents trade places; each slot keeps whether it floats, so a swap never reshapes either layout.
 	if !a_ok || !b_ok {return false}
 	a.content, b.content = b.content, a.content
 	l.nodes[first], l.nodes[second] = a, b
@@ -308,9 +329,9 @@ first_shown :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
 	switch node in l.nodes[id] {
 	case Vacant:
 	case Pane:
-		if !node.linked {return id}
+		if !node.linked && !node.floating {return id}
 	case Split:
-		if node.linked {return INVALID_NODE}
+		if node.linked || node.floating {return INVALID_NODE}
 		if found := first_shown(l, node.first); found != INVALID_NODE {return found}
 		return first_shown(l, node.second)
 	}
@@ -322,9 +343,9 @@ shown_count :: proc(l: ^Layout, id: Node_Id) -> int {
 	switch node in l.nodes[id] {
 	case Vacant:
 	case Pane:
-		return node.linked ? 0 : 1
+		return node.linked || node.floating ? 0 : 1
 	case Split:
-		return node.linked ? 0 : shown_count(l, node.first) + shown_count(l, node.second)
+		return node.linked || node.floating ? 0 : shown_count(l, node.first) + shown_count(l, node.second)
 	}
 	return 0
 }
@@ -341,6 +362,7 @@ split_divides :: proc(l: ^Layout, s: Split) -> bool {
 set_linked :: proc(l: ^Layout, node: Node_Id, linked: bool) -> bool {
 	if int(node) >= len(l.nodes) {return false}
 	if _, vacant := l.nodes[node].(Vacant); vacant || node_linked(l, node) == linked {return false}
+	if linked && is_floating(l, node) {return false}
 	if linked && (l.root == INVALID_NODE || shown_count(l, l.root) <= 1) {return false}
 	sibling, _, _, _, placed := placement(l, node)
 	node_set_linked(l, node, linked)
@@ -350,24 +372,29 @@ set_linked :: proc(l: ^Layout, node: Node_Id, linked: bool) -> bool {
 	return true
 }
 
-// Restores what the rest of the package relies on: some pane is shown, and focus is on a shown pane. Panes
-// return from their windows when none would be left, as when the last shown pane closes.
+// Restores what the rest of the package relies on: some pane is shown, and focus is on a shown pane or a
+// floating pane that is not minimized. Linked and floating panes return to the tree when no other pane
+// would be left, as when the last shown pane closes.
 links_repair :: proc(l: ^Layout) {
 	if l.root == INVALID_NODE {return}
 	if first_shown(l, l.root) == INVALID_NODE {
-		for _, i in l.nodes {node_set_linked(l, Node_Id(i), false)}
+		for _, i in l.nodes {
+			node_set_linked(l, Node_Id(i), false)
+			float_clear(l, Node_Id(i))
+		}
 	}
-	if int(l.focus) < len(l.nodes) {
-		if _, ok := l.nodes[l.focus].(Pane); ok && link_root(l, l.focus) == INVALID_NODE {return}
-	}
-	l.focus = first_shown(l, l.root)
+	if focus_valid(l, l.focus) {return}
+	l.focus = focus_behind(l)
 }
 
 @(require_results)
 remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 	if int(node) >= len(l.nodes) {return false}
-	if _, ok := l.nodes[node].(Pane); !ok {return false}
-	if l.focus == node {panes_changed(l)}
+	_, ok := l.nodes[node].(Pane)
+	if !ok {return false}
+	float_group := float_root(l, node)
+	// A floating pane takes no part in the tiled arrangement, so its close leaves any zoom in place.
+	if l.focus == node && float_group == INVALID_NODE {panes_changed(l)}
 	parent := parent_of(l, node)
 	if parent == INVALID_NODE {
 		l.root, l.focus = INVALID_NODE, INVALID_NODE
@@ -382,9 +409,16 @@ remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 			if s.first == parent {s.first = sibling} else {s.second = sibling}
 			l.nodes[grandparent] = s
 		}
-		// The last two panes of a linked slot: the one that stays is the slot now.
+		// The last two panes of a linked or floating slot: the one that stays is the slot now.
 		if branch.linked {node_set_linked(l, sibling, true)}
-		if l.focus == node {l.focus = first_shown(l, sibling)}
+		if branch.floating {node_set_float(l, sibling, true, branch.float)}
+		if l.focus == node {
+			if float_group != INVALID_NODE && float_group != node {
+				l.focus = pane_first(l, sibling)
+			} else {
+				l.focus = float_group != INVALID_NODE ? INVALID_NODE : first_shown(l, sibling)
+			}
+		}
 		l.nodes[parent] = Vacant{}
 	}
 	l.nodes[node] = Vacant{}
@@ -502,9 +536,11 @@ focus_cycle :: proc(rects: []Pane_Rect, focus: Node_Id, delta: int) -> Node_Id {
 	return result
 }
 
+// Places the tiled panes; floats_place adds the floating ones above them.
 compute :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect, honor_zoom := true) {
 	clear(out)
-	if l.root != INVALID_NODE {place(l, l.zoomed && honor_zoom ? l.focus : l.root, area, gap, out)}
+	if l.root == INVALID_NODE {return}
+	place(l, l.zoomed && honor_zoom ? focus_tiled(l) : l.root, area, gap, out)
 }
 
 @(private)
@@ -535,8 +571,11 @@ place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane
 	switch node in l.nodes[id] {
 	case Vacant:
 	case Pane:
-		if !node.linked {append(out, Pane_Rect{id, node.content, area, node.order})}
+		if !node.linked && !node.floating {
+			append(out, Pane_Rect{id, node.content, area, node.order, false})
+		}
 	case Split:
+		if node.floating {return}
 		if !split_divides(l, node) {
 			place(l, first_shown(l, node.first) != INVALID_NODE ? node.first : node.second, area, gap, out)
 			return
@@ -555,6 +594,7 @@ dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 @(private)
 place_dividers :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 	if s, ok := l.nodes[id].(Split); ok {
+		if s.floating {return}
 		if !split_divides(l, s) {
 			shown := first_shown(l, s.first) != INVALID_NODE ? s.first : s.second
 			place_dividers(l, shown, area, gap, out)
@@ -598,8 +638,10 @@ drag_divider :: proc(l: ^Layout, d: Divider, x, y, gap: f32) -> bool {
 	return true
 }
 
+// The topmost pane at the point. Tiled panes never overlap, and floating panes follow them in stacking
+// order, so the last match is the one drawn on top.
 hit_test :: proc(rects: []Pane_Rect, x, y: f32) -> (Pane_Rect, bool) {
-	for r in rects {
+	#reverse for r in rects {
 		if x >= r.rect.x &&
 		   x < r.rect.x + r.rect.width &&
 		   y >= r.rect.y &&
@@ -615,7 +657,9 @@ hit_test :: proc(rects: []Pane_Rect, x, y: f32) -> (Pane_Rect, bool) {
 @(private)
 run_top :: proc(l: ^Layout, node: Node_Id, axis: Axis) -> Node_Id {
 	top := node
+	floating := float_root(l, node)
 	for parent := parent_of(l, top); parent != INVALID_NODE; parent = parent_of(l, parent) {
+		if top == floating {break}
 		s, ok := l.nodes[parent].(Split)
 		if !ok || s.axis != axis {break}
 		top = parent
@@ -655,7 +699,9 @@ balance_related :: proc(l: ^Layout, node: Node_Id) -> bool {
 	return true
 }
 
-// Moves a pane beside `target`, keeping its content and focus order; the split it leaves collapses.
+// Moves a pane beside `target`, keeping its content and focus order; the split it leaves collapses. The
+// pane joins whatever layout the target belongs to, so a move can take it into or out of a floating
+// group. The tiling must keep a pane to show.
 @(require_results)
 move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (Node_Id, bool) {
 	if node == target ||
@@ -664,8 +710,10 @@ move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (N
 	pane, ok := l.nodes[node].(Pane)
 	target_pane, target_ok := l.nodes[target].(Pane)
 	if !ok || !target_ok || target_pane.linked {return INVALID_NODE, false}
-	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
-	pane.linked = false
+	if pane_tiled(l, node) && !pane_tiled(l, target) && shown_count(l, l.root) <= 1 {
+		return INVALID_NODE, false
+	}
+	pane_settle(&pane)
 	focused := l.focus == node
 	if !remove(l, node) {return INVALID_NODE, false}
 	added := place_pane(l, target, pane, direction)
@@ -673,9 +721,13 @@ move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (N
 	return added, true
 }
 
+// A pane placed beside a floating group's root joins the group: the frame moves to the new split.
 @(private)
 place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction) -> Node_Id {
 	parent := parent_of(l, target)
+	floating_value: Float
+	floating, was_floating := node_float(l, target)
+	if was_floating {floating_value = floating^; node_set_float(l, target, false)}
 	added := allocate_node(l, pane)
 	before := direction == .Left || direction == .Up
 	axis: Axis = direction == .Left || direction == .Right ? .Horizontal : .Vertical
@@ -683,7 +735,13 @@ place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction
 	if before {
 		first, second = added, target
 	}
-	branch := allocate_node(l, Split{axis = axis, ratio = 0.5, first = first, second = second})
+	branch := allocate_node(
+		l,
+		Split {
+			axis = axis, ratio = 0.5, first = first, second = second,
+			floating = was_floating, float = floating_value,
+		},
+	)
 	if parent == INVALID_NODE {l.root = branch} else {
 		s := l.nodes[parent].(Split)
 		if s.first == target {s.first = branch} else {s.second = branch}
@@ -693,14 +751,14 @@ place_pane :: proc(l: ^Layout, target: Node_Id, pane: Pane, direction: Direction
 	return added
 }
 
+// Docks a pane along an edge of the whole tiling, which takes a floating pane out of its group.
 @(require_results)
 dock_pane :: proc(l: ^Layout, node: Node_Id, direction: Direction) -> (Node_Id, bool) {
 	if node == l.root || int(node) >= len(l.nodes) {return INVALID_NODE, false}
 	pane, ok := l.nodes[node].(Pane)
 	// Removing the only shown pane would bring linked panes back; docking has nothing to dock beside.
-	if !ok || shown_count(l, l.root) <= 1 {return INVALID_NODE, false}
-	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
-	pane.linked = false
+	if !ok || (pane_tiled(l, node) && shown_count(l, l.root) <= 1) {return INVALID_NODE, false}
+	pane_settle(&pane)
 	focused := l.focus == node
 	if !remove(l, node) {return INVALID_NODE, false}
 	added := place_pane(l, l.root, pane, direction)
@@ -721,8 +779,7 @@ separate_pane :: proc(
 	if int(node) >= len(source.nodes) {return {}, false}
 	pane, ok := source.nodes[node].(Pane)
 	if !ok {return {}, false}
-	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
-	pane.linked = false
+	pane_settle(&pane)
 	destination: Layout
 	if init(&destination, pane.content, allocator) != nil {destroy(&destination); return {}, false}
 	if !remove(source, node) {destroy(&destination); return {}, false}
@@ -747,8 +804,7 @@ transfer_pane :: proc(
 	   int(target) >= len(destination.nodes) {return INVALID_NODE, false}
 	pane, ok := source.nodes[node].(Pane)
 	if !ok {return INVALID_NODE, false}
-	// A pane that leaves its slot joins an ordinary tree, where it must be shown.
-	pane.linked = false
+	pane_settle(&pane)
 	if _, target_ok := destination.nodes[target].(Pane); !target_ok {return INVALID_NODE, false}
 	// Content is a reference owned elsewhere, so it may appear once in a tree. A terminal or a
 	// Settings pane can join any destination that does not already show the same content.

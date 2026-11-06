@@ -122,7 +122,7 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	if w.pane_fill == .Screen {return}
 	r := pane.rect
 	clip := render.Rect{0, 0, f32(w.width), f32(w.height)}
-	if app.settings.pane.gap == 0 {
+	if app.settings.pane.gap == 0 && !pane.floating {
 		clip = {r.x, r.y, r.width, r.height}
 		edge := math.ceil(max(1, w.scale))
 		for d in w.dividers {
@@ -177,7 +177,7 @@ window_shared_borders :: proc(app: ^App, w: ^Window) {
 		   ) !=
 		   .None {return}
 		for pane in w.panes {
-			if !window_focus_outlined(app, w, pane) {continue}
+			if pane.floating || !window_focus_outlined(app, w, pane) {continue}
 			p := pane.rect
 			segment := r
 			if d.axis == .Horizontal {

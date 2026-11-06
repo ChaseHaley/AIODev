@@ -186,7 +186,7 @@ markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
 	if pane.state != .Loaded || !markdown.search_select(&pane.search, upward) {return}
 	match := pane.search.matches[pane.search.selected]
 	if shown, found := markdown_pane_rect(w, pane.id); found {
-		visible := int(markdown_geometry_of(w, shown.rect).area.height)
+		visible := int(markdown_geometry_of(w, shown).area.height)
 		ui.markdown_reveal(&pane.view, match.start, match.end, visible)
 	}
 }
@@ -270,7 +270,8 @@ markdown_new_tab :: proc(
 }
 
 // Shows a verified file beside `node`: the pane already showing it, a new split, or a new tab when
-// the pane is too small to split. `w` is the window showing the workspace, or nil.
+// the pane is too small to split; with `floating`, a floating pane above the tab instead of a split.
+// `w` is the window showing the workspace, or nil.
 @(require_results)
 markdown_open_at :: proc(
 	app: ^App,
@@ -282,6 +283,7 @@ markdown_open_at :: proc(
 	direction: layout.Direction = .Right,
 	ratio: f32 = 0.5,
 	focus := true,
+	floating := false,
 ) -> bool {
 	walk := workspace_panes(app, workspace)
 	for shown, ok := workspace_pane_next(&walk); ok; shown, ok = workspace_pane_next(&walk) {
@@ -301,8 +303,16 @@ markdown_open_at :: proc(
 	opened := false
 	if w != nil && window_linked(w) {
 		opened = markdown_new_tab(app, nil, workspace, content, false)
+	} else if floating {
+		opened = floating_attach(app, w, workspace, tab_index, content, focus)
 	} else {
-		failure := pane_split_insert(app, w, workspace, tab_index, node, direction, ratio, focus, content, false)
+		// A floating pane does not split, so the file opens beside the tiled pane below it.
+		anchor := node
+		tree := &workspace.tabs[tab_index].tree
+		if layout.is_floating(tree, anchor) {anchor = layout.focus_tiled(tree)}
+		failure := pane_split_insert(
+			app, w, workspace, tab_index, anchor, direction, ratio, focus, content, false,
+		)
 		#partial switch failure {
 		case .None:
 			opened = true
@@ -318,7 +328,10 @@ markdown_open_at :: proc(
 markdown_open_focused :: proc(app: ^App, w: ^Window, path: string) {
 	acting := pane_link_acting_window(app, w)
 	workspace := acting.workspace
-	if !markdown_open_at(app, acting, workspace, workspace.selected, acting.tree.focus, path) {
+	floating := app.settings.pane.markdown_floating
+	if !markdown_open_at(
+		app, acting, workspace, workspace.selected, acting.tree.focus, path, floating = floating,
+	) {
 		notify(app, .Error, "Could not open the file.")
 	}
 }
@@ -384,6 +397,8 @@ control_markdown_open :: proc(
 	if file.confirm {return outcome_failure(.Failed, "that file type is not shown as Markdown")}
 	direction: layout.Direction = .Direction in invocation.given ? invocation.direction : .Right
 	ratio: f32 = .Ratio in invocation.given ? invocation.ratio : 0.5
+	// A requested direction asks for a split, whatever the floating preference.
+	floating := app.settings.pane.markdown_floating && .Direction not_in invocation.given
 	if !markdown_open_at(
 		app,
 		w,
@@ -394,6 +409,7 @@ control_markdown_open :: proc(
 		direction,
 		ratio,
 		invocation.focus,
+		floating,
 	) {
 		return outcome_failure(.Failed, "could not open the file")
 	}
@@ -429,14 +445,15 @@ markdown_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Markdown_P
 }
 
 @(private, require_results)
-markdown_geometry_of :: proc(w: ^Window, rect: layout.Rect) -> ui.Markdown_Geometry {
-	area := render.Rect{rect.x, rect.y + w.header_height, rect.width, max(0, rect.height - w.header_height)}
+markdown_geometry_of :: proc(w: ^Window, shown: layout.Pane_Rect) -> ui.Markdown_Geometry {
+	rect, header := shown.rect, pane_header_of(w, shown)
+	area := render.Rect{rect.x, rect.y + header, rect.width, max(0, rect.height - header)}
 	return ui.markdown_geometry(area, w.scale)
 }
 
 @(private, require_results)
-markdown_bar :: proc(w: ^Window, pane: ^Markdown_Pane, rect: layout.Rect) -> (ui.Scrollbar, bool) {
-	area := markdown_geometry_of(w, rect).area
+markdown_bar :: proc(w: ^Window, pane: ^Markdown_Pane, shown: layout.Pane_Rect) -> (ui.Scrollbar, bool) {
+	area := markdown_geometry_of(w, shown).area
 	area.width -= 2 * w.scale
 	area.height -= 4 * w.scale
 	extent := ui.Scroll_Extent{ui.markdown_total(&pane.view), int(area.height), pane.view.scroll}
@@ -475,7 +492,7 @@ markdown_message_draw :: proc(
 markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card: int) -> glyphs.Result {
 	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
 	pane := markdown_find(app, shown.content.id)
-	g := markdown_geometry_of(w, shown.rect)
+	g := markdown_geometry_of(w, shown)
 	if pane != nil && pane.state == .Loaded {
 		view := &pane.view
 		ui.markdown_view_fit(view, &pane.document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
@@ -495,7 +512,7 @@ markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card:
 		   result != .Ok {
 			return result
 		}
-		if bar, visible := markdown_bar(w, pane, shown.rect); visible {
+		if bar, visible := markdown_bar(w, pane, shown); visible {
 			ui.scrollbar_draw(&w.list, app.theme, bar, ui.scrollbar_state(pane.bar_hover, pane.scroll_drag))
 		}
 	} else if result := markdown_message_draw(app, w, pane, g); result != .Ok {return result}
@@ -507,7 +524,7 @@ markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card:
 
 @(private)
 markdown_scroll :: proc(w: ^Window, pane: ^Markdown_Pane, shown: layout.Pane_Rect, delta: int) {
-	visible := int(markdown_geometry_of(w, shown.rect).area.height)
+	visible := int(markdown_geometry_of(w, shown).area.height)
 	if ui.markdown_scroll_by(&pane.view, delta, visible) {w.dirty = true}
 }
 
@@ -526,7 +543,7 @@ markdown_page :: proc(app: ^App, w: ^Window, pages: f64) {
 	if pane == nil {return}
 	shown, found := markdown_pane_rect(w, pane.id)
 	if !found {return}
-	visible := int(markdown_geometry_of(w, shown.rect).area.height)
+	visible := int(markdown_geometry_of(w, shown).area.height)
 	page := max(1, visible - ui.markdown_line(&pane.view))
 	markdown_scroll(w, pane, shown, int(pages * f64(page)))
 }
@@ -651,13 +668,13 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 		if pane == nil || !found {w.markdown_held = 0; return}
 		w.pointer = {x, y}
 		if pane.scroll_drag.active {
-			if bar, visible := markdown_bar(w, pane, shown.rect); visible {
+			if bar, visible := markdown_bar(w, pane, shown); visible {
 				pane.view.scroll = ui.scrollbar_drag(pane.scroll_drag, bar, y)
 				w.dirty = true
 			}
 			return
 		}
-		g := markdown_geometry_of(w, shown.rect)
+		g := markdown_geometry_of(w, shown)
 		if y < g.area.y {markdown_scroll(w, pane, shown, int(y - g.area.y))}
 		if y > g.area.y + g.area.height {markdown_scroll(w, pane, shown, int(y - g.area.y - g.area.height))}
 		pane.view.head = ui.markdown_offset_at(&pane.view, &pane.document, g, x, y)
@@ -673,11 +690,11 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	pane, shown := markdown_under_pointer(app, w, x, y)
 	markdown_hover_clear(app, w, pane)
 	if pane == nil {pointer_set(app, w, .Arrow); return}
-	bar, visible := markdown_bar(w, pane, shown.rect)
+	bar, visible := markdown_bar(w, pane, shown)
 	over_bar := visible && ui.scrollbar_contains(bar, x, y)
 	link := -1
 	if !over_bar && pane.state == .Loaded {
-		link = ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown.rect), x, y)
+		link = ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown), x, y)
 	}
 	if over_bar != pane.bar_hover || link != pane.view.hover_link {w.dirty = true}
 	pane.bar_hover, pane.view.hover_link = over_bar, link
@@ -698,12 +715,12 @@ markdown_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	pane_focus(app, w, shown.node)
 	if pane == nil || pane.state != .Loaded || e.button != .Left {return}
 	w.dirty = true
-	if bar, visible := markdown_bar(w, pane, shown.rect); visible && ui.scrollbar_contains(bar, x, y) {
+	if bar, visible := markdown_bar(w, pane, shown); visible && ui.scrollbar_contains(bar, x, y) {
 		pane.view.scroll = ui.scrollbar_press(&pane.scroll_drag, bar, y)
 		if pane.scroll_drag.active {w.markdown_held = pane.id}
 		return
 	}
-	g := markdown_geometry_of(w, shown.rect)
+	g := markdown_geometry_of(w, shown)
 	if .Control in e.modifiers {
 		if link := ui.markdown_link_at(&pane.view, g, x, y); link >= 0 {
 			markdown_link_open(app, w, pane, link)

@@ -17,7 +17,8 @@ Gesture_State :: struct {
 gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.gesture.cancelled += w.gesture.buttons | w.header_buttons
 	if ui.armed_down(w.find.armed) || w.selecting || w.dragging.count > 0 || w.rail_resizing ||
-	   w.tab_drag.pressed || w.pane_drag.pressed || ui.armed_down(w.tab_close_armed) ||
+	   w.tab_drag.pressed || w.pane_drag.pressed || w.float_drag.pressed ||
+	   w.float_capsule_drag.pressed || ui.armed_down(w.tab_close_armed) ||
 	   ui.armed_down(w.caption_armed) || ui.armed_down(w.tab_orientation_button_armed) ||
 	   ui.armed_down(w.title_action_armed) ||
 	   ui.editor_dragging(&w.editor) || w.rename.dragging || w.workspace_picker.query.dragging {
@@ -42,6 +43,10 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.caption_armed)
 	w.selecting, w.autoscrolling, w.split_overlay = false, false, false
 	w.scroll_drag = {}
+	w.float_drag, w.float_capsule_drag = {}, {}
+	ui.armed_cancel(&w.float_capsule_armed)
+	w.float_capsule_hover, w.float_header_hover, w.float_header_action = nil, layout.INVALID_NODE, .None
+	ui.armed_cancel(&w.float_header_armed)
 	w.rail_resizing = false
 	ui.armed_cancel(&w.status.panel_button_armed)
 	w.rename.dragging, w.workspace_picker.query.dragging = false, false
@@ -212,6 +217,24 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}
 	x, y := f32(e.x), f32(e.y)
+	if w.float_capsule_drag.pressed {
+		if .Left not_in e.buttons {
+			w.float_capsule_drag = {}
+			ui.armed_cancel(&w.float_capsule_armed)
+		} else if floating_capsule_drag_move(w, x, y) {
+			pointer_set(app, w, .Arrow)
+			return
+		}
+	}
+	if w.float_drag.pressed {
+		if .Left not_in e.buttons {
+			w.float_drag = {}
+		} else if floating_drag_move(app, w, x, y) {
+			edges := w.float_drag.edges
+			pointer_set(app, w, edges == {} ? .Arrow : floating_edge_cursor(edges))
+			return
+		}
+	}
 	target := pointer_target(app, w, x, y)
 	if w.pane_drag.pressed && (w.pane_drag.active || !pointer_modal(target)) {
 		if .Left not_in e.buttons {
@@ -280,6 +303,7 @@ content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	entry := pane_at(app, w, e.x, e.y)
 	if shape == .Text && entry == nil && !w.selecting {shape = .Arrow}
 	resize, over_divider := divider_cursor(w, x, y)
+	over_divider &&= !floating_covers(w, x, y)
 	if over_divider && !swallowed {shape = resize}
 	if !w.selecting && !over_divider && !swallowed && !title && link_hover_update(app, w, x, y) {
 		shape = .Hand

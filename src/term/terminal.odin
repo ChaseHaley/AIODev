@@ -707,6 +707,21 @@ capture :: proc(
 	return true
 }
 
+// Moves the pane's grid on the surface when its size is unchanged, as dragging a floating pane does, so
+// the program sees no resize. False leaves a changed grid to resize.
+@(require_results)
+reposition :: proc(s: ^Session, geometry: Geometry) -> bool {
+	sync.mutex_lock(&s.mutex)
+	g := s.geometry
+	same :=
+		g.columns == geometry.columns && g.rows == geometry.rows &&
+		g.cell_width == geometry.cell_width && g.cell_height == geometry.cell_height
+	if same {s.geometry = geometry}
+	sync.mutex_unlock(&s.mutex)
+	if same {mark_changed(s)}
+	return same
+}
+
 resize :: proc(s: ^Session, geometry: Geometry) {
 	sync.mutex_lock(&s.mutex)
 	s.geometry = geometry

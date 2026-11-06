@@ -143,6 +143,10 @@ Action :: enum u32 {
 	Reopen_Closed,
 	Linked_Window,
 	Show_Documents,
+	New_Floating,
+	Float_Pane,
+	Minimize_Floating,
+	Minimize_All_Floating,
 }
 
 @(private)
@@ -415,6 +419,18 @@ ACTIONS :: [Action]Action_Info {
 	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}},
 	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil},
 	.Show_Documents = {"pane.documents", "Show Documents", nil},
+	.New_Floating = {"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}},
+	.Float_Pane = {"pane.float", "Float or Dock Pane", {{.Enter, {.Control, .Alt}}}},
+	.Minimize_Floating = {
+		"pane.minimize_floating",
+		"Minimize or Restore Float",
+		{{.M, {.Control, .Shift}}},
+	},
+	.Minimize_All_Floating = {
+		"pane.minimize_all_floating",
+		"Minimize or Restore All Floats",
+		nil,
+	},
 }
 
 @(require_results)
@@ -488,7 +504,19 @@ run_action :: proc(
 	w.dirty = true
 	switch action {
 	case .Linked_Window:
+		if layout.is_floating(w.tree, w.tree.focus) {
+			notify(app, .Info, "Dock the float before moving its pane to a linked window.")
+			return
+		}
 		pane_link_toggle(app, w)
+	case .New_Floating:
+		floating_new(app, w)
+	case .Float_Pane:
+		floating_toggle(app, w)
+	case .Minimize_Floating:
+		floating_minimize_toggle(app, w)
+	case .Minimize_All_Floating:
+		floating_minimize_all_toggle(app, w)
 	case .Show_Documents:
 		document_menu_open_focused(app, w)
 	case .Show_Build_Info:
@@ -689,7 +717,7 @@ run_action :: proc(
 			w,
 			layout.focus_cycle(
 				pane_action_rects(app, w),
-				w.tree.focus,
+				pane_action_focus(w),
 				action == .Focus_Next ? 1 : -1,
 			),
 		)
@@ -735,11 +763,13 @@ run_action :: proc(
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
 		direction := layout.Direction(int(action) - int(Action.Focus_Left))
-		pane_focus(
-			app,
-			w,
-			layout.focus_direction(pane_action_rects(app, w), w.tree.focus, direction),
-		)
+		start := pane_action_focus(w)
+		target := layout.focus_direction(pane_action_rects(app, w), start, direction)
+		// Leaving a floating group's outer edge continues from the tiled pane behind it.
+		if target == start && layout.is_floating(w.tree, start) {
+			target = layout.focus_direction(window_tiled_rects(w), layout.focus_tiled(w.tree), direction)
+		}
+		pane_focus(app, w, target)
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
 		resize_pane(app, w, action, 10)
 	case .Resize_Left_Large, .Resize_Right_Large, .Resize_Up_Large, .Resize_Down_Large:
@@ -786,12 +816,29 @@ resize_pane :: proc(app: ^App, w: ^Window, action: Action, amount: f32) {
 	}
 }
 
+// The panes sharing the focused pane's arrangement: its floating group, or the tiled panes.
 @(private)
 pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
-	if !pane_view_solo(w) {return w.panes[:]}
+	root := layout.float_root(w.tree, w.tree.focus)
+	if root != layout.INVALID_NODE {
+		floats := floating_rects(w)
+		start := -1
+		for pane, i in floats {
+			same := layout.float_root(w.tree, pane.node) == root
+			if same && start < 0 {start = i}
+			if !same && start >= 0 {return floats[start:i]}
+		}
+		if start >= 0 {return floats[start:]}
+	}
+	if !pane_view_solo(w) {return window_tiled_rects(w)}
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(w.tree, window_content_area(app, w), window_gap(app, w), &rects, false)
 	return rects[:]
+}
+
+@(private)
+pane_action_focus :: proc(w: ^Window) -> layout.Node_Id {
+	return layout.is_floating(w.tree, w.tree.focus) ? w.tree.focus : layout.focus_tiled(w.tree)
 }
 
 copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {

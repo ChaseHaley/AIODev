@@ -16,6 +16,7 @@ Theme_Settings :: struct {
 Pane_Settings :: struct {
 	gap, corner_radius:            int,
 	show_headers:                  bool,
+	markdown_floating:             bool,
 	confirm_shell_switch:          bool,
 	minimum_columns, minimum_rows: int,
 	focus_border, unfocused_dim:   int,

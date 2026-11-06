@@ -165,8 +165,13 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 		return
 	}
 	focus_leave(app, w)
-	w.tree.focus = node
-	if pane_view_solo(w) {window_relayout(app, w)}
+	// A floating pane rises above the others, and comes out of its capsule, as it takes focus.
+	floats_changed := layout.focus_set(w.tree, node)
+	if pane_view_solo(w) && !layout.is_floating(w.tree, node) {
+		window_relayout(app, w)
+	} else if floats_changed {
+		window_floats_layout(app, w)
+	}
 	focus_enter(app, w)
 }
 
@@ -768,7 +773,8 @@ pane_remove :: proc(
 	if visible {
 		for w in app.windows {
 			if w.workspace != workspace {continue}
-			window_relayout(app, w)
+			// A floating pane's close leaves the tiled panes exactly as they were.
+			if pane.floating {window_floats_layout(app, w)} else {window_relayout(app, w)}
 			if was_focused {focus_enter(app, w)}
 		}
 	}
@@ -797,6 +803,12 @@ session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 	}
 	for window in app.windows {
 		window.dirty = true
+		if window.tree != nil {
+			node := layout.find_content(window.tree, {.Terminal, id})
+			if floating, ok := layout.float_of(window.tree, node); ok && floating.minimized {
+				floating_capsules_refresh(app, window)
+			}
+		}
 		if focused := focused_session(app, window); focused != nil && focused.id == id {
 			window_update_title(app, window)
 		}

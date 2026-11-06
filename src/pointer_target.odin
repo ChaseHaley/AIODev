@@ -32,6 +32,9 @@ Pointer_Target :: enum u8 {
 	Status_Panel,
 	// The tab strip band or the rail, including an overlay rail above the panes.
 	Tabs,
+	// A floating pane's resize edges and the capsules of minimized floating panes. A floating pane also
+	// hides the dividers below it.
+	Floating,
 	// Pane headers and a single pane's floating split controls.
 	Pane_Header,
 	Scrollbar,
@@ -85,6 +88,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Divider          = {divider_claims, divider_hover, divider_pointer_press, divider_release, nil},
 	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release, panel_tooltip},
 	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release, tabs_tooltip},
+	.Floating         = {floating_claims, floating_hover, floating_press, floating_release, floating_tooltip},
 	.Pane_Header      = {header_claims, header_hover, header_press, nil, header_tooltip},
 	.Scrollbar        = {scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release, nil},
 	.Settings_Page    = {settings_claims, settings_hover, content_press, nil, settings_tooltip},
@@ -560,7 +564,7 @@ workspace_button_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_E
 
 @(private = "file")
 pill_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return status_rect_contains(status_pill_rect(app, w), x, y)
+	return !floating_covers(w, x, y) && status_rect_contains(status_pill_rect(app, w), x, y)
 }
 
 @(private = "file")
@@ -581,7 +585,9 @@ pill_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 // Dividers
 
 @(private = "file")
-divider_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+divider_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
+	if _, _, edge := floating_edge_at(w, x, y); edge {return false}
+	if rect_contains(w.float_capsule_group, x, y) {return false}
 	_, over := divider_cursor(w, x, y)
 	return over
 }
@@ -610,7 +616,9 @@ divider_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -
 // Activity panel
 
 @(private = "file")
-panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return status_panel_contains(app, w, x, y)}
+panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return !floating_covers(w, x, y) && status_panel_contains(app, w, x, y)
+}
 
 @(private = "file")
 panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -654,7 +662,7 @@ panel_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> 
 
 @(private = "file")
 tabs_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return tab_interaction_hit(app, w, x, y, .Left).kind != .Outside
+	return !floating_covers(w, x, y) && tab_interaction_hit(app, w, x, y, .Left).kind != .Outside
 }
 
 @(private = "file")
@@ -745,6 +753,7 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	case .Zoom: return "Zoom"
 	case .Fill_Window: return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
 	case .Linked_Window: return window_linked(w) ? "Return pane to tab" : "Move pane to linked window"
+	case .Dock: return "Move to a float"
 	case .Close: return "Close pane"
 	case:
 	}
@@ -815,7 +824,7 @@ settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 		pointer_set(app, w, .Arrow)
 		return
 	}
-	l := settings_layout_for(w, pane.rect)
+	l := settings_layout_for(w, pane)
 	changed := ui.editor_hover(&w.editor, l, x, y)
 	if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
 	if changed {w.dirty = true}

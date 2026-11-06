@@ -78,6 +78,32 @@ layout_tree_decode_moves_focus_off_splits :: proc(t: ^testing.T) {
 }
 
 @(test)
+layout_tree_decode_restores_floating_panes :: proc(t: ^testing.T) {
+	float := []app.Saved_Float{{x = 0.9, y = 0.1, width = 0.5, height = math.nan_f32(), stack = 7}}
+	minimized := []app.Saved_Float{{x = 0.1, y = 0.1, width = 0.5, height = 0.5, stack = 3, minimized = true}}
+	nodes := []app.Saved_Node{
+		{split = true, first = 1, second = 4},
+		{split = true, first = 2, second = 3},
+		{},
+		{float = minimized},
+		{float = float},
+	}
+	tree, ok := decode(nodes, focus = 3)
+	defer layout.destroy(&tree)
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, tree.focus, layout.Node_Id(2))
+	shown, floated := tree.nodes[4].(layout.Pane)
+	testing.expect(t, floated && shown.floating && !shown.float.minimized)
+	testing.expect_value(t, shown.float.bounds, layout.Rect{0.2, 0.2, 0.6, 0.6})
+	hidden := tree.nodes[3].(layout.Pane)
+	testing.expect(t, hidden.floating && hidden.float.minimized)
+	testing.expect_value(t, layout.float_latest(&tree, false), layout.Node_Id(4))
+	added, err := layout.float_new(&tree, {.Terminal, 9}, {0.1, 0.1, 0.3, 0.3})
+	testing.expect_value(t, err, nil)
+	testing.expect(t, tree.nodes[added].(layout.Pane).float.stack > 7, "new panes open above restored ones")
+}
+
+@(test)
 layout_state_encode_round_trips_structure :: proc(t: ^testing.T) {
 	state: app.App
 	defer {
@@ -96,7 +122,10 @@ layout_state_encode_round_trips_structure :: proc(t: ^testing.T) {
 		append(&workspace.tabs, tab)
 	}
 	second := &workspace.tabs[1].tree
-	_, split_error := layout.split(second, 0, .Horizontal, 0.25, {.Terminal, 42})
+	terminal, split_error := layout.split(second, 0, .Horizontal, 0.25, {.Terminal, 42})
+	testing.expect_value(t, split_error, nil)
+	testing.expect(t, layout.set_floating(second, terminal, true, {0.2, 0.1, 0.5, 0.7}))
+	_, split_error = layout.split_direction(second, terminal, .Down, 0.5, {.Markdown, 7})
 	testing.expect_value(t, split_error, nil)
 	workspace.selected = 1
 	empty := app.workspace_create_empty(&state)
@@ -119,14 +148,21 @@ layout_state_encode_round_trips_structure :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, len(saved.tabs), 2) { return }
 	testing.expect_value(t, saved.tabs[1].name, "Docs")
 	nodes := saved.tabs[1].nodes
-	if !testing.expect_value(t, len(nodes), 3) { return }
+	if !testing.expect_value(t, len(nodes), 5) {return}
 	testing.expect(t, nodes[0].split)
 	testing.expect_value(t, nodes[0].ratio, f32(0.25))
 	testing.expect_value(t, nodes[nodes[0].first].content, layout.Content_Kind.Settings)
-	testing.expect_value(t, nodes[nodes[0].second].content, layout.Content_Kind.Terminal)
+	floating := nodes[nodes[0].second]
+	testing.expect(t, floating.split && len(floating.float) == 1)
+	testing.expect_value(t, floating.float[0].x, f32(0.2))
+	testing.expect_value(t, nodes[floating.first].content, layout.Content_Kind.Terminal)
+	testing.expect_value(t, nodes[floating.second].content, layout.Content_Kind.Markdown)
 	testing.expect_value(t, saved.tabs[1].focus, nodes[0].first)
 	tree: layout.Layout
-	testing.expect(t, app.layout_tree_decode(&saved.tabs[1], &tree))
+	if testing.expect(t, app.layout_tree_decode(&saved.tabs[1], &tree)) {
+		root := tree.nodes[tree.root].(layout.Split)
+		testing.expect(t, layout.is_floating(&tree, root.second))
+	}
 	layout.destroy(&tree)
 }
 
