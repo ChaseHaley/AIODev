@@ -516,14 +516,9 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if !status_panel_in_rail(app, w) {
 		radius := f32(app.settings.pane.corner_radius) * s
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar, radius = radius})
-		ui.draw_rect(&w.list, {rect = panel, color = app.theme.pane_border, radius = radius, stroke = max(1, s)})
 	} else {
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar})
-		ui.draw_rect(&w.list, {rect = {panel.x, panel.y, panel.width - s, s}, color = app.theme.border})
-		ui.draw_rect(
-			&w.list,
-			{rect = {panel.x + panel.width - s, panel.y, s, panel.height}, color = app.theme.border},
-		)
+		ui.draw_rect(&w.list, {rect = {panel.x, panel.y, panel.width, s}, color = app.theme.border})
 	}
 	rows, total := status_panel_rows(app, w)
 	small := ui.text_styled(&w.ui_text, .Detail)

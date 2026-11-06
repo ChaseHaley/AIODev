@@ -67,12 +67,37 @@ function Set-View-Button($view) {
     if ($s['activity.view'] -ne $view) { Click $s 'activity.view_button' }
     Equal (State)['activity.view'] $view "header button shows $view"
 }
+function Flat-Edges($theme, $label, $r, $rightOnly = $false) {
+    $colors = (Get-Content -Raw (Join-Path $repo "themes/$theme.theme.json") | ConvertFrom-Json).colors
+    $expected = $colors.tab_bar.ToLower() + 'ff'
+    $middleX, $middleY = [int]($r[0]+$r[2]/2), [int]($r[1]+$r[3]/2)
+    # Use fully covered pixels when layout edges land between device pixels.
+    $points = @("$([int][math]::Floor($r[0]+$r[2])-1),$middleY")
+    if (-not $rightOnly) {
+        # Stay left of the transient notice shadow in the bottom-right corner.
+        $bottomX = [int]($r[0]+24)
+        $points += @("$([int][math]::Ceiling($r[0])),$middleY", "$middleX,$([int][math]::Ceiling($r[1]))",
+            "$bottomX,$([int][math]::Floor($r[1]+$r[3])-1)")
+    }
+    foreach ($point in $points) {
+        $sample = Aio pixels --region "$point,1,1" --sample '0,0'
+        $actual = ($sample -split ' ')[-1]
+        # Outer-edge rasterization can round a channel down by one step.
+        foreach ($channel in 1, 3, 5, 7) {
+            $delta = [Convert]::ToInt32($actual.Substring($channel, 2), 16) -
+                [Convert]::ToInt32($expected.Substring($channel, 2), 16)
+            if ([math]::Abs($delta) -gt 1) { throw "$label edge at $point expected $expected, observed $actual" }
+        }
+        Write-Output "PASS $label flat edge at $point"
+    }
+}
 function Surface-Proof($theme, $label) {
     $s = State
     $scale = [double]$s['window.scale']
     $panel = Rect $s 'activity.rect'
     $colors = (Get-Content -Raw (Join-Path $repo "themes/$theme.theme.json") | ConvertFrom-Json).colors
     $expected = $colors.tab_bar.ToLower() + 'ff'
+    Flat-Edges $theme $label $panel
     # Sample inside the standalone frame and the empty bottom edge of its title band.
     foreach ($y in ($panel[1]+32*$scale-1), ($panel[1]+$panel[3]-12*$scale)) {
         $sample = Aio pixels --region "$([int]($panel[0]+8*$scale)),$([int]$y),1,1" --sample '0,0'
@@ -211,12 +236,34 @@ try {
     Click $s 'activity.side_button'
     Equal (State)['activity.side'] 'left' 'panel docks left'
     Aio capture --out "$data/left-dock.png" | Out-Null
+    foreach ($theme in 'studio-dark', 'studio-light') {
+        Set-Theme $theme
+        foreach ($dpi in 96, 144) {
+            Aio dpi $dpi | Out-Null
+            Flat-Edges $theme "left-$theme-$dpi" (Rect (State) 'activity.rect')
+            Aio capture --out "$data/left-$theme-$dpi.png" | Out-Null
+        }
+    }
+    Aio dpi 96 | Out-Null
+    Set-Theme 'studio-dark'
     if ((State)['tabs.orientation'] -ne 'vertical') { Aio command view.tabs_orientation | Out-Null }
     foreach ($view in 'comfy', 'dense') {
         Set-View-Button $view
         Start-Sleep -Milliseconds 200
         Aio capture --out "$data/rail-$view.png" | Out-Null
     }
+    foreach ($theme in 'studio-dark', 'studio-light') {
+        Set-Theme $theme
+        foreach ($dpi in 96, 144) {
+            Aio dpi $dpi | Out-Null
+            $s = State
+            Flat-Edges $theme "rail-$theme-$dpi" (Rect $s 'rail.rect') $true
+            Flat-Edges $theme "embedded-activity-$theme-$dpi" (Rect $s 'activity.rect') $true
+            Aio capture --out "$data/flat-rail-$theme-$dpi.png" | Out-Null
+        }
+    }
+    Aio dpi 96 | Out-Null
+    Set-Theme 'studio-dark'
 
     # The in-rail panel resizes with either view showing.
     $s = State
