@@ -56,7 +56,7 @@ pane_preview_workspace_discard :: proc(app: ^App, workspace: ^Workspace) {
 
 pane_window_preview_discard :: proc(app: ^App, id: platform.Window_Id) {
 	preview := window_find(app, id)
-	if preview == nil || !preview.preparing {return}
+	if preview == nil || preview.phase != .Preparing {return}
 	workspace_id := preview.workspace.id
 	window_close(app, preview)
 	if workspace := workspace_find(app, workspace_id); workspace != nil && workspace.provisional {
@@ -194,7 +194,7 @@ drag_point :: proc(app: ^App, w: ^Window, x, y: f32) -> (point: Drag_Point, ok: 
 	   y < f32(w.height) {
 		destination, tx, ty = w, i32(x), i32(y)
 	}
-	if destination != nil && destination.preparing {destination = nil}
+	if destination != nil && destination.phase == .Preparing {destination = nil}
 	return {destination, sx, sy, tx, ty}, true
 }
 
@@ -253,10 +253,10 @@ pane_to_window :: proc(
 	if !found {return false}
 	workspace := home.workspace
 	if preview == nil ||
-	   !preview.preparing ||
+	   preview.phase != .Preparing ||
 	   workspace == nil ||
 	   !(source_window.workspace == workspace ||
-			   (source_window.linked && source_window.link_workspace == workspace.id)) ||
+			   window_link_workspace(source_window) == workspace.id) ||
 	   !pane_window_source_allows(workspace) {
 		return false
 	}
@@ -280,7 +280,7 @@ pane_to_window :: proc(
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
 	name := workspace_default_name(app)
 	if name == "" {return false}
-	was_linked := source_window.linked
+	was_linked := window_linked(source_window)
 	move := pane_move_begin(app, preview, home.tab, workspace)
 	if !layout.remove(&home.tab.tree, home.node) {
 		delete(name)
@@ -289,13 +289,13 @@ pane_to_window :: proc(
 	}
 	destination.tree.nodes[destination.tree.root] = layout_pane
 	destination.tree.next_pane_order = layout_pane.order
-	preview.preparing = false
+	shown := window_commit(app, preview)
 	preview.workspace.provisional = false
 	preview.workspace.name = name
 	workspace_pickers_refresh(app)
 	pane_move_finish(app, move, destination)
 	if was_linked {pane_link_refresh_source(app, source_window, pane.content)}
-	if !window_show_prepared(app, preview) {return false}
+	if !shown {return false}
 	_ = window_activate(app, preview)
 	return true
 }

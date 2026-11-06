@@ -15,7 +15,7 @@ pane_link_new_tab :: proc(
 	source_window, destination_window: ^Window,
 	d: Pane_Drag,
 ) -> bool {
-	if !source_window.linked || destination_window.linked {return false}
+	if !window_linked(source_window) || window_linked(destination_window) {return false}
 	pane, is_pane := d.source.tree.nodes[d.node].(layout.Pane)
 	if !is_pane {return false}
 	content := pane.content
@@ -45,7 +45,7 @@ pane_link_drag_release :: proc(
 	content := pane.content
 	home, source_linked, found := pane_link_origin(app, d.source, d.node)
 	if !found {return false}
-	if !source_linked && !destination_window.linked {return false}
+	if !source_linked && !window_linked(destination_window) {return false}
 	if source_linked {
 		// Store this window's arrangement before the pane leaves the slot.
 		home = pane_link_reconcile_at(app, source_window, home)
@@ -57,7 +57,7 @@ pane_link_drag_release :: proc(
 	} else if !pane_link_tab_can_lose(home.tab) {
 		return false
 	}
-	destination_linked := destination_window.linked
+	destination_linked := window_linked(destination_window)
 	destination := d.destination
 	slot := layout.INVALID_NODE
 	target := d.target

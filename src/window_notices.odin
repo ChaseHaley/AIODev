@@ -6,7 +6,7 @@ import "aio:ui"
 window_notices_sync :: proc(app: ^App) {
 	target: ^Window
 	for w in app.windows {
-		if w.preparing || (w.linked && !w.link_shown) || w.width <= 0 || w.height <= 0 {continue}
+		if !window_drawable(w) {continue}
 		if target == nil ||
 		   (w.focused && !target.focused) ||
 		   (w.focused == target.focused && w.focus_order > target.focus_order) {

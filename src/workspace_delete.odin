@@ -3,7 +3,7 @@ package main
 import "aio:term"
 
 workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
-	if w == nil || w.preparing || !workspace_eligible(app, workspace) {return}
+	if w == nil || w.phase == .Preparing || !workspace_eligible(app, workspace) {return}
 	pending_close_open_workspace(app, w, workspace, workspace_delete_plan(app, workspace))
 }
 

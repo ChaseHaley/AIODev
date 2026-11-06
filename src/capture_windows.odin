@@ -127,7 +127,7 @@ when AIO_CONTROL {
 		if app.device == nil {
 			return {}, evidence_error(out, "the graphics device is unavailable; restart the instance")
 		}
-		if w.width <= 0 || w.height <= 0 {
+		if window_minimized(w) {
 			return {}, evidence_error(out, "the window has no drawable area; restore it and retry")
 		}
 		surface, surface_error := render.surface_create_offscreen(app.device, w.width, w.height)

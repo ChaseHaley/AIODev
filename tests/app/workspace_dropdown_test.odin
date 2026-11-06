@@ -117,7 +117,7 @@ workspace_index_excludes_provisional_and_preparing_workspaces :: proc(t: ^testin
 		workspace.provisional = i == 1
 	}
 	defer { for workspace in state.workspaces { app.workspace_destroy(workspace) } }
-	preparing := app.Window{workspace = state.workspaces[2], preparing = true}
+	preparing := app.Window{workspace = state.workspaces[2], phase = .Preparing}
 	append(&state.windows, &preparing)
 	testing.expect(t, app.workspace_index(&state, 0) == state.workspaces[0])
 	testing.expect(t, app.workspace_index(&state, 1) == state.workspaces[3])

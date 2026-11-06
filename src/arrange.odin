@@ -467,7 +467,7 @@ pane_drag_preview :: proc(app: ^App, source_window: ^Window) -> (layout.Rect, bo
 	// trial must move it there rather than copy it across from the linked window's view.
 	if source_pane, is_pane := d.source.tree.nodes[d.node].(layout.Pane); is_pane {
 		if home, source_linked := pane_link_home(app, source_pane.content); source_linked &&
-		   !w.linked &&
+		   !window_linked(w) &&
 		   d.destination == home.tab {
 			result := pane_trial_move(
 				app,
@@ -575,7 +575,7 @@ pane_drag_target_move :: proc(
 	swap, changed_window: bool,
 ) -> bool {
 	d := &source_window.pane_drag
-	if !w.linked && pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
+	if !window_linked(w) && pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
 	title_height := window_title_height(w)
 	destination := selected_tab(w.workspace)
 	now := time.tick_now()
@@ -595,14 +595,14 @@ pane_drag_target_move :: proc(
 			if rail_tab < len(w.workspace.tabs) {destination = w.workspace.tabs[rail_tab]}
 		}
 	}
-	new_tab := !swap && !w.linked &&
+	new_tab := !swap && !window_linked(w) &&
 		(w.tabs_horizontal
 				? ui.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
 				: over_rail && rail_new_tab)
 	if destination != nil && destination != selected_tab(w.workspace) && on_tab >= 0 && !swap {
 		if d.hover != destination {
 			d.hover, d.hover_until = destination, time.tick_add(now, 350 * time.Millisecond)
-		} else if time.tick_diff(now, d.hover_until) <= 0 && !source_window.linked {
+		} else if time.tick_diff(now, d.hover_until) <= 0 && !window_linked(source_window) {
 			// Hovering only changes which tab is shown; it must not move the tab marked selection.
 			// A drag from a linked window must not swap the host's shown tab either: pane_links_sync
 			// shows a linked window only while its own tab is on screen, so switching away here would
@@ -695,7 +695,7 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}
 	}
 	if d.new_tab && d.shown {
-		if w.linked {
+		if window_linked(w) {
 			if !pane_link_new_tab(app, w, destination_window, d) {pane_drag_restore(app, w, d)}
 		} else if !pane_to_tab(app, destination_window, d.source, d.node) {
 			pane_drag_restore(app, w, d)
@@ -718,7 +718,7 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		pane_drag_restore(app, w, d)
 		return true
 	}
-	if (w.linked || destination_window.linked) && destination_window != w {
+	if (window_linked(w) || window_linked(destination_window)) && destination_window != w {
 		if pane_link_drag_release(app, w, destination_window, d) {return true}
 		pane_drag_restore(app, w, d)
 		if d.shown {notify(app, .Error, "Could not move the pane. The source was preserved.")}

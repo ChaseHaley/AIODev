@@ -82,6 +82,12 @@ pane_is_linked :: proc(f: ^Fixture) -> bool {
 	return is_pane && pane.linked
 }
 
+@(private = "file")
+activation_pending :: proc(w: ^app.Window) -> bool {
+	link, linked := w.link.?
+	return linked && link.activate
+}
+
 // Linking, in the states the feature exists for: the window follows the tab and the session never restarts.
 @(test)
 linked_window_follows_its_tab :: proc(t: ^testing.T) {
@@ -106,35 +112,35 @@ linked_window_follows_its_tab :: proc(t: ^testing.T) {
 	testing.expect(t, w.header_height > 0)
 	testing.expect_value(t, app.tab_pane_count(f.tab), 2)
 	app.pane_links_sync(f.state)
-	testing.expect(t, w.link_shown)
+	testing.expect(t, w.phase == .Shown)
 	geometry := term.geometry(session.session)
 
 	if !testing.expect(t, app.tab_create(f.state, f.host.workspace)) {return}
 	app.tab_select(f.state, f.host, 1)
 	app.pane_links_sync(f.state)
-	testing.expect(t, !w.link_shown, "another tab hides the window")
+	testing.expect(t, w.phase == .Hidden, "another tab hides the window")
 	app.tab_select(f.state, f.host, 0)
 	app.pane_links_sync(f.state)
-	testing.expect(t, w.link_shown, "its tab brings the window back")
+	testing.expect(t, w.phase == .Shown, "its tab brings the window back")
 	testing.expect_value(t, term.geometry(session.session), geometry)
 	testing.expect_value(t, term.process_id(session.session), pid)
 
 	width, height := f.host.width, f.host.height
 	app.window_resize(f.state, f.host, 0, 0)
 	app.pane_links_sync(f.state)
-	testing.expect(t, !w.link_shown, "minimizing the host hides the window")
+	testing.expect(t, w.phase == .Hidden, "minimizing the host hides the window")
 	app.window_resize(f.state, f.host, width, height)
 	app.pane_links_sync(f.state)
-	testing.expect(t, w.link_shown)
+	testing.expect(t, w.phase == .Shown)
 
 	app.hide_to_tray(f.state, f.host)
 	testing.expect(t, app.window_primary(f.state) == nil, "a linked window is not the app's window")
 	app.pane_links_sync(f.state)
-	testing.expect(t, !w.link_shown, "hiding the host hides the window")
+	testing.expect(t, w.phase == .Hidden, "hiding the host hides the window")
 	testing.expect(t, app.session_find(f.state, f.content.id) != nil)
 	app.show_window(f.state)
 	app.pane_links_sync(f.state)
-	testing.expect(t, w.link_shown)
+	testing.expect(t, w.phase == .Shown)
 	testing.expect_value(t, len(f.state.windows), 2)
 }
 
@@ -241,7 +247,7 @@ reopening_a_closed_tab_brings_back_its_linked_window :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(f.state.windows), 2)
 	app.pane_links_sync(f.state)
 	for w in f.state.windows {
-		if w.linked {testing.expect(t, w.link_shown)}
+		if app.window_linked(w) {testing.expect(t, w.phase == .Shown)}
 	}
 }
 
@@ -264,11 +270,11 @@ linked_window_routes_commands :: proc(t: ^testing.T) {
 	testing.expect(t, w.workspace == view)
 	testing.expect_value(t, len(f.state.workspaces), 1)
 	app.pane_links_sync(f.state)
-	testing.expect(t, !w.link_shown, "the new tab is selected, so the pane's tab left the screen")
+	testing.expect(t, w.phase == .Hidden, "the new tab is selected, so the pane's tab left the screen")
 	app.run_action(f.state, w, .Tab_1)
 	testing.expect_value(t, f.host.workspace.selected, 0)
 	app.pane_links_sync(f.state)
-	testing.expect(t, w.link_shown)
+	testing.expect(t, w.phase == .Shown)
 }
 
 @(test)
@@ -281,10 +287,11 @@ focusing_a_linked_pane_goes_to_its_window :: proc(t: ^testing.T) {
 	w := linked_window(&f)
 	if !testing.expect(t, w != nil) {return}
 	focus := f.tab.tree.focus
-	w.link_activate = false
+	app.pane_links_sync(f.state)
+	testing.expect(t, w.phase == .Shown && !activation_pending(w), "the first show carries out the activation")
 	app.pane_focus(f.state, f.host, f.node)
 	testing.expect_value(t, f.tab.tree.focus, focus)
-	testing.expect(t, w.link_activate)
+	testing.expect(t, activation_pending(w))
 }
 
 @(test)
@@ -304,12 +311,12 @@ linked_pane_follows_its_tab_to_another_workspace :: proc(t: ^testing.T) {
 	testing.expect(t, app.workspace_move_content(f.state, f.host, request, destination))
 	testing.expect(t, f.host.workspace == destination)
 	app.pane_links_sync(f.state)
-	testing.expect_value(t, w.link_workspace, destination.id)
-	testing.expect(t, w.link_shown, "the host now shows the moved tab")
+	testing.expect_value(t, app.window_link_workspace(w), destination.id)
+	testing.expect(t, w.phase == .Shown, "the host now shows the moved tab")
 	testing.expect_value(t, len(f.state.windows), 2)
 	testing.expect(t, app.workspace_select(f.state, f.host, home_workspace))
 	app.pane_links_sync(f.state)
-	testing.expect(t, !w.link_shown)
+	testing.expect(t, w.phase == .Hidden)
 }
 
 @(test)
@@ -345,13 +352,13 @@ linked_window_survives_a_restart :: proc(t: ^testing.T) {
 	testing.expect_value(t, linked_count, 1)
 	restored := app.pane_link_window_of(second.state, content)
 	if !testing.expect(t, restored != nil) {return}
-	testing.expect(t, !restored.link_shown)
+	testing.expect(t, restored.phase == .Hidden)
 	testing.expect(t, app.window_primary(second.state) != restored)
 	placement, placement_error := platform.window_placement(&second.state.platform, restored.id)
 	testing.expect_value(t, placement_error, platform.Error.None)
 	testing.expect_value(t, placement, target)
 	app.pane_links_sync(second.state)
-	testing.expect(t, restored.link_shown)
+	testing.expect(t, restored.phase == .Shown)
 	focused, is_pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
 	testing.expect(t, is_pane && !focused.linked)
 }
@@ -594,7 +601,7 @@ dragging_a_linked_pane_into_its_host_tab_returns_it :: proc(t: ^testing.T) {
 		)
 	}
 	app.pane_links_sync(f.state)
-	testing.expect(t, w.link_shown)
+	testing.expect(t, w.phase == .Shown)
 	app.pane_link_toggle(f.state, w)
 	testing.expect_value(t, len(f.state.windows), 1)
 	testing.expect_value(t, len(f.host.panes), 3)
@@ -848,7 +855,7 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 	testing.expect_value(t, len(w.panes), 1)
 	testing.expect_value(t, app.tab_pane_count(f.tab), 2)
 	app.pane_links_sync(f.state)
-	testing.expect(t, !w.link_shown)
+	testing.expect(t, w.phase == .Hidden)
 }
 
 @(test)
@@ -919,7 +926,7 @@ focusing_a_pane_in_a_split_linked_window_selects_it_there :: proc(t: ^testing.T)
 	if !ok {return}
 	home := layout.find_content(f.host.tree, f.content)
 	app.pane_focus(f.state, f.host, home)
-	testing.expect(t, w.link_activate)
+	testing.expect(t, activation_pending(w))
 	focused := w.tree.nodes[w.tree.focus].(layout.Pane)
 	testing.expect_value(t, focused.content, f.content)
 }
@@ -963,11 +970,11 @@ split_linked_window_survives_a_restart :: proc(t: ^testing.T) {
 	defer fixture_stop(t, &second, false)
 	testing.expect_value(t, len(second.state.windows), 2)
 	restored: ^app.Window
-	for candidate in second.state.windows {if candidate.linked {restored = candidate}}
+	for candidate in second.state.windows {if app.window_linked(candidate) {restored = candidate}}
 	if !testing.expect(t, restored != nil) {return}
 	testing.expect_value(t, layout.pane_count(restored.tree), 2)
 	app.pane_links_sync(second.state)
-	testing.expect(t, restored.link_shown)
+	testing.expect(t, restored.phase == .Shown)
 	testing.expect_value(t, len(restored.panes), 2)
 	placement, placement_error := platform.window_placement(&second.state.platform, restored.id)
 	testing.expect_value(t, placement_error, platform.Error.None)

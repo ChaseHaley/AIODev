@@ -285,7 +285,7 @@ markdown_open_at :: proc(
 	content := layout.Content{.Markdown, pane.id}
 	// A linked window holds one pane's slot, and only linkable content belongs there.
 	opened := false
-	if w != nil && w.linked {
+	if w != nil && window_linked(w) {
 		opened = markdown_new_tab(app, nil, workspace, content, false)
 	} else {
 		failure := pane_split_insert(app, w, workspace, tab_index, node, direction, ratio, focus, content, false)

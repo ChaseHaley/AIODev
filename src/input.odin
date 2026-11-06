@@ -88,12 +88,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		}
 	case platform.Resize_Event:
 		if w := window_find(app, e.window); w != nil {
-			if !w.preparing && !gesture_cancel(app, w) {return}
+			if w.phase != .Preparing && !gesture_cancel(app, w) {return}
 			window_resize(app, w, e.width, e.height)
 		}
 	case platform.Dpi_Event:
 		if w := window_find(app, e.window); w != nil {
-			if !w.preparing && !gesture_cancel(app, w) {return}
+			if w.phase != .Preparing && !gesture_cancel(app, w) {return}
 			window_set_dpi(app, w, e.dpi)
 		}
 	case platform.Focus_Event:
@@ -107,9 +107,9 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 	case platform.Close_Request_Event:
 		if w := window_find(app, e.window); w != nil {
 			switch {
-			case w.preparing:
+			case w.phase == .Preparing:
 				_ = gesture_cancel(app, w)
-			case w.linked:
+			case window_linked(w):
 				pane_link_return(app, w)
 			case:
 				hide_to_tray(app, w)
@@ -129,7 +129,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 	case platform.Activate_Request_Event:
 		// Launching AIODev again means a fresh workspace window, as New Window does. With every
 		// window hidden to the tray, it reopens the existing view instead.
-		if window_primary(app) == nil {show_window(app)} else {workspace_new(app, nil, true, name_it = false)}
+		if app_tray_only(app) {show_window(app)} else {workspace_new(app, nil, true, name_it = false)}
 	case platform.Tray_Menu_Event:
 		switch e.id {
 		case TRAY_OPEN:
@@ -145,7 +145,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 
 show_window :: proc(app: ^App) {
 	if len(app.workspaces) == 0 {return}
-	if window_primary(app) == nil {
+	if app_tray_only(app) {
 		workspace := app.workspaces[0]
 		if len(workspace.tabs) == 0 && !tab_create(app, workspace) {
 			notify(app, .Error, "Could not create a tab.")
@@ -162,7 +162,7 @@ show_window :: proc(app: ^App) {
 hide_to_tray :: proc(app: ^App, w: ^Window) {
 	focus_leave(app, w)
 	window_close(app, w)
-	if window_primary(app) != nil {return}
+	if !app_tray_only(app) {return}
 	if app.settings.window.tray_notification && !app.tray_hint_shown {
 		app.tray_hint_shown = true
 		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use Quit to exit."
@@ -174,7 +174,7 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 
 @(private)
 on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
-	if w.preparing {return}
+	if w.phase == .Preparing {return}
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
@@ -231,7 +231,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	if !palette_active(app, w) &&
 	   e.pressed &&
-	   !w.linked &&
+	   !window_linked(w) &&
 	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
 		if w.tabs_horizontal {
 			bar := window_tab_bar(app, w)
@@ -354,7 +354,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 
 @(private)
 on_text :: proc(app: ^App, w: ^Window, text: string) {
-	if w.preparing {return}
+	if w.phase == .Preparing {return}
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_text(app, w, text); return}
 	if w.tab_menu.open {return}
 	if w.profile_menu.open {return}
@@ -425,7 +425,7 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
-	if w.preparing {return}
+	if w.phase == .Preparing {return}
 	if pane_workspace_drag_wheel(app, w, e.delta_y) || tab_workspace_drag_wheel(app, w, e.delta_y) {return}
 	if workspace_picker_active(&w.workspace_picker) {
 		workspace_picker_wheel(w, e.delta_y)

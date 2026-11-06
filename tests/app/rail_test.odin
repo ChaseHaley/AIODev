@@ -68,7 +68,7 @@ rail_rows_show_only_the_current_workspace_and_follow_switches :: proc(t: ^testin
 @(test)
 rail_adaptive_threshold_toggle_and_crossing_restore_automatic_behaviour :: proc(t: ^testing.T) {
 	state: app.App
-	w := app.Window{width = 1200, height = 700, scale = 1, preparing = true}
+	w := app.Window{width = 1200, height = 700, scale = 1, phase = .Preparing}
 	app.rail_adaptive_update(&w)
 	testing.expect(t, w.rail_auto)
 	testing.expect(t, app.rail_docked(&w))
@@ -180,7 +180,7 @@ rail_keyboard_tab_selection_closes_an_open_overlay :: proc(t: ^testing.T) {
 		scale          = 1,
 		rail_auto      = false,
 		rail_override  = .Shown,
-		preparing      = true,
+		phase          = .Preparing,
 	}
 	append(&state.windows, &w)
 	testing.expect(t, app.rail_overlay(&w))
@@ -193,11 +193,11 @@ rail_keyboard_tab_selection_closes_an_open_overlay :: proc(t: ^testing.T) {
 @(test)
 rail_preview_windows_do_not_reserve_rail_width :: proc(t: ^testing.T) {
 	state: app.App
-	w := app.Window{width = 1000, height = 700, scale = 1, rail_auto = true, preparing = true}
+	w := app.Window{width = 1000, height = 700, scale = 1, rail_auto = true, phase = .Preparing}
 	preview := app.window_content_area(&state, &w)
 	testing.expect_value(t, preview.x, f32(0))
 	testing.expect_value(t, preview.width, f32(1000))
-	w.preparing = false
+	w.phase = .Shown
 	docked := app.window_content_area(&state, &w)
 	testing.expect_value(t, docked.x, ui.rail_pixel_width(1))
 	testing.expect_value(t, docked.width, 1000 - ui.rail_pixel_width(1))

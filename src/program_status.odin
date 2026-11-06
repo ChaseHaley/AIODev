@@ -230,7 +230,7 @@ status_tab_mark :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) 
 // Queue the next frame immediately. window_render waits on the swap chain before sampling the
 // phase, so display refresh paces animation without a timer cap or an extra sleep after Present.
 status_spin_active :: proc(w: ^Window) -> bool {
-	return w.status_spinning && w.width > 0 && w.height > 0 && !w.preparing
+	return w.status_spinning && window_drawable(w)
 }
 
 status_spin_tick :: proc(w: ^Window) {
@@ -394,8 +394,8 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 // A click on a status notification jumps to the pane that sent it, reopening a window if all
 // were hidden to the tray.
 status_notification_clicked :: proc(app: ^App, session: u32) {
-	if window_primary(app) == nil {show_window(app)}
-	if window_primary(app) == nil {return}
+	if app_tray_only(app) {show_window(app)}
+	if app_tray_only(app) {return}
 	target := window_for_workspace(app, status_workspace_of(app, session))
 	if target == nil {target = window_primary(app)}
 	if !window_activate(app, target) {return}

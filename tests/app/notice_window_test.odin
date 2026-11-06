@@ -10,7 +10,7 @@ import "core:time"
 notice_expect_window :: proc(t: ^testing.T, s: ^app.App, owner: ^app.Window) {
 	testing.expect_value(t, s.notice_window, owner.id)
 	for w in s.windows {
-		if w.preparing || (w.linked && !w.link_shown) {continue}
+		if !app.window_drawable(w) {continue}
 		if !testing.expect(t, app.window_build_frame(s, w)) {return}
 		point := notice_close_point(w)
 		close_drawn := false
@@ -75,17 +75,16 @@ notices_fall_back_after_window_close_hide_minimize_and_preparation :: proc(t: ^t
 	app.handle_event(s, platform.Focus_Event{first.id, false})
 	app.handle_event(s, platform.Focus_Event{second.id, true})
 	app.handle_event(s, platform.Focus_Event{second.id, false})
-	second.preparing = true
+	second.phase = .Preparing
 	app.window_notices_sync(s)
 	testing.expect_value(t, s.notice_window, first.id)
-	second.preparing = false
-	second.linked = true
+	second.phase, second.link = .Hidden, app.Window_Link{}
 	app.window_notices_sync(s)
 	testing.expect_value(t, s.notice_window, first.id)
-	second.link_shown = true
+	second.phase = .Shown
 	app.window_notices_sync(s)
 	testing.expect_value(t, s.notice_window, second.id)
-	second.linked, second.link_shown = false, false
+	second.link = nil
 	width := second.width
 	second.width = 0
 	app.window_notices_sync(s)
@@ -95,10 +94,10 @@ notices_fall_back_after_window_close_hide_minimize_and_preparation :: proc(t: ^t
 	testing.expect_value(t, s.notice_window, second.id)
 	app.window_close(s, second)
 	testing.expect_value(t, s.notice_window, first.id)
-	first.preparing = true
+	first.phase = .Preparing
 	app.window_notices_sync(s)
 	testing.expect_value(t, s.notice_window, platform.Window_Id(0))
-	first.preparing = false
+	first.phase = .Shown
 	app.window_notices_sync(s)
 	testing.expect_value(t, s.notice_window, first.id)
 }

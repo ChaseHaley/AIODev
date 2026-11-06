@@ -42,7 +42,7 @@ pane_workspace_drag_release :: proc(app: ^App, source: ^Window, d: Pane_Drag) {
 	if hit < 0 || hit > count + 1 {pane_drag_restore(app, source, d); return}
 	if hit <= count {
 		workspace_move_choose(app, pane_link_acting_window(app, source), request, id)
-		if source.linked {
+		if window_linked(source) {
 			pane, is_pane := d.source.tree.nodes[d.node].(layout.Pane)
 			if is_pane {pane_link_refresh_source(app, source, pane.content)}
 		}

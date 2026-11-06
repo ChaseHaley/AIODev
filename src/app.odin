@@ -374,8 +374,14 @@ tick :: proc(app: ^App) {
 			window.taskbar_workspace = window.workspace
 			status_taskbar_update(app, window)
 		}
-		if window.preparing {window.dirty = false; continue}
-		if window.linked && !window.link_shown {continue}
+		switch window.phase {
+		case .Preparing:
+			window.dirty = false
+			continue
+		case .Hidden, .Closing:
+			continue
+		case .Shown:
+		}
 		if window.dirty {
 			window_render(app, window)
 			verify_presented(app, window)
@@ -661,7 +667,7 @@ update_sessions :: proc(app: ^App) {
 		}
 		if term.take_bell(s) {
 			for window in app.windows {
-				if !window.focused && (!window.linked || window.link_shown) &&
+				if !window.focused && window.phase == .Shown &&
 				   platform_api.window_flash(&app.platform, window.id) != .None {
 					log.error("flashing the window failed")
 				}

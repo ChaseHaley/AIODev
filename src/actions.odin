@@ -471,7 +471,7 @@ run_action :: proc(
 	split_focus := true,
 ) {
 	if (w.pane_drag.pressed || w.tab_drag.pressed) && !gesture_cancel(app, w) {return}
-	if w.linked {
+	if window_linked(w) {
 		switch pane_link_route(action) {
 		case .Local:
 			pane_link_reconcile(app, w)

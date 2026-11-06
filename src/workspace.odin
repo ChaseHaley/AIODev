@@ -160,7 +160,7 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	if is_pane && layout.link_root(w.tree, node) != layout.INVALID_NODE {
 		if linked := pane_link_window_of(app, pane.content); linked != nil {
 			pane_focus(app, linked, layout.find_content(linked.tree, pane.content))
-			linked.link_activate = true
+			pane_link_activate(linked)
 		}
 		return
 	}
@@ -330,7 +330,7 @@ pane_split :: proc(
 		app, w, w.workspace, tab, w.tree.focus, direction, ratio, focus, launch, true,
 	); err {
 	case .None:
-		if w.linked {pane_link_store(app, w)}
+		if window_linked(w) {pane_link_store(app, w)}
 	case .Minimum:
 	case .Check:
 		notify(app, .Error, "Could not check the new pane size.")
@@ -688,7 +688,7 @@ tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {
 }
 
 pane_close :: proc(app: ^App, w: ^Window) {
-	if w.linked {
+	if window_linked(w) {
 		home, found := pane_link_home(app, pane_link_content(w))
 		if found {
 			pane_close_at(app, home.workspace, tab_index_by_id(home.workspace, home.tab.id), home.node)

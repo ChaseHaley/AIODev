@@ -61,12 +61,9 @@ Window :: struct {
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
 	focus_order: u64,
-	preparing: bool,
-	// Shows part of a tab instead of a workspace; see pane_links.odin. w.workspace is then a private
-	// view of those panes, and link_workspace is the id of the workspace that really holds them.
-	linked, link_shown: bool,
-	link_activate, link_maximize: bool,
-	link_workspace: u32,
+	phase: Window_Phase,
+	// Set once, when pane_link_window_create makes the window; see Window_Link.
+	link: Maybe(Window_Link),
 	generation: u64,
 	selecting: bool,
 	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
@@ -175,8 +172,7 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	}
 	w := window_prepare(app, workspace)
 	if w == nil {return false}
-	if !window_show_prepared(app, w) {window_close(app, w); return false}
-	w.preparing = false
+	if !window_commit(app, w) {window_close(app, w); return false}
 	window_apply_settings(app, w)
 	if !app.options.inactive {_ = window_activate(app, w)}
 	return true
@@ -194,7 +190,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	if allocation_error != nil {
 		return nil
 	}
-	w.preparing = true
+	w.phase = .Preparing
 	w.scale = f32(platform.primary_dpi(&app.platform)) / 96
 	w.ui_text = app.ui_text
 	w.metrics = window_metrics(app, w.scale)
@@ -253,8 +249,12 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	return w
 }
 
+// Preparing → Shown: the window owns its content from here and takes input. A show the OS refuses still
+// commits, since the caller may already have moved content in; the result says whether it is on screen.
 @(require_results)
-window_show_prepared :: proc(app: ^App, w: ^Window) -> bool {
+window_commit :: proc(app: ^App, w: ^Window) -> bool {
+	assert(w.phase == .Preparing)
+	w.phase = .Shown
 	show_error := platform.window_show_inactive(&app.platform, w.id)
 	if show_error != .None {
 		log.errorf("showing the window failed: %v", show_error)
@@ -286,9 +286,15 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
+	if w.phase == .Closing {return}
+	// A preview stays Preparing through the cancel: cancelling the drag that made it is how a preview is
+	// discarded, and that discard closes it from inside this call. Any other window is Closing first, so
+	// nothing the cancel sets off takes it for a live window or closes it again.
+	if w.phase != .Preparing {w.phase = .Closing}
 	if !gesture_cancel(app, w) {return}
+	w.phase = .Closing
 	window_overlays_cancel(app, w)
-	view := w.linked ? w.workspace : nil
+	view, id := window_linked(w) ? w.workspace : nil, w.id
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
 			ordered_remove(&app.windows, i)
@@ -304,6 +310,9 @@ window_close :: proc(app: ^App, w: ^Window) {
 	window_free(w)
 	if view != nil {workspace_destroy(view)}
 	window_notices_sync(app)
+	// A destroyed window never reports losing focus, so the jump list follows the notices to the window
+	// focused most recently.
+	if app.focus_jumps.window == id {app.focus_jumps.window = app.notice_window}
 }
 
 @(private)
@@ -351,7 +360,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 		log.error("setting the window frame color failed")
 	}
 	// A linked window has no tabs to place, and the rail is the only placement that takes pane space.
-	horizontal := w.linked || app.settings.tabs.orientation == .Horizontal
+	horizontal := window_linked(w) || app.settings.tabs.orientation == .Horizontal
 	placement_changed := horizontal != w.tabs_horizontal
 	w.tabs_horizontal = horizontal
 	if placement_changed {
@@ -381,7 +390,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 	w.maximized = platform.window_maximized(&app.platform, w.id)
 	w.width, w.height = width, height
-	if width <= 0 || height <= 0 {
+	if window_minimized(w) {
 		return
 	}
 	rail_adaptive_update(w)
@@ -404,10 +413,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if palette_visible(app, w) {
 		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
 	}
-	if w.preparing { return }
-	if w.width <= 0 || w.height <= 0 {
-		return
-	}
+	if w.phase == .Preparing || window_minimized(w) {return}
 	bar_height := window_title_height(w)
 	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
 	if tab_count != len(w.tab_positions) {

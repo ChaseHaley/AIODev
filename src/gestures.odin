@@ -106,7 +106,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 }
 
 gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	if w.preparing {return}
+	if w.phase == .Preparing {return}
 	if e.pressed {
 		w.gesture.cancelled -= {e.button}
 		w.gesture.buttons += {e.button}
@@ -208,7 +208,7 @@ content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	if w.scroll_drag.active {terminal_scrollbar_move(app, w, f32(event.y)); return}
-	if w.preparing {return}
+	if w.phase == .Preparing {return}
 	e := event
 	e.buttons -= w.gesture.cancelled
 	if event.buttons != {} && e.buttons == {} {return}

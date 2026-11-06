@@ -89,7 +89,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.process_id(session), pid)
 	preview := app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, preview != nil) { return }
-	testing.expect(t, preview.preparing)
+	testing.expect(t, preview.phase == .Preparing)
 	testing.expect_value(t, preview.workspace.name, "")
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, term.process_id(session), pid)
@@ -123,7 +123,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	preview_id = preview.id
 	app.tab_close(&state, source_window, 1)
 	testing.expect(t, !app.pane_to_window(&state, source_window, source, node, preview_id))
-	testing.expect(t, preview.preparing && preview.workspace.provisional)
+	testing.expect(t, preview.phase == .Preparing && preview.workspace.provisional)
 	testing.expect_value(t, source.tree.root, node)
 	testing.expect_value(t, len(state.sessions), 1)
 	testing.expect_value(t, term.process_id(session), pid)
@@ -147,7 +147,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	failed_commit := app.pane_to_window(&state, source_window, source, node, preview_id)
 	context.allocator = allocator
 	testing.expect(t, !failed_commit)
-	testing.expect(t, preview.preparing && preview.workspace.provisional)
+	testing.expect(t, preview.phase == .Preparing && preview.workspace.provisional)
 	testing.expect_value(t, source.tree.root, node)
 	// The drop moves the pane at once, then names the new window in its own chip.
 	source_window.pane_drag = {source = source, node = node, active = true,
@@ -164,7 +164,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, preview.workspace.name, "Detached tools")
 	testing.expect_value(t, len(state.windows), 2)
 	testing.expect(t, app.window_find(&state, preview_id) == preview)
-	testing.expect(t, !preview.preparing)
+	testing.expect(t, preview.phase == .Shown)
 	testing.expect(t, preview.workspace.name != "" && preview.workspace.name != source_workspace.name)
 	testing.expect_value(t, preview.workspace.id, preview_workspace_id)
 	testing.expect(t, preview.workspace.id > 2)

@@ -16,7 +16,7 @@ Pane_Move :: struct {
 pane_move_begin :: proc(app: ^App, w: ^Window, source: ^Tab, workspace: ^Workspace) -> Pane_Move {
 	move := Pane_Move{source = source, workspace = workspace, destination = w.id}
 	for window in app.windows {
-		if window.preparing {continue}
+		if window.phase == .Preparing {continue}
 		if window != w && selected_tab(window.workspace) != source {continue}
 		move.departed[move.count] = window.id
 		move.count += 1

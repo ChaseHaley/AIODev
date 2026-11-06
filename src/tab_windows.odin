@@ -148,7 +148,7 @@ tab_drag_windows_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	d := &w.tab_drag
 	d.pointer = {x, y}
 	point, ok := drag_point(app, w, x, y)
-	if ok && !w.linked && point.window != nil && !point.window.linked {
+	if ok && !window_linked(w) && point.window != nil && !window_linked(point.window) {
 		px, py := f32(point.x), f32(point.y)
 		if tab_workspace_drag_move(app, w, point.window, px, py) {return true}
 		if point.window != w {
@@ -296,7 +296,7 @@ tabs_carry :: proc(
 @(require_results)
 tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 	workspace, destination := source_window.workspace, preview.workspace
-	if !preview.preparing || !tab_window_source_allows(workspace) {return false}
+	if preview.phase != .Preparing || !tab_window_source_allows(workspace) {return false}
 	// The first tab takes over the preview's placeholder, which is already the window's selected tab.
 	records, reserved := tab_records_reserve(destination, tabs_marked_count(workspace), destination.tabs[0])
 	if !reserved {return false}
@@ -311,7 +311,7 @@ tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 	selected_index := tabs_carry(app, workspace, destination, records, selected, 1, true)
 	tab_select_one(workspace, workspace.selected)
 
-	preview.preparing = false
+	shown := window_commit(app, preview)
 	destination.provisional = false
 	destination.name = name
 	destination.selected = selected_index
@@ -322,7 +322,7 @@ tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 	window_relayout(app, preview)
 	focus_enter(app, preview)
 	workspace_settings_sync(app, destination)
-	if !window_show_prepared(app, preview) {
+	if !shown {
 		notify(app, .Error, "The tabs moved, but their window could not be shown. Reopen it from the tray.")
 		return true
 	}
@@ -338,7 +338,7 @@ tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 tabs_to_workspace :: proc(app: ^App, source_window: ^Window, destination: ^Workspace, slot: int) -> bool {
 	workspace := source_window.workspace
 	if workspace == destination ||
-	   source_window.linked ||
+	   window_linked(source_window) ||
 	   !workspace_eligible(app, destination) ||
 	   !tabs_can_join(workspace, destination) {
 		return false
