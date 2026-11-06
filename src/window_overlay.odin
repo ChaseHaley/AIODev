@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:ui"
 
 // The surface a window shows over its content and takes input with, holding what only that surface
 // needs. overlay_open and overlay_close are its only writers; each surface's own file changes the
@@ -94,11 +95,13 @@ Overlay_Exit :: enum u8 {
 // Shows `next` in place of whatever had the window's input. The previous window surface ends with its
 // cancel exit, a palette owned here fades out, and the picker and an open confirmation close, so no two
 // surfaces take the window's input together. Callers that cancel the pointer gesture do so first.
-overlay_open :: proc(app: ^App, w: ^Window, next: Window_Overlay) {
+// `reopening` is a confirmation its caller rewrites in place: cancelling it would undo what the caller
+// prepared for the new question, such as the tabs a close subset just marked.
+overlay_open :: proc(app: ^App, w: ^Window, next: Window_Overlay, reopening: ^ui.Confirm = nil) {
 	overlay_close(app, w)
 	palette_close(app, w)
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_cancel(w)}
-	if confirmation_current(w) != nil {confirmation_cancel(app, w)}
+	if current := confirmation_current(w); current != nil && current != reopening {confirmation_cancel(app, w)}
 	w.overlay, w.dirty = next, true
 }
 

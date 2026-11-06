@@ -241,6 +241,28 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 	testing.expect(t, f.workspace.tabs[0].marked && !w.pending_close.confirm.open)
 }
 
+// Regression: a close subset requested while a tab-close question is open (a command can do this) must
+// replace the question with its own marks, not have the replaced question's cancel restore them.
+@(test)
+tab_close_subset_replaces_an_open_close_question_with_its_marks :: proc(t: ^testing.T) {
+	f: Menu_Fixture
+	defer menu_fixture_destroy(&f)
+	if !menu_fixture_init(t, &f, 3) { return }
+	w := &f.w
+	_, split_error := layout.split_direction(&f.workspace.tabs[2].tree,
+		f.workspace.tabs[2].tree.root, .Right, 0.5, {.Terminal, 0})
+	testing.expect_value(t, split_error, nil)
+	app.pending_close_open_tab(&f.state, w, 2)
+	if !testing.expect(t, w.pending_close.confirm.open && w.pending_close.tabs == 1) { return }
+	app.tab_close_subset(&f.state, w, true, 0)
+	testing.expect(t, w.pending_close.confirm.open)
+	testing.expect_value(t, w.pending_close.tabs, 2)
+	testing.expect(t, f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
+	menu_key(&f, {key = .Enter})
+	if !testing.expect_value(t, len(f.workspace.tabs), 1) { return }
+	testing.expect_value(t, f.workspace.tabs[0].id, 1)
+}
+
 @(test)
 tab_menu_close_others_acts_on_an_unmarked_target :: proc(t: ^testing.T) {
 	f: Menu_Fixture

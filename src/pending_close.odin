@@ -34,11 +34,12 @@ pending_close_clear :: proc(pc: ^Pending_Close) {
 	pc^ = {}
 }
 
-// Opens the tab question, cancelling the gesture and palette that requested it.
+// Opens the tab question, cancelling the gesture and palette that requested it. An open close question is
+// rewritten in place, keeping the tabs its caller just marked.
 pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
 	if !gesture_cancel(app, w) {return}
-	overlay_open(app, w, nil)
+	overlay_open(app, w, nil, &w.pending_close.confirm)
 	pc := &w.pending_close
 	delete(pc.workspace_name)
 	delete(pc.destination_name)
