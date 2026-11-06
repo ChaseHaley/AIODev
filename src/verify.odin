@@ -51,17 +51,13 @@ CHANGED_KEYS :: [?]string {
 when AIO_CONTROL {
 	Verify :: struct {
 		server: ^control.Server,
-		pending: ^control.Message,
-		started, changed: time.Tick,
-		generation, frames, request_frame: u64,
+		request: Verify_Request,
+		// When the focused pane's content last changed, or the last drive began.
+		changed: time.Tick,
+		generation, frames: u64,
 		pointer_updates: u64,
 		session_id: u32,
-		phase: Verify_Phase,
-		needs_frame, presented: bool,
-		quit_id: u64,
-		quit_started: time.Tick,
-		before: term.Snapshot,
-		before_state: []control.State_Entry,
+		presented: bool,
 		presents: [dynamic]Verify_Present,
 		mouse_window: platform.Window_Id,
 		target_window: platform.Window_Id,
@@ -74,11 +70,94 @@ when AIO_CONTROL {
 		count: u32,
 	}
 
-	Verify_Phase :: enum {
+	// The control request in flight; nil is idle. Only the procs from verify_accept to verify_end
+	// write it. A read or the start of a drive finishes in the tick it begins, so neither is a state.
+	Verify_Request :: union {
+		Verify_Gate,
+		Verify_Wait,
+		Verify_Drive,
+		Verify_Quitting,
+	}
+
+	// A read or drive held until the window has presented what it last drew, so it never sees a
+	// stale frame.
+	Verify_Gate :: struct {
+		message: ^control.Message,
+		then: Verify_Gated,
+		started: time.Tick,
+		request_frame: u64,
+		// The window had a frame to draw when the request arrived.
+		needs_frame: bool,
+	}
+
+	Verify_Gated :: enum {
+		Read,
+		Drive,
+	}
+
+	Verify_Wait :: struct {
+		message: ^control.Message,
+		started: time.Tick,
+		request_frame: u64,
+	}
+
+	// A drive has happened; its reply waits for the window to settle, then reports what changed.
+	Verify_Drive :: struct {
+		message: ^control.Message,
+		started: time.Tick,
+		request_frame: u64,
+		before: term.Snapshot,
+		before_state: []control.State_Entry,
+	}
+
+	// The reply to the request that quit has been sent; the app's quit is held until it is delivered.
+	Verify_Quitting :: struct {
+		id: u64,
+		started: time.Tick,
+	}
+
+	Verify_Action :: enum {
 		Read,
 		Wait,
-		Start_Drive,
-		Finish_Drive,
+		Drive,
+		Quit,
+	}
+
+	// Every request type names its action, so a new one cannot silently become a drive.
+	verify_action :: proc(request: control.Request) -> (action: Verify_Action) {
+		switch r in request {
+		case nil:
+			action = .Read
+		case control.Ping,
+		     control.Screen,
+		     control.Cells,
+		     control.State,
+		     control.Expect,
+		     control.Help,
+		     control.Capture,
+		     control.Pixels,
+		     control.Diff,
+		     control.Draws,
+		     control.Perf,
+		     control.Vt:
+			action = .Read
+		case control.Wait:
+			action = .Wait
+		case control.Tray:
+			action = r.action == .Quit ? .Quit : .Drive
+		case control.Type,
+		     control.Key,
+		     control.Run,
+		     control.Mouse,
+		     control.Focus,
+		     control.Resize,
+		     control.Dpi,
+		     control.Command,
+		     control.Window_Select,
+		     control.Window_Move:
+			action = .Drive
+		}
+		return
 	}
 
 	verify_start :: proc(app: ^App) {
@@ -97,23 +176,10 @@ when AIO_CONTROL {
 		app.verify.changed = time.tick_now()
 	}
 
-	verify_clear :: proc(v: ^Verify) {
-		control.message_destroy(v.pending)
-		v.pending = nil
-		term.snapshot_destroy(&v.before)
-		for entry in v.before_state {
-			delete(entry.key)
-			delete(entry.value)
-		}
-		delete(v.before_state)
-		v.before_state = nil
-		v.phase, v.needs_frame = .Read, false
-	}
-
 	verify_destroy :: proc(app: ^App) {
 		v := &app.verify
 		control.destroy(v.server)
-		verify_clear(v)
+		verify_end(v)
 		delete(v.presents)
 		v^ = {}
 	}
@@ -170,31 +236,28 @@ when AIO_CONTROL {
 	verify_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 		v := &app.verify
 		now := time.tick_now()
-		if v.quit_id != 0 {
+		started: time.Tick
+		timeout_ms, idle_ms := 0, -1
+		switch s in v.request {
+		case nil:
+			return {}, false
+		case Verify_Quitting:
 			return time.tick_add(now, 10 * time.Millisecond), true
+		case Verify_Gate:
+			started, timeout_ms = s.started, verify_timeout(s.message.request)
+		case Verify_Wait:
+			r := s.message.request.(control.Wait)
+			started, timeout_ms = s.started, r.timeout_ms
+			if r.kind == .Idle {idle_ms = r.idle_ms}
+		case Verify_Drive:
+			started = s.started
+			idle_ms, timeout_ms = verify_drive_limits(s.message.request)
+			if _, resize := s.message.request.(control.Resize); resize {timeout_ms = RESIZE_TIMEOUT_MS}
 		}
-		if v.pending == nil {return {}, false}
 		for w in app.windows {
 			if w.dirty && window_drawable(w) {return now, true}
 		}
-		deadline := time.tick_add(
-			v.started,
-			time.Duration(verify_timeout(v.pending.request)) * time.Millisecond,
-		)
-		idle_ms := -1
-		#partial switch r in v.pending.request {
-		case control.Wait:
-			if r.kind == .Idle {idle_ms = r.idle_ms}
-		case control.Run:
-			if v.phase == .Finish_Drive {idle_ms = r.idle_ms}
-		case:
-			if v.phase == .Finish_Drive {
-				idle_ms = 50
-				if _, resize := v.pending.request.(control.Resize); !resize {
-					deadline = time.tick_add(v.started, time.Second)
-				}
-			}
-		}
+		deadline := time.tick_add(started, time.Duration(timeout_ms) * time.Millisecond)
 		if idle_ms >= 0 {
 			idle := time.tick_add(v.changed, time.Duration(idle_ms) * time.Millisecond)
 			if time.tick_diff(now, idle) > 0 &&
@@ -234,14 +297,19 @@ when AIO_CONTROL {
 		return ""
 	}
 
+	// How long a read or drive waits for the window to present a frame before it starts.
 	verify_timeout :: proc(request: control.Request) -> int {
-		#partial switch r in request {
-		case control.Wait:
-			return r.timeout_ms
-		case control.Run:
-			return r.timeout_ms
-		}
+		if r, run := request.(control.Run); run {return r.timeout_ms}
 		return 5000
+	}
+
+	// A resize may report only once the grid follows, which takes longer than the frame.
+	RESIZE_TIMEOUT_MS :: 5000
+
+	// How long after a drive the content must be quiet, and the longest a drive waits for it.
+	verify_drive_limits :: proc(request: control.Request) -> (idle_ms, timeout_ms: int) {
+		if r, run := request.(control.Run); run {return r.idle_ms, r.timeout_ms}
+		return 50, 1000
 	}
 
 	verify_needs_window :: proc(request: control.Request) -> bool {
@@ -1032,14 +1100,6 @@ when AIO_CONTROL {
 		return 0
 	}
 
-	verify_reply :: proc(app: ^App, ok: bool, text: string) {
-		v := &app.verify
-		if err := control.respond(v.server, v.pending.id, {ok = ok, text = text}); err != .None {
-			log.errorf("answering control request failed: %v", err)
-		}
-		verify_clear(v)
-	}
-
 	verify_error :: proc(app: ^App, err: control.Error) {
 		log.errorf("control request failed: %v", err)
 		verify_reply(
@@ -1049,17 +1109,17 @@ when AIO_CONTROL {
 		)
 	}
 
+	// Records what a drive's reply compares against. On failure the caller frees what was recorded.
 	@(require_results)
-	verify_before :: proc(app: ^App, entries: []control.State_Entry) -> control.Error {
-		v := &app.verify
+	verify_before :: proc(app: ^App, d: ^Verify_Drive, entries: []control.State_Entry) -> control.Error {
 		if w := verify_window(app); w != nil && focused_session(app, w) != nil {
 			err: control.Error
-			v.before, err = verify_snapshot(app, true)
+			d.before, err = verify_snapshot(app, true)
 			if err != .None {return err}
 		}
 		owned, allocation_error := make([]control.State_Entry, len(entries))
 		if allocation_error != nil {return .Out_Of_Memory}
-		v.before_state = owned
+		d.before_state = owned
 		for entry, i in entries {
 			key, key_error := strings.clone(entry.key)
 			if key_error != nil {return .Out_Of_Memory}
@@ -1069,6 +1129,15 @@ when AIO_CONTROL {
 			owned[i].value = value
 		}
 		return .None
+	}
+
+	verify_before_destroy :: proc(d: ^Verify_Drive) {
+		term.snapshot_destroy(&d.before)
+		for entry in d.before_state {
+			delete(entry.key)
+			delete(entry.value)
+		}
+		delete(d.before_state)
 	}
 
 	@(require_results)
@@ -1322,22 +1391,22 @@ when AIO_CONTROL {
 	@(require_results)
 	verify_changes :: proc(
 		app: ^App,
+		d: ^Verify_Drive,
 		s: ^term.Snapshot,
 		entries: []control.State_Entry,
 	) -> (
 		string,
 		control.Error,
 	) {
-		v := &app.verify
 		parts := make([dynamic]string, context.temp_allocator)
 		ranges := make([dynamic]string, context.temp_allocator)
 		changed_rows := 0
 		first := -1
-		rows := v.before.rows > 0 && s.rows > 0 ? max(int(v.before.rows), int(s.rows)) : 0
+		rows := d.before.rows > 0 && s.rows > 0 ? max(int(d.before.rows), int(s.rows)) : 0
 		for row in 0 ..= rows {
 			changed := false
 			if row < rows {
-				a, ae := term.row_text(&v.before, row, context.temp_allocator)
+				a, ae := term.row_text(&d.before, row, context.temp_allocator)
 				b, be := term.row_text(s, row, context.temp_allocator)
 				if ae != .None || be != .None {return "", .Out_Of_Memory}
 				changed = a != b
@@ -1360,7 +1429,7 @@ when AIO_CONTROL {
 			if _, err := append(&parts, label); err != nil {return "", .Out_Of_Memory}
 		}
 		for key in CHANGED_KEYS {
-			a, b := verify_value(v.before_state, key), verify_value(entries, key)
+			a, b := verify_value(d.before_state, key), verify_value(entries, key)
 			if a == b {continue}
 			value := strings.builder_make(context.temp_allocator)
 			if err := control.format_value(&value, b); err != .None {return "", err}
@@ -1372,7 +1441,7 @@ when AIO_CONTROL {
 		}
 		for n in app.notices.items {
 			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
-			old := verify_value(v.before_state, key)
+			old := verify_value(d.before_state, key)
 			// Expiry countdown changes are not a new notice.
 			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
 			prefix := fmt.tprintf("%s: %s (", kind, n.text)
@@ -1386,7 +1455,7 @@ when AIO_CONTROL {
 			)
 			if _, err := append(&parts, label); err != nil {return "", .Out_Of_Memory}
 		}
-		for old in v.before_state {
+		for old in d.before_state {
 			if strings.has_prefix(old.key, "notice.") && verify_value(entries, old.key) == "" {
 				if _, err := append(&parts, fmt.tprintf("%s removed", old.key)); err != nil {
 					return "", .Out_Of_Memory
@@ -1397,13 +1466,13 @@ when AIO_CONTROL {
 		return fmt.tprintf("ok; %s", strings.join(parts[:], "; ", context.temp_allocator)), .None
 	}
 
-	verify_read :: proc(app: ^App) {
+	verify_read :: proc(app: ^App, request: control.Request) {
 		entries, state_error := verify_state(app)
 		if state_error != .None {verify_error(app, state_error); return}
 		out := strings.builder_make(context.temp_allocator)
 		err: control.Error
 		passed := true
-		#partial switch r in app.verify.pending.request {
+		#partial switch r in request {
 		case control.Ping:
 			for key, i in ([]string{"pid", "app", "build", "data", "settings", "log"}) {
 				fmt.sbprintf(&out, "%s%s=", i == 0 ? "" : " ", key)
@@ -1416,12 +1485,12 @@ when AIO_CONTROL {
 			err = control.format_state(&out, entries)
 		case control.Screen, control.Cells, control.Expect:
 			s: term.Snapshot
-			expect, is_expect := app.verify.pending.request.(control.Expect)
+			expect, is_expect := request.(control.Expect)
 			if !is_expect || expect.kind != .State {
 				s, err = verify_snapshot(app)
 				if err != .None {verify_error(app, err); return}
 			}
-			#partial switch r in app.verify.pending.request {
+			#partial switch r in request {
 			case control.Screen:
 				err = control.format_screen(&out, &s, r.rows)
 			case control.Cells:
@@ -1457,16 +1526,16 @@ when AIO_CONTROL {
 		verify_reply(app, passed, strings.to_string(out))
 	}
 
-	verify_wait :: proc(app: ^App, w: ^Window, now: time.Tick, presented: bool) {
+	verify_wait :: proc(app: ^App, wait: Verify_Wait, w: ^Window, now: time.Tick, presented: bool) {
 		v := &app.verify
-		r := v.pending.request.(control.Wait)
-		elapsed := int(time.tick_diff(v.started, now) / time.Millisecond)
+		r := wait.message.request.(control.Wait)
+		elapsed := int(time.tick_diff(wait.started, now) / time.Millisecond)
 		timed_out := elapsed >= r.timeout_ms
 		idle := time.tick_diff(v.changed, now) >= time.Duration(r.idle_ms) * time.Millisecond
 		if !timed_out {
 			if r.kind == .Idle && !idle {return}
 			if !presented {
-				if r.kind == .Idle || v.frames == v.request_frame {w.dirty = true}
+				if r.kind == .Idle || v.frames == wait.request_frame {w.dirty = true}
 				return
 			}
 		}
@@ -1479,7 +1548,7 @@ when AIO_CONTROL {
 		case .Idle:
 			label, passed = fmt.tprintf("idle %dms", r.idle_ms), idle
 		case .Frame:
-			passed = v.frames > v.request_frame
+			passed = v.frames > wait.request_frame
 		case .Text, .Gone:
 			e := control.Expect {
 				kind = r.kind == .Text ? .Text : .No_Text,
@@ -1492,7 +1561,7 @@ when AIO_CONTROL {
 			}
 		}
 		if err != .None {verify_error(app, err); return}
-		if passed && presented && v.frames > v.request_frame && !w.dirty {
+		if passed && presented && v.frames > wait.request_frame && !w.dirty {
 			verify_reply(app, true, fmt.tprintf("PASS wait %s after %dms", label, elapsed))
 			return
 		}
@@ -1511,40 +1580,16 @@ when AIO_CONTROL {
 			)
 			return
 		}
-		if passed || v.frames == v.request_frame {w.dirty = true}
+		if passed || v.frames == wait.request_frame {w.dirty = true}
 	}
 
-	verify_begin_quit :: proc(app: ^App, now: time.Tick) {
+	verify_finish_drive :: proc(app: ^App, d: ^Verify_Drive, w: ^Window, now: time.Tick) {
 		v := &app.verify
-		v.quit_id, v.quit_started = v.pending.id, now
-		verify_reply(app, true, "ok; quitting")
-	}
-
-	verify_start_drive :: proc(app: ^App, now: time.Tick) {
-		v := &app.verify
-		entries, state_error := verify_state(app)
-		if state_error != .None {verify_error(app, state_error); return}
-		if err := verify_before(app, entries); err != .None {verify_error(app, err); return}
-		perf.mark_input(&app.perf)
-		if err := verify_drive(app, v.pending.request);
-		   err != .None {verify_error(app, err); return}
-		if !app.running {
-			app.running = true
-			verify_begin_quit(app, now)
-			return
-		}
-		v.phase, v.started, v.changed = .Finish_Drive, now, now
-		v.request_frame = v.frames
-	}
-
-	verify_finish_drive :: proc(app: ^App, w: ^Window, now: time.Tick) {
-		v := &app.verify
-		elapsed := int(time.tick_diff(v.started, now) / time.Millisecond)
-		idle_ms, timeout_ms := 50, 1000
-		run, is_run := v.pending.request.(control.Run)
-		if is_run {idle_ms, timeout_ms = run.idle_ms, run.timeout_ms}
+		elapsed := int(time.tick_diff(d.started, now) / time.Millisecond)
+		idle_ms, timeout_ms := verify_drive_limits(d.message.request)
+		_, is_run := d.message.request.(control.Run)
 		quiet := time.tick_diff(v.changed, now) >= time.Duration(idle_ms) * time.Millisecond
-		frame := w == nil || v.frames > v.request_frame && !w.dirty
+		frame := w == nil || v.frames > d.request_frame && !w.dirty
 		if elapsed < timeout_ms && (!quiet || !frame) {
 			if w != nil && quiet {w.dirty = true}
 			return
@@ -1575,14 +1620,14 @@ when AIO_CONTROL {
 		}
 		entries, state_error := verify_state(app)
 		if state_error != .None {verify_error(app, state_error); return}
-		if r, resize := v.pending.request.(control.Resize); resize {
+		if r, resize := d.message.request.(control.Resize); resize {
 			if verify_value(entries, "grid.size") != fmt.tprintf("%dx%d", r.columns, r.rows) {
-				if elapsed < 5000 {return}
+				if elapsed < RESIZE_TIMEOUT_MS {return}
 				verify_reply(app, false, "error: resize timed out; use state to inspect grid.size")
 				return
 			}
 		}
-		text, change_error := verify_changes(app, &s, entries)
+		text, change_error := verify_changes(app, d, &s, entries)
 		if change_error != .None {verify_error(app, change_error); return}
 		if is_run {
 			rows, rows_error := verify_rows(&s)
@@ -1611,73 +1656,154 @@ when AIO_CONTROL {
 		presented := v.presented
 		v.presented = false
 		now := time.tick_now()
-		if v.quit_id != 0 {
-			if control.delivery_finished(v.server, v.quit_id) ||
-			   time.tick_diff(v.quit_started, now) >= time.Second {
-				handle_event(app, platform.Tray_Menu_Event{TRAY_QUIT})
+		if quitting, ok := v.request.(Verify_Quitting); ok {
+			if control.delivery_finished(v.server, quitting.id) ||
+			   time.tick_diff(quitting.started, now) >= time.Second {
+				app_quit_release(app)
 			}
 			return
 		}
 		w := verify_window(app)
 		verify_update_generation(v, app, w, now)
-		if v.pending == nil {
-			v.pending = control.poll(v.server)
-			if v.pending == nil {return}
-			v.started, v.request_frame = now, v.frames
-			v.phase = .Start_Drive
-			#partial switch _ in v.pending.request {
-			case control.Ping,
-			     control.Screen,
-			     control.Cells,
-			     control.State,
-			     control.Expect,
-			     control.Help,
-			     control.Capture,
-			     control.Pixels,
-			     control.Diff,
-			     control.Draws,
-			     control.Perf,
-			     control.Vt:
-				v.phase = .Read
-			case control.Wait:
-				v.phase = .Wait
-			}
-			if w != nil {
-				current: u64
-				current = window_generation(app, w)
-				v.needs_frame = w.dirty || current != w.generation
-			}
+		if v.request == nil {
+			message := control.poll(v.server)
+			if message == nil {return}
+			verify_accept(app, message, w, now)
 		}
-		if tray, ok := v.pending.request.(control.Tray); ok && tray.action == .Quit {
-			verify_begin_quit(app, now)
-			return
-		}
-		if w == nil && v.phase != .Finish_Drive && verify_needs_window(v.pending.request) {
+		message := verify_message(v)
+		if message == nil {return}
+		_, driving := v.request.(Verify_Drive)
+		if !driving && w == nil && verify_needs_window(message.request) {
 			verify_reply(app, false, "error: window hidden; run tray open")
 			return
 		}
-		if w != nil &&
-		   (v.phase == .Read || v.phase == .Start_Drive) &&
-		   (w.dirty || v.needs_frame && v.frames == v.request_frame) {
-			timeout := time.Duration(verify_timeout(v.pending.request)) * time.Millisecond
-			if time.tick_diff(v.started, now) < timeout {w.dirty = true; return}
-			verify_reply(
-				app,
-				false,
-				"error: no frame presented before timeout; restore the window and retry",
-			)
+		switch &s in v.request {
+		case nil, Verify_Quitting:
+		case Verify_Gate:
+			if w != nil && (w.dirty || s.needs_frame && v.frames == s.request_frame) {
+				timeout := time.Duration(verify_timeout(message.request)) * time.Millisecond
+				if time.tick_diff(s.started, now) < timeout {w.dirty = true; return}
+				verify_reply(
+					app,
+					false,
+					"error: no frame presented before timeout; restore the window and retry",
+				)
+				return
+			}
+			switch s.then {
+			case .Read:
+				verify_read(app, message.request)
+			case .Drive:
+				verify_start_drive(app, s, now)
+			}
+		case Verify_Wait:
+			verify_wait(app, s, w, now, presented)
+		case Verify_Drive:
+			verify_finish_drive(app, &s, w, now)
+		}
+	}
+
+	// The procs from here to verify_end are the only writers of Verify.request.
+
+	// The message's request decides its first state; a quit is answered at once.
+	verify_accept :: proc(app: ^App, message: ^control.Message, w: ^Window, now: time.Tick) {
+		v := &app.verify
+		switch verify_action(message.request) {
+		case .Read:
+			verify_gate(app, message, .Read, w, now)
+		case .Drive:
+			verify_gate(app, message, .Drive, w, now)
+		case .Wait:
+			v.request = Verify_Wait{message, now, v.frames}
+		case .Quit:
+			id := message.id
+			control.message_destroy(message)
+			app_quit(app)
+			verify_quit(app, id, now)
+		}
+	}
+
+	verify_gate :: proc(app: ^App, message: ^control.Message, then: Verify_Gated, w: ^Window, now: time.Tick) {
+		v := &app.verify
+		gate := Verify_Gate{message = message, then = then, started = now, request_frame = v.frames}
+		if w != nil {gate.needs_frame = w.dirty || window_generation(app, w) != w.generation}
+		v.request = gate
+	}
+
+	// Records the state the reply compares against, drives, and waits for the result. A drive that
+	// quit the app is answered now, while the quit is held open.
+	verify_start_drive :: proc(app: ^App, gate: Verify_Gate, now: time.Tick) {
+		v := &app.verify
+		entries, state_error := verify_state(app)
+		if state_error != .None {verify_error(app, state_error); return}
+		drive := Verify_Drive{message = gate.message}
+		started := false
+		defer if !started {verify_before_destroy(&drive)}
+		if err := verify_before(app, &drive, entries); err != .None {verify_error(app, err); return}
+		perf.mark_input(&app.perf)
+		if err := verify_drive(app, gate.message.request);
+		   err != .None {verify_error(app, err); return}
+		if app.run != .Running {
+			id := gate.message.id
+			verify_end(v)
+			verify_quit(app, id, now)
 			return
 		}
-		switch v.phase {
-		case .Read:
-			verify_read(app)
-		case .Wait:
-			verify_wait(app, w, now, presented)
-		case .Start_Drive:
-			verify_start_drive(app, now)
-		case .Finish_Drive:
-			verify_finish_drive(app, w, now)
+		drive.started, drive.request_frame = now, v.frames
+		v.changed = now
+		v.request = drive
+		started = true
+	}
+
+	// Answers the request that quit and holds the app's quit until the answer is delivered. A failed
+	// graphics device ends the app regardless, so its answer says so and nothing is held.
+	verify_quit :: proc(app: ^App, id: u64, now: time.Tick) {
+		v := &app.verify
+		held := app_quit_hold(app)
+		response := control.Response{ok = held, text = "ok; quitting"}
+		if !held {response.text = "error: the graphics device was lost; AIODev is exiting"}
+		if err := control.respond(v.server, id, response); err != .None {
+			log.errorf("answering control request failed: %v", err)
 		}
+		if held {v.request = Verify_Quitting{id, now}}
+	}
+
+	verify_reply :: proc(app: ^App, ok: bool, text: string) {
+		v := &app.verify
+		if m := verify_message(v); m != nil {
+			if err := control.respond(v.server, m.id, {ok = ok, text = text}); err != .None {
+				log.errorf("answering control request failed: %v", err)
+			}
+		}
+		verify_end(v)
+	}
+
+	// Ends whatever request is in flight, freeing what its state owns.
+	verify_end :: proc(v: ^Verify) {
+		switch &s in v.request {
+		case nil, Verify_Quitting:
+		case Verify_Gate:
+			control.message_destroy(s.message)
+		case Verify_Wait:
+			control.message_destroy(s.message)
+		case Verify_Drive:
+			control.message_destroy(s.message)
+			verify_before_destroy(&s)
+		}
+		v.request = nil
+	}
+
+	verify_message :: proc(v: ^Verify) -> ^control.Message {
+		switch s in v.request {
+		case Verify_Gate:
+			return s.message
+		case Verify_Wait:
+			return s.message
+		case Verify_Drive:
+			return s.message
+		case Verify_Quitting:
+		}
+		return nil
 	}
 	// Whether the pane's program has an icon ready to draw at any size, from whichever source.
 	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {

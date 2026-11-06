@@ -2,7 +2,6 @@ package main
 
 import "aio:colour"
 import "aio:commands"
-import "aio:control"
 import "aio:font"
 import "aio:glyphs"
 import "aio:instance"
@@ -139,7 +138,7 @@ App :: struct {
 	next_workspace_id:     u32,
 	next_session_id:       u32,
 	windows:               [dynamic]^Window,
-	running:               bool,
+	run:                   App_Run,
 	tray_hint_shown:       bool,
 	settings_migration_noticed: bool,
 	process_deadline:      time.Tick,
@@ -150,8 +149,7 @@ App :: struct {
 	// Tests replace this to observe Ctrl+click without launching a browser.
 	open_url:              proc(uri: string) -> bool,
 	open_file:             proc(path, approved: string) -> bool,
-	// The CLI pipe, present while control.enabled is on.
-	cli:                   ^control.Server,
+	cli:                   Cli_Pipe,
 	// The directory holding aio.exe beside this executable, added to each shell's PATH; empty
 	// when aio.exe is missing.
 	cli_directory:         string,
@@ -273,14 +271,12 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	verify_start(app)
 	control_cli_sync(app)
-	app.running = true
 	return true
 }
 
 app_destroy :: proc(app: ^App) {
 	verify_destroy(app)
-	control.destroy(app.cli)
-	app.cli = nil
+	control_cli_stop(app)
 	delete(app.cli_directory)
 	for len(app.windows) > 0 {
 		window_close(app, app.windows[len(app.windows) - 1])
@@ -327,7 +323,7 @@ app_destroy :: proc(app: ^App) {
 }
 
 run :: proc(app: ^App) {
-	for app.running {
+	for app_running(app) {
 		if platform_api.wait_events(&app.platform, wait_timeout(app)) != .None {
 			log.error("waiting for events failed")
 		}

@@ -181,7 +181,7 @@ confirmation_accept_keeps_swap_identity_and_retires_last_tab_window :: proc(t: ^
 	l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale)
 	confirmation_test_mouse(state, w, true, l.accept.x + 10, l.accept.y + 10)
 	confirmation_test_mouse(state, w, false, l.accept.x + 10, l.accept.y + 10)
-	testing.expect(t, app.window_find(state, window_id) == nil && !state.running)
+	testing.expect(t, app.window_find(state, window_id) == nil && state.run == .Quit)
 	testing.expect_value(t, len(state.windows), 0)
 	testing.expect_value(t, len(state.sessions), 0)
 	testing.expect_value(t, len(state.workspaces), 0)

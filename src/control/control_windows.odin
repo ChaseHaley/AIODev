@@ -16,15 +16,47 @@ import "core:time"
 SERVER_IO_TIMEOUT_MS :: 5000
 
 Server :: struct {
-	allocator:                 runtime.Allocator,
-	wake:                      Wake,
-	pipe, stop, ready:         w.HANDLE,
-	worker:                    ^thread.Thread,
-	mutex:                     sync.Mutex, // Guards request, response, and delivery state.
-	pending:                   ^Message,
-	active, serial, completed: u64,
-	response:                  []u8,
-	raw:                       bool,
+	allocator:          runtime.Allocator,
+	wake:               Wake,
+	pipe, stop, ready:  w.HANDLE,
+	worker:             ^thread.Thread,
+	mutex:              sync.Mutex, // Guards slot and serial.
+	slot:               Slot,
+	// The last request id handed out. Every earlier id, and this one once the slot empties, has
+	// been delivered or abandoned.
+	serial:             u64,
+	raw:                bool,
+}
+
+// The one request in flight between the server thread and the app; nil is empty. The procs that
+// name a state in their comment are its only writers, each under the mutex.
+@(private)
+Slot :: union {
+	// Read from the client, waiting for the app to poll it.
+	Slot_Queued,
+	// Polled; the app owns the message and has not answered.
+	Slot_Taken,
+	// Answered; the server thread has not picked the reply up.
+	Slot_Responded,
+	// The server thread is writing the reply to the client.
+	Slot_Writing,
+}
+@(private)
+Slot_Queued :: struct {
+	message: ^Message,
+}
+@(private)
+Slot_Taken :: struct {
+	id: u64,
+}
+@(private)
+Slot_Responded :: struct {
+	id:       u64,
+	response: []u8,
+}
+@(private)
+Slot_Writing :: struct {
+	id: u64,
 }
 Client :: struct {
 	pipe:       w.HANDLE,
@@ -177,34 +209,37 @@ destroy :: proc(s: ^Server) {
 		thread.join(s.worker)
 		thread.destroy(s.worker)
 	}
-	message_destroy(s.pending)
-	delete(s.response, s.allocator)
+	slot_release(s)
 	close_handle(&s.pipe)
 	close_handle(&s.stop)
 	close_handle(&s.ready)
 	free(s, s.allocator)
 }
 
-// Poll transfers ownership; the caller destroys the message even if its client disconnects.
+// Queued becomes Taken. Poll transfers ownership; the caller destroys the message even if its client
+// disconnects.
 poll :: proc(s: ^Server) -> ^Message {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	m := s.pending
-	s.pending = nil
-	return m
+	queued, ok := s.slot.(Slot_Queued)
+	if !ok {return nil}
+	s.slot = Slot_Taken{queued.message.id}
+	return queued.message
 }
 
+// Taken becomes Responded. Any other state means the request is gone: its client disconnected, or
+// the id already has its answer.
 @(require_results)
 respond :: proc(s: ^Server, id: u64, response: Response) -> Error {
 	data, err := encode_response(response, s.allocator)
 	if err != .None {return err}
 	sync.mutex_lock(&s.mutex)
-	if id == 0 || s.active != id || s.response != nil {
+	if taken, ok := s.slot.(Slot_Taken); !ok || taken.id != id {
 		sync.mutex_unlock(&s.mutex)
 		delete(data, s.allocator)
 		return .Closed
 	}
-	s.response = data
+	s.slot = Slot_Responded{id, data}
 	sync.mutex_unlock(&s.mutex)
 	if !bool(w.SetEvent(s.ready)) {return os_error("SetEvent")}
 	return .None
@@ -215,14 +250,7 @@ delivery_finished :: proc(s: ^Server, id: u64) -> bool {
 	if s == nil || id == 0 {return false}
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	return id <= s.completed
-}
-
-@(private)
-finish_delivery :: proc(s: ^Server, id: u64) {
-	sync.mutex_lock(&s.mutex)
-	s.completed = id
-	sync.mutex_unlock(&s.mutex)
+	return id < s.serial || id == s.serial && s.slot == nil
 }
 
 @(private, require_results)
@@ -375,28 +403,42 @@ accept_client :: proc(s: ^Server) -> Error {
 	return err
 }
 
+// Empty becomes Queued.
 @(private)
-clear_request :: proc(s: ^Server) {
+slot_queue :: proc(s: ^Server, m: ^Message) {
 	sync.mutex_lock(&s.mutex)
-	m, data := s.pending, s.response
-	s.pending, s.response, s.active = nil, nil, 0
-	sync.mutex_unlock(&s.mutex)
-	message_destroy(m)
-	delete(data, s.allocator)
+	defer sync.mutex_unlock(&s.mutex)
+	s.serial += 1
+	m.id = s.serial
+	s.slot = Slot_Queued{m}
 }
 
+// Any state becomes empty, freeing what the slot still owns; the request is delivered or abandoned.
+@(private)
+slot_release :: proc(s: ^Server) {
+	sync.mutex_lock(&s.mutex)
+	slot := s.slot
+	s.slot = nil
+	sync.mutex_unlock(&s.mutex)
+	switch held in slot {
+	case Slot_Queued:
+		message_destroy(held.message)
+	case Slot_Responded:
+		delete(held.response, s.allocator)
+	case Slot_Taken, Slot_Writing:
+	}
+}
+
+// Waits for Responded and makes it Writing, handing the reply to the caller.
 @(private, require_results)
 await_response :: proc(s: ^Server) -> ([]u8, Error) {
 	handles := [?]w.HANDLE{s.stop, s.ready}
 	for {
 		sync.mutex_lock(&s.mutex)
-		data := s.response
-		s.response = nil
-		if data != nil {
-			s.active = 0
-		}
+		responded, ok := s.slot.(Slot_Responded)
+		if ok {s.slot = Slot_Writing{responded.id}}
 		sync.mutex_unlock(&s.mutex)
-		if data != nil {return data, .None}
+		if ok {return responded.response, .None}
 		result := w.WaitForMultipleObjects(2, &handles[0], false, 10)
 		if result == w.WAIT_OBJECT_0 {return nil, .Closed}
 		if result == w.WAIT_FAILED {return nil, os_error("WaitForMultipleObjects")}
@@ -452,19 +494,13 @@ serve_client :: proc(s: ^Server) -> Error {
 			if write_error != .None {return write_error}
 			continue
 		}
-		sync.mutex_lock(&s.mutex)
-		s.serial += 1
-		m.id = s.serial
-		id := m.id
-		s.active, s.pending = m.id, m
-		sync.mutex_unlock(&s.mutex)
+		slot_queue(s, m)
 		if s.wake.procedure != nil {
 			s.wake.procedure(s.wake.user)
 		}
 		response, response_error := await_response(s)
-		clear_request(s)
 		if response_error != .None {
-			finish_delivery(s, id)
+			slot_release(s)
 			return response_error
 		}
 		write_error := write_line(
@@ -475,7 +511,7 @@ serve_client :: proc(s: ^Server) -> Error {
 			SERVER_IO_TIMEOUT_MS,
 		)
 		delete(response, s.allocator)
-		finish_delivery(s, id)
+		slot_release(s)
 		if write_error != .None {return write_error}
 	}
 }
@@ -489,7 +525,6 @@ server_thread :: proc(t: ^thread.Thread) {
 			break
 		}
 		err := serve_client(s)
-		clear_request(s)
 		if err != .Closed && err != .Protocol && err != .Timeout {
 			log.errorf("control: serving client failed: %v", err)
 		}

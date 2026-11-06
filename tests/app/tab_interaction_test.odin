@@ -191,7 +191,7 @@ tab_interaction_final_close_can_retire_the_event_window_in_both_adapters :: proc
 			id = survivor.id
 			r = interaction_rect(s, survivor, 0, button == .Left)
 			for pressed in ([?]bool{true, false}) {interaction_button(s, id, r, button, pressed)}
-			testing.expect(t, !s.running && len(s.windows) == 0 && len(s.workspaces) == 0 && len(s.sessions) == 0)
+			testing.expect(t, s.run == .Quit && len(s.windows) == 0 && len(s.workspaces) == 0 && len(s.sessions) == 0)
 		}
 	}
 }
