@@ -162,7 +162,7 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 	focus_leave(app, w)
 	window_close(app, w)
 	if window_primary(app) != nil {return}
-	if !app.tray_hint_shown {
+	if app.settings.window.tray_notification && !app.tray_hint_shown {
 		app.tray_hint_shown = true
 		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use Quit to exit."
 		if platform.tray_notify(&app.platform, "AIODev is still running", text) != .None {
