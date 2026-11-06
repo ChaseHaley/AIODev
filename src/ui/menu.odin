@@ -16,6 +16,21 @@ Menu_Item :: struct {
 	icon_atlas:            render.Rect,
 	checked, enabled:      bool,
 	separator:             bool,
+	// A line icon in place of a badge, inked like the label.
+	glyph:                 Maybe(Icon),
+	// Secondary text after the label, fading out where it runs out of room.
+	detail:                string,
+	// A compact button at the row's end, and one beyond it that shows while the row is selected.
+	action:                Maybe(Icon),
+	selected_action:       Maybe(Icon),
+	// The label is an error.
+	danger:                bool,
+}
+
+Menu_Row_Part :: enum {
+	Row,
+	Action,
+	Selected_Action,
 }
 
 Menu :: struct {
@@ -25,6 +40,8 @@ Menu :: struct {
 	anchor_x, anchor_y:   f32,
 	// An embedded menu may stay inside its owning pane; zero uses the whole window.
 	bounds:               render.Rect,
+	// The row button under the pointer, on the selected row.
+	hover_part:           Menu_Row_Part,
 }
 
 menu_init :: proc(m: ^Menu, allocator := context.allocator) {
@@ -120,6 +137,35 @@ menu_hit :: proc(m: ^Menu, x, y, width, height, scale: f32) -> int {
 		if y >= row.y && y < row.y + row.height {return i}
 	}
 	return -1
+}
+
+// Where a row's button sits. Its slot is kept even while the button is hidden, so labels hold still.
+menu_action_rect :: proc(
+	m: ^Menu,
+	index: int,
+	part: Menu_Row_Part,
+	width, height, scale: f32,
+) -> render.Rect {
+	row := menu_row_rect(m, index, width, height, scale)
+	size := HEIGHT_COMPACT * scale
+	inset := (row.height - size) / 2
+	slot: f32 = part == .Selected_Action ? 1 : 2
+	return {row.x + row.width - inset - slot * size, row.y + inset, size, size}
+}
+
+// The part of row `index` at the point. Only buttons the row is showing count.
+menu_row_part :: proc(m: ^Menu, index: int, x, y, width, height, scale: f32) -> Menu_Row_Part {
+	if index < 0 || index >= len(m.items) {return .Row}
+	item := m.items[index]
+	if _, shown := item.action.?; shown {
+		if contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
+	}
+	if _, shown := item.selected_action.?; shown && index == m.selected {
+		if contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
+			return .Selected_Action
+		}
+	}
+	return .Row
 }
 
 Menu_Outcome :: enum {
@@ -220,6 +266,21 @@ menu_draw :: proc(
 			); result != .Ok {return result}
 			label_x += icon_width
 		}
+		ink := item.enabled ? theme.text : theme.muted
+		if item.danger {ink = theme.error}
+		if glyph, drawn := item.glyph.?; drawn {
+			icon_draw(list, glyph, {label_x, row.y, ICON_BUTTON * scale, row.height}, ink, ICON_BUTTON, scale)
+			label_x += (ICON_BUTTON + SPACE_2) * scale
+		}
+		end := row.x + row.width - inset
+		_, has_action := item.action.?
+		_, has_selected_action := item.selected_action.?
+		if has_selected_action {
+			end = menu_action_rect(m, i, .Selected_Action, width, height, scale).x
+		}
+		if has_action {
+			end = menu_action_rect(m, i, .Action, width, height, scale).x
+		}
 		shortcut_width := f32(0)
 		if item.shortcut != "" {
 			shortcut_width = text_width(&small, item.shortcut)
@@ -232,18 +293,46 @@ menu_draw :: proc(
 				theme.faint,
 			); result != .Ok {return result}
 		}
-		if result := draw_text(
-			text,
-			list,
-			item.label,
-			label_x,
-			row.y + (row.height - text.line_height) / 2 + text.ascent,
-			item.enabled ? theme.text : theme.muted,
-			max(1, row.x + row.width - inset - (shortcut_width > 0 ? shortcut_width + SPACE_2 * scale : 0) - label_x),
-		); result != .Ok {return result}
+		end -= shortcut_width > 0 ? shortcut_width + SPACE_2 * scale : 0
+		available := max(1, end - label_x)
+		label_baseline := row.y + (row.height - text.line_height) / 2 + text.ascent
+		if item.detail == "" {
+			if result := draw_text(text, list, item.label, label_x, label_baseline, ink, available);
+			   result != .Ok {return result}
+		} else {
+			label_width := min(text_width(text, item.label), available)
+			if result := draw_fading_text(text, list, item.label, label_x, label_baseline, ink, label_width);
+			   result != .Ok {return result}
+			detail_x := label_x + label_width + SPACE_2 * scale
+			if end - detail_x > 0 {
+				if result := draw_fading_text(
+					&small,
+					list,
+					item.detail,
+					detail_x,
+					label_baseline,
+					theme.faint,
+					end - detail_x,
+				); result != .Ok {return result}
+			}
+		}
 		if i == m.selected && item.enabled && contains(row, pointer.x, pointer.y) {
 			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
+		}
+		if icon, shown := item.action.?; shown {
+			hover: f32 = i == m.selected && m.hover_part == .Action ? 1 : 0
+			rect := menu_action_rect(m, i, .Action, width, height, scale)
+			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {
+				return .Ok
+			}
+		}
+		if icon, shown := item.selected_action.?; shown && i == m.selected {
+			hover: f32 = m.hover_part == .Selected_Action ? 1 : 0
+			rect := menu_action_rect(m, i, .Selected_Action, width, height, scale)
+			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {
+				return .Ok
+			}
 		}
 	}
 	return .Ok
