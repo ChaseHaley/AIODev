@@ -178,7 +178,7 @@ palette_mode_labels_fit_at_control_size :: proc(t: ^testing.T) {
 			ui.palette_open_mode(&p, &registry, mode)
 			l := ui.palette_layout(&p, 560 * scale, 700 * scale, scale)
 			needed := ui.text_width(&text, ui.palette_mode_info(mode).word) +
-				2 * ui.CONTROL_INSET * scale
+				(2 * ui.CONTROL_INSET + ui.ICON_BUTTON + ui.SPACE_2) * scale
 			testing.expect(t, l.modes[mode].width >= needed)
 		}
 	}

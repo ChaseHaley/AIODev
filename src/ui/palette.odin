@@ -78,6 +78,22 @@ Palette_Mode_Info :: struct {
 	.Commands,
 }
 
+@(private) PALETTE_MODE_ICONS := [Palette_Mode]Icon {
+	.All = .Grid,
+	.Tabs = .Layout_Top,
+	.Workspaces = .Workspace,
+	.Settings = .Settings,
+	.Commands = .Command,
+}
+
+@(private) PALETTE_MODE_WIDTHS := [Palette_Mode]f32 {
+	.All = 72,
+	.Tabs = 80,
+	.Workspaces = 128,
+	.Settings = 104,
+	.Commands = 120,
+}
+
 // The order of an empty query's list and of equal-ranked matches: the original domains first.
 @(private) PALETTE_DOMAIN_ORDER := [?]Palette_Kind{.Command, .Setting, .Tab, .Workspace}
 
@@ -957,9 +973,16 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		rows       = rows,
 	}
 	mode_inset := min(SPACE_2 * scale, panel.width / 2)
-	mode_width := max(0, panel.width - 2 * mode_inset) / f32(len(PALETTE_CYCLE))
-	for mode, i in PALETTE_CYCLE {
-		l.modes[mode] = {panel.x + mode_inset + f32(i) * mode_width, panel.y, mode_width, mode_height}
+	mode_space := max(0, panel.width - 2 * mode_inset)
+	minimum: f32
+	for minimum_width in PALETTE_MODE_WIDTHS {minimum += minimum_width * scale}
+	extra := max(0, mode_space - minimum) / f32(len(PALETTE_CYCLE))
+	fit := min(1, mode_space / minimum)
+	mode_x := panel.x + mode_inset
+	for mode in PALETTE_CYCLE {
+		mode_width := PALETTE_MODE_WIDTHS[mode] * scale * fit + extra
+		l.modes[mode] = {mode_x, panel.y, mode_width, mode_height}
+		mode_x += mode_width
 	}
 	if footer_height > 0 {l.footer = {panel.x, l.list.y + used + padding, panel.width, footer_height}}
 	// The track replaces the list's right padding, inside the panel border.
@@ -1327,10 +1350,18 @@ draw_modes :: proc(
 		room := max(0, row.width - 2 * inset)
 		if room <= 0 {continue}
 		word := PALETTE_MODES[mode].word
-		width := min(text_width(&mode_text, word), room)
+		icon_size := min(ICON_BUTTON * scale, room)
+		gap := min(SPACE_2 * scale, max(0, room - icon_size))
+		text_room := max(0, room - icon_size - gap)
+		width := min(text_width(&mode_text, word), text_room)
+		x := row.x + (row.width - icon_size - gap - width) / 2
+		ink := p.mode == mode || p.mode_hover == i ? theme.text : theme.muted
+		icon := render.Rect{x, row.y, icon_size, row.height}
+		icon_draw(list, PALETTE_MODE_ICONS[mode], icon, ink, icon_size / scale, scale)
+		if text_room <= 0 {continue}
 		baseline := row.y + (row.height - mode_text.line_height) / 2 + mode_text.ascent
-		if result := draw_text(&mode_text, list, word, row.x + (row.width - width) / 2, baseline,
-			p.mode == mode || p.mode_hover == i ? theme.text : theme.muted, room); result != .Ok {return result}
+		if result := draw_text(&mode_text, list, word, x + icon_size + gap, baseline,
+			ink, text_room); result != .Ok {return result}
 	}
 	return .Ok
 }
