@@ -1111,12 +1111,11 @@ when AIO_CONTROL {
 		return 0
 	}
 
+	// Current pages report draft when they hold pending work, derived rather than stored.
 	verify_settings_revision :: proc(p: ^ui.Editor) -> string {
 		switch r in p.revision {
-		case ui.Editor_Fresh:
-			return "fresh"
-		case ui.Editor_Draft:
-			return "draft"
+		case ui.Editor_Current:
+			return ui.editor_draft(p) ? "draft" : "fresh"
 		case ui.Editor_Stale:
 			switch r.reason {
 			case .Changed_Outside:

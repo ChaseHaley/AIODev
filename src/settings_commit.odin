@@ -175,7 +175,8 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	ui.editor_filter(&replacement)
 	row := ui.editor_row(p)
 	selected := row != nil && ui.editor_reveal(&replacement, row.key)
-	draft := preserve_draft && ui.editor_draft(p)
+	// Program drafts already rode along above; only a draft on a selected row can be orphaned.
+	draft := preserve_draft && row != nil && ui.editor_draft(p)
 	// Removing a field being edited is a semantic conflict. Keep that page and its old source
 	// intact, so saving cannot silently recreate a removed profile or discard its draft.
 	if draft && !selected {
@@ -185,7 +186,6 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preser
 	replacement.filter.cursor, replacement.filter.anchor = p.filter.cursor, p.filter.anchor
 	replacement.scroll = clamp(p.scroll, 0, max(0, len(replacement.items) - max(1, p.visible_rows)))
 	if selected {ui.editor_carry(&replacement, p, draft)}
-	ui.editor_revision_sync(&replacement)
 	ui.editor_destroy(p)
 	p^, replacement = replacement, {}
 	published = true

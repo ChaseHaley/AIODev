@@ -56,6 +56,37 @@ process_editor_saves_runtime_rules_and_keeps_new_group_drafts_across_other_write
 	testing.expect_value(t, string(data), before)
 }
 
+// A program draft rides along with publication even when the page's search shows no row, so the
+// page stays current and the draft still saves.
+@(test)
+process_editor_keeps_a_program_draft_current_while_search_shows_no_row :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !process_app_fixture(t, &f, "process-no-row") {return}
+	s, w := &f.state, f.state.windows[0]
+	p := &w.editor
+	testing.expect(t, ui.editor_reveal(p, "process.group.0.add"))
+	_ = ui.editor_process_activate(p, ui.editor_row(p))
+	ui.field_set(&p.value, "Focus")
+	app.editor_outcome(s, w, .Save)
+	testing.expect(t, p.process_dirty)
+	ui.field_set(&p.filter, "qqqqqqqqqqqq")
+	ui.editor_filter(p)
+	if !testing.expect(t, ui.editor_row(p) == nil) {return}
+	updated := commit_text(t, ui.editor_source(p), "pane.gap", "11")
+	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated), settings.Save_Error.None)
+	expect_revision(t, p, true)
+	testing.expect_value(t, ui.editor_source(p), updated)
+	testing.expect(t, p.process_dirty)
+	ui.field_set(&p.filter, "")
+	ui.editor_filter(p)
+	testing.expect(t, ui.editor_reveal(p, "process.group.3.program.1"))
+	ui.editor_focus_row(p)
+	ui.field_set(&p.value, "claude")
+	app.editor_outcome(s, w, .Save)
+	testing.expect_value(t, s.settings.process.padding_groups, "Editors:0:nvim,vim;Tools:8:less;Focus:8:claude")
+}
+
 @(test)
 process_editor_always_confirms_deletion_and_rejects_changed_subjects :: proc(t: ^testing.T) {
 	f: Palette_Fixture

@@ -7,7 +7,6 @@ import "core:strings"
 
 editor_process_save :: proc(app: ^App, w: ^Window) {
 	p := &w.editor
-	defer ui.editor_revision_sync(p)
 	value, problem := ui.editor_process_value(p)
 	if problem != "" {ui.editor_message(p, problem, true); return}
 	updated, message, err := settings.edit_text(ui.editor_source(p), settings.PADDING_GROUPS_KEY, value)

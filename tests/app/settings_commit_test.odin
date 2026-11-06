@@ -222,8 +222,7 @@ settings_reload_publishes_the_file_to_stale_pages_and_keeps_drafts :: proc(t: ^t
 	}
 	testing.expect_value(t, ui.editor_row(second).key, "font.size")
 	testing.expect_value(t, ui.field_string(&second.value), "19")
-	_, draft := second.revision.(ui.Editor_Draft)
-	testing.expect(t, draft, "the carried draft remains explicit after reloading")
+	testing.expect(t, ui.editor_draft(second), "the carried draft survives reloading")
 	candidate := commit_text(t, ui.editor_source(second), "font.size", ui.field_string(&second.value))
 	testing.expect_value(t, app.settings_commit(s, ui.editor_source(second), candidate, second), settings.Save_Error.None)
 	testing.expect_value(t, s.settings.font.size, 19.0)

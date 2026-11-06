@@ -511,7 +511,6 @@ editor_font_filter :: proc(app: ^App, w: ^Window) {
 
 editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	p := &w.editor
-	defer ui.editor_revision_sync(p)
 	// The outcome that names a request is the only one that may act on it.
 	request := ui.editor_request_take(p)
 	defer ui.editor_request_destroy(&request)

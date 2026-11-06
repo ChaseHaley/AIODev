@@ -258,20 +258,15 @@ Profile_Position :: struct {
 }
 
 // The settings text a page shows; nil is Closed. The revision_ procs below own its transitions.
-// Fresh and Draft share a file revision, but Draft has pending work in the editor's value, capture
-// or program groups. Stale keeps that work and the older text when publication cannot reach it,
-// so a save checks the older text rather than overwriting a newer file.
+// Current matches the latest revision the page received; whether it has pending work is derived by
+// editor_draft. Stale keeps that work and the older text when publication cannot reach it, so a save
+// checks the older text rather than overwriting a newer file.
 Editor_Revision :: union {
-	Editor_Fresh,
-	Editor_Draft,
+	Editor_Current,
 	Editor_Stale,
 }
 
-Editor_Fresh :: struct {
-	source: string,
-}
-
-Editor_Draft :: struct {
+Editor_Current :: struct {
 	source: string,
 }
 
@@ -296,9 +291,7 @@ editor_loaded :: proc(p: ^Editor) -> bool {
 // The text the page shows and saves against; empty for a closed page.
 editor_source :: proc(p: ^Editor) -> string {
 	switch r in p.revision {
-	case Editor_Fresh:
-		return r.source
-	case Editor_Draft:
+	case Editor_Current:
 		return r.source
 	case Editor_Stale:
 		return r.source
@@ -309,7 +302,7 @@ editor_source :: proc(p: ^Editor) -> string {
 // Takes ownership of the text only after a replacement page is built.
 editor_revision_open :: proc(p: ^Editor, source: string) {
 	editor_revision_close(p)
-	p.revision = Editor_Fresh{source}
+	p.revision = Editor_Current{source}
 }
 
 editor_revision_close :: proc(p: ^Editor) {
@@ -324,15 +317,7 @@ editor_revision_stale :: proc(p: ^Editor, reason: Editor_Stale_Reason) {
 	p.revision = Editor_Stale{editor_source(p), reason}
 }
 
-// Runs when an edit or navigation finishes, never while drawing. The draft payload already lives in
-// the field, capture or program group; changing phase moves only the owned source string.
-editor_revision_sync :: proc(p: ^Editor) {
-	if !editor_loaded(p) {return}
-	if _, stale := p.revision.(Editor_Stale); stale {return}
-	source := editor_source(p)
-	if editor_draft(p) {p.revision = Editor_Draft{source}} else {p.revision = Editor_Fresh{source}}
-}
-
+// Pending work in the selected field, a shortcut capture or the program groups.
 editor_draft :: proc(p: ^Editor) -> bool {
 	row := editor_row(p)
 	return p.process_dirty || editor_capturing(p) || (row != nil && field_string(&p.value) != row.value)
@@ -837,7 +822,6 @@ stop_editing :: proc(p: ^Editor) {
 // Selects a page line. Whatever the previous row had open closes; a field keeps the keyboard when
 // the next row can take it.
 editor_select :: proc(p: ^Editor, index: int) {
-	defer editor_revision_sync(p)
 	if !editor_process_capture(p) {return}
 	if p.error || mode_shows_hint(p.mode) {editor_message(p, "", false)}
 	if p.error_text != "" {
@@ -1794,7 +1778,6 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 // Takes the raw key event: capture needs the physical key, and navigation uses the layout's key.
 editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	if !raw.pressed {return .None}
-	defer editor_revision_sync(p)
 	if profile_menu_shown(p) {
 		if menu_key(&p.profile_menu, raw) == .Chosen {return editor_profile_menu_choose(p)}
 		// The menu closes itself on Escape; the keyboard stays on the row's More control.
@@ -1948,7 +1931,6 @@ editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 }
 
 editor_text :: proc(p: ^Editor, text: string) {
-	defer editor_revision_sync(p)
 	#partial switch _ in p.mode {
 	case Editor_Capturing, Editor_Positions, Editor_Reset_All:
 		return
@@ -2000,7 +1982,6 @@ editor_selection :: proc(p: ^Editor) -> string {
 
 // Removes the selected text of the focused field after it was copied.
 editor_cut :: proc(p: ^Editor) {
-	defer editor_revision_sync(p)
 	if editor_selection(p) == "" {return}
 	if row := editor_row(p); editor_popup(p) == .Choice && choice_searchable(row) {
 		field_text(&p.choice_search, "")
@@ -2359,7 +2340,6 @@ editor_press :: proc(
 	x, y: f32,
 	extend: bool,
 ) -> Editor_Outcome {
-	defer editor_revision_sync(p)
 	s := l.scale
 	p.profile_menu.bounds = l.page
 	if profile_menu_shown(p) {
@@ -2576,7 +2556,6 @@ editor_press :: proc(
 
 // Continues a pointer drag; returns whether anything changed.
 editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> bool {
-	defer editor_revision_sync(p)
 	if browsing, ok := p.mode.(Editor_Browsing); ok && browsing.selecting {
 		return field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), false, true) != .None
 	}
