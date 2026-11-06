@@ -2,6 +2,7 @@ package app_test
 
 import "base:runtime"
 import "core:testing"
+import "core:time"
 import app "../../src"
 import "aio:pty"
 
@@ -81,6 +82,13 @@ program_is_adopted_on_a_second_poll_and_dropped_at_the_prompt :: proc(t: ^testin
 	state: app.App
 	entry: app.Session_Entry
 	defer app.program_forget(&entry)
+
+	// A short command seen by one poll and gone by the next neither redraws nor saves the layout.
+	state.layout_path = "layout.ini"
+	testing.expect(t, !app.program_update(&state, &entry, claude, ROOT))
+	testing.expect(t, !app.program_update(&state, &entry, shell, ROOT), "a program seen once ends quietly")
+	testing.expect(t, entry.program == nil)
+	testing.expect_value(t, state.layout_deadline, time.Tick{})
 
 	testing.expect(t, !app.program_update(&state, &entry, claude, ROOT), "one sighting changes no icon")
 	testing.expect_value(t, app.program_polled(&entry), CLAUDE)

@@ -382,6 +382,8 @@ program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Proces
 	apps := program_reporters(entry)
 	index := pty.process_program(processes, root, apps, program_polled(entry))
 	if index < 0 {
+		// A program seen once never showed, so its end changes nothing drawn or saved.
+		if _, seen := entry.program.(Program_Seen); seen {entry.program = nil; return false}
 		if !program_forget(entry) {return false}
 		layout_state_touch(app)
 		return true
