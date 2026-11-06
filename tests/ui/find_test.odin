@@ -1,5 +1,6 @@
 package ui_test
 
+import "core:mem"
 import "core:testing"
 import "aio:font"
 import "aio:glyphs"
@@ -195,7 +196,7 @@ find_toggles_close_and_focus_respond_without_matches :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_string(&f.query), "\u00a9")
 
 	ui.find_blur(&f)
-	testing.expect(t, f.open && !f.focused && !ui.find_has_keyboard(&f))
+	testing.expect(t, ui.find_is_open(&f) && !ui.find_has_keyboard(&f))
 	ui.find_mouse(&f, l, false, .Left, true, l.query.x+4, l.query.y+4)
 	testing.expect(t, ui.find_has_keyboard(&f))
 	ui.find_mouse(&f, l, false, .Left, false, l.query.x+4, l.query.y+4)
@@ -258,4 +259,48 @@ find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_selected_text(&f.query), "alpha2")
 	testing.expect_value(t, ui.find_text(&f, "beta"), Outcome.Changed)
 	testing.expect_value(t, ui.field_string(&f.query), "beta")
+}
+
+// Browsing copies what was typed; whatever ends browsing frees the copy, rather than the next browse.
+@(test)
+find_history_browsing_frees_its_draft_when_it_ends :: proc(t: ^testing.T) {
+	h: ui.Find_History
+	defer ui.find_history_destroy(&h)
+	f: ui.Find_Bar
+	ui.find_init(&f)
+	defer ui.find_destroy(&f)
+	tracking: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&tracking, context.allocator)
+	defer mem.tracking_allocator_destroy(&tracking)
+	up := platform.Key_Event{key = .Arrow_Up, pressed = true}
+	down := platform.Key_Event{key = .Arrow_Down, pressed = true}
+	enter := platform.Key_Event{key = .Enter, pressed = true}
+	ui.find_open(&f, &h)
+	ui.find_text(&f, "older")
+	ui.find_blur(&f, &h)
+	// Each way out leaves the newest entry as the query, so recording it again allocates nothing.
+	Way_Out :: enum {Past_Newest, Enter, Typing, Blur, Close}
+	for way in Way_Out {
+		context.allocator = mem.tracking_allocator(&tracking)
+		if !ui.find_is_open(&f) {ui.find_open(&f, &h)}
+		ui.find_focus(&f)
+		ui.field_set(&f.query, "draft")
+		testing.expect_value(t, ui.find_key(&f, up, &h), ui.Find_Outcome.Changed)
+		testing.expect_value(t, ui.field_string(&f.query), "older")
+		switch way {
+		case .Past_Newest:
+			ui.find_key(&f, down, &h)
+			testing.expect_value(t, ui.field_string(&f.query), "draft")
+		case .Enter:
+			ui.find_key(&f, enter, &h)
+		case .Typing:
+			ui.find_text(&f, "!")
+		case .Blur:
+			ui.find_blur(&f, &h)
+		case .Close:
+			ui.find_close(&f, &h)
+		}
+		testing.expectf(t, len(tracking.allocation_map) == 0, "%v kept the draft", way)
+		testing.expect_value(t, ui.find_key(&f, down, &h), ui.Find_Outcome.None)
+	}
 }

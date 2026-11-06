@@ -109,8 +109,8 @@ Session :: struct {
 	press_event, drag_event, release_event, autoscroll_event: ghostty.Selection_Gesture_Event,
 	search:                                                   ghostty.Search,
 	search_matches:                                           [dynamic]ghostty.Selection,
-	search_active:                                            bool,
-	search_fed:                                               u64,
+	// Written only by the transitions in search.odin and pattern_search.odin.
+	search_state:                                             Search_State,
 	pattern:                                                  Pattern_Search,
 	status:                                                   Status_Kind,
 	exit_code:                                                u32,

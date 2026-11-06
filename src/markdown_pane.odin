@@ -162,17 +162,27 @@ markdown_pane_load :: proc(pane: ^Markdown_Pane) -> bool {
 @(require_results)
 markdown_find_summary :: proc(pane: ^Markdown_Pane) -> term.Search_Summary {
 	s := &pane.search
-	if !s.active {return {selected = -1}}
-	if pane.state != .Loaded {return {active = true, complete = true, selected = -1, invalid = s.invalid}}
-	total := len(s.matches)
-	return {
-		active = true,
-		complete = s.complete || s.invalid,
-		total = total,
-		selected = s.selected,
-		invalid = s.invalid,
-		revision = s.revision,
+	summary := term.Search_Summary {
+		selected = -1,
 	}
+	switch s.phase {
+	case .Off:
+		return summary
+	case .Invalid:
+		summary.progress = .Invalid
+	case .Scanning:
+		summary.progress = .Searching
+	case .Complete:
+		summary.progress = .Complete
+	case .Failed:
+		summary.progress = .Failed
+	}
+	if pane.state != .Loaded {
+		if summary.progress == .Searching {summary.progress = .Complete}
+		return summary
+	}
+	summary.total, summary.selected, summary.revision = len(s.matches), s.selected, s.revision
+	return summary
 }
 
 markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
@@ -184,15 +194,22 @@ markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
 	}
 }
 
+// The search reads only a document the pane shows. One that went missing, grew too large or failed to
+// parse waits until it loads again, which restarts the search.
+@(private = "file")
+markdown_find_due :: proc(pane: ^Markdown_Pane) -> bool {
+	return pane.state == .Loaded && markdown.search_pending(&pane.search)
+}
+
 @(require_results)
 markdown_find_pending :: proc(app: ^App) -> bool {
-	for pane in app.markdown_panes {if markdown.search_pending(&pane.search) {return true}}
+	for pane in app.markdown_panes {if markdown_find_due(pane) {return true}}
 	return false
 }
 
 markdown_find_tick :: proc(app: ^App) {
 	for pane in app.markdown_panes {
-		if !markdown.search_pending(&pane.search) {continue}
+		if !markdown_find_due(pane) {continue}
 		before := markdown_find_summary(pane)
 		markdown.search_update(&pane.search, &pane.document, MARKDOWN_FIND_BUDGET)
 		if markdown_find_summary(pane) != before {mark_all_dirty(app)}
@@ -447,7 +464,7 @@ markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card:
 		ui.markdown_view_fit(view, &pane.document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
 		ui.markdown_scroll_by(view, 0, int(g.area.height))
 		find: ui.Markdown_Find
-		if pane.search.active {
+		if pane.search.phase != .Off {
 			c := app.settings.colors
 			find = {
 				matches = pane.search.matches[:],

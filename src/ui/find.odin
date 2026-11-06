@@ -14,20 +14,35 @@ import "core:time"
 @(private) FIND_TOGGLE :: 28
 @(private) FIND_HISTORY_LIMIT :: 100
 
-// The bar stays open without the keyboard after a click elsewhere, so the terminal takes keys while
-// matches stay highlighted.
 Find_Bar :: struct {
-	open, focused:         bool,
+	// Only the procedures in this file write it.
+	state:                 Find_State,
 	query:                 Text_Field,
 	case_sensitive, regex: bool,
 	hover:                 Find_Outcome,
 	armed:                 Armed(Find_Outcome),
 	motion:                [Find_Outcome]Control_Motion,
-	// History position while Up and Down browse it, or -1 while editing.
-	recall:                int,
-	// What was being typed before browsing began, restored by moving past the newest entry.
-	draft:                 Find_Entry,
 }
+
+// nil is closed. The bar stays open without the keyboard after a click elsewhere, so the terminal takes
+// keys while matches stay highlighted.
+Find_State :: union {
+	Find_Editing,
+	Find_Browsing,
+	Find_Blurred,
+}
+
+Find_Editing :: struct {}
+
+// Up and Down step through history like a shell prompt.
+Find_Browsing :: struct {
+	// The history entry the query shows.
+	index: int,
+	// What was being typed before browsing began, restored by moving past the newest entry. Owned.
+	draft: Find_Entry,
+}
+
+Find_Blurred :: struct {}
 
 Find_Entry :: struct {
 	query:                 string,
@@ -56,13 +71,31 @@ Find_Outcome :: enum {
 
 find_init :: proc(f: ^Find_Bar, allocator := context.allocator) {
 	f.query.bytes = make([dynamic]u8, allocator)
-	f.recall = -1
 }
 
 find_destroy :: proc(f: ^Find_Bar) {
+	find_enter(f, nil)
 	delete(f.query.bytes)
-	delete(f.draft.query)
 	f^ = {}
+}
+
+find_is_open :: proc(f: ^Find_Bar) -> bool { return f.state != nil }
+
+// Whether keys and text belong to the find bar rather than the terminal.
+find_has_keyboard :: proc(f: ^Find_Bar) -> bool {
+	switch _ in f.state {
+	case Find_Editing, Find_Browsing:
+		return true
+	case Find_Blurred:
+	}
+	return false
+}
+
+// Every change of state goes through here, so leaving history browsing always frees its draft.
+@(private)
+find_enter :: proc(f: ^Find_Bar, to: Find_State) {
+	if browsing, ok := f.state.(Find_Browsing); ok {delete(browsing.draft.query)}
+	f.state = to
 }
 
 find_history_destroy :: proc(h: ^Find_History) {
@@ -105,42 +138,43 @@ find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 // Opens with the keyboard. `restore` refills the newest search, and `select` also selects it so typing
 // replaces it.
 find_open :: proc(f: ^Find_Bar, h: ^Find_History = nil, restore := false, select := false) {
-	f.open, f.focused = true, true
+	find_enter(f, Find_Editing{})
 	f.hover = .None
 	f.motion = {}
-	f.recall = -1
 	armed_cancel(&f.armed)
 	newest, found := find_history_newest(h)
 	field_set(&f.query, (restore || select) && found ? newest.query : "")
 	if select { field_select_all(&f.query) }
 }
 
-// Gives the open bar the keyboard again, selecting the query when `select` is set.
+// Gives the open bar the keyboard again, selecting the query when `select` is set. A closed bar stays closed.
 find_focus :: proc(f: ^Find_Bar, select := false) {
-	f.focused = true
+	if f.state == nil { return }
+	if _, blurred := f.state.(Find_Blurred); blurred { find_enter(f, Find_Editing{}) }
 	if select { field_select_all(&f.query) }
 }
 
 // Leaves the bar and its matches showing while the terminal takes the keyboard.
 find_blur :: proc(f: ^Find_Bar, h: ^Find_History = nil) {
-	if !f.focused { return }
+	if !find_has_keyboard(f) { return }
 	find_history_add(h, f)
-	f.focused = false
-	f.recall = -1
+	find_enter(f, Find_Blurred{})
 	armed_cancel(&f.armed)
 }
 
 find_close :: proc(f: ^Find_Bar, h: ^Find_History = nil) {
-	if f.open { find_history_add(h, f) }
-	f.open, f.focused = false, false
+	if f.state != nil { find_history_add(h, f) }
+	find_enter(f, nil)
 	f.hover = .None
 	f.motion = {}
-	f.recall = -1
 	armed_cancel(&f.armed)
 }
 
-// Whether keys and text belong to the find bar rather than the terminal.
-find_has_keyboard :: proc(f: ^Find_Bar) -> bool { return f.open && f.focused }
+// Typing or Enter ends history browsing; the query keeps what browsing put there.
+@(private)
+find_edit :: proc(f: ^Find_Bar) {
+	if _, browsing := f.state.(Find_Browsing); browsing { find_enter(f, Find_Editing{}) }
+}
 
 // Handles a key while the bar has the keyboard. Enter moves to older matches and Shift+Enter to newer;
 // Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular expressions.
@@ -154,7 +188,7 @@ find_key :: proc(f: ^Find_Bar, e: platform.Key_Event, h: ^Find_History = nil) ->
 		return .Closed
 	case .Enter, .Numpad_Enter:
 		find_history_add(h, f)
-		f.recall = -1
+		find_edit(f)
 		return .Shift in e.modifiers ? .Newer : .Older
 	case .Arrow_Up:
 		return find_recall(f, h, true)
@@ -166,7 +200,7 @@ find_key :: proc(f: ^Find_Bar, e: platform.Key_Event, h: ^Find_History = nil) ->
 		if alt { return find_toggle(f, .Regex_Toggle) }
 	}
 	outcome := find_change(field_key(&f.query, e))
-	if outcome == .Changed { f.recall = -1 }
+	if outcome == .Changed { find_edit(f) }
 	return outcome
 }
 
@@ -183,36 +217,44 @@ find_toggle :: proc(f: ^Find_Bar, target: Find_Outcome) -> Find_Outcome {
 	return .Changed
 }
 
-// Steps through history like a shell prompt. The first step skips an entry equal to the current query.
+// Steps through history like a shell prompt. The first step skips an entry equal to the current query, and
+// stepping past the newest entry restores the draft and ends browsing.
 @(private)
 find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Outcome {
 	if h == nil || len(h.entries) == 0 { return .None }
 	count := len(h.entries)
-	next := f.recall
+	browsing, is_browsing := &f.state.(Find_Browsing)
 	switch {
-	case older && f.recall < 0:
-		next = count - 1
+	case older && !is_browsing:
+		next := count - 1
 		if h.entries[next].query == field_string(&f.query) { next -= 1 }
 		if next < 0 { return .None }
-		delete(f.draft.query)
-		f.draft = {}
+		draft: Find_Entry
 		if copied, err := strings.clone(field_string(&f.query)); err == nil {
-			f.draft = {copied, f.case_sensitive, f.regex}
+			draft = {copied, f.case_sensitive, f.regex}
 		}
+		find_enter(f, Find_Browsing{next, draft})
+		find_show(f, h.entries[next])
 	case older:
-		if next == 0 { return .None }
-		next -= 1
-	case f.recall < 0:
+		if browsing.index == 0 { return .None }
+		browsing.index -= 1
+		find_show(f, h.entries[browsing.index])
+	case !is_browsing:
 		return .None
+	case browsing.index + 1 < count:
+		browsing.index += 1
+		find_show(f, h.entries[browsing.index])
 	case:
-		next += 1
+		find_show(f, browsing.draft)
+		find_enter(f, Find_Editing{})
 	}
-	entry := f.draft
-	if next < count { entry = h.entries[next] } else { next = -1 }
-	f.recall = next
+	return .Changed
+}
+
+@(private)
+find_show :: proc(f: ^Find_Bar, entry: Find_Entry) {
 	field_set(&f.query, entry.query)
 	f.case_sensitive, f.regex = entry.case_sensitive, entry.regex
-	return .Changed
 }
 
 @(private)
@@ -229,7 +271,7 @@ find_change :: proc(change: Field_Change) -> Find_Outcome {
 
 find_text :: proc(f: ^Find_Bar, text: string) -> Find_Outcome {
 	outcome := find_change(field_text(&f.query, text))
-	if outcome == .Changed { f.recall = -1 }
+	if outcome == .Changed { find_edit(f) }
 	return outcome
 }
 
@@ -342,7 +384,7 @@ find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mo
 	if button != .Left { return .None }
 	hit := find_hit(l, enabled, x, y)
 	if pressed {
-		f.focused = true
+		find_focus(f)
 		armed_press(&f.armed, hit)
 		return .Moved
 	}
@@ -429,5 +471,5 @@ find_draw :: proc(
 		style       = .Body,
 		scale       = scale,
 	}
-	return field_box_draw(box, list, theme, field_box_baseline(box), f.focused, "Find")
+	return field_box_draw(box, list, theme, field_box_baseline(box), find_has_keyboard(f), "Find")
 }

@@ -2,6 +2,7 @@ package term
 
 import "aio:ghostty"
 import "aio:line_match"
+import "base:runtime"
 import "core:log"
 import "core:slice"
 import "core:sync"
@@ -39,29 +40,41 @@ Chunk_Row :: struct {
 	continues: bool,
 }
 
+// The row scanner's progress through one needle. Its matcher is set up in every phase but Invalid.
+Pattern_Phase :: enum u8 {
+	// The regular expression does not compile, so there is nothing to scan.
+	Invalid,
+	// No pass has begun.
+	Starting,
+	// The first pass publishes matches as it finds them.
+	First_Pass,
+	// A pass has finished. A terminal change since it began starts a refresh.
+	Idle,
+	// Rescans into `found` and swaps it in when done, so drawn results never go partial.
+	Refresh,
+}
+
+// The scanner's working set. The buffers outlive each needle, so later passes reuse their memory.
 @(private)
 Pattern_Search :: struct {
-	active, invalid:  bool,
-	matcher:          line_match.Matcher,
-	// Results oldest first. A refresh builds `found` and swaps it in, so drawn results never go partial.
-	matches, found:   [dynamic]Pattern_Match,
+	matcher:           line_match.Matcher,
+	// Results oldest first.
+	matches, found:    [dynamic]Pattern_Match,
 	// Index into matches, or -1.
-	selected:         int,
-	selected_match:   Pattern_Match,
-	// A pass has finished since the needle changed.
-	complete:         bool,
-	scanning:         bool,
-	// Bumped when a refresh changes the results, so the window redraws their highlights.
-	revision:         int,
-	fed:              u64,
+	selected:          int,
+	selected_match:    Pattern_Match,
+	// Bumped when a pass changes the results, so the window redraws their highlights.
+	revision:          int,
+	// The terminal generation the latest pass began from.
+	fed:               u64,
 	next_row, end_row: int,
-	columns, rows:    int,
-	anchor:           u64,
-	chunk_text:       [dynamic]u8,
-	chunk_cells:      [dynamic]Line_Cell,
-	chunk_rows:       [dynamic]Chunk_Row,
-	line_text:        [dynamic]u8,
-	line_cells:       [dynamic]Line_Cell,
+	columns, rows:     int,
+	anchor:            u64,
+	chunk_text:        [dynamic]u8,
+	chunk_cells:       [dynamic]Line_Cell,
+	chunk_rows:        [dynamic]Chunk_Row,
+	line_text:         [dynamic]u8,
+	line_cells:        [dynamic]Line_Cell,
 }
 
 @(private)
@@ -78,7 +91,7 @@ pattern_init :: proc(p: ^Pattern_Search, s: ^Session) {
 
 @(private)
 pattern_destroy :: proc(p: ^Pattern_Search, s: ^Session) {
-	pattern_clear(p, s)
+	pattern_clear(p)
 	delete(p.matches)
 	delete(p.found)
 	delete(p.chunk_text)
@@ -88,59 +101,79 @@ pattern_destroy :: proc(p: ^Pattern_Search, s: ^Session) {
 	delete(p.line_cells)
 }
 
+// Drops the needle and its results when the search leaves the scanner.
 @(private)
-pattern_clear :: proc(p: ^Pattern_Search, s: ^Session) {
+pattern_clear :: proc(p: ^Pattern_Search) {
 	line_match.destroy(&p.matcher)
-	p.active, p.invalid, p.complete, p.scanning = false, false, false, false
 	p.selected = -1
 	clear(&p.matches)
 	clear(&p.found)
 }
 
-// Starts a scan for `needle`. An invalid expression keeps the search active so the find bar can say so.
-@(private)
-pattern_set :: proc(s: ^Session, needle: string, options: Search_Options) {
-	p := &s.pattern
-	pattern_clear(p, s)
-	if len(needle) == 0 {
-		return
-	}
-	switch line_match.init(&p.matcher, needle, options, s.allocator) {
+// The state a new needle starts in. An invalid expression stays with the scanner so the find bar can say so.
+@(private, require_results)
+pattern_set :: proc(s: ^Session, needle: string, options: Search_Options) -> Search_State {
+	switch line_match.init(&s.pattern.matcher, needle, options, s.allocator) {
 	case .Out_Of_Memory:
 		log.error("term: copying the search text failed")
-		return
+		return Search_Failed{}
 	case .Invalid:
-		p.active, p.invalid = true, true
-		return
+		return Pattern_Phase.Invalid
 	case .Ok:
 	}
-	p.active = true
-	p.fed = generation(s) - 1
+	return Pattern_Phase.Starting
 }
 
 @(private)
-pattern_pending :: proc(s: ^Session) -> bool {
-	p := &s.pattern
-	return p.active && !p.invalid && (p.scanning || generation(s) != p.fed)
+pattern_pending :: proc(s: ^Session, phase: Pattern_Phase) -> bool {
+	switch phase {
+	case .Invalid:
+		return false
+	case .Starting, .First_Pass, .Refresh:
+		return true
+	case .Idle:
+		return generation(s) != s.pattern.fed
+	}
+	return false
 }
 
+// Moves the scanner through its phases: begins a pass when one is due, reads for `budget`, and finishes the
+// pass at the end of the screen. Running out of memory ends the search rather than showing partial results.
 @(private)
-pattern_update :: proc(s: ^Session, budget: time.Duration) {
-	p := &s.pattern
-	if !pattern_pending(s) {
+pattern_update :: proc(s: ^Session, from: Pattern_Phase, budget: time.Duration) {
+	if !pattern_pending(s, from) {
 		return
 	}
+	p := &s.pattern
 	start := time.tick_now()
-	if !p.scanning && !pattern_begin(s) {
-		return
-	}
-	for time.tick_since(start) < budget {
-		done := pattern_read(s)
-		pattern_process(p, done)
-		if done {
-			pattern_finish(p)
+	phase := from
+	err: runtime.Allocator_Error
+	if phase == .Starting || phase == .Idle {
+		begun: bool
+		if begun, err = pattern_begin(s, phase == .Idle); !begun && err == nil {
 			return
 		}
+		phase = phase == .Idle ? Pattern_Phase.Refresh : Pattern_Phase.First_Pass
+		s.search_state = phase
+	}
+	into := phase == .Refresh ? &p.found : &p.matches
+	for err == nil && time.tick_since(start) < budget {
+		done: bool
+		done, err = pattern_read(s)
+		if err == nil {
+			err = pattern_process(p, into, done)
+		}
+		if err == nil && done {
+			pattern_finish(p, phase)
+			s.search_state = Pattern_Phase.Idle
+			return
+		}
+	}
+	if err != nil {
+		log.errorf("term: searching the screen failed: %v", err)
+		pattern_clear(p)
+		s.search_state = Search_Failed{}
+		mark_changed(s)
 	}
 }
 
@@ -151,14 +184,30 @@ pattern_results :: proc(p: ^Pattern_Search) -> []Pattern_Match {
 }
 
 @(private)
-pattern_target :: proc(p: ^Pattern_Search) -> ^[dynamic]Pattern_Match {
-	return p.complete ? &p.found : &p.matches
+pattern_summary :: proc(p: ^Pattern_Search, phase: Pattern_Phase) -> Search_Summary {
+	progress: Search_Progress
+	switch phase {
+	case .Invalid:
+		progress = .Invalid
+	case .Starting, .First_Pass:
+		progress = .Searching
+	case .Idle, .Refresh:
+		progress = .Complete
+	}
+	total := len(pattern_results(p))
+	return {
+		progress = progress,
+		total = total,
+		selected = p.selected < 0 ? -1 : total - 1 - p.selected,
+		revision = p.revision,
+	}
 }
 
 // Chooses where the pass starts. History above the active area does not change unless it is pruned, cleared
-// or reflowed, so a refresh normally rescans only the lines that touch the active area.
+// or reflowed, so a refresh normally rescans only the lines that touch the active area. Not begun without
+// an error means the screen could not be read; the next update tries again.
 @(private, require_results)
-pattern_begin :: proc(s: ^Session) -> bool {
+pattern_begin :: proc(s: ^Session, refresh: bool) -> (begun: bool, err: runtime.Allocator_Error) {
 	p := &s.pattern
 	columns, rows := int(s.geometry.columns), int(s.geometry.rows)
 	sync.mutex_lock(&s.mutex)
@@ -166,12 +215,12 @@ pattern_begin :: proc(s: ^Session) -> bool {
 	bar: ghostty.Terminal_Scrollbar
 	if ghostty.terminal_get(s.terminal, .Scrollbar, &bar) != .Success {
 		log.error("term: reading the screen size for search failed")
-		return false
+		return false, nil
 	}
 	total := int(bar.total)
 	anchor := screen_anchor(s.terminal, columns, min(total, PATTERN_ANCHOR_ROWS))
 	start := 0
-	if p.complete && columns == p.columns && rows == p.rows && anchor == p.anchor && total >= p.end_row {
+	if refresh && columns == p.columns && rows == p.rows && anchor == p.anchor && total >= p.end_row {
 		start = max(0, p.end_row - p.rows)
 		for start > 0 && row_continues(s.terminal, .Screen, u32(start)) {
 			start -= 1
@@ -180,23 +229,19 @@ pattern_begin :: proc(s: ^Session) -> bool {
 	p.fed = generation(s)
 	p.columns, p.rows, p.anchor = columns, rows, anchor
 	p.next_row, p.end_row = start, total
-	p.scanning = true
 	clear(&p.line_text)
 	clear(&p.line_cells)
 	clear(&p.found)
-	if !p.complete {
+	if !refresh {
 		clear(&p.matches)
-		return true
+		return true, nil
 	}
 	kept := 0
 	for kept < len(p.matches) && int(p.matches[kept].first_row) < start {
 		kept += 1
 	}
-	if _, err := append(&p.found, ..p.matches[:kept]); err != nil {
-		p.scanning = false
-		return false
-	}
-	return true
+	append(&p.found, ..p.matches[:kept]) or_return
+	return true, nil
 }
 
 @(private)
@@ -232,9 +277,9 @@ screen_row_ref :: proc(terminal: ghostty.Terminal, y: int) -> (ghostty.Grid_Ref,
 	return ref, ok
 }
 
-// Copies the next rows' text under the lock, one entry per byte in chunk_cells. Returns true at the end.
+// Copies the next rows' text under the lock, one entry per byte in chunk_cells. Done at the end.
 @(private, require_results)
-pattern_read :: proc(s: ^Session) -> bool {
+pattern_read :: proc(s: ^Session) -> (done: bool, err: runtime.Allocator_Error) {
 	p := &s.pattern
 	clear(&p.chunk_text)
 	clear(&p.chunk_cells)
@@ -257,20 +302,16 @@ pattern_read :: proc(s: ^Session) -> bool {
 		}
 		for x in 0 ..< p.columns {
 			ref.x = u16(x)
-			if !read_cell(p, &ref, y, x) {
-				return true
-			}
+			read_cell(p, &ref, y, x) or_return
 		}
-		if _, err := append(&p.chunk_rows, Chunk_Row{len(p.chunk_text), continues}); err != nil {
-			return true
-		}
+		append(&p.chunk_rows, Chunk_Row{len(p.chunk_text), continues}) or_return
 		p.next_row += 1
 	}
-	return p.next_row >= p.end_row
+	return p.next_row >= p.end_row, nil
 }
 
 @(private, require_results)
-read_cell :: proc(p: ^Pattern_Search, ref: ^ghostty.Grid_Ref, y, x: int) -> bool {
+read_cell :: proc(p: ^Pattern_Search, ref: ^ghostty.Grid_Ref, y, x: int) -> runtime.Allocator_Error {
 	codepoint: u32
 	wide: ghostty.Cell_Wide
 	has_text: bool
@@ -282,52 +323,50 @@ read_cell :: proc(p: ^Pattern_Search, ref: ^ghostty.Grid_Ref, y, x: int) -> bool
 		ok = ghostty.cell_get_multi(cell, len(keys), &keys[0], &values[0], nil) == .Success
 	}
 	if ok && (wide == .Spacer_Tail || wide == .Spacer_Head) {
-		return true
+		return nil
 	}
 	at := Line_Cell{i32(y), u16(x), u16(x), false}
 	if !ok || !has_text || codepoint == 0 {
 		at.blank = true
-		_, err := append(&p.chunk_text, ' ')
-		_, cell_err := append(&p.chunk_cells, at)
-		return err == nil && cell_err == nil
+		append(&p.chunk_text, ' ') or_return
+		append(&p.chunk_cells, at) or_return
+		return nil
 	}
 	if wide == .Wide {
 		at.last += 1
 	}
 	bytes, count := utf8.encode_rune(rune(codepoint))
 	for i in 0 ..< count {
-		_, err := append(&p.chunk_text, bytes[i])
-		_, cell_err := append(&p.chunk_cells, at)
-		if err != nil || cell_err != nil {
-			return false
-		}
+		append(&p.chunk_text, bytes[i]) or_return
+		append(&p.chunk_cells, at) or_return
 	}
-	return true
+	return nil
 }
 
-// Joins soft-wrapped rows into logical lines and matches each finished line.
-@(private)
-pattern_process :: proc(p: ^Pattern_Search, done: bool) {
+// Joins soft-wrapped rows into logical lines and matches each finished line into `into`.
+@(private, require_results)
+pattern_process :: proc(
+	p: ^Pattern_Search,
+	into: ^[dynamic]Pattern_Match,
+	done: bool,
+) -> runtime.Allocator_Error {
 	start := 0
 	for row in p.chunk_rows {
 		if !row.continues {
-			pattern_match_line(p)
+			pattern_match_line(p, into) or_return
 		}
-		_, err := append(&p.line_text, ..p.chunk_text[start:row.end])
-		_, cell_err := append(&p.line_cells, ..p.chunk_cells[start:row.end])
-		if err != nil || cell_err != nil {
-			clear(&p.line_text)
-			clear(&p.line_cells)
-		}
+		append(&p.line_text, ..p.chunk_text[start:row.end]) or_return
+		append(&p.line_cells, ..p.chunk_cells[start:row.end]) or_return
 		start = row.end
 	}
 	if done {
-		pattern_match_line(p)
+		pattern_match_line(p, into) or_return
 	}
+	return nil
 }
 
-@(private)
-pattern_match_line :: proc(p: ^Pattern_Search) {
+@(private, require_results)
+pattern_match_line :: proc(p: ^Pattern_Search, into: ^[dynamic]Pattern_Match) -> runtime.Allocator_Error {
 	defer {
 		clear(&p.line_text)
 		clear(&p.line_cells)
@@ -337,29 +376,22 @@ pattern_match_line :: proc(p: ^Pattern_Search) {
 		end -= 1
 	}
 	if end == 0 {
-		return
+		return nil
 	}
 	line_match.begin(&p.matcher, string(p.line_text[:end]))
 	for {
 		first, match_end, ok := line_match.next(&p.matcher)
-		if !ok || !pattern_add(p, first, match_end) {
-			return
+		if !ok {
+			return nil
 		}
+		a, b := p.line_cells[first], p.line_cells[match_end - 1]
+		append(into, Pattern_Match{a.row, b.row, a.first, b.last}) or_return
 	}
 }
 
-@(private, require_results)
-pattern_add :: proc(p: ^Pattern_Search, first, end: int) -> bool {
-	a, b := p.line_cells[first], p.line_cells[end - 1]
-	_, err := append(pattern_target(p), Pattern_Match{a.row, b.row, a.first, b.last})
-	return err == nil
-}
-
 @(private)
-pattern_finish :: proc(p: ^Pattern_Search) {
-	p.scanning = false
-	if !p.complete {
-		p.complete = true
+pattern_finish :: proc(p: ^Pattern_Search, phase: Pattern_Phase) {
+	if phase == .First_Pass {
 		p.revision += 1
 		return
 	}
@@ -395,7 +427,7 @@ pattern_select :: proc(s: ^Session, older: bool) -> bool {
 	p := &s.pattern
 	matches := pattern_results(p)
 	total := len(matches)
-	if !p.active || total == 0 {
+	if total == 0 {
 		return false
 	}
 	switch {

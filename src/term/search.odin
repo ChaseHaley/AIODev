@@ -9,15 +9,40 @@ import "core:time"
 @(private)
 SEARCH_STEP_BUDGET :: 2 * time.Millisecond
 
-Search_Summary :: struct {
-	active, complete: bool,
-	total:            int,
-	// Position of the selected match counting from the newest, or -1 when none is selected.
-	selected:         int,
+// What the session's search is doing; nil is no search. One value names the backend, so libghostty and
+// the row scanner never hold a needle at the same time.
+Search_State :: union {
+	Literal_Search,
+	Pattern_Phase,
+	Search_Failed,
+}
+
+// libghostty's incremental search holds the needle and its matches.
+Literal_Search :: struct {
+	// The terminal generation the search last read.
+	fed: u64,
+}
+
+// The search could not start or went on without memory. It holds no needle and no matches.
+Search_Failed :: struct {}
+
+Search_Progress :: enum u8 {
+	Off,
+	Searching,
+	Complete,
 	// The regular expression does not compile.
-	invalid:          bool,
+	Invalid,
+	// The search stopped with no matches, such as when memory ran out.
+	Failed,
+}
+
+Search_Summary :: struct {
+	progress: Search_Progress,
+	total:    int,
+	// Position of the selected match counting from the newest, or -1 when none is selected.
+	selected: int,
 	// Changes when a refresh moves the scanner's results without changing the counts.
-	revision:         int,
+	revision: int,
 }
 
 // A run of matched cells on one viewport row; columns are inclusive.
@@ -27,63 +52,75 @@ Highlight :: struct {
 }
 
 // Starts a search of the session's scrollback and screens; an empty needle ends it. Literal text without
-// case sensitivity uses libghostty's incremental search; other options use the row scanner.
+// case sensitivity uses libghostty's incremental search; other options use the row scanner. This and the
+// passes in pattern_update are the only writers of s.search_state.
 search_set_needle :: proc(s: ^Session, needle: string, options: Search_Options = {}) {
-	scanned := len(needle) > 0 && options != {}
-	if scanned || s.pattern.active {
-		pattern_set(s, scanned ? needle : "", options)
+	literal := len(needle) > 0 && options == {}
+	switch _ in s.search_state {
+	case Literal_Search:
+		// A new needle replaces the old one. A failed clear leaves a needle that nothing feeds or reads.
+		if !literal {_ = ghostty_set_needle(s, "")}
+	case Pattern_Phase:
+		pattern_clear(&s.pattern)
+	case Search_Failed:
+	case:
+		if len(needle) == 0 {return}
 	}
-	if scanned {
-		ghostty_set_needle(s, "")
-		mark_changed(s)
-		return
+	switch {
+	case len(needle) == 0:
+		s.search_state = nil
+	case literal:
+		s.search_state = Search_Failed{}
+		if ghostty_set_needle(s, needle) {s.search_state = Literal_Search{generation(s)}}
+	case:
+		s.search_state = pattern_set(s, needle, options)
 	}
-	ghostty_set_needle(s, needle)
+	mark_changed(s)
 }
 
-@(private)
-ghostty_set_needle :: proc(s: ^Session, needle: string) {
-	if !s.search_active && len(needle) == 0 {
-		return
-	}
+@(private, require_results)
+ghostty_set_needle :: proc(s: ^Session, needle: string) -> bool {
 	value := ghostty.String{raw_data(needle), uint(len(needle))}
 	sync.mutex_lock(&s.mutex)
 	result := ghostty.search_set(s.search, .Needle, len(needle) > 0 ? &value : nil)
 	sync.mutex_unlock(&s.mutex)
 	if result != .Success {
 		log.errorf("term: setting the search text failed: %v", result)
-		return
 	}
-	s.search_active = len(needle) > 0
-	mark_changed(s)
+	return result == .Success
 }
 
 // Whether search_update has work: the search is still catching up or the terminal changed
 // since it last looked.
 search_pending :: proc(s: ^Session) -> bool {
-	if s.pattern.active {
-		return pattern_pending(s)
+	switch state in s.search_state {
+	case Literal_Search:
+		status: ghostty.Search_Status
+		if ghostty.search_get(s.search, .Status, &status) != .Success {
+			return false
+		}
+		return status != .Complete || generation(s) != state.fed
+	case Pattern_Phase:
+		return pattern_pending(s, state)
+	case Search_Failed:
 	}
-	if !s.search_active {
-		return false
-	}
-	status: ghostty.Search_Status
-	if ghostty.search_get(s.search, .Status, &status) != .Success {
-		return false
-	}
-	return status != .Complete || generation(s) != s.search_fed
+	return false
 }
 
 // Advances the search for a bounded time. The terminal lock is held only while the search reads the terminal.
 search_update :: proc(s: ^Session) {
-	if s.pattern.active {
-		pattern_update(s, SEARCH_STEP_BUDGET)
-		return
+	switch &state in s.search_state {
+	case Literal_Search:
+		state.fed = generation(s)
+		ghostty_update(s)
+	case Pattern_Phase:
+		pattern_update(s, state, SEARCH_STEP_BUDGET)
+	case Search_Failed:
 	}
-	if !s.search_active {
-		return
-	}
-	s.search_fed = generation(s)
+}
+
+@(private)
+ghostty_update :: proc(s: ^Session) {
 	start := time.tick_now()
 	if !search_feed(s) {
 		return
@@ -120,12 +157,18 @@ search_feed :: proc(s: ^Session) -> bool {
 // Selects the next older match, or the next newer one, wrapping at either end, and scrolls it into view.
 // Returns false when there is nothing to select.
 search_select :: proc(s: ^Session, older: bool) -> bool {
-	if s.pattern.active {
+	switch _ in s.search_state {
+	case Literal_Search:
+		return ghostty_select(s, older)
+	case Pattern_Phase:
 		return pattern_select(s, older)
+	case Search_Failed:
 	}
-	if !s.search_active {
-		return false
-	}
+	return false
+}
+
+@(private)
+ghostty_select :: proc(s: ^Session, older: bool) -> bool {
 	sync.mutex_lock(&s.mutex)
 	result := ghostty.search_set(s.search, older ? .Select_Next : .Select_Prev, nil)
 	sync.mutex_unlock(&s.mutex)
@@ -137,29 +180,27 @@ search_select :: proc(s: ^Session, older: bool) -> bool {
 }
 
 search_summary :: proc(s: ^Session) -> Search_Summary {
+	switch phase in s.search_state {
+	case Literal_Search:
+		return ghostty_summary(s)
+	case Pattern_Phase:
+		return pattern_summary(&s.pattern, phase)
+	case Search_Failed:
+		return {progress = .Failed, selected = -1}
+	}
+	return {selected = -1}
+}
+
+@(private)
+ghostty_summary :: proc(s: ^Session) -> Search_Summary {
 	summary := Search_Summary {
+		progress = .Searching,
 		selected = -1,
 	}
-	if p := &s.pattern; p.active {
-		total := len(pattern_results(p))
-		summary = {
-			active   = true,
-			complete = p.complete || p.invalid,
-			total    = total,
-			selected = p.selected < 0 ? -1 : total - 1 - p.selected,
-			invalid  = p.invalid,
-			revision = p.revision,
-		}
-		return summary
-	}
-	if !s.search_active {
-		return summary
-	}
-	summary.active = true
 	status: ghostty.Search_Status
 	total, index: uint
-	if ghostty.search_get(s.search, .Status, &status) == .Success {
-		summary.complete = status == .Complete
+	if ghostty.search_get(s.search, .Status, &status) == .Success && status == .Complete {
+		summary.progress = .Complete
 	}
 	if ghostty.search_get(s.search, .Total_Matches, &total) == .Success {
 		summary.total = int(total)
@@ -175,11 +216,11 @@ search_summary :: proc(s: ^Session) -> Search_Summary {
 @(private)
 collect_highlights :: proc(s: ^Session, out: ^[dynamic]Highlight) {
 	clear(out)
-	if s.pattern.active {
+	if _, pattern := s.search_state.(Pattern_Phase); pattern {
 		pattern_highlights(s, out)
 		return
 	}
-	if !s.search_active {
+	if _, literal := s.search_state.(Literal_Search); !literal {
 		return
 	}
 	if result := ghostty.search_feed(s.search); result != .Success {

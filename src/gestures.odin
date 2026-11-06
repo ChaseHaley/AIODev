@@ -157,7 +157,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	w.gesture.owners[e.button] = target
 	w.dirty = true
 	// A press below the find bar hands the keyboard back to the terminal; the bar and its matches stay.
-	if target > .Find && w.find.focused {ui.find_blur(&w.find, &app.find_history)}
+	if target > .Find && ui.find_has_keyboard(&w.find) {ui.find_blur(&w.find, &app.find_history)}
 	pointer_press(app, w, target, e)
 }
 
