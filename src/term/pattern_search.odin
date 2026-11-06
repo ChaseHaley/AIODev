@@ -40,7 +40,8 @@ Chunk_Row :: struct {
 	continues: bool,
 }
 
-// The row scanner's progress through one needle. Its matcher is set up in every phase but Invalid.
+// The row scanner's progress through one needle. The matcher holds the needle in every phase; only Invalid
+// has nothing to scan.
 Pattern_Phase :: enum u8 {
 	// The regular expression does not compile, so there is nothing to scan.
 	Invalid,
