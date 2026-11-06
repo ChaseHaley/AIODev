@@ -4,16 +4,22 @@ import "core:log"
 import w "core:sys/windows"
 
 @(private)
-taskbar_list :: proc(p: ^Platform) -> ^w.ITaskbarList3 {
-	if p.taskbar != nil || p.taskbar_failed {return p.taskbar}
-	p.taskbar_failed = true
+taskbar_list :: proc(p: ^Platform) -> (^w.ITaskbarList3, Error) {
+	switch service in p.taskbar {
+	case ^w.ITaskbarList3:
+		return service, .None
+	case Service_Failed:
+		return nil, .Unavailable
+	case nil:
+	}
+	p.taskbar = Service_Failed{}
 	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
 	// S_FALSE means COM was already initialized on this thread, and still needs a matching uninit.
 	if result >= 0 {
 		p.com_initialized = true
 	} else if u32(result) != 0x80010106 {
 		log.errorf("CoInitializeEx failed: HRESULT 0x%x", u32(result))
-		return nil
+		return nil, .Os
 	}
 	list: rawptr
 	result = w.CoCreateInstance(
@@ -25,24 +31,22 @@ taskbar_list :: proc(p: ^Platform) -> ^w.ITaskbarList3 {
 	)
 	if result < 0 || list == nil {
 		log.errorf("creating the taskbar list failed: HRESULT 0x%x", u32(result))
-		return nil
+		return nil, .Os
 	}
 	taskbar := (^w.ITaskbarList3)(list)
 	if result = taskbar->HrInit(); result < 0 {
 		log.errorf("ITaskbarList3::HrInit failed: HRESULT 0x%x", u32(result))
 		taskbar->Release()
-		return nil
+		return nil, .Os
 	}
-	p.taskbar, p.taskbar_failed = taskbar, false
-	return taskbar
+	p.taskbar = taskbar
+	return taskbar, .None
 }
 
 @(private)
 taskbar_destroy :: proc(p: ^Platform) {
-	if p.taskbar != nil {
-		p.taskbar->Release()
-		p.taskbar = nil
-	}
+	if taskbar, ready := p.taskbar.(^w.ITaskbarList3); ready {taskbar->Release()}
+	p.taskbar = nil
 	if p.com_initialized {
 		w.CoUninitialize()
 		p.com_initialized = false
@@ -53,8 +57,8 @@ taskbar_destroy :: proc(p: ^Platform) {
 window_set_progress :: proc(p: ^Platform, id: Window_Id, state: Progress_State, percent: int) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
-	taskbar := taskbar_list(p)
-	if taskbar == nil {return .Os}
+	taskbar, err := taskbar_list(p)
+	if err != .None {return err}
 	flags := [Progress_State]w.TBPFLAG {
 		.None          = .NOPROGRESS,
 		.Indeterminate = .INDETERMINATE,

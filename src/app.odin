@@ -5,7 +5,6 @@ import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
 import "aio:instance"
-import "aio:layout"
 import platform_api "aio:platform"
 import "aio:perf"
 import "aio:pty"
@@ -92,12 +91,9 @@ App :: struct {
 	markdown_panes:        [dynamic]^Markdown_Pane,
 	next_markdown_id:      u32,
 	markdown_deadline:     time.Tick,
-	markdown_pick:         ^platform_api.File_Pick,
-	markdown_pick_window:  platform_api.Window_Id,
+	markdown_pick:         Maybe(File_Dialog),
 	// The file dialog behind Add File and Add Folder, and the pane it is choosing for.
-	document_pick:         ^platform_api.File_Pick,
-	document_pick_window:  platform_api.Window_Id,
-	document_pick_content: layout.Content,
+	document_pick:         Maybe(Document_Pick),
 	settings_path:         string,
 	log_path:              string,
 	fonts:                 ^font.System,

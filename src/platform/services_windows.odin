@@ -68,11 +68,13 @@ window_show_inactive :: proc(p: ^Platform, id: Window_Id) -> Error {
 	return .None
 }
 
+// Requested → Added. Explorer restarting drops the icon, so its broadcast brings the tray back here.
 @(require_results)
 @(private)
 tray_add :: proc(p: ^Platform) -> Error {
+	p.tray = Tray_Requested{}
 	if !os_ok(w.Shell_NotifyIconW(w.NIM_ADD, &p.tray_data), "Shell_NotifyIconW(add)") {return .Os}
-	p.tray_added = true
+	p.tray = Tray_Added{}
 	p.tray_data.uVersion = NOTIFYICON_VERSION_4
 	if !os_ok(
 		w.Shell_NotifyIconW(w.NIM_SETVERSION, &p.tray_data),
@@ -84,7 +86,7 @@ tray_add :: proc(p: ^Platform) -> Error {
 @(require_results)
 tray_create :: proc(p: ^Platform, tooltip: string) -> Error {
 	if p.host.hwnd == nil {return .Not_Initialized}
-	if p.tray_requested || len(tooltip) > 127 {return .Invalid_Argument}
+	if p.tray != nil || len(tooltip) > 127 {return .Invalid_Argument}
 	p.tray_data = {
 		cbSize           = size_of(w.NOTIFYICONDATAW),
 		hWnd             = p.host.hwnd,
@@ -94,7 +96,6 @@ tray_create :: proc(p: ^Platform, tooltip: string) -> Error {
 		hIcon            = p.icon,
 	}
 	utf16.encode_string(p.tray_data.szTip[:127], tooltip)
-	p.tray_requested = true
 	err := tray_add(p)
 	if err != .None {
 		cleanup_error := tray_destroy(p)
@@ -105,15 +106,14 @@ tray_create :: proc(p: ^Platform, tooltip: string) -> Error {
 	return err
 }
 
+// A failed removal keeps the icon Added, so platform shutdown tries again.
 @(require_results)
 tray_destroy :: proc(p: ^Platform) -> Error {
-	p.tray_requested = false
-	if !p.tray_added {return .None}
-	if !os_ok(
+	if _, added := p.tray.(Tray_Added); added && !os_ok(
 		w.Shell_NotifyIconW(w.NIM_DELETE, &p.tray_data),
 		"Shell_NotifyIconW(delete)",
 	) {return .Os}
-	p.tray_added = false
+	p.tray = nil
 	return .None
 }
 
@@ -208,16 +208,25 @@ clamp_utf16_units :: proc(s: string, max_units: int) -> string {
 // A click on the notification reports `token` back in a Tray_Notification_Event; 0 means no target.
 @(require_results)
 tray_notify :: proc(p: ^Platform, title, text: string, token: u64 = 0, sound := true) -> Error {
-	if !p.tray_added {return .Not_Initialized}
+	added, ok := &p.tray.(Tray_Added)
+	if !ok {return .Not_Initialized}
 	data := p.tray_data
 	data.uFlags = w.NIF_INFO
 	data.dwInfoFlags = NIIF_INFO
 	if !sound {data.dwInfoFlags |= 0x10} // NIIF_NOSOUND
 	utf16.encode_string(data.szInfoTitle[:63], clamp_utf16_units(title, 63))
 	utf16.encode_string(data.szInfo[:255], clamp_utf16_units(text, 255))
-	p.tray_notify_token = token
 	if !os_ok(w.Shell_NotifyIconW(w.NIM_MODIFY, &data), "Shell_NotifyIconW(notify)") {return .Os}
+	added.balloon = token
 	return .None
+}
+
+// NIN_BALLOONUSERCLICK names the icon but not the balloon, and the icon shows one balloon at a time,
+// each replacing the last. So a click reports the newest balloon's token, including a click on an
+// older balloon if the shell still lists it in the notification center and reports that click.
+@(private)
+tray_balloon_clicked :: proc(p: ^Platform) {
+	if added, ok := p.tray.(Tray_Added); ok {enqueue(p, Tray_Notification_Event{added.balloon})}
 }
 
 @(require_results)

@@ -1,0 +1,107 @@
+package app_test
+
+import "base:runtime"
+import "core:os"
+import "core:testing"
+import app "../../src"
+
+// A window can be left without a surface when device recovery cannot recreate it. It must survive a
+// resize, a second recovery must rebuild it, and its next frame must create it if nothing else does.
+@(test)
+device_recovery_rebuilds_a_window_left_without_a_surface :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "device") { return }
+	s := &f.state
+	first, second := s.windows[0], s.windows[1]
+	app.window_surface_release(first)
+	app.window_resize(s, first, 640, 480)
+	testing.expect(t, app.window_surface(first) == nil)
+	lost := s.device
+	app.recover_device(s)
+	testing.expect(t, app.app_running(s))
+	testing.expect(t, s.device != lost)
+	testing.expect(t, s.cache.device == s.device)
+	testing.expect(t, app.window_surface(first) != nil)
+	testing.expect(t, app.window_surface(second) != nil)
+	app.window_surface_release(second)
+	app.window_resize(s, second, 500, 400)
+	app.tick(s)
+	testing.expect(t, app.window_surface(second) != nil)
+}
+
+// A driver still resetting can lose the recreated device too. The window's next attempt to make its
+// surface must then recover again rather than leave the window blank.
+@(test)
+a_device_lost_again_while_remaking_a_surface_recovers_again :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "device-again") { return }
+	s := &f.state
+	first := s.windows[0]
+	for _ in 0 ..< 2 {
+		app.window_surface_release(first)
+		lost := s.device
+		lost.lost = true
+		app.tick(s)
+		testing.expect(t, app.app_running(s))
+		testing.expect(t, s.device != lost)
+		testing.expect(t, !s.device.lost)
+		testing.expect(t, app.window_surface(first) != nil)
+		testing.expect(t, !first.dirty)
+	}
+}
+
+// Any other failure is reported once and waits for a change that could fix it, here a new size.
+@(test)
+a_surface_that_cannot_be_made_is_reported_once_and_waits_for_a_resize :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "surface-size") { return }
+	s := &f.state
+	first := s.windows[0]
+	errors := 0
+	logger := context.logger
+	context.logger = {
+		procedure = proc(data: rawptr, level: runtime.Logger_Level, _: string, _: runtime.Logger_Options,
+			_ := #caller_location) {
+			if level >= .Error {(^int)(data)^ += 1}
+		},
+		data = &errors,
+	}
+	app.window_surface_release(first)
+	app.window_resize(s, first, 16385, 600)
+	app.tick(s)
+	first.dirty = true
+	app.tick(s)
+	context.logger = logger
+	testing.expect(t, app.window_surface(first) == nil)
+	_, failed := first.surface.(app.Surface_Failed)
+	testing.expect(t, failed)
+	testing.expect_value(t, errors, 1)
+	app.window_resize(s, first, 800, 600)
+	app.tick(s)
+	testing.expect(t, app.window_surface(first) != nil)
+}
+
+// The dialog's answer is only for the window it was opened from, so it must not outlive that window.
+@(test)
+closing_a_window_closes_its_file_dialog :: proc(t: ^testing.T) {
+	// GetOpenFileNameW changes the process's working directory despite OFN_NOCHANGEDIR, and the
+	// runner writes its report relative to the working directory.
+	directory, directory_error := os.get_working_directory(context.allocator)
+	if !testing.expect_value(t, directory_error, nil) { return }
+	defer delete(directory)
+	defer testing.expect_value(t, os.set_working_directory(directory), nil)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "dialog") { return }
+	s := &f.state
+	first, second := s.windows[0], s.windows[1]
+	app.markdown_open_picker(s, second)
+	if !testing.expect(t, s.markdown_pick != nil) { return }
+	app.window_close(s, first)
+	testing.expect(t, s.markdown_pick != nil)
+	app.window_close(s, second)
+	testing.expect(t, s.markdown_pick == nil)
+}

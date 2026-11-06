@@ -36,6 +36,9 @@ Device :: struct {
 	atlas, color_atlas: Atlas,
 	generation:         u64,
 	gamma:              Text_Gamma,
+	// The driver reported the device removed or reset. Nothing new can be made on it, so creation
+	// refuses at once instead of calling, and logging, into a device that cannot recover.
+	lost:               bool,
 }
 
 @(private)
@@ -86,9 +89,11 @@ checked :: proc(
 	log.errorf("%s failed: HRESULT 0x%08x", call, u32(hr))
 	switch hr {
 	case dxgi.ERROR_DEVICE_REMOVED, dxgi.ERROR_DEVICE_RESET, dxgi.ERROR_DEVICE_HUNG:
+		if d != nil {d.lost = true}
 		return .Device_Lost
 	}
 	if d != nil && d.native != nil && d.native->GetDeviceRemovedReason() < 0 {
+		d.lost = true
 		return .Device_Lost
 	}
 	return failure

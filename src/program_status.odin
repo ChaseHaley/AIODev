@@ -370,9 +370,11 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	// The sound rides on the first notification Windows shows, and plays on its own when none does.
 	sound := c.sound
 	if c.banner {
-		if platform_api.notification_show(&app.platform, title, text, entry.id, sound) == .None {
+		// Unavailable: notifications could not start, which the first banner already reported.
+		result := platform_api.notification_show(&app.platform, title, text, entry.id, sound)
+		if result == .None {
 			sound = false
-		} else {
+		} else if result != .Unavailable {
 			notify(app, .Error, "Windows could not show a status notification. Check notification settings.")
 		}
 	}
@@ -523,7 +525,9 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 	}
 	if !force && state == w.taskbar_state && percent == w.taskbar_percent {return}
 	w.taskbar_state, w.taskbar_percent = state, percent
-	if platform_api.window_set_progress(&app.platform, w.id, state, percent) != .None {
+	// Unavailable: the taskbar list could not start, which its first use already logged.
+	if err := platform_api.window_set_progress(&app.platform, w.id, state, percent);
+	   err != .None && err != .Unavailable {
 		log.error("updating taskbar progress failed")
 	}
 }

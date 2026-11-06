@@ -77,11 +77,8 @@ markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 }
 
 markdown_panes_destroy :: proc(app: ^App) {
-	if app.markdown_pick != nil {
-		platform.file_pick_destroy(app.markdown_pick)
-		app.markdown_pick = nil
-	}
-	document_pick_destroy(app)
+	markdown_pick_close(app)
+	document_pick_close(app)
 	for pane in app.markdown_panes {markdown_pane_destroy(pane)}
 	delete(app.markdown_panes)
 	app.markdown_panes = nil
@@ -326,6 +323,20 @@ markdown_open_focused :: proc(app: ^App, w: ^Window, path: string) {
 	}
 }
 
+// A file dialog the app is waiting on, and the window it was opened from. The app holds one or none
+// per purpose. The tick acts on a dialog's answer and closes it as soon as it is finished.
+File_Dialog :: struct {
+	pick:   ^platform.File_Pick,
+	window: platform.Window_Id,
+}
+
+// A dialog's answer is for the window it was opened from, so closing that window closes the dialog
+// unanswered instead of leaving it on screen without its owner.
+file_dialogs_window_closed :: proc(app: ^App, id: platform.Window_Id) {
+	if dialog, open := app.markdown_pick.?; open && dialog.window == id {markdown_pick_close(app)}
+	if dialog, open := app.document_pick.?; open && dialog.window == id {document_pick_close(app)}
+}
+
 // The Open Markdown File command from a key or the palette.
 markdown_open_picker :: proc(app: ^App, w: ^Window) {
 	if app.markdown_pick != nil || !gesture_cancel(app, w) {return}
@@ -337,19 +348,25 @@ markdown_open_picker :: proc(app: ^App, w: ^Window) {
 		notify(app, .Error, "Could not show the file dialog.")
 		return
 	}
-	app.markdown_pick, app.markdown_pick_window = pick, w.id
+	app.markdown_pick = File_Dialog{pick, w.id}
 }
 
-// Opens what the dialog chose once it closes. The window may have gone in the meantime.
+// Opens what the dialog chose once it closes.
 @(private)
 markdown_pick_tick :: proc(app: ^App) {
-	if app.markdown_pick == nil {return}
-	path, finished := platform.file_pick_finished(app.markdown_pick)
+	dialog, open := app.markdown_pick.?
+	if !open {return}
+	path, finished := platform.file_pick_finished(dialog.pick)
 	if !finished {return}
-	if w := window_find(app, app.markdown_pick_window); w != nil && path != "" {
+	if w := window_find(app, dialog.window); w != nil && path != "" {
 		terminal_file_request(app, w, path)
 	}
-	platform.file_pick_destroy(app.markdown_pick)
+	markdown_pick_close(app)
+}
+
+@(private)
+markdown_pick_close :: proc(app: ^App) {
+	if dialog, open := app.markdown_pick.?; open {platform.file_pick_destroy(dialog.pick)}
 	app.markdown_pick = nil
 }
 

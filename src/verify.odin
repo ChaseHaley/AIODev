@@ -201,8 +201,9 @@ when AIO_CONTROL {
 	}
 
 	verify_presented :: proc(app: ^App, w: ^Window) {
-		if w.surface == nil {return}
-		count, err := render.surface_present_count(w.surface)
+		surface := window_surface(w)
+		if surface == nil {return}
+		count, err := render.surface_present_count(surface)
 		if err != .None {
 			log.errorf("reading the present count failed: %v", err)
 			return
@@ -213,16 +214,16 @@ when AIO_CONTROL {
 		}
 		for &p in v.presents {
 			if p.id != w.id {continue}
-			previous := p.surface == w.surface ? p.count : 0
+			previous := p.surface == surface ? p.count : 0
 			if count == previous {w.dirty = true}
 			if verify_window(app) == w {
 				v.presented ||= count != previous
 				v.frames += u64(count >= previous ? count - previous : count)
 			}
-			p.surface, p.count = w.surface, count
+			p.surface, p.count = surface, count
 			return
 		}
-		if _, err := append(&v.presents, Verify_Present{w.id, w.surface, count}); err != nil {
+		if _, err := append(&v.presents, Verify_Present{w.id, surface, count}); err != nil {
 			log.error("recording the presented frame failed: out of memory")
 			return
 		}

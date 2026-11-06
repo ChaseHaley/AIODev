@@ -26,22 +26,36 @@ Event_Queue :: struct {
 	text:      []u8,
 	text_used: int,
 }
+// While the user drags a window's edge or caption, Windows runs its own message loop inside
+// DispatchMessageW, and the app's loop runs only when the window procedure calls back into it.
+@(private)
+Size_Move :: enum u8 {
+	None,
+	Looping,
+	// The app's tick is running. A message it causes must not start a second tick inside it.
+	Ticking,
+}
+// Full screen keeps what leaving it restores; a window without it is windowed.
+@(private)
+Screen_Full :: struct {
+	style:     w.LONG_PTR,
+	placement: w.WINDOWPLACEMENT,
+}
 @(private)
 Window :: struct {
 	owner:                            ^Platform,
 	id:                               Window_Id,
 	hwnd:                             w.HWND,
 	cursor:                           w.HCURSOR,
-	tracking, sizing:                 bool,
+	tracking:                         bool,
+	size_move:                        Size_Move,
 	buttons:                          u8,
 	high_surrogate:                   u16,
 	previous_move:                    Mouse_Move_Event,
 	has_previous_move:                bool,
 	tabbed_title_bar:                 bool,
 	title_height, title_controls_end: i32,
-	screen_full:                      bool,
-	saved_style:                      w.LONG_PTR,
-	saved_placement:                  w.WINDOWPLACEMENT,
+	screen:                           Maybe(Screen_Full),
 }
 Platform :: struct {
 	allocator:                  runtime.Allocator,
@@ -59,18 +73,41 @@ Platform :: struct {
 	error:                      Error,
 	taskbar_created:            u32,
 	icon:                       w.HICON,
-	tray_requested, tray_added: bool,
+	tray:                       Tray,
 	tray_data:                  w.NOTIFYICONDATAW,
-	tray_notify_token:          u64,
-	notifications:              rawptr,
+	notifications:              Service(rawptr),
 	menu:                       w.HMENU,
 	menu_ids:                   []u32,
 	modal_callback:             proc(user: rawptr),
 	modal_user:                 rawptr,
 	frequency:                  w.LARGE_INTEGER,
-	taskbar:                    ^w.ITaskbarList3,
-	taskbar_failed:             bool,
+	taskbar:                    Service(^w.ITaskbarList3),
 	com_initialized:            bool,
+}
+
+// A service the platform starts on first use. Its failure is kept, so a broken service is neither
+// retried nor reported again on every use. No variant means it has not been started.
+@(private)
+Service :: union($T: typeid) {
+	T,
+	Service_Failed,
+}
+@(private)
+Service_Failed :: struct {}
+
+// The tray icon the app asked for. No variant means none was. Requested means the shell does not hold
+// it because adding it failed, as it can when Explorer restarts; the next restart tries again.
+@(private)
+Tray :: union {
+	Tray_Requested,
+	Tray_Added,
+}
+@(private)
+Tray_Requested :: struct {}
+// The shell holds the icon. `balloon` is the token of the last balloon shown on it.
+@(private)
+Tray_Added :: struct {
+	balloon: u64,
 }
 
 @(require_results)
@@ -303,8 +340,7 @@ init :: proc(p: ^Platform, app_id: string, allocator := context.allocator) -> In
 @(require_results)
 destroy :: proc(p: ^Platform) -> Error {
 	if p == nil {return .None}
-	aio_notifications_destroy(p.notifications)
-	p.notifications = nil
+	notifications_destroy(p)
 	first_error := p.error
 	for window in p.windows {
 		if !os_ok(w.DestroyWindow(window.hwnd), "DestroyWindow") {
@@ -422,17 +458,22 @@ wait_events :: proc(p: ^Platform, timeout_ms: u32) -> Error {
 	return .None
 }
 
+// Room for every event one more message can produce.
+@(private)
+queue_has_room :: proc(q: ^Event_Queue) -> bool {
+	return q.count < len(q.events) - 16 && q.text_used < len(q.text) - 1024
+}
+
 @(require_results)
 poll_events :: proc(p: ^Platform) -> ([]Event, Error) {
 	if p.wake_event == nil {return nil, .Not_Initialized}
 	if sync.atomic_exchange(&p.wake_pending, 0) != 0 {
 		enqueue(p, Wake_Event{})
 	}
-	q := &p.queues[p.write_queue]
+	// A modal size/move loop inside DispatchMessageW runs the app's tick, which polls and swaps the
+	// queues, so the queue being filled is looked up afresh rather than held across a dispatch.
 	message: w.MSG
-	for q.count < len(q.events) - 16 &&
-	    q.text_used < len(q.text) - 1024 &&
-	    bool(w.PeekMessageW(&message, nil, 0, 0, w.PM_REMOVE)) {
+	for queue_has_room(&p.queues[p.write_queue]) && bool(w.PeekMessageW(&message, nil, 0, 0, w.PM_REMOVE)) {
 		owned := message.hwnd == p.host.hwnd
 		for window in p.windows {
 			if window.hwnd == message.hwnd {
@@ -453,6 +494,7 @@ poll_events :: proc(p: ^Platform) -> ([]Event, Error) {
 			w.DispatchMessageW(&message)
 		}
 	}
+	q := &p.queues[p.write_queue]
 	result := q.events[:q.count]
 	p.write_queue = 1 - p.write_queue
 	p.queues[p.write_queue].count = 0
@@ -1126,6 +1168,17 @@ set_modal_loop_callback :: proc(p: ^Platform, callback: proc(user: rawptr), user
 	p.modal_callback, p.modal_user = callback, user
 }
 
+// Runs the app's loop from inside the modal loop. The tick may close the window, so the window is
+// looked up again afterwards, and it may end the loop, which must not be undone.
+@(private)
+size_move_tick :: proc(p: ^Platform, window: ^Window) {
+	if window.size_move != .Looping || p.modal_callback == nil {return}
+	id := window.id
+	window.size_move = .Ticking
+	p.modal_callback(p.modal_user)
+	if still := find_window(p, id); still != nil && still.size_move == .Ticking {still.size_move = .Looping}
+}
+
 @(private)
 mouse_time :: proc(p: ^Platform) -> i64 {
 	counter: w.LARGE_INTEGER
@@ -1166,7 +1219,7 @@ window_proc :: proc "system" (
 				w.GetSystemMetricsForDpi(w.SM_CYFRAME, w.GetDpiForWindow(hwnd)) +
 				w.GetSystemMetricsForDpi(w.SM_CXPADDEDBORDER, w.GetDpiForWindow(hwnd))
 			// A window maximized before going full screen stays zoomed underneath it, with no frame to hide.
-			params.rgrc[0].top = top + (!window.screen_full && bool(w.IsZoomed(hwnd)) ? border : 0)
+			params.rgrc[0].top = top + (window.screen == nil && bool(w.IsZoomed(hwnd)) ? border : 0)
 			return result
 		}
 		if message == w.WM_NCMOUSEMOVE || message == w.WM_NCLBUTTONDOWN {
@@ -1202,7 +1255,7 @@ window_proc :: proc "system" (
 		}
 		if message == w.WM_NCHITTEST {
 			result = w.DefWindowProcW(hwnd, message, wp, lp)
-			if window.screen_full {return result}
+			if window.screen != nil {return result}
 			if result != w.HTCLIENT && result != w.HTCAPTION && result != w.HTTOP {return result}
 			point := w.POINT {
 				i32(cast(i16)u16(uintptr(lp) & 0xffff)),
@@ -1228,8 +1281,7 @@ window_proc :: proc "system" (
 			return w.HTCLIENT
 		}
 	}
-	if message == p.taskbar_created && p.tray_requested {
-		p.tray_added = false
+	if message == p.taskbar_created && p.tray != nil {
 		err := tray_add(p)
 		if err != .None {
 			p.error = err
@@ -1254,9 +1306,7 @@ window_proc :: proc "system" (
 		   code == NIN_KEYSELECT {
 			enqueue(p, Tray_Event{})
 		}
-		if code == NIN_BALLOONUSERCLICK {
-			enqueue(p, Tray_Notification_Event{p.tray_notify_token})
-		}
+		if code == NIN_BALLOONUSERCLICK {tray_balloon_clicked(p)}
 		if code == w.WM_CONTEXTMENU || code == w.WM_RBUTTONUP {
 			tray_popup(p)
 		}
@@ -1292,9 +1342,7 @@ window_proc :: proc "system" (
 				},
 			)
 		}
-		if window.sizing && p.modal_callback != nil {
-			p.modal_callback(p.modal_user)
-		}
+		size_move_tick(p, window)
 		return 0
 	case w.WM_SETTINGCHANGE:
 		enqueue(p, Settings_Event{})
@@ -1310,20 +1358,18 @@ window_proc :: proc "system" (
 		enqueue(p, Dpi_Event{window.id, u32(wp & 0xffff)})
 		return 0
 	case w.WM_ENTERSIZEMOVE:
-		window.sizing = true
+		window.size_move = .Looping
 		if w.SetTimer(hwnd, SIZING_TIMER_ID, 16, nil) == 0 {
 			log.errorf("SetTimer failed: %d", w.GetLastError())
 			p.error = .Os
 		}
 		return 0
 	case w.WM_EXITSIZEMOVE:
-		window.sizing = false
+		window.size_move = .None
 		record_os(p, w.KillTimer(hwnd, SIZING_TIMER_ID), "KillTimer")
 		return 0
 	case w.WM_TIMER:
-		if wp == SIZING_TIMER_ID && window.sizing && p.modal_callback != nil {
-			p.modal_callback(p.modal_user)
-		}
+		if wp == SIZING_TIMER_ID {size_move_tick(p, window)}
 		return 0
 	case w.WM_SETCURSOR:
 		if uintptr(lp) & 0xffff == w.HTCLIENT {
@@ -1372,26 +1418,28 @@ window_maximized :: proc(p: ^Platform, id: Window_Id) -> bool {
 }
 
 // window_set_screen covers the monitor with no caption or frame, and restores the prior placement.
+// An error means the window stayed as it was, so the caller's view of it stays true.
 window_set_screen :: proc(p: ^Platform, id: Window_Id, on: bool) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
-	if on == window.screen_full {return .None}
+	full, is_full := window.screen.?
+	if on == is_full {return .None}
 	if on {
-		if !os_ok(w.GetWindowPlacement(window.hwnd, &window.saved_placement), "GetWindowPlacement") {
-			return .Os
+		full = {
+			placement = {length = size_of(w.WINDOWPLACEMENT)},
 		}
+		if !os_ok(w.GetWindowPlacement(window.hwnd, &full.placement), "GetWindowPlacement") {return .Os}
 		info := w.MONITORINFO {
 			cbSize = size_of(w.MONITORINFO),
 		}
 		// MONITOR_DEFAULTTONEAREST: the monitor that holds most of the window, or the nearest one.
 		monitor := w.MonitorFromWindow(window.hwnd, w.Monitor_From_Flags(2))
 		if !os_ok(w.GetMonitorInfoW(monitor, &info), "GetMonitorInfoW") {return .Os}
-		window.saved_style = w.GetWindowLongPtrW(window.hwnd, w.GWL_STYLE)
-		style := window.saved_style & ~(w.LONG_PTR(w.WS_CAPTION) | w.LONG_PTR(w.WS_THICKFRAME))
-		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, style)
+		full.style = w.GetWindowLongPtrW(window.hwnd, w.GWL_STYLE)
+		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, screen_style(full))
 		rect := info.rcMonitor
 		// Set first: moving the window recalculates its frame, which reads this.
-		window.screen_full = true
+		window.screen = full
 		if !os_ok(
 			w.SetWindowPos(
 				window.hwnd,
@@ -1404,30 +1452,40 @@ window_set_screen :: proc(p: ^Platform, id: Window_Id, on: bool) -> Error {
 			),
 			"SetWindowPos(screen)",
 		) {
-			window.screen_full = false
-			_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, window.saved_style)
+			window.screen = nil
+			_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, full.style)
 			return .Os
 		}
-	} else {
-		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, window.saved_style)
-		window.screen_full = false
-		if !os_ok(w.SetWindowPlacement(window.hwnd, &window.saved_placement), "SetWindowPlacement") {
-			return .Os
-		}
-		if !os_ok(
-			w.SetWindowPos(
-				window.hwnd,
-				nil,
-				0,
-				0,
-				0,
-				0,
-				w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOZORDER | w.SWP_FRAMECHANGED,
-			),
-			"SetWindowPos(restore frame)",
-		) {return .Os}
+		return .None
 	}
+	// Cleared first for the same reason; a refused placement puts full screen back.
+	_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, full.style)
+	window.screen = nil
+	if !os_ok(w.SetWindowPlacement(window.hwnd, &full.placement), "SetWindowPlacement") {
+		window.screen = full
+		_ = w.SetWindowLongPtrW(window.hwnd, w.GWL_STYLE, screen_style(full))
+		return .Os
+	}
+	// The window is back in its place; a frame left stale until the next resize is not worth
+	// reporting as a refusal, which would leave the app believing it is still full screen.
+	_ = os_ok(
+		w.SetWindowPos(
+			window.hwnd,
+			nil,
+			0,
+			0,
+			0,
+			0,
+			w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOZORDER | w.SWP_FRAMECHANGED,
+		),
+		"SetWindowPos(restore frame)",
+	)
 	return .None
+}
+
+@(private)
+screen_style :: proc(full: Screen_Full) -> w.LONG_PTR {
+	return full.style & ~(w.LONG_PTR(w.WS_CAPTION) | w.LONG_PTR(w.WS_THICKFRAME))
 }
 
 window_caption_action :: proc(p: ^Platform, id: Window_Id, index: int) {

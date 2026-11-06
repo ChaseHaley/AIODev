@@ -20,26 +20,40 @@ foreign notifications {
 }
 
 // Windows owns banner visibility (including Do Not Disturb); this reports API failures explicitly.
+// Unavailable means notifications could not start, which the first attempt already reported.
 @(require_results)
 notification_show :: proc(p: ^Platform, title, text: string, token: u32, sound: bool) -> Error {
 	if p.host.hwnd == nil {return .Not_Initialized}
-	if p.notifications == nil {
-		result := aio_notifications_create(p.host.hwnd, NOTIFICATION_MESSAGE, &p.notifications)
-		if result < 0 {
+	state: rawptr
+	switch service in p.notifications {
+	case rawptr:
+		state = service
+	case Service_Failed:
+		return .Unavailable
+	case nil:
+		if result := aio_notifications_create(p.host.hwnd, NOTIFICATION_MESSAGE, &state); result < 0 {
 			log.errorf("initializing Windows notifications failed: HRESULT 0x%x", u32(result))
+			p.notifications = Service_Failed{}
 			return .Os
 		}
+		p.notifications = state
 	}
 	title_w := w.utf8_to_wstring(title, context.temp_allocator)
 	text_w := w.utf8_to_wstring(text, context.temp_allocator)
 	if title_w == nil || text_w == nil {return .Os}
 	operation: cstring
-	result := aio_notifications_show(p.notifications, title_w, text_w, token, sound, &operation)
+	result := aio_notifications_show(state, title_w, text_w, token, sound, &operation)
 	if result < 0 {
 		log.errorf("Windows notification %s failed: HRESULT 0x%x", operation, u32(result))
 		return .Os
 	}
 	return .None
+}
+
+@(private)
+notifications_destroy :: proc(p: ^Platform) {
+	if state, ready := p.notifications.(rawptr); ready {aio_notifications_destroy(state)}
+	p.notifications = nil
 }
 
 @(require_results)
