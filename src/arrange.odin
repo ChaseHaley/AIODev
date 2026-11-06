@@ -37,10 +37,8 @@ Pane_Drag :: struct {
 	destination_original_index:                int,
 	new_window, preview_failed:                  bool,
 	thumbnail:                                   Drag_Thumbnail,
-	picker_window:                              platform.Window_Id,
-	picker_pointer:                             [2]f32,
-	picker_hit:                                 int,
-	ghost:                                       [4]ui.Motion,
+	using picker:                                Workspace_Drag,
+	ghost:                                      [4]ui.Motion,
 	reveal:                                      ui.Motion,
 }
 
@@ -385,7 +383,7 @@ pane_drag_cancel :: proc(app: ^App, w: ^Window) {
 	w.pane_drag = {}
 	if !d.pressed {return}
 	drag_thumbnail_destroy(&d.thumbnail)
-	pane_workspace_drag_close(app, d)
+	workspace_drag_close(app, &d.picker)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
 	pane_drag_restore(app, w, d)
@@ -503,8 +501,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}
 	}
 	if destination == nil || destination.id != previous {
-		pane_workspace_drag_close(app, d^)
-		d.picker_window = 0
+		workspace_drag_close(app, &d.picker)
 		if old := window_find(app, previous); old != nil && old != w {
 			for tab, i in old.workspace.tabs {
 				if tab == d.destination_original {tab_select(app, old, i, true); break}
