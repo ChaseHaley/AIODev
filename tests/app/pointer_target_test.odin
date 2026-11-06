@@ -3,6 +3,7 @@ package app_test
 import app "../../src"
 import "aio:render"
 import "aio:ui"
+import "aio:term"
 import "core:testing"
 
 // The find bar floats over the docked Activity panel. Hover, cursor and press must all reach the find
@@ -29,12 +30,29 @@ pointer_find_bar_over_activity_panel_owns_hover_cursor_and_press :: proc(t: ^tes
 	below := [2]f32{close.x, l.panel.y + l.panel.height + 40 * w.scale}
 	testing.expect_value(t, app.pointer_target(s, w, below.x, below.y), app.Pointer_Target.Status_Panel)
 	pointer_expect_move(t, s, w, below.x, below.y, .Arrow)
-	testing.expect_value(t, w.status.hover_surface, app.Status_Surface.Panel)
+	// A hovered row shows the panel seeing the pointer leave for the find bar.
+	s.settings.status.enabled = true
+	entry := app.focused_session(s, w)
+	if !testing.expect(t, entry != nil) {return}
+	previous := entry.statuses
+	defer entry.statuses = previous
+	records := [1]term.Program_Status{{id = "a", app = "codex", state = .Working, progress = -1}}
+	entry.statuses = records[:]
+	rows, _ := app.status_panel_rows(s, w)
+	on_row := [2]f32{-1, -1}
+	for row in rows {
+		if !row.report {continue}
+		top := panel.y + app.STATUS_PANEL_HEADER * w.scale
+		on_row = {panel.x + 40 * w.scale, top + row.y + row.height / 2}
+	}
+	testing.expect_value(t, app.pointer_target(s, w, on_row.x, on_row.y), app.Pointer_Target.Status_Panel)
+	pointer_expect_move(t, s, w, on_row.x, on_row.y, .Hand)
+	testing.expect(t, w.status.panel_hover != nil)
 
 	for point in ([?][2]f32{toggle, close}) {
 		testing.expect_value(t, app.pointer_target(s, w, point.x, point.y), app.Pointer_Target.Find)
 		pointer_expect_move(t, s, w, point.x, point.y, .Hand)
-		testing.expect_value(t, w.status.hover_surface, app.Status_Surface.None)
+		testing.expect(t, w.status.panel_hover == nil)
 	}
 	testing.expect_value(t, w.find.hover, ui.Find_Outcome.Close)
 

@@ -291,7 +291,7 @@ documents_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 // Activity inbox
 
 @(private = "file")
-inbox_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return w.status.inbox_open}
+inbox_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return status_inbox_shown(w)}
 
 @(private = "file")
 inbox_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
@@ -618,10 +618,7 @@ panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mo
 		_ = status_overview_move(app, w, f32(e.x), f32(e.y))
 		return
 	}
-	s := &w.status
-	if s.hover_surface != .None || s.hover >= 0 || s.panel_button_hover != .None {
-		s.hover_surface, s.hover, s.panel_button_hover, w.dirty = .None, -1, .None, true
-	}
+	status_overview_leave(w)
 }
 
 @(private = "file")

@@ -89,7 +89,7 @@ status_fixture_init :: proc(t: ^testing.T, f: ^Status_Fixture) -> bool {
 	}
 	f.second = {
 		{id = "", app = "codex", state = .Blocked, kind = .Permission, progress = -1, updated_at = now},
-		{id = "old", app = "codex", state = .Error, seen = true, progress = -1, updated_at = now},
+		{id = "old", app = "codex", state = .Error_Seen, progress = -1, updated_at = now},
 	}
 	entries := [2]app.Session_Entry{{id = 1, statuses = f.first[:]}, {id = 2, statuses = f.second[:]}}
 	for entry in entries {
@@ -133,7 +133,7 @@ program_status_close_scope_protects_work_independent_of_presentation :: proc(t: 
 program_status_ranks_attention_first :: proc(t: ^testing.T) {
 	blocked := term.Program_Status{state = .Blocked}
 	failed := term.Program_Status{state = .Error}
-	seen_failed := term.Program_Status{state = .Error, seen = true}
+	seen_failed := term.Program_Status{state = .Error_Seen}
 	done := term.Program_Status{state = .Done}
 	working := term.Program_Status{state = .Working}
 	idle := term.Program_Status{state = .Idle}
@@ -152,7 +152,7 @@ program_status_marks_follow_state_and_kind :: proc(t: ^testing.T) {
 	testing.expect_value(t, question.progress, i8(10))
 	auth := app.status_mark({state = .Blocked, kind = .Auth, progress = -1})
 	testing.expect_value(t, auth.glyph, ui.Status_Glyph.Auth)
-	seen := app.status_mark({state = .Done, seen = true, progress = -1})
+	seen := app.status_mark({state = .Done_Seen, progress = -1})
 	testing.expect(t, seen.glyph == .Done && seen.dim)
 	buffer: [8]u8
 	testing.expect_value(t, ui.status_headline({glyph = .Working, progress = 7}, buffer[:]), "7%")

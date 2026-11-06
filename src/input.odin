@@ -209,7 +209,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		document_menu_key(app, w, e, logical)
 		return
 	}
-	if w.status.inbox_open {
+	if status_inbox_shown(w) {
 		if e.pressed {w.suppressed_key = e}
 		status_inbox_key(app, w, logical)
 		return
@@ -448,7 +448,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 		w.dirty = true
 		return
 	}
-	if w.status.inbox_open {
+	if status_inbox_shown(w) {
 		status_inbox_wheel(app, w, e.delta_y)
 		return
 	}

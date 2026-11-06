@@ -71,7 +71,7 @@ activity_dense_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.
 	reports := reports_of(
 		"W",
 		{id = "idle", state = .Idle},
-		{id = "seen", state = .Error, seen = true},
+		{id = "seen", state = .Error_Seen},
 		{id = "unseen", state = .Error},
 		{id = "working", state = .Working},
 		{id = "working/ask", state = .Blocked},
