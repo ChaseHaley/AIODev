@@ -6,6 +6,8 @@ import "aio:render"
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
 // One slot per Header_Action from Documents through Close, in that order, left to right.
 HEADER_BUTTONS :: 7
+@(private = "file")
+HEADER_TITLE_MINIMUM :: f32(40)
 Header_Action :: enum {
 	None,
 	Documents,
@@ -48,8 +50,10 @@ header_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Heade
 	{
 		for i := len(l.buttons) - 1; i >= 0; i -= 1 {
 			if i == int(Header_Action.Documents) - 1 {
+				// It gives way first, so a narrow pane keeps its badge, some title and its own controls.
 				gap := 2 * SPACE_1 * scale + scale
-				if !documents || end - gap - button < area.x + SPACE_1 * scale {break}
+				title_end := area.x + (SPACE_2 + ICON_BUTTON + SPACE_2 + HEADER_TITLE_MINIMUM) * scale
+				if !documents || end - gap - button < title_end {break}
 				l.divider = header_divider(l.buttons[i + 1], l.panel.y, l.panel.height, scale)
 				end -= gap
 			}

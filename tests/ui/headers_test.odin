@@ -44,6 +44,14 @@ headers_set_the_documents_button_apart_and_can_leave_it_out :: proc(t: ^testing.
 	testing.expect_value(t, without.buttons[documents + 1], next)
 	testing.expect(t, without.title.width > l.title.width)
 
+	// In a split this narrow the button must not reach the badge or title, which focus and drag the pane.
+	small := ui.header_layout({5, 8, 198, 200}, 1)
+	testing.expect_value(t, small.buttons[documents].width, f32(0))
+	testing.expect_value(t, ui.header_hit_test(small, 5 + 35, 8 + 14), ui.Header_Action.None)
+	wide_enough := ui.header_layout({5, 8, 260, 200}, 1)
+	testing.expect(t, wide_enough.buttons[documents].width > 0)
+	testing.expect(t, wide_enough.buttons[documents].x >= wide_enough.badge.x + wide_enough.badge.width + 48)
+
 	// Too narrow for every control: the controls for the pane itself stay.
 	narrow := ui.header_layout({5, 8, 170 * scale, 200 * scale}, scale)
 	testing.expect_value(t, narrow.buttons[documents].width, f32(0))
