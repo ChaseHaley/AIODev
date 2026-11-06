@@ -172,6 +172,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				status,
 				status_phase(app, w, status),
 				app.settings.status.enabled && app.settings.status.tab_indicators,
+				tab_content_icon(tab),
 			); result != .Ok {return result}
 		}
 	}

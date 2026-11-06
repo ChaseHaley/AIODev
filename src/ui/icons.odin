@@ -41,6 +41,8 @@ Icon :: enum {
 	Terminal,
 	View_Comfy,
 	View_Dense,
+	Markdown,
+	None,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -124,6 +126,12 @@ icon_draw :: proc(
 		ink    = ink,
 	}
 	switch icon {
+	case .None:
+	case .Markdown:
+		pen_box(p, 1, 3, 14, 10, 2)
+		pen_path(p, {3.5, 10.5}, {3.5, 5.5}, {6, 8}, {8.5, 5.5}, {8.5, 10.5})
+		pen_path(p, {11.5, 5.5}, {11.5, 10.5})
+		pen_path(p, {10, 9}, {11.5, 10.5}, {13, 9})
 	case .Close:
 		pen_path(p, {4, 4}, {12, 12})
 		pen_path(p, {12, 4}, {4, 12})

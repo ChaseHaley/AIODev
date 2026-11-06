@@ -317,7 +317,8 @@ rail_row_draw :: proc(
 		if result != .Ok {return result}
 	}
 	status := status_tab_mark(app, w, row.workspace, row.tab)
-	has_badge := icon != "" || atlas.width > 0
+	content_icon := tab_content_icon(row.workspace.tabs[row.tab])
+	has_badge := content_icon != .None || icon != "" || atlas.width > 0
 	current := row.workspace == w.workspace
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
@@ -344,11 +345,17 @@ rail_row_draw :: proc(
 		if result := status_mark_draw(app, w, mark, status); result != .Ok {return result}
 	}
 	if has_badge {
-		if result := ui.shell_badge_draw(
+		area := render.Rect{
+			tile.x + ui.CONTROL_INSET * s, tile.y + (tile.height - 16 * s) / 2, 16 * s, 16 * s,
+		}
+		if content_icon != .None {
+			ui.icon_draw(&w.list, content_icon, area,
+				selected ? app.theme.tab_active_text : app.theme.tab_text, ui.ICON_BUTTON, s)
+		} else if result := ui.shell_badge_draw(
 			&w.list,
 			&w.ui_text,
 			app.theme,
-			{tile.x + ui.CONTROL_INSET * s, tile.y + (tile.height - 16 * s) / 2, 16 * s, 16 * s},
+			area,
 			icon,
 			s,
 			atlas,

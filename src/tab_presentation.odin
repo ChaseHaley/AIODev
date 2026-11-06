@@ -1,6 +1,19 @@
 package main
 
 import "aio:ui"
+import "aio:layout"
+
+tab_content_icon :: proc(tab: ^Tab) -> ui.Icon {
+	if int(tab.tree.focus) >= len(tab.tree.nodes) {return .None}
+	pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+	if !ok {return .None}
+	switch pane.content.kind {
+	case .Terminal: return .None
+	case .Settings: return .Settings
+	case .Markdown: return .Markdown
+	}
+	return .None
+}
 
 // Tab presentation indexed by tab position. Both arrays stay aligned with the
 // workspace tab list; controls carry one extra trailing entry for the new-tab button and one
