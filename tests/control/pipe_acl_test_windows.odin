@@ -1,11 +1,37 @@
 package control_test
 
+import "base:runtime"
 import "aio:control"
 import "core:fmt"
+import "core:mem"
 import w "core:sys/windows"
 import "core:testing"
 
 foreign import pipe_acl_advapi32 "system:advapi32.lib"
+
+@(private="file")
+byte_aligned_allocator :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,
+	old_memory: rawptr, old_size: int, location: runtime.Source_Code_Location,
+) -> ([]u8, runtime.Allocator_Error) {
+	if alignment == 1 && (mode == .Alloc || mode == .Alloc_Non_Zeroed) {
+		_, err := mem.arena_alloc_bytes(cast(^mem.Arena)data, 1, 1)
+		if err != nil {return nil, err}
+	}
+	return mem.arena_allocator_proc(data, mode, size, alignment, old_memory, old_size, location)
+}
+
+@(test)
+pipe_creation_aligns_token_information_for_byte_aligned_allocators :: proc(t: ^testing.T) {
+	name := test_pipe_name(t)
+	if name == "" {return}
+	defer delete(name)
+	storage: [16384]u8
+	arena: mem.Arena
+	mem.arena_init(&arena, storage[:])
+	server, err := control.create(name, {}, {byte_aligned_allocator, &arena})
+	if !testing.expect_value(t, err, control.Error.None) {return}
+	defer control.destroy(server)
+}
 
 @(private, default_calling_convention = "system")
 foreign pipe_acl_advapi32 {

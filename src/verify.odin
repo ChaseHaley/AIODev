@@ -13,6 +13,7 @@ import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:log"
+import "core:math"
 import "core:os"
 import "core:strings"
 import "core:time"
@@ -21,6 +22,7 @@ import "core:unicode/utf8"
 // These imports are used only when AIO_CONTROL is set.
 _ :: fmt
 _ :: log
+_ :: math
 _ :: os
 _ :: strings
 _ :: utf8
@@ -1247,17 +1249,32 @@ when AIO_CONTROL {
 		case control.Dpi:
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case control.Resize:
-			_, width, height := pane_box_for_grid(
+			insets := pane_insets(app, w.scale, focused_session(app, w))
+			desired, width, height := pane_box_for_grid(
 				app,
 				w.scale,
 				w.metrics,
 				u16(r.columns),
 				u16(r.rows),
-				pane_insets(app, w.scale, focused_session(app, w)),
+				insets,
 				w.rail_width > 0 ? w.rail_width : f32(app.settings.tabs.rail_width),
 			)
-			if platform.window_set_client_size(&app.platform, w.id, width, height) !=
-			   .None {return .System}
+			// Activity can move between a standalone dock and the rail as the width changes.
+			for _ in 0..<32 {
+				candidate := w^
+				candidate.width, candidate.height = width, height
+				rail_adaptive_update(&candidate)
+				area := window_content_area(app, &candidate)
+				box := pane_box(w.metrics, area, insets)
+				if box.columns == u16(r.columns) && box.rows == u16(r.rows) {
+					if platform.window_set_client_size(&app.platform, w.id,
+						candidate.width, candidate.height) != .None {return .System}
+					return .None
+				}
+				width += i32(math.ceil(desired.rect.width - area.width))
+				height += i32(math.ceil(desired.rect.height - area.height))
+			}
+			return .Invalid_Argument
 		case control.Command:
 			command := commands.find(&app.registry, r.name)
 			if command == nil || command.disabled {return .Invalid_Argument}

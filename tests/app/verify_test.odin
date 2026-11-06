@@ -6,8 +6,56 @@ import app "../../src"
 import "aio:control"
 import "aio:layout"
 import "aio:platform"
+import "aio:term_view"
 
 when app.AIO_CONTROL {
+	@(test)
+	verification_resize_accounts_for_activity_and_adaptive_rail :: proc(t: ^testing.T) {
+		state: app.App
+		if !testing.expect_value(t, platform.init(&state.platform, "AIODev.Test.VerifyResize"),
+			platform.Init_Result.Primary) {return}
+		defer testing.expect_value(t, platform.destroy(&state.platform), platform.Error.None)
+		id, err := platform.window_create(&state.platform, {hidden = true, width = 900, height = 600})
+		if !testing.expect_value(t, err, platform.Error.None) {return}
+		w := app.Window{id = id, width = 900, height = 600}
+		append(&state.windows, &w)
+		defer delete(state.windows)
+		state.settings.pane.gap = 5
+		state.settings.window.padding = 8
+		state.settings.pane.show_headers = true
+		state.settings.status.enabled = true
+		state.settings.status.panel_width = 192
+		for scale in ([?]f32{1, 1.1, 1.5, 2}) {
+			w.scale = scale
+			w.metrics = term_view.Metrics{cell_width = 9.2 * scale, cell_height = 20 * scale}
+			for horizontal in ([?]bool{false, true}) {
+				w.tabs_horizontal = horizontal
+				state.settings.tabs.orientation = horizontal ? .Horizontal : .Vertical
+				for enabled in ([?]bool{false, true}) {
+					state.settings.status.panel = enabled
+					for left in ([?]bool{false, true}) {
+						state.settings.status.panel_side = left ? .Left : .Right
+						for choice in ([?]app.Rail_Override{.Auto, .Hidden, .Shown}) {
+							for columns in ([?]int{120, 72, 40}) {
+								w.rail_override = choice
+								if !testing.expect_value(t, app.verify_drive(&state, control.Resize{columns, 24}),
+									control.Error.None) {continue}
+								width, height, size_error := platform.window_client_size(&state.platform, id)
+								testing.expect_value(t, size_error, platform.Error.None)
+								w.width, w.height = width, height
+								app.rail_adaptive_update(&w)
+								box := app.pane_box(w.metrics, app.window_content_area(&state, &w),
+									app.pane_insets(&state, scale, nil))
+								testing.expect_value(t, box.columns, u16(columns))
+								testing.expect_value(t, box.rows, u16(24))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	@(test)
 	verification_target_overrides_focus_and_clears_after_destruction :: proc(t: ^testing.T) {
 		first_workspace, second_workspace: app.Workspace

@@ -538,6 +538,8 @@ dragging_inside_a_linked_window_rearranges_it :: proc(t: ^testing.T) {
 	if !fixture_start(t, &f, 31) {return}
 	w, _, ok := fixture_split_linked(t, &f)
 	if !ok {return}
+	// This is a local rearrangement; an overlapping host must not become the OS drop target.
+	testing.expect_value(t, platform.window_hide(&f.state.platform, f.host.id), platform.Error.None)
 	source, target := w.panes[0], w.panes[1]
 	start := [2]f32{source.rect.x + 40, source.rect.y + 8}
 	app.pane_drag_press(f.state, w, source.node, start.x, start.y)

@@ -3,6 +3,7 @@ package control
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:strings"
 import "core:sync"
 import w "core:sys/windows"
@@ -78,7 +79,7 @@ security_descriptor :: proc(allocator: runtime.Allocator) -> (w.PSECURITY_DESCRI
 	if bool(w.GetTokenInformation(token, .TokenUser, nil, 0, &size)) ||
 	   w.GetLastError() !=
 		   w.ERROR_INSUFFICIENT_BUFFER {return nil, os_error("GetTokenInformation")}
-	buffer, allocation_error := make([]u8, int(size), allocator)
+	buffer, allocation_error := mem.alloc_bytes(int(size), align_of(w.TOKEN_USER), allocator)
 	if allocation_error != nil {return nil, .Out_Of_Memory}
 	defer delete(buffer, allocator)
 	if !bool(w.GetTokenInformation(token, .TokenUser, raw_data(buffer), size, &size)) {

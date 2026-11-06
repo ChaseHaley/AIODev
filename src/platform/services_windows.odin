@@ -231,6 +231,21 @@ unlock_global :: proc(memory: w.HGLOBAL) -> bool {
 	return true
 }
 
+@(private, require_results)
+open_clipboard :: proc(p: ^Platform) -> bool {
+	// Clipboard viewers briefly lock it after a change. Bound the wait to 100 ms.
+	for attempt in 0..<21 {
+		if bool(w.OpenClipboard(p.host.hwnd)) {return true}
+		code := w.GetLastError()
+		if code != w.ERROR_ACCESS_DENIED || attempt == 20 {
+			log.errorf("OpenClipboard failed: Win32 %d", code)
+			return false
+		}
+		w.Sleep(5)
+	}
+	return false
+}
+
 @(require_results)
 clipboard_set_text :: proc(p: ^Platform, text: string) -> (ok: bool) {
 	if p.host.hwnd == nil {return false}
@@ -264,7 +279,7 @@ clipboard_set_text :: proc(p: ^Platform, text: string) -> (ok: bool) {
 	}
 	copy((cast([^]u16)data)[:len(units) + 1], (cast([^]u16)units)[:len(units) + 1])
 	if !unlock_global(w.HGLOBAL(memory)) {return false}
-	if !os_ok(w.OpenClipboard(p.host.hwnd), "OpenClipboard") {return false}
+	if !open_clipboard(p) {return false}
 	defer {
 		if !os_ok(w.CloseClipboard(), "CloseClipboard") {
 			ok = false
@@ -288,7 +303,7 @@ clipboard_get_text :: proc(
 	ok: bool,
 ) {
 	if p.host.hwnd == nil {return "", false}
-	if !os_ok(w.OpenClipboard(p.host.hwnd), "OpenClipboard") {return "", false}
+	if !open_clipboard(p) {return "", false}
 	defer {
 		if !os_ok(w.CloseClipboard(), "CloseClipboard") {
 			if ok {
