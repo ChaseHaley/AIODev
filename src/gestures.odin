@@ -125,6 +125,13 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		_ = pane_drag_release(app, w)
 		return
 	}
+	if !e.pressed && e.button == .Left && w.tab_drag.active && w.tab_drag.picker_window != 0 {
+		w.gesture.owners[e.button] = nil
+		w.rail_pressed, w.tab_pressed = -1, false
+		_ = tab_drag_move(app, w, x, y)
+		tab_drag_finish(app, w)
+		return
+	}
 	target := pointer_target(app, w, x, y)
 	if !e.pressed && e.button in w.notice_buttons {
 		_ = gesture_complete(app, w, e)
@@ -209,6 +216,19 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 			return
 		}
 	}
+	if w.tab_drag.pressed && (w.tab_drag.active || !pointer_modal(target)) {
+		if .Left not_in e.buttons {
+			tab_drag_cancel(app, w)
+			target = pointer_target(app, w, x, y)
+		} else if tab_drag_move(app, w, x, y) {
+			if w.tab_drag.active {
+				d := &w.tab_drag
+				outside := d.new_window || d.destination_window != 0 || d.picker_window != 0
+				pointer_set(app, w, outside ? .Resize_All : .Arrow)
+			}
+			return
+		}
+	}
 	if pointer_modal(target) {
 		pointer_move(app, w, target, e)
 		return
@@ -217,17 +237,6 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		if .Left not_in e.buttons {w.dragging, w.rail_resizing = {}, false; return}
 		divider_drag(app, w, x, y)
 		return
-	}
-	if w.tab_drag.pressed {
-		if .Left not_in e.buttons {
-			tab_drag_cancel(app, w)
-		} else if tab_drag_move(app, w, x, y) {
-			if w.tab_drag.active {
-				outside := w.tab_drag.new_window || w.tab_drag.destination_window != 0
-				pointer_set(app, w, outside ? .Resize_All : .Arrow)
-			}
-			return
-		}
 	}
 	target = pointer_held_target(w, e.buttons, target)
 	pointer_move(app, w, target, e)

@@ -59,6 +59,7 @@ Tab_Drag :: struct {
 	destination_window:          platform.Window_Id,
 	pointer:                    [2]f32,
 	thumbnail:                   Drag_Thumbnail,
+	using picker:                Workspace_Drag,
 }
 
 @(private)
@@ -301,6 +302,7 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 	if d.pressed {w.dirty = true}
 	drag_thumbnail_destroy(&d.thumbnail)
 	tab_incoming_close(app, d.destination_window)
+	workspace_drag_close(app, &d.picker)
 	for tab, to in d.order {
 		for current, from in w.workspace.tabs {if current == tab {tab_move(app, w, from, to); break}}
 	}
@@ -309,6 +311,10 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 }
 
 tab_drag_release :: proc(app: ^App, w: ^Window) {
+	if w.tab_drag.picker_window != 0 {
+		tab_workspace_drag_release(app, w)
+		return
+	}
 	if w.tab_drag.destination_window != 0 {
 		tab_drag_release_on_window(app, w)
 		return
@@ -340,6 +346,13 @@ tab_drag_release :: proc(app: ^App, w: ^Window) {
 	delete(d.order)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
+}
+
+// The drop may take the window's last tab, and the window with it.
+tab_drag_finish :: proc(app: ^App, w: ^Window) {
+	id := w.id
+	tab_drag_release(app, w)
+	if window_find(app, id) != nil {rail_overlay_dismiss(app, w)}
 }
 
 pane_drag_press :: proc(app: ^App, w: ^Window, node: layout.Node_Id, x, y: f32) {

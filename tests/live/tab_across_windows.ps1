@@ -102,6 +102,21 @@ function Destination-Incoming([string] $Source, [int] $Count, [int] $Slot, [stri
     Assert-Equal $d['tabs.incoming.slot'] $Slot "$Label puts the gap at slot $Slot"
     Select-Window $Source
 }
+function Middle([string] $Rectangle) {
+    $r = Numbers $Rectangle
+    return "$([int]($r[0]+$r[2]/2)),$([int]($r[1]+$r[3]/2))"
+}
+# A dropdown row's center. Its rows are 34 DIP apart, with 8 more before the rows that make something new.
+function Row-Point([int] $Index) {
+    $s = State
+    $scale = [double]$s['window.scale']
+    $row = Numbers $s['workspace.picker.row']
+    $selected = [int]$s['workspace.picker.selected']
+    $rows = [int]$s['workspace.picker.count']-2
+    $top = $row[1]+($Index-$selected)*34*$scale
+    if ($Index -ge $rows -and $selected -lt $rows) { $top += 8*$scale }
+    return "$([int]($row[0]+$row[2]/2)),$([int]($top+17*$scale))"
+}
 function Capture([string] $Label) {
     Start-Sleep -Milliseconds 300
     $o, $size = (Numbers $script:destinationState['window.origin']), ($script:destinationState['window.size'] -split 'x')
@@ -231,6 +246,93 @@ try {
     Aio run 'Write-Output LAST$(6*7)' | Out-Null
     Aio wait text LAST42 | Out-Null
     Capture 'rail-dropped'
+
+    # The workspace dropdown takes a tab as it does a pane, here in a window with a workspace to go to.
+    $first = State
+    $firstWorkspace = $first['workspace.id']
+    Aio command workspace.new | Out-Null
+    Aio key Enter | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    $second = (State)['workspace.id']
+    Aio command workspace.change | Out-Null
+    Aio type $first['workspace.name'] | Out-Null
+    Aio key Enter | Out-Null
+    Aio expect state "workspace.id=$firstWorkspace" | Out-Null
+    $tabs = [int](State)['tabs.count']
+    $sessions = (State)['sessions.count']
+
+    # Escape from the dropdown keeps everything.
+    Begin-Drag 1 'rect'
+    Aio mouse move (Middle (State)['workspace.button']) --px | Out-Null
+    $s = State
+    Assert-Equal $s['workspace.picker'] true 'the chip opens the dropdown'
+    Assert-Equal $s['tabs.dragging'] true 'the dropdown keeps the drag'
+    $row = Row-Point 0
+    Aio mouse move $row --px | Out-Null
+    Assert-Equal (State)['workspace.picker.selected'] 0 'the row under the pointer highlights'
+    $destinationState = State
+    Capture 'dropdown-row'
+    Aio key Esc | Out-Null
+    Aio mouse up $row --px | Out-Null
+    $s = State
+    Assert-Equal $s['workspace.picker'] false 'Escape closes the dropdown'
+    Assert-Equal $s['tabs.count'] $tabs 'Escape keeps the tabs'
+    # The next press reads the row's place, so the tab must finish sliding back first.
+    Start-Sleep -Milliseconds 300
+
+    # A row moves the tab to that workspace, which this window then shows, as for a pane.
+    $moving = (State)['session.id']
+    Begin-Drag 1 'rect'
+    Aio mouse move (Middle (State)['workspace.button']) --px | Out-Null
+    $row = Row-Point 0
+    Aio mouse move $row --px | Out-Null
+    Aio mouse up $row --px | Out-Null
+    $s = State
+    Assert-Equal $s['workspace.id'] $second 'the window shows the chosen workspace'
+    Assert-Equal $s['tabs.count'] 2 'the workspace gained the tab'
+    Assert-Equal $s['session.id'] $moving 'the moved tab is focused'
+    Assert-Equal $s['sessions.count'] $sessions 'the move starts or closes no shell'
+    Aio run 'Write-Output ROW$(6*7)' | Out-Null
+    Aio wait text ROW42 | Out-Null
+
+    # The row after the workspaces makes a new one, which names itself in its chip.
+    $workspaces = [int]$s['workspaces.count']
+    Begin-Drag 2 'rect'
+    Aio mouse move (Middle (State)['workspace.button']) --px | Out-Null
+    $row = Row-Point ([int](State)['workspace.picker.count']-2)
+    Aio mouse move $row --px | Out-Null
+    Aio mouse up $row --px | Out-Null
+    $s = State
+    Assert-Equal $s['workspaces.count'] ($workspaces+1) 'the row makes a workspace'
+    Assert-Equal $s['rename.open'] true 'the new workspace names itself in its chip'
+    Assert-Equal $s['tabs.count'] 1 'the new workspace holds the tab'
+    Aio key Enter | Out-Null
+
+    # That workspace's last tab, dropped on another workspace, deletes it and keeps the window showing the drop.
+    $emptied = (State)['workspace.id']
+    Begin-Drag 1 'rect'
+    Aio mouse move (Middle (State)['workspace.button']) --px | Out-Null
+    $row = Row-Point 0
+    Aio mouse move $row --px | Out-Null
+    Aio mouse up $row --px | Out-Null
+    $s = State
+    Assert-Equal $s['workspaces.count'] $workspaces 'the emptied workspace is deleted'
+    Assert-Equal $s['windows.count'] 1 'the window stays to show the destination'
+    if ($s['workspace.id'] -eq $emptied) { throw 'The window still shows the emptied workspace.' }
+    Assert-Equal $s['sessions.count'] $sessions 'no shell stopped with the workspace'
+
+    # The last row opens a window.
+    Assert-Equal ([int]$s['tabs.count'] -ge 2) $true 'a tab stays behind'
+    $count = [int]$s['tabs.count']
+    Begin-Drag 1 'rect'
+    Aio mouse move (Middle (State)['workspace.button']) --px | Out-Null
+    $row = Row-Point ([int](State)['workspace.picker.count']-1)
+    Aio mouse move $row --px | Out-Null
+    Aio mouse up $row --px | Out-Null
+    $s = State
+    Assert-Equal $s['windows.count'] 2 'the last row opens a window'
+    Assert-Equal $s['tabs.count'] ($count-1) 'the tab left this window'
+    Assert-Equal $s['sessions.count'] $sessions 'the new window starts no shell'
     Write-Output 'PASS tab across windows journey'
 } finally {
     & $ctl --name $Name stop | Out-Null
