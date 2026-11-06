@@ -223,11 +223,9 @@ status_panel_reports :: proc(app: ^App, w: ^Window) -> []Status_Panel_Report {
 @(private)
 status_panel_section :: proc(record: term.Program_Status) -> Status_Panel_Section {
 	switch record.state {
-	case .Blocked:
+	case .Blocked, .Error:
 		return .Needs_You
-	case .Error:
-		return record.seen ? .Finished : .Needs_You
-	case .Done:
+	case .Done, .Done_Seen, .Error_Seen:
 		return .Finished
 	case .Working:
 		return .Working
@@ -390,7 +388,7 @@ status_panel_end_draw :: proc(
 	mark: ui.Status_Mark,
 	highlighted: bool,
 ) -> glyphs.Result {
-	if highlighted && status_dismissable(item.record) {
+	if highlighted && term.program_status_finished(item.record.state) {
 		close := status_panel_dismiss_rect(app, w, r)
 		ui.icon_draw(&w.list, .Close, close, app.theme.muted, ui.ICON_INDICATOR, w.scale)
 		return .Ok
@@ -422,7 +420,7 @@ status_panel_comfy_draw :: proc(
 	text_x := left + (logo + ui.SPACE_2) * s
 	right := box.x + box.width - ui.CONTROL_INSET * s
 	title_room := max(0, right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - text_x)
-	quiet := status_finished_seen(item.record)
+	quiet := term.program_status_seen(item.record.state)
 	if result := ui.draw_fading_text(&strong, &w.list, status_item_name(app, item), text_x, line_one,
 		quiet ? app.theme.muted : app.theme.text, title_room); result != .Ok {return result}
 	mark := status_mark(item.record)
@@ -474,7 +472,7 @@ status_panel_dense_draw :: proc(
 	   result != .Ok {return result}
 	text_x := left + (logo + ui.SPACE_2) * s
 	room := max(0, age_x - ui.SPACE_2 * s - text_x)
-	quiet := status_finished_seen(item.record) || item.record.state == .Idle
+	quiet := term.program_status_seen(item.record.state) || item.record.state == .Idle
 	ink := quiet ? app.theme.muted : app.theme.text
 	name := status_item_name(app, item)
 	if row.depth > 0 {return ui.draw_fading_text(&body, &w.list, name, text_x, baseline, ink, room)}
@@ -562,11 +560,12 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	w.status.panel_scroll = clamp(w.status.panel_scroll, 0, max(0, total - list.height))
 	dense := app.settings.status.panel_view == .Dense
+	hovered, any_hovered := w.status.panel_hover.?
 	for row, i in rows {
 		r := status_panel_row_rect(w, list, row)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
 		result: glyphs.Result
-		highlighted := w.status.hover_surface == .Panel && w.status.hover == i
+		highlighted := any_hovered && hovered == i
 		if row.report {
 			box := status_panel_row_box(w, r, row)
 			if ui.navigation_row_surface_draw(&w.list, app.theme, box, {hovered = highlighted}, s,
@@ -609,7 +608,8 @@ status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	index, rect := status_panel_hit(app, w, rows, x, y)
 	if index < 0 {return ""}
 	item := rows[index].item
-	if status_dismissable(item.record) && status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
+	if term.program_status_finished(item.record.state) &&
+	   status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		return "Dismiss"
 	}
 	name := status_item_name(app, item)
@@ -648,7 +648,8 @@ status_panel_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 	index, rect := status_panel_hit(app, w, rows, x, y)
 	if index < 0 {return true}
 	item := rows[index].item
-	if status_dismissable(item.record) && status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
+	if term.program_status_finished(item.record.state) &&
+	   status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		status_dismiss_item(app, item)
 		w.dirty = true
 		return true

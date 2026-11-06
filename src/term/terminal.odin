@@ -204,7 +204,7 @@ destroy :: proc(s: ^Session) {
 	ghostty.key_event_free(s.key_event)
 	ghostty.key_encoder_free(s.key_encoder)
 	ghostty.terminal_free(s.terminal)
-	clear_program_status(s, false)
+	clear_program_status(s, .All)
 	delete(s.failure, s.allocator)
 	delete(s.queue.pending)
 	delete(s.search_matches)
@@ -218,7 +218,7 @@ restart :: proc(s: ^Session, config: Config) {
 	}
 	sync.mutex_lock(&s.mutex)
 	ghostty.terminal_reset(s.terminal)
-	clear_program_status(s, false)
+	clear_program_status(s, .All)
 	delete(s.failure, s.allocator)
 	s.failure = ""
 	s.held = false
@@ -416,7 +416,7 @@ mark_changed :: proc(s: ^Session) {
 reader_main :: proc(s: ^Session) {
 	defer {
 		sync.mutex_lock(&s.mutex)
-		clear_program_status(s, true)
+		clear_program_status(s, .Transient)
 		sync.mutex_unlock(&s.mutex)
 		notify(s)
 	}

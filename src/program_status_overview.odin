@@ -29,10 +29,10 @@ STATUS_HEADER_HEIGHT :: f32(40)
 STATUS_FOOTER_HEIGHT :: ui.HEIGHT_STANDARD
 STATUS_PANEL_HEADER :: ui.HEIGHT_STANDARD
 
-Status_Surface :: enum {
-	None,
-	Inbox,
-	Panel,
+// The inbox while it is open. The pointer moves its keyboard selection, so it keeps no hover.
+Status_Inbox :: struct {
+	selected: int,
+	scroll:   f32,
 }
 
 Status_Panel_Button :: enum {
@@ -46,14 +46,11 @@ Status_Overview :: struct {
 	panel_width, panel_height: f32,
 	panel_button_armed: ui.Armed(Status_Panel_Button),
 	panel_button_hover: Status_Panel_Button,
-	inbox_open: bool,
-	// Keyboard selection in the inbox, and the item under the pointer on any surface.
-	selected:               int,
-	hover:                  int,
-	hover_surface:          Status_Surface,
-	pill_hover:             bool,
-	inbox_scroll:           f32,
-	panel_scroll:           f32,
+	inbox:              Maybe(Status_Inbox),
+	// The Activity panel row under the pointer.
+	panel_hover:        Maybe(int),
+	pill_hover:         bool,
+	panel_scroll:       f32,
 }
 
 // One report in an overview. The record's strings borrow from the session's snapshot, so items live
@@ -129,16 +126,6 @@ status_item_name :: proc(app: ^App, item: Status_Item) -> string {
 }
 
 @(private)
-status_finished_seen :: proc(record: term.Program_Status) -> bool {
-	return record.seen && (record.state == .Done || record.state == .Error)
-}
-
-@(private)
-status_dismissable :: proc(record: term.Program_Status) -> bool {
-	return record.state == .Done || record.state == .Error
-}
-
-@(private)
 status_dismiss_rect :: proc(w: ^Window, row: render.Rect) -> render.Rect {
 	s := w.scale
 	size := ui.HEIGHT_COMPACT * s
@@ -168,9 +155,9 @@ status_row_draw :: proc(
 	if result := status_mark_draw(app, w, {left, icon_y, icon, icon}, mark); result != .Ok {
 		return result
 	}
-	quiet := status_finished_seen(item.record)
+	quiet := term.program_status_seen(item.record.state)
 	text_x := left + icon + ui.SPACE_2 * s
-	show_dismiss := highlighted && status_dismissable(item.record)
+	show_dismiss := highlighted && term.program_status_finished(item.record.state)
 	right := r.x + r.width - (show_dismiss ? ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_1 : ui.CONTROL_INSET) * s
 	age := status_age(item.record.updated_at)
 	age_width := ui.text_width(&small, age)
@@ -238,7 +225,7 @@ status_dismiss_item :: proc(app: ^App, item: Status_Item) {
 
 @(private)
 status_open_item :: proc(app: ^App, w: ^Window, item: Status_Item) {
-	w.status.inbox_open = false
+	status_inbox_close(w)
 	w.dirty = true
 	if !status_reveal(app, w, item.session) {notify(app, .Error, "Could not show that pane.")}
 }
@@ -267,7 +254,7 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if r.width <= 0 {return .Ok}
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), ui.TITLE_BAR_HEIGHT * s}) != .None {return .Ok}
-	if w.status.inbox_open {
+	if status_inbox_shown(w) {
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
 	} else if w.status.pill_hover {
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.hover, radius = ui.RADIUS_CONTROL * s})
@@ -303,16 +290,22 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			ink,
 		); result != .Ok {return result}
 	}
-	if w.status.pill_hover && !w.status.inbox_open {
+	if w.status.pill_hover && !status_inbox_shown(w) {
 		radius := ui.RADIUS_CONTROL * s
 		if ui.hover_rim_draw(&w.list, app.theme, r, radius, 1, s, w.pointer, compact = true) != .None {return .Ok}
 	}
 	return .Ok
 }
 
+status_inbox_shown :: proc(w: ^Window) -> bool {
+	_, open := w.status.inbox.?
+	return open
+}
+
+// Opening starts at the top with the first item selected; closing forgets both.
 status_inbox_toggle :: proc(app: ^App, w: ^Window) {
-	if w.status.inbox_open {
-		w.status.inbox_open, w.dirty = false, true
+	if status_inbox_shown(w) {
+		status_inbox_close(w)
 		return
 	}
 	if !app.settings.status.enabled {
@@ -321,8 +314,13 @@ status_inbox_toggle :: proc(app: ^App, w: ^Window) {
 	}
 	if !gesture_cancel(app, w) {return}
 	window_overlays_cancel(app, w)
-	w.status.inbox_open = true
-	w.status.selected, w.status.hover, w.status.inbox_scroll = 0, -1, 0
+	w.status.inbox = Status_Inbox{}
+	w.dirty = true
+}
+
+status_inbox_close :: proc(w: ^Window) {
+	if !status_inbox_shown(w) {return}
+	w.status.inbox = nil
 	w.dirty = true
 }
 
@@ -365,18 +363,19 @@ status_inbox_row_rect :: proc(w: ^Window, list: render.Rect, scroll: f32, index:
 }
 
 @(private)
-status_inbox_clamp :: proc(w: ^Window, list: render.Rect, count: int) {
+status_inbox_clamp :: proc(w: ^Window, inbox: ^Status_Inbox, list: render.Rect, count: int) {
 	height := STATUS_ROW_HEIGHT * w.scale
 	limit := max(0, f32(count) * height - list.height)
-	w.status.selected = clamp(w.status.selected, 0, max(0, count - 1))
-	top := f32(w.status.selected) * height
-	if top < w.status.inbox_scroll {w.status.inbox_scroll = top}
-	if top + height > w.status.inbox_scroll + list.height {w.status.inbox_scroll = top + height - list.height}
-	w.status.inbox_scroll = clamp(w.status.inbox_scroll, 0, limit)
+	inbox.selected = clamp(inbox.selected, 0, max(0, count - 1))
+	top := f32(inbox.selected) * height
+	if top < inbox.scroll {inbox.scroll = top}
+	if top + height > inbox.scroll + list.height {inbox.scroll = top + height - list.height}
+	inbox.scroll = clamp(inbox.scroll, 0, limit)
 }
 
 status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	if !w.status.inbox_open {return .Ok}
+	inbox, open := &w.status.inbox.?
+	if !open {return .Ok}
 	items := status_items(app, w)
 	surface, list, footer_y := status_inbox_layout(app, w, items)
 	s := w.scale
@@ -424,11 +423,11 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			app.theme.faint,
 		); result != .Ok {return result}
 	}
-	status_inbox_clamp(w, list, len(items))
+	status_inbox_clamp(w, inbox, list, len(items))
 	for item, i in items {
-		r := status_inbox_row_rect(w, list, w.status.inbox_scroll, i)
+		r := status_inbox_row_rect(w, list, inbox.scroll, i)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
-		highlighted := i == w.status.selected
+		highlighted := i == inbox.selected
 		if result := status_row_draw(app, w, r, item, highlighted); result != .Ok {return result}
 	}
 	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
@@ -446,22 +445,23 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 }
 
 @(private)
-status_inbox_hit :: proc(app: ^App, w: ^Window, items: []Status_Item, x, y: f32) -> int {
+status_inbox_hit :: proc(app: ^App, w: ^Window, items: []Status_Item, scroll, x, y: f32) -> int {
 	_, list, _ := status_inbox_layout(app, w, items)
 	if !status_rect_contains(list, x, y) {return -1}
-	index := int(math.floor((y - list.y + w.status.inbox_scroll) / (STATUS_ROW_HEIGHT * w.scale)))
+	index := int(math.floor((y - list.y + scroll) / (STATUS_ROW_HEIGHT * w.scale)))
 	return index >= 0 && index < len(items) ? index : -1
 }
 
 status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	if !e.pressed {return}
+	inbox, open := w.status.inbox.?
+	if !e.pressed || !open {return}
 	w.header_buttons += {e.button}
 	x, y := f32(e.x), f32(e.y)
 	items := status_items(app, w)
 	surface, _, _ := status_inbox_layout(app, w, items)
 	w.dirty = true
 	if !status_rect_contains(surface, x, y) {
-		w.status.inbox_open = false
+		status_inbox_close(w)
 		return
 	}
 	if e.button != .Left {return}
@@ -469,11 +469,12 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 		status_dismiss_finished(app, w)
 		return
 	}
-	index := status_inbox_hit(app, w, items, x, y)
+	index := status_inbox_hit(app, w, items, inbox.scroll, x, y)
 	if index < 0 {return}
 	_, list, _ := status_inbox_layout(app, w, items)
-	row := status_inbox_row_rect(w, list, w.status.inbox_scroll, index)
-	if status_dismissable(items[index].record) && status_rect_contains(status_dismiss_rect(w, row), x, y) {
+	row := status_inbox_row_rect(w, list, inbox.scroll, index)
+	if term.program_status_finished(items[index].record.state) &&
+	   status_rect_contains(status_dismiss_rect(w, row), x, y) {
 		status_dismiss_item(app, items[index])
 		return
 	}
@@ -481,10 +482,12 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 }
 
 status_inbox_move :: proc(app: ^App, w: ^Window, x, y: f32) {
+	inbox, open := &w.status.inbox.?
+	if !open {return}
 	items := status_items(app, w)
-	index := status_inbox_hit(app, w, items, x, y)
-	if index >= 0 && index != w.status.selected {
-		w.status.selected, w.dirty = index, true
+	index := status_inbox_hit(app, w, items, inbox.scroll, x, y)
+	if index >= 0 && index != inbox.selected {
+		inbox.selected, w.dirty = index, true
 	}
 	surface, _, _ := status_inbox_layout(app, w, items)
 	dismiss_all := status_rect_contains(status_dismiss_all_rect(w, surface), x, y)
@@ -492,39 +495,39 @@ status_inbox_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 }
 
 status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
-	w.status.inbox_scroll -= f32(math.sign(delta)) * 3 * STATUS_ROW_HEIGHT * w.scale
+	inbox, open := &w.status.inbox.?
+	if !open {return}
+	inbox.scroll -= f32(math.sign(delta)) * 3 * STATUS_ROW_HEIGHT * w.scale
 	items := status_items(app, w)
 	_, list, _ := status_inbox_layout(app, w, items)
 	height := STATUS_ROW_HEIGHT * w.scale
-	w.status.inbox_scroll = clamp(w.status.inbox_scroll, 0, max(0, f32(len(items)) * height - list.height))
-	first := int(math.ceil(w.status.inbox_scroll / height))
-	last := int(math.floor((w.status.inbox_scroll + list.height) / height)) - 1
-	w.status.selected = clamp(w.status.selected, first, max(first, last))
+	inbox.scroll = clamp(inbox.scroll, 0, max(0, f32(len(items)) * height - list.height))
+	first := int(math.ceil(inbox.scroll / height))
+	last := int(math.floor((inbox.scroll + list.height) / height)) - 1
+	inbox.selected = clamp(inbox.selected, first, max(first, last))
 	w.dirty = true
 }
 
 status_inbox_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
-	if !e.pressed {return}
+	inbox, open := &w.status.inbox.?
+	if !e.pressed || !open {return}
 	items := status_items(app, w)
 	if step := ui.list_step(e); step != 0 {
-		w.status.selected = clamp(w.status.selected + step, 0, max(0, len(items) - 1))
+		inbox.selected = clamp(inbox.selected + step, 0, max(0, len(items) - 1))
 		w.dirty = true
 		return
 	}
+	selected := inbox.selected >= 0 && inbox.selected < len(items)
 	#partial switch e.key {
 	case .Escape:
-		w.status.inbox_open, w.dirty = false, true
+		status_inbox_close(w)
 	case .Enter, .Numpad_Enter:
-		if w.status.selected >= 0 && w.status.selected < len(items) {
-			status_open_item(app, w, items[w.status.selected])
-		}
+		if selected {status_open_item(app, w, items[inbox.selected])}
 	case .Delete:
-		if w.status.selected >= 0 && w.status.selected < len(items) {
-			status_dismiss_item(app, items[w.status.selected])
-		}
+		if selected {status_dismiss_item(app, items[inbox.selected])}
 	case .J:
 		if .Control in e.modifiers && .Shift in e.modifiers {
-			w.status.inbox_open = false
+			status_inbox_close(w)
 			status_next_attention(app, w)
 		}
 	}
@@ -537,24 +540,34 @@ status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if button != w.status.panel_button_hover {w.status.panel_button_hover, w.dirty = button, true}
 	pill := status_rect_contains(status_pill_rect(app, w), x, y)
 	if pill != w.status.pill_hover {w.status.pill_hover, w.dirty = pill, true}
-	surface := Status_Surface.None
-	hover := -1
-	if status_panel_contains(app, w, x, y) {
-		if _, over := divider_cursor(w, x, y); over {return false}
-		surface = .Panel
+	over := status_panel_contains(app, w, x, y)
+	hover: Maybe(int)
+	if over {
+		if _, on_divider := divider_cursor(w, x, y); on_divider {return false}
 		rows, _ := status_panel_rows(app, w)
-		hover, _ = status_panel_hit(app, w, rows, x, y)
+		if index, _ := status_panel_hit(app, w, rows, x, y); index >= 0 {hover = index}
 	}
-	if surface != w.status.hover_surface || hover != w.status.hover {
-		w.status.hover_surface, w.status.hover, w.dirty = surface, hover, true
-	}
-	if surface == .None {return false}
-	pointer_set(app, w, hover >= 0 || button != .None ? .Hand : .Arrow)
+	status_panel_hover_set(w, hover)
+	if !over {return false}
+	_, on_row := hover.?
+	pointer_set(app, w, on_row || button != .None ? .Hand : .Arrow)
 	return true
 }
 
+// The pointer left the Activity panel for a surface above it.
+status_overview_leave :: proc(w: ^Window) {
+	status_panel_hover_set(w, nil)
+	if w.status.panel_button_hover != .None {w.status.panel_button_hover, w.dirty = .None, true}
+}
+
+@(private = "file")
+status_panel_hover_set :: proc(w: ^Window, hover: Maybe(int)) {
+	if hover == w.status.panel_hover {return}
+	w.status.panel_hover = hover
+	w.dirty = true
+}
+
 status_overview_cancel :: proc(w: ^Window) {
-	if w.status.inbox_open {w.dirty = true}
-	w.status.inbox_open = false
-	w.status.hover_surface, w.status.hover, w.status.pill_hover = .None, -1, false
+	status_inbox_close(w)
+	w.status.panel_hover, w.status.pill_hover = nil, false
 }

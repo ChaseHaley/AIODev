@@ -72,9 +72,9 @@ status_shown :: proc(app: ^App, record: term.Program_Status) -> bool {
 		shown = s.show_working
 	case .Blocked:
 		shown = s.show_blocked
-	case .Done:
+	case .Done, .Done_Seen:
 		shown = s.show_done
-	case .Error:
+	case .Error, .Error_Seen:
 		shown = s.show_error
 	}
 	return shown && !status_app_ignored(s.ignore_apps, record.app)
@@ -98,12 +98,12 @@ status_mark :: proc(record: term.Program_Status) -> ui.Status_Mark {
 		case .Auth:
 			glyph = .Auth
 		}
-	case .Done:
+	case .Done, .Done_Seen:
 		glyph = .Done
-	case .Error:
+	case .Error, .Error_Seen:
 		glyph = .Error
 	}
-	return {glyph, record.progress, record.seen}
+	return {glyph, record.progress, term.program_status_seen(record.state)}
 }
 
 // Lower ranks need the user sooner. Finished work the user has seen ranks below anything live.
@@ -112,9 +112,13 @@ status_rank :: proc(record: term.Program_Status) -> int {
 	case .Blocked:
 		return 0
 	case .Error:
-		return record.seen ? 5 : 1
+		return 1
 	case .Done:
-		return record.seen ? 6 : 2
+		return 2
+	case .Error_Seen:
+		return 5
+	case .Done_Seen:
+		return 6
 	case .Working:
 		return 3
 	case .Idle:
@@ -142,9 +146,10 @@ status_summary_add :: proc(app: ^App, summary: ^Status_Summary, entry: ^Session_
 		case .Blocked:
 			summary.blocked += 1
 		case .Error:
-			if !record.seen {summary.failed += 1}
+			summary.failed += 1
 		case .Done:
-			if !record.seen {summary.done += 1}
+			summary.done += 1
+		case .Done_Seen, .Error_Seen:
 		case .Working:
 			summary.working += 1
 		case .Idle:
@@ -311,9 +316,9 @@ status_notification_channels :: proc(
 		set = s.notify_working
 	case .Blocked:
 		set = s.notify_blocked
-	case .Error:
+	case .Error, .Error_Seen:
 		set = s.notify_error
-	case .Done:
+	case .Done, .Done_Seen:
 		set = s.notify_done
 	}
 	return {.Banner in set, .Tray in set, .Flash in set, .Sound in set, .Notice in set}
@@ -325,22 +330,29 @@ status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
 	return c.banner || c.tray || c.flash || c.sound || c.notice
 }
 
+// A pane notifies at most once an interval, for the newest change that wants a notification. Once
+// it has, the throttle holds back every other change in the interval, those in the same refresh
+// included: they are coalesced into that one notification, not queued, and the overviews still show
+// each record. Seeing finished work changes no report, so it never notifies.
 @(private)
 status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term.Program_Status) {
 	if !app.settings.status.enabled {return}
+	if !app.settings.status.notify_focused && status_watched(app, entry) {return}
+	now := time.tick_now()
+	if entry.status_notified != {} && time.tick_diff(entry.status_notified, now) < STATUS_NOTICE_INTERVAL {
+		return
+	}
 	for record in entry.statuses {
 		if !status_notify_wanted(app, record) || !status_shown(app, record) {continue}
+		reported := term.program_status_reported(record.state)
 		changed := true
 		for old in previous {
 			if old.id == record.id {
-				changed = old.state != record.state || old.kind != record.kind
+				changed = term.program_status_reported(old.state) != reported || old.kind != record.kind
 				break
 			}
 		}
-		if !changed || (!app.settings.status.notify_focused && status_watched(app, entry)) {continue}
-		now := time.tick_now()
-		if entry.status_notified != {} &&
-		   time.tick_diff(entry.status_notified, now) < STATUS_NOTICE_INTERVAL {return}
+		if !changed {continue}
 		entry.status_notified = now
 		status_notice(app, entry, record)
 		return
@@ -355,32 +367,37 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	text := status_crumb(app, entry)
 	if record.message != "" {text = fmt.tprintf("%s · %s", record.message, text)}
 	c := status_notification_channels(&app.settings.status, record.state)
-	sound_delivered := false
+	// The sound rides on the first notification Windows shows, and plays on its own when none does.
+	sound := c.sound
 	if c.banner {
-		if platform_api.notification_show(&app.platform, title, text, entry.id, c.sound) == .None {
-			sound_delivered = c.sound
+		if platform_api.notification_show(&app.platform, title, text, entry.id, sound) == .None {
+			sound = false
 		} else {
 			notify(app, .Error, "Windows could not show a status notification. Check notification settings.")
 		}
 	}
 	if c.tray {
-		result := platform_api.tray_notify(
-			&app.platform, title, text, u64(entry.id), c.sound && !sound_delivered,
-		)
-		if result == .None {
-			sound_delivered = c.sound
+		if platform_api.tray_notify(&app.platform, title, text, u64(entry.id), sound) == .None {
+			sound = false
 		} else {
 			notify(app, .Error, "Windows could not show a tray notification.")
 		}
 	}
-	if c.sound && !sound_delivered && platform_api.notification_sound() != .None {
+	if sound && platform_api.notification_sound() != .None {
 		log.error("playing program status sound failed")
 	}
 	if c.notice {
-		kind: ui.Notice_Kind = .Info
-		if record.state == .Blocked {kind = .Warning}
-		if record.state == .Error {kind = .Error}
-		if record.state == .Done {kind = .Success}
+		kind: ui.Notice_Kind
+		#partial switch term.program_status_reported(record.state) {
+		case .Blocked:
+			kind = .Warning
+		case .Error:
+			kind = .Error
+		case .Done:
+			kind = .Success
+		case:
+			kind = .Info
+		}
 		notify(app, kind, fmt.tprintf("%s: %s", title, text))
 	}
 	target := window_for_workspace(app, status_workspace_of(app, entry.id))
@@ -479,7 +496,7 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 				if !status_shown(app, record) {continue}
 				#partial switch record.state {
 				case .Error:
-					failed ||= s.taskbar_error && !record.seen
+					failed ||= s.taskbar_error
 				case .Blocked:
 					blocked ||= s.taskbar_blocked
 				case .Working:
