@@ -679,7 +679,7 @@ tab_close_subset :: proc(app: ^App, w: ^Window, right: bool, anchor: int) {
 		if tab.marked && first < 0 {first = i}
 	}
 	if first >= 0 {tab_close_request(app, w, first)}
-	if !w.pending_close.confirm.open {tab_close_restore(w)}
+	if !ui.presence_is_open(w.pending_close.confirm.presence) {tab_close_restore(w)}
 }
 
 tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {

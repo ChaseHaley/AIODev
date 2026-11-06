@@ -185,7 +185,7 @@ palette_mode_actions_open_directly_and_default_to_all :: proc(t: ^testing.T) {
 		testing.expect_value(t, s.palette.mode, entry.mode)
 		app.palette_close(s, first)
 		app.update_motion(s)
-		testing.expect(t, !s.palette.open)
+		testing.expect(t, !ui.presence_is_open(s.palette.presence))
 	}
 	app.run_action(s, first, .Command_Palette)
 	testing.expect_value(t, s.palette.mode, ui.Palette_Mode.All)

@@ -162,9 +162,10 @@ notice_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 
 @(private = "file")
 notice_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+	// Only the window holding the notices has their hover to change.
+	if app.notice_window != w.id {return}
 	hit := owner == .Notice ? notice_hit(app, w, f32(e.x), f32(e.y)) : ui.Notice_Hit{}
-	hover := hit.close ? hit.id : 0
-	if hover != w.notice_hover {w.notice_hover, w.dirty = hover, true}
+	if ui.notices_hover(&app.notices, hit.close ? hit.id : 0) {w.dirty = true}
 	if owner == .Notice {pointer_set(app, w, hit.close ? .Hand : .Arrow)}
 }
 
@@ -178,7 +179,7 @@ notice_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	w.notice_buttons += {e.button}
 	if e.button != .Left {return}
 	hit := notice_hit(app, w, f32(e.x), f32(e.y))
-	ui.armed_press(&w.notice_armed, hit.close ? hit.id : 0)
+	ui.notices_press(&app.notices, hit.close ? hit.id : 0)
 }
 
 @(private = "file")
@@ -187,12 +188,12 @@ notice_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) ->
 	w.notice_buttons -= {e.button}
 	if e.button == .Left {
 		hit := notice_hit(app, w, f32(e.x), f32(e.y))
-		id, ok := ui.armed_release(&w.notice_armed, hit.close ? hit.id : 0)
-		if ok && id != 0 && ui.notices_dismiss(&app.notices, id) {
+		if ui.notices_release(&app.notices, hit.close ? hit.id : 0) {
 			for window in app.windows {window.dirty = true}
 		}
 	}
-	w.notice_hover, w.dirty = 0, true
+	_ = ui.notices_hover(&app.notices, 0)
+	w.dirty = true
 	return true
 }
 

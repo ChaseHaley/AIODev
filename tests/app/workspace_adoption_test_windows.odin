@@ -163,7 +163,7 @@ workspace_selection_and_deletion_share_adoption_order :: proc(t: ^testing.T) {
 	if !testing.expect(t, app.workspace_select(state, w, one)) { return }
 	adoption_expect_postcondition(t, state, w, one)
 	app.workspace_delete_request(state, w, one)
-	testing.expect(t, w.pending_close.confirm.open)
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence))
 	adoption_dirty_presentation(w)
 	app.pending_close_finish(state, w, true)
 	adoption_expect_postcondition(t, state, w, two)

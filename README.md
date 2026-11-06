@@ -54,6 +54,11 @@ Requirements:
 `vendor/ghostty` holds a prebuilt libghostty-vt pinned to `vendor/ghostty/REVISION`. Rebuilding it
 needs Zig 0.16: `tools/build_ghostty.ps1`.
 
+Floating UI surfaces use `ui.Presence` transitions for opening, closing and releasing their
+payloads. Toasts live in one list with entering, timed, sticky or fading state; fading a toast
+also releases its close-button press and hover. The `ui` and `app` test packages cover these
+lifetimes with and without animations.
+
 ## License
 
 AIODev is released under the [MIT License](LICENSE). Release packages include third-party

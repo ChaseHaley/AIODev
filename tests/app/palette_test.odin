@@ -179,9 +179,11 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, !first.tab_menu.open && app.palette_active(s, second))
 	app.pane_split(s, first, .Right)
 	app.tab_close_request(s, first, 0)
-	testing.expect(t, first.pending_close.confirm.open && app.palette_active(s, second))
+	testing.expect(t, ui.presence_is_open(first.pending_close.confirm.presence) &&
+		app.palette_active(s, second))
 	app.handle_event(s, platform.Focus_Event{first.id, false})
-	testing.expect(t, !first.pending_close.confirm.open && first.pending_close.confirm.motion.value == 0)
+	testing.expect(t, !ui.presence_is_open(first.pending_close.confirm.presence) &&
+		first.pending_close.confirm.motion.value == 0)
 	testing.expect(t, app.palette_active(s, second) && s.palette.query.dragging)
 	testing.expect_value(t, len(s.sessions), 3)
 	app.palette_close(s, first)
@@ -190,7 +192,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, app.palette_active(s, second) && s.palette.query.dragging)
 	testing.expect_value(t, len(s.sessions), 3)
 	app.handle_event(s, platform.Focus_Event{second.id, false})
-	testing.expect(t, !s.palette.open && !s.palette.query.dragging)
+	testing.expect(t, !ui.presence_is_open(s.palette.presence) && !s.palette.query.dragging)
 	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
 	app.palette_open(s, second)
 	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape, pressed = true})
@@ -211,7 +213,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, app.palette_visible(s, second) && !app.palette_active(s, second))
 	app.window_close(s, second)
 	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
-	testing.expect(t, !s.palette.open && s.palette.motion.value == 0)
+	testing.expect(t, !ui.presence_is_open(s.palette.presence) && s.palette.motion.value == 0)
 	testing.expect_value(t, len(s.sessions), 3)
 	if !testing.expect(t, app.window_open(s, first_workspace)) { return }
 	testing.expect(t, !app.palette_visible(s, s.windows[0]))

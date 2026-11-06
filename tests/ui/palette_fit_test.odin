@@ -288,7 +288,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, outcome, ui.Outcome.None)
 	p.query.dragging = true
 	ui.palette_close(&p)
-	testing.expect(t, !p.open && !p.query.dragging)
+	testing.expect(t, !ui.presence_is_open(p.presence) && !p.query.dragging)
 }
 
 @(test)

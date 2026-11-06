@@ -33,8 +33,8 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.rail_hover, w.rail_pressed = -1, -1
 	w.title_action_hover = .None
 	ui.armed_cancel(&w.title_action_armed)
-	ui.armed_cancel(&w.notice_armed)
-	w.notice_hover, w.notice_buttons = 0, {}
+	if app.notice_window == w.id {ui.notices_pointer_cancel(&app.notices)}
+	w.notice_buttons = {}
 	w.tab_orientation_button_hovered = false
 	ui.armed_cancel(&w.tab_orientation_button_armed)
 	ui.armed_cancel(&w.tab_close_armed)

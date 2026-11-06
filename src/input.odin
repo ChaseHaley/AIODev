@@ -67,7 +67,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.tab_hover, w.tab_pressed = -1, false
 			w.rail_hover, w.rail_pressed = -1, -1
 			w.title_action_hover = .None
-			w.notice_hover = 0
+			if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, 0)}
 			w.document_menu.menu.hover_part = .Row
 			w.tab_orientation_button_hovered = false
 			w.workspace_hovered = false

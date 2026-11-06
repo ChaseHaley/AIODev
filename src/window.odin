@@ -100,8 +100,6 @@ Window :: struct {
 	dock_left_width:     f32,
 	title_action_hover: Title_Action,
 	title_action_armed: ui.Armed(Title_Action),
-	notice_hover: u64,
-	notice_armed: ui.Armed(u64),
 	notice_buttons: input.Mouse_Buttons,
 	tab_orientation_button_hovered: bool,
 	tab_orientation_button_armed:   ui.Armed(bool),
@@ -754,8 +752,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		size.x,
 		size.y,
 		w.scale,
-		w.notice_hover,
-		ui.armed_target(w.notice_armed),
 		w.pointer,
 	)
 }

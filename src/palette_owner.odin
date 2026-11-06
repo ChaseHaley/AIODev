@@ -8,7 +8,7 @@ import "aio:term"
 import "aio:ui"
 
 palette_active :: proc(app: ^App, w: ^Window) -> bool {
-	return w != nil && w.id != 0 && app.palette_window == w.id && app.palette.open
+	return w != nil && w.id != 0 && app.palette_window == w.id && ui.presence_is_open(app.palette.presence)
 }
 
 palette_visible :: proc(app: ^App, w: ^Window) -> bool {

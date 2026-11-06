@@ -33,8 +33,9 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:93; defaults]",
 		.Shortcut_Warning), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
-	testing.expect_value(t, state.notices.items[0].expires, first.expires)
-	testing.expect(t, ui.notices_expire(&state.notices, time.tick_add(first.expires, time.Second)))
+	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), ui.notice_expiry(first))
+	testing.expect(t, ui.notices_expire(&state.notices,
+		time.tick_add(ui.notice_expiry(first).?, time.Second)))
 	testing.expect_value(t, settings.diagnostic_append(&issues, 93, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:93; defaults]",
 		.Shortcut_Warning), nil)
@@ -49,9 +50,9 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 	show_diagnostics_quietly(&state, &issues, os.Error(os.General_Error.Invalid_Path))
 	testing.expect_value(t, state.notices.items[0].kind, ui.Notice_Kind.Error)
 	testing.expect(t, strings.contains(state.notices.items[0].text, "Using defaults"))
-	read_expiry := state.notices.items[0].expires
+	read_expiry := ui.notice_expiry(state.notices.items[0])
 	show_diagnostics_quietly(&state, &issues, os.Error(os.General_Error.Invalid_Path))
-	testing.expect_value(t, state.notices.items[0].expires, read_expiry)
+	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), read_expiry)
 	ui.notices_clear(&state.notices, state.notices.items[0].key)
 	show_diagnostics_quietly(&state, &issues, os.Error(os.General_Error.Not_Exist))
 	testing.expect_value(t, len(state.notices.items), 1)
@@ -105,9 +106,9 @@ settings_load_keeps_source_order_conflict_and_text_field_chords_separate :: proc
 	testing.expect_value(t, state.settings_diagnostics[0].kind, settings.Diagnostic_Kind.Shortcut_Warning)
 	select_all := commands.find(&state.registry, "edit.select_all")
 	testing.expect_value(t, len(commands.active_shortcuts(select_all)), 0)
-	expires := state.notices.items[0].expires
+	expires := ui.notice_expiry(state.notices.items[0])
 	app.load_settings(&state)
-	testing.expect_value(t, state.notices.items[0].expires, expires)
+	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), expires)
 	if !testing.expect_value(t, os.write_entire_file(path, "input.leader = Ctrl+A\n"), nil) { return }
 	app.load_settings(&state)
 	testing.expect_value(t, len(state.settings_diagnostics), 0)
@@ -156,7 +157,7 @@ settings_bracket_leader_preserves_actions_and_winners_after_notice_expiry :: pro
 		if !testing.expect_value(t, len(state.notices.items), 1) { continue }
 		testing.expect_value(t, state.notices.items[0].kind, ui.Notice_Kind.Warning)
 		testing.expect(t, ui.notices_expire(&state.notices,
-			time.tick_add(state.notices.items[0].expires, time.Second)))
+			time.tick_add(ui.notice_expiry(state.notices.items[0]).?, time.Second)))
 	}
 }
 

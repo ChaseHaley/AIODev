@@ -444,7 +444,7 @@ palette_scope_tabs_preserve_the_query_and_caret :: proc(t: ^testing.T) {
 			testing.expect_value(t, ui.palette_query(&p), "pane")
 			testing.expect_value(t, p.query.cursor, 2)
 			testing.expect_value(t, p.query.anchor, 1)
-			testing.expect(t, !p.query.dragging && p.open)
+			testing.expect(t, !p.query.dragging && ui.presence_is_open(p.presence))
 			testing.expect_value(t, p.selected, 0)
 			testing.expect_value(t, p.scroll, 0)
 		}

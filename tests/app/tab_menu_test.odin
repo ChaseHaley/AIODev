@@ -225,9 +225,9 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 			if !w.tab_menu.separators[i] && candidate == action { w.tab_menu.selected = i; break }
 		}
 		app.tab_menu_choose(&f.state, w)
-		testing.expect(t, w.pending_close.confirm.open && !w.tab_menu.open)
+		testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && !w.tab_menu.open)
 		menu_key(&f, {key = .Escape})
-		testing.expect(t, !w.pending_close.confirm.open)
+		testing.expect(t, !ui.presence_is_open(w.pending_close.confirm.presence))
 		testing.expect_value(t, len(f.workspace.tabs), 3)
 		for tab, i in f.workspace.tabs { testing.expect_value(t, tab.marked, i == f.workspace.selected) }
 		testing.expect_value(t, len(w.close_restore), 0)
@@ -237,7 +237,7 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 	app.tab_menu_choose(&f.state, w)
 	menu_key(&f, {key = .Enter})
 	testing.expect_value(t, len(f.workspace.tabs), 1)
-	testing.expect(t, f.workspace.tabs[0].marked && !w.pending_close.confirm.open)
+	testing.expect(t, f.workspace.tabs[0].marked && !ui.presence_is_open(w.pending_close.confirm.presence))
 }
 
 @(test)
@@ -255,7 +255,7 @@ tab_menu_close_others_acts_on_an_unmarked_target :: proc(t: ^testing.T) {
 	}
 	app.tab_menu_choose(&f.state, w)
 	testing.expect_value(t, f.workspace.selected, 0)
-	testing.expect(t, w.pending_close.confirm.open && f.workspace.tabs[0].marked &&
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && f.workspace.tabs[0].marked &&
 		!f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
 	menu_key(&f, {key = .Enter})
 	if !testing.expect_value(t, len(f.workspace.tabs), 1) { return }
@@ -275,7 +275,7 @@ tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	testing.expect_value(t, split_error, nil)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
 	app.tab_menu_choose(&f.state, w)
-	testing.expect(t, w.pending_close.confirm.open && f.workspace.tabs[2].marked)
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && f.workspace.tabs[2].marked)
 	menu_key(&f, {key = .Escape})
 	testing.expect(t, f.workspace.tabs[0].marked && f.workspace.tabs[1].marked && !f.workspace.tabs[2].marked)
 	testing.expect_value(t, f.workspace.selected, 0)

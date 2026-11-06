@@ -48,7 +48,7 @@ pending_file_text :: proc(pending: ^Pending_File) -> Pending_Close_Text {
 
 pending_file_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	pending := &w.pending_file
-	if !pending.confirm.open {return}
+	if !ui.presence_is_open(pending.confirm.presence) {return}
 	ui.confirm_close(&pending.confirm)
 	if accept && !open_file_link(app, pending.file.path, pending.file.target) {
 		notify(app, .Error, "Could not open the file.")
