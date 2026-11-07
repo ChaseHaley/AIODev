@@ -293,9 +293,9 @@ status_focus_enter :: proc(app: ^App, w: ^Window) {
 }
 
 // Leaving a pane removes the finished work the user saw there, unless it waits for a dismissal.
-status_focus_leave :: proc(app: ^App, w: ^Window) {
+status_focus_leave :: proc(app: ^App, entry: ^Session_Entry) {
 	if app.settings.status.keep_finished != .Focus {return}
-	if entry := focused_session(app, w); entry != nil {term.program_status_dismiss_finished(entry.session)}
+	term.program_status_dismiss_finished(entry.session)
 }
 
 Status_Notification_Channels :: struct {

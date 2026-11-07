@@ -129,31 +129,6 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 	free(workspace)
 }
 
-focus_leave :: proc(app: ^App, w: ^Window) {
-	theme_delete_disarm(&w.resources)
-	window_overlays_cancel(app, w)
-	status_focus_leave(app, w)
-	leader_cancel(w)
-	if entry := focused_session(app, w); entry != nil {
-		term.send_focus(entry.session, false)
-	}
-	if target := find_target(app, w); target != nil && ui.find_is_open(&w.find) {find_close(app, w, target)}
-	w.selecting, w.autoscrolling = false, false
-	w.dragging = {}
-	w.wheel_remainder = 0
-	paste_confirm_cancel(app, w)
-}
-
-focus_enter :: proc(app: ^App, w: ^Window) {
-	if entry := focused_session(app, w); entry != nil {
-		term.send_focus(entry.session, w.focused)
-	}
-	reset_blink(w)
-	status_focus_enter(app, w)
-	w.dirty = true
-	window_update_title(app, w)
-}
-
 pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	if w.tree.focus == node || int(node) >= len(w.tree.nodes) {return}
 	// Status, jumps and scripts name a pane wherever it is; a linked one takes focus in its own window.
@@ -274,7 +249,7 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 	move := pane_move_begin(app, w, source, source_workspace)
 	tree, separated := layout.separate_pane(&source.tree, node)
 	if !separated {
-		pane_move_abort(app, move)
+		pane_move_enter(app, move)
 		tab_record_free(tab)
 		notify(app, .Error, "Could not move the pane. The layout was preserved.")
 		return false
@@ -311,7 +286,7 @@ pane_transfer :: proc(
 		root,
 	)
 	if !moved {
-		pane_move_abort(app, move)
+		pane_move_enter(app, move)
 		return false
 	}
 	pane_move_finish(app, move, destination)

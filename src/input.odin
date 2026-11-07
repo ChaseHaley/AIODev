@@ -532,7 +532,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		if !gesture_cancel(app, w) {return}
 		window_overlays_cancel(app, w, true)
 	}
-	if entry := focused_session(app, w); entry != nil {term.send_focus(entry.session, focused)}
+	if entry := focus_session(app, w); entry != nil {term.send_focus(entry.session, focused)}
 	if focused {status_focus_enter(app, w)}
 }
 

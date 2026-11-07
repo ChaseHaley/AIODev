@@ -361,6 +361,8 @@ tabs_to_workspace :: proc(app: ^App, source_window: ^Window, destination: ^Works
 	selected := selected_tab(workspace)
 	kept := tab_window_kept_index(workspace)
 	if kept < 0 {
+		// Every tab goes, so the window stays left until it adopts the destination or closes with its
+		// emptied workspace.
 		focus_leave(app, source_window)
 	} else {
 		tab_select(app, source_window, kept, true)

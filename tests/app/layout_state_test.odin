@@ -1,5 +1,6 @@
 package app_test
 
+import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
 import "core:math"
@@ -173,10 +174,13 @@ Restore_Fixture :: struct {
 }
 
 @(private="file")
-restore_start :: proc(t: ^testing.T, f: ^Restore_Fixture, directory, layout_path: string, run: int) -> bool {
+restore_start :: proc(
+	t: ^testing.T, f: ^Restore_Fixture, directory, layout_path: string, run: int, pending := false,
+) -> bool {
 	f.state.options = {data_dir = directory, inactive = true}
 	f.state.app_id = fmt.aprintf("AIODev.Test.LayoutRestore.%d.%d", os.get_pid(), run)
-	f.state.layout_path = strings.clone(layout_path)
+	app.layout_state_enable(&f.state, strings.clone(layout_path))
+	if pending {app.layout_state_touch(&f.state)}
 	if !testing.expect_value(t, platform.init(&f.state.platform, f.state.app_id), platform.Init_Result.Primary) {
 		return false
 	}
@@ -291,10 +295,76 @@ layout_state_sets_aside_unreadable_files :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, os.write_entire_file(layout_path, "{not json"), nil) { return }
 	f: Restore_Fixture
 	defer app.app_destroy(&f.state)
-	if !restore_start(t, &f, directory, layout_path, 3) { return }
+	if !restore_start(t, &f, directory, layout_path, 3, pending = true) { return }
+	_, scheduled := app.layout_state_deadline(&f.state)
+	testing.expect(t, !scheduled, "setting aside a damaged file clears a pending save")
 	testing.expect_value(t, len(f.state.workspaces), 1)
 	testing.expect_value(t, len(f.state.workspaces[0].tabs), 1)
 	kept := strings.concatenate({layout_path, ".bad"}, context.temp_allocator)
 	testing.expect(t, os.exists(kept))
 	testing.expect(t, !os.exists(layout_path))
+}
+
+@(test)
+layout_save_coalesces_changes_and_disabling_drops_the_pending_save :: proc(t: ^testing.T) {
+	state: app.App
+	app.layout_state_touch(&state)
+	_, scheduled := app.layout_state_deadline(&state)
+	testing.expect(t, !scheduled, "nothing is scheduled without a file")
+	app.layout_state_enable(&state, strings.clone("layout.json"))
+	app.layout_state_touch(&state)
+	first, first_scheduled := app.layout_state_deadline(&state)
+	testing.expect(t, first_scheduled)
+	app.layout_state_touch(&state)
+	second, _ := app.layout_state_deadline(&state)
+	testing.expect_value(t, second, first)
+	app.layout_state_disable(&state)
+	_, scheduled = app.layout_state_deadline(&state)
+	testing.expect(t, !scheduled)
+	_, enabled := app.layout_state_path(&state)
+	testing.expect(t, !enabled)
+}
+
+@(test)
+layout_state_stops_saving_when_a_damaged_file_cannot_be_set_aside :: proc(t: ^testing.T) {
+	directory, directory_error := os.make_directory_temp("", "aio-layout-stuck-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) { return }
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
+	layout_path := strings.concatenate({directory, "/layout.json"}, context.temp_allocator)
+	settings := idle_shell_settings(t, "cursor.blink = false\n")
+	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) { return }
+	if !testing.expect_value(t, os.write_entire_file(layout_path, "{not json"), nil) { return }
+	// A folder where the damaged file would be kept makes setting it aside fail.
+	kept := strings.concatenate({layout_path, ".bad"}, context.temp_allocator)
+	if !testing.expect_value(t, os.make_directory(kept), nil) { return }
+	f: Restore_Fixture
+	defer app.app_destroy(&f.state)
+	// The failed rename logs an error, which the runner would count as a failure; everything else, including
+	// this test's own expectations, still reaches the runner.
+	runner := context.logger
+	context.logger = {
+		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, options: runtime.Logger_Options,
+			location := #caller_location) {
+			if location.procedure == "layout_state_quarantine" {return}
+			next := (^runtime.Logger)(data)
+			next.procedure(next.data, level, text, options, location)
+		},
+		data = &runner,
+		lowest_level = runner.lowest_level,
+		options = runner.options,
+	}
+	started := restore_start(t, &f, directory, layout_path, 5, pending = true)
+	context.logger = runner
+	if !started { return }
+	_, enabled := app.layout_state_path(&f.state)
+	testing.expect(t, !enabled)
+	app.layout_state_touch(&f.state)
+	_, scheduled := app.layout_state_deadline(&f.state)
+	testing.expect(t, !scheduled)
+	app.layout_state_save(&f.state)
+	data, read_error := os.read_entire_file(layout_path, context.temp_allocator)
+	testing.expect_value(t, read_error, nil)
+	testing.expect_value(t, string(data), "{not json")
 }

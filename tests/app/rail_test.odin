@@ -126,6 +126,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 		rail_auto     = false,
 		rail_override = .Shown,
 	}
+	app.focus_init(&w)
 	append(&state.windows, &w)
 	testing.expect(t, app.rail_overlay(&w))
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})

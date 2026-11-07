@@ -70,6 +70,11 @@ payloads. Toasts live in one list with entering, timed, sticky or fading state; 
 also releases its close-button press and hover. The `ui` and `app` test packages cover these
 lifetimes with and without animations.
 
+Pane focus changes are bracketed in `src/focus_bracket.odin`: each window records the pane it
+entered, so repeating an enter or leave does not repeat a terminal focus report. Layout saving
+uses Disabled, Idle and Scheduled states in `src/layout_state.odin`; disabling it drops any
+pending save and releases its path.
+
 ## License
 
 AIODev is released under the [MIT License](LICENSE). Release packages include third-party

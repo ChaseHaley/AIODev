@@ -403,8 +403,7 @@ pane_drag_restore :: proc(app: ^App, w: ^Window, d: Pane_Drag) {
 		if destination.workspace.selected != d.destination_original_index &&
 		   d.destination_original_index >= 0 &&
 		   d.destination_original_index < len(destination.workspace.tabs) {
-			destination.workspace.selected = d.destination_original_index
-			destination.tree = &selected_tab(destination.workspace).tree
+			tab_select(app, destination, d.destination_original_index, true)
 		}
 		destination.dirty = true
 	}

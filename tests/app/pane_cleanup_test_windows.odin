@@ -45,6 +45,7 @@ cleanup_fixture_init :: proc(t: ^testing.T, f: ^Cleanup_Fixture) -> bool {
 		if !testing.expect_value(t, err, platform.Error.None) { return false }
 		w := new(app.Window)
 		w.id, w.workspace, w.tree = id, workspace, &tab.tree
+		app.focus_init(w)
 		append(&state.windows, w)
 		view: term_view.View
 		if !testing.expect(t, term_view.create(&view)) { return false }
@@ -153,6 +154,7 @@ pane_cleanup_refreshes_another_windows_open_picker :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, err, platform.Error.None) { return }
 	observer := new(app.Window)
 	observer.id, observer.workspace, observer.tree = id, workspace, &tab.tree
+	app.focus_init(observer)
 	append(&state.windows, observer)
 	app.workspace_picker_open(state, observer)
 	testing.expect_value(t, len(observer.workspace_picker.rows), 3)

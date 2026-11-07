@@ -93,26 +93,73 @@ layout_float_decode :: proc(saved: Saved_Float) -> layout.Float {
 	}
 }
 
+// Saving the layout. nil is Disabled: there is no file, as in tests, or a damaged one could not be set
+// aside. Idle has nothing waiting; Scheduled writes a burst of changes at its deadline. Each enabled state
+// owns the path, and the procs below are the only writers.
+Layout_Save :: union {
+	Layout_Save_Idle,
+	Layout_Save_Scheduled,
+}
+
+Layout_Save_Idle :: struct {
+	path: string,
+}
+
+Layout_Save_Scheduled :: struct {
+	path:     string,
+	deadline: time.Tick,
+}
+
+// Saves the layout to `path`, which the app then owns.
+layout_state_enable :: proc(app: ^App, path: string) {
+	layout_state_disable(app)
+	app.layout_save = Layout_Save_Idle{path}
+}
+
+// Stops saving and drops a pending save with the path.
+layout_state_disable :: proc(app: ^App) {
+	if path, enabled := layout_state_path(app); enabled {delete(path)}
+	app.layout_save = nil
+}
+
+layout_state_path :: proc(app: ^App) -> (string, bool) {
+	switch save in app.layout_save {
+	case Layout_Save_Idle:
+		return save.path, true
+	case Layout_Save_Scheduled:
+		return save.path, true
+	}
+	return "", false
+}
+
+layout_state_deadline :: proc(app: ^App) -> (time.Tick, bool) {
+	scheduled, ok := app.layout_save.(Layout_Save_Scheduled)
+	return scheduled.deadline, ok
+}
+
 // Schedules a save check; repeated calls before it runs coalesce into one.
 layout_state_touch :: proc(app: ^App) {
-	if app.layout_path == "" || app.layout_deadline != {} {return}
-	app.layout_deadline = time.tick_add(time.tick_now(), LAYOUT_SAVE_DELAY)
+	idle, ok := app.layout_save.(Layout_Save_Idle)
+	if !ok {return}
+	app.layout_save = Layout_Save_Scheduled{idle.path, time.tick_add(time.tick_now(), LAYOUT_SAVE_DELAY)}
 }
 
 layout_state_tick :: proc(app: ^App) {
-	if app.layout_deadline == {} || time.tick_diff(time.tick_now(), app.layout_deadline) > 0 {return}
-	app.layout_deadline = {}
+	scheduled, ok := app.layout_save.(Layout_Save_Scheduled)
+	if !ok || time.tick_diff(time.tick_now(), scheduled.deadline) > 0 {return}
+	app.layout_save = Layout_Save_Idle{scheduled.path}
 	layout_state_save(app)
 }
 
 // Writes the current structure when it differs from the last write. `fresh` reads running
 // programs now even without icon polling, as on quit.
 layout_state_save :: proc(app: ^App, fresh := false) {
-	if app.layout_path == "" {return}
+	path, enabled := layout_state_path(app)
+	if !enabled {return}
 	text, ok := layout_state_encode(app, context.temp_allocator, fresh ? pane_processes(app) : nil)
 	if !ok {log.error("encoding the workspace layout failed"); return}
 	if text == app.layout_saved {return}
-	if !layout_state_write(app.layout_path, text) {return}
+	if !layout_state_write(path, text) {return}
 	owned, err := strings.clone(text)
 	if err != nil {return}
 	delete(app.layout_saved)
@@ -270,11 +317,12 @@ layout_state_write :: proc(path, text: string) -> bool {
 // default workspace; anything restored before a failure is kept.
 @(require_results)
 layout_state_restore :: proc(app: ^App) -> bool {
-	if app.layout_path == "" {return false}
-	data, read_error := os.read_entire_file(app.layout_path, context.temp_allocator)
+	path, enabled := layout_state_path(app)
+	if !enabled {return false}
+	data, read_error := os.read_entire_file(path, context.temp_allocator)
 	if read_error == .Not_Exist {return false}
 	if read_error != nil {
-		log.errorf("reading %s failed: %v", app.layout_path, read_error)
+		log.errorf("reading %s failed: %v", path, read_error)
 		notify(app, .Error, "Could not read the saved workspaces. Starting with a new workspace.")
 		return false
 	}
@@ -282,7 +330,7 @@ layout_state_restore :: proc(app: ^App) -> bool {
 	decode_error := json.unmarshal(data, &state, allocator = context.temp_allocator)
 	if decode_error != nil || state.version != LAYOUT_STATE_VERSION {
 		log.warnf("the saved layout is unreadable: %v (version %d)", decode_error, state.version)
-		layout_state_quarantine(app)
+		layout_state_quarantine(app, path)
 		return false
 	}
 	opened, first: ^Workspace
@@ -298,11 +346,14 @@ layout_state_restore :: proc(app: ^App) -> bool {
 
 // Keeps a damaged file for inspection instead of overwriting it with the new default layout.
 @(private)
-layout_state_quarantine :: proc(app: ^App) {
-	kept := strings.concatenate({app.layout_path, ".bad"}, context.temp_allocator)
-	if err := os.rename(app.layout_path, kept); err != nil {
+layout_state_quarantine :: proc(app: ^App, path: string) {
+	if scheduled, pending := app.layout_save.(Layout_Save_Scheduled); pending {
+		app.layout_save = Layout_Save_Idle{scheduled.path}
+	}
+	kept := strings.concatenate({path, ".bad"}, context.temp_allocator)
+	if err := os.rename(path, kept); err != nil {
 		log.errorf("setting aside the unreadable layout failed: %v", err)
-		app.layout_path = ""
+		layout_state_disable(app)
 		notify(app, .Error, "Could not read the saved workspaces, so layout saving is off this session.")
 		return
 	}

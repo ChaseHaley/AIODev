@@ -55,6 +55,7 @@ move_fixture_init :: proc(t: ^testing.T, f: ^Move_Fixture) -> bool {
 	if !testing.expect_value(t, err, nil) {return false}
 	f.source.tree.focus = f.node
 	for w in state.windows {
+		app.focus_init(w)
 		w.cursor_phase_visible = false
 		w.wheel_remainder = 0.5
 		w.selecting = true
@@ -111,6 +112,7 @@ pane_move_completion_selects_titles_and_relayouts_all_destinations :: proc(t: ^t
 			delete(f.destination.workspace.name)
 			f.destination.workspace.name = ""
 			destination.tree.nodes[destination.tree.root] = source.tree.nodes[f.node]
+			app.focus_init(f.destination)
 			if !testing.expect(t, app.pane_to_window(state, f.source, source, f.node, f.destination.id)) {
 				return
 			}
@@ -308,4 +310,29 @@ pane_drag_dropdown_cancel_gap_scroll_and_last_pane_guard :: proc(t: ^testing.T) 
 	testing.expect_value(t, other.pane_drag.picker_hit, -1)
 	app.pane_drag_cancel(state, other)
 	testing.expect_value(t, len(state.windows), 3)
+}
+
+// When the tab a drag hovered is gone, cancelling still enters the pane of the tab it gives back.
+@(test)
+pane_drag_cancel_enters_the_destination_tab_it_restores_by_index :: proc(t: ^testing.T) {
+	f: Move_Fixture
+	defer move_fixture_destroy(t, &f)
+	if !move_fixture_init(t, &f) {return}
+	state, w, destination := &f.state, f.source, f.destination
+	other := new(app.Tab)
+	if !testing.expect_value(t, layout.init(&other.tree, {.Terminal, 5}), nil) {
+		free(other)
+		return
+	}
+	other.id = 2
+	append(&destination.workspace.tabs, other)
+	app.tab_select(state, destination, 1, true)
+	if !testing.expect(t, focus_holds_shown(destination)) {return}
+	app.pane_drag_press(state, w, f.node, 400, 200)
+	w.pane_drag.active = true
+	w.pane_drag.destination_window = destination.id
+	w.pane_drag.destination_original_index = 0
+	app.pane_drag_cancel(state, w)
+	testing.expect_value(t, destination.workspace.selected, 0)
+	testing.expect(t, focus_holds_shown(destination))
 }
