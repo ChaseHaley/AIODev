@@ -3,6 +3,7 @@ package main
 import "aio:colour"
 import "aio:commands"
 import "aio:layout"
+import "aio:platform"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
@@ -66,8 +67,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			return .Ok
 		}
 	}
-	// A disarmed caption control must not be drawn as button 0.
-	caption_pressed := -1
+	caption_pressed: Maybe(platform.Caption_Button)
 	if ui.armed_down(w.caption_armed) {caption_pressed = ui.armed_target(w.caption_armed)}
 	if result := ui.caption_draw(
 		&w.list,

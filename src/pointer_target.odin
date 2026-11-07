@@ -393,25 +393,28 @@ rename_cancel :: proc(_: ^App, w: ^Window) {
 
 @(private = "file")
 caption_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return ui.caption_hit(f32(w.width), x, y, w.scale) >= 0
+	return ui.caption_hit(f32(w.width), x, y, w.scale) != nil
 }
 
 @(private = "file")
 caption_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := move_point(e)
-	caption := owner == .Caption ? ui.caption_hit(f32(w.width), x, y, w.scale) : -1
+	caption: Maybe(platform.Caption_Button)
+	if owner == .Caption {caption = ui.caption_hit(f32(w.width), x, y, w.scale)}
 	if caption != w.caption_hover {w.caption_hover, w.dirty = caption, true}
 	if owner == .Caption {pointer_set(app, w, chrome_pointer(app, w, x, y))}
 }
 
 @(private = "file")
 caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	switch ui.caption_hit(f32(w.width), x, y, w.scale) {
-	case 0: return "Minimize"
-	case 1: return w.maximized ? "Restore" : "Maximize"
-	case 2: return window_linked(w) ? "Return pane to tab" : "Close window"
-	case: return ""
+	button, hit := ui.caption_hit(f32(w.width), x, y, w.scale).?
+	if !hit {return ""}
+	switch button {
+	case .Minimize: return "Minimize"
+	case .Maximize: return w.maximized ? "Restore" : "Maximize"
+	case .Close: return window_linked(w) ? "Return pane to tab" : "Close window"
 	}
+	return ""
 }
 
 @(private = "file")
@@ -427,13 +430,13 @@ caption_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 	}
 	fired, ok := ui.armed_release(&w.caption_armed, ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale))
 	w.dirty = true
-	if ok {platform.window_caption_action(&app.platform, w.id, fired)}
+	if button, has := fired.?; ok && has {platform.window_caption_action(&app.platform, w.id, button)}
 	return true
 }
 
 @(private = "file")
 caption_cancel :: proc(_: ^App, w: ^Window) {
-	w.caption_hover = -1
+	w.caption_hover = nil
 	ui.armed_cancel(&w.caption_armed)
 }
 

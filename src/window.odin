@@ -125,8 +125,8 @@ Window :: struct {
 	workspace_picker: Workspace_Picker,
 	workspace_hovered: bool,
 	workspace_motion: ui.Control_Motion,
-	caption_hover: int,
-	caption_armed: ui.Armed(int),
+	caption_hover: Maybe(platform.Caption_Button),
+	caption_armed: ui.Armed(Maybe(platform.Caption_Button)),
 	maximized: bool,
 	pane_fill: layout.Pane_Fill,
 	paste_confirm: Paste_Confirm,
@@ -190,7 +190,6 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	profile_menu_init(&w.profile_menu)
 	document_menu_init(&w.document_menu)
 	w.tab_hover, w.rail_hover = -1, -1
-	w.caption_hover = -1
 	w.float_header_shown = layout.INVALID_NODE
 	w.pointer_shape = .Text
 	w.dirty = true

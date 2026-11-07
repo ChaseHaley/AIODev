@@ -24,6 +24,24 @@ Window_Desc :: struct {
 	hidden, inactive: bool,
 	tabbed_title_bar: bool,
 }
+// The window's own caption buttons, in their order from the left at the right edge of the title bar.
+Caption_Button :: enum u8 {
+	Minimize,
+	Maximize,
+	Close,
+}
+// Title bar geometry in 96-DPI pixels. The native hit test and the drawn caption both read it, so the
+// buttons Windows reports and the buttons the app draws stay the same.
+TITLE_BAR_HEIGHT :: 40
+CAPTION_BUTTON_WIDTH :: 46
+CAPTION_WIDTH :: CAPTION_BUTTON_WIDTH * len(Caption_Button)
+// A window's restored rectangle in workspace coordinates, and whether it is maximized over it.
+Window_Placement :: struct {
+	left, top, right, bottom: i32,
+	maximized:                bool,
+}
+// Names the target a notification click reports back; 0 means no target.
+Notification_Token :: distinct u32
 // Taskbar button progress. Paused and Error tint the bar; Indeterminate has no value.
 Progress_State :: enum {
 	None,
@@ -75,7 +93,7 @@ Tray_Menu_Event :: struct {
 }
 // A click on a native notification raised by tray_notify, carrying back the token it was given.
 Tray_Notification_Event :: struct {
-	token: u64,
+	token: Notification_Token,
 }
 Notification_Error_Event :: struct {
 	code: u32,

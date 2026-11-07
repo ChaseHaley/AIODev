@@ -674,7 +674,7 @@ when AIO_CONTROL {
 					"title.controls_end",
 					fmt.tprintf("%d", i32(window_title_controls_end(app, w))),
 				},
-				{"title.caption_start", fmt.tprintf("%g", f32(w.width) - 138 * w.scale)},
+				{"title.caption_start", fmt.tprintf("%g", f32(w.width) - ui.CAPTION_WIDTH * w.scale)},
 				{"workspace.id", fmt.tprintf("%d", w.workspace.id)},
 				{"workspace.name", w.workspace.name},
 				{"workspace.button", verify_workspace_rect(workspace_button_rect(w))},

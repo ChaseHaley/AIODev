@@ -222,6 +222,12 @@ switch ($Task) {
         Copy-Conpty $stage
         Copy-Item -LiteralPath 'themes' -Destination $stage -Recurse -Force
         [IO.File]::WriteAllText((Join-Path $PWD "$stage/build.txt"), "$buildId`r`n")
+        # install.ps1 installs exactly what this list names, so the stage above is the one file list.
+        $stageRoot = (Resolve-Path -LiteralPath $stage).Path
+        $manifest = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File |
+            ForEach-Object { $_.FullName.Substring($stageRoot.Length + 1) } |
+            Where-Object { $_ -ne 'install.ps1' } | Sort-Object)
+        [IO.File]::WriteAllText((Join-Path $stageRoot 'files.txt'), (($manifest | ForEach-Object { "$_`r`n" }) -join ''))
         # A clean checkout of a release tag names the archive after the tag; anything else uses the revision.
         $label = $buildId
         if ($buildId -notmatch '\+dirty$|^unknown$') {

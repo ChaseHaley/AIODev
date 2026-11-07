@@ -389,7 +389,7 @@ pane_link_restore :: proc(
 	workspace: ^Workspace,
 	tab: ^Tab,
 	node: layout.Node_Id,
-	saved_window: []platform.Window_Placement,
+	saved_window: []Saved_Window,
 ) {
 	w := pane_link_window_create(app, &tab.tree, node, workspace)
 	if w == nil {
@@ -397,7 +397,8 @@ pane_link_restore :: proc(
 		return
 	}
 	if len(saved_window) == 0 {return}
-	placement := saved_window[0]
+	saved := saved_window[0]
+	placement := platform.Window_Placement{saved.left, saved.top, saved.right, saved.bottom, saved.maximized}
 	if placement.right <= placement.left || placement.bottom <= placement.top {return}
 	if platform.window_set_placement(&app.platform, w.id, placement) != .None {
 		log.error("restoring a linked window's placement failed")

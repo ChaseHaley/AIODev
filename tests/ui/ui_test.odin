@@ -6,6 +6,7 @@ import "core:time"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
+import "aio:platform"
 import "aio:render"
 import "aio:ui"
 
@@ -250,14 +251,11 @@ rail_close_targets_and_caption_buttons_are_distinct :: proc(t: ^testing.T) {
 			testing.expect_value(t, ui.rail_close_hit(layout, r.x - 2 * scale, r.y + r.height / 2, scale), -1)
 		}
 		testing.expect_value(t, ui.rail_close_hit(layout, area.x + area.width - 6 * scale, layout.footer.y + 4, scale), -1)
-		for i in 0 ..< 3 {
-			testing.expect_value(
-				t,
-				ui.caption_hit(1200 * scale, (1085 + f32(i) * 46) * scale, 20 * scale, scale),
-				i,
-			)
+		for button in platform.Caption_Button {
+			x := (1085 + f32(int(button)) * platform.CAPTION_BUTTON_WIDTH) * scale
+			testing.expect_value(t, ui.caption_hit(1200 * scale, x, 20 * scale, scale), button)
 		}
-		testing.expect_value(t, ui.caption_hit(1200 * scale, 300 * scale, 20 * scale, scale), -1)
+		testing.expect_value(t, ui.caption_hit(1200 * scale, 300 * scale, 20 * scale, scale), nil)
 	}
 }
 
