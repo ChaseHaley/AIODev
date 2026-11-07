@@ -49,8 +49,8 @@ Float_Edge :: enum u8 {
 Float_Edges :: bit_set[Float_Edge]
 
 // What the float surface's held Left press is doing; nil when it holds none. Only this file writes it:
-// floating_press begins it, the follow procs advance it, and floating_pointer_move, floating_release and
-// floating_pointer_cancel end it.
+// floating_press begins it, the follow procs advance it, and floating_pointer_move, floating_release,
+// floating_pointer_cancel and floating_drag_follow (when the float stops floating) end it.
 Float_Press :: union {
 	Float_Button_Press,
 	Float_Header_Press,
