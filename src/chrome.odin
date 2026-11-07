@@ -9,22 +9,39 @@ import "aio:ui"
 import "core:math"
 
 window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
-	if w.pane_fill == .Screen {return {0, 0, f32(w.width), f32(w.height)}}
+	return window_content_area_in(app, w, w.pane_fill)
+}
+
+// The content area w has when its pane fill is `fill`, which need not be the fill it has now.
+window_content_area_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> layout.Rect {
+	if fill == .Screen {return {0, 0, f32(w.width), f32(w.height)}}
 	r := ui.pane_area(
 		f32(w.width),
 		f32(w.height),
-		window_title_height(w),
+		window_title_height_in(w, fill),
 		f32(app.settings.pane.gap),
 		w.scale,
 	)
-	if !w.tabs_horizontal && rail_docked(w) && w.phase != .Preparing {
+	if !w.tabs_horizontal && rail_docked_in(w, fill) && w.phase != .Preparing {
 		rail_width := min(rail_width_pixels(w), r.width)
 		r.x += rail_width
 		r.width -= rail_width
 	}
-	r.width = max(0, r.width - status_panel_dock_width(app, w))
-	if app.settings.status.panel_side == .Left {r.x += status_panel_dock_width(app, w)}
+	dock_width := status_panel_dock_width_in(app, w, fill)
+	r.width = max(0, r.width - dock_width)
+	if app.settings.status.panel_side == .Left {r.x += dock_width}
 	return {r.x, r.y, r.width, r.height}
+}
+
+// The geometry w places its panes with when its pane fill is `fill`. Floating groups keep the window's
+// own floating area whatever the fill.
+window_geometry :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> layout.Geometry {
+	return {
+		tiled = window_content_area_in(app, w, fill),
+		floating = floating_area(w),
+		gap = window_gap(app, w),
+		header = floating_header_height(w),
+	}
 }
 
 window_generation :: proc(app: ^App, w: ^Window) -> u64 {

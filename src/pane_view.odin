@@ -21,9 +21,13 @@ pane_fill_active :: proc(w: ^Window) -> bool {
 	return w.pane_fill != .None
 }
 
-// window_title_height is the title bar space the window reserves; Screen fills the monitor without it.
 window_title_height :: proc(w: ^Window) -> f32 {
-	if w.pane_fill == .Screen {return 0}
+	return window_title_height_in(w, w.pane_fill)
+}
+
+// The title bar space the window reserves under `fill`; Screen fills the monitor without it.
+window_title_height_in :: proc(w: ^Window, fill: layout.Pane_Fill) -> f32 {
+	if fill == .Screen {return 0}
 	return ui.TITLE_BAR_HEIGHT * w.scale
 }
 
@@ -36,14 +40,6 @@ pane_view_toggle :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) {
 // to end a view. A tab changed while hidden ends the view when it is next shown.
 pane_view_sync :: proc(app: ^App, w: ^Window) {
 	if w.tree != nil && w.tree.panes_changed {_ = pane_view_apply(app, w, .Panes_Changed)}
-}
-
-// The area panes return to once a change to them has ended any fill, which size checks must judge by.
-pane_view_split_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
-	fill := w.pane_fill
-	w.pane_fill = .None
-	defer w.pane_fill = fill
-	return window_content_area(app, w)
 }
 
 // The operating system goes first, so a refusal leaves every part of the view as it was.

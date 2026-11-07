@@ -162,13 +162,7 @@ link_view_store :: proc(home: ^Layout, slot: Node_Id, view: ^Layout) -> (Node_Id
 	root := node_copy(home, view, view.root, true)
 	node_vacate(home, slot)
 	node_set_linked(home, root, true)
-	if parent == INVALID_NODE {
-		home.root = root
-	} else {
-		s := home.nodes[parent].(Split)
-		if s.first == slot {s.first = root} else {s.second = root}
-		home.nodes[parent] = s
-	}
+	node_replace(home, parent, slot, root)
 	return root, true
 }
 
@@ -185,9 +179,7 @@ link_return_pane :: proc(l: ^Layout, node: Node_Id) -> (Node_Id, bool) {
 	sibling, axis, before, _, _ := placement(l, node)
 	if !remove(l, node) {return node, false}
 	remaining := link_root(l, sibling)
-	direction: Direction
-	if axis == .Horizontal {direction = before ? .Left : .Right} else {direction = before ? .Up : .Down}
-	return place_pane(l, remaining, pane, direction), true
+	return place_pane(l, remaining, pane, direction_of(axis, before)), true
 }
 
 // Adds a pane to a slot, so it shows in the slot's window with the panes already there. `target` is a
@@ -209,34 +201,12 @@ slot_insert_pane :: proc(
 	// The slot marks the panes it holds, not each pane; a pane inside it stays plain.
 	inserted := pane
 	pane_settle(&inserted)
-	if !root && target_node != slot {
-		if link_root(l, target_node) != slot {return INVALID_NODE, false}
-		if reserve(&l.nodes, len(l.nodes) + 2) != nil {return INVALID_NODE, false}
-		return place_pane(l, target_node, inserted, direction), true
-	}
+	joins_slot := root || target_node == slot
+	if !joins_slot && link_root(l, target_node) != slot {return INVALID_NODE, false}
 	if reserve(&l.nodes, len(l.nodes) + 2) != nil {return INVALID_NODE, false}
-	// Before the new split exists: it also holds the slot, and a vacant node can put it first in the scan.
-	parent := parent_of(l, slot)
-	added := allocate_node(l, inserted)
-	before := direction == .Left || direction == .Up
-	axis: Axis = direction == .Left || direction == .Right ? .Horizontal : .Vertical
-	first, second := slot, added
-	if before {first, second = added, slot}
-	branch := allocate_node(
-		l,
-		Split{axis = axis, ratio = 0.5, first = first, second = second, linked = true},
-	)
-	// The mark moves to the new split so the old slot's panes and the added pane all stay in the window.
-	node_set_linked(l, slot, false)
-	if parent == INVALID_NODE {
-		l.root = branch
-	} else {
-		s := l.nodes[parent].(Split)
-		if s.first == slot {s.first = branch} else {s.second = branch}
-		l.nodes[parent] = s
-	}
-	panes_changed(l)
-	return added, true
+	// Taking the slot's edge moves its mark to the new split, so the old slot's panes and the added pane
+	// all stay in the window.
+	return place_pane(l, joins_slot ? slot : target_node, inserted, direction, joins_slot), true
 }
 
 // Moves a pane from the same tree into a slot, which may be the one it is already in or another. A pane
@@ -291,11 +261,7 @@ transfer_pane_to_slot :: proc(
 	   shown_count(source, source.root) <= 1 &&
 	   pane_count(source) > 1 {return INVALID_NODE, false}
 	// Content is a reference owned elsewhere, so it may appear once in a tree.
-	for n in destination.nodes {
-		if p, is_pane_node := n.(Pane); is_pane_node && p.content == pane.content {
-			return INVALID_NODE, false
-		}
-	}
+	if find_content(destination, pane.content) != INVALID_NODE {return INVALID_NODE, false}
 	if reserve(&destination.nodes, len(destination.nodes) + 2) != nil {return INVALID_NODE, false}
 	if !remove(source, node) {return INVALID_NODE, false}
 	destination.next_pane_order += 1

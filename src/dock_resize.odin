@@ -12,9 +12,9 @@ ACTIVITY_HEIGHT_DIVIDER :: layout.Node_Id(max(u32) - 3)
 
 window_dividers :: proc(app: ^App, w: ^Window) {
 	if w.tree == nil {return}
-	area, gap := window_content_area(app, w), window_gap(app, w)
-	if pane_view_solo(w) {clear(&w.dividers)} else {layout.dividers(w.tree, area, gap, &w.dividers)}
-	layout.floats_dividers(w.tree, floating_area(w), gap, floating_header_height(w), &w.dividers)
+	g := window_geometry(app, w, w.pane_fill)
+	gap := g.gap
+	layout.dividers_shown(w.tree, g, pane_view_solo(w), &w.dividers)
 	if rail_visible(w) {
 		r := rail_resize_rect(w)
 		d := layout.Divider{node = RAIL_DIVIDER, axis = .Horizontal,

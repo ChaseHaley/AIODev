@@ -271,8 +271,6 @@ pane_to_window :: proc(
 	   destination.tree.nodes[destination.tree.root].(layout.Pane).content !=
 		   pane.content {return false}
 	layout_pane := home.tab.tree.nodes[home.node].(layout.Pane)
-	// A pane that leaves its slot joins an ordinary window, where it must be shown.
-	layout_pane.linked = false
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
@@ -289,8 +287,8 @@ pane_to_window :: proc(
 	// The node was checked to be a pane above, which is all a removal needs.
 	removed := layout.remove(&home.tab.tree, home.node)
 	assert(removed)
-	destination.tree.nodes[destination.tree.root] = layout_pane
-	destination.tree.next_pane_order = layout_pane.order
+	// A pane that leaves its slot joins an ordinary window, where it must be shown.
+	layout.pane_adopt(&destination.tree, layout_pane)
 	preview.workspace.provisional = false
 	preview.workspace.name = name
 	workspace_pickers_refresh(app)
