@@ -11,6 +11,7 @@ import "aio:control"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
+import "aio:ui"
 
 _ :: log
 
@@ -129,7 +130,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect_value(t, os.write_entire_file(path, settings), nil)
 	if !testing.expect(t, app.window_open(&state, state.workspaces[0])) {return}
 	first = state.windows[1]
-	testing.expect(t, first.editor.open && app.settings_active(first))
+	testing.expect(t, ui.editor_loaded(&first.editor) && app.settings_active(first))
 	app.tab_close(&state, first, 1)
 
 	context.allocator = runtime.nil_allocator()

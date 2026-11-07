@@ -14,7 +14,6 @@ import fixtures "../fixtures"
 @(private)
 process_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 	testing.expect_value(t, ui.editor_process_load(p, "Editors:0:nvim,vim;Tools:8:less,nvim", 12), nil)
-	p.open = true
 	ui.editor_filter(p)
 }
 

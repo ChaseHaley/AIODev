@@ -9,14 +9,14 @@ editor_process_save :: proc(app: ^App, w: ^Window) {
 	p := &w.editor
 	value, problem := ui.editor_process_value(p)
 	if problem != "" {ui.editor_message(p, problem, true); return}
-	updated, message, err := settings.edit_text(p.source, settings.PADDING_GROUPS_KEY, value)
+	updated, message, err := settings.edit_text(ui.editor_source(p), settings.PADDING_GROUPS_KEY, value)
 	defer delete(updated)
 	defer delete(message)
 	if err != nil || message != "" {
 		ui.editor_message(p, err != nil ? "Could not prepare program settings." : message, true)
 		return
 	}
-	if result := settings_commit(app, p.source, updated, p); result != .None {
+	if result := settings_commit(app, ui.editor_source(p), updated, p); result != .None {
 		failure := "Could not save program settings."
 		if result == .Conflict {failure = "File changed outside this editor. Reopen Settings to reload it."}
 		ui.editor_message(p, failure, true)
@@ -35,7 +35,7 @@ editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
 	if name == "" {return}
 	owned, err := strings.clone(name)
 	if err != nil {ui.editor_message(&w.editor, "Could not prepare group deletion.", true); return}
-	source, source_error := strings.clone(w.editor.source)
+	source, source_error := strings.clone(ui.editor_source(&w.editor))
 	if source_error != nil {
 		delete(owned)
 		ui.editor_message(&w.editor, "Could not prepare group deletion.", true)
@@ -55,7 +55,7 @@ editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
 editor_process_remove_finish :: proc(app: ^App, w: ^Window, accepted: bool) {
 	ui.confirm_close(&w.process_remove_confirm)
 	if accepted {
-		if w.editor.source != w.process_remove_source {
+		if ui.editor_source(&w.editor) != w.process_remove_source {
 			ui.editor_message(&w.editor, "Settings changed. Review the group before deleting it.", true)
 			w.dirty = true
 			return

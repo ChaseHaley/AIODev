@@ -51,7 +51,7 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	palette_binding_press_key(s, {key = .Enter})
 	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
 	testing.expect(t, app.palette_active(s, w))
-	testing.expect(t, !w.editor.open, "editing never opens Settings")
+	testing.expect(t, !ui.editor_loaded(&w.editor), "editing never opens Settings")
 	bound := commands.find_by_shortcut(&s.registry, {.F9, {.Control, .Alt}})
 	if testing.expect(t, bound != nil) {testing.expect_value(t, bound.name, "pane.split_right")}
 	saved, saved_error := os.read_entire_file(f.path, context.temp_allocator)

@@ -49,14 +49,6 @@ choice_font_toggle_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	return {r.x + 4 * s, r.y + (4 + CHOICE_SEARCH_HEIGHT) * s, r.width - 8 * s, CHOICE_HEIGHT * s}
 }
 
-@(private)
-choice_toggle_fonts :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
-	row.show_all_fonts = !row.show_all_fonts
-	row.choices, row.other_font_choices = row.other_font_choices, row.choices
-	choice_filter(p, row)
-	return .Font_Filter
-}
-
 // Restore an open font search after its preference is published through Settings.
 editor_font_search_restore :: proc(p: ^Editor, query: string, toggle_focus: bool) {
 	row := editor_row(p)

@@ -287,7 +287,9 @@ load_migrates_once :: proc(t: ^testing.T) {
 	defer delete(path)
 	legacy := "shell.command = cmd.exe\r\nshell.directory = C:\\\r\nfont.size = 12\r\n"
 	testing.expect_value(t, os.write_entire_file(path, legacy), nil)
-	s, diagnostics, created, migrated, migration_error, err := settings.load(path)
+	source: string
+	s, diagnostics, created, migrated, migration_error, err := settings.load(path, source_out = &source)
+	defer delete(source)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, err, nil)
@@ -301,6 +303,7 @@ load_migrates_once :: proc(t: ^testing.T) {
 	testing.expect_value(t, read_error, nil)
 	testing.expect(t, strings.contains(string(text), `profile.default.command = "cmd.exe"`))
 	testing.expect(t, !strings.contains(string(text), "shell.command"))
+	testing.expect(t, source == string(text), "publication receives the migrated text, not the legacy file")
 
 	second, second_diagnostics, second_created, second_migrated, second_migration_error, second_error :=
 		settings.load(path)

@@ -31,7 +31,6 @@ editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 			"Input"},
 	}
 	for r in rows { testing.expect_value(t, ui.editor_add(p, r.row, r.group), nil) }
-	p.open = true
 	ui.editor_filter(p)
 }
 
@@ -490,7 +489,6 @@ editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
 	row.value = "banner, sound"
 	testing.expect(t, row.multiple)
 	testing.expect_value(t, ui.editor_add(&p, row, "Program Status"), nil)
-	p.open = true
 	ui.editor_filter(&p)
 	l := page(&p)
 	testing.expect(t, ui.editor_select_key(&p, "status.notify_blocked"))
@@ -512,4 +510,47 @@ editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
 	ui.editor_key(&p, key({key = .Escape}))
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.None)
+}
+
+@(test)
+settings_page_revision_tracks_edits_navigation_and_external_conflicts :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	source, err := strings.clone("font.family = Mono\n")
+	if !testing.expect_value(t, err, nil) {return}
+	ui.editor_revision_open(&p, source)
+	_, current := p.revision.(ui.Editor_Current)
+	testing.expect(t, current)
+	testing.expect(t, !ui.editor_draft(&p))
+	testing.expect(t, ui.editor_select_key(&p, "font.family"))
+	ui.editor_key(&p, key({key = .Enter}))
+	ui.editor_key(&p, key({key = .A, modifiers = {.Control}}))
+	ui.editor_text(&p, "Other")
+	testing.expect(t, ui.editor_draft(&p))
+	_, current = p.revision.(ui.Editor_Current)
+	testing.expect(t, current, "a draft does not change the page's revision")
+	testing.expect_value(t, ui.field_string(&p.value), "Other")
+	testing.expect_value(t, ui.editor_source(&p), source)
+	ui.editor_key(&p, key({key = .A, modifiers = {.Control}}))
+	ui.editor_text(&p, "Mono")
+	testing.expect(t, !ui.editor_draft(&p), "restoring the saved value ends the draft")
+	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
+	ui.editor_key(&p, key({key = .Enter}))
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Shortcuts)
+	testing.expect(t, !ui.editor_draft(&p), "opening the shortcut menu is not a draft")
+	ui.editor_key(&p, key({key = .Enter}))
+	testing.expect(t, ui.editor_draft(&p), "capture is a draft before a key is recorded")
+	ui.editor_key(&p, key({key = .Escape}))
+	testing.expect(t, !ui.editor_draft(&p), "cancelling capture returns to the saved value")
+	ui.editor_revision_stale(&p, .Changed_Outside)
+	testing.expect(t, ui.editor_select_key(&p, "font.family"))
+	ui.editor_key(&p, key({key = .Enter}))
+	ui.editor_key(&p, key({key = .A, modifiers = {.Control}}))
+	ui.editor_text(&p, "Pending")
+	stale, is_stale := p.revision.(ui.Editor_Stale)
+	testing.expect(t, is_stale, "editing a stale page cannot make its old source current")
+	testing.expect_value(t, stale.reason, ui.Editor_Stale_Reason.Changed_Outside)
+	testing.expect_value(t, ui.field_string(&p.value), "Pending")
+	testing.expect_value(t, ui.editor_source(&p), source)
 }

@@ -496,7 +496,9 @@ when AIO_CONTROL {
 				{"theme.hover_lift", fmt.tprintf("%g", app.theme.hover_lift)},
 				{"theme.hover_gloss", fmt.tprintf("%g", app.theme.hover_gloss)},
 				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
-				{"settings.open", fmt.tprintf("%t", w.editor.open)},
+				{"settings.open", fmt.tprintf("%t", ui.editor_loaded(&w.editor))},
+				{"settings.revision", verify_settings_revision(&w.editor)},
+				{"settings.theme_delete_armed", fmt.tprintf("%t", w.theme_delete != nil)},
 				{"overlay", strings.to_lower(fmt.tprintf("%v", overlay_kind(app, w)), context.temp_allocator)},
 				{"rename.open", fmt.tprintf("%t", rename_shown(w))},
 				{"rename.error", fmt.tprintf("%t", verify_chip_name_error(w))},
@@ -1196,6 +1198,24 @@ when AIO_CONTROL {
 			if workspace == w.workspace {return i + 1}
 		}
 		return 0
+	}
+
+	// Current pages report draft when they hold pending work, derived rather than stored.
+	verify_settings_revision :: proc(p: ^ui.Editor) -> string {
+		switch r in p.revision {
+		case ui.Editor_Current:
+			return ui.editor_draft(p) ? "draft" : "fresh"
+		case ui.Editor_Stale:
+			switch r.reason {
+			case .Changed_Outside:
+				return "stale.changed_outside"
+			case .Draft_Conflict:
+				return "stale.draft_conflict"
+			case .Refresh_Failed:
+				return "stale.refresh_failed"
+			}
+		}
+		return "closed"
 	}
 
 	verify_error :: proc(app: ^App, err: control.Error) {

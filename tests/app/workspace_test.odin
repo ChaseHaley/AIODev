@@ -147,17 +147,17 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect(t, app.selected_tab(original) == settings_tab)
 	if !testing.expect(t, app.workspace_select(&state, w, two)) { return }
 	testing.expect(t, !app.settings_active(w))
-	testing.expect(t, !w.editor.open)
+	testing.expect(t, !ui.editor_loaded(&w.editor))
 	if !testing.expect(t, app.workspace_select(&state, w, original)) { return }
 	testing.expect(t, app.settings_active(w))
-	testing.expect(t, w.editor.open && len(w.editor.rows) > 0)
+	testing.expect(t, ui.editor_loaded(&w.editor) && len(w.editor.rows) > 0)
 	testing.expect(t, app.selected_tab(original) == settings_tab)
 	panes := raw_data(w.panes)
 	if !testing.expect(t, app.workspace_select(&state, w, two)) { return }
 	testing.expect_value(t, raw_data(w.panes), panes)
 	testing.expect_value(t, os.remove(path), nil)
 	testing.expect(t, !app.workspace_select(&state, w, original))
-	testing.expect(t, w.workspace == two && !w.editor.open)
+	testing.expect(t, w.workspace == two && !ui.editor_loaded(&w.editor))
 	testing.expect_value(t, os.write_entire_file(path, settings), nil)
 	if !testing.expect(t, app.workspace_select(&state, w, original)) { return }
 	app.run_action(&state, w, .New_Window)

@@ -271,7 +271,6 @@ profile_editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 		testing.expect_value(t, ui.editor_add(p, entry.row, entry.group), nil)
 	}
 	ui.editor_group_table(p, "Profiles")
-	p.open = true
 	ui.editor_filter(p)
 }
 

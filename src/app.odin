@@ -680,7 +680,21 @@ notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	mark_all_dirty(app)
 }
 
-load_settings :: proc(app: ^App) {
+// The settings file as read, before any of it applies.
+@(private)
+Settings_Read :: struct {
+	loaded:            settings.Settings,
+	diagnostics:       [dynamic]settings.Diagnostic,
+	// Owned exact parsed text, transferred by settings.load; lives through publication.
+	source:            string,
+	read_error:        os.Error,
+	created, migrated: bool,
+	migration_error:   settings.Save_Error,
+}
+
+// Reads the settings file, or defaults when it cannot be read. Fails only when neither is available.
+@(private, require_results)
+settings_read :: proc(app: ^App) -> (read: Settings_Read, ok: bool) {
 	if app.settings_path == "" {
 		path, err := settings.default_path()
 		if err != nil {
@@ -689,14 +703,15 @@ load_settings :: proc(app: ^App) {
 		app.settings_path = path
 	}
 	comments, comment_count := binding_comments()
-	loaded, diagnostics, created, migrated, migration_error, err := settings.load(
-		app.settings_path,
-		extra_comments = comments[:comment_count],
-		themes_directory = settings.theme_directory(),
-	)
-	defer settings.diagnostics_destroy(&diagnostics)
-	if err != nil {
-		log.errorf("reading %s failed: %v", app.settings_path, err)
+	read.loaded, read.diagnostics, read.created, read.migrated, read.migration_error, read.read_error =
+		settings.load(
+			app.settings_path,
+			extra_comments = comments[:comment_count],
+			themes_directory = settings.theme_directory(),
+			source_out = &read.source,
+		)
+	if read.read_error != nil {
+		log.errorf("reading %s failed: %v", app.settings_path, read.read_error)
 		defaults, default_error := settings.defaults()
 		if default_error != nil {
 			log.errorf("loading default settings failed: %v", default_error)
@@ -705,24 +720,30 @@ load_settings :: proc(app: ^App) {
 				.Error,
 				"Could not load settings or defaults. Check the log and restart AIODev.",
 			)
-			return
+			settings.diagnostics_destroy(&read.diagnostics)
+			return {}, false
 		}
-		loaded = defaults
+		read.loaded = defaults
 	}
-	settings_apply_revision(app, loaded, &diagnostics, err)
-	if created {
+	return read, true
+}
+
+// Reports what reading the file changed on disk, once the settings it read apply.
+@(private)
+settings_read_report :: proc(app: ^App, read: ^Settings_Read) {
+	if read.created {
 		log.infof("created %s", app.settings_path)
 	}
-	if (migrated || migration_error != .None) && !app.settings_migration_noticed {
+	if (read.migrated || read.migration_error != .None) && !app.settings_migration_noticed {
 		app.settings_migration_noticed = true
-		if migrated {
+		if read.migrated {
 			notify(
 				app,
 				.Info,
 				"settings.ini was updated to the current format; existing shells are unchanged.",
 			)
 		} else {
-			log.errorf("migrating settings failed: %v", migration_error)
+			log.errorf("migrating settings failed: %v", read.migration_error)
 			notify(
 				app,
 				.Error,
@@ -731,6 +752,33 @@ load_settings :: proc(app: ^App) {
 			)
 		}
 	}
+}
+
+// At startup nothing runs yet that a revision must reach, so the file only replaces the settings.
+load_settings :: proc(app: ^App) {
+	read, ok := settings_read(app)
+	if !ok {return}
+	defer settings.diagnostics_destroy(&read.diagnostics)
+	defer delete(read.source)
+	settings_apply_revision(app, read.loaded, &read.diagnostics, read.read_error)
+	settings_read_report(app, &read)
+}
+
+// The one order every settings revision after startup takes, saved here or read from the file again:
+// interactions holding old settings end, the revision replaces the running settings, windows and
+// sessions apply it, and then the open settings pages show it.
+@(private)
+settings_revision_apply :: proc(
+	app: ^App,
+	loaded: settings.Settings,
+	diagnostics: ^[dynamic]settings.Diagnostic,
+	read_error: os.Error,
+	publication: Settings_Publication,
+) {
+	settings_prepare_reload(app)
+	settings_apply_revision(app, loaded, diagnostics, read_error)
+	settings_apply_running(app)
+	settings_publish(app, publication)
 }
 
 @(private)
@@ -761,11 +809,16 @@ settings_prepare_reload :: proc(app: ^App) {
 }
 
 reload_settings :: proc(app: ^App, announce := true) {
-	settings_prepare_reload(app)
 	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
 	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
-	load_settings(app)
-	settings_apply_running(app)
+	read, ok := settings_read(app)
+	if !ok {return}
+	defer settings.diagnostics_destroy(&read.diagnostics)
+	defer delete(read.source)
+	publication: Settings_Publication = Publish_Unavailable{}
+	if read.read_error == nil {publication = Publish_Reloaded{read.source}}
+	settings_revision_apply(app, read.loaded, &read.diagnostics, read.read_error, publication)
+	settings_read_report(app, &read)
 	if announce {
 		if previous_shell != app.settings.shell.command ||
 		   previous_directory != app.settings.shell.directory {

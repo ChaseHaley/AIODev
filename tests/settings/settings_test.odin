@@ -188,7 +188,11 @@ file_lifecycle :: proc(t: ^testing.T) {
 	testing.expect_value(t, path_error, nil)
 	if path_error != nil { return }
 	defer delete(path)
-	s, d, created, migrated, migration_error, err := settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"})
+	source: string
+	s, d, created, migrated, migration_error, err := settings.load(
+		path, extra_comments = {"keys.edit.copy = Ctrl+C"}, source_out = &source,
+	)
+	defer delete(source)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
@@ -204,7 +208,11 @@ file_lifecycle :: proc(t: ^testing.T) {
 	defer delete(bytes)
 	testing.expect_value(t, read_error, nil)
 	testing.expect_value(t, string(bytes), text)
-	loaded, loaded_diagnostics, loaded_created, loaded_migrated, loaded_migration_error, loaded_error := settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"})
+	testing.expect_value(t, source, text)
+	loaded_source: string
+	loaded, loaded_diagnostics, loaded_created, loaded_migrated, loaded_migration_error, loaded_error :=
+		settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"}, source_out = &loaded_source)
+	defer delete(loaded_source)
 	defer settings.destroy(&loaded)
 	defer settings.diagnostics_destroy(&loaded_diagnostics)
 	testing.expect_value(t, loaded_error, nil)
@@ -213,11 +221,15 @@ file_lifecycle :: proc(t: ^testing.T) {
 	testing.expect_value(t, loaded_migration_error, settings.Save_Error.None)
 	testing.expect_value(t, len(loaded_diagnostics), 0)
 	expect_settings(t, loaded, s)
+	testing.expect_value(t, loaded_source, text)
 	modified_text :: `font.family = Custom
 font.size = invalid
 `
 	testing.expect_value(t, os.write_entire_file(path, modified_text), nil)
-	modified, modified_diagnostics, modified_created, modified_migrated, modified_migration_error, modified_error := settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"})
+	modified_source: string
+	modified, modified_diagnostics, modified_created, modified_migrated, modified_migration_error, modified_error :=
+		settings.load(path, extra_comments = {"keys.edit.copy = Ctrl+C"}, source_out = &modified_source)
+	defer delete(modified_source)
 	defer settings.destroy(&modified)
 	defer settings.diagnostics_destroy(&modified_diagnostics)
 	testing.expect_value(t, modified_error, nil)
@@ -227,10 +239,15 @@ font.size = invalid
 	testing.expect_value(t, len(modified_diagnostics), 1)
 	testing.expect_value(t, modified.font.family, "Custom")
 	testing.expect_value(t, modified.font.size, 12)
-	bad, bad_diagnostics, bad_created, bad_migrated, bad_migration_error, bad_error := settings.load(directory)
+	testing.expect_value(t, modified_source, modified_text)
+	testing.expect(t, loaded_source == text, "the earlier source remains owned after another load")
+	unread_source: string
+	bad, bad_diagnostics, bad_created, bad_migrated, bad_migration_error, bad_error :=
+		settings.load(directory, source_out = &unread_source)
 	defer settings.destroy(&bad)
 	defer settings.diagnostics_destroy(&bad_diagnostics)
 	testing.expect(t, bad_error != nil)
+	testing.expect_value(t, unread_source, "")
 	testing.expect_value(t, bad_created, false)
 	testing.expect_value(t, bad_migrated, false)
 	testing.expect_value(t, bad_migration_error, settings.Save_Error.None)
