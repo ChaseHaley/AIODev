@@ -54,7 +54,8 @@ terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Butto
 	if delta := ui.scrollbar_press(&grab, bar, y) - bar.extent.offset; delta != 0 {
 		term.scroll_viewport(entry.session, delta)
 	}
-	w.scroll_drag = Terminal_Scroll_Drag{entry.id, grab}
+	// A track press pages once; only a thumb press holds the bar.
+	if grab.active {w.scroll_drag = Terminal_Scroll_Drag{entry.id, grab}} else {w.scroll_drag = nil}
 	w.dirty = true
 	return true
 }

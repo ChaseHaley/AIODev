@@ -59,6 +59,11 @@ scrollbar_drag_clamps_and_track_click_pages :: proc(t: ^testing.T) {
 		platform.Mouse_Button_Event{button = .Left, pressed = true, x = i32(track.x + 3), y = i32(track.y + 2)}))
 	after, _ := term.scrollbar(&s)
 	testing.expect_value(t, before.offset - after.offset, before.len)
+	// A held track press is no thumb drag: moves must leave the paged viewport alone.
+	testing.expect(t, !app.terminal_scrollbar_dragging(&w))
+	app.terminal_scrollbar_move(&state, &w, track.y + track.height / 2)
+	paged, _ := term.scrollbar(&s)
+	testing.expect_value(t, paged.offset, after.offset)
 	bar, _ = app.terminal_scrollbar_geometry(&state, &w, pane, &state.sessions[0])
 	thumb = bar.thumb
 	testing.expect(t, app.terminal_scrollbar_button(&state, &w,
