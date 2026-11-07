@@ -102,12 +102,12 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 		ui.palette_key(&p, &registry, key({key = .End}))
 		testing.expect_value(t, p.selected, len(p.results)-1)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			theme := ui.theme_from(fixtures.shipped_theme(id))
+			theme := ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
 			theme.selection = {1, 0, 0, 1}
 			for progress in ([?]f32{0.01, 0.25, 0.5, 0.75, 1}) {
 				render.draw_list_reset(&list)
-				testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale, 1,
-					4*scale*(1-progress)), render.Build_Status.Ok)
+				testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale,
+					{opacity = 1, rise = 4*scale*(1-progress)}), render.Build_Status.Ok)
 				for layer in list.layers {
 					testing.expect(t, layer.clip.y >= 0 && layer.clip.y+layer.clip.height <= h)
 				}
@@ -345,7 +345,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		l = ui.palette_layout(&p, w, h, scale)
 		selected_y := l.list.y + f32(p.selected-p.scroll) * l.row_height
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			theme := ui.theme_from(fixtures.shipped_theme(id))
+			theme := ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
 			render.draw_list_reset(&list)
 			testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), render.Build_Status.Ok)
 			selected_rows := 0

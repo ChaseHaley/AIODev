@@ -314,10 +314,22 @@ open_choice :: proc(p: ^Palette, setting: int) -> Outcome {
 	b := &p.buffers
 	allocator := b.choices.allocator
 	current, _ := setting_value(p, s)
+	// The choices and their labels stay aligned: a failed copy opens nothing rather than a short list.
+	if reserve(&b.choices, len(choices)) != nil || reserve(&b.labels, len(choices)) != nil {return .None}
 	for choice, i in choices {
 		label := i < len(labels) ? labels[i] : ""
-		append(&b.choices, strings.clone(choice, allocator))
-		append(&b.labels, label != "" && label != choice ? strings.clone(label, allocator) : "")
+		owned, choice_error := strings.clone(choice, allocator)
+		owned_label, label_error := "", choice_error
+		if label != "" && label != choice && choice_error == nil {
+			owned_label, label_error = strings.clone(label, allocator)
+		}
+		if label_error != nil {
+			delete(owned, allocator)
+			edit_choices_clear(b)
+			return .None
+		}
+		append(&b.choices, owned)
+		append(&b.labels, owned_label)
 	}
 	field_set(&b.filter, "")
 	edit_set(p, Choice_Edit{setting = setting, hover = -1})
@@ -343,7 +355,8 @@ open_text :: proc(p: ^Palette, setting: int) -> Outcome {
 popup_choose :: proc(p: ^Palette, c: ^Choice_Edit, index: int) -> Outcome {
 	b := &p.buffers
 	if index < 0 || index >= len(b.matches) {return .None}
-	value := strings.clone(b.choices[b.matches[index]], context.temp_allocator)
+	value, clone_error := strings.clone(b.choices[b.matches[index]], context.temp_allocator)
+	if clone_error != nil {return .None}
 	return choose_value(p, &p.settings[c.setting], value)
 }
 
@@ -387,7 +400,7 @@ control_step :: proc(p: ^Palette, setting: int, direction: int) -> Outcome {
 @(private)
 edit_key :: proc(p: ^Palette, e: input.Key_Event) -> Outcome {
 	#partial switch e.key {
-	case .Escape:
+	case PALETTE_CANCEL_KEY:
 		edit_set(p, nil)
 		return .Changed
 	case .Tab:
@@ -399,7 +412,8 @@ edit_key :: proc(p: ^Palette, e: input.Key_Event) -> Outcome {
 		#partial switch e.key {
 		case .Enter, .Numpad_Enter:
 			s := &p.settings[edit.setting]
-			value := strings.clone(field_string(&b.field), context.temp_allocator)
+			value, clone_error := strings.clone(field_string(&b.field), context.temp_allocator)
+			if clone_error != nil {return .None}
 			if s.control == .Slider {
 				number, ok := strconv.parse_f64(strings.trim_space(value))
 				// An unreadable number still goes to the owner, which reports why it was refused.
@@ -603,19 +617,14 @@ popup_row_at :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout, x, y: f32)
 
 @(private)
 popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f32) -> Field_Box {
-	return {
-		field = &p.buffers.filter, text = text,
-		rect = {popup.x + 4 * scale, popup.y + 4 * scale, popup.width - 8 * scale, HEIGHT_TOOLBAR * scale},
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
-	}
+	pad := OVERLAY_PADDING * scale
+	rect := render.Rect{popup.x + pad, popup.y + pad, popup.width - 2 * pad, HEIGHT_TOOLBAR * scale}
+	return field_box_standard(&p.buffers.filter, text, rect, scale)
 }
 
 @(private)
 text_entry_box :: proc(p: ^Palette, control: render.Rect, text: ^Text, scale: f32) -> Field_Box {
-	return {
-		field = &p.buffers.field, text = text, rect = control,
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
-	}
+	return field_box_standard(&p.buffers.field, text, control, scale)
 }
 
 // A press on a setting row's control. The second result is false when the press missed it.
@@ -799,10 +808,7 @@ draw_control :: proc(
 	if entry, typing := p.edit.(Text_Edit); typing && entry.setting == setting {
 		box := text_entry_box(p, control, text, scale)
 		box_draw(list, control, theme, true, scale)
-		result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Empty")
-		// The field leaves its clip pushed; later rows draw in the list again.
-		_ = render.push_layer(list, l.list)
-		return result
+		return field_box_draw(box, list, theme, field_box_baseline(box), true, "Empty")
 	}
 	switch s.control {
 	case .None:
@@ -862,7 +868,6 @@ draw_popup :: proc(
 		box_draw(list, box.rect, theme, true, scale)
 		if result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Search");
 		   result != .Ok {return result}
-		if render.push_layer(list, popup) != .None {return .Ok}
 	}
 	top := popup_list_top(p, c, popup, scale)
 	row_height := PALETTE_POPUP_ROW * scale

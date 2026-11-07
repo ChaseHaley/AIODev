@@ -18,12 +18,12 @@ Menu_Item :: struct {
 	checked, enabled:      bool,
 	separator:             bool,
 	// A line icon in place of a badge, inked like the label.
-	glyph:                 Maybe(Icon),
+	glyph:                 Icon,
 	// Secondary text after the label, fading out where it runs out of room.
 	detail:                string,
 	// A compact button at the row's end, and one beyond it that shows while the row is selected.
-	action:                Maybe(Icon),
-	selected_action:       Maybe(Icon),
+	action:                Icon,
+	selected_action:       Icon,
 	// The label is an error.
 	danger:                bool,
 	// The owner's key for what choosing the row does; the menu only carries it.
@@ -220,10 +220,10 @@ menu_action_rect :: proc(
 menu_row_part :: proc(m: ^Menu, index: int, x, y, width, height, scale: f32) -> Menu_Row_Part {
 	if index < 0 || index >= len(m.items) {return .Row}
 	item := m.items[index]
-	if _, shown := item.action.?; shown {
+	if item.action != .None {
 		if render.rect_contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
 	}
-	if _, shown := item.selected_action.?; shown && index == menu_selected(m) {
+	if item.selected_action != .None && index == menu_selected(m) {
 		if render.rect_contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
 			return .Selected_Action
 		}
@@ -278,10 +278,7 @@ menu_draw :: proc(
 ) -> render.Build_Status {
 	surface, rows, first := menu_view(m, width, height, scale)
 	selected := menu_selected(m)
-	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
-	frame := popover_panel(surface, scale)
-	if panel_draw(list, frame, theme) != .None {return .Ok}
-	if render.push_layer(list, surface, RADIUS_OVERLAY * scale) != .None {return .Ok}
+	if !popover_open(list, surface, theme, width, height, scale) {return .Ok}
 	small := text_styled(text, .Detail)
 	inset := CONTROL_INSET * scale
 	for visible in 0..<rows {
@@ -324,13 +321,14 @@ menu_draw :: proc(
 		}
 		ink := item.enabled ? theme.text : theme.muted
 		if item.danger {ink = theme.error}
-		if glyph, drawn := item.glyph.?; drawn {
-			icon_draw(list, glyph, {label_x, row.y, ICON_BUTTON * scale, row.height}, ink, ICON_BUTTON, scale)
+		if item.glyph != .None {
+			glyph := render.Rect{label_x, row.y, ICON_BUTTON * scale, row.height}
+			icon_draw(list, item.glyph, glyph, ink, ICON_BUTTON, scale)
 			label_x += (ICON_BUTTON + SPACE_2) * scale
 		}
 		end := row.x + row.width - inset
-		_, has_action := item.action.?
-		_, has_selected_action := item.selected_action.?
+		has_action := item.action != .None
+		has_selected_action := item.selected_action != .None
 		if has_selected_action {
 			end = menu_action_rect(m, i, .Selected_Action, width, height, scale).x
 		}
@@ -376,17 +374,19 @@ menu_draw :: proc(
 			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
 		}
-		if icon, shown := item.action.?; shown {
+		if item.action != .None {
 			hover: f32 = i == selected && m.hover_part == .Action ? 1 : 0
 			rect := menu_action_rect(m, i, .Action, width, height, scale)
-			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {
+			if icon_button_draw(list, theme, rect, item.action, hover, 0, scale, pointer,
+				radius = RADIUS_CONTROL) != .None {
 				return .Ok
 			}
 		}
-		if icon, shown := item.selected_action.?; shown && i == selected {
+		if item.selected_action != .None && i == selected {
 			hover: f32 = m.hover_part == .Selected_Action ? 1 : 0
 			rect := menu_action_rect(m, i, .Selected_Action, width, height, scale)
-			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {
+			if icon_button_draw(list, theme, rect, item.selected_action, hover, 0, scale, pointer,
+				radius = RADIUS_CONTROL) != .None {
 				return .Ok
 			}
 		}

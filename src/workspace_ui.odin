@@ -466,16 +466,8 @@ workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
-	return {
-		field = &w.workspace_picker.query,
-		text = &w.ui_text,
-		rect = workspace_picker_field_rect(w),
-		inset = ui.CONTROL_INSET,
-		caret_width = 1,
-		radius = ui.RADIUS_CONTROL,
-		style = .Body,
-		scale = w.scale,
-	}
+	rect := workspace_picker_field_rect(w)
+	return ui.field_box_standard(&w.workspace_picker.query, &w.ui_text, rect, w.scale)
 }
 
 workspace_picker_slot_rect :: proc(w: ^Window, index: int) -> render.Rect {
@@ -559,10 +551,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
 	@(static, rodata) action_info := ACTIONS
-	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	frame := ui.popover_panel(r, s)
-	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
-	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
+	if !ui.popover_open(&w.list, r, app.theme, f32(w.width), f32(w.height), s) { return .Ok }
 	if workspace_picker_icons(p) { return workspace_icon_picker_draw(app, w) }
 	box := workspace_picker_query_box(w)
 	field := box.rect

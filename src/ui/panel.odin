@@ -82,6 +82,19 @@ popover_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
 	}
 }
 
+// Opens a popover over a `width` by `height` window: its frame, then a clip to the rounded surface
+// for its content. False when the draw list has no room, and the caller draws nothing more.
+popover_open :: proc(
+	list: ^render.Draw_List,
+	surface: render.Rect,
+	theme: Theme,
+	width, height, scale: f32,
+) -> bool {
+	if render.push_layer(list, {0, 0, width, height}) != .None {return false}
+	if panel_draw(list, popover_panel(surface, scale), theme) != .None {return false}
+	return render.push_layer(list, surface, RADIUS_OVERLAY * scale) == .None
+}
+
 // The frame for a centred surface over a scrim: the command palette, confirmations and rename.
 dialog_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
 	return {

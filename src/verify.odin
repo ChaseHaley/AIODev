@@ -1104,7 +1104,7 @@ when AIO_CONTROL {
 		return "No matches"
 	}
 
-	verify_find_rect :: proc(w: ^Window, searched: Find_Target, target: ui.Find_Outcome) -> string {
+	verify_find_rect :: proc(w: ^Window, searched: Find_Target, target: ui.Find_Button) -> string {
 		if !ui.find_is_open(&w.find) { return "" }
 		l, _ := find_controls(w, searched)
 		#partial switch target {

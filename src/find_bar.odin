@@ -103,7 +103,7 @@ on_find_outcome :: proc(app: ^App, w: ^Window, target: Find_Target, outcome: ui.
 	}
 	step: search.Step
 	switch outcome {
-	case .None, .Moved, .Case_Toggle, .Regex_Toggle, .Close:
+	case .None, .Moved:
 		return
 	case .Changed:
 		find_target_set(target, ui.field_string(&w.find.query), find_options(w))

@@ -140,7 +140,6 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	app.animations = platform_api.client_animations_enabled()
 	ui.notices_init(&app.notices)
-	app.notices.animations = app.animations
 	if catalogue, err := program_art.catalogue_make(); err == nil {
 		app.program_art = catalogue
 	} else {
@@ -297,7 +296,7 @@ tick :: proc(app: ^App) {
 		mark_all_dirty(app)
 	}
 	update_motion(app)
-	if ui.notices_expire(&app.notices, time.tick_now()) {
+	if ui.notices_expire(&app.notices, app.animations, time.tick_now()) {
 		mark_all_dirty(app)
 	}
 	// A dwell can create or discard the trailing preview window.
@@ -494,7 +493,8 @@ update_sessions :: proc(app: ^App) {
 
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	duration := kind == .Error || kind == .Warning ? ERROR_NOTICE_DURATION : NOTICE_DURATION
-	ui.notices_put(&app.notices, u32(Notice_Key.Transient), kind, text, duration)
+	key := u32(Notice_Key.Transient)
+	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, time.tick_now())
 	mark_all_dirty(app)
 }
 
@@ -686,7 +686,7 @@ apply_fonts :: proc(app: ^App) {
 	family, err := font.family_load(app.fonts, app.settings.font.family)
 	if err == .None {
 		app.family = family
-		ui.notices_clear(&app.notices, u32(Notice_Key.Font))
+		ui.notices_clear(&app.notices, u32(Notice_Key.Font), app.animations, time.tick_now())
 		return
 	}
 	for name in FALLBACK_FONT_FAMILIES {
@@ -697,7 +697,10 @@ apply_fonts :: proc(app: ^App) {
 				app.settings.font.family,
 				name,
 			)
-			ui.notices_put(&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION)
+			ui.notices_put(
+				&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION, app.animations,
+				time.tick_now(),
+			)
 			return
 		}
 	}
@@ -705,9 +708,7 @@ apply_fonts :: proc(app: ^App) {
 }
 
 apply_theme :: proc(app: ^App) {
-	app.theme = ui.theme_from(app.settings.active_theme)
-	app.theme.hover_lift = f32(app.settings.interface.hover_lift)
-	app.theme.hover_gloss = f32(app.settings.interface.hover_gloss)
+	app.theme = ui.theme_from(app.settings.active_theme, app.settings.interface)
 }
 
 @(private)

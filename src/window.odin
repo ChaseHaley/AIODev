@@ -644,10 +644,9 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 		}
 	}
 	if palette_visible(app, w) {
-		opacity, rise := ui.presence_fade(app.palette.presence, 4 * w.scale)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
-			opacity, rise, w.pointer,
+			ui.presence_fade(app.palette.presence, ui.RISE_DIALOG * w.scale), w.pointer,
 		)
 		if result != .Ok { return frame, result }
 	}

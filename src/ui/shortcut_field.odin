@@ -53,7 +53,8 @@ Shortcut_Field_State :: struct {
 }
 
 // One field for idle, selected and recording states on every surface. Only the popup lists
-// alternatives; even a recording field keeps the same compact summary and input typography.
+// alternatives; even a recording field keeps the same compact summary and input typography. The
+// caller's layer is current again afterwards.
 shortcut_field_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, parts: Row_Parts,
 	summary: Shortcut_Summary, state: Shortcut_Field_State, page: render.Rect, scale: f32,
@@ -65,7 +66,9 @@ shortcut_field_draw :: proc(
 		radius := RADIUS_CONTROL * scale
 		draw_rect(list, {rect = parts.field, color = theme.accent, radius = radius, stroke = 2 * scale})
 	}
-	if render.push_layer(list, parts.field, RADIUS_CONTROL * scale) != .None {return .Ok}
+	scope, opened := clip_scope_open(list, parts.field, RADIUS_CONTROL * scale)
+	if !opened {return .Ok}
+	defer clip_scope_close(list, scope)
 	first := summary.first
 	if first == "" {
 		empty := state.empty_label != "" ? state.empty_label : "Add shortcut"

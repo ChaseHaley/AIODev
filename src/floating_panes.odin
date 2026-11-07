@@ -228,12 +228,10 @@ floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 	shown := w.float_header_shown == root
 	hover, press: f32
 	if shown {hover, press = w.float_header_motion.hover.value, w.float_header_motion.press.value}
-	flat := app.theme
-	flat.hover_lift = 0
 	_, ink, err := ui.button_draw(
 		&w.list,
-		flat,
-		{rect = r, hover = hover, press = press, radius = max(radius / s, 0.01)},
+		app.theme,
+		{rect = r, hover = hover, press = press, radius = max(radius / s, 0.01), surface = .Flat},
 		s,
 		w.pointer,
 	)
@@ -762,9 +760,6 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	label := ui.text_styled(&w.ui_text, .Body)
-	capsule_theme := app.theme
-	capsule_theme.hover_lift = 0
-	capsule_theme.hover = {}
 	for capsule in capsules {
 		r := capsule.rect
 		radius := ui.pill_radius(r)
@@ -774,12 +769,13 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		hovered := w.float_capsule_hover == capsule.content
 		face, ink, err := ui.button_draw(
 			&w.list,
-			capsule_theme,
+			app.theme,
 			{
 				rect = r,
 				hover = hovered ? 1 : 0,
 				press = floating_capsule_pressed(w, capsule.content) ? 1 : 0,
 				radius = radius / s,
+				surface = .Flat_Unfilled,
 			},
 			s,
 			w.pointer,

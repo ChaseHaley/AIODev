@@ -162,7 +162,7 @@ workspace_order_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) -> bo
 				if from < lift.to && index > from && index <= lift.to {target -= 1}
 				if lift.to < from && index >= lift.to && index < from {target += 1}
 			}
-			ui.motion_target(&entry.position, f32(target), TAB_REORDER_DURATION, .Decelerate, enabled, now)
+			ui.motion_target(&entry.position, f32(target), ui.REORDER_DURATION, .Decelerate, enabled, now)
 		}
 		changed = ui.motion_update(&entry.position, now) || changed
 		moving ||= ui.motion_active(entry.position)

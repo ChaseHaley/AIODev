@@ -18,9 +18,9 @@ Find_Bar :: struct {
 	state:                 Find_State,
 	query:                 Text_Field,
 	case_sensitive, regex: bool,
-	hover:                 Find_Outcome,
-	armed:                 Armed(Find_Outcome),
-	motion:                [Find_Outcome]Control_Motion,
+	hover:                 Find_Button,
+	armed:                 Armed(Find_Button),
+	motion:                [Find_Button]Control_Motion,
 }
 
 // nil is closed. The bar stays open without the keyboard after a click elsewhere, so the terminal takes
@@ -55,6 +55,7 @@ Find_History :: struct {
 
 Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, up, down, close: render.Rect }
 
+// What a key, text or click did to the bar.
 Find_Outcome :: enum {
 	None,
 	Changed,
@@ -66,10 +67,16 @@ Find_Outcome :: enum {
 	Up,
 	Down,
 	Closed,
-	// Pointer targets; activating one returns Changed or Closed.
+}
+
+// The bar's buttons, the pointer targets a press arms and a release activates.
+Find_Button :: enum {
+	None,
+	Up,
+	Down,
+	Close,
 	Case_Toggle,
 	Regex_Toggle,
-	Close,
 }
 
 find_init :: proc(f: ^Find_Bar, allocator := context.allocator) {
@@ -116,12 +123,19 @@ find_history_newest :: proc(h: ^Find_History) -> (Find_Entry, bool) {
 find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 	query := field_string(&f.query)
 	if h == nil || len(query) == 0 { return }
+	if last := len(h.entries) - 1; last >= 0 && h.entries[last].query == query {
+		h.entries[last].case_sensitive, h.entries[last].regex = f.case_sensitive, f.regex
+		return
+	}
+	// The copy and its slot come first, so a search that cannot be recorded leaves the history as it was.
+	copied, err := strings.clone(query)
+	if err != nil { return }
+	if reserve(&h.entries, len(h.entries) + 1) != nil {
+		delete(copied)
+		return
+	}
 	for entry, i in h.entries {
 		if entry.query != query { continue }
-		if i == len(h.entries) - 1 {
-			h.entries[i].case_sensitive, h.entries[i].regex = f.case_sensitive, f.regex
-			return
-		}
 		delete(entry.query)
 		ordered_remove(&h.entries, i)
 		break
@@ -130,12 +144,7 @@ find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 		delete(h.entries[0].query)
 		ordered_remove(&h.entries, 0)
 	}
-	copied, err := strings.clone(query)
-	if err != nil { return }
-	if _, append_error := append(&h.entries, Find_Entry{copied, f.case_sensitive, f.regex});
-	   append_error != nil {
-		delete(copied)
-	}
+	append(&h.entries, Find_Entry{copied, f.case_sensitive, f.regex})
 }
 
 // Opens with the keyboard. `restore` refills the newest search, and `select` also selects it so typing
@@ -209,7 +218,7 @@ find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Fi
 }
 
 @(private)
-find_toggle :: proc(f: ^Find_Bar, target: Find_Outcome) -> Find_Outcome {
+find_toggle :: proc(f: ^Find_Bar, target: Find_Button) -> Find_Outcome {
 	#partial switch target {
 	case .Case_Toggle:
 		f.case_sensitive = !f.case_sensitive
@@ -233,11 +242,10 @@ find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Outcome
 		next := count - 1
 		if h.entries[next].query == field_string(&f.query) { next -= 1 }
 		if next < 0 { return .None }
-		draft: Find_Entry
-		if copied, err := strings.clone(field_string(&f.query)); err == nil {
-			draft = {copied, f.case_sensitive, f.regex}
-		}
-		find_enter(f, Find_Browsing{next, draft})
+		// Browsing must be able to restore the draft, so without a copy of it nothing is recalled.
+		copied, err := strings.clone(field_string(&f.query))
+		if err != nil { return .None }
+		find_enter(f, Find_Browsing{next, {copied, f.case_sensitive, f.regex}})
 		find_show(f, h.entries[next])
 	case older:
 		if browsing.index == 0 { return .None }
@@ -343,7 +351,7 @@ clip_rect :: proc(r, bounds: render.Rect) -> render.Rect {
 find_contains :: proc(l: Find_Layout, x, y: f32) -> bool { return render.rect_contains(l.panel, x, y) }
 
 // Toggles and close always respond; the arrows only when there are matches.
-find_hit :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> Find_Outcome {
+find_hit :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> Find_Button {
 	if render.rect_contains(l.close, x, y) { return .Close }
 	if render.rect_contains(l.case_toggle, x, y) { return .Case_Toggle }
 	if render.rect_contains(l.regex_toggle, x, y) { return .Regex_Toggle }
@@ -394,9 +402,12 @@ find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mo
 	}
 	fired, ok := armed_release(&f.armed, hit)
 	if !ok { return .Moved }
-	#partial switch fired {
-	case .Up, .Down:
-		return fired
+	switch fired {
+	case .None:
+	case .Up:
+		return .Up
+	case .Down:
+		return .Down
 	case .Close:
 		return .Closed
 	case .Case_Toggle, .Regex_Toggle:
@@ -432,7 +443,7 @@ find_draw :: proc(
 	}
 	buttons := [?]struct {
 		area:   render.Rect,
-		action: Find_Outcome,
+		action: Find_Button,
 		icon:   Icon,
 		label:  string,
 		on:     bool,
@@ -441,8 +452,8 @@ find_draw :: proc(
 		{l.up, .Up, .Arrow_Up, "", false, enabled},
 		{l.down, .Down, .Arrow_Down, "", false, enabled},
 		{l.close, .Close, .Close, "", false, true},
-		{l.case_toggle, .Case_Toggle, {}, "Aa", f.case_sensitive, true},
-		{l.regex_toggle, .Regex_Toggle, {}, ".*", f.regex, true},
+		{l.case_toggle, .Case_Toggle, .None, "Aa", f.case_sensitive, true},
+		{l.regex_toggle, .Regex_Toggle, .None, ".*", f.regex, true},
 	}
 	for b in buttons {
 		if b.area.width <= 0 { continue }

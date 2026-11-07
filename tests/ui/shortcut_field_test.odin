@@ -42,7 +42,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 	defer commands.destroy(&r)
 	defer ui.palette_destroy(&p)
 	testing.expect_value(t, commands.set_shortcuts(&r, 1, {{.K, {.Control}}}), commands.Error.None)
-	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"))
+	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
 	for scale in ([?]f32{1, 1.5, 2}) {
 		ui.text_set_size(&text, 14 * scale)
 		l := ui.palette_layout(&p, 1000 * scale, 800 * scale, scale)
