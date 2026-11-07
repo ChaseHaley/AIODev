@@ -967,3 +967,15 @@ when AIO_CONTROL {
 		state_valuef(r, "panes.float_header_press_value", "%g", w.float_header_motion.press.value)
 	}
 }
+
+// Floating pane pointer surface: leave and held drag
+
+@(private)
+floating_leave :: proc(_: ^App, w: ^Window) {
+	floating_hover_clear(w)
+}
+
+@(private)
+floating_held :: proc(app: ^App, w: ^Window, _: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
+	return floating_pointer_move(app, w, e) ? .Taken : .Free
+}

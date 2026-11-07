@@ -388,3 +388,58 @@ split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
 	pane_header_cancel(w)
 	w.dirty = true
 }
+
+// Pane header pointer surface: pane headers, and a single pane's split controls, which show while the
+// pointer is in the pane's top band and no surface above the pane covers it.
+
+@(private)
+header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	_, _, hit := pane_header_hit(w, x, y)
+	return hit
+}
+
+@(private)
+header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	x, y := f32(e.x), f32(e.y)
+	in_pane := pointer_surfaces[owner].in_pane
+	split_overlay_update(w, x, y, in_pane && !selection_active(w))
+	over, target := pane_header_pointer(w, x, y, owner == .Pane_Header && !selection_active(w))
+	if owner != .Pane_Header {return}
+	pointer_set(app, w, over && target != nil && !gesture_swallowing(w) ? .Hand : .Arrow)
+}
+
+@(private)
+header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	_, target, _ := pane_header_hit(w, x, y)
+	return pane_header_tooltip(w, target)
+}
+
+// The header swallows its presses, so it also finishes a release that lands anywhere.
+@(private)
+header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	if palette_active(app, w) {pane_header_cancel(w)}
+	pane_header_release(app, w, e)
+	return true
+}
+
+@(private)
+header_cancel :: proc(_: ^App, w: ^Window) {
+	pane_header_cancel(w)
+	w.split_overlay = false
+}
+
+// A pane drag follows the pointer once it has started, or while no modal surface is under it.
+@(private)
+pane_drag_held :: proc(
+	app: ^App,
+	w: ^Window,
+	under: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) -> Pointer_Held {
+	if _, pane := pane_drag_grab(w); !pane {return .Free}
+	if drag_active(w) == nil && pointer_modal(under) {return .Free}
+	if .Left not_in e.buttons {pane_drag_cancel(app, w); return .Ended}
+	if !pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers) {return .Free}
+	pointer_set(app, w, .Resize_All)
+	return .Taken
+}
