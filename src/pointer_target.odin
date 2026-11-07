@@ -3,7 +3,6 @@ package main
 import "aio:input"
 import "aio:platform"
 import "aio:ui"
-import "aio:render"
 import "core:time"
 
 // The surfaces that can own the pointer, listed topmost first. The order is the precedence: hover,
@@ -343,36 +342,6 @@ notice_leave :: proc(app: ^App, w: ^Window) {
 	if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, 0)}
 }
 
-// Dock edge menu
-
-@(private = "file")
-divider_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return dock_divider_menu_shown(w)}
-
-@(private = "file")
-divider_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
-	if owner != .Divider_Menu {return}
-	x, y := f32(e.x), f32(e.y)
-	hit := dock_divider_menu_hit(w, x, y)
-	enabled := hit >= 0 && w.divider_menu.items[hit].enabled
-	if enabled && hit != ui.menu_selected(&w.divider_menu) {
-		ui.menu_select(&w.divider_menu, hit)
-		w.dirty = true
-	}
-	pointer_set(app, w, enabled ? .Hand : .Arrow)
-}
-
-@(private = "file")
-divider_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	if !e.pressed {return}
-	gesture_swallow(w, e.button, .Divider_Menu)
-	if hit := dock_divider_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
-		if w.divider_menu.items[hit].enabled {
-			ui.menu_select(&w.divider_menu, hit)
-			dock_divider_menu_choose(app, w)
-		}
-	} else {overlay_close(app, w)}
-}
-
 // Caption buttons
 
 @(private = "file")
@@ -422,119 +391,4 @@ caption_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 caption_cancel :: proc(_: ^App, w: ^Window) {
 	w.caption_hover = nil
 	ui.armed_cancel(&w.caption_armed)
-}
-
-// Dividers
-
-@(private = "file")
-divider_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
-	if _, _, edge := floating_edge_at(w, x, y); edge {return false}
-	if render.rect_contains(w.float_capsule_group, x, y) {return false}
-	_, over := divider_cursor(w, x, y)
-	return over
-}
-
-@(private = "file")
-divider_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
-	if owner != .Divider {return}
-	resize, _ := divider_cursor(w, f32(e.x), f32(e.y))
-	pointer_set(app, w, resize)
-}
-
-@(private = "file")
-divider_pointer_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	if e.button == .Left {_ = divider_press(app, w, f32(e.x), f32(e.y), e.time_ns)}
-	if e.button == .Right {dock_divider_menu_open(app, w, f32(e.x), f32(e.y))}
-}
-
-@(private = "file")
-divider_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
-	return e.button == .Left && divider_drag_release(app, w, f32(e.x), f32(e.y))
-}
-
-@(private = "file")
-divider_pointer_cancel :: proc(_: ^App, w: ^Window) {
-	divider_cancel(w)
-}
-
-// A held divider follows the pointer unless a modal surface opened over it; a move without Left ends
-// the drag whose release was missed.
-@(private = "file")
-divider_held :: proc(
-	app: ^App,
-	w: ^Window,
-	under: Pointer_Target,
-	e: input.Mouse_Move_Event,
-) -> Pointer_Held {
-	if divider_dragging(w) == nil || pointer_modal(under) {return .Free}
-	if .Left not_in e.buttons {divider_cancel(w); return .Taken}
-	divider_drag(app, w, f32(e.x), f32(e.y))
-	return .Taken
-}
-
-// Floating panes
-
-@(private = "file")
-floating_leave :: proc(_: ^App, w: ^Window) {
-	floating_hover_clear(w)
-}
-
-@(private = "file")
-floating_held :: proc(app: ^App, w: ^Window, _: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
-	return floating_pointer_move(app, w, e) ? .Taken : .Free
-}
-
-// Pane headers, and a single pane's split controls, which show while the pointer is in the pane's top
-// band and no surface above the pane covers it.
-
-@(private = "file")
-header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	_, _, hit := pane_header_hit(w, x, y)
-	return hit
-}
-
-@(private = "file")
-header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
-	x, y := f32(e.x), f32(e.y)
-	in_pane := pointer_surfaces[owner].in_pane
-	split_overlay_update(w, x, y, in_pane && !selection_active(w))
-	over, target := pane_header_pointer(w, x, y, owner == .Pane_Header && !selection_active(w))
-	if owner != .Pane_Header {return}
-	pointer_set(app, w, over && target != nil && !gesture_swallowing(w) ? .Hand : .Arrow)
-}
-
-@(private = "file")
-header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	_, target, _ := pane_header_hit(w, x, y)
-	return pane_header_tooltip(w, target)
-}
-
-// The header swallows its presses, so it also finishes a release that lands anywhere.
-@(private = "file")
-header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
-	if palette_active(app, w) {pane_header_cancel(w)}
-	pane_header_release(app, w, e)
-	return true
-}
-
-@(private = "file")
-header_cancel :: proc(_: ^App, w: ^Window) {
-	pane_header_cancel(w)
-	w.split_overlay = false
-}
-
-// A pane drag follows the pointer once it has started, or while no modal surface is under it.
-@(private = "file")
-pane_drag_held :: proc(
-	app: ^App,
-	w: ^Window,
-	under: Pointer_Target,
-	e: input.Mouse_Move_Event,
-) -> Pointer_Held {
-	if _, pane := pane_drag_grab(w); !pane {return .Free}
-	if drag_active(w) == nil && pointer_modal(under) {return .Free}
-	if .Left not_in e.buttons {pane_drag_cancel(app, w); return .Ended}
-	if !pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers) {return .Free}
-	pointer_set(app, w, .Resize_All)
-	return .Taken
 }

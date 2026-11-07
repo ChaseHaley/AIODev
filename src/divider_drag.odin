@@ -2,6 +2,8 @@ package main
 
 import "aio:layout"
 import "aio:platform"
+import "aio:input"
+import "aio:render"
 
 
 // How the pointer grabs dividers and dock edges, in DIPs: the band either side of a bar, the reach of a
@@ -216,4 +218,52 @@ divider_cursor :: proc(w: ^Window, x, y: f32) -> (platform.Cursor_Shape, bool) {
 	for hit in hits[:n] {axes += {hit.axis}}
 	if axes == {.Horizontal, .Vertical} {return .Resize_All, true}
 	return .Horizontal in axes ? .Resize_Horizontal : .Resize_Vertical, true
+}
+
+// Divider pointer surface
+
+@(private)
+divider_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
+	if _, _, edge := floating_edge_at(w, x, y); edge {return false}
+	if render.rect_contains(w.float_capsule_group, x, y) {return false}
+	_, over := divider_cursor(w, x, y)
+	return over
+}
+
+@(private)
+divider_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Divider {return}
+	resize, _ := divider_cursor(w, f32(e.x), f32(e.y))
+	pointer_set(app, w, resize)
+}
+
+@(private)
+divider_pointer_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button == .Left {_ = divider_press(app, w, f32(e.x), f32(e.y), e.time_ns)}
+	if e.button == .Right {dock_divider_menu_open(app, w, f32(e.x), f32(e.y))}
+}
+
+@(private)
+divider_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	return e.button == .Left && divider_drag_release(app, w, f32(e.x), f32(e.y))
+}
+
+@(private)
+divider_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	divider_cancel(w)
+}
+
+// A held divider follows the pointer unless a modal surface opened over it; a move without Left ends
+// the drag whose release was missed.
+@(private)
+divider_held :: proc(
+	app: ^App,
+	w: ^Window,
+	under: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) -> Pointer_Held {
+	if divider_dragging(w) == nil || pointer_modal(under) {return .Free}
+	if .Left not_in e.buttons {divider_cancel(w); return .Taken}
+	divider_drag(app, w, f32(e.x), f32(e.y))
+	return .Taken
 }

@@ -215,3 +215,33 @@ dock_edge_save_default :: proc(app: ^App, w: ^Window, edge: Dock_Edge) {
 	value := fmt.tprintf("%d", int(math.round(size)))
 	settings_save_value(app, DOCK_EDGE_SETTING[edge], value, "Could not save default size.")
 }
+
+// Dock edge menu pointer surface
+
+@(private)
+divider_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return dock_divider_menu_shown(w)}
+
+@(private)
+divider_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Divider_Menu {return}
+	x, y := f32(e.x), f32(e.y)
+	hit := dock_divider_menu_hit(w, x, y)
+	enabled := hit >= 0 && w.divider_menu.items[hit].enabled
+	if enabled && hit != ui.menu_selected(&w.divider_menu) {
+		ui.menu_select(&w.divider_menu, hit)
+		w.dirty = true
+	}
+	pointer_set(app, w, enabled ? .Hand : .Arrow)
+}
+
+@(private)
+divider_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {return}
+	gesture_swallow(w, e.button, .Divider_Menu)
+	if hit := dock_divider_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
+		if w.divider_menu.items[hit].enabled {
+			ui.menu_select(&w.divider_menu, hit)
+			dock_divider_menu_choose(app, w)
+		}
+	} else {overlay_close(app, w)}
+}
