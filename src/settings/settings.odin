@@ -998,8 +998,8 @@ Diagnostic :: struct {
 	line:         int,
 	key, message: string,
 	kind:         Diagnostic_Kind,
-	// What the problem means without where it is, so moved source lines do not make it new. Empty
-	// when the message names no location.
+	// What the problem means without where it is, so moved source lines do not make it new. Every
+	// diagnostic has one: given by the producer, or derived by diagnostic_identity_of.
 	identity:     string,
 }
 
@@ -1362,8 +1362,8 @@ add_diagnostic :: proc(
 		delete(issue.message, out.allocator)
 		return err
 	}
-	meaning: string
-	if meaning, err = strings.clone(identity, out.allocator); err == nil {
+	meaning := identity != "" ? identity : diagnostic_identity_of(issue.kind, issue.message)
+	if meaning, err = strings.clone(meaning, out.allocator); err == nil {
 		_, err = append(out, Diagnostic{line, copy, issue.message, issue.kind, meaning})
 	}
 	if err != nil {
@@ -1372,6 +1372,17 @@ add_diagnostic :: proc(
 		delete(issue.message, out.allocator)
 	}
 	return err
+}
+
+// The identity of a diagnostic whose producer gave none. Settings problems carry their line apart
+// from the message, so the message is the meaning. A shortcut warning names its source lines in a
+// trailing " [file:line; ...]" part, which is location rather than meaning.
+@(private)
+diagnostic_identity_of :: proc(kind: Diagnostic_Kind, message: string) -> string {
+	if kind == .Shortcut_Warning && strings.has_suffix(message, "]") {
+		if at := strings.last_index(message, " ["); at > 0 {return strings.trim_space(message[:at])}
+	}
+	return message
 }
 
 @(private, require_results)

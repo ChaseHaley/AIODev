@@ -402,6 +402,16 @@ profile_table_includes_detected_and_confirms_custom_removal :: proc(t: ^testing.
 		nil,
 	)
 	testing.expect_value(t, settings.profiles_finalize(&f.state.settings), nil)
+	// Pages read machine shells from the revision's input snapshot, which the running settings
+	// were parsed with; the fake shell joins both.
+	inputs := &f.state.settings_inputs
+	detected := make([dynamic]settings.Detected_Profile, context.temp_allocator)
+	append(&detected, ..inputs.detected[:])
+	append(&detected, settings.Detected_Profile{"fake-shell", "Fake Shell", "cmd.exe", "~"})
+	replacement, inputs_error := settings.inputs_read(inputs.themes_directory, detected[:])
+	if !testing.expect_value(t, inputs_error, nil) {return}
+	settings.inputs_destroy(inputs)
+	inputs^ = replacement
 	e := profile_open(&f)
 
 	testing.expect(t, !ui.editor_select_key(e, "profiles.detected"))

@@ -5,7 +5,8 @@ import "aio:ui"
 import "core:log"
 import "core:os"
 
-// Saving unrelated settings can move source lines without changing a problem's meaning.
+// Saving unrelated settings can move source lines without changing a problem's meaning. Every
+// diagnostic settings records has an identity; a hand-built one without it is its message.
 @(private)
 diagnostic_identity :: proc(d: settings.Diagnostic) -> string {
 	return d.identity != "" ? d.identity : d.message

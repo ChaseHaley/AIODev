@@ -95,6 +95,7 @@ settings_load_keeps_source_order_conflict_and_text_field_chords_separate :: proc
 	state := app.App{settings_path = path, registry = commands.create()}
 	defer commands.destroy(&state.registry)
 	defer settings.destroy(&state.settings)
+	defer settings.inputs_destroy(&state.settings_inputs)
 	defer settings.diagnostics_destroy(&state.settings_diagnostics)
 	ui.notices_init(&state.notices)
 	defer ui.notices_destroy(&state.notices)
