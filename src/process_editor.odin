@@ -26,6 +26,13 @@ editor_process_save :: proc(app: ^App, w: ^Window) {
 	ui.editor_message(p, "Saved and applied.", false)
 }
 
+// The program group a confirmation asks before deleting: its name for the question, and the settings
+// text the question was asked against, so a file changed meanwhile is reviewed before anything goes.
+Process_Remove :: struct {
+	name, source: string,
+	group:        int,
+}
+
 editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
 	if !ui.editor_process_capture(&w.editor) {return}
 	name := ""
@@ -42,30 +49,20 @@ editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
 		return
 	}
 	overlay_open(app, w, nil)
-	delete(w.process_remove_name)
-	delete(w.process_remove_source)
-	w.process_remove_name = owned
-	w.process_remove_source, w.process_remove_id = source, group
-	ui.confirm_open(&w.process_remove_confirm)
-	w.process_remove_confirm.focus = .Cancel
-	w.process_remove_confirm.show_option = false
-	w.dirty = true
+	confirmation_open(w, Process_Remove{name = owned, source = source, group = group}, focus = .Cancel)
 }
 
-editor_process_remove_finish :: proc(app: ^App, w: ^Window, accepted: bool) {
-	ui.confirm_close(&w.process_remove_confirm)
-	if accepted {
-		if ui.editor_source(&w.editor) != w.process_remove_source {
-			ui.editor_message(&w.editor, "Settings changed. Review the group before deleting it.", true)
-			w.dirty = true
-			return
-		}
-		ui.editor_process_group_remove(&w.editor, w.process_remove_id)
-		editor_process_save(app, w)
+@(private)
+editor_process_remove_finish :: proc(app: ^App, w: ^Window, remove: Process_Remove, accepted: bool) {
+	if !accepted {return}
+	if ui.editor_source(&w.editor) != remove.source {
+		ui.editor_message(&w.editor, "Settings changed. Review the group before deleting it.", true)
+		return
 	}
-	w.dirty = true
+	ui.editor_process_group_remove(&w.editor, remove.group)
+	editor_process_save(app, w)
 }
 
-editor_process_remove_title :: proc(w: ^Window) -> string {
-	return fmt.tprintf("Delete %s?", w.process_remove_name)
+editor_process_remove_text :: proc(remove: Process_Remove) -> Confirmation_Text {
+	return {title = fmt.tprintf("Delete %s?", remove.name), label = "Delete"}
 }

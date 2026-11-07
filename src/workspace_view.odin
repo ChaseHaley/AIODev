@@ -118,11 +118,11 @@ workspace_adopt :: proc(
 	defer workspace_view_destroy(&prepared)
 	if !gesture_cancel(app, w) {return false}
 	focus_leave(app, w)
-	tab_close_restore(w)
+	// A close question counts the tabs this window stops showing, so it ends now, putting back any
+	// marks its subset replaced.
+	if confirmation_subject(w, Pending_Close) != nil {confirmation_cancel(app, w)}
 	overlay_close(app, w)
 	workspace_picker_cancel(w)
-	pending_close_clear(&w.pending_close)
-	clear(&w.close_restore)
 	// Editor storage belongs to the window; its reading position belongs to the workspace.
 	w.workspace.settings_scroll = w.editor.scroll
 	switch adoption {

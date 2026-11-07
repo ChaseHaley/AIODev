@@ -450,7 +450,21 @@ when AIO_CONTROL {
 				editor_key, editor_title = row.key, row.title
 				choice_count = len(row.choices)
 			}
-			confirm := pending_close_text(app, &w.pending_close, w.workspace)
+			// Each confirmation key reads the question only while it is about that key's subject.
+			question := confirmation_shown(w)
+			opacity := question != nil ? question.dialog.motion.value : 0
+			closing := confirmation_subject(w, Pending_Close)
+			close_open := confirmation_asking(w, Pending_Close) != nil
+			confirm: Confirmation_Text
+			close_workspace: u32
+			if closing != nil {
+				confirm = pending_close_text(app, closing, close_open, w.workspace)
+				if target, ok := closing.target.(Close_Workspace); ok {close_workspace = target.workspace}
+			}
+			file := confirmation_subject(w, Pending_File)
+			swap := confirmation_subject(w, Pane_Swap)
+			removing := confirmation_subject(w, Profile_Remove)
+			process_remove := confirmation_asking(w, Process_Remove) != nil
 			picker_rect, _ := workspace_picker_rect(w)
 			link_hover, link_uri, link_spans := verify_link_hover(w)
 			slider := render.Rect{}
@@ -529,19 +543,22 @@ when AIO_CONTROL {
 				},
 				{"settings.process.drag_target", fmt.tprintf("%d", ui.editor_order_target(&w.editor))},
 				{"settings.process.value", app.settings.process.padding_groups},
+				{"settings.process.confirming", fmt.tprintf("%t", process_remove)},
 				{
-					"settings.process.confirming",
-					fmt.tprintf("%t", ui.presence_is_open(w.process_remove_confirm.presence)),
+					"settings.process.confirm_option",
+					fmt.tprintf("%t", process_remove && question.dialog.show_option),
 				},
-				{"settings.process.confirm_option", fmt.tprintf("%t", w.process_remove_confirm.show_option)},
 				{"settings.profile.expanded", w.editor.expanded},
 				{"settings.profile.default", app.settings.profiles.default_id},
 				{"settings.profile.detected_open", fmt.tprintf("%t", w.editor.detected_open)},
 				{
 					"settings.profile.removing",
-					ui.presence_is_open(w.profile_remove_confirm.presence) ? w.profile_remove_id : "",
+					confirmation_asking(w, Profile_Remove) != nil ? removing.id : "",
 				},
-				{"settings.profile.remove_title", editor_profile_remove_title(app, w)},
+				{
+					"settings.profile.remove_title",
+					editor_profile_remove_text(app, removing != nil ? removing.id : "").title,
+				},
 				{"settings.profile.menu_open", fmt.tprintf("%t", verify_editor_profile_menu_open(w))},
 				{"settings.profile.menu_count", fmt.tprintf("%d", len(w.editor.profile_menu.items))},
 				{"settings.profile.action", fmt.tprintf("%v", w.editor.request)},
@@ -602,17 +619,17 @@ when AIO_CONTROL {
 					),
 				},
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
-				{"confirm.open", fmt.tprintf("%t", ui.presence_is_open(w.pending_close.confirm.presence))},
-				{"confirm.opacity", fmt.tprintf("%g", w.pending_close.confirm.motion.value)},
-				{"confirm.title", ui.presence_is_open(w.pending_close.confirm.presence) ? confirm.title : ""},
-				{"confirm.body", ui.presence_is_open(w.pending_close.confirm.presence) ? confirm.body : ""},
-				{"confirm.workspace", fmt.tprintf("%d", w.pending_close.workspace)},
-				{"file.open", fmt.tprintf("%t", ui.presence_is_open(w.pending_file.confirm.presence))},
-				{"file.path", w.pending_file.file.path},
-				{"file.target", w.pending_file.file.target},
-				{"swap.open", fmt.tprintf("%t", ui.presence_is_open(w.pending_swap.confirm.presence))},
-				{"swap.opacity", fmt.tprintf("%g", w.pending_swap.confirm.motion.value)},
-				{"swap.profile", w.pending_swap.profile_id},
+				{"confirm.open", fmt.tprintf("%t", close_open)},
+				{"confirm.opacity", fmt.tprintf("%g", closing != nil ? opacity : 0)},
+				{"confirm.title", close_open ? confirm.title : ""},
+				{"confirm.body", close_open ? confirm.body : ""},
+				{"confirm.workspace", fmt.tprintf("%d", close_workspace)},
+				{"file.open", fmt.tprintf("%t", confirmation_asking(w, Pending_File) != nil)},
+				{"file.path", file != nil ? file.file.path : ""},
+				{"file.target", file != nil ? file.file.target : ""},
+				{"swap.open", fmt.tprintf("%t", confirmation_asking(w, Pane_Swap) != nil)},
+				{"swap.opacity", fmt.tprintf("%g", swap != nil ? opacity : 0)},
+				{"swap.profile", swap != nil ? swap.profile_id : ""},
 				{"leader.indicator", w.leader_until != {} ? "pane-status-line" : "none"},
 				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
 				{"window.dpi", fmt.tprintf("%d", u32(w.scale * 96))},

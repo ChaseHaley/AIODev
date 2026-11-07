@@ -179,11 +179,11 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, first.overlay == nil && app.palette_active(s, second))
 	app.pane_split(s, first, .Right)
 	app.tab_close_request(s, first, 0)
-	testing.expect(t, ui.presence_is_open(first.pending_close.confirm.presence) &&
+	testing.expect(t, app.confirmation_asking(first, app.Pending_Close) != nil &&
 		app.palette_active(s, second))
 	app.handle_event(s, platform.Focus_Event{first.id, false})
-	testing.expect(t, !ui.presence_is_open(first.pending_close.confirm.presence) &&
-		first.pending_close.confirm.motion.value == 0)
+	// Focus loss dismisses a close question at once, without a fade.
+	testing.expect(t, app.confirmation_shown(first) == nil)
 	testing.expect(t, app.palette_active(s, second) && s.palette.drag != nil)
 	testing.expect_value(t, len(s.sessions), 3)
 	app.palette_close(s, first)

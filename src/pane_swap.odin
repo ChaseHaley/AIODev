@@ -4,20 +4,20 @@ import "aio:layout"
 import "aio:pty"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:strings"
 
+// The shell switch a confirmation asks about: the pane, the profile it switches to, and the names its
+// text shows.
 Pane_Swap :: struct {
-	confirm:                 ui.Confirm,
-	pane:                    layout.Node_Id,
+	pane:                     layout.Node_Id,
 	profile_id, profile_name: string,
-	current_name:            string,
+	current_name:             string,
 }
 
-pane_swap_clear :: proc(swap: ^Pane_Swap) {
+pane_swap_destroy :: proc(swap: ^Pane_Swap) {
 	delete(swap.profile_id)
 	delete(swap.profile_name)
 	delete(swap.current_name)
@@ -61,8 +61,6 @@ pane_shell_swap_request :: proc(
 	}
 	if !gesture_cancel(app, w) {return}
 	overlay_open(app, w, nil)
-	swap := &w.pending_swap
-	pane_swap_clear(swap)
 	owned_id, id_error := strings.clone(profile.id)
 	if id_error != nil {notify(app, .Error, "Could not prepare the shell switch."); return}
 	owned_name, name_error := strings.clone(profile.name)
@@ -78,32 +76,30 @@ pane_shell_swap_request :: proc(
 		notify(app, .Error, "Could not prepare the shell switch.")
 		return
 	}
-	swap.pane = node
-	swap.profile_id, swap.profile_name, swap.current_name = owned_id, owned_name, owned_current
-	swap.confirm.show_option = true
-	swap.confirm.option = false
-	ui.confirm_open(&swap.confirm)
-	w.dirty = true
-}
-
-pane_swap_text :: proc(swap: ^Pane_Swap) -> (title, body, note, label: string) {
-	title = fmt.tprintf("Switch to %s?", swap.profile_name)
-	body = fmt.tprintf("The current %s session in this pane will be lost.", swap.current_name)
-	label = "Switch"
-	return
-}
-
-pane_swap_finish :: proc(app: ^App, w: ^Window, accept: bool) {
-	swap := &w.pending_swap
-	if !ui.presence_is_open(swap.confirm.presence) {return}
-	option := swap.confirm.option
-	node, profile_id := swap.pane, swap.profile_id
-	ui.confirm_close(&swap.confirm)
-	if accept {
-		if option {pane_swap_opt_out(app)}
-		pane_shell_swap(app, w, node, profile_id)
+	swap := Pane_Swap {
+		pane         = node,
+		profile_id   = owned_id,
+		profile_name = owned_name,
+		current_name = owned_current,
 	}
-	w.dirty = true
+	confirmation_open(w, swap, show_option = true)
+}
+
+pane_swap_text :: proc(swap: Pane_Swap) -> Confirmation_Text {
+	return {
+		title = fmt.tprintf("Switch to %s?", swap.profile_name),
+		body = fmt.tprintf("The current %s session in this pane will be lost.", swap.current_name),
+		label = "Switch",
+		option = "Don't ask again",
+	}
+}
+
+// `opt_out` is the question's "Don't ask again" option.
+@(private)
+pane_swap_finish :: proc(app: ^App, w: ^Window, swap: Pane_Swap, opt_out, accept: bool) {
+	if !accept {return}
+	if opt_out {pane_swap_opt_out(app)}
+	pane_shell_swap(app, w, swap.pane, swap.profile_id)
 }
 
 @(private)

@@ -310,8 +310,6 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
 	defer workspace_picker_layout_changed(w)
 	window_overlays_cancel(app, w)
-	pending_close_clear(&w.pending_close)
-	tab_close_restore(w)
 	ui.field_set(&w.workspace_picker.query, "")
 	workspace_picker_transition(w, .List)
 	workspace_picker_filter(app, w)

@@ -345,6 +345,7 @@ tick :: proc(app: ^App) {
 		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
 			leader_cancel(window)
 		}
+		paste_confirm_expire(window, time.tick_now())
 		update_blink(window)
 		update_autoscroll(app, window)
 		tooltip_tick(window)

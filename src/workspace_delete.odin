@@ -54,12 +54,13 @@ workspace_delete_commit :: proc(app: ^App, plan: Workspace_Delete_Plan) -> bool 
 	return true
 }
 
-workspace_delete_accept :: proc(app: ^App, w: ^Window) {
-	pc := &w.pending_close
-	workspace := workspace_find(app, pc.plan.workspace)
+// Deletes the workspace when the plan the question presented still holds, and asks again with the
+// current plan when it does not.
+workspace_delete_accept :: proc(app: ^App, w: ^Window, presented: Workspace_Delete_Plan) {
+	workspace := workspace_find(app, presented.workspace)
 	if workspace == nil {return}
 	plan := workspace_delete_plan(app, workspace)
-	if !workspace_delete_plan_same(plan, pc.plan) {
+	if !workspace_delete_plan_same(plan, presented) {
 		workspace_delete_request(app, w, workspace)
 		return
 	}

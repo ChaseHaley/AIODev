@@ -4,54 +4,64 @@ import "aio:ui"
 import "core:fmt"
 import "core:strings"
 
-Pending_Close_Kind :: enum {
-	None,
-	Tab,
-	Workspace,
-}
-
-// The destructive close being asked about, the subject that must still be live when it is
-// accepted, and the counts and names the prompt shows. The plan is the workspace subject's
-// identity and policy; a tab close leaves it empty.
+// The destructive close a confirmation asks about, and the counts its text shows. The counts follow
+// panes that exit while the question asks, then stay fixed while it closes.
 Pending_Close :: struct {
-	confirm:          ui.Confirm,
-	kind:             Pending_Close_Kind,
-	tab:              u32,
-	using plan:       Workspace_Delete_Plan,
-	workspace_name:   string,
-	destination_name: string,
+	target:                Close_Target,
 	tabs, panes, sessions: int,
 }
 
-Pending_Close_Text :: struct {
-	title, body, label, note: string,
+Close_Target :: union {
+	Close_Tab,
+	Close_Workspace,
 }
 
-// Releases the cached subject names and returns the question to no subject.
-pending_close_clear :: proc(pc: ^Pending_Close) {
-	delete(pc.workspace_name)
-	delete(pc.destination_name)
+// The tab to close: the recorded one, or with its marked group.
+Close_Tab :: struct {
+	tab:     u32,
+	// The marks a close subset replaced with the tabs it closes, which tab.marked means while the
+	// question asks. The answer takes them and puts them back through tab_close_restore; empty when the
+	// close named its tab directly.
+	restore: [dynamic]u32,
+}
+
+// The plan is the workspace subject's identity and policy; the names keep the text while it closes.
+Close_Workspace :: struct {
+	using plan:                       Workspace_Delete_Plan,
+	workspace_name, destination_name: string,
+}
+
+pending_close_destroy :: proc(pc: ^Pending_Close) {
+	switch &target in pc.target {
+	case Close_Tab:
+		delete(target.restore)
+	case Close_Workspace:
+		delete(target.workspace_name)
+		delete(target.destination_name)
+	}
 	pc^ = {}
 }
 
-// Opens the tab question, cancelling the gesture and palette that requested it. An open close question is
-// rewritten in place, keeping the tabs its caller just marked.
-pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int) {
+// Opens the tab question, cancelling the gesture and palette that requested it, and takes `restore`,
+// the marks a close subset replaced. An asking close question is rewritten in place: the tabs its
+// caller just marked stay, and marks it already holds remain the ones to put back.
+pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int, restore: ^[dynamic]u32 = nil) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
 	if !gesture_cancel(app, w) {return}
-	overlay_open(app, w, nil, &w.pending_close.confirm)
-	pc := &w.pending_close
-	delete(pc.workspace_name)
-	delete(pc.destination_name)
-	pc.workspace_name, pc.destination_name = "", ""
-	pc.kind = .Tab
-	pc.tab = w.workspace.tabs[index].id
-	pc.plan = {}
+	close := Close_Tab{tab = w.workspace.tabs[index].id}
+	if restore != nil {close.restore, restore^ = restore^, {}}
+	reopening: ^ui.Confirm
+	if asking := confirmation_asking(w, Pending_Close); asking != nil {
+		reopening = confirmation_current(w)
+		if held, ok := &asking.target.(Close_Tab); ok && len(held.restore) > 0 {
+			delete(close.restore)
+			close.restore, held.restore = held.restore, {}
+		}
+	}
+	overlay_open(app, w, nil, reopening)
+	pc := Pending_Close{target = close}
 	pc.tabs, pc.panes, _ = tab_close_scope(w.workspace, index)
-	pc.sessions = 0
-	pc.confirm.extended = false
-	ui.confirm_open(&pc.confirm)
-	w.dirty = true
+	confirmation_open(w, pc)
 }
 
 // Opens the workspace question. Names are cloned before the gesture and overlay cancellation
@@ -83,31 +93,25 @@ pending_close_open_workspace :: proc(
 		return
 	}
 	window_overlays_cancel(app, w)
-	pc := &w.pending_close
-	delete(pc.workspace_name)
-	delete(pc.destination_name)
-	pc.workspace_name, pc.destination_name = name, destination_name
-	pc.kind = .Workspace
-	pc.plan = plan
-	pc.tab = 0
+	pc := Pending_Close {
+		target = Close_Workspace{plan = plan, workspace_name = name, destination_name = destination_name},
+	}
 	counts := workspace_pane_counts(workspace)
 	pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
-	ui.confirm_open(&pc.confirm)
-	pc.confirm.extended = true
-	w.dirty = true
+	confirmation_open(w, pc, extended = true)
 }
 
-// Counts follow panes that exit while the question is open, then stay fixed while it fades out.
+// Counts follow panes that exit while the question is `open`, then stay fixed while it closes.
 pending_close_text :: proc(
 	app: ^App,
 	pc: ^Pending_Close,
+	open: bool,
 	workspace: ^Workspace,
-) -> Pending_Close_Text {
-	text: Pending_Close_Text
-	switch pc.kind {
-	case .None:
-	case .Tab:
-		if index := tab_index_by_id(workspace, pc.tab); ui.presence_is_open(pc.confirm.presence) && index >= 0 {
+) -> Confirmation_Text {
+	text: Confirmation_Text
+	switch target in pc.target {
+	case Close_Tab:
+		if index := tab_index_by_id(workspace, target.tab); open && index >= 0 {
 			pc.tabs, pc.panes, _ = tab_close_scope(workspace, index)
 		}
 		if pc.tabs > 1 {
@@ -119,15 +123,15 @@ pending_close_text :: proc(
 		}
 		text.label = "Close"
 		text.note = "Turn this off with Confirm Closing Split Tabs in Settings."
-		if index := tab_index_by_id(workspace, pc.tab); tab_close_has_work(app, workspace, index) {
+		if index := tab_index_by_id(workspace, target.tab); tab_close_has_work(app, workspace, index) {
 			text.title = pc.tabs > 1 ? "Close tabs with ongoing work?" : "Close tab with ongoing work?"
 			text.body = "Closing will interrupt this work."
 			text.note = ""
 		}
-	case .Workspace:
-		name := pc.workspace_name
-		found := workspace_find(app, pc.plan.workspace)
-		if ui.presence_is_open(pc.confirm.presence) && found != nil {
+	case Close_Workspace:
+		name := target.workspace_name
+		found := workspace_find(app, target.workspace)
+		if open && found != nil {
 			name = found.name
 			counts := workspace_pane_counts(found)
 			pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
@@ -141,13 +145,13 @@ pending_close_text :: proc(
 		)
 		text.label = "Delete"
 		switch {
-		case pc.plan.owner == 0:
+		case target.owner == 0:
 			text.note = "Other workspaces and their sessions stay open."
-		case pc.plan.destination != 0:
+		case target.destination != 0:
 			text.note = fmt.tprintf(
 				"Switch its window to #%d “%s”.",
-				pc.plan.destination,
-				pc.destination_name,
+				target.destination,
+				target.destination_name,
 			)
 		case:
 			text.note = "Replace it with a fresh default workspace and shell."
@@ -156,27 +160,25 @@ pending_close_text :: proc(
 	return text
 }
 
-// Closes the question. Acceptance dispatches to the subject's owner; cancellation restores the
-// tab selection that a subset close replaced.
-pending_close_finish :: proc(app: ^App, w: ^Window, accept: bool) {
-	pc := &w.pending_close
-	kind := pc.kind
-	ui.confirm_close(&pc.confirm)
-	w.dirty = true
-	switch kind {
-	case .None:
-	case .Tab:
-		if accept {
-			if index := tab_index_by_id(w.workspace, pc.tab); index >= 0 {
-				id := w.id
-				tab_close(app, w, index)
-				// Closing the last tab may retire this window.
-				if current := window_find(app, id); current != nil {tab_close_restore(current)}
-				return
-			}
+// Acts on the answer. Acceptance dispatches to the subject's owner; either answer puts back the tab
+// marks a subset close replaced. The subject is not read once acceptance has run, since that may
+// retire the window or ask again.
+@(private)
+pending_close_finish :: proc(app: ^App, w: ^Window, pc: ^Pending_Close, accept: bool) {
+	switch &target in pc.target {
+	case Close_Tab:
+		restore := target.restore
+		target.restore = {}
+		if index := tab_index_by_id(w.workspace, target.tab); accept && index >= 0 {
+			id := w.id
+			tab_close(app, w, index)
+			// Closing the last tab may retire this window.
+			if current := window_find(app, id); current != nil {tab_close_restore(current, &restore)}
+			else {delete(restore)}
+			return
 		}
-		tab_close_restore(w)
-	case .Workspace:
-		if accept {workspace_delete_accept(app, w)}
+		tab_close_restore(w, &restore)
+	case Close_Workspace:
+		if accept {workspace_delete_accept(app, w, target.plan)}
 	}
 }

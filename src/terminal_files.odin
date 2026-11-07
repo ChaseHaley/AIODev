@@ -1,17 +1,11 @@
 package main
 
 import "aio:platform"
-import "aio:ui"
 import "core:path/filepath"
 
+// The active file a confirmation asks before opening.
 Pending_File :: struct {
-	confirm: ui.Confirm,
-	file:    platform.Terminal_File,
-}
-
-pending_file_clear :: proc(pending: ^Pending_File) {
-	platform.terminal_file_destroy(&pending.file)
-	pending^ = {}
+	file: platform.Terminal_File,
 }
 
 terminal_file_request :: proc(app: ^App, w: ^Window, path: string) {
@@ -29,15 +23,10 @@ terminal_file_request :: proc(app: ^App, w: ^Window, path: string) {
 	}
 	if !gesture_cancel(app, w) {platform.terminal_file_destroy(&file); return}
 	overlay_open(app, w, nil)
-	pending_file_clear(&w.pending_file)
-	w.pending_file.file = file
-	w.pending_file.confirm.extended = true
-	ui.confirm_open(&w.pending_file.confirm)
-	w.pending_file.confirm.focus = .Cancel
-	w.dirty = true
+	confirmation_open(w, Pending_File{file}, extended = true, focus = .Cancel)
 }
 
-pending_file_text :: proc(pending: ^Pending_File) -> Pending_Close_Text {
+pending_file_text :: proc(pending: Pending_File) -> Confirmation_Text {
 	return {
 		title = "Open this file?",
 		body = filepath.base(pending.file.target),
@@ -46,14 +35,11 @@ pending_file_text :: proc(pending: ^Pending_File) -> Pending_Close_Text {
 	}
 }
 
-pending_file_finish :: proc(app: ^App, w: ^Window, accept: bool) {
-	pending := &w.pending_file
-	if !ui.presence_is_open(pending.confirm.presence) {return}
-	ui.confirm_close(&pending.confirm)
+@(private)
+pending_file_finish :: proc(app: ^App, pending: Pending_File, accept: bool) {
 	if accept && !open_file_link(app, pending.file.path, pending.file.target) {
 		notify(app, .Error, "Could not open the file.")
 	}
-	w.dirty = true
 }
 
 @(private, require_results)
