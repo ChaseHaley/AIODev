@@ -2,6 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:layout"
+import "aio:localpath"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
@@ -266,7 +267,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 				directory      = entry.header.launch_directory,
 			}
 			raw := term.working_directory(entry.session, context.temp_allocator)
-			if label, err := settings.directory_label(raw, context.temp_allocator); err == nil && label != "" {
+			if label, err := localpath.directory_label(raw, context.temp_allocator); err == nil && label != "" {
 				report.directory = label
 			}
 			append(&reports, report)

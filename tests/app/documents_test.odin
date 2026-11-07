@@ -280,8 +280,8 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	if !palette_fixture_create(t, &f, "documents-menu", false) {return}
 	s, w := &f.state, f.state.windows[0]
 	Open_Stub_State = {}
-	s.open_url = link_open_stub
-	defer s.open_url = nil
+	s.opener.url = link_open_stub
+	defer s.opener.url = nil
 	menu := &w.document_menu
 
 	// With nothing pinned the menu offers the ways to add, and what opened it keeps its place.
@@ -438,8 +438,8 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 	if !palette_fixture_create(t, &f, "documents-link", false) {return}
 	s, w := &f.state, f.state.windows[0]
 	Open_Stub_State = {}
-	s.open_url = link_open_stub
-	defer s.open_url = nil
+	s.opener.url = link_open_stub
+	defer s.opener.url = nil
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/one")
 	point, ok := link_point(t, &f, 4, 0)
 	if !ok {return}

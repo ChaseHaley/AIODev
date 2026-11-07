@@ -5,6 +5,7 @@ import "aio:font"
 import "aio:glyphs"
 import "aio:input"
 import "aio:instance"
+import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:perf"
 import "aio:pty"
@@ -129,9 +130,8 @@ App :: struct {
 	// Only the real launch enables it, which also turns restoring on.
 	layout_save:           Layout_Save,
 	layout_saved:          string,
-	// Tests replace this to observe Ctrl+click without launching a browser.
-	open_url:              proc(uri: string) -> bool,
-	open_file:             proc(path, approved: string) -> bool,
+	// Hands web and file targets to the system; see target_open.odin.
+	opener:                Target_Opener,
 	cli:                   Cli_Pipe,
 	// The directory holding aio.exe beside this executable, added to each shell's PATH; empty
 	// when aio.exe is missing.
@@ -463,7 +463,7 @@ session_config :: proc(
 		directory_text, command, title = profile.directory, profile.command, profile.name
 	}
 	if command_override != "" {command, title = command_override, ""}
-	directory, err := settings.expand_home(directory_text, context.temp_allocator)
+	directory, err := localpath.expand_home(directory_text, context.temp_allocator)
 	if err != nil {
 		log.errorf("expanding the shell directory failed: %v", err)
 		directory = directory_text
@@ -526,14 +526,13 @@ session_open :: proc(
 	}
 	// Defense in depth: every caller filters its directory, but an untrusted one must never reach
 	// CreateProcess. Falling back here keeps the pane usable instead of failing the whole open.
-	launch_directory := directory
-	if launch_directory != "" && !pty.working_directory_is_local(launch_directory) {
+	launch_directory, refused := local_launch_directory(directory, "")
+	if refused {
 		notify(
 			app,
 			.Warning,
 			"The requested directory is remote or unavailable; using the profile's default.",
 		)
-		launch_directory = ""
 	}
 	if launch_directory != "" {config.working_directory = launch_directory}
 	session, err := term.create(config, {wake_platform, &app.platform})

@@ -5,10 +5,10 @@ import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:links"
+import "aio:localpath"
 import "aio:markdown"
 import "aio:platform"
 import "aio:render"
-import "aio:settings"
 import "aio:term"
 import "aio:ui"
 import "core:log"
@@ -95,11 +95,6 @@ Markdown_Pane :: struct {
 	revision:               u64,
 }
 
-markdown_is_path :: proc(path: string) -> bool {
-	extension := strings.to_lower(filepath.ext(path), context.temp_allocator)
-	return extension == ".md" || extension == ".markdown"
-}
-
 @(require_results)
 markdown_find :: proc(app: ^App, id: u32) -> ^Markdown_Pane {
 	for pane in app.markdown_panes {if pane.id == id {return pane}}
@@ -132,7 +127,7 @@ markdown_path_set :: proc(pane: ^Markdown_Pane, path: string) -> bool {
 	if err != nil {return false}
 	title, title_error := strings.clone(filepath.base(path))
 	if title_error != nil {delete(owned); return false}
-	directory, directory_error := settings.directory_label(filepath.dir(path))
+	directory, directory_error := localpath.directory_label(filepath.dir(path))
 	if directory_error != nil {directory = ""}
 	delete(pane.path)
 	delete(pane.title)
@@ -206,9 +201,10 @@ markdown_pane_verified :: proc(pane: ^Markdown_Pane) {
 @(private = "file", require_results)
 markdown_pane_poll :: proc(pane: ^Markdown_Pane) -> bool {
 	if pane.load != nil {return markdown_pane_load(pane)}
-	file, ok := platform.prepare_terminal_file(pane.path)
+	file, ok := localpath.prepare_open(pane.path)
 	if !ok {return false}
-	defer platform.terminal_file_destroy(&file)
+	defer localpath.open_file_destroy(&file)
+	// An active file is never rendered, whatever its name; any other safe file may be explicitly shown.
 	if file.confirm || !markdown_path_set(pane, file.target) {return false}
 	markdown_pane_verified(pane)
 	return true
@@ -441,7 +437,7 @@ markdown_open_picker :: proc(app: ^App, w: ^Window) {
 	palette_close(app, w)
 	directory := ""
 	if entry := focused_session(app, w); entry != nil {directory, _ = pane_directory(app, entry)}
-	pick := platform.file_pick_start(&app.platform, w.id, "Markdown files", "*.md;*.markdown", directory)
+	pick := platform.file_pick_start(&app.platform, w.id, "Markdown files", MARKDOWN_FILTER, directory)
 	if pick == nil {
 		notify(app, .Error, "Could not show the file dialog.")
 		return
@@ -457,7 +453,7 @@ markdown_pick_tick :: proc(app: ^App) {
 	path, finished := platform.file_pick_finished(dialog.pick)
 	if !finished {return}
 	if w := window_find(app, dialog.window); w != nil && path != "" {
-		terminal_file_request(app, w, path)
+		target_open(app, w, File_Target{path})
 	}
 	markdown_pick_close(app)
 }
@@ -476,9 +472,9 @@ control_markdown_open :: proc(
 	invocation: commands.Invocation,
 ) -> Outcome {
 	if .Text not_in invocation.given {return outcome_failure(.Usage, "name a file to open")}
-	file, ok := platform.prepare_terminal_file(invocation.text)
+	file, ok := localpath.prepare_open(invocation.text)
 	if !ok {return outcome_failure(.Failed, "that file is not available; use a local, absolute path")}
-	defer platform.terminal_file_destroy(&file)
+	defer localpath.open_file_destroy(&file)
 	if file.confirm {return outcome_failure(.Failed, "that file type is not shown as Markdown")}
 	direction: layout.Direction = .Direction in invocation.given ? invocation.direction : .Right
 	ratio: f32 = .Ratio in invocation.given ? invocation.ratio : 0.5
@@ -733,17 +729,8 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 // same path as a file link printed in a terminal.
 @(private)
 markdown_link_open :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, link: int) {
-	uri := markdown_document(pane).links[link]
-	if links.allowed(uri) {
-		if !open_link(app, uri) {notify(app, .Error, "Could not open the link.")}
-		return
-	}
-	target := uri
-	if fragment := strings.index_byte(target, '#'); fragment >= 0 {target = target[:fragment]}
-	buffer: [4096]u8 = ---
-	directory := filepath.dir(pane.path)
-	path, ok := links.resolve_file(target, directory, platform.local_hosts(), buffer[:])
-	if ok {terminal_file_request(app, w, path)} else {notify(app, .Error, "That local file is not available.")}
+	buffer: [links.TARGET_BYTES]u8 = ---
+	target_open(app, w, target_from_href(markdown_document(pane).links[link], pane.path, buffer[:]))
 }
 
 // Pointer surface

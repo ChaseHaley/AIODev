@@ -158,23 +158,6 @@ paths :: proc(t: ^testing.T) {
 	defer delete(path)
 	testing.expect_value(t, err, nil)
 	testing.expect(t, strings.has_suffix(path, "\\AIODev\\settings.ini"))
-	home, home_error := os.user_home_dir(context.allocator)
-	defer delete(home)
-	
-	for input in ([]string{"~", "~/child", "~\\child", "~other", "relative"}) {
-		output, expand_error := settings.expand_home(input)
-		defer delete(output)
-		if input == "~" || strings.has_prefix(input, "~/") || strings.has_prefix(input, "~\\") {
-			testing.expect_value(t, expand_error, home_error)
-			if home_error != nil { continue }
-		} else { testing.expect_value(t, expand_error, nil) }
-		if input == "~" {
-			testing.expect_value(t, output, home)
-		}
-		if strings.has_prefix(input, "~/") || strings.has_prefix(input, "~\\") {
-			testing.expect(t, strings.has_prefix(output, home))
-		} else if input != "~" { testing.expect_value(t, output, input) }
-	}
 }
 
 @(test)
@@ -360,9 +343,6 @@ keys.edit.copy = Ctrl+Insert`, allocator)
 	text, text_error := settings.default_text(runtime.nil_allocator())
 	testing.expect_value(t, text, "")
 	testing.expect_value(t, text_error, runtime.Allocator_Error.Out_Of_Memory)
-	path, path_error := settings.expand_home("relative", runtime.nil_allocator())
-	testing.expect_value(t, path, "")
-	testing.expect_value(t, path_error, os.Error(runtime.Allocator_Error.Out_Of_Memory))
 }
 
 expect_settings :: proc(t: ^testing.T, actual, expected: settings.Settings) {

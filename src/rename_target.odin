@@ -1,7 +1,6 @@
 package main
 
 import "aio:layout"
-import "aio:settings"
 import "core:strings"
 
 Rename_Kind :: enum {Tab, Pane, Workspace}
@@ -30,7 +29,7 @@ rename_target_commit :: proc(
 ) -> Rename_Outcome {
 	destination := rename_target_destination(app, w, target)
 	if destination == nil {return .Missing}
-	clean := settings.display_title(strings.trim_space(value), context.temp_allocator)
+	clean := display_title(strings.trim_space(value), context.temp_allocator)
 	if clean == "" && target.kind == .Workspace {return .Empty}
 	name, err := strings.clone(clean)
 	if err != nil {return .Failed}

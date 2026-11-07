@@ -7,6 +7,7 @@ import "core:strings"
 import w "core:sys/windows"
 import "core:unicode/utf16"
 import "aio:links"
+import "aio:localpath"
 
 // A window's restored rectangle in workspace coordinates, and whether it is maximized over it.
 Window_Placement :: struct {
@@ -369,12 +370,7 @@ open_path_allowed :: proc(path: string) -> bool {
 	for c in path {
 		if c == 0 {return false}
 	}
-	drive_absolute :=
-		len(path) >= 3 &&
-		path[1] == ':' &&
-		((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) &&
-		(path[2] == '\\' || path[2] == '/')
-	if drive_absolute {return true}
+	if localpath.is_drive_absolute(path) {return true}
 	if strings.has_prefix(path, `\\`) || strings.has_prefix(path, "//") {return false}
 	for c in path {
 		if c == ':' {return false}
@@ -402,13 +398,10 @@ local_file_within_limit :: proc(path: string, limit: i64) -> bool {
 	return size > 0 && size <= limit
 }
 
-@(require_results)
-open_path :: proc(path: string) -> bool {
-	if !open_path_allowed(path) {
-		log.warnf("platform: refusing to open a non-local path")
-		return false
-	}
-	text := w.utf8_to_wstring(path, context.allocator)
+// Hands an already-admitted path or address to the shell's default handler.
+@(private, require_results)
+shell_open :: proc(target: string) -> bool {
+	text := w.utf8_to_wstring(target, context.allocator)
 	if text == nil {return false}
 	defer delete(text)
 	result := w.ShellExecuteW(nil, nil, text, nil, nil, w.SW_SHOWNORMAL)
@@ -417,6 +410,15 @@ open_path :: proc(path: string) -> bool {
 		return false
 	}
 	return true
+}
+
+@(require_results)
+open_path :: proc(path: string) -> bool {
+	if !open_path_allowed(path) {
+		log.warnf("platform: refusing to open a non-local path")
+		return false
+	}
+	return shell_open(path)
 }
 
 // open_url hands a web target to the system's default browser. It never runs a command shell:
@@ -428,13 +430,5 @@ open_url :: proc(uri: string) -> bool {
 		log.warnf("platform: refusing to open a non-web target")
 		return false
 	}
-	text := w.utf8_to_wstring(uri, context.allocator)
-	if text == nil {return false}
-	defer delete(text)
-	result := w.ShellExecuteW(nil, nil, text, nil, nil, w.SW_SHOWNORMAL)
-	if uintptr(result) <= SHELL_EXECUTE_ERROR_MAX {
-		log.errorf("ShellExecuteW failed: code %d", uintptr(result))
-		return false
-	}
-	return true
+	return shell_open(uri)
 }

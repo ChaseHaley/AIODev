@@ -2,10 +2,9 @@ package main
 
 import "aio:layout"
 import "aio:links"
-import "aio:platform"
+import "aio:localpath"
 import "aio:term"
 import "aio:term_view"
-import "core:log"
 
 @(private, require_results)
 link_pane :: proc(w: ^Window, content: layout.Content) -> ^Pane_View {
@@ -94,62 +93,48 @@ link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	return hit
 }
 
-@(private)
-Link_Resolution :: enum {
-	// Nothing under the pointer reads as a link.
-	None,
-	Web,
-	File,
-	// It reads as a local file, but none exists there.
-	Missing,
-}
-
-// What a click at the point would open. The filesystem settles file links here, under D-068. The
-// target borrows buffer or the pane's link state; copy it to keep it.
+// What a click at the point would open; nil when nothing under the pointer reads as a link. The
+// filesystem settles file links here, under D-068. Strings borrow buffer or the pane's link state;
+// copy them to keep them.
 @(private, require_results)
-link_resolve :: proc(app: ^App, w: ^Window, x, y: f32, buffer: []u8) -> (Link_Resolution, string) {
+link_resolve :: proc(app: ^App, w: ^Window, x, y: f32, buffer: []u8) -> Target {
 	pane, found := layout.hit_test(w.panes[:], x, y)
 	if !found {
-		return .None, ""
+		return nil
 	}
 	entry := workspace_session_for_content(app, pane.content)
 	state := link_pane(w, pane.content)
 	if entry == nil || state == nil || !term_view.links_refresh(&state.view, entry.session) {
-		return .None, ""
+		return nil
 	}
 	column, row, inside := link_cell(entry, x, y)
 	if !inside {
-		return .None, ""
+		return nil
 	}
 	cwd := term.working_directory(entry.session, context.temp_allocator)
 	selection, selected := term.link_selection_at(&state.view.links, column, row)
 	if selected {
-		if uri, web := link_selection_web(selection, buffer); web {return .Web, uri}
-		if path, exists := link_selection_file(selection, cwd, buffer); exists {return .File, path}
+		if uri, web := link_selection_web(selection, buffer); web {return Web_Target{uri}}
+		if path, exists := link_selection_file(selection, cwd, buffer); exists {return File_Target{path}}
 	}
 	target, hit := term.link_detected_at(&state.view.links, column, row)
-	if !hit {return selected ? .Missing : .None, ""}
-	if !links.allowed(target.uri) {
-		path, exists := link_detected_file(target, cwd, buffer)
-		return exists ? .File : .Missing, path
+	if !hit {
+		if selected {return Missing_Target{}}
+		return nil
 	}
-	return .Web, target.uri
+	if !links.allowed(target.uri) {
+		if path, exists := link_detected_file(target, cwd, buffer); exists {return File_Target{path}}
+		return Missing_Target{}
+	}
+	return Web_Target{target.uri}
 }
 
 @(private, require_results)
 link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	buffer: [4096]u8 = ---
-	resolution, target := link_resolve(app, w, x, y, buffer[:])
-	switch resolution {
-	case .None:
-		return false
-	case .Web:
-		if !open_link(app, target) {notify(app, .Error, "Could not open the link.")}
-	case .File:
-		terminal_file_request(app, w, target)
-	case .Missing:
-		notify(app, .Error, "That local file is not available.")
-	}
+	buffer: [links.TARGET_BYTES]u8 = ---
+	target := link_resolve(app, w, x, y, buffer[:])
+	if target == nil {return false}
+	target_open(app, w, target)
 	return true
 }
 
@@ -158,15 +143,14 @@ link_click :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private)
 LINK_FILE_CHECKS :: 24
 
-// link_file_exists returns the path text names when the file is there. The result borrows buffer.
+// link_file_exists returns the path text names when an openable file is there. The result borrows
+// buffer.
 @(private, require_results)
 link_file_exists :: proc(text, cwd: string, checks: ^int, buffer: []u8) -> (string, bool) {
-	path, valid := links.resolve_file(text, cwd, platform.local_hosts(), buffer)
+	path, valid := links.resolve_file(text, cwd, localpath.local_hosts(), buffer)
 	if !valid || checks^ >= LINK_FILE_CHECKS {return "", false}
 	checks^ += 1
-	file, exists := platform.prepare_terminal_file(path)
-	if !exists {return "", false}
-	platform.terminal_file_destroy(&file)
+	if !localpath.file_available(path) {return "", false}
 	return path, true
 }
 
@@ -188,7 +172,7 @@ link_detected_file :: proc(target: term.Link_Target, cwd: string, buffer: []u8) 
 
 @(private, require_results)
 link_break_readings :: proc(text, cwd: string, checks: ^int, buffer: []u8) -> (string, bool) {
-	spelling: [4096]u8 = ---
+	spelling: [links.TARGET_BYTES]u8 = ---
 	for mask := links.break_variants(text) - 1; mask >= 0; mask -= 1 {
 		reading, ok := links.break_variant(text, mask, spelling[:])
 		if !ok {continue}
@@ -240,24 +224,4 @@ link_hover_at_pointer :: proc(app: ^App, w: ^Window, pane: ^Pane_View) -> Maybe(
 	range, _, over := term.link_at(&pane.view.links, column, row)
 	if !over {return nil}
 	return Link_Hover{pane.content, range}
-}
-
-@(private, require_results)
-open_link :: proc(app: ^App, uri: string) -> bool {
-	when ODIN_TEST {
-		// A test that reaches a link without installing a stub must not launch a browser.
-		if app.open_url == nil {
-			log.error("a terminal link was clicked in a test without an opener stub")
-			return false
-		}
-	}
-	opener := app.open_url
-	if opener == nil {
-		opener = platform.open_url
-	}
-	if !opener(uri) {
-		log.errorf("opening the web target failed: %s", uri)
-		return false
-	}
-	return true
 }

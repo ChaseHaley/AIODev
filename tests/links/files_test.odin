@@ -233,14 +233,3 @@ selected_text_is_a_target_when_it_can_name_one :: proc(t: ^testing.T) {
 		if ok {testing.expect_value(t, text[r.start:r.end], c.target)}
 	}
 }
-
-@(test)
-active_file_types_need_confirmation_even_without_pathext :: proc(t: ^testing.T) {
-	for path in ([?]string{`C:\a.EXE`, `C:\a.ps1`, `C:\a.lnk`, `C:\a.url`, `C:\a.msi`,
-		`C:\a.hta`, `C:\a.scf`, `C:\a.library-ms`, `C:\a.settingcontent-ms`, `C:\a.appref-ms`,
-		`C:\a.msu`, `C:\a.search-ms`, `C:\a.iqy`, `C:\a.xll`, `C:\a.iso`, `C:\a.vhdx`}) {
-		testing.expectf(t, links.file_needs_confirmation(path, ""), "%s must be confirmed", path)
-	}
-	testing.expect(t, links.file_needs_confirmation(`C:\a.custom`, ".EXE;;.CUSTOM;"))
-	testing.expect(t, !links.file_needs_confirmation(`C:\a.txt`, ".EXE;;"))
-}

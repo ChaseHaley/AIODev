@@ -1,6 +1,6 @@
-package platform_test
+package localpath_test
 
-import "aio:platform"
+import "aio:localpath"
 import "core:testing"
 import "core:os"
 import "core:strings"
@@ -9,9 +9,10 @@ import "core:strings"
 terminal_file_preparation_refuses_missing_and_remote_paths :: proc(t: ^testing.T) {
 	for path in ([?]string{`C:\__aiodev_missing_237__.txt`, `\\server\share\file.txt`,
 		`file://remote/share/file`, `C:\Windows\win.ini:stream`, `C:\Windows\NUL`}) {
-		file, ok := platform.prepare_terminal_file(path)
+		file, ok := localpath.prepare_open(path)
 		testing.expect(t, !ok)
-		platform.terminal_file_destroy(&file)
+		testing.expect(t, !localpath.file_available(path))
+		localpath.open_file_destroy(&file)
 	}
 }
 
@@ -27,8 +28,9 @@ terminal_file_preparation_checks_real_files_before_classifying :: proc(t: ^testi
 		defer delete(path)
 		defer os.remove(path)
 		if !testing.expect_value(t, os.write_entire_file(path, "fixture"), nil) {continue}
-		file, ok := platform.prepare_terminal_file(path)
-		defer platform.terminal_file_destroy(&file)
+		file, ok := localpath.prepare_open(path)
+		defer localpath.open_file_destroy(&file)
+		testing.expect_value(t, localpath.file_available(path), ok)
 		if name == "shortcut.lnk" {
 			testing.expect(t, !ok, "a malformed shortcut must not be handed to the shell")
 		} else {
@@ -36,8 +38,8 @@ terminal_file_preparation_checks_real_files_before_classifying :: proc(t: ^testi
 			testing.expect_value(t, file.confirm, name != "document.txt")
 		}
 	}
-	file, ok := platform.prepare_terminal_file(directory)
-	defer platform.terminal_file_destroy(&file)
+	file, ok := localpath.prepare_open(directory)
+	defer localpath.open_file_destroy(&file)
 	testing.expect(t, ok, "folders use the default handler too")
 }
 
@@ -58,8 +60,8 @@ terminal_file_dispatch_refuses_unapproved_or_changed_targets :: proc(t: ^testing
 	defer os.remove(script)
 	if !testing.expect_value(t, os.write_entire_file(document, "fixture"), nil) {return}
 	if !testing.expect_value(t, os.write_entire_file(script, "fixture"), nil) {return}
-	testing.expect(t, !platform.open_terminal_file(script, ""), "an active type needs an approved target")
-	testing.expect(t, !platform.open_terminal_file(document, `C:\elsewhere.bat`), "a changed target is refused")
+	testing.expect(t, !localpath.open_file(script, ""), "an active type needs an approved target")
+	testing.expect(t, !localpath.open_file(document, `C:\elsewhere.bat`), "a changed target is refused")
 }
 
 // OneDrive marks every synced item with a cloud reparse tag. Machines without it skip.
@@ -67,8 +69,8 @@ terminal_file_dispatch_refuses_unapproved_or_changed_targets :: proc(t: ^testing
 terminal_file_preparation_accepts_cloud_placeholders :: proc(t: ^testing.T) {
 	root := os.get_env("OneDrive", context.temp_allocator)
 	if root == "" || !os.exists(root) {return}
-	file, ok := platform.prepare_terminal_file(root)
-	defer platform.terminal_file_destroy(&file)
+	file, ok := localpath.prepare_open(root)
+	defer localpath.open_file_destroy(&file)
 	testing.expectf(t, ok, "%s is a local sync folder", root)
 	testing.expect(t, !file.confirm)
 }

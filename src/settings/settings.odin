@@ -1606,24 +1606,3 @@ migrate_settings_text :: proc(
 	}
 	return
 }
-
-@(require_results)
-expand_home :: proc(path: string, allocator := context.allocator) -> (string, os.Error) {
-	if path != "~" && !strings.has_prefix(path, "~/") && !strings.has_prefix(path, "~\\") {
-		copy, err := strings.clone(path, allocator)
-		if err != nil {
-			return "", err
-		}
-		return copy, nil
-	}
-	home, err := os.user_home_dir(allocator)
-	if err != nil {
-		return "", err
-	}
-	defer delete(home, allocator)
-	result, copy_error := strings.concatenate({home, path[1:]}, allocator)
-	if copy_error != nil {
-		return "", copy_error
-	}
-	return result, nil
-}
