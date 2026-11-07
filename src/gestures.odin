@@ -45,9 +45,7 @@ Gesture_Owner :: union #no_nil {
 }
 
 // A Left press on a strip tab or the new-tab button, drawn pressed while the pointer is over it.
-Gesture_Tab :: struct {
-	index: int,
-}
+Gesture_Tab :: struct {}
 
 // A Left press on a rail row: a tab index, RAIL_NEW_TAB_ROW or RAIL_PROFILE_ROW, drawn pressed.
 Gesture_Rail_Row :: struct {

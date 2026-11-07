@@ -37,7 +37,7 @@ tab_interaction_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Ev
 	// A Left press draws its tab, new-tab button or rail row pressed until the release.
 	if e.button == .Left && w.tabs_horizontal {
 		if hit.kind == .Tab || hit.kind == .Close || hit.kind == .New_Tab {
-			gesture_tab_press(w, Gesture_Tab{hit.index})
+			gesture_tab_press(w, Gesture_Tab{})
 		}
 	} else if e.button == .Left {
 		#partial switch hit.kind {
