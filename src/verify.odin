@@ -286,8 +286,7 @@ when AIO_CONTROL {
 		if w == nil {return {}, .Invalid_Argument}
 		entry := focused_session(app, w)
 		if entry == nil {return {}, .Invalid_Argument}
-		for pane in w.views {
-			if pane.content != {.Terminal, entry.id} {continue}
+		if pane := pane_view(w, {.Terminal, entry.id}); pane != nil {
 			allocator := persistent ? context.allocator : context.temp_allocator
 			snapshot, err := term.snapshot(pane.view.state, allocator)
 			if err != .None {
@@ -739,8 +738,8 @@ when AIO_CONTROL {
 				{"find.query", ui.field_string(&w.find.query)},
 				{"find.matches", find_status(w, find_target(app, w))},
 				{"find.count", verify_find_count(w, find_target(app, w))},
-				{"find.older", verify_find_rect(w, find_target(app, w), .Older)},
-				{"find.newer", verify_find_rect(w, find_target(app, w), .Newer)},
+				{"find.older", verify_find_rect(w, find_target(app, w), .Up)},
+				{"find.newer", verify_find_rect(w, find_target(app, w), .Down)},
 				{"find.close", verify_find_rect(w, find_target(app, w), .Close)},
 			}
 			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
@@ -1069,10 +1068,10 @@ when AIO_CONTROL {
 	// cursor shape is what the OS was asked to show.
 	verify_link_hover :: proc(w: ^Window) -> (hover, uri: string, spans: int) {
 		hover = "none"
-		for &view in w.views {spans += len(view.view.links.spans)}
+		for &view in w.views {spans += term.link_span_count(&view.links)}
 		link, ok := w.link_hover.?
 		if !ok {return}
-		view := link_pane(w, link.content)
+		view := pane_view(w, link.content)
 		if view == nil {return}
 		range := link.range
 		hover = fmt.tprintf(
@@ -1082,7 +1081,7 @@ when AIO_CONTROL {
 			range.last_row,
 			range.last_column,
 		)
-		if _, target, found := term.link_at(&view.view.links, range.first_column, range.first_row); found {
+		if _, target, found := term.link_at(&view.links, range.first_column, range.first_row); found {
 			uri = target
 		}
 		return
@@ -1110,8 +1109,8 @@ when AIO_CONTROL {
 		if !ui.find_is_open(&w.find) { return "" }
 		l, _ := find_controls(w, searched)
 		#partial switch target {
-		case .Older: return verify_workspace_rect(l.older)
-		case .Newer: return verify_workspace_rect(l.newer)
+		case .Up: return verify_workspace_rect(l.up)
+		case .Down: return verify_workspace_rect(l.down)
 		}
 		return verify_workspace_rect(l.close)
 	}

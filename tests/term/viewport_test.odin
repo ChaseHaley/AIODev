@@ -7,7 +7,7 @@ import "aio:ghostty"
 import "aio:term"
 
 cursor_in_viewport :: proc(t: ^testing.T, s: ^term.Session, state: ghostty.Render_State) -> bool {
-	if !testing.expect(t, term.capture(s, state)) {
+	if !testing.expect(t, updated(term.capture(s, state))) {
 		return false
 	}
 	cursor := ghostty.sized(ghostty.Render_State_Cursor)

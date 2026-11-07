@@ -84,8 +84,16 @@ Md_Table_Detail :: struct {
 }
 
 @(private)
+Md_Align :: enum i32 {
+	Default,
+	Left,
+	Center,
+	Right,
+}
+
+@(private)
 Md_Td_Detail :: struct {
-	align: i32,
+	align: Md_Align,
 }
 
 @(private)

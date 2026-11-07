@@ -51,6 +51,10 @@ Selection_Autoscrolling :: struct {
 	deadline: time.Tick,
 }
 
+// How often an autoscrolling drag moves history by a row.
+@(private = "file")
+AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
+
 selection_active :: proc(w: ^Window) -> bool {
 	return w.selection != nil
 }
@@ -100,6 +104,8 @@ selection_autoscroll_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 	autoscrolling, ok := w.selection.(Selection_Autoscrolling)
 	if !ok {return}
 	entry := session_find(app, autoscrolling.session)
+	// A gone session only stops the scrolling. The button is still held, so the drag stays Selecting
+	// and keeps the pointer until the release ends it; selection_entry then finds nothing to copy.
 	if entry == nil {
 		w.selection = Selection_Selecting{autoscrolling.session}
 		return

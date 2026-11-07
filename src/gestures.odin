@@ -289,7 +289,7 @@ content_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 }
 
 gesture_move :: proc(app: ^App, w: ^Window, event: input.Mouse_Move_Event) {
-	if terminal_scrollbar_dragging(w) {terminal_scrollbar_move(app, w, f32(event.y)); return}
+	if pane_scrollbar_dragging(w) {pane_scrollbar_move(app, w, f32(event.x), f32(event.y)); return}
 	if w.phase == .Preparing {return}
 	e := event
 	e.buttons -= gesture_buttons(w, Gesture_Cancelled)

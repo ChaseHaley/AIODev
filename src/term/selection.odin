@@ -190,12 +190,20 @@ clear_selection :: proc(s: ^Session) {
 	mark_changed(s)
 }
 
-// Returns the selected text with soft-wrapped lines joined, or false when nothing is selected.
-selection_text :: proc(s: ^Session, allocator := context.allocator) -> (string, bool) {
+// How selected text reads as text: plain, soft-wrapped lines joined and trailing blanks trimmed. Copying
+// and the link scanner's reading of a selection both use it.
+@(private)
+selection_format_options :: proc() -> ghostty.Terminal_Selection_Format_Options {
 	options := ghostty.sized(ghostty.Terminal_Selection_Format_Options)
 	options.emit = .Plain
 	options.unwrap = true
 	options.trim = true
+	return options
+}
+
+// Returns the selected text with soft-wrapped lines joined, or false when nothing is selected.
+selection_text :: proc(s: ^Session, allocator := context.allocator) -> (string, bool) {
+	options := selection_format_options()
 	text: [^]u8
 	length: uint
 	sync.mutex_lock(&s.mutex)

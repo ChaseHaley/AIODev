@@ -10,9 +10,7 @@ import app "../../src"
 import "aio:verify_protocol"
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
 import "aio:term"
-import "aio:term_view"
 import "aio:ui"
 
 @(private="file")
@@ -48,10 +46,9 @@ cleanup_fixture_init :: proc(t: ^testing.T, f: ^Cleanup_Fixture) -> bool {
 		w.id, w.workspace, w.tree = id, workspace, &tab.tree
 		app.focus_init(w)
 		append(&state.windows, w)
-		view: term_view.View
-		if !testing.expect(t, term_view.create(&view)) { return false }
-		append(&w.views, app.Pane_View{content = {.Terminal, u32(index+1)}, view = view,
-			cache = render.draw_list_init()})
+		view, created := app.pane_view_create({.Terminal, u32(index+1)}, true)
+		if !testing.expect(t, created) { return false }
+		append(&w.views, view)
 		if index == 0 { f.source = w } else { f.destination = w }
 	}
 	return true

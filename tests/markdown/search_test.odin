@@ -1,7 +1,7 @@
 package markdown_test
 
-import "aio:line_match"
 import "aio:markdown"
+import "aio:search"
 import "base:runtime"
 import "core:testing"
 import "core:time"
@@ -24,7 +24,7 @@ settle :: proc(f: ^Fixture) {
 }
 
 @(private = "file")
-found :: proc(t: ^testing.T, f: ^Fixture, source, needle: string, options: line_match.Options = {}) -> int {
+found :: proc(t: ^testing.T, f: ^Fixture, source, needle: string, options: search.Options = {}) -> int {
 	if !testing.expect(t, markdown.parse(source, &f.doc)) {return -1}
 	markdown.search_set(&f.search, needle, options)
 	settle(f)

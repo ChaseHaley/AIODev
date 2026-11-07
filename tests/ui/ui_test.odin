@@ -184,9 +184,9 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_string(&f.query), "err ")
 	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace})), Outcome.Changed)
 	testing.expect_value(t, ui.field_string(&f.query), "err")
-	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), Outcome.Older)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), Outcome.Next)
 	shift_enter := key({key = .Enter, text = "\r", modifiers = {.Shift}})
-	testing.expect_value(t, ui.find_key(&f, shift_enter), Outcome.Newer)
+	testing.expect_value(t, ui.find_key(&f, shift_enter), Outcome.Previous)
 	// Without history, Up and Down leave the query alone.
 	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Up})), Outcome.None)
 	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Down})), Outcome.None)

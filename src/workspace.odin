@@ -3,6 +3,7 @@ package main
 import "aio:layout"
 import "aio:localpath"
 import "aio:platform"
+import "aio:procinfo"
 import "aio:pty"
 import "aio:settings"
 import "aio:term"
@@ -541,7 +542,7 @@ pane_directory :: proc(app: ^App, entry: ^Session_Entry) -> (directory: string, 
 pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: string, refused: bool) {
 	root := term.process_id(entry.session)
 	if program != 0 {
-		path, found := pty.process_directory(program, root, context.temp_allocator)
+		path, found := procinfo.process_directory(program, root, context.temp_allocator)
 		if found && pty.working_directory_is_local(path) {return path, false}
 	}
 	raw := term.working_directory(entry.session, context.temp_allocator)
@@ -549,7 +550,7 @@ pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: st
 		if pty.working_directory_is_local(reported) {return reported, false}
 		refused = true
 	}
-	path, ok := pty.process_directory(root, root, context.temp_allocator)
+	path, ok := procinfo.process_directory(root, root, context.temp_allocator)
 	if ok && pty.working_directory_is_local(path) {return path, refused}
 	directory, _ = local_launch_directory("", entry.header.launch_directory)
 	return directory, refused

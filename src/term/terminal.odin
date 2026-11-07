@@ -46,13 +46,23 @@ Config :: struct {
 	environment:                     []pty.Env_Var,
 	path_append:                     string,
 	geometry:                        Geometry,
-	scrollback_lines:                int,
+	options:                         Options,
 	colors:                          Colors,
-	ignore_program_status:           bool,
 	// Text written to the screen before the shell starts, which then draws below it.
 	preface:                         string,
 }
 
+// Everything about a session a running app can change. create, restart and configure all install
+// the whole set, so no caller has to follow creation with a separate configure. The zero value is
+// libghostty's own default: a steady block cursor, no retained scrollback and no status reports.
+Options :: struct {
+	scrollback_lines:                     int,
+	cursor:                               Cursor_Style,
+	cursor_blink, program_status_enabled: bool,
+}
+
+// Host variables a session accepts on top of the three terminal ones, on the stack of spawn. The
+// app supplies at most two (pane id and instance name); the rest is headroom for a new one.
 MAX_HOST_ENVIRONMENT :: 4
 
 Wake :: struct {
@@ -225,22 +235,16 @@ Recording_Faulted :: struct {}
 
 @(require_results)
 create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^Session, Error) {
-	s, allocation_error := new(Session, allocator)
-	if allocation_error != nil {
+	s := session_new(config.geometry, allocator)
+	if s == nil {
 		return nil, .Out_Of_Memory
 	}
-	s.allocator = allocator
-	s.callback_context = context
 	s.wake = wake
-	s.geometry = config.geometry
-	s.queue.pending.allocator = allocator
-	s.search_matches.allocator = allocator
-	pattern_init(&s.pattern, s)
 	ok := false
 	defer if !ok {
 		destroy(s)
 	}
-	if err := ghostty_create(s, config); err != .None {
+	if err := ghostty_create(s, config.geometry, config.options); err != .None {
 		return nil, err
 	}
 	// Applied here rather than in ghostty_create so a headless replay can keep libghostty's default
@@ -252,6 +256,23 @@ create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^
 	spawn(s, config)
 	ok = true
 	return s, .None
+}
+
+// The state both constructors share before libghostty exists. destroy is valid on the result, so
+// each constructor cleans up a later failure the same way.
+@(private)
+session_new :: proc(geometry: Geometry, allocator: runtime.Allocator) -> ^Session {
+	s, allocation_error := new(Session, allocator)
+	if allocation_error != nil {
+		return nil
+	}
+	s.allocator = allocator
+	s.callback_context = context
+	s.geometry = geometry
+	s.queue.pending.allocator = allocator
+	s.search_matches.allocator = allocator
+	pattern_init(&s.pattern, s)
+	return s
 }
 
 destroy :: proc(s: ^Session) {
@@ -284,6 +305,7 @@ restart :: proc(s: ^Session, config: Config) {
 	ghostty.terminal_reset(s.terminal)
 	clear_program_status(s, .All)
 	s.render_hold = nil
+	_ = options_install(s, config.options)
 	sync.mutex_unlock(&s.mutex)
 	resize(s, config.geometry)
 	spawn(s, config)
@@ -291,8 +313,7 @@ restart :: proc(s: ^Session, config: Config) {
 }
 
 @(private, require_results)
-ghostty_create :: proc(s: ^Session, config: Config) -> Error {
-	g := config.geometry
+ghostty_create :: proc(s: ^Session, g: Geometry, session_options: Options) -> Error {
 	if ghostty.terminal_new(nil, &s.terminal, g.columns, g.rows) != .Success {
 		return .Terminal_Failed
 	}
@@ -300,10 +321,8 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 	bell: ghostty.Terminal_Bell_Fn = on_bell
 	title_changed: ghostty.Terminal_Title_Changed_Fn = on_title_changed
 	render_hold: ghostty.Terminal_Render_Hold_Fn = on_render_hold
-	program_status: ghostty.Terminal_Program_Status_Fn = on_program_status
 	semantic_prompt: ghostty.Terminal_Semantic_Prompt_Fn = on_semantic_prompt
 	size: ghostty.Terminal_Size_Fn = on_size
-	scrollback := uint(config.scrollback_lines)
 	image_limit := IMAGE_STORAGE_LIMIT
 	png_decoder_install()
 	options := [?]struct {
@@ -317,11 +336,9 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 		{.Pwd_Changed, rawptr(title_changed)},
 		{.Reset, rawptr(title_changed)},
 		{.Render_Hold, rawptr(render_hold)},
-		{.Program_Status, config.ignore_program_status ? nil : rawptr(program_status)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
 		// The engine's default byte cap otherwise prunes before our configured line limit.
 		{.Scrollback_Max_Bytes, nil},
-		{.Scrollback_Max_Lines, &scrollback},
 		{.Size, rawptr(size)},
 		{.Kitty_Image_Storage_Limit, &image_limit},
 	}
@@ -331,7 +348,9 @@ ghostty_create :: proc(s: ^Session, config: Config) -> Error {
 			return .Terminal_Failed
 		}
 	}
-	s.program_status_enabled = !config.ignore_program_status
+	if !options_install(s, session_options) {
+		return .Terminal_Failed
+	}
 	if !apply_mode_defaults(s.terminal) {
 		return .Terminal_Failed
 	}
@@ -578,7 +597,11 @@ writer_main :: proc(s: ^Session) {
 	}
 }
 
-@(private)
+// Every caller states what a refused write means. Typed text and pastes report it (send_input),
+// since the user is owed a result; focus, mouse and wheel reports are best effort and drop it, as
+// a writer failure is logged once and a closed queue belongs to a session being stopped; terminal
+// replies warn only when the queue is full.
+@(private, require_results)
 queue_push :: proc(q: ^Write_Queue, data: []u8) -> Queue_Push {
 	sync.mutex_lock(&q.mutex)
 	defer sync.mutex_unlock(&q.mutex)
@@ -676,6 +699,27 @@ on_render_hold :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr, held: 
 	}
 }
 
+// What capture did to the caller's render state. Only Updated read the terminal: its generation is
+// the one current under the lock the read held, so a cache keyed by it never claims later output.
+// Held leaves the previous screen in place while synchronized output holds frames; the hold ends
+// by itself at `until`, so the caller draws again then even if the program stays silent. Failed
+// also leaves the previous screen and has already been logged.
+Capture_Result :: union {
+	Capture_Updated,
+	Capture_Held,
+	Capture_Failed,
+}
+
+Capture_Updated :: struct {
+	generation: u64,
+}
+
+Capture_Held :: struct {
+	until: time.Tick,
+}
+
+Capture_Failed :: struct {}
+
 // Updates `state` from the terminal and, given `highlights`, replaces it with the visible search
 // matches. Given `images`, it also reads the visible image placements.
 capture :: proc(
@@ -683,12 +727,13 @@ capture :: proc(
 	state: ghostty.Render_State,
 	highlights: ^[dynamic]Highlight = nil,
 	images: ^Image_Capture = nil,
-) -> bool {
+) -> Capture_Result {
 	sync.mutex_lock(&s.mutex)
 	if since, held := s.render_hold.?; held && time.tick_since(since) < RENDER_HOLD_LIMIT {
 		sync.mutex_unlock(&s.mutex)
-		return false
+		return Capture_Held{time.tick_add(since, RENDER_HOLD_LIMIT)}
 	}
+	generation := sync.atomic_load(&s.generation)
 	result := ghostty.render_state_begin_update(state, s.terminal)
 	if result == .Success && highlights != nil {
 		collect_highlights(s, highlights)
@@ -702,9 +747,9 @@ capture :: proc(
 	}
 	if result != .Success {
 		log.errorf("term: render state update failed: %v", result)
-		return false
+		return Capture_Failed{}
 	}
-	return true
+	return Capture_Updated{generation}
 }
 
 // Moves the pane's grid on the surface when its size is unchanged, as dragging a floating pane does, so
@@ -874,10 +919,22 @@ Cursor_Style :: enum u8 {
 	Underline,
 }
 
-// Applies settings that a running session can change: retained scrollback and the default cursor.
-configure :: proc(s: ^Session, scrollback_lines: int, cursor: Cursor_Style, blink: bool) {
+// Applies settings that a running session can change to a live session.
+configure :: proc(s: ^Session, options: Options) {
+	sync.mutex_lock(&s.mutex)
+	_ = options_install(s, options)
+	sync.mutex_unlock(&s.mutex)
+	mark_changed(s)
+}
+
+// The one writer of the options: retained scrollback, the default cursor and program-status
+// reports. Disabling reports stops listening: reports are dropped, the support query goes
+// unanswered so programs see the protocol as unsupported, and every stored record is removed. The
+// caller holds the session mutex; each failure is logged and the rest still applied.
+@(private, require_results)
+options_install :: proc(s: ^Session, options: Options) -> bool {
 	style: ghostty.Terminal_Cursor_Style
-	switch cursor {
+	switch options.cursor {
 	case .Block:
 		style = .Block
 	case .Bar:
@@ -885,17 +942,34 @@ configure :: proc(s: ^Session, scrollback_lines: int, cursor: Cursor_Style, blin
 	case .Underline:
 		style = .Underline
 	}
-	lines := uint(scrollback_lines)
-	blinking := blink
-	sync.mutex_lock(&s.mutex)
-	ok := ghostty.terminal_set(s.terminal, .Scrollback_Max_Lines, &lines) == .Success
-	ok &&= ghostty.terminal_set(s.terminal, .Default_Cursor_Style, &style) == .Success
-	ok &&= ghostty.terminal_set(s.terminal, .Default_Cursor_Blink, &blinking) == .Success
-	sync.mutex_unlock(&s.mutex)
-	if !ok {
-		log.error("term: applying session configuration failed")
+	lines := uint(options.scrollback_lines)
+	blinking := options.cursor_blink
+	reporter: ghostty.Terminal_Program_Status_Fn = on_program_status
+	settings := [?]struct {
+		option: ghostty.Terminal_Option,
+		value:  rawptr,
+	} {
+		{.Scrollback_Max_Lines, &lines},
+		{.Default_Cursor_Style, &style},
+		{.Default_Cursor_Blink, &blinking},
 	}
-	mark_changed(s)
+	ok := true
+	for item in settings {
+		if ghostty.terminal_set(s.terminal, item.option, item.value) != .Success {
+			log.errorf("term: setting %v failed", item.option)
+			ok = false
+		}
+	}
+	enabled := options.program_status_enabled
+	if s.program_status_enabled == enabled {return ok}
+	value := enabled ? rawptr(reporter) : nil
+	if ghostty.terminal_set(s.terminal, .Program_Status, value) != .Success {
+		log.error("term: switching program status reports failed")
+		return false
+	}
+	s.program_status_enabled = enabled
+	if !enabled {clear_program_status(s, .All)}
+	return ok
 }
 
 geometry :: proc(s: ^Session) -> Geometry {

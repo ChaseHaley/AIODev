@@ -38,18 +38,18 @@ scrollback_capacity_survives_reconfigure_resize_and_reset :: proc(t: ^testing.T)
 	s, err := term.create_headless(replay_geometry(100, 24), 1000)
 	if !testing.expect_value(t, err, term.Error.None) {return}
 	defer term.destroy(s)
-	term.configure(s, 10_000, .Block, false)
+	term.configure(s, {scrollback_lines = 10_000, program_status_enabled = true})
 	term.resize(s, replay_geometry(240, 24))
 	for line in 1..=3000 {
 		term.replay_write(s, transmute([]u8)fmt.tprintf("retained_%d\r\n", line))
 	}
 	bar, _ := term.scrollbar(s)
 	testing.expect_value(t, bar.total, u64(3001))
-	term.configure(s, 1000, .Block, false)
+	term.configure(s, {scrollback_lines = 1000, program_status_enabled = true})
 	bar, _ = term.scrollbar(s)
 	testing.expectf(t, bar.total >= 400 && bar.total <= 1600,
 		"lowering limit to 1000 retained %d rows", bar.total)
-	term.configure(s, 10_000, .Block, false)
+	term.configure(s, {scrollback_lines = 10_000, program_status_enabled = true})
 	term.replay_write(s, transmute([]u8)string("\x1bc"))
 	for line in 1..=3000 {
 		term.replay_write(s, transmute([]u8)fmt.tprintf("after_reset_%d\r\n", line))

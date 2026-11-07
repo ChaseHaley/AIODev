@@ -31,8 +31,8 @@ tooltip_covers_scrollback_find_buttons :: proc(t: ^testing.T) {
 	buttons := [?]struct{rect: render.Rect, label: string} {
 		{l.case_toggle, "Match case"},
 		{l.regex_toggle, "Use regular expression"},
-		{l.older, "Previous match"},
-		{l.newer, "Next match"},
+		{l.up, "Previous match"},
+		{l.down, "Next match"},
 		{l.close, "Close find"},
 	}
 	for button in buttons {

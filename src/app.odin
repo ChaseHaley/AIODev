@@ -90,9 +90,7 @@ App :: struct {
 	markdown_panes:        [dynamic]^Markdown_Pane,
 	next_markdown_id:      u32,
 	markdown_deadline:     time.Tick,
-	markdown_pick:         Maybe(File_Dialog),
-	// The file dialog behind Add File and Add Folder, and the pane it is choosing for.
-	document_pick:         Maybe(Document_Pick),
+	dialogs:               File_Dialogs,
 	// The settings file this app reads and saves; app_init takes it from paths.
 	settings_path:         string,
 	log_path:              string,
@@ -303,6 +301,7 @@ app_destroy :: proc(app: ^App) {
 	ui.palette_destroy(&app.palette)
 	ui.find_history_destroy(&app.find_history)
 	focus_jumps_destroy(&app.focus_jumps)
+	file_dialogs_destroy(app)
 	markdown_panes_destroy(app)
 	ui.notices_destroy(&app.notices)
 	commands.destroy(&app.registry)
@@ -363,6 +362,7 @@ tick :: proc(app: ^App) {
 		leader_expire(window, now)
 		paste_confirm_expire(window, now)
 		cursor_blink_tick(window, now)
+		capture_hold_tick(window, now)
 		selection_autoscroll_tick(app, window, now)
 		tooltip_tick(window, now)
 		status_spin_tick(window)
@@ -384,6 +384,7 @@ tick :: proc(app: ^App) {
 	control_cli_tick(app)
 	focus_jumps_track(app)
 	layout_state_tick(app)
+	file_dialogs_tick(app)
 	markdown_tick(app)
 	free_all(context.temp_allocator)
 }
@@ -428,6 +429,10 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		}
 		if next, blinking := cursor_blink_deadline(window);
 		   blinking && (!found || time.tick_diff(next, deadline) > 0) {
+			deadline, found = next, true
+		}
+		if next, held := capture_hold_deadline(window);
+		   held && (!found || time.tick_diff(next, deadline) > 0) {
 			deadline, found = next, true
 		}
 		if next, autoscrolling := selection_autoscroll_deadline(window);
@@ -493,9 +498,8 @@ session_config :: proc(
 		refresh_environment = app.settings.shell.refresh_environment,
 		working_directory = directory,
 		geometry = geometry,
-		scrollback_lines = app.settings.scrollback.lines,
+		options = session_options(app),
 		colors = terminal_colors(app.settings.colors),
-		ignore_program_status = !app.settings.status.enabled,
 	}
 }
 
@@ -576,12 +580,12 @@ session_open :: proc(
 	}
 	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config)
 	session_status_sync(&app.sessions[len(app.sessions) - 1])
-	configure_session(app, session)
 	return true
 }
 
+// The settings a running session follows; create, restart and configure all take the whole set.
 @(private)
-configure_session :: proc(app: ^App, session: ^term.Session) {
+session_options :: proc(app: ^App) -> term.Options {
 	cursor: term.Cursor_Style
 	switch app.settings.cursor.style {
 	case .Block:
@@ -591,7 +595,12 @@ configure_session :: proc(app: ^App, session: ^term.Session) {
 	case .Underline:
 		cursor = .Underline
 	}
-	term.configure(session, app.settings.scrollback.lines, cursor, app.settings.cursor.blink)
+	return {
+		scrollback_lines = app.settings.scrollback.lines,
+		cursor = cursor,
+		cursor_blink = app.settings.cursor.blink,
+		program_status_enabled = app.settings.status.enabled,
+	}
 }
 
 session_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
@@ -845,7 +854,7 @@ settings_apply_running :: proc(app: ^App) {
 	apply_theme(app)
 	for entry in app.sessions {
 		term.set_colors(entry.session, terminal_colors(app.settings.colors))
-		configure_session(app, entry.session)
+		term.configure(entry.session, session_options(app))
 	}
 	for window in app.windows {
 		window_apply_settings(app, window)

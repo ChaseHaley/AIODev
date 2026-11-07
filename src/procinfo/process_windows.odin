@@ -1,7 +1,19 @@
-package pty
+package procinfo
 
 import "core:log"
 import w "core:sys/windows"
+
+foreign import kernel32 "system:kernel32.lib"
+
+@(private, default_calling_convention = "system")
+foreign kernel32 {
+	QueryFullProcessImageNameW :: proc(
+		hProcess: w.HANDLE,
+		dwFlags: w.DWORD,
+		lpExeName: w.LPWSTR,
+		lpdwSize: ^w.DWORD,
+	) -> w.BOOL ---
+}
 
 @(require_results)
 process_snapshot :: proc(allocator := context.allocator) -> ([]Process_Info, Error) {

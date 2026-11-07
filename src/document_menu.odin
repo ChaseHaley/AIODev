@@ -416,16 +416,10 @@ document_menu_show_pin :: proc(app: ^App, w: ^Window, content: layout.Content, d
 	document_menu_show(app, w, content, Document_Menu_Pin{{owned, document.folder}}, x, y)
 }
 
-// Add File and Add Folder choose for the document scope of `content`.
-Document_Pick :: struct {
-	using dialog: File_Dialog,
-	content:      layout.Content,
-}
-
 @(private = "file")
 document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 	state := document_menu_state(w)
-	if state == nil || app.document_pick != nil {return}
+	if state == nil || app.dialogs.document != nil {return}
 	content := state.content
 	if !gesture_cancel(app, w) {return}
 	overlay_close(app, w)
@@ -438,25 +432,12 @@ document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 		notify(app, .Error, "Could not show the file dialog.")
 		return
 	}
-	app.document_pick = Document_Pick{{pick, w.id}, content}
+	app.dialogs.document = Document_Pick{{pick, w.id}, content}
 }
 
-// Collects what the dialog chose once it closes. The pane may have gone in the meantime.
-document_pick_tick :: proc(app: ^App) {
-	dialog, open := app.document_pick.?
-	if !open {return}
-	path, finished := platform.file_pick_finished(dialog.pick)
-	if !finished {return}
-	if w := window_find(app, dialog.window); w != nil && path != "" {
-		if _, found := document_scopes(app, dialog.content); found {
-			document_chosen(app, w, dialog.content, path)
-		}
-	}
-	document_pick_close(app)
-}
-
-@(private = "file")
-document_chosen :: proc(app: ^App, w: ^Window, content: layout.Content, path: string) {
+// Pins what Add File or Add Folder chose, unless the pane has gone in the meantime.
+document_pick_chosen :: proc(app: ^App, w: ^Window, content: layout.Content, path: string) {
+	if _, found := document_scopes(app, content); !found {return}
 	file, ok := localpath.prepare_open(path)
 	if !ok {
 		target_unavailable(app)
@@ -464,11 +445,6 @@ document_chosen :: proc(app: ^App, w: ^Window, content: layout.Content, path: st
 	}
 	defer localpath.open_file_destroy(&file)
 	document_menu_show_pin(app, w, content, {file.path, os.is_dir(file.target)})
-}
-
-document_pick_close :: proc(app: ^App) {
-	if dialog, open := app.document_pick.?; open {platform.file_pick_destroy(dialog.pick)}
-	app.document_pick = nil
 }
 
 // Pins are app state: every window may be showing a button this changes, and the layout saves them.

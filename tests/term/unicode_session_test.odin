@@ -20,7 +20,7 @@ unicode_survives_conpty :: proc(t: ^testing.T) {
 	state: ghostty.Render_State
 	if !testing.expect_value(t, ghostty.render_state_new(nil, &state), ghostty.Result.Success) { return }
 	defer ghostty.render_state_free(state)
-	if !testing.expect(t, term.capture(s, state)) { return }
+	if !testing.expect(t, updated(term.capture(s, state))) { return }
 	snapshot, snapshot_error := term.snapshot(state)
 	defer term.snapshot_destroy(&snapshot)
 	if !testing.expect_value(t, snapshot_error, term.Error.None) { return }
@@ -56,7 +56,7 @@ unicode_survives_conpty :: proc(t: ^testing.T) {
 		term.search_set_needle(s, expected_text)
 		summary := settle_search(t, s)
 		testing.expectf(t, summary.total > 0, "%s: search found no match for %q", c.id, text)
-		if !testing.expect(t, term.capture(s, state, &highlights)) { return }
+		if !testing.expect(t, updated(term.capture(s, state, &highlights))) { return }
 		found := false
 		for h in highlights {
 			if h.row == row && h.first == 0 && h.last == columns - 1 { found = true }

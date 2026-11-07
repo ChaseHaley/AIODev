@@ -569,8 +569,8 @@ find_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	#partial switch w.find.hover {
 	case .Case_Toggle: return "Match case"
 	case .Regex_Toggle: return "Use regular expression"
-	case .Older: return "Previous match"
-	case .Newer: return "Next match"
+	case .Up: return "Previous match"
+	case .Down: return "Next match"
 	case .Close: return "Close find"
 	case:
 	}
@@ -816,16 +816,18 @@ header_cancel :: proc(_: ^App, w: ^Window) {
 
 @(private = "file")
 scrollbar_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return terminal_scrollbar_at(app, w, x, y) != 0
+	_, found := terminal_scrollbar_at(app, w, x, y)
+	return found
 }
 
 @(private = "file")
 scrollbar_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Scrollbar {
-		terminal_scrollbar_hover_set(w, 0)
+		pane_scrollbar_hover_leave(w, .Terminal)
 		return
 	}
-	terminal_scrollbar_hover_set(w, terminal_scrollbar_at(app, w, f32(e.x), f32(e.y)))
+	content, found := terminal_scrollbar_at(app, w, f32(e.x), f32(e.y))
+	if found {pane_scrollbar_hover_set(w, content)} else {pane_scrollbar_hover_leave(w, .Terminal)}
 	pointer_set(app, w, .Arrow)
 }
 
@@ -841,7 +843,7 @@ scrollbar_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) ->
 
 @(private = "file")
 scrollbar_cancel :: proc(_: ^App, w: ^Window) {
-	terminal_scrollbar_cancel(w)
+	_ = pane_scrollbar_end(w, .Terminal)
 }
 
 // Settings pages

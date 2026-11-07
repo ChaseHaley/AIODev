@@ -13,14 +13,16 @@ import "core:log"
 import "core:time"
 
 @(private)
-AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
-@(private)
 FRAME_WAIT_MS :: 100
 
+// A pane's state in one window: header controls for every pane and, for a terminal, its drawing view,
+// cached draw list and the links on its screen (see term_links.odin). pane_view_create makes one and
+// pane_view_destroy releases it.
 Pane_View :: struct {
 	content: layout.Content,
 	view: term_view.View,
 	cache: render.Draw_List,
+	links: term.Link_Map,
 	valid: bool,
 	generation, atlas_generation, builds: u64,
 	image_epoch: u64,
@@ -40,9 +42,8 @@ Window :: struct {
 	markdown_hover: Markdown_Hover,
 	using resources: Workspace_View_Resources,
 	gesture: Gesture_State,
-	// A held terminal scrollbar thumb; see terminal_scrollbar.odin.
-	scroll_drag: Maybe(Terminal_Scroll_Drag),
-	scroll_hover: u32,
+	// The pane scrollbar under the pointer and a held thumb; see pane_scrollbar.odin.
+	scrollbars: Pane_Scrollbars,
 	// A divider press, drag or the first click of a double-click; see arrange.odin.
 	divider: Divider_Gesture,
 	// The pane or tab drag this window's pointer holds; see drag.odin.
@@ -133,6 +134,9 @@ Window :: struct {
 	cursor_blink: Cursor_Blink,
 	// A frame that drew a spinner requests display-paced frames until one does not.
 	status_spinning: bool,
+	// The earliest end of a synchronized-output hold the last frame drew through: the frame showed
+	// the held screen, so the window draws again then even if the program writes nothing more.
+	capture_hold: Maybe(time.Tick),
 	taskbar: Status_Taskbar,
 	status: Status_Overview,
 	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
@@ -443,10 +447,7 @@ window_views_prune :: proc(w: ^Window) {
 		visible := false
 		for pane in w.panes {visible ||= pane.content == w.views[i].content}
 		if visible {continue}
-		if pane_owns_session(w.views[i].content.kind) {
-			term_view.destroy(&w.views[i].view)
-			render.draw_list_destroy(&w.views[i].cache)
-		}
+		pane_view_destroy(&w.views[i])
 		ordered_remove(&w.views, i)
 	}
 }
@@ -457,7 +458,7 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	entry := workspace_session_for_content(app, pane.content)
 	if entry == nil {
 		if pane_view(w, pane.content) == nil {
-			cached := Pane_View{content = pane.content}
+			cached, _ := pane_view_create(pane.content, false)
 			if _, err := append(&w.views, cached); err != nil {
 				log.error("storing a pane's header state failed")
 			}
@@ -484,32 +485,49 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		term.resize(entry.session, g)
 	}
 	if pane_view(w, pane.content) == nil {
-		view: term_view.View
-		if !term_view.create(&view) {
+		cached, created := pane_view_create(pane.content, true)
+		if !created {
 			log.error("creating a terminal view failed")
 			return
 		}
-		cached := Pane_View {
-			content = pane.content,
-			view    = view,
-			cache   = render.draw_list_init(),
-		}
 		if _, err := append(&w.views, cached); err != nil {
-			term_view.destroy(&view)
-			render.draw_list_destroy(&cached.cache)
+			pane_view_destroy(&cached)
 			log.error("storing a terminal view failed")
 		}
 	}
 }
 
+// The one lookup of the state a window keeps for the pane showing `content`; nil when it has none.
 @(private)
-pane_view :: proc(w: ^Window, content: layout.Content) -> ^term_view.View {
+pane_view :: proc(w: ^Window, content: layout.Content) -> ^Pane_View {
 	for &pane in w.views {
 		if pane.content == content {
-			return &pane.view
+			return &pane
 		}
 	}
 	return nil
+}
+
+// A terminal's view, cache and link index are made together; any other pane keeps only its header
+// state. A failure leaves nothing to release.
+@(require_results)
+pane_view_create :: proc(content: layout.Content, terminal: bool) -> (pane: Pane_View, ok: bool) {
+	pane.content = content
+	if !terminal {return pane, true}
+	if !term_view.create(&pane.view) {return {}, false}
+	if !term.link_map_create(&pane.links) {
+		term_view.destroy(&pane.view)
+		return {}, false
+	}
+	pane.cache = render.draw_list_init()
+	return pane, true
+}
+
+pane_view_destroy :: proc(pane: ^Pane_View) {
+	if !pane_owns_session(pane.content.kind) {return}
+	term_view.destroy(&pane.view)
+	render.draw_list_destroy(&pane.cache)
+	term.link_map_destroy(&pane.links)
 }
 
 // The session shown in the focused pane, which receives keyboard input.
@@ -574,6 +592,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 	frame: term_view.Frame
 	blinking := false
 	w.status_spinning = false
+	w.capture_hold = nil
 	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
 	for pane in w.panes {
 		if pane.floating {continue}
@@ -682,8 +701,9 @@ pane_draw :: proc(
 		return frame, markdown_pane_draw(app, w, pane, card)
 	}
 	entry := workspace_session_for_content(app, pane.content)
-	view := pane_view(w, pane.content)
-	if entry == nil || view == nil {return frame, .Ok}
+	state := pane_view(w, pane.content)
+	if entry == nil || state == nil {return frame, .Ok}
+	view := &state.view
 	c := app.settings.colors
 	selection_foreground: Maybe(render.Color)
 	if fg, ok := c.selection_foreground.?; ok {selection_foreground = colour.rgba(fg)}
@@ -715,6 +735,7 @@ pane_draw :: proc(
 	)
 	frame, result = build_pane(app, w, pane, entry, view, box.origin, style)
 	if result != .Ok {return frame, result}
+	if held, ok := frame.capture.(term.Capture_Held); ok {capture_hold_note(w, held.until)}
 	if card < len(w.list.rects) {w.list.rects[card].color = frame.background}
 	blinking^ ||= frame.cursor_blinking && content_focused
 	if entry.status != .Running {
@@ -731,7 +752,7 @@ pane_draw :: proc(
 	}
 	if header_result := pane_header_draw(app, w, pane, entry);
 	   header_result != .Ok {return frame, header_result}
-	terminal_scrollbar_draw(app, w, pane, entry)
+	pane_scrollbar_draw(app, w, pane)
 	window_card_dim(app, w, pane, frame.background)
 	window_card_outline(app, w, pane)
 	return frame, .Ok
@@ -768,10 +789,9 @@ build_pane :: proc(
 				style,
 			)
 		}
-		generation := term.generation(entry.session)
 		atlas := render.atlas_generation(app.device)
 		if !cached.valid ||
-		   cached.generation != generation ||
+		   cached.generation != term.generation(entry.session) ||
 		   cached.atlas_generation != atlas ||
 		   cached.image_epoch != render.image_epoch(app.device) ||
 		   cached.style != style {
@@ -791,11 +811,13 @@ build_pane :: proc(
 			if result != .Ok {return frame, result}
 			if cached.cache.error == .None {
 				cached.frame, cached.style = frame, style
-				cached.generation, cached.atlas_generation =
-					generation, render.atlas_generation(app.device)
+				cached.atlas_generation = render.atlas_generation(app.device)
 				cached.image_epoch = render.image_epoch(app.device)
-				// A held or failed capture drew the previous screen; rebuild on the next frame.
-				cached.valid = frame.captured
+				// Only a read screen is cached, under the generation it was read at. A held or
+				// failed capture drew the previous screen; rebuild on the next frame.
+				if updated, ok := frame.capture.(term.Capture_Updated); ok {
+					cached.generation, cached.valid = updated.generation, true
+				}
 				cached.builds += 1
 			}
 		}
@@ -803,4 +825,23 @@ build_pane :: proc(
 		return cached.frame, .Ok
 	}
 	return {}, .Ok
+}
+
+@(private)
+capture_hold_note :: proc(w: ^Window, until: time.Tick) {
+	if at, held := w.capture_hold.?; held && time.tick_diff(at, until) >= 0 {return}
+	w.capture_hold = until
+}
+
+capture_hold_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
+	until, held := w.capture_hold.?
+	return until, held
+}
+
+// A hold that outlived its limit no longer stops capture, so the next frame reads the screen.
+capture_hold_tick :: proc(w: ^Window, now: time.Tick) {
+	until, held := w.capture_hold.?
+	if !held || time.tick_diff(until, now) < 0 {return}
+	w.capture_hold = nil
+	w.dirty = true
 }

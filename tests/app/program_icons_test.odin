@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:testing"
 import app "../../src"
 import "aio:program_art"
-import "aio:pty"
+import "aio:procinfo"
 
 @(test)
 process_snapshot_asked_for_while_one_is_taken_is_not_taken_twice :: proc(t: ^testing.T) {
@@ -79,9 +79,9 @@ program_is_adopted_on_a_second_poll_and_dropped_at_the_prompt :: proc(t: ^testin
 	ROOT :: 1_000_001
 	CLAUDE :: 1_000_003
 	CODEX :: 1_000_005
-	shell := []pty.Process_Info{{id = ROOT, parent = 1, executable = "pwsh.exe"}}
-	claude := []pty.Process_Info{shell[0], {id = CLAUDE, parent = ROOT, executable = "claude.exe"}}
-	codex := []pty.Process_Info{shell[0], {id = CODEX, parent = ROOT, executable = "codex.exe"}}
+	shell := []procinfo.Process_Info{{id = ROOT, parent = 1, executable = "pwsh.exe"}}
+	claude := []procinfo.Process_Info{shell[0], {id = CLAUDE, parent = ROOT, executable = "claude.exe"}}
+	codex := []procinfo.Process_Info{shell[0], {id = CODEX, parent = ROOT, executable = "codex.exe"}}
 	state: app.App
 	if !art_catalogue(t, &state) {return}
 	defer program_art.catalogue_destroy(&state.program_art)

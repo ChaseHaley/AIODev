@@ -79,7 +79,7 @@ pane_header_draw :: proc(
 	entry: ^Session_Entry,
 ) -> render.Build_Status {
 	controls: [ui.HEADER_BUTTONS]ui.Control_Motion
-	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
+	if view := pane_view(w, pane.content); view != nil {controls = view.header_controls}
 	r := pane.rect
 	documents := pane_header_documents(w, pane)
 	if w.header_height == 0 && !pane.floating {
@@ -207,9 +207,7 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		document_menu_open_pane(app, w, pane)
 		return
 	}
-	for &view in w.views {
-		if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
-	}
+	if view := pane_view(w, pane.content); view != nil {ui.armed_press(&view.header_armed, action)}
 	// Every pane header rearranges panes; a float moves by its own float header.
 	if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
 }

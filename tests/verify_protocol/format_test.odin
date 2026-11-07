@@ -130,7 +130,7 @@ cursor_blanks_escaping_and_state :: proc(t: ^testing.T) {
 	defer strings.builder_destroy(&b)
 	testing.expect_value(t, verify_protocol.format_screen(&b, &s), verify_protocol.Error.None)
 	testing.expect_value(t, strings.to_string(b), "screen 4x12 cursor 0,0 hidden blinking\n0-11 blank\n")
-	s.cursor.viewport_has_value = false
+	s.cursor.position = nil
 	strings.builder_reset(&b)
 	testing.expect_value(t, verify_protocol.format_screen(&b, &s), verify_protocol.Error.None)
 	testing.expect_value(t, strings.to_string(b), "screen 4x12 cursor off-screen\n0-11 blank\n")

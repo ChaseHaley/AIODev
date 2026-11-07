@@ -57,7 +57,7 @@ status_release :: proc(entry: ^Session_Entry) {
 // Turning the protocol on or off reaches every live session at once.
 status_apply_settings :: proc(app: ^App) {
 	for &entry in app.sessions {
-		term.set_program_status_enabled(entry.session, app.settings.status.enabled)
+		term.configure(entry.session, session_options(app))
 		status_refresh(app, &entry)
 	}
 	for w in app.windows {status_taskbar_update(app, w, true)}

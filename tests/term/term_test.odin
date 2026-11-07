@@ -32,9 +32,15 @@ config :: proc(command: string) -> term.Config {
 			surface_width = 800,
 			surface_height = 480,
 		},
-		scrollback_lines = 1000,
+		options = {scrollback_lines = 1000, program_status_enabled = true},
 		colors = {foreground = {220, 220, 220}, background = {16, 16, 16}, cursor = {255, 255, 255}},
 	}
+}
+
+// The capture read the terminal, rather than holding or failing.
+updated :: proc(result: term.Capture_Result) -> bool {
+	_, ok := result.(term.Capture_Updated)
+	return ok
 }
 
 start :: proc(t: ^testing.T, command: string, wakes: ^Wakes) -> ^term.Session {

@@ -1,7 +1,7 @@
 package main
 
 import "aio:program_art"
-import "aio:pty"
+import "aio:procinfo"
 import "aio:settings"
 import "aio:term"
 import "core:slice"
@@ -94,9 +94,14 @@ program_adopted :: proc(entry: ^Session_Entry) -> ^Program_Adopted {
 }
 
 // Follows the pane's program to this poll's snapshot; reports whether its icon may change.
-program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Process_Info, root: u32) -> bool {
+program_update :: proc(
+	app: ^App,
+	entry: ^Session_Entry,
+	processes: []procinfo.Process_Info,
+	root: u32,
+) -> bool {
 	apps := program_reporters(entry)
-	index := pty.process_program(processes, root, apps, program_polled(entry))
+	index := procinfo.process_program(processes, root, apps, program_polled(entry))
 	if index < 0 {
 		// A program seen once never showed, so its end changes nothing drawn or saved.
 		if _, seen := entry.program.(Program_Seen); seen {entry.program = nil; return false}
@@ -143,11 +148,11 @@ program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Proces
 // What a program confirmed by a second poll shows: its image, name and command.
 @(private)
 program_adopt :: proc(app: ^App, id, root: u32, stem: string) -> (program: Program_Adopted) {
-	path, ok := pty.process_image(id, root)
+	path, ok := procinfo.process_image(id, root)
 	name := stem
-	arguments, _ := pty.process_arguments(id, root, context.temp_allocator)
+	arguments, _ := procinfo.process_arguments(id, root, context.temp_allocator)
 	if program_listed(program_launchers[:], stem) {
-		if script := pty.process_script(arguments); program_known(app, script) {
+		if script := procinfo.process_script(arguments); program_known(app, script) {
 			name = script
 			// The launcher's own icon would show Node or cmd rather than the program.
 			delete(path)
@@ -178,7 +183,7 @@ program_command :: proc(arguments: []string, stem: string, allocator := context.
 	b := strings.builder_make(context.temp_allocator)
 	first := 1
 	if program_listed(program_launchers[:], stem) {
-		if script := pty.process_script(arguments); script != "" {
+		if script := procinfo.process_script(arguments); script != "" {
 			// The argument naming the script; anything after the script in it (cmd's quoted
 			// command) is kept.
 			for argument, i in arguments[1:] {
@@ -264,7 +269,7 @@ pane_program :: proc(app: ^App, entry: ^Session_Entry) -> u32 {
 	if program_polling(app) {
 		return program_polled(entry)
 	}
-	processes, err := pty.process_snapshot(context.temp_allocator)
+	processes, err := procinfo.process_snapshot(context.temp_allocator)
 	if err != .None {return 0}
 	program, _ := pane_running(app, entry, processes)
 	return program
@@ -272,9 +277,9 @@ pane_program :: proc(app: ^App, entry: ^Session_Entry) -> u32 {
 
 // The processes to read running programs from when a pane is remembered: nil while polling
 // tracks them, otherwise one snapshot taken now, in temporary memory.
-pane_processes :: proc(app: ^App) -> []pty.Process_Info {
+pane_processes :: proc(app: ^App) -> []procinfo.Process_Info {
 	if program_polling(app) || len(app.sessions) == 0 {return nil}
-	processes, err := pty.process_snapshot(context.temp_allocator)
+	processes, err := procinfo.process_snapshot(context.temp_allocator)
 	return err == .None ? processes : nil
 }
 
@@ -283,7 +288,7 @@ pane_processes :: proc(app: ^App) -> []pty.Process_Info {
 pane_running :: proc(
 	app: ^App,
 	entry: ^Session_Entry,
-	processes: []pty.Process_Info,
+	processes: []procinfo.Process_Info,
 ) -> (
 	program: u32,
 	command: string,
@@ -293,10 +298,10 @@ pane_running :: proc(
 		return program_polled(entry), command
 	}
 	root := term.process_id(entry.session)
-	index := pty.process_program(processes, root, program_reporters(entry), 0)
+	index := procinfo.process_program(processes, root, program_reporters(entry), 0)
 	if index < 0 {return}
 	program = processes[index].id
-	arguments, _ := pty.process_arguments(program, root, context.temp_allocator)
+	arguments, _ := procinfo.process_arguments(program, root, context.temp_allocator)
 	stem := settings.executable_stem(processes[index].executable)
 	return program, program_command(arguments, stem, context.temp_allocator)
 }

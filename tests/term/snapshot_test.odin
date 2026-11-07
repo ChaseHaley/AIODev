@@ -57,11 +57,11 @@ snapshot_text_width_and_ownership :: proc(t: ^testing.T) {
 	expect_row(t, &s, 2, "")
 	expect_row(t, &s, -1, "")
 	expect_row(t, &s, 3, "")
-	testing.expect_value(t, term.snapshot_cell(&s, 0, 1).width, ghostty.Cell_Wide.Wide)
-	testing.expect_value(t, term.snapshot_cell(&s, 1, 1).width, ghostty.Cell_Wide.Spacer_Tail)
+	testing.expect_value(t, term.snapshot_cell(&s, 0, 1).width, term.Cell_Width.Wide)
+	testing.expect_value(t, term.snapshot_cell(&s, 1, 1).width, term.Cell_Width.Spacer_Tail)
 	testing.expect_value(t, term.snapshot_cell(&s, 1, 1).text, "")
 	testing.expect_value(t, term.snapshot_cell(&s, 2, 1).text, "e\u0301")
-	testing.expect_value(t, term.snapshot_cell(&s, 2, 1).width, ghostty.Cell_Wide.Narrow)
+	testing.expect_value(t, term.snapshot_cell(&s, 2, 1).width, term.Cell_Width.Narrow)
 	testing.expect_value(t, term.snapshot_cell(&s, 0, 2).text, "")
 	outside := [?][2]int{{-1, 0}, {0, -1}, {10, 0}, {0, 3}}
 	for p in outside {
@@ -82,7 +82,7 @@ snapshot_wrapping_and_overscan :: proc(t: ^testing.T) {
 	w, wrap_err := term.snapshot(wrapped.state)
 	if !testing.expect_value(t, wrap_err, term.Error.None) { return }
 	defer term.snapshot_destroy(&w)
-	testing.expect_value(t, term.snapshot_cell(&w, 3, 0).width, ghostty.Cell_Wide.Spacer_Head)
+	testing.expect_value(t, term.snapshot_cell(&w, 3, 0).width, term.Cell_Width.Spacer_Head)
 	testing.expect_value(t, term.snapshot_cell(&w, 3, 0).text, "")
 	expect_row(t, &w, 0, "abc")
 	expect_row(t, &w, 1, "\u754c")
@@ -101,7 +101,7 @@ snapshot_wrapping_and_overscan :: proc(t: ^testing.T) {
 	expect_row(t, &s, 0, "1")
 	expect_row(t, &s, 1, "2")
 	expect_row(t, &s, 2, "3")
-	testing.expect(t, !s.cursor.viewport_has_value)
+	testing.expect(t, s.cursor.position == nil)
 }
 
 @(test)
@@ -138,13 +138,13 @@ snapshot_styles_and_colors :: proc(t: ^testing.T) {
 	a := term.snapshot_cell(&s, 0, 0).style
 	testing.expect(t, a.bold && a.faint && a.italic && a.blink && a.inverse && a.invisible)
 	testing.expect(t, a.strikethrough && a.overline)
-	underlines := [?]ghostty.Sgr_Underline{.Single, .Double, .Curly, .Dotted, .Dashed}
+	underlines := [?]term.Underline{.Single, .Double, .Curly, .Dotted, .Dashed}
 	for underline, i in underlines {
-		testing.expect_value(t, term.snapshot_cell(&s, i+1, 0).style.underline, i32(underline))
+		testing.expect_value(t, term.snapshot_cell(&s, i+1, 0).style.underline, underline)
 	}
+	testing.expect(t, term.snapshot_cell(&s, 4, 0).style.underline_color == nil)
 	u := term.snapshot_cell(&s, 5, 0).style.underline_color
-	testing.expect_value(t, u.tag, ghostty.Style_Color_Tag.Palette)
-	testing.expect_value(t, u.value.palette, 42)
+	testing.expect_value(t, u, Maybe(term.Color)(s.palette[42]))
 	testing.expect_value(t, s.palette[42], term.Color{0xab, 0xcd, 0xef})
 	g := term.snapshot_cell(&s, 6, 0)
 	testing.expect_value(t, g.foreground, Maybe(term.Color)(s.palette[123]))
@@ -173,11 +173,8 @@ snapshot_cursor_and_selection :: proc(t: ^testing.T) {
 	s, err := term.snapshot(source.state)
 	if !testing.expect_value(t, err, term.Error.None) { return }
 	defer term.snapshot_destroy(&s)
-	testing.expect(t, s.cursor.viewport_has_value && s.cursor.visible && s.cursor.blinking)
-	testing.expect_value(t, s.cursor.viewport_x, 1)
-	testing.expect_value(t, s.cursor.viewport_y, 1)
-	testing.expect(t, s.cursor.wide_tail)
-	testing.expect_value(t, s.cursor.visual_style, ghostty.Render_State_Cursor_Visual_Style.Bar)
+	testing.expect(t, s.cursor.visible && s.cursor.blinking)
+	testing.expect_value(t, s.cursor.position, Maybe([2]int)([2]int{1, 1}))
 	testing.expect(t, s.cursor_color == nil)
 	testing.expect(t, term.snapshot_cell(&s, 0, 0).selected)
 	testing.expect(t, !term.snapshot_cell(&s, 19, 2).selected)
@@ -188,7 +185,6 @@ snapshot_cursor_and_selection :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, hidden_err, term.Error.None) { return }
 	defer term.snapshot_destroy(&hidden)
 	testing.expect(t, !hidden.cursor.visible && !hidden.cursor.blinking)
-	testing.expect_value(t, hidden.cursor.visual_style, ghostty.Render_State_Cursor_Visual_Style.Underline)
 }
 
 @(test)

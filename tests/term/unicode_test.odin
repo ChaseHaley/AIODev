@@ -176,11 +176,11 @@ unicode_wide_wraps_at_edge :: proc(t: ^testing.T) {
 	g, ok := unicode_grid(t, transmute([]u8)input, 5)
 	if !ok { return }
 	defer unicode_grid_destroy(&g)
-	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 4, 0).width, ghostty.Cell_Wide.Spacer_Head)
+	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 4, 0).width, term.Cell_Width.Spacer_Head)
 	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 0, 1).text, "\U0000754c")
-	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 0, 1).width, ghostty.Cell_Wide.Wide)
+	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 0, 1).width, term.Cell_Width.Wide)
 	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 2, 1).text, "\U0001F469\U0000200d\U0001F4BB")
-	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 2, 1).width, ghostty.Cell_Wide.Wide)
+	testing.expect_value(t, term.snapshot_cell(&g.snapshot, 2, 1).width, term.Cell_Width.Wide)
 }
 
 // Writing every case on one line and resizing through each width never leaves a wide cell
