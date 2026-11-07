@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:strings"
 
-Profile_Mutation_Kind :: enum {Add, Duplicate, Enable, Remove, Move}
+Profile_Mutation_Kind :: enum {Add, Duplicate, Remove, Move}
 
 Profile_Mutation :: struct {
 	kind: Profile_Mutation_Kind,
@@ -28,7 +28,6 @@ profile_mutate :: proc(
 	if (change.kind == .Add || change.kind == .Duplicate) && len(profiles.items) >= PROFILE_LIMIT {
 		return "", "", "", .Limit
 	}
-	if change.kind == .Enable && !profile.detected {return "", "", "", .Unavailable}
 	if change.kind == .Remove && !profile_can_remove(profile) {
 		return "", "", "", .Unavailable
 	}
@@ -49,7 +48,7 @@ profile_mutate :: proc(
 	}
 	if alloc_error != nil {return "", "", "", .Allocation}
 	defer delete(revision, allocator)
-	if change.kind == .Add || change.kind == .Duplicate || change.kind == .Enable {
+	if change.kind == .Add || change.kind == .Duplicate {
 		values := Profile {
 			name = "New Profile", command = DEFAULT_PROFILE_COMMAND, directory = DEFAULT_PROFILE_DIRECTORY,
 		}
@@ -60,11 +59,9 @@ profile_mutate :: proc(
 			if change.kind == .Duplicate {values.name = fmt.tprintf("%s copy", profile.name)}
 		}
 		if change.kind == .Duplicate && values.icon != "" {fields += {.Icon}}
-		if change.kind != .Enable {
-			base := values.name
-			for number := 2; profile_name_taken(profiles, "", values.name); number += 1 {
-				values.name = fmt.tprintf("%s %d", base, number)
-			}
+		base := values.name
+		for number := 2; profile_name_taken(profiles, "", values.name); number += 1 {
+			values.name = fmt.tprintf("%s %d", base, number)
 		}
 		// The order new lines are appended in.
 		for field in ([?]Profile_Field{.Name, .Command, .Directory, .Hidden, .Icon}) {
@@ -84,12 +81,7 @@ profile_mutate :: proc(
 	for index in indices[:count] {
 		item := &profiles.items[index]
 		if change.kind == .Remove && item.id == target {continue}
-		if item.detected {
-			if change.kind != .Move && !(change.kind == .Enable && item.id == target) &&
-			   !profile_order_has(profiles, item.id) {
-				continue
-			}
-		}
+		if item.detected && change.kind != .Move && !profile_order_has(profiles, item.id) {continue}
 		if item.id == target {from = written}
 		ordered[written] = item.id
 		written += 1
@@ -99,7 +91,7 @@ profile_mutate :: proc(
 			from = written - 1
 		}
 	}
-	if (change.kind == .Add || change.kind == .Duplicate || change.kind == .Enable) && from < 0 {
+	if (change.kind == .Add || change.kind == .Duplicate) && from < 0 {
 		ordered[written] = target
 		written += 1
 	}

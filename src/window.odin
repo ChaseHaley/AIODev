@@ -385,7 +385,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	w.status_rail_reserve = status_panel_rail_height(app, w)
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
-		ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
+		ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	}
 	if w.phase == .Preparing || window_minimized(w) {return}
 	bar_height := window_title_height(w)

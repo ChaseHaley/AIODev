@@ -17,12 +17,12 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 	s, w := &f.state, f.state.windows[0]
 	for scale in ([?]f32{1, 1.5}) {
 		for node in ([?]layout.Node_Id{app.RAIL_DIVIDER, app.ACTIVITY_DIVIDER, app.ACTIVITY_HEIGHT_DIVIDER}) {
-			saved, _ := app.settings_save_value(s, "status.panel", "true", "enable Activity")
+			saved := app.settings_save_value(s, "status.panel", "true", "enable Activity")
 			if !testing.expect(t, saved) {return}
 			side := node == app.ACTIVITY_HEIGHT_DIVIDER ? "left" : "right"
-			saved, _ = app.settings_save_value(s, "status.panel_side", side, "set side")
+			saved = app.settings_save_value(s, "status.panel_side", side, "set side")
 			if !testing.expect(t, saved) {return}
-			saved, _ = app.settings_save_value(s, "tabs.orientation", "vertical", "set orientation")
+			saved = app.settings_save_value(s, "tabs.orientation", "vertical", "set orientation")
 			if !testing.expect(t, saved) {return}
 			w.scale, w.width, w.height = scale, i32(1400 * scale), i32(900 * scale)
 			w.rail_width, w.status.panel_width, w.status.panel_height = 272, 354, 0.57

@@ -67,18 +67,18 @@ settings_reveal_palette_clears_the_search_and_focuses_an_editable_row :: proc(t:
 	defer reveal_fixture_destroy(t, &f)
 	if !reveal_fixture_create(t, &f, "font.size = 12\n") {return}
 	e := &f.editor
-	app.settings_reveal_page(&f.state, e, {query = "font", search = .Scope})
+	app.settings_reveal_page(e, {query = "font", search = .Scope})
 	testing.expect_value(t, ui.field_string(&e.filter), "font")
-	app.settings_reveal_page(&f.state, e, {key = "pane.gap", search = .Clear, focus = .Control})
+	app.settings_reveal_page(e, {key = "pane.gap", search = .Clear, focus = .Control})
 	testing.expect_value(t, ui.field_string(&e.filter), "")
 	testing.expect_value(t, reveal_row_key(e), "pane.gap")
 	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Control)
 	testing.expect_value(t, e.message, "")
-	app.settings_reveal_page(&f.state, e, {key = "keys.tab.new", search = .Clear, focus = .Control})
+	app.settings_reveal_page(e, {key = "keys.tab.new", search = .Clear, focus = .Control})
 	testing.expect_value(t, reveal_row_key(e), "keys.tab.new")
 	testing.expect_value(t, ui.editor_row(e).kind, ui.Row_Kind.Shortcut)
 	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
-	app.settings_reveal_page(&f.state, e, {key = "no.such.key", search = .Clear, focus = .Control})
+	app.settings_reveal_page(e, {key = "no.such.key", search = .Clear, focus = .Control})
 	testing.expect_value(t, reveal_row_key(e), "font.size")
 	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
 }
@@ -90,8 +90,8 @@ settings_reveal_shortcut_scopes_the_search_to_key_bindings :: proc(t: ^testing.T
 	defer reveal_fixture_destroy(t, &f)
 	if !reveal_fixture_create(t, &f, "font.size = 12\n") {return}
 	e := &f.editor
-	app.settings_reveal_page(&f.state, e, {query = "font", search = .Scope})
-	app.settings_reveal_page(&f.state, e, {query = "keys.", search = .Scope})
+	app.settings_reveal_page(e, {query = "font", search = .Scope})
+	app.settings_reveal_page(e, {query = "keys.", search = .Scope})
 	testing.expect_value(t, ui.field_string(&e.filter), "keys.")
 	testing.expect(t, strings.has_prefix(reveal_row_key(e), "keys."))
 	visible := 0
@@ -113,8 +113,8 @@ settings_reveal_tab_selects_the_confirm_close_row :: proc(t: ^testing.T) {
 	defer reveal_fixture_destroy(t, &f)
 	if !reveal_fixture_create(t, &f, "font.size = 12\n") {return}
 	e := &f.editor
-	app.settings_reveal_page(&f.state, e, {query = "font", search = .Scope})
-	app.settings_reveal_page(&f.state, e, {key = "tab.confirm_close", search = .Clear})
+	app.settings_reveal_page(e, {query = "font", search = .Scope})
+	app.settings_reveal_page(e, {key = "tab.confirm_close", search = .Clear})
 	testing.expect_value(t, ui.field_string(&e.filter), "")
 	testing.expect_value(t, reveal_row_key(e), "tab.confirm_close")
 	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
@@ -136,13 +136,14 @@ settings_reveal_theme_preserves_the_search_across_a_reload_and_posts_its_message
 	if !testing.expect_value(t, os.write_entire_file(f.path, "profile.default.command = cmd.exe\n"), nil) {
 		return
 	}
+	query := strings.clone(ui.field_string(&e.filter), context.temp_allocator)
+	if !testing.expect(t, app.settings_load(&f.state, e)) {return}
 	app.settings_reveal_page(
-		&f.state,
 		e,
 		{
 			key = "profile.default.command",
-			search = .Preserve,
-			reload = true,
+			query = query,
+			search = .Scope,
 			message = "Shell foreground and background now follow the theme.",
 		},
 	)

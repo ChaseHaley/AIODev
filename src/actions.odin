@@ -4,7 +4,6 @@ import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
-import "aio:settings"
 import "aio:term"
 import "aio:ui"
 import "core:fmt"
@@ -828,11 +827,11 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		pane_header_cancel(w)
 		editor_open(app, w)
 	case .Change_Shortcut:
-		settings_reveal(app, w, {query = settings.KEY_BINDING_PREFIX, search = .Scope})
+		settings_reveal(app, w, {section = .Shortcuts})
 	case .Reload_Settings:
 		reload_settings(app)
 	case .Customize_Colors:
-		settings_reveal(app, w, {query = "colors.", search = .Scope})
+		settings_reveal(app, w, {section = .Colors})
 	case .Rename_Tab:
 		rename_open(app, w, true, tab_index)
 	case .Change_Pane_Shell:
@@ -966,7 +965,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Status_Inbox:
 		status_inbox_toggle(app, w)
 	case .Status_Panel:
-		settings_toggle_bool(app, "status.panel", &app.settings.status.panel)
+		settings_toggle_bool(app, "status.panel", app.settings.status.panel)
 	case .Status_Dismiss_Finished:
 		status_dismiss_finished(app, w)
 	}

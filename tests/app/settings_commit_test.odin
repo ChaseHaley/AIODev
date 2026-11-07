@@ -17,13 +17,10 @@ commit_text :: proc(t: ^testing.T, source, key, value: string) -> string {
 	return updated
 }
 
+// Saves one setting through the settings change every writer uses.
 @(private)
-theme_commit_text :: proc(t: ^testing.T, source, token, value: string) -> string {
-	updated, created, issue, err := settings.theme_color_edit(source, token, value, context.temp_allocator)
-	testing.expect_value(t, err, settings.Theme_Edit_Error.None)
-	testing.expect_value(t, issue, "")
-	_ = created
-	return updated
+commit_value :: proc(s: ^app.App, key, value: string, base: app.Settings_Base) -> app.Settings_Status {
+	return app.settings_change(s, app.Setting_Value{key, value}, base).status
 }
 
 // Opening Settings focuses an existing tab, so a second settings tab only comes from a layout saved with two.
@@ -63,13 +60,13 @@ settings_commit_publishes_across_writers_and_preserves_the_other_windows_draft :
 	if !commit_open_pages(t, &f, "commit-writers") {return}
 	s := &f.state
 	first, second := &s.windows[0].editor, &s.windows[1].editor
-	app.settings_reveal_page(s, first, {key = "pane.gap", focus = .Control})
-	app.settings_reveal_page(s, second, {key = "font.size", query = "font", search = .Scope, focus = .Control})
+	app.settings_reveal_page(first, {key = "pane.gap", focus = .Control})
+	app.settings_reveal_page(second, {key = "font.size", query = "font", search = .Scope, focus = .Control})
 	ui.field_set(&second.value, "19")
 	second.value.cursor, second.value.anchor = 1, 0
 	ui.editor_message(second, "Pending field", true)
 	updated := commit_text(t, ui.editor_source(first), "pane.gap", "9")
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}
+	if !testing.expect_value(t, commit_value(s, "pane.gap", "9", app.Settings_Page{first}), app.Settings_Status.Applied) {return}
 	testing.expect_value(t, s.settings.pane.gap, 9)
 	testing.expect_value(t, ui.editor_source(first), updated)
 	testing.expect_value(t, ui.editor_row(first).key, "pane.gap")
@@ -85,14 +82,15 @@ settings_commit_publishes_across_writers_and_preserves_the_other_windows_draft :
 	testing.expect_value(t, second.message, "Pending field")
 	testing.expect(t, second.error)
 	updated = commit_text(t, ui.editor_source(first), "tabs.orientation", "vertical")
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated), settings.Save_Error.None) {return}
+	expected := app.Settings_Expected{ui.editor_source(first)}
+	if !testing.expect_value(t, commit_value(s, "tabs.orientation", "vertical", expected), app.Settings_Status.Applied) {return}
 	for window in s.windows {
 		testing.expect(t, !window.tabs_horizontal)
 		testing.expect_value(t, ui.editor_source(&window.editor), updated)
 	}
 	testing.expect_value(t, ui.field_string(&second.value), "19")
 	updated = commit_text(t, ui.editor_source(second), "font.size", ui.field_string(&second.value))
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(second), updated, second), settings.Save_Error.None) {return}
+	if !testing.expect_value(t, commit_value(s, "font.size", "19", app.Settings_Page{second}), app.Settings_Status.Applied) {return}
 	testing.expect_value(t, s.settings.font.size, 19.0)
 	testing.expect_value(t, ui.editor_row(second).value, "19")
 	testing.expect_value(t, ui.editor_source(first), updated)
@@ -108,14 +106,13 @@ settings_commit_conflict_leaves_running_state_pages_and_drafts_unchanged :: proc
 	if !commit_open_pages(t, &f, "commit-conflict") {return}
 	s := &f.state
 	p := &s.windows[0].editor
-	app.settings_reveal_page(s, p, {key = "font.size", focus = .Control})
+	app.settings_reveal_page(p, {key = "font.size", focus = .Control})
 	ui.field_set(&p.value, "19")
 	previous := strings.clone(ui.editor_source(p), context.temp_allocator)
 	font_size := s.settings.font.size
 	external := commit_text(t, previous, "pane.gap", "9")
 	if !testing.expect_value(t, os.write_entire_file(f.path, external), nil) {return}
-	updated := commit_text(t, previous, "font.size", "19")
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated, p), settings.Save_Error.Conflict)
+	testing.expect_value(t, commit_value(s, "font.size", "19", app.Settings_Page{p}), app.Settings_Status.Conflict)
 	testing.expect_value(t, s.settings.font.size, font_size)
 	for window in s.windows {
 		testing.expect_value(t, ui.editor_source(&window.editor), previous)
@@ -140,16 +137,15 @@ settings_commit_disk_writer_keeps_an_external_conflict_on_stale_pages :: proc(t:
 	previous := strings.clone(ui.editor_source(p), context.temp_allocator)
 	external := commit_text(t, previous, "pane.gap", "9")
 	if !testing.expect_value(t, os.write_entire_file(f.path, external), nil) {return}
-	updated := commit_text(t, external, "tabs.orientation", "vertical")
-	if !testing.expect_value(t, app.settings_commit(s, external, updated), settings.Save_Error.None) {return}
+	vertical := commit_value(s, "tabs.orientation", "vertical", app.Settings_Expected{external})
+	if !testing.expect_value(t, vertical, app.Settings_Status.Applied) {return}
 	testing.expect_value(t, s.settings.pane.gap, 9)
 	testing.expect_value(t, s.settings.tabs.orientation, settings.Tabs_Orientation.Vertical)
 	for window in s.windows {
 		testing.expect_value(t, ui.editor_source(&window.editor), previous)
 		expect_revision(t, &window.editor, false)
 	}
-	candidate := commit_text(t, ui.editor_source(p), "font.size", "19")
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), candidate, p), settings.Save_Error.Conflict)
+	testing.expect_value(t, commit_value(s, "font.size", "19", app.Settings_Page{p}), app.Settings_Status.Conflict)
 }
 
 @(test)
@@ -161,12 +157,11 @@ settings_commit_io_failure_does_not_publish :: proc(t: ^testing.T) {
 	p := &s.windows[0].editor
 	previous := strings.clone(ui.editor_source(p), context.temp_allocator)
 	gap := s.settings.pane.gap
-	updated := commit_text(t, previous, "pane.gap", "9")
 	previous_path := s.settings_path
 	s.settings_path = strings.concatenate({f.directory, "/missing/settings.ini"}, context.temp_allocator)
 	defer s.settings_path = previous_path
 	context.logger = {}
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated, p), settings.Save_Error.IO)
+	testing.expect_value(t, commit_value(s, "pane.gap", "9", app.Settings_Page{p}), app.Settings_Status.Failed)
 	testing.expect_value(t, s.settings.pane.gap, gap)
 	for window in s.windows {
 		testing.expect_value(t, ui.editor_source(&window.editor), previous)
@@ -181,23 +176,25 @@ settings_commit_keeps_a_removed_profiles_draft_as_a_conflict :: proc(t: ^testing
 	if !commit_open_pages(t, &f, "commit-removed") {return}
 	s := &f.state
 	first, second := &s.windows[0].editor, &s.windows[1].editor
-	updated := commit_text(t, ui.editor_source(first), "profile.custom.command", "cmd.exe")
-	updated = commit_text(t, updated, "profile.custom.name", "Custom")
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}
-	app.settings_reveal_page(s, second, {key = "profile.custom.name", focus = .Control})
+	command := commit_value(s, "profile.custom.command", "cmd.exe", app.Settings_Page{first})
+	if !testing.expect_value(t, command, app.Settings_Status.Applied) {return}
+	name := commit_value(s, "profile.custom.name", "Custom", app.Settings_Page{first})
+	if !testing.expect_value(t, name, app.Settings_Status.Applied) {return}
+	app.settings_reveal_page(second, {key = "profile.custom.name", focus = .Control})
 	ui.field_set(&second.value, "My pending name")
 	previous := strings.clone(ui.editor_source(second), context.temp_allocator)
-	removed, remove_error := settings.remove_profile_text(ui.editor_source(first), "custom", context.temp_allocator)
-	if !testing.expect_value(t, remove_error, nil) {return}
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), removed, first), settings.Save_Error.None) {return}
+	remove := settings.Profile_Mutation{kind = .Remove, id = "custom"}
+	removed := app.settings_change(s, remove, app.Settings_Page{first})
+	if !testing.expect_value(t, removed.status, app.Settings_Status.Applied) {return}
 	testing.expect(t, settings.profile_find(&s.settings.profiles, "custom") == nil)
 	testing.expect_value(t, ui.editor_source(second), previous)
 	expect_revision(t, second, false, .Draft_Conflict)
 	expect_revision(t, first, true)
 	testing.expect_value(t, ui.editor_row(second).key, "profile.custom.name")
 	testing.expect_value(t, ui.field_string(&second.value), "My pending name")
-	candidate := commit_text(t, ui.editor_source(second), "profile.custom.name", ui.field_string(&second.value))
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(second), candidate, second), settings.Save_Error.Conflict)
+	pending := strings.clone(ui.field_string(&second.value), context.temp_allocator)
+	renamed := commit_value(s, "profile.custom.name", pending, app.Settings_Page{second})
+	testing.expect_value(t, renamed, app.Settings_Status.Conflict)
 }
 
 // Reloading is how a page behind the file catches up: every page adopts the file, and a draft whose
@@ -209,12 +206,13 @@ settings_reload_publishes_the_file_to_stale_pages_and_keeps_drafts :: proc(t: ^t
 	if !commit_open_pages(t, &f, "reload-stale") {return}
 	s := &f.state
 	first, second := &s.windows[0].editor, &s.windows[1].editor
-	app.settings_reveal_page(s, second, {key = "font.size", focus = .Control})
+	app.settings_reveal_page(second, {key = "font.size", focus = .Control})
 	ui.field_set(&second.value, "19")
 	external := commit_text(t, ui.editor_source(first), "pane.gap", "9")
 	if !testing.expect_value(t, os.write_entire_file(f.path, external), nil) {return}
 	updated := commit_text(t, external, "tabs.orientation", "vertical")
-	if !testing.expect_value(t, app.settings_commit(s, external, updated), settings.Save_Error.None) {return}
+	vertical := commit_value(s, "tabs.orientation", "vertical", app.Settings_Expected{external})
+	if !testing.expect_value(t, vertical, app.Settings_Status.Applied) {return}
 	for window in s.windows {expect_revision(t, &window.editor, false)}
 	app.reload_settings(s, false)
 	for window in s.windows {
@@ -224,8 +222,7 @@ settings_reload_publishes_the_file_to_stale_pages_and_keeps_drafts :: proc(t: ^t
 	testing.expect_value(t, ui.editor_row(second).key, "font.size")
 	testing.expect_value(t, ui.field_string(&second.value), "19")
 	testing.expect(t, ui.editor_draft(second), "the carried draft survives reloading")
-	candidate := commit_text(t, ui.editor_source(second), "font.size", ui.field_string(&second.value))
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(second), candidate, second), settings.Save_Error.None)
+	testing.expect_value(t, commit_value(s, "font.size", "19", app.Settings_Page{second}), app.Settings_Status.Applied)
 	testing.expect_value(t, s.settings.font.size, 19.0)
 }
 
@@ -236,7 +233,7 @@ settings_commit_keeps_the_origins_color_picker_and_hsv_after_drag_release :: pro
 	if !profile_fixture_create(t, &f, "commit-picker", PROFILE_FIXTURE_SETTINGS) {return}
 	p := profile_open(&f)
 	w := f.state.windows[0]
-	app.settings_reveal_page(&f.state, p, {key = "colors.cursor", focus = .Control})
+	app.settings_reveal_page(p, {key = "colors.cursor", focus = .Control})
 	cases := [?]struct {value: string, hsv: [3]f32, drag: ui.Color_Drag} {
 		{"#000000", {120, 0.75, 0}, .Ramp},
 		{"#408020", {100, 0.75, 0.5}, .Wheel},
@@ -263,21 +260,20 @@ settings_commit_rebuilds_a_clean_peers_picker_hsv_when_its_effective_color_chang
 	if !commit_open_pages(t, &f, "commit-peer-picker") {return}
 	s := &f.state
 	first, second := &s.windows[0].editor, &s.windows[1].editor
-	updated := theme_commit_text(t, ui.editor_source(first), "cursor", "#000000")
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}
-	app.settings_reveal_page(s, second, {key = "colors.cursor", focus = .Control})
+	color := app.settings_change(s, app.Theme_Change(app.Theme_Color{"cursor", "#000000"}), app.Settings_Page{first})
+	if !testing.expect_value(t, color.status, app.Settings_Status.Applied) {return}
+	app.settings_reveal_page(second, {key = "colors.cursor", focus = .Control})
 	second.mode, second.hsv = ui.Editor_Color_Popup{}, {120, 0.75, 0}
-	updated = theme_commit_text(t, ui.editor_source(first), "cursor", "#408020")
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}
+	color = app.settings_change(s, app.Theme_Change(app.Theme_Color{"cursor", "#408020"}), app.Settings_Page{first})
+	if !testing.expect_value(t, color.status, app.Settings_Status.Applied) {return}
 	testing.expect_value(t, ui.editor_popup(second), ui.Editor_Popup.Color)
 	testing.expect_value(t, ui.field_string(&second.value), "#408020")
 	h, saturation, value := colour.rgb_to_hsv({64, 128, 32})
 	testing.expect_value(t, second.hsv, [3]f32{h, saturation, value})
-	updated = theme_commit_text(t, ui.editor_source(first), "cursor", "#000000")
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}
+	color = app.settings_change(s, app.Theme_Change(app.Theme_Color{"cursor", "#000000"}), app.Settings_Page{first})
+	if !testing.expect_value(t, color.status, app.Settings_Status.Applied) {return}
 	second.hsv = {120, 0.75, 0}
-	updated = commit_text(t, ui.editor_source(first), "pane.gap", "9")
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}
+	if !testing.expect_value(t, commit_value(s, "pane.gap", "9", app.Settings_Page{first}), app.Settings_Status.Applied) {return}
 	testing.expect_value(t, second.hsv, [3]f32{120, 0.75, 0})
 	testing.expect_value(t, ui.editor_popup(second), ui.Editor_Popup.Color)
 }

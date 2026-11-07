@@ -22,6 +22,14 @@ Process_Parts :: struct {
 	handle, expand, remove: render.Rect,
 }
 
+// The program group editor's state on the settings page. The groups are one aggregate draft: once
+// any field changes (`process_dirty`), they save together as one setting over `process_source`.
+Process_Editor_State :: struct {
+	process_expanded, process_next, process_next_program, process_fallback: int,
+	process_source:                                                         string,
+	process_dirty:                                                          bool,
+}
+
 editor_process_parts :: proc(row: render.Rect, scale: f32) -> Process_Parts {
 	s := scale
 	size := min(28 * s, row.width / 4)
@@ -127,7 +135,10 @@ process_select :: proc(p: ^Editor, key: string, focus: bool = false) {
 	// Items contain row offsets; discard them before rebuilding after structural row edits.
 	clear(&p.items)
 	editor_rebuild(p)
-	if editor_reveal(p, key) && focus {editor_mode_set(p, Editor_Editing{}); field_select_all(&p.value)}
+	if editor_reveal(p, Reveal_Row{key}) && focus {
+		editor_mode_set(p, Editor_Editing{})
+		field_select_all(&p.value)
+	}
 }
 
 editor_process_toggle :: proc(p: ^Editor, id: int) {

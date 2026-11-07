@@ -72,7 +72,7 @@ activity_side_button_persists_setting_and_cancels_outside_or_on_capture_loss :: 
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "activity-side", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	saved, _ := app.settings_save_value(s, "status.panel", "true", "enable panel")
+	saved := app.settings_save_value(s, "status.panel", "true", "enable panel")
 	if !testing.expect(t, saved) {return}
 	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
 		r := app.status_panel_side_rect(s, w)

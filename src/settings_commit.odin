@@ -1,9 +1,443 @@
 package main
 
+import "aio:commands"
 import "aio:settings"
 import "aio:ui"
+import "core:fmt"
 import "core:os"
 import "core:strings"
+
+// One change to the settings. Every surface that writes settings (the page, the palette, toolbar
+// buttons, confirmations) describes its change here, and settings_change builds, checks, saves and
+// publishes it in one order. Strings are borrowed for the call.
+Settings_Edit :: union #no_nil {
+	// One key: a schema setting, a shortcut or a custom theme field.
+	Setting_Value,
+	Profile_Field_Value,
+	settings.Profile_Mutation,
+	Theme_Change,
+	Factory_Reset,
+}
+
+Setting_Value :: struct {
+	key, value: string,
+}
+
+// One inline profile field, checked as the page checks typing. Hidden takes the file's value.
+Profile_Field_Value :: struct {
+	id:    string,
+	field: settings.Profile_Field,
+	value: string,
+}
+
+// A change to the active theme of the revision.
+Theme_Change :: union #no_nil {
+	Theme_Color,
+	Theme_Name,
+	Theme_Rename,
+	Theme_Duplicate,
+	Theme_Remove,
+}
+
+// An empty value returns the color to the base theme.
+Theme_Color :: struct {
+	token_key, value: string,
+}
+
+Theme_Name :: struct {
+	name: string,
+}
+
+Theme_Rename :: struct {
+	id: string,
+}
+
+Theme_Duplicate :: struct {}
+
+Theme_Remove :: struct {}
+
+// The factory defaults replace the whole file; open pages drop their drafts.
+Factory_Reset :: struct {}
+
+// The revision a change is computed against and must still be in the file when it saves.
+Settings_Base :: union #no_nil {
+	// The page's own text. The page is publication's origin and keeps its saved field.
+	Settings_Page,
+	// The file as it is now. Without a settings file, the running settings.
+	Settings_Current,
+	// The text a confirmation was asked against.
+	Settings_Expected,
+}
+
+Settings_Page :: struct {
+	page: ^ui.Editor,
+}
+
+Settings_Current :: struct {}
+
+Settings_Expected :: struct {
+	source: string,
+}
+
+Settings_Status :: enum {
+	Applied,
+	// Nothing to save, such as a profile that no longer exists.
+	Unchanged,
+	// The change or its shortcuts were refused; `message` says why.
+	Refused,
+	// The change could not be built.
+	Unprepared,
+	// The file no longer holds the base revision.
+	Conflict,
+	// The file could not be read or written.
+	Failed,
+}
+
+Settings_Result :: struct {
+	status:  Settings_Status,
+	// Refused: why. Applied: a shortcut warning, or empty. Temporary.
+	message: string,
+	// The profile or theme the change created, renamed to or selected. Temporary.
+	id:      string,
+}
+
+// Which surface asked, which picks the wording of a failure.
+Settings_Workflow :: enum {
+	Setting,
+	Profile_Field,
+	Profile,
+	Process,
+	Theme,
+	Font_Filter,
+	Reset,
+}
+
+@(private, rodata)
+SETTINGS_FAILURE_TEXT := [Settings_Workflow][Settings_Status]string {
+	.Setting = #partial [Settings_Status]string {
+		.Unprepared = "Could not allocate settings change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save settings. Check the settings path and permissions.",
+	},
+	.Profile_Field = #partial [Settings_Status]string {
+		.Unprepared = "Could not allocate settings change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save the profile. Check the settings path and permissions.",
+	},
+	.Profile = #partial [Settings_Status]string {
+		.Unprepared = "Could not prepare the profile change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save the profile. Check the settings path and permissions.",
+	},
+	.Process = #partial [Settings_Status]string {
+		.Unprepared = "Could not prepare program settings.",
+		.Conflict = "File changed outside this editor. Reopen Settings to reload it.",
+		.Failed = "Could not save program settings.",
+	},
+	.Theme = #partial [Settings_Status]string {
+		.Unprepared = "Could not prepare the theme change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save the theme. Check the settings path and permissions.",
+	},
+	.Font_Filter = #partial [Settings_Status]string {
+		.Refused = FONT_FILTER_FAILURE_TEXT,
+		.Unprepared = FONT_FILTER_FAILURE_TEXT,
+		.Conflict = FONT_FILTER_FAILURE_TEXT,
+		.Failed = FONT_FILTER_FAILURE_TEXT,
+	},
+	.Reset = #partial [Settings_Status]string {
+		.Unprepared = "Could not prepare factory defaults.",
+		.Conflict = RESET_FAILURE_TEXT,
+		.Failed = RESET_FAILURE_TEXT,
+	},
+}
+
+@(private)
+SETTINGS_CONFLICT_TEXT :: "File changed outside this editor. Close and reopen Settings to reload it."
+@(private)
+FONT_FILTER_FAILURE_TEXT :: "Could not save font filtering. Reopen Settings and try again."
+@(private)
+RESET_FAILURE_TEXT :: "Could not reset settings. Reopen Settings and try again."
+
+// What `workflow` says about a result that did not apply: a refusal's own reason, else the
+// workflow's failure wording. Empty for a result with nothing to report.
+settings_result_text :: proc(result: Settings_Result, workflow: Settings_Workflow) -> string {
+	failure := SETTINGS_FAILURE_TEXT[workflow][result.status]
+	if result.status == .Refused && failure == "" {return result.message}
+	return failure
+}
+
+// Shows a result that did not apply on the page that asked. True when the change applied.
+settings_page_report :: proc(p: ^ui.Editor, result: Settings_Result, workflow: Settings_Workflow) -> bool {
+	if result.status == .Applied {return true}
+	if text := settings_result_text(result, workflow); text != "" {ui.editor_message(p, text, true)}
+	return false
+}
+
+// Saves one setting from outside the page, such as the palette or a toolbar button, and reports
+// a refusal or `failure` as a notice. A shortcut warning is shown once the change applies.
+settings_save_value :: proc(app: ^App, key, value, failure: string) -> bool {
+	result := settings_change(app, Setting_Value{key, value}, Settings_Current{})
+	switch result.status {
+	case .Applied:
+		if result.message != "" {notify(app, .Info, result.message)}
+		return true
+	case .Unchanged:
+		return true
+	case .Refused:
+		notify(app, .Error, result.message)
+	case .Unprepared, .Conflict, .Failed:
+		notify(app, .Error, failure)
+	}
+	return false
+}
+
+// Builds the revision `edit` makes of `base`, checks its shortcuts when the change can affect them,
+// saves it over exactly `base`, applies it to the running app and publishes it to every open
+// settings page. A rejected change leaves the file, the running settings and every page as they
+// were; a conflict marks the pages showing `base` as behind the file. Without a settings file only
+// a schema setting can change, and it applies to the running settings directly.
+@(require_results)
+settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> Settings_Result {
+	if app.settings_path == "" {return settings_change_memory(app, edit)}
+	source: string
+	origin: ^ui.Editor
+	switch b in base {
+	case Settings_Page:
+		source, origin = ui.editor_source(b.page), b.page
+	case Settings_Current:
+		data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
+		if read_error != nil {return {status = .Failed}}
+		source = string(data)
+	case Settings_Expected:
+		source = b.source
+	}
+	// Publication replaces pages, which may own `source`.
+	previous, previous_error := strings.clone(source, context.temp_allocator)
+	if previous_error != nil {return {status = .Unprepared}}
+	built := settings_edit_build(app, edit, previous)
+	defer delete(built.revision)
+	if built.result.status != .Applied {return built.result}
+	revision, revision_error := strings.clone(built.revision, context.temp_allocator)
+	if revision_error != nil {return {status = .Unprepared}}
+	loaded, diagnostics, parse_error := settings.parse(revision, inputs = &app.settings_inputs)
+	defer settings.destroy(&loaded)
+	defer settings.diagnostics_destroy(&diagnostics)
+	if parse_error != nil {return {status = .Failed}}
+	result := built.result
+	if value, ok := edit.(Setting_Value); ok && settings.setting_affects_bindings(value.key) {
+		problem, warning := settings_bindings_check(&loaded, app.settings_path)
+		if problem != "" {return {status = .Refused, message = problem}}
+		result.message = warning
+	}
+	switch settings.save(app.settings_path, previous, revision) {
+	case .None:
+	case .Conflict:
+		for window in app.windows {
+			p := &window.editor
+			if ui.editor_source(p) == previous {ui.editor_revision_stale(p, .Changed_Outside)}
+		}
+		return {status = .Conflict}
+	case .IO:
+		return {status = .Failed}
+	}
+	publication: Settings_Publication = Publish_Saved{previous, revision, origin}
+	if _, reset := edit.(Factory_Reset); reset {publication = Publish_Reset{revision}}
+	settings_revision_apply(app, loaded, &diagnostics, nil, publication)
+	loaded = {}
+	return result
+}
+
+// A built revision: owned `revision` when the result is Applied.
+@(private)
+Settings_Built :: struct {
+	revision: string,
+	result:   Settings_Result,
+}
+
+// The revision `edit` makes of `source`. Profile and theme changes resolve against the revision
+// `source` parses to, never against the running settings, which a page may be behind.
+@(private, require_results)
+settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (built: Settings_Built) {
+	switch e in edit {
+	case Setting_Value:
+		return settings_text_edit(source, e.key, e.value)
+	case Factory_Reset:
+		defaults, err := settings.default_text()
+		if err != nil {return {result = {status = .Unprepared}}}
+		return {revision = defaults}
+	case Profile_Field_Value, settings.Profile_Mutation, Theme_Change:
+	}
+	model, diagnostics, parse_error := settings.parse(source, inputs = &app.settings_inputs)
+	settings.diagnostics_destroy(&diagnostics)
+	defer settings.destroy(&model)
+	if parse_error != nil {return {result = {status = .Unprepared}}}
+	#partial switch e in edit {
+	case Profile_Field_Value:
+		return settings_profile_field_edit(&model, source, e)
+	case settings.Profile_Mutation:
+		return settings_profile_mutation_edit(&model, source, e)
+	case Theme_Change:
+		return settings_theme_edit(&model, source, e)
+	}
+	return
+}
+
+@(private, require_results)
+settings_text_edit :: proc(source, key, value: string) -> Settings_Built {
+	updated, message, err := settings.edit_text(source, key, value)
+	defer delete(message)
+	if err != nil || message != "" {
+		delete(updated)
+		if err != nil {return {result = {status = .Unprepared}}}
+		refused := Settings_Built{result = {status = .Refused}}
+		refused.result.message, _ = strings.clone(message, context.temp_allocator)
+		return refused
+	}
+	return {revision = updated}
+}
+
+// Empty names and commands, duplicate names and a command line whose executable cannot be found are
+// refused with the page's inline wording.
+@(private, require_results)
+settings_profile_field_edit :: proc(
+	model: ^settings.Settings,
+	source: string,
+	change: Profile_Field_Value,
+) -> Settings_Built {
+	problem := settings.Profile_Problem.None
+	if change.field != .Hidden {
+		_, problem = settings.profile_field_check(
+			change.field, change.value, .Interactive_Field, &model.profiles, change.id,
+		)
+	}
+	if problem == .None && change.field == .Command && !profile_command_exists(change.value) {
+		problem = .Command_Missing
+	}
+	if problem != .None {
+		text := settings.profile_problem_text(problem, .Interactive_Field, change.value)
+		return {result = {status = .Refused, message = text}}
+	}
+	return settings_text_edit(source, settings.profile_field_key(change.id, change.field), change.value)
+}
+
+@(private, require_results)
+settings_profile_mutation_edit :: proc(
+	model: ^settings.Settings,
+	source: string,
+	change: settings.Profile_Mutation,
+) -> (
+	built: Settings_Built,
+) {
+	updated, id, issue, error := settings.profile_mutate(source, &model.profiles, change)
+	defer delete(id)
+	defer delete(issue)
+	switch error {
+	case .None:
+		built.revision = updated
+		built.result.id, _ = strings.clone(id, context.temp_allocator)
+	case .Unavailable:
+		built.result.status = .Unchanged
+	case .Edit:
+		built.result.status = .Refused
+		built.result.message, _ = strings.clone(issue, context.temp_allocator)
+	case .Limit:
+		built.result = {status = .Refused, message = "Profile limit reached. Remove one before duplicating."}
+		if change.kind == .Add {
+			built.result.message = "Profile limit reached. Remove one before adding another."
+		}
+	case .Allocation:
+		built.result.status = .Unprepared
+	}
+	if error != .None {delete(updated)}
+	return
+}
+
+@(private, require_results)
+settings_theme_edit :: proc(
+	model: ^settings.Settings,
+	source: string,
+	change: Theme_Change,
+) -> (
+	built: Settings_Built,
+) {
+	updated, id, issue: string
+	error: settings.Theme_Edit_Error
+	switch c in change {
+	case Theme_Color:
+		updated, id, issue, error = settings.theme_color_edit(model, source, c.token_key, c.value)
+		if error == .None && updated == source {
+			delete(updated)
+			return {result = {status = .Unchanged}}
+		}
+	case Theme_Name:
+		key := fmt.tprintf("%s%s.name", settings.CUSTOM_THEME_PREFIX, model.theme.name)
+		return settings_text_edit(source, key, strings.trim_space(c.name))
+	case Theme_Rename:
+		updated, issue, error = settings.theme_rename(model, source, c.id)
+		built.result.id = c.id
+	case Theme_Duplicate:
+		updated, id, error = settings.theme_duplicate(model, source)
+		if error == .Invalid {issue = "Custom theme limit reached. Delete one before saving another."}
+	case Theme_Remove:
+		updated, id, error = settings.theme_delete(model, source)
+	}
+	defer delete(id)
+	switch error {
+	case .None:
+		built.revision = updated
+		if id != "" {built.result.id, _ = strings.clone(id, context.temp_allocator)}
+		return
+	case .Allocation:
+		built.result.status = .Unprepared
+	case .Invalid:
+		built.result = {status = .Refused, message = issue}
+	case .Unavailable:
+		built.result = {status = .Refused, message = "Theme files cannot be renamed or deleted here."}
+	}
+	delete(updated)
+	return
+}
+
+// Without a settings file, a schema setting changes the running settings and every window
+// follows it at once, relaid out for sizes and sides. Nothing else has a running form to change.
+@(private, require_results)
+settings_change_memory :: proc(app: ^App, edit: Settings_Edit) -> Settings_Result {
+	value, is_value := edit.(Setting_Value)
+	entry := is_value ? settings.schema_find(value.key) : nil
+	if entry == nil {return {status = .Failed}}
+	message, err := settings.setting_assign(&app.settings, entry^, value.value)
+	if err != nil {return {status = .Unprepared}}
+	if message != "" {return {status = .Refused, message = message}}
+	for window in app.windows {
+		window_apply_settings(app, window)
+		rail_reveal_active(window)
+		window_relayout(app, window)
+	}
+	status_apply_settings(app)
+	return {status = .Applied}
+}
+
+// A refusal for the first shortcut problem a revision would have, or the first warning it keeps.
+// Both are temporary.
+@(private, require_results)
+settings_bindings_check :: proc(s: ^settings.Settings, path: string) -> (problem, warning: string) {
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	if register_actions(&registry) != .None {return "Could not validate shortcuts.", ""}
+	report, report_error := binding_report(&registry, s)
+	for issue in report.issues {
+		if issue.severity == .Shortcut_Warning {
+			if warning == "" {warning = binding_issue_identity(issue, path)}
+		} else if issue.kind == .Duplicate_Shortcut {
+			return fmt.tprintf("Assigned to %s. Choose another shortcut.", issue.conflict.winner.title), ""
+		} else {
+			return fmt.tprintf("%s: %s", issue.key, binding_issue_text(issue, path)), ""
+		}
+	}
+	if report_error != nil {return "Could not validate shortcuts.", ""}
+	return "", warning
+}
 
 // How a new settings revision reaches the open settings pages.
 Settings_Publication :: union #no_nil {
@@ -34,86 +468,10 @@ Publish_Reset :: struct {
 	revision: string,
 }
 
-// Saves and publishes exactly one internal revision.
-@(require_results)
-settings_commit :: proc(
-	app: ^App,
-	expected, updated: string,
-	origin: ^ui.Editor = nil,
-) -> settings.Save_Error {
-	// A caller may borrow either string from a page that publication replaces.
-	previous, previous_error := strings.clone(expected, context.temp_allocator)
-	revision, revision_error := strings.clone(updated, context.temp_allocator)
-	if previous_error != nil || revision_error != nil {return .IO}
-	return settings_save_revision(app, previous, revision, Publish_Saved{previous, revision, origin})
-}
-
-// Saves `revision` over `expected` and applies it. A conflict means the file no longer holds
-// `expected`, so the pages showing it have fallen behind.
-@(private, require_results)
-settings_save_revision :: proc(
-	app: ^App,
-	expected, revision: string,
-	publication: Settings_Publication,
-) -> settings.Save_Error {
-	loaded, diagnostics, parse_error := settings.parse(revision, themes_directory = settings.theme_directory())
-	defer settings.destroy(&loaded)
-	defer settings.diagnostics_destroy(&diagnostics)
-	if parse_error != nil {return .IO}
-	result := settings.save(app.settings_path, expected, revision)
-	if result == .Conflict {
-		for window in app.windows {
-			p := &window.editor
-			if ui.editor_source(p) == expected {ui.editor_revision_stale(p, .Changed_Outside)}
-		}
-	}
-	if result != .None {return result}
-	settings_revision_apply(app, loaded, &diagnostics, nil, publication)
-	loaded = {}
-	return .None
-}
-
-// Saves one setting through the file so the change survives and every window applies it. A value
-// the schema refuses reports why; other failures report `failure`. Without a settings file, as in
-// tests, the caller applies the value itself.
-@(require_results)
-settings_save_value :: proc(app: ^App, key, value, failure: string) -> (saved, has_file: bool) {
-	if app.settings_path == "" {return false, false}
-	data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
-	if read_error != nil {
-		notify(app, .Error, failure)
-		return false, true
-	}
-	updated, message, edit_error := settings.edit_text(string(data), key, value)
-	defer delete(updated)
-	defer delete(message)
-	if edit_error == nil && message != "" {
-		notify(app, .Error, message)
-		return false, true
-	}
-	warning: string
-	if edit_error == nil && settings.setting_affects_bindings(key) {
-		problem: string
-		problem, warning = editor_validate_bindings(updated, app.settings_path)
-		if problem != "" {
-			notify(app, .Error, problem)
-			return false, true
-		}
-	}
-	if edit_error != nil || settings_commit(app, string(data), updated) != .None {
-		notify(app, .Error, failure)
-		return false, true
-	}
-	if warning != "" {notify(app, .Info, warning)}
-	return true, true
-}
-
-// Shows a new revision on every open settings page. It also ends any Delete Theme prompt, since the
-// revision may have changed the theme the prompt named.
+// Shows a new revision on every open settings page.
 @(private)
 settings_publish :: proc(app: ^App, publication: Settings_Publication) {
 	for window in app.windows {
-		theme_delete_disarm(&window.resources)
 		p := &window.editor
 		if !ui.editor_loaded(p) {continue}
 		window.dirty = true
@@ -123,15 +481,15 @@ settings_publish :: proc(app: ^App, publication: Settings_Publication) {
 				ui.editor_revision_stale(p, .Changed_Outside)
 				continue
 			}
-			settings_publish_page(app, p, publish.revision, p != publish.origin)
+			settings_publish_page(app, p, publish.revision, p == publish.origin ? .Saved_Origin : .Saved_Other)
 		case Publish_Reloaded:
-			settings_publish_page(app, p, publish.revision, true)
+			settings_publish_page(app, p, publish.revision, .Reloaded)
 		case Publish_Unavailable:
 			ui.editor_revision_stale(p, .Refresh_Failed)
 		case Publish_Reset:
 			// The page is built afresh rather than carried over, which drops what the user had open.
-			replacement: ui.Editor
-			if !settings_load_source(app, &replacement, publish.revision) {
+			replacement, built := settings_page_build(app, publish.revision, nil)
+			if !built {
 				ui.editor_revision_stale(p, .Refresh_Failed)
 				continue
 			}
@@ -141,53 +499,29 @@ settings_publish :: proc(app: ^App, publication: Settings_Publication) {
 	}
 }
 
+// Rebuilds one page for `revision` and lets the page adopt it. Every way out short of adopting
+// leaves the page behind the revision with its source and drafts intact.
 @(private)
-settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, preserve_draft: bool) {
-	// Every way out short of replacing the page leaves it behind the revision.
-	reason := ui.Editor_Stale_Reason.Refresh_Failed
-	published := false
-	defer if !published {ui.editor_revision_stale(p, reason)}
+settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, adoption: ui.Editor_Adoption) {
 	if !ui.editor_process_capture(p) {
 		notify(app, .Error, "Could not preserve the active program draft.")
+		ui.editor_revision_stale(p, .Refresh_Failed)
 		return
 	}
-	replacement: ui.Editor
-	defer ui.editor_destroy(&replacement)
 	view, view_error := ui.editor_view_take(p)
 	defer ui.editor_view_destroy(&view)
 	if view_error != nil {
 		notify(app, .Error, "Could not refresh the settings page. Reopen Settings to reload it.")
+		ui.editor_revision_stale(p, .Refresh_Failed)
 		return
 	}
-	ui.editor_view_hold(&replacement, &view)
-	if !settings_load_source(app, &replacement, revision) {return}
-	if p.process_dirty {
-		if preserve_draft && p.process_source != replacement.process_source {
-			reason = .Draft_Conflict
-			return
-		}
-		if ui.editor_process_copy_draft(p, &replacement) != nil {
-			notify(app, .Error, "Could not preserve program drafts.")
-			return
-		}
-	}
-	ui.field_set(&replacement.filter, ui.field_string(&p.filter))
-	ui.editor_filter(&replacement)
-	row := ui.editor_row(p)
-	selected := row != nil && ui.editor_reveal(&replacement, row.key)
-	// Program drafts already rode along above; only a draft on a selected row can be orphaned.
-	draft := preserve_draft && row != nil && ui.editor_draft(p)
-	// Removing a field being edited is a semantic conflict. Keep that page and its old source
-	// intact, so saving cannot silently recreate a removed profile or discard its draft.
-	if draft && !selected {
-		reason = .Draft_Conflict
+	replacement, built := settings_page_build(app, revision, &view)
+	defer ui.editor_destroy(&replacement)
+	if !built {
+		ui.editor_revision_stale(p, .Refresh_Failed)
 		return
 	}
-	replacement.filter.cursor, replacement.filter.anchor = p.filter.cursor, p.filter.anchor
-	replacement.scroll = clamp(p.scroll, 0, max(0, len(replacement.items) - max(1, p.visible_rows)))
-	if selected {ui.editor_carry(&replacement, p, draft)}
-	ui.editor_destroy(p)
-	p^, replacement = replacement, {}
-	published = true
+	if ui.editor_adopt(p, &replacement, adoption) == .Draft_Copy_Failed {
+		notify(app, .Error, "Could not preserve program drafts.")
+	}
 }
-

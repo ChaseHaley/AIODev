@@ -349,11 +349,7 @@ when AIO_CONTROL {
 		item := ""
 		p := &app.palette
 		palette_layout: ui.Palette_Layout
-		if owns_palette {
-			// Observing geometry must not repair selection or scroll before the assertion reads them.
-			measured := p^
-			palette_layout = ui.palette_layout(&measured, f32(w.width), f32(w.height), w.scale)
-		}
+		if owns_palette {palette_layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)}
 		if owns_palette && p.selected >= 0 && p.selected < len(p.results) {
 			item = ui.palette_result_name(p, p.results[p.selected])
 		}
@@ -521,7 +517,7 @@ when AIO_CONTROL {
 				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
 				{"settings.open", fmt.tprintf("%t", ui.editor_loaded(&w.editor))},
 				{"settings.revision", verify_settings_revision(&w.editor)},
-				{"settings.theme_delete_armed", fmt.tprintf("%t", w.theme_delete != nil)},
+				{"settings.theme_delete_armed", fmt.tprintf("%t", w.editor.delete_armed)},
 				{"overlay", strings.to_lower(fmt.tprintf("%v", overlay_kind(app, w)), context.temp_allocator)},
 				{"rename.open", fmt.tprintf("%t", rename_shown(w))},
 				{"rename.error", fmt.tprintf("%t", verify_chip_name_error(w))},
@@ -559,14 +555,15 @@ when AIO_CONTROL {
 				},
 				{"settings.profile.expanded", w.editor.expanded},
 				{"settings.profile.default", app.settings.profiles.default_id},
-				{"settings.profile.detected_open", fmt.tprintf("%t", w.editor.detected_open)},
+				// The page no longer has a detected-profile section; the keys keep their empty values.
+				{"settings.profile.detected_open", "false"},
 				{
 					"settings.profile.removing",
 					confirmation_asking(w, Profile_Remove) != nil ? removing.id : "",
 				},
 				{
 					"settings.profile.remove_title",
-					editor_profile_remove_text(app, removing != nil ? removing.id : "").title,
+					removing != nil ? editor_profile_remove_text(removing^).title : "Delete profile?",
 				},
 				{"settings.profile.menu_open", fmt.tprintf("%t", verify_editor_profile_menu_open(w))},
 				{"settings.profile.menu_count", fmt.tprintf("%d", len(w.editor.profile_menu.items))},
@@ -579,11 +576,8 @@ when AIO_CONTROL {
 					fmt.tprintf("%t", ui.profile_columns(page.list, page.scale).directory_shown),
 				},
 				{"settings.profile.rows", verify_profile_rows(w, page, .Profile)},
-				{"settings.profile.detected_rows", verify_profile_rows(w, page, .Detected)},
-				{
-					"settings.profile.detected_header",
-					verify_profile_rows(w, page, .Detected_Header),
-				},
+				{"settings.profile.detected_rows", ""},
+				{"settings.profile.detected_header", ""},
 				{"settings.profile.app_count", fmt.tprintf("%d", len(app.settings.profiles.items))},
 				{"settings.profile.app_detected", verify_detected_count(app)},
 				{"settings.profile.group", fmt.tprintf("%d", verify_profile_group(&w.editor))},
@@ -1210,7 +1204,7 @@ when AIO_CONTROL {
 
 	verify_profile_group :: proc(p: ^ui.Editor) -> int {
 		for group, index in p.groups {
-			if group.title == "Profiles" {return index}
+			if group.title == SETTINGS_SECTIONS[.Profiles].title {return index}
 		}
 		return -1
 	}

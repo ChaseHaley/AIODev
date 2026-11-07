@@ -54,11 +54,10 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 	if entry.step > 0 {row.step = entry.step}
 	switch entry.live_choices {
 	case .None, .Themes:
-	case .Shell_Fonts:
-		row.searchable, row.font_filter, row.choice_min_width = true, true, FONT_CHOICE_WIDTH
-	case .Interface_Fonts:
+	case .Shell_Fonts, .Interface_Fonts:
 		row.searchable, row.choice_min_width = true, FONT_CHOICE_WIDTH
 	}
+	row.font_filter = entry.choice_filter != ""
 	return row
 }
 

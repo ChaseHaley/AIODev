@@ -65,8 +65,8 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 
 @(test)
 settings_diagnostic_comparison_ignores_order_and_locations_but_preserves_new_meanings :: proc(t: ^testing.T) {
-	a := [?]settings.Diagnostic{{1, "a", "invalid", .Invalid_Value}, {2, "b", "unknown", .Unknown_Key}}
-	b := [?]settings.Diagnostic{{8, "b", "unknown", .Unknown_Key}, {9, "a", "invalid", .Invalid_Value}}
+	a := [?]settings.Diagnostic{{1, "a", "invalid", .Invalid_Value, ""}, {2, "b", "unknown", .Unknown_Key, ""}}
+	b := [?]settings.Diagnostic{{8, "b", "unknown", .Unknown_Key, ""}, {9, "a", "invalid", .Invalid_Value, ""}}
 	testing.expect(t, app.settings_diagnostics_equal(a[:], b[:]))
 	b[0].message = "different"
 	testing.expect(t, !app.settings_diagnostics_equal(a[:], b[:]))
@@ -77,9 +77,9 @@ settings_diagnostic_comparison_ignores_order_and_locations_but_preserves_new_mea
 	b[0].kind = .Out_Of_Range
 	testing.expect(t, !app.settings_diagnostics_equal(a[:], b[:]))
 	leader_a := [?]settings.Diagnostic{{1, "input.leader",
-		"input.leader (Ctrl+B) vs New Tab; input.leader wins [settings.ini:1; defaults]", .Shortcut_Warning}}
+		"input.leader (Ctrl+B) vs New Tab; input.leader wins [settings.ini:1; defaults]", .Shortcut_Warning, "input.leader (Ctrl+B) vs New Tab; input.leader wins"}}
 	leader_b := [?]settings.Diagnostic{{2, "input.leader",
-		"input.leader (Ctrl+T) vs New Tab; input.leader wins [settings.ini:2; defaults]", .Shortcut_Warning}}
+		"input.leader (Ctrl+T) vs New Tab; input.leader wins [settings.ini:2; defaults]", .Shortcut_Warning, "input.leader (Ctrl+T) vs New Tab; input.leader wins"}}
 	testing.expect(t, !app.settings_diagnostics_equal(leader_a[:], leader_b[:]))
 }
 
@@ -126,16 +126,16 @@ settings_load_keeps_source_order_conflict_and_text_field_chords_separate :: proc
 settings_bracket_leader_preserves_actions_and_winners_after_notice_expiry :: proc(t: ^testing.T) {
 	a := [?]settings.Diagnostic{{10, "input.leader",
 		"input.leader (Ctrl+[) vs New Tab (tab.new); input.leader wins [settings.ini:10; settings.ini:9]",
-		.Shortcut_Warning}}
+		.Shortcut_Warning, "input.leader (Ctrl+[) vs New Tab (tab.new); input.leader wins"}}
 	b := [?]settings.Diagnostic{{11, "input.leader",
 		"input.leader (Ctrl+[) vs Close Tab (tab.close); input.leader wins [settings.ini:11; defaults]",
-		.Shortcut_Warning}}
+		.Shortcut_Warning, "input.leader (Ctrl+[) vs Close Tab (tab.close); input.leader wins"}}
 	c := [?]settings.Diagnostic{{10, "input.leader",
 		"input.leader (Ctrl+[) vs New Tab (tab.new); tab.new wins [settings.ini:10; settings.ini:11]",
-		.Shortcut_Warning}}
+		.Shortcut_Warning, "input.leader (Ctrl+[) vs New Tab (tab.new); tab.new wins"}}
 	d := [?]settings.Diagnostic{{12, "input.leader",
 		"input.leader (Ctrl+[) vs New Tab (tab.new); input.leader wins [settings.ini:12; settings.ini:11]",
-		.Shortcut_Warning}}
+		.Shortcut_Warning, "input.leader (Ctrl+[) vs New Tab (tab.new); input.leader wins"}}
 	testing.expect(t, !app.settings_diagnostics_equal(a[:], b[:]), "changed action must remain visible")
 	testing.expect(t, !app.settings_diagnostics_equal(a[:], c[:]), "changed winner must remain visible")
 	testing.expect(t, app.settings_diagnostics_equal(a[:], d[:]), "source-line moves stay quiet")

@@ -243,12 +243,12 @@ editor_choice_popup_highlights_the_option_under_the_pointer :: proc(t: ^testing.
 	popup := ui.editor_popup_rect(&p, l)
 	second := popup.y + 4 + 30 * 1.5
 	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, second))
-	testing.expect_value(t, p.popup_index, 1)
+	testing.expect_value(t, p.choice_list.index, 1)
 	// The same option reports no change once it is already highlighted.
 	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, second))
 	// Below the popup must not steal the highlight from the open list.
 	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, popup.y+popup.height+40))
-	testing.expect_value(t, p.popup_index, 1)
+	testing.expect_value(t, p.choice_list.index, 1)
 }
 
 @(test)
@@ -323,7 +323,7 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	editor_fixture(t, &p)
-	p.leader = commands.Shortcut{.B, {.Control}}
+	p.capture.leader = commands.Shortcut{.B, {.Control}}
 	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
 	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Shortcuts)
@@ -339,7 +339,7 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .X, text = "x"}))
 	testing.expect(t, p.error)
 	ui.editor_key(&p, key({key = .B, modifiers = {.Control}}))
-	testing.expect(t, p.mode.(ui.Editor_Capturing).leader_pending)
+	testing.expect_value(t, p.capture.state, ui.Shortcut_Capture_State.Leader_Pending)
 	ui.editor_key(&p, key({key = .R, text = "r"}))
 	testing.expect_value(t, ui.field_string(&p.value), "Leader+R")
 	ui.editor_key(&p, key({key = .Escape}))
@@ -415,8 +415,8 @@ editor_adds_beyond_four_and_scrolls_shortcut_alternatives :: proc(t: ^testing.T)
 	ui.editor_select(&p, p.selected)
 	ui.editor_key(&p, key({key = .Enter}))
 	for _ in 0..<9 { ui.editor_key(&p, key({key = .Arrow_Down})) }
-	testing.expect_value(t, p.popup_index, 9)
-	testing.expect(t, p.popup_scroll > 0)
+	testing.expect_value(t, p.capture.alternatives.index, 9)
+	testing.expect(t, p.capture.alternatives.scroll > 0)
 	ui.editor_key(&p, key({key = .Enter}))
 	ui.editor_key(&p, key({key = .F10}))
 	testing.expect_value(t, ui.field_string(&p.value), "F1, F2, F3, F4, F5, F6, F7, F8, F9, F10")
@@ -459,7 +459,7 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Positions)
 	ui.editor_key(&p, key({key = .Space, text = " "}))
-	testing.expect(t, p.physical)
+	testing.expect(t, p.capture.physical)
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Reset_All)
 	ui.editor_key(&p, key({key = .Tab}))
@@ -469,7 +469,7 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	testing.expect(t, ui.editor_capturing(&p))
 	ui.editor_key(&p, key({key = .Z, unshifted = 'y', modifiers = {.Control}}))
 	testing.expect_value(t, ui.field_string(&p.value), "Physical+Ctrl+Z")
-	p.physical = false
+	p.capture.physical = false
 	ui.editor_key(&p, key({key = .Backspace}))
 	ui.editor_key(&p, key({key = .Z, unshifted = 'y', modifiers = {.Control}}))
 	testing.expect_value(t, ui.field_string(&p.value), "Ctrl+Y")
@@ -477,7 +477,7 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	testing.expect(t, positions.width > 0)
 	x, y := center(positions)
 	ui.editor_press(&p, l, nil, x, y, false)
-	testing.expect(t, p.physical)
+	testing.expect(t, p.capture.physical)
 }
 
 @(test)
@@ -495,7 +495,7 @@ editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
 	testing.expect(t, ui.editor_select_key(&p, "status.notify_blocked"))
 	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
-	testing.expect_value(t, p.popup_index, 0)
+	testing.expect_value(t, p.choice_list.index, 0)
 	// Enter flips the highlighted option and leaves the list open for the next one.
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "sound")

@@ -9,9 +9,7 @@ import fixtures "../fixtures"
 @(test)
 editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.T) {
 	source := "# keep\r\ntheme.name = tide-light\r\nfont.size = 14\r\n"
-	updated, created, issue, err := settings.theme_color_edit(
-		source, "tab_bar", "rgb(1, 2, 3)", themes_directory = THEMES,
-	)
+	updated, created, issue, err := edit_color(source, "tab_bar", "rgb(1, 2, 3)", THEMES)
 	defer delete(updated)
 	defer delete(created)
 	testing.expect_value(t, err, settings.Theme_Edit_Error.None)
@@ -20,7 +18,7 @@ editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.
 	testing.expect(t, strings.has_prefix(updated, "# keep\r\n"))
 	testing.expect(t, strings.contains(updated, "theme.custom.tide-light-custom.base = tide-light\r\n"))
 	testing.expect(t, strings.contains(updated, "theme.custom.tide-light-custom.tab_bar = #010203\r\n"))
-	s, diagnostics, parse_error := settings.parse(updated, themes_directory = THEMES)
+	s, diagnostics, parse_error := parse_themes(updated, THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, parse_error, nil)
@@ -31,7 +29,7 @@ editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.
 	base := fixtures.shipped_theme("tide-light")
 	testing.expect_value(t, s.active_theme.colors[.Text], base.colors[.Text])
 
-	again, again_created, _, again_error := settings.theme_color_edit(updated, "border", "#11223344")
+	again, again_created, _, again_error := edit_color(updated, "border", "#11223344")
 	defer delete(again)
 	defer delete(again_created)
 	testing.expect_value(t, again_error, settings.Theme_Edit_Error.None)
@@ -39,13 +37,13 @@ editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.
 	testing.expect(t, strings.contains(again, "theme.custom.tide-light-custom.border = #11223344"))
 	testing.expect(t, !strings.contains(again, "tide-light-custom-2"))
 
-	reset, _, _, reset_error := settings.theme_color_edit(again, "tab_bar", "")
+	reset, _, _, reset_error := edit_color(again, "tab_bar", "")
 	defer delete(reset)
 	testing.expect_value(t, reset_error, settings.Theme_Edit_Error.None)
 	testing.expect(t, !strings.contains(reset, "tab_bar"))
 	testing.expect(t, strings.contains(reset, "theme.custom.tide-light-custom.base"))
 
-	unchanged, none, _, unchanged_error := settings.theme_color_edit(source, "tab_bar", "")
+	unchanged, none, _, unchanged_error := edit_color(source, "tab_bar", "")
 	defer delete(unchanged)
 	defer delete(none)
 	testing.expect_value(t, unchanged_error, settings.Theme_Edit_Error.None)
@@ -57,14 +55,14 @@ editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.
 theme_color_edit_rejects_values_the_color_cannot_take :: proc(t: ^testing.T) {
 	cases := [?][2]string{{"cursor", "not a color"}, {"tab_bar", "#12"}}
 	for c in cases {
-		updated, created, issue, err := settings.theme_color_edit("theme.name = studio\n", c[0], c[1])
+		updated, created, issue, err := edit_color("theme.name = studio\n", c[0], c[1])
 		testing.expect_value(t, err, settings.Theme_Edit_Error.Invalid)
 		testing.expect(t, issue != "")
 		testing.expect_value(t, updated, "")
 		delete(updated)
 		delete(created)
 	}
-	updated, created, _, err := settings.theme_color_edit("", "unknown_color", "#000000")
+	updated, created, _, err := edit_color("", "unknown_color", "#000000")
 	testing.expect_value(t, err, settings.Theme_Edit_Error.Unavailable)
 	delete(updated)
 	delete(created)
@@ -73,12 +71,12 @@ theme_color_edit_rejects_values_the_color_cannot_take :: proc(t: ^testing.T) {
 @(test)
 themes_duplicate_rename_and_delete_as_whole_blocks :: proc(t: ^testing.T) {
 	source := "theme.name = mine\ntheme.custom.mine.base = ember-dark\ntheme.custom.mine.cursor = #010203\n"
-	copy, created, err := settings.theme_duplicate(source)
+	copy, created, err := edit_duplicate(source)
 	defer delete(copy)
 	defer delete(created)
 	testing.expect_value(t, err, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, created, "mine-copy")
-	s, diagnostics, parse_error := settings.parse(copy, themes_directory = THEMES)
+	s, diagnostics, parse_error := parse_themes(copy, THEMES)
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
 	testing.expect_value(t, s.theme.name, "mine-copy")
@@ -88,47 +86,45 @@ themes_duplicate_rename_and_delete_as_whole_blocks :: proc(t: ^testing.T) {
 	settings.destroy(&s)
 	settings.diagnostics_destroy(&diagnostics)
 
-	renamed, issue, rename_error := settings.theme_rename(source, "night")
+	renamed, issue, rename_error := edit_rename(source, "night")
 	defer delete(renamed)
 	testing.expect_value(t, rename_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, renamed, "theme.name = \"night\"\ntheme.custom.night.base = ember-dark\ntheme.custom.night.cursor = #010203\n")
 	for id in ([?]string{"studio-dark", "Bad"}) {
-		refused, reason, refuse_error := settings.theme_rename(source, id)
+		refused, reason, refuse_error := edit_rename(source, id)
 		testing.expect_value(t, refuse_error, settings.Theme_Edit_Error.Invalid)
 		testing.expect(t, reason != "")
 		delete(refused)
 	}
-	taken, taken_reason, taken_error := settings.theme_rename(copy, "mine")
+	taken, taken_reason, taken_error := edit_rename(copy, "mine")
 	testing.expect_value(t, taken_error, settings.Theme_Edit_Error.Invalid)
 	testing.expect_value(t, taken_reason, "Another theme uses this ID.")
 	delete(taken)
 
-	deleted, selected, delete_error := settings.theme_delete(source, themes_directory = THEMES)
+	deleted, selected, delete_error := edit_delete(source, THEMES)
 	defer delete(deleted)
 	defer delete(selected)
 	testing.expect_value(t, delete_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, selected, "ember-dark")
 	testing.expect_value(t, deleted, "theme.name = \"ember-dark\"\n")
 	// Without its base file, deleting falls back to the default theme.
-	orphan, orphan_selected, orphan_error := settings.theme_delete(source)
+	orphan, orphan_selected, orphan_error := edit_delete(source)
 	defer delete(orphan)
 	defer delete(orphan_selected)
 	testing.expect_value(t, orphan_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, orphan_selected, settings.DEFAULT_THEME_ID)
 
-	file_copy, file_created, file_error := settings.theme_duplicate(
-		"theme.name = tide-dark\n", themes_directory = THEMES,
-	)
+	file_copy, file_created, file_error := edit_duplicate("theme.name = tide-dark\n", THEMES)
 	defer delete(file_copy)
 	defer delete(file_created)
 	testing.expect_value(t, file_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, file_created, "tide-dark-custom")
 	testing.expect(t, strings.contains(file_copy, "theme.custom.tide-dark-custom.base = tide-dark\n"))
 	for refuse in ([?]string{"theme.name = tide-dark\n", ""}) {
-		_, _, unavailable := settings.theme_delete(refuse, themes_directory = THEMES)
+		_, _, unavailable := edit_delete(refuse, THEMES)
 		testing.expect_value(t, unavailable, settings.Theme_Edit_Error.Unavailable)
-		_, _, rename_unavailable := settings.theme_rename(refuse, "x", themes_directory = THEMES)
+		_, _, rename_unavailable := edit_rename(refuse, "x", THEMES)
 		testing.expect_value(t, rename_unavailable, settings.Theme_Edit_Error.Unavailable)
 	}
 }
@@ -147,7 +143,7 @@ legacy_color_overrides_migrate_into_a_custom_theme :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(updated, "empty follows"))
 	testing.expect(t, !strings.contains(updated, "Default background"))
 	testing.expect(t, strings.contains(updated, "# mine\n"))
-	s, diagnostics, parse_error := settings.parse(updated, themes_directory = THEMES)
+	s, diagnostics, parse_error := parse_themes(updated, THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, parse_error, nil)

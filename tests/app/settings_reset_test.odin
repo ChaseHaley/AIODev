@@ -17,7 +17,8 @@ settings_factory_reset_cancels_then_replaces_every_category_and_open_page :: pro
 		"\nfont.size = 22\npane.gap = 13\nkeys.tab.next = Alt+N\n",
 		"profile.custom.name = Custom\nprofile.custom.command = cmd.exe\n",
 		"theme.custom.mine.base = studio-dark\ntheme.custom.mine.text = #123456\n"}, context.temp_allocator)
-	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(&w.editor), updated), settings.Save_Error.None) {return}
+	if !testing.expect_value(t, os.write_entire_file(f.path, updated), nil) {return}
+	app.reload_settings(s, false)
 	app.editor_outcome(s, w, .Reset_All)
 	c := app.confirmation_current(w)
 	if !testing.expect(t, c != nil && app.confirmation_asking(w, app.Settings_Reset) != nil) {return}

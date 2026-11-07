@@ -98,7 +98,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 		if !testing.expect_value(t, surface_error, render.Error.None) { return }
 		defer render.surface_destroy(surface)
 		ui.text_set_size(&text, 16*scale)
-		ui.palette_layout(&p, w, h, scale)
+		ui.palette_fit(&p, w, h, scale)
 		ui.palette_key(&p, &registry, key({key = .End}))
 		testing.expect_value(t, p.selected, len(p.results)-1)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
@@ -143,7 +143,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 
 @(private)
 palette_fit_visible :: proc(t: ^testing.T, p: ^ui.Palette, l: ui.Palette_Layout, width, height: f32) {
-	// Navigation changes the window, so measure again before checking what is drawn.
+	// Navigation keeps the selection on a fitted row, so measuring without fitting must show it.
 	current := ui.palette_layout(p, width, height, l.row_height / 40)
 	for r in ([?]render.Rect{current.panel, current.mode_bar, current.input, current.list}) {
 		testing.expect(t, r.x >= 0 && r.y >= 0 && r.width >= 0 && r.height >= 0)
@@ -173,6 +173,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 				w, h := width*scale, height*scale
 				ui.palette_open(&p, &registry)
 				ui.palette_text(&p, &registry, "setting")
+				ui.palette_fit(&p, w, h, scale)
 				l := ui.palette_layout(&p, w, h, scale)
 				palette_fit_visible(t, &p, l, w, h)
 				ui.palette_key(&p, &registry, key({key = .End}))
@@ -248,6 +249,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 		{1000, 400, 1}, {1000, 800, 1}, {1000, 800, 2}, {926, 928, 2},
 		{463, 240, 1.5}, {463, 240, 0.5}, {40, 1, 1}, {1000, 800, 1},
 	}) {
+		ui.palette_fit(&p, viewport[0], viewport[1], viewport[2])
 		l := ui.palette_layout(&p, viewport[0], viewport[1], viewport[2])
 		testing.expect_value(t, p.selected, len(p.results)-1)
 		palette_fit_visible(t, &p, l, viewport[0], viewport[1])
@@ -261,6 +263,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(p.results), terminal)
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect_value(t, p.selected, 0)
+	ui.palette_fit(&p, 926, 928, 2)
 	l := ui.palette_layout(&p, 926, 928, 2)
 	testing.expect_value(t, l.rows, min(terminal, p.visible_rows))
 	ui.palette_key(&p, &registry, key({key = .End}))
@@ -269,6 +272,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, chosen_setting(&p), "terminal.minimum_contrast")
 	ui.palette_open(&p, &registry)
 	ui.palette_text(&p, &registry, "terminal settings contrast")
+	ui.palette_fit(&p, 926, 928, 2)
 	l = ui.palette_layout(&p, 926, 928, 2)
 	testing.expect_value(t, len(p.results), 1)
 	testing.expect_value(t, l.rows, 1)
@@ -278,6 +282,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.selected, 0)
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	ui.palette_text(&p, &registry, "zzzz setting")
+	ui.palette_fit(&p, 926, 928, 2)
 	l = ui.palette_layout(&p, 926, 928, 2)
 	testing.expect_value(t, l.rows, 1)
 	testing.expect_value(t, p.scroll, 0)
@@ -323,6 +328,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		if !testing.expect_value(t, surface_error, render.Error.None) { return }
 		defer render.surface_destroy(surface)
 		ui.text_set_size(&text, 16*scale)
+		ui.palette_fit(&p, w, h, scale)
 		l := ui.palette_layout(&p, w, h, scale)
 		if l.input.width > 100*scale && l.input.height >= 64*scale {
 			frame := ui.field_box_text_rect(ui.palette_query_box(&p, l, &text, scale))
@@ -359,7 +365,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 			calls := allocations.calls
 			for _ in 0..<3 {
 				render.draw_list_reset(&list)
-				ui.palette_layout(&p, w, h, scale)
+				ui.palette_fit(&p, w, h, scale)
 				ui.palette_scroll(&p, -1)
 				testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), render.Build_Status.Ok)
 				testing.expect_value(t, allocations.calls, calls)

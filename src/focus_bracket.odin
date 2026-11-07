@@ -30,7 +30,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	entered, ok := w.focus_bracket.(Focus_Entered)
 	if !ok {return}
 	w.focus_bracket = nil
-	theme_delete_disarm(&w.resources)
+	ui.editor_theme_delete_disarm(&w.editor)
 	window_overlays_cancel(app, w)
 	entry := workspace_session_for_content(app, entered.content)
 	if entry != nil {status_focus_leave(app, entry)}

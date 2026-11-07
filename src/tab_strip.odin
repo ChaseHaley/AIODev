@@ -116,14 +116,7 @@ window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 
 toggle_tab_orientation :: proc(app: ^App) {
 	next := app.settings.tabs.orientation == .Horizontal ? "vertical" : "horizontal"
-	if _, has_file := settings_save_value(app, "tabs.orientation", next, "Could not save the tab orientation.");
-	   !has_file {
-		app.settings.tabs.orientation = next == "horizontal" ? .Horizontal : .Vertical
-		for window in app.windows {
-			window_apply_settings(app, window)
-			rail_reveal_active(window)
-		}
-	}
+	settings_save_value(app, "tabs.orientation", next, "Could not save the tab orientation.")
 }
 
 @(private)
@@ -235,10 +228,6 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	return .Ok
 }
 
-settings_toggle_bool :: proc(app: ^App, key: string, target: ^bool) {
-	value := target^ ? "false" : "true"
-	if _, has_file := settings_save_value(app, key, value, "Could not save the setting."); has_file {return}
-	target^ = !target^
-	for window in app.windows {window_apply_settings(app, window)}
-	status_apply_settings(app)
+settings_toggle_bool :: proc(app: ^App, key: string, value: bool) {
+	settings_save_value(app, key, value ? "false" : "true", "Could not save the setting.")
 }
