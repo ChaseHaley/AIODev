@@ -80,6 +80,20 @@ press :: proc(key: input.Key, modifiers: input.Modifiers = {}) -> platform.Key_E
 	return {key = key, modifiers = modifiers, pressed = true}
 }
 
+// Takes the setting and value a Set_Setting outcome names.
+@(private)
+chosen_value :: proc(p: ^ui.Palette) -> (key, value: string) {
+	chosen, _ := ui.palette_chosen_take(p).(ui.Chosen_Value)
+	return chosen.key, chosen.value
+}
+
+// Takes the setting an Open_Setting outcome names.
+@(private)
+chosen_setting :: proc(p: ^ui.Palette) -> string {
+	chosen, _ := ui.palette_chosen_take(p).(ui.Chosen_Setting)
+	return chosen.key
+}
+
 @(test)
 palette_alt_arrows_step_a_toggle_slider_and_choice_in_place :: proc(t: ^testing.T) {
 	p: ui.Palette
@@ -90,7 +104,7 @@ palette_alt_arrows_step_a_toggle_slider_and_choice_in_place :: proc(t: ^testing.
 
 	select_setting(&p, "cursor.blink")
 	outcome, _ := ui.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
-	key, value := ui.palette_chosen_value(&p)
+	key, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "cursor.blink")
 	testing.expect_value(t, value, "false")
@@ -98,7 +112,7 @@ palette_alt_arrows_step_a_toggle_slider_and_choice_in_place :: proc(t: ^testing.
 
 	select_setting(&p, "pane.gap")
 	outcome, _ = ui.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
-	_, value = ui.palette_chosen_value(&p)
+	_, value = chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "6")
 
@@ -108,7 +122,7 @@ palette_alt_arrows_step_a_toggle_slider_and_choice_in_place :: proc(t: ^testing.
 
 	select_setting(&p, "cursor.style")
 	outcome, _ = ui.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
-	_, value = ui.palette_chosen_value(&p)
+	_, value = chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "underline")
 }
@@ -124,7 +138,7 @@ palette_enter_still_jumps_to_a_setting_with_a_control :: proc(t: ^testing.T) {
 	select_setting(&p, "cursor.blink")
 	outcome, _ := ui.palette_key(&p, &registry, press(.Enter))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
-	testing.expect_value(t, p.chosen, "cursor.blink")
+	testing.expect_value(t, chosen_setting(&p), "cursor.blink")
 }
 
 @(test)
@@ -160,7 +174,7 @@ palette_choice_list_opens_moves_and_chooses :: proc(t: ^testing.T) {
 	ui.palette_key(&p, &registry, press(.Enter, {.Control}))
 	ui.palette_key(&p, &registry, press(.Arrow_Down))
 	outcome, _ = ui.palette_key(&p, &registry, press(.Enter))
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "bar")
 }
@@ -180,7 +194,7 @@ palette_long_choice_list_filters_typed_text :: proc(t: ^testing.T) {
 	ui.palette_text(&p, &registry, "jet")
 	testing.expect_value(t, ui.palette_query(&p), "")
 	outcome, _ := ui.palette_key(&p, &registry, press(.Enter))
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "JetBrains Mono")
 }
@@ -198,7 +212,7 @@ palette_text_entry_commits_on_enter :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Text)
 	ui.palette_text(&p, &registry, "vim, less")
 	outcome, _ := ui.palette_key(&p, &registry, press(.Enter))
-	key, value := ui.palette_chosen_value(&p)
+	key, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "status.ignore_apps")
 	testing.expect_value(t, value, "vim, less")
@@ -217,7 +231,7 @@ palette_slider_typed_value_snaps_and_clamps :: proc(t: ^testing.T) {
 	ui.palette_key(&p, &registry, press(.Enter, {.Control}))
 	ui.palette_text(&p, &registry, "99")
 	outcome, _ := ui.palette_key(&p, &registry, press(.Enter))
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "24")
 }
@@ -234,7 +248,7 @@ palette_toggle_click_changes_value_and_title_click_jumps :: proc(t: ^testing.T) 
 	row_y := l.list.y + l.row_height / 2
 	toggle_x := l.list.x + l.list.width - 46 - 18
 	outcome, _ := ui.palette_mouse_press(&p, &registry, l, toggle_x, row_y)
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "false")
 	testing.expect(t, ui.presence_is_open(p.presence), "a control click keeps the palette open")
@@ -258,13 +272,76 @@ palette_slider_drag_saves_on_release :: proc(t: ^testing.T) {
 	track_right := track_left + 98
 	outcome, _ := ui.palette_mouse_press(&p, &registry, l, track_left + 2, row_y)
 	testing.expect_value(t, outcome, ui.Outcome.Changed)
-	testing.expect(t, ui.palette_slider_dragging(&p), "a track press starts a drag")
+	_, sliding := p.drag.(ui.Slider_Drag)
+	testing.expect(t, sliding, "a track press starts a drag")
 	ui.palette_slider_drag(&p, l, track_right + 40)
 	outcome = ui.palette_pointer_release(&p)
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "24")
-	testing.expect(t, !ui.palette_slider_dragging(&p), "release ends the drag")
+	testing.expect(t, p.drag == nil, "release ends the drag")
+}
+
+@(test)
+palette_slider_drag_cancel_saves_nothing :: proc(t: ^testing.T) {
+	p: ui.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+
+	l := ui.palette_layout(&p, 1000, 800, 1)
+	row_y := l.list.y + l.row_height * 1.5
+	track_left := l.list.x + l.list.width - 46 - 156 + 7
+	ui.palette_mouse_press(&p, &registry, l, track_left + 2, row_y)
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Slider)
+	ui.palette_slider_drag(&p, l, track_left + 200)
+	ui.palette_drag_cancel(&p)
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
+	testing.expect_value(t, ui.palette_pointer_release(&p), ui.Outcome.None)
+	testing.expect(t, ui.palette_chosen_take(&p) == nil, "a cancelled drag names no value")
+}
+
+@(test)
+palette_close_and_take_drop_a_chosen_value :: proc(t: ^testing.T) {
+	p: ui.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+
+	select_setting(&p, "cursor.blink")
+	outcome, _ := ui.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	key, _ := chosen_value(&p)
+	testing.expect_value(t, key, "cursor.blink")
+	testing.expect(t, ui.palette_chosen_take(&p) == nil, "a choice is taken once")
+
+	ui.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	ui.palette_close(&p)
+	testing.expect(t, ui.palette_chosen_take(&p) == nil, "closing drops a choice nobody took")
+}
+
+@(test)
+palette_opening_an_edit_drops_the_previous_pointer_hold_and_choice :: proc(t: ^testing.T) {
+	p: ui.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+
+	select_setting(&p, "cursor.blink")
+	ui.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	p.drag = ui.Query_Drag{}
+	select_setting(&p, "status.ignore_apps")
+	ui.palette_key(&p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Text)
+	testing.expect(t, p.drag == nil, "the new edit owns input, not the previous pointer hold")
+	testing.expect(t, ui.palette_chosen_take(&p) == nil, "the previous outcome no longer names a value")
+
+	ui.palette_key(&p, &registry, press(.Escape))
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
+	testing.expect(t, p.drag == nil && ui.palette_chosen_take(&p) == nil)
 }
 
 @(test)
@@ -279,7 +356,7 @@ palette_reset_button_restores_the_default_and_ignores_an_unchanged_setting :: pr
 	reset_x := l.list.x + l.list.width - 8 - 13
 	blink_y := l.list.y + l.row_height / 2
 	outcome, _ := ui.palette_mouse_press(&p, &registry, l, reset_x, blink_y)
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "false")
 	testing.expect(t, ui.presence_is_open(p.presence), "a reset keeps the palette open")
@@ -294,7 +371,7 @@ palette_reset_button_restores_the_default_and_ignores_an_unchanged_setting :: pr
 	control_set(&v, "input.leader", "ctrl+a")
 	outcome, _ = ui.palette_mouse_press(&p, &registry, l, reset_x, leader_y)
 	key: string
-	key, value = ui.palette_chosen_value(&p)
+	key, value = chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "input.leader")
 	testing.expect_value(t, value, "ctrl+b")

@@ -55,11 +55,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.workspace_picker.order = {}
 	_ = workspace_order_animate(w, app.animations, time.tick_now())
 	link_hover_clear(w)
-	if palette_active(app, w) {
-		ui.palette_input_release(&app.palette)
-		if ui.palette_slider_dragging(&app.palette) {ui.palette_edit_cancel(&app.palette)}
-		app.palette.scroll_drag = {}
-	}
+	if palette_active(app, w) {ui.palette_drag_cancel(&app.palette)}
 	markdown_gesture_clear(app, w)
 	ui.editor_hover_clear(&w.editor)
 	ui.editor_pointer_cancel(&w.editor)

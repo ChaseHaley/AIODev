@@ -15,6 +15,12 @@ palette_binding_press_key :: proc(s: ^app.App, e: platform.Key_Event) {
 	app.handle_event(s, key)
 }
 
+@(private)
+palette_binding_editor :: proc(s: ^app.App) -> ^ui.Editor {
+	binding, open := &s.palette.edit.(ui.Shortcut_Edit)
+	return open ? &binding.editor : nil
+}
+
 @(test)
 palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_settings :: proc(t: ^testing.T) {
 	f: Palette_Fixture
@@ -30,10 +36,14 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	palette_binding_press_key(s, {key = .Enter, modifiers = {.Control}})
 	palette_binding_press_key(s, {key = .Enter})
 	palette_binding_press_key(s, {key = .C, modifiers = {.Control}})
-	testing.expect_value(t, ui.field_string(&s.palette.binding.value), "Ctrl+C")
+	b := palette_binding_editor(s)
+	if !testing.expect(t, b != nil) {return}
+	testing.expect_value(t, ui.field_string(&b.value), "Ctrl+C")
 	palette_binding_press_key(s, {key = .C, modifiers = {.Control, .Shift}})
 	palette_binding_press_key(s, {key = .Enter})
-	testing.expect(t, ui.editor_capturing(&s.palette.binding), "a conflicting binding remains editable")
+	b = palette_binding_editor(s)
+	testing.expect(t, b != nil && ui.editor_capturing(b), "a conflicting binding remains editable")
+	testing.expect(t, ui.palette_chosen_take(&s.palette) == nil, "handling the outcome took its value")
 	after, after_error := os.read_entire_file(f.path, context.temp_allocator)
 	testing.expect_value(t, after_error, nil)
 	testing.expect_value(t, string(after), string(before))

@@ -18,6 +18,13 @@ binding_palette :: proc(t: ^testing.T, p: ^ui.Palette) -> commands.Registry {
 	return r
 }
 
+// The open shortcut row's editor, or nil.
+@(private)
+binding_editor :: proc(p: ^ui.Palette) -> ^ui.Editor {
+	binding, open := &p.edit.(ui.Shortcut_Edit)
+	return open ? &binding.editor : nil
+}
+
 @(test)
 palette_shortcut_replaces_one_alternative_and_cancels_without_running :: proc(t: ^testing.T) {
 	p: ui.Palette
@@ -30,12 +37,13 @@ palette_shortcut_replaces_one_alternative_and_cancels_without_running :: proc(t:
 	ui.palette_key(&p, &r, press(.Enter))
 	ui.palette_key(&p, &r, press(.C, {.Control}))
 	outcome, _ = ui.palette_key(&p, &r, press(.Enter))
-	key, value := ui.palette_chosen_value(&p)
+	key, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "keys.test.alpha")
 	testing.expect_value(t, value, "Ctrl+C, Ctrl+Shift+K")
 	ui.palette_binding_saved(&p, false)
-	testing.expect(t, ui.editor_capturing(&p.binding), "a refused value stays editable")
+	b := binding_editor(&p)
+	testing.expect(t, b != nil && ui.editor_capturing(b), "a refused value stays editable")
 	ui.palette_key(&p, &r, press(.Escape))
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
 	testing.expect(t, ui.presence_is_open(p.presence))
@@ -59,24 +67,24 @@ palette_shortcut_add_delete_physical_and_leader_use_settings_capture :: proc(t: 
 	ui.palette_key(&p, &r, press(.B, {.Control}))
 	ui.palette_key(&p, &r, press(.X))
 	outcome, _ := ui.palette_key(&p, &r, press(.Enter))
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "Ctrl+K, Ctrl+Shift+K, Leader+X")
 	ui.palette_binding_saved(&p, true)
 	ui.palette_key(&p, &r, press(.Enter, {.Control}))
 	outcome, _ = ui.palette_key(&p, &r, press(.Delete))
-	_, value = ui.palette_chosen_value(&p)
+	_, value = chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "Ctrl+Shift+K")
 	ui.palette_binding_saved(&p, true)
 	ui.palette_key(&p, &r, press(.Enter, {.Control}))
 	ui.palette_key(&p, &r, press(.Enter))
-	p.binding.physical = true
+	if b := binding_editor(&p); testing.expect(t, b != nil) {b.physical = true}
 	e := press(.Q, {.Control})
 	e.unshifted = 'a'
 	ui.palette_key(&p, &r, e)
 	ui.palette_key(&p, &r, press(.Enter))
-	_, value = ui.palette_chosen_value(&p)
+	_, value = chosen_value(&p)
 	testing.expect(t, strings.contains(value, "Physical+"))
 	testing.expect(t, strings.contains(value, "Ctrl+Q"))
 }
@@ -99,7 +107,7 @@ palette_shortcut_control_click_and_reset_preserve_command_activation :: proc(t: 
 	testing.expect_value(t, commands.set_shortcuts(&r, 1, {{.F9, {.Control, .Alt}}}), commands.Error.None)
 	outcome, _ = ui.palette_mouse_press(&p, &r, l, parts.reset.x + 10, parts.reset.y + 10)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
-	_, value := ui.palette_chosen_value(&p)
+	_, value := chosen_value(&p)
 	testing.expect_value(t, value, "Ctrl+K, Ctrl+Shift+K")
 	ui.palette_binding_saved(&p, true)
 	id: commands.Command_Id
@@ -121,8 +129,27 @@ palette_can_assign_a_command_without_an_existing_shortcut :: proc(t: ^testing.T)
 	ui.palette_key(&p, &r, press(.Enter))
 	ui.palette_key(&p, &r, press(.F11, {.Control, .Alt}))
 	outcome, _ := ui.palette_key(&p, &r, press(.Enter))
-	key, value := ui.palette_chosen_value(&p)
+	key, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "keys.test.unbound")
 	testing.expect_value(t, value, "Ctrl+Alt+F11")
+}
+
+@(test)
+palette_shortcut_popup_opens_below_its_inline_control :: proc(t: ^testing.T) {
+	p: ui.Palette
+	r := binding_palette(t, &p)
+	defer commands.destroy(&r)
+	defer ui.palette_destroy(&p)
+	for scale in ([?]f32{1, 1.5, 2}) {
+		ui.palette_open_mode(&p, &r, .Commands)
+		l := ui.palette_layout(&p, 1200 * scale, 1200 * scale, scale)
+		ui.palette_key(&p, &r, press(.Enter, {.Control}))
+		row := l.list
+		row.height = l.row_height
+		parts := ui.palette_binding_parts(row, scale)
+		popup := ui.palette_popup_rect(&p, l)
+		testing.expect(t, popup.width > 0)
+		testing.expect_value(t, popup.y, parts.field.y + parts.field.height + 4 * scale)
+	}
 }

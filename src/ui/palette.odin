@@ -36,7 +36,7 @@ Outcome :: enum {
 	Closed,
 	Run,
 	Open_Setting,
-	// A setting control chose a new value; palette_chosen_value names it. The palette stays open.
+	// A setting control chose a new value; the owner takes it with palette_chosen_take. The palette stays open.
 	Set_Setting,
 	Open_Tab,
 	Open_Workspace,
@@ -186,21 +186,45 @@ Palette :: struct {
 	workspaces:     Palette_Source,
 	mode:           Palette_Mode,
 	mode_hover:     int,
-	// The setting key of the last Open_Setting or Set_Setting outcome.
-	chosen:       string,
-	chosen_value: [dynamic]u8,
-	chosen_id:    u64,
+	chosen:       Palette_Chosen,
+	// Storage for Chosen_Value's strings, reused from one choice to the next.
+	chosen_key, chosen_value: [dynamic]u8,
 	scratch:      ^fuzzy.Scratch,
 	values:       Palette_Values,
 	edit:         Palette_Edit,
-	// Shortcut editing uses the same capture and alternatives control as Settings.
-	binding:      Editor,
-	binding_result: int,
-	chosen_key:   [dynamic]u8,
+	buffers:      Edit_Buffers,
+	drag:         Palette_Drag,
 	leader:       Maybe(commands.Shortcut),
 	reset_hover:  int,
 	scroll_hover: bool,
-	scroll_drag:  Scroll_Drag,
+}
+
+// What the last outcome names for the owner: the setting to reveal (Open_Setting), the value to save
+// (Set_Setting), or the tab or workspace to show (Open_Tab, Open_Workspace). Set only with that
+// outcome, by palette_choose; the owner takes it with palette_chosen_take as it handles the outcome,
+// and opening or closing the palette drops one nobody took.
+Palette_Chosen :: union {
+	Chosen_Setting,
+	Chosen_Value,
+	Chosen_Tab,
+	Chosen_Workspace,
+}
+
+Chosen_Setting :: struct {
+	key: string,
+}
+
+// The strings stay valid until the palette's next choice.
+Chosen_Value :: struct {
+	key, value: string,
+}
+
+Chosen_Tab :: struct {
+	id: u64,
+}
+
+Chosen_Workspace :: struct {
+	id: u64,
 }
 
 Palette_Layout :: struct {
@@ -225,7 +249,7 @@ palette_init :: proc(
 	p.positions = make([dynamic]int, allocator)
 	p.chosen_value = make([dynamic]u8, allocator)
 	p.chosen_key = make([dynamic]u8, allocator)
-	edit_init(&p.edit, allocator)
+	edit_init(&p.buffers, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
 	p.mode_hover = -1
@@ -242,7 +266,7 @@ palette_init :: proc(
 }
 
 palette_destroy :: proc(p: ^Palette) {
-	editor_destroy(&p.binding)
+	edit_set(p, nil)
 	delete(p.chosen_key)
 	free(p.scratch, p.query.bytes.allocator)
 	delete(p.query.bytes)
@@ -251,7 +275,7 @@ palette_destroy :: proc(p: ^Palette) {
 	delete(p.positions)
 	delete(p.haystack)
 	delete(p.chosen_value)
-	edit_destroy(&p.edit)
+	edit_destroy(&p.buffers)
 	p^ = {}
 }
 
@@ -271,17 +295,48 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	p.mode = mode
 	p.mode_hover = -1
 	p.reset_hover = -1
-	p.scroll_hover, p.scroll_drag = false, {}
-	p.chosen, p.chosen_id = "", 0
+	p.scroll_hover = false
+	drag_set(p, nil)
+	palette_choose(p, nil)
 	refresh(p, registry)
 }
 
 palette_close :: proc(p: ^Palette) {
-	palette_edit_cancel(p)
+	edit_set(p, nil)
 	presence_close(&p.presence)
-	field_release(&p.query)
+
 	p.mode_hover = -1
-	p.scroll_hover, p.scroll_drag = false, {}
+	p.scroll_hover = false
+	drag_set(p, nil)
+	palette_choose(p, nil)
+}
+
+// The only writer of p.chosen besides palette_chosen_take.
+@(private)
+palette_choose :: proc(p: ^Palette, chosen: Palette_Chosen) {p.chosen = chosen}
+
+// Values need owned storage, but schema keys outlive the palette. The embedded shortcut row's key
+// needs a copy too, since closing that edit destroys its editor.
+@(private)
+choose_setting :: proc(p: ^Palette, key, value: string, copy_key := false) -> Outcome {
+	saved_key := key
+	if copy_key {
+		clear(&p.chosen_key)
+		append(&p.chosen_key, key)
+		saved_key = string(p.chosen_key[:])
+	}
+	clear(&p.chosen_value)
+	append(&p.chosen_value, value)
+	palette_choose(p, Chosen_Value{saved_key, string(p.chosen_value[:])})
+	return .Set_Setting
+}
+
+// Hands the owner what the outcome it is handling names, once.
+@(require_results)
+palette_chosen_take :: proc(p: ^Palette) -> Palette_Chosen {
+	chosen := p.chosen
+	p.chosen = nil
+	return chosen
 }
 
 palette_query :: proc(p: ^Palette) -> string {return field_string(&p.query)}
@@ -641,7 +696,7 @@ less_result :: proc(a, b: Palette_Result) -> bool {
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
 	// An open control belongs to a row this refresh may move or remove.
-	palette_edit_cancel(p)
+	edit_set(p, nil)
 	clear(&p.results)
 	clear(&p.ordered)
 	if !utf8.valid_string(query) {query = ""}
@@ -788,14 +843,13 @@ run :: proc(p: ^Palette, index: int) -> (Outcome, commands.Command_Id) {
 	case .Command:
 		return .Run, result.command.id
 	case .Setting:
-		p.chosen = p.settings[result.setting].key
-		p.chosen_id = 0
+		palette_choose(p, Chosen_Setting{p.settings[result.setting].key})
 		return .Open_Setting, 0
 	case .Tab:
-		p.chosen_id = result.id
+		palette_choose(p, Chosen_Tab{result.id})
 		return .Open_Tab, 0
 	case .Workspace:
-		p.chosen_id = result.id
+		palette_choose(p, Chosen_Workspace{result.id})
 		return .Open_Workspace, 0
 	}
 	return .None, 0
@@ -841,9 +895,13 @@ palette_key :: proc(
 	if !e.pressed {
 		return .None, 0
 	}
-	if p.edit.kind == .Shortcut {return palette_binding_key(p, e), 0}
-	if p.edit.kind == .Choice || p.edit.kind == .Text {return edit_key(p, e), 0}
-	if p.edit.kind == .Slider {return .None, 0}
+	switch &edit in p.edit {
+	case Shortcut_Edit:
+		return palette_binding_key(p, &edit, e), 0
+	case Choice_Edit, Text_Edit:
+		return edit_key(p, e), 0
+	}
+	if _, sliding := p.drag.(Slider_Drag); sliding {return .None, 0}
 	#partial switch e.key {
 	case .Tab:
 		palette_cycle_mode(p, registry, .Shift in e.modifiers)
@@ -892,7 +950,7 @@ palette_key :: proc(
 }
 
 palette_text :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -> Outcome {
-	if p.edit.kind != .None {return edit_text(p, text)}
+	if palette_editing(p) != .None {return edit_text(p, text)}
 	return edited(p, registry, field_text(&p.query, text))
 }
 
@@ -989,7 +1047,7 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	extent := Scroll_Extent{len(p.results), p.visible_rows, p.scroll}
 	gutter := SCROLLBAR_TRACK * scale + border
 	area := render.Rect{panel.x + panel.width - gutter, l.list.y, SCROLLBAR_TRACK * scale, used}
-	state := scrollbar_state(p.scroll_hover, p.scroll_drag)
+	state := palette_scrollbar_state(p)
 	if l.bar, l.bar_visible = scrollbar_layout(area, extent, state, scale); l.bar_visible {
 		l.list.width = max(0, area.x - l.list.x)
 	}
@@ -1015,17 +1073,17 @@ mode_at :: proc(l: Palette_Layout, x, y: f32) -> int {
 }
 
 palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
-	switch p.edit.kind {
-	case .Shortcut:
-		return editor_hover(&p.binding, palette_binding_layout(p, l), x, y) ? .Changed : .None
-	case .Choice:
-		hover := popup_row_at(p, l, x, y)
-		if hover == p.edit.hover {return .None}
-		p.edit.hover = hover
+	if _, sliding := p.drag.(Slider_Drag); sliding {return .None}
+	switch &edit in p.edit {
+	case Shortcut_Edit:
+		return editor_hover(&edit.editor, palette_binding_layout(p, l, edit.result), x, y) ? .Changed : .None
+	case Choice_Edit:
+		hover := popup_row_at(p, &edit, l, x, y)
+		if hover == edit.hover {return .None}
+		edit.hover = hover
 		return .Changed
-	case .Slider, .Text:
+	case Text_Edit:
 		return .None
-	case .None:
 	}
 	hover := mode_at(l, x, y)
 	mode_changed := hover != p.mode_hover
@@ -1055,15 +1113,20 @@ palette_mouse_press :: proc(
 	commands.Command_Id,
 ) {
 	if index := mode_at(l, x, y); index >= 0 && !palette_popup_contains(p, l, x, y) {
-		palette_edit_cancel(p)
-		field_release(&p.query)
+		edit_set(p, nil)
+		drag_set(p, nil)
 		palette_set_mode(p, registry, PALETTE_CYCLE[index])
 		return .Changed, 0
 	}
-	if p.edit.kind == .Shortcut {return palette_binding_press(p, l, text, x, y), 0}
+	if binding, open := &p.edit.(Shortcut_Edit); open {
+		return palette_binding_press(p, binding, l, text, x, y), 0
+	}
 	if outcome, handled := edit_press(p, l, text, x, y); handled {return outcome, 0}
 	if l.bar_visible && scrollbar_contains(l.bar, x, y) {
-		palette_scroll_to(p, scrollbar_press(&p.scroll_drag, l.bar, y))
+		drag: Scroll_Drag
+		offset := scrollbar_press(&drag, l.bar, y)
+		if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})}
+		palette_scroll_to(p, offset)
 		return .Changed, 0
 	}
 	if index := row_at(p, l, x, y); index >= 0 {
@@ -1129,31 +1192,27 @@ palette_input_press :: proc(
 	x, y, scale: f32,
 	extend: bool,
 ) -> Outcome {
-	palette_edit_cancel(p)
+	edit_set(p, nil)
 	at := field_box_offset(palette_query_box(p, l, text, scale), x)
-	return field_pointer(&p.query, at, true, extend) == .None ? .None : .Changed
+	drag_set(p, Query_Drag{})
+	return field_move(&p.query, at, extend) == .None ? .None : .Changed
 }
 
 palette_input_drag :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, scale: f32) -> Outcome {
+	if _, selecting := p.drag.(Query_Drag); !selecting {return .None}
 	at := field_box_offset(palette_query_box(p, l, text, scale), x)
-	return field_pointer(&p.query, at, false, true) == .None ? .None : .Changed
-}
-
-palette_input_release :: proc(p: ^Palette) -> bool {
-	return field_release(&p.query)
+	return field_move(&p.query, at, true) == .None ? .None : .Changed
 }
 
 palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
-	switch p.edit.kind {
-	case .Shortcut:
+	if _, sliding := p.drag.(Slider_Drag); sliding {return .None}
+	switch &edit in p.edit {
+	case Shortcut_Edit:
 		return .None
-	case .Choice:
-		return popup_wheel(p, rows)
-	case .Slider:
-		return .None
-	case .Text:
-		palette_edit_cancel(p)
-	case .None:
+	case Choice_Edit:
+		return popup_wheel(p, &edit, rows)
+	case Text_Edit:
+		edit_set(p, nil)
 	}
 	return palette_scroll_to(p, p.scroll - rows)
 }
@@ -1169,13 +1228,17 @@ palette_scroll_to :: proc(p: ^Palette, offset: int) -> Outcome {
 	return .Changed
 }
 
-palette_scrollbar_dragging :: proc(p: ^Palette) -> bool {return p.scroll_drag.active}
+palette_scrollbar_state :: proc(p: ^Palette) -> Scrollbar_State {
+	if _, holding := p.drag.(Scrollbar_Drag); holding {return .Active}
+	return p.scroll_hover ? .Hovered : .Collapsed
+}
 
 // Tracks hover through the drag too, so the bar collapses on a release away from the track.
 palette_scrollbar_drag :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
-	if !p.scroll_drag.active || !l.bar_visible {return .None}
+	drag, holding := p.drag.(Scrollbar_Drag)
+	if !holding || !l.bar_visible {return .None}
 	p.scroll_hover = scrollbar_contains(l.bar, x, y)
-	return palette_scroll_to(p, scrollbar_drag(p.scroll_drag, l.bar, y))
+	return palette_scroll_to(p, scrollbar_drag({active = true, grab = drag.grab}, l.bar, y))
 }
 
 @(private)
@@ -1193,16 +1256,17 @@ draw_footer :: proc(
 		rect  = {l.footer.x, l.footer.y, l.footer.width, scale},
 		color = theme.border,
 	})
-	if p.edit.kind == .Shortcut {
+	if binding, open := &p.edit.(Shortcut_Edit); open {
+		b := &binding.editor
 		hint_text := text_styled(text, .Detail)
-		message := p.binding.message
-		if !p.binding.error {
-			message = editor_capturing(&p.binding) ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
+		message := b.message
+		if !b.error {
+			message = editor_capturing(b) ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
 			          "Enter replaces · Delete removes · Esc cancels"
 		}
 		return draw_text(&hint_text, list, message, l.footer.x + 12 * scale,
 		                 l.footer.y + (l.footer.height - hint_text.line_height) / 2 + hint_text.ascent,
-		                 p.binding.error ? theme.error : theme.muted, max(1, l.footer.width - 24 * scale))
+		                 b.error ? theme.error : theme.muted, max(1, l.footer.width - 24 * scale))
 	}
 	hints: [PALETTE_HINT_CAP]Palette_Key_Hint
 	count := palette_key_hints(p, &hints)
@@ -1234,13 +1298,13 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 		out[count^] = {keys = {first, second}, label = label}
 		count^ += 1
 	}
-	#partial switch p.edit.kind {
-	case .Choice:
+	#partial switch _ in p.edit {
+	case Choice_Edit:
 		add(out, &count, "Ctrl+N", "Ctrl+P", "Navigate")
 		add(out, &count, "Enter", "", "Choose")
 		add(out, &count, "Esc", "", "Cancel")
 		return count
-	case .Text:
+	case Text_Edit:
 		add(out, &count, "Enter", "", "Apply")
 		add(out, &count, "Esc", "", "Cancel")
 		return count
@@ -1431,7 +1495,8 @@ palette_draw :: proc(
 			if item.command != nil {
 				parts := palette_binding_parts(row, scale)
 				side = parts.field.x
-				if p.edit.kind == .Shortcut && p.binding_result == index && editor_popup(&p.binding) == .None {
+				binding, open := &p.edit.(Shortcut_Edit)
+				if open && binding.result == index && editor_popup(&binding.editor) == .None {
 					side = parts.positions.x
 				}
 				if result := palette_binding_draw(p, item.command, index, row, list, text, theme, l, pointer);
@@ -1490,10 +1555,11 @@ palette_draw :: proc(
 			}
 		}
 	}
-	if l.bar_visible {scrollbar_draw(list, theme, l.bar, scrollbar_state(p.scroll_hover, p.scroll_drag))}
+	if l.bar_visible {scrollbar_draw(list, theme, l.bar, palette_scrollbar_state(p))}
 	if result := draw_footer(p, list, text, theme, l, scale); result != .Ok {return result}
-	if p.edit.kind == .Shortcut {
-		return popup_draw(&p.binding, palette_binding_layout(p, l), list, text, theme, pointer)
+	if binding, open := &p.edit.(Shortcut_Edit); open {
+		layout := palette_binding_layout(p, l, binding.result)
+		return popup_draw(&binding.editor, layout, list, text, theme, pointer)
 	}
 	if result := draw_popup(p, list, text, theme, l); result != .Ok {return result}
 	return .Ok

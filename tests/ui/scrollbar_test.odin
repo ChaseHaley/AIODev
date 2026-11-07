@@ -68,7 +68,8 @@ palette_scrollbar_pages_drags_and_keeps_rows_clear :: proc(t: ^testing.T) {
 
 	l = ui.palette_layout(&p, 1000, 800, 1)
 	_, _ = ui.palette_mouse_press(&p, &registry, l, x, l.bar.thumb.y + 1)
-	testing.expect(t, ui.palette_scrollbar_dragging(&p))
+	_, holding := p.drag.(ui.Scrollbar_Drag)
+	testing.expect(t, holding)
 	testing.expect_value(t, ui.palette_scrollbar_drag(&p, l, x, 10000), ui.Outcome.Changed)
 	testing.expect_value(t, p.scroll, len(p.results) - p.visible_rows)
 	l = ui.palette_layout(&p, 1000, 800, 1)
@@ -77,8 +78,8 @@ palette_scrollbar_pages_drags_and_keeps_rows_clear :: proc(t: ^testing.T) {
 	_ = ui.palette_scrollbar_drag(&p, l, x - 500, -10000)
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect_value(t, ui.palette_pointer_release(&p), ui.Outcome.Changed)
-	testing.expect(t, !ui.palette_scrollbar_dragging(&p))
-	testing.expect_value(t, ui.scrollbar_state(p.scroll_hover, p.scroll_drag), ui.Scrollbar_State.Collapsed)
+	testing.expect(t, p.drag == nil)
+	testing.expect_value(t, ui.palette_scrollbar_state(&p), ui.Scrollbar_State.Collapsed)
 
 	ui.palette_text(&p, &registry, "zzzzzzzz-nothing")
 	l = ui.palette_layout(&p, 1000, 800, 1)

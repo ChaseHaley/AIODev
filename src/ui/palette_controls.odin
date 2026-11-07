@@ -42,6 +42,8 @@ Palette_Values :: struct {
 	choices: proc(user: rawptr, key: string) -> (choices, labels: []string),
 }
 
+// What palette_editing reports. A slider is edited only while the pointer drags it, so its state is
+// Slider_Drag in Palette_Drag rather than a Palette_Edit variant.
 Palette_Edit_Kind :: enum {
 	None,
 	Slider,
@@ -50,17 +52,66 @@ Palette_Edit_Kind :: enum {
 	Shortcut,
 }
 
-// The one setting control being operated: a slider drag, an open choice list or a text entry.
-// Choice strings are owned copies, released when the edit ends.
-Palette_Edit :: struct {
-	kind:            Palette_Edit_Kind,
-	setting:         int,
-	number:          f64,
+// The one control open in place: a setting's choice list or text entry, or a command's shortcut
+// row. nil when none is. edit_set is the only writer.
+Palette_Edit :: union {
+	Choice_Edit,
+	Text_Edit,
+	Shortcut_Edit,
+}
+
+// `index` is the highlighted match, `scroll` the first match shown and `hover` the match under the
+// pointer, or -1.
+Choice_Edit :: struct {
+	setting:              int,
+	index, scroll, hover: int,
+}
+
+Text_Edit :: struct {
+	setting: int,
+}
+
+// The single Settings row editing the shortcuts of result `result`. Its editor drives capture and
+// the alternatives list through its own mode, exactly as on the Settings page.
+Shortcut_Edit :: struct {
+	editor: Editor,
+	result: int,
+}
+
+// Storage the open edit fills: the text entry, the choice list's filter, owned copies of the
+// choices and their labels, and the choices the filter matches. Each is meaningful only while the
+// edit that fills it is open; it outlives edits so opening one reuses its capacity.
+Edit_Buffers :: struct {
 	field, filter:   Text_Field,
 	choices, labels: [dynamic]string,
 	matches:         [dynamic]int,
-	index, scroll:   int,
-	hover:           int,
+}
+
+// What the pointer holds, one thing at a time: a selection drag in the query, the text entry or the
+// choice filter, the results' scrollbar thumb, or a slider with the value it shows. A press starts
+// it; palette_pointer_release ends it, and palette_drag_cancel drops it without saving. drag_set is
+// the only writer.
+Palette_Drag :: union {
+	Query_Drag,
+	Field_Drag,
+	Filter_Drag,
+	Scrollbar_Drag,
+	Slider_Drag,
+}
+
+Query_Drag :: struct {}
+
+Field_Drag :: struct {}
+
+Filter_Drag :: struct {}
+
+Scrollbar_Drag :: struct {
+	grab: f32,
+}
+
+Slider_Drag :: struct {
+	setting: int,
+	number:  f64,
 }
 
 // A setting's palette entry, built from the row shape the Settings page uses. Settings whose page
@@ -96,51 +147,74 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 
 palette_set_values :: proc(p: ^Palette, values: Palette_Values) {p.values = values}
 
-palette_editing :: proc(p: ^Palette) -> Palette_Edit_Kind {return p.edit.kind}
-
-// The setting key and value of the last Set_Setting outcome.
-palette_chosen_value :: proc(p: ^Palette) -> (key, value: string) {
-	return p.chosen, string(p.chosen_value[:])
+palette_editing :: proc(p: ^Palette) -> Palette_Edit_Kind {
+	if _, sliding := p.drag.(Slider_Drag); sliding {return .Slider}
+	switch _ in p.edit {
+	case Choice_Edit:
+		return .Choice
+	case Text_Edit:
+		return .Text
+	case Shortcut_Edit:
+		return .Shortcut
+	}
+	return .None
 }
 
 @(private)
-edit_init :: proc(e: ^Palette_Edit, allocator := context.allocator) {
-	e.field.bytes = make([dynamic]u8, allocator)
-	e.filter.bytes = make([dynamic]u8, allocator)
-	e.choices = make([dynamic]string, allocator)
-	e.labels = make([dynamic]string, allocator)
-	e.matches = make([dynamic]int, allocator)
-	e.setting, e.hover = -1, -1
+edit_init :: proc(b: ^Edit_Buffers, allocator := context.allocator) {
+	b.field.bytes = make([dynamic]u8, allocator)
+	b.filter.bytes = make([dynamic]u8, allocator)
+	b.choices = make([dynamic]string, allocator)
+	b.labels = make([dynamic]string, allocator)
+	b.matches = make([dynamic]int, allocator)
 }
 
 @(private)
-edit_choices_clear :: proc(e: ^Palette_Edit) {
-	for s in e.choices {delete(s, e.choices.allocator)}
-	for s in e.labels {delete(s, e.labels.allocator)}
-	clear(&e.choices)
-	clear(&e.labels)
-	clear(&e.matches)
+edit_choices_clear :: proc(b: ^Edit_Buffers) {
+	for s in b.choices {delete(s, b.choices.allocator)}
+	for s in b.labels {delete(s, b.labels.allocator)}
+	clear(&b.choices)
+	clear(&b.labels)
+	clear(&b.matches)
 }
 
 @(private)
-edit_destroy :: proc(e: ^Palette_Edit) {
-	edit_choices_clear(e)
-	delete(e.field.bytes)
-	delete(e.filter.bytes)
-	delete(e.choices)
-	delete(e.labels)
-	delete(e.matches)
+edit_destroy :: proc(b: ^Edit_Buffers) {
+	edit_choices_clear(b)
+	delete(b.field.bytes)
+	delete(b.filter.bytes)
+	delete(b.choices)
+	delete(b.labels)
+	delete(b.matches)
 }
 
-// Ends any in-place edit without saving.
-palette_edit_cancel :: proc(p: ^Palette) {
-	if p.edit.kind == .None {return}
-	if p.edit.kind == .Shortcut {editor_destroy(&p.binding)}
-	edit_choices_clear(&p.edit)
-	p.edit.kind, p.edit.setting, p.edit.hover = .None, -1, -1
-	field_release(&p.edit.field)
-	field_release(&p.edit.filter)
+// Leaving an edit frees what it owned and ends its selection drag. Opening one drops any pointer
+// hold without saving, since keys and presses now go to the edit.
+@(private)
+edit_set :: proc(p: ^Palette, next: Palette_Edit) {
+	switch &e in p.edit {
+	case Choice_Edit:
+		edit_choices_clear(&p.buffers)
+	case Text_Edit:
+	case Shortcut_Edit:
+		editor_destroy(&e.editor)
+	}
+	#partial switch _ in p.drag {
+	case Field_Drag, Filter_Drag:
+		drag_set(p, nil)
+	}
+	if next != nil {drag_set(p, nil)}
+	palette_choose(p, nil)
+	p.edit = next
 }
+
+// The only writer of p.drag. The palette's text fields move by its drag state, never by their own
+// `dragging` flag.
+@(private)
+drag_set :: proc(p: ^Palette, next: Palette_Drag) {p.drag = next}
+
+// Drops whatever the pointer holds without saving, as when the window loses the pointer capture.
+palette_drag_cancel :: proc(p: ^Palette) {drag_set(p, nil)}
 
 // The setting a result row shows, or nil when the row is not a setting.
 @(private)
@@ -175,12 +249,9 @@ setting_number :: proc(p: ^Palette, s: ^Palette_Setting) -> f64 {
 @(private)
 choose_value :: proc(p: ^Palette, s: ^Palette_Setting, value: string) -> Outcome {
 	current, _ := setting_value(p, s)
-	palette_edit_cancel(p)
+	edit_set(p, nil)
 	if value == current {return .Changed}
-	p.chosen = s.key
-	clear(&p.chosen_value)
-	append(&p.chosen_value, value)
-	return .Set_Setting
+	return choose_setting(p, s.key, value)
 }
 
 @(private)
@@ -222,10 +293,10 @@ step_choice :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome
 }
 
 @(private)
-choice_filter_update :: proc(p: ^Palette) {
-	e := &p.edit
-	choice_matches_filter(&e.matches, e.choices[:], e.labels[:], field_string(&e.filter))
-	e.index, e.scroll = 0, 0
+choice_filter_update :: proc(p: ^Palette, c: ^Choice_Edit) {
+	b := &p.buffers
+	choice_matches_filter(&b.matches, b.choices[:], b.labels[:], field_string(&b.filter))
+	c.index, c.scroll = 0, 0
 }
 
 @(private)
@@ -233,50 +304,50 @@ open_choice :: proc(p: ^Palette, setting: int) -> Outcome {
 	s := &p.settings[setting]
 	choices, labels := static_or_live_choices(p, s)
 	if len(choices) == 0 {return .None}
-	palette_edit_cancel(p)
-	e := &p.edit
-	allocator := e.choices.allocator
+	edit_set(p, nil)
+	b := &p.buffers
+	allocator := b.choices.allocator
 	current, _ := setting_value(p, s)
 	for choice, i in choices {
 		label := i < len(labels) ? labels[i] : ""
-		append(&e.choices, strings.clone(choice, allocator))
-		append(&e.labels, label != "" && label != choice ? strings.clone(label, allocator) : "")
+		append(&b.choices, strings.clone(choice, allocator))
+		append(&b.labels, label != "" && label != choice ? strings.clone(label, allocator) : "")
 	}
-	field_set(&e.filter, "")
-	e.kind, e.setting = .Choice, setting
-	choice_filter_update(p)
-	for match, i in e.matches {if e.choices[match] == current {e.index = i}}
-	popup_keep_visible(p)
+	field_set(&b.filter, "")
+	edit_set(p, Choice_Edit{setting = setting, hover = -1})
+	c := &p.edit.(Choice_Edit)
+	choice_filter_update(p, c)
+	for match, i in b.matches {if b.choices[match] == current {c.index = i}}
+	popup_keep_visible(p, c)
 	return .Changed
 }
 
 @(private)
 open_text :: proc(p: ^Palette, setting: int) -> Outcome {
 	s := &p.settings[setting]
-	palette_edit_cancel(p)
+	edit_set(p, nil)
 	value, _ := setting_value(p, s)
-	field_set(&p.edit.field, value)
-	field_select_all(&p.edit.field)
-	p.edit.kind, p.edit.setting = .Text, setting
+	field_set(&p.buffers.field, value)
+	field_select_all(&p.buffers.field)
+	edit_set(p, Text_Edit{setting})
 	return .Changed
 }
 
 @(private)
-popup_keep_visible :: proc(p: ^Palette) {
-	e := &p.edit
-	count := len(e.matches)
-	e.index = clamp(e.index, 0, max(0, count - 1))
-	if e.index < e.scroll {e.scroll = e.index}
-	if e.index >= e.scroll + PALETTE_POPUP_ROWS {e.scroll = e.index - PALETTE_POPUP_ROWS + 1}
-	e.scroll = clamp(e.scroll, 0, max(0, count - PALETTE_POPUP_ROWS))
+popup_keep_visible :: proc(p: ^Palette, c: ^Choice_Edit) {
+	count := len(p.buffers.matches)
+	c.index = clamp(c.index, 0, max(0, count - 1))
+	if c.index < c.scroll {c.scroll = c.index}
+	if c.index >= c.scroll + PALETTE_POPUP_ROWS {c.scroll = c.index - PALETTE_POPUP_ROWS + 1}
+	c.scroll = clamp(c.scroll, 0, max(0, count - PALETTE_POPUP_ROWS))
 }
 
 @(private)
-popup_choose :: proc(p: ^Palette, index: int) -> Outcome {
-	e := &p.edit
-	if index < 0 || index >= len(e.matches) || e.setting < 0 {return .None}
-	value := strings.clone(e.choices[e.matches[index]], context.temp_allocator)
-	return choose_value(p, &p.settings[e.setting], value)
+popup_choose :: proc(p: ^Palette, c: ^Choice_Edit, index: int) -> Outcome {
+	b := &p.buffers
+	if index < 0 || index >= len(b.matches) {return .None}
+	value := strings.clone(b.choices[b.matches[index]], context.temp_allocator)
+	return choose_value(p, &p.settings[c.setting], value)
 }
 
 // Toggles flip, choices open their list, and sliders and text open a typed entry.
@@ -318,22 +389,20 @@ control_step :: proc(p: ^Palette, setting: int, direction: int) -> Outcome {
 // Keys for an open choice list or text entry. Every key is consumed.
 @(private)
 edit_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
-	edit := &p.edit
 	#partial switch e.key {
 	case .Escape:
-		palette_edit_cancel(p)
+		edit_set(p, nil)
 		return .Changed
 	case .Tab:
 		return .None
 	}
-	switch edit.kind {
-	case .None, .Slider, .Shortcut:
-		return .None
-	case .Text:
+	b := &p.buffers
+	#partial switch &edit in p.edit {
+	case Text_Edit:
 		#partial switch e.key {
 		case .Enter, .Numpad_Enter:
 			s := &p.settings[edit.setting]
-			value := strings.clone(field_string(&edit.field), context.temp_allocator)
+			value := strings.clone(field_string(&b.field), context.temp_allocator)
 			if s.control == .Slider {
 				number, ok := strconv.parse_f64(strings.trim_space(value))
 				// An unreadable number still goes to the owner, which reports why it was refused.
@@ -341,41 +410,41 @@ edit_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
 			}
 			return choose_value(p, s, value)
 		}
-		return field_key(&edit.field, e) == .None ? .None : .Changed
-	case .Choice:
+		return field_key(&b.field, e) == .None ? .None : .Changed
+	case Choice_Edit:
 		if step := list_step(e); step != 0 {
 			edit.index += step
-			popup_keep_visible(p)
+			popup_keep_visible(p, &edit)
 			return .Changed
 		}
 		#partial switch e.key {
 		case .Enter, .Numpad_Enter:
-			return popup_choose(p, edit.index)
+			return popup_choose(p, &edit, edit.index)
 		case .Page_Up:
 			edit.index -= PALETTE_POPUP_ROWS
-			popup_keep_visible(p)
+			popup_keep_visible(p, &edit)
 			return .Changed
 		case .Page_Down:
 			edit.index += PALETTE_POPUP_ROWS
-			popup_keep_visible(p)
+			popup_keep_visible(p, &edit)
 			return .Changed
 		}
-		if !popup_searchable(p) {return .None}
-		if field_key(&edit.filter, e) == .Edited {choice_filter_update(p)}
+		if !p.settings[edit.setting].searchable {return .None}
+		if field_key(&b.filter, e) == .Edited {choice_filter_update(p, &edit)}
 		return .Changed
 	}
 	return .None
 }
 
-// The field typed text and pastes go to while an edit is open.
+// The field typed text and pastes go to while an edit is open: the text entry, or a searchable
+// choice list's filter.
 @(private)
 edit_field :: proc(p: ^Palette) -> ^Text_Field {
-	switch p.edit.kind {
-	case .Text:
-		return &p.edit.field
-	case .Choice:
-		return popup_searchable(p) ? &p.edit.filter : nil
-	case .None, .Slider, .Shortcut:
+	#partial switch edit in p.edit {
+	case Text_Edit:
+		return &p.buffers.field
+	case Choice_Edit:
+		return p.settings[edit.setting].searchable ? &p.buffers.filter : nil
 	}
 	return nil
 }
@@ -385,7 +454,7 @@ edit_text :: proc(p: ^Palette, text: string) -> Outcome {
 	field := edit_field(p)
 	if field == nil {return .None}
 	change := field_text(field, text)
-	if change == .Edited && p.edit.kind == .Choice {choice_filter_update(p)}
+	if c, listing := &p.edit.(Choice_Edit); listing && change == .Edited {choice_filter_update(p, c)}
 	return change == .None ? .None : .Changed
 }
 
@@ -496,23 +565,32 @@ setting_row :: proc(p: ^Palette, l: Palette_Layout, setting: int) -> (render.Rec
 }
 
 @(private)
-edit_control :: proc(p: ^Palette, l: Palette_Layout) -> render.Rect {
-	if p.edit.setting < 0 {return {}}
-	row, ok := setting_row(p, l, p.edit.setting)
+edit_control :: proc(p: ^Palette, l: Palette_Layout, setting: int) -> render.Rect {
+	row, ok := setting_row(p, l, setting)
 	if !ok {return {}}
-	return control_rect(&p.settings[p.edit.setting], row, l.scale)
+	return control_rect(&p.settings[setting], row, l.scale)
 }
 
-// The open choice list, below its control or above it when the window has no room below.
+// The open choice list or shortcut alternatives, or nothing.
 palette_popup_rect :: proc(p: ^Palette, l: Palette_Layout) -> render.Rect {
-	if p.edit.kind == .Shortcut {return editor_popup_rect(&p.binding, palette_binding_layout(p, l))}
-	if p.edit.kind != .Choice {return {}}
-	control := edit_control(p, l)
+	#partial switch &edit in p.edit {
+	case Shortcut_Edit:
+		return editor_popup_rect(&edit.editor, palette_binding_layout(p, l, edit.result))
+	case Choice_Edit:
+		return choice_popup_rect(p, &edit, l)
+	}
+	return {}
+}
+
+// The choice list, below its control or above it when the window has no room below.
+@(private)
+choice_popup_rect :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout) -> render.Rect {
+	control := edit_control(p, l, c.setting)
 	if control.width <= 0 {return {}}
 	s := l.scale
-	rows := min(PALETTE_POPUP_ROWS, max(1, len(p.edit.matches)))
+	rows := min(PALETTE_POPUP_ROWS, max(1, len(p.buffers.matches)))
 	height := (f32(rows) * PALETTE_POPUP_ROW + 2 * OVERLAY_PADDING) * s
-	if popup_searchable(p) {height += PALETTE_POPUP_SEARCH * s}
+	if p.settings[c.setting].searchable {height += PALETTE_POPUP_SEARCH * s}
 	width := max(control.width, 220 * s)
 	x := clamp(control.x + control.width - width, s, max(s, l.viewport.width - width - s))
 	y := control.y + control.height + 4 * s
@@ -526,31 +604,26 @@ palette_popup_contains :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> boo
 
 // Searchable lists, such as installed fonts, have a filter field at the top of the popup.
 @(private)
-popup_searchable :: proc(p: ^Palette) -> bool {
-	return p.edit.setting >= 0 && p.settings[p.edit.setting].searchable
-}
-
-@(private)
-popup_list_top :: proc(p: ^Palette, popup: render.Rect, scale: f32) -> f32 {
+popup_list_top :: proc(p: ^Palette, c: ^Choice_Edit, popup: render.Rect, scale: f32) -> f32 {
 	top := popup.y + 4 * scale
-	if popup_searchable(p) {top += PALETTE_POPUP_SEARCH * scale}
+	if p.settings[c.setting].searchable {top += PALETTE_POPUP_SEARCH * scale}
 	return top
 }
 
 @(private)
-popup_row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
-	popup := palette_popup_rect(p, l)
+popup_row_at :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout, x, y: f32) -> int {
+	popup := choice_popup_rect(p, c, l)
 	if !contains(popup, x, y) {return -1}
-	top := popup_list_top(p, popup, l.scale)
+	top := popup_list_top(p, c, popup, l.scale)
 	if y < top {return -1}
-	index := p.edit.scroll + int((y - top) / (PALETTE_POPUP_ROW * l.scale))
-	return index < len(p.edit.matches) ? index : -1
+	index := c.scroll + int((y - top) / (PALETTE_POPUP_ROW * l.scale))
+	return index < len(p.buffers.matches) ? index : -1
 }
 
 @(private)
 popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f32) -> Field_Box {
 	return {
-		field = &p.edit.filter, text = text,
+		field = &p.buffers.filter, text = text,
 		rect = {popup.x + 4 * scale, popup.y + 4 * scale, popup.width - 8 * scale, HEIGHT_TOOLBAR * scale},
 		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
 	}
@@ -559,7 +632,7 @@ popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f3
 @(private)
 text_entry_box :: proc(p: ^Palette, control: render.Rect, text: ^Text, scale: f32) -> Field_Box {
 	return {
-		field = &p.edit.field, text = text, rect = control,
+		field = &p.buffers.field, text = text, rect = control,
 		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
 	}
 }
@@ -581,48 +654,77 @@ control_press :: proc(p: ^Palette, l: Palette_Layout, index: int, x, y: f32) -> 
 	#partial switch s.control {
 	case .Slider:
 		if contains(slider_number_rect(control, l.scale), x, y) {return open_text(p, setting), true}
-		palette_edit_cancel(p)
-		p.edit.kind, p.edit.setting = .Slider, setting
+		edit_set(p, nil)
 		track := slider_track(control, l.scale)
-		p.edit.number = snap(s, slider_value(s.minimum, s.maximum, (x - track.x) / max(1, track.width)))
+		number := snap(s, slider_value(s.minimum, s.maximum, (x - track.x) / max(1, track.width)))
+		drag_set(p, Slider_Drag{setting, number})
 		return .Changed, true
 	}
 	return control_activate(p, setting), true
 }
 
-palette_slider_dragging :: proc(p: ^Palette) -> bool {return p.edit.kind == .Slider}
-
 palette_slider_drag :: proc(p: ^Palette, l: Palette_Layout, x: f32) -> Outcome {
-	if p.edit.kind != .Slider {return .None}
-	s := &p.settings[p.edit.setting]
-	track := slider_track(edit_control(p, l), l.scale)
+	drag, sliding := &p.drag.(Slider_Drag)
+	if !sliding {return .None}
+	s := &p.settings[drag.setting]
+	track := slider_track(edit_control(p, l, drag.setting), l.scale)
 	if track.width <= 0 {return .None}
 	number := snap(s, slider_value(s.minimum, s.maximum, (x - track.x) / track.width))
-	if number == p.edit.number {return .None}
-	p.edit.number = number
+	if number == drag.number {return .None}
+	drag.number = number
 	return .Changed
+}
+
+// Moves what the pointer holds while the left button is down; otherwise the move is a hover.
+palette_pointer_move :: proc(
+	p: ^Palette,
+	l: Palette_Layout,
+	text: ^Text,
+	x, y: f32,
+	held: bool,
+) -> Outcome {
+	if !held {return palette_mouse_move(p, l, x, y)}
+	switch _ in p.drag {
+	case Query_Drag:
+		return palette_input_drag(p, l, text, x, l.scale)
+	case Field_Drag:
+		entry, open := p.edit.(Text_Edit)
+		if !open {return .None}
+		box := text_entry_box(p, edit_control(p, l, entry.setting), text, l.scale)
+		return field_move(&p.buffers.field, field_box_offset(box, x), true) == .None ? .None : .Changed
+	case Filter_Drag:
+		choice, open := &p.edit.(Choice_Edit)
+		if !open {return .None}
+		box := popup_search_box(p, choice_popup_rect(p, choice, l), text, l.scale)
+		return field_move(&p.buffers.filter, field_box_offset(box, x), true) == .None ? .None : .Changed
+	case Scrollbar_Drag:
+		return palette_scrollbar_drag(p, l, x, y)
+	case Slider_Drag:
+		return palette_slider_drag(p, l, x)
+	}
+	return palette_mouse_move(p, l, x, y)
 }
 
 // Ends a pointer gesture: a released slider saves the value it shows.
 palette_pointer_release :: proc(p: ^Palette) -> Outcome {
-	field_release(&p.query)
-	field_release(&p.edit.field)
-	field_release(&p.edit.filter)
-	if p.scroll_drag.active {
-		p.scroll_drag = {}
+	drag := p.drag
+	drag_set(p, nil)
+	#partial switch d in drag {
+	case Scrollbar_Drag:
 		return .Changed
+	case Slider_Drag:
+		return choose_number(p, &p.settings[d.setting], d.number)
 	}
-	if p.edit.kind != .Slider {return .None}
-	return choose_number(p, &p.settings[p.edit.setting], p.edit.number)
+	return .None
 }
 
 @(private)
-popup_wheel :: proc(p: ^Palette, rows: int) -> Outcome {
-	limit := max(0, len(p.edit.matches) - PALETTE_POPUP_ROWS)
-	scroll := clamp(p.edit.scroll - rows, 0, limit)
-	if scroll == p.edit.scroll {return .None}
-	p.edit.scroll = scroll
-	p.edit.index = clamp(p.edit.index, scroll, scroll + PALETTE_POPUP_ROWS - 1)
+popup_wheel :: proc(p: ^Palette, c: ^Choice_Edit, rows: int) -> Outcome {
+	limit := max(0, len(p.buffers.matches) - PALETTE_POPUP_ROWS)
+	scroll := clamp(c.scroll - rows, 0, limit)
+	if scroll == c.scroll {return .None}
+	c.scroll = scroll
+	c.index = clamp(c.index, scroll, scroll + PALETTE_POPUP_ROWS - 1)
 	return .Changed
 }
 
@@ -630,79 +732,63 @@ popup_wheel :: proc(p: ^Palette, rows: int) -> Outcome {
 // press should fall through to the palette after the edit ended.
 @(private)
 edit_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> (Outcome, bool) {
-	switch p.edit.kind {
-	case .None, .Slider, .Shortcut:
-		return .None, false
-	case .Choice:
-		popup := palette_popup_rect(p, l)
+	#partial switch &edit in p.edit {
+	case Choice_Edit:
+		popup := choice_popup_rect(p, &edit, l)
 		if contains(popup, x, y) {
-			if index := popup_row_at(p, l, x, y); index >= 0 {return popup_choose(p, index), true}
-			if text != nil && popup_searchable(p) {
+			if index := popup_row_at(p, &edit, l, x, y); index >= 0 {
+				return popup_choose(p, &edit, index), true
+			}
+			if text != nil && p.settings[edit.setting].searchable {
 				box := popup_search_box(p, popup, text, l.scale)
 				if contains(box.rect, x, y) {
-					_ = field_pointer(&p.edit.filter, field_box_offset(box, x), true, false)
+					_ = field_move(&p.buffers.filter, field_box_offset(box, x), false)
+					drag_set(p, Filter_Drag{})
 				}
 			}
 			return .Changed, true
 		}
 		// A press on the open control closes the list, like the Settings page.
-		closing := contains(edit_control(p, l), x, y)
-		palette_edit_cancel(p)
+		closing := contains(edit_control(p, l, edit.setting), x, y)
+		edit_set(p, nil)
 		return .Changed, closing
-	case .Text:
-		control := edit_control(p, l)
+	case Text_Edit:
+		control := edit_control(p, l, edit.setting)
 		if contains(control, x, y) {
 			if text != nil {
 				box := text_entry_box(p, control, text, l.scale)
-				_ = field_pointer(&p.edit.field, field_box_offset(box, x), true, false)
+				_ = field_move(&p.buffers.field, field_box_offset(box, x), false)
+				drag_set(p, Field_Drag{})
 			}
 			return .Changed, true
 		}
-		palette_edit_cancel(p)
+		edit_set(p, nil)
 		return .Changed, false
 	}
 	return .None, false
 }
 
-palette_edit_drag :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x: f32) -> Outcome {
-	if p.edit.kind == .Text && p.edit.field.dragging {
-		box := text_entry_box(p, edit_control(p, l), text, l.scale)
-		return field_pointer(&p.edit.field, field_box_offset(box, x), false, true) == .None ? .None : .Changed
-	}
-	if p.edit.kind == .Choice && p.edit.filter.dragging {
-		box := popup_search_box(p, palette_popup_rect(p, l), text, l.scale)
-		return field_pointer(&p.edit.filter, field_box_offset(box, x), false, true) == .None ? .None : .Changed
-	}
-	return .None
-}
-
-palette_edit_text_dragging :: proc(p: ^Palette) -> bool {
-	return p.edit.field.dragging || p.edit.filter.dragging
-}
-
 // The pointer shape over a setting control or an open edit; ok is false elsewhere.
 @(private)
 control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.Cursor_Shape, bool) {
-	switch p.edit.kind {
-	case .Shortcut:
+	if _, sliding := p.drag.(Slider_Drag); sliding {return .Hand, true}
+	switch &edit in p.edit {
+	case Shortcut_Edit:
 		if contains(palette_popup_rect(p, l), x, y) {return .Hand, true}
-		row, _ := row_rect(p, l, p.binding_result)
+		row, _ := row_rect(p, l, edit.result)
 		parts := palette_binding_parts(row, l.scale)
 		if contains(parts.field, x, y) || contains(parts.positions, x, y) || contains(parts.reset, x, y) {
 			return .Hand, true
 		}
 		return .Arrow, false
-	case .Choice:
-		popup := palette_popup_rect(p, l)
+	case Choice_Edit:
+		popup := choice_popup_rect(p, &edit, l)
 		if contains(popup, x, y) {
-			if popup_row_at(p, l, x, y) >= 0 {return .Hand, true}
-			return y < popup_list_top(p, popup, l.scale) ? .Text : .Arrow, true
+			if popup_row_at(p, &edit, l, x, y) >= 0 {return .Hand, true}
+			return y < popup_list_top(p, &edit, popup, l.scale) ? .Text : .Arrow, true
 		}
-	case .Text:
-		if contains(edit_control(p, l), x, y) {return .Text, true}
-	case .Slider:
-		return .Hand, true
-	case .None:
+	case Text_Edit:
+		if contains(edit_control(p, l, edit.setting), x, y) {return .Text, true}
 	}
 	index := row_at(p, l, x, y)
 	s := result_setting(p, index)
@@ -728,11 +814,10 @@ draw_control :: proc(
 	scale := l.scale
 	control := control_rect(s, row, scale)
 	if control.width <= 0 {return .Ok}
-	editing := p.edit.setting == setting
 	value, label := setting_value(p, s)
 	input_text := text_styled(text, .Body)
 	baseline := control.y + (control.height - input_text.line_height) / 2 + input_text.ascent
-	if editing && p.edit.kind == .Text {
+	if entry, typing := p.edit.(Text_Edit); typing && entry.setting == setting {
 		box := text_entry_box(p, control, text, scale)
 		box_draw(list, control, theme, true, scale)
 		result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Empty")
@@ -745,7 +830,8 @@ draw_control :: proc(
 	case .Toggle:
 		switch_draw(list, control, value == "true", false, theme, scale)
 	case .Slider:
-		number := editing && p.edit.kind == .Slider ? p.edit.number : setting_number(p, s)
+		drag, sliding := p.drag.(Slider_Drag)
+		number := sliding && drag.setting == setting ? drag.number : setting_number(p, s)
 		slider_draw(list, slider_track(control, scale), slider_fraction(s.minimum, s.maximum, number), theme, scale)
 		shown := number_text(s.step > 0 ? s.step : 1, number)
 		number_box := slider_number_rect(control, scale)
@@ -753,7 +839,8 @@ draw_control :: proc(
 		return draw_text(&input_text, list, shown, number_box.x + number_box.width - width, baseline,
 			theme.muted, number_box.width)
 	case .Choice:
-		box_draw(list, control, theme, editing && p.edit.kind == .Choice, scale)
+		choice, listing := p.edit.(Choice_Edit)
+		box_draw(list, control, theme, listing && choice.setting == setting, scale)
 		inset := CONTROL_INSET * scale
 		if result := draw_text(&input_text, list, label, control.x + inset, baseline, theme.text,
 			max(1, control.width - 2 * inset - (ICON_INDICATOR + SPACE_1) * scale)); result != .Ok {return result}
@@ -782,39 +869,41 @@ draw_popup :: proc(
 	theme: Theme,
 	l: Palette_Layout,
 ) -> glyphs.Result {
-	popup := palette_popup_rect(p, l)
+	c, listing := &p.edit.(Choice_Edit)
+	if !listing {return .Ok}
+	popup := choice_popup_rect(p, c, l)
 	if popup.width <= 0 {return .Ok}
 	scale := l.scale
 	if render.push_layer(list, popup) != .None {return .Ok}
 	draw_rect(list, {rect = popup, color = theme.pane, radius = RADIUS_OVERLAY * scale})
 	draw_rect(list, {rect = popup, color = theme.border, radius = RADIUS_OVERLAY * scale, stroke = scale})
-	e := &p.edit
-	if popup_searchable(p) {
+	b := &p.buffers
+	if p.settings[c.setting].searchable {
 		box := popup_search_box(p, popup, text, scale)
 		box_draw(list, box.rect, theme, true, scale)
 		if result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Search");
 		   result != .Ok {return result}
 		if render.push_layer(list, popup) != .None {return .Ok}
 	}
-	top := popup_list_top(p, popup, scale)
+	top := popup_list_top(p, c, popup, scale)
 	row_height := PALETTE_POPUP_ROW * scale
 	item_text := text^
-	if len(e.matches) == 0 {
+	if len(b.matches) == 0 {
 		baseline := top + (row_height - item_text.line_height) / 2 + item_text.ascent
 		return draw_text(&item_text, list, "No matches", popup.x + SPACE_3 * scale, baseline, theme.muted)
 	}
-	current, _ := setting_value(p, &p.settings[e.setting])
-	for i := e.scroll; i < len(e.matches) && i < e.scroll + PALETTE_POPUP_ROWS; i += 1 {
-		choice := e.matches[i]
+	current, _ := setting_value(p, &p.settings[c.setting])
+	for i := c.scroll; i < len(b.matches) && i < c.scroll + PALETTE_POPUP_ROWS; i += 1 {
+		choice := b.matches[i]
 		pad := OVERLAY_PADDING * scale
-		row := render.Rect{popup.x + pad, top + f32(i - e.scroll) * row_height, popup.width - 2 * pad, row_height}
-		if i == e.index {
+		row := render.Rect{popup.x + pad, top + f32(i - c.scroll) * row_height, popup.width - 2 * pad, row_height}
+		if i == c.index {
 			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
-		} else if i == e.hover {
+		} else if i == c.hover {
 			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_CONTROL * scale})
 		}
-		label := e.labels[choice] != "" ? e.labels[choice] : e.choices[choice]
-		saved := e.choices[choice] == current
+		label := b.labels[choice] != "" ? b.labels[choice] : b.choices[choice]
+		saved := b.choices[choice] == current
 		baseline := row.y + (row.height - item_text.line_height) / 2 + item_text.ascent
 		if saved {
 			check := render.Rect {

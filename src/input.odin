@@ -383,6 +383,8 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 
 @(private)
 on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: commands.Command_Id) {
+	// The outcome that names a choice is the only one that may act on it.
+	chosen := ui.palette_chosen_take(&app.palette)
 	switch outcome {
 	case .None:
 	case .Changed, .Closed:
@@ -392,22 +394,29 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		command_run(app, w, Action(id), .Palette)
 	case .Open_Setting:
 		w.dirty = true
-		settings_reveal(
-			app,
-			pane_link_acting_window(app, w),
-			{key = app.palette.chosen, search = .Clear, focus = .Control},
-		)
+		if setting, ok := chosen.(ui.Chosen_Setting); ok {
+			settings_reveal(
+				app,
+				pane_link_acting_window(app, w),
+				{key = setting.key, search = .Clear, focus = .Control},
+			)
+		}
 	case .Set_Setting:
 		w.dirty = true
-		key, value := ui.palette_chosen_value(&app.palette)
-		saved, _ := settings_save_value(app, key, value, "Could not save the setting.")
-		ui.palette_binding_saved(&app.palette, saved)
+		if value, ok := chosen.(ui.Chosen_Value); ok {
+			saved, _ := settings_save_value(app, value.key, value.value, "Could not save the setting.")
+			ui.palette_binding_saved(&app.palette, saved)
+		}
 	case .Open_Tab:
 		w.dirty = true
-		palette_activate_tab(app, pane_link_acting_window(app, w), app.palette.chosen_id)
+		if tab, ok := chosen.(ui.Chosen_Tab); ok {
+			palette_activate_tab(app, pane_link_acting_window(app, w), tab.id)
+		}
 	case .Open_Workspace:
 		w.dirty = true
-		palette_activate_workspace(app, pane_link_acting_window(app, w), u32(app.palette.chosen_id))
+		if workspace, ok := chosen.(ui.Chosen_Workspace); ok {
+			palette_activate_workspace(app, pane_link_acting_window(app, w), u32(workspace.id))
+		}
 	}
 }
 
