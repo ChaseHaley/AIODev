@@ -6,7 +6,8 @@ import "aio:render"
 import "core:unicode/utf8"
 
 // One line of editable text. The selection runs between anchor and cursor; they are equal when
-// nothing is selected. Both are byte offsets on rune boundaries.
+// nothing is selected. Both are byte offsets on rune boundaries. `dragging` holds from a pointer press
+// in the field until its owner calls field_release.
 Text_Field :: struct {
 	bytes:          [dynamic]u8,
 	cursor, anchor: int,
@@ -35,7 +36,8 @@ field_selected_text :: proc(f: ^Text_Field) -> string {
 field_set :: proc(f: ^Text_Field, value: string) {
 	clear(&f.bytes)
 	append(&f.bytes, ..transmute([]u8)value)
-	f.cursor, f.anchor, f.dragging = len(f.bytes), len(f.bytes), false
+	f.cursor, f.anchor = len(f.bytes), len(f.bytes)
+	field_release(f)
 }
 
 field_select_all :: proc(f: ^Text_Field) {
@@ -184,6 +186,13 @@ field_pointer :: proc(f: ^Text_Field, at: int, pressed, extend: bool) -> Field_C
 	}
 	if !f.dragging {return .None}
 	return field_move(f, at, true)
+}
+
+// Ends a pointer drag in the field, returning whether one was under way.
+field_release :: proc(f: ^Text_Field) -> bool {
+	dragging := f.dragging
+	f.dragging = false
+	return dragging
 }
 
 field_draw :: proc(

@@ -279,7 +279,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 palette_close :: proc(p: ^Palette) {
 	palette_edit_cancel(p)
 	presence_close(&p.presence)
-	p.query.dragging = false
+	field_release(&p.query)
 	p.mode_hover = -1
 	p.scroll_hover, p.scroll_drag = false, {}
 }
@@ -1056,7 +1056,7 @@ palette_mouse_press :: proc(
 ) {
 	if index := mode_at(l, x, y); index >= 0 && !palette_popup_contains(p, l, x, y) {
 		palette_edit_cancel(p)
-		p.query.dragging = false
+		field_release(&p.query)
 		palette_set_mode(p, registry, PALETTE_CYCLE[index])
 		return .Changed, 0
 	}
@@ -1140,9 +1140,7 @@ palette_input_drag :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, scale
 }
 
 palette_input_release :: proc(p: ^Palette) -> bool {
-	dragging := p.query.dragging
-	p.query.dragging = false
-	return dragging
+	return field_release(&p.query)
 }
 
 palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {

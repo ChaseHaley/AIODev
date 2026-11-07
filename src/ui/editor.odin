@@ -2551,8 +2551,9 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 // Ends a pointer drag; a slider or colour drag saves the value it settled on. Dropping a profile
 // row names its ID and insertion slot.
 editor_release :: proc(p: ^Editor) -> Editor_Outcome {
-	p.filter.dragging, p.value.dragging = false, false
-	p.choice_search.dragging = false
+	field_release(&p.filter)
+	field_release(&p.value)
+	field_release(&p.choice_search)
 	if _, reordering := p.order.(Order_Dragging); reordering {return order_drop(p)}
 	settled := false
 	switch m in p.mode {

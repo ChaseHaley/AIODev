@@ -92,10 +92,13 @@ offsets_select_the_text_under_a_drag :: proc(t: ^testing.T) {
 	line := f32(ui.markdown_line(&f.view))
 	y := g.top + line / 2
 	testing.expect_value(t, ui.markdown_offset_at(&f.view, &f.doc, g, g.left - 50, y), 0)
-	f.view.anchor = 0
-	f.view.head = ui.markdown_offset_at(&f.view, &f.doc, g, g.left + g.width, y + line * 3)
+	ui.markdown_select_at(&f.view, 0, false)
+	far := ui.markdown_offset_at(&f.view, &f.doc, g, g.left + g.width, y + line * 3)
+	ui.markdown_select_at(&f.view, far, true)
 	testing.expect_value(t, ui.markdown_selected_text(&f.view, &f.doc), "first paragraph\n\nsecond paragraph")
-	f.view.anchor, f.view.head = f.view.head, 6
+	// A shifted press keeps the anchor where the drag left the head.
+	ui.markdown_select_at(&f.view, f.view.head, false)
+	ui.markdown_select_at(&f.view, 6, true)
 	testing.expect_value(t, ui.markdown_selected_text(&f.view, &f.doc), "paragraph\n\nsecond paragraph")
 	ui.markdown_selection_clear(&f.view)
 	testing.expect_value(t, ui.markdown_selected_text(&f.view, &f.doc), "")
@@ -240,6 +243,42 @@ matches_draw_in_find_colours_with_the_selected_one_distinct :: proc(t: ^testing.
 	for rect in list.rects {
 		testing.expect(t, rect.color != find.background && rect.color != find.selected_background)
 	}
+}
+
+// The view does not keep the pointer: a pane nothing hovers underlines no link, not the first one.
+@(test)
+only_the_hovered_link_is_underlined :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, "[first](https://a.example) and [second](https://b.example)\n") {return}
+	device, device_error := render.device_create()
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 14)) {return}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	g := ui.markdown_geometry(WIDE_AREA, 1)
+	fit(&f, g.width)
+	theme: ui.Theme
+	theme.accent = {0, 0, 1, 1}
+	underlines: [3]int
+	lefts: [3]f32
+	for hover, i in ([3]int{-1, 0, 1}) {
+		render.draw_list_reset(&list)
+		result := ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme, {}, hover)
+		testing.expect_value(t, result, glyphs.Result.Ok)
+		for rect in list.rects {
+			if rect.color == theme.accent && rect.rect.height <= 1 {
+				underlines[i] += 1
+				lefts[i] = rect.rect.x
+			}
+		}
+	}
+	testing.expect_value(t, underlines, [3]int{0, 1, 1})
+	testing.expect(t, lefts[2] > lefts[1])
 }
 
 @(test)

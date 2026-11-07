@@ -49,8 +49,9 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.armed_cancel(&w.float_header_armed)
 	w.rail_resizing = false
 	ui.armed_cancel(&w.status.panel_button_armed)
-	w.rename.dragging, w.workspace_picker.query.dragging = false, false
-	w.document_menu.url.dragging = false
+	ui.field_release(&w.rename)
+	ui.field_release(&w.workspace_picker.query)
+	ui.field_release(&w.document_menu.url)
 	w.workspace_picker.order = {}
 	_ = workspace_order_animate(w, app.animations, time.tick_now())
 	link_hover_clear(w)

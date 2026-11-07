@@ -43,12 +43,15 @@ workspace_picker_transition :: proc(w: ^Window, mode: Workspace_Picker_Mode, tar
 	p.order = {}
 	if mode == .Closed || mode == .Icons || mode == .Tint {clear(&p.order_positions)}
 	p.menu_hover, p.menu_selected, p.rename_error, p.rename_motion = 0, 0, false, {}
-	p.query.dragging, w.rename.dragging, w.dirty = false, false, true
+	ui.field_release(&p.query)
+	ui.field_release(&w.rename)
+	w.dirty = true
 }
 
 workspace_picker_cancel :: proc(w: ^Window, focus_lost := false) {
 	p := &w.workspace_picker
-	p.query.dragging, w.rename.dragging = false, false
+	ui.field_release(&p.query)
+	ui.field_release(&w.rename)
 	// Windows' emoji picker can take focus before delivering text to the icon field.
 	if focus_lost && workspace_picker_icons(p) {return}
 	workspace_picker_transition(w, .Closed)
@@ -88,7 +91,8 @@ workspace_picker_select :: proc(w: ^Window, index: int) {
 workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	p := &w.workspace_picker
 	if !e.pressed {
-		p.query.dragging, w.rename.dragging = false, false
+		ui.field_release(&p.query)
+		ui.field_release(&w.rename)
 		w.header_buttons -= {e.button}
 		if e.button == .Left && p.order.id != 0 {workspace_order_release(app, w, e)}
 		return

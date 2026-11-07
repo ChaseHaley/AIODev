@@ -117,7 +117,7 @@ document_menu_close :: proc(w: ^Window) {
 	menu := &w.document_menu
 	if !menu.menu.open {return}
 	menu.menu.open, menu.url_open, menu.url_invalid, menu.popout = false, false, false, false
-	menu.url.dragging = false
+	ui.field_release(&menu.url)
 	menu.menu.hover_part = .Row
 	document_menu_pending_clear(menu)
 	w.dirty = true
@@ -667,7 +667,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Eve
 	menu := &w.document_menu
 	if !e.pressed {
 		w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
-		menu.url.dragging = false
+		ui.field_release(&menu.url)
 		if e.button in w.header_buttons {w.header_buttons -= {e.button}}
 		return
 	}

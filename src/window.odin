@@ -38,8 +38,9 @@ Window :: struct {
 	id: platform.Window_Id,
 	surface: Window_Surface,
 	ui_text: ui.Text,
-	// The Markdown pane holding a selection or scrollbar drag, or 0.
-	markdown_held: u32,
+	// The pointer's hold on a Markdown pane and what it is over; markdown_pane.odin writes both.
+	markdown_gesture: Markdown_Gesture,
+	markdown_hover: Markdown_Hover,
 	using resources: Workspace_View_Resources,
 	gesture: Gesture_State,
 	scroll_drag: ui.Scroll_Drag,

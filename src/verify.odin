@@ -462,18 +462,31 @@ when AIO_CONTROL {
 			}
 			markdown_scroll, markdown_total := 0, 0
 			markdown_path, markdown_selected := "", ""
-			markdown_state := Markdown_State.Missing
+			markdown_state := "Missing"
 			if pane := markdown_focused(app, w); pane != nil {
 				markdown_scroll, markdown_total = pane.view.scroll, ui.markdown_total(&pane.view)
-				markdown_path, markdown_state = pane.path, pane.state
-				markdown_selected = ui.markdown_selected_text(&pane.view, &pane.document)
+				markdown_path = pane.path
+				switch _ in pane.load {
+				case nil:
+					markdown_state = "Unverified"
+				case Markdown_Missing:
+				case Markdown_Loaded:
+					markdown_state = "Loaded"
+				case Markdown_Too_Large:
+					markdown_state = "Too_Large"
+				case Markdown_Failed:
+					markdown_state = "Failed"
+				}
+				if document := markdown_document(pane); document != nil {
+					markdown_selected = ui.markdown_selected_text(&pane.view, document)
+				}
 			}
 			window := [?]control.State_Entry {
 				{"window.id", fmt.tprintf("%d", w.id)},
 				{"markdown.count", fmt.tprintf("%d", len(app.markdown_panes))},
 				{"markdown.active", fmt.tprintf("%t", markdown_active(w))},
 				{"markdown.path", markdown_path},
-				{"markdown.state", fmt.tprintf("%v", markdown_state)},
+				{"markdown.state", markdown_state},
 				{"markdown.scroll", fmt.tprintf("%d", markdown_scroll)},
 				{"markdown.total", fmt.tprintf("%d", markdown_total)},
 				{"markdown.selection", markdown_selected},
