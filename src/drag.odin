@@ -363,40 +363,53 @@ drag_destroy :: proc(w: ^Window) {
 }
 
 when AIO_CONTROL {
-	// What the verify harness reports of a window's drag, in the terms its journeys check.
-	Drag_Report :: struct {
-		pane, tab:                      bool,
-		shown, root, new_tab, tear_off: bool,
+	// The window's pane or tab drag in the terms its journeys check, with the tab slots it opens.
+	drag_state_report :: proc(r: ^State_Report, w: ^Window) {
+		pane, tab, shown, root, new_tab, tear_off: bool
 		// A pane drag's visited window; the window a tab drag offers its tabs to.
-		window:                         input.Window_Id,
-		preview:                        input.Window_Id,
-		thumbnail:                      Drag_Thumbnail,
-		ghost:                          [4]f32,
-	}
-
-	drag_report :: proc(w: ^Window) -> (report: Drag_Report) {
+		window, preview: input.Window_Id
+		thumbnail: Drag_Thumbnail
+		ghost: [4]f32
 		if pressed, ok := w.drag.(Drag_Pressed); ok {
-			if _, pane := pressed.grab.(Pane_Grab); pane {report.window = w.id}
-			return
+			if _, grabbed := pressed.grab.(Pane_Grab); grabbed {window = w.id}
+		} else if a := drag_active(w); a != nil {
+			_, tear_off = a.destination.(Drop_Tear_Off)
+			if ready, ready_ok := a.preview.(Preview_Ready); ready_ok {preview = ready.window}
+			thumbnail = a.thumbnail
+			switch carry in a.carry {
+			case Pane_Carry:
+				pane = true
+				shown = pane_drag_ghost_shown(a)
+				_, root = a.destination.(Drop_Dock_Root)
+				_, new_tab = a.destination.(Drop_New_Tab)
+				window = carry.visit.window
+				for m, i in carry.ghost {ghost[i] = m.target}
+			case Tab_Carry:
+				tab = true
+				if offer, offered := a.destination.(Drop_Other_Window); offered {window = offer.window}
+			}
 		}
-		a := drag_active(w)
-		if a == nil {return}
-		_, report.tear_off = a.destination.(Drop_Tear_Off)
-		if ready, ok := a.preview.(Preview_Ready); ok {report.preview = ready.window}
-		report.thumbnail = a.thumbnail
-		switch carry in a.carry {
-		case Pane_Carry:
-			report.pane = true
-			report.shown = pane_drag_ghost_shown(a)
-			_, report.root = a.destination.(Drop_Dock_Root)
-			_, report.new_tab = a.destination.(Drop_New_Tab)
-			report.window = carry.visit.window
-			for m, i in carry.ghost {report.ghost[i] = m.target}
-		case Tab_Carry:
-			report.tab = true
-			if offer, offered := a.destination.(Drop_Other_Window); offered {report.window = offer.window}
-		}
-		return
+		tab_thumbnail, pane_thumbnail: Drag_Thumbnail
+		if tab {tab_thumbnail = thumbnail}
+		if pane {pane_thumbnail = thumbnail}
+		state_value(r, "panes.dragging", pane)
+		state_value(r, "tabs.dragging", tab)
+		state_value(r, "tabs.drop.new_window", tab && tear_off)
+		state_value(r, "tabs.drop.preview_window", tab ? preview : 0)
+		state_value(r, "tabs.drop.window", tab ? window : 0)
+		state_value(r, "tabs.incoming.count", w.tab_incoming.count)
+		state_value(r, "tabs.incoming.slot", w.tab_incoming.slot)
+		state_value(r, "tabs.drop.thumbnail", tab && thumbnail.shown)
+		state_valuef(r, "tabs.drop.thumbnail_size", "%dx%d", tab_thumbnail.width, tab_thumbnail.height)
+		state_value(r, "panes.drop.shown", shown)
+		state_value(r, "panes.drop.root", root)
+		state_value(r, "panes.drop.new_tab", new_tab)
+		state_value(r, "panes.drop.new_window", pane && tear_off)
+		state_value(r, "panes.drop.window", tab ? 0 : window)
+		state_value(r, "panes.drop.preview_window", pane ? preview : 0)
+		state_value(r, "panes.drop.thumbnail", pane && thumbnail.shown)
+		state_valuef(r, "panes.drop.thumbnail_size", "%dx%d", pane_thumbnail.width, pane_thumbnail.height)
+		state_valuef(r, "panes.drop.rect", "%g,%g,%g,%g", ghost[0], ghost[1], ghost[2], ghost[3])
 	}
 }
 

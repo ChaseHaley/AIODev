@@ -225,3 +225,33 @@ confirmation_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
 	return result
 }
+
+when AIO_CONTROL {
+	// The close, file and swap questions' keys. Each reads the question only while it is about that
+	// key's subject.
+	confirmation_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		question := confirmation_shown(w)
+		opacity := question != nil ? question.dialog.motion.value : 0
+		closing := confirmation_subject(w, Pending_Close)
+		close_open := confirmation_asking(w, Pending_Close) != nil
+		confirm: Confirmation_Text
+		close_workspace: u32
+		if closing != nil {
+			confirm = pending_close_text(app, closing, close_open, w.workspace)
+			if target, ok := closing.target.(Close_Workspace); ok {close_workspace = target.workspace}
+		}
+		file := confirmation_subject(w, Pending_File)
+		swap := confirmation_subject(w, Pane_Swap)
+		state_value(r, "confirm.open", close_open)
+		state_valuef(r, "confirm.opacity", "%g", closing != nil ? opacity : 0)
+		state_text(r, "confirm.title", close_open ? confirm.title : "")
+		state_text(r, "confirm.body", close_open ? confirm.body : "")
+		state_value(r, "confirm.workspace", close_workspace)
+		state_value(r, "file.open", confirmation_asking(w, Pending_File) != nil)
+		state_text(r, "file.path", file != nil ? file.file.path : "")
+		state_text(r, "file.target", file != nil ? file.file.target : "")
+		state_value(r, "swap.open", confirmation_asking(w, Pane_Swap) != nil)
+		state_valuef(r, "swap.opacity", "%g", swap != nil ? opacity : 0)
+		state_text(r, "swap.profile", swap != nil ? swap.profile_id : "")
+	}
+}

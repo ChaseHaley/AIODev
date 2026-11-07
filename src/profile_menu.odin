@@ -279,3 +279,10 @@ profile_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		w.pointer,
 	)
 }
+
+when AIO_CONTROL {
+	profile_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
+		state_value(r, "profile_menu.open", profile_menu_shown(w))
+		state_value(r, "profile_menu.count", w.profile_menu.count)
+	}
+}

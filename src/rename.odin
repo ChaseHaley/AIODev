@@ -224,3 +224,12 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		max(1, r.width - 2 * pad),
 	)
 }
+
+when AIO_CONTROL {
+	rename_state_report :: proc(r: ^State_Report, w: ^Window) {
+		chip, _ := w.overlay.(Overlay_Chip_Name)
+		state_value(r, "rename.open", rename_shown(w))
+		state_value(r, "rename.error", chip.error)
+		state_text(r, "rename.value", ui.field_string(&w.rename))
+	}
+}

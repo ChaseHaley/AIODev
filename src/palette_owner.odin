@@ -108,3 +108,47 @@ palette_settings_init :: proc(app: ^App) -> bool {
 	}
 	return ui.palette_init(&app.palette, table[:count]) == nil
 }
+
+when AIO_CONTROL {
+	// The palette's verification keys. Only the window that owns the palette reports its contents.
+	palette_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		owner := palette_owner_id(app)
+		owns := w != nil && owner == w.id
+		p := &app.palette
+		layout: ui.Palette_Layout
+		item, value := "", ""
+		edit := ui.Palette_Edit_Kind.None
+		if owns {
+			layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+			edit = ui.palette_editing(p)
+			if p.selected >= 0 && p.selected < len(p.results) {
+				selected := p.results[p.selected]
+				item = ui.palette_result_name(p, selected)
+				// The saved value of the selected setting row, read the way its palette control reads it.
+				if selected.kind == .Setting {value, _ = palette_setting_value(app, item)}
+				if selected.command != nil {
+					value = commands.shortcut_set_text(selected.command.shortcuts, context.temp_allocator)
+				}
+			}
+		}
+		state_value(r, "palette.window", owner)
+		state_value(r, "palette.open", palette_active(app, w))
+		state_text(r, "palette.query", owns ? ui.palette_query(p) : "")
+		state_text(r, "palette.mode", owns ? ui.palette_mode_word(p.mode) : "all")
+		state_text(r, "palette.prefix", owns ? ui.palette_mode_prefix(p.mode) : "")
+		state_value(r, "palette.selected", owns ? p.selected : 0)
+		state_value(r, "palette.items", owns ? len(p.results) : 0)
+		state_text(r, "palette.item", item)
+		state_value(r, "palette.scroll", owns ? p.scroll : 0)
+		state_value(r, "palette.edit", edit)
+		state_text(r, "palette.value", value)
+		state_value(r, "palette.rows", layout.rows)
+		state_valuef(r, "palette.row_height", "%g", layout.row_height)
+		state_rect(r, "palette.panel", layout.panel)
+		state_rect(r, "palette.input", layout.input)
+		state_rect(r, "palette.list", layout.list)
+		for mode in ui.Palette_Mode {
+			state_rect(r, state_key("palette.mode.%s", ui.palette_mode_word(mode)), layout.modes[mode])
+		}
+	}
+}

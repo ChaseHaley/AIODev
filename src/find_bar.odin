@@ -164,3 +164,40 @@ find_controls :: proc(w: ^Window, target: Find_Target) -> (l: ui.Find_Layout, en
 	text := ui.text_styled(&w.ui_text, .Detail)
 	return ui.find_layout(f32(w.width), w.scale, ui.text_width(&text, label)), available
 }
+
+when AIO_CONTROL {
+	// The find bar's keys. find.count is the bar's own label; find.matches keeps the earlier wording
+	// ("1 match", "N matches") that live journeys check, from the same summary.
+	find_bar_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		target := find_target(app, w)
+		label, _ := find_presentation(w, target)
+		matches := ""
+		if s, ok := find_target_summary(target); ok && len(w.find.query.bytes) > 0 {
+			switch {
+			case s.selected >= 0: matches = fmt.tprintf("%d of %d", s.selected + 1, s.total)
+			case s.total == 1: matches = "1 match"
+			case s.total > 0: matches = fmt.tprintf("%d matches", s.total)
+			case s.progress == .Searching: matches = "Searching…"
+			case: matches = "No matches"
+			}
+		}
+		open := ui.find_is_open(&w.find)
+		state_value(r, "find.open", open)
+		state_value(r, "find.focused", ui.find_has_keyboard(&w.find))
+		state_value(r, "find.case_sensitive", w.find.case_sensitive)
+		state_value(r, "find.regex", w.find.regex)
+		state_text(r, "find.query", ui.field_string(&w.find.query))
+		state_text(r, "find.matches", matches)
+		state_text(r, "find.count", label)
+		if open {
+			controls, _ := find_controls(w, target)
+			state_rect(r, "find.older", controls.up)
+			state_rect(r, "find.newer", controls.down)
+			state_rect(r, "find.close", controls.close)
+		} else {
+			state_text(r, "find.older", "")
+			state_text(r, "find.newer", "")
+			state_text(r, "find.close", "")
+		}
+	}
+}

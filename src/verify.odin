@@ -40,20 +40,57 @@ _ :: settings
 
 AIO_CONTROL :: #config(AIO_CONTROL, false)
 
-// State keys whose change is reported by name rather than as a full value dump.
-@(private)
-CHANGED_KEYS :: [?]string {
-	"window.visible", "windows.count", "window.id", "window.origin", "window.size", "window.dpi",
-	"window.focused", "grid.size", "palette.open", "palette.query", "palette.item", "palette.selected",
-	"find.open", "find.query", "find.matches", "session.viewport", "session.selection",
-}
-
 when AIO_CONTROL {
+	// The state keys a drive's reply names when they change, in reply order. A key with words reports
+	// a change to true or false in them; any other key reports key=value.
+	Changed_Key :: struct {
+		key:                       string,
+		became_true, became_false: string,
+	}
+
+	CHANGED_KEYS :: [?]Changed_Key {
+		{key = "window.visible", became_true = "window shown", became_false = "window hidden"},
+		{key = "windows.count"},
+		{key = "window.id"},
+		{key = "window.origin"},
+		{key = "window.size"},
+		{key = "window.dpi"},
+		{key = "window.focused"},
+		{key = "grid.size"},
+		{key = "palette.open", became_true = "palette opened", became_false = "palette closed"},
+		{key = "palette.query"},
+		{key = "palette.item"},
+		{key = "palette.selected"},
+		{key = "find.open", became_true = "find opened", became_false = "find closed"},
+		{key = "find.query"},
+		{key = "find.matches"},
+		{key = "session.viewport"},
+		{key = "session.selection"},
+	}
+
+	// Server-side timings. A read or drive waits this long for the window to present before it starts.
+	GATE_TIMEOUT_MS :: 5000
+	// A drive answers once the focused content has been quiet DRIVE_IDLE_MS, or at DRIVE_TIMEOUT_MS.
+	DRIVE_IDLE_MS :: 50
+	DRIVE_TIMEOUT_MS :: 1000
+	// A resize may report only once the grid follows, which takes longer than the frame.
+	RESIZE_TIMEOUT_MS :: 5000
+	// The slowest fixed-budget drive, a gated resize, answers before a client stops waiting.
+	#assert(GATE_TIMEOUT_MS + RESIZE_TIMEOUT_MS < verify_protocol.CLIENT_TIMEOUT_MS)
+	// A quit's answer has this long to reach the client, checked every QUIT_POLL, before the app exits.
+	QUIT_DRAIN :: time.Second
+	QUIT_POLL :: 10 * time.Millisecond
+	// A mouse drag moves in this many even steps, one nanosecond apart, and releases a nanosecond later.
+	MOUSE_DRAG_STEPS :: 4
+
 	Verify :: struct {
 		server: ^control.Server,
 		request: Verify_Request,
 		// When the focused pane's content last changed, or the last drive began.
 		changed: time.Tick,
+		// state's frames.presented: swap-chain presents of the verified window, from DXGI statistics.
+		// perf's frames.presented is perf.Stats.presented, successful frame_render calls of every
+		// window; both keys keep their published meaning, and this is the one place stating it.
 		generation, frames: u64,
 		pointer_updates: u64,
 		session_id: u32,
@@ -207,6 +244,9 @@ when AIO_CONTROL {
 		return window_primary(app)
 	}
 
+	// Counts the swap-chain presents of a window just rendered. A window whose count has not advanced
+	// is drawn again, so a gated reply can prove a presented frame once DXGI statistics catch up; this
+	// redraw is harness-build cadence only.
 	verify_presented :: proc(app: ^App, w: ^Window) {
 		surface := window_surface(w)
 		if surface == nil {return}
@@ -250,7 +290,7 @@ when AIO_CONTROL {
 		case nil:
 			return {}, false
 		case Verify_Quitting:
-			return time.tick_add(now, 10 * time.Millisecond), true
+			return time.tick_add(now, QUIT_POLL), true
 		case Verify_Gate:
 			started, timeout_ms = s.started, verify_timeout(s.message.request)
 		case Verify_Wait:
@@ -307,16 +347,13 @@ when AIO_CONTROL {
 	// How long a read or drive waits for the window to present a frame before it starts.
 	verify_timeout :: proc(request: verify_protocol.Request) -> int {
 		if r, run := request.(verify_protocol.Run); run {return r.timeout_ms}
-		return 5000
+		return GATE_TIMEOUT_MS
 	}
-
-	// A resize may report only once the grid follows, which takes longer than the frame.
-	RESIZE_TIMEOUT_MS :: 5000
 
 	// How long after a drive the content must be quiet, and the longest a drive waits for it.
 	verify_drive_limits :: proc(request: verify_protocol.Request) -> (idle_ms, timeout_ms: int) {
 		if r, run := request.(verify_protocol.Run); run {return r.idle_ms, r.timeout_ms}
-		return 50, 1000
+		return DRIVE_IDLE_MS, DRIVE_TIMEOUT_MS
 	}
 
 	verify_needs_window :: proc(request: verify_protocol.Request) -> bool {
@@ -338,462 +375,83 @@ when AIO_CONTROL {
 		return fmt.tprintf("%d", key)
 	}
 
+	// Where every report writes the verification state: key=value entries in the order written. Each
+	// feature's report sits beside its state; the first failure is kept and later writes are dropped.
+	State_Report :: struct {
+		entries: [dynamic]verify_protocol.State_Entry,
+		error:   verify_protocol.Error,
+	}
+
+	state_text :: proc(r: ^State_Report, key, value: string) {
+		if r.error != .None {return}
+		if _, err := append(&r.entries, verify_protocol.State_Entry{key, value}); err != nil {
+			r.error = .Out_Of_Memory
+		}
+	}
+
+	// A boolean, integer or enum name as fmt's %v writes it.
+	state_value :: proc(r: ^State_Report, key: string, value: any) {
+		state_text(r, key, fmt.tprintf("%v", value))
+	}
+
+	state_valuef :: proc(r: ^State_Report, key, format: string, args: ..any) {
+		state_text(r, key, fmt.tprintf(format, ..args))
+	}
+
+	// An enum or other name, in lower case.
+	state_word :: proc(r: ^State_Report, key: string, value: any) {
+		state_text(r, key, strings.to_lower(fmt.tprintf("%v", value), context.temp_allocator))
+	}
+
+	state_rect :: proc(r: ^State_Report, key: string, rect: render.Rect) {
+		state_valuef(r, key, "%g,%g,%g,%g", rect.x, rect.y, rect.width, rect.height)
+	}
+
+	// A key carrying an index or name, such as rail.row.2.title.
+	state_key :: proc(format: string, args: ..any) -> string {
+		return fmt.tprintf(format, ..args)
+	}
+
+	state_fail :: proc(r: ^State_Report, err: verify_protocol.Error) {
+		if r.error == .None {r.error = err}
+	}
+
+	// The state every reply reads, one group per owner. Reading it changes nothing.
 	@(require_results)
 	verify_state :: proc(app: ^App) -> ([]verify_protocol.State_Entry, verify_protocol.Error) {
+		r := State_Report {
+			entries = make([dynamic]verify_protocol.State_Entry, context.temp_allocator),
+		}
 		w := verify_window(app)
-		palette_owner := palette_owner_id(app)
-		owns_palette := w != nil && palette_owner == w.id
-		item := ""
-		p := &app.palette
-		palette_layout: ui.Palette_Layout
-		if owns_palette {palette_layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)}
-		if owns_palette && p.selected >= 0 && p.selected < len(p.results) {
-			item = ui.palette_result_name(p, p.results[p.selected])
-		}
-		// The saved value of the selected setting row, read the way its palette control reads it.
-		selected_value := ""
-		edit := ui.Palette_Edit_Kind.None
-		if owns_palette {
-			edit = ui.palette_editing(p)
-			if p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Setting {
-				selected_value, _ = palette_setting_value(app, item)
-			}
-			if p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].command != nil {
-				selected_value = commands.shortcut_set_text(p.results[p.selected].command.shortcuts,
-				                                           context.temp_allocator)
-			}
-		}
-		entries := make([dynamic]verify_protocol.State_Entry, context.temp_allocator)
-		base := [?]verify_protocol.State_Entry {
-			{"app.pid", fmt.tprintf("%d", os.get_pid())},
-			{"app.app", app.app_id},
-			{"app.build", AIO_BUILD_ID},
-			{"app.build_kind", AIO_BUILD_KIND},
-			{"app.data", app.options.data_dir == "" ? "default" : app.options.data_dir},
-			{"app.settings", app.settings_path},
-			{"app.log", app.log_path},
-			{"window.visible", fmt.tprintf("%t", !app_tray_only(app))},
-			{"windows.count", fmt.tprintf("%d", len(app.windows))},
-			{"palette.window", fmt.tprintf("%d", palette_owner)},
-			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
-			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
-			{"palette.mode", owns_palette ? ui.palette_mode_word(p.mode) : "all"},
-			{"palette.prefix", owns_palette ? ui.palette_mode_prefix(p.mode) : ""},
-			{"palette.selected", fmt.tprintf("%d", owns_palette ? p.selected : 0)},
-			{"palette.items", fmt.tprintf("%d", owns_palette ? len(p.results) : 0)}, {"palette.item", item},
-			{"palette.scroll", fmt.tprintf("%d", owns_palette ? p.scroll : 0)},
-			{"palette.edit", fmt.tprintf("%v", edit)},
-			{"palette.value", selected_value},
-			{"palette.rows", fmt.tprintf("%d", palette_layout.rows)},
-			{"palette.row_height", fmt.tprintf("%g", palette_layout.row_height)},
-			{"palette.panel", fmt.tprintf("%g,%g,%g,%g", palette_layout.panel.x, palette_layout.panel.y,
-				palette_layout.panel.width, palette_layout.panel.height)},
-			{"palette.input", fmt.tprintf("%g,%g,%g,%g", palette_layout.input.x, palette_layout.input.y,
-				palette_layout.input.width, palette_layout.input.height)},
-			{"palette.list", fmt.tprintf("%g,%g,%g,%g", palette_layout.list.x, palette_layout.list.y,
-				palette_layout.list.width, palette_layout.list.height)},
-			{"frames.presented", fmt.tprintf("%d", app.verify.frames)},
-			{
-				"theme.name",
-				settings.value_text(&app.settings, settings.schema_find("theme.name")^),
-			},
-			{"terminal.foreground", settings.color_hex(app.settings.colors.foreground)},
-			{"terminal.background", settings.color_hex(app.settings.colors.background)},
-			{"ui.animations", fmt.tprintf("%t", app.animations)},
-			{"ui.font_points", fmt.tprintf("%g", app.settings.interface.font_size)},
-			{"ui.font_family", app.settings.interface.font_family},
-			{"terminal.font_family", app.settings.font.family},
-			{"shell.icon.loaded", fmt.tprintf("%t", app.shell_icon.width > 0)},
-			{"ui.animating", fmt.tprintf("%t", motion_active(app))},
-			{"leader.enabled", fmt.tprintf("%t", app.leader != nil)},
-			{"workspaces.count", fmt.tprintf("%d", len(app.workspaces))},
-		}
-		if _, err := append(&entries, ..base[:]); err != nil {return nil, .Out_Of_Memory}
-		for mode in ui.Palette_Mode {
-			r := palette_layout.modes[mode]
-			entry := verify_protocol.State_Entry{fmt.tprintf("palette.mode.%s", ui.palette_mode_word(mode)),
-				fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)}
-			if _, err := append(&entries, entry); err != nil {return nil, .Out_Of_Memory}
-		}
-		origin: [2]i32
-		for window, i in app.windows {
-			x, y, err := platform.window_to_screen(&app.platform, window.id, 0, 0)
-			if err != .None {return nil, .System}
-			if window == w {origin = {x, y}}
-			prefix := fmt.tprintf("window.%d", i + 1)
-			inventory := [?]verify_protocol.State_Entry {
-				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", window.id)},
-				{fmt.tprintf("%s.origin", prefix), fmt.tprintf("%d,%d", x, y)},
-				{
-					fmt.tprintf("%s.size", prefix),
-					fmt.tprintf("%dx%d", window.width, window.height),
-				},
-				{
-					fmt.tprintf("%s.workspace_index", prefix),
-					fmt.tprintf("%d", verify_workspace_index(app, window)),
-				},
-				{fmt.tprintf("%s.preparing", prefix), fmt.tprintf("%t", window.phase == .Preparing)},
-				{fmt.tprintf("%s.linked", prefix), fmt.tprintf("%t", window_linked(window))},
-				{
-					fmt.tprintf("%s.link_shown", prefix),
-					fmt.tprintf("%t", window_linked(window) && window.phase == .Shown),
-				},
-			}
-			if _, err := append(&entries, ..inventory[:]); err != nil {return nil, .Out_Of_Memory}
-		}
+		verify_app_report(&r, app)
+		palette_state_report(&r, app, w)
 		entry: ^Session_Entry
 		if w != nil {
 			entry = focused_session(app, w)
-			editor_key := ""
-			editor_title := ""
-			choice_count := 0
-			if row := ui.editor_row(&w.editor);
-			   row != nil {
-				editor_key, editor_title = row.key, row.title
-				choice_count = len(row.choices)
-			}
-			// Each confirmation key reads the question only while it is about that key's subject.
-			question := confirmation_shown(w)
-			opacity := question != nil ? question.dialog.motion.value : 0
-			closing := confirmation_subject(w, Pending_Close)
-			close_open := confirmation_asking(w, Pending_Close) != nil
-			confirm: Confirmation_Text
-			close_workspace: u32
-			if closing != nil {
-				confirm = pending_close_text(app, closing, close_open, w.workspace)
-				if target, ok := closing.target.(Close_Workspace); ok {close_workspace = target.workspace}
-			}
-			file := confirmation_subject(w, Pending_File)
-			swap := confirmation_subject(w, Pane_Swap)
-			removing := confirmation_subject(w, Profile_Remove)
-			process_remove := confirmation_asking(w, Process_Remove) != nil
-			picker_rect, _ := workspace_picker_rect(w)
-			link_hover, link_uri, link_spans := verify_link_hover(w)
-			slider := render.Rect{}
-			page: ui.Editor_Layout
-			if settings_active(w) {
-				page = settings_layout(w)
-				if len(w.editor.items) > 0 {
-					slider = ui.editor_row_parts(&w.editor, page, w.editor.selected).slider
-				}
-			}
-			markdown_scroll, markdown_total := 0, 0
-			markdown_path, markdown_selected := "", ""
-			markdown_state := "Missing"
-			if pane := markdown_focused(app, w); pane != nil {
-				markdown_scroll, markdown_total = pane.view.scroll, ui.markdown_total(&pane.view)
-				markdown_path = pane.path
-				switch _ in pane.load {
-				case nil:
-					markdown_state = "Unverified"
-				case Markdown_Missing:
-				case Markdown_Loaded:
-					markdown_state = "Loaded"
-				case Markdown_Too_Large:
-					markdown_state = "Too_Large"
-				case Markdown_Failed:
-					markdown_state = "Failed"
-				}
-				if document := markdown_document(pane); document != nil {
-					markdown_selected = ui.markdown_selected_text(&pane.view, document)
-				}
-			}
-			window := [?]verify_protocol.State_Entry {
-				{"window.id", fmt.tprintf("%d", w.id)},
-				{"markdown.count", fmt.tprintf("%d", len(app.markdown_panes))},
-				{"markdown.active", fmt.tprintf("%t", markdown_active(w))},
-				{"markdown.path", markdown_path},
-				{"markdown.state", markdown_state},
-				{"markdown.scroll", fmt.tprintf("%d", markdown_scroll)},
-				{"markdown.total", fmt.tprintf("%d", markdown_total)},
-				{"markdown.selection", markdown_selected},
-				{"window.origin", fmt.tprintf("%d,%d", origin.x, origin.y)},
-				{"window.pointer", fmt.tprintf("%g,%g", w.pointer.x, w.pointer.y)},
-				{"theme.hover_lift", fmt.tprintf("%g", app.theme.hover_lift)},
-				{"theme.hover_gloss", fmt.tprintf("%g", app.theme.hover_gloss)},
-				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
-				{"settings.open", fmt.tprintf("%t", ui.editor_loaded(&w.editor))},
-				{"settings.revision", verify_settings_revision(&w.editor)},
-				{"settings.theme_delete_armed", fmt.tprintf("%t", w.editor.delete_armed)},
-				{"overlay", strings.to_lower(fmt.tprintf("%v", overlay_kind(app, w)), context.temp_allocator)},
-				{"rename.open", fmt.tprintf("%t", rename_shown(w))},
-				{"rename.error", fmt.tprintf("%t", verify_chip_name_error(w))},
-				{"rename.value", ui.field_string(&w.rename)},
-				{"tab_menu.open", fmt.tprintf("%t", tab_menu_shown(w) || dock_divider_menu_shown(w))},
-				{"tab_menu.count", fmt.tprintf("%d", len(verify_menu_rows(w).items))},
-				{"tab_menu.action", fmt.tprintf("%v", verify_tab_menu_action(w))},
-				{"settings.filter", string(w.editor.filter.bytes[:])},
-				{"settings.scroll", fmt.tprintf("%d", w.editor.scroll)},
-				{"settings.group", fmt.tprintf("%d", ui.editor_active_group(&w.editor))},
-				{"settings.key", editor_key},
-				{"settings.value", string(w.editor.value.bytes[:])},
-				{"settings.editing", fmt.tprintf("%t", ui.editor_editing(&w.editor))},
-				{"settings.active", fmt.tprintf("%t", settings_active(w))},
-				{"settings.popup", fmt.tprintf("%v", ui.editor_popup(&w.editor))},
-				{"settings.choice_count", fmt.tprintf("%d", choice_count)},
-				{"settings.choice_query", ui.field_string(&w.editor.choice_search)},
-				{"settings.choice_matches", fmt.tprintf("%d", len(w.editor.choice_matches))},
-				{"settings.capturing", fmt.tprintf("%t", ui.editor_capturing(&w.editor))},
-				{"settings.title", editor_title},
-				{"settings.message", w.editor.message},
-				{"settings.error", fmt.tprintf("%t", w.editor.error)},
-				{"settings.process.rows", verify_process_rows(w, page)},
-				{"settings.process.expanded", fmt.tprintf("%d", w.editor.process_expanded)},
-				{
-					"settings.process.dragging",
-					fmt.tprintf("%t", ui.editor_order_dragging(&w.editor, .Process_Groups)),
-				},
-				{"settings.process.drag_target", fmt.tprintf("%d", ui.editor_order_target(&w.editor))},
-				{"settings.process.value", app.settings.process.padding_groups},
-				{"settings.process.confirming", fmt.tprintf("%t", process_remove)},
-				{
-					"settings.process.confirm_option",
-					fmt.tprintf("%t", process_remove && question.dialog.show_option),
-				},
-				{"settings.profile.expanded", w.editor.expanded},
-				{"settings.profile.default", app.settings.profiles.default_id},
-				// The page no longer has a detected-profile section; the keys keep their empty values.
-				{"settings.profile.detected_open", "false"},
-				{
-					"settings.profile.removing",
-					confirmation_asking(w, Profile_Remove) != nil ? removing.id : "",
-				},
-				{
-					"settings.profile.remove_title",
-					removing != nil ? editor_profile_remove_text(removing^).title : "Delete profile?",
-				},
-				{"settings.profile.menu_open", fmt.tprintf("%t", verify_editor_profile_menu_open(w))},
-				{"settings.profile.menu_count", fmt.tprintf("%d", len(w.editor.profile_menu.items))},
-				{"settings.profile.action", fmt.tprintf("%v", w.editor.request)},
-				{"settings.profile.error_key", w.editor.error_key},
-				{"settings.profile.error", w.editor.error_text},
-				{"settings.profile.control", fmt.tprintf("%v", w.editor.profile_control)},
-				{
-					"settings.profile.directory_shown",
-					fmt.tprintf("%t", ui.profile_columns(page.list, page.scale).directory_shown),
-				},
-				{"settings.profile.rows", verify_profile_rows(w, page, .Profile)},
-				{"settings.profile.detected_rows", ""},
-				{"settings.profile.detected_header", ""},
-				{"settings.profile.app_count", fmt.tprintf("%d", len(app.settings.profiles.items))},
-				{"settings.profile.app_detected", verify_detected_count(app)},
-				{"settings.profile.group", fmt.tprintf("%d", verify_profile_group(&w.editor))},
-				{
-					"settings.profile.dragging",
-					fmt.tprintf("%t", ui.editor_order_dragging(&w.editor, .Profiles)),
-				},
-				{"settings.profile.drag_target", fmt.tprintf("%d", ui.editor_order_target(&w.editor))},
-				{"settings.profile.drag_id", ui.editor_order_profile(&w.editor)},
-				{
-					"settings.slider",
-					fmt.tprintf("%g,%g,%g,%g", slider.x, slider.y, slider.width, slider.height),
-				},
-				{
-					"settings.search_rect",
-					fmt.tprintf(
-						"%g,%g,%g,%g",
-						page.filter.x,
-						page.filter.y,
-						page.filter.width,
-						page.filter.height,
-					),
-				},
-				{
-					"settings.outline_rect",
-					fmt.tprintf(
-						"%g,%g,%g,%g",
-						page.outline.x,
-						page.outline.y,
-						page.outline.width,
-						page.outline.height,
-					),
-				},
-				{
-					"settings.list_rect",
-					fmt.tprintf(
-						"%g,%g,%g,%g",
-						page.list.x,
-						page.list.y,
-						page.list.width,
-						page.list.height,
-					),
-				},
-				{"leader.pending", fmt.tprintf("%t", leader_armed(w))},
-				{"confirm.open", fmt.tprintf("%t", close_open)},
-				{"confirm.opacity", fmt.tprintf("%g", closing != nil ? opacity : 0)},
-				{"confirm.title", close_open ? confirm.title : ""},
-				{"confirm.body", close_open ? confirm.body : ""},
-				{"confirm.workspace", fmt.tprintf("%d", close_workspace)},
-				{"file.open", fmt.tprintf("%t", confirmation_asking(w, Pending_File) != nil)},
-				{"file.path", file != nil ? file.file.path : ""},
-				{"file.target", file != nil ? file.file.target : ""},
-				{"swap.open", fmt.tprintf("%t", confirmation_asking(w, Pane_Swap) != nil)},
-				{"swap.opacity", fmt.tprintf("%g", swap != nil ? opacity : 0)},
-				{"swap.profile", swap != nil ? swap.profile_id : ""},
-				{"leader.indicator", leader_armed(w) ? "pane-status-line" : "none"},
-				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
-				{"window.dpi", fmt.tprintf("%d", u32(w.scale * 96))},
-				{"window.scale", fmt.tprintf("%g", w.scale)},
-				{"window.focused", fmt.tprintf("%t", w.focused)},
-				{"window.maximized", fmt.tprintf("%t", w.maximized)},
-				{"window.pane_view", fmt.tprintf("%v", pane_view_current(w))},
-				{"tabs.orientation", w.tabs_horizontal ? "horizontal" : "vertical"},
-				{"tabs.width", fmt.tprintf("%g", window_tab_bar(app, w).tab_width)},
-				{"tabs.x", fmt.tprintf("%g", window_tab_bar(app, w).x)},
-				{"tabs.height", fmt.tprintf("%g", window_tab_bar(app, w).height)},
-				{"tabs.new_tab", verify_workspace_rect(window_tab_new_rect(app, w))},
-				{"tabs.chevron", verify_workspace_rect(tab_chevron_rect(app, w))},
-				{"rail.visible", fmt.tprintf("%t", rail_visible(w))},
-				{"rail.docked", fmt.tprintf("%t", rail_docked(w))},
-				{"rail.rect", verify_workspace_rect(rail_area(w))},
-				{"rail.resize", verify_workspace_rect(rail_resize_rect(w))},
-				{"rail.resizing", fmt.tprintf("%t", rail_resizing(w))},
-				{"activity.rect", verify_workspace_rect(status_panel_rect(app, w))},
-				{"activity.side_button", verify_workspace_rect(status_panel_side_rect(app, w))},
-				{"activity.side", app.settings.status.panel_side == .Left ? "left" : "right"},
-				{"activity.view_button", verify_workspace_rect(status_panel_view_rect(app, w))},
-				{"activity.view", app.settings.status.panel_view == .Comfy ? "comfy" : "dense"},
-				{"dividers.dragging", fmt.tprintf("%d", divider_drag_count(w))},
-				{"rail.overlay", fmt.tprintf("%t", rail_overlay(w))},
-				{"rail.scroll", fmt.tprintf("%g", w.rail_scroll)},
-				{"rail.slide", fmt.tprintf("%g", rail_slide_value(w))},
-				{"rail.rows", fmt.tprintf("%d", rail_tab_count(w))},
-				{"rail.row.height", fmt.tprintf("%g", ui.RAIL_ROW_HEIGHT * w.scale)},
-				{"rail.toggle", verify_workspace_rect(tab_orientation_button_rect(w))},
-				{"tabs.orientation_button", verify_workspace_rect(tab_orientation_button_rect(w))},
-				{"title.settings", verify_workspace_rect(title_action_rect(w, .Settings))},
-				{"title.palette", verify_workspace_rect(title_action_rect(w, .Palette))},
-				{"title.height", fmt.tprintf("%g", ui.TITLE_BAR_HEIGHT * w.scale)},
-				{
-					"title.controls_end",
-					fmt.tprintf("%d", i32(window_title_controls_end(app, w))),
-				},
-				{"title.caption_start", fmt.tprintf("%g", f32(w.width) - ui.CAPTION_WIDTH * w.scale)},
-				{"workspace.id", fmt.tprintf("%d", w.workspace.id)},
-				{"workspace.name", w.workspace.name},
-				{"workspace.button", verify_workspace_rect(workspace_button_rect(w))},
-				{"workspace.button.hover", fmt.tprintf("%t", w.workspace_hovered)},
-				{"workspace.picker", fmt.tprintf("%t", workspace_picker_active(&w.workspace_picker))},
-				{"workspace.icon.preset", fmt.tprintf("%d", w.workspace.icon.preset)},
-				{"workspace.icon.emoji", w.workspace.icon.emoji},
-				{"workspace.icon.tint", fmt.tprintf("%d", w.workspace.icon.tint)},
-				{"workspace.picker.colors", fmt.tprintf("%t", workspace_picker_tint(&w.workspace_picker))},
-				{"workspace.picker.color_button", verify_workspace_rect(workspace_icon_color_button(w))},
-				{"workspace.picker.icons", fmt.tprintf("%t", workspace_picker_icons(&w.workspace_picker))},
-				{"workspace.picker.selected", fmt.tprintf("%d", w.workspace_picker.selected)},
-				{"workspace.picker.count", fmt.tprintf("%d", workspace_picker_count(w))},
-				{"workspace.picker.query", ui.field_string(&w.workspace_picker.query)},
-				{"workspace.picker.rect", verify_workspace_rect(picker_rect)},
-				{"workspace.picker.field", verify_workspace_rect(workspace_picker_field_rect(w))},
-				{"workspace.picker.row", verify_workspace_rect(
-					workspace_picker_row_rect(w, w.workspace_picker.selected))},
-				{"workspace.picker.menu_target", fmt.tprintf("%d", workspace_picker_menu_id(&w.workspace_picker))},
-				{"workspace.picker.menu_hover", fmt.tprintf("%d", w.workspace_picker.menu_hover)},
-				{"workspace.picker.menu_selected", fmt.tprintf("%d", w.workspace_picker.menu_selected)},
-				{"workspace.picker.window_enabled", fmt.tprintf("%t", workspace_row_window_enabled(app, w,
-					workspace_picker_menu_id(&w.workspace_picker)))},
-				{"workspace.picker.window_title", workspace_row_window_title(app,
-					workspace_picker_menu_id(&w.workspace_picker))},
-				{"workspace.picker.menu_button", verify_workspace_rect(workspace_picker_menu_button_rect(w,
-					w.workspace_picker.selected))},
-				{"workspace.picker.menu_item", verify_workspace_rect(workspace_row_menu_item_rect(w,
-					w.workspace_picker.menu_selected))},
-				{"workspace.picker.rename_target", fmt.tprintf("%d",
-					workspace_picker_rename_id(&w.workspace_picker))},
-				{"workspace.picker.rename_value", ui.field_string(&w.workspace_picker.rename)},
-				{"workspace.picker.rename_field", verify_workspace_rect(workspace_row_rename_field_rect(w))},
-				{"workspace.picker.rename_error", fmt.tprintf("%t", workspace_picker_rename_error(&w.workspace_picker))},
-				{"workspace.picker.icon_target", fmt.tprintf("%d", workspace_picker_icon_id(&w.workspace_picker))},
-				{"window.preparing", fmt.tprintf("%t", w.phase == .Preparing)},
-				{"pointer.shape", strings.to_lower(fmt.tprintf("%v", w.pointer_shape), context.temp_allocator)},
-				{"pointer.updates", fmt.tprintf("%d", app.verify.pointer_updates)},
-				{"link.hover", link_hover},
-				{"link.uri", link_uri},
-				{"link.spans", fmt.tprintf("%d", link_spans)},
-				{"rail.new_tab", verify_workspace_rect(rail_new_tab_rect(w))},
-				{"rail.profile", verify_workspace_rect(rail_profile_rect(w))},
-				{"profile_menu.open", fmt.tprintf("%t", profile_menu_shown(w))},
-				{"profile_menu.count", fmt.tprintf("%d", w.profile_menu.count)},
-				{"documents.open", fmt.tprintf("%t", document_menu_shown(w))},
-				{"documents.mode", verify_document_mode(w)},
-				{"documents.count", fmt.tprintf("%d", w.document_menu.count)},
-				{"documents.popout", fmt.tprintf("%t", verify_document_popout(w))},
-				{"documents.url_open", fmt.tprintf("%t", verify_document_url_entry(w))},
-				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
-				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
-				{
-					"session.process",
-					entry != nil ? string(entry.process_name[:entry.process_name_length]) : "",
-				},
-				{"find.open", fmt.tprintf("%t", ui.find_is_open(&w.find))},
-				{"find.focused", fmt.tprintf("%t", ui.find_has_keyboard(&w.find))},
-				{"find.case_sensitive", fmt.tprintf("%t", w.find.case_sensitive)},
-				{"find.regex", fmt.tprintf("%t", w.find.regex)},
-				{"find.query", ui.field_string(&w.find.query)},
-				{"find.matches", find_status(w, find_target(app, w))},
-				{"find.count", verify_find_count(w, find_target(app, w))},
-				{"find.older", verify_find_rect(w, find_target(app, w), .Up)},
-				{"find.newer", verify_find_rect(w, find_target(app, w), .Down)},
-				{"find.close", verify_find_rect(w, find_target(app, w), .Close)},
-			}
-			if _, err := append(&entries, ..window[:]); err != nil { return nil, .Out_Of_Memory }
-			activity_rows, _ := status_panel_rows(app, w)
-			activity_list := status_panel_list(app, w, status_panel_rect(app, w))
-			for row, i in activity_rows {
-				rect := verify_workspace_rect(status_panel_row_rect(w, activity_list, row))
-				text := row.report ? status_item_name(app, row.item) : row.label
-				row_state := [?]verify_protocol.State_Entry {
-					{fmt.tprintf("activity.row.%d.rect", i), rect},
-					{fmt.tprintf("activity.row.%d.report", i), fmt.tprintf("%t", row.report)},
-					{fmt.tprintf("activity.row.%d.text", i), text},
-					{fmt.tprintf("activity.row.%d.depth", i), fmt.tprintf("%d", row.depth)},
-				}
-				if _, err := append(&entries, ..row_state[:]); err != nil { return nil, .Out_Of_Memory }
-			}
-			// The dock edge menu reports under the tab menu's keys, as it did when it shared that surface.
-			shown_menu := verify_menu_rows(w)
-			for item, i in shown_menu.items {
-				divider := shown_menu == &w.divider_menu
-				enabled := divider ? item.enabled && !item.separator : tab_menu_enabled(w, i)
-				rect := ui.menu_row_rect(shown_menu, i, f32(w.width), f32(w.height), w.scale)
-				row := [?]verify_protocol.State_Entry{
-					{fmt.tprintf("tab_menu.row.%d.label", i + 1), item.label},
-					{fmt.tprintf("tab_menu.row.%d.separator", i + 1), fmt.tprintf("%t", item.separator)},
-					{fmt.tprintf("tab_menu.row.%d.enabled", i + 1), fmt.tprintf("%t", enabled)},
-					{fmt.tprintf("tab_menu.row.%d.rect", i + 1), verify_workspace_rect(rect)},
-				}
-				if _, err := append(&entries, ..row[:]); err != nil { return nil, .Out_Of_Memory }
-			}
-			layout, layout_ok := rail_current_layout(w)
-			if layout_ok {
-				for tab, i in w.workspace.tabs {
-					rect := ui.rail_row_rect(layout, i)
-					title := tab.title
-					selected := i == w.workspace.selected
-					marked := tab.marked
-					row_state := [?]verify_protocol.State_Entry{
-						{fmt.tprintf("rail.row.%d.kind", i + 1), "tab"},
-						{fmt.tprintf("rail.row.%d.title", i + 1), title},
-						{fmt.tprintf("rail.row.%d.rect", i + 1), verify_workspace_rect(rect)},
-						{fmt.tprintf("rail.row.%d.selected", i + 1), fmt.tprintf("%t", selected)},
-						{fmt.tprintf("rail.row.%d.marked", i + 1), fmt.tprintf("%t", marked)},
-						{fmt.tprintf("rail.row.%d.workspace", i + 1), fmt.tprintf("%d", w.workspace.id)},
-						{fmt.tprintf("rail.row.%d.tab", i + 1), fmt.tprintf("%d", i + 1)},
-					}
-					if _, err := append(&entries, ..row_state[:]); err != nil { return nil, .Out_Of_Memory }
-				}
-			}
+			verify_window_report(&r, app, w, entry)
+			markdown_state_report(&r, app, w)
+			settings_page_state_report(&r, app, w)
+			rename_state_report(&r, w)
+			tab_menu_state_report(&r, w)
+			confirmation_state_report(&r, app, w)
+			tab_strip_state_report(&r, app, w)
+			rail_state_report(&r, w)
+			status_panel_state_report(&r, app, w)
+			divider_state_report(&r, w)
+			title_state_report(&r, app, w)
+			workspace_picker_state_report(&r, app, w)
+			link_state_report(&r, w)
+			profile_menu_state_report(&r, w)
+			document_menu_state_report(&r, w)
+			find_bar_state_report(&r, app, w)
 		} else {
-			hidden := [?]verify_protocol.State_Entry {
-				{"window.id", "0"},
-				{"window.origin", "0,0"},
-				{"window.workspace_index", "0"},
-				{"window.size", "0x0"},
-				{"window.dpi", "0"},
-				{"window.scale", "0"},
-				{"window.focused", "false"},
-			}
-			if _, err := append(&entries, ..hidden[:]); err != nil {return nil, .Out_Of_Memory}
+			state_text(&r, "window.id", "0")
+			state_text(&r, "window.origin", "0,0")
+			state_text(&r, "window.workspace_index", "0")
+			state_text(&r, "window.size", "0x0")
+			state_text(&r, "window.dpi", "0")
+			state_text(&r, "window.scale", "0")
+			state_text(&r, "window.focused", "false")
 			if len(app.workspaces) > 0 {
 				if tab := selected_tab(app.workspaces[0]); tab != nil {
 					pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
@@ -801,428 +459,220 @@ when AIO_CONTROL {
 				}
 			}
 		}
+		verify_tabs_report(&r, app, w)
+		if w != nil {
+			verify_panes_report(&r, app, w)
+			floating_state_report(&r, w)
+			drag_state_report(&r, w)
+		}
+		if entry != nil {verify_session_report(&r, app, w, entry)}
+		verify_notices_report(&r, app)
+		return r.entries[:], r.error
+	}
+
+	// The application's identity, the settings it shows and its window inventory. App and Window
+	// compose the features, so these keys belong to no feature.
+	verify_app_report :: proc(r: ^State_Report, app: ^App) {
+		state_value(r, "app.pid", os.get_pid())
+		state_text(r, "app.app", app.app_id)
+		state_text(r, "app.build", AIO_BUILD_ID)
+		state_text(r, "app.build_kind", AIO_BUILD_KIND)
+		state_text(r, "app.data", app.options.data_dir == "" ? "default" : app.options.data_dir)
+		state_text(r, "app.settings", app.settings_path)
+		state_text(r, "app.log", app.log_path)
+		state_value(r, "window.visible", !app_tray_only(app))
+		state_value(r, "windows.count", len(app.windows))
+		state_value(r, "frames.presented", app.verify.frames)
+		state_text(r, "theme.name", settings.value_text(&app.settings, settings.schema_find("theme.name")^))
+		state_text(r, "terminal.foreground", settings.color_hex(app.settings.colors.foreground))
+		state_text(r, "terminal.background", settings.color_hex(app.settings.colors.background))
+		state_value(r, "ui.animations", app.animations)
+		state_valuef(r, "ui.font_points", "%g", app.settings.interface.font_size)
+		state_text(r, "ui.font_family", app.settings.interface.font_family)
+		state_text(r, "terminal.font_family", app.settings.font.family)
+		state_value(r, "shell.icon.loaded", app.shell_icon.width > 0)
+		state_value(r, "ui.animating", motion_active(app))
+		state_value(r, "leader.enabled", app.leader != nil)
+		state_value(r, "workspaces.count", len(app.workspaces))
+		for window, i in app.windows {
+			n := i + 1
+			x, y, err := platform.window_to_screen(&app.platform, window.id, 0, 0)
+			if err != .None {state_fail(r, .System); return}
+			state_value(r, state_key("window.%d.id", n), window.id)
+			state_valuef(r, state_key("window.%d.origin", n), "%d,%d", x, y)
+			state_valuef(r, state_key("window.%d.size", n), "%dx%d", window.width, window.height)
+			state_value(r, state_key("window.%d.workspace_index", n), verify_workspace_index(app, window))
+			state_value(r, state_key("window.%d.preparing", n), window.phase == .Preparing)
+			state_value(r, state_key("window.%d.linked", n), window_linked(window))
+			state_value(r, state_key("window.%d.link_shown", n), window_linked(window) && window.phase == .Shown)
+		}
+	}
+
+	// The verified window's own keys: placement, scale, focus, pointer and grid metrics.
+	verify_window_report :: proc(r: ^State_Report, app: ^App, w: ^Window, entry: ^Session_Entry) {
+		x, y, err := platform.window_to_screen(&app.platform, w.id, 0, 0)
+		if err != .None {state_fail(r, .System); return}
+		state_value(r, "window.id", w.id)
+		state_valuef(r, "window.origin", "%d,%d", x, y)
+		state_valuef(r, "window.pointer", "%g,%g", w.pointer.x, w.pointer.y)
+		state_valuef(r, "theme.hover_lift", "%g", app.theme.hover_lift)
+		state_valuef(r, "theme.hover_gloss", "%g", app.theme.hover_gloss)
+		state_value(r, "window.workspace_index", verify_workspace_index(app, w))
+		state_word(r, "overlay", overlay_kind(app, w))
+		state_value(r, "leader.pending", leader_armed(w))
+		state_text(r, "leader.indicator", leader_armed(w) ? "pane-status-line" : "none")
+		state_valuef(r, "window.size", "%dx%d", w.width, w.height)
+		state_value(r, "window.dpi", u32(w.scale * 96))
+		state_valuef(r, "window.scale", "%g", w.scale)
+		state_value(r, "window.focused", w.focused)
+		state_value(r, "window.maximized", w.maximized)
+		state_value(r, "window.pane_view", pane_view_current(w))
+		state_value(r, "window.preparing", w.phase == .Preparing)
+		state_word(r, "pointer.shape", w.pointer_shape)
+		state_value(r, "pointer.updates", app.verify.pointer_updates)
+		state_valuef(r, "grid.cell", "%gx%g", w.metrics.cell_width, w.metrics.cell_height)
+		state_valuef(r, "grid.padding", "%g", pane_padding(app, w.scale, entry))
+		process := entry != nil ? string(entry.process_name[:entry.process_name_length]) : ""
+		state_text(r, "session.process", process)
+	}
+
+	// The shown workspace's tabs, or the first workspace's while every window is hidden.
+	verify_tabs_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
 		empty: Workspace
 		workspace := &empty
 		if w != nil {
 			workspace = w.workspace
-			_, _ = rail_current_layout(w)
 		} else if len(app.workspaces) > 0 {
 			workspace = app.workspaces[0]
 		}
-		workspace_state := [?]verify_protocol.State_Entry {
-			{"tabs.count", fmt.tprintf("%d", len(workspace.tabs))},
-			{
-				"tabs.selected",
-				fmt.tprintf("%d", len(workspace.tabs) == 0 ? 0 : workspace.selected + 1),
-			},
-			{"sessions.count", fmt.tprintf("%d", len(app.sessions))},
-		}
-		if _, err := append(&entries, ..workspace_state[:]);
-		   err != nil {return nil, .Out_Of_Memory}
+		state_value(r, "tabs.count", len(workspace.tabs))
+		state_value(r, "tabs.selected", len(workspace.tabs) == 0 ? 0 : workspace.selected + 1)
+		state_value(r, "sessions.count", len(app.sessions))
 		for tab, i in workspace.tabs {
-			prefix := fmt.tprintf("tab.%d", i + 1)
+			n := i + 1
 			row_index := -1
-			row_rect := render.Rect{}
-			close_rect := render.Rect{}
+			row_rect, close_rect, strip_rect, strip_close: render.Rect
 			position := f32(i)
-			strip_rect := render.Rect{}
-			strip_close := render.Rect{}
 			if w != nil {
-				row_index = w.tabs_horizontal ? -1 : i
-				row_rect = rail_row_rect_for_tab(w, i)
-				layout, _ := rail_current_layout(w)
-				close_rect = ui.rail_close_rect(layout, row_index, w.scale)
+				row_index, row_rect, close_rect = rail_tab_report_rects(w, i)
 				position = tab_position(w, i)
 				strip_rect = window_tab_rect(app, w, i)
 				strip_close = window_tab_close_rect(app, w, i)
 			}
-			tab_state := [?]verify_protocol.State_Entry {
-				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
-				{fmt.tprintf("%s.marked", prefix), fmt.tprintf("%t", tab.marked)},
-				{fmt.tprintf("%s.position", prefix), fmt.tprintf("%g", position)},
-				{fmt.tprintf("%s.rail_row", prefix), fmt.tprintf("%d", row_index)},
-				{fmt.tprintf("%s.rect", prefix), verify_workspace_rect(row_rect)},
-				{fmt.tprintf("%s.close", prefix), verify_workspace_rect(close_rect)},
-				{fmt.tprintf("%s.strip_rect", prefix), verify_workspace_rect(strip_rect)},
-				{fmt.tprintf("%s.strip_close", prefix), verify_workspace_rect(strip_close)},
-				{fmt.tprintf("%s.focus", prefix), fmt.tprintf("%d", tab.tree.focus)},
-				{fmt.tprintf("%s.title", prefix), tab.title},
-				{fmt.tprintf("%s.zoomed", prefix), fmt.tprintf("%t", tab.tree.zoomed)},
-			}
-			if _, err := append(&entries, ..tab_state[:]); err != nil {return nil, .Out_Of_Memory}
+			state_value(r, state_key("tab.%d.id", n), tab.id)
+			state_value(r, state_key("tab.%d.marked", n), tab.marked)
+			state_valuef(r, state_key("tab.%d.position", n), "%g", position)
+			state_value(r, state_key("tab.%d.rail_row", n), row_index)
+			state_rect(r, state_key("tab.%d.rect", n), row_rect)
+			state_rect(r, state_key("tab.%d.close", n), close_rect)
+			state_rect(r, state_key("tab.%d.strip_rect", n), strip_rect)
+			state_rect(r, state_key("tab.%d.strip_close", n), strip_close)
+			state_value(r, state_key("tab.%d.focus", n), tab.tree.focus)
+			state_text(r, state_key("tab.%d.title", n), tab.title)
+			state_value(r, state_key("tab.%d.zoomed", n), tab.tree.zoomed)
 			count := 0
-			for node, n in tab.tree.nodes {
-				if pane, ok := node.(layout.Pane); ok {
-					count += 1
-					if session := workspace_session_for_content(app, pane.content); session != nil {
-						g := term.geometry(session.session)
-						if _, err := append(
-							&entries,
-							verify_protocol.State_Entry {
-								fmt.tprintf("%s.pane.%d.grid", prefix, n),
-								fmt.tprintf("%dx%d", g.columns, g.rows),
-							},
-						); err != nil {return nil, .Out_Of_Memory}
-						if _, err := append(
-							&entries,
-							verify_protocol.State_Entry {
-								fmt.tprintf("%s.pane.%d.keep_open", prefix, n),
-								fmt.tprintf("%t", session.keep_open),
-							},
-						); err != nil {return nil, .Out_Of_Memory}
-					}
-					if _, err := append(
-						&entries,
-						verify_protocol.State_Entry {
-							fmt.tprintf("%s.pane.%d.session", prefix, n),
-							fmt.tprintf("%d", pane.content.id),
-						},
-					); err != nil {return nil, .Out_Of_Memory}
-					if floating, floated := layout.float_of(&tab.tree, layout.Node_Id(n)); floated {
-						b := floating.bounds
-						floating_state := [?]verify_protocol.State_Entry {
-							{
-								fmt.tprintf("%s.pane.%d.float", prefix, n),
-								fmt.tprintf("%g,%g,%g,%g", b.x, b.y, b.width, b.height),
-							},
-							{
-								fmt.tprintf("%s.pane.%d.minimized", prefix, n),
-								fmt.tprintf("%t", floating.minimized),
-							},
-						}
-						if _, err := append(&entries, ..floating_state[:]); err != nil {
-							return nil, .Out_Of_Memory
-						}
-					}
+			for node, id in tab.tree.nodes {
+				pane, ok := node.(layout.Pane)
+				if !ok {continue}
+				count += 1
+				if session := workspace_session_for_content(app, pane.content); session != nil {
+					g := term.geometry(session.session)
+					state_valuef(r, state_key("tab.%d.pane.%d.grid", n, id), "%dx%d", g.columns, g.rows)
+					state_value(r, state_key("tab.%d.pane.%d.keep_open", n, id), session.keep_open)
+				}
+				state_value(r, state_key("tab.%d.pane.%d.session", n, id), pane.content.id)
+				if floating, floated := layout.float_of(&tab.tree, layout.Node_Id(id)); floated {
+					b := floating.bounds
+					float_key := state_key("tab.%d.pane.%d.float", n, id)
+					state_valuef(r, float_key, "%g,%g,%g,%g", b.x, b.y, b.width, b.height)
+					state_value(r, state_key("tab.%d.pane.%d.minimized", n, id), floating.minimized)
 				}
 			}
 			shown_floats, minimized_floats := layout.float_counts(&tab.tree)
-			tab_floats := [?]verify_protocol.State_Entry {
-				{fmt.tprintf("%s.panes", prefix), fmt.tprintf("%d", count)},
-				{fmt.tprintf("%s.floating", prefix), fmt.tprintf("%d", shown_floats)},
-				{fmt.tprintf("%s.minimized", prefix), fmt.tprintf("%d", minimized_floats)},
-			}
-			if _, err := append(&entries, ..tab_floats[:]); err != nil {return nil, .Out_Of_Memory}
+			state_value(r, state_key("tab.%d.panes", n), count)
+			state_value(r, state_key("tab.%d.floating", n), shown_floats)
+			state_value(r, state_key("tab.%d.minimized", n), minimized_floats)
 		}
-		if w != nil {
-			drag := drag_report(w)
-			tab_thumbnail, pane_thumbnail: Drag_Thumbnail
-			if drag.tab {tab_thumbnail = drag.thumbnail}
-			if drag.pane {pane_thumbnail = drag.thumbnail}
-			pane_state := [?]verify_protocol.State_Entry {
-				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
-				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
-				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(w)))},
-				{
-					"panes.capsule_group",
-					fmt.tprintf(
-						"%g,%g,%g,%g",
-						w.float_capsule_group.x,
-						w.float_capsule_group.y,
-						w.float_capsule_group.width,
-						w.float_capsule_group.height,
-					),
-				},
-				{"panes.focused", fmt.tprintf("%d", window_tree(w).focus)},
-				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
-				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
-				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
-				{"panes.dragging", fmt.tprintf("%t", drag.pane)},
-				{"panes.float_dragging", fmt.tprintf("%t", floating_dragging(w))},
-				{
-					"panes.float_header_hover",
-					fmt.tprintf("%v", (w.float_header_hover.? or_else Float_Header_Spot{}).action),
-				},
-				{"panes.float_header_hover_value", fmt.tprintf("%g", w.float_header_motion.hover.value)},
-				{"panes.float_header_press_value", fmt.tprintf("%g", w.float_header_motion.press.value)},
-				{"tabs.dragging", fmt.tprintf("%t", drag.tab)},
-				{"tabs.drop.new_window", fmt.tprintf("%t", drag.tab && drag.tear_off)},
-				{"tabs.drop.preview_window", fmt.tprintf("%d", drag.tab ? drag.preview : 0)},
-				{"tabs.drop.window", fmt.tprintf("%d", drag.tab ? drag.window : 0)},
-				{"tabs.incoming.count", fmt.tprintf("%d", w.tab_incoming.count)},
-				{"tabs.incoming.slot", fmt.tprintf("%d", w.tab_incoming.slot)},
-				{"tabs.drop.thumbnail", fmt.tprintf("%t", drag.tab && drag.thumbnail.shown)},
-				{
-					"tabs.drop.thumbnail_size",
-					fmt.tprintf("%dx%d", tab_thumbnail.width, tab_thumbnail.height),
-				},
-				{"panes.drop.shown", fmt.tprintf("%t", drag.shown)},
-				{"panes.drop.root", fmt.tprintf("%t", drag.root)},
-				{"panes.drop.new_tab", fmt.tprintf("%t", drag.new_tab)},
-				{"panes.drop.new_window", fmt.tprintf("%t", drag.pane && drag.tear_off)},
-				{"panes.drop.window", fmt.tprintf("%d", drag.tab ? 0 : drag.window)},
-				{"panes.drop.preview_window", fmt.tprintf("%d", drag.pane ? drag.preview : 0)},
-				{"panes.drop.thumbnail", fmt.tprintf("%t", drag.pane && drag.thumbnail.shown)},
-				{
-					"panes.drop.thumbnail_size",
-					fmt.tprintf("%dx%d", pane_thumbnail.width, pane_thumbnail.height),
-				},
-				{
-					"panes.drop.rect",
-					fmt.tprintf("%g,%g,%g,%g", drag.ghost[0], drag.ghost[1], drag.ghost[2], drag.ghost[3]),
-				},
-			}
-			if _, err := append(&entries, ..pane_state[:]); err != nil {return nil, .Out_Of_Memory}
-			for view in w.views {
-				if !pane_owns_session(view.content.kind) {continue}
-				if _, err := append(
-					&entries,
-					verify_protocol.State_Entry {
-						fmt.tprintf("session.%d.builds", view.content.id),
-						fmt.tprintf("%d", view.builds),
-					},
-				); err != nil {return nil, .Out_Of_Memory}
-			}
-			for pane in w.panes {
-				r := pane.rect
-				if _, err := append(
-					&entries,
-					verify_protocol.State_Entry {
-						fmt.tprintf("pane.%d.rect", pane.node),
-						fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height),
-					},
-				); err != nil {return nil, .Out_Of_Memory}
-			}
+	}
+
+	// The verified window's tiled panes and the views it keeps.
+	verify_panes_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		state_value(r, "panes.count", len(window_tiled_rects(w)))
+		state_value(r, "panes.focused", window_tree(w).focus)
+		state_valuef(r, "panes.gap", "%g", window_gap(app, w))
+		state_valuef(r, "panes.header_height", "%g", w.header_height)
+		state_value(r, "panes.split_overlay", w.split_overlay)
+		for view in w.views {
+			if !pane_owns_session(view.content.kind) {continue}
+			state_value(r, state_key("session.%d.builds", view.content.id), view.builds)
 		}
-		if entry != nil {
-			s := entry.session
-			g := term.geometry(s)
-			status := term.status(s)
-			bar, bar_ok := term.scrollbar(s)
-			if !bar_ok {return nil, .System}
-			up := bar.total - min(bar.total, bar.offset + bar.len)
-			selection := "none"
-			if term.has_selection(s) {
-				text, ok := term.selection_text(s, context.temp_allocator)
-				if !ok {return nil, .System}
-				end, count := 0, 0
-				for _, offset in text {
-					if count == 80 {break}
-					_, width := utf8.decode_rune_in_string(text[offset:])
-					end, count = offset + width, count + 1
-				}
-				selection = text[:end]
-			}
-			program: Program_Adopted
-			if adopted := program_adopted(entry); adopted != nil {program = adopted^}
-			session := [?]verify_protocol.State_Entry {
-				{"session.id", fmt.tprintf("%d", entry.id)},
-				{"session.message", session_message(status)},
-				{"grid.size", fmt.tprintf("%dx%d", g.columns, g.rows)},
-				{
-					"session.status",
-					strings.to_lower(fmt.tprintf("%v", status.kind), context.temp_allocator),
-				},
-				{"session.exit", fmt.tprintf("%d", status.exit_code)},
-				{"session.title", term.title(s, context.temp_allocator)},
-				{"session.header.title", pane_header_title(&entry.header)},
-				{"session.profile", entry.profile_id},
-				{"session.name", entry.name},
-				{"session.command", program.command},
-				{"session.program", program.path},
-				{"session.program.name", program.name},
-				{"session.program.source", verify_program_source(app, entry)},
-				{"session.program.icon", fmt.tprintf("%t", verify_program_icon(app, entry))},
-				{"session.header.directory", entry.header.directory},
-				{
-					"session.header.icon",
-					app.shell_icon.width > 0 ? settings.profile_base(&app.settings.profiles).icon : entry.header.icon,
-				},
-				{"grid.origin", fmt.tprintf("%d,%d", g.padding_left, g.padding_top)},
-				{"session.viewport", up == 0 ? "bottom" : fmt.tprintf("up:%d", up)},
-				{"session.selection", selection},
-				{"session.mouse", fmt.tprintf("%t", term.mouse_tracking(s))},
-				{"session.generation", fmt.tprintf("%d", term.generation(s))},
-			}
-			if _, err := append(&entries, ..session[:]); err != nil {return nil, .Out_Of_Memory}
-			if w == nil {
-				grid := [?]verify_protocol.State_Entry {
-					{"grid.cell", fmt.tprintf("%dx%d", g.cell_width, g.cell_height)},
-					{"grid.padding", fmt.tprintf("%d", g.padding_left)},
-				}
-				if _, err := append(&entries, ..grid[:]); err != nil {return nil, .Out_Of_Memory}
-			}
+		for pane in w.panes {
+			p := pane.rect
+			state_valuef(r, state_key("pane.%d.rect", pane.node), "%g,%g,%g,%g", p.x, p.y, p.width, p.height)
 		}
-		if _, err := append(&entries, verify_protocol.State_Entry{
-			"notices.window", fmt.tprintf("%d", app.notice_window),
-		}); err != nil {return nil, .Out_Of_Memory}
+	}
+
+	// The focused session, or the first workspace's while every window is hidden.
+	verify_session_report :: proc(r: ^State_Report, app: ^App, w: ^Window, entry: ^Session_Entry) {
+		s := entry.session
+		g := term.geometry(s)
+		status := term.status(s)
+		bar, bar_ok := term.scrollbar(s)
+		if !bar_ok {state_fail(r, .System); return}
+		up := bar.total - min(bar.total, bar.offset + bar.len)
+		selection := "none"
+		if term.has_selection(s) {
+			text, ok := term.selection_text(s, context.temp_allocator)
+			if !ok {state_fail(r, .System); return}
+			end, count := 0, 0
+			for _, offset in text {
+				if count == 80 {break}
+				_, width := utf8.decode_rune_in_string(text[offset:])
+				end, count = offset + width, count + 1
+			}
+			selection = text[:end]
+		}
+		program: Program_Adopted
+		if adopted := program_adopted(entry); adopted != nil {program = adopted^}
+		state_value(r, "session.id", entry.id)
+		state_text(r, "session.message", session_message(status))
+		state_valuef(r, "grid.size", "%dx%d", g.columns, g.rows)
+		state_word(r, "session.status", status.kind)
+		state_valuef(r, "session.exit", "%d", status.exit_code)
+		state_text(r, "session.title", term.title(s, context.temp_allocator))
+		state_text(r, "session.header.title", pane_header_title(&entry.header))
+		state_text(r, "session.profile", entry.profile_id)
+		state_text(r, "session.name", entry.name)
+		state_text(r, "session.command", program.command)
+		state_text(r, "session.program", program.path)
+		state_text(r, "session.program.name", program.name)
+		program_icon_state_report(r, app, entry)
+		state_text(r, "session.header.directory", entry.header.directory)
+		icon := entry.header.icon
+		if app.shell_icon.width > 0 {icon = settings.profile_base(&app.settings.profiles).icon}
+		state_text(r, "session.header.icon", icon)
+		state_valuef(r, "grid.origin", "%d,%d", g.padding_left, g.padding_top)
+		state_text(r, "session.viewport", up == 0 ? "bottom" : fmt.tprintf("up:%d", up))
+		state_text(r, "session.selection", selection)
+		state_value(r, "session.mouse", term.mouse_tracking(s))
+		state_value(r, "session.generation", term.generation(s))
+		if w == nil {
+			state_valuef(r, "grid.cell", "%dx%d", g.cell_width, g.cell_height)
+			state_valuef(r, "grid.padding", "%d", g.padding_left)
+		}
+	}
+
+	verify_notices_report :: proc(r: ^State_Report, app: ^App) {
+		state_value(r, "notices.window", app.notice_window)
 		for n in ui.notices_live(&app.notices) {
 			left := "sticky"
 			if expires, timed := ui.notice_expiry(n).?; timed {
 				remaining := max(i64(0), i64(time.tick_diff(time.tick_now(), expires) / time.Millisecond))
 				left = fmt.tprintf("%dms", remaining)
 			}
-			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
 			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
-			value := fmt.tprintf("%s: %s (%s)", kind, n.text, left)
-			if _, err := append(&entries, verify_protocol.State_Entry{key, value}); err != nil {
-				return nil, .Out_Of_Memory
-			}
+			state_valuef(r, state_key("notice.%s", verify_notice_key(n.key)), "%s: %s (%s)", kind, n.text, left)
 		}
-		return entries[:], .None
-	}
-
-	// Hover state and the link count are enough to prove the interaction from a control journey
-	// without reading pixels: the range and target name the cells under the pointer, and the
-	// cursor shape is what the OS was asked to show.
-	verify_link_hover :: proc(w: ^Window) -> (hover, uri: string, spans: int) {
-		hover = "none"
-		for &view in w.views {spans += term.link_span_count(&view.links)}
-		link, ok := w.link_hover.?
-		if !ok {return}
-		view := pane_view(w, link.content)
-		if view == nil {return}
-		range := link.range
-		hover = fmt.tprintf(
-			"%d,%d-%d,%d",
-			range.first_row,
-			range.first_column,
-			range.last_row,
-			range.last_column,
-		)
-		if _, target, found := term.link_at(&view.links, range.first_column, range.first_row); found {
-			uri = target
-		}
-		return
-	}
-
-	verify_find_count :: proc(w: ^Window, target: Find_Target) -> string {
-		label, _ := find_presentation(w, target)
-		return label
-	}
-
-	// Retain the original matches field for existing control journeys.
-	find_status :: proc(w: ^Window, target: Find_Target) -> string {
-		s, ok := find_target_summary(target)
-		if !ok || len(w.find.query.bytes) == 0 { return "" }
-		switch {
-		case s.selected >= 0: return fmt.tprintf("%d of %d", s.selected + 1, s.total)
-		case s.total == 1: return "1 match"
-		case s.total > 0: return fmt.tprintf("%d matches", s.total)
-		case s.progress == .Searching: return "Searching…"
-		}
-		return "No matches"
-	}
-
-	verify_find_rect :: proc(w: ^Window, searched: Find_Target, target: ui.Find_Outcome) -> string {
-		if !ui.find_is_open(&w.find) { return "" }
-		l, _ := find_controls(w, searched)
-		#partial switch target {
-		case .Up: return verify_workspace_rect(l.up)
-		case .Down: return verify_workspace_rect(l.down)
-		}
-		return verify_workspace_rect(l.close)
-	}
-
-	verify_workspace_rect :: proc(r: render.Rect) -> string {
-		return fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)
-	}
-
-	// The rows the tab_menu keys describe: the dock edge menu while it shows, else the tab menu.
-	verify_menu_rows :: proc(w: ^Window) -> ^ui.Menu {
-		if dock_divider_menu_shown(w) { return &w.divider_menu }
-		tab_menu_sync(w)
-		return &w.tab_menu.menu
-	}
-
-	// The Action of the tab menu's selected row, or the zero Action without one.
-	verify_tab_menu_action :: proc(w: ^Window) -> Action {
-		index := ui.menu_selected(&w.tab_menu.menu)
-		if index < 0 || w.tab_menu.items[index].separator { return {} }
-		return Action(w.tab_menu.items[index].payload)
-	}
-
-	verify_chip_name_error :: proc(w: ^Window) -> bool {
-		chip, _ := w.overlay.(Overlay_Chip_Name)
-		return chip.error
-	}
-
-	verify_editor_profile_menu_open :: proc(w: ^Window) -> bool {
-		_, open := w.editor.mode.(ui.Editor_Profile_Menu)
-		return open
-	}
-
-	verify_document_popout :: proc(w: ^Window) -> bool {
-		_, shown := document_menu_popout(w)
-		return shown
-	}
-
-	verify_document_url_entry :: proc(w: ^Window) -> bool {
-		_, shown := document_menu_url_entry(w)
-		return shown
-	}
-
-	// list, pin or link; empty while the menu is closed.
-	verify_document_mode :: proc(w: ^Window) -> string {
-		state, shown := w.overlay.(Overlay_Document_Menu)
-		if !shown {return ""}
-		switch _ in state.mode {
-		case Document_Menu_List: return "list"
-		case Document_Menu_Pin: return "pin"
-		case Document_Menu_Link: return "link"
-		}
-		return ""
-	}
-
-	verify_process_rows :: proc(w: ^Window, page: ui.Editor_Layout) -> string {
-		builder := strings.builder_make(context.temp_allocator)
-		first := true
-		for item, index in w.editor.items {
-			if item.row < 0 {continue}
-			row := &w.editor.rows[item.row]
-			if row.process_field == .None {continue}
-			r := ui.editor_row_parts(&w.editor, page, index).row
-			if !first {strings.write_byte(&builder, ';')}
-			first = false
-			strings.write_string(&builder,
-				fmt.tprintf("%s@%g,%g,%g,%g", row.key, r.x, r.y, r.width, r.height))
-		}
-		return strings.to_string(builder)
-	}
-
-	// One table row per item as id@x,y,w,h, so a live journey can aim a drag at the grip.
-	verify_profile_rows :: proc(
-		w: ^Window,
-		page: ui.Editor_Layout,
-		kind: ui.Row_Kind,
-	) -> string {
-		builder := strings.builder_make(context.temp_allocator)
-		first := true
-		for item, index in w.editor.items {
-			if item.row < 0 {continue}
-			row := &w.editor.rows[item.row]
-			if row.kind != kind {continue}
-			if !first {strings.write_byte(&builder, ';')}
-			first = false
-			rect := ui.editor_row_parts(&w.editor, page, index).row
-			strings.write_string(
-				&builder,
-				fmt.tprintf(
-					"%s@%g,%g,%g,%g",
-					row.profile,
-					rect.x,
-					rect.y,
-					rect.width,
-					rect.height,
-				),
-			)
-		}
-		return strings.to_string(builder)
-	}
-
-	verify_detected_count :: proc(app: ^App) -> string {
-		count := 0
-		for &profile in app.settings.profiles.items {
-			if profile.detected {count += 1}
-		}
-		return fmt.tprintf("%d", count)
-	}
-
-	verify_profile_group :: proc(p: ^ui.Editor) -> int {
-		for group, index in p.groups {
-			if group.title == SETTINGS_SECTIONS[.Profiles].title {return index}
-		}
-		return -1
 	}
 
 	verify_workspace_index :: proc(app: ^App, w: ^Window) -> int {
@@ -1230,24 +680,6 @@ when AIO_CONTROL {
 			if workspace == w.workspace {return i + 1}
 		}
 		return 0
-	}
-
-	// Current pages report draft when they hold pending work, derived rather than stored.
-	verify_settings_revision :: proc(p: ^ui.Editor) -> string {
-		switch r in p.revision {
-		case ui.Editor_Current:
-			return ui.editor_draft(p) ? "draft" : "fresh"
-		case ui.Editor_Stale:
-			switch r.reason {
-			case .Changed_Outside:
-				return "stale.changed_outside"
-			case .Draft_Conflict:
-				return "stale.draft_conflict"
-			case .Refresh_Failed:
-				return "stale.refresh_failed"
-			}
-		}
-		return "closed"
 	}
 
 	verify_error :: proc(app: ^App, err: verify_protocol.Error) {
@@ -1363,11 +795,33 @@ when AIO_CONTROL {
 			if p.x > int(max(i32)) || p.y > int(max(i32)) {return {}, false}
 			return {i32(p.x), i32(p.y)}, true
 		}
+		box, complaint := verify_grid(app, w)
+		if complaint != "" || p.x >= int(box.columns) || p.y >= int(box.rows) {return {}, false}
+		first, last := verify_cell_corner(w, box, p.x, p.y), verify_cell_corner(w, box, p.x + 1, p.y + 1)
+		return {i32(first.x + (last.x - first.x) / 2), i32(first.y + (last.y - first.y) / 2)}, true
+	}
+
+	// The focused pane's grid as `w` draws it: the one cell-to-pixel mapping that mouse cells and
+	// cell evidence share. The complaint says why there is none.
+	@(require_results)
+	verify_grid :: proc(app: ^App, w: ^Window) -> (box: Pane_Box, complaint: string) {
 		entry := focused_session(app, w)
-		if entry == nil {return {}, false}
-		g := term.geometry(entry.session)
-		point, ok := term.cell_center(g, p.x, p.y)
-		return point, ok
+		if entry == nil {return {}, "the selected window has no focused pane; address the region in pixels"}
+		for pane in w.panes {
+			if pane.content != {.Terminal, entry.id} {continue}
+			return pane_box(w.metrics, pane.rect, pane_insets(app, w.scale, entry, pane.floating)), ""
+		}
+		return {}, "the focused pane is not visible; select its tab or use --region"
+	}
+
+	// The client pixel at the top-left corner of cell (column, row). Edges round rather than the
+	// cell size, so adjacent cells meet exactly.
+	@(require_results)
+	verify_cell_corner :: proc(w: ^Window, box: Pane_Box, column, row: int) -> [2]int {
+		return {
+			int(math.round(box.origin.x + f32(column) * w.metrics.cell_width)),
+			int(math.round(box.origin.y + f32(row) * w.metrics.cell_height)),
+		}
 	}
 
 	@(require_results)
@@ -1413,9 +867,9 @@ when AIO_CONTROL {
 			)
 		}
 		if m.kind == .Drag {
-			for step in 1 ..= 4 {
-				x := pos.x + i32((i64(end.x) - i64(pos.x)) * i64(step) / 4)
-				y := pos.y + i32((i64(end.y) - i64(pos.y)) * i64(step) / 4)
+			for step in 1 ..= MOUSE_DRAG_STEPS {
+				x := pos.x + i32((i64(end.x) - i64(pos.x)) * i64(step) / MOUSE_DRAG_STEPS)
+				y := pos.y + i32((i64(end.y) - i64(pos.y)) * i64(step) / MOUSE_DRAG_STEPS)
 				handle_event(
 					app,
 					input.Mouse_Move_Event{w.id, x, y, v.buttons, m.modifiers, now + i64(step)},
@@ -1433,7 +887,7 @@ when AIO_CONTROL {
 					end.x,
 					end.y,
 					m.modifiers,
-					now + 5,
+					now + MOUSE_DRAG_STEPS + 1,
 				},
 			)
 		}
@@ -1586,15 +1040,17 @@ when AIO_CONTROL {
 			)
 			if _, err := append(&parts, label); err != nil {return "", .Out_Of_Memory}
 		}
-		for key in CHANGED_KEYS {
-			a, b := verify_value(d.before_state, key), verify_value(entries, key)
+		for changed in CHANGED_KEYS {
+			a, b := verify_value(d.before_state, changed.key), verify_value(entries, changed.key)
 			if a == b {continue}
-			value := strings.builder_make(context.temp_allocator)
-			if err := verify_protocol.format_value(&value, b); err != .None {return "", err}
-			change := fmt.tprintf("%s=%s", key, strings.to_string(value))
-			if key == "window.visible" {change = b == "true" ? "window shown" : "window hidden"}
-			if key == "palette.open" {change = b == "true" ? "palette opened" : "palette closed"}
-			if key == "find.open" {change = b == "true" ? "find opened" : "find closed"}
+			change: string
+			if changed.became_true != "" {
+				change = b == "true" ? changed.became_true : changed.became_false
+			} else {
+				value := strings.builder_make(context.temp_allocator)
+				if err := verify_protocol.format_value(&value, b); err != .None {return "", err}
+				change = fmt.tprintf("%s=%s", changed.key, strings.to_string(value))
+			}
 			if _, err := append(&parts, change); err != nil {return "", .Out_Of_Memory}
 		}
 		for n in ui.notices_live(&app.notices) {
@@ -1819,7 +1275,7 @@ when AIO_CONTROL {
 		now := time.tick_now()
 		if quitting, ok := v.request.(Verify_Quitting); ok {
 			if control.delivery_finished(v.server, quitting.id) ||
-			   time.tick_diff(quitting.started, now) >= time.Second {
+			   time.tick_diff(quitting.started, now) >= QUIT_DRAIN {
 				app_quit_release(app)
 			}
 			return
@@ -1991,17 +1447,6 @@ when AIO_CONTROL {
 		request := message.request
 		verify_protocol.request_destroy(&request)
 		control.message_destroy(message.transport)
-	}
-	// Whether the pane's program has an icon ready to draw at any size, from whichever source.
-	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {
-		program := program_adopted(entry)
-		return program != nil && program.name != "" && program_icon_ready(app, program)
-	}
-	verify_program_source :: proc(app: ^App, entry: ^Session_Entry) -> string {
-		program := program_adopted(entry)
-		if program == nil || program.name == "" {return ""}
-		want, found := program_icon_source(app, program, 16)
-		return found ? strings.to_lower(fmt.tprintf("%v", want.source), context.temp_allocator) : ""
 	}
 } else {
 	Verify :: struct {}

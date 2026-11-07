@@ -732,3 +732,24 @@ status_panel_wheel :: proc(app: ^App, w: ^Window, x, y, delta: f32) -> bool {
 	w.dirty = true
 	return true
 }
+
+when AIO_CONTROL {
+	// The Activity panel's verification keys and its rows as the panel lists them.
+	status_panel_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		area := status_panel_rect(app, w)
+		state_rect(r, "activity.rect", area)
+		state_rect(r, "activity.side_button", status_panel_side_rect(app, w))
+		state_text(r, "activity.side", app.settings.status.panel_side == .Left ? "left" : "right")
+		state_rect(r, "activity.view_button", status_panel_view_rect(app, w))
+		state_text(r, "activity.view", app.settings.status.panel_view == .Comfy ? "comfy" : "dense")
+		rows, _ := status_panel_rows(app, w)
+		list := status_panel_list(app, w, area)
+		for row, i in rows {
+			state_rect(r, state_key("activity.row.%d.rect", i), status_panel_row_rect(w, list, row))
+			state_value(r, state_key("activity.row.%d.report", i), row.report)
+			text := row.report ? status_item_name(app, row.item) : row.label
+			state_text(r, state_key("activity.row.%d.text", i), text)
+			state_value(r, state_key("activity.row.%d.depth", i), row.depth)
+		}
+	}
+}

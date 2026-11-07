@@ -181,3 +181,28 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	width, height := f32(w.width), f32(w.height)
 	return ui.menu_draw(&w.tab_menu.menu, &w.list, &w.ui_text, app.theme, width, height, w.scale, w.pointer)
 }
+
+when AIO_CONTROL {
+	// The tab menu's verification keys. The dock edge menu reports under them while it shows, as it
+	// did when it shared this surface. Like every reader of the rows, the report syncs them first.
+	tab_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
+		divider := dock_divider_menu_shown(w)
+		menu := &w.tab_menu.menu
+		if divider {menu = &w.divider_menu} else {tab_menu_sync(w)}
+		action: Action
+		if index := ui.menu_selected(&w.tab_menu.menu); index >= 0 && !w.tab_menu.items[index].separator {
+			action = Action(w.tab_menu.items[index].payload)
+		}
+		state_value(r, "tab_menu.open", tab_menu_shown(w) || divider)
+		state_value(r, "tab_menu.count", len(menu.items))
+		state_value(r, "tab_menu.action", action)
+		for item, i in menu.items {
+			enabled := divider ? item.enabled && !item.separator : tab_menu_enabled(w, i)
+			rect := ui.menu_row_rect(menu, i, f32(w.width), f32(w.height), w.scale)
+			state_text(r, state_key("tab_menu.row.%d.label", i + 1), item.label)
+			state_value(r, state_key("tab_menu.row.%d.separator", i + 1), item.separator)
+			state_value(r, state_key("tab_menu.row.%d.enabled", i + 1), enabled)
+			state_rect(r, state_key("tab_menu.row.%d.rect", i + 1), rect)
+		}
+	}
+}

@@ -758,3 +758,37 @@ markdown_gesture_clear :: proc(app: ^App, w: ^Window) {
 	w.markdown_gesture = nil
 	w.dirty = true
 }
+
+when AIO_CONTROL {
+	// The focused Markdown pane's verification keys; the load state is reported by its variant name.
+	markdown_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		scroll, total := 0, 0
+		path, selected := "", ""
+		state := "Missing"
+		if pane := markdown_focused(app, w); pane != nil {
+			scroll, total = pane.view.scroll, ui.markdown_total(&pane.view)
+			path = pane.path
+			switch _ in pane.load {
+			case nil:
+				state = "Unverified"
+			case Markdown_Missing:
+			case Markdown_Loaded:
+				state = "Loaded"
+			case Markdown_Too_Large:
+				state = "Too_Large"
+			case Markdown_Failed:
+				state = "Failed"
+			}
+			if document := markdown_document(pane); document != nil {
+				selected = ui.markdown_selected_text(&pane.view, document)
+			}
+		}
+		state_value(r, "markdown.count", len(app.markdown_panes))
+		state_value(r, "markdown.active", markdown_active(w))
+		state_text(r, "markdown.path", path)
+		state_text(r, "markdown.state", state)
+		state_value(r, "markdown.scroll", scroll)
+		state_value(r, "markdown.total", total)
+		state_text(r, "markdown.selection", selected)
+	}
+}

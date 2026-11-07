@@ -841,3 +841,24 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	return .Ok
 }
+
+when AIO_CONTROL {
+	// The document menu's keys; documents.mode is list, pin or link, and empty while it is closed.
+	document_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
+		mode := ""
+		if state, shown := w.overlay.(Overlay_Document_Menu); shown {
+			switch _ in state.mode {
+			case Document_Menu_List: mode = "list"
+			case Document_Menu_Pin: mode = "pin"
+			case Document_Menu_Link: mode = "link"
+			}
+		}
+		_, popout := document_menu_popout(w)
+		_, url_entry := document_menu_url_entry(w)
+		state_value(r, "documents.open", document_menu_shown(w))
+		state_text(r, "documents.mode", mode)
+		state_value(r, "documents.count", w.document_menu.count)
+		state_value(r, "documents.popout", popout)
+		state_value(r, "documents.url_open", url_entry)
+	}
+}

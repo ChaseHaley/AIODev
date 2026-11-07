@@ -949,3 +949,16 @@ floating_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	}
 	return "Move float"
 }
+
+when AIO_CONTROL {
+	floating_state_report :: proc(r: ^State_Report, w: ^Window) {
+		hover := (w.float_header_hover.? or_else Float_Header_Spot{}).action
+		state_value(r, "panes.floating", len(floating_rects(w)))
+		state_value(r, "panes.capsules", len(floating_capsules(w)))
+		state_rect(r, "panes.capsule_group", w.float_capsule_group)
+		state_value(r, "panes.float_dragging", floating_dragging(w))
+		state_value(r, "panes.float_header_hover", hover)
+		state_valuef(r, "panes.float_header_hover_value", "%g", w.float_header_motion.hover.value)
+		state_valuef(r, "panes.float_header_press_value", "%g", w.float_header_motion.press.value)
+	}
+}

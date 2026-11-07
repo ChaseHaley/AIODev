@@ -1,5 +1,6 @@
 package pixels
 
+import "core:hash"
 import "core:image/png"
 import "core:os"
 
@@ -231,12 +232,6 @@ add_band :: proc(result: ^Diff, top, bottom, left, right: int) {
 
 @(private)
 MAX_STORED_BYTES :: 65535
-@(private)
-CRC_POLYNOMIAL :: u32(0xEDB88320)
-@(private)
-ADLER_MODULUS :: u32(65521)
-@(private)
-ADLER_BLOCK :: 5552
 
 // png_write stores img as an 8-bit RGBA PNG.
 @(require_results)
@@ -296,7 +291,7 @@ zlib_stored :: proc(raw: []u8) -> ([]u8, bool) {
 		offset += count
 		if final {break}
 	}
-	put_u32be(payload[at:at + 4], adler32(raw))
+	put_u32be(payload[at:at + 4], hash.adler32(raw))
 	return payload, true
 }
 
@@ -313,8 +308,9 @@ put_chunk :: proc(file: ^[dynamic]u8, kind: string, payload: []u8) -> bool {
 	if len(kind) != 4 {return false}
 	length: [4]u8
 	put_u32be(length[:], u32(len(payload)))
+	// The chunk CRC covers the type and then the payload, as the PNG specification requires.
 	checksum: [4]u8
-	put_u32be(checksum[:], crc32(kind, payload))
+	put_u32be(checksum[:], hash.crc32(payload, hash.crc32(transmute([]u8)kind)))
 	if _, err := append(file, ..length[:]); err != nil {return false}
 	if _, err := append(file, ..transmute([]u8)kind); err != nil {return false}
 	if len(payload) > 0 {
@@ -322,40 +318,6 @@ put_chunk :: proc(file: ^[dynamic]u8, kind: string, payload: []u8) -> bool {
 	}
 	_, err := append(file, ..checksum[:])
 	return err == nil
-}
-
-// crc32 covers a chunk type and its payload, as the PNG specification requires.
-@(private)
-crc32 :: proc(kind: string, payload: []u8) -> u32 {
-	crc := u32(0xFFFFFFFF)
-	for byte in transmute([]u8)kind {crc = crc32_byte(crc, byte)}
-	for byte in payload {crc = crc32_byte(crc, byte)}
-	return crc ~ 0xFFFFFFFF
-}
-
-@(private)
-crc32_byte :: proc(crc: u32, byte: u8) -> u32 {
-	result := crc ~ u32(byte)
-	for _ in 0 ..< 8 {
-		if result & 1 == 1 {result = (result >> 1) ~ CRC_POLYNOMIAL} else {result >>= 1}
-	}
-	return result
-}
-
-@(private)
-adler32 :: proc(data: []u8) -> u32 {
-	low, high := u32(1), u32(0)
-	// 5552 is the largest block whose sums cannot overflow before the modulo.
-	for start := 0; start < len(data); start += ADLER_BLOCK {
-		end := min(start + ADLER_BLOCK, len(data))
-		for byte in data[start:end] {
-			low += u32(byte)
-			high += low
-		}
-		low %= ADLER_MODULUS
-		high %= ADLER_MODULUS
-	}
-	return high << 16 | low
 }
 
 // png_read decodes an 8-bit RGB or RGBA PNG into a packed RGBA image. It reads the file

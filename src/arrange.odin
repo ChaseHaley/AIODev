@@ -43,9 +43,10 @@ divider_dragging :: proc(w: ^Window) -> ^Divider_Drag {
 }
 
 when AIO_CONTROL {
-	divider_drag_count :: proc(w: ^Window) -> int {
+	// How many dividers the window's drag holds; zero while none is dragged.
+	divider_state_report :: proc(r: ^State_Report, w: ^Window) {
 		drag := divider_dragging(w)
-		return drag == nil ? 0 : drag.count
+		state_value(r, "dividers.dragging", drag == nil ? 0 : drag.count)
 	}
 }
 

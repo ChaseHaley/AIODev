@@ -229,3 +229,15 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	)
 	return .Ok
 }
+
+when AIO_CONTROL {
+	tab_strip_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		bar := window_tab_bar(app, w)
+		state_text(r, "tabs.orientation", w.tabs_horizontal ? "horizontal" : "vertical")
+		state_valuef(r, "tabs.width", "%g", bar.tab_width)
+		state_valuef(r, "tabs.x", "%g", bar.x)
+		state_valuef(r, "tabs.height", "%g", bar.height)
+		state_rect(r, "tabs.new_tab", window_tab_new_rect(app, w))
+		state_rect(r, "tabs.chevron", tab_chevron_rect(app, w))
+	}
+}

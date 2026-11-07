@@ -60,13 +60,51 @@ rail_overlay_phase :: proc(w: ^Window) -> (Rail_Overlay_Phase, bool) {
 }
 
 when AIO_CONTROL {
-	// How far the rail is out: 1 docked, 0 hidden, and the slide's position for an overlay.
-	rail_slide_value :: proc(w: ^Window) -> f32 {
-		switch r in w.rail {
-		case Rail_Docked: return 1
-		case Rail_Overlay: return r.slide.value
+	// The rail's verification keys, read without storing the scroll clamp the layout applies.
+	rail_state_report :: proc(r: ^State_Report, w: ^Window) {
+		// How far the rail is out: 1 docked, 0 hidden, and the slide's position for an overlay.
+		slide: f32
+		switch rail in w.rail {
+		case Rail_Docked: slide = 1
+		case Rail_Overlay: slide = rail.slide.value
 		}
-		return 0
+		toggle := tab_orientation_button_rect(w)
+		state_value(r, "rail.visible", rail_visible(w))
+		state_value(r, "rail.docked", rail_docked(w))
+		state_rect(r, "rail.rect", rail_area(w))
+		state_rect(r, "rail.resize", rail_resize_rect(w))
+		state_value(r, "rail.resizing", rail_resizing(w))
+		state_value(r, "rail.overlay", rail_overlay(w))
+		state_valuef(r, "rail.scroll", "%g", w.rail_scroll)
+		state_valuef(r, "rail.slide", "%g", slide)
+		state_value(r, "rail.rows", rail_tab_count(w))
+		state_valuef(r, "rail.row.height", "%g", ui.RAIL_ROW_HEIGHT * w.scale)
+		// rail.toggle is the published name of the orientation button the tab strip also reports.
+		state_rect(r, "rail.toggle", toggle)
+		state_rect(r, "tabs.orientation_button", toggle)
+		state_rect(r, "rail.new_tab", rail_new_tab_rect(w))
+		state_rect(r, "rail.profile", rail_profile_rect(w))
+		layout, ok := rail_layout_query(w)
+		if !ok {return}
+		for tab, i in w.workspace.tabs {
+			n := i + 1
+			state_text(r, state_key("rail.row.%d.kind", n), "tab")
+			state_text(r, state_key("rail.row.%d.title", n), tab.title)
+			state_rect(r, state_key("rail.row.%d.rect", n), ui.rail_row_rect(layout, i))
+			state_value(r, state_key("rail.row.%d.selected", n), i == w.workspace.selected)
+			state_value(r, state_key("rail.row.%d.marked", n), tab.marked)
+			state_value(r, state_key("rail.row.%d.workspace", n), w.workspace.id)
+			state_value(r, state_key("rail.row.%d.tab", n), n)
+		}
+	}
+
+	// tab.N's rail row index (-1 on a tab strip), row and close button, as rail_row_rect_for_tab and
+	// the drawer place them.
+	rail_tab_report_rects :: proc(w: ^Window, tab: int) -> (index: int, row, close: render.Rect) {
+		layout, ok := rail_layout_query(w)
+		index = w.tabs_horizontal ? -1 : tab
+		if ok && tab >= 0 && tab < rail_tab_count(w) {row = rail_tab_rect(w, layout, tab)}
+		return index, row, ui.rail_close_rect(layout, index, w.scale)
 	}
 }
 
@@ -154,14 +192,21 @@ rail_tab_count :: proc(w: ^Window) -> int {
 	return w.tabs_horizontal || w.workspace == nil ? 0 : len(w.workspace.tabs)
 }
 
+// The rail's layout with its scroll clamped to the rows, stored so later readers start from it.
 @(require_results)
 rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+	layout, ok = rail_layout_query(w)
+	if ok {w.rail_scroll = layout.scroll}
+	return
+}
+
+// The rail's layout with its scroll clamped to the rows, leaving the window unchanged.
+@(require_results)
+rail_layout_query :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
 	area := rail_area(w)
 	area.height = max(0, area.height - w.status_rail_reserve)
-	layout = ui.rail_layout(area, w.scale, rail_tab_count(w) + w.tab_incoming.count, w.rail_scroll)
-	w.rail_scroll = layout.scroll
-	return layout, true
+	return ui.rail_layout(area, w.scale, rail_tab_count(w) + w.tab_incoming.count, w.rail_scroll), true
 }
 
 rail_reveal_active :: proc(w: ^Window) {

@@ -41,3 +41,13 @@ title_actions_draw :: proc(app: ^App, w: ^Window) {
 		)
 	}
 }
+
+when AIO_CONTROL {
+	title_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		state_rect(r, "title.settings", title_action_rect(w, .Settings))
+		state_rect(r, "title.palette", title_action_rect(w, .Palette))
+		state_valuef(r, "title.height", "%g", ui.TITLE_BAR_HEIGHT * w.scale)
+		state_value(r, "title.controls_end", i32(window_title_controls_end(app, w)))
+		state_valuef(r, "title.caption_start", "%g", f32(w.width) - ui.CAPTION_WIDTH * w.scale)
+	}
+}
