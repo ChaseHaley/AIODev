@@ -533,3 +533,40 @@ status_overview_cancel :: proc(w: ^Window) {
 	status_panel_hover_clear(w)
 	w.status.pill_hover = false
 }
+
+// Activity inbox pointer surface
+
+@(private)
+status_inbox_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return status_inbox_shown(w)}
+
+@(private)
+status_inbox_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Status_Inbox {status_inbox_move(app, w, f32(e.x), f32(e.y))}
+}
+
+// Activity pill pointer surface
+
+@(private)
+status_pill_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return render.rect_contains(status_pill_rect(app, w), x, y)
+}
+
+@(private)
+status_pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	hovered := owner == .Status_Pill
+	status_pill_hover_set(w, hovered)
+	if hovered {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
+}
+
+@(private)
+status_pill_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Activity"}
+
+@(private)
+status_pill_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button == .Left {status_inbox_toggle(app, w)}
+}
+
+@(private)
+status_pill_leave :: proc(_: ^App, w: ^Window) {
+	status_pill_hover_set(w, false)
+}

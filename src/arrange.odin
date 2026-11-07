@@ -10,8 +10,6 @@ import "core:math"
 import "core:time"
 
 @(private)
-DOUBLE_CLICK_NS :: i64(500_000_000)
-@(private)
 DRAG_THRESHOLD :: 5
 @(private)
 GHOST_DURATION :: 120 * time.Millisecond

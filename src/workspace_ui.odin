@@ -675,3 +675,42 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }
 	return workspace_row_menu_draw(app, w)
 }
+
+// Workspace button pointer surface
+
+@(private)
+workspace_button_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return y >= 0 && y < window_title_height(w) && x >= title_actions_end(w) &&
+		x < workspace_button_width(w)
+}
+
+@(private)
+workspace_button_hover :: proc(
+	app: ^App,
+	w: ^Window,
+	owner: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) {
+	if owner == .Workspace_Button {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
+}
+
+@(private)
+workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Workspaces"}
+
+@(private)
+workspace_button_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button == .Left {workspace_picker_chip_press(app, w, e.time_ns)}
+}
+
+@(private)
+workspace_button_leave :: proc(_: ^App, w: ^Window) {
+	w.workspace_hovered = false
+}
+
+// Every move that reaches the window updates the button's hover, which drives its motion; a drag or a
+// modal surface does not hide it.
+workspace_button_track :: proc(w: ^Window, x, y: f32) {
+	if hovered := render.rect_contains(workspace_button_rect(w), x, y); hovered != w.workspace_hovered {
+		w.workspace_hovered, w.dirty = hovered, true
+	}
+}

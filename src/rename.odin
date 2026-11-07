@@ -224,3 +224,43 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		max(1, r.width - 2 * pad),
 	)
 }
+
+// Rename field pointer surface
+
+@(private)
+rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return rename_shown(w)}
+
+@(private)
+rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Rename {return}
+	x, y := f32(e.x), f32(e.y)
+	if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
+	pointer_set(app, w, render.rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
+}
+
+// A press outside the dialog finishes the rename and is swallowed with its release. The workspace chip
+// field is not modal: the press leaves it, keeping the name typed so far when it can, and still reaches
+// what it landed on.
+@(private)
+rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {ui.field_release(&w.rename); return}
+	x, y := f32(e.x), f32(e.y)
+	if chip_name_shown(w) && !render.rect_contains(rename_rect(w), x, y) {
+		overlay_close(app, w, .Leave)
+		target := pointer_target(app, w, x, y)
+		gesture_hand_off(w, e.button, target)
+		pointer_press(app, w, target, e)
+		return
+	}
+	if !render.rect_contains(rename_rect(w), x, y) {
+		rename_finish(app, w, false)
+		gesture_swallow(w, e.button, .Rename)
+	} else if e.button == .Left && render.rect_contains(rename_field_rect(w), x, y) {
+		rename_pointer(app, w, x, true, .Shift in e.modifiers)
+	}
+}
+
+@(private)
+rename_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.rename)
+}

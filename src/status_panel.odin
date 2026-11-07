@@ -655,7 +655,7 @@ status_panel_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 }
 
 // The pointer left the panel for another surface.
-status_panel_leave :: proc(w: ^Window) {
+status_panel_leave :: proc(_: ^App, w: ^Window) {
 	status_panel_hover_set(w, nil)
 	if w.status.panel_button_hover != .None {w.status.panel_button_hover, w.dirty = .None, true}
 }
@@ -719,7 +719,7 @@ status_panel_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	return true
 }
 
-status_panel_cancel :: proc(w: ^Window) {
+status_panel_cancel :: proc(_: ^App, w: ^Window) {
 	ui.armed_cancel(&w.status.panel_button_armed)
 }
 
@@ -731,4 +731,20 @@ status_panel_wheel :: proc(app: ^App, w: ^Window, x, y, delta: f32) -> bool {
 	w.status.panel_scroll = clamp(w.status.panel_scroll - step, 0, max(0, total - list.height))
 	w.dirty = true
 	return true
+}
+
+// Activity panel pointer surface
+
+@(private)
+status_panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return status_panel_contains(app, w, x, y)
+}
+
+@(private)
+status_panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Status_Panel {
+		status_panel_move(app, w, f32(e.x), f32(e.y))
+		return
+	}
+	status_panel_leave(app, w)
 }

@@ -189,16 +189,7 @@ app_init :: proc(app: ^App) -> bool {
 	shell_icon_load(app)
 	apply_fonts(app)
 	apply_theme(app)
-	if platform_api.tray_create(&app.platform, app.app_id) != .None {
-		log.error("creating the tray icon failed")
-	}
-	tray_menu := [?]platform_api.Tray_Menu_Item {
-		{id = TRAY_OPEN, title = "Open AIODev"},
-		{id = TRAY_QUIT, title = "Quit"},
-	}
-	if platform_api.tray_set_menu(&app.platform, tray_menu[:]) != .None {
-		log.error("setting the tray menu failed")
-	}
+	tray_init(app)
 	platform_api.set_modal_loop_callback(
 		&app.platform,
 		proc(user: rawptr) {tick((^App)(user))},
@@ -230,9 +221,7 @@ app_destroy :: proc(app: ^App) {
 	for workspace in app.workspaces {workspace_destroy(workspace)}
 	delete(app.workspaces)
 	if app.platform_ready {
-		if platform_api.tray_destroy(&app.platform) != .None {
-			log.error("removing the tray icon failed")
-		}
+		tray_destroy(app)
 	}
 	process_worker_destroy(&app.processes)
 	program_icon_cache_destroy(&app.program_icons)

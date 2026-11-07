@@ -2682,10 +2682,15 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	return true
 }
 
-editor_hover_clear :: proc(p: ^Editor) {
+// Drops every hover; reports whether one was shown.
+editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
+	changed =
+		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
+		p.hover_profile_item >= 0 || p.popup_bar_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
 	p.popup_bar_hover = false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
+	return
 }
 
 // Whether the pointer is over editable text, which shows a text cursor.

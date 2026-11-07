@@ -742,7 +742,7 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 	pointer_set(app, w, shape)
 }
 
-document_menu_tooltip :: proc(w: ^Window, x, y: f32) -> string {
+document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	menu := &w.document_menu
 	if _, popout := document_menu_popout(w); popout {
 		level, hit := document_popout_hit(w, x, y)
@@ -840,4 +840,24 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		ui.icon_draw(&w.list, document_level_icon(level), face, ink, ui.ICON_BUTTON, s)
 	}
 	return .Ok
+}
+
+// Document menu pointer surface
+
+@(private)
+document_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return document_menu_shown(w)}
+
+@(private)
+document_menu_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Document_Menu {document_menu_hover(app, w, f32(e.x), f32(e.y), .Left in e.buttons)}
+}
+
+@(private)
+document_menu_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.document_menu.url)
+}
+
+@(private)
+document_menu_leave :: proc(_: ^App, w: ^Window) {
+	w.document_menu.menu.hover_part = .Row
 }

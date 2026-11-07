@@ -2,21 +2,23 @@ package main
 
 import "aio:commands"
 import "aio:input"
-import "aio:layout"
 import "aio:platform"
-import "aio:render"
 import "aio:term"
 import "aio:ui"
 import "core:log"
 import "core:math"
 import "core:time"
 
-@(private)
-TRAY_OPEN :: 1
-@(private)
-TRAY_QUIT :: 2
+// Terminal and settings scrolling moves this many lines per wheel notch.
 @(private)
 WHEEL_LINES :: 3
+
+when AIO_CONTROL {
+	// The wheel delta that scrolls `lines` lines, for synthetic input that names lines, not notches.
+	wheel_delta_for_lines :: proc(lines: int) -> f32 {
+		return f32(lines) / WHEEL_LINES
+	}
+}
 
 handle_event :: proc(app: ^App, event: platform.Event) {
 	switch e in event {
@@ -37,34 +39,12 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			x, y := f32(e.x), f32(e.y)
 			if w.pointer != ([2]f32{x, y}) && w.gloss_hovered {w.dirty = true}
 			w.pointer = {x, y}
-			if hovered := render.rect_contains(workspace_button_rect(w), x, y);
-			   hovered != w.workspace_hovered {
-				w.workspace_hovered, w.dirty = hovered, true
-			}
+			workspace_button_track(w, x, y)
 			gesture_move(app, w, e)
 		}
 	case platform.Mouse_Leave_Event:
 		if w := window_find(app, e.window); w != nil {
-			tooltip_cancel(w)
-			w.find.hover = .None
-			w.tab_hover = nil
-			gesture_tab_unpress(w)
-			w.title_action_hover = .None
-			if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, 0)}
-			floating_hover_clear(w)
-			w.document_menu.menu.hover_part = .Row
-			w.tab_orientation_button_hovered = false
-			w.workspace_hovered = false
-			w.workspace_picker.menu_hover = 0
-			ui.editor_hover_clear(&w.editor)
-			link_hover_clear(w)
-			pane_scrollbar_hover_leave(w, .Terminal)
-			w.split_overlay = false
-			for &view in w.views {
-				view.header_hover = .None
-				ui.armed_cancel(&view.header_armed)
-			}
-			w.dirty = true
+			pointer_leave(app, w)
 		}
 	case input.Mouse_Wheel_Event:
 		if w := window_find(app, e.window); w != nil {
@@ -99,14 +79,8 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 				hide_to_tray(app, w)
 			}
 		}
-	case platform.Tray_Event:
-		show_window(app)
-	case platform.Tray_Notification_Event:
-		if e.token == 0 {
-			show_window(app)
-		} else {
-			status_notification_clicked(app, u32(e.token))
-		}
+	case platform.Tray_Event, platform.Tray_Notification_Event, platform.Tray_Menu_Event:
+		tray_event(app, event)
 	case platform.Notification_Error_Event:
 		log.errorf("Windows notification delivery failed: HRESULT 0x%x", e.code)
 		notify(app, .Error, "Windows could not deliver a status notification.")
@@ -114,46 +88,121 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		// Launching AIODev again means a fresh workspace window, as New Window does. With every
 		// window hidden to the tray, it reopens the existing view instead.
 		if app_tray_only(app) {show_window(app)} else {workspace_new(app, nil, true, name_it = false)}
-	case platform.Tray_Menu_Event:
-		switch e.id {
-		case TRAY_OPEN:
-			show_window(app)
-		case TRAY_QUIT:
-			app_quit(app)
-		}
 	case platform.Settings_Event:
 		refresh_animations(app)
 	case platform.Wake_Event:
 	}
 }
 
-show_window :: proc(app: ^App) {
-	if len(app.workspaces) == 0 {return}
-	if app_tray_only(app) {
-		workspace := app.workspaces[0]
-		if len(workspace.tabs) == 0 {
-			if _, created := tab_create(app, workspace); !created {
-				notify(app, .Error, "Could not create a tab.")
-				return
-			}
-		}
-		if !window_open(app, workspace) {
-			notify(app, .Error, "Could not open the AIODev window.")
-			return
-		}
-	}
-	_ = window_activate(app, window_primary(app))
+// A key, typed text or the wheel, on its way to the surface that takes the window's input.
+@(private = "file")
+Overlay_Input :: union {
+	Overlay_Key,
+	Overlay_Text,
+	Overlay_Wheel,
 }
 
-hide_to_tray :: proc(app: ^App, w: ^Window) {
-	focus_leave(app, w)
-	window_close(app, w)
-	if !app_tray_only(app) {return}
-	if app.settings.window.tray_notification && !app.tray_hint_shown {
-		app.tray_hint_shown = true
-		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use Quit to exit."
-		if platform.tray_notify(&app.platform, "AIODev is still running", text) != .None {
-			log.error("showing the tray notification failed")
+@(private = "file")
+Overlay_Key :: struct {
+	event:   input.Key_Event,
+	// The key as the keyboard layout's letters name it; menus navigate by it.
+	logical: input.Key_Event,
+}
+
+@(private = "file")
+Overlay_Text :: struct {
+	text: string,
+}
+
+// `rows` is whole wheel rows; the surfaces that take the wheel first see only `delta`.
+@(private = "file")
+Overlay_Wheel :: struct {
+	delta: f32,
+	rows:  int,
+}
+
+// The surfaces that take keys, text and the wheel ahead of everything else. A confirmation and the
+// palette take them later: keys after the Activity inbox and a drag's Escape (the palette after the
+// rail's Escape and the tab menu's keys too), the wheel in whole rows after the inbox, the Activity
+// panel and the rail.
+@(private = "file")
+OVERLAY_FIRST :: bit_set[Overlay_Kind] {
+	.Workspace_Picker,
+	.Rename,
+	.Chip_Name,
+	.Tab_Menu,
+	.Divider_Menu,
+	.Profile_Menu,
+	.Document_Menu,
+}
+
+// Each surface's keys, text and wheel side by side. Keys a surface takes have their release
+// suppressed, except a confirmation's, which suppresses its own.
+@(private = "file")
+overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_Input) {
+	switch kind {
+	case .None:
+	case .Workspace_Picker:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			workspace_picker_key(app, w, e.logical)
+		case Overlay_Text: workspace_picker_text(app, w, e.text)
+		case Overlay_Wheel: workspace_picker_wheel(w, e.delta)
+		}
+	case .Rename, .Chip_Name:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			rename_key(app, w, e.event)
+		case Overlay_Text:
+			ui.field_text(&w.rename, e.text)
+			w.dirty = true
+		case Overlay_Wheel:
+		}
+	case .Tab_Menu:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			tab_menu_key(app, w, e.logical)
+		case Overlay_Text:
+		case Overlay_Wheel: tab_menu_wheel(w, int(math.sign(e.delta)))
+		}
+	case .Divider_Menu:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			dock_divider_menu_key(app, w, e.logical)
+		case Overlay_Text:
+		case Overlay_Wheel: dock_divider_menu_wheel(w, int(math.sign(e.delta)))
+		}
+	case .Profile_Menu:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			profile_menu_key(app, w, e.logical)
+		case Overlay_Text:
+		case Overlay_Wheel: profile_menu_wheel(w, int(math.sign(e.delta)))
+		}
+	case .Document_Menu:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			document_menu_key(app, w, e.event, e.logical)
+		case Overlay_Text: document_menu_text_input(app, w, e.text)
+		case Overlay_Wheel: document_menu_wheel(app, w, int(math.sign(e.delta)))
+		}
+	case .Confirmation:
+		switch e in event {
+		case Overlay_Key: _ = confirmation_key(app, w, e.event)
+		case Overlay_Text, Overlay_Wheel:
+		}
+	case .Palette:
+		switch e in event {
+		case Overlay_Key: palette_key_input(app, w, e.event, e.logical)
+		case Overlay_Text: on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, e.text), 0)
+		case Overlay_Wheel:
+			on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(e.rows)))), 0)
 		}
 	}
 }
@@ -164,45 +213,21 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	// Every surface ignores releases, so a consumed press's release is dropped before routing.
 	if key_release_suppressed(w, e) {return}
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
-	logical := e
-	logical.key = commands.logical_key(e.key, e.unshifted)
+	key := Overlay_Key{e, e}
+	key.logical.key = commands.logical_key(e.key, e.unshifted)
 	if drag_holds_dropdown(w) {
 		key_suppress(w, e)
 		if e.pressed && e.key == .Escape {_ = gesture_cancel(app, w)}
 		return
 	}
 	kind := overlay_kind(app, w)
-	switch kind {
-	case .Workspace_Picker:
-		key_suppress(w, e)
-		workspace_picker_key(app, w, logical)
+	if kind in OVERLAY_FIRST {
+		overlay_input(app, w, kind, key)
 		return
-	case .Rename, .Chip_Name:
-		key_suppress(w, e)
-		rename_key(app, w, e)
-		return
-	case .Tab_Menu:
-		key_suppress(w, e)
-		tab_menu_key(app, w, logical)
-		return
-	case .Divider_Menu:
-		key_suppress(w, e)
-		dock_divider_menu_key(app, w, logical)
-		return
-	case .Profile_Menu:
-		key_suppress(w, e)
-		profile_menu_key(app, w, logical)
-		return
-	case .Document_Menu:
-		key_suppress(w, e)
-		document_menu_key(app, w, e, logical)
-		return
-	// A confirmation and the palette take keys below, after the inbox and the drags' Escape.
-	case .Confirmation, .Palette, .None:
 	}
 	if status_inbox_shown(w) {
 		key_suppress(w, e)
-		status_inbox_key(app, w, e, logical)
+		status_inbox_key(app, w, e, key.logical)
 		return
 	}
 	if e.pressed && e.key == .Escape && drag_active(w) != nil {
@@ -211,7 +236,7 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		return
 	}
 	if kind == .Confirmation {
-		_ = confirmation_key(app, w, e)
+		overlay_input(app, w, kind, key)
 		return
 	}
 	if e.pressed && e.key == .Escape && rail_overlay(w) {
@@ -219,60 +244,9 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		rail_overlay_dismiss(app, w)
 		return
 	}
-	if kind != .Palette &&
-	   e.pressed &&
-	   !window_linked(w) &&
-	   (e.key == .Context_Menu || e.key == .F10 && .Shift in e.modifiers) {
-		if w.tabs_horizontal {
-			bar := window_tab_bar(app, w)
-			tab_menu_open(
-				app,
-				w,
-				w.workspace.selected,
-				bar.x + tab_position(w, w.workspace.selected) * bar.tab_width,
-				bar.height,
-			)
-		} else {
-			row := rail_row_rect_for_tab(w, w.workspace.selected)
-			if row.height <= 0 {
-				row = {16, ui.TITLE_BAR_HEIGHT * w.scale, 1, 1}
-			}
-			tab_menu_open(
-				app,
-				w,
-				w.workspace.selected,
-				row.x + 16 * w.scale,
-				row.y + row.height,
-			)
-		}
-		key_suppress(w, e)
-		return
-	}
+	if kind != .Palette && tab_menu_key_open(app, w, e) {return}
 	if kind == .Palette {
-		pane_header_cancel(w)
-		key_suppress(w, e)
-		p := &app.palette
-		if ui.palette_editing(p) == .Shortcut {
-			outcome, id := ui.palette_key(p, &app.registry, e)
-			on_palette_outcome(app, w, outcome, id)
-			return
-		}
-		switch clipboard_chord(logical) {
-		case .Copy:
-			clipboard_copy(app, ui.palette_selection(p))
-		case .Cut:
-			if clipboard_copy(
-				app,
-				ui.palette_selection(p),
-			) {on_palette_outcome(app, w, ui.palette_cut(p, &app.registry), 0)}
-		case .Paste:
-			if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-				on_palette_outcome(app, w, ui.palette_paste(p, &app.registry, text), 0)
-			}
-		case .None:
-			outcome, id := ui.palette_key(p, &app.registry, logical)
-			on_palette_outcome(app, w, outcome, id)
-		}
+		overlay_input(app, w, kind, key)
 		return
 	}
 	if settings_active(w) {
@@ -283,40 +257,100 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		markdown_key(app, w, e)
 		return
 	}
+	terminal_key(app, w, e)
+}
+
+@(private)
+on_text :: proc(app: ^App, w: ^Window, text: string) {
+	if w.phase == .Preparing {return}
+	if kind := overlay_kind(app, w); kind != .None {
+		overlay_input(app, w, kind, Overlay_Text{text})
+		return
+	}
+	if settings_active(w) {
+		ui.editor_text(&w.editor, text)
+		w.dirty = true
+		return
+	}
+	if ui.find_has_keyboard(&w.find) {
+		on_find_outcome(app, w, find_target(app, w), ui.find_text(&w.find, text))
+		return
+	}
+	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
+		term.send_text(entry.session, text)
+		cursor_blink_reset(w)
+	}
+}
+
+// What the start every content pane's keys share found, for the pane to act on in its own order.
+Content_Key :: struct {
+	// The key as the keyboard layout's letters name it, for chords.
+	logical:   input.Key_Event,
+	// The leader was pressed twice, so the key goes to the pane, past every shortcut.
+	literal:   bool,
+	clipboard: Clipboard_Chord,
+	// The shortcut a fresh press that is not literal runs; found is false otherwise.
+	action:    Action,
+	found:     bool,
+}
+
+// The start of the keys of the terminal, Markdown and settings panes: Escape closes a find bar that has
+// the keyboard (when `find_escape`), then the leader chord. Consumed when either took the key. Each pane
+// then decides between the clipboard chord, the shortcut and its own keys in its own order.
+@(private)
+content_key_prelude :: proc(
+	app: ^App,
+	w: ^Window,
+	e: input.Key_Event,
+	find_escape: bool,
+) -> (
+	key: Content_Key,
+	consumed: bool,
+) {
+	if find_escape && e.pressed && e.key == .Escape && ui.find_has_keyboard(&w.find) && !leader_armed(w) {
+		key_suppress(w, e)
+		find_close(app, w, find_target(app, w))
+		return {}, true
+	}
+	switch leader_key(app, w, e) {
+	case .Consumed:
+		return {}, true
+	case .Literal:
+		key.literal = true
+	case .None:
+	}
+	key.logical = e
+	key.logical.key = commands.logical_key(e.key, e.unshifted)
+	key.clipboard = clipboard_chord(key.logical)
+	if e.pressed && !key.literal {key.action, key.found = shortcut_action(app, e)}
+	return key, false
+}
+
+// Keys for the focused terminal. Its Copy shortcut runs only for a native selection or the find bar; a
+// fullscreen program owns its selection and receives the key.
+@(private)
+terminal_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	entry := focused_session(app, w)
 	if entry == nil {
 		return
 	}
-	literal := false
-	if e.pressed {
-		if ui.find_has_keyboard(&w.find) && e.key == .Escape && !leader_armed(w) {
+	key, consumed := content_key_prelude(app, w, e, true)
+	if consumed {return}
+	if key.found {
+		repeated := e.repeat && key_suppressed(w, e.key)
+		if key.action != .Copy || ui.find_has_keyboard(&w.find) || repeated ||
+		   copy_selection_available(app, w) {
 			key_suppress(w, e)
-			find_close(app, w, entry)
+			if !repeated || key.action != .Copy {run_action(app, w, key.action)}
 			return
-		}
-		switch leader_key(app, w, e) {
-		case .Consumed:
-			return
-		case .Literal:
-			literal = true
-		case .None:
-			if action, found := shortcut_action(app, e); found {
-				repeated := e.repeat && key_suppressed(w, e.key)
-				// A fullscreen program owns its selection; only a native selection claims its copy key.
-				if action != .Copy || ui.find_has_keyboard(&w.find) || repeated ||
-				   copy_selection_available(app, w) {
-					key_suppress(w, e)
-					if !repeated || action != .Copy {run_action(app, w, action)}
-					return
-				}
-			}
 		}
 	}
 	if ui.find_has_keyboard(&w.find) {
-		find_bar_key(app, w, e, logical)
+		find_bar_key(app, w, e, key.logical)
 		return
 	}
 	if e.pressed {
+		// Enter restarts a stopped session: the pane's own key, not a binding.
 		if entry.status != .Running {
 			if e.key == .Enter || e.key == .Numpad_Enter {
 				key_suppress(w, e)
@@ -334,7 +368,7 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 	term.send_key(entry.session, e)
 	// The leader's own release stays suppressed, so the shell receives the whole keystroke now.
-	if literal {
+	if key.literal {
 		up := e
 		up.pressed, up.repeat, up.text = false, false, ""
 		term.send_key(entry.session, up)
@@ -342,119 +376,13 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 }
 
 @(private)
-on_text :: proc(app: ^App, w: ^Window, text: string) {
-	if w.phase == .Preparing {return}
-	switch overlay_kind(app, w) {
-	case .Workspace_Picker:
-		workspace_picker_text(app, w, text)
-		return
-	case .Tab_Menu, .Divider_Menu, .Profile_Menu, .Confirmation:
-		return
-	case .Document_Menu:
-		document_menu_text_input(app, w, text)
-		return
-	case .Rename, .Chip_Name:
-		ui.field_text(&w.rename, text)
-		w.dirty = true
-		return
-	case .Palette:
-		on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, text), 0)
-		return
-	case .None:
-	}
-	if settings_active(w) {
-		ui.editor_text(&w.editor, text)
-		w.dirty = true
-		return
-	}
-	if ui.find_has_keyboard(&w.find) {
-		on_find_outcome(app, w, find_target(app, w), ui.find_text(&w.find, text))
-		return
-	}
-	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
-		term.send_text(entry.session, text)
-		cursor_blink_reset(w)
-	}
-}
-
-@(private)
-on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: commands.Command_Id) {
-	// The outcome that names a choice is the only one that may act on it.
-	chosen := ui.palette_chosen_take(&app.palette)
-	switch outcome {
-	case .None:
-	case .Changed, .Closed:
-		w.dirty = true
-	case .Run:
-		w.dirty = true
-		run_action(app, w, Action(id))
-	case .Open_Setting:
-		w.dirty = true
-		if setting, ok := chosen.(ui.Chosen_Setting); ok {
-			settings_reveal(
-				app,
-				pane_link_acting_window(app, w),
-				{key = setting.key, search = .Clear, focus = .Control},
-			)
-		}
-	case .Set_Setting:
-		w.dirty = true
-		if value, ok := chosen.(ui.Chosen_Value); ok {
-			saved := settings_save_value(app, value.key, value.value, "Could not save the setting.")
-			ui.palette_binding_saved(&app.palette, saved)
-		}
-	case .Open_Tab:
-		w.dirty = true
-		if tab, ok := chosen.(ui.Chosen_Tab); ok {
-			palette_activate_tab(app, pane_link_acting_window(app, w), tab.id)
-		}
-	case .Open_Workspace:
-		w.dirty = true
-		if workspace, ok := chosen.(ui.Chosen_Workspace); ok {
-			palette_activate_workspace(app, pane_link_acting_window(app, w), u32(workspace.id))
-		}
-	}
-}
-
-@(private)
-pane_at :: proc(app: ^App, w: ^Window, x, y: i32) -> ^Session_Entry {
-	pane, found := layout.hit_test(w.panes[:], f32(x), f32(y))
-	if selection_active(w) {return selection_entry(app, w)}
-	if !found {return nil}
-	return workspace_session_for_content(app, pane.content)
-}
-
-@(private)
-reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool {
-	return .Shift not_in modifiers && term.mouse_tracking(entry.session)
-}
-
-@(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 	if w.phase == .Preparing {return}
 	if drag_wheel(app, w, e.delta_y) {return}
 	kind := overlay_kind(app, w)
-	switch kind {
-	case .Workspace_Picker:
-		workspace_picker_wheel(w, e.delta_y)
+	if kind in OVERLAY_FIRST {
+		overlay_input(app, w, kind, Overlay_Wheel{delta = e.delta_y})
 		return
-	case .Rename, .Chip_Name:
-		return
-	case .Tab_Menu:
-		tab_menu_wheel(w, int(math.sign(e.delta_y)))
-		return
-	case .Divider_Menu:
-		dock_divider_menu_wheel(w, int(math.sign(e.delta_y)))
-		return
-	case .Profile_Menu:
-		profile_menu_wheel(w, int(math.sign(e.delta_y)))
-		return
-	case .Document_Menu:
-		document_menu_wheel(app, w, int(math.sign(e.delta_y)))
-		return
-	// A confirmation and the palette take whole wheel rows below, after the inbox, the Activity panel and
-	// the rail.
-	case .Confirmation, .Palette, .None:
 	}
 	if status_inbox_shown(w) {
 		status_inbox_wheel(app, w, e.delta_y)
@@ -480,9 +408,8 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 		return
 	}
 	w.wheel_remainder -= f32(rows)
-	if kind == .Confirmation {return}
-	if kind == .Palette {
-		on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(rows)))), 0)
+	if kind != .None {
+		overlay_input(app, w, kind, Overlay_Wheel{e.delta_y, rows})
 		return
 	}
 	if pane, found := settings_pane_under_pointer(w, f32(e.x), f32(e.y)); found {
@@ -520,6 +447,12 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	}
 	if entry := focus_session(app, w); entry != nil {term.send_focus(entry.session, focused)}
 	if focused {status_focus_enter(app, w)}
+}
+
+// What the keyboard holds between events: the leader chord and the keys whose release is suppressed.
+Key_State :: struct {
+	leader:     Leader,
+	suppressed: Suppressed_Keys,
 }
 
 // Leader chord mode: nil is Idle; Armed waits until `until` for the key that completes the chord.
@@ -616,16 +549,4 @@ key_release_suppressed :: proc(w: ^Window, e: input.Key_Event) -> bool {
 	held := w.suppressed[e.key]
 	if !e.repeat {w.suppressed[e.key] = false}
 	return held && !e.pressed
-}
-
-@(private)
-pointer_set :: proc(app: ^App, w: ^Window, shape: platform.Cursor_Shape) {
-	if shape == w.pointer_shape {return}
-	when AIO_CONTROL {app.verify.pointer_updates += 1}
-	// A window without a native window yet, or any longer, has no pointer to change.
-	#partial switch platform.window_set_cursor(&app.platform, w.id, shape) {
-	case .None: w.pointer_shape = shape
-	case .Invalid_Window:
-	case: log.error("setting the pointer cursor failed")
-	}
 }

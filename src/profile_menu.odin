@@ -7,6 +7,7 @@ import "aio:render"
 import "aio:settings"
 import "aio:ui"
 import "core:log"
+import "aio:platform"
 
 // What choosing a profile does.
 Profile_Menu_Mode :: union #no_nil {
@@ -176,16 +177,10 @@ profile_menu_open_new_tab :: proc(app: ^App, w: ^Window, x, y: f32) {
 	profile_menu_open(app, w, Profile_Menu_New_Tab{}, x, y)
 }
 
-// `pane` is a node of w's current tree.
-profile_menu_open_pane :: proc(
-	app: ^App,
-	w: ^Window,
-	pane: layout.Node_Id,
-	x, y: f32,
-) {
-	node, is_pane := window_tree(w).nodes[pane].(layout.Pane)
-	if !is_pane {return}
-	profile_menu_open(app, w, Profile_Menu_Swap_Pane{node.content}, x, y)
+// Opens the shell menu for a shown pane, below the start of its header.
+profile_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
+	x, y := pane.rect.x + 8 * w.scale, pane.rect.y + ui.HEADER_HEIGHT * w.scale
+	profile_menu_open(app, w, Profile_Menu_Swap_Pane{pane.content}, x, y)
 }
 
 profile_menu_choose :: proc(app: ^App, w: ^Window) {
@@ -248,11 +243,11 @@ profile_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 	)
 }
 
-profile_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
-	if !profile_menu_shown(w) {return false}
+profile_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !profile_menu_shown(w) {return}
 	if !e.pressed {
 		w.dirty = true
-		return true
+		return
 	}
 	gesture_swallow(w, e.button, .Profile_Menu)
 	if hit := profile_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
@@ -264,7 +259,6 @@ profile_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	} else if hit < 0 {
 		overlay_close(app, w)
 	}
-	return true
 }
 
 profile_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
@@ -278,4 +272,25 @@ profile_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		w.scale,
 		w.pointer,
 	)
+}
+
+// Profile menu pointer surface
+
+@(private)
+profile_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return profile_menu_shown(w)}
+
+@(private)
+profile_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Profile_Menu {return}
+	x, y := f32(e.x), f32(e.y)
+	shape := platform.Cursor_Shape.Arrow
+	if hit := profile_menu_hit(w, x, y); hit >= 0 {
+		if hit != ui.menu_selected(&w.profile_menu.menu) {
+			ui.menu_select(&w.profile_menu.menu, hit)
+			w.dirty = true
+		}
+		item := w.profile_menu.menu.items[hit]
+		if item.enabled && !item.separator {shape = .Hand}
+	}
+	pointer_set(app, w, shape)
 }

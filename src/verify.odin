@@ -1391,7 +1391,7 @@ when AIO_CONTROL {
 					window = w.id,
 					x = pos.x,
 					y = pos.y,
-					delta_y = f32(m.lines) / WHEEL_LINES,
+					delta_y = wheel_delta_for_lines(m.lines),
 					modifiers = m.modifiers,
 					time_ns = now,
 				},
