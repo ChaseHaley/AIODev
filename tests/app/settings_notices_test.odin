@@ -22,7 +22,7 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 	defer settings.diagnostics_destroy(&issues)
 	testing.expect_value(t, settings.diagnostic_append(&issues, 92, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:92; defaults]",
-		.Shortcut_Warning, "input.leader vs Select All (edit.select_all); input.leader wins"), nil)
+		.Shortcut_Warning), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
 	if !testing.expect_value(t, len(state.notices.items), 1) { return }
 	first := state.notices.items[0]
@@ -31,14 +31,14 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 	testing.expect(t, !strings.contains(first.text, "settings.ini:") && !strings.contains(first.text, "Line 92"))
 	testing.expect_value(t, settings.diagnostic_append(&issues, 93, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:93; defaults]",
-		.Shortcut_Warning, "input.leader vs Select All (edit.select_all); input.leader wins"), nil)
+		.Shortcut_Warning), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
 	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), ui.notice_expiry(first))
 	testing.expect(t, ui.notices_expire(&state.notices,
 		time.tick_add(ui.notice_expiry(first).?, time.Second)))
 	testing.expect_value(t, settings.diagnostic_append(&issues, 93, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:93; defaults]",
-		.Shortcut_Warning, "input.leader vs Select All (edit.select_all); input.leader wins"), nil)
+		.Shortcut_Warning), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
 	testing.expect_value(t, len(state.notices.items), 0)
 	testing.expect_value(t, settings.diagnostic_append(&issues, 1, "font.size", "invalid number", .Invalid_Value), nil)
@@ -95,6 +95,7 @@ settings_load_keeps_source_order_conflict_and_text_field_chords_separate :: proc
 	state := app.App{settings_path = path, registry = commands.create()}
 	defer commands.destroy(&state.registry)
 	defer settings.destroy(&state.settings)
+	defer settings.inputs_destroy(&state.settings_inputs)
 	defer settings.diagnostics_destroy(&state.settings_diagnostics)
 	ui.notices_init(&state.notices)
 	defer ui.notices_destroy(&state.notices)
@@ -148,7 +149,7 @@ settings_bracket_leader_preserves_actions_and_winners_after_notice_expiry :: pro
 	sequence := [?]settings.Diagnostic{a[0], d[0], b[0], c[0]}
 	for diagnostic in sequence {
 		testing.expect_value(t, settings.diagnostic_append(&issues, diagnostic.line,
-			diagnostic.key, diagnostic.message, diagnostic.kind, diagnostic.identity), nil)
+			diagnostic.key, diagnostic.message, diagnostic.kind), nil)
 		show_diagnostics_quietly(&state, &issues, nil)
 		if diagnostic.message == d[0].message {
 			testing.expect_value(t, len(state.notices.items), 0)

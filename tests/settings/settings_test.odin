@@ -121,7 +121,11 @@ font.family = `
 	testing.expect_value(t, len(d), len(expected))
 	for actual, i in d {
 		if i >= len(expected) { break }
-		testing.expect_value(t, actual, expected[i])
+		// Parse problems keep their line apart from the message, which is their identity.
+		testing.expect_value(t, actual.identity, actual.message)
+		located := actual
+		located.identity = ""
+		testing.expect_value(t, located, expected[i])
 	}
 	testing.expect_value(t, s.window.rows, 32)
 	testing.expect_value(t, s.font.size, 12)
