@@ -840,13 +840,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		focus := window_tree(w).focus
 		for pane in w.panes {
 			if pane.node != focus || !pane_owns_session(pane.content.kind) {continue}
-			profile_menu_open_pane(
-				app,
-				w,
-				pane.node,
-				pane.rect.x + 8 * w.scale,
-				pane.rect.y + ui.HEADER_HEIGHT * w.scale,
-			)
+			profile_menu_open_pane(app, w, pane)
 			break
 		}
 	case .Duplicate_Tab:

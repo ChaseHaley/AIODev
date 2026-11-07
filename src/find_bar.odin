@@ -201,3 +201,65 @@ when AIO_CONTROL {
 		}
 	}
 }
+
+// Find bar pointer surface
+
+@(private)
+find_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	if !ui.find_is_open(&w.find) {return false}
+	l, _ := find_controls(w, find_target(app, w))
+	return ui.find_contains(l, x, y)
+}
+
+@(private)
+find_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Find || !ui.find_is_open(&w.find) {
+		if w.find.hover != .None {w.find.hover, w.dirty = .None, true}
+		if owner == .Find {pointer_set(app, w, .Arrow)}
+		return
+	}
+	x, y := f32(e.x), f32(e.y)
+	l, available := find_controls(w, find_target(app, w))
+	if ui.find_hover(&w.find, l, available, x, y) {w.dirty = true}
+	pointer_set(app, w, ui.find_pointer(l, available, x, y))
+}
+
+@(private)
+find_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
+	#partial switch w.find.hover {
+	case .Case_Toggle: return "Match case"
+	case .Regex_Toggle: return "Use regular expression"
+	case .Up: return "Previous match"
+	case .Down: return "Next match"
+	case .Close: return "Close find"
+	case:
+	}
+	return ""
+}
+
+@(private)
+find_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.armed_cancel(&w.find.armed)
+	w.find.hover = .None
+}
+
+@(private)
+find_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	target := find_target(app, w)
+	l, enabled := find_controls(w, target)
+	on_find_outcome(app, w, target, ui.find_mouse(&w.find, l, enabled, e.button, true, f32(e.x), f32(e.y)))
+}
+
+@(private)
+find_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	if e.button != .Left || !ui.find_is_open(&w.find) || !ui.armed_down(w.find.armed) {return false}
+	target := find_target(app, w)
+	l, enabled := find_controls(w, target)
+	on_find_outcome(app, w, target, ui.find_mouse(&w.find, l, enabled, e.button, false, f32(e.x), f32(e.y)))
+	return true
+}
+
+@(private)
+find_leave :: proc(_: ^App, w: ^Window) {
+	w.find.hover = .None
+}

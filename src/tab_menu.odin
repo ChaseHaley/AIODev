@@ -169,6 +169,27 @@ tab_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 }
 
+// The keyboard's context-menu key, or Shift+F10, opens the selected tab's menu at that tab: below it
+// on the strip, or below the start of its row on the rail. A linked window shows no tabs. These are
+// the native context-menu conventions, so they are not user bindings.
+tab_menu_key_open :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
+	if !e.pressed || window_linked(w) {return false}
+	if e.key != .Context_Menu && !(e.key == .F10 && .Shift in e.modifiers) {return false}
+	selected := w.workspace.selected
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		tab_menu_open(app, w, selected, bar.x + tab_position(w, selected) * bar.tab_width, bar.height)
+	} else {
+		row := rail_row_rect_for_tab(w, selected)
+		if row.height <= 0 {
+			row = {16, ui.TITLE_BAR_HEIGHT * w.scale, 1, 1}
+		}
+		tab_menu_open(app, w, selected, row.x + 16 * w.scale, row.y + row.height)
+	}
+	key_suppress(w, e)
+	return true
+}
+
 tab_menu_wheel :: proc(w: ^Window, rows: int) {
 	tab_menu_sync(w)
 	ui.menu_wheel(&w.tab_menu.menu, rows)
@@ -205,4 +226,34 @@ when AIO_CONTROL {
 			state_rect(r, state_key("tab_menu.row.%d.rect", i + 1), rect)
 		}
 	}
+}
+
+// Tab menu pointer surface
+
+@(private)
+tab_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return tab_menu_shown(w)}
+
+@(private)
+tab_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Tab_Menu {return}
+	x, y := f32(e.x), f32(e.y)
+	hit := tab_menu_hit(w, x, y)
+	enabled := tab_menu_enabled(w, hit)
+	if enabled && hit != ui.menu_selected(&w.tab_menu.menu) {
+		ui.menu_select(&w.tab_menu.menu, hit)
+		w.dirty = true
+	}
+	pointer_set(app, w, enabled ? .Hand : .Arrow)
+}
+
+@(private)
+tab_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {return}
+	gesture_swallow(w, e.button, .Tab_Menu)
+	if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
+		if tab_menu_enabled(w, hit) {
+			ui.menu_select(&w.tab_menu.menu, hit)
+			tab_menu_choose(app, w)
+		}
+	} else {overlay_close(app, w)}
 }

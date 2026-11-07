@@ -3,8 +3,6 @@ package main
 import "aio:layout"
 import "aio:platform"
 
-@(private)
-DOUBLE_CLICK_NS :: i64(500_000_000)
 
 // How the pointer grabs dividers and dock edges, in DIPs: the band either side of a bar, the reach of a
 // junction where bars meet, and how far apart meeting bars may lie.

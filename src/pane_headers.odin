@@ -325,8 +325,7 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	pane_focus(app, w, pane.node)
 	if _, badge := target.(ui.Header_Badge); badge {
 		if workspace_session_for_content(app, pane.content) == nil {return}
-		x, y := pane.rect.x + 8 * w.scale, pane.rect.y + ui.HEADER_HEIGHT * w.scale
-		profile_menu_open_pane(app, w, pane.node, x, y)
+		profile_menu_open_pane(app, w, pane)
 		return
 	}
 	if target == Pane_Header_Button.Documents {

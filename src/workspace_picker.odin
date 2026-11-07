@@ -5,6 +5,7 @@ import "aio:platform"
 import "aio:render"
 import "core:math"
 import "aio:ui"
+import "core:time"
 
 // Which part of the picker is open; nil is closed. workspace_picker_transition and workspace_picker_list_set
 // are its only writers, so a move target, a drag hold or a row press ends with the list it belongs to.
@@ -486,4 +487,42 @@ when AIO_CONTROL {
 		state_value(r, "workspace.picker.rename_error", workspace_picker_rename_error(p))
 		state_value(r, "workspace.picker.icon_target", workspace_picker_icon_id(p))
 	}
+}
+
+// Workspace picker pointer surface
+
+@(private)
+workspace_picker_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return workspace_picker_active(&w.workspace_picker)
+}
+
+@(private)
+workspace_picker_pointer_hover :: proc(
+	app: ^App,
+	w: ^Window,
+	owner: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) {
+	if owner == .Workspace_Picker {workspace_picker_hover(app, w, e)}
+}
+
+@(private)
+workspace_picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	_, icons := w.workspace_picker.state.(Workspace_Picker_Icons)
+	if icons && render.rect_contains(workspace_icon_color_button(w), x, y) {
+		return "Change icon color"
+	}
+	return ""
+}
+
+@(private)
+workspace_picker_pointer_cancel :: proc(app: ^App, w: ^Window) {
+	ui.field_release(&w.workspace_picker.query)
+	workspace_order_end(w)
+	_ = workspace_order_animate(w, app.animations, time.tick_now())
+}
+
+@(private)
+workspace_picker_leave :: proc(_: ^App, w: ^Window) {
+	w.workspace_picker.menu_hover = 0
 }

@@ -261,3 +261,28 @@ when AIO_CONTROL {
 		state_text(r, "swap.profile", swap != nil ? swap.profile_id : "")
 	}
 }
+
+// Confirmation pointer surface
+
+@(private)
+confirmation_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return confirmation_current(w) != nil}
+
+@(private)
+confirmation_pointer_hover :: proc(
+	app: ^App,
+	w: ^Window,
+	owner: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) {
+	if owner == .Confirmation {_ = confirmation_hover(app, w, f32(e.x), f32(e.y))}
+}
+
+@(private)
+confirmation_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	_ = confirmation_button(app, w, e)
+}
+
+@(private)
+confirmation_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	confirmation_release(w)
+}

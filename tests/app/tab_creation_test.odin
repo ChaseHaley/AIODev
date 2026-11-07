@@ -133,7 +133,9 @@ profile.order = default, cmd
 	second := app.focused_session(s, w).id
 	app.tab_select(s, w, 0)
 	node := app.window_tree(w).focus
-	app.profile_menu_open_pane(s, w, node, 20, 20)
+	for pane in w.panes {
+		if pane.node == node {app.profile_menu_open_pane(s, w, pane)}
+	}
 	cmd := -1
 	for i in 0 ..< len(w.profile_menu.items) {
 		entry, _ := app.profile_menu_entry(&w.profile_menu, i)
