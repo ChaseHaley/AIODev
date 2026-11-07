@@ -1,7 +1,38 @@
 package main
 
+import "aio:platform"
 import "aio:term"
+import "aio:ui"
 import "core:time"
+
+copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
+	text, selected := term.selection_text(entry.session, context.temp_allocator)
+	if !selected {
+		return
+	}
+	if !platform.clipboard_set_text(&app.platform, text) {
+		notify(app, .Error, "Could not copy to the clipboard.")
+	} else {
+		ui.notices_put(
+			&app.notices,
+			u32(Notice_Key.Copy),
+			.Success,
+			"Copied to clipboard",
+			COPY_NOTICE_DURATION,
+		)
+		mark_all_dirty(app)
+		if explicit {term.clear_selection(entry.session)}
+	}
+}
+
+// Whether w's focused terminal has a native selection for Copy. Only then does the palette offer Copy
+// and verification run it; the terminal's copy key also needs it, since a fullscreen program owns any
+// other selection.
+@(require_results)
+copy_selection_available :: proc(app: ^App, w: ^Window) -> bool {
+	entry := focused_session(app, w)
+	return entry != nil && term.has_selection(entry.session)
+}
 
 // A Left drag selecting terminal text; nil is Idle. Selecting holds the session pressed; past the top or
 // bottom edge it is Autoscrolling, and history scrolls a row each time `deadline` passes. The direction

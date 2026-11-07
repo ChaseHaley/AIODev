@@ -195,6 +195,8 @@ Palette :: struct {
 	buffers:      Edit_Buffers,
 	drag:         Palette_Drag,
 	leader:       Maybe(commands.Shortcut),
+	// A command the window that opened the palette cannot run now, which the palette leaves out.
+	unavailable:  Maybe(commands.Command_Id),
 	reset_hover:  int,
 	scroll_hover: bool,
 }
@@ -401,30 +403,11 @@ palette_cycle_mode :: proc(p: ^Palette, registry: ^commands.Registry, reverse: b
 	palette_set_mode(p, registry, palette_next_mode(p.mode, reverse))
 }
 
-// The category a command name belongs to, such as Panes for pane.split_right.
-command_category :: proc(name: string) -> string {
-	dot := strings.index_byte(name, '.')
-	switch dot < 0 ? name : name[:dot] {
-	case "app":
-		return "Application"
-	case "terminal":
-		return "Terminal"
-	case "pane":
-		return "Panes"
-	case "tab":
-		return "Tabs"
-	case "workspace":
-		return "Workspaces"
-	case "window":
-		return "Windows"
-	case "settings":
-		return "Settings"
-	case "edit":
-		return "Edit"
-	case "view":
-		return "View"
-	}
-	return "Commands"
+// Whether the palette lists a command: hidden ones serve scripts, and the unavailable one cannot run.
+@(private)
+palette_lists :: proc(p: ^Palette, command: ^commands.Command) -> bool {
+	unavailable, some := p.unavailable.?
+	return !command.hidden && !(some && unavailable == command.id)
 }
 
 @(private)
@@ -706,7 +689,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	workspaces := (p.mode == .All || p.mode == .Workspaces) ? count_of(p.workspaces) : 0
 	enabled_commands := 0
 	if p.mode == .All || p.mode == .Commands {
-		for command in registry.items {if !command.disabled && !command.hidden {enabled_commands += 1}}
+		for &command in registry.items {if palette_lists(p, &command) {enabled_commands += 1}}
 	}
 	setting_count := (p.mode == .All || p.mode == .Settings) ? len(p.settings) : 0
 	candidates := tabs + workspaces + setting_count + enabled_commands
@@ -777,7 +760,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	if p.mode == .All || p.mode == .Commands {
 		start := len(p.ordered)
 		for &command in registry.items {
-			if command.disabled || command.hidden {continue}
+			if !palette_lists(p, &command) {continue}
 			if empty {
 				append(&p.ordered, Palette_Result{kind = .Command, command = &command, setting = -1,
 					rank = PALETTE_NO_RANK})
@@ -792,7 +775,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					command.title,
 					query,
 					width,
-					[]string{command_category(command.name)},
+					[]string{commands.category(command.name).title},
 					true,
 				)
 			}

@@ -5,7 +5,6 @@ import "aio:font"
 import "aio:input"
 import "aio:layout"
 import "aio:settings"
-import "aio:term"
 import "aio:ui"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
@@ -82,14 +81,8 @@ palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 		palette_release(app, previous)
 	}
 	window_overlays_cancel(app, w)
-	entry := focused_session(app, w)
-	has_selection := entry != nil && term.has_selection(entry.session)
-	registered := commands.set_enabled(
-		&app.registry,
-		commands.Command_Id(Action.Copy),
-		has_selection,
-	)
-	assert(registered)
+	app.palette.unavailable = nil
+	if !copy_selection_available(app, w) {app.palette.unavailable = commands.Command_Id(Action.Copy)}
 	app.palette_owner = w.id
 	app.palette.leader = app.leader
 	ui.palette_open_mode(&app.palette, &app.registry, mode)

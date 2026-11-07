@@ -1,6 +1,7 @@
 package main
 
 import "aio:input"
+import "aio:commands"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
@@ -426,7 +427,11 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
 	ui.draw_rect(&w.list, {rect = {surface.x, footer_y, surface.width, s}, color = app.theme.border})
-	hint := "Ctrl+Shift+J next that needs you · Enter go to pane · Delete dismiss"
+	hint := "Enter go to pane · Delete dismiss"
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	if next := action_shortcut_text(app, .Status_Next, buffer[:]); next != "" {
+		hint = fmt.tprintf("%s next that needs you · %s", next, hint)
+	}
 	return ui.draw_fading_text(
 		&small,
 		&w.list,

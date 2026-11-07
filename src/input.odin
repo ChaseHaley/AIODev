@@ -298,9 +298,9 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 				repeated := e.repeat && key_suppressed(w, e.key)
 				// A fullscreen program owns its selection; only a native selection claims its copy key.
 				if action != .Copy || ui.find_has_keyboard(&w.find) || repeated ||
-				   term.has_selection(entry.session) {
+				   copy_selection_available(app, w) {
 					key_suppress(w, e)
-					if !repeated || action != .Copy {command_run(app, w, action, .Key)}
+					if !repeated || action != .Copy {run_action(app, w, action)}
 					return
 				}
 			}
@@ -381,7 +381,7 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		w.dirty = true
 	case .Run:
 		w.dirty = true
-		command_run(app, w, Action(id), .Palette)
+		run_action(app, w, Action(id))
 	case .Open_Setting:
 		w.dirty = true
 		if setting, ok := chosen.(ui.Chosen_Setting); ok {
@@ -576,7 +576,7 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 		if e.key == .Escape {return .Consumed}
 		chord := e
 		chord.modifiers += {.Leader}
-		if action, found := shortcut_action(app, chord); found {command_run(app, w, action, .Key)}
+		if action, found := shortcut_action(app, chord); found {run_action(app, w, action)}
 		return .Consumed
 	}
 	if is_leader {

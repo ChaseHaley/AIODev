@@ -163,6 +163,12 @@ tab_select :: proc(app: ^App, w: ^Window, index: int, preserve_selection := fals
 	focus_enter(app, w)
 }
 
+// Shows a tab a person chose, as tab_select, and puts away the rail overlay that may have shown it.
+tab_show :: proc(app: ^App, w: ^Window, index: int) {
+	tab_select(app, w, index)
+	rail_overlay_dismiss(app, w)
+}
+
 tab_select_one :: proc(workspace: ^Workspace, index: int) {
 	for tab, i in workspace.tabs {tab.marked = i == index}
 	workspace.selection_anchor = workspace.tabs[index].id
@@ -193,8 +199,7 @@ tab_new :: proc(app: ^App, w: ^Window) {
 		notify(app, .Error, "Could not create a tab.")
 		return
 	}
-	tab_select(app, w, len(w.workspace.tabs) - 1)
-	rail_overlay_dismiss(app, w)
+	tab_show(app, w, len(w.workspace.tabs) - 1)
 }
 
 // Opens the Nth visible profile from profile.order, matching the profile.open_N shortcuts.
@@ -211,8 +216,7 @@ tab_new_profile :: proc(app: ^App, w: ^Window, index: int) {
 		notify(app, .Error, "Could not create a tab.")
 		return
 	}
-	tab_select(app, w, len(w.workspace.tabs) - 1)
-	rail_overlay_dismiss(app, w)
+	tab_show(app, w, len(w.workspace.tabs) - 1)
 }
 
 // One-per-workspace content must never show in two panes at once. Other content is keyed by its own
@@ -615,8 +619,7 @@ tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	copy_tab := w.workspace.tabs[len(w.workspace.tabs) - 1]
 	documents_copy(&copy_tab.documents, w.workspace.tabs[index].documents[:])
 	documents_copy(&app.sessions[len(app.sessions) - 1].documents, pinned)
-	tab_select(app, w, len(w.workspace.tabs) - 1)
-	rail_overlay_dismiss(app, w)
+	tab_show(app, w, len(w.workspace.tabs) - 1)
 }
 
 tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {

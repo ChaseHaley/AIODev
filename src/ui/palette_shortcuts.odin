@@ -91,7 +91,8 @@ palette_binding_key :: proc(p: ^Palette, binding: ^Shortcut_Edit, e: input.Key_E
 palette_binding_reset :: proc(p: ^Palette, index: int) -> Outcome {
 	if index < 0 || index >= len(p.results) || p.results[index].command == nil {return .None}
 	p.selected = index
-	if !palette_binding_modified(p.results[index].command) {return .Changed}
+	command := p.results[index].command
+	if commands.shortcut_set_equal(command.shortcuts, command.defaults) {return .Changed}
 	if palette_binding_open(p, index) == .None {return .None}
 	return palette_binding_outcome(p, &p.edit.(Shortcut_Edit), .Reset)
 }
@@ -124,24 +125,12 @@ palette_binding_press :: proc(
 	return .Changed
 }
 
-@(private)
-palette_binding_modified :: proc(command: ^commands.Command) -> bool {
-	modified := command.shortcuts.count != command.defaults.count
-	if !modified {
-		for shortcut, i in command.shortcuts.items[:command.shortcuts.count] {
-			default := command.defaults.items[i]
-			modified ||= shortcut.key != default.key || shortcut.modifiers != default.modifiers
-		}
-	}
-	return modified
-}
-
 palette_binding_draw :: proc(
 	p: ^Palette, command: ^commands.Command, index: int, row: render.Rect,
 	list: ^render.Draw_List, text: ^Text, theme: Theme, l: Palette_Layout, pointer: [2]f32,
 ) -> render.Build_Status {
 	parts := palette_binding_parts(row, l.scale)
-	modified := palette_binding_modified(command)
+	modified := !commands.shortcut_set_equal(command.shortcuts, command.defaults)
 	reset_hovered := render.rect_contains(parts.reset, pointer.x, pointer.y)
 	_ = reset_button_draw(list, theme, parts.reset, modified, reset_hovered,
 	                      index == p.selected, pointer, l.scale)
