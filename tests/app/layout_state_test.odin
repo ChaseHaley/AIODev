@@ -207,13 +207,14 @@ layout_state_restores_workspaces_tabs_and_directories :: proc(t: ^testing.T) {
 	app.pane_split(&first.state, w, .Right, 0.4)
 	first_root := w.workspace.tabs[0].tree.root
 	saved_ratio := w.workspace.tabs[0].tree.nodes[first_root].(layout.Split).ratio
-	if !testing.expect(t, app.tab_create(&first.state, w.workspace, directory = pane_directory)) {
+	server, created := app.tab_create(&first.state, w.workspace, directory = pane_directory)
+	if !testing.expect(t, created) {
 		app.app_destroy(&first.state)
 		return
 	}
 	app.tab_select(&first.state, w, 1)
 	w.workspace.tabs[1].name = strings.clone("Build")
-	first.state.sessions[len(first.state.sessions) - 1].name = strings.clone("server")
+	app.session_find(&first.state, server).name = strings.clone("server")
 	delete(w.workspace.name)
 	w.workspace.name = strings.clone("Project")
 	w.workspace.icon.tint = 4

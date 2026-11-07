@@ -72,14 +72,14 @@ float_fixture :: proc(
 	app.pane_split(s, w, .Right)
 	app.floating_toggle(s, w)
 	if !testing.expect_value(t, len(app.floating_rects(w)), 1) {return}
-	frame, ok = layout.float_rect(w.tree, w.tree.focus, app.floating_area(w))
+	frame, ok = layout.float_rect(app.window_tree(w), app.window_tree(w).focus, app.floating_area(w))
 	ok = testing.expect(t, ok)
 	return
 }
 
 @(private = "file")
 float_frame :: proc(w: ^app.Window) -> layout.Rect {
-	frame, _ := layout.float_rect(w.tree, app.floating_rects(w)[0].node, app.floating_area(w))
+	frame, _ := layout.float_rect(app.window_tree(w), app.floating_rects(w)[0].node, app.floating_area(w))
 	return frame
 }
 

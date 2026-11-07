@@ -39,12 +39,10 @@ pane_workspace_drag_release :: proc(
 		pane_drag_restore(app, source, carry)
 		return
 	case Workspace_Drop_Row:
-		drag_let_go(app, source, a)
-		workspace_move_choose(app, pane_link_acting_window(app, source), row.request, row.id)
-		if window_linked(source) {
-			pane, is_pane := carry.source.tree.nodes[carry.node].(layout.Pane)
-			if is_pane {pane_link_refresh_source(app, source, pane.content)}
-		}
+		pane_workspace_drop_move(app, source, a, carry, row.request, Workspace_Move_Existing{row.id})
+		return
+	case Workspace_Drop_New_Workspace:
+		pane_workspace_drop_move(app, source, a, carry, row.request, Workspace_Move_New{})
 		return
 	case Workspace_Drop_New_Window:
 	}
@@ -55,4 +53,21 @@ pane_workspace_drag_release :: proc(
 	drag_let_go(app, source, a)
 	pane_drag_restore(app, source, carry)
 	notify(app, .Error, "Could not move the pane to a new window. The source was preserved.")
+}
+
+@(private = "file")
+pane_workspace_drop_move :: proc(
+	app: ^App,
+	source: ^Window,
+	a: ^Drag_Active,
+	carry: ^Pane_Carry,
+	request: Workspace_Move_Request,
+	destination: Workspace_Move_Destination,
+) {
+	drag_let_go(app, source, a)
+	workspace_move_choose(app, pane_link_acting_window(app, source), request, destination)
+	if window_linked(source) {
+		pane, is_pane := carry.source.tree.nodes[carry.node].(layout.Pane)
+		if is_pane {pane_link_refresh_source(app, source, pane.content)}
+	}
 }

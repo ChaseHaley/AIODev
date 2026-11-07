@@ -20,7 +20,7 @@ tray_only_ignores_a_tear_off_preview :: proc(t: ^testing.T) {
 	s := &f.state
 	host := s.windows[0]
 	source := s.workspaces[0].tabs[0]
-	if !testing.expect(t, app.tab_create(s, s.workspaces[0])) {return}
+	if _, created := app.tab_create(s, s.workspaces[0]); !testing.expect(t, created) {return}
 	preview := app.pane_window_preview_create(s, source, source.tree.root)
 	if !testing.expect(t, preview != nil) {return}
 	testing.expect(t, app.window_primary(s) == host)
@@ -46,7 +46,7 @@ linked_window_activation_waits_until_it_is_shown :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, len(s.windows), 2) {return}
 	w := s.windows[1]
 	testing.expect(t, activation_pending(w))
-	if !testing.expect(t, app.tab_create(s, host.workspace)) {return}
+	if _, created := app.tab_create(s, host.workspace); !testing.expect(t, created) {return}
 	app.tab_select(s, host, 1)
 	app.pane_links_sync(s)
 	testing.expect(t, w.phase == .Hidden)

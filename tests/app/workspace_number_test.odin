@@ -34,8 +34,8 @@ workspace_phrases_are_unique_and_previews_remain_unnamed :: proc(t: ^testing.T) 
 	defer delete(name)
 	workspace := app.workspace_create_empty(&state)
 	if !testing.expect(t, workspace != nil) {return}
-	testing.expect_value(t, app.rename_target_commit(&state, nil,
-		{app.Rename_Kind.Workspace, workspace.id}, name), app.Rename_Outcome.Saved)
+	testing.expect_value(t, app.rename_target_commit(&state, app.Rename_Workspace_Target{workspace.id}, name,
+		.Workspace_Row), app.Rename_Outcome.Saved)
 	rng = rand.create(42)
 	other := app.workspace_default_name(&state)
 	defer delete(other)

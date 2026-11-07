@@ -48,7 +48,7 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 					if d.axis != .Vertical {continue}
 					x := side == .Left ? panel.x + panel.width : panel.x
 					y := d.rect.y + d.rect.height / 2
-					before := w.tree.nodes[d.node].(layout.Split).ratio
+					before := app.window_tree(w).nodes[d.node].(layout.Split).ratio
 					pointer_expect_move(t, s, w, x, y, .Resize_All)
 					gesture_button(s, w, .Left, true, x, y)
 					testing.expect_value(t, divider_count(w), 2)
@@ -56,7 +56,7 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 					rail_resize_drag_to(s, w, x + dx, y + 30 * scale)
 					after := app.status_panel_rect(s, w)
 					testing.expect_value(t, after.width - panel.width, 40 * scale)
-					testing.expect(t, w.tree.nodes[d.node].(layout.Split).ratio > before)
+					testing.expect(t, app.window_tree(w).nodes[d.node].(layout.Split).ratio > before)
 					gesture_button(s, w, .Left, false, x + dx, y + 30 * scale)
 					testing.expect_value(t, divider_count(w), 0)
 					break

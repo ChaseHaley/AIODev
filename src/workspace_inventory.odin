@@ -194,13 +194,7 @@ workspace_session_pane_at :: proc(
 // Whether any pane in the workspace shows `content`.
 @(require_results)
 workspace_has_content :: proc(workspace: ^Workspace, content: layout.Content) -> bool {
-	if workspace == nil {return false}
-	for tab in workspace.tabs {
-		for node in tab.tree.nodes {
-			if pane, ok := node.(layout.Pane); ok && pane.content == content {return true}
-		}
-	}
-	return false
+	return workspace_content_search(workspace, content, nil)
 }
 
 // Whether `content` is shown outside `excluded`, which is how a pane move detects a duplicate
@@ -211,6 +205,12 @@ workspace_content_outside_tab :: proc(
 	content: layout.Content,
 	excluded: ^Tab,
 ) -> bool {
+	return workspace_content_search(workspace, content, excluded)
+}
+
+// Whether a pane in any tab but `excluded` shows `content`; a nil `excluded` searches every tab.
+@(private = "file", require_results)
+workspace_content_search :: proc(workspace: ^Workspace, content: layout.Content, excluded: ^Tab) -> bool {
 	if workspace == nil {return false}
 	for tab in workspace.tabs {
 		if tab == excluded {continue}

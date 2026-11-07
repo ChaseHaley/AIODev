@@ -45,6 +45,6 @@ pane_minimum_allows :: proc(
 
 pane_minimum_single :: proc(app: ^App, w: ^Window, notify_failure := true) -> bool {
 	area := window_content_area(app, w)
-	rects := [?]layout.Pane_Rect{{content = {.Terminal, 0}, rect = area}}
+	rects := [?]layout.Pane_Rect{{content = PANE_MEASUREMENT_CONTENT, rect = area}}
 	return pane_minimum_allows(app, w, rects[:], nil, notify_failure)
 }

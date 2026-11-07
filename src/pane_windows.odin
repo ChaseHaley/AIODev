@@ -99,8 +99,8 @@ window_preview_prepare :: proc(app: ^App, content: layout.Content, tab_name: str
 	if workspace == nil {return nil}
 	success := false
 	defer if !success {pane_preview_workspace_discard(app, workspace)}
-	tab, record_error := tab_record_reserve(workspace)
-	if record_error != .None {return nil}
+	tab, reserved := tab_record_reserve(workspace)
+	if !reserved {return nil}
 	if layout.init(&tab.tree, content) != nil {tab_record_free(tab); return nil}
 	if tab_name != "" {
 		name, name_error := strings.clone(tab_name)
@@ -113,6 +113,12 @@ window_preview_prepare :: proc(app: ^App, content: layout.Content, tab_name: str
 	workspace_pickers_refresh(app)
 	success = true
 	return preview
+}
+
+// A committed tear-off's workspace becomes an ordinary listed one, owning its suggested `name`.
+window_preview_publish :: proc(preview: ^Window, name: string) {
+	preview.workspace.provisional = false
+	preview.workspace.name = name
 }
 
 // A small live picture of what a drag would carry into a new window.
@@ -290,9 +296,8 @@ pane_to_window :: proc(
 	assert(removed)
 	// A pane that leaves its slot joins an ordinary window, where it must be shown.
 	layout.pane_adopt(&destination.tree, layout_pane)
-	preview.workspace.provisional = false
-	preview.workspace.name = name
-	workspace_pickers_refresh(app)
+	window_preview_publish(preview, name)
+	workspace_mutation_finish(app, preview.workspace, {.Names})
 	pane_move_finish(app, move, destination)
 	if was_linked {pane_link_refresh_source(app, source_window, pane.content)}
 	_ = window_activate(app, preview)

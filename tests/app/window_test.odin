@@ -46,7 +46,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 		testing.expect_value(t, err, nil)
 		return
 	}
-	if !testing.expect(t, app.tab_create(&state, second_workspace)) { return }
+	if _, created := app.tab_create(&state, second_workspace); !testing.expect(t, created) { return }
 	if !testing.expect(t, app.window_open(&state, second_workspace)) { return }
 	second := state.windows[1]
 	second_session := state.sessions[1].session
@@ -54,7 +54,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect(t, second_pid != 0 && second_pid != first_pid)
 	testing.expect(t, first.workspace == state.workspaces[0])
 	testing.expect(t, second.workspace == second_workspace)
-	testing.expect(t, first.tree != second.tree)
+	testing.expect(t, app.window_tree(first) != app.window_tree(second))
 	testing.expect_value(t, len(state.sessions), 2)
 	app.tick(&state)
 	when app.AIO_CONTROL {
@@ -115,7 +115,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect(t, !opened)
 	testing.expect_value(t, len(state.windows), 1)
 	if !testing.expect(t, app.window_open(&state, state.workspaces[0])) { return }
-	testing.expect(t, state.windows[1].tree == &state.workspaces[0].tabs[0].tree)
+	testing.expect(t, app.window_tree(state.windows[1]) == &state.workspaces[0].tabs[0].tree)
 	testing.expect_value(t, term.process_id(first_session), first_pid)
 	testing.expect_value(t, len(state.sessions), 2)
 

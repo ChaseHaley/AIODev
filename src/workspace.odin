@@ -1,11 +1,8 @@
 package main
 
 import "aio:layout"
-import "aio:localpath"
 import "aio:platform"
-import "aio:pty"
 import "aio:settings"
-import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:log"
@@ -84,6 +81,7 @@ selected_tab :: proc(workspace: ^Workspace) -> ^Tab {
 	return workspace.tabs[workspace.selected]
 }
 
+// Opens a tab holding one new terminal session and returns that session's id.
 @(require_results)
 tab_create :: proc(
 	app: ^App,
@@ -91,34 +89,24 @@ tab_create :: proc(
 	command: string = "",
 	directory: string = "",
 	profile_id: string = "",
-) -> bool {
-	tab, record_error := tab_record_reserve(workspace)
-	if record_error != .None {return false}
-	if !session_open(app, command, directory, profile_id) {
+) -> (
+	session: u32,
+	ok: bool,
+) {
+	tab, reserved := tab_record_reserve(workspace)
+	if !reserved {return 0, false}
+	id, opened := session_open(app, command, directory, profile_id)
+	if !opened {
 		tab_record_free(tab)
-		return false
+		return 0, false
 	}
-	id := app.next_session_id
 	if layout.init(&tab.tree, {.Terminal, id}) != nil {
 		session_close(app, id)
 		tab_record_free(tab)
-		return false
+		return 0, false
 	}
 	tab_record_commit(app, workspace, tab)
-	return true
-}
-
-session_close :: proc(app: ^App, id: u32) {
-	for &entry, i in app.sessions {
-		if entry.id == id {
-			status := term.status(entry.session)
-			app.closed_sessions[app.closed_next] = {id, status.kind, status.exit_code}
-			app.closed_next = (app.closed_next + 1) % len(app.closed_sessions)
-			session_entry_destroy(&entry)
-			ordered_remove(&app.sessions, i)
-			return
-		}
-	}
+	return id, true
 }
 
 workspace_destroy :: proc(workspace: ^Workspace) {
@@ -130,34 +118,18 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 	free(workspace)
 }
 
-pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
-	if w.tree.focus == node || int(node) >= len(w.tree.nodes) {return}
-	// Status, jumps and scripts name a pane wherever it is; a linked one takes focus in its own window.
-	pane, is_pane := w.tree.nodes[node].(layout.Pane)
-	if is_pane && layout.link_root(w.tree, node) != layout.INVALID_NODE {
-		if linked := pane_link_window_of(app, pane.content); linked != nil {
-			pane_focus(app, linked, layout.find_content(linked.tree, pane.content))
-			pane_link_activate(linked)
-		}
-		return
-	}
-	focus_leave(app, w)
-	// A floating pane rises above the others, and comes out of its capsule, as it takes focus.
-	floats_changed := layout.focus_set(w.tree, node)
-	if pane_view_solo(w) && !layout.is_floating(w.tree, node) {
-		window_relayout(app, w)
-	} else if floats_changed {
-		window_floats_layout(app, w)
-	}
-	focus_enter(app, w)
+// What showing a tab does to the marked tabs: a plain choice marks only it, while multiselection and moves
+// that already set the marks keep them.
+Tab_Selection_Mode :: enum {
+	Replace_Marks,
+	Preserve_Marks,
 }
 
-tab_select :: proc(app: ^App, w: ^Window, index: int, preserve_selection := false) {
+tab_select :: proc(app: ^App, w: ^Window, index: int, mode := Tab_Selection_Mode.Replace_Marks) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
-	if !preserve_selection {tab_select_one(w.workspace, index); mark_all_dirty(app)}
+	if mode == .Replace_Marks {tab_select_one(w.workspace, index); mark_all_dirty(app)}
 	focus_leave(app, w)
 	w.workspace.selected = index
-	w.tree = &selected_tab(w.workspace).tree
 	window_relayout(app, w)
 	rail_reveal_active(w)
 	focus_enter(app, w)
@@ -189,13 +161,13 @@ tab_pointer_select :: proc(app: ^App, w: ^Window, index: int, toggle, range: boo
 		for tab, i in tabs {tab.marked = marked[i]}
 	}
 	if !range {w.workspace.selection_anchor = tabs[index].id}
-	tab_select(app, w, index, true)
+	tab_select(app, w, index, .Preserve_Marks)
 	mark_all_dirty(app)
 }
 
 tab_new :: proc(app: ^App, w: ^Window) {
 	if !pane_minimum_single(app, w) {return}
-	if !tab_create(app, w.workspace) {
+	if _, created := tab_create(app, w.workspace); !created {
 		notify(app, .Error, "Could not create a tab.")
 		return
 	}
@@ -211,242 +183,21 @@ tab_new_profile :: proc(app: ^App, w: ^Window, index: int) {
 		notify(app, .Error, "That shell profile is not available.")
 		return
 	}
-	profile := &app.settings.profiles.items[indices[index]]
-	if !tab_create(app, w.workspace, profile_id = profile.id) {
+	tab_new_profile_id(app, w, app.settings.profiles.items[indices[index]].id)
+}
+
+// Opens a tab running the profile `profile_id` names, which must still have a shell to launch.
+tab_new_profile_id :: proc(app: ^App, w: ^Window, profile_id: string) {
+	if !pane_minimum_single(app, w) {return}
+	if _, requested := settings.profile_resolve(&app.settings, profile_id); !requested {
+		notify(app, .Error, "That shell profile is not available.")
+		return
+	}
+	if _, created := tab_create(app, w.workspace, profile_id = profile_id); !created {
 		notify(app, .Error, "Could not create a tab.")
 		return
 	}
 	tab_show(app, w, len(w.workspace.tabs) - 1)
-}
-
-// One-per-workspace content must never show in two panes at once. Other content is keyed by its own
-// id and cannot collide.
-@(require_results)
-pane_content_can_join :: proc(content: layout.Content, destination: ^Workspace, source: ^Tab) -> bool {
-	if !CONTENT_POLICY[content.kind].one_per_workspace {return true}
-	return !workspace_content_outside_tab(destination, content, source)
-}
-
-@(require_results)
-pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -> bool {
-	source_workspace := pane_source_workspace(app, source)
-	if source_workspace == nil || int(node) >= len(source.tree.nodes) {return false}
-	if node == source.tree.root && source_workspace == w.workspace {
-		for tab, index in w.workspace.tabs {
-			if tab != source {continue}
-			tab_move(app, w, index, len(w.workspace.tabs) - 1)
-			tab_select(app, w, len(w.workspace.tabs) - 1)
-			return true
-		}
-		return false
-	}
-	pane, valid := source.tree.nodes[node].(layout.Pane)
-	if !valid {return false}
-	destination_workspace := w.workspace
-	if !pane_content_can_join(pane.content, destination_workspace, source) {return false}
-	panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
-	if !pane_minimum_allows(app, w, panes[:], nil, notify_failure = true) {return false}
-	tab, record_error := tab_record_reserve(w.workspace)
-	if record_error != .None {
-		notify(app, .Error, "Could not create a tab. The pane was preserved.")
-		return false
-	}
-	move := pane_move_begin(app, w, source, source_workspace)
-	tree, separated := layout.separate_pane(&source.tree, node)
-	if !separated {
-		pane_move_enter(app, move)
-		tab_record_free(tab)
-		notify(app, .Error, "Could not move the pane. The layout was preserved.")
-		return false
-	}
-	tab.tree = tree
-	tab_record_commit(app, w.workspace, tab)
-	pane_move_finish(app, move, tab)
-	return true
-}
-
-@(require_results)
-pane_transfer :: proc(
-	app: ^App,
-	w: ^Window,
-	source, destination: ^Tab,
-	node, target: layout.Node_Id,
-	direction: layout.Direction,
-	root: bool,
-) -> bool {
-	source_workspace := pane_source_workspace(app, source)
-	destination_index := -1
-	for tab, index in w.workspace.tabs {if tab == destination {destination_index = index; break}}
-	if source_workspace == nil || destination_index < 0 || source == destination {return false}
-	if int(node) >= len(source.tree.nodes) || int(target) >= len(destination.tree.nodes) {return false}
-	pane, valid := source.tree.nodes[node].(layout.Pane)
-	if !valid || !pane_content_can_join(pane.content, w.workspace, source) {return false}
-	move := pane_move_begin(app, w, source, source_workspace)
-	_, moved := layout.transfer_pane(
-		&source.tree,
-		&destination.tree,
-		node,
-		target,
-		direction,
-		root,
-	)
-	if !moved {
-		pane_move_enter(app, move)
-		return false
-	}
-	pane_move_finish(app, move, destination)
-	return true
-}
-
-pane_split :: proc(
-	app: ^App,
-	w: ^Window,
-	direction: layout.Direction,
-	ratio: f32 = 0.5,
-	focus := true,
-) {
-	tab := w.workspace.selected
-	launch: Pane_Launch
-	if entry := focused_session(app, w); entry != nil {
-		refused: bool
-		launch.directory, refused = pane_directory(app, entry)
-		if refused {notify_directory_refused(app)}
-	}
-	switch _, err := pane_split_at(
-		app, w, w.workspace, tab, w.tree.focus, direction, ratio, focus, launch, true,
-	); err {
-	case .None:
-		if window_linked(w) {pane_link_store(app, w)}
-	case .Minimum:
-	case .Check:
-		notify(app, .Error, "Could not check the new pane size.")
-	case .Session:
-		notify(app, .Error, "Could not create a pane.")
-	case .Layout:
-		notify(app, .Error, "Could not split the pane.")
-	}
-}
-
-// What a new pane runs; empty fields take the profile's or settings' values.
-Pane_Launch :: struct {
-	command, directory, profile: string,
-}
-
-Pane_Split_Error :: enum {
-	None,
-	Minimum, // The new pane would be smaller than the minimum pane size.
-	Check,   // The size check itself failed.
-	Session,
-	Layout,
-}
-
-// Splits `node` of the workspace's tab at `tab_index` and returns the new pane's session id. w shows
-// the workspace, or is nil when no window does; only a shown tab is relaid out, and focus selects the
-// tab first.
-@(require_results)
-pane_split_at :: proc(
-	app: ^App,
-	w: ^Window,
-	workspace: ^Workspace,
-	tab_index: int,
-	node: layout.Node_Id,
-	direction: layout.Direction,
-	ratio: f32,
-	focus: bool,
-	launch: Pane_Launch,
-	notify_minimum: bool,
-) -> (
-	u32,
-	Pane_Split_Error,
-) {
-	tab := workspace.tabs[tab_index]
-	if failure := pane_split_check(app, w, tab, node, direction, ratio, notify_minimum); failure != .None {
-		return 0, failure
-	}
-	if !session_open(app, launch.command, launch.directory, launch.profile) {return 0, .Session}
-	id := app.next_session_id
-	if !pane_split_attach(app, w, workspace, tab_index, node, direction, ratio, focus, {.Terminal, id}) {
-		session_close(app, id)
-		return 0, .Layout
-	}
-	return id, .None
-}
-
-// Splits `node` with content that exists already. See pane_split_at for how w and focus apply.
-@(require_results)
-pane_split_insert :: proc(
-	app: ^App,
-	w: ^Window,
-	workspace: ^Workspace,
-	tab_index: int,
-	node: layout.Node_Id,
-	direction: layout.Direction,
-	ratio: f32,
-	focus: bool,
-	content: layout.Content,
-	notify_minimum: bool,
-) -> Pane_Split_Error {
-	tab := workspace.tabs[tab_index]
-	if failure := pane_split_check(app, w, tab, node, direction, ratio, notify_minimum); failure != .None {
-		return failure
-	}
-	if !pane_split_attach(app, w, workspace, tab_index, node, direction, ratio, focus, content) {return .Layout}
-	return .None
-}
-
-@(private, require_results)
-pane_split_check :: proc(
-	app: ^App,
-	w: ^Window,
-	tab: ^Tab,
-	node: layout.Node_Id,
-	direction: layout.Direction,
-	ratio: f32,
-	notify_minimum: bool,
-) -> Pane_Split_Error {
-	if w == nil {return .None}
-	trial := pane_trial_split(app, w, direction, ratio, tree = &tab.tree, node = node,
-		notify_failure = notify_minimum)
-	if trial.error == .Minimum {return .Minimum}
-	if trial.error != .None {return .Check}
-	return .None
-}
-
-@(private, require_results)
-pane_split_attach :: proc(
-	app: ^App,
-	w: ^Window,
-	workspace: ^Workspace,
-	tab_index: int,
-	node: layout.Node_Id,
-	direction: layout.Direction,
-	ratio: f32,
-	focus: bool,
-	content: layout.Content,
-) -> bool {
-	tab := workspace.tabs[tab_index]
-	added, err := layout.split_direction(&tab.tree, node, direction, ratio, content)
-	if err != nil {return false}
-	if w == nil {return true}
-	visible := workspace.selected == tab_index
-	if focus {
-		if !visible {tab_select(app, w, tab_index)}
-		pane_focus(app, w, added)
-	}
-	if visible || focus {window_relayout(app, w)}
-	return true
-}
-
-pane_keep_open :: proc(app: ^App, w: ^Window) {
-	entry := focused_session(app, w)
-	if entry == nil {return}
-	entry.keep_open = !entry.keep_open
-	notify(
-		app,
-		.Info,
-		entry.keep_open ? "Pane will stay open after exit." : "Pane will close after exit.",
-	)
-	if !entry.keep_open && entry.status == .Exited {_ = close_exited_session(app, entry.id)}
 }
 
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
@@ -513,97 +264,6 @@ tab_close_request :: proc(app: ^App, w: ^Window, index: int, restore: ^[dynamic]
 	pending_close_open_tab(app, w, index, restore)
 }
 
-// The app's one launch-directory choice: session open, restore, shell switch and pane directories pick
-// through it, without touching a remote path twice. `refused` reports that a nonempty candidate was
-// rejected, so the caller can say why a different directory is used; each caller words that itself.
-// An empty result means the profile's own directory. pty.spawn still checks again (defense in depth).
-@(require_results)
-local_launch_directory :: proc(candidate, fallback: string) -> (directory: string, refused: bool) {
-	if candidate != "" {
-		if pty.working_directory_is_local(candidate) {return candidate, false}
-		refused = true
-	}
-	if fallback != "" && pty.working_directory_is_local(fallback) {return fallback, refused}
-	return "", refused
-}
-
-// Where a split or duplicate of the pane starts. As in kitty, a running program's own directory
-// wins over the shell's last OSC 7 report, which predates the program; then the shell process's
-// directory, which cmd and bash keep current, and finally where the pane was launched. `refused`
-// reports a reported directory that was remote or unavailable.
-@(require_results)
-pane_directory :: proc(app: ^App, entry: ^Session_Entry) -> (directory: string, refused: bool) {
-	return pane_directory_of(entry, pane_program(app, entry, term.process_id(entry.session)))
-}
-
-// pane_directory for a pane whose running program, if any, is already known.
-@(require_results)
-pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: string, refused: bool) {
-	root := term.process_id(entry.session)
-	if program != 0 {
-		path, found := pty.process_directory(program, root, context.temp_allocator)
-		if found && pty.working_directory_is_local(path) {return path, false}
-	}
-	raw := term.working_directory(entry.session, context.temp_allocator)
-	if reported, err := localpath.directory_label(raw, context.temp_allocator); err == nil && reported != "" {
-		if pty.working_directory_is_local(reported) {return reported, false}
-		refused = true
-	}
-	path, ok := pty.process_directory(root, root, context.temp_allocator)
-	if ok && pty.working_directory_is_local(path) {return path, refused}
-	directory, _ = local_launch_directory("", entry.header.launch_directory)
-	return directory, refused
-}
-
-// The pane's running program. Icon polling already tracks it, including one seen once but not yet
-// adopted; without polling it is chosen the same way from a snapshot taken now (about 10 ms).
-@(private)
-pane_program :: proc(app: ^App, entry: ^Session_Entry, root: u32) -> u32 {
-	if app.settings.tabs.program_icons {
-		return program_polled(entry)
-	}
-	processes, err := pty.process_snapshot(context.temp_allocator)
-	if err != .None {return 0}
-	program, _ := pane_running(app, entry, processes)
-	return program
-}
-
-// The processes to read running programs from when a pane is remembered: nil while icon polling
-// tracks them, otherwise one snapshot taken now, in temporary memory.
-pane_processes :: proc(app: ^App) -> []pty.Process_Info {
-	if app.settings.tabs.program_icons || len(app.sessions) == 0 {return nil}
-	processes, err := pty.process_snapshot(context.temp_allocator)
-	return err == .None ? processes : nil
-}
-
-// The pane's running program and how it was started, in temporary memory: polling's choice, or the
-// one `processes` names; none without either.
-pane_running :: proc(
-	app: ^App,
-	entry: ^Session_Entry,
-	processes: []pty.Process_Info,
-) -> (
-	program: u32,
-	command: string,
-) {
-	if app.settings.tabs.program_icons {
-		if adopted := program_adopted(entry); adopted != nil {command = adopted.command}
-		return program_polled(entry), command
-	}
-	root := term.process_id(entry.session)
-	index := pty.process_program(processes, root, program_reporters(entry), 0)
-	if index < 0 {return}
-	program = processes[index].id
-	arguments, _ := pty.process_arguments(program, root, context.temp_allocator)
-	stem := settings.executable_stem(processes[index].executable)
-	return program, program_command(arguments, stem, context.temp_allocator)
-}
-
-@(private)
-notify_directory_refused :: proc(app: ^App) {
-	notify(app, .Warning, "The pane's reported directory is remote or unavailable; using a local fallback.")
-}
-
 tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	pane, _ := workspace_focused_session_pane(app, w.workspace, index)
 	entry := pane.session
@@ -612,13 +272,14 @@ tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	if refused {notify_directory_refused(app)}
 	// Opening a session can move app.sessions, and `entry` with it.
 	pinned := entry.documents[:]
-	if !tab_create(app, w.workspace, entry.header.command, directory, entry.profile_id) {
+	session, created := tab_create(app, w.workspace, entry.header.command, directory, entry.profile_id)
+	if !created {
 		notify(app, .Error, "Could not duplicate the tab.")
 		return
 	}
 	copy_tab := w.workspace.tabs[len(w.workspace.tabs) - 1]
 	documents_copy(&copy_tab.documents, w.workspace.tabs[index].documents[:])
-	documents_copy(&app.sessions[len(app.sessions) - 1].documents, pinned)
+	documents_copy(&session_find(app, session).documents, pinned)
 	tab_show(app, w, len(w.workspace.tabs) - 1)
 }
 
@@ -681,23 +342,6 @@ tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {
 	return -1
 }
 
-pane_close :: proc(app: ^App, w: ^Window) {
-	if window_linked(w) {
-		home, found := pane_link_home(app, pane_link_content(w))
-		if found {
-			pane_close_at(app, home.workspace, tab_index_by_id(home.workspace, home.tab.id), home.node)
-		}
-		return
-	}
-	pane_close_at(app, w.workspace, w.workspace.selected, w.tree.focus)
-}
-
-// A close Reopen Closed can undo, by request or because the shell exited.
-pane_close_at :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
-	closed_record_pane(app, workspace, tab_index, node)
-	pane_remove(app, workspace, tab_index, node)
-}
-
 @(private)
 workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: int) {
 	index := original_index
@@ -713,93 +357,19 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	for pane, ok := workspace_pane_next(&terminal); ok; pane, ok = workspace_pane_next(&terminal) {
 		session_close(app, pane.content.id)
 	}
+	// The record leaves the list and selection names a remaining tab before anything can observe either.
 	ordered_remove(&workspace.tabs, index)
+	workspace.selected = tab_selected_after_remove(workspace.selected, index, len(workspace.tabs))
 	tab_record_free(tab)
 	workspace_settings_sync(app, workspace)
-	workspace.selected = tab_selected_after_remove(workspace.selected, index, len(workspace.tabs))
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		w := app.windows[i]
 		if w.workspace != workspace {continue}
 		tab_presentation_remove(&w.presentation, index)
-		if len(workspace.tabs) == 0 {
-			w.tree = nil
-		} else {
-			w.tree = &selected_tab(workspace).tree
+		if len(workspace.tabs) > 0 {
 			window_relayout(app, w)
 			rail_reveal_active(w)
 			if was_selected {focus_enter(app, w)}
-		}
-	}
-}
-
-@(private)
-pane_remove :: proc(
-	app: ^App,
-	workspace: ^Workspace,
-	original_tab_index: int,
-	node: layout.Node_Id,
-) {
-	tab_index := original_tab_index
-	tab := workspace.tabs[tab_index]
-	for w in app.windows {if w.workspace == workspace {_ = gesture_cancel(app, w)}}
-	for current, i in workspace.tabs {if current == tab {tab_index = i; break}}
-	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
-	if !is_pane {return}
-	if tab.tree.root == node {
-		workspace_close_tab(app, workspace, tab_index)
-		workspace_close_empty(app, workspace)
-		return
-	}
-	visible := tab_index == workspace.selected
-	was_focused := visible && tab.tree.focus == node
-	if was_focused {
-		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
-	}
-	if !layout.remove(&tab.tree, node) {return}
-	if pane_owns_session(pane.content.kind) {session_close(app, pane.content.id)}
-	workspace_settings_sync(app, workspace)
-	tab_update_title(app, tab)
-	if visible {
-		for w in app.windows {
-			if w.workspace != workspace {continue}
-			// A floating pane's close leaves the tiled panes exactly as they were.
-			if pane.floating {window_floats_layout(app, w)} else {window_relayout(app, w)}
-			if was_focused {focus_enter(app, w)}
-		}
-	}
-}
-
-@(require_results)
-close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
-	if entry := session_find(app, id); entry != nil && entry.keep_open {return false}
-	for workspace in app.workspaces {
-		pane, found := workspace_first_session(app, workspace, id)
-		if !found {continue}
-		if len(workspace.tabs) == 1 &&
-		   workspace.tabs[pane.tab].tree.root == pane.node {return false}
-		pane_close_at(app, workspace, pane.tab, pane.node)
-		return true
-	}
-	return false
-}
-
-session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
-	for workspace in app.workspaces {
-		for tab in workspace.tabs {
-			pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-			if pane.content == {.Terminal, id} {tab_update_title(app, tab)}
-		}
-	}
-	for window in app.windows {
-		window.dirty = true
-		if window.tree != nil {
-			node := layout.find_content(window.tree, {.Terminal, id})
-			if floating, ok := layout.float_of(window.tree, node); ok && floating.minimized {
-				floating_capsules_refresh(app, window)
-			}
-		}
-		if focused := focused_session(app, window); focused != nil && focused.id == id {
-			window_update_title(app, window)
 		}
 	}
 }
@@ -812,24 +382,4 @@ window_update_title :: proc(app: ^App, w: ^Window) {
 	if platform.window_set_title(&app.platform, w.id, title) != .None {
 		log.error("setting the window title failed")
 	}
-}
-
-session_message :: proc(status: term.Status) -> string {
-	switch status.kind {
-	case .Running:
-		return ""
-	case .Exited:
-		return fmt.tprintf(
-			"The shell exited with code %d. Press Enter to restart it.",
-			status.exit_code,
-		)
-	case .Failed:
-		reason := status.message != "" ? status.message : "Could not start the shell."
-		return fmt.tprintf(
-			"%s Check shell.command and shell.directory in settings, " +
-			"then press Enter to try again.",
-			reason,
-		)
-	}
-	return ""
 }

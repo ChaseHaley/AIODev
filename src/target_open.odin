@@ -137,6 +137,10 @@ pending_file_finish :: proc(app: ^App, pending: Pending_File, accept: bool) {
 	}
 }
 
+pending_file_destroy :: proc(pending: ^Pending_File) {
+	localpath.open_file_destroy(&pending.file)
+}
+
 @(private, require_results)
 target_open_url :: proc(app: ^App, uri: string) -> bool {
 	if app.opener.url == nil {

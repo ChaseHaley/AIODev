@@ -52,7 +52,7 @@ gestures_header_multiple_buttons_release_outside_over_caption :: proc(t: ^testin
 	testing.expect(t, gesture_captured(w) == {})
 	testing.expect(t, !ui.armed_down(w.caption_armed))
 	testing.expect_value(t, len(w.panes), 2)
-	testing.expect(t, app.window_find(s, w.id) == w && !w.tree.zoomed)
+	testing.expect(t, app.window_find(s, w.id) == w && !app.window_tree(w).zoomed)
 }
 
 @(test)
@@ -74,7 +74,7 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 		switch scenario {
 		case 0: app.palette_open(s, w)
 		case 1: app.workspace_picker_open(s, w)
-		case 2: app.rename_open(s, w, true, w.workspace.selected)
+		case 2: app.rename_open(s, w, app.Rename_Tab_Target{w.workspace.id, app.selected_tab(w.workspace).id})
 		case 3: app.tab_menu_open(s, w, 0, 20, 20)
 		case 4: app.workspace_delete_request(s, w, w.workspace)
 		case 5: app.editor_open(s, w)
@@ -111,13 +111,13 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	r := w.panes[0].rect
 	gesture_button(s, w, .Left, true, r.x+30, r.y+w.header_height+40)
 	if !testing.expect(t, app.selection_active(w)) {return}
-	focus := w.tree.focus
+	focus := app.window_tree(w).focus
 	ui.find_open(&w.find)
 	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = w.width+10, y = w.height+10,
 		buttons = {.Left}})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
 	testing.expect(t, !app.selection_active(w) && !ui.armed_down(w.find.armed))
-	testing.expect_value(t, w.tree.focus, focus)
+	testing.expect_value(t, app.window_tree(w).focus, focus)
 	app.editor_open(s, w)
 	l := app.settings_layout(w)
 	gesture_button(s, w, .Left, true, l.filter.x+20, l.filter.y+l.filter.height/2)
@@ -142,11 +142,11 @@ gestures_menu_kept_open_releases_its_swallowed_button :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, len(w.workspace.tabs), 1) {return}
 	app.tab_menu_open(s, w, 0, 20, 20)
 	row := -1
-	for i in 0 ..< w.tab_menu.count {
-		if w.tab_menu.actions[i] == .Close_Other_Tabs {row = i}
+	for item, i in w.tab_menu.items {
+		if !item.separator && app.Action(item.payload) == .Close_Other_Tabs {row = i}
 	}
 	if !testing.expect(t, row >= 0 && !app.tab_menu_enabled(w, row)) {return}
-	r := app.tab_menu_row_rect(w, row)
+	r := window_menu_row(w, &w.tab_menu.menu, row)
 	gesture_button(s, w, .Left, true, r.x + 20, r.y + r.height / 2)
 	gesture_button(s, w, .Left, false, r.x + 20, r.y + r.height / 2)
 	if !testing.expect(t, app.tab_menu_shown(w)) {return}
@@ -172,10 +172,10 @@ gestures_cancel_preview_destruction_and_late_events_preserve_runtime :: proc(t: 
 	entry := app.focused_session(s, w)
 	id, pid, session := entry.id, term.process_id(entry.session), entry.session
 	source := app.selected_tab(w.workspace)
-	preview := app.pane_window_preview_create(s, source, w.tree.focus)
+	preview := app.pane_window_preview_create(s, source, app.window_tree(w).focus)
 	if !testing.expect(t, preview != nil) {return}
 	preview_id := preview.id
-	seed_pane_drag(w, source, w.tree.focus, preview = app.Preview_Ready{preview_id})
+	seed_pane_drag(w, source, app.window_tree(w).focus, preview = app.Preview_Ready{preview_id})
 	app.handle_event(s, platform.Capture_Lost_Event{preview_id})
 	testing.expect(t, app.window_find(s, preview_id) == nil)
 	app.handle_event(s, platform.Focus_Event{preview_id, false})
@@ -263,8 +263,7 @@ gesture_terminal_packets :: proc(t: ^testing.T, report: bool) {
 		gesture_button(s, w, .Left, false, px + 10, py)
 	} else {
 		layout, _ := app.rail_current_layout(w)
-		row := app.rail_row_index_for_tab(w.rail_rows[:], w.workspace, 0)
-		close := ui.rail_close_rect(layout, row, w.scale)
+		close := ui.rail_close_rect(layout, 0, w.scale)
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)
 		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = 100, y = 200, buttons = {.Left}})
 		app.handle_event(s, platform.Capture_Lost_Event{w.id})
@@ -361,11 +360,11 @@ gestures_settings_header_zoom_and_close_drive_the_settings_pane :: proc(t: ^test
 	h, found := gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
 	gesture_click_header(s, w, int(ui.Header_Action.Zoom) - 1, h)
-	if !testing.expect(t, w.tree.zoomed) {return}
+	if !testing.expect(t, app.window_tree(w).zoomed) {return}
 	h, found = gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
 	gesture_click_header(s, w, int(ui.Header_Action.Zoom) - 1, h)
-	testing.expect(t, !w.tree.zoomed)
+	testing.expect(t, !app.window_tree(w).zoomed)
 	sessions, tabs := len(s.sessions), len(w.workspace.tabs)
 	h, found = gesture_settings_header(w)
 	if !testing.expect(t, found) {return}

@@ -14,13 +14,13 @@ chrome_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> platform.Cursor_Shap
 		if x >= toggle.x + toggle.width {return .Hand}
 	}
 	if render.rect_contains(status_pill_rect(app, w), x, y) {return .Hand}
-	hit := tab_interaction_hit(app, w, x, y, .Left)
-	switch hit.kind {
-	case .Outside, .Empty:
-	case .Close, .New_Tab, .Profiles:
+	hit := tab_chrome_hit(app, w, x, y, .Left)
+	if hit.close {return .Hand}
+	switch target in hit.target {
+	case Tab_Chrome_New, Tab_Chrome_Profiles:
 		return .Hand
-	case .Tab:
-		if w.workspace != nil && hit.index != w.workspace.selected {return .Hand}
+	case Tab_Chrome_Tab:
+		if w.workspace != nil && target.index != w.workspace.selected {return .Hand}
 	}
 	return .Arrow
 }

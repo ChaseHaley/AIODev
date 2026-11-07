@@ -246,20 +246,10 @@ status_spin_tick :: proc(w: ^Window) {
 	if status_spin_active(w) {w.dirty = true}
 }
 
-status_pane_title :: proc(entry: ^Session_Entry) -> string {
-	return entry.name != "" ? entry.name : pane_header_title(&entry.header)
-}
-
 status_record_name :: proc(entry: ^Session_Entry, record: term.Program_Status) -> string {
 	if record.title != "" {return record.title}
 	if record.app != "" {return record.app}
-	return status_pane_title(entry)
-}
-
-@(private)
-status_tab_title :: proc(workspace: ^Workspace, tab: int) -> string {
-	title := workspace.tabs[tab].title
-	return title != "" ? title : fmt.tprintf("Tab %d", tab + 1)
+	return session_display_title(entry)
 }
 
 // Where a session lives, for lists and notices that must say which pane they mean.
@@ -267,13 +257,13 @@ status_crumb :: proc(app: ^App, entry: ^Session_Entry) -> string {
 	for workspace in app.workspaces {
 		pane, ok := workspace_first_session(app, workspace, entry.id)
 		if !ok {continue}
-		tab := status_tab_title(workspace, pane.tab)
+		tab := tab_display_title(workspace.tabs[pane.tab], pane.tab + 1)
 		if tab_pane_count(workspace.tabs[pane.tab]) > 1 {
-			return fmt.tprintf("%s › %s › %s", workspace.name, tab, status_pane_title(entry))
+			return fmt.tprintf("%s › %s › %s", workspace.name, tab, session_display_title(entry))
 		}
 		return fmt.tprintf("%s › %s", workspace.name, tab)
 	}
-	return status_pane_title(entry)
+	return session_display_title(entry)
 }
 
 status_workspace_of :: proc(app: ^App, session: u32) -> ^Workspace {

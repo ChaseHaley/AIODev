@@ -42,7 +42,7 @@ confirmation_fixture_destroy :: proc(t: ^testing.T, f: ^Confirmation_Fixture) {
 @(private="file")
 confirmation_open_subject :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, swap: bool) -> ^ui.Confirm {
 	if swap {
-		app.pane_shell_swap_request(state, w, w.tree.focus, "alternate")
+		app.pane_shell_swap_request(state, w, app.window_tree(w).focus, "alternate")
 		testing.expect(t, app.confirmation_asking(w, app.Pane_Swap) != nil)
 	} else {
 		app.pending_close_open_tab(state, w, w.workspace.selected)

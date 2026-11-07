@@ -7,9 +7,10 @@ import "aio:ui"
 // The window's half of layout.PANE_VIEW_TRANSITIONS. Everything here reads w.pane_fill and tree.zoomed
 // through pane_view_current, and only pane_view_apply writes them.
 
-// w.tree is nil only for the moment a window has lost its last tab.
+// The shown tree is nil only for the moment a window has lost its last tab.
 pane_view_current :: proc(w: ^Window) -> layout.Pane_View {
-	return layout.pane_view_of(w.pane_fill, w.tree != nil && w.tree.zoomed)
+	tree := window_tree(w)
+	return layout.pane_view_of(w.pane_fill, tree != nil && tree.zoomed)
 }
 
 // Whether the window shows the focused pane alone.
@@ -39,13 +40,14 @@ pane_view_toggle :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) {
 // Runs at the top of every layout, which every change to a shown tree reaches, so no caller can forget
 // to end a view. A tab changed while hidden ends the view when it is next shown.
 pane_view_sync :: proc(app: ^App, w: ^Window) {
-	if w.tree != nil && w.tree.panes_changed {_ = pane_view_apply(app, w, .Panes_Changed)}
+	if tree := window_tree(w); tree != nil && tree.panes_changed {_ = pane_view_apply(app, w, .Panes_Changed)}
 }
 
 // The operating system goes first, so a refusal leaves every part of the view as it was.
 @(private = "file", require_results)
 pane_view_apply :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) -> bool {
-	w.tree.panes_changed = false
+	tree := window_tree(w)
+	tree.panes_changed = false
 	to := layout.PANE_VIEW_TRANSITIONS[pane_view_current(w)][event]
 	if to == pane_view_current(w) {return false}
 	fill, zoomed := layout.pane_view_parts(to)
@@ -55,7 +57,7 @@ pane_view_apply :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) ->
 			return false
 		}
 	}
-	w.pane_fill, w.tree.zoomed = fill, zoomed
+	w.pane_fill, tree.zoomed = fill, zoomed
 	divider_cancel(w)
 	return true
 }

@@ -1,26 +1,21 @@
 package main
 
 import "aio:layout"
+import "core:fmt"
 import "core:log"
 import "core:strings"
 
-Tab_Record_Error :: enum {
-	None,
-	Allocation,
-	Capacity,
-}
-
-// A caller may only create a session or separate a pane after this succeeds, so a capacity
-// failure must leave the session registry and source layout untouched.
+// A caller may only create a session or separate a pane after this succeeds, so a failure must
+// leave the session registry and source layout untouched.
 @(require_results)
-tab_record_reserve :: proc(workspace: ^Workspace) -> (^Tab, Tab_Record_Error) {
+tab_record_reserve :: proc(workspace: ^Workspace) -> (^Tab, bool) {
 	tab, err := new(Tab)
-	if err != nil {return nil, .Allocation}
+	if err != nil {return nil, false}
 	if reserve(&workspace.tabs, len(workspace.tabs) + 1) != nil {
 		free(tab)
-		return nil, .Capacity
+		return nil, false
 	}
-	return tab, .None
+	return tab, true
 }
 
 // Capacity was reserved, so the insert cannot leave a half-built record in the rail.
@@ -63,13 +58,18 @@ tab_selected_after_remove :: proc(selected, index, count: int) -> int {
 	return clamp(shifted, 0, max(0, count - 1))
 }
 
+// What the strip, rail and status crumbs call a tab: its title, else `Tab N` for its 1-based ordinal.
+tab_display_title :: proc(tab: ^Tab, ordinal: int) -> string {
+	return tab.title != "" ? tab.title : fmt.tprintf("Tab %d", ordinal)
+}
+
 // One rule for construction and later refreshes: the tab's own name, else its content's title.
 @(private)
 tab_update_title :: proc(app: ^App, tab: ^Tab) {
 	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
 	title := content_title(app, pane.content)
 	if entry := workspace_session_for_content(app, pane.content); entry != nil {
-		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
+		title = session_display_title(entry)
 	}
 	if tab.name != "" {title = tab.name}
 	owned, err := strings.clone(title)

@@ -9,6 +9,11 @@ Pane_Trial_Error :: enum {
 	Minimum,
 }
 
+// The content geometry trials measure in place of a pane that does not exist yet. It is used only for
+// measurement and names no session: session ids are allocated upward from 1 and never reach it, so
+// it never matches a real pane's content or looks up a session's header.
+PANE_MEASUREMENT_CONTENT :: layout.Content{.Terminal, max(u32)}
+
 // Geometry is copied out; all detached storage belongs to the evaluation's scratch allocator.
 Pane_Trial_Result :: struct {
 	rect:  layout.Rect,
@@ -53,19 +58,16 @@ pane_trial_split :: proc(
 	notify_failure := true,
 ) -> Pane_Trial_Result {
 	original, target := tree, node
-	if original == nil {original, target = w.tree, w.tree.focus}
+	if original == nil {
+		original = window_tree(w)
+		target = original.focus
+	}
 	if int(target) >= len(original.nodes) {return {error = .Invalid}}
 	if _, ok := original.nodes[target].(layout.Pane); !ok {return {error = .Invalid}}
 	trial, copy_error := layout.clone(original, allocator)
 	if copy_error != nil {return {error = .Allocation}}
 	defer layout.destroy(&trial)
-	added, err := layout.split_direction(
-		&trial,
-		target,
-		direction,
-		ratio,
-		{.Terminal, app.next_session_id + 1},
-	)
+	added, err := layout.split_direction(&trial, target, direction, ratio, PANE_MEASUREMENT_CONTENT)
 	if err != nil {return {error = .Allocation}}
 	return pane_trial_evaluate(app, w, original, &trial, added, notify_failure)
 }

@@ -63,6 +63,11 @@ editor_process_remove_finish :: proc(app: ^App, w: ^Window, remove: Process_Remo
 	editor_process_save(app, w)
 }
 
+editor_process_remove_destroy :: proc(remove: ^Process_Remove) {
+	delete(remove.name)
+	delete(remove.source)
+}
+
 editor_process_remove_text :: proc(remove: Process_Remove) -> Confirmation_Text {
 	return {title = fmt.tprintf("Delete %s?", remove.name), label = "Delete"}
 }

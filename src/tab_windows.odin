@@ -18,36 +18,12 @@ tab_window_source_allows :: proc(workspace: ^Workspace) -> bool {
 	return marked && kept
 }
 
-// The tab that takes over the source window: the nearest that stays, preferring the right as a close does.
-@(private = "file", require_results)
-tab_window_kept_index :: proc(workspace: ^Workspace) -> int {
-	for i in workspace.selected ..< len(workspace.tabs) {
-		if !workspace.tabs[i].marked {return i}
-	}
-	for i := workspace.selected - 1; i >= 0; i -= 1 {
-		if !workspace.tabs[i].marked {return i}
-	}
-	return -1
-}
-
 // Tabs another window's drag would add here: its tabs open a gap at `slot`, and a ghost shows them landing.
 // A count of 0 is no gap. tab_incoming_set is the only writer, driven by the dragging window's destination.
 Tab_Incoming :: struct {
 	source:      input.Window_Id,
 	count, slot: int,
 	ghost:       ui.Motion,
-}
-
-@(private = "file", require_results)
-tabs_can_join :: proc(workspace, destination: ^Workspace) -> bool {
-	for tab in workspace.tabs {
-		if !tab.marked {continue}
-		for node in tab.tree.nodes {
-			pane := node.(layout.Pane) or_continue
-			if !pane_content_can_join(pane.content, destination, tab) {return false}
-		}
-	}
-	return true
 }
 
 // Where tabs dropped at a point in w would land, centring their group on the pointer. A drop away from the
@@ -171,184 +147,64 @@ tabs_marked_count :: proc(workspace: ^Workspace) -> int {
 	return count
 }
 
-// A record for each of `count` tabs, in temporary memory. A placeholder already in the destination is first.
+// The ids of the marked tabs a drag carries, in their order, in temporary memory.
 @(private = "file", require_results)
-tab_records_reserve :: proc(
-	destination: ^Workspace,
-	count: int,
-	placeholder: ^Tab = nil,
-) -> (
-	[]^Tab,
-	bool,
-) {
-	records, records_error := make([]^Tab, count, context.temp_allocator)
-	if records_error != nil {return nil, false}
-	reserved := false
-	defer if !reserved {tab_records_free(records, placeholder)}
-	for &record, i in records {
-		if i == 0 && placeholder != nil {
-			record = placeholder
-			continue
-		}
-		created, record_error := tab_record_reserve(destination)
-		if record_error != .None {return nil, false}
-		record = created
-	}
-	if reserve(&destination.tabs, len(destination.tabs) + count) != nil {return nil, false}
-	reserved = true
-	return records, true
-}
-
-@(private = "file")
-tab_records_free :: proc(records: []^Tab, placeholder: ^Tab = nil) {
-	for record in records {if record != nil && record != placeholder {tab_record_free(record)}}
-}
-
-// Sessions never restart: each marked tab's tree changes owner whole, so panes keep their arrangement and a
-// linked window follows its panes. Records join the destination in order at `at`, and the emptied tabs leave
-// the source, whose window must already show a tab that stays unless all of them go. Returns the selected
-// tab's place in `records`.
-@(private = "file")
-tabs_carry :: proc(
-	app: ^App,
-	workspace, destination: ^Workspace,
-	records: []^Tab,
-	selected: ^Tab,
-	at: int,
-	has_placeholder := false,
-) -> int {
-	selected_index, index, insert := 0, 0, at
+tabs_marked_ids :: proc(workspace: ^Workspace) -> ([]u32, bool) {
+	ids, err := make([]u32, tabs_marked_count(workspace), context.temp_allocator)
+	if err != nil {return nil, false}
+	index := 0
 	for tab in workspace.tabs {
 		if !tab.marked {continue}
-		record := records[index]
-		if tab == selected {selected_index = index}
-		placeholder := has_placeholder && index == 0
-		if placeholder {layout.destroy(&record.tree)}
-		record.tree, tab.tree = tab.tree, {root = layout.INVALID_NODE, focus = layout.INVALID_NODE}
-		record.name, tab.name = tab.name, ""
-		record.marked = true
-		if placeholder {
-			tab_update_title(app, record)
-		} else {
-			tab_record_commit(app, destination, record, insert)
-			insert += 1
-		}
+		ids[index] = tab.id
 		index += 1
 	}
-	// With nothing left there is no tab to show while the rest close, so the windows let go of all of them.
-	if index == len(workspace.tabs) {
-		for w in app.windows {
-			if w.workspace != workspace {continue}
-			w.tree = nil
-			tab_presentation_clear(&w.presentation)
-		}
-		for tab in workspace.tabs {tab_record_free(tab)}
-		clear(&workspace.tabs)
-		workspace.selected = 0
-		workspace_settings_sync(app, workspace)
-		return selected_index
-	}
-	for i := len(workspace.tabs) - 1; i >= 0; i -= 1 {
-		if workspace.tabs[i].tree.root == layout.INVALID_NODE {workspace_close_tab(app, workspace, i)}
-	}
-	return selected_index
+	return ids, true
 }
 
-// Every step that can fail comes before the first layout moves, and the window shows before the tabs move, so
+// Every step that can fail comes before the first tab moves, and the window shows before the tabs move, so
 // a failure leaves the source as it was and the preview still prepared.
 @(require_results)
 tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 	workspace, destination := source_window.workspace, preview.workspace
 	if preview.phase != .Preparing || !tab_window_source_allows(workspace) {return false}
-	// The first tab takes over the preview's placeholder, which is already the window's selected tab.
-	records, reserved := tab_records_reserve(destination, tabs_marked_count(workspace), destination.tabs[0])
-	if !reserved {return false}
+	tabs, listed := tabs_marked_ids(workspace)
+	if !listed {return false}
+	// The tabs take the place of the preview's placeholder, which is already the window's selected tab.
+	placeholder := destination.tabs[0]
+	transfer := Workspace_Tab_Transfer{workspace, destination, tabs, 1, selected_tab(workspace).id, placeholder}
+	if !workspace_tabs_transfer_reserve(app, transfer) {return false}
 	name := workspace_default_name(app)
 	if name == "" || !window_commit(app, preview) {
 		delete(name)
-		tab_records_free(records, destination.tabs[0])
 		return false
 	}
 
-	selected := selected_tab(workspace)
-	tab_select(app, source_window, tab_window_kept_index(workspace), true)
-	selected_index := tabs_carry(app, workspace, destination, records, selected, 1, true)
+	tab_select(app, source_window, tab_kept_index(workspace, tabs), .Preserve_Marks)
+	workspace_tabs_transfer(app, transfer)
 	tab_select_one(workspace, workspace.selected)
-
-	destination.provisional = false
-	destination.name = name
-	destination.selected = selected_index
-	destination.selection_anchor = records[selected_index].id
-	preview.tree = &records[selected_index].tree
-	workspace_pickers_refresh(app)
-	mark_all_dirty(app)
+	window_relayout(app, source_window)
+	rail_reveal_active(source_window)
+	window_preview_publish(preview, name)
 	window_relayout(app, preview)
 	focus_enter(app, preview)
-	workspace_settings_sync(app, destination)
+	workspace_mutation_finish(app, workspace, {.Structure})
+	workspace_mutation_finish(app, destination, {.Structure, .Names})
 	_ = window_activate(app, preview)
 	return true
 }
 
-// Moves the marked tabs into another workspace, inserting them at `slot`. Every step that can fail comes
-// before the first layout moves. A workspace no window shows comes to the source window, as with moving a
-// pane. When the last tabs go, the source workspace is deleted and its window closes if the destination has a
-// window of its own, so a caller must look `source_window` up before using it again.
+// Moves the marked tabs into another workspace, inserting them at `slot`, as workspace_tabs_move does.
 @(require_results)
-tabs_to_workspace :: proc(app: ^App, source_window: ^Window, destination: ^Workspace, slot: int) -> bool {
-	workspace := source_window.workspace
-	if workspace == destination ||
-	   window_linked(source_window) ||
-	   !workspace_eligible(app, destination) ||
-	   !tabs_can_join(workspace, destination) {
-		return false
-	}
-	count := tabs_marked_count(workspace)
-	if count == 0 {return false}
-	records, reserved := tab_records_reserve(destination, count)
-	if !reserved {return false}
-	at := clamp(slot, 0, len(destination.tabs))
-	owner := window_for_workspace(app, destination)
-	if owner != nil && !tab_presentation_reserve(&owner.presentation, len(destination.tabs) + count) {
-		tab_records_free(records)
-		return false
-	}
-
-	// The destination takes focus first, so Windows does not hand it to another app as the source closes.
-	if owner != nil {
-		_ = window_activate(app, owner)
-		focus_leave(app, owner)
-	}
-	selected := selected_tab(workspace)
-	kept := tab_window_kept_index(workspace)
-	if kept < 0 {
-		// Every tab goes, so the window stays left until it adopts the destination or closes with its
-		// emptied workspace.
-		focus_leave(app, source_window)
-	} else {
-		tab_select(app, source_window, kept, true)
-	}
-	for tab in destination.tabs {tab.marked = false}
-	selected_index := tabs_carry(app, workspace, destination, records, selected, at)
-	if kept >= 0 {tab_select_one(workspace, workspace.selected)}
-	destination.selected = at + selected_index
-	destination.selection_anchor = records[selected_index].id
-
-	if owner != nil {
-		tab_incoming_set(app, owner.id, {})
-		owner.tab_hover = -1
-		tab_presentation_insert(&owner.presentation, at, count)
-		owner.tree = &records[selected_index].tree
-		window_relayout(app, owner)
-		rail_reveal_active(owner)
-		focus_enter(app, owner)
-	} else if !workspace_select(app, source_window, destination) {
-		notify(app, .Error, "The tabs moved, but their workspace could not be displayed.")
-	}
-	workspace_settings_sync(app, destination)
-	workspace_close_empty(app, workspace, replace_window = owner == nil)
-	workspace_pickers_refresh(app)
-	mark_all_dirty(app)
-	return true
+tabs_to_workspace :: proc(
+	app: ^App,
+	source_window: ^Window,
+	destination: ^Workspace,
+	slot: int,
+) -> Tab_Move_Result {
+	tabs, listed := tabs_marked_ids(source_window.workspace)
+	selected := selected_tab(source_window.workspace)
+	if !listed || selected == nil || destination == nil {return .Failed}
+	return workspace_tabs_move(app, source_window, destination, tabs, selected.id, slot)
 }
 
 // Finishes a drag held on a workspace dropdown, whose rows are the other workspaces, then a new workspace and
@@ -363,7 +219,10 @@ tab_workspace_drag_release :: proc(app: ^App, w: ^Window, a: ^Drag_Active, held:
 		moved = tear_off_preview_ensure(app, a, false) != nil && tear_off_commit(app, w, a)
 	case Workspace_Drop_Row:
 		attempted = true
-		moved = tabs_to_chosen_workspace(app, w, row.id)
+		moved = tabs_to_chosen_workspace(app, w, Workspace_Move_Existing{row.id})
+	case Workspace_Drop_New_Workspace:
+		attempted = true
+		moved = tabs_to_chosen_workspace(app, w, Workspace_Move_New{})
 	}
 	if moved {
 		drag_free(app, a)
@@ -373,19 +232,13 @@ tab_workspace_drag_release :: proc(app: ^App, w: ^Window, a: ^Drag_Active, held:
 	if attempted {notify(app, .Error, "Could not move the tabs. The source was preserved.")}
 }
 
-// An id of 0 moves them into a new workspace, which takes a suggested name to edit in its chip.
 @(private = "file", require_results)
-tabs_to_chosen_workspace :: proc(app: ^App, w: ^Window, id: u32) -> bool {
-	destination := id == 0 ? workspace_create_empty(app) : workspace_find(app, id)
-	if destination == nil {return false}
-	if !tabs_to_workspace(app, w, destination, len(destination.tabs)) {
-		if id == 0 {_ = workspace_discard_empty(app, destination)}
-		return false
-	}
-	if id == 0 {
-		if owner := window_for_workspace(app, destination); owner != nil {workspace_name_begin(app, owner)}
-	}
-	return true
+tabs_to_chosen_workspace :: proc(app: ^App, w: ^Window, destination: Workspace_Move_Destination) -> bool {
+	workspace, created := workspace_move_destination(app, destination)
+	if workspace == nil {return false}
+	moved := tabs_to_workspace(app, w, workspace, len(workspace.tabs)) != .Failed
+	workspace_move_destination_settle(app, workspace, created, moved)
+	return moved
 }
 
 // Finishes a drag held over another window, whose gap closes as the tabs arrive. A failed drop puts the tabs
@@ -393,7 +246,7 @@ tabs_to_chosen_workspace :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 tab_drag_release_on_window :: proc(app: ^App, w: ^Window, a: ^Drag_Active, offer: Drop_Other_Window) {
 	tear_off_preview_discard(app, a)
 	destination := window_find(app, offer.window)
-	if destination != nil && tabs_to_workspace(app, w, destination.workspace, offer.slot) {
+	if destination != nil && tabs_to_workspace(app, w, destination.workspace, offer.slot) != .Failed {
 		drag_free(app, a)
 		return
 	}

@@ -8,6 +8,7 @@ import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:strings"
 
@@ -220,12 +221,25 @@ document_menu_own :: proc(menu: ^Document_Menu, text: string) -> string {
 	return owned
 }
 
+// Each row's payload keys its entry; a row the menu could not take gets none.
 @(private = "file")
 document_menu_push :: proc(menu: ^Document_Menu, item: ui.Menu_Item, entry: Document_Menu_Entry = {}) {
-	if menu.count >= ui.MENU_MAX_ITEMS {return}
-	if ui.menu_add(&menu.menu, item) != nil {return}
+	row := item
+	row.payload = u32(menu.count)
+	added, err := ui.menu_add(&menu.menu, row)
+	if err != nil {log.errorf("adding a document menu row failed: %v", err)}
+	if !added {return}
 	menu.entries[menu.count] = entry
 	menu.count += 1
+}
+
+// The entry row `row` stands for, or none for a row out of range.
+@(private = "file")
+document_menu_entry :: proc(menu: ^Document_Menu, row: int) -> (Document_Menu_Entry, bool) {
+	if row < 0 || row >= len(menu.menu.items) {return {}, false}
+	key := int(menu.menu.items[row].payload)
+	if key >= menu.count {return {}, false}
+	return menu.entries[key], true
 }
 
 @(private = "file")
@@ -320,13 +334,14 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	} else {
 		menu.menu.scroll = scroll
 		ui.menu_select(&menu.menu, clamp(selected, 0, max(0, len(menu.menu.items) - 1)))
-		if menu.count > 0 && !menu.menu.items[ui.menu_selected(&menu.menu)].enabled {
+		if len(menu.menu.items) > 0 && !menu.menu.items[ui.menu_selected(&menu.menu)].enabled {
 			ui.menu_step(&menu.menu, 1)
 		}
 	}
 	if _, entering := document_menu_url_entry(w); entering {
-		for i in 0 ..< menu.count {
-			if menu.entries[i].action == .Url_Field {ui.menu_select(&menu.menu, i)}
+		for i in 0 ..< len(menu.menu.items) {
+			entry, _ := document_menu_entry(menu, i)
+			if entry.action == .Url_Field {ui.menu_select(&menu.menu, i)}
 		}
 	}
 	ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
@@ -347,34 +362,20 @@ document_menu_show :: proc(
 	document_menu_build(app, w, true)
 }
 
-// Where the menu hangs from: under the pane's Documents button, or inside its corner without one.
-@(private = "file")
-document_menu_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> (x, y: f32) {
-	r := pane.rect
-	l := pane_header_layout(w, pane)
-	width := ui.MENU_WIDTH * w.scale
-	if w.header_height == 0 && !pane.floating && len(w.panes) > 1 && !w.panes[1].floating {
-		return r.x + r.width - width - ui.SPACE_2 * w.scale, r.y + ui.SPACE_2 * w.scale
-	}
-	button := l.buttons[int(ui.Header_Action.Documents) - 1]
-	if button.width == 0 {
-		return r.x + r.width - width - ui.SPACE_2 * w.scale, r.y + ui.HEADER_HEIGHT * w.scale + ui.SPACE_1 * w.scale
-	}
-	return button.x + button.width - width, button.y + button.height + ui.SPACE_1 * w.scale
-}
-
 document_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	if !CONTENT_POLICY[pane.content.kind].documents {return}
-	x, y := document_menu_anchor(w, pane)
-	document_menu_show(app, w, pane.content, Document_Menu_List{}, x, y)
+	anchor := pane_header_document_anchor(w, pane)
+	document_menu_show(app, w, pane.content, Document_Menu_List{}, anchor.x, anchor.y)
 }
 
 // The Show Documents command: the only way to the menu for a split pane with headers off.
 document_menu_open_focused :: proc(app: ^App, w: ^Window) {
+	tree := window_tree(w)
+	if tree == nil {return}
 	for pane in w.panes {
-		if pane.node != w.tree.focus {continue}
+		if pane.node != tree.focus {continue}
 		if !CONTENT_POLICY[pane.content.kind].documents {
-			notify(app, .Info, "Settings has no documents of its own.")
+			notify(app, .Info, content_documents_notice(pane.content.kind))
 			return
 		}
 		if !gesture_cancel(app, w) {return}
@@ -499,9 +500,9 @@ document_menu_pin :: proc(app: ^App, w: ^Window, level: Document_Level, document
 document_menu_remove :: proc(app: ^App, w: ^Window, index: int) {
 	state := document_menu_state(w)
 	menu := &w.document_menu
-	if state == nil || index < 0 || index >= menu.count {return}
-	entry := menu.entries[index]
-	if entry.action != .Open {return}
+	if state == nil {return}
+	entry, listed := document_menu_entry(menu, index)
+	if !listed || entry.action != .Open {return}
 	scopes, found := document_scopes(app, state.content)
 	if found && document_remove(scopes, entry.level, entry.target) {documents_changed(app)}
 	document_menu_build(app, w)
@@ -511,8 +512,9 @@ document_menu_remove :: proc(app: ^App, w: ^Window, index: int) {
 document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 	state := document_menu_state(w)
 	menu := &w.document_menu
-	if state == nil || index < 0 || index >= menu.count {return}
-	entry := menu.entries[index]
+	if state == nil {return}
+	entry, listed := document_menu_entry(menu, index)
+	if !listed {return}
 	switch entry.action {
 	case .None, .Url_Field:
 	case .Open:
@@ -570,11 +572,12 @@ document_menu_url_edited :: proc(app: ^App, w: ^Window) {
 @(private = "file")
 document_popout_open :: proc(app: ^App, w: ^Window, index: int) {
 	menu := &w.document_menu
-	if index < 0 || index >= menu.count || menu.entries[index].action != .Open {return}
+	entry, _ := document_menu_entry(menu, index)
+	if entry.action != .Open {return}
 	if _, entering := document_menu_url_entry(w); entering {
 		document_menu_set(app, w, Document_Menu_List{}, .Rebuild)
 	}
-	document_menu_set(app, w, Document_Menu_List{Document_Popout{index, menu.entries[index].level}}, .Keep)
+	document_menu_set(app, w, Document_Menu_List{Document_Popout{index, entry.level}}, .Keep)
 }
 
 @(private = "file")
@@ -595,7 +598,7 @@ document_popout_choose :: proc(app: ^App, w: ^Window, level: Document_Level) {
 	popout, shown := document_menu_popout(w)
 	if !shown {return}
 	menu := &w.document_menu
-	entry := menu.entries[popout.row]
+	entry, _ := document_menu_entry(menu, popout.row)
 	document_popout_close(app, w)
 	if entry.level == level {return}
 	// Rebuilding replaces the text the entry borrows.
@@ -603,8 +606,10 @@ document_popout_choose :: proc(app: ^App, w: ^Window, level: Document_Level) {
 	document_menu_pin(app, w, level, {target, entry.folder})
 	document_menu_build(app, w)
 	// The row moved with its level, so the selection follows it there.
-	for i in 0 ..< menu.count {
-		if menu.entries[i].action == .Open && menu.entries[i].target == target {ui.menu_select(&menu.menu, i)}
+	for i in 0 ..< len(menu.menu.items) {
+		if row, _ := document_menu_entry(menu, i); row.action == .Open && row.target == target {
+			ui.menu_select(&menu.menu, i)
+		}
 	}
 	ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
 }
@@ -710,8 +715,8 @@ document_menu_text_input :: proc(app: ^App, w: ^Window, text: string) {
 @(private = "file")
 document_url_box :: proc(w: ^Window) -> (ui.Field_Box, bool) {
 	menu := &w.document_menu
-	for i in 0 ..< menu.count {
-		if menu.entries[i].action != .Url_Field {continue}
+	for i in 0 ..< len(menu.menu.items) {
+		if entry, _ := document_menu_entry(menu, i); entry.action != .Url_Field {continue}
 		return {
 			field = &menu.url,
 			text = &w.ui_text,
@@ -769,12 +774,13 @@ document_menu_tooltip :: proc(w: ^Window, x, y: f32) -> string {
 	}
 	width, height := f32(w.width), f32(w.height)
 	row := ui.menu_hit(&menu.menu, x, y, width, height, w.scale)
-	if row < 0 || menu.entries[row].action != .Open {return ""}
+	entry, _ := document_menu_entry(menu, row)
+	if entry.action != .Open {return ""}
 	switch ui.menu_row_part(&menu.menu, row, x, y, width, height, w.scale) {
 	case .Row:
 		return ""
 	case .Action:
-		return DOCUMENT_LEVEL_TIPS[menu.entries[row].level]
+		return DOCUMENT_LEVEL_TIPS[entry.level]
 	case .Selected_Action:
 		return "Remove"
 	}
@@ -805,7 +811,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 		return
 	}
 	if e.button != .Left {return}
-	if menu.entries[hit].action == .Url_Field {
+	if entry, _ := document_menu_entry(menu, hit); entry.action == .Url_Field {
 		if box, shown := document_url_box(w); shown {
 			ui.field_pointer(&menu.url, ui.field_box_offset(box, x), true, .Shift in e.modifiers)
 			w.dirty = true
@@ -844,7 +850,8 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !shown {return .Ok}
 	if render.push_layer(&w.list, {0, 0, width, height}) != .None {return .Ok}
 	if ui.panel_draw(&w.list, ui.popover_panel(document_popout_rect(w), s), app.theme) != .None {return .Ok}
-	current := menu.entries[popout.row].level
+	entry, _ := document_menu_entry(menu, popout.row)
+	current := entry.level
 	for level in Document_Level {
 		b := ui.Button {
 			rect     = document_popout_button(w, level),

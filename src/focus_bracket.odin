@@ -79,7 +79,8 @@ focus_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 
 @(private = "file")
 focus_shown :: proc(w: ^Window) -> (layout.Content, bool) {
-	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return {}, false}
-	pane, is_pane := w.tree.nodes[w.tree.focus].(layout.Pane)
+	tree := window_tree(w)
+	if tree == nil || tree.focus == layout.INVALID_NODE {return {}, false}
+	pane, is_pane := tree.nodes[tree.focus].(layout.Pane)
 	return pane.content, is_pane
 }

@@ -3,7 +3,6 @@ package main
 import "aio:input"
 import "aio:render"
 import "aio:ui"
-import "core:fmt"
 
 // Horizontal tab-strip geometry and drawing. The strip shares the 40 DIP title bar with the
 // workspace chip and the caption controls, so both the tab bar and the controls end read the same
@@ -13,7 +12,7 @@ window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	left := workspace_button_width(w) + status_pill_width(app, w)
 	// Tabs share their width with any that a drag would add, without counting as tabs yet.
 	bar := ui.tab_bar_layout(
-		max(0, f32(w.width) - 218 * w.scale - left),
+		max(0, f32(w.width) - window_caption_reserve(w) - left),
 		w.scale,
 		len(w.workspace.tabs) + w.tab_incoming.count,
 	)
@@ -62,23 +61,25 @@ window_tab_close_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect 
 	return r
 }
 
-window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> int {
-	if x < bar.x || x >= bar.x + bar.width || y < 0 || y >= bar.height {return -1}
+window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab_Chrome_Target {
+	if x < bar.x || x >= bar.x + bar.width || y < 0 || y >= bar.height {return nil}
 	for pass in 0 ..< 2 {
 		for i := bar.count - 1; i >= 0; i -= 1 {
 			foreground := tab_drag_active(w) && w.workspace.tabs[i].marked
 			if foreground != (pass == 0) {continue}
 			r := window_tab_rect(app, w, i)
-			if x >= r.x && x < r.x + r.width {return i}
+			if x >= r.x && x < r.x + r.width {return Tab_Chrome_Tab{i}}
 		}
 	}
-	return ui.tab_bar_hit_test(bar, x, y) == bar.count ? bar.count : -1
+	if ui.tab_bar_hit_test(bar, x, y) == bar.count {return Tab_Chrome_New{}}
+	return nil
 }
 
 window_tab_close_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> int {
-	index := window_tab_hit(app, w, bar, x, y)
-	r := window_tab_close_rect(app, w, index)
-	if r.width > 0 && render.rect_contains(r, x, y) {return index}
+	tab, ok := window_tab_hit(app, w, bar, x, y).(Tab_Chrome_Tab)
+	if !ok {return -1}
+	r := window_tab_close_rect(app, w, tab.index)
+	if r.width > 0 && render.rect_contains(r, x, y) {return tab.index}
 	return -1
 }
 
@@ -92,13 +93,15 @@ strip_tab_interaction_hit :: proc(
 	if y >= bar.height {return {}}
 	chevron := tab_chevron_rect(app, w)
 	if button == .Left && x >= chevron.x && x < chevron.x + chevron.width {
-		return {kind = .Profiles, menu_anchor = {x, chevron.y + chevron.height}}
+		anchor := [2]f32{x, chevron.y + chevron.height}
+		return {target = Tab_Chrome_Profiles{}, inside = true, menu_anchor = anchor}
 	}
-	index := window_tab_hit(app, w, bar, x, y)
-	if index == bar.count {return {kind = .New_Tab, menu_anchor = {x, bar.height}}}
-	if index < 0 {return {kind = .Empty}}
-	kind: Tab_Interaction_Kind = window_tab_close_hit(app, w, bar, x, y) >= 0 ? .Close : .Tab
-	return {kind = kind, index = index}
+	hit := Tab_Interaction_Hit{target = window_tab_hit(app, w, bar, x, y), inside = true}
+	#partial switch _ in hit.target {
+	case Tab_Chrome_New: hit.menu_anchor = {x, bar.height}
+	case Tab_Chrome_Tab: hit.close = window_tab_close_hit(app, w, bar, x, y) >= 0
+	}
+	return hit
 }
 
 // The rightmost point the title chrome claims before the native caption buttons start.
@@ -114,22 +117,15 @@ window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 	return max(left, bar.x + f32(bar.count) * bar.tab_width + 2 * bar.button_width)
 }
 
-toggle_tab_orientation :: proc(app: ^App) {
-	next := app.settings.tabs.orientation == .Horizontal ? "vertical" : "horizontal"
-	if _, has_file := settings_save_value(app, "tabs.orientation", next, "Could not save the tab orientation.");
-	   !has_file {
-		app.settings.tabs.orientation = next == "horizontal" ? .Horizontal : .Vertical
-		for window in app.windows {
-			window_apply_settings(app, window)
-			rail_reveal_active(window)
-		}
-	}
-}
-
 @(private)
-tab_control :: proc(w: ^Window, index: int) -> ui.Control_Motion {
-	if index < 0 || index >= len(w.tab_controls) {return {}}
-	return w.tab_controls[index]
+tab_control :: proc(w: ^Window, target: Tab_Chrome_Target) -> ui.Control_Motion {
+	switch t in target {
+	case Tab_Chrome_Tab:
+		if t.index >= 0 && t.index < len(w.tab_controls) {return w.tab_controls[t.index]}
+	case Tab_Chrome_New: return w.new_tab_control
+	case Tab_Chrome_Profiles: return w.profiles_control
+	}
+	return {}
 }
 
 window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
@@ -140,8 +136,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		foreground := pass == 1
 		for tab, i in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
-			title := fmt.tprintf("Tab %d", i + 1)
-			if tab.title != "" {title = tab.title}
+			title := tab_display_title(tab, i + 1)
 			icon: string
 			atlas := render.Rect{}
 			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {
@@ -160,8 +155,8 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 				title,
 				i == w.workspace.selected,
 				w.scale,
-				tab_control(w, i).hover.value,
-				tab_control(w, i).press.value,
+				tab_control(w, Tab_Chrome_Tab{i}).hover.value,
+				tab_control(w, Tab_Chrome_Tab{i}).press.value,
 				0,
 				x,
 				tab_marked_shown(w, i),
@@ -183,7 +178,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		// The selected tab rises with its hover, so its underline rises with it.
 		lift := ui.hover_lift_at(
 			app.theme,
-			tab_control(w, w.workspace.selected).hover.value,
+			tab_control(w, Tab_Chrome_Tab{w.workspace.selected}).hover.value,
 			w.scale,
 		)
 		underline := render.Rect{x, 30 * w.scale - lift, max(0, bar.tab_width - 20 * w.scale), 2 * w.scale}
@@ -207,8 +202,8 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		"",
 		false,
 		w.scale,
-		tab_control(w, bar.count).hover.value,
-		tab_control(w, bar.count).press.value,
+		tab_control(w, Tab_Chrome_New{}).hover.value,
+		tab_control(w, Tab_Chrome_New{}).press.value,
 		0,
 		-1,
 		false,
@@ -218,7 +213,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	); result != .Ok {return result}
 	chevron := tab_chevron_rect(app, w)
 	if render.push_layer(&w.list, chevron) != .None {return .Ok}
-	control := tab_control(w, bar.count + 1)
+	control := tab_control(w, Tab_Chrome_Profiles{})
 	hover := control.hover.value
 	tile := render.Rect{chevron.x + 2 * w.scale, 6 * w.scale, chevron.width - 4 * w.scale, 28 * w.scale}
 	_ = ui.icon_button_draw(
@@ -233,12 +228,4 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		ui.ICON_INDICATOR,
 	)
 	return .Ok
-}
-
-settings_toggle_bool :: proc(app: ^App, key: string, target: ^bool) {
-	value := target^ ? "false" : "true"
-	if _, has_file := settings_save_value(app, key, value, "Could not save the setting."); has_file {return}
-	target^ = !target^
-	for window in app.windows {window_apply_settings(app, window)}
-	status_apply_settings(app)
 }

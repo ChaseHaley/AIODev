@@ -64,9 +64,9 @@ Status_Item :: struct {
 
 @(private)
 status_crumb_at :: proc(workspace: ^Workspace, tab: int, entry: ^Session_Entry) -> string {
-	title := status_tab_title(workspace, tab)
+	title := tab_display_title(workspace.tabs[tab], tab + 1)
 	if tab_pane_count(workspace.tabs[tab]) > 1 {
-		return fmt.tprintf("%s › %s › %s", workspace.name, title, status_pane_title(entry))
+		return fmt.tprintf("%s › %s › %s", workspace.name, title, session_display_title(entry))
 	}
 	return fmt.tprintf("%s › %s", workspace.name, title)
 }

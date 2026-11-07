@@ -40,3 +40,7 @@ settings_reset_finish :: proc(app: ^App, reset: Settings_Reset, accepted: bool) 
 	}
 	notify(app, .Info, "All settings restored to factory defaults.")
 }
+
+settings_reset_destroy :: proc(reset: ^Settings_Reset) {
+	delete(reset.source)
+}

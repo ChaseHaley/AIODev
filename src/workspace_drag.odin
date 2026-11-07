@@ -12,13 +12,19 @@ import "core:math"
 // content back.
 Workspace_Drag_Drop :: union {
 	Workspace_Drop_Row,
+	Workspace_Drop_New_Workspace,
 	Workspace_Drop_New_Window,
 }
 
-// A workspace row; id 0 is the new workspace row.
+// An existing workspace's row.
 Workspace_Drop_Row :: struct {
 	request: Workspace_Move_Request,
 	id:      u32,
+}
+
+// The row that moves the content into a new workspace.
+Workspace_Drop_New_Workspace :: struct {
+	request: Workspace_Move_Request,
 }
 
 Workspace_Drop_New_Window :: struct {}
@@ -64,13 +70,14 @@ workspace_picker_drag_hover :: proc(
 	if !held {
 		if holding {workspace_picker_drag_leave(app, previous)}
 		window_overlays_cancel(app, w)
-		workspace_picker_transition(w, .List)
+		workspace_picker_transition(w, Workspace_Picker_List{})
 		workspace_picker_list_set(w, Workspace_Move_Target{request, true})
 		ui.field_set(&p.query, "")
 		workspace_picker_filter(app, w)
 	}
 	row := workspace_picker_hit(w, x, y)
-	if row == len(p.rows) + 1 && !new_window_allowed {row = -1}
+	_, new_window := workspace_picker_target_at(w, row).(Picker_New_Window)
+	if new_window && !new_window_allowed {row = -1}
 	p.selected = row
 	return {window = w.id, pointer = {x, y}, row = row}, true
 }
@@ -80,9 +87,7 @@ workspace_picker_drag_hover :: proc(
 workspace_picker_drag_scroll :: proc(app: ^App, d: Drop_Workspace_Dropdown, delta: f32) -> ^Window {
 	w := workspace_drag_picker(app, d)
 	if w == nil {return nil}
-	_, visible := workspace_picker_rect(w)
-	p := &w.workspace_picker
-	p.scroll = clamp(p.scroll - int(math.sign(delta)), 0, max(0, workspace_picker_count(w) - visible))
+	workspace_picker_scroll(w, -int(math.sign(delta)))
 	return w
 }
 
@@ -91,11 +96,12 @@ workspace_picker_drag_drop :: proc(app: ^App, d: Drop_Workspace_Dropdown) -> (dr
 	defer workspace_picker_drag_leave(app, d)
 	w := workspace_drag_picker(app, d)
 	if w == nil {return}
-	p := &w.workspace_picker
-	move, _ := workspace_picker_move(p)
-	hit, count := d.row, len(p.rows)
-	if hit >= 0 && hit <= count {return Workspace_Drop_Row{move.request, hit < count ? p.rows[hit].id : 0}}
-	if hit == count + 1 {return Workspace_Drop_New_Window{}}
+	move, _ := workspace_picker_move(&w.workspace_picker)
+	#partial switch t in workspace_picker_target_at(w, d.row) {
+	case Picker_Workspace: return Workspace_Drop_Row{move.request, t.id}
+	case Picker_New_Workspace: return Workspace_Drop_New_Workspace{move.request}
+	case Picker_New_Window: return Workspace_Drop_New_Window{}
+	}
 	return
 }
 

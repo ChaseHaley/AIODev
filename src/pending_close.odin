@@ -1,5 +1,6 @@
 package main
 
+import "aio:settings"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"
@@ -122,11 +123,12 @@ pending_close_text :: proc(
 			text.body = "The shells running in it will exit."
 		}
 		text.label = "Close"
-		text.note = "Turn this off with Confirm Closing Split Tabs in Settings."
 		if index := tab_index_by_id(workspace, target.tab); tab_close_has_work(app, workspace, index) {
 			text.title = pc.tabs > 1 ? "Close tabs with ongoing work?" : "Close tab with ongoing work?"
 			text.body = "Closing will interrupt this work."
-			text.note = ""
+		} else {
+			setting := settings.schema_find("tab.confirm_close")
+			text.note = fmt.tprintf("Turn this off with %s in Settings.", setting.title)
 		}
 	case Close_Workspace:
 		name := target.workspace_name

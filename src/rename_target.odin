@@ -3,67 +3,114 @@ package main
 import "aio:layout"
 import "core:strings"
 
-Rename_Kind :: enum {Tab, Pane, Workspace}
+// What a rename names. A tab is found within its workspace and a pane by its terminal session, so the
+// window that presents the field need not hold the target.
+Rename_Target :: union {
+	Rename_Tab_Target,
+	Rename_Pane_Target,
+	Rename_Workspace_Target,
+}
 
-Rename_Target :: struct {
-	kind: Rename_Kind,
-	id:   u32,
+Rename_Tab_Target :: struct {
+	workspace, tab: u32,
+}
+
+Rename_Pane_Target :: struct {
+	session: u32,
+}
+
+Rename_Workspace_Target :: struct {
+	workspace: u32,
+}
+
+// What an empty name means to the editor that typed it. Every editor cleans the name the same way.
+Rename_Intent :: enum {
+	// A tab or pane: empty restores the automatic title.
+	Automatic_Title,
+	// The workspace chip: empty keeps the current name, and the chip closes.
+	Workspace_Chip,
+	// The picker's row editor: empty is refused, and the editor stays open with its error.
+	Workspace_Row,
 }
 
 Rename_Outcome :: enum {
 	Saved,
-	Empty,   // Workspace names cannot be empty; tab and pane names can restore automatic titles.
+	Empty,   // A row editor's workspace name cannot be empty.
 	Missing, // The target no longer exists.
 	Failed,  // The cleaned name could not be stored.
 }
 
+// A name as typed, cleaned as every rename stores it.
+rename_clean :: proc(value: string) -> string {
+	return display_title(strings.trim_space(value), context.temp_allocator)
+}
+
 // Resolves the target by id at commit, so a target closed while the field is open reports .Missing
-// instead of writing through a stale pointer. w presents the field: a tab target belongs to its
-// rail, and tab and pane names refresh its titles; workspace names repaint every window.
+// instead of writing through a stale pointer. Tab and pane names refresh the titles of every window that
+// shows them; workspace names repaint every window. An empty name under .Workspace_Chip saves nothing.
 @(require_results)
 rename_target_commit :: proc(
 	app: ^App,
-	w: ^Window,
 	target: Rename_Target,
 	value: string,
+	intent: Rename_Intent,
 ) -> Rename_Outcome {
-	destination := rename_target_destination(app, w, target)
+	destination := rename_target_destination(app, target)
 	if destination == nil {return .Missing}
-	clean := display_title(strings.trim_space(value), context.temp_allocator)
-	if clean == "" && target.kind == .Workspace {return .Empty}
+	clean := rename_clean(value)
+	if clean == "" {
+		switch intent {
+		case .Automatic_Title:
+		case .Workspace_Chip: return .Saved
+		case .Workspace_Row: return .Empty
+		}
+	}
 	name, err := strings.clone(clean)
 	if err != nil {return .Failed}
 	delete(destination^)
 	destination^ = name
-	switch target.kind {
-	case .Tab, .Pane:
-		for tab in w.workspace.tabs {tab_update_title(app, tab)}
-		window_update_title(app, w)
-		w.dirty = true
-		if target.kind == .Pane && w.tree != nil {
-			node := layout.find_content(w.tree, {.Terminal, target.id})
-			if floating, ok := layout.float_of(w.tree, node); ok && floating.minimized {
-				floating_capsules_refresh(app, w)
+	switch t in target {
+	case Rename_Tab_Target:
+		workspace := workspace_find(app, t.workspace)
+		for tab in workspace.tabs {tab_update_title(app, tab)}
+		if owner := window_for_workspace(app, workspace); owner != nil {
+			window_update_title(app, owner)
+			owner.dirty = true
+		}
+	case Rename_Pane_Target:
+		// The pane's workspace window and a linked window holding the pane both show its name.
+		content := layout.Content{.Terminal, t.session}
+		for window in app.windows {
+			if !workspace_has_content(window.workspace, content) {continue}
+			for tab in window.workspace.tabs {tab_update_title(app, tab)}
+			window_update_title(app, window)
+			window.dirty = true
+			tree := window_tree(window)
+			if tree == nil {continue}
+			node := layout.find_content(tree, content)
+			if floating, ok := layout.float_of(tree, node); ok && floating.minimized {
+				floating_capsules_refresh(app, window)
 			}
 		}
-	case .Workspace:
+	case Rename_Workspace_Target:
 		for window in app.windows {window_relayout(app, window)}
-		workspace_pickers_refresh(app)
+		workspace_mutation_finish(app, workspace_find(app, t.workspace), {.Names})
 	}
 	return .Saved
 }
 
+// The name a target stores, or nil when it no longer exists.
 @(private)
-rename_target_destination :: proc(app: ^App, w: ^Window, target: Rename_Target) -> ^string {
-	switch target.kind {
-	case .Tab:
-		for tab in w.workspace.tabs {
-			if tab.id == target.id {return &tab.name}
-		}
-	case .Pane:
-		if entry := session_find(app, target.id); entry != nil {return &entry.name}
-	case .Workspace:
-		if workspace := workspace_find(app, target.id); workspace != nil {return &workspace.name}
+rename_target_destination :: proc(app: ^App, target: Rename_Target) -> ^string {
+	switch t in target {
+	case Rename_Tab_Target:
+		workspace := workspace_find(app, t.workspace)
+		if workspace == nil {return nil}
+		if index := tab_index_by_id(workspace, t.tab); index >= 0 {return &workspace.tabs[index].name}
+	case Rename_Pane_Target:
+		if entry := session_find(app, t.session); entry != nil {return &entry.name}
+	case Rename_Workspace_Target:
+		if workspace := workspace_find(app, t.workspace); workspace != nil {return &workspace.name}
 	}
 	return nil
 }

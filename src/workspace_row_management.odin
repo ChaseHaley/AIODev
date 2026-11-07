@@ -6,7 +6,40 @@ import "aio:render"
 import "aio:ui"
 
 Workspace_Row_Action :: enum { Rename, Icon, Open_Window, Delete, Move_Up, Move_Down }
-WORKSPACE_ROW_ACTIONS :: [?]Workspace_Row_Action{.Rename, .Icon, .Open_Window, .Move_Up, .Move_Down, .Delete}
+
+// One row of a workspace row's menu. Open Window's title depends on the workspace; see
+// workspace_row_menu_title.
+Workspace_Row_Menu_Item :: struct {
+	action: Workspace_Row_Action,
+	title:  string,
+}
+
+@(rodata)
+WORKSPACE_ROW_MENU := [?]Workspace_Row_Menu_Item {
+	{.Rename, "Rename"},
+	{.Icon, "Change Icon"},
+	{.Open_Window, "Open in New Window"},
+	{.Move_Up, "Move Up"},
+	{.Move_Down, "Move Down"},
+	{.Delete, "Delete…"},
+}
+
+workspace_row_menu_title :: proc(app: ^App, item: Workspace_Row_Menu_Item, id: u32) -> string {
+	if item.action == .Open_Window {return workspace_row_window_title(app, id)}
+	return item.title
+}
+
+// Whether `action` can run on row `id` from window `w`: what the menu shows and what choosing it does.
+workspace_row_action_enabled :: proc(app: ^App, w: ^Window, id: u32, action: Workspace_Row_Action) -> bool {
+	if workspace_row_target(app, id) == nil {return false}
+	switch action {
+	case .Rename, .Icon, .Delete: return true
+	case .Open_Window: return workspace_row_window_enabled(app, w, id)
+	case .Move_Up: return workspace_order_neighbor(app, id, -1) != 0
+	case .Move_Down: return workspace_order_neighbor(app, id, 1) != 0
+	}
+	return false
+}
 
 workspace_row_window_enabled :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 	target := workspace_row_target(app, id)
@@ -54,7 +87,7 @@ workspace_row_menu_open :: proc(app: ^App, w: ^Window, id: u32) {
 	if workspace_row_target(app, id) == nil { return }
 	if workspace_picker_icons(&w.workspace_picker) {workspace_picker_return(app, w)}
 	workspace_row_rename_finish(app, w, false)
-	workspace_picker_transition(w, .Menu, id)
+	workspace_picker_transition(w, Workspace_Picker_Menu{id})
 	w.workspace_picker.menu_selected = 0
 	workspace_row_reveal(w, id)
 	w.dirty = true
@@ -62,22 +95,23 @@ workspace_row_menu_open :: proc(app: ^App, w: ^Window, id: u32) {
 
 workspace_row_menu_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
-	id, selected := workspace_picker_target(p, .Menu), p.menu_selected
+	id, selected := workspace_picker_menu_id(p), p.menu_selected
 	w.dirty = true
-	target := workspace_row_target(app, id)
-	if target == nil || selected < 0 || selected >= len(WORKSPACE_ROW_ACTIONS) { return }
-	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
-	if actions[selected] == .Open_Window {
+	if selected < 0 || selected >= len(WORKSPACE_ROW_MENU) { return }
+	action := WORKSPACE_ROW_MENU[selected].action
+	if !workspace_row_action_enabled(app, w, id, action) { return }
+	if action == .Open_Window {
 		_ = workspace_open_window(app, w, id)
 		return
 	}
-	workspace_picker_transition(w, .List)
-	#partial switch actions[selected] {
+	workspace_picker_transition(w, Workspace_Picker_List{})
+	switch action {
 	case .Rename: workspace_row_rename_open(app, w, id)
 	case .Icon: workspace_row_icon_open(app, w, id)
-	case .Delete: workspace_delete_request(app, w, target)
+	case .Open_Window:
+	case .Delete: workspace_delete_request(app, w, workspace_row_target(app, id))
 	case .Move_Up, .Move_Down:
-		step := actions[selected] == .Move_Up ? -1 : 1
+		step := action == .Move_Up ? -1 : 1
 		_ = workspace_reorder(app, id, workspace_order_neighbor(app, id, step))
 		workspace_row_reveal(w, id)
 	}
@@ -87,26 +121,30 @@ workspace_row_rename_open :: proc(app: ^App, w: ^Window, id: u32) {
 	target := workspace_row_target(app, id)
 	if target == nil { return }
 	if workspace_picker_icons(&w.workspace_picker) {workspace_picker_return(app, w)}
+	workspace_picker_transition(w, Workspace_Picker_Rename{id = id})
 	p := &w.workspace_picker
-	workspace_picker_transition(w, .Rename, id)
-	ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, app.animations, time.tick_now())
-	ui.field_set(&w.rename, target.name)
-	ui.field_select_all(&w.rename)
+	workspace_row_rename_target(p, app.animations, time.tick_now())
+	ui.field_set(&p.rename, target.name)
+	ui.field_select_all(&p.rename)
 	workspace_row_reveal(w, id)
 	w.dirty = true
 }
 
+// Ends the row editor. Saving refuses an empty name, keeping the editor open with its error, as it does a
+// name that could not be stored.
 workspace_row_rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
-	id := workspace_picker_target(&w.workspace_picker, .Rename)
+	p := &w.workspace_picker
+	id := workspace_picker_rename_id(p)
 	if id == 0 { return }
 	if save {
-		outcome := rename_target_commit(app, w, Rename_Target{.Workspace, id}, ui.field_string(&w.rename))
+		value := ui.field_string(&p.rename)
+		outcome := rename_target_commit(app, Rename_Workspace_Target{id}, value, .Workspace_Row)
 		if outcome == .Empty || outcome == .Failed {
 			workspace_row_rename_error_set(w, true)
 			return
 		}
 	}
-	workspace_picker_transition(w, .List)
+	workspace_picker_transition(w, Workspace_Picker_List{})
 	workspace_picker_layout_changed(w)
 }
 
@@ -116,17 +154,30 @@ workspace_row_rename_error_set :: proc(w: ^Window, error: bool) {
 	}
 }
 
+// The rename field eases open below its row while the rename lasts; true when it moved this frame.
+workspace_row_rename_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) -> bool {
+	p := &w.workspace_picker
+	if _, renaming := p.state.(Workspace_Picker_Rename); !renaming {return false}
+	workspace_row_rename_target(p, enabled, now)
+	return ui.motion_update(&p.rename_motion, now)
+}
+
+@(private = "file")
+workspace_row_rename_target :: proc(p: ^Workspace_Picker, enabled: bool, now: time.Tick) {
+	ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, enabled, now)
+}
+
 // The inline rename: SPACE_2, a standard field, SPACE_2, one Detail hint line and SPACE_2.
 WORKSPACE_RENAME_HEIGHT :: 72
 
 workspace_row_rename_height :: proc(w: ^Window) -> f32 {
-	if workspace_picker_mode(&w.workspace_picker) != .Rename {return 0}
+	if _, renaming := w.workspace_picker.state.(Workspace_Picker_Rename); !renaming {return 0}
 	return WORKSPACE_RENAME_HEIGHT * w.scale * w.workspace_picker.rename_motion.value
 }
 
 workspace_row_rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	p := &w.workspace_picker
-	index := workspace_row_index(w, workspace_picker_target(p, .Rename))
+	index := workspace_row_index(w, workspace_picker_rename_id(p))
 	if index < 0 { return {} }
 	r, s := workspace_picker_row_rect(w, index), w.scale
 	offset := WORKSPACE_RENAME_HEIGHT * s * (1 - p.rename_motion.value)
@@ -135,7 +186,7 @@ workspace_row_rename_field_rect :: proc(w: ^Window) -> render.Rect {
 
 workspace_row_rename_box :: proc(w: ^Window) -> ui.Field_Box {
 	return {
-		field = &w.rename,
+		field = &w.workspace_picker.rename,
 		text = &w.ui_text,
 		rect = workspace_row_rename_field_rect(w),
 		inset = ui.CONTROL_INSET,
@@ -153,8 +204,12 @@ workspace_row_icon_open :: proc(app: ^App, w: ^Window, id: u32) {
 	p := &w.workspace_picker
 	workspace_row_rename_finish(app, w, false)
 	if !workspace_picker_icons(p) {ui.field_set(&p.saved_query, ui.field_string(&p.query))}
-	workspace_picker_transition(w, .Icons, id)
-	p.selected = target.icon.emoji == "" ? target.icon.preset : len(WORKSPACE_ICONS)
+	workspace_picker_transition(w, Workspace_Picker_Icons{id})
+	if target.icon.emoji == "" {
+		workspace_picker_select_target(w, Picker_Icon{target.icon.preset})
+	} else {
+		workspace_picker_select_target(w, Picker_Emoji_Field{})
+	}
 	p.scroll = 0
 	ui.field_set(&p.query, target.icon.emoji)
 	ui.field_select_all(&p.query)
@@ -164,8 +219,8 @@ workspace_row_icon_open :: proc(app: ^App, w: ^Window, id: u32) {
 workspace_picker_return :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	if !workspace_picker_icons(p) {return}
-	id := workspace_picker_target(p, .Icons)
-	workspace_picker_transition(w, .List)
+	id := workspace_picker_icon_id(p)
+	workspace_picker_transition(w, Workspace_Picker_List{})
 	ui.field_set(&p.query, ui.field_string(&p.saved_query))
 	workspace_picker_filter(app, w)
 	workspace_row_reveal(w, id)
@@ -174,30 +229,33 @@ workspace_picker_return :: proc(app: ^App, w: ^Window) {
 
 workspace_row_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	p := &w.workspace_picker
-	switch workspace_picker_mode(p) {
-	case .List: if !workspace_picker_browsing(p) { return false }
-	case .Closed, .Icons, .Tint: return false
-	case .Menu, .Rename:
+	#partial switch _ in p.state {
+	case Workspace_Picker_List: if !workspace_picker_browsing(p) { return false }
+	case Workspace_Picker_Menu, Workspace_Picker_Rename:
+	case: return false
 	}
-	if id := workspace_picker_target(p, .Menu); id != 0 {
+	if id := workspace_picker_menu_id(p); id != 0 {
 		w.dirty = true
-		if workspace_row_target(app, id) == nil { workspace_picker_transition(w, .List); return true }
+		if workspace_row_target(app, id) == nil {
+			workspace_picker_transition(w, Workspace_Picker_List{})
+			return true
+		}
 		if step := ui.list_step(e); step != 0 {
-			p.menu_selected = (p.menu_selected + len(WORKSPACE_ROW_ACTIONS) + step) % len(WORKSPACE_ROW_ACTIONS)
+			p.menu_selected = (p.menu_selected + len(WORKSPACE_ROW_MENU) + step) % len(WORKSPACE_ROW_MENU)
 			return true
 		}
 		#partial switch e.key {
-		case .Escape, .Arrow_Left, .Context_Menu: workspace_picker_transition(w, .List)
+		case .Escape, .Arrow_Left, .Context_Menu: workspace_picker_transition(w, Workspace_Picker_List{})
 		case .Tab:
 			step := .Shift in e.modifiers ? -1 : 1
-			p.menu_selected = (p.menu_selected + len(WORKSPACE_ROW_ACTIONS) + step) % len(WORKSPACE_ROW_ACTIONS)
+			p.menu_selected = (p.menu_selected + len(WORKSPACE_ROW_MENU) + step) % len(WORKSPACE_ROW_MENU)
 		case .Home: p.menu_selected = 0
-		case .End: p.menu_selected = len(WORKSPACE_ROW_ACTIONS) - 1
+		case .End: p.menu_selected = len(WORKSPACE_ROW_MENU) - 1
 		case .Enter, .Numpad_Enter, .Space: workspace_row_menu_choose(app, w)
 		}
 		return true
 	}
-	if id := workspace_picker_target(p, .Rename); id != 0 {
+	if id := workspace_picker_rename_id(p); id != 0 {
 		w.dirty = true
 		if workspace_row_target(app, id) == nil {
 			workspace_row_rename_finish(app, w, false)
@@ -208,23 +266,24 @@ workspace_row_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 		case .Enter, .Numpad_Enter: workspace_row_rename_finish(app, w, true)
 		case .Tab:
 			workspace_row_rename_finish(app, w, true)
-			if workspace_picker_mode(p) != .Rename {
+			if _, renaming := p.state.(Workspace_Picker_Rename); !renaming {
 				p.selected = (p.selected + workspace_picker_count(w) + (.Shift in e.modifiers ? -1 : 1))%
 					workspace_picker_count(w)
 			}
 		case:
-			field_edit_key(app, &w.rename, e)
+			field_edit_key(app, &p.rename, e)
 			workspace_row_rename_error_set(w, false)
 		}
 		return true
 	}
-	if p.selected < 0 || p.selected >= len(p.rows) { return false }
+	row, on_row := workspace_picker_selection(w).(Picker_Workspace)
+	if !on_row { return false }
 	if e.key == .Arrow_Right || e.key == .Context_Menu || e.key == .F10 && e.modifiers == {.Shift} {
-		workspace_row_menu_open(app, w, p.rows[p.selected].id)
+		workspace_row_menu_open(app, w, row.id)
 		return true
 	}
 	if e.key == .F2 && e.modifiers == {} {
-		workspace_row_rename_open(app, w, p.rows[p.selected].id)
+		workspace_row_rename_open(app, w, row.id)
 		return true
 	}
 	return false
@@ -232,11 +291,11 @@ workspace_row_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 
 workspace_row_menu_rect :: proc(w: ^Window) -> render.Rect {
 	p, s := &w.workspace_picker, w.scale
-	index := workspace_row_index(w, workspace_picker_target(p, .Menu))
+	index := workspace_row_index(w, workspace_picker_menu_id(p))
 	if index < 0 { return {} }
 	row := workspace_picker_row_rect(w, index)
 	width := min(196 * s, max(0, f32(w.width) - 10 * s))
-	rows := f32(len(WORKSPACE_ROW_ACTIONS))
+	rows := f32(len(WORKSPACE_ROW_MENU))
 	height := min((2 * ui.OVERLAY_PADDING + ui.HEIGHT_STANDARD * rows) * s, max(0, f32(w.height) - 10 * s))
 	return {clamp(row.x + row.width - width, 5 * s, max(5 * s, f32(w.width) - width - 5 * s)),
 		clamp(row.y + row.height, 5 * s, max(5 * s, f32(w.height) - height - 5 * s)), width, height}
@@ -245,13 +304,13 @@ workspace_row_menu_rect :: proc(w: ^Window) -> render.Rect {
 workspace_row_menu_item_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	r, s := workspace_row_menu_rect(w), w.scale
 	pad := ui.OVERLAY_PADDING * s
-	height := max(0, (r.height - 2 * pad) / f32(len(WORKSPACE_ROW_ACTIONS)))
+	height := max(0, (r.height - 2 * pad) / f32(len(WORKSPACE_ROW_MENU)))
 	return {r.x + pad, r.y + pad + f32(index) * height, max(0, r.width - 2 * pad), height}
 }
 
 workspace_row_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
-	if workspace_picker_target(&w.workspace_picker, .Menu) == 0 { return -1 }
-	for i in 0..<len(WORKSPACE_ROW_ACTIONS) {
+	if workspace_picker_menu_id(&w.workspace_picker) == 0 { return -1 }
+	for i in 0..<len(WORKSPACE_ROW_MENU) {
 		if render.rect_contains(workspace_row_menu_item_rect(w, i), x, y) { return i }
 	}
 	return -1
@@ -259,16 +318,15 @@ workspace_row_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 
 workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> bool {
 	p := &w.workspace_picker
-	mode := workspace_picker_mode(p)
-	if mode == .Menu {
+	#partial switch _ in p.state {
+	case Workspace_Picker_Menu:
 		if hit := workspace_row_menu_hit(w, x, y); hit >= 0 {
 			p.menu_selected = hit
 			workspace_row_menu_choose(app, w)
-		} else { workspace_picker_transition(w, .List) }
+		} else { workspace_picker_transition(w, Workspace_Picker_List{}) }
 		return true
-	}
-	if mode == .Rename {
-		row := workspace_picker_row_rect(w, workspace_row_index(w, workspace_picker_target(p, .Rename)))
+	case Workspace_Picker_Rename:
+		row := workspace_picker_row_rect(w, workspace_row_index(w, workspace_picker_rename_id(p)))
 		if y >= row.y + row.height && render.rect_contains(workspace_row_rename_field_rect(w), x, y) {
 			workspace_picker_pointer(app, w, x, true, extend)
 			return true
@@ -280,15 +338,14 @@ workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> b
 
 workspace_row_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) -> bool {
 	p := &w.workspace_picker
-	mode := workspace_picker_mode(p)
-	if mode == .Menu {
+	#partial switch _ in p.state {
+	case Workspace_Picker_Menu:
 		hit := workspace_row_menu_hit(w, f32(e.x), f32(e.y))
 		if hit >= 0 {p.menu_selected, w.dirty = hit, true}
 		pointer_set(app, w, hit >= 0 ? .Hand : .Arrow)
 		return true
-	}
-	if mode == .Rename {
-		if w.rename.dragging && .Left in e.buttons {
+	case Workspace_Picker_Rename:
+		if p.rename.dragging && .Left in e.buttons {
 			workspace_picker_pointer(app, w, f32(e.x), false, true)
 		}
 		inside := render.rect_contains(workspace_row_rename_field_rect(w), f32(e.x), f32(e.y))
@@ -334,7 +391,7 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 
 workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
-	index := workspace_row_index(w, workspace_picker_target(p, .Rename))
+	index := workspace_row_index(w, workspace_picker_rename_id(p))
 	if index < 0 { return .Ok }
 	row := workspace_picker_row_rect(w, index)
 	clip := render.Rect{row.x, row.y + row.height, row.width, workspace_row_rename_height(w)}
@@ -360,23 +417,16 @@ workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status 
 
 workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
-	id := workspace_picker_target(p, .Menu)
+	id := workspace_picker_menu_id(p)
 	if id == 0 { return .Ok }
 	r := workspace_row_menu_rect(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
 	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
-	titles := [?]string{
-		"Rename", "Change Icon", workspace_row_window_title(app, id), "Move Up", "Move Down", "Delete…",
-	}
-	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
-	for title, i in titles {
-		enabled := workspace_row_target(app, id) != nil &&
-			(actions[i] != .Open_Window || workspace_row_window_enabled(app, w, id))
-		if actions[i] == .Move_Up || actions[i] == .Move_Down {
-			enabled &&= workspace_order_neighbor(app, id, actions[i] == .Move_Up ? -1 : 1) != 0
-		}
+	for menu_item, i in WORKSPACE_ROW_MENU {
+		title := workspace_row_menu_title(app, menu_item, id)
+		enabled := workspace_row_action_enabled(app, w, id, menu_item.action)
 		item := workspace_row_menu_item_rect(w, i)
 		if i == p.menu_selected {
 			selection := render.Rect_Instance{rect = item, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s}

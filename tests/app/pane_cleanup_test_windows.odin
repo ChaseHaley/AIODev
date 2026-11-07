@@ -45,7 +45,7 @@ cleanup_fixture_init :: proc(t: ^testing.T, f: ^Cleanup_Fixture) -> bool {
 		id, err := platform.window_create(&state.platform, {hidden = true, width = 320, height = 200})
 		if !testing.expect_value(t, err, platform.Error.None) { return false }
 		w := new(app.Window)
-		w.id, w.workspace, w.tree = id, workspace, &tab.tree
+		w.id, w.workspace = id, workspace
 		app.focus_init(w)
 		append(&state.windows, w)
 		view: term_view.View
@@ -81,7 +81,7 @@ pane_cleanup_committed_final_pane_removes_source_registry_and_view :: proc(t: ^t
 		source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
 		source_id, window_id := f.source.workspace.id, f.source.id
 		if scenario >= 2 { app.window_close(state, f.source) }
-		destination_workspace, destination_tree := f.destination.workspace, f.destination.tree
+		destination_workspace, destination_tree := f.destination.workspace, app.window_tree(f.destination)
 		app.workspace_picker_open(state, f.destination)
 		when app.AIO_CONTROL {
 			state.verify.target_window, state.verify.mouse_window = window_id, window_id
@@ -154,7 +154,7 @@ pane_cleanup_refreshes_another_windows_open_picker :: proc(t: ^testing.T) {
 	id, err := platform.window_create(&state.platform, {hidden = true, width = 320, height = 200})
 	if !testing.expect_value(t, err, platform.Error.None) { return }
 	observer := new(app.Window)
-	observer.id, observer.workspace, observer.tree = id, workspace, &tab.tree
+	observer.id, observer.workspace = id, workspace
 	app.focus_init(observer)
 	append(&state.windows, observer)
 	app.workspace_picker_open(state, observer)
@@ -195,7 +195,7 @@ pane_cleanup_other_tabs_settings_and_split_panes_keep_source :: proc(t: ^testing
 			}
 			testing.expect(t, app.workspace_find(state, workspace.id) == workspace)
 			testing.expect(t, app.window_for_workspace(state, workspace) == f.source)
-			testing.expect(t, f.source.tree == &app.selected_tab(workspace).tree)
+			testing.expect(t, app.window_tree(f.source) == &app.selected_tab(workspace).tree)
 			testing.expect_value(t, len(state.workspaces), 2)
 			testing.expect_value(t, len(state.windows), 2)
 		}

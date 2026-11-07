@@ -13,8 +13,7 @@ workspace_icon_picker_layout :: proc(w: ^Window) -> Workspace_Icon_Layout {
 	s := w.scale
 	width := min(272 * s, max(0, f32(w.width) - 2 * ui.SPACE_1 * s))
 	columns := clamp(int((width - 20 * s) / (48 * s)), 1, 5)
-	tint := workspace_picker_mode(&w.workspace_picker) == .Tint
-	count := tint ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
+	count := workspace_picker_tint(&w.workspace_picker) ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
 	rows := (count + columns - 1) / columns
 	available := max(0, f32(w.height) - (ui.TITLE_BAR_HEIGHT + ui.SPACE_1) * s)
 	height := min(available, (136 + f32(rows) * 48) * s)
@@ -31,27 +30,35 @@ workspace_icon_picker_layout :: proc(w: ^Window) -> Workspace_Icon_Layout {
 		apply = {field.x, field.y + field.height + 8 * s, field.width, ui.HEIGHT_STANDARD * s}}
 }
 
-workspace_icon_picker_cell :: proc(w: ^Window, g: Workspace_Icon_Layout, index: int) -> render.Rect {
-	tint := workspace_picker_mode(&w.workspace_picker) == .Tint
-	count := tint ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
-	if tint {
-		if index == count { return g.apply }
-	} else {
-		if index == count { return g.field }
-		if index == count + 1 { return g.apply }
-		if index == count + 2 { return workspace_icon_color_button(w) }
+// The grid cell a preset icon or colour occupies; false for the field and buttons around the grid.
+@(private = "file")
+workspace_icon_picker_grid_cell :: proc(target: Workspace_Picker_Target) -> (int, bool) {
+	#partial switch t in target {
+	case Picker_Icon: return t.preset, true
+	case Picker_Tint: return t.tint, true
 	}
-	if index < 0 || index >= count { return {} }
+	return -1, false
+}
+
+workspace_icon_picker_cell :: proc(w: ^Window, g: Workspace_Icon_Layout, index: int) -> render.Rect {
+	target := workspace_picker_target_at(w, index)
+	#partial switch _ in target {
+	case Picker_Emoji_Field: return g.field
+	case Picker_Emoji_Apply, Picker_Tint_Back: return g.apply
+	case Picker_Tint_Open: return workspace_icon_color_button(w)
+	}
+	cell, in_grid := workspace_icon_picker_grid_cell(target)
+	if !in_grid { return {} }
 	s := w.scale
-	return {g.grid.x + f32(index % g.columns) * 48 * s,
-		g.grid.y + f32(index / g.columns - w.workspace_picker.scroll) * 48 * s, 44 * s, 44 * s}
+	return {g.grid.x + f32(cell % g.columns) * 48 * s,
+		g.grid.y + f32(cell / g.columns - w.workspace_picker.scroll) * 48 * s, 44 * s, 44 * s}
 }
 
 workspace_icon_picker_reveal :: proc(w: ^Window, g: Workspace_Icon_Layout) {
 	p := &w.workspace_picker
-	count := workspace_picker_mode(p) == .Tint ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
-	if p.selected >= 0 && p.selected < count && g.visible_rows > 0 {
-		row := p.selected / g.columns
+	cell, in_grid := workspace_icon_picker_grid_cell(workspace_picker_selection(w))
+	if in_grid && g.visible_rows > 0 {
+		row := cell / g.columns
 		p.scroll = clamp(p.scroll, row - g.visible_rows + 1, row)
 	}
 	p.scroll = clamp(p.scroll, 0, max(0, g.rows - max(1, g.visible_rows)))
@@ -60,50 +67,80 @@ workspace_icon_picker_reveal :: proc(w: ^Window, g: Workspace_Icon_Layout) {
 workspace_icon_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	g := workspace_icon_picker_layout(w)
 	if !render.rect_contains(g.panel, x, y) { return -1 }
-	colors := workspace_picker_mode(&w.workspace_picker) == .Tint
-	count := colors ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
-	if !colors && render.rect_contains(workspace_icon_color_button(w), x, y) { return count + 2 }
-	if render.rect_contains(g.apply, x, y) { return count + (colors ? 0 : 1) }
+	tint := workspace_picker_tint(&w.workspace_picker)
+	hit: Workspace_Picker_Target
+	if !tint && render.rect_contains(workspace_icon_color_button(w), x, y) {
+		hit = Picker_Tint_Open{}
+	} else if render.rect_contains(g.apply, x, y) {
+		if tint { hit = Picker_Tint_Back{} } else { hit = Picker_Emoji_Apply{} }
+	}
+	if hit != nil {
+		index, _ := workspace_picker_target_index(w, hit)
+		return index
+	}
 	if !render.rect_contains(g.grid, x, y) { return -1 }
-	for i in 0..<count {
+	for i in 0..<(tint ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)) {
 		if render.rect_contains(workspace_icon_picker_cell(w, g, i), x, y) { return i }
 	}
 	return -1
 }
 
+// Arrows move through the grid, then down through the emoji field, Apply and the colour button, and back
+// to the top. Left, Right, Home and End stay in the grid; on the colour button they do nothing, and on the
+// field or Apply they are the field's.
 workspace_icon_picker_key :: proc(w: ^Window, e: input.Key_Event) -> bool {
 	defer workspace_picker_layout_changed(w)
-	p := &w.workspace_picker
 	g := workspace_icon_picker_layout(w)
 	count := len(WORKSPACE_ICONS)
+	current := workspace_picker_selection(w)
+	icon, on_icon := current.(Picker_Icon)
+	next: Workspace_Picker_Target
 	#partial switch e.key {
 	case .Arrow_Down:
-		p.selected = p.selected < count ? min(count, p.selected + g.columns) : (p.selected + 1) % (count + 3)
+		#partial switch t in current {
+		case Picker_Icon:
+			if t.preset + g.columns < count { next = Picker_Icon{t.preset + g.columns} }
+			else { next = Picker_Emoji_Field{} }
+		case Picker_Emoji_Field: next = Picker_Emoji_Apply{}
+		case Picker_Emoji_Apply: next = Picker_Tint_Open{}
+		case Picker_Tint_Open: next = Picker_Icon{0}
+		}
 	case .Arrow_Up:
-		if p.selected == count { p.selected = count - 1 }
-		else if p.selected == count + 1 { p.selected = count }
-		else if p.selected == count + 2 { p.selected = count + 1 }
-		else { p.selected = p.selected < g.columns ? count + 2 : p.selected - g.columns }
+		#partial switch t in current {
+		case Picker_Icon:
+			if t.preset < g.columns { next = Picker_Tint_Open{} } else { next = Picker_Icon{t.preset - g.columns} }
+		case Picker_Emoji_Field: next = Picker_Icon{count - 1}
+		case Picker_Emoji_Apply: next = Picker_Emoji_Field{}
+		case Picker_Tint_Open: next = Picker_Emoji_Apply{}
+		}
 	case .Arrow_Left, .Arrow_Right:
-		if p.selected >= count { return p.selected == count + 2 }
-		p.selected = (p.selected + count + (e.key == .Arrow_Left ? -1 : 1)) % count
+		if !on_icon {
+			_, on_button := current.(Picker_Tint_Open)
+			return on_button
+		}
+		next = Picker_Icon{(icon.preset + count + (e.key == .Arrow_Left ? -1 : 1)) % count}
 	case .Home, .End:
-		if p.selected >= count { return p.selected == count + 2 }
-		p.selected = e.key == .Home ? 0 : count - 1
+		if !on_icon {
+			_, on_button := current.(Picker_Tint_Open)
+			return on_button
+		}
+		next = Picker_Icon{e.key == .Home ? 0 : count - 1}
 	case: return false
 	}
+	workspace_picker_select_target(w, next)
 	return true
 }
 
 workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
-	if workspace_picker_mode(p) == .Tint { return workspace_icon_color_draw(app, w) }
+	if workspace_picker_tint(p) { return workspace_icon_color_draw(app, w) }
 	g := workspace_icon_picker_layout(w)
-	target := workspace_row_target(app, workspace_picker_target(p, .Icons))
+	target := workspace_row_target(app, workspace_picker_icon_id(p))
 	if target == nil { return .Ok }
 	if result := workspace_icon_picker_title(app, w, g, "Icon"); result != .Ok { return result }
 	color_button := workspace_icon_color_button(w)
-	if p.selected == len(WORKSPACE_ICONS) + 2 {
+	chosen := workspace_picker_selection(w)
+	if _, selected := chosen.(Picker_Tint_Open); selected {
 		button := render.Rect_Instance{
 			rect = color_button, radius = ui.RADIUS_CONTROL * s, color = app.theme.selection,
 		}
@@ -149,11 +186,13 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status
 	field_fill := render.Rect_Instance{rect = g.field, color = app.theme.pane, radius = ui.RADIUS_CONTROL * s}
 	if render.push_rect(&w.list, field_fill) != .None { return .Ok }
 	box := workspace_picker_query_box(w)
+	_, on_field := chosen.(Picker_Emoji_Field)
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
-		p.selected == len(WORKSPACE_ICONS), "Custom emoji"); result != .Ok { return result }
+		on_field, "Custom emoji"); result != .Ok { return result }
 	if render.push_layer(&w.list, g.panel, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	inset := ui.CONTROL_INSET * s
-	fill := p.selected == len(WORKSPACE_ICONS) + 1 ? app.theme.selection : app.theme.pane
+	_, on_apply := chosen.(Picker_Emoji_Apply)
+	fill := on_apply ? app.theme.selection : app.theme.pane
 	apply := render.Rect_Instance{rect = g.apply, color = fill, radius = ui.RADIUS_CONTROL * s}
 	if render.push_rect(&w.list, apply) != .None { return .Ok }
 	color := workspace_icon_valid(ui.field_string(&p.query)) ? app.theme.text : app.theme.muted

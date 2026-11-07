@@ -38,15 +38,13 @@ box_applied :: proc(
 	tree: layout.Layout
 	if !testing.expect_value(t, layout.init(&tree, {kind, 1}), nil) {return {}}
 	defer layout.destroy(&tree)
-	local := w^
-	local.tree = &tree
 	rects := make([dynamic]layout.Pane_Rect)
 	defer delete(rects)
-	layout.compute(&tree, app.window_content_area(state, &local),
-		app.window_gap(state, &local), &rects, false)
+	layout.compute(&tree, app.window_content_area(state, w),
+		app.window_gap(state, w), &rects, false)
 	if !testing.expect_value(t, len(rects), 1) {return {}}
-	return app.pane_box(local.metrics, rects[0].rect,
-		app.pane_insets(state, local.scale, nil))
+	return app.pane_box(w.metrics, rects[0].rect,
+		app.pane_insets(state, w.scale, nil))
 }
 
 @(test)
@@ -116,19 +114,20 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 pane_minimum_refusal_reports_the_grid_the_layout_applies_at_every_scale :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 2}) {
 		for settings_tab in ([?]bool{false, true}) {
-			state := app.App{next_session_id = 2}
+			state: app.App
 			ui.notices_init(&state.notices)
 			defer ui.notices_destroy(&state.notices)
 			state.settings.window.padding = 8
 			state.settings.pane.gap = 5
 			state.settings.pane.show_headers = true
 			shown_kind: layout.Content_Kind = settings_tab ? .Settings : .Terminal
-			shown_tree: layout.Layout
-			if !testing.expect_value(t, layout.init(&shown_tree, {shown_kind, 1}), nil) {return}
-			defer layout.destroy(&shown_tree)
+			shown_tab: app.Tab
+			if !testing.expect_value(t, layout.init(&shown_tab.tree, {shown_kind, 1}), nil) {return}
+			defer layout.destroy(&shown_tab.tree)
 			workspace: app.Workspace
+			defer delete(workspace.tabs)
 			w := box_window(&workspace, scale)
-			w.tree = &shown_tree
+			append(&workspace.tabs, &shown_tab)
 			shown := box_applied(t, &state, &w, shown_kind)
 			// A new tab or split guards a terminal pane, which is what the layout
 			// applies next whichever tab is on screen.

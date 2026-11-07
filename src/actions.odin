@@ -727,13 +727,13 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			w, failure = control_focus(app, t, action)
 			if w == nil {return failure}
 		}
-		rename_open(app, w, false, w.workspace.selected)
+		if pane := focused_session(app, w); pane != nil {rename_open(app, w, Rename_Pane_Target{pane.id})}
 	case .Minimize_Floating:
 		if t, named := target.?; named {
 			shown, failure := control_show(app, t)
 			if shown == nil {return failure}
 			// Naming a minimized float restores it, as focusing it does.
-			if floating, ok := layout.float_of(shown.tree, t.pane.node); ok && floating.minimized {
+			if floating, ok := layout.float_of(window_tree(shown), t.pane.node); ok && floating.minimized {
 				pane_focus(app, shown, t.pane.node)
 				layout_state_touch(app)
 				return {}
@@ -743,7 +743,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		}
 		floating_minimize_toggle(app, w)
 	case .Linked_Window:
-		if layout.is_floating(w.tree, w.tree.focus) {
+		if tree := window_tree(w); layout.is_floating(tree, tree.focus) {
 			notify(app, .Info, "Dock the float before moving its pane to a linked window.")
 			return {}
 		}
@@ -834,10 +834,13 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Customize_Colors:
 		settings_reveal(app, w, {query = "colors.", search = .Scope})
 	case .Rename_Tab:
-		rename_open(app, w, true, tab_index)
+		if tab_index >= 0 && tab_index < len(w.workspace.tabs) {
+			rename_open(app, w, Rename_Tab_Target{w.workspace.id, w.workspace.tabs[tab_index].id})
+		}
 	case .Change_Pane_Shell:
+		focus := window_tree(w).focus
 		for pane in w.panes {
-			if pane.node != w.tree.focus || !pane_owns_session(pane.content.kind) {continue}
+			if pane.node != focus || !pane_owns_session(pane.content.kind) {continue}
 			profile_menu_open_pane(
 				app,
 				w,
@@ -918,38 +921,41 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Fullscreen_Pane:
 		pane_view_toggle(app, w, .Toggle_Screen)
 	case .Balance_Panes:
-		layout.balance(w.tree)
+		layout.balance(window_tree(w))
 		window_relayout(app, w)
 	case .Keep_Pane_Open:
 		pane_keep_open(app, w)
 	case .Swap_Left, .Swap_Right, .Swap_Up, .Swap_Down, .Swap_Previous, .Swap_Next:
 		rects := pane_action_rects(app, w)
 		other: layout.Node_Id
+		tree := window_tree(w)
 		if param.family == .Toward {
-			other = layout.focus_direction(rects, w.tree.focus, param.direction)
+			other = layout.focus_direction(rects, tree.focus, param.direction)
 		} else {
-			other = layout.focus_cycle(rects, w.tree.focus, action == .Swap_Next ? 1 : -1)
+			other = layout.focus_cycle(rects, tree.focus, action == .Swap_Next ? 1 : -1)
 		}
-		if other != w.tree.focus {
+		if other != tree.focus {
 			selection_cancel(w)
 			divider_cancel(w)
 			w.wheel_remainder = 0
-			if layout.swap(w.tree, w.tree.focus, other) {window_relayout(app, w)}
+			if layout.swap(tree, tree.focus, other) {window_relayout(app, w)}
 			cursor_blink_reset(w)
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
 		start := pane_action_focus(w)
 		other := layout.focus_direction(pane_action_rects(app, w), start, param.direction)
 		// Leaving a floating group's outer edge continues from the tiled pane behind it.
-		if other == start && layout.is_floating(w.tree, start) {
+		tree := window_tree(w)
+		if other == start && layout.is_floating(tree, start) {
 			tiled := window_tiled_rects(w)
-			other = layout.focus_direction(tiled, layout.focus_tiled(w.tree), param.direction)
+			other = layout.focus_direction(tiled, layout.focus_tiled(tree), param.direction)
 		}
 		pane_focus(app, w, other)
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down, .Resize_Left_Large, .Resize_Right_Large,
 	     .Resize_Up_Large, .Resize_Down_Large:
 		step := param.resize
-		if layout.resize_pixels(w.tree, w.tree.focus, step.axis, step.pixels, w.dividers[:]) {
+		tree := window_tree(w)
+		if layout.resize_pixels(tree, tree.focus, step.axis, step.pixels, w.dividers[:]) {
 			window_relayout(app, w)
 		}
 	case .Toggle_Tabs_Rail:
@@ -976,12 +982,13 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 // The panes sharing the focused pane's arrangement: its floating group, or the tiled panes.
 @(private)
 pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
-	root := layout.float_root(w.tree, w.tree.focus)
+	tree := window_tree(w)
+	root := layout.float_root(tree, tree.focus)
 	if root != layout.INVALID_NODE {
 		floats := floating_rects(w)
 		start := -1
 		for pane, i in floats {
-			same := layout.float_root(w.tree, pane.node) == root
+			same := layout.float_root(tree, pane.node) == root
 			if same && start < 0 {start = i}
 			if !same && start >= 0 {return floats[start:i]}
 		}
@@ -989,11 +996,12 @@ pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
 	}
 	if !pane_view_solo(w) {return window_tiled_rects(w)}
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	layout.compute(w.tree, window_content_area(app, w), window_gap(app, w), &rects, false)
+	layout.compute(tree, window_content_area(app, w), window_gap(app, w), &rects, false)
 	return rects[:]
 }
 
 @(private)
 pane_action_focus :: proc(w: ^Window) -> layout.Node_Id {
-	return layout.is_floating(w.tree, w.tree.focus) ? w.tree.focus : layout.focus_tiled(w.tree)
+	tree := window_tree(w)
+	return layout.is_floating(tree, tree.focus) ? tree.focus : layout.focus_tiled(tree)
 }

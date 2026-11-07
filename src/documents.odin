@@ -141,22 +141,10 @@ document_scopes :: proc(app: ^App, content: layout.Content) -> (scopes: Document
 		if workspace.provisional {continue}
 		for tab in workspace.tabs {
 			if layout.find_content(&tab.tree, content) == layout.INVALID_NODE {continue}
-			return {document_pane_list(app, content), &tab.documents, &workspace.documents}, true
+			return {content_documents(app, content), &tab.documents, &workspace.documents}, true
 		}
 	}
 	return {}, false
-}
-
-@(private, require_results)
-document_pane_list :: proc(app: ^App, content: layout.Content) -> ^Document_List {
-	switch content.kind {
-	case .Terminal:
-		if entry := session_find(app, content.id); entry != nil {return &entry.documents}
-	case .Markdown:
-		if pane := markdown_find(app, content.id); pane != nil {return &pane.documents}
-	case .Settings:
-	}
-	return nil
 }
 
 @(require_results)
@@ -207,16 +195,21 @@ document_pin :: proc(
 ) -> Document_Pin_Result {
 	destination := document_scope_list(scopes, level)
 	if destination == nil {return .Failed}
-	if !document_list_has(destination, document.target) && len(destination) >= DOCUMENT_LEVEL_LIMIT {
-		return .Level_Full
-	}
-	// The caller's document may borrow from a list about to give it up.
-	target, err := strings.clone(document.target, context.temp_allocator)
+	present := document_list_has(destination, document.target)
+	if !present && len(destination) >= DOCUMENT_LEVEL_LIMIT {return .Level_Full}
+	// The caller's document may borrow from a list about to give it up, so the stored copy and the
+	// destination's room exist before any list changes. A target already there frees its own slot.
+	target, err := strings.clone(document.target)
 	if err != nil {return .Failed}
+	if !present && reserve(destination, len(destination) + 1) != nil {
+		delete(target)
+		log.error("storing a pinned document failed")
+		return .Failed
+	}
 	for other in Document_Level {
 		if list := document_scope_list(scopes, other); list != nil {_ = document_list_remove(list, target)}
 	}
-	if !document_list_append(destination, {target, document.folder}) {return .Failed}
+	append(destination, Document{target, document.folder})
 	return .Pinned
 }
 

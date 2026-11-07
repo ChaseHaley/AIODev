@@ -1,7 +1,6 @@
 package main
 
 import "aio:input"
-import "aio:localpath"
 import "aio:render"
 import "aio:ui"
 import "core:time"
@@ -108,14 +107,13 @@ confirmation_clear :: proc(w: ^Window) {
 	case Pane_Swap:
 		pane_swap_destroy(&subject)
 	case Pending_File:
-		localpath.open_file_destroy(&subject.file)
+		pending_file_destroy(&subject)
 	case Process_Remove:
-		delete(subject.name)
-		delete(subject.source)
+		editor_process_remove_destroy(&subject)
 	case Profile_Remove:
-		delete(subject.id)
+		editor_profile_remove_destroy(&subject)
 	case Settings_Reset:
-		delete(subject.source)
+		settings_reset_destroy(&subject)
 	}
 	w.confirmation = nil
 }
@@ -126,6 +124,12 @@ confirmation_clear :: proc(w: ^Window) {
 confirmation_cancel :: proc(app: ^App, w: ^Window) {
 	confirmation_finish(app, w, false)
 	if confirmation_subject(w, Pending_Close) != nil {confirmation_clear(w)}
+}
+
+// The window stops showing its workspace. A close question counts the tabs it stops showing, so it
+// ends now, putting back any marks its subset replaced; other questions are unaffected.
+confirmation_workspace_depart :: proc(app: ^App, w: ^Window) {
+	if confirmation_subject(w, Pending_Close) != nil {confirmation_cancel(app, w)}
 }
 
 @(private)

@@ -526,9 +526,9 @@ when AIO_CONTROL {
 				{"rename.open", fmt.tprintf("%t", rename_shown(w))},
 				{"rename.error", fmt.tprintf("%t", verify_chip_name_error(w))},
 				{"rename.value", ui.field_string(&w.rename)},
-				{"tab_menu.open", fmt.tprintf("%t", tab_menu_shown(w))},
-				{"tab_menu.count", fmt.tprintf("%d", w.tab_menu.count)},
-				{"tab_menu.action", fmt.tprintf("%v", w.tab_menu.actions[w.tab_menu.selected])},
+				{"tab_menu.open", fmt.tprintf("%t", tab_menu_shown(w) || dock_divider_menu_shown(w))},
+				{"tab_menu.count", fmt.tprintf("%d", len(verify_menu_rows(w).items))},
+				{"tab_menu.action", fmt.tprintf("%v", verify_tab_menu_action(w))},
 				{"settings.filter", string(w.editor.filter.bytes[:])},
 				{"settings.scroll", fmt.tprintf("%d", w.editor.scroll)},
 				{"settings.group", fmt.tprintf("%d", ui.editor_active_group(&w.editor))},
@@ -666,7 +666,7 @@ when AIO_CONTROL {
 				{"rail.overlay", fmt.tprintf("%t", rail_overlay(w))},
 				{"rail.scroll", fmt.tprintf("%g", w.rail_scroll)},
 				{"rail.slide", fmt.tprintf("%g", rail_slide_value(w))},
-				{"rail.rows", fmt.tprintf("%d", len(w.rail_rows))},
+				{"rail.rows", fmt.tprintf("%d", rail_tab_count(w))},
 				{"rail.row.height", fmt.tprintf("%g", ui.RAIL_ROW_HEIGHT * w.scale)},
 				{"rail.toggle", verify_workspace_rect(tab_orientation_button_rect(w))},
 				{"tabs.orientation_button", verify_workspace_rect(tab_orientation_button_rect(w))},
@@ -686,7 +686,7 @@ when AIO_CONTROL {
 				{"workspace.icon.preset", fmt.tprintf("%d", w.workspace.icon.preset)},
 				{"workspace.icon.emoji", w.workspace.icon.emoji},
 				{"workspace.icon.tint", fmt.tprintf("%d", w.workspace.icon.tint)},
-				{"workspace.picker.colors", fmt.tprintf("%t", workspace_picker_mode(&w.workspace_picker) == .Tint)},
+				{"workspace.picker.colors", fmt.tprintf("%t", workspace_picker_tint(&w.workspace_picker))},
 				{"workspace.picker.color_button", verify_workspace_rect(workspace_icon_color_button(w))},
 				{"workspace.picker.icons", fmt.tprintf("%t", workspace_picker_icons(&w.workspace_picker))},
 				{"workspace.picker.selected", fmt.tprintf("%d", w.workspace_picker.selected)},
@@ -696,23 +696,23 @@ when AIO_CONTROL {
 				{"workspace.picker.field", verify_workspace_rect(workspace_picker_field_rect(w))},
 				{"workspace.picker.row", verify_workspace_rect(
 					workspace_picker_row_rect(w, w.workspace_picker.selected))},
-				{"workspace.picker.menu_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Menu))},
+				{"workspace.picker.menu_target", fmt.tprintf("%d", workspace_picker_menu_id(&w.workspace_picker))},
 				{"workspace.picker.menu_hover", fmt.tprintf("%d", w.workspace_picker.menu_hover)},
 				{"workspace.picker.menu_selected", fmt.tprintf("%d", w.workspace_picker.menu_selected)},
 				{"workspace.picker.window_enabled", fmt.tprintf("%t", workspace_row_window_enabled(app, w,
-					workspace_picker_target(&w.workspace_picker, .Menu)))},
+					workspace_picker_menu_id(&w.workspace_picker)))},
 				{"workspace.picker.window_title", workspace_row_window_title(app,
-					workspace_picker_target(&w.workspace_picker, .Menu))},
+					workspace_picker_menu_id(&w.workspace_picker))},
 				{"workspace.picker.menu_button", verify_workspace_rect(workspace_picker_menu_button_rect(w,
 					w.workspace_picker.selected))},
 				{"workspace.picker.menu_item", verify_workspace_rect(workspace_row_menu_item_rect(w,
 					w.workspace_picker.menu_selected))},
 				{"workspace.picker.rename_target", fmt.tprintf("%d",
-					workspace_picker_target(&w.workspace_picker, .Rename))},
-				{"workspace.picker.rename_value", ui.field_string(&w.rename)},
+					workspace_picker_rename_id(&w.workspace_picker))},
+				{"workspace.picker.rename_value", ui.field_string(&w.workspace_picker.rename)},
 				{"workspace.picker.rename_field", verify_workspace_rect(workspace_row_rename_field_rect(w))},
 				{"workspace.picker.rename_error", fmt.tprintf("%t", workspace_picker_rename_error(&w.workspace_picker))},
-				{"workspace.picker.icon_target", fmt.tprintf("%d", workspace_picker_target(&w.workspace_picker, .Icons))},
+				{"workspace.picker.icon_target", fmt.tprintf("%d", workspace_picker_icon_id(&w.workspace_picker))},
 				{"window.preparing", fmt.tprintf("%t", w.phase == .Preparing)},
 				{"pointer.shape", strings.to_lower(fmt.tprintf("%v", w.pointer_shape), context.temp_allocator)},
 				{"pointer.updates", fmt.tprintf("%d", app.verify.pointer_updates)},
@@ -759,30 +759,35 @@ when AIO_CONTROL {
 				}
 				if _, err := append(&entries, ..row_state[:]); err != nil { return nil, .Out_Of_Memory }
 			}
-			for i in 0..<w.tab_menu.count {
+			// The dock edge menu reports under the tab menu's keys, as it did when it shared that surface.
+			shown_menu := verify_menu_rows(w)
+			for item, i in shown_menu.items {
+				divider := shown_menu == &w.divider_menu
+				enabled := divider ? item.enabled && !item.separator : tab_menu_enabled(w, i)
+				rect := ui.menu_row_rect(shown_menu, i, f32(w.width), f32(w.height), w.scale)
 				row := [?]verify_protocol.State_Entry{
-					{fmt.tprintf("tab_menu.row.%d.label", i + 1), tab_menu_label(w, i)},
-					{fmt.tprintf("tab_menu.row.%d.separator", i + 1), fmt.tprintf("%t", w.tab_menu.separators[i])},
-					{fmt.tprintf("tab_menu.row.%d.enabled", i + 1), fmt.tprintf("%t", tab_menu_enabled(w, i))},
-					{fmt.tprintf("tab_menu.row.%d.rect", i + 1), verify_workspace_rect(tab_menu_row_rect(w, i))},
+					{fmt.tprintf("tab_menu.row.%d.label", i + 1), item.label},
+					{fmt.tprintf("tab_menu.row.%d.separator", i + 1), fmt.tprintf("%t", item.separator)},
+					{fmt.tprintf("tab_menu.row.%d.enabled", i + 1), fmt.tprintf("%t", enabled)},
+					{fmt.tprintf("tab_menu.row.%d.rect", i + 1), verify_workspace_rect(rect)},
 				}
 				if _, err := append(&entries, ..row[:]); err != nil { return nil, .Out_Of_Memory }
 			}
 			layout, layout_ok := rail_current_layout(w)
 			if layout_ok {
-				for row, i in w.rail_rows {
+				for tab, i in w.workspace.tabs {
 					rect := ui.rail_row_rect(layout, i)
-					title := row.workspace.tabs[row.tab].title
-					selected := row.tab == w.workspace.selected
-					marked := row.workspace.tabs[row.tab].marked
+					title := tab.title
+					selected := i == w.workspace.selected
+					marked := tab.marked
 					row_state := [?]verify_protocol.State_Entry{
 						{fmt.tprintf("rail.row.%d.kind", i + 1), "tab"},
 						{fmt.tprintf("rail.row.%d.title", i + 1), title},
 						{fmt.tprintf("rail.row.%d.rect", i + 1), verify_workspace_rect(rect)},
 						{fmt.tprintf("rail.row.%d.selected", i + 1), fmt.tprintf("%t", selected)},
 						{fmt.tprintf("rail.row.%d.marked", i + 1), fmt.tprintf("%t", marked)},
-						{fmt.tprintf("rail.row.%d.workspace", i + 1), fmt.tprintf("%d", row.workspace.id)},
-						{fmt.tprintf("rail.row.%d.tab", i + 1), fmt.tprintf("%d", row.tab + 1)},
+						{fmt.tprintf("rail.row.%d.workspace", i + 1), fmt.tprintf("%d", w.workspace.id)},
+						{fmt.tprintf("rail.row.%d.tab", i + 1), fmt.tprintf("%d", i + 1)},
 					}
 					if _, err := append(&entries, ..row_state[:]); err != nil { return nil, .Out_Of_Memory }
 				}
@@ -832,7 +837,7 @@ when AIO_CONTROL {
 			strip_rect := render.Rect{}
 			strip_close := render.Rect{}
 			if w != nil {
-				row_index = rail_row_index_for_tab(w.rail_rows[:], workspace, i)
+				row_index = w.tabs_horizontal ? -1 : i
 				row_rect = rail_row_rect_for_tab(w, i)
 				layout, _ := rail_current_layout(w)
 				close_rect = ui.rail_close_rect(layout, row_index, w.scale)
@@ -927,7 +932,7 @@ when AIO_CONTROL {
 						w.float_capsule_group.height,
 					),
 				},
-				{"panes.focused", fmt.tprintf("%d", w.tree.focus)},
+				{"panes.focused", fmt.tprintf("%d", window_tree(w).focus)},
 				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
 				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
@@ -1120,6 +1125,20 @@ when AIO_CONTROL {
 
 	verify_workspace_rect :: proc(r: render.Rect) -> string {
 		return fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)
+	}
+
+	// The rows the tab_menu keys describe: the dock edge menu while it shows, else the tab menu.
+	verify_menu_rows :: proc(w: ^Window) -> ^ui.Menu {
+		if dock_divider_menu_shown(w) { return &w.divider_menu }
+		tab_menu_sync(w)
+		return &w.tab_menu.menu
+	}
+
+	// The Action of the tab menu's selected row, or the zero Action without one.
+	verify_tab_menu_action :: proc(w: ^Window) -> Action {
+		index := ui.menu_selected(&w.tab_menu.menu)
+		if index < 0 || w.tab_menu.items[index].separator { return {} }
+		return Action(w.tab_menu.items[index].payload)
 	}
 
 	verify_chip_name_error :: proc(w: ^Window) -> bool {

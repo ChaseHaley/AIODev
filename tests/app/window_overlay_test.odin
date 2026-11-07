@@ -13,7 +13,7 @@ overlay_rename_replaces_tab_menu_and_receives_text_and_keys :: proc(t: ^testing.
 	s, w := &f.state, f.state.windows[0]
 	app.tab_menu_open(s, w, 0, 20, 20)
 	if !testing.expect(t, app.tab_menu_shown(w)) {return}
-	app.rename_open(s, w, true, 0)
+	app.rename_open(s, w, app.Rename_Tab_Target{w.workspace.id, w.workspace.tabs[0].id})
 	testing.expect(t, app.rename_shown(w) && !app.tab_menu_shown(w))
 	app.handle_event(s, input.Text_Event{window = w.id, text = "Named from menu"})
 	app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})

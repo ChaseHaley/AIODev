@@ -363,14 +363,14 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 			workspace.name = name
 		}
 	}
+	// Each part is kept on its own: a damaged tint must not cost the workspace a valid preset or emoji.
 	icon := saved.icon
-	if icon.preset >= 0 && icon.preset < len(WORKSPACE_ICONS) &&
-	   (icon.emoji == "" || workspace_icon_valid(icon.emoji)) {
+	if workspace_icon_valid_value({preset = icon.preset, emoji = icon.emoji}) {
 		if emoji, err := strings.clone(icon.emoji); err == nil {
 			workspace.icon = {preset = icon.preset, emoji = emoji}
 		}
 	}
-	if icon.tint >= 0 && icon.tint < len(WORKSPACE_ICON_COLORS) {workspace.icon.tint = icon.tint}
+	if workspace_icon_valid_value({tint = icon.tint}) {workspace.icon.tint = icon.tint}
 	documents_restore(&workspace.documents, saved.documents)
 	selected := saved.selected
 	for &tab, i in saved.tabs {
@@ -387,8 +387,8 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 
 @(private, require_results)
 layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) -> bool {
-	tab, record_error := tab_record_reserve(workspace)
-	if record_error != .None {return false}
+	tab, reserved := tab_record_reserve(workspace)
+	if !reserved {return false}
 	if !layout_tree_decode(saved, &tab.tree) {
 		log.error("skipping a saved tab with a damaged layout")
 		tab_record_free(tab)
@@ -401,8 +401,7 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 		restored := false
 		switch pane.content.kind {
 		case .Terminal:
-			restored = layout_session_restore(app, &saved.nodes[i])
-			if restored {pane.content.id = app.next_session_id}
+			pane.content.id, restored = layout_session_restore(app, &saved.nodes[i])
 		case .Settings:
 			restored = !settings_seen && !workspace_has_content(workspace, pane.content)
 			if restored {settings_seen = true} else {log.error("skipping a saved tab with a second settings page")}
@@ -416,7 +415,7 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 			}
 		}
 		if !restored {
-			layout_tab_discard(app, tab)
+			layout_tab_discard(app, tab, i)
 			return false
 		}
 	}
@@ -432,8 +431,9 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 	return true
 }
 
+// Opens the saved pane's session and returns its id.
 @(private, require_results)
-layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> bool {
+layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, ok: bool) {
 	// A directory that is remote or no longer exists falls back to the profile's own.
 	directory, refused := local_launch_directory(saved.directory, "")
 	if refused {
@@ -445,22 +445,23 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> bool {
 	}
 	command := saved.command
 	if !utf8.valid_string(command) || len(command) > PROGRAM_COMMAND_LIMIT * 4 {command = ""}
-	if !session_open(app, "", directory, saved.profile, command) {return false}
-	entry := &app.sessions[len(app.sessions) - 1]
+	id, opened := session_open(app, "", directory, saved.profile, command)
+	if !opened {return 0, false}
+	entry := session_find(app, id)
 	entry.keep_open = saved.keep_open
 	documents_restore(&entry.documents, saved.documents)
 	if saved.name != "" && utf8.valid_string(saved.name) {
 		if name, err := strings.clone(saved.name); err == nil {entry.name = name}
 	}
-	return true
+	return id, true
 }
 
-// Closes the sessions a partly restored tab already opened before freeing it.
+// Closes the sessions a partly restored tab opened for its first `restored` nodes, before freeing it.
 @(private)
-layout_tab_discard :: proc(app: ^App, tab: ^Tab) {
-	for node in tab.tree.nodes {
+layout_tab_discard :: proc(app: ^App, tab: ^Tab, restored: int) {
+	for node in tab.tree.nodes[:restored] {
 		pane := node.(layout.Pane) or_continue
-		if pane_owns_session(pane.content.kind) && pane.content.id != 0 {session_close(app, pane.content.id)}
+		if pane_owns_session(pane.content.kind) {session_close(app, pane.content.id)}
 	}
 	tab_record_free(tab)
 }

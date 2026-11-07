@@ -18,12 +18,12 @@ rail_and_pane_junction_drags_both_axes :: proc(t: ^testing.T) {
 	for d in w.dividers {
 		if d.axis != .Vertical {continue}
 		x, y := app.rail_width_pixels(w), d.rect.y + d.rect.height / 2
-		before := w.tree.nodes[d.node].(layout.Split).ratio
+		before := app.window_tree(w).nodes[d.node].(layout.Split).ratio
 		gesture_button(s, w, .Left, true, x, y)
 		testing.expect_value(t, divider_count(w), 2)
 		rail_resize_drag_to(s, w, x + 40, y + 50)
 		testing.expect_value(t, app.rail_width_pixels(w), x + 40)
-		testing.expect(t, w.tree.nodes[d.node].(layout.Split).ratio > before)
+		testing.expect(t, app.window_tree(w).nodes[d.node].(layout.Split).ratio > before)
 		gesture_button(s, w, .Left, false, x + 40, y + 50)
 		break
 	}

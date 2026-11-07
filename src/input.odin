@@ -47,7 +47,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		if w := window_find(app, e.window); w != nil {
 			tooltip_cancel(w)
 			w.find.hover = .None
-			w.tab_hover, w.rail_hover = -1, -1
+			w.tab_hover = nil
 			gesture_tab_unpress(w)
 			w.title_action_hover = .None
 			if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, 0)}
@@ -131,9 +131,11 @@ show_window :: proc(app: ^App) {
 	if len(app.workspaces) == 0 {return}
 	if app_tray_only(app) {
 		workspace := app.workspaces[0]
-		if len(workspace.tabs) == 0 && !tab_create(app, workspace) {
-			notify(app, .Error, "Could not create a tab.")
-			return
+		if len(workspace.tabs) == 0 {
+			if _, created := tab_create(app, workspace); !created {
+				notify(app, .Error, "Could not create a tab.")
+				return
+			}
 		}
 		if !window_open(app, workspace) {
 			notify(app, .Error, "Could not open the AIODev window.")
@@ -179,9 +181,13 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		key_suppress(w, e)
 		rename_key(app, w, e)
 		return
-	case .Tab_Menu, .Divider_Menu:
+	case .Tab_Menu:
 		key_suppress(w, e)
 		tab_menu_key(app, w, logical)
+		return
+	case .Divider_Menu:
+		key_suppress(w, e)
+		dock_divider_menu_key(app, w, logical)
 		return
 	case .Profile_Menu:
 		key_suppress(w, e)
@@ -434,9 +440,11 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 		return
 	case .Rename, .Chip_Name:
 		return
-	case .Tab_Menu, .Divider_Menu:
-		tab_menu_step(w, -int(math.sign(e.delta_y)), false)
-		w.dirty = true
+	case .Tab_Menu:
+		tab_menu_wheel(w, int(math.sign(e.delta_y)))
+		return
+	case .Divider_Menu:
+		dock_divider_menu_wheel(w, int(math.sign(e.delta_y)))
 		return
 	case .Profile_Menu:
 		profile_menu_wheel(w, int(math.sign(e.delta_y)))
