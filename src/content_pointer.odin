@@ -107,7 +107,11 @@ content_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 	resize, over_divider := divider_cursor(w, x, y)
 	over_divider &&= !floating_covers(w, x, y)
 	if over_divider && !swallowed {shape = resize}
-	if link_hover_move(app, w, x, y, over_divider, title) {shape = .Hand}
+	if selection_active(w) || over_divider || title || swallowed {
+		link_hover_clear(w)
+	} else if link_hover_update(app, w, x, y) {
+		shape = .Hand
+	}
 	pointer_set(app, w, shape)
 	if swallowed || entry == nil {return}
 	if selection_active(w) {

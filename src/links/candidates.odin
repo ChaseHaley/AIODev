@@ -153,6 +153,30 @@ break_variant :: proc(text: string, mask: int, buffer: []u8) -> (string, bool) {
 	return string(buffer[:at]), true
 }
 
+// Break_Readings visits descending masks: all spaces first, all variable breaks joined last.
+// Only the first BREAK_VARIANTS breaks vary; later breaks always remain spaces.
+Break_Readings :: struct {
+	text:      string,
+	buffer:    []u8,
+	next_mask: int,
+}
+
+@(require_results)
+break_readings :: proc(text: string, buffer: []u8) -> Break_Readings {
+	return {text = text, buffer = buffer, next_mask = break_variants(text) - 1}
+}
+
+// Each result borrows buffer until the next call. Readings too large for it are skipped.
+@(require_results)
+break_readings_next :: proc(readings: ^Break_Readings) -> (string, bool) {
+	for readings.next_mask >= 0 {
+		mask := readings.next_mask
+		readings.next_mask -= 1
+		if reading, ok := break_variant(readings.text, mask, readings.buffer); ok {return reading, true}
+	}
+	return "", false
+}
+
 // candidates appends what a click on the target at start..end could mean, longest first. Ends fall at
 // spaces, row breaks and cuts, the places a program broke a word. A relative target can also start at
 // the words before it. Callers check each range against the filesystem at click time.
@@ -243,9 +267,8 @@ selection_target :: proc(line: string, relative: bool) -> (Range, bool) {
 	text := line[start:end]
 	buffer: [SELECTION_BYTES]u8 = ---
 	resolved: [TARGET_BYTES]u8 = ---
-	for mask := break_variants(text) - 1; mask >= 0; mask -= 1 {
-		variant, ok := break_variant(text, mask, buffer[:])
-		if !ok {continue}
+	readings := break_readings(text, buffer[:])
+	for variant in break_readings_next(&readings) {
 		if allowed(variant) {return {start, end}, true}
 		absolute := localpath.local_absolute(strip_location(variant))
 		if !absolute && (!relative || !strings.contains_any(variant, ".\\/") || !relative_plausible(variant)) {

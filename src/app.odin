@@ -276,7 +276,7 @@ tick :: proc(app: ^App) {
 	}
 	if len(events) > 0 {layout_state_touch(app)}
 	update_sessions(app)
-	markdown_find_tick(app)
+	find_tick(app)
 	update_processes(app)
 	if ready, unreadable := program_icons_adopt(app); ready || unreadable != "" {
 		if unreadable != "" {
@@ -375,12 +375,7 @@ wait_timeout :: proc(app: ^App) -> u32 {
 			deadline, found = next, true
 		}
 	}
-	for entry in app.sessions {
-		if term.search_pending(entry.session) {
-			return 0
-		}
-	}
-	if markdown_find_pending(app) {return 0}
+	if find_pending(app) {return 0}
 	if !found {
 		return INFINITE
 	}
@@ -437,13 +432,6 @@ update_sessions :: proc(app: ^App) {
 	for i := len(app.sessions) - 1; i >= 0; i -= 1 {
 		entry := &app.sessions[i]
 		s := entry.session
-		if term.search_pending(s) {
-			before := term.search_summary(s)
-			term.search_update(s)
-			if term.search_summary(s) != before {
-				mark_all_dirty(app)
-			}
-		}
 		if term.take_status_change(s) {
 			workspace_status_changed = true
 			layout_state_touch(app)

@@ -59,7 +59,7 @@ pointer_find_bar_over_activity_panel_owns_hover_cursor_and_press :: proc(t: ^tes
 
 	gesture_button(s, w, .Left, true, toggle.x, toggle.y)
 	gesture_button(s, w, .Left, false, toggle.x, toggle.y)
-	testing.expect(t, w.find.regex)
+	testing.expect(t, w.find.options.regex)
 	gesture_button(s, w, .Left, true, close.x, close.y)
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect(t, !ui.find_is_open(&w.find))

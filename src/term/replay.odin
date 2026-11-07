@@ -74,10 +74,3 @@ replay_write :: proc(s: ^Session, data: []u8) {
 	ghostty.terminal_vt_write(s.terminal, raw_data(data), uint(len(data)))
 	sync.mutex_unlock(&s.mutex)
 }
-
-// replay_snapshot reads the replayed terminal through the render-state path the app uses, so screen
-// and cell output come from the production readers instead of a second formatter.
-@(require_results)
-replay_snapshot :: proc(s: ^Session, allocator := context.allocator) -> (Snapshot, Error) {
-	return screen_snapshot(s, allocator)
-}

@@ -314,7 +314,7 @@ bad_png_is_refused_and_the_terminal_keeps_working :: proc(t: ^testing.T) {
 		testing.expectf(t, strings.has_prefix(reply, "\x1b_Gi=1;E"), "case %d answered %q", i, reply)
 		testing.expect_value(t, len(placements(t, &f)), 0)
 		write(&f, "still alive")
-		shot, err := term.replay_snapshot(f.session)
+		shot, err := term.screen_snapshot(f.session)
 		defer term.snapshot_destroy(&shot)
 		testing.expect_value(t, err, term.Error.None)
 		text, _ := term.row_text(&shot, 0, context.temp_allocator)

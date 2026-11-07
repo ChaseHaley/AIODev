@@ -30,17 +30,6 @@ link_hover_clear :: proc(w: ^Window) {
 	link_hover_set(w, nil)
 }
 
-// The pointer moved over pane content. A selection drag, a divider, the title bar or a button another
-// surface swallowed hides the underline. Returns whether the pointer is over a link.
-@(private, require_results)
-link_hover_move :: proc(app: ^App, w: ^Window, x, y: f32, over_divider, title: bool) -> bool {
-	if selection_active(w) || over_divider || title || gesture_swallowing(w) {
-		link_hover_clear(w)
-		return false
-	}
-	return link_hover_update(app, w, x, y)
-}
-
 // The terminal cell under a point and the pane state indexing its links. It borrows the window's
 // views, so it is for immediate use only.
 @(private)
@@ -85,7 +74,7 @@ link_hover_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Maybe(Link_Hover) {
 
 // Records the range the renderer underlines under the pointer. It returns whether the pointer is
 // over a link.
-@(private = "file", require_results)
+@(require_results)
 link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	next := link_hover_at(app, w, x, y)
 	link_hover_set(w, next)
@@ -104,6 +93,7 @@ link_resolve :: proc(app: ^App, w: ^Window, x, y: f32, buffer: []u8) -> Target {
 	cwd := term.working_directory(hit.entry.session, context.temp_allocator)
 	selection, selected := term.link_selection_at(&hit.pane.links, hit.column, hit.row)
 	if selected {
+		// Every web reading wins over every file reading, not just the matching mask.
 		if uri, web := link_selection_web(selection, buffer); web {return Web_Target{uri}}
 		if path, exists := link_selection_file(selection, cwd, buffer); exists {return File_Target{path}}
 	}
@@ -163,9 +153,8 @@ link_detected_file :: proc(target: term.Link_Target, cwd: string, buffer: []u8) 
 @(private, require_results)
 link_break_readings :: proc(text, cwd: string, checks: ^int, buffer: []u8) -> (string, bool) {
 	spelling: [links.TARGET_BYTES]u8 = ---
-	for mask := links.break_variants(text) - 1; mask >= 0; mask -= 1 {
-		reading, ok := links.break_variant(text, mask, spelling[:])
-		if !ok {continue}
+	readings := links.break_readings(text, spelling[:])
+	for reading in links.break_readings_next(&readings) {
 		if path, exists := link_file_exists(reading, cwd, checks, buffer); exists {return path, true}
 	}
 	return "", false
@@ -180,9 +169,9 @@ link_selection_file :: proc(selection: term.Link_Target, cwd: string, buffer: []
 @(private, require_results)
 link_selection_web :: proc(selection: term.Link_Target, buffer: []u8) -> (string, bool) {
 	text := selection.line[selection.start:selection.end]
-	for mask := links.break_variants(text) - 1; mask >= 0; mask -= 1 {
-		reading, ok := links.break_variant(text, mask, buffer)
-		if ok && links.allowed(reading) {return reading, true}
+	readings := links.break_readings(text, buffer)
+	for reading in links.break_readings_next(&readings) {
+		if links.allowed(reading) {return reading, true}
 	}
 	return "", false
 }

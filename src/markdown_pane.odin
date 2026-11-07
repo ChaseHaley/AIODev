@@ -246,28 +246,6 @@ markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
 	}
 }
 
-// The search reads only a document the pane shows. One that went missing, grew too large or failed to
-// parse waits until it loads again, which restarts the search.
-@(private = "file")
-markdown_find_due :: proc(pane: ^Markdown_Pane) -> bool {
-	return markdown_document(pane) != nil && markdown.search_pending(&pane.search)
-}
-
-@(require_results)
-markdown_find_pending :: proc(app: ^App) -> bool {
-	for pane in app.markdown_panes {if markdown_find_due(pane) {return true}}
-	return false
-}
-
-markdown_find_tick :: proc(app: ^App) {
-	for pane in app.markdown_panes {
-		if !markdown_find_due(pane) {continue}
-		before := markdown_find_summary(pane)
-		markdown.search_update(&pane.search, markdown_document(pane), search.STEP_BUDGET)
-		if markdown_find_summary(pane) != before {mark_all_dirty(app)}
-	}
-}
-
 @(private)
 markdown_referenced :: proc(app: ^App, id: u32) -> bool {
 	content := layout.Content{.Markdown, id}
@@ -460,9 +438,7 @@ markdown_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Markdown_P
 
 @(private, require_results)
 markdown_geometry_of :: proc(w: ^Window, shown: layout.Pane_Rect) -> ui.Markdown_Geometry {
-	rect, header := shown.rect, pane_header_of(w, shown)
-	area := render.Rect{rect.x, rect.y + header, rect.width, max(0, rect.height - header)}
-	return ui.markdown_geometry(area, w.scale)
+	return ui.markdown_geometry(pane_body_rect(w, shown), w.scale)
 }
 
 // The link the pointer is over in pane `id`, or -1.
@@ -700,7 +676,6 @@ markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 		markdown_gesture_clear(app, w)
 		return
 	}
-	w.pointer = {x, y}
 	g := markdown_geometry_of(w, shown)
 	if y < g.area.y {markdown_scroll(w, pane, shown, int(y - g.area.y))}
 	if y > g.area.y + g.area.height {markdown_scroll(w, pane, shown, int(y - g.area.y - g.area.height))}

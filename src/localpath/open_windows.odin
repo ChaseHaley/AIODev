@@ -1,5 +1,6 @@
 package localpath
 
+import "aio:com"
 import "base:runtime"
 import "core:log"
 import "core:os"
@@ -17,22 +18,6 @@ foreign open_kernel32 {
 // starts absolute, may be a file of any kind, and refuses every non-placeholder reparse component
 // before following it, while a working directory may be relative and may cross a local junction as
 // long as its final target is a local directory. Keep both policies; share only the path grammar.
-
-// RPC_E_CHANGED_MODE: COM is already initialized on this thread in another apartment, which serves.
-@(private)
-COM_CHANGED_MODE :: 0x80010106
-
-// Enters a single-threaded COM apartment on the calling thread. `entered` means the caller owes one
-// CoUninitialize, including for S_FALSE. COM already initialized in another apartment kind serves, so it
-// is `usable` with nothing owed; any other failure is logged.
-@(require_results)
-com_apartment :: proc() -> (entered, usable: bool) {
-	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
-	if result >= 0 {return true, true}
-	if u32(result) == COM_CHANGED_MODE {return false, true}
-	log.errorf("CoInitializeEx failed: HRESULT 0x%x", u32(result))
-	return false, false
-}
 
 // The cycle and complexity bound for shortcut chains. A target still naming a shortcut is refused.
 @(private)
@@ -127,7 +112,7 @@ Persist_File_Vtable :: struct {
 // because a plain open of its target cannot carry them.
 @(private, require_results)
 shortcut_target :: proc(path: string) -> (string, bool) {
-	initialized, usable := com_apartment()
+	initialized, usable := com.apartment()
 	defer if initialized {w.CoUninitialize()}
 	if !usable {return "", false}
 	class_id := w.GUID{0x00021401, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}}

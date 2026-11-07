@@ -3,6 +3,7 @@ package ui
 import "aio:input"
 import "aio:platform"
 import "aio:render"
+import "aio:search"
 import "core:strings"
 import "core:time"
 
@@ -15,12 +16,12 @@ import "core:time"
 
 Find_Bar :: struct {
 	// Only the procedures in this file write it.
-	state:                 Find_State,
-	query:                 Text_Field,
-	case_sensitive, regex: bool,
-	hover:                 Find_Button,
-	armed:                 Armed(Find_Button),
-	motion:                [Find_Button]Control_Motion,
+	state:   Find_State,
+	query:   Text_Field,
+	options: search.Options,
+	hover:   Find_Button,
+	armed:   Armed(Find_Button),
+	motion:  [Find_Button]Control_Motion,
 }
 
 // nil is closed. The bar stays open without the keyboard after a click elsewhere, so the terminal takes
@@ -44,8 +45,8 @@ Find_Browsing :: struct {
 Find_Blurred :: struct {}
 
 Find_Entry :: struct {
-	query:                 string,
-	case_sensitive, regex: bool,
+	query:   string,
+	options: search.Options,
 }
 
 // Searches shared by every window, oldest first.
@@ -56,16 +57,12 @@ Find_History :: struct {
 Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, up, down, close: render.Rect }
 
 // What a key, text or click did to the bar.
-Find_Outcome :: enum {
+Find_Outcome :: union #no_nil {Find_Change, search.Step}
+
+Find_Change :: enum {
 	None,
 	Changed,
 	Moved,
-	// Enter and Shift+Enter: the next and previous match in the searched surface's reading order.
-	Next,
-	Previous,
-	// The arrow buttons: the match above or below on screen.
-	Up,
-	Down,
 	Closed,
 }
 
@@ -124,7 +121,7 @@ find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 	query := field_string(&f.query)
 	if h == nil || len(query) == 0 { return }
 	if last := len(h.entries) - 1; last >= 0 && h.entries[last].query == query {
-		h.entries[last].case_sensitive, h.entries[last].regex = f.case_sensitive, f.regex
+		h.entries[last].options = f.options
 		return
 	}
 	// The copy and its slot come first, so a search that cannot be recorded leaves the history as it was.
@@ -144,7 +141,7 @@ find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 		delete(h.entries[0].query)
 		ordered_remove(&h.entries, 0)
 	}
-	append(&h.entries, Find_Entry{copied, f.case_sensitive, f.regex})
+	append(&h.entries, Find_Entry{copied, f.options})
 }
 
 // Opens with the keyboard. `restore` refills the newest search, and `select` also selects it so typing
@@ -193,16 +190,16 @@ find_edit :: proc(f: ^Find_Bar) {
 // expressions.
 find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
 	if !e.pressed {
-		return .None
+		return Find_Change.None
 	}
 	alt := .Alt in e.modifiers && .Control not_in e.modifiers
 	#partial switch e.key {
 	case .Escape:
-		return .Closed
+		return Find_Change.Closed
 	case .Enter, .Numpad_Enter:
 		find_history_add(h, f)
 		find_edit(f)
-		return .Shift in e.modifiers ? .Previous : .Next
+		return .Shift in e.modifiers ? search.Step.Previous : search.Step.Next
 	case .Arrow_Up:
 		return find_recall(f, h, true)
 	case .Arrow_Down:
@@ -213,46 +210,46 @@ find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Fi
 		if alt { return find_toggle(f, .Regex_Toggle) }
 	}
 	outcome := find_change(field_key(&f.query, e))
-	if outcome == .Changed { find_edit(f) }
+	if outcome == Find_Change.Changed { find_edit(f) }
 	return outcome
 }
 
 @(private)
-find_toggle :: proc(f: ^Find_Bar, target: Find_Button) -> Find_Outcome {
+find_toggle :: proc(f: ^Find_Bar, target: Find_Button) -> Find_Change {
 	#partial switch target {
 	case .Case_Toggle:
-		f.case_sensitive = !f.case_sensitive
+		f.options.case_sensitive = !f.options.case_sensitive
 	case .Regex_Toggle:
-		f.regex = !f.regex
+		f.options.regex = !f.options.regex
 	case:
-		return .None
+		return Find_Change.None
 	}
-	return .Changed
+	return Find_Change.Changed
 }
 
 // Steps through history like a shell prompt. The first step skips an entry equal to the current query, and
 // stepping past the newest entry restores the draft and ends browsing.
 @(private)
-find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Outcome {
-	if h == nil || len(h.entries) == 0 { return .None }
+find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Change {
+	if h == nil || len(h.entries) == 0 { return Find_Change.None }
 	count := len(h.entries)
 	browsing, is_browsing := &f.state.(Find_Browsing)
 	switch {
 	case older && !is_browsing:
 		next := count - 1
 		if h.entries[next].query == field_string(&f.query) { next -= 1 }
-		if next < 0 { return .None }
+		if next < 0 { return Find_Change.None }
 		// Browsing must be able to restore the draft, so without a copy of it nothing is recalled.
 		copied, err := strings.clone(field_string(&f.query))
-		if err != nil { return .None }
-		find_enter(f, Find_Browsing{next, {copied, f.case_sensitive, f.regex}})
+		if err != nil { return Find_Change.None }
+		find_enter(f, Find_Browsing{next, {copied, f.options}})
 		find_show(f, h.entries[next])
 	case older:
-		if browsing.index == 0 { return .None }
+		if browsing.index == 0 { return Find_Change.None }
 		browsing.index -= 1
 		find_show(f, h.entries[browsing.index])
 	case !is_browsing:
-		return .None
+		return Find_Change.None
 	case browsing.index + 1 < count:
 		browsing.index += 1
 		find_show(f, h.entries[browsing.index])
@@ -260,30 +257,30 @@ find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Outcome
 		find_show(f, browsing.draft)
 		find_enter(f, Find_Editing{})
 	}
-	return .Changed
+	return Find_Change.Changed
 }
 
 @(private)
 find_show :: proc(f: ^Find_Bar, entry: Find_Entry) {
 	field_set(&f.query, entry.query)
-	f.case_sensitive, f.regex = entry.case_sensitive, entry.regex
+	f.options = entry.options
 }
 
 @(private)
-find_change :: proc(change: Field_Change) -> Find_Outcome {
+find_change :: proc(change: Field_Change) -> Find_Change {
 	switch change {
 	case .None:
-		return .None
+		return Find_Change.None
 	case .Moved:
-		return .Moved
+		return Find_Change.Moved
 	case .Edited:
 	}
-	return .Changed
+	return Find_Change.Changed
 }
 
 find_text :: proc(f: ^Find_Bar, text: string) -> Find_Outcome {
 	outcome := find_change(field_text(&f.query, text))
-	if outcome == .Changed { find_edit(f) }
+	if outcome == Find_Change.Changed { find_edit(f) }
 	return outcome
 }
 
@@ -393,27 +390,27 @@ find_animating :: proc(f: ^Find_Bar) -> bool {
 // gives it the keyboard.
 find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mouse_Button,
 	pressed: bool, x, y: f32) -> Find_Outcome {
-	if button != .Left { return .None }
+	if button != .Left { return Find_Change.None }
 	hit := find_hit(l, enabled, x, y)
 	if pressed {
 		find_focus(f)
 		armed_press(&f.armed, hit)
-		return .Moved
+		return Find_Change.Moved
 	}
 	fired, ok := armed_release(&f.armed, hit)
-	if !ok { return .Moved }
+	if !ok { return Find_Change.Moved }
 	switch fired {
 	case .None:
 	case .Up:
-		return .Up
+		return search.Step.Up
 	case .Down:
-		return .Down
+		return search.Step.Down
 	case .Close:
-		return .Closed
+		return Find_Change.Closed
 	case .Case_Toggle, .Regex_Toggle:
 		return find_toggle(f, fired)
 	}
-	return .Moved
+	return Find_Change.Moved
 }
 
 // Draws the bar with `status` (such as "3 of 17") right-aligned after the query.
@@ -452,8 +449,8 @@ find_draw :: proc(
 		{l.up, .Up, .Arrow_Up, "", false, enabled},
 		{l.down, .Down, .Arrow_Down, "", false, enabled},
 		{l.close, .Close, .Close, "", false, true},
-		{l.case_toggle, .Case_Toggle, .None, "Aa", f.case_sensitive, true},
-		{l.regex_toggle, .Regex_Toggle, .None, ".*", f.regex, true},
+		{l.case_toggle, .Case_Toggle, .None, "Aa", f.options.case_sensitive, true},
+		{l.regex_toggle, .Regex_Toggle, .None, ".*", f.options.regex, true},
 	}
 	for b in buttons {
 		if b.area.width <= 0 { continue }

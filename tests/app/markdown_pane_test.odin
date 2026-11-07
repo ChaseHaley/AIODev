@@ -111,7 +111,7 @@ opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^tes
 
 @(private = "file")
 find_settle :: proc(state: ^app.App) {
-	for app.markdown_find_pending(state) {app.markdown_find_tick(state)}
+	for app.find_pending(state) {app.find_tick(state)}
 }
 
 @(private = "file")
@@ -190,12 +190,12 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 
 	// Case and expression toggles, on their usual keys.
 	press(&f.state, w, .C, {.Alt})
-	testing.expect(t, w.find.case_sensitive)
+	testing.expect(t, w.find.options.case_sensitive)
 	find_settle(&f.state)
 	testing.expect_value(t, find_count(w, pane), "0 of 2")
 	press(&f.state, w, .C, {.Alt})
 	press(&f.state, w, .R, {.Alt})
-	testing.expect(t, w.find.regex)
+	testing.expect(t, w.find.options.regex)
 	app.handle_event(&f.state, input.Text_Event{w.id, "("})
 	find_settle(&f.state)
 	testing.expect_value(t, find_count(w, pane), "Invalid expression")
@@ -248,8 +248,8 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	press(&f.state, w, .End)
 	app.handle_event(&f.state, input.Text_Event{w.id, " last"})
 	testing.expect_value(t, ui.field_string(&w.find.query), "needle last")
-	testing.expect(t, !app.markdown_find_pending(&f.state))
-	app.markdown_find_tick(&f.state)
+	testing.expect(t, !app.find_pending(&f.state))
+	app.find_tick(&f.state)
 	testing.expect_value(t, pane.search.next, 0)
 	testing.expect_value(t, find_count(w, pane), "0 of 0")
 	testing.expect_value(t, os.write_entire_file(f.file, "needle last\n"), nil)
@@ -270,7 +270,7 @@ a_pane_without_a_search_costs_no_wakeups :: proc(t: ^testing.T) {
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Idle") {return}
 	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
-	testing.expect(t, !app.markdown_find_pending(&f.state))
+	testing.expect(t, !app.find_pending(&f.state))
 }
 
 @(test)

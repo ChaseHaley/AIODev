@@ -1,0 +1,31 @@
+WORK-344 round 2 / R2Terminal
+Base: e2a404b; branch refactor/untangle-r2-terminal.
+
+All ten assigned terminal.md findings implemented; no dismissals.
+1. Pointer recording: removed w.pointer re-stores from pane_scrollbar_move, selection_move and markdown_held_move. input.odin remains the event writer.
+2. Pane body: pane_body_rect in pane_box.odin clamps body height once; terminal scrollbar, Markdown geometry and settings_layout_for use it. Nonpositive terminal scrollbar areas remain invisible.
+3. Find work: find_pending/find_tick cover terminal and Markdown scanners through find_target_pending/find_target_tick. Shared summary-before/after dirty rule. Removed Markdown-specific pending/tick and app's inline terminal scanning. Per-backend scanners and STEP_BUDGET unchanged.
+4. Find vocabulary: Find_Bar/Find_Entry store search.Options; Find_Outcome carries Find_Change or search.Step. History, widget controls, app effects and tests migrated. Existing find.case_sensitive/find.regex state keys unchanged.
+5. Link readings: allocation-free links.Break_Readings iterator owns descending-mask order, cap and scratch handling. Selection and terminal file/web loops migrated. Click still checks all web readings before file readings; file-check cap unchanged.
+6. replay_snapshot removed: documented screen_snapshot exposed; tool and both test consumers migrated.
+7. snapshot_color removed: snapshot sites call color_from_ghostty directly.
+8. Scrollbars: removed duplicate terminal scrollbar hover/button/release handlers; surface hover/press/release use shared state update. Tests route through gesture_button/gesture_move with lightweight layout and hidden status panel (full-window synthetic pane otherwise lies under the default panel). Release updates hover without changing cursor policy.
+9. Link hover: content_move owns admission; removed link_hover_move and exposed link_hover_update.
+10. COM: moved apartment initialization to aio:com leaf used by localpath shortcut and platform taskbar/file picker; HRESULT and uninitialization ownership preserved.
+
+Verification:
+- Final pwsh -NoProfile -File build.ps1 check: exit 0.
+- app named run: 6/8 passed; scrollbar_drag_clamps_and_track_click_pages and scrollbar_expands_under_pointer_and_can_be_hidden failed because synthetic pane overlapped default Status_Panel. Both fixtures now disable status.panel; rerun is owed (single-run budget instruction). No production workaround. Run also emitted a find_history allocation warning in find_headless_events_keep_counts_scope_keyboard_wrap_and_close; history behavior was preserved.
+- ui named run: 6/6 passed (find_bar_edits_query_and_navigates; find_pointer_requires_matching_release_and_disables_without_matches; find_toggles_close_and_focus_respond_without_matches; find_history_recalls_searches_like_a_prompt; find_history_browsing_frees_its_draft_when_it_ends; armed_keeps_a_press_that_has_no_target).
+- links whole package: 16/16 passed, including new reading order/cap/buffer/exhaustion coverage.
+- term named run: 4/4 passed (replay_reproduces_screen_and_cell_attributes; bad_png_is_refused_and_the_terminal_keeps_working; snapshot_styles_and_colors; snapshot_background_only_cells).
+- localpath named run: terminal_file_preparation_checks_real_files_before_classifying passed.
+- No live journeys. No product behavior intentionally changed; shared body clamp preserves hidden tiny-scrollbar outcome.
+
+Cross-ownership edits:
+- app.odin: only old markdown tick/pending call wiring plus removed obsolete terminal pending/update inline blocks; Main explicitly approved these required clean-cutover deletions.
+- pane_box.odin: assigned pane_body_rect and render import.
+- settings_pane.odin: assigned body query only. R2Settings notified to retain this argument when merging its editor_fit wrapper.
+- terminal_selection.odin: assigned pointer-write deletion only, no copy_selection edits.
+- platform files: assigned COM helper imports/calls only.
+- Tests and tools: required caller/entrypoint migrations as above.

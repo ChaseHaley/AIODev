@@ -87,7 +87,6 @@ selection_begin :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32, time_ns: i
 @(private)
 selection_move :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32) {
 	term.selection_drag(entry.session, x, y)
-	w.pointer = {x, y}
 	selection_follow(w, entry, time.tick_now())
 	w.dirty = true
 }

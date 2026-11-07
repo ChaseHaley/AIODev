@@ -1,7 +1,7 @@
 package platform
 
+import "aio:com"
 import "aio:input"
-import "aio:localpath"
 import "core:log"
 import "core:strings"
 import "core:sync"
@@ -90,7 +90,7 @@ file_pick_run :: proc(t: ^thread.Thread) {
 	}
 	// The Explorer dialog needs an apartment on the thread that shows it. Without one the folder dialog
 	// fails to start and says so, and the classic file dialog still runs.
-	initialized, _ := localpath.com_apartment()
+	initialized, _ := com.apartment()
 	defer if initialized {w.CoUninitialize()}
 	if pick.folders {
 		file_pick_folder(pick)

@@ -203,6 +203,68 @@ row_breaks_read_as_a_space_or_as_nothing :: proc(t: ^testing.T) {
 }
 
 @(test)
+break_readings_descend_masks_and_cap_variable_breaks :: proc(t: ^testing.T) {
+	buffer: [32]u8
+	readings := links.break_readings("a\nb\nc\nd\ne", buffer[:])
+	expected := [?]string{
+		"a b c d e",
+		"ab c d e",
+		"a bc d e",
+		"abc d e",
+		"a b cd e",
+		"ab cd e",
+		"a bcd e",
+		"abcd e",
+	}
+	count := 0
+	for reading in links.break_readings_next(&readings) {
+		if testing.expect(t, count < len(expected)) {
+			testing.expect_value(t, reading, expected[count])
+		}
+		count += 1
+	}
+	testing.expect_value(t, count, len(expected))
+	reading, more := links.break_readings_next(&readings)
+	testing.expect(t, !more)
+	testing.expect_value(t, reading, "")
+}
+
+@(test)
+break_readings_skip_oversized_variants_without_losing_shorter_ones :: proc(t: ^testing.T) {
+	buffer: [4]u8
+	readings := links.break_readings("a\nb\nc", buffer[:])
+	expected := [?]string{"ab c", "a bc", "abc"}
+	count := 0
+	for reading in links.break_readings_next(&readings) {
+		if testing.expect(t, count < len(expected)) {
+			testing.expect_value(t, reading, expected[count])
+		}
+		count += 1
+	}
+	testing.expect_value(t, count, len(expected))
+
+	readings = links.break_readings("a\nbc", buffer[:2])
+	for _ in 0 ..< 2 {
+		reading, more := links.break_readings_next(&readings)
+		testing.expect(t, !more)
+		testing.expect_value(t, reading, "")
+	}
+}
+
+@(test)
+break_readings_yield_unbroken_and_empty_text_once :: proc(t: ^testing.T) {
+	buffer: [4]u8
+	for text in ([?]string{"path", ""}) {
+		readings := links.break_readings(text, buffer[:])
+		reading, more := links.break_readings_next(&readings)
+		testing.expect(t, more)
+		testing.expect_value(t, reading, text)
+		_, again := links.break_readings_next(&readings)
+		testing.expect(t, !again)
+	}
+}
+
+@(test)
 selected_text_is_a_target_when_it_can_name_one :: proc(t: ^testing.T) {
 	cases := [?]struct {
 		raw:      string,
@@ -214,6 +276,7 @@ selected_text_is_a_target_when_it_can_name_one :: proc(t: ^testing.T) {
 		{`"C:\My Dir\a.txt"`, false, `C:\My Dir\a.txt`},
 		{`C:\My Dir\a.txt.`, false, `C:\My Dir\a.txt`},
 		{"https://example.com/a\n  /b", false, "https://example.com/a\n/b"},
+		{"ht\ntps://example.com/a", false, "ht\ntps://example.com/a"},
 		{`My Folder\a b.txt`, true, `My Folder\a b.txt`},
 		{`My Folder\a b.txt`, false, ""},
 		{`just some words`, true, ""},
