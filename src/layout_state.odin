@@ -203,15 +203,9 @@ layout_state_encode :: proc(
 		if workspace.provisional || len(workspace.tabs) == 0 {continue}
 		tabs := make([]Saved_Tab, len(workspace.tabs), context.temp_allocator)
 		for tab, i in workspace.tabs {
-			nodes, focus, encoded := layout_tree_encode(app, &tab.tree, processes)
+			encoded: bool
+			tabs[i], encoded = layout_tab_encode(app, tab, processes)
 			if !encoded {return "", false}
-			tabs[i] = {
-				name = tab.name,
-				focus = focus,
-				zoomed = tab.tree.zoomed,
-				nodes = nodes,
-				documents = tab.documents[:],
-			}
 		}
 		append(
 			&workspaces,
@@ -232,6 +226,21 @@ layout_state_encode :: proc(
 	data, err := json.marshal(state, {pretty = true, use_enum_names = true}, allocator)
 	if err != nil {return "", false}
 	return string(data), true
+}
+
+// A tab as layout state and the closed-tab journal save it, in temporary memory.
+@(private, require_results)
+layout_tab_encode :: proc(app: ^App, tab: ^Tab, processes: []procinfo.Process_Info) -> (Saved_Tab, bool) {
+	nodes, focus, encoded := layout_tree_encode(app, &tab.tree, processes)
+	if !encoded {return {}, false}
+	return {
+			name = tab.name,
+			focus = focus,
+			zoomed = tab.tree.zoomed,
+			nodes = nodes,
+			documents = tab.documents[:],
+		},
+		true
 }
 
 // The tree's saved nodes, root first, in temporary memory, and the saved index of its focused pane. False
@@ -421,17 +430,18 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 		tab_record_free(tab)
 		return false
 	}
-	settings_seen := false
+	// Content a workspace holds once may come back once, and only when the workspace lacks it.
+	once: bit_set[layout.Content_Kind]
 	for &node, i in tab.tree.nodes {
 		pane, is_pane := &node.(layout.Pane)
 		if !is_pane {continue}
 		restored := false
-		switch pane.content.kind {
+		kind := pane.content.kind
+		switch kind {
 		case .Terminal:
 			pane.content.id, restored = layout_session_restore(app, &saved.nodes[i])
 		case .Settings:
-			restored = !settings_seen && !workspace_has_content(workspace, pane.content)
-			if restored {settings_seen = true} else {log.error("skipping a saved tab with a second settings page")}
+			restored = true
 		case .Markdown:
 			path := saved.nodes[i].path
 			document := path != "" && utf8.valid_string(path) ? markdown_pane_create(app, path, false) : nil
@@ -439,6 +449,14 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 			if restored {
 				pane.content.id = document.id
 				documents_restore(&document.documents, saved.nodes[i].documents)
+			}
+		}
+		if restored && CONTENT_POLICY[kind].one_per_workspace {
+			restored = kind not_in once && !workspace_has_content(workspace, pane.content)
+			if restored {
+				once += {kind}
+			} else {
+				log.errorf("skipping a saved tab with a second %s page", CONTENT_POLICY[kind].display_name)
 			}
 		}
 		if !restored {

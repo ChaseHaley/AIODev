@@ -374,10 +374,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	view := status_inbox_view(app, w, inbox)
 	items, surface, list, footer_y := view.items, view.surface, view.list, view.footer_y
 	s := w.scale
-	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
-	frame := ui.popover_panel(surface, s)
-	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
+	if !ui.popover_open(&w.list, surface, app.theme, f32(w.width), f32(w.height), s) {return .Ok}
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	scope := app.settings.status.scope == .All ? "All workspaces" : "This workspace"
@@ -532,4 +529,41 @@ status_overview_cancel :: proc(w: ^Window) {
 	status_inbox_close(w)
 	status_panel_hover_clear(w)
 	w.status.pill_hover = false
+}
+
+// Activity inbox pointer surface
+
+@(private)
+status_inbox_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return status_inbox_shown(w)}
+
+@(private)
+status_inbox_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Status_Inbox {status_inbox_move(app, w, f32(e.x), f32(e.y))}
+}
+
+// Activity pill pointer surface
+
+@(private)
+status_pill_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return render.rect_contains(status_pill_rect(app, w), x, y)
+}
+
+@(private)
+status_pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	hovered := owner == .Status_Pill
+	status_pill_hover_set(w, hovered)
+	if hovered {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
+}
+
+@(private)
+status_pill_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Activity"}
+
+@(private)
+status_pill_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button == .Left {status_inbox_toggle(app, w)}
+}
+
+@(private)
+status_pill_leave :: proc(_: ^App, w: ^Window) {
+	status_pill_hover_set(w, false)
 }

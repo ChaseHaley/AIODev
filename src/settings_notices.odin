@@ -4,6 +4,7 @@ import "aio:settings"
 import "aio:ui"
 import "core:log"
 import "core:os"
+import "core:time"
 
 // What the settings notice last reported, so an unchanged revision stays quiet, and whether the format
 // migration was announced this run. App embeds it; reading and applying settings are its only writers.
@@ -67,7 +68,7 @@ show_settings_diagnostics :: proc(
 	app.settings_read_error = read_error
 	if !changed {return}
 	if read_error == nil && len(app.settings_diagnostics) == 0 {
-		ui.notices_clear(&app.notices, u32(Notice_Key.Settings))
+		ui.notices_clear(&app.notices, u32(Notice_Key.Settings), app.animations, time.tick_now())
 		return
 	}
 	kind: ui.Notice_Kind = .Warning
@@ -81,5 +82,6 @@ show_settings_diagnostics :: proc(
 		kind = .Error
 		text = "Some settings could not be applied. Open Settings to review them; check the log for details."
 	}
-	ui.notices_put(&app.notices, u32(Notice_Key.Settings), kind, text, ERROR_NOTICE_DURATION)
+	key := u32(Notice_Key.Settings)
+	ui.notices_put(&app.notices, key, kind, text, ERROR_NOTICE_DURATION, app.animations, time.tick_now())
 }

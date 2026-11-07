@@ -6,9 +6,9 @@ import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "base:runtime"
+import "core:log"
 import "core:slice"
 import "core:strings"
-import "core:time"
 import "core:unicode/utf8"
 
 @(private) PALETTE_MAX_ROWS :: 8
@@ -24,10 +24,6 @@ import "core:unicode/utf8"
 // A leading icon and the gap after it.
 @(private) PALETTE_GLYPH_WIDTH :: ICON_BUTTON + SPACE_2
 @(private) PALETTE_NO_RANK :: 99
-@(private) PALETTE_PRESENCE :: Presence_Spec {
-	open  = 120 * time.Millisecond,
-	close = 90 * time.Millisecond,
-}
 
 // What activating a result does.
 Outcome :: enum {
@@ -115,6 +111,18 @@ Palette_Key_Hint :: struct {
 
 // At most navigate, three selection actions, and close.
 @(private) PALETTE_HINT_CAP :: 5
+
+// The palette's chords beyond list_step, each beside the keycap the footer shows for it. palette_key
+// and edit_key match these, so changing a chord changes its hint. Enter and Numpad Enter both accept.
+// The operate modifier with Enter edits a command's shortcut or operates a setting's control.
+@(private) PALETTE_OPERATE :: input.Modifier.Control
+@(private) PALETTE_OPERATE_LABEL :: "Ctrl+Enter"
+// The adjust modifier with Left or Right steps the selected setting.
+@(private) PALETTE_ADJUST :: input.Modifier.Alt
+@(private) PALETTE_ADJUST_LABEL :: "Alt+←/→"
+@(private) PALETTE_ACCEPT_LABEL :: "Enter"
+@(private) PALETTE_CANCEL_KEY :: input.Key.Escape
+@(private) PALETTE_CANCEL_LABEL :: "Esc"
 
 // A setting the palette can open in the settings editor, and the control it offers in place.
 // The strings are static schema text. A choice without `choices` asks Palette_Values for a live list.
@@ -286,7 +294,7 @@ palette_open :: proc(p: ^Palette, registry: ^commands.Registry) {
 }
 
 palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
-	presence_open(&p.presence, PALETTE_PRESENCE)
+	presence_open(&p.presence, DIALOG_PRESENCE)
 	field_set(&p.query, "")
 	p.selected, p.scroll = 0, 0
 	p.mode = mode
@@ -313,17 +321,18 @@ palette_close :: proc(p: ^Palette) {
 palette_choose :: proc(p: ^Palette, chosen: Palette_Chosen) {p.chosen = chosen}
 
 // Values need owned storage, but schema keys outlive the palette. The embedded shortcut row's key
-// needs a copy too, since closing that edit destroys its editor.
+// needs a copy too, since closing that edit destroys its editor. A copy that cannot be stored chooses
+// nothing, so the owner never applies a partial value.
 @(private)
 choose_setting :: proc(p: ^Palette, key, value: string, copy_key := false) -> Outcome {
 	saved_key := key
 	if copy_key {
 		clear(&p.chosen_key)
-		append(&p.chosen_key, key)
+		if _, err := append(&p.chosen_key, key); err != nil {return .None}
 		saved_key = string(p.chosen_key[:])
 	}
 	clear(&p.chosen_value)
-	append(&p.chosen_value, value)
+	if _, err := append(&p.chosen_value, value); err != nil {return .None}
 	palette_choose(p, Chosen_Value{saved_key, string(p.chosen_value[:])})
 	return .Set_Setting
 }
@@ -454,6 +463,9 @@ setting_header_match :: proc(p: ^Palette, setting: int, query: string, highlight
 ) {
 	s := p.settings[setting]
 	clear(&p.haystack)
+	// Room for the header alias and the title, so the text matched is never a truncated copy.
+	needed := len(s.group) + len(PALETTE_SETTING_SUFFIX) + 2 + len(s.title)
+	if reserve(&p.haystack, needed) != nil {return}
 	append(&p.haystack, s.group)
 	append(&p.haystack, PALETTE_SETTING_SUFFIX)
 	// The displayed singular header is also a subsequence of this plural alias.
@@ -664,7 +676,14 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	}
 	setting_count := (p.mode == .All || p.mode == .Settings) ? len(p.settings) : 0
 	candidates := tabs + workspaces + setting_count + enabled_commands
-	if !empty && width > 0 {resize(&p.positions, candidates * width)}
+	// Every candidate's storage is in place before ranking, so the appends below cannot fail and the
+	// published list is complete. Without room the palette lists nothing rather than a partial list.
+	if reserve(&p.ordered, candidates) != nil || reserve(&p.results, candidates) != nil ||
+	   (width > 0 && resize(&p.positions, candidates * width) != nil) {
+		log.errorf("palette: no room for %d results", candidates)
+		p.selected, p.scroll = 0, 0
+		return
+	}
 	spans: [Palette_Kind][2]int
 	if p.mode == .All || p.mode == .Tabs {
 		start := len(p.ordered)
@@ -754,7 +773,6 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 		spans[.Command] = {start, len(p.ordered)}
 	}
 	if len(p.ordered) > 0 {
-		_ = reserve(&p.results, len(p.ordered))
 		for kind in PALETTE_DOMAIN_ORDER {
 			append(&p.results, ..p.ordered[spans[kind][0]:spans[kind][1]])
 		}
@@ -867,26 +885,26 @@ palette_key :: proc(
 		}
 	}
 	shift := .Shift in e.modifiers
-	if (e.key == .Enter || e.key == .Numpad_Enter) && .Control in e.modifiers &&
+	if (e.key == .Enter || e.key == .Numpad_Enter) && PALETTE_OPERATE in e.modifiers &&
 	   p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Command {
 		return palette_binding_open(p, p.selected), 0
 	}
-	// Alt+Left and Alt+Right step the selected setting; Ctrl+Enter operates its control.
+	// The adjust chord steps the selected setting; the operate chord operates its control.
 	if s := result_setting(p, p.selected); s != nil && s.control != .None {
 		setting := p.results[p.selected].setting
-		alt := .Alt in e.modifiers && .Control not_in e.modifiers
+		alt := PALETTE_ADJUST in e.modifiers && PALETTE_OPERATE not_in e.modifiers
 		#partial switch e.key {
 		case .Arrow_Left:
 			if alt {return control_step(p, setting, -1), 0}
 		case .Arrow_Right:
 			if alt {return control_step(p, setting, 1), 0}
 		case .Enter, .Numpad_Enter:
-			if .Control in e.modifiers {return control_activate(p, setting), 0}
+			if PALETTE_OPERATE in e.modifiers {return control_activate(p, setting), 0}
 		}
 	}
 	if step := list_step(e); step != 0 {return move(p, step), 0}
 	#partial switch e.key {
-	case .Escape:
+	case PALETTE_CANCEL_KEY:
 		palette_close(p)
 		return .Closed, 0
 	case .Enter, .Numpad_Enter:
@@ -1279,33 +1297,33 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 	#partial switch _ in p.edit {
 	case Choice_Edit:
 		add(out, &count, LIST_NEXT_LABEL, LIST_PREVIOUS_LABEL, "Navigate")
-		add(out, &count, "Enter", "", "Choose")
-		add(out, &count, "Esc", "", "Cancel")
+		add(out, &count, PALETTE_ACCEPT_LABEL, "", "Choose")
+		add(out, &count, PALETTE_CANCEL_LABEL, "", "Cancel")
 		return count
 	case Text_Edit:
-		add(out, &count, "Enter", "", "Apply")
-		add(out, &count, "Esc", "", "Cancel")
+		add(out, &count, PALETTE_ACCEPT_LABEL, "", "Apply")
+		add(out, &count, PALETTE_CANCEL_LABEL, "", "Cancel")
 		return count
 	}
 	if p.selected >= 0 && p.selected < len(p.results) {
 		add(out, &count, LIST_NEXT_LABEL, LIST_PREVIOUS_LABEL, "Navigate")
 		switch p.results[p.selected].kind {
 		case .Command:
-			add(out, &count, "Enter", "", "Run command")
-			add(out, &count, "Ctrl+Enter", "", "Edit shortcut")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Run command")
+			add(out, &count, PALETTE_OPERATE_LABEL, "", "Edit shortcut")
 		case .Setting:
-			add(out, &count, "Enter", "", "Go to setting")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Go to setting")
 			if s := result_setting(p, p.selected); s != nil && s.control != .None {
-				add(out, &count, "Ctrl+Enter", "", "Change")
-				if s.control != .Text {add(out, &count, "Alt+←/→", "", "Adjust")}
+				add(out, &count, PALETTE_OPERATE_LABEL, "", "Change")
+				if s.control != .Text {add(out, &count, PALETTE_ADJUST_LABEL, "", "Adjust")}
 			}
 		case .Tab:
-			add(out, &count, "Enter", "", "Switch tab")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Switch tab")
 		case .Workspace:
-			add(out, &count, "Enter", "", "Switch workspace")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Switch workspace")
 		}
 	}
-	add(out, &count, "Esc", "", "Close")
+	add(out, &count, PALETTE_CANCEL_LABEL, "", "Close")
 	return count
 }
 
@@ -1412,7 +1430,7 @@ palette_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, height, scale: f32,
-	opacity: f32 = 1, rise: f32 = 0,
+	fade := FADE_NONE,
 	pointer: [2]f32 = {},
 ) -> render.Build_Status {
 	palette_fit(p, width, height, scale)
@@ -1421,9 +1439,10 @@ palette_draw :: proc(
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
-	layer_start, rect_start, glyph_start := len(list.layers), len(list.rects), len(list.glyphs)
-	bounded_rise := clamp(rise, 0, max(0, height - scale - panel.y - panel.height))
-	defer fade_draw(list, layer_start, rect_start, glyph_start, opacity, bounded_rise)
+	// The full-window clip stays put; the panel sinks no lower than the client's bottom edge.
+	mark := fade_mark(list)
+	bounded := Fade{fade.opacity, clamp(fade.rise, 0, max(0, height - scale - panel.y - panel.height))}
+	defer fade_draw(list, mark, bounded)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
 	frame := dialog_panel(panel, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}

@@ -129,16 +129,7 @@ rename_field_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
-	return {
-		field = &w.rename,
-		text = &w.ui_text,
-		rect = rename_field_rect(w),
-		inset = ui.CONTROL_INSET,
-		caret_width = 1,
-		radius = ui.RADIUS_CONTROL,
-		style = .Body,
-		scale = w.scale,
-	}
+	return ui.field_box_standard(&w.rename, &w.ui_text, rename_field_rect(w), w.scale)
 }
 
 rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
@@ -223,4 +214,53 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		app.theme.muted,
 		max(1, r.width - 2 * pad),
 	)
+}
+
+when AIO_CONTROL {
+	rename_state_report :: proc(r: ^State_Report, w: ^Window) {
+		chip, _ := w.overlay.(Overlay_Chip_Name)
+		state_value(r, "rename.open", rename_shown(w))
+		state_value(r, "rename.error", chip.error)
+		state_text(r, "rename.value", ui.field_string(&w.rename))
+	}
+}
+
+// Rename field pointer surface
+
+@(private)
+rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return rename_shown(w)}
+
+@(private)
+rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Rename {return}
+	x, y := f32(e.x), f32(e.y)
+	if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
+	pointer_set(app, w, render.rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
+}
+
+// A press outside the dialog finishes the rename and is swallowed with its release. The workspace chip
+// field is not modal: the press leaves it, keeping the name typed so far when it can, and still reaches
+// what it landed on.
+@(private)
+rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {ui.field_release(&w.rename); return}
+	x, y := f32(e.x), f32(e.y)
+	if chip_name_shown(w) && !render.rect_contains(rename_rect(w), x, y) {
+		overlay_close(app, w, .Leave)
+		target := pointer_target(app, w, x, y)
+		gesture_hand_off(w, e.button, target)
+		pointer_press(app, w, target, e)
+		return
+	}
+	if !render.rect_contains(rename_rect(w), x, y) {
+		rename_finish(app, w, false)
+		gesture_swallow(w, e.button, .Rename)
+	} else if e.button == .Left && render.rect_contains(rename_field_rect(w), x, y) {
+		rename_pointer(app, w, x, true, .Shift in e.modifiers)
+	}
+}
+
+@(private)
+rename_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.rename)
 }

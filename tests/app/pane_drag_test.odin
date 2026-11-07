@@ -10,15 +10,14 @@ seed_pane_drag :: proc(
 	w: ^app.Window,
 	source: ^app.Tab,
 	node: layout.Node_Id,
-	destination: app.Drag_Destination = nil,
+	destination: app.Pane_Destination = nil,
 	preview: app.Tear_Off_Preview = nil,
 ) {
-	visit := app.drag_destination_window(destination)
+	visit := app.pane_destination_window(destination)
 	if visit == 0 {visit = w.id}
 	w.drag = app.Drag_Active {
-		carry       = app.Pane_Carry{grab = {source, node}, visit = {window = visit}},
-		destination = destination,
-		preview     = preview,
+		carry   = app.Pane_Carry{grab = {source, node}, destination = destination, visit = {window = visit}},
+		preview = preview,
 	}
 }
 
@@ -35,10 +34,13 @@ pane_drag_label_names_each_drop :: proc(t: ^testing.T) {
 	source := app.Tab{}
 	destination := app.Tab{}
 	grab := app.Pane_Grab{source = &source, node = 1}
-	testing.expect_value(t, app.pane_drag_label(grab, app.Drop_Pane{tab = &destination}), "Move pane here")
-	testing.expect_value(t, app.pane_drag_label(grab, app.Drop_Dock_Root{tab = &destination}), "Dock to workspace edge")
-	testing.expect_value(t, app.pane_drag_label(grab, app.Drop_Swap{}), "Swap panes")
-	testing.expect_value(t, app.pane_drag_label(grab, app.Drop_New_Tab{tab = &destination}), "+ New tab")
+	testing.expect_value(t, app.pane_drag_label(grab, app.Pane_Drop{tab = &destination}), "Move pane here")
+	edge := app.Pane_Drop{tab = &destination, place = .Edge}
+	testing.expect_value(t, app.pane_drag_label(grab, edge), "Dock to workspace edge")
+	testing.expect_value(t, app.pane_drag_label(grab, app.Pane_Drop{place = .Swap}), "Swap panes")
+	new_tab := app.Pane_Drop{tab = &destination, place = .New_Tab}
+	testing.expect_value(t, app.pane_drag_label(grab, new_tab), "+ New tab")
 	grab.node = source.tree.root
-	testing.expect_value(t, app.pane_drag_label(grab, app.Drop_New_Tab{tab = &source}), "Move tab to end")
+	new_tab.tab = &source
+	testing.expect_value(t, app.pane_drag_label(grab, new_tab), "Move tab to end")
 }

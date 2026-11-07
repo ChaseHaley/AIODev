@@ -10,7 +10,6 @@ import "aio:commands"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
-import "aio:ui"
 
 @(private = "file")
 Fixture :: struct {
@@ -411,11 +410,9 @@ header_button_moves_a_pane_to_a_linked_window_and_back :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_stop(t, &f)
 	if !fixture_start(t, &f, 30) {return}
-	button := int(ui.Header_Action.Linked_Window) - 1
-	click := proc(f: ^Fixture, w: ^app.Window, pane: layout.Pane_Rect, button: int) {
-		r := pane.rect
-		h := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
-		gesture_click_header(f.state, w, button, h)
+	button := app.Pane_Header_Button.Linked_Window
+	click := proc(f: ^Fixture, w: ^app.Window, pane: layout.Pane_Rect, button: app.Pane_Header_Button) {
+		gesture_click_header(f.state, w, button, app.pane_header_layout(w, pane))
 	}
 	click(&f, f.host, f.host.panes[0], button)
 	testing.expect_value(t, len(f.state.windows), 1)
@@ -525,8 +522,8 @@ drag_pane_to :: proc(
 	direction: layout.Direction,
 	root := false,
 ) {
-	place: app.Drag_Destination = app.Drop_Pane{destination_window.id, destination, target, direction, .Fits}
-	if root {place = app.Drop_Dock_Root{destination_window.id, destination, target, direction, .Fits}}
+	place_kind := root ? app.Pane_Place.Edge : app.Pane_Place.Beside
+	place := app.Pane_Drop{destination_window.id, destination, place_kind, target, direction, .Fits}
 	seed_pane_drag(source_window, source, node, place)
 }
 
@@ -545,7 +542,7 @@ dragging_inside_a_linked_window_rearranges_it :: proc(t: ^testing.T) {
 	x := target.rect.x + target.rect.width / 2
 	y := target.rect.y + target.rect.height - 8 * w.scale
 	testing.expect(t, app.pane_drag_move(f.state, w, x, y, false))
-	_, tear_off := app.drag_destination(w).(app.Drop_Tear_Off)
+	_, tear_off := app.pane_drag_destination(w).(app.Drop_Tear_Off)
 	testing.expect(t, !tear_off)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	root, is_split := app.window_tree(w).nodes[app.window_tree(w).root].(layout.Split)
@@ -753,7 +750,7 @@ dragging_a_linked_pane_outside_every_window_tears_it_off :: proc(t: ^testing.T) 
 	start := [2]f32{source.rect.x + 40, source.rect.y + 8}
 	app.pane_drag_press(f.state, w, source.node, start.x, start.y)
 	testing.expect(t, app.pane_drag_move(f.state, w, -30_000, -30_000, false))
-	_, tear_off := app.drag_destination(w).(app.Drop_Tear_Off)
+	_, tear_off := app.pane_drag_destination(w).(app.Drop_Tear_Off)
 	testing.expect(t, tear_off, "a linked pane can leave for a window of its own")
 	testing.expect(t, drag_preview(w) != 0)
 	testing.expect(t, app.pane_drag_release(f.state, w))
@@ -786,7 +783,7 @@ dragging_a_linked_pane_to_a_new_host_tab_moves_it_there :: proc(t: ^testing.T) {
 		w,
 		app.selected_tab(w.workspace),
 		w.panes[1].node,
-		app.Drop_New_Tab{f.host.id, app.selected_tab(f.host.workspace), .Fits},
+		app.Pane_Drop{f.host.id, app.selected_tab(f.host.workspace), .New_Tab, layout.INVALID_NODE, .Left, .Fits},
 	)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	testing.expect_value(t, len(f.state.windows), 2)
@@ -847,7 +844,7 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 			false,
 		),
 	) {return}
-	held, holding := app.drag_destination(w).(app.Drop_Workspace_Dropdown)
+	held, holding := app.pane_drag_destination(w).(app.Drop_Workspace_Dropdown)
 	testing.expect(t, holding && held.window == f.host.id)
 	row := app.workspace_picker_row_rect(f.host, 0)
 	if !testing.expect(
@@ -861,7 +858,7 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 			false,
 		),
 	) {return}
-	held, _ = app.drag_destination(w).(app.Drop_Workspace_Dropdown)
+	held, _ = app.pane_drag_destination(w).(app.Drop_Workspace_Dropdown)
 	testing.expect_value(t, held.row, 0)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	testing.expect(t, f.host.workspace == destination)

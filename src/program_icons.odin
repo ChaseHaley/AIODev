@@ -200,7 +200,7 @@ pane_icon :: proc(
 	if entry == nil {return}
 	program := program_adopted(entry)
 	if app.settings.tabs.program_icons && program != nil && program.name != "" {
-		want, found := program_icon_source(app, program, int(math.round(size)))
+		want, found := program_icon_source(app, program, int(math.round(size)), .Draw)
 		if found {
 			state: Program_Icon_State
 			atlas, state, result = program_icon_atlas(app, want, int(math.round(size)))
@@ -228,7 +228,7 @@ report_icon :: proc(
 	if app.settings.tabs.program_icons && name != "" {
 		pixels := int(math.round(size))
 		art, has_art := program_art_find(app, name)
-		want, found := program_named_source(app, name, art, has_art, pixels)
+		want, found := program_named_source(app, name, art, has_art, pixels, .Draw)
 		if found {
 			state: Program_Icon_State
 			atlas, state, result = program_icon_atlas(app, want, pixels)
@@ -240,20 +240,28 @@ report_icon :: proc(
 	return
 }
 
+// Whether a source lookup marks the missing entries it consults as recently used. Drawing does, so
+// they outlive idle entries; an observer leaves the cache as it is.
+Program_Icon_Lookup :: enum {
+	Draw,
+	Observe,
+}
+
 // The first source in precedence order that has not turned out to be missing at this size.
 @(private)
 program_icon_source :: proc(
 	app: ^App,
 	program: ^Program_Adopted,
 	size: int,
+	lookup: Program_Icon_Lookup,
 ) -> (
 	want: Program_Icon_Want,
 	found: bool,
 ) {
-	want, found = program_named_source(app, program.name, program.art, program.has_art, size)
+	want, found = program_named_source(app, program.name, program.art, program.has_art, size, lookup)
 	if found {return}
 	executable := Program_Icon_Want{source = .Executable, path = program.path}
-	if program.path != "" && !program_icon_missing(app, executable, size) {return executable, true}
+	if program.path != "" && !program_icon_missing(app, executable, size, lookup) {return executable, true}
 	return {}, false
 }
 
@@ -265,29 +273,35 @@ program_named_source :: proc(
 	art: program_art.Art,
 	has_art: bool,
 	size: int,
+	lookup: Program_Icon_Lookup,
 ) -> (
 	want: Program_Icon_Want,
 	found: bool,
 ) {
 	if file, ok := program_named_file(app, name, art, has_art); ok {
 		want = {source = .File, path = file}
-		if !program_icon_missing(app, want, size) {return want, true}
+		if !program_icon_missing(app, want, size, lookup) {return want, true}
 	}
 	if has_art {
 		paint := program_art_paint(app, art)
 		want = {source = .Artwork, path = program_art.canonical(art), art = art, paint = paint}
-		if !program_icon_missing(app, want, size) {return want, true}
+		if !program_icon_missing(app, want, size, lookup) {return want, true}
 	}
 	return {}, false
 }
 
 @(private)
-program_icon_missing :: proc(app: ^App, want: Program_Icon_Want, size: int) -> bool {
+program_icon_missing :: proc(
+	app: ^App,
+	want: Program_Icon_Want,
+	size: int,
+	lookup: Program_Icon_Lookup,
+) -> bool {
 	cache := &app.program_icons
 	for &icon in cache.icons {
 		if icon.state == .Missing && icon.source == want.source && icon.size == size &&
 		   icon.paint == want.paint && icon.path == want.path {
-			icon.used = cache.clock
+			if lookup == .Draw {icon.used = cache.clock}
 			return true
 		}
 	}
@@ -325,23 +339,34 @@ program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_ar
 }
 
 when AIO_CONTROL {
-	// Whether the pane's program has an icon ready to draw at any size, from whichever source; the
-	// verification state reports it.
-	program_icon_ready :: proc(app: ^App, program: ^Program_Adopted) -> bool {
-		file, has_file := program_named_file(app, program.name, program.art, program.has_art)
-		art := program.has_art ? program_art.canonical(program.art) : ""
-		for icon in app.program_icons.icons {
-			if icon.state != .Ready {continue}
-			switch icon.source {
-			case .File:
-				if has_file && icon.path == file {return true}
-			case .Artwork:
-				if art != "" && icon.path == art {return true}
-			case .Executable:
-				if program.path != "" && icon.path == program.path {return true}
+	// session.program.source has always been looked up at 16 pixels, a rail tab's icon at 100% scale;
+	// a source missing only at another drawn size does not change it.
+	PROGRAM_ICON_REPORT_SIZE :: 16
+
+	// The pane's program icon: the source it would draw from, and whether an icon is ready at any
+	// size from any source. Reading them leaves the cache's use order alone.
+	program_icon_state_report :: proc(r: ^State_Report, app: ^App, entry: ^Session_Entry) {
+		want: Program_Icon_Want
+		found, ready := false, false
+		if program := program_adopted(entry); program != nil && program.name != "" {
+			want, found = program_icon_source(app, program, PROGRAM_ICON_REPORT_SIZE, .Observe)
+			file, has_file := program_named_file(app, program.name, program.art, program.has_art)
+			art := program.has_art ? program_art.canonical(program.art) : ""
+			for icon in app.program_icons.icons {
+				if icon.state != .Ready {continue}
+				switch icon.source {
+				case .File: ready ||= has_file && icon.path == file
+				case .Artwork: ready ||= art != "" && icon.path == art
+				case .Executable: ready ||= program.path != "" && icon.path == program.path
+				}
 			}
 		}
-		return false
+		if found {
+			state_word(r, "session.program.source", want.source)
+		} else {
+			state_text(r, "session.program.source", "")
+		}
+		state_value(r, "session.program.icon", ready)
 	}
 }
 

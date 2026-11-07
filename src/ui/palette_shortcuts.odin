@@ -157,9 +157,7 @@ palette_binding_draw :: proc(
 			positions_focused = c.state == .Idle, physical = c.physical, empty_label = "Add shortcut",
 		}
 		summary := shortcut_summary(field_string(&binding.draft))
-		result := shortcut_field_draw(list, text, theme, parts, summary, state, l.viewport, l.scale)
-		_ = render.push_layer(list, l.list)
-		return result
+		return shortcut_field_draw(list, text, theme, parts, summary, state, l.viewport, l.scale)
 	}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	summary := Shortcut_Summary{additional = max(0, command.shortcuts.count - 1)}
@@ -168,10 +166,7 @@ palette_binding_draw :: proc(
 	}
 	parts.positions = {}
 	focused := render.rect_contains(parts.field, pointer.x, pointer.y)
-	result := shortcut_field_draw(list, text, theme, parts, summary,
-	                              {focused = focused}, l.viewport, l.scale)
-	_ = render.push_layer(list, l.list)
-	return result
+	return shortcut_field_draw(list, text, theme, parts, summary, {focused = focused}, l.viewport, l.scale)
 }
 
 // The open row's alternatives list, over everything else in the palette.

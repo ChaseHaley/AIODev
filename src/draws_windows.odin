@@ -1,15 +1,15 @@
 package main
 
 import "aio:draws"
-import "aio:render"
+import "aio:pixels"
 import "aio:verify_protocol"
 import "core:fmt"
 import "core:strings"
 
 _ :: verify_protocol
 _ :: draws
+_ :: pixels
 _ :: fmt
-_ :: render
 _ :: strings
 
 // Draw-list evidence: report the selected window's last built frame in draw order.
@@ -36,13 +36,13 @@ when AIO_CONTROL {
 		}
 		filter := draws.Filter{kind = kind}
 		if request.region.kind == .Pixels {
-			region := render.Rect {
-				x      = f32(request.region.x),
-				y      = f32(request.region.y),
-				width  = f32(request.region.width),
-				height = f32(request.region.height),
-			}
-			if !draws.region_fits(region, int(w.width), int(w.height)) {
+			requested := request.region
+			// The integer region is checked as pixel evidence checks it, then handed over as floats.
+			if !pixels.rect_within(
+				int(w.width),
+				int(w.height),
+				{requested.x, requested.y, requested.width, requested.height},
+			) {
 				return verify_protocol.explain(
 					out,
 					fmt.tprintf(
@@ -56,7 +56,8 @@ when AIO_CONTROL {
 					),
 				)
 			}
-			filter.bounded, filter.region = true, region
+			filter.bounded = true
+			filter.region = {f32(requested.x), f32(requested.y), f32(requested.width), f32(requested.height)}
 		}
 		draws.format_report(out, &w.list, filter)
 		return .None

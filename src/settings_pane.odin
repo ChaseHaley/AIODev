@@ -3,6 +3,7 @@ package main
 import "aio:layout"
 import "aio:render"
 import "aio:ui"
+import "aio:input"
 
 // Where the settings page lives in the window: the one settings pane, its layout and drawing, and
 // opening it. The page's rows come from settings_editor.odin; its saves from settings_commit.odin.
@@ -167,3 +168,64 @@ editor_open :: proc(app: ^App, w: ^Window) -> ^Window {
 	return w
 }
 
+// Settings page pointer surface
+
+@(private)
+settings_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	_, found := settings_pane_under_pointer(w, x, y)
+	return found
+}
+
+@(private)
+settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Settings_Page {
+		if ui.editor_hover_clear(&w.editor) {w.dirty = true}
+		return
+	}
+	x, y := f32(e.x), f32(e.y)
+	pane, found := settings_pane_under_pointer(w, x, y)
+	if !found {
+		// A held scrollbar follows the pointer anywhere, as it does on every other surface, and
+		// collapses on release because the pointer is no longer over it.
+		if w.editor.popup_bar_hover {w.editor.popup_bar_hover, w.dirty = false, true}
+		if ui.editor_scrollbar_dragging(&w.editor) && .Left in e.buttons &&
+		   ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y) {w.dirty = true}
+		pointer_set(app, w, .Arrow)
+		return
+	}
+	l := settings_layout_for(w, pane)
+	changed := ui.editor_hover(&w.editor, l, x, y)
+	if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
+	if changed {w.dirty = true}
+	pointer_set(app, w, ui.editor_pointer(&w.editor, l, x, y))
+}
+
+@(private)
+settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
+	return w.editor.hover_reset >= 0 ? "Reset setting" : ""
+}
+
+@(private)
+settings_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.editor_hover_clear(&w.editor)
+	ui.editor_pointer_cancel(&w.editor)
+}
+
+@(private)
+settings_leave :: proc(_: ^App, w: ^Window) {
+	ui.editor_hover_clear(&w.editor)
+}
+
+// A release no surface took: a held process-group row drops where it is released, then the focused page
+// finishes its press.
+@(private)
+settings_pointer_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	if ui.editor_order_dragging(&w.editor, .Process_Groups) {
+		_ = ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
+		editor_outcome(app, w, ui.editor_release(&w.editor))
+		return true
+	}
+	if !settings_active(w) {return false}
+	editor_outcome(app, w, ui.editor_release(&w.editor))
+	return true
+}

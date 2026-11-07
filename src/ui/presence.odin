@@ -7,6 +7,13 @@ Presence_Spec :: struct {
 	open, close: time.Duration,
 }
 
+// Surfaces centred over a scrim, the command palette and confirmations, open and close alike, and
+// sink RISE_DIALOG as they fade.
+DIALOG_PRESENCE :: Presence_Spec {
+	open  = 120 * time.Millisecond,
+	close = 90 * time.Millisecond,
+}
+
 // Where a floating surface is in its open and close motion. The procs in this file are the only
 // writers, so the motion always means what the phase says: rising to 1 while Opening, held at 1
 // when Open, falling to 0 while Closing and at rest at 0 when Closed.
@@ -37,6 +44,11 @@ presence_open :: proc(p: ^Presence, spec: Presence_Spec) {
 // release running exactly once after every close.
 presence_close :: proc(p: ^Presence) {
 	p.phase = p.motion.value == 0 && !motion_active(p.motion) ? .Release_Due : .Closing
+}
+
+// A surface that is already fully shown, ready to close from its open state.
+presence_shown :: proc(spec: Presence_Spec) -> Presence {
+	return {phase = .Open, spec = spec, motion = {value = 1, target = 1}}
 }
 
 // Drops the motion after the caller released the payload, returning the presence to closed.
@@ -82,7 +94,15 @@ presence_advance :: proc(p: ^Presence, enabled: bool, now: time.Tick) -> (change
 	return changed, true
 }
 
-// The rise only happens while closing, so an opening or settled surface keeps its place.
-presence_fade :: proc(p: Presence, rise: f32) -> (opacity, offset: f32) {
-	return p.motion.value, presence_is_open(p) ? 0 : rise * (1 - p.motion.value)
+// How a surface looks at this point of its presence: its opacity and how far it has sunk.
+Fade :: struct {
+	opacity, rise: f32,
+}
+
+FADE_NONE :: Fade{opacity = 1}
+
+// `rise` is the surface's full sink distance (RISE_DIALOG or RISE_NOTICE times the scale). The rise
+// only happens while closing, so an opening or settled surface keeps its place.
+presence_fade :: proc(p: Presence, rise: f32) -> Fade {
+	return {p.motion.value, presence_is_open(p) ? 0 : rise * (1 - p.motion.value)}
 }

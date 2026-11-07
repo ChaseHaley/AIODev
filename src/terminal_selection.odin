@@ -22,6 +22,8 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 			.Success,
 			"Copied to clipboard",
 			COPY_NOTICE_DURATION,
+			app.animations,
+			time.tick_now(),
 		)
 		mark_all_dirty(app)
 		if explicit {term.clear_selection(entry.session)}

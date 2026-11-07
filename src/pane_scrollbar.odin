@@ -181,3 +181,50 @@ terminal_scrollbar_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	terminal_scrollbar_hover(app, w, x, y)
 	return true
 }
+
+// Terminal scrollbar pointer surface
+
+@(private)
+scrollbar_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	_, found := terminal_scrollbar_at(app, w, x, y)
+	return found
+}
+
+@(private)
+scrollbar_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Scrollbar {
+		pane_scrollbar_hover_leave(w, .Terminal)
+		return
+	}
+	content, found := terminal_scrollbar_at(app, w, f32(e.x), f32(e.y))
+	if found {pane_scrollbar_hover_set(w, content)} else {pane_scrollbar_hover_leave(w, .Terminal)}
+	pointer_set(app, w, .Arrow)
+}
+
+@(private)
+scrollbar_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	_ = terminal_scrollbar_button(app, w, e)
+}
+
+@(private)
+scrollbar_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	return e.button == .Left && terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
+}
+
+@(private)
+scrollbar_cancel :: proc(_: ^App, w: ^Window) {
+	_ = pane_scrollbar_end(w, .Terminal)
+}
+
+@(private)
+scrollbar_leave :: proc(_: ^App, w: ^Window) {
+	pane_scrollbar_hover_leave(w, .Terminal)
+}
+
+// A held thumb of either kind follows the pointer anywhere; a Markdown thumb is pressed on its page.
+@(private)
+scrollbar_held :: proc(app: ^App, w: ^Window, _: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
+	if !pane_scrollbar_dragging(w) {return .Free}
+	pane_scrollbar_move(app, w, f32(e.x), f32(e.y))
+	return .Taken
+}

@@ -23,17 +23,6 @@ Filter :: struct {
 	kind:    Kind,
 }
 
-// region_fits reports whether a client-pixel rectangle lies inside a width by height client area.
-// The grammar already rejects empty sizes, so a region that does not fit is a caller mistake.
-@(require_results)
-region_fits :: proc(region: render.Rect, width, height: int) -> bool {
-	if region.width <= 0 || region.height <= 0 {return false}
-	return region.x >= 0 &&
-	       region.y >= 0 &&
-	       region.x + region.width <= f32(width) &&
-	       region.y + region.height <= f32(height)
-}
-
 // format_report writes the summary lines and, when the filter is bounded, one line per intersecting
 // instance. Instances follow frame_render: layers in order, and within a layer rects, then images,
 // then glyphs. An instance's number is its index in that list array, which is its draw order.
@@ -70,18 +59,18 @@ format_report :: proc(out: ^strings.Builder, list: ^render.Draw_List, filter: Fi
 // as 0..1 f32, so clamp before rounding keeps a stray value printable instead of overflowing a byte.
 @(require_results)
 format_color :: proc(color: render.Color) -> string {
-	return fmt.tprintf(
-		"#%02x%02x%02x%02x",
-		channel(color.r),
-		channel(color.g),
-		channel(color.b),
-		channel(color.a),
-	)
+	return format_rgba8({channel(color.r), channel(color.g), channel(color.b), channel(color.a)})
+}
+
+// format_rgba8 writes byte channels as the same #rrggbbaa text; pixel evidence reads bytes.
+@(require_results)
+format_rgba8 :: proc(color: [4]u8) -> string {
+	return fmt.tprintf("#%02x%02x%02x%02x", color[0], color[1], color[2], color[3])
 }
 
 @(private, require_results)
-channel :: proc(v: f32) -> int {
-	return int(math.round(clamp(v, 0, 1) * 255))
+channel :: proc(v: f32) -> u8 {
+	return u8(math.round(clamp(v, 0, 1) * 255))
 }
 
 // rounded turns f32 geometry into the integer client pixels the report prints.

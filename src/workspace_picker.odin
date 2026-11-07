@@ -467,3 +467,79 @@ workspace_picker_wheel :: proc(w: ^Window, delta: f32) {
 	}
 	workspace_picker_select(w, p.selected - int(math.sign(delta)))
 }
+
+when AIO_CONTROL {
+	// The workspace button's and picker's verification keys, with the shown workspace's identity.
+	workspace_picker_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		p := &w.workspace_picker
+		picker_rect, _ := workspace_picker_rect(w)
+		menu_target := workspace_picker_menu_id(p)
+		state_value(r, "workspace.id", w.workspace.id)
+		state_text(r, "workspace.name", w.workspace.name)
+		state_rect(r, "workspace.button", workspace_button_rect(w))
+		state_value(r, "workspace.button.hover", w.workspace_hovered)
+		state_value(r, "workspace.picker", workspace_picker_active(p))
+		state_value(r, "workspace.icon.preset", w.workspace.icon.preset)
+		state_text(r, "workspace.icon.emoji", w.workspace.icon.emoji)
+		state_value(r, "workspace.icon.tint", w.workspace.icon.tint)
+		state_value(r, "workspace.picker.colors", workspace_picker_tint(p))
+		state_rect(r, "workspace.picker.color_button", workspace_icon_color_button(w))
+		state_value(r, "workspace.picker.icons", workspace_picker_icons(p))
+		state_value(r, "workspace.picker.selected", p.selected)
+		state_value(r, "workspace.picker.count", workspace_picker_count(w))
+		state_text(r, "workspace.picker.query", ui.field_string(&p.query))
+		state_rect(r, "workspace.picker.rect", picker_rect)
+		state_rect(r, "workspace.picker.field", workspace_picker_field_rect(w))
+		state_rect(r, "workspace.picker.row", workspace_picker_row_rect(w, p.selected))
+		state_value(r, "workspace.picker.menu_target", menu_target)
+		state_value(r, "workspace.picker.menu_hover", p.menu_hover)
+		state_value(r, "workspace.picker.menu_selected", p.menu_selected)
+		state_value(r, "workspace.picker.window_enabled", workspace_row_window_enabled(app, w, menu_target))
+		state_text(r, "workspace.picker.window_title", workspace_row_window_title(app, menu_target))
+		state_rect(r, "workspace.picker.menu_button", workspace_picker_menu_button_rect(w, p.selected))
+		state_rect(r, "workspace.picker.menu_item", workspace_row_menu_item_rect(w, p.menu_selected))
+		state_value(r, "workspace.picker.rename_target", workspace_picker_rename_id(p))
+		state_text(r, "workspace.picker.rename_value", ui.field_string(&p.rename))
+		state_rect(r, "workspace.picker.rename_field", workspace_row_rename_field_rect(w))
+		state_value(r, "workspace.picker.rename_error", workspace_picker_rename_error(p))
+		state_value(r, "workspace.picker.icon_target", workspace_picker_icon_id(p))
+	}
+}
+
+// Workspace picker pointer surface
+
+@(private)
+workspace_picker_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return workspace_picker_active(&w.workspace_picker)
+}
+
+@(private)
+workspace_picker_pointer_hover :: proc(
+	app: ^App,
+	w: ^Window,
+	owner: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) {
+	if owner == .Workspace_Picker {workspace_picker_hover(app, w, e)}
+}
+
+@(private)
+workspace_picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	_, icons := w.workspace_picker.state.(Workspace_Picker_Icons)
+	if icons && render.rect_contains(workspace_icon_color_button(w), x, y) {
+		return "Change icon color"
+	}
+	return ""
+}
+
+@(private)
+workspace_picker_pointer_cancel :: proc(app: ^App, w: ^Window) {
+	ui.field_release(&w.workspace_picker.query)
+	workspace_order_end(w)
+	_ = workspace_order_animate(w, app.animations, time.tick_now())
+}
+
+@(private)
+workspace_picker_leave :: proc(_: ^App, w: ^Window) {
+	w.workspace_picker.menu_hover = 0
+}

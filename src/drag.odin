@@ -10,8 +10,12 @@ import "core:time"
 // threshold makes it Active, and from then on one destination at a time would take the drop. The release
 // drops there; Escape, a lost capture or a release the drag does not own cancels it and puts everything back.
 // The procs in this file are the only writers of Window.drag, of an active drag's destination and of its
-// tear-off preview. arrange.odin, tab_windows.odin and pane_workspace_drag.odin work out the destinations and
-// carry out the drops.
+// tear-off preview. arrange.odin, tab_drag.odin, tab_windows.odin and pane_workspace_drag.odin work out the
+// destinations and carry out the drops.
+//
+// A pane drag is the app's one pane drag: it visits, previews in and drops into other windows, so pressing a
+// pane header cancels the pane drag of every other window (pane_drag_press). A tab drag offers tabs to other
+// windows only through Drop_Other_Window, which that window's own drags do not touch, so it stays per window.
 Drag :: union {
 	Drag_Pressed,
 	Drag_Active,
@@ -46,12 +50,11 @@ Tab_Grab :: struct {
 }
 
 Drag_Active :: struct {
-	carry:       Drag_Carry,
+	carry:     Drag_Carry,
 	// The latest pointer position, in the source window's coordinates.
-	pointer:     [2]f32,
-	destination: Drag_Destination,
-	preview:     Tear_Off_Preview,
-	thumbnail:   Drag_Thumbnail,
+	pointer:   [2]f32,
+	preview:   Tear_Off_Preview,
+	thumbnail: Drag_Thumbnail,
 }
 
 Drag_Carry :: union #no_nil {
@@ -60,11 +63,12 @@ Drag_Carry :: union #no_nil {
 }
 
 Pane_Carry :: struct {
-	using grab: Pane_Grab,
-	visit:      Drag_Visit,
+	using grab:  Pane_Grab,
+	destination: Pane_Destination,
+	visit:       Drag_Visit,
 	// The drop outline as x, y, width and height, and its fade in.
-	ghost:      [4]ui.Motion,
-	reveal:     ui.Motion,
+	ghost:       [4]ui.Motion,
+	reveal:      ui.Motion,
 }
 
 // The window a pane drag is over, 0 outside every window, and the tab it showed on arrival, which leaving the
@@ -83,68 +87,71 @@ Drag_Hover :: struct {
 }
 
 @(private)
+DRAG_THRESHOLD :: 5
+
+@(private)
 DRAG_HOVER_DELAY :: 350 * time.Millisecond
 
 Tab_Carry :: struct {
-	using grab: Tab_Grab,
+	using grab:  Tab_Grab,
+	destination: Tab_Destination,
 	// The tabs in their order at the threshold, which a cancel restores.
-	order:      [dynamic]^Tab,
+	order:       [dynamic]^Tab,
 	// The grabbed tab's place among the marked tabs.
-	rank:       int,
+	rank:        int,
 }
 
-// Where a drop would land now. Nil lands nowhere and puts the content back.
-Drag_Destination :: union {
-	Drop_Pane,
-	Drop_Swap,
-	Drop_Dock_Root,
-	Drop_New_Tab,
+// Where a pane drop would land now. Nil lands nowhere and puts the pane back.
+Pane_Destination :: union {
+	Pane_Drop,
+	Drop_Workspace_Dropdown,
+	Drop_Tear_Off,
+}
+
+// Where a tab drop would land now. Nil lands nowhere and puts the tabs back.
+Tab_Destination :: union {
 	Drop_Reorder,
 	Drop_Other_Window,
 	Drop_Workspace_Dropdown,
 	Drop_Tear_Off,
 }
 
-// Whether a pane lands where the outline shows, from the trial layout that placed the outline.
+// Whether a pane lands where the outline shows, from the trial that placed the outline. A drop that does not
+// fit shows no outline; the release reports the refusals worth a notice.
 Drop_Fit :: enum u8 {
 	Fits,
+	// Nothing to report, such as a move that would change nothing.
 	Refused,
 	// It would leave a pane below the minimum pane size, which the drop reports.
 	Too_Small,
+	// The move between a linked window and another window is refused; the pane stays in its tab.
+	Refused_Source_Kept,
+	// The move to another tab is refused; both tabs stay as they were.
+	Refused_Tabs_Kept,
 }
 
-// A pane beside `target`, a pane of `tab`, which `window` shows.
-Drop_Pane :: struct {
+// How a dropped pane joins the tab it lands in.
+Pane_Place :: enum u8 {
+	// Beside `target`, on its `direction` side.
+	Beside,
+	// Along the `direction` edge of the whole tab, from the band at the edge of the content area. `target`
+	// is the pane focused there, which a linked destination resolves to its slot.
+	Edge,
+	// Trading places with `target` in its own tab while Shift is held.
+	Swap,
+	// In a new tab of the window. The pane's own tab, when it is that tab's only pane, only moves to the end.
+	New_Tab,
+}
+
+// A pane landing in `window`, which shows `tab`: the plan the outline measures and the release carries out.
+// `target` is a pane of the tree the window shows; a new tab has none. `fit` is the trial's verdict.
+Pane_Drop :: struct {
 	window:    input.Window_Id,
 	tab:       ^Tab,
+	place:     Pane_Place,
 	target:    layout.Node_Id,
 	direction: layout.Direction,
 	fit:       Drop_Fit,
-}
-
-// A pane trading places with `target` in its own tab while Shift is held.
-Drop_Swap :: struct {
-	window: input.Window_Id,
-	target: layout.Node_Id,
-	fit:    Drop_Fit,
-}
-
-// A pane along one edge of the whole of `tab`, from the band at the edge of the content area. `target` is the
-// pane focused there, which a linked destination resolves to its slot.
-Drop_Dock_Root :: struct {
-	window:    input.Window_Id,
-	tab:       ^Tab,
-	target:    layout.Node_Id,
-	direction: layout.Direction,
-	fit:       Drop_Fit,
-}
-
-// A pane in a new tab of `window`. `tab` is the tab shown there: the pane's own, when it is that tab's only
-// pane, only moves the tab to the end.
-Drop_New_Tab :: struct {
-	window: input.Window_Id,
-	tab:    ^Tab,
-	fit:    Drop_Fit,
 }
 
 // Tabs in the order their own strip or rail shows as they move.
@@ -231,33 +238,73 @@ tab_drag_active :: proc(w: ^Window) -> bool {
 	return tab
 }
 
-drag_destination :: proc(w: ^Window) -> Drag_Destination {
+// The destination of w's pane drag, nil while it holds none or carries tabs.
+pane_drag_destination :: proc(w: ^Window) -> Pane_Destination {
 	a := drag_active(w)
-	return a == nil ? nil : a.destination
+	if a == nil {return nil}
+	carry, pane := a.carry.(Pane_Carry)
+	return pane ? carry.destination : nil
+}
+
+// The workspace dropdown an active drag holds open, whatever it carries.
+drag_held_dropdown :: proc(a: ^Drag_Active) -> (Drop_Workspace_Dropdown, bool) {
+	switch carry in a.carry {
+	case Pane_Carry:
+		held, ok := carry.destination.(Drop_Workspace_Dropdown)
+		return held, ok
+	case Tab_Carry:
+		held, ok := carry.destination.(Drop_Workspace_Dropdown)
+		return held, ok
+	}
+	return {}, false
+}
+
+// Whether an active drag offers a window of its own at the pointer, whatever it carries.
+drag_tearing_off :: proc(a: ^Drag_Active) -> bool {
+	switch carry in a.carry {
+	case Pane_Carry:
+		_, tear_off := carry.destination.(Drop_Tear_Off)
+		return tear_off
+	case Tab_Carry:
+		_, tear_off := carry.destination.(Drop_Tear_Off)
+		return tear_off
+	}
+	return false
 }
 
 // An active drag holding a workspace dropdown open, which takes every key and the release.
 drag_holds_dropdown :: proc(w: ^Window) -> bool {
-	_, held := drag_destination(w).(Drop_Workspace_Dropdown)
+	a := drag_active(w)
+	if a == nil {return false}
+	_, held := drag_held_dropdown(a)
 	return held
 }
 
-// The window a drop at the destination would land in, or 0; a tear-off lands in the preview.
-drag_destination_window :: proc(destination: Drag_Destination) -> input.Window_Id {
+// The window a pane drop at `destination` would land in, or 0; a tear-off lands in the preview.
+pane_destination_window :: proc(destination: Pane_Destination) -> input.Window_Id {
 	switch d in destination {
-	case Drop_Pane:
-		return d.window
-	case Drop_Swap:
-		return d.window
-	case Drop_Dock_Root:
-		return d.window
-	case Drop_New_Tab:
-		return d.window
-	case Drop_Other_Window:
+	case Pane_Drop:
 		return d.window
 	case Drop_Workspace_Dropdown:
 		return d.window
-	case Drop_Reorder, Drop_Tear_Off:
+	case Drop_Tear_Off:
+	}
+	return 0
+}
+
+// The window a drop at an active drag's destination would land in, or 0; a tear-off lands in the preview.
+drag_destination_window :: proc(a: ^Drag_Active) -> input.Window_Id {
+	switch carry in a.carry {
+	case Pane_Carry:
+		return pane_destination_window(carry.destination)
+	case Tab_Carry:
+		switch d in carry.destination {
+		case Drop_Other_Window:
+			return d.window
+		case Drop_Workspace_Dropdown:
+			return d.window
+		case Drop_Reorder, Drop_Tear_Off:
+		}
 	}
 	return 0
 }
@@ -276,7 +323,7 @@ drag_hover_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 drag_involves :: proc(w: ^Window, id: input.Window_Id) -> bool {
 	a := drag_active(w)
 	if a == nil {return false}
-	if drag_destination_window(a.destination) == id {return true}
+	if drag_destination_window(a) == id {return true}
 	if ready, ok := a.preview.(Preview_Ready); ok && ready.window == id {return true}
 	carry, pane := a.carry.(Pane_Carry)
 	return pane && carry.visit.window == id
@@ -311,16 +358,20 @@ drag_end :: proc(w: ^Window) -> Drag {
 	return d
 }
 
-// The only change of an active drag's destination. What the old one held in another window lets go, and the
-// window offered tabs opens its gap.
-drag_retarget :: proc(app: ^App, w: ^Window, a: ^Drag_Active, next: Drag_Destination) {
-	previous := a.destination
-	if held, was := previous.(Drop_Workspace_Dropdown); was {
-		if now, still := next.(Drop_Workspace_Dropdown); !still || now.window != held.window {
-			workspace_picker_drag_leave(app, held)
-		}
-	}
-	if offer, was := previous.(Drop_Other_Window); was {
+// The only change of an active pane drag's destination.
+pane_drag_retarget :: proc(app: ^App, w: ^Window, a: ^Drag_Active, next: Pane_Destination) {
+	next_held: Maybe(Drop_Workspace_Dropdown)
+	if held, holds := next.(Drop_Workspace_Dropdown); holds {next_held = held}
+	_, tear_off := next.(Drop_Tear_Off)
+	drag_destination_leave(app, w, a, next_held, tear_off)
+	(&a.carry.(Pane_Carry)).destination = next
+}
+
+// The only change of an active tab drag's destination: the window offered the tabs opens its gap, and one
+// no longer offered them closes it.
+tab_drag_retarget :: proc(app: ^App, w: ^Window, a: ^Drag_Active, next: Tab_Destination) {
+	carry := &a.carry.(Tab_Carry)
+	if offer, was := carry.destination.(Drop_Other_Window); was {
 		if now, still := next.(Drop_Other_Window); !still || now.window != offer.window {
 			tab_incoming_set(app, offer.window, {})
 		}
@@ -329,17 +380,42 @@ drag_retarget :: proc(app: ^App, w: ^Window, a: ^Drag_Active, next: Drag_Destina
 		count := tabs_marked_count(w.workspace)
 		tab_incoming_set(app, offer.window, {source = w.id, count = count, slot = offer.slot})
 	}
-	_, was_tear_off := previous.(Drop_Tear_Off)
+	next_held: Maybe(Drop_Workspace_Dropdown)
+	if held, holds := next.(Drop_Workspace_Dropdown); holds {next_held = held}
 	_, tear_off := next.(Drop_Tear_Off)
+	drag_destination_leave(app, w, a, next_held, tear_off)
+	carry.destination = next
+}
+
+// What leaving the current destination lets go of, whatever the drag carries: a dropdown the next one does
+// not hold, and the tear-off thumbnail once no tear-off is offered.
+@(private)
+drag_destination_leave :: proc(
+	app: ^App,
+	w: ^Window,
+	a: ^Drag_Active,
+	next_held: Maybe(Drop_Workspace_Dropdown),
+	tear_off: bool,
+) {
+	if held, was := drag_held_dropdown(a); was {
+		if now, still := next_held.?; !still || now.window != held.window {
+			workspace_picker_drag_leave(app, held)
+		}
+	}
+	was_tear_off := drag_tearing_off(a)
 	if !tear_off {drag_thumbnail_sync(app, w, &a.thumbnail, {}, false, 0, 0)}
 	if was_tear_off != tear_off {w.dirty = true}
-	a.destination = next
 }
 
 // Releases everything an ended drag holds outside its content: the other windows it reached, then its own
 // resources.
 drag_let_go :: proc(app: ^App, w: ^Window, a: ^Drag_Active) {
-	drag_retarget(app, w, a, nil)
+	switch _ in a.carry {
+	case Pane_Carry:
+		pane_drag_retarget(app, w, a, nil)
+	case Tab_Carry:
+		tab_drag_retarget(app, w, a, nil)
+	}
 	drag_free(app, a)
 }
 
@@ -363,40 +439,55 @@ drag_destroy :: proc(w: ^Window) {
 }
 
 when AIO_CONTROL {
-	// What the verify harness reports of a window's drag, in the terms its journeys check.
-	Drag_Report :: struct {
-		pane, tab:                      bool,
-		shown, root, new_tab, tear_off: bool,
+	// The window's pane or tab drag in the terms its journeys check, with the tab slots it opens.
+	drag_state_report :: proc(r: ^State_Report, w: ^Window) {
+		pane, tab, shown, root, new_tab, tear_off: bool
 		// A pane drag's visited window; the window a tab drag offers its tabs to.
-		window:                         input.Window_Id,
-		preview:                        input.Window_Id,
-		thumbnail:                      Drag_Thumbnail,
-		ghost:                          [4]f32,
-	}
-
-	drag_report :: proc(w: ^Window) -> (report: Drag_Report) {
+		window, preview: input.Window_Id
+		thumbnail: Drag_Thumbnail
+		ghost: [4]f32
 		if pressed, ok := w.drag.(Drag_Pressed); ok {
-			if _, pane := pressed.grab.(Pane_Grab); pane {report.window = w.id}
-			return
+			if _, grabbed := pressed.grab.(Pane_Grab); grabbed {window = w.id}
+		} else if a := drag_active(w); a != nil {
+			tear_off = drag_tearing_off(a)
+			if ready, ready_ok := a.preview.(Preview_Ready); ready_ok {preview = ready.window}
+			thumbnail = a.thumbnail
+			switch carry in a.carry {
+			case Pane_Carry:
+				pane = true
+				shown = pane_drag_ghost_shown(a)
+				if drop, placed := carry.destination.(Pane_Drop); placed {
+					root = drop.place == .Edge
+					new_tab = drop.place == .New_Tab
+				}
+				window = carry.visit.window
+				for m, i in carry.ghost {ghost[i] = m.target}
+			case Tab_Carry:
+				tab = true
+				if offer, offered := carry.destination.(Drop_Other_Window); offered {window = offer.window}
+			}
 		}
-		a := drag_active(w)
-		if a == nil {return}
-		_, report.tear_off = a.destination.(Drop_Tear_Off)
-		if ready, ok := a.preview.(Preview_Ready); ok {report.preview = ready.window}
-		report.thumbnail = a.thumbnail
-		switch carry in a.carry {
-		case Pane_Carry:
-			report.pane = true
-			report.shown = pane_drag_ghost_shown(a)
-			_, report.root = a.destination.(Drop_Dock_Root)
-			_, report.new_tab = a.destination.(Drop_New_Tab)
-			report.window = carry.visit.window
-			for m, i in carry.ghost {report.ghost[i] = m.target}
-		case Tab_Carry:
-			report.tab = true
-			if offer, offered := a.destination.(Drop_Other_Window); offered {report.window = offer.window}
-		}
-		return
+		tab_thumbnail, pane_thumbnail: Drag_Thumbnail
+		if tab {tab_thumbnail = thumbnail}
+		if pane {pane_thumbnail = thumbnail}
+		state_value(r, "panes.dragging", pane)
+		state_value(r, "tabs.dragging", tab)
+		state_value(r, "tabs.drop.new_window", tab && tear_off)
+		state_value(r, "tabs.drop.preview_window", tab ? preview : 0)
+		state_value(r, "tabs.drop.window", tab ? window : 0)
+		state_value(r, "tabs.incoming.count", w.tab_incoming.count)
+		state_value(r, "tabs.incoming.slot", w.tab_incoming.slot)
+		state_value(r, "tabs.drop.thumbnail", tab && thumbnail.shown)
+		state_valuef(r, "tabs.drop.thumbnail_size", "%dx%d", tab_thumbnail.width, tab_thumbnail.height)
+		state_value(r, "panes.drop.shown", shown)
+		state_value(r, "panes.drop.root", root)
+		state_value(r, "panes.drop.new_tab", new_tab)
+		state_value(r, "panes.drop.new_window", pane && tear_off)
+		state_value(r, "panes.drop.window", tab ? 0 : window)
+		state_value(r, "panes.drop.preview_window", pane ? preview : 0)
+		state_value(r, "panes.drop.thumbnail", pane && thumbnail.shown)
+		state_valuef(r, "panes.drop.thumbnail_size", "%dx%d", pane_thumbnail.width, pane_thumbnail.height)
+		state_valuef(r, "panes.drop.rect", "%g,%g,%g,%g", ghost[0], ghost[1], ghost[2], ghost[3])
 	}
 }
 

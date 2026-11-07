@@ -700,16 +700,8 @@ document_url_box :: proc(w: ^Window) -> (ui.Field_Box, bool) {
 	menu := &w.document_menu
 	for i in 0 ..< len(menu.menu.items) {
 		if entry, _ := document_menu_entry(menu, i); entry.action != .Url_Field {continue}
-		return {
-			field = &menu.url,
-			text = &w.ui_text,
-			rect = ui.menu_row_rect(&menu.menu, i, f32(w.width), f32(w.height), w.scale),
-			inset = ui.CONTROL_INSET,
-			caret_width = 1,
-			radius = ui.RADIUS_CONTROL,
-			style = .Body,
-			scale = w.scale,
-		}, true
+		rect := ui.menu_row_rect(&menu.menu, i, f32(w.width), f32(w.height), w.scale)
+		return ui.field_box_standard(&menu.url, &w.ui_text, rect, w.scale), true
 	}
 	return {}, false
 }
@@ -749,7 +741,7 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 	pointer_set(app, w, shape)
 }
 
-document_menu_tooltip :: proc(w: ^Window, x, y: f32) -> string {
+document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	menu := &w.document_menu
 	if _, popout := document_menu_popout(w); popout {
 		level, hit := document_popout_hit(w, x, y)
@@ -847,4 +839,45 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		ui.icon_draw(&w.list, document_level_icon(level), face, ink, ui.ICON_BUTTON, s)
 	}
 	return .Ok
+}
+
+when AIO_CONTROL {
+	// The document menu's keys; documents.mode is list, pin or link, and empty while it is closed.
+	document_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
+		mode := ""
+		if state, shown := w.overlay.(Overlay_Document_Menu); shown {
+			switch _ in state.mode {
+			case Document_Menu_List: mode = "list"
+			case Document_Menu_Pin: mode = "pin"
+			case Document_Menu_Link: mode = "link"
+			}
+		}
+		_, popout := document_menu_popout(w)
+		_, url_entry := document_menu_url_entry(w)
+		state_value(r, "documents.open", document_menu_shown(w))
+		state_text(r, "documents.mode", mode)
+		state_value(r, "documents.count", w.document_menu.count)
+		state_value(r, "documents.popout", popout)
+		state_value(r, "documents.url_open", url_entry)
+	}
+}
+
+// Document menu pointer surface
+
+@(private)
+document_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return document_menu_shown(w)}
+
+@(private)
+document_menu_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Document_Menu {document_menu_hover(app, w, f32(e.x), f32(e.y), .Left in e.buttons)}
+}
+
+@(private)
+document_menu_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.document_menu.url)
+}
+
+@(private)
+document_menu_leave :: proc(_: ^App, w: ^Window) {
+	w.document_menu.menu.hover_part = .Row
 }

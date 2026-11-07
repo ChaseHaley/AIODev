@@ -1,21 +1,19 @@
 package main
 
-import "aio:verify_protocol"
-import "aio:layout"
+import "aio:draws"
 import "aio:pixels"
 import "aio:render"
+import "aio:verify_protocol"
 import "core:fmt"
-import "core:math"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-_ :: verify_protocol
-_ :: layout
+_ :: draws
 _ :: pixels
 _ :: render
+_ :: verify_protocol
 _ :: fmt
-_ :: math
 _ :: os
 _ :: filepath
 _ :: strings
@@ -24,13 +22,8 @@ _ :: strings
 // The renderer lives in capture_windows.odin so the verification protocol stays free of graphics.
 
 when AIO_CONTROL {
-	@(require_results)
-	color_text :: proc(color: [4]u8) -> string {
-		return fmt.tprintf("#%02x%02x%02x%02x", color[0], color[1], color[2], color[3])
-	}
-
-	// evidence_region resolves a request region to client pixels. Cells go through the focused
-	// pane's box, so an address selects exactly the pixels the grid drew for those cells.
+	// evidence_region resolves a request region to client pixels. Cells go through verify_grid, the
+	// mapping mouse cells use, so an address selects exactly the pixels the grid drew for them.
 	@(require_results)
 	evidence_region :: proc(
 		app: ^App,
@@ -58,19 +51,8 @@ when AIO_CONTROL {
 			}
 			return requested, ""
 		case .Cells:
-			entry := focused_session(app, w)
-			if entry == nil {
-				return {}, "the selected window has no focused pane; address the region in pixels"
-			}
-			shown: layout.Pane_Rect
-			visible := false
-			for pane in w.panes {
-				if pane.content != {.Terminal, entry.id} {continue}
-				shown, visible = pane, true
-				break
-			}
-			if !visible {return {}, "the focused pane is not visible; select its tab or use --region"}
-			box := pane_box(w.metrics, shown.rect, pane_insets(app, w.scale, entry, shown.floating))
+			box, complaint := verify_grid(app, w)
+			if complaint != "" {return {}, complaint}
 			if region.x + region.width > int(box.columns) ||
 			   region.y + region.height > int(box.rows) {
 				return {}, fmt.tprintf(
@@ -83,16 +65,9 @@ when AIO_CONTROL {
 					box.rows,
 				)
 			}
-			// Cell edges are rounded, not the cell size, so adjacent cell regions meet exactly.
-			left := int(math.round(box.origin.x + f32(region.x) * w.metrics.cell_width))
-			top := int(math.round(box.origin.y + f32(region.y) * w.metrics.cell_height))
-			right := int(
-				math.round(box.origin.x + f32(region.x + region.width) * w.metrics.cell_width),
-			)
-			bottom := int(
-				math.round(box.origin.y + f32(region.y + region.height) * w.metrics.cell_height),
-			)
-			requested := pixels.Rect{left, top, right - left, bottom - top}
+			first := verify_cell_corner(w, box, region.x, region.y)
+			last := verify_cell_corner(w, box, region.x + region.width, region.y + region.height)
+			requested := pixels.Rect{first.x, first.y, last.x - first.x, last.y - first.y}
 			if !pixels.rect_within(int(w.width), int(w.height), requested) {
 				return {}, "the cell region falls outside the window; use --region"
 			}
@@ -242,7 +217,7 @@ when AIO_CONTROL {
 				"sample %d,%d %s",
 				request.sample.x,
 				request.sample.y,
-				color_text(color),
+				draws.format_rgba8(color),
 			)
 			return .None
 		}
@@ -257,7 +232,7 @@ when AIO_CONTROL {
 				index,
 				line.coverage,
 				line.colors,
-				color_text(line.dominant),
+				draws.format_rgba8(line.dominant),
 			)
 		}
 		return .None

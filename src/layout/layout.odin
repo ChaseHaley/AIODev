@@ -72,6 +72,12 @@ Divider :: struct {
 	area, rect: Rect,
 }
 
+// A bar the pointer can grab beside a layout's own dividers, such as an edge of the surrounding chrome.
+Edge :: struct {
+	axis: Axis,
+	rect: Rect,
+}
+
 Pane :: struct {
 	content:  Content,
 	order:    u64,
@@ -201,7 +207,8 @@ split :: proc(
 
 // Places a new pane beside `node`, which may be a pane or a whole split, taking `share` of the
 // space they then divide; `before` puts it left of or above the node. Reopening a closed pane uses
-// this to return it beside the panes it was split from.
+// this to return it beside the panes it was split from. With `join_slot` the pane joins the slot
+// `node` is in, even when `node` is the slot itself.
 @(require_results)
 insert_beside :: proc(
 	l: ^Layout,
@@ -210,13 +217,14 @@ insert_beside :: proc(
 	before: bool,
 	share: f32,
 	content: Content,
+	join_slot := false,
 ) -> (
 	Node_Id,
 	runtime.Allocator_Error,
 ) {
 	if int(node) >= len(l.nodes) {return INVALID_NODE, .Invalid_Argument}
 	if _, vacant := l.nodes[node].(Vacant); vacant {return INVALID_NODE, .Invalid_Argument}
-	return wrap(l, node, axis, before, beside_ratio(share, before), content)
+	return wrap(l, node, axis, before, beside_ratio(share, before), content, join_slot)
 }
 
 // The ratio of a split that gives `share` to a new side placed before or after the other; a split's ratio
@@ -296,13 +304,15 @@ wrap :: proc(
 	before: bool,
 	ratio: f32,
 	content: Content,
+	join_slot := false,
 ) -> (
 	Node_Id,
 	runtime.Allocator_Error,
 ) {
 	if err := reserve(&l.nodes, len(l.nodes) + 2); err != nil {return INVALID_NODE, err}
 	l.next_pane_order += 1
-	added := node_wrap(l, node, Pane{content = content, order = l.next_pane_order}, axis, before, ratio)
+	pane := Pane{content = content, order = l.next_pane_order}
+	added := node_wrap(l, node, pane, axis, before, ratio, join_slot)
 	return added, nil
 }
 
@@ -355,6 +365,8 @@ place_pane :: proc(
 	return node_wrap(l, target, pane, axis, before, 0.5, join_slot)
 }
 
+// Splits the pane at `node`; the new pane takes `ratio` on the `direction` side. With `join_slot` the new
+// pane joins the slot `node` is in, even when `node` is the slot itself.
 @(require_results)
 split_direction :: proc(
 	l: ^Layout,
@@ -362,6 +374,7 @@ split_direction :: proc(
 	direction: Direction,
 	ratio: f32,
 	content: Content,
+	join_slot := false,
 ) -> (
 	Node_Id,
 	runtime.Allocator_Error,
@@ -370,7 +383,7 @@ split_direction :: proc(
 	_, is_pane := l.nodes[node].(Pane)
 	assert(is_pane, "only panes can be split")
 	axis, before := direction_parts(direction)
-	return wrap(l, node, axis, before, beside_ratio(ratio, before), content)
+	return wrap(l, node, axis, before, beside_ratio(ratio, before), content, join_slot)
 }
 
 @(require_results)
@@ -865,20 +878,30 @@ transfer_pane :: proc(
 	return added, true
 }
 
-// Every divider within `tolerance` of the point, so a junction of splits can be dragged as one.
+// Every bar within `tolerance` of the point, so a junction of bars can be dragged as one. The bars are
+// `edges` followed by `dividers`; `out` receives the indices of those hit in that order.
 divider_hit_all :: proc(
+	edges: []Edge,
 	dividers: []Divider,
 	x, y, tolerance: f32,
-	out: []Divider,
+	out: []int,
 	junction_radius: f32 = 0,
 	alignment: f32 = 0,
 ) -> int {
+	bar :: proc(edges: []Edge, dividers: []Divider, i: int) -> Edge {
+		if i < len(edges) {return edges[i]}
+		d := dividers[i - len(edges)]
+		return {d.axis, d.rect}
+	}
+	bars := len(edges) + len(dividers)
 	junction: [2]f32
 	closest := junction_radius + 1
 	if junction_radius > 0 {
-		for vertical in dividers {
+		for i in 0 ..< bars {
+			vertical := bar(edges, dividers, i)
 			if vertical.axis != .Horizontal {continue}
-			for horizontal in dividers {
+			for j in 0 ..< bars {
+				horizontal := bar(edges, dividers, j)
 				if horizontal.axis != .Vertical {continue}
 				v, h := vertical.rect, horizontal.rect
 				cx, cy := v.x + v.width / 2, h.y + h.height / 2
@@ -895,7 +918,8 @@ divider_hit_all :: proc(
 		}
 	}
 	count := 0
-	for d in dividers {
+	for i in 0 ..< bars {
+		d := bar(edges, dividers, i)
 		r := d.rect
 		r.x, r.width = r.x - tolerance, r.width + 2 * tolerance
 		r.y, r.height = r.y - tolerance, r.height + 2 * tolerance
@@ -914,7 +938,7 @@ divider_hit_all :: proc(
 			}
 		}
 		if count < len(out) && hit {
-			out[count] = d
+			out[count] = i
 			count += 1
 		}
 	}

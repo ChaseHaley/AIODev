@@ -205,3 +205,26 @@ link_hover_refresh :: proc(app: ^App, w: ^Window) {
 	link_hover_set(w, next)
 	pointer_set(app, w, next != nil ? .Hand : .Text)
 }
+
+when AIO_CONTROL {
+	// Hover state and the link count prove the interaction from a control journey without reading
+	// pixels: the range and target name the cells under the pointer, and pointer.shape is what the
+	// OS was asked to show.
+	link_state_report :: proc(r: ^State_Report, w: ^Window) {
+		hover, uri := "none", ""
+		spans := 0
+		for &view in w.views {spans += term.link_span_count(&view.links)}
+		if link, ok := w.link_hover.?; ok {
+			if view := pane_view(w, link.content); view != nil {
+				range := link.range
+				hover = state_key("%d,%d-%d,%d", range.first_row, range.first_column, range.last_row, range.last_column)
+				if _, target, found := term.link_at(&view.links, range.first_column, range.first_row); found {
+					uri = target
+				}
+			}
+		}
+		state_text(r, "link.hover", hover)
+		state_text(r, "link.uri", uri)
+		state_value(r, "link.spans", spans)
+	}
+}

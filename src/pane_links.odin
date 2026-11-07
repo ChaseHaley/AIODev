@@ -9,8 +9,10 @@ import "core:log"
 // A linked window shows part of a tab on its own, so panes that belong together can span monitors and still
 // switch with their tab (D-077, D-079). Its panes stay in their tab's tree, under a node marked linked, which
 // keeps every walk, close, move and saved layout correct without knowing about windows. The window displays
-// a private workspace that no list reaches, holding a copy of that subtree, and pane_links_sync keeps the two
-// matching and shows the window only while its tab is on screen.
+// a private workspace that no list reaches, holding a copy of that subtree. The tab's tree is the only place
+// panes join or leave a slot (pane_link_split, pane_moves.odin, closed_reopen_linked); the copy only arranges
+// them, and pane_link_reconcile, the one writer between the two, stores that arrangement or reloads the copy.
+// pane_links_sync reconciles every tick and shows the window only while its tab is on screen.
 
 // Where a linked pane lives: its own node, and the slot marked linked that holds it.
 Pane_Link_Home :: struct {
@@ -99,44 +101,30 @@ pane_link_tab_can_lose :: proc(tab: ^Tab) -> bool {
 	return layout.shown_pane_count(&tab.tree) > 1 || layout.pane_count(&tab.tree) <= 1
 }
 
-// Settles the window's copy against `home`'s slot. Panes join and leave in the tab's tree, so a
-// different set of panes there replaces the copy; the same panes arranged differently came from this
-// window and go back.
-pane_link_reconcile_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) -> Pane_Link_Home {
-	result := home
-	tree := &result.tab.tree
-	shown := window_tree(w)
-	if !layout.slot_valid(tree, result.slot) {return result}
-	if layout.same_arrangement(tree, result.slot, shown, shown.root) {return result}
-	if layout.same_panes(tree, result.slot, shown, shown.root) {
-		if slot, stored := layout.link_view_store(tree, result.slot, shown); stored {
-			result.slot = slot
-		} else {
-			log.error("saving a linked window's arrangement failed")
-		}
-		layout_state_touch(app)
-		return result
-	}
-	_ = gesture_cancel(app, w)
-	focus_leave(app, w)
-	if layout.link_view_load(shown, tree, result.slot) != nil {
-		log.error("updating a linked window's panes failed")
-	}
-	window_relayout(app, w)
-	focus_enter(app, w)
-	layout_state_touch(app)
-	return result
-}
-
-pane_link_reconcile :: proc(app: ^App, w: ^Window) {
+// Brings linked window w's copy and its slot into agreement, the one place either is written from the other.
+// Panes join and leave in the tab's tree, so a different set of panes there reloads the copy; the same panes
+// arranged differently came from this window and are stored in the slot. Storing rebuilds the slot, so
+// callers find panes in the tab's tree again by content. False when the arrangement could not be stored.
+pane_link_reconcile :: proc(app: ^App, w: ^Window) -> bool {
 	home, found := pane_link_locate(app, w)
-	if !found {return}
-	_ = pane_link_reconcile_at(app, w, home)
+	if !found {return true}
+	tree := &home.tab.tree
+	shown := window_tree(w)
+	if !layout.slot_valid(tree, home.slot) {return true}
+	if layout.same_arrangement(tree, home.slot, shown, shown.root) {return true}
+	if layout.same_panes(tree, home.slot, shown, shown.root) {
+		_, stored := layout.link_view_store(tree, home.slot, shown)
+		if !stored {log.error("saving a linked window's arrangement failed")}
+		layout_state_touch(app)
+		return stored
+	}
+	pane_link_reload(app, w, home)
+	return true
 }
 
-// Reloads a linked window from the slot `home` names.
+// Reloads linked window w's copy from the slot `home` names, keeping its focused pane where it can.
 @(private)
-pane_link_refresh_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
+pane_link_reload :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
 	if home.tab == nil || !layout.slot_valid(&home.tab.tree, home.slot) {return}
 	_ = gesture_cancel(app, w)
 	focus_leave(app, w)
@@ -157,21 +145,51 @@ pane_link_refresh_source :: proc(app: ^App, w: ^Window, content: layout.Content)
 		pane := node.(layout.Pane) or_continue
 		if pane.content == content {continue}
 		if home, found := pane_link_home(app, pane.content); found {
-			pane_link_refresh_at(app, w, home)
+			pane_link_reload(app, w, home)
 			return
 		}
 	}
 	pane_link_end(app, w)
 }
 
-// Records a pane this window just added, which the next sync would otherwise take for one that left.
-pane_link_store :: proc(app: ^App, w: ^Window) {
-	home, found := pane_link_locate(app, w)
-	if !found {return}
-	if _, stored := layout.link_view_store(&home.tab.tree, home.slot, window_tree(w)); !stored {
-		log.error("saving a linked window's panes failed")
+// Shows linked window w's slot again after `content` joined it in the tab's tree, focusing the pane there
+// when asked.
+pane_link_joined :: proc(app: ^App, w: ^Window, content: layout.Content, focus: bool) {
+	home, found := pane_link_home(app, content)
+	if !found {
+		log.error("the pane did not join the linked window")
+		return
 	}
-	layout_state_touch(app)
+	pane_link_reload(app, w, home)
+	if !focus {return}
+	if node := layout.find_content(window_tree(w), content); node != layout.INVALID_NODE {
+		pane_focus(app, w, node)
+	}
+}
+
+// Splits the pane at `node` of linked window w's copy with `content`. The new pane joins the slot in the
+// tab's tree, where panes join and leave, and the window then shows it with the rest of the slot.
+@(require_results)
+pane_link_split :: proc(
+	app: ^App,
+	w: ^Window,
+	node: layout.Node_Id,
+	direction: layout.Direction,
+	ratio: f32,
+	focus: bool,
+	content: layout.Content,
+) -> bool {
+	view := window_tree(w)
+	if int(node) >= len(view.nodes) {return false}
+	beside, is_pane := view.nodes[node].(layout.Pane)
+	if !is_pane || !pane_link_reconcile(app, w) {return false}
+	home, found := pane_link_home(app, beside.content)
+	if !found {return false}
+	tree := &home.tab.tree
+	if _, err := layout.split_direction(tree, home.node, direction, ratio, content, join_slot = true);
+	   err != nil {return false}
+	pane_link_joined(app, w, content, focus)
+	return true
 }
 
 // The window showing the pane's tab, or the app's window when nothing shows it.

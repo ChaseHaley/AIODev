@@ -28,9 +28,8 @@ gesture_captured :: proc(w: ^app.Window) -> (buttons: input.Mouse_Buttons) {
 }
 
 @(private)
-gesture_header :: proc(w: ^app.Window) -> ui.Header_Layout {
-	r := w.panes[0].rect
-	return ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
+gesture_header :: proc(w: ^app.Window) -> app.Pane_Header_Layout {
+	return app.pane_header_layout(w, w.panes[0])
 }
 
 @(test)
@@ -68,7 +67,7 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 	for scenario in 0 ..< 8 {
 		testing.expect_value(t, len(w.panes), 2)
 		h := gesture_header(w)
-		close := h.buttons[int(ui.Header_Action.Fill_Window) - 1]
+		close := h.buttons[.Fill_Window]
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)
 		gesture_button(s, w, .Middle, true, h.title.x+4, h.title.y+4)
 		switch scenario {
@@ -203,8 +202,8 @@ gestures_completion_removes_source_window_and_preserves_both_runtimes :: proc(t:
 		ids := [?]u32{s.sessions[0].id, s.sessions[1].id}
 		sessions := [?]^term.Session{s.sessions[0].session, s.sessions[1].session}
 		pids := [?]u32{term.process_id(sessions[0]), term.process_id(sessions[1])}
-		place: app.Drag_Destination = app.Drop_Pane{target.id, destination, destination.tree.root, .Right, .Fits}
-		if to_tab {place = app.Drop_New_Tab{target.id, destination, .Fits}}
+		place := app.Pane_Drop{target.id, destination, .Beside, destination.tree.root, .Right, .Fits}
+		if to_tab {place = app.Pane_Drop{window = target.id, tab = destination, place = .New_Tab}}
 		seed_pane_drag(w, source, source.tree.root, place)
 		app.handle_event(s, input.Mouse_Button_Event{window = window_id, button = .Left})
 		testing.expect(t, app.window_find(s, window_id) == nil)
@@ -307,12 +306,9 @@ gestures_terminal_press_motion_release_keep_reporting :: proc(t: ^testing.T) {
 }
 
 @(private)
-gesture_settings_header :: proc(w: ^app.Window) -> (ui.Header_Layout, bool) {
+gesture_settings_header :: proc(w: ^app.Window) -> (app.Pane_Header_Layout, bool) {
 	for pane in w.panes {
-		if pane.content.kind != .Settings {continue}
-		r := pane.rect
-		return ui.header_layout({r.x, r.y, r.width, r.height}, w.scale),
-			true
+		if pane.content.kind == .Settings {return app.pane_header_layout(w, pane), true}
 	}
 	return {}, false
 }
@@ -321,8 +317,8 @@ gesture_settings_header :: proc(w: ^app.Window) -> (ui.Header_Layout, bool) {
 gesture_click_header :: proc(
 	s: ^app.App,
 	w: ^app.Window,
-	button: int,
-	h: ui.Header_Layout,
+	button: app.Pane_Header_Button,
+	h: app.Pane_Header_Layout,
 ) {
 	r := h.buttons[button]
 	gesture_button(s, w, .Left, true, r.x + r.width / 2, r.y + r.height / 2)
@@ -332,7 +328,7 @@ gesture_click_header :: proc(
 // Settings is ordinary pane content, so its header controls run the same commands as a terminal.
 @(test)
 gestures_settings_header_split_buttons_create_terminal_panes :: proc(t: ^testing.T) {
-	for action in ([?]ui.Header_Action{.Split_Right, .Split_Down}) {
+	for action in ([?]app.Pane_Header_Button{.Split_Right, .Split_Down}) {
 		f: Palette_Fixture
 		defer palette_fixture_destroy(t, &f)
 		if !palette_fixture_create(t, &f, "gesture-settings-split") {return}
@@ -342,7 +338,7 @@ gestures_settings_header_split_buttons_create_terminal_panes :: proc(t: ^testing
 		sessions, tabs := len(s.sessions), len(w.workspace.tabs)
 		h, found := gesture_settings_header(w)
 		if !testing.expect(t, found) {return}
-		gesture_click_header(s, w, int(action) - 1, h)
+		gesture_click_header(s, w, action, h)
 		testing.expect_value(t, len(w.panes), 2)
 		testing.expect_value(t, len(w.workspace.tabs), tabs)
 		testing.expect_value(t, len(s.sessions), sessions + 1)
@@ -359,16 +355,16 @@ gestures_settings_header_zoom_and_close_drive_the_settings_pane :: proc(t: ^test
 	if !testing.expect(t, app.settings_active(w)) {return}
 	h, found := gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	gesture_click_header(s, w, int(ui.Header_Action.Zoom) - 1, h)
+	gesture_click_header(s, w, .Zoom, h)
 	if !testing.expect(t, app.window_tree(w).zoomed) {return}
 	h, found = gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	gesture_click_header(s, w, int(ui.Header_Action.Zoom) - 1, h)
+	gesture_click_header(s, w, .Zoom, h)
 	testing.expect(t, !app.window_tree(w).zoomed)
 	sessions, tabs := len(s.sessions), len(w.workspace.tabs)
 	h, found = gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	gesture_click_header(s, w, int(ui.Header_Action.Close) - 1, h)
+	gesture_click_header(s, w, .Close, h)
 	testing.expect(t, !ui.editor_loaded(&w.editor))
 	testing.expect(t, !app.settings_active(w))
 	testing.expect_value(t, len(w.workspace.tabs), tabs - 1)

@@ -673,17 +673,9 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		editor_outcome(app, w, ui.editor_key(p, e))
 		return
 	}
-	literal := false
-	switch leader_key(app, w, e) {
-	case .Consumed:
-		return
-	case .Literal:
-		literal = true
-	case .None:
-	}
-	logical := e
-	logical.key = commands.logical_key(e.key, e.unshifted)
-	switch clipboard_chord(logical) {
+	key, consumed := content_key_prelude(app, w, e, false)
+	if consumed {return}
+	switch key.clipboard {
 	case .Copy:
 		clipboard_copy(app, ui.editor_selection(p))
 		return
@@ -696,11 +688,9 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		return
 	case .None:
 	}
-	if e.pressed && !literal && !editor_owns(logical) {
-		if action, found := shortcut_action(app, e); found {
-			run_action(app, w, action)
-			return
-		}
+	if key.found && !editor_owns(key.logical) {
+		run_action(app, w, key.action)
+		return
 	}
 	editor_outcome(app, w, ui.editor_key(p, e))
 }
@@ -743,4 +733,143 @@ editor_profile_remove_finish :: proc(app: ^App, w: ^Window, remove: Profile_Remo
 editor_profile_remove_destroy :: proc(remove: ^Profile_Remove) {
 	delete(remove.id)
 	delete(remove.name)
+}
+
+when AIO_CONTROL {
+	// The settings page's verification keys, with the page's row geometry as the drawer lays it out.
+	settings_page_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		p := &w.editor
+		key, title := "", ""
+		choice_count := 0
+		if row := ui.editor_row(p); row != nil {
+			key, title = row.key, row.title
+			choice_count = len(row.choices)
+		}
+		selected: ui.Row_Parts
+		page: ui.Editor_Layout
+		if settings_active(w) {
+			page = settings_layout(w)
+			if len(p.items) > 0 {selected = ui.editor_row_parts(p, page, p.selected)}
+		}
+		question := confirmation_shown(w)
+		process_remove := confirmation_asking(w, Process_Remove) != nil
+		removing := confirmation_subject(w, Profile_Remove)
+		_, menu_open := p.mode.(ui.Editor_Profile_Menu)
+		detected := 0
+		for &profile in app.settings.profiles.items {
+			if profile.detected {detected += 1}
+		}
+		profile_group := -1
+		for group, index in p.groups {
+			if group.title == SETTINGS_SECTIONS[.Profiles].title {profile_group = index; break}
+		}
+		state_value(r, "settings.open", ui.editor_loaded(p))
+		state_text(r, "settings.revision", settings_page_revision_word(p))
+		state_value(r, "settings.theme_delete_armed", p.delete_armed)
+		state_text(r, "settings.filter", string(p.filter.bytes[:]))
+		state_value(r, "settings.scroll", p.scroll)
+		state_value(r, "settings.group", ui.editor_active_group(p))
+		state_text(r, "settings.key", key)
+		state_text(r, "settings.value", string(p.value.bytes[:]))
+		state_value(r, "settings.editing", ui.editor_editing(p))
+		state_value(r, "settings.active", settings_active(w))
+		state_value(r, "settings.popup", ui.editor_popup(p))
+		state_value(r, "settings.choice_count", choice_count)
+		state_text(r, "settings.choice_query", ui.field_string(&p.choice_search))
+		state_value(r, "settings.choice_matches", len(p.choice_matches))
+		state_value(r, "settings.capturing", ui.editor_capturing(p))
+		state_text(r, "settings.title", title)
+		state_text(r, "settings.message", p.message)
+		state_value(r, "settings.error", p.error)
+		state_text(r, "settings.process.rows", settings_page_row_rects(p, page, .Process))
+		state_value(r, "settings.process.expanded", p.process_expanded)
+		state_value(r, "settings.process.dragging", ui.editor_order_dragging(p, .Process_Groups))
+		state_value(r, "settings.process.drag_target", ui.editor_order_target(p))
+		state_text(r, "settings.process.value", app.settings.process.padding_groups)
+		state_value(r, "settings.process.confirming", process_remove)
+		state_value(r, "settings.process.confirm_option", process_remove && question.dialog.show_option)
+		state_text(r, "settings.profile.expanded", p.expanded)
+		state_text(r, "settings.profile.default", app.settings.profiles.default_id)
+		// The page no longer has a detected-profile section; its keys keep their empty values.
+		state_text(r, "settings.profile.detected_open", "false")
+		state_text(r, "settings.profile.removing", confirmation_asking(w, Profile_Remove) != nil ? removing.id : "")
+		remove_title := removing != nil ? editor_profile_remove_text(removing^).title : "Delete profile?"
+		state_text(r, "settings.profile.remove_title", remove_title)
+		state_value(r, "settings.profile.menu_open", menu_open)
+		state_value(r, "settings.profile.menu_count", len(p.profile_menu.items))
+		state_value(r, "settings.profile.action", p.request)
+		state_text(r, "settings.profile.error_key", p.error_key)
+		state_text(r, "settings.profile.error", p.error_text)
+		state_value(r, "settings.profile.control", p.profile_control)
+		columns := ui.profile_columns(page.list, page.scale)
+		state_value(r, "settings.profile.directory_shown", columns.directory_shown)
+		state_text(r, "settings.profile.rows", settings_page_row_rects(p, page, .Profile))
+		state_text(r, "settings.profile.detected_rows", "")
+		state_text(r, "settings.profile.detected_header", "")
+		state_value(r, "settings.profile.app_count", len(app.settings.profiles.items))
+		state_value(r, "settings.profile.app_detected", detected)
+		state_value(r, "settings.profile.group", profile_group)
+		state_value(r, "settings.profile.dragging", ui.editor_order_dragging(p, .Profiles))
+		state_value(r, "settings.profile.drag_target", ui.editor_order_target(p))
+		state_text(r, "settings.profile.drag_id", ui.editor_order_profile(p))
+		state_rect(r, "settings.slider", selected.slider)
+		state_rect(r, "settings.search_rect", page.filter)
+		state_rect(r, "settings.outline_rect", page.outline)
+		state_rect(r, "settings.list_rect", page.list)
+	}
+
+	// Current pages report draft while they hold pending work, derived rather than stored.
+	@(private = "file")
+	settings_page_revision_word :: proc(p: ^ui.Editor) -> string {
+		switch revision in p.revision {
+		case ui.Editor_Current:
+			return ui.editor_draft(p) ? "draft" : "fresh"
+		case ui.Editor_Stale:
+			switch revision.reason {
+			case .Changed_Outside:
+				return "stale.changed_outside"
+			case .Draft_Conflict:
+				return "stale.draft_conflict"
+			case .Refresh_Failed:
+				return "stale.refresh_failed"
+			}
+		}
+		return "closed"
+	}
+
+	@(private = "file")
+	Settings_Page_Table :: enum {
+		Process,
+		Profile,
+	}
+
+	// A table's rows as key@x,y,w,h (process) or id@x,y,w,h (profile), joined by ';', so a live
+	// journey can aim a drag at a row's grip.
+	@(private = "file")
+	settings_page_row_rects :: proc(
+		p: ^ui.Editor,
+		page: ui.Editor_Layout,
+		table: Settings_Page_Table,
+	) -> string {
+		builder := strings.builder_make(context.temp_allocator)
+		first := true
+		for item, index in p.items {
+			if item.row < 0 {continue}
+			row := &p.rows[item.row]
+			name: string
+			switch table {
+			case .Process:
+				if row.process_field == .None {continue}
+				name = row.key
+			case .Profile:
+				if row.kind != .Profile {continue}
+				name = row.profile
+			}
+			rect := ui.editor_row_parts(p, page, index).row
+			if !first {strings.write_byte(&builder, ';')}
+			first = false
+			fmt.sbprintf(&builder, "%s@%g,%g,%g,%g", name, rect.x, rect.y, rect.width, rect.height)
+		}
+		return strings.to_string(builder)
+	}
 }

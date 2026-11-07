@@ -94,7 +94,7 @@ process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"))
+	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)

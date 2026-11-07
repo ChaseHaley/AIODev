@@ -54,6 +54,8 @@ paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
 			.Warning,
 			PASTE_CONFIRM_TEXT,
 			PASTE_CONFIRM_DURATION,
+			app.animations,
+			now,
 		)
 		mark_all_dirty(app)
 	case .Failed:
@@ -66,7 +68,7 @@ paste_confirm_cancel :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	w.paste_confirm = nil
-	ui.notices_clear(&app.notices, u32(Notice_Key.Paste))
+	ui.notices_clear(&app.notices, u32(Notice_Key.Paste), app.animations, time.tick_now())
 	mark_all_dirty(app)
 }
 

@@ -89,11 +89,11 @@ divider_hit_all_finds_junctions :: proc(t: ^testing.T) {
 	bars := make([dynamic]layout.Divider)
 	defer delete(bars)
 	layout.dividers(&l, {0, 0, 400, 400}, 4, &bars)
-	out: [4]layout.Divider
-	testing.expect_value(t, layout.divider_hit_all(bars[:], 200, 200, 3, out[:]), 3)
-	testing.expect_value(t, layout.divider_hit_all(bars[:], 200, 50, 3, out[:]), 1)
-	testing.expect_value(t, layout.divider_hit_all(bars[:], 50, 50, 3, out[:]), 0)
-	testing.expect_value(t, layout.divider_hit_all(bars[:], 200, 200, 3, out[:1]), 1)
+	out: [4]int
+	testing.expect_value(t, layout.divider_hit_all(nil, bars[:], 200, 200, 3, out[:]), 3)
+	testing.expect_value(t, layout.divider_hit_all(nil, bars[:], 200, 50, 3, out[:]), 1)
+	testing.expect_value(t, layout.divider_hit_all(nil, bars[:], 50, 50, 3, out[:]), 0)
+	testing.expect_value(t, layout.divider_hit_all(nil, bars[:], 200, 200, 3, out[:1]), 1)
 }
 
 @(test)
@@ -106,19 +106,19 @@ junction_hot_zone_keeps_aligned_halves_together :: proc(t: ^testing.T) {
 				{node = 1, axis = .Vertical, rect = {0, 140*scale, 100*scale, g}},
 				{node = 2, axis = .Vertical, rect = {100*scale+g, 140*scale, 100*scale, g}},
 			}
-			hits: [4]layout.Divider
+			hits: [4]int
 			for dx in ([?]f32{-9, 0, 9}) {
 				for dy in ([?]f32{-9, 0, 9}) {
-					n := layout.divider_hit_all(bars[:], 100*scale+g/2+dx*scale,
+					n := layout.divider_hit_all(nil, bars[:], 100*scale+g/2+dx*scale,
 						140*scale+g/2+dy*scale, 3*scale, hits[:], 10*scale, 2*scale)
 					testing.expect_value(t, n, 3)
 				}
 			}
 			bars[2].rect.y += scale
-			testing.expect_value(t, layout.divider_hit_all(bars[:], 100*scale+g/2-8*scale,
+			testing.expect_value(t, layout.divider_hit_all(nil, bars[:], 100*scale+g/2-8*scale,
 				140*scale+g/2, 3*scale, hits[:], 10*scale, 2*scale), 3)
 			bars[2].rect.y += 20*scale
-			testing.expect_value(t, layout.divider_hit_all(bars[:], 100*scale+g/2,
+			testing.expect_value(t, layout.divider_hit_all(nil, bars[:], 100*scale+g/2,
 				140*scale+g/2, 3*scale, hits[:], 10*scale, 2*scale), 2)
 		}
 	}

@@ -28,9 +28,9 @@ Pane_View :: struct {
 	image_epoch: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
-	header_controls: [ui.HEADER_BUTTONS]ui.Control_Motion,
-	header_hover:   ui.Header_Action,
-	header_armed:   ui.Armed(ui.Header_Action),
+	header_controls: [Pane_Header_Button]ui.Control_Motion,
+	header_hover:   Pane_Header_Target,
+	header_armed:   ui.Armed(Pane_Header_Target),
 }
 
 Window :: struct {
@@ -72,9 +72,7 @@ Window :: struct {
 	// The last frame drew a pointer-following rim, so pointer movement must repaint it.
 	gloss_hovered: bool,
 	find: ui.Find_Bar,
-	// Leader chord mode and the keys whose releases are swallowed; input.odin is their only writer.
-	leader: Leader,
-	suppressed: Suppressed_Keys,
+	using keys: Key_State,
 	// Tab placement: horizontal restores the title-bar strip and the presentation arrays below.
 	tabs_horizontal: bool,
 	tab_underline:   ui.Motion,
@@ -82,6 +80,7 @@ Window :: struct {
 	tab_hover:       Tab_Chrome_Target,
 	tab_close_armed: ui.Armed(int),
 	using rail_state: Rail_State,
+	// The Activity panel's width left of the rail; see window_dock_reserve.
 	dock_left_width: f32,
 	using title_controls: Title_Controls,
 	// The question asked before a destructive change, with its subject; see confirmation.odin.
@@ -96,8 +95,10 @@ Window :: struct {
 	using frame_wakes: Frame_Wakes,
 	taskbar: Status_Taskbar,
 	status: Status_Overview,
-	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
+	// The rail height the activity panel takes in vertical view; see window_dock_reserve.
 	status_rail_reserve: f32,
+	// The dock edges shown beside the layout's dividers, refreshed with them by window_dividers.
+	dock_edges: Dock_Edges_Shown,
 }
 
 // What the last frame drew that asks for another frame. build_frame clears it and drawing fills it in,
@@ -383,8 +384,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 window_relayout :: proc(app: ^App, w: ^Window) {
 	pane_view_sync(app, w)
 	w.dirty = true
-	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
-	w.status_rail_reserve = status_panel_rail_height(app, w)
+	window_dock_reserve(app, w)
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
 		ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -634,10 +634,9 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		}
 	}
 	if palette_visible(app, w) {
-		opacity, rise := ui.presence_fade(app.palette.presence, 4 * w.scale)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
-			opacity, rise, w.pointer,
+			ui.presence_fade(app.palette.presence, ui.RISE_DIALOG * w.scale), w.pointer,
 		)
 		if result != .Ok { return result }
 	}

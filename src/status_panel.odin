@@ -99,6 +99,13 @@ status_panel_dock_width_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill
 	return ui.rail_pixel_width(w.scale, width, available)
 }
 
+// Refreshes what the panel reserves from the rail: its width left of the rail, which places the rail,
+// and its height in the rail, which the tab list leaves free. Relayout and dock edge drags call it.
+window_dock_reserve :: proc(app: ^App, w: ^Window) {
+	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
+	w.status_rail_reserve = status_panel_rail_height(app, w)
+}
+
 status_panel_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	if !status_panel_visible(app, w) {return {}}
 	if status_panel_in_rail(app, w) {
@@ -655,7 +662,7 @@ status_panel_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 }
 
 // The pointer left the panel for another surface.
-status_panel_leave :: proc(w: ^Window) {
+status_panel_leave :: proc(_: ^App, w: ^Window) {
 	status_panel_hover_set(w, nil)
 	if w.status.panel_button_hover != .None {w.status.panel_button_hover, w.dirty = .None, true}
 }
@@ -719,7 +726,7 @@ status_panel_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	return true
 }
 
-status_panel_cancel :: proc(w: ^Window) {
+status_panel_cancel :: proc(_: ^App, w: ^Window) {
 	ui.armed_cancel(&w.status.panel_button_armed)
 }
 
@@ -731,4 +738,41 @@ status_panel_wheel :: proc(app: ^App, w: ^Window, x, y, delta: f32) -> bool {
 	w.status.panel_scroll = clamp(w.status.panel_scroll - step, 0, max(0, total - list.height))
 	w.dirty = true
 	return true
+}
+
+when AIO_CONTROL {
+	// The Activity panel's verification keys and its rows as the panel lists them.
+	status_panel_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		area := status_panel_rect(app, w)
+		state_rect(r, "activity.rect", area)
+		state_rect(r, "activity.side_button", status_panel_side_rect(app, w))
+		state_text(r, "activity.side", app.settings.status.panel_side == .Left ? "left" : "right")
+		state_rect(r, "activity.view_button", status_panel_view_rect(app, w))
+		state_text(r, "activity.view", app.settings.status.panel_view == .Comfy ? "comfy" : "dense")
+		rows, _ := status_panel_rows(app, w)
+		list := status_panel_list(app, w, area)
+		for row, i in rows {
+			state_rect(r, state_key("activity.row.%d.rect", i), status_panel_row_rect(w, list, row))
+			state_value(r, state_key("activity.row.%d.report", i), row.report)
+			text := row.report ? status_item_name(app, row.item) : row.label
+			state_text(r, state_key("activity.row.%d.text", i), text)
+			state_value(r, state_key("activity.row.%d.depth", i), row.depth)
+		}
+	}
+}
+
+// Activity panel pointer surface
+
+@(private)
+status_panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return status_panel_contains(app, w, x, y)
+}
+
+@(private)
+status_panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Status_Panel {
+		status_panel_move(app, w, f32(e.x), f32(e.y))
+		return
+	}
+	status_panel_leave(app, w)
 }

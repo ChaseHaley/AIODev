@@ -1,18 +1,35 @@
 package main
 
-import "aio:ui"
 import "aio:layout"
+import "aio:render"
+import "aio:ui"
 import "core:log"
 import "core:time"
 
-// How long a reordered tab takes to ease into its slot (D-069). Workspace rows settling after a reorder
-// share it, so both lists move alike.
-TAB_REORDER_DURATION :: 140 * time.Millisecond
-
-tab_content_icon :: proc(tab: ^Tab) -> ui.Icon {
-	if int(tab.tree.focus) >= len(tab.tree.nodes) {return .None}
-	pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	return ok ? content_tab_icon(pane.content.kind) : .None
+// What tab `index` of the window's workspace shows in the strip and in the rail: its title, the
+// focused pane's content icon or program badge, and its program status.
+tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Build_Status) {
+	tab := w.workspace.tabs[index]
+	status := status_tab_mark(app, w, w.workspace, index)
+	t := ui.Tab_Tile {
+		title        = tab_display_title(tab, index + 1),
+		status       = status,
+		status_phase = status_phase(app, w, status),
+		status_slot  = app.settings.status.enabled && app.settings.status.tab_indicators,
+		selected     = index == w.workspace.selected,
+		marked       = tab_marked_shown(w, index),
+	}
+	if pane, terminal := workspace_focused_session_pane(app, w.workspace, index); terminal {
+		result: render.Build_Status
+		t.badge.shell, t.badge.atlas, result = pane_icon(app, pane.session, ui.ICON_BUTTON * w.scale)
+		if result != .Ok {return t, result}
+	}
+	if int(tab.tree.focus) < len(tab.tree.nodes) {
+		if pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane); ok {
+			t.badge.icon = content_tab_icon(pane.content.kind)
+		}
+	}
+	return t, .Ok
 }
 
 // Tab presentation indexed by tab position: both arrays stay aligned with the workspace tab list. The
@@ -68,13 +85,13 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool 
 		if i >= len(w.workspace.tabs) {continue}
 		if !following || !w.workspace.tabs[i].marked {
 			gap := i >= w.tab_incoming.slot ? w.tab_incoming.count : 0
-			ui.motion_target(&position, f32(i + gap), TAB_REORDER_DURATION, .Decelerate, app.animations, now)
+			ui.motion_target(&position, f32(i + gap), ui.REORDER_DURATION, .Decelerate, app.animations, now)
 		}
 		changed = ui.motion_update(&position, now) || changed
 	}
 	changed = ui.motion_update(&w.tab_incoming.ghost, now) || changed
 	selected := f32(w.workspace.selected)
-	ui.motion_target(&w.tab_underline, selected, TAB_REORDER_DURATION, .Decelerate, app.animations, now)
+	ui.motion_target(&w.tab_underline, selected, ui.REORDER_DURATION, .Decelerate, app.animations, now)
 	for &control, i in w.tab_controls {
 		changed = tab_strip_control_update(app, w, &control, Tab_Chrome_Tab{i}, now) || changed
 	}

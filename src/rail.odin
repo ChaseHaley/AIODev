@@ -71,13 +71,51 @@ rail_overlay_phase :: proc(w: ^Window) -> (Rail_Overlay_Phase, bool) {
 }
 
 when AIO_CONTROL {
-	// How far the rail is out: 1 docked, 0 hidden, and the slide's position for an overlay.
-	rail_slide_value :: proc(w: ^Window) -> f32 {
-		switch r in w.rail {
-		case Rail_Docked: return 1
-		case Rail_Overlay: return r.slide.value
+	// The rail's verification keys, read without storing the scroll clamp the layout applies.
+	rail_state_report :: proc(r: ^State_Report, w: ^Window) {
+		// How far the rail is out: 1 docked, 0 hidden, and the slide's position for an overlay.
+		slide: f32
+		switch rail in w.rail {
+		case Rail_Docked: slide = 1
+		case Rail_Overlay: slide = rail.slide.value
 		}
-		return 0
+		toggle := tab_orientation_button_rect(w)
+		state_value(r, "rail.visible", rail_visible(w))
+		state_value(r, "rail.docked", rail_docked(w))
+		state_rect(r, "rail.rect", rail_area(w))
+		state_rect(r, "rail.resize", rail_resize_rect(w))
+		state_value(r, "rail.resizing", rail_resizing(w))
+		state_value(r, "rail.overlay", rail_overlay(w))
+		state_valuef(r, "rail.scroll", "%g", w.rail_scroll)
+		state_valuef(r, "rail.slide", "%g", slide)
+		state_value(r, "rail.rows", rail_tab_count(w))
+		state_valuef(r, "rail.row.height", "%g", ui.RAIL_ROW_HEIGHT * w.scale)
+		// rail.toggle is the published name of the orientation button the tab strip also reports.
+		state_rect(r, "rail.toggle", toggle)
+		state_rect(r, "tabs.orientation_button", toggle)
+		state_rect(r, "rail.new_tab", rail_new_tab_rect(w))
+		state_rect(r, "rail.profile", rail_profile_rect(w))
+		layout, ok := rail_layout_query(w)
+		if !ok {return}
+		for tab, i in w.workspace.tabs {
+			n := i + 1
+			state_text(r, state_key("rail.row.%d.kind", n), "tab")
+			state_text(r, state_key("rail.row.%d.title", n), tab.title)
+			state_rect(r, state_key("rail.row.%d.rect", n), ui.rail_row_rect(layout, i))
+			state_value(r, state_key("rail.row.%d.selected", n), i == w.workspace.selected)
+			state_value(r, state_key("rail.row.%d.marked", n), tab.marked)
+			state_value(r, state_key("rail.row.%d.workspace", n), w.workspace.id)
+			state_value(r, state_key("rail.row.%d.tab", n), n)
+		}
+	}
+
+	// tab.N's rail row index (-1 on a tab strip), row and close button, as rail_row_rect_for_tab and
+	// the drawer place them.
+	rail_tab_report_rects :: proc(w: ^Window, tab: int) -> (index: int, row, close: render.Rect) {
+		layout, ok := rail_layout_query(w)
+		index = w.tabs_horizontal ? -1 : tab
+		if ok && tab >= 0 && tab < rail_tab_count(w) {row = rail_tab_rect(w, layout, tab)}
+		return index, row, ui.rail_close_rect(layout, index, w.scale)
 	}
 }
 
@@ -148,10 +186,15 @@ rail_width_pixels :: proc(w: ^Window) -> f32 {
 	return ui.rail_pixel_width(w.scale, width > 0 ? width : ui.RAIL_WIDTH, f32(w.width))
 }
 
-rail_resize_rect :: proc(w: ^Window) -> render.Rect {
-	if w.phase == .Preparing || !rail_visible(w) {return {}}
-	area := rail_area(w)
-	return {area.x + area.width - 3 * w.scale, area.y, 6 * w.scale, area.height}
+when AIO_CONTROL {
+	// DIVIDER_GRAB either side of the rail's right side, where a press starts resizing it, as verify reports
+	// it; divider_hits finds the same band from the rail's dock edge.
+	rail_resize_rect :: proc(w: ^Window) -> render.Rect {
+		if w.phase == .Preparing || !rail_visible(w) {return {}}
+		area := rail_area(w)
+		grab := DIVIDER_GRAB * w.scale
+		return {area.x + area.width - grab, area.y, 2 * grab, area.height}
+	}
 }
 
 rail_resize_cancel :: proc(w: ^Window) {
@@ -165,14 +208,21 @@ rail_tab_count :: proc(w: ^Window) -> int {
 	return w.tabs_horizontal || w.workspace == nil ? 0 : len(w.workspace.tabs)
 }
 
+// The rail's layout with its scroll clamped to the rows, stored so later readers start from it.
 @(require_results)
 rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+	layout, ok = rail_layout_query(w)
+	if ok {w.rail_scroll = layout.scroll}
+	return
+}
+
+// The rail's layout with its scroll clamped to the rows, leaving the window unchanged.
+@(require_results)
+rail_layout_query :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
 	area := rail_area(w)
 	area.height = max(0, area.height - w.status_rail_reserve)
-	layout = ui.rail_layout(area, w.scale, rail_tab_count(w) + w.tab_incoming.count, w.rail_scroll)
-	w.rail_scroll = layout.scroll
-	return layout, true
+	return ui.rail_layout(area, w.scale, rail_tab_count(w) + w.tab_incoming.count, w.rail_scroll), true
 }
 
 rail_reveal_active :: proc(w: ^Window) {
@@ -189,7 +239,7 @@ rail_reveal_active :: proc(w: ^Window) {
 
 tab_orientation_button_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
-	return {4 * s, 4 * s, ui.RAIL_TOGGLE_WIDTH * s, 32 * s}
+	return {4 * s, 4 * s, ui.TITLE_BUTTON_WIDTH * s, ui.HEIGHT_STANDARD * s}
 }
 
 tab_orientation_button_hit :: proc(w: ^Window, x, y: f32) -> bool {
@@ -322,72 +372,44 @@ rail_row_draw :: proc(
 	index: int,
 	moving: bool,
 ) -> render.Build_Status {
-	tab := w.workspace.tabs[index]
 	s := w.scale
 	hover := w.tab_hover == Tab_Chrome_Tab{index}
 	pressed := gesture_tab_pressed(w) == Tab_Chrome_Tab{index}
-	rect := rail_tab_rect(w, layout, index)
-	if rect.width <= 0 || rect.y + rect.height <= layout.list.y || rect.y >= layout.list.y + layout.list.height {
+	tile := rail_tab_rect(w, layout, index)
+	list_bottom := layout.list.y + layout.list.height
+	if tile.width <= 0 || tile.y + tile.height <= layout.list.y || tile.y >= list_bottom {
 		return .Ok
 	}
 	if moving {
 		if render.push_layer(&w.list, layout.list) != .None {return .Ok}
-		if rail_docked(w) {ui.draw_rect(&w.list, {rect = rect, color = app.theme.tab_bar})}
+		if rail_docked(w) {ui.draw_rect(&w.list, {rect = tile, color = app.theme.tab_bar})}
 	}
-	tile := ui.rail_tab_tile(layout, rect)
-	selected := index == w.workspace.selected
-	marked := tab_marked_shown(w, index)
-	title := tab_display_title(tab, index + 1)
-	icon: string
-	atlas := render.Rect{}
-	if pane, terminal := workspace_focused_session_pane(app, w.workspace, index); terminal {
-		result: render.Build_Status
-		icon, atlas, result = pane_icon(app, pane.session, 16 * s)
-		if result != .Ok {return result}
-	}
-	status := status_tab_mark(app, w, w.workspace, index)
-	content_icon := tab_content_icon(tab)
-	has_badge := content_icon != .None || icon != "" || atlas.width > 0
+	t, built := tab_tile(app, w, index)
+	if built != .Ok {return built}
+	has_badge := ui.tab_badge_shown(t.badge)
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, index)
 	leading := has_badge ? (ui.ICON_BUTTON + ui.SPACE_2) * s : 0
 	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0
 	// Status sits at the right, before Close when it shows, with its place kept while tab status is on.
 	status_right := show_close ? close.x : tile.x + tile.width - 4 * s
-	if app.settings.status.enabled && app.settings.status.tab_indicators || status.glyph != .None {
+	if t.status_slot || t.status.glyph != .None {
 		trailing = tile.x + tile.width - status_right + (ui.ICON_INDICATOR + ui.SPACE_1) * s
 	}
 	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, tile,
-		{title = title, selected = selected, marked = marked, hovered = hover, pressed = pressed,
+		{title = t.title, selected = t.selected, marked = t.marked, hovered = hover, pressed = pressed,
 		 leading = leading, trailing = trailing}, s, w.pointer); result != .Ok {return result}
-	if status.glyph != .None {
-		ui.status_progress_draw(
-			&w.list,
-			app.theme,
-			{tile.x + 8 * s, tile.y + s, max(0, tile.width - 16 * s), tile.height - 3 * s},
-			status,
-			s,
-		)
+	if t.status.glyph != .None {
+		band := render.Rect{tile.x, tile.y + s, tile.width, tile.height - 3 * s}
+		ui.tab_progress_draw(&w.list, app.theme, band, t.status, s)
 		size := ui.ICON_INDICATOR * s
 		mark := render.Rect{status_right - ui.SPACE_1 * s - size, tile.y + (tile.height - size) / 2, size, size}
-		if result := status_mark_draw(app, w, mark, status); result != .Ok {return result}
+		if result := ui.status_glyph_draw(&w.list, &w.ui_text, app.theme, mark, t.status, t.status_phase, s);
+		   result != .Ok {return result}
 	}
 	if has_badge {
-		area := render.Rect{
-			tile.x + ui.CONTROL_INSET * s, tile.y + (tile.height - 16 * s) / 2, 16 * s, 16 * s,
-		}
-		if content_icon != .None {
-			ui.icon_draw(&w.list, content_icon, area,
-				selected ? app.theme.tab_active_text : app.theme.tab_text, ui.ICON_BUTTON, s)
-		} else if result := ui.shell_badge_draw(
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			area,
-			icon,
-			s,
-			atlas,
-		); result != .Ok {return result}
+		badge := ui.tab_badge_draw(&w.list, &w.ui_text, app.theme, tile, t, s)
+		if badge != .Ok {return badge}
 	}
 	if show_close {
 		ui.icon_draw(&w.list, .Close, close, app.theme.tab_text, ui.ICON_INDICATOR, s)

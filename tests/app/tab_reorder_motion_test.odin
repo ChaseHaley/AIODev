@@ -92,7 +92,7 @@ tab_reorder_scrolling_groups_and_cancellation_keep_pointer_and_identity :: proc(
 	group := app.rail_row_rect_for_tab(&w, 3)
 	testing.expect_value(t, group.y - moved.y, moved.height)
 	app.tab_drag_move(&state, &w, 500, y)
-	testing.expect(t, app.tab_drag_active(&w) && app.drag_destination(&w) == nil)
+	testing.expect(t, app.tab_drag_active(&w) && tab_drag_destination(&w) == nil)
 	app.tab_drag_release(&state, &w)
 	app.update_motion(&state)
 	for tab, i in workspace.tabs {

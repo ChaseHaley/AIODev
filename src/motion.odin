@@ -90,7 +90,7 @@ motion_active :: proc(app: ^App) -> bool {
 update_motion :: proc(app: ^App) {
 	now := time.tick_now()
 	palette_animate(app, now)
-	if ui.notices_animate(&app.notices, now) {mark_all_dirty(app)}
+	if ui.notices_animate(&app.notices, app.animations, now) {mark_all_dirty(app)}
 	for w in app.windows {
 		for part in Window_Motion {
 			if window_motion_advance(app, w, part, now) {w.dirty = true}
@@ -102,6 +102,7 @@ refresh_animations :: proc(app: ^App) {
 	enabled := platform.client_animations_enabled()
 	if app.animations == enabled {return}
 	app.animations = enabled
-	ui.notices_set_animations(&app.notices, enabled)
+	// Without animations every notice snaps to the end of its motion at once.
+	if !enabled {_ = ui.notices_animate(&app.notices, false, time.tick_now())}
 	mark_all_dirty(app)
 }

@@ -3,6 +3,12 @@ package main
 import "aio:layout"
 import "core:fmt"
 
+// How every refusal for the minimum pane size ends: where the user changes it.
+@(private)
+PANE_MINIMUM_HINT :: "Change Minimum Pane Width and Height in Settings."
+
+// Whether every pane in `rects` keeps the minimum pane size, measured with the header each pane is drawn
+// with, as pane fitting measures it. A pane no smaller than it was in `before` keeps what it had.
 pane_minimum_allows :: proc(
 	app: ^App,
 	w: ^Window,
@@ -20,16 +26,15 @@ pane_minimum_allows :: proc(
 			   old.rect.height <= pane.rect.height {unchanged = true; break}
 		}
 		if unchanged {continue}
-		insets := pane_insets(app, w.scale, workspace_session_for_content(app, pane.content))
-		box := pane_box(w.metrics, pane.rect, insets)
+		entry := workspace_session_for_content(app, pane.content)
+		box := pane_box(w.metrics, pane.rect, pane_insets(app, w.scale, entry, pane.floating))
 		if int(box.columns) < minimum.minimum_columns || int(box.rows) < minimum.minimum_rows {
 			if notify_failure {
 				notify(
 					app,
 					.Warning,
 					fmt.tprintf(
-						"Can't create this pane: %d × %d content cells; minimum %d × %d. " +
-						"Change Minimum Pane Width and Height in Settings.",
+						"Can't create this pane: %d × %d content cells; minimum %d × %d. " + PANE_MINIMUM_HINT,
 						box.columns,
 						box.rows,
 						minimum.minimum_columns,
@@ -41,6 +46,20 @@ pane_minimum_allows :: proc(
 		}
 	}
 	return true
+}
+
+// A pane drop refused because a pane would end up below the minimum pane size.
+pane_minimum_dock_refused :: proc(app: ^App) {
+	minimum := app.settings.pane
+	notify(
+		app,
+		.Warning,
+		fmt.tprintf(
+			"Can't dock: minimum %d × %d content cells. " + PANE_MINIMUM_HINT,
+			minimum.minimum_columns,
+			minimum.minimum_rows,
+		),
+	)
 }
 
 pane_minimum_single :: proc(app: ^App, w: ^Window, notify_failure := true) -> bool {

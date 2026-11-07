@@ -474,16 +474,8 @@ workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 workspace_picker_query_box :: proc(w: ^Window) -> ui.Field_Box {
-	return {
-		field = &w.workspace_picker.query,
-		text = &w.ui_text,
-		rect = workspace_picker_field_rect(w),
-		inset = ui.CONTROL_INSET,
-		caret_width = 1,
-		radius = ui.RADIUS_CONTROL,
-		style = .Body,
-		scale = w.scale,
-	}
+	rect := workspace_picker_field_rect(w)
+	return ui.field_box_standard(&w.workspace_picker.query, &w.ui_text, rect, w.scale)
 }
 
 workspace_picker_slot_rect :: proc(w: ^Window, index: int) -> render.Rect {
@@ -567,10 +559,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
 	@(static, rodata) action_info := ACTIONS
-	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	frame := ui.popover_panel(r, s)
-	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
-	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
+	if !ui.popover_open(&w.list, r, app.theme, f32(w.width), f32(w.height), s) { return .Ok }
 	if workspace_picker_icons(p) { return workspace_icon_picker_draw(app, w) }
 	box := workspace_picker_query_box(w)
 	field := box.rect
@@ -682,4 +671,43 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
 	if result := workspace_row_rename_draw(app, w); result != .Ok { return result }
 	return workspace_row_menu_draw(app, w)
+}
+
+// Workspace button pointer surface
+
+@(private)
+workspace_button_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return y >= 0 && y < window_title_height(w) && x >= title_actions_end(w) &&
+		x < workspace_button_width(w)
+}
+
+@(private)
+workspace_button_hover :: proc(
+	app: ^App,
+	w: ^Window,
+	owner: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) {
+	if owner == .Workspace_Button {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
+}
+
+@(private)
+workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Workspaces"}
+
+@(private)
+workspace_button_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button == .Left {workspace_picker_chip_press(app, w, e.time_ns)}
+}
+
+@(private)
+workspace_button_leave :: proc(_: ^App, w: ^Window) {
+	w.workspace_hovered = false
+}
+
+// Every move that reaches the window updates the button's hover, which drives its motion; a drag or a
+// modal surface does not hide it.
+workspace_button_track :: proc(w: ^Window, x, y: f32) {
+	if hovered := render.rect_contains(workspace_button_rect(w), x, y); hovered != w.workspace_hovered {
+		w.workspace_hovered, w.dirty = hovered, true
+	}
 }

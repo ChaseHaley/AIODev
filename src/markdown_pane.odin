@@ -600,31 +600,18 @@ markdown_select_all :: proc(app: ^App, w: ^Window) {
 markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	pane_header_cancel(w)
 	key_suppress(w, e)
+	key, consumed := content_key_prelude(app, w, e, true)
+	if consumed {return}
+	logical := key.logical
 	has_find := ui.find_has_keyboard(&w.find)
-	if has_find && e.pressed && e.key == .Escape && !leader_armed(w) {
-		find_close(app, w, find_target(app, w))
-		return
-	}
-	literal := false
-	switch leader_key(app, w, e) {
-	case .Consumed:
-		return
-	case .Literal:
-		literal = true
-	case .None:
-	}
-	logical := e
-	logical.key = commands.logical_key(e.key, e.unshifted)
-	if !has_find && clipboard_chord(logical) == .Copy {
+	if !has_find && key.clipboard == .Copy {
 		markdown_copy(app, w)
 		return
 	}
 	if !e.pressed {return}
-	if !literal {
-		if action, found := shortcut_action(app, e); found {
-			run_action(app, w, action)
-			return
-		}
+	if key.found {
+		run_action(app, w, key.action)
+		return
 	}
 	if has_find {
 		find_bar_key(app, w, e, logical)
@@ -680,6 +667,12 @@ markdown_hover_set :: proc(w: ^Window, next: Markdown_Hover) {
 	if w.markdown_hover != next {w.markdown_hover, w.dirty = next, true}
 }
 
+// The pointer is off every Markdown page: no link or bar shows its hover.
+markdown_leave :: proc(_: ^App, w: ^Window) {
+	markdown_hover_set(w, nil)
+	pane_scrollbar_hover_leave(w, .Markdown)
+}
+
 markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	if w.markdown_gesture != nil {
@@ -687,14 +680,12 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 		return
 	}
 	if owner != .Markdown_Page {
-		markdown_hover_set(w, nil)
-		pane_scrollbar_hover_leave(w, .Markdown)
+		markdown_leave(app, w)
 		return
 	}
 	pane, shown := markdown_under_pointer(app, w, x, y)
 	if pane == nil {
-		markdown_hover_set(w, nil)
-		pane_scrollbar_hover_leave(w, .Markdown)
+		markdown_leave(app, w)
 		pointer_set(app, w, .Arrow)
 		return
 	}
@@ -777,4 +768,38 @@ markdown_gesture_clear :: proc(app: ^App, w: ^Window) {
 	if w.markdown_gesture == nil && !thumb {return}
 	w.markdown_gesture = nil
 	w.dirty = true
+}
+
+when AIO_CONTROL {
+	// The focused Markdown pane's verification keys; the load state is reported by its variant name.
+	markdown_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		scroll, total := 0, 0
+		path, selected := "", ""
+		state := "Missing"
+		if pane := markdown_focused(app, w); pane != nil {
+			scroll, total = pane.view.scroll, ui.markdown_total(&pane.view)
+			path = pane.path
+			switch _ in pane.load {
+			case nil:
+				state = "Unverified"
+			case Markdown_Missing:
+			case Markdown_Loaded:
+				state = "Loaded"
+			case Markdown_Too_Large:
+				state = "Too_Large"
+			case Markdown_Failed:
+				state = "Failed"
+			}
+			if document := markdown_document(pane); document != nil {
+				selected = ui.markdown_selected_text(&pane.view, document)
+			}
+		}
+		state_value(r, "markdown.count", len(app.markdown_panes))
+		state_value(r, "markdown.active", markdown_active(w))
+		state_text(r, "markdown.path", path)
+		state_text(r, "markdown.state", state)
+		state_value(r, "markdown.scroll", scroll)
+		state_value(r, "markdown.total", total)
+		state_text(r, "markdown.selection", selected)
+	}
 }

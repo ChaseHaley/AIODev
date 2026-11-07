@@ -209,13 +209,3 @@ empty_list_reports_zero_counts :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, report(&list, filter), "draws layers=0 rects=0 glyphs=0\n")
 }
-
-@(test)
-region_must_fit_the_client_area :: proc(t: ^testing.T) {
-	testing.expect(t, draws.region_fits({0, 0, 100, 100}, 100, 100))
-	testing.expect(t, draws.region_fits({99, 99, 1, 1}, 100, 100))
-	testing.expect(t, !draws.region_fits({90, 90, 11, 11}, 100, 100))
-	testing.expect(t, !draws.region_fits({100, 0, 1, 1}, 100, 100))
-	testing.expect(t, !draws.region_fits({-1, 0, 10, 10}, 100, 100))
-	testing.expect(t, !draws.region_fits({0, 0, 0, 10}, 100, 100))
-}

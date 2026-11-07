@@ -16,15 +16,15 @@ confirm_keys_choose_cancel_or_accept :: proc(t: ^testing.T) {
 	c: ui.Confirm
 	ui.confirm_open(&c)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Accept)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .Enter})), ui.Confirm_Outcome.Accept)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .Escape})), ui.Confirm_Outcome.Cancel)
-	testing.expect_value(t, ui.confirm_key(&c, {key = .Enter}), ui.Confirm_Outcome.None)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab})), ui.Confirm_Outcome.Changed)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Enter}), ""), ui.Confirm_Outcome.Accept)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Escape}), ""), ui.Confirm_Outcome.Cancel)
+	testing.expect_value(t, ui.confirm_key(&c, {key = .Enter}, ""), ui.Confirm_Outcome.None)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab}), ""), ui.Confirm_Outcome.Changed)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Cancel)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .Space})), ui.Confirm_Outcome.Cancel)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .Arrow_Right})), ui.Confirm_Outcome.Changed)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Space}), ""), ui.Confirm_Outcome.Cancel)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Arrow_Right}), ""), ui.Confirm_Outcome.Changed)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Accept)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .A})), ui.Confirm_Outcome.None)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .A}), ""), ui.Confirm_Outcome.None)
 	ui.confirm_open(&c)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Accept)
 }
@@ -33,18 +33,24 @@ confirm_keys_choose_cancel_or_accept :: proc(t: ^testing.T) {
 @(test)
 confirm_open_takes_its_presentation_and_unchecks_the_option :: proc(t: ^testing.T) {
 	c: ui.Confirm
+	option :: "Don't ask again"
+	alt_d := press({key = .D, modifiers = {.Alt}})
 	ui.confirm_open(&c, show_option = true)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .D, modifiers = {.Alt}})), ui.Confirm_Outcome.Changed)
+	testing.expect_value(t, ui.confirm_key(&c, alt_d, option), ui.Confirm_Outcome.Changed)
 	testing.expect(t, c.option && c.show_option && !c.extended)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Option)
+	// The accelerator is the label's first letter, not a fixed chord.
+	testing.expect_value(t, ui.confirm_key(&c, alt_d, "Keep both"), ui.Confirm_Outcome.None)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .K, modifiers = {.Alt}}), "Keep both"),
+		ui.Confirm_Outcome.Changed)
 	ui.confirm_open(&c, extended = true, focus = .Cancel)
 	testing.expect(t, !c.option && !c.show_option && c.extended)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Cancel)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab})), ui.Confirm_Outcome.Changed)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab}), option), ui.Confirm_Outcome.Changed)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Accept)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab})), ui.Confirm_Outcome.Changed)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab}), option), ui.Confirm_Outcome.Changed)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Cancel)
-	testing.expect_value(t, ui.confirm_key(&c, press({key = .D, modifiers = {.Alt}})), ui.Confirm_Outcome.None)
+	testing.expect_value(t, ui.confirm_key(&c, alt_d, option), ui.Confirm_Outcome.None)
 }
 
 @(test)

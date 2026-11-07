@@ -89,7 +89,7 @@ status_glyph_draw :: proc(
 		text_set_size(&symbol, size * 0.72) // design-exempt: a glyph drawn as part of the status mark
 		paper := theme.window
 		if mark.glyph == .Auth && text.has_icons {
-			return draw_icon(text, list, STATUS_LOCK_ICON, r, paper, 0.95)
+			return draw_icon(text, list, STATUS_LOCK_ICON, r, paper, r.height * 0.57)
 		}
 		glyph: rune
 		#partial switch mark.glyph {

@@ -277,3 +277,13 @@ png_round_trip_preserves_pixels_and_bytes :: proc(t: ^testing.T) {
 	_, text_error := pixels.png_read(text)
 	testing.expect_value(t, text_error, pixels.Error.Read_Failed)
 }
+
+@(test)
+region_must_fit_the_client_area :: proc(t: ^testing.T) {
+	testing.expect(t, pixels.rect_within(100, 100, {0, 0, 100, 100}))
+	testing.expect(t, pixels.rect_within(100, 100, {99, 99, 1, 1}))
+	testing.expect(t, !pixels.rect_within(100, 100, {90, 90, 11, 11}))
+	testing.expect(t, !pixels.rect_within(100, 100, {100, 0, 1, 1}))
+	testing.expect(t, !pixels.rect_within(100, 100, {-1, 0, 10, 10}))
+	testing.expect(t, !pixels.rect_within(100, 100, {0, 0, 0, 10}))
+}

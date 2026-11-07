@@ -168,15 +168,8 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	if app.settings.pane.gap == 0 && !pane.floating {
 		clip = {r.x, r.y, r.width, r.height}
 		edge := math.ceil(max(1, w.scale))
-		for d in w.dividers {
-			if d.axis == .Horizontal {
-				if r.x == d.rect.x + d.rect.width {clip.x += edge; clip.width -= edge}
-				if r.x + r.width == d.rect.x {clip.width -= edge}
-			} else {
-				if r.y == d.rect.y + d.rect.height {clip.y += edge; clip.height -= edge}
-				if r.y + r.height == d.rect.y {clip.height -= edge}
-			}
-		}
+		for bar in w.dock_edges.bars[:w.dock_edges.count] {card_clip_shared(&clip, r, bar, edge)}
+		for d in w.dividers {card_clip_shared(&clip, r, {d.axis, d.rect}, edge)}
 	}
 	if render.push_layer(&w.list, clip) != .None {return}
 	radius := window_pane_radius(app, w)
@@ -189,6 +182,29 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		   {rect = {r.x, r.y, r.width, r.height}, color = border, radius = radius, stroke = stroke},
 	   ) !=
 	   .None {return}
+}
+
+// Leaves out the side of a pane rectangle `r` that touches `bar`, whose shared border draws it.
+@(private = "file")
+card_clip_shared :: proc(clip: ^render.Rect, r: layout.Rect, bar: layout.Edge, edge: f32) {
+	leading, trailing := bar_adjacent(r, bar)
+	if bar.axis == .Horizontal {
+		if leading {clip.x += edge; clip.width -= edge}
+		if trailing {clip.width -= edge}
+	} else {
+		if leading {clip.y += edge; clip.height -= edge}
+		if trailing {clip.height -= edge}
+	}
+}
+
+// Which sides of pane rectangle `r` lie along `bar` on the bar's axis: its leading side just after the
+// bar, its trailing side just before it. With no gap those sides draw once, as the bar's shared border.
+@(private = "file")
+bar_adjacent :: proc(r: layout.Rect, bar: layout.Edge) -> (leading, trailing: bool) {
+	if bar.axis == .Horizontal {
+		return r.x == bar.rect.x + bar.rect.width, r.x + r.width == bar.rect.x
+	}
+	return r.y == bar.rect.y + bar.rect.height, r.y + r.height == bar.rect.y
 }
 
 @(private)
@@ -210,36 +226,46 @@ window_card_dim :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, backgroun
 
 @(private)
 window_shared_borders :: proc(app: ^App, w: ^Window) {
-	if app.settings.pane.gap != 0 || len(w.dividers) == 0 {return}
+	if app.settings.pane.gap != 0 || (len(w.dividers) == 0 && w.dock_edges.count == 0) {return}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return}
+	for bar in w.dock_edges.bars[:w.dock_edges.count] {
+		if !window_shared_border(app, w, bar) {return}
+	}
 	for d in w.dividers {
-		r := d.rect
+		if !window_shared_border(app, w, {d.axis, d.rect}) {return}
+	}
+}
+
+// One bar's border, with the stretch beside a focus-outlined pane in the focus colour; false when the
+// draw list is full.
+@(private = "file")
+window_shared_border :: proc(app: ^App, w: ^Window, bar: layout.Edge) -> bool {
+	r := bar.rect
+	if render.push_rect(
+		   &w.list,
+		   {rect = {r.x, r.y, r.width, r.height}, color = app.theme.pane_border},
+	   ) !=
+	   .None {return false}
+	for pane in w.panes {
+		if pane.floating || !window_focus_outlined(app, w, pane) {continue}
+		p := pane.rect
+		if leading, trailing := bar_adjacent(p, bar); !leading && !trailing {continue}
+		segment := r
+		if bar.axis == .Horizontal {
+			segment.y = max(r.y, p.y)
+			segment.height = max(0, min(r.y + r.height, p.y + p.height) - segment.y)
+		} else {
+			segment.x = max(r.x, p.x)
+			segment.width = max(0, min(r.x + r.width, p.x + p.width) - segment.x)
+		}
 		if render.push_rect(
 			   &w.list,
-			   {rect = {r.x, r.y, r.width, r.height}, color = app.theme.pane_border},
+			   {
+				   rect = {segment.x, segment.y, segment.width, segment.height},
+				   color = app.theme.pane_focus,
+			   },
 		   ) !=
-		   .None {return}
-		for pane in w.panes {
-			if pane.floating || !window_focus_outlined(app, w, pane) {continue}
-			p := pane.rect
-			segment := r
-			if d.axis == .Horizontal {
-				if p.x + p.width != r.x && p.x != r.x + r.width {continue}
-				segment.y = max(r.y, p.y)
-				segment.height = max(0, min(r.y + r.height, p.y + p.height) - segment.y)
-			} else {
-				if p.y + p.height != r.y && p.y != r.y + r.height {continue}
-				segment.x = max(r.x, p.x)
-				segment.width = max(0, min(r.x + r.width, p.x + p.width) - segment.x)
-			}
-			if render.push_rect(
-				   &w.list,
-				   {
-					   rect = {segment.x, segment.y, segment.width, segment.height},
-					   color = app.theme.pane_focus,
-				   },
-			   ) !=
-			   .None {return}
-		}
+		   .None {return false}
 	}
+	return true
 }

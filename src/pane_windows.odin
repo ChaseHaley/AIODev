@@ -105,12 +105,11 @@ pane_to_window :: proc(
 	name := workspace_default_name(app)
 	if name == "" {return false}
 	// The preview is still Preparing here, so the move leaves only the windows that were live.
-	move := pane_move_begin(app, preview, home.tab, workspace)
+	move := pane_move_begin(app, preview, home.tab, home.node)
 	if !tear_off_window_show(app, preview, name) {
 		pane_move_enter(app, move)
 		return false
 	}
-	was_linked := window_linked(source_window)
 	// The node was checked to be a pane above, which is all a removal needs.
 	removed := layout.remove(&home.tab.tree, home.node)
 	assert(removed)
@@ -119,7 +118,6 @@ pane_to_window :: proc(
 	window_preview_publish(preview, name)
 	workspace_mutation_finish(app, preview.workspace, {.Names})
 	pane_move_finish(app, move, destination)
-	if was_linked {pane_link_refresh_source(app, source_window, pane.content)}
 	_ = window_activate(app, preview)
 	return true
 }

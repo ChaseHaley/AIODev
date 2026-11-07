@@ -42,13 +42,13 @@ workspace_picker_drag_leave :: proc(app: ^App, d: Drop_Workspace_Dropdown) {
 }
 
 // Opens w's dropdown while the pointer is over its chip and keeps it open over its rows, returning the hold
-// and whether the drag is on it. `current` is the drag's destination now. The dropdown's last row, a new
+// and whether the drag is on it. `a` is the drag, holding its destination now. The dropdown's last row, a new
 // window, takes a drop only when the content may leave for one. Leaving the dropdown is the caller's next
 // destination, which closes it.
 @(require_results)
 workspace_picker_drag_hover :: proc(
 	app: ^App,
-	current: Drag_Destination,
+	a: ^Drag_Active,
 	w: ^Window,
 	x, y: f32,
 	request: Workspace_Move_Request,
@@ -61,7 +61,7 @@ workspace_picker_drag_hover :: proc(
 	button := workspace_button_rect(w)
 	on_button := render.rect_contains(button, x, y)
 	panel, _ := workspace_picker_rect(w)
-	previous, holding := current.(Drop_Workspace_Dropdown)
+	previous, holding := drag_held_dropdown(a)
 	held := holding && workspace_drag_picker(app, previous) == w
 	// Keep the drag alive through the gap between the chip and its dropdown.
 	in_panel := held && x >= panel.x && x < panel.x + panel.width &&
@@ -108,7 +108,9 @@ workspace_picker_drag_drop :: proc(app: ^App, d: Drop_Workspace_Dropdown) -> (dr
 // Scrolls a dropdown a drag holds and follows the rows under the still pointer; whether the wheel was the
 // drag's.
 drag_wheel :: proc(app: ^App, w: ^Window, delta: f32) -> bool {
-	held, holding := drag_destination(w).(Drop_Workspace_Dropdown)
+	a := drag_active(w)
+	if a == nil {return false}
+	held, holding := drag_held_dropdown(a)
 	if !holding {return false}
 	picker := workspace_picker_drag_scroll(app, held, delta)
 	if picker == nil {return false}
