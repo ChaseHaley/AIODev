@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:localpath"
 import "aio:platform"
 import "aio:pty"
 import "aio:settings"
@@ -508,8 +509,10 @@ tab_close_request :: proc(app: ^App, w: ^Window, index: int, restore: ^[dynamic]
 	pending_close_open_tab(app, w, index, restore)
 }
 
-// Picks a usable launch directory without touching a remote path twice. `refused` reports that a
-// nonempty candidate was rejected, so the caller can tell the user why a different shell started.
+// The app's one launch-directory choice: session open, restore, shell switch and pane directories pick
+// through it, without touching a remote path twice. `refused` reports that a nonempty candidate was
+// rejected, so the caller can say why a different directory is used; each caller words that itself.
+// An empty result means the profile's own directory. pty.spawn still checks again (defense in depth).
 @(require_results)
 local_launch_directory :: proc(candidate, fallback: string) -> (directory: string, refused: bool) {
 	if candidate != "" {
@@ -538,7 +541,7 @@ pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: st
 		if found && pty.working_directory_is_local(path) {return path, false}
 	}
 	raw := term.working_directory(entry.session, context.temp_allocator)
-	if reported, err := settings.directory_label(raw, context.temp_allocator); err == nil && reported != "" {
+	if reported, err := localpath.directory_label(raw, context.temp_allocator); err == nil && reported != "" {
 		if pty.working_directory_is_local(reported) {return reported, false}
 		refused = true
 	}

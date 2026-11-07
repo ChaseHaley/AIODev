@@ -3,7 +3,6 @@ package main
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
-import "aio:settings"
 import "aio:ui"
 import "core:strings"
 
@@ -50,7 +49,7 @@ workspace_name_begin :: proc(app: ^App, w: ^Window) {
 // Stores the chip's text as the workspace's name. An empty field keeps the existing name. False when
 // another workspace already uses the name, which leaves the workspace's name as it was.
 chip_name_save :: proc(app: ^App, w: ^Window, workspace_id: u32) -> bool {
-	name := settings.display_title(strings.trim_space(ui.field_string(&w.rename)), context.temp_allocator)
+	name := display_title(strings.trim_space(ui.field_string(&w.rename)), context.temp_allocator)
 	if name == "" {return true}
 	for workspace in app.workspaces {
 		if !workspace.provisional && workspace.id != workspace_id && strings.equal_fold(workspace.name, name) {

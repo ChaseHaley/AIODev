@@ -44,17 +44,19 @@ settings_add_profile_row :: proc(p: ^ui.Editor, row: ui.Editor_Row, group: strin
 }
 
 // Whether a profile's command line names an executable that exists. Explicit paths must exist;
-// a bare name is resolved through the same trusted directories the terminal uses. A resolver
-// error fails open so an unrelated OS problem never blocks saving.
+// a bare name is resolved through the same trusted directories the terminal uses. A lookup that
+// cannot run fails open so an unrelated OS problem never blocks saving; spawning still fails then.
 @(private)
 profile_command_exists :: proc(command: string) -> bool {
-	token := pty.executable_token(command)
-	if token == "" {return false}
-	if pty.is_explicit_path(token) {return os.exists(token)}
-	directories, directory_error := pty.search_directories(context.temp_allocator)
-	if directory_error != nil {return true}
-	_, resolve_error := pty.resolve_executable(command, directories, context.temp_allocator)
-	return resolve_error.kind == .None
+	executable, err := pty.resolve_command(command, context.temp_allocator)
+	if err.kind == .Out_Of_Memory {return true}
+	switch found in executable {
+	case pty.Explicit_Executable:
+		return os.exists(found.token)
+	case pty.Searched_Executable:
+		return true
+	}
+	return false
 }
 
 // Fills the editor from the settings file; the settings tab shows it.

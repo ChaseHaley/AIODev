@@ -130,7 +130,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 	s, w := &f.state, f.state.windows[0]
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
-	s.open_url = link_open_stub
+	s.opener.url = link_open_stub
 	Open_Stub_State = {}
 
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/one")
@@ -210,7 +210,7 @@ terminal_links_prefer_osc8_and_ignore_blocked_schemes :: proc(t: ^testing.T) {
 	s, w := &f.state, f.state.windows[0]
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
-	s.open_url = link_open_stub
+	s.opener.url = link_open_stub
 	Open_Stub_State = {}
 	link_feed(
 		t,
@@ -245,7 +245,7 @@ terminal_links_hover_at_nonzero_scroll_offset :: proc(t: ^testing.T) {
 	s, w := &f.state, f.state.windows[0]
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
-	s.open_url = link_open_stub
+	s.opener.url = link_open_stub
 	Open_Stub_State = {}
 	rows := int(term.geometry(entry.session).rows)
 	if !testing.expect(t, rows > 5) {return}
@@ -278,7 +278,7 @@ active_terminal_file_waits_for_confirmation_and_can_be_cancelled :: proc(t: ^tes
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "terminal-active-file", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	app.terminal_file_request(s, w, `C:\Windows\System32\cmd.exe`)
+	app.target_open(s, w, app.File_Target{`C:\Windows\System32\cmd.exe`})
 	testing.expect(t, app.confirmation_asking(w, app.Pending_File) != nil)
 	app.confirmation_cancel(s, w)
 	testing.expect(t, app.confirmation_asking(w, app.Pending_File) == nil)
@@ -337,7 +337,7 @@ ctrl_click_opens_a_spaced_path_the_underline_could_not_prove :: proc(t: ^testing
 	if !ok {return}
 	defer link_files_destroy(files)
 	s := &f.state
-	s.open_file = link_file_stub
+	s.opener.file = link_file_stub
 	Open_Stub_State = {}
 	// Nothing after "My" shows the path goes on, so only the disk can tell this is a folder.
 	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", files.folder))
@@ -363,7 +363,7 @@ ctrl_click_opens_a_path_a_program_wrapped_at_the_edge :: proc(t: ^testing.T) {
 	if !ok {return}
 	defer link_files_destroy(files)
 	s, w := &f.state, f.state.windows[0]
-	s.open_file = link_file_stub
+	s.opener.file = link_file_stub
 	Open_Stub_State = {}
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
@@ -396,7 +396,7 @@ ctrl_click_inside_a_selection_opens_the_selected_text :: proc(t: ^testing.T) {
 	if !ok {return}
 	defer link_files_destroy(files)
 	s, w := &f.state, f.state.windows[0]
-	s.open_file = link_file_stub
+	s.opener.file = link_file_stub
 	Open_Stub_State = {}
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
@@ -426,7 +426,7 @@ ctrl_click_active_file_opens_only_after_explicit_acceptance :: proc(t: ^testing.
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "terminal-confirm-file", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	s.open_file = link_file_stub
+	s.opener.file = link_file_stub
 	Open_Stub_State = {}
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[H" +
 		"\x1b]8;;file:///C:/Windows/System32/cmd.exe\x1b\\EXEC\x1b]8;;\x1b\\")

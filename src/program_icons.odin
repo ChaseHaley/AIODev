@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:program_art"
 import "aio:pty"
@@ -9,7 +10,6 @@ import "aio:settings"
 import "aio:term_view"
 import "core:log"
 import "core:math"
-import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
@@ -291,13 +291,8 @@ program_named_file :: proc(app: ^App, name: string, art: program_art.Art, has_ar
 		file, ok = settings.program_icon_file(&app.settings, program_art.canonical(art))
 	}
 	if !ok {return "", false}
-	path, err := settings.expand_home(file, context.temp_allocator)
-	if err != nil {return "", false}
-	if !filepath.is_abs(path) {
-		path, err = filepath.join({filepath.dir(app.settings_path), path}, context.temp_allocator)
-		if err != nil {return "", false}
-	}
-	return path, true
+	path, err := localpath.settings_relative(file, app.settings_path, context.temp_allocator)
+	return path, err == .None
 }
 
 // Artwork is drawn in its brand colours when every one stands out from the tab background,

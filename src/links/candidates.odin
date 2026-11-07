@@ -1,5 +1,6 @@
 package links
 
+import "aio:localpath"
 import "core:strings"
 
 // Row_Join says whether two rows without a wrap flag are one line a program wrapped itself. Word is a
@@ -241,12 +242,12 @@ selection_target :: proc(line: string, relative: bool) -> (Range, bool) {
 	if start >= end {return {}, false}
 	text := line[start:end]
 	buffer: [SELECTION_BYTES]u8 = ---
-	resolved: [4096]u8 = ---
+	resolved: [TARGET_BYTES]u8 = ---
 	for mask := break_variants(text) - 1; mask >= 0; mask -= 1 {
 		variant, ok := break_variant(text, mask, buffer[:])
 		if !ok {continue}
 		if allowed(variant) {return {start, end}, true}
-		absolute := local_absolute(strip_location(variant))
+		absolute := localpath.local_absolute(strip_location(variant))
 		if !absolute && (!relative || !strings.contains_any(variant, ".\\/") || !relative_plausible(variant)) {
 			continue
 		}

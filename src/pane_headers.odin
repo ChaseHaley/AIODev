@@ -3,6 +3,7 @@ package main
 import "aio:commands"
 import "aio:glyphs"
 import "aio:layout"
+import "aio:localpath"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -11,6 +12,7 @@ import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:strings"
+import "core:unicode/utf8"
 
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
@@ -48,11 +50,24 @@ pane_header_refresh :: proc(entry: ^Session_Entry) {
 	defer delete(title)
 	directory := term.working_directory(entry.session)
 	defer delete(directory)
-	label, err := settings.directory_label(directory)
+	label, err := localpath.directory_label(directory)
 	if err != nil {log.error("caching the reported pane directory failed")}
 	delete(header.title)
 	delete(header.directory)
-	header.title, header.directory = settings.display_title(title), label
+	header.title, header.directory = display_title(title), label
+}
+
+// A program-supplied or user-typed title as shown: control characters dropped, capped at 1024
+// bytes on a complete UTF-8 rune.
+display_title :: proc(raw: string, allocator := context.allocator) -> string {
+	bytes := make([dynamic]u8, 0, min(1024, len(raw)), allocator)
+	for r in raw {
+		if r < ' ' || r >= 0x7f && r <= 0x9f {continue}
+		encoded, count := utf8.encode_rune(r)
+		if len(bytes) + count > 1024 {break}
+		if _, err := append(&bytes, ..encoded[:count]); err != nil {break}
+	}
+	return string(bytes[:])
 }
 
 pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {

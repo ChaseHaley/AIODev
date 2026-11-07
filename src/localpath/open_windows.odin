@@ -1,50 +1,30 @@
-package platform
+package localpath
 
-import "aio:links"
+import "base:runtime"
 import "core:log"
 import "core:os"
 import "core:strings"
-import "core:sync"
 import w "core:sys/windows"
-import "core:unicode/utf16"
 
-foreign import terminal_kernel32 "system:kernel32.lib"
+foreign import open_kernel32 "system:kernel32.lib"
 
 @(default_calling_convention = "system")
-foreign terminal_kernel32 {
+foreign open_kernel32 {
 	GetDriveTypeW :: proc(root: w.LPCWSTR) -> u32 ---
-	GetComputerNameExW :: proc(format: u32, buffer: w.LPWSTR, size: ^u32) -> w.BOOL ---
 }
 
-@(private)
-Local_Hosts :: struct {
-	once:  sync.Once,
-	text:  [3][256]u8,
-	names: [3]string,
-	count: int,
-}
-@(private)
-local_hosts_state: Local_Hosts
+// Click-time file admission. It differs from pty's working-directory check on purpose: a clicked path
+// starts absolute, may be a file of any kind, and refuses every non-placeholder reparse component
+// before following it, while a working directory may be relative and may cross a local junction as
+// long as its final target is a local directory. Keep both policies; share only the path grammar.
 
-// This machine's DNS host, fully qualified and NetBIOS names, which local shells and ls write
-// into file URI authorities. Read once; callers on any thread borrow the result.
-local_hosts :: proc() -> []string {
-	sync.once_do(&local_hosts_state.once, proc() {
-		hosts := &local_hosts_state
-		for format in ([?]u32{1, 3, 0}) {
-			wide: [256]u16
-			size := u32(len(wide))
-			if !bool(GetComputerNameExW(format, &wide[0], &size)) || size == 0 {
-				log.errorf("GetComputerNameExW(%d) failed: %d", format, w.GetLastError())
-				continue
-			}
-			n := utf16.decode_to_utf8(hosts.text[hosts.count][:], wide[:size])
-			hosts.names[hosts.count] = string(hosts.text[hosts.count][:n])
-			hosts.count += 1
-		}
-	})
-	return local_hosts_state.names[:local_hosts_state.count]
-}
+// RPC_E_CHANGED_MODE: COM is already initialized on this thread in another apartment, which serves.
+@(private)
+COM_CHANGED_MODE :: 0x80010106
+
+// The cycle and complexity bound for shortcut chains. A target still naming a shortcut is refused.
+@(private)
+SHORTCUT_HOPS :: 4
 
 // Sync providers such as OneDrive mark local placeholders with the cloud reparse tag family.
 // Those redirect nowhere, unlike junctions, symlinks and mount points, which stay refused.
@@ -60,9 +40,10 @@ cloud_placeholder :: proc(path: cstring16) -> bool {
 
 // Refuse mapped drives and every non-placeholder reparse component before following a path.
 // This keeps local junctions and symlinks from smuggling a remote share into a click-time check.
+// Only fixed, removable and RAM-disk drives are allowed.
 @(private, require_results)
-canonical_terminal_path :: proc(path: string) -> (string, bool) {
-	if !links.local_absolute(path) {return "", false}
+canonical_path :: proc(path: string) -> (string, bool) {
+	if !local_absolute(path) {return "", false}
 	text := w.utf8_to_wstring(path, context.temp_allocator)
 	if text == nil {return "", false}
 	full: [4096]u16
@@ -88,7 +69,7 @@ canonical_terminal_path :: proc(path: string) -> (string, bool) {
 	handle := w.CreateFileW(cstring16(&full[0]), 0, w.FILE_SHARE_READ | w.FILE_SHARE_WRITE | w.FILE_SHARE_DELETE,
 		nil, w.OPEN_EXISTING, w.FILE_FLAG_BACKUP_SEMANTICS, nil)
 	if handle == w.INVALID_HANDLE_VALUE {
-		log.errorf("CreateFileW(terminal path) failed: %d", w.GetLastError())
+		log.errorf("CreateFileW(local file) failed: %d", w.GetLastError())
 		return "", false
 	}
 	defer if !bool(w.CloseHandle(handle)) {log.errorf("CloseHandle failed: %d", w.GetLastError())}
@@ -101,7 +82,7 @@ canonical_terminal_path :: proc(path: string) -> (string, bool) {
 	converted, err := w.utf16_to_utf8(final[:count], context.temp_allocator)
 	if err != nil {return "", false}
 	if strings.has_prefix(converted, `\\?\`) {converted = converted[4:]}
-	if !links.local_absolute(converted) {return "", false}
+	if !local_absolute(converted) {return "", false}
 	return converted, true
 }
 
@@ -137,7 +118,7 @@ shortcut_target :: proc(path: string) -> (string, bool) {
 	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
 	initialized := result >= 0
 	defer if initialized {w.CoUninitialize()}
-	if result < 0 && u32(result) != 0x80010106 {
+	if result < 0 && u32(result) != COM_CHANGED_MODE {
 		log.errorf("CoInitializeEx failed: %x", u32(result))
 		return "", false
 	}
@@ -181,37 +162,63 @@ shortcut_target :: proc(path: string) -> (string, bool) {
 	return converted, err == nil
 }
 
-@(require_results)
-prepare_terminal_file :: proc(path: string) -> (file: Terminal_File, ok: bool) {
-	canonical, exists := canonical_terminal_path(path)
-	if !exists {return {}, false}
-	target := canonical
-	shortcut := false
-	for _ in 0 ..< 4 {
-		if !strings.has_suffix(strings.to_lower(target, context.temp_allocator), ".lnk") {break}
+@(private, require_results)
+shortcut_name :: proc(path: string) -> bool {
+	return strings.has_suffix(strings.to_lower(path, context.temp_allocator), ".lnk")
+}
+
+// Follows shortcuts from an admitted canonical path. The target borrows the temporary allocator.
+// Only a shortcut starts COM; any other file is its own target.
+@(private, require_results)
+shortcut_chain :: proc(canonical: string) -> (target: string, shortcut, ok: bool) {
+	target = canonical
+	for _ in 0 ..< SHORTCUT_HOPS {
+		if !shortcut_name(target) {break}
 		shortcut = true
 		raw, resolved := shortcut_target(target)
-		if !resolved {return {}, false}
-		target, resolved = canonical_terminal_path(raw)
-		if !resolved {return {}, false}
+		if !resolved {return "", false, false}
+		target, resolved = canonical_path(raw)
+		if !resolved {return "", false, false}
 	}
-	if strings.has_suffix(strings.to_lower(target, context.temp_allocator), ".lnk") {return {}, false}
-	file.path, _ = strings.clone(canonical)
-	file.target, _ = strings.clone(target)
-	if file.path == "" || file.target == "" {terminal_file_destroy(&file); return {}, false}
+	if shortcut_name(target) {return "", false, false}
+	return target, shortcut, true
+}
+
+// Whether prepare_open would accept the path, without its owned copies or confirmation policy.
+// Link candidates are tried with it: a candidate must be openable, not merely present, so an
+// unusable longer spelling never beats a usable shorter one, and a shortcut's chain is checked too.
+@(require_results)
+file_available :: proc(path: string) -> bool {
+	canonical, admitted := canonical_path(path)
+	if !admitted {return false}
+	_, _, ok := shortcut_chain(canonical)
+	return ok
+}
+
+@(require_results)
+prepare_open :: proc(path: string) -> (file: Open_File, ok: bool) {
+	canonical, admitted := canonical_path(path)
+	if !admitted {return {}, false}
+	target, shortcut, resolved := shortcut_chain(canonical)
+	if !resolved {return {}, false}
+	path_error, target_error: runtime.Allocator_Error
+	file.path, path_error = strings.clone(canonical)
+	file.target, target_error = strings.clone(target)
+	if path_error != nil || target_error != nil {open_file_destroy(&file); return {}, false}
 	pathext := os.get_env("PATHEXT", context.temp_allocator)
-	file.confirm = shortcut || links.file_needs_confirmation(target, pathext)
+	file.confirm = shortcut || file_needs_confirmation(target, pathext)
 	return file, true
 }
 
-// approved is the target the user confirmed, or empty when no confirmation was shown. The dispatch
-// rechecks the path and opens only the validated target, never the .lnk, so the shell does not
-// resolve a shortcut again at launch and a retargeted shortcut is refused rather than opened.
+// approved is the target the user confirmed, or empty when no confirmation was shown; a prepared
+// target is never empty. The dispatch rechecks the path and opens only the validated target, never
+// the .lnk, so the shell does not resolve a shortcut again at launch and a retargeted shortcut is
+// refused rather than opened.
 @(require_results)
-open_terminal_file :: proc(path, approved: string) -> bool {
-	file, ok := prepare_terminal_file(path)
+open_file :: proc(path, approved: string) -> bool {
+	file, ok := prepare_open(path)
 	if !ok {return false}
-	defer terminal_file_destroy(&file)
+	defer open_file_destroy(&file)
 	if file.confirm && approved == "" {return false}
 	if approved != "" && file.target != approved {return false}
 	text := w.utf8_to_wstring(file.target, context.temp_allocator)
@@ -220,7 +227,7 @@ open_terminal_file :: proc(path, approved: string) -> bool {
 	info := w.SHELLEXECUTEINFOW{cbSize = size_of(w.SHELLEXECUTEINFOW),
 		fMask = w.SEE_MASK_FLAG_NO_UI, lpVerb = cstring16(&verb[0]), lpFile = text, nShow = w.SW_SHOWNORMAL}
 	if !bool(w.ShellExecuteExW(&info)) {
-		log.errorf("ShellExecuteExW(terminal file) failed: %d", w.GetLastError())
+		log.errorf("ShellExecuteExW(local file) failed: %d", w.GetLastError())
 		return false
 	}
 	return true

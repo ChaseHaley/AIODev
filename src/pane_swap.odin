@@ -1,7 +1,7 @@
 package main
 
 import "aio:layout"
-import "aio:pty"
+import "aio:localpath"
 import "aio:settings"
 import "aio:term"
 import "core:fmt"
@@ -157,21 +157,22 @@ pane_shell_swap :: proc(
 		shell_is_windows(profile.command) &&
 		shell_is_windows(entry.header.command)
 	if carry {
-		label, label_error := settings.directory_label(
+		label, label_error := localpath.directory_label(
 			raw_directory,
 			context.temp_allocator,
 		)
 		if label_error != nil {
 			log.errorf("resolving the pane directory failed: %v", label_error)
 		} else if label != "" {
-			if pty.working_directory_is_local(label) {
-				config.working_directory = label
-			} else {
+			directory, refused := local_launch_directory(label, "")
+			if refused {
 				notify(
 					app,
 					.Warning,
 					"The pane's directory is remote or unavailable; using the profile's default.",
 				)
+			} else {
+				config.working_directory = directory
 			}
 		}
 	}

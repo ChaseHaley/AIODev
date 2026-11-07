@@ -1,6 +1,7 @@
 package main
 
 import "aio:instance"
+import "aio:localpath"
 import "aio:platform"
 import "core:fmt"
 import "core:log"
@@ -65,6 +66,7 @@ start :: proc() -> int {
 	}
 	app := App {
 		options = options,
+		opener = {url = platform.open_url, file = localpath.open_file},
 	}
 	defer app_destroy(&app)
 	id, id_error := instance.app_id(options, context.allocator)

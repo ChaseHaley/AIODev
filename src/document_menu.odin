@@ -2,6 +2,8 @@ package main
 
 import "aio:glyphs"
 import "aio:layout"
+import "aio:links"
+import "aio:localpath"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
@@ -384,21 +386,23 @@ document_menu_open_focused :: proc(app: ^App, w: ^Window) {
 // Ctrl+right-click on a terminal link. False leaves the press to the terminal.
 @(require_results)
 document_menu_open_link :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	buffer: [4096]u8 = ---
-	resolution, target := link_resolve(app, w, x, y, buffer[:])
-	switch resolution {
-	case .None:
+	buffer: [links.TARGET_BYTES]u8 = ---
+	spelling, folder := "", false
+	switch t in link_resolve(app, w, x, y, buffer[:]) {
+	case nil:
 		return false
-	case .Missing:
-		notify(app, .Error, "That local file is not available.")
+	case Missing_Target:
+		target_unavailable(app)
 		return true
-	case .Web, .File:
+	case Web_Target:
+		spelling = t.uri
+	case File_Target:
+		spelling, folder = t.path, os.is_dir(t.path)
 	}
 	pane, found := layout.hit_test(w.panes[:], x, y)
 	if !found {return false}
-	owned, err := strings.clone(target)
+	owned, err := strings.clone(spelling)
 	if err != nil {return false}
-	folder := resolution == .File && os.is_dir(target)
 	document_menu_show(app, w, pane.content, Document_Menu_Link{{owned, folder}}, x, y)
 	return true
 }
@@ -453,12 +457,12 @@ document_pick_tick :: proc(app: ^App) {
 
 @(private = "file")
 document_chosen :: proc(app: ^App, w: ^Window, content: layout.Content, path: string) {
-	file, ok := platform.prepare_terminal_file(path)
+	file, ok := localpath.prepare_open(path)
 	if !ok {
-		notify(app, .Error, "That local file is not available.")
+		target_unavailable(app)
 		return
 	}
-	defer platform.terminal_file_destroy(&file)
+	defer localpath.open_file_destroy(&file)
 	document_menu_show_pin(app, w, content, {file.path, os.is_dir(file.target)})
 }
 
@@ -514,12 +518,12 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 	case .Open:
 		target := strings.clone(entry.target, context.temp_allocator)
 		overlay_close(app, w)
-		document_open(app, w, target)
+		target_open(app, w, target_from_document(target))
 	case .Open_Link:
 		link, _ := state.mode.(Document_Menu_Link)
 		target := strings.clone(link.document.target, context.temp_allocator)
 		overlay_close(app, w)
-		document_open(app, w, target)
+		target_open(app, w, target_from_document(target))
 	case .Add_File:
 		document_pick_start(app, w, false)
 	case .Add_Folder:

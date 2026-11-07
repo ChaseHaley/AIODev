@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:localpath"
 import "aio:platform"
 import "aio:ui"
 import "core:time"
@@ -107,7 +108,7 @@ confirmation_clear :: proc(w: ^Window) {
 	case Pane_Swap:
 		pane_swap_destroy(&subject)
 	case Pending_File:
-		platform.terminal_file_destroy(&subject.file)
+		localpath.open_file_destroy(&subject.file)
 	case Process_Remove:
 		delete(subject.name)
 		delete(subject.source)

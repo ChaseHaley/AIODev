@@ -2,7 +2,7 @@ package term
 
 import "aio:ghostty"
 import "aio:links"
-import "aio:platform"
+import "aio:localpath"
 import "base:runtime"
 import "core:strings"
 import "core:sync"
@@ -496,7 +496,7 @@ append_span :: proc(m: ^Link_Map, y, first, last, start, length: int) -> bool {
 
 @(private, require_results)
 scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) -> bool {
-	hosts := platform.local_hosts()
+	hosts := localpath.local_hosts()
 	for y in 0 ..< rows {
 		m.row_start[y] = len(m.row_text)
 		point := ghostty.Point{tag = .Viewport, value = {coordinate = {x = 0, y = u32(y)}}}
@@ -557,7 +557,7 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 			}
 			usable := uri != "" && links.allowed(uri)
 			if uri != "" && !usable {
-				file_buffer: [4096]u8 = ---
+				file_buffer: [links.TARGET_BYTES]u8 = ---
 				_, usable = links.resolve_file(uri, "", hosts, file_buffer[:])
 			}
 			if run_active {
@@ -860,9 +860,9 @@ link_map_scan_locked :: proc(
 	pwd: ghostty.String
 	m.relative_files = false
 	if ghostty.terminal_get(terminal, .Pwd, &pwd) == .Success && pwd.len > 0 {
-		buffer: [4096]u8 = ---
+		buffer: [links.TARGET_BYTES]u8 = ---
 		_, m.relative_files = links.resolve_file(
-			string(pwd.ptr[:pwd.len]), "", platform.local_hosts(), buffer[:])
+			string(pwd.ptr[:pwd.len]), "", localpath.local_hosts(), buffer[:])
 	}
 	clear(&m.spans)
 	clear(&m.text)
