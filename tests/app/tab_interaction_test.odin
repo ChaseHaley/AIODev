@@ -40,7 +40,7 @@ interaction_click :: proc(s: ^app.App, w: ^app.Window, index: int, modifiers: in
 interaction_placement :: proc(s: ^app.App, w: ^app.Window, horizontal: bool) {
 	w.tabs_horizontal = horizontal
 	w.width, w.height, w.scale = 1000, 700, 1
-	w.rail_auto, w.rail_override = true, .Auto
+	w.rail_wide, w.rail = true, app.Rail_Docked{}
 	app.window_relayout(s, w)
 	app.update_motion(s)
 }
@@ -146,19 +146,20 @@ tab_interaction_overlay_selection_dismisses_without_arming_reorder :: proc(t: ^t
 	interaction_placement(s, w, false)
 	app.tab_new(s, w)
 	app.tab_select(s, w, 0)
-	w.width, w.rail_auto, w.rail_override = 600, false, .Shown
+	w.width, w.rail_wide = 600, false
+	rail_show(w)
 	r := interaction_rect(s, w, 1)
 	interaction_button(s, w.id, r, .Left, true, {.Control})
 	testing.expect(t, w.workspace.tabs[0].marked && w.workspace.tabs[1].marked)
 	testing.expect(t, !app.rail_visible(w) && !w.tab_drag.pressed)
 	interaction_button(s, w.id, r, .Left, false)
-	w.rail_override = .Shown
+	rail_show(w)
 	interaction_button(s, w.id, r, .Right, true)
 	testing.expect(t, app.tab_menu_shown(w) && !app.rail_visible(w))
 	interaction_button(s, w.id, r, .Right, false)
 	app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 	app.tab_select(s, w, 0)
-	w.rail_override = .Shown
+	rail_show(w)
 	close := interaction_rect(s, w, 1, true)
 	interaction_button(s, w.id, close, .Left, true)
 	interaction_button(s, w.id, {}, .Left, false)

@@ -15,14 +15,32 @@ Rail_Row :: struct {
 	tab:       int,
 }
 
-// A manual visibility choice survives resizes on the same side of the dock threshold. Crossing
-// the threshold returns the window to automatic behaviour, so a docked rail docks again when
-// the window widens and a narrow window hides it again.
-Rail_Override :: enum {
-	Auto,
-	Shown,
-	Hidden,
+// The rail's presentation in vertical tab view; nil is Hidden. A docked rail takes pane space; an
+// overlay slides over the panes and is removed when its closing slide ends. Only this file writes it.
+//
+// The automatic policy is Window.rail_wide: the window is wide enough to dock. A manual toggle
+// survives resizes on the same side of that threshold; crossing it returns to automatic, so a docked
+// rail docks again when the window widens and a narrow window hides it again.
+Rail_Presentation :: union {
+	Rail_Docked,
+	Rail_Overlay,
 }
+
+Rail_Docked :: struct {}
+
+// The slide targets 1 while Opening or Open and 0 while Closing.
+Rail_Overlay :: struct {
+	slide: ui.Motion,
+}
+
+Rail_Overlay_Phase :: enum {
+	Opening,
+	Open,
+	Closing,
+}
+
+@(private = "file")
+RAIL_SLIDE :: 140 * time.Millisecond
 
 @(require_results)
 rail_rows_build :: proc(w: ^Window, rows: ^[dynamic]Rail_Row) -> bool {
@@ -43,39 +61,79 @@ rail_auto_at :: proc(width: i32, scale: f32) -> bool {
 
 rail_adaptive_update :: proc(w: ^Window) {
 	if w.tabs_horizontal {return}
-	auto := rail_auto_at(w.width, w.scale)
-	if auto == w.rail_auto {return}
+	wide := rail_auto_at(w.width, w.scale)
+	if wide == w.rail_wide {return}
+	rail_auto_reset(w)
+}
+
+// Automatic presentation: docked when wide and hidden when narrow. Nothing of the previous
+// presentation survives, so a docked rail hidden by a crossing cannot linger as an overlay.
+rail_auto_reset :: proc(w: ^Window) {
 	rail_resize_cancel(w)
-	w.rail_auto, w.rail_override = auto, .Auto
-	w.rail_was_overlay = false
-	// A crossing must not leave the previous presentation behind: wide turns the docked rail on,
-	// narrow turns every rail state off until the toggle asks for an overlay.
-	if auto {
-		w.rail_slide.value, w.rail_slide.target = 1, 1
-	} else {
-		w.rail_slide.value, w.rail_slide.target = 0, 0
+	w.rail_wide = rail_auto_at(w.width, w.scale)
+	if w.rail_wide {w.rail = Rail_Docked{}} else {w.rail = nil}
+}
+
+rail_overlay_phase :: proc(w: ^Window) -> (Rail_Overlay_Phase, bool) {
+	overlay, ok := w.rail.(Rail_Overlay)
+	if !ok {return {}, false}
+	if overlay.slide.target == 0 {return .Closing, true}
+	return ui.motion_active(overlay.slide) ? .Opening : .Open, true
+}
+
+when AIO_CONTROL {
+	// How far the rail is out: 1 docked, 0 hidden, and the slide's position for an overlay.
+	rail_slide_value :: proc(w: ^Window) -> f32 {
+		switch r in w.rail {
+		case Rail_Docked: return 1
+		case Rail_Overlay: return r.slide.value
+		}
+		return 0
 	}
+}
+
+rail_sliding :: proc(w: ^Window) -> bool {
+	overlay, ok := w.rail.(Rail_Overlay)
+	return ok && ui.motion_active(overlay.slide)
+}
+
+// Advances the overlay slide; a finished closing slide hides the rail.
+rail_slide_update :: proc(w: ^Window, now: time.Tick) -> bool {
+	overlay, ok := &w.rail.(Rail_Overlay)
+	if !ok {return false}
+	changed := ui.motion_update(&overlay.slide, now)
+	rail_overlay_settle(w)
+	return changed
+}
+
+@(private = "file")
+rail_overlay_settle :: proc(w: ^Window) {
+	overlay, ok := w.rail.(Rail_Overlay)
+	if ok && overlay.slide.target == 0 && !ui.motion_active(overlay.slide) {w.rail = nil}
+}
+
+@(private = "file")
+rail_overlay_slide :: proc(app: ^App, w: ^Window, target: f32) {
+	if _, ok := w.rail.(Rail_Overlay); !ok {w.rail = Rail_Overlay{}}
+	overlay := &w.rail.(Rail_Overlay)
+	ui.motion_target(&overlay.slide, target, RAIL_SLIDE, .Decelerate, app.animations, time.tick_now())
+	rail_overlay_settle(w)
 }
 
 rail_visible :: proc(w: ^Window) -> bool {
 	if w.tabs_horizontal || pane_fill_active(w) {return false}
-	switch w.rail_override {
-	case .Hidden:
-		return false
-	case .Shown:
-		return true
-	case .Auto:
-		return w.rail_auto
-	}
-	return false
+	phase, overlay := rail_overlay_phase(w)
+	return overlay ? phase != .Closing : w.rail != nil
 }
 
 rail_docked :: proc(w: ^Window) -> bool {
-	return rail_visible(w) && w.rail_auto
+	_, docked := w.rail.(Rail_Docked)
+	return docked && rail_visible(w)
 }
 
 rail_overlay :: proc(w: ^Window) -> bool {
-	return rail_visible(w) && !w.rail_auto
+	_, overlay := w.rail.(Rail_Overlay)
+	return overlay && rail_visible(w)
 }
 
 rail_area :: proc(w: ^Window) -> render.Rect {
@@ -99,9 +157,9 @@ rail_resize_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 rail_resize_cancel :: proc(w: ^Window) {
-	if w.rail_resizing {gesture_cancel_button(w, .Left)}
-	if w.rail_resizing {w.dragging = {}}
-	w.rail_resizing = false
+	if !rail_resizing(w) {return}
+	gesture_cancel_button(w, .Left)
+	divider_cancel(w)
 }
 
 @(require_results)
@@ -148,26 +206,12 @@ rail_toggle :: proc(app: ^App, w: ^Window) {
 	if w.tabs_horizontal {return}
 	rail_resize_cancel(w)
 	was_docked := rail_docked(w)
-	now := time.tick_now()
 	if rail_visible(w) {
-		was_overlay := rail_overlay(w)
-		w.rail_override = .Hidden
-		if was_overlay {
-			w.rail_was_overlay = true
-			ui.motion_target(&w.rail_slide, 0, 140 * time.Millisecond, .Decelerate, app.animations, now)
-		} else {
-			w.rail_was_overlay = false
-			w.rail_slide.value, w.rail_slide.target = 0, 0
-		}
+		if rail_overlay(w) {rail_overlay_slide(app, w, 0)} else {w.rail = nil}
+	} else if w.rail_wide {
+		w.rail = Rail_Docked{}
 	} else {
-		w.rail_override = .Shown
-		if !w.rail_auto {
-			w.rail_was_overlay = true
-			ui.motion_target(&w.rail_slide, 1, 140 * time.Millisecond, .Decelerate, app.animations, now)
-		} else {
-			w.rail_was_overlay = false
-			w.rail_slide.value, w.rail_slide.target = 1, 1
-		}
+		rail_overlay_slide(app, w, 1)
 	}
 	if was_docked != rail_docked(w) {window_relayout(app, w)} else {window_dividers(app, w)}
 	w.dirty = true
@@ -176,10 +220,8 @@ rail_toggle :: proc(app: ^App, w: ^Window) {
 rail_overlay_dismiss :: proc(app: ^App, w: ^Window) {
 	if !rail_overlay(w) {return}
 	rail_resize_cancel(w)
-	w.rail_override = .Auto
+	rail_overlay_slide(app, w, 0)
 	window_dividers(app, w)
-	w.rail_was_overlay = true
-	ui.motion_target(&w.rail_slide, 0, 140 * time.Millisecond, .Decelerate, app.animations, time.tick_now())
 	w.dirty = true
 }
 
@@ -369,15 +411,15 @@ rail_row_draw :: proc(
 
 rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if w.tabs_horizontal {return .Ok}
-	draw_overlay :=
-		rail_overlay(w) ||
-		(w.rail_was_overlay && !rail_docked(w) && w.rail_slide.value > 0)
+	// An overlay draws while open or sliding; a docked rail only in its own presentation.
+	overlay, draw_overlay := w.rail.(Rail_Overlay)
+	draw_overlay &&= rail_overlay(w) || overlay.slide.value > 0
 	if !rail_docked(w) && !draw_overlay {return .Ok}
 	layout, ok := rail_current_layout(w)
 	if !ok {return .Ok}
 	area := layout.area
 	if draw_overlay {
-		area.x -= (1 - w.rail_slide.value) * area.width
+		area.x -= (1 - overlay.slide.value) * area.width
 		layout = ui.rail_layout(area, w.scale, len(w.rail_rows) + w.tab_incoming.count, w.rail_scroll)
 	}
 	if area.x + area.width <= 0 {return .Ok}

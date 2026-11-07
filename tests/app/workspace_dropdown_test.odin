@@ -96,7 +96,7 @@ workspace_navigation_wraps_actions_and_consumes_closing_key_release :: proc(t: ^
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = false})
-	testing.expect(t, w.suppressed_key == nil)
+	testing.expect(t, !app.key_suppressed(&w, .Escape))
 	// A tab menu names its tab in the window's workspace; this one names a tab that is not there.
 	workspace := app.workspace_create_empty(&state)
 	if !testing.expect(t, workspace != nil) {return}

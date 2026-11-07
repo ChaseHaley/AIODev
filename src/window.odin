@@ -12,8 +12,6 @@ import "core:log"
 import "core:time"
 
 @(private)
-CURSOR_BLINK_INTERVAL :: 530 * time.Millisecond
-@(private)
 AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
 @(private)
 FRAME_WAIT_MS :: 100
@@ -30,7 +28,6 @@ Pane_View :: struct {
 	header_controls: [ui.HEADER_BUTTONS]ui.Control_Motion,
 	header_hover:   ui.Header_Action,
 	header_armed:   ui.Armed(ui.Header_Action),
-	hover:          Maybe(term.Link_Range),
 }
 
 Window :: struct {
@@ -42,12 +39,11 @@ Window :: struct {
 	markdown_hover: Markdown_Hover,
 	using resources: Workspace_View_Resources,
 	gesture: Gesture_State,
-	scroll_drag: ui.Scroll_Drag,
-	scroll_session: u32,
+	// A held terminal scrollbar thumb; see terminal_scrollbar.odin.
+	scroll_drag: Maybe(Terminal_Scroll_Drag),
 	scroll_hover: u32,
-	dragging: Divider_Drag,
-	divider_click_node: layout.Node_Id,
-	divider_click_ns: i64,
+	// A divider press, drag or the first click of a double-click; see arrange.odin.
+	divider: Divider_Gesture,
 	pane_drag: Pane_Drag,
 	tab_drag: Tab_Drag,
 	// The float surface's held Left press: a float header button, a float moving or resizing, or the
@@ -81,45 +77,39 @@ Window :: struct {
 	// Set once, when pane_link_window_create makes the window; see Window_Link.
 	link: Maybe(Window_Link),
 	generation: u64,
-	selecting: bool,
-	// While a selection drag is past the top or bottom edge, history scrolls a row per AUTOSCROLL_INTERVAL.
-	autoscrolling: bool,
-	autoscroll_deadline: time.Tick,
+	// A terminal text selection drag; see terminal_selection.odin.
+	selection: Selection_Drag,
+	// The terminal link under the pointer; see term_links.odin.
+	link_hover: Maybe(Link_Hover),
 	pointer: [2]f32,
-	tooltip: string,
+	// See tooltip.odin; tooltip_text stores the label the state names.
+	tooltip: Tooltip,
 	tooltip_text: [TOOLTIP_LIMIT]u8,
-	tooltip_deadline: time.Tick,
-	tooltip_warm_until: time.Tick,
-	tooltip_anchor: [2]f32,
-	tooltip_visible: bool,
 	pointer_shape: platform.Cursor_Shape,
 	// The last frame drew a pointer-following rim, so pointer movement must repaint it.
 	gloss_hovered: bool,
 	find: ui.Find_Bar,
-	leader_until: time.Tick,
+	// Leader chord mode and the keys whose releases are swallowed; input.odin is their only writer.
+	leader: Leader,
+	suppressed: Suppressed_Keys,
 	// Tab placement: horizontal restores the title-bar strip and the presentation arrays below.
 	tabs_horizontal: bool,
 	tab_underline:   ui.Motion,
 	tab_hover:       int,
-	// Vertical tab rail: rows, scroll, adaptive visibility and the overlay slide.
+	// Vertical tab rail: rows, scroll and its presentation with the automatic policy; see rail.odin.
 	rail_rows:           [dynamic]Rail_Row,
-	rail_auto:           bool,
-	rail_override:       Rail_Override,
+	rail:                Rail_Presentation,
+	rail_wide:           bool,
 	rail_scroll:         f32,
 	rail_hover:          int,
 	rail_width:          f32,
 	// tabs.rail_width, the width a double-click on the rail edge returns to.
 	rail_default_width:  f32,
-	rail_resizing:       bool,
 	dock_left_width:     f32,
 	title_action_hover: Title_Action,
 	title_action_armed: ui.Armed(Title_Action),
 	tab_orientation_button_hovered: bool,
 	tab_orientation_button_armed:   ui.Armed(bool),
-	rail_slide:          ui.Motion,
-	// True while an overlay is visible or sliding out, so a docked rail hidden by a width
-	// crossing cannot leave a phantom rail over the pane.
-	rail_was_overlay:    bool,
 	tab_close_armed:     ui.Armed(int),
 	// The question asked before a destructive change, with its subject; see confirmation.odin.
 	confirmation: Maybe(Confirmation),
@@ -138,10 +128,8 @@ Window :: struct {
 	maximized: bool,
 	pane_fill: layout.Pane_Fill,
 	paste_confirm: Paste_Confirm,
-	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
-	blinking, cursor_phase_visible: bool,
-	blink_deadline: time.Tick,
+	cursor_blink: Cursor_Blink,
 	// A frame that drew a spinner requests display-paced frames until one does not.
 	status_spinning: bool,
 	taskbar_state: platform.Progress_State,
@@ -200,10 +188,8 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	document_menu_init(&w.document_menu)
 	w.tab_hover, w.rail_hover = -1, -1
 	w.caption_hover = -1
-	w.divider_click_node = layout.INVALID_NODE
 	w.float_header_shown = layout.INVALID_NODE
 	w.pointer_shape = .Text
-	w.cursor_phase_visible = true
 	w.dirty = true
 	if !workspace_view_init(app, &w.resources, workspace) {window_free(w); return nil}
 	focus_init(w)
@@ -368,13 +354,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	if placement_changed && !horizontal {
 		// Returning from the strip restores the rail's automatic state; a manual hide or overlay
 		// does not survive the mode switch.
-		w.rail_override, w.rail_was_overlay = .Auto, false
-		rail_adaptive_update(w)
-		if w.rail_auto {
-			w.rail_slide.value, w.rail_slide.target = 1, 1
-		} else {
-			w.rail_slide.value, w.rail_slide.target = 0, 0
-		}
+		rail_auto_reset(w)
 	}
 	if placement_changed && horizontal {
 		// The rail rows hold workspace pointers from the old surface and are not read again until
@@ -549,53 +529,6 @@ focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 	return workspace_session_for_content(app, pane.content)
 }
 
-update_blink :: proc(w: ^Window) {
-	if !w.blinking {
-		w.cursor_phase_visible = true
-		return
-	}
-	now := time.tick_now()
-	if time.tick_diff(w.blink_deadline, now) >= 0 {
-		w.cursor_phase_visible = !w.cursor_phase_visible
-		w.blink_deadline = time.tick_add(now, CURSOR_BLINK_INTERVAL)
-		w.dirty = true
-	}
-}
-
-// Starts or stops edge autoscroll after the selection drag moved to `pointer`.
-autoscroll_follow :: proc(w: ^Window, entry: ^Session_Entry) {
-	active := term.selection_autoscroll(entry.session) != .None
-	if active && !w.autoscrolling {
-		w.autoscroll_deadline = time.tick_add(time.tick_now(), AUTOSCROLL_INTERVAL)
-	}
-	w.autoscrolling = active
-}
-
-update_autoscroll :: proc(app: ^App, w: ^Window) {
-	if !w.autoscrolling {
-		return
-	}
-	entry := pane_at(app, w, i32(w.pointer.x), i32(w.pointer.y))
-	if !w.selecting || entry == nil {
-		w.autoscrolling = false
-		return
-	}
-	now := time.tick_now()
-	if time.tick_diff(w.autoscroll_deadline, now) < 0 {
-		return
-	}
-	term.selection_autoscroll_tick(entry.session, w.pointer.x, w.pointer.y)
-	w.autoscroll_deadline = time.tick_add(now, AUTOSCROLL_INTERVAL)
-	w.dirty = true
-	autoscroll_follow(w, entry)
-}
-
-// Restarts the blink cycle with the cursor shown, so typing never hides the cursor.
-reset_blink :: proc(w: ^Window) {
-	w.cursor_phase_visible = true
-	w.blink_deadline = time.tick_add(time.tick_now(), CURSOR_BLINK_INTERVAL)
-}
-
 window_render :: proc(app: ^App, w: ^Window) {
 	if w.width <= 0 || w.height <= 0 {return}
 	if !window_surface_ready(app, w) {return}
@@ -673,10 +606,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 		if result != .Ok {return frame, result}
 	}
 	if result := floating_capsules_draw(app, w); result != .Ok {return frame, result}
-	if blinking != w.blinking {
-		w.blinking = blinking
-		reset_blink(w)
-	}
+	cursor_blink_observe(w, blinking)
 	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := tab_drag_draw(app, w); result != .Ok {return frame, result}
 	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
@@ -760,7 +690,6 @@ pane_draw :: proc(
 	}
 	entry := workspace_session_for_content(app, pane.content)
 	view := pane_view(w, pane.content)
-	state := link_pane(w, pane.content)
 	if entry == nil || view == nil {return frame, .Ok}
 	c := app.settings.colors
 	selection_foreground: Maybe(render.Color)
@@ -768,10 +697,7 @@ pane_draw :: proc(
 	content_focused :=
 		w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
 		!ui.find_has_keyboard(&w.find)
-	hover: Maybe(term.Link_Range)
-	if state != nil {
-		hover = state.hover
-	}
+	hover := link_hover_range(w, pane.content)
 	minimum_contrast := f32(1)
 	if app.settings.active_theme.terminal_light {
 		minimum_contrast = f32(app.settings.terminal.minimum_contrast)
@@ -786,7 +712,7 @@ pane_draw :: proc(
 		cursor_text = color(c.cursor_text),
 		minimum_contrast = minimum_contrast,
 		focused = content_focused,
-		cursor_phase_visible = !content_focused || w.cursor_phase_visible,
+		cursor_phase_visible = !content_focused || cursor_visible(w),
 		hover = hover,
 	}
 	box := pane_box(

@@ -101,7 +101,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		workspace_button_tooltip, nil},
 	.Status_Pill      = {pill_claims, pill_hover, pill_press, nil, pill_tooltip, nil},
 	.Divider          = {
-		divider_claims, divider_hover, divider_pointer_press, divider_release, nil, divider_cancel,
+		divider_claims, divider_hover, divider_pointer_press, divider_release, nil, divider_pointer_cancel,
 	},
 	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release, panel_tooltip, panel_cancel},
 	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release, tabs_tooltip, tabs_cancel},
@@ -674,15 +674,12 @@ divider_pointer_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Ev
 
 @(private = "file")
 divider_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || w.dragging.count == 0 {return false}
-	divider_drag(app, w, f32(e.x), f32(e.y))
-	w.dragging, w.rail_resizing = {}, false
-	return true
+	return e.button == .Left && divider_drag_release(app, w, f32(e.x), f32(e.y))
 }
 
 @(private = "file")
-divider_cancel :: proc(_: ^App, w: ^Window) {
-	w.rail_resizing = false
+divider_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	divider_cancel(w)
 }
 
 // Activity panel
@@ -819,8 +816,8 @@ header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
 	x, y := move_point(e)
 	in_pane := owner == .Pane_Header || owner == .Scrollbar || owner == .Settings_Page || owner == .Content
-	split_overlay_update(w, x, y, in_pane && !w.selecting)
-	over, action := pane_header_pointer(w, x, y, owner == .Pane_Header && !w.selecting)
+	split_overlay_update(w, x, y, in_pane && !selection_active(w))
+	over, action := pane_header_pointer(w, x, y, owner == .Pane_Header && !selection_active(w))
 	if owner != .Pane_Header {return}
 	pointer_set(app, w, over && action != .None && !gesture_swallowing(w) ? .Hand : .Arrow)
 }
@@ -880,14 +877,12 @@ scrollbar_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 @(private = "file")
 scrollbar_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || !w.scroll_drag.active {return false}
-	terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
-	return true
+	return e.button == .Left && terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
 }
 
 @(private = "file")
 scrollbar_cancel :: proc(_: ^App, w: ^Window) {
-	w.scroll_drag = {}
+	terminal_scrollbar_cancel(w)
 }
 
 // Settings pages
@@ -950,7 +945,7 @@ content_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.
 
 @(private = "file")
 content_cancel :: proc(_: ^App, w: ^Window) {
-	w.selecting, w.autoscrolling = false, false
+	selection_cancel(w)
 	link_hover_clear(w)
 }
 

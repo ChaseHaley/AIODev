@@ -91,7 +91,7 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 			testing.expect_value(t, term.status(entry.session).kind, term.Status_Kind.Running)
 		}
 		testing.expect(t, !w.pane_drag.pressed && !w.tab_drag.pressed && gesture_captured(w) == {})
-		testing.expect(t, !w.selecting && !w.autoscrolling)
+		testing.expect(t, !app.selection_active(w))
 		if scenario == 5 {
 			// Return to the same terminal tree after the Settings case, with every runtime intact.
 			if !testing.expect(t, app.settings_active(w)) {return}
@@ -110,13 +110,13 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	app.pane_split(s, w, .Right)
 	r := w.panes[0].rect
 	gesture_button(s, w, .Left, true, r.x+30, r.y+w.header_height+40)
-	if !testing.expect(t, w.selecting) {return}
+	if !testing.expect(t, app.selection_active(w)) {return}
 	focus := w.tree.focus
 	ui.find_open(&w.find)
 	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = w.width+10, y = w.height+10,
 		buttons = {.Left}})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
-	testing.expect(t, !w.selecting && !w.autoscrolling && !ui.armed_down(w.find.armed))
+	testing.expect(t, !app.selection_active(w) && !ui.armed_down(w.find.armed))
 	testing.expect_value(t, w.tree.focus, focus)
 	app.editor_open(s, w)
 	l := app.settings_layout(w)
@@ -157,9 +157,9 @@ gestures_menu_kept_open_releases_its_swallowed_button :: proc(t: ^testing.T) {
 	x, y := p.x + 30, p.y + w.header_height + 40
 	pointer_expect_move(t, s, w, x, y, .Text)
 	gesture_button(s, w, .Left, true, x, y)
-	if !testing.expect(t, w.selecting) {return}
+	if !testing.expect(t, app.selection_active(w)) {return}
 	gesture_button(s, w, .Left, false, x + 30, y)
-	testing.expect(t, !w.selecting, "the release must finish the selection")
+	testing.expect(t, !app.selection_active(w), "the release must finish the selection")
 }
 
 @(test)

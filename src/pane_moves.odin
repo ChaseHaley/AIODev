@@ -80,6 +80,6 @@ pane_rearrange :: proc(
 	if changed {
 		window_relayout(app, w)
 		window_update_title(app, w)
-		reset_blink(w)
+		cursor_blink_reset(w)
 	}
 }

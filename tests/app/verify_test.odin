@@ -35,9 +35,14 @@ when app.AIO_CONTROL {
 					state.settings.status.panel = enabled
 					for left in ([?]bool{false, true}) {
 						state.settings.status.panel_side = left ? .Left : .Right
-						for choice in ([?]app.Rail_Override{.Auto, .Hidden, .Shown}) {
+						// The rail as left automatic, hidden by the toggle, or shown by it.
+						for choice in 0 ..< 3 {
 							for columns in ([?]int{120, 72, 40}) {
-								w.rail_override = choice
+								switch choice {
+								case 0: app.rail_auto_reset(&w)
+								case 1: w.rail = nil
+								case 2: rail_show(&w)
+								}
 								if !testing.expect_value(t, app.verify_drive(&state, control.Resize{columns, 24}),
 									control.Error.None) {continue}
 								width, height, size_error := platform.window_client_size(&state.platform, id)
@@ -73,10 +78,10 @@ when app.AIO_CONTROL {
 		app.verify_end(&state.verify)
 		testing.expect(t, app.verify_window(&state) == &second)
 		state.verify.mouse_window, state.verify.buttons = second.id, {.Left}
-		second.dragging.count = 1
+		second.divider = app.Divider_Drag{count = 1}
 		second.tab_drag.pressed = true
 		app.handle_event(&state, platform.Capture_Lost_Event{second.id})
-		testing.expect_value(t, second.dragging.count, 0)
+		testing.expect_value(t, divider_count(&second), 0)
 		testing.expect(t, !second.tab_drag.pressed)
 		ordered_remove(&state.windows, 1)
 		testing.expect(t, app.verify_window(&state) == &first)

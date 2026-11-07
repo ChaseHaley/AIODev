@@ -755,11 +755,11 @@ run_action :: proc(
 			)
 		}
 		if target != w.tree.focus {
-			w.selecting, w.autoscrolling = false, false
-			w.dragging = {}
+			selection_cancel(w)
+			divider_cancel(w)
 			w.wheel_remainder = 0
 			if layout.swap(w.tree, w.tree.focus, target) {window_relayout(app, w)}
-			reset_blink(w)
+			cursor_blink_reset(w)
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
 		direction := layout.Direction(int(action) - int(Action.Focus_Left))
@@ -1042,9 +1042,7 @@ find_bar_key :: proc(app: ^App, w: ^Window, e, logical: platform.Key_Event) {
 	case .None:
 		outcome = ui.find_key(&w.find, logical, &app.find_history)
 	}
-	if outcome == .Closed {
-		w.suppressed_key = e
-	}
+	if outcome == .Closed {key_suppress(w, e)}
 	target := find_target(app, w)
 	// A terminal is read from its newest line up and a document from its first line down, so Enter
 	// follows the reading direction. The bar's arrows always point the way they move.

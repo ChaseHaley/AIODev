@@ -147,7 +147,7 @@ confirmation_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 	c := confirmation_current(w)
 	if c == nil {return false}
 	pane_header_cancel(w)
-	if e.pressed {w.suppressed_key = e}
+	key_suppress(w, e)
 	confirmation_outcome(app, w, ui.confirm_key(c, e))
 	return true
 }

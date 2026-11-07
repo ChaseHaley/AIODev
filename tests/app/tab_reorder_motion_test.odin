@@ -12,7 +12,7 @@ tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: pr
 		state := app.App{animations = true}
 		workspace: app.Workspace
 		w := app.Window{workspace = &workspace, width = 1000, height = 700, scale = 1,
-			rail_auto = true, tabs_horizontal = horizontal}
+			rail_wide = true, rail = app.Rail_Docked{}, tabs_horizontal = horizontal}
 		append(&state.windows, &w)
 		defer delete(state.windows)
 		defer delete(workspace.tabs)
@@ -69,7 +69,7 @@ tab_reorder_scrolling_groups_and_cancellation_keep_pointer_and_identity :: proc(
 	state: app.App
 	workspace: app.Workspace
 	w := app.Window{workspace = &workspace, width = 1200, height = 300, scale = 1.5,
-		rail_auto = true, rail_scroll = 48}
+		rail_wide = true, rail = app.Rail_Docked{}, rail_scroll = 48}
 	append(&state.windows, &w)
 	defer delete(state.windows)
 	defer delete(workspace.tabs)

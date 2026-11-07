@@ -41,7 +41,7 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			testing.expect_value(t, divider.node, node)
 			testing.expect_value(t, w.tab_menu.count, 1)
 			testing.expect_value(t, app.tab_menu_label(w, 0), "Set as Default Size")
-			testing.expect_value(t, w.dragging.count, 0)
+			testing.expect_value(t, divider_count(w), 0)
 			app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 			testing.expect(t, w.overlay == nil)
 			after, after_error := os.read_entire_file(f.path, context.temp_allocator)

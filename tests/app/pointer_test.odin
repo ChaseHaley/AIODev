@@ -75,7 +75,7 @@ pointer_tabs_use_hand_except_on_the_selected_tab_body :: proc(t: ^testing.T) {
 		s, w := &f.state, f.state.windows[0]
 		w.tabs_horizontal = horizontal
 		w.width, w.height, w.scale = 1000, 700, 1
-		w.rail_auto, w.rail_override = true, .Auto
+		w.rail_wide, w.rail = true, app.Rail_Docked{}
 		app.window_relayout(s, w)
 		app.tab_new(s, w)
 		app.tab_select(s, w, 0)

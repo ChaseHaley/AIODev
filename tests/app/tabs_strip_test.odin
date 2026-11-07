@@ -59,7 +59,8 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 		width           = 1000,
 		height          = 700,
 		scale           = 1,
-		rail_auto       = true,
+		rail_wide       = true,
+		rail            = app.Rail_Docked{},
 		tabs_horizontal = true,
 	}
 	testing.expect(t, !app.rail_visible(&w))

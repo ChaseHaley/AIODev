@@ -618,7 +618,7 @@ when AIO_CONTROL {
 						page.list.height,
 					),
 				},
-				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
+				{"leader.pending", fmt.tprintf("%t", leader_armed(w))},
 				{"confirm.open", fmt.tprintf("%t", close_open)},
 				{"confirm.opacity", fmt.tprintf("%g", closing != nil ? opacity : 0)},
 				{"confirm.title", close_open ? confirm.title : ""},
@@ -630,7 +630,7 @@ when AIO_CONTROL {
 				{"swap.open", fmt.tprintf("%t", confirmation_asking(w, Pane_Swap) != nil)},
 				{"swap.opacity", fmt.tprintf("%g", swap != nil ? opacity : 0)},
 				{"swap.profile", swap != nil ? swap.profile_id : ""},
-				{"leader.indicator", w.leader_until != {} ? "pane-status-line" : "none"},
+				{"leader.indicator", leader_armed(w) ? "pane-status-line" : "none"},
 				{"window.size", fmt.tprintf("%dx%d", w.width, w.height)},
 				{"window.dpi", fmt.tprintf("%d", u32(w.scale * 96))},
 				{"window.scale", fmt.tprintf("%g", w.scale)},
@@ -647,16 +647,16 @@ when AIO_CONTROL {
 				{"rail.docked", fmt.tprintf("%t", rail_docked(w))},
 				{"rail.rect", verify_workspace_rect(rail_area(w))},
 				{"rail.resize", verify_workspace_rect(rail_resize_rect(w))},
-				{"rail.resizing", fmt.tprintf("%t", w.rail_resizing)},
+				{"rail.resizing", fmt.tprintf("%t", rail_resizing(w))},
 				{"activity.rect", verify_workspace_rect(status_panel_rect(app, w))},
 				{"activity.side_button", verify_workspace_rect(status_panel_side_rect(app, w))},
 				{"activity.side", app.settings.status.panel_side == .Left ? "left" : "right"},
 				{"activity.view_button", verify_workspace_rect(status_panel_view_rect(app, w))},
 				{"activity.view", app.settings.status.panel_view == .Comfy ? "comfy" : "dense"},
-				{"dividers.dragging", fmt.tprintf("%d", w.dragging.count)},
+				{"dividers.dragging", fmt.tprintf("%d", divider_drag_count(w))},
 				{"rail.overlay", fmt.tprintf("%t", rail_overlay(w))},
 				{"rail.scroll", fmt.tprintf("%g", w.rail_scroll)},
-				{"rail.slide", fmt.tprintf("%g", w.rail_slide.value)},
+				{"rail.slide", fmt.tprintf("%g", rail_slide_value(w))},
 				{"rail.rows", fmt.tprintf("%d", len(w.rail_rows))},
 				{"rail.row.height", fmt.tprintf("%g", ui.RAIL_ROW_HEIGHT * w.scale)},
 				{"rail.toggle", verify_workspace_rect(tab_orientation_button_rect(w))},
@@ -1064,26 +1064,21 @@ when AIO_CONTROL {
 	// cursor shape is what the OS was asked to show.
 	verify_link_hover :: proc(w: ^Window) -> (hover, uri: string, spans: int) {
 		hover = "none"
-		for &view, i in w.views {
-			spans += len(view.view.links.spans)
-			range, ok := view.hover.?
-			if !ok || hover != "none" {
-				continue
-			}
-			hover = fmt.tprintf(
-				"%d,%d-%d,%d",
-				range.first_row,
-				range.first_column,
-				range.last_row,
-				range.last_column,
-			)
-			if _, target, found := term.link_at(
-				&w.views[i].view.links,
-				range.first_column,
-				range.first_row,
-			); found {
-				uri = target
-			}
+		for &view in w.views {spans += len(view.view.links.spans)}
+		link, ok := w.link_hover.?
+		if !ok {return}
+		view := link_pane(w, link.content)
+		if view == nil {return}
+		range := link.range
+		hover = fmt.tprintf(
+			"%d,%d-%d,%d",
+			range.first_row,
+			range.first_column,
+			range.last_row,
+			range.last_column,
+		)
+		if _, target, found := term.link_at(&view.view.links, range.first_column, range.first_row); found {
+			uri = target
 		}
 		return
 	}

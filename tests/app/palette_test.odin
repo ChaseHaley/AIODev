@@ -196,9 +196,9 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, s.palette_owner == nil)
 	app.palette_open(s, second)
 	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape, pressed = true})
-	testing.expect(t, !app.palette_active(s, second) && second.suppressed_key != nil)
+	testing.expect(t, !app.palette_active(s, second) && app.key_suppressed(second, .Escape))
 	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape})
-	testing.expect(t, second.suppressed_key == nil)
+	testing.expect(t, !app.key_suppressed(second, .Escape))
 	app.palette_open(s, second)
 	second.pane_drag.pressed, second.pane_drag.active = true, true
 	second.tab_drag.pressed, second.tab_drag.active = true, true

@@ -137,7 +137,7 @@ confirmation_both_subjects_cancel_outside_release_capture_and_focus :: proc(t: ^
 		testing.expect(t, ui.presence_is_open(c.presence))
 		confirmation_test_mouse(state, w, true, 1, f32(w.height - 1))
 		confirmation_test_mouse(state, w, false, 1, f32(w.height - 1))
-		testing.expect(t, app.confirmation_current(w) == nil && !w.selecting)
+		testing.expect(t, app.confirmation_current(w) == nil && !app.selection_active(w))
 		testing.expect_value(t, len(w.workspace.tabs), 1)
 		testing.expect_value(t, app.focused_session(state, w).profile_id, "default")
 		c = confirmation_open_subject(t, state, w, swap)

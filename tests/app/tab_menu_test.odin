@@ -181,7 +181,7 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	menu_key(&f, {key = .End})
 	testing.expect_value(t, w.tab_menu.selected, 9)
 	menu_key(&f, {key = .Escape})
-	testing.expect(t, !app.tab_menu_shown(w) && w.suppressed_key == nil)
+	testing.expect(t, !app.tab_menu_shown(w) && !app.key_suppressed(w, .Escape))
 	menu_key(&f, {key = .F10, modifiers = {.Shift}})
 	testing.expect(t, app.tab_menu_shown(w))
 	menu_key(&f, {key = .Context_Menu})

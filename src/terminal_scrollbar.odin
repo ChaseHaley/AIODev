@@ -6,8 +6,20 @@ import "aio:render"
 import "aio:term"
 import "aio:ui"
 
+// A held terminal scrollbar thumb: the session whose bar it is and where the pointer grabbed it. Nil is
+// Idle. The procs in this file are the only writers.
+Terminal_Scroll_Drag :: struct {
+	session: u32,
+	grab:    ui.Scroll_Drag,
+}
+
+terminal_scrollbar_dragging :: proc(w: ^Window) -> bool {
+	return w.scroll_drag != nil
+}
+
 terminal_scrollbar_state :: proc(w: ^Window, id: u32) -> ui.Scrollbar_State {
-	drag := w.scroll_session == id ? w.scroll_drag : {}
+	drag: ui.Scroll_Drag
+	if held, ok := w.scroll_drag.?; ok && held.session == id {drag = held.grab}
 	return ui.scrollbar_state(w.scroll_hover == id, drag)
 }
 
@@ -38,25 +50,34 @@ terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Butto
 	entry := workspace_session_for_content(app, pane.content)
 	bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
 	if !visible || !ui.scrollbar_contains(bar, x, y) {return false}
-	w.scroll_session = entry.id
-	if delta := ui.scrollbar_press(&w.scroll_drag, bar, y) - bar.extent.offset; delta != 0 {
+	grab: ui.Scroll_Drag
+	if delta := ui.scrollbar_press(&grab, bar, y) - bar.extent.offset; delta != 0 {
 		term.scroll_viewport(entry.session, delta)
 	}
+	// A track press pages once; only a thumb press holds the bar.
+	if grab.active {w.scroll_drag = Terminal_Scroll_Drag{entry.id, grab}} else {w.scroll_drag = nil}
 	w.dirty = true
 	return true
 }
 
+// The held thumb follows the pointer; a bar that is gone ends the drag.
 terminal_scrollbar_move :: proc(app: ^App, w: ^Window, y: f32) {
+	held, ok := w.scroll_drag.?
+	if !ok {return}
 	for pane in w.panes {
 		entry := workspace_session_for_content(app, pane.content)
-		if entry == nil || entry.id != w.scroll_session {continue}
+		if entry == nil || entry.id != held.session {continue}
 		bar, visible := terminal_scrollbar_geometry(app, w, pane, entry)
 		if !visible {return}
-		term.scroll_viewport(entry.session, ui.scrollbar_drag(w.scroll_drag, bar, y) - bar.extent.offset)
+		term.scroll_viewport(entry.session, ui.scrollbar_drag(held.grab, bar, y) - bar.extent.offset)
 		w.dirty = true
 		return
 	}
-	w.scroll_drag = {}
+	terminal_scrollbar_cancel(w)
+}
+
+terminal_scrollbar_cancel :: proc(w: ^Window) {
+	w.scroll_drag = nil
 }
 
 // The session whose visible track holds the point on the topmost pane there, or 0.
@@ -72,7 +93,7 @@ terminal_scrollbar_at :: proc(app: ^App, w: ^Window, x, y: f32) -> u32 {
 // Records which pane's track is under the pointer, repainting only when that changes.
 terminal_scrollbar_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	hovered: u32
-	if !w.selecting {hovered = terminal_scrollbar_at(app, w, x, y)}
+	if !selection_active(w) {hovered = terminal_scrollbar_at(app, w, x, y)}
 	terminal_scrollbar_hover_set(w, hovered)
 	return hovered != 0
 }
@@ -81,7 +102,9 @@ terminal_scrollbar_hover_set :: proc(w: ^Window, id: u32) {
 	if w.scroll_hover != id {w.scroll_hover, w.dirty = id, true}
 }
 
-terminal_scrollbar_release :: proc(app: ^App, w: ^Window, x, y: f32) {
-	w.scroll_drag, w.dirty = {}, true
+terminal_scrollbar_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	if w.scroll_drag == nil {return false}
+	w.scroll_drag, w.dirty = nil, true
 	terminal_scrollbar_hover(app, w, x, y)
+	return true
 }
