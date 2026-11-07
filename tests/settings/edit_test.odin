@@ -3,6 +3,9 @@ package settings_test
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:thread"
+import "core:time"
+import win32 "core:sys/windows"
 import "aio:settings"
 import fixtures "../fixtures"
 
@@ -250,4 +253,32 @@ editor_save_detects_conflicts_and_cleans_up :: proc(t: ^testing.T) {
 	files, list_error := os.read_dir(folder, -1, context.temp_allocator)
 	testing.expect_value(t, list_error, nil)
 	testing.expect_value(t, len(files), 0)
+}
+
+// Another process can hold settings.ini open for a moment after it changes, as a virus scanner
+// does; a save waits for it instead of failing.
+@(test)
+editor_save_waits_for_a_brief_lock_on_the_settings_file :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("", "aio-settings-*", context.allocator)
+	if !testing.expect_value(t, err, nil) { return }
+	defer delete(dir)
+	defer os.remove(dir)
+	path := strings.concatenate({dir, "/settings.ini"}, context.temp_allocator)
+	defer os.remove(path)
+	testing.expect_value(t, os.write_entire_file(path, "original"), nil)
+	// Opened without sharing, as a scanner may, the file can be neither read nor replaced.
+	wide := win32.utf8_to_wstring(path)
+	held := win32.CreateFileW(wide, win32.GENERIC_READ, 0, nil, win32.OPEN_EXISTING, 0, nil)
+	if !testing.expect(t, held != win32.INVALID_HANDLE_VALUE) { return }
+	release := thread.create_and_start_with_poly_data(held, proc(handle: win32.HANDLE) {
+		time.sleep(50 * time.Millisecond)
+		win32.CloseHandle(handle)
+	})
+	saved := settings.save(path, "original", "updated")
+	thread.join(release)
+	thread.destroy(release)
+	testing.expect_value(t, saved, settings.Save_Error.None)
+	data, read_error := os.read_entire_file(path, context.temp_allocator)
+	testing.expect_value(t, read_error, nil)
+	testing.expect_value(t, string(data), "updated")
 }
