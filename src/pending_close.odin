@@ -59,7 +59,7 @@ pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int, restore: ^[dyn
 			close.restore, held.restore = held.restore, {}
 		}
 	}
-	overlay_open(app, w, nil, reopening)
+	overlay_close_all(app, w, reopening)
 	pc := Pending_Close{target = close}
 	pc.tabs, pc.panes, _ = tab_close_scope(w.workspace, index)
 	confirmation_open(w, pc)

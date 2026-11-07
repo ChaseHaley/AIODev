@@ -90,6 +90,14 @@ workspace_find :: proc(app: ^App, id: u32) -> ^Workspace {
 	return nil
 }
 
+// The workspace whose tab list holds `source`, or nil.
+pane_source_workspace :: proc(app: ^App, source: ^Tab) -> ^Workspace {
+	for workspace in app.workspaces {
+		for tab in workspace.tabs {if tab == source {return workspace}}
+	}
+	return nil
+}
+
 @(require_results)
 workspace_select :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	if !workspace_eligible(app, workspace) {return false}

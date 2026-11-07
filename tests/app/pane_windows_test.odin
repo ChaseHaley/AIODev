@@ -40,7 +40,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	tab_id := source_workspace.next_tab_id
 	last_preview := app.pane_window_preview_create(&state, source, node)
 	testing.expect(t, last_preview == nil)
-	if last_preview != nil { app.pane_window_preview_discard(&state, last_preview.id) }
+	if last_preview != nil { app.window_preview_discard(&state, last_preview.id) }
 	testing.expect_value(t, state.next_workspace_id, workspace_id)
 	testing.expect_value(t, source_workspace.next_tab_id, tab_id)
 	app.pane_drag_press(&state, source_window, node, 80, 58)
@@ -62,12 +62,12 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	workspace_id = state.next_workspace_id
 	settings_preview := app.pane_window_preview_create(&state, settings_tab, settings_tab.tree.root)
 	if !testing.expect(t, settings_preview != nil) { return }
-	app.pane_window_preview_discard(&state, settings_preview.id)
+	app.window_preview_discard(&state, settings_preview.id)
 	testing.expect(t, state.next_workspace_id > workspace_id)
 	testing.expect_value(t, len(state.workspaces), 1)
 	settings_preview = app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, settings_preview != nil) { return }
-	app.pane_window_preview_discard(&state, settings_preview.id)
+	app.window_preview_discard(&state, settings_preview.id)
 	app.tab_close(&state, source_window, 1)
 	testing.expect_value(t, len(source_workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
@@ -106,7 +106,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	app.window_set_dpi(&state, preview, 96)
 	preview_id := preview.id
 	preview_workspace_id := preview.workspace.id
-	app.pane_window_preview_discard(&state, preview_id)
+	app.window_preview_discard(&state, preview_id)
 	testing.expect(t, app.window_find(&state, preview_id) == nil)
 	testing.expect_value(t, state.next_workspace_id, preview_workspace_id)
 	testing.expect_value(t, len(state.workspaces), 1)
@@ -231,8 +231,8 @@ tear_off_commit_moves_nothing_when_its_window_cannot_show :: proc(t: ^testing.T)
 	moved_tabs := app.tabs_to_window(s, w, tab_preview)
 	pane_kept := pane_preview.phase == .Preparing && pane_preview.workspace.provisional
 	tabs_kept := tab_preview.phase == .Preparing && tab_preview.workspace.provisional
-	app.pane_window_preview_discard(s, pane_id)
-	app.pane_window_preview_discard(s, tab_id)
+	app.window_preview_discard(s, pane_id)
+	app.window_preview_discard(s, tab_id)
 	context.logger = logger
 	testing.expect(t, !moved_pane && !moved_tabs)
 	testing.expect(t, pane_kept && tabs_kept, "a refused show leaves each preview to discard")

@@ -68,7 +68,7 @@ tab_incoming_set :: proc(app: ^App, id: input.Window_Id, offer: Tab_Incoming) {
 		ui.motion_target(
 			&incoming.ghost,
 			f32(offer.slot),
-			140 * time.Millisecond,
+			TAB_REORDER_DURATION,
 			.Decelerate,
 			app.animations,
 			time.tick_now(),
@@ -174,10 +174,7 @@ tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 	transfer := Workspace_Tab_Transfer{workspace, destination, tabs, 1, selected_tab(workspace).id, placeholder}
 	if !workspace_tabs_transfer_reserve(app, transfer) {return false}
 	name := workspace_default_name(app)
-	if name == "" || !window_commit(app, preview) {
-		delete(name)
-		return false
-	}
+	if name == "" || !tear_off_window_show(app, preview, name) {return false}
 
 	tab_select(app, source_window, tab_kept_index(workspace, tabs), .Preserve_Marks)
 	workspace_tabs_transfer(app, transfer)

@@ -6,6 +6,8 @@ import "aio:control"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
+import "core:os"
+import "core:path/filepath"
 import "core:strings"
 
 // The aio command line's side of the CLI pipe; cli_protocol owns the request and reply shapes.
@@ -18,6 +20,33 @@ Cli_Pipe :: union {
 	Cli_Pipe_Failed,
 }
 Cli_Pipe_Failed :: struct {}
+
+@(private = "file")
+CLI_EXECUTABLE :: "aio.exe"
+
+// The aio command line as App embeds it: the pipe it reaches the app through, and the directory holding
+// aio.exe beside this executable, which each shell's PATH gets; empty when aio.exe is missing.
+Cli_State :: struct {
+	cli:           Cli_Pipe,
+	cli_directory: string,
+}
+
+// Finds aio.exe beside this executable; the pipe starts with control_cli_sync once settings apply.
+control_cli_init :: proc(app: ^App) {
+	executable, err := os.get_executable_path(context.temp_allocator)
+	if err != nil {return}
+	directory := filepath.dir(executable)
+	if cli, join_error := filepath.join({directory, CLI_EXECUTABLE}, context.temp_allocator);
+	   join_error == nil && os.exists(cli) {
+		app.cli_directory = strings.clone(directory)
+	}
+}
+
+control_cli_destroy :: proc(app: ^App) {
+	control_cli_stop(app)
+	delete(app.cli_directory)
+	app.cli_directory = ""
+}
 
 // Starts or stops the CLI pipe to match control.enabled (D-046). Settings apply at startup, on
 // Reload Settings and on each Settings page change.

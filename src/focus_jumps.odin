@@ -64,6 +64,12 @@ focus_jumps_track :: proc(app: ^App) {
 	if entry := focused_session(app, w); entry != nil {focus_jumps_note(&app.focus_jumps, entry.id)}
 }
 
+// A destroyed window never reports losing focus, so the jump list follows the notices to the window
+// focused most recently.
+focus_jumps_window_closed :: proc(app: ^App, id: input.Window_Id) {
+	if app.focus_jumps.window == id {app.focus_jumps.window = app.notice_window}
+}
+
 @(private)
 focus_jump_reachable :: proc(data: rawptr, session: u32) -> bool {
 	app := (^App)(data)

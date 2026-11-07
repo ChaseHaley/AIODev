@@ -4,6 +4,7 @@ import "aio:commands"
 import "aio:input"
 import "aio:settings"
 import "aio:ui"
+import "core:time"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
 // mapping between them, so keeping a window through a closing fade needs no second hand-synced phase.
@@ -20,6 +21,19 @@ palette_owner_state :: proc(app: ^App) -> Palette_Owner_State {
 	if !owned {return nil}
 	if ui.presence_is_open(app.palette.presence) {return Palette_Open{owner}}
 	return Palette_Closing{owner}
+}
+
+// Advances the palette's fade; its window draws it, and keeps it until a fade-out settles.
+palette_animate :: proc(app: ^App, now: time.Tick) {
+	changed, settled := ui.presence_advance(&app.palette.presence, app.animations, now)
+	owner := palette_owner_window(app)
+	if owner == nil {return}
+	if changed {owner.dirty = true}
+	if settled {palette_release(app, owner)}
+}
+
+palette_animating :: proc(app: ^App) -> bool {
+	return palette_owner_state(app) != nil && ui.presence_active(app.palette.presence)
 }
 
 // Zero means unowned at the external window-id boundary, not in the stored owner.

@@ -6,6 +6,7 @@ import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:log"
+import "core:time"
 
 // Floats (WORK-045). A float is a window of one or more panes above its tab's tiled panes, so opening,
 // moving, minimizing or closing it never resizes or reflows them. Its float header moves it, and holds
@@ -115,6 +116,36 @@ Float_Header_Spot :: struct {
 	action: Float_Header_Action,
 }
 
+// A window's floating-pane presentation, which Window embeds; floating_window_init and
+// floating_window_destroy are its lifetime, and this file is its only writer.
+Float_Window_State :: struct {
+	// The float surface's held Left press: a float header button, a float moving or resizing, or the
+	// capsule row.
+	float_press: Float_Press,
+	// The float header part under the pointer, and the float the hover and press animation belongs to,
+	// which it keeps while fading out.
+	float_header_hover:    Maybe(Float_Header_Spot),
+	float_header_shown:    layout.Node_Id,
+	float_header_motion:   ui.Control_Motion,
+	float_header_controls: [FLOAT_HEADER_BUTTONS]ui.Control_Motion,
+	// The minimized float whose capsule is under the pointer; where the user left the capsule row, as a
+	// fraction of the room it can travel, or nil for the bottom-right; and the row's cached geometry.
+	float_capsule_hover:      Maybe(layout.Content),
+	float_capsule_anchor:     Maybe([2]f32),
+	float_capsule_group:      render.Rect,
+	float_capsules:           [dynamic]Float_Capsule,
+	float_capsule_widths:     [dynamic]f32,
+}
+
+floating_window_init :: proc(s: ^Float_Window_State) {
+	s.float_header_shown = layout.INVALID_NODE
+}
+
+floating_window_destroy :: proc(s: ^Float_Window_State) {
+	delete(s.float_capsules)
+	delete(s.float_capsule_widths)
+}
+
 // A float moves or resizes with the pointer.
 floating_dragging :: proc(w: ^Window) -> bool {
 	#partial switch _ in w.float_press {
@@ -138,6 +169,35 @@ floating_header_held :: proc(w: ^Window) -> (layout.Content, bool) {
 floating_button_pressed :: proc(w: ^Window, action: Float_Header_Action) -> bool {
 	p, ok := w.float_press.(Float_Button_Press)
 	return ok && p.action == action
+}
+
+// The float header under the pointer, or the one moving its float, takes the animation; a header the
+// pointer left keeps it while it fades. True when the window must draw again.
+floating_header_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+	header := layout.INVALID_NODE
+	spot, spotted := w.float_header_hover.?
+	if spotted {header = spot.root}
+	held, moving := floating_header_held(w)
+	if moving {
+		tree := window_tree(w)
+		header = layout.float_root(tree, layout.find_content(tree, held))
+	}
+	if header != layout.INVALID_NODE {w.float_header_shown = header}
+	active := header != layout.INVALID_NODE
+	changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
+	for &control, i in w.float_header_controls {
+		action := Float_Header_Action(i + 1)
+		over := spotted && spot.action == action
+		pressed := floating_button_pressed(w, action)
+		changed = ui.control_update(&control, over, pressed, app.animations, now) || changed
+	}
+	return changed
+}
+
+floating_header_animating :: proc(w: ^Window) -> bool {
+	if ui.control_active(w.float_header_motion) {return true}
+	for control in w.float_header_controls {if ui.control_active(control) {return true}}
+	return false
 }
 
 @(private)

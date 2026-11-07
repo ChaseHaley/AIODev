@@ -72,6 +72,21 @@ Markdown_Link_Hover :: struct {
 	link: int,
 }
 
+// A window's pointer state over its Markdown panes; Window embeds it and this file is its only writer.
+Markdown_Pointer :: struct {
+	markdown_gesture: Markdown_Gesture,
+	markdown_hover:   Markdown_Hover,
+}
+
+// The app's Markdown panes, which windows refer to by id, and when the poll next reads their files.
+// App embeds it; this file owns it, and markdown_app_destroy releases it.
+Markdown_App :: struct {
+	markdown_panes:    [dynamic]^Markdown_Pane,
+	next_markdown_id:  u32,
+	// Zero while no pane is registered, so nothing polls.
+	markdown_deadline: time.Tick,
+}
+
 // Owned by App.markdown_panes; panes refer to it by id and the poll frees it once none does.
 Markdown_Pane :: struct {
 	id:                     u32,
@@ -102,10 +117,15 @@ markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 	free(pane)
 }
 
-markdown_panes_destroy :: proc(app: ^App) {
-	for pane in app.markdown_panes {markdown_pane_destroy(pane)}
-	delete(app.markdown_panes)
-	app.markdown_panes = nil
+markdown_app_destroy :: proc(state: ^Markdown_App) {
+	for pane in state.markdown_panes {markdown_pane_destroy(pane)}
+	delete(state.markdown_panes)
+	state^ = {}
+}
+
+// When the poll next reads the panes' files; false while no pane is registered.
+markdown_poll_deadline :: proc(app: ^App) -> (time.Tick, bool) {
+	return app.markdown_deadline, app.markdown_deadline != {}
 }
 
 @(private)

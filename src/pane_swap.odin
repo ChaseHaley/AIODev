@@ -50,7 +50,7 @@ pane_shell_swap_request :: proc(
 		current = found.name
 	}
 	if !gesture_cancel(app, w) {return}
-	overlay_open(app, w, nil)
+	overlay_close_all(app, w)
 	owned_id, id_error := strings.clone(profile.id)
 	if id_error != nil {notify(app, .Error, "Could not prepare the shell switch."); return}
 	owned_name, name_error := strings.clone(profile.name)
@@ -149,11 +149,7 @@ pane_shell_swap :: proc(
 			}
 		}
 	}
-	term.restart(entry.session, config)
 	delete(entry.profile_id)
 	entry.profile_id = owned_id
-	pane_header_launch(&entry.header, config)
-	pane_header_refresh(entry)
-	session_status_sync(entry)
-	mark_all_dirty(app)
+	session_relaunch(app, entry, config)
 }

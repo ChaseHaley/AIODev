@@ -5,9 +5,43 @@ import "aio:commands"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
-import "aio:term"
 import "aio:ui"
 import "core:math"
+import "core:time"
+
+// The title bar's own controls under the pointer and held: the title actions, the tab orientation
+// button, the native caption buttons and the workspace button. Window embeds it; the pointer surfaces
+// set it and window_chrome_draw draws from it.
+Title_Controls :: struct {
+	title_action_hover:             Title_Action,
+	title_action_armed:             ui.Armed(Title_Action),
+	tab_orientation_button_hovered: bool,
+	tab_orientation_button_armed:   ui.Armed(bool),
+	caption_hover:                  Maybe(platform.Caption_Button),
+	caption_armed:                  ui.Armed(Maybe(platform.Caption_Button)),
+	workspace_hovered:              bool,
+	workspace_motion:               ui.Control_Motion,
+}
+
+// Only the workspace button animates its hover; true when the window must draw again.
+title_controls_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+	return ui.control_update(&w.workspace_motion, w.workspace_hovered, false, app.animations, now)
+}
+
+title_controls_animating :: proc(w: ^Window) -> bool {
+	return ui.control_active(w.workspace_motion)
+}
+
+// Whether `pane` presents as the window's focused pane: its outline, header, full contrast and focused
+// cursor all follow this. Its cursor also needs the keyboard; see pane_has_keyboard.
+pane_shows_focus :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
+	return w.focused && pane.node == window_tree(w).focus
+}
+
+// The focused pane takes typing unless the palette or the find bar holds the keyboard.
+pane_has_keyboard :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> bool {
+	return pane_shows_focus(w, pane) && !palette_active(app, w) && !ui.find_has_keyboard(&w.find)
+}
 
 window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 	return window_content_area_in(app, w, w.pane_fill)
@@ -45,19 +79,9 @@ window_geometry :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> layout
 	}
 }
 
-window_generation :: proc(app: ^App, w: ^Window) -> u64 {
-	generation: u64
-	for pane in w.panes {
-		if entry := workspace_session_for_content(app, pane.content); entry != nil {
-			generation += term.generation(entry.session)
-		}
-	}
-	return generation
-}
-
 window_chrome_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	window_shared_borders(app, w)
-	bar_height := ui.TITLE_BAR_HEIGHT * w.scale
+	bar_height := window_title_height(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar_height}) == .None {
 		if render.push_rect(
 			   &w.list,
@@ -169,14 +193,14 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 
 @(private)
 window_focus_outlined :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> bool {
-	return w.focused && pane.node == window_tree(w).focus && app.settings.pane.focus_border > 0
+	return pane_shows_focus(w, pane) && app.settings.pane.focus_border > 0
 }
 
 // Fades an unfocused pane, header included, toward its own background so the focused pane alone
 // keeps full contrast; the outline drawn after it stays crisp.
 window_card_dim :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, background: render.Color) {
 	dim := app.settings.pane.unfocused_dim
-	if dim <= 0 || (w.focused && pane.node == window_tree(w).focus) {return}
+	if dim <= 0 || pane_shows_focus(w, pane) {return}
 	r := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
 	if render.push_layer(&w.list, r, window_pane_radius(app, w)) != .None {return}
 	veil := background

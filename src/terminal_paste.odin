@@ -5,6 +5,14 @@ import "aio:term"
 import "aio:ui"
 import "core:time"
 
+// The text names the duration: change both together.
+@(private)
+PASTE_CONFIRM_DURATION :: 10 * time.Second
+@(private)
+PASTE_CONFIRM_TEXT ::
+	"The clipboard text has line breaks, so the shell will run each line as a command. " +
+	"Paste again within 10 seconds to confirm."
+
 // A multiline paste waiting to be confirmed; nil is Idle. Armed names the pane's session, so only a
 // second paste into that pane within the wait counts as the confirmation. The Paste notice shows the
 // wait: arming puts it, cancelling clears it, and it expires with the arm. The procs below are the
@@ -67,4 +75,9 @@ paste_confirm_expire :: proc(w: ^Window, now: time.Tick) {
 	if armed, ok := w.paste_confirm.(Paste_Armed); ok && time.tick_diff(now, armed.until) <= 0 {
 		w.paste_confirm = nil
 	}
+}
+
+paste_confirm_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
+	armed, ok := w.paste_confirm.(Paste_Armed)
+	return armed.until, ok
 }

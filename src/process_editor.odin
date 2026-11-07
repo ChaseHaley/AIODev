@@ -37,7 +37,7 @@ editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
 		ui.editor_message(&w.editor, "Could not prepare group deletion.", true)
 		return
 	}
-	overlay_open(app, w, nil)
+	overlay_close_all(app, w)
 	confirmation_open(w, Process_Remove{name = owned, source = source, group = group}, focus = .Cancel)
 }
 

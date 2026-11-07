@@ -2,6 +2,7 @@ package main
 
 import "aio:ui"
 import "aio:layout"
+import "core:log"
 import "core:time"
 
 // How long a reordered tab takes to ease into its slot (D-069). Workspace rows settling after a reorder
@@ -54,6 +55,67 @@ tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int)
 		position.value, position.target = f32(i), f32(i)
 	}
 	return true
+}
+
+// Advances the window's tab motion: tabs easing into their slots, the ghost of tabs arriving from
+// another window, the selection underline and the strip controls. True when the window must draw again.
+tab_presentation_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+	changed := false
+	// D-069: dragged tabs follow the pointer (tab_drag_follow_pointer); the others, and every tab once
+	// dropped, settle into their slots, opening the gap another window's drag asks for.
+	following := tab_drag_active(w)
+	for &position, i in w.tab_positions {
+		if i >= len(w.workspace.tabs) {continue}
+		if !following || !w.workspace.tabs[i].marked {
+			gap := i >= w.tab_incoming.slot ? w.tab_incoming.count : 0
+			ui.motion_target(&position, f32(i + gap), TAB_REORDER_DURATION, .Decelerate, app.animations, now)
+		}
+		changed = ui.motion_update(&position, now) || changed
+	}
+	changed = ui.motion_update(&w.tab_incoming.ghost, now) || changed
+	selected := f32(w.workspace.selected)
+	ui.motion_target(&w.tab_underline, selected, TAB_REORDER_DURATION, .Decelerate, app.animations, now)
+	for &control, i in w.tab_controls {
+		changed = tab_strip_control_update(app, w, &control, Tab_Chrome_Tab{i}, now) || changed
+	}
+	changed = tab_strip_control_update(app, w, &w.new_tab_control, Tab_Chrome_New{}, now) || changed
+	changed = tab_strip_control_update(app, w, &w.profiles_control, Tab_Chrome_Profiles{}, now) || changed
+	return ui.motion_update(&w.tab_underline, now) || changed
+}
+
+tab_presentation_animating :: proc(w: ^Window) -> bool {
+	if ui.motion_active(w.tab_underline) || ui.motion_active(w.tab_incoming.ghost) {return true}
+	for control in w.tab_controls {if ui.control_active(control) {return true}}
+	if ui.control_active(w.new_tab_control) || ui.control_active(w.profiles_control) {return true}
+	for position in w.tab_positions {if ui.motion_active(position) {return true}}
+	return false
+}
+
+// A strip control hovers while the pointer is over it, and draws a held strip press while it hovers.
+@(private = "file")
+tab_strip_control_update :: proc(
+	app: ^App,
+	w: ^Window,
+	control: ^ui.Control_Motion,
+	target: Tab_Chrome_Target,
+	now: time.Tick,
+) -> bool {
+	hovered := w.tabs_horizontal && w.tab_hover == target
+	return ui.control_update(control, hovered, hovered && gesture_tab_pressed(w) != nil, app.animations, now)
+}
+
+// Relayout fits the presentation to the tab count. Only the strip draws its hover and presses from the
+// positions, so a count change while it shows forgets them. A failed resize leaves the arrays as they
+// were: drawing and tab_presentation_animate bound every index by the tab count instead.
+tab_presentation_fit :: proc(w: ^Window) {
+	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
+	if tab_count != len(w.tab_positions) && w.tabs_horizontal {
+		w.tab_hover = nil
+		gesture_tab_unpress(w)
+	}
+	if !tab_presentation_resize(&w.presentation, tab_count) {
+		log.error("resizing tab presentation values failed")
+	}
 }
 
 @(require_results)

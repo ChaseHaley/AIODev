@@ -10,6 +10,7 @@ import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 
 Pane_Header_Metadata :: struct {
@@ -142,7 +143,7 @@ pane_header_draw :: proc(
 		title,
 		directory,
 		icon,
-		w.focused && pane.node == window_tree(w).focus,
+		pane_shows_focus(w, pane),
 		controls,
 		pane_view_current(w) == .Zoom,
 		w.pane_fill == .Content,
@@ -210,6 +211,33 @@ pane_header_cancel :: proc(w: ^Window) {
 		view.header_hover = .None
 		ui.armed_cancel(&view.header_armed)
 	}
+}
+
+// Header buttons animate only while some header shows: a header row, a single pane's split controls or
+// a float's panes.
+@(private = "file")
+pane_header_controls_shown :: proc(w: ^Window) -> bool {
+	return w.header_height > 0 || w.split_overlay || window_floats_shown(w)
+}
+
+// Advances every header button's hover and press; true when the window must draw again.
+pane_header_controls_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+	if !pane_header_controls_shown(w) {return false}
+	changed := false
+	for &pane in w.views {
+		for &control, i in pane.header_controls {
+			action := ui.Header_Action(i + 1)
+			hovered, armed := pane.header_hover == action, ui.armed_is(pane.header_armed, action)
+			changed = ui.control_update(&control, hovered, armed, app.animations, now) || changed
+		}
+	}
+	return changed
+}
+
+pane_header_controls_animating :: proc(w: ^Window) -> bool {
+	if !pane_header_controls_shown(w) {return false}
+	for pane in w.views {for control in pane.header_controls {if ui.control_active(control) {return true}}}
+	return false
 }
 
 // The terminal must not receive either half of a header click: the header swallows the press, and

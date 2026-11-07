@@ -320,7 +320,7 @@ pane_link_show :: proc(app: ^App, w: ^Window, host: ^Window) {
 	}
 	w.phase, w.dirty = .Shown, true
 	link := &w.link.?
-	if link.maximize && !app.options.inactive {
+	if link.maximize && !activation_suppressed(app) {
 		platform.window_maximize(&app.platform, w.id)
 		if !link.activate && host != nil {_ = window_activate(app, host)}
 	}
@@ -408,9 +408,6 @@ pane_link_restore :: proc(
 		return
 	}
 	if link, linked := &w.link.?; linked {link.maximize = placement.maximized}
-	if dpi := platform.window_dpi(&app.platform, w.id); dpi != 0 && f32(dpi) / 96 != w.scale {
-		window_set_dpi(app, w, dpi)
-	}
-	width, height, size_error := platform.window_client_size(&app.platform, w.id)
-	if size_error == .None && (width != w.width || height != w.height) {window_resize(app, w, width, height)}
+	// A size that cannot be read leaves the window at the size it last knew.
+	_ = window_sync_placement(app, w)
 }

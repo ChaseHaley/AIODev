@@ -30,6 +30,17 @@ Rail_Overlay_Phase :: enum {
 	Closing,
 }
 
+// A window's vertical tab rail, which Window embeds: its presentation, whether the window is wide enough
+// to dock it, its list's scroll, the width a rail-edge drag chose (0 for none) and tabs.rail_width, the
+// width a double-click on the rail edge returns to.
+Rail_State :: struct {
+	rail:               Rail_Presentation,
+	rail_wide:          bool,
+	rail_scroll:        f32,
+	rail_width:         f32,
+	rail_default_width: f32,
+}
+
 @(private = "file")
 RAIL_SLIDE :: 140 * time.Millisecond
 

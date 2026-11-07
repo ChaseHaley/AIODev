@@ -433,7 +433,7 @@ tear_off_preview_discard :: proc(app: ^App, a: ^Drag_Active) {
 	ready, ok := a.preview.(Preview_Ready)
 	if !ok {return}
 	a.preview = nil
-	pane_window_preview_discard(app, ready.window)
+	window_preview_discard(app, ready.window)
 }
 
 // Ready → committed: the preview moves to the pointer and takes the carried content, then names its new

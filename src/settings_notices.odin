@@ -5,6 +5,18 @@ import "aio:ui"
 import "core:log"
 import "core:os"
 
+// What the settings notice last reported, so an unchanged revision stays quiet, and whether the format
+// migration was announced this run. App embeds it; reading and applying settings are its only writers.
+Settings_Notice_State :: struct {
+	settings_diagnostics:       [dynamic]settings.Diagnostic,
+	settings_read_error:        os.Error,
+	settings_migration_noticed: bool,
+}
+
+settings_notice_state_destroy :: proc(s: ^Settings_Notice_State) {
+	settings.diagnostics_destroy(&s.settings_diagnostics)
+}
+
 // Saving unrelated settings can move source lines without changing a problem's meaning. Every
 // diagnostic settings records has an identity; a hand-built one without it is its message.
 @(private)

@@ -32,8 +32,7 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 
 // The window's tooltip: nil is Cold. Pending shows `label` at `deadline`; Visible shows it; Warm
 // (after a visible tooltip was left) shows a neighbour's label at once until `until`. `anchor` is
-// where the pointer last was over the label, for the neighbour distance. Labels live in
-// Window.tooltip_text, because a label may be built for one event in temporary memory.
+// where the pointer last was over the label, for the neighbour distance.
 Tooltip :: union {
 	Tooltip_Pending,
 	Tooltip_Visible,
@@ -54,6 +53,13 @@ Tooltip_Visible :: struct {
 Tooltip_Warm :: struct {
 	until:  time.Tick,
 	anchor: [2]f32,
+}
+
+// A window's tooltip with the text its labels point into: a label may be built for one event in
+// temporary memory, so tooltip_store copies it here, and only this file writes either. Window embeds it.
+Tooltip_State :: struct {
+	tooltip:      Tooltip,
+	tooltip_text: [TOOLTIP_LIMIT]u8,
 }
 
 // The label the window is waiting to show or showing; empty when Cold or Warm.

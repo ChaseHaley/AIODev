@@ -510,8 +510,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	w.dirty = true
 	if focused {
 		app.focus_jumps.window = w.id
-		app.window_focus_order += 1
-		w.focus_order = app.window_focus_order
+		window_focus_note(app, w)
 	}
 	window_notices_sync(app)
 	if !focused {

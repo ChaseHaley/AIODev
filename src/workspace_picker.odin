@@ -5,6 +5,7 @@ import "aio:platform"
 import "aio:render"
 import "core:math"
 import "aio:ui"
+import "core:time"
 
 // Which part of the picker is open; nil is closed. workspace_picker_transition and workspace_picker_list_set
 // are its only writers, so a move target, a drag hold or a row press ends with the list it belongs to.
@@ -137,6 +138,23 @@ WORKSPACE_ICON_CONTROLS :: 3
 
 workspace_picker_active :: proc(p: ^Workspace_Picker) -> bool {
 	return p.state != nil
+}
+
+// Advances the picker's motion: rows settling after a reorder, the rename field and the hovered row's
+// menu button. True when the window must draw again.
+workspace_picker_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+	p := &w.workspace_picker
+	changed := workspace_order_animate(w, app.animations, now)
+	changed = workspace_row_rename_animate(w, app.animations, now) || changed
+	hovered := p.menu_hover != 0 && workspace_row_index(w, p.menu_hover) >= 0
+	return ui.control_update(&p.menu_motion, hovered, false, app.animations, now) || changed
+}
+
+// Only a shown picker keeps the loop awake for its motion.
+workspace_picker_animating :: proc(w: ^Window) -> bool {
+	p := &w.workspace_picker
+	if !workspace_picker_active(p) {return false}
+	return workspace_order_animating(p) || ui.motion_active(p.rename_motion) || ui.control_active(p.menu_motion)
 }
 
 // The icon grid or the tint grid it opens shows.

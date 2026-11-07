@@ -2,6 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:localpath"
+import "aio:platform"
 import "aio:pty"
 import "aio:settings"
 import "aio:term"
@@ -234,11 +235,85 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 			config.working_directory = entry.header.launch_directory
 		}
 	}
+	session_relaunch(app, entry, config)
+}
+
+// Runs `config` in the session's place, as a restart and a shell switch do; the header shows the new
+// launch and the status what the new process reports.
+session_relaunch :: proc(app: ^App, entry: ^Session_Entry, config: term.Config) {
 	term.restart(entry.session, config)
 	pane_header_launch(&entry.header, config)
 	pane_header_refresh(entry)
 	session_status_sync(entry)
 	mark_all_dirty(app)
+}
+
+// The per-tick poll of every session: search progress, status, title, program status and bell, then
+// the windows whose shown screens changed.
+@(private)
+update_sessions :: proc(app: ^App) {
+	workspace_status_changed := false
+	// Exit cleanup removes only the current entry; earlier entries remain valid.
+	for i := len(app.sessions) - 1; i >= 0; i -= 1 {
+		entry := &app.sessions[i]
+		s := entry.session
+		if term.search_pending(s) {
+			before := term.search_summary(s)
+			term.search_update(s)
+			if term.search_summary(s) != before {
+				mark_all_dirty(app)
+			}
+		}
+		if term.take_status_change(s) {
+			workspace_status_changed = true
+			layout_state_touch(app)
+			status, changed := session_status_sync(entry)
+			if changed {mark_all_dirty(app)}
+			if status.kind == .Exited && close_exited_session(app, entry.id) {continue}
+		}
+		if term.take_title_change(s) {
+			layout_state_touch(app)
+			pane_header_refresh(entry)
+			session_titles_changed(app, entry.id)
+		}
+		if term.take_program_status_change(s) {
+			workspace_status_changed = true
+			status_refresh(app, entry)
+			if status_watched(app, entry) {term.program_status_acknowledge(s)}
+			mark_all_dirty(app)
+		}
+		if term.take_bell(s) {
+			for window in app.windows {
+				if !window.focused && window.phase == .Shown &&
+				   platform.window_flash(&app.platform, window.id) != .None {
+					log.error("flashing the window failed")
+				}
+			}
+		}
+	}
+	if workspace_status_changed {
+		workspace_picker_status_changed(app)
+		for window in app.windows {status_taskbar_update(app, window)}
+	}
+	for window in app.windows {
+		generation := window_generation(app, window)
+		if generation != window.generation {
+			window.generation = generation
+			link_hover_refresh(app, window)
+			window.dirty = true
+		}
+	}
+}
+
+// A sum of the generations of the sessions w shows, which changes whenever one of their screens does.
+window_generation :: proc(app: ^App, w: ^Window) -> u64 {
+	generation: u64
+	for pane in w.panes {
+		if entry := workspace_session_for_content(app, pane.content); entry != nil {
+			generation += term.generation(entry.session)
+		}
+	}
+	return generation
 }
 
 session_close :: proc(app: ^App, id: u32) {

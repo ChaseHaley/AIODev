@@ -79,6 +79,14 @@ window_surface_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 	}
 }
 
+// Presents w's draw list. Any render call can lose the device; this module recovers it, here as for
+// making and resizing a surface, so callers only learn that the frame was not shown.
+window_surface_present :: proc(app: ^App, w: ^Window, background: render.Color) -> render.Error {
+	err := render.frame_render(app.device, window_surface(w), &w.list, background)
+	if err == .Device_Lost {recover_device(app)}
+	return err
+}
+
 // Rebuilds every graphics object after the GPU was reset or removed; sessions are untouched. If no
 // device can be made, the app quits, still holding the lost one so nothing points at freed memory.
 // A window whose surface the new device loses too is left for its next frame to recover again.

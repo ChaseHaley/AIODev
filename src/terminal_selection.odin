@@ -5,6 +5,9 @@ import "aio:term"
 import "aio:ui"
 import "core:time"
 
+@(private)
+COPY_NOTICE_DURATION :: 2 * time.Second
+
 copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 	text, selected := term.selection_text(entry.session, context.temp_allocator)
 	if !selected {

@@ -22,9 +22,10 @@ cursor_visible :: proc(w: ^Window) -> bool {
 	return !blinking || on.visible
 }
 
+// A window that does not draw, minimized or hidden, needs no blink, so it never wakes the loop for one.
 cursor_blink_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	on, blinking := w.cursor_blink.(Cursor_Blink_On)
-	return on.deadline, blinking
+	return on.deadline, blinking && window_drawable(w)
 }
 
 // The frame just built found whether the focused cursor blinks; a change starts or stops the cycle.
@@ -53,7 +54,7 @@ cursor_blink_reset :: proc(w: ^Window) {
 	}
 }
 
-// A window that draws no frames stops blinking, so it never wakes the loop.
+// A hidden linked window drops its cycle, so it shows its cursor when it comes back.
 cursor_blink_stop :: proc(w: ^Window) {
 	w.cursor_blink = nil
 }

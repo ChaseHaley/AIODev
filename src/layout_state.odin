@@ -120,6 +120,19 @@ Layout_Save_Scheduled :: struct {
 	deadline: time.Tick,
 }
 
+// Layout persistence as App embeds it: the save state and the text last written, which a save
+// compares against so an unchanged layout is not written again. layout_state_destroy releases both.
+Layout_Store :: struct {
+	layout_save:  Layout_Save,
+	layout_saved: string,
+}
+
+layout_state_destroy :: proc(app: ^App) {
+	layout_state_disable(app)
+	delete(app.layout_saved)
+	app.layout_saved = ""
+}
+
 // Saves the layout to `path`, which the app then owns.
 layout_state_enable :: proc(app: ^App, path: string) {
 	layout_state_disable(app)

@@ -125,7 +125,7 @@ document_menu_text_clear :: proc(menu: ^Document_Menu) {
 	clear(&menu.text)
 }
 
-// Frees the document a Pin or Link mode holds; overlay_close and document_menu_set call it on leaving one.
+// Frees the document a Pin or Link mode holds; document_menu_close and document_menu_set call it.
 document_menu_mode_release :: proc(mode: Document_Menu_Mode) {
 	switch m in mode {
 	case Document_Menu_List:
@@ -134,6 +134,13 @@ document_menu_mode_release :: proc(mode: Document_Menu_Mode) {
 	case Document_Menu_Link:
 		delete(m.document.target)
 	}
+}
+
+// The menu's surface ends: the document its mode holds, the URL being typed and the hover go with it.
+document_menu_close :: proc(menu: ^Document_Menu, mode: Document_Menu_Mode) {
+	document_menu_mode_release(mode)
+	ui.field_release(&menu.url)
+	menu.menu.hover_part = .Row
 }
 
 // Takes w because a menu still showing when its window is freed holds a document in w.overlay.

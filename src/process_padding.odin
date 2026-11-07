@@ -19,7 +19,7 @@ pane_padding :: proc(app: ^App, scale: f32, entry: ^Session_Entry) -> f32 {
 
 // One process snapshot per interval serves padding groups and program icons alike, and is skipped
 // when neither is in use. The worker takes it; windows redraw only when a pane's padding or
-// program changes.
+// program changes. app.process_deadline, zero while nothing polls, is this poll's alone.
 update_processes :: proc(app: ^App) {
 	processes, ready := process_snapshot_take(&app.processes)
 	defer if ready {procinfo.process_snapshot_destroy(processes, app.processes.allocator)}
@@ -48,6 +48,16 @@ update_processes :: proc(app: ^App) {
 	if relayout {
 		for window in app.windows {window_relayout(app, window); window.dirty = true}
 	} else if redraw {mark_all_dirty(app)}
+}
+
+// When update_processes next asks for a snapshot; false while nothing polls.
+process_poll_deadline :: proc(app: ^App) -> (time.Tick, bool) {
+	return app.process_deadline, app.process_deadline != {}
+}
+
+// New settings may poll for other reasons, so the next update asks for a snapshot at once.
+process_poll_restart :: proc(app: ^App) {
+	app.process_deadline = {}
 }
 
 @(private)

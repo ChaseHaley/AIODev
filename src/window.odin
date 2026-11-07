@@ -37,9 +37,7 @@ Window :: struct {
 	id: input.Window_Id,
 	surface: Window_Surface,
 	ui_text: ui.Text,
-	// The pointer's hold on a Markdown pane and what it is over; markdown_pane.odin writes both.
-	markdown_gesture: Markdown_Gesture,
-	markdown_hover: Markdown_Hover,
+	using markdown_pointer: Markdown_Pointer,
 	using resources: Workspace_View_Resources,
 	gesture: Gesture_State,
 	// The pane scrollbar under the pointer and a held thumb; see pane_scrollbar.odin.
@@ -48,22 +46,7 @@ Window :: struct {
 	divider: Divider_Gesture,
 	// The pane or tab drag this window's pointer holds; see drag.odin.
 	drag: Drag,
-	// The float surface's held Left press: a float header button, a float moving or resizing, or the
-	// capsule row; see floating_panes.odin.
-	float_press: Float_Press,
-	// The float header part under the pointer, and the float the hover and press animation belongs to,
-	// which it keeps while fading out.
-	float_header_hover:    Maybe(Float_Header_Spot),
-	float_header_shown:    layout.Node_Id,
-	float_header_motion:   ui.Control_Motion,
-	float_header_controls: [FLOAT_HEADER_BUTTONS]ui.Control_Motion,
-	// The minimized float whose capsule is under the pointer; where the user left the capsule row, as a
-	// fraction of the room it can travel, or nil for the bottom-right; and the row's cached geometry.
-	float_capsule_hover:      Maybe(layout.Content),
-	float_capsule_anchor:     Maybe([2]f32),
-	float_capsule_group:      render.Rect,
-	float_capsules:           [dynamic]Float_Capsule,
-	float_capsule_widths:     [dynamic]f32,
+	using floats: Float_Window_State,
 	tab_incoming: Tab_Incoming,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
 	split_overlay: bool,
@@ -84,9 +67,7 @@ Window :: struct {
 	// The terminal link under the pointer; see term_links.odin.
 	link_hover: Maybe(Link_Hover),
 	pointer: [2]f32,
-	// See tooltip.odin; tooltip_text stores the label the state names.
-	tooltip: Tooltip,
-	tooltip_text: [TOOLTIP_LIMIT]u8,
+	using tooltip_state: Tooltip_State,
 	pointer_shape: platform.Cursor_Shape,
 	// The last frame drew a pointer-following rim, so pointer movement must repaint it.
 	gloss_hovered: bool,
@@ -99,58 +80,60 @@ Window :: struct {
 	tab_underline:   ui.Motion,
 	// The strip control or rail row under the pointer.
 	tab_hover:       Tab_Chrome_Target,
-	// Vertical tab rail: scroll and its presentation with the automatic policy; see rail.odin.
-	rail:                Rail_Presentation,
-	rail_wide:           bool,
-	rail_scroll:         f32,
-	rail_width:          f32,
-	// tabs.rail_width, the width a double-click on the rail edge returns to.
-	rail_default_width:  f32,
-	dock_left_width:     f32,
-	title_action_hover: Title_Action,
-	title_action_armed: ui.Armed(Title_Action),
-	tab_orientation_button_hovered: bool,
-	tab_orientation_button_armed:   ui.Armed(bool),
-	tab_close_armed:     ui.Armed(int),
+	tab_close_armed: ui.Armed(int),
+	using rail_state: Rail_State,
+	dock_left_width: f32,
+	using title_controls: Title_Controls,
 	// The question asked before a destructive change, with its subject; see confirmation.odin.
 	confirmation: Maybe(Confirmation),
-	// The surface over the content that takes input; see window_overlay.odin. The menus' rows and the
-	// rename field below are storage the surfaces reuse.
-	overlay: Window_Overlay,
-	tab_menu: Tab_Menu,
-	divider_menu: ui.Menu,
-	profile_menu: Profile_Menu,
-	document_menu: Document_Menu,
-	rename: ui.Text_Field,
+	using surfaces: Overlay_Surfaces,
 	workspace_picker: Workspace_Picker,
-	workspace_hovered: bool,
-	workspace_motion: ui.Control_Motion,
-	caption_hover: Maybe(platform.Caption_Button),
-	caption_armed: ui.Armed(Maybe(platform.Caption_Button)),
 	maximized: bool,
 	pane_fill: layout.Pane_Fill,
 	paste_confirm: Paste_Confirm,
 	wheel_remainder: f32,
 	cursor_blink: Cursor_Blink,
-	// A frame that drew a spinner requests display-paced frames until one does not.
-	status_spinning: bool,
-	// The earliest end of a synchronized-output hold the last frame drew through: the frame showed
-	// the held screen, so the window draws again then even if the program writes nothing more.
-	capture_hold: Maybe(time.Tick),
+	using frame_wakes: Frame_Wakes,
 	taskbar: Status_Taskbar,
 	status: Status_Overview,
 	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
 	status_rail_reserve: f32,
 }
 
+// What the last frame drew that asks for another frame. build_frame clears it and drawing fills it in,
+// because only drawing knows which of these it showed; the loop's wake inventory reads it.
+Frame_Wakes :: struct {
+	// A spinner drew, so frames follow the display until one draws none; see status_spin_active.
+	status_spinning: bool,
+	// The earliest end of a synchronized-output hold the frame drew through: the frame showed the held
+	// screen, so the window draws again then even if the program writes nothing more.
+	capture_hold: Maybe(time.Tick),
+}
+
+// Windows reports DPI with 96 as 100%.
+dpi_scale :: proc(dpi: u32) -> f32 {
+	return f32(dpi) / 96
+}
+
+// Font points to pixels at a window scale: a point is 1/72 inch and scale 1 is 96 pixels per inch.
+points_pixels :: proc(points, scale: f32) -> f32 {
+	return points * scale * 96 / 72
+}
+
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
-	size_px := app.font_points * scale * 96 / 72
 	return term_view.compute_metrics(
 		app.fonts,
 		app.family,
-		size_px,
+		points_pixels(app.font_points, scale),
 		f32(app.settings.font.line_height),
 	)
+}
+
+// --no-activate runs the app for automation without taking the user's focus: no window activates or
+// maximizes itself, window_activate only shows one, and a drag treats its own occluded window as under
+// the pointer. Every such decision asks here.
+activation_suppressed :: proc(app: ^App) -> bool {
+	return app.options.inactive
 }
 
 @(require_results)
@@ -162,8 +145,9 @@ window_open :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	w := window_prepare(app, workspace)
 	if w == nil {return false}
 	if !window_commit(app, w) {window_close(app, w); return false}
-	window_apply_settings(app, w)
-	if !app.options.inactive {_ = window_activate(app, w)}
+	// Settings applied while Preparing; a shown window lays out all of its chrome and panes.
+	window_relayout(app, w)
+	if !activation_suppressed(app) {_ = window_activate(app, w)}
 	return true
 }
 
@@ -180,17 +164,11 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 		return nil
 	}
 	w.phase = .Preparing
-	w.scale = f32(platform.primary_dpi(&app.platform)) / 96
-	w.ui_text = app.ui_text
-	w.metrics = window_metrics(app, w.scale)
-	w.rail_default_width = f32(app.settings.tabs.rail_width)
+	w.scale = dpi_scale(platform.primary_dpi(&app.platform))
 	w.list = render.draw_list_init()
 	ui.find_init(&w.find)
-	tab_menu_init(&w.tab_menu)
-	ui.menu_init(&w.divider_menu)
-	profile_menu_init(&w.profile_menu)
-	document_menu_init(&w.document_menu)
-	w.float_header_shown = layout.INVALID_NODE
+	overlay_surfaces_init(&w.surfaces)
+	floating_window_init(&w.floats)
 	w.pointer_shape = .Text
 	w.dirty = true
 	if !workspace_view_init(app, &w.resources, workspace) {window_free(w); return nil}
@@ -204,7 +182,6 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	g := initial_geometry(app)
 	desc := platform.Window_Desc {
 		title = app.app_id,
-		inactive = app.options.inactive,
 		hidden = true,
 		tabbed_title_bar = true,
 		width = i32(g.surface_width),
@@ -224,8 +201,12 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 		window_close(app, w)
 		return nil
 	}
-	window_set_dpi(app, w, platform.window_dpi(&app.platform, id))
-	window_apply_settings(app, w)
+	// The settings apply once, at the scale of the monitor the window opened on.
+	if dpi := platform.window_dpi(&app.platform, id); dpi != 0 {
+		window_set_dpi(app, w, dpi)
+	} else {
+		window_apply_settings(app, w)
+	}
 	rail_reveal_active(w)
 	if platform.window_set_cursor(&app.platform, id, .Text) != .None {
 		log.error("setting the window cursor failed")
@@ -235,7 +216,9 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 }
 
 // Preparing → Shown: the window owns its content from here and takes input. A show the OS refuses leaves it
-// Preparing, so callers commit before moving content in and can still discard the window.
+// Preparing, so callers commit before moving content in and can still discard the window. A Preparing
+// window skips most of window_relayout, title-bar hit area included, so every caller lays the shown
+// window out before returning to the loop: window_open at once, a tear-off once its content has moved.
 @(require_results)
 window_commit :: proc(app: ^App, w: ^Window) -> bool {
 	assert(w.phase == .Preparing)
@@ -251,7 +234,7 @@ window_commit :: proc(app: ^App, w: ^Window) -> bool {
 @(require_results)
 window_activate :: proc(app: ^App, w: ^Window) -> bool {
 	err: platform.Error
-	if app.options.inactive {
+	if activation_suppressed(app) {
 		err = platform.window_show_inactive(&app.platform, w.id)
 	} else {
 		err = platform.window_focus(&app.platform, w.id)
@@ -275,15 +258,23 @@ window_tree :: proc(w: ^Window) -> ^layout.Layout {
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
-	if w.phase == .Closing {return}
-	// A window still Preparing (a preview, or one whose show failed) stays Preparing through the cancel:
-	// cancelling the drag that made a preview is how it is discarded, and that discard closes it from
-	// inside this call. Any other window is Closing first, so nothing the cancel sets off takes it for a
-	// live window or closes it again.
-	if w.phase != .Preparing {w.phase = .Closing}
-	if !gesture_cancel(app, w) {return}
-	w.phase = .Closing
+	switch w.phase {
+	case .Closing:
+		return
+	case .Preparing:
+		// A window still Preparing (a preview, or one whose show failed) stays Preparing through the
+		// cancel: cancelling the drag that made a preview is how it is discarded, and that discard closes
+		// it from inside this call, which leaves nothing more to do here.
+		if !gesture_cancel(app, w) {return}
+		w.phase = .Closing
+	case .Shown, .Hidden:
+		// Closing first, so nothing the cancel sets off takes w for a live window or closes it again;
+		// window_close returns at once for a Closing window, so w outlives the cancel.
+		w.phase = .Closing
+		_ = gesture_cancel(app, w)
+	}
 	window_overlays_cancel(app, w)
+	// A file dialog belongs to its native window, so it closes before the window does.
 	file_dialogs_window_closed(app, w.id)
 	view, id := window_linked(w) ? w.workspace : nil, w.id
 	for i in 0 ..< len(app.windows) {
@@ -297,26 +288,23 @@ window_close :: proc(app: ^App, w: ^Window) {
 		log.error("destroying the window failed")
 	}
 	window_free(w)
+	// A linked window's workspace is its private view of the tab's panes.
 	if view != nil {workspace_destroy(view)}
+	// The notices and the jump list move on to the window focused most recently.
 	window_notices_sync(app)
-	// A destroyed window never reports losing focus, so the jump list follows the notices to the window
-	// focused most recently.
-	if app.focus_jumps.window == id {app.focus_jumps.window = app.notice_window}
+	focus_jumps_window_closed(app, id)
 }
 
+// Each feature releases what it keeps in w; zero state is safe, so a window that failed part way
+// through window_prepare is freed the same way.
 @(private)
 window_free :: proc(w: ^Window) {
 	workspace_view_destroy(&w.resources)
 	drag_destroy(w)
 	ui.find_destroy(&w.find)
-	tab_menu_destroy(&w.tab_menu)
-	ui.menu_destroy(&w.divider_menu)
-	profile_menu_destroy(&w.profile_menu)
-	document_menu_destroy(w)
-	delete(w.rename.bytes)
+	overlay_surfaces_destroy(w)
 	workspace_picker_destroy(w)
-	delete(w.float_capsules)
-	delete(w.float_capsule_widths)
+	floating_window_destroy(&w.floats)
 	confirmation_clear(w)
 	render.draw_list_destroy(&w.list)
 	free(w)
@@ -335,14 +323,27 @@ window_set_dpi :: proc(app: ^App, w: ^Window, dpi: u32) {
 	if dpi == 0 {
 		return
 	}
-	w.scale = f32(dpi) / 96
+	w.scale = dpi_scale(dpi)
 	rail_adaptive_update(w)
 	window_apply_settings(app, w)
 }
 
+// After the OS placed w, as a tear-off drop or a restored linked window does, w takes the DPI of the
+// monitor it landed on and the client size it now has. False when the size cannot be read.
+@(require_results)
+window_sync_placement :: proc(app: ^App, w: ^Window) -> bool {
+	if dpi := platform.window_dpi(&app.platform, w.id); dpi != 0 && dpi_scale(dpi) != w.scale {
+		window_set_dpi(app, w, dpi)
+	}
+	width, height, size_error := platform.window_client_size(&app.platform, w.id)
+	if size_error != .None {return false}
+	if width != w.width || height != w.height {window_resize(app, w, width, height)}
+	return true
+}
+
 window_apply_settings :: proc(app: ^App, w: ^Window) {
 	w.ui_text = app.ui_text
-	ui.text_set_size(&w.ui_text, f32(app.settings.interface.font_size) * w.scale * 96 / 72)
+	ui.text_set_size(&w.ui_text, points_pixels(f32(app.settings.interface.font_size), w.scale))
 	w.metrics = window_metrics(app, w.scale)
 	w.rail_default_width = f32(app.settings.tabs.rail_width)
 	colors := app.settings.active_theme.colors
@@ -390,15 +391,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	}
 	if w.phase == .Preparing || window_minimized(w) {return}
 	bar_height := window_title_height(w)
-	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
-	if tab_count != len(w.tab_positions) && w.tabs_horizontal {
-		// Only the strip's hover and presses draw from the tab positions.
-		w.tab_hover = nil
-		gesture_tab_unpress(w)
-	}
-	if !tab_presentation_resize(&w.presentation, tab_count) {
-		log.error("resizing tab presentation values failed")
-	}
+	tab_presentation_fit(w)
 	platform.window_title_bar(
 		&app.platform,
 		w.id,
@@ -413,11 +406,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	for &view in w.views {view.header_controls = {}}
 	w.header_height = pane_insets(app, w.scale, nil).header
 	layout.place_shown(window_tree(w), window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
-	window_dividers(app, w)
-	window_views_prune(w)
-	for &view in w.views {view.valid = false}
-	for pane in w.panes {pane_fit(app, w, pane)}
-	floating_capsules_refresh(app, w)
+	window_panes_placed(app, w, 0)
 	rail_reveal_active(w)
 }
 
@@ -430,9 +419,16 @@ window_floats_layout :: proc(app: ^App, w: ^Window) {
 	resize(&w.panes, tiled)
 	g := window_geometry(app, w, w.pane_fill)
 	layout.floats_place(tree, g.floating, g.gap, g.header, &w.panes)
+	window_panes_placed(app, w, tiled)
+}
+
+// What follows placing w.panes[first:], for the full and the floats-only relayout alike: the dividers,
+// the views of panes no longer shown, each placed pane's grid and cached drawing, and the capsules.
+@(private)
+window_panes_placed :: proc(app: ^App, w: ^Window, first: int) {
 	window_dividers(app, w)
 	window_views_prune(w)
-	for pane in w.panes[tiled:] {
+	for pane in w.panes[first:] {
 		pane_fit(app, w, pane)
 		for &view in w.views {if view.content == pane.content {view.valid = false}}
 	}
@@ -542,7 +538,7 @@ focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 }
 
 window_render :: proc(app: ^App, w: ^Window) {
-	if w.width <= 0 || w.height <= 0 {return}
+	if window_minimized(w) {return}
 	if !window_surface_ready(app, w) {return}
 	surface := window_surface(w)
 	if err := render.frame_wait(surface, FRAME_WAIT_MS); err == .Wait_Failed {
@@ -555,12 +551,10 @@ window_render :: proc(app: ^App, w: ^Window) {
 	build_ms := perf.since_ms(build_start)
 	w.gloss_hovered = ui.hover_rim_present(&w.list)
 	render_start := time.tick_now()
-	err := render.frame_render(app.device, surface, &w.list, background)
+	err := window_surface_present(app, w, background)
 	render_ms := perf.since_ms(render_start)
-	if err == .Device_Lost {
-		recover_device(app)
-		return
-	}
+	// The surface module recovered a lost device; the next frame draws on the new one.
+	if err == .Device_Lost {return}
 	if err != .None {
 		log.errorf("rendering a frame failed: %v", err)
 	}
@@ -579,7 +573,7 @@ window_render :: proc(app: ^App, w: ^Window) {
 window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 	build := render.frame_build_begin(&w.list, app.device)
 	for {
-		_, _ = build_frame(app, w)
+		build_frame(app, w)
 		switch render.frame_build_finish(&build) {
 		case .Ready: return true
 		case .Retry:
@@ -588,24 +582,22 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 	}
 }
 
+// Builds the window's draw list. An atlas reset stops the build at once; window_build_frame then reads
+// the draw list to decide whether to build again.
 @(private)
-build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Status) {
-	frame: term_view.Frame
+build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	blinking := false
-	w.status_spinning = false
-	w.capture_hold = nil
+	w.frame_wakes = {}
 	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
 	for pane in w.panes {
 		if pane.floating {continue}
-		result: render.Build_Status
-		frame, result = pane_draw(app, w, pane, &blinking)
-		if result != .Ok {return frame, result}
+		if result := pane_draw(app, w, pane, &blinking); result != .Ok {return result}
 	}
 	if w.pane_fill != .Screen {
-		if result := window_chrome_draw(app, w); result != .Ok {return frame, result}
+		if result := window_chrome_draw(app, w); result != .Ok {return result}
 	}
-	if result := rail_draw(app, w); result != .Ok {return frame, result}
-	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
+	if result := rail_draw(app, w); result != .Ok {return result}
+	if result := status_panel_draw(app, w); result != .Ok {return result}
 	group := layout.INVALID_NODE
 	tree := window_tree(w)
 	for pane in w.panes {
@@ -615,15 +607,13 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 			group = root
 			floating_header_draw(app, w, root)
 		}
-		result: render.Build_Status
-		frame, result = pane_draw(app, w, pane, &blinking)
-		if result != .Ok {return frame, result}
+		if result := pane_draw(app, w, pane, &blinking); result != .Ok {return result}
 	}
-	if result := floating_capsules_draw(app, w); result != .Ok {return frame, result}
+	if result := floating_capsules_draw(app, w); result != .Ok {return result}
 	cursor_blink_observe(w, blinking)
-	if result := pane_drag_draw(app, w); result != .Ok {return frame, result}
-	if result := tab_drag_draw(app, w); result != .Ok {return frame, result}
-	if result := window_leader_draw(app, w); result != .Ok {return frame, result}
+	if result := pane_drag_draw(app, w); result != .Ok {return result}
+	if result := tab_drag_draw(app, w); result != .Ok {return result}
+	if result := window_leader_draw(app, w); result != .Ok {return result}
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if ui.find_is_open(&w.find) {
 		status, enabled := find_presentation(w, find_target(app, w))
@@ -640,7 +630,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 			w.pointer,
 		)
 		if result != .Ok {
-			return frame, result
+			return result
 		}
 	}
 	if palette_visible(app, w) {
@@ -649,30 +639,13 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
 			opacity, rise, w.pointer,
 		)
-		if result != .Ok { return frame, result }
+		if result != .Ok { return result }
 	}
-	#partial switch _ in w.overlay {
-	case Overlay_Rename, Overlay_Chip_Name:
-		if result := rename_draw(app, w); result != .Ok {return frame, result}
-	}
-	if result := confirmation_draw(app, w); result != .Ok {return frame, result}
-	#partial switch _ in w.overlay {
-	case Overlay_Tab_Menu:
-		if result := tab_menu_draw(app, w); result != .Ok {return frame, result}
-	case Overlay_Divider_Menu:
-		if result := dock_divider_menu_draw(app, w); result != .Ok {return frame, result}
-	case Overlay_Profile_Menu:
-		if result := profile_menu_draw(app, w); result != .Ok {return frame, result}
-	case Overlay_Document_Menu:
-		if result := document_menu_draw(app, w); result != .Ok {return frame, result}
-	}
-	if workspace_picker_active(&w.workspace_picker) {
-		if result := workspace_picker_draw(app, w); result != .Ok {return frame, result}
-	}
-	if result := status_inbox_draw(app, w); result != .Ok {return frame, result}
-	if result := tooltip_draw(app, w); result != .Ok {return frame, result}
-	if app.notice_window != w.id {return frame, .Ok}
-	return frame, ui.notices_draw(
+	if result := overlay_draw(app, w); result != .Ok {return result}
+	if result := status_inbox_draw(app, w); result != .Ok {return result}
+	if result := tooltip_draw(app, w); result != .Ok {return result}
+	if app.notice_window != w.id {return .Ok}
+	return ui.notices_draw(
 		&app.notices,
 		&w.list,
 		&w.ui_text,
@@ -686,34 +659,24 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 
 // Draws one pane's card, content, header, scrollbar, dimming and outline.
 @(private)
-pane_draw :: proc(
-	app: ^App,
-	w: ^Window,
-	pane: layout.Pane_Rect,
-	blinking: ^bool,
-) -> (
-	frame: term_view.Frame,
-	result: render.Build_Status,
-) {
+pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool) -> render.Build_Status {
 	card := len(w.list.rects)
 	window_card_draw(app, w, pane)
 	switch pane.content.kind {
 	case .Terminal:
 	case .Settings:
-		return frame, settings_pane_draw(app, w, pane, card)
+		return settings_pane_draw(app, w, pane, card)
 	case .Markdown:
-		return frame, markdown_pane_draw(app, w, pane, card)
+		return markdown_pane_draw(app, w, pane, card)
 	}
 	entry := workspace_session_for_content(app, pane.content)
 	state := pane_view(w, pane.content)
-	if entry == nil || state == nil {return frame, .Ok}
+	if entry == nil || state == nil {return .Ok}
 	view := &state.view
 	c := app.settings.colors
 	selection_foreground: Maybe(render.Color)
 	if fg, ok := c.selection_foreground.?; ok {selection_foreground = colour.rgba(fg)}
-	content_focused :=
-		w.focused && pane.node == window_tree(w).focus && !palette_active(app, w) &&
-		!ui.find_has_keyboard(&w.find)
+	content_focused := pane_has_keyboard(app, w, pane)
 	hover := link_hover_range(w, pane.content)
 	minimum_contrast := f32(1)
 	if app.settings.active_theme.terminal_light {
@@ -737,8 +700,8 @@ pane_draw :: proc(
 		pane.rect,
 		pane_insets(app, w.scale, entry, pane.floating),
 	)
-	frame, result = build_pane(app, w, pane, entry, view, box.origin, style)
-	if result != .Ok {return frame, result}
+	frame, result := build_pane(app, w, pane, entry, view, box.origin, style)
+	if result != .Ok {return result}
 	if held, ok := frame.capture.(term.Capture_Held); ok {capture_hold_note(w, held.until)}
 	if card < len(w.list.rects) {w.list.rects[card].color = frame.background}
 	blinking^ ||= frame.cursor_blinking && content_focused
@@ -752,14 +715,14 @@ pane_draw :: proc(
 			message,
 			w.scale,
 			window_pane_radius(app, w),
-		); message_result != .Ok {return frame, message_result}
+		); message_result != .Ok {return message_result}
 	}
 	if header_result := pane_header_draw(app, w, pane, entry);
-	   header_result != .Ok {return frame, header_result}
+	   header_result != .Ok {return header_result}
 	pane_scrollbar_draw(app, w, pane)
 	window_card_dim(app, w, pane, frame.background)
 	window_card_outline(app, w, pane)
-	return frame, .Ok
+	return .Ok
 }
 
 @(private)

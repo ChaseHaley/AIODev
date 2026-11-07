@@ -13,7 +13,7 @@ settings_reset_ask :: proc(app: ^App, w: ^Window) {
 	if !ui.editor_loaded(&w.editor) {return}
 	value, err := strings.clone(ui.editor_source(&w.editor))
 	if err != nil {notify(app, .Error, "Could not prepare the settings reset."); return}
-	overlay_open(app, w, nil)
+	overlay_close_all(app, w)
 	confirmation_open(w, Settings_Reset{value}, extended = true, focus = .Cancel)
 }
 

@@ -31,7 +31,7 @@ tray_only_ignores_a_tear_off_preview :: proc(t: ^testing.T) {
 	primary := app.window_primary(s)
 	testing.expect(t, primary != nil && primary != preview && primary.workspace == s.workspaces[0])
 	testing.expect(t, preview.phase == .Preparing)
-	app.pane_window_preview_discard(s, preview.id)
+	app.window_preview_discard(s, preview.id)
 }
 
 @(test)

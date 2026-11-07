@@ -90,7 +90,7 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: 
 		&w.list,
 		&w.ui_text,
 		app.theme,
-		w.focused && pane.node == window_tree(w).focus && !palette_active(app, w),
+		pane_shows_focus(w, pane) && !palette_active(app, w),
 		w.pointer,
 	)
 	if result != .Ok {return result}
