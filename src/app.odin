@@ -342,9 +342,7 @@ tick :: proc(app: ^App) {
 	pane_links_sync(app)
 	window_notices_sync(app)
 	for window in app.windows {
-		if window.leader_until != {} && time.tick_diff(time.tick_now(), window.leader_until) <= 0 {
-			leader_cancel(window)
-		}
+		leader_expire(window, time.tick_now())
 		paste_confirm_expire(window, time.tick_now())
 		update_blink(window)
 		update_autoscroll(app, window)
@@ -409,9 +407,9 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		   next != {} && (!found || time.tick_diff(next, deadline) > 0) {
 			deadline, found = next, true
 		}
-		if window.leader_until != {} &&
-		   (!found || time.tick_diff(window.leader_until, deadline) > 0) {
-			deadline, found = window.leader_until, true
+		if next, armed := leader_deadline(window);
+		   armed && (!found || time.tick_diff(next, deadline) > 0) {
+			deadline, found = next, true
 		}
 		if window.blinking && (!found || time.tick_diff(window.blink_deadline, deadline) > 0) {
 			deadline, found = window.blink_deadline, true

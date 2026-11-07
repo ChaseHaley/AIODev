@@ -83,7 +83,7 @@ window_pane_radius :: proc(app: ^App, w: ^Window) -> f32 {
 }
 
 window_leader_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	if w.leader_until == {} {return .Ok}
+	if !leader_armed(w) {return .Ok}
 	leader, enabled := app.leader.?
 	if !enabled {return .Ok}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8

@@ -67,7 +67,7 @@ terminal_copy_without_native_selection_reaches_fullscreen_application :: proc(t:
 	testing.expect(t, !term.has_selection(f.session) && term.mouse_tracking(f.session))
 	terminal_copy_key(t, &f, .C, {.Control, .Shift})
 	testing.expect_value(t, string(f.session.queue.pending[:]), "\x1b[99;6u")
-	testing.expect(t, f.window.suppressed_key == nil)
+	testing.expect(t, !app.key_suppressed(&f.window, .C))
 	clear(&f.session.queue.pending)
 	terminal_copy_key(t, &f, .Insert, {.Control})
 	testing.expect_value(t, string(f.session.queue.pending[:]), "\x1b[2;5~\x1b[2;5:3~")
@@ -91,7 +91,7 @@ terminal_copy_custom_binding_and_find_keep_their_own_scope :: proc(t: ^testing.T
 	terminal_copy_key(t, &f, .Y, {.Control, .Alt})
 	testing.expect_value(t, len(f.session.queue.pending), 0)
 	testing.expect_value(t, ui.field_selected_text(&f.window.find.query), "find selection")
-	testing.expect(t, f.window.suppressed_key == nil)
+	testing.expect(t, !app.key_suppressed(&f.window, .Y))
 }
 
 @(test)
@@ -104,7 +104,7 @@ terminal_native_copy_keeps_repeats_and_release_out_of_the_application :: proc(t:
 	e := platform.Key_Event{window = f.window.id, key = .C, modifiers = {.Control, .Shift}, pressed = true}
 	app.handle_event(&f.state, e)
 	testing.expect_value(t, len(f.session.queue.pending), 0)
-	testing.expect(t, f.window.suppressed_key != nil)
+	testing.expect(t, app.key_suppressed(&f.window, .C))
 	// Successful copy clears the native selection before a held key can repeat.
 	term.clear_selection(f.session)
 	e.repeat = true
@@ -112,9 +112,51 @@ terminal_native_copy_keeps_repeats_and_release_out_of_the_application :: proc(t:
 	e.pressed, e.repeat = false, false
 	app.handle_event(&f.state, e)
 	testing.expect_value(t, len(f.session.queue.pending), 0)
-	testing.expect(t, f.window.suppressed_key == nil)
+	testing.expect(t, !app.key_suppressed(&f.window, .C))
 	terminal_copy_key(t, &f, .C, {.Control, .Shift})
 	testing.expect_value(t, string(f.session.queue.pending[:]), "\x1b[99;6u")
+}
+
+// A second consumed key pressed while the first is held must not let the first one's release
+// through to the application, which never saw its press.
+@(test)
+terminal_overlapping_shortcuts_keep_both_releases_out_of_the_application :: proc(t: ^testing.T) {
+	f: Terminal_Copy_Fixture
+	defer terminal_copy_fixture_destroy(&f)
+	if !terminal_copy_fixture(t, &f) {return}
+	buffer: [32]u8
+	shortcut :: proc(t: ^testing.T, f: ^Terminal_Copy_Fixture, key: input.Key, pressed: bool, buffer: []u8) {
+		e, err := platform.synthesize_key(f.window.id, key, {.Control}, pressed, buffer)
+		if !testing.expect_value(t, err, platform.Error.None) {return}
+		app.handle_event(&f.state, e)
+	}
+	term.select_all(f.session)
+	shortcut(t, &f, .Insert, true, buffer[:])
+	term.select_all(f.session)
+	e := platform.Key_Event{window = f.window.id, key = .C, modifiers = {.Control, .Shift}, pressed = true}
+	app.handle_event(&f.state, e)
+	shortcut(t, &f, .Insert, false, buffer[:])
+	e.pressed = false
+	app.handle_event(&f.state, e)
+	testing.expect_value(t, string(f.session.queue.pending[:]), "")
+}
+
+// A consumed key whose release went to another window must not swallow the release of its next,
+// delivered press.
+@(test)
+terminal_fresh_press_drops_a_stale_suppression :: proc(t: ^testing.T) {
+	f: Terminal_Copy_Fixture
+	defer terminal_copy_fixture_destroy(&f)
+	if !terminal_copy_fixture(t, &f) {return}
+	term.select_all(f.session)
+	buffer: [32]u8
+	e, err := platform.synthesize_key(f.window.id, .Insert, {.Control}, true, buffer[:])
+	if !testing.expect_value(t, err, platform.Error.None) {return}
+	app.handle_event(&f.state, e)
+	testing.expect_value(t, len(f.session.queue.pending), 0)
+	term.clear_selection(f.session)
+	terminal_copy_key(t, &f, .Insert, {.Control})
+	testing.expect_value(t, string(f.session.queue.pending[:]), "\x1b[2;5~\x1b[2;5:3~")
 }
 
 @(test)

@@ -667,9 +667,9 @@ markdown_select_all :: proc(app: ^App, w: ^Window) {
 
 markdown_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	pane_header_cancel(w)
-	if e.pressed {w.suppressed_key = e}
+	key_suppress(w, e)
 	has_find := ui.find_has_keyboard(&w.find)
-	if has_find && e.pressed && e.key == .Escape && w.leader_until == {} {
+	if has_find && e.pressed && e.key == .Escape && !leader_armed(w) {
 		find_close(app, w, find_target(app, w))
 		return
 	}

@@ -100,7 +100,9 @@ Window :: struct {
 	// The last frame drew a pointer-following rim, so pointer movement must repaint it.
 	gloss_hovered: bool,
 	find: ui.Find_Bar,
-	leader_until: time.Tick,
+	// Leader chord mode and the keys whose releases are swallowed; input.odin is their only writer.
+	leader: Leader,
+	suppressed: Suppressed_Keys,
 	// Tab placement: horizontal restores the title-bar strip and the presentation arrays below.
 	tabs_horizontal: bool,
 	tab_underline:   ui.Motion,
@@ -142,7 +144,6 @@ Window :: struct {
 	maximized: bool,
 	pane_fill: layout.Pane_Fill,
 	paste_confirm: Paste_Confirm,
-	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
 	blinking, cursor_phase_visible: bool,
 	blink_deadline: time.Tick,

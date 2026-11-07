@@ -176,52 +176,49 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 @(private)
 on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if w.phase == .Preparing {return}
+	// Every surface ignores releases, so a consumed press's release is dropped before routing.
+	if key_release_suppressed(w, e) {return}
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
 	if (w.pane_drag.active && w.pane_drag.picker_window != 0) ||
 	   (w.tab_drag.active && w.tab_drag.picker_window != 0) {
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		if e.pressed && e.key == .Escape {_ = gesture_cancel(app, w)}
 		return
 	}
 	kind := overlay_kind(app, w)
 	switch kind {
 	case .Workspace_Picker:
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		workspace_picker_key(app, w, logical)
 		return
 	case .Rename, .Chip_Name:
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		rename_key(app, w, e)
 		return
 	case .Tab_Menu, .Divider_Menu:
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		tab_menu_key(app, w, logical)
 		return
 	case .Profile_Menu:
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		profile_menu_key(app, w, logical)
 		return
 	case .Document_Menu:
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		document_menu_key(app, w, e, logical)
 		return
-	// A confirmation and the palette take keys below, after the inbox, a held key's release and the
-	// drags' Escape.
+	// A confirmation and the palette take keys below, after the inbox and the drags' Escape.
 	case .Confirmation, .Palette, .None:
 	}
 	if status_inbox_shown(w) {
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		status_inbox_key(app, w, logical)
 		return
 	}
-	if suppressed, ok := w.suppressed_key.?; ok && !e.pressed && suppressed.key == e.key {
-		w.suppressed_key = nil
-		return
-	}
 	if e.pressed && e.key == .Escape && (w.pane_drag.active || w.tab_drag.active) {
-		w.suppressed_key = e
+		key_suppress(w, e)
 		_ = gesture_cancel(app, w)
 		return
 	}
@@ -230,7 +227,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		return
 	}
 	if e.pressed && e.key == .Escape && rail_overlay(w) {
-		w.suppressed_key = e
+		key_suppress(w, e)
 		rail_overlay_dismiss(app, w)
 		return
 	}
@@ -260,12 +257,12 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 				row.y + row.height,
 			)
 		}
-		w.suppressed_key = e
+		key_suppress(w, e)
 		return
 	}
 	if kind == .Palette {
 		pane_header_cancel(w)
-		if e.pressed {w.suppressed_key = e}
+		key_suppress(w, e)
 		p := &app.palette
 		if ui.palette_editing(p) == .Shortcut {
 			outcome, id := ui.palette_key(p, &app.registry, e)
@@ -304,8 +301,8 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	literal := false
 	if e.pressed {
-		if ui.find_has_keyboard(&w.find) && e.key == .Escape && w.leader_until == {} {
-			w.suppressed_key = e
+		if ui.find_has_keyboard(&w.find) && e.key == .Escape && !leader_armed(w) {
+			key_suppress(w, e)
 			find_close(app, w, entry)
 			return
 		}
@@ -316,12 +313,11 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			literal = true
 		case .None:
 			if action, found := shortcut_action(app, e); found {
-				suppressed, consumed := w.suppressed_key.?
-				repeated := e.repeat && consumed && suppressed.key == e.key
+				repeated := e.repeat && key_suppressed(w, e.key)
 				// A fullscreen program owns its selection; only a native selection claims its copy key.
 				if action != .Copy || ui.find_has_keyboard(&w.find) || repeated ||
 				   term.has_selection(entry.session) {
-					w.suppressed_key = e
+					key_suppress(w, e)
 					if !repeated || action != .Copy {command_run(app, w, action, .Key)}
 					return
 				}
@@ -335,7 +331,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if e.pressed {
 		if entry.status != .Running {
 			if e.key == .Enter || e.key == .Numpad_Enter {
-				w.suppressed_key = e
+				key_suppress(w, e)
 				session_restart(app, entry)
 			}
 			return
@@ -536,10 +532,42 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	if focused {status_focus_enter(app, w)}
 }
 
+// Leader chord mode: nil is Idle; Armed waits until `until` for the key that completes the chord.
+Leader :: union {
+	Leader_Armed,
+}
+
+Leader_Armed :: struct {
+	until: time.Tick,
+}
+
+LEADER_TIMEOUT :: 2 * time.Second
+
+leader_armed :: proc(w: ^Window) -> bool {
+	return w.leader != nil
+}
+
+leader_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
+	armed, ok := w.leader.(Leader_Armed)
+	return armed.until, ok
+}
+
+@(private)
+leader_arm :: proc(w: ^Window, now: time.Tick) {
+	w.leader = Leader_Armed{time.tick_add(now, LEADER_TIMEOUT)}
+	w.dirty = true
+}
+
 @(private)
 leader_cancel :: proc(w: ^Window) {
-	if w.leader_until != {} {w.dirty = true}
-	w.leader_until = {}
+	if w.leader != nil {w.dirty = true}
+	w.leader = nil
+}
+
+// Returns to Idle once the chord window has passed; a key arriving later is not part of a chord.
+@(private)
+leader_expire :: proc(w: ^Window, now: time.Tick) {
+	if until, armed := leader_deadline(w); armed && time.tick_diff(now, until) <= 0 {leader_cancel(w)}
 }
 
 // Literal: the leader was pressed twice, so the caller delivers that key to whatever has the keyboard.
@@ -554,36 +582,50 @@ Leader_Result :: enum {
 @(private)
 leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> Leader_Result {
 	if !e.pressed || is_modifier_key(e.key) {return .None}
-	if w.leader_until != {} {
-		if leader, enabled := app.leader.?;
-		   enabled &&
-		   e.repeat &&
-		   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {return .Consumed}
-		pending := time.tick_diff(time.tick_now(), w.leader_until) > 0
+	leader, enabled := app.leader.?
+	is_leader := enabled && commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted)
+	// A held leader's repeats keep the chord armed.
+	if leader_armed(w) && is_leader && e.repeat {return .Consumed}
+	leader_expire(w, time.tick_now())
+	if leader_armed(w) {
 		leader_cancel(w)
-		if pending {
-			w.suppressed_key = e
-			if leader, enabled := app.leader.?;
-			   enabled &&
-			   commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {return .Literal}
-			if e.key == .Escape {return .Consumed}
-			chord := e
-			chord.modifiers += {.Leader}
-			if action, found := shortcut_action(app, chord); found {command_run(app, w, action, .Key)}
-			return .Consumed
-		}
+		key_suppress(w, e)
+		if is_leader {return .Literal}
+		if e.key == .Escape {return .Consumed}
+		chord := e
+		chord.modifiers += {.Leader}
+		if action, found := shortcut_action(app, chord); found {command_run(app, w, action, .Key)}
+		return .Consumed
 	}
-	if leader, enabled := app.leader.?; enabled {
-		if commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {
-			w.suppressed_key = e
-			if !e.repeat {
-				w.leader_until = time.tick_add(time.tick_now(), 2 * time.Second)
-				w.dirty = true
-			}
-			return .Consumed
-		}
+	if is_leader {
+		key_suppress(w, e)
+		if !e.repeat {leader_arm(w, time.tick_now())}
+		return .Consumed
 	}
 	return .None
+}
+
+// Keys whose press a surface consumed, so their release must not reach the terminal. A set, because
+// a second key can be pressed and consumed while the first is still held.
+Suppressed_Keys :: [input.Key]bool
+
+// The only writer of the suppression on a press: the surface consumed this key.
+@(private)
+key_suppress :: proc(w: ^Window, e: platform.Key_Event) {
+	if e.pressed {w.suppressed[e.key] = true}
+}
+
+key_suppressed :: proc(w: ^Window, key: input.Key) -> bool {
+	return w.suppressed[key]
+}
+
+// Every key event passes here first. A release of a suppressed key ends its suppression and is
+// consumed; a fresh press supersedes a suppression whose release went to another window.
+@(private)
+key_release_suppressed :: proc(w: ^Window, e: platform.Key_Event) -> bool {
+	held := w.suppressed[e.key]
+	if !e.repeat {w.suppressed[e.key] = false}
+	return held && !e.pressed
 }
 
 @(private)

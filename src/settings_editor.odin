@@ -1143,7 +1143,7 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	pane_header_cancel(w)
 	p := &w.editor
 	w.dirty = true
-	if e.pressed {w.suppressed_key = e}
+	key_suppress(w, e)
 	// Escape backs out of a delete prompt even when the page has nothing else to leave.
 	if e.pressed && e.key == .Escape {theme_delete_disarm(&w.resources)}
 	if ui.editor_capturing(p) {
