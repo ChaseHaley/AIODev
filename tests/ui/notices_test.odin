@@ -53,16 +53,18 @@ notices_hold_a_removed_clone_until_its_close_settles :: proc(t: ^testing.T) {
 	now := time.tick_now()
 	ui.notices_put(&n, 1, .Info, "closing", 0)
 	ui.notices_animate(&n, now)
-	testing.expect_value(t, len(n.items), 1)
+	testing.expect_value(t, len(ui.notices_live(&n)), 1)
 	testing.expect(t, ui.notices_clear(&n, 1))
-	testing.expect_value(t, len(n.items), 0)
-	testing.expect_value(t, len(n.fading), 1)
+	testing.expect_value(t, len(ui.notices_live(&n)), 0)
+	if !testing.expect_value(t, len(n.items), 1) {return}
+	testing.expect(t, ui.notice_fading(n.items[0]))
+	testing.expect(t, !ui.notices_clear(&n, 1), "a fading notice is no longer shown under its key")
 	testing.expect(t, ui.notices_animating(&n))
 	testing.expect(t, ui.notices_animate(&n, time.tick_add(now, time.Second)))
-	testing.expect_value(t, len(n.fading), 0)
+	testing.expect_value(t, len(n.items), 0)
 	testing.expect(t, !ui.notices_animating(&n))
 	testing.expect(t, !ui.notices_animate(&n, time.tick_add(now, 2*time.Second)))
-	testing.expect_value(t, len(n.fading), 0)
+	testing.expect_value(t, len(n.items), 0)
 }
 
 @(test)
@@ -74,8 +76,56 @@ notices_without_animations_free_a_removed_clone_immediately :: proc(t: ^testing.
 	testing.expect_value(t, len(n.items), 1)
 	testing.expect(t, ui.notices_clear(&n, 1))
 	testing.expect_value(t, len(n.items), 0)
-	testing.expect_value(t, len(n.fading), 0)
 	testing.expect(t, !ui.notices_animating(&n))
+}
+
+@(test)
+notices_fade_behind_live_notices_and_turning_animations_off_settles_every_motion :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	ui.notices_set_animations(&n, true)
+	ui.notices_put(&n, 0, .Info, "first", time.Hour)
+	ui.notices_put(&n, 0, .Info, "second", 0)
+	first := n.items[0].id
+	testing.expect(t, ui.notices_dismiss(&n, first))
+	ui.notices_put(&n, 0, .Info, "third", time.Hour)
+	// The fading notice stays at the bottom of the stack while new ones arrive above it.
+	if !testing.expect_value(t, len(n.items), 3) {return}
+	testing.expect_value(t, n.items[0].text, "second")
+	testing.expect_value(t, n.items[1].text, "third")
+	testing.expect_value(t, n.items[2].id, first)
+	testing.expect_value(t, len(ui.notices_live(&n)), 2)
+	testing.expect(t, !ui.notices_dismiss(&n, first))
+	deadline, timed := ui.notices_deadline(&n)
+	testing.expect(t, timed && deadline == ui.notice_expiry(n.items[1]).?)
+	ui.notices_set_animations(&n, false)
+	testing.expect_value(t, len(n.items), 2)
+	testing.expect(t, !ui.notices_animating(&n))
+}
+
+@(test)
+notices_fading_notice_drops_its_hover_and_armed_press :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	ui.notices_set_animations(&n, true)
+	ui.notices_put(&n, 0, .Info, "timed", time.Millisecond)
+	ui.notices_put(&n, 0, .Info, "sticky", 0)
+	timed, sticky := n.items[0].id, n.items[1].id
+	testing.expect(t, ui.notices_hover(&n, timed))
+	ui.notices_press(&n, timed)
+	testing.expect(t, ui.notices_expire(&n, time.tick_add(time.tick_now(), time.Second)))
+	if !testing.expect_value(t, n.items[1].id, timed) {return}
+	testing.expect(t, ui.notice_fading(n.items[1]))
+	testing.expect_value(t, n.hover, u64(0))
+	testing.expect(t, !ui.armed_is(n.armed, timed), "a press must not stay armed on a fading notice")
+	testing.expect(t, !ui.notices_release(&n, timed))
+	// Another notice's pointer state survives that fade.
+	testing.expect(t, ui.notices_hover(&n, sticky))
+	ui.notices_press(&n, sticky)
+	testing.expect(t, ui.notices_release(&n, sticky))
+	testing.expect_value(t, len(ui.notices_live(&n)), 0)
 }
 
 @(test)

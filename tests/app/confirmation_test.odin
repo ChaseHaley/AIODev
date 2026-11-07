@@ -44,11 +44,11 @@ confirmation_fixture_destroy :: proc(t: ^testing.T, f: ^Confirmation_Fixture) {
 confirmation_open_subject :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, swap: bool) -> ^ui.Confirm {
 	if swap {
 		app.pane_shell_swap_request(state, w, w.tree.focus, "alternate")
-		testing.expect(t, w.pending_swap.confirm.open)
+		testing.expect(t, ui.presence_is_open(w.pending_swap.confirm.presence))
 		return &w.pending_swap.confirm
 	}
 	app.pending_close_open_tab(state, w, w.workspace.selected)
-	testing.expect(t, w.pending_close.confirm.open)
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence))
 	return &w.pending_close.confirm
 }
 
@@ -92,7 +92,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		testing.expect_value(t, app.confirmation_draw(state, w), glyphs.Result.Ok)
 		testing.expect(t, len(w.list.rects) > 0 && len(w.list.glyphs) > 0)
 		confirmation_test_key(state, w, .Escape)
-		testing.expect(t, !c.open && ui.presence_visible(c.presence))
+		testing.expect(t, !ui.presence_is_open(c.presence) && ui.presence_visible(c.presence))
 		if swap {testing.expect_value(t, w.pending_swap.profile_id, "alternate")}
 		else {testing.expect_value(t, w.pending_close.kind, app.Pending_Close_Kind.Tab)}
 		app.update_motion(state)
@@ -112,7 +112,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		testing.expect_value(t, c.motion.value, f32(1))
 		confirmation_test_key(state, w, .Escape)
 		app.update_motion(state)
-		testing.expect(t, !ui.presence_visible(c.presence) && !c.release_due)
+		testing.expect_value(t, c.phase, ui.Presence_Phase.Closed)
 	}
 }
 
@@ -129,23 +129,23 @@ confirmation_both_subjects_cancel_outside_release_capture_and_focus :: proc(t: ^
 		x, y := l.accept.x + 10, l.accept.y + 10
 		confirmation_test_mouse(state, w, true, x, y)
 		confirmation_test_mouse(state, w, false, 1, f32(w.height - 1))
-		testing.expect(t, c.open && !ui.armed_down(c.armed))
+		testing.expect(t, ui.presence_is_open(c.presence) && !ui.armed_down(c.armed))
 		confirmation_test_mouse(state, w, true, x, y)
 		app.handle_event(state, platform.Capture_Lost_Event{window = w.id})
-		testing.expect(t, c.open && !ui.armed_down(c.armed))
+		testing.expect(t, ui.presence_is_open(c.presence) && !ui.armed_down(c.armed))
 		confirmation_test_mouse(state, w, false, x, y)
 		confirmation_test_mouse(state, w, false, x, y)
-		testing.expect(t, c.open)
+		testing.expect(t, ui.presence_is_open(c.presence))
 		confirmation_test_mouse(state, w, true, 1, f32(w.height - 1))
 		confirmation_test_mouse(state, w, false, 1, f32(w.height - 1))
-		testing.expect(t, !c.open && !w.selecting)
+		testing.expect(t, !ui.presence_is_open(c.presence) && !w.selecting)
 		testing.expect_value(t, len(w.workspace.tabs), 1)
 		testing.expect_value(t, app.focused_session(state, w).profile_id, "default")
 		c = confirmation_open_subject(t, state, w, swap)
 		if swap {c.option = true}
 		confirmation_test_mouse(state, w, true, x, y)
 		app.handle_event(state, platform.Focus_Event{window = w.id, focused = false})
-		testing.expect(t, !c.open && !ui.armed_down(c.armed))
+		testing.expect(t, !ui.presence_is_open(c.presence) && !ui.armed_down(c.armed))
 		state.animations = false
 		app.update_motion(state)
 		testing.expect(t, !ui.presence_visible(c.presence))
@@ -176,7 +176,7 @@ confirmation_accept_keeps_swap_identity_and_retires_last_tab_window :: proc(t: ^
 	app.update_motion(state)
 	app.pane_split(state, w, .Right)
 	app.tab_close_request(state, w, 0)
-	testing.expect(t, w.pending_close.confirm.open)
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence))
 	window_id := w.id
 	l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale)
 	confirmation_test_mouse(state, w, true, l.accept.x + 10, l.accept.y + 10)

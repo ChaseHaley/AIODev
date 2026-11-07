@@ -64,7 +64,7 @@ process_editor_always_confirms_deletion_and_rejects_changed_subjects :: proc(t: 
 	s, w := &f.state, f.state.windows[0]
 	p := &w.editor
 	app.editor_process_remove_ask(s, w, 1)
-	testing.expect(t, w.process_remove_confirm.open)
+	testing.expect(t, ui.presence_is_open(w.process_remove_confirm.presence))
 	testing.expect(t, !w.process_remove_confirm.show_option)
 	testing.expect_value(t, w.process_remove_confirm.focus, ui.Confirm_Button.Cancel)
 	app.editor_process_remove_finish(s, w, false)

@@ -406,15 +406,15 @@ profile_table_includes_detected_and_confirms_custom_removal :: proc(t: ^testing.
 	testing.expect(t, .Protected in ui.editor_row(e).flags)
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, !f.state.windows[0].profile_remove_confirm.open)
+	testing.expect(t, !ui.presence_is_open(f.state.windows[0].profile_remove_confirm.presence))
 	testing.expect(t, settings.profile_visible(settings.profile_find(&f.state.settings.profiles, "fake-shell")))
 	app.editor_profile_remove_ask(&f.state, f.state.windows[0], "fake-shell")
-	testing.expect(t, !f.state.windows[0].profile_remove_confirm.open)
+	testing.expect(t, !ui.presence_is_open(f.state.windows[0].profile_remove_confirm.presence))
 
 	testing.expect(t, ui.editor_select_key(e, "profile.beta"))
 	ui.editor_focus_row(e)
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, f.state.windows[0].profile_remove_confirm.open)
+	testing.expect(t, ui.presence_is_open(f.state.windows[0].profile_remove_confirm.presence))
 	app.editor_profile_remove_finish(&f.state, f.state.windows[0], false)
 	testing.expect(t, !profile_file_lacks(f.path, "profile.beta.command"))
 	app.editor_profile_remove_ask(&f.state, f.state.windows[0], "beta")
@@ -447,7 +447,7 @@ profile_table_keeps_the_built_in_default_and_resets_a_removed_default :: proc(t:
 	if !testing.expect(t, ui.editor_select_key(e, "profile.beta")) {return}
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, f.state.windows[0].profile_remove_confirm.open)
+	testing.expect(t, ui.presence_is_open(f.state.windows[0].profile_remove_confirm.presence))
 	app.editor_profile_remove_finish(&f.state, f.state.windows[0], true)
 	testing.expect(t, profile_file_lacks(f.path, "profile.beta."))
 	testing.expect(t, profile_file_has(f.path, `shell.default_profile = "default"`))
@@ -456,7 +456,7 @@ profile_table_keeps_the_built_in_default_and_resets_a_removed_default :: proc(t:
 	if !testing.expect(t, ui.editor_select_key(e, "profile.default")) {return}
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, !f.state.windows[0].profile_remove_confirm.open)
+	testing.expect(t, !ui.presence_is_open(f.state.windows[0].profile_remove_confirm.presence))
 	testing.expect(t, settings.profile_find(&f.state.settings.profiles, "default") != nil)
 }
 

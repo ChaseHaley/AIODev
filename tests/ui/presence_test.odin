@@ -85,3 +85,33 @@ presence_fade_rises_only_while_closing :: proc(t: ^testing.T) {
 	testing.expect(t, opacity > 0 && opacity < 1)
 	testing.expect(t, offset > 0 && offset < 6)
 }
+
+@(test)
+presence_reopen_while_closing_keeps_the_payload_and_every_close_settles_once :: proc(t: ^testing.T) {
+	start := time.tick_now()
+	p: Presence_Probe
+	ui.presence_open(&p.presence, PRESENCE_PROBE_SPEC)
+	testing.expect(t, ui.presence_active(p.presence), "an open owes the advance that starts its motion")
+	presence_probe_frame(&p, true, start)
+	presence_probe_frame(&p, true, time.tick_add(start, 200*time.Millisecond))
+	testing.expect_value(t, p.presence.phase, ui.Presence_Phase.Open)
+
+	ui.presence_close(&p.presence)
+	presence_probe_frame(&p, true, time.tick_add(start, 200*time.Millisecond))
+	presence_probe_frame(&p, true, time.tick_add(start, 245*time.Millisecond))
+	ui.presence_open(&p.presence, PRESENCE_PROBE_SPEC)
+	testing.expect(t, ui.presence_is_open(p.presence))
+	presence_probe_frame(&p, true, time.tick_add(start, 245*time.Millisecond))
+	presence_probe_frame(&p, true, time.tick_add(start, 600*time.Millisecond))
+	testing.expect_value(t, p.presence.phase, ui.Presence_Phase.Open)
+	testing.expect_value(t, p.presence.motion.value, f32(1))
+	testing.expect_value(t, p.released, 0)
+
+	// A close with nothing left to fade still owes its caller the release.
+	closed: Presence_Probe
+	ui.presence_close(&closed.presence)
+	testing.expect(t, !ui.presence_visible(closed.presence) && ui.presence_active(closed.presence))
+	presence_probe_frame(&closed, true, start)
+	testing.expect_value(t, closed.released, 1)
+	testing.expect_value(t, closed.presence.phase, ui.Presence_Phase.Closed)
+}

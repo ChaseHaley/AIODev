@@ -47,26 +47,45 @@ notice_style :: proc(
 	return "Info", .Info, theme.info
 }
 
+Notice_Entering :: struct {
+	presence: Presence,
+	// A sticky notice has no deadline. Timed notices count from arrival, not from the end of entry.
+	expires: Maybe(time.Tick),
+}
+Notice_Shown :: struct {expires: time.Tick}
+Notice_Sticky :: struct {}
+Notice_Fading :: struct {presence: Presence}
+
+Notice_State :: union #no_nil {
+	Notice_Sticky,
+	Notice_Entering,
+	Notice_Shown,
+	Notice_Fading,
+}
+
 Notice :: struct {
-	id:             u64,
-	key:            u32,
-	kind:           Notice_Kind,
-	text:           string,
-	sticky:         bool,
-	expires:        time.Tick,
-	using presence: Presence,
+	id:    u64,
+	key:   u32,
+	kind:  Notice_Kind,
+	text:  string,
+	state: Notice_State,
 }
 
 Notices :: struct {
-	next_id:       u64,
-	items, fading: [dynamic]Notice,
-	animations:    bool,
-	lines:         [dynamic]string,
+	next_id:    u64,
+	// The live notices in the order they arrived, then the fading ones in the order they began to
+	// fade, so a notice leaves from the bottom of the stack. notice_fade keeps that order.
+	items:      [dynamic]Notice,
+	// The close button under the pointer and the one a press armed, in the window that holds the
+	// notices. A fade drops either when it names the fading notice.
+	hover:      u64,
+	armed:      Armed(u64),
+	animations: bool,
+	lines:      [dynamic]string,
 }
 
 notices_init :: proc(n: ^Notices, allocator := context.allocator) {
 	n.items = make([dynamic]Notice, allocator)
-	n.fading = make([dynamic]Notice, allocator)
 	n.lines = make([dynamic]string, allocator)
 }
 
@@ -74,11 +93,41 @@ notices_destroy :: proc(n: ^Notices) {
 	for item in n.items {
 		delete(item.text, n.items.allocator)
 	}
-	for item in n.fading {delete(item.text, n.items.allocator)}
-	delete(n.fading)
 	delete(n.items)
 	delete(n.lines)
 	n^ = {}
+}
+
+notice_fading :: proc(item: Notice) -> bool {
+	_, fading := item.state.(Notice_Fading)
+	return fading
+}
+
+notice_expiry :: proc(item: Notice) -> Maybe(time.Tick) {
+	switch state in item.state {
+	case Notice_Entering: return state.expires
+	case Notice_Shown: return state.expires
+	case Notice_Sticky, Notice_Fading:
+	}
+	return nil
+}
+
+@(private)
+notice_fade_values :: proc(item: Notice, rise: f32) -> (opacity, offset: f32) {
+	switch state in item.state {
+	case Notice_Entering: return presence_fade(state.presence, rise)
+	case Notice_Fading: return presence_fade(state.presence, rise)
+	case Notice_Shown, Notice_Sticky:
+	}
+	return 1, 0
+}
+
+// The live notices, which lead the list.
+notices_live :: proc(n: ^Notices) -> []Notice {
+	for item, i in n.items {
+		if notice_fading(item) {return n.items[:i]}
+	}
+	return n.items[:]
 }
 
 // Shows a notice. A nonzero key replaces the notice already shown under it; a zero duration is sticky.
@@ -98,27 +147,26 @@ notices_put :: proc(
 	}
 	n.next_id += 1
 	notice := Notice {
-		id     = n.next_id,
-		key    = key,
-		kind   = kind,
-		text   = owned,
-		sticky = duration == 0,
+		id   = n.next_id,
+		key  = key,
+		kind = kind,
+		text = owned,
 	}
 	now := time.tick_now()
-	presence_open(&notice.presence, NOTICE_PRESENCE)
-	_, _ = presence_advance(&notice.presence, n.animations, now)
-	if !notice.sticky {
-		notice.expires = time.tick_add(now, duration)
-	}
-	if _, append_err := append(&n.items, notice); append_err != nil {
+	entering: Notice_Entering
+	presence_open(&entering.presence, NOTICE_PRESENCE)
+	if duration != 0 {entering.expires = time.tick_add(now, duration)}
+	notice.state = entering
+	_, _ = notice_advance(&notice, n.animations, now)
+	if _, inject_err := inject_at(&n.items, len(notices_live(n)), notice); inject_err != nil {
 		delete(owned, n.items.allocator)
 	}
 }
 
 notices_clear :: proc(n: ^Notices, key: u32) -> bool {
-	for i := len(n.items) - 1; i >= 0; i -= 1 {
+	for i := len(notices_live(n)) - 1; i >= 0; i -= 1 {
 		if n.items[i].key == key {
-			notices_remove(n, i)
+			notice_fade(n, i)
 			return true
 		}
 	}
@@ -126,10 +174,32 @@ notices_clear :: proc(n: ^Notices, key: u32) -> bool {
 }
 
 notices_dismiss :: proc(n: ^Notices, id: u64) -> bool {
-	for item, i in n.items {
-		if item.id == id {notices_remove(n, i); return true}
+	for item, i in notices_live(n) {
+		if item.id == id {notice_fade(n, i); return true}
 	}
 	return false
+}
+
+// Reports whether the hovered close button changed, so the caller redraws only then.
+notices_hover :: proc(n: ^Notices, id: u64) -> bool {
+	if n.hover == id {return false}
+	n.hover = id
+	return true
+}
+
+notices_press :: proc(n: ^Notices, id: u64) {
+	armed_press(&n.armed, id)
+}
+
+// Dismisses the notice whose close button both the press and this release landed on.
+notices_release :: proc(n: ^Notices, id: u64) -> (dismissed: bool) {
+	fired, ok := armed_release(&n.armed, id)
+	return ok && fired != 0 && notices_dismiss(n, fired)
+}
+
+notices_pointer_cancel :: proc(n: ^Notices) {
+	n.hover = 0
+	armed_cancel(&n.armed)
 }
 
 Notice_Hit :: struct {
@@ -174,15 +244,15 @@ notices_hit :: proc(
 ) -> Notice_Hit {
 	if text.fonts == nil || width <= 2 * NOTICE_MARGIN * scale {return {}}
 	bottom := height - NOTICE_MARGIN * scale
-	for i := len(n.items) + len(n.fading) - 1; i >= 0; i -= 1 {
-		item := i < len(n.items) ? n.items[i] : n.fading[i - len(n.items)]
+	for i := len(n.items) - 1; i >= 0; i -= 1 {
+		item := n.items[i]
 		l := notice_layout(n, item, text, width, bottom, scale)
-		_, rise := presence_fade(item.presence, 6 * scale)
+		_, rise := notice_fade_values(item, 6 * scale)
 		box, close := l.box, l.close
 		box.y += rise
 		close.y += rise
 		if contains(box, x, y) {
-			return {item.id, i < len(n.items) && contains(close, x, y), true}
+			return {item.id, !notice_fading(item) && contains(close, x, y), true}
 		}
 		bottom = l.box.y - SPACE_2 * scale
 		if bottom < NOTICE_MARGIN * scale {break}
@@ -190,25 +260,24 @@ notices_hit :: proc(
 	return {}
 }
 
-// Removes expired notices and reports whether any were removed.
+// Fades expired notices and reports whether any began to fade.
 notices_expire :: proc(n: ^Notices, now: time.Tick) -> bool {
-	removed := false
-	for i := len(n.items) - 1; i >= 0; i -= 1 {
-		item := n.items[i]
-		if !item.sticky && time.tick_diff(item.expires, now) >= 0 {
-			notices_remove(n, i)
-			removed = true
+	faded := false
+	for i := len(notices_live(n)) - 1; i >= 0; i -= 1 {
+		if expires, timed := notice_expiry(n.items[i]).?; timed && time.tick_diff(expires, now) >= 0 {
+			notice_fade(n, i)
+			faded = true
 		}
 	}
-	return removed
+	return faded
 }
 
 notices_deadline :: proc(n: ^Notices) -> (time.Tick, bool) {
 	deadline: time.Tick
 	found := false
-	for item in n.items {
-		if !item.sticky && (!found || time.tick_diff(item.expires, deadline) > 0) {
-			deadline, found = item.expires, true
+	for item in notices_live(n) {
+		if expires, timed := notice_expiry(item).?; timed && (!found || time.tick_diff(expires, deadline) > 0) {
+			deadline, found = expires, true
 		}
 	}
 	return deadline, found
@@ -220,21 +289,18 @@ notices_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, height, scale: f32,
-	hover: u64 = 0,
-	pressed: u64 = 0,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {
-	if len(n.items) + len(n.fading) == 0 ||
-	   render.push_layer(list, {0, 0, width, height}) != .None {
+	if len(n.items) == 0 || render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
 	margin, padding := NOTICE_MARGIN * scale, NOTICE_PADDING * scale
 	max_width := min(NOTICE_WIDTH * scale, max(0, width - 2 * margin))
 	if max_width <= 0 {return .Ok}
 	bottom := height - margin
-	for i := len(n.items) + len(n.fading) - 1; i >= 0; i -= 1 {
-		item: Notice
-		if i < len(n.items) {item = n.items[i]} else {item = n.fading[i - len(n.items)]}
+	hover, pressed := n.hover, armed_target(n.armed)
+	for i := len(n.items) - 1; i >= 0; i -= 1 {
+		item := n.items[i]
 		layers, rects, glyph_count := len(list.layers), len(list.rects), len(list.glyphs)
 		l := notice_layout(n, item, text, width, bottom, scale)
 		box, content_width, lines := l.box, l.content_width, l.lines
@@ -271,7 +337,7 @@ notices_draw :: proc(
 				return result
 			}
 		}
-		opacity, rise := presence_fade(item.presence, 6 * scale)
+		opacity, rise := notice_fade_values(item, 6 * scale)
 		fade_draw(list, layers, rects, glyph_count, opacity, rise)
 		bottom = box.y - SPACE_2 * scale
 		if bottom < margin {
@@ -281,44 +347,78 @@ notices_draw :: proc(
 	return .Ok
 }
 
+// The one way a notice leaves. It moves behind the live notices and the pointer lets go of it, so
+// a fading notice never shows a hovered or pressed close button; without animations the close
+// settles at once and the notice is gone.
 @(private)
-notices_remove :: proc(n: ^Notices, index: int) {
+notice_fade :: proc(n: ^Notices, index: int) {
 	item := n.items[index]
-	presence_close(&item.presence)
-	if _, settled := presence_advance(&item.presence, n.animations, time.tick_now()); settled {
-		delete(item.text, n.items.allocator)
-	} else if _, err := append(&n.fading, item); err != nil {
-		delete(item.text, n.items.allocator)
+	if n.hover == item.id {n.hover = 0}
+	if armed_is(n.armed, item.id) {armed_cancel(&n.armed)}
+	p: Presence
+	if entering, ok := item.state.(Notice_Entering); ok {
+		p = entering.presence
+	} else {
+		presence_open(&p, NOTICE_PRESENCE)
+		_, _ = presence_advance(&p, false, time.tick_now())
 	}
-	ordered_remove(&n.items, index)
+	presence_close(&p)
+	item.state = Notice_Fading{p}
+	_, settled := notice_advance(&item, n.animations, time.tick_now())
+	copy(n.items[index:], n.items[index + 1:])
+	if settled {
+		delete(item.text, n.items.allocator)
+		resize(&n.items, len(n.items) - 1)
+	} else {
+		n.items[len(n.items) - 1] = item
+	}
 }
 
 notices_animating :: proc(n: ^Notices) -> bool {
-	for item in n.items {if presence_active(item.presence) {return true}}
-	return len(n.fading) > 0
+	for item in n.items {
+		switch state in item.state {
+		case Notice_Entering, Notice_Fading: return true
+		case Notice_Shown, Notice_Sticky:
+		}
+	}
+	return false
 }
 
 notices_animate :: proc(n: ^Notices, now: time.Tick) -> bool {
 	changed := false
-	for &item in n.items {
-		item_changed, _ := presence_advance(&item.presence, n.animations, now)
-		changed = item_changed || changed
-	}
-	for i := len(n.fading) - 1; i >= 0; i -= 1 {
-		item_changed, settled := presence_advance(&n.fading[i].presence, n.animations, now)
+	for i := len(n.items) - 1; i >= 0; i -= 1 {
+		item_changed, settled := notice_advance(&n.items[i], n.animations, now)
 		changed = item_changed || changed
 		if settled {
-			delete(n.fading[i].text, n.items.allocator)
-			ordered_remove(&n.fading, i)
+			delete(n.items[i].text, n.items.allocator)
+			ordered_remove(&n.items, i)
 		}
 	}
 	return changed
 }
 
+// Arrival, the end of entry and the end of a fade are the only lifetime transitions. Motion exists
+// only during entry and fade, and only entry and timed display can carry a deadline.
+@(private)
+notice_advance :: proc(item: ^Notice, enabled: bool, now: time.Tick) -> (changed, settled: bool) {
+	switch &state in item.state {
+	case Notice_Entering:
+		changed, _ = presence_advance(&state.presence, enabled, now)
+		if !presence_active(state.presence) {
+			expires := state.expires
+			if deadline, timed := expires.?; timed {item.state = Notice_Shown{deadline}}
+			else {item.state = Notice_Sticky{}}
+		}
+	case Notice_Fading:
+		changed, settled = presence_advance(&state.presence, enabled, now)
+	case Notice_Shown, Notice_Sticky:
+	}
+	return
+}
+
+// Without animations every notice snaps to the end of its motion: an entering one is shown and a
+// fading one is gone.
 notices_set_animations :: proc(n: ^Notices, enabled: bool) {
 	n.animations = enabled
-	if enabled {return}
-	for &item in n.items {item.motion.value, item.motion.target = 1, 1}
-	for item in n.fading {delete(item.text, n.items.allocator)}
-	clear(&n.fading)
+	if !enabled {_ = notices_animate(n, time.tick_now())}
 }

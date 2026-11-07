@@ -19,7 +19,7 @@ settings_factory_reset_cancels_then_replaces_every_category_and_open_page :: pro
 		"theme.custom.mine.base = studio-dark\ntheme.custom.mine.text = #123456\n"}, context.temp_allocator)
 	if !testing.expect_value(t, app.settings_commit(s, w.editor.source, updated), settings.Save_Error.None) {return}
 	app.editor_outcome(s, w, .Reset_All)
-	testing.expect(t, w.settings_reset_confirm.open)
+	testing.expect(t, ui.presence_is_open(w.settings_reset_confirm.presence))
 	testing.expect_value(t, w.settings_reset_confirm.focus, ui.Confirm_Button.Cancel)
 	app.settings_reset_finish(s, w, false)
 	testing.expect_value(t, w.editor.source, updated)

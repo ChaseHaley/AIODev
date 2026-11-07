@@ -35,7 +35,7 @@ notices_follow_window_focus_and_keep_their_identity_and_expiry :: proc(t: ^testi
 	ui.notices_set_animations(&s.notices, false)
 	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id)}
 	ui.notices_put(&s.notices, 0, .Info, "Only one window", time.Hour)
-	id, expiry := s.notices.items[0].id, s.notices.items[0].expires
+	id, expiry := s.notices.items[0].id, ui.notice_expiry(s.notices.items[0])
 	// Inactive startup has no focus history; pick the first available window.
 	notice_expect_window(t, s, first)
 	for active in ([?]^app.Window{second, first, second}) {
@@ -50,7 +50,7 @@ notices_follow_window_focus_and_keep_their_identity_and_expiry :: proc(t: ^testi
 		app.handle_event(s, platform.Focus_Event{active.id, false})
 		notice_expect_window(t, s, active)
 		testing.expect_value(t, s.notices.items[0].id, id)
-		testing.expect_value(t, s.notices.items[0].expires, expiry)
+		testing.expect_value(t, ui.notice_expiry(s.notices.items[0]), expiry)
 	}
 	close := notice_close_point(second)
 	gesture_button(s, second, .Left, true, close.x, close.y)

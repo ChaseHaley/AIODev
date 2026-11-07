@@ -7,58 +7,82 @@ Presence_Spec :: struct {
 	open, close: time.Duration,
 }
 
-// A floating surface's open and close motion. advance reports the one step that ends a close, so
-// the caller releases its payload exactly once.
-Presence :: struct {
-	open:        bool,
-	release_due: bool,
-	spec:        Presence_Spec,
-	motion:      Motion,
+// Where a floating surface is in its open and close motion. The procs in this file are the only
+// writers, so the motion always means what the phase says: rising to 1 while Opening, held at 1
+// when Open, falling to 0 while Closing and at rest at 0 when Closed.
+Presence_Phase :: enum u8 {
+	// The zero value, so a surface built as a plain value is closed with nothing to release.
+	Closed,
+	Opening,
+	Open,
+	Closing,
+	// Nothing remains to draw, but the caller still holds its payload until the next advance.
+	Release_Due,
 }
 
+Presence :: struct {
+	phase:  Presence_Phase,
+	spec:   Presence_Spec,
+	motion: Motion,
+}
+
+// Opening a surface that is still closing reverses its fade from where it is and keeps the
+// caller's payload, since the close never settled.
 presence_open :: proc(p: ^Presence, spec: Presence_Spec) {
 	p.spec = spec
-	p.open = true
-	p.release_due = false
+	if p.phase != .Open {p.phase = .Opening}
 }
 
+// Closing always owes the caller one settle, even from Closed, so a caller can rely on its
+// release running exactly once after every close.
 presence_close :: proc(p: ^Presence) {
-	p.open = false
-	p.release_due = true
+	p.phase = p.motion.value == 0 && !motion_active(p.motion) ? .Release_Due : .Closing
 }
 
 // Drops the motion after the caller released the payload, returning the presence to closed.
 presence_reset :: proc(p: ^Presence) {
-	p.open = false
-	p.release_due = false
-	p.motion = {}
+	p^ = {spec = p.spec}
+}
+
+// Opening or open: the surface takes input.
+presence_is_open :: proc(p: Presence) -> bool {
+	return p.phase == .Opening || p.phase == .Open
 }
 
 presence_visible :: proc(p: Presence) -> bool {
-	return p.open || p.motion.value > 0
+	return presence_is_open(p) || p.motion.value > 0
 }
 
+// Still owes an advance: a motion in flight, or a change of phase it has not reached yet.
 presence_active :: proc(p: Presence) -> bool {
-	return motion_active(p.motion)
+	return p.phase == .Opening || p.phase == .Closing || p.phase == .Release_Due
 }
 
 // settled is true on the single advance that finishes a close, so a caller that releases on it
 // cannot release twice. Disabled animations snap to the target on that same advance.
 presence_advance :: proc(p: ^Presence, enabled: bool, now: time.Tick) -> (changed, settled: bool) {
-	if p.open {
+	switch p.phase {
+	case .Closed, .Open:
+		return false, false
+	case .Release_Due:
+		presence_reset(p)
+		return false, true
+	case .Opening:
 		motion_target(&p.motion, 1, p.spec.open, .Decelerate, enabled, now)
-	} else {
+	case .Closing:
 		motion_target(&p.motion, 0, p.spec.close, .Accelerate, enabled, now)
 	}
 	changed = motion_update(&p.motion, now)
-	if p.open || !p.release_due || motion_active(p.motion) {
+	if motion_active(p.motion) {return changed, false}
+	if p.phase == .Opening {
+		p.phase = .Open
 		return changed, false
 	}
-	p.release_due = false
+	p.phase = .Closed
 	return changed, true
 }
 
 // The rise only happens while closing, so an opening or settled surface keeps its place.
 presence_fade :: proc(p: Presence, rise: f32) -> (opacity, offset: f32) {
-	return p.motion.value, p.open ? 0 : rise * (1 - p.motion.value)
+	return p.motion.value, presence_is_open(p) ? 0 : rise * (1 - p.motion.value)
 }

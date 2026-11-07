@@ -106,7 +106,7 @@ pending_close_text :: proc(
 	switch pc.kind {
 	case .None:
 	case .Tab:
-		if index := tab_index_by_id(workspace, pc.tab); pc.confirm.open && index >= 0 {
+		if index := tab_index_by_id(workspace, pc.tab); ui.presence_is_open(pc.confirm.presence) && index >= 0 {
 			pc.tabs, pc.panes, _ = tab_close_scope(workspace, index)
 		}
 		if pc.tabs > 1 {
@@ -125,7 +125,8 @@ pending_close_text :: proc(
 		}
 	case .Workspace:
 		name := pc.workspace_name
-		if found := workspace_find(app, pc.plan.workspace); pc.confirm.open && found != nil {
+		found := workspace_find(app, pc.plan.workspace)
+		if ui.presence_is_open(pc.confirm.presence) && found != nil {
 			name = found.name
 			counts := workspace_pane_counts(found)
 			pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions

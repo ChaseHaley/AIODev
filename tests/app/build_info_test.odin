@@ -24,9 +24,10 @@ build_info_registry_dispatch_refreshes_one_owned_notice_without_a_session :: pro
 	testing.expect_value(t, notice.kind, ui.Notice_Kind.Info)
 	testing.expect_value(t, notice.text, "AIODev | Revision: " + app.AIO_BUILD_ID + " | Build: " + app.AIO_BUILD_KIND)
 	testing.expect(t, strings.contains(notice.text, app.AIO_BUILD_ID))
-	testing.expect(t, !notice.sticky && time.tick_diff(time.tick_now(), notice.expires) > 0)
+	expires, timed := ui.notice_expiry(notice).?
+	testing.expect(t, timed && time.tick_diff(time.tick_now(), expires) > 0)
 	app.run_action(&state, &w, app.Action(command.id))
 	testing.expect_value(t, len(state.notices.items), 1)
 	testing.expect_value(t, state.notices.items[0].key, notice.key)
-	testing.expect(t, time.tick_diff(notice.expires, state.notices.items[0].expires) >= 0)
+	testing.expect(t, time.tick_diff(expires, ui.notice_expiry(state.notices.items[0]).?) >= 0)
 }

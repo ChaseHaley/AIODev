@@ -44,7 +44,7 @@ palette_filters_navigates_and_runs :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.palette_init(&p, nil), nil)
 	defer ui.palette_destroy(&p)
 	ui.palette_open(&p, &registry)
-	testing.expect(t, p.open)
+	testing.expect(t, ui.presence_is_open(p.presence))
 	testing.expect_value(t, len(p.results), 4)
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .R, text = "r"}))
 	testing.expect_value(t, outcome, ui.Outcome.Changed)
@@ -63,7 +63,7 @@ palette_filters_navigates_and_runs :: proc(t: ^testing.T) {
 	ran, id := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, ran, ui.Outcome.Run)
 	testing.expect_value(t, id, expected)
-	testing.expect(t, !p.open)
+	testing.expect(t, !ui.presence_is_open(p.presence))
 }
 
 @(test)
@@ -86,7 +86,7 @@ palette_text_editing_and_close :: proc(t: ^testing.T) {
 	testing.expect_value(t, run, ui.Outcome.None)
 	closed, _ := ui.palette_key(&p, &registry, key({key = .Escape}))
 	testing.expect_value(t, closed, ui.Outcome.Closed)
-	testing.expect(t, !p.open)
+	testing.expect(t, !ui.presence_is_open(p.presence))
 }
 
 @(test)
@@ -309,7 +309,7 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
 	testing.expect_value(t, p.chosen, "pane.gap")
-	testing.expect(t, !p.open)
+	testing.expect(t, !ui.presence_is_open(p.presence))
 
 	ui.palette_open(&p, &registry)
 	ui.palette_text(&p, &registry, "panes")
@@ -317,7 +317,7 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Run)
-	testing.expect(t, !p.open)
+	testing.expect(t, !ui.presence_is_open(p.presence))
 
 	ui.palette_open(&p, &registry)
 	ui.palette_text(&p, &registry, "font si")

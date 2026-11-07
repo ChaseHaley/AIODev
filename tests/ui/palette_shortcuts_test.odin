@@ -38,7 +38,7 @@ palette_shortcut_replaces_one_alternative_and_cancels_without_running :: proc(t:
 	testing.expect(t, ui.editor_capturing(&p.binding), "a refused value stays editable")
 	ui.palette_key(&p, &r, press(.Escape))
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
-	testing.expect(t, p.open)
+	testing.expect(t, ui.presence_is_open(p.presence))
 	id: commands.Command_Id
 	outcome, id = ui.palette_key(&p, &r, press(.Enter))
 	testing.expect_value(t, outcome, ui.Outcome.Run)

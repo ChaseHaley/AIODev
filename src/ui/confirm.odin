@@ -50,9 +50,10 @@ CONFIRM_PRESENCE :: Presence_Spec {
 }
 
 confirm_open :: proc(c: ^Confirm) {
+	// A dialog asked again while it fades fades in from nothing, as a fresh question.
+	presence_reset(&c.presence)
 	presence_open(&c.presence, CONFIRM_PRESENCE)
 	c.focus, c.hover = .Accept, .None
-	c.motion = {}
 	c.hover_motion = {}
 	armed_cancel(&c.armed)
 }

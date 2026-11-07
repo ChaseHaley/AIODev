@@ -127,7 +127,7 @@ last_settings_tab_closes_the_app_after_split_close_confirmation :: proc(t: ^test
 	w := state.windows[0]
 	app.pane_split(state, w, .Right)
 	app.tab_close_request(state, w, 0)
-	testing.expect(t, w.pending_close.confirm.open)
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence))
 	delete_key(state, w, .Escape)
 	testing.expect(t, state.run == .Running && len(w.workspace.tabs) == 1)
 	app.run_action(state, w, .Settings_UI)
@@ -199,7 +199,8 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	defer for handle in processes { if handle != nil { testing.expect(t, bool(win32.CloseHandle(handle))) } }
 	for cancel in ([?]int{0, 1, 2, 3}) {
 		app.workspace_delete_request(state, w, workspace)
-		testing.expect(t, w.pending_close.confirm.open && !app.workspace_picker_active(&w.workspace_picker))
+		testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) &&
+			!app.workspace_picker_active(&w.workspace_picker))
 		text := app.pending_close_text(state, &w.pending_close, w.workspace)
 		testing.expect(t, strings.contains(text.title, workspace.name))
 		testing.expect_value(t, text.body, "Close 3 tabs (4 panes); stop 3 sessions.")
@@ -215,7 +216,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 		case 3:
 			app.handle_event(state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true})
 		}
-		testing.expect(t, !w.pending_close.confirm.open && w.workspace == workspace)
+		testing.expect(t, !ui.presence_is_open(w.pending_close.confirm.presence) && w.workspace == workspace)
 		testing.expect_value(t, len(workspace.tabs), 3)
 		testing.expect_value(t, len(state.sessions), 3)
 		testing.expect_value(t, win32.WaitForSingleObject(process, 0), win32.WAIT_TIMEOUT)
@@ -229,7 +230,8 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	testing.expect(t, w.workspace.id > id && w.tree == &app.selected_tab(w.workspace).tree)
 	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
-	testing.expect(t, !w.editor.open && !w.tab_menu.open && !w.pending_close.confirm.open)
+	testing.expect(t, !w.editor.open && !w.tab_menu.open &&
+		!ui.presence_is_open(w.pending_close.confirm.presence))
 	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
 	for handle in processes { testing.expect_value(t, win32.WaitForSingleObject(handle, 1000), win32.WAIT_OBJECT_0) }
 	app.tick(state)
@@ -309,7 +311,7 @@ workspace_delete_destination_failure_and_changed_ownership_reconfirm :: proc(t: 
 	app.workspace_delete_request(state, w, target)
 	if !testing.expect(t, app.window_open(state, destination)) { return }
 	delete_key(state, w, .Enter)
-	testing.expect(t, w.pending_close.confirm.open && w.workspace == target)
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && w.workspace == target)
 	testing.expect_value(t, w.pending_close.destination, u32(0))
 	delete_key(state, w, .Escape)
 	app.window_close(state, state.windows[1])
@@ -417,11 +419,11 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	id := target.id
 	target.provisional = true
 	app.workspace_delete_request(state, w, target)
-	testing.expect(t, !w.pending_close.confirm.open)
+	testing.expect(t, !ui.presence_is_open(w.pending_close.confirm.presence))
 	target.provisional = false
 	w.phase = .Preparing
 	app.workspace_delete_request(state, w, target)
-	testing.expect(t, !w.pending_close.confirm.open)
+	testing.expect(t, !ui.presence_is_open(w.pending_close.confirm.presence))
 	w.phase = .Shown
 	app.workspace_new(state, w, true)
 	app.rename_finish(state, w, true)
@@ -438,7 +440,7 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	delete_key(state, w, .Enter)
 	testing.expect(t, app.workspace_find(state, id) == nil)
 	delete_key(state, requester, .Enter)
-	testing.expect(t, !requester.pending_close.confirm.open)
+	testing.expect(t, !ui.presence_is_open(requester.pending_close.confirm.presence))
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, len(state.workspaces), 2)
 	app.tick(state)

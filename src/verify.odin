@@ -511,12 +511,18 @@ when AIO_CONTROL {
 				},
 				{"settings.process.drag_target", fmt.tprintf("%d", ui.editor_order_target(&w.editor))},
 				{"settings.process.value", app.settings.process.padding_groups},
-				{"settings.process.confirming", fmt.tprintf("%t", w.process_remove_confirm.open)},
+				{
+					"settings.process.confirming",
+					fmt.tprintf("%t", ui.presence_is_open(w.process_remove_confirm.presence)),
+				},
 				{"settings.process.confirm_option", fmt.tprintf("%t", w.process_remove_confirm.show_option)},
 				{"settings.profile.expanded", w.editor.expanded},
 				{"settings.profile.default", app.settings.profiles.default_id},
 				{"settings.profile.detected_open", fmt.tprintf("%t", w.editor.detected_open)},
-				{"settings.profile.removing", w.profile_remove_confirm.open ? w.profile_remove_id : ""},
+				{
+					"settings.profile.removing",
+					ui.presence_is_open(w.profile_remove_confirm.presence) ? w.profile_remove_id : "",
+				},
 				{"settings.profile.remove_title", editor_profile_remove_title(app, w)},
 				{"settings.profile.menu_open", fmt.tprintf("%t", w.editor.profile_menu.open)},
 				{"settings.profile.menu_count", fmt.tprintf("%d", len(w.editor.profile_menu.items))},
@@ -578,15 +584,15 @@ when AIO_CONTROL {
 					),
 				},
 				{"leader.pending", fmt.tprintf("%t", w.leader_until != {})},
-				{"confirm.open", fmt.tprintf("%t", w.pending_close.confirm.open)},
+				{"confirm.open", fmt.tprintf("%t", ui.presence_is_open(w.pending_close.confirm.presence))},
 				{"confirm.opacity", fmt.tprintf("%g", w.pending_close.confirm.motion.value)},
-				{"confirm.title", w.pending_close.confirm.open ? confirm.title : ""},
-				{"confirm.body", w.pending_close.confirm.open ? confirm.body : ""},
+				{"confirm.title", ui.presence_is_open(w.pending_close.confirm.presence) ? confirm.title : ""},
+				{"confirm.body", ui.presence_is_open(w.pending_close.confirm.presence) ? confirm.body : ""},
 				{"confirm.workspace", fmt.tprintf("%d", w.pending_close.workspace)},
-				{"file.open", fmt.tprintf("%t", w.pending_file.confirm.open)},
+				{"file.open", fmt.tprintf("%t", ui.presence_is_open(w.pending_file.confirm.presence))},
 				{"file.path", w.pending_file.file.path},
 				{"file.target", w.pending_file.file.target},
-				{"swap.open", fmt.tprintf("%t", w.pending_swap.confirm.open)},
+				{"swap.open", fmt.tprintf("%t", ui.presence_is_open(w.pending_swap.confirm.presence))},
 				{"swap.opacity", fmt.tprintf("%g", w.pending_swap.confirm.motion.value)},
 				{"swap.profile", w.pending_swap.profile_id},
 				{"leader.indicator", w.leader_until != {} ? "pane-status-line" : "none"},
@@ -999,12 +1005,12 @@ when AIO_CONTROL {
 		if _, err := append(&entries, control.State_Entry{
 			"notices.window", fmt.tprintf("%d", app.notice_window),
 		}); err != nil {return nil, .Out_Of_Memory}
-		for n in app.notices.items {
-			remaining := max(
-				i64(0),
-				i64(time.tick_diff(time.tick_now(), n.expires) / time.Millisecond),
-			)
-			left := n.sticky ? "sticky" : fmt.tprintf("%dms", remaining)
+		for n in ui.notices_live(&app.notices) {
+			left := "sticky"
+			if expires, timed := ui.notice_expiry(n).?; timed {
+				remaining := max(i64(0), i64(time.tick_diff(time.tick_now(), expires) / time.Millisecond))
+				left = fmt.tprintf("%dms", remaining)
+			}
 			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
 			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
 			value := fmt.tprintf("%s: %s (%s)", kind, n.text, left)
@@ -1483,7 +1489,7 @@ when AIO_CONTROL {
 			if key == "find.open" {change = b == "true" ? "find opened" : "find closed"}
 			if _, err := append(&parts, change); err != nil {return "", .Out_Of_Memory}
 		}
-		for n in app.notices.items {
+		for n in ui.notices_live(&app.notices) {
 			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
 			old := verify_value(d.before_state, key)
 			// Expiry countdown changes are not a new notice.

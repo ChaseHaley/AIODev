@@ -20,7 +20,7 @@ confirmation_subjects :: proc(w: ^Window) -> [6]^ui.Confirm {
 }
 
 confirmation_current :: proc(w: ^Window) -> ^ui.Confirm {
-	for c in confirmation_subjects(w) {if c.open {return c}}
+	for c in confirmation_subjects(w) {if ui.presence_is_open(c.presence) {return c}}
 	return nil
 }
 
@@ -90,12 +90,12 @@ confirmation_clear :: proc(w: ^Window) {
 }
 
 confirmation_cancel :: proc(app: ^App, w: ^Window) {
-	if w.pending_close.confirm.open {pending_close_finish(app, w, false)}
-	if w.pending_swap.confirm.open {pane_swap_finish(app, w, false)}
-	if w.pending_file.confirm.open {pending_file_finish(app, w, false)}
-	if w.profile_remove_confirm.open {editor_profile_remove_finish(app, w, false)}
-	if w.process_remove_confirm.open {editor_process_remove_finish(app, w, false)}
-	if w.settings_reset_confirm.open {settings_reset_finish(app, w, false)}
+	if ui.presence_is_open(w.pending_close.confirm.presence) {pending_close_finish(app, w, false)}
+	if ui.presence_is_open(w.pending_swap.confirm.presence) {pane_swap_finish(app, w, false)}
+	if ui.presence_is_open(w.pending_file.confirm.presence) {pending_file_finish(app, w, false)}
+	if ui.presence_is_open(w.profile_remove_confirm.presence) {editor_profile_remove_finish(app, w, false)}
+	if ui.presence_is_open(w.process_remove_confirm.presence) {editor_process_remove_finish(app, w, false)}
+	if ui.presence_is_open(w.settings_reset_confirm.presence) {settings_reset_finish(app, w, false)}
 	// Close navigation drops its recorded subject immediately; shell switching keeps its
 	// existing fade-out policy and releases the cached profile when that fade settles.
 	pending_close_clear(&w.pending_close)
@@ -103,8 +103,7 @@ confirmation_cancel :: proc(app: ^App, w: ^Window) {
 
 confirmation_active :: proc(w: ^Window) -> bool {
 	for c in confirmation_subjects(w) {
-		if c.open && c.motion.value != 1 || c.release_due || ui.presence_active(c.presence) ||
-		   ui.control_active(c.hover_motion) {return true}
+		if ui.presence_active(c.presence) || ui.control_active(c.hover_motion) {return true}
 	}
 	return false
 }

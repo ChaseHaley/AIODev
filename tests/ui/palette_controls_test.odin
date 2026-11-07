@@ -94,7 +94,7 @@ palette_alt_arrows_step_a_toggle_slider_and_choice_in_place :: proc(t: ^testing.
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "cursor.blink")
 	testing.expect_value(t, value, "false")
-	testing.expect(t, p.open, "the palette stays open after a change")
+	testing.expect(t, ui.presence_is_open(p.presence), "the palette stays open after a change")
 
 	select_setting(&p, "pane.gap")
 	outcome, _ = ui.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
@@ -154,7 +154,7 @@ palette_choice_list_opens_moves_and_chooses :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
 	outcome, _ := ui.palette_key(&p, &registry, press(.Escape))
 	testing.expect_value(t, outcome, ui.Outcome.Changed)
-	testing.expect(t, p.open, "Escape closes only the list")
+	testing.expect(t, ui.presence_is_open(p.presence), "Escape closes only the list")
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
 
 	ui.palette_key(&p, &registry, press(.Enter, {.Control}))
@@ -237,7 +237,7 @@ palette_toggle_click_changes_value_and_title_click_jumps :: proc(t: ^testing.T) 
 	_, value := ui.palette_chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "false")
-	testing.expect(t, p.open, "a control click keeps the palette open")
+	testing.expect(t, ui.presence_is_open(p.presence), "a control click keeps the palette open")
 
 	outcome, _ = ui.palette_mouse_press(&p, &registry, l, l.list.x + 60, row_y)
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
@@ -282,7 +282,7 @@ palette_reset_button_restores_the_default_and_ignores_an_unchanged_setting :: pr
 	_, value := ui.palette_chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "false")
-	testing.expect(t, p.open, "a reset keeps the palette open")
+	testing.expect(t, ui.presence_is_open(p.presence), "a reset keeps the palette open")
 
 	gap_y := l.list.y + l.row_height * 1.5
 	outcome, _ = ui.palette_mouse_press(&p, &registry, l, reset_x, gap_y)

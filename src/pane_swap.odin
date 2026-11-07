@@ -94,7 +94,7 @@ pane_swap_text :: proc(swap: ^Pane_Swap) -> (title, body, note, label: string) {
 
 pane_swap_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 	swap := &w.pending_swap
-	if !swap.confirm.open {return}
+	if !ui.presence_is_open(swap.confirm.presence) {return}
 	option := swap.confirm.option
 	node, profile_id := swap.pane, swap.profile_id
 	ui.confirm_close(&swap.confirm)
