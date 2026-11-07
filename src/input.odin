@@ -179,8 +179,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
 	logical := e
 	logical.key = commands.logical_key(e.key, e.unshifted)
-	if (w.pane_drag.active && w.pane_drag.picker_window != 0) ||
-	   (w.tab_drag.active && w.tab_drag.picker_window != 0) {
+	if drag_holds_dropdown(w) {
 		if e.pressed {w.suppressed_key = e}
 		if e.pressed && e.key == .Escape {_ = gesture_cancel(app, w)}
 		return
@@ -220,7 +219,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 		w.suppressed_key = nil
 		return
 	}
-	if e.pressed && e.key == .Escape && (w.pane_drag.active || w.tab_drag.active) {
+	if e.pressed && e.key == .Escape && drag_active(w) != nil {
 		w.suppressed_key = e
 		_ = gesture_cancel(app, w)
 		return
@@ -448,7 +447,7 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
 	if w.phase == .Preparing {return}
-	if pane_workspace_drag_wheel(app, w, e.delta_y) || tab_workspace_drag_wheel(app, w, e.delta_y) {return}
+	if drag_wheel(app, w, e.delta_y) {return}
 	kind := overlay_kind(app, w)
 	switch kind {
 	case .Workspace_Picker:

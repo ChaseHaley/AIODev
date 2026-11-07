@@ -31,6 +31,26 @@ tab_drag_over_window :: proc(state: ^app.App, w, destination: ^app.Window, index
 	app.tab_drag_over(state, w, destination, x, y)
 }
 
+// The window w's tab drag offers its tabs to, or 0.
+@(private = "file")
+tab_drag_offered :: proc(w: ^app.Window) -> platform.Window_Id {
+	offer, _ := app.drag_destination(w).(app.Drop_Other_Window)
+	return offer.window
+}
+
+// The dropdown w's drag holds open: its window, or 0, and the row under the pointer.
+@(private = "file")
+tab_drag_dropdown :: proc(w: ^app.Window) -> app.Drop_Workspace_Dropdown {
+	held, _ := app.drag_destination(w).(app.Drop_Workspace_Dropdown)
+	return held
+}
+
+@(private = "file")
+tab_drag_tears_off :: proc(w: ^app.Window) -> bool {
+	_, tear_off := app.drag_destination(w).(app.Drop_Tear_Off)
+	return tear_off
+}
+
 @(private = "file")
 Across_Fixture :: struct {
 	directory, path: string,
@@ -70,7 +90,7 @@ across_second_window :: proc(t: ^testing.T, state: ^app.App, first: ^app.Window)
 	if !testing.expect(t, app.tab_create(state, first.workspace)) {return nil}
 	app.tab_select(state, first, 1)
 	testing.expect(t, tab_drag_off_window(state, first, 1))
-	second := app.window_find(state, first.tab_drag.preview_window)
+	second := app.window_find(state, drag_preview(first))
 	if !testing.expect(t, second != nil) {return nil}
 	app.tab_drag_release(state, first)
 	app.rename_finish(state, second, true)
@@ -112,7 +132,7 @@ tabs_dragged_to_another_window_join_its_workspace :: proc(t: ^testing.T) {
 
 	// Holding over the window opens a gap that follows the pointer, and nothing moves yet.
 	tab_drag_over_window(&state, source, destination, 0, bar.x + bar.tab_width, 10)
-	testing.expect_value(t, source.tab_drag.destination_window, destination.id)
+	testing.expect_value(t, tab_drag_offered(source), destination.id)
 	testing.expect_value(t, destination.tab_incoming.count, 1)
 	testing.expect_value(t, destination.tab_incoming.slot, 1)
 	// The strip shares its width with the arriving tab but does not count it as a tab.
@@ -125,7 +145,7 @@ tabs_dragged_to_another_window_join_its_workspace :: proc(t: ^testing.T) {
 	// Leaving the window closes the gap, and a cancel keeps both sides as they were.
 	app.tab_drag_over(&state, source, nil, 0, 0)
 	testing.expect_value(t, destination.tab_incoming.count, 0)
-	testing.expect_value(t, source.tab_drag.destination_window, platform.Window_Id(0))
+	testing.expect_value(t, tab_drag_offered(source), platform.Window_Id(0))
 	app.tab_drag_over(&state, source, destination, bar.x, 10)
 	app.tab_drag_cancel(&state, source)
 	testing.expect_value(t, destination.tab_incoming.count, 0)
@@ -233,14 +253,14 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	p := &source.workspace_picker
 	move, _ := app.workspace_picker_move(p)
 	testing.expect(t, app.workspace_picker_held(p) && move.request.whole_tab)
-	testing.expect_value(t, source.tab_drag.picker_window, source.id)
+	testing.expect_value(t, tab_drag_dropdown(source).window, source.id)
 	if !testing.expect_value(t, len(p.rows), 2) {return}
 	testing.expect_value(t, p.rows[home_row].id, home.id)
 	testing.expect_value(t, p.rows[unshown_row].id, unshown.id)
-	testing.expect_value(t, source.tab_drag.picker_hit, home_row)
+	testing.expect_value(t, tab_drag_dropdown(source).row, home_row)
 	testing.expect(t, !app.tab_workspace_drag_move(&state, source, source, 5, f32(source.height) - 5))
 	testing.expect(t, !app.workspace_picker_held(p))
-	testing.expect_value(t, source.tab_drag.picker_window, platform.Window_Id(0))
+	testing.expect_value(t, tab_drag_dropdown(source).window, platform.Window_Id(0))
 	app.tab_drag_cancel(&state, source)
 
 	// A cancel from the dropdown closes it and moves nothing, as does a drop between rows.
@@ -253,11 +273,13 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	testing.expect(t, tab_drag_to_row(&state, source, source, 0, 0))
 	app.tab_move(&state, source, 0, 1)
 	app.handle_event(&state, platform.Key_Event{window = source.id, key = .Escape, pressed = true})
-	testing.expect(t, !app.workspace_picker_held(p) && !source.tab_drag.pressed)
+	testing.expect(t, !app.workspace_picker_held(p) && !app.drag_held(source))
 	testing.expect(t, workspace.tabs[0] == first_tab)
 	app.handle_event(&state, platform.Key_Event{window = source.id, key = .Escape})
 	testing.expect(t, tab_drag_to_row(&state, source, source, 0, 0))
-	source.tab_drag.picker_hit = -1
+	between := tab_drag_dropdown(source)
+	between.row = -1
+	app.drag_active(source).destination = between
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(workspace.tabs), 5)
 
@@ -275,7 +297,7 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 
 	// The dropdown of another window works the same way.
 	testing.expect(t, tab_drag_to_row(&state, source, shown_elsewhere, 0, 0))
-	testing.expect_value(t, source.tab_drag.picker_window, shown_elsewhere.id)
+	testing.expect_value(t, tab_drag_dropdown(source).window, shown_elsewhere.id)
 	testing.expect(t, app.workspace_picker_held(&shown_elsewhere.workspace_picker))
 	app.tab_drag_cancel(&state, source)
 	testing.expect(t, !app.workspace_picker_held(&shown_elsewhere.workspace_picker))
@@ -294,7 +316,7 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 
 	// The row after the workspaces opens a new one, which starts naming itself in its chip.
 	if !testing.expect(t, tab_drag_to_row(&state, source, source, 0, 2)) {return}
-	testing.expect_value(t, source.tab_drag.picker_hit, 2)
+	testing.expect_value(t, tab_drag_dropdown(source).row, 2)
 	app.tab_drag_release(&state, source)
 	named := source.workspace
 	testing.expect(t, named != workspace)
@@ -309,13 +331,13 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	app.tab_select(&state, source, 0)
 	new_window_row := len(state.workspaces) - 1 + 1
 	if !testing.expect(t, tab_drag_to_row(&state, source, source, 0, new_window_row)) {return}
-	testing.expect_value(t, source.tab_drag.picker_hit, new_window_row)
+	testing.expect_value(t, tab_drag_dropdown(source).row, new_window_row)
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(state.windows), 3)
 	testing.expect_value(t, len(workspace.tabs), 1)
 	for window in state.windows {if app.rename_shown(window) {app.rename_finish(&state, window, true)}}
 	if !testing.expect(t, tab_drag_to_row(&state, source, source, 0, new_window_row + 1)) {return}
-	testing.expect_value(t, source.tab_drag.picker_hit, -1)
+	testing.expect_value(t, tab_drag_dropdown(source).row, -1)
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(state.windows), 3)
 	testing.expect_value(t, len(workspace.tabs), 1)
@@ -371,9 +393,9 @@ closing_the_destination_cancels_a_tab_drag :: proc(t: ^testing.T) {
 	source := across_second_window(t, &state, destination)
 	if source == nil {return}
 	tab_drag_over_window(&state, source, destination, 0, 0, 10)
-	testing.expect(t, source.tab_drag.pressed)
+	testing.expect(t, app.drag_held(source))
 	app.window_close(&state, destination)
-	testing.expect(t, !source.tab_drag.pressed)
+	testing.expect(t, !app.drag_held(source))
 	testing.expect_value(t, len(source.workspace.tabs), 1)
 	app.tick(&state)
 }
@@ -482,8 +504,8 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	app.pane_split(&state, source, .Right)
 	if !testing.expect_value(t, tab_pane_count(app.selected_tab(workspace)), 2) {return}
 	testing.expect(t, tab_drag_off_window(&state, source, 0))
-	testing.expect(t, source.tab_drag.active && !source.tab_drag.new_window)
-	testing.expect_value(t, source.tab_drag.preview_window, platform.Window_Id(0))
+	testing.expect(t, app.tab_drag_active(source) && !tab_drag_tears_off(source))
+	testing.expect_value(t, drag_preview(source), platform.Window_Id(0))
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(workspace.tabs), 1)
@@ -500,8 +522,8 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 
 	// Cancelling discards the hidden destination and keeps the source exactly as it was.
 	testing.expect(t, tab_drag_off_window(&state, source, 0))
-	testing.expect(t, source.tab_drag.new_window)
-	preview := app.window_find(&state, source.tab_drag.preview_window)
+	testing.expect(t, tab_drag_tears_off(source))
+	preview := app.window_find(&state, drag_preview(source))
 	if !testing.expect(t, preview != nil) {return}
 	testing.expect(t, preview.phase == .Preparing && preview.workspace.provisional)
 	testing.expect_value(t, len(state.sessions), sessions)
@@ -514,15 +536,15 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 
 	// Closing the destination cancels the drag rather than leaving it pointing at nothing.
 	testing.expect(t, tab_drag_off_window(&state, source, 0))
-	preview = app.window_find(&state, source.tab_drag.preview_window)
+	preview = app.window_find(&state, drag_preview(source))
 	if !testing.expect(t, preview != nil) {return}
 	app.window_close(&state, preview)
-	testing.expect(t, !source.tab_drag.pressed)
+	testing.expect(t, !app.drag_held(source))
 	testing.expect_value(t, len(state.workspaces), 1)
 
 	// Allocation failure at the drop leaves both sides whole.
 	testing.expect(t, tab_drag_off_window(&state, source, 0))
-	preview = app.window_find(&state, source.tab_drag.preview_window)
+	preview = app.window_find(&state, drag_preview(source))
 	if !testing.expect(t, preview != nil) {return}
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
@@ -536,7 +558,7 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 
 	// The drop carries every pane, the running sessions and the tab's name, then names the window.
 	testing.expect(t, tab_drag_off_window(&state, source, 0))
-	preview = app.window_find(&state, source.tab_drag.preview_window)
+	preview = app.window_find(&state, drag_preview(source))
 	if !testing.expect(t, preview != nil) {return}
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(state.windows), 2)
@@ -571,7 +593,7 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	content_second := second.tree.nodes[second.tree.focus].(layout.Pane).content
 	content_fourth := fourth.tree.nodes[fourth.tree.focus].(layout.Pane).content
 	testing.expect(t, tab_drag_off_window(&state, source, 2))
-	group := app.window_find(&state, source.tab_drag.preview_window)
+	group := app.window_find(&state, drag_preview(source))
 	if !testing.expect(t, group != nil) {return}
 	app.tab_drag_release(&state, source)
 	app.rename_finish(&state, group, true)
@@ -599,7 +621,7 @@ tab_tear_off_moves_marked_tabs_with_all_their_panes :: proc(t: ^testing.T) {
 	panes := layout.pane_count(&carried.tree)
 	app.tab_select(&state, group, 1)
 	testing.expect(t, tab_drag_off_window(&state, group, 1))
-	home := app.window_find(&state, group.tab_drag.preview_window)
+	home := app.window_find(&state, drag_preview(group))
 	if !testing.expect(t, home != nil) {return}
 	app.tab_drag_release(&state, group)
 	app.rename_finish(&state, home, true)

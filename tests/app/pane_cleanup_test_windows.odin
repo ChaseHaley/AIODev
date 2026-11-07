@@ -129,9 +129,9 @@ pane_cleanup_drag_release_returns_after_source_view_is_freed :: proc(t: ^testing
 		state := &f.state
 		source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
 		id, window_id := f.source.workspace.id, f.source.id
-		f.source.pane_drag = {pressed = true, active = true, shown = true, new_tab = to_tab,
-			source = source, destination = destination, node = source.tree.root,
-			target = destination.tree.root, destination_window = f.destination.id, direction = .Right}
+		place: app.Drag_Destination = app.Drop_Pane{f.destination.id, destination, destination.tree.root, .Right, .Fits}
+		if to_tab {place = app.Drop_New_Tab{f.destination.id, destination, .Fits}}
+		seed_pane_drag(f.source, source, source.tree.root, place)
 		if !testing.expect(t, app.pane_drag_release(state, f.source)) { return }
 		testing.expect(t, app.window_find(state, window_id) == nil)
 		testing.expect(t, app.workspace_find(state, id) == nil)
@@ -210,8 +210,7 @@ pane_cleanup_failure_cancel_stale_and_same_workspace_preserve_source :: proc(t: 
 	workspace := f.source.workspace
 	source, destination := app.selected_tab(workspace), app.selected_tab(f.destination.workspace)
 	node, target := source.tree.root, destination.tree.root
-	app.pane_drag_press(state, f.source, node, 0, 0)
-	f.source.pane_drag.active = true
+	seed_pane_drag(f.source, source, node)
 	app.pane_drag_cancel(state, f.source)
 	testing.expect(t, !app.pane_drag_release(state, f.source))
 	testing.expect(t, !app.pane_transfer(state, f.destination, source, destination,

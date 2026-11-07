@@ -13,7 +13,7 @@ import "core:log"
 pane_link_new_tab :: proc(
 	app: ^App,
 	source_window, destination_window: ^Window,
-	d: Pane_Drag,
+	d: Pane_Grab,
 ) -> bool {
 	if !window_linked(source_window) || window_linked(destination_window) {return false}
 	pane, is_pane := d.source.tree.nodes[d.node].(layout.Pane)
@@ -38,7 +38,8 @@ pane_link_new_tab :: proc(
 pane_link_drag_release :: proc(
 	app: ^App,
 	source_window, destination_window: ^Window,
-	d: Pane_Drag,
+	d: Pane_Grab,
+	drop: Pane_Drop,
 ) -> bool {
 	pane, is_pane := d.source.tree.nodes[d.node].(layout.Pane)
 	if !is_pane {return false}
@@ -58,9 +59,9 @@ pane_link_drag_release :: proc(
 		return false
 	}
 	destination_linked := window_linked(destination_window)
-	destination := d.destination
+	destination := drop.tab
 	slot := layout.INVALID_NODE
-	target := d.target
+	target := drop.target
 	if destination_linked {
 		destination_home, located := pane_link_locate(app, destination_window)
 		if !located {return false}
@@ -69,11 +70,11 @@ pane_link_drag_release :: proc(
 		destination, slot = destination_home.tab, destination_home.slot
 		if !layout.slot_valid(&destination.tree, slot) {return false}
 		if target != layout.INVALID_NODE {
-			if int(target) >= len(d.destination.tree.nodes) {return false}
-			target_pane, target_is_pane := d.destination.tree.nodes[target].(layout.Pane)
+			if int(target) >= len(drop.tab.tree.nodes) {return false}
+			target_pane, target_is_pane := drop.tab.tree.nodes[target].(layout.Pane)
 			if !target_is_pane {return false}
 			target = layout.find_content(&destination.tree, target_pane.content)
-			if target == layout.INVALID_NODE && !d.root {return false}
+			if target == layout.INVALID_NODE && !drop.root {return false}
 		}
 	}
 	if destination == nil {return false}
@@ -98,8 +99,8 @@ pane_link_drag_release :: proc(
 			home.node,
 			slot,
 			target,
-			d.direction,
-			d.root,
+			drop.direction,
+			drop.root,
 		)
 	case destination_linked:
 		_, moved = layout.transfer_pane_to_slot(
@@ -108,14 +109,14 @@ pane_link_drag_release :: proc(
 			home.node,
 			slot,
 			target,
-			d.direction,
-			d.root,
+			drop.direction,
+			drop.root,
 		)
 	case same_tab:
-		if d.root {
-			_, moved = layout.dock_pane(&home.tab.tree, home.node, d.direction)
+		if drop.root {
+			_, moved = layout.dock_pane(&home.tab.tree, home.node, drop.direction)
 		} else {
-			_, moved = layout.move_pane(&home.tab.tree, home.node, target, d.direction)
+			_, moved = layout.move_pane(&home.tab.tree, home.node, target, drop.direction)
 		}
 	case:
 		_, moved = layout.transfer_pane(
@@ -123,8 +124,8 @@ pane_link_drag_release :: proc(
 			&destination.tree,
 			home.node,
 			target,
-			d.direction,
-			d.root,
+			drop.direction,
+			drop.root,
 		)
 	}
 	if !moved {

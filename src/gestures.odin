@@ -191,7 +191,7 @@ gesture_finish :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) ->
 		return true
 	}
 	if e.button != .Left {return false}
-	if w.pane_drag.pressed {_ = pane_drag_release(app, w); return true}
+	if _, pane := pane_drag_grab(w); pane {_ = pane_drag_release(app, w); return true}
 	if ui.editor_order_dragging(&w.editor, .Process_Groups) {
 		_ = ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
 		editor_outcome(app, w, ui.editor_release(&w.editor))
@@ -223,15 +223,16 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	capture := w.gesture.captures[e.button]
 	w.gesture.captures[e.button] = nil
 	if _, cancelled := capture.(Gesture_Cancelled); cancelled {return}
-	if e.button == .Left && w.pane_drag.active && w.pane_drag.picker_window != 0 {
-		pane_drag_move(app, w, x, y, .Shift in e.modifiers)
-		pane_header_cancel(w)
-		_ = pane_drag_release(app, w)
-		return
-	}
-	if e.button == .Left && w.tab_drag.active && w.tab_drag.picker_window != 0 {
-		_ = tab_drag_move(app, w, x, y)
-		tab_drag_finish(app, w)
+	// A drag holding a workspace dropdown open drops there, though the dropdown is a modal surface.
+	if e.button == .Left && drag_holds_dropdown(w) {
+		if pane_drag_active(w) {
+			pane_drag_move(app, w, x, y, .Shift in e.modifiers)
+			pane_header_cancel(w)
+			_ = pane_drag_release(app, w)
+		} else {
+			_ = tab_drag_move(app, w, x, y)
+			tab_drag_finish(app, w)
+		}
 		return
 	}
 	target := pointer_target(app, w, x, y)
@@ -315,24 +316,18 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		}
 	}
 	target := pointer_target(app, w, x, y)
-	if w.pane_drag.pressed && (w.pane_drag.active || !pointer_modal(target)) {
+	if drag_held(w) && (drag_active(w) != nil || !pointer_modal(target)) {
+		_, pane := pane_drag_grab(w)
 		if .Left not_in e.buttons {
-			pane_drag_cancel(app, w)
+			if pane {pane_drag_cancel(app, w)} else {tab_drag_cancel(app, w)}
 			target = pointer_target(app, w, x, y)
-		} else if pane_drag_move(app, w, x, y, .Shift in e.modifiers) {
+		} else if pane && pane_drag_move(app, w, x, y, .Shift in e.modifiers) {
 			pointer_set(app, w, .Resize_All)
 			return
-		}
-	}
-	if w.tab_drag.pressed && (w.tab_drag.active || !pointer_modal(target)) {
-		if .Left not_in e.buttons {
-			tab_drag_cancel(app, w)
-			target = pointer_target(app, w, x, y)
-		} else if tab_drag_move(app, w, x, y) {
-			if w.tab_drag.active {
-				d := &w.tab_drag
-				outside := d.new_window || d.destination_window != 0 || d.picker_window != 0
-				pointer_set(app, w, outside ? .Resize_All : .Arrow)
+		} else if !pane && tab_drag_move(app, w, x, y) {
+			if a := drag_active(w); a != nil {
+				_, reorder := a.destination.(Drop_Reorder)
+				pointer_set(app, w, a.destination == nil || reorder ? .Arrow : .Resize_All)
 			}
 			return
 		}

@@ -2,55 +2,57 @@ package main
 
 import "aio:layout"
 
+// Holds w's workspace dropdown open while the pane drag is on it; Shift, which swaps panes, never holds it.
 pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap: bool) -> bool {
-	d := &source.pane_drag
-	home, _, found := pane_link_origin(app, d.source, d.node)
-	if !found {return false}
-	if swap {
-		workspace_picker_drag_leave(app, &d.picker)
+	a, carry := pane_drag_state(source)
+	if a == nil {return false}
+	held, on := Drop_Workspace_Dropdown{}, false
+	if !swap {
+		home, _, found := pane_link_origin(app, carry.source, carry.node)
+		if !found {return false}
+		request := Workspace_Move_Request{home.workspace.id, home.tab.id, home.node, false}
+		allowed := pane_window_source_can_lose(app, carry.source, carry.node)
+		held, on = workspace_picker_drag_hover(app, a.destination, w, x, y, request, allowed)
+	}
+	if !on {
+		if _, holding := a.destination.(Drop_Workspace_Dropdown); holding {drag_retarget(app, source, a, nil)}
 		return false
 	}
-	request := Workspace_Move_Request{home.workspace.id, home.tab.id, home.node, false}
-	new_window_allowed := pane_window_source_can_lose(app, d.source, d.node)
-	if !workspace_picker_drag_hover(app, &d.picker, w, x, y, request, new_window_allowed) {return false}
-	d.target, d.destination, d.hover = layout.INVALID_NODE, nil, nil
-	d.hover_until = {}
-	d.shown, d.new_tab, d.new_window, d.swap, d.root = false, false, false, false, false
-	d.minimum_rejected = false
+	carry.visit.hover = nil
+	drag_retarget(app, source, a, held)
 	source.dirty, w.dirty = true, true
 	return true
 }
 
-pane_workspace_drag_wheel :: proc(app: ^App, source: ^Window, delta: f32) -> bool {
-	d := &source.pane_drag
-	if !d.active {return false}
-	w := workspace_picker_drag_scroll(app, &d.picker, delta)
-	if w == nil {return false}
-	return pane_workspace_drag_move(app, source, w, d.picker_pointer.x, d.picker_pointer.y, false)
-}
-
-pane_workspace_drag_release :: proc(app: ^App, source: ^Window, d: Pane_Drag) {
-	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
-	picker := d.picker
-	switch drop in workspace_picker_drag_drop(app, &picker) {
+pane_workspace_drag_release :: proc(
+	app: ^App,
+	source: ^Window,
+	a: ^Drag_Active,
+	held: Drop_Workspace_Dropdown,
+) {
+	carry := &a.carry.(Pane_Carry)
+	drop := workspace_picker_drag_drop(app, held)
+	if _, new_window := drop.(Workspace_Drop_New_Window); !new_window {tear_off_preview_discard(app, a)}
+	switch row in drop {
 	case nil:
-		pane_drag_restore(app, source, d)
+		drag_let_go(app, source, a)
+		pane_drag_restore(app, source, carry)
 		return
 	case Workspace_Drop_Row:
-		workspace_move_choose(app, pane_link_acting_window(app, source), drop.request, drop.id)
+		drag_let_go(app, source, a)
+		workspace_move_choose(app, pane_link_acting_window(app, source), row.request, row.id)
 		if window_linked(source) {
-			pane, is_pane := d.source.tree.nodes[d.node].(layout.Pane)
+			pane, is_pane := carry.source.tree.nodes[carry.node].(layout.Pane)
 			if is_pane {pane_link_refresh_source(app, source, pane.content)}
 		}
 		return
 	case Workspace_Drop_New_Window:
 	}
-	if preview := pane_window_preview_create(app, d.source, d.node); preview != nil {
-		tear_off := d
-		tear_off.preview_window = preview.id
-		if pane_tear_off(app, source, tear_off) {return}
-		pane_window_preview_discard(app, preview.id)
+	if tear_off_preview_ensure(app, a, false) != nil && tear_off_commit(app, source, a) {
+		drag_free(app, a)
+		return
 	}
-	pane_drag_restore(app, source, d)
+	drag_let_go(app, source, a)
+	pane_drag_restore(app, source, carry)
 	notify(app, .Error, "Could not move the pane to a new window. The source was preserved.")
 }

@@ -212,7 +212,7 @@ rail_tab_hit :: proc(w: ^Window, layout: ui.Rail_Layout, x, y: f32) -> int {
 	for pass in 0 ..< 2 {
 		for index := len(w.rail_rows) - 1; index >= 0; index -= 1 {
 			row := w.rail_rows[index]
-			foreground := w.tab_drag.active && row.workspace.tabs[row.tab].marked
+			foreground := tab_drag_active(w) && row.workspace.tabs[row.tab].marked
 			if foreground != (pass == 0) {continue}
 			r := rail_tab_rect(w, layout, index)
 			if x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height {return index}
@@ -395,12 +395,13 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		ui.draw_rect(&w.list, {rect = area, color = app.theme.tab_bar})
 	}
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
-	moving := w.tab_drag.active
+	dragging := tab_drag_active(w)
+	moving := dragging
 	for position in w.tab_positions {moving ||= ui.motion_active(position)}
-	for pass in 0 ..< (w.tab_drag.active ? 2 : 1) {
+	for pass in 0 ..< (dragging ? 2 : 1) {
 		foreground := pass == 1
 		for row, index in w.rail_rows {
-			if (w.tab_drag.active && row.workspace.tabs[row.tab].marked) != foreground {continue}
+			if (dragging && row.workspace.tabs[row.tab].marked) != foreground {continue}
 			if result := rail_row_draw(app, w, layout, index, moving); result != .Ok {return result}
 		}
 	}

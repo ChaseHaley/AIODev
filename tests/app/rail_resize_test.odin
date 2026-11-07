@@ -58,14 +58,14 @@ rail_resize_drag_updates_content_clamps_and_finishes_outside :: proc(t: ^testing
 		x, y := app.rail_width_pixels(w) + scale, 100 * scale
 		pointer_expect_move(t, s, w, x, y, .Resize_Horizontal)
 		gesture_button(s, w, .Left, true, x, y)
-		testing.expect(t, w.rail_resizing && !w.tab_drag.pressed && !w.selecting)
+		testing.expect(t, w.rail_resizing && !app.drag_held(w) && !w.selecting)
 		rail_resize_drag_to(s, w, x + 80 * scale, y)
 		testing.expect_value(t, app.rail_width_pixels(w), 288 * scale)
 		after := app.window_content_area(s, w)
 		testing.expect_value(t, after.x - before.x, 80 * scale)
 		testing.expect_value(t, before.width - after.width, 80 * scale)
 		gesture_button(s, w, .Left, false, x + 80 * scale, -20)
-		testing.expect(t, !w.rail_resizing && !w.pane_drag.pressed)
+		testing.expect(t, !w.rail_resizing && !app.drag_held(w))
 		pointer_expect_move(t, s, w, x + 120 * scale, y, .Text)
 		testing.expect_value(t, app.rail_width_pixels(w), 288 * scale)
 

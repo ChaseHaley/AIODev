@@ -200,13 +200,15 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape})
 	testing.expect(t, second.suppressed_key == nil)
 	app.palette_open(s, second)
-	second.pane_drag.pressed, second.pane_drag.active = true, true
-	second.tab_drag.pressed, second.tab_drag.active = true, true
+	seed_pane_drag(second, app.selected_tab(second.workspace), second.tree.focus)
 	app.focus_leave(s, second)
 	testing.expect(t, !app.palette_visible(s, second) && s.palette_owner == nil)
-	testing.expect(t, second.pane_drag.pressed && second.pane_drag.active)
-	testing.expect(t, second.tab_drag.pressed && second.tab_drag.active)
-	second.pane_drag, second.tab_drag = {}, {}
+	testing.expect(t, app.pane_drag_active(second))
+	second.drag = app.Drag_Active{carry = app.Tab_Carry{grab = {grabbed = app.selected_tab(second.workspace)}}}
+	app.focus_enter(s, second)
+	app.focus_leave(s, second)
+	testing.expect(t, app.tab_drag_active(second))
+	second.drag = nil
 	app.palette_open(s, second)
 	app.update_motion(s)
 	app.palette_close(s, second)
@@ -235,8 +237,7 @@ palette_stays_with_its_owner_when_the_new_window_goes_away :: proc(t: ^testing.T
 	preview := app.pane_window_preview_create(s, app.selected_tab(w.workspace), w.tree.focus)
 	if !testing.expect(t, preview != nil) { return }
 	preview_id := preview.id
-	app.pane_drag_press(s, w, w.tree.focus, 30, 60)
-	w.pane_drag.preview_window = preview_id
+	seed_pane_drag(w, app.selected_tab(w.workspace), w.tree.focus, preview = app.Preview_Ready{preview_id})
 	app.palette_open(s, preview)
 	testing.expect(t, app.window_find(s, preview_id) == nil)
 	testing.expect(t, app.palette_active(s, previous) && app.palette_visible(s, previous))

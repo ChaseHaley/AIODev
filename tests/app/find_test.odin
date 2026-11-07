@@ -65,7 +65,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	defer app.tab_drag_cancel(&state, &w)
 	row := app.rail_row_rect_for_tab(&w, 0)
 	app.tab_press(&state, &w, 0, row.x + 20, row.y + row.height / 2, false)
-	if !testing.expect(t, w.tab_drag.pressed) { return }
+	if !testing.expect(t, app.tab_drag_held(&w)) { return }
 	// Seed the gesture, the tabs' hold on it and the overlay together; moves and releases use the real
 	// app dispatcher.
 	w.gesture.captures[.Left] = app.Gesture_Held{app.Pointer_Target.Tabs}
@@ -74,9 +74,9 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	target := app.rail_row_rect_for_tab(&w, 1)
 	x, y := i32(target.x + 20), i32(target.y + target.height / 2)
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
-	if !testing.expect(t, w.tab_drag.active && workspace.tabs[1] == &tabs[0]) { return }
+	if !testing.expect(t, app.tab_drag_active(&w) && workspace.tabs[1] == &tabs[0]) { return }
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
-	testing.expect(t, !w.tab_drag.pressed && !w.tab_drag.active)
+	testing.expect(t, !app.drag_held(&w))
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y})
 	testing.expect(t, workspace.tabs[1] == &tabs[0])
 	testing.expect_value(t, workspace.selected, 1)
