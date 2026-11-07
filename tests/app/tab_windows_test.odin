@@ -32,23 +32,31 @@ tab_drag_over_window :: proc(state: ^app.App, w, destination: ^app.Window, index
 	app.tab_drag_over(state, w, destination, x, y)
 }
 
+// The destination of w's tab drag, nil while it holds none.
+tab_drag_destination :: proc(w: ^app.Window) -> app.Tab_Destination {
+	a := app.drag_active(w)
+	if a == nil {return nil}
+	carry, _ := a.carry.(app.Tab_Carry)
+	return carry.destination
+}
+
 // The window w's tab drag offers its tabs to, or 0.
 @(private = "file")
 tab_drag_offered :: proc(w: ^app.Window) -> input.Window_Id {
-	offer, _ := app.drag_destination(w).(app.Drop_Other_Window)
+	offer, _ := tab_drag_destination(w).(app.Drop_Other_Window)
 	return offer.window
 }
 
 // The dropdown w's drag holds open: its window, or 0, and the row under the pointer.
 @(private = "file")
 tab_drag_dropdown :: proc(w: ^app.Window) -> app.Drop_Workspace_Dropdown {
-	held, _ := app.drag_destination(w).(app.Drop_Workspace_Dropdown)
+	held, _ := tab_drag_destination(w).(app.Drop_Workspace_Dropdown)
 	return held
 }
 
 @(private = "file")
 tab_drag_tears_off :: proc(w: ^app.Window) -> bool {
-	_, tear_off := app.drag_destination(w).(app.Drop_Tear_Off)
+	_, tear_off := tab_drag_destination(w).(app.Drop_Tear_Off)
 	return tear_off
 }
 
@@ -285,7 +293,8 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	testing.expect(t, tab_drag_to_row(&state, source, source, 0, 0))
 	between := tab_drag_dropdown(source)
 	between.row = -1
-	app.drag_active(source).destination = between
+	carry := &app.drag_active(source).carry.(app.Tab_Carry)
+	carry.destination = between
 	app.tab_drag_release(&state, source)
 	testing.expect_value(t, len(workspace.tabs), 5)
 

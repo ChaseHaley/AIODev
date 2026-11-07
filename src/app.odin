@@ -415,14 +415,19 @@ wake_platform :: proc(user: rawptr) {
 initial_geometry :: proc(app: ^App) -> term.Geometry {
 	scale := f32(platform_api.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
-	box, width, height := pane_box_for_grid(
+	// A new window as it shows once opened and its settings apply, before it has a size.
+	template := Window {
+		scale              = scale,
+		metrics            = metrics,
+		rail_default_width = f32(app.settings.tabs.rail_width),
+		tabs_horizontal    = app.settings.tabs.orientation == .Horizontal,
+	}
+	box, width, height, _ := pane_box_for_grid(
 		app,
-		scale,
-		metrics,
+		template,
 		u16(app.settings.window.columns),
 		u16(app.settings.window.rows),
 		pane_insets(app, scale, nil),
-		f32(app.settings.tabs.rail_width),
 	)
 	return {
 		columns = box.columns,

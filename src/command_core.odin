@@ -327,7 +327,6 @@ control_split :: proc(
 	)
 	switch err {
 	case .None:
-		if linked != nil {pane_link_store(app, linked)}
 	case .Minimum:
 		return outcome_failure(.Failed, "the pane is too small to split; change Minimum Pane Width and Height")
 	case .Check, .Layout:

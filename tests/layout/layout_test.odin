@@ -146,11 +146,11 @@ dividers_hit_drag_and_reject_stale_nodes :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(dividers), 2)
 	testing.expect_value(t, dividers[0].rect, layout.Rect{100, 0, 4, 204})
 	testing.expect_value(t, dividers[1].rect, layout.Rect{104, 100, 100, 4})
-	hits: [2]layout.Divider
-	testing.expect_value(t, layout.divider_hit_all(dividers[:], 99, 50, 2, hits[:]), 1)
-	d := hits[0]
+	hits: [2]int
+	testing.expect_value(t, layout.divider_hit_all(nil, dividers[:], 99, 50, 2, hits[:]), 1)
+	d := dividers[hits[0]]
 	testing.expect_value(t, d.node, l.root)
-	testing.expect_value(t, layout.divider_hit_all(dividers[:], 10, 10, 2, hits[:]), 0)
+	testing.expect_value(t, layout.divider_hit_all(nil, dividers[:], 10, 10, 2, hits[:]), 0)
 	testing.expect(t, layout.drag_divider(&l, d, 152, 0, 4))
 	testing.expect_value(t, l.nodes[l.root].(layout.Split).ratio, f32(0.75))
 	testing.expect(t, layout.drag_divider(&l, d, 500, 0, 4))

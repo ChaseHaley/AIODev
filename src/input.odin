@@ -60,10 +60,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			link_hover_clear(w)
 			pane_scrollbar_hover_leave(w, .Terminal)
 			w.split_overlay = false
-			for &view in w.views {
-				view.header_hover = .None
-				ui.armed_cancel(&view.header_armed)
-			}
+			pane_header_cancel(w)
 			w.dirty = true
 		}
 	case input.Mouse_Wheel_Event:

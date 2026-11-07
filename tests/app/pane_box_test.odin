@@ -63,14 +63,10 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 					testing.expect_value(t, insets.header,
 						headers ? math.round(ui.HEADER_HEIGHT * scale) : 0)
 					for grid in ([?][2]u16{{80, 24}, {40, 10}, {1, 1}}) {
-						box, width, height := app.pane_box_for_grid(
-							&state,
-							scale,
-							w.metrics,
-							grid.x,
-							grid.y,
-							insets,
+						box, width, height, solved := app.pane_box_for_grid(
+							&state, w, grid.x, grid.y, insets,
 						)
+						testing.expect(t, solved)
 						testing.expect_value(t, box.columns, grid.x)
 						testing.expect_value(t, box.rows, grid.y)
 						w.width, w.height = width, height
@@ -97,9 +93,8 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 			w := box_window(&workspace, scale)
 			w.rail_width = width
 			insets := app.pane_insets(&state, scale, nil)
-			box, client_width, client_height := app.pane_box_for_grid(
-				&state, scale, w.metrics, 120, 24, insets, width,
-			)
+			box, client_width, client_height, solved := app.pane_box_for_grid(&state, w, 120, 24, insets)
+			testing.expect(t, solved)
 			w.width, w.height = client_width, client_height
 			app.rail_adaptive_update(&w)
 			applied := box_applied(t, &state, &w, .Terminal)

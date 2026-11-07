@@ -163,7 +163,8 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		   ) !=
 		   .None {return .Ok}
 	}
-	if _, new_tab := drag_destination(w).(Drop_New_Tab); new_tab || w.tab_incoming.count > 0 {return .Ok}
+	drop, placed := pane_drag_destination(w).(Pane_Drop)
+	if (placed && drop.place == .New_Tab) || w.tab_incoming.count > 0 {return .Ok}
 	new_tab := tab_control(w, Tab_Chrome_New{})
 	if result := ui.tab_new_draw(
 		&w.list,

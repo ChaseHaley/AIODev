@@ -38,7 +38,9 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 					testing.expect_value(t, panel.y + panel.height, rail.y + rail.height)
 					testing.expect_value(t, w.dock_left_width, 0)
 					testing.expect(t, w.status_rail_reserve > 0)
-					for d in w.dividers {testing.expect(t, d.node != app.ACTIVITY_DIVIDER)}
+					for edge in w.dock_edges.edges[:w.dock_edges.count] {
+						testing.expect(t, edge != .Activity_Width)
+					}
 					continue
 				}
 				if side == .Left {

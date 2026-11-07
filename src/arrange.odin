@@ -1,390 +1,17 @@
 package main
 
-import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "aio:render"
 import "aio:ui"
-import "core:fmt"
-import "core:math"
 import "core:time"
 
-@(private)
-DOUBLE_CLICK_NS :: i64(500_000_000)
-@(private)
-DRAG_THRESHOLD :: 5
+// A pane drag from a header: where the pointer is resolves to a Pane_Drop, the trial measures the move it
+// plans (pane_moves.odin), the outline shows it and the release carries it out.
+
 @(private)
 GHOST_DURATION :: 120 * time.Millisecond
 
-// A Left press on a divider, dock edge or rail edge; nil is Idle. First_Click remembers the last press,
-// so a second press on the same divider within DOUBLE_CLICK_NS balances what it divides. Dragging moves
-// the splits whose dividers meet under the pointer, outermost first, and keeps its press as the first
-// click for the release. The procs below are the only writers.
-Divider_Gesture :: union {
-	Divider_First_Click,
-	Divider_Drag,
-}
-
-Divider_First_Click :: struct {
-	node:    layout.Node_Id,
-	time_ns: i64,
-}
-
-Divider_Drag :: struct {
-	nodes:   [4]layout.Node_Id,
-	offsets: [4]f32,
-	count:   int,
-	click:   Divider_First_Click,
-}
-
-divider_dragging :: proc(w: ^Window) -> ^Divider_Drag {
-	drag, ok := &w.divider.(Divider_Drag)
-	return ok ? drag : nil
-}
-
-when AIO_CONTROL {
-	divider_drag_count :: proc(w: ^Window) -> int {
-		drag := divider_dragging(w)
-		return drag == nil ? 0 : drag.count
-	}
-}
-
-// The rail edge is among the dragged dividers.
-rail_resizing :: proc(w: ^Window) -> bool {
-	drag := divider_dragging(w)
-	if drag == nil {return false}
-	for node in drag.nodes[:drag.count] {if node == RAIL_DIVIDER {return true}}
-	return false
-}
-
-// The drag ends at the release point; its press stays the first click of a double-click.
-divider_drag_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	if divider_dragging(w) == nil {return false}
-	divider_drag(app, w, x, y)
-	if drag := divider_dragging(w); drag != nil {
-		click := drag.click
-		w.divider = click
-	}
-	return true
-}
-
-// A drag or first click that was interrupted: a later press starts over.
-divider_cancel :: proc(w: ^Window) {
-	w.divider = nil
-}
-
-@(private)
-divider_hits :: proc(w: ^Window, x, y: f32, out: []layout.Divider) -> int {
-	tree := window_tree(w)
-	if root, _, covered := floating_frame_at(w, x, y); covered {
-		hits: [8]layout.Divider
-		n := layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, hits[:], 10 * w.scale, 2 * w.scale)
-		count := 0
-		for d in hits[:n] {
-			if dock_divider(d.node) || layout.float_root(tree, d.node) != root {continue}
-			if count >= len(out) {break}
-			out[count] = d
-			count += 1
-		}
-		return count
-	}
-	if rail_overlay(w) {
-		area := rail_area(w)
-		for d in w.dividers {
-			if d.node != RAIL_DIVIDER {continue}
-			if x < area.x || x >= d.rect.x + d.rect.width + 3 * w.scale ||
-			   y < area.y || y >= area.y + area.height {break}
-			docks: [2]layout.Divider
-			count := 0
-			for dock in w.dividers {
-				if dock_divider(dock.node) {docks[count] = dock; count += 1}
-			}
-			return layout.divider_hit_all(docks[:count], x, y, 3 * w.scale, out)
-		}
-	}
-	hits: [8]layout.Divider
-	n := layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, hits[:], 10 * w.scale, 2 * w.scale)
-	count := 0
-	for d in hits[:n] {
-		if !dock_divider(d.node) && layout.float_root(tree, d.node) != layout.INVALID_NODE {continue}
-		if count >= len(out) {break}
-		out[count] = d
-		count += 1
-	}
-	return count
-}
-
-// Starts a divider drag, or on a second click of the same divider balances the splits it belongs to.
-divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
-	hits: [4]layout.Divider
-	n := divider_hits(w, x, y, hits[:])
-	if n == 0 {return false}
-	selection_cancel(w)
-	if click, ok := w.divider.(Divider_First_Click);
-	   ok && hits[0].node == click.node && time_ns > click.time_ns &&
-	   time_ns - click.time_ns <= DOUBLE_CLICK_NS {
-		w.divider = nil
-		balanced := false
-		tree := window_tree(w)
-		for d in hits[:n] {
-			if dock_divider(d.node) {dock_divider_reset(w, d.node); balanced = true}
-			else {balanced = layout.balance_related(tree, d.node) || balanced}
-		}
-		if balanced {window_relayout(app, w)}
-		return true
-	}
-	drag := Divider_Drag {
-		count = n,
-		click = {hits[0].node, time_ns},
-	}
-	for d, i in hits[:n] {
-		drag.nodes[i] = d.node
-		if dock_divider(d.node) {
-			pointer := d.axis == .Vertical ? y : x
-			drag.offsets[i] = pointer - dock_divider_position(app, w, d.node)
-		}
-	}
-	w.divider = drag
-	return true
-}
-
-// Each split takes the pointer position on its own axis. Divider areas are refreshed after every move,
-// because an outer split resizes the region of the splits nested inside it.
-divider_drag :: proc(app: ^App, w: ^Window, x, y: f32) {
-	drag := divider_dragging(w)
-	if drag == nil {return}
-	gap := window_gap(app, w)
-	tree := window_tree(w)
-	moved := false
-	for node, i in drag.nodes[:drag.count] {
-		if dock_divider(node) {
-			pointer := node == ACTIVITY_HEIGHT_DIVIDER ? y : x
-			dock_divider_drag(app, w, node, pointer - drag.offsets[i])
-			w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
-			w.status_rail_reserve = status_panel_rail_height(app, w)
-			window_dividers(app, w)
-			moved = true
-			continue
-		}
-		for d in w.dividers {
-			if d.node != node {continue}
-			if layout.drag_divider(tree, d, x, y, gap) {
-				moved = true
-				window_dividers(app, w)
-			}
-			break
-		}
-	}
-	if moved {window_relayout(app, w)}
-}
-
-divider_cursor :: proc(w: ^Window, x, y: f32) -> (platform.Cursor_Shape, bool) {
-	hits: [4]layout.Divider
-	n := divider_hits(w, x, y, hits[:])
-	if n == 0 {return .Arrow, false}
-	axes: bit_set[layout.Axis]
-	for d in hits[:n] {axes += {d.axis}}
-	if axes == {.Horizontal, .Vertical} {return .Resize_All, true}
-	return .Horizontal in axes ? .Resize_Horizontal : .Resize_Vertical, true
-}
-
-tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) {
-	if index < 0 || index >= len(w.workspace.tabs) || !w.workspace.tabs[index].marked {return}
-	offset: [2]f32
-	if w.tabs_horizontal {
-		bar := window_tab_bar(app, w)
-		if bar.tab_width <= 0 {return}
-		offset.x = x - (bar.x + tab_position(w, index) * bar.tab_width)
-	} else {
-		row := rail_row_rect_for_tab(w, index)
-		if row.height <= 0 {return}
-		offset.y = (y - row.y) / row.height
-	}
-	drag_press(w, x, y, Tab_Grab{w.workspace.tabs[index], offset, modified})
-}
-
-// Moves a tab and everything indexed by tab position, keeping the selected tab selected.
-tab_move :: proc(app: ^App, w: ^Window, from, to: int) {
-	tabs := &w.workspace.tabs
-	if from == to || from < 0 || to < 0 || from >= len(tabs) || to >= len(tabs) {return}
-	tab := tabs[from]
-	ordered_remove(tabs, from)
-	inject_at(tabs, to, tab)
-	tab_presentation_move(&w.presentation, from, to)
-	w.workspace.selected = tab_selected_after_move(w.workspace.selected, from, to)
-	rail_reveal_active(w)
-	mark_all_dirty(app)
-}
-
-// The active tab drag in w, or nil.
-@(private)
-tab_drag_state :: proc(w: ^Window) -> (^Drag_Active, ^Tab_Carry) {
-	a := drag_active(w)
-	if a == nil {return nil, nil}
-	carry, tab := &a.carry.(Tab_Carry)
-	if !tab {return nil, nil}
-	return a, carry
-}
-
-tab_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	if grab, passed := drag_threshold_passed(w, x, y); passed {
-		tab, is_tab := grab.(Tab_Grab)
-		if !is_tab {return false}
-		order, err := make([dynamic]^Tab, len(w.workspace.tabs))
-		if err != nil {
-			_ = drag_end(w)
-			notify(app, .Error, "Could not begin tab dragging.")
-			return true
-		}
-		copy(order[:], w.workspace.tabs[:])
-		rank := 0
-		for candidate in order {if candidate == tab.grabbed {break}; if candidate.marked {rank += 1}}
-		_ = drag_activate(w, Tab_Carry{grab = tab, order = order, rank = rank}, x, y)
-	}
-	if !tab_drag_active(w) {return false}
-	if tab_drag_windows_move(app, w, x, y) {return true}
-	if w.tabs_horizontal {return tab_drag_move_strip(app, w, x)}
-	return tab_drag_move_rail(app, w, x, y)
-}
-
-@(private)
-tab_drag_apply_slot :: proc(app: ^App, w: ^Window, slot: int) -> bool {
-	_, d := tab_drag_state(w)
-	marked, mark_error := make([]bool, len(d.order), context.temp_allocator)
-	if mark_error !=
-	   nil {tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return false}
-	count := 0
-	for tab, i in d.order {marked[i] = tab.marked; if tab.marked {count += 1}}
-	if len(d.order) - count <= 0 {return false}
-	order, order_error := make([]int, len(d.order), context.temp_allocator)
-	if order_error !=
-	   nil {tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return false}
-	if !ui.tab_group_order(marked, slot, order) {return false}
-	for original, to in order {
-		for tab, from in w.workspace.tabs {
-			if tab == d.order[original] {tab_move(app, w, from, to); break}
-		}
-	}
-	w.dirty = true
-	return true
-}
-
-@(private)
-tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
-	a, d := tab_drag_state(w)
-	drag_retarget(app, w, a, Drop_Reorder{})
-	bar := window_tab_bar(app, w)
-	if bar.tab_width <= 0 {return true}
-	count := 0
-	for tab in d.order {if tab.marked {count += 1}}
-	if len(d.order) - count <= 0 {return true}
-	first := clamp(
-		(x - bar.x - d.offset.x) / bar.tab_width - f32(d.rank),
-		0,
-		f32(len(d.order) - count),
-	)
-	if !tab_drag_apply_slot(app, w, int(math.floor(first + 0.5))) {return true}
-	tab_drag_follow_pointer(w, first)
-	return true
-}
-
-@(private)
-tab_drag_follow_pointer :: proc(w: ^Window, first: f32) {
-	rank, now := 0, time.tick_now()
-	for tab, i in w.workspace.tabs {
-		if !tab.marked {continue}
-		if i < len(w.tab_positions) {
-			ui.motion_target(&w.tab_positions[i], first + f32(rank), 0, .Linear, false, now)
-		}
-		rank += 1
-	}
-}
-
-@(private)
-tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	a, d := tab_drag_state(w)
-	layout, ok := rail_current_layout(w)
-	if !ok || !rail_visible(w) || layout.list.height <= 0 || layout.row_height <= 0 {
-		drag_retarget(app, w, a, nil)
-		w.dirty = true
-		return true
-	}
-	if !render.rect_contains(rail_area(w), x, y) {
-		drag_retarget(app, w, a, nil)
-		w.dirty = true
-		return true
-	}
-	drag_retarget(app, w, a, Drop_Reorder{})
-	if layout.count == 0 {return true}
-	count := 0
-	for tab in d.order {if tab.marked {count += 1}}
-	if len(d.order) - count <= 0 {return true}
-	first_row := ui.rail_row_rect(layout, 0)
-	first :=
-		(y - first_row.y) / layout.row_height -
-		d.offset.y -
-		f32(d.rank)
-	first = clamp(first, 0, f32(len(d.order) - count))
-	if !tab_drag_apply_slot(app, w, int(math.floor(first + 0.5))) {return true}
-	first = clamp(first + (w.rail_scroll - layout.scroll) / layout.row_height, 0, f32(len(d.order) - count))
-	tab_drag_follow_pointer(w, first)
-	return true
-}
-
-tab_drag_cancel :: proc(app: ^App, w: ^Window) {
-	if !tab_drag_held(w) {return}
-	d := drag_end(w)
-	if a, active := &d.(Drag_Active); active {tab_drag_abandon(app, w, a)}
-}
-
-// Puts an ended tab drag's tabs back in their order and lets go of everything it held.
-@(private)
-tab_drag_abandon :: proc(app: ^App, w: ^Window, a: ^Drag_Active) {
-	for tab, to in a.carry.(Tab_Carry).order {
-		for current, from in w.workspace.tabs {if current == tab {tab_move(app, w, from, to); break}}
-	}
-	drag_let_go(app, w, a)
-}
-
-// Drops the tabs at the destination. A click without a drag selects only the pressed tab, unless it changed
-// the marks.
-tab_drag_release :: proc(app: ^App, w: ^Window) {
-	if !tab_drag_held(w) {return}
-	d := drag_end(w)
-	switch &state in d {
-	case Drag_Pressed:
-		if !state.grab.(Tab_Grab).modified {tab_select_one(w.workspace, w.workspace.selected)}
-	case Drag_Active:
-		a := &state
-		drag_thumbnail_destroy(&a.thumbnail)
-		switch destination in a.destination {
-		case Drop_Workspace_Dropdown:
-			tab_workspace_drag_release(app, w, a, destination)
-		case Drop_Other_Window:
-			tab_drag_release_on_window(app, w, a, destination)
-		case Drop_Tear_Off:
-			_, ready := a.preview.(Preview_Ready)
-			if ready && tear_off_commit(app, w, a) {
-				drag_free(app, a)
-				return
-			}
-			tab_drag_abandon(app, w, a)
-			if ready {notify(app, .Error, "Could not move the tabs. The source was preserved.")}
-		case Drop_Reorder:
-			drag_let_go(app, w, a)
-		case nil, Drop_Pane, Drop_Swap, Drop_Dock_Root, Drop_New_Tab:
-			tab_drag_abandon(app, w, a)
-		}
-	}
-}
-
-// The drop may take the window's last tab, and the window with it.
-tab_drag_finish :: proc(app: ^App, w: ^Window) {
-	id := w.id
-	tab_drag_release(app, w)
-	if window_find(app, id) != nil {rail_overlay_dismiss(app, w)}
-}
-
+// A pane drag is the app's only one, so a press here cancels a pane drag held in any other window.
 pane_drag_press :: proc(app: ^App, w: ^Window, node: layout.Node_Id, x, y: f32) {
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		if i < len(app.windows) && app.windows[i] != w {pane_drag_cancel(app, app.windows[i])}
@@ -456,21 +83,21 @@ nearest_side :: proc(r: layout.Rect, x, y: f32) -> layout.Direction {
 	return .Down
 }
 
-// Where the dragged pane would land at `destination`, and whether it fits there: the target's card for a
-// swap, the new tab's place, otherwise its card in a trial layout.
+// Where the dragged pane would land on `drop` in w, and whether it fits there: the target's card for a swap,
+// the new tab's place, otherwise the pane's card in a trial of the move the drop would make.
 @(private)
 pane_drag_preview :: proc(
 	app: ^App,
+	source_window: ^Window,
 	carry: ^Pane_Carry,
-	destination: Drag_Destination,
+	w: ^Window,
+	drop: Pane_Drop,
 ) -> (
 	layout.Rect,
 	Drop_Fit,
 ) {
-	w := window_find(app, drag_destination_window(destination))
-	if w == nil {return {}, .Refused}
-	switch d in destination {
-	case Drop_New_Tab:
+	switch drop.place {
+	case .New_Tab:
 		pane := carry.source.tree.nodes[carry.node].(layout.Pane)
 		panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
 		reorders_tab :=
@@ -497,42 +124,14 @@ pane_drag_preview :: proc(
 				max(0, r.height - 2 * inset),
 			},
 			.Fits
-	case Drop_Swap:
-		for pane in w.panes {if pane.node == d.target {return pane.rect, .Fits}}
-	case Drop_Pane:
-		return pane_drag_trial(app, carry, w, d.tab, d.target, d.direction, false)
-	case Drop_Dock_Root:
-		return pane_drag_trial(app, carry, w, d.tab, d.target, d.direction, true)
-	case Drop_Reorder, Drop_Other_Window, Drop_Workspace_Dropdown, Drop_Tear_Off:
+	case .Swap:
+		for pane in w.panes {if pane.node == drop.target {return pane.rect, .Fits}}
+		return {}, .Refused
+	case .Beside, .Edge:
 	}
-	return {}, .Refused
-}
-
-@(private)
-pane_drag_trial :: proc(
-	app: ^App,
-	carry: ^Pane_Carry,
-	w: ^Window,
-	destination: ^Tab,
-	target: layout.Node_Id,
-	direction: layout.Direction,
-	root: bool,
-) -> (
-	layout.Rect,
-	Drop_Fit,
-) {
-	result: Pane_Trial_Result
-	// A pane returning to the window that owns its tab is still in that tree under its slot, so the
-	// trial must move it there rather than copy it across from the linked window's view.
-	home, source_linked := Pane_Link_Home{}, false
-	if source_pane, is_pane := carry.source.tree.nodes[carry.node].(layout.Pane); is_pane {
-		home, source_linked = pane_link_home(app, source_pane.content)
-	}
-	if source_linked && !window_linked(w) && destination == home.tab {
-		result = pane_trial_move(app, w, &home.tab.tree, &home.tab.tree, home.node, target, direction, root)
-	} else {
-		result = pane_trial_move(app, w, &carry.source.tree, &destination.tree, carry.node, target, direction, root)
-	}
+	op, resolved := pane_drop_operation(app, source_window, carry.source, carry.node, w, drop)
+	if !resolved {return {}, pane_drop_refusal(source_window, carry.source, w, drop)}
+	result := pane_trial_operation(app, w, op)
 	#partial switch result.error {
 	case .None:
 		return result.rect, .Fits
@@ -545,48 +144,28 @@ pane_drag_trial :: proc(
 // Whether the outline shows: a destination the pane fits, or a tear-off with its window prepared.
 @(private)
 pane_drag_ghost_shown :: proc(a: ^Drag_Active) -> bool {
-	if _, tear_off := a.destination.(Drop_Tear_Off); tear_off {
+	switch d in a.carry.(Pane_Carry).destination {
+	case Drop_Tear_Off:
 		_, ready := a.preview.(Preview_Ready)
 		return ready
+	case Pane_Drop:
+		return d.fit == .Fits
+	case Drop_Workspace_Dropdown:
 	}
-	fit, placed := pane_drop_fit(a.destination)
-	return placed && fit == .Fits
-}
-
-@(private)
-pane_drop_fit :: proc(destination: Drag_Destination) -> (Drop_Fit, bool) {
-	#partial switch d in destination {
-	case Drop_Pane:
-		return d.fit, true
-	case Drop_Swap:
-		return d.fit, true
-	case Drop_Dock_Root:
-		return d.fit, true
-	case Drop_New_Tab:
-		return d.fit, true
-	}
-	return .Refused, false
+	return false
 }
 
 // The same place to land, whatever the fit.
 @(private)
-pane_drop_same :: proc(a, b: Drag_Destination) -> bool {
+pane_destination_same :: proc(a, b: Pane_Destination) -> bool {
 	switch x in a {
 	case nil:
 		return b == nil
-	case Drop_Pane:
-		y, ok := b.(Drop_Pane)
-		return ok && x.window == y.window && x.tab == y.tab && x.target == y.target && x.direction == y.direction
-	case Drop_Swap:
-		y, ok := b.(Drop_Swap)
-		return ok && x.window == y.window && x.target == y.target
-	case Drop_Dock_Root:
-		y, ok := b.(Drop_Dock_Root)
-		return ok && x.window == y.window && x.tab == y.tab && x.target == y.target && x.direction == y.direction
-	case Drop_New_Tab:
-		y, ok := b.(Drop_New_Tab)
-		return ok && x.window == y.window && x.tab == y.tab
-	case Drop_Reorder, Drop_Other_Window, Drop_Workspace_Dropdown, Drop_Tear_Off:
+	case Pane_Drop:
+		y, ok := b.(Pane_Drop)
+		return ok && x.window == y.window && x.tab == y.tab && x.place == y.place && x.target == y.target &&
+			x.direction == y.direction
+	case Drop_Workspace_Dropdown, Drop_Tear_Off:
 	}
 	return false
 }
@@ -649,7 +228,7 @@ pane_drag_outside :: proc(
 	swap: bool,
 	point: Drag_Point,
 ) {
-	next: Drag_Destination
+	next: Pane_Destination
 	if swap {
 	} else if pane_window_source_can_lose(app, carry.source, carry.node) {
 		next = Drop_Tear_Off{}
@@ -657,7 +236,7 @@ pane_drag_outside :: proc(
 	} else {
 		tear_off_preview_discard(app, a)
 	}
-	drag_retarget(app, w, a, next)
+	pane_drag_retarget(app, w, a, next)
 	_, tear_off := next.(Drop_Tear_Off)
 	shown := pane_drag_ghost_shown(a)
 	pane_drag_thumbnail_sync(app, w, a, carry, shown, point.screen_x, point.screen_y)
@@ -733,32 +312,26 @@ pane_drag_target_move :: proc(
 		}
 	}
 	if swap && destination != carry.source {target = layout.INVALID_NODE}
-	next: Drag_Destination
+	// Each place keeps only the fields it uses, so the same place compares equal wherever the pointer is.
+	next: Pane_Destination
 	switch {
 	case new_tab:
-		next = Drop_New_Tab{w.id, destination, .Fits}
+		next = Pane_Drop{w.id, destination, .New_Tab, layout.INVALID_NODE, .Left, .Fits}
 	case target == layout.INVALID_NODE:
 	case swap:
-		next = Drop_Swap{w.id, target, .Fits}
+		next = Pane_Drop{w.id, destination, .Swap, target, .Left, .Fits}
 	case root:
-		next = Drop_Dock_Root{w.id, destination, target, direction, .Fits}
+		next = Pane_Drop{w.id, destination, .Edge, target, direction, .Fits}
 	case:
-		next = Drop_Pane{w.id, destination, target, direction, .Fits}
+		next = Pane_Drop{w.id, destination, .Beside, target, direction, .Fits}
 	}
-	if pane_drop_same(a.destination, next) && !changed_window {return true}
-	rect, fit := pane_drag_preview(app, carry, next)
-	#partial switch &d in next {
-	case Drop_Pane:
-		d.fit = fit
-	case Drop_Swap:
-		d.fit = fit
-	case Drop_Dock_Root:
-		d.fit = fit
-	case Drop_New_Tab:
-		d.fit = fit
+	if pane_destination_same(carry.destination, next) && !changed_window {return true}
+	rect: layout.Rect
+	if drop, placed := &next.(Pane_Drop); placed {
+		rect, drop.fit = pane_drag_preview(app, source_window, carry, w, drop^)
 	}
 	shown := pane_drag_ghost_shown(a)
-	drag_retarget(app, source_window, a, next)
+	pane_drag_retarget(app, source_window, a, next)
 	// The ghost fades in on every drop kind, so crossing between the tab strip and a pane
 	// never flashes between faded and opaque.
 	ui.motion_target(&carry.reveal, 1, GHOST_DURATION, .Decelerate, app.animations, now)
@@ -802,40 +375,6 @@ pane_drag_hover :: proc(
 	}
 }
 
-// A pane drop's destination, resolved for the procs that carry it out.
-@(private)
-Pane_Drop :: struct {
-	window:              input.Window_Id,
-	tab:                 ^Tab,
-	target:              layout.Node_Id,
-	direction:           layout.Direction,
-	root, swap, new_tab: bool,
-	fit:                 Drop_Fit,
-}
-
-@(private)
-pane_drop_resolve :: proc(carry: ^Pane_Carry, destination: Drag_Destination) -> (Pane_Drop, bool) {
-	#partial switch d in destination {
-	case Drop_Pane:
-		return {window = d.window, tab = d.tab, target = d.target, direction = d.direction, fit = d.fit}, true
-	case Drop_Swap:
-		return {window = d.window, tab = carry.source, target = d.target, swap = true, fit = d.fit}, true
-	case Drop_Dock_Root:
-		return {
-				window = d.window,
-				tab = d.tab,
-				target = d.target,
-				direction = d.direction,
-				root = true,
-				fit = d.fit,
-			},
-			true
-	case Drop_New_Tab:
-		return {window = d.window, tab = d.tab, target = layout.INVALID_NODE, new_tab = true, fit = d.fit}, true
-	}
-	return {}, false
-}
-
 // Finishes a header drag; a drop outside another pane leaves the layout unchanged.
 pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	if _, held := pane_drag_grab(w); !held {return false}
@@ -844,9 +383,10 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 	if !active {return false}
 	carry := &a.carry.(Pane_Carry)
 	drag_thumbnail_destroy(&a.thumbnail)
-	#partial switch held in a.destination {
+	drop: Pane_Drop
+	switch destination in carry.destination {
 	case Drop_Workspace_Dropdown:
-		pane_workspace_drag_release(app, w, a, held)
+		pane_workspace_drag_release(app, w, a, destination)
 		return true
 	case Drop_Tear_Off:
 		_, ready := a.preview.(Preview_Ready)
@@ -858,61 +398,43 @@ pane_drag_release :: proc(app: ^App, w: ^Window) -> bool {
 		pane_drag_restore(app, w, carry)
 		if ready {notify(app, .Error, "Could not move the pane. The source was preserved.")}
 		return true
+	case nil:
+		drag_let_go(app, w, a)
+		pane_drag_restore(app, w, carry)
+		return true
+	case Pane_Drop:
+		drop = destination
 	}
-	drop, placed := pane_drop_resolve(carry, a.destination)
 	drag_let_go(app, w, a)
-	destination_window := placed ? window_find(app, drop.window) : nil
+	destination_window := window_find(app, drop.window)
 	if destination_window == nil {pane_drag_restore(app, w, carry); return true}
 	destination_window.dirty = true
 	if destination_window != w {pane_drag_show_source(app, w, carry.source)}
 	if drop.fit != .Fits {
-		if drop.fit == .Too_Small {
-			notify(
-				app,
-				.Warning,
-				fmt.tprintf(
-					"Can't dock: minimum %d × %d content cells. " +
-					"Change Minimum Pane Width and Height in Settings.",
-					app.settings.pane.minimum_columns,
-					app.settings.pane.minimum_rows,
-				),
-			)
-		}
+		pane_drop_refused(app, drop.fit)
 		pane_drag_restore(app, w, carry)
 		return true
 	}
-	if drop.new_tab {
-		if window_linked(w) {
-			if !pane_link_new_tab(app, w, destination_window, carry.grab) {pane_drag_restore(app, w, carry)}
-		} else if !pane_to_tab(app, destination_window, carry.source, carry.node) {
-			pane_drag_restore(app, w, carry)
-		}
-		return true
+	if pane_drop_commit(app, w, carry.grab, destination_window, drop) {return true}
+	pane_drag_restore(app, w, carry)
+	if drop.place != .New_Tab {
+		pane_drop_refused(app, pane_drop_refusal(w, carry.source, destination_window, drop))
 	}
-	if (window_linked(w) || window_linked(destination_window)) && destination_window != w {
-		if pane_link_drag_release(app, w, destination_window, carry.grab, drop) {return true}
-		pane_drag_restore(app, w, carry)
-		notify(app, .Error, "Could not move the pane. The source was preserved.")
-		return true
-	}
-	if drop.tab != carry.source {
-		if !pane_transfer(
-			app,
-			destination_window,
-			carry.source,
-			drop.tab,
-			carry.node,
-			drop.target,
-			drop.direction,
-			drop.root,
-		) {
-			pane_drag_restore(app, w, carry)
-			notify(app, .Error, "Could not move the pane. Both tabs were preserved.")
-		}
-		return true
-	}
-	pane_rearrange(app, w, carry.node, drop.target, drop.direction, drop.swap, drop.root)
 	return true
+}
+
+// Tells the user why a released drop moved nothing, once, for the refusals that need saying.
+@(private)
+pane_drop_refused :: proc(app: ^App, fit: Drop_Fit) {
+	switch fit {
+	case .Too_Small:
+		pane_minimum_dock_refused(app)
+	case .Refused_Source_Kept:
+		notify(app, .Error, "Could not move the pane. The source was preserved.")
+	case .Refused_Tabs_Kept:
+		notify(app, .Error, "Could not move the pane. Both tabs were preserved.")
+	case .Fits, .Refused:
+	}
 }
 
 // A rest on another tab switches to it when its moment is up.
@@ -949,17 +471,18 @@ pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) 
 
 // The label a drop would produce, independent of its drawing.
 @(require_results)
-pane_drag_label :: proc(grab: Pane_Grab, destination: Drag_Destination) -> string {
-	#partial switch d in destination {
-	case Drop_New_Tab:
-		if d.tab == grab.source && grab.node == grab.source.tree.root {
+pane_drag_label :: proc(grab: Pane_Grab, drop: Pane_Drop) -> string {
+	switch drop.place {
+	case .New_Tab:
+		if drop.tab == grab.source && grab.node == grab.source.tree.root {
 			return "Move tab to end"
 		}
 		return "+ New tab"
-	case Drop_Swap:
+	case .Swap:
 		return "Swap panes"
-	case Drop_Dock_Root:
+	case .Edge:
 		return "Dock to workspace edge"
+	case .Beside:
 	}
 	return "Move pane here"
 }
@@ -967,11 +490,9 @@ pane_drag_label :: proc(grab: Pane_Grab, destination: Drag_Destination) -> strin
 // The outline of a pane drop: in the window it lands in, or around the pane a tear-off takes from its own.
 pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	a, carry := pane_drag_state(w)
-	if a != nil {
-		if _, tear_off := a.destination.(Drop_Tear_Off); !tear_off {a = nil}
-	}
+	if a != nil && !drag_tearing_off(a) {a = nil}
 	for source in app.windows {
-		if sa, sc := pane_drag_state(source); sa != nil && drag_destination_window(sa.destination) == w.id {
+		if sa, sc := pane_drag_state(source); sa != nil && pane_destination_window(sc.destination) == w.id {
 			a, carry = sa, sc
 			break
 		}
@@ -981,7 +502,8 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	radius := f32(app.settings.pane.corner_radius) * w.scale
 	// The thumbnail copies this pane live, so a tear-off marks it with an outline and nothing over its text.
-	if _, tear_off := a.destination.(Drop_Tear_Off); tear_off {
+	drop, placed := carry.destination.(Pane_Drop)
+	if !placed {
 		_ = render.push_rect(
 			&w.list,
 			{rect = r, color = app.theme.accent, radius = radius, stroke = 2 * w.scale},
@@ -1000,7 +522,7 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		   {rect = r, color = accent, radius = radius, stroke = 2 * w.scale},
 	   ) !=
 	   .None {return .Ok}
-	label := pane_drag_label(carry.grab, a.destination)
+	label := pane_drag_label(carry.grab, drop)
 	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
 	label_color := app.theme.text

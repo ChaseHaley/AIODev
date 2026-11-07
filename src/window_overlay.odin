@@ -40,7 +40,7 @@ Overlay_Tab_Menu :: struct {
 
 // A dock edge's menu, which offers to keep the edge's current size. Its rows are w.divider_menu.
 Overlay_Divider_Menu :: struct {
-	node: layout.Node_Id,
+	edge: Dock_Edge,
 }
 
 Overlay_Profile_Menu :: struct {

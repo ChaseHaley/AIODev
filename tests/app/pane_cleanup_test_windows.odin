@@ -127,8 +127,8 @@ pane_cleanup_drag_release_returns_after_source_view_is_freed :: proc(t: ^testing
 		state := &f.state
 		source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
 		id, window_id := f.source.workspace.id, f.source.id
-		place: app.Drag_Destination = app.Drop_Pane{f.destination.id, destination, destination.tree.root, .Right, .Fits}
-		if to_tab {place = app.Drop_New_Tab{f.destination.id, destination, .Fits}}
+		place := app.Pane_Drop{f.destination.id, destination, .Beside, destination.tree.root, .Right, .Fits}
+		if to_tab {place.place, place.target = .New_Tab, layout.INVALID_NODE}
 		seed_pane_drag(f.source, source, source.tree.root, place)
 		if !testing.expect(t, app.pane_drag_release(state, f.source)) { return }
 		testing.expect(t, app.window_find(state, window_id) == nil)
