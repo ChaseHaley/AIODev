@@ -11,6 +11,7 @@ import "aio:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "aio:verify_protocol"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -35,6 +36,7 @@ _ :: platform
 _ :: render
 _ :: term
 _ :: ui
+_ :: verify_protocol
 _ :: settings
 _ :: program_art
 
@@ -79,10 +81,17 @@ when AIO_CONTROL {
 		Verify_Quitting,
 	}
 
+	// A polled control message and the request parsed from its arguments, which the request
+	// borrows. The state holding it destroys both.
+	Verify_Message :: struct {
+		transport: ^control.Message,
+		request: verify_protocol.Request,
+	}
+
 	// A read or drive held until the window has presented what it last drew, so it never sees a
 	// stale frame.
 	Verify_Gate :: struct {
-		message: ^control.Message,
+		message: Verify_Message,
 		then: Verify_Gated,
 		started: time.Tick,
 		request_frame: u64,
@@ -96,18 +105,18 @@ when AIO_CONTROL {
 	}
 
 	Verify_Wait :: struct {
-		message: ^control.Message,
+		message: Verify_Message,
 		started: time.Tick,
 		request_frame: u64,
 	}
 
 	// A drive has happened; its reply waits for the window to settle, then reports what changed.
 	Verify_Drive :: struct {
-		message: ^control.Message,
+		message: Verify_Message,
 		started: time.Tick,
 		request_frame: u64,
 		before: term.Snapshot,
-		before_state: []control.State_Entry,
+		before_state: []verify_protocol.State_Entry,
 	}
 
 	// The reply to the request that quit has been sent; the app's quit is held until it is delivered.
@@ -124,37 +133,37 @@ when AIO_CONTROL {
 	}
 
 	// Every request type names its action, so a new one cannot silently become a drive.
-	verify_action :: proc(request: control.Request) -> (action: Verify_Action) {
+	verify_action :: proc(request: verify_protocol.Request) -> (action: Verify_Action) {
 		switch r in request {
 		case nil:
 			action = .Read
-		case control.Ping,
-		     control.Screen,
-		     control.Cells,
-		     control.State,
-		     control.Expect,
-		     control.Help,
-		     control.Capture,
-		     control.Pixels,
-		     control.Diff,
-		     control.Draws,
-		     control.Perf,
-		     control.Vt:
+		case verify_protocol.Ping,
+		     verify_protocol.Screen,
+		     verify_protocol.Cells,
+		     verify_protocol.State,
+		     verify_protocol.Expect,
+		     verify_protocol.Help,
+		     verify_protocol.Capture,
+		     verify_protocol.Pixels,
+		     verify_protocol.Diff,
+		     verify_protocol.Draws,
+		     verify_protocol.Perf,
+		     verify_protocol.Vt:
 			action = .Read
-		case control.Wait:
+		case verify_protocol.Wait:
 			action = .Wait
-		case control.Tray:
+		case verify_protocol.Tray:
 			action = r.action == .Quit ? .Quit : .Drive
-		case control.Type,
-		     control.Key,
-		     control.Run,
-		     control.Mouse,
-		     control.Focus,
-		     control.Resize,
-		     control.Dpi,
-		     control.Command,
-		     control.Window_Select,
-		     control.Window_Move:
+		case verify_protocol.Type,
+		     verify_protocol.Key,
+		     verify_protocol.Run,
+		     verify_protocol.Mouse,
+		     verify_protocol.Focus,
+		     verify_protocol.Resize,
+		     verify_protocol.Dpi,
+		     verify_protocol.Command,
+		     verify_protocol.Window_Select,
+		     verify_protocol.Window_Move:
 			action = .Drive
 		}
 		return
@@ -247,13 +256,13 @@ when AIO_CONTROL {
 		case Verify_Gate:
 			started, timeout_ms = s.started, verify_timeout(s.message.request)
 		case Verify_Wait:
-			r := s.message.request.(control.Wait)
+			r := s.message.request.(verify_protocol.Wait)
 			started, timeout_ms = s.started, r.timeout_ms
 			if r.kind == .Idle {idle_ms = r.idle_ms}
 		case Verify_Drive:
 			started = s.started
 			idle_ms, timeout_ms = verify_drive_limits(s.message.request)
-			if _, resize := s.message.request.(control.Resize); resize {timeout_ms = RESIZE_TIMEOUT_MS}
+			if _, resize := s.message.request.(verify_protocol.Resize); resize {timeout_ms = RESIZE_TIMEOUT_MS}
 		}
 		for w in app.windows {
 			if w.dirty && window_drawable(w) {return now, true}
@@ -273,7 +282,7 @@ when AIO_CONTROL {
 		persistent: bool = false,
 	) -> (
 		term.Snapshot,
-		control.Error,
+		verify_protocol.Error,
 	) {
 		w := verify_window(app)
 		if w == nil {return {}, .Invalid_Argument}
@@ -291,7 +300,7 @@ when AIO_CONTROL {
 		return {}, .Invalid_Argument
 	}
 
-	verify_value :: proc(entries: []control.State_Entry, key: string) -> string {
+	verify_value :: proc(entries: []verify_protocol.State_Entry, key: string) -> string {
 		for entry in entries {
 			if entry.key == key {return entry.value}
 		}
@@ -299,8 +308,8 @@ when AIO_CONTROL {
 	}
 
 	// How long a read or drive waits for the window to present a frame before it starts.
-	verify_timeout :: proc(request: control.Request) -> int {
-		if r, run := request.(control.Run); run {return r.timeout_ms}
+	verify_timeout :: proc(request: verify_protocol.Request) -> int {
+		if r, run := request.(verify_protocol.Run); run {return r.timeout_ms}
 		return 5000
 	}
 
@@ -308,18 +317,18 @@ when AIO_CONTROL {
 	RESIZE_TIMEOUT_MS :: 5000
 
 	// How long after a drive the content must be quiet, and the longest a drive waits for it.
-	verify_drive_limits :: proc(request: control.Request) -> (idle_ms, timeout_ms: int) {
-		if r, run := request.(control.Run); run {return r.idle_ms, r.timeout_ms}
+	verify_drive_limits :: proc(request: verify_protocol.Request) -> (idle_ms, timeout_ms: int) {
+		if r, run := request.(verify_protocol.Run); run {return r.idle_ms, r.timeout_ms}
 		return 50, 1000
 	}
 
-	verify_needs_window :: proc(request: control.Request) -> bool {
+	verify_needs_window :: proc(request: verify_protocol.Request) -> bool {
 		#partial switch r in request {
-		case control.Ping, control.Help, control.State, control.Perf:
+		case verify_protocol.Ping, verify_protocol.Help, verify_protocol.State, verify_protocol.Perf:
 			return false
-		case control.Tray:
+		case verify_protocol.Tray:
 			return r.action == .Hide
-		case control.Expect:
+		case verify_protocol.Expect:
 			return r.kind != .State
 		}
 		return true
@@ -333,7 +342,7 @@ when AIO_CONTROL {
 	}
 
 	@(require_results)
-	verify_state :: proc(app: ^App) -> ([]control.State_Entry, control.Error) {
+	verify_state :: proc(app: ^App) -> ([]verify_protocol.State_Entry, verify_protocol.Error) {
 		w := verify_window(app)
 		palette_owner := palette_owner_id(app)
 		owns_palette := w != nil && palette_owner == w.id
@@ -361,8 +370,8 @@ when AIO_CONTROL {
 				                                           context.temp_allocator)
 			}
 		}
-		entries := make([dynamic]control.State_Entry, context.temp_allocator)
-		base := [?]control.State_Entry {
+		entries := make([dynamic]verify_protocol.State_Entry, context.temp_allocator)
+		base := [?]verify_protocol.State_Entry {
 			{"app.pid", fmt.tprintf("%d", os.get_pid())},
 			{"app.app", app.app_id},
 			{"app.build", AIO_BUILD_ID},
@@ -409,7 +418,7 @@ when AIO_CONTROL {
 		if _, err := append(&entries, ..base[:]); err != nil {return nil, .Out_Of_Memory}
 		for mode in ui.Palette_Mode {
 			r := palette_layout.modes[mode]
-			entry := control.State_Entry{fmt.tprintf("palette.mode.%s", ui.palette_mode_word(mode)),
+			entry := verify_protocol.State_Entry{fmt.tprintf("palette.mode.%s", ui.palette_mode_word(mode)),
 				fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)}
 			if _, err := append(&entries, entry); err != nil {return nil, .Out_Of_Memory}
 		}
@@ -419,7 +428,7 @@ when AIO_CONTROL {
 			if err != .None {return nil, .System}
 			if window == w {origin = {x, y}}
 			prefix := fmt.tprintf("window.%d", i + 1)
-			inventory := [?]control.State_Entry {
+			inventory := [?]verify_protocol.State_Entry {
 				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", window.id)},
 				{fmt.tprintf("%s.origin", prefix), fmt.tprintf("%d,%d", x, y)},
 				{
@@ -496,7 +505,7 @@ when AIO_CONTROL {
 					markdown_selected = ui.markdown_selected_text(&pane.view, document)
 				}
 			}
-			window := [?]control.State_Entry {
+			window := [?]verify_protocol.State_Entry {
 				{"window.id", fmt.tprintf("%d", w.id)},
 				{"markdown.count", fmt.tprintf("%d", len(app.markdown_panes))},
 				{"markdown.active", fmt.tprintf("%t", markdown_active(w))},
@@ -742,7 +751,7 @@ when AIO_CONTROL {
 			for row, i in activity_rows {
 				rect := verify_workspace_rect(status_panel_row_rect(w, activity_list, row))
 				text := row.report ? status_item_name(app, row.item) : row.label
-				row_state := [?]control.State_Entry {
+				row_state := [?]verify_protocol.State_Entry {
 					{fmt.tprintf("activity.row.%d.rect", i), rect},
 					{fmt.tprintf("activity.row.%d.report", i), fmt.tprintf("%t", row.report)},
 					{fmt.tprintf("activity.row.%d.text", i), text},
@@ -751,7 +760,7 @@ when AIO_CONTROL {
 				if _, err := append(&entries, ..row_state[:]); err != nil { return nil, .Out_Of_Memory }
 			}
 			for i in 0..<w.tab_menu.count {
-				row := [?]control.State_Entry{
+				row := [?]verify_protocol.State_Entry{
 					{fmt.tprintf("tab_menu.row.%d.label", i + 1), tab_menu_label(w, i)},
 					{fmt.tprintf("tab_menu.row.%d.separator", i + 1), fmt.tprintf("%t", w.tab_menu.separators[i])},
 					{fmt.tprintf("tab_menu.row.%d.enabled", i + 1), fmt.tprintf("%t", tab_menu_enabled(w, i))},
@@ -766,7 +775,7 @@ when AIO_CONTROL {
 					title := row.workspace.tabs[row.tab].title
 					selected := row.tab == w.workspace.selected
 					marked := row.workspace.tabs[row.tab].marked
-					row_state := [?]control.State_Entry{
+					row_state := [?]verify_protocol.State_Entry{
 						{fmt.tprintf("rail.row.%d.kind", i + 1), "tab"},
 						{fmt.tprintf("rail.row.%d.title", i + 1), title},
 						{fmt.tprintf("rail.row.%d.rect", i + 1), verify_workspace_rect(rect)},
@@ -779,7 +788,7 @@ when AIO_CONTROL {
 				}
 			}
 		} else {
-			hidden := [?]control.State_Entry {
+			hidden := [?]verify_protocol.State_Entry {
 				{"window.id", "0"},
 				{"window.origin", "0,0"},
 				{"window.workspace_index", "0"},
@@ -804,7 +813,7 @@ when AIO_CONTROL {
 		} else if len(app.workspaces) > 0 {
 			workspace = app.workspaces[0]
 		}
-		workspace_state := [?]control.State_Entry {
+		workspace_state := [?]verify_protocol.State_Entry {
 			{"tabs.count", fmt.tprintf("%d", len(workspace.tabs))},
 			{
 				"tabs.selected",
@@ -831,7 +840,7 @@ when AIO_CONTROL {
 				strip_rect = window_tab_rect(app, w, i)
 				strip_close = window_tab_close_rect(app, w, i)
 			}
-			tab_state := [?]control.State_Entry {
+			tab_state := [?]verify_protocol.State_Entry {
 				{fmt.tprintf("%s.id", prefix), fmt.tprintf("%d", tab.id)},
 				{fmt.tprintf("%s.marked", prefix), fmt.tprintf("%t", tab.marked)},
 				{fmt.tprintf("%s.position", prefix), fmt.tprintf("%g", position)},
@@ -853,14 +862,14 @@ when AIO_CONTROL {
 						g := term.geometry(session.session)
 						if _, err := append(
 							&entries,
-							control.State_Entry {
+							verify_protocol.State_Entry {
 								fmt.tprintf("%s.pane.%d.grid", prefix, n),
 								fmt.tprintf("%dx%d", g.columns, g.rows),
 							},
 						); err != nil {return nil, .Out_Of_Memory}
 						if _, err := append(
 							&entries,
-							control.State_Entry {
+							verify_protocol.State_Entry {
 								fmt.tprintf("%s.pane.%d.keep_open", prefix, n),
 								fmt.tprintf("%t", session.keep_open),
 							},
@@ -868,14 +877,14 @@ when AIO_CONTROL {
 					}
 					if _, err := append(
 						&entries,
-						control.State_Entry {
+						verify_protocol.State_Entry {
 							fmt.tprintf("%s.pane.%d.session", prefix, n),
 							fmt.tprintf("%d", pane.content.id),
 						},
 					); err != nil {return nil, .Out_Of_Memory}
 					if floating, floated := layout.float_of(&tab.tree, layout.Node_Id(n)); floated {
 						b := floating.bounds
-						floating_state := [?]control.State_Entry {
+						floating_state := [?]verify_protocol.State_Entry {
 							{
 								fmt.tprintf("%s.pane.%d.float", prefix, n),
 								fmt.tprintf("%g,%g,%g,%g", b.x, b.y, b.width, b.height),
@@ -892,7 +901,7 @@ when AIO_CONTROL {
 				}
 			}
 			shown_floats, minimized_floats := layout.float_counts(&tab.tree)
-			tab_floats := [?]control.State_Entry {
+			tab_floats := [?]verify_protocol.State_Entry {
 				{fmt.tprintf("%s.panes", prefix), fmt.tprintf("%d", count)},
 				{fmt.tprintf("%s.floating", prefix), fmt.tprintf("%d", shown_floats)},
 				{fmt.tprintf("%s.minimized", prefix), fmt.tprintf("%d", minimized_floats)},
@@ -904,7 +913,7 @@ when AIO_CONTROL {
 			tab_thumbnail, pane_thumbnail: Drag_Thumbnail
 			if drag.tab {tab_thumbnail = drag.thumbnail}
 			if drag.pane {pane_thumbnail = drag.thumbnail}
-			pane_state := [?]control.State_Entry {
+			pane_state := [?]verify_protocol.State_Entry {
 				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
 				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
 				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(w)))},
@@ -962,7 +971,7 @@ when AIO_CONTROL {
 				if !pane_owns_session(view.content.kind) {continue}
 				if _, err := append(
 					&entries,
-					control.State_Entry {
+					verify_protocol.State_Entry {
 						fmt.tprintf("session.%d.builds", view.content.id),
 						fmt.tprintf("%d", view.builds),
 					},
@@ -972,7 +981,7 @@ when AIO_CONTROL {
 				r := pane.rect
 				if _, err := append(
 					&entries,
-					control.State_Entry {
+					verify_protocol.State_Entry {
 						fmt.tprintf("pane.%d.rect", pane.node),
 						fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height),
 					},
@@ -1000,7 +1009,7 @@ when AIO_CONTROL {
 			}
 			program: Program_Adopted
 			if adopted := program_adopted(entry); adopted != nil {program = adopted^}
-			session := [?]control.State_Entry {
+			session := [?]verify_protocol.State_Entry {
 				{"session.id", fmt.tprintf("%d", entry.id)},
 				{"session.message", session_message(status)},
 				{"grid.size", fmt.tprintf("%dx%d", g.columns, g.rows)},
@@ -1031,14 +1040,14 @@ when AIO_CONTROL {
 			}
 			if _, err := append(&entries, ..session[:]); err != nil {return nil, .Out_Of_Memory}
 			if w == nil {
-				grid := [?]control.State_Entry {
+				grid := [?]verify_protocol.State_Entry {
 					{"grid.cell", fmt.tprintf("%dx%d", g.cell_width, g.cell_height)},
 					{"grid.padding", fmt.tprintf("%d", g.padding_left)},
 				}
 				if _, err := append(&entries, ..grid[:]); err != nil {return nil, .Out_Of_Memory}
 			}
 		}
-		if _, err := append(&entries, control.State_Entry{
+		if _, err := append(&entries, verify_protocol.State_Entry{
 			"notices.window", fmt.tprintf("%d", app.notice_window),
 		}); err != nil {return nil, .Out_Of_Memory}
 		for n in ui.notices_live(&app.notices) {
@@ -1050,7 +1059,7 @@ when AIO_CONTROL {
 			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
 			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
 			value := fmt.tprintf("%s: %s (%s)", kind, n.text, left)
-			if _, err := append(&entries, control.State_Entry{key, value}); err != nil {
+			if _, err := append(&entries, verify_protocol.State_Entry{key, value}); err != nil {
 				return nil, .Out_Of_Memory
 			}
 		}
@@ -1231,7 +1240,7 @@ when AIO_CONTROL {
 		return "closed"
 	}
 
-	verify_error :: proc(app: ^App, err: control.Error) {
+	verify_error :: proc(app: ^App, err: verify_protocol.Error) {
 		log.errorf("control request failed: %v", err)
 		verify_reply(
 			app,
@@ -1242,13 +1251,17 @@ when AIO_CONTROL {
 
 	// Records what a drive's reply compares against. On failure the caller frees what was recorded.
 	@(require_results)
-	verify_before :: proc(app: ^App, d: ^Verify_Drive, entries: []control.State_Entry) -> control.Error {
+	verify_before :: proc(
+		app: ^App,
+		d: ^Verify_Drive,
+		entries: []verify_protocol.State_Entry,
+	) -> verify_protocol.Error {
 		if w := verify_window(app); w != nil && focused_session(app, w) != nil {
-			err: control.Error
+			err: verify_protocol.Error
 			d.before, err = verify_snapshot(app, true)
 			if err != .None {return err}
 		}
-		owned, allocation_error := make([]control.State_Entry, len(entries))
+		owned, allocation_error := make([]verify_protocol.State_Entry, len(entries))
 		if allocation_error != nil {return .Out_Of_Memory}
 		d.before_state = owned
 		for entry, i in entries {
@@ -1278,7 +1291,7 @@ when AIO_CONTROL {
 		key: input.Key,
 		mods: input.Modifiers,
 		pressed: bool,
-	) -> control.Error {
+	) -> verify_protocol.Error {
 		if window_find(app, id) == nil {return .Invalid_Argument}
 		buffer: [32]u8
 		event, err := platform.synthesize_key(id, key, mods, pressed, buffer[:])
@@ -1292,11 +1305,11 @@ when AIO_CONTROL {
 		app: ^App,
 		id: platform.Window_Id,
 		chord: commands.Shortcut,
-	) -> control.Error {
+	) -> verify_protocol.Error {
 		keys := [?]input.Key{.Control_Left, .Shift_Left, .Alt_Left, .Meta_Left}
 		flags := [?]input.Modifier{.Control, .Shift, .Alt, .Super}
 		mods: input.Modifiers
-		err: control.Error
+		err: verify_protocol.Error
 		for key, i in keys {
 			if flags[i] not_in chord.modifiers {continue}
 			mods += {flags[i]}
@@ -1320,7 +1333,7 @@ when AIO_CONTROL {
 	verify_position :: proc(
 		app: ^App,
 		w: ^Window,
-		p: control.Position,
+		p: verify_protocol.Position,
 		pixels: bool,
 		screen: bool = false,
 	) -> (
@@ -1348,7 +1361,7 @@ when AIO_CONTROL {
 	}
 
 	@(require_results)
-	verify_mouse :: proc(app: ^App, w: ^Window, m: control.Mouse) -> control.Error {
+	verify_mouse :: proc(app: ^App, w: ^Window, m: verify_protocol.Mouse) -> verify_protocol.Error {
 		v := &app.verify
 		if v.mouse_window != w.id {
 			v.mouse_window, v.buttons = w.id, {}
@@ -1418,15 +1431,15 @@ when AIO_CONTROL {
 	}
 
 	@(require_results)
-	verify_drive :: proc(app: ^App, request: control.Request) -> control.Error {
-		if selection, ok := request.(control.Window_Select); ok {
+	verify_drive :: proc(app: ^App, request: verify_protocol.Request) -> verify_protocol.Error {
+		if selection, ok := request.(verify_protocol.Window_Select); ok {
 			id := platform.Window_Id(selection.id)
 			if window_find(app, id) == nil {return .Invalid_Argument}
 			app.verify.target_window = id
 			return .None
 		}
 		w := verify_window(app)
-		if tray, ok := request.(control.Tray); ok {
+		if tray, ok := request.(verify_protocol.Tray); ok {
 			switch tray.action {
 			case .Open:
 				handle_event(app, platform.Tray_Event{})
@@ -1440,18 +1453,18 @@ when AIO_CONTROL {
 		if w == nil {return .Invalid_Argument}
 		id := w.id
 		#partial switch r in request {
-		case control.Type:
+		case verify_protocol.Type:
 			handle_event(app, platform.Text_Event{w.id, r.text})
-		case control.Key:
+		case verify_protocol.Key:
 			for chord in r.chords {
 				if err := verify_chord(app, id, chord); err != .None {return err}
 			}
-		case control.Run:
+		case verify_protocol.Run:
 			handle_event(app, platform.Text_Event{w.id, r.line})
 			return verify_chord(app, w.id, {.Enter, {}})
-		case control.Mouse:
+		case verify_protocol.Mouse:
 			return verify_mouse(app, w, r)
-		case control.Window_Move:
+		case verify_protocol.Window_Move:
 			if platform.window_set_position(
 				   &app.platform,
 				   w.id,
@@ -1459,11 +1472,11 @@ when AIO_CONTROL {
 				   i32(r.position.y),
 			   ) !=
 			   .None {return .System}
-		case control.Focus:
+		case verify_protocol.Focus:
 			handle_event(app, platform.Focus_Event{w.id, r.focused})
-		case control.Dpi:
+		case verify_protocol.Dpi:
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
-		case control.Resize:
+		case verify_protocol.Resize:
 			insets := pane_insets(app, w.scale, focused_session(app, w))
 			desired, width, height := pane_box_for_grid(
 				app,
@@ -1490,7 +1503,7 @@ when AIO_CONTROL {
 				height += i32(math.ceil(desired.rect.height - area.height))
 			}
 			return .Invalid_Argument
-		case control.Command:
+		case verify_protocol.Command:
 			command := commands.find(&app.registry, r.name)
 			if command == nil || command.disabled {return .Invalid_Argument}
 			palette_close(app, w)
@@ -1505,7 +1518,7 @@ when AIO_CONTROL {
 	}
 
 	@(require_results)
-	verify_rows :: proc(s: ^term.Snapshot, count: int = 3) -> (string, control.Error) {
+	verify_rows :: proc(s: ^term.Snapshot, count: int = 3) -> (string, verify_protocol.Error) {
 		rows: [3]string
 		n := 0
 		for row := int(s.rows) - 1; row >= 0 && n < min(count, len(rows)); row -= 1 {
@@ -1524,10 +1537,10 @@ when AIO_CONTROL {
 		app: ^App,
 		d: ^Verify_Drive,
 		s: ^term.Snapshot,
-		entries: []control.State_Entry,
+		entries: []verify_protocol.State_Entry,
 	) -> (
 		string,
-		control.Error,
+		verify_protocol.Error,
 	) {
 		parts := make([dynamic]string, context.temp_allocator)
 		ranges := make([dynamic]string, context.temp_allocator)
@@ -1563,7 +1576,7 @@ when AIO_CONTROL {
 			a, b := verify_value(d.before_state, key), verify_value(entries, key)
 			if a == b {continue}
 			value := strings.builder_make(context.temp_allocator)
-			if err := control.format_value(&value, b); err != .None {return "", err}
+			if err := verify_protocol.format_value(&value, b); err != .None {return "", err}
 			change := fmt.tprintf("%s=%s", key, strings.to_string(value))
 			if key == "window.visible" {change = b == "true" ? "window shown" : "window hidden"}
 			if key == "palette.open" {change = b == "true" ? "palette opened" : "palette closed"}
@@ -1578,7 +1591,7 @@ when AIO_CONTROL {
 			prefix := fmt.tprintf("%s: %s (", kind, n.text)
 			if strings.has_prefix(old, prefix) {continue}
 			value := strings.builder_make(context.temp_allocator)
-			if err := control.format_value(&value, n.text); err != .None {return "", err}
+			if err := verify_protocol.format_value(&value, n.text); err != .None {return "", err}
 			label := fmt.tprintf(
 				"notice %s %s",
 				verify_notice_key(n.key),
@@ -1597,49 +1610,49 @@ when AIO_CONTROL {
 		return fmt.tprintf("ok; %s", strings.join(parts[:], "; ", context.temp_allocator)), .None
 	}
 
-	verify_read :: proc(app: ^App, request: control.Request) {
+	verify_read :: proc(app: ^App, request: verify_protocol.Request) {
 		entries, state_error := verify_state(app)
 		if state_error != .None {verify_error(app, state_error); return}
 		out := strings.builder_make(context.temp_allocator)
-		err: control.Error
+		err: verify_protocol.Error
 		passed := true
 		#partial switch r in request {
-		case control.Ping:
-			for key, i in ([]string{"pid", "app", "build", "data", "settings", "log"}) {
-				fmt.sbprintf(&out, "%s%s=", i == 0 ? "" : " ", key)
-				err = control.format_value(&out, verify_value(entries, fmt.tprintf("app.%s", key)))
-				if err != .None {break}
+		case verify_protocol.Ping:
+			values: [verify_protocol.Ping_Field]string
+			for name, field in verify_protocol.PING_FIELDS {
+				values[field] = verify_value(entries, fmt.tprintf("app.%s", name))
 			}
-		case control.Help:
-			err = control.help(&out, r.command)
-		case control.State:
-			err = control.format_state(&out, entries)
-		case control.Screen, control.Cells, control.Expect:
+			err = verify_protocol.format_ping(&out, values)
+		case verify_protocol.Help:
+			err = verify_protocol.help(&out, r.command)
+		case verify_protocol.State:
+			err = verify_protocol.format_state(&out, entries)
+		case verify_protocol.Screen, verify_protocol.Cells, verify_protocol.Expect:
 			s: term.Snapshot
-			expect, is_expect := request.(control.Expect)
+			expect, is_expect := request.(verify_protocol.Expect)
 			if !is_expect || expect.kind != .State {
 				s, err = verify_snapshot(app)
 				if err != .None {verify_error(app, err); return}
 			}
 			#partial switch r in request {
-			case control.Screen:
-				err = control.format_screen(&out, &s, r.rows)
-			case control.Cells:
-				err = control.format_cells(&out, &s, r)
-			case control.Expect:
-				passed, err = control.evaluate(&out, r, &s, entries)
+			case verify_protocol.Screen:
+				err = verify_protocol.format_screen(&out, &s, r.rows)
+			case verify_protocol.Cells:
+				err = verify_protocol.format_cells(&out, &s, r)
+			case verify_protocol.Expect:
+				passed, err = verify_protocol.evaluate(&out, r, &s, entries)
 			}
-		case control.Capture:
+		case verify_protocol.Capture:
 			err = capture_read(app, &out, r)
-		case control.Pixels:
+		case verify_protocol.Pixels:
 			err = pixels_read(app, &out, r)
-		case control.Diff:
+		case verify_protocol.Diff:
 			err = pixels_diff(app, &out, r)
-		case control.Draws:
+		case verify_protocol.Draws:
 			err = draws_read(app, &out, r)
-		case control.Perf:
+		case verify_protocol.Perf:
 			err = perf_read(app, &out, r)
-		case control.Vt:
+		case verify_protocol.Vt:
 			err = vt_record(app, &out, r)
 		case:
 			err = .Invalid_Argument
@@ -1647,7 +1660,7 @@ when AIO_CONTROL {
 		if err != .None {
 			// Evidence commands explain bad input, files, or devices in their own words.
 			text := strings.to_string(out)
-			if strings.has_prefix(text, "error:") {
+			if verify_protocol.reply_explained(text) {
 				verify_reply(app, false, text)
 				return
 			}
@@ -1659,7 +1672,7 @@ when AIO_CONTROL {
 
 	verify_wait :: proc(app: ^App, wait: Verify_Wait, w: ^Window, now: time.Tick, presented: bool) {
 		v := &app.verify
-		r := wait.message.request.(control.Wait)
+		r := wait.message.request.(verify_protocol.Wait)
 		elapsed := int(time.tick_diff(wait.started, now) / time.Millisecond)
 		timed_out := elapsed >= r.timeout_ms
 		idle := time.tick_diff(v.changed, now) >= time.Duration(r.idle_ms) * time.Millisecond
@@ -1681,19 +1694,21 @@ when AIO_CONTROL {
 		case .Frame:
 			passed = v.frames > wait.request_frame
 		case .Text, .Gone:
-			e := control.Expect {
+			e := verify_protocol.Expect {
 				kind = r.kind == .Text ? .Text : .No_Text,
 				text = r.text,
 			}
-			passed, err = control.evaluate(&out, e, &s)
+			passed, err = verify_protocol.evaluate(&out, e, &s)
 			label = fmt.tprintf("%s %q", r.kind == .Text ? "text" : "gone", r.text)
 			if passed && r.kind == .Text {
-				label = strings.trim_prefix(strings.trim_space(strings.to_string(out)), "PASS ")
+				text := strings.trim_space(strings.to_string(out))
+				label = strings.trim_prefix(text, verify_protocol.PASS_PREFIX)
 			}
 		}
 		if err != .None {verify_error(app, err); return}
 		if passed && presented && v.frames > wait.request_frame && !w.dirty {
-			verify_reply(app, true, fmt.tprintf("PASS wait %s after %dms", label, elapsed))
+			text := fmt.tprintf("%swait %s after %dms", verify_protocol.PASS_PREFIX, label, elapsed)
+			verify_reply(app, true, text)
 			return
 		}
 		if timed_out {
@@ -1703,7 +1718,8 @@ when AIO_CONTROL {
 				app,
 				false,
 				fmt.tprintf(
-					"FAIL wait %s: timeout after %dms; last rows: %s",
+					"%swait %s: timeout after %dms; last rows: %s",
+					verify_protocol.FAIL_PREFIX,
 					label,
 					elapsed,
 					rows,
@@ -1718,7 +1734,7 @@ when AIO_CONTROL {
 		v := &app.verify
 		elapsed := int(time.tick_diff(d.started, now) / time.Millisecond)
 		idle_ms, timeout_ms := verify_drive_limits(d.message.request)
-		_, is_run := d.message.request.(control.Run)
+		_, is_run := d.message.request.(verify_protocol.Run)
 		quiet := time.tick_diff(v.changed, now) >= time.Duration(idle_ms) * time.Millisecond
 		frame := w == nil || v.frames > d.request_frame && !w.dirty
 		if elapsed < timeout_ms && (!quiet || !frame) {
@@ -1726,7 +1742,7 @@ when AIO_CONTROL {
 			return
 		}
 		s: term.Snapshot
-		err: control.Error
+		err: verify_protocol.Error
 		if w != nil && focused_session(app, w) != nil {
 			s, err = verify_snapshot(app)
 			if err != .None {verify_error(app, err); return}
@@ -1751,7 +1767,7 @@ when AIO_CONTROL {
 		}
 		entries, state_error := verify_state(app)
 		if state_error != .None {verify_error(app, state_error); return}
-		if r, resize := d.message.request.(control.Resize); resize {
+		if r, resize := d.message.request.(verify_protocol.Resize); resize {
 			if verify_value(entries, "grid.size") != fmt.tprintf("%dx%d", r.columns, r.rows) {
 				if elapsed < RESIZE_TIMEOUT_MS {return}
 				verify_reply(app, false, "error: resize timed out; use state to inspect grid.size")
@@ -1797,12 +1813,17 @@ when AIO_CONTROL {
 		w := verify_window(app)
 		verify_update_generation(v, app, w, now)
 		if v.request == nil {
-			message := control.poll(v.server)
-			if message == nil {return}
-			verify_accept(app, message, w, now)
+			transport := control.poll(v.server)
+			if transport == nil {return}
+			request, parse_error := verify_protocol.parse(transport.args)
+			if parse_error.advice != "" {
+				verify_reject(v, transport, parse_error)
+				return
+			}
+			verify_accept(app, {transport, request}, w, now)
 		}
-		message := verify_message(v)
-		if message == nil {return}
+		message, active := verify_message(v)
+		if !active {return}
 		_, driving := v.request.(Verify_Drive)
 		if !driving && w == nil && verify_needs_window(message.request) {
 			verify_reply(app, false, "error: window hidden; run tray open")
@@ -1834,10 +1855,25 @@ when AIO_CONTROL {
 		}
 	}
 
+	// Answers a request whose arguments do not parse, without entering a state.
+	verify_reject :: proc(v: ^Verify, transport: ^control.Message, e: verify_protocol.Parse_Error) {
+		defer control.message_destroy(transport)
+		out := strings.builder_make(context.temp_allocator)
+		text: string
+		if err := verify_protocol.format_parse_error(&out, e); err == .None {
+			text = strings.to_string(out)
+		} else {
+			text = fmt.tprintf("error: %v; check arguments with help and retry", err)
+		}
+		if err := control.respond(v.server, transport.id, {ok = false, text = text}); err != .None {
+			log.errorf("answering control request failed: %v", err)
+		}
+	}
+
 	// The procs from here to verify_end are the only writers of Verify.request.
 
 	// The message's request decides its first state; a quit is answered at once.
-	verify_accept :: proc(app: ^App, message: ^control.Message, w: ^Window, now: time.Tick) {
+	verify_accept :: proc(app: ^App, message: Verify_Message, w: ^Window, now: time.Tick) {
 		v := &app.verify
 		switch verify_action(message.request) {
 		case .Read:
@@ -1847,14 +1883,14 @@ when AIO_CONTROL {
 		case .Wait:
 			v.request = Verify_Wait{message, now, v.frames}
 		case .Quit:
-			id := message.id
-			control.message_destroy(message)
+			id := message.transport.id
+			verify_message_destroy(message)
 			app_quit(app)
 			verify_quit(app, id, now)
 		}
 	}
 
-	verify_gate :: proc(app: ^App, message: ^control.Message, then: Verify_Gated, w: ^Window, now: time.Tick) {
+	verify_gate :: proc(app: ^App, message: Verify_Message, then: Verify_Gated, w: ^Window, now: time.Tick) {
 		v := &app.verify
 		gate := Verify_Gate{message = message, then = then, started = now, request_frame = v.frames}
 		if w != nil {gate.needs_frame = w.dirty || window_generation(app, w) != w.generation}
@@ -1875,7 +1911,7 @@ when AIO_CONTROL {
 		if err := verify_drive(app, gate.message.request);
 		   err != .None {verify_error(app, err); return}
 		if app.run != .Running {
-			id := gate.message.id
+			id := gate.message.transport.id
 			verify_end(v)
 			verify_quit(app, id, now)
 			return
@@ -1901,8 +1937,8 @@ when AIO_CONTROL {
 
 	verify_reply :: proc(app: ^App, ok: bool, text: string) {
 		v := &app.verify
-		if m := verify_message(v); m != nil {
-			if err := control.respond(v.server, m.id, {ok = ok, text = text}); err != .None {
+		if m, active := verify_message(v); active {
+			if err := control.respond(v.server, m.transport.id, {ok = ok, text = text}); err != .None {
 				log.errorf("answering control request failed: %v", err)
 			}
 		}
@@ -1914,27 +1950,33 @@ when AIO_CONTROL {
 		switch &s in v.request {
 		case nil, Verify_Quitting:
 		case Verify_Gate:
-			control.message_destroy(s.message)
+			verify_message_destroy(s.message)
 		case Verify_Wait:
-			control.message_destroy(s.message)
+			verify_message_destroy(s.message)
 		case Verify_Drive:
-			control.message_destroy(s.message)
+			verify_message_destroy(s.message)
 			verify_before_destroy(&s)
 		}
 		v.request = nil
 	}
 
-	verify_message :: proc(v: ^Verify) -> ^control.Message {
+	verify_message :: proc(v: ^Verify) -> (Verify_Message, bool) {
 		switch s in v.request {
 		case Verify_Gate:
-			return s.message
+			return s.message, true
 		case Verify_Wait:
-			return s.message
+			return s.message, true
 		case Verify_Drive:
-			return s.message
+			return s.message, true
 		case Verify_Quitting:
 		}
-		return nil
+		return {}, false
+	}
+
+	verify_message_destroy :: proc(message: Verify_Message) {
+		request := message.request
+		verify_protocol.request_destroy(&request)
+		control.message_destroy(message.transport)
 	}
 	// Whether the pane's program has an icon ready to draw at any size, from whichever source.
 	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {

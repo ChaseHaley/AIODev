@@ -1,5 +1,6 @@
 package control_test
 
+import "base:runtime"
 import "core:strings"
 import "core:testing"
 import "core:thread"
@@ -19,6 +20,31 @@ cli_pipe_name_is_distinct_from_verification :: proc(t: ^testing.T) {
 	}
 }
 
+@(private = "file")
+fail_allocation :: proc(
+	data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,
+	old_memory: rawptr, old_size: int, location: runtime.Source_Code_Location,
+) -> ([]u8, runtime.Allocator_Error) {
+	if mode == .Alloc || mode == .Alloc_Non_Zeroed || mode == .Resize || mode == .Resize_Non_Zeroed {
+		return nil, .Out_Of_Memory
+	}
+	return nil, nil
+}
+
+@(test)
+verification_pipe_name :: proc(t: ^testing.T) {
+	name, err := control.pipe_name("test")
+	defer delete(name)
+	testing.expect_value(t, err, control.Error.None)
+	testing.expect_value(t, name, `\\.\pipe\test.control`)
+	for invalid in ([]string{"", "a/b", "a\\b", "a\x00b", "\xff"}) {
+		_, failure := control.pipe_name(invalid)
+		testing.expect_value(t, failure, control.Error.Invalid_Argument)
+	}
+	_, allocation_error := control.pipe_name("test", runtime.Allocator{fail_allocation, nil})
+	testing.expect_value(t, allocation_error, control.Error.Out_Of_Memory)
+}
+
 Cli_Call :: struct {
 	name:              string,
 	ok, text_received: bool,
@@ -27,10 +53,10 @@ Cli_Call :: struct {
 }
 
 @(test)
-raw_server_delivers_arguments_and_status :: proc(t: ^testing.T) {
+server_delivers_arguments_and_status :: proc(t: ^testing.T) {
 	name := test_pipe_name(t)
 	defer delete(name)
-	s, err := control.create(name, {}, raw = true)
+	s, err := control.create(name, {})
 	if !testing.expect_value(t, err, control.Error.None) { return }
 	defer control.destroy(s)
 	state := Cli_Call{name = name}
@@ -39,7 +65,7 @@ raw_server_delivers_arguments_and_status :: proc(t: ^testing.T) {
 		client, connect_error := control.connect(c.name, 2000)
 		if connect_error != .None { c.error = connect_error; return }
 		defer control.close(&client)
-		// Not verification grammar: a raw server must not answer it with a parse error.
+		// Not verification grammar: the transport delivers it to the app unanswered.
 		response: control.Response
 		response, c.error = control.call(&client, {"", "text", "pane.split", "--direction", "down"}, 2000)
 		c.ok, c.status, c.text_received = response.ok, response.status, response.text == "no such pane"
@@ -49,8 +75,6 @@ raw_server_delivers_arguments_and_status :: proc(t: ^testing.T) {
 	defer thread.destroy(worker)
 	m := await_request(t, s)
 	if m == nil { thread.join(worker); return }
-	testing.expect_value(t, m.parse_error.advice, "")
-	testing.expect(t, m.request == nil)
 	testing.expect_value(t, len(m.args), 5)
 	testing.expect_value(t, m.args[2], "pane.split")
 	testing.expect_value(t, control.respond(s, m.id, {ok = false, text = "no such pane", status = 3}), control.Error.None)

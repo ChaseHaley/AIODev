@@ -5,8 +5,8 @@ import "core:fmt"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
-import "aio:control"
 import "aio:instance"
+import "aio:verify_protocol"
 
 USAGE :: `aioctl [--name <name>] <command> [args...]
 launch [--fresh] [--settings <file>] [--shell <command>] [--size <cols>x<rows>] [--keep-env]
@@ -33,8 +33,9 @@ parse_options :: proc(args: []string) -> (Options, string) {
 	o := Options{name = "verify", columns = 120, rows = 32}
 	if len(args) > 0 && args[0] == "--name" {
 		if len(args) < 2 { return {}, "supply a name after --name; use help" }
-		_, err := instance.parse({"--instance", args[1]})
-		if err != .None { return {}, "use a name of 1..32 ASCII letters, digits, hyphens, or underscores" }
+		if !instance.valid_name(args[1]) {
+			return {}, "use a name of 1..32 ASCII letters, digits, hyphens, or underscores"
+		}
 		o.name, args = args[1], args[2:]
 	}
 	if len(args) == 0 { return {}, "choose a command; use help" }
@@ -72,9 +73,9 @@ parse_options :: proc(args: []string) -> (Options, string) {
 				case "--settings": o.settings = value
 				case "--shell": o.shell = value
 				case "--size":
-					request, err := control.parse({"resize", value})
+					request, err := verify_protocol.parse({"resize", value})
 					if err.advice != "" { return {}, "use --size <cols>x<rows>, each dimension 1..1000" }
-					size := request.(control.Resize)
+					size := request.(verify_protocol.Resize)
 					o.columns, o.rows = size.columns, size.rows
 				}
 			case: return {}, "unknown launch option; use help launch"
@@ -135,8 +136,8 @@ response_body :: proc(text: string) -> string {
 
 @(require_results)
 safe_data_path :: proc(repo, path, name: string) -> bool {
-	_, err := instance.parse({"--instance", name})
-	if err != .None || len(repo) < 3 || repo[1:3] != `:\` { return false }
+	if !instance.valid_name(name) { return false }
+	if len(repo) < 3 || repo[1:3] != `:\` { return false }
 	if strings.contains_any(repo, "/\r\n\x00") || strings.contains(repo, `\..`) { return false }
 	suffix := `\build\verify\`
 	if len(path) != len(repo)+len(suffix)+len(name) { return false }
@@ -149,7 +150,8 @@ safe_data_path :: proc(repo, path, name: string) -> bool {
 settings_text :: proc(
 	o: Options, repo, data_dir: string, allocator := context.allocator,
 ) -> (string, bool) {
-	if o.columns < 1 || o.columns > 1000 || o.rows < 1 || o.rows > 1000 ||
+	if o.columns < 1 || o.columns > verify_protocol.MAX_GRID_DIMENSION ||
+	   o.rows < 1 || o.rows > verify_protocol.MAX_GRID_DIMENSION ||
 	   len(o.shell) > 32767 || repo == "" || len(repo) > 32767 ||
 	   strings.contains_any(o.shell, "\r\n\x00") ||
 	   strings.contains_any(repo, "\r\n\x00\"") || !utf8.valid_string(o.shell) ||
@@ -204,44 +206,16 @@ default_shell :: proc(data_dir: string, allocator: runtime.Allocator) -> (string
 }
 
 History :: enum { Unknown, Isolated, Custom_Shell, Settings_File }
+// The history words instance.ini records; Unknown is a record written before history was recorded.
+HISTORY_WORDS :: [History]string{.Unknown = "", .Isolated = "isolated", .Custom_Shell = "custom-shell",
+	.Settings_File = "settings-file"}
 Record :: struct { pid: u32, created: u64, executable: string, keep_env: bool, history: History }
 
+// The instance.ini text for r; parse_record reads it back.
 @(require_results)
-response_field :: proc(text, key: string, allocator := context.allocator) -> (string, bool) {
-	remaining := text
-	for remaining != "" {
-		i := strings.index_byte(remaining, '=')
-		if i < 1 { return "", false }
-		name := remaining[:i]
-		remaining = remaining[i+1:]
-		if len(remaining) == 0 { return "", false }
-		end := 0
-		if remaining[0] == '"' {
-			end = 1
-			for end < len(remaining) && remaining[end] != '"' {
-				if remaining[end] == '\\' { end += 1 }
-				end += 1
-			}
-			if end >= len(remaining) { return "", false }
-			end += 1
-		} else {
-			for end < len(remaining) && remaining[end] != ' ' { end += 1 }
-		}
-		if end < len(remaining) && remaining[end] != ' ' { return "", false }
-		if name == key {
-			if remaining[0] == '"' {
-				value, allocated, ok := strconv.unquote_string(remaining[:end], allocator)
-				if !ok { return "", false }
-				if allocated { return value, true }
-				copy, err := strings.clone(value, allocator)
-				return copy, err == nil
-			}
-			copy, err := strings.clone(remaining[:end], allocator)
-			return copy, err == nil
-		}
-		remaining = strings.trim_space(remaining[end:])
-	}
-	return "", false
+record_text :: proc(r: Record, allocator := context.allocator) -> string {
+	return fmt.aprintf("pid=%d\ncreated=%d\nexecutable=%s\nno_color=%s\nhistory=%s\n", r.pid, r.created,
+		r.executable, r.keep_env ? "kept" : "removed", HISTORY_WORDS[r.history], allocator = allocator)
 }
 
 @(require_results)
@@ -274,12 +248,11 @@ parse_record :: proc(text: string) -> (Record, bool) {
 			r.keep_env = value == "kept"
 		case "history":
 			index = 4
-			switch value {
-			case "isolated": r.history = .Isolated
-			case "custom-shell": r.history = .Custom_Shell
-			case "settings-file": r.history = .Settings_File
-			case: return {}, false
+			known := false
+			for word, history in HISTORY_WORDS {
+				if history != .Unknown && word == value { r.history, known = history, true }
 			}
+			if !known { return {}, false }
 		case: return {}, false
 		}
 		if seen[index] { return {}, false }

@@ -1,4 +1,4 @@
-package control
+package verify_protocol
 
 import "aio:commands"
 import "aio:input"
@@ -13,6 +13,21 @@ Range :: struct {
 	specified: bool,
 }
 MAX_GRID_DIMENSION :: 1000
+// Request defaults, stated once for the parser and help.
+WAIT_TIMEOUT_MS :: 5000
+RUN_TIMEOUT_MS :: 10000
+IDLE_MS :: 300
+MIN_DPI :: 48
+MAX_DPI :: 768
+// Every number on the wire, milliseconds and signed coordinates included, fits a signed 32-bit int.
+MAX_NUMBER :: int(max(i32))
+// A client waits this long for a reply, or a wait or run's own timeout plus REPLY_MARGIN_MS.
+CLIENT_TIMEOUT_MS :: 15000
+REPLY_MARGIN_MS :: 1000
+// The pane.split options a verification command accepts default to an interactive split.
+SPLIT_DIRECTION :: layout.Direction.Right
+SPLIT_RATIO :: f32(0.5)
+SPLIT_FOCUS :: true
 Position :: struct {
 	x, y: int,
 }
@@ -178,8 +193,83 @@ Parse_Error :: struct {
 	advice:   string,
 }
 
-@(private, require_results)
-number :: proc(s: string, low: int = 0, high: int = int(max(i32))) -> (int, bool) {
+// Every request verb. parse and help each switch over all of them, so no verb has one without the
+// other.
+Verb :: enum {
+	Ping,
+	Screen,
+	Cells,
+	State,
+	Wait,
+	Expect,
+	Type,
+	Key,
+	Run,
+	Mouse,
+	Focus,
+	Resize,
+	Dpi,
+	Tray,
+	Command,
+	Window,
+	Help,
+	Capture,
+	Pixels,
+	Diff,
+	Draws,
+	Perf,
+	Vt,
+}
+
+VERB_NAMES :: [Verb]string {
+	.Ping    = "ping",
+	.Screen  = "screen",
+	.Cells   = "cells",
+	.State   = "state",
+	.Wait    = "wait",
+	.Expect  = "expect",
+	.Type    = "type",
+	.Key     = "key",
+	.Run     = "run",
+	.Mouse   = "mouse",
+	.Focus   = "focus",
+	.Resize  = "resize",
+	.Dpi     = "dpi",
+	.Tray    = "tray",
+	.Command = "command",
+	.Window  = "window",
+	.Help    = "help",
+	.Capture = "capture",
+	.Pixels  = "pixels",
+	.Diff    = "diff",
+	.Draws   = "draws",
+	.Perf    = "perf",
+	.Vt      = "vt",
+}
+
+@(require_results)
+verb_parse :: proc(name: string) -> (Verb, bool) {
+	for verb_name, verb in VERB_NAMES {
+		if verb_name == name {return verb, true}
+	}
+	return {}, false
+}
+
+// Writes the reply to a request parse rejected: the quoted argument, then the advice.
+@(require_results)
+format_parse_error :: proc(out: ^strings.Builder, e: Parse_Error) -> Error {
+	w := Writer {
+		out = out,
+	}
+	quoted(&w, e.argument)
+	put(&w, ": ")
+	put(&w, e.advice)
+	return w.error
+}
+
+// Reads a nonnegative decimal integer within low..high, as rows, cells and milliseconds are written.
+@(require_results)
+parse_number :: proc(s: string, low: int = 0, high: int = MAX_NUMBER) -> (int, bool) {
 	if len(s) == 0 {return 0, false}
 	for c in s {
 		if c < '0' || c > '9' {return 0, false}
@@ -192,12 +282,13 @@ number :: proc(s: string, low: int = 0, high: int = int(max(i32))) -> (int, bool
 pair :: proc(s: string, separator: u8, signed: bool = false) -> (Position, bool) {
 	i := strings.index_byte(s, separator)
 	if i < 0 {return {}, false}
-	x, a := number(s[:i])
-	y, b := number(s[i + 1:])
 	if signed {
-		x, a = signed_number(s[:i])
-		y, b = signed_number(s[i + 1:])
+		x, a := signed_number(s[:i])
+		y, b := signed_number(s[i + 1:])
+		return {x, y}, a && b
 	}
+	x, a := parse_number(s[:i])
+	y, b := parse_number(s[i + 1:])
 	return {x, y}, a && b
 }
 
@@ -205,17 +296,19 @@ pair :: proc(s: string, separator: u8, signed: bool = false) -> (Position, bool)
 signed_number :: proc(s: string) -> (int, bool) {
 	digits := s
 	if len(digits) > 0 && (digits[0] == '-' || digits[0] == '+') {digits = digits[1:]}
-	_, valid := number(digits, 0, int(max(i32)) + 1)
+	_, valid := parse_number(digits, 0, MAX_NUMBER + 1)
 	if !valid {return 0, false}
 	n, ok := strconv.parse_int(s)
 	return n, ok && n >= int(min(i32)) && n <= int(max(i32))
 }
 
-@(private, require_results)
+// Reads an inclusive first:last range, or a single n when single is set, as screen and cells
+// accept them.
+@(require_results)
 parse_range :: proc(s: string, single: bool) -> (Range, bool) {
 	i := strings.index_byte(s, ':')
 	if i < 0 {
-		n, ok := number(s)
+		n, ok := parse_number(s)
 		return {n, n, true}, ok && single
 	}
 	p, ok := pair(s, ':')
@@ -239,7 +332,7 @@ integer_list :: proc(s: string, out: []int, minimum: int) -> (count: int, ok: bo
 		separator := strings.index_byte(rest, ',')
 		part := rest
 		if separator >= 0 {part = rest[:separator]}
-		value, valid := number(part)
+		value, valid := parse_number(part)
 		if !valid {return 0, false}
 		out[count] = value
 		count += 1
@@ -270,27 +363,38 @@ cell_region :: proc(s: string) -> (Region, bool) {
 	return {.Cells, values[0], values[1], width, height}, true
 }
 
+// Reads a --cell (focused-pane cells) or --region (client pixels) option value. A request takes one
+// region; `repeated` is its advice when one was already given.
+@(private, require_results)
+region_option :: proc(option, value: string, seen: ^bool, repeated: string) -> (Region, Parse_Error) {
+	if seen^ {return {}, {option, repeated}}
+	if option == "--cell" {
+		r, ok := cell_region(value)
+		if !ok {return {}, {value, "use c,r[,w,h] with nonnegative cells and positive size"}}
+		seen^ = true
+		return r, {}
+	}
+	r, ok := pixel_region(value)
+	if !ok {return {}, {value, "use x,y,w,h with nonnegative origin and positive size"}}
+	seen^ = true
+	return r, {}
+}
+
 @(require_results)
 parse_capture :: proc(args: []string) -> (Request, Parse_Error) {
 	bad := Parse_Error{args[0], "use capture [--cell c,r[,w,h] | --region x,y,w,h] [--out <file>]"}
 	c := Capture {
 		region = {kind = .Window},
 	}
-	seen_cell, seen_region, seen_out := false, false, false
+	seen_region, seen_out := false, false
 	for i := 1; i < len(args); i += 2 {
 		if i + 1 >= len(args) {return {}, {args[i], "supply a value after this option"}}
 		value := args[i + 1]
 		switch args[i] {
-		case "--cell":
-			if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
-			r, ok := cell_region(value)
-			if !ok {return {}, {value, "use c,r[,w,h] with nonnegative cells and positive size"}}
-			c.region, seen_cell = r, true
-		case "--region":
-			if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
-			r, ok := pixel_region(value)
-			if !ok {return {}, {value, "use x,y,w,h with nonnegative origin and positive size"}}
-			c.region, seen_region = r, true
+		case "--cell", "--region":
+			r, e := region_option(args[i], value, &seen_region, "use one region option")
+			if e.advice != "" {return {}, e}
+			c.region = r
 		case "--out":
 			if seen_out {return {}, {args[i], "use --out once"}}
 			if value == "" || strings.contains(value, "\x00") {return {}, {value, "use a nonempty path"}}
@@ -308,7 +412,7 @@ parse_pixels :: proc(args: []string) -> (Request, Parse_Error) {
 	p := Pixels {
 		region = {kind = .Window},
 	}
-	seen_cell, seen_region, seen_sample := false, false, false
+	seen_region, seen_sample := false, false
 	for i := 1; i < len(args); {
 		switch args[i] {
 		case "--rows":
@@ -323,16 +427,10 @@ parse_pixels :: proc(args: []string) -> (Request, Parse_Error) {
 			if i + 1 >= len(args) {return {}, {args[i], "supply a value after this option"}}
 			value := args[i + 1]
 			switch args[i] {
-			case "--cell":
-				if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
-				r, ok := cell_region(value)
-				if !ok {return {}, {value, "use c,r[,w,h] with nonnegative cells and positive size"}}
-				p.region, seen_cell = r, true
-			case "--region":
-				if seen_cell || seen_region {return {}, {args[i], "use one region option"}}
-				r, ok := pixel_region(value)
-				if !ok {return {}, {value, "use x,y,w,h with nonnegative origin and positive size"}}
-				p.region, seen_region = r, true
+			case "--cell", "--region":
+				r, e := region_option(args[i], value, &seen_region, "use one region option")
+				if e.advice != "" {return {}, e}
+				p.region = r
 			case "--sample":
 				if seen_sample {return {}, {args[i], "use --sample once"}}
 				position, ok := pair(value, ',')
@@ -362,10 +460,9 @@ parse_draws :: proc(args: []string) -> (Request, Parse_Error) {
 		value := args[i + 1]
 		switch args[i] {
 		case "--region":
-			if seen_region {return {}, {args[i], "use --region once"}}
-			r, ok := pixel_region(value)
-			if !ok {return {}, {value, "use x,y,w,h with nonnegative origin and positive size"}}
-			d.region, seen_region = r, true
+			r, e := region_option(args[i], value, &seen_region, "use --region once")
+			if e.advice != "" {return {}, e}
+			d.region = r
 		case "--kind":
 			if seen_kind {return {}, {args[i], "use --kind once"}}
 			switch value {
@@ -410,6 +507,19 @@ request_destroy :: proc(r: ^Request) {
 	r^ = {}
 }
 
+// How long a client waits for a request's reply: a wait or run's own timeout plus REPLY_MARGIN_MS,
+// otherwise CLIENT_TIMEOUT_MS.
+@(require_results)
+client_timeout_ms :: proc(request: Request) -> int {
+	#partial switch r in request {
+	case Wait:
+		return min(r.timeout_ms, MAX_NUMBER - REPLY_MARGIN_MS) + REPLY_MARGIN_MS
+	case Run:
+		return min(r.timeout_ms, MAX_NUMBER - REPLY_MARGIN_MS) + REPLY_MARGIN_MS
+	}
+	return CLIENT_TIMEOUT_MS
+}
+
 @(require_results)
 parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse_Error) {
 	if len(args) == 0 {return {}, {"<command>", "choose a command; use help"}}
@@ -417,15 +527,17 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		if !utf8.valid_string(arg) {return {}, {arg, "use valid UTF-8 text"}}
 	}
 	bad := Parse_Error{args[0], "use help for this command's grammar"}
-	switch args[0] {
-	case "ping", "state":
+	verb, known := verb_parse(args[0])
+	if !known {return {}, {args[0], "unknown command; use help"}}
+	switch verb {
+	case .Ping, .State:
 		if len(args) != 1 {return {}, {args[1], "remove the extra argument"}}
-		if args[0] == "ping" {return Ping{}, {}}
+		if verb == .Ping {return Ping{}, {}}
 		return State{}, {}
-	case "help":
+	case .Help:
 		if len(args) > 2 {return {}, {args[2], "use help [command]"}}
 		return Help{len(args) == 2 ? args[1] : ""}, {}
-	case "window":
+	case .Window:
 		if len(args) != 3 {return {}, bad}
 		switch args[1] {
 		case "select":
@@ -439,15 +551,15 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			return Window_Move{position}, {}
 		}
 		return {}, bad
-	case "screen":
+	case .Screen:
 		if len(args) == 1 {return Screen{}, {}}
 		if len(args) != 2 {return {}, bad}
 		r, ok := parse_range(args[1], true)
 		if !ok {return {}, {args[1], "use a nonnegative row or first:last"}}
 		return Screen{r}, {}
-	case "cells":
+	case .Cells:
 		if len(args) < 2 || len(args) > 3 {return {}, bad}
-		n, ok := number(args[1])
+		n, ok := parse_number(args[1])
 		if !ok {return {}, {args[1], "use a nonnegative row"}}
 		r: Range
 		if len(args) == 3 {
@@ -455,13 +567,13 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			if !ok {return {}, {args[2], "use first:last columns"}}
 		}
 		return Cells{n, r}, {}
-	case "command":
+	case .Command:
 		if len(args) < 2 || args[1] == "" {return {}, bad}
 		r := Command {
 			name      = args[1],
-			direction = .Right,
-			ratio     = 0.5,
-			focus     = true,
+			direction = SPLIT_DIRECTION,
+			ratio     = SPLIT_RATIO,
+			focus     = SPLIT_FOCUS,
 		}
 		if len(args) > 2 && r.name != "pane.split" {return {}, bad}
 		seen: [3]bool
@@ -471,23 +583,14 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			switch args[i] {
 			case "--direction":
 				index = 0
-				switch args[i + 1] {
-				case "left":
-					r.direction = .Left
-				case "right":
-					r.direction = .Right
-				case "up":
-					r.direction = .Up
-				case "down":
-					r.direction = .Down
-				case:
-					return {}, bad
-				}
+				direction, valid := commands.parse_direction(args[i + 1])
+				if !valid {return {}, bad}
+				r.direction = direction
 			case "--ratio":
 				index = 1
-				n, ok := strconv.parse_f32(args[i + 1])
-				if !ok || !(n >= 0.05 && n <= 0.95) {return {}, bad}
-				r.ratio = n
+				ratio, valid := commands.parse_ratio(args[i + 1])
+				if !valid {return {}, bad}
+				r.ratio = ratio
 			case "--focus":
 				index = 2
 				if args[i + 1] != "true" && args[i + 1] != "false" {return {}, bad}
@@ -499,15 +602,15 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			seen[index] = true
 		}
 		return r, {}
-	case "type", "focus", "tray", "resize", "dpi":
+	case .Type, .Focus, .Tray, .Resize, .Dpi:
 		if len(args) != 2 {return {}, bad}
 		s := args[1]
-		switch args[0] {
-		case "type":
+		#partial switch verb {
+		case .Type:
 			return Type{s}, {}
-		case "focus":
+		case .Focus:
 			if s == "in" || s == "out" {return Focus{s == "in"}, {}}
-		case "tray":
+		case .Tray:
 			switch s {
 			case "open":
 				return Tray{.Open}, {}
@@ -516,7 +619,7 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			case "quit":
 				return Tray{.Quit}, {}
 			}
-		case "resize":
+		case .Resize:
 			p, ok := pair(s, 'x')
 			if ok &&
 			   p.x >= 1 &&
@@ -525,12 +628,12 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			   p.y <= MAX_GRID_DIMENSION {
 				return Resize{p.x, p.y}, {}
 			}
-		case "dpi":
-			n, ok := number(s, 48, 768)
+		case .Dpi:
+			n, ok := parse_number(s, MIN_DPI, MAX_DPI)
 			if ok {return Dpi{n}, {}}
 		}
 		return {}, {s, "use help for valid values and ranges"}
-	case "key":
+	case .Key:
 		if len(args) < 2 {return {}, bad}
 		k := Key {
 			chords = make([dynamic]commands.Shortcut, allocator),
@@ -547,15 +650,15 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			}
 		}
 		return k, {}
-	case "run", "wait":
+	case .Run, .Wait:
 		if len(args) < 2 {return {}, bad}
 		w := Wait {
-			idle_ms    = 300,
-			timeout_ms = 5000,
+			idle_ms    = IDLE_MS,
+			timeout_ms = WAIT_TIMEOUT_MS,
 		}
 		start := 2
-		if args[0] == "run" {
-			w.text, w.timeout_ms = args[1], 10000
+		if verb == .Run {
+			w.text, w.timeout_ms = args[1], RUN_TIMEOUT_MS
 		} else {
 			switch args[1] {
 			case "text", "gone":
@@ -567,7 +670,7 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			case "idle":
 				w.kind = .Idle
 				if len(args) > 2 && !strings.has_prefix(args[2], "--") {
-					n, ok := number(args[2])
+					n, ok := parse_number(args[2])
 					if !ok {return {}, {args[2], "use nonnegative milliseconds"}}
 					w.idle_ms, start = n, 3
 				}
@@ -578,22 +681,22 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		seen_timeout, seen_idle := false, false
 		for i := start; i < len(args); i += 2 {
 			if i + 1 == len(args) {return {}, {args[i], "supply milliseconds after this option"}}
-			n, ok := number(args[i + 1])
+			n, ok := parse_number(args[i + 1])
 			if !ok {return {}, {args[i + 1], "use nonnegative milliseconds"}}
 			switch args[i] {
 			case "--timeout":
 				if seen_timeout {return {}, {args[i], "use this option once"}}
 				w.timeout_ms, seen_timeout = n, true
 			case "--idle":
-				if args[0] != "run" || seen_idle {return {}, {args[i], "use --idle once on run"}}
+				if verb != .Run || seen_idle {return {}, {args[i], "use --idle once on run"}}
 				w.idle_ms, seen_idle = n, true
 			case:
 				return {}, {args[i], "use --timeout, or --idle on run"}
 			}
 		}
-		if args[0] == "run" {return Run{w.text, w.idle_ms, w.timeout_ms}, {}}
+		if verb == .Run {return Run{w.text, w.idle_ms, w.timeout_ms}, {}}
 		return w, {}
-	case "expect":
+	case .Expect:
 		if len(args) < 3 {return {}, bad}
 		e: Expect
 		switch args[1] {
@@ -622,24 +725,24 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			return {}, {args[1], "choose text, no-text, cursor, cell, or state"}
 		}
 		return e, {}
-	case "mouse":
+	case .Mouse:
 		return parse_mouse(args)
-	case "capture":
+	case .Capture:
 		return parse_capture(args)
-	case "pixels":
+	case .Pixels:
 		return parse_pixels(args)
-	case "diff":
+	case .Diff:
 		if len(args) != 2 {return {}, bad}
 		if args[1] == "" {return {}, {args[1], "use a baseline capture path"}}
 		return Diff{args[1]}, {}
-	case "draws":
+	case .Draws:
 		return parse_draws(args)
-	case "perf":
+	case .Perf:
 		return parse_perf(args)
-	case "vt":
+	case .Vt:
 		return parse_vt(args)
 	}
-	return {}, {args[0], "unknown command; use help"}
+	return {}, bad
 }
 
 @(private, require_results)
@@ -707,14 +810,10 @@ parse_mouse :: proc(args: []string) -> (Request, Parse_Error) {
 		case "--mods":
 			if seen_mods {return {}, {option, "use --mods once"}}
 			seen_mods = true
-			// The shortcut parser owns modifier spelling and duplicate detection.
-			buffer: [256]u8
-			if len(s) + 2 > len(buffer) {return {}, {s, "use modifiers such as Ctrl+Shift"}}
-			n := copy(buffer[:], s)
-			copy(buffer[n:], "+A")
-			chord, valid := commands.parse_shortcut(string(buffer[:n + 2]))
+			// The command grammar owns modifier spelling and duplicate detection.
+			modifiers, valid := commands.parse_modifiers(s)
 			if !valid {return {}, {s, "use modifiers such as Ctrl+Shift"}}
-			m.modifiers = chord.modifiers
+			m.modifiers = modifiers
 		case:
 			return {}, {option, "choose --button, --mods, --px, or --screen"}
 		}

@@ -7,7 +7,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
@@ -58,9 +58,9 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	app.tick(&state)
 	when app.AIO_CONTROL {
 		first.focused, second.focused = true, false
-		testing.expect_value(t, app.verify_drive(&state, control.Window_Select{u64(second.id)}), control.Error.None)
+		testing.expect_value(t, app.verify_drive(&state, verify_protocol.Window_Select{u64(second.id)}), verify_protocol.Error.None)
 		entries, state_error := app.verify_state(&state)
-		testing.expect_value(t, state_error, control.Error.None)
+		testing.expect_value(t, state_error, verify_protocol.Error.None)
 		testing.expect_value(t, app.verify_value(entries, "session.id"), fmt.tprintf("%d", state.sessions[1].id))
 		testing.expect_value(t, app.verify_value(entries, "window.workspace_index"), "2")
 		testing.expect(t, app.verify_window(&state) == second)

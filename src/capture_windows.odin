@@ -1,6 +1,6 @@
 package main
 
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:layout"
 import "aio:pixels"
 import "aio:render"
@@ -10,7 +10,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-_ :: control
+_ :: verify_protocol
 _ :: layout
 _ :: pixels
 _ :: render
@@ -21,17 +21,9 @@ _ :: filepath
 _ :: strings
 
 // Pixel evidence: render the last built frame offscreen, then write or compare its pixels.
-// The renderer lives in capture_windows.odin so the control protocol stays free of graphics.
+// The renderer lives in capture_windows.odin so the verification protocol stays free of graphics.
 
 when AIO_CONTROL {
-	// evidence_error writes the client-facing explanation. verify_read forwards a reply that
-	// starts with "error: " verbatim, so every failure here names the next step.
-	@(require_results)
-	evidence_error :: proc(out: ^strings.Builder, text: string) -> control.Error {
-		fmt.sbprintf(out, "error: %s", text)
-		return .Invalid_Argument
-	}
-
 	@(require_results)
 	color_text :: proc(color: [4]u8) -> string {
 		return fmt.tprintf("#%02x%02x%02x%02x", color[0], color[1], color[2], color[3])
@@ -43,7 +35,7 @@ when AIO_CONTROL {
 	evidence_region :: proc(
 		app: ^App,
 		w: ^Window,
-		region: control.Region,
+		region: verify_protocol.Region,
 	) -> (
 		pixels.Rect,
 		string,
@@ -116,23 +108,23 @@ when AIO_CONTROL {
 	evidence_frame :: proc(
 		app: ^App,
 		w: ^Window,
-		region: control.Region,
+		region: verify_protocol.Region,
 		out: ^strings.Builder,
 	) -> (
 		pixels.Image,
-		control.Error,
+		verify_protocol.Error,
 	) {
 		requested, complaint := evidence_region(app, w, region)
-		if complaint != "" {return {}, evidence_error(out, complaint)}
+		if complaint != "" {return {}, verify_protocol.explain(out, complaint)}
 		if app.device == nil {
-			return {}, evidence_error(out, "the graphics device is unavailable; restart the instance")
+			return {}, verify_protocol.explain(out, "the graphics device is unavailable; restart the instance")
 		}
 		if window_minimized(w) {
-			return {}, evidence_error(out, "the window has no drawable area; restore it and retry")
+			return {}, verify_protocol.explain(out, "the window has no drawable area; restore it and retry")
 		}
 		surface, surface_error := render.surface_create_offscreen(app.device, w.width, w.height)
 		if surface_error != .None {
-			return {}, evidence_error(
+			return {}, verify_protocol.explain(
 				out,
 				fmt.tprintf(
 					"cannot create an offscreen surface (%v); restart the instance",
@@ -143,7 +135,7 @@ when AIO_CONTROL {
 		defer render.surface_destroy(surface)
 		if render_error := render.frame_render(app.device, surface, &w.list, app.theme.window);
 		   render_error != .None {
-			return {}, evidence_error(
+			return {}, verify_protocol.explain(
 				out,
 				fmt.tprintf(
 					"cannot render the frame offscreen (%v); retry after the next frame",
@@ -153,7 +145,7 @@ when AIO_CONTROL {
 		}
 		readback, read_error := render.surface_read_pixels(app.device, surface, context.allocator)
 		if read_error != .None {
-			return {}, evidence_error(
+			return {}, verify_protocol.explain(
 				out,
 				fmt.tprintf(
 					"cannot read the offscreen frame back (%v); retry after the next frame",
@@ -165,7 +157,7 @@ when AIO_CONTROL {
 		image, image_error := pixels.image_from_bgra(readback, int(w.width), requested)
 		if image_error == .Out_Of_Memory {return {}, .Out_Of_Memory}
 		if image_error != .None {
-			return {}, evidence_error(out, "the region does not fit the rendered frame")
+			return {}, verify_protocol.explain(out, "the region does not fit the rendered frame")
 		}
 		return image, .None
 	}
@@ -174,28 +166,28 @@ when AIO_CONTROL {
 	capture_read :: proc(
 		app: ^App,
 		out: ^strings.Builder,
-		request: control.Capture,
-	) -> control.Error {
+		request: verify_protocol.Capture,
+	) -> verify_protocol.Error {
 		w := verify_window(app)
-		if w == nil {return evidence_error(out, "no window to capture; run tray open")}
+		if w == nil {return verify_protocol.explain(out, "no window to capture; run tray open")}
 		image, err := evidence_frame(app, w, request.region, out)
 		if err != .None {return err}
 		defer pixels.image_destroy(&image)
 		path := request.output
 		if path == "" {
-			if app.options.data_dir == "" {
-				return evidence_error(out, "no data directory for the default capture; pass --out <file.png>")
+			if app.paths.captures == "" {
+				return verify_protocol.explain(out, "no data directory for the default capture; pass --out <file.png>")
 			}
-			directory, join_error := filepath.join({app.options.data_dir, "captures"})
-			if join_error != nil {return .Out_Of_Memory}
+			directory := app.paths.captures
 			if mkdir_error := os.mkdir_all(directory); mkdir_error != nil {
-				return evidence_error(
+				return verify_protocol.explain(
 					out,
 					fmt.tprintf("cannot create %s (%v); pass --out <file.png>", directory, mkdir_error),
 				)
 			}
-			path, join_error = filepath.join({directory, "capture.png"})
+			joined, join_error := filepath.join({directory, "capture.png"})
 			if join_error != nil {return .Out_Of_Memory}
+			path = joined
 		}
 		if request.output != "" {
 			// An explicit --out may point into a directory the caller has not created yet; the
@@ -203,7 +195,7 @@ when AIO_CONTROL {
 			directory := filepath.dir(path)
 			if directory != "" && directory != "." {
 				if mkdir_error := os.mkdir_all(directory); mkdir_error != nil {
-					return evidence_error(
+					return verify_protocol.explain(
 						out,
 						fmt.tprintf("cannot create %s (%v); check the path", directory, mkdir_error),
 					)
@@ -211,7 +203,7 @@ when AIO_CONTROL {
 			}
 		}
 		if pixels.png_write(path, image) != .None {
-			return evidence_error(
+			return verify_protocol.explain(
 				out,
 				fmt.tprintf("cannot write %s; check the directory and permissions", path),
 			)
@@ -224,17 +216,17 @@ when AIO_CONTROL {
 	pixels_read :: proc(
 		app: ^App,
 		out: ^strings.Builder,
-		request: control.Pixels,
-	) -> control.Error {
+		request: verify_protocol.Pixels,
+	) -> verify_protocol.Error {
 		w := verify_window(app)
-		if w == nil {return evidence_error(out, "no window to read; run tray open")}
+		if w == nil {return verify_protocol.explain(out, "no window to read; run tray open")}
 		image, err := evidence_frame(app, w, request.region, out)
 		if err != .None {return err}
 		defer pixels.image_destroy(&image)
 		if request.sampled {
 			color, sample_error := pixels.sample(image, request.sample.x, request.sample.y)
 			if sample_error != .None {
-				return evidence_error(
+				return verify_protocol.explain(
 					out,
 					fmt.tprintf(
 						"sample %d,%d is outside the %dx%d region",
@@ -275,15 +267,15 @@ when AIO_CONTROL {
 	pixels_diff :: proc(
 		app: ^App,
 		out: ^strings.Builder,
-		request: control.Diff,
-	) -> control.Error {
+		request: verify_protocol.Diff,
+	) -> verify_protocol.Error {
 		w := verify_window(app)
-		if w == nil {return evidence_error(out, "no window to compare; run tray open")}
+		if w == nil {return verify_protocol.explain(out, "no window to compare; run tray open")}
 		baseline, read_error := pixels.png_read(request.baseline)
 		if read_error != .None {
 			if read_error == .Out_Of_Memory {return .Out_Of_Memory}
 			if read_error == .Not_An_Image {
-				return evidence_error(
+				return verify_protocol.explain(
 					out,
 					fmt.tprintf(
 						"%s is not an 8-bit RGB or RGBA PNG; capture a new baseline",
@@ -291,7 +283,7 @@ when AIO_CONTROL {
 					),
 				)
 			}
-			return evidence_error(
+			return verify_protocol.explain(
 				out,
 				fmt.tprintf(
 					"cannot read baseline %s; capture one with capture --out",
@@ -307,7 +299,7 @@ when AIO_CONTROL {
 		if diff_error != .None {
 			if diff_error == .Out_Of_Memory {return .Out_Of_Memory}
 			if diff_error != .Size_Mismatch {return .System}
-			return evidence_error(
+			return verify_protocol.explain(
 				out,
 				fmt.tprintf(
 					"baseline is %dx%d but the window is %dx%d; capture a fresh baseline",

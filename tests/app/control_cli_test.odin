@@ -25,7 +25,7 @@ cli_pipe_failure_waits_for_control_enabled_to_change :: proc(t: ^testing.T) {
 	defer app.control_cli_stop(&state)
 	name, name_error := control.cli_pipe_name(state.app_id, context.temp_allocator)
 	if !testing.expect_value(t, name_error, control.Error.None) {return}
-	squatter, squatter_error := control.create(name, {}, raw = true)
+	squatter, squatter_error := control.create(name, {})
 	if !testing.expect_value(t, squatter_error, control.Error.None) {return}
 
 	state.settings.control.enabled = true

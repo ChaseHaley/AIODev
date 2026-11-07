@@ -1,30 +1,45 @@
-package control
+package verify_protocol
 
 import "aio:term"
 import "core:fmt"
 import "core:strings"
 
+// Evidence formatting failures. A failure whose reply already explains itself is written with
+// explain; verify reports any other as a generic failure line.
 Error :: enum {
 	None,
 	Out_Of_Memory,
 	Invalid_Argument,
-	Protocol,
-	Timeout,
-	Closed,
 	System,
-	// The pipe answered, but its server process did not match the expected identity.
-	Impostor,
 }
 
-// The process a client expects behind a control pipe. A zero field is not checked; a client that
-// knows only the image still gets the image check.
-Server_Identity :: struct {
-	pid:     u32,
-	created: u64,
-	image:   string,
-}
 State_Entry :: struct {
 	key, value: string,
+}
+
+// A failed reply whose text starts with ERROR_PREFIX explains itself; verify forwards it verbatim.
+// Expect and wait verdicts start with PASS_PREFIX or FAIL_PREFIX. A client prints either kind as
+// the request's result; any other failed reply is a client failure.
+ERROR_PREFIX :: "error: "
+PASS_PREFIX :: "PASS "
+FAIL_PREFIX :: "FAIL "
+
+// Writes the client-facing explanation of a failed evidence request and returns err.
+@(require_results)
+explain :: proc(out: ^strings.Builder, text: string, err := Error.Invalid_Argument) -> Error {
+	strings.write_string(out, ERROR_PREFIX)
+	strings.write_string(out, text)
+	return err
+}
+
+@(require_results)
+reply_explained :: proc(text: string) -> bool {
+	return strings.has_prefix(text, ERROR_PREFIX)
+}
+
+@(require_results)
+reply_is_result :: proc(text: string) -> bool {
+	return reply_explained(text) || strings.has_prefix(text, FAIL_PREFIX)
 }
 
 @(private)
@@ -282,6 +297,9 @@ format_cells :: proc(out: ^strings.Builder, s: ^term.Snapshot, request: Cells) -
 	return w.error
 }
 
+// Writes a value bare, or quoted when it is empty or has a space, quote or control byte. Inside
+// quotes a quote is \" and a control byte \xNN; backslashes stay literal, so Windows paths read
+// unchanged. value_parse is the decoder.
 @(private)
 value_text :: proc(w: ^Writer, value: string) {
 	quote := value == ""
@@ -330,6 +348,114 @@ format_state :: proc(out: ^strings.Builder, entries: []State_Entry) -> Error {
 	return w.error
 }
 
+// Decodes the value at the start of text as value_text wrote it, returning the rest after it. A
+// quoted value reads \" as a quote, \xNN as a byte and any other backslash as itself. Because
+// backslashes are not escaped, a value that itself contains \", \xNN or a trailing backslash is
+// ambiguous; no state or ping value the app writes contains them except by accident of a path.
+@(require_results)
+value_parse :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	value, rest: string,
+	ok: bool,
+) {
+	if text == "" || text[0] != '"' {
+		end := strings.index_any(text, " \n")
+		if end < 0 {end = len(text)}
+		bare, err := strings.clone(text[:end], allocator)
+		return bare, text[end:], err == nil
+	}
+	b, allocation_error := strings.builder_make(allocator)
+	if allocation_error != nil {return "", "", false}
+	for i := 1; i < len(text); {
+		c := text[i]
+		if c == '"' {return strings.to_string(b), text[i + 1:], true}
+		decoded, width := c, 1
+		if c == '\\' && i + 1 < len(text) && text[i + 1] == '"' {
+			decoded, width = '"', 2
+		} else if c == '\\' && i + 3 < len(text) && text[i + 1] == 'x' {
+			high, high_ok := hex_digit(text[i + 2])
+			low, low_ok := hex_digit(text[i + 3])
+			if high_ok && low_ok {decoded, width = high << 4 | low, 4}
+		}
+		if strings.write_byte(&b, decoded) != 1 {break}
+		i += width
+	}
+	strings.builder_destroy(&b)
+	return "", "", false
+}
+
+@(private, require_results)
+hex_digit :: proc(c: u8) -> (u8, bool) {
+	switch c {
+	case '0' ..= '9':
+		return c - '0', true
+	case 'a' ..= 'f':
+		return c - 'a' + 10, true
+	case 'A' ..= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
+}
+
+// The value of key in a reply of key=value fields separated by spaces (ping) or lines (state), as
+// format_ping and format_state write them. The value is allocated; false when the key is absent or
+// the reply is malformed.
+@(require_results)
+reply_field :: proc(text, key: string, allocator := context.allocator) -> (string, bool) {
+	remaining := text
+	for remaining != "" {
+		i := strings.index_byte(remaining, '=')
+		if i < 1 {return "", false}
+		name := remaining[:i]
+		value, rest, ok := value_parse(remaining[i + 1:], allocator)
+		if !ok {return "", false}
+		if rest != "" && rest[0] != ' ' && rest[0] != '\n' {
+			delete(value, allocator)
+			return "", false
+		}
+		if name == key {return value, true}
+		delete(value, allocator)
+		remaining = strings.trim_left_space(rest)
+	}
+	return "", false
+}
+
+// The fields of the ping reply, in order.
+Ping_Field :: enum {
+	Pid,
+	App,
+	Build,
+	Data,
+	Settings,
+	Log,
+}
+
+PING_FIELDS :: [Ping_Field]string {
+	.Pid      = "pid",
+	.App      = "app",
+	.Build    = "build",
+	.Data     = "data",
+	.Settings = "settings",
+	.Log      = "log",
+}
+
+// Writes the one-line ping reply: space-separated field=value pairs; reply_field reads them.
+@(require_results)
+format_ping :: proc(out: ^strings.Builder, values: [Ping_Field]string) -> Error {
+	w := Writer {
+		out = out,
+	}
+	for field in Ping_Field {
+		if field != .Pid {put(&w, " ")}
+		put(&w, PING_FIELDS[field])
+		put(&w, "=")
+		value_text(&w, values[field])
+	}
+	return w.error
+}
+
 @(require_results)
 evaluate :: proc(
 	out: ^strings.Builder,
@@ -353,7 +479,8 @@ evaluate :: proc(
 			}
 		}
 		passed = found && value == request.value
-		put(&w, passed ? "PASS state " : "FAIL state ")
+		put(&w, passed ? PASS_PREFIX : FAIL_PREFIX)
+		put(&w, "state ")
 		put(&w, request.key)
 		if passed {
 			put(&w, "=")
@@ -406,7 +533,7 @@ evaluate :: proc(
 			}
 		}
 		passed = request.kind == .Text ? found : !found
-		put(&w, passed ? "PASS " : "FAIL ")
+		put(&w, passed ? PASS_PREFIX : FAIL_PREFIX)
 		put(&w, request.kind == .No_Text ? "no-text " : "text ")
 		quoted(&w, request.text)
 		if found {
@@ -439,7 +566,8 @@ evaluate :: proc(
 			s.cursor.viewport_has_value &&
 			int(s.cursor.viewport_x) == p.x &&
 			int(s.cursor.viewport_y) == p.y
-		put(&w, passed ? "PASS cursor " : "FAIL cursor ")
+		put(&w, passed ? PASS_PREFIX : FAIL_PREFIX)
+		put(&w, "cursor ")
 		integer(&w, p.x)
 		put(&w, ",")
 		integer(&w, p.y)
@@ -469,7 +597,8 @@ evaluate :: proc(
 				}
 			}
 		}
-		put(&w, passed ? "PASS cell " : "FAIL cell ")
+		put(&w, passed ? PASS_PREFIX : FAIL_PREFIX)
+		put(&w, "cell ")
 		integer(&w, p.x)
 		put(&w, ",")
 		integer(&w, p.y)

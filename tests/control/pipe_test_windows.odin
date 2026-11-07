@@ -82,6 +82,27 @@ expect_closed_call :: proc(c: ^control.Client) -> (control.Response, control.Err
 	return control.call(c, {"ping"}, 1000)
 }
 
+// Calls on c while another thread polls s and answers "answered", as the app does after polling.
+answered_call :: proc(
+	t: ^testing.T, s: ^control.Server, c: ^control.Client, args: []string,
+) -> (control.Response, control.Error) {
+	worker := thread.create_and_start_with_data(s, proc(data: rawptr) {
+		server := (^control.Server)(data)
+		start := time.tick_now()
+		for time.tick_since(start) < 3*time.Second {
+			m := control.poll(server)
+			if m == nil { time.sleep(time.Millisecond); continue }
+			_ = control.respond(server, m.id, {ok = false, text = "answered"})
+			control.message_destroy(m)
+			return
+		}
+	})
+	if !testing.expect(t, worker != nil) { return {}, .System }
+	defer thread.destroy(worker)
+	defer thread.join(worker)
+	return control.call(c, args, 1000)
+}
+
 @(test)
 pipe_round_trips_delayed_and_exclusive :: proc(t: ^testing.T) {
 	name := test_pipe_name(t)
@@ -103,8 +124,8 @@ pipe_round_trips_delayed_and_exclusive :: proc(t: ^testing.T) {
 	for i in 0..<3 {
 		m := await_request(t, s)
 		if m == nil { break }
-		testing.expect_value(t, m.parse_error.advice, "")
-		testing.expect_value(t, m.request.(control.Type).text, "hello\n\"\\world")
+		testing.expect_value(t, len(m.args), 2)
+		testing.expect_value(t, m.args[1], "hello\n\"\\world")
 		if i == 1 { time.sleep(40*time.Millisecond) }
 		testing.expect(t, !control.delivery_finished(s, m.id))
 		testing.expect_value(t, control.respond(s, m.id, {ok = true, text = "reply\n\"\\"}), control.Error.None)
@@ -300,7 +321,7 @@ pipe_protocol_errors_and_server_limit :: proc(t: ^testing.T) {
 }
 
 @(test)
-pipe_parse_error_response :: proc(t: ^testing.T) {
+pipe_delivers_requests_unparsed :: proc(t: ^testing.T) {
 	name := test_pipe_name(t)
 	defer delete(name)
 	s, err := control.create(name, {})
@@ -310,10 +331,10 @@ pipe_parse_error_response :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, connect_error, control.Error.None) { return }
 	defer control.close(&c)
 	for _ in 0..<2 {
-		r, call_error := control.call(&c, {"unknown"}, 1000)
+		r, call_error := answered_call(t, s, &c, {"unknown", "--any"})
 		testing.expect_value(t, call_error, control.Error.None)
 		testing.expect(t, !r.ok)
-		testing.expect_value(t, r.text, "\"unknown\": unknown command; use help")
+		testing.expect_value(t, r.text, "answered")
 		control.response_destroy(&r)
 	}
 	testing.expect(t, control.poll(s) == nil)
@@ -362,7 +383,7 @@ pipe_fragmented_and_coalesced_lines :: proc(t: ^testing.T) {
 	for expected in ([]string{"a", "b"}) {
 		m := await_request(t, s)
 		if m == nil { return }
-		testing.expect_value(t, m.request.(control.Type).text, expected)
+		testing.expect_value(t, m.args[1], expected)
 		testing.expect_value(t, control.respond(s, m.id, {ok = false, text = "observed failure"}), control.Error.None)
 		control.message_destroy(m)
 		buffer: [128]u8
@@ -427,11 +448,11 @@ pipe_silent_client_releases_instance :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, second_error, control.Error.None) { return }
 	defer control.close(&second)
 	testing.expect(t, time.tick_since(start) < 10*time.Second)
-	r, call_error := control.call(&second, {"unknown"}, 1000)
+	r, call_error := answered_call(t, s, &second, {"unknown"})
 	defer control.response_destroy(&r)
 	testing.expect_value(t, call_error, control.Error.None)
 	testing.expect(t, !r.ok)
-	testing.expect_value(t, r.text, "\"unknown\": unknown command; use help")
+	testing.expect_value(t, r.text, "answered")
 }
 
 // A client that requests a response but never reads it must not hold the instance:
@@ -468,11 +489,11 @@ pipe_unread_response_releases_instance :: proc(t: ^testing.T) {
 	defer control.close(&next)
 	testing.expect(t, time.tick_since(start) < 10*time.Second)
 	await_delivery(t, s, m.id)
-	r, call_error := control.call(&next, {"unknown"}, 1000)
+	r, call_error := answered_call(t, s, &next, {"unknown"})
 	defer control.response_destroy(&r)
 	testing.expect_value(t, call_error, control.Error.None)
 	testing.expect(t, !r.ok)
-	testing.expect_value(t, r.text, "\"unknown\": unknown command; use help")
+	testing.expect_value(t, r.text, "answered")
 }
 
 @(test)
@@ -493,10 +514,10 @@ pipe_argument_limit :: proc(t: ^testing.T) {
 	control.response_destroy(&rejected)
 	testing.expect_value(t, reject_error, control.Error.Protocol)
 	// The same connection stays usable after the rejection.
-	reply, reply_error := control.call(&c, {"unknown"}, 1000)
+	reply, reply_error := answered_call(t, s, &c, {"unknown"})
 	testing.expect_value(t, reply_error, control.Error.None)
 	testing.expect(t, !reply.ok)
-	testing.expect_value(t, reply.text, "\"unknown\": unknown command; use help")
+	testing.expect_value(t, reply.text, "answered")
 	control.response_destroy(&reply)
 	control.close(&c)
 	// The server independently caps the decoded array, even for a raw client that
@@ -522,11 +543,11 @@ pipe_argument_limit :: proc(t: ^testing.T) {
 	next, next_error := control.connect(name, 3000)
 	if !testing.expect_value(t, next_error, control.Error.None) { return }
 	defer control.close(&next)
-	response, call_error := control.call(&next, {"unknown"}, 1000)
+	response, call_error := answered_call(t, s, &next, {"unknown"})
 	defer control.response_destroy(&response)
 	testing.expect_value(t, call_error, control.Error.None)
 	testing.expect(t, !response.ok)
-	testing.expect_value(t, response.text, "\"unknown\": unknown command; use help")
+	testing.expect_value(t, response.text, "answered")
 }
 
 // await_response has no deadline: a request held past SERVER_IO_TIMEOUT_MS still

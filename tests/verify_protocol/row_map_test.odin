@@ -1,4 +1,4 @@
-package control_test
+package verify_protocol_test
 
 import "core:testing"
 import "aio:ghostty"

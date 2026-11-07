@@ -6,7 +6,7 @@ import "core:os"
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -105,8 +105,8 @@ pane_cleanup_committed_final_pane_removes_source_registry_and_view :: proc(t: ^t
 		testing.expect(t, app.workspace_index(state, 0) == destination_workspace)
 		testing.expect(t, app.workspace_index(state, 1) == nil)
 		when app.AIO_CONTROL {
-			testing.expect_value(t, app.verify_drive(state, control.Window_Select{u64(window_id)}),
-				control.Error.Invalid_Argument)
+			testing.expect_value(t, app.verify_drive(state, verify_protocol.Window_Select{u64(window_id)}),
+				verify_protocol.Error.Invalid_Argument)
 			testing.expect(t, app.verify_window(state) == f.destination)
 			testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))
 			testing.expect_value(t, state.verify.mouse_window, platform.Window_Id(0))
