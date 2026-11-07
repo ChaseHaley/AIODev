@@ -117,16 +117,18 @@ update_motion :: proc(app: ^App) {
 		}
 		// The float header under the pointer, or the one moving its float, takes the animation; a header
 		// the pointer left keeps it while it fades.
-		header := w.float_header_hover
-		moving := w.float_drag.pressed && w.float_drag.header
-		if moving {header = layout.float_root(w.tree, layout.find_content(w.tree, w.float_drag.content))}
+		header := layout.INVALID_NODE
+		spot, spotted := w.float_header_hover.?
+		if spotted {header = spot.root}
+		held, moving := floating_header_held(w)
+		if moving {header = layout.float_root(w.tree, layout.find_content(w.tree, held))}
 		if header != layout.INVALID_NODE {w.float_header_shown = header}
 		active := header != layout.INVALID_NODE
 		changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
 		for &control, i in w.float_header_controls {
 			action := Float_Header_Action(i + 1)
-			over := w.float_header_hover != layout.INVALID_NODE && w.float_header_action == action
-			pressed := ui.armed_is(w.float_header_armed, action)
+			over := spotted && spot.action == action
+			pressed := floating_button_pressed(w, action)
 			changed = ui.control_update(&control, over, pressed, app.animations, now) || changed
 		}
 		if changed {w.dirty = true}

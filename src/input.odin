@@ -68,7 +68,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			gesture_tab_unpress(w)
 			w.title_action_hover = .None
 			if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, 0)}
-			w.float_capsule_hover = nil
+			floating_hover_clear(w)
 			w.document_menu.menu.hover_part = .Row
 			w.tab_orientation_button_hovered = false
 			w.workspace_hovered = false

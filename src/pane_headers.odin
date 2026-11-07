@@ -211,7 +211,6 @@ pane_header_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 	}
 	if e.button == .Left {
 		_ = pane_drag_release(app, w)
-		floating_drag_release(app, w, f32(e.x), f32(e.y))
 	}
 	chosen: ui.Header_Action
 	for &view in w.views {
