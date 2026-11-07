@@ -313,6 +313,8 @@ Schema_Entry :: struct {
 	step:              f64,
 	// Edited inside another setting's control, so it has no row or palette entry of its own.
 	embedded:          bool,
+	// The embedded Bool setting that widens this setting's live choices, switched in its popup.
+	choice_filter:     string,
 	apply_timing:      Apply_Timing,
 	// A change must be checked against every command shortcut.
 	affects_bindings:  bool,
@@ -762,6 +764,7 @@ SCHEMA :: [?]Schema_Entry {
 		valid = {1, 256},
 		control = .Choice,
 		live_choices = .Shell_Fonts,
+		choice_filter = "font.show_all",
 		description = "Terminal font family.",
 	},
 	{
@@ -995,6 +998,9 @@ Diagnostic :: struct {
 	line:         int,
 	key, message: string,
 	kind:         Diagnostic_Kind,
+	// What the problem means without where it is, so moved source lines do not make it new. Empty
+	// when the message names no location.
+	identity:     string,
 }
 
 @(private)
@@ -1324,6 +1330,7 @@ diagnostics_destroy :: proc(diagnostics: ^[dynamic]Diagnostic) {
 	for d in diagnostics^ {
 		delete(d.key, diagnostics.allocator)
 		delete(d.message, diagnostics.allocator)
+		delete(d.identity, diagnostics.allocator)
 	}
 	delete(diagnostics^)
 	diagnostics^ = {}
@@ -1335,10 +1342,11 @@ diagnostic_append :: proc(
 	line: int,
 	key, message: string,
 	kind: Diagnostic_Kind = .Invalid_Value,
+	identity := "",
 ) -> runtime.Allocator_Error {
 	issue, err := problem(kind, out.allocator, message)
 	if err != nil {return err}
-	return add_diagnostic(out, line, key, issue.(Problem))
+	return add_diagnostic(out, line, key, issue.(Problem), identity)
 }
 
 @(private, require_results)
@@ -1347,15 +1355,20 @@ add_diagnostic :: proc(
 	line: int,
 	key: string,
 	issue: Problem,
+	identity := "",
 ) -> runtime.Allocator_Error {
 	copy, err := strings.clone(key, out.allocator)
 	if err != nil {
 		delete(issue.message, out.allocator)
 		return err
 	}
-	_, err = append(out, Diagnostic{line, copy, issue.message, issue.kind})
+	meaning: string
+	if meaning, err = strings.clone(identity, out.allocator); err == nil {
+		_, err = append(out, Diagnostic{line, copy, issue.message, issue.kind, meaning})
+	}
 	if err != nil {
 		delete(copy, out.allocator)
+		delete(meaning, out.allocator)
 		delete(issue.message, out.allocator)
 	}
 	return err
@@ -1403,11 +1416,13 @@ parse_key_binding :: proc(
 	return nil
 }
 
+// Parses settings text. With `inputs`, the revision also gets that snapshot's detected shells and
+// theme files; the result owns its own copies.
 @(require_results)
 parse :: proc(
 	text: string,
 	allocator := context.allocator,
-	themes_directory: string = "",
+	inputs: ^Inputs = nil,
 ) -> (
 	Settings,
 	[dynamic]Diagnostic,
@@ -1505,9 +1520,13 @@ parse :: proc(
 		return {}, {}, legacy_error
 	}
 	if profile_error := profiles_finalize(&s); profile_error != nil {return {}, {}, profile_error}
-	if themes_directory != "" {
-		if file_error := theme_files_load(&s, &diagnostics, themes_directory);
-		   file_error != nil {return {}, {}, file_error}
+	if inputs != nil {
+		if detect_error := profiles_apply_detection(&s, inputs.detected[:]); detect_error != nil {
+			return {}, {}, detect_error
+		}
+		if file_error := theme_files_apply(&s, &diagnostics, inputs.theme_files[:]); file_error != nil {
+			return {}, {}, file_error
+		}
 	}
 	if default_error := theme_default_add(&s); default_error != nil {return {}, {}, default_error}
 	if theme_error := resolve_theme(&s, &diagnostics); theme_error != nil {return {}, {}, theme_error}
@@ -1568,7 +1587,7 @@ load :: proc(
 	path: string,
 	allocator := context.allocator,
 	extra_comments: []string = nil,
-	themes_directory: string = "",
+	inputs: ^Inputs = nil,
 	source_out: ^string = nil,
 ) -> (
 	s: Settings,
@@ -1601,7 +1620,7 @@ load :: proc(
 			}
 		}
 		parse_error: runtime.Allocator_Error
-		s, diagnostics, parse_error = parse(text, allocator, themes_directory)
+		s, diagnostics, parse_error = parse(text, allocator, inputs)
 		if parse_error != nil {err = parse_error; return}
 		if source_out != nil {
 			if changed && !migrated {
@@ -1627,7 +1646,7 @@ load :: proc(
 	err = os.write_entire_file(path, text)
 	if err != nil {return}
 	default_error: runtime.Allocator_Error
-	s, diagnostics, default_error = parse(text, allocator, themes_directory)
+	s, diagnostics, default_error = parse(text, allocator, inputs)
 	if default_error != nil {
 		err = default_error
 		return

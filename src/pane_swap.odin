@@ -6,7 +6,6 @@ import "aio:settings"
 import "aio:term"
 import "core:fmt"
 import "core:log"
-import "core:os"
 import "core:strings"
 
 // The shell switch a confirmation asks about: the pane, the profile it switches to, and the names its
@@ -95,27 +94,10 @@ pane_swap_finish :: proc(app: ^App, w: ^Window, swap: Pane_Swap, opt_out, accept
 
 @(private)
 pane_swap_opt_out :: proc(app: ^App) {
-	data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
-	if read_error != nil {
-		notify(app, .Error, "Could not save the shell-switch warning preference.")
-		return
+	failure :: "Could not save the shell-switch warning preference."
+	if settings_save_value(app, "pane.confirm_shell_switch", "false", failure) {
+		notify(app, .Info, "Won't ask again. Turn it back on in Settings.")
 	}
-	updated, message, edit_error := settings.edit_text(
-		string(data),
-		"pane.confirm_shell_switch",
-		"false",
-	)
-	defer delete(updated)
-	defer delete(message)
-	if edit_error != nil || message != "" {
-		notify(app, .Error, "Could not save the shell-switch warning preference.")
-		return
-	}
-	if settings_commit(app, string(data), updated) != .None {
-		notify(app, .Error, "Could not save the shell-switch warning preference.")
-		return
-	}
-	notify(app, .Info, "Won't ask again. Turn it back on in Settings.")
 }
 
 // Replaces the session's process in place. The session ID, pane, focus and name are unchanged;

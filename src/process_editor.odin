@@ -9,19 +9,8 @@ editor_process_save :: proc(app: ^App, w: ^Window) {
 	p := &w.editor
 	value, problem := ui.editor_process_value(p)
 	if problem != "" {ui.editor_message(p, problem, true); return}
-	updated, message, err := settings.edit_text(ui.editor_source(p), settings.PADDING_GROUPS_KEY, value)
-	defer delete(updated)
-	defer delete(message)
-	if err != nil || message != "" {
-		ui.editor_message(p, err != nil ? "Could not prepare program settings." : message, true)
-		return
-	}
-	if result := settings_commit(app, ui.editor_source(p), updated, p); result != .None {
-		failure := "Could not save program settings."
-		if result == .Conflict {failure = "File changed outside this editor. Reopen Settings to reload it."}
-		ui.editor_message(p, failure, true)
-		return
-	}
+	result := settings_change(app, Setting_Value{settings.PADDING_GROUPS_KEY, value}, Settings_Page{p})
+	if !settings_page_report(p, result, .Process) {return}
 	p.process_dirty = false
 	ui.editor_message(p, "Saved and applied.", false)
 }

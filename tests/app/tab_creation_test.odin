@@ -30,7 +30,6 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 	if !testing.expect_value(t, table_error, nil) {return}
 	defer ui.profile_table_destroy(&table)
 	testing.expect_value(t, len(table.rows), 4)
-	testing.expect_value(t, len(table.detected), 0)
 	w: app.Window
 	app.profile_menu_init(&w.profile_menu)
 	defer app.profile_menu_destroy(&w.profile_menu)

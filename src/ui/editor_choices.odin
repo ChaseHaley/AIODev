@@ -1,7 +1,6 @@
 package ui
 
 import "aio:render"
-import "aio:settings"
 import "core:strings"
 
 @(private)
@@ -25,7 +24,7 @@ choice_source_index :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> int {
 @(private)
 choice_filter :: proc(p: ^Editor, row: ^Editor_Row) {
 	choice_matches_filter(&p.choice_matches, row.choices, row.choice_labels, field_string(&p.choice_search))
-	p.popup_index, p.popup_scroll = 0, 0
+	p.choice_list = {}
 }
 
 @(private)
@@ -69,29 +68,31 @@ choice_search_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Bo
 	}
 }
 
+// The options a multiple choice has on: the pending bits of the selected row, which its owner saves
+// by name.
+editor_choice_set :: proc(p: ^Editor) -> u32 {
+	return p.choice_set
+}
+
 @(private)
-choice_set_has :: proc(row: ^Editor_Row, value: string, index: int) -> bool {
-	mask, _, ok := settings.set_parse(row.choices, value)
-	return ok && mask & (1 << u32(index)) != 0
+choice_set_has :: proc(mask: u32, index: int) -> bool {
+	return mask & (1 << u32(index)) != 0
 }
 
 // Flips one option and saves at once, leaving the popup open for the next option.
 @(private)
-choice_set_toggle :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
-	mask, _, _ := settings.set_parse(row.choices, field_string(&p.value))
-	field_set(&p.value, settings.set_text(row.choices, mask ~ (1 << u32(index))))
-	p.popup_index = index
+choice_set_toggle :: proc(p: ^Editor, index: int) -> Editor_Outcome {
+	p.choice_set ~= 1 << u32(index)
+	p.choice_list.index = index
 	return .Save
 }
 
 @(private)
-choice_set_label :: proc(row: ^Editor_Row, value: string) -> string {
-	mask, _, ok := settings.set_parse(row.choices, value)
-	if !ok {return value}
+choice_set_label :: proc(row: ^Editor_Row, mask: u32) -> string {
 	if mask == 0 {return "Off"}
 	b := strings.builder_make(context.temp_allocator)
 	for label, i in row.choice_labels {
-		if mask & (1 << u32(i)) == 0 {continue}
+		if !choice_set_has(mask, i) {continue}
 		if strings.builder_len(b) > 0 {strings.write_string(&b, ", ")}
 		strings.write_string(&b, label)
 	}

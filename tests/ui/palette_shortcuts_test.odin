@@ -18,11 +18,11 @@ binding_palette :: proc(t: ^testing.T, p: ^ui.Palette) -> commands.Registry {
 	return r
 }
 
-// The open shortcut row's editor, or nil.
+// The open shortcut row, or nil.
 @(private)
-binding_editor :: proc(p: ^ui.Palette) -> ^ui.Editor {
+binding_edit :: proc(p: ^ui.Palette) -> ^ui.Shortcut_Edit {
 	binding, open := &p.edit.(ui.Shortcut_Edit)
-	return open ? &binding.editor : nil
+	return open ? binding : nil
 }
 
 @(test)
@@ -42,8 +42,8 @@ palette_shortcut_replaces_one_alternative_and_cancels_without_running :: proc(t:
 	testing.expect_value(t, key, "keys.test.alpha")
 	testing.expect_value(t, value, "Ctrl+C, Ctrl+Shift+K")
 	ui.palette_binding_saved(&p, false)
-	b := binding_editor(&p)
-	testing.expect(t, b != nil && ui.editor_capturing(b), "a refused value stays editable")
+	b := binding_edit(&p)
+	testing.expect(t, b != nil && ui.shortcut_capture_recording(&b.capture), "a refused value stays editable")
 	ui.palette_key(&p, &r, press(.Escape))
 	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
 	testing.expect(t, ui.presence_is_open(p.presence))
@@ -79,7 +79,7 @@ palette_shortcut_add_delete_physical_and_leader_use_settings_capture :: proc(t: 
 	ui.palette_binding_saved(&p, true)
 	ui.palette_key(&p, &r, press(.Enter, {.Control}))
 	ui.palette_key(&p, &r, press(.Enter))
-	if b := binding_editor(&p); testing.expect(t, b != nil) {b.physical = true}
+	if b := binding_edit(&p); testing.expect(t, b != nil) {b.capture.physical = true}
 	e := press(.Q, {.Control})
 	e.unshifted = 'a'
 	ui.palette_key(&p, &r, e)

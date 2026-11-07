@@ -140,6 +140,27 @@ edit_text :: proc(
 	return
 }
 
+// Sets one schema setting of `s` to an edited value, refusing what edit_text refuses. It changes
+// running settings when there is no settings file to edit. `message`, when set, is temporary.
+@(require_results)
+setting_assign :: proc(
+	s: ^Settings,
+	entry: Schema_Entry,
+	value: string,
+) -> (
+	message: string,
+	err: runtime.Allocator_Error,
+) {
+	if strings.contains_any(value, "\r\n\x00") {return "Use a single line without NUL bytes.", nil}
+	encoded := strings.builder_make(context.temp_allocator) or_return
+	encode_value(&encoded, entry, value) or_return
+	issue := assign(s, entry, strings.to_string(encoded)) or_return
+	refused, present := issue.?
+	if !present {return "", nil}
+	defer delete(refused.message, s.allocator)
+	return strings.clone(refused.message, context.temp_allocator)
+}
+
 // Replaces the owned `text` with its revision setting `key`. A refusal leaves `text` alone and
 // returns edit_text's message, owned by `allocator`; nothing else is left to free.
 @(private, require_results)

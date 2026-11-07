@@ -265,19 +265,30 @@ binding_issue_text :: proc(issue: Binding_Issue, path: string) -> string {
 			binding_origin(path, conflict.winner.line),
 		)
 	case .Leader_Prefix:
-		conflict := issue.conflict
 		return fmt.tprintf(
-			"input.leader (%s) vs %s (%s); %s wins [%s:%d; %s]",
-			conflict.leader_text,
-			conflict.loser.title,
-			conflict.loser.name,
-			conflict.winner.name,
+			"%s [%s:%d; %s]",
+			binding_issue_identity(issue, path),
 			binding_file_name(path),
 			issue.line,
-			binding_origin(path, conflict.loser.line),
+			binding_origin(path, issue.conflict.loser.line),
 		)
 	}
 	return ""
+}
+
+// What a binding issue means without the source lines it names, so an edit that only moves lines
+// leaves it the same problem. Only the leader conflict appends its locations.
+@(require_results)
+binding_issue_identity :: proc(issue: Binding_Issue, path: string) -> string {
+	if issue.kind != .Leader_Prefix {return binding_issue_text(issue, path)}
+	conflict := issue.conflict
+	return fmt.tprintf(
+		"input.leader (%s) vs %s (%s); %s wins",
+		conflict.leader_text,
+		conflict.loser.title,
+		conflict.loser.name,
+		conflict.winner.name,
+	)
 }
 
 // A source line, or "defaults" when the effective shortcut is built in.
@@ -330,8 +341,9 @@ settings_diagnostic :: proc(
 	line: int,
 	key, message: string,
 	kind: settings.Diagnostic_Kind = .Invalid_Value,
+	identity := "",
 ) {
-	if err := settings.diagnostic_append(diagnostics, line, key, message, kind); err != nil {
+	if err := settings.diagnostic_append(diagnostics, line, key, message, kind, identity); err != nil {
 		log.errorf("recording shortcut diagnostic failed: %v", err)
 		notify(app, .Error, message)
 	}
@@ -342,7 +354,9 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 	report, report_error := binding_report(&app.registry, &app.settings)
 	for issue in report.issues {
 		message := binding_issue_text(issue, app.settings_path)
-		settings_diagnostic(app, diagnostics, issue.line, issue.key, message, issue.severity)
+		identity := ""
+		if issue.kind == .Leader_Prefix {identity = binding_issue_identity(issue, app.settings_path)}
+		settings_diagnostic(app, diagnostics, issue.line, issue.key, message, issue.severity, identity)
 	}
 	if report_error != nil {
 		notify(app, .Error, "Could not allocate shortcut bindings.")

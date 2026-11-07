@@ -2,6 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:input"
+import "aio:settings"
 import "aio:ui"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
@@ -83,6 +84,27 @@ palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 	app.palette_owner = w.id
 	app.palette.leader = app.leader
 	ui.palette_open_mode(&app.palette, &app.registry, mode)
-	ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
+	ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
+}
+
+// The palette's settings: every schema setting with a row of its own, then the page sections the
+// palette can jump to. The palette borrows the table for the app's lifetime.
+@(require_results)
+palette_settings_init :: proc(app: ^App) -> bool {
+	@(static) table: [len(settings.SCHEMA) + len(Settings_Section)]ui.Palette_Setting
+	@(static, rodata)
+	schema := settings.SCHEMA
+	count := 0
+	for entry in schema {
+		if entry.embedded {continue}
+		table[count] = ui.palette_setting(entry)
+		count += 1
+	}
+	for section in SETTINGS_SECTIONS {
+		if section.palette_key == "" {continue}
+		table[count] = {key = section.palette_key, title = section.title, group = section.title}
+		count += 1
+	}
+	return ui.palette_init(&app.palette, table[:count]) == nil
 }

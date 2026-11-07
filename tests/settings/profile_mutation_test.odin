@@ -125,31 +125,6 @@ profile.order = found, alpha, default
 }
 
 @(test)
-profile_mutation_enable_materializes_only_the_selected_detection :: proc(t: ^testing.T) {
-	source :: "# keep\nshell.default_profile = found\nprofile.order = default\n"
-	s := mutation_parse(t, source)
-	defer settings.destroy(&s)
-	testing.expect_value(t, settings.profile_detect(&s, {"found", "Found", "cmd.exe", `C:\work`}), nil)
-	testing.expect_value(t, settings.profile_detect(&s, {"other", "Other", "cmd.exe", "~"}), nil)
-	text, id, issue, error := settings.profile_mutate(source, &s.profiles, {kind = .Enable, id = "found"})
-	defer delete(text)
-	defer delete(id)
-	defer delete(issue)
-	testing.expect_value(t, error, settings.Profile_Mutation_Error.None)
-	after := mutation_parse(t, text)
-	defer settings.destroy(&after)
-	profile := settings.profile_find(&after.profiles, id)
-	if !testing.expect(t, profile != nil) {return}
-	testing.expect_value(t, profile.name, "Found")
-	testing.expect_value(t, profile.command, "cmd.exe")
-	testing.expect_value(t, profile.directory, `C:\work`)
-	testing.expect(t, !profile.detected && .Hidden in profile.set && !profile.hidden)
-	testing.expect_value(t, after.profiles.default_id, "found")
-	mutation_order(t, &after, {"default", "found"})
-	testing.expect(t, !strings.contains(text, "profile.other."))
-}
-
-@(test)
 profile_mutation_remove_repairs_order_and_default_in_one_revision :: proc(t: ^testing.T) {
 	source :: "\xef\xbb\xbf# keep\r\nprofile.alpha.name = Alpha\r\n" +
 		"profile.alpha.command = cmd.exe\r\nprofile.alphabet.command = cmd.exe\r\n" +
@@ -205,7 +180,6 @@ profile_mutation_rejects_ineligible_requests_without_a_revision :: proc(t: ^test
 	testing.expect_value(t, settings.profile_detect(&s, {"found", "Found", "cmd.exe", "~"}), nil)
 	for change in ([?]settings.Profile_Mutation {
 		{kind = .Remove, id = "default"}, {kind = .Remove, id = "found"},
-		{kind = .Enable, id = "default"},
 		{kind = .Duplicate, id = "missing"},
 	}) {
 		text, id, issue, error := settings.profile_mutate("", &s.profiles, change)
@@ -219,13 +193,13 @@ profile_mutation_rejects_ineligible_requests_without_a_revision :: proc(t: ^test
 	for i in 2 ..< settings.PROFILE_LIMIT {
 		testing.expect_value(t, settings.profile_detect(&s, {fmt.tprintf("p-%d", i), "Found", "cmd.exe", "~"}), nil)
 	}
-	for kind in ([?]settings.Profile_Mutation_Kind{.Add, .Duplicate, .Enable}) {
+	for kind in ([?]settings.Profile_Mutation_Kind{.Add, .Duplicate}) {
 		text, id, issue, error := settings.profile_mutate("", &s.profiles, {kind = kind, id = "found"})
 		defer delete(text)
 		defer delete(id)
 		defer delete(issue)
-		testing.expect_value(t, error, kind == .Enable ? settings.Profile_Mutation_Error.None : .Limit)
-		testing.expect_value(t, text != "", kind == .Enable)
+		testing.expect_value(t, error, settings.Profile_Mutation_Error.Limit)
+		testing.expect_value(t, text, "")
 	}
 }
 
@@ -234,7 +208,7 @@ profile_mutation_failed_edits_and_allocations_never_return_partial_revisions :: 
 	s := mutation_parse(t, "# source\n")
 	defer settings.destroy(&s)
 	testing.expect_value(t, settings.profile_detect(&s, {"found", "Found", "cmd.exe\nbad", "~"}), nil)
-	text, id, issue, error := settings.profile_mutate("# source\n", &s.profiles, {kind = .Enable, id = "found"})
+	text, id, issue, error := settings.profile_mutate("# source\n", &s.profiles, {kind = .Duplicate, id = "found"})
 	defer delete(text)
 	defer delete(id)
 	defer delete(issue)

@@ -1,13 +1,56 @@
 package settings
 
-import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
-import "core:slice"
 import "core:strings"
 
 THEME_FILE_MAX_BYTES :: 64 * 1024
+
+// The top-level fields of a theme file, in the order the schema lists them.
+Theme_Field :: enum {
+	Schema,
+	Version,
+	Id,
+	Name,
+	Author,
+	Description,
+	Base,
+	Colors,
+}
+
+Theme_Field_Kind :: enum {
+	String,
+	// The format version, which must be 1.
+	Version,
+	// The colors object, checked token by token.
+	Colors,
+}
+
+Theme_Field_Info :: struct {
+	key:      string,
+	kind:     Theme_Field_Kind,
+	required: bool,
+}
+
+// What theme_file_parse accepts and theme_schema_text describes at the top level of a theme file.
+@(rodata)
+THEME_FIELDS := [Theme_Field]Theme_Field_Info {
+	.Schema      = {key = "$schema", kind = .String},
+	.Version     = {key = "version", kind = .Version, required = true},
+	.Id          = {key = "id", kind = .String, required = true},
+	.Name        = {key = "name", kind = .String},
+	.Author      = {key = "author", kind = .String},
+	.Description = {key = "description", kind = .String},
+	.Base        = {key = "base", kind = .String},
+	.Colors      = {key = "colors", kind = .Colors, required = true},
+}
+
+@(private)
+theme_field_find :: proc(key: string) -> (Theme_Field_Info, bool) {
+	for info in THEME_FIELDS {if info.key == key {return info, true}}
+	return {}, false
+}
 
 @(require_results)
 theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
@@ -37,16 +80,16 @@ theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
 	object, object_ok := value.(json.Object)
 	if !object_ok {return {}, "Expected a theme object."}
 	for key, entry in object {
-		switch key {
-		case "$schema", "id", "base", "name", "author", "description":
+		info, known := theme_field_find(key)
+		if !known {return {}, fmt.tprintf("Unknown theme field: %s", key)}
+		switch info.kind {
+		case .String:
 			if _, ok := entry.(json.String); !ok {return {}, "Theme metadata must be strings."}
-		case "version":
+		case .Version:
 			if version, ok := entry.(json.Float); !ok || version != 1 {
 				return {}, "Expected theme version 1."
 			}
-		case "colors":
-		case:
-			return {}, fmt.tprintf("Unknown theme field: %s", key)
+		case .Colors:
 		}
 	}
 	id, id_ok := object["id"].(json.String)
@@ -92,63 +135,6 @@ theme_directory :: proc() -> string {
 	return fmt.tprintf("%s/themes", path)
 }
 
-@(private, require_results)
-theme_files_load :: proc(
-	s: ^Settings,
-	diagnostics: ^[dynamic]Diagnostic,
-	directory: string,
-) -> runtime.Allocator_Error {
-	files, read_error := os.read_directory_by_path(directory, 1024, context.temp_allocator)
-	if read_error == .Not_Exist {return nil}
-	if read_error != nil {
-		return diagnostic_append(diagnostics, 0, directory, "Could not read themes directory.")
-	}
-	defer os.file_info_slice_delete(files, context.temp_allocator)
-	slice.sort_by(files, proc(a, b: os.File_Info) -> bool {return a.name < b.name})
-	if len(files) == 1024 {
-		if err := diagnostic_append(diagnostics, 0, directory, "Only the first 1024 entries were scanned.");
-		   err != nil {return err}
-	}
-	for file in files {
-		if file.type != .Regular {continue}
-		if !strings.has_suffix(file.name, ".theme.json") {continue}
-		path := fmt.tprintf("%s/%s", directory, file.name)
-		if file.size > THEME_FILE_MAX_BYTES {
-			if err := diagnostic_append(diagnostics, 0, path, "Theme file exceeds 64 KiB.");
-			   err != nil {return err}
-			continue
-		}
-		data, error := os.read_entire_file(path, context.temp_allocator)
-		if error != nil {
-			if err := diagnostic_append(diagnostics, 0, path, "Could not read theme file.");
-			   err != nil {return err}
-			continue
-		}
-		theme, issue := theme_file_parse(string(data))
-		delete(data, context.temp_allocator)
-		if issue != "" {
-			if err := diagnostic_append(diagnostics, 0, path, issue); err != nil {return err}
-			continue
-		}
-		if existing := custom_theme_find(s, theme.id); existing != nil {
-			if existing.external {
-				if err := diagnostic_append(diagnostics, 0, path, "Duplicate theme ID; file ignored.");
-				   err != nil {return err}
-			}
-			continue
-		}
-		stored, add_error := custom_theme_add(s, theme.id)
-		if add_error != nil {return add_error}
-		if stored == nil {
-			if err := diagnostic_append(diagnostics, 0, path, "Custom theme limit reached.");
-			   err != nil {return err}
-			continue
-		}
-		if err := custom_theme_store(s, stored, theme); err != nil {return err}
-	}
-	return nil
-}
-
 // A complete theme file: every color of `theme` in token order, so it needs no base. Empty
 // metadata is left out.
 @(require_results)
@@ -163,23 +149,25 @@ theme_file_text :: proc(
 	bool,
 ) {
 	if !theme_id_valid(id) {return "", false}
-	quote :: proc(text: string) -> string {
-		data, error := json.marshal(text, allocator = context.temp_allocator)
-		return error == nil ? string(data) : `""`
+	// A value that cannot be quoted fails the file rather than writing an empty string in its place.
+	field :: proc(b: ^strings.Builder, indent, key, value, separator: string) -> bool {
+		quoted_key, key_error := json.marshal(key, allocator = context.temp_allocator)
+		quoted_value, value_error := json.marshal(value, allocator = context.temp_allocator)
+		if key_error != nil || value_error != nil {return false}
+		return write_parts(b, indent, string(quoted_key), ": ", string(quoted_value), separator) == nil
 	}
 	builder, error := strings.builder_make(context.temp_allocator)
 	if error != nil {return "", false}
 	defer strings.builder_destroy(&builder)
 	if write_parts(&builder, "{\n  \"$schema\": \"./theme.schema.json\",\n  \"version\": 1,\n") != nil ||
-	   write_parts(&builder, "  \"id\": ", quote(id), ",\n") != nil {return "", false}
-	if name != "" && write_parts(&builder, "  \"name\": ", quote(name), ",\n") != nil {return "", false}
-	if description != "" &&
-	   write_parts(&builder, "  \"description\": ", quote(description), ",\n") != nil {return "", false}
+	   !field(&builder, "  ", "id", id, ",\n") {return "", false}
+	if name != "" && !field(&builder, "  ", "name", name, ",\n") {return "", false}
+	if description != "" && !field(&builder, "  ", "description", description, ",\n") {return "", false}
 	if write_parts(&builder, "  \"colors\": {\n") != nil {return "", false}
 	for info, token in THEME_TOKENS {
 		separator := token == max(Theme_Token) ? "\n" : ",\n"
-		value := quote(theme_color_text(token, theme.colors[token]))
-		if write_parts(&builder, "    ", quote(info.key), ": ", value, separator) != nil {return "", false}
+		value := theme_color_text(token, theme.colors[token])
+		if !field(&builder, "    ", info.key, value, separator) {return "", false}
 	}
 	if write_parts(&builder, "  }\n}\n") != nil {return "", false}
 	text, clone_error := strings.clone(strings.to_string(builder), allocator)

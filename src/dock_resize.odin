@@ -175,13 +175,5 @@ dock_divider_save_default :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 		key, size = "status.panel_height", 100 * status_panel_rail_height(app, w) / area.height
 	case: return
 	}
-	value := int(math.round(size))
-	_, has_file := settings_save_value(app, key, fmt.tprintf("%d", value), "Could not save default size.")
-	if has_file {return}
-	switch node {
-	case RAIL_DIVIDER: app.settings.tabs.rail_width = value
-	case ACTIVITY_DIVIDER: app.settings.status.panel_width = value
-	case ACTIVITY_HEIGHT_DIVIDER: app.settings.status.panel_height = value
-	}
-	for window in app.windows {window_apply_settings(app, window); window_relayout(app, window)}
+	settings_save_value(app, key, fmt.tprintf("%d", int(math.round(size))), "Could not save default size.")
 }

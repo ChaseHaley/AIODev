@@ -1,5 +1,26 @@
 package ui
 
+// The profile table's state on the settings page: the one expanded profile, the control the focus
+// ring is on, the pointer's hover, the overflow menu, and an inline field problem. Strings are owned.
+Profile_Editor_State :: struct {
+	profile_menu:                         Menu,
+	profile_menu_controls:                [4]Profile_Control,
+	profile_menu_parts:                   Profile_Parts,
+	expanded:                             string,
+	profile_control:                      Profile_Control,
+	hover_profile_item:                   int,
+	hover_profile_control:                Profile_Control,
+	error_key, error_profile, error_text: string,
+}
+
+@(private)
+profile_editor_destroy :: proc(state: ^Profile_Editor_State) {
+	menu_destroy(&state.profile_menu)
+	for text in ([?]string{state.expanded, state.error_key, state.error_profile, state.error_text}) {
+		delete(text)
+	}
+}
+
 // The menu contains exactly the controls omitted by the current row geometry.
 editor_profile_menu_open :: proc(p: ^Editor, row: ^Editor_Row, parts: Profile_Parts) {
 	menu_clear(&p.profile_menu)

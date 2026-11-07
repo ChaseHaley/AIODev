@@ -101,22 +101,22 @@ font.family = `
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	expected := []settings.Diagnostic{
-		{1, "unknown", `unknown key "unknown"; expected a key from the settings schema`, .Unknown_Key},
-		{2, "missing separator", `expected "key = value"`, .Malformed_Line},
-		{3, "font.size", "0 is out of range 1..200", .Out_Of_Range},
-		{4, "cursor.blink", `invalid boolean "TRUE", expected true or false`, .Invalid_Value},
-		{5, "cursor.style", `"Block" is not one of block, bar, underline`, .Invalid_Value},
-		{6, "theme.custom.mine.cursor", `invalid color "blu", expected #rrggbb`, .Invalid_Value},
-		{8, "window.rows", `duplicate key "window.rows"; last value wins`, .Duplicate_Key},
-		{8, "window.rows", `invalid integer "nope", expected a decimal integer`, .Invalid_Value},
-		{9, "font.family", "expected a closing double quote", .Invalid_Value},
-		{10, "font.line_height", "NaN is out of range 0.5..4", .Out_Of_Range},
-		{11, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key},
-		{11, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range},
-		{12, "font.size", `duplicate key "font.size"; last value wins`, .Duplicate_Key},
-		{12, "font.size", `invalid number "twelve", expected a number`, .Invalid_Value},
-		{13, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key},
-		{13, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range},
+		{1, "unknown", `unknown key "unknown"; expected a key from the settings schema`, .Unknown_Key, ""},
+		{2, "missing separator", `expected "key = value"`, .Malformed_Line, ""},
+		{3, "font.size", "0 is out of range 1..200", .Out_Of_Range, ""},
+		{4, "cursor.blink", `invalid boolean "TRUE", expected true or false`, .Invalid_Value, ""},
+		{5, "cursor.style", `"Block" is not one of block, bar, underline`, .Invalid_Value, ""},
+		{6, "theme.custom.mine.cursor", `invalid color "blu", expected #rrggbb`, .Invalid_Value, ""},
+		{8, "window.rows", `duplicate key "window.rows"; last value wins`, .Duplicate_Key, ""},
+		{8, "window.rows", `invalid integer "nope", expected a decimal integer`, .Invalid_Value, ""},
+		{9, "font.family", "expected a closing double quote", .Invalid_Value, ""},
+		{10, "font.line_height", "NaN is out of range 0.5..4", .Out_Of_Range, ""},
+		{11, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key, ""},
+		{11, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range, ""},
+		{12, "font.size", `duplicate key "font.size"; last value wins`, .Duplicate_Key, ""},
+		{12, "font.size", `invalid number "twelve", expected a number`, .Invalid_Value, ""},
+		{13, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key, ""},
+		{13, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range, ""},
 	}
 	testing.expect_value(t, len(d), len(expected))
 	for actual, i in d {

@@ -1,5 +1,6 @@
 package settings_test
 
+import "base:runtime"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
@@ -7,6 +8,57 @@ import "aio:settings"
 import fixtures "../fixtures"
 
 THEMES :: "themes"
+
+// Parses `source` with the theme files of `directory`, as the app parses a revision with its inputs.
+@(private)
+parse_themes :: proc(
+	source, directory: string,
+) -> (
+	settings.Settings,
+	[dynamic]settings.Diagnostic,
+	runtime.Allocator_Error,
+) {
+	inputs, err := settings.inputs_read(directory, nil)
+	defer settings.inputs_destroy(&inputs)
+	if err != nil {return {}, {}, err}
+	return settings.parse(source, inputs = &inputs)
+}
+
+// The revision a theme edit of `source` resolves against.
+@(private)
+theme_model :: proc(source, directory: string) -> settings.Settings {
+	s, diagnostics, _ := parse_themes(source, directory)
+	settings.diagnostics_destroy(&diagnostics)
+	return s
+}
+
+@(private)
+edit_color :: proc(source, token, value: string, directory := "") -> (string, string, string, settings.Theme_Edit_Error) {
+	s := theme_model(source, directory)
+	defer settings.destroy(&s)
+	return settings.theme_color_edit(&s, source, token, value)
+}
+
+@(private)
+edit_duplicate :: proc(source: string, directory := "") -> (string, string, settings.Theme_Edit_Error) {
+	s := theme_model(source, directory)
+	defer settings.destroy(&s)
+	return settings.theme_duplicate(&s, source)
+}
+
+@(private)
+edit_rename :: proc(source, id: string, directory := "") -> (string, string, settings.Theme_Edit_Error) {
+	s := theme_model(source, directory)
+	defer settings.destroy(&s)
+	return settings.theme_rename(&s, source, id)
+}
+
+@(private)
+edit_delete :: proc(source: string, directory := "") -> (string, string, settings.Theme_Edit_Error) {
+	s := theme_model(source, directory)
+	defer settings.destroy(&s)
+	return settings.theme_delete(&s, source)
+}
 
 @(test)
 shipped_themes_resolve_after_parsing :: proc(t: ^testing.T) {
@@ -23,7 +75,7 @@ shipped_themes_resolve_after_parsing :: proc(t: ^testing.T) {
 		{"tokyonight-day", {0xe1, 0xe2, 0xe7}, {0xf5, 0x2a, 0x65}, true},
 	}
 	for fixture in cases {
-		s, d, err := settings.parse(fmt.tprintf("theme.name = %s\n", fixture.id), themes_directory = THEMES)
+		s, d, err := parse_themes(fmt.tprintf("theme.name = %s\n", fixture.id), THEMES)
 		defer settings.destroy(&s)
 		defer settings.diagnostics_destroy(&d)
 		testing.expect_value(t, err, nil)
@@ -58,12 +110,9 @@ the_compiled_default_survives_an_empty_themes_folder :: proc(t: ^testing.T) {
 
 @(test)
 custom_theme_inherits_its_base_and_overrides_single_colors :: proc(t: ^testing.T) {
-	s, d, err := settings.parse(
-		"theme.name = ocean\ntheme.custom.ocean.base = tide-light\n" +
+	s, d, err := parse_themes("theme.name = ocean\ntheme.custom.ocean.base = tide-light\n" +
 		"theme.custom.ocean.tab_bar = #010203\ntheme.custom.ocean.border = #04050680\n" +
-		"theme.custom.ocean.palette.15 = #070809\ntheme.custom.other.cursor = #0a0b0c\n",
-		themes_directory = THEMES,
-	)
+		"theme.custom.ocean.palette.15 = #070809\ntheme.custom.other.cursor = #0a0b0c\n", THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
@@ -82,12 +131,9 @@ custom_theme_inherits_its_base_and_overrides_single_colors :: proc(t: ^testing.T
 
 @(test)
 custom_themes_stack_on_custom_bases_and_survive_cycles :: proc(t: ^testing.T) {
-	s, d, err := settings.parse(
-		"theme.name = top\ntheme.custom.top.base = middle\ntheme.custom.top.cursor = #010101\n" +
+	s, d, err := parse_themes("theme.name = top\ntheme.custom.top.base = middle\ntheme.custom.top.cursor = #010101\n" +
 		"theme.custom.middle.base = ember-light\ntheme.custom.middle.tab_bar = #020202\n" +
-		"theme.custom.loop.base = loop\ntheme.custom.loop.accent = #030303\n",
-		themes_directory = THEMES,
-	)
+		"theme.custom.loop.base = loop\ntheme.custom.loop.accent = #030303\n", THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
@@ -184,9 +230,7 @@ legacy_theme_name_and_mode_become_one_theme_id :: proc(t: ^testing.T) {
 	_, untouched, _ := settings.migrate_theme_variant_text("theme.name = tide\n")
 	testing.expect(t, !untouched)
 
-	s, d, err := settings.parse(
-		"theme.name = mine\ntheme.custom.mine.base = tokyonight-night-light\n", themes_directory = THEMES,
-	)
+	s, d, err := parse_themes("theme.name = mine\ntheme.custom.mine.base = tokyonight-night-light\n", THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
@@ -196,11 +240,8 @@ legacy_theme_name_and_mode_become_one_theme_id :: proc(t: ^testing.T) {
 
 @(test)
 themes_show_free_text_names_while_ids_stay_the_key :: proc(t: ^testing.T) {
-	s, d, err := settings.parse(
-		"theme.name = mine\ntheme.custom.mine.name = \"Late Night: Ünïcode / <Mine>?\"\n" +
-		"theme.custom.mine.base = tide-dark\n",
-		themes_directory = THEMES,
-	)
+	s, d, err := parse_themes("theme.name = mine\ntheme.custom.mine.name = \"Late Night: Ünïcode / <Mine>?\"\n" +
+		"theme.custom.mine.base = tide-dark\n", THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
@@ -209,9 +250,7 @@ themes_show_free_text_names_while_ids_stay_the_key :: proc(t: ^testing.T) {
 	testing.expect_value(t, settings.theme_display_name(&s, "tokyonight-storm"), "Tokyo Night Storm")
 	testing.expect_value(t, settings.theme_display_name(&s, "nothing"), "nothing")
 
-	updated, created, issue, edit_error := settings.theme_color_edit(
-		"theme.name = tide-dark\n", "accent", "#010203", themes_directory = THEMES,
-	)
+	updated, created, issue, edit_error := edit_color("theme.name = tide-dark\n", "accent", "#010203", THEMES)
 	defer delete(updated)
 	defer delete(created)
 	testing.expect_value(t, edit_error, settings.Theme_Edit_Error.None)
@@ -222,11 +261,11 @@ themes_show_free_text_names_while_ids_stay_the_key :: proc(t: ^testing.T) {
 	defer delete(message)
 	testing.expect_value(t, alloc, nil)
 	testing.expect_value(t, message, "")
-	copy, copy_id, copy_error := settings.theme_duplicate(named, themes_directory = THEMES)
+	copy, copy_id, copy_error := edit_duplicate(named, THEMES)
 	defer delete(copy)
 	defer delete(copy_id)
 	testing.expect_value(t, copy_error, settings.Theme_Edit_Error.None)
-	c, cd, ce := settings.parse(copy, themes_directory = THEMES)
+	c, cd, ce := parse_themes(copy, THEMES)
 	defer settings.destroy(&c)
 	defer settings.diagnostics_destroy(&cd)
 	testing.expect_value(t, ce, nil)

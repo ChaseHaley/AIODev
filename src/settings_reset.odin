@@ -1,6 +1,5 @@
 package main
 
-import "aio:settings"
 import "aio:ui"
 import "core:strings"
 
@@ -29,13 +28,10 @@ settings_reset_text :: proc() -> Confirmation_Text {
 @(private)
 settings_reset_finish :: proc(app: ^App, reset: Settings_Reset, accepted: bool) {
 	if !accepted {return}
-	defaults, err := settings.default_text()
-	defer delete(defaults)
-	if err != nil {notify(app, .Error, "Could not prepare factory defaults."); return}
 	// A full reset also discards pending fields and program drafts on every open page.
-	result := settings_save_revision(app, reset.source, defaults, Publish_Reset{defaults})
-	if result != .None {
-		notify(app, .Error, "Could not reset settings. Reopen Settings and try again.")
+	result := settings_change(app, Factory_Reset{}, Settings_Expected{reset.source})
+	if result.status != .Applied {
+		notify(app, .Error, settings_result_text(result, .Reset))
 		return
 	}
 	notify(app, .Info, "All settings restored to factory defaults.")

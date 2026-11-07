@@ -212,7 +212,7 @@ confirmation_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	case Process_Remove:
 		text = editor_process_remove_text(subject)
 	case Profile_Remove:
-		text = editor_profile_remove_text(app, subject.id)
+		text = editor_profile_remove_text(subject)
 	case Settings_Reset:
 		text = settings_reset_text()
 	}

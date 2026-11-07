@@ -54,6 +54,8 @@ App :: struct {
 	platform_ready:        bool,
 	settings_diagnostics:  [dynamic]settings.Diagnostic,
 	settings_read_error:   os.Error,
+	// Theme files and machine shells the running revision was read with; saves and pages reuse them.
+	settings_inputs:       settings.Inputs,
 	settings:              settings.Settings,
 	markdown_panes:        [dynamic]^Markdown_Pane,
 	next_markdown_id:      u32,
@@ -149,20 +151,7 @@ app_init :: proc(app: ^App) -> bool {
 		log.errorf("registering commands failed: %v", err)
 		return false
 	}
-	@(static) palette_settings: [len(settings.SCHEMA) + 1]ui.Palette_Setting
-	@(static, rodata)
-	schema := settings.SCHEMA
-	setting_count := 0
-	for entry in schema {
-		if entry.embedded {continue}
-		palette_settings[setting_count] = ui.palette_setting(entry)
-		setting_count += 1
-	}
-	palette_settings[setting_count] = {key = "profiles", title = "Profiles", group = "Profiles"}
-	setting_count += 1
-	if ui.palette_init(&app.palette, palette_settings[:setting_count]) != nil {
-		return false
-	}
+	if !palette_settings_init(app) {return false}
 	palette_set_sources(app)
 	ui.palette_set_values(
 		&app.palette,
@@ -263,6 +252,7 @@ app_destroy :: proc(app: ^App) {
 	ui.notices_destroy(&app.notices)
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
+	settings.inputs_destroy(&app.settings_inputs)
 	settings.diagnostics_destroy(&app.settings_diagnostics)
 	delete(app.settings_path)
 	instance.paths_destroy(&app.paths)
@@ -515,25 +505,35 @@ Settings_Read :: struct {
 	diagnostics:       [dynamic]settings.Diagnostic,
 	// Owned exact parsed text, transferred by settings.load; lives through publication.
 	source:            string,
+	// The theme files and machine shells this read used; they replace the app's on success.
+	inputs:            settings.Inputs,
 	read_error:        os.Error,
 	created, migrated: bool,
 	migration_error:   settings.Save_Error,
 }
 
-// Reads the settings file, or defaults when it cannot be read. Fails only when neither is available.
+// Reads the themes folder, the machine's shells and the settings file, or defaults when the file
+// cannot be read. Fails only when neither is available.
 @(private, require_results)
 settings_read :: proc(app: ^App) -> (read: Settings_Read, ok: bool) {
+	inputs, inputs_error := settings.inputs_read(settings.theme_directory(), shell_profiles_detect())
+	if inputs_error != nil {log.errorf("recording theme files and shells failed: %v", inputs_error)}
+	read.inputs = inputs
 	comments, comment_count := binding_comments()
 	read.loaded, read.diagnostics, read.created, read.migrated, read.migration_error, read.read_error =
 		settings.load(
 			app.settings_path,
 			extra_comments = comments[:comment_count],
-			themes_directory = settings.theme_directory(),
+			inputs = &read.inputs,
 			source_out = &read.source,
 		)
 	if read.read_error != nil {
 		log.errorf("reading %s failed: %v", app.settings_path, read.read_error)
 		defaults, default_error := settings.defaults()
+		if default_error == nil {
+			default_error = settings.profiles_apply_detection(&defaults, read.inputs.detected[:])
+			if default_error != nil {settings.destroy(&defaults)}
+		}
 		if default_error != nil {
 			log.errorf("loading default settings failed: %v", default_error)
 			notify(
@@ -542,11 +542,19 @@ settings_read :: proc(app: ^App) -> (read: Settings_Read, ok: bool) {
 				"Could not load settings or defaults. Check the log and restart AIODev.",
 			)
 			settings.diagnostics_destroy(&read.diagnostics)
+			settings.inputs_destroy(&read.inputs)
 			return {}, false
 		}
 		read.loaded = defaults
 	}
 	return read, true
+}
+
+// The revision `read` came with becomes the one saves and pages are built with.
+@(private)
+settings_inputs_adopt :: proc(app: ^App, read: ^Settings_Read) {
+	settings.inputs_destroy(&app.settings_inputs)
+	app.settings_inputs, read.inputs = read.inputs, {}
 }
 
 // Reports what reading the file changed on disk, once the settings it read apply.
@@ -581,6 +589,7 @@ load_settings :: proc(app: ^App) {
 	if !ok {return}
 	defer settings.diagnostics_destroy(&read.diagnostics)
 	defer delete(read.source)
+	settings_inputs_adopt(app, &read)
 	settings_apply_revision(app, read.loaded, &read.diagnostics, read.read_error)
 	settings_read_report(app, &read)
 }
@@ -611,7 +620,6 @@ settings_apply_revision :: proc(
 ) {
 	settings.destroy(&app.settings)
 	app.settings = loaded
-	detect_shell_profiles(app)
 	app.process_deadline = {}
 	for &entry in app.sessions {entry.process_padding = nil}
 	apply_bindings(app, diagnostics)
@@ -637,6 +645,7 @@ reload_settings :: proc(app: ^App, announce := true) {
 	if !ok {return}
 	defer settings.diagnostics_destroy(&read.diagnostics)
 	defer delete(read.source)
+	settings_inputs_adopt(app, &read)
 	publication: Settings_Publication = Publish_Unavailable{}
 	if read.read_error == nil {publication = Publish_Reloaded{read.source}}
 	settings_revision_apply(app, read.loaded, &read.diagnostics, read.read_error, publication)

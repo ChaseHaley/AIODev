@@ -400,7 +400,7 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 	case .Set_Setting:
 		w.dirty = true
 		if value, ok := chosen.(ui.Chosen_Value); ok {
-			saved, _ := settings_save_value(app, value.key, value.value, "Could not save the setting.")
+			saved := settings_save_value(app, value.key, value.value, "Could not save the setting.")
 			ui.palette_binding_saved(&app.palette, saved)
 		}
 	case .Open_Tab:

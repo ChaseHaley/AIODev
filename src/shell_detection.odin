@@ -7,9 +7,10 @@ import "core:log"
 import "core:os"
 import "core:strings"
 
-// Adds the shells this machine has, without starting one. Only file existence and the WSL
-// registry are consulted; hidden profiles and file overrides win in profile_detect.
-detect_shell_profiles :: proc(app: ^App) {
+// The shells this machine has, found without starting one. Only file existence and the WSL
+// registry are consulted; hidden profiles and file overrides win when a parse applies them.
+// Temporary; settings.inputs_read keeps its own copy for the revision.
+shell_profiles_detect :: proc() -> []settings.Detected_Profile {
 	detected := make([dynamic]settings.Detected_Profile, context.temp_allocator)
 	system_root := os.get_env("SystemRoot", context.temp_allocator)
 	if system_root == "" {system_root = `C:\Windows`}
@@ -57,17 +58,7 @@ detect_shell_profiles :: proc(app: ^App) {
 			)
 		}
 	}
-	settings.profiles_begin_detection(&app.settings.profiles)
-	for profile in detected {
-		if profile_error := settings.profile_detect(&app.settings, profile);
-		   profile_error != nil {
-			log.errorf("adding detected shell profiles failed: %v", profile_error)
-			break
-		}
-	}
-	if finalize_error := settings.profiles_finalize(&app.settings); finalize_error != nil {
-		log.errorf("resolving detected shell profiles failed: %v", finalize_error)
-	}
+	return detected[:]
 }
 
 @(private)

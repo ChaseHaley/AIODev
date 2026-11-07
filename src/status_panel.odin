@@ -132,13 +132,8 @@ status_panel_view_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 
 // One preference in the settings file, so Settings and every window follow it.
 status_panel_view_toggle :: proc(app: ^App) {
-	dense := app.settings.status.panel_view == .Comfy
-	value := dense ? "dense" : "comfy"
-	if _, has_file := settings_save_value(app, "status.panel_view", value, "Could not save Activity view.");
-	   !has_file {
-		app.settings.status.panel_view = dense ? .Dense : .Comfy
-		for window in app.windows {window.dirty = true}
-	}
+	value := app.settings.status.panel_view == .Comfy ? "dense" : "comfy"
+	settings_save_value(app, "status.panel_view", value, "Could not save Activity view.")
 }
 
 // Runs a header button after a press and release both landed on it.
@@ -155,11 +150,7 @@ status_panel_button_fire :: proc(app: ^App, button: Status_Panel_Button) {
 
 status_panel_side_toggle :: proc(app: ^App) {
 	next := app.settings.status.panel_side == .Right ? "left" : "right"
-	if _, has_file := settings_save_value(app, "status.panel_side", next, "Could not save Activity side.");
-	   !has_file {
-		app.settings.status.panel_side = next == "left" ? .Left : .Right
-		for window in app.windows {window_relayout(app, window)}
-	}
+	settings_save_value(app, "status.panel_side", next, "Could not save Activity side.")
 }
 
 @(private)
