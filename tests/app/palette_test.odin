@@ -159,7 +159,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, app.palette_active(s, first))
 	app.run_action(s, second, .Command_Palette)
 	testing.expect(t, app.palette_active(s, second) && !app.palette_visible(s, first))
-	testing.expect(t, s.palette.drag == nil && !second.rename_open)
+	testing.expect(t, s.palette.drag == nil && !app.rename_shown(second))
 	testing.expect(t, first.workspace == first_workspace && first.tree == first_tree)
 	testing.expect_value(t, first.workspace.selected, first_selected)
 	testing.expect_value(t, first.tree.focus, first_focus)
@@ -172,11 +172,11 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	s.palette.drag = ui.Query_Drag{}
 	app.rename_open(s, first, true, first.workspace.selected)
 	app.handle_event(s, platform.Focus_Event{first.id, false})
-	testing.expect(t, !first.rename_open)
+	testing.expect(t, !app.rename_shown(first))
 	testing.expect(t, app.palette_active(s, second) && s.palette.drag != nil)
 	app.tab_menu_open(s, first, 0, 10, 20)
 	app.handle_event(s, platform.Focus_Event{first.id, false})
-	testing.expect(t, !first.tab_menu.open && app.palette_active(s, second))
+	testing.expect(t, first.overlay == nil && app.palette_active(s, second))
 	app.pane_split(s, first, .Right)
 	app.tab_close_request(s, first, 0)
 	testing.expect(t, ui.presence_is_open(first.pending_close.confirm.presence) &&
@@ -193,7 +193,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect_value(t, len(s.sessions), 3)
 	app.handle_event(s, platform.Focus_Event{second.id, false})
 	testing.expect(t, !ui.presence_is_open(s.palette.presence) && s.palette.drag == nil)
-	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
+	testing.expect(t, s.palette_owner == nil)
 	app.palette_open(s, second)
 	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.palette_active(s, second) && second.suppressed_key != nil)
@@ -203,7 +203,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	second.pane_drag.pressed, second.pane_drag.active = true, true
 	second.tab_drag.pressed, second.tab_drag.active = true, true
 	app.focus_leave(s, second)
-	testing.expect(t, !app.palette_visible(s, second) && s.palette_window == 0)
+	testing.expect(t, !app.palette_visible(s, second) && s.palette_owner == nil)
 	testing.expect(t, second.pane_drag.pressed && second.pane_drag.active)
 	testing.expect(t, second.tab_drag.pressed && second.tab_drag.active)
 	second.pane_drag, second.tab_drag = {}, {}
@@ -212,12 +212,36 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	app.palette_close(s, second)
 	testing.expect(t, app.palette_visible(s, second) && !app.palette_active(s, second))
 	app.window_close(s, second)
-	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
+	testing.expect(t, s.palette_owner == nil)
 	testing.expect(t, !ui.presence_is_open(s.palette.presence) && s.palette.motion.value == 0)
 	testing.expect_value(t, len(s.sessions), 3)
 	if !testing.expect(t, app.window_open(s, first_workspace)) { return }
 	testing.expect(t, !app.palette_visible(s, s.windows[0]))
 	testing.expect_value(t, term.process_id(s.sessions[0].session), first_pid)
+}
+
+// Regression: moving the palette to another window released it from its owner before cancelling the new
+// window's gesture, which can remove that window (a tear-off preview); the palette then belonged to no one.
+@(test)
+palette_stays_with_its_owner_when_the_new_window_goes_away :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "move-fails") { return }
+	s := &f.state
+	w, previous := s.windows[0], s.windows[1]
+	app.pane_split(s, w, .Right)
+	app.palette_open(s, previous)
+	if !testing.expect(t, app.palette_active(s, previous)) { return }
+	preview := app.pane_window_preview_create(s, app.selected_tab(w.workspace), w.tree.focus)
+	if !testing.expect(t, preview != nil) { return }
+	preview_id := preview.id
+	app.pane_drag_press(s, w, w.tree.focus, 30, 60)
+	w.pane_drag.preview_window = preview_id
+	app.palette_open(s, preview)
+	testing.expect(t, app.window_find(s, preview_id) == nil)
+	testing.expect(t, app.palette_active(s, previous) && app.palette_visible(s, previous))
+	owner, owned := s.palette_owner.?
+	testing.expect(t, owned && owner == previous.id)
 }
 
 @(test)
@@ -230,15 +254,16 @@ palette_without_animations_releases_its_owner_in_the_closing_step :: proc(t: ^te
 	app.palette_open(s, first)
 	app.update_motion(s)
 	testing.expect(t, app.palette_active(s, first) && app.palette_visible(s, first))
-	testing.expect_value(t, s.palette_window, first.id)
+	owner, owned := s.palette_owner.?
+	testing.expect(t, owned && owner == first.id)
 	app.palette_close(s, first)
 	testing.expect(t, app.palette_visible(s, first) && !app.palette_active(s, first))
 	app.update_motion(s)
 	testing.expect(t, !app.palette_visible(s, first))
-	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
+	testing.expect(t, s.palette_owner == nil)
 	testing.expect_value(t, s.palette.motion.value, f32(0))
 	app.update_motion(s)
-	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
+	testing.expect(t, s.palette_owner == nil)
 }
 
 @(test)
@@ -261,7 +286,7 @@ palette_fade_invalidates_only_owner_and_releases_after_settling :: proc(t: ^test
 	testing.expect(t, !app.palette_visible(s, second))
 	s.palette.motion.started = time.tick_add(time.tick_now(), -time.Second)
 	app.update_motion(s)
-	testing.expect_value(t, s.palette_window, platform.Window_Id(0))
+	testing.expect(t, s.palette_owner == nil)
 	testing.expect(t, !app.palette_visible(s, first))
 	testing.expect(t, !app.motion_active(s))
 }

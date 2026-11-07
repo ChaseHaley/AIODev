@@ -173,7 +173,7 @@ workspace134_inline_rename_edits_target_cancel_invalid_and_failure :: proc(t: ^t
 	s, w := &f.state, &f.w
 	app.workspace_row_menu_open(s, w, f.target.id)
 	app.workspace_row_menu_choose(s, w)
-	testing.expect(t, !w.rename_open && app.workspace_picker_active(&w.workspace_picker))
+	testing.expect(t, !app.rename_shown(w) && app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Rename), f.target.id)
 	testing.expect_value(t, ui.field_selected_text(&w.rename), "Workspace 2")
 	app.workspace_picker_text(s, w, "  Build tools  ")
@@ -206,7 +206,7 @@ workspace134_inline_rename_edits_target_cancel_invalid_and_failure :: proc(t: ^t
 	app.workspace_picker_text(s, w, "project")
 	app.workspace_picker_key(s, w, {key = .Tab, pressed = true})
 	testing.expect_value(t, f.target.name, "My project")
-	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && !w.rename_open)
+	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && !app.rename_shown(w))
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_text(s, w, "Cancel outside")
 	app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = 599, y = 399})
@@ -282,7 +282,7 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	f.target = nil
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
 	testing.expect_value(t, f.current.name, "Workspace 1")
-	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && !w.rename_open)
+	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && !app.rename_shown(w))
 	other := app.workspace_create_empty(s)
 	if !testing.expect(t, other != nil) { return }
 	app.workspace_row_icon_open(s, w, other.id)
@@ -469,7 +469,7 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 					}
 					delete(pixels)
 				}
-				testing.expect(t, !w.rename_open && w.workspace == f.current)
+				testing.expect(t, !app.rename_shown(w) && w.workspace == f.current)
 				if rename {
 					frame := ui.field_box_text_rect(app.workspace_row_rename_box(w))
 					app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,

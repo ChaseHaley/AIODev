@@ -36,13 +36,14 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			if !testing.expect_value(t, read_error, nil) {return}
 			gesture_button(s, w, .Right, true, x, y)
 			gesture_button(s, w, .Right, false, x, y)
-			testing.expect(t, w.tab_menu.open)
-			testing.expect_value(t, w.tab_menu.dock, node)
+			divider, shown := w.overlay.(app.Overlay_Divider_Menu)
+			testing.expect(t, shown)
+			testing.expect_value(t, divider.node, node)
 			testing.expect_value(t, w.tab_menu.count, 1)
 			testing.expect_value(t, app.tab_menu_label(w, 0), "Set as Default Size")
 			testing.expect_value(t, w.dragging.count, 0)
 			app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-			testing.expect(t, !w.tab_menu.open)
+			testing.expect(t, w.overlay == nil)
 			after, after_error := os.read_entire_file(f.path, context.temp_allocator)
 			testing.expect_value(t, after_error, nil)
 			testing.expect_value(t, string(after), string(before))
@@ -65,7 +66,7 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			} else {
 				app.handle_event(s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
 			}
-			testing.expect(t, !w.tab_menu.open)
+			testing.expect(t, w.overlay == nil)
 			text, err := os.read_entire_file(f.path, context.temp_allocator)
 			testing.expect_value(t, err, nil)
 			testing.expect(t, strings.contains(string(text), fmt.tprintf("%s = %d", key, expected)))

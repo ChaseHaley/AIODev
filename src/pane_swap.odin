@@ -60,6 +60,7 @@ pane_shell_swap_request :: proc(
 		current = found.name
 	}
 	if !gesture_cancel(app, w) {return}
+	overlay_open(app, w, nil)
 	swap := &w.pending_swap
 	pane_swap_clear(swap)
 	owned_id, id_error := strings.clone(profile.id)

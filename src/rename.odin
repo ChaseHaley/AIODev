@@ -7,62 +7,79 @@ import "aio:settings"
 import "aio:ui"
 import "core:strings"
 
-// A tab or pane renames in a dialog; a workspace names in place, in its chip.
-Rename_Mode :: enum {Rename, Workspace}
+// What the rename dialog names. A workspace names in place instead, in its chip (Overlay_Chip_Name).
+Rename_Dialog :: enum u8 {Tab, Pane}
+
+// The dialog or the chip's name field shows.
+rename_shown :: proc(w: ^Window) -> bool {
+	#partial switch _ in w.overlay {
+	case Overlay_Rename, Overlay_Chip_Name: return true
+	}
+	return false
+}
+
+chip_name_shown :: proc(w: ^Window) -> bool {
+	_, shown := w.overlay.(Overlay_Chip_Name)
+	return shown
+}
 
 // Renames tab `index`, or the focused pane when tab_name is false.
 rename_open :: proc(app: ^App, w: ^Window, tab_name: bool, index: int) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
 	tab := w.workspace.tabs[index]
-	target, value := Rename_Target{.Tab, tab.id}, tab.name
+	dialog, value := Overlay_Rename{.Tab, tab.id}, tab.name
 	if !tab_name {
 		entry := focused_session(app, w)
 		if entry == nil {return}
-		target, value = {.Pane, entry.id}, entry.name
+		dialog, value = {.Pane, entry.id}, entry.name
 	}
 	if !gesture_cancel(app, w) {return}
-	if w.rename_open {rename_finish(app, w, false)}
-	palette_close(app, w)
+	overlay_open(app, w, dialog)
 	ui.field_set(&w.rename, value)
 	ui.field_select_all(&w.rename)
-	w.rename_mode = .Rename
-	w.rename_target, w.rename_open, w.dirty = target, true, true
 }
 
 // Opens the window's workspace name for editing in its chip, with the whole name selected.
 workspace_name_begin :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
-	if w.rename_open {rename_finish(app, w, false)}
-	palette_close(app, w)
-	workspace_picker_cancel(w)
+	overlay_open(app, w, Overlay_Chip_Name{workspace = w.workspace.id})
 	ui.field_set(&w.rename, w.workspace.name)
 	ui.field_select_all(&w.rename)
-	w.rename_target = {.Workspace, w.workspace.id}
-	w.rename_mode, w.rename_error = .Workspace, false
-	w.rename_open, w.dirty = true, true
 }
 
-// Saving a workspace name keeps the field open while the name is in use, and an empty field keeps the
-// existing name. Not saving always leaves the workspace with the name it has.
-rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
-	mode := w.rename_mode
-	if save && mode == .Workspace {
-		name := settings.display_title(strings.trim_space(ui.field_string(&w.rename)), context.temp_allocator)
-		if name != "" {
-			for workspace in app.workspaces {
-				if !workspace.provisional &&
-				   workspace.id != w.rename_target.id &&
-				   strings.equal_fold(workspace.name, name) {
-					w.rename_error, w.dirty = true, true
-					return
-				}
-			}
-			_ = rename_target_commit(app, w, w.rename_target, name)
+// Stores the chip's text as the workspace's name. An empty field keeps the existing name. False when
+// another workspace already uses the name, which leaves the workspace's name as it was.
+chip_name_save :: proc(app: ^App, w: ^Window, workspace_id: u32) -> bool {
+	name := settings.display_title(strings.trim_space(ui.field_string(&w.rename)), context.temp_allocator)
+	if name == "" {return true}
+	for workspace in app.workspaces {
+		if !workspace.provisional && workspace.id != workspace_id && strings.equal_fold(workspace.name, name) {
+			return false
 		}
-	} else if save {
-		_ = rename_target_commit(app, w, w.rename_target, ui.field_string(&w.rename))
 	}
-	w.rename_open, w.rename_mode, w.rename_error, w.dirty = false, .Rename, false, true
+	_ = rename_target_commit(app, w, {.Workspace, workspace_id}, name)
+	return true
+}
+
+// The rename's own exit, from Enter and Escape. Saving a name already in use keeps the chip open with
+// its error, which is the one way out of a save that stays; every other path closes the field. Not
+// saving always leaves the target with the name it has.
+rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
+	#partial switch &current in w.overlay {
+	case Overlay_Rename:
+		if save {
+			kind: Rename_Kind = current.kind == .Tab ? .Tab : .Pane
+			_ = rename_target_commit(app, w, {kind, current.id}, ui.field_string(&w.rename))
+		}
+	case Overlay_Chip_Name:
+		if save && !chip_name_save(app, w, current.workspace) {
+			current.error, w.dirty = true, true
+			return
+		}
+	case:
+		return
+	}
+	overlay_close(app, w)
 }
 
 rename_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
@@ -70,7 +87,8 @@ rename_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if e.key == .Escape {rename_finish(app, w, false); return}
 	if e.key == .Enter || e.key == .Numpad_Enter {rename_finish(app, w, true); return}
 	field_edit_key(app, &w.rename, e)
-	w.rename_error, w.dirty = false, true
+	if chip, ok := &w.overlay.(Overlay_Chip_Name); ok {chip.error = false}
+	w.dirty = true
 }
 
 // Title, field and hint stacked inside the dialog padding, so the height follows the text.
@@ -81,7 +99,7 @@ rename_metrics :: proc(w: ^Window) -> (heading, hint: ui.Text) {
 
 rename_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
-	if w.rename_mode == .Workspace {return workspace_button_rect(w)}
+	if chip_name_shown(w) {return workspace_button_rect(w)}
 	heading, hint := rename_metrics(w)
 	height :=
 		2 * ui.DIALOG_PADDING * s +
@@ -100,7 +118,7 @@ rename_rect :: proc(w: ^Window) -> render.Rect {
 
 rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	r, s := rename_rect(w), w.scale
-	if w.rename_mode == .Workspace {
+	if chip_name_shown(w) {
 		// The field's inset puts the text exactly where the chip draws its label.
 		lead := (ui.CONTROL_INSET + ui.ICON_BUTTON) * s
 		return {r.x + lead, r.y, max(1, r.width - lead), r.height}
@@ -148,7 +166,7 @@ workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	box := rename_field_box(w)
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), true, "Workspace name");
 	   result != .Ok {return result}
-	if !w.rename_error {return .Ok}
+	if chip, _ := w.overlay.(Overlay_Chip_Name); !chip.error {return .Ok}
 	message := "A workspace already uses that name."
 	detail := ui.text_styled(&w.ui_text, .Detail)
 	pad := ui.SPACE_2 * s
@@ -165,7 +183,8 @@ workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 }
 
 rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	if w.rename_mode == .Workspace {return workspace_name_draw(app, w)}
+	dialog, shown := w.overlay.(Overlay_Rename)
+	if !shown {return workspace_name_draw(app, w)}
 	s := w.scale
 	r := rename_rect(w)
 	pad := ui.DIALOG_PADDING * s
@@ -175,7 +194,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	   .None {return .Ok}
 	frame := ui.dialog_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	title := w.rename_target.kind == .Tab ? "Rename Tab" : "Rename Pane"
+	title := dialog.kind == .Tab ? "Rename Tab" : "Rename Pane"
 	if result := ui.draw_text(
 		&heading,
 		&w.list,

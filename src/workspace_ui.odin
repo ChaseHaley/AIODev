@@ -158,7 +158,7 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if width <= 12 * w.scale {return .Ok}
 	r := workspace_button_rect(w)
 	// While the chip holds the name field it stays flat, so nothing shows around the field.
-	hover := w.rename_open && w.rename_mode == .Workspace ? 0 : w.workspace_motion.hover.value
+	hover := chip_name_shown(w) ? 0 : w.workspace_motion.hover.value
 	lift := ui.hover_lift_at(app.theme, hover, w.scale)
 	r.y -= lift
 	if render.push_layer(&w.list, {0, 0, width, ui.TITLE_BAR_HEIGHT * w.scale}) != .None {return .Ok}
@@ -310,7 +310,6 @@ workspace_picker_open :: proc(app: ^App, w: ^Window) {
 	if !gesture_cancel(app, w) {return}
 	defer workspace_picker_layout_changed(w)
 	window_overlays_cancel(app, w)
-	w.tab_menu.open, w.rename_open = false, false
 	pending_close_clear(&w.pending_close)
 	tab_close_restore(w)
 	ui.field_set(&w.workspace_picker.query, "")

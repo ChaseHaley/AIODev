@@ -9,6 +9,7 @@ settings_reset_ask :: proc(app: ^App, w: ^Window) {
 	settings_reset_clear(w)
 	value, err := strings.clone(w.editor.source)
 	if err != nil {notify(app, .Error, "Could not prepare the settings reset."); return}
+	overlay_open(app, w, nil)
 	w.settings_reset_source = value
 	ui.confirm_open(&w.settings_reset_confirm)
 	w.settings_reset_confirm.extended = true

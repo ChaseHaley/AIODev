@@ -26,7 +26,7 @@ editor_profile_menu_open :: proc(p: ^Editor, row: ^Editor_Row, parts: Profile_Pa
 }
 
 editor_profile_menu_choose :: proc(p: ^Editor) -> Editor_Outcome {
-	index := p.profile_menu.selected
+	index := menu_selected(&p.profile_menu)
 	editor_mode_set(p, Editor_Editing{})
 	if index < 0 || index >= len(p.profile_menu.items) {return .Changed}
 	row := editor_row(p)

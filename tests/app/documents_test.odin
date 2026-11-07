@@ -240,6 +240,37 @@ click_part :: proc(s: ^app.App, w: ^app.Window, row: int, part: ui.Menu_Row_Part
 	press(s, w, x, y)
 }
 
+@(private = "file")
+shown_in :: proc(w: ^app.Window, $T: typeid) -> bool {
+	state, shown := w.overlay.(app.Overlay_Document_Menu)
+	if !shown {return false}
+	_, in_mode := state.mode.(T)
+	return in_mode
+}
+
+// The document a Pin or Link menu holds.
+@(private = "file")
+held_target :: proc(w: ^app.Window) -> string {
+	state, _ := w.overlay.(app.Overlay_Document_Menu)
+	#partial switch mode in state.mode {
+	case app.Document_Menu_Pin: return mode.document.target
+	case app.Document_Menu_Link: return mode.document.target
+	}
+	return ""
+}
+
+@(private = "file")
+url_entry :: proc(w: ^app.Window) -> (entering, invalid: bool) {
+	url, shown := app.document_menu_url_entry(w)
+	return shown, url.invalid
+}
+
+@(private = "file")
+popout_shown :: proc(w: ^app.Window) -> bool {
+	_, shown := app.document_menu_popout(w)
+	return shown
+}
+
 @(test)
 document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^testing.T) {
 	sync.mutex_lock(&Link_Test_Lock)
@@ -255,38 +286,41 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 
 	// With nothing pinned the menu offers the ways to add, and what opened it keeps its place.
 	open_button(s, w)
-	if !testing.expect(t, menu.menu.open) {return}
-	testing.expect_value(t, menu.mode, app.Document_Menu_Mode.List)
+	if !testing.expect(t, app.document_menu_shown(w)) {return}
+	testing.expect(t, shown_in(w, app.Document_Menu_List))
 	testing.expect(t, row_of(w, .Add_File) >= 0 && row_of(w, .Add_Folder) >= 0 && row_of(w, .Add_Url) >= 0)
 	testing.expect(t, row_of(w, .Open) < 0)
 
 	// Add URL: a bad address stays in the field, a good one moves on to choosing its level.
 	click_row(s, w, row_of(w, .Add_Url))
-	testing.expect(t, menu.url_open)
+	entering, invalid := url_entry(w)
+	testing.expect(t, entering)
 	testing.expect(t, row_of(w, .Add_Url) < 0 && row_of(w, .Url_Field) >= 0)
 	app.handle_event(s, platform.Text_Event{window = w.id, text = "not a url"})
 	testing.expect_value(t, ui.field_string(&menu.url), "not a url")
 	key(s, w, .Enter)
-	testing.expect(t, menu.url_invalid && menu.url_open)
+	entering, invalid = url_entry(w)
+	testing.expect(t, invalid && entering)
 	ui.field_set(&menu.url, "")
 	app.handle_event(s, platform.Text_Event{window = w.id, text = "https://example.com/a"})
-	testing.expect(t, !menu.url_invalid)
+	entering, invalid = url_entry(w)
+	testing.expect(t, entering && !invalid)
 	key(s, w, .Enter)
-	testing.expect_value(t, menu.mode, app.Document_Menu_Mode.Pin)
-	testing.expect(t, !menu.url_open)
-	testing.expect_value(t, menu.pending.target, "https://example.com/a")
+	testing.expect(t, shown_in(w, app.Document_Menu_Pin))
+	entering, _ = url_entry(w)
+	testing.expect(t, !entering)
+	testing.expect_value(t, held_target(w), "https://example.com/a")
 	// Escape returns to the list without pinning.
 	key(s, w, .Escape)
-	testing.expect_value(t, menu.mode, app.Document_Menu_Mode.List)
-	testing.expect(t, menu.menu.open)
+	testing.expect(t, shown_in(w, app.Document_Menu_List))
 
 	scopes, found := app.document_scopes(s, w.panes[0].content)
 	if !testing.expect(t, found) {return}
 	testing.expect_value(t, len(scopes.pane) + len(scopes.tab) + len(scopes.workspace), 0)
 	_ = app.document_pin(scopes, .Tab, {target = "https://example.com/a"})
 	_ = app.document_pin(scopes, .Pane, {target = "https://example.com/b"})
-	app.document_menu_close(w)
-	testing.expect(t, !menu.menu.open)
+	app.overlay_close(s, w)
+	testing.expect(t, !app.document_menu_shown(w))
 	open_button(s, w)
 
 	// Levels are divided, and pane comes first.
@@ -296,12 +330,13 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 
 	// The level button opens the popout on the current level; choosing it only closes the popout.
 	click_part(s, w, first, .Action)
-	if !testing.expect(t, menu.popout) {return}
-	testing.expect_value(t, menu.popout_pick, app.Document_Level.Pane)
+	popout, popout_open := app.document_menu_popout(w)
+	if !testing.expect(t, popout_open) {return}
+	testing.expect_value(t, popout.pick, app.Document_Level.Pane)
 	r := app.document_popout_button(w, .Pane)
 	x, y := center(transmute([4]f32)r)
 	press(s, w, x, y)
-	testing.expect(t, !menu.popout)
+	testing.expect(t, !popout_shown(w))
 	testing.expect_value(t, len(scopes.pane), 1)
 
 	// Choosing another level moves the document there and keeps the menu open.
@@ -310,21 +345,21 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	x, y = center(transmute([4]f32)r)
 	testing.expect(t, r.y + r.height <= ui.menu_action_rect(&menu.menu, row_of(w, .Open, "https://example.com/b"), .Action, f32(w.width), f32(w.height), w.scale).y)
 	press(s, w, x, y)
-	testing.expect(t, menu.menu.open && !menu.popout)
+	testing.expect(t, app.document_menu_shown(w) && !popout_shown(w))
 	testing.expect_value(t, len(scopes.pane), 0)
 	testing.expect_value(t, len(scopes.workspace), 1)
 	testing.expect_value(t, menu.entries[row_of(w, .Open, "https://example.com/b")].level, app.Document_Level.Workspace)
 
 	// A press outside the popout closes only the popout.
 	click_part(s, w, row_of(w, .Open, "https://example.com/a"), .Action)
-	testing.expect(t, menu.popout)
+	testing.expect(t, popout_shown(w))
 	press(s, w, 2, f32(w.height) - 2)
-	testing.expect(t, menu.menu.open && !menu.popout)
+	testing.expect(t, app.document_menu_shown(w) && !popout_shown(w))
 
 	// Keyboard: Right opens the popout, arrows choose, Enter applies.
-	menu.menu.selected = row_of(w, .Open, "https://example.com/a")
+	ui.menu_select(&menu.menu, row_of(w, .Open, "https://example.com/a"))
 	key(s, w, .Arrow_Right)
-	testing.expect(t, menu.popout)
+	testing.expect(t, popout_shown(w))
 	key(s, w, .Arrow_Left)
 	key(s, w, .Enter)
 	testing.expect_value(t, len(scopes.pane), 1)
@@ -334,31 +369,64 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	row := row_of(w, .Open, "https://example.com/a")
 	r = ui.menu_row_rect(&menu.menu, row, f32(w.width), f32(w.height), w.scale)
 	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(r.x + 40), y = i32(r.y + r.height / 2)})
-	testing.expect_value(t, menu.menu.selected, row)
+	testing.expect_value(t, ui.menu_selected(&menu.menu), row)
 	click_part(s, w, row, .Selected_Action)
 	testing.expect_value(t, len(scopes.pane), 0)
-	testing.expect(t, menu.menu.open)
-	menu.menu.selected = row_of(w, .Open, "https://example.com/b")
+	testing.expect(t, app.document_menu_shown(w))
+	ui.menu_select(&menu.menu, row_of(w, .Open, "https://example.com/b"))
 	key(s, w, .Delete)
 	testing.expect_value(t, len(scopes.workspace), 0)
-	testing.expect(t, menu.menu.open && row_of(w, .Open) < 0)
+	testing.expect(t, app.document_menu_shown(w) && row_of(w, .Open) < 0)
 
 	// Clicking a row opens it and closes the menu.
 	_ = app.document_pin(scopes, .Tab, {target = "https://example.com/c"})
-	app.document_menu_close(w)
+	app.overlay_close(s, w)
 	open_button(s, w)
 	click_row(s, w, row_of(w, .Open, "https://example.com/c"))
-	testing.expect(t, !menu.menu.open)
+	testing.expect(t, !app.document_menu_shown(w))
 	testing.expect_value(t, Open_Stub_State.calls, 1)
 	testing.expect_value(t, Open_Stub_State.uri, "https://example.com/c")
 
 	// A press outside closes the menu, and losing focus would too.
 	open_button(s, w)
 	press(s, w, 2, f32(w.height) - 2)
-	testing.expect(t, !menu.menu.open)
+	testing.expect(t, !app.document_menu_shown(w))
 	open_button(s, w)
 	app.window_overlays_cancel(s, w)
-	testing.expect(t, !menu.menu.open)
+	testing.expect(t, !app.document_menu_shown(w))
+}
+
+// Regression: the level popout could open over the address field, which then kept the keyboard while the
+// popout showed. The popout now takes the list's one step and ends the address entry.
+@(test)
+document_menu_popout_takes_the_keyboard_from_the_address_field :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-popout-url", false) {return}
+	s, w := &f.state, f.state.windows[0]
+	scopes, found := app.document_scopes(s, w.panes[0].content)
+	if !testing.expect(t, found) {return}
+	_ = app.document_pin(scopes, .Pane, {target = "https://example.com/a"})
+	open_button(s, w)
+	click_row(s, w, row_of(w, .Add_Url))
+	entering, _ := url_entry(w)
+	if !testing.expect(t, entering) {return}
+	click_part(s, w, row_of(w, .Open, "https://example.com/a"), .Action)
+	popout, shown := app.document_menu_popout(w)
+	entering, _ = url_entry(w)
+	if !testing.expect(t, shown && !entering) {return}
+	testing.expect(t, row_of(w, .Url_Field) < 0 && row_of(w, .Add_Url) >= 0)
+	testing.expect_value(t, popout.pick, app.Document_Level.Pane)
+	key(s, w, .Arrow_Right)
+	popout, shown = app.document_menu_popout(w)
+	testing.expect(t, shown)
+	testing.expect_value(t, popout.pick, app.Document_Level.Tab)
+	testing.expect_value(t, ui.field_string(&w.document_menu.url), "")
+	key(s, w, .Enter)
+	testing.expect_value(t, len(scopes.pane), 0)
+	testing.expect_value(t, len(scopes.tab), 1)
 }
 
 @(test)
@@ -372,7 +440,6 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 	Open_Stub_State = {}
 	s.open_url = link_open_stub
 	defer s.open_url = nil
-	menu := &w.document_menu
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/one")
 	point, ok := link_point(t, &f, 4, 0)
 	if !ok {return}
@@ -380,14 +447,14 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 
 	// A plain right-click is the terminal's.
 	press(s, w, x, y, .Right)
-	testing.expect(t, !menu.menu.open)
+	testing.expect(t, !app.document_menu_shown(w))
 
 	press(s, w, x, y, .Right, {.Control})
-	if !testing.expect(t, menu.menu.open) {return}
-	testing.expect_value(t, menu.mode, app.Document_Menu_Mode.Link)
-	testing.expect_value(t, menu.pending.target, "https://example.com/one")
+	if !testing.expect(t, app.document_menu_shown(w)) {return}
+	testing.expect(t, shown_in(w, app.Document_Menu_Link))
+	testing.expect_value(t, held_target(w), "https://example.com/one")
 	click_row(s, w, row_of(w, .Pin, level = .Tab))
-	testing.expect(t, !menu.menu.open)
+	testing.expect(t, !app.document_menu_shown(w))
 	scopes, found := app.document_scopes(s, w.panes[0].content)
 	if !testing.expect(t, found) {return}
 	if !testing.expect_value(t, len(scopes.tab), 1) {return}
@@ -396,14 +463,14 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 
 	press(s, w, x, y, .Right, {.Control})
 	click_row(s, w, row_of(w, .Open_Link))
-	testing.expect(t, !menu.menu.open)
+	testing.expect(t, !app.document_menu_shown(w))
 	testing.expect_value(t, Open_Stub_State.calls, 1)
 
 	// Off any link it does nothing.
 	far, far_ok := link_point(t, &f, 40, 5)
 	if !far_ok {return}
 	press(s, w, f32(far.x), f32(far.y), .Right, {.Control})
-	testing.expect(t, !menu.menu.open)
+	testing.expect(t, !app.document_menu_shown(w))
 }
 
 @(test)

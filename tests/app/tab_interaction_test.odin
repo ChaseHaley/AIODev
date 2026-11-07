@@ -74,7 +74,7 @@ tab_interaction_selection_context_and_drag_use_both_geometry_adapters :: proc(t:
 		r := interaction_rect(s, w, 0)
 		selected := w.workspace.selected
 		interaction_button(s, w.id, r, .Right, true)
-		testing.expect(t, w.tab_menu.open)
+		testing.expect(t, app.tab_menu_shown(w))
 		interaction_marks(t, w, {true, false, true})
 		testing.expect_value(t, w.workspace.selected, selected)
 		interaction_button(s, w.id, r, .Right, false)
@@ -154,7 +154,7 @@ tab_interaction_overlay_selection_dismisses_without_arming_reorder :: proc(t: ^t
 	interaction_button(s, w.id, r, .Left, false)
 	w.rail_override = .Shown
 	interaction_button(s, w.id, r, .Right, true)
-	testing.expect(t, w.tab_menu.open && !app.rail_visible(w))
+	testing.expect(t, app.tab_menu_shown(w) && !app.rail_visible(w))
 	interaction_button(s, w.id, r, .Right, false)
 	app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 	app.tab_select(s, w, 0)

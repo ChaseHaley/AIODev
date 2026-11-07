@@ -149,11 +149,7 @@ pane_header_draw :: proc(
 @(private)
 pane_header_documents :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Documents {
 	if !CONTENT_POLICY[pane.content.kind].documents {return {}}
-	menu := &w.document_menu
-	return {
-		shown = true,
-		open = menu.menu.open && menu.mode != .Link && menu.content == pane.content,
-	}
+	return {shown = true, open = document_menu_shown_for(w, pane.content)}
 }
 
 // The header under the point, on the topmost pane there: a floating pane covers the headers below it.

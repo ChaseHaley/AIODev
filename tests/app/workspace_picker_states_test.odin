@@ -78,12 +78,13 @@ workspace_chip_double_click_needs_the_press_that_opened_the_list :: proc(t: ^tes
 	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape})
 	app.workspace_picker_open(&state, &w)
 	press(&state, &w, x, y, 1_100_000_000)
-	testing.expect(t, !w.rename_open)
+	testing.expect(t, !app.rename_shown(&w))
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 
 	press(&state, &w, x, y, 2_000_000_000)
 	testing.expect(t, app.workspace_picker_active(&w.workspace_picker))
 	press(&state, &w, x, y, 2_100_000_000)
-	testing.expect(t, w.rename_open && w.rename_mode == .Workspace)
+	_, chip_name := w.overlay.(app.Overlay_Chip_Name)
+	testing.expect(t, chip_name)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 }

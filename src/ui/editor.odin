@@ -691,13 +691,11 @@ editor_browse :: proc(p: ^Editor) {editor_mode_set(p, Editor_Browsing{})}
 // Moves the keyboard to the selected row's control.
 editor_focus_row :: proc(p: ^Editor) {editor_mode_set(p, Editor_Editing{})}
 
-// The only writer of p.mode. The profile menu is open exactly while its state holds. A capture's or
-// the alternatives list's hint is cleared by the moves that dismiss them, not by every exit: saving
-// keeps it, so a refused save that resumes the capture still shows it.
+// The only writer of p.mode, which is also what shows the profile menu. A capture's or the alternatives
+// list's hint is cleared by the moves that dismiss them, not by every exit: saving keeps it, so a
+// refused save that resumes the capture still shows it.
 @(private)
 editor_mode_set :: proc(p: ^Editor, next: Editor_Mode) {
-	_, menu := next.(Editor_Profile_Menu)
-	p.profile_menu.open = menu
 	p.mode = next
 }
 
@@ -1725,9 +1723,12 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
 	if !raw.pressed {return .None}
 	if profile_menu_shown(p) {
-		if menu_key(&p.profile_menu, raw) == .Chosen {return editor_profile_menu_choose(p)}
-		// The menu closes itself on Escape; the keyboard stays on the row's More control.
-		if !p.profile_menu.open {editor_mode_set(p, Editor_Editing{})}
+		switch menu_key(&p.profile_menu, raw) {
+		case .Chosen: return editor_profile_menu_choose(p)
+		// Escape closes the menu; the keyboard stays on the row's More control.
+		case .Closed: editor_mode_set(p, Editor_Editing{})
+		case .None, .Changed:
+		}
 		return .Changed
 	}
 	row := editor_row(p)
@@ -2291,7 +2292,7 @@ editor_press :: proc(
 	if profile_menu_shown(p) {
 		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, s)
 		if hit >= 0 {
-			p.profile_menu.selected = hit
+			menu_select(&p.profile_menu, hit)
 			return editor_profile_menu_choose(p)
 		}
 		editor_mode_set(p, Editor_Editing{})
@@ -2611,8 +2612,8 @@ order_drop :: proc(p: ^Editor) -> Editor_Outcome {
 editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if profile_menu_shown(p) {
 		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, l.scale)
-		if hit < 0 || hit == p.profile_menu.selected {return false}
-		p.profile_menu.selected = hit
+		if hit < 0 || hit == menu_selected(&p.profile_menu) {return false}
+		menu_select(&p.profile_menu, hit)
 		return true
 	}
 	// An open dropdown highlights the option under the pointer, like the menus.

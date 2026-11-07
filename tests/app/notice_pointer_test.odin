@@ -34,7 +34,7 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	gesture_button(s, w, .Right, true, close.x, close.y)
 	gesture_button(s, w, .Right, false, close.x, close.y)
 	testing.expect_value(t, len(s.notices.items), 2)
-	testing.expect(t, !w.tab_menu.open)
+	testing.expect(t, !app.tab_menu_shown(w))
 	gesture_button(s, w, .Left, true, close.x-40*w.scale, close.y)
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect_value(t, len(s.notices.items), 2)

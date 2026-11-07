@@ -33,10 +33,13 @@ Menu_Row_Part :: enum {
 	Selected_Action,
 }
 
+// Whether a menu shows is its owner's state; the menu holds its rows and the selection within them.
 Menu :: struct {
-	open:                 bool,
 	items:                [dynamic]Menu_Item,
-	selected, scroll:     int,
+	selection:            Maybe(int),
+	// The first row shown as of the last selection change, so moving the selection within the visible
+	// rows keeps them still. Drawing and hit testing show the selection even when it has not caught up.
+	scroll:               int,
 	anchor_x, anchor_y:   f32,
 	// An embedded menu may stay inside its owning pane; zero uses the whole window.
 	bounds:               render.Rect,
@@ -55,13 +58,27 @@ menu_destroy :: proc(m: ^Menu) {
 
 menu_clear :: proc(m: ^Menu) {
 	clear(&m.items)
-	m.selected, m.scroll = 0, 0
+	menu_select(m, -1)
+	m.scroll = 0
 }
 
 menu_add :: proc(m: ^Menu, item: Menu_Item) -> runtime.Allocator_Error {
 	if len(m.items) >= MENU_MAX_ITEMS {return nil}
 	_, err := append(&m.items, item)
+	if err == nil && len(m.items) == 1 {menu_select(m, 0)}
 	return err
+}
+
+// The row, or -1 for no selection at the row-index interface.
+menu_selected :: proc(m: ^Menu) -> int {
+	index, selected := m.selection.?
+	return selected ? index : -1
+}
+
+// The only writer of the selection. Negative or removed rows mean no selection; drawing never repairs it.
+menu_select :: proc(m: ^Menu, index: int) {
+	m.selection = nil
+	if index >= 0 && index < len(m.items) {m.selection = index}
 }
 
 menu_anchor :: proc(m: ^Menu, x, y: f32) {
@@ -73,20 +90,75 @@ menu_row_height :: proc(m: ^Menu, index: int) -> f32 {
 	return item.separator ? MENU_SEPARATOR_HEIGHT : MENU_ROW_HEIGHT
 }
 
-menu_step :: proc(m: ^Menu, step: int, wrap := true) {
-	if len(m.items) == 0 || step == 0 {return}
+// Moves the selection to the next enabled row in the step's direction. False leaves it where it was.
+menu_step :: proc(m: ^Menu, step: int, wrap := true) -> bool {
+	if len(m.items) == 0 || step == 0 {return false}
 	direction := step > 0 ? 1 : -1
-	index := m.selected
+	index := menu_selected(m)
 	for _ in 0..<len(m.items) {
 		index += direction
-		if !wrap && (index < 0 || index >= len(m.items)) {return}
+		if !wrap && (index < 0 || index >= len(m.items)) {return false}
 		index = (index + len(m.items)) % len(m.items)
 		item := m.items[index]
 		if !item.separator && item.enabled {
-			m.selected = index
-			return
+			menu_select(m, index)
+			return true
 		}
 	}
+	return false
+}
+
+// An edge search uses a local cursor: a failed search cannot leave an out-of-range selection behind.
+menu_select_edge :: proc(m: ^Menu, last: bool) {
+	for offset in 0..<len(m.items) {
+		index := last ? len(m.items) - offset - 1 : offset
+		item := m.items[index]
+		if !item.separator && item.enabled {menu_select(m, index); return}
+	}
+}
+
+// Stores the first row the selection needs, so later moves inside the visible rows keep them still.
+menu_reveal :: proc(m: ^Menu, width, height, scale: f32) {
+	_, _, m.scroll = menu_view(m, width, height, scale)
+}
+
+@(private = "file")
+menu_bounds :: proc(m: ^Menu, width, height: f32) -> render.Rect {
+	return m.bounds.width > 0 ? m.bounds : {0, 0, width, height}
+}
+
+// The surface height and how many rows fit when the list starts at row `first`.
+@(private = "file")
+menu_extent :: proc(m: ^Menu, first: int, bounds: render.Rect, scale: f32) -> (content: f32, rows: int) {
+	content = 2 * OVERLAY_PADDING * scale
+	for i in first..<len(m.items) {
+		next := menu_row_height(m, i) * scale
+		if rows > 0 && content + next > bounds.height - 16 * scale {break}
+		content += next
+		rows += 1
+	}
+	return
+}
+
+// The surface, the visible row count and the first visible row: the stored scroll, moved only as far as
+// showing the selection needs.
+@(private = "file")
+menu_view :: proc(m: ^Menu, width, height, scale: f32) -> (surface: render.Rect, rows, first: int) {
+	bounds := menu_bounds(m, width, height)
+	first = clamp(m.scroll, 0, max(0, len(m.items) - 1))
+	selected := menu_selected(m)
+	if selected >= 0 && selected < first {first = selected}
+	content: f32
+	content, rows = menu_extent(m, first, bounds, scale)
+	for first + rows <= selected && selected < len(m.items) {
+		first += 1
+		content, rows = menu_extent(m, first, bounds, scale)
+	}
+	surface_width := min(MENU_WIDTH * scale, max(0, bounds.width - 16 * scale))
+	left, top := bounds.x + 8 * scale, bounds.y + 8 * scale
+	x := clamp(m.anchor_x, left, max(left, bounds.x + bounds.width - surface_width - 8 * scale))
+	y := clamp(m.anchor_y, top, max(top, bounds.y + bounds.height - content - 8 * scale))
+	return {x, y, surface_width, content}, rows, first
 }
 
 // Clamps the surface into the window and returns the visible rows.
@@ -97,27 +169,14 @@ menu_layout :: proc(
 	render.Rect,
 	int,
 ) {
-	bounds := m.bounds
-	if bounds.width <= 0 {bounds = {0, 0, width, height}}
-	rows := 0
-	content := 2 * OVERLAY_PADDING * scale
-	for i in m.scroll..<len(m.items) {
-		next := menu_row_height(m, i) * scale
-		if rows > 0 && content + next > bounds.height - 16 * scale {break}
-		content += next
-		rows += 1
-	}
-	surface_width := min(MENU_WIDTH * scale, max(0, bounds.width - 16 * scale))
-	left, top := bounds.x + 8 * scale, bounds.y + 8 * scale
-	x := clamp(m.anchor_x, left, max(left, bounds.x + bounds.width - surface_width - 8 * scale))
-	y := clamp(m.anchor_y, top, max(top, bounds.y + bounds.height - content - 8 * scale))
-	return {x, y, surface_width, content}, rows
+	surface, rows, _ := menu_view(m, width, height, scale)
+	return surface, rows
 }
 
 menu_row_rect :: proc(m: ^Menu, index: int, width, height, scale: f32) -> render.Rect {
-	surface, _ := menu_layout(m, width, height, scale)
+	surface, _, first := menu_view(m, width, height, scale)
 	y := surface.y + OVERLAY_PADDING * scale
-	for i in m.scroll..<index {y += menu_row_height(m, i) * scale}
+	for i in first..<index {y += menu_row_height(m, i) * scale}
 	return {
 		surface.x + OVERLAY_PADDING * scale,
 		y,
@@ -127,12 +186,12 @@ menu_row_rect :: proc(m: ^Menu, index: int, width, height, scale: f32) -> render
 }
 
 menu_hit :: proc(m: ^Menu, x, y, width, height, scale: f32) -> int {
-	surface, rows := menu_layout(m, width, height, scale)
+	surface, rows, first := menu_view(m, width, height, scale)
 	if x < surface.x ||
 	   x >= surface.x + surface.width ||
 	   y < surface.y + OVERLAY_PADDING * scale ||
 	   y >= surface.y + surface.height - OVERLAY_PADDING * scale {return -1}
-	for i in m.scroll..<m.scroll + rows {
+	for i in first..<first + rows {
 		row := menu_row_rect(m, i, width, height, scale)
 		if y >= row.y && y < row.y + row.height {return i}
 	}
@@ -160,7 +219,7 @@ menu_row_part :: proc(m: ^Menu, index: int, x, y, width, height, scale: f32) -> 
 	if _, shown := item.action.?; shown {
 		if contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
 	}
-	if _, shown := item.selected_action.?; shown && index == m.selected {
+	if _, shown := item.selected_action.?; shown && index == menu_selected(m) {
 		if contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
 			return .Selected_Action
 		}
@@ -175,6 +234,7 @@ Menu_Outcome :: enum {
 	Closed,
 }
 
+// Closed asks the owner to close the menu; whether it shows is the owner's state.
 menu_key :: proc(m: ^Menu, e: platform.Key_Event) -> Menu_Outcome {
 	if !e.pressed {return .None}
 	if step := list_step(e); step != 0 {
@@ -183,19 +243,16 @@ menu_key :: proc(m: ^Menu, e: platform.Key_Event) -> Menu_Outcome {
 	}
 	#partial switch e.key {
 	case .Escape, .Context_Menu:
-		m.open = false
 		return .Closed
 	case .Home:
-		m.selected = -1
-		menu_step(m, 1)
+		menu_select_edge(m, false)
 		return .Changed
 	case .End:
-		m.selected = len(m.items)
-		menu_step(m, -1)
+		menu_select_edge(m, true)
 		return .Changed
 	case .Enter, .Numpad_Enter, .Space:
-		if m.selected >= 0 && m.selected < len(m.items) {
-			item := m.items[m.selected]
+		if selected := menu_selected(m); selected >= 0 && selected < len(m.items) {
+			item := m.items[selected]
 			if item.enabled && !item.separator {return .Chosen}
 		}
 	}
@@ -206,6 +263,7 @@ menu_wheel :: proc(m: ^Menu, rows: int) {
 	menu_step(m, -rows, false)
 }
 
+// Draws the rows around the selection; it reads the menu and changes nothing in it.
 menu_draw :: proc(
 	m: ^Menu,
 	list: ^render.Draw_List,
@@ -214,14 +272,8 @@ menu_draw :: proc(
 	width, height, scale: f32,
 	pointer: [2]f32 = {},
 ) -> glyphs.Result {
-	if !m.open {return .Ok}
-	if m.selected >= len(m.items) {m.selected = len(m.items) - 1}
-	surface, rows := menu_layout(m, width, height, scale)
-	for m.scroll + rows <= m.selected {m.scroll += 1; surface, rows = menu_layout(m, width, height, scale)}
-	if m.selected >= 0 && m.selected < m.scroll {
-		m.scroll = m.selected
-		surface, rows = menu_layout(m, width, height, scale)
-	}
+	surface, rows, first := menu_view(m, width, height, scale)
+	selected := menu_selected(m)
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
 	frame := popover_panel(surface, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
@@ -229,7 +281,7 @@ menu_draw :: proc(
 	small := text_styled(text, .Detail)
 	inset := CONTROL_INSET * scale
 	for visible in 0..<rows {
-		i := m.scroll + visible
+		i := first + visible
 		if i >= len(m.items) {break}
 		item := m.items[i]
 		row := menu_row_rect(m, i, width, height, scale)
@@ -243,7 +295,7 @@ menu_draw :: proc(
 			) != .None {return .Ok}
 			continue
 		}
-		if i == m.selected && item.enabled {
+		if i == selected && item.enabled {
 			if render.push_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale}) !=
 			   .None {return .Ok}
 		}
@@ -316,18 +368,18 @@ menu_draw :: proc(
 				); result != .Ok {return result}
 			}
 		}
-		if i == m.selected && item.enabled && contains(row, pointer.x, pointer.y) {
+		if i == selected && item.enabled && contains(row, pointer.x, pointer.y) {
 			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
 		}
 		if icon, shown := item.action.?; shown {
-			hover: f32 = i == m.selected && m.hover_part == .Action ? 1 : 0
+			hover: f32 = i == selected && m.hover_part == .Action ? 1 : 0
 			rect := menu_action_rect(m, i, .Action, width, height, scale)
 			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {
 				return .Ok
 			}
 		}
-		if icon, shown := item.selected_action.?; shown && i == m.selected {
+		if icon, shown := item.selected_action.?; shown && i == selected {
 			hover: f32 = m.hover_part == .Selected_Action ? 1 : 0
 			rect := menu_action_rect(m, i, .Selected_Action, width, height, scale)
 			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {

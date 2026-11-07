@@ -153,8 +153,8 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	source_window.pane_drag = {source = source, node = node, active = true,
 		shown = true, new_window = true, preview_window = preview_id}
 	testing.expect(t, app.pane_drag_release(&state, source_window))
-	testing.expect(t, !source_window.rename_open)
-	testing.expect(t, preview.rename_open && preview.rename_mode == .Workspace)
+	testing.expect(t, !app.rename_shown(source_window))
+	testing.expect(t, app.chip_name_shown(preview))
 	testing.expect_value(t, ui.field_selected_text(&preview.rename), preview.workspace.name)
 	geometry_default := app.initial_geometry(&state)
 	testing.expect_value(t, u32(preview.width), geometry_default.surface_width)

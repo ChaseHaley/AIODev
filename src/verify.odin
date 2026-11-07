@@ -335,7 +335,8 @@ when AIO_CONTROL {
 	@(require_results)
 	verify_state :: proc(app: ^App) -> ([]control.State_Entry, control.Error) {
 		w := verify_window(app)
-		owns_palette := w != nil && app.palette_window == w.id
+		palette_owner := palette_owner_id(app)
+		owns_palette := w != nil && palette_owner == w.id
 		item := ""
 		p := &app.palette
 		palette_layout: ui.Palette_Layout
@@ -371,7 +372,7 @@ when AIO_CONTROL {
 			{"app.log", app.log_path},
 			{"window.visible", fmt.tprintf("%t", !app_tray_only(app))},
 			{"windows.count", fmt.tprintf("%d", len(app.windows))},
-			{"palette.window", fmt.tprintf("%d", app.palette_window)},
+			{"palette.window", fmt.tprintf("%d", palette_owner)},
 			{"palette.open", fmt.tprintf("%t", palette_active(app, w))},
 			{"palette.query", owns_palette ? ui.palette_query(p) : ""},
 			{"palette.mode", owns_palette ? ui.palette_mode_word(p.mode) : "all"},
@@ -496,9 +497,11 @@ when AIO_CONTROL {
 				{"theme.hover_gloss", fmt.tprintf("%g", app.theme.hover_gloss)},
 				{"window.workspace_index", fmt.tprintf("%d", verify_workspace_index(app, w))},
 				{"settings.open", fmt.tprintf("%t", w.editor.open)},
-				{"rename.open", fmt.tprintf("%t", w.rename_open)},
+				{"overlay", strings.to_lower(fmt.tprintf("%v", overlay_kind(app, w)), context.temp_allocator)},
+				{"rename.open", fmt.tprintf("%t", rename_shown(w))},
+				{"rename.error", fmt.tprintf("%t", verify_chip_name_error(w))},
 				{"rename.value", ui.field_string(&w.rename)},
-				{"tab_menu.open", fmt.tprintf("%t", w.tab_menu.open)},
+				{"tab_menu.open", fmt.tprintf("%t", tab_menu_shown(w))},
 				{"tab_menu.count", fmt.tprintf("%d", w.tab_menu.count)},
 				{"tab_menu.action", fmt.tprintf("%v", w.tab_menu.actions[w.tab_menu.selected])},
 				{"settings.filter", string(w.editor.filter.bytes[:])},
@@ -537,7 +540,7 @@ when AIO_CONTROL {
 					ui.presence_is_open(w.profile_remove_confirm.presence) ? w.profile_remove_id : "",
 				},
 				{"settings.profile.remove_title", editor_profile_remove_title(app, w)},
-				{"settings.profile.menu_open", fmt.tprintf("%t", w.editor.profile_menu.open)},
+				{"settings.profile.menu_open", fmt.tprintf("%t", verify_editor_profile_menu_open(w))},
 				{"settings.profile.menu_count", fmt.tprintf("%d", len(w.editor.profile_menu.items))},
 				{"settings.profile.action", fmt.tprintf("%v", w.editor.request)},
 				{"settings.profile.error_key", w.editor.error_key},
@@ -690,13 +693,13 @@ when AIO_CONTROL {
 				{"link.spans", fmt.tprintf("%d", link_spans)},
 				{"rail.new_tab", verify_workspace_rect(rail_new_tab_rect(w))},
 				{"rail.profile", verify_workspace_rect(rail_profile_rect(w))},
-				{"profile_menu.open", fmt.tprintf("%t", w.profile_menu.open)},
+				{"profile_menu.open", fmt.tprintf("%t", profile_menu_shown(w))},
 				{"profile_menu.count", fmt.tprintf("%d", w.profile_menu.count)},
-				{"documents.open", fmt.tprintf("%t", w.document_menu.menu.open)},
-				{"documents.mode", strings.to_lower(fmt.tprintf("%v", w.document_menu.mode), context.temp_allocator)},
+				{"documents.open", fmt.tprintf("%t", document_menu_shown(w))},
+				{"documents.mode", verify_document_mode(w)},
 				{"documents.count", fmt.tprintf("%d", w.document_menu.count)},
-				{"documents.popout", fmt.tprintf("%t", w.document_menu.popout)},
-				{"documents.url_open", fmt.tprintf("%t", w.document_menu.url_open)},
+				{"documents.popout", fmt.tprintf("%t", verify_document_popout(w))},
+				{"documents.url_open", fmt.tprintf("%t", verify_document_url_entry(w))},
 				{"grid.cell", fmt.tprintf("%gx%g", w.metrics.cell_width, w.metrics.cell_height)},
 				{"grid.padding", fmt.tprintf("%g", pane_padding(app, w.scale, entry))},
 				{
@@ -1093,6 +1096,38 @@ when AIO_CONTROL {
 
 	verify_workspace_rect :: proc(r: render.Rect) -> string {
 		return fmt.tprintf("%g,%g,%g,%g", r.x, r.y, r.width, r.height)
+	}
+
+	verify_chip_name_error :: proc(w: ^Window) -> bool {
+		chip, _ := w.overlay.(Overlay_Chip_Name)
+		return chip.error
+	}
+
+	verify_editor_profile_menu_open :: proc(w: ^Window) -> bool {
+		_, open := w.editor.mode.(ui.Editor_Profile_Menu)
+		return open
+	}
+
+	verify_document_popout :: proc(w: ^Window) -> bool {
+		_, shown := document_menu_popout(w)
+		return shown
+	}
+
+	verify_document_url_entry :: proc(w: ^Window) -> bool {
+		_, shown := document_menu_url_entry(w)
+		return shown
+	}
+
+	// list, pin or link; empty while the menu is closed.
+	verify_document_mode :: proc(w: ^Window) -> string {
+		state, shown := w.overlay.(Overlay_Document_Menu)
+		if !shown {return ""}
+		switch _ in state.mode {
+		case Document_Menu_List: return "list"
+		case Document_Menu_Pin: return "pin"
+		case Document_Menu_Link: return "link"
+		}
+		return ""
 	}
 
 	verify_process_rows :: proc(w: ^Window, page: ui.Editor_Layout) -> string {

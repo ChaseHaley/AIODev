@@ -88,7 +88,7 @@ tab_menu_exact_single_rows :: proc(t: ^testing.T) {
 	for index in ([?]int{2, 5, 6, 8}) {
 		w.tab_menu.selected = index
 		app.tab_menu_choose(&f.state, w)
-		testing.expect(t, w.tab_menu.open)
+		testing.expect(t, app.tab_menu_shown(w))
 		testing.expect_value(t, len(f.workspace.tabs), 1)
 	}
 }
@@ -165,7 +165,7 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	if !menu_fixture_init(t, &f, 1) { return }
 	w := &f.w
 	menu_key(&f, {key = .Context_Menu})
-	testing.expect(t, w.tab_menu.open)
+	testing.expect(t, app.tab_menu_shown(w))
 	menu_key(&f, {key = .Arrow_Down})
 	testing.expect_value(t, w.tab_menu.selected, 1)
 	menu_key(&f, {key = .Arrow_Down})
@@ -181,20 +181,20 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	menu_key(&f, {key = .End})
 	testing.expect_value(t, w.tab_menu.selected, 9)
 	menu_key(&f, {key = .Escape})
-	testing.expect(t, !w.tab_menu.open && w.suppressed_key == nil)
+	testing.expect(t, !app.tab_menu_shown(w) && w.suppressed_key == nil)
 	menu_key(&f, {key = .F10, modifiers = {.Shift}})
-	testing.expect(t, w.tab_menu.open)
+	testing.expect(t, app.tab_menu_shown(w))
 	menu_key(&f, {key = .Context_Menu})
-	testing.expect(t, !w.tab_menu.open)
+	testing.expect(t, !app.tab_menu_shown(w))
 	menu_key(&f, {key = .Context_Menu})
 	app.handle_event(&f.state, platform.Focus_Event{w.id, false})
-	testing.expect(t, !w.tab_menu.open)
+	testing.expect(t, !app.tab_menu_shown(w))
 	menu_key(&f, {key = .Context_Menu})
 	w.width, w.height = 800, 600
 	row := app.tab_menu_row_rect(w, 2)
 	app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row.x+10), y = i32(row.y+row.height/2)})
-	testing.expect(t, w.tab_menu.open && !w.rename_open)
+	testing.expect(t, app.tab_menu_shown(w) && !app.rename_shown(w))
 	menu_key(&f, {key = .Home})
 	app.handle_event(&f.state, platform.Mouse_Wheel_Event{window = w.id, delta_y = -1})
 	testing.expect_value(t, w.tab_menu.selected, 1)
@@ -202,12 +202,13 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	testing.expect_value(t, w.tab_menu.selected, 3)
 	app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = 799, y = 599})
-	testing.expect(t, !w.tab_menu.open)
+	testing.expect(t, !app.tab_menu_shown(w))
 	w.width, w.height = 0, 0
 	menu_key(&f, {key = .Context_Menu})
 	menu_key(&f, {key = .Enter})
-	testing.expect(t, !w.tab_menu.open && w.rename_open && w.rename_target.kind == app.Rename_Kind.Tab)
-	testing.expect_value(t, w.rename_target.id, f.workspace.tabs[0].id)
+	dialog, shown := w.overlay.(app.Overlay_Rename)
+	testing.expect(t, !app.tab_menu_shown(w) && shown && dialog.kind == .Tab)
+	testing.expect_value(t, dialog.id, f.workspace.tabs[0].id)
 }
 
 @(test)
@@ -225,7 +226,7 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 			if !w.tab_menu.separators[i] && candidate == action { w.tab_menu.selected = i; break }
 		}
 		app.tab_menu_choose(&f.state, w)
-		testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && !w.tab_menu.open)
+		testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && !app.tab_menu_shown(w))
 		menu_key(&f, {key = .Escape})
 		testing.expect(t, !ui.presence_is_open(w.pending_close.confirm.presence))
 		testing.expect_value(t, len(f.workspace.tabs), 3)
@@ -238,6 +239,28 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 	menu_key(&f, {key = .Enter})
 	testing.expect_value(t, len(f.workspace.tabs), 1)
 	testing.expect(t, f.workspace.tabs[0].marked && !ui.presence_is_open(w.pending_close.confirm.presence))
+}
+
+// Regression: a close subset requested while a tab-close question is open (a command can do this) must
+// replace the question with its own marks, not have the replaced question's cancel restore them.
+@(test)
+tab_close_subset_replaces_an_open_close_question_with_its_marks :: proc(t: ^testing.T) {
+	f: Menu_Fixture
+	defer menu_fixture_destroy(&f)
+	if !menu_fixture_init(t, &f, 3) { return }
+	w := &f.w
+	_, split_error := layout.split_direction(&f.workspace.tabs[2].tree,
+		f.workspace.tabs[2].tree.root, .Right, 0.5, {.Terminal, 0})
+	testing.expect_value(t, split_error, nil)
+	app.pending_close_open_tab(&f.state, w, 2)
+	if !testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && w.pending_close.tabs == 1) { return }
+	app.tab_close_subset(&f.state, w, true, 0)
+	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence))
+	testing.expect_value(t, w.pending_close.tabs, 2)
+	testing.expect(t, f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
+	menu_key(&f, {key = .Enter})
+	if !testing.expect_value(t, len(f.workspace.tabs), 1) { return }
+	testing.expect_value(t, f.workspace.tabs[0].id, 1)
 }
 
 @(test)
@@ -289,7 +312,7 @@ tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
 	menu_key(&f, {key = .End})
 	menu_key(&f, {key = .Enter})
-	testing.expect(t, app.settings_active(w) && !w.tab_menu.open)
+	testing.expect(t, app.settings_active(w) && !app.tab_menu_shown(w))
 	testing.expect_value(t, ui.field_string(&w.editor.filter), "")
 	if row := ui.editor_row(&w.editor); testing.expect(t, row != nil) {
 		testing.expect_value(t, row.key, "tab.confirm_close")

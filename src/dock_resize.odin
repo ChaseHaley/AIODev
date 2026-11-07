@@ -86,10 +86,8 @@ dock_divider_menu_open :: proc(app: ^App, w: ^Window, x, y: f32) {
 	for hit in hits[:count] {
 		if !dock_divider(hit.node) {continue}
 		if !gesture_cancel(app, w) {return}
-		w.profile_menu.open = false
-		document_menu_close(w)
-		w.tab_menu = {open = true, count = 1, position = {x, y}, dock = hit.node}
-		w.dirty = true
+		overlay_open(app, w, Overlay_Divider_Menu{node = hit.node})
+		w.tab_menu = {count = 1, position = {x, y}}
 		return
 	}
 }

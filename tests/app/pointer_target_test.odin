@@ -108,7 +108,7 @@ pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T
 	pointer_expect_move(t, s, w, caption.x, caption.y, .Arrow)
 	testing.expect_value(t, w.caption_hover, 2)
 	app.tab_menu_open(s, w, 0, 40 * w.scale, 60 * w.scale)
-	if !testing.expect(t, w.tab_menu.open) {return}
+	if !testing.expect(t, app.tab_menu_shown(w)) {return}
 	testing.expect_value(t, app.pointer_target(s, w, caption.x, caption.y), app.Pointer_Target.Tab_Menu)
 	menu, _ := app.tab_menu_rect(w)
 	testing.expect(t, !pointer_inside(menu, caption.x, caption.y), "the caption must lie outside the menu")
@@ -116,7 +116,7 @@ pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T
 	testing.expect_value(t, w.caption_hover, -1)
 	gesture_button(s, w, .Left, true, caption.x, caption.y)
 	gesture_button(s, w, .Left, false, caption.x, caption.y)
-	testing.expect(t, !w.tab_menu.open, "a press off the menu closes it")
+	testing.expect(t, !app.tab_menu_shown(w), "a press off the menu closes it")
 	testing.expect(t, ui.armed_down(w.caption_armed) == false, "the press must not reach the caption")
 	testing.expect_value(t, len(s.windows), windows)
 }

@@ -22,6 +22,12 @@ the Vivaldi browser.
 - Program status and native Windows notifications per pane
 - `aio`, a command line for scripts and coding agents to open, split, type into and read panes
 
+Menus, naming fields, the workspace picker and confirmation dialogs take turns owning a window's
+input. Opening one dismisses the previous surface without saving an unfinished rename. Leaving a
+workspace's name chip by clicking elsewhere or changing focus keeps the name when it is available;
+Enter leaves a duplicate name open for correction. The command palette belongs to one window at a
+time, including while it fades out.
+
 ## Install
 
 1. Download the latest `AIODev-<version>-windows-x64.zip` from

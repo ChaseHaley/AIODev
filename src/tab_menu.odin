@@ -7,21 +7,29 @@ import "aio:render"
 import "aio:ui"
 import "core:fmt"
 
+// The rows of the tab menu and the dock edge menu; which one shows, and for what, is w.overlay.
 Tab_Menu :: struct {
-	open: bool,
 	actions: [16]Action,
 	separators: [16]bool,
-	count, selected, scroll: int,
+	count, selected: int,
+	// The first row shown as of the last selection change; see tab_menu_first.
+	scroll: int,
 	position: [2]f32,
-	dock: layout.Node_Id,
-	// The right-clicked tab. The menu acts on it, or on its marked group, without activating it.
-	tab: u32,
+}
+
+// The tab menu or the dock edge menu shows.
+tab_menu_shown :: proc(w: ^Window) -> bool {
+	#partial switch _ in w.overlay {
+	case Overlay_Tab_Menu, Overlay_Divider_Menu: return true
+	}
+	return false
 }
 
 // The index of the tab the open menu acts on, or -1.
 tab_menu_target :: proc(w: ^Window) -> int {
-	if !w.tab_menu.open || w.tab_menu.tab == 0 {return -1}
-	return tab_index_by_id(w.workspace, w.tab_menu.tab)
+	menu, shown := w.overlay.(Overlay_Tab_Menu)
+	if !shown {return -1}
+	return tab_index_by_id(w.workspace, menu.tab)
 }
 
 // How many tabs the menu's actions cover: the marked group when the target is in it, else the target alone.
@@ -43,13 +51,8 @@ tab_marked_shown :: proc(w: ^Window, index: int) -> bool {
 tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	if index < 0 || index >= len(w.workspace.tabs) {return}
 	if !gesture_cancel(app, w) {return}
-	w.profile_menu.open = false
-	document_menu_close(w)
-	w.tab_menu = {
-		open     = true,
-		position = {x, y},
-		tab      = w.workspace.tabs[index].id,
-	}
+	overlay_open(app, w, Overlay_Tab_Menu{tab = w.workspace.tabs[index].id})
+	w.tab_menu = {position = {x, y}}
 	menu := &w.tab_menu
 	count := tab_menu_scope(w)
 	if count == 1 {
@@ -73,11 +76,10 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	menu.count += 2
 	menu.selected = -1
 	tab_menu_step(w, 1)
-	w.dirty = true
 }
 
 tab_menu_label :: proc(w: ^Window, index: int) -> string {
-	if dock_divider(w.tab_menu.dock) {return "Set as Default Size"}
+	if _, divider := w.overlay.(Overlay_Divider_Menu); divider {return "Set as Default Size"}
 	if w.tab_menu.separators[index] { return "" }
 	#partial switch w.tab_menu.actions[index] {
 	case .Rename_Tab: return "Rename"
@@ -94,7 +96,7 @@ tab_menu_label :: proc(w: ^Window, index: int) -> string {
 
 tab_menu_enabled :: proc(w: ^Window, index: int) -> bool {
 	if index < 0 || index >= w.tab_menu.count || w.tab_menu.separators[index] { return false }
-	if dock_divider(w.tab_menu.dock) {return true}
+	if _, divider := w.overlay.(Overlay_Divider_Menu); divider {return true}
 	// Tab rows need their target, which may have closed while the menu was open.
 	target := tab_menu_target(w)
 	#partial switch w.tab_menu.actions[index] {
@@ -120,7 +122,11 @@ tab_menu_step :: proc(w: ^Window, step: int, wrap := true) {
 		index += direction
 		if !wrap && (index < 0 || index >= menu.count) { return }
 		index = (index + menu.count) % menu.count
-		if tab_menu_enabled(w, index) { menu.selected = index; return }
+		if tab_menu_enabled(w, index) {
+			menu.selected = index
+			menu.scroll = tab_menu_first(w)
+			return
+		}
 	}
 }
 
@@ -128,16 +134,36 @@ tab_menu_row_height :: proc(w: ^Window, index: int) -> f32 {
 	return (w.tab_menu.separators[index] ? ui.MENU_SEPARATOR_HEIGHT : ui.MENU_ROW_HEIGHT) * w.scale
 }
 
-tab_menu_rect :: proc(w: ^Window) -> (render.Rect, int) {
+// The surface height and how many rows fit when the list starts at row `first`.
+@(private = "file")
+tab_menu_extent :: proc(w: ^Window, first: int) -> (height: f32, rows: int) {
 	s := w.scale
-	rows := 0
-	height := 2 * ui.OVERLAY_PADDING * s
-	for i in w.tab_menu.scroll..<w.tab_menu.count {
+	height = 2 * ui.OVERLAY_PADDING * s
+	for i in first..<w.tab_menu.count {
 		next := tab_menu_row_height(w, i)
 		if rows > 0 && height + next > f32(w.height) - 16 * s { break }
 		height += next
 		rows += 1
 	}
+	return
+}
+
+// The first row shown: the stored scroll, moved only as far as showing the selection needs, so a
+// window that shrank still shows it without drawing having to change the menu.
+tab_menu_first :: proc(w: ^Window) -> int {
+	menu := &w.tab_menu
+	first := clamp(menu.scroll, 0, max(0, menu.selected))
+	for first < menu.selected {
+		_, rows := tab_menu_extent(w, first)
+		if first + rows > menu.selected { break }
+		first += 1
+	}
+	return first
+}
+
+tab_menu_rect :: proc(w: ^Window) -> (render.Rect, int) {
+	s := w.scale
+	height, rows := tab_menu_extent(w, tab_menu_first(w))
 	width := min(ui.MENU_WIDTH * s, f32(w.width) - 16 * s)
 	return {clamp(w.tab_menu.position.x, 8 * s, max(8 * s, f32(w.width) - width - 8 * s)),
 		clamp(w.tab_menu.position.y, 8 * s, max(8 * s, f32(w.height) - height - 8 * s)), width, height}, rows
@@ -147,14 +173,15 @@ tab_menu_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 	r, _ := tab_menu_rect(w)
 	pad := ui.OVERLAY_PADDING * w.scale
 	y := r.y + pad
-	for i in w.tab_menu.scroll..<index { y += tab_menu_row_height(w, i) }
+	for i in tab_menu_first(w)..<index { y += tab_menu_row_height(w, i) }
 	return {r.x + pad, y, r.width - 2 * pad, tab_menu_row_height(w, index)}
 }
 
 tab_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 	r, rows := tab_menu_rect(w)
 	if x < r.x || x >= r.x + r.width || y < r.y + 4 * w.scale || y >= r.y + r.height - 4 * w.scale { return -1 }
-	for i in w.tab_menu.scroll..<w.tab_menu.scroll + rows {
+	first := tab_menu_first(w)
+	for i in first..<first + rows {
 		row := tab_menu_row_rect(w, i)
 		if y >= row.y && y < row.y + row.height { return i }
 	}
@@ -163,15 +190,14 @@ tab_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 
 tab_menu_choose :: proc(app: ^App, w: ^Window) {
 	if !tab_menu_enabled(w, w.tab_menu.selected) { return }
-	if dock_divider(w.tab_menu.dock) {
-		w.tab_menu.open = false
-		dock_divider_save_default(app, w, w.tab_menu.dock)
+	if divider, ok := w.overlay.(Overlay_Divider_Menu); ok {
+		overlay_close(app, w)
+		dock_divider_save_default(app, w, divider.node)
 		return
 	}
 	action := w.tab_menu.actions[w.tab_menu.selected]
 	target := tab_menu_target(w)
-	w.tab_menu.open = false
-	w.dirty = true
+	overlay_close(app, w)
 	// tab_menu_enabled refused tab rows without a target, so target is valid for each of them.
 	#partial switch action {
 	case .Close_Tab: tab_close_request(app, w, target)
@@ -187,35 +213,41 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 
 tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if !e.pressed {return}
-	menu := &w.tab_menu
 	w.dirty = true
 	if step := ui.list_step(e); step != 0 {
 		tab_menu_step(w, step)
 		return
 	}
 	#partial switch e.key {
-	case .Escape, .Context_Menu: menu.open = false
-	case .Home: menu.selected = -1; tab_menu_step(w, 1)
-	case .End: menu.selected = menu.count; tab_menu_step(w, -1)
+	case .Escape, .Context_Menu: overlay_close(app, w)
+	case .Home: tab_menu_select_edge(w, false)
+	case .End: tab_menu_select_edge(w, true)
 	case .Enter, .Numpad_Enter, .Space: tab_menu_choose(app, w)
 	}
 }
 
+// Selects the first enabled row, or the last one from the end. A menu without one keeps its selection.
+@(private = "file")
+tab_menu_select_edge :: proc(w: ^Window, last: bool) {
+	menu := &w.tab_menu
+	previous := menu.selected
+	menu.selected = last ? menu.count : -1
+	tab_menu_step(w, last ? -1 : 1)
+	if menu.selected < 0 || menu.selected >= menu.count {menu.selected = previous}
+}
+
+// Draws the rows around the selection; it reads the menu and changes nothing in it.
 tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	s := w.scale
 	menu := &w.tab_menu
-	menu.scroll = clamp(menu.scroll, 0, max(0, menu.selected))
 	r, rows := tab_menu_rect(w)
-	for menu.scroll + rows <= menu.selected {
-		menu.scroll += 1
-		r, rows = tab_menu_rect(w)
-	}
+	first := tab_menu_first(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
 	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	for visible in 0..<rows {
-		i := menu.scroll + visible
+		i := first + visible
 		if i >= menu.count { break }
 		row := tab_menu_row_rect(w, i)
 		if menu.separators[i] {

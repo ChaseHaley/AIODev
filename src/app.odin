@@ -112,7 +112,8 @@ App :: struct {
 	palette:               ui.Palette,
 	find_history:          ui.Find_History,
 	focus_jumps:           Focus_Jumps,
-	palette_window:        platform_api.Window_Id,
+	// The window the palette is open or closing in; see palette_owner.odin.
+	palette_owner:         Maybe(platform_api.Window_Id),
 	notices:               ui.Notices,
 	notice_window:         platform_api.Window_Id,
 	window_focus_order:    u64,
