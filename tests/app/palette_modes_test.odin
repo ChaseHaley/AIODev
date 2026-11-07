@@ -148,7 +148,7 @@ palette_workspace_activation_follows_exclusive_ownership :: proc(t: ^testing.T) 
 	first_workspace, second_workspace := first.workspace, second.workspace
 	other := app.workspace_create_empty(s)
 	if !testing.expect(t, other != nil) {return}
-	if !testing.expect(t, app.tab_create(s, other)) {return}
+	if _, created := app.tab_create(s, other); !testing.expect(t, created) {return}
 
 	app.palette_open_mode(s, first, .Workspaces)
 	if !testing.expect(t, palette_select_id(t, s, u64(second_workspace.id))) {return}

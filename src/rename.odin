@@ -5,9 +5,6 @@ import "aio:render"
 import "aio:ui"
 import "core:strings"
 
-// What the rename dialog names. A workspace names in place instead, in its chip (Overlay_Chip_Name).
-Rename_Dialog :: enum u8 {Tab, Pane}
-
 // The dialog or the chip's name field shows.
 rename_shown :: proc(w: ^Window) -> bool {
 	#partial switch _ in w.overlay {
@@ -21,18 +18,19 @@ chip_name_shown :: proc(w: ^Window) -> bool {
 	return shown
 }
 
-// Renames tab `index`, or the focused pane when tab_name is false.
-rename_open :: proc(app: ^App, w: ^Window, tab_name: bool, index: int) {
-	if index < 0 || index >= len(w.workspace.tabs) {return}
-	tab := w.workspace.tabs[index]
-	dialog, value := Overlay_Rename{.Tab, tab.id}, tab.name
-	if !tab_name {
-		entry := focused_session(app, w)
-		if entry == nil {return}
-		dialog, value = {.Pane, entry.id}, entry.name
+// Opens the dialog naming a tab or pane, holding its current name with the whole name selected. A workspace
+// names in place instead, in the chip of the window that shows it (Overlay_Chip_Name).
+rename_open :: proc(app: ^App, w: ^Window, target: Rename_Target) {
+	if workspace, naming := target.(Rename_Workspace_Target); naming {
+		owner := window_for_workspace(app, workspace_find(app, workspace.workspace))
+		if owner != nil {workspace_name_begin(app, owner)}
+		return
 	}
+	destination := rename_target_destination(app, target)
+	if destination == nil {return}
+	value := destination^
 	if !gesture_cancel(app, w) {return}
-	overlay_open(app, w, dialog)
+	overlay_open(app, w, Overlay_Rename{target})
 	ui.field_set(&w.rename, value)
 	ui.field_select_all(&w.rename)
 }
@@ -45,17 +43,19 @@ workspace_name_begin :: proc(app: ^App, w: ^Window) {
 	ui.field_select_all(&w.rename)
 }
 
-// Stores the chip's text as the workspace's name. An empty field keeps the existing name. False when
-// another workspace already uses the name, which leaves the workspace's name as it was.
+// Stores the chip's text as the workspace's name. An empty field keeps the existing name, which
+// rename_target_commit's .Workspace_Chip intent decides. False when another workspace already uses the
+// name, which leaves the workspace's name as it was.
 chip_name_save :: proc(app: ^App, w: ^Window, workspace_id: u32) -> bool {
-	name := display_title(strings.trim_space(ui.field_string(&w.rename)), context.temp_allocator)
-	if name == "" {return true}
-	for workspace in app.workspaces {
-		if !workspace.provisional && workspace.id != workspace_id && strings.equal_fold(workspace.name, name) {
-			return false
+	value := ui.field_string(&w.rename)
+	if name := rename_clean(value); name != "" {
+		for workspace in app.workspaces {
+			if !workspace.provisional && workspace.id != workspace_id && strings.equal_fold(workspace.name, name) {
+				return false
+			}
 		}
 	}
-	_ = rename_target_commit(app, w, {.Workspace, workspace_id}, name)
+	_ = rename_target_commit(app, Rename_Workspace_Target{workspace_id}, value, .Workspace_Chip)
 	return true
 }
 
@@ -65,10 +65,7 @@ chip_name_save :: proc(app: ^App, w: ^Window, workspace_id: u32) -> bool {
 rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 	#partial switch &current in w.overlay {
 	case Overlay_Rename:
-		if save {
-			kind: Rename_Kind = current.kind == .Tab ? .Tab : .Pane
-			_ = rename_target_commit(app, w, {kind, current.id}, ui.field_string(&w.rename))
-		}
+		if save {_ = rename_target_commit(app, current.target, ui.field_string(&w.rename), .Automatic_Title)}
 	case Overlay_Chip_Name:
 		if save && !chip_name_save(app, w, current.workspace) {
 			current.error, w.dirty = true, true
@@ -192,7 +189,8 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	   .None {return .Ok}
 	frame := ui.dialog_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	title := dialog.kind == .Tab ? "Rename Tab" : "Rename Pane"
+	_, tab := dialog.target.(Rename_Tab_Target)
+	title := tab ? "Rename Tab" : "Rename Pane"
 	if result := ui.draw_text(
 		&heading,
 		&w.list,

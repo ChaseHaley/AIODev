@@ -24,6 +24,7 @@ motion_active :: proc(app: ^App) -> bool {
 		for control in w.float_header_controls { if ui.control_active(control) { return true } }
 		if ui.find_is_open(&w.find) && ui.find_animating(&w.find) { return true }
 		for control in w.tab_controls { if ui.control_active(control) { return true } }
+		if ui.control_active(w.new_tab_control) || ui.control_active(w.profiles_control) { return true }
 		for position in w.tab_positions { if ui.motion_active(position) { return true } }
 		if pane_drag_animating(w) { return true }
 		if ui.editor_profiles_animating(&w.editor) { return true }
@@ -50,10 +51,7 @@ update_motion :: proc(app: ^App) {
 		if ui.control_update(&w.workspace_motion, w.workspace_hovered, false, app.animations, now) {
 			w.dirty = true
 		}
-		if workspace_picker_mode(p) == .Rename {
-			ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, app.animations, now)
-			if ui.motion_update(&p.rename_motion, now) { w.dirty = true }
-		}
+		if workspace_row_rename_animate(w, app.animations, now) { w.dirty = true }
 		hovered := p.menu_hover != 0 && workspace_row_index(w, p.menu_hover) >= 0
 		if ui.control_update(&p.menu_motion, hovered, false, app.animations, now) { w.dirty = true }
 		rail_changed := rail_slide_update(w, now)
@@ -68,7 +66,7 @@ update_motion :: proc(app: ^App) {
 				ui.motion_target(
 					&position,
 					f32(i + gap),
-					140 * time.Millisecond,
+					TAB_REORDER_DURATION,
 					.Decelerate,
 					app.animations,
 					now,
@@ -86,16 +84,11 @@ update_motion :: proc(app: ^App) {
 			now,
 		)
 		for &control, i in w.tab_controls {
-			tabs_changed =
-				ui.control_update(
-					&control,
-					w.tab_hover == i,
-					gesture_tab_pressed(w) && w.tab_hover == i,
-					app.animations,
-					now,
-				) ||
-				tabs_changed
+			tabs_changed = strip_control_update(app, w, &control, Tab_Chrome_Tab{i}, now) || tabs_changed
 		}
+		tabs_changed = strip_control_update(app, w, &w.new_tab_control, Tab_Chrome_New{}, now) || tabs_changed
+		tabs_changed =
+			strip_control_update(app, w, &w.profiles_control, Tab_Chrome_Profiles{}, now) || tabs_changed
 		tabs_changed = ui.motion_update(&w.tab_underline, now) || tabs_changed
 		pane_drag_animate(app, w, app.animations, now)
 		if ui.editor_profiles_animate(&w.editor, app.animations, now) {w.dirty = true}
@@ -121,7 +114,10 @@ update_motion :: proc(app: ^App) {
 		spot, spotted := w.float_header_hover.?
 		if spotted {header = spot.root}
 		held, moving := floating_header_held(w)
-		if moving {header = layout.float_root(w.tree, layout.find_content(w.tree, held))}
+		if moving {
+			tree := window_tree(w)
+			header = layout.float_root(tree, layout.find_content(tree, held))
+		}
 		if header != layout.INVALID_NODE {w.float_header_shown = header}
 		active := header != layout.INVALID_NODE
 		changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
@@ -136,6 +132,19 @@ update_motion :: proc(app: ^App) {
 		confirmation_advance(app, w, now)
 		if rail_changed || tabs_changed || controls_changed {w.dirty = true}
 	}
+}
+
+// A strip control hovers while the pointer is over it, and draws a held strip press while it hovers.
+@(private = "file")
+strip_control_update :: proc(
+	app: ^App,
+	w: ^Window,
+	control: ^ui.Control_Motion,
+	target: Tab_Chrome_Target,
+	now: time.Tick,
+) -> bool {
+	hovered := w.tabs_horizontal && w.tab_hover == target
+	return ui.control_update(control, hovered, hovered && gesture_tab_pressed(w) != nil, app.animations, now)
 }
 
 refresh_animations :: proc(app: ^App) {

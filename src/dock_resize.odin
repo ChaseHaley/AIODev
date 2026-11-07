@@ -1,8 +1,11 @@
 package main
 
+import "aio:input"
 import "aio:layout"
+import "aio:render"
 import "aio:ui"
 import "core:fmt"
+import "core:log"
 import "core:math"
 
 RAIL_DIVIDER :: layout.Node_Id(max(u32) - 1)
@@ -11,10 +14,11 @@ ACTIVITY_DIVIDER :: layout.Node_Id(max(u32) - 2)
 ACTIVITY_HEIGHT_DIVIDER :: layout.Node_Id(max(u32) - 3)
 
 window_dividers :: proc(app: ^App, w: ^Window) {
-	if w.tree == nil {return}
+	tree := window_tree(w)
+	if tree == nil {return}
 	g := window_geometry(app, w, w.pane_fill)
 	gap := g.gap
-	layout.dividers_shown(w.tree, g, pane_view_solo(w), &w.dividers)
+	layout.dividers_shown(tree, g, pane_view_solo(w), &w.dividers)
 	if rail_visible(w) {
 		r := rail_resize_rect(w)
 		d := layout.Divider{node = RAIL_DIVIDER, axis = .Horizontal,
@@ -80,6 +84,21 @@ dock_divider_reset :: proc(w: ^Window, node: layout.Node_Id) {
 	}
 }
 
+// What a dock edge's menu offers; each row's payload names one.
+Dock_Divider_Choice :: enum u32 {
+	Save_Default,
+}
+
+@(private = "file", rodata)
+DOCK_DIVIDER_CHOICE_LABELS := [Dock_Divider_Choice]string {
+	.Save_Default = "Set as Default Size",
+}
+
+dock_divider_menu_shown :: proc(w: ^Window) -> bool {
+	_, shown := w.overlay.(Overlay_Divider_Menu)
+	return shown
+}
+
 dock_divider_menu_open :: proc(app: ^App, w: ^Window, x, y: f32) {
 	hits: [4]layout.Divider
 	count := divider_hits(w, x, y, hits[:])
@@ -87,9 +106,59 @@ dock_divider_menu_open :: proc(app: ^App, w: ^Window, x, y: f32) {
 		if !dock_divider(hit.node) {continue}
 		if !gesture_cancel(app, w) {return}
 		overlay_open(app, w, Overlay_Divider_Menu{node = hit.node})
-		w.tab_menu = {count = 1, position = {x, y}}
+		menu := &w.divider_menu
+		ui.menu_clear(menu)
+		ui.menu_anchor(menu, x, y)
+		for choice in Dock_Divider_Choice {
+			label := DOCK_DIVIDER_CHOICE_LABELS[choice]
+			item := ui.Menu_Item{label = label, enabled = true, payload = u32(choice)}
+			if added, err := ui.menu_add(menu, item); !added {
+				log.errorf("adding a dock edge menu row failed: %v", err)
+				overlay_close(app, w)
+				return
+			}
+		}
 		return
 	}
+}
+
+dock_divider_menu_choose :: proc(app: ^App, w: ^Window) {
+	divider, shown := w.overlay.(Overlay_Divider_Menu)
+	index := ui.menu_selected(&w.divider_menu)
+	if !shown || index < 0 {return}
+	item := w.divider_menu.items[index]
+	if !item.enabled || item.separator {return}
+	overlay_close(app, w)
+	switch Dock_Divider_Choice(item.payload) {
+	case .Save_Default:
+		dock_divider_save_default(app, w, divider.node)
+	}
+}
+
+dock_divider_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
+	if !e.pressed {return}
+	w.dirty = true
+	switch ui.menu_key(&w.divider_menu, e) {
+	case .None:
+	case .Changed: ui.menu_reveal(&w.divider_menu, f32(w.width), f32(w.height), w.scale)
+	case .Chosen: dock_divider_menu_choose(app, w)
+	case .Closed: overlay_close(app, w)
+	}
+}
+
+dock_divider_menu_wheel :: proc(w: ^Window, rows: int) {
+	ui.menu_wheel(&w.divider_menu, rows)
+	ui.menu_reveal(&w.divider_menu, f32(w.width), f32(w.height), w.scale)
+	w.dirty = true
+}
+
+dock_divider_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
+	return ui.menu_hit(&w.divider_menu, x, y, f32(w.width), f32(w.height), w.scale)
+}
+
+dock_divider_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
+	width, height := f32(w.width), f32(w.height)
+	return ui.menu_draw(&w.divider_menu, &w.list, &w.ui_text, app.theme, width, height, w.scale, w.pointer)
 }
 
 dock_divider_save_default :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {

@@ -40,23 +40,20 @@ Gesture_Cancelled :: struct {}
 
 Gesture_Owner :: union #no_nil {
 	Pointer_Target,
-	Gesture_Tab,
-	Gesture_Rail_Row,
+	Gesture_Tab_Press,
 }
 
-// A Left press on a strip tab or the new-tab button, drawn pressed while the pointer is over it.
-Gesture_Tab :: struct {}
-
-// A Left press on a rail row: a tab index, RAIL_NEW_TAB_ROW or RAIL_PROFILE_ROW, drawn pressed.
-Gesture_Rail_Row :: struct {
-	row: int,
+// A Left press on a tab, the new-tab button or a rail footer control, drawn pressed until its release.
+// The strip draws the press on whichever of its controls the pointer is over; the rail on `target`.
+Gesture_Tab_Press :: struct {
+	target: Tab_Chrome_Target,
 }
 
 @(private)
 gesture_owner_target :: proc(owner: Gesture_Owner) -> Pointer_Target {
 	switch o in owner {
 	case Pointer_Target: return o
-	case Gesture_Tab, Gesture_Rail_Row: return .Tabs
+	case Gesture_Tab_Press: return .Tabs
 	}
 	return .Content
 }
@@ -84,19 +81,12 @@ gesture_buttons :: proc(w: ^Window, $T: typeid) -> (buttons: input.Mouse_Buttons
 // A surface consumed a held button, so pane content shows no hover and programs see no motion.
 gesture_swallowing :: proc(w: ^Window) -> bool {return gesture_buttons(w, Gesture_Swallowed) != {}}
 
-gesture_tab_pressed :: proc(w: ^Window) -> bool {
+// The tab chrome target a held Left press draws pressed, or nil.
+gesture_tab_pressed :: proc(w: ^Window) -> Tab_Chrome_Target {
 	held, ok := w.gesture.captures[.Left].(Gesture_Held)
-	if !ok {return false}
-	_, tab := held.owner.(Gesture_Tab)
-	return tab
-}
-
-// The pressed rail row, or -1.
-gesture_rail_pressed :: proc(w: ^Window) -> int {
-	held, ok := w.gesture.captures[.Left].(Gesture_Held)
-	if !ok {return -1}
-	pressed, rail := held.owner.(Gesture_Rail_Row)
-	return rail ? pressed.row : -1
+	if !ok {return nil}
+	pressed, _ := held.owner.(Gesture_Tab_Press)
+	return pressed.target
 }
 
 // The surface holding `button` consumes it: one call per press, from that surface's press handler. A
@@ -122,10 +112,12 @@ gesture_hand_off :: proc(w: ^Window, button: input.Mouse_Button, owner: Pointer_
 	}
 }
 
-// A Left press on the tabs that draws `row` pressed until its release.
-gesture_tab_press :: proc(w: ^Window, row: Gesture_Owner) {
+// A Left press on the tabs that draws `target` pressed until its release.
+gesture_tab_press :: proc(w: ^Window, target: Tab_Chrome_Target) {
 	held, ok := w.gesture.captures[.Left].(Gesture_Held)
-	if ok && gesture_owner_target(held.owner) == .Tabs {w.gesture.captures[.Left] = Gesture_Held{row}}
+	if ok && gesture_owner_target(held.owner) == .Tabs {
+		w.gesture.captures[.Left] = Gesture_Held{Gesture_Tab_Press{target}}
+	}
 }
 
 // The tabs changed under a held press: it stops drawing pressed and still finishes with the tabs.

@@ -10,8 +10,9 @@ import "aio:ui"
 @(private)
 focus_holds_shown :: proc(w: ^app.Window) -> bool {
 	entered, ok := w.focus_bracket.(app.Focus_Entered)
-	if !ok || w.tree == nil || w.tree.focus == layout.INVALID_NODE {return false}
-	pane, is_pane := w.tree.nodes[w.tree.focus].(layout.Pane)
+	tree := app.window_tree(w)
+	if !ok || tree == nil || tree.focus == layout.INVALID_NODE {return false}
+	pane, is_pane := tree.nodes[tree.focus].(layout.Pane)
 	return is_pane && entered.content == pane.content
 }
 
@@ -23,9 +24,10 @@ focus_bracket_holds_the_pane_each_change_shows :: proc(t: ^testing.T) {
 	s := &f.state
 	w := s.windows[0]
 	testing.expect(t, focus_holds_shown(w), "a window opens holding its pane")
-	first := w.tree.focus
+	first := app.window_tree(w).focus
 	app.pane_split(s, w, .Right)
-	testing.expect(t, w.tree.focus != first && focus_holds_shown(w), "a split enters the new pane")
+	split := app.window_tree(w).focus != first
+	testing.expect(t, split && focus_holds_shown(w), "a split enters the new pane")
 	app.pane_focus(s, w, first)
 	testing.expect(t, focus_holds_shown(w))
 	app.tab_new(s, w)
@@ -51,7 +53,7 @@ focus_bracket_entering_another_pane_leaves_the_one_that_held_focus :: proc(t: ^t
 	if !palette_fixture_create(t, &f, "focus-bracket-enter", second_window = false) {return}
 	s := &f.state
 	w := s.windows[0]
-	first := w.tree.focus
+	first := app.window_tree(w).focus
 	app.pane_split(s, w, .Right)
 	ui.find_open(&w.find)
 	previous := app.focused_session(s, w).session
@@ -59,7 +61,7 @@ focus_bracket_entering_another_pane_leaves_the_one_that_held_focus :: proc(t: ^t
 	testing.expect(t, term.search_summary(previous).progress != .Off)
 	w.selection = app.Selection_Selecting{}
 	// A change of focus that skipped focus_leave: entering takes focus from the pane that still holds it.
-	w.tree.focus = first
+	app.window_tree(w).focus = first
 	app.focus_enter(s, w)
 	testing.expect(t, focus_holds_shown(w))
 	testing.expect(t, !ui.find_is_open(&w.find) && !app.selection_active(w))

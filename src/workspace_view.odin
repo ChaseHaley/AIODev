@@ -5,7 +5,6 @@ import "aio:ui"
 
 Workspace_View_Resources :: struct {
 	workspace: ^Workspace,
-	tree: ^layout.Layout,
 	editor: ui.Editor,
 	// Belongs to the settings page in editor and moves with it.
 	theme_delete: Theme_Delete,
@@ -15,9 +14,17 @@ Workspace_View_Resources :: struct {
 	dividers: [dynamic]layout.Divider,
 }
 
+// The layout the view shows: always its workspace's selected tab, so it follows selection and membership.
+// Nil while the workspace has no tab to show.
+workspace_view_tree :: proc(resources: ^Workspace_View_Resources) -> ^layout.Layout {
+	workspace := resources.workspace
+	if workspace == nil || workspace.selected < 0 || workspace.selected >= len(workspace.tabs) {return nil}
+	return &workspace.tabs[workspace.selected].tree
+}
+
 @(require_results)
 workspace_view_init :: proc(app: ^App, resources: ^Workspace_View_Resources, workspace: ^Workspace) -> bool {
-	resources.workspace, resources.tree = workspace, &selected_tab(workspace).tree
+	resources.workspace = workspace
 	resources.views = make([dynamic]Pane_View)
 	resources.panes = make([dynamic]layout.Pane_Rect)
 	tab_presentation_init(&resources.presentation)
@@ -40,11 +47,12 @@ workspace_view_prepare :: proc(
 	if !workspace_view_init(app, resources, workspace) {return false}
 	prepared := false
 	defer if !prepared {workspace_view_destroy(resources)}
+	tree := workspace_view_tree(resources)
 	if !tab_presentation_resize(&resources.presentation, len(workspace.tabs)) ||
-	   reserve(&resources.panes, len(resources.tree.nodes)) != nil ||
-	   reserve(&resources.dividers, len(resources.tree.nodes)) != nil ||
-	   reserve(&resources.views, len(resources.tree.nodes)) != nil {return false}
-	walk := workspace_tab_panes(app, resources.tree, resources.workspace.selected)
+	   reserve(&resources.panes, len(tree.nodes)) != nil ||
+	   reserve(&resources.dividers, len(tree.nodes)) != nil ||
+	   reserve(&resources.views, len(tree.nodes)) != nil {return false}
+	walk := workspace_tab_panes(app, tree, resources.workspace.selected)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
 		entry, created := pane_view_create(pane.content, pane.session != nil)
 		if !created {return false}
@@ -76,7 +84,7 @@ workspace_view_rebind :: proc(destination, prepared: ^Workspace_View_Resources) 
 	assert(destination != prepared)
 	destination.editor, prepared.editor = prepared.editor, destination.editor
 	destination.theme_delete, prepared.theme_delete = prepared.theme_delete, destination.theme_delete
-	destination.workspace, destination.tree = prepared.workspace, prepared.tree
+	destination.workspace = prepared.workspace
 	tab_presentation_clear(&destination.presentation)
 	workspace_view_destroy(prepared)
 }
@@ -108,9 +116,7 @@ workspace_adopt :: proc(
 	defer workspace_view_destroy(&prepared)
 	if !gesture_cancel(app, w) {return false}
 	focus_leave(app, w)
-	// A close question counts the tabs this window stops showing, so it ends now, putting back any
-	// marks its subset replaced.
-	if confirmation_subject(w, Pending_Close) != nil {confirmation_cancel(app, w)}
+	confirmation_workspace_depart(app, w)
 	overlay_close(app, w)
 	workspace_picker_cancel(w)
 	// Editor storage belongs to the window; its reading position belongs to the workspace.
@@ -126,7 +132,7 @@ workspace_adopt :: proc(
 		value  = f32(workspace.selected),
 		target = f32(workspace.selected),
 	}
-	w.tab_hover, w.rail_hover = -1, -1
+	w.tab_hover = nil
 	gesture_tab_unpress(w)
 	ui.armed_cancel(&w.tab_close_armed)
 	window_relayout(app, w)

@@ -9,6 +9,12 @@ title_actions_end :: proc(w: ^Window) -> f32 {
 	return (3 * ui.RAIL_TOGGLE_WIDTH + 8) * w.scale
 }
 
+// The title-bar width the native caption buttons keep at the right, which the workspace chip and the
+// tab bar both leave free.
+window_caption_reserve :: proc(w: ^Window) -> f32 {
+	return 218 * w.scale
+}
+
 title_action_rect :: proc(w: ^Window, action: Title_Action) -> render.Rect {
 	if action == .None {return {}}
 	r := tab_orientation_button_rect(w)

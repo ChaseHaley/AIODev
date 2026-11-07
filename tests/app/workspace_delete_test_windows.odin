@@ -42,7 +42,7 @@ last_tab_group_removes_workspace_and_reuses_window_then_last_pane_exits :: proc(
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(state.sessions), 1)
 	testing.expect(t, state.windows[0] == w && w.id == window_id && w.workspace == fallback)
-	testing.expect_value(t, w.tree, &app.selected_tab(fallback).tree)
+	testing.expect_value(t, app.window_tree(w), &app.selected_tab(fallback).tree)
 	testing.expect_value(t, term.process_id(survivor), survivor_pid)
 	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
 	testing.expect(t, state.run == .Running && !state.tray_hint_shown)
@@ -228,7 +228,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect(t, state.windows[0] == w && w.id == window_id)
-	testing.expect(t, w.workspace.id > id && w.tree == &app.selected_tab(w.workspace).tree)
+	testing.expect(t, w.workspace.id > id && app.window_tree(w) == &app.selected_tab(w.workspace).tree)
 	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
 	testing.expect(t, !ui.editor_loaded(&w.editor) && !app.tab_menu_shown(w) &&
@@ -375,7 +375,7 @@ workspace_delete_allocation_failures_preserve_original_until_prepared :: proc(t:
 		failure.failed = true
 		if app.workspace_find(state, id) == nil { break }
 		failures += 1
-		testing.expect(t, w.workspace == original && w.tree == &app.selected_tab(original).tree)
+		testing.expect(t, w.workspace == original && app.window_tree(w) == &app.selected_tab(original).tree)
 		testing.expect_value(t, len(state.workspaces), 1)
 		testing.expect_value(t, len(state.sessions), 1)
 		testing.expect_value(t, len(state.windows), 1)
@@ -480,9 +480,9 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 		if ok {break}
 		testing.expect(t, failure.failed)
 		testing.expect_value(t, len(tracker.allocation_map), 0)
-		testing.expect(t, prepared.workspace == nil && prepared.tree == nil)
+		testing.expect(t, prepared.workspace == nil && app.workspace_view_tree(&prepared) == nil)
 		testing.expect_value(t, raw_data(w.views), live_views)
-		testing.expect(t, w.workspace == workspace && w.tree == &app.selected_tab(workspace).tree)
+		testing.expect(t, w.workspace == workspace && app.window_tree(w) == &app.selected_tab(workspace).tree)
 		testing.expect_value(t, term.geometry(session), geometry)
 		testing.expect_value(t, term.process_id(session), pid)
 	}
@@ -499,12 +499,13 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	app.workspace_view_move(&receiver, &prepared)
 	app.workspace_view_destroy(&prepared)
 	app.workspace_view_destroy(&prepared)
-	testing.expect(t, prepared.workspace == nil && prepared.tree == nil)
+	testing.expect(t, prepared.workspace == nil && app.workspace_view_tree(&prepared) == nil)
 	testing.expect(t, raw_data(prepared.views) == nil && raw_data(prepared.panes) == nil)
 	testing.expect(t, raw_data(prepared.dividers) == nil)
 	testing.expect(t, raw_data(prepared.dividers) == nil && ui.editor_source(&prepared.editor) == "")
 	testing.expect_value(t, raw_data(receiver.views), views)
-	testing.expect(t, receiver.workspace == workspace && receiver.tree == w.tree)
+	testing.expect(t, receiver.workspace == workspace)
+	testing.expect(t, app.workspace_view_tree(&receiver) == app.window_tree(w))
 	testing.expect_value(t, raw_data(w.views), live_views)
 	testing.expect_value(t, term.geometry(session), geometry)
 	testing.expect_value(t, term.process_id(session), pid)

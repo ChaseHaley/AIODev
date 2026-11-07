@@ -44,7 +44,7 @@ palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string,
 			testing.expect_value(t, append_error, nil)
 			return false
 		}
-		if !testing.expect(t, app.tab_create(&f.state, workspace)) { return false }
+		if _, created := app.tab_create(&f.state, workspace); !testing.expect(t, created) { return false }
 		if !testing.expect(t, app.window_open(&f.state, workspace)) { return false }
 	}
 	app.tick(&f.state)
@@ -148,22 +148,23 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	if !palette_fixture_create(t, &f, "lifecycle") { return }
 	s := &f.state
 	first, second := s.windows[0], s.windows[1]
-	first_workspace, first_tree := first.workspace, first.tree
-	first_selected, first_focus := first.workspace.selected, first.tree.focus
+	first_workspace, first_tree := first.workspace, app.window_tree(first)
+	first_selected, first_focus := first.workspace.selected, app.window_tree(first).focus
 	first_pid, second_pid := term.process_id(s.sessions[0].session), term.process_id(s.sessions[1].session)
 	app.run_action(s, first, .Find)
 	app.handle_event(s, input.Text_Event{first.id, "retained"})
 	app.palette_open(s, first)
 	s.palette.drag = ui.Query_Drag{}
-	app.rename_open(s, second, true, second.workspace.selected)
+	second_tab := app.Rename_Tab_Target{second.workspace.id, app.selected_tab(second.workspace).id}
+	app.rename_open(s, second, second_tab)
 	app.handle_event(s, input.Text_Event{second.id, "unsaved"})
 	testing.expect(t, app.palette_active(s, first))
 	app.run_action(s, second, .Command_Palette)
 	testing.expect(t, app.palette_active(s, second) && !app.palette_visible(s, first))
 	testing.expect(t, s.palette.drag == nil && !app.rename_shown(second))
-	testing.expect(t, first.workspace == first_workspace && first.tree == first_tree)
+	testing.expect(t, first.workspace == first_workspace && app.window_tree(first) == first_tree)
 	testing.expect_value(t, first.workspace.selected, first_selected)
-	testing.expect_value(t, first.tree.focus, first_focus)
+	testing.expect_value(t, app.window_tree(first).focus, first_focus)
 	testing.expect_value(t, ui.field_string(&first.find.query), "retained")
 	testing.expect_value(t, len(first.workspace.tabs), 1)
 	testing.expect_value(t, len(s.sessions), 2)
@@ -171,7 +172,8 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect_value(t, term.process_id(s.sessions[1].session), second_pid)
 	testing.expect_value(t, app.selected_tab(second.workspace).name, "")
 	s.palette.drag = ui.Query_Drag{}
-	app.rename_open(s, first, true, first.workspace.selected)
+	first_tab := app.Rename_Tab_Target{first.workspace.id, app.selected_tab(first.workspace).id}
+	app.rename_open(s, first, first_tab)
 	app.handle_event(s, platform.Focus_Event{first.id, false})
 	testing.expect(t, !app.rename_shown(first))
 	testing.expect(t, app.palette_active(s, second) && s.palette.drag != nil)
@@ -201,7 +203,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	app.handle_event(s, input.Key_Event{window = second.id, key = .Escape})
 	testing.expect(t, !app.key_suppressed(second, .Escape))
 	app.palette_open(s, second)
-	seed_pane_drag(second, app.selected_tab(second.workspace), second.tree.focus)
+	seed_pane_drag(second, app.selected_tab(second.workspace), app.window_tree(second).focus)
 	app.focus_leave(s, second)
 	testing.expect(t, !app.palette_visible(s, second) && s.palette_owner == nil)
 	testing.expect(t, app.pane_drag_active(second))
@@ -235,10 +237,11 @@ palette_stays_with_its_owner_when_the_new_window_goes_away :: proc(t: ^testing.T
 	app.pane_split(s, w, .Right)
 	app.palette_open(s, previous)
 	if !testing.expect(t, app.palette_active(s, previous)) { return }
-	preview := app.pane_window_preview_create(s, app.selected_tab(w.workspace), w.tree.focus)
+	focus := app.window_tree(w).focus
+	preview := app.pane_window_preview_create(s, app.selected_tab(w.workspace), focus)
 	if !testing.expect(t, preview != nil) { return }
 	preview_id := preview.id
-	seed_pane_drag(w, app.selected_tab(w.workspace), w.tree.focus, preview = app.Preview_Ready{preview_id})
+	seed_pane_drag(w, app.selected_tab(w.workspace), focus, preview = app.Preview_Ready{preview_id})
 	app.palette_open(s, preview)
 	testing.expect(t, app.window_find(s, preview_id) == nil)
 	testing.expect(t, app.palette_active(s, previous) && app.palette_visible(s, previous))

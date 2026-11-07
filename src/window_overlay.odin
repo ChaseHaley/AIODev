@@ -23,8 +23,7 @@ Window_Overlay :: union {
 
 // A tab or pane renames in a dialog; the text is w.rename.
 Overlay_Rename :: struct {
-	kind: Rename_Dialog,
-	id:   u32,
+	target: Rename_Target,
 }
 
 // The window's workspace names in place, in its chip; the text is w.rename.
@@ -39,7 +38,7 @@ Overlay_Tab_Menu :: struct {
 	tab: u32,
 }
 
-// A dock edge's menu, which offers to keep the edge's current size. It shares w.tab_menu's surface.
+// A dock edge's menu, which offers to keep the edge's current size. Its rows are w.divider_menu.
 Overlay_Divider_Menu :: struct {
 	node: layout.Node_Id,
 }
@@ -132,7 +131,6 @@ window_overlays_cancel :: proc(app: ^App, w: ^Window, focus_lost := false) {
 	palette_release(app, w)
 	workspace_picker_cancel(w, focus_lost)
 	overlay_close(app, w, focus_lost ? .Leave : .Cancel)
-	ui.field_release(&w.rename)
 	confirmation_cancel(app, w)
 	rail_overlay_dismiss(app, w)
 	status_overview_cancel(w)

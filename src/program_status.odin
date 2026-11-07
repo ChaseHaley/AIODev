@@ -149,7 +149,7 @@ status_spin_tick :: proc(w: ^Window) {
 status_record_name :: proc(entry: ^Session_Entry, record: term.Program_Status) -> string {
 	if record.title != "" {return record.title}
 	if record.app != "" {return record.app}
-	return session_title(entry)
+	return session_display_title(entry)
 }
 
 status_watched :: proc(app: ^App, entry: ^Session_Entry) -> bool {

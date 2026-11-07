@@ -97,10 +97,10 @@ opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^tes
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Open") {return}
 	w := f.state.windows[0]
-	before := w.tree.focus
+	before := app.window_tree(w).focus
 	opened := open(&f.state, f.file)
 	testing.expect_value(t, opened.status, commands.Status.Ok)
-	testing.expect_value(t, w.tree.focus, before)
+	testing.expect_value(t, app.window_tree(w).focus, before)
 	if !testing.expect_value(t, len(f.state.markdown_panes), 1) {return}
 	pane := f.state.markdown_panes[0]
 	testing.expect_value(t, load_name(pane), "Loaded")
@@ -389,7 +389,7 @@ closing_the_pane_frees_it_and_stops_the_poll :: proc(t: ^testing.T) {
 	w := f.state.windows[0]
 	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
 	testing.expect(t, f.state.markdown_deadline != {})
-	app.pane_close_at(&f.state, w.workspace, w.workspace.selected, w.tree.focus)
+	app.pane_close_at(&f.state, w.workspace, w.workspace.selected, app.window_tree(w).focus)
 	testing.expect_value(t, len(f.state.markdown_panes), 1)
 	poll(&f.state)
 	testing.expect_value(t, len(f.state.markdown_panes), 0)

@@ -54,7 +54,6 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	one.marked = true
 	w := app.Window {
 		workspace       = workspace,
-		tree            = &one.tree,
 		width           = 1000,
 		height          = 700,
 		scale           = 1,
@@ -71,9 +70,9 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	bar := app.window_tab_bar(&state, &w)
 	testing.expect_value(t, bar.count, 3)
 	testing.expect(t, bar.tab_width > 0 && bar.tab_width <= 220)
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, 20) == 0)
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width*3+2, 20) == bar.count)
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, 1, 20) == -1)
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, 20) == app.Tab_Chrome_Tab{0})
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width*3+2, 20) == app.Tab_Chrome_New{})
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, 1, 20) == nil)
 
 	// The strip and the two trailing buttons end before the native caption buttons start.
 	testing.expect(t, app.window_title_controls_end(&state, &w) < f32(w.width)-138)
@@ -94,7 +93,6 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	w := app.Window {
 		id              = 71,
 		workspace       = workspace,
-		tree            = &one.tree,
 		width           = 1000,
 		height          = 700,
 		scale           = 1,
@@ -123,7 +121,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 			y = i32(second.y + second.height / 2),
 		},
 	)
-	testing.expect(t, w.tree == &two.tree)
+	testing.expect(t, app.window_tree(&w) == &two.tree)
 
 	close := app.window_tab_close_rect(&state, &w, 1)
 	app.handle_event(

@@ -113,8 +113,8 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	state.sessions[1].status = .Running
 	app.workspace_picker_cancel(w)
 	testing.expect_value(t, two.id, u32(2))
-	testing.expect(t, app.rename_target_commit(&state, w,
-		{app.Rename_Kind.Workspace, two.id}, " \n\t ") == app.Rename_Outcome.Empty)
+	testing.expect(t, app.rename_target_commit(&state, app.Rename_Workspace_Target{two.id}, " \n\t ",
+		.Workspace_Row) == app.Rename_Outcome.Empty)
 	testing.expect_value(t, two.name, "Build tools")
 	app.run_action(&state, w, .Change_Workspace)
 	app.handle_event(&state, input.Text_Event{window = w.id, text = original.name})
@@ -130,12 +130,10 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	if !testing.expect(t, layout_ok && app.rail_docked(w)) { return }
 	row0 := app.rail_row_rect_for_tab(w, 0)
 	row1 := app.rail_row_rect_for_tab(w, 1)
-	row0_index := app.rail_row_index_for_tab(w.rail_rows[:], original, 0)
-	testing.expect_value(t, ui.rail_row_hit(layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), row0_index)
-	close := ui.rail_close_rect(layout, row0_index + 1, w.scale)
+	testing.expect_value(t, ui.rail_row_hit(layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), 0)
+	close := ui.rail_close_rect(layout, 1, w.scale)
 	hit := app.rail_tab_interaction_hit(w, close.x + close.width / 2, close.y + close.height / 2, .Left)
-	testing.expect_value(t, hit.kind, app.Tab_Interaction_Kind.Close)
-	testing.expect_value(t, hit.index, 1)
+	testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{1})
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row0.x + 20 * w.scale), y = i32(row0.y + 16 * w.scale)})
 	testing.expect_value(t, original.selected, 0)

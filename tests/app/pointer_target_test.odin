@@ -110,7 +110,7 @@ pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T
 	app.tab_menu_open(s, w, 0, 40 * w.scale, 60 * w.scale)
 	if !testing.expect(t, app.tab_menu_shown(w)) {return}
 	testing.expect_value(t, app.pointer_target(s, w, caption.x, caption.y), app.Pointer_Target.Tab_Menu)
-	menu, _ := app.tab_menu_rect(w)
+	menu, _ := window_menu_rect(w, &w.tab_menu.menu)
 	testing.expect(t, !pointer_inside(menu, caption.x, caption.y), "the caption must lie outside the menu")
 	pointer_expect_move(t, s, w, caption.x, caption.y + 1, .Arrow)
 	testing.expect_value(t, w.caption_hover, -1)

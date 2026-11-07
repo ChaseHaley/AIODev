@@ -39,18 +39,23 @@ workspace_delete_commit :: proc(app: ^App, plan: Workspace_Delete_Plan) -> bool 
 	committed := false
 	defer if plan.fresh &&
 	   !committed {workspace_delete_release(app, destination); workspace_pickers_refresh(app)}
-	if plan.created_tab && !tab_create(app, destination) {return false}
-	defer if plan.created_tab && !plan.fresh && !committed {workspace_close_tab(app, destination, 0)}
+	session: u32
 	if plan.created_tab {
-		entry := session_find(app, app.next_session_id)
+		created: bool
+		session, created = tab_create(app, destination)
+		if !created {return false}
+	}
+	defer if plan.created_tab && !plan.fresh && !committed {workspace_close_tab(app, destination, 0)}
+	// A created tab can hold a shell that failed to start; the replacement must actually run.
+	if plan.created_tab {
+		entry := session_find(app, session)
 		if entry == nil || term.status(entry.session).kind == .Failed {return false}
 	}
 	// Replacing pre-flights every view before the old workspace is released (D-053).
 	if owner != nil && !workspace_adopt(app, owner, destination, .Replace) {return false}
 	workspace_delete_release(app, workspace)
 	committed = true
-	workspace_pickers_refresh(app)
-	mark_all_dirty(app)
+	workspace_mutation_finish(app, destination, {.Names})
 	return true
 }
 

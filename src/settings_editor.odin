@@ -301,17 +301,18 @@ settings_pane_location :: proc(
 
 // Whether the window shows a focused settings pane, which then takes keyboard input.
 settings_active :: proc(w: ^Window) -> bool {
-	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return false}
-	pane, ok := w.tree.nodes[w.tree.focus].(layout.Pane)
+	tree := window_tree(w)
+	if tree == nil || tree.focus == layout.INVALID_NODE {return false}
+	pane, ok := tree.nodes[tree.focus].(layout.Pane)
 	return ok && pane.content.kind == .Settings
 }
 
 // The rectangle of the settings pane the window should address, preferring the focused one.
 @(private)
 settings_pane_rect :: proc(w: ^Window) -> layout.Pane_Rect {
-	if w.tree != nil && w.tree.focus != layout.INVALID_NODE {
+	if tree := window_tree(w); tree != nil && tree.focus != layout.INVALID_NODE {
 		for pane in w.panes {
-			if pane.node == w.tree.focus && pane.content.kind == .Settings {return pane}
+			if pane.node == tree.focus && pane.content.kind == .Settings {return pane}
 		}
 	}
 	for pane in w.panes {
@@ -352,7 +353,7 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: 
 		&w.list,
 		&w.ui_text,
 		app.theme,
-		w.focused && pane.node == w.tree.focus && !palette_active(app, w),
+		w.focused && pane.node == window_tree(w).focus && !palette_active(app, w),
 		w.pointer,
 	)
 	if result != .Ok {return result}
@@ -415,8 +416,8 @@ editor_open :: proc(app: ^App, w: ^Window) -> ^Window {
 	find_close(app, w, find_target(app, w))
 	if workspace := settings_workspace(app, w); workspace != nil {return settings_focus(app, w, workspace)}
 	if !settings_load(app, &w.editor) {return nil}
-	tab, record_error := tab_record_reserve(w.workspace)
-	if record_error != .None {
+	tab, reserved := tab_record_reserve(w.workspace)
+	if !reserved {
 		ui.editor_destroy(&w.editor)
 		notify(app, .Error, "Could not open the settings tab.")
 		return nil
@@ -1177,4 +1178,8 @@ editor_profile_remove_ask :: proc(app: ^App, w: ^Window, id: string) {
 @(private)
 editor_profile_remove_finish :: proc(app: ^App, w: ^Window, remove: Profile_Remove, accepted: bool) {
 	if accepted {editor_profile_mutate(app, w, {kind = .Remove, id = remove.id})}
+}
+
+editor_profile_remove_destroy :: proc(remove: ^Profile_Remove) {
+	delete(remove.id)
 }

@@ -80,6 +80,8 @@ pane_link_drag_release :: proc(
 	if destination == nil {return false}
 	destination_workspace := pane_source_workspace(app, destination)
 	if destination_workspace == nil {return false}
+	// An unlinked destination window shows the tab it receives, so the tab must be one of its own.
+	if !destination_linked && destination_workspace != destination_window.workspace {return false}
 	if !pane_content_can_join(content, destination_workspace, home.tab) {return false}
 	same_tab := destination == home.tab
 	if same_tab {
@@ -180,7 +182,8 @@ pane_link_drag_finish :: proc(
 	if destination_linked {
 		if home, found := pane_link_home(app, content); found {
 			pane_link_refresh_at(app, destination_window, home)
-			if node := layout.find_content(destination_window.tree, content); node != layout.INVALID_NODE {
+			tree := window_tree(destination_window)
+			if node := layout.find_content(tree, content); node != layout.INVALID_NODE {
 				pane_focus(app, destination_window, node)
 			}
 		} else {
@@ -192,7 +195,6 @@ pane_link_drag_finish :: proc(
 			tab_select_one(destination_window.workspace, index)
 			destination_window.workspace.selected = index
 		}
-		destination_window.tree = &destination.tree
 		if node := layout.find_content(&destination.tree, content); node != layout.INVALID_NODE {
 			destination.tree.focus = node
 		}

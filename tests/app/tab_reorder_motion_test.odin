@@ -16,7 +16,6 @@ tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: pr
 		append(&state.windows, &w)
 		defer delete(state.windows)
 		defer delete(workspace.tabs)
-		defer delete(w.rail_rows)
 		defer app.tab_presentation_destroy(&w.presentation)
 		tabs: [4]app.Tab
 		for &tab, i in tabs {
@@ -26,7 +25,6 @@ tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: pr
 			append(&workspace.tabs, &tab)
 		}
 		tabs[0].marked = true
-		w.tree = &tabs[0].tree
 		if !testing.expect(t, app.tab_presentation_resize(&w.presentation, len(tabs))) {return}
 		first := horizontal ? app.window_tab_rect(&state, &w, 0) : app.rail_row_rect_for_tab(&w, 0)
 		x, y := first.x + first.width / 2, first.y + first.height / 2
@@ -44,8 +42,7 @@ tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: pr
 			close := ui.rail_close_rect(l, 1, w.scale)
 			close.y += 0.25 * first.height
 			hit := app.rail_tab_interaction_hit(&w, close.x + close.width / 2, close.y + close.height / 2, .Left)
-			testing.expect_value(t, hit.kind, app.Tab_Interaction_Kind.Close)
-			testing.expect_value(t, hit.index, 1)
+			testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{1})
 			testing.expect_value(t, app.rail_tab_hit(&w, l, moved.x, l.footer.y + 1), -1)
 		}
 		app.update_motion(&state)
@@ -73,7 +70,6 @@ tab_reorder_scrolling_groups_and_cancellation_keep_pointer_and_identity :: proc(
 	append(&state.windows, &w)
 	defer delete(state.windows)
 	defer delete(workspace.tabs)
-	defer delete(w.rail_rows)
 	defer app.tab_presentation_destroy(&w.presentation)
 	tabs: [6]app.Tab
 	for &tab, i in tabs {
@@ -84,7 +80,6 @@ tab_reorder_scrolling_groups_and_cancellation_keep_pointer_and_identity :: proc(
 	}
 	tabs[1].marked, tabs[3].marked = true, true
 	workspace.selected = 1
-	w.tree = &tabs[1].tree
 	if !testing.expect(t, app.tab_presentation_resize(&w.presentation, len(tabs))) {return}
 	first := app.rail_row_rect_for_tab(&w, 1)
 	x, y := first.x + first.width / 2, first.y + 0.25 * first.height
@@ -106,7 +101,7 @@ tab_reorder_scrolling_groups_and_cancellation_keep_pointer_and_identity :: proc(
 	}
 	testing.expect(t, !app.drag_held(&w) && !app.motion_active(&state))
 	tabs[1].marked, tabs[3].marked, tabs[0].marked = false, false, true
-	workspace.selected, w.tree, w.rail_scroll = 0, &tabs[0].tree, 0
+	workspace.selected, w.rail_scroll = 0, 0
 	first = app.rail_row_rect_for_tab(&w, 0)
 	x, y = first.x + first.width / 2, first.y + first.height / 2
 	app.tab_press(&state, &w, 0, x, y, false)

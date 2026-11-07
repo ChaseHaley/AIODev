@@ -75,12 +75,13 @@ divider_cancel :: proc(w: ^Window) {
 
 @(private)
 divider_hits :: proc(w: ^Window, x, y: f32, out: []layout.Divider) -> int {
+	tree := window_tree(w)
 	if root, _, covered := floating_frame_at(w, x, y); covered {
 		hits: [8]layout.Divider
 		n := layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, hits[:], 10 * w.scale, 2 * w.scale)
 		count := 0
 		for d in hits[:n] {
-			if dock_divider(d.node) || layout.float_root(w.tree, d.node) != root {continue}
+			if dock_divider(d.node) || layout.float_root(tree, d.node) != root {continue}
 			if count >= len(out) {break}
 			out[count] = d
 			count += 1
@@ -105,7 +106,7 @@ divider_hits :: proc(w: ^Window, x, y: f32, out: []layout.Divider) -> int {
 	n := layout.divider_hit_all(w.dividers[:], x, y, 3 * w.scale, hits[:], 10 * w.scale, 2 * w.scale)
 	count := 0
 	for d in hits[:n] {
-		if !dock_divider(d.node) && layout.float_root(w.tree, d.node) != layout.INVALID_NODE {continue}
+		if !dock_divider(d.node) && layout.float_root(tree, d.node) != layout.INVALID_NODE {continue}
 		if count >= len(out) {break}
 		out[count] = d
 		count += 1
@@ -124,9 +125,10 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 	   time_ns - click.time_ns <= DOUBLE_CLICK_NS {
 		w.divider = nil
 		balanced := false
+		tree := window_tree(w)
 		for d in hits[:n] {
 			if dock_divider(d.node) {dock_divider_reset(w, d.node); balanced = true}
-			else {balanced = layout.balance_related(w.tree, d.node) || balanced}
+			else {balanced = layout.balance_related(tree, d.node) || balanced}
 		}
 		if balanced {window_relayout(app, w)}
 		return true
@@ -152,6 +154,7 @@ divider_drag :: proc(app: ^App, w: ^Window, x, y: f32) {
 	drag := divider_dragging(w)
 	if drag == nil {return}
 	gap := window_gap(app, w)
+	tree := window_tree(w)
 	moved := false
 	for node, i in drag.nodes[:drag.count] {
 		if dock_divider(node) {
@@ -165,7 +168,7 @@ divider_drag :: proc(app: ^App, w: ^Window, x, y: f32) {
 		}
 		for d in w.dividers {
 			if d.node != node {continue}
-			if layout.drag_divider(w.tree, d, x, y, gap) {
+			if layout.drag_divider(tree, d, x, y, gap) {
 				moved = true
 				window_dividers(app, w)
 			}
@@ -209,7 +212,6 @@ tab_move :: proc(app: ^App, w: ^Window, from, to: int) {
 	inject_at(tabs, to, tab)
 	tab_presentation_move(&w.presentation, from, to)
 	w.workspace.selected = tab_selected_after_move(w.workspace.selected, from, to)
-	w.tree = &selected_tab(w.workspace).tree
 	rail_reveal_active(w)
 	mark_all_dirty(app)
 }
@@ -402,7 +404,7 @@ pane_drag_state :: proc(w: ^Window) -> (^Drag_Active, ^Pane_Carry) {
 
 @(private)
 pane_drag_show_source :: proc(app: ^App, w: ^Window, source: ^Tab) {
-	for tab, i in w.workspace.tabs {if tab == source {tab_select(app, w, i, true); break}}
+	for tab, i in w.workspace.tabs {if tab == source {tab_select(app, w, i, .Preserve_Marks); break}}
 }
 
 // Shows the tabs the drag found: the source's in its own window, and the original one in the window it
@@ -412,12 +414,12 @@ pane_drag_restore :: proc(app: ^App, w: ^Window, carry: ^Pane_Carry) {
 	visit := carry.visit
 	if destination := window_find(app, visit.window); destination != nil && destination != w {
 		for tab, i in destination.workspace.tabs {
-			if tab == visit.original {tab_select(app, destination, i, true); break}
+			if tab == visit.original {tab_select(app, destination, i, .Preserve_Marks); break}
 		}
 		if destination.workspace.selected != visit.original_index &&
 		   visit.original_index >= 0 &&
 		   visit.original_index < len(destination.workspace.tabs) {
-			tab_select(app, destination, visit.original_index, true)
+			tab_select(app, destination, visit.original_index, .Preserve_Marks)
 		}
 		destination.dirty = true
 	}
@@ -624,7 +626,7 @@ pane_drag_visit :: proc(app: ^App, w: ^Window, carry: ^Pane_Carry, destination: 
 	if id == previous {return false}
 	if old := window_find(app, previous); old != nil && old != w {
 		for tab, i in old.workspace.tabs {
-			if tab == visit.original {tab_select(app, old, i, true); break}
+			if tab == visit.original {tab_select(app, old, i, .Preserve_Marks); break}
 		}
 		old.dirty = true
 	}
@@ -683,10 +685,8 @@ pane_drag_target_move :: proc(
 	on_tab := -1
 	over_rail, rail_new_tab := false, false
 	if w.tabs_horizontal {
-		bar := window_tab_bar(app, w)
-		on_tab = window_tab_hit(app, w, bar, x, y)
-		if on_tab >= 0 && on_tab < bar.count {
-			destination = w.workspace.tabs[on_tab]
+		if tab, ok := window_tab_hit(app, w, window_tab_bar(app, w), x, y).(Tab_Chrome_Tab); ok {
+			on_tab, destination = tab.index, w.workspace.tabs[tab.index]
 		}
 	} else {
 		rail_tab, new_tab_target, over := rail_pane_target(w, x, y)
@@ -797,7 +797,7 @@ pane_drag_hover :: proc(
 	if !armed || hover.tab != destination {
 		visit.hover = Drag_Hover{destination, time.tick_add(now, DRAG_HOVER_DELAY)}
 	} else if time.tick_diff(now, hover.at) <= 0 {
-		tab_select(app, w, on_tab, true)
+		tab_select(app, w, on_tab, .Preserve_Marks)
 		visit.hover = nil
 	}
 }

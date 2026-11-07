@@ -39,11 +39,11 @@ adoption_fixture_destroy :: proc(t: ^testing.T, f: ^Adoption_Fixture) {
 // Every presentation value a caller must not have to teach either path separately.
 @(private="file")
 adoption_dirty_presentation :: proc(w: ^app.Window) {
-	w.rail_hover = 1
-	w.gesture.captures[.Left] = app.Gesture_Held{app.Gesture_Rail_Row{1}}
+	w.tab_hover = app.Tab_Chrome_Tab{1}
+	w.gesture.captures[.Left] = app.Gesture_Held{app.Gesture_Tab_Press{app.Tab_Chrome_Tab{1}}}
 	w.rail_scroll = 99
 	ui.armed_press(&w.tab_close_armed, 2)
-	w.overlay = app.Overlay_Rename{kind = .Tab}
+	w.overlay = app.Overlay_Rename{target = app.Rename_Tab_Target{}}
 	w.workspace_picker.state = app.Workspace_Picker_List{}
 }
 
@@ -55,9 +55,9 @@ adoption_expect_postcondition :: proc(
 	workspace: ^app.Workspace,
 ) {
 	testing.expect_value(t, w.workspace, workspace)
-	testing.expect(t, w.tree == &app.selected_tab(workspace).tree)
-	testing.expect_value(t, w.rail_hover, -1)
-	testing.expect_value(t, app.gesture_rail_pressed(w), -1)
+	testing.expect(t, app.window_tree(w) == &app.selected_tab(workspace).tree)
+	testing.expect(t, w.tab_hover == nil)
+	testing.expect(t, app.gesture_tab_pressed(w) == nil)
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	testing.expect(t, w.overlay == nil)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
@@ -77,7 +77,7 @@ workspace_adopt_retains_or_replaces_storage_with_one_postcondition :: proc(t: ^t
 	if !testing.expect_value(t, len(w.views), 2) { return }
 	two := app.workspace_create_empty(state)
 	if !testing.expect(t, two != nil) { return }
-	if !testing.expect(t, app.tab_create(state, two)) { return }
+	if _, created := app.tab_create(state, two); !testing.expect(t, created) { return }
 	panes := raw_data(w.panes)
 	adoption_dirty_presentation(w)
 	if !testing.expect(t, app.workspace_adopt(state, w, two, .Retain)) { return }
@@ -124,7 +124,7 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	app.pane_split(state, w, .Right)
 	two := app.workspace_create_empty(state)
 	if !testing.expect(t, two != nil) { return }
-	if !testing.expect(t, app.tab_create(state, two)) { return }
+	if _, created := app.tab_create(state, two); !testing.expect(t, created) { return }
 	views, panes := raw_data(w.views), raw_data(w.panes)
 	adoption_dirty_presentation(w)
 	backing := context.allocator
@@ -136,14 +136,15 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	testing.expect(t, !ok && failure.failed)
 	// Failure before the old view is released leaves the workspace and its presentation alone.
 	testing.expect_value(t, w.workspace, one)
-	testing.expect(t, w.tree == &app.selected_tab(one).tree)
+	testing.expect(t, app.window_tree(w) == &app.selected_tab(one).tree)
 	testing.expect_value(t, raw_data(w.views), views)
 	testing.expect_value(t, raw_data(w.panes), panes)
-	testing.expect_value(t, w.rail_hover, 1)
-	testing.expect_value(t, app.gesture_rail_pressed(w), 1)
+	testing.expect(t, w.tab_hover == app.Tab_Chrome_Tab{1})
+	testing.expect(t, app.gesture_tab_pressed(w) == app.Tab_Chrome_Tab{1})
 	testing.expect_value(t, ui.armed_target(w.tab_close_armed), 2)
 	testing.expect_value(t, w.rail_scroll, f32(99))
-	testing.expect(t, app.workspace_picker_mode(&w.workspace_picker) == .List)
+	_, listing := w.workspace_picker.state.(app.Workspace_Picker_List)
+	testing.expect(t, listing)
 	app.tick(state)
 }
 

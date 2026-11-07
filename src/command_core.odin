@@ -90,10 +90,12 @@ control_pane_focus :: proc(app: ^App, target: Pane_Target) -> Outcome {
 
 @(private)
 control_rename :: proc(app: ^App, target: Pane_Target, name: string) -> Outcome {
-	window := window_for_workspace(app, target.workspace)
-	if window == nil {return outcome_failure(.Failed, "the pane's workspace is not open in a window")}
+	if window_for_workspace(app, target.workspace) == nil {
+		return outcome_failure(.Failed, "the pane's workspace is not open in a window")
+	}
 	entry := target.pane.session
-	if entry == nil || rename_target_commit(app, window, {.Pane, entry.id}, name) != .Saved {
+	if entry == nil ||
+	   rename_target_commit(app, Rename_Pane_Target{entry.id}, name, .Automatic_Title) != .Saved {
 		return outcome_failure(.Failed, "could not rename the pane")
 	}
 	return {}
@@ -115,7 +117,8 @@ pane_target_resolve :: proc(app: ^App, text: string, caller: u32) -> (Pane_Targe
 		w: ^Window
 		for window in app.windows {if window.focused {w = window; break}}
 		if w == nil {w = window_primary(app)}
-		if w == nil || w.workspace == nil || w.tree == nil {
+		tree := window_tree(w)
+		if w == nil || w.workspace == nil || tree == nil {
 			return {}, outcome_failure(.Target, "no window is open")
 		}
 		// A linked window's workspace is only a view; the pane's identity is in its tab.
@@ -123,7 +126,7 @@ pane_target_resolve :: proc(app: ^App, text: string, caller: u32) -> (Pane_Targe
 			if target, found := pane_target_session(app, pane_link_content(w).id); found {return target, {}}
 			return {}, outcome_failure(.Target, "the focused window has no pane")
 		}
-		pane, found := workspace_pane_at(app, w.workspace, w.workspace.selected, w.tree.focus)
+		pane, found := workspace_pane_at(app, w.workspace, w.workspace.selected, tree.focus)
 		if !found {return {}, outcome_failure(.Target, "the focused window has no pane")}
 		return {w.workspace, pane}, {}
 	}
@@ -195,7 +198,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Repor
 				workspace_name = workspace.name,
 				tab            = pane.tab + 1,
 				focused        = linked != nil ? linked_focus : w != nil && w.focused &&
-					workspace.selected == pane.tab && w.tree.focus == pane.node,
+					workspace.selected == pane.tab && window_tree(w).focus == pane.node,
 				status         = cli_protocol.PANE_STATUS_WORDS[PANE_STATUS[status.kind]],
 				exit_code      = status.exit_code,
 				directory      = entry.header.launch_directory,
@@ -225,20 +228,16 @@ closed_pane_report :: proc(app: ^App, text: string, caller: u32) -> ([]cli_proto
 	id, valid := pane_id_parse(text)
 	if text == "" || text == "here" {id, valid = caller, caller != 0}
 	if !valid {return nil, false}
-	for offset in 1 ..= len(app.closed_sessions) {
-		index := (app.closed_next - offset + len(app.closed_sessions)) % len(app.closed_sessions)
-		closed := app.closed_sessions[index]
-		if closed.id != id || id == 0 {continue}
-		report := make([]cli_protocol.Pane_Report, 1, context.temp_allocator)
-		status := closed.status == .Running ? cli_protocol.Pane_Status.Closed : PANE_STATUS[closed.status]
-		report[0] = {
-			id        = id,
-			status    = cli_protocol.PANE_STATUS_WORDS[status],
-			exit_code = closed.exit_code,
-		}
-		return report, true
+	closed, found := closed_session_find(&app.closed_sessions, id)
+	if !found {return nil, false}
+	report := make([]cli_protocol.Pane_Report, 1, context.temp_allocator)
+	status := closed.status == .Running ? cli_protocol.Pane_Status.Closed : PANE_STATUS[closed.status]
+	report[0] = {
+		id        = id,
+		status    = cli_protocol.PANE_STATUS_WORDS[status],
+		exit_code = closed.exit_code,
 	}
-	return nil, false
+	return report, true
 }
 
 // The pane's visible rows, or its last `lines` rows when lines is positive.
@@ -283,10 +282,10 @@ control_tab_new :: proc(
 	if w != nil && !pane_minimum_single(app, w, notify_failure = false) {
 		return outcome_failure(.Failed, "the window is too small for a new pane")
 	}
-	if !tab_create(app, workspace, invocation.program, invocation.directory, invocation.profile) {
+	id, created := tab_create(app, workspace, invocation.program, invocation.directory, invocation.profile)
+	if !created {
 		return outcome_failure(.Failed, "could not create a tab")
 	}
-	id := app.next_session_id
 	if w != nil {
 		if invocation.focus {
 			tab_show(app, w, len(workspace.tabs) - 1)
@@ -312,7 +311,7 @@ control_split :: proc(
 	if linked != nil {
 		pane_link_reconcile(app, linked)
 		shown, workspace, tab = linked, linked.workspace, 0
-		node = layout.find_content(linked.tree, target.pane.content)
+		node = layout.find_content(window_tree(linked), target.pane.content)
 	}
 	id, err := pane_split_at(
 		app,
@@ -379,7 +378,7 @@ control_created :: proc(app: ^App, w: ^Window, id: u32, name: string) -> Outcome
 		}
 	}
 	if name == "" {return result}
-	if w == nil || rename_target_commit(app, w, {.Pane, id}, name) != .Saved {
+	if w == nil || rename_target_commit(app, Rename_Pane_Target{id}, name, .Automatic_Title) != .Saved {
 		result.status, result.message = .Failed, "the pane opened but could not be named"
 	}
 	return result

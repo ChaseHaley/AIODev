@@ -100,7 +100,7 @@ pane_header_draw :: proc(
 	icon := content_icon(pane.content.kind)
 	if entry != nil {
 		// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
-		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
+		title = session_display_title(entry)
 		directory = entry.header.directory
 		result: render.Build_Status
 		icon, icon_atlas, result = pane_icon(app, entry, ui.ICON_BUTTON * w.scale)
@@ -142,7 +142,7 @@ pane_header_draw :: proc(
 		title,
 		directory,
 		icon,
-		w.focused && pane.node == w.tree.focus,
+		w.focused && pane.node == window_tree(w).focus,
 		controls,
 		pane_view_current(w) == .Zoom,
 		w.pane_fill == .Content,
@@ -180,6 +180,29 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Layo
 	documents := CONTENT_POLICY[pane.content.kind].documents
 	if w.header_height == 0 && !pane.floating {return ui.split_overlay_layout(area, w.scale, documents)}
 	return ui.header_layout(area, w.scale, documents, pane.floating)
+}
+
+// Where a pane's document menu hangs from: under its Documents button, or inside its corner without one.
+// A split pane with headers off shows no controls, so its menu sits in the corner the header would use.
+pane_header_document_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> [2]f32 {
+	r := pane.rect
+	s := w.scale
+	width := ui.MENU_WIDTH * s
+	if w.header_height == 0 && !pane.floating && !pane_single_tiled(w) {
+		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.SPACE_2 * s}
+	}
+	button := pane_header_layout(w, pane).buttons[int(ui.Header_Action.Documents) - 1]
+	if button.width == 0 {
+		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.HEADER_HEIGHT * s + ui.SPACE_1 * s}
+	}
+	return {button.x + button.width - width, button.y + button.height + ui.SPACE_1 * s}
+}
+
+// One tiled pane alone, which shows split controls while headers are off. Floating panes follow
+// the tiled ones.
+@(private)
+pane_single_tiled :: proc(w: ^Window) -> bool {
+	return len(w.panes) > 0 && !w.panes[0].floating && (len(w.panes) == 1 || w.panes[1].floating)
 }
 
 pane_header_cancel :: proc(w: ^Window) {
@@ -297,8 +320,7 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.H
 // Shows a single pane's split controls while the pointer is within the top band of its card.
 split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
 	shown := false
-	// Floating panes follow the tiled ones and never take the single pane's controls.
-	single := len(w.panes) > 0 && !w.panes[0].floating && (len(w.panes) == 1 || w.panes[1].floating)
+	single := pane_single_tiled(w)
 	if enabled && w.header_height == 0 && single {
 		r := w.panes[0].rect
 		top, found := layout.hit_test(w.panes[:], x, y)

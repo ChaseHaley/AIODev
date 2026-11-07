@@ -341,7 +341,6 @@ editor_draft :: proc(p: ^Editor) -> bool {
 // in `value` until it is saved.
 Editor :: struct {
 	profile_menu: Menu,
-	profile_menu_controls: [4]Profile_Control,
 	profile_menu_parts: Profile_Parts,
 	process_expanded, process_next, process_next_program, process_fallback: int,
 	process_source: string,

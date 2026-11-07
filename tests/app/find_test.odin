@@ -39,7 +39,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	workspace: app.Workspace
 	append(&workspace.tabs, &tabs[0], &tabs[1])
 	defer delete(workspace.tabs)
-	w := app.Window{id = 138, workspace = &workspace, tree = &tabs[0].tree,
+	w := app.Window{id = 138, workspace = &workspace,
 		width = 1000, height = 600, scale = 1,
 		rail_wide = true, rail = app.Rail_Docked{}}
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
@@ -79,8 +79,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	testing.expect_value(t, workspace.selected, 1)
 	testing.expect(t, !ui.armed_down(w.find.armed))
 	layout_state, _ := app.rail_current_layout(&w)
-	row_index := app.rail_row_index_for_tab(w.rail_rows[:], &workspace, workspace.selected)
-	close := ui.rail_close_rect(layout_state, row_index, w.scale)
+	close := ui.rail_close_rect(layout_state, workspace.selected, w.scale)
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x+close.width/2), y = i32(close.y+close.height/2)})
 	if !testing.expect_value(t, ui.armed_target(w.tab_close_armed), workspace.selected) { return }
@@ -89,9 +88,10 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(workspace.tabs), 2)
 	// Keep the divider regression independent when running against the known broken dispatcher.
 	ui.armed_cancel(&w.tab_close_armed)
-	_, split_error := layout.split(w.tree, w.tree.focus, .Horizontal, 0.5, {.Terminal, 140})
+	shown := app.window_tree(&w)
+	_, split_error := layout.split(shown, shown.focus, .Horizontal, 0.5, {.Terminal, 140})
 	if !testing.expect_value(t, split_error, nil) { return }
-	layout.dividers(w.tree, app.window_content_area(&state, &w), app.window_gap(&state, &w), &w.dividers)
+	layout.dividers(shown, app.window_content_area(&state, &w), app.window_gap(&state, &w), &w.dividers)
 	if !testing.expect_value(t, len(w.dividers), 1) { return }
 	d := w.dividers[0].rect
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
@@ -129,12 +129,13 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
+	tab: app.Tab
+	if !testing.expect_value(t, layout.init(&tab.tree, {.Terminal, 138}), nil) { return }
+	defer layout.destroy(&tab.tree)
 	workspace: app.Workspace
-	tree: layout.Layout
-	if !testing.expect_value(t, layout.init(&tree, {.Terminal, 138}), nil) { return }
-	defer layout.destroy(&tree)
-	w := app.Window{id = 138, workspace = &workspace, tree = &tree, width = 1000, height = 600,
-		scale = 1}
+	append(&workspace.tabs, &tab)
+	defer delete(workspace.tabs)
+	w := app.Window{id = 138, workspace = &workspace, width = 1000, height = 600, scale = 1}
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
 	ui.find_init(&w.find)
 	defer ui.find_destroy(&w.find)
@@ -144,10 +145,13 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	append(&state.sessions, app.Session_Entry{id = 138, session = session})
 	defer delete(state.sessions)
 	append(&state.sessions, app.Session_Entry{id = 139, session = other})
-	other_tree: layout.Layout
-	if !testing.expect_value(t, layout.init(&other_tree, {.Terminal, 139}), nil) { return }
-	defer layout.destroy(&other_tree)
-	other_window := app.Window{id = 139, workspace = &workspace, tree = &other_tree}
+	other_tab: app.Tab
+	if !testing.expect_value(t, layout.init(&other_tab.tree, {.Terminal, 139}), nil) { return }
+	defer layout.destroy(&other_tab.tree)
+	other_workspace: app.Workspace
+	append(&other_workspace.tabs, &other_tab)
+	defer delete(other_workspace.tabs)
+	other_window := app.Window{id = 139, workspace = &other_workspace}
 	ui.find_init(&other_window.find)
 	defer ui.find_destroy(&other_window.find)
 	ui.find_open(&other_window.find)
@@ -251,11 +255,13 @@ find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T)
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
+	tab: app.Tab
+	if !testing.expect_value(t, layout.init(&tab.tree, {.Terminal, 140}), nil) { return }
+	defer layout.destroy(&tab.tree)
 	workspace: app.Workspace
-	tree: layout.Layout
-	if !testing.expect_value(t, layout.init(&tree, {.Terminal, 140}), nil) { return }
-	defer layout.destroy(&tree)
-	w := app.Window{id = 140, workspace = &workspace, tree = &tree, width = 1000, height = 600, scale = 1}
+	append(&workspace.tabs, &tab)
+	defer delete(workspace.tabs)
+	w := app.Window{id = 140, workspace = &workspace, width = 1000, height = 600, scale = 1}
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
 	ui.find_init(&w.find)
 	defer ui.find_destroy(&w.find)

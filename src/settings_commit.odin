@@ -108,6 +108,26 @@ settings_save_value :: proc(app: ^App, key, value, failure: string) -> (saved, h
 	return true, true
 }
 
+settings_toggle_bool :: proc(app: ^App, key: string, target: ^bool) {
+	value := target^ ? "false" : "true"
+	if _, has_file := settings_save_value(app, key, value, "Could not save the setting."); has_file {return}
+	target^ = !target^
+	for window in app.windows {window_apply_settings(app, window)}
+	status_apply_settings(app)
+}
+
+toggle_tab_orientation :: proc(app: ^App) {
+	next := app.settings.tabs.orientation == .Horizontal ? "vertical" : "horizontal"
+	if _, has_file := settings_save_value(app, "tabs.orientation", next, "Could not save the tab orientation.");
+	   !has_file {
+		app.settings.tabs.orientation = next == "horizontal" ? .Horizontal : .Vertical
+		for window in app.windows {
+			window_apply_settings(app, window)
+			rail_reveal_active(window)
+		}
+	}
+}
+
 // Shows a new revision on every open settings page. It also ends any Delete Theme prompt, since the
 // revision may have changed the theme the prompt named.
 @(private)

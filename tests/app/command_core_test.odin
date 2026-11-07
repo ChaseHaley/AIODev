@@ -60,7 +60,7 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	split_pane := split.pane
 	testing.expect_value(t, app.tab_pane_count(workspace.tabs[1]), 2)
 	testing.expect_value(t, workspace.selected, 0)
-	testing.expect(t, w.tree == &workspace.tabs[0].tree)
+	testing.expect(t, app.window_tree(w) == &workspace.tabs[0].tree)
 
 	// Text reaches the pane's shell, which learns its own id from AIODEV_PANE.
 	id := strings.clone(fmt.tprintf("%d", split_pane))
@@ -93,9 +93,10 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	// A command without a targeted form focuses its target first.
 	testing.expect_value(t, invoke(&state, first, "pane.zoom", "--pane", id).status, commands.Status.Ok)
 	testing.expect_value(t, workspace.selected, 1)
-	focused := w.tree.nodes[w.tree.focus].(layout.Pane)
+	shown := app.window_tree(w)
+	focused := shown.nodes[shown.focus].(layout.Pane)
 	testing.expect_value(t, focused.content.id, split_pane)
-	testing.expect(t, w.tree.zoomed)
+	testing.expect(t, shown.zoomed)
 
 	// A targeted minimize command restores a minimized float instead of focusing and hiding it again.
 	floating := invoke(&state, first, "pane.new_floating", "--pane", id)
@@ -105,18 +106,18 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t, invoke(&state, first, "pane.minimize_floating", "--pane", float_id).status, commands.Status.Ok,
 	)
-	float_node := layout.find_content(w.tree, {.Terminal, floating.pane})
-	float_state, float_ok := layout.float_of(w.tree, float_node)
+	float_node := layout.find_content(shown, {.Terminal, floating.pane})
+	float_state, float_ok := layout.float_of(shown, float_node)
 	testing.expect(t, float_ok && float_state.minimized)
 	testing.expect_value(
 		t, invoke(&state, first, "pane.minimize_floating", "--pane", float_id).status, commands.Status.Ok,
 	)
-	float_state, float_ok = layout.float_of(w.tree, float_node)
+	float_state, float_ok = layout.float_of(shown, float_node)
 	testing.expect(t, float_ok && !float_state.minimized)
 	float_split := invoke(&state, first, "pane.split", "--pane", float_id, "--direction", "right")
 	testing.expect_value(t, float_split.status, commands.Status.Ok)
-	float_split_node := layout.find_content(w.tree, {.Terminal, float_split.pane})
-	testing.expect_value(t, layout.float_root(w.tree, float_split_node), layout.float_root(w.tree, float_node))
+	float_split_node := layout.find_content(shown, {.Terminal, float_split.pane})
+	testing.expect_value(t, layout.float_root(shown, float_split_node), layout.float_root(shown, float_node))
 	float_split_id := strings.clone(fmt.tprintf("%d", float_split.pane))
 	defer delete(float_split_id)
 	testing.expect_value(

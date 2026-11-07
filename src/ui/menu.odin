@@ -8,7 +8,9 @@ MENU_WIDTH :: f32(280)
 MENU_ROW_HEIGHT :: HEIGHT_STANDARD
 // A hairline with SPACE_1 above and below.
 MENU_SEPARATOR_HEIGHT :: 2 * SPACE_1 + 1
-MENU_MAX_ITEMS :: 64
+// Enough for the longest owner: a profile menu's settings.PROFILE_LIMIT profiles and its separator,
+// Settings and Command Palette rows.
+MENU_MAX_ITEMS :: 72
 
 Menu_Item :: struct {
 	label, shortcut, icon: string,
@@ -24,6 +26,8 @@ Menu_Item :: struct {
 	selected_action:       Maybe(Icon),
 	// The label is an error.
 	danger:                bool,
+	// The owner's key for what choosing the row does; the menu only carries it.
+	payload:               u32,
 }
 
 Menu_Row_Part :: enum {
@@ -61,11 +65,12 @@ menu_clear :: proc(m: ^Menu) {
 	m.scroll = 0
 }
 
-menu_add :: proc(m: ^Menu, item: Menu_Item) -> runtime.Allocator_Error {
-	if len(m.items) >= MENU_MAX_ITEMS {return nil}
-	_, err := append(&m.items, item)
-	if err == nil && len(m.items) == 1 {menu_select(m, 0)}
-	return err
+// Added is false when the menu already holds MENU_MAX_ITEMS rows; the error is the append's.
+menu_add :: proc(m: ^Menu, item: Menu_Item) -> (added: bool, error: runtime.Allocator_Error) {
+	if len(m.items) >= MENU_MAX_ITEMS {return false, nil}
+	if _, error = append(&m.items, item); error != nil {return false, error}
+	if len(m.items) == 1 {menu_select(m, 0)}
+	return true, nil
 }
 
 // The row, or -1 for no selection at the row-index interface.

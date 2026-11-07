@@ -119,7 +119,7 @@ pending_close_workspace_subject_recounts_and_deletes :: proc(t: ^testing.T) {
 	testing.expect_value(t, text.body, "Close 2 tabs (3 panes); stop 3 sessions.")
 	testing.expect_value(t, text.label, "Delete")
 	testing.expect_value(t, text.note, "Replace it with a fresh default workspace and shell.")
-	if !testing.expect(t, app.tab_create(state, target)) { return }
+	if _, created := app.tab_create(state, target); !testing.expect(t, created) { return }
 	text = app.pending_close_text(state, pc, true, w.workspace)
 	testing.expect_value(t, text.body, "Close 3 tabs (4 panes); stop 4 sessions.")
 	app.confirmation_finish(state, w, false)

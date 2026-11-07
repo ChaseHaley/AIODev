@@ -203,8 +203,9 @@ floating_header_at :: proc(
 	group, frame, found := floating_frame_at(w, x, y)
 	if !found {return layout.INVALID_NODE, .None, false}
 	radius := window_pane_radius(app, w)
+	tree := window_tree(w)
 	for pane in floating_rects(w) {
-		if layout.float_root(w.tree, pane.node) != group {continue}
+		if layout.float_root(tree, pane.node) != group {continue}
 		if rounded_contains(pane.rect, radius, x, y) {return layout.INVALID_NODE, .None, false}
 	}
 	for button, i in floating_header_buttons(w, frame) {
@@ -217,7 +218,7 @@ floating_header_at :: proc(
 // the title bar's colour and behaves as one flat control: the shared hover fill, pointer gloss and pressed
 // fill without lifting, over the whole frame, with its handle and buttons in the strip at the top.
 floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
-	frame, found := layout.float_rect(w.tree, root, floating_area(w))
+	frame, found := layout.float_rect(window_tree(w), root, floating_area(w))
 	if !found {return}
 	s := w.scale
 	radius := window_pane_radius(app, w)
@@ -281,7 +282,7 @@ floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 // Closes every pane of a float, each as a close Reopen Closed can undo.
 floating_close :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 	contents := make([dynamic]layout.Content, context.temp_allocator)
-	layout.contents(w.tree, root, &contents)
+	layout.contents(window_tree(w), root, &contents)
 	workspace, tab := w.workspace, w.workspace.selected
 	for content in contents {
 		node := layout.find_content(&workspace.tabs[tab].tree, content)
@@ -291,18 +292,19 @@ floating_close :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 
 @(private)
 floating_header_fire :: proc(app: ^App, w: ^Window, content: layout.Content, action: Float_Header_Action) {
-	node := layout.find_content(w.tree, content)
-	if !layout.is_floating(w.tree, node) {return}
+	tree := window_tree(w)
+	node := layout.find_content(tree, content)
+	if !layout.is_floating(tree, node) {return}
 	switch action {
 	case .None, .Move:
 	case .Minimize:
 		floating_minimize(app, w, node)
 	case .Dock:
-		if !layout.set_floating(w.tree, node, false) {return}
+		if !layout.set_floating(tree, node, false) {return}
 		window_relayout(app, w)
 		layout_state_touch(app)
 	case .Close:
-		floating_close(app, w, layout.float_root(w.tree, node))
+		floating_close(app, w, layout.float_root(tree, node))
 	}
 }
 
@@ -336,8 +338,8 @@ floating_open :: proc(
 	bool,
 ) {
 	if tab_index < 0 || tab_index >= len(workspace.tabs) {return 0, false}
-	if !session_open(app, launch.command, launch.directory, launch.profile) {return 0, false}
-	id := app.next_session_id
+	id, opened := session_open(app, launch.command, launch.directory, launch.profile)
+	if !opened {return 0, false}
 	if !floating_attach(app, w, workspace, tab_index, {.Terminal, id}, focus) {
 		session_close(app, id)
 		return 0, false
@@ -385,10 +387,11 @@ floating_new :: proc(app: ^App, w: ^Window) {
 // Float or Dock Pane: lifts the focused tiled pane above the others, or docks a floating one back where
 // it came from.
 floating_toggle :: proc(app: ^App, w: ^Window) {
-	node := w.tree.focus
-	if layout.is_floating(w.tree, node) {
-		if !layout.set_floating(w.tree, node, false) {return}
-	} else if !layout.set_floating(w.tree, node, true, floating_bounds_new(w, w.tree)) {
+	tree := window_tree(w)
+	node := tree.focus
+	if layout.is_floating(tree, node) {
+		if !layout.set_floating(tree, node, false) {return}
+	} else if !layout.set_floating(tree, node, true, floating_bounds_new(w, tree)) {
 		notify(app, .Info, "The tab keeps one tiled pane; split it before floating this one.")
 		return
 	}
@@ -398,11 +401,12 @@ floating_toggle :: proc(app: ^App, w: ^Window) {
 
 // Minimizes the focused floating group, or brings back the group minimized last.
 floating_minimize_toggle :: proc(app: ^App, w: ^Window) {
-	if layout.is_floating(w.tree, w.tree.focus) {
-		floating_minimize(app, w, w.tree.focus)
+	tree := window_tree(w)
+	if layout.is_floating(tree, tree.focus) {
+		floating_minimize(app, w, tree.focus)
 		return
 	}
-	node := layout.float_latest(w.tree, true)
+	node := layout.float_latest(tree, true)
 	if node == layout.INVALID_NODE {
 		notify(app, .Info, "No float in this tab is minimized.")
 		return
@@ -412,19 +416,20 @@ floating_minimize_toggle :: proc(app: ^App, w: ^Window) {
 
 // Minimizes every shown floating group, or when none is shown, brings every minimized one back.
 floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
-	shown, minimized := layout.float_counts(w.tree)
+	tree := window_tree(w)
+	shown, minimized := layout.float_counts(tree)
 	if shown == 0 && minimized == 0 {
 		notify(app, .Info, "This tab has no floats.")
 		return
 	}
-	focused := layout.is_floating(w.tree, w.tree.focus)
+	focused := layout.is_floating(tree, tree.focus)
 	if focused {focus_leave(app, w)}
-	for _, i in w.tree.nodes {
+	for _, i in tree.nodes {
 		root := layout.Node_Id(i)
-		if layout.float_is_root(w.tree, root) {_ = layout.float_minimize(w.tree, root, shown > 0)}
+		if layout.float_is_root(tree, root) {_ = layout.float_minimize(tree, root, shown > 0)}
 	}
 	if shown == 0 {
-		latest := layout.float_latest(w.tree, false)
+		latest := layout.float_latest(tree, false)
 		if latest != layout.INVALID_NODE {pane_focus(app, w, latest)}
 	}
 	window_floats_layout(app, w)
@@ -433,9 +438,10 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 }
 
 floating_minimize :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
-	focused := layout.float_root(w.tree, w.tree.focus) == layout.float_root(w.tree, node)
+	tree := window_tree(w)
+	focused := layout.float_root(tree, tree.focus) == layout.float_root(tree, node)
 	if focused {focus_leave(app, w)}
-	if !layout.float_minimize(w.tree, node, true) {return}
+	if !layout.float_minimize(tree, node, true) {return}
 	window_floats_layout(app, w)
 	if focused {focus_enter(app, w)}
 	layout_state_touch(app)
@@ -456,11 +462,12 @@ window_tiled_rects :: proc(w: ^Window) -> []layout.Pane_Rect {
 // The topmost floating group whose frame contains the point.
 floating_frame_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, rect: layout.Rect, ok: bool) {
 	last := layout.INVALID_NODE
+	tree := window_tree(w)
 	#reverse for candidate in floating_rects(w) {
-		group := layout.float_root(w.tree, candidate.node)
+		group := layout.float_root(tree, candidate.node)
 		if group == last {continue}
 		last = group
-		frame, found := layout.float_rect(w.tree, group, floating_area(w))
+		frame, found := layout.float_rect(tree, group, floating_area(w))
 		if found && x >= frame.x && x < frame.x + frame.width &&
 		   y >= frame.y && y < frame.y + frame.height {return group, frame, true}
 	}
@@ -471,11 +478,12 @@ floating_frame_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, rect:
 floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edges: Float_Edges, ok: bool) {
 	band := FLOAT_EDGE * w.scale / 2
 	last := layout.INVALID_NODE
+	tree := window_tree(w)
 	#reverse for candidate in floating_rects(w) {
-		group := layout.float_root(w.tree, candidate.node)
+		group := layout.float_root(tree, candidate.node)
 		if group == last {continue}
 		last = group
-		r, found := layout.float_rect(w.tree, group, floating_area(w))
+		r, found := layout.float_rect(tree, group, floating_area(w))
 		if !found ||
 		   x < r.x - band || x >= r.x + r.width + band ||
 		   y < r.y - band || y >= r.y + r.height + band {continue}
@@ -501,7 +509,7 @@ floating_covers :: proc(w: ^Window, x, y: f32) -> bool {
 // Where a move or resize of the float holding the pane begins; false when the pane no longer floats.
 @(private)
 floating_grab :: proc(w: ^Window, pane: layout.Pane_Rect, x, y: f32) -> (Float_Grab, bool) {
-	rect, found := layout.float_rect(w.tree, pane.node, floating_area(w))
+	rect, found := layout.float_rect(window_tree(w), pane.node, floating_area(w))
 	return {content = pane.content, start = {x, y}, rect = rect}, found
 }
 
@@ -556,13 +564,14 @@ floating_drag_follow :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	case:
 		return false
 	}
-	node := layout.find_content(w.tree, grab.content)
-	if !layout.is_floating(w.tree, node) {w.float_press = nil; return false}
+	tree := window_tree(w)
+	node := layout.find_content(tree, grab.content)
+	if !layout.is_floating(tree, node) {w.float_press = nil; return false}
 	area := floating_area(w)
 	if area.width <= 0 || area.height <= 0 {return true}
 	r := floating_drag_rect(area, grab.rect, {x - grab.start.x, y - grab.start.y}, edges, w.scale)
 	bounds := floating_bounds_for_rect(area, r)
-	if layout.float_set_bounds(w.tree, node, bounds) {window_floats_layout(app, w)}
+	if layout.float_set_bounds(tree, node, bounds) {window_floats_layout(app, w)}
 	return true
 }
 
@@ -627,20 +636,21 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	clear(&w.float_capsules)
 	clear(&w.float_capsule_widths)
 	w.float_capsule_group = {}
-	if w.tree == nil || window_linked(w) {return}
+	tree := window_tree(w)
+	if tree == nil || window_linked(w) {return}
 	s := w.scale
-	for _, i in w.tree.nodes {
+	for _, i in tree.nodes {
 		root := layout.Node_Id(i)
-		if !layout.float_is_root(w.tree, root) {continue}
-		floating, ok := layout.float_of(w.tree, root)
+		if !layout.float_is_root(tree, root) {continue}
+		floating, ok := layout.float_of(tree, root)
 		if !ok || !floating.minimized {continue}
-		pane_id := layout.float_pane(w.tree, root)
+		pane_id := layout.float_pane(tree, root)
 		if pane_id == layout.INVALID_NODE {continue}
-		pane := w.tree.nodes[pane_id].(layout.Pane) or_continue
+		pane := tree.nodes[pane_id].(layout.Pane) or_continue
 		capsule := Float_Capsule {
 			root = root,
 			content = pane.content,
-			order = layout.float_order(w.tree, root),
+			order = layout.float_order(tree, root),
 		}
 		if _, err := append(&w.float_capsules, capsule); err != nil {
 			clear(&w.float_capsules)
@@ -741,7 +751,7 @@ floating_capsules_follow :: proc(w: ^Window, x, y: f32) -> bool {
 
 floating_title :: proc(app: ^App, content: layout.Content) -> string {
 	if entry := workspace_session_for_content(app, content); entry != nil {
-		return entry.name != "" ? entry.name : pane_header_title(&entry.header)
+		return session_display_title(entry)
 	}
 	return content_title(app, content)
 }
@@ -860,12 +870,13 @@ floating_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if !edge {
 		root, action, header := floating_header_at(app, w, x, y)
 		if !header {return}
-		node := w.tree.focus
-		if layout.float_root(w.tree, node) != root {node = layout.float_pane(w.tree, root)}
+		tree := window_tree(w)
+		node := tree.focus
+		if layout.float_root(tree, node) != root {node = layout.float_pane(tree, root)}
 		w.dirty = true
 		if action != .Move {
 			// A button fires on release over itself, like every other control.
-			w.float_press = Float_Button_Press{w.tree.nodes[node].(layout.Pane).content, action}
+			w.float_press = Float_Button_Press{tree.nodes[node].(layout.Pane).content, action}
 			return
 		}
 		pane_focus(app, w, node)
@@ -896,7 +907,8 @@ floating_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> 
 		pane_header_cancel(w)
 	case Float_Button_Press:
 		under := Float_Header_Action.None
-		target := layout.float_root(w.tree, layout.find_content(w.tree, p.content))
+		tree := window_tree(w)
+		target := layout.float_root(tree, layout.find_content(tree, p.content))
 		if root, action, over := floating_header_at(app, w, x, y); over && root == target {under = action}
 		w.float_press = nil
 		w.dirty = true
@@ -910,7 +922,7 @@ floating_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> 
 		if !armed {return true}
 		w.dirty = true
 		if capsule, found := floating_capsule_at(w, x, y).?; found && capsule.content == pressed {
-			pane_focus(app, w, layout.find_content(w.tree, pressed))
+			pane_focus(app, w, layout.find_content(window_tree(w), pressed))
 			layout_state_touch(app)
 		}
 	}

@@ -11,11 +11,11 @@ editor_profile_menu_open :: proc(p: ^Editor, row: ^Editor_Row, parts: Profile_Pa
 	}
 	for item in controls {
 		if !item.hidden {continue}
-		index := len(p.profile_menu.items)
-		if menu_add(&p.profile_menu, {label = item.label, enabled = true, checked = item.checked}) != nil {
-			return
-		}
-		p.profile_menu_controls[index] = item.control
+		added, err := menu_add(
+			&p.profile_menu,
+			{label = item.label, enabled = true, checked = item.checked, payload = u32(item.control)},
+		)
+		if err != nil || !added {return}
 	}
 	menu_anchor(&p.profile_menu, parts.more.x, parts.more.y + parts.more.height)
 	next: Editor_Mode = Editor_Editing{}
@@ -30,6 +30,6 @@ editor_profile_menu_choose :: proc(p: ^Editor) -> Editor_Outcome {
 	if index < 0 || index >= len(p.profile_menu.items) {return .Changed}
 	row := editor_row(p)
 	if row == nil || row.kind != .Profile {return .Changed}
-	p.profile_control = p.profile_menu_controls[index]
+	p.profile_control = Profile_Control(p.profile_menu.items[index].payload)
 	return profile_activate(p, row)
 }

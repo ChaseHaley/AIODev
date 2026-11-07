@@ -118,10 +118,8 @@ when app.AIO_CONTROL {
 		defer delete(first_workspace.tabs)
 		append(&second_workspace.tabs, &second_tab)
 		defer delete(second_workspace.tabs)
-		first := app.Window{id = first_id, workspace = &first_workspace, tree = &first_tab.tree,
-			focused = true, width = 160, height = 100}
-		second := app.Window{id = second_id, workspace = &second_workspace, tree = &second_tab.tree,
-			width = 240, height = 140}
+		first := app.Window{id = first_id, workspace = &first_workspace, focused = true, width = 160, height = 100}
+		second := app.Window{id = second_id, workspace = &second_workspace, width = 240, height = 140}
 		append(&state.windows, &first, &second)
 		defer delete(state.windows)
 		append(&state.workspaces, &first_workspace, &second_workspace)

@@ -1,5 +1,7 @@
 package main
 
+import "aio:font"
+import "aio:settings"
 import "aio:ui"
 import "core:strings"
 
@@ -56,4 +58,25 @@ settings_reveal_page :: proc(app: ^App, p: ^ui.Editor, reveal: Settings_Reveal) 
 		if row := ui.editor_row(p); row != nil && row.kind != .Shortcut {ui.editor_focus_row(p)}
 	}
 	if reveal.message != "" {ui.editor_message(p, reveal.message, false)}
+}
+
+// The palette's view of a setting's current value; a theme also shows its display name.
+@(private)
+palette_setting_value :: proc(user: rawptr, key: string) -> (value, label: string) {
+	app := cast(^App)user
+	entry := settings.schema_find(key)
+	if entry == nil {return}
+	value = settings.value_text(&app.settings, entry^)
+	if entry.live_choices == .Themes {label = settings.theme_display_name(&app.settings, value)}
+	return
+}
+
+@(private)
+palette_setting_choices :: proc(user: rawptr, key: string) -> (choices, labels: []string) {
+	app := cast(^App)user
+	entry := settings.schema_find(key)
+	if entry == nil {return}
+	fonts, _ := font.installed_families(app.fonts)
+	choices, labels, _ = setting_live_choices(&app.settings, fonts, entry.live_choices)
+	return
 }

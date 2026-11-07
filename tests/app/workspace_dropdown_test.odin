@@ -104,11 +104,16 @@ workspace_navigation_wraps_actions_and_consumes_closing_key_release :: proc(t: ^
 	defer app.workspace_destroy(workspace)
 	w.workspace = workspace
 	w.overlay = app.Overlay_Tab_Menu{tab = 1}
-	w.tab_menu.count = 3
+	defer app.tab_menu_destroy(&w.tab_menu)
+	for _ in 0 ..< 3 {
+		row := ui.Menu_Item{label = "Command Palette", payload = u32(app.Action.Command_Palette)}
+		added, err := ui.menu_add(&w.tab_menu.menu, row)
+		testing.expect(t, added && err == nil)
+	}
 	app.handle_event(&state, input.Key_Event{window = w.id, key = .P, modifiers = {.Control}, pressed = true})
-	testing.expect_value(t, w.tab_menu.selected, 2)
+	testing.expect_value(t, ui.menu_selected(&w.tab_menu.menu), 2)
 	app.handle_event(&state, input.Key_Event{window = w.id, key = .N, modifiers = {.Control}, pressed = true})
-	testing.expect_value(t, w.tab_menu.selected, 0)
+	testing.expect_value(t, ui.menu_selected(&w.tab_menu.menu), 0)
 	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = false})
 	testing.expect(t, app.tab_menu_shown(&w))
 }

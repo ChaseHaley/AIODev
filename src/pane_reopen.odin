@@ -171,24 +171,8 @@ closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Close
 		return
 	}
 	if !closed_fits(app, w, &tab.tree, target, record) {return}
-	if !layout_session_restore(app, &record.tab.nodes[0]) {
-		notify(app, .Error, "Could not reopen the pane.")
-		return
-	}
-	id := app.next_session_id
-	added, err := layout.insert_beside(
-		&tab.tree,
-		target,
-		record.axis,
-		record.before,
-		record.share,
-		{.Terminal, id},
-	)
-	if err != nil {
-		session_close(app, id)
-		notify(app, .Error, "Could not reopen the pane.")
-		return
-	}
+	added, placed := closed_pane_restore(app, &tab.tree, target, record)
+	if !placed {return}
 	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
 	pane_focus(app, w, added)
 	tab_update_title(app, tab)
@@ -197,19 +181,10 @@ closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Close
 
 @(private)
 closed_reopen_floating :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Closed_Record) {
-	if !layout_session_restore(app, &record.tab.nodes[0]) {
-		notify(app, .Error, "Could not reopen the pane.")
-		return
-	}
-	id := app.next_session_id
 	tab := w.workspace.tabs[tab_index]
 	bounds := layout_float_decode(record.float[0]).bounds
-	node, err := layout.float_new(&tab.tree, {.Terminal, id}, bounds)
-	if err != nil {
-		session_close(app, id)
-		notify(app, .Error, "Could not reopen the pane.")
-		return
-	}
+	node, placed := closed_pane_restore(app, &tab.tree, bounds, record)
+	if !placed {return}
 	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
 	pane_focus(app, w, node)
 	tab_update_title(app, tab)
@@ -231,27 +206,12 @@ closed_reopen_linked :: proc(
 	linked := pane_link_window_of(app, group[0])
 	if linked == nil {return}
 	pane_link_reconcile(app, linked)
-	target := layout.find_group(linked.tree, group[:])
-	if target == layout.INVALID_NODE {target = layout.find_content(linked.tree, group[0])}
-	if !closed_fits(app, linked, linked.tree, target, record) {return}
-	if !layout_session_restore(app, &record.tab.nodes[0]) {
-		notify(app, .Error, "Could not reopen the pane.")
-		return
-	}
-	id := app.next_session_id
-	added, err := layout.insert_beside(
-		linked.tree,
-		target,
-		record.axis,
-		record.before,
-		record.share,
-		{.Terminal, id},
-	)
-	if err != nil {
-		session_close(app, id)
-		notify(app, .Error, "Could not reopen the pane.")
-		return
-	}
+	shown := window_tree(linked)
+	target := layout.find_group(shown, group[:])
+	if target == layout.INVALID_NODE {target = layout.find_content(shown, group[0])}
+	if !closed_fits(app, linked, shown, target, record) {return}
+	added, placed := closed_pane_restore(app, shown, target, record)
+	if !placed {return}
 	pane_link_store(app, linked)
 	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
 	pane_focus(app, linked, added)
@@ -271,14 +231,55 @@ closed_fits :: proc(
 	trial, copy_error := layout.clone(tree, context.temp_allocator)
 	if copy_error != nil {notify(app, .Error, "Could not check the reopened pane's size."); return false}
 	defer layout.destroy(&trial)
-	added, err := layout.insert_beside(
-		&trial,
-		target,
-		record.axis,
-		record.before,
-		record.share,
-		{.Terminal, app.next_session_id + 1},
-	)
-	if err != nil {notify(app, .Error, "Could not check the reopened pane's size."); return false}
+	added, placed := closed_place(&trial, target, record, PANE_MEASUREMENT_CONTENT)
+	if !placed {notify(app, .Error, "Could not check the reopened pane's size."); return false}
 	return pane_trial_evaluate(app, w, tree, &trial, added, true).error == .None
+}
+
+// Where a reopened pane goes in its tree: beside a tiled pane, or floating within its saved bounds.
+@(private)
+Closed_Place :: union {
+	layout.Node_Id,
+	layout.Rect,
+}
+
+// Opens the closed pane's session and places it, closing the session again when it cannot be placed.
+// Tiled, floating and linked reopening differ only in where it goes and what they refresh afterwards.
+@(private, require_results)
+closed_pane_restore :: proc(
+	app: ^App,
+	tree: ^layout.Layout,
+	place: Closed_Place,
+	record: ^Closed_Record,
+) -> (
+	layout.Node_Id,
+	bool,
+) {
+	if id, restored := layout_session_restore(app, &record.tab.nodes[0]); restored {
+		if node, placed := closed_place(tree, place, record, {.Terminal, id}); placed {return node, true}
+		session_close(app, id)
+	}
+	notify(app, .Error, "Could not reopen the pane.")
+	return layout.INVALID_NODE, false
+}
+
+@(private, require_results)
+closed_place :: proc(
+	tree: ^layout.Layout,
+	place: Closed_Place,
+	record: ^Closed_Record,
+	content: layout.Content,
+) -> (
+	layout.Node_Id,
+	bool,
+) {
+	switch at in place {
+	case layout.Node_Id:
+		node, err := layout.insert_beside(tree, at, record.axis, record.before, record.share, content)
+		return node, err == nil
+	case layout.Rect:
+		node, err := layout.float_new(tree, content, at)
+		return node, err == nil
+	}
+	return layout.INVALID_NODE, false
 }

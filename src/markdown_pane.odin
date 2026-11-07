@@ -303,8 +303,8 @@ markdown_new_tab :: proc(
 	content: layout.Content,
 	focus: bool,
 ) -> bool {
-	tab, record_error := tab_record_reserve(workspace)
-	if record_error != .None {return false}
+	tab, reserved := tab_record_reserve(workspace)
+	if !reserved {return false}
 	if layout.init(&tab.tree, content) != nil {
 		tab_record_free(tab)
 		return false
@@ -375,7 +375,7 @@ markdown_open_focused :: proc(app: ^App, w: ^Window, path: string) {
 	workspace := acting.workspace
 	floating := app.settings.pane.markdown_floating
 	if !markdown_open_at(
-		app, acting, workspace, workspace.selected, acting.tree.focus, path, floating = floating,
+		app, acting, workspace, workspace.selected, window_tree(acting).focus, path, floating = floating,
 	) {
 		notify(app, .Error, "Could not open the file.")
 	}
@@ -431,15 +431,17 @@ control_markdown_open :: proc(
 // The window's focused pane when it shows Markdown.
 @(require_results)
 markdown_focused :: proc(app: ^App, w: ^Window) -> ^Markdown_Pane {
-	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return nil}
-	pane, ok := w.tree.nodes[w.tree.focus].(layout.Pane)
+	tree := window_tree(w)
+	if tree == nil || tree.focus == layout.INVALID_NODE {return nil}
+	pane, ok := tree.nodes[tree.focus].(layout.Pane)
 	if !ok || pane.content.kind != .Markdown {return nil}
 	return markdown_find(app, pane.content.id)
 }
 
 markdown_active :: proc(w: ^Window) -> bool {
-	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return false}
-	pane, ok := w.tree.nodes[w.tree.focus].(layout.Pane)
+	tree := window_tree(w)
+	if tree == nil || tree.focus == layout.INVALID_NODE {return false}
+	pane, ok := tree.nodes[tree.focus].(layout.Pane)
 	return ok && pane.content.kind == .Markdown
 }
 

@@ -17,7 +17,6 @@ import fixtures "../fixtures"
 Workspace134_Fixture :: struct {
 	state: app.App,
 	w, owner: app.Window,
-	tree: layout.Layout,
 	current, target: ^app.Workspace,
 }
 
@@ -25,13 +24,16 @@ Workspace134_Fixture :: struct {
 workspace134_init :: proc(t: ^testing.T, f: ^Workspace134_Fixture) -> bool {
 	f.current, f.target = app.workspace_create_empty(&f.state), app.workspace_create_empty(&f.state)
 	if !testing.expect(t, f.current != nil && f.target != nil) { return false }
-	testing.expect_value(t, app.rename_target_commit(&f.state, nil,
-		{app.Rename_Kind.Workspace, f.current.id}, "Workspace 1"), app.Rename_Outcome.Saved)
-	testing.expect_value(t, app.rename_target_commit(&f.state, nil,
-		{app.Rename_Kind.Workspace, f.target.id}, "Workspace 2"), app.Rename_Outcome.Saved)
-	f.tree.root, f.tree.focus = layout.INVALID_NODE, layout.INVALID_NODE
-	f.w = {id = 1, workspace = f.current, tree = &f.tree, width = 600, height = 400, scale = 1}
-	f.owner = {id = 2, workspace = f.target, tree = &f.tree}
+	testing.expect_value(t, app.rename_target_commit(&f.state, app.Rename_Workspace_Target{f.current.id},
+		"Workspace 1", .Workspace_Row), app.Rename_Outcome.Saved)
+	testing.expect_value(t, app.rename_target_commit(&f.state, app.Rename_Workspace_Target{f.target.id},
+		"Workspace 2", .Workspace_Row), app.Rename_Outcome.Saved)
+	// The current window shows an empty layout; the target stays without tabs, so it can be discarded.
+	shown := new(app.Tab)
+	shown.tree.root, shown.tree.focus = layout.INVALID_NODE, layout.INVALID_NODE
+	append(&f.current.tabs, shown)
+	f.w = {id = 1, workspace = f.current, width = 600, height = 400, scale = 1}
+	f.owner = {id = 2, workspace = f.target}
 	append(&f.state.windows, &f.w, &f.owner)
 	app.workspace_picker_open(&f.state, &f.w)
 	return true
@@ -46,6 +48,7 @@ workspace134_destroy :: proc(f: ^Workspace134_Fixture) {
 	delete(f.w.workspace_picker.query.bytes)
 	delete(f.w.workspace_picker.saved_query.bytes)
 	delete(f.w.rename.bytes)
+	delete(f.w.workspace_picker.rename.bytes)
 	delete(f.w.panes)
 	delete(f.w.dividers)
 	app.confirmation_clear(&f.w)
@@ -88,7 +91,7 @@ workspace133_window_action_rechecks_requester_target_and_owner :: proc(t: ^testi
 	w.workspace = f.target
 	w.workspace_picker.menu_selected = 2
 	app.workspace_row_menu_choose(s, w)
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), f.target.id)
+	testing.expect_value(t, app.workspace_picker_menu_id(&w.workspace_picker), f.target.id)
 	testing.expect(t, app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, len(s.windows), 2)
 }
@@ -112,7 +115,7 @@ workspace133_failed_open_preserves_filtered_row_and_runtime :: proc(t: ^testing.
 	testing.expect_value(t, len(s.sessions), 0)
 	testing.expect(t, w.workspace == f.current && app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "Workspace 2")
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), f.target.id)
+	testing.expect_value(t, app.workspace_picker_menu_id(&w.workspace_picker), f.target.id)
 	if testing.expect_value(t, len(s.notices.items), 1) {
 		testing.expect_value(t, s.notices.items[0].kind, ui.Notice_Kind.Error)
 	}
@@ -132,10 +135,10 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	button := app.workspace_picker_menu_button_rect(w, 1)
 	app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(button.x+16), y = i32(button.y+16)})
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), f.target.id)
+	testing.expect_value(t, app.workspace_picker_menu_id(&w.workspace_picker), f.target.id)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
 	app.workspace_picker_key(s, w, {key = .P, modifiers = {.Control}, pressed = true})
-	testing.expect_value(t, w.workspace_picker.menu_selected, len(app.WORKSPACE_ROW_ACTIONS) - 1)
+	testing.expect_value(t, w.workspace_picker.menu_selected, len(app.WORKSPACE_ROW_MENU) - 1)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = false})
 	testing.expect(t, app.confirmation_current(w) == nil)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
@@ -152,15 +155,15 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	app.workspace_picker_open(s, w)
 	app.workspace_row_menu_open(s, w, f.target.id)
 	app.workspace_picker_key(s, w, {key = .Arrow_Left, pressed = true})
-	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Menu) == 0)
+	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_menu_id(&w.workspace_picker) == 0)
 	testing.expect_value(t, w.workspace_picker.selected, 1)
 	app.workspace_picker_key(s, w, {key = .F10, modifiers = {.Shift}, pressed = true})
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), f.target.id)
+	testing.expect_value(t, app.workspace_picker_menu_id(&w.workspace_picker), f.target.id)
 	app.workspace_picker_click(s, w, 1, 1, false)
-	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Menu) == 0)
+	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_menu_id(&w.workspace_picker) == 0)
 	app.workspace_picker_key(s, w, {key = .Arrow_Right, pressed = true})
 	app.workspace_picker_key(s, w, {key = .Tab, modifiers = {.Shift}, pressed = true})
-	testing.expect_value(t, w.workspace_picker.menu_selected, len(app.WORKSPACE_ROW_ACTIONS) - 1)
+	testing.expect_value(t, w.workspace_picker.menu_selected, len(app.WORKSPACE_ROW_MENU) - 1)
 	app.workspace_picker_key(s, w, {key = .Escape, pressed = true})
 	app.workspace_picker_key(s, w, {key = .N, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.selected, 2)
@@ -176,50 +179,50 @@ workspace134_inline_rename_edits_target_cancel_invalid_and_failure :: proc(t: ^t
 	app.workspace_row_menu_open(s, w, f.target.id)
 	app.workspace_row_menu_choose(s, w)
 	testing.expect(t, !app.rename_shown(w) && app.workspace_picker_active(&w.workspace_picker))
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Rename), f.target.id)
-	testing.expect_value(t, ui.field_selected_text(&w.rename), "Workspace 2")
+	testing.expect_value(t, app.workspace_picker_rename_id(&w.workspace_picker), f.target.id)
+	testing.expect_value(t, ui.field_selected_text(&w.workspace_picker.rename), "Workspace 2")
 	app.workspace_picker_text(s, w, "  Build tools  ")
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
 	testing.expect_value(t, f.target.name, "Build tools")
 	testing.expect_value(t, f.current.name, "Workspace 1")
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Rename), u32(0))
+	testing.expect_value(t, app.workspace_picker_rename_id(&w.workspace_picker), u32(0))
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_text(s, w, "   ")
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
-	testing.expect(t, app.workspace_picker_rename_error(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == f.target.id)
+	testing.expect(t, app.workspace_picker_rename_error(&w.workspace_picker) && app.workspace_picker_rename_id(&w.workspace_picker) == f.target.id)
 	testing.expect_value(t, f.target.name, "Build tools")
-	ui.field_set(&w.rename, "Retry")
+	ui.field_set(&w.workspace_picker.rename, "Retry")
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
 	context.allocator = allocator
-	testing.expect(t, app.workspace_picker_rename_error(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == f.target.id)
+	testing.expect(t, app.workspace_picker_rename_error(&w.workspace_picker) && app.workspace_picker_rename_id(&w.workspace_picker) == f.target.id)
 	testing.expect_value(t, f.target.name, "Build tools")
 	app.workspace_picker_key(s, w, {key = .Escape, pressed = true})
-	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
+	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_rename_id(&w.workspace_picker) == 0)
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_key(s, w, {key = .Arrow_Left, pressed = true})
-	testing.expect_value(t, w.rename.cursor, 0)
+	testing.expect_value(t, w.workspace_picker.rename.cursor, 0)
 	app.workspace_picker_text(s, w, "My ")
 	app.workspace_picker_key(s, w, {key = .End, modifiers = {.Shift}, pressed = true})
-	testing.expect_value(t, ui.field_selected_text(&w.rename), "Build tools")
+	testing.expect_value(t, ui.field_selected_text(&w.workspace_picker.rename), "Build tools")
 	app.workspace_picker_key(s, w, {key = .Backspace, pressed = true})
 	app.workspace_picker_text(s, w, "project")
 	app.workspace_picker_key(s, w, {key = .Tab, pressed = true})
 	testing.expect_value(t, f.target.name, "My project")
-	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && !app.rename_shown(w))
+	testing.expect(t, app.workspace_picker_rename_id(&w.workspace_picker) == 0 && !app.rename_shown(w))
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_text(s, w, "Cancel outside")
 	app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = 599, y = 399})
-	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
+	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_rename_id(&w.workspace_picker) == 0)
 	testing.expect_value(t, f.target.name, "My project")
 	app.workspace_picker_open(s, w)
 	app.workspace_row_rename_open(s, w, f.current.id)
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Rename), f.current.id)
+	testing.expect_value(t, app.workspace_picker_rename_id(&w.workspace_picker), f.current.id)
 	app.workspace_picker_text(s, w, "Cancel blur")
 	app.handle_event(s, platform.Focus_Event{window = w.id, focused = false})
-	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
+	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_rename_id(&w.workspace_picker) == 0)
 	testing.expect_value(t, f.current.name, "Workspace 1")
 }
 
@@ -233,7 +236,7 @@ workspace134_icon_target_preserves_filter_unicode_owner_and_cancel :: proc(t: ^t
 	app.workspace_row_menu_open(s, w, f.target.id)
 	app.workspace_picker_key(s, w, {key = .N, modifiers = {.Control}, pressed = true})
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Icons), f.target.id)
+	testing.expect_value(t, app.workspace_picker_icon_id(&w.workspace_picker), f.target.id)
 	w.workspace_picker.selected = 7
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
 	testing.expect_value(t, f.target.icon.preset, 7)
@@ -273,9 +276,9 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	app.workspace_row_menu_open(s, w, f.target.id)
 	f.owner.phase = .Preparing
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
-	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && app.workspace_picker_target(&w.workspace_picker, .Menu) == 0)
+	testing.expect(t, app.workspace_picker_rename_id(&w.workspace_picker) == 0 && app.workspace_picker_menu_id(&w.workspace_picker) == 0)
 	app.workspace_row_menu_open(s, w, f.target.id)
-	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), u32(0))
+	testing.expect_value(t, app.workspace_picker_menu_id(&w.workspace_picker), u32(0))
 	f.owner.phase = .Shown
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_text(s, w, "Stale")
@@ -284,7 +287,7 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	f.target = nil
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
 	testing.expect_value(t, f.current.name, "Workspace 1")
-	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && !app.rename_shown(w))
+	testing.expect(t, app.workspace_picker_rename_id(&w.workspace_picker) == 0 && !app.rename_shown(w))
 	other := app.workspace_create_empty(s)
 	if !testing.expect(t, other != nil) { return }
 	app.workspace_row_icon_open(s, w, other.id)
@@ -296,7 +299,7 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	other = app.workspace_create_empty(s)
 	if !testing.expect(t, other != nil) { return }
 	app.workspace_row_menu_open(s, w, other.id)
-	w.workspace_picker.menu_selected = len(app.WORKSPACE_ROW_ACTIONS) - 1
+	w.workspace_picker.menu_selected = len(app.WORKSPACE_ROW_MENU) - 1
 	testing.expect(t, app.workspace_discard_empty(s, other))
 	app.workspace_row_menu_choose(s, w)
 	testing.expect(t, app.confirmation_current(w) == nil)
@@ -330,7 +333,7 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 		menu := app.workspace_row_menu_rect(w)
 		testing.expect(t, menu.x >= 0 && menu.y >= 0 && menu.x+menu.width <= f32(w.width))
 		testing.expect(t, menu.y+menu.height <= f32(w.height))
-		for i in 0..<len(app.WORKSPACE_ROW_ACTIONS) {
+		for i in 0..<len(app.WORKSPACE_ROW_MENU) {
 			item := app.workspace_row_menu_item_rect(w, i)
 			testing.expect_value(t, app.workspace_row_menu_hit(w, item.x+1, item.y+1), i)
 		}
@@ -476,12 +479,12 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 					frame := ui.field_box_text_rect(app.workspace_row_rename_box(w))
 					app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 						x = i32(frame.x), y = i32(sample.y+16*scale)})
-					testing.expect_value(t, w.rename.cursor, 0)
+					testing.expect_value(t, w.workspace_picker.rename.cursor, 0)
 					app.workspace_picker_pointer(s, w, frame.x+frame.width, false, true)
-					testing.expect_value(t, ui.field_selected_text(&w.rename), f.target.name)
+					testing.expect_value(t, ui.field_selected_text(&w.workspace_picker.rename), f.target.name)
 					app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = false,
 						x = i32(frame.x+frame.width), y = i32(sample.y+16*scale)})
-					testing.expect(t, !w.rename.dragging)
+					testing.expect(t, !w.workspace_picker.rename.dragging)
 				}
 			}
 		}

@@ -28,8 +28,7 @@ workspace_close_empty :: proc(app: ^App, workspace: ^Workspace, replace_window :
 		if window_for_workspace(app, workspace) != nil {return}
 	}
 	workspace_delete_release(app, workspace)
-	workspace_pickers_refresh(app)
-	mark_all_dirty(app)
+	workspace_mutation_finish(app, nil, {.Names})
 	for candidate in app.workspaces {if workspace_eligible(app, candidate) {return}}
 	app_quit(app)
 }

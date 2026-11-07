@@ -71,7 +71,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	app.tab_close(&state, source_window, 1)
 	testing.expect_value(t, len(source_workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
-	if !testing.expect(t, app.tab_create(&state, source_workspace)) { return }
+	if _, created := app.tab_create(&state, source_workspace); !testing.expect(t, created) { return }
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
 	failed := app.pane_window_preview_create(&state, source, node)
@@ -140,7 +140,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect(t, app.pane_drag_release(&state, source_window))
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(state.workspaces), 1)
-	if !testing.expect(t, app.tab_create(&state, source_workspace)) { return }
+	if _, created := app.tab_create(&state, source_workspace); !testing.expect(t, created) { return }
 	preview = app.pane_window_preview_create(&state, source, node)
 	if !testing.expect(t, preview != nil) { return }
 	preview_id = preview.id
@@ -182,10 +182,11 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	// A foreign empty strip accepts the sole pane and removes only its exhausted source view.
 	second_workspace := app.workspace_create_empty(&state)
 	if !testing.expect(t, second_workspace != nil) { return }
-	if !testing.expect(t, app.tab_create(&state, second_workspace)) { return }
+	if _, created := app.tab_create(&state, second_workspace); !testing.expect(t, created) { return }
 	if !testing.expect(t, app.window_open(&state, second_workspace)) { return }
 	second := app.window_for_workspace(&state, second_workspace)
-	if !testing.expect(t, app.pane_to_tab(&state, second, app.selected_tab(preview.workspace), preview.tree.root)) { return }
+	shown := app.selected_tab(preview.workspace)
+	if !testing.expect(t, app.pane_to_tab(&state, second, shown, app.window_tree(preview).root)) { return }
 	testing.expect_value(t, len(state.windows), 2)
 	testing.expect(t, app.window_find(&state, second.id) == second)
 	testing.expect_value(t, len(second_workspace.tabs), 2)
@@ -204,7 +205,7 @@ tear_off_commit_moves_nothing_when_its_window_cannot_show :: proc(t: ^testing.T)
 	if !palette_fixture_create(t, &f, "tear-off-show-fails", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	app.pane_split(s, w, .Right)
-	if !testing.expect(t, app.tab_create(s, w.workspace)) {return}
+	if _, created := app.tab_create(s, w.workspace); !testing.expect(t, created) {return}
 	app.tab_select(s, w, 0)
 	source := app.selected_tab(w.workspace)
 	node := source.tree.focus

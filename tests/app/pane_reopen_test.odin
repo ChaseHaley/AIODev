@@ -63,7 +63,8 @@ closed_panes_and_tabs_reopen_in_place :: proc(t: ^testing.T) {
 	testing.expect(t, second_split)
 
 	// A closed split tab returns whole at its position.
-	testing.expect(t, app.tab_create(&state, workspace))
+	_, created := app.tab_create(&state, workspace)
+	testing.expect(t, created)
 	app.tab_close(&state, w, 0)
 	testing.expect_value(t, len(workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)

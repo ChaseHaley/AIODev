@@ -14,6 +14,7 @@ Pointer_Target :: enum u8 {
 	// Modal surfaces take the whole window, including presses and releases that began elsewhere.
 	Workspace_Picker,
 	Tab_Menu,
+	Divider_Menu,
 	Profile_Menu,
 	Document_Menu,
 	Status_Inbox,
@@ -76,6 +77,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		picker_claims, picker_hover, workspace_picker_button, nil, picker_tooltip, picker_cancel,
 	},
 	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil, nil, nil},
+	.Divider_Menu     = {divider_menu_claims, divider_menu_hover, divider_menu_button, nil, nil, nil},
 	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil, nil, nil},
 	.Document_Menu    = {
 		documents_claims, documents_hover, documents_press, nil, documents_tooltip, documents_cancel,
@@ -245,7 +247,7 @@ picker_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mous
 
 @(private = "file")
 picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	icons := workspace_picker_mode(&w.workspace_picker) == .Icons
+	_, icons := w.workspace_picker.state.(Workspace_Picker_Icons)
 	if icons && render.rect_contains(workspace_icon_color_button(w), x, y) {
 		return "Change icon color"
 	}
@@ -270,7 +272,10 @@ tab_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 	x, y := move_point(e)
 	hit := tab_menu_hit(w, x, y)
 	enabled := tab_menu_enabled(w, hit)
-	if enabled && hit != w.tab_menu.selected {w.tab_menu.selected, w.dirty = hit, true}
+	if enabled && hit != ui.menu_selected(&w.tab_menu.menu) {
+		ui.menu_select(&w.tab_menu.menu, hit)
+		w.dirty = true
+	}
 	pointer_set(app, w, enabled ? .Hand : .Arrow)
 }
 
@@ -280,8 +285,38 @@ tab_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	gesture_swallow(w, e.button, .Tab_Menu)
 	if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
 		if tab_menu_enabled(w, hit) {
-			w.tab_menu.selected = hit
+			ui.menu_select(&w.tab_menu.menu, hit)
 			tab_menu_choose(app, w)
+		}
+	} else {overlay_close(app, w)}
+}
+
+// Dock edge menu
+
+@(private = "file")
+divider_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return dock_divider_menu_shown(w)}
+
+@(private = "file")
+divider_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Divider_Menu {return}
+	x, y := move_point(e)
+	hit := dock_divider_menu_hit(w, x, y)
+	enabled := hit >= 0 && w.divider_menu.items[hit].enabled
+	if enabled && hit != ui.menu_selected(&w.divider_menu) {
+		ui.menu_select(&w.divider_menu, hit)
+		w.dirty = true
+	}
+	pointer_set(app, w, enabled ? .Hand : .Arrow)
+}
+
+@(private = "file")
+divider_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {return}
+	gesture_swallow(w, e.button, .Divider_Menu)
+	if hit := dock_divider_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
+		if w.divider_menu.items[hit].enabled {
+			ui.menu_select(&w.divider_menu, hit)
+			dock_divider_menu_choose(app, w)
 		}
 	} else {overlay_close(app, w)}
 }
@@ -705,30 +740,30 @@ panel_cancel :: proc(_: ^App, w: ^Window) {
 
 @(private = "file")
 tabs_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return !floating_covers(w, x, y) && tab_interaction_hit(app, w, x, y, .Left).kind != .Outside
+	return !floating_covers(w, x, y) && tab_chrome_hit(app, w, x, y, .Left).inside
 }
 
 @(private = "file")
 tabs_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := move_point(e)
-	tab_hover, rail_hover := -1, -1
+	hover: Tab_Chrome_Target
 	if owner == .Tabs && w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
-		tab_hover = window_tab_hit(app, w, bar, x, y)
+		hover = window_tab_hit(app, w, bar, x, y)
 		chevron := tab_chevron_rect(app, w)
 		if x >= chevron.x && x < chevron.x + chevron.width && y >= 0 && y < bar.height {
-			tab_hover = bar.count + 1
+			hover = Tab_Chrome_Profiles{}
 		}
 	} else if owner == .Tabs {
 		if layout, ok := rail_current_layout(w); ok {
-			rail_hover = rail_tab_hit(w, layout, x, y)
-			if rail_hover < 0 && ui.rail_footer_hit(layout, x, y) {
-				rail_hover = ui.rail_profile_hit(layout, x, y) ? RAIL_PROFILE_ROW : RAIL_NEW_TAB_ROW
+			if index := rail_tab_hit(w, layout, x, y); index >= 0 {
+				hover = Tab_Chrome_Tab{index}
+			} else {
+				hover = rail_footer_target(layout, x, y)
 			}
 		}
 	}
-	if w.tabs_horizontal && tab_hover != w.tab_hover {w.tab_hover, w.dirty = tab_hover, true}
-	if rail_hover != w.rail_hover {w.rail_hover, w.dirty = rail_hover, true}
+	if hover != w.tab_hover {w.tab_hover, w.dirty = hover, true}
 	if owner == .Tabs {pointer_set(app, w, chrome_pointer(app, w, x, y))}
 }
 
@@ -738,7 +773,7 @@ tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		bar := window_tab_bar(app, w)
 		if window_tab_close_hit(app, w, bar, x, y) >= 0 {return "Close tab"}
 		if x >= tab_chevron_rect(app, w).x {return "Choose profile"}
-		if window_tab_hit(app, w, bar, x, y) == bar.count {return "New tab"}
+		if _, new_tab := window_tab_hit(app, w, bar, x, y).(Tab_Chrome_New); new_tab {return "New tab"}
 	} else if layout, ok := rail_current_layout(w); ok {
 		if row := rail_tab_hit(w, layout, x, y); row >= 0 {
 			close := rail_tab_close_rect(w, layout, row)
@@ -769,7 +804,7 @@ tabs_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool
 
 @(private = "file")
 tabs_cancel :: proc(_: ^App, w: ^Window) {
-	w.tab_hover, w.rail_hover = -1, -1
+	w.tab_hover = nil
 	ui.armed_cancel(&w.tab_close_armed)
 }
 

@@ -39,8 +39,8 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			divider, shown := w.overlay.(app.Overlay_Divider_Menu)
 			testing.expect(t, shown)
 			testing.expect_value(t, divider.node, node)
-			testing.expect_value(t, w.tab_menu.count, 1)
-			testing.expect_value(t, app.tab_menu_label(w, 0), "Set as Default Size")
+			testing.expect_value(t, len(w.divider_menu.items), 1)
+			testing.expect_value(t, w.divider_menu.items[0].label, "Set as Default Size")
 			testing.expect_value(t, divider_count(w), 0)
 			app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 			testing.expect(t, w.overlay == nil)
@@ -60,7 +60,7 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			}
 			// Exercise pointer selection as well as keyboard selection through normal event dispatch.
 			if scale == 1 {
-				row := app.tab_menu_row_rect(w, 0)
+				row := window_menu_row(w, &w.divider_menu, 0)
 				gesture_button(s, w, .Left, true, row.x + 20, row.y + row.height / 2)
 				gesture_button(s, w, .Left, false, row.x + 20, row.y + row.height / 2)
 			} else {

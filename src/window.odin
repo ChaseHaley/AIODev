@@ -97,13 +97,12 @@ Window :: struct {
 	// Tab placement: horizontal restores the title-bar strip and the presentation arrays below.
 	tabs_horizontal: bool,
 	tab_underline:   ui.Motion,
-	tab_hover:       int,
-	// Vertical tab rail: rows, scroll and its presentation with the automatic policy; see rail.odin.
-	rail_rows:           [dynamic]Rail_Row,
+	// The strip control or rail row under the pointer.
+	tab_hover:       Tab_Chrome_Target,
+	// Vertical tab rail: scroll and its presentation with the automatic policy; see rail.odin.
 	rail:                Rail_Presentation,
 	rail_wide:           bool,
 	rail_scroll:         f32,
-	rail_hover:          int,
 	rail_width:          f32,
 	// tabs.rail_width, the width a double-click on the rail edge returns to.
 	rail_default_width:  f32,
@@ -119,6 +118,7 @@ Window :: struct {
 	// rename field below are storage the surfaces reuse.
 	overlay: Window_Overlay,
 	tab_menu: Tab_Menu,
+	divider_menu: ui.Menu,
 	profile_menu: Profile_Menu,
 	document_menu: Document_Menu,
 	rename: ui.Text_Field,
@@ -185,11 +185,11 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	w.metrics = window_metrics(app, w.scale)
 	w.rail_default_width = f32(app.settings.tabs.rail_width)
 	w.list = render.draw_list_init()
-	w.rail_rows = make([dynamic]Rail_Row)
 	ui.find_init(&w.find)
+	tab_menu_init(&w.tab_menu)
+	ui.menu_init(&w.divider_menu)
 	profile_menu_init(&w.profile_menu)
 	document_menu_init(&w.document_menu)
-	w.tab_hover, w.rail_hover = -1, -1
 	w.caption_hover = -1
 	w.float_header_shown = layout.INVALID_NODE
 	w.pointer_shape = .Text
@@ -270,6 +270,11 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	return nil
 }
 
+// The layout w shows, derived from its workspace's selected tab; nil while it has no tab to show.
+window_tree :: proc(w: ^Window) -> ^layout.Layout {
+	return w == nil ? nil : workspace_view_tree(&w.resources)
+}
+
 window_close :: proc(app: ^App, w: ^Window) {
 	if w.phase == .Closing {return}
 	// A window still Preparing (a preview, or one whose show failed) stays Preparing through the cancel:
@@ -304,8 +309,9 @@ window_close :: proc(app: ^App, w: ^Window) {
 window_free :: proc(w: ^Window) {
 	workspace_view_destroy(&w.resources)
 	drag_destroy(w)
-	delete(w.rail_rows)
 	ui.find_destroy(&w.find)
+	tab_menu_destroy(&w.tab_menu)
+	ui.menu_destroy(&w.divider_menu)
 	profile_menu_destroy(&w.profile_menu)
 	document_menu_destroy(w)
 	delete(w.rename.bytes)
@@ -351,19 +357,13 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	w.tabs_horizontal = horizontal
 	if placement_changed {
 		rail_resize_cancel(w)
-		w.tab_hover = -1
+		w.tab_hover = nil
 		gesture_tab_unpress(w)
 	}
 	if placement_changed && !horizontal {
 		// Returning from the strip restores the rail's automatic state; a manual hide or overlay
 		// does not survive the mode switch.
 		rail_auto_reset(w)
-	}
-	if placement_changed && horizontal {
-		// The rail rows hold workspace pointers from the old surface and are not read again until
-		// the rail returns, when relayout rebuilds them.
-		clear(&w.rail_rows)
-		w.rail_hover = -1
 	}
 	window_relayout(app, w)
 }
@@ -392,10 +392,10 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if w.phase == .Preparing || window_minimized(w) {return}
 	bar_height := window_title_height(w)
 	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
-	if tab_count != len(w.tab_positions) {
-		w.tab_hover = -1
-		// Only the strip's presses draw from the tab positions.
-		if w.tabs_horizontal {gesture_tab_unpress(w)}
+	if tab_count != len(w.tab_positions) && w.tabs_horizontal {
+		// Only the strip's hover and presses draw from the tab positions.
+		w.tab_hover = nil
+		gesture_tab_unpress(w)
 	}
 	if !tab_presentation_resize(&w.presentation, tab_count) {
 		log.error("resizing tab presentation values failed")
@@ -413,7 +413,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
 	w.header_height = pane_insets(app, w.scale, nil).header
-	layout.place_shown(w.tree, window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
+	layout.place_shown(window_tree(w), window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
 	for &view in w.views {view.valid = false}
@@ -425,11 +425,12 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 // Lays out only the floating panes, after one opened, moved, resized, rose or was minimized. The tiled
 // panes keep their rectangles, grids and cached drawing.
 window_floats_layout :: proc(app: ^App, w: ^Window) {
-	if w.phase == .Preparing || window_minimized(w) || w.tree == nil {return}
+	tree := window_tree(w)
+	if w.phase == .Preparing || window_minimized(w) || tree == nil {return}
 	tiled := len(window_tiled_rects(w))
 	resize(&w.panes, tiled)
 	g := window_geometry(app, w, w.pane_fill)
-	layout.floats_place(w.tree, g.floating, g.gap, g.header, &w.panes)
+	layout.floats_place(tree, g.floating, g.gap, g.header, &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
 	for pane in w.panes[tiled:] {
@@ -532,8 +533,9 @@ pane_view_destroy :: proc(pane: ^Pane_View) {
 
 // The session shown in the focused pane, which receives keyboard input.
 focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
-	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return nil}
-	pane, is_pane := w.tree.nodes[w.tree.focus].(layout.Pane)
+	tree := window_tree(w)
+	if tree == nil || tree.focus == layout.INVALID_NODE {return nil}
+	pane, is_pane := tree.nodes[tree.focus].(layout.Pane)
 	if !is_pane {
 		return nil
 	}
@@ -606,10 +608,11 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 	if result := rail_draw(app, w); result != .Ok {return frame, result}
 	if result := status_panel_draw(app, w); result != .Ok {return frame, result}
 	group := layout.INVALID_NODE
+	tree := window_tree(w)
 	for pane in w.panes {
 		if !pane.floating {continue}
 		// Each float's frame and header draw with it, so a higher float covers a lower one's.
-		if root := layout.float_root(w.tree, pane.node); root != group {
+		if root := layout.float_root(tree, pane.node); root != group {
 			group = root
 			floating_header_draw(app, w, root)
 		}
@@ -655,8 +658,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 	}
 	if result := confirmation_draw(app, w); result != .Ok {return frame, result}
 	#partial switch _ in w.overlay {
-	case Overlay_Tab_Menu, Overlay_Divider_Menu:
+	case Overlay_Tab_Menu:
 		if result := tab_menu_draw(app, w); result != .Ok {return frame, result}
+	case Overlay_Divider_Menu:
+		if result := dock_divider_menu_draw(app, w); result != .Ok {return frame, result}
 	case Overlay_Profile_Menu:
 		if result := profile_menu_draw(app, w); result != .Ok {return frame, result}
 	case Overlay_Document_Menu:
@@ -708,7 +713,7 @@ pane_draw :: proc(
 	selection_foreground: Maybe(render.Color)
 	if fg, ok := c.selection_foreground.?; ok {selection_foreground = colour.rgba(fg)}
 	content_focused :=
-		w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
+		w.focused && pane.node == window_tree(w).focus && !palette_active(app, w) &&
 		!ui.find_has_keyboard(&w.find)
 	hover := link_hover_range(w, pane.content)
 	minimum_contrast := f32(1)
