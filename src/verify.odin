@@ -919,8 +919,11 @@ when AIO_CONTROL {
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
 				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
 				{"panes.dragging", fmt.tprintf("%t", w.pane_drag.active)},
-				{"panes.float_dragging", fmt.tprintf("%t", w.float_drag.active)},
-				{"panes.float_header_hover", fmt.tprintf("%v", w.float_header_action)},
+				{"panes.float_dragging", fmt.tprintf("%t", floating_dragging(w))},
+				{
+					"panes.float_header_hover",
+					fmt.tprintf("%v", (w.float_header_hover.? or_else Float_Header_Spot{}).action),
+				},
 				{"panes.float_header_hover_value", fmt.tprintf("%g", w.float_header_motion.hover.value)},
 				{"panes.float_header_press_value", fmt.tprintf("%g", w.float_header_motion.press.value)},
 				{"tabs.dragging", fmt.tprintf("%t", w.tab_drag.active)},

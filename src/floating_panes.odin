@@ -48,16 +48,107 @@ Float_Edge :: enum u8 {
 // The edges a resize moves; none moves the whole pane.
 Float_Edges :: bit_set[Float_Edge]
 
-Float_Drag :: struct {
-	pressed, active: bool,
-	// The press began on a float header.
-	header:          bool,
-	// Content survives the node renumbering a close elsewhere in the tree can cause.
-	content:         layout.Content,
-	edges:           Float_Edges,
-	start:           [2]f32,
-	// The pane's rectangle when the press began, in pixels.
-	rect:            layout.Rect,
+// What the float surface's held Left press is doing; nil when it holds none. Only this file writes it:
+// floating_press begins it, the follow procs advance it, and floating_pointer_move, floating_release,
+// floating_pointer_cancel and floating_drag_follow (when the float stops floating) end it.
+Float_Press :: union {
+	Float_Button_Press,
+	Float_Header_Press,
+	Float_Move,
+	Float_Resize,
+	Float_Capsules_Press,
+	Float_Capsules_Move,
+}
+
+// A float header button, drawn pressed until the release, which fires it over the same button of the
+// same float. Content names a pane of the float.
+Float_Button_Press :: struct {
+	content: layout.Content,
+	action:  Float_Header_Action,
+}
+
+// Where a move or resize began: a pane of the float by its content, which survives the node renumbering a
+// close elsewhere in the tree can cause; the pointer; and the float's rectangle, in pixels.
+Float_Grab :: struct {
+	content: layout.Content,
+	start:   [2]f32,
+	rect:    layout.Rect,
+}
+
+// A press on the float header that has not yet travelled FLOAT_DRAG_THRESHOLD, so is still a click.
+Float_Header_Press :: struct {
+	using grab: Float_Grab,
+}
+
+// The float follows the pointer from its header.
+Float_Move :: struct {
+	using grab: Float_Grab,
+}
+
+// The float's edges follow the pointer from the outer edge band.
+Float_Resize :: struct {
+	using grab: Float_Grab,
+	edges:      Float_Edges,
+}
+
+// Where a capsule row move began: the pointer and the row, in pixels.
+Float_Row_Grab :: struct {
+	start: [2]f32,
+	rect:  render.Rect,
+}
+
+// A press on the capsule row that has not yet travelled FLOAT_DRAG_THRESHOLD. On a capsule, it draws that
+// capsule pressed and restores its float on a release over it; between capsules, it does nothing.
+Float_Capsules_Press :: struct {
+	using grab: Float_Row_Grab,
+	capsule:    Maybe(layout.Content),
+}
+
+// The capsule row follows the pointer.
+Float_Capsules_Move :: struct {
+	using grab: Float_Row_Grab,
+}
+
+// A part of a float header under the pointer: the float's root and what that part does.
+Float_Header_Spot :: struct {
+	root:   layout.Node_Id,
+	action: Float_Header_Action,
+}
+
+// A float moves or resizes with the pointer.
+floating_dragging :: proc(w: ^Window) -> bool {
+	#partial switch _ in w.float_press {
+	case Float_Move, Float_Resize:
+		return true
+	}
+	return false
+}
+
+// The float whose header holds the press, by a pane's content, while a press there may still move it.
+floating_header_held :: proc(w: ^Window) -> (layout.Content, bool) {
+	#partial switch p in w.float_press {
+	case Float_Header_Press:
+		return p.content, true
+	case Float_Move:
+		return p.content, true
+	}
+	return {}, false
+}
+
+floating_button_pressed :: proc(w: ^Window, action: Float_Header_Action) -> bool {
+	p, ok := w.float_press.(Float_Button_Press)
+	return ok && p.action == action
+}
+
+@(private)
+floating_capsule_pressed :: proc(w: ^Window, content: layout.Content) -> bool {
+	p, ok := w.float_press.(Float_Capsules_Press)
+	return ok && p.capsule == content
+}
+
+// The pointer left the floats: no capsule or header part is hovered.
+floating_hover_clear :: proc(w: ^Window) {
+	w.float_capsule_hover, w.float_header_hover = nil, nil
 }
 
 // Whether the window shows any floating pane, whose header controls then animate.
@@ -407,17 +498,11 @@ floating_covers :: proc(w: ^Window, x, y: f32) -> bool {
 	return rect_contains(w.float_capsule_group, x, y)
 }
 
-floating_drag_press :: proc(_: ^App, w: ^Window, pane: layout.Pane_Rect, edges: Float_Edges, x, y: f32) {
+// Where a move or resize of the float holding the pane begins; false when the pane no longer floats.
+@(private)
+floating_grab :: proc(w: ^Window, pane: layout.Pane_Rect, x, y: f32) -> (Float_Grab, bool) {
 	rect, found := layout.float_rect(w.tree, pane.node, floating_area(w))
-	if !found {return}
-	w.float_drag = {
-		pressed = true,
-		active  = edges != {},
-		content = pane.content,
-		edges   = edges,
-		start   = {x, y},
-		rect    = rect,
-	}
+	return {content = pane.content, start = {x, y}, rect = rect}, found
 }
 
 floating_drag_rect :: proc(
@@ -452,32 +537,53 @@ floating_bounds_for_rect :: proc(area, rect: layout.Rect) -> layout.Rect {
 	}
 }
 
-// Follows the pointer while a floating pane moves or resizes. False when no such drag is held.
-floating_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	d := &w.float_drag
-	if !d.pressed {return false}
-	dx, dy := x - d.start.x, y - d.start.y
-	if !d.active {
-		if max(abs(dx), abs(dy)) < FLOAT_DRAG_THRESHOLD * w.scale {return true}
-		d.active = true
+// Follows the pointer while a float moves or resizes: a header press past FLOAT_DRAG_THRESHOLD becomes a
+// move. False when no such press is held, or its float no longer floats, which ends it.
+@(private)
+floating_drag_follow :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	grab: Float_Grab
+	edges: Float_Edges
+	#partial switch p in w.float_press {
+	case Float_Header_Press:
+		if max(abs(x - p.start.x), abs(y - p.start.y)) < FLOAT_DRAG_THRESHOLD * w.scale {return true}
+		w.float_press = Float_Move{p.grab}
 		pane_header_cancel(w)
+		grab = p.grab
+	case Float_Move:
+		grab = p.grab
+	case Float_Resize:
+		grab, edges = p.grab, p.edges
+	case:
+		return false
 	}
-	node := layout.find_content(w.tree, d.content)
-	if !layout.is_floating(w.tree, node) {w.float_drag = {}; return false}
+	node := layout.find_content(w.tree, grab.content)
+	if !layout.is_floating(w.tree, node) {w.float_press = nil; return false}
 	area := floating_area(w)
 	if area.width <= 0 || area.height <= 0 {return true}
-	r := floating_drag_rect(area, d.rect, {dx, dy}, d.edges, w.scale)
+	r := floating_drag_rect(area, grab.rect, {x - grab.start.x, y - grab.start.y}, edges, w.scale)
 	bounds := floating_bounds_for_rect(area, r)
 	if layout.float_set_bounds(w.tree, node, bounds) {window_floats_layout(app, w)}
 	return true
 }
 
-floating_drag_release :: proc(app: ^App, w: ^Window, x, y: f32) {
-	if !w.float_drag.pressed {return}
-	moved := w.float_drag.active
-	if moved {_ = floating_drag_move(app, w, x, y)}
-	w.float_drag = {}
-	if moved {layout_state_touch(app)}
+// Moves while the float surface holds Left: the float or the capsule row follows the pointer. False when
+// no drag is held, so the move reaches the surfaces; a move without Left ends the drag the release missed.
+floating_pointer_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
+	switch _ in w.float_press {
+	case nil, Float_Button_Press:
+		return false
+	case Float_Header_Press, Float_Move, Float_Resize, Float_Capsules_Press, Float_Capsules_Move:
+	}
+	if .Left not_in e.buttons {w.float_press = nil; return false}
+	x, y := f32(e.x), f32(e.y)
+	if floating_capsules_follow(w, x, y) {
+		pointer_set(app, w, .Arrow)
+		return true
+	}
+	if !floating_drag_follow(app, w, x, y) {return false}
+	resize, resizing := w.float_press.(Float_Resize)
+	pointer_set(app, w, resizing ? floating_edge_cursor(resize.edges) : .Arrow)
+	return true
 }
 
 @(private)
@@ -496,12 +602,6 @@ Float_Capsule :: struct {
 	content: layout.Content,
 	rect:    render.Rect,
 	order:   u64,
-}
-
-Float_Capsule_Drag :: struct {
-	pressed, active: bool,
-	start:           [2]f32,
-	rect:            render.Rect,
 }
 
 floating_capsule_row_fit :: proc(widths: []f32, area_width, preferred_gap: f32) -> (start, gap: f32) {
@@ -580,9 +680,9 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	height := ui.HEIGHT_STANDARD * s
 	x := area.x + margin + start
 	y := area.y + area.height - height - margin
-	if w.float_capsule_positioned {
-		x = area.x + w.float_capsule_anchor.x * max(0, area.width - row_width)
-		y = area.y + w.float_capsule_anchor.y * max(0, area.height - height)
+	if anchor, placed := w.float_capsule_anchor.?; placed {
+		x = area.x + anchor.x * max(0, area.width - row_width)
+		y = area.y + anchor.y * max(0, area.height - height)
 	}
 	x = clamp(x, area.x, max(area.x, area.x + area.width - row_width))
 	y = clamp(y, area.y, max(area.y, area.y + area.height - height))
@@ -605,26 +705,25 @@ floating_capsule_at :: proc(w: ^Window, x, y: f32) -> Maybe(Float_Capsule) {
 	return nil
 }
 
-floating_capsule_drag_press :: proc(w: ^Window, x, y: f32) -> bool {
-	if !rect_contains(w.float_capsule_group, x, y) {return false}
-	w.float_capsule_drag = {pressed = true, start = {x, y}, rect = w.float_capsule_group}
-	return true
-}
-
-// Follows the pointer while the minimized-pane row moves. False when no row drag is held.
-floating_capsule_drag_move :: proc(w: ^Window, x, y: f32) -> bool {
-	d := &w.float_capsule_drag
-	if !d.pressed {return false}
-	dx, dy := x - d.start.x, y - d.start.y
-	if !d.active {
-		if max(abs(dx), abs(dy)) < FLOAT_DRAG_THRESHOLD * w.scale {return true}
-		d.active = true
-		ui.armed_cancel(&w.float_capsule_armed)
+// Follows the pointer while the capsule row moves: a press past FLOAT_DRAG_THRESHOLD becomes a move, which
+// places the row where the user leaves it. False when no row press is held.
+@(private)
+floating_capsules_follow :: proc(w: ^Window, x, y: f32) -> bool {
+	grab: Float_Row_Grab
+	#partial switch p in w.float_press {
+	case Float_Capsules_Press:
+		if max(abs(x - p.start.x), abs(y - p.start.y)) < FLOAT_DRAG_THRESHOLD * w.scale {return true}
+		w.float_press = Float_Capsules_Move{p.grab}
+		grab = p.grab
+	case Float_Capsules_Move:
+		grab = p.grab
+	case:
+		return false
 	}
 	area := floating_area(w)
-	r := d.rect
-	r.x = clamp(r.x + dx, area.x, max(area.x, area.x + area.width - r.width))
-	r.y = clamp(r.y + dy, area.y, max(area.y, area.y + area.height - r.height))
+	r := grab.rect
+	r.x = clamp(r.x + x - grab.start.x, area.x, max(area.x, area.x + area.width - r.width))
+	r.y = clamp(r.y + y - grab.start.y, area.y, max(area.y, area.y + area.height - r.height))
 	shift := [2]f32{r.x - w.float_capsule_group.x, r.y - w.float_capsule_group.y}
 	w.float_capsule_group = r
 	for &capsule in w.float_capsules {
@@ -632,11 +731,10 @@ floating_capsule_drag_move :: proc(w: ^Window, x, y: f32) -> bool {
 		capsule.rect.y += shift.y
 	}
 	x_travel, y_travel := max(0, area.width - r.width), max(0, area.height - r.height)
-	w.float_capsule_anchor = {
+	w.float_capsule_anchor = [2]f32 {
 		x_travel > 0 ? (r.x - area.x) / x_travel : 0,
 		y_travel > 0 ? (r.y - area.y) / y_travel : 0,
 	}
-	w.float_capsule_positioned = true
 	w.dirty = true
 	return true
 }
@@ -670,7 +768,7 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			{
 				rect = r,
 				hover = hovered ? 1 : 0,
-				press = ui.armed_is(w.float_capsule_armed, capsule.content) ? 1 : 0,
+				press = floating_capsule_pressed(w, capsule.content) ? 1 : 0,
 				radius = radius / s,
 			},
 			s,
@@ -721,19 +819,20 @@ floating_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	hover: Maybe(layout.Content)
-	header, action := layout.INVALID_NODE, Float_Header_Action.None
+	header: Maybe(Float_Header_Spot)
+	action := Float_Header_Action.None
 	edges, edge := Float_Edges{}, false
 	if owner == .Floating {
 		if capsule, found := floating_capsule_at(w, x, y).?; found {hover = capsule.content}
 		_, edges, edge = floating_edge_at(w, x, y)
 		if hover == nil && !edge {
-			if root, at, over := floating_header_at(app, w, x, y); over {header, action = root, at}
+			if root, at, over := floating_header_at(app, w, x, y); over {
+				header, action = Float_Header_Spot{root, at}, at
+			}
 		}
 	}
 	if hover != w.float_capsule_hover {w.float_capsule_hover, w.dirty = hover, true}
-	if header != w.float_header_hover || action != w.float_header_action {
-		w.float_header_hover, w.float_header_action, w.dirty = header, action, true
-	}
+	if header != w.float_header_hover {w.float_header_hover, w.dirty = header, true}
 	if owner != .Floating {return}
 	switch {
 	case hover != nil, action != .None && action != .Move:
@@ -748,10 +847,12 @@ floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	x, y := f32(e.x), f32(e.y)
-	if floating_capsule_drag_press(w, x, y) {
-		if capsule, found := floating_capsule_at(w, x, y).?; found {
-			ui.armed_press(&w.float_capsule_armed, capsule.content)
+	if rect_contains(w.float_capsule_group, x, y) {
+		press := Float_Capsules_Press {
+			grab = {start = {x, y}, rect = w.float_capsule_group},
 		}
+		if capsule, found := floating_capsule_at(w, x, y).?; found {press.capsule = capsule.content}
+		w.float_press = press
 		w.dirty = true
 		return
 	}
@@ -764,15 +865,13 @@ floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		w.dirty = true
 		if action != .Move {
 			// A button fires on release over itself, like every other control.
-			w.float_header_target = w.tree.nodes[node].(layout.Pane).content
-			ui.armed_press(&w.float_header_armed, action)
+			w.float_press = Float_Button_Press{w.tree.nodes[node].(layout.Pane).content, action}
 			return
 		}
 		pane_focus(app, w, node)
 		for shown in w.panes {
 			if shown.node != node {continue}
-			floating_drag_press(app, w, shown, {}, x, y)
-			w.float_drag.header = w.float_drag.pressed
+			if grab, found := floating_grab(w, shown, x, y); found {w.float_press = Float_Header_Press{grab}}
 			break
 		}
 		return
@@ -780,49 +879,50 @@ floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	pane_focus(app, w, pane.node)
 	// Focus raises the pane, which a resize then follows from its current rectangle.
 	for shown in w.panes {if shown.content == pane.content {pane = shown}}
-	floating_drag_press(app, w, pane, edges, x, y)
+	if grab, found := floating_grab(w, pane, x, y); found {w.float_press = Float_Resize{grab, edges}}
 }
 
 floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
 	x, y := f32(e.x), f32(e.y)
-	if w.float_drag.pressed {
-		floating_drag_release(app, w, x, y)
+	switch p in w.float_press {
+	case nil:
+		return false
+	case Float_Header_Press, Float_Move, Float_Resize:
+		moved := floating_dragging(w)
+		if moved {_ = floating_drag_follow(app, w, x, y)}
+		w.float_press = nil
+		if moved {layout_state_touch(app)}
 		pane_header_cancel(w)
-		return true
-	}
-	if ui.armed_down(w.float_header_armed) {
+	case Float_Button_Press:
 		under := Float_Header_Action.None
-		target := layout.float_root(w.tree, layout.find_content(w.tree, w.float_header_target))
+		target := layout.float_root(w.tree, layout.find_content(w.tree, p.content))
 		if root, action, over := floating_header_at(app, w, x, y); over && root == target {under = action}
-		fired, ok := ui.armed_release(&w.float_header_armed, under)
+		w.float_press = nil
 		w.dirty = true
-		if ok && fired != .None {floating_header_fire(app, w, w.float_header_target, fired)}
-		return true
-	}
-	capsule_pressed := w.float_capsule_drag.pressed
-	capsule_moved := capsule_pressed && w.float_capsule_drag.active
-	if capsule_moved {_ = floating_capsule_drag_move(w, x, y)}
-	if capsule_pressed {w.float_capsule_drag = {}}
-	if capsule_moved {return true}
-	if !ui.armed_down(w.float_capsule_armed) {return capsule_pressed}
-	under: layout.Content
-	capsule, found := floating_capsule_at(w, x, y).?
-	if found {under = capsule.content}
-	fired, ok := ui.armed_release(&w.float_capsule_armed, under)
-	w.dirty = true
-	if ok && found {
-		pane_focus(app, w, layout.find_content(w.tree, fired))
-		layout_state_touch(app)
+		if under == p.action {floating_header_fire(app, w, p.content, p.action)}
+	case Float_Capsules_Move:
+		_ = floating_capsules_follow(w, x, y)
+		w.float_press = nil
+	case Float_Capsules_Press:
+		w.float_press = nil
+		pressed, armed := p.capsule.?
+		if !armed {return true}
+		w.dirty = true
+		if capsule, found := floating_capsule_at(w, x, y).?; found && capsule.content == pressed {
+			pane_focus(app, w, layout.find_content(w.tree, pressed))
+			layout_state_touch(app)
+		}
 	}
 	return true
 }
 
-floating_pointer_cancel :: proc(_: ^App, w: ^Window) {
-	w.float_drag, w.float_capsule_drag = {}, {}
-	ui.armed_cancel(&w.float_capsule_armed)
-	w.float_capsule_hover, w.float_header_hover, w.float_header_action = nil, layout.INVALID_NODE, .None
-	ui.armed_cancel(&w.float_header_armed)
+// Capture loss ends any press. A move or resize leaves the float where it stands, which the layout then
+// saves as it does on a release.
+floating_pointer_cancel :: proc(app: ^App, w: ^Window) {
+	if floating_dragging(w) {layout_state_touch(app)}
+	w.float_press = nil
+	floating_hover_clear(w)
 }
 
 floating_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {

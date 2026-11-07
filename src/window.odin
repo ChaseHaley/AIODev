@@ -50,24 +50,20 @@ Window :: struct {
 	divider_click_ns: i64,
 	pane_drag: Pane_Drag,
 	tab_drag: Tab_Drag,
-	// A floating pane moved by its header or resized by an edge; see floating_panes.odin.
-	float_drag: Float_Drag,
-	// The float header under the pointer and which part of it; the float the hover and press animation
-	// belongs to, which it keeps while fading out; and the header button pressed, with a pane of its float.
-	float_header_hover:    layout.Node_Id,
-	float_header_action:   Float_Header_Action,
+	// The float surface's held Left press: a float header button, a float moving or resizing, or the
+	// capsule row; see floating_panes.odin.
+	float_press: Float_Press,
+	// The float header part under the pointer, and the float the hover and press animation belongs to,
+	// which it keeps while fading out.
+	float_header_hover:    Maybe(Float_Header_Spot),
 	float_header_shown:    layout.Node_Id,
 	float_header_motion:   ui.Control_Motion,
 	float_header_controls: [FLOAT_HEADER_BUTTONS]ui.Control_Motion,
-	float_header_armed:    ui.Armed(Float_Header_Action),
-	float_header_target:   layout.Content,
-	// The minimized floating pane whose capsule is under the pointer, and their movable row.
+	// The minimized float whose capsule is under the pointer; where the user left the capsule row, as a
+	// fraction of the room it can travel, or nil for the bottom-right; and the row's cached geometry.
 	float_capsule_hover:      Maybe(layout.Content),
-	float_capsule_armed:      ui.Armed(layout.Content),
-	float_capsule_drag:       Float_Capsule_Drag,
+	float_capsule_anchor:     Maybe([2]f32),
 	float_capsule_group:      render.Rect,
-	float_capsule_anchor:     [2]f32,
-	float_capsule_positioned: bool,
 	float_capsules:           [dynamic]Float_Capsule,
 	float_capsule_widths:     [dynamic]f32,
 	tab_incoming: Tab_Incoming,
@@ -204,7 +200,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	document_menu_init(&w.document_menu)
 	w.tab_hover, w.rail_hover = -1, -1
 	w.caption_hover = -1
-	w.divider_click_node, w.float_header_hover = layout.INVALID_NODE, layout.INVALID_NODE
+	w.divider_click_node = layout.INVALID_NODE
 	w.float_header_shown = layout.INVALID_NODE
 	w.pointer_shape = .Text
 	w.cursor_phase_visible = true

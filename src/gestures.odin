@@ -296,24 +296,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 	e.buttons -= gesture_buttons(w, Gesture_Cancelled)
 	if event.buttons != {} && e.buttons == {} {return}
 	x, y := f32(e.x), f32(e.y)
-	if w.float_capsule_drag.pressed {
-		if .Left not_in e.buttons {
-			w.float_capsule_drag = {}
-			ui.armed_cancel(&w.float_capsule_armed)
-		} else if floating_capsule_drag_move(w, x, y) {
-			pointer_set(app, w, .Arrow)
-			return
-		}
-	}
-	if w.float_drag.pressed {
-		if .Left not_in e.buttons {
-			w.float_drag = {}
-		} else if floating_drag_move(app, w, x, y) {
-			edges := w.float_drag.edges
-			pointer_set(app, w, edges == {} ? .Arrow : floating_edge_cursor(edges))
-			return
-		}
-	}
+	if floating_pointer_move(app, w, e) {return}
 	target := pointer_target(app, w, x, y)
 	if w.pane_drag.pressed && (w.pane_drag.active || !pointer_modal(target)) {
 		if .Left not_in e.buttons {
