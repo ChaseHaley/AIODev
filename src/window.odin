@@ -1,6 +1,6 @@
 package main
 
-import "aio:glyphs"
+import "aio:colour"
 import "aio:layout"
 import "aio:perf"
 import "aio:platform"
@@ -577,14 +577,14 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 }
 
 @(private)
-build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
+build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Status) {
 	frame: term_view.Frame
 	blinking := false
 	w.status_spinning = false
 	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
 	for pane in w.panes {
 		if pane.floating {continue}
-		result: glyphs.Result
+		result: render.Build_Status
 		frame, result = pane_draw(app, w, pane, &blinking)
 		if result != .Ok {return frame, result}
 	}
@@ -601,7 +601,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, glyphs.Result) {
 			group = root
 			floating_header_draw(app, w, root)
 		}
-		result: glyphs.Result
+		result: render.Build_Status
 		frame, result = pane_draw(app, w, pane, &blinking)
 		if result != .Ok {return frame, result}
 	}
@@ -677,7 +677,7 @@ pane_draw :: proc(
 	blinking: ^bool,
 ) -> (
 	frame: term_view.Frame,
-	result: glyphs.Result,
+	result: render.Build_Status,
 ) {
 	card := len(w.list.rects)
 	window_card_draw(app, w, pane)
@@ -693,7 +693,7 @@ pane_draw :: proc(
 	if entry == nil || view == nil {return frame, .Ok}
 	c := app.settings.colors
 	selection_foreground: Maybe(render.Color)
-	if fg, ok := c.selection_foreground.?; ok {selection_foreground = color(fg)}
+	if fg, ok := c.selection_foreground.?; ok {selection_foreground = colour.rgba(fg)}
 	content_focused :=
 		w.focused && pane.node == w.tree.focus && !palette_active(app, w) &&
 		!ui.find_has_keyboard(&w.find)
@@ -704,12 +704,12 @@ pane_draw :: proc(
 	}
 	style := term_view.Style {
 		family = app.family,
-		selection_background = color(c.selection_background),
+		selection_background = colour.rgba(c.selection_background),
 		selection_foreground = selection_foreground,
-		search_foreground = color(c.search_foreground),
-		search_background = color(c.search_background),
-		search_selected_background = color(c.search_selected_background),
-		cursor_text = color(c.cursor_text),
+		search_foreground = colour.rgba(c.search_foreground),
+		search_background = colour.rgba(c.search_background),
+		search_selected_background = colour.rgba(c.search_selected_background),
+		cursor_text = colour.rgba(c.cursor_text),
 		minimum_contrast = minimum_contrast,
 		focused = content_focused,
 		cursor_phase_visible = !content_focused || cursor_visible(w),
@@ -755,7 +755,7 @@ build_pane :: proc(
 	style: term_view.Style,
 ) -> (
 	term_view.Frame,
-	glyphs.Result,
+	render.Build_Status,
 ) {
 	clip := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
 	radius := window_pane_radius(app, w)
@@ -801,7 +801,8 @@ build_pane :: proc(
 				cached.generation, cached.atlas_generation =
 					generation, render.atlas_generation(app.device)
 				cached.image_epoch = render.image_epoch(app.device)
-				cached.valid = true
+				// A held or failed capture drew the previous screen; rebuild on the next frame.
+				cached.valid = frame.captured
 				cached.builds += 1
 			}
 		}

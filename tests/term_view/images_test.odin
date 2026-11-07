@@ -242,7 +242,7 @@ translated_origin_moves_the_image_with_the_cells :: proc(t: ^testing.T) {
 	frame, result := term_view.build(
 		&f.view, f.session, f.fonts, &f.cache, &f.list, origin, f.metrics, {family = f.family},
 	)
-	testing.expect_value(t, result, glyphs.Result.Ok)
+	testing.expect_value(t, result, render.Build_Status.Ok)
 	testing.expect_value(t, render.frame_render(f.device, f.surface, &f.list, frame.background), render.Error.None)
 	pixels, err := render.surface_read_pixels(f.device, f.surface, context.allocator)
 	testing.expect_value(t, err, render.Error.None)

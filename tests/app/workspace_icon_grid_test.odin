@@ -195,7 +195,7 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 			append(&state.workspaces, &workspace)
 			defer delete(state.workspaces)
 			render.draw_list_reset(&w.list)
-			testing.expect_value(t, app.workspace_picker_draw(&state, &w), glyphs.Result.Ok)
+			testing.expect_value(t, app.workspace_picker_draw(&state, &w), render.Build_Status.Ok)
 			g := app.workspace_icon_picker_layout(&w)
 			selected := app.workspace_icon_picker_cell(&w, g, 7)
 			current := app.workspace_icon_picker_cell(&w, g, 2)

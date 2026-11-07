@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 Navigation_Row :: struct {
@@ -17,7 +16,7 @@ navigation_row_draw :: proc(
 	row: Navigation_Row,
 	scale: f32,
 	pointer: [2]f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if navigation_row_surface_draw(list, theme, rect, row, scale, pointer) != .None {return .Ok}
 	return draw_fading_text(
 		text,

@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -419,7 +418,7 @@ tab_drag_outline :: proc(app: ^App, w: ^Window) {
 
 // The arriving tabs in the gap they would take. With no tabs on screen, the content takes an outline instead.
 @(private = "file")
-tab_incoming_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+tab_incoming_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	incoming := w.tab_incoming
 	r, clip: render.Rect
 	if w.tabs_horizontal && !pane_fill_active(w) {
@@ -474,7 +473,7 @@ tab_incoming_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 }
 
 // The thumbnail copies the tab live, so the source marks it with an outline and nothing over its text.
-tab_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+tab_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if a, _ := tab_drag_state(w); a != nil {
 		_, tear_off := a.destination.(Drop_Tear_Off)
 		_, ready := a.preview.(Preview_Ready)

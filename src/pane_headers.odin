@@ -1,7 +1,6 @@
 package main
 
 import "aio:commands"
-import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -64,7 +63,7 @@ pane_header_draw :: proc(
 	w: ^Window,
 	pane: layout.Pane_Rect,
 	entry: ^Session_Entry,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	controls: [ui.HEADER_BUTTONS]ui.Control_Motion
 	for view in w.views {if view.content == pane.content {controls = view.header_controls; break}}
 	r := pane.rect
@@ -89,7 +88,7 @@ pane_header_draw :: proc(
 		// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 		title = entry.name != "" ? entry.name : pane_header_title(&entry.header)
 		directory = entry.header.directory
-		result: glyphs.Result
+		result: render.Build_Status
 		icon, icon_atlas, result = pane_icon(app, entry, ui.ICON_BUTTON * w.scale)
 		if result != .Ok {return result}
 	}

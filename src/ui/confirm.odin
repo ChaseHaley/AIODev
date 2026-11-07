@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -97,13 +96,13 @@ confirm_layout :: proc(width, height, scale: f32, extended := false, show_option
 }
 
 confirm_hit :: proc(l: Confirm_Layout, x, y: f32) -> Confirm_Button {
-	if l.option.width > 0 && contains(l.option, x, y) {return .Option}
-	if contains(l.accept, x, y) {return .Accept}
-	if contains(l.cancel, x, y) {return .Cancel}
+	if l.option.width > 0 && render.rect_contains(l.option, x, y) {return .Option}
+	if render.rect_contains(l.accept, x, y) {return .Accept}
+	if render.rect_contains(l.cancel, x, y) {return .Cancel}
 	return .None
 }
 
-confirm_contains :: proc(l: Confirm_Layout, x, y: f32) -> bool {return contains(l.panel, x, y)}
+confirm_contains :: proc(l: Confirm_Layout, x, y: f32) -> bool {return render.rect_contains(l.panel, x, y)}
 
 @(private)
 confirm_cycle :: proc(c: ^Confirm, step: int) {
@@ -196,7 +195,7 @@ confirm_button_draw :: proc(
 	label: string,
 	scale: f32,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	accept := button == .Accept
 	active := armed_is(c.armed, button)
 	hover := c.hover == button ? c.hover_motion.hover.value : 0
@@ -246,7 +245,7 @@ confirm_draw :: proc(
 	note: string,
 	option_label: string = "",
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	l := confirm_layout(width, height, scale, c.extended, c.show_option)
 	s := scale
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}

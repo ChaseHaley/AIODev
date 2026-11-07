@@ -2,10 +2,10 @@ package main
 
 import "aio:commands"
 import "aio:font"
-import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
 import "aio:pty"
+import "aio:render"
 import "aio:settings"
 import "aio:ui"
 import "core:fmt"
@@ -369,7 +369,7 @@ settings_pane_under_pointer :: proc(
 }
 
 @(require_results)
-settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: int) -> glyphs.Result {
+settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: int) -> render.Build_Status {
 	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
 	result := ui.editor_draw(
 		&w.editor,

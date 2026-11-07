@@ -50,7 +50,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		render.draw_list_reset(&list)
 		_ = render.push_layer(&list, l.viewport)
 		testing.expect_value(t, ui.palette_binding_draw(&p, &r.items[0], 0, row, &list, &text, theme, l, {}),
-		                     glyphs.Result.Ok)
+		                     render.Build_Status.Ok)
 		if !testing.expect(t, len(list.glyphs) > 0) {return}
 		idle := list.glyphs[0].rect
 		parts := ui.palette_binding_parts(row, scale)
@@ -60,13 +60,13 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		input := ui.text_styled(&text, .Body)
 		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K", parts.field.x + ui.CONTROL_INSET * scale,
 		                     parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent,
-		                     theme.text), glyphs.Result.Ok)
+		                     theme.text), render.Build_Status.Ok)
 		if testing.expect(t, len(list.glyphs) > 0) {testing.expect_value(t, list.glyphs[0].rect, idle)}
 		ui.palette_key(&p, &r, press(.Enter, {.Control}))
 		render.draw_list_reset(&list)
 		_ = render.push_layer(&list, l.viewport)
 		testing.expect_value(t, ui.palette_binding_draw(&p, &r.items[0], 0, row, &list, &text, theme, l, {}),
-		                     glyphs.Result.Ok)
+		                     render.Build_Status.Ok)
 		if testing.expect(t, len(list.glyphs) > 0) {
 			testing.expect_value(t, list.glyphs[0].rect, idle)
 		}
@@ -78,7 +78,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		_ = render.push_layer(&list, l.viewport)
 		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K, +1", parts.field.x + ui.CONTROL_INSET * scale,
 		                     parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent,
-		                     theme.text), glyphs.Result.Ok)
+		                     theme.text), render.Build_Status.Ok)
 		expected := make([]render.Glyph_Instance, len(list.glyphs), context.temp_allocator)
 		copy(expected, list.glyphs[:])
 		for editing in ([?]bool{false, true}) {
@@ -86,7 +86,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 			render.draw_list_reset(&list)
 			_ = render.push_layer(&list, l.viewport)
 			testing.expect_value(t, ui.palette_binding_draw(&p, &r.items[0], 0, row, &list, &text, theme, l, {}),
-			                     glyphs.Result.Ok)
+			                     render.Build_Status.Ok)
 			testing.expect_value(t, len(list.glyphs), len(expected))
 			for glyph, i in list.glyphs {
 				if i < len(expected) {testing.expect_value(t, glyph.atlas, expected[i].atlas)}
@@ -111,7 +111,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 			field := ui.editor_row_parts(&e, page, 1).field
 			testing.expect_value(t, field.width, parts.field.width)
 			render.draw_list_reset(&list)
-			testing.expect_value(t, ui.editor_draw(&e, page, &list, &text, theme, true), glyphs.Result.Ok)
+			testing.expect_value(t, ui.editor_draw(&e, page, &list, &text, theme, true), render.Build_Status.Ok)
 			count := 0
 			for glyph in list.glyphs {
 				center := [2]f32{glyph.rect.x + glyph.rect.width / 2, glyph.rect.y + glyph.rect.height / 2}

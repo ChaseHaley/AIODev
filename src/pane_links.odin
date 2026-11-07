@@ -1,8 +1,8 @@
 package main
 
-import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
+import "aio:render"
 import "aio:ui"
 import "core:log"
 
@@ -433,7 +433,7 @@ pane_links_sync :: proc(app: ^App) {
 	}
 }
 
-pane_link_title_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+pane_link_title_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	tab := selected_tab(w.workspace)
 	if tab == nil {return .Ok}
 	inset := ui.SPACE_3 * w.scale

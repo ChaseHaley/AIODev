@@ -1,8 +1,8 @@
 package main
 
-import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
+import "aio:render"
 import "aio:settings"
 import "aio:ui"
 
@@ -234,7 +234,7 @@ profile_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 	return true
 }
 
-profile_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+profile_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	return ui.menu_draw(
 		&w.profile_menu.menu,
 		&w.list,

@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import platform_api "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -71,20 +70,16 @@ shell_icon_load :: proc(app: ^App) {
 	mark_all_dirty(app)
 }
 
-shell_icon_atlas :: proc(app: ^App) -> (render.Rect, glyphs.Result) {
+shell_icon_atlas :: proc(app: ^App) -> (render.Rect, render.Build_Status) {
 	icon := &app.shell_icon
 	if icon.width == 0 {return {}, .Ok}
-	if icon.slot.generation != render.atlas_generation(app.device) {
-		slot, ok := render.atlas_reserve(app.device, i32(icon.width), i32(icon.height), true)
-		if !ok {render.atlas_reset(app.device); return {}, .Atlas_Reset}
-		render.atlas_upload(
-			app.device,
-			slot,
-			icon.pixels[:icon.width * icon.height * 4],
-			icon.width,
-		)
-		icon.slot = slot
-	}
-	r := icon.slot
-	return {f32(r.x), f32(r.y), f32(r.width), f32(r.height)}, .Ok
+	return render.atlas_ensure(
+		app.device,
+		&icon.slot,
+		i32(icon.width),
+		i32(icon.height),
+		icon.pixels[:icon.width * icon.height * 4],
+		icon.width,
+		true,
+	)
 }

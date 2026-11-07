@@ -52,7 +52,7 @@ glyph_entries_are_cached :: proc(t: ^testing.T) {
 		return
 	}
 	first, result := glyphs.glyph(&f.cache, g, 20)
-	testing.expect_value(t, result, glyphs.Result.Ok)
+	testing.expect_value(t, result, render.Build_Status.Ok)
 	testing.expect(t, first.size.x > 0 && first.size.y > 0)
 	testing.expect(t, first.offset.y < 0)
 	again, _ := glyphs.glyph(&f.cache, g, 20)
@@ -61,7 +61,7 @@ glyph_entries_are_cached :: proc(t: ^testing.T) {
 	testing.expect(t, larger.size.y > first.size.y)
 	space, _ := font.glyph_lookup(f.fonts, f.family, .Regular, ' ')
 	empty, empty_result := glyphs.glyph(&f.cache, space, 20)
-	testing.expect_value(t, empty_result, glyphs.Result.Ok)
+	testing.expect_value(t, empty_result, render.Build_Status.Ok)
 	testing.expect_value(t, empty.size, [2]f32{})
 }
 
@@ -74,7 +74,7 @@ sprites_cover_the_cell_width :: proc(t: ^testing.T) {
 	defer fixture_destroy(&f)
 	for kind in glyphs.Sprite {
 		entry, result := glyphs.sprite(&f.cache, kind, 9, 2)
-		testing.expect_value(t, result, glyphs.Result.Ok)
+		testing.expect_value(t, result, render.Build_Status.Ok)
 		testing.expect_value(t, entry.size, [2]f32{9, 8})
 		testing.expect_value(t, entry.offset, [2]f32{0, -4})
 		again, _ := glyphs.sprite(&f.cache, kind, 9, 2)
@@ -100,9 +100,9 @@ atlas_reset_invalidates_entries :: proc(t: ^testing.T) {
 	}
 	next, _ := font.glyph_lookup(f.fonts, f.family, .Regular, 'C')
 	_, overflow := glyphs.glyph(&f.cache, next, 24)
-	testing.expect_value(t, overflow, glyphs.Result.Atlas_Reset)
+	testing.expect_value(t, overflow, render.Build_Status.Atlas_Reset)
 	after, result := glyphs.glyph(&f.cache, g, 24)
-	testing.expect_value(t, result, glyphs.Result.Ok)
+	testing.expect_value(t, result, render.Build_Status.Ok)
 	testing.expect_value(t, after.size, before.size)
 	testing.expect_value(t, after.atlas.x + after.atlas.y, 0)
 }

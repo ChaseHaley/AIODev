@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -505,7 +504,7 @@ reset_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 	s := result_setting(p, index)
 	if s == nil {return -1}
 	row, _ := row_rect(p, l, index)
-	return contains(reset_rect(s, row, l.scale), x, y) ? index : -1
+	return render.rect_contains(reset_rect(s, row, l.scale), x, y) ? index : -1
 }
 
 // A press on a reset button saves the default. An unmodified setting has nothing to reset.
@@ -527,11 +526,11 @@ draw_reset :: proc(
 	index: int,
 	row: render.Rect,
 	pointer: [2]f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := result_setting(p, index)
 	rect := reset_rect(s, row, l.scale)
 	if rect.width <= 0 {return .Ok}
-	hovered := contains(rect, pointer.x, pointer.y)
+	hovered := render.rect_contains(rect, pointer.x, pointer.y)
 	modified, selected := setting_modified(p, s), index == p.selected
 	_ = reset_button_draw(list, theme, rect, modified, hovered, selected, pointer, l.scale)
 	return .Ok
@@ -599,7 +598,7 @@ choice_popup_rect :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout) -> re
 }
 
 palette_popup_contains :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> bool {
-	return contains(palette_popup_rect(p, l), x, y)
+	return render.rect_contains(palette_popup_rect(p, l), x, y)
 }
 
 // Searchable lists, such as installed fonts, have a filter field at the top of the popup.
@@ -613,7 +612,7 @@ popup_list_top :: proc(p: ^Palette, c: ^Choice_Edit, popup: render.Rect, scale: 
 @(private)
 popup_row_at :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout, x, y: f32) -> int {
 	popup := choice_popup_rect(p, c, l)
-	if !contains(popup, x, y) {return -1}
+	if !render.rect_contains(popup, x, y) {return -1}
 	top := popup_list_top(p, c, popup, l.scale)
 	if y < top {return -1}
 	index := c.scroll + int((y - top) / (PALETTE_POPUP_ROW * l.scale))
@@ -648,12 +647,12 @@ control_press :: proc(p: ^Palette, l: Palette_Layout, index: int, x, y: f32) -> 
 	// The toggle takes a slightly taller target than it draws.
 	target := control
 	target.y, target.height = row.y, row.height
-	if !contains(target, x, y) {return .None, false}
+	if !render.rect_contains(target, x, y) {return .None, false}
 	setting := p.results[index].setting
 	p.selected = index
 	#partial switch s.control {
 	case .Slider:
-		if contains(slider_number_rect(control, l.scale), x, y) {return open_text(p, setting), true}
+		if render.rect_contains(slider_number_rect(control, l.scale), x, y) {return open_text(p, setting), true}
 		edit_set(p, nil)
 		track := slider_track(control, l.scale)
 		number := snap(s, slider_value(s.minimum, s.maximum, (x - track.x) / max(1, track.width)))
@@ -735,13 +734,13 @@ edit_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> (O
 	#partial switch &edit in p.edit {
 	case Choice_Edit:
 		popup := choice_popup_rect(p, &edit, l)
-		if contains(popup, x, y) {
+		if render.rect_contains(popup, x, y) {
 			if index := popup_row_at(p, &edit, l, x, y); index >= 0 {
 				return popup_choose(p, &edit, index), true
 			}
 			if text != nil && p.settings[edit.setting].searchable {
 				box := popup_search_box(p, popup, text, l.scale)
-				if contains(box.rect, x, y) {
+				if render.rect_contains(box.rect, x, y) {
 					_ = field_move(&p.buffers.filter, field_box_offset(box, x), false)
 					drag_set(p, Filter_Drag{})
 				}
@@ -749,12 +748,12 @@ edit_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> (O
 			return .Changed, true
 		}
 		// A press on the open control closes the list, like the Settings page.
-		closing := contains(edit_control(p, l, edit.setting), x, y)
+		closing := render.rect_contains(edit_control(p, l, edit.setting), x, y)
 		edit_set(p, nil)
 		return .Changed, closing
 	case Text_Edit:
 		control := edit_control(p, l, edit.setting)
-		if contains(control, x, y) {
+		if render.rect_contains(control, x, y) {
 			if text != nil {
 				box := text_entry_box(p, control, text, l.scale)
 				_ = field_move(&p.buffers.field, field_box_offset(box, x), false)
@@ -774,21 +773,23 @@ control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.
 	if _, sliding := p.drag.(Slider_Drag); sliding {return .Hand, true}
 	switch &edit in p.edit {
 	case Shortcut_Edit:
-		if contains(palette_popup_rect(p, l), x, y) {return .Hand, true}
+		if render.rect_contains(palette_popup_rect(p, l), x, y) {return .Hand, true}
 		row, _ := row_rect(p, l, edit.result)
 		parts := palette_binding_parts(row, l.scale)
-		if contains(parts.field, x, y) || contains(parts.positions, x, y) || contains(parts.reset, x, y) {
+		if render.rect_contains(parts.field, x, y) ||
+		   render.rect_contains(parts.positions, x, y) ||
+		   render.rect_contains(parts.reset, x, y) {
 			return .Hand, true
 		}
 		return .Arrow, false
 	case Choice_Edit:
 		popup := choice_popup_rect(p, &edit, l)
-		if contains(popup, x, y) {
+		if render.rect_contains(popup, x, y) {
 			if popup_row_at(p, &edit, l, x, y) >= 0 {return .Hand, true}
 			return y < popup_list_top(p, &edit, popup, l.scale) ? .Text : .Arrow, true
 		}
 	case Text_Edit:
-		if contains(edit_control(p, l, edit.setting), x, y) {return .Text, true}
+		if render.rect_contains(edit_control(p, l, edit.setting), x, y) {return .Text, true}
 	}
 	index := row_at(p, l, x, y)
 	s := result_setting(p, index)
@@ -796,7 +797,7 @@ control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.
 	if reset_at(p, l, x, y) == index {return .Hand, true}
 	if s.control == .None {return .Arrow, false}
 	row, _ := row_rect(p, l, index)
-	if contains(control_rect(s, row, l.scale), x, y) {return .Hand, true}
+	if render.rect_contains(control_rect(s, row, l.scale), x, y) {return .Hand, true}
 	return .Arrow, false
 }
 
@@ -809,7 +810,7 @@ draw_control :: proc(
 	l: Palette_Layout,
 	setting: int,
 	row: render.Rect,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := &p.settings[setting]
 	scale := l.scale
 	control := control_rect(s, row, scale)
@@ -868,7 +869,7 @@ draw_popup :: proc(
 	text: ^Text,
 	theme: Theme,
 	l: Palette_Layout,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	c, listing := &p.edit.(Choice_Edit)
 	if !listing {return .Ok}
 	popup := choice_popup_rect(p, c, l)

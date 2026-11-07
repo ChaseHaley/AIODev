@@ -1,3 +1,6 @@
+// compile_shader defines RECT_FILL_* and GLYPH_* from the render package constants. Frame,
+// RectInstance and GlyphInstance mirror Frame_Constants, Rect_Instance and Glyph_Instance, whose
+// layouts are asserted beside their Odin declarations.
 cbuffer Frame : register(b0) {
     float4 gamma_ratios;
     float2 target_size;
@@ -105,9 +108,9 @@ float arc_distance(float2 p, float4 s, float radius) {
 }
 
 float4 rect_ps(Vertex i) : SV_Target {
-    if (i.flags == 4 || i.flags == 5) {
-        float d = i.flags == 4 ? segment_distance(i.local, i.sheen.xy, i.sheen.zw)
-                               : arc_distance(i.local, i.sheen, i.edge.x);
+    if (i.flags == RECT_FILL_SEGMENT || i.flags == RECT_FILL_ARC) {
+        float d = i.flags == RECT_FILL_SEGMENT ? segment_distance(i.local, i.sheen.xy, i.sheen.zw)
+                                               : arc_distance(i.local, i.sheen, i.edge.x);
         float a = saturate(0.5 + i.extra.x * 0.5 - d) * i.color.a * clip_coverage(i.position.xy);
         return float4(i.color.rgb * a, a);
     }
@@ -118,12 +121,12 @@ float4 rect_ps(Vertex i) : SV_Target {
     if (i.extra.x > 0) coverage *= saturate(distance + i.extra.x + 0.5);
     float alpha = coverage * i.color.a * clip_coverage(i.position.xy);
     float3 rgb = i.color.rgb;
-    if (i.flags == 1) {
+    if (i.flags == RECT_FILL_HUE_WHEEL) {
         float2 d = (i.local - i.rect.zw * 0.5) / max(1, i.rect.zw * 0.5);
         rgb = hsv_rgb(frac(atan2(d.y, d.x) / 6.2831853 + 1), saturate(length(d)), i.color.r);
-    } else if (i.flags == 2) {
+    } else if (i.flags == RECT_FILL_VALUE_RAMP) {
         rgb *= saturate(i.local.x / max(1, i.rect.z));
-    } else if (i.flags == 3) {
+    } else if (i.flags == RECT_FILL_RIM) {
         // A rim light: a band just inside the rounded edge, reaching out from the pointer,
         // with a faint interior wash so the face is not perfectly flat.
         float2 delta = i.local - i.sheen.xy;
@@ -167,8 +170,10 @@ float4 image_ps(Vertex i) : SV_Target {
 // DirectWrite grayscale correction, after microsoft/terminal src/renderer/atlas/dwrite.hlsl (MIT).
 float4 glyph_ps(Vertex i) : SV_Target {
     float opacity = i.color.a * clip_coverage(i.position.xy);
-    if (i.flags & 2) opacity *= saturate((i.extra.z - i.position.x) / max(1, i.extra.z - i.extra.y));
-    if (i.flags & 1) {
+    if (i.flags & GLYPH_FADE) {
+        opacity *= saturate((i.extra.z - i.position.x) / max(1, i.extra.z - i.extra.y));
+    }
+    if (i.flags & GLYPH_COLOR) {
         // Color glyphs are premultiplied RGBA; fade them with the instance alpha only.
         return color_atlas.Load(int3(floor(i.texel), 0)) * opacity;
     }

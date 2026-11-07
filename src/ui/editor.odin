@@ -2,7 +2,6 @@ package ui
 
 import "aio:colour"
 import "aio:commands"
-import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -794,8 +793,8 @@ sync_color :: proc(p: ^Editor) {
 	row := editor_row(p)
 	if row == nil || (row.kind != .Color && row.kind != .Optional_Color) {return}
 	c, ok, _ := settings.parse_color(field_string(&p.value))
-	if !ok || settings.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2]) == c {return}
-	h, s, v := settings.rgb_to_hsv(c)
+	if !ok || colour.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2]) == c {return}
+	h, s, v := colour.rgb_to_hsv(c)
 	if s == 0 || v == 0 {h = p.hsv[0]}
 	if v == 0 {s = p.hsv[1]}
 	p.hsv = {h, s, v}
@@ -1376,11 +1375,11 @@ max_scroll :: proc(p: ^Editor) -> int {return max(0, len(p.items) - max(1, p.vis
 // Scrolls the page, or the outline under the pointer, without moving the selection.
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 	if profile_menu_shown(p) {menu_wheel(&p.profile_menu, rows); return}
-	if editor_popup(p) == .Choice && contains(editor_popup_rect(p, l), x, y) {
+	if editor_popup(p) == .Choice && render.rect_contains(editor_popup_rect(p, l), x, y) {
 		if row := editor_row(p); row != nil {choice_scroll_to(p, row, l, p.popup_scroll - rows)}
 		return
 	}
-	if editor_popup(p) == .Shortcuts && contains(editor_popup_rect(p, l), x, y) {
+	if editor_popup(p) == .Shortcuts && render.rect_contains(editor_popup_rect(p, l), x, y) {
 		if row := editor_row(p); row != nil {
 			last := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			visible := shortcut_popup_rows(p, l)
@@ -1393,7 +1392,7 @@ editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 		}
 		return
 	}
-	if contains(l.outline, x, y) {
+	if render.rect_contains(l.outline, x, y) {
 		p.outline_scroll = clamp(
 			p.outline_scroll - rows,
 			0,
@@ -2303,11 +2302,6 @@ color_parts :: proc(popup: render.Rect, optional: bool, scale: f32) -> Color_Par
 }
 
 @(private)
-contains :: proc(r: render.Rect, x, y: f32) -> bool {
-	return r.width > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-}
-
-@(private)
 pick_color :: proc(p: ^Editor, c: Color_Parts, drag: Color_Drag, x, y: f32) {
 	if drag == .Wheel {
 		radius := c.wheel.width / 2
@@ -2319,7 +2313,7 @@ pick_color :: proc(p: ^Editor, c: Color_Parts, drag: Color_Drag, x, y: f32) {
 		p.hsv[2] = clamp((x - c.ramp.x) / max(1, c.ramp.width), 0, 1)
 	}
 	// The picker chooses hue, saturation and value; a translucent color keeps its typed alpha.
-	picked := settings.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2])
+	picked := colour.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2])
 	previous, _ := colour.parse_translucent(field_string(&p.value), .Permissive)
 	buffer: [colour.HEX_ALPHA_LENGTH]u8
 	text := colour.format_translucent({picked.r, picked.g, picked.b, previous.a}, buffer[:])
@@ -2353,17 +2347,17 @@ editor_press :: proc(
 		return .Changed
 	}
 	popup := editor_popup(p)
-	if popup == .None && contains(editor_reset_all_rect(l), x, y) {return .Reset_All}
+	if popup == .None && render.rect_contains(editor_reset_all_rect(l), x, y) {return .Reset_All}
 	if popup != .None {
 		r := editor_popup_rect(p, l)
 		row := editor_row(p)
-		if !contains(r, x, y) || row == nil {
+		if !render.rect_contains(r, x, y) || row == nil {
 			if popup == .Shortcuts {editor_message(p, "", false)}
 			editor_mode_set(p, Editor_Editing{})
 			return .Changed
 		}
 		if choice, open := p.mode.(Editor_Choice_Popup); open {
-			if contains(choice_font_toggle_rect(p, l), x, y) {
+			if render.rect_contains(choice_font_toggle_rect(p, l), x, y) {
 				choice.toggle_focus = true
 				editor_mode_set(p, choice)
 				return .Font_Filter
@@ -2409,11 +2403,11 @@ editor_press :: proc(
 		c := color_parts(r, row.kind == .Optional_Color, s)
 		drag: Color_Drag
 		switch {
-		case contains(c.wheel, x, y):
+		case render.rect_contains(c.wheel, x, y):
 			drag = .Wheel
-		case contains({c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}, x, y):
+		case render.rect_contains({c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}, x, y):
 			drag = .Ramp
-		case contains(c.no_color, x, y):
+		case render.rect_contains(c.no_color, x, y):
 			field_set(&p.value, "")
 			editor_mode_set(p, Editor_Editing{})
 			return .Save
@@ -2424,25 +2418,25 @@ editor_press :: proc(
 		pick_color(p, c, drag, x, y)
 		return .Changed
 	}
-	if contains(editor_clear_rect(p, l), x, y) {
+	if render.rect_contains(editor_clear_rect(p, l), x, y) {
 		if editor_focus(p) != .Search {stop_editing(p)}
 		field_set(&p.filter, "")
 		editor_filter(p)
 		return .Changed
 	}
-	if contains(l.filter, x, y) {
+	if render.rect_contains(l.filter, x, y) {
 		if editor_focus(p) != .Search {stop_editing(p)}
 		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend)
 		editor_mode_set(p, Editor_Browsing{selecting = true})
 		return .Changed
 	}
-	if contains(l.outline, x, y) {
+	if render.rect_contains(l.outline, x, y) {
 		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
 		if entry >= len(outline_entries(p)) {return .None}
 		editor_jump(p, entry)
 		return .Changed
 	}
-	if !contains(l.list, x, y) {return .None}
+	if !render.rect_contains(l.list, x, y) {return .None}
 	index := p.scroll + int((y - l.list.y) / l.row_height)
 	if index >= len(p.items) || p.items[index].row < 0 {return .None}
 	if index != p.selected {editor_select(p, index)}
@@ -2455,39 +2449,39 @@ editor_press :: proc(
 	   row.kind == .Detected_Header {
 		table := profile_row_parts(row.kind, parts.row, s)
 		switch {
-		case row.kind == .Profile && contains(table.more, x, y):
+		case row.kind == .Profile && render.rect_contains(table.more, x, y):
 			editor_profile_menu_open(p, row, table)
 			return .Changed
-		case row.kind == .Profile && contains(table.handle, x, y):
+		case row.kind == .Profile && render.rect_contains(table.handle, x, y):
 			if filtering(p) {return .Changed}
 			grab := (y - parts.row.y) / l.row_height
 			order_begin(p, Order_Profile{strings.clone(row.profile)}, profile_index_at(p, index), grab)
 			return .Changed
-		case row.kind == .Profile && contains(table.radio, x, y):
+		case row.kind == .Profile && render.rect_contains(table.radio, x, y):
 			editor_mode_set(p, Editor_Editing{})
 			p.profile_control = .Radio
 			return profile_request(p, .Default, row.profile)
-		case row.kind == .Profile && contains(table.toggle, x, y):
+		case row.kind == .Profile && render.rect_contains(table.toggle, x, y):
 			editor_mode_set(p, Editor_Editing{})
 			p.profile_control = .Hidden
 			editor_request_set(p, Profile_Hidden_Request{strings.clone(row.profile), .Hidden not_in row.flags})
 			return .Profile_Action
-		case row.kind == .Profile && contains(table.expand, x, y):
+		case row.kind == .Profile && render.rect_contains(table.expand, x, y):
 			editor_mode_set(p, Editor_Editing{})
 			p.profile_control = .Expand
 			editor_profile_toggle(p, row.profile)
 			return .Changed
-		case row.kind == .Profile && contains(table.duplicate, x, y):
+		case row.kind == .Profile && render.rect_contains(table.duplicate, x, y):
 			editor_mode_set(p, Editor_Editing{})
 			p.profile_control = .Duplicate
 			return profile_request(p, .Duplicate, row.profile)
 		case row.kind == .Profile &&
 		     row.profile != settings.PROFILE_DEFAULT_ID && .Protected not_in row.flags &&
-		     contains(table.remove, x, y):
+		     render.rect_contains(table.remove, x, y):
 			editor_mode_set(p, Editor_Editing{})
 			p.profile_control = .Remove
 			return profile_request(p, .Remove, row.profile)
-		case row.kind == .Detected && contains(table.enable, x, y):
+		case row.kind == .Detected && render.rect_contains(table.enable, x, y):
 			editor_mode_set(p, Editor_Editing{})
 			p.profile_control = .Enable
 			return profile_request(p, .Enable, row.profile)
@@ -2498,7 +2492,7 @@ editor_press :: proc(
 			return .Save
 		case row.kind == .Profile:
 			if (row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags) &&
-			   contains(table.remove, x, y) {
+			   render.rect_contains(table.remove, x, y) {
 				return .Changed
 			}
 			editor_profile_toggle(p, row.profile)
@@ -2507,22 +2501,22 @@ editor_press :: proc(
 		return .Changed
 	}
 	switch {
-	case contains(parts.reset, x, y):
+	case render.rect_contains(parts.reset, x, y):
 		return .Reset
-	case contains(parts.clear, x, y):
+	case render.rect_contains(parts.clear, x, y):
 		field_set(&p.value, "")
 		return .Save
-	case contains(parts.toggle, x, y):
+	case render.rect_contains(parts.toggle, x, y):
 		editor_mode_set(p, Editor_Editing{})
 		return flip_toggle(p)
-	case contains(parts.positions, x, y):
+	case render.rect_contains(parts.positions, x, y):
 		p.physical = !p.physical
 		return .Changed
-	case contains(parts.swatch, x, y) && row.kind != .Profile_Icon:
+	case render.rect_contains(parts.swatch, x, y) && row.kind != .Profile_Icon:
 		editor_mode_set(p, Editor_Color_Popup{})
 		return .Changed
-	case contains(parts.slider, x, y) ||
-	     contains(
+	case render.rect_contains(parts.slider, x, y) ||
+	     render.rect_contains(
 		     {
 			     parts.slider.x - 8 * s,
 			     parts.slider.y - 10 * s,
@@ -2536,7 +2530,7 @@ editor_press :: proc(
 		editor_mode_set(p, Editor_Editing{drag = .Slider})
 		slide(p, row, parts.slider, x)
 		return .Changed
-	case contains(parts.field, x, y):
+	case render.rect_contains(parts.field, x, y):
 		#partial switch row.kind {
 		case .Choice:
 			open_choices(p, row)
@@ -2565,7 +2559,9 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 	if drag, reordering := &p.order.(Order_Dragging); reordering {
 		moved := profile_drag_move(p, l, y)
 		// A drop outside the page keeps the saved order; the group eases back to its place.
-		if _, group := drag.block.(Order_Group); group && !contains(l.list, x, y) {drag.target = drag.from}
+		if _, group := drag.block.(Order_Group); group && !render.rect_contains(l.list, x, y) {
+			drag.target = drag.from
+		}
 		return moved
 	}
 	switch m in p.mode {
@@ -2692,7 +2688,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 				right - popup.x - 4 * l.scale,
 				CHOICE_HEIGHT * l.scale,
 			}
-			if contains(popup, x, y) && visible >= 0 && contains(option, x, y) {
+			if render.rect_contains(popup, x, y) && visible >= 0 && render.rect_contains(option, x, y) {
 				index, valid := visible, false
 				#partial switch popup_open {
 				case .Choice:
@@ -2713,31 +2709,31 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	}
 	item, reset, outline := -1, -1, -1
 	profile_item, profile_control := -1, Profile_Control.Radio
-	if popup_open == .None && !editor_order_dragging(p, .Profiles) && contains(l.list, x, y) {
+	if popup_open == .None && !editor_order_dragging(p, .Profiles) && render.rect_contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
 		if index < len(p.items) && p.items[index].row >= 0 {
 			item = index
 			parts := editor_row_parts(p, l, index)
-			if contains(parts.reset, x, y) {reset = index}
+			if render.rect_contains(parts.reset, x, y) {reset = index}
 			row := &p.rows[p.items[index].row]
 			if row.kind == .Profile || row.kind == .Detected {
 				table := profile_row_parts(row.kind, parts.row, l.scale)
 				profile_item = index
 				switch {
-				case contains(table.more, x, y):
+				case render.rect_contains(table.more, x, y):
 					profile_control = .More
-				case contains(table.radio, x, y):
+				case render.rect_contains(table.radio, x, y):
 					profile_control = .Radio
-				case contains(table.toggle, x, y):
+				case render.rect_contains(table.toggle, x, y):
 					profile_control = .Hidden
-				case contains(table.expand, x, y):
+				case render.rect_contains(table.expand, x, y):
 					profile_control = .Expand
-				case contains(table.duplicate, x, y):
+				case render.rect_contains(table.duplicate, x, y):
 					profile_control = .Duplicate
 				case row.profile != settings.PROFILE_DEFAULT_ID && .Protected not_in row.flags &&
-				     contains(table.remove, x, y):
+				     render.rect_contains(table.remove, x, y):
 					profile_control = .Remove
-				case contains(table.enable, x, y):
+				case render.rect_contains(table.enable, x, y):
 					profile_control = .Enable
 				case:
 					profile_item = -1
@@ -2745,11 +2741,11 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 			}
 		}
 	}
-	if popup_open == .None && contains(l.outline, x, y) {
+	if popup_open == .None && render.rect_contains(l.outline, x, y) {
 		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
 		if entry < len(outline_entries(p)) {outline = entry}
 	}
-	clear := contains(editor_clear_rect(p, l), x, y)
+	clear := render.rect_contains(editor_clear_rect(p, l), x, y)
 	if item == p.hover_item &&
 	   reset == p.hover_reset &&
 	   outline == p.hover_outline &&
@@ -2772,25 +2768,25 @@ editor_hover_clear :: proc(p: ^Editor) {
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if profile_menu_shown(p) {return false}
-	if contains(editor_popup_rect(p, l), x, y) {return false}
-	if contains(filter_text_rect(p, l), x, y) {return true}
-	if !contains(l.list, x, y) {return false}
+	if render.rect_contains(editor_popup_rect(p, l), x, y) {return false}
+	if render.rect_contains(filter_text_rect(p, l), x, y) {return true}
+	if !render.rect_contains(l.list, x, y) {return false}
 	index := p.scroll + int((y - l.list.y) / l.row_height)
 	if index >= len(p.items) || p.items[index].row < 0 {return false}
 	kind := p.rows[p.items[index].row].kind
-	return text_kind(kind) && contains(editor_row_parts(p, l, index).field, x, y)
+	return text_kind(kind) && render.rect_contains(editor_row_parts(p, l, index).field, x, y)
 }
 
 // The pointer for the page: text over editable text, a hand over anything a click changes.
 editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Cursor_Shape {
 	if profile_menu_shown(p) {return .Hand}
 	s := l.scale
-	if popup := editor_popup_rect(p, l); contains(popup, x, y) {
+	if popup := editor_popup_rect(p, l); render.rect_contains(popup, x, y) {
 		row := editor_row(p)
 		if row == nil {return .Arrow}
 		if editor_popup(p) == .Choice {
 			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {return .Arrow}
-			if contains(choice_font_toggle_rect(p, l), x, y) {return .Hand}
+			if render.rect_contains(choice_font_toggle_rect(p, l), x, y) {return .Hand}
 			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {return .Text}
 			popup.y += choice_search_height(row, s)
 		}
@@ -2804,34 +2800,36 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 		case .Color:
 			c := color_parts(popup, row.kind == .Optional_Color, s)
 			ramp := render.Rect{c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}
-			if contains(c.wheel, x, y) || contains(ramp, x, y) || contains(c.no_color, x, y) {
+			if render.rect_contains(c.wheel, x, y) ||
+			   render.rect_contains(ramp, x, y) ||
+			   render.rect_contains(c.no_color, x, y) {
 				return .Hand
 			}
 		}
 		return .Arrow
 	}
-	if contains(editor_reset_all_rect(l), x, y) {return .Hand}
-	if contains(editor_clear_rect(p, l), x, y) {return .Hand}
-	if contains(filter_text_rect(p, l), x, y) {return .Text}
-	if contains(l.outline, x, y) {
+	if render.rect_contains(editor_reset_all_rect(l), x, y) {return .Hand}
+	if render.rect_contains(editor_clear_rect(p, l), x, y) {return .Hand}
+	if render.rect_contains(filter_text_rect(p, l), x, y) {return .Text}
+	if render.rect_contains(l.outline, x, y) {
 		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
 		return entry < len(outline_entries(p)) ? .Hand : .Arrow
 	}
-	if !contains(l.list, x, y) {return .Arrow}
+	if !render.rect_contains(l.list, x, y) {return .Arrow}
 	index := p.scroll + int((y - l.list.y) / l.row_height)
 	if index >= len(p.items) || p.items[index].row < 0 {return .Arrow}
 	row := &p.rows[p.items[index].row]
 	parts := editor_row_parts(p, l, index)
 	if row.process_field == .Group {
 		cells := editor_process_parts(parts.row, s)
-		if contains(cells.handle, x, y) {return editor_process_orderable(p) ? .Resize_All : .Arrow}
+		if render.rect_contains(cells.handle, x, y) {return editor_process_orderable(p) ? .Resize_All : .Arrow}
 		return .Hand
 	}
 	#partial switch row.kind {
 	case .Profile, .Detected_Header, .Profile_Add:
 		return .Hand
 	case .Detected:
-		return contains(profile_row_parts(row.kind, parts.row, s).enable, x, y) ? .Hand : .Arrow
+		return render.rect_contains(profile_row_parts(row.kind, parts.row, s).enable, x, y) ? .Hand : .Arrow
 	}
 	slider := render.Rect {
 		parts.slider.x - 8 * s,
@@ -2840,14 +2838,14 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 		parts.slider.height + 20 * s,
 	}
 	switch {
-	case contains(parts.reset, x, y),
-	     contains(parts.clear, x, y),
-	     contains(parts.toggle, x, y),
-	     contains(parts.positions, x, y),
-	     contains(parts.swatch, x, y) && row.kind != .Profile_Icon,
-	     parts.slider.width > 0 && contains(slider, x, y):
+	case render.rect_contains(parts.reset, x, y),
+	     render.rect_contains(parts.clear, x, y),
+	     render.rect_contains(parts.toggle, x, y),
+	     render.rect_contains(parts.positions, x, y),
+	     render.rect_contains(parts.swatch, x, y) && row.kind != .Profile_Icon,
+	     parts.slider.width > 0 && render.rect_contains(slider, x, y):
 		return .Hand
-	case contains(parts.field, x, y):
+	case render.rect_contains(parts.field, x, y):
 		#partial switch row.kind {
 		case .Choice, .Shortcut, .Action:
 			return .Hand
@@ -2999,7 +2997,7 @@ profile_row_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	table := profile_row_parts(.Profile, parts.row, scale)
 	if selected {p.profile_menu_parts = table}
 	small := text_styled(text, .Detail)
@@ -3125,7 +3123,7 @@ profile_add_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	label := text^
 	icon := render.Rect {
 		row_rect.x + SPACE_3 * scale,
@@ -3156,7 +3154,7 @@ profile_detected_header_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	draw_rect(
 		list,
 		{
@@ -3206,7 +3204,7 @@ profile_detected_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	table := profile_row_parts(.Detected, parts.row, scale)
 	small := text_styled(text, .Detail)
 	cy := parts.row.y + parts.row.height / 2
@@ -3263,7 +3261,7 @@ control_draw :: proc(
 	theme: Theme,
 	page: render.Rect,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	value := selected ? field_string(&p.value) : row.value
 	focused := selected && editor_editing(p)
 	input_text := text_styled(text, .Body)
@@ -3365,7 +3363,7 @@ popup_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	r := editor_popup_rect(p, l)
 	row := editor_row(p)
 	if r.width == 0 || row == nil {return .Ok}
@@ -3388,7 +3386,7 @@ popup_draw :: proc(
 			}
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_CONTROL * s})}
-			if contains(option, pointer.x, pointer.y) {
+			if render.rect_contains(option, pointer.x, pointer.y) {
 				// Options carry the selection tint, not the paper fill, so no hairline.
 				if result := hover_rim_draw(list, theme, option, RADIUS_CONTROL * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
@@ -3460,7 +3458,7 @@ popup_draw :: proc(
 			}
 			if i ==
 			   p.popup_index {draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_CONTROL * s})}
-			if contains(option, pointer.x, pointer.y) {
+			if render.rect_contains(option, pointer.x, pointer.y) {
 				// Options carry the selection tint, not the paper fill, so no hairline.
 				if result := hover_rim_draw(list, theme, option, RADIUS_CONTROL * s, 1, s, pointer, false);
 				   result != .None {return .Ok}
@@ -3523,7 +3521,7 @@ popup_draw :: proc(
 			stroke = 2 * s,
 		},
 	)
-	full := colour.rgba(settings.hsv_to_rgb(p.hsv[0], p.hsv[1], 1))
+	full := colour.rgba(colour.hsv_to_rgb(p.hsv[0], p.hsv[1], 1))
 	draw_rect(
 		list,
 		{rect = c.ramp, color = full, radius = RADIUS_CONTROL * s, fill = render.RECT_FILL_VALUE_RAMP},
@@ -3575,7 +3573,7 @@ filter_draw :: proc(
 	theme: Theme,
 	focused: bool,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := l.scale
 	box := filter_box(p, l, text)
 	box_draw(list, l.filter, theme, focused, s)
@@ -3605,7 +3603,7 @@ outline_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if l.outline.width == 0 {return .Ok}
 	s := l.scale
 	entries := outline_entries(p)
@@ -3657,7 +3655,7 @@ editor_draw :: proc(
 	theme: Theme,
 	focused: bool,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := l.scale
 	p.visible_rows = l.rows
 	p.profile_menu.bounds = l.page

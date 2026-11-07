@@ -1,7 +1,7 @@
 package main
 
-import "aio:glyphs"
 import "aio:platform"
+import "aio:render"
 import "aio:ui"
 import "core:time"
 
@@ -193,7 +193,7 @@ confirmation_advance :: proc(app: ^App, w: ^Window, now: time.Tick) {
 	if settled {confirmation_clear(w)}
 }
 
-confirmation_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+confirmation_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	c := confirmation_shown(w)
 	if c == nil || !ui.presence_visible(c.dialog.presence) {return .Ok}
 	text: Confirmation_Text

@@ -2,7 +2,6 @@ package ui
 
 import "aio:commands"
 import "aio:fuzzy"
-import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
 import "base:runtime"
@@ -1057,7 +1056,7 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 @(private)
 row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 	r := l.list
-	if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height || l.row_height <= 0 {
+	if !render.rect_contains(r, x, y) || l.row_height <= 0 {
 		return -1
 	}
 	index := p.scroll + int((y - r.y) / l.row_height)
@@ -1067,7 +1066,7 @@ row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 @(private)
 mode_at :: proc(l: Palette_Layout, x, y: f32) -> int {
 	for mode, i in PALETTE_CYCLE {
-		if contains(l.modes[mode], x, y) {return i}
+		if render.rect_contains(l.modes[mode], x, y) {return i}
 	}
 	return -1
 }
@@ -1133,15 +1132,14 @@ palette_mouse_press :: proc(
 		if p.results[index].kind == .Command {
 			row, _ := row_rect(p, l, index)
 			parts := palette_binding_parts(row, l.scale)
-			if contains(parts.reset, x, y) {return palette_binding_reset(p, index), 0}
-			if contains(parts.field, x, y) {return palette_binding_open(p, index), 0}
+			if render.rect_contains(parts.reset, x, y) {return palette_binding_reset(p, index), 0}
+			if render.rect_contains(parts.field, x, y) {return palette_binding_open(p, index), 0}
 		}
 		if outcome, handled := reset_press(p, l, index, x, y); handled {return outcome, 0}
 		if outcome, handled := control_press(p, l, index, x, y); handled {return outcome, 0}
 		return run(p, index)
 	}
-	r := l.panel
-	if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height {
+	if !render.rect_contains(l.panel, x, y) {
 		palette_close(p)
 		return .Closed, 0
 	}
@@ -1167,8 +1165,7 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 }
 
 palette_input_contains :: proc(l: Palette_Layout, x, y: f32) -> bool {
-	r := l.input
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return render.rect_contains(l.input, x, y)
 }
 
 palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
@@ -1249,7 +1246,7 @@ draw_footer :: proc(
 	theme: Theme,
 	l: Palette_Layout,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if l.footer.width <= 0 || l.footer.height <= 0 {return .Ok}
 	if render.push_layer(list, l.footer) != .None {return .Ok}
 	draw_rect(list, {
@@ -1351,7 +1348,7 @@ draw_key_hint :: proc(
 	footer: render.Rect,
 	baseline: f32,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	pen := x
 	height := min(PALETTE_KEYCAP_HEIGHT * scale, footer.height)
 	top := footer.y + (footer.height - height) / 2
@@ -1387,7 +1384,7 @@ draw_modes :: proc(
 	theme: Theme,
 	l: Palette_Layout,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if l.mode_bar.width <= 0 || l.mode_bar.height <= 0 {return .Ok}
 	if render.push_layer(list, l.mode_bar) != .None {return .Ok}
 	draw_rect(list, {
@@ -1436,7 +1433,7 @@ palette_draw :: proc(
 	width, height, scale: f32,
 	opacity: f32 = 1, rise: f32 = 0,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	l := palette_layout(p, width, height, scale)
 	panel := l.panel
 	if render.push_layer(list, {0, 0, width, height}) != .None {
@@ -1484,7 +1481,7 @@ palette_draw :: proc(
 			row := render.Rect{l.list.x, l.list.y + f32(rows) * l.row_height, l.list.width, l.row_height}
 			if index == p.selected {
 				draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
-				if contains(row, pointer.x, pointer.y) {
+				if render.rect_contains(row, pointer.x, pointer.y) {
 					// The row carries the selection tint, not the paper fill, so no hairline.
 					if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer, false);
 					   result != .None {return .Ok}

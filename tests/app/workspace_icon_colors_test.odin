@@ -1,9 +1,9 @@
 package app_test
 
+import "aio:colour"
 import "core:testing"
 import app "../../src"
 import "aio:render"
-import "aio:term_view"
 import "aio:ui"
 import fixtures "../fixtures"
 
@@ -47,10 +47,10 @@ workspace143_colors_have_contrast_in_all_shipped_themes_and_selection_states :: 
 			for tint in 1..<len(app.WORKSPACE_ICON_COLORS) {
 				color := app.workspace_icon_tint(tint, theme.text)
 				for base in ([?]render.Color{theme.pane, theme.surface}) {
-					testing.expect(t, term_view.contrast_ratio(color, base) >= 3)
+					testing.expect(t, colour.contrast_ratio(color, base) >= 3)
 					selected := base
 					for i in 0..<3 { selected[i] = theme.selection[i]*theme.selection.a+base[i]*(1-theme.selection.a) }
-					testing.expect(t, term_view.contrast_ratio(color, selected) >= 3)
+					testing.expect(t, colour.contrast_ratio(color, selected) >= 3)
 				}
 			}
 		}

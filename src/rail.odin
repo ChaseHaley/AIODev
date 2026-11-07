@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:ui"
@@ -199,7 +198,7 @@ tab_orientation_button_rect :: proc(w: ^Window) -> render.Rect {
 
 tab_orientation_button_hit :: proc(w: ^Window, x, y: f32) -> bool {
 	r := tab_orientation_button_rect(w)
-	return r.width >= 24 * w.scale && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return r.width >= 24 * w.scale && render.rect_contains(r, x, y)
 }
 
 rail_toggle :: proc(app: ^App, w: ^Window) {
@@ -249,24 +248,20 @@ rail_tab_close_rect :: proc(w: ^Window, layout: ui.Rail_Layout, index: int) -> r
 }
 
 rail_tab_hit :: proc(w: ^Window, layout: ui.Rail_Layout, x, y: f32) -> int {
-	if x < layout.list.x || x >= layout.list.x + layout.list.width ||
-	   y < layout.list.y || y >= layout.list.y + layout.list.height {return -1}
+	if !render.rect_contains(layout.list, x, y) {return -1}
 	for pass in 0 ..< 2 {
 		for index := len(w.rail_rows) - 1; index >= 0; index -= 1 {
 			row := w.rail_rows[index]
 			foreground := tab_drag_active(w) && row.workspace.tabs[row.tab].marked
 			if foreground != (pass == 0) {continue}
-			r := rail_tab_rect(w, layout, index)
-			if x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height {return index}
+			if render.rect_contains(rail_tab_rect(w, layout, index), x, y) {return index}
 		}
 	}
 	return -1
 }
 
 rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Button) -> Tab_Interaction_Hit {
-	area := rail_area(w)
-	if !rail_visible(w) || x < area.x || x >= area.x + area.width ||
-	   y < area.y || y >= area.y + area.height {return {}}
+	if !rail_visible(w) || !render.rect_contains(rail_area(w), x, y) {return {}}
 	layout, ok := rail_current_layout(w)
 	if !ok {return {kind = .Empty}}
 	if ui.rail_footer_hit(layout, x, y) {
@@ -283,8 +278,7 @@ rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Butt
 	if entry.workspace != w.workspace || entry.tab < 0 || entry.tab >= len(w.workspace.tabs) {
 		return {kind = .Empty}
 	}
-	close := rail_tab_close_rect(w, layout, row)
-	on_close := x >= close.x && x < close.x + close.width && y >= close.y && y < close.y + close.height
+	on_close := render.rect_contains(rail_tab_close_rect(w, layout, row), x, y)
 	kind: Tab_Interaction_Kind = on_close ? .Close : .Tab
 	return {kind = kind, index = entry.tab}
 }
@@ -292,8 +286,7 @@ rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Butt
 @(require_results)
 rail_pane_target :: proc(w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool) {
 	if !rail_visible(w) {return -1, false, false}
-	area := rail_area(w)
-	if x < area.x || x >= area.x + area.width || y < area.y || y >= area.y + area.height {
+	if !render.rect_contains(rail_area(w), x, y) {
 		return -1, false, false
 	}
 	layout, built := rail_current_layout(w)
@@ -331,7 +324,7 @@ rail_row_draw :: proc(
 	layout: ui.Rail_Layout,
 	index: int,
 	moving: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	row := w.rail_rows[index]
 	s := w.scale
 	hover := w.rail_hover == index
@@ -354,7 +347,7 @@ rail_row_draw :: proc(
 	icon: string
 	atlas := render.Rect{}
 	if pane, terminal := workspace_focused_session_pane(app, row.workspace, row.tab); terminal {
-		result: glyphs.Result
+		result: render.Build_Status
 		icon, atlas, result = pane_icon(app, pane.session, 16 * s)
 		if result != .Ok {return result}
 	}
@@ -409,7 +402,7 @@ rail_row_draw :: proc(
 	return .Ok
 }
 
-rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if w.tabs_horizontal {return .Ok}
 	// An overlay draws while open or sliding; a docked rail only in its own presentation.
 	overlay, draw_overlay := w.rail.(Rail_Overlay)
@@ -490,7 +483,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	return .Ok
 }
 
-tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r := tab_orientation_button_rect(w)
 	if r.width < 24 * w.scale {return .Ok}
 	if render.push_layer(

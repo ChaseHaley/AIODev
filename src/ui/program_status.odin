@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 import "core:math"
 
@@ -57,7 +56,7 @@ status_glyph_draw :: proc(
 	mark: Status_Mark,
 	phase: f32,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if mark.glyph == .None {return .Ok}
 	size := min(area.width, area.height)
 	if size <= 2 * scale {return .Ok}

@@ -2,6 +2,7 @@ package render
 
 import "base:runtime"
 import "core:log"
+import "core:strconv"
 import win "core:sys/windows"
 import d3d "vendor:directx/d3d11"
 import compiler "vendor:directx/d3d_compiler"
@@ -69,6 +70,47 @@ Frame_Constants :: struct {
 	image_rect, image_uv:    Rect,
 }
 
+// Frame_Constants is draw.hlsl's `Frame` cbuffer. Constant-buffer packing never lets a vector cross
+// a 16-byte register, so the explicit padding keeps round_clip and image_rect on register starts.
+#assert(offset_of(Frame_Constants, rect_start) == 28 && offset_of(Frame_Constants, round_clip) == 48)
+#assert(offset_of(Frame_Constants, image_rect) == 80 && size_of(Frame_Constants) == 112)
+
+// The draw.hlsl names for the fill and glyph flag values, defined from the Odin constants.
+@(private)
+Shader_Constant :: struct {
+	name:  cstring,
+	value: u32,
+}
+
+@(private)
+SHADER_CONSTANTS :: [?]Shader_Constant {
+	{"RECT_FILL_HUE_WHEEL", RECT_FILL_HUE_WHEEL},
+	{"RECT_FILL_VALUE_RAMP", RECT_FILL_VALUE_RAMP},
+	{"RECT_FILL_RIM", RECT_FILL_RIM},
+	{"RECT_FILL_SEGMENT", RECT_FILL_SEGMENT},
+	{"RECT_FILL_ARC", RECT_FILL_ARC},
+	{"GLYPH_COLOR", GLYPH_COLOR},
+	{"GLYPH_FADE", GLYPH_FADE},
+}
+
+// Decimal macro text for each shader constant, plus the null entry that ends the macro list.
+@(private)
+Shader_Macros :: struct {
+	digits: [len(SHADER_CONSTANTS)][11]u8,
+	macros: [len(SHADER_CONSTANTS) + 1]compiler.SHADER_MACRO,
+}
+
+@(private)
+shader_macros :: proc(m: ^Shader_Macros) {
+	constants := SHADER_CONSTANTS
+	for constant, i in constants {
+		text := strconv.write_uint(m.digits[i][:10], u64(constant.value), 10)
+		m.digits[i][len(text)] = 0
+		m.macros[i] = {constant.name, cstring(&m.digits[i][0])}
+	}
+	m.macros[len(constants)] = {}
+}
+
 @(private)
 release :: proc(p: ^$T) {
 	if p != nil {
@@ -102,12 +144,14 @@ checked :: proc(
 @(private, require_results)
 compile_shader :: proc(entry, target: cstring) -> (^compiler.ID3DBlob, Error) {
 	source :: #load("shaders/draw.hlsl", string)
+	defines: Shader_Macros
+	shader_macros(&defines)
 	code, diagnostics: ^compiler.ID3DBlob
 	hr := compiler.Compile(
 		raw_data(source),
 		len(source),
 		"draw.hlsl",
-		nil,
+		&defines.macros[0],
 		nil,
 		entry,
 		target,
@@ -333,7 +377,7 @@ device_destroy :: proc(d: ^Device) {
 
 set_text_gamma :: proc(d: ^Device, gamma: Text_Gamma) {
 	d.gamma = {
-		gamma             = clamp(gamma.gamma, 1, 2.2),
+		gamma             = clamp(gamma.gamma, MIN_TEXT_GAMMA, MAX_TEXT_GAMMA),
 		enhanced_contrast = max(gamma.enhanced_contrast, 0),
 	}
 }
@@ -441,4 +485,33 @@ atlas_reset :: proc(d: ^Device) {
 
 atlas_generation :: proc(d: ^Device) -> u64 {
 	return d.generation
+}
+
+// The one atlas protocol for glyphs and icons: `slot` keeps `pixels` resident in the current atlas
+// generation, reserving and uploading again when it belongs to an earlier one. When the atlas is
+// full it is reset and the result is .Atlas_Reset: `slot` is untouched, every earlier slot is
+// stale, and the frame under construction must be rebuilt. Stride is in pixels, as for upload. A
+// zero slot always uploads, because device generations start at 1.
+@(require_results)
+atlas_ensure :: proc(
+	d: ^Device,
+	slot: ^Atlas_Slot,
+	width, height: i32,
+	pixels: []u8,
+	stride: int,
+	color := false,
+) -> (
+	Rect,
+	Build_Status,
+) {
+	if slot.generation != d.generation {
+		reserved, ok := atlas_reserve(d, width, height, color)
+		if !ok {
+			atlas_reset(d)
+			return {}, .Atlas_Reset
+		}
+		atlas_upload(d, reserved, pixels, stride)
+		slot^ = reserved
+	}
+	return {f32(slot.x), f32(slot.y), f32(slot.width), f32(slot.height)}, .Ok
 }

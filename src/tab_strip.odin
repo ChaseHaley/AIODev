@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:ui"
@@ -79,10 +78,7 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> int
 window_tab_close_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> int {
 	index := window_tab_hit(app, w, bar, x, y)
 	r := window_tab_close_rect(app, w, index)
-	if r.width > 0 &&	   x >= r.x &&
-	   x < r.x + r.width &&
-	   y >= r.y &&
-	   y < r.y + r.height {return index}
+	if r.width > 0 && render.rect_contains(r, x, y) {return index}
 	return -1
 }
 
@@ -136,7 +132,7 @@ tab_control :: proc(w: ^Window, index: int) -> ui.Control_Motion {
 	return w.tab_controls[index]
 }
 
-window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 {return .Ok}
 	dragging := tab_drag_active(w)
@@ -149,7 +145,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			icon: string
 			atlas := render.Rect{}
 			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {
-				result: glyphs.Result
+				result: render.Build_Status
 				icon, atlas, result = pane_icon(app, pane.session, ui.ICON_BUTTON * w.scale)
 				if result != .Ok {return result}
 			}

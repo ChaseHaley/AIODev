@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 import "core:strings"
 import "core:time"
@@ -251,8 +250,8 @@ notices_hit :: proc(
 		box, close := l.box, l.close
 		box.y += rise
 		close.y += rise
-		if contains(box, x, y) {
-			return {item.id, !notice_fading(item) && contains(close, x, y), true}
+		if render.rect_contains(box, x, y) {
+			return {item.id, !notice_fading(item) && render.rect_contains(close, x, y), true}
 		}
 		bottom = l.box.y - SPACE_2 * scale
 		if bottom < NOTICE_MARGIN * scale {break}
@@ -290,7 +289,7 @@ notices_draw :: proc(
 	theme: Theme,
 	width, height, scale: f32,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if len(n.items) == 0 || render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}

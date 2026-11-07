@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -336,23 +335,23 @@ clip_rect :: proc(r, bounds: render.Rect) -> render.Rect {
 	return {x, r.y, max(0, right - x), r.height}
 }
 
-find_contains :: proc(l: Find_Layout, x, y: f32) -> bool { return contains(l.panel, x, y) }
+find_contains :: proc(l: Find_Layout, x, y: f32) -> bool { return render.rect_contains(l.panel, x, y) }
 
 // Toggles and close always respond; the arrows only when there are matches.
 find_hit :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> Find_Outcome {
-	if contains(l.close, x, y) { return .Close }
-	if contains(l.case_toggle, x, y) { return .Case_Toggle }
-	if contains(l.regex_toggle, x, y) { return .Regex_Toggle }
+	if render.rect_contains(l.close, x, y) { return .Close }
+	if render.rect_contains(l.case_toggle, x, y) { return .Case_Toggle }
+	if render.rect_contains(l.regex_toggle, x, y) { return .Regex_Toggle }
 	if !enabled { return .None }
-	if contains(l.older, x, y) { return .Older }
-	if contains(l.newer, x, y) { return .Newer }
+	if render.rect_contains(l.older, x, y) { return .Older }
+	if render.rect_contains(l.newer, x, y) { return .Newer }
 	return .None
 }
 
 // Text over the query, a hand over an enabled button.
 find_pointer :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> platform.Cursor_Shape {
 	if find_hit(l, enabled, x, y) != .None {return .Hand}
-	return contains(l.query, x, y) ? .Text : .Arrow
+	return render.rect_contains(l.query, x, y) ? .Text : .Arrow
 }
 
 find_hover :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, x, y: f32) -> bool {
@@ -411,7 +410,7 @@ find_draw :: proc(
 	enabled: bool,
 	width, height, scale: f32,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	input_text := text_styled(base, .Body)
 	count := text_styled(base, .Detail)
 	l := find_layout(width, scale, text_width(&count, status))

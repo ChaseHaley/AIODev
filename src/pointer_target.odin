@@ -173,11 +173,6 @@ pointer_release :: proc(
 	return release != nil && release(app, w, e)
 }
 
-@(private)
-rect_contains :: proc(r: render.Rect, x, y: f32) -> bool {
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-}
-
 @(private = "file")
 move_point :: proc(e: platform.Mouse_Move_Event) -> (f32, f32) {return f32(e.x), f32(e.y)}
 
@@ -248,7 +243,7 @@ picker_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 @(private = "file")
 picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	icons := workspace_picker_mode(&w.workspace_picker) == .Icons
-	if icons && rect_contains(workspace_icon_color_button(w), x, y) {
+	if icons && render.rect_contains(workspace_icon_color_button(w), x, y) {
 		return "Change icon color"
 	}
 	return ""
@@ -361,7 +356,7 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 	if owner != .Rename {return}
 	x, y := move_point(e)
 	if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
-	pointer_set(app, w, rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
+	pointer_set(app, w, render.rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
 }
 
 // A press outside the dialog finishes the rename and is swallowed with its release. The workspace chip
@@ -371,17 +366,17 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 rename_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if !e.pressed {ui.field_release(&w.rename); return}
 	x, y := f32(e.x), f32(e.y)
-	if chip_name_shown(w) && !rect_contains(rename_rect(w), x, y) {
+	if chip_name_shown(w) && !render.rect_contains(rename_rect(w), x, y) {
 		overlay_close(app, w, .Leave)
 		target := pointer_target(app, w, x, y)
 		gesture_hand_off(w, e.button, target)
 		pointer_press(app, w, target, e)
 		return
 	}
-	if !rect_contains(rename_rect(w), x, y) {
+	if !render.rect_contains(rename_rect(w), x, y) {
 		rename_finish(app, w, false)
 		gesture_swallow(w, e.button, .Rename)
-	} else if e.button == .Left && rect_contains(rename_field_rect(w), x, y) {
+	} else if e.button == .Left && render.rect_contains(rename_field_rect(w), x, y) {
 		rename_pointer(app, w, x, true, .Shift in e.modifiers)
 	}
 }
@@ -631,7 +626,7 @@ workspace_button_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_E
 
 @(private = "file")
 pill_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return !floating_covers(w, x, y) && status_rect_contains(status_pill_rect(app, w), x, y)
+	return !floating_covers(w, x, y) && render.rect_contains(status_pill_rect(app, w), x, y)
 }
 
 @(private = "file")
@@ -654,7 +649,7 @@ pill_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private = "file")
 divider_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return false}
-	if rect_contains(w.float_capsule_group, x, y) {return false}
+	if render.rect_contains(w.float_capsule_group, x, y) {return false}
 	_, over := divider_cursor(w, x, y)
 	return over
 }
@@ -772,7 +767,7 @@ tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	} else if layout, ok := rail_current_layout(w); ok {
 		if row := rail_tab_hit(w, layout, x, y); row >= 0 {
 			close := rail_tab_close_rect(w, layout, row)
-			if rect_contains(close, x, y) {return "Close tab"}
+			if render.rect_contains(close, x, y) {return "Close tab"}
 		}
 		if ui.rail_footer_hit(layout, x, y) {
 			if ui.rail_profile_hit(layout, x, y) {return "Choose profile"}

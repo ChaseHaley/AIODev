@@ -34,6 +34,10 @@ Style :: struct {
 Frame :: struct {
 	background:      render.Color,
 	cursor_blinking: bool,
+	// The screen was read from the session for this build. False draws the previously captured
+	// screen (a synchronized-output hold or a failed read), so the frame must not be cached as the
+	// session's current generation.
+	captured:        bool,
 }
 
 View :: struct {
@@ -208,10 +212,10 @@ build :: proc(
 	style: Style,
 ) -> (
 	Frame,
-	glyphs.Result,
+	render.Build_Status,
 ) {
 	if list.error != .None {return {}, .Ok}
-	term.capture(session, v.state, &v.highlights, &v.images)
+	captured := term.capture(session, v.state, &v.highlights, &v.images)
 	b := Builder {
 		list    = list,
 		cache   = cache,
@@ -235,6 +239,7 @@ build :: proc(
 	frame := Frame {
 		background      = color(b.colors.background),
 		cursor_blinking = b.cursor.visible && b.cursor.blinking,
+		captured        = captured,
 	}
 	has_images := len(v.images.placements) > 0
 	if has_images {
@@ -438,7 +443,7 @@ row_backgrounds :: proc(v: ^View, b: ^Builder, top: f32) {
 }
 
 @(private)
-build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
+build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 	m := b.metrics
 	top := b.origin.y + f32(y) * m.cell_height
 	row_paints(v, b, y)
@@ -569,7 +574,7 @@ cell_face :: proc(p: Cell_Paint) -> font.Style {
 }
 
 @(private, require_results)
-draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
+draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> render.Build_Status {
 	if len(v.runes) == 0 {return .Ok}
 	clear(&v.shaped)
 	if err := font.shape(
@@ -632,7 +637,7 @@ draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Re
 }
 
 @(private, require_results)
-draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
+draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> render.Build_Status {
 	for r, i in v.runes {
 		g, found := font.glyph_lookup(b.fonts, b.style.family, face, r)
 		if !found {continue}
@@ -650,7 +655,7 @@ draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> gl
 }
 
 @(private)
-decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
+decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> render.Build_Status {
 	m := b.metrics
 	baseline := top + m.baseline
 	if p.style.strikethrough {

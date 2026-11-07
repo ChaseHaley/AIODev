@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
 import "core:unicode/utf8"
@@ -205,7 +204,7 @@ field_draw :: proc(
 	placeholder: string,
 	color: render.Color,
 	caret_width: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	value := field_string(f)
 	if value == "" {
 		if result := draw_text(text, list, placeholder, x, baseline, theme.muted, available);

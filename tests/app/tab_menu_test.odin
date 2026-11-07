@@ -372,7 +372,7 @@ tab_menu_draw_matches_labels_separators_and_disabled_rows :: proc(t: ^testing.T)
 		render.draw_list_reset(&w.list)
 		render.draw_list_reset(&expected)
 		testing.expect_value(t, render.push_layer(&expected, {0, 0, f32(w.width), f32(w.height)}), render.Error.None)
-		testing.expect_value(t, app.tab_menu_draw(&f.state, w), glyphs.Result.Ok)
+		testing.expect_value(t, app.tab_menu_draw(&f.state, w), render.Build_Status.Ok)
 		y := app.tab_menu_row_rect(w, 0).y
 		labels := [?]string{"Rename", "Duplicate", "", "Move Tab to Workspace…", "Move Tab to New Workspace", "Close to the Right",
 			"Close Others", "Close", "", "Tab Settings"}
@@ -390,20 +390,20 @@ tab_menu_draw_matches_labels_separators_and_disabled_rows :: proc(t: ^testing.T)
 			testing.expect_value(t, ui.draw_text(&w.ui_text, &expected, label, row.x+ui.CONTROL_INSET*scale,
 				row.y+(row.height-w.ui_text.line_height)/2+w.ui_text.ascent,
 				i == 5 || i == 6 ? f.state.theme.muted : f.state.theme.text,
-				max(1, row.width-2*ui.CONTROL_INSET*scale)), glyphs.Result.Ok)
+				max(1, row.width-2*ui.CONTROL_INSET*scale)), render.Build_Status.Ok)
 		}
 		testing.expect_value(t, len(w.list.glyphs), len(expected.glyphs))
 		for glyph, i in w.list.glyphs { testing.expect_value(t, glyph, expected.glyphs[i]) }
 		w.height = i32(120*scale)
 		menu_key(&f, {key = .End})
 		render.draw_list_reset(&w.list)
-		testing.expect_value(t, app.tab_menu_draw(&f.state, w), glyphs.Result.Ok)
+		testing.expect_value(t, app.tab_menu_draw(&f.state, w), render.Build_Status.Ok)
 		r, rows := app.tab_menu_rect(w)
 		testing.expect(t, w.tab_menu.scroll > 0 && w.tab_menu.scroll+rows > w.tab_menu.selected)
 		testing.expect(t, r.y+r.height <= f32(w.height))
 		menu_key(&f, {key = .Home})
 		render.draw_list_reset(&w.list)
-		testing.expect_value(t, app.tab_menu_draw(&f.state, w), glyphs.Result.Ok)
+		testing.expect_value(t, app.tab_menu_draw(&f.state, w), render.Build_Status.Ok)
 		testing.expect_value(t, w.tab_menu.scroll, 0)
 	}
 }
