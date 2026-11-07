@@ -5,7 +5,6 @@ import "aio:platform"
 import "aio:pty"
 import "core:encoding/json"
 import "core:log"
-import "core:math"
 import "core:os"
 import "core:strings"
 import "core:time"
@@ -20,10 +19,10 @@ LAYOUT_SAVE_DELAY :: 2 * time.Second
 // A tree larger than any reachable layout is treated as damage rather than allocated.
 LAYOUT_NODE_LIMIT :: 4096
 
+// Files written before it was dropped also hold an unused `workspace_number`, which reading skips.
 Layout_State :: struct {
-	version:          int,
-	workspace_number: u32,
-	workspaces:       []Saved_Workspace,
+	version:    int,
+	workspaces: []Saved_Workspace,
 }
 
 Saved_Workspace :: struct {
@@ -84,10 +83,11 @@ layout_float_encode :: proc(floating: bool, value: layout.Float) -> []Saved_Floa
 	return saved
 }
 
+// A saved floating place as layout takes it, which brings the bounds into range.
 @(private)
 layout_float_decode :: proc(saved: Saved_Float) -> layout.Float {
 	return {
-		bounds = layout.float_bounds_clamp({saved.x, saved.y, saved.width, saved.height}),
+		bounds = {saved.x, saved.y, saved.width, saved.height},
 		stack = saved.stack,
 		minimized = saved.minimized,
 	}
@@ -180,16 +180,13 @@ layout_state_encode :: proc(
 		if workspace.provisional || len(workspace.tabs) == 0 {continue}
 		tabs := make([]Saved_Tab, len(workspace.tabs), context.temp_allocator)
 		for tab, i in workspace.tabs {
-			nodes := make([dynamic]Saved_Node, 0, len(tab.tree.nodes), context.temp_allocator)
-			focus := 0
-			if layout_node_encode(app, &tab.tree, tab.tree.root, &nodes, &focus, processes) < 0 {
-				return "", false
-			}
+			nodes, focus, encoded := layout_tree_encode(app, &tab.tree, processes)
+			if !encoded {return "", false}
 			tabs[i] = {
 				name = tab.name,
 				focus = focus,
 				zoomed = tab.tree.zoomed,
-				nodes = nodes[:],
+				nodes = nodes,
 				documents = tab.documents[:],
 			}
 		}
@@ -206,60 +203,56 @@ layout_state_encode :: proc(
 		)
 	}
 	state := Layout_State {
-		version          = LAYOUT_STATE_VERSION,
-		workspaces       = workspaces[:],
+		version    = LAYOUT_STATE_VERSION,
+		workspaces = workspaces[:],
 	}
 	data, err := json.marshal(state, {pretty = true, use_enum_names = true}, allocator)
 	if err != nil {return "", false}
 	return string(data), true
 }
 
+// The tree's saved nodes, root first, in temporary memory, and the saved index of its focused pane. False
+// for a tree that has lost its shape.
 @(private)
-layout_node_encode :: proc(
+layout_tree_encode :: proc(
 	app: ^App,
 	tree: ^layout.Layout,
-	id: layout.Node_Id,
-	nodes: ^[dynamic]Saved_Node,
-	focus: ^int,
 	processes: []pty.Process_Info,
-) -> int {
-	if int(id) >= len(tree.nodes) {return -1}
-	index := len(nodes)
-	switch node in tree.nodes[id] {
-	case layout.Vacant:
-		return -1
-	case layout.Pane:
-		saved := layout_pane_encode(app, node.content, processes)
-		if node.linked {layout_link_encode(app, tree, id, &saved)}
-		saved.float = layout_float_encode(node.floating, node.float)
-		append(nodes, saved)
-		if id == tree.focus {focus^ = index}
-	case layout.Split:
-		saved := Saved_Node{split = true, axis = node.axis, ratio = node.ratio}
-		if node.linked {layout_link_encode(app, tree, id, &saved)}
-		saved.float = layout_float_encode(node.floating, node.float)
-		append(nodes, saved)
-		first := layout_node_encode(app, tree, node.first, nodes, focus, processes)
-		second := layout_node_encode(app, tree, node.second, nodes, focus, processes)
-		if first < 0 || second < 0 {return -1}
-		nodes[index].first, nodes[index].second = first, second
+) -> (
+	nodes: []Saved_Node,
+	focus: int,
+	ok: bool,
+) {
+	flat := make([dynamic]layout.Flat_Node, 0, len(tree.nodes), context.temp_allocator)
+	focus = layout.flatten(tree, &flat) or_return
+	nodes = make([]Saved_Node, len(flat), context.temp_allocator)
+	for node, i in flat {
+		if node.split {
+			nodes[i] = {split = true, axis = node.axis, ratio = node.ratio, first = node.first, second = node.second}
+		} else {
+			nodes[i] = layout_pane_encode(app, node.content, processes)
+		}
+		if node.linked {layout_link_encode(app, flat[i:], &nodes[i])}
+		nodes[i].float = layout_float_encode(node.floating, node.float)
 	}
-	return index
+	return nodes, focus, true
 }
 
-// Marks a saved node as a linked slot and records where its window is.
+// Marks a saved node as a linked slot and records where its window is. `slot` starts at the slot's own
+// flat node, so its first pane is the slot's first.
 @(private)
-layout_link_encode :: proc(app: ^App, tree: ^layout.Layout, slot: layout.Node_Id, saved: ^Saved_Node) {
+layout_link_encode :: proc(app: ^App, slot: []layout.Flat_Node, saved: ^Saved_Node) {
 	saved.linked = true
-	panes := make([dynamic]layout.Content, context.temp_allocator)
-	layout.contents(tree, slot, &panes)
-	if len(panes) == 0 {return}
-	linked := pane_link_window_of(app, panes[0])
-	if linked == nil {return}
-	if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
-		window := make([]platform.Window_Placement, 1, context.temp_allocator)
-		window[0] = placement
-		saved.window = window
+	for node in slot {
+		if node.split {continue}
+		linked := pane_link_window_of(app, node.content)
+		if linked == nil {return}
+		if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
+			window := make([]platform.Window_Placement, 1, context.temp_allocator)
+			window[0] = placement
+			saved.window = window
+		}
+		return
 	}
 }
 
@@ -473,84 +466,27 @@ layout_tab_discard :: proc(app: ^App, tab: ^Tab) {
 	tab_record_free(tab)
 }
 
-// Rebuilds a tree whose node indices match the saved ones. Every node must be reached exactly
-// once from the root, so cycles, shared children and orphans are rejected. Pane content ids are
-// left at zero for the caller to fill.
+// Rebuilds a tree whose node indices match the saved ones; layout.unflatten rejects a damaged tree and
+// repairs its detached groups. Pane content ids are left at zero for the caller to fill.
 @(require_results)
 layout_tree_decode :: proc(saved: ^Saved_Tab, tree: ^layout.Layout) -> bool {
 	count := len(saved.nodes)
 	if count == 0 || count > LAYOUT_NODE_LIMIT {return false}
-	visited, visited_error := make([]bool, count, context.temp_allocator)
-	if visited_error != nil {return false}
-	nodes, nodes_error := make([dynamic]layout.Node, count)
-	if nodes_error != nil {return false}
-	tree^ = {nodes = nodes}
-	if !layout_node_decode(saved.nodes, 0, visited, tree, false, false) {
-		layout.destroy(tree)
-		return false
-	}
-	for reached in visited {if !reached {layout.destroy(tree); return false}}
-	tree.root = 0
-	focus := saved.focus
-	if focus < 0 || focus >= count || saved.nodes[focus].split {
-		for node, i in saved.nodes {if !node.split {focus = i; break}}
-	}
-	tree.focus = layout.Node_Id(focus)
-	tree.zoomed = saved.zoomed
-	layout.float_stack_restore(tree)
-	layout.links_repair(tree)
-	return true
-}
-
-@(private, require_results)
-layout_node_decode :: proc(
-	saved: []Saved_Node,
-	index: int,
-	visited: []bool,
-	tree: ^layout.Layout,
-	in_slot, in_float: bool,
-) -> bool {
-	if index < 0 || index >= len(saved) || visited[index] {return false}
-	visited[index] = true
-	node := saved[index]
-	if !node.split {
-		if node.content > max(layout.Content_Kind) {return false}
-		tree.next_pane_order += 1
-		// A pane inside a linked or floating group cannot introduce another detached group.
-		floating := len(node.float) == 1 && !in_slot && !in_float && !node.linked
-		linked := node.linked && !in_slot && !in_float && CONTENT_POLICY[node.content].linkable
-		tree.nodes[index] = layout.Pane {
-			content  = {kind = node.content},
-			order    = tree.next_pane_order,
-			linked   = linked,
-			floating = floating,
-			float    = floating ? layout_float_decode(node.float[0]) : {},
+	flat, flat_error := make([]layout.Flat_Node, count, context.temp_allocator)
+	if flat_error != nil {return false}
+	for node, i in saved.nodes {
+		flat[i] = {
+			split   = node.split,
+			axis    = node.axis,
+			ratio   = node.ratio,
+			first   = node.first,
+			second  = node.second,
+			content = {kind = node.content},
+			linked  = node.linked,
 		}
-		return true
+		if len(node.float) == 1 {flat[i].floating, flat[i].float = true, layout_float_decode(node.float[0])}
 	}
-	if node.axis != .Horizontal && node.axis != .Vertical {return false}
-	if math.is_nan(node.ratio) {return false}
-	// A linked or floating slot holds no nested slots; only linkable content can have a linked window.
-	floating := len(node.float) == 1 && !in_slot && !in_float && !node.linked
-	linked := node.linked && !in_slot && !in_float && !floating
-	if !layout_node_decode(saved, node.first, visited, tree, in_slot || linked, in_float || floating) ||
-	   !layout_node_decode(saved, node.second, visited, tree, in_slot || linked, in_float || floating) {
-		return false
-	}
-	if linked {
-		panes := make([dynamic]layout.Content, context.temp_allocator)
-		layout.contents(tree, layout.Node_Id(node.first), &panes)
-		layout.contents(tree, layout.Node_Id(node.second), &panes)
-		for pane in panes {linked &&= CONTENT_POLICY[pane.kind].linkable}
-	}
-	tree.nodes[index] = layout.Split {
-		axis   = node.axis,
-		ratio  = clamp(node.ratio, 0.05, 0.95),
-		first  = layout.Node_Id(node.first),
-		second = layout.Node_Id(node.second),
-		linked = linked,
-		floating = floating,
-		float = floating ? layout_float_decode(node.float[0]) : {},
-	}
-	return true
+	linkable: bit_set[layout.Content_Kind]
+	for policy, kind in CONTENT_POLICY {if policy.linkable {linkable += {kind}}}
+	return layout.unflatten(tree, flat, saved.focus, saved.zoomed, linkable)
 }

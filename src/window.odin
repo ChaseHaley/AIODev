@@ -411,14 +411,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
 	w.header_height = pane_insets(app, w.scale, nil).header
-	area := window_content_area(app, w)
-	gap := window_gap(app, w)
-	if pane_view_solo(w) {
-		layout.compute_focused(w.tree, area, &w.panes)
-	} else {
-		layout.compute(w.tree, area, gap, &w.panes)
-	}
-	layout.floats_place(w.tree, floating_area(w), gap, floating_header_height(w), &w.panes)
+	layout.place_shown(w.tree, window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
 	for &view in w.views {view.valid = false}
@@ -433,7 +426,8 @@ window_floats_layout :: proc(app: ^App, w: ^Window) {
 	if w.phase == .Preparing || window_minimized(w) || w.tree == nil {return}
 	tiled := len(window_tiled_rects(w))
 	resize(&w.panes, tiled)
-	layout.floats_place(w.tree, floating_area(w), window_gap(app, w), floating_header_height(w), &w.panes)
+	g := window_geometry(app, w, w.pane_fill)
+	layout.floats_place(w.tree, g.floating, g.gap, g.header, &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
 	for pane in w.panes[tiled:] {

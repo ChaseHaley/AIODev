@@ -1,6 +1,7 @@
 package main
 
 import "aio:input"
+import "aio:layout"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
@@ -120,14 +121,23 @@ rail_overlay_slide :: proc(app: ^App, w: ^Window, target: f32) {
 }
 
 rail_visible :: proc(w: ^Window) -> bool {
-	if w.tabs_horizontal || pane_fill_active(w) {return false}
+	return rail_visible_in(w, w.pane_fill)
+}
+
+// Whether the rail shows when the window's pane fill is `fill`; a filling pane covers it.
+rail_visible_in :: proc(w: ^Window, fill: layout.Pane_Fill) -> bool {
+	if w.tabs_horizontal || fill != .None {return false}
 	phase, overlay := rail_overlay_phase(w)
 	return overlay ? phase != .Closing : w.rail != nil
 }
 
 rail_docked :: proc(w: ^Window) -> bool {
+	return rail_docked_in(w, w.pane_fill)
+}
+
+rail_docked_in :: proc(w: ^Window, fill: layout.Pane_Fill) -> bool {
 	_, docked := w.rail.(Rail_Docked)
-	return docked && rail_visible(w)
+	return docked && rail_visible_in(w, fill)
 }
 
 rail_overlay :: proc(w: ^Window) -> bool {

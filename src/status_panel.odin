@@ -1,6 +1,7 @@
 package main
 
 import "aio:input"
+import "aio:layout"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -24,8 +25,13 @@ import "core:strings"
 @(private) STATUS_PANEL_DEPTH_MAX :: 3
 
 status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
+	return status_panel_visible_in(app, w, w.pane_fill)
+}
+
+// Whether the panel shows when the window's pane fill is `fill`; a filling pane covers it.
+status_panel_visible_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> bool {
 	s := &app.settings.status
-	if !s.enabled || !s.panel || w.phase == .Preparing || window_linked(w) || pane_fill_active(w) {
+	if !s.enabled || !s.panel || w.phase == .Preparing || window_linked(w) || fill != .None {
 		return false
 	}
 	return true
@@ -33,7 +39,12 @@ status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
 
 // Vertical view puts a left panel under the tabs in the docked rail.
 status_panel_in_rail :: proc(app: ^App, w: ^Window) -> bool {
-	return status_panel_visible(app, w) && app.settings.status.panel_side == .Left && rail_docked(w)
+	return status_panel_in_rail_in(app, w, w.pane_fill)
+}
+
+status_panel_in_rail_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> bool {
+	return status_panel_visible_in(app, w, fill) && app.settings.status.panel_side == .Left &&
+		rail_docked_in(w, fill)
 }
 
 // The rail gives the bottom of its height to the panel in vertical view.
@@ -52,9 +63,14 @@ status_panel_rail_clamp :: proc(w: ^Window, height: f32) -> f32 {
 }
 
 status_panel_dock_width :: proc(app: ^App, w: ^Window) -> f32 {
-	if !status_panel_visible(app, w) || status_panel_in_rail(app, w) {return 0}
+	return status_panel_dock_width_in(app, w, w.pane_fill)
+}
+
+// The width the panel takes beside the panes when the window's pane fill is `fill`.
+status_panel_dock_width_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> f32 {
+	if !status_panel_visible_in(app, w, fill) || status_panel_in_rail_in(app, w, fill) {return 0}
 	width := w.status.panel_width > 0 ? w.status.panel_width : f32(app.settings.status.panel_width)
-	available := f32(w.width) - (rail_docked(w) ? rail_width_pixels(w) : 0)
+	available := f32(w.width) - (rail_docked_in(w, fill) ? rail_width_pixels(w) : 0)
 	return ui.rail_pixel_width(w.scale, width, available)
 }
 

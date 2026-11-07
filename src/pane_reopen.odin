@@ -47,14 +47,13 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 		terminal ||= pane_owns_session(pane.content.kind)
 	}
 	if !terminal {return}
-	nodes := make([dynamic]Saved_Node, 0, len(tab.tree.nodes), context.temp_allocator)
-	focus := 0
-	if layout_node_encode(app, &tab.tree, tab.tree.root, &nodes, &focus, pane_processes(app)) < 0 {return}
+	nodes, focus, encoded := layout_tree_encode(app, &tab.tree, pane_processes(app))
+	if !encoded {return}
 	saved := Saved_Tab {
 		name   = tab.name,
 		focus  = focus,
 		zoomed = tab.tree.zoomed,
-		nodes  = nodes[:],
+		nodes  = nodes,
 		documents = tab.documents[:],
 	}
 	closed_push(app, {workspace = workspace.id}, {index = index, tab = saved})
@@ -270,8 +269,8 @@ closed_fits :: proc(
 	target: layout.Node_Id,
 	record: ^Closed_Record,
 ) -> bool {
-	trial, copied := pane_trial_copy(tree, context.temp_allocator)
-	if !copied {notify(app, .Error, "Could not check the reopened pane's size."); return false}
+	trial, copy_error := layout.clone(tree, context.temp_allocator)
+	if copy_error != nil {notify(app, .Error, "Could not check the reopened pane's size."); return false}
 	defer layout.destroy(&trial)
 	added, err := layout.insert_beside(
 		&trial,

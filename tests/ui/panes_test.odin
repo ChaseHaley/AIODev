@@ -33,8 +33,8 @@ pane_cards_keep_nonnegative_geometry_and_draggable_gaps :: proc(t: ^testing.T) {
 				}
 				for d in dividers {
 					x, y := d.rect.x+d.rect.width/2, d.rect.y+d.rect.height/2
-					_, found := layout.divider_hit_test(dividers[:], x, y, 3*scale)
-					testing.expect(t, found)
+					hits: [4]layout.Divider
+					testing.expect(t, layout.divider_hit_all(dividers[:], x, y, 3*scale, hits[:]) > 0)
 					testing.expect(t, layout.drag_divider(&tree, d, x+10*scale, y+10*scale, spacing))
 				}
 			}
