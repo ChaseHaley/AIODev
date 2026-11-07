@@ -6,6 +6,10 @@ import "core:fmt"
 import "core:math"
 import "core:strings"
 
+// The narrowest a font list's popup gets, in DIPs, so long family names stay readable.
+@(private)
+FONT_CHOICE_WIDTH :: 360
+
 // The control, range and rounding a schema setting gets wherever it is edited. Settings and the
 // palette both start from this, so a setting cannot show one control on the page and another in
 // the palette. Dynamic choices (themes, fonts) and the current value are filled in by the caller.
@@ -16,41 +20,44 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 		title         = entry.title,
 		description   = entry.description,
 		default_value = entry.default_value,
-		minimum       = entry.minimum,
-		maximum       = entry.maximum,
+		minimum       = entry.valid.minimum,
+		maximum       = entry.valid.maximum,
+		choices       = entry.names,
+		choice_labels = entry.labels,
 	}
-	switch entry.kind {
-	case .String:
-		row.kind = .Text
-		switch entry.key {
-		case "input.leader":
-			row.kind = .Shortcut
-		case "theme.name":
+	if entry.slider != (settings.Range{}) {
+		row.minimum, row.maximum = entry.slider.minimum, entry.slider.maximum
+	}
+	switch entry.control {
+	case .By_Kind:
+		switch entry.kind {
+		case .String:
+			row.kind = .Text
+		case .Int:
+			row.kind, row.step = .Integer, 1
+		case .Float:
+			row.kind, row.step = .Number, 0.1
+		case .Bool:
+			row.kind = .Toggle
+		case .Enum:
 			row.kind = .Choice
-		case "font.family", "interface.font_family":
-			row.kind, row.searchable = .Choice, true
+		case .Set:
+			row.kind, row.multiple = .Choice, true
 		}
-	case .Int:
-		row.kind, row.step = .Integer, 1
-	case .Float:
-		row.kind, row.step = .Number, 0.1
-	case .Bool:
-		row.kind = .Toggle
-	case .Enum:
-		row.kind, row.choices = .Choice, entry.enum_names
-		if entry.key == "status.panel_view" {row.choice_labels = settings.status_panel_view_labels[:]}
-	case .Set:
-		row.kind, row.multiple, row.choices = .Choice, true, entry.enum_names
-		row.choice_labels = settings.status_channel_labels[:]
+	case .Shortcut:
+		row.kind, row.shortcut_mode = .Shortcut, .Single
+	case .Choice:
+		row.kind = .Choice
+	case .Group:
+		row.kind = .Text
 	}
-	switch entry.key {
-	case "font.size":
-		row.minimum, row.maximum, row.step = 6, 32, 1
-	case "interface.font_size":
-		// 0.75 pt is one pixel at 96 DPI, so each step lands on a whole pixel size.
-		row.step = 0.75
-	case "font.line_height":
-		row.minimum, row.maximum, row.step = 0.8, 2, 0.05
+	if entry.step > 0 {row.step = entry.step}
+	switch entry.live_choices {
+	case .None, .Themes:
+	case .Shell_Fonts:
+		row.searchable, row.font_filter, row.choice_min_width = true, true, FONT_CHOICE_WIDTH
+	case .Interface_Fonts:
+		row.searchable, row.choice_min_width = true, FONT_CHOICE_WIDTH
 	}
 	return row
 }

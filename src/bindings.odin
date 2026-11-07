@@ -171,12 +171,13 @@ binding_report :: proc(
 		}
 	}
 	if s.input.leader != "" {
+		leader_line := settings.setting_line(s, "input.leader")
 		leader, valid := commands.parse_shortcut(s.input.leader)
 		if !valid || .Leader in leader.modifiers || !leader_key_supported(leader.key) {
 			issue := Binding_Issue {
 				kind     = .Unsupported_Leader_Shortcut,
 				severity = .Invalid_Value,
-				line     = s.leader_line,
+				line     = leader_line,
 				key      = "input.leader",
 			}
 			if _, err := append(&issues, issue); err != nil {
@@ -188,7 +189,7 @@ binding_report :: proc(
 			for &other in registry.items {
 				for shortcut in commands.active_shortcuts(&other) {
 					if commands.prefix_conflicts(leader, shortcut) &&
-					   applied_lines[Action(other.id)] >= s.leader_line &&
+					   applied_lines[Action(other.id)] >= leader_line &&
 					   (winner == nil ||
 							   applied_lines[Action(other.id)] > applied_lines[Action(winner.id)]) {
 						winner = &other
@@ -198,7 +199,7 @@ binding_report :: proc(
 			leader_wins := winner == nil
 			winner_source: Binding_Source
 			if leader_wins {
-				winner_source = {"input.leader", "", s.leader_line}
+				winner_source = {"input.leader", "", leader_line}
 				report.leader = leader
 			} else {
 				winner_source = {winner.name, winner.title, applied_lines[Action(winner.id)]}
@@ -212,7 +213,7 @@ binding_report :: proc(
 					issue := Binding_Issue {
 						kind     = .Leader_Prefix,
 						severity = .Shortcut_Warning,
-						line     = s.leader_line,
+						line     = leader_line,
 						key      = "input.leader",
 						conflict = {
 							shortcut    = shortcut,

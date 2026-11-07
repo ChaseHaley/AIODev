@@ -11,19 +11,15 @@ DEFAULT_PROFILE_COMMAND :: "pwsh.exe -NoLogo"
 DEFAULT_PROFILE_DIRECTORY :: "~"
 PROFILE_ID_MAX_LENGTH :: 32
 PROFILE_LIMIT :: 64
-PROFILE_DEFAULT_FIELDS :: [3]string{"command", "directory", "icon"}
 
-// One named shell. Fields are the effective values after profiles_finalize; the `_set` flags
-// record whether the file or detection supplied them, so a later finalize can inherit the rest.
+// One named shell. Fields are the effective values after profiles_finalize; `set` records the
+// fields the file or detection supplied, so a later finalize can inherit the rest.
 // detection_id preserves discovery identity when the built-in default represents a machine shell.
 Profile :: struct {
 	id, name, command, directory, icon: string,
 	detection_id:                     string,
 	hidden, detected, builtin:         bool,
-	line:                              int,
-	name_set, command_set:             bool,
-	directory_set, icon_set:           bool,
-	hidden_set:                        bool,
+	set:                               bit_set[Profile_Field],
 }
 
 Profiles :: struct {
@@ -41,21 +37,42 @@ profiles_init :: proc(p: ^Profiles, allocator: runtime.Allocator) {
 }
 
 profiles_destroy :: proc(p: ^Profiles) {
-	for &profile in p.items {
-		for field in ([?]string {
-			profile.id,
-			profile.name,
-			profile.command,
-			profile.directory,
-			profile.icon,
-			profile.detection_id,
-		}) {delete(field, p.allocator)}
-	}
+	for &profile in p.items {profile_destroy(&profile, p.allocator)}
 	delete(p.items)
 	for id in p.order {delete(id, p.allocator)}
 	delete(p.order)
 	delete(p.default_id, p.allocator)
 	p^ = {}
+}
+
+// Frees one profile's owned strings, for list teardown and removal alike.
+@(private)
+profile_destroy :: proc(profile: ^Profile, allocator: runtime.Allocator) {
+	for field in ([?]string {
+		profile.id,
+		profile.name,
+		profile.command,
+		profile.directory,
+		profile.icon,
+		profile.detection_id,
+	}) {delete(field, allocator)}
+}
+
+// The string a text field stores; nil for Hidden, which is a flag.
+@(private)
+profile_text :: proc(profile: ^Profile, field: Profile_Field) -> ^string {
+	switch field {
+	case .Name:
+		return &profile.name
+	case .Command:
+		return &profile.command
+	case .Directory:
+		return &profile.directory
+	case .Icon:
+		return &profile.icon
+	case .Hidden:
+	}
+	return nil
 }
 
 profile_find :: proc(p: ^Profiles, id: string) -> ^Profile {
@@ -67,42 +84,16 @@ profile_find :: proc(p: ^Profiles, id: string) -> ^Profile {
 
 // Appends a profile with an owned ID. `nil` means the limit was reached.
 @(require_results)
-profiles_add :: proc(
-	p: ^Profiles,
-	id: string,
-	line: int,
-) -> (
-	^Profile,
-	runtime.Allocator_Error,
-) {
+profiles_add :: proc(p: ^Profiles, id: string) -> (^Profile, runtime.Allocator_Error) {
 	if found := profile_find(p, id); found != nil {return found, nil}
 	if len(p.items) >= PROFILE_LIMIT {return nil, nil}
 	owned, err := strings.clone(id, p.allocator)
 	if err != nil {return nil, err}
-	if _, append_error := append(&p.items, Profile{id = owned, line = line});
-	   append_error != nil {
+	if _, append_error := append(&p.items, Profile{id = owned}); append_error != nil {
 		delete(owned, p.allocator)
 		return nil, append_error
 	}
 	return &p.items[len(p.items) - 1], nil
-}
-
-profile_id_valid :: proc(id: string) -> bool {
-	if len(id) == 0 || len(id) > PROFILE_ID_MAX_LENGTH {return false}
-	if id[0] == '-' || id[0] == '_' {return false}
-	for c in id {
-		letter := c >= 'a' && c <= 'z'
-		digit := c >= '0' && c <= '9'
-		if !letter && !digit && c != '_' && c != '-' {return false}
-	}
-	return true
-}
-
-profile_field_valid :: proc(field: string) -> bool {
-	for name in ([?]string{"name", "command", "directory", "icon", "hidden"}) {
-		if field == name {return true}
-	}
-	return false
 }
 
 // Splits "profile.ID.field"; `profile.order` is handled before this is called.
@@ -114,64 +105,49 @@ profile_key_split :: proc(key: string) -> (id, field: string, shaped: bool) {
 	return rest[:dot], rest[dot + 1:], true
 }
 
-// The three pre-profile shell keys. They stay accepted so a file whose migration cannot be
-// written still launches; the file format otherwise uses profile.default.*.
-legacy_shell_slot :: proc(key: string) -> (slot: int, matches: bool) {
-	switch key {
-	case "shell.command":
-		return 0, true
-	case "shell.directory":
-		return 1, true
-	case "shell.icon":
-		return 2, true
-	}
-	return 0, false
+// The three pre-profile shell keys, in migration order. They stay accepted so a file whose
+// migration cannot be written still launches; the file format otherwise uses profile.default.*.
+Legacy_Shell_Field :: enum {
+	Command,
+	Directory,
+	Icon,
 }
 
-legacy_shell_entry :: proc(slot: int) -> Schema_Entry {
-	switch slot {
-	case 0:
-		return {
-			key = "shell.command",
-			kind = .String,
-			offset = offset_of(Settings, shell) + offset_of(Shell_Settings, command),
-			default_value = DEFAULT_PROFILE_COMMAND,
-			minimum = 1,
-			maximum = 32767,
-		}
-	case 1:
-		return {
-			key = "shell.directory",
-			kind = .String,
-			offset = offset_of(Settings, shell) + offset_of(Shell_Settings, directory),
-			default_value = DEFAULT_PROFILE_DIRECTORY,
-			minimum = 1,
-			maximum = 32767,
-		}
-	case 2:
-		return {
-			key = "shell.icon",
-			kind = .String,
-			offset = offset_of(Settings, shell) + offset_of(Shell_Settings, icon),
-			maximum = 32767,
-		}
-	}
-	unreachable()
+// The file rules of each legacy key. Only the icon may be empty.
+@(private, rodata)
+legacy_shell_entries := [Legacy_Shell_Field]Schema_Entry {
+	.Command = {
+		key = "shell.command",
+		kind = .String,
+		default_value = DEFAULT_PROFILE_COMMAND,
+		valid = {1, 32767},
+	},
+	.Directory = {
+		key = "shell.directory",
+		kind = .String,
+		default_value = DEFAULT_PROFILE_DIRECTORY,
+		valid = {1, 32767},
+	},
+	.Icon = {key = "shell.icon", kind = .String, valid = {0, 32767}},
 }
 
+// The profile.default field each legacy key became.
+@(private, rodata)
+legacy_shell_profile_fields := [Legacy_Shell_Field]Profile_Field {
+	.Command   = .Command,
+	.Directory = .Directory,
+	.Icon      = .Icon,
+}
+
+// The legacy values one parse read, borrowed from its text; nil where the key was absent.
 @(private)
-profile_text_value :: proc(input: string) -> (text, issue: string) {
-	text = input
-	if len(text) > 0 && text[0] == '"' {
-		if len(text) < 2 || text[len(text) - 1] != '"' {
-			return "", "expected a closing double quote"
-		}
-		text = text[1:len(text) - 1]
+Legacy_Shell_Input :: [Legacy_Shell_Field]Maybe(string)
+
+legacy_shell_field :: proc(key: string) -> (Legacy_Shell_Field, bool) {
+	for entry, field in legacy_shell_entries {
+		if entry.key == key {return field, true}
 	}
-	if !profile_value_facts(text).valid {
-		return "", "expected UTF-8 text without NUL bytes"
-	}
-	return text, ""
+	return {}, false
 }
 
 @(private, require_results)
@@ -188,23 +164,34 @@ profile_own :: proc(
 	return nil
 }
 
+// One entry of a profile.order value: trimmed, possibly empty. `repeated` means an earlier entry
+// has the same text.
 @(private)
-profile_duplicate_diagnostic :: proc(
-	diagnostics: ^[dynamic]Diagnostic,
-	key: string,
-	line: int,
-) -> runtime.Allocator_Error {
-	issue, issue_error := problem(
-		.Duplicate_Key,
-		diagnostics.allocator,
-		"duplicate key \"",
-		key,
-		"\"; last value wins",
-	)
-	if issue_error != nil {return issue_error}
-	return add_diagnostic(diagnostics, line, key, issue.(Problem))
+Order_Token :: struct {
+	id:              string,
+	valid, repeated: bool,
 }
 
+// Steps through the comma-separated entries of a profile.order value without allocating; `offset`
+// starts at 0. Every entry, empty ones included, is returned so each caller applies its own policy.
+@(private)
+order_token_next :: proc(text: string, offset: ^int) -> (token: Order_Token, ok: bool) {
+	start := offset^
+	if start > len(text) {return {}, false}
+	end := strings.index_byte(text[start:], ',')
+	end = end < 0 ? len(text) : start + end
+	offset^ = end + 1
+	token.id = strings.trim_space(text[start:end])
+	token.valid = id_valid(token.id, PROFILE_ID_MAX_LENGTH)
+	for from := 0; from < start; {
+		comma := from + strings.index_byte(text[from:], ',')
+		token.repeated ||= strings.trim_space(text[from:comma]) == token.id
+		from = comma + 1
+	}
+	return token, true
+}
+
+// File parsing diagnoses and drops malformed or repeated IDs and keeps the rest.
 @(private, require_results)
 parse_profile_order :: proc(
 	p: ^Profiles,
@@ -213,37 +200,28 @@ parse_profile_order :: proc(
 	diagnostics: ^[dynamic]Diagnostic,
 ) -> runtime.Allocator_Error {
 	if p.order_line > 0 {
-		if err := profile_duplicate_diagnostic(diagnostics, PROFILE_ORDER_KEY, line);
-		   err != nil {return err}
+		duplicate_key_diagnostic(diagnostics, PROFILE_ORDER_KEY, line) or_return
 	}
 	p.order_line = line
 	for id in p.order {delete(id, p.allocator)}
 	clear(&p.order)
-	if strings.trim_space(value) == "" {return nil}
-	parts, split_error := strings.split(value, ",", p.allocator)
-	if split_error != nil {return split_error}
-	defer delete(parts, p.allocator)
-	for part in parts {
-		id := strings.trim_space(part)
-		if id == "" {continue}
-		if !profile_id_valid(id) {
-			if err := diagnostic_append(
+	offset := 0
+	for token in order_token_next(value, &offset) {
+		if token.id == "" {continue}
+		if !token.valid {
+			diagnostic_append(
 				diagnostics,
 				line,
 				PROFILE_ORDER_KEY,
 				"invalid profile ID in order; use lowercase letters, digits, - and _",
-			); err != nil {return err}
+			) or_return
 			continue
 		}
-		duplicate := false
-		for existing in p.order {duplicate ||= existing == id}
-		if duplicate {
-			if err := profile_duplicate_diagnostic(diagnostics, PROFILE_ORDER_KEY, line);
-			   err != nil {return err}
+		if token.repeated {
+			duplicate_key_diagnostic(diagnostics, PROFILE_ORDER_KEY, line) or_return
 			continue
 		}
-		owned, clone_error := strings.clone(id, p.allocator)
-		if clone_error != nil {return clone_error}
+		owned := strings.clone(token.id, p.allocator) or_return
 		if _, append_error := append(&p.order, owned); append_error != nil {
 			delete(owned, p.allocator)
 			return append_error
@@ -264,7 +242,7 @@ parse_profile_key :: proc(
 	if key == PROFILE_ORDER_KEY {
 		return parse_profile_order(p, value, line, diagnostics)
 	}
-	id, field, shaped := profile_key_split(key)
+	id, field_name, shaped := profile_key_split(key)
 	if !shaped {
 		return diagnostic_append(
 			diagnostics,
@@ -275,7 +253,7 @@ parse_profile_key :: proc(
 			.Unknown_Key,
 		)
 	}
-	if !profile_id_valid(id) {
+	if !id_valid(id, PROFILE_ID_MAX_LENGTH) {
 		return diagnostic_append(
 			diagnostics,
 			line,
@@ -284,9 +262,10 @@ parse_profile_key :: proc(
 			.Unknown_Key,
 		)
 	}
-	if !profile_field_valid(field) {
+	field, known := profile_field_from_name(field_name)
+	if !known {
 		message, message_error := strings.concatenate(
-			{"unknown profile field \"", field, "\"; expected name, command, ",
+			{"unknown profile field \"", field_name, "\"; expected name, command, ",
 			 "directory, icon or hidden"},
 			context.temp_allocator,
 		)
@@ -295,163 +274,105 @@ parse_profile_key :: proc(
 		}
 		return diagnostic_append(diagnostics, line, key, message, .Unknown_Key)
 	}
-	profile, add_error := profiles_add(p, id, line)
+	profile, add_error := profiles_add(p, id)
 	if add_error != nil {return add_error}
 	if profile == nil {
 		return diagnostic_append(
 			diagnostics,
 			line,
 			key,
-			"too many profiles; the limit is 64",
+			limit_message("profiles", PROFILE_LIMIT),
 			.Invalid_Value,
 		)
 	}
-	if field == "hidden" {
-		if value != "true" && value != "false" {
-			message, message_error := strings.concatenate(
-				{"invalid boolean \"", value, "\", expected true or false"},
-				context.temp_allocator,
-			)
-			if message_error != nil {message = "expected true or false"}
-			return diagnostic_append(diagnostics, line, key, message, .Invalid_Value)
-		}
-		if profile.hidden_set {
-			if err := profile_duplicate_diagnostic(diagnostics, key, line); err != nil {
-				return err
-			}
-		}
-		profile.hidden, profile.hidden_set = value == "true", true
-		return nil
+	text, issue := profile_field_check(field, value, .File)
+	if issue != .None {
+		return diagnostic_append(diagnostics, line, key, profile_problem_text(issue, .File, value))
 	}
-	text, text_issue := profile_text_value(value)
-	if text_issue != "" {
-		return diagnostic_append(diagnostics, line, key, text_issue, .Invalid_Value)
-	}
-	facts := profile_value_facts(text)
-	if facts.empty && field == "name" {
-		return diagnostic_append(
-			diagnostics,
-			line,
-			key,
-			"profile name cannot be empty",
-			.Invalid_Value,
-		)
-	}
-	if facts.empty && field == "command" {
-		return diagnostic_append(
-			diagnostics,
-			line,
-			key,
-			"profile command line cannot be empty",
-			.Invalid_Value,
-		)
-	}
-	duplicate :=
-		field == "name" ? profile.name_set : field == "command" ? profile.command_set :
-		field == "directory" ? profile.directory_set : field == "icon" ? profile.icon_set : false
-	if duplicate {
-		if err := profile_duplicate_diagnostic(diagnostics, key, line); err != nil {
-			return err
-		}
+	if field in profile.set {
+		duplicate_key_diagnostic(diagnostics, key, line) or_return
 	}
 	switch field {
-	case "name":
-		if err := profile_own(&profile.name, text, p.allocator); err != nil {return err}
-		profile.name_set = true
-	case "command":
-		if err := profile_own(&profile.command, text, p.allocator); err != nil {return err}
-		profile.command_set = true
-	case "directory":
-		if text != "" {
-			if err := profile_own(&profile.directory, text, p.allocator); err != nil {return err}
-			profile.directory_set = true
-		}
-	case "icon":
-		if err := profile_own(&profile.icon, text, p.allocator); err != nil {return err}
-		profile.icon_set = true
+	case .Hidden:
+		profile.hidden = text == "true"
+	case .Directory:
+		// An empty directory inherits the default one.
+		if text == "" {return nil}
+		profile_own(&profile.directory, text, p.allocator) or_return
+	case .Name, .Command, .Icon:
+		profile_own(profile_text(profile, field), text, p.allocator) or_return
 	}
+	profile.set += {field}
 	return nil
 }
 
 @(private)
 profile_name_from_command :: proc(command: string) -> string {
-	executable := shell_executable(command)
-	switch {
-	case strings.equal_fold(executable, "pwsh"):
-		return "PowerShell 7"
-	case strings.equal_fold(executable, "powershell"):
-		return "Windows PowerShell"
-	case strings.equal_fold(executable, "cmd"):
-		return "Command Prompt"
-	case strings.equal_fold(executable, "wsl"):
-		return "WSL"
-	case strings.equal_fold(executable, "bash"):
-		return "Bash"
-	}
-	return executable
+	if name := shell_definitions[shell_kind(command)].name; name != "" {return name}
+	return shell_executable(command)
 }
 
-// Resolves inheritance and mirrors the default profile into the legacy shell fields. Safe to call
-// again after detection adds profiles; values the file or detection set are left alone.
+// Applies the legacy shell keys to the reserved default profile wherever profile.default.* did not
+// set that field. Called once per parse, before profiles_finalize derives the default's name.
+@(private, require_results)
+profiles_resolve_legacy :: proc(p: ^Profiles, legacy: Legacy_Shell_Input) -> runtime.Allocator_Error {
+	base := profiles_add(p, PROFILE_DEFAULT_ID) or_return
+	if base == nil {return .Out_Of_Memory}
+	for value, legacy_field in legacy {
+		text, seen := value.?
+		field := legacy_shell_profile_fields[legacy_field]
+		if !seen || field in base.set {continue}
+		profile_own(profile_text(base, field), text, p.allocator) or_return
+	}
+	return nil
+}
+
+// Resolves inheritance. Safe to call again after detection adds profiles: fields the file or
+// detection set are left alone, and the reserved default fills only a command or directory that is
+// still empty.
 @(require_results)
 profiles_finalize :: proc(s: ^Settings) -> runtime.Allocator_Error {
 	p := &s.profiles
-	default_profile, add_error := profiles_add(p, PROFILE_DEFAULT_ID, 0)
-	if add_error != nil {return add_error}
-	if default_profile == nil {return .Out_Of_Memory}
-	if !default_profile.command_set {
-		command := s.shell.command != "" ? s.shell.command : DEFAULT_PROFILE_COMMAND
-		if err := profile_own(&default_profile.command, command, p.allocator);
-		   err != nil {return err}
+	base := profiles_add(p, PROFILE_DEFAULT_ID) or_return
+	if base == nil {return .Out_Of_Memory}
+	if base.command == "" {
+		profile_own(&base.command, DEFAULT_PROFILE_COMMAND, p.allocator) or_return
 	}
-	if !default_profile.directory_set {
-		directory := s.shell.directory != "" ? s.shell.directory : DEFAULT_PROFILE_DIRECTORY
-		if err := profile_own(&default_profile.directory, directory, p.allocator);
-		   err != nil {return err}
+	if base.directory == "" {
+		profile_own(&base.directory, DEFAULT_PROFILE_DIRECTORY, p.allocator) or_return
 	}
-	if !default_profile.icon_set {
-		if err := profile_own(&default_profile.icon, s.shell.icon, p.allocator);
-		   err != nil {return err}
-	}
-	if !default_profile.name_set {
-		name := profile_name_from_command(default_profile.command)
+	if .Name not_in base.set {
+		name := profile_name_from_command(base.command)
 		if name == "" {name = PROFILE_DEFAULT_ID}
-		if err := profile_own(&default_profile.name, name, p.allocator); err != nil {
-			return err
-		}
-	}
-	// Existing callers read shell.command, shell.directory and shell.icon; keep them equal to
-	// the resolved default profile so there is one effective source.
-	if err := profile_own(&s.shell.command, default_profile.command, p.allocator);
-	   err != nil {return err}
-	if err := profile_own(&s.shell.directory, default_profile.directory, p.allocator);
-	   err != nil {return err}
-	if err := profile_own(&s.shell.icon, default_profile.icon, p.allocator); err != nil {
-		return err
+		profile_own(&base.name, name, p.allocator) or_return
 	}
 	for &profile in p.items {
 		if profile.id == PROFILE_DEFAULT_ID {continue}
-		if !profile.directory_set {
-			if err := profile_own(&profile.directory, s.shell.directory, p.allocator);
-			   err != nil {return err}
+		if .Directory not_in profile.set {
+			profile_own(&profile.directory, base.directory, p.allocator) or_return
 		}
-		if !profile.icon_set {
-			if err := profile_own(&profile.icon, "", p.allocator); err != nil {return err}
-		}
-		if !profile.name_set {
-			if err := profile_own(&profile.name, profile.id, p.allocator); err != nil {
-				return err
-			}
-		}
+		if .Icon not_in profile.set {profile_own(&profile.icon, "", p.allocator) or_return}
+		if .Name not_in profile.set {profile_own(&profile.name, profile.id, p.allocator) or_return}
 	}
 	default_id := s.shell.default_profile != "" ? s.shell.default_profile : PROFILE_DEFAULT_ID
 	if err := profile_own(&p.default_id, default_id, p.allocator); err != nil {return err}
 	return nil
 }
 
+// The reserved `default` profile: what the legacy shell keys configure and what other profiles
+// inherit a starting directory from. Unlike profile_default it ignores shell.default_profile.
+profile_base :: proc(p: ^Profiles) -> ^Profile {
+	return profile_find(p, PROFILE_DEFAULT_ID)
+}
+
 profile_default :: proc(p: ^Profiles) -> ^Profile {
 	if found := profile_find(p, p.default_id); found != nil {return found}
-	return profile_find(p, PROFILE_DEFAULT_ID)
+	return profile_base(p)
+}
+
+// Whether Settings may delete `profile`: never the reserved default or a machine profile.
+profile_can_remove :: proc(profile: ^Profile) -> bool {
+	return profile.id != PROFILE_DEFAULT_ID && !profile.builtin
 }
 
 // The profile a launch should use. An unknown or commandless ID falls back to the default
@@ -476,15 +397,7 @@ Detected_Profile :: struct {
 @(private)
 profile_remove_at :: proc(p: ^Profiles, index: int) {
 	if index < 0 || index >= len(p.items) {return}
-	profile := &p.items[index]
-	for field in ([?]string {
-		profile.id,
-		profile.name,
-		profile.command,
-		profile.directory,
-		profile.icon,
-		profile.detection_id,
-	}) {delete(field, p.allocator)}
+	profile_destroy(&p.items[index], p.allocator)
 	ordered_remove(&p.items, index)
 }
 
@@ -502,11 +415,9 @@ profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allo
 	profile := profile_find(p, detected.id)
 	// The built-in default already represents this shell. Keep its stable ID rather than
 	// adding a second machine profile; explicitly configured profiles keep their own identity.
-	metadata_only := profile != nil && profile.id != PROFILE_DEFAULT_ID &&
-		!profile.name_set && !profile.command_set &&
-		!profile.directory_set && !profile.icon_set
+	metadata_only := profile != nil && profile.id != PROFILE_DEFAULT_ID && profile.set <= {.Hidden}
 	if profile == nil || metadata_only {
-		default := profile_find(p, PROFILE_DEFAULT_ID)
+		default := profile_base(p)
 		if default != nil && strings.equal_fold(
 			strings.trim_space(default.command), strings.trim_space(detected.command),
 		) {
@@ -523,26 +434,22 @@ profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allo
 	}
 	created := profile == nil
 	if created {
-		profile, _ = profiles_add(p, detected.id, 0)
+		profile, _ = profiles_add(p, detected.id)
 		if profile == nil {return nil}
 	}
 	if created {profile.detected = true}
 	if err := profile_own(&profile.detection_id, detected.id, p.allocator); err != nil {return err}
 	profile.builtin = true
-	if !profile.name_set {
-		if err := profile_own(&profile.name, detected.name, p.allocator); err != nil {return err}
-		profile.name_set = true
+	if .Name not_in profile.set {
+		profile_own(&profile.name, detected.name, p.allocator) or_return
 	}
-	if !profile.command_set {
-		if err := profile_own(&profile.command, detected.command, p.allocator);
-		   err != nil {return err}
-		profile.command_set = true
+	if .Command not_in profile.set {
+		profile_own(&profile.command, detected.command, p.allocator) or_return
 	}
-	if !profile.directory_set {
-		if err := profile_own(&profile.directory, detected.directory, p.allocator);
-		   err != nil {return err}
-		profile.directory_set = true
+	if .Directory not_in profile.set {
+		profile_own(&profile.directory, detected.directory, p.allocator) or_return
 	}
+	profile.set += {.Name, .Command, .Directory}
 	return nil
 }
 
@@ -678,9 +585,7 @@ migrate_text :: proc(
 	err: runtime.Allocator_Error,
 ) {
 	scanner := line_scanner_init(text)
-	legacy: [3]bool
-	default_written: [3]bool
-	has_default: [3]bool
+	legacy, default_written, has_default: bit_set[Legacy_Shell_Field]
 	has_default_profile := false
 	has_order := false
 	has_profile := false
@@ -690,10 +595,12 @@ migrate_text :: proc(
 		line, ok := line_next(&scanner)
 		if !ok {break}
 		if !line.split {continue}
-		if slot, matches := legacy_shell_slot(line.key); matches {legacy[slot] = true}
-		if strings.has_prefix(line.key, "profile.default.") {
-			field := line.key[len("profile.default."):]
-			for name, i in PROFILE_DEFAULT_FIELDS {if field == name {has_default[i] = true}}
+		if field, matches := legacy_shell_field(line.key); matches {legacy += {field}}
+		if id, name, shaped := profile_key_split(line.key); shaped && id == PROFILE_DEFAULT_ID {
+			profile_field, known := profile_field_from_name(name)
+			for target, field in legacy_shell_profile_fields {
+				if known && target == profile_field {has_default += {field}}
+			}
 		}
 		if line.key == "shell.default_profile" {has_default_profile = true}
 		if line.key == PROFILE_ORDER_KEY {has_order = true}
@@ -703,11 +610,7 @@ migrate_text :: proc(
 		}
 		if strings.has_prefix(line.key, "shell.") {last_shell_line = line.number}
 	}
-	need :=
-		legacy[0] ||
-		legacy[1] ||
-		legacy[2] ||
-		has_profile && (!has_default_profile || !has_order)
+	need := legacy != {} || has_profile && (!has_default_profile || !has_order)
 	if !need {return "", false, nil}
 
 	builder, build_error := strings.builder_make(allocator)
@@ -720,7 +623,6 @@ migrate_text :: proc(
 	if insert_after == 0 {insert_after = first_profile_line - 1}
 	inserted := false
 	rescanner := line_scanner_init(text)
-	fields := PROFILE_DEFAULT_FIELDS
 	for {
 		line, ok := line_next(&rescanner)
 		if !ok {break}
@@ -734,13 +636,12 @@ migrate_text :: proc(
 			inserted = true
 		}
 		if line.split {
-			if slot, matches := legacy_shell_slot(line.key); matches {
-				if has_default[slot] || default_written[slot] {continue}
-				default_written[slot] = true
-				field := fields[slot]
-				if err = write_parts(&builder, "profile.default.", field, " = "); err != nil {
-					return
-				}
+			if field, matches := legacy_shell_field(line.key); matches {
+				if field in has_default || field in default_written {continue}
+				default_written += {field}
+				name := profile_field_names[legacy_shell_profile_fields[field]]
+				if err = write_parts(&builder, PROFILE_PREFIX, PROFILE_DEFAULT_ID, ".", name, " = ");
+				   err != nil {return}
 				if err = write_migrated_value(&builder, line.value); err != nil {return}
 				if err = write_parts(&builder, line.eol); err != nil {return}
 				continue
@@ -790,18 +691,12 @@ write_migrated_value :: proc(b: ^strings.Builder, raw: string) -> runtime.Alloca
 	return write_parts(b, "\"", raw, "\"")
 }
 
+// Interactive order edits are all or nothing: any empty, malformed or repeated entry refuses them.
 @(private)
 profile_order_text_valid :: proc(text: string) -> bool {
-	parts, split_error := strings.split(text, ",", context.temp_allocator)
-	if split_error != nil {return false}
-	for part, i in parts {
-		id := strings.trim_space(part)
-		if id == "" {return false}
-		if !profile_id_valid(id) {return false}
-		for previous, j in parts {
-			if i == j {continue}
-			if strings.trim_space(previous) == id {return false}
-		}
+	offset := 0
+	for token in order_token_next(text, &offset) {
+		if !token.valid || token.repeated {return false}
 	}
 	return true
 }
@@ -841,27 +736,21 @@ profile_edit_text :: proc(key, value: string) -> (serialized, issue: string) {
 		}
 		return value, ""
 	}
-	id, field, shaped := profile_key_split(key)
+	id, field_name, shaped := profile_key_split(key)
 	if !shaped {
 		return "", "Expected profile.ID.name, profile.ID.command, profile.ID.directory, " +
 			"profile.ID.icon, profile.ID.hidden or profile.order."
 	}
-	if !profile_id_valid(id) {
+	if !id_valid(id, PROFILE_ID_MAX_LENGTH) {
 		return "", "Invalid profile ID. Use lowercase letters, digits, - and _."
 	}
-	if !profile_field_valid(field) {
+	field, known := profile_field_from_name(field_name)
+	if !known {
 		return "", "Unknown profile field. Expected name, command, directory, icon or hidden."
 	}
-	if field == "hidden" {
-		if value != "true" && value != "false" {return "", "Expected true or false."}
-		return value, ""
-	}
-	facts := profile_value_facts(value)
-	if field == "name" && facts.empty {return "", "A profile needs a name."}
-	if field == "command" && facts.empty {return "", "A profile needs a command line."}
-	if !facts.valid {
-		return "", "Expected UTF-8 text without NUL bytes."
-	}
+	text, field_issue := profile_field_check(field, value, .Interactive_Field)
+	if field_issue != .None {return "", profile_problem_text(field_issue, .Interactive_Field, value)}
+	if field == .Hidden {return text, ""}
 	builder, build_error := strings.builder_make(context.temp_allocator)
 	if build_error != nil {return "", "Could not allocate the settings change."}
 	defer strings.builder_destroy(&builder)

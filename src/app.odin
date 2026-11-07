@@ -23,10 +23,6 @@ import "core:time"
 @(private)
 FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
 @(private)
-MIN_FONT_POINTS :: 6
-@(private)
-MAX_FONT_POINTS :: 72
-@(private)
 NOTICE_DURATION :: 6 * time.Second
 @(private)
 COPY_NOTICE_DURATION :: 2 * time.Second
@@ -185,7 +181,7 @@ app_init :: proc(app: ^App) -> bool {
 	schema := settings.SCHEMA
 	setting_count := 0
 	for entry in schema {
-		if entry.key == "font.show_all" {continue}
+		if entry.embedded {continue}
 		palette_settings[setting_count] = ui.palette_setting(entry)
 		setting_count += 1
 	}
@@ -457,8 +453,8 @@ session_config :: proc(
 	profile: ^settings.Profile,
 	command_override: string = "",
 ) -> term.Config {
-	directory_text := app.settings.shell.directory
-	command, title := app.settings.shell.command, ""
+	base := settings.profile_base(&app.settings.profiles)
+	directory_text, command, title := base.directory, base.command, ""
 	if profile != nil {
 		directory_text, command, title = profile.directory, profile.command, profile.name
 	}
@@ -808,8 +804,9 @@ settings_prepare_reload :: proc(app: ^App) {
 }
 
 reload_settings :: proc(app: ^App, announce := true) {
-	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
-	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
+	base := settings.profile_base(&app.settings.profiles)
+	previous_shell := strings.clone(base.command, context.temp_allocator)
+	previous_directory := strings.clone(base.directory, context.temp_allocator)
 	read, ok := settings_read(app)
 	if !ok {return}
 	defer settings.diagnostics_destroy(&read.diagnostics)
@@ -819,8 +816,8 @@ reload_settings :: proc(app: ^App, announce := true) {
 	settings_revision_apply(app, read.loaded, &read.diagnostics, read.read_error, publication)
 	settings_read_report(app, &read)
 	if announce {
-		if previous_shell != app.settings.shell.command ||
-		   previous_directory != app.settings.shell.directory {
+		base = settings.profile_base(&app.settings.profiles)
+		if previous_shell != base.command || previous_directory != base.directory {
 			notify(app, .Info, "Shell settings apply the next time the shell restarts.")
 		} else if app.settings_read_error == nil && len(app.settings_diagnostics) == 0 {
 			notify(app, .Info, "Settings reloaded.")
@@ -892,7 +889,8 @@ terminal_colors :: proc(c: settings.Color_Settings) -> term.Colors {
 }
 
 set_font_points :: proc(app: ^App, points: f32) {
-	app.font_points = clamp(points, MIN_FONT_POINTS, MAX_FONT_POINTS)
+	zoom := settings.FONT_SIZE_ZOOM
+	app.font_points = clamp(points, f32(zoom.minimum), f32(zoom.maximum))
 	for window in app.windows {
 		window_apply_settings(app, window)
 	}

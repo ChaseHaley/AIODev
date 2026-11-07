@@ -65,6 +65,25 @@ line_next :: proc(scanner: ^Line_Scanner) -> (line: Line, ok: bool) {
 	return line, true
 }
 
+// id_valid's grammar as a regular expression, for the exported theme schema.
+ID_PATTERN :: "^[a-z0-9][a-z0-9_-]*$"
+
+// The ID grammar profiles and themes share: lowercase ASCII letters, digits, - and _, not starting
+// with - or _, and at most `max_length` bytes. Each domain declares its own limit.
+id_valid :: proc(id: string, max_length: int) -> bool {
+	if len(id) == 0 || len(id) > max_length {return false}
+	if id[0] == '-' || id[0] == '_' {return false}
+	for i in 0 ..< len(id) {
+		if !id_byte_valid(id[i]) {return false}
+	}
+	return true
+}
+
+// Whether `c` may appear in an ID; the first byte also excludes - and _.
+id_byte_valid :: proc(c: u8) -> bool {
+	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+}
+
 // Writes the on-disk form of a schema value. Strings are quoted; the other kinds pass their value
 // text through.
 @(require_results)

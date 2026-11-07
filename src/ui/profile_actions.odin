@@ -7,8 +7,7 @@ editor_profile_menu_open :: proc(p: ^Editor, row: ^Editor_Row, parts: Profile_Pa
 		{.Radio, "Use as default", parts.radio.width <= 0, .Default in row.flags},
 		{.Hidden, "Show in menus", parts.toggle.width <= 0, .Hidden not_in row.flags},
 		{.Duplicate, "Duplicate profile", parts.duplicate.width <= 0, false},
-		{.Remove, "Delete profile", parts.remove.width <= 0 &&
-		 row.profile != "default" && .Protected not_in row.flags, false},
+		{.Remove, "Delete profile", parts.remove.width <= 0 && .Protected not_in row.flags, false},
 	}
 	for item in controls {
 		if !item.hidden {continue}

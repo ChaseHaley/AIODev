@@ -60,7 +60,7 @@ profile_generated_names_remain_editable_after_repeated_add_and_duplicate :: proc
 		profile := settings.profile_find(&after.profiles, id)
 		if !testing.expect(t, profile != nil) {delete(text); return}
 		testing.expect_value(t, profile.name, expected[index])
-		testing.expect(t, !settings.profile_value_facts(profile.name, &after.profiles, id).name_taken)
+		testing.expect(t, !settings.profile_name_taken(&after.profiles, id, profile.name))
 		delete(source)
 		source = text
 	}
@@ -86,8 +86,7 @@ profile_mutation_add_owns_fields_id_and_eligible_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, profile.name, "New Profile")
 	testing.expect_value(t, profile.command, settings.DEFAULT_PROFILE_COMMAND)
 	testing.expect_value(t, profile.directory, settings.DEFAULT_PROFILE_DIRECTORY)
-	testing.expect(t, profile.name_set && profile.command_set && profile.directory_set)
-	testing.expect(t, !profile.hidden_set && !profile.icon_set)
+	testing.expect_value(t, profile.set, bit_set[settings.Profile_Field]{.Name, .Command, .Directory})
 	mutation_order(t, &after, {"default", "profile-2"})
 	testing.expect(t, strings.has_prefix(text, "\xef\xbb\xbf# keep café\r\nfont.size = 14\r\n"))
 	testing.expect_value(t, len(s.profiles.items), 2)
@@ -120,7 +119,7 @@ profile.order = found, alpha, default
 	testing.expect_value(t, profile.command, "cmd.exe /k")
 	testing.expect_value(t, profile.directory, `C:\work`)
 	testing.expect_value(t, profile.icon, `C:\icons\shell.png`)
-	testing.expect(t, profile.hidden_set && !profile.hidden)
+	testing.expect(t, .Hidden in profile.set && !profile.hidden)
 	mutation_order(t, &after, {"found", "alpha", id, "default"})
 	testing.expect(t, settings.profile_find(&s.profiles, "alpha").hidden)
 }
@@ -144,7 +143,7 @@ profile_mutation_enable_materializes_only_the_selected_detection :: proc(t: ^tes
 	testing.expect_value(t, profile.name, "Found")
 	testing.expect_value(t, profile.command, "cmd.exe")
 	testing.expect_value(t, profile.directory, `C:\work`)
-	testing.expect(t, !profile.detected && profile.hidden_set && !profile.hidden)
+	testing.expect(t, !profile.detected && .Hidden in profile.set && !profile.hidden)
 	testing.expect_value(t, after.profiles.default_id, "found")
 	mutation_order(t, &after, {"default", "found"})
 	testing.expect(t, !strings.contains(text, "profile.other."))

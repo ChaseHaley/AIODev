@@ -39,6 +39,9 @@ Editor_Row_Flag :: enum {
 	Hidden,
 	// The profile already has an explicit profile.order entry.
 	Listed,
+	// A profile found on this machine.
+	Builtin,
+	// A profile Settings may not delete (settings.profile_can_remove is false).
 	Protected,
 }
 
@@ -58,11 +61,23 @@ Editor_Row :: struct {
 	// A choice whose value is any combination of `choices`, saved by settings.set_text.
 	multiple:                                      bool,
 	choices, choice_labels:                        []string,
+	// The narrowest the choice popup gets, in DIPs; zero follows the field.
+	choice_min_width:                              f32,
+	// The choice popup carries the Show all fonts switch, which reports .Font_Filter.
+	font_filter:                                   bool,
 	show_all_fonts:                                bool,
+	shortcut_mode:                                 Shortcut_Mode,
 	profile, badge, detail, note:                  string,
 	flags:                                         bit_set[Editor_Row_Flag],
 	process: int,
 	process_field: Process_Field,
+}
+
+// A command shortcut holds several comma-separated alternatives; a Single chord such as the leader
+// holds one.
+Shortcut_Mode :: enum {
+	Alternatives,
+	Single,
 }
 
 Editor_Group :: struct {
@@ -862,7 +877,7 @@ editor_reveal :: proc(p: ^Editor, key: string) -> bool {
 		target = "profiles.add"
 		for row in p.rows {if row.kind == .Profile {target = row.key; break}}
 	}
-	if key == settings.PADDING_GROUPS_KEY {
+	if entry := settings.schema_find(key); entry != nil && entry.control == .Group {
 		target = process_key(0, ".add")
 		for row in p.rows {if row.process_field == .Group {target = row.key; break}}
 	}
@@ -1533,7 +1548,7 @@ capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> Editor_
 			editor_mode_set(p, Editor_Editing{})
 			return .Save
 		case .Backspace, .Delete:
-			if strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) {
+			if row.shortcut_mode == .Alternatives {
 				shortcut_replace(p, row, "")
 			} else {field_set(&p.value, "")}
 			return .Changed
@@ -1548,7 +1563,7 @@ capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> Editor_
 		modifiers,
 	}
 	if p.physical {chord.modifiers += {.Physical}}
-	binding := strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX)
+	binding := row.shortcut_mode == .Alternatives
 	if leader, ok := p.leader.?;
 	   ok &&
 	   binding &&
@@ -1595,7 +1610,7 @@ profile_control_step :: proc(p: ^Editor, row: ^Editor_Row, step: int) {
 	} else {
 		order[0], order[1], order[2], order[3], order[4] =
 			.Expand, .Radio, .Hidden, .Duplicate, .Remove
-		count = (row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags) ? 4 : 5
+		count = .Protected in row.flags ? 4 : 5
 		if p.profile_menu_parts.more.width > 0 {
 			order[0] = .Expand
 			count = 1
@@ -1650,10 +1665,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Choice:
 		open_choices(p, row)
 	case .Shortcut:
-		if strings.has_prefix(
-			row.key,
-			settings.KEY_BINDING_PREFIX,
-		) {open_shortcuts(p)} else {start_capture(p)}
+		if row.shortcut_mode == .Alternatives {open_shortcuts(p)} else {start_capture(p)}
 	case .Color, .Optional_Color:
 		editor_mode_set(p, Editor_Color_Popup{})
 		field_select_all(&p.value)
@@ -1679,7 +1691,7 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_O
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	popup := editor_popup(p)
 	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
-		if row.key == "font.family" && e.key == .Tab {
+		if row.font_filter && e.key == .Tab {
 			choice.toggle_focus = !choice.toggle_focus
 			editor_mode_set(p, choice)
 			return .Changed, true
@@ -1891,7 +1903,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	case .Delete, .Backspace:
 		if control {break}
 		if focus == .Control && row != nil && row.kind == .Profile {
-			if row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags {return .Changed}
+			if .Protected in row.flags {return .Changed}
 			return profile_request(p, .Remove, row.profile)
 		}
 	case .R:
@@ -2233,8 +2245,7 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 		count := choice_popup_rows(p, row, l)
 		p.popup_scroll = clamp(p.popup_scroll, max(0, p.popup_index - max(1, count) + 1), p.popup_index)
 		p.popup_scroll = min(p.popup_scroll, max(0, editor_choice_count(p, row) - count))
-		width := parts.field.width
-		if row.key == "font.family" || row.key == "interface.font_family" {width = max(width, 360 * s)}
+		width := max(parts.field.width, row.choice_min_width * s)
 		r = {
 			parts.field.x,
 			parts.field.y + parts.field.height + 4 * s,
@@ -2458,7 +2469,7 @@ editor_press :: proc(
 			p.profile_control = .Duplicate
 			return profile_request(p, .Duplicate, row.profile)
 		case row.kind == .Profile &&
-		     row.profile != settings.PROFILE_DEFAULT_ID && .Protected not_in row.flags &&
+		     .Protected not_in row.flags &&
 		     render.rect_contains(table.remove, x, y):
 			editor_mode_set(p, Editor_Editing{})
 			p.profile_control = .Remove
@@ -2473,7 +2484,7 @@ editor_press :: proc(
 		case row.kind == .Profile_Add:
 			return .Save
 		case row.kind == .Profile:
-			if (row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags) &&
+			if .Protected in row.flags &&
 			   render.rect_contains(table.remove, x, y) {
 				return .Changed
 			}
@@ -2712,7 +2723,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 					profile_control = .Expand
 				case render.rect_contains(table.duplicate, x, y):
 					profile_control = .Duplicate
-				case row.profile != settings.PROFILE_DEFAULT_ID && .Protected not_in row.flags &&
+				case .Protected not_in row.flags &&
 				     render.rect_contains(table.remove, x, y):
 					profile_control = .Remove
 				case render.rect_contains(table.enable, x, y):
@@ -2997,7 +3008,7 @@ profile_row_draw :: proc(
 	name_color := strong ? theme.text : theme.muted
 	if .Hidden in row.flags {name_color = theme.muted}
 	name_baseline, note_baseline := stacked_baselines(parts.row, text, &small, scale)
-	auto_detected := .Protected in row.flags
+	auto_detected := .Builtin in row.flags
 	if row.note == "" && !auto_detected {name_baseline = cy - text.line_height / 2 + text.ascent}
 	if result := draw_text(
 		text,
@@ -3075,8 +3086,7 @@ profile_row_draw :: proc(
 		}
 		for control in controls {
 			if control.rect.width <= 0 {continue}
-			protected := row.profile == settings.PROFILE_DEFAULT_ID || .Protected in row.flags
-			if control.kind == .Remove && protected {continue}
+			if control.kind == .Remove && .Protected in row.flags {continue}
 			profile_button_draw(
 				list,
 				control.rect,
@@ -3305,7 +3315,7 @@ control_draw :: proc(
 		return shortcut_field_draw(list, text, theme, parts, shortcut_summary(value), {
 			capturing = selected && editor_capturing(p), focused = focused,
 			positions_focused = selected && editor_focus(p) == .Positions, physical = p.physical,
-			empty_label = strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) ? "Add shortcut" : "None",
+			empty_label = row.shortcut_mode == .Alternatives ? "Add shortcut" : "None",
 		}, page, scale)
 	case .Text:
 	case .Profile_Icon:
@@ -3405,7 +3415,7 @@ popup_draw :: proc(
 			                           !toggle_focus, "Search fonts");
 			   result != .Ok {return result}
 			if render.push_layer(list, l.page) != .None {return .Ok}
-			if row.key == "font.family" {
+			if row.font_filter {
 				toggle := choice_font_toggle_rect(p, l)
 				switch_w, switch_h := SWITCH_WIDTH * s, SWITCH_HEIGHT * s
 				switch_rect := render.Rect {

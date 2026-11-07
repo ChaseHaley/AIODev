@@ -3,6 +3,7 @@ package main
 import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:render"
+import "aio:settings"
 import "core:image/png"
 
 // Shell icons are small, and the PNG loader reads a whole file before checking its header, so a
@@ -21,12 +22,9 @@ Shell_Icon :: struct {
 
 shell_icon_load :: proc(app: ^App) {
 	app.shell_icon = {}
-	if app.settings.shell.icon == "" {return}
-	path, path_error := localpath.settings_relative(
-		app.settings.shell.icon,
-		app.settings_path,
-		context.temp_allocator,
-	)
+	icon_path := settings.profile_base(&app.settings.profiles).icon
+	if icon_path == "" {return}
+	path, path_error := localpath.settings_relative(icon_path, app.settings_path, context.temp_allocator)
 	switch path_error {
 	case .None:
 	case .Expand:

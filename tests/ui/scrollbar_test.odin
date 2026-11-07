@@ -94,6 +94,7 @@ choice_dropdown_scrollbar_pages_drags_and_keeps_options_clear :: proc(t: ^testin
 	for &choice, i in choices {choice = fmt.tprintf("Font %02d", i)}
 	testing.expect_value(t, ui.editor_add(&p, {
 		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true,
+		font_filter = true, choice_min_width = 360,
 		value = choices[0], choices = choices[:],
 	}, "Font"), nil)
 	ui.editor_filter(&p)

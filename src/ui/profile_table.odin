@@ -3,13 +3,13 @@ package ui
 import "aio:render"
 import "aio:settings"
 import "base:runtime"
-import "core:fmt"
 import "core:strings"
 
-// One profile as the settings table reads it. The strings are owned by Profile_Table.
+// One profile as the settings table reads it. The strings are owned by Profile_Table. `removable`
+// is settings.profile_can_remove.
 Profile_Row :: struct {
 	id, name, command, directory, icon, badge, note: string,
-	hidden, detected, is_default, listed:           bool,
+	hidden, detected, is_default, listed, removable: bool,
 }
 
 // Configured and machine profiles in profile.order order.
@@ -56,20 +56,6 @@ profile_row_destroy :: proc(row: ^Profile_Row, allocator: runtime.Allocator) {
 	}
 }
 
-@(private)
-profile_row_note :: proc(
-	profiles: ^settings.Profiles,
-	profile: ^settings.Profile,
-) -> string {
-	name := settings.profile_value_facts(profile.name, profiles, profile.id)
-	command := settings.profile_value_facts(profile.command)
-	if !name.valid || !command.valid {return "Expected UTF-8 text without NUL bytes."}
-	if name.empty {return "A profile needs a name."}
-	if command.empty {return "A profile needs a command line."}
-	if name.name_taken {return "Another profile uses this name."}
-	return ""
-}
-
 // Builds one table from the resolved profile list. Duplicate names and unreadable commands
 // become row notes; builtin marks machine profiles, including ones with file overrides.
 @(require_results)
@@ -94,6 +80,7 @@ profile_table_build :: proc(
 			detected   = profile.builtin,
 			is_default = default != nil && profile.id == default.id,
 			listed     = settings.profile_order_has(profiles, profile.id),
+			removable  = settings.profile_can_remove(profile),
 		}
 		row_ok := false
 		defer if !row_ok {profile_row_destroy(&row, allocator)}
@@ -102,19 +89,18 @@ profile_table_build :: proc(
 		row.command = strings.clone(profile.command, allocator) or_return
 		row.directory = strings.clone(profile.directory, allocator) or_return
 		row.icon = strings.clone(profile.icon, allocator) or_return
-		row.badge = strings.clone(
-			settings.shell_icon(settings.shell_executable(profile.command), ""),
-			allocator,
-		) or_return
-		note := profile_row_note(profiles, profile)
-		if note == "" &&
+		row.badge = strings.clone(settings.shell_badge(profile.command), allocator) or_return
+		problem := settings.profile_check(profiles, profile)
+		if problem == .None &&
 		   !profile.detected &&
 		   command_exists != nil &&
 		   !command_exists(profile.command) {
-			executable := settings.shell_executable(profile.command)
-			note = fmt.tprintf("Command not found: %s.", executable)
+			problem = .Command_Missing
 		}
-		row.note = strings.clone(note, allocator) or_return
+		row.note = strings.clone(
+			settings.profile_problem_text(problem, .Table_Note, profile.command),
+			allocator,
+		) or_return
 		target := &table.rows
 		if _, append_error := append(target, row); append_error != nil {return {}, append_error}
 		row_ok = true

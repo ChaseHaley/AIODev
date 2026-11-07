@@ -37,13 +37,13 @@ choice_choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcom
 @(private)
 choice_search_height :: proc(row: ^Editor_Row, scale: f32) -> f32 {
 	if !choice_searchable(row) {return 0}
-	return (CHOICE_SEARCH_HEIGHT + (row.key == "font.family" ? CHOICE_HEIGHT : 0)) * scale
+	return (CHOICE_SEARCH_HEIGHT + (row.font_filter ? CHOICE_HEIGHT : 0)) * scale
 }
 
 @(private)
 choice_font_toggle_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	row := editor_row(p)
-	if row == nil || row.key != "font.family" || editor_popup(p) != .Choice {return {}}
+	if row == nil || !row.font_filter || editor_popup(p) != .Choice {return {}}
 	r := editor_popup_rect(p, l)
 	s := l.scale
 	return {r.x + 4 * s, r.y + (4 + CHOICE_SEARCH_HEIGHT) * s, r.width - 8 * s, CHOICE_HEIGHT * s}

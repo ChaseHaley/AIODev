@@ -383,7 +383,7 @@ editor_profile_default_row_has_no_remove_action :: proc(t: ^testing.T) {
 				profile = "default",
 				badge = ">_",
 				kind = .Profile,
-				flags = {.Default},
+				flags = {.Default, .Protected},
 			},
 			"Profiles",
 		),

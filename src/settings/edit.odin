@@ -10,10 +10,32 @@ import "core:strings"
 schema_find :: proc(key: string) -> ^Schema_Entry {
 	@(static, rodata)
 	schema := SCHEMA
-	for &entry in schema {
-		if entry.key == key {return &entry}
+	index := schema_index(key)
+	if index < 0 {return nil}
+	return &schema[index]
+}
+
+// The SCHEMA position of `key`, or -1.
+schema_index :: proc(key: string) -> int {
+	@(static, rodata)
+	schema := SCHEMA
+	for entry, i in schema {
+		if entry.key == key {return i}
 	}
-	return nil
+	return -1
+}
+
+// The file line that set a schema key, or zero when the file leaves it at its default.
+setting_line :: proc(s: ^Settings, key: string) -> int {
+	index := schema_index(key)
+	return index < 0 ? 0 : s.lines[index]
+}
+
+// Whether saving `key` must be checked against every command shortcut.
+setting_affects_bindings :: proc(key: string) -> bool {
+	if strings.has_prefix(key, KEY_BINDING_PREFIX) {return true}
+	entry := schema_find(key)
+	return entry != nil && entry.affects_bindings
 }
 
 value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
@@ -28,9 +50,9 @@ value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
 	case .Bool:
 		return (cast(^bool)p)^ ? "true" : "false"
 	case .Enum:
-		return entry.enum_names[(cast(^int)p)^]
+		return entry.names[(cast(^int)p)^]
 	case .Set:
-		return set_text(entry.enum_names, (cast(^u32)p)^)
+		return set_text(entry.names, (cast(^u32)p)^)
 	}
 	return ""
 }
@@ -60,18 +82,15 @@ edit_text :: proc(
 	if entry := schema_find(key); entry != nil {
 		if err = encode_value(&encoded, entry^, value); err != nil {return}
 		serialized = strings.to_string(encoded)
-		s, default_error := defaults(allocator)
-		if default_error != nil {err = default_error; return}
-		defer destroy(&s)
-		issue, assign_error := assign(&s, entry^, serialized)
-		if assign_error != nil {err = assign_error; return}
+		_, issue, parse_error := value_parse(entry^, serialized, allocator)
+		if parse_error != nil {err = parse_error; return}
 		if p, ok := issue.?; ok {message = p.message; return}
-	} else if slot, legacy := legacy_shell_slot(key); legacy {
-		if value == "" && slot != 2 {
+	} else if field, legacy := legacy_shell_field(key); legacy {
+		entry := legacy_shell_entries[field]
+		if value == "" && entry.valid.minimum > 0 {
 			message, err = strings.clone("Shell command and starting directory cannot be empty.", allocator)
 			return
 		}
-		entry := legacy_shell_entry(slot)
 		if err = encode_value(&encoded, entry, value); err != nil {return}
 		serialized = strings.to_string(encoded)
 	} else if strings.has_prefix(key, CUSTOM_THEME_PREFIX) {
@@ -118,6 +137,32 @@ edit_text :: proc(
 		if err = write_parts(&b, key, " = ", serialized, scanner.eol); err != nil {return}
 	}
 	updated, err = strings.clone(strings.to_string(b), allocator)
+	return
+}
+
+// Replaces the owned `text` with its revision setting `key`. A refusal leaves `text` alone and
+// returns edit_text's message, owned by `allocator`; nothing else is left to free.
+@(private, require_results)
+revision_edit_owned :: proc(
+	text: ^string,
+	key, value: string,
+	allocator: runtime.Allocator,
+) -> (
+	message: string,
+	err: runtime.Allocator_Error,
+) {
+	updated: string
+	updated, message, err = edit_text(text^, key, value, allocator)
+	if err != nil || message != "" {
+		delete(updated, allocator)
+		if err != nil {
+			delete(message, allocator)
+			message = ""
+		}
+		return
+	}
+	delete(text^, allocator)
+	text^ = updated
 	return
 }
 

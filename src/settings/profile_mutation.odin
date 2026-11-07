@@ -29,7 +29,7 @@ profile_mutate :: proc(
 		return "", "", "", .Limit
 	}
 	if change.kind == .Enable && !profile.detected {return "", "", "", .Unavailable}
-	if change.kind == .Remove && (profile.id == PROFILE_DEFAULT_ID || profile.builtin) {
+	if change.kind == .Remove && !profile_can_remove(profile) {
 		return "", "", "", .Unavailable
 	}
 
@@ -53,26 +53,26 @@ profile_mutate :: proc(
 		values := Profile {
 			name = "New Profile", command = DEFAULT_PROFILE_COMMAND, directory = DEFAULT_PROFILE_DIRECTORY,
 		}
-		count := 3
+		fields := bit_set[Profile_Field]{.Name, .Command, .Directory}
 		if change.kind != .Add {
 			values = profile^
-			count = 4
+			fields += {.Hidden}
 			if change.kind == .Duplicate {values.name = fmt.tprintf("%s copy", profile.name)}
 		}
+		if change.kind == .Duplicate && values.icon != "" {fields += {.Icon}}
 		if change.kind != .Enable {
 			base := values.name
-			for number := 2; profile_value_facts(values.name, profiles).name_taken; number += 1 {
+			for number := 2; profile_name_taken(profiles, "", values.name); number += 1 {
 				values.name = fmt.tprintf("%s %d", base, number)
 			}
 		}
-		pairs := [5][2]string {
-			{"name", values.name}, {"command", values.command}, {"directory", values.directory},
-			{"hidden", "false"}, {"icon", values.icon},
-		}
-		if change.kind == .Duplicate && values.icon != "" {count = 5}
-		for pair in pairs[:count] {
-			key := fmt.tprintf("profile.%s.%s", target, pair[0])
-			if issue, error = profile_mutation_edit(&revision, key, pair[1], allocator); error != .None {
+		// The order new lines are appended in.
+		for field in ([?]Profile_Field{.Name, .Command, .Directory, .Hidden, .Icon}) {
+			if field not_in fields {continue}
+			value := field == .Hidden ? "false" : profile_text(&values, field)^
+			if issue, error = profile_mutation_edit(
+				&revision, profile_field_key(target, field), value, allocator,
+			); error != .None {
 				return "", "", issue, error
 			}
 		}
@@ -127,18 +127,8 @@ profile_mutation_edit :: proc(
 	key, value: string,
 	allocator: runtime.Allocator,
 ) -> (issue: string, error: Profile_Mutation_Error) {
-	updated, message, alloc_error := edit_text(text^, key, value, allocator)
-	if alloc_error != nil {
-		delete(updated, allocator)
-		delete(message, allocator)
-		return "", .Allocation
-	}
-	if message != "" {
-		delete(updated, allocator)
-		return message, .Edit
-	}
-	delete(message, allocator)
-	delete(text^, allocator)
-	text^ = updated
+	message, alloc_error := revision_edit_owned(text, key, value, allocator)
+	if alloc_error != nil {return "", .Allocation}
+	if message != "" {return message, .Edit}
 	return
 }

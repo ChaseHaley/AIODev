@@ -10,7 +10,7 @@ shortcut_origins_keep_last_written_source_line :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, nil)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
-	testing.expect_value(t, s.leader_line, 4)
+	testing.expect_value(t, settings.setting_line(&s, "input.leader"), 4)
 	testing.expect_value(t, s.input.leader, "Ctrl+T")
 	testing.expect_value(t, len(s.keys), 1)
 	testing.expect_value(t, s.keys[0].line, 5)

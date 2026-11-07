@@ -18,15 +18,15 @@ theme_schema_text :: proc(allocator := context.allocator) -> (string, bool) {
   "properties": {
     "$schema": {"type": "string"},
     "version": {"const": 1},
-    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "maxLength": `,
-		fmt.tprintf("%d", PROFILE_ID_MAX_LENGTH), `},
+    "id": {"type": "string", "pattern": "`, ID_PATTERN, `", "maxLength": `,
+		fmt.tprintf("%d", THEME_ID_MAX_LENGTH), `},
     "name": {"type": "string", "description": "Display name shown in the theme selector; any text."},
     "author": {"type": "string"},
     "description": {"type": "string"},
     "base": {
       "type": "string",
       "description": "ID of another theme that supplies the colors this file leaves out.",
-      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+      "pattern": "`, ID_PATTERN, `"
     },
     "colors": {
       "type": "object",

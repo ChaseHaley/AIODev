@@ -10,6 +10,7 @@ import "core:testing"
 import app "../../src"
 import "aio:input"
 import "aio:platform"
+import "aio:settings"
 import "aio:term"
 import "aio:ui"
 import win32 "core:sys/windows"
@@ -352,11 +353,12 @@ workspace_delete_allocation_failures_preserve_original_until_prepared :: proc(t:
 	pid := term.process_id(session)
 	backing := context.allocator
 	context.logger = log.nil_logger()
-	shell := state.settings.shell.command
-	state.settings.shell.command = "aio-delete-nonexistent-shell.exe"
+	base := settings.profile_base(&state.settings.profiles)
+	shell := base.command
+	base.command = "aio-delete-nonexistent-shell.exe"
 	app.workspace_delete_request(state, w, original)
 	delete_key(state, w, .Enter)
-	state.settings.shell.command = shell
+	base.command = shell
 	testing.expect(t, w.workspace == original && app.workspace_find(state, id) == original)
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect_value(t, len(state.sessions), 1)

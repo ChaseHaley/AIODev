@@ -13,18 +13,26 @@ Cursor_Style :: enum int {
 	Bar,
 	Underline,
 }
+CURSOR_STYLE_NAME :: [Cursor_Style]string {
+	.Block     = "block",
+	.Bar       = "bar",
+	.Underline = "underline",
+}
+#assert(len(Cursor_Style) == 3)
+CURSOR_STYLE_NAMES :: []string {
+	CURSOR_STYLE_NAME[Cursor_Style(0)],
+	CURSOR_STYLE_NAME[Cursor_Style(1)],
+	CURSOR_STYLE_NAME[Cursor_Style(2)],
+}
 Font_Settings :: struct {
 	family:            string,
 	show_all:          bool,
 	size, line_height: f64,
 }
 Shell_Settings :: struct {
-	// Legacy parse targets for the default profile. The file format uses profile.default.*;
-	// these remain so an unwritable file still launches and existing callers keep working.
-	command, directory, icon: string,
-	default_profile:          string,
-	refresh_environment:      bool,
-	integration:              bool,
+	default_profile:     string,
+	refresh_environment: bool,
+	integration:         bool,
 }
 Input_Settings :: struct {
 	leader: string,
@@ -33,12 +41,29 @@ Interface_Settings :: struct {
 	font_family:                      string,
 	font_size, hover_lift, hover_gloss: f64,
 }
+Pane_Settings :: struct {
+	gap, corner_radius:            int,
+	show_headers:                  bool,
+	markdown_floating:             bool,
+	confirm_shell_switch:          bool,
+	minimum_columns, minimum_rows: int,
+	focus_border, unfocused_dim:   int,
+}
 Tab_Settings :: struct {
 	confirm_close: bool,
 }
 Tabs_Orientation :: enum int {
 	Vertical,
 	Horizontal,
+}
+TABS_ORIENTATION_NAME :: [Tabs_Orientation]string {
+	.Vertical   = "vertical",
+	.Horizontal = "horizontal",
+}
+#assert(len(Tabs_Orientation) == 2)
+TABS_ORIENTATION_NAMES :: []string {
+	TABS_ORIENTATION_NAME[Tabs_Orientation(0)],
+	TABS_ORIENTATION_NAME[Tabs_Orientation(1)],
 }
 Tabs_Settings :: struct {
 	orientation:        Tabs_Orientation,
@@ -50,21 +75,57 @@ Status_Scope :: enum int {
 	All,
 	Workspace,
 }
+STATUS_SCOPE_NAME :: [Status_Scope]string {
+	.All       = "all",
+	.Workspace = "workspace",
+}
+#assert(len(Status_Scope) == 2)
+STATUS_SCOPE_NAMES :: []string{STATUS_SCOPE_NAME[Status_Scope(0)], STATUS_SCOPE_NAME[Status_Scope(1)]}
 Status_Panel_Side :: enum int {
 	Right,
 	Left,
+}
+STATUS_PANEL_SIDE_NAME :: [Status_Panel_Side]string {
+	.Right = "right",
+	.Left  = "left",
+}
+#assert(len(Status_Panel_Side) == 2)
+STATUS_PANEL_SIDE_NAMES :: []string {
+	STATUS_PANEL_SIDE_NAME[Status_Panel_Side(0)],
+	STATUS_PANEL_SIDE_NAME[Status_Panel_Side(1)],
 }
 Status_Panel_View :: enum int {
 	Comfy,
 	Dense,
 }
-// What Settings shows for each view, in Status_Panel_View order.
-@(rodata)
-status_panel_view_labels := [len(Status_Panel_View)]string{"Comfy", "Dense"}
+STATUS_PANEL_VIEW_NAME :: [Status_Panel_View]string {
+	.Comfy = "comfy",
+	.Dense = "dense",
+}
+// What Settings shows for each view.
+STATUS_PANEL_VIEW_LABEL :: [Status_Panel_View]string {
+	.Comfy = "Comfy",
+	.Dense = "Dense",
+}
+#assert(len(Status_Panel_View) == 2)
+STATUS_PANEL_VIEW_NAMES :: []string {
+	STATUS_PANEL_VIEW_NAME[Status_Panel_View(0)],
+	STATUS_PANEL_VIEW_NAME[Status_Panel_View(1)],
+}
+STATUS_PANEL_VIEW_LABELS :: []string {
+	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(0)],
+	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(1)],
+}
 Status_Keep :: enum int {
 	Focus,
 	Dismiss,
 }
+STATUS_KEEP_NAME :: [Status_Keep]string {
+	.Focus   = "focus",
+	.Dismiss = "dismiss",
+}
+#assert(len(Status_Keep) == 2)
+STATUS_KEEP_NAMES :: []string{STATUS_KEEP_NAME[Status_Keep(0)], STATUS_KEEP_NAME[Status_Keep(1)]}
 // How one program status reaches you. Each state chooses any combination; none means silence.
 Status_Channel :: enum u8 {
 	Banner,
@@ -74,15 +135,35 @@ Status_Channel :: enum u8 {
 	Notice,
 }
 Status_Channels :: bit_set[Status_Channel;u32]
-// Saved names and Settings labels, in Status_Channel order.
-STATUS_CHANNEL_NAMES :: []string{"banner", "tray", "flash", "sound", "notice"}
-@(rodata)
-status_channel_labels := [len(Status_Channel)]string {
-	"Windows banner",
-	"Tray notification",
-	"Flash taskbar",
-	"Sound",
-	"In-app notice",
+// Saved names; bit i of a saved set is Status_Channel(i).
+STATUS_CHANNEL_NAME :: [Status_Channel]string {
+	.Banner = "banner",
+	.Tray   = "tray",
+	.Flash  = "flash",
+	.Sound  = "sound",
+	.Notice = "notice",
+}
+STATUS_CHANNEL_LABEL :: [Status_Channel]string {
+	.Banner = "Windows banner",
+	.Tray   = "Tray notification",
+	.Flash  = "Flash taskbar",
+	.Sound  = "Sound",
+	.Notice = "In-app notice",
+}
+#assert(len(Status_Channel) == 5)
+STATUS_CHANNEL_NAMES :: []string {
+	STATUS_CHANNEL_NAME[Status_Channel(0)],
+	STATUS_CHANNEL_NAME[Status_Channel(1)],
+	STATUS_CHANNEL_NAME[Status_Channel(2)],
+	STATUS_CHANNEL_NAME[Status_Channel(3)],
+	STATUS_CHANNEL_NAME[Status_Channel(4)],
+}
+STATUS_CHANNEL_LABELS :: []string {
+	STATUS_CHANNEL_LABEL[Status_Channel(0)],
+	STATUS_CHANNEL_LABEL[Status_Channel(1)],
+	STATUS_CHANNEL_LABEL[Status_Channel(2)],
+	STATUS_CHANNEL_LABEL[Status_Channel(3)],
+	STATUS_CHANNEL_LABEL[Status_Channel(4)],
 }
 // Program status (OSC 7501). Each surface and state can be turned off on its own; `enabled` turns
 // the whole protocol off, so programs see the terminal as unsupported.
@@ -145,7 +226,6 @@ Settings :: struct {
 	theme:           Theme_Settings,
 	themes:          [dynamic]Custom_Theme,
 	active_theme:    Theme,
-	theme_line:      int,
 	pane:            Pane_Settings,
 	tab:             Tab_Settings,
 	tabs:            Tabs_Settings,
@@ -153,9 +233,15 @@ Settings :: struct {
 	control:         Control_Settings,
 	profiles:        Profiles,
 	allocator:       runtime.Allocator,
-	leader_line:     int,
-	default_profile_line: int,
+	// The file line of each SCHEMA entry, zero when the file does not set it; read through
+	// setting_line. Sized by a constant because SCHEMA's own length depends on this struct.
+	lines:           [SCHEMA_CAPACITY]int,
 }
+SCHEMA_CAPACITY :: 128
+#assert(len(SCHEMA) <= SCHEMA_CAPACITY)
+// Font zoom keys keep the shell font size within this span, apart from the file's `valid` range
+// and the slider's comfortable one.
+FONT_SIZE_ZOOM :: Range{6, 72}
 KEY_BINDING_PREFIX :: "keys."
 Key_Binding :: struct {
 	name, value: string,
@@ -166,803 +252,733 @@ Kind :: enum {
 	Int,
 	Float,
 	Bool,
+	// One of `names`, stored as its index: names[i] is the saved name of enum value i.
 	Enum,
-	// A Status_Channels set saved as comma-separated `enum_names`, or `none`.
+	// A bit set saved as comma-separated `names`, or `none`: bit i is names[i].
 	Set,
 }
-Schema_Entry :: struct {
-	key, title:       string,
-	kind:             Kind,
-	offset:           uintptr,
-	default_value:    string,
+// Inclusive bounds. For a String they bound its length in UTF-8 bytes.
+Range :: struct {
 	minimum, maximum: f64,
-	enum_names:       []string,
-	description:      string,
+}
+// How Settings and the palette edit a setting.
+Setting_Control :: enum {
+	// Follows `kind`: text, integer or number slider, toggle, or a choice of `names`.
+	By_Kind,
+	// A chord captured from the keyboard.
+	Shortcut,
+	// A String chosen from the list `live_choices` names.
+	Choice,
+	// Edited by a group editor of its own, such as program padding groups. The palette can only
+	// jump to it and offers no reset for it.
+	Group,
+}
+// The grammar a String value must follow beyond its length.
+Setting_Validator :: enum {
+	None,
+	Padding_Groups,
+	Program_Icons,
+}
+// Where a Choice setting's options come from while the app runs.
+Live_Choices :: enum {
+	None,
+	Themes,
+	Shell_Fonts,
+	Interface_Fonts,
+}
+// When the running app applies a saved value.
+Apply_Timing :: enum {
+	Immediate,
+	New_Sessions,
+}
+// One setting: its storage, file form and how it is edited. Ranges are separate policies: `valid` is
+// what the file accepts, `slider` the comfortable span a slider offers when narrower.
+Schema_Entry :: struct {
+	key, title:        string,
+	kind:              Kind,
+	offset:            uintptr,
+	default_value:     string,
+	valid:             Range,
+	// Saved names of an Enum or Set and, optionally, what Settings shows for each.
+	names, labels:     []string,
+	// The file comment; Settings shows `page_description` instead when it is set.
+	description:       string,
+	page_description:  string,
+	control:           Setting_Control,
+	validator:         Setting_Validator,
+	live_choices:      Live_Choices,
+	// Zero means the slider spans `valid`.
+	slider:            Range,
+	// The rounding of a numeric control; zero rounds by kind.
+	step:              f64,
+	// Edited inside another setting's control, so it has no row or palette entry of its own.
+	embedded:          bool,
+	apply_timing:      Apply_Timing,
+	// A change must be checked against every command shortcut.
+	affects_bindings:  bool,
 }
 SCHEMA :: [?]Schema_Entry {
 	{
-		"terminal.scroll_page_length", "Scroll Page Length", .Float,
-		offset_of(Settings, terminal) + offset_of(Terminal_Settings, scroll_page_length),
-		"0.5", 0.01, 1, nil,
-		"Fraction of the visible page used by the configured page scrolling commands.",
+		key = "terminal.scroll_page_length",
+		title = "Scroll Page Length",
+		kind = .Float,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, scroll_page_length),
+		default_value = "0.5",
+		valid = {0.01, 1},
+		description = "Fraction of the visible page used by the configured page scrolling commands.",
 	},
 	{
-		"terminal.scrollbar", "Show Scrollbar", .Bool,
-		offset_of(Settings, terminal) + offset_of(Terminal_Settings, scrollbar),
-		"true", 0, 0, nil,
-		"Show a scrollbar on terminal panes with scrollback.",
+		key = "terminal.scrollbar",
+		title = "Show Scrollbar",
+		kind = .Bool,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, scrollbar),
+		default_value = "true",
+		description = "Show a scrollbar on terminal panes with scrollback.",
 	},
 	{
-		"theme.name",
-		"Theme",
-		.String,
-		offset_of(Settings, theme) + offset_of(Theme_Settings, name),
-		DEFAULT_THEME_ID,
-		1,
-		64,
-		nil,
-		"Color theme ID: a file in the themes folder, such as studio-light, or a custom theme.",
+		key = "theme.name",
+		title = "Theme",
+		kind = .String,
+		offset = offset_of(Settings, theme) + offset_of(Theme_Settings, name),
+		default_value = DEFAULT_THEME_ID,
+		valid = {1, 64},
+		control = .Choice,
+		live_choices = .Themes,
+		page_description = "Theme file or custom theme. Changing any color saves a custom theme.",
+		description = "Color theme ID: a file in the themes folder, such as studio-light, or a custom theme.",
 	},
 	{
-		"pane.gap",
-		"Pane Gap",
-		.Int,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, gap),
-		"4",
-		0,
-		24,
-		nil,
-		"Space between and around pane cards in DIPs.",
+		key = "pane.gap",
+		title = "Pane Gap",
+		kind = .Int,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, gap),
+		default_value = "4",
+		valid = {0, 24},
+		description = "Space between and around pane cards in DIPs.",
 	},
 	{
-		"pane.corner_radius",
-		"Pane Corner Radius",
-		.Int,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, corner_radius),
-		"8",
-		0,
-		16,
-		nil,
-		"Pane card corner radius in DIPs.",
+		key = "pane.corner_radius",
+		title = "Pane Corner Radius",
+		kind = .Int,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, corner_radius),
+		default_value = "8",
+		valid = {0, 16},
+		description = "Pane card corner radius in DIPs.",
 	},
 	{
-		"pane.focus_border",
-		"Focus Border Width",
-		.Int,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, focus_border),
-		"1",
-		0,
-		8,
-		nil,
-		"Width of the focused pane's accent outline in DIPs. Zero outlines it like every other pane.",
+		key = "pane.focus_border",
+		title = "Focus Border Width",
+		kind = .Int,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, focus_border),
+		default_value = "1",
+		valid = {0, 8},
+		description = "Width of the focused pane's accent outline in DIPs. Zero outlines it like every other pane.",
 	},
 	{
-		"pane.unfocused_dim",
-		"Dim Unfocused Panes",
-		.Int,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, unfocused_dim),
-		"0",
-		0,
-		90,
-		nil,
-		"How far unfocused panes fade toward their background, in percent, so only the focused " +
+		key = "pane.unfocused_dim",
+		title = "Dim Unfocused Panes",
+		kind = .Int,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, unfocused_dim),
+		default_value = "0",
+		valid = {0, 90},
+		description = "How far unfocused panes fade toward their background, in percent, so only the focused " +
 			"pane keeps full contrast. Zero disables dimming.",
 	},
 	{
-		"pane.show_headers",
-		"Show Pane Headers",
-		.Bool,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a header and controls on every terminal pane.",
+		key = "pane.show_headers",
+		title = "Show Pane Headers",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers),
+		default_value = "true",
+		description = "Show a header and controls on every terminal pane.",
 	},
 	{
-		"pane.markdown_floating",
-		"Open Markdown Files in a Float",
-		.Bool,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, markdown_floating),
-		"false",
-		0,
-		0,
-		nil,
-		"Open a Markdown file from a terminal link or Open Markdown File in a float above the tab, so " +
-			"the panes already there keep their size.",
+		key = "pane.markdown_floating",
+		title = "Open Markdown Files in a Float",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, markdown_floating),
+		default_value = "false",
+		description = "Open a Markdown file from a terminal link or Open Markdown File in a float above the tab, " +
+			"so the panes already there keep their size.",
 	},
 	{
-		"pane.confirm_shell_switch",
-		"Confirm Switching Pane Shells",
-		.Bool,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, confirm_shell_switch),
-		"true",
-		0,
-		0,
-		nil,
-		"Ask before a running pane's shell is replaced, losing its session.",
+		key = "pane.confirm_shell_switch",
+		title = "Confirm Switching Pane Shells",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, confirm_shell_switch),
+		default_value = "true",
+		description = "Ask before a running pane's shell is replaced, losing its session.",
 	},
 	{
-		"pane.minimum_columns",
-		"Minimum Pane Width",
-		.Int,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_columns),
-		"20",
-		0,
-		32767,
-		nil,
-		"Minimum content columns for a new pane or split. Zero disables the width check; " +
+		key = "pane.minimum_columns",
+		title = "Minimum Pane Width",
+		kind = .Int,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_columns),
+		default_value = "20",
+		valid = {0, 32767},
+		description = "Minimum content columns for a new pane or split. Zero disables the width check; " +
 			"existing panes may shrink.",
 	},
 	{
-		"pane.minimum_rows",
-		"Minimum Pane Height",
-		.Int,
-		offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_rows),
-		"5",
-		0,
-		32767,
-		nil,
-		"Minimum content rows for a new pane or split. Zero disables the height check; existing panes may shrink.",
+		key = "pane.minimum_rows",
+		title = "Minimum Pane Height",
+		kind = .Int,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_rows),
+		default_value = "5",
+		valid = {0, 32767},
+		description = "Minimum content rows for a new pane or split. Zero disables the height check; existing " +
+			"panes may shrink.",
 	},
 	{
-		"tab.confirm_close",
-		"Confirm Closing Split Tabs",
-		.Bool,
-		offset_of(Settings, tab) + offset_of(Tab_Settings, confirm_close),
-		"true",
-		0,
-		0,
-		nil,
-		"Ask before closing a tab that has more than one pane.",
+		key = "tab.confirm_close",
+		title = "Confirm Closing Split Tabs",
+		kind = .Bool,
+		offset = offset_of(Settings, tab) + offset_of(Tab_Settings, confirm_close),
+		default_value = "true",
+		description = "Ask before closing a tab that has more than one pane.",
 	},
 	{
-		"tabs.orientation",
-		"Tab Orientation",
-		.Enum,
-		offset_of(Settings, tabs) + offset_of(Tabs_Settings, orientation),
-		"horizontal",
-		0,
-		0,
-		{"vertical", "horizontal"},
-		"Draw tabs in a vertical rail along the left or in a horizontal strip in the title bar. " +
+		key = "tabs.orientation",
+		title = "Tab Orientation",
+		kind = .Enum,
+		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, orientation),
+		default_value = "horizontal",
+		names = TABS_ORIENTATION_NAMES,
+		description = "Draw tabs in a vertical rail along the left or in a horizontal strip in the title bar. " +
 			"Switch at any time with Ctrl+Shift+L.",
 	},
 	{
-		"tabs.rail_width",
-		"Vertical Tab Width",
-		.Int,
-		offset_of(Settings, tabs) + offset_of(Tabs_Settings, rail_width),
-		"208",
-		144,
-		480,
-		nil,
-		"Width of the vertical tab rail in DIPs. Double-clicking its edge returns it to this width.",
+		key = "tabs.rail_width",
+		title = "Vertical Tab Width",
+		kind = .Int,
+		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, rail_width),
+		default_value = "208",
+		valid = {144, 480},
+		description = "Width of the vertical tab rail in DIPs. Double-clicking its edge returns it to this width.",
 	},
 	{
-		"tabs.program_icons",
-		"Program Icons",
-		.Bool,
-		offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icons),
-		"true",
-		0,
-		0,
-		nil,
-		"Show the icon of the program running in a pane, such as Neovim, Codex or Claude Code, on " +
+		key = "tabs.program_icons",
+		title = "Program Icons",
+		kind = .Bool,
+		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icons),
+		default_value = "true",
+		description = "Show the icon of the program running in a pane, such as Neovim, Codex or Claude Code, on " +
 			"its tab and pane header.",
 	},
 	{
-		PROGRAM_ICON_FILES_KEY,
-		"Program Icon Files",
-		.String,
-		offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icon_files),
-		"",
-		0,
-		4096,
-		nil,
-		"Your own PNG icons for programs, used instead of built-in ones: " +
+		key = PROGRAM_ICON_FILES_KEY,
+		title = "Program Icon Files",
+		kind = .String,
+		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icon_files),
+		default_value = "",
+		valid = {0, 4096},
+		validator = .Program_Icons,
+		description = "Your own PNG icons for programs, used instead of built-in ones: " +
 			PROGRAM_ICON_FILES_EXAMPLE + ".",
 	},
 	{
-		"status.enabled",
-		"Program Status",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, enabled),
-		"true",
-		0,
-		0,
-		nil,
-		"Listen for OSC 7501 program status reports from agents, builds and other long-running " +
+		key = "status.enabled",
+		title = "Program Status",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, enabled),
+		default_value = "true",
+		description = "Listen for OSC 7501 program status reports from agents, builds and other long-running " +
 			"programs. Off drops reports and tells programs the terminal does not support them.",
 	},
 	{
-		"status.tab_indicators",
-		"Status on Tabs",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, tab_indicators),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a spinner, progress bar or symbol on tabs whose programs are working, blocked, finished or failed.",
+		key = "status.tab_indicators",
+		title = "Status on Tabs",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, tab_indicators),
+		default_value = "true",
+		description = "Show a spinner, progress bar or symbol on tabs whose programs are working, blocked, " +
+			"finished or failed.",
 	},
 	{
-		"status.active_tab_indicator",
-		"Status on the Active Tab",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, active_tab_indicator),
-		"true",
-		0,
-		0,
-		nil,
-		"Also show tab status on the tab you are looking at.",
+		key = "status.active_tab_indicator",
+		title = "Status on the Active Tab",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, active_tab_indicator),
+		default_value = "true",
+		description = "Also show tab status on the tab you are looking at.",
 	},
 	{
-		"status.pane_headers",
-		"Status in Pane Headers",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, pane_headers),
-		"true",
-		0,
-		0,
-		nil,
-		"Show what a pane's program reports in its header. Needs pane headers.",
+		key = "status.pane_headers",
+		title = "Status in Pane Headers",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, pane_headers),
+		default_value = "true",
+		description = "Show what a pane's program reports in its header. Needs pane headers.",
 	},
 	{
-		"status.workspace_picker",
-		"Status in Workspace Picker",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, workspace_picker),
-		"true",
-		0,
-		0,
-		nil,
-		"Summarize each workspace's program status in the workspace picker.",
+		key = "status.workspace_picker",
+		title = "Status in Workspace Picker",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, workspace_picker),
+		default_value = "true",
+		description = "Summarize each workspace's program status in the workspace picker.",
 	},
 	{
-		"status.inbox",
-		"Status Inbox",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, inbox),
-		"false",
-		0,
-		0,
-		nil,
-		"Show a title-bar summary that opens a list of programs ordered by what needs you first.",
+		key = "status.inbox",
+		title = "Status Inbox",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, inbox),
+		default_value = "false",
+		description = "Show a title-bar summary that opens a list of programs ordered by what needs you first.",
 	},
 	{
-		"status.panel",
-		"Activity Panel",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, panel),
-		"true",
-		0,
-		0,
-		nil,
-		"Show a docked list of every program reporting status.",
+		key = "status.panel",
+		title = "Activity Panel",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel),
+		default_value = "true",
+		description = "Show a docked list of every program reporting status.",
 	},
 	{
-		"status.panel_side",
-		"Activity Panel Side",
-		.Enum,
-		offset_of(Settings, status) + offset_of(Status_Settings, panel_side),
-		"right",
-		0,
-		0,
-		{"right", "left"},
-		"Dock Activity at the far right or far left of the workspace.",
+		key = "status.panel_side",
+		title = "Activity Panel Side",
+		kind = .Enum,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_side),
+		default_value = "right",
+		names = STATUS_PANEL_SIDE_NAMES,
+		description = "Dock Activity at the far right or far left of the workspace.",
 	},
 	{
-		"status.panel_view",
-		"Activity Panel View",
-		.Enum,
-		offset_of(Settings, status) + offset_of(Status_Settings, panel_view),
-		"comfy",
-		0,
-		0,
-		{"comfy", "dense"},
-		"Comfy shows each task with its message. Dense fits more programs in compact rows.",
+		key = "status.panel_view",
+		title = "Activity Panel View",
+		kind = .Enum,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_view),
+		default_value = "comfy",
+		names = STATUS_PANEL_VIEW_NAMES,
+		labels = STATUS_PANEL_VIEW_LABELS,
+		description = "Comfy shows each task with its message. Dense fits more programs in compact rows.",
 	},
 	{
-		"status.panel_width",
-		"Activity Panel Width",
-		.Int,
-		offset_of(Settings, status) + offset_of(Status_Settings, panel_width),
-		"300",
-		144,
-		480,
-		nil,
-		"Width of the docked activity panel in DIPs. Double-clicking its edge returns it to this width.",
+		key = "status.panel_width",
+		title = "Activity Panel Width",
+		kind = .Int,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_width),
+		default_value = "300",
+		valid = {144, 480},
+		description = "Width of the docked activity panel in DIPs. Double-clicking its edge returns it to this " +
+			"width.",
 	},
 	{
-		"status.panel_height",
-		"Activity Panel Height",
-		.Int,
-		offset_of(Settings, status) + offset_of(Status_Settings, panel_height),
-		"45",
-		20,
-		80,
-		nil,
-		"Share of the vertical tab rail the activity panel takes below the tabs, in percent. " +
+		key = "status.panel_height",
+		title = "Activity Panel Height",
+		kind = .Int,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_height),
+		default_value = "45",
+		valid = {20, 80},
+		description = "Share of the vertical tab rail the activity panel takes below the tabs, in percent. " +
 			"Double-clicking its edge returns it to this height.",
 	},
 	{
-		"status.taskbar",
-		"Taskbar Progress",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, taskbar),
-		"true",
-		0,
-		0,
-		nil,
-		"Show progress, blocked and failed work on the window's taskbar button.",
+		key = "status.taskbar",
+		title = "Taskbar Progress",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar),
+		default_value = "true",
+		description = "Show progress, blocked and failed work on the window's taskbar button.",
 	},
 	{
-		"status.show_working",
-		"Show Working",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, show_working),
-		"true",
-		0,
-		0,
-		nil,
-		"Show programs that are working.",
+		key = "status.show_working",
+		title = "Show Working",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_working),
+		default_value = "true",
+		description = "Show programs that are working.",
 	},
 	{
-		"status.show_blocked",
-		"Show Blocked",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, show_blocked),
-		"true",
-		0,
-		0,
-		nil,
-		"Show programs waiting for permission, an answer or a sign-in.",
+		key = "status.show_blocked",
+		title = "Show Blocked",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_blocked),
+		default_value = "true",
+		description = "Show programs waiting for permission, an answer or a sign-in.",
 	},
 	{
-		"status.show_done",
-		"Show Done",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, show_done),
-		"true",
-		0,
-		0,
-		nil,
-		"Show programs that finished work for you to look at.",
+		key = "status.show_done",
+		title = "Show Done",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_done),
+		default_value = "true",
+		description = "Show programs that finished work for you to look at.",
 	},
 	{
-		"status.show_error",
-		"Show Errors",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, show_error),
-		"true",
-		0,
-		0,
-		nil,
-		"Show programs that failed and stopped.",
+		key = "status.show_error",
+		title = "Show Errors",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_error),
+		default_value = "true",
+		description = "Show programs that failed and stopped.",
 	},
 	{
-		"status.show_idle",
-		"Show Idle",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, show_idle),
-		"false",
-		0,
-		0,
-		nil,
-		"Show programs waiting at their own prompt.",
+		key = "status.show_idle",
+		title = "Show Idle",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_idle),
+		default_value = "false",
+		description = "Show programs waiting at their own prompt.",
 	},
 	{
-		"status.notify_blocked",
-		"Notify When Blocked",
-		.Set,
-		offset_of(Settings, status) + offset_of(Status_Settings, notify_blocked),
-		"banner, sound",
-		0,
-		0,
-		STATUS_CHANNEL_NAMES,
-		"How to notify you when a program needs you.",
+		key = "status.notify_blocked",
+		title = "Notify When Blocked",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_blocked),
+		default_value = "banner, sound",
+		names = STATUS_CHANNEL_NAMES,
+		labels = STATUS_CHANNEL_LABELS,
+		description = "How to notify you when a program needs you.",
 	},
 	{
-		"status.notify_error",
-		"Notify on Errors",
-		.Set,
-		offset_of(Settings, status) + offset_of(Status_Settings, notify_error),
-		"banner, sound",
-		0,
-		0,
-		STATUS_CHANNEL_NAMES,
-		"How to notify you when a program fails.",
+		key = "status.notify_error",
+		title = "Notify on Errors",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_error),
+		default_value = "banner, sound",
+		names = STATUS_CHANNEL_NAMES,
+		labels = STATUS_CHANNEL_LABELS,
+		description = "How to notify you when a program fails.",
 	},
 	{
-		"status.notify_done",
-		"Notify When Done",
-		.Set,
-		offset_of(Settings, status) + offset_of(Status_Settings, notify_done),
-		"none",
-		0,
-		0,
-		STATUS_CHANNEL_NAMES,
-		"How to notify you when a program finishes.",
+		key = "status.notify_done",
+		title = "Notify When Done",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_done),
+		default_value = "none",
+		names = STATUS_CHANNEL_NAMES,
+		labels = STATUS_CHANNEL_LABELS,
+		description = "How to notify you when a program finishes.",
 	},
 	{
-		"status.notify_idle",
-		"Notify When Idle",
-		.Set,
-		offset_of(Settings, status) + offset_of(Status_Settings, notify_idle),
-		"none",
-		0,
-		0,
-		STATUS_CHANNEL_NAMES,
-		"How to notify you when a program becomes idle.",
+		key = "status.notify_idle",
+		title = "Notify When Idle",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_idle),
+		default_value = "none",
+		names = STATUS_CHANNEL_NAMES,
+		labels = STATUS_CHANNEL_LABELS,
+		description = "How to notify you when a program becomes idle.",
 	},
 	{
-		"status.notify_working",
-		"Notify When Working",
-		.Set,
-		offset_of(Settings, status) + offset_of(Status_Settings, notify_working),
-		"none",
-		0,
-		0,
-		STATUS_CHANNEL_NAMES,
-		"How to notify you when a program starts working.",
+		key = "status.notify_working",
+		title = "Notify When Working",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_working),
+		default_value = "none",
+		names = STATUS_CHANNEL_NAMES,
+		labels = STATUS_CHANNEL_LABELS,
+		description = "How to notify you when a program starts working.",
 	},
 	{
-		"status.taskbar_working",
-		"Working: Taskbar Progress",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, taskbar_working),
-		"true",
-		0,
-		0,
-		nil,
-		"Include this state in the taskbar progress indicator.",
+		key = "status.taskbar_working",
+		title = "Working: Taskbar Progress",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar_working),
+		default_value = "true",
+		description = "Include this state in the taskbar progress indicator.",
 	},
 	{
-		"status.taskbar_blocked",
-		"Blocked: Taskbar Progress",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, taskbar_blocked),
-		"true",
-		0,
-		0,
-		nil,
-		"Include this state in the taskbar progress indicator.",
+		key = "status.taskbar_blocked",
+		title = "Blocked: Taskbar Progress",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar_blocked),
+		default_value = "true",
+		description = "Include this state in the taskbar progress indicator.",
 	},
 	{
-		"status.taskbar_error",
-		"Error: Taskbar Progress",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, taskbar_error),
-		"true",
-		0,
-		0,
-		nil,
-		"Include this state in the taskbar progress indicator.",
+		key = "status.taskbar_error",
+		title = "Error: Taskbar Progress",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar_error),
+		default_value = "true",
+		description = "Include this state in the taskbar progress indicator.",
 	},
 	{
-		"status.notify_focused",
-		"Notify While Watching",
-		.Bool,
-		offset_of(Settings, status) + offset_of(Status_Settings, notify_focused),
-		"false",
-		0,
-		0,
-		nil,
-		"Also notify about the pane you are looking at.",
+		key = "status.notify_focused",
+		title = "Notify While Watching",
+		kind = .Bool,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_focused),
+		default_value = "false",
+		description = "Also notify about the pane you are looking at.",
 	},
 	{
-		"status.scope",
-		"Status Overview Scope",
-		.Enum,
-		offset_of(Settings, status) + offset_of(Status_Settings, scope),
-		"all",
-		0,
-		0,
-		{"all", "workspace"},
-		"Whether the inbox and panel list every workspace or only the window's workspace.",
+		key = "status.scope",
+		title = "Status Overview Scope",
+		kind = .Enum,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, scope),
+		default_value = "all",
+		names = STATUS_SCOPE_NAMES,
+		description = "Whether the inbox and panel list every workspace or only the window's workspace.",
 	},
 	{
-		"status.keep_finished",
-		"Keep Finished Status",
-		.Enum,
-		offset_of(Settings, status) + offset_of(Status_Settings, keep_finished),
-		"focus",
-		0,
-		0,
-		{"focus", "dismiss"},
-		"Remove done and error status once you leave the pane you looked at, or keep it until you dismiss it.",
+		key = "status.keep_finished",
+		title = "Keep Finished Status",
+		kind = .Enum,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, keep_finished),
+		default_value = "focus",
+		names = STATUS_KEEP_NAMES,
+		description = "Remove done and error status once you leave the pane you looked at, or keep it until you " +
+			"dismiss it.",
 	},
 	{
-		"status.ignore_apps",
-		"Ignore Status From",
-		.String,
-		offset_of(Settings, status) + offset_of(Status_Settings, ignore_apps),
-		"",
-		0,
-		256,
-		nil,
-		"Comma-separated program names, the OSC 7501 app key such as vite or cargo, whose status is never shown.",
+		key = "status.ignore_apps",
+		title = "Ignore Status From",
+		kind = .String,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, ignore_apps),
+		default_value = "",
+		valid = {0, 256},
+		description = "Comma-separated program names, the OSC 7501 app key such as vite or cargo, whose status " +
+			"is never shown.",
 	},
 	{
-		"shell.default_profile",
-		"Default Shell Profile",
-		.String,
-		offset_of(Settings, shell) + offset_of(Shell_Settings, default_profile),
-		"default",
-		1,
-		64,
-		nil,
-		"Profile for new tabs, splits and the plus button. Profiles are ordered by profile.order.",
+		key = "shell.default_profile",
+		title = "Default Shell Profile",
+		kind = .String,
+		offset = offset_of(Settings, shell) + offset_of(Shell_Settings, default_profile),
+		default_value = "default",
+		valid = {1, 64},
+		description = "Profile for new tabs, splits and the plus button. Profiles are ordered by profile.order.",
 	},
 	{
-		"input.leader",
-		"Leader Key",
-		.String,
-		offset_of(Settings, input) + offset_of(Input_Settings, leader),
-		"",
-		0,
-		128,
-		nil,
-		"Optional leader chord, for example Ctrl+B; use Leader+T in a command shortcut. Empty disables it.",
+		key = "input.leader",
+		title = "Leader Key",
+		kind = .String,
+		offset = offset_of(Settings, input) + offset_of(Input_Settings, leader),
+		default_value = "",
+		valid = {0, 128},
+		control = .Shortcut,
+		affects_bindings = true,
+		description = "Optional leader chord, for example Ctrl+B; use Leader+T in a command shortcut. Empty " +
+			"disables it.",
 	},
 	{
-		"font.family",
-		"Shell Font",
-		.String,
-		offset_of(Settings, font) + offset_of(Font_Settings, family),
-		"Cascadia Mono",
-		1,
-		256,
-		nil,
-		"Terminal font family.",
+		key = "font.family",
+		title = "Shell Font",
+		kind = .String,
+		offset = offset_of(Settings, font) + offset_of(Font_Settings, family),
+		default_value = "Cascadia Mono",
+		valid = {1, 256},
+		control = .Choice,
+		live_choices = .Shell_Fonts,
+		description = "Terminal font family.",
 	},
 	{
-		"font.show_all", "Show All Fonts", .Bool,
-		offset_of(Settings, font) + offset_of(Font_Settings, show_all),
-		"false", 0, 0, nil,
-		"Include proportional fonts in the shell font list.",
+		key = "font.show_all",
+		title = "Show All Fonts",
+		kind = .Bool,
+		offset = offset_of(Settings, font) + offset_of(Font_Settings, show_all),
+		default_value = "false",
+		embedded = true,
+		description = "Include proportional fonts in the shell font list.",
 	},
 	{
-		"interface.font_family", "GUI Font", .String,
-		offset_of(Settings, interface) + offset_of(Interface_Settings, font_family),
-		"Segoe UI Variable Text", 1, 256, nil,
-		"Font family for interface text; independent of the shells.",
+		key = "interface.font_family",
+		title = "GUI Font",
+		kind = .String,
+		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, font_family),
+		default_value = "Segoe UI Variable Text",
+		valid = {1, 256},
+		control = .Choice,
+		live_choices = .Interface_Fonts,
+		description = "Font family for interface text; independent of the shells.",
 	},
 	{
-		"interface.font_size",
-		"GUI Font Size",
-		.Float,
-		offset_of(Settings, interface) + offset_of(Interface_Settings, font_size),
-		"9.75",
-		6,
-		14,
-		nil,
-		"Body text size in points (9.75 is 13 px); other interface text keeps its ratio to it.",
+		key = "interface.font_size",
+		title = "GUI Font Size",
+		kind = .Float,
+		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, font_size),
+		default_value = "9.75",
+		valid = {6, 14},
+		// 0.75 pt is one pixel at 96 DPI, so each step lands on a whole pixel size.
+		step = 0.75,
+		description = "Body text size in points (9.75 is 13 px); other interface text keeps its ratio to it.",
 	},
 	{
-		"interface.hover_lift",
-		"Hover Lift",
-		.Float,
-		offset_of(Settings, interface) + offset_of(Interface_Settings, hover_lift),
-		"1.5",
-		0,
-		4,
-		nil,
-		"How far interactive controls rise on hover, in DIPs. Zero disables the lift.",
+		key = "interface.hover_lift",
+		title = "Hover Lift",
+		kind = .Float,
+		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, hover_lift),
+		default_value = "1.5",
+		valid = {0, 4},
+		description = "How far interactive controls rise on hover, in DIPs. Zero disables the lift.",
 	},
 	{
-		"interface.hover_gloss",
-		"Hover Gloss",
-		.Float,
-		offset_of(Settings, interface) + offset_of(Interface_Settings, hover_gloss),
-		"1",
-		0,
-		2,
-		nil,
-		"Strength of the pointer-following rim light on hovered controls. One is the designed " +
+		key = "interface.hover_gloss",
+		title = "Hover Gloss",
+		kind = .Float,
+		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, hover_gloss),
+		default_value = "1",
+		valid = {0, 2},
+		description = "Strength of the pointer-following rim light on hovered controls. One is the designed " +
 			"strength; zero disables it.",
 	},
 	{
-		"font.size",
-		"Font Size",
-		.Float,
-		offset_of(Settings, font) + offset_of(Font_Settings, size),
-		"12",
-		1,
-		200,
-		nil,
-		"Font size in points.",
+		key = "font.size",
+		title = "Font Size",
+		kind = .Float,
+		offset = offset_of(Settings, font) + offset_of(Font_Settings, size),
+		default_value = "12",
+		valid = {1, 200},
+		slider = {6, 32},
+		step = 1,
+		description = "Font size in points.",
 	},
 	{
-		"font.line_height",
-		"Line Height",
-		.Float,
-		offset_of(Settings, font) + offset_of(Font_Settings, line_height),
-		"1.0",
-		0.5,
-		4,
-		nil,
-		"Line height multiplier.",
+		key = "font.line_height",
+		title = "Line Height",
+		kind = .Float,
+		offset = offset_of(Settings, font) + offset_of(Font_Settings, line_height),
+		default_value = "1.0",
+		valid = {0.5, 4},
+		slider = {0.8, 2},
+		step = 0.05,
+		description = "Line height multiplier.",
 	},
 	{
-		"shell.refresh_environment",
-		"Refresh Shell Environment",
-		.Bool,
-		offset_of(Settings, shell) + offset_of(Shell_Settings, refresh_environment),
-		"true",
-		0,
-		0,
-		nil,
-		"Read current Windows environment variables for new and restarted shells; keep launcher-only variables.",
+		key = "shell.refresh_environment",
+		title = "Refresh Shell Environment",
+		kind = .Bool,
+		offset = offset_of(Settings, shell) + offset_of(Shell_Settings, refresh_environment),
+		default_value = "true",
+		description = "Read current Windows environment variables for new and restarted shells; keep " +
+			"launcher-only variables.",
 	},
 	{
-		"shell.integration",
-		"Shell Integration",
-		.Bool,
-		offset_of(Settings, shell) + offset_of(Shell_Settings, integration),
-		"true",
-		0,
-		0,
-		nil,
-		"Report the PowerShell prompt's directory so splits open there. Applies to new shells.",
+		key = "shell.integration",
+		title = "Shell Integration",
+		kind = .Bool,
+		offset = offset_of(Settings, shell) + offset_of(Shell_Settings, integration),
+		default_value = "true",
+		description = "Report the PowerShell prompt's directory so splits open there. Applies to new shells.",
 	},
 	{
-		"window.columns",
-		"Initial Columns",
-		.Int,
-		offset_of(Settings, window) + offset_of(Window_Settings, columns),
-		"120",
-		1,
-		32767,
-		nil,
-		"Initial terminal columns.",
+		key = "window.columns",
+		title = "Initial Columns",
+		kind = .Int,
+		offset = offset_of(Settings, window) + offset_of(Window_Settings, columns),
+		default_value = "120",
+		valid = {1, 32767},
+		apply_timing = .New_Sessions,
+		description = "Initial terminal columns.",
 	},
 	{
-		"window.rows",
-		"Initial Rows",
-		.Int,
-		offset_of(Settings, window) + offset_of(Window_Settings, rows),
-		"32",
-		1,
-		32767,
-		nil,
-		"Initial terminal rows.",
+		key = "window.rows",
+		title = "Initial Rows",
+		kind = .Int,
+		offset = offset_of(Settings, window) + offset_of(Window_Settings, rows),
+		default_value = "32",
+		valid = {1, 32767},
+		apply_timing = .New_Sessions,
+		description = "Initial terminal rows.",
 	},
 	{
-		"window.padding",
-		"Content Padding",
-		.Int,
-		offset_of(Settings, window) + offset_of(Window_Settings, padding),
-		"8",
-		0,
-		1024,
-		nil,
-		"Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap.",
+		key = "window.padding",
+		title = "Content Padding",
+		kind = .Int,
+		offset = offset_of(Settings, window) + offset_of(Window_Settings, padding),
+		default_value = "8",
+		valid = {0, 1024},
+		description = "Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap.",
 	},
 	{
-		"window.tray_notification",
-		"Notify When Closing to Tray",
-		.Bool,
-		offset_of(Settings, window) + offset_of(Window_Settings, tray_notification),
-		"true",
-		0,
-		0,
-		nil,
-		"Show the \"AIODev is still running\" notification the first time closing the last window " +
+		key = "window.tray_notification",
+		title = "Notify When Closing to Tray",
+		kind = .Bool,
+		offset = offset_of(Settings, window) + offset_of(Window_Settings, tray_notification),
+		default_value = "true",
+		description = "Show the \"AIODev is still running\" notification the first time closing the last window " +
 			"hides AIODev to the tray.",
 	},
 	{
-		PADDING_GROUPS_KEY,
-		"Process Padding Groups",
-		.String,
-		offset_of(Settings, process) + offset_of(Process_Settings, padding_groups),
-		"",
-		0,
-		4096,
-		nil,
-		"Named groups: " + PADDING_GROUPS_EXAMPLE + ". First match wins; " +
+		key = PADDING_GROUPS_KEY,
+		title = "Process Padding Groups",
+		kind = .String,
+		offset = offset_of(Settings, process) + offset_of(Process_Settings, padding_groups),
+		default_value = "",
+		valid = {0, 4096},
+		control = .Group,
+		validator = .Padding_Groups,
+		description = "Named groups: " + PADDING_GROUPS_EXAMPLE + ". First match wins; " +
 			"other processes use Content Padding.",
 	},
 	{
-		"scrollback.lines",
-		"Scrollback Lines",
-		.Int,
-		offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines),
-		"10000",
-		0,
-		10000000,
-		nil,
-		"Scrollback lines to keep; history is freed in blocks, so the count kept varies by a few hundred.",
+		key = "scrollback.lines",
+		title = "Scrollback Lines",
+		kind = .Int,
+		offset = offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines),
+		default_value = "10000",
+		valid = {0, 10000000},
+		description = "Scrollback lines to keep; history is freed in blocks, so the count kept varies by a few " +
+			"hundred.",
 	},
 	{
-		"terminal.copy_on_select",
-		"Copy on Select",
-		.Bool,
-		offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select),
-		"false",
-		0,
-		0,
-		nil,
-		"Copy selected text automatically; otherwise Ctrl+Shift+C copies it.",
+		key = "terminal.copy_on_select",
+		title = "Copy on Select",
+		kind = .Bool,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select),
+		default_value = "false",
+		description = "Copy selected text automatically; otherwise Ctrl+Shift+C copies it.",
 	},
 	{
-		"terminal.confirm_multiline_paste",
-		"Confirm Multiline Paste",
-		.Bool,
-		offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste),
-		"true",
-		0,
-		0,
-		nil,
-		"Ask before pasting line breaks the shell would run as separate commands.",
+		key = "terminal.confirm_multiline_paste",
+		title = "Confirm Multiline Paste",
+		kind = .Bool,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste),
+		default_value = "true",
+		description = "Ask before pasting line breaks the shell would run as separate commands.",
 	},
 	{
-		"terminal.find_keep_query",
-		"Keep Last Search",
-		.Bool,
-		offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_keep_query),
-		"false",
-		0,
-		0,
-		nil,
-		"Start find with the last search filled in.",
+		key = "terminal.find_keep_query",
+		title = "Keep Last Search",
+		kind = .Bool,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_keep_query),
+		default_value = "false",
+		description = "Start find with the last search filled in.",
 	},
 	{
-		"terminal.find_select_query",
-		"Select Last Search",
-		.Bool,
-		offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_select_query),
-		"false",
-		0,
-		0,
-		nil,
-		"Start find with the last search filled in and selected, so typing replaces it.",
+		key = "terminal.find_select_query",
+		title = "Select Last Search",
+		kind = .Bool,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_select_query),
+		default_value = "false",
+		description = "Start find with the last search filled in and selected, so typing replaces it.",
 	},
 	{
-		"terminal.minimum_contrast",
-		"Minimum Text Contrast",
-		.Float,
-		offset_of(Settings, terminal) + offset_of(Terminal_Settings, minimum_contrast),
-		"4.5",
-		1,
-		21,
-		nil,
-		"Minimum text contrast in light themes, including application colors. " +
+		key = "terminal.minimum_contrast",
+		title = "Minimum Text Contrast",
+		kind = .Float,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, minimum_contrast),
+		default_value = "4.5",
+		valid = {1, 21},
+		description = "Minimum text contrast in light themes, including application colors. " +
 			"One preserves exact colors; dark themes stay unchanged.",
 	},
 	{
-		"cursor.style",
-		"Cursor Style",
-		.Enum,
-		offset_of(Settings, cursor) + offset_of(Cursor_Settings, style),
-		"block",
-		0,
-		0,
-		{"block", "bar", "underline"},
-		"Cursor shape: block, bar, or underline.",
+		key = "cursor.style",
+		title = "Cursor Style",
+		kind = .Enum,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, style),
+		default_value = "block",
+		names = CURSOR_STYLE_NAMES,
+		description = "Cursor shape: block, bar, or underline.",
 	},
 	{
-		"cursor.blink",
-		"Cursor Blink",
-		.Bool,
-		offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink),
-		"false",
-		0,
-		0,
-		nil,
-		"Blink the cursor.",
+		key = "cursor.blink",
+		title = "Cursor Blink",
+		kind = .Bool,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink),
+		default_value = "false",
+		description = "Blink the cursor.",
 	},
 	{
-		"control.enabled",
-		"Command Line Control",
-		.Bool,
-		offset_of(Settings, control) + offset_of(Control_Settings, enabled),
-		"false",
-		0,
-		0,
-		nil,
-		"Accept commands from the aio command line, which scripts and coding agents use to open " +
+		key = "control.enabled",
+		title = "Command Line Control",
+		kind = .Bool,
+		offset = offset_of(Settings, control) + offset_of(Control_Settings, enabled),
+		default_value = "false",
+		description = "Accept commands from the aio command line, which scripts and coding agents use to open " +
 			"tabs and panes, send them text and read their screens. Only programs running as you " +
 			"on this computer can connect.",
 	},
@@ -1001,6 +1017,47 @@ problem :: proc(
 	return Problem{kind, message}, nil
 }
 
+// The diagnostic every file family reports for a repeated key; the later line's value is used.
+@(require_results)
+duplicate_key_diagnostic :: proc(
+	diagnostics: ^[dynamic]Diagnostic,
+	key: string,
+	line: int,
+) -> runtime.Allocator_Error {
+	issue, issue_error := problem(
+		.Duplicate_Key,
+		diagnostics.allocator,
+		"duplicate key \"",
+		key,
+		"\"; last value wins",
+	)
+	if issue_error != nil {return issue_error}
+	return add_diagnostic(diagnostics, line, key, issue.(Problem))
+}
+
+// The message for a collection that reached its limit, such as "too many profiles; the limit is
+// 64". Temporary.
+limit_message :: proc(items: string, limit: int) -> string {
+	return fmt.tprintf("too many %s; the limit is %d", items, limit)
+}
+
+// The text of a file value: checked for UTF-8 without NUL bytes, then one enclosing pair of double
+// quotes removed. `text` borrows `input`; `issue` is empty when the value is usable.
+text_value_decode :: proc(input: string) -> (text, issue: string) {
+	if !text_valid(input) {return "", "expected UTF-8 text without NUL bytes"}
+	text = input
+	if len(text) > 0 && text[0] == '"' {
+		if len(text) < 2 || text[len(text) - 1] != '"' {return "", "expected a closing double quote"}
+		text = text[1:len(text) - 1]
+	}
+	return text, ""
+}
+
+// Whether settings can store `text`: UTF-8 without NUL bytes.
+text_valid :: proc(text: string) -> bool {
+	return utf8.valid_string(text) && !strings.contains(text, "\x00")
+}
+
 @(private, require_results)
 range_problem :: proc(
 	entry: Schema_Entry,
@@ -1011,7 +1068,7 @@ range_problem :: proc(
 	runtime.Allocator_Error,
 ) {
 	buffer: [128]u8
-	limits := fmt.bprintf(buffer[:], "%g..%g", entry.minimum, entry.maximum)
+	limits := fmt.bprintf(buffer[:], "%g..%g", entry.valid.minimum, entry.valid.maximum)
 	if entry.kind == .String {
 		return problem(
 			.Out_Of_Range,
@@ -1024,6 +1081,131 @@ range_problem :: proc(
 	return problem(.Out_Of_Range, allocator, value, " is out of range ", limits)
 }
 
+// One checked schema value: a String borrows the text it was parsed from, an Enum is its index in
+// `names` and a Set is its mask.
+@(private)
+Parsed_Value :: union {
+	string,
+	int,
+	f64,
+	bool,
+	u32,
+}
+
+// Checks one file value against its descriptor without touching any settings. A problem's message
+// is owned by `allocator`.
+@(private, require_results)
+value_parse :: proc(
+	entry: Schema_Entry,
+	input: string,
+	allocator: runtime.Allocator,
+) -> (
+	Parsed_Value,
+	Maybe(Problem),
+	runtime.Allocator_Error,
+) {
+	value, text_issue := text_value_decode(input)
+	if text_issue != "" {
+		issue, err := problem(.Invalid_Value, allocator, text_issue)
+		return nil, issue, err
+	}
+	switch entry.kind {
+	case .String:
+		switch entry.validator {
+		case .None:
+		case .Padding_Groups:
+			if !padding_groups_valid(value) {
+				buffer: [192]u8
+				issue, err := problem(.Invalid_Value, allocator, padding_groups_rules(buffer[:]))
+				return nil, issue, err
+			}
+		case .Program_Icons:
+			if !program_icon_files_valid(value) {
+				buffer: [256]u8
+				issue, err := problem(.Invalid_Value, allocator, program_icon_files_rules(buffer[:]))
+				return nil, issue, err
+			}
+		}
+		if f64(len(value)) < entry.valid.minimum || f64(len(value)) > entry.valid.maximum {
+			issue, err := range_problem(entry, value, allocator)
+			return nil, issue, err
+		}
+		return value, nil, nil
+	case .Int:
+		v, ok := strconv.parse_int(value, 10)
+		if !ok {
+			issue, err := problem(
+				.Invalid_Value,
+				allocator,
+				"invalid integer \"",
+				value,
+				"\", expected a decimal integer",
+			)
+			return nil, issue, err
+		}
+		if f64(v) < entry.valid.minimum || f64(v) > entry.valid.maximum {
+			issue, err := range_problem(entry, value, allocator)
+			return nil, issue, err
+		}
+		return v, nil, nil
+	case .Float:
+		v, ok := strconv.parse_f64(value)
+		if !ok {
+			issue, err := problem(
+				.Invalid_Value,
+				allocator,
+				"invalid number \"",
+				value,
+				"\", expected a number",
+			)
+			return nil, issue, err
+		}
+		if !(v >= entry.valid.minimum && v <= entry.valid.maximum) {
+			issue, err := range_problem(entry, value, allocator)
+			return nil, issue, err
+		}
+		return v, nil, nil
+	case .Bool:
+		if value != "true" && value != "false" {
+			issue, err := problem(
+				.Invalid_Value,
+				allocator,
+				"invalid boolean \"",
+				value,
+				"\", expected true or false",
+			)
+			return nil, issue, err
+		}
+		return value == "true", nil, nil
+	case .Enum:
+		for name, i in entry.names {
+			if name == value {return i, nil, nil}
+		}
+		names, err := strings.join(entry.names, ", ", allocator)
+		if err != nil {return nil, nil, err}
+		defer delete(names, allocator)
+		issue, issue_error := problem(.Invalid_Value, allocator, "\"", value, "\" is not one of ", names)
+		return nil, issue, issue_error
+	case .Set:
+		mask, unknown, ok := set_parse(entry.names, value)
+		if ok {return mask, nil, nil}
+		names, err := strings.join(entry.names, ", ", allocator)
+		if err != nil {return nil, nil, err}
+		defer delete(names, allocator)
+		issue, issue_error := problem(
+			.Invalid_Value,
+			allocator,
+			"\"",
+			unknown,
+			"\" is not one of ",
+			names,
+			"; separate choices with commas, or use none",
+		)
+		return nil, issue, issue_error
+	}
+	return nil, nil, nil
+}
+
 @(private, require_results)
 assign :: proc(
 	s: ^Settings,
@@ -1033,104 +1215,24 @@ assign :: proc(
 	Maybe(Problem),
 	runtime.Allocator_Error,
 ) {
-	value := input
-	if !utf8.valid_string(value) || strings.contains(value, "\x00") {
-		return problem(.Invalid_Value, s.allocator, "expected UTF-8 text without NUL bytes")
-	}
-	if len(value) > 0 && value[0] == '"' {
-		if len(value) < 2 || value[len(value) - 1] != '"' {
-			return problem(.Invalid_Value, s.allocator, "expected a closing double quote")
-		}
-		value = value[1:len(value) - 1]
-	}
+	value, issue, err := value_parse(entry, input, s.allocator)
+	if err != nil || issue != nil {return issue, err}
 	p := rawptr(uintptr(s) + entry.offset)
-	switch entry.kind {
-	case .String:
-		if entry.key == PADDING_GROUPS_KEY && !padding_groups_valid(value) {
-			buffer: [192]u8
-			return problem(.Invalid_Value, s.allocator, padding_groups_rules(buffer[:]))
-		}
-		if entry.key == PROGRAM_ICON_FILES_KEY && !program_icon_files_valid(value) {
-			buffer: [256]u8
-			return problem(.Invalid_Value, s.allocator, program_icon_files_rules(buffer[:]))
-		}
-		if f64(len(value)) < entry.minimum || f64(len(value)) > entry.maximum {
-			return range_problem(entry, value, s.allocator)
-		}
-		copy, err := strings.clone(value, s.allocator)
-		if err != nil {return nil, err}
-		v := cast(^string)p
-		delete(v^, s.allocator)
-		v^ = copy
-	case .Int:
-		v, ok := strconv.parse_int(value, 10)
-		if !ok {
-			return problem(
-				.Invalid_Value,
-				s.allocator,
-				"invalid integer \"",
-				value,
-				"\", expected a decimal integer",
-			)
-		}
-		if f64(v) < entry.minimum || f64(v) > entry.maximum {
-			return range_problem(entry, value, s.allocator)
-		}
+	switch v in value {
+	case string:
+		copy, clone_error := strings.clone(v, s.allocator)
+		if clone_error != nil {return nil, clone_error}
+		field := cast(^string)p
+		delete(field^, s.allocator)
+		field^ = copy
+	case int:
 		(cast(^int)p)^ = v
-	case .Float:
-		v, ok := strconv.parse_f64(value)
-		if !ok {
-			return problem(
-				.Invalid_Value,
-				s.allocator,
-				"invalid number \"",
-				value,
-				"\", expected a number",
-			)
-		}
-		if !(v >= entry.minimum && v <= entry.maximum) {
-			return range_problem(entry, value, s.allocator)
-		}
+	case f64:
 		(cast(^f64)p)^ = v
-	case .Bool:
-		if value != "true" && value != "false" {
-			return problem(
-				.Invalid_Value,
-				s.allocator,
-				"invalid boolean \"",
-				value,
-				"\", expected true or false",
-			)
-		}
-		(cast(^bool)p)^ = value == "true"
-	case .Enum:
-		for name, i in entry.enum_names {
-			if name == value {
-				(cast(^int)p)^ = i
-				return nil, nil
-			}
-		}
-		names, err := strings.join(entry.enum_names, ", ", s.allocator)
-		if err != nil {return nil, err}
-		defer delete(names, s.allocator)
-		return problem(.Invalid_Value, s.allocator, "\"", value, "\" is not one of ", names)
-	case .Set:
-		mask, unknown, ok := set_parse(entry.enum_names, value)
-		if !ok {
-			names, err := strings.join(entry.enum_names, ", ", s.allocator)
-			if err != nil {return nil, err}
-			defer delete(names, s.allocator)
-			return problem(
-				.Invalid_Value,
-				s.allocator,
-				"\"",
-				unknown,
-				"\" is not one of ",
-				names,
-				"; separate choices with commas, or use none",
-			)
-		}
-		(cast(^u32)p)^ = mask
+	case bool:
+		(cast(^bool)p)^ = v
+	case u32:
+		(cast(^u32)p)^ = v
 	}
 	return nil, nil
 }
@@ -1186,17 +1288,6 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 			unreachable()
 		}
 	}
-	legacy_error: runtime.Allocator_Error
-	s.shell.command, legacy_error = strings.clone(DEFAULT_PROFILE_COMMAND, allocator)
-	if legacy_error != nil {
-		destroy(&s)
-		return {}, legacy_error
-	}
-	s.shell.directory, legacy_error = strings.clone(DEFAULT_PROFILE_DIRECTORY, allocator)
-	if legacy_error != nil {
-		destroy(&s)
-		return {}, legacy_error
-	}
 	if profile_error := profiles_finalize(&s); profile_error != nil {
 		destroy(&s)
 		return {}, profile_error
@@ -1219,9 +1310,6 @@ destroy :: proc(s: ^Settings) {
 			delete((cast(^string)(uintptr(s) + entry.offset))^, s.allocator)
 		}
 	}
-	delete(s.shell.command, s.allocator)
-	delete(s.shell.directory, s.allocator)
-	delete(s.shell.icon, s.allocator)
 	profiles_destroy(&s.profiles)
 	for theme in s.themes {
 		delete(theme.id, s.allocator)
@@ -1290,16 +1378,7 @@ parse_key_binding :: proc(
 		}
 	}
 	if duplicate >= 0 {
-		issue, issue_error := problem(
-			.Duplicate_Key,
-			allocator,
-			"duplicate key \"",
-			key,
-			"\"; last value wins",
-		)
-		if issue_error != nil {return issue_error}
-		err := add_diagnostic(diagnostics, line_number, key, issue.(Problem))
-		if err != nil {return err}
+		if err := duplicate_key_diagnostic(diagnostics, key, line_number); err != nil {return err}
 	}
 	name, name_error := strings.clone(binding_name, allocator)
 	if name_error != nil {return name_error}
@@ -1343,8 +1422,7 @@ parse :: proc(
 		diagnostics_destroy(&diagnostics)
 	}
 	schema := SCHEMA
-	seen: [len(SCHEMA)]bool
-	legacy_seen: [3]bool
+	legacy: Legacy_Shell_Input
 	scanner := line_scanner_init(text)
 	for {
 		line, ok := line_next(&scanner)
@@ -1376,56 +1454,43 @@ parse :: proc(
 			if theme_error != nil {return {}, {}, theme_error}
 			continue
 		}
-		if slot, legacy := legacy_shell_slot(key); legacy {
-			entry := legacy_shell_entry(slot)
-			if legacy_seen[slot] {
-				issue, issue_error := problem(
-					.Duplicate_Key,
-					allocator,
-					"duplicate key \"",
-					key,
-					"\"; last value wins",
-				)
-				if issue_error != nil {return {}, {}, issue_error}
-				err = add_diagnostic(&diagnostics, line.number, key, issue.(Problem))
+		if field, is_legacy := legacy_shell_field(key); is_legacy {
+			if legacy[field] != nil {
+				err = duplicate_key_diagnostic(&diagnostics, key, line.number)
 				if err != nil {return {}, {}, err}
 			}
-			legacy_seen[slot] = true
-			issue, assign_error := assign(&s, entry, value)
-			if assign_error != nil {return {}, {}, assign_error}
+			entry := legacy_shell_entries[field]
+			parsed, issue, parse_error := value_parse(entry, value, allocator)
+			if parse_error != nil {return {}, {}, parse_error}
+			legacy_value := entry.default_value
 			if p, present := issue.?; present {
 				err = add_diagnostic(&diagnostics, line.number, key, p)
 				if err != nil {return {}, {}, err}
-				reset_issue, reset_error := assign(&s, entry, entry.default_value)
-				if reset_error != nil {return {}, {}, reset_error}
-				assert(reset_issue == nil)
+			} else {
+				legacy_value = parsed.(string)
 			}
+			legacy[field] = legacy_value
 			continue
 		}
-		index := -1
-		for entry, i in SCHEMA {
-			if entry.key == key {
-				index = i
-				break
-			}
-		}
-		if index < 0 || seen[index] {
-			kind := Diagnostic_Kind.Unknown_Key
-			parts := []string{"unknown key \"", key, "\"; expected a key from the settings schema"}
-			if index >= 0 {
-				kind = .Duplicate_Key
-				parts = {"duplicate key \"", key, "\"; last value wins"}
-			}
-			issue, issue_error := problem(kind, allocator, ..parts)
+		index := schema_index(key)
+		if index < 0 {
+			issue, issue_error := problem(
+				.Unknown_Key,
+				allocator,
+				"unknown key \"",
+				key,
+				"\"; expected a key from the settings schema",
+			)
 			if issue_error != nil {return {}, {}, issue_error}
 			err = add_diagnostic(&diagnostics, line.number, key, issue.(Problem))
 			if err != nil {return {}, {}, err}
-			if index < 0 {continue}
+			continue
 		}
-		seen[index] = true
-		if key == "input.leader" {s.leader_line = line.number}
-		if key == "shell.default_profile" {s.default_profile_line = line.number}
-		if key == "theme.name" {s.theme_line = line.number}
+		if s.lines[index] > 0 {
+			err = duplicate_key_diagnostic(&diagnostics, key, line.number)
+			if err != nil {return {}, {}, err}
+		}
+		s.lines[index] = line.number
 		issue, assign_error := assign(&s, schema[index], value)
 		if assign_error != nil {return {}, {}, assign_error}
 		if p, present := issue.?; present {
@@ -1435,6 +1500,9 @@ parse :: proc(
 			if default_error != nil {return {}, {}, default_error}
 			assert(default_issue == nil)
 		}
+	}
+	if legacy_error := profiles_resolve_legacy(&s.profiles, legacy); legacy_error != nil {
+		return {}, {}, legacy_error
 	}
 	if profile_error := profiles_finalize(&s); profile_error != nil {return {}, {}, profile_error}
 	if themes_directory != "" {
