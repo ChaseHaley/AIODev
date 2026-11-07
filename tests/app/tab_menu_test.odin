@@ -38,6 +38,9 @@ menu_fixture_init :: proc(t: ^testing.T, f: ^Menu_Fixture, count: int) -> bool {
 		append(&f.workspace.tabs, tab)
 	}
 	f.workspace.next_tab_id = u32(count)
+	// Commands name a tab by its workspace's id, so the workspace is registered as a shown one always is.
+	f.workspace.id = 1
+	append(&f.state.workspaces, &f.workspace)
 	f.state.settings.tab.confirm_close = true
 	return true
 }
@@ -52,6 +55,7 @@ menu_fixture_destroy :: proc(f: ^Menu_Fixture) {
 	delete(f.workspace.tabs)
 	app.tab_menu_destroy(&f.w.tab_menu)
 	delete(f.state.windows)
+	delete(f.state.workspaces)
 	app.confirmation_clear(&f.w)
 	delete(f.w.rename.bytes)
 	delete(f.w.panes)
