@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "base:runtime"
@@ -217,10 +216,10 @@ menu_row_part :: proc(m: ^Menu, index: int, x, y, width, height, scale: f32) -> 
 	if index < 0 || index >= len(m.items) {return .Row}
 	item := m.items[index]
 	if _, shown := item.action.?; shown {
-		if contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
+		if render.rect_contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
 	}
 	if _, shown := item.selected_action.?; shown && index == menu_selected(m) {
-		if contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
+		if render.rect_contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
 			return .Selected_Action
 		}
 	}
@@ -271,7 +270,7 @@ menu_draw :: proc(
 	theme: Theme,
 	width, height, scale: f32,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	surface, rows, first := menu_view(m, width, height, scale)
 	selected := menu_selected(m)
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
@@ -368,7 +367,7 @@ menu_draw :: proc(
 				); result != .Ok {return result}
 			}
 		}
-		if i == selected && item.enabled && contains(row, pointer.x, pointer.y) {
+		if i == selected && item.enabled && render.rect_contains(row, pointer.x, pointer.y) {
 			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
 		}

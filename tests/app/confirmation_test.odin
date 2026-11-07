@@ -6,7 +6,6 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -89,7 +88,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		app.update_motion(state)
 		testing.expect_value(t, c.hover_motion.hover.value, f32(1))
 		render.draw_list_reset(&w.list)
-		testing.expect_value(t, app.confirmation_draw(state, w), glyphs.Result.Ok)
+		testing.expect_value(t, app.confirmation_draw(state, w), render.Build_Status.Ok)
 		testing.expect(t, len(w.list.rects) > 0 && len(w.list.glyphs) > 0)
 		confirmation_test_key(state, w, .Escape)
 		testing.expect(t, !ui.presence_is_open(c.presence) && ui.presence_visible(c.presence))
@@ -102,7 +101,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		// The settled question released its subject with it.
 		testing.expect(t, w.dirty && app.confirmation_shown(w) == nil)
 		render.draw_list_reset(&w.list)
-		testing.expect_value(t, app.confirmation_draw(state, w), glyphs.Result.Ok)
+		testing.expect_value(t, app.confirmation_draw(state, w), render.Build_Status.Ok)
 		testing.expect_value(t, len(w.list.rects), 0)
 		// Disabled motion still releases the same payload through the application's motion loop.
 		state.animations = false

@@ -1,7 +1,7 @@
 package main
 
+import "aio:colour"
 import "aio:commands"
-import "aio:glyphs"
 import "aio:input"
 import "aio:layout"
 import "aio:links"
@@ -566,7 +566,7 @@ markdown_message_draw :: proc(
 	w: ^Window,
 	pane: ^Markdown_Pane,
 	g: ui.Markdown_Geometry,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if render.push_layer(&w.list, g.area, 0) != .None {return .Ok}
 	message := "This file could not be read."
 	path := ""
@@ -587,7 +587,7 @@ markdown_message_draw :: proc(
 }
 
 @(require_results)
-markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card: int) -> glyphs.Result {
+markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card: int) -> render.Build_Status {
 	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
 	pane := markdown_find(app, shown.content.id)
 	g := markdown_geometry_of(w, shown)
@@ -602,9 +602,9 @@ markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card:
 			find = {
 				matches = pane.search.matches[:],
 				selected = pane.search.selected,
-				foreground = color(c.search_foreground),
-				background = color(c.search_background),
-				selected_background = color(c.search_selected_background),
+				foreground = colour.rgba(c.search_foreground),
+				background = colour.rgba(c.search_background),
+				selected_background = colour.rgba(c.search_selected_background),
 			}
 		}
 		hover := markdown_link_hovered(w, pane.id)

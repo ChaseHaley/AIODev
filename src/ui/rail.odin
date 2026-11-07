@@ -85,8 +85,7 @@ rail_row_hit :: proc(layout: Rail_Layout, x, y: f32) -> int {
 }
 
 rail_row_contains :: proc(layout: Rail_Layout, index: int, x, y: f32) -> bool {
-	row := rail_row_rect(layout, index)
-	return x >= row.x && x < row.x + row.width && y >= row.y && y < row.y + row.height
+	return render.rect_contains(rail_row_rect(layout, index), x, y)
 }
 
 // Keeps `index` fully inside the list, moving the scroll only when it is not already visible.
@@ -118,17 +117,12 @@ rail_close_rect :: proc(layout: Rail_Layout, index: int, scale: f32) -> render.R
 rail_close_hit :: proc(layout: Rail_Layout, x, y, scale: f32) -> int {
 	index := rail_row_hit(layout, x, y)
 	r := rail_close_rect(layout, index, scale)
-	if r.width > 0 &&
-	   x >= r.x &&
-	   x < r.x + r.width &&
-	   y >= r.y &&
-	   y < r.y + r.height {return index}
+	if r.width > 0 && render.rect_contains(r, x, y) {return index}
 	return -1
 }
 
 rail_footer_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {
-	r := layout.footer
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return render.rect_contains(layout.footer, x, y)
 }
 
 rail_footer_tile :: proc(layout: Rail_Layout) -> render.Rect {
@@ -148,8 +142,7 @@ rail_profile_rect :: proc(layout: Rail_Layout) -> render.Rect {
 }
 
 rail_profile_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {
-	r := rail_profile_rect(layout)
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return render.rect_contains(rail_profile_rect(layout), x, y)
 }
 
 rail_new_tab_tile :: proc(layout: Rail_Layout) -> render.Rect {

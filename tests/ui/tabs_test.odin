@@ -67,7 +67,7 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 			bar := ui.tab_bar_layout(width * 2 * scale + 32 * scale, scale, 2)
 			render.draw_list_reset(&list)
 			testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 1, "Title", false, scale,
-				icon_atlas = {0, 0, 14 * scale, 14 * scale}, status = done, status_slot = true), glyphs.Result.Ok)
+				icon_atlas = {0, 0, 14 * scale, 14 * scale}, status = done, status_slot = true), render.Build_Status.Ok)
 			left := bar.x + bar.tab_width
 			close := ui.tab_close_rect(bar, 1, scale)
 			icon_found, status_found := false, false
@@ -86,7 +86,7 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 			// Without a status to show, a narrow tab keeps its icon.
 			render.draw_list_reset(&list)
 			testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 1, "Title", false, scale,
-				icon_atlas = {0, 0, 14 * scale, 14 * scale}, status_slot = true), glyphs.Result.Ok)
+				icon_atlas = {0, 0, 14 * scale, 14 * scale}, status_slot = true), render.Build_Status.Ok)
 			icon_found = false
 			for g in list.glyphs {icon_found ||= g.flags & render.GLYPH_COLOR != 0}
 			testing.expect(t, icon_found)

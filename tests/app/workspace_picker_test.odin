@@ -1,7 +1,6 @@
 package app_test
 
 import app "../../src"
-import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -65,7 +64,7 @@ picker152_compare :: proc(t: ^testing.T, a, b: ^Picker152_Fixture) {
 	}
 	before := pb^
 	render.draw_list_reset(&wb.list)
-	testing.expect_value(t, app.workspace_picker_draw(&b.state, wb), glyphs.Result.Ok)
+	testing.expect_value(t, app.workspace_picker_draw(&b.state, wb), render.Build_Status.Ok)
 	testing.expect_value(t, pb.state, before.state)
 	testing.expect_value(t, pb.selected, before.selected)
 	testing.expect_value(t, pb.scroll, before.scroll)

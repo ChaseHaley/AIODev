@@ -8,6 +8,20 @@ Rect :: struct {
 	x, y, width, height: f32,
 }
 
+// Half-open containment: the left and top edges are inside, the right and bottom edges are not, so
+// adjacent rectangles never both claim a point and an empty rectangle contains nothing.
+rect_contains :: proc(r: Rect, x, y: f32) -> bool {
+	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+// What drawing into a frame under construction reports. Atlas_Reset means the atlas was emptied
+// to make room: every glyph and icon already placed in the frame is stale, so the caller stops
+// drawing and lets Frame_Build start the next attempt.
+Build_Status :: enum {
+	Ok,
+	Atlas_Reset,
+}
+
 Rect_Instance :: struct {
 	rect:             Rect,
 	color:            Color,
@@ -18,6 +32,15 @@ Rect_Instance :: struct {
 	sheen:            [4]f32,
 }
 
+// Rect_Instance and Glyph_Instance are read by draw.hlsl as StructuredBuffer elements, which pack
+// four-byte scalars without padding. The shader's RectInstance and GlyphInstance list these fields
+// in the same order.
+#assert(size_of(Rect_Instance) == 64 && offset_of(Rect_Instance, fill) == 44)
+#assert(offset_of(Rect_Instance, sheen) == 48)
+
+// The fill and glyph flag values below reach draw.hlsl as same-named macros (see shader_macros), so
+// the shader cannot drift from them.
+//
 // RECT_FILL_HUE_WHEEL shades a circle by hue around the center and saturation outward, with color.r as
 // the HSV value. RECT_FILL_VALUE_RAMP darkens color.rgb to black at the left edge.
 // RECT_FILL_RIM keeps color.rgb as a rim light: alpha follows a pointer-shaped reach at the rounded edge.
@@ -39,6 +62,8 @@ Glyph_Instance :: struct {
 	fade_start, fade_end: f32,
 	_:                    u32,
 }
+
+#assert(size_of(Glyph_Instance) == 64 && offset_of(Glyph_Instance, flags) == 48)
 
 GLYPH_COLOR :: u32(1)
 GLYPH_FADE :: u32(2)
@@ -76,6 +101,7 @@ Atlas_Slot :: struct {
 	color:               bool,
 }
 
+// Text_Gamma carries DirectWrite's grayscale text rendering parameters from font to the renderer.
 Text_Gamma :: struct {
 	gamma, enhanced_contrast: f32,
 }
@@ -84,6 +110,12 @@ DEFAULT_TEXT_GAMMA :: Text_Gamma {
 	gamma             = 1.8,
 	enhanced_contrast = 1.0,
 }
+
+// The gamma range GAMMA_INCORRECT_TARGET_RATIOS covers, one row per tenth.
+@(private)
+MIN_TEXT_GAMMA :: 1
+@(private)
+MAX_TEXT_GAMMA :: 2.2
 
 Error :: enum {
 	None,
@@ -259,7 +291,7 @@ gamma_ratios :: proc(gamma: f32) -> [4]f32 {
 	NORM24 :: f32(f64(0x100) / 255 * 4)
 	@(static, rodata)
 	table := GAMMA_INCORRECT_TARGET_RATIOS
-	index := int(math.round((clamp(gamma, 1, 2.2) - 1) * 10))
+	index := int(math.round((clamp(gamma, MIN_TEXT_GAMMA, MAX_TEXT_GAMMA) - MIN_TEXT_GAMMA) * 10))
 	r := table[index]
 	return {NORM13 * r[0], NORM24 * r[1], NORM13 * r[2], NORM24 * r[3]}
 }

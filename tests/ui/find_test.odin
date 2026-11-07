@@ -1,5 +1,6 @@
 package ui_test
 
+import "aio:colour"
 import "core:mem"
 import "core:testing"
 import "aio:font"
@@ -7,7 +8,6 @@ import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
-import "aio:term_view"
 import "aio:ui"
 import fixtures "../fixtures"
 
@@ -86,7 +86,7 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 		{
 			resolved := fixtures.shipped_theme_file(file) or_continue
 			theme := ui.theme_from(resolved)
-			testing.expect(t, term_view.contrast_ratio(theme.text, theme.surface) >= 4.5)
+			testing.expect(t, colour.contrast_ratio(theme.text, theme.surface) >= 4.5)
 			for scale in ([?]f32{1, 1.5, 2}) {
 				ui.text_set_size(&text, 14*scale)
 				for width in ([?]f32{240, 300, 1000}) {
@@ -95,7 +95,7 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 						count := ui.text_styled(&text, .Detail)
 						l := ui.find_layout(width*scale, scale, ui.text_width(&count, status))
 						testing.expect_value(t, ui.find_draw(&f, &list, &text, theme, status, true,
-							width*scale, 400*scale, scale), glyphs.Result.Ok)
+							width*scale, 400*scale, scale), render.Build_Status.Ok)
 						// Count glyphs are emitted first and must include every visible character without an ellipsis.
 						visible := 0
 						for r in status { if r != ' ' { visible += 1 } }
@@ -115,7 +115,7 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 						testing.expect_value(t, strokes, 8)
 						render.draw_list_reset(&list)
 						testing.expect_value(t, ui.find_draw(&f, &list, &text, theme, status, false,
-							width*scale, 400*scale, scale), glyphs.Result.Ok)
+							width*scale, 400*scale, scale), render.Build_Status.Ok)
 						// Without matches the arrows, drawn first, fade; close still works.
 						stroke := 0
 						for r in list.rects {

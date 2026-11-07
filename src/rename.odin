@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:settings"
@@ -154,7 +153,7 @@ rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
 
 // The chip keeps its shape and size: its chevron gives way to a field holding the name.
 @(private = "file")
-workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_name_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	s := w.scale
 	r := rename_rect(w)
 	radius := ui.RADIUS_CONTROL * s
@@ -182,7 +181,7 @@ workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	return ui.draw_text(&detail, &w.list, message, panel.x + pad, baseline, app.theme.error)
 }
 
-rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	dialog, shown := w.overlay.(Overlay_Rename)
 	if !shown {return workspace_name_draw(app, w)}
 	s := w.scale

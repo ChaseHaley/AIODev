@@ -4,6 +4,7 @@ import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
+import "aio:render"
 import "aio:term"
 import "aio:ui"
 import "core:log"
@@ -36,7 +37,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			x, y := f32(e.x), f32(e.y)
 			if w.pointer != ([2]f32{x, y}) && w.gloss_hovered {w.dirty = true}
 			w.pointer = {x, y}
-			if hovered := workspace_rect_contains(workspace_button_rect(w), x, y);
+			if hovered := render.rect_contains(workspace_button_rect(w), x, y);
 			   hovered != w.workspace_hovered {
 				w.workspace_hovered, w.dirty = hovered, true
 			}

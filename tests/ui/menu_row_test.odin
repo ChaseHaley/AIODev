@@ -58,7 +58,7 @@ menu_drawing_preserves_selection_and_scroll_and_hit_testing_matches :: proc(t: ^
 	defer render.draw_list_destroy(&list)
 	text: ui.Text
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
-	testing.expect_value(t, ui.menu_draw(&m, &list, &text, {}, 400, 100, 1), glyphs.Result.Ok)
+	testing.expect_value(t, ui.menu_draw(&m, &list, &text, {}, 400, 100, 1), render.Build_Status.Ok)
 	testing.expect_value(t, ui.menu_selected(&m), 25)
 	testing.expect_value(t, m.scroll, 0)
 	selected := ui.menu_row_rect(&m, 25, 400, 100, 1)
@@ -67,7 +67,7 @@ menu_drawing_preserves_selection_and_scroll_and_hit_testing_matches :: proc(t: ^
 	testing.expect(t, m.scroll > 0 && m.scroll <= ui.menu_selected(&m))
 	// No row is a real selection state, not a sentinel a draw must repair.
 	ui.menu_select(&m, -1)
-	testing.expect_value(t, ui.menu_draw(&m, &list, &text, {}, 400, 100, 1), glyphs.Result.Ok)
+	testing.expect_value(t, ui.menu_draw(&m, &list, &text, {}, 400, 100, 1), render.Build_Status.Ok)
 	testing.expect(t, m.selection == nil)
 }
 

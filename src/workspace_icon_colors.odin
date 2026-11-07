@@ -1,7 +1,7 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
+import "aio:colour"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
@@ -28,7 +28,7 @@ workspace_icon_tint :: proc(index: int, foreground: render.Color) -> render.Colo
 	@(static, rodata) colors := WORKSPACE_ICON_COLORS
 	color := colors[index].light
 	if foreground.r + foreground.g + foreground.b > 1.5 { color = colors[index].dark }
-	return {f32(color.r) / 255, f32(color.g) / 255, f32(color.b) / 255, foreground.a}
+	return colour.rgba(color, foreground.a)
 }
 
 @(require_results)
@@ -98,7 +98,7 @@ workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	w.dirty = true
 }
 
-workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
 	g := workspace_icon_picker_layout(w)
 	target := workspace_row_target(app, workspace_picker_target(p, .Icons))

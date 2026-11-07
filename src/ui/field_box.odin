@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 // A one-line editable field drawn inside a rectangle. Draw and hit-test read the same numbers; the
@@ -46,7 +45,7 @@ field_box_draw :: proc(
 	baseline: f32,
 	focused: bool,
 	placeholder: string,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	text := text_styled(box.text, box.style)
 	frame := field_box_text_rect(box)
 	if render.push_layer(list, box.rect, box.radius * box.scale) != .None {return .Ok}

@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:settings"
@@ -368,7 +367,7 @@ status_panel_logo_draw :: proc(
 	w: ^Window,
 	x, middle, size: f32,
 	item: Status_Item,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	extent := math.round(size * s)
 	area := render.Rect{math.round(x), math.round(middle - extent / 2), extent, extent}
@@ -389,7 +388,7 @@ status_panel_end_draw :: proc(
 	item: Status_Item,
 	mark: ui.Status_Mark,
 	highlighted: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if highlighted && term.program_status_finished(item.record.state) {
 		close := status_panel_dismiss_rect(app, w, r)
 		ui.icon_draw(&w.list, .Close, close, app.theme.muted, ui.ICON_INDICATOR, w.scale)
@@ -407,7 +406,7 @@ status_panel_comfy_draw :: proc(
 	r: render.Rect,
 	row: Status_Panel_Row,
 	highlighted: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	item := row.item
 	box := status_panel_row_box(w, r, row)
@@ -450,7 +449,7 @@ status_panel_dense_draw :: proc(
 	r: render.Rect,
 	row: Status_Panel_Row,
 	highlighted: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	item := row.item
 	box := status_panel_row_box(w, r, row)
@@ -493,7 +492,7 @@ status_panel_label_draw :: proc(
 	w: ^Window,
 	r: render.Rect,
 	row: Status_Panel_Row,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	small := ui.text_styled(&w.ui_text, .Detail)
 	ink := row.attention ? ui.status_color(app.theme, .Blocked) : app.theme.faint
@@ -508,7 +507,7 @@ status_panel_label_draw :: proc(
 	return ui.draw_fading_text(&small, &w.list, row.label, x, baseline, ink, max(0, right - x))
 }
 
-status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	panel := status_panel_rect(app, w)
 	if panel.width <= 0 || panel.height <= 0 {return .Ok}
 	s := w.scale
@@ -566,7 +565,7 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	for row, i in rows {
 		r := status_panel_row_rect(w, list, row)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
-		result: glyphs.Result
+		result: render.Build_Status
 		highlighted := any_hovered && hovered == i
 		if row.report {
 			box := status_panel_row_box(w, r, row)
@@ -596,10 +595,10 @@ status_panel_hit :: proc(
 	rect: render.Rect,
 ) {
 	list := status_panel_list(app, w, status_panel_rect(app, w))
-	if !status_rect_contains(list, x, y) {return -1, {}}
+	if !render.rect_contains(list, x, y) {return -1, {}}
 	for row, i in rows {
 		r := status_panel_row_rect(w, list, row)
-		if row.report && status_rect_contains(r, x, y) {return i, r}
+		if row.report && render.rect_contains(r, x, y) {return i, r}
 	}
 	return -1, {}
 }
@@ -611,7 +610,7 @@ status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	if index < 0 {return ""}
 	item := rows[index].item
 	if term.program_status_finished(item.record.state) &&
-	   status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
+	   render.rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		return "Dismiss"
 	}
 	name := status_item_name(app, item)
@@ -628,12 +627,12 @@ status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 status_panel_button_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Status_Panel_Button {
-	if status_rect_contains(status_panel_side_rect(app, w), x, y) {return .Side}
-	return status_rect_contains(status_panel_view_rect(app, w), x, y) ? .View : .None
+	if render.rect_contains(status_panel_side_rect(app, w), x, y) {return .Side}
+	return render.rect_contains(status_panel_view_rect(app, w), x, y) ? .View : .None
 }
 
 status_panel_contains :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return status_rect_contains(status_panel_rect(app, w), x, y)
+	return render.rect_contains(status_panel_rect(app, w), x, y)
 }
 
 // Panel clicks open the pane a row came from; the panel takes every press inside it.
@@ -651,7 +650,7 @@ status_panel_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	if index < 0 {return true}
 	item := rows[index].item
 	if term.program_status_finished(item.record.state) &&
-	   status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
+	   render.rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		status_dismiss_item(app, item)
 		w.dirty = true
 		return true

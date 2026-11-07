@@ -21,11 +21,6 @@ Entry :: struct {
 	color:  bool,
 }
 
-Result :: enum {
-	Ok,
-	Atlas_Reset,
-}
-
 Cache :: struct {
 	allocator:  runtime.Allocator,
 	fonts:      ^font.System,
@@ -93,8 +88,8 @@ validate :: proc(c: ^Cache) {
 	}
 }
 
-// Reserves atlas space and uploads pixels. When the atlas is full it is reset, every entry is
-// forgotten, and the caller must rebuild the frame because entries it already used are stale.
+// Places pixels in the atlas. When the atlas is full it is reset, every entry is forgotten, and the
+// caller must rebuild the frame because entries it already used are stale.
 @(private)
 upload :: proc(
 	c: ^Cache,
@@ -103,20 +98,18 @@ upload :: proc(
 	color := false,
 ) -> (
 	render.Rect,
-	Result,
+	render.Build_Status,
 ) {
-	slot, ok := render.atlas_reserve(c.device, width, height, color)
-	if !ok {
-		render.atlas_reset(c.device)
+	slot: render.Atlas_Slot
+	rect, status := render.atlas_ensure(c.device, &slot, width, height, pixels, int(width), color)
+	if status != .Ok {
 		forget(c)
-		return {}, .Atlas_Reset
 	}
-	render.atlas_upload(c.device, slot, pixels, int(width))
-	return {f32(slot.x), f32(slot.y), f32(width), f32(height)}, .Ok
+	return rect, status
 }
 
 // With color set, a glyph the font draws in color is cached as RGBA and its entry reports color.
-glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry, Result) {
+glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry, render.Build_Status) {
 	validate(c)
 	key := Glyph_Key{g.face, g.index, u32(math.round(size_px * g.scale * 64)), color}
 	if entry, found := c.glyphs[key]; found {
@@ -162,7 +155,7 @@ reset_counts :: proc(c: ^Cache) {
 }
 
 // Returns a cell-wide decoration; its offset centers it vertically on the pen position.
-sprite :: proc(c: ^Cache, kind: Sprite, cell_width, thickness: f32) -> (Entry, Result) {
+sprite :: proc(c: ^Cache, kind: Sprite, cell_width, thickness: f32) -> (Entry, render.Build_Status) {
 	validate(c)
 	t := max(1, u16(math.round(thickness)))
 	w := max(1, u16(cell_width))

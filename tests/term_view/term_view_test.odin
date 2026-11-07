@@ -1,5 +1,6 @@
 package term_view_test
 
+import "aio:colour"
 import "core:math"
 import "core:slice"
 import "core:strings"
@@ -125,7 +126,7 @@ render_frame :: proc(t: ^testing.T, f: ^Fixture, style: term_view.Style) -> (ter
 	for _ in 0 ..< 2 {
 		render.draw_list_reset(&f.list)
 		testing.expect_value(t, render.push_layer(&f.list, {0, 0, 4096, 4096}), render.Error.None)
-		result: glyphs.Result
+		result: render.Build_Status
 		frame, result = term_view.build(&f.view, f.session, f.fonts, &f.cache, &f.list, {0, 0}, f.metrics, style)
 		if result == .Ok {
 			break
@@ -264,7 +265,7 @@ unshaped_entry :: proc(t: ^testing.T, f: ^Fixture, r: rune, style: font.Style = 
 	g, found := font.glyph_lookup(f.fonts, f.family, style, r)
 	testing.expect(t, found)
 	entry, result := glyphs.glyph(&f.cache, g, SIZE_PX)
-	testing.expect_value(t, result, glyphs.Result.Ok)
+	testing.expect_value(t, result, render.Build_Status.Ok)
 	return entry
 }
 
@@ -339,7 +340,7 @@ consolas_grid_and_combining_cluster :: proc(t: ^testing.T) {
 		if wide { left += (span - advance * scale) / 2 }
 		baseline := m.cell_height / 2 + (m.baseline - m.cell_height / 2) * scale
 		entry, result := glyphs.glyph(&f.cache, g, SIZE_PX * scale, wide)
-		testing.expect_value(t, result, glyphs.Result.Ok)
+		testing.expect_value(t, result, render.Build_Status.Ok)
 		if entry.size.x == 0 { continue }
 		testing.expect_value(t, render.push_glyph(&f.list, {
 			rect = {
@@ -356,7 +357,7 @@ consolas_grid_and_combining_cluster :: proc(t: ^testing.T) {
 	for g in combined {
 		testing.expect_value(t, g.cluster, 0)
 		entry, result := glyphs.glyph(&f.cache, g.glyph, SIZE_PX)
-		testing.expect_value(t, result, glyphs.Result.Ok)
+		testing.expect_value(t, result, render.Build_Status.Ok)
 		testing.expect_value(t, render.push_glyph(&f.list, {
 			rect = {
 				math.round(6 * f.metrics.cell_width + advance + g.offset.x + entry.offset.x),
@@ -504,7 +505,7 @@ contrast_adjustment_reaches_rendered_glyphs_and_off_restores_exact_color :: proc
 	render_frame(t, &f, style)
 	if !testing.expect(t, len(f.list.glyphs) > 0) { return }
 	background := render.Color{200/f32(255), 200/f32(255), 200/f32(255), 1}
-	testing.expect(t, term_view.contrast_ratio(f.list.glyphs[0].color, background) >= 4.499)
+	testing.expect(t, colour.contrast_ratio(f.list.glyphs[0].color, background) >= 4.499)
 	style.minimum_contrast = 1
 	render_frame(t, &f, style)
 	testing.expect_value(t, f.list.glyphs[0].color, background)

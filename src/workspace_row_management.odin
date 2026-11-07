@@ -2,7 +2,6 @@ package main
 
 import "aio:input"
 import "core:time"
-import "aio:glyphs"
 import "aio:render"
 import "aio:ui"
 
@@ -253,7 +252,7 @@ workspace_row_menu_item_rect :: proc(w: ^Window, index: int) -> render.Rect {
 workspace_row_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 	if workspace_picker_target(&w.workspace_picker, .Menu) == 0 { return -1 }
 	for i in 0..<len(WORKSPACE_ROW_ACTIONS) {
-		if workspace_rect_contains(workspace_row_menu_item_rect(w, i), x, y) { return i }
+		if render.rect_contains(workspace_row_menu_item_rect(w, i), x, y) { return i }
 	}
 	return -1
 }
@@ -270,7 +269,7 @@ workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> b
 	}
 	if mode == .Rename {
 		row := workspace_picker_row_rect(w, workspace_row_index(w, workspace_picker_target(p, .Rename)))
-		if y >= row.y + row.height && workspace_rect_contains(workspace_row_rename_field_rect(w), x, y) {
+		if y >= row.y + row.height && render.rect_contains(workspace_row_rename_field_rect(w), x, y) {
 			workspace_picker_pointer(app, w, x, true, extend)
 			return true
 		}
@@ -292,7 +291,7 @@ workspace_row_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) ->
 		if w.rename.dragging && .Left in e.buttons {
 			workspace_picker_pointer(app, w, f32(e.x), false, true)
 		}
-		inside := workspace_rect_contains(workspace_row_rename_field_rect(w), f32(e.x), f32(e.y))
+		inside := render.rect_contains(workspace_row_rename_field_rect(w), f32(e.x), f32(e.y))
 		pointer_set(app, w, inside ? .Text : .Arrow)
 		return true
 	}
@@ -333,7 +332,7 @@ workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
 	}
 }
 
-workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
 	index := workspace_row_index(w, workspace_picker_target(p, .Rename))
 	if index < 0 { return .Ok }
@@ -359,7 +358,7 @@ workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme.muted, field.width)
 }
 
-workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
 	id := workspace_picker_target(p, .Menu)
 	if id == 0 { return .Ok }
@@ -391,7 +390,7 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			enabled ? app.theme.text : app.theme.muted, max(0, item.width - 2 * inset)); result != .Ok {
 			return result
 		}
-		if i == p.menu_selected && workspace_rect_contains(item, w.pointer.x, w.pointer.y) {
+		if i == p.menu_selected && render.rect_contains(item, w.pointer.x, w.pointer.y) {
 			// The menu item carries the selection tint, so it takes no paper hairline.
 			if ui.hover_rim_draw(&w.list, app.theme, item, ui.RADIUS_CONTROL * s, 1, s, w.pointer, false) != .None {
 				return .Ok

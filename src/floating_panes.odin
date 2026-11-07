@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
@@ -209,7 +208,7 @@ floating_header_at :: proc(
 		if rounded_contains(pane.rect, radius, x, y) {return layout.INVALID_NODE, .None, false}
 	}
 	for button, i in floating_header_buttons(w, frame) {
-		if rect_contains(button, x, y) {return group, Float_Header_Action(i + 1), true}
+		if render.rect_contains(button, x, y) {return group, Float_Header_Action(i + 1), true}
 	}
 	return group, .Move, true
 }
@@ -496,7 +495,7 @@ floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edge
 floating_covers :: proc(w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
 	if _, _, frame := floating_frame_at(w, x, y); frame {return true}
-	return rect_contains(w.float_capsule_group, x, y)
+	return render.rect_contains(w.float_capsule_group, x, y)
 }
 
 // Where a move or resize of the float holding the pane begins; false when the pane no longer floats.
@@ -701,7 +700,7 @@ floating_capsules :: proc(w: ^Window) -> []Float_Capsule {
 @(private)
 floating_capsule_at :: proc(w: ^Window, x, y: f32) -> Maybe(Float_Capsule) {
 	for capsule in floating_capsules(w) {
-		if rect_contains(capsule.rect, x, y) {return capsule}
+		if render.rect_contains(capsule.rect, x, y) {return capsule}
 	}
 	return nil
 }
@@ -747,7 +746,7 @@ floating_title :: proc(app: ^App, content: layout.Content) -> string {
 	return content_title(app, content)
 }
 
-floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	capsules := floating_capsules(w)
 	if len(capsules) == 0 {return .Ok}
 	s := w.scale
@@ -814,7 +813,7 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 floating_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
 	if _, _, header := floating_header_at(app, w, x, y); header {return true}
-	return rect_contains(w.float_capsule_group, x, y)
+	return render.rect_contains(w.float_capsule_group, x, y)
 }
 
 floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
@@ -848,7 +847,7 @@ floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 floating_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	x, y := f32(e.x), f32(e.y)
-	if rect_contains(w.float_capsule_group, x, y) {
+	if render.rect_contains(w.float_capsule_group, x, y) {
 		press := Float_Capsules_Press {
 			grab = {start = {x, y}, rect = w.float_capsule_group},
 		}

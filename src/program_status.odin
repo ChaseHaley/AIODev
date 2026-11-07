@@ -1,7 +1,6 @@
 package main
 
 import platform_api "aio:platform"
-import "aio:glyphs"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
@@ -218,7 +217,12 @@ status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
 	return f32(f64(time.tick_now()._nsec % period) / f64(period))
 }
 
-status_mark_draw :: proc(app: ^App, w: ^Window, area: render.Rect, mark: ui.Status_Mark) -> glyphs.Result {
+status_mark_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	area: render.Rect,
+	mark: ui.Status_Mark,
+) -> render.Build_Status {
 	phase := status_phase(app, w, mark)
 	return ui.status_glyph_draw(&w.list, &w.ui_text, app.theme, area, mark, phase, w.scale)
 }

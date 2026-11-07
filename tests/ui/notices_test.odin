@@ -1,11 +1,11 @@
 package ui_test
 
+import "aio:colour"
 import "base:runtime"
 import "core:testing"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
-import "aio:term_view"
 import "aio:ui"
 import "core:time"
 import fixtures "../fixtures"
@@ -32,7 +32,7 @@ notice_severities_have_unique_words_symbols_and_readable_theme_colors :: proc(t:
 			for kind in ui.Notice_Kind {
 				label, symbol, color := ui.notice_style(kind, theme)
 				testing.expect(t, len(label) > 0)
-				testing.expectf(t, term_view.contrast_ratio(color, theme.surface) >= 4.5,
+				testing.expectf(t, colour.contrast_ratio(color, theme.surface) >= 4.5,
 					"%v %v label contrast", file.name, kind)
 				for other in ui.Notice_Kind {
 					if other == kind { continue }
@@ -158,7 +158,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				theme := ui.theme_from(fixtures.shipped_theme(id))
 				render.draw_list_reset(&list)
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
-					width*scale, 1000*scale, scale), glyphs.Result.Ok)
+					width*scale, 1000*scale, scale), render.Build_Status.Ok)
 				testing.expect(t, len(list.glyphs) > 0)
 				testing.expect_value(t, len(list.rects), 46)
 				layers, rects, glyph_count, lines := cap(list.layers), cap(list.rects), cap(list.glyphs), cap(n.lines)
@@ -166,7 +166,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				for _ in 0..<3 {
 					render.draw_list_reset(&list)
 					testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
-						width*scale, 1000*scale, scale), glyphs.Result.Ok)
+						width*scale, 1000*scale, scale), render.Build_Status.Ok)
 					testing.expect_value(t, cap(list.layers), layers)
 					testing.expect_value(t, cap(list.rects), rects)
 					testing.expect_value(t, cap(list.glyphs), glyph_count)
@@ -186,7 +186,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				render.draw_list_reset(&list)
 				theme := ui.theme_from(fixtures.shipped_theme("studio-dark"))
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
-					width*scale, 1000*scale, scale), glyphs.Result.Ok)
+					width*scale, 1000*scale, scale), render.Build_Status.Ok)
 				box := list.rects[1].rect
 				testing.expect(t, box.width <= min(520, width-32)*scale)
 				testing.expect(t, box.x >= 16*scale)

@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:render"
 import "aio:ui"
 import "core:strings"
@@ -59,7 +58,7 @@ workspace_icon_draw :: proc(
 	icon: Workspace_Icon,
 	area: render.Rect,
 	color: render.Color,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if icon.emoji != "" {
 		return ui.draw_cluster_centered(&w.ui_text, &w.list, icon.emoji, area, color, area.height)
 	}

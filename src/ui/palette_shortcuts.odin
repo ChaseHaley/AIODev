@@ -1,7 +1,6 @@
 package ui
 
 import "aio:commands"
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "core:fmt"
@@ -109,15 +108,15 @@ palette_binding_press :: proc(
 	layout := palette_binding_layout(p, l, binding.result)
 	row, _ := row_rect(p, l, binding.result)
 	parts := palette_binding_parts(row, l.scale)
-	if editor_popup(b) != .None && contains(editor_popup_rect(b, layout), x, y) {
+	if editor_popup(b) != .None && render.rect_contains(editor_popup_rect(b, layout), x, y) {
 		return palette_binding_outcome(p, binding, editor_press(b, layout, text, x, y, false))
 	}
-	if contains(parts.reset, x, y) {return palette_binding_outcome(p, binding, .Reset)}
-	if editor_popup(b) == .None && contains(parts.positions, x, y) {
+	if render.rect_contains(parts.reset, x, y) {return palette_binding_outcome(p, binding, .Reset)}
+	if editor_popup(b) == .None && render.rect_contains(parts.positions, x, y) {
 		b.physical = !b.physical
 		return .Changed
 	}
-	if contains(parts.field, x, y) {
+	if render.rect_contains(parts.field, x, y) {
 		open_shortcuts(b)
 		return .Changed
 	}
@@ -140,10 +139,11 @@ palette_binding_modified :: proc(command: ^commands.Command) -> bool {
 palette_binding_draw :: proc(
 	p: ^Palette, command: ^commands.Command, index: int, row: render.Rect,
 	list: ^render.Draw_List, text: ^Text, theme: Theme, l: Palette_Layout, pointer: [2]f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	parts := palette_binding_parts(row, l.scale)
 	modified := palette_binding_modified(command)
-	_ = reset_button_draw(list, theme, parts.reset, modified, contains(parts.reset, pointer.x, pointer.y),
+	reset_hovered := render.rect_contains(parts.reset, pointer.x, pointer.y)
+	_ = reset_button_draw(list, theme, parts.reset, modified, reset_hovered,
 	                      index == p.selected, pointer, l.scale)
 	if binding, open := &p.edit.(Shortcut_Edit); open && binding.result == index {
 		b := &binding.editor
@@ -158,8 +158,9 @@ palette_binding_draw :: proc(
 		summary.first = commands.shortcut_text(shortcuts[0], buffer[:])
 	}
 	parts.positions = {}
+	focused := render.rect_contains(parts.field, pointer.x, pointer.y)
 	result := shortcut_field_draw(list, text, theme, parts, summary,
-	                              {focused = contains(parts.field, pointer.x, pointer.y)}, l.viewport, l.scale)
+	                              {focused = focused}, l.viewport, l.scale)
 	_ = render.push_layer(list, l.list)
 	return result
 }

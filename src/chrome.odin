@@ -1,7 +1,7 @@
 package main
 
+import "aio:colour"
 import "aio:commands"
-import "aio:glyphs"
 import "aio:layout"
 import "aio:render"
 import "aio:term"
@@ -37,7 +37,7 @@ window_generation :: proc(app: ^App, w: ^Window) -> u64 {
 	return generation
 }
 
-window_chrome_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+window_chrome_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	window_shared_borders(app, w)
 	bar_height := ui.TITLE_BAR_HEIGHT * w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar_height}) == .None {
@@ -82,7 +82,7 @@ window_pane_radius :: proc(app: ^App, w: ^Window) -> f32 {
 	return f32(app.settings.pane.corner_radius) * w.scale
 }
 
-window_leader_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !leader_armed(w) {return .Ok}
 	leader, enabled := app.leader.?
 	if !enabled {return .Ok}
@@ -111,7 +111,7 @@ window_card_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		   &w.list,
 		   {
 			   rect = {r.x, r.y, r.width, r.height},
-			   color = color(app.settings.colors.background),
+			   color = colour.rgba(app.settings.colors.background),
 			   radius = radius,
 		   },
 	   ) !=

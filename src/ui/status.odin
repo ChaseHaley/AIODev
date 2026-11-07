@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 leader_status_layout :: proc(area: render.Rect, width, scale: f32) -> render.Rect {
@@ -21,7 +20,7 @@ leader_status_draw :: proc(
 	area: render.Rect,
 	chord: string,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	small := text_styled(text, .Detail)
 	keycap := text_styled(text, .Detail)
 	hint := "Leader · awaiting key"
@@ -59,7 +58,7 @@ pane_message_draw :: proc(
 	message: string,
 	scale: f32,
 	radius: f32 = 0,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	padding := min(SPACE_3 * scale, area.width / 4)
 	lines := make([dynamic]string, context.temp_allocator)

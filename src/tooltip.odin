@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:ui"
@@ -141,7 +140,7 @@ tooltip_tick :: proc(w: ^Window, now: time.Tick) {
 	w.dirty = true
 }
 
-tooltip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+tooltip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	label, shown := tooltip_shown(w)
 	if !shown {return .Ok}
 	owner := pointer_target(app, w, w.pointer.x, w.pointer.y)

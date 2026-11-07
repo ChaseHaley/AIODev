@@ -107,7 +107,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 			for progress in ([?]f32{0.01, 0.25, 0.5, 0.75, 1}) {
 				render.draw_list_reset(&list)
 				testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale, 1,
-					4*scale*(1-progress)), glyphs.Result.Ok)
+					4*scale*(1-progress)), render.Build_Status.Ok)
 				for layer in list.layers {
 					testing.expect(t, layer.clip.y >= 0 && layer.clip.y+layer.clip.height <= h)
 				}
@@ -341,7 +341,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		for id in ([?]string{"studio-dark", "studio-light"}) {
 			theme := ui.theme_from(fixtures.shipped_theme(id))
 			render.draw_list_reset(&list)
-			testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), glyphs.Result.Ok)
+			testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), render.Build_Status.Ok)
 			selected_rows := 0
 			for instance in list.rects {
 				if instance.color != theme.selection { continue }
@@ -361,7 +361,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 				render.draw_list_reset(&list)
 				ui.palette_layout(&p, w, h, scale)
 				ui.palette_scroll(&p, -1)
-				testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), glyphs.Result.Ok)
+				testing.expect_value(t, ui.palette_draw(&p, &list, &text, theme, w, h, scale), render.Build_Status.Ok)
 				testing.expect_value(t, allocations.calls, calls)
 			}
 		}

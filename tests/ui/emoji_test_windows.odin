@@ -25,7 +25,7 @@ emoji_icon_shapes_variation_zwj_flags_and_skin_tones_as_color_glyphs :: proc(t: 
 		render.draw_list_reset(&list)
 		testing.expect_value(t, render.push_layer(&list, {0, 0, 32, 32}), render.Error.None)
 		testing.expect_value(t, ui.draw_cluster_centered(&text, &list, emoji, {0, 0, 32, 32},
-			{1, 1, 1, 1}, 20), glyphs.Result.Ok)
+			{1, 1, 1, 1}, 20), render.Build_Status.Ok)
 		if emoji != "👨‍👩‍👧‍👦" { testing.expect_value(t, len(list.glyphs), 1) }
 		// Segoe UI Emoji may show a family as separate figures; preserve them all and fit the slot.
 		if !testing.expect(t, len(list.glyphs) > 0 && len(list.glyphs) <= 64) { continue }
@@ -39,7 +39,7 @@ emoji_icon_shapes_variation_zwj_flags_and_skin_tones_as_color_glyphs :: proc(t: 
 		render.draw_list_reset(&list)
 		testing.expect_value(t, render.push_layer(&list, {0, 0, 32, 32}), render.Error.None)
 		testing.expect_value(t, ui.draw_cluster_centered(&text, &list, emoji, {0, 0, 32, 32},
-			{1, 1, 1, 1}, 20), glyphs.Result.Ok)
+			{1, 1, 1, 1}, 20), render.Build_Status.Ok)
 		testing.expect_value(t, len(list.glyphs), count)
 		for g, i in list.glyphs { testing.expect_value(t, g, before[i]) }
 	}

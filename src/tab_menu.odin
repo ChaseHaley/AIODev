@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:layout"
 import "aio:render"
@@ -237,7 +236,7 @@ tab_menu_select_edge :: proc(w: ^Window, last: bool) {
 }
 
 // Draws the rows around the selection; it reads the menu and changes nothing in it.
-tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+tab_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	s := w.scale
 	menu := &w.tab_menu
 	r, rows := tab_menu_rect(w)
@@ -267,9 +266,7 @@ tab_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		if result := ui.draw_text(&w.ui_text, &w.list, tab_menu_label(w, i), row.x + inset,
 			row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			enabled ? app.theme.text : app.theme.muted, max(1, row.width - 2 * inset)); result != .Ok { return result }
-		if i == menu.selected && enabled &&
-		   w.pointer.x >= row.x && w.pointer.x < row.x + row.width &&
-		   w.pointer.y >= row.y && w.pointer.y < row.y + row.height {
+		if i == menu.selected && enabled && render.rect_contains(row, w.pointer.x, w.pointer.y) {
 			if ui.hover_rim_draw(&w.list, app.theme, row, ui.RADIUS_CONTROL * s, 1, s, w.pointer) != .None {
 				return .Ok
 			}

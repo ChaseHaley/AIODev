@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:term"
@@ -140,7 +139,7 @@ status_row_draw :: proc(
 	r: render.Rect,
 	item: Status_Item,
 	highlighted: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	if highlighted {
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
@@ -244,12 +243,7 @@ status_pill_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	return {workspace_button_width(w), top, width - ui.SPACE_1 * w.scale, height}
 }
 
-@(private)
-status_rect_contains :: proc(r: render.Rect, x, y: f32) -> bool {
-	return r.width > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-}
-
-status_pill_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+status_pill_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r := status_pill_rect(app, w)
 	if r.width <= 0 {return .Ok}
 	s := w.scale
@@ -373,7 +367,7 @@ status_inbox_clamp :: proc(w: ^Window, inbox: ^Status_Inbox, list: render.Rect, 
 	inbox.scroll = clamp(inbox.scroll, 0, limit)
 }
 
-status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	inbox, open := &w.status.inbox.?
 	if !open {return .Ok}
 	items := status_items(app, w)
@@ -447,7 +441,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 @(private)
 status_inbox_hit :: proc(app: ^App, w: ^Window, items: []Status_Item, scroll, x, y: f32) -> int {
 	_, list, _ := status_inbox_layout(app, w, items)
-	if !status_rect_contains(list, x, y) {return -1}
+	if !render.rect_contains(list, x, y) {return -1}
 	index := int(math.floor((y - list.y + scroll) / (STATUS_ROW_HEIGHT * w.scale)))
 	return index >= 0 && index < len(items) ? index : -1
 }
@@ -460,12 +454,12 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	items := status_items(app, w)
 	surface, _, _ := status_inbox_layout(app, w, items)
 	w.dirty = true
-	if !status_rect_contains(surface, x, y) {
+	if !render.rect_contains(surface, x, y) {
 		status_inbox_close(w)
 		return
 	}
 	if e.button != .Left {return}
-	if status_rect_contains(status_dismiss_all_rect(w, surface), x, y) {
+	if render.rect_contains(status_dismiss_all_rect(w, surface), x, y) {
 		status_dismiss_finished(app, w)
 		return
 	}
@@ -474,7 +468,7 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	_, list, _ := status_inbox_layout(app, w, items)
 	row := status_inbox_row_rect(w, list, inbox.scroll, index)
 	if term.program_status_finished(items[index].record.state) &&
-	   status_rect_contains(status_dismiss_rect(w, row), x, y) {
+	   render.rect_contains(status_dismiss_rect(w, row), x, y) {
 		status_dismiss_item(app, items[index])
 		return
 	}
@@ -490,7 +484,7 @@ status_inbox_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 		inbox.selected, w.dirty = index, true
 	}
 	surface, _, _ := status_inbox_layout(app, w, items)
-	dismiss_all := status_rect_contains(status_dismiss_all_rect(w, surface), x, y)
+	dismiss_all := render.rect_contains(status_dismiss_all_rect(w, surface), x, y)
 	pointer_set(app, w, index >= 0 || dismiss_all ? .Hand : .Arrow)
 }
 
@@ -538,7 +532,7 @@ status_inbox_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 status_overview_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	button := status_panel_button_at(app, w, x, y)
 	if button != w.status.panel_button_hover {w.status.panel_button_hover, w.dirty = button, true}
-	pill := status_rect_contains(status_pill_rect(app, w), x, y)
+	pill := render.rect_contains(status_pill_rect(app, w), x, y)
 	if pill != w.status.pill_hover {w.status.pill_hover, w.dirty = pill, true}
 	over := status_panel_contains(app, w, x, y)
 	hover: Maybe(int)

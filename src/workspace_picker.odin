@@ -2,6 +2,7 @@ package main
 
 import "aio:input"
 import "aio:platform"
+import "aio:render"
 import "core:math"
 import "aio:ui"
 
@@ -229,7 +230,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 	r, _ := workspace_picker_rect(w)
 	if list, listing := p.state.(Workspace_Picker_List); listing && e.button == .Left {
 		if chip, pressed := list.sub.(Workspace_Chip_Pressed); pressed &&
-		   workspace_rect_contains(workspace_button_rect(w), x, y) &&
+		   render.rect_contains(workspace_button_rect(w), x, y) &&
 		   e.time_ns - chip.time_ns <= DOUBLE_CLICK_NS {
 			workspace_name_begin(app, w)
 			return
@@ -237,12 +238,12 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 	}
 	if workspace_picker_mode(p) == .Menu && e.button == .Left {
 		workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
-	} else if !workspace_rect_contains(r, x, y) {
+	} else if !render.rect_contains(r, x, y) {
 		workspace_picker_cancel(w)
 	} else if e.button == .Left {
 		if workspace_picker_browsing(p) {
 			if hit := workspace_picker_hit(w, x, y); hit >= 0 && hit < len(p.rows) &&
-			   !workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+			   !render.rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 				row := workspace_picker_row_rect(w, hit)
 				workspace_picker_list_set(w, Workspace_Order_Pressed{id = p.rows[hit].id, start_x = x,
 					start_y = y, grab = (y - row.y) / row.height})
@@ -268,10 +269,10 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event)
 		shape = .Hand
 		workspace_picker_select(w, hit)
 		if workspace_picker_browsing(p) && hit < len(p.rows) &&
-		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+		   render.rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 			hover = p.rows[hit].id
 		}
-	} else if workspace_rect_contains(workspace_picker_field_rect(w), x, y) {
+	} else if render.rect_contains(workspace_picker_field_rect(w), x, y) {
 		shape = .Text
 	}
 	if hover != p.menu_hover {

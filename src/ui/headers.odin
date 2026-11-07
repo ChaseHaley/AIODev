@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
@@ -112,14 +111,8 @@ header_layout :: proc(area: render.Rect, scale: f32, documents := true, floating
 header_hit_test :: proc(l: Header_Layout, x, y: f32) -> Header_Action {
 	for button, i in l.buttons {
 		if button.width > 0 &&
-		   x >= button.x &&
-		   x < button.x + button.width &&
-		   y >= button.y &&
-		   y < button.y + button.height &&
-		   x >= l.panel.x &&
-		   x < l.panel.x + l.panel.width &&
-		   y >= l.panel.y &&
-		   y < l.panel.y + l.panel.height {return Header_Action(i + 1)}
+		   render.rect_contains(button, x, y) &&
+		   render.rect_contains(l.panel, x, y) {return Header_Action(i + 1)}
 	}
 	// The badge's hover target extends a little past the glyph, but never outside the visible card.
 	if l.badge.width > 0 && l.panel.width > 0 && l.panel.height > 0 {
@@ -133,12 +126,7 @@ header_hit_test :: proc(l: Header_Layout, x, y: f32) -> Header_Action {
 }
 
 header_contains :: proc(l: Header_Layout, x, y: f32) -> bool {
-	return(
-		x >= l.panel.x &&
-		x < l.panel.x + l.panel.width &&
-		y >= l.panel.y &&
-		y < l.panel.y + l.panel.height \
-	)
+	return render.rect_contains(l.panel, x, y)
 }
 
 shell_badge_draw :: proc(
@@ -149,7 +137,7 @@ shell_badge_draw :: proc(
 	icon: string,
 	scale: f32,
 	atlas: render.Rect = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if atlas.width > 0 {
 		r := area
 		factor := min(area.width / atlas.width, area.height / atlas.height)
@@ -219,7 +207,7 @@ header_draw :: proc(
 	content_icon: Icon = .None,
 	documents: Header_Documents = {shown = true},
 	floating := false,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	l := header_layout(area, scale, documents.shown, floating)
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
@@ -366,7 +354,7 @@ split_overlay_draw :: proc(
 	scale: f32,
 	pointer: [2]f32 = {},
 	documents: Header_Documents = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	radius := RADIUS_OVERLAY * scale
 	if render.push_layer(list, l.panel, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = theme.surface, radius = radius})

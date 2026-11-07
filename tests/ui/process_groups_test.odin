@@ -105,7 +105,7 @@ process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_row(&p).key, "process.group.3.name")
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	p.scroll = 0
-	testing.expect_value(t, ui.editor_draw(&p, page, &list, &text, theme, true), glyphs.Result.Ok)
+	testing.expect_value(t, ui.editor_draw(&p, page, &list, &text, theme, true), render.Build_Status.Ok)
 	// Each label below the focused field must paint inside its layer's clip, not the field's.
 	for key in ([?]string{"process.group.3.padding", "process.group.3.add", "process.group.0.add"}) {
 		row: render.Rect

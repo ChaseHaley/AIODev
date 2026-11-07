@@ -400,14 +400,14 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 				w.width = i32(f32(width)*scale)
 				f.current.name = ""
 				render.draw_list_reset(&w.list)
-				testing.expect_value(t, app.workspace_button_draw(s, w), glyphs.Result.Ok)
+				testing.expect_value(t, app.workspace_button_draw(s, w), render.Build_Status.Ok)
 				testing.expect_value(t, render.frame_render(device, surface, &w.list, s.theme.window), render.Error.None)
 				baseline, error := render.surface_read_pixels(device, surface, context.allocator)
 				if !testing.expect_value(t, error, render.Error.None) { return }
 				defer delete(baseline)
 				f.current.name = "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"
 				render.draw_list_reset(&w.list)
-				testing.expect_value(t, app.workspace_button_draw(s, w), glyphs.Result.Ok)
+				testing.expect_value(t, app.workspace_button_draw(s, w), render.Build_Status.Ok)
 				testing.expect_value(t, render.frame_render(device, surface, &w.list, s.theme.window), render.Error.None)
 				pixels, pixel_error := render.surface_read_pixels(device, surface, context.allocator)
 				if !testing.expect_value(t, pixel_error, render.Error.None) { return }
@@ -456,9 +456,9 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 				render.draw_list_reset(&w.list)
 				app.workspace_row_menu_open(s, w, f.target.id)
 				if rename { app.workspace_row_menu_choose(s, w) }
-				testing.expect_value(t, app.workspace_button_draw(s, w), glyphs.Result.Ok)
+				testing.expect_value(t, app.workspace_button_draw(s, w), render.Build_Status.Ok)
 				testing.expect_value(t, len(w.list.rects), 3)
-				testing.expect_value(t, app.workspace_picker_draw(s, w), glyphs.Result.Ok)
+				testing.expect_value(t, app.workspace_picker_draw(s, w), render.Build_Status.Ok)
 				sample := rename ? app.workspace_row_rename_field_rect(w) : app.workspace_row_menu_item_rect(w, 0)
 				testing.expect_value(t, render.frame_render(device, surface, &w.list, s.theme.window), render.Error.None)
 				pixels, pixel_error := render.surface_read_pixels(device, surface, context.allocator)

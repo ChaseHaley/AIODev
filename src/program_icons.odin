@@ -1,12 +1,11 @@
 package main
 
-import "aio:glyphs"
+import "aio:colour"
 import platform_api "aio:platform"
 import "aio:program_art"
 import "aio:pty"
 import "aio:render"
 import "aio:settings"
-import "aio:term_view"
 import "core:log"
 import "core:math"
 import "core:path/filepath"
@@ -136,7 +135,7 @@ program_icon_atlas :: proc(
 ) -> (
 	rect: render.Rect,
 	state: Program_Icon_State,
-	result: glyphs.Result,
+	result: render.Build_Status,
 ) {
 	pw := &app.processes
 	if path == "" || size < 1 || size > platform_api.EXECUTABLE_ICON_MAX {return {}, .Missing, .Ok}
@@ -148,14 +147,10 @@ program_icon_atlas :: proc(
 		if icon.path != path {continue}
 		icon.used = pw.clock
 		if icon.state != .Ready {return {}, icon.state, .Ok}
-		if icon.slot.generation != render.atlas_generation(app.device) {
-			slot, ok := render.atlas_reserve(app.device, i32(size), i32(size), true)
-			if !ok {render.atlas_reset(app.device); return {}, .Pending, .Atlas_Reset}
-			render.atlas_upload(app.device, slot, icon.pixels, size)
-			icon.slot = slot
-		}
-		r := icon.slot
-		return {f32(r.x), f32(r.y), f32(r.width), f32(r.height)}, .Ready, .Ok
+		side := i32(size)
+		atlas, status := render.atlas_ensure(app.device, &icon.slot, side, side, icon.pixels, size, true)
+		if status != .Ok {return {}, .Pending, status}
+		return atlas, .Ready, .Ok
 	}
 	program_icon_request(app, source, path, paint, size)
 	return {}, .Pending, .Ok
@@ -171,7 +166,7 @@ pane_icon :: proc(
 ) -> (
 	badge: string,
 	atlas: render.Rect,
-	result: glyphs.Result,
+	result: render.Build_Status,
 ) {
 	if entry == nil {return}
 	program := program_adopted(entry)
@@ -199,7 +194,7 @@ report_icon :: proc(
 ) -> (
 	atlas: render.Rect,
 	pending: bool,
-	result: glyphs.Result,
+	result: render.Build_Status,
 ) {
 	if app.settings.tabs.program_icons && name != "" {
 		pixels := int(math.round(size))
@@ -310,8 +305,7 @@ program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_ar
 	layers := art.layers
 	for layer in program_art.next_layer(&layers) {
 		brand := program_art.brand(layer) or_continue
-		colour := render.Color{f32(brand.r) / 255, f32(brand.g) / 255, f32(brand.b) / 255, 1}
-		if term_view.contrast_ratio(colour, app.theme.tab_bar) < PROGRAM_ART_CONTRAST {
+		if colour.contrast_ratio(colour.rgba(brand), app.theme.tab_bar) < PROGRAM_ART_CONTRAST {
 			paint.mono = true
 			return
 		}

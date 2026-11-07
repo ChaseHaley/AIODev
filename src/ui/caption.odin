@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 TITLE_BAR_HEIGHT :: f32(40)
@@ -27,7 +26,7 @@ caption_draw :: proc(
 	hover, pressed: int,
 	maximized: bool,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if render.push_layer(list, {0, 0, width, TITLE_BAR_HEIGHT * scale}) != .None {return .Ok}
 	for i in 0 ..< 3 {
 		r := render.Rect{width - f32(3 - i) * 46 * scale, 0, 46 * scale, TITLE_BAR_HEIGHT * scale}

@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 // The horizontal title-bar tab strip. It shares the title-bar height so the strip, the workspace
@@ -33,7 +32,7 @@ tab_drop_region :: proc(bar: Tab_Bar, width, scale: f32) -> render.Rect {
 
 tab_drop_hit :: proc(bar: Tab_Bar, width, scale, x, y: f32) -> bool {
 	r := tab_drop_region(bar, width, scale)
-	return r.width > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return r.width > 0 && render.rect_contains(r, x, y)
 }
 
 // The count is the new-tab button; -1 is outside the controls.
@@ -70,7 +69,7 @@ tab_draw :: proc(
 	status_phase: f32 = 0,
 	status_slot: bool = false,
 	content_icon: Icon = .None,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	x := f32(index) * bar.tab_width
 	if position >= 0 {x = position}
 	width := bar.tab_width
@@ -195,10 +194,6 @@ tab_close_rect :: proc(bar: Tab_Bar, index: int, scale: f32) -> render.Rect {
 tab_close_hit :: proc(bar: Tab_Bar, x, y, scale: f32) -> int {
 	index := tab_bar_hit_test(bar, x, y)
 	r := tab_close_rect(bar, index, scale)
-	if r.width > 0 &&
-	   x >= r.x &&
-	   x < r.x + r.width &&
-	   y >= r.y &&
-	   y < r.y + r.height {return index}
+	if r.width > 0 && render.rect_contains(r, x, y) {return index}
 	return -1
 }

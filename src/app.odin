@@ -1,6 +1,5 @@
 package main
 
-import "aio:colour"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
@@ -880,10 +879,6 @@ apply_theme :: proc(app: ^App) {
 	app.theme.hover_gloss = f32(app.settings.interface.hover_gloss)
 }
 
-color :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {
-	return colour.rgba(c, alpha)
-}
-
 @(private)
 terminal_colors :: proc(c: settings.Color_Settings) -> term.Colors {
 	colors := term.Colors {
@@ -905,9 +900,5 @@ set_font_points :: proc(app: ^App, points: f32) {
 }
 
 apply_text_gamma :: proc(app: ^App) {
-	gamma := font.text_gamma(app.fonts)
-	render.set_text_gamma(
-		app.device,
-		{gamma = gamma.gamma, enhanced_contrast = gamma.enhanced_contrast},
-	)
+	render.set_text_gamma(app.device, font.text_gamma(app.fonts))
 }

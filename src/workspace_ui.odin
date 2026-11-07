@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:ui"
@@ -13,11 +12,6 @@ Workspace_Row :: struct {
 }
 
 WORKSPACE_ACTIONS :: [?]Action{.New_Workspace, .New_Window}
-
-@(private)
-workspace_rect_contains :: proc(r: render.Rect, x, y: f32) -> bool {
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-}
 
 workspace_index :: proc(app: ^App, index: int) -> ^Workspace {
 	if index < 0 {return nil}
@@ -153,7 +147,7 @@ workspace_button_rect :: proc(w: ^Window) -> render.Rect {
 	return {left + ui.SPACE_1 * w.scale, top, max(0, width - left - 2 * ui.SPACE_1 * w.scale), height}
 }
 
-workspace_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	width := workspace_button_width(w)
 	if width <= 12 * w.scale {return .Ok}
 	r := workspace_button_rect(w)
@@ -510,12 +504,12 @@ workspace_picker_row_rect :: proc(w: ^Window, index: int) -> render.Rect {
 workspace_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_hit(w, x, y) }
 	r, _ := workspace_picker_rect(w)
-	if !workspace_rect_contains(r, x, y) {return -1}
+	if !render.rect_contains(r, x, y) {return -1}
 	if y < r.y + workspace_picker_header(w) {return -1}
 	for lifted in ([?]bool{true, false}) {
 		for i in 0..<workspace_picker_count(w) {
 			if workspace_order_lifted(&w.workspace_picker, i) != lifted {continue}
-			if workspace_rect_contains(workspace_picker_row_rect(w, i), x, y) {return i}
+			if render.rect_contains(workspace_picker_row_rect(w, i), x, y) {return i}
 		}
 	}
 	return -1
@@ -534,13 +528,13 @@ workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 	if workspace_row_click(app, w, x, y, extend) { return }
 	if hit := workspace_picker_hit(w, x, y); hit >= 0 {
 		if workspace_picker_browsing(p) && hit < len(p.rows) &&
-		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+		   render.rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 			workspace_row_menu_open(app, w, p.rows[hit].id)
 			return
 		}
 		p.selected = hit
 		workspace_picker_choose(app, w)
-	} else if workspace_rect_contains(workspace_picker_field_rect(w), x, y) {
+	} else if render.rect_contains(workspace_picker_field_rect(w), x, y) {
 		workspace_picker_pointer(app, w, x, true, extend)
 	}
 }
@@ -554,7 +548,7 @@ workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend:
 	w.dirty = true
 }
 
-workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p := &w.workspace_picker
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
@@ -655,7 +649,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			); result != .Ok {return result}
 			// Rows are a reading surface: they take the pointer light but never the lift. The
 			// selected row keeps its tint, so it takes no paper hairline.
-			if workspace_rect_contains(row, w.pointer.x, w.pointer.y) {
+			if render.rect_contains(row, w.pointer.x, w.pointer.y) {
 				if result := ui.hover_rim_draw(
 					&w.list,
 					app.theme,

@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:ui"
@@ -60,14 +59,14 @@ workspace_icon_picker_reveal :: proc(w: ^Window, g: Workspace_Icon_Layout) {
 
 workspace_icon_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	g := workspace_icon_picker_layout(w)
-	if !workspace_rect_contains(g.panel, x, y) { return -1 }
+	if !render.rect_contains(g.panel, x, y) { return -1 }
 	colors := workspace_picker_mode(&w.workspace_picker) == .Tint
 	count := colors ? len(WORKSPACE_ICON_COLORS) : len(WORKSPACE_ICONS)
-	if !colors && workspace_rect_contains(workspace_icon_color_button(w), x, y) { return count + 2 }
-	if workspace_rect_contains(g.apply, x, y) { return count + (colors ? 0 : 1) }
-	if !workspace_rect_contains(g.grid, x, y) { return -1 }
+	if !colors && render.rect_contains(workspace_icon_color_button(w), x, y) { return count + 2 }
+	if render.rect_contains(g.apply, x, y) { return count + (colors ? 0 : 1) }
+	if !render.rect_contains(g.grid, x, y) { return -1 }
 	for i in 0..<count {
-		if workspace_rect_contains(workspace_icon_picker_cell(w, g, i), x, y) { return i }
+		if render.rect_contains(workspace_icon_picker_cell(w, g, i), x, y) { return i }
 	}
 	return -1
 }
@@ -96,7 +95,7 @@ workspace_icon_picker_key :: proc(w: ^Window, e: input.Key_Event) -> bool {
 	return true
 }
 
-workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
 	if workspace_picker_mode(p) == .Tint { return workspace_icon_color_draw(app, w) }
 	g := workspace_icon_picker_layout(w)
@@ -179,7 +178,7 @@ WORKSPACE_ICON_HEADER :: 40
 
 workspace_icon_picker_title :: proc(
 	app: ^App, w: ^Window, g: Workspace_Icon_Layout, title: string,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	s := w.scale
 	baseline := g.panel.y + (WORKSPACE_ICON_HEADER * s - strong.line_height) / 2 + strong.ascent

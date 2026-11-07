@@ -1,7 +1,6 @@
 package ui
 
 import "aio:font"
-import "aio:glyphs"
 import "aio:markdown"
 import "aio:render"
 import "core:math"
@@ -720,7 +719,7 @@ draw_run :: proc(
 	color: render.Color,
 	find: Markdown_Find,
 	selected_from, selected_to: int,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	m := &v.faces[run.face]
 	shown := text^
 	shown.size_px = m.size_px
@@ -753,7 +752,7 @@ markdown_draw :: proc(
 	theme: Theme,
 	find: Markdown_Find = {},
 	hover_link := -1,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if render.push_layer(list, g.area, 0) != .None {return .Ok}
 	origin_y := g.top - f32(v.scroll)
 	visible_top := g.area.y - origin_y

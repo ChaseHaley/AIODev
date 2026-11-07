@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
@@ -630,7 +629,7 @@ document_popout_button :: proc(w: ^Window, level: Document_Level) -> render.Rect
 @(private = "file")
 document_popout_hit :: proc(w: ^Window, x, y: f32) -> (Document_Level, bool) {
 	for level in Document_Level {
-		if rect_contains(document_popout_button(w, level), x, y) {return level, true}
+		if render.rect_contains(document_popout_button(w, level), x, y) {return level, true}
 	}
 	return {}, false
 }
@@ -739,7 +738,7 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 			ui.field_pointer(&menu.url, ui.field_box_offset(box, x), false, true)
 			w.dirty = true
 		}
-		if rect_contains(box.rect, x, y) {
+		if render.rect_contains(box.rect, x, y) {
 			pointer_set(app, w, .Text)
 			return
 		}
@@ -822,7 +821,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	}
 }
 
-document_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	menu := &w.document_menu
 	s := w.scale
 	width, height := f32(w.width), f32(w.height)

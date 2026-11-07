@@ -18,7 +18,7 @@ title_action_rect :: proc(w: ^Window, action: Title_Action) -> render.Rect {
 
 title_action_hit :: proc(w: ^Window, x, y: f32) -> Title_Action {
 	for action in Title_Action {
-		if action != .None && rect_contains(title_action_rect(w, action), x, y) {return action}
+		if action != .None && render.rect_contains(title_action_rect(w, action), x, y) {return action}
 	}
 	return .None
 }

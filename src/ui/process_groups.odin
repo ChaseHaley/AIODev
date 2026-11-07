@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:render"
 import "aio:settings"
@@ -350,7 +349,7 @@ editor_process_press :: proc(
 ) -> (Editor_Outcome, bool) {
 	if row.kind == .Process_Group {
 		cells := editor_process_parts(parts.row, scale)
-		if contains(cells.handle, x, y) {
+		if render.rect_contains(cells.handle, x, y) {
 			if !editor_process_orderable(p) {return .Changed, true}
 			from := 0
 			for candidate in p.rows {
@@ -361,14 +360,14 @@ editor_process_press :: proc(
 			order_begin(p, Order_Group{row.process}, from, (y - parts.row.y) / parts.row.height)
 			return .Changed, true
 		}
-		if contains(cells.remove, x, y) {
+		if render.rect_contains(cells.remove, x, y) {
 			editor_request_set(p, Process_Remove_Request{row.process})
 			return .Process_Remove, true
 		}
 		editor_process_toggle(p, row.process)
 		return .Changed, true
 	}
-	if row.process_field == .Program && contains(parts.clear, x, y) {
+	if row.process_field == .Program && render.rect_contains(parts.clear, x, y) {
 		return editor_process_program_remove(p, row.key), true
 	}
 	if row.process_field == .Fallback {return .Changed, true}
@@ -387,7 +386,7 @@ editor_process_orderable :: proc(p: ^Editor) -> bool {
 editor_process_draw :: proc(
 	p: ^Editor, row: ^Editor_Row, parts: Row_Parts, selected: bool,
 	list: ^render.Draw_List, text: ^Text, theme: Theme, scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s, r := scale, parts.row
 	baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
 	buffer: [128]u8

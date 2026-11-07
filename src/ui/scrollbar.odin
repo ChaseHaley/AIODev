@@ -59,7 +59,7 @@ scrollbar_layout :: proc(
 	return {track, thumb, extent}, true
 }
 
-scrollbar_contains :: proc(bar: Scrollbar, x, y: f32) -> bool {return contains(bar.track, x, y)}
+scrollbar_contains :: proc(bar: Scrollbar, x, y: f32) -> bool {return render.rect_contains(bar.track, x, y)}
 
 // A press on the track pages toward the pointer, or on the thumb starts a drag. Returns the offset
 // the surface scrolls to.

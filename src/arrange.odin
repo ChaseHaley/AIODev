@@ -1,6 +1,5 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
@@ -308,8 +307,7 @@ tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		w.dirty = true
 		return true
 	}
-	area := rail_area(w)
-	if x < area.x || x >= area.x + area.width || y < area.y || y >= area.y + area.height {
+	if !render.rect_contains(rail_area(w), x, y) {
 		drag_retarget(app, w, a, nil)
 		w.dirty = true
 		return true
@@ -967,7 +965,7 @@ pane_drag_label :: proc(grab: Pane_Grab, destination: Drag_Destination) -> strin
 }
 
 // The outline of a pane drop: in the window it lands in, or around the pane a tear-off takes from its own.
-pane_drag_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	a, carry := pane_drag_state(w)
 	if a != nil {
 		if _, tear_off := a.destination.(Drop_Tear_Off); !tear_off {a = nil}

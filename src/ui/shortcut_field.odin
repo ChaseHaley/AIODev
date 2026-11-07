@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 import "core:fmt"
 import "core:strings"
@@ -58,7 +57,7 @@ Shortcut_Field_State :: struct {
 shortcut_field_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, parts: Row_Parts,
 	summary: Shortcut_Summary, state: Shortcut_Field_State, page: render.Rect, scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	input := text_styled(text, .Body)
 	baseline := parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent
 	box_draw(list, parts.field, theme, state.focused && !state.capturing, scale)

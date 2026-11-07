@@ -145,7 +145,7 @@ draw_text :: proc(
 	max_width: f32 = 0,
 	highlights: []int = nil,
 	highlight: render.Color = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	limit := max_width > 0 ? max_width - text_width(t, ELLIPSIS) : max(f32)
 	clipped := max_width > 0 && text_width(t, s) > max_width
 	pen := x
@@ -184,7 +184,7 @@ draw_glyph :: proc(
 	g: font.Glyph,
 	x, baseline: f32,
 	c: render.Color,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	entry, result := glyphs.glyph(t.cache, g, t.size_px)
 	if result != .Ok || entry.size.x == 0 {
 		return result
@@ -270,7 +270,7 @@ draw_fading_text :: proc(
 	x, baseline: f32,
 	color: render.Color,
 	width: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if width <= 0 {return .Ok}
 	pen := x
 	clipped := text_width(t, s) > width
@@ -318,7 +318,7 @@ draw_glyph_centered :: proc(
 	r: rune,
 	area: render.Rect,
 	c: render.Color,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
 	if !found {return .Ok}
 	entry, result := glyphs.glyph(t.cache, g, t.size_px)
@@ -342,7 +342,7 @@ draw_icon :: proc(
 	area: render.Rect,
 	c: render.Color,
 	fraction: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if !t.has_icons {return .Ok}
 	icons := t^
 	icons.family = t.icons
@@ -358,7 +358,7 @@ draw_cluster_centered :: proc(
 	area: render.Rect,
 	c: render.Color,
 	size_px: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	runes: [32]rune
 	clusters: [32]int
 	count := 0

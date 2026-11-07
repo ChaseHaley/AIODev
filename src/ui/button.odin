@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 // The surface every chrome button shares: the raised hover (lift, seat shadow, fill, rim light),
@@ -93,13 +92,13 @@ text_button_draw :: proc(
 	focused: bool,
 	scale: f32,
 	pointer: [2]f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if rect.width <= 0 {return .Ok}
 	radius := RADIUS_CONTROL * scale
 	draw_rect(list, {rect = rect, color = theme.surface, radius = radius})
 	draw_rect(list, {rect = rect, color = theme.border, radius = radius, stroke = scale})
 	if focused {focus_ring_draw(list, rect, theme, scale)}
-	if contains(rect, pointer.x, pointer.y) {
+	if render.rect_contains(rect, pointer.x, pointer.y) {
 		if hover_rim_draw(list, theme, rect, radius, 1, scale, pointer, true) != .None {return .Ok}
 	}
 	inset := CONTROL_INSET * scale
