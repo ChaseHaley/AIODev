@@ -488,6 +488,8 @@ editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
 	if !testing.expect(t, entry != nil) {return}
 	row := ui.schema_row(entry^)
 	row.value = "banner, sound"
+	// The page edits option bits; its owner projects them from the value and saves their names.
+	row.choice_mask, _, _ = settings.set_parse(row.choices, row.value)
 	testing.expect(t, row.multiple)
 	testing.expect_value(t, ui.editor_add(&p, row, "Program Status"), nil)
 	ui.editor_filter(&p)
@@ -498,16 +500,16 @@ editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.choice_list.index, 0)
 	// Enter flips the highlighted option and leaves the list open for the next one.
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
-	testing.expect_value(t, ui.field_string(&p.value), "sound")
+	testing.expect_value(t, settings.set_text(row.choices, ui.editor_choice_set(&p)), "sound")
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
 	ui.editor_key(&p, key({key = .Arrow_Down}))
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Space})), ui.Editor_Outcome.Save)
-	testing.expect_value(t, ui.field_string(&p.value), "tray, sound")
+	testing.expect_value(t, settings.set_text(row.choices, ui.editor_choice_set(&p)), "tray, sound")
 	popup := ui.editor_popup_rect(&p, l)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+4+30*3.5, false), ui.Editor_Outcome.Save)
-	testing.expect_value(t, ui.field_string(&p.value), "tray")
+	testing.expect_value(t, settings.set_text(row.choices, ui.editor_choice_set(&p)), "tray")
 	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+4+30*1.5, false), ui.Editor_Outcome.Save)
-	testing.expect_value(t, ui.field_string(&p.value), "none")
+	testing.expect_value(t, settings.set_text(row.choices, ui.editor_choice_set(&p)), "none")
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
 	ui.editor_key(&p, key({key = .Escape}))
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.None)
