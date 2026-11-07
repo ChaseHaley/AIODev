@@ -28,9 +28,9 @@ Pane_View :: struct {
 	image_epoch: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
-	header_controls: [ui.HEADER_BUTTONS]ui.Control_Motion,
-	header_hover:   ui.Header_Action,
-	header_armed:   ui.Armed(ui.Header_Action),
+	header_controls: [Pane_Header_Button]ui.Control_Motion,
+	header_hover:   Pane_Header_Target,
+	header_armed:   ui.Armed(Pane_Header_Target),
 }
 
 Window :: struct {
@@ -56,7 +56,7 @@ Window :: struct {
 	float_header_hover:    Maybe(Float_Header_Spot),
 	float_header_shown:    layout.Node_Id,
 	float_header_motion:   ui.Control_Motion,
-	float_header_controls: [FLOAT_HEADER_BUTTONS]ui.Control_Motion,
+	float_header_controls: [len(FLOAT_HEADER_BUTTONS)]ui.Control_Motion,
 	// The minimized float whose capsule is under the pointer; where the user left the capsule row, as a
 	// fraction of the room it can travel, or nil for the bottom-right; and the row's cached geometry.
 	float_capsule_hover:      Maybe(layout.Content),
@@ -106,6 +106,7 @@ Window :: struct {
 	rail_width:          f32,
 	// tabs.rail_width, the width a double-click on the rail edge returns to.
 	rail_default_width:  f32,
+	// The Activity panel's width left of the rail; see window_dock_reserve.
 	dock_left_width:     f32,
 	title_action_hover: Title_Action,
 	title_action_armed: ui.Armed(Title_Action),
@@ -139,8 +140,10 @@ Window :: struct {
 	capture_hold: Maybe(time.Tick),
 	taskbar: Status_Taskbar,
 	status: Status_Overview,
-	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
+	// The rail height the activity panel takes in vertical view; see window_dock_reserve.
 	status_rail_reserve: f32,
+	// The dock edges shown beside the layout's dividers, refreshed with them by window_dividers.
+	dock_edges: Dock_Edges_Shown,
 }
 
 window_metrics :: proc(app: ^App, scale: f32) -> term_view.Metrics {
@@ -382,8 +385,7 @@ window_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 window_relayout :: proc(app: ^App, w: ^Window) {
 	pane_view_sync(app, w)
 	w.dirty = true
-	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
-	w.status_rail_reserve = status_panel_rail_height(app, w)
+	window_dock_reserve(app, w)
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
 		ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
@@ -644,10 +646,9 @@ build_frame :: proc(app: ^App, w: ^Window) -> (term_view.Frame, render.Build_Sta
 		}
 	}
 	if palette_visible(app, w) {
-		opacity, rise := ui.presence_fade(app.palette.presence, 4 * w.scale)
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
-			opacity, rise, w.pointer,
+			ui.presence_fade(app.palette.presence, ui.RISE_DIALOG * w.scale), w.pointer,
 		)
 		if result != .Ok { return frame, result }
 	}

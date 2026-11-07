@@ -61,11 +61,9 @@ editor_font_search_restore :: proc(p: ^Editor, query: string, toggle_focus: bool
 choice_search_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
 	r := editor_popup_rect(p, l)
 	s := l.scale
-	return {
-		field = &p.choice_search, text = text,
-		rect = {r.x + 4 * s, r.y + 4 * s, r.width - 8 * s, HEIGHT_STANDARD * s},
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = s,
-	}
+	pad := OVERLAY_PADDING * s
+	rect := render.Rect{r.x + pad, r.y + pad, r.width - 2 * pad, HEIGHT_STANDARD * s}
+	return field_box_standard(&p.choice_search, text, rect, s)
 }
 
 // The options a multiple choice has on: the pending bits of the selected row, which its owner saves

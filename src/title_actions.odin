@@ -6,7 +6,7 @@ import "aio:ui"
 Title_Action :: enum {None, Settings, Palette}
 
 title_actions_end :: proc(w: ^Window) -> f32 {
-	return (3 * ui.RAIL_TOGGLE_WIDTH + 8) * w.scale
+	return (3 * ui.TITLE_BUTTON_WIDTH + 8) * w.scale
 }
 
 // The title-bar width the native caption buttons keep at the right, which the workspace chip and the
@@ -18,7 +18,7 @@ window_caption_reserve :: proc(w: ^Window) -> f32 {
 title_action_rect :: proc(w: ^Window, action: Title_Action) -> render.Rect {
 	if action == .None {return {}}
 	r := tab_orientation_button_rect(w)
-	r.x += f32(int(action)) * ui.RAIL_TOGGLE_WIDTH * w.scale
+	r.x += f32(int(action)) * ui.TITLE_BUTTON_WIDTH * w.scale
 	return r
 }
 

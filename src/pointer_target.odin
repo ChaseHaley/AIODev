@@ -219,7 +219,7 @@ notice_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 	if app.notice_window != w.id {return true}
 	if e.button == .Left {
 		hit := notice_hit(app, w, f32(e.x), f32(e.y))
-		if ui.notices_release(&app.notices, hit.close ? hit.id : 0) {
+		if ui.notices_release(&app.notices, hit.close ? hit.id : 0, app.animations, time.tick_now()) {
 			for window in app.windows {window.dirty = true}
 		}
 	}
@@ -825,15 +825,15 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mous
 	x, y := move_point(e)
 	in_pane := owner == .Pane_Header || owner == .Scrollbar || owner == .Settings_Page || owner == .Content
 	split_overlay_update(w, x, y, in_pane && !selection_active(w))
-	over, action := pane_header_pointer(w, x, y, owner == .Pane_Header && !selection_active(w))
+	over, target := pane_header_pointer(w, x, y, owner == .Pane_Header && !selection_active(w))
 	if owner != .Pane_Header {return}
-	pointer_set(app, w, over && action != .None && !gesture_swallowing(w) ? .Hand : .Arrow)
+	pointer_set(app, w, over && target != nil && !gesture_swallowing(w) ? .Hand : .Arrow)
 }
 
 @(private = "file")
 header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	_, action, _ := pane_header_hit(w, x, y)
-	return pane_header_tooltip(w, action)
+	_, target, _ := pane_header_hit(w, x, y)
+	return pane_header_tooltip(w, target)
 }
 
 // The header swallows its presses, so it also finishes a release that lands anywhere.

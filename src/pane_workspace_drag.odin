@@ -12,14 +12,16 @@ pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap:
 		if !found {return false}
 		request := Workspace_Move_Request{home.workspace.id, home.tab.id, home.node, false}
 		allowed := pane_window_source_can_lose(app, carry.source, carry.node)
-		held, on = workspace_picker_drag_hover(app, a.destination, w, x, y, request, allowed)
+		held, on = workspace_picker_drag_hover(app, a, w, x, y, request, allowed)
 	}
 	if !on {
-		if _, holding := a.destination.(Drop_Workspace_Dropdown); holding {drag_retarget(app, source, a, nil)}
+		if _, holding := carry.destination.(Drop_Workspace_Dropdown); holding {
+			pane_drag_retarget(app, source, a, nil)
+		}
 		return false
 	}
 	carry.visit.hover = nil
-	drag_retarget(app, source, a, held)
+	pane_drag_retarget(app, source, a, held)
 	source.dirty, w.dirty = true, true
 	return true
 }

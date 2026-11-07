@@ -3,6 +3,7 @@ package app_test
 import "aio:input"
 import "core:strings"
 import "core:testing"
+import "core:time"
 import app "../../src"
 import "aio:layout"
 import "aio:platform"
@@ -154,17 +155,20 @@ floating_header_buttons_fire_only_on_release_over_themselves :: proc(t: ^testing
 	float_move(s, w, frame.x + 40, frame.y + 10)
 	float_button(s, w, frame.x + 40, frame.y + 10, false)
 	testing.expect_value(t, w.float_press, nil)
-	testing.expect_value(t, len(app.floating_capsules(w)), 0)
+	testing.expect_value(t, len(w.float_capsules), 0)
 	float_button(s, w, mx, my, true)
 	float_button(s, w, mx, my, false)
-	if !testing.expect_value(t, len(app.floating_capsules(w)), 1) {return}
+	if !testing.expect_value(t, len(w.float_capsules), 1) {return}
 
 	// The capsule row moves as one from a press that travels, and only a click restores.
 	group := w.float_capsule_group
 	cx, cy := group.x + group.width / 2, group.y + group.height / 2
 	// A notice in the same corner would take the press.
-	for len(ui.notices_live(&s.notices)) > 0 {_ = ui.notices_dismiss(&s.notices, s.notices.items[0].id)}
-	ui.notices_set_animations(&s.notices, false)
+	now := time.tick_now()
+	for len(ui.notices_live(&s.notices)) > 0 {
+		_ = ui.notices_dismiss(&s.notices, s.notices.items[0].id, false, now)
+	}
+	_ = ui.notices_animate(&s.notices, false, now)
 	testing.expect_value(t, app.pointer_target(s, w, cx, cy), app.Pointer_Target.Floating)
 	float_button(s, w, cx, cy, true)
 	press, pressed := w.float_press.(app.Float_Capsules_Press)
@@ -177,12 +181,12 @@ floating_header_buttons_fire_only_on_release_over_themselves :: proc(t: ^testing
 	testing.expect_value(t, w.float_capsule_group.y, group.y - 40)
 	float_button(s, w, cx - 60, cy - 40, false)
 	testing.expect(t, w.float_capsule_anchor != nil)
-	testing.expect_value(t, len(app.floating_capsules(w)), 1)
+	testing.expect_value(t, len(w.float_capsules), 1)
 	group = w.float_capsule_group
 	cx, cy = group.x + group.width / 2, group.y + group.height / 2
 	float_button(s, w, cx, cy, true)
 	float_button(s, w, cx, cy, false)
-	testing.expect_value(t, len(app.floating_capsules(w)), 0)
+	testing.expect_value(t, len(w.float_capsules), 0)
 	testing.expect_value(t, len(app.floating_rects(w)), 1)
 }
 

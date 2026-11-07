@@ -673,6 +673,7 @@ when AIO_CONTROL {
 			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
 			state_valuef(r, state_key("notice.%s", verify_notice_key(n.key)), "%s: %s (%s)", kind, n.text, left)
 		}
+
 	}
 
 	verify_workspace_index :: proc(app: ^App, w: ^Window) -> int {
@@ -942,15 +943,7 @@ when AIO_CONTROL {
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case verify_protocol.Resize:
 			insets := pane_insets(app, w.scale, focused_session(app, w))
-			desired, width, height := pane_box_for_grid(
-				app,
-				w.scale,
-				w.metrics,
-				u16(r.columns),
-				u16(r.rows),
-				insets,
-				w.rail_width > 0 ? w.rail_width : f32(app.settings.tabs.rail_width),
-			)
+			desired, width, height, _ := pane_box_for_grid(app, w^, u16(r.columns), u16(r.rows), insets)
 			// Activity can move between a standalone dock and the rail as the width changes.
 			for _ in 0..<32 {
 				candidate := w^

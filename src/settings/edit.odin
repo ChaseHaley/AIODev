@@ -3,9 +3,11 @@ package settings
 import "aio:colour"
 import "base:runtime"
 import "core:fmt"
+import "core:io"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:time"
 
 schema_find :: proc(key: string) -> ^Schema_Entry {
 	@(static, rodata)
@@ -193,6 +195,14 @@ Save_Error :: enum {
 	IO,
 }
 
+// How long a save waits for another process, such as a virus scanner or indexer opening the file
+// a moment ago, to let go of settings.ini. Windows reports that as Permission_Denied, which a
+// truly unwritable file also reports, so the wait is short and bounded.
+@(private)
+SAVE_LOCK_ATTEMPTS :: 20
+@(private)
+SAVE_LOCK_WAIT :: 10 * time.Millisecond
+
 @(require_results)
 save :: proc(path, expected, updated: string) -> Save_Error {
 	f, err := os.create_temp_file(os.dir(path), ".aiodev-settings-*")
@@ -216,13 +226,22 @@ save :: proc(path, expected, updated: string) -> Save_Error {
 		)
 		return .IO
 	}
-	current, read_error := os.read_entire_file(path, context.temp_allocator)
-	if read_error !=
-	   nil {log.errorf("reading settings before save failed: %v", read_error); return .IO}
-	if string(current) != expected {return .Conflict}
-	if rename_error := os.rename(name, path); rename_error != nil {
-		log.errorf("replacing settings failed: %v", rename_error)
-		return .IO
+	// The file is checked against `expected` again before every replace attempt, so a wait never
+	// lets an edit made meanwhile be overwritten.
+	for attempt in 1 ..= SAVE_LOCK_ATTEMPTS {
+		current, read_error := os.read_entire_file(path, context.temp_allocator)
+		replace_error := read_error
+		if read_error == nil {
+			if string(current) != expected {return .Conflict}
+			replace_error = os.rename(name, path)
+			if replace_error == nil {return .None}
+		}
+		locked := replace_error == io.Error.Permission_Denied
+		if !locked || attempt == SAVE_LOCK_ATTEMPTS {
+			log.errorf("%s settings failed: %v", read_error != nil ? "reading" : "replacing", replace_error)
+			return .IO
+		}
+		time.sleep(SAVE_LOCK_WAIT)
 	}
-	return .None
+	return .IO
 }

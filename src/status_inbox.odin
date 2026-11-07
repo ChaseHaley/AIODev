@@ -374,10 +374,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	view := status_inbox_view(app, w, inbox)
 	items, surface, list, footer_y := view.items, view.surface, view.list, view.footer_y
 	s := w.scale
-	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
-	frame := ui.popover_panel(surface, s)
-	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
+	if !ui.popover_open(&w.list, surface, app.theme, f32(w.width), f32(w.height), s) {return .Ok}
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	scope := app.settings.status.scope == .All ? "All workspaces" : "This workspace"

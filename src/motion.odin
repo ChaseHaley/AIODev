@@ -43,7 +43,7 @@ update_motion :: proc(app: ^App) {
 		if palette_changed {owner.dirty = true}
 		if palette_settled {palette_release(app, owner)}
 	}
-	notices_changed := ui.notices_animate(&app.notices, now)
+	notices_changed := ui.notices_animate(&app.notices, app.animations, now)
 	if notices_changed {mark_all_dirty(app)}
 	for w in app.windows {
 		p := &w.workspace_picker
@@ -66,7 +66,7 @@ update_motion :: proc(app: ^App) {
 				ui.motion_target(
 					&position,
 					f32(i + gap),
-					TAB_REORDER_DURATION,
+					ui.REORDER_DURATION,
 					.Decelerate,
 					app.animations,
 					now,
@@ -95,12 +95,12 @@ update_motion :: proc(app: ^App) {
 		controls_changed := false
 		if w.header_height > 0 || w.split_overlay || window_floats_shown(w) {
 			for &pane in w.views {
-				for &control, i in pane.header_controls {
+				for &control, button in pane.header_controls {
 					controls_changed =
 						ui.control_update(
 							&control,
-							pane.header_hover == ui.Header_Action(i + 1),
-							ui.armed_is(pane.header_armed, ui.Header_Action(i + 1)),
+							pane.header_hover == button,
+							ui.armed_is(pane.header_armed, button),
 							app.animations,
 							now,
 						) ||
@@ -122,7 +122,7 @@ update_motion :: proc(app: ^App) {
 		active := header != layout.INVALID_NODE
 		changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
 		for &control, i in w.float_header_controls {
-			action := Float_Header_Action(i + 1)
+			action := FLOAT_HEADER_BUTTONS[i].action
 			over := spotted && spot.action == action
 			pressed := floating_button_pressed(w, action)
 			changed = ui.control_update(&control, over, pressed, app.animations, now) || changed
@@ -151,6 +151,7 @@ refresh_animations :: proc(app: ^App) {
 	enabled := platform.client_animations_enabled()
 	if app.animations == enabled {return}
 	app.animations = enabled
-	ui.notices_set_animations(&app.notices, enabled)
+	// Without animations every notice snaps to the end of its motion at once.
+	if !enabled {_ = ui.notices_animate(&app.notices, false, time.tick_now())}
 	mark_all_dirty(app)
 }

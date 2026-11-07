@@ -47,15 +47,8 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 		terminal ||= pane_owns_session(pane.content.kind)
 	}
 	if !terminal {return}
-	nodes, focus, encoded := layout_tree_encode(app, &tab.tree, pane_processes(app))
+	saved, encoded := layout_tab_encode(app, tab, pane_processes(app))
 	if !encoded {return}
-	saved := Saved_Tab {
-		name   = tab.name,
-		focus  = focus,
-		zoomed = tab.tree.zoomed,
-		nodes  = nodes,
-		documents = tab.documents[:],
-	}
 	closed_push(app, {workspace = workspace.id}, {index = index, tab = saved})
 }
 
@@ -160,10 +153,7 @@ closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Close
 	target := layout.find_group(&tab.tree, record.beside)
 	for content in record.beside {
 		if target != layout.INVALID_NODE {break}
-		for node, i in tab.tree.nodes {
-			pane := node.(layout.Pane) or_continue
-			if pane.content == content {target = layout.Node_Id(i); break}
-		}
+		target = layout.find_content(&tab.tree, content)
 	}
 	if target == layout.INVALID_NODE {target = tab.tree.focus}
 	if record.linked && layout.link_root(&tab.tree, target) != layout.INVALID_NODE {
@@ -191,7 +181,8 @@ closed_reopen_floating :: proc(app: ^App, w: ^Window, tab_index: int, record: ^C
 	window_floats_layout(app, w)
 }
 
-// The pane's neighbours are in a linked window, so it goes back among them there.
+// The pane's neighbours are in a linked window, so it goes back among them there: its size is checked in
+// that window, and it joins their slot in the tab's tree.
 @(private)
 closed_reopen_linked :: proc(
 	app: ^App,
@@ -205,18 +196,20 @@ closed_reopen_linked :: proc(
 	layout.contents(tree, home_target, &group)
 	linked := pane_link_window_of(app, group[0])
 	if linked == nil {return}
-	pane_link_reconcile(app, linked)
+	if !pane_link_reconcile(app, linked) {return}
 	shown := window_tree(linked)
 	target := layout.find_group(shown, group[:])
 	if target == layout.INVALID_NODE {target = layout.find_content(shown, group[0])}
 	if !closed_fits(app, linked, shown, target, record) {return}
-	added, placed := closed_pane_restore(app, shown, target, record)
+	// The reconcile may have rebuilt the slot, so the neighbours are found there again.
+	home := layout.find_group(tree, group[:])
+	if home == layout.INVALID_NODE {home = layout.find_content(tree, group[0])}
+	added, placed := closed_pane_restore(app, tree, home, record, join_slot = true)
 	if !placed {return}
-	pane_link_store(app, linked)
+	content := tree.nodes[added].(layout.Pane).content
 	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
-	pane_focus(app, linked, added)
+	pane_link_joined(app, linked, content, focus = true)
 	pane_link_activate(linked)
-	window_relayout(app, linked)
 }
 
 // Whether the reopened pane and its neighbours keep the minimum pane size.
@@ -231,7 +224,7 @@ closed_fits :: proc(
 	trial, copy_error := layout.clone(tree, context.temp_allocator)
 	if copy_error != nil {notify(app, .Error, "Could not check the reopened pane's size."); return false}
 	defer layout.destroy(&trial)
-	added, placed := closed_place(&trial, target, record, PANE_MEASUREMENT_CONTENT)
+	added, placed := closed_place(&trial, target, record, PANE_MEASUREMENT_CONTENT, false)
 	if !placed {notify(app, .Error, "Could not check the reopened pane's size."); return false}
 	return pane_trial_evaluate(app, w, tree, &trial, added, true).error == .None
 }
@@ -244,19 +237,22 @@ Closed_Place :: union {
 }
 
 // Opens the closed pane's session and places it, closing the session again when it cannot be placed.
-// Tiled, floating and linked reopening differ only in where it goes and what they refresh afterwards.
+// Tiled, floating and linked reopening differ only in where it goes and what they refresh afterwards;
+// `join_slot` puts it in the linked slot its neighbours are in.
 @(private, require_results)
 closed_pane_restore :: proc(
 	app: ^App,
 	tree: ^layout.Layout,
 	place: Closed_Place,
 	record: ^Closed_Record,
+	join_slot := false,
 ) -> (
 	layout.Node_Id,
 	bool,
 ) {
 	if id, restored := layout_session_restore(app, &record.tab.nodes[0]); restored {
-		if node, placed := closed_place(tree, place, record, {.Terminal, id}); placed {return node, true}
+		node, placed := closed_place(tree, place, record, {.Terminal, id}, join_slot)
+		if placed {return node, true}
 		session_close(app, id)
 	}
 	notify(app, .Error, "Could not reopen the pane.")
@@ -269,13 +265,16 @@ closed_place :: proc(
 	place: Closed_Place,
 	record: ^Closed_Record,
 	content: layout.Content,
+	join_slot: bool,
 ) -> (
 	layout.Node_Id,
 	bool,
 ) {
 	switch at in place {
 	case layout.Node_Id:
-		node, err := layout.insert_beside(tree, at, record.axis, record.before, record.share, content)
+		node, err := layout.insert_beside(
+			tree, at, record.axis, record.before, record.share, content, join_slot,
+		)
 		return node, err == nil
 	case layout.Rect:
 		node, err := layout.float_new(tree, content, at)

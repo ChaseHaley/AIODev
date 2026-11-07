@@ -34,7 +34,7 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 		.Shortcut_Warning), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
 	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), ui.notice_expiry(first))
-	testing.expect(t, ui.notices_expire(&state.notices,
+	testing.expect(t, ui.notices_expire(&state.notices, false,
 		time.tick_add(ui.notice_expiry(first).?, time.Second)))
 	testing.expect_value(t, settings.diagnostic_append(&issues, 93, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:93; defaults]",
@@ -53,7 +53,7 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 	read_expiry := ui.notice_expiry(state.notices.items[0])
 	show_diagnostics_quietly(&state, &issues, os.Error(os.General_Error.Invalid_Path))
 	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), read_expiry)
-	ui.notices_clear(&state.notices, state.notices.items[0].key)
+	ui.notices_clear(&state.notices, state.notices.items[0].key, false, time.tick_now())
 	show_diagnostics_quietly(&state, &issues, os.Error(os.General_Error.Not_Exist))
 	testing.expect_value(t, len(state.notices.items), 1)
 	show_diagnostics_quietly(&state, &issues, nil)
@@ -157,7 +157,7 @@ settings_bracket_leader_preserves_actions_and_winners_after_notice_expiry :: pro
 		}
 		if !testing.expect_value(t, len(state.notices.items), 1) { continue }
 		testing.expect_value(t, state.notices.items[0].kind, ui.Notice_Kind.Warning)
-		testing.expect(t, ui.notices_expire(&state.notices,
+		testing.expect(t, ui.notices_expire(&state.notices, false,
 			time.tick_add(ui.notice_expiry(state.notices.items[0]).?, time.Second)))
 	}
 }

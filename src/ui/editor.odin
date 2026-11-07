@@ -1425,7 +1425,7 @@ editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bo
 		}
 		if !dragging || !entry.lifted {
 			line := f32(profile_block_line(p, blocks, block))
-			motion_target(&entry.position, line, 140 * time.Millisecond, .Decelerate, enabled, now)
+			motion_target(&entry.position, line, REORDER_DURATION, .Decelerate, enabled, now)
 		}
 		changed = motion_update(&entry.position, now) || changed
 		moving ||= motion_active(entry.position)
@@ -2051,31 +2051,13 @@ filter_text_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 // The value field of one row. Every row kind that shows editable text shares this box.
 @(private)
 value_box :: proc(p: ^Editor, parts: Row_Parts, text: ^Text, scale: f32) -> Field_Box {
-	return {
-		field = &p.value,
-		text = text,
-		rect = parts.field,
-		inset = CONTROL_INSET,
-		caret_width = 1,
-		radius = RADIUS_CONTROL,
-		style = .Body,
-		scale = scale,
-	}
+	return field_box_standard(&p.value, text, parts.field, scale)
 }
 
 // The search field, narrowed to leave room for the clear button when it is shown.
 @(private)
 filter_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
-	return {
-		field = &p.filter,
-		text = text,
-		rect = filter_text_rect(p, l),
-		inset = CONTROL_INSET,
-		caret_width = 1,
-		radius = RADIUS_CONTROL,
-		style = .Body,
-		scale = l.scale,
-	}
+	return field_box_standard(&p.filter, text, filter_text_rect(p, l), l.scale)
 }
 
 editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts {
@@ -3535,8 +3517,6 @@ editor_draw :: proc(
 		if row.process_field != .None {
 			if result := editor_process_draw(p, row, parts, selected, list, text, theme, s);
 			   result != .Ok {return result}
-			// A selected text field leaves its own clip pushed; later rows draw in the list again.
-			if render.push_layer(list, l.list) != .None {return .Ok}
 			continue
 		}
 		if row.kind == .Profile {
@@ -3599,7 +3579,6 @@ editor_draw :: proc(
 			return result
 		}
 		if row.kind == .Profile_Icon {
-			if render.push_layer(list, l.list) != .None {return .Ok}
 			box_draw(list, parts.clear, theme, false, s)
 			label := "Clear"
 			if result := draw_text(

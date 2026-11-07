@@ -298,9 +298,9 @@ gesture_move :: proc(app: ^App, w: ^Window, event: input.Mouse_Move_Event) {
 			pointer_set(app, w, .Resize_All)
 			return
 		} else if !pane && tab_drag_move(app, w, x, y) {
-			if a := drag_active(w); a != nil {
-				_, reorder := a.destination.(Drop_Reorder)
-				pointer_set(app, w, a.destination == nil || reorder ? .Arrow : .Resize_All)
+			if a, carry := tab_drag_state(w); a != nil {
+				_, reorder := carry.destination.(Drop_Reorder)
+				pointer_set(app, w, carry.destination == nil || reorder ? .Arrow : .Resize_All)
 			}
 			return
 		}

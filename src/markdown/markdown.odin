@@ -38,6 +38,13 @@ Align :: enum u8 {
 	Right,
 }
 
+// A task list item's checkbox. Its marker text (☐ or ☑) is only what the item copies as.
+Task :: enum u8 {
+	None,
+	Open,
+	Done,
+}
+
 // One flat block. Containers become depths on the blocks they hold, and the first block of a list
 // item carries its marker.
 Block :: struct {
@@ -47,6 +54,7 @@ Block :: struct {
 	// Follows the previous block with no gap, as items of a tight list do.
 	tight:                    bool,
 	marker_start, marker_end: int,
+	task:                     Task,
 	first_span, span_count:   int,
 	table, row, column:       int,
 	header:                   bool,
@@ -84,6 +92,7 @@ Builder :: struct {
 	quote_depth:   int,
 	marker:        [16]u8,
 	marker_len:    int,
+	task:          Task,
 	// A tight list item's text arrives with no paragraph around it.
 	implicit:      bool,
 	block_open:    bool,
@@ -178,11 +187,11 @@ block_begin :: proc(b: ^Builder, kind: Block_Kind, level := 0, align := Align.Le
 		block.row, block.column, block.header = b.table_row, b.table_column, b.cell_header
 	}
 	if b.marker_len > 0 {
-		block.marker_start = len(b.doc.text)
+		block.marker_start, block.task = len(b.doc.text), b.task
 		if _, err := append(&b.doc.text, string(b.marker[:b.marker_len])); err != nil {return false}
 		block.marker_end = len(b.doc.text)
 		if _, err := append(&b.doc.text, " "); err != nil {return false}
-		b.marker_len = 0
+		b.marker_len, b.task = 0, .None
 	}
 	_, err := append(&b.doc.blocks, block)
 	b.block_open = err == nil
@@ -213,8 +222,10 @@ implicit_end :: proc(b: ^Builder) {
 marker_set :: proc(b: ^Builder, detail: ^Md_Li_Detail) {
 	list := &b.lists[len(b.lists) - 1]
 	text: string
+	b.task = .None
 	if detail.is_task != 0 {
-		text = detail.task_mark == ' ' ? "☐" : "☑"
+		b.task = detail.task_mark == ' ' ? .Open : .Done
+		text = b.task == .Open ? "☐" : "☑"
 		if list.ordered {list.next += 1}
 	} else if list.ordered {
 		text = fmt.bprintf(b.marker[:], "%d.", list.next)

@@ -19,10 +19,11 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "notice-pointer", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	ui.notices_set_animations(&s.notices, false)
-	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id)}
-	ui.notices_put(&s.notices, 0, .Info, "First", time.Hour)
-	ui.notices_put(&s.notices, 0, .Success, "Second", 0)
+	// The fixture runs without animations, so the application's notice transitions settle at once.
+	now := time.tick_now()
+	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false, now)}
+	ui.notices_put(&s.notices, 0, .Info, "First", time.Hour, false, now)
+	ui.notices_put(&s.notices, 0, .Success, "Second", 0, false, now)
 	close := notice_close_point(w)
 	testing.expect_value(t, app.pointer_target(s, w, close.x, close.y), app.Pointer_Target.Notice)
 	pointer_expect_move(t, s, w, close.x, close.y, .Hand)
@@ -48,8 +49,8 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	testing.expect_value(t, s.notices.items[0].text, "First")
 
 	gesture_button(s, w, .Left, true, close.x, close.y)
-	ui.notices_expire(&s.notices, time.tick_add(time.tick_now(), 2*time.Hour))
-	ui.notices_put(&s.notices, 0, .Warning, "Replacement", 0)
+	ui.notices_expire(&s.notices, false, time.tick_add(time.tick_now(), 2*time.Hour))
+	ui.notices_put(&s.notices, 0, .Warning, "Replacement", 0, false, time.tick_now())
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect_value(t, len(s.notices.items), 1)
 	testing.expect_value(t, s.notices.items[0].text, "Replacement")
@@ -69,22 +70,22 @@ notice_press_held_while_its_notice_fades_disarms_without_dismissing :: proc(t: ^
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "notice-fade-press", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	ui.notices_set_animations(&s.notices, false)
-	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id)}
-	ui.notices_put(&s.notices, 0, .Info, "Timed", time.Millisecond)
-	ui.notices_set_animations(&s.notices, true)
+	now := time.tick_now()
+	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false, now)}
+	ui.notices_put(&s.notices, 0, .Info, "Timed", time.Millisecond, false, now)
+	s.animations = true
 	id := s.notices.items[0].id
 	close := notice_close_point(w)
 	pointer_expect_move(t, s, w, close.x, close.y, .Hand)
 	gesture_button(s, w, .Left, true, close.x, close.y)
 	testing.expect(t, ui.armed_is(s.notices.armed, id))
-	testing.expect(t, ui.notices_expire(&s.notices, time.tick_add(time.tick_now(), time.Second)))
+	testing.expect(t, ui.notices_expire(&s.notices, true, time.tick_add(time.tick_now(), time.Second)))
 	if !testing.expect_value(t, len(s.notices.items), 1) {return}
 	testing.expect(t, ui.notice_fading(s.notices.items[0]))
 	testing.expect(t, !ui.armed_is(s.notices.armed, id), "the press must let go of a fading notice")
 	testing.expect_value(t, s.notices.hover, u64(0))
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect(t, !app.selection_active(w) && gesture_captured(w) == {})
-	ui.notices_set_animations(&s.notices, false)
+	ui.notices_animate(&s.notices, false, time.tick_now())
 	testing.expect_value(t, len(s.notices.items), 0)
 }

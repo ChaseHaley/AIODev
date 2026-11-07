@@ -99,6 +99,13 @@ status_panel_dock_width_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill
 	return ui.rail_pixel_width(w.scale, width, available)
 }
 
+// Refreshes what the panel reserves from the rail: its width left of the rail, which places the rail,
+// and its height in the rail, which the tab list leaves free. Relayout and dock edge drags call it.
+window_dock_reserve :: proc(app: ^App, w: ^Window) {
+	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
+	w.status_rail_reserve = status_panel_rail_height(app, w)
+}
+
 status_panel_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	if !status_panel_visible(app, w) {return {}}
 	if status_panel_in_rail(app, w) {

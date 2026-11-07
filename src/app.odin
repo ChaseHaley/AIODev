@@ -140,7 +140,6 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	app.animations = platform_api.client_animations_enabled()
 	ui.notices_init(&app.notices)
-	app.notices.animations = app.animations
 	if catalogue, err := program_art.catalogue_make(); err == nil {
 		app.program_art = catalogue
 	} else {
@@ -297,7 +296,7 @@ tick :: proc(app: ^App) {
 		mark_all_dirty(app)
 	}
 	update_motion(app)
-	if ui.notices_expire(&app.notices, time.tick_now()) {
+	if ui.notices_expire(&app.notices, app.animations, time.tick_now()) {
 		mark_all_dirty(app)
 	}
 	// A dwell can create or discard the trailing preview window.
@@ -416,14 +415,19 @@ wake_platform :: proc(user: rawptr) {
 initial_geometry :: proc(app: ^App) -> term.Geometry {
 	scale := f32(platform_api.primary_dpi(&app.platform)) / 96
 	metrics := window_metrics(app, scale)
-	box, width, height := pane_box_for_grid(
+	// A new window as it shows once opened and its settings apply, before it has a size.
+	template := Window {
+		scale              = scale,
+		metrics            = metrics,
+		rail_default_width = f32(app.settings.tabs.rail_width),
+		tabs_horizontal    = app.settings.tabs.orientation == .Horizontal,
+	}
+	box, width, height, _ := pane_box_for_grid(
 		app,
-		scale,
-		metrics,
+		template,
 		u16(app.settings.window.columns),
 		u16(app.settings.window.rows),
 		pane_insets(app, scale, nil),
-		f32(app.settings.tabs.rail_width),
 	)
 	return {
 		columns = box.columns,
@@ -494,7 +498,8 @@ update_sessions :: proc(app: ^App) {
 
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	duration := kind == .Error || kind == .Warning ? ERROR_NOTICE_DURATION : NOTICE_DURATION
-	ui.notices_put(&app.notices, u32(Notice_Key.Transient), kind, text, duration)
+	key := u32(Notice_Key.Transient)
+	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, time.tick_now())
 	mark_all_dirty(app)
 }
 
@@ -686,7 +691,7 @@ apply_fonts :: proc(app: ^App) {
 	family, err := font.family_load(app.fonts, app.settings.font.family)
 	if err == .None {
 		app.family = family
-		ui.notices_clear(&app.notices, u32(Notice_Key.Font))
+		ui.notices_clear(&app.notices, u32(Notice_Key.Font), app.animations, time.tick_now())
 		return
 	}
 	for name in FALLBACK_FONT_FAMILIES {
@@ -697,7 +702,10 @@ apply_fonts :: proc(app: ^App) {
 				app.settings.font.family,
 				name,
 			)
-			ui.notices_put(&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION)
+			ui.notices_put(
+				&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION, app.animations,
+				time.tick_now(),
+			)
 			return
 		}
 	}
@@ -705,9 +713,7 @@ apply_fonts :: proc(app: ^App) {
 }
 
 apply_theme :: proc(app: ^App) {
-	app.theme = ui.theme_from(app.settings.active_theme)
-	app.theme.hover_lift = f32(app.settings.interface.hover_lift)
-	app.theme.hover_gloss = f32(app.settings.interface.hover_gloss)
+	app.theme = ui.theme_from(app.settings.active_theme, app.settings.interface)
 }
 
 @(private)

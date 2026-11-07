@@ -41,7 +41,7 @@ workspace143_colors_have_contrast_in_all_shipped_themes_and_selection_states :: 
 	for file in fixtures.SHIPPED_THEMES {
 		{
 			resolved := fixtures.shipped_theme_file(file) or_continue
-			theme := ui.theme_from(resolved)
+			theme := ui.theme_from(resolved, fixtures.default_interface())
 			testing.expect_value(t, app.workspace_icon_tint(0, theme.text), theme.text)
 			testing.expect_value(t, app.workspace_icon_tint(-1, theme.text), theme.text)
 			for tint in 1..<len(app.WORKSPACE_ICON_COLORS) {

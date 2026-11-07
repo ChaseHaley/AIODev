@@ -44,7 +44,7 @@ view_expect_coherent :: proc(t: ^testing.T, s: ^app.App, w: ^app.Window, loc := 
 	if solo {
 		testing.expect_value(t, len(w.panes), 1, loc = loc)
 		testing.expect_value(t, w.panes[0].node, app.window_tree(w).focus, loc = loc)
-		for divider in w.dividers {testing.expect(t, app.dock_divider(divider.node), loc = loc)}
+		testing.expect_value(t, len(w.dividers), 0, loc = loc)
 	} else {
 		testing.expect_value(t, len(w.panes), app.tab_pane_count(app.selected_tab(w.workspace)), loc = loc)
 	}
