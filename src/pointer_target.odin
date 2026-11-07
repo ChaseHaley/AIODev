@@ -104,7 +104,9 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Divider          = {
 		divider_claims, divider_hover, divider_pointer_press, divider_release, nil, divider_pointer_cancel,
 	},
-	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release, panel_tooltip, panel_cancel},
+	.Status_Panel     = {
+		panel_claims, panel_hover, status_panel_press, status_panel_release, status_panel_tooltip, panel_cancel,
+	},
 	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release, tabs_tooltip, tabs_cancel},
 	.Floating         = {
 		floating_claims, floating_hover, floating_press, floating_release, floating_tooltip,
@@ -633,7 +635,7 @@ pill_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private = "file")
 pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	hovered := owner == .Status_Pill
-	if hovered != w.status.pill_hover {w.status.pill_hover, w.dirty = hovered, true}
+	status_pill_hover_set(w, hovered)
 	if hovered {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
 }
 
@@ -688,43 +690,15 @@ panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private = "file")
 panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner == .Status_Panel {
-		_ = status_overview_move(app, w, f32(e.x), f32(e.y))
+		status_panel_move(app, w, f32(e.x), f32(e.y))
 		return
 	}
-	status_overview_leave(w)
-}
-
-@(private = "file")
-panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
-	switch status_panel_button_at(app, w, x, y) {
-	case .Side:
-		return "Move activity panel"
-	case .View:
-		return app.settings.status.panel_view == .Comfy ? "Switch to Dense" : "Switch to Comfy"
-	case .None:
-	}
-	return status_panel_row_tooltip(app, w, x, y)
-}
-
-@(private = "file")
-panel_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	_ = status_panel_button(app, w, e)
-}
-
-@(private = "file")
-panel_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
-	if e.button != .Left || !ui.armed_down(w.status.panel_button_armed) {return false}
-	w.dirty = true
-	button := status_panel_button_at(app, w, f32(e.x), f32(e.y))
-	if fired, ok := ui.armed_release(&w.status.panel_button_armed, button); ok {
-		status_panel_button_fire(app, fired)
-	}
-	return true
+	status_panel_leave(w)
 }
 
 @(private = "file")
 panel_cancel :: proc(_: ^App, w: ^Window) {
-	ui.armed_cancel(&w.status.panel_button_armed)
+	status_panel_cancel(w)
 }
 
 // Tab strip and rail

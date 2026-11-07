@@ -131,34 +131,35 @@ program_status_close_scope_protects_work_independent_of_presentation :: proc(t: 
 
 @(test)
 program_status_ranks_attention_first :: proc(t: ^testing.T) {
-	blocked := term.Program_Status{state = .Blocked}
-	failed := term.Program_Status{state = .Error}
-	seen_failed := term.Program_Status{state = .Error_Seen}
-	done := term.Program_Status{state = .Done}
-	working := term.Program_Status{state = .Working}
-	idle := term.Program_Status{state = .Idle}
-	testing.expect(t, app.status_rank(blocked) < app.status_rank(failed))
-	testing.expect(t, app.status_rank(failed) < app.status_rank(done))
-	testing.expect(t, app.status_rank(done) < app.status_rank(working))
-	testing.expect(t, app.status_rank(working) < app.status_rank(idle))
-	testing.expect(t, app.status_rank(idle) < app.status_rank(seen_failed))
-	testing.expect(t, app.status_attention(done) && !app.status_attention(seen_failed))
+	rank :: proc(state: term.Program_Status_State) -> app.Status_Rank {
+		return app.status_presentation({state = state}).rank
+	}
+	testing.expect(t, rank(.Blocked) < rank(.Error))
+	testing.expect(t, rank(.Error) < rank(.Done))
+	testing.expect(t, rank(.Done) < rank(.Working))
+	testing.expect(t, rank(.Working) < rank(.Idle))
+	testing.expect(t, rank(.Idle) < rank(.Error_Seen))
+	done, seen_failed := app.status_presentation({state = .Done}), app.status_presentation({state = .Error_Seen})
+	testing.expect(t, done.attention && !seen_failed.attention && seen_failed.seen)
+	// The Activity panel's Needs you leaves finished work to Finished, unlike next-attention.
+	testing.expect_value(t, done.section, app.Status_Section.Finished)
+	testing.expect_value(t, app.status_presentation({state = .Error}).section, app.Status_Section.Needs_You)
 }
 
 @(test)
 program_status_marks_follow_state_and_kind :: proc(t: ^testing.T) {
-	question := app.status_mark({state = .Blocked, kind = .Question, progress = 10})
+	question := app.status_presentation({state = .Blocked, kind = .Question, progress = 10}).mark
 	testing.expect_value(t, question.glyph, ui.Status_Glyph.Question)
 	testing.expect_value(t, question.progress, i8(10))
-	auth := app.status_mark({state = .Blocked, kind = .Auth, progress = -1})
+	auth := app.status_presentation({state = .Blocked, kind = .Auth, progress = -1}).mark
 	testing.expect_value(t, auth.glyph, ui.Status_Glyph.Auth)
-	seen := app.status_mark({state = .Done_Seen, progress = -1})
+	seen := app.status_presentation({state = .Done_Seen, progress = -1}).mark
 	testing.expect(t, seen.glyph == .Done && seen.dim)
 	buffer: [8]u8
-	testing.expect_value(t, ui.status_headline({glyph = .Working, progress = 7}, buffer[:]), "7%")
-	testing.expect_value(t, ui.status_headline({glyph = .Working, progress = 100}, buffer[:]), "100%")
-	testing.expect_value(t, ui.status_headline({glyph = .Working, progress = -1}, buffer[:]), "Working")
-	testing.expect_value(t, ui.status_headline({glyph = .Permission}, buffer[:]), "Needs permission")
+	testing.expect_value(t, app.status_headline({glyph = .Working, progress = 7}, buffer[:]), "7%")
+	testing.expect_value(t, app.status_headline({glyph = .Working, progress = 100}, buffer[:]), "100%")
+	testing.expect_value(t, app.status_headline({glyph = .Working, progress = -1}, buffer[:]), "Working")
+	testing.expect_value(t, app.status_headline({glyph = .Permission}, buffer[:]), "Needs permission")
 }
 
 @(test)
@@ -176,14 +177,14 @@ program_status_summaries_respect_settings :: proc(t: ^testing.T) {
 	defer status_fixture_destroy(&f)
 	if !status_fixture_init(t, &f) {return}
 	tab := app.status_tab_summary(&f.state, f.workspace, 0)
-	testing.expect_value(t, tab.working, 1)
-	testing.expect_value(t, tab.done, 1)
-	testing.expect_value(t, tab.idle, 0)
+	testing.expect_value(t, tab.counts[.Working], 1)
+	testing.expect_value(t, tab.counts[.Done], 1)
+	testing.expect_value(t, tab.counts[.Idle], 0)
 	testing.expect_value(t, tab.top.id, "test")
 	whole := app.status_workspace_summary(&f.state, f.workspace)
-	testing.expect_value(t, whole.blocked, 1)
-	testing.expect_value(t, whole.failed, 0)
-	testing.expect_value(t, app.status_needs(whole), 2)
+	testing.expect_value(t, whole.counts[.Blocked], 1)
+	testing.expect_value(t, whole.counts[.Failed], 0)
+	testing.expect_value(t, whole.needs, 2)
 	testing.expect_value(t, whole.session, u32(2))
 	mark, shown := app.status_indicator(whole)
 	testing.expect(t, shown && mark.glyph == .Permission)
@@ -193,14 +194,14 @@ program_status_summaries_respect_settings :: proc(t: ^testing.T) {
 	original := f.state.settings.status.ignore_apps
 	f.state.settings.status.ignore_apps = "cargo"
 	tab = app.status_tab_summary(&f.state, f.workspace, 0)
-	testing.expect_value(t, tab.working, 0)
-	testing.expect_value(t, tab.idle, 1)
+	testing.expect_value(t, tab.counts[.Working], 0)
+	testing.expect_value(t, tab.counts[.Idle], 1)
 	testing.expect_value(t, tab.top.app, "vite")
 	f.state.settings.status.ignore_apps = original
 
 	f.state.settings.status.show_blocked = false
 	whole = app.status_workspace_summary(&f.state, f.workspace)
-	testing.expect_value(t, whole.blocked, 0)
+	testing.expect_value(t, whole.counts[.Blocked], 0)
 	testing.expect_value(t, whole.top.id, "test")
 
 	f.state.settings.status.workspace_picker = false

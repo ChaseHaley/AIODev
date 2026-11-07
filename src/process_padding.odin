@@ -24,10 +24,10 @@ update_processes :: proc(app: ^App) {
 	processes, ready := process_snapshot_take(&app.processes)
 	defer if ready {pty.process_snapshot_destroy(processes, app.processes.allocator)}
 	padding := app.settings.process.padding_groups != ""
-	icons := app.settings.tabs.program_icons
+	polling := program_polling(app)
 	running := false
 	for &entry in app.sessions {
-		if entry.status == .Running && icons {running = true; continue}
+		if entry.status == .Running && polling {running = true; continue}
 		if program_forget(&entry) {mark_all_dirty(app)}
 		running ||= entry.status == .Running && padding
 	}
@@ -35,7 +35,7 @@ update_processes :: proc(app: ^App) {
 	now := time.tick_now()
 	if app.process_deadline == {} || time.tick_diff(now, app.process_deadline) <= 0 {
 		app.process_deadline = time.tick_add(now, PROCESS_INTERVAL)
-		process_snapshot_request(&app.processes, app.platform_ready ? &app.platform : nil)
+		process_snapshot_request(&app.processes, process_worker_platform(app))
 	}
 	if len(processes) == 0 {return}
 	relayout, redraw := false, false
@@ -43,7 +43,7 @@ update_processes :: proc(app: ^App) {
 		if entry.status != .Running {continue}
 		root := term.process_id(entry.session)
 		if padding {relayout ||= padding_update(app, &entry, processes, root)}
-		if icons {redraw ||= program_update(app, &entry, processes, root)}
+		if polling {redraw ||= program_update(app, &entry, processes, root)}
 	}
 	if relayout {
 		for window in app.windows {window_relayout(app, window); window.dirty = true}

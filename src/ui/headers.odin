@@ -251,7 +251,7 @@ header_draw :: proc(
 			scale,
 		); result != .Ok {return result}
 		ink := theme.muted
-		if status_blocked(status.glyph) || status.glyph == .Error {ink = status_color(theme, status.glyph)}
+		if status.urgent {ink = status_color(theme, status.glyph)}
 		if result := draw_fading_text(
 			&small,
 			list,

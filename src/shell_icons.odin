@@ -1,15 +1,10 @@
 package main
 
-import platform_api "aio:platform"
 import "aio:render"
 import "aio:settings"
 import "core:image/png"
 import "core:path/filepath"
 
-// Shell icons are small, and the PNG loader reads a whole file before checking its header, so a
-// settings value naming a huge file must be refused before it is read into memory.
-@(private)
-SHELL_ICON_MAX_BYTES :: 32 << 20
 @(private)
 SHELL_ICON_INVALID_NOTICE ::
 	"Shell Icon needs a readable PNG no larger than 1024 × 1024. Using the shell default."
@@ -29,26 +24,14 @@ shell_icon_load :: proc(app: ^App) {
 		path, err = filepath.join({filepath.dir(app.settings_path), path}, context.temp_allocator)
 		if err != nil {notify(app, .Error, "Could not resolve the shell icon path."); return}
 	}
-	// The settings file is trusted, but a device path, remote share, directory, or oversized file
-	// would stall startup or allocate without bound before the decoder's own checks run.
-	if !platform_api.local_file_within_limit(path, SHELL_ICON_MAX_BYTES) {
-		notify(app, .Error, SHELL_ICON_INVALID_NOTICE)
-		return
-	}
-	header, header_error := png.load(path, {.return_header})
-	defer png.destroy(header)
-	if header_error != nil ||
-	   header == nil ||
-	   header.width < 1 ||
-	   header.height < 1 ||
-	   header.width > 1024 ||
-	   header.height > 1024 {
-		notify(app, .Error, SHELL_ICON_INVALID_NOTICE)
-		return
-	}
-	image, image_error := png.load(path, {.alpha_add_if_missing, .alpha_premultiply})
+	image, load_error := icon_png_load(path)
 	defer png.destroy(image)
-	if image_error != nil || image == nil || image.depth != 8 || image.channels != 4 {
+	switch load_error {
+	case .None:
+	case .Refused:
+		notify(app, .Error, SHELL_ICON_INVALID_NOTICE)
+		return
+	case .Undecodable:
 		notify(
 			app,
 			.Error,

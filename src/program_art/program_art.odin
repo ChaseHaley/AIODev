@@ -1,6 +1,7 @@
 package program_art
 
 import "aio:vector"
+import "core:mem"
 import "core:strconv"
 import "core:strings"
 
@@ -15,17 +16,17 @@ TABLE :: #load("../../assets/program_art.txt", string)
 VIEW :: 24
 
 Art :: struct {
-	// The first name is the canonical one; all are matched without case or a trailing ".exe".
+	// The first name is the canonical one; all are matched without case.
 	names:  string,
-	// Layers separated by '|', each `colour:rule:path`; read them with next_layer.
-	layers: string,
+	layers: []Layer,
 }
 
 Layer :: struct {
-	// Six hex digits, or empty to use the theme text colour.
-	colour: string,
-	rule:   vector.Fill_Rule,
-	path:   string,
+	// The brand colour, when `branded`; otherwise the layer uses the theme text colour.
+	colour:  [3]u8,
+	branded: bool,
+	rule:    vector.Fill_Rule,
+	path:    string,
 }
 
 // How to colour artwork. Layers without a brand colour, or every layer when `mono` is set, use
@@ -35,16 +36,53 @@ Paint :: struct {
 	mono: bool,
 }
 
-// The artwork naming `name`, an executable stem or reported app key.
+// TABLE parsed once. Names and paths borrow from TABLE; `layers` backs every Art's layers.
+Catalogue :: struct {
+	arts:   []Art,
+	layers: []Layer,
+}
+
+// Parses TABLE. A malformed entry is skipped, so it is found like an unsupported program.
 @(require_results)
-find :: proc(name: string) -> (art: Art, found: bool) {
-	key := stem(name)
-	if key == "" {return}
+catalogue_make :: proc(allocator := context.allocator) -> (catalogue: Catalogue, err: mem.Allocator_Error) {
+	arts, layers := 0, 0
 	rest := TABLE
 	for line in strings.split_lines_iterator(&rest) {
-		if line == "" || line[0] == '#' {continue}
-		entry, ok := parse(line)
-		if !ok {continue}
+		count := entry_layers(line)
+		if count > 0 {arts, layers = arts + 1, layers + count}
+	}
+	catalogue.arts = make([]Art, arts, allocator) or_return
+	catalogue.layers, err = make([]Layer, layers, allocator)
+	if err != nil {
+		delete(catalogue.arts, allocator)
+		return {}, err
+	}
+	arts, layers = 0, 0
+	rest = TABLE
+	for line in strings.split_lines_iterator(&rest) {
+		count := entry_layers(line)
+		if count == 0 {continue}
+		bar := strings.index_byte(line, '|')
+		art := &catalogue.arts[arts]
+		art.names, art.layers = line[:bar], catalogue.layers[layers:layers + count]
+		text := line[bar + 1:]
+		for &layer in art.layers {layer, _ = next_layer(&text)}
+		arts, layers = arts + 1, layers + count
+	}
+	return catalogue, nil
+}
+
+catalogue_destroy :: proc(catalogue: ^Catalogue, allocator := context.allocator) {
+	delete(catalogue.arts, allocator)
+	delete(catalogue.layers, allocator)
+	catalogue^ = {}
+}
+
+// The artwork naming `key`, an executable stem or reported app key; callers strip ".exe".
+@(require_results)
+find :: proc(catalogue: ^Catalogue, key: string) -> (art: Art, found: bool) {
+	if key == "" {return}
+	for entry in catalogue.arts {
 		names := entry.names
 		for candidate in strings.split_iterator(&names, ",") {
 			if strings.equal_fold(candidate, key) {return entry, true}
@@ -59,36 +97,6 @@ canonical :: proc(art: Art) -> string {
 	return comma < 0 ? art.names : art.names[:comma]
 }
 
-// Takes the next layer from `rest`, which starts as an Art's layers.
-@(require_results)
-next_layer :: proc(rest: ^string) -> (layer: Layer, ok: bool) {
-	text := strings.split_iterator(rest, "|") or_return
-	layer.colour = strings.split_iterator(&text, ":") or_return
-	rule := strings.split_iterator(&text, ":") or_return
-	switch rule {
-	case "nonzero":
-		layer.rule = .Nonzero
-	case "evenodd":
-		layer.rule = .Even_Odd
-	case:
-		return
-	}
-	layer.path = text
-	return layer, (layer.colour == "" || len(layer.colour) == 6) && layer.path != ""
-}
-
-// The layer's brand colour, if it has one.
-@(require_results)
-brand :: proc(layer: Layer) -> (colour: [3]u8, ok: bool) {
-	if len(layer.colour) != 6 {return}
-	for i in 0 ..< 3 {
-		value, parsed := strconv.parse_u64_of_base(layer.colour[i * 2:i * 2 + 2], 16)
-		if !parsed {return}
-		colour[i] = u8(value)
-	}
-	return colour, true
-}
-
 // Draws `art` size x size as premultiplied RGBA, each layer over the ones before it.
 @(require_results)
 draw :: proc(art: Art, size: int, paint: Paint, pixels: []u8) -> bool {
@@ -97,12 +105,9 @@ draw :: proc(art: Art, size: int, paint: Paint, pixels: []u8) -> bool {
 	defer delete(coverage)
 	out := pixels[:size * size * 4]
 	for &value in out {value = 0}
-	rest := art.layers
-	for rest != "" {
-		layer := next_layer(&rest) or_return
+	for layer in art.layers {
 		if !vector.fill({layer.path}, VIEW, layer.rule, size, coverage) {return false}
-		colour, branded := brand(layer)
-		if paint.mono || !branded {colour = paint.text}
+		colour := paint.mono || !layer.branded ? paint.text : layer.colour
 		for alpha, i in coverage {
 			a := u32(alpha)
 			p := out[i * 4:i * 4 + 4]
@@ -113,19 +118,45 @@ draw :: proc(art: Art, size: int, paint: Paint, pixels: []u8) -> bool {
 	return true
 }
 
+// The number of layers in one table line, or zero for a comment or malformed entry.
 @(private)
-parse :: proc(line: string) -> (art: Art, ok: bool) {
+entry_layers :: proc(line: string) -> int {
+	if line == "" || line[0] == '#' {return 0}
 	bar := strings.index_byte(line, '|')
-	if bar <= 0 {return}
-	art.names, art.layers = line[:bar], line[bar + 1:]
-	rest := art.layers
-	for rest != "" {_ = next_layer(&rest) or_return}
-	return art, art.layers != ""
+	if bar <= 0 {return 0}
+	rest := line[bar + 1:]
+	count := 0
+	for rest != "" {
+		_, ok := next_layer(&rest)
+		if !ok {return 0}
+		count += 1
+	}
+	return count
 }
 
-@(private)
-stem :: proc(name: string) -> string {
-	text := strings.trim_space(name)
-	if len(text) > 4 && strings.equal_fold(text[len(text) - 4:], ".exe") {text = text[:len(text) - 4]}
-	return text
+// Takes the next `colour:rule:path` layer from `rest`, layers separated by '|'.
+@(private, require_results)
+next_layer :: proc(rest: ^string) -> (layer: Layer, ok: bool) {
+	text := strings.split_iterator(rest, "|") or_return
+	colour := strings.split_iterator(&text, ":") or_return
+	rule := strings.split_iterator(&text, ":") or_return
+	switch rule {
+	case "nonzero":
+		layer.rule = .Nonzero
+	case "evenodd":
+		layer.rule = .Even_Odd
+	case:
+		return
+	}
+	layer.path = text
+	if len(colour) != 0 && len(colour) != 6 {return}
+	// Six characters that are not hex digits leave the layer in the theme text colour.
+	layer.branded = len(colour) == 6
+	for i in 0 ..< 3 {
+		if !layer.branded {break}
+		value, parsed := strconv.parse_u64_of_base(colour[i * 2:i * 2 + 2], 16)
+		layer.colour[i], layer.branded = u8(value), parsed
+	}
+	if !layer.branded {layer.colour = {}}
+	return layer, layer.path != ""
 }

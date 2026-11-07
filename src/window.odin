@@ -133,9 +133,7 @@ Window :: struct {
 	cursor_blink: Cursor_Blink,
 	// A frame that drew a spinner requests display-paced frames until one does not.
 	status_spinning: bool,
-	taskbar_state: platform.Progress_State,
-	taskbar_percent: int,
-	taskbar_workspace: ^Workspace,
+	taskbar: Status_Taskbar,
 	status: Status_Overview,
 	// The rail height the activity panel takes in vertical view, refreshed on every relayout.
 	status_rail_reserve: f32,
