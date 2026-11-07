@@ -8,11 +8,10 @@ import "core:math"
 RAIL_WIDTH :: f32(208)
 RAIL_MIN_WIDTH :: f32(144)
 RAIL_MAX_WIDTH :: f32(480)
-RAIL_ROW_HEIGHT :: f32(32)
-RAIL_FOOTER_HEIGHT :: f32(32)
+// Rail rows and the footer that holds the new-tab row are standard list rows.
+RAIL_ROW_HEIGHT :: HEIGHT_STANDARD
+RAIL_FOOTER_HEIGHT :: HEIGHT_STANDARD
 RAIL_PADDING :: f32(4)
-RAIL_TAB_INDENT :: f32(0)
-RAIL_TOGGLE_WIDTH :: f32(32)
 // A docked 208 rail leaves about 500 DIPs of pane at this width, roughly 60 columns at the
 // default font. Narrower than that the rail takes more than a third of the window.
 RAIL_DOCK_MIN_WIDTH :: f32(720)
@@ -149,9 +148,4 @@ rail_new_tab_tile :: proc(layout: Rail_Layout) -> render.Rect {
 	tile := rail_footer_tile(layout)
 	tile.width = max(0, tile.width - rail_profile_rect(layout).width)
 	return tile
-}
-
-rail_tab_tile :: proc(layout: Rail_Layout, row: render.Rect) -> render.Rect {
-	inset := RAIL_TAB_INDENT * layout.scale
-	return {row.x + inset, row.y, max(0, row.width - inset), row.height}
 }

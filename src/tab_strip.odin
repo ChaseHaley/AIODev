@@ -10,16 +10,13 @@ import "aio:ui"
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	if w.workspace == nil {return {}}
 	left := workspace_button_width(w) + status_pill_width(app, w)
-	// Tabs share their width with any that a drag would add, without counting as tabs yet.
-	bar := ui.tab_bar_layout(
+	return ui.tab_bar_layout(
+		left,
 		max(0, f32(w.width) - window_caption_reserve(w) - left),
 		w.scale,
-		len(w.workspace.tabs) + w.tab_incoming.count,
+		len(w.workspace.tabs),
+		w.tab_incoming.count,
 	)
-	bar.count -= min(bar.count, w.tab_incoming.count)
-	bar.x = left
-	bar.height = ui.TITLE_BAR_HEIGHT * w.scale
-	return bar
 }
 
 tab_chevron_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
@@ -44,21 +41,11 @@ window_tab_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
 }
 
 window_tab_new_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
-	bar := window_tab_bar(app, w)
-	return {
-		bar.x + f32(bar.count) * bar.tab_width,
-		0,
-		bar.button_width,
-		bar.height,
-	}
+	return ui.tab_new_rect(window_tab_bar(app, w))
 }
 
 window_tab_close_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
-	bar := window_tab_bar(app, w)
-	if index < 0 || index >= bar.count {return {}}
-	r := ui.tab_close_rect(bar, index, w.scale)
-	r.x += (tab_position(w, index) - f32(index)) * bar.tab_width
-	return r
+	return ui.tab_close_rect(window_tab_bar(app, w), index, tab_position(w, index), w.scale)
 }
 
 window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab_Chrome_Target {
@@ -71,7 +58,7 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab
 			if x >= r.x && x < r.x + r.width {return Tab_Chrome_Tab{i}}
 		}
 	}
-	if ui.tab_bar_hit_test(bar, x, y) == bar.count {return Tab_Chrome_New{}}
+	if bar.count > 0 && render.rect_contains(ui.tab_new_rect(bar), x, y) {return Tab_Chrome_New{}}
 	return nil
 }
 
@@ -136,52 +123,36 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		foreground := pass == 1
 		for tab, i in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
-			title := tab_display_title(tab, i + 1)
-			icon: string
-			atlas := render.Rect{}
-			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {
-				result: render.Build_Status
-				icon, atlas, result = pane_icon(app, pane.session, ui.ICON_BUTTON * w.scale)
-				if result != .Ok {return result}
-			}
-			x := tab_position(w, i) * bar.tab_width
-			status := status_tab_mark(app, w, w.workspace, i)
+			tile, built := tab_tile(app, w, i)
+			if built != .Ok {return built}
+			control := tab_control(w, Tab_Chrome_Tab{i})
 			if result := ui.tab_draw(
 				&w.list,
 				&w.ui_text,
 				app.theme,
 				bar,
 				i,
-				title,
-				i == w.workspace.selected,
+				tab_position(w, i),
+				tile,
+				control.hover.value,
+				control.press.value,
 				w.scale,
-				tab_control(w, Tab_Chrome_Tab{i}).hover.value,
-				tab_control(w, Tab_Chrome_Tab{i}).press.value,
-				0,
-				x,
-				tab_marked_shown(w, i),
-				icon,
-				atlas,
 				w.pointer,
-				status,
-				status_phase(app, w, status),
-				app.settings.status.enabled && app.settings.status.tab_indicators,
-				tab_content_icon(tab),
 			); result != .Ok {return result}
 		}
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {
-		x := bar.x + w.tab_underline.value * bar.tab_width + 10 * w.scale
+		position := w.tab_underline.value
 		moving := dragging
-		for position in w.tab_positions {moving ||= ui.motion_active(position)}
-		if moving {x = bar.x + tab_position(w, w.workspace.selected) * bar.tab_width + 10 * w.scale}
+		for motion in w.tab_positions {moving ||= ui.motion_active(motion)}
+		if moving {position = tab_position(w, w.workspace.selected)}
 		// The selected tab rises with its hover, so its underline rises with it.
 		lift := ui.hover_lift_at(
 			app.theme,
 			tab_control(w, Tab_Chrome_Tab{w.workspace.selected}).hover.value,
 			w.scale,
 		)
-		underline := render.Rect{x, 30 * w.scale - lift, max(0, bar.tab_width - 20 * w.scale), 2 * w.scale}
+		underline := ui.tab_underline_rect(bar, position, lift, w.scale)
 		if render.push_rect(
 			   &w.list,
 			   {
@@ -193,35 +164,25 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		   .None {return .Ok}
 	}
 	if _, new_tab := drag_destination(w).(Drop_New_Tab); new_tab || w.tab_incoming.count > 0 {return .Ok}
-	if result := ui.tab_draw(
+	new_tab := tab_control(w, Tab_Chrome_New{})
+	if result := ui.tab_new_draw(
 		&w.list,
-		&w.ui_text,
 		app.theme,
 		bar,
-		bar.count,
-		"",
-		false,
+		new_tab.hover.value,
+		new_tab.press.value,
 		w.scale,
-		tab_control(w, Tab_Chrome_New{}).hover.value,
-		tab_control(w, Tab_Chrome_New{}).press.value,
-		0,
-		-1,
-		false,
-		"",
-		{},
 		w.pointer,
 	); result != .Ok {return result}
 	chevron := tab_chevron_rect(app, w)
 	if render.push_layer(&w.list, chevron) != .None {return .Ok}
 	control := tab_control(w, Tab_Chrome_Profiles{})
-	hover := control.hover.value
-	tile := render.Rect{chevron.x + 2 * w.scale, 6 * w.scale, chevron.width - 4 * w.scale, 28 * w.scale}
 	_ = ui.icon_button_draw(
 		&w.list,
 		app.theme,
-		tile,
+		ui.tab_tile_rect(bar, chevron.x, chevron.width, 0, w.scale),
 		.Chevron_Down,
-		hover,
+		control.hover.value,
 		control.press.value,
 		w.scale,
 		w.pointer,

@@ -85,7 +85,7 @@ find_draw_keeps_full_count_and_arrow_ink_in_narrow_scaled_themes :: proc(t: ^tes
 	for file in fixtures.SHIPPED_THEMES {
 		{
 			resolved := fixtures.shipped_theme_file(file) or_continue
-			theme := ui.theme_from(resolved)
+			theme := ui.theme_from(resolved, fixtures.default_interface())
 			testing.expect(t, colour.contrast_ratio(theme.text, theme.surface) >= 4.5)
 			for scale in ([?]f32{1, 1.5, 2}) {
 				ui.text_set_size(&text, 14*scale)
@@ -142,7 +142,7 @@ find_pointer_requires_matching_release_and_disables_without_matches :: proc(t: ^
 	next := l.down.x+16
 	Outcome :: ui.Find_Outcome
 	testing.expect(t, ui.find_hover(&f, l, true, x, y))
-	testing.expect_value(t, f.hover, Outcome.Up)
+	testing.expect_value(t, f.hover, ui.Find_Button.Up)
 	testing.expect(t, !ui.find_hover(&f, l, true, x, y))
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Right, true, x, y), Outcome.None)
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), Outcome.Moved)
@@ -155,15 +155,15 @@ find_pointer_requires_matching_release_and_disables_without_matches :: proc(t: ^
 	ui.find_mouse(&f, l, true, .Left, true, x, y)
 	testing.expect_value(t, ui.find_mouse(&f, l, false, .Left, false, x, y), Outcome.Moved)
 	ui.find_mouse(&f, l, false, .Left, true, next, y)
-	testing.expect_value(t, ui.armed_target(f.armed), Outcome.None)
+	testing.expect_value(t, ui.armed_target(f.armed), ui.Find_Button.None)
 	testing.expect(t, ui.armed_down(f.armed))
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), Outcome.Moved)
 	ui.find_mouse(&f, l, true, .Left, true, x, y)
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, 0, 0), Outcome.Moved)
 	ui.find_close(&f)
 	testing.expect(t, !ui.armed_down(f.armed))
-	testing.expect_value(t, ui.armed_target(f.armed), Outcome.None)
-	testing.expect_value(t, f.hover, Outcome.None)
+	testing.expect_value(t, ui.armed_target(f.armed), ui.Find_Button.None)
+	testing.expect_value(t, f.hover, ui.Find_Button.None)
 }
 
 @(test)

@@ -33,9 +33,9 @@ notices_follow_window_focus_and_keep_their_identity_and_expiry :: proc(t: ^testi
 	if !palette_fixture_create(t, &f, "notice-window") {return}
 	s := &f.state
 	first, second := s.windows[0], s.windows[1]
-	ui.notices_set_animations(&s.notices, false)
-	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id)}
-	ui.notices_put(&s.notices, 0, .Info, "Only one window", time.Hour)
+	now := time.tick_now()
+	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false, now)}
+	ui.notices_put(&s.notices, 0, .Info, "Only one window", time.Hour, false, now)
 	id, expiry := s.notices.items[0].id, ui.notice_expiry(s.notices.items[0])
 	// Inactive startup has no focus history; pick the first available window.
 	notice_expect_window(t, s, first)

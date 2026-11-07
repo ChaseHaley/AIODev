@@ -43,7 +43,7 @@ update_motion :: proc(app: ^App) {
 		if palette_changed {owner.dirty = true}
 		if palette_settled {palette_release(app, owner)}
 	}
-	notices_changed := ui.notices_animate(&app.notices, now)
+	notices_changed := ui.notices_animate(&app.notices, app.animations, now)
 	if notices_changed {mark_all_dirty(app)}
 	for w in app.windows {
 		p := &w.workspace_picker
@@ -66,7 +66,7 @@ update_motion :: proc(app: ^App) {
 				ui.motion_target(
 					&position,
 					f32(i + gap),
-					TAB_REORDER_DURATION,
+					ui.REORDER_DURATION,
 					.Decelerate,
 					app.animations,
 					now,
@@ -151,6 +151,7 @@ refresh_animations :: proc(app: ^App) {
 	enabled := platform.client_animations_enabled()
 	if app.animations == enabled {return}
 	app.animations = enabled
-	ui.notices_set_animations(&app.notices, enabled)
+	// Without animations every notice snaps to the end of its motion at once.
+	if !enabled {_ = ui.notices_animate(&app.notices, false, time.tick_now())}
 	mark_all_dirty(app)
 }

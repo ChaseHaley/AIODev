@@ -185,16 +185,8 @@ workspace_row_rename_field_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 workspace_row_rename_box :: proc(w: ^Window) -> ui.Field_Box {
-	return {
-		field = &w.workspace_picker.rename,
-		text = &w.ui_text,
-		rect = workspace_row_rename_field_rect(w),
-		inset = ui.CONTROL_INSET,
-		caret_width = 1,
-		radius = ui.RADIUS_CONTROL,
-		style = .Body,
-		scale = w.scale,
-	}
+	rect := workspace_row_rename_field_rect(w)
+	return ui.field_box_standard(&w.workspace_picker.rename, &w.ui_text, rect, w.scale)
 }
 
 workspace_row_icon_open :: proc(app: ^App, w: ^Window, id: u32) {
@@ -420,10 +412,7 @@ workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	id := workspace_picker_menu_id(p)
 	if id == 0 { return .Ok }
 	r := workspace_row_menu_rect(w)
-	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
-	frame := ui.popover_panel(r, s)
-	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
-	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
+	if !ui.popover_open(&w.list, r, app.theme, f32(w.width), f32(w.height), s) { return .Ok }
 	for menu_item, i in WORKSPACE_ROW_MENU {
 		title := workspace_row_menu_title(app, menu_item, id)
 		enabled := workspace_row_action_enabled(app, w, id, menu_item.action)

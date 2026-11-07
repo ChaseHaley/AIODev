@@ -129,16 +129,7 @@ rename_field_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
-	return {
-		field = &w.rename,
-		text = &w.ui_text,
-		rect = rename_field_rect(w),
-		inset = ui.CONTROL_INSET,
-		caret_width = 1,
-		radius = ui.RADIUS_CONTROL,
-		style = .Body,
-		scale = w.scale,
-	}
+	return ui.field_box_standard(&w.rename, &w.ui_text, rename_field_rect(w), w.scale)
 }
 
 rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {

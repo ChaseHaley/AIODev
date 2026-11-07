@@ -3,6 +3,7 @@ package app_test
 import "aio:input"
 import "core:strings"
 import "core:testing"
+import "core:time"
 import app "../../src"
 import "aio:layout"
 import "aio:platform"
@@ -163,8 +164,11 @@ floating_header_buttons_fire_only_on_release_over_themselves :: proc(t: ^testing
 	group := w.float_capsule_group
 	cx, cy := group.x + group.width / 2, group.y + group.height / 2
 	// A notice in the same corner would take the press.
-	for len(ui.notices_live(&s.notices)) > 0 {_ = ui.notices_dismiss(&s.notices, s.notices.items[0].id)}
-	ui.notices_set_animations(&s.notices, false)
+	now := time.tick_now()
+	for len(ui.notices_live(&s.notices)) > 0 {
+		_ = ui.notices_dismiss(&s.notices, s.notices.items[0].id, false, now)
+	}
+	_ = ui.notices_animate(&s.notices, false, now)
 	testing.expect_value(t, app.pointer_target(s, w, cx, cy), app.Pointer_Target.Floating)
 	float_button(s, w, cx, cy, true)
 	press, pressed := w.float_press.(app.Float_Capsules_Press)

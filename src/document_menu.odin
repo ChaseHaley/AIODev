@@ -693,16 +693,8 @@ document_url_box :: proc(w: ^Window) -> (ui.Field_Box, bool) {
 	menu := &w.document_menu
 	for i in 0 ..< len(menu.menu.items) {
 		if entry, _ := document_menu_entry(menu, i); entry.action != .Url_Field {continue}
-		return {
-			field = &menu.url,
-			text = &w.ui_text,
-			rect = ui.menu_row_rect(&menu.menu, i, f32(w.width), f32(w.height), w.scale),
-			inset = ui.CONTROL_INSET,
-			caret_width = 1,
-			radius = ui.RADIUS_CONTROL,
-			style = .Body,
-			scale = w.scale,
-		}, true
+		rect := ui.menu_row_rect(&menu.menu, i, f32(w.width), f32(w.height), w.scale)
+		return ui.field_box_standard(&menu.url, &w.ui_text, rect, w.scale), true
 	}
 	return {}, false
 }

@@ -153,7 +153,8 @@ confirmation_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	if c == nil {return false}
 	pane_header_cancel(w)
 	key_suppress(w, e)
-	confirmation_outcome(app, w, ui.confirm_key(c, e))
+	option := confirmation_text(app, w, confirmation_shown(w), recount = false).option
+	confirmation_outcome(app, w, ui.confirm_key(c, e, option))
 	return true
 }
 
@@ -198,30 +199,35 @@ confirmation_advance :: proc(app: ^App, w: ^Window, now: time.Tick) {
 	if settled {confirmation_clear(w)}
 }
 
+// The words of the question shown. A close question that is still asking recounts what it closes
+// when `recount` is set; reading the text for anything but drawing leaves the counts alone.
+@(private)
+confirmation_text :: proc(app: ^App, w: ^Window, c: ^Confirmation, recount: bool) -> Confirmation_Text {
+	switch &subject in c.subject {
+	case Pending_Close:
+		counting := recount && ui.presence_is_open(c.dialog.presence)
+		return pending_close_text(app, &subject, counting, w.workspace)
+	case Pane_Swap:
+		return pane_swap_text(subject)
+	case Pending_File:
+		return pending_file_text(subject)
+	case Process_Remove:
+		return editor_process_remove_text(subject)
+	case Profile_Remove:
+		return editor_profile_remove_text(subject)
+	case Settings_Reset:
+		return settings_reset_text()
+	}
+	return {}
+}
+
 confirmation_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	c := confirmation_shown(w)
 	if c == nil || !ui.presence_visible(c.dialog.presence) {return .Ok}
-	text: Confirmation_Text
-	switch &subject in c.subject {
-	case Pending_Close:
-		text = pending_close_text(app, &subject, ui.presence_is_open(c.dialog.presence), w.workspace)
-	case Pane_Swap:
-		text = pane_swap_text(subject)
-	case Pending_File:
-		text = pending_file_text(subject)
-	case Process_Remove:
-		text = editor_process_remove_text(subject)
-	case Profile_Remove:
-		text = editor_profile_remove_text(subject)
-	case Settings_Reset:
-		text = settings_reset_text()
-	}
-	layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
-	result := ui.confirm_draw(
+	text := confirmation_text(app, w, c, recount = true)
+	return ui.confirm_draw(
 		&c.dialog, &w.list, &w.ui_text, app.theme, f32(w.width), f32(w.height), w.scale,
-		text.title, text.body, text.label, text.note, text.option, w.pointer,
+		text.title, text.body, text.label, text.note, text.option,
+		ui.presence_fade(c.dialog.presence, ui.RISE_DIALOG * w.scale), w.pointer,
 	)
-	opacity, rise := ui.presence_fade(c.dialog.presence, 4 * w.scale)
-	ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
-	return result
 }

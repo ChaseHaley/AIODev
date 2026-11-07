@@ -55,7 +55,7 @@ pointer_find_bar_over_activity_panel_owns_hover_cursor_and_press :: proc(t: ^tes
 		pointer_expect_move(t, s, w, point.x, point.y, .Hand)
 		testing.expect(t, w.status.panel_hover == nil)
 	}
-	testing.expect_value(t, w.find.hover, ui.Find_Outcome.Close)
+	testing.expect_value(t, w.find.hover, ui.Find_Button.Close)
 
 	gesture_button(s, w, .Left, true, toggle.x, toggle.y)
 	gesture_button(s, w, .Left, false, toggle.x, toggle.y)

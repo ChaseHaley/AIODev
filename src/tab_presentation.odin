@@ -1,17 +1,33 @@
 package main
 
-import "aio:ui"
 import "aio:layout"
-import "core:time"
+import "aio:render"
+import "aio:ui"
 
-// How long a reordered tab takes to ease into its slot (D-069). Workspace rows settling after a reorder
-// share it, so both lists move alike.
-TAB_REORDER_DURATION :: 140 * time.Millisecond
-
-tab_content_icon :: proc(tab: ^Tab) -> ui.Icon {
-	if int(tab.tree.focus) >= len(tab.tree.nodes) {return .None}
-	pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	return ok ? content_tab_icon(pane.content.kind) : .None
+// What tab `index` of the window's workspace shows in the strip and in the rail: its title, the
+// focused pane's content icon or program badge, and its program status.
+tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Build_Status) {
+	tab := w.workspace.tabs[index]
+	status := status_tab_mark(app, w, w.workspace, index)
+	t := ui.Tab_Tile {
+		title        = tab_display_title(tab, index + 1),
+		status       = status,
+		status_phase = status_phase(app, w, status),
+		status_slot  = app.settings.status.enabled && app.settings.status.tab_indicators,
+		selected     = index == w.workspace.selected,
+		marked       = tab_marked_shown(w, index),
+	}
+	if pane, terminal := workspace_focused_session_pane(app, w.workspace, index); terminal {
+		result: render.Build_Status
+		t.badge.shell, t.badge.atlas, result = pane_icon(app, pane.session, ui.ICON_BUTTON * w.scale)
+		if result != .Ok {return t, result}
+	}
+	if int(tab.tree.focus) < len(tab.tree.nodes) {
+		if pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane); ok {
+			t.badge.icon = content_tab_icon(pane.content.kind)
+		}
+	}
+	return t, .Ok
 }
 
 // Tab presentation indexed by tab position: both arrays stay aligned with the workspace tab list. The

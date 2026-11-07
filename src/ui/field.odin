@@ -2,6 +2,7 @@ package ui
 
 import "aio:input"
 import "aio:render"
+import "base:runtime"
 import "core:unicode/utf8"
 
 // One line of editable text. The selection runs between anchor and cursor; they are equal when
@@ -32,11 +33,14 @@ field_selected_text :: proc(f: ^Text_Field) -> string {
 	return string(f.bytes[start:end])
 }
 
-field_set :: proc(f: ^Text_Field, value: string) {
+// Replaces the whole text. Without room for `value` the field keeps its text and reports the error.
+field_set :: proc(f: ^Text_Field, value: string) -> runtime.Allocator_Error {
+	if err := reserve(&f.bytes, len(value)); err != nil {return err}
 	clear(&f.bytes)
 	append(&f.bytes, ..transmute([]u8)value)
 	f.cursor, f.anchor = len(f.bytes), len(f.bytes)
 	field_release(f)
+	return nil
 }
 
 field_select_all :: proc(f: ^Text_Field) {
@@ -50,10 +54,16 @@ field_delete_range :: proc(f: ^Text_Field, start, end: int) {
 	f.cursor, f.anchor = start, start
 }
 
-// Replaces the selection with the printable runes of `text`.
+// Replaces the selection with the printable runes of `text`. Without room for all of them the field
+// is left unchanged, so an edit is never applied in part.
 field_text :: proc(f: ^Text_Field, text: string) -> Field_Change {
 	if !utf8.valid_string(text) {return .None}
 	start, end := field_selection(f)
+	added := 0
+	for r in text {
+		if r >= ' ' && r != 0x7f {added += utf8.rune_size(r)}
+	}
+	if reserve(&f.bytes, len(f.bytes) - (end - start) + added) != nil {return .None}
 	change := Field_Change.None
 	if start != end {
 		field_delete_range(f, start, end)
@@ -63,7 +73,7 @@ field_text :: proc(f: ^Text_Field, text: string) -> Field_Change {
 		if r < ' ' || r == 0x7f {continue}
 		encoded, n := utf8.encode_rune(r)
 		before := len(f.bytes)
-		if resize(&f.bytes, before + n) != nil {break}
+		resize(&f.bytes, before + n)
 		copy(f.bytes[f.cursor + n:], f.bytes[f.cursor:before])
 		copy(f.bytes[f.cursor:], encoded[:n])
 		f.cursor += n

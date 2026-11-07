@@ -76,7 +76,7 @@ workspace_icon_draw :: proc(
 	if !w.ui_text.has_icons {
 		return ui.draw_glyph_centered(&w.ui_text, &w.list, '◇', area, tint)
 	}
-	// draw_icon sizes the font to 0.6 of `fraction`; Segoe Fluent Icons draw a glyph as wide as its em,
-	// so this fraction makes the glyph fill the box like every other 16 DIP leading icon.
-	return ui.draw_icon(&w.ui_text, &w.list, preset.glyph, area, tint, 1 / 0.6)
+	// Segoe Fluent Icons draw a glyph as wide as its em, so a font as tall as the box makes the glyph
+	// fill it like every other 16 DIP leading icon.
+	return ui.draw_icon(&w.ui_text, &w.list, preset.glyph, area, tint, area.height)
 }

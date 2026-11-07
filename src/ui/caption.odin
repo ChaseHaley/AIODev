@@ -54,7 +54,8 @@ caption_draw :: proc(
 		case .Close:
 			icon = '\ue8bb'
 		}
-		if result := draw_icon(text, list, icon, r, ink, 0.4); result != .Ok {return result}
+		// The native caption glyphs at the size Windows draws them: 0.24 of the title-bar height.
+		if result := draw_icon(text, list, icon, r, ink, r.height * 0.24); result != .Ok {return result}
 		if hovered {
 			// The buttons are flush with the window edge and some carry a forced fill, so the
 			// paper hairline would read as a stray border.

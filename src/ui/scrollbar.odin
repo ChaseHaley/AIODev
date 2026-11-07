@@ -84,9 +84,11 @@ scrollbar_drag :: proc(drag: Scroll_Drag, bar: Scrollbar, y: f32) -> int {
 	return int(fraction * f32(e.total - e.visible) + 0.5)
 }
 
-// Draws in a layer clipped to the track, which stays current: push a layer before drawing more.
+// Draws clipped to the track; the caller's layer is current again afterwards.
 scrollbar_draw :: proc(list: ^render.Draw_List, theme: Theme, bar: Scrollbar, state: Scrollbar_State) {
-	if render.push_layer(list, bar.track, 0) != .None {return}
+	scope, opened := clip_scope_open(list, bar.track)
+	if !opened {return}
+	defer clip_scope_close(list, scope)
 	color := theme.scrollbar
 	if state != .Collapsed {
 		color = state == .Active ? theme.scrollbar_active : theme.scrollbar_hover
