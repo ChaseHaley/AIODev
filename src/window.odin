@@ -150,7 +150,6 @@ Window :: struct {
 	rename_target: Rename_Target,
 	rename_mode: Rename_Mode,
 	rename_error: bool,
-	workspace_button_press_ns: i64,
 	workspace_picker: Workspace_Picker,
 	workspace_hovered: bool,
 	workspace_motion: ui.Control_Motion,

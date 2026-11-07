@@ -43,7 +43,7 @@ adoption_dirty_presentation :: proc(w: ^app.Window) {
 	w.rail_scroll = 99
 	ui.armed_press(&w.tab_close_armed, 2)
 	w.tab_menu.open, w.rename_open = true, true
-	w.workspace_picker.mode = .List
+	w.workspace_picker.state = app.Workspace_Picker_List{}
 }
 
 @(private="file")
@@ -144,7 +144,7 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	testing.expect_value(t, w.rail_pressed, 1)
 	testing.expect_value(t, ui.armed_target(w.tab_close_armed), 2)
 	testing.expect_value(t, w.rail_scroll, f32(99))
-	testing.expect(t, w.workspace_picker.mode == .List)
+	testing.expect(t, app.workspace_picker_mode(&w.workspace_picker) == .List)
 	app.tick(state)
 }
 

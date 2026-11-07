@@ -239,9 +239,10 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 		strings.trim_space(ui.field_string(&p.query)),
 		context.temp_allocator,
 	)
+	move, _ := workspace_picker_move(p)
 	for workspace in app.workspaces {
 		if !workspace_eligible(app, workspace) {continue}
-		if p.move.workspace == workspace.id {continue}
+		if move.request.workspace == workspace.id {continue}
 		name := strings.to_lower(workspace.name, context.temp_allocator)
 		if query != "" && !strings.contains(name, query) {continue}
 		if _, err := append(
@@ -259,24 +260,30 @@ workspace_picker_filter :: proc(app: ^App, w: ^Window) {
 workspace_pickers_refresh :: proc(app: ^App, preserve_scroll := false) {
 	for w in app.windows {
 		p := &w.workspace_picker
-		if p.mode == .Closed { continue }
-		if p.order.id != 0 && workspace_row_target(app, p.order.id) == nil {p.order = {}}
+		if !workspace_picker_active(p) { continue }
+		if id := workspace_order_grabbed(p); id != 0 && workspace_row_target(app, id) == nil {
+			workspace_order_end(w)
+		}
 		if workspace_picker_icons(p) {
-			if workspace_row_target(app, p.target_id) == nil { workspace_picker_return(app, w) }
+			if workspace_row_target(app, workspace_picker_target(p, .Icons)) == nil {
+				workspace_picker_return(app, w)
+			}
 			continue
 		}
-		if p.mode == .Menu && workspace_row_target(app, p.target_id) == nil {
+		if id := workspace_picker_target(p, .Menu); id != 0 && workspace_row_target(app, id) == nil {
 			workspace_picker_transition(w, .List)
 		}
-		if p.mode == .Rename && workspace_row_target(app, p.target_id) == nil {
+		if id := workspace_picker_target(p, .Rename); id != 0 && workspace_row_target(app, id) == nil {
 			workspace_row_rename_finish(app, w, false)
 		}
 		id := p.selected >= 0 && p.selected < len(p.rows) ? p.rows[p.selected].id : 0
 		action := p.selected - len(p.rows)
 		scroll := p.scroll
 		workspace_picker_filter(app, w)
-		if p.mode == .Menu && workspace_row_index(w, p.target_id) < 0 { workspace_picker_transition(w, .List) }
-		if p.mode == .Rename && workspace_row_index(w, p.target_id) < 0 {
+		if menu := workspace_picker_target(p, .Menu); menu != 0 && workspace_row_index(w, menu) < 0 {
+			workspace_picker_transition(w, .List)
+		}
+		if rename := workspace_picker_target(p, .Rename); rename != 0 && workspace_row_index(w, rename) < 0 {
 			workspace_row_rename_finish(app, w, false)
 		}
 		if id != 0 {
@@ -318,34 +325,35 @@ workspace_icon_open :: proc(app: ^App, w: ^Window) {
 }
 
 workspace_picker_count :: proc(w: ^Window) -> int {
-	if workspace_picker_icons(&w.workspace_picker) {
-		return (w.workspace_picker.mode == .Tint) ? len(WORKSPACE_ICON_COLORS) + 1 : len(WORKSPACE_ICONS) + 3
-	}
 	p := &w.workspace_picker
-	return len(p.rows) + (p.move.workspace != 0 && !p.drag ? 1 : len(WORKSPACE_ACTIONS))
+	if workspace_picker_icons(p) {
+		return workspace_picker_mode(p) == .Tint ? len(WORKSPACE_ICON_COLORS) + 1 : len(WORKSPACE_ICONS) + 3
+	}
+	// A keyboard move offers a new workspace; a drag also offers a new window, in the actions' place.
+	move, moving := workspace_picker_move(p)
+	return len(p.rows) + (moving && !move.drag ? 1 : len(WORKSPACE_ACTIONS))
 }
 
 workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	index, count := p.selected, len(p.rows)
-	if p.move.workspace != 0 {
+	if move, moving := workspace_picker_move(p); moving {
 		if index < 0 || index > count {return}
-		request := p.move
 		id := index < count ? p.rows[index].id : 0
 		workspace_picker_cancel(w)
-		workspace_move_choose(app, w, request, id)
+		workspace_move_choose(app, w, move.request, id)
 		return
 	}
 	defer workspace_picker_layout_changed(w)
 	if workspace_picker_icons(p) {
-		if p.mode == .Tint { workspace_icon_color_choose(app, w); return }
+		if workspace_picker_mode(p) == .Tint { workspace_icon_color_choose(app, w); return }
 		if index == len(WORKSPACE_ICONS) + 2 { workspace_icon_color_open(app, w); return }
 		emoji := index >= len(WORKSPACE_ICONS) ? ui.field_string(&p.query) : ""
 		if index >= len(WORKSPACE_ICONS) && !workspace_icon_valid(emoji) {
 			notify(app, .Error, "Enter an emoji (up to 32 Unicode characters), then apply it.")
 			return
 		}
-		target := workspace_row_target(app, p.target_id)
+		target := workspace_row_target(app, workspace_picker_target(p, .Icons))
 		if target == nil { workspace_picker_return(app, w); return }
 		if !workspace_icon_set(app, target, index < len(WORKSPACE_ICONS) ? index : 0, emoji) {
 			notify(app, .Error, "Could not change the workspace icon.")
@@ -371,11 +379,11 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 	defer workspace_picker_layout_changed(w)
 	workspace_order_reset(w)
-	if w.workspace_picker.mode == .Tint { return }
-	if w.workspace_picker.mode == .Menu { return }
-	if w.workspace_picker.mode == .Rename {
+	mode := workspace_picker_mode(&w.workspace_picker)
+	if mode == .Tint || mode == .Menu { return }
+	if mode == .Rename {
 		ui.field_text(&w.rename, value)
-		w.workspace_picker.rename_error, w.dirty = false, true
+		workspace_row_rename_error_set(w, false)
 		return
 	}
 	ui.field_text(&w.workspace_picker.query, value)
@@ -391,15 +399,14 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	defer if window_find(app, window_id) == w {workspace_picker_layout_changed(w)}
 	if !e.pressed {return}
 	p := &w.workspace_picker
-	if p.order.id != 0 {
-		p.order = {}
-		w.dirty = true
+	if workspace_order_grabbed(p) != 0 {
+		workspace_order_end(w)
 		if e.key == .Escape {return}
 	}
 	if workspace_row_key(app, w, e) { return }
 	count := workspace_picker_count(w)
 	w.dirty = true
-	if p.mode == .Tint { workspace_icon_color_key(app, w, e); return }
+	if workspace_picker_mode(p) == .Tint { workspace_icon_color_key(app, w, e); return }
 	if workspace_picker_icons(p) && workspace_icon_picker_key(w, e) { return }
 	if step := ui.list_step(e); step != 0 {
 		p.selected = (p.selected + count + step) % count
@@ -411,8 +418,7 @@ workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	case .Tab: p.selected = (p.selected + count + (.Shift in e.modifiers ? -1 : 1)) % count
 	case .Enter, .Numpad_Enter: workspace_picker_choose(app, w); return
 	case .Delete:
-		if p.move.workspace == 0 && !workspace_picker_icons(p) &&
-		   e.modifiers == {.Shift} && p.selected < len(p.rows) {
+		if workspace_picker_browsing(p) && e.modifiers == {.Shift} && p.selected < len(p.rows) {
 			workspace_delete_request(app, w, workspace_find(app, p.rows[p.selected].id))
 		} else {
 			change := ui.field_key(&p.query, e)
@@ -448,7 +454,7 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 	width := min(380 * s, max(0, f32(w.width) - 2 * ui.SPACE_1 * s))
 	header := workspace_picker_header(w)
 	extra := workspace_row_rename_height(w)
-	reserve := w.workspace_picker.mode == .Rename ? WORKSPACE_RENAME_HEIGHT * s : 0
+	reserve := workspace_picker_mode(&w.workspace_picker) == .Rename ? WORKSPACE_RENAME_HEIGHT * s : 0
 	available := f32(w.height) - y - header - 24 * s - reserve
 	rows := min(workspace_picker_count(w), max(1, int(available / (WORKSPACE_ROW_HEIGHT * s))))
 	content := header + f32(rows) * WORKSPACE_ROW_HEIGHT * s + (8 + ui.OVERLAY_PADDING) * s + extra
@@ -457,7 +463,7 @@ workspace_picker_rect :: proc(w: ^Window) -> (render.Rect, int) {
 }
 
 workspace_picker_field_rect :: proc(w: ^Window) -> render.Rect {
-	if w.workspace_picker.mode == .Tint { return {} }
+	if workspace_picker_mode(&w.workspace_picker) == .Tint { return {} }
 	if workspace_picker_icons(&w.workspace_picker) { return workspace_icon_picker_layout(w).field }
 	r, _ := workspace_picker_rect(w)
 	s := w.scale
@@ -530,7 +536,7 @@ workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 	p := &w.workspace_picker
 	if workspace_row_click(app, w, x, y, extend) { return }
 	if hit := workspace_picker_hit(w, x, y); hit >= 0 {
-		if p.move.workspace == 0 && !workspace_picker_icons(p) && hit < len(p.rows) &&
+		if workspace_picker_browsing(p) && hit < len(p.rows) &&
 		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 			workspace_row_menu_open(app, w, p.rows[hit].id)
 			return
@@ -546,7 +552,7 @@ workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend:
 	defer workspace_picker_layout_changed(w)
 	if workspace_picker_icons(&w.workspace_picker) { w.workspace_picker.selected = len(WORKSPACE_ICONS) }
 	box := workspace_picker_query_box(w)
-	if w.workspace_picker.mode == .Rename { box = workspace_row_rename_box(w) }
+	if workspace_picker_mode(&w.workspace_picker) == .Rename { box = workspace_row_rename_box(w) }
 	ui.field_pointer(box.field, ui.field_box_offset(box, x), pressed, extend)
 	w.dirty = true
 }
@@ -569,10 +575,11 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		return .Ok
 	}
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box),
-		p.mode == .List, "Search workspaces"); result != .Ok { return result }
+		workspace_picker_mode(p) == .List, "Search workspaces"); result != .Ok { return result }
 	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	clip := render.Rect{r.x, r.y + workspace_picker_header(w), r.width,
 		max(0, r.height - workspace_picker_header(w) - ui.OVERLAY_PADDING * s)}
+	_, moving := workspace_picker_move(p)
 	for lifted in ([?]bool{false, true}) {
 		if render.push_layer(&w.list, clip) != .None {return .Ok}
 		for i in 0..<workspace_picker_count(w) {
@@ -610,7 +617,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				if program := status_picker_text(app, workspace); program != "" {
 					detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
 				}
-			} else if p.move.workspace != 0 {
+			} else if moving {
 				label = i == len(p.rows) ? "Move to New Workspace" : "Move to New Window"
 			} else {label = action_info[actions[i - len(p.rows)]].title}
 			baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
@@ -625,7 +632,7 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 				label_x += (ui.ICON_BUTTON + ui.SPACE_2) * s
 			}
 			right := row.x + row.width - ui.CONTROL_INSET * s
-			if has_icon && p.move.workspace == 0 {
+			if has_icon && !moving {
 				workspace_row_ellipsis_draw(app, w, i)
 				right = row.x + row.width - (ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_2) * s
 			}

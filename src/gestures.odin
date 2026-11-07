@@ -52,7 +52,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	ui.field_release(&w.rename)
 	ui.field_release(&w.workspace_picker.query)
 	ui.field_release(&w.document_menu.url)
-	w.workspace_picker.order = {}
+	workspace_order_end(w)
 	_ = workspace_order_animate(w, app.animations, time.tick_now())
 	link_hover_clear(w)
 	if palette_active(app, w) {ui.palette_drag_cancel(&app.palette)}

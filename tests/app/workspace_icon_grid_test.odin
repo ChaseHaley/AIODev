@@ -15,7 +15,7 @@ workspace_icon_grid_layout_fits_dpi_and_scrolls_only_presets :: proc(t: ^testing
 		for width in ([?]i32{140, 244, 272, 600}) {
 			for height in ([?]i32{240, 300, 800}) {
 				w := app.Window{width = i32(f32(width)*scale), height = i32(f32(height)*scale), scale = scale}
-				w.workspace_picker.mode = .Icons
+				w.workspace_picker.state = app.Workspace_Picker_Icons{}
 				g := app.workspace_icon_picker_layout(&w)
 				testing.expect(t, g.columns >= 2 && g.columns <= 5)
 				testing.expect(t, g.panel.x+g.panel.width <= f32(w.width))
@@ -53,7 +53,7 @@ workspace_icon_grid_layout_fits_dpi_and_scrolls_only_presets :: proc(t: ^testing
 workspace_icon_grid_keys_keep_grid_and_custom_editing_accessible :: proc(t: ^testing.T) {
 	state: app.App
 	w := app.Window{width = 600, height = 300, scale = 1}
-	w.workspace_picker.mode = .Icons
+	w.workspace_picker.state = app.Workspace_Picker_Icons{}
 	defer delete(w.workspace_picker.query.bytes)
 	key :: proc(state: ^app.App, w: ^app.Window, e: platform.Key_Event, selected: int, t: ^testing.T) {
 		app.workspace_picker_key(state, w, e)
@@ -182,8 +182,7 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 	defer glyphs.destroy(&cache)
 	workspace := app.Workspace{id = 1, icon = {preset = 2}}
 	w := app.Window{workspace = &workspace}
-	w.workspace_picker.mode, w.workspace_picker.selected = .Icons, 7
-	w.workspace_picker.target_id = workspace.id
+	w.workspace_picker.state, w.workspace_picker.selected = app.Workspace_Picker_Icons{workspace.id}, 7
 	w.list = render.draw_list_init()
 	defer render.draw_list_destroy(&w.list)
 	defer delete(w.workspace_picker.query.bytes)

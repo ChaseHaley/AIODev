@@ -124,9 +124,8 @@ tab_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32) -> boo
 	d := &source.tab_drag
 	grabbed := d.grabbed
 	request := Workspace_Move_Request{source.workspace.id, grabbed.id, grabbed.tree.focus, true}
-	if !workspace_drag_hover(app, &d.picker, w, x, y, request, tab_window_source_allows(source.workspace)) {
-		return false
-	}
+	allows := tab_window_source_allows(source.workspace)
+	if !workspace_picker_drag_hover(app, &d.picker, w, x, y, request, allows) {return false}
 	tab_drag_over(app, source, nil, 0, 0)
 	d.elsewhere, d.new_window = false, false
 	drag_thumbnail_sync(app, source, &d.thumbnail, {}, false, 0, 0)
@@ -137,7 +136,7 @@ tab_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32) -> boo
 tab_workspace_drag_wheel :: proc(app: ^App, source: ^Window, delta: f32) -> bool {
 	d := &source.tab_drag
 	if !d.active {return false}
-	w := workspace_drag_scroll(app, &d.picker, delta)
+	w := workspace_picker_drag_scroll(app, &d.picker, delta)
 	if w == nil {return false}
 	return tab_workspace_drag_move(app, source, w, d.picker_pointer.x, d.picker_pointer.y)
 }
@@ -156,7 +155,7 @@ tab_drag_windows_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 			return true
 		}
 	} else {
-		workspace_drag_close(app, &d.picker)
+		workspace_picker_drag_leave(app, &d.picker)
 	}
 	tab_drag_over(app, w, nil, 0, 0)
 	tear_off := ok && point.window == nil && tab_window_source_allows(w.workspace)
@@ -398,18 +397,15 @@ tab_workspace_drag_release :: proc(app: ^App, w: ^Window) {
 	w.tab_drag = {}
 	drag_thumbnail_destroy(&d.thumbnail)
 	w.dirty = true
-	picker := window_find(app, d.picker_window)
-	rows := picker != nil && picker.workspace_picker.drag ? len(picker.workspace_picker.rows) : -1
-	hit := d.picker_hit
-	id := hit >= 0 && hit < rows ? picker.workspace_picker.rows[hit].id : 0
-	workspace_drag_close(app, &d.picker)
-	new_window := rows >= 0 && hit == rows + 1
+	drop := workspace_picker_drag_drop(app, &d.picker)
+	_, new_window := drop.(Workspace_Drop_New_Window)
 	if !new_window {
 		if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
 		d.preview_window = 0
 	}
 	moved, attempted := false, false
-	if new_window {
+	switch row in drop {
+	case Workspace_Drop_New_Window:
 		attempted = true
 		if d.preview_window == 0 {
 			if preview := tab_window_preview_create(app, d.grabbed); preview != nil {
@@ -417,9 +413,9 @@ tab_workspace_drag_release :: proc(app: ^App, w: ^Window) {
 			}
 		}
 		moved = d.preview_window != 0 && tab_tear_off(app, w, d.pointer, d.preview_window)
-	} else if rows >= 0 && hit >= 0 && hit <= rows {
+	case Workspace_Drop_Row:
 		attempted = true
-		moved = tabs_to_chosen_workspace(app, w, id)
+		moved = tabs_to_chosen_workspace(app, w, row.id)
 	}
 	if moved {
 		delete(d.order)

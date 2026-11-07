@@ -98,13 +98,12 @@ workspace_row_rename_open :: proc(app: ^App, w: ^Window, id: u32) {
 }
 
 workspace_row_rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
-	p := &w.workspace_picker
-	if p.mode != .Rename { return }
+	id := workspace_picker_target(&w.workspace_picker, .Rename)
+	if id == 0 { return }
 	if save {
-		outcome := rename_target_commit(app, w, Rename_Target{.Workspace, p.target_id},
-			ui.field_string(&w.rename))
+		outcome := rename_target_commit(app, w, Rename_Target{.Workspace, id}, ui.field_string(&w.rename))
 		if outcome == .Empty || outcome == .Failed {
-			p.rename_error, w.dirty = true, true
+			workspace_row_rename_error_set(w, true)
 			return
 		}
 	}
@@ -112,11 +111,17 @@ workspace_row_rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 	workspace_picker_layout_changed(w)
 }
 
+workspace_row_rename_error_set :: proc(w: ^Window, error: bool) {
+	if rename, renaming := &w.workspace_picker.state.(Workspace_Picker_Rename); renaming {
+		rename.error, w.dirty = error, true
+	}
+}
+
 // The inline rename: SPACE_2, a standard field, SPACE_2, one Detail hint line and SPACE_2.
 WORKSPACE_RENAME_HEIGHT :: 72
 
 workspace_row_rename_height :: proc(w: ^Window) -> f32 {
-	if w.workspace_picker.mode != .Rename {return 0}
+	if workspace_picker_mode(&w.workspace_picker) != .Rename {return 0}
 	return WORKSPACE_RENAME_HEIGHT * w.scale * w.workspace_picker.rename_motion.value
 }
 
@@ -170,11 +175,14 @@ workspace_picker_return :: proc(app: ^App, w: ^Window) {
 
 workspace_row_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 	p := &w.workspace_picker
-	if p.move.workspace != 0 {return false}
-	if workspace_picker_icons(p) { return false }
-	if p.mode == .Menu {
+	switch workspace_picker_mode(p) {
+	case .List: if !workspace_picker_browsing(p) { return false }
+	case .Closed, .Icons, .Tint: return false
+	case .Menu, .Rename:
+	}
+	if id := workspace_picker_target(p, .Menu); id != 0 {
 		w.dirty = true
-		if workspace_row_target(app, p.target_id) == nil { workspace_picker_transition(w, .List); return true }
+		if workspace_row_target(app, id) == nil { workspace_picker_transition(w, .List); return true }
 		if step := ui.list_step(e); step != 0 {
 			p.menu_selected = (p.menu_selected + len(WORKSPACE_ROW_ACTIONS) + step) % len(WORKSPACE_ROW_ACTIONS)
 			return true
@@ -190,9 +198,9 @@ workspace_row_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool 
 		}
 		return true
 	}
-	if p.mode == .Rename {
+	if id := workspace_picker_target(p, .Rename); id != 0 {
 		w.dirty = true
-		if workspace_row_target(app, p.target_id) == nil {
+		if workspace_row_target(app, id) == nil {
 			workspace_row_rename_finish(app, w, false)
 			return true
 		}
@@ -201,13 +209,13 @@ workspace_row_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool 
 		case .Enter, .Numpad_Enter: workspace_row_rename_finish(app, w, true)
 		case .Tab:
 			workspace_row_rename_finish(app, w, true)
-			if p.mode != .Rename {
+			if workspace_picker_mode(p) != .Rename {
 				p.selected = (p.selected + workspace_picker_count(w) + (.Shift in e.modifiers ? -1 : 1))%
 					workspace_picker_count(w)
 			}
 		case:
 			field_edit_key(app, &w.rename, e)
-			p.rename_error = false
+			workspace_row_rename_error_set(w, false)
 		}
 		return true
 	}
@@ -252,14 +260,15 @@ workspace_row_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 
 workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> bool {
 	p := &w.workspace_picker
-	if p.mode == .Menu {
+	mode := workspace_picker_mode(p)
+	if mode == .Menu {
 		if hit := workspace_row_menu_hit(w, x, y); hit >= 0 {
 			p.menu_selected = hit
 			workspace_row_menu_choose(app, w)
 		} else { workspace_picker_transition(w, .List) }
 		return true
 	}
-	if p.mode == .Rename {
+	if mode == .Rename {
 		row := workspace_picker_row_rect(w, workspace_row_index(w, workspace_picker_target(p, .Rename)))
 		if y >= row.y + row.height && workspace_rect_contains(workspace_row_rename_field_rect(w), x, y) {
 			workspace_picker_pointer(app, w, x, true, extend)
@@ -272,13 +281,14 @@ workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> b
 
 workspace_row_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
 	p := &w.workspace_picker
-	if p.mode == .Menu {
+	mode := workspace_picker_mode(p)
+	if mode == .Menu {
 		hit := workspace_row_menu_hit(w, f32(e.x), f32(e.y))
 		if hit >= 0 {p.menu_selected, w.dirty = hit, true}
 		pointer_set(app, w, hit >= 0 ? .Hand : .Arrow)
 		return true
 	}
-	if p.mode == .Rename {
+	if mode == .Rename {
 		if w.rename.dragging && .Left in e.buttons {
 			workspace_picker_pointer(app, w, f32(e.x), false, true)
 		}
@@ -341,7 +351,8 @@ workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), true,
 		"Workspace name"); result != .Ok { return result }
 	if render.push_layer(&w.list, clip) != .None { return .Ok }
-	hint := p.rename_error ? "Could not save name · Enter retries · Esc cancels" : "Enter saves · Esc cancels"
+	hint := "Enter saves · Esc cancels"
+	if workspace_picker_rename_error(p) {hint = "Could not save name · Enter retries · Esc cancels"}
 	detail := ui.text_styled(&w.ui_text, .Detail)
 	baseline := field.y + field.height + ui.SPACE_2 * s + detail.ascent
 	return ui.draw_fading_text(&detail, &w.list, hint, field.x, baseline,
@@ -350,21 +361,22 @@ workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 
 workspace_row_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	p, s := &w.workspace_picker, w.scale
-	if p.mode != .Menu { return .Ok }
+	id := workspace_picker_target(p, .Menu)
+	if id == 0 { return .Ok }
 	r := workspace_row_menu_rect(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None { return .Ok }
 	frame := ui.popover_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None { return .Ok }
 	if render.push_layer(&w.list, r, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	titles := [?]string{
-		"Rename", "Change Icon", workspace_row_window_title(app, p.target_id), "Move Up", "Move Down", "Delete…",
+		"Rename", "Change Icon", workspace_row_window_title(app, id), "Move Up", "Move Down", "Delete…",
 	}
 	@(static, rodata) actions := WORKSPACE_ROW_ACTIONS
 	for title, i in titles {
-		enabled := workspace_row_target(app, p.target_id) != nil &&
-			(actions[i] != .Open_Window || workspace_row_window_enabled(app, w, p.target_id))
+		enabled := workspace_row_target(app, id) != nil &&
+			(actions[i] != .Open_Window || workspace_row_window_enabled(app, w, id))
 		if actions[i] == .Move_Up || actions[i] == .Move_Down {
-			enabled &&= workspace_order_neighbor(app, p.target_id, actions[i] == .Move_Up ? -1 : 1) != 0
+			enabled &&= workspace_order_neighbor(app, id, actions[i] == .Move_Up ? -1 : 1) != 0
 		}
 		item := workspace_row_menu_item_rect(w, i)
 		if i == p.menu_selected {

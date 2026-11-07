@@ -323,7 +323,7 @@ tab_drag_cancel :: proc(app: ^App, w: ^Window) {
 	if d.pressed {w.dirty = true}
 	drag_thumbnail_destroy(&d.thumbnail)
 	tab_incoming_close(app, d.destination_window)
-	workspace_drag_close(app, &d.picker)
+	workspace_picker_drag_leave(app, &d.picker)
 	for tab, to in d.order {
 		for current, from in w.workspace.tabs {if current == tab {tab_move(app, w, from, to); break}}
 	}
@@ -416,7 +416,7 @@ pane_drag_cancel :: proc(app: ^App, w: ^Window) {
 	w.pane_drag = {}
 	if !d.pressed {return}
 	drag_thumbnail_destroy(&d.thumbnail)
-	workspace_drag_close(app, &d.picker)
+	workspace_picker_drag_leave(app, &d.picker)
 	w.dirty = true
 	if d.preview_window != 0 {pane_window_preview_discard(app, d.preview_window)}
 	pane_drag_restore(app, w, d)
@@ -534,7 +534,7 @@ pane_drag_move :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> bool {
 		for tab, i in w.workspace.tabs {if tab == d.source {tab_select(app, w, i, true); break}}
 	}
 	if destination == nil || destination.id != previous {
-		workspace_drag_close(app, &d.picker)
+		workspace_picker_drag_leave(app, &d.picker)
 		if old := window_find(app, previous); old != nil && old != w {
 			for tab, i in old.workspace.tabs {
 				if tab == d.destination_original {tab_select(app, old, i, true); break}

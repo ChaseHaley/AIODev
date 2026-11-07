@@ -45,7 +45,7 @@ workspace_icon_color_open :: proc(app: ^App, w: ^Window) {
 	target := workspace_row_target(app, workspace_picker_target(&w.workspace_picker, .Icons))
 	if target == nil { workspace_picker_return(app, w); return }
 	p := &w.workspace_picker
-	workspace_picker_transition(w, .Tint, p.target_id)
+	workspace_picker_transition(w, .Tint, target.id)
 	p.selected, p.scroll = target.icon.tint, 0
 	ui.field_release(&p.query)
 	w.dirty = true
@@ -54,7 +54,7 @@ workspace_icon_color_open :: proc(app: ^App, w: ^Window) {
 workspace_icon_color_back :: proc(w: ^Window) {
 	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
-	workspace_picker_transition(w, .Icons, p.target_id)
+	workspace_picker_transition(w, .Icons, workspace_picker_target(p, .Icons))
 	p.selected, p.scroll = len(WORKSPACE_ICONS) + 2, 0
 	w.dirty = true
 }
@@ -62,7 +62,7 @@ workspace_icon_color_back :: proc(w: ^Window) {
 workspace_icon_color_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
 	if p.selected == len(WORKSPACE_ICON_COLORS) { workspace_icon_color_back(w); return }
-	target := workspace_row_target(app, p.target_id)
+	target := workspace_row_target(app, workspace_picker_target(p, .Icons))
 	if target == nil { workspace_picker_return(app, w); return }
 	if !workspace_icon_color_set(app, target, p.selected) { return }
 	workspace_picker_return(app, w)
@@ -101,7 +101,7 @@ workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	p, s := &w.workspace_picker, w.scale
 	g := workspace_icon_picker_layout(w)
-	target := workspace_row_target(app, p.target_id)
+	target := workspace_row_target(app, workspace_picker_target(p, .Icons))
 	if target == nil { return .Ok }
 	if result := workspace_icon_picker_title(app, w, g, "Preset icon color"); result != .Ok { return result }
 	if render.push_layer(&w.list, g.grid) != .None { return .Ok }

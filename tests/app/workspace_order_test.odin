@@ -38,13 +38,15 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	testing.expect_value(t, state.workspaces[1].id, u32(1))
 	grabbed := app.workspace_order_position(&w.workspace_picker, 1)
 	if !testing.expect(t, grabbed != nil) {return}
-	testing.expect(t, grabbed.lifted)
+	testing.expect(t, app.workspace_order_settling(&w.workspace_picker))
+	testing.expect(t, app.workspace_order_lifted(&w.workspace_picker, 1))
 	testing.expect_value(t, grabbed.position.value, f32(1.25))
 	testing.expect_value(t, grabbed.position.target, f32(1))
 	testing.expect_value(t, grabbed.position.duration, 140 * time.Millisecond)
 	testing.expect_value(t, grabbed.position.easing, ui.Easing.Decelerate)
 	app.workspace_row_menu_open(&state, &w, 1)
 	testing.expect_value(t, len(w.workspace_picker.order_positions), 4)
+	testing.expect(t, app.workspace_order_settling(&w.workspace_picker))
 	testing.expect_value(t, app.workspace_picker_row_rect(&w, 1).y, row.y + 40)
 	started = grabbed.position.started
 	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 70 * time.Millisecond))
@@ -52,6 +54,7 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 140 * time.Millisecond))
 	testing.expect_value(t, len(w.workspace_picker.order_positions), 0)
 	testing.expect(t, !app.workspace_order_animating(&w.workspace_picker))
+	testing.expect(t, !app.workspace_order_settling(&w.workspace_picker))
 }
 
 @(private="file")
@@ -169,7 +172,7 @@ workspace_order_drag_commits_on_release_and_cancel_preserves_order :: proc(t: ^t
 			app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
 				pressed = true, x = x, y = y})
 			app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = end_y, buttons = {.Left}})
-			testing.expect(t, w.workspace_picker.order.active)
+			testing.expect(t, app.workspace_order_lift(&w.workspace_picker) != nil)
 			testing.expect_value(t, app.workspace_picker_row_rect(&w, 1).y, first.y)
 			testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, last.y)
 			testing.expect_value(t, state.workspaces[0].id, u32(1))
@@ -179,7 +182,7 @@ workspace_order_drag_commits_on_release_and_cancel_preserves_order :: proc(t: ^t
 			app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = end_y})
 			testing.expect_value(t, state.workspaces[0].id, cancel ? u32(1) : u32(2))
 			testing.expect_value(t, w.workspace.id, u32(1))
-			testing.expect_value(t, w.workspace_picker.order.id, u32(0))
+			testing.expect_value(t, app.workspace_order_grabbed(&w.workspace_picker), u32(0))
 			testing.expect_value(t, len(w.workspace_picker.order_positions), 0)
 			testing.expect(t, app.workspace_picker_active(&w.workspace_picker))
 		}

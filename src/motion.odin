@@ -50,7 +50,7 @@ update_motion :: proc(app: ^App) {
 		if ui.control_update(&w.workspace_motion, w.workspace_hovered, false, app.animations, now) {
 			w.dirty = true
 		}
-		if p.mode == .Rename {
+		if workspace_picker_mode(p) == .Rename {
 			ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, app.animations, now)
 			if ui.motion_update(&p.rename_motion, now) { w.dirty = true }
 		}
