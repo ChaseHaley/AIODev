@@ -85,4 +85,11 @@ a_relative_markdown_file_becomes_absolute_before_it_is_sent :: proc(t: ^testing.
 	testing.expect_value(t, cli.absolute_file_argument(absolute, `C:\work`, context.temp_allocator)[1], `D:\plan.md`)
 	other := []string{"pane.send", `docs\plan.md`}
 	testing.expect_value(t, cli.absolute_file_argument(other, `C:\work`, context.temp_allocator)[1], `docs\plan.md`)
+	// Value-taking options come from the command grammar, not a second CLI arity list.
+	options := []string{
+		"pane.open_markdown", "--pane", "agent", "--ratio", "0.4", "--cwd", "work", `docs\plan.md`,
+	}
+	normalized := cli.absolute_file_argument(options, `C:\work`, context.temp_allocator)
+	for i in 0 ..< len(options) - 1 {testing.expect_value(t, normalized[i], options[i])}
+	testing.expect_value(t, normalized[len(normalized) - 1], `C:\work\docs\plan.md`)
 }

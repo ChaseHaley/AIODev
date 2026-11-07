@@ -238,10 +238,7 @@ when AIO_CONTROL {
 				app.verify.mouse_window, app.verify.buttons = 0, {}
 			}
 		}
-		for w in app.windows {
-			if w.focused {return w}
-		}
-		return window_primary(app)
+		return window_focused_or_primary(app)
 	}
 
 	// Counts the swap-chain presents of a window just rendered. A window whose count has not advanced
@@ -963,9 +960,7 @@ when AIO_CONTROL {
 		case verify_protocol.Command:
 			command := commands.find(&app.registry, r.name)
 			if command == nil {return .Invalid_Argument}
-			// Copy runs only on a selection, judged in this window now, as the palette judges it.
-			is_copy := Action(command.id) == .Copy
-			if is_copy && !copy_selection_available(app, w) {return .Invalid_Argument}
+			if !action_available(app, w, Action(command.id)) {return .Invalid_Argument}
 			palette_close(app, w)
 			// Verification stands in for a person at the keyboard, acting on this window's focus, which
 			// reports failures as notices rather than an outcome.

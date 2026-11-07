@@ -1,11 +1,22 @@
 package cli_protocol
 
-import "aio:commands"
 import "aio:control"
 
 // The aio command line's wire contract with AIODev, shared by the aio client and the app's CLI pipe
 // server (D-046). A request is a JSON string array: the caller pane id or "", the reply format word,
 // then the command name and its arguments. The reply's status is the CLI exit status.
+
+// Shared invocation outcomes; the values are the CLI exit codes (D-046).
+Status :: enum u8 {
+	Ok          = 0,
+	Failed      = 1,
+	Usage       = 2,
+	Target      = 3,
+	Unreachable = 4,
+	// The pipe answered, but its server process was not the expected AIODev.
+	Impostor    = 5,
+	Interrupted = 130,
+}
 
 Format :: enum u8 {
 	Text,
@@ -54,14 +65,14 @@ request_decode :: proc(args: []string) -> (Request, bool) {
 
 // The reply to a request: ok exactly when the status is Ok.
 @(require_results)
-response :: proc(status: commands.Status, text: string) -> control.Response {
+response :: proc(status: Status, text: string) -> control.Response {
 	return {ok = status == .Ok, text = text, status = u8(status)}
 }
 
 // The exit status a reply carries. A reply without one maps ok to Ok and anything else to Failed.
 @(require_results)
-response_status :: proc(r: control.Response) -> commands.Status {
-	if r.status != 0 {return commands.Status(r.status)}
+response_status :: proc(r: control.Response) -> Status {
+	if r.status != 0 {return Status(r.status)}
 	return r.ok ? .Ok : .Failed
 }
 

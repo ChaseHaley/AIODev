@@ -24,10 +24,6 @@ MAX_NUMBER :: int(max(i32))
 // A client waits this long for a reply, or a wait or run's own timeout plus REPLY_MARGIN_MS.
 CLIENT_TIMEOUT_MS :: 15000
 REPLY_MARGIN_MS :: 1000
-// The pane.split options a verification command accepts default to an interactive split.
-SPLIT_DIRECTION :: layout.Direction.Right
-SPLIT_RATIO :: f32(0.5)
-SPLIT_FOCUS :: true
 Position :: struct {
 	x, y: int,
 }
@@ -572,9 +568,9 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		if len(args) < 2 || args[1] == "" {return {}, bad}
 		r := Command {
 			name      = args[1],
-			direction = SPLIT_DIRECTION,
-			ratio     = SPLIT_RATIO,
-			focus     = SPLIT_FOCUS,
+			direction = commands.SPLIT_DEFAULT.direction,
+			ratio     = commands.SPLIT_DEFAULT.ratio,
+			focus     = commands.SPLIT_DEFAULT.focus,
 		}
 		if len(args) > 2 && r.name != "pane.split" {return {}, bad}
 		seen: [3]bool

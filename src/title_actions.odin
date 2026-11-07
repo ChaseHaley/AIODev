@@ -8,17 +8,18 @@ import "aio:ui"
 // for hover and press state.
 Title_Action :: enum {None, Settings, Palette}
 
-// What a control draws and says.
+// What a control draws, says, and runs.
 @(private = "file")
 Title_Control :: struct {
 	icon:    ui.Icon,
 	tooltip: string,
+	action:  Action,
 }
 
 @(private = "file", rodata)
 TITLE_CONTROLS := #partial [Title_Action]Title_Control {
-	.Settings = {.Settings, "Settings"},
-	.Palette = {.Command, "Command palette"},
+	.Settings = {.Settings, "Settings", .Settings_UI},
+	.Palette = {.Command, "Command palette", .Command_Palette},
 }
 
 // Every title control is one toggle wide: the orientation toggle, then each action after None.
@@ -103,13 +104,7 @@ title_action_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	if e.button != .Left || !ui.armed_down(w.title_action_armed) {return false}
 	fired, ok := ui.armed_release(&w.title_action_armed, title_action_hit(w, f32(e.x), f32(e.y)))
 	w.dirty = true
-	if ok {
-		switch fired {
-		case .None:
-		case .Settings: editor_open(app, w)
-		case .Palette: palette_open(app, w)
-		}
-	}
+	if ok && fired != .None {run_action(app, w, TITLE_CONTROLS[fired].action)}
 	return true
 }
 

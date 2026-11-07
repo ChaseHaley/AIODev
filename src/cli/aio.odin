@@ -50,13 +50,13 @@ print_usage :: proc() {
 	fmt.printf(
 		USAGE_FORMAT,
 		WAIT_DEFAULT_TIMEOUT_MS,
-		u8(commands.Status.Ok),
-		u8(commands.Status.Failed),
-		u8(commands.Status.Usage),
-		u8(commands.Status.Target),
-		u8(commands.Status.Unreachable),
-		u8(commands.Status.Impostor),
-		u8(commands.Status.Interrupted),
+		u8(cli_protocol.Status.Ok),
+		u8(cli_protocol.Status.Failed),
+		u8(cli_protocol.Status.Usage),
+		u8(cli_protocol.Status.Target),
+		u8(cli_protocol.Status.Unreachable),
+		u8(cli_protocol.Status.Impostor),
+		u8(cli_protocol.Status.Interrupted),
 	)
 }
 
@@ -68,15 +68,13 @@ absolute_file_argument :: proc(
 	directory: string,
 	allocator := context.allocator,
 ) -> []string {
-	if len(args) == 0 || args[0] != "pane.open_markdown" {return args}
+	if len(args) == 0 || args[0] != commands.OPEN_MARKDOWN_COMMAND {return args}
 	result := make([]string, len(args), allocator)
 	copy(result, args)
 	for i := 1; i < len(result); i += 1 {
-		switch result[i] {
-		case "--focus":
-		case "--pane", "--direction", "--ratio":
+		if commands.option_takes_value(result[i]) {
 			i += 1
-		case:
+		} else {
 			if !filepath.is_abs(result[i]) && !strings.has_prefix(result[i], "--") {
 				joined, err := filepath.join({directory, result[i]}, allocator)
 				if err == nil {result[i] = joined}
@@ -121,7 +119,7 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 		case "--instance":
 			if seen_instance {return {}, "use --instance once"}
 			if i + 1 == len(args) || !instance.valid_name(args[i + 1]) {
-				return {}, "--instance takes 1 to 32 letters, digits, - or _"
+				return {}, "--instance takes " + instance.NAME_RULE
 			}
 			i += 1
 			o.instance, seen_instance = args[i], true

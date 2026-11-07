@@ -14,6 +14,14 @@ USAGE ::
 	FLAG_NO_ACTIVATE + "]"
 // A name has 1..MAX_NAME_LENGTH ASCII letters, digits, hyphens or underscores.
 MAX_NAME_LENGTH :: 32
+// Compose the two-digit bound without runtime formatting or allocation.
+@(private)
+DECIMAL_DIGITS :: "0123456789"
+#assert(MAX_NAME_LENGTH >= 10 && MAX_NAME_LENGTH < 100)
+NAME_RULE ::
+	"1.." + DECIMAL_DIGITS[MAX_NAME_LENGTH / 10:MAX_NAME_LENGTH / 10 + 1] +
+	DECIMAL_DIGITS[MAX_NAME_LENGTH % 10:MAX_NAME_LENGTH % 10 + 1] +
+	" ASCII letters, digits, hyphens, or underscores"
 
 // Files an instance keeps in its data directory.
 SETTINGS_FILE :: "settings.ini"

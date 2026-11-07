@@ -2,7 +2,6 @@ package cli_protocol_test
 
 import "core:testing"
 import "aio:cli_protocol"
-import "aio:commands"
 import "aio:control"
 
 @(test)
@@ -27,12 +26,12 @@ request_header_round_trip :: proc(t: ^testing.T) {
 
 @(test)
 status_round_trip :: proc(t: ^testing.T) {
-	for status in commands.Status {
+	for status in cli_protocol.Status {
 		testing.expect_value(t, cli_protocol.response_status(cli_protocol.response(status, "x")), status)
 	}
 	// A reply without a status, such as a verification reply, maps ok to Ok and failure to Failed.
-	testing.expect_value(t, cli_protocol.response_status(control.Response{ok = true}), commands.Status.Ok)
-	testing.expect_value(t, cli_protocol.response_status(control.Response{}), commands.Status.Failed)
+	testing.expect_value(t, cli_protocol.response_status(control.Response{ok = true}), cli_protocol.Status.Ok)
+	testing.expect_value(t, cli_protocol.response_status(control.Response{}), cli_protocol.Status.Failed)
 }
 
 @(test)

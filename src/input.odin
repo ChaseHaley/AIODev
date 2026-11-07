@@ -338,8 +338,7 @@ terminal_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if consumed {return}
 	if key.found {
 		repeated := e.repeat && key_suppressed(w, e.key)
-		if key.action != .Copy || ui.find_has_keyboard(&w.find) || repeated ||
-		   copy_selection_available(app, w) {
+		if repeated || action_available(app, w, key.action) {
 			key_suppress(w, e)
 			if !repeated || key.action != .Copy {run_action(app, w, key.action)}
 			return

@@ -1,7 +1,6 @@
 package cli
 
 import "aio:cli_protocol"
-import "aio:commands"
 import "aio:control"
 import "aio:instance"
 import "core:encoding/json"
@@ -33,7 +32,7 @@ main :: proc() {
 }
 
 @(private, require_results)
-start :: proc() -> commands.Status {
+start :: proc() -> cli_protocol.Status {
 	args, argument_error := instance.command_line(context.allocator)
 	if argument_error != .None {
 		fmt.eprintln("aio: could not read the command line")
@@ -85,7 +84,7 @@ server_identity :: proc(allocator := context.allocator) -> (control.Server_Ident
 
 // One request on its own connection, so other clients can interleave between a wait's polls.
 @(private, require_results)
-send :: proc(pipe: string, request: []string) -> (control.Response, commands.Status) {
+send :: proc(pipe: string, request: []string) -> (control.Response, cli_protocol.Status) {
 	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, context.temp_allocator)
 	if connect_error != .None {
 		fmt.eprintln(
@@ -124,7 +123,7 @@ send :: proc(pipe: string, request: []string) -> (control.Response, commands.Sta
 
 // Polls until the pane shows the text or its program exits, so no request holds the pipe.
 @(private, require_results)
-wait :: proc(o: Options, pipe, caller: string) -> commands.Status {
+wait :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 	if !bool(w.SetConsoleCtrlHandler(on_interrupt, true)) {
 		fmt.eprintln("aio: could not watch for Ctrl+C")
 		return .Failed

@@ -1,5 +1,6 @@
 package main
 
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:input"
 import "aio:layout"
@@ -378,7 +379,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Rename_Pane = {"pane.rename", "Rename Pane", nil, .Local, {accepted = {.Text}, control = .Pane}},
 	.Change_Pane_Shell = {"pane.change_shell", "Change Pane Shell…", nil, .Local, {}},
 	.Open_Markdown = {
-		"pane.open_markdown", "Open Markdown File…", nil, .Host,
+		commands.OPEN_MARKDOWN_COMMAND, "Open Markdown File…", nil, .Host,
 		{accepted = {.Text, .Direction, .Ratio, .Focus}, control = .Pane},
 	},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil, .Host, {}},
@@ -520,7 +521,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Pane_Focus = {"pane.focus", "Focus Pane", nil, .Host, {hidden = true, control = .Pane}},
 	.App_Commands = {
-		"app.commands", "List Commands", nil, .Host,
+		cli_protocol.CATALOGUE_COMMAND, "List Commands", nil, .Host,
 		{accepted = {.Text}, hidden = true, control = .Unnamed},
 	},
 	.Reopen_Closed = {
@@ -637,6 +638,13 @@ command_window :: proc(app: ^App, w: ^Window, action: Action) -> ^Window {
 	return w
 }
 
+// Availability is command policy; each surface decides how an unavailable action is presented.
+action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
+	if action != .Copy {return true}
+	entry := focused_session(app, w)
+	return ui.find_has_keyboard(&w.find) || entry != nil && term.has_selection(entry.session)
+}
+
 // Runs one command for every interface, so it behaves the same from each (WORK-038). A window context
 // acts on that window's focus and reports failures as notices; its outcome carries nothing. A control
 // request names its pane, which the command's Control_Form decides how to reach.
@@ -682,7 +690,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .App_Commands:
 		return command_catalogue(app, invocation.text)
 	case .Pane_List:
-		return {panes = pane_reports(app, nil)}
+		return {payload = Outcome_Panes(pane_reports(app, nil))}
 	case .Pane_Status:
 		return control_pane_status(app, ctx.(Control_Request), invocation)
 	case .Pane_Read:

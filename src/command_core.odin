@@ -16,14 +16,15 @@ import "core:strings"
 // What an invocation produced. Key, palette and pointer invocations report through notices instead.
 // Strings and slices are temporary.
 Outcome :: struct {
-	status:    commands.Status,
-	message:   string,
-	// The pane a command created, or 0.
-	pane:      u32,
-	text:      string,
-	panes:     []cli_protocol.Pane_Report,
-	catalogue: []cli_protocol.Command_Report,
+	status:  cli_protocol.Status,
+	message: string,
+	payload: union {Outcome_Created, Outcome_Text, Outcome_Panes, Outcome_Catalogue, Outcome_Usage},
 }
+Outcome_Created :: struct {pane: u32}
+Outcome_Text :: distinct string
+Outcome_Panes :: distinct []cli_protocol.Pane_Report
+Outcome_Catalogue :: distinct []cli_protocol.Command_Report
+Outcome_Usage :: distinct cli_protocol.Command_Report
 
 // A pane a control invocation acts on, with the identity mutation needs.
 Pane_Target :: struct {
@@ -32,7 +33,7 @@ Pane_Target :: struct {
 }
 
 @(private)
-outcome_failure :: proc(status: commands.Status, message: string) -> Outcome {
+outcome_failure :: proc(status: cli_protocol.Status, message: string) -> Outcome {
 	return {status = status, message = message}
 }
 
@@ -69,12 +70,12 @@ control_pane_status :: proc(
 	target, failure := pane_target_resolve(app, invocation.pane, request.caller)
 	if failure.status == .Target {
 		if closed, found := closed_pane_report(app, invocation.pane, request.caller); found {
-			return {panes = closed}
+			return {payload = Outcome_Panes(closed)}
 		}
 	}
 	if failure.status != .Ok {return failure}
 	if target.pane.session == nil {return outcome_failure(.Failed, "that pane does not show a terminal")}
-	return {panes = pane_reports(app, &target)}
+	return {payload = Outcome_Panes(pane_reports(app, &target))}
 }
 
 // Focuses a pane and brings its window forward; a linked pane's own window takes the focus instead.
@@ -101,22 +102,35 @@ control_rename :: proc(app: ^App, target: Pane_Target, name: string) -> Outcome 
 	return {}
 }
 
+// The target words are classified once for both live and closed-pane queries.
+Pane_Target_Word :: union #no_nil {Pane_Caller, Pane_Focused, Pane_Id, Pane_Name}
+Pane_Caller :: struct {}
+Pane_Focused :: struct {}
+Pane_Id :: distinct u32
+Pane_Name :: distinct string
+
+@(private)
+pane_target_word :: proc(text: string, caller: u32) -> Pane_Target_Word {
+	if text == "here" || text == "" && caller != 0 {return Pane_Caller{}}
+	if text == "" || text == "focused" {return Pane_Focused{}}
+	if id, numeric := pane_id_parse(text); numeric {return Pane_Id(id)}
+	return Pane_Name(text)
+}
+
 // Resolves a target: empty means the caller, else the focused pane; `here` is the caller, `focused`
 // the focused pane; digits name a pane id, anything else a pane name. An ambiguous name changes
 // nothing and lists its matches (D-046).
 @(require_results)
 pane_target_resolve :: proc(app: ^App, text: string, caller: u32) -> (Pane_Target, Outcome) {
-	switch {
-	case text == "here", text == "" && caller != 0:
+	switch word in pane_target_word(text, caller) {
+	case Pane_Caller:
 		if caller == 0 {
 			return {}, outcome_failure(.Target, "no calling pane: run aio inside an AIODev pane or pass --pane")
 		}
 		if target, found := pane_target_session(app, caller); found {return target, {}}
 		return {}, outcome_failure(.Target, "the calling pane no longer exists; pass --pane")
-	case text == "", text == "focused":
-		w: ^Window
-		for window in app.windows {if window.focused {w = window; break}}
-		if w == nil {w = window_primary(app)}
+	case Pane_Focused:
+		w := window_focused_or_primary(app)
 		tree := window_tree(w)
 		if w == nil || w.workspace == nil || tree == nil {
 			return {}, outcome_failure(.Target, "no window is open")
@@ -129,10 +143,10 @@ pane_target_resolve :: proc(app: ^App, text: string, caller: u32) -> (Pane_Targe
 		pane, found := workspace_pane_at(app, w.workspace, w.workspace.selected, tree.focus)
 		if !found {return {}, outcome_failure(.Target, "the focused window has no pane")}
 		return {w.workspace, pane}, {}
-	}
-	if id, numeric := pane_id_parse(text); numeric {
-		if target, found := pane_target_session(app, id); found {return target, {}}
+	case Pane_Id:
+		if target, found := pane_target_session(app, u32(word)); found {return target, {}}
 		return {}, outcome_failure(.Target, "no pane has that id; use aio pane.list")
+	case Pane_Name:
 	}
 	match: Pane_Target
 	ids := make([dynamic]u32, context.temp_allocator)
@@ -168,11 +182,8 @@ pane_id_parse :: proc(text: string) -> (u32, bool) {
 
 @(private, require_results)
 pane_target_session :: proc(app: ^App, id: u32) -> (Pane_Target, bool) {
-	for workspace in app.workspaces {
-		if workspace.provisional {continue}
-		if pane, found := workspace_first_session(app, workspace, id); found {return {workspace, pane}, true}
-	}
-	return {}, false
+	workspace, pane, found := session_pane_find(app, id)
+	return {workspace, pane}, found
 }
 
 // Every terminal pane in workspace and tab order, or only `only`'s.
@@ -225,9 +236,16 @@ PANE_STATUS := [term.Status_Kind]cli_protocol.Pane_Status {
 // program, or closed while the program still ran.
 @(private)
 closed_pane_report :: proc(app: ^App, text: string, caller: u32) -> ([]cli_protocol.Pane_Report, bool) {
-	id, valid := pane_id_parse(text)
-	if text == "" || text == "here" {id, valid = caller, caller != 0}
-	if !valid {return nil, false}
+	id: u32
+	switch word in pane_target_word(text, caller) {
+	case Pane_Caller:
+		if caller == 0 {return nil, false}
+		id = caller
+	case Pane_Id:
+		id = u32(word)
+	case Pane_Focused, Pane_Name:
+		return nil, false
+	}
 	closed, found := closed_session_find(&app.closed_sessions, id)
 	if !found {return nil, false}
 	report := make([]cli_protocol.Pane_Report, 1, context.temp_allocator)
@@ -247,7 +265,7 @@ pane_read :: proc(entry: ^Session_Entry, lines: int) -> Outcome {
 	rows, err := term.screen_rows(entry.session, context.temp_allocator)
 	if err != .None {return outcome_failure(.Failed, "could not read the pane's screen")}
 	if lines > 0 && lines < len(rows) {rows = rows[len(rows) - lines:]}
-	return {text = strings.join(rows, "\n", context.temp_allocator)}
+	return {payload = Outcome_Text(strings.join(rows, "\n", context.temp_allocator))}
 }
 
 // Types text into the pane's program, then presses Enter when asked, as a person at the keyboard would.
@@ -367,7 +385,7 @@ control_profile_check :: proc(app: ^App, profile: string) -> (Outcome, bool) {
 @(private)
 control_created :: proc(app: ^App, w: ^Window, id: u32, name: string) -> Outcome {
 	result := Outcome {
-		pane = id,
+		payload = Outcome_Created{id},
 	}
 	entry := session_find(app, id)
 	if entry != nil {
@@ -393,5 +411,6 @@ command_catalogue :: proc(app: ^App, name: string) -> Outcome {
 		append(&reports, cli_protocol.Command_Report{command.name, command.title, usage})
 	}
 	if name != "" && len(reports) == 0 {return outcome_failure(.Usage, "unknown command; use aio commands")}
-	return {catalogue = reports[:]}
+	if name != "" {return {payload = Outcome_Usage(reports[0])}}
+	return {payload = Outcome_Catalogue(reports[:])}
 }

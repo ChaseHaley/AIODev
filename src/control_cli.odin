@@ -81,8 +81,7 @@ control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
 	return control_cli_reply(command_execute(app, Control_Request{caller}, invocation), json_output)
 }
 
-// The reply text follows whichever Outcome field the command filled: a failure's message, a
-// created pane, one command's usage, the catalogue, the pane list, else the text.
+// The payload kind selects the reply shape; status and message report failures independently.
 @(private)
 control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Response {
 	response := cli_protocol.response(outcome.status, "")
@@ -92,10 +91,18 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			ok       = ok,
 			status   = u8(outcome.status),
 			error    = outcome.message,
-			pane     = outcome.pane,
-			text     = outcome.text,
-			panes    = outcome.panes,
-			commands = outcome.catalogue,
+		}
+		switch payload in outcome.payload {
+		case Outcome_Created:
+			document.pane = payload.pane
+		case Outcome_Text:
+			document.text = string(payload)
+		case Outcome_Panes:
+			document.panes = ([]cli_protocol.Pane_Report)(payload)
+		case Outcome_Catalogue:
+			document.commands = ([]cli_protocol.Command_Report)(payload)
+		case Outcome_Usage:
+			document.commands = []cli_protocol.Command_Report{cli_protocol.Command_Report(payload)}
 		}
 		data, err := json.marshal(document, {}, context.temp_allocator)
 		if err != nil {
@@ -105,30 +112,33 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 		return response
 	}
 	b := strings.builder_make(context.temp_allocator)
-	switch {
-	case !ok:
+	if !ok {
 		strings.write_string(&b, outcome.message)
-		if outcome.pane != 0 {fmt.sbprintf(&b, " (pane %d)", outcome.pane)}
-	case outcome.pane != 0:
-		fmt.sbprintf(&b, "%d", outcome.pane)
-	case len(outcome.catalogue) == 1:
-		fmt.sbprintf(&b, "%s\n%s", outcome.catalogue[0].usage, outcome.catalogue[0].title)
-	case outcome.catalogue != nil:
-		for command, i in outcome.catalogue {
-			if i > 0 {strings.write_byte(&b, '\n')}
-			fmt.sbprintf(&b, "%-30s %s", command.name, command.title)
+		if created, present := outcome.payload.(Outcome_Created); present && created.pane != 0 {
+			fmt.sbprintf(&b, " (pane %d)", created.pane)
 		}
-	case outcome.panes != nil:
-		// One tab-separated line per pane: id, focus mark, workspace, tab, status, process, title,
-		// directory.
-		for pane, i in outcome.panes {
-			if i > 0 {strings.write_byte(&b, '\n')}
-			title := pane.name != "" ? pane.name : pane.title
-			fmt.sbprintf(&b, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s", pane.id, pane.focused ? "*" : "",
-				pane.workspace_name, pane.tab, pane.status, pane.process, title, pane.directory)
+	} else {
+		switch payload in outcome.payload {
+		case Outcome_Created:
+			fmt.sbprintf(&b, "%d", payload.pane)
+		case Outcome_Usage:
+			fmt.sbprintf(&b, "%s\n%s", payload.usage, payload.title)
+		case Outcome_Catalogue:
+			for command, i in payload {
+				if i > 0 {strings.write_byte(&b, '\n')}
+				fmt.sbprintf(&b, "%-30s %s", command.name, command.title)
+			}
+		case Outcome_Panes:
+			// Tab-separated id, focus, workspace, tab, status, process, title and directory.
+			for pane, i in payload {
+				if i > 0 {strings.write_byte(&b, '\n')}
+				title := pane.name != "" ? pane.name : pane.title
+				fmt.sbprintf(&b, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s", pane.id, pane.focused ? "*" : "",
+					pane.workspace_name, pane.tab, pane.status, pane.process, title, pane.directory)
+			}
+		case Outcome_Text:
+			strings.write_string(&b, string(payload))
 		}
-	case:
-		strings.write_string(&b, outcome.text)
 	}
 	response.text = strings.to_string(b)
 	return response

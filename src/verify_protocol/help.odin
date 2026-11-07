@@ -2,6 +2,7 @@ package verify_protocol
 
 import "aio:commands"
 import "aio:layout"
+import "core:fmt"
 import "core:strings"
 
 HELP_OVERVIEW :: `aioctl <command> [arguments]
@@ -89,7 +90,6 @@ put_underline_names :: proc(w: ^Writer, include_none: bool, separator: string) {
 
 // The help spells the split shares literally; these keep the text in step with the declarations.
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
-#assert(SPLIT_RATIO == 0.5)
 
 @(private)
 put_direction_words :: proc(w: ^Writer) {
@@ -407,9 +407,10 @@ No defaults. Output is one line: ok; <changes>, e.g. ok; no visible change. Fail
 pane.split accepts --direction `)
 		put_direction_words(&w)
 		put(&w, ", --ratio 0.05..0.95 (new pane's share),\nand --focus true|false. Defaults: ")
-		put(&w, commands.DIRECTION_WORDS[SPLIT_DIRECTION])
-		put(&w, ", 0.5")
-		put(&w, SPLIT_FOCUS ? ", true" : ", false")
+		put(&w, commands.DIRECTION_WORDS[commands.SPLIT_DEFAULT.direction])
+		buffer: [32]u8
+		put(&w, fmt.bprintf(buffer[:], ", %v", commands.SPLIT_DEFAULT.ratio))
+		put(&w, commands.SPLIT_DEFAULT.focus ? ", true" : ", false")
 		put(
 			&w,
 			`. Other commands accept no options.

@@ -325,9 +325,9 @@ markdown_open_at :: proc(
 	tab_index: int,
 	node: layout.Node_Id,
 	path: string,
-	direction: layout.Direction = .Right,
-	ratio: f32 = 0.5,
-	focus := true,
+	direction: layout.Direction = commands.SPLIT_DEFAULT.direction,
+	ratio: f32 = commands.SPLIT_DEFAULT.ratio,
+	focus := commands.SPLIT_DEFAULT.focus,
 	floating := false,
 ) -> bool {
 	walk := workspace_panes(app, workspace)
@@ -407,8 +407,6 @@ control_markdown_open :: proc(
 	if !ok {return outcome_failure(.Failed, "that file is not available; use a local, absolute path")}
 	defer localpath.open_file_destroy(&file)
 	if file.confirm {return outcome_failure(.Failed, "that file type is not shown as Markdown")}
-	direction: layout.Direction = .Direction in invocation.given ? invocation.direction : .Right
-	ratio: f32 = .Ratio in invocation.given ? invocation.ratio : 0.5
 	// A requested direction asks for a split, whatever the floating preference.
 	floating := app.settings.pane.markdown_floating && .Direction not_in invocation.given
 	if !markdown_open_at(
@@ -418,8 +416,8 @@ control_markdown_open :: proc(
 		target.pane.tab,
 		target.pane.node,
 		file.target,
-		direction,
-		ratio,
+		invocation.direction,
+		invocation.ratio,
 		invocation.focus,
 		floating,
 	) {

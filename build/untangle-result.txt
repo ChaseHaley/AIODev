@@ -1,0 +1,33 @@
+R2Commands dispositions (base e2a404b)
+
+Implemented all 13 owned commands findings and terminal clipboard finding; none dismissed.
+1. Split defaults: commands.SPLIT_DEFAULT owns Right/0.5/interactive focus; invocation, verify parsing/help, markdown defaults and pane_split consume it. control_markdown_open no longer reapplies defaults.
+2. aio path normalization: commands.option_takes_value derives arity from argument_grammar (plus shared --pane); ACTIONS and aio share OPEN_MARKDOWN_COMMAND. Relative paths still resolve in aio's cwd; option values are not rewritten.
+3. Outcome: discriminated Created/Text/Panes/Catalogue/Usage payloads replace field-precedence inference. Producers select payload explicitly; failure status/message remain independent, retaining failed-created pane ids and existing text/JSON fields/bytes.
+4. Catalogue identity: ACTIONS uses cli_protocol.CATALOGUE_COMMAND.
+5. Closed-pane grammar: pane_target_word classifies caller/focused/id/name once for live and closed queries.
+6. Window choice: window_focused_or_primary in window_phase.odin serves command_core and verify_window.
+7. Title controls: Action lives in TITLE_CONTROLS; release dispatches through run_action, honoring gesture cleanup and palette toggle policy.
+8. Copy availability: action_available owns Copy's find-keyboard-or-terminal-selection policy; input, palette and verify use it. Removed copy_selection_available. Key-repeat suppression remains surface-owned.
+9. Instance diagnostic: instance.NAME_RULE derives its length from MAX_NAME_LENGTH; aio and aioctl use it.
+10. Categories: category derives from ACTIONS command names; status/profile namespaces now map to Status/Profiles instead of fallback. Regression test checks every registered action namespace.
+11. Status: enum moved to cli_protocol, all callers/tests migrated. cli_protocol and cli/main_windows drop commands dependency. aio retains commands solely for actual command grammar used by normalization, not statuses.
+12. settings_diagnostic: single-use forwarding procedure removed; report assembly inlined into apply_bindings.
+13. Terminal copy: copy_selection reuses clipboard_copy; success notice and explicit selection clearing preserved, clipboard failure keeps selection.
+Excluded keys. finding remains R2Settings-owned and untouched.
+
+Shared dependency: cherry-picked R2Workspaces 736daff as c6d202f (session_navigation.odin). pane_target_session uses its session_pane_find query. Main may already have the original shared commit; avoid duplicate integration.
+Outside primary ownership: src/input.odin and src/palette_owner.odin availability callers; src/verify.odin availability/window fallback callers; src/window_phase.odin focused-or-primary helper (Main approved); tools/aioctl/options.odin diagnostic caller; tests/app/command_core_test.odin, markdown_pane_test.odin and pane_links_test.odin type/Outcome migrations; new tests/app/command_policy_test.odin; tests/cli/cli_test.odin and tests/cli_protocol/cli_protocol_test.odin. src/markdown_pane.odin and pane_launch.odin edits stay within assigned split-default lines/import.
+
+Behavior: no persisted or wire format changes; split defaults and CLI cwd semantics unchanged. Corrected namespace grouping drift and title-button bypass of existing action policy. Invalid instance diagnostics now use the shared wording. Verification Copy accepts the existing find-keyboard Copy context as well as terminal selection. No unrelated defect hunt.
+
+Verification (serial; no live journeys):
+- pwsh -NoProfile -File build.ps1 check: final exit 0.
+- test commands: 19 passed.
+- test cli: 4 passed (includes grammar-driven normalization regression).
+- test cli_protocol: 3 passed.
+- test verify_protocol: 16 passed.
+- test instance: 9 passed.
+- test aioctl: 14 passed.
+- test app -TestNames command_categories_cover_every_action_namespace,command_payloads_select_catalogue_usage_and_empty_panes,copy_availability_follows_terminal_selection_or_find_keyboard,control_commands_target_panes_without_moving_focus,terminal_copy_without_native_selection_reaches_fullscreen_application,terminal_copy_custom_binding_and_find_keep_their_own_scope,terminal_native_copy_keeps_repeats_and_release_out_of_the_application: 7 passed.
+Total: 72 tests passed; none owed.
