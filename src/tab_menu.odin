@@ -1,8 +1,8 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
@@ -211,7 +211,7 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+tab_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if !e.pressed {return}
 	w.dirty = true
 	if step := ui.list_step(e); step != 0 {

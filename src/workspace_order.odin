@@ -1,6 +1,6 @@
 package main
 
-import "aio:platform"
+import "aio:input"
 import "aio:ui"
 import "core:math"
 import "core:time"
@@ -187,7 +187,7 @@ workspace_order_lifted :: proc(p: ^Workspace_Picker, index: int) -> bool {
 	return settling && settle.id == id
 }
 
-workspace_order_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
+workspace_order_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) -> bool {
 	p := &w.workspace_picker
 	if workspace_order_grabbed(p) == 0 {return false}
 	if .Left not_in e.buttons {workspace_order_end(w); return false}
@@ -213,7 +213,7 @@ workspace_order_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Even
 	return true
 }
 
-workspace_order_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+workspace_order_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	p := &w.workspace_picker
 	id := workspace_order_grabbed(p)
 	if id == 0 {return}

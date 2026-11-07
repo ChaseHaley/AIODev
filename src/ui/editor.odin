@@ -1519,28 +1519,10 @@ open_shortcuts :: proc(p: ^Editor) {
 	)
 }
 
-@(private)
-is_modifier :: proc(key: input.Key) -> bool {
-	#partial switch key {
-	case .Shift_Left,
-	     .Shift_Right,
-	     .Control_Left,
-	     .Control_Right,
-	     .Alt_Left,
-	     .Alt_Right,
-	     .Meta_Left,
-	     .Meta_Right,
-	     .Caps_Lock,
-	     .Num_Lock:
-		return true
-	}
-	return false
-}
-
 // Records chords pressed while a shortcut field captures. Pressing the leader first adds Leader+.
 @(private)
-capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> Editor_Outcome {
-	if is_modifier(e.key) {return .None}
+capture_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> Editor_Outcome {
+	if input.is_modifier_key(e.key) {return .None}
 	leader_pending := p.mode.(Editor_Capturing).leader_pending
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	if modifiers == {} && !leader_pending {
@@ -1694,7 +1676,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 }
 
 @(private)
-popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Editor_Outcome, bool) {
+popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_Outcome, bool) {
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	popup := editor_popup(p)
 	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
@@ -1774,7 +1756,7 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: platform.Key_Event) -> (Edito
 }
 
 // Takes the raw key event: capture needs the physical key, and navigation uses the layout's key.
-editor_key :: proc(p: ^Editor, raw: platform.Key_Event) -> Editor_Outcome {
+editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	if !raw.pressed {return .None}
 	if profile_menu_shown(p) {
 		switch menu_key(&p.profile_menu, raw) {

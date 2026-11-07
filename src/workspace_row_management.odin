@@ -1,8 +1,8 @@
 package main
 
+import "aio:input"
 import "core:time"
 import "aio:glyphs"
-import "aio:platform"
 import "aio:render"
 import "aio:ui"
 
@@ -173,7 +173,7 @@ workspace_picker_return :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
 }
 
-workspace_row_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
+workspace_row_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	p := &w.workspace_picker
 	switch workspace_picker_mode(p) {
 	case .List: if !workspace_picker_browsing(p) { return false }
@@ -279,7 +279,7 @@ workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> b
 	return false
 }
 
-workspace_row_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
+workspace_row_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) -> bool {
 	p := &w.workspace_picker
 	mode := workspace_picker_mode(p)
 	if mode == .Menu {

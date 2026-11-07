@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:platform"
 import "aio:ui"
 import "core:time"
@@ -143,7 +144,7 @@ confirmation_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Confirm_Outcome)
 	}
 }
 
-confirmation_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
+confirmation_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	c := confirmation_current(w)
 	if c == nil {return false}
 	pane_header_cancel(w)
@@ -152,7 +153,7 @@ confirmation_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
 	return true
 }
 
-confirmation_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+confirmation_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	c := confirmation_current(w)
 	if c == nil {return false}
 	outcome := ui.confirm_mouse(c, confirmation_layout(w, c), e.button, e.pressed, f32(e.x), f32(e.y))

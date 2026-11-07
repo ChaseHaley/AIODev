@@ -3,6 +3,7 @@ package main
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:pty"
@@ -1125,7 +1126,7 @@ editor_theme_delete :: proc(app: ^App, w: ^Window) {
 
 // Plain and shifted keys type or navigate, and these Ctrl chords edit text or move through the list.
 @(private)
-editor_owns :: proc(e: platform.Key_Event) -> bool {
+editor_owns :: proc(e: input.Key_Event) -> bool {
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	if modifiers & {.Control, .Alt, .Super} == {} {return true}
 	#partial switch e.key {
@@ -1139,7 +1140,7 @@ editor_owns :: proc(e: platform.Key_Event) -> bool {
 
 // Keys on the settings tab. Recording a shortcut keeps every key; otherwise text fields keep their
 // clipboard and editing chords and other app shortcuts still run, so tabs can be switched or closed.
-settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	pane_header_cancel(w)
 	p := &w.editor
 	w.dirty = true

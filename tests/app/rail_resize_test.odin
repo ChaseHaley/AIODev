@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
@@ -38,7 +39,7 @@ rail_resize_fixture :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string) ->
 
 @(private)
 rail_resize_drag_to :: proc(s: ^app.App, w: ^app.Window, x, y: f32) {
-	app.handle_event(s, platform.Mouse_Move_Event{
+	app.handle_event(s, input.Mouse_Move_Event{
 		window = w.id, x = i32(x), y = i32(y), buttons = {.Left},
 	})
 }
@@ -146,7 +147,7 @@ divider_double_click_does_not_span_a_cancel :: proc(t: ^testing.T) {
 	if !rail_resize_fixture(t, &f, "divider-click-cancel") {return}
 	s, w := &f.state, f.state.windows[0]
 	x, y := app.rail_width_pixels(w), 100 * w.scale
-	press := platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	press := input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(x), y = i32(y), time_ns = 1_000_000_000}
 	app.handle_event(s, press)
 	if !testing.expect(t, app.rail_resizing(w)) {return}

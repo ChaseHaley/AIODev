@@ -1,7 +1,7 @@
 package main
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
@@ -68,7 +68,7 @@ workspace_icon_color_choose :: proc(app: ^App, w: ^Window) {
 	workspace_picker_return(app, w)
 }
 
-workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	n := len(WORKSPACE_ICON_COLORS)

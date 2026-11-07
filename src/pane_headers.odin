@@ -2,8 +2,8 @@ package main
 
 import "aio:commands"
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -178,7 +178,7 @@ pane_header_cancel :: proc(w: ^Window) {
 
 // The terminal must not receive either half of a header click: the header swallows the press, and
 // pane_header_release finishes it wherever it is released.
-pane_header_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
 	if !hit || selection_active(w) {return}
 	gesture_swallow(w, e.button, .Pane_Header)
@@ -201,7 +201,7 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event)
 	if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
 }
 
-pane_header_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+pane_header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
 	if e.button == .Left && pane_drag_active(w) {
 		pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers)

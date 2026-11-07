@@ -1,7 +1,7 @@
 package main
 
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "aio:ui"
 import "core:math"
 import "core:time"
@@ -70,7 +70,7 @@ Pane_Carry :: struct {
 // The window a pane drag is over, 0 outside every window, and the tab it showed on arrival, which leaving the
 // window shows again. Resting on another of its tabs arms a switch to that tab.
 Drag_Visit :: struct {
-	window:         platform.Window_Id,
+	window:         input.Window_Id,
 	original:       ^Tab,
 	original_index: int,
 	hover:          Maybe(Drag_Hover),
@@ -115,7 +115,7 @@ Drop_Fit :: enum u8 {
 
 // A pane beside `target`, a pane of `tab`, which `window` shows.
 Drop_Pane :: struct {
-	window:    platform.Window_Id,
+	window:    input.Window_Id,
 	tab:       ^Tab,
 	target:    layout.Node_Id,
 	direction: layout.Direction,
@@ -124,7 +124,7 @@ Drop_Pane :: struct {
 
 // A pane trading places with `target` in its own tab while Shift is held.
 Drop_Swap :: struct {
-	window: platform.Window_Id,
+	window: input.Window_Id,
 	target: layout.Node_Id,
 	fit:    Drop_Fit,
 }
@@ -132,7 +132,7 @@ Drop_Swap :: struct {
 // A pane along one edge of the whole of `tab`, from the band at the edge of the content area. `target` is the
 // pane focused there, which a linked destination resolves to its slot.
 Drop_Dock_Root :: struct {
-	window:    platform.Window_Id,
+	window:    input.Window_Id,
 	tab:       ^Tab,
 	target:    layout.Node_Id,
 	direction: layout.Direction,
@@ -142,7 +142,7 @@ Drop_Dock_Root :: struct {
 // A pane in a new tab of `window`. `tab` is the tab shown there: the pane's own, when it is that tab's only
 // pane, only moves the tab to the end.
 Drop_New_Tab :: struct {
-	window: platform.Window_Id,
+	window: input.Window_Id,
 	tab:    ^Tab,
 	fit:    Drop_Fit,
 }
@@ -152,14 +152,14 @@ Drop_Reorder :: struct {}
 
 // Tabs joining another window's workspace at `slot`, where that window opens a gap for them.
 Drop_Other_Window :: struct {
-	window: platform.Window_Id,
+	window: input.Window_Id,
 	slot:   int,
 }
 
 // A drag holding `window`'s workspace dropdown open. `row` is the row under `pointer`, in that window's
 // coordinates, or -1; the dropdown keeps its own side, so one closed under the drag no longer takes the drop.
 Drop_Workspace_Dropdown :: struct {
-	window:  platform.Window_Id,
+	window:  input.Window_Id,
 	pointer: [2]f32,
 	row:     int,
 }
@@ -175,7 +175,7 @@ Tear_Off_Preview :: union {
 }
 
 Preview_Ready :: struct {
-	window: platform.Window_Id,
+	window: input.Window_Id,
 }
 
 Preview_Failed :: struct {}
@@ -243,7 +243,7 @@ drag_holds_dropdown :: proc(w: ^Window) -> bool {
 }
 
 // The window a drop at the destination would land in, or 0; a tear-off lands in the preview.
-drag_destination_window :: proc(destination: Drag_Destination) -> platform.Window_Id {
+drag_destination_window :: proc(destination: Drag_Destination) -> input.Window_Id {
 	switch d in destination {
 	case Drop_Pane:
 		return d.window
@@ -273,7 +273,7 @@ drag_hover_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 }
 
 // Whether w's drag reaches window `id`: by visiting it, dropping there or preparing it.
-drag_involves :: proc(w: ^Window, id: platform.Window_Id) -> bool {
+drag_involves :: proc(w: ^Window, id: input.Window_Id) -> bool {
 	a := drag_active(w)
 	if a == nil {return false}
 	if drag_destination_window(a.destination) == id {return true}
@@ -368,8 +368,8 @@ when AIO_CONTROL {
 		pane, tab:                      bool,
 		shown, root, new_tab, tear_off: bool,
 		// A pane drag's visited window; the window a tab drag offers its tabs to.
-		window:                         platform.Window_Id,
-		preview:                        platform.Window_Id,
+		window:                         input.Window_Id,
+		preview:                        input.Window_Id,
 		thumbnail:                      Drag_Thumbnail,
 		ghost:                          [4]f32,
 	}

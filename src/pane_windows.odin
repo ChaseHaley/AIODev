@@ -1,5 +1,6 @@
 package main
 
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "core:log"
@@ -54,7 +55,7 @@ pane_preview_workspace_discard :: proc(app: ^App, workspace: ^Workspace) {
 	}
 }
 
-pane_window_preview_discard :: proc(app: ^App, id: platform.Window_Id) {
+pane_window_preview_discard :: proc(app: ^App, id: input.Window_Id) {
 	preview := window_find(app, id)
 	if preview == nil || preview.phase != .Preparing {return}
 	workspace_id := preview.workspace.id
@@ -244,7 +245,7 @@ pane_to_window :: proc(
 	source_window: ^Window,
 	source: ^Tab,
 	node: layout.Node_Id,
-	preview_id: platform.Window_Id,
+	preview_id: input.Window_Id,
 ) -> bool {
 	preview := window_find(app, preview_id)
 	home, linked, found := pane_link_origin(app, source, node)

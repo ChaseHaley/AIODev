@@ -1,7 +1,7 @@
 package main
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
@@ -452,7 +452,7 @@ status_inbox_hit :: proc(app: ^App, w: ^Window, items: []Status_Item, scroll, x,
 	return index >= 0 && index < len(items) ? index : -1
 }
 
-status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+status_inbox_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	inbox, open := w.status.inbox.?
 	if !e.pressed || !open {return}
 	gesture_swallow(w, e.button, .Status_Inbox)
@@ -508,7 +508,7 @@ status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
 	w.dirty = true
 }
 
-status_inbox_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+status_inbox_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	inbox, open := &w.status.inbox.?
 	if !e.pressed || !open {return}
 	items := status_items(app, w)

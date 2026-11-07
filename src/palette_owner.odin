@@ -2,10 +2,10 @@ package main
 
 import "aio:commands"
 import "aio:font"
+import "aio:input"
 import "aio:layout"
 import "aio:settings"
 import "aio:term"
-import "aio:platform"
 import "aio:ui"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
@@ -15,8 +15,8 @@ Palette_Owner_State :: union {
 	Palette_Closing,
 }
 
-Palette_Open :: struct {window: platform.Window_Id}
-Palette_Closing :: struct {window: platform.Window_Id}
+Palette_Open :: struct {window: input.Window_Id}
+Palette_Closing :: struct {window: input.Window_Id}
 
 palette_owner_state :: proc(app: ^App) -> Palette_Owner_State {
 	owner, owned := app.palette_owner.?
@@ -26,7 +26,7 @@ palette_owner_state :: proc(app: ^App) -> Palette_Owner_State {
 }
 
 // Zero means unowned at the external window-id boundary, not in the stored owner.
-palette_owner_id :: proc(app: ^App) -> platform.Window_Id {
+palette_owner_id :: proc(app: ^App) -> input.Window_Id {
 	switch state in palette_owner_state(app) {
 	case nil: return 0
 	case Palette_Open: return state.window

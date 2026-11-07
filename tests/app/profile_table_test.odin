@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -178,7 +179,7 @@ profile_file_lacks :: proc(path, prefix: string) -> bool {
 }
 
 @(private)
-profile_press :: proc(f: ^Profile_Fixture, key: platform.Key_Event) {
+profile_press :: proc(f: ^Profile_Fixture, key: input.Key_Event) {
 	e := key
 	e.pressed = true
 	w := f.state.windows[0]

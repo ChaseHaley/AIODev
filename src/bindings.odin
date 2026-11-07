@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:input"
 import "aio:settings"
 import "base:runtime"
 import "core:fmt"
@@ -97,7 +98,7 @@ binding_report :: proc(
 		unsupported := false
 		for shortcut in storage[:n] {
 			if .Leader in shortcut.modifiers &&
-			   (shortcut.key == .Unidentified || is_modifier_key(shortcut.key)) {
+			   (shortcut.key == .Unidentified || input.is_modifier_key(shortcut.key)) {
 				unsupported = true
 			}
 		}
@@ -173,7 +174,7 @@ binding_report :: proc(
 		if !valid ||
 		   .Leader in leader.modifiers ||
 		   leader.key == .Unidentified ||
-		   is_modifier_key(leader.key) {
+		   input.is_modifier_key(leader.key) {
 			issue := Binding_Issue {
 				kind     = .Unsupported_Leader_Shortcut,
 				severity = .Invalid_Value,

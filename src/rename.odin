@@ -1,7 +1,7 @@
 package main
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
@@ -82,7 +82,7 @@ rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 	overlay_close(app, w)
 }
 
-rename_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+rename_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if !e.pressed {return}
 	if e.key == .Escape {rename_finish(app, w, false); return}
 	if e.key == .Enter || e.key == .Numpad_Enter {rename_finish(app, w, true); return}

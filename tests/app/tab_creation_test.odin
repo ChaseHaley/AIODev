@@ -2,7 +2,6 @@ package app_test
 
 import app "../../src"
 import "aio:input"
-import "aio:platform"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
@@ -55,7 +54,7 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 @(private="file")
 creation_click :: proc(s: ^app.App, w: ^app.Window, r: render.Rect, button: input.Mouse_Button) {
 	for pressed in ([?]bool{true, false}) {
-		app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = button, pressed = pressed,
+		app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = button, pressed = pressed,
 			x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
 	}
 }
@@ -94,7 +93,7 @@ profile.order = default, cmd, hidden
 		}
 		if !testing.expect(t, cmd >= 0) {return}
 		ui.menu_select(&w.profile_menu.menu, cmd)
-		app.handle_event(s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+		app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 		testing.expect(t, !app.profile_menu_shown(w))
 		testing.expect_value(t, len(w.workspace.tabs), count + 1)
 		testing.expect_value(t, app.focused_session(s, w).profile_id, "cmd")
@@ -105,7 +104,7 @@ profile.order = default, cmd, hidden
 		creation_click(s, w, plus, .Right)
 		testing.expect(t, app.profile_menu_shown(w))
 		testing.expect_value(t, len(w.workspace.tabs), count + 1)
-		app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+		app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 		testing.expect(t, !app.profile_menu_shown(w))
 		testing.expect_value(t, app.gesture_rail_pressed(w), -1)
 		creation_click(s, w, plus, .Left)

@@ -54,13 +54,13 @@ confirmation_open_subject :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window
 
 @(private="file")
 confirmation_test_key :: proc(state: ^app.App, w: ^app.Window, key: input.Key) {
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, pressed = true})
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, pressed = false})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, pressed = true})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, pressed = false})
 }
 
 @(private="file")
 confirmation_test_mouse :: proc(state: ^app.App, w: ^app.Window, pressed: bool, x, y: f32) {
-	app.handle_event(state, platform.Mouse_Button_Event{
+	app.handle_event(state, input.Mouse_Button_Event{
 		window = w.id, button = .Left, pressed = pressed, x = i32(x), y = i32(y),
 	})
 }
@@ -81,7 +81,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		app.update_motion(state)
 		testing.expect_value(t, c.motion.value, f32(1))
 		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, c.extended, c.show_option)
-		app.handle_event(state, platform.Mouse_Move_Event{
+		app.handle_event(state, input.Mouse_Move_Event{
 			window = w.id, x = i32(l.accept.x + 10), y = i32(l.accept.y + 10),
 		})
 		app.update_motion(state)

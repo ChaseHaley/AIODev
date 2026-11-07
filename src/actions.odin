@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:input"
 import "aio:layout"
 import "aio:markdown"
 import "aio:platform"
@@ -470,7 +471,7 @@ palette_action_mode :: proc(action: Action) -> ui.Palette_Mode {
 	}
 }
 
-shortcut_action :: proc(app: ^App, e: platform.Key_Event) -> (Action, bool) {
+shortcut_action :: proc(app: ^App, e: input.Key_Event) -> (Action, bool) {
 	if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted);
 	   command != nil {
 		return Action(command.id), true
@@ -1030,7 +1031,7 @@ on_find_outcome :: proc(app: ^App, w: ^Window, target: Find_Target, outcome: ui.
 }
 
 // A key while the bar has the keyboard edits the query; none reach the pane.
-find_bar_key :: proc(app: ^App, w: ^Window, e, logical: platform.Key_Event) {
+find_bar_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 	outcome: ui.Find_Outcome
 	switch clipboard_chord(logical) {
 	case .Copy:

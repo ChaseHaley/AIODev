@@ -3,6 +3,7 @@ package ui
 import "aio:commands"
 import "aio:fuzzy"
 import "aio:glyphs"
+import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "base:runtime"
@@ -887,7 +888,7 @@ edited :: proc(p: ^Palette, registry: ^commands.Registry, change: Field_Change) 
 palette_key :: proc(
 	p: ^Palette,
 	registry: ^commands.Registry,
-	e: platform.Key_Event,
+	e: input.Key_Event,
 ) -> (
 	Outcome,
 	commands.Command_Id,

@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
@@ -102,7 +103,7 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	for row, i in other.workspace_picker.rows {
 		if row.id == original.id {other.workspace_picker.selected = i; break}
 	}
-	app.handle_event(&state, platform.Key_Event{window = other.id, key = .Enter, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = other.id, key = .Enter, pressed = true})
 	testing.expect(t, app.window_find(&state, other_id) == nil)
 	testing.expect(t, app.workspace_find(&state, settings_id) == nil)
 	testing.expect_value(t, len(state.sessions), 3)

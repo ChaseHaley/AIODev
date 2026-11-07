@@ -1,7 +1,7 @@
 package ui
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "base:runtime"
 
@@ -235,7 +235,7 @@ Menu_Outcome :: enum {
 }
 
 // Closed asks the owner to close the menu; whether it shows is the owner's state.
-menu_key :: proc(m: ^Menu, e: platform.Key_Event) -> Menu_Outcome {
+menu_key :: proc(m: ^Menu, e: input.Key_Event) -> Menu_Outcome {
 	if !e.pressed {return .None}
 	if step := list_step(e); step != 0 {
 		menu_step(m, step)

@@ -1,9 +1,9 @@
 package ui
 
-import "aio:platform"
+import "aio:input"
 
 // Callers supply logical keys and own wrapping, clamping and paging.
-list_step :: proc(e: platform.Key_Event) -> int {
+list_step :: proc(e: input.Key_Event) -> int {
 	if !e.pressed {return 0}
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	#partial switch e.key {

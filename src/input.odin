@@ -17,39 +17,21 @@ TRAY_QUIT :: 2
 @(private)
 WHEEL_LINES :: 3
 
-@(private)
-is_modifier_key :: proc(key: input.Key) -> bool {
-	#partial switch key {
-	case .Shift_Left,
-	     .Shift_Right,
-	     .Control_Left,
-	     .Control_Right,
-	     .Alt_Left,
-	     .Alt_Right,
-	     .Meta_Left,
-	     .Meta_Right,
-	     .Caps_Lock,
-	     .Num_Lock:
-		return true
-	}
-	return false
-}
-
 handle_event :: proc(app: ^App, event: platform.Event) {
 	switch e in event {
-	case platform.Key_Event:
+	case input.Key_Event:
 		if w := window_find(app, e.window); w != nil {
 			on_key(app, w, e)
 		}
-	case platform.Text_Event:
+	case input.Text_Event:
 		if w := window_find(app, e.window); w != nil {
 			on_text(app, w, e.text)
 		}
-	case platform.Mouse_Button_Event:
+	case input.Mouse_Button_Event:
 		if w := window_find(app, e.window); w != nil {
 			gesture_button(app, w, e)
 		}
-	case platform.Mouse_Move_Event:
+	case input.Mouse_Move_Event:
 		if w := window_find(app, e.window); w != nil {
 			x, y := f32(e.x), f32(e.y)
 			if w.pointer != ([2]f32{x, y}) && w.gloss_hovered {w.dirty = true}
@@ -83,7 +65,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			}
 			w.dirty = true
 		}
-	case platform.Mouse_Wheel_Event:
+	case input.Mouse_Wheel_Event:
 		if w := window_find(app, e.window); w != nil {
 			on_wheel(app, w, e)
 		}
@@ -174,7 +156,7 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 }
 
 @(private)
-on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if w.phase == .Preparing {return}
 	// Every surface ignores releases, so a consumed press's release is dropped before routing.
 	if key_release_suppressed(w, e) {return}
@@ -335,7 +317,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 			}
 			return
 		}
-		if !is_modifier_key(e.key) {
+		if !input.is_modifier_key(e.key) {
 			if term.has_selection(entry.session) {
 				term.clear_selection(entry.session)
 			}
@@ -441,7 +423,7 @@ reports_mouse :: proc(entry: ^Session_Entry, modifiers: input.Modifiers) -> bool
 }
 
 @(private)
-on_wheel :: proc(app: ^App, w: ^Window, e: platform.Mouse_Wheel_Event) {
+on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 	if w.phase == .Preparing {return}
 	if drag_wheel(app, w, e.delta_y) {return}
 	kind := overlay_kind(app, w)
@@ -579,8 +561,8 @@ Leader_Result :: enum {
 
 // Every surface that takes keys calls this first, except while a shortcut field records keys.
 @(private)
-leader_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> Leader_Result {
-	if !e.pressed || is_modifier_key(e.key) {return .None}
+leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
+	if !e.pressed || input.is_modifier_key(e.key) {return .None}
 	leader, enabled := app.leader.?
 	is_leader := enabled && commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted)
 	// A held leader's repeats keep the chord armed.
@@ -610,7 +592,7 @@ Suppressed_Keys :: [input.Key]bool
 
 // The only writer of the suppression on a press: the surface consumed this key.
 @(private)
-key_suppress :: proc(w: ^Window, e: platform.Key_Event) {
+key_suppress :: proc(w: ^Window, e: input.Key_Event) {
 	if e.pressed {w.suppressed[e.key] = true}
 }
 
@@ -621,7 +603,7 @@ key_suppressed :: proc(w: ^Window, key: input.Key) -> bool {
 // Every key event passes here first. A release of a suppressed key ends its suppression and is
 // consumed; a fresh press supersedes a suppression whose release went to another window.
 @(private)
-key_release_suppressed :: proc(w: ^Window, e: platform.Key_Event) -> bool {
+key_release_suppressed :: proc(w: ^Window, e: input.Key_Event) -> bool {
 	held := w.suppressed[e.key]
 	if !e.repeat {w.suppressed[e.key] = false}
 	return held && !e.pressed

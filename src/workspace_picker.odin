@@ -1,5 +1,6 @@
 package main
 
+import "aio:input"
 import "aio:platform"
 import "core:math"
 import "aio:ui"
@@ -215,7 +216,7 @@ workspace_picker_chip_press :: proc(app: ^App, w: ^Window, time_ns: i64) {
 	workspace_picker_list_set(w, Workspace_Chip_Pressed{time_ns})
 }
 
-workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	p := &w.workspace_picker
 	if !e.pressed {
 		ui.field_release(&p.query)
@@ -253,7 +254,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 	}
 }
 
-workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+workspace_picker_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 	if workspace_order_hover(app, w, e) {return}
 	if workspace_row_hover(app, w, e) {return}
 	p := &w.workspace_picker

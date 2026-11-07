@@ -1,7 +1,7 @@
 package main
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:ui"
 import "core:strings"
@@ -81,7 +81,7 @@ tooltip_store :: proc(w: ^Window, label: string) -> string {
 	return string(w.tooltip_text[:copy(w.tooltip_text[:], label)])
 }
 
-tooltip_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+tooltip_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if e.buttons != {} {tooltip_cancel(w); return}
 	label := tooltip_label(app, w, owner, f32(e.x), f32(e.y))
 	point := [2]f32{f32(e.x), f32(e.y)}

@@ -1,5 +1,6 @@
 package platform
 
+import "aio:input"
 import "core:log"
 import w "core:sys/windows"
 
@@ -54,7 +55,7 @@ taskbar_destroy :: proc(p: ^Platform) {
 }
 
 // Shows progress on the window's taskbar button. `percent` is ignored for None and Indeterminate.
-window_set_progress :: proc(p: ^Platform, id: Window_Id, state: Progress_State, percent: int) -> Error {
+window_set_progress :: proc(p: ^Platform, id: input.Window_Id, state: Progress_State, percent: int) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	taskbar, err := taskbar_list(p)

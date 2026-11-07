@@ -184,13 +184,13 @@ find_toggles_close_and_focus_respond_without_matches :: proc(t: ^testing.T) {
 	testing.expect_value(t, click(&f, l, l.regex_toggle), Outcome.Changed)
 	testing.expect(t, f.case_sensitive && f.regex)
 	testing.expect_value(t, click(&f, l, l.older), Outcome.Moved)
-	alt :: proc(k: input.Key) -> platform.Key_Event { return {key = k, modifiers = {.Alt}, pressed = true, text = "c"} }
+	alt :: proc(k: input.Key) -> input.Key_Event { return {key = k, modifiers = {.Alt}, pressed = true, text = "c"} }
 	testing.expect_value(t, ui.find_key(&f, alt(.C)), Outcome.Changed)
 	testing.expect_value(t, ui.find_key(&f, alt(.R)), Outcome.Changed)
 	testing.expect(t, !f.case_sensitive && !f.regex)
 	testing.expect_value(t, ui.field_string(&f.query), "")
 	// AltGr arrives as Control+Alt and types its character.
-	altgr := platform.Key_Event{key = .C, modifiers = {.Control, .Alt}, pressed = true, text = "\u00a9"}
+	altgr := input.Key_Event{key = .C, modifiers = {.Control, .Alt}, pressed = true, text = "\u00a9"}
 	testing.expect_value(t, ui.find_key(&f, altgr), Outcome.Changed)
 	testing.expect(t, !f.case_sensitive)
 	testing.expect_value(t, ui.field_string(&f.query), "\u00a9")
@@ -213,9 +213,9 @@ find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 	ui.find_init(&f)
 	defer ui.find_destroy(&f)
 	Outcome :: ui.Find_Outcome
-	up := platform.Key_Event{key = .Arrow_Up, pressed = true}
-	down := platform.Key_Event{key = .Arrow_Down, pressed = true}
-	enter := platform.Key_Event{key = .Enter, pressed = true}
+	up := input.Key_Event{key = .Arrow_Up, pressed = true}
+	down := input.Key_Event{key = .Arrow_Down, pressed = true}
+	enter := input.Key_Event{key = .Enter, pressed = true}
 	ui.find_open(&f, &h)
 	ui.find_text(&f, "alpha")
 	ui.find_key(&f, enter, &h)
@@ -272,9 +272,9 @@ find_history_browsing_frees_its_draft_when_it_ends :: proc(t: ^testing.T) {
 	tracking: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&tracking, context.allocator)
 	defer mem.tracking_allocator_destroy(&tracking)
-	up := platform.Key_Event{key = .Arrow_Up, pressed = true}
-	down := platform.Key_Event{key = .Arrow_Down, pressed = true}
-	enter := platform.Key_Event{key = .Enter, pressed = true}
+	up := input.Key_Event{key = .Arrow_Up, pressed = true}
+	down := input.Key_Event{key = .Arrow_Down, pressed = true}
+	enter := input.Key_Event{key = .Enter, pressed = true}
 	ui.find_open(&f, &h)
 	ui.find_text(&f, "older")
 	ui.find_blur(&f, &h)

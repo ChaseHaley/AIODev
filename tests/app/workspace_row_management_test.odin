@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:testing"
 import "core:time"
@@ -129,7 +130,7 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	if !workspace134_init(t, &f) { return }
 	s, w := &f.state, &f.w
 	button := app.workspace_picker_menu_button_rect(w, 1)
-	app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(button.x+16), y = i32(button.y+16)})
 	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Menu), f.target.id)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
@@ -144,7 +145,7 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	testing.expect_value(t, question.workspace, f.target.id)
 	testing.expect_value(t, question.owner, f.owner.id)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
-	app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, app.confirmation_current(w) == nil)
 	testing.expect_value(t, len(s.workspaces), 2)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
@@ -210,7 +211,7 @@ workspace134_inline_rename_edits_target_cancel_invalid_and_failure :: proc(t: ^t
 	testing.expect(t, app.workspace_picker_target(&w.workspace_picker, .Rename) == 0 && !app.rename_shown(w))
 	app.workspace_row_rename_open(s, w, f.target.id)
 	app.workspace_picker_text(s, w, "Cancel outside")
-	app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = 599, y = 399})
+	app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = 599, y = 399})
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker) && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
 	testing.expect_value(t, f.target.name, "My project")
 	app.workspace_picker_open(s, w)
@@ -357,11 +358,11 @@ workspace_ellipsis_hover_tracks_only_its_button :: proc(t: ^testing.T) {
 	s, w := &f.state, &f.w
 	row := app.workspace_picker_row_rect(w, 1)
 	button := app.workspace_picker_menu_button_rect(w, 1)
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
 	testing.expect_value(t, w.workspace_picker.menu_hover, w.workspace_picker.rows[1].id)
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(row.x+8), y = i32(row.y+row.height/2)})
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(row.x+8), y = i32(row.y+row.height/2)})
 	testing.expect_value(t, w.workspace_picker.menu_hover, u32(0))
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
 	testing.expect_value(t, w.workspace_picker.menu_hover, w.workspace_picker.rows[1].id)
 	app.handle_event(s, platform.Mouse_Leave_Event{window = w.id})
 	testing.expect_value(t, w.workspace_picker.menu_hover, u32(0))
@@ -473,12 +474,12 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 				testing.expect(t, !app.rename_shown(w) && w.workspace == f.current)
 				if rename {
 					frame := ui.field_box_text_rect(app.workspace_row_rename_box(w))
-					app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+					app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 						x = i32(frame.x), y = i32(sample.y+16*scale)})
 					testing.expect_value(t, w.rename.cursor, 0)
 					app.workspace_picker_pointer(s, w, frame.x+frame.width, false, true)
 					testing.expect_value(t, ui.field_selected_text(&w.rename), f.target.name)
-					app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = false,
+					app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = false,
 						x = i32(frame.x+frame.width), y = i32(sample.y+16*scale)})
 					testing.expect(t, !w.rename.dragging)
 				}

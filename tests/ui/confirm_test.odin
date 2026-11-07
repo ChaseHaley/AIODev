@@ -1,11 +1,11 @@
 package ui_test
 
+import "aio:input"
 import "core:testing"
-import "aio:platform"
 import "aio:ui"
 
 @(private="file")
-press :: proc(key: platform.Key_Event) -> platform.Key_Event {
+press :: proc(key: input.Key_Event) -> input.Key_Event {
 	e := key
 	e.pressed = true
 	return e

@@ -1,8 +1,8 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
@@ -34,7 +34,7 @@ tab_window_kept_index :: proc(workspace: ^Workspace) -> int {
 // Tabs another window's drag would add here: its tabs open a gap at `slot`, and a ghost shows them landing.
 // A count of 0 is no gap. tab_incoming_set is the only writer, driven by the dragging window's destination.
 Tab_Incoming :: struct {
-	source:      platform.Window_Id,
+	source:      input.Window_Id,
 	count, slot: int,
 	ghost:       ui.Motion,
 }
@@ -73,7 +73,7 @@ tab_drop_slot :: proc(app: ^App, w: ^Window, incoming: int, x, y: f32) -> int {
 }
 
 // Opens, moves or, with a count of 0, closes the gap of window `id` for an offer of tabs.
-tab_incoming_set :: proc(app: ^App, id: platform.Window_Id, offer: Tab_Incoming) {
+tab_incoming_set :: proc(app: ^App, id: input.Window_Id, offer: Tab_Incoming) {
 	w := window_find(app, id)
 	if w == nil {return}
 	incoming := &w.tab_incoming

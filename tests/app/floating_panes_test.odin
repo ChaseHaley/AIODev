@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:strings"
 import "core:testing"
 import app "../../src"
@@ -86,13 +87,13 @@ float_frame :: proc(w: ^app.Window) -> layout.Rect {
 float_button :: proc(s: ^app.App, w: ^app.Window, x, y: f32, pressed: bool) {
 	app.handle_event(
 		s,
-		platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = pressed, x = i32(x), y = i32(y)},
+		input.Mouse_Button_Event{window = w.id, button = .Left, pressed = pressed, x = i32(x), y = i32(y)},
 	)
 }
 
 @(private = "file")
 float_move :: proc(s: ^app.App, w: ^app.Window, x, y: f32, held := true) {
-	e := platform.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)}
+	e := input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)}
 	if held {e.buttons = {.Left}}
 	app.handle_event(s, e)
 }

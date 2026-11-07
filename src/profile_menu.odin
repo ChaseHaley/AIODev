@@ -1,8 +1,8 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
@@ -182,7 +182,7 @@ profile_menu_choose :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-profile_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
+profile_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	if !profile_menu_shown(w) {return false}
 	switch ui.menu_key(&w.profile_menu.menu, e) {
 	case .None:
@@ -215,7 +215,7 @@ profile_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 	)
 }
 
-profile_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+profile_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if !profile_menu_shown(w) {return false}
 	if !e.pressed {
 		w.dirty = true

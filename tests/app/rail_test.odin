@@ -1,9 +1,9 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
 import "aio:ui"
 
 @(private="file")
@@ -128,7 +128,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	app.focus_init(&w)
 	append(&state.windows, &w)
 	testing.expect(t, app.rail_overlay(&w))
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.rail_overlay(&w))
 	testing.expect(t, !app.rail_visible(&w))
 
@@ -137,7 +137,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	row := app.rail_row_rect_for_tab(&w, 0)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -149,7 +149,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	testing.expect(t, !app.rail_overlay(&w))
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			x = i32(row.x + 20),
@@ -233,7 +233,7 @@ rail_close_and_multiselect_keep_the_selected_group_and_remaining_tab :: proc(t: 
 	}
 	append(&state.windows, &w)
 	row1 := app.rail_row_rect_for_tab(&w, 1)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row1.x + 20), y = i32(row1.y + 16), modifiers = {.Control}})
 	testing.expect(t, one.marked && two.marked && !three.marked)
 	testing.expect_value(t, workspace.selected, 1)
@@ -242,10 +242,10 @@ rail_close_and_multiselect_keep_the_selected_group_and_remaining_tab :: proc(t: 
 	if !testing.expect(t, ok) {return}
 	row_index := app.rail_row_index_for_tab(w.rail_rows[:], workspace, 1)
 	close := ui.rail_close_rect(layout_state, row_index, w.scale)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x + close.width / 2), y = i32(close.y + close.height / 2)})
 	testing.expect(t, ui.armed_down(w.tab_close_armed))
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 		x = i32(close.x + close.width / 2), y = i32(close.y + close.height / 2)})
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	if !testing.expect_value(t, len(workspace.tabs), 1) {return}

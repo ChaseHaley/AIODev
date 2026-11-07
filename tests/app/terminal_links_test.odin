@@ -78,7 +78,7 @@ link_move :: proc(t: ^testing.T, f: ^Palette_Fixture, column, row: int) -> bool 
 	s, w := &f.state, f.state.windows[0]
 	point, ok := link_point(t, f, column, row)
 	if !ok {return false}
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = point.x, y = point.y})
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = point.x, y = point.y})
 	return true
 }
 
@@ -96,7 +96,7 @@ link_click :: proc(
 	if control {modifiers = {.Control}}
 	app.handle_event(
 		s,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -108,7 +108,7 @@ link_click :: proc(
 	)
 	app.handle_event(
 		s,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = false,
@@ -147,7 +147,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 	if !grid_ok {return}
 	app.handle_event(
 		s,
-		platform.Mouse_Move_Event {
+		input.Mouse_Move_Event {
 			window = w.id,
 			x = grid_point.x - i32(g.cell_width / 2) - 1,
 			y = grid_point.y,
@@ -175,7 +175,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 	if !point_ok {return}
 	app.handle_event(
 		s,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -188,7 +188,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 	testing.expect(t, app.selection_active(w), "a plain click still begins the selection gesture")
 	app.handle_event(
 		s,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = false,

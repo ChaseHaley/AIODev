@@ -1,7 +1,7 @@
 package main
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:ui"
 
@@ -72,7 +72,7 @@ workspace_icon_picker_hit :: proc(w: ^Window, x, y: f32) -> int {
 	return -1
 }
 
-workspace_icon_picker_key :: proc(w: ^Window, e: platform.Key_Event) -> bool {
+workspace_icon_picker_key :: proc(w: ^Window, e: input.Key_Event) -> bool {
 	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	g := workspace_icon_picker_layout(w)

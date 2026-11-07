@@ -1,5 +1,6 @@
 package platform_test
 
+import "aio:input"
 import "core:testing"
 import w "core:sys/windows"
 import p "aio:platform"
@@ -69,7 +70,7 @@ window_hit_testing_respects_owned_topmost_and_foreign_windows :: proc(t: ^testin
 	if !testing.expect_value(t, second_error, p.Error.None) { return }
 	other, other_error := p.window_create(&foreign_platform, {hidden = true, width = 240, height = 160})
 	if !testing.expect_value(t, other_error, p.Error.None) { return }
-	for owner in ([?]struct { platform: ^p.Platform, id, expected: p.Window_Id }{
+	for owner in ([?]struct { platform: ^p.Platform, id, expected: input.Window_Id }{
 		{&platform, first, first}, {&platform, second, second}, {&foreign_platform, other, 0},
 	}) {
 		testing.expect_value(t, p.window_set_position(owner.platform, owner.id, 80, 80), p.Error.None)
@@ -90,7 +91,7 @@ window_hit_testing_respects_owned_topmost_and_foreign_windows :: proc(t: ^testin
 	}
 	hit, _, _, hit_error := p.window_at_point(&platform, -30000, -30000)
 	testing.expect_value(t, hit_error, p.Error.None)
-	testing.expect_value(t, hit, p.Window_Id(0))
+	testing.expect_value(t, hit, input.Window_Id(0))
 }
 
 @(test)

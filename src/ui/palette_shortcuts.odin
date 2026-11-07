@@ -2,7 +2,7 @@ package ui
 
 import "aio:commands"
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "core:fmt"
 
@@ -85,7 +85,7 @@ palette_binding_saved :: proc(p: ^Palette, saved: bool) {
 }
 
 @(private)
-palette_binding_key :: proc(p: ^Palette, binding: ^Shortcut_Edit, e: platform.Key_Event) -> Outcome {
+palette_binding_key :: proc(p: ^Palette, binding: ^Shortcut_Edit, e: input.Key_Event) -> Outcome {
 	return palette_binding_outcome(p, binding, editor_key(&binding.editor, e))
 }
 

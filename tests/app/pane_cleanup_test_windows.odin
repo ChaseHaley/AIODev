@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
@@ -108,8 +109,8 @@ pane_cleanup_committed_final_pane_removes_source_registry_and_view :: proc(t: ^t
 			testing.expect_value(t, app.verify_drive(state, control.Window_Select{u64(window_id)}),
 				control.Error.Invalid_Argument)
 			testing.expect(t, app.verify_window(state) == f.destination)
-			testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))
-			testing.expect_value(t, state.verify.mouse_window, platform.Window_Id(0))
+			testing.expect_value(t, state.verify.target_window, input.Window_Id(0))
+			testing.expect_value(t, state.verify.mouse_window, input.Window_Id(0))
 			testing.expect(t, state.verify.buttons == {})
 		}
 		testing.expect(t, !state.tray_hint_shown)

@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:fmt"
 import "core:testing"
 import app "../../src"
@@ -74,7 +75,7 @@ when app.AIO_CONTROL {
 		testing.expect(t, app.verify_window(&state) == &second)
 		testing.expect(t, first.focused && !second.focused)
 		testing.expect_value(t, app.verify_drive(&state, control.Window_Select{99}), control.Error.Invalid_Argument)
-		testing.expect_value(t, state.verify.target_window, platform.Window_Id(22))
+		testing.expect_value(t, state.verify.target_window, input.Window_Id(22))
 		app.verify_end(&state.verify)
 		testing.expect(t, app.verify_window(&state) == &second)
 		state.verify.mouse_window, state.verify.buttons = second.id, {.Left}
@@ -85,8 +86,8 @@ when app.AIO_CONTROL {
 		testing.expect(t, !app.drag_held(&second))
 		ordered_remove(&state.windows, 1)
 		testing.expect(t, app.verify_window(&state) == &first)
-		testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))
-		testing.expect_value(t, state.verify.mouse_window, platform.Window_Id(0))
+		testing.expect_value(t, state.verify.target_window, input.Window_Id(0))
+		testing.expect_value(t, state.verify.mouse_window, input.Window_Id(0))
 		testing.expect(t, state.verify.buttons == {})
 		first.focused = false
 		testing.expect(t, app.verify_window(&state) == &first)

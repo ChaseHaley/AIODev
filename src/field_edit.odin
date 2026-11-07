@@ -1,5 +1,6 @@
 package main
 
+import "aio:input"
 import "aio:platform"
 import "aio:ui"
 
@@ -9,7 +10,7 @@ Field_Edit :: struct {
 	pasted: bool,
 }
 
-field_edit_key :: proc(app: ^App, field: ^ui.Text_Field, e: platform.Key_Event) -> Field_Edit {
+field_edit_key :: proc(app: ^App, field: ^ui.Text_Field, e: input.Key_Event) -> Field_Edit {
 	switch clipboard_chord(e) {
 	case .Copy:
 		clipboard_copy(app, ui.field_selected_text(field))
@@ -37,7 +38,7 @@ Clipboard_Chord :: enum {
 
 // Clipboard chords for text fields, including the terminal's Ctrl+Shift forms.
 @(private)
-clipboard_chord :: proc(e: platform.Key_Event) -> Clipboard_Chord {
+clipboard_chord :: proc(e: input.Key_Event) -> Clipboard_Chord {
 	if !e.pressed {return .None}
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	control := modifiers == {.Control} || modifiers == {.Control, .Shift}

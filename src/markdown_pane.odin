@@ -2,6 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:links"
 import "aio:markdown"
@@ -424,12 +425,12 @@ markdown_open_focused :: proc(app: ^App, w: ^Window, path: string) {
 // per purpose. The tick acts on a dialog's answer and closes it as soon as it is finished.
 File_Dialog :: struct {
 	pick:   ^platform.File_Pick,
-	window: platform.Window_Id,
+	window: input.Window_Id,
 }
 
 // A dialog's answer is for the window it was opened from, so closing that window closes the dialog
 // unanswered instead of leaving it on screen without its owner.
-file_dialogs_window_closed :: proc(app: ^App, id: platform.Window_Id) {
+file_dialogs_window_closed :: proc(app: ^App, id: input.Window_Id) {
 	if dialog, open := app.markdown_pick.?; open && dialog.window == id {markdown_pick_close(app)}
 	if dialog, open := app.document_pick.?; open && dialog.window == id {document_pick_close(app)}
 }
@@ -665,7 +666,7 @@ markdown_select_all :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-markdown_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	pane_header_cancel(w)
 	key_suppress(w, e)
 	has_find := ui.find_has_keyboard(&w.find)
@@ -757,7 +758,7 @@ markdown_hover_set :: proc(w: ^Window, next: Markdown_Hover) {
 	if w.markdown_hover != next {w.markdown_hover, w.dirty = next, true}
 }
 
-markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	if w.markdown_gesture != nil {
 		markdown_held_move(app, w, x, y)
@@ -826,7 +827,7 @@ markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	}
 }
 
-markdown_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
 	pane, shown := markdown_under_pointer(app, w, x, y)
 	if shown.content.kind != .Markdown {return}
@@ -853,7 +854,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	w.markdown_gesture = Markdown_Selecting{pane.id}
 }
 
-markdown_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+markdown_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left || w.markdown_gesture == nil {return false}
 	markdown_gesture_clear(app, w)
 	return true

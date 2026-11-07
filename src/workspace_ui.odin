@@ -1,7 +1,7 @@
 package main
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
@@ -391,7 +391,7 @@ workspace_picker_text :: proc(app: ^App, w: ^Window, value: string) {
 	workspace_picker_filter(app, w)
 }
 
-workspace_picker_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+workspace_picker_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	window_id := w.id
 	defer if window_find(app, window_id) == w {workspace_picker_layout_changed(w)}
 	if !e.pressed {return}

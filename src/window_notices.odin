@@ -1,6 +1,6 @@
 package main
 
-import "aio:platform"
+import "aio:input"
 import "aio:ui"
 
 window_notices_sync :: proc(app: ^App) {
@@ -13,7 +13,7 @@ window_notices_sync :: proc(app: ^App) {
 			target = w
 		}
 	}
-	id := target != nil ? target.id : platform.Window_Id(0)
+	id := target != nil ? target.id : input.Window_Id(0)
 	if app.notice_window == id {return}
 	app.notice_window = id
 	ui.notices_pointer_cancel(&app.notices)

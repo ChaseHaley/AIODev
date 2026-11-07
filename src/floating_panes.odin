@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -568,7 +569,7 @@ floating_drag_follow :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 
 // Moves while the float surface holds Left: the float or the capsule row follows the pointer. False when
 // no drag is held, so the move reaches the surfaces; a move without Left ends the drag the release missed.
-floating_pointer_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
+floating_pointer_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) -> bool {
 	switch _ in w.float_press {
 	case nil, Float_Button_Press:
 		return false
@@ -816,7 +817,7 @@ floating_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	return rect_contains(w.float_capsule_group, x, y)
 }
 
-floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	hover: Maybe(layout.Content)
 	header: Maybe(Float_Header_Spot)
@@ -844,7 +845,7 @@ floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	}
 }
 
-floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+floating_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	x, y := f32(e.x), f32(e.y)
 	if rect_contains(w.float_capsule_group, x, y) {
@@ -882,7 +883,7 @@ floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if grab, found := floating_grab(w, pane, x, y); found {w.float_press = Float_Resize{grab, edges}}
 }
 
-floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+floating_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
 	x, y := f32(e.x), f32(e.y)
 	switch p in w.float_press {

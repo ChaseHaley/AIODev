@@ -1,7 +1,7 @@
 package ui
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:settings"
 import "base:runtime"
@@ -312,7 +312,7 @@ editor_process_field_parts :: proc(row: ^Editor_Row, parts: Row_Parts, scale: f3
 }
 
 editor_process_key :: proc(
-	p: ^Editor, row: ^Editor_Row, e: platform.Key_Event,
+	p: ^Editor, row: ^Editor_Row, e: input.Key_Event,
 ) -> (Editor_Outcome, bool) {
 	if row == nil || row.kind != .Process_Group {return .None, false}
 	if .Control in e.modifiers && (e.key == .Arrow_Up || e.key == .Arrow_Down) {

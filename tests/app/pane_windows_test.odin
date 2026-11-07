@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
@@ -48,7 +49,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect(t, app.pane_drag_active(source_window) && !tear_off)
 	_, failed_preview := app.drag_active(source_window).preview.(app.Preview_Failed)
 	testing.expect(t, !failed_preview)
-	testing.expect_value(t, drag_preview(source_window), platform.Window_Id(0))
+	testing.expect_value(t, drag_preview(source_window), input.Window_Id(0))
 	testing.expect(t, app.pane_drag_release(&state, source_window))
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect_value(t, len(state.workspaces), 1)
@@ -134,7 +135,7 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect(t, app.pane_drag_move(&state, source_window, -30_000, -30_000, false))
 	_, tear_off = app.drag_destination(source_window).(app.Drop_Tear_Off)
 	testing.expect(t, !tear_off)
-	testing.expect_value(t, drag_preview(source_window), platform.Window_Id(0))
+	testing.expect_value(t, drag_preview(source_window), input.Window_Id(0))
 	testing.expect(t, app.window_find(&state, preview_id) == nil)
 	testing.expect(t, app.pane_drag_release(&state, source_window))
 	testing.expect_value(t, len(state.windows), 1)

@@ -1,11 +1,11 @@
 package app_test
 
+import "aio:input"
 import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:commands"
-import "aio:platform"
 import "aio:ui"
 
 @(private)
@@ -79,7 +79,7 @@ palette_mode_binding_survives_reload_and_opens_its_mode :: proc(t: ^testing.T) {
 
 	app.handle_event(
 		s,
-		platform.Key_Event {
+		input.Key_Event {
 			window = first.id,
 			key = .Digit_1,
 			modifiers = {.Control, .Alt},
@@ -123,7 +123,7 @@ palette_tab_activation_selects_the_tab_and_its_window :: proc(t: ^testing.T) {
 	if !testing.expect(t, palette_select_id(t, s, first_key)) {return}
 	app.handle_event(
 		s,
-		platform.Key_Event{window = first.id, key = .Enter, pressed = true},
+		input.Key_Event{window = first.id, key = .Enter, pressed = true},
 	)
 	testing.expect(t, !app.palette_active(s, first))
 	testing.expect_value(t, first_workspace.selected, 0)
@@ -133,7 +133,7 @@ palette_tab_activation_selects_the_tab_and_its_window :: proc(t: ^testing.T) {
 	if !testing.expect(t, palette_select_id(t, s, second_key)) {return}
 	app.handle_event(
 		s,
-		platform.Key_Event{window = first.id, key = .Enter, pressed = true},
+		input.Key_Event{window = first.id, key = .Enter, pressed = true},
 	)
 	testing.expect(t, !app.palette_active(s, first))
 	testing.expect_value(t, second_workspace.selected, 0)
@@ -156,7 +156,7 @@ palette_workspace_activation_follows_exclusive_ownership :: proc(t: ^testing.T) 
 	if !testing.expect(t, palette_select_id(t, s, u64(second_workspace.id))) {return}
 	app.handle_event(
 		s,
-		platform.Key_Event{window = first.id, key = .Enter, pressed = true},
+		input.Key_Event{window = first.id, key = .Enter, pressed = true},
 	)
 	testing.expect_value(t, app.window_for_workspace(s, second_workspace), second)
 	testing.expect_value(t, first.workspace, first_workspace)
@@ -166,7 +166,7 @@ palette_workspace_activation_follows_exclusive_ownership :: proc(t: ^testing.T) 
 	if !testing.expect(t, palette_select_id(t, s, u64(other.id))) {return}
 	app.handle_event(
 		s,
-		platform.Key_Event{window = first.id, key = .Enter, pressed = true},
+		input.Key_Event{window = first.id, key = .Enter, pressed = true},
 	)
 	testing.expect_value(t, first.workspace, other)
 	testing.expect_value(t, app.window_for_workspace(s, other), first)

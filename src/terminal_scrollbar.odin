@@ -1,7 +1,7 @@
 package main
 
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
@@ -42,7 +42,7 @@ terminal_scrollbar_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, e
 	if visible {ui.scrollbar_draw(&w.list, app.theme, bar, terminal_scrollbar_state(w, entry.id))}
 }
 
-terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if !e.pressed || e.button != .Left {return false}
 	x, y := f32(e.x), f32(e.y)
 	pane, found := layout.hit_test(w.panes[:], x, y)

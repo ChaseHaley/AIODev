@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -806,7 +807,7 @@ pane_drag_hover :: proc(
 // A pane drop's destination, resolved for the procs that carry it out.
 @(private)
 Pane_Drop :: struct {
-	window:              platform.Window_Id,
+	window:              input.Window_Id,
 	tab:                 ^Tab,
 	target:              layout.Node_Id,
 	direction:           layout.Direction,

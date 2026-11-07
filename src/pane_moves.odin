@@ -1,14 +1,14 @@
 package main
 
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 
 @(private)
 Pane_Move :: struct {
 	source: ^Tab,
 	workspace: ^Workspace,
-	destination: platform.Window_Id,
-	departed: [2]platform.Window_Id,
+	destination: input.Window_Id,
+	departed: [2]input.Window_Id,
 	count: int,
 }
 

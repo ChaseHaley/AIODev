@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
@@ -295,7 +296,7 @@ pane_drag_dropdown_cancel_gap_scroll_and_last_pane_guard :: proc(t: ^testing.T) 
 	testing.expect_value(t, held.row, -1)
 	testing.expect(t, app.drag_wheel(state, w, -1))
 	testing.expect_value(t, w.workspace_picker.scroll, 1)
-	app.handle_event(state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.drag_held(w) && !app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(w.workspace)), 2)
 	other := f.destination

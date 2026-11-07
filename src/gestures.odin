@@ -162,7 +162,7 @@ gesture_cancel :: proc(app: ^App, w: ^Window) -> bool {
 // Delivers a release to the surface recorded at its press. Completion never falls through to fresh hit
 // testing, even when its action removes w.
 @(private)
-gesture_complete :: proc(app: ^App, w: ^Window, capture: Gesture_Capture, e: platform.Mouse_Button_Event) {
+gesture_complete :: proc(app: ^App, w: ^Window, capture: Gesture_Capture, e: input.Mouse_Button_Event) {
 	switch c in capture {
 	case Gesture_Held:
 		if pointer_release(app, w, gesture_owner_target(c.owner), e) {return}
@@ -182,7 +182,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, capture: Gesture_Capture, e: pla
 // The shared completion of a release its surface declined: a confirmation, the palette, then pane
 // content and a pane drag the header began.
 @(private)
-gesture_finish :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+gesture_finish :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if confirmation_button(app, w, e) {return true}
 	w.dirty = true
 	x, y := f32(e.x), f32(e.y)
@@ -202,7 +202,7 @@ gesture_finish :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) ->
 	return false
 }
 
-gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if w.phase == .Preparing {return}
 	x, y := f32(e.x), f32(e.y)
 	if e.pressed {
@@ -248,7 +248,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 // A press on pane content focuses the pane, then reaches a settings page, a link, the selection or a
 // program that reports the mouse.
 @(private)
-content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+content_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
 	if !selection_active(w) {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
@@ -288,7 +288,7 @@ content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	}
 }
 
-gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
+gesture_move :: proc(app: ^App, w: ^Window, event: input.Mouse_Move_Event) {
 	if terminal_scrollbar_dragging(w) {terminal_scrollbar_move(app, w, f32(event.y)); return}
 	if w.phase == .Preparing {return}
 	e := event
@@ -343,7 +343,7 @@ pointer_held_target :: proc(w: ^Window, target: Pointer_Target) -> Pointer_Targe
 // Moves over terminal content: the text cursor, links, the selection and programs that report the
 // mouse. A button swallowed by another surface keeps the arrow and reaches no program.
 @(private)
-content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+content_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	swallowed := gesture_swallowing(w)
 	title := y < window_title_height(w)

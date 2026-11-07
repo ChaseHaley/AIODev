@@ -166,7 +166,7 @@ delete_fixture_destroy :: proc(t: ^testing.T, f: ^Delete_Fixture) {
 
 @(private="file")
 delete_key :: proc(state: ^app.App, w: ^app.Window, key: input.Key) {
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, pressed = true})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, pressed = true})
 }
 
 @(private="file")
@@ -210,11 +210,11 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 		case 2:
 			l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, true)
 			x, y := i32(l.cancel.x+l.cancel.width/2), i32(l.cancel.y+l.cancel.height/2)
-			app.handle_event(state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+			app.handle_event(state, input.Mouse_Button_Event{window = w.id, button = .Left,
 				pressed = true, x = x, y = y})
-			app.handle_event(state, platform.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = y})
+			app.handle_event(state, input.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = y})
 		case 3:
-			app.handle_event(state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true})
+			app.handle_event(state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true})
 		}
 		testing.expect(t, app.confirmation_current(w) == nil && w.workspace == workspace)
 		testing.expect_value(t, len(workspace.tabs), 3)

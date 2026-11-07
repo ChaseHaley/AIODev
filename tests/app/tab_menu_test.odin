@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:fmt"
 import "core:os"
 import "core:testing"
@@ -59,7 +60,7 @@ menu_fixture_destroy :: proc(f: ^Menu_Fixture) {
 	_ = platform.destroy(&f.state.platform)
 }
 
-menu_key :: proc(f: ^Menu_Fixture, key: platform.Key_Event) {
+menu_key :: proc(f: ^Menu_Fixture, key: input.Key_Event) {
 	e := key
 	e.window, e.pressed = f.w.id, true
 	app.handle_event(&f.state, e)
@@ -192,15 +193,15 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	menu_key(&f, {key = .Context_Menu})
 	w.width, w.height = 800, 600
 	row := app.tab_menu_row_rect(w, 2)
-	app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row.x+10), y = i32(row.y+row.height/2)})
 	testing.expect(t, app.tab_menu_shown(w) && !app.rename_shown(w))
 	menu_key(&f, {key = .Home})
-	app.handle_event(&f.state, platform.Mouse_Wheel_Event{window = w.id, delta_y = -1})
+	app.handle_event(&f.state, input.Mouse_Wheel_Event{window = w.id, delta_y = -1})
 	testing.expect_value(t, w.tab_menu.selected, 1)
-	app.handle_event(&f.state, platform.Mouse_Wheel_Event{window = w.id, delta_y = -1})
+	app.handle_event(&f.state, input.Mouse_Wheel_Event{window = w.id, delta_y = -1})
 	testing.expect_value(t, w.tab_menu.selected, 3)
-	app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = 799, y = 599})
 	testing.expect(t, !app.tab_menu_shown(w))
 	w.width, w.height = 0, 0

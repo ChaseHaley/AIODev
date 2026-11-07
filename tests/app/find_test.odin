@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -73,21 +74,21 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.find_is_open(&w.find)) { return }
 	target := app.rail_row_rect_for_tab(&w, 1)
 	x, y := i32(target.x + 20), i32(target.y + target.height / 2)
-	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
+	app.handle_event(&state, input.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
 	if !testing.expect(t, app.tab_drag_active(&w) && workspace.tabs[1] == &tabs[0]) { return }
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 	testing.expect(t, !app.drag_held(&w))
-	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y})
+	app.handle_event(&state, input.Mouse_Move_Event{window = w.id, x = x, y = y})
 	testing.expect(t, workspace.tabs[1] == &tabs[0])
 	testing.expect_value(t, workspace.selected, 1)
 	testing.expect(t, !ui.armed_down(w.find.armed))
 	layout_state, _ := app.rail_current_layout(&w)
 	row_index := app.rail_row_index_for_tab(w.rail_rows[:], &workspace, workspace.selected)
 	close := ui.rail_close_rect(layout_state, row_index, w.scale)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x+close.width/2), y = i32(close.y+close.height/2)})
 	if !testing.expect_value(t, ui.armed_target(w.tab_close_armed), workspace.selected) { return }
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	testing.expect_value(t, len(workspace.tabs), 2)
 	// Keep the divider regression independent when running against the known broken dispatcher.
@@ -97,11 +98,11 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	layout.dividers(w.tree, app.window_content_area(&state, &w), app.window_gap(&state, &w), &w.dividers)
 	if !testing.expect_value(t, len(w.dividers), 1) { return }
 	d := w.dividers[0].rect
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(d.x+d.width/2), y = 300, time_ns = 1_000_000_000})
 	if !testing.expect_value(t, divider_count(&w), 1) { return }
-	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
+	app.handle_event(&state, input.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 	testing.expect_value(t, divider_count(&w), 0)
 	testing.expect(t, !ui.armed_down(w.find.armed) && ui.find_is_open(&w.find))
 }
@@ -155,14 +156,14 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	defer ui.find_destroy(&other_window.find)
 	ui.find_open(&other_window.find)
 	append(&state.windows, &other_window)
-	app.handle_event(&state, platform.Text_Event{other_window.id, "OTHER138"})
+	app.handle_event(&state, input.Text_Event{other_window.id, "OTHER138"})
 	find_settle(t, other)
 	testing.expect(t, term.search_summary(other).progress != .Off)
 	ui.find_open(&w.find)
 	label, enabled := app.find_presentation(&w, &state.sessions[0])
 	testing.expect_value(t, label, "0 of 0")
 	testing.expect(t, !enabled)
-	app.handle_event(&state, platform.Text_Event{w.id, "MATCH138"})
+	app.handle_event(&state, input.Text_Event{w.id, "MATCH138"})
 	label, _ = app.find_presentation(&w, &state.sessions[0])
 	testing.expect(t, strings.contains(label, "Searching"))
 	find_settle(t, session)
@@ -172,65 +173,65 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	for expected in 0 ..< 4 {
 		l, _ := app.find_controls(&w, &state.sessions[0])
 		x, y := i32(l.older.x+16), i32(l.older.y+16)
-		app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y,
+		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y,
 			button = .Left, pressed = true})
-		app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
+		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 		testing.expect_value(t, term.search_summary(session).selected, expected%3)
 		testing.expect_value(t, term.search_summary(other).selected, -1)
 	}
 	l, _ := app.find_controls(&w, &state.sessions[0])
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.newer.x+16),
+		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.newer.x+16),
 			y = i32(l.newer.y+16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, term.search_summary(session).selected, 2)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect_value(t, term.search_summary(session).selected, 0)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, modifiers = {.Shift}, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, modifiers = {.Shift}, pressed = true})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
 	label, _ = app.find_presentation(&w, &state.sessions[0])
 	testing.expect_value(t, label, "3 of 3")
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left, pressed = true})
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = w.width-20, y = 20, button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = w.width-20, y = 20, button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
 	testing.expect(t, !ui.armed_down(w.find.armed))
 	testing.expect(t, !ui.armed_down(w.caption_armed))
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left, pressed = true})
 	w.dirty = false
 	app.handle_event(&state, platform.Capture_Lost_Event{w.id})
 	testing.expect(t, !ui.armed_down(w.find.armed) &&
 		ui.armed_target(w.find.armed) == .None && w.dirty)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left, pressed = true})
 	app.handle_event(&state, platform.Focus_Event{window = w.id, focused = false})
 	testing.expect(t, !ui.armed_down(w.find.armed) &&
 		ui.armed_target(w.find.armed) == .None && ui.find_is_open(&w.find))
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
-	app.handle_event(&state, platform.Text_Event{w.id, "absent"})
+	app.handle_event(&state, input.Text_Event{w.id, "absent"})
 	find_settle(t, session)
 	label, enabled = app.find_presentation(&w, &state.sessions[0])
 		testing.expect_value(t, label, "0 of 0")
 	testing.expect(t, !enabled)
 	l, _ = app.find_controls(&w, &state.sessions[0])
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
+		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 			y = i32(l.older.y+16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, term.search_summary(session).selected, -1)
 	testing.expect_value(t, term.search_summary(other).selected, -1)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
 		y = i32(l.older.y+16), button = .Left, pressed = true})
 	testing.expect(t, ui.armed_down(w.find.armed) && ui.armed_target(w.find.armed) == .None)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 5, y = 5, button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = 5, y = 5, button = .Left})
 	testing.expect(t, !ui.armed_down(w.find.armed))
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !ui.find_is_open(&w.find) && term.search_summary(session).progress == .Off)
 	bar, _ := term.scrollbar(session)
 	testing.expect_value(t, bar.offset+bar.len, bar.total)
@@ -273,29 +274,29 @@ find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T)
 
 	app.find_toggle(&state, &w, entry)
 	testing.expect(t, ui.find_has_keyboard(&w.find))
-	app.handle_event(&state, platform.Text_Event{w.id, "line_7$"})
+	app.handle_event(&state, input.Text_Event{w.id, "line_7$"})
 	testing.expect(t, !w.find.regex)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .R, modifiers = {.Alt}, pressed = true,
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .R, modifiers = {.Alt}, pressed = true,
 		text = "r"})
 	testing.expect(t, w.find.regex)
 	testing.expect_value(t, ui.field_string(&w.find.query), "line_7$")
 	find_settle(t, session)
 	testing.expect_value(t, term.search_summary(session).total, 1)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	scrolled := up(session)
 	testing.expect(t, scrolled > 0)
 
 	// A press on the terminal blurs the bar; it stays open and Escape is no longer its key.
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left,
 		pressed = true})
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = 200, y = 400, button = .Left})
 	testing.expect(t, ui.find_is_open(&w.find) && !ui.find_has_keyboard(&w.find))
 	testing.expect(t, term.search_summary(session).progress != .Off)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, ui.find_is_open(&w.find))
 	app.find_toggle(&state, &w, entry)
 	testing.expect(t, ui.find_has_keyboard(&w.find))
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !ui.find_is_open(&w.find) && term.search_summary(session).progress == .Off)
 	testing.expect_value(t, up(session), scrolled)
 
@@ -306,8 +307,8 @@ find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T)
 	testing.expect(t, term.search_summary(session).progress != .Off)
 	l, _ := app.find_controls(&w, entry)
 	x, y := i32(l.close.x+16), i32(l.close.y+16)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = true})
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = true})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 	testing.expect(t, !ui.find_is_open(&w.find))
 	testing.expect_value(t, up(session), scrolled)
 }

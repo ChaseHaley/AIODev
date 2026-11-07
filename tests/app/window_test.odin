@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -179,7 +180,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	when app.AIO_CONTROL {
 		app.window_close(&state, second)
 		testing.expect(t, app.verify_window(&state) == nil)
-		testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))
+		testing.expect_value(t, state.verify.target_window, input.Window_Id(0))
 		testing.expect_value(t, term.process_id(second_session), second_pid)
 		testing.expect_value(t, len(state.sessions), 3)
 	}

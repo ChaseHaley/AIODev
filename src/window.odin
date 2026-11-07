@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:perf"
 import "aio:platform"
@@ -31,7 +32,7 @@ Pane_View :: struct {
 }
 
 Window :: struct {
-	id: platform.Window_Id,
+	id: input.Window_Id,
 	surface: Window_Surface,
 	ui_text: ui.Text,
 	// The pointer's hold on a Markdown pane and what it is over; markdown_pane.odin writes both.
@@ -314,7 +315,7 @@ window_free :: proc(w: ^Window) {
 	free(w)
 }
 
-window_find :: proc(app: ^App, id: platform.Window_Id) -> ^Window {
+window_find :: proc(app: ^App, id: input.Window_Id) -> ^Window {
 	for w in app.windows {
 		if w.id == id {
 			return w

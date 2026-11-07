@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:platform"
 import "aio:ui"
 import "core:testing"
@@ -96,7 +97,7 @@ notices_fall_back_after_window_close_hide_minimize_and_preparation :: proc(t: ^t
 	testing.expect_value(t, s.notice_window, first.id)
 	first.phase = .Preparing
 	app.window_notices_sync(s)
-	testing.expect_value(t, s.notice_window, platform.Window_Id(0))
+	testing.expect_value(t, s.notice_window, input.Window_Id(0))
 	first.phase = .Shown
 	app.window_notices_sync(s)
 	testing.expect_value(t, s.notice_window, first.id)

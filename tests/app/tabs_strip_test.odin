@@ -5,7 +5,6 @@ import app "../../src"
 import "aio:layout"
 import "aio:commands"
 import "aio:input"
-import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
@@ -106,7 +105,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	second := app.window_tab_rect(&state, &w, 1)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -117,7 +116,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	testing.expect_value(t, workspace.selected, 1)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			x = i32(second.x + second.width / 2),
@@ -129,7 +128,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	close := app.window_tab_close_rect(&state, &w, 1)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -140,7 +139,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	testing.expect(t, ui.armed_is(w.tab_close_armed, 1))
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			x = i32(close.x + close.width / 2),
@@ -192,7 +191,7 @@ tab_orientation_button_click_switches_both_directions :: proc(t: ^testing.T) {
 	for expected in ([?]settings.Tabs_Orientation{.Horizontal, .Vertical}) {
 		r := app.tab_orientation_button_rect(&w)
 		for pressed in ([?]bool{true, false}) {
-			app.gesture_button(&state, &w, platform.Mouse_Button_Event {
+			app.gesture_button(&state, &w, input.Mouse_Button_Event {
 				window = w.id, button = .Left, pressed = pressed,
 				x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2),
 			})

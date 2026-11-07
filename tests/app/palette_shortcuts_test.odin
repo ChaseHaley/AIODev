@@ -2,14 +2,14 @@ package app_test
 
 import app "../../src"
 import "aio:commands"
-import "aio:platform"
+import "aio:input"
 import "aio:ui"
 import "core:os"
 import "core:strings"
 import "core:testing"
 
 @(private)
-palette_binding_press_key :: proc(s: ^app.App, e: platform.Key_Event) {
+palette_binding_press_key :: proc(s: ^app.App, e: input.Key_Event) {
 	key := e
 	key.window, key.pressed = s.windows[0].id, true
 	app.handle_event(s, key)

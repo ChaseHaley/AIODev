@@ -178,7 +178,7 @@ find_edit :: proc(f: ^Find_Bar) {
 
 // Handles a key while the bar has the keyboard. Enter moves to older matches and Shift+Enter to newer;
 // Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular expressions.
-find_key :: proc(f: ^Find_Bar, e: platform.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
+find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
 	if !e.pressed {
 		return .None
 	}

@@ -2,7 +2,6 @@ package ui_test
 
 import "aio:commands"
 import "aio:input"
-import "aio:platform"
 import "aio:ui"
 import "core:testing"
 
@@ -76,7 +75,7 @@ select_setting :: proc(p: ^ui.Palette, key: string) {
 }
 
 @(private)
-press :: proc(key: input.Key, modifiers: input.Modifiers = {}) -> platform.Key_Event {
+press :: proc(key: input.Key, modifiers: input.Modifiers = {}) -> input.Key_Event {
 	return {key = key, modifiers = modifiers, pressed = true}
 }
 

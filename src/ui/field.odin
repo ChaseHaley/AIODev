@@ -1,7 +1,7 @@
 package ui
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "core:unicode/utf8"
 
@@ -118,7 +118,7 @@ field_move :: proc(f: ^Text_Field, to: int, extend: bool) -> Field_Change {
 }
 
 // Handles editing and caret keys. Clipboard chords belong to the caller, which owns the clipboard.
-field_key :: proc(f: ^Text_Field, e: platform.Key_Event) -> Field_Change {
+field_key :: proc(f: ^Text_Field, e: input.Key_Event) -> Field_Change {
 	if !e.pressed {return .None}
 	control := .Control in e.modifiers
 	shift := .Shift in e.modifiers

@@ -1,8 +1,8 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -42,7 +42,7 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			testing.expect_value(t, w.tab_menu.count, 1)
 			testing.expect_value(t, app.tab_menu_label(w, 0), "Set as Default Size")
 			testing.expect_value(t, divider_count(w), 0)
-			app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+			app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 			testing.expect(t, w.overlay == nil)
 			after, after_error := os.read_entire_file(f.path, context.temp_allocator)
 			testing.expect_value(t, after_error, nil)
@@ -64,7 +64,7 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 				gesture_button(s, w, .Left, true, row.x + 20, row.y + row.height / 2)
 				gesture_button(s, w, .Left, false, row.x + 20, row.y + row.height / 2)
 			} else {
-				app.handle_event(s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+				app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 			}
 			testing.expect(t, w.overlay == nil)
 			text, err := os.read_entire_file(f.path, context.temp_allocator)

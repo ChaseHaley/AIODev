@@ -1,5 +1,6 @@
 package main
 
+import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
@@ -53,13 +54,13 @@ Pointer_Surface :: struct {
 	claims:  proc(app: ^App, w: ^Window, x, y: f32) -> bool,
 	// Runs for every surface on every move. The owner updates its hover and sets the cursor; every
 	// other surface clears its own hover, cheaply when there is none.
-	hover:   proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event),
+	hover:   proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event),
 	// A press the surface owns. A modal surface also receives every release while it is open.
-	press:   proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event),
+	press:   proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event),
 	// The release of a press the surface owned, wherever it lands; false passes it on to the shared
 	// completion for confirmations, the palette and pane content. A release of a press the surface
 	// swallowed ends there either way.
-	release: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool,
+	release: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool,
 	// The hovered control supplies a short label; the shared tooltip owns timing and drawing.
 	tooltip: proc(app: ^App, w: ^Window, x, y: f32) -> string,
 	// Capture loss: the surface drops its hover, armed control and drag, whether or not it holds a button.
@@ -151,14 +152,14 @@ pointer_modal :: proc(target: Pointer_Target) -> bool {
 }
 
 // Lets every surface see the move: the owner hovers and sets the cursor, the rest clear their hover.
-pointer_move :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+pointer_move :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	for surface in pointer_surfaces {
 		if surface.hover != nil {surface.hover(app, w, owner, e)}
 	}
 	tooltip_hover(app, w, owner, e)
 }
 
-pointer_press :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Button_Event) {
+pointer_press :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Button_Event) {
 	if e.pressed {tooltip_cancel(w)}
 	pointer_surfaces[owner].press(app, w, e)
 }
@@ -167,7 +168,7 @@ pointer_release :: proc(
 	app: ^App,
 	w: ^Window,
 	owner: Pointer_Target,
-	e: platform.Mouse_Button_Event,
+	e: input.Mouse_Button_Event,
 ) -> bool {
 	release := pointer_surfaces[owner].release
 	return release != nil && release(app, w, e)
@@ -179,7 +180,7 @@ rect_contains :: proc(r: render.Rect, x, y: f32) -> bool {
 }
 
 @(private = "file")
-move_point :: proc(e: platform.Mouse_Move_Event) -> (f32, f32) {return f32(e.x), f32(e.y)}
+move_point :: proc(e: input.Mouse_Move_Event) -> (f32, f32) {return f32(e.x), f32(e.y)}
 
 @(private = "file")
 notice_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> ui.Notice_Hit {
@@ -193,7 +194,7 @@ notice_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-notice_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+notice_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	// Only the window holding the notices has their hover to change.
 	if app.notice_window != w.id {return}
 	hit := owner == .Notice ? notice_hit(app, w, f32(e.x), f32(e.y)) : ui.Notice_Hit{}
@@ -207,7 +208,7 @@ notice_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 @(private = "file")
-notice_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+notice_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	hit := notice_hit(app, w, f32(e.x), f32(e.y))
 	ui.notices_press(&app.notices, hit.close ? hit.id : 0)
@@ -215,7 +216,7 @@ notice_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 
 // A notice press ends here even after the notices moved to another window, which cancelled it there.
 @(private = "file")
-notice_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+notice_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if app.notice_window != w.id {return true}
 	if e.button == .Left {
 		hit := notice_hit(app, w, f32(e.x), f32(e.y))
@@ -241,7 +242,7 @@ picker_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-picker_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+picker_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner == .Workspace_Picker {workspace_picker_hover(app, w, e)}
 }
 
@@ -267,7 +268,7 @@ picker_cancel :: proc(app: ^App, w: ^Window) {
 tab_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return tab_menu_shown(w)}
 
 @(private = "file")
-tab_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+tab_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Tab_Menu {return}
 	x, y := move_point(e)
 	hit := tab_menu_hit(w, x, y)
@@ -277,7 +278,7 @@ tab_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 }
 
 @(private = "file")
-tab_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+tab_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if !e.pressed {return}
 	gesture_swallow(w, e.button, .Tab_Menu)
 	if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
@@ -294,7 +295,7 @@ tab_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 profile_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return profile_menu_shown(w)}
 
 @(private = "file")
-profile_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+profile_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Profile_Menu {return}
 	x, y := move_point(e)
 	shape := platform.Cursor_Shape.Arrow
@@ -310,7 +311,7 @@ profile_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: plat
 }
 
 @(private = "file")
-profile_menu_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+profile_menu_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	_ = profile_menu_button(app, w, e)
 }
 
@@ -320,14 +321,14 @@ profile_menu_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event
 documents_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return document_menu_shown(w)}
 
 @(private = "file")
-documents_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+documents_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Document_Menu {return}
 	x, y := move_point(e)
 	document_menu_hover(app, w, x, y, .Left in e.buttons)
 }
 
 @(private = "file")
-documents_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+documents_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	document_menu_button(app, w, e)
 }
 
@@ -347,7 +348,7 @@ documents_cancel :: proc(_: ^App, w: ^Window) {
 inbox_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return status_inbox_shown(w)}
 
 @(private = "file")
-inbox_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+inbox_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner == .Status_Inbox {status_inbox_move(app, w, f32(e.x), f32(e.y))}
 }
 
@@ -357,7 +358,7 @@ inbox_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mo
 rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return rename_shown(w)}
 
 @(private = "file")
-rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Rename {return}
 	x, y := move_point(e)
 	if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
@@ -368,7 +369,7 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 // field is not modal: the press leaves it, keeping the name typed so far when it can, and still reaches
 // what it landed on.
 @(private = "file")
-rename_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if !e.pressed {ui.field_release(&w.rename); return}
 	x, y := f32(e.x), f32(e.y)
 	if chip_name_shown(w) && !rect_contains(rename_rect(w), x, y) {
@@ -399,7 +400,7 @@ caption_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-caption_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+caption_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := move_point(e)
 	caption := owner == .Caption ? ui.caption_hit(f32(w.width), x, y, w.scale) : -1
 	if caption != w.caption_hover {w.caption_hover, w.dirty = caption, true}
@@ -417,13 +418,13 @@ caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 @(private = "file")
-caption_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+caption_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left || drag_held(w) {return}
 	ui.armed_press(&w.caption_armed, ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale))
 }
 
 @(private = "file")
-caption_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+caption_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !ui.armed_down(w.caption_armed) || drag_held(w) {
 		return false
 	}
@@ -449,13 +450,13 @@ confirmation_pointer_hover :: proc(
 	app: ^App,
 	w: ^Window,
 	owner: Pointer_Target,
-	e: platform.Mouse_Move_Event,
+	e: input.Mouse_Move_Event,
 ) {
 	if owner == .Confirmation {_ = confirmation_hover(app, w, f32(e.x), f32(e.y))}
 }
 
 @(private = "file")
-confirmation_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+confirmation_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	_ = confirmation_button(app, w, e)
 }
 
@@ -470,7 +471,7 @@ confirmation_cancel_press :: proc(_: ^App, w: ^Window) {
 palette_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return palette_active(app, w)}
 
 @(private = "file")
-palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Palette {return}
 	x, y := move_point(e)
 	p := &app.palette
@@ -486,7 +487,7 @@ palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
 }
 
 @(private = "file")
-palette_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+palette_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
 	p := &app.palette
 	l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
@@ -512,7 +513,7 @@ orientation_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-orientation_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+orientation_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	hovered := owner == .Tab_Orientation
 	if hovered != w.tab_orientation_button_hovered {w.tab_orientation_button_hovered, w.dirty = hovered, true}
 	if hovered {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
@@ -524,12 +525,12 @@ orientation_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 }
 
 @(private = "file")
-orientation_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+orientation_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {ui.armed_press(&w.tab_orientation_button_armed, true)}
 }
 
 @(private = "file")
-orientation_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+orientation_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !ui.armed_down(w.tab_orientation_button_armed) {return false}
 	hit := tab_orientation_button_hit(w, f32(e.x), f32(e.y))
 	fired, ok := ui.armed_release(&w.tab_orientation_button_armed, hit)
@@ -554,7 +555,7 @@ find_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-find_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+find_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Find || !ui.find_is_open(&w.find) {
 		if w.find.hover != .None {w.find.hover, w.dirty = .None, true}
 		if owner == .Find {pointer_set(app, w, .Arrow)}
@@ -586,14 +587,14 @@ find_cancel :: proc(_: ^App, w: ^Window) {
 }
 
 @(private = "file")
-find_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+find_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	target := find_target(app, w)
 	l, enabled := find_controls(w, target)
 	on_find_outcome(app, w, target, ui.find_mouse(&w.find, l, enabled, e.button, true, f32(e.x), f32(e.y)))
 }
 
 @(private = "file")
-find_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+find_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !ui.find_is_open(&w.find) || !ui.armed_down(w.find.armed) {return false}
 	target := find_target(app, w)
 	l, enabled := find_controls(w, target)
@@ -614,7 +615,7 @@ workspace_button_hover :: proc(
 	app: ^App,
 	w: ^Window,
 	owner: Pointer_Target,
-	e: platform.Mouse_Move_Event,
+	e: input.Mouse_Move_Event,
 ) {
 	if owner == .Workspace_Button {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
 }
@@ -623,7 +624,7 @@ workspace_button_hover :: proc(
 workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Workspaces"}
 
 @(private = "file")
-workspace_button_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+workspace_button_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {workspace_picker_chip_press(app, w, e.time_ns)}
 }
 
@@ -635,7 +636,7 @@ pill_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	hovered := owner == .Status_Pill
 	if hovered != w.status.pill_hover {w.status.pill_hover, w.dirty = hovered, true}
 	if hovered {pointer_set(app, w, chrome_pointer(app, w, f32(e.x), f32(e.y)))}
@@ -645,7 +646,7 @@ pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mou
 pill_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Activity"}
 
 @(private = "file")
-pill_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+pill_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {status_inbox_toggle(app, w)}
 }
 
@@ -660,20 +661,20 @@ divider_claims :: proc(_: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-divider_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+divider_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Divider {return}
 	resize, _ := divider_cursor(w, f32(e.x), f32(e.y))
 	pointer_set(app, w, resize)
 }
 
 @(private = "file")
-divider_pointer_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+divider_pointer_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {_ = divider_press(app, w, f32(e.x), f32(e.y), e.time_ns)}
 	if e.button == .Right {dock_divider_menu_open(app, w, f32(e.x), f32(e.y))}
 }
 
 @(private = "file")
-divider_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+divider_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	return e.button == .Left && divider_drag_release(app, w, f32(e.x), f32(e.y))
 }
 
@@ -690,7 +691,7 @@ panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner == .Status_Panel {
 		_ = status_overview_move(app, w, f32(e.x), f32(e.y))
 		return
@@ -711,12 +712,12 @@ panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 @(private = "file")
-panel_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+panel_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	_ = status_panel_button(app, w, e)
 }
 
 @(private = "file")
-panel_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+panel_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !ui.armed_down(w.status.panel_button_armed) {return false}
 	w.dirty = true
 	button := status_panel_button_at(app, w, f32(e.x), f32(e.y))
@@ -739,7 +740,7 @@ tabs_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-tabs_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+tabs_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := move_point(e)
 	tab_hover, rail_hover := -1, -1
 	if owner == .Tabs && w.tabs_horizontal {
@@ -782,13 +783,13 @@ tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 @(private = "file")
-tabs_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+tabs_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	_ = tab_interaction_press(app, w, e)
 }
 
 // A tab close fires on a matching release; a tab drag settles wherever it is released.
 @(private = "file")
-tabs_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+tabs_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
 	w.dirty = true
 	if tab_interaction_release(app, w, f32(e.x), f32(e.y)) {return true}
@@ -813,7 +814,7 @@ header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := move_point(e)
 	in_pane := owner == .Pane_Header || owner == .Scrollbar || owner == .Settings_Page || owner == .Content
 	split_overlay_update(w, x, y, in_pane && !selection_active(w))
@@ -841,7 +842,7 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 
 // The header swallows its presses, so it also finishes a release that lands anywhere.
 @(private = "file")
-header_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if palette_active(app, w) {pane_header_cancel(w)}
 	pane_header_release(app, w, e)
 	return true
@@ -861,7 +862,7 @@ scrollbar_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-scrollbar_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+scrollbar_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Scrollbar {
 		terminal_scrollbar_hover_set(w, 0)
 		return
@@ -871,12 +872,12 @@ scrollbar_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platfor
 }
 
 @(private = "file")
-scrollbar_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+scrollbar_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	_ = terminal_scrollbar_button(app, w, e)
 }
 
 @(private = "file")
-scrollbar_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+scrollbar_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	return e.button == .Left && terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
 }
 
@@ -894,7 +895,7 @@ settings_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private = "file")
-settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+settings_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Settings_Page {
 		p := &w.editor
 		if p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
@@ -939,7 +940,7 @@ settings_cancel :: proc(_: ^App, w: ^Window) {
 content_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return true}
 
 @(private = "file")
-content_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+content_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner == .Content {content_move(app, w, e)} else {link_hover_clear(w)}
 }
 
@@ -956,7 +957,7 @@ title_action_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 
 @(private = "file")
 title_action_pointer_hover :: proc(
-	app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event,
+	app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event,
 ) {
 	hover := owner == .Title_Action ? title_action_hit(w, f32(e.x), f32(e.y)) : Title_Action.None
 	if hover != w.title_action_hover {w.title_action_hover, w.dirty = hover, true}
@@ -974,12 +975,12 @@ title_action_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 @(private = "file")
-title_action_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+title_action_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {ui.armed_press(&w.title_action_armed, title_action_hit(w, f32(e.x), f32(e.y)))}
 }
 
 @(private = "file")
-title_action_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+title_action_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !ui.armed_down(w.title_action_armed) {return false}
 	fired, ok := ui.armed_release(&w.title_action_armed, title_action_hit(w, f32(e.x), f32(e.y)))
 	w.dirty = true

@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:settings"
@@ -99,7 +100,7 @@ activity_side_button_persists_setting_and_cancels_outside_or_on_capture_loss :: 
 @(private)
 dock_click_at :: proc(s: ^app.App, w: ^app.Window, x, y: f32, time_ns: i64) {
 	for pressed in ([?]bool{true, false}) {
-		app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left,
+		app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left,
 			pressed = pressed, x = i32(x), y = i32(y), time_ns = time_ns})
 	}
 }

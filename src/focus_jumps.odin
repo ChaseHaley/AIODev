@@ -1,6 +1,6 @@
 package main
 
-import platform_api "aio:platform"
+import "aio:input"
 
 // Pane focus as a jump list, like an editor's back and forward. Entries are session ids, so a pane
 // keeps its place as it moves between tabs, workspaces and windows.
@@ -13,7 +13,7 @@ Focus_Jumps :: struct {
 	index: int,
 	// The window the user last worked in. It is tracked here rather than read from window focus
 	// events, which arrive a tick after a jump asks for activation.
-	window: platform_api.Window_Id,
+	window: input.Window_Id,
 }
 
 focus_jumps_destroy :: proc(j: ^Focus_Jumps) {

@@ -1,5 +1,6 @@
 package platform
 
+import "aio:input"
 import "core:log"
 import "core:strings"
 import "core:sync"
@@ -183,7 +184,7 @@ file_pick_folder :: proc(pick: ^File_Pick) {
 @(require_results)
 file_pick_start :: proc(
 	p: ^Platform,
-	id: Window_Id,
+	id: input.Window_Id,
 	filter_name, pattern, directory: string,
 	folders := false,
 ) -> ^File_Pick {

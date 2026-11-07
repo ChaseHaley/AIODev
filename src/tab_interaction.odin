@@ -1,7 +1,6 @@
 package main
 
 import "aio:input"
-import "aio:platform"
 import "aio:ui"
 
 Tab_Interaction_Kind :: enum {
@@ -31,7 +30,7 @@ tab_interaction_hit :: proc(
 }
 
 @(require_results)
-tab_interaction_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+tab_interaction_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	x, y := f32(e.x), f32(e.y)
 	hit := tab_interaction_hit(app, w, x, y, e.button)
 	// A Left press draws its tab, new-tab button or rail row pressed until the release.

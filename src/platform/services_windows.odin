@@ -1,5 +1,6 @@
 package platform
 
+import "aio:input"
 import "base:runtime"
 import "core:log"
 import "core:strings"
@@ -15,7 +16,7 @@ Window_Placement :: struct {
 
 // Keeps the window's maximized state and raises it above other applications without taking focus.
 @(require_results)
-window_show_raised :: proc(p: ^Platform, id: Window_Id) -> Error {
+window_show_raised :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	flags := u32(w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW)
@@ -23,12 +24,12 @@ window_show_raised :: proc(p: ^Platform, id: Window_Id) -> Error {
 	return .None
 }
 
-window_maximize :: proc(p: ^Platform, id: Window_Id) {
+window_maximize :: proc(p: ^Platform, id: input.Window_Id) {
 	if window := find_window(p, id); window != nil {w.ShowWindow(window.hwnd, w.SW_MAXIMIZE)}
 }
 
 @(require_results)
-window_placement :: proc(p: ^Platform, id: Window_Id) -> (Window_Placement, Error) {
+window_placement :: proc(p: ^Platform, id: input.Window_Id) -> (Window_Placement, Error) {
 	window := find_window(p, id)
 	if window == nil {return {}, .Invalid_Window}
 	placement := w.WINDOWPLACEMENT {
@@ -42,7 +43,7 @@ window_placement :: proc(p: ^Platform, id: Window_Id) -> (Window_Placement, Erro
 // Moves a hidden window to its restored rectangle and leaves it hidden. Windows pulls the rectangle back
 // on screen if its monitor has gone. Maximizing waits until the window is shown.
 @(require_results)
-window_set_placement :: proc(p: ^Platform, id: Window_Id, target: Window_Placement) -> Error {
+window_set_placement :: proc(p: ^Platform, id: input.Window_Id, target: Window_Placement) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	placement := w.WINDOWPLACEMENT {
@@ -56,7 +57,7 @@ window_set_placement :: proc(p: ^Platform, id: Window_Id, target: Window_Placeme
 }
 
 @(require_results)
-window_show_inactive :: proc(p: ^Platform, id: Window_Id) -> Error {
+window_show_inactive :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	// ShowWindow returns the previous visibility, not success.

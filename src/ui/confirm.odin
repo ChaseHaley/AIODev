@@ -2,7 +2,6 @@ package ui
 
 import "aio:glyphs"
 import "aio:input"
-import "aio:platform"
 import "aio:render"
 import "core:time"
 
@@ -121,7 +120,7 @@ confirm_cycle :: proc(c: ^Confirm, step: int) {
 	c.focus = order[index]
 }
 
-confirm_key :: proc(c: ^Confirm, e: platform.Key_Event) -> Confirm_Outcome {
+confirm_key :: proc(c: ^Confirm, e: input.Key_Event) -> Confirm_Outcome {
 	if !e.pressed {return .None}
 	if c.show_option && .Alt in e.modifiers && e.key == .D {
 		c.option = !c.option

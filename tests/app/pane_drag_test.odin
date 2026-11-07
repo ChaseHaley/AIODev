@@ -1,9 +1,9 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
 
 // An active pane drag in w carrying `node` of `source`, as hovering would leave it over `destination`.
 seed_pane_drag :: proc(
@@ -23,7 +23,7 @@ seed_pane_drag :: proc(
 }
 
 // The prepared window of w's tear-off, or 0.
-drag_preview :: proc(w: ^app.Window) -> platform.Window_Id {
+drag_preview :: proc(w: ^app.Window) -> input.Window_Id {
 	a := app.drag_active(w)
 	if a == nil {return 0}
 	ready, _ := a.preview.(app.Preview_Ready)

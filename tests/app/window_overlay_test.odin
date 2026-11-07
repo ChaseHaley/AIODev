@@ -1,8 +1,8 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
 import "aio:ui"
 
 @(test)
@@ -15,8 +15,8 @@ overlay_rename_replaces_tab_menu_and_receives_text_and_keys :: proc(t: ^testing.
 	if !testing.expect(t, app.tab_menu_shown(w)) {return}
 	app.rename_open(s, w, true, 0)
 	testing.expect(t, app.rename_shown(w) && !app.tab_menu_shown(w))
-	app.handle_event(s, platform.Text_Event{window = w.id, text = "Named from menu"})
-	app.handle_event(s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(s, input.Text_Event{window = w.id, text = "Named from menu"})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect(t, !app.rename_shown(w))
 	testing.expect_value(t, w.workspace.tabs[0].name, "Named from menu")
 }

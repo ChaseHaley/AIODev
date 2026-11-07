@@ -48,7 +48,7 @@ synthesized_keys :: proc(t: ^testing.T) {
 		buffer: [32]u8
 		e, err := p.synthesize_key(7, f.key, f.modifiers, true, buffer[:])
 		if !testing.expect_value(t, err, p.Error.None) { continue }
-		testing.expect_value(t, e.window, p.Window_Id(7))
+		testing.expect_value(t, e.window, input.Window_Id(7))
 		testing.expect_value(t, e.key, f.key)
 		testing.expect_value(t, e.modifiers, f.modifiers)
 		testing.expect_value(t, e.text, f.text)

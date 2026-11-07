@@ -4,6 +4,7 @@ import "aio:colour"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
+import "aio:input"
 import "aio:instance"
 import platform_api "aio:platform"
 import "aio:perf"
@@ -113,9 +114,9 @@ App :: struct {
 	find_history:          ui.Find_History,
 	focus_jumps:           Focus_Jumps,
 	// The window the palette is open or closing in; see palette_owner.odin.
-	palette_owner:         Maybe(platform_api.Window_Id),
+	palette_owner:         Maybe(input.Window_Id),
 	notices:               ui.Notices,
-	notice_window:         platform_api.Window_Id,
+	notice_window:         input.Window_Id,
 	window_focus_order:    u64,
 	sessions:              [dynamic]Session_Entry,
 	workspaces:            [dynamic]^Workspace,

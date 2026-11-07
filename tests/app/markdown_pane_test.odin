@@ -122,8 +122,8 @@ find_count :: proc(w: ^app.Window, pane: ^app.Markdown_Pane) -> string {
 
 @(private = "file")
 press :: proc(state: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.Modifiers = {}) {
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true})
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, modifiers = modifiers})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, modifiers = modifiers})
 }
 
 // Drives the bar through the real dispatcher: the keys and bar of terminal find, reading top down.
@@ -146,7 +146,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	app.run_action(&f.state, w, .Find)
 	testing.expect(t, ui.find_has_keyboard(&w.find))
 	testing.expect_value(t, find_count(w, pane), "0 of 0")
-	app.handle_event(&f.state, platform.Text_Event{w.id, "needle"})
+	app.handle_event(&f.state, input.Text_Event{w.id, "needle"})
 	testing.expect_value(t, ui.field_string(&w.find.query), "needle")
 	find_settle(&f.state)
 	testing.expect_value(t, find_count(w, pane), "0 of 3")
@@ -173,12 +173,12 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	// The bar's arrows move the way they point, whichever way Enter goes.
 	l, _ := app.find_controls(w, pane)
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x + 16),
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x + 16),
 			y = i32(l.older.y + 16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, find_count(w, pane), "2 of 3")
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = i32(l.newer.x + 16),
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.newer.x + 16),
 			y = i32(l.newer.y + 16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, find_count(w, pane), "3 of 3")
@@ -196,7 +196,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	press(&f.state, w, .C, {.Alt})
 	press(&f.state, w, .R, {.Alt})
 	testing.expect(t, w.find.regex)
-	app.handle_event(&f.state, platform.Text_Event{w.id, "("})
+	app.handle_event(&f.state, input.Text_Event{w.id, "("})
 	find_settle(&f.state)
 	testing.expect_value(t, find_count(w, pane), "Invalid expression")
 	press(&f.state, w, .Backspace)
@@ -225,7 +225,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
 	x, y := i32(shown.rect.x + shown.rect.width / 2), i32(shown.rect.y + shown.rect.height / 2)
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = down})
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = down})
 	}
 	testing.expect(t, ui.find_is_open(&w.find) && !ui.find_has_keyboard(&w.find) && pane.search.phase != .Off)
 	press(&f.state, w, .Escape)
@@ -246,7 +246,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	// A new query does not read the document the missing file left behind; the file's return does.
 	app.run_action(&f.state, w, .Find)
 	press(&f.state, w, .End)
-	app.handle_event(&f.state, platform.Text_Event{w.id, " last"})
+	app.handle_event(&f.state, input.Text_Event{w.id, " last"})
 	testing.expect_value(t, ui.field_string(&w.find.query), "needle last")
 	testing.expect(t, !app.markdown_find_pending(&f.state))
 	app.markdown_find_tick(&f.state)
@@ -489,13 +489,13 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	y := g.top + line / 2
 
 	button := proc(state: ^app.App, w: ^app.Window, x, y: f32, pressed: bool) {
-		app.handle_event(state, platform.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+		app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
 			button = .Left, pressed = pressed})
 	}
 	button(&f.state, w, g.left + 1, y, true)
 	held, selecting := w.markdown_gesture.(app.Markdown_Selecting)
 	testing.expect(t, selecting && held.pane == pane.id)
-	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id, x = i32(g.left + g.width),
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(g.left + g.width),
 		y = i32(y), buttons = {.Left}})
 	testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "first paragraph")
 	testing.expect(t, w.markdown_hover == nil)
@@ -507,11 +507,11 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	for ui.markdown_link_at(&pane.view, g, g.left + 5, link_y) < 0 && link_y < g.area.y + g.area.height {
 		link_y += 1
 	}
-	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id, x = i32(g.left + 5), y = i32(link_y)})
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(g.left + 5), y = i32(link_y)})
 	link, over := w.markdown_hover.(app.Markdown_Link_Hover)
 	testing.expect(t, over && link.pane == pane.id && link.link == 0)
 	t_rect := terminal.rect
-	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id,
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id,
 		x = i32(t_rect.x + t_rect.width / 2), y = i32(t_rect.y + t_rect.height / 2)})
 	testing.expect(t, w.markdown_hover == nil)
 }

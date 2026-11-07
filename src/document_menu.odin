@@ -1,6 +1,7 @@
 package main
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -634,7 +635,7 @@ document_popout_hit :: proc(w: ^Window, x, y: f32) -> (Document_Level, bool) {
 	return {}, false
 }
 
-document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: platform.Key_Event) {
+document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) {
 	state := document_menu_state(w)
 	if state == nil || !logical.pressed {return}
 	menu := &w.document_menu
@@ -777,7 +778,7 @@ document_menu_tooltip :: proc(w: ^Window, x, y: f32) -> string {
 	return ""
 }
 
-document_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	menu := &w.document_menu
 	if !e.pressed {
 		w.dirty = true

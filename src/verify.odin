@@ -59,13 +59,13 @@ when AIO_CONTROL {
 		session_id: u32,
 		presented: bool,
 		presents: [dynamic]Verify_Present,
-		mouse_window: platform.Window_Id,
-		target_window: platform.Window_Id,
+		mouse_window: input.Window_Id,
+		target_window: input.Window_Id,
 		buttons: input.Mouse_Buttons,
 	}
 
 	Verify_Present :: struct {
-		id: platform.Window_Id,
+		id: input.Window_Id,
 		surface: ^render.Surface,
 		count: u32,
 	}
@@ -1274,7 +1274,7 @@ when AIO_CONTROL {
 	@(require_results)
 	verify_key_event :: proc(
 		app: ^App,
-		id: platform.Window_Id,
+		id: input.Window_Id,
 		key: input.Key,
 		mods: input.Modifiers,
 		pressed: bool,
@@ -1290,7 +1290,7 @@ when AIO_CONTROL {
 	@(require_results)
 	verify_chord :: proc(
 		app: ^App,
-		id: platform.Window_Id,
+		id: input.Window_Id,
 		chord: commands.Shortcut,
 	) -> control.Error {
 		keys := [?]input.Key{.Control_Left, .Shift_Left, .Alt_Left, .Meta_Left}
@@ -1364,7 +1364,7 @@ when AIO_CONTROL {
 		if m.kind == .Wheel {
 			handle_event(
 				app,
-				platform.Mouse_Wheel_Event {
+				input.Mouse_Wheel_Event {
 					window = w.id,
 					x = pos.x,
 					y = pos.y,
@@ -1378,7 +1378,7 @@ when AIO_CONTROL {
 		if m.kind == .Move {
 			handle_event(
 				app,
-				platform.Mouse_Move_Event{w.id, pos.x, pos.y, v.buttons, m.modifiers, now},
+				input.Mouse_Move_Event{w.id, pos.x, pos.y, v.buttons, m.modifiers, now},
 			)
 			return .None
 		}
@@ -1386,7 +1386,7 @@ when AIO_CONTROL {
 			v.buttons += {m.button}
 			handle_event(
 				app,
-				platform.Mouse_Button_Event{w.id, m.button, true, pos.x, pos.y, m.modifiers, now},
+				input.Mouse_Button_Event{w.id, m.button, true, pos.x, pos.y, m.modifiers, now},
 			)
 		}
 		if m.kind == .Drag {
@@ -1395,7 +1395,7 @@ when AIO_CONTROL {
 				y := pos.y + i32((i64(end.y) - i64(pos.y)) * i64(step) / 4)
 				handle_event(
 					app,
-					platform.Mouse_Move_Event{w.id, x, y, v.buttons, m.modifiers, now + i64(step)},
+					input.Mouse_Move_Event{w.id, x, y, v.buttons, m.modifiers, now + i64(step)},
 				)
 			}
 		}
@@ -1403,7 +1403,7 @@ when AIO_CONTROL {
 			v.buttons -= {m.button}
 			handle_event(
 				app,
-				platform.Mouse_Button_Event {
+				input.Mouse_Button_Event {
 					w.id,
 					m.button,
 					false,
@@ -1420,7 +1420,7 @@ when AIO_CONTROL {
 	@(require_results)
 	verify_drive :: proc(app: ^App, request: control.Request) -> control.Error {
 		if selection, ok := request.(control.Window_Select); ok {
-			id := platform.Window_Id(selection.id)
+			id := input.Window_Id(selection.id)
 			if window_find(app, id) == nil {return .Invalid_Argument}
 			app.verify.target_window = id
 			return .None
@@ -1441,13 +1441,13 @@ when AIO_CONTROL {
 		id := w.id
 		#partial switch r in request {
 		case control.Type:
-			handle_event(app, platform.Text_Event{w.id, r.text})
+			handle_event(app, input.Text_Event{w.id, r.text})
 		case control.Key:
 			for chord in r.chords {
 				if err := verify_chord(app, id, chord); err != .None {return err}
 			}
 		case control.Run:
-			handle_event(app, platform.Text_Event{w.id, r.line})
+			handle_event(app, input.Text_Event{w.id, r.line})
 			return verify_chord(app, w.id, {.Enter, {}})
 		case control.Mouse:
 			return verify_mouse(app, w, r)

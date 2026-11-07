@@ -1,6 +1,6 @@
 package main
 
-import "aio:platform"
+import "aio:input"
 
 // One workspace deletion: the subject that must still be live when it is accepted, the window
 // that must receive a replacement before the old workspace is discarded (D-051), the destination
@@ -8,7 +8,7 @@ import "aio:platform"
 // identity and commit consumes it, so the rule has one home (D-053).
 Workspace_Delete_Plan :: struct {
 	workspace:   u32,
-	owner:       platform.Window_Id,
+	owner:       input.Window_Id,
 	destination: u32,
 	fresh:       bool,
 	created_tab: bool,

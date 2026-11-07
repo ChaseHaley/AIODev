@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -98,20 +99,20 @@ palette_routes_input_and_render_only_to_its_window :: proc(t: ^testing.T) {
 	testing.expect(t, second.views[1].style.focused)
 	app.palette_close(s, second)
 	testing.expect(t, app.palette_active(s, first))
-	app.handle_event(s, platform.Text_Event{first.id, "font"})
+	app.handle_event(s, input.Text_Event{first.id, "font"})
 	app.run_action(s, second, .Find)
-	app.handle_event(s, platform.Text_Event{second.id, "needle"})
-	app.handle_event(s, platform.Key_Event{window = second.id, key = .Backspace, pressed = true})
+	app.handle_event(s, input.Text_Event{second.id, "needle"})
+	app.handle_event(s, input.Key_Event{window = second.id, key = .Backspace, pressed = true})
 	testing.expect_value(t, ui.field_string(&second.find.query), "needl")
 	testing.expect_value(t, ui.palette_query(&s.palette), "font")
 	selected, scroll := s.palette.selected, s.palette.scroll
 	l := ui.palette_layout(&s.palette, f32(first.width), f32(first.height), first.scale)
-	app.handle_event(s, platform.Mouse_Move_Event{window = second.id,
+	app.handle_event(s, input.Mouse_Move_Event{window = second.id,
 		x = i32(l.list.x+20), y = i32(l.list.y+2*l.row_height)})
-	app.handle_event(s, platform.Mouse_Wheel_Event{window = second.id, delta_y = -1})
-	app.handle_event(s, platform.Mouse_Button_Event{window = second.id, button = .Left,
+	app.handle_event(s, input.Mouse_Wheel_Event{window = second.id, delta_y = -1})
+	app.handle_event(s, input.Mouse_Button_Event{window = second.id, button = .Left,
 		pressed = true, x = i32(l.panel.x-10), y = i32(l.panel.y+20)})
-	app.handle_event(s, platform.Mouse_Button_Event{window = second.id, button = .Left,
+	app.handle_event(s, input.Mouse_Button_Event{window = second.id, button = .Left,
 		x = i32(l.panel.x-10), y = i32(l.panel.y+20)})
 	testing.expect(t, app.palette_active(s, first))
 	testing.expect_value(t, s.palette.selected, selected)
@@ -120,7 +121,7 @@ palette_routes_input_and_render_only_to_its_window :: proc(t: ^testing.T) {
 	app.editor_open(s, second)
 	testing.expect(t, app.settings_active(second))
 	testing.expect(t, app.palette_active(s, first))
-	app.handle_event(s, platform.Text_Event{second.id, "line height"})
+	app.handle_event(s, input.Text_Event{second.id, "line height"})
 	testing.expect_value(t, ui.field_string(&second.editor.filter), "line height")
 	testing.expect_value(t, ui.palette_query(&s.palette), "font")
 	app.palette_release(s, first)
@@ -151,11 +152,11 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	first_selected, first_focus := first.workspace.selected, first.tree.focus
 	first_pid, second_pid := term.process_id(s.sessions[0].session), term.process_id(s.sessions[1].session)
 	app.run_action(s, first, .Find)
-	app.handle_event(s, platform.Text_Event{first.id, "retained"})
+	app.handle_event(s, input.Text_Event{first.id, "retained"})
 	app.palette_open(s, first)
 	s.palette.drag = ui.Query_Drag{}
 	app.rename_open(s, second, true, second.workspace.selected)
-	app.handle_event(s, platform.Text_Event{second.id, "unsaved"})
+	app.handle_event(s, input.Text_Event{second.id, "unsaved"})
 	testing.expect(t, app.palette_active(s, first))
 	app.run_action(s, second, .Command_Palette)
 	testing.expect(t, app.palette_active(s, second) && !app.palette_visible(s, first))
@@ -195,9 +196,9 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, !ui.presence_is_open(s.palette.presence) && s.palette.drag == nil)
 	testing.expect(t, s.palette_owner == nil)
 	app.palette_open(s, second)
-	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape, pressed = true})
+	app.handle_event(s, input.Key_Event{window = second.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.palette_active(s, second) && app.key_suppressed(second, .Escape))
-	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape})
+	app.handle_event(s, input.Key_Event{window = second.id, key = .Escape})
 	testing.expect(t, !app.key_suppressed(second, .Escape))
 	app.palette_open(s, second)
 	seed_pane_drag(second, app.selected_tab(second.workspace), second.tree.focus)

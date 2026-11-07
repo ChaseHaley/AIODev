@@ -6,22 +6,15 @@ import w "core:sys/windows"
 import "core:unicode/utf16"
 import "core:unicode/utf8"
 
-Native_Key :: struct {
-	vk, scan_code:     u16,
-	char:              u16,
-	control_key_state: u32,
-	repeat_count:      u16,
-}
-
 @(require_results)
 synthesize_key :: proc(
-	window: Window_Id,
+	window: input.Window_Id,
 	key: input.Key,
 	modifiers: input.Modifiers,
 	pressed: bool,
 	buffer: []u8,
 ) -> (
-	Key_Event,
+	input.Key_Event,
 	Error,
 ) {
 	scan, extended, mapped := scan_code_from_key(key)
@@ -85,7 +78,7 @@ synthesize_key :: proc(
 	}
 	if .Caps_Lock in modifiers {state[w.VK_CAPITAL] = 1}
 	if .Num_Lock in modifiers {state[w.VK_NUMLOCK] = 1}
-	e := Key_Event {
+	e := input.Key_Event {
 		window = window,
 		key = key,
 		modifiers = modifiers,

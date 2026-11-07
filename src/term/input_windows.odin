@@ -1,7 +1,7 @@
 package term
 
 import "aio:ghostty"
-import "aio:platform"
+import "aio:input"
 import "core:fmt"
 import "core:log"
 import "core:sync"
@@ -44,7 +44,7 @@ append_win32_text :: proc(out: []u8, units: []u16) -> int {
 	return n
 }
 
-send_key :: proc(s: ^Session, event: platform.Key_Event) -> bool {
+send_key :: proc(s: ^Session, event: input.Key_Event) -> bool {
 	if !sync.atomic_load(&s.win32_input) {
 		return send_key_vt(s, event)
 	}

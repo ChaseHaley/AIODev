@@ -1,11 +1,11 @@
 package ui_test
 
+import "aio:input"
 import "core:testing"
 import "core:time"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
-import "aio:platform"
 import "aio:render"
 import "aio:ui"
 
@@ -30,7 +30,7 @@ palette_settings := [?]ui.Palette_Setting{
 	{key = "terminal.copy_on_select", title = "Copy on Select", group = "Terminal"},
 }
 
-key :: proc(k: platform.Key_Event) -> platform.Key_Event {
+key :: proc(k: input.Key_Event) -> input.Key_Event {
 	e := k
 	e.pressed = true
 	return e

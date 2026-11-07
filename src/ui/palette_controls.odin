@@ -1,6 +1,7 @@
 package ui
 
 import "aio:glyphs"
+import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -388,7 +389,7 @@ control_step :: proc(p: ^Palette, setting: int, direction: int) -> Outcome {
 
 // Keys for an open choice list or text entry. Every key is consumed.
 @(private)
-edit_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
+edit_key :: proc(p: ^Palette, e: input.Key_Event) -> Outcome {
 	#partial switch e.key {
 	case .Escape:
 		edit_set(p, nil)

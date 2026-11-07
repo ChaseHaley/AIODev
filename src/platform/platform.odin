@@ -2,7 +2,6 @@ package platform
 
 import "aio:input"
 
-Window_Id :: distinct u64
 Init_Result :: enum {
 	Failed,
 	Primary,
@@ -49,61 +48,26 @@ Tray_Menu_Item :: struct {
 	title:               string,
 	disabled, separator: bool,
 }
-Key_Event :: struct {
-	window:          Window_Id,
-	key:             input.Key,
-	modifiers:       input.Modifiers,
-	pressed, repeat: bool,
-	text:            string,
-	unshifted:       rune,
-	native:          Native_Key,
-}
-Text_Event :: struct {
-	window: Window_Id,
-	text:   string,
-}
-Mouse_Button_Event :: struct {
-	window:    Window_Id,
-	button:    input.Mouse_Button,
-	pressed:   bool,
-	x, y:      i32,
-	modifiers: input.Modifiers,
-	time_ns:   i64,
-}
-Mouse_Move_Event :: struct {
-	window:    Window_Id,
-	x, y:      i32,
-	buttons:   input.Mouse_Buttons,
-	modifiers: input.Modifiers,
-	time_ns:   i64,
-}
-Mouse_Wheel_Event :: struct {
-	window:           Window_Id,
-	x, y:             i32,
-	delta_x, delta_y: f32,
-	modifiers:        input.Modifiers,
-	time_ns:          i64,
-}
 Resize_Event :: struct {
-	window:        Window_Id,
+	window:        input.Window_Id,
 	width, height: i32,
 }
 Dpi_Event :: struct {
-	window: Window_Id,
+	window: input.Window_Id,
 	dpi:    u32,
 }
 Focus_Event :: struct {
-	window:  Window_Id,
+	window:  input.Window_Id,
 	focused: bool,
 }
 Mouse_Leave_Event :: struct {
-	window: Window_Id,
+	window: input.Window_Id,
 }
 Capture_Lost_Event :: struct {
-	window: Window_Id,
+	window: input.Window_Id,
 }
 Close_Request_Event :: struct {
-	window: Window_Id,
+	window: input.Window_Id,
 }
 Tray_Event :: struct {}
 Tray_Menu_Event :: struct {
@@ -120,12 +84,12 @@ Activate_Request_Event :: struct {}
 Settings_Event :: struct {}
 Wake_Event :: struct {}
 Event :: union {
-	Key_Event,
-	Text_Event,
-	Mouse_Button_Event,
-	Mouse_Move_Event,
+	input.Key_Event,
+	input.Text_Event,
+	input.Mouse_Button_Event,
+	input.Mouse_Move_Event,
 	Mouse_Leave_Event,
-	Mouse_Wheel_Event,
+	input.Mouse_Wheel_Event,
 	Resize_Event,
 	Dpi_Event,
 	Focus_Event,

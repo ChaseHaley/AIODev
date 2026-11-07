@@ -14,7 +14,7 @@ import "aio:ui"
 @(private)
 gesture_button :: proc(s: ^app.App, w: ^app.Window, button: input.Mouse_Button,
 	pressed: bool, x, y: f32) {
-	app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = button,
+	app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = button,
 		pressed = pressed, x = i32(x), y = i32(y), time_ns = 1_000_000_000})
 }
 
@@ -113,7 +113,7 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	if !testing.expect(t, app.selection_active(w)) {return}
 	focus := w.tree.focus
 	ui.find_open(&w.find)
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = w.width+10, y = w.height+10,
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = w.width+10, y = w.height+10,
 		buttons = {.Left}})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
 	testing.expect(t, !app.selection_active(w) && !ui.armed_down(w.find.armed))
@@ -150,7 +150,7 @@ gestures_menu_kept_open_releases_its_swallowed_button :: proc(t: ^testing.T) {
 	gesture_button(s, w, .Left, true, r.x + 20, r.y + r.height / 2)
 	gesture_button(s, w, .Left, false, r.x + 20, r.y + r.height / 2)
 	if !testing.expect(t, app.tab_menu_shown(w)) {return}
-	app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	if !testing.expect(t, !app.tab_menu_shown(w)) {return}
 	testing.expect(t, gesture_captured(w) == {})
 	p := w.panes[0].rect
@@ -179,7 +179,7 @@ gestures_cancel_preview_destruction_and_late_events_preserve_runtime :: proc(t: 
 	app.handle_event(s, platform.Capture_Lost_Event{preview_id})
 	testing.expect(t, app.window_find(s, preview_id) == nil)
 	app.handle_event(s, platform.Focus_Event{preview_id, false})
-	app.handle_event(s, platform.Mouse_Button_Event{window = preview_id, button = .Left})
+	app.handle_event(s, input.Mouse_Button_Event{window = preview_id, button = .Left})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
 	testing.expect(t, !app.drag_held(w))
 	testing.expect_value(t, len(s.windows), 2)
@@ -206,11 +206,11 @@ gestures_completion_removes_source_window_and_preserves_both_runtimes :: proc(t:
 		place: app.Drag_Destination = app.Drop_Pane{target.id, destination, destination.tree.root, .Right, .Fits}
 		if to_tab {place = app.Drop_New_Tab{target.id, destination, .Fits}}
 		seed_pane_drag(w, source, source.tree.root, place)
-		app.handle_event(s, platform.Mouse_Button_Event{window = window_id, button = .Left})
+		app.handle_event(s, input.Mouse_Button_Event{window = window_id, button = .Left})
 		testing.expect(t, app.window_find(s, window_id) == nil)
 		testing.expect(t, app.workspace_find(s, workspace_id) == nil)
-		app.handle_event(s, platform.Mouse_Move_Event{window = window_id, x = 100, y = 100})
-		app.handle_event(s, platform.Mouse_Button_Event{window = window_id, button = .Right})
+		app.handle_event(s, input.Mouse_Move_Event{window = window_id, x = 100, y = 100})
+		app.handle_event(s, input.Mouse_Button_Event{window = window_id, button = .Right})
 		testing.expect_value(t, len(s.windows), 1)
 		testing.expect_value(t, len(s.sessions), 2)
 		testing.expect_value(t, len(target.workspace.tabs), to_tab ? 2 : 1)
@@ -259,16 +259,16 @@ gesture_terminal_packets :: proc(t: ^testing.T, report: bool) {
 		pane := w.panes[0].rect
 		px, py := pane.x + 30, pane.y + 30
 		gesture_button(s, w, .Left, true, px, py)
-		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(px + 10), y = i32(py), buttons = {.Left}})
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(px + 10), y = i32(py), buttons = {.Left}})
 		gesture_button(s, w, .Left, false, px + 10, py)
 	} else {
 		layout, _ := app.rail_current_layout(w)
 		row := app.rail_row_index_for_tab(w.rail_rows[:], w.workspace, 0)
 		close := ui.rail_close_rect(layout, row, w.scale)
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)
-		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = 100, y = 200, buttons = {.Left}})
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = 100, y = 200, buttons = {.Left}})
 		app.handle_event(s, platform.Capture_Lost_Event{w.id})
-		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = 110, y = 200, buttons = {.Left}})
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = 110, y = 200, buttons = {.Left}})
 		gesture_button(s, w, .Left, false, 110, 200)
 		app.pane_split(s, w, .Right)
 		h := gesture_header(w)

@@ -1,7 +1,7 @@
 package main
 
 import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -637,7 +637,7 @@ status_panel_contains :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 // Panel clicks open the pane a row came from; the panel takes every press inside it.
-status_panel_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+status_panel_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	x, y := f32(e.x), f32(e.y)
 	if !e.pressed || !status_panel_contains(app, w, x, y) {return false}
 	gesture_swallow(w, e.button, .Status_Panel)

@@ -15,7 +15,7 @@ field_edit_failed_clipboard_preserves_unicode_selection :: proc(t: ^testing.T) {
 	f: ui.Text_Field
 	defer delete(f.bytes)
 	// An uninitialized platform is a deterministic clipboard failure without an OS write.
-	for e in ([?]platform.Key_Event{
+	for e in ([?]input.Key_Event{
 		{key = .X, modifiers = {.Control}, pressed = true},
 		{key = .X, modifiers = {.Control, .Shift}, pressed = true},
 		{key = .Delete, modifiers = {.Shift}, pressed = true},
@@ -45,7 +45,7 @@ field_edit_empty_releases_and_nonclipboard_keys :: proc(t: ^testing.T) {
 	f: ui.Text_Field
 	defer delete(f.bytes)
 	ui.field_set(&f, "é🙂")
-	for e in ([?]platform.Key_Event{
+	for e in ([?]input.Key_Event{
 		{key = .C, modifiers = {.Control}, pressed = true},
 		{key = .Insert, modifiers = {.Control}, pressed = true},
 		{key = .X, modifiers = {.Control}, pressed = true},
@@ -55,7 +55,7 @@ field_edit_empty_releases_and_nonclipboard_keys :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, len(s.notices.items), 0)
 	ui.field_select_all(&f)
-	for e in ([?]platform.Key_Event{
+	for e in ([?]input.Key_Event{
 		{key = .X, modifiers = {.Control}}, {key = .Delete, modifiers = {.Shift}},
 		{key = .V, modifiers = {.Control}}, {key = .Insert, modifiers = {.Shift}},
 		{key = .C, modifiers = {.Control, .Super}, pressed = true},
@@ -89,7 +89,7 @@ field_edit_clipboard_and_direct_consumer_events :: proc(t: ^testing.T) {
 	}
 	f: ui.Text_Field
 	defer delete(f.bytes)
-	for e in ([?]platform.Key_Event{
+	for e in ([?]input.Key_Event{
 		{key = .C, modifiers = {.Control}, pressed = true},
 		{key = .C, modifiers = {.Control, .Shift}, pressed = true},
 		{key = .Insert, modifiers = {.Control}, pressed = true},
@@ -149,39 +149,39 @@ field_edit_clipboard_and_direct_consumer_events :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Rename), workspace.id)
 	testing.expect_value(t, ui.field_string(&w.rename), workspace.name)
 	testing.expect(t, platform.clipboard_set_text(&s.platform, "  漢\n🙂  "))
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .V, modifiers = {.Control}, pressed = true})
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .V, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, ui.field_string(&w.rename), "  漢🙂  ")
 	ui.field_select_all(&w.rename)
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .C, unshifted = 'c',
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .C, unshifted = 'c',
 		modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, ui.field_selected_text(&w.rename), "  漢🙂  ")
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .V, modifiers = {.Control}})
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .V, modifiers = {.Control}})
 	testing.expect_value(t, ui.field_string(&w.rename), "  漢🙂  ")
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect_value(t, workspace.name, "漢🙂")
 	testing.expect(t, !app.rename_shown(&w) && app.workspace_picker_target(&w.workspace_picker, .Rename) == 0)
 
 	app.workspace_picker_open(&s, &w)
 	testing.expect(t, platform.clipboard_set_text(&s.platform, "漢\n🙂"))
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .V, modifiers = {.Control}, pressed = true})
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .V, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "漢🙂")
 	testing.expect_value(t, len(w.workspace_picker.rows), 1)
 	ui.field_select_all(&w.workspace_picker.query)
 	// The picker receives logical layout keys; rename retains its existing raw-key policy.
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .C, unshifted = 'x',
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .C, unshifted = 'x',
 		modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "")
 	app.workspace_row_rename_open(&s, &w, workspace.id)
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .Insert, modifiers = {.Shift}, pressed = true})
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .Insert, modifiers = {.Shift}, pressed = true})
 	testing.expect_value(t, ui.field_string(&w.rename), "漢🙂")
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect_value(t, app.workspace_picker_target(&w.workspace_picker, .Rename), u32(0))
 	testing.expect_value(t, workspace.name, "漢🙂")
 	app.workspace_row_icon_open(&s, &w, workspace.id)
 	ui.field_set(&w.workspace_picker.query, "")
 	w.workspace_picker.selected = 0
 	testing.expect(t, platform.clipboard_set_text(&s.platform, "\n\t"))
-	app.handle_event(&s, platform.Key_Event{window = w.id, key = .V, modifiers = {.Control}, pressed = true})
+	app.handle_event(&s, input.Key_Event{window = w.id, key = .V, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "")
 	testing.expect_value(t, w.workspace_picker.selected, len(app.WORKSPACE_ICONS))
 }

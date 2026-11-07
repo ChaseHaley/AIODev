@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
@@ -15,7 +16,7 @@ pointer_expect_move :: proc(
 	shape: platform.Cursor_Shape,
 ) {
 	before := s.verify.pointer_updates
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)})
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)})
 	testing.expect_value(t, w.pointer_shape, shape)
 	testing.expect(t, s.verify.pointer_updates - before <= 1, "one move must not flash another cursor")
 }
