@@ -136,9 +136,9 @@ workspace_adopt :: proc(
 		value  = f32(workspace.selected),
 		target = f32(workspace.selected),
 	}
-	w.tab_hover, w.tab_pressed = -1, false
+	w.tab_hover, w.rail_hover = -1, -1
+	gesture_tab_unpress(w)
 	ui.armed_cancel(&w.tab_close_armed)
-	w.rail_hover, w.rail_pressed = -1, -1
 	window_relayout(app, w)
 	rail_reveal_active(w)
 	focus_enter(app, w)

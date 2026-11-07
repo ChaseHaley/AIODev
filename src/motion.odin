@@ -90,7 +90,7 @@ update_motion :: proc(app: ^App) {
 				ui.control_update(
 					&control,
 					w.tab_hover == i,
-					w.tab_pressed && w.tab_hover == i,
+					gesture_tab_pressed(w) && w.tab_hover == i,
 					app.animations,
 					now,
 				) ||

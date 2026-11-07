@@ -17,8 +17,5 @@ window_notices_sync :: proc(app: ^App) {
 	if app.notice_window == id {return}
 	app.notice_window = id
 	ui.notices_pointer_cancel(&app.notices)
-	for w in app.windows {
-		w.notice_buttons = {}
-		w.dirty = true
-	}
+	for w in app.windows {w.dirty = true}
 }

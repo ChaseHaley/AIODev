@@ -640,7 +640,7 @@ status_panel_contains :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 status_panel_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	x, y := f32(e.x), f32(e.y)
 	if !e.pressed || !status_panel_contains(app, w, x, y) {return false}
-	w.header_buttons += {e.button}
+	gesture_swallow(w, e.button, .Status_Panel)
 	if e.button != .Left {return true}
 	if button := status_panel_button_at(app, w, x, y); button != .None {
 		ui.armed_press(&w.status.panel_button_armed, button)

@@ -99,7 +99,7 @@ rail_resize_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 rail_resize_cancel :: proc(w: ^Window) {
-	if w.rail_resizing {w.gesture.cancelled += {.Left}}
+	if w.rail_resizing {gesture_cancel_button(w, .Left)}
 	if w.rail_resizing {w.dragging = {}}
 	w.rail_resizing = false
 }
@@ -293,7 +293,7 @@ rail_row_draw :: proc(
 	row := w.rail_rows[index]
 	s := w.scale
 	hover := w.rail_hover == index
-	pressed := w.rail_pressed == index
+	pressed := gesture_rail_pressed(w) == index
 	rect := rail_tab_rect(w, layout, index)
 	if rect.width <= 0 || rect.y + rect.height <= layout.list.y || rect.y >= layout.list.y + layout.list.height {
 		return .Ok
@@ -407,7 +407,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, layout.footer) != .None {return .Ok}
 	tile := ui.rail_new_tab_tile(layout)
 	hover := w.rail_hover == RAIL_NEW_TAB_ROW
-	pressed := w.rail_pressed == RAIL_NEW_TAB_ROW
+	pressed := gesture_rail_pressed(w) == RAIL_NEW_TAB_ROW
 	if hover || pressed {
 		fill := pressed ? app.theme.pressed : app.theme.hover
 		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = ui.RADIUS_CONTROL * w.scale})
@@ -432,7 +432,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	chevron := ui.rail_profile_rect(layout)
 	profile_hover := f32(int(w.rail_hover == RAIL_PROFILE_ROW))
-	profile_press := f32(int(w.rail_pressed == RAIL_PROFILE_ROW))
+	profile_press := f32(int(gesture_rail_pressed(w) == RAIL_PROFILE_ROW))
 	_ = ui.icon_button_draw(
 		&w.list,
 		app.theme,

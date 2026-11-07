@@ -3,6 +3,7 @@ package main
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
+import "core:time"
 
 // The surfaces that can own the pointer, listed topmost first. The order is the precedence: hover,
 // cursor and press all resolve through `pointer_target`, so the surface that shows a hover is the one
@@ -56,44 +57,71 @@ Pointer_Surface :: struct {
 	// A press the surface owns. A modal surface also receives every release while it is open.
 	press:   proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event),
 	// The release of a press the surface owned, wherever it lands; false passes it on to the shared
-	// completion for confirmations, swallowed buttons, the palette and pane content.
+	// completion for confirmations, the palette and pane content. A release of a press the surface
+	// swallowed ends there either way.
 	release: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool,
 	// The hovered control supplies a short label; the shared tooltip owns timing and drawing.
 	tooltip: proc(app: ^App, w: ^Window, x, y: f32) -> string,
+	// Capture loss: the surface drops its hover, armed control and drag, whether or not it holds a button.
+	cancel:  proc(app: ^App, w: ^Window),
 }
 
 @(rodata)
 pointer_surfaces := [Pointer_Target]Pointer_Surface {
-	.Notice           = {notice_claims, notice_hover, notice_press, notice_release, notice_tooltip},
-	.Workspace_Picker = {picker_claims, picker_hover, workspace_picker_button, nil, picker_tooltip},
-	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil, nil},
-	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil, nil},
-	.Document_Menu    = {documents_claims, documents_hover, documents_press, nil, documents_tooltip},
-	.Status_Inbox     = {inbox_claims, inbox_hover, status_inbox_button, nil, nil},
-	.Rename           = {rename_claims, rename_hover, rename_button, nil, nil},
-	.Caption          = {caption_claims, caption_hover, caption_press, caption_release, caption_tooltip},
-	.Confirmation     = {confirmation_claims, confirmation_pointer_hover, confirmation_press, nil, nil},
-	.Palette          = {palette_claims, palette_hover, palette_press, nil, palette_tooltip},
+	.Notice           = {
+		notice_claims, notice_hover, notice_press, notice_release, notice_tooltip, notice_cancel,
+	},
+	.Workspace_Picker = {
+		picker_claims, picker_hover, workspace_picker_button, nil, picker_tooltip, picker_cancel,
+	},
+	.Tab_Menu         = {tab_menu_claims, tab_menu_hover, tab_menu_button, nil, nil, nil},
+	.Profile_Menu     = {profile_menu_claims, profile_menu_hover, profile_menu_press, nil, nil, nil},
+	.Document_Menu    = {
+		documents_claims, documents_hover, documents_press, nil, documents_tooltip, documents_cancel,
+	},
+	.Status_Inbox     = {inbox_claims, inbox_hover, status_inbox_button, nil, nil, nil},
+	.Rename           = {rename_claims, rename_hover, rename_button, nil, nil, rename_cancel},
+	.Caption          = {
+		caption_claims, caption_hover, caption_press, caption_release, caption_tooltip, caption_cancel,
+	},
+	.Confirmation     = {
+		confirmation_claims, confirmation_pointer_hover, confirmation_press, nil, nil, confirmation_cancel_press,
+	},
+	.Palette          = {palette_claims, palette_hover, palette_press, nil, palette_tooltip, palette_cancel},
 	.Tab_Orientation  = {
 		orientation_claims, orientation_hover, orientation_press, orientation_release, orientation_tooltip,
+		orientation_cancel,
 	},
 	.Title_Action     = {
 		title_action_claims, title_action_pointer_hover, title_action_press, title_action_release,
-		title_action_tooltip,
+		title_action_tooltip, title_action_cancel,
 	},
-	.Find             = {find_claims, find_pointer_hover, find_press, find_release, find_tooltip},
+	.Find             = {find_claims, find_pointer_hover, find_press, find_release, find_tooltip, find_cancel},
 	.Workspace_Button = {workspace_button_claims, workspace_button_hover, workspace_button_press, nil,
-		workspace_button_tooltip},
-	.Status_Pill      = {pill_claims, pill_hover, pill_press, nil, pill_tooltip},
-	.Divider          = {divider_claims, divider_hover, divider_pointer_press, divider_release, nil},
-	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release, panel_tooltip},
-	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release, tabs_tooltip},
-	.Floating         = {floating_claims, floating_hover, floating_press, floating_release, floating_tooltip},
-	.Pane_Header      = {header_claims, header_hover, header_press, nil, header_tooltip},
-	.Scrollbar        = {scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release, nil},
-	.Settings_Page    = {settings_claims, settings_hover, content_press, nil, settings_tooltip},
-	.Markdown_Page    = {markdown_claims, markdown_hover, markdown_press, markdown_release, nil},
-	.Content          = {content_claims, content_hover, content_press, nil, nil},
+		workspace_button_tooltip, nil},
+	.Status_Pill      = {pill_claims, pill_hover, pill_press, nil, pill_tooltip, nil},
+	.Divider          = {
+		divider_claims, divider_hover, divider_pointer_press, divider_release, nil, divider_cancel,
+	},
+	.Status_Panel     = {panel_claims, panel_hover, panel_press, panel_release, panel_tooltip, panel_cancel},
+	.Tabs             = {tabs_claims, tabs_hover, tabs_press, tabs_release, tabs_tooltip, tabs_cancel},
+	.Floating         = {
+		floating_claims, floating_hover, floating_press, floating_release, floating_tooltip,
+		floating_pointer_cancel,
+	},
+	.Pane_Header      = {
+		header_claims, header_hover, pane_header_press, header_release, header_tooltip, header_cancel,
+	},
+	.Scrollbar        = {
+		scrollbar_claims, scrollbar_hover, scrollbar_press, scrollbar_release, nil, scrollbar_cancel,
+	},
+	.Settings_Page    = {
+		settings_claims, settings_hover, content_press, nil, settings_tooltip, settings_cancel,
+	},
+	.Markdown_Page    = {
+		markdown_claims, markdown_hover, markdown_press, markdown_release, nil, markdown_gesture_clear,
+	},
+	.Content          = {content_claims, content_hover, content_press, nil, nil, content_cancel},
 }
 
 // The workspace and tab chrome a linked window does not draw.
@@ -180,16 +208,15 @@ notice_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 
 @(private = "file")
 notice_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	w.notice_buttons += {e.button}
 	if e.button != .Left {return}
 	hit := notice_hit(app, w, f32(e.x), f32(e.y))
 	ui.notices_press(&app.notices, hit.close ? hit.id : 0)
 }
 
+// A notice press ends here even after the notices moved to another window, which cancelled it there.
 @(private = "file")
 notice_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button not_in w.notice_buttons {return false}
-	w.notice_buttons -= {e.button}
+	if app.notice_window != w.id {return true}
 	if e.button == .Left {
 		hit := notice_hit(app, w, f32(e.x), f32(e.y))
 		if ui.notices_release(&app.notices, hit.close ? hit.id : 0) {
@@ -199,6 +226,11 @@ notice_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) ->
 	_ = ui.notices_hover(&app.notices, 0)
 	w.dirty = true
 	return true
+}
+
+@(private = "file")
+notice_cancel :: proc(app: ^App, w: ^Window) {
+	if app.notice_window == w.id {ui.notices_pointer_cancel(&app.notices)}
 }
 
 // Workspace picker
@@ -222,6 +254,13 @@ picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	return ""
 }
 
+@(private = "file")
+picker_cancel :: proc(app: ^App, w: ^Window) {
+	ui.field_release(&w.workspace_picker.query)
+	workspace_order_end(w)
+	_ = workspace_order_animate(w, app.animations, time.tick_now())
+}
+
 // Tab menu
 
 @(private = "file")
@@ -240,7 +279,7 @@ tab_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 @(private = "file")
 tab_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if !e.pressed {return}
-	w.header_buttons += {e.button}
+	gesture_swallow(w, e.button, .Tab_Menu)
 	if hit := tab_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
 		if tab_menu_enabled(w, hit) {
 			w.tab_menu.selected = hit
@@ -297,6 +336,11 @@ documents_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	return document_menu_tooltip(w, x, y)
 }
 
+@(private = "file")
+documents_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.document_menu.url)
+}
+
 // Activity inbox
 
 @(private = "file")
@@ -330,16 +374,21 @@ rename_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if chip_name_shown(w) && !rect_contains(rename_rect(w), x, y) {
 		overlay_close(app, w, .Leave)
 		target := pointer_target(app, w, x, y)
-		w.gesture.owners[e.button] = target
+		gesture_hand_off(w, e.button, target)
 		pointer_press(app, w, target, e)
 		return
 	}
 	if !rect_contains(rename_rect(w), x, y) {
 		rename_finish(app, w, false)
-		w.header_buttons += {e.button}
+		gesture_swallow(w, e.button, .Rename)
 	} else if e.button == .Left && rect_contains(rename_field_rect(w), x, y) {
 		rename_pointer(app, w, x, true, .Shift in e.modifiers)
 	}
+}
+
+@(private = "file")
+rename_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.rename)
 }
 
 // Caption buttons
@@ -384,6 +433,12 @@ caption_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -
 	return true
 }
 
+@(private = "file")
+caption_cancel :: proc(_: ^App, w: ^Window) {
+	w.caption_hover = -1
+	ui.armed_cancel(&w.caption_armed)
+}
+
 // Confirmation
 
 @(private = "file")
@@ -402,6 +457,11 @@ confirmation_pointer_hover :: proc(
 @(private = "file")
 confirmation_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	_ = confirmation_button(app, w, e)
+}
+
+@(private = "file")
+confirmation_cancel_press :: proc(_: ^App, w: ^Window) {
+	confirmation_release(w)
 }
 
 // Command palette
@@ -439,6 +499,11 @@ palette_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	on_palette_outcome(app, w, outcome, id)
 }
 
+@(private = "file")
+palette_cancel :: proc(app: ^App, w: ^Window) {
+	if palette_active(app, w) {ui.palette_drag_cancel(&app.palette)}
+}
+
 // Tab orientation toggle
 
 @(private = "file")
@@ -471,6 +536,12 @@ orientation_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 	w.dirty = true
 	if ok && fired {toggle_tab_orientation(app)}
 	return true
+}
+
+@(private = "file")
+orientation_cancel :: proc(_: ^App, w: ^Window) {
+	w.tab_orientation_button_hovered = false
+	ui.armed_cancel(&w.tab_orientation_button_armed)
 }
 
 // Find bar
@@ -506,6 +577,12 @@ find_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	case:
 	}
 	return ""
+}
+
+@(private = "file")
+find_cancel :: proc(_: ^App, w: ^Window) {
+	ui.armed_cancel(&w.find.armed)
+	w.find.hover = .None
 }
 
 @(private = "file")
@@ -603,6 +680,11 @@ divider_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -
 	return true
 }
 
+@(private = "file")
+divider_cancel :: proc(_: ^App, w: ^Window) {
+	w.rail_resizing = false
+}
+
 // Activity panel
 
 @(private = "file")
@@ -639,13 +721,17 @@ panel_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private = "file")
 panel_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !ui.armed_down(w.status.panel_button_armed) {return false}
-	w.header_buttons -= {.Left}
 	w.dirty = true
 	button := status_panel_button_at(app, w, f32(e.x), f32(e.y))
 	if fired, ok := ui.armed_release(&w.status.panel_button_armed, button); ok {
 		status_panel_button_fire(app, fired)
 	}
 	return true
+}
+
+@(private = "file")
+panel_cancel :: proc(_: ^App, w: ^Window) {
+	ui.armed_cancel(&w.status.panel_button_armed)
 }
 
 // Tab strip and rail
@@ -707,11 +793,17 @@ tabs_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private = "file")
 tabs_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
-	w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
+	w.dirty = true
 	if tab_interaction_release(app, w, f32(e.x), f32(e.y)) {return true}
 	if !w.tab_drag.pressed {return false}
 	tab_drag_finish(app, w)
 	return true
+}
+
+@(private = "file")
+tabs_cancel :: proc(_: ^App, w: ^Window) {
+	w.tab_hover, w.rail_hover = -1, -1
+	ui.armed_cancel(&w.tab_close_armed)
 }
 
 // Pane headers, and a single pane's split controls, which show while the pointer is in the pane's top
@@ -730,7 +822,7 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 	split_overlay_update(w, x, y, in_pane && !w.selecting)
 	over, action := pane_header_pointer(w, x, y, owner == .Pane_Header && !w.selecting)
 	if owner != .Pane_Header {return}
-	pointer_set(app, w, over && action != .None && w.header_buttons == {} ? .Hand : .Arrow)
+	pointer_set(app, w, over && action != .None && !gesture_swallowing(w) ? .Hand : .Arrow)
 }
 
 @(private = "file")
@@ -750,9 +842,18 @@ header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	return ""
 }
 
+// The header swallows its presses, so it also finishes a release that lands anywhere.
 @(private = "file")
-header_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	_ = pane_header_button(app, w, e)
+header_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+	if palette_active(app, w) {pane_header_cancel(w)}
+	pane_header_release(app, w, e)
+	return true
+}
+
+@(private = "file")
+header_cancel :: proc(_: ^App, w: ^Window) {
+	pane_header_cancel(w)
+	w.split_overlay = false
 }
 
 // Terminal scrollbars
@@ -782,6 +883,11 @@ scrollbar_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event)
 	if e.button != .Left || !w.scroll_drag.active {return false}
 	terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
 	return true
+}
+
+@(private = "file")
+scrollbar_cancel :: proc(_: ^App, w: ^Window) {
+	w.scroll_drag = {}
 }
 
 // Settings pages
@@ -826,6 +932,12 @@ settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	return w.editor.hover_reset >= 0 ? "Reset setting" : ""
 }
 
+@(private = "file")
+settings_cancel :: proc(_: ^App, w: ^Window) {
+	ui.editor_hover_clear(&w.editor)
+	ui.editor_pointer_cancel(&w.editor)
+}
+
 // Terminal content
 
 @(private = "file")
@@ -834,6 +946,12 @@ content_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return true}
 @(private = "file")
 content_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
 	if owner == .Content {content_move(app, w, e)} else {link_hover_clear(w)}
+}
+
+@(private = "file")
+content_cancel :: proc(_: ^App, w: ^Window) {
+	w.selecting, w.autoscrolling = false, false
+	link_hover_clear(w)
 }
 
 @(private = "file")
@@ -878,4 +996,10 @@ title_action_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Eve
 		}
 	}
 	return true
+}
+
+@(private = "file")
+title_action_cancel :: proc(_: ^App, w: ^Window) {
+	w.title_action_hover = .None
+	ui.armed_cancel(&w.title_action_armed)
 }

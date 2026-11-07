@@ -218,11 +218,10 @@ profile_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 profile_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	if !profile_menu_shown(w) {return false}
 	if !e.pressed {
-		w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
-		if e.button in w.header_buttons {w.header_buttons -= {e.button}}
+		w.dirty = true
 		return true
 	}
-	w.header_buttons += {e.button}
+	gesture_swallow(w, e.button, .Profile_Menu)
 	if hit := profile_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
 		item := w.profile_menu.menu.items[hit]
 		if item.enabled && !item.separator {

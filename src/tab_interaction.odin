@@ -34,14 +34,16 @@ tab_interaction_hit :: proc(
 tab_interaction_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
 	x, y := f32(e.x), f32(e.y)
 	hit := tab_interaction_hit(app, w, x, y, e.button)
-	if w.tabs_horizontal {
-		w.tab_pressed = e.button == .Left &&
-			(hit.kind == .Tab || hit.kind == .Close || hit.kind == .New_Tab)
+	// A Left press draws its tab, new-tab button or rail row pressed until the release.
+	if e.button == .Left && w.tabs_horizontal {
+		if hit.kind == .Tab || hit.kind == .Close || hit.kind == .New_Tab {
+			gesture_tab_press(w, Gesture_Tab{hit.index})
+		}
 	} else if e.button == .Left {
 		#partial switch hit.kind {
-		case .Tab, .Close: w.rail_pressed = hit.index
-		case .New_Tab: w.rail_pressed = RAIL_NEW_TAB_ROW
-		case .Profiles: w.rail_pressed = RAIL_PROFILE_ROW
+		case .Tab, .Close: gesture_tab_press(w, Gesture_Rail_Row{hit.index})
+		case .New_Tab: gesture_tab_press(w, Gesture_Rail_Row{RAIL_NEW_TAB_ROW})
+		case .Profiles: gesture_tab_press(w, Gesture_Rail_Row{RAIL_PROFILE_ROW})
 		}
 	}
 	switch hit.kind {

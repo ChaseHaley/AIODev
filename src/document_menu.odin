@@ -780,12 +780,11 @@ document_menu_tooltip :: proc(w: ^Window, x, y: f32) -> string {
 document_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	menu := &w.document_menu
 	if !e.pressed {
-		w.rail_pressed, w.tab_pressed, w.dirty = -1, false, true
+		w.dirty = true
 		ui.field_release(&menu.url)
-		if e.button in w.header_buttons {w.header_buttons -= {e.button}}
 		return
 	}
-	w.header_buttons += {e.button}
+	gesture_swallow(w, e.button, .Document_Menu)
 	x, y := f32(e.x), f32(e.y)
 	if _, popout := document_menu_popout(w); popout {
 		if level, hit := document_popout_hit(w, x, y); hit && e.button == .Left {

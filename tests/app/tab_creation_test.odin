@@ -82,7 +82,7 @@ profile.order = default, cmd, hidden
 		chevron := horizontal ? app.tab_chevron_rect(s, w) : app.rail_profile_rect(w)
 		creation_click(s, w, chevron, .Left)
 		if !testing.expect(t, app.profile_menu_shown(w)) {return}
-		testing.expect_value(t, w.rail_pressed, -1)
+		testing.expect_value(t, app.gesture_rail_pressed(w), -1)
 		testing.expect_value(t, len(w.workspace.tabs), count)
 		shown, _ := w.overlay.(app.Overlay_Profile_Menu)
 		_, new_tab := shown.mode.(app.Profile_Menu_New_Tab)
@@ -107,7 +107,7 @@ profile.order = default, cmd, hidden
 		testing.expect_value(t, len(w.workspace.tabs), count + 1)
 		app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
 		testing.expect(t, !app.profile_menu_shown(w))
-		testing.expect_value(t, w.rail_pressed, -1)
+		testing.expect_value(t, app.gesture_rail_pressed(w), -1)
 		creation_click(s, w, plus, .Left)
 		testing.expect_value(t, len(w.workspace.tabs), count + 2)
 		testing.expect_value(t, app.focused_session(s, w).profile_id, "default")

@@ -39,7 +39,8 @@ adoption_fixture_destroy :: proc(t: ^testing.T, f: ^Adoption_Fixture) {
 // Every presentation value a caller must not have to teach either path separately.
 @(private="file")
 adoption_dirty_presentation :: proc(w: ^app.Window) {
-	w.rail_hover, w.rail_pressed = 1, 1
+	w.rail_hover = 1
+	w.gesture.captures[.Left] = app.Gesture_Held{app.Gesture_Rail_Row{1}}
 	w.rail_scroll = 99
 	ui.armed_press(&w.tab_close_armed, 2)
 	w.overlay = app.Overlay_Rename{kind = .Tab}
@@ -56,7 +57,7 @@ adoption_expect_postcondition :: proc(
 	testing.expect_value(t, w.workspace, workspace)
 	testing.expect(t, w.tree == &app.selected_tab(workspace).tree)
 	testing.expect_value(t, w.rail_hover, -1)
-	testing.expect_value(t, w.rail_pressed, -1)
+	testing.expect_value(t, app.gesture_rail_pressed(w), -1)
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	testing.expect(t, w.overlay == nil)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
@@ -140,7 +141,7 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	testing.expect_value(t, raw_data(w.views), views)
 	testing.expect_value(t, raw_data(w.panes), panes)
 	testing.expect_value(t, w.rail_hover, 1)
-	testing.expect_value(t, w.rail_pressed, 1)
+	testing.expect_value(t, app.gesture_rail_pressed(w), 1)
 	testing.expect_value(t, ui.armed_target(w.tab_close_armed), 2)
 	testing.expect_value(t, w.rail_scroll, f32(99))
 	testing.expect(t, app.workspace_picker_mode(&w.workspace_picker) == .List)
