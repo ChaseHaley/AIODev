@@ -2,6 +2,7 @@ package ui_test
 
 import "core:testing"
 import "aio:commands"
+import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
@@ -13,11 +14,13 @@ caption_claim_and_hit_test_share_one_boundary :: proc(t: ^testing.T) {
 		width := 1000 * scale
 		claim := ui.caption_claim_height(scale)
 		testing.expect_value(t, claim, ui.TITLE_BAR_HEIGHT * scale)
-		testing.expect_value(t, ui.caption_hit(width, width - 10 * scale, claim, scale), -1)
-		testing.expect_value(t, ui.caption_hit(width, width - 10 * scale, claim - 1, scale), 2)
-		for i in 0 ..< 3 {
-			x := width - 138 * scale + (f32(i) * 46 + 20) * scale
-			testing.expect_value(t, ui.caption_hit(width, x, claim - 1, scale), i)
+		testing.expect_value(t, ui.caption_hit(width, width - 10 * scale, claim, scale), nil)
+		close := platform.Caption_Button.Close
+		testing.expect_value(t, ui.caption_hit(width, width - 10 * scale, claim - 1, scale), close)
+		for button in platform.Caption_Button {
+			left := f32(int(button)) * platform.CAPTION_BUTTON_WIDTH + 20
+			x := width - ui.CAPTION_WIDTH * scale + left * scale
+			testing.expect_value(t, ui.caption_hit(width, x, claim - 1, scale), button)
 		}
 	}
 }

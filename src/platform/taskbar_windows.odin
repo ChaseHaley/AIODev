@@ -1,6 +1,7 @@
 package platform
 
 import "aio:input"
+import "aio:localpath"
 import "core:log"
 import w "core:sys/windows"
 
@@ -14,16 +15,12 @@ taskbar_list :: proc(p: ^Platform) -> (^w.ITaskbarList3, Error) {
 	case nil:
 	}
 	p.taskbar = Service_Failed{}
-	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
+	entered, usable := localpath.com_apartment()
 	// S_FALSE means COM was already initialized on this thread, and still needs a matching uninit.
-	if result >= 0 {
-		p.com_initialized = true
-	} else if u32(result) != 0x80010106 {
-		log.errorf("CoInitializeEx failed: HRESULT 0x%x", u32(result))
-		return nil, .Os
-	}
+	p.com_initialized = entered
+	if !usable {return nil, .Os}
 	list: rawptr
-	result = w.CoCreateInstance(
+	result := w.CoCreateInstance(
 		w.CLSID_TaskbarList,
 		nil,
 		w.CLSCTX_INPROC_SERVER,

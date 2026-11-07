@@ -22,6 +22,18 @@ foreign open_kernel32 {
 @(private)
 COM_CHANGED_MODE :: 0x80010106
 
+// Enters a single-threaded COM apartment on the calling thread. `entered` means the caller owes one
+// CoUninitialize, including for S_FALSE. COM already initialized in another apartment kind serves, so it
+// is `usable` with nothing owed; any other failure is logged.
+@(require_results)
+com_apartment :: proc() -> (entered, usable: bool) {
+	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
+	if result >= 0 {return true, true}
+	if u32(result) == COM_CHANGED_MODE {return false, true}
+	log.errorf("CoInitializeEx failed: HRESULT 0x%x", u32(result))
+	return false, false
+}
+
 // The cycle and complexity bound for shortcut chains. A target still naming a shortcut is refused.
 @(private)
 SHORTCUT_HOPS :: 4
@@ -115,18 +127,14 @@ Persist_File_Vtable :: struct {
 // because a plain open of its target cannot carry them.
 @(private, require_results)
 shortcut_target :: proc(path: string) -> (string, bool) {
-	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
-	initialized := result >= 0
+	initialized, usable := com_apartment()
 	defer if initialized {w.CoUninitialize()}
-	if result < 0 && u32(result) != COM_CHANGED_MODE {
-		log.errorf("CoInitializeEx failed: %x", u32(result))
-		return "", false
-	}
+	if !usable {return "", false}
 	class_id := w.GUID{0x00021401, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}}
 	link_id := w.GUID{0x000214f9, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}}
 	persist_id := w.GUID{0x0000010b, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}}
 	object: rawptr
-	result = w.CoCreateInstance(&class_id, nil, w.CLSCTX_INPROC_SERVER, &link_id, &object)
+	result := w.CoCreateInstance(&class_id, nil, w.CLSCTX_INPROC_SERVER, &link_id, &object)
 	if result < 0 || object == nil {
 		log.errorf("CoCreateInstance(ShellLink) failed: %x", u32(result))
 		return "", false

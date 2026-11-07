@@ -231,9 +231,10 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	c := status_notification_channels(&app.settings.status, record.state)
 	// The sound rides on the first notification Windows shows, and plays on its own when none does.
 	sound := c.sound
+	token := platform_api.Notification_Token(entry.id)
 	if c.banner {
 		// Unavailable: notifications could not start, which the first banner already reported.
-		result := platform_api.notification_show(&app.platform, title, text, entry.id, sound)
+		result := platform_api.notification_show(&app.platform, title, text, token, sound)
 		if result == .None {
 			sound = false
 		} else if result != .Unavailable {
@@ -241,7 +242,7 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 		}
 	}
 	if c.tray {
-		if platform_api.tray_notify(&app.platform, title, text, u64(entry.id), sound) == .None {
+		if platform_api.tray_notify(&app.platform, title, text, token, sound) == .None {
 			sound = false
 		} else {
 			notify(app, .Error, "Windows could not show a tray notification.")

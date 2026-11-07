@@ -25,8 +25,9 @@ $repo = Resolve-Path (Join-Path $PSScriptRoot '..')
 $app = Resolve-Path (Join-Path $repo $Executable)
 $aio = Join-Path (Split-Path $app) 'aio.exe'
 $data = Join-Path $repo 'build/demo'
+. (Join-Path $PSScriptRoot 'instance.ps1')
 
-if (Get-Process aiodev -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match "--instance\s+$Instance\b" }) {
+if (Test-AIODevInstanceRunning $Instance) {
     throw "A '$Instance' instance is already running; quit it first."
 }
 if (Test-Path -LiteralPath $data) { Remove-Item -LiteralPath $data -Recurse -Force }
@@ -71,14 +72,14 @@ while ($true) {
 
 $pwsh = (Get-Command pwsh).Source
 $shell = "`"$pwsh`" -NoLogo -NoExit -File `"$promptScript`""
-Set-Content -LiteralPath (Join-Path $data 'settings.ini') -Value @(
+Set-Content -LiteralPath (Join-Path $data $AIODevSettingsFile) -Value @(
     'control.enabled = true'
     "shell.command = `"$shell`""
     "shell.directory = `"$repo`""
     'status.panel = true'
 )
 
-$process = Start-Process -FilePath $app -ArgumentList '--instance', $Instance, '--data-dir', $data -PassThru
+$process = Start-Process -FilePath $app -ArgumentList (Get-AIODevInstanceArguments $Instance $data) -PassThru
 $deadline = [DateTime]::UtcNow.AddSeconds(15)
 do {
     if ([DateTime]::UtcNow -gt $deadline) { throw 'AIODev did not open a window.' }

@@ -27,7 +27,7 @@ tab_bar_layout :: proc(width, scale: f32, count: int) -> Tab_Bar {
 
 tab_drop_region :: proc(bar: Tab_Bar, width, scale: f32) -> render.Rect {
 	left := bar.x + f32(bar.count) * bar.tab_width
-	return {left, 0, max(0, width - 138 * scale - left), bar.height}
+	return {left, 0, max(0, width - CAPTION_WIDTH * scale - left), bar.height}
 }
 
 tab_drop_hit :: proc(bar: Tab_Bar, width, scale, x, y: f32) -> bool {

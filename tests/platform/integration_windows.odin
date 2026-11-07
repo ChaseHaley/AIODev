@@ -42,7 +42,7 @@ tabbed_title_bar_keeps_native_hit_testing_and_client_size :: proc(t: ^testing.T)
 	testing.expect_value(t, size_error, p.Error.None)
 	testing.expect_value(t, width, i32(800))
 	testing.expect_value(t, height, i32(500))
-	p.window_caption_action(&platform, id, 2)
+	p.window_caption_action(&platform, id, .Close)
 	events, poll_error := p.poll_events(&platform)
 	testing.expect_value(t, poll_error, p.Error.None)
 	closed := false
@@ -64,7 +64,7 @@ invalid_and_partial_lifecycle :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, p.Error.Not_Initialized)
 	testing.expect_value(t, p.window_destroy(&platform, 1), p.Error.Invalid_Window)
 	testing.expect_value(t, p.window_set_title(&platform, 1, "x"), p.Error.Invalid_Window)
-	testing.expect_value(t, p.window_set_frame_color(&platform, 1, {}), p.Error.Invalid_Window)
+	testing.expect_value(t, p.window_set_frame_color(&platform, 1, {}, {}), p.Error.Invalid_Window)
 	testing.expect_value(t, p.window_set_cursor(&platform, 1, .Arrow), p.Error.Invalid_Window)
 	testing.expect_value(t, p.window_flash(&platform, 1), p.Error.Invalid_Window)
 	testing.expect(t, p.window_native_handle(&platform, 1) == nil)
@@ -96,7 +96,8 @@ window_lifecycle_and_events :: proc(t: ^testing.T) {
 	testing.expect_value(t, width, i32(320))
 	testing.expect_value(t, height, i32(200))
 	testing.expect_value(t, p.window_set_title(&platform, first, "Changed 漢😀"), p.Error.None)
-	testing.expect_value(t, p.window_set_frame_color(&platform, first, {0x0f, 0x11, 0x15}), p.Error.None)
+	frame_color := p.window_set_frame_color(&platform, first, {0x0f, 0x11, 0x15}, {0xec, 0xec, 0xf1})
+	testing.expect_value(t, frame_color, p.Error.None)
 	for shape in p.Cursor_Shape {
 		testing.expect_value(t, p.window_set_cursor(&platform, first, shape), p.Error.None)
 	}

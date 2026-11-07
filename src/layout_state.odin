@@ -60,7 +60,7 @@ Saved_Node :: struct {
 	command:   string `json:"command,omitempty"`,
 	linked:    bool,
 	// A linked pane's window, as a slice because only an empty one is left out of the file.
-	window:    []platform.Window_Placement `json:"window,omitempty"`,
+	window:    []Saved_Window `json:"window,omitempty"`,
 	// A floating pane's place above the tiling, likewise a slice of at most one.
 	float:     []Saved_Float `json:"float,omitempty"`,
 	documents: []Document `json:"documents,omitempty"`,
@@ -71,6 +71,16 @@ Saved_Float :: struct {
 	x, y, width, height: f32,
 	stack:               u64,
 	minimized:           bool,
+}
+
+// A linked window's restored rectangle and maximized state as the layout file stores them. The tags are
+// the file's names, so the platform's placement type can change without changing the format.
+Saved_Window :: struct {
+	left:      i32 `json:"left"`,
+	top:       i32 `json:"top"`,
+	right:     i32 `json:"right"`,
+	bottom:    i32 `json:"bottom"`,
+	maximized: bool `json:"maximized"`,
 }
 
 // The saved form of a floating pane group's place, in temporary memory, or nil for a tiled node.
@@ -248,8 +258,8 @@ layout_link_encode :: proc(app: ^App, slot: []layout.Flat_Node, saved: ^Saved_No
 		linked := pane_link_window_of(app, node.content)
 		if linked == nil {return}
 		if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
-			window := make([]platform.Window_Placement, 1, context.temp_allocator)
-			window[0] = placement
+			window := make([]Saved_Window, 1, context.temp_allocator)
+			window[0] = {placement.left, placement.top, placement.right, placement.bottom, placement.maximized}
 			saved.window = window
 		}
 		return
