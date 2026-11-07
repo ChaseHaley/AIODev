@@ -6,7 +6,6 @@ import "aio:render"
 import "aio:settings"
 import "base:runtime"
 import "core:fmt"
-import "core:strconv"
 import "core:strings"
 
 Process_Field :: enum {
@@ -49,7 +48,7 @@ process_row_add :: proc(
 	return editor_add(p, {
 		key = process_key(id, suffix), title = title, value = value,
 		kind = kind, process = id, process_field = field, detail = settings.PADDING_GROUPS_KEY,
-	}, "Processes")
+	}, settings.group_title(settings.PADDING_GROUPS_KEY))
 }
 
 @(require_results)
@@ -59,6 +58,7 @@ editor_process_load :: proc(p: ^Editor, value: string, fallback: int) -> runtime
 	groups := settings.padding_groups_scan(value)
 	for group, more := settings.padding_groups_next(&groups); more;
 	    group, more = settings.padding_groups_next(&groups) {
+		// Parsing rejects a malformed value whole, so this guards only text that bypassed it.
 		if !group.valid {continue}
 		p.process_next += 1
 		id := p.process_next
@@ -232,45 +232,39 @@ editor_process_move :: proc(p: ^Editor, id, slot: int) {
 	process_select(p, process_key(id))
 }
 
-// Serializes staged fields through the existing grammar. Empty/invalid drafts never reach disk.
+// Stages fields for the model to check and encode. Empty/invalid drafts never reach disk.
 @(require_results)
 editor_process_value :: proc(p: ^Editor) -> (value, problem: string) {
 	if !editor_process_capture(p) {return "", "Could not keep the program draft."}
-	builder := strings.builder_make(context.temp_allocator)
-	first := true
+	groups := make([dynamic]settings.Padding_Draft, context.temp_allocator)
 	for header in p.rows {
 		if header.process_field != .Group {continue}
-		name, padding: string
+		group: settings.Padding_Draft
 		programs := make([dynamic]string, context.temp_allocator)
 		for row in p.rows {
 			if row.process != header.process {continue}
 			#partial switch row.process_field {
-			case .Name: name = strings.trim_space(row.value)
-			case .Padding: padding = strings.trim_space(row.value)
-			case .Program:
-				program := strings.trim_space(row.value)
-				if program == "" || strings.contains_any(program, ",;:/\\*?\"\r\n") {
-					return "", "Enter one executable name per program."
-				}
-				for other in programs {
-					if strings.equal_fold(settings.executable_stem(other), settings.executable_stem(program)) {
-						return "", "This program is already in the group."
-					}
-				}
-				append(&programs, program)
+			case .Name: group.name = row.value
+			case .Padding: group.padding = row.value
+			case .Program: append(&programs, row.value)
 			case:
 			}
 		}
-		if name == "" || strings.contains_any(name, ":;\r\n") {return "", "Enter a group name without : or ;."}
-		number, ok := strconv.parse_int(padding)
-		if !ok || number < 0 || number > 1024 {return "", "Padding must be a whole number from 0 to 1024."}
-		if len(programs) == 0 {return "", "Add a program or delete the group."}
-		if !first {strings.write_byte(&builder, ';')}
-		first = false
-		strings.write_string(&builder, fmt.tprintf("%s:%d:%s", name, number,
-			strings.join(programs[:], ",", context.temp_allocator)))
+		group.programs = programs[:]
+		append(&groups, group)
 	}
-	return strings.to_string(builder), ""
+	text, refusal, err := settings.padding_groups_text(groups[:], context.temp_allocator)
+	if err != nil {return "", "Could not keep the program draft."}
+	refused, has_problem := refusal.?
+	if !has_problem {return text, ""}
+	switch refused {
+	case .Program: problem = "Enter one executable name per program."
+	case .Duplicate_Program: problem = "This program is already in the group."
+	case .Name: problem = "Enter a group name without : or ;."
+	case .Padding: problem = "Padding must be a whole number from 0 to 1024."
+	case .No_Programs: problem = "Add a program or delete the group."
+	}
+	return "", problem
 }
 
 // Publication can refresh other settings while keeping the complete unsaved process list.
@@ -281,7 +275,7 @@ editor_process_copy_draft :: proc(from, to: ^Editor) -> runtime.Allocator_Error 
 	}
 	for row in from.rows {
 		if row.process_field == .None {continue}
-		editor_add(to, row, "Processes") or_return
+		editor_add(to, row, settings.group_title(settings.PADDING_GROUPS_KEY)) or_return
 	}
 	to.process_next, to.process_next_program = from.process_next, from.process_next_program
 	to.process_expanded, to.process_dirty = from.process_expanded, from.process_dirty

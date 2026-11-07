@@ -27,7 +27,8 @@ editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 			default_value = "10000", kind = .Integer, minimum = 0, maximum = 10000000}, "Scrollback"},
 		{{key = "keys.pane.split_right", title = "Split Right", description = "Shortcut.", value = "Ctrl+Shift+O",
 			default_value = "Ctrl+Shift+O", kind = .Shortcut}, "Pane Shortcuts"},
-		{{key = "input.leader", title = "Leader Key", description = "Prefix.", value = "", kind = .Shortcut},
+		{{key = "input.leader", title = "Leader Key", description = "Prefix.", value = "", kind = .Shortcut,
+			shortcut_mode = .Single},
 			"Input"},
 	}
 	for r in rows { testing.expect_value(t, ui.editor_add(p, r.row, r.group), nil) }

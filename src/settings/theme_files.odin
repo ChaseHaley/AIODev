@@ -205,7 +205,7 @@ theme_export :: proc(s: ^Settings, directory: string) -> (path: string, error: o
 	} else if schema_error != .Exist {return "", schema_error}
 	for number := 1; number <= 1000; number += 1 {
 		id := fmt.tprintf("export-%s-%d", s.theme.name, number)
-		if len(id) > PROFILE_ID_MAX_LENGTH {id = fmt.tprintf("export-theme-%d", number)}
+		if len(id) > THEME_ID_MAX_LENGTH {id = fmt.tprintf("export-theme-%d", number)}
 		path = fmt.tprintf("%s/%s.theme.json", directory, id)
 		file, open_error := os.open(path, os.O_WRONLY | os.O_CREATE | os.O_EXCL)
 		if open_error == .Exist {continue}

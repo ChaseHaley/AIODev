@@ -5,7 +5,7 @@ import "core:strings"
 import "aio:settings"
 
 @(test)
-shell_badges_follow_the_launched_executable_and_explicit_override :: proc(t: ^testing.T) {
+shell_badges_follow_the_launched_executable :: proc(t: ^testing.T) {
 	for row in ([?][3]string{
 		{"pwsh.exe -NoLogo", "pwsh", ">_"},
 		{"  \"C:\\Program Files\\PowerShell\\7\\pwsh.EXE\" -NoLogo", "pwsh", ">_"},
@@ -15,10 +15,8 @@ shell_badges_follow_the_launched_executable_and_explicit_override :: proc(t: ^te
 		{"custom-shell.exe", "custom-shell", ">_"},
 		{"", "", ">_"},
 	}) {
-		executable := settings.shell_executable(row[0])
-		testing.expect_value(t, executable, row[1])
-		testing.expect_value(t, settings.shell_icon(executable, ""), row[2])
-		testing.expect_value(t, settings.shell_icon(executable, "λ"), "λ")
+		testing.expect_value(t, settings.shell_executable(row[0]), row[1])
+		testing.expect_value(t, settings.shell_badge(row[0]), row[2])
 	}
 }
 
@@ -62,7 +60,7 @@ header_settings_reload_and_serialize_through_the_shared_schema :: proc(t: ^testi
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(diagnostics), 0)
 	testing.expect(t, !s.pane.show_headers)
-	testing.expect_value(t, s.shell.icon, "λ")
+	testing.expect_value(t, settings.profile_base(&s.profiles).icon, "λ")
 	testing.expect_value(t, settings.value_text(&s, settings.schema_find("pane.show_headers")^), "false")
 }
 

@@ -23,8 +23,9 @@ Shell_Icon :: struct {
 
 shell_icon_load :: proc(app: ^App) {
 	app.shell_icon = {}
-	if app.settings.shell.icon == "" {return}
-	path, err := settings.expand_home(app.settings.shell.icon, context.temp_allocator)
+	icon_path := settings.profile_base(&app.settings.profiles).icon
+	if icon_path == "" {return}
+	path, err := settings.expand_home(icon_path, context.temp_allocator)
 	if err != nil {notify(app, .Error, "Could not allocate the shell icon path."); return}
 	if !filepath.is_abs(path) {
 		path, err = filepath.join({filepath.dir(app.settings_path), path}, context.temp_allocator)

@@ -236,7 +236,7 @@ theme_delete_target :: proc(s: ^Settings, custom: ^Custom_Theme) -> string {
 @(private)
 theme_id_free :: proc(s: ^Settings, wanted: string) -> string {
 	stem := wanted
-	if len(stem) > PROFILE_ID_MAX_LENGTH - 3 {stem = stem[:PROFILE_ID_MAX_LENGTH - 3]}
+	if len(stem) > THEME_ID_MAX_LENGTH - 3 {stem = stem[:THEME_ID_MAX_LENGTH - 3]}
 	stem = strings.trim_right(stem, "-_")
 	id := stem
 	for number := 2; custom_theme_find(s, id) != nil; number += 1 {
@@ -254,19 +254,10 @@ theme_edit_line :: proc(
 	issue: string,
 	error: Theme_Edit_Error,
 ) {
-	updated, message, alloc_error := edit_text(text^, key, value, allocator)
+	message, alloc_error := revision_edit_owned(text, key, value, allocator)
 	defer delete(message, allocator)
-	if alloc_error != nil {
-		delete(updated, allocator)
-		delete(message, allocator)
-		return "", .Allocation
-	}
-	if message != "" {
-		delete(updated, allocator)
-		return strings.clone(message, context.temp_allocator), .Invalid
-	}
-	delete(text^, allocator)
-	text^ = updated
+	if alloc_error != nil {return "", .Allocation}
+	if message != "" {return strings.clone(message, context.temp_allocator), .Invalid}
 	return
 }
 

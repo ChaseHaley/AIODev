@@ -118,18 +118,15 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 	@(static, rodata)
 	schema := settings.SCHEMA
 	for &entry in schema {
-		if entry.key == settings.PADDING_GROUPS_KEY || entry.key == "font.show_all" {continue}
+		// Group settings have their own editor below; embedded ones live inside another control.
+		if entry.control == .Group || entry.embedded {continue}
 		row := ui.schema_row(entry)
 		row.value = settings.value_text(&s, entry)
-		if choices, labels, live := setting_live_choices(&s, font_items, entry.key); live {
+		if choices, labels, live := setting_live_choices(&s, font_items, entry.live_choices); live {
 			row.choices, row.choice_labels = choices, labels
 		}
-		if entry.key == "font.family" {
-			row.show_all_fonts = s.font.show_all
-		}
-		if entry.key == "theme.name" {
-			row.description = "Theme file or custom theme. Changing any color saves a custom theme."
-		}
+		if row.font_filter {row.show_all_fonts = s.font.show_all}
+		if entry.page_description != "" {row.description = entry.page_description}
 		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {
 			ui.editor_destroy(p)
 			notify(app, .Error, "Could not allocate settings editor.")
@@ -155,7 +152,8 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 		if row.is_default {flags += {.Default}}
 		if row.hidden {flags += {.Hidden}}
 		if row.listed {flags += {.Listed}}
-		if row.detected {flags += {.Protected}}
+		if row.detected {flags += {.Builtin}}
+		if !row.removable {flags += {.Protected}}
 		detail := fmt.tprintf(
 			"%s %s %s name command line starting directory icon hidden duplicate remove",
 			row.command,
@@ -182,10 +180,9 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 			notify(app, .Error, "Could not allocate the profile table.")
 			return false
 		}
-		prefix := fmt.tprintf("profile.%s", row.id)
-		rows := [?]ui.Editor_Row {
-			{
-				key = fmt.tprintf("%s.name", prefix),
+		rows := [settings.Profile_Field]ui.Editor_Row {
+			.Name = {
+				key = settings.profile_field_key(row.id, .Name),
 				title = "Name",
 				description = "Shown in menus, tabs and the palette.",
 				value = row.name,
@@ -193,8 +190,8 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 				profile = row.id,
 				kind = .Text,
 			},
-			{
-				key = fmt.tprintf("%s.command", prefix),
+			.Command = {
+				key = settings.profile_field_key(row.id, .Command),
 				title = "Command line",
 				description = "Executable and arguments.",
 				value = row.command,
@@ -202,8 +199,8 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 				profile = row.id,
 				kind = .Text,
 			},
-			{
-				key = fmt.tprintf("%s.directory", prefix),
+			.Directory = {
+				key = settings.profile_field_key(row.id, .Directory),
 				title = "Starting directory",
 				description = "Empty inherits the default starting directory.",
 				value = row.directory,
@@ -211,8 +208,8 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 				profile = row.id,
 				kind = .Text,
 			},
-			{
-				key = fmt.tprintf("%s.icon", prefix),
+			.Icon = {
+				key = settings.profile_field_key(row.id, .Icon),
 				title = "Icon",
 				description = "PNG path; empty uses the executable's text badge.",
 				value = row.icon,
@@ -220,8 +217,8 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 				badge = row.badge,
 				kind = .Profile_Icon,
 			},
-			{
-				key = fmt.tprintf("%s.hidden", prefix),
+			.Hidden = {
+				key = settings.profile_field_key(row.id, .Hidden),
 				title = "Show in menus",
 				description = "Include this profile in shell menus.",
 				value = row.hidden ? "false" : "true",
@@ -492,7 +489,7 @@ editor_validate_bindings :: proc(text, path: string) -> (problem, warning: strin
 editor_font_filter :: proc(app: ^App, w: ^Window) {
 	p := &w.editor
 	row := ui.editor_row(p)
-	if row == nil || row.key != "font.family" {return}
+	if row == nil || !row.font_filter {return}
 	query := strings.clone(ui.field_string(&p.choice_search), context.temp_allocator)
 	focused := ui.editor_choice_toggle_focused(p)
 	source := ui.editor_source(p)
@@ -586,7 +583,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		return
 	}
 	warning: string
-	if strings.has_prefix(row.key, settings.KEY_BINDING_PREFIX) || row.key == "input.leader" {
+	if settings.setting_affects_bindings(row.key) {
 		problem: string
 		problem, warning = editor_validate_bindings(updated, app.settings_path)
 		if problem != "" {
@@ -607,7 +604,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if kind == .Shortcut {ui.editor_browse(p)}
 	text := "Saved and applied."
 	if warning != "" {text = fmt.tprintf("Saved. %s", warning)}
-	if key == "window.columns" || key == "window.rows" {
+	if entry := settings.schema_find(key); entry != nil && entry.apply_timing == .New_Sessions {
 		text = "Saved. Initial size applies to new sessions."
 	}
 	ui.editor_message(p, text, false)
@@ -669,40 +666,34 @@ editor_profile_field :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row) {
 	key := strings.clone(row.key, context.temp_allocator)
 	profile := strings.clone(row.profile, context.temp_allocator)
 	value := strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
-	facts := settings.profile_value_facts(value)
-	problem: string
-	switch {
-	case !facts.valid:
-		problem = "Expected UTF-8 text without NUL bytes."
-	case strings.has_suffix(key, ".name"):
-		facts = settings.profile_value_facts(value, &app.settings.profiles, profile)
-		if facts.empty {
-			problem = "A profile needs a name."
-		} else if facts.name_taken {
-			problem = "Another profile uses this name."
-		}
-	case strings.has_suffix(key, ".command"):
-		if facts.empty {
-			problem = "A profile needs a command line."
-		} else if !profile_command_exists(value) {
-			problem = fmt.tprintf(
-				"Command not found: %s. Check the path, or leave the executable on PATH.",
-				settings.shell_executable(value),
-			)
-		}
+	_, field_name, shaped := settings.profile_key_split(key)
+	field, known := settings.profile_field_from_name(field_name)
+	if !shaped || !known {return}
+	problem := settings.Profile_Problem.None
+	if field != .Hidden {
+		_, problem = settings.profile_field_check(
+			field, value, .Interactive_Field, &app.settings.profiles, profile,
+		)
 	}
-	if problem != "" {
-		editor_profile_fail(w, profile, key, problem)
+	if problem == .None && field == .Command && !profile_command_exists(value) {
+		problem = .Command_Missing
+	}
+	if problem != .None {
+		editor_profile_fail(
+			w, profile, key, settings.profile_problem_text(problem, .Interactive_Field, value),
+		)
 		return
 	}
 	message := "Saved."
 	focus := Reveal_Focus.Control
-	if strings.has_suffix(key, ".command") || strings.has_suffix(key, ".directory") {
+	switch field {
+	case .Command, .Directory:
 		message = "Saved. Applies to new or restarted shells."
-	}
-	if strings.has_suffix(key, ".hidden") {
+	case .Hidden:
+		// The toggle shows "Show in menus"; the file stores the opposite.
 		value = value == "true" ? "false" : "true"
 		focus = .None
+	case .Name, .Icon:
 	}
 	_ = editor_profile_write(app, w, key, value, key, message, focus)
 }
@@ -820,18 +811,19 @@ settings_color_prefix :: "colors."
 setting_live_choices :: proc(
 	s: ^settings.Settings,
 	fonts: []font.Family_Info,
-	key: string,
+	source: settings.Live_Choices,
 ) -> (
 	choices, labels: []string,
 	live: bool,
 ) {
-	switch key {
-	case "theme.name":
+	switch source {
+	case .None:
+	case .Themes:
 		choices, labels = settings_theme_choices(s)
 		return choices, labels, true
-	case "font.family":
+	case .Shell_Fonts:
 		return font.family_choices(fonts, s.font.show_all, s.font.family), nil, true
-	case "interface.font_family":
+	case .Interface_Fonts:
 		return font.family_choices(fonts, true, s.interface.font_family), nil, true
 	}
 	return nil, nil, false
@@ -1197,7 +1189,7 @@ editor_profile_remove_text :: proc(app: ^App, id: string) -> Confirmation_Text {
 
 editor_profile_remove_ask :: proc(app: ^App, w: ^Window, id: string) {
 	profile := settings.profile_find(&app.settings.profiles, id)
-	if profile == nil || profile.builtin || id == settings.PROFILE_DEFAULT_ID {return}
+	if profile == nil || !settings.profile_can_remove(profile) {return}
 	owned, err := strings.clone(id)
 	if err != nil {notify(app, .Error, "Could not prepare profile deletion."); return}
 	overlay_open(app, w, nil)

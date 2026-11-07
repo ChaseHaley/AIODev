@@ -92,7 +92,7 @@ settings_save_value :: proc(app: ^App, key, value, failure: string) -> (saved, h
 		return false, true
 	}
 	warning: string
-	if edit_error == nil && (strings.has_prefix(key, settings.KEY_BINDING_PREFIX) || key == "input.leader") {
+	if edit_error == nil && settings.setting_affects_bindings(key) {
 		problem: string
 		problem, warning = editor_validate_bindings(updated, app.settings_path)
 		if problem != "" {

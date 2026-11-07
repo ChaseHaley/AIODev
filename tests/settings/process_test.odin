@@ -106,3 +106,44 @@ padding_group_lookup_skips_a_malformed_group_that_validation_rejects :: proc(t: 
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(diagnostics), 1)
 }
+
+@(test)
+padding_groups_text_encodes_what_the_parser_reads_and_names_the_first_refused_field :: proc(t: ^testing.T) {
+	groups := [?]settings.Padding_Draft{
+		{name = " editors ", padding = " 0 ", programs = []string{"nvim", " vim.exe "}},
+		{name = "tools", padding = "1024", programs = []string{"less"}},
+	}
+	text, problem, err := settings.padding_groups_text(groups[:], context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	testing.expect(t, problem == nil)
+	testing.expect_value(t, text, "editors:0:nvim,vim.exe;tools:1024:less")
+	s, diagnostics, parse_error := settings.parse(fmt.tprintf("%s = %s", settings.PADDING_GROUPS_KEY, text))
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	padding, matched := settings.process_padding(&s, "VIM")
+	testing.expect(t, matched && padding == 0)
+
+	Case :: struct {
+		group:   settings.Padding_Draft,
+		problem: settings.Padding_Problem,
+	}
+	for c in ([?]Case{
+		{{name = "a", padding = "0", programs = []string{"x;y"}}, .Program},
+		{{name = "a", padding = "0", programs = []string{"foo,bar"}}, .Program},
+		{{name = "a", padding = "0", programs = []string{"*.exe"}}, .Program},
+		{{name = "a", padding = "0", programs = []string{"nvim", "NVIM.exe"}}, .Duplicate_Program},
+		{{name = "a;b", padding = "0", programs = []string{"nvim"}}, .Name},
+		{{name = " ", padding = "0", programs = []string{"nvim"}}, .Name},
+		{{name = "a", padding = "1025", programs = []string{"nvim"}}, .Padding},
+		{{name = "a", padding = "0"}, .No_Programs},
+	}) {
+		drafts := []settings.Padding_Draft{c.group}
+		refused, refusal, refused_error := settings.padding_groups_text(drafts, context.temp_allocator)
+		testing.expect_value(t, refused_error, nil)
+		testing.expect_value(t, refused, "")
+		got, has_problem := refusal.?
+		testing.expect(t, has_problem && got == c.problem, c.group.name)
+	}
+}

@@ -129,7 +129,7 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 		choices       = row.choices,
 		searchable    = row.searchable,
 		default_value = entry.default_value,
-		resettable    = entry.key != settings.PADDING_GROUPS_KEY,
+		resettable    = entry.control != .Group,
 	}
 	#partial switch row.kind {
 	case .Toggle:
@@ -140,7 +140,7 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 		// A multiple choice keeps its popup open between options, so it is edited on the page.
 		s.control = row.multiple ? .None : .Choice
 	case .Text:
-		s.control = entry.key == settings.PADDING_GROUPS_KEY ? .None : .Text
+		s.control = entry.control == .Group ? .None : .Text
 	}
 	return s
 }

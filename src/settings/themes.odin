@@ -13,14 +13,6 @@ DEFAULT_THEME_TEXT :: #load("../../themes/studio-dark.theme.json", string)
 Theme_Settings :: struct {
 	name: string,
 }
-Pane_Settings :: struct {
-	gap, corner_radius:            int,
-	show_headers:                  bool,
-	markdown_floating:             bool,
-	confirm_shell_switch:          bool,
-	minimum_columns, minimum_rows: int,
-	focus_border, unfocused_dim:   int,
-}
 Theme_Color :: colour.Translucent
 
 // Every color a theme owns, interface and terminal alike. Interface colors are semantic roles

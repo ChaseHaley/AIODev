@@ -41,7 +41,7 @@ defaults_include_built_in_profile :: proc(t: ^testing.T) {
 	testing.expect_value(t, builtin.directory, settings.DEFAULT_PROFILE_DIRECTORY)
 	testing.expect_value(t, builtin.name, "PowerShell 7")
 	testing.expect_value(t, s.shell.default_profile, settings.PROFILE_DEFAULT_ID)
-	testing.expect_value(t, s.shell.command, settings.DEFAULT_PROFILE_COMMAND)
+	testing.expect_value(t, settings.profile_base(&s.profiles), builtin)
 }
 
 @(test)
@@ -244,8 +244,8 @@ migration_rewrites_legacy_shell_keys :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect_value(t, s.shell.command, "cmd.exe /k echo hi")
-	testing.expect_value(t, s.shell.directory, `D:\work`)
+	testing.expect_value(t, settings.profile_base(&s.profiles).command, "cmd.exe /k echo hi")
+	testing.expect_value(t, settings.profile_base(&s.profiles).directory, `D:\work`)
 	builtin := settings.profile_find(&s.profiles, settings.PROFILE_DEFAULT_ID)
 	if testing.expect(t, builtin != nil) {
 		testing.expect_value(t, builtin.command, "cmd.exe /k echo hi")
@@ -271,7 +271,7 @@ migration_keeps_existing_default_profile_keys :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect_value(t, parsed.shell.command, "pwsh.exe -NoLogo")
+	testing.expect_value(t, settings.profile_base(&parsed.profiles).command, "pwsh.exe -NoLogo")
 }
 
 @(test)
@@ -297,7 +297,7 @@ load_migrates_once :: proc(t: ^testing.T) {
 	testing.expect(t, migrated)
 	testing.expect_value(t, migration_error, settings.Save_Error.None)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect_value(t, s.shell.command, "cmd.exe")
+	testing.expect_value(t, settings.profile_base(&s.profiles).command, "cmd.exe")
 	text, read_error := os.read_entire_file(path, context.allocator)
 	defer delete(text)
 	testing.expect_value(t, read_error, nil)
@@ -372,25 +372,28 @@ profile.cmd.name = Command Prompt
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect(t, settings.profile_value_facts("powerShell", &s.profiles, "cmd").name_taken)
-	testing.expect(t, settings.profile_value_facts("  PowerShell  ", &s.profiles, "cmd").name_taken)
-	testing.expect(t, !settings.profile_value_facts("POWERSHELL", &s.profiles, "pwsh").name_taken)
-	testing.expect(t, !settings.profile_value_facts("pwsh", &s.profiles, "cmd").name_taken)
-	testing.expect(t, !settings.profile_value_facts("", &s.profiles, "cmd").name_taken)
+	testing.expect(t, settings.profile_name_taken(&s.profiles, "cmd", "powerShell"))
+	testing.expect(t, settings.profile_name_taken(&s.profiles, "cmd", "  PowerShell  "))
+	testing.expect(t, !settings.profile_name_taken(&s.profiles, "pwsh", "POWERSHELL"))
+	testing.expect(t, !settings.profile_name_taken(&s.profiles, "cmd", "pwsh"))
+	testing.expect(t, !settings.profile_name_taken(&s.profiles, "cmd", ""))
 }
 
 @(test)
 profile_text_facts_match_load_and_edit_validation :: proc(t: ^testing.T) {
 	for value in ([?]string{"", " \t ", "\xe2\x80\x83"}) {
-		facts := settings.profile_value_facts(value)
-		testing.expect(t, facts.valid && facts.empty)
+		_, name_issue := settings.profile_field_check(.Name, value, .Interactive_Field)
+		testing.expect_value(t, name_issue, settings.Profile_Problem.Empty_Name)
+		_, command_issue := settings.profile_field_check(.Command, value, .Interactive_Field)
+		testing.expect_value(t, command_issue, settings.Profile_Problem.Empty_Command)
 		for key in ([?]string{"profile.alpha.name", "profile.alpha.command"}) {
 			_, issue := settings.profile_edit_text(key, value)
 			testing.expect(t, issue != "")
 		}
 	}
 	for value in ([?]string{"bad\x00text", "\xff"}) {
-		testing.expect(t, !settings.profile_value_facts(value).valid)
+		_, text_issue := settings.profile_field_check(.Directory, value, .Interactive_Field)
+		testing.expect_value(t, text_issue, settings.Profile_Problem.Invalid_Text)
 		_, issue := settings.profile_edit_text("profile.alpha.directory", value)
 		testing.expect_value(t, issue, "Expected UTF-8 text without NUL bytes.")
 	}
@@ -465,7 +468,7 @@ default_and_hidden_writes_use_the_existing_keys :: proc(t: ^testing.T) {
 	pwsh := settings.profile_find(&parsed.profiles, "pwsh")
 	if testing.expect(t, pwsh != nil) {
 		testing.expect_value(t, pwsh.hidden, true)
-		testing.expect_value(t, pwsh.hidden_set, true)
+		testing.expect(t, .Hidden in pwsh.set)
 	}
 	testing.expect(t, !strings.has_prefix(second, "profile.pwsh.hidden"))
 }

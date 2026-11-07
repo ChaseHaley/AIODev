@@ -24,15 +24,6 @@ pane_swap_destroy :: proc(swap: ^Pane_Swap) {
 	swap^ = {}
 }
 
-@(private)
-shell_is_windows :: proc(command: string) -> bool {
-	executable := settings.shell_executable(command)
-	for unix in ([?]string{"wsl", "bash", "zsh", "fish", "sh"}) {
-		if strings.equal_fold(executable, unix) {return false}
-	}
-	return true
-}
-
 // Opens the confirmation for replacing a running pane's shell, or swaps immediately when the
 // pane has exited or the warning is off.
 pane_shell_swap_request :: proc(
@@ -154,8 +145,8 @@ pane_shell_swap :: proc(
 	raw_directory := term.working_directory(entry.session, context.temp_allocator)
 	carry :=
 		raw_directory != "" &&
-		shell_is_windows(profile.command) &&
-		shell_is_windows(entry.header.command)
+		!settings.shell_definitions[settings.shell_kind(profile.command)].unix &&
+		!settings.shell_definitions[settings.shell_kind(entry.header.command)].unix
 	if carry {
 		label, label_error := settings.directory_label(
 			raw_directory,

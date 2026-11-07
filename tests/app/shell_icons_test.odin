@@ -37,13 +37,21 @@ shell_icon_load_accepts_local_png_and_refuses_device_and_oversized_files :: proc
 	if !testing.expect_value(t, os.write_entire_file(icon, png_icon[:]), nil) {return}
 
 	state := app.App{}
+	defaults, defaults_error := settings.defaults()
+	if !testing.expect_value(t, defaults_error, nil) {return}
+	state.settings = defaults
 	state.settings_path = strings.concatenate({directory, `\settings.ini`})
 	defer delete(state.settings_path)
 	defer settings.destroy(&state.settings)
 	ui.notices_init(&state.notices)
 	defer ui.notices_destroy(&state.notices)
+	base := settings.profile_base(&state.settings.profiles)
+	set_icon :: proc(base: ^settings.Profile, path: string) {
+		delete(base.icon)
+		base.icon = strings.clone(path)
+	}
 
-	state.settings.shell.icon = "icon.png"
+	set_icon(base, "icon.png")
 	app.shell_icon_load(&state)
 	testing.expect(t, state.shell_icon.width > 0, "a valid local PNG still loads")
 	testing.expect_value(t, len(state.notices.items), 0)
@@ -51,7 +59,7 @@ shell_icon_load_accepts_local_png_and_refuses_device_and_oversized_files :: proc
 	// The extended-length alias reads the same local PNG, so only the path policy refuses it.
 	device := strings.concatenate({`\\?\`, icon})
 	defer delete(device)
-	state.settings.shell.icon = device
+	set_icon(base, device)
 	app.shell_icon_load(&state)
 	testing.expect_value(t, state.shell_icon.width, 0)
 	testing.expect_value(t, len(state.notices.items), 1)
@@ -66,7 +74,7 @@ shell_icon_load_accepts_local_png_and_refuses_device_and_oversized_files :: proc
 	truncate_error := os.truncate(file, (32 << 20) + 1)
 	os.close(file)
 	if !testing.expect_value(t, truncate_error, nil) {return}
-	state.settings.shell.icon = "oversized.png"
+	set_icon(base, "oversized.png")
 	app.shell_icon_load(&state)
 	testing.expect_value(t, state.shell_icon.width, 0)
 	testing.expect_value(t, len(state.notices.items), 1)

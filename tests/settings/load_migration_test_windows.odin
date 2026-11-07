@@ -52,7 +52,7 @@ load_source_is_the_file_when_its_migration_cannot_save :: proc(t: ^testing.T) {
 	testing.expect_value(t, migrated, false)
 	testing.expect_value(t, migration_error, settings.Save_Error.IO)
 	testing.expect(t, logged.errors > 0)
-	testing.expect_value(t, s.shell.command, "cmd.exe")
+	testing.expect_value(t, settings.profile_base(&s.profiles).command, "cmd.exe")
 	testing.expect_value(t, source, legacy)
 	text, read_error := os.read_entire_file(path, context.temp_allocator)
 	testing.expect_value(t, read_error, nil)

@@ -39,7 +39,7 @@ pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config) {
 	header.executable = header_clone(settings.shell_executable(config.command_line))
 	header.command, header.launch_directory =
 		header_clone(config.command_line), header_clone(config.working_directory)
-	header.icon = settings.shell_icon(header.executable, "")
+	header.icon = settings.shell_badge(config.command_line)
 }
 
 pane_header_refresh :: proc(entry: ^Session_Entry) {

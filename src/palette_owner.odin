@@ -221,14 +221,16 @@ palette_setting_value :: proc(user: rawptr, key: string) -> (value, label: strin
 	entry := settings.schema_find(key)
 	if entry == nil {return}
 	value = settings.value_text(&app.settings, entry^)
-	if key == "theme.name" {label = settings.theme_display_name(&app.settings, value)}
+	if entry.live_choices == .Themes {label = settings.theme_display_name(&app.settings, value)}
 	return
 }
 
 @(private)
 palette_setting_choices :: proc(user: rawptr, key: string) -> (choices, labels: []string) {
 	app := cast(^App)user
+	entry := settings.schema_find(key)
+	if entry == nil {return}
 	fonts, _ := font.installed_families(app.fonts)
-	choices, labels, _ = setting_live_choices(&app.settings, fonts, key)
+	choices, labels, _ = setting_live_choices(&app.settings, fonts, entry.live_choices)
 	return
 }

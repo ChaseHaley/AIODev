@@ -72,11 +72,6 @@ profile_shortcut_label :: proc(index: int) -> string {
 }
 
 @(private)
-profile_badge :: proc(profile: ^settings.Profile) -> string {
-	return settings.shell_icon(settings.shell_executable(profile.command), "")
-}
-
-@(private)
 profile_menu_push :: proc(
 	menu: ^Profile_Menu,
 	item: ui.Menu_Item,
@@ -113,7 +108,7 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 			{
 				label = profile.name,
 				shortcut = profile_shortcut_label(i),
-				icon = profile_badge(profile),
+				icon = settings.shell_badge(profile.command),
 				checked = checked,
 				enabled = true,
 			},

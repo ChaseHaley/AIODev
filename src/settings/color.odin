@@ -48,11 +48,3 @@ group_title :: proc(key: string) -> string {
 parse_color :: proc(text: string) -> (color: Color, ok, alpha: bool) {
 	return colour.parse(text, .Permissive)
 }
-
-hsv_to_rgb :: proc(hue, saturation, value: f32) -> Color {
-	return colour.hsv_to_rgb(hue, saturation, value)
-}
-
-rgb_to_hsv :: proc(c: Color) -> (hue, saturation, value: f32) {
-	return colour.rgb_to_hsv(c)
-}

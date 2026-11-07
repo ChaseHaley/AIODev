@@ -207,7 +207,7 @@ editor_preserves_unrelated_text_and_removes_target_duplicates :: proc(t: ^testin
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect_value(t, parsed.shell.command, `  pwsh -c "echo #hello"  `)
+	testing.expect_value(t, settings.profile_base(&parsed.profiles).command, `  pwsh -c "echo #hello"  `)
 	testing.expect(t, strings.has_prefix(appended, "# no newline\n"))
 }
 

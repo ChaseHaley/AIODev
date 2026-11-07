@@ -38,16 +38,6 @@ parse_color_accepts_pasted_representations :: proc(t: ^testing.T) {
 }
 
 @(test)
-hsv_conversion_round_trips_primary_and_grey_colors :: proc(t: ^testing.T) {
-	for c in ([?]settings.Color{{255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {18, 52, 86}, {128, 128, 128}, {0, 0, 0}}) {
-		h, s, v := settings.rgb_to_hsv(c)
-		testing.expect_value(t, settings.hsv_to_rgb(h, s, v), c)
-	}
-	testing.expect_value(t, settings.hsv_to_rgb(-120, 1, 1), settings.Color{0, 0, 255})
-	testing.expect_value(t, settings.hsv_to_rgb(720, 2, 1), settings.Color{255, 0, 0})
-}
-
-@(test)
 every_setting_has_a_friendly_title_and_group :: proc(t: ^testing.T) {
 	for entry in settings.SCHEMA {
 		testing.expectf(t, entry.title != "" && entry.title != entry.key && !strings.contains(entry.title, "."),

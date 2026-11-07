@@ -96,8 +96,8 @@ generated_settings :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, parse_error, runtime.Allocator_Error.None)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect_value(t, s.shell.command, o.shell)
-	testing.expect_value(t, s.shell.directory, `C:\repo with spaces\data`)
+	testing.expect_value(t, settings.profile_base(&s.profiles).command, o.shell)
+	testing.expect_value(t, settings.profile_base(&s.profiles).directory, `C:\repo with spaces\data`)
 	testing.expect_value(t, s.font.family, "Cascadia Mono")
 	testing.expect_value(t, s.cursor.blink, false)
 	testing.expect_value(t, s.window.columns, 90)
@@ -114,7 +114,7 @@ generated_settings :: proc(t: ^testing.T) {
 		defer settings.diagnostics_destroy(&issues)
 		testing.expect_value(t, error, runtime.Allocator_Error.None)
 		testing.expect_value(t, len(issues), 0)
-		testing.expect_value(t, parsed.shell.command, shell)
+		testing.expect_value(t, settings.profile_base(&parsed.profiles).command, shell)
 	}
 	for bad in ([]ctl.Options{{}, {shell = "x", columns = 0, rows = 1},
 		{shell = "x", columns = 1, rows = 1001}, {shell = "x\nkey=true", columns = 1, rows = 1}}) {
@@ -152,7 +152,7 @@ default_history_settings :: proc(t: ^testing.T) {
 			defer settings.diagnostics_destroy(&diagnostics)
 			testing.expect_value(t, parse_error, runtime.Allocator_Error.None)
 			testing.expect_value(t, len(diagnostics), 0)
-			testing.expect_value(t, s.shell.command, item.command)
+			testing.expect_value(t, settings.profile_base(&s.profiles).command, item.command)
 		}
 	}
 	o, error := ctl.parse_options({"launch"})

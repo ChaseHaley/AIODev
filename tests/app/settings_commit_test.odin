@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:colour"
 import "aio:layout"
 import "aio:settings"
 import "aio:ui"
@@ -270,7 +271,7 @@ settings_commit_rebuilds_a_clean_peers_picker_hsv_when_its_effective_color_chang
 	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}
 	testing.expect_value(t, ui.editor_popup(second), ui.Editor_Popup.Color)
 	testing.expect_value(t, ui.field_string(&second.value), "#408020")
-	h, saturation, value := settings.rgb_to_hsv({64, 128, 32})
+	h, saturation, value := colour.rgb_to_hsv({64, 128, 32})
 	testing.expect_value(t, second.hsv, [3]f32{h, saturation, value})
 	updated = theme_commit_text(t, ui.editor_source(first), "cursor", "#000000")
 	if !testing.expect_value(t, app.settings_commit(s, ui.editor_source(first), updated, first), settings.Save_Error.None) {return}

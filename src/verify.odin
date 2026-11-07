@@ -1021,7 +1021,7 @@ when AIO_CONTROL {
 				{"session.header.directory", entry.header.directory},
 				{
 					"session.header.icon",
-					app.shell_icon.width > 0 ? app.settings.shell.icon : entry.header.icon,
+					app.shell_icon.width > 0 ? settings.profile_base(&app.settings.profiles).icon : entry.header.icon,
 				},
 				{"grid.origin", fmt.tprintf("%d,%d", g.padding_left, g.padding_top)},
 				{"session.viewport", up == 0 ? "bottom" : fmt.tprintf("up:%d", up)},
