@@ -35,8 +35,8 @@ Workspace_Chip_Pressed :: struct {
 }
 
 // The rows are destinations for content rather than workspaces to switch to. A pane or tab drag holds
-// the list open from its chip, offering a new window as well; that drag's Workspace_Drag carries the
-// pointer.
+// the list open from its chip, offering a new window as well; that drag's Drop_Workspace_Dropdown
+// destination carries the pointer.
 Workspace_Move_Target :: struct {
 	request: Workspace_Move_Request,
 	drag:    bool,

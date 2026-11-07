@@ -287,9 +287,10 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 
 window_close :: proc(app: ^App, w: ^Window) {
 	if w.phase == .Closing {return}
-	// A preview stays Preparing through the cancel: cancelling the drag that made it is how a preview is
-	// discarded, and that discard closes it from inside this call. Any other window is Closing first, so
-	// nothing the cancel sets off takes it for a live window or closes it again.
+	// A window still Preparing (a preview, or one whose show failed) stays Preparing through the cancel:
+	// cancelling the drag that made a preview is how it is discarded, and that discard closes it from
+	// inside this call. Any other window is Closing first, so nothing the cancel sets off takes it for a
+	// live window or closes it again.
 	if w.phase != .Preparing {w.phase = .Closing}
 	if !gesture_cancel(app, w) {return}
 	w.phase = .Closing
