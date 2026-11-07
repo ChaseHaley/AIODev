@@ -68,7 +68,7 @@ focus_jumps_track :: proc(app: ^App) {
 focus_jump_reachable :: proc(data: rawptr, session: u32) -> bool {
 	app := (^App)(data)
 	if session_find(app, session) == nil {return false}
-	workspace := status_workspace_of(app, session)
+	workspace := session_workspace(app, session)
 	return workspace != nil && workspace_eligible(app, workspace)
 }
 
@@ -76,14 +76,10 @@ focus_jump_reachable :: proc(data: rawptr, session: u32) -> bool {
 focus_jump :: proc(app: ^App, w: ^Window, step: int) {
 	session, ok := focus_jumps_step(&app.focus_jumps, step, focus_jump_reachable, app)
 	if !ok {return}
-	target := window_for_workspace(app, status_workspace_of(app, session))
-	if target == nil {target = w}
+	target := session_window(app, session, w)
 	if target != w && !window_activate(app, target) {return}
-	if !status_reveal(app, target, session) {
-		notify(app, .Error, "Could not show that pane.")
-		return
-	}
-	if owner := window_for_workspace(app, status_workspace_of(app, session)); owner != nil {
+	if !session_show(app, target, session) {return}
+	if owner := window_for_workspace(app, session_workspace(app, session)); owner != nil {
 		app.focus_jumps.window = owner.id
 	}
 }

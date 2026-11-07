@@ -121,9 +121,9 @@ pane_header_draw :: proc(
 		summary: Status_Summary
 		status_summary_add(app, &summary, entry)
 		if summary.found {
-			status = status_mark(summary.top)
+			status = status_presentation(summary.top).mark
 			buffer: [8]u8
-			headline := ui.status_headline(status, buffer[:])
+			headline := status_headline(status, buffer[:])
 			status_text = strings.clone(headline, context.temp_allocator)
 			if summary.top.message != "" {
 				status_text = fmt.tprintf("%s · %s", headline, summary.top.message)

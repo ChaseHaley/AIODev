@@ -1,23 +1,20 @@
 package main
 
 import platform_api "aio:platform"
-import "aio:program_art"
 import "aio:pty"
-import "core:image/png"
 import "core:log"
 import "core:mem"
-import "core:slice"
 import "core:sync"
 import "core:thread"
 
 // Process work that must not stall a frame: the process snapshot behind padding groups and
 // program icons (about 10 ms with a few hundred processes), and reading or drawing their icons.
 // The main thread asks, the worker answers and wakes it, and the main thread adopts the answer.
+// Program_Icon_Cache owns the icons; the worker only runs their jobs.
 Process_Worker :: struct {
-	icons:     [PROGRAM_ICON_LIMIT]Program_Icon,
-	clock:     u64,
 	// Guards everything below except worker, platform and allocator, which are set before the thread
-	// starts. jobs and done reserve one job per pending icon up front, so the worker never grows them.
+	// starts. jobs and done reserve PROGRAM_ICON_LIMIT jobs up front, the most icons that can be
+	// pending at once, so appending never grows them and cannot fail.
 	mutex:     sync.Mutex,
 	cond:      sync.Cond,
 	jobs:      [dynamic]Program_Icon_Job,
@@ -74,18 +71,6 @@ process_snapshot_collect :: proc(s: ^Process_Snapshot) -> (processes: []pty.Proc
 	return snapshot.processes, true
 }
 
-// A pending icon's path and pixels are borrowed by its job; icons are never evicted while pending.
-@(private)
-Program_Icon_Job :: struct {
-	index:  int,
-	source: Program_Icon_Source,
-	path:   string,
-	paint:  program_art.Paint,
-	size:   int,
-	pixels: []u8,
-	found:  bool,
-}
-
 process_worker_destroy :: proc(pw: ^Process_Worker) {
 	if pw.worker != nil {
 		sync.mutex_lock(&pw.mutex)
@@ -98,13 +83,16 @@ process_worker_destroy :: proc(pw: ^Process_Worker) {
 			pty.process_snapshot_destroy(ready.processes, pw.allocator)
 		}
 	}
-	for &icon in pw.icons {
-		delete(icon.path)
-		delete(icon.pixels)
-	}
 	delete(pw.jobs)
 	delete(pw.done)
 	pw^ = {}
+}
+
+// The platform the worker wakes when it finishes work, or nil when headless and nothing waits on
+// the loop. The worker binds it at its first start and keeps it for its lifetime.
+@(private)
+process_worker_platform :: proc(app: ^App) -> ^platform_api.Platform {
+	return app.platform_ready ? &app.platform : nil
 }
 
 @(private)
@@ -172,91 +160,22 @@ process_snapshot_take :: proc(pw: ^Process_Worker) -> (snapshot: []pty.Process_I
 // Queues the read of a pending icon. The worker must already run, so no icon is left pending without
 // a job to settle it.
 @(private)
-process_icon_request :: proc(pw: ^Process_Worker, index: int) {
+process_icon_request :: proc(pw: ^Process_Worker, job: Program_Icon_Job) {
 	assert(pw.worker != nil)
-	icon := &pw.icons[index]
 	sync.mutex_lock(&pw.mutex)
-	job := Program_Icon_Job {
-		index  = index,
-		source = icon.source,
-		path   = icon.path,
-		paint  = icon.paint,
-		size   = icon.size,
-		pixels = icon.pixels,
-	}
 	_, _ = append(&pw.jobs, job)
 	sync.cond_signal(&pw.cond)
 	sync.mutex_unlock(&pw.mutex)
 }
 
-// Takes finished icon reads; reports whether one produced an icon to draw, and the path of a user's
-// PNG that could not be read, valid until the icon is reused.
-process_icons_adopt :: proc(pw: ^Process_Worker) -> (ready: bool, unreadable: string) {
-	if pw.worker == nil {return}
+// Moves the finished icon jobs into `out`, which holds PROGRAM_ICON_LIMIT, and returns how many.
+@(private)
+process_icon_results :: proc(pw: ^Process_Worker, out: []Program_Icon_Job) -> int {
+	if pw.worker == nil {return 0}
 	sync.mutex_lock(&pw.mutex)
-	for job in pw.done {
-		program_icon_move(&pw.icons[job.index], job.found ? .Ready : .Missing)
-		ready ||= job.found
-		if !job.found && job.source == .File {unreadable = pw.icons[job.index].path}
-	}
+	defer sync.mutex_unlock(&pw.mutex)
+	count := copy(out, pw.done[:])
+	assert(count == len(pw.done))
 	clear(&pw.done)
-	sync.mutex_unlock(&pw.mutex)
-	return
-}
-
-// Runs on the worker: reads or draws one icon into its job's pixels.
-@(private)
-program_icon_read :: proc(job: Program_Icon_Job) -> bool {
-	switch job.source {
-	case .Executable:
-		return platform_api.executable_icon(job.path, job.size, job.pixels)
-	case .Artwork:
-		art, found := program_art.find(job.path)
-		return found && program_art.draw(art, job.size, job.paint, job.pixels)
-	case .File:
-		return program_icon_png(job.path, job.size, job.pixels)
-	}
-	return false
-}
-
-// A user's PNG fitted into size x size, centred, each pixel averaging the source pixels it covers.
-// Limited like Shell Icon, since the decoder reads the whole file before checking it.
-@(private)
-program_icon_png :: proc(path: string, size: int, pixels: []u8) -> bool {
-	if !platform_api.local_file_within_limit(path, SHELL_ICON_MAX_BYTES) {return false}
-	header, header_error := png.load(path, {.return_header})
-	defer png.destroy(header)
-	if header_error != nil ||
-	   header == nil ||
-	   header.width < 1 ||
-	   header.height < 1 ||
-	   header.width > 1024 ||
-	   header.height > 1024 {return false}
-	image, image_error := png.load(path, {.alpha_add_if_missing, .alpha_premultiply})
-	defer png.destroy(image)
-	if image_error != nil || image == nil || image.depth != 8 || image.channels != 4 {return false}
-	source := image.pixels.buf[:]
-	longest := max(image.width, image.height)
-	width, height := max(1, image.width * size / longest), max(1, image.height * size / longest)
-	left, top := (size - width) / 2, (size - height) / 2
-	slice.fill(pixels[:size * size * 4], 0)
-	for y in 0 ..< height {
-		y0 := y * image.height / height
-		y1 := max(y0 + 1, (y + 1) * image.height / height)
-		for x in 0 ..< width {
-			x0 := x * image.width / width
-			x1 := max(x0 + 1, (x + 1) * image.width / width)
-			sum: [4]u32
-			for sy in y0 ..< y1 {
-				for sx in x0 ..< x1 {
-					from := (sy * image.width + sx) * 4
-					for c in 0 ..< 4 {sum[c] += u32(source[from + c])}
-				}
-			}
-			count := u32((x1 - x0) * (y1 - y0))
-			to := ((top + y) * size + left + x) * 4
-			for c in 0 ..< 4 {pixels[to + c] = u8((sum[c] + count / 2) / count)}
-		}
-	}
-	return true
+	return count
 }

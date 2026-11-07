@@ -8,6 +8,7 @@ import "aio:instance"
 import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:perf"
+import "aio:program_art"
 import "aio:pty"
 import "aio:render"
 import "aio:settings"
@@ -102,6 +103,8 @@ App :: struct {
 	cache:                 glyphs.Cache,
 	shell_icon:            Shell_Icon,
 	processes:             Process_Worker,
+	program_icons:         Program_Icon_Cache,
+	program_art:           program_art.Catalogue,
 	ui_text:               ui.Text,
 	ui_ready:              bool,
 	animations:            bool,
@@ -181,6 +184,11 @@ app_init :: proc(app: ^App) -> bool {
 	app.animations = platform_api.client_animations_enabled()
 	ui.notices_init(&app.notices)
 	app.notices.animations = app.animations
+	if catalogue, err := program_art.catalogue_make(); err == nil {
+		app.program_art = catalogue
+	} else {
+		log.errorf("parsing the bundled program artwork failed: %v", err)
+	}
 	app.registry = commands.create()
 	if err := register_actions(&app.registry); err != .None {
 		log.errorf("registering commands failed: %v", err)
@@ -283,6 +291,8 @@ app_destroy :: proc(app: ^App) {
 		}
 	}
 	process_worker_destroy(&app.processes)
+	program_icon_cache_destroy(&app.program_icons)
+	program_art.catalogue_destroy(&app.program_art)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)
@@ -334,7 +344,7 @@ tick :: proc(app: ^App) {
 	update_sessions(app)
 	markdown_find_tick(app)
 	update_processes(app)
-	if ready, unreadable := process_icons_adopt(&app.processes); ready || unreadable != "" {
+	if ready, unreadable := program_icons_adopt(app); ready || unreadable != "" {
 		if unreadable != "" {
 			notify(app, .Error, fmt.tprintf("Could not read %s as a PNG program icon.", unreadable))
 		}
@@ -356,10 +366,7 @@ tick :: proc(app: ^App) {
 		selection_autoscroll_tick(app, window, now)
 		tooltip_tick(window, now)
 		status_spin_tick(window)
-		if window.taskbar_workspace != window.workspace {
-			window.taskbar_workspace = window.workspace
-			status_taskbar_update(app, window)
-		}
+		status_taskbar_follow(app, window)
 		switch window.phase {
 		case .Preparing:
 			window.dirty = false

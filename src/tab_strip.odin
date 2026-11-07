@@ -3,7 +3,6 @@ package main
 import "aio:input"
 import "aio:render"
 import "aio:ui"
-import "core:fmt"
 
 // Horizontal tab-strip geometry and drawing. The strip shares the 40 DIP title bar with the
 // workspace chip and the caption controls, so both the tab bar and the controls end read the same
@@ -140,8 +139,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		foreground := pass == 1
 		for tab, i in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
-			title := fmt.tprintf("Tab %d", i + 1)
-			if tab.title != "" {title = tab.title}
+			title := tab_display_title(w.workspace, i)
 			icon: string
 			atlas := render.Rect{}
 			if pane, terminal := workspace_focused_session_pane(app, w.workspace, i); terminal {

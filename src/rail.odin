@@ -4,7 +4,6 @@ import "aio:input"
 import "aio:layout"
 import "aio:render"
 import "aio:ui"
-import "core:fmt"
 import "core:time"
 
 RAIL_NEW_TAB_ROW :: -2
@@ -350,10 +349,7 @@ rail_row_draw :: proc(
 	tile := ui.rail_tab_tile(layout, rect)
 	selected := row.workspace == w.workspace && row.tab == w.workspace.selected
 	marked := row.workspace == w.workspace && tab_marked_shown(w, row.tab)
-	title := fmt.tprintf("Tab %d", row.tab + 1)
-	if row.tab < len(row.workspace.tabs) && row.workspace.tabs[row.tab].title != "" {
-		title = row.workspace.tabs[row.tab].title
-	}
+	title := tab_display_title(row.workspace, row.tab)
 	icon: string
 	atlas := render.Rect{}
 	if pane, terminal := workspace_focused_session_pane(app, row.workspace, row.tab); terminal {

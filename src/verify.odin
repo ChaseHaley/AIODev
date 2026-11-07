@@ -6,7 +6,6 @@ import "aio:input"
 import "aio:layout"
 import "aio:perf"
 import "aio:platform"
-import "aio:program_art"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -38,7 +37,6 @@ _ :: term
 _ :: ui
 _ :: verify_protocol
 _ :: settings
-_ :: program_art
 
 AIO_CONTROL :: #config(AIO_CONTROL, false)
 
@@ -1985,27 +1983,13 @@ when AIO_CONTROL {
 	// Whether the pane's program has an icon ready to draw at any size, from whichever source.
 	verify_program_icon :: proc(app: ^App, entry: ^Session_Entry) -> bool {
 		program := program_adopted(entry)
-		if program == nil || program.name == "" {return false}
-		file, has_file := program_named_file(app, program.name, program.art, program.has_art)
-		art := program.has_art ? program_art.canonical(program.art) : ""
-		for icon in app.processes.icons {
-			if icon.state != .Ready {continue}
-			switch icon.source {
-			case .File:
-				if has_file && icon.path == file {return true}
-			case .Artwork:
-				if art != "" && icon.path == art {return true}
-			case .Executable:
-				if program.path != "" && icon.path == program.path {return true}
-			}
-		}
-		return false
+		return program != nil && program.name != "" && program_icon_ready(app, program)
 	}
 	verify_program_source :: proc(app: ^App, entry: ^Session_Entry) -> string {
 		program := program_adopted(entry)
 		if program == nil || program.name == "" {return ""}
-		source, _, _, found := program_icon_source(app, program, 16)
-		return found ? strings.to_lower(fmt.tprintf("%v", source), context.temp_allocator) : ""
+		want, found := program_icon_source(app, program, 16)
+		return found ? strings.to_lower(fmt.tprintf("%v", want.source), context.temp_allocator) : ""
 	}
 } else {
 	Verify :: struct {}

@@ -196,7 +196,7 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 	if status_inbox_shown(w) {
 		key_suppress(w, e)
-		status_inbox_key(app, w, logical)
+		status_inbox_key(app, w, e, logical)
 		return
 	}
 	if e.pressed && e.key == .Escape && drag_active(w) != nil {

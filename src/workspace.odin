@@ -533,7 +533,7 @@ local_launch_directory :: proc(candidate, fallback: string) -> (directory: strin
 // reports a reported directory that was remote or unavailable.
 @(require_results)
 pane_directory :: proc(app: ^App, entry: ^Session_Entry) -> (directory: string, refused: bool) {
-	return pane_directory_of(entry, pane_program(app, entry, term.process_id(entry.session)))
+	return pane_directory_of(entry, pane_program(app, entry))
 }
 
 // pane_directory for a pane whose running program, if any, is already known.
@@ -553,50 +553,6 @@ pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: st
 	if ok && pty.working_directory_is_local(path) {return path, refused}
 	directory, _ = local_launch_directory("", entry.header.launch_directory)
 	return directory, refused
-}
-
-// The pane's running program. Icon polling already tracks it, including one seen once but not yet
-// adopted; without polling it is chosen the same way from a snapshot taken now (about 10 ms).
-@(private)
-pane_program :: proc(app: ^App, entry: ^Session_Entry, root: u32) -> u32 {
-	if app.settings.tabs.program_icons {
-		return program_polled(entry)
-	}
-	processes, err := pty.process_snapshot(context.temp_allocator)
-	if err != .None {return 0}
-	program, _ := pane_running(app, entry, processes)
-	return program
-}
-
-// The processes to read running programs from when a pane is remembered: nil while icon polling
-// tracks them, otherwise one snapshot taken now, in temporary memory.
-pane_processes :: proc(app: ^App) -> []pty.Process_Info {
-	if app.settings.tabs.program_icons || len(app.sessions) == 0 {return nil}
-	processes, err := pty.process_snapshot(context.temp_allocator)
-	return err == .None ? processes : nil
-}
-
-// The pane's running program and how it was started, in temporary memory: polling's choice, or the
-// one `processes` names; none without either.
-pane_running :: proc(
-	app: ^App,
-	entry: ^Session_Entry,
-	processes: []pty.Process_Info,
-) -> (
-	program: u32,
-	command: string,
-) {
-	if app.settings.tabs.program_icons {
-		if adopted := program_adopted(entry); adopted != nil {command = adopted.command}
-		return program_polled(entry), command
-	}
-	root := term.process_id(entry.session)
-	index := pty.process_program(processes, root, program_reporters(entry), 0)
-	if index < 0 {return}
-	program = processes[index].id
-	arguments, _ := pty.process_arguments(program, root, context.temp_allocator)
-	stem := settings.executable_stem(processes[index].executable)
-	return program, program_command(arguments, stem, context.temp_allocator)
 }
 
 @(private)

@@ -4,34 +4,21 @@ import "aio:colour"
 import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:program_art"
-import "aio:pty"
 import "aio:render"
 import "aio:settings"
+import "core:image/png"
 import "core:log"
 import "core:math"
 import "core:slice"
 import "core:strings"
-import "core:unicode/utf8"
 
-// Icons of the programs running in panes (WORK-272, WORK-279). A program is named by its
-// executable stem, the script a launcher runs, or the app a WSL or SSH session reports. Its icon
-// is the user's PNG for that name, then bundled artwork, then the executable's own icon, then the
-// shell badge. The process worker reads and draws each one at the drawn pixel size, cached by
-// source and size; a source that yields nothing is cached as missing so the next one is used.
+// Icons of the programs running in panes (WORK-272, WORK-279). A program's icon is the user's PNG
+// for its name, then bundled artwork, then the executable's own icon, then the shell badge. The
+// process worker reads and draws each one at the drawn pixel size, cached by source and size; a
+// source that yields nothing is cached as missing so the next one is used.
 
 @(private)
 PROGRAM_ICON_LIMIT :: 32
-// A remembered command longer than this is cut; it only reminds the user what ran.
-@(private)
-PROGRAM_COMMAND_LIMIT :: 240
-
-// Launchers run the program named by their arguments rather than being one.
-@(private, rodata)
-program_launchers := [?]string{"node", "bun", "deno", "npx", "pnpx", "bunx", "cmd", "uv", "uvx"}
-
-// Bridges run programs out of Windows' sight, which can only be named by what they report.
-@(private, rodata)
-program_bridges := [?]string{"wsl", "ssh", "mosh", "mosh-client", "docker", "podman"}
 
 // Artwork with a brand colour fainter than this against the tab background uses the tab text
 // colour instead.
@@ -62,17 +49,51 @@ Program_Icon_Source :: enum u8 {
 	File,
 }
 
-// `path` is an executable or PNG path, or the artwork's canonical name.
+// Where an icon comes from. `path` is an executable or PNG path, or the artwork's canonical name;
+// `art` is set for artwork and borrows from App.program_art.
 @(private)
-Program_Icon :: struct {
+Program_Icon_Want :: struct {
 	source: Program_Icon_Source,
 	path:   string,
+	art:    program_art.Art,
 	paint:  program_art.Paint,
+}
+
+@(private)
+Program_Icon :: struct {
+	using want: Program_Icon_Want,
+	size:       int,
+	pixels:     []u8,
+	state:      Program_Icon_State,
+	slot:       render.Atlas_Slot,
+	used:       u64,
+}
+
+// Every slot, its eviction clock and its state transitions. At most PROGRAM_ICON_LIMIT icons are
+// pending, which is the capacity Process_Worker reserves for icon jobs.
+Program_Icon_Cache :: struct {
+	icons: [PROGRAM_ICON_LIMIT]Program_Icon,
+	clock: u64,
+}
+
+// One pending icon's read, run on the process worker. Its path and pixels are borrowed from the
+// pending icon, which is never evicted while pending.
+@(private)
+Program_Icon_Job :: struct {
+	index:  int,
+	want:   Program_Icon_Want,
 	size:   int,
 	pixels: []u8,
-	state:  Program_Icon_State,
-	slot:   render.Atlas_Slot,
-	used:   u64,
+	found:  bool,
+}
+
+// Run after the process worker has stopped, since pending icons are borrowed by its jobs.
+program_icon_cache_destroy :: proc(cache: ^Program_Icon_Cache) {
+	for &icon in cache.icons {
+		delete(icon.path)
+		delete(icon.pixels)
+	}
+	cache^ = {}
 }
 
 // The only writer of an icon's state. Freeing releases the icon's memory, and the icon must already
@@ -90,27 +111,22 @@ program_icon_move :: proc(icon: ^Program_Icon, to: Program_Icon_State) {
 }
 
 // Reuses a free icon or the least recently drawn finished one. The worker is started first, so an
-// icon is only made pending when a job will settle it.
+// icon is only made pending when a job will settle it. When no slot or memory is available nothing
+// is queued and the caller still reports Pending (retained: the next draw asks again).
 @(private)
-program_icon_request :: proc(
-	app: ^App,
-	source: Program_Icon_Source,
-	path: string,
-	paint: program_art.Paint,
-	size: int,
-) {
-	pw := &app.processes
-	if !process_worker_start(pw, app.platform_ready ? &app.platform : nil) {return}
+program_icon_request :: proc(app: ^App, want: Program_Icon_Want, size: int) {
+	cache := &app.program_icons
+	if !process_worker_start(&app.processes, process_worker_platform(app)) {return}
 	index := -1
-	for icon, i in pw.icons {
+	for icon, i in cache.icons {
 		if icon.state == .Pending {continue}
-		if index < 0 || icon.state == .Free || icon.used < pw.icons[index].used {index = i}
+		if index < 0 || icon.state == .Free || icon.used < cache.icons[index].used {index = i}
 		if icon.state == .Free {break}
 	}
 	if index < 0 {return}
-	icon := &pw.icons[index]
+	icon := &cache.icons[index]
 	if icon.state != .Free {program_icon_move(icon, .Free)}
-	path_copy, path_error := strings.clone(path)
+	path_copy, path_error := strings.clone(want.path)
 	pixels, pixel_error := make([]u8, size * size * 4)
 	if path_error != nil || pixel_error != nil {
 		delete(path_copy)
@@ -118,42 +134,55 @@ program_icon_request :: proc(
 		log.error("allocating a program icon failed")
 		return
 	}
-	icon.source, icon.path, icon.paint, icon.size, icon.pixels = source, path_copy, paint, size, pixels
-	icon.used = pw.clock
+	icon.want, icon.size, icon.pixels = want, size, pixels
+	icon.path = path_copy
+	icon.used = cache.clock
 	program_icon_move(icon, .Pending)
-	process_icon_request(pw, index)
+	process_icon_request(&app.processes, {index = index, want = icon.want, size = size, pixels = pixels})
 }
 
 // The atlas rectangle of one source's icon once it is ready; `state` is Pending while it is read.
+// An empty path or a size the decoders refuse reports Missing, so the next source is used.
 @(private)
 program_icon_atlas :: proc(
 	app: ^App,
-	source: Program_Icon_Source,
-	path: string,
-	paint: program_art.Paint,
+	want: Program_Icon_Want,
 	size: int,
 ) -> (
 	rect: render.Rect,
 	state: Program_Icon_State,
 	result: render.Build_Status,
 ) {
-	pw := &app.processes
-	if path == "" || size < 1 || size > platform_api.EXECUTABLE_ICON_MAX {return {}, .Missing, .Ok}
-	pw.clock += 1
-	for &icon in pw.icons {
-		if icon.state == .Free || icon.source != source || icon.size != size || icon.paint != paint {
+	cache := &app.program_icons
+	if want.path == "" || size < 1 || size > platform_api.EXECUTABLE_ICON_MAX {return {}, .Missing, .Ok}
+	cache.clock += 1
+	for &icon in cache.icons {
+		if icon.state == .Free || icon.source != want.source || icon.size != size || icon.paint != want.paint {
 			continue
 		}
-		if icon.path != path {continue}
-		icon.used = pw.clock
+		if icon.path != want.path {continue}
+		icon.used = cache.clock
 		if icon.state != .Ready {return {}, icon.state, .Ok}
 		side := i32(size)
 		atlas, status := render.atlas_ensure(app.device, &icon.slot, side, side, icon.pixels, size, true)
 		if status != .Ok {return {}, .Pending, status}
 		return atlas, .Ready, .Ok
 	}
-	program_icon_request(app, source, path, paint, size)
+	program_icon_request(app, want, size)
 	return {}, .Pending, .Ok
+}
+
+// Settles the icon reads the worker finished; reports whether one produced an icon to draw, and
+// the path of a user's PNG that could not be read, valid until the icon is reused.
+program_icons_adopt :: proc(app: ^App) -> (ready: bool, unreadable: string) {
+	done: [PROGRAM_ICON_LIMIT]Program_Icon_Job
+	for job in done[:process_icon_results(&app.processes, done[:])] {
+		icon := &app.program_icons.icons[job.index]
+		program_icon_move(icon, job.found ? .Ready : .Missing)
+		ready ||= job.found
+		if !job.found && job.want.source == .File {unreadable = icon.path}
+	}
+	return
 }
 
 // The badge for a pane drawn `size` pixels square: its program's icon once one is ready,
@@ -171,10 +200,10 @@ pane_icon :: proc(
 	if entry == nil {return}
 	program := program_adopted(entry)
 	if app.settings.tabs.program_icons && program != nil && program.name != "" {
-		source, path, paint, found := program_icon_source(app, program, int(math.round(size)))
+		want, found := program_icon_source(app, program, int(math.round(size)))
 		if found {
 			state: Program_Icon_State
-			atlas, state, result = program_icon_atlas(app, source, path, paint, int(math.round(size)))
+			atlas, state, result = program_icon_atlas(app, want, int(math.round(size)))
 			if result != .Ok || state == .Ready {return}
 			atlas = {}
 		}
@@ -198,11 +227,11 @@ report_icon :: proc(
 ) {
 	if app.settings.tabs.program_icons && name != "" {
 		pixels := int(math.round(size))
-		art, has_art := program_art.find(name)
-		source, path, paint, found := program_named_source(app, name, art, has_art, pixels)
+		art, has_art := program_art_find(app, name)
+		want, found := program_named_source(app, name, art, has_art, pixels)
 		if found {
 			state: Program_Icon_State
-			atlas, state, result = program_icon_atlas(app, source, path, paint, pixels)
+			atlas, state, result = program_icon_atlas(app, want, pixels)
 			if result != .Ok || state == .Ready {return}
 			if state == .Pending {return {}, true, .Ok}
 		}
@@ -218,17 +247,14 @@ program_icon_source :: proc(
 	program: ^Program_Adopted,
 	size: int,
 ) -> (
-	source: Program_Icon_Source,
-	path: string,
-	paint: program_art.Paint,
+	want: Program_Icon_Want,
 	found: bool,
 ) {
-	source, path, paint, found = program_named_source(app, program.name, program.art, program.has_art, size)
+	want, found = program_named_source(app, program.name, program.art, program.has_art, size)
 	if found {return}
-	if program.path != "" && !program_icon_missing(app, .Executable, program.path, {}, size) {
-		return .Executable, program.path, {}, true
-	}
-	return
+	executable := Program_Icon_Want{source = .Executable, path = program.path}
+	if program.path != "" && !program_icon_missing(app, executable, size) {return executable, true}
+	return {}, false
 }
 
 // The user's PNG for a program's name, then its bundled artwork.
@@ -240,37 +266,28 @@ program_named_source :: proc(
 	has_art: bool,
 	size: int,
 ) -> (
-	source: Program_Icon_Source,
-	path: string,
-	paint: program_art.Paint,
+	want: Program_Icon_Want,
 	found: bool,
 ) {
-	if file, ok := program_named_file(app, name, art, has_art);
-	   ok && !program_icon_missing(app, .File, file, {}, size) {
-		return .File, file, {}, true
+	if file, ok := program_named_file(app, name, art, has_art); ok {
+		want = {source = .File, path = file}
+		if !program_icon_missing(app, want, size) {return want, true}
 	}
 	if has_art {
-		canonical := program_art.canonical(art)
-		art_paint := program_art_paint(app, art)
-		if !program_icon_missing(app, .Artwork, canonical, art_paint, size) {
-			return .Artwork, canonical, art_paint, true
-		}
+		paint := program_art_paint(app, art)
+		want = {source = .Artwork, path = program_art.canonical(art), art = art, paint = paint}
+		if !program_icon_missing(app, want, size) {return want, true}
 	}
-	return
+	return {}, false
 }
 
 @(private)
-program_icon_missing :: proc(
-	app: ^App,
-	source: Program_Icon_Source,
-	path: string,
-	paint: program_art.Paint,
-	size: int,
-) -> bool {
-	for &icon in app.processes.icons {
-		if icon.state == .Missing && icon.source == source && icon.size == size && icon.paint == paint &&
-		   icon.path == path {
-			icon.used = app.processes.clock
+program_icon_missing :: proc(app: ^App, want: Program_Icon_Want, size: int) -> bool {
+	cache := &app.program_icons
+	for &icon in cache.icons {
+		if icon.state == .Missing && icon.source == want.source && icon.size == size &&
+		   icon.paint == want.paint && icon.path == want.path {
+			icon.used = cache.clock
 			return true
 		}
 	}
@@ -297,10 +314,9 @@ program_named_file :: proc(app: ^App, name: string, art: program_art.Art, has_ar
 program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_art.Paint) {
 	text := app.theme.tab_text
 	paint.text = {u8(math.round(text.r * 255)), u8(math.round(text.g * 255)), u8(math.round(text.b * 255))}
-	layers := art.layers
-	for layer in program_art.next_layer(&layers) {
-		brand := program_art.brand(layer) or_continue
-		if colour.contrast_ratio(colour.rgba(brand), app.theme.tab_bar) < PROGRAM_ART_CONTRAST {
+	for layer in art.layers {
+		if !layer.branded {continue}
+		if colour.contrast_ratio(colour.rgba(layer.colour), app.theme.tab_bar) < PROGRAM_ART_CONTRAST {
 			paint.mono = true
 			return
 		}
@@ -308,232 +324,78 @@ program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_ar
 	return
 }
 
-// The pane's program as polling sees it; nil while its shell is at the prompt. A program is adopted
-// only when a second poll still sees it, so a prompt helper or a short command does not flash its
-// icon, while returning to the shell shows at once. Only program_update and program_forget write it.
-Program :: union {
-	Program_Seen,
-	Program_Adopted,
-	Program_Changing,
-}
-
-// Seen by one poll, with nothing adopted yet.
-Program_Seen :: struct {
-	id: u32,
-}
-
-// The process adopted and its image path; the name icons are looked up by and its bundled artwork;
-// whether it is a WSL or SSH bridge, named by what its programs report; and how it was started, as
-// a reopened pane shows it.
-Program_Adopted :: struct {
-	id:      u32,
-	path:    string,
-	name:    string,
-	art:     program_art.Art,
-	has_art: bool,
-	bridge:  bool,
-	command: string,
-}
-
-// The adopted program stands while the last poll saw another, `id`, for the first time.
-Program_Changing :: struct {
-	adopted: Program_Adopted,
-	id:      u32,
-}
-
-// The last poll's choice, adopted or not, so that a split right after a program starts already
-// opens in its directory.
-program_polled :: proc(entry: ^Session_Entry) -> u32 {
-	switch program in entry.program {
-	case Program_Seen:
-		return program.id
-	case Program_Adopted:
-		return program.id
-	case Program_Changing:
-		return program.id
-	}
-	return 0
-}
-
-// The program the pane's icon and remembered command name; nil until one is adopted.
-program_adopted :: proc(entry: ^Session_Entry) -> ^Program_Adopted {
-	#partial switch &program in entry.program {
-	case Program_Adopted:
-		return &program
-	case Program_Changing:
-		return &program.adopted
-	}
-	return nil
-}
-
-// Follows the pane's program to this poll's snapshot; reports whether its icon may change.
-program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Process_Info, root: u32) -> bool {
-	apps := program_reporters(entry)
-	index := pty.process_program(processes, root, apps, program_polled(entry))
-	if index < 0 {
-		// A program seen once never showed, so its end changes nothing drawn or saved.
-		if _, seen := entry.program.(Program_Seen); seen {entry.program = nil; return false}
-		if !program_forget(entry) {return false}
-		layout_state_touch(app)
-		return true
-	}
-	id := processes[index].id
-	stem := settings.executable_stem(processes[index].executable)
-	adopted := false
-	switch &program in entry.program {
-	case nil:
-		entry.program = Program_Seen{id}
-		return false
-	case Program_Seen:
-		if program.id != id {program.id = id; return false}
-		entry.program = program_adopt(app, id, root, stem)
-		adopted = true
-	case Program_Adopted:
-		if program.id != id {entry.program = Program_Changing{program, id}; return false}
-	case Program_Changing:
-		if program.id != id {
-			standing := program.adopted
-			if standing.id == id {entry.program = standing} else {program.id = id}
-			return false
-		}
-		program_release(&program.adopted)
-		entry.program = program_adopt(app, id, root, stem)
-		adopted = true
-	}
-	if adopted {layout_state_touch(app)}
-	program := program_adopted(entry)
-	if !program.bridge {return adopted}
-	// A bridge is named by the first reported app that has an icon, and by itself otherwise.
-	name := stem
-	for key in apps {
-		if program_known(app, key) {name = key; break}
-	}
-	if strings.equal_fold(name, program.name) {return adopted}
-	program_name_set(program, name)
-	return true
-}
-
-// What a program confirmed by a second poll shows: its image, name and command.
-@(private)
-program_adopt :: proc(app: ^App, id, root: u32, stem: string) -> (program: Program_Adopted) {
-	path, ok := pty.process_image(id, root)
-	name := stem
-	arguments, _ := pty.process_arguments(id, root, context.temp_allocator)
-	if program_listed(program_launchers[:], stem) {
-		if script := pty.process_script(arguments); program_known(app, script) {
-			name = script
-			// The launcher's own icon would show Node or cmd rather than the program.
-			delete(path)
-			path, ok = "", false
-		}
-	}
-	program.id, program.path = id, ok ? path : ""
-	program_name_set(&program, name)
-	program.command = program_command(arguments, stem)
-	program.bridge = program_listed(program_bridges[:], stem)
-	return
-}
-
-// The apps the pane's program status names, most important first, in temporary memory.
-program_reporters :: proc(entry: ^Session_Entry) -> []string {
-	records := slice.clone(entry.statuses, context.temp_allocator)
-	slice.sort_by(records, status_before)
-	apps := make([dynamic]string, 0, len(records), context.temp_allocator)
-	for record in records {if record.app != "" {append(&apps, record.app)}}
-	return apps[:]
-}
-
-// How the program was started, as someone would type it: the executable's stem, or the script a
-// launcher runs, then the remaining arguments. Control characters are dropped so the text is safe
-// to write to a terminal. Empty when the arguments are unreadable.
-program_command :: proc(arguments: []string, stem: string, allocator := context.allocator) -> string {
-	if len(arguments) == 0 || stem == "" {return ""}
-	b := strings.builder_make(context.temp_allocator)
-	first := 1
-	if program_listed(program_launchers[:], stem) {
-		if script := pty.process_script(arguments); script != "" {
-			// The argument naming the script; anything after the script in it (cmd's quoted
-			// command) is kept.
-			for argument, i in arguments[1:] {
-				text := strings.trim(argument, "\" ")
-				lower := strings.to_lower(text, context.temp_allocator)
-				at := strings.index(lower, strings.to_lower(script, context.temp_allocator))
-				if at < 0 || argument == "" || argument[0] == '-' {continue}
-				strings.write_string(&b, script)
-				rest := text[at + len(script):]
-				if space := strings.index_byte(rest, ' '); space >= 0 {
-					rest = strings.trim_left(rest[space:], "\" ")
-					if rest != "" {strings.write_byte(&b, ' '); strings.write_string(&b, rest)}
-				}
-				first = i + 2
-				break
+when AIO_CONTROL {
+	// Whether the pane's program has an icon ready to draw at any size, from whichever source; the
+	// verification state reports it.
+	program_icon_ready :: proc(app: ^App, program: ^Program_Adopted) -> bool {
+		file, has_file := program_named_file(app, program.name, program.art, program.has_art)
+		art := program.has_art ? program_art.canonical(program.art) : ""
+		for icon in app.program_icons.icons {
+			if icon.state != .Ready {continue}
+			switch icon.source {
+			case .File:
+				if has_file && icon.path == file {return true}
+			case .Artwork:
+				if art != "" && icon.path == art {return true}
+			case .Executable:
+				if program.path != "" && icon.path == program.path {return true}
 			}
 		}
+		return false
 	}
-	if strings.builder_len(b) == 0 {strings.write_string(&b, stem)}
-	for argument in arguments[min(first, len(arguments)):] {
-		strings.write_byte(&b, ' ')
-		quoted := argument == "" || strings.index_any(argument, " \t") >= 0
-		if quoted {strings.write_byte(&b, '"')}
-		strings.write_string(&b, argument)
-		if quoted {strings.write_byte(&b, '"')}
-	}
-	return printable_command(strings.to_string(b), allocator)
-}
-
-// The text without control characters, cut to PROGRAM_COMMAND_LIMIT bytes, so it can be written
-// to a terminal as plain text.
-printable_command :: proc(text: string, allocator := context.allocator) -> string {
-	out := strings.builder_make(allocator)
-	for r in text {
-		if r < 0x20 || r == 0x7f || r >= 0x80 && r < 0xa0 || r == utf8.RUNE_ERROR {continue}
-		if strings.builder_len(out) + utf8.rune_size(r) > PROGRAM_COMMAND_LIMIT {break}
-		strings.write_rune(&out, r)
-	}
-	return strings.to_string(out)
-}
-
-@(private)
-program_known :: proc(app: ^App, name: string) -> bool {
-	if name == "" {return false}
-	if _, found := program_art.find(name); found {return true}
-	_, found := settings.program_icon_file(&app.settings, name)
-	return found
-}
-
-@(private)
-program_listed :: proc(names: []string, stem: string) -> bool {
-	for name in names {if strings.equal_fold(name, stem) {return true}}
-	return false
-}
-
-@(private)
-program_name_set :: proc(program: ^Program_Adopted, name: string) {
-	lower := strings.to_lower(name)
-	delete(program.name)
-	program.name = lower
-	program.art, program.has_art = program_art.find(lower)
-}
-
-@(private)
-program_release :: proc(program: ^Program_Adopted) {
-	delete(program.path)
-	delete(program.name)
-	delete(program.command)
-}
-
-// Drops the pane's program; reports whether it had one.
-program_forget :: proc(entry: ^Session_Entry) -> bool {
-	if entry.program == nil {return false}
-	if program := program_adopted(entry); program != nil {program_release(program)}
-	entry.program = nil
-	return true
 }
 
 // Drops PNG icons so edited files and settings are read again; ones being read are left alone.
 program_icons_reload :: proc(app: ^App) {
-	for &icon in app.processes.icons {
+	for &icon in app.program_icons.icons {
 		if icon.source != .File || icon.state == .Pending || icon.state == .Free {continue}
 		program_icon_move(&icon, .Free)
 	}
+}
+
+// Runs on the process worker: reads or draws one icon into its job's pixels.
+@(private)
+program_icon_read :: proc(job: Program_Icon_Job) -> bool {
+	switch job.want.source {
+	case .Executable:
+		return platform_api.executable_icon(job.want.path, job.size, job.pixels)
+	case .Artwork:
+		return program_art.draw(job.want.art, job.size, job.want.paint, job.pixels)
+	case .File:
+		return program_icon_png(job.want.path, job.size, job.pixels)
+	}
+	return false
+}
+
+// A user's PNG fitted into size x size, centred, each pixel averaging the source pixels it covers
+// (the shell icon samples nearest-neighbour instead).
+@(private)
+program_icon_png :: proc(path: string, size: int, pixels: []u8) -> bool {
+	image, load_error := icon_png_load(path)
+	defer png.destroy(image)
+	if load_error != .None {return false}
+	source := image.pixels.buf[:]
+	longest := max(image.width, image.height)
+	width, height := max(1, image.width * size / longest), max(1, image.height * size / longest)
+	left, top := (size - width) / 2, (size - height) / 2
+	slice.fill(pixels[:size * size * 4], 0)
+	for y in 0 ..< height {
+		y0 := y * image.height / height
+		y1 := max(y0 + 1, (y + 1) * image.height / height)
+		for x in 0 ..< width {
+			x0 := x * image.width / width
+			x1 := max(x0 + 1, (x + 1) * image.width / width)
+			sum: [4]u32
+			for sy in y0 ..< y1 {
+				for sx in x0 ..< x1 {
+					from := (sy * image.width + sx) * 4
+					for c in 0 ..< 4 {sum[c] += u32(source[from + c])}
+				}
+			}
+			count := u32((x1 - x0) * (y1 - y0))
+			to := ((top + y) * size + left + x) * 4
+			for c in 0 ..< 4 {pixels[to + c] = u8((sum[c] + count / 2) / count)}
+		}
+	}
+	return true
 }
