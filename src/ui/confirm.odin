@@ -20,7 +20,8 @@ Confirm_Outcome :: enum {
 	Accept,
 }
 
-// A modal question with Cancel and Accept buttons. Accept has the keyboard first so Enter confirms.
+// A modal question with Cancel and Accept buttons. Accept has the keyboard first so Enter confirms,
+// unless the question opens with Cancel focused.
 Confirm :: struct {
 	using presence: Presence,
 	focus, hover:   Confirm_Button,
@@ -49,13 +50,13 @@ CONFIRM_PRESENCE :: Presence_Spec {
 	close = 90 * time.Millisecond,
 }
 
-confirm_open :: proc(c: ^Confirm) {
-	// A dialog asked again while it fades fades in from nothing, as a fresh question.
-	presence_reset(&c.presence)
+// Opens the dialog as a fresh question, so one asked again while it fades fades in from nothing. The
+// caller states the whole presentation here: the wide panel, the button that has the keyboard first and
+// whether the option shows. The option always starts unchecked.
+confirm_open :: proc(c: ^Confirm, extended := false, focus := Confirm_Button.Accept, show_option := false) {
+	assert(focus != .None && (focus != .Option || show_option))
+	c^ = {focus = focus, extended = extended, show_option = show_option}
 	presence_open(&c.presence, CONFIRM_PRESENCE)
-	c.focus, c.hover = .Accept, .None
-	c.hover_motion = {}
-	armed_cancel(&c.armed)
 }
 
 confirm_close :: proc(c: ^Confirm) {

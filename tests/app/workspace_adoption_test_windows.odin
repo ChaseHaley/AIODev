@@ -60,8 +60,7 @@ adoption_expect_postcondition :: proc(
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	testing.expect(t, w.overlay == nil)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
-	testing.expect_value(t, w.pending_close.kind, app.Pending_Close_Kind.None)
-	testing.expect(t, len(w.close_restore) == 0)
+	testing.expect(t, app.confirmation_subject(w, app.Pending_Close) == nil)
 	testing.expect(t, app.focused_session(state, w) != nil)
 	testing.expect_value(t, workspace.selection_anchor, workspace.tabs[workspace.selected].id)
 }
@@ -162,9 +161,9 @@ workspace_selection_and_deletion_share_adoption_order :: proc(t: ^testing.T) {
 	if !testing.expect(t, app.workspace_select(state, w, one)) { return }
 	adoption_expect_postcondition(t, state, w, one)
 	app.workspace_delete_request(state, w, one)
-	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence))
+	testing.expect(t, app.confirmation_asking(w, app.Pending_Close) != nil)
 	adoption_dirty_presentation(w)
-	app.pending_close_finish(state, w, true)
+	app.confirmation_finish(state, w, true)
 	adoption_expect_postcondition(t, state, w, two)
 	testing.expect(t, app.workspace_find(state, one.id) == nil)
 	testing.expect_value(t, len(state.workspaces), 1)

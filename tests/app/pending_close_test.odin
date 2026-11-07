@@ -8,7 +8,6 @@ import "core:testing"
 import app "../../src"
 import "aio:layout"
 import "aio:platform"
-import "aio:ui"
 
 @(private="file")
 Pending_Fixture :: struct { state: app.App, directory, path: string }
@@ -37,6 +36,11 @@ pending_fixture_destroy :: proc(t: ^testing.T, f: ^Pending_Fixture) {
 	if f.directory != "" { testing.expect_value(t, os.remove(f.directory), nil); delete(f.directory) }
 }
 
+@(private="file")
+close_asking :: proc(w: ^app.Window) -> ^app.Pending_Close {
+	return app.confirmation_asking(w, app.Pending_Close)
+}
+
 @(test)
 pending_close_tab_subject_recounts_and_targets_recorded_tab :: proc(t: ^testing.T) {
 	f: Pending_Fixture
@@ -58,10 +62,12 @@ pending_close_tab_subject_recounts_and_targets_recorded_tab :: proc(t: ^testing.
 	if !testing.expect_value(t, split_error, nil) { return }
 	app.tab_select(state, w, 2)
 	app.tab_close_request(state, w, 2)
-	pc := &w.pending_close
-	if !testing.expect(t, ui.presence_is_open(pc.confirm.presence) && pc.kind == .Tab) { return }
-	testing.expect_value(t, pc.tab, recorded.id)
-	text := app.pending_close_text(state, pc, workspace)
+	pc := close_asking(w)
+	if !testing.expect(t, pc != nil) { return }
+	recorded_target, is_tab := pc.target.(app.Close_Tab)
+	if !testing.expect(t, is_tab) { return }
+	testing.expect_value(t, recorded_target.tab, recorded.id)
+	text := app.pending_close_text(state, pc, true, workspace)
 	testing.expect_value(t, text.title, "Close this tab and its 2 panes?")
 	testing.expect_value(t, text.label, "Close")
 	_, split_error = layout.split_direction(
@@ -72,17 +78,20 @@ pending_close_tab_subject_recounts_and_targets_recorded_tab :: proc(t: ^testing.
 		{.Terminal, 0},
 	)
 	testing.expect_value(t, split_error, nil)
-	text = app.pending_close_text(state, pc, workspace)
+	text = app.pending_close_text(state, pc, true, workspace)
 	testing.expect_value(t, text.title, "Close this tab and its 3 panes?")
-	app.pending_close_finish(state, w, false)
-	testing.expect(t, !ui.presence_is_open(pc.confirm.presence))
+	app.confirmation_finish(state, w, false)
+	testing.expect(t, close_asking(w) == nil)
 	testing.expect_value(t, len(workspace.tabs), 3)
 	app.tab_close_request(state, w, 2)
 	app.tab_close(state, w, 1)
 	testing.expect_value(t, len(workspace.tabs), 2)
-	testing.expect(t, ui.presence_is_open(pc.confirm.presence) && pc.kind == .Tab)
-	app.pending_close_finish(state, w, true)
-	testing.expect(t, !ui.presence_is_open(pc.confirm.presence))
+	pc = close_asking(w)
+	if !testing.expect(t, pc != nil) { return }
+	_, is_tab = pc.target.(app.Close_Tab)
+	testing.expect(t, is_tab)
+	app.confirmation_finish(state, w, true)
+	testing.expect(t, close_asking(w) == nil)
 	testing.expect_value(t, len(workspace.tabs), 1)
 	testing.expect(t, workspace.tabs[0].id != recorded.id)
 }
@@ -99,30 +108,32 @@ pending_close_workspace_subject_recounts_and_deletes :: proc(t: ^testing.T) {
 	app.pane_split(state, w, .Right)
 	app.tab_new(state, w)
 	app.workspace_delete_request(state, w, target)
-	pc := &w.pending_close
-	if !testing.expect(t, ui.presence_is_open(pc.confirm.presence) && pc.kind == .Workspace) { return }
-	testing.expect_value(t, pc.workspace, target_id)
-	testing.expect_value(t, pc.owner, w.id)
-	testing.expect_value(t, pc.destination, u32(0))
-	text := app.pending_close_text(state, pc, w.workspace)
+	pc := close_asking(w)
+	if !testing.expect(t, pc != nil) { return }
+	plan, is_workspace := pc.target.(app.Close_Workspace)
+	if !testing.expect(t, is_workspace) { return }
+	testing.expect_value(t, plan.workspace, target_id)
+	testing.expect_value(t, plan.owner, w.id)
+	testing.expect_value(t, plan.destination, u32(0))
+	text := app.pending_close_text(state, pc, true, w.workspace)
 	testing.expect_value(t, text.body, "Close 2 tabs (3 panes); stop 3 sessions.")
 	testing.expect_value(t, text.label, "Delete")
 	testing.expect_value(t, text.note, "Replace it with a fresh default workspace and shell.")
 	if !testing.expect(t, app.tab_create(state, target)) { return }
-	text = app.pending_close_text(state, pc, w.workspace)
+	text = app.pending_close_text(state, pc, true, w.workspace)
 	testing.expect_value(t, text.body, "Close 3 tabs (4 panes); stop 4 sessions.")
-	app.pending_close_finish(state, w, false)
-	testing.expect(t, !ui.presence_is_open(pc.confirm.presence))
+	app.confirmation_finish(state, w, false)
+	testing.expect(t, close_asking(w) == nil)
 	testing.expect(t, app.workspace_find(state, target_id) == target)
 	testing.expect_value(t, len(target.tabs), 3)
 	app.workspace_delete_request(state, w, target)
-	app.pending_close_finish(state, w, true)
-	testing.expect(t, !ui.presence_is_open(pc.confirm.presence))
+	app.confirmation_finish(state, w, true)
+	testing.expect(t, close_asking(w) == nil)
 	testing.expect(t, app.workspace_find(state, target_id) == nil)
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect(t, w.workspace.id != target_id)
-	testing.expect_value(t, pc.kind, app.Pending_Close_Kind.None)
-	testing.expect(t, pc.workspace_name == "" && pc.destination_name == "")
+	// The window adopting its replacement released the question's subject, names included.
+	testing.expect(t, app.confirmation_shown(w) == nil)
 }
 
 @(test)
@@ -140,23 +151,27 @@ pending_close_stale_owner_reopens_question :: proc(t: ^testing.T) {
 	target := owner.workspace
 	target_id := target.id
 	app.workspace_delete_request(state, w, target)
-	pc := &w.pending_close
-	if !testing.expect(t, ui.presence_is_open(pc.confirm.presence) && pc.kind == .Workspace) { return }
-	testing.expect_value(t, pc.owner, owner.id)
-	testing.expect_value(t, pc.destination, u32(0))
+	pc := close_asking(w)
+	if !testing.expect(t, pc != nil) { return }
+	plan, is_workspace := pc.target.(app.Close_Workspace)
+	if !testing.expect(t, is_workspace) { return }
+	testing.expect_value(t, plan.owner, owner.id)
+	testing.expect_value(t, plan.destination, u32(0))
 	app.window_close(state, owner)
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect(t, app.workspace_find(state, target_id) == target)
-	app.pending_close_finish(state, w, true)
-	testing.expect(t, ui.presence_is_open(pc.confirm.presence))
-	testing.expect(t, pc.owner == 0)
-	testing.expect_value(t, pc.destination, u32(0))
+	app.confirmation_finish(state, w, true)
+	pc = close_asking(w)
+	if !testing.expect(t, pc != nil) { return }
+	plan, _ = pc.target.(app.Close_Workspace)
+	testing.expect(t, plan.owner == 0)
+	testing.expect_value(t, plan.destination, u32(0))
 	testing.expect(t, app.workspace_find(state, target_id) == target)
 	testing.expect(t, w.workspace == first)
-	text := app.pending_close_text(state, pc, w.workspace)
+	text := app.pending_close_text(state, pc, true, w.workspace)
 	testing.expect_value(t, text.note, "Other workspaces and their sessions stay open.")
-	app.pending_close_finish(state, w, false)
-	testing.expect(t, !ui.presence_is_open(pc.confirm.presence))
+	app.confirmation_finish(state, w, false)
+	testing.expect(t, close_asking(w) == nil)
 }
 
 @(private="file")
@@ -193,19 +208,23 @@ pending_close_allocation_failure_keeps_previous_question :: proc(t: ^testing.T) 
 	target := w.workspace
 	app.pane_split(state, w, .Right)
 	app.tab_close_request(state, w, 0)
-	pc := &w.pending_close
-	if !testing.expect(t, ui.presence_is_open(pc.confirm.presence) && pc.kind == .Tab) { return }
-	tab_id := pc.tab
+	pc := close_asking(w)
+	if !testing.expect(t, pc != nil) { return }
+	asked, is_tab := pc.target.(app.Close_Tab)
+	if !testing.expect(t, is_tab) { return }
 	backing := context.allocator
 	failure := Pending_Fail_Allocator{backing = backing}
 	context.allocator = runtime.Allocator{pending_fail_allocation, &failure}
 	app.workspace_delete_request(state, w, target)
 	context.allocator = backing
 	testing.expect(t, failure.failed)
-	testing.expect(t, ui.presence_is_open(pc.confirm.presence))
-	testing.expect_value(t, pc.kind, app.Pending_Close_Kind.Tab)
-	testing.expect_value(t, pc.tab, tab_id)
+	pc = close_asking(w)
+	if testing.expect(t, pc != nil) {
+		kept, still_tab := pc.target.(app.Close_Tab)
+		testing.expect(t, still_tab)
+		testing.expect_value(t, kept.tab, asked.tab)
+	}
 	testing.expect(t, app.workspace_find(state, target.id) == target)
 	testing.expect_value(t, len(state.windows), 1)
-	app.pending_close_finish(state, w, false)
+	app.confirmation_finish(state, w, false)
 }

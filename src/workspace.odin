@@ -497,14 +497,15 @@ tab_close_has_work :: proc(app: ^App, workspace: ^Workspace, index: int) -> bool
 	return false
 }
 
-// The split-tab preference does not disable protection for explicitly reported ongoing work.
-tab_close_request :: proc(app: ^App, w: ^Window, index: int) {
+// The split-tab preference does not disable protection for explicitly reported ongoing work. `restore`
+// is a close subset's replaced marks, which a question takes when it asks.
+tab_close_request :: proc(app: ^App, w: ^Window, index: int, restore: ^[dynamic]u32 = nil) {
 	_, _, split := tab_close_scope(w.workspace, index)
 	if !tab_close_has_work(app, w.workspace, index) && (!split || !app.settings.tab.confirm_close) {
 		tab_close(app, w, index)
 		return
 	}
-	pending_close_open_tab(app, w, index)
+	pending_close_open_tab(app, w, index, restore)
 }
 
 // Picks a usable launch directory without touching a remote path twice. `refused` reports that a
@@ -629,38 +630,44 @@ tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {
 	}
 }
 
-// Puts back the marks a subset close replaced, falling back to the active tab when all of them closed.
-tab_close_restore :: proc(w: ^Window) {
-	if len(w.close_restore) == 0 {return}
+// Puts back the marks a subset close replaced and releases the list, falling back to the active tab
+// when all of them closed. The one exit of a close subset, whether its question was answered,
+// dismissed or never asked.
+tab_close_restore :: proc(w: ^Window, restore: ^[dynamic]u32) {
+	defer {
+		delete(restore^)
+		restore^ = {}
+	}
+	if len(restore^) == 0 {return}
 	kept := false
 	for tab in w.workspace.tabs {
 		tab.marked = false
-		for id in w.close_restore {tab.marked ||= tab.id == id}
+		for id in restore^ {tab.marked ||= tab.id == id}
 		kept ||= tab.marked
 	}
 	if !kept && len(w.workspace.tabs) > 0 {tab_select_one(w.workspace, w.workspace.selected)}
-	clear(&w.close_restore)
 	w.dirty = true
 }
 
 // Closes the tabs right of `anchor`, or every tab outside it: its marked group when it is marked,
-// otherwise every other tab.
+// otherwise every other tab. The marks show the tabs closing until the question, if one asks, is
+// answered; the question then holds the marks to put back.
 tab_close_subset :: proc(app: ^App, w: ^Window, right: bool, anchor: int) {
 	if anchor < 0 || anchor >= len(w.workspace.tabs) {return}
 	group := w.workspace.tabs[anchor].marked
-	clear(&w.close_restore)
-	if reserve(&w.close_restore, len(w.workspace.tabs)) != nil {
+	restore, err := make([dynamic]u32, 0, len(w.workspace.tabs))
+	if err != nil {
 		notify(app, .Error, "Could not select tabs to close.")
 		return
 	}
-	for tab in w.workspace.tabs {if tab.marked {append(&w.close_restore, tab.id)}}
+	for tab in w.workspace.tabs {if tab.marked {append(&restore, tab.id)}}
 	first := -1
 	for tab, i in w.workspace.tabs {
 		tab.marked = right ? i > anchor : (group ? !tab.marked : i != anchor)
 		if tab.marked && first < 0 {first = i}
 	}
-	if first >= 0 {tab_close_request(app, w, first)}
-	if !ui.presence_is_open(w.pending_close.confirm.presence) {tab_close_restore(w)}
+	if first >= 0 {tab_close_request(app, w, first, &restore)}
+	tab_close_restore(w, &restore)
 }
 
 tab_index_by_id :: proc(workspace: ^Workspace, id: u32) -> int {

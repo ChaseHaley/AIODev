@@ -130,19 +130,8 @@ Window :: struct {
 	// crossing cannot leave a phantom rail over the pane.
 	rail_was_overlay:    bool,
 	tab_close_armed:     ui.Armed(int),
-	// Asks before a destructive close and holds its subject, live counts and presentation state.
-	pending_close: Pending_Close,
-	pending_swap:  Pane_Swap,
-	settings_reset_confirm: ui.Confirm,
-	settings_reset_source: string,
-	profile_remove_confirm: ui.Confirm,
-	profile_remove_id: string,
-	process_remove_confirm: ui.Confirm,
-	process_remove_name: string,
-	process_remove_source: string,
-	process_remove_id: int,
-	pending_file:  Pending_File,
-	close_restore: [dynamic]u32,
+	// The question asked before a destructive change, with its subject; see confirmation.odin.
+	confirmation: Maybe(Confirmation),
 	// The surface over the content that takes input; see window_overlay.odin. The menus' rows and the
 	// rename field below are storage the surfaces reuse.
 	overlay: Window_Overlay,
@@ -157,7 +146,7 @@ Window :: struct {
 	caption_armed: ui.Armed(int),
 	maximized: bool,
 	pane_fill: layout.Pane_Fill,
-	paste_confirm_until: time.Tick,
+	paste_confirm: Paste_Confirm,
 	suppressed_key: Maybe(platform.Key_Event),
 	wheel_remainder: f32,
 	blinking, cursor_phase_visible: bool,
@@ -341,7 +330,6 @@ window_free :: proc(w: ^Window) {
 	document_menu_destroy(w)
 	delete(w.rename.bytes)
 	workspace_picker_destroy(w)
-	delete(w.close_restore)
 	delete(w.float_capsules)
 	delete(w.float_capsule_widths)
 	confirmation_clear(w)

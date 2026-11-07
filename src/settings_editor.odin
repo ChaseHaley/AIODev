@@ -1182,31 +1182,29 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	editor_outcome(app, w, ui.editor_key(p, e))
 }
 
-editor_profile_remove_title :: proc(app: ^App, w: ^Window) -> string {
-	profile := settings.profile_find(&app.settings.profiles, w.profile_remove_id)
-	if profile == nil {return "Delete profile?"}
-	return fmt.tprintf("Delete %s?", profile.name)
+// The custom profile a confirmation asks before deleting.
+Profile_Remove :: struct {
+	id: string,
+}
+
+editor_profile_remove_text :: proc(app: ^App, id: string) -> Confirmation_Text {
+	text := Confirmation_Text{title = "Delete profile?", label = "Delete"}
+	if profile := settings.profile_find(&app.settings.profiles, id); profile != nil {
+		text.title = fmt.tprintf("Delete %s?", profile.name)
+	}
+	return text
 }
 
 editor_profile_remove_ask :: proc(app: ^App, w: ^Window, id: string) {
 	profile := settings.profile_find(&app.settings.profiles, id)
 	if profile == nil || profile.builtin || id == settings.PROFILE_DEFAULT_ID {return}
+	owned, err := strings.clone(id)
+	if err != nil {notify(app, .Error, "Could not prepare profile deletion."); return}
 	overlay_open(app, w, nil)
-	delete(w.profile_remove_id)
-	w.profile_remove_id = strings.clone(id)
-	ui.confirm_open(&w.profile_remove_confirm)
-	w.profile_remove_confirm.focus = .Cancel
-	w.profile_remove_confirm.show_option = false
-	w.dirty = true
+	confirmation_open(w, Profile_Remove{owned}, focus = .Cancel)
 }
 
-editor_profile_remove_finish :: proc(app: ^App, w: ^Window, accepted: bool) {
-	ui.confirm_close(&w.profile_remove_confirm)
-	if accepted {editor_profile_mutate(app, w, {kind = .Remove, id = w.profile_remove_id})}
-	w.dirty = true
-}
-
-profile_remove_clear :: proc(w: ^Window) {
-	delete(w.profile_remove_id)
-	w.profile_remove_id, w.profile_remove_confirm = "", {}
+@(private)
+editor_profile_remove_finish :: proc(app: ^App, w: ^Window, remove: Profile_Remove, accepted: bool) {
+	if accepted {editor_profile_mutate(app, w, {kind = .Remove, id = remove.id})}
 }

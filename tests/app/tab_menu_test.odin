@@ -51,7 +51,7 @@ menu_fixture_destroy :: proc(f: ^Menu_Fixture) {
 	}
 	delete(f.workspace.tabs)
 	delete(f.state.windows)
-	delete(f.w.close_restore)
+	app.confirmation_clear(&f.w)
 	delete(f.w.rename.bytes)
 	delete(f.w.panes)
 	delete(f.w.dividers)
@@ -226,19 +226,23 @@ tab_menu_close_subset_cancel_restores_selection :: proc(t: ^testing.T) {
 			if !w.tab_menu.separators[i] && candidate == action { w.tab_menu.selected = i; break }
 		}
 		app.tab_menu_choose(&f.state, w)
-		testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && !app.tab_menu_shown(w))
+		testing.expect(t, app.confirmation_asking(w, app.Pending_Close) != nil && !app.tab_menu_shown(w))
 		menu_key(&f, {key = .Escape})
-		testing.expect(t, !ui.presence_is_open(w.pending_close.confirm.presence))
+		testing.expect(t, app.confirmation_current(w) == nil)
 		testing.expect_value(t, len(f.workspace.tabs), 3)
 		for tab, i in f.workspace.tabs { testing.expect_value(t, tab.marked, i == f.workspace.selected) }
-		testing.expect_value(t, len(w.close_restore), 0)
+		// The answer took the marks it put back, so the closing question holds none.
+		if closing := app.confirmation_subject(w, app.Pending_Close); closing != nil {
+			held, _ := closing.target.(app.Close_Tab)
+			testing.expect_value(t, len(held.restore), 0)
+		}
 	}
 	app.tab_menu_open(&f.state, w, 0, 10, 20)
 	w.tab_menu.selected = 5
 	app.tab_menu_choose(&f.state, w)
 	menu_key(&f, {key = .Enter})
 	testing.expect_value(t, len(f.workspace.tabs), 1)
-	testing.expect(t, f.workspace.tabs[0].marked && !ui.presence_is_open(w.pending_close.confirm.presence))
+	testing.expect(t, f.workspace.tabs[0].marked && app.confirmation_current(w) == nil)
 }
 
 // Regression: a close subset requested while a tab-close question is open (a command can do this) must
@@ -253,14 +257,36 @@ tab_close_subset_replaces_an_open_close_question_with_its_marks :: proc(t: ^test
 		f.workspace.tabs[2].tree.root, .Right, 0.5, {.Terminal, 0})
 	testing.expect_value(t, split_error, nil)
 	app.pending_close_open_tab(&f.state, w, 2)
-	if !testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && w.pending_close.tabs == 1) { return }
+	pc := app.confirmation_asking(w, app.Pending_Close)
+	if !testing.expect(t, pc != nil && pc.tabs == 1) { return }
 	app.tab_close_subset(&f.state, w, true, 0)
-	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence))
-	testing.expect_value(t, w.pending_close.tabs, 2)
+	pc = app.confirmation_asking(w, app.Pending_Close)
+	if !testing.expect(t, pc != nil) { return }
+	testing.expect_value(t, pc.tabs, 2)
 	testing.expect(t, f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
 	menu_key(&f, {key = .Enter})
 	if !testing.expect_value(t, len(f.workspace.tabs), 1) { return }
 	testing.expect_value(t, f.workspace.tabs[0].id, 1)
+}
+
+// Regression: a close subset requested while another subset's question asks rewrites that question, and
+// dismissing it puts back the marks from before the first subset rather than the first subset's own.
+@(test)
+tab_close_subset_over_a_subset_question_restores_the_original_marks :: proc(t: ^testing.T) {
+	f: Menu_Fixture
+	defer menu_fixture_destroy(&f)
+	if !menu_fixture_init(t, &f, 3) { return }
+	w := &f.w
+	_, split_error := layout.split_direction(&f.workspace.tabs[2].tree,
+		f.workspace.tabs[2].tree.root, .Right, 0.5, {.Terminal, 0})
+	testing.expect_value(t, split_error, nil)
+	app.tab_close_subset(&f.state, w, true, 0)
+	testing.expect(t, !f.workspace.tabs[0].marked && f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
+	app.tab_close_subset(&f.state, w, true, 1)
+	testing.expect(t, !f.workspace.tabs[0].marked && !f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
+	menu_key(&f, {key = .Escape})
+	testing.expect_value(t, len(f.workspace.tabs), 3)
+	for tab, i in f.workspace.tabs { testing.expect_value(t, tab.marked, i == 0) }
 }
 
 @(test)
@@ -278,7 +304,7 @@ tab_menu_close_others_acts_on_an_unmarked_target :: proc(t: ^testing.T) {
 	}
 	app.tab_menu_choose(&f.state, w)
 	testing.expect_value(t, f.workspace.selected, 0)
-	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && f.workspace.tabs[0].marked &&
+	testing.expect(t, app.confirmation_asking(w, app.Pending_Close) != nil && f.workspace.tabs[0].marked &&
 		!f.workspace.tabs[1].marked && f.workspace.tabs[2].marked)
 	menu_key(&f, {key = .Enter})
 	if !testing.expect_value(t, len(f.workspace.tabs), 1) { return }
@@ -298,7 +324,7 @@ tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	testing.expect_value(t, split_error, nil)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
 	app.tab_menu_choose(&f.state, w)
-	testing.expect(t, ui.presence_is_open(w.pending_close.confirm.presence) && f.workspace.tabs[2].marked)
+	testing.expect(t, app.confirmation_asking(w, app.Pending_Close) != nil && f.workspace.tabs[2].marked)
 	menu_key(&f, {key = .Escape})
 	testing.expect(t, f.workspace.tabs[0].marked && f.workspace.tabs[1].marked && !f.workspace.tabs[2].marked)
 	testing.expect_value(t, f.workspace.selected, 0)

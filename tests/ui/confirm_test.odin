@@ -29,6 +29,24 @@ confirm_keys_choose_cancel_or_accept :: proc(t: ^testing.T) {
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Accept)
 }
 
+// A dialog opens with the presentation its question states, so nothing a previous question set survives.
+@(test)
+confirm_open_takes_its_presentation_and_unchecks_the_option :: proc(t: ^testing.T) {
+	c: ui.Confirm
+	ui.confirm_open(&c, show_option = true)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .D, modifiers = {.Alt}})), ui.Confirm_Outcome.Changed)
+	testing.expect(t, c.option && c.show_option && !c.extended)
+	testing.expect_value(t, c.focus, ui.Confirm_Button.Option)
+	ui.confirm_open(&c, extended = true, focus = .Cancel)
+	testing.expect(t, !c.option && !c.show_option && c.extended)
+	testing.expect_value(t, c.focus, ui.Confirm_Button.Cancel)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab})), ui.Confirm_Outcome.Changed)
+	testing.expect_value(t, c.focus, ui.Confirm_Button.Accept)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .Tab})), ui.Confirm_Outcome.Changed)
+	testing.expect_value(t, c.focus, ui.Confirm_Button.Cancel)
+	testing.expect_value(t, ui.confirm_key(&c, press({key = .D, modifiers = {.Alt}})), ui.Confirm_Outcome.None)
+}
+
 @(test)
 confirm_pointer_needs_press_and_release_on_one_button :: proc(t: ^testing.T) {
 	c: ui.Confirm
