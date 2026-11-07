@@ -1,9 +1,11 @@
 package main
 
 import "aio:commands"
+import "aio:input"
 import "aio:settings"
 import "base:runtime"
 import "core:fmt"
+import "core:log"
 import "core:slice"
 import "core:strings"
 
@@ -96,8 +98,7 @@ binding_report :: proc(
 		}
 		unsupported := false
 		for shortcut in storage[:n] {
-			if .Leader in shortcut.modifiers &&
-			   (shortcut.key == .Unidentified || is_modifier_key(shortcut.key)) {
+			if .Leader in shortcut.modifiers && !leader_key_supported(shortcut.key) {
 				unsupported = true
 			}
 		}
@@ -124,10 +125,11 @@ binding_report :: proc(
 		report.issues = issues[:]
 		return report, .Out_Of_Memory
 	}
-	applied_lines: [len(Action)]int
+	// The registry holds this app's commands, whose ids are their Actions.
+	applied_lines: [Action]int
 	for error, i in errors[:count] {
 		if error == .None {
-			applied_lines[int(overrides[i].id)] = s.keys[lines[i]].line
+			applied_lines[Action(overrides[i].id)] = s.keys[lines[i]].line
 		}
 	}
 	for error, i in errors[:count] {
@@ -156,7 +158,7 @@ binding_report :: proc(
 						winner   = {
 							name  = other.name,
 							title = other.title,
-							line  = applied_lines[int(other.id)],
+							line  = applied_lines[Action(other.id)],
 						},
 					}
 					break
@@ -170,10 +172,7 @@ binding_report :: proc(
 	}
 	if s.input.leader != "" {
 		leader, valid := commands.parse_shortcut(s.input.leader)
-		if !valid ||
-		   .Leader in leader.modifiers ||
-		   leader.key == .Unidentified ||
-		   is_modifier_key(leader.key) {
+		if !valid || .Leader in leader.modifiers || !leader_key_supported(leader.key) {
 			issue := Binding_Issue {
 				kind     = .Unsupported_Leader_Shortcut,
 				severity = .Invalid_Value,
@@ -189,9 +188,9 @@ binding_report :: proc(
 			for &other in registry.items {
 				for shortcut in commands.active_shortcuts(&other) {
 					if commands.prefix_conflicts(leader, shortcut) &&
-					   applied_lines[int(other.id)] >= s.leader_line &&
+					   applied_lines[Action(other.id)] >= s.leader_line &&
 					   (winner == nil ||
-							   applied_lines[int(other.id)] > applied_lines[int(winner.id)]) {
+							   applied_lines[Action(other.id)] > applied_lines[Action(winner.id)]) {
 						winner = &other
 					}
 				}
@@ -202,7 +201,7 @@ binding_report :: proc(
 				winner_source = {"input.leader", "", s.leader_line}
 				report.leader = leader
 			} else {
-				winner_source = {winner.name, winner.title, applied_lines[int(winner.id)]}
+				winner_source = {winner.name, winner.title, applied_lines[Action(winner.id)]}
 			}
 			for &other in registry.items {
 				// Copy because unbind compacts the active shortcut array.
@@ -218,7 +217,7 @@ binding_report :: proc(
 						conflict = {
 							shortcut    = shortcut,
 							leader_text = s.input.leader,
-							loser       = {other.name, other.title, applied_lines[int(other.id)]},
+							loser       = {other.name, other.title, applied_lines[Action(other.id)]},
 							winner      = winner_source,
 						},
 					}
@@ -252,9 +251,8 @@ binding_issue_text :: proc(issue: Binding_Issue, path: string) -> string {
 		)
 	case .Duplicate_Shortcut:
 		conflict := issue.conflict
-		buffer: [128]u8
-		label, err := commands.shortcut_label(conflict.shortcut, buffer[:])
-		assert(err == .None)
+		buffer: [commands.SHORTCUT_TEXT_CAP]u8
+		label := commands.shortcut_text(conflict.shortcut, buffer[:])
 		return fmt.tprintf(
 			"shortcut \"%s\" for %s (%s at %s) already used by %s (%s at %s)",
 			label,
@@ -297,4 +295,63 @@ binding_key :: proc(name: string) -> string {
 binding_file_name :: proc(path: string) -> string {
 	i := max(strings.last_index_byte(path, '/'), strings.last_index_byte(path, '\\'))
 	return path[i + 1:]
+}
+
+@(private)
+binding_comment :: proc(descriptor: Command_Descriptor) -> string {
+	if len(descriptor.shortcuts) == 0 {return fmt.tprintf("%s =", binding_key(descriptor.name))}
+	set := commands.Shortcut_Set{descriptor.shortcuts, len(descriptor.shortcuts)}
+	value := commands.shortcut_set_text(set, context.temp_allocator)
+	return fmt.tprintf("%s = %s", binding_key(descriptor.name), value)
+}
+
+// The settings file's shortcut comments: a heading, then one line per command a key can run.
+@(private)
+binding_comments :: proc() -> (lines: [len(Action) + 1]string, count: int) {
+	lines[0] =
+		"Shortcuts: uncomment a line to change it. Separate several with commas; " +
+		"leave the value empty to remove them."
+	count = 1
+	@(static, rodata)
+	descriptors := ACTIONS
+	for descriptor in descriptors {
+		if descriptor.spec.hidden {continue}
+		lines[count] = binding_comment(descriptor)
+		count += 1
+	}
+	return
+}
+
+@(private)
+settings_diagnostic :: proc(
+	app: ^App,
+	diagnostics: ^[dynamic]settings.Diagnostic,
+	line: int,
+	key, message: string,
+	kind: settings.Diagnostic_Kind = .Invalid_Value,
+) {
+	if err := settings.diagnostic_append(diagnostics, line, key, message, kind); err != nil {
+		log.errorf("recording shortcut diagnostic failed: %v", err)
+		notify(app, .Error, message)
+	}
+}
+
+@(private)
+apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
+	report, report_error := binding_report(&app.registry, &app.settings)
+	for issue in report.issues {
+		message := binding_issue_text(issue, app.settings_path)
+		settings_diagnostic(app, diagnostics, issue.line, issue.key, message, issue.severity)
+	}
+	if report_error != nil {
+		notify(app, .Error, "Could not allocate shortcut bindings.")
+		return
+	}
+	app.leader = report.leader
+}
+
+// A leader, and a key following one, must be an identified key that is not itself a modifier.
+@(private)
+leader_key_supported :: proc(key: input.Key) -> bool {
+	return key != .Unidentified && !is_modifier_key(key)
 }

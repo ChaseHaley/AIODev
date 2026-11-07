@@ -1,6 +1,5 @@
 package main
 
-import "aio:commands"
 import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
@@ -224,21 +223,54 @@ pane_header_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Even
 		}
 	}
 	if chosen == .None {return}
-	names := [ui.Header_Action]string {
-		.None          = "",
-		.Documents     = "",
-		.Split_Right   = "pane.split_right",
-		.Split_Down    = "pane.split_down",
-		.Zoom          = "pane.zoom",
-		.Fill_Window   = "pane.fill_window",
-		.Linked_Window = "pane.linked_window",
-		.Dock          = "pane.float",
-		.Close         = "pane.close",
-		.Badge         = "",
+	if action, runs := pane_header_command(chosen); runs {run_action(app, w, action)}
+}
+
+// The command a header button runs. Documents opens its menu on press, and the badge runs none.
+@(private)
+pane_header_command :: proc(action: ui.Header_Action) -> (Action, bool) {
+	switch action {
+	case .Split_Right:
+		return .Split_Right, true
+	case .Split_Down:
+		return .Split_Down, true
+	case .Zoom:
+		return .Zoom_Pane, true
+	case .Fill_Window:
+		return .Fill_Window_Pane, true
+	case .Linked_Window:
+		return .Linked_Window, true
+	case .Dock:
+		return .Float_Pane, true
+	case .Close:
+		return .Close_Pane, true
+	case .None, .Documents, .Badge:
 	}
-	if command := commands.find(&app.registry, names[chosen]); command != nil {
-		command_run(app, w, Action(command.id), .Menu)
+	return {}, false
+}
+
+// What a header button's tooltip says it does, which can depend on the window's current state.
+pane_header_tooltip :: proc(w: ^Window, action: ui.Header_Action) -> string {
+	switch action {
+	case .Documents:
+		return "Documents"
+	case .Split_Right:
+		return "Split right"
+	case .Split_Down:
+		return "Split down"
+	case .Zoom:
+		return "Zoom"
+	case .Fill_Window:
+		return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
+	case .Linked_Window:
+		return window_linked(w) ? "Return pane to tab" : "Move pane to linked window"
+	case .Dock:
+		return "Move to a float"
+	case .Close:
+		return "Close pane"
+	case .None, .Badge:
 	}
+	return ""
 }
 
 pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.Header_Action) {

@@ -85,7 +85,7 @@ control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
 		message := fmt.tprintf("%q: %s", parse_error.argument, parse_error.advice)
 		return control_cli_reply(outcome_failure(.Usage, message), json_output)
 	}
-	return control_cli_reply(command_invoke(app, nil, invocation, caller), json_output)
+	return control_cli_reply(command_execute(app, Control_Request{caller}, invocation), json_output)
 }
 
 @(private)

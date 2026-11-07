@@ -825,18 +825,7 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.M
 @(private = "file")
 header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	_, action, _ := pane_header_hit(w, x, y)
-	#partial switch action {
-	case .Documents: return "Documents"
-	case .Split_Right: return "Split right"
-	case .Split_Down: return "Split down"
-	case .Zoom: return "Zoom"
-	case .Fill_Window: return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
-	case .Linked_Window: return window_linked(w) ? "Return pane to tab" : "Move pane to linked window"
-	case .Dock: return "Move to a float"
-	case .Close: return "Close pane"
-	case:
-	}
-	return ""
+	return pane_header_tooltip(w, action)
 }
 
 // The header swallows its presses, so it also finishes a release that lands anywhere.

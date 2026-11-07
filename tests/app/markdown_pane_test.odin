@@ -56,7 +56,7 @@ open :: proc(state: ^app.App, path: string, focus := false) -> app.Outcome {
 	args := focus ? []string{"pane.open_markdown", "--focus", path} : []string{"pane.open_markdown", path}
 	invocation, err := commands.parse_invocation(&state.registry, args, context.temp_allocator)
 	if err.advice != "" {return {status = .Usage, message = err.advice}}
-	return app.command_invoke(state, nil, invocation, state.sessions[0].id)
+	return app.command_execute(state, app.Control_Request{state.sessions[0].id}, invocation)
 }
 
 // Runs the poll now rather than waiting for its interval.

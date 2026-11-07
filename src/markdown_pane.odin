@@ -690,7 +690,7 @@ markdown_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	if !e.pressed {return}
 	if !literal {
 		if action, found := shortcut_action(app, e); found {
-			command_run(app, w, action, .Key)
+			run_action(app, w, action)
 			return
 		}
 	}

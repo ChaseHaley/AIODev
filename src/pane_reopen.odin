@@ -146,8 +146,7 @@ closed_reopen_tab :: proc(app: ^App, w: ^Window, record: ^Closed_Record) {
 	last := len(w.workspace.tabs) - 1
 	to := clamp(record.index, 0, last)
 	tab_move(app, w, last, to)
-	tab_select(app, w, to)
-	rail_overlay_dismiss(app, w)
+	tab_show(app, w, to)
 }
 
 // Returns the pane beside the panes it was split from when they are still together; otherwise

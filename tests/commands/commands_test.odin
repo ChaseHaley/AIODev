@@ -107,20 +107,6 @@ labels :: proc(t: ^testing.T) {
 }
 
 @(test)
-enabled_state :: proc(t: ^testing.T) {
-	registry := commands.create()
-	defer commands.destroy(&registry)
-	command := commands.Command{id = 1, name = "quit", title = "Quit"}
-	testing.expect_value(t, commands.register(&registry, command), commands.Error.None)
-	testing.expect(t, !commands.set_enabled(&registry, 99, false))
-	testing.expect(t, !commands.set_enabled(&registry, 99, true))
-	for enabled in ([?]bool{true, false, true}) {
-		testing.expect(t, commands.set_enabled(&registry, 1, enabled))
-		testing.expect_value(t, commands.find(&registry, commands.Command_Id(1)).disabled, !enabled)
-	}
-}
-
-@(test)
 ownership_and_failure :: proc(t: ^testing.T) {
 	partial: commands.Registry
 	commands.destroy(&partial)
@@ -315,7 +301,6 @@ rebinding :: proc(t: ^testing.T) {
 	}
 	state.remaining = 0
 	copy_command := commands.find(&registry, 1)
-	testing.expect(t, commands.set_enabled(&registry, 1, false))
 	copy_chord := [?]commands.Shortcut{{.C, {.Control}}}
 	paste_chord := [?]commands.Shortcut{{.V, {.Control}}}
 	other_chord := [?]commands.Shortcut{{.X, {.Control}}}
@@ -325,7 +310,7 @@ rebinding :: proc(t: ^testing.T) {
 	for error in errors { testing.expect_value(t, error, commands.Error.None) }
 	testing.expect(t, commands.find_by_shortcut(&registry, paste_chord[0]) == copy_command)
 	testing.expect_value(t, commands.find_by_shortcut(&registry, copy_chord[0]).id, commands.Command_Id(2))
-	testing.expect(t, commands.find(&registry, 1) == copy_command && copy_command.disabled)
+	testing.expect(t, commands.find(&registry, 1) == copy_command)
 	conflict := [?]commands.Override{{1, other_chord[:]}}
 	_ = commands.rebind(&registry, conflict[:], errors[:])
 	testing.expect_value(t, errors[0], commands.Error.Duplicate_Shortcut)
@@ -339,7 +324,6 @@ rebinding :: proc(t: ^testing.T) {
 	testing.expect(t, commands.find_by_shortcut(&registry, copy_chord[0]) == copy_command)
 	testing.expect_value(t, commands.find_by_shortcut(&registry, paste_chord[0]).id, commands.Command_Id(2))
 	testing.expect_value(t, commands.find_by_shortcut(&registry, other_chord[0]).id, commands.Command_Id(3))
-	testing.expect(t, copy_command.disabled)
 	unbound := [?]commands.Override{{1, nil}}
 	_ = commands.rebind(&registry, unbound[:], errors[:])
 	testing.expect_value(t, errors[0], commands.Error.None)

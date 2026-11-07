@@ -14,31 +14,6 @@ import "core:slice"
 import "core:strings"
 
 @(private)
-shortcut_group :: proc(name: string) -> string {
-	switch ui.command_category(name) {
-	case "Application":
-		return "Application Shortcuts"
-	case "Terminal":
-		return "Terminal Shortcuts"
-	case "Panes":
-		return "Pane Shortcuts"
-	case "Tabs":
-		return "Tab Shortcuts"
-	case "Workspaces":
-		return "Workspace Shortcuts"
-	case "Windows":
-		return "Window Shortcuts"
-	case "Settings":
-		return "Settings Shortcuts"
-	case "Edit":
-		return "Edit Shortcuts"
-	case "View":
-		return "View Shortcuts"
-	}
-	return "Other Shortcuts"
-}
-
-@(private)
 settings_add_profile_row :: proc(p: ^ui.Editor, row: ui.Editor_Row, group: string) -> bool {
 	return ui.editor_add(p, row, group) == nil
 }
@@ -271,7 +246,7 @@ settings_load_source :: proc(app: ^App, editor: ^ui.Editor, source: string) -> b
 			default_value = commands.shortcut_set_text(command.defaults, context.temp_allocator),
 			kind          = .Shortcut,
 		}
-		if ui.editor_add(p, row, shortcut_group(command.name)) != nil {
+		if ui.editor_add(p, row, commands.category(command.name).group) != nil {
 			ui.editor_destroy(p)
 			notify(app, .Error, "Could not allocate settings editor.")
 			return false
@@ -1175,7 +1150,7 @@ settings_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 	}
 	if e.pressed && !literal && !editor_owns(logical) {
 		if action, found := shortcut_action(app, e); found {
-			command_run(app, w, action, .Key)
+			run_action(app, w, action)
 			return
 		}
 	}

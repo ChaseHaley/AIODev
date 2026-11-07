@@ -20,7 +20,7 @@ Pane_Link_Home :: struct {
 	slot:      layout.Node_Id,
 }
 
-// What a command does when a linked window runs it.
+// What a command does when a linked window runs it; each command's descriptor in ACTIONS names one.
 Pane_Link_Route :: enum u8 {
 	// Acts on the window's own panes, or on no pane at all.
 	Local,
@@ -28,73 +28,6 @@ Pane_Link_Route :: enum u8 {
 	Host,
 	// Would take the pane out of its tab while it is in this window.
 	Refuse,
-}
-
-@(private)
-pane_link_route :: proc(action: Action) -> Pane_Link_Route {
-	#partial switch action {
-	case .Show_Build_Info,
-	     .Command_Palette,
-	     .Palette_Tabs,
-	     .Palette_Workspaces,
-	     .Palette_Settings,
-	     .Palette_Commands,
-	     .Copy,
-	     .Paste,
-	     .Select_All,
-	     .Find,
-	     .Clear_Scrollback,
-	     .Scroll_Page_Up,
-	     .Scroll_Page_Down,
-	     .Scroll_Partial_Up,
-	     .Scroll_Partial_Down,
-	     .Font_Size_Increase,
-	     .Font_Size_Decrease,
-	     .Font_Size_Reset,
-	     .Open_Settings,
-	     .Reload_Settings,
-	     .Rename_Pane,
-	     .Restart_Shell,
-	     .Quit,
-	     .Close_Pane,
-	     .Keep_Pane_Open,
-	     .Zoom_Pane,
-	     .Fill_Window_Pane,
-	     .Fullscreen_Pane,
-	     .Linked_Window,
-	     .Show_Documents,
-	     .Focus_Left,
-	     .Focus_Right,
-	     .Focus_Up,
-	     .Focus_Down,
-	     .Focus_Previous,
-	     .Focus_Next,
-	     .Resize_Left,
-	     .Resize_Right,
-	     .Resize_Up,
-	     .Resize_Down,
-	     .Resize_Left_Large,
-	     .Resize_Right_Large,
-	     .Resize_Up_Large,
-	     .Resize_Down_Large,
-	     .Balance_Panes,
-	     .Swap_Left,
-	     .Swap_Right,
-	     .Swap_Up,
-	     .Swap_Down,
-	     .Swap_Previous,
-	     .Swap_Next,
-	     .Split,
-	     .Split_Left,
-	     .Split_Right,
-	     .Split_Up,
-	     .Split_Down,
-	     .Change_Pane_Shell:
-		return .Local
-	case .Move_Pane_Workspace, .Move_Pane_New_Workspace, .Float_Pane:
-		return .Refuse
-	}
-	return .Host
 }
 
 // The pane a command in this window acts on.

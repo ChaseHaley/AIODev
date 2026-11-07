@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
@@ -198,17 +199,9 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 	action := w.tab_menu.actions[w.tab_menu.selected]
 	target := tab_menu_target(w)
 	overlay_close(app, w)
-	// tab_menu_enabled refused tab rows without a target, so target is valid for each of them.
-	#partial switch action {
-	case .Close_Tab: tab_close_request(app, w, target)
-	case .Close_Other_Tabs: tab_close_subset(app, w, false, target)
-	case .Close_Right_Tabs: tab_close_subset(app, w, true, target)
-	case .Rename_Tab: rename_open(app, w, true, target)
-	case .Duplicate_Tab: tab_duplicate(app, w, target)
-	case .Move_Tab_Workspace: workspace_move_open(app, w, true, target)
-	case .Move_Tab_New_Workspace: workspace_move_new(app, w, true, target)
-	case: command_run(app, w, action, .Menu)
-	}
+	// tab_menu_enabled refused tab rows without a target, so the command acts on a live tab.
+	invocation := commands.invocation(commands.Command_Id(action), focus = true)
+	_ = command_execute(app, Window_Context{w, target}, invocation)
 }
 
 tab_menu_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {

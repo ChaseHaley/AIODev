@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
@@ -39,7 +40,13 @@ Profile_Menu :: struct {
 	using menu: ui.Menu,
 	entries:    [ui.MENU_MAX_ITEMS]Profile_Menu_Entry,
 	count:      int,
+	// The shortcut labels the rows show, as bound when the menu opened.
+	shortcuts:  [PROFILE_MENU_SHORTCUTS][commands.SHORTCUT_TEXT_CAP]u8,
 }
+
+// Rows that can show a shortcut: one per New Tab with Profile N command, Settings and the palette.
+@(private)
+PROFILE_MENU_SHORTCUTS :: 11
 
 profile_menu_init :: proc(menu: ^Profile_Menu) {
 	ui.menu_init(&menu.menu)
@@ -54,21 +61,10 @@ profile_menu_destroy :: proc(menu: ^Profile_Menu) {
 	ui.menu_destroy(&menu.menu)
 }
 
+// The label of the first shortcut that runs `action` now, kept in the menu's slot `slot`.
 @(private)
-profile_shortcut_label :: proc(index: int) -> string {
-	@(static, rodata)
-	labels := [9]string {
-		"Ctrl+Shift+1",
-		"Ctrl+Shift+2",
-		"Ctrl+Shift+3",
-		"Ctrl+Shift+4",
-		"Ctrl+Shift+5",
-		"Ctrl+Shift+6",
-		"Ctrl+Shift+7",
-		"Ctrl+Shift+8",
-		"Ctrl+Shift+9",
-	}
-	return index >= 0 && index < len(labels) ? labels[index] : ""
+profile_menu_shortcut :: proc(app: ^App, menu: ^Profile_Menu, slot: int, action: Action) -> string {
+	return action_shortcut_text(app, action, menu.shortcuts[slot][:])
 }
 
 @(private)
@@ -108,11 +104,15 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 		profile := &app.settings.profiles.items[indices[i]]
 		checked := profile.id == current
 		if !swap {checked = profile.id == app.settings.profiles.default_id}
+		shortcut := ""
+		if action, bound := profile_action(i); bound {
+			shortcut = profile_menu_shortcut(app, menu, i, action)
+		}
 		profile_menu_push(
 			menu,
 			{
 				label = profile.name,
-				shortcut = profile_shortcut_label(i),
+				shortcut = shortcut,
 				icon = profile_badge(profile),
 				checked = checked,
 				enabled = true,
@@ -124,12 +124,20 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 		profile_menu_push(menu, {separator = true}, {})
 		profile_menu_push(
 			menu,
-			{label = "Settings", shortcut = "Ctrl+,", enabled = true},
+			{
+				label = "Settings",
+				shortcut = profile_menu_shortcut(app, menu, PROFILE_MENU_SHORTCUTS - 2, .Settings_UI),
+				enabled = true,
+			},
 			{action = .Settings},
 		)
 		profile_menu_push(
 			menu,
-			{label = "Command Palette", shortcut = "Ctrl+Shift+P", enabled = true},
+			{
+				label = "Command Palette",
+				shortcut = profile_menu_shortcut(app, menu, PROFILE_MENU_SHORTCUTS - 1, .Command_Palette),
+				enabled = true,
+			},
 			{action = .Palette},
 		)
 	}

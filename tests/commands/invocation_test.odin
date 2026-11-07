@@ -30,13 +30,13 @@ invocation_registry :: proc(t: ^testing.T) -> commands.Registry {
 }
 
 @(test)
-invocation_defaults_depend_on_origin :: proc(t: ^testing.T) {
-	key := commands.invocation(7, .Key)
+invocation_defaults_split_right_half :: proc(t: ^testing.T) {
+	key := commands.invocation(7, focus = true)
 	testing.expect_value(t, key.id, commands.Command_Id(7))
 	testing.expect_value(t, key.direction, layout.Direction.Right)
 	testing.expect_value(t, key.ratio, f32(0.5))
 	testing.expect(t, key.focus)
-	testing.expect(t, !commands.invocation(7, .Control).focus)
+	testing.expect(t, !commands.invocation(7, focus = false).focus)
 }
 
 @(test)
@@ -50,7 +50,6 @@ invocation_parses_every_argument :: proc(t: ^testing.T) {
 	result, err := commands.parse_invocation(&registry, args[:], context.temp_allocator)
 	testing.expect_value(t, err, commands.Parse_Error{})
 	testing.expect_value(t, result.id, commands.Command_Id(2))
-	testing.expect_value(t, result.origin, commands.Origin.Control)
 	testing.expect_value(t, result.pane, "build")
 	testing.expect_value(t, result.direction, layout.Direction.Down)
 	testing.expect_value(t, result.ratio, f32(0.3))

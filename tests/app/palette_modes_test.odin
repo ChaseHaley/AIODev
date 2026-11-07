@@ -31,9 +31,7 @@ palette_mode_actions_register_without_defaults :: proc(t: ^testing.T) {
 		testing.expect_value(t, command.title, expected_title(entry.action))
 		testing.expect_value(t, len(commands.active_shortcuts(command)), 0)
 		testing.expect_value(t, command.defaults.count, 0)
-		testing.expect_value(t, app.palette_action_mode(entry.action), entry.mode)
 	}
-	testing.expect_value(t, app.palette_action_mode(.Command_Palette), ui.Palette_Mode.All)
 }
 
 @(private)

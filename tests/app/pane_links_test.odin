@@ -904,8 +904,8 @@ pane_reports_name_one_focused_pane_in_a_split_linked_window :: proc(t: ^testing.
 	if !ok {return}
 	w.focused = true
 	focused := 0
-	list := commands.invocation(commands.Command_Id(app.Action.Pane_List), .Control)
-	for report in app.command_invoke(f.state, nil, list).panes {
+	list := commands.invocation(commands.Command_Id(app.Action.Pane_List), focus = false)
+	for report in app.command_execute(f.state, app.Control_Request{}, list).panes {
 		if report.focused {
 			focused += 1
 			testing.expect_value(t, report.id, added.id)

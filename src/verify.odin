@@ -1492,12 +1492,16 @@ when AIO_CONTROL {
 			return .Invalid_Argument
 		case control.Command:
 			command := commands.find(&app.registry, r.name)
-			if command == nil || command.disabled {return .Invalid_Argument}
+			if command == nil {return .Invalid_Argument}
+			// Copy runs only on a selection, judged in this window now, as the palette judges it.
+			is_copy := Action(command.id) == .Copy
+			if is_copy && !copy_selection_available(app, w) {return .Invalid_Argument}
 			palette_close(app, w)
-			// Verification stands in for a person at the keyboard, acting on this window's focus.
-			invocation := commands.invocation(command.id, .Key)
-			invocation.direction, invocation.ratio, invocation.focus = r.direction, r.ratio, r.focus
-			_ = command_invoke(app, w, invocation)
+			// Verification stands in for a person at the keyboard, acting on this window's focus, which
+			// reports failures as notices rather than an outcome.
+			invocation := commands.invocation(command.id, focus = r.focus)
+			invocation.direction, invocation.ratio = r.direction, r.ratio
+			_ = command_execute(app, Window_Context{window = w}, invocation)
 		case:
 			return .Invalid_Argument
 		}
