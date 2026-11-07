@@ -788,7 +788,6 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 	x, y := f32(e.x), f32(e.y)
 	if w.float_drag.pressed {
 		floating_drag_release(app, w, x, y)
-		w.header_buttons -= {.Left}
 		pane_header_cancel(w)
 		return true
 	}
@@ -817,6 +816,13 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		layout_state_touch(app)
 	}
 	return true
+}
+
+floating_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	w.float_drag, w.float_capsule_drag = {}, {}
+	ui.armed_cancel(&w.float_capsule_armed)
+	w.float_capsule_hover, w.float_header_hover, w.float_header_action = nil, layout.INVALID_NODE, .None
+	ui.armed_cancel(&w.float_header_armed)
 }
 
 floating_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {

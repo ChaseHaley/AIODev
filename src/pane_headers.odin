@@ -176,78 +176,70 @@ pane_header_cancel :: proc(w: ^Window) {
 	}
 }
 
-// The terminal must not receive either half of a header click, including a release outside it.
-pane_header_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+// The terminal must not receive either half of a header click: the header swallows the press, and
+// pane_header_release finishes it wherever it is released.
+pane_header_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
-	if !e.pressed && e.button in w.header_buttons {
-		w.header_buttons -= {e.button}
-		if e.button == .Left && w.pane_drag.active {
-			pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers)
-			pane_header_cancel(w)
-			_ = pane_drag_release(app, w)
-			return true
-		}
-		if e.button == .Left {
-			_ = pane_drag_release(app, w)
-			floating_drag_release(app, w, f32(e.x), f32(e.y))
-		}
-		chosen: ui.Header_Action
-		for &view in w.views {
-			if e.button == .Left {
-				fired, ok := ui.armed_release(
-					&view.header_armed,
-					hit && view.content == pane.content ? action : ui.Header_Action.None,
-				)
-				// A view armed with no action must not clear another view's choice.
-				if ok && fired != .None {chosen = fired}
-			}
-		}
-		if chosen != .None {
-			names := [ui.Header_Action]string {
-				.None          = "",
-				.Documents     = "",
-				.Split_Right   = "pane.split_right",
-				.Split_Down    = "pane.split_down",
-				.Zoom          = "pane.zoom",
-				.Fill_Window   = "pane.fill_window",
-				.Linked_Window = "pane.linked_window",
-				.Dock          = "pane.float",
-				.Close         = "pane.close",
-				.Badge         = "",
-			}
-			if command := commands.find(&app.registry, names[chosen]);
-			   command != nil {command_run(app, w, Action(command.id), .Menu)}
-		}
-		return true
+	if !hit || w.selecting {return}
+	gesture_swallow(w, e.button, .Pane_Header)
+	if e.button != .Left {return}
+	pane_focus(app, w, pane.node)
+	if action == .Badge {
+		if workspace_session_for_content(app, pane.content) == nil {return}
+		x, y := pane.rect.x + 8 * w.scale, pane.rect.y + ui.HEADER_HEIGHT * w.scale
+		profile_menu_open_pane(app, w, pane.node, x, y)
+		return
 	}
-	if !hit || w.selecting {return false}
-	if e.pressed {
-		w.header_buttons += {e.button}
+	if action == .Documents {
+		document_menu_open_pane(app, w, pane)
+		return
+	}
+	for &view in w.views {
+		if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
+	}
+	// Every pane header rearranges panes; a float moves by its own float header.
+	if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
+}
+
+pane_header_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
+	if e.button == .Left && w.pane_drag.active {
+		pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers)
+		pane_header_cancel(w)
+		_ = pane_drag_release(app, w)
+		return
+	}
+	if e.button == .Left {
+		_ = pane_drag_release(app, w)
+		floating_drag_release(app, w, f32(e.x), f32(e.y))
+	}
+	chosen: ui.Header_Action
+	for &view in w.views {
 		if e.button == .Left {
-			pane_focus(app, w, pane.node)
-			if action == .Badge {
-				if workspace_session_for_content(app, pane.content) == nil {return true}
-				profile_menu_open_pane(
-					app,
-					w,
-					pane.node,
-					pane.rect.x + 8 * w.scale,
-					pane.rect.y + ui.HEADER_HEIGHT * w.scale,
-				)
-				return true
-			}
-			if action == .Documents {
-				document_menu_open_pane(app, w, pane)
-				return true
-			}
-			for &view in w.views {
-				if view.content == pane.content {ui.armed_press(&view.header_armed, action)}
-			}
-			// Every pane header rearranges panes; a float moves by its own float header.
-			if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
+			fired, ok := ui.armed_release(
+				&view.header_armed,
+				hit && view.content == pane.content ? action : ui.Header_Action.None,
+			)
+			// A view armed with no action must not clear another view's choice.
+			if ok && fired != .None {chosen = fired}
 		}
 	}
-	return true
+	if chosen == .None {return}
+	names := [ui.Header_Action]string {
+		.None          = "",
+		.Documents     = "",
+		.Split_Right   = "pane.split_right",
+		.Split_Down    = "pane.split_down",
+		.Zoom          = "pane.zoom",
+		.Fill_Window   = "pane.fill_window",
+		.Linked_Window = "pane.linked_window",
+		.Dock          = "pane.float",
+		.Close         = "pane.close",
+		.Badge         = "",
+	}
+	if command := commands.find(&app.registry, names[chosen]); command != nil {
+		command_run(app, w, Action(command.id), .Menu)
+	}
 }
 
 pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.Header_Action) {

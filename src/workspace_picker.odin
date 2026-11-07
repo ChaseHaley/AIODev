@@ -220,18 +220,16 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 	if !e.pressed {
 		ui.field_release(&p.query)
 		ui.field_release(&w.rename)
-		w.header_buttons -= {e.button}
 		if e.button == .Left {workspace_order_release(app, w, e)}
 		return
 	}
-	w.header_buttons += {e.button}
+	gesture_swallow(w, e.button, .Workspace_Picker)
 	x, y := f32(e.x), f32(e.y)
 	r, _ := workspace_picker_rect(w)
 	if list, listing := p.state.(Workspace_Picker_List); listing && e.button == .Left {
 		if chip, pressed := list.sub.(Workspace_Chip_Pressed); pressed &&
 		   workspace_rect_contains(workspace_button_rect(w), x, y) &&
 		   e.time_ns - chip.time_ns <= DOUBLE_CLICK_NS {
-			w.header_buttons -= {e.button}
 			workspace_name_begin(app, w)
 			return
 		}

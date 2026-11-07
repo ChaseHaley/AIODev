@@ -455,7 +455,7 @@ status_inbox_hit :: proc(app: ^App, w: ^Window, items: []Status_Item, scroll, x,
 status_inbox_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	inbox, open := w.status.inbox.?
 	if !e.pressed || !open {return}
-	w.header_buttons += {e.button}
+	gesture_swallow(w, e.button, .Status_Inbox)
 	x, y := f32(e.x), f32(e.y)
 	items := status_items(app, w)
 	surface, _, _ := status_inbox_layout(app, w, items)

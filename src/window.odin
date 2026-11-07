@@ -1,7 +1,6 @@
 package main
 
 import "aio:glyphs"
-import "aio:input"
 import "aio:layout"
 import "aio:perf"
 import "aio:platform"
@@ -77,7 +76,6 @@ Window :: struct {
 	list: render.Draw_List,
 	width, height: i32,
 	header_height: f32,
-	header_buttons: input.Mouse_Buttons,
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
@@ -107,14 +105,12 @@ Window :: struct {
 	tabs_horizontal: bool,
 	tab_underline:   ui.Motion,
 	tab_hover:       int,
-	tab_pressed:     bool,
 	// Vertical tab rail: rows, scroll, adaptive visibility and the overlay slide.
 	rail_rows:           [dynamic]Rail_Row,
 	rail_auto:           bool,
 	rail_override:       Rail_Override,
 	rail_scroll:         f32,
 	rail_hover:          int,
-	rail_pressed:        int,
 	rail_width:          f32,
 	// tabs.rail_width, the width a double-click on the rail edge returns to.
 	rail_default_width:  f32,
@@ -122,7 +118,6 @@ Window :: struct {
 	dock_left_width:     f32,
 	title_action_hover: Title_Action,
 	title_action_armed: ui.Armed(Title_Action),
-	notice_buttons: input.Mouse_Buttons,
 	tab_orientation_button_hovered: bool,
 	tab_orientation_button_armed:   ui.Armed(bool),
 	rail_slide:          ui.Motion,
@@ -207,7 +202,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	ui.find_init(&w.find)
 	profile_menu_init(&w.profile_menu)
 	document_menu_init(&w.document_menu)
-	w.tab_hover, w.rail_hover, w.rail_pressed = -1, -1, -1
+	w.tab_hover, w.rail_hover = -1, -1
 	w.caption_hover = -1
 	w.divider_click_node, w.float_header_hover = layout.INVALID_NODE, layout.INVALID_NODE
 	w.float_header_shown = layout.INVALID_NODE
@@ -371,7 +366,8 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	w.tabs_horizontal = horizontal
 	if placement_changed {
 		rail_resize_cancel(w)
-		w.tab_hover, w.tab_pressed = -1, false
+		w.tab_hover = -1
+		gesture_tab_unpress(w)
 	}
 	if placement_changed && !horizontal {
 		// Returning from the strip restores the rail's automatic state; a manual hide or overlay
@@ -388,7 +384,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 		// The rail rows hold workspace pointers from the old surface and are not read again until
 		// the rail returns, when relayout rebuilds them.
 		clear(&w.rail_rows)
-		w.rail_hover, w.rail_pressed = -1, -1
+		w.rail_hover = -1
 	}
 	window_relayout(app, w)
 }
@@ -418,7 +414,9 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	bar_height := window_title_height(w)
 	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
 	if tab_count != len(w.tab_positions) {
-		w.tab_hover, w.tab_pressed = -1, false
+		w.tab_hover = -1
+		// Only the strip's presses draw from the tab positions.
+		if w.tabs_horizontal {gesture_tab_unpress(w)}
 	}
 	if !tab_presentation_resize(&w.presentation, tab_count) {
 		log.error("resizing tab presentation values failed")

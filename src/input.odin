@@ -64,8 +64,8 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		if w := window_find(app, e.window); w != nil {
 			tooltip_cancel(w)
 			w.find.hover = .None
-			w.tab_hover, w.tab_pressed = -1, false
-			w.rail_hover, w.rail_pressed = -1, -1
+			w.tab_hover, w.rail_hover = -1, -1
+			gesture_tab_unpress(w)
 			w.title_action_hover = .None
 			if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, 0)}
 			w.float_capsule_hover = nil

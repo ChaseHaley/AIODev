@@ -26,11 +26,11 @@ gestures_native_capture_loss_cancels_armed_header_before_late_release :: proc(t:
 	hwnd := w.HWND(platform.window_native_handle(&s.platform, window.id))
 	w.SendMessageW(hwnd, w.WM_LBUTTONDOWN, w.MK_LBUTTON, position)
 	gesture_dispatch_pending(t, s)
-	if !testing.expect(t, .Left in window.header_buttons) {return}
+	if !testing.expect(t, .Left in app.gesture_buttons(window, app.Gesture_Swallowed)) {return}
 	w.SendMessageW(hwnd, w.WM_CANCELMODE, 0, 0)
 	w.SendMessageW(hwnd, w.WM_LBUTTONUP, 0, position)
 	gesture_dispatch_pending(t, s)
-	testing.expect(t, window.header_buttons == {} && !window.pane_drag.pressed)
+	testing.expect(t, gesture_captured(window) == {} && !window.pane_drag.pressed)
 	testing.expect_value(t, len(window.panes), 2)
 	testing.expect_value(t, len(s.sessions), 3)
 	testing.expect(t, w.GetCapture() != hwnd)

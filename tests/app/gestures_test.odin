@@ -18,6 +18,15 @@ gesture_button :: proc(s: ^app.App, w: ^app.Window, button: input.Mouse_Button,
 		pressed = pressed, x = i32(x), y = i32(y), time_ns = 1_000_000_000})
 }
 
+// The buttons whose capture is not free.
+@(private)
+gesture_captured :: proc(w: ^app.Window) -> (buttons: input.Mouse_Buttons) {
+	for capture, button in w.gesture.captures {
+		if capture != nil {buttons += {button}}
+	}
+	return
+}
+
 @(private)
 gesture_header :: proc(w: ^app.Window) -> ui.Header_Layout {
 	r := w.panes[0].rect
@@ -35,12 +44,12 @@ gestures_header_multiple_buttons_release_outside_over_caption :: proc(t: ^testin
 	for button in ([?]input.Mouse_Button{.Left, .Right, .Middle}) {
 		gesture_button(s, w, button, true, h.title.x+4, h.title.y+4)
 	}
-	testing.expect(t, w.header_buttons == {.Left, .Right, .Middle})
+	testing.expect(t, app.gesture_buttons(w, app.Gesture_Swallowed) == {.Left, .Right, .Middle})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
 	testing.expect(t, !w.pane_drag.pressed)
 	gesture_button(s, w, .Right, false, -20, f32(w.height)+20)
 	gesture_button(s, w, .Middle, false, -20, f32(w.height)+20)
-	testing.expect(t, w.header_buttons == {})
+	testing.expect(t, gesture_captured(w) == {})
 	testing.expect(t, !ui.armed_down(w.caption_armed))
 	testing.expect_value(t, len(w.panes), 2)
 	testing.expect(t, app.window_find(s, w.id) == w && !w.tree.zoomed)
@@ -81,7 +90,7 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 			testing.expect_value(t, term.process_id(entry.session), pids[i])
 			testing.expect_value(t, term.status(entry.session).kind, term.Status_Kind.Running)
 		}
-		testing.expect(t, !w.pane_drag.pressed && !w.tab_drag.pressed && w.header_buttons == {})
+		testing.expect(t, !w.pane_drag.pressed && !w.tab_drag.pressed && gesture_captured(w) == {})
 		testing.expect(t, !w.selecting && !w.autoscrolling)
 		if scenario == 5 {
 			// Return to the same terminal tree after the Settings case, with every runtime intact.
@@ -119,6 +128,38 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	app.handle_event(s, platform.Capture_Lost_Event{w.id})
 	gesture_button(s, w, .Left, false, l.filter.x+20, l.filter.y+l.filter.height/2)
 	testing.expect(t, !w.editor.filter.dragging && !ui.editor_dragging(&w.editor))
+}
+
+// A press on a disabled menu row leaves the menu open, and its release reaches the menu. Closing the
+// menu from the keyboard must not leave the button swallowed: the pointer would keep the arrow over
+// text and the next selection drag would never finish.
+@(test)
+gestures_menu_kept_open_releases_its_swallowed_button :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "gesture-menu-row") {return}
+	s, w := &f.state, f.state.windows[0]
+	if !testing.expect_value(t, len(w.workspace.tabs), 1) {return}
+	app.tab_menu_open(s, w, 0, 20, 20)
+	row := -1
+	for i in 0 ..< w.tab_menu.count {
+		if w.tab_menu.actions[i] == .Close_Other_Tabs {row = i}
+	}
+	if !testing.expect(t, row >= 0 && !app.tab_menu_enabled(w, row)) {return}
+	r := app.tab_menu_row_rect(w, row)
+	gesture_button(s, w, .Left, true, r.x + 20, r.y + r.height / 2)
+	gesture_button(s, w, .Left, false, r.x + 20, r.y + r.height / 2)
+	if !testing.expect(t, app.tab_menu_shown(w)) {return}
+	app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	if !testing.expect(t, !app.tab_menu_shown(w)) {return}
+	testing.expect(t, gesture_captured(w) == {})
+	p := w.panes[0].rect
+	x, y := p.x + 30, p.y + w.header_height + 40
+	pointer_expect_move(t, s, w, x, y, .Text)
+	gesture_button(s, w, .Left, true, x, y)
+	if !testing.expect(t, w.selecting) {return}
+	gesture_button(s, w, .Left, false, x + 30, y)
+	testing.expect(t, !w.selecting, "the release must finish the selection")
 }
 
 @(test)
