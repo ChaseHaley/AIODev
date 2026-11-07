@@ -63,7 +63,7 @@ scrollbar_drag_clamps_and_track_click_pages :: proc(t: ^testing.T) {
 	thumb = bar.thumb
 	testing.expect(t, app.terminal_scrollbar_button(&state, &w,
 		platform.Mouse_Button_Event{button = .Left, pressed = true, x = i32(track.x + 3), y = i32(thumb.y + 2)}))
-	testing.expect(t, w.scroll_drag.active)
+	testing.expect(t, app.terminal_scrollbar_dragging(&w))
 	app.terminal_scrollbar_move(&state, &w, -100)
 	after, _ = term.scrollbar(&s)
 	testing.expect_value(t, after.offset, 0)

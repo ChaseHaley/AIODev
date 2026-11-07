@@ -404,7 +404,8 @@ pane_link_hide :: proc(app: ^App, w: ^Window, host: ^Window) {
 	}
 	w.phase = .Hidden
 	// A hidden window draws no frames, so nothing would ever stop these from waking the loop.
-	w.blinking, w.status_spinning = false, false
+	cursor_blink_stop(w)
+	w.status_spinning = false
 }
 
 // Once per tick, after every event, so any path that changes what is on screen is covered: a linked window

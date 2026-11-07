@@ -60,6 +60,6 @@ pane_view_apply :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) ->
 		}
 	}
 	w.pane_fill, w.tree.zoomed = fill, zoomed
-	w.dragging = {}
+	divider_cancel(w)
 	return true
 }

@@ -138,7 +138,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 	if !testing.expect(t, view != nil) {return}
 	if !link_move(t, &f, 0, 0) {return}
 	testing.expect_value(t, w.pointer_shape, platform.Cursor_Shape.Hand)
-	hover, hovered := view.hover.?
+	hover, hovered := app.link_hover_range(w, view.content).?
 	testing.expect(t, hovered)
 	testing.expect_value(t, hover, term.Link_Range{0, 0, 0, 22})
 
@@ -154,7 +154,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 		},
 	)
 	testing.expect_value(t, w.pointer_shape, platform.Cursor_Shape.Text)
-	_, still_hovered := view.hover.?
+	_, still_hovered := app.link_hover_range(w, view.content).?
 	testing.expect(t, !still_hovered, "padding beside the grid is not a link cell")
 
 	term.select_all(entry.session)
@@ -185,7 +185,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 		},
 	)
 	testing.expect_value(t, Open_Stub_State.calls, 1)
-	testing.expect(t, w.selecting, "a plain click still begins the selection gesture")
+	testing.expect(t, app.selection_active(w), "a plain click still begins the selection gesture")
 	app.handle_event(
 		s,
 		platform.Mouse_Button_Event {
@@ -197,7 +197,7 @@ terminal_links_hover_and_ctrl_click_without_changing_plain_click :: proc(t: ^tes
 			time_ns = 2_100_000_000,
 		},
 	)
-	testing.expect(t, !w.selecting)
+	testing.expect(t, !app.selection_active(w))
 }
 
 @(test)
@@ -229,7 +229,7 @@ terminal_links_prefer_osc8_and_ignore_blocked_schemes :: proc(t: ^testing.T) {
 	testing.expect_value(t, w.pointer_shape, platform.Cursor_Shape.Text)
 	view := link_view(w, entry.id)
 	if !testing.expect(t, view != nil) {return}
-	_, hovered := view.hover.?
+	_, hovered := app.link_hover_range(w, view.content).?
 	testing.expect(t, !hovered)
 	link_click(t, &f, 0, 1, true)
 	testing.expect_value(t, Open_Stub_State.calls, 1)

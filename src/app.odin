@@ -342,11 +342,12 @@ tick :: proc(app: ^App) {
 	pane_links_sync(app)
 	window_notices_sync(app)
 	for window in app.windows {
-		leader_expire(window, time.tick_now())
-		paste_confirm_expire(window, time.tick_now())
-		update_blink(window)
-		update_autoscroll(app, window)
-		tooltip_tick(window)
+		now := time.tick_now()
+		leader_expire(window, now)
+		paste_confirm_expire(window, now)
+		cursor_blink_tick(window, now)
+		selection_autoscroll_tick(app, window, now)
+		tooltip_tick(window, now)
 		status_spin_tick(window)
 		if window.taskbar_workspace != window.workspace {
 			window.taskbar_workspace = window.workspace
@@ -399,9 +400,9 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		deadline, found = next, true
 	}
 	for window in app.windows {
-		if window.tooltip_deadline != {} &&
-		   (!found || time.tick_diff(window.tooltip_deadline, deadline) > 0) {
-			deadline, found = window.tooltip_deadline, true
+		if next, pending := tooltip_deadline(window);
+		   pending && (!found || time.tick_diff(next, deadline) > 0) {
+			deadline, found = next, true
 		}
 		if next := window.pane_drag.hover_until;
 		   next != {} && (!found || time.tick_diff(next, deadline) > 0) {
@@ -411,12 +412,13 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		   armed && (!found || time.tick_diff(next, deadline) > 0) {
 			deadline, found = next, true
 		}
-		if window.blinking && (!found || time.tick_diff(window.blink_deadline, deadline) > 0) {
-			deadline, found = window.blink_deadline, true
+		if next, blinking := cursor_blink_deadline(window);
+		   blinking && (!found || time.tick_diff(next, deadline) > 0) {
+			deadline, found = next, true
 		}
-		if window.autoscrolling &&
-		   (!found || time.tick_diff(window.autoscroll_deadline, deadline) > 0) {
-			deadline, found = window.autoscroll_deadline, true
+		if next, autoscrolling := selection_autoscroll_deadline(window);
+		   autoscrolling && (!found || time.tick_diff(next, deadline) > 0) {
+			deadline, found = next, true
 		}
 	}
 	for entry in app.sessions {

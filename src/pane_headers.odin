@@ -180,7 +180,7 @@ pane_header_cancel :: proc(w: ^Window) {
 // pane_header_release finishes it wherever it is released.
 pane_header_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
-	if !hit || w.selecting {return}
+	if !hit || selection_active(w) {return}
 	gesture_swallow(w, e.button, .Pane_Header)
 	if e.button != .Left {return}
 	pane_focus(app, w, pane.node)

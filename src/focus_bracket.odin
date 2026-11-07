@@ -45,8 +45,8 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 		}
 		if target != nil {find_close(app, w, target)}
 	}
-	w.selecting, w.autoscrolling = false, false
-	w.dragging = {}
+	selection_cancel(w)
+	divider_cancel(w)
 	w.wheel_remainder = 0
 	paste_confirm_cancel(app, w)
 }
@@ -64,7 +64,7 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 			term.send_focus(entry.session, w.focused)
 		}
 	}
-	reset_blink(w)
+	cursor_blink_reset(w)
 	status_focus_enter(app, w)
 	w.dirty = true
 	window_update_title(app, w)

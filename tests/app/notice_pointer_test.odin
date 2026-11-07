@@ -28,7 +28,7 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	pointer_expect_move(t, s, w, close.x, close.y, .Hand)
 	testing.expect_value(t, s.notices.hover, s.notices.items[1].id)
 	gesture_button(s, w, .Left, true, close.x, close.y)
-	testing.expect(t, !w.selecting)
+	testing.expect(t, !app.selection_active(w))
 	gesture_button(s, w, .Left, false, 200, 200)
 	testing.expect_value(t, len(s.notices.items), 2)
 	gesture_button(s, w, .Right, true, close.x, close.y)
@@ -60,7 +60,7 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect_value(t, len(s.notices.items), 0)
 	testing.expect(t, app.palette_active(s, w))
-	testing.expect(t, !w.selecting && gesture_captured(w) == {})
+	testing.expect(t, !app.selection_active(w) && gesture_captured(w) == {})
 }
 
 @(test)
@@ -84,7 +84,7 @@ notice_press_held_while_its_notice_fades_disarms_without_dismissing :: proc(t: ^
 	testing.expect(t, !ui.armed_is(s.notices.armed, id), "the press must let go of a fading notice")
 	testing.expect_value(t, s.notices.hover, u64(0))
 	gesture_button(s, w, .Left, false, close.x, close.y)
-	testing.expect(t, !w.selecting && gesture_captured(w) == {})
+	testing.expect(t, !app.selection_active(w) && gesture_captured(w) == {})
 	ui.notices_set_animations(&s.notices, false)
 	testing.expect_value(t, len(s.notices.items), 0)
 }

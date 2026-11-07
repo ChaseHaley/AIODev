@@ -31,64 +31,126 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 	return tooltip_clip(label(app, w, x, y), TOOLTIP_LIMIT)
 }
 
-// The window keeps its own copy, because a label may be built for one event in temporary memory.
-@(private)
-tooltip_store :: proc(w: ^Window, label: string) {
-	w.tooltip = string(w.tooltip_text[:copy(w.tooltip_text[:], label)])
+// The window's tooltip: nil is Cold. Pending shows `label` at `deadline`; Visible shows it; Warm
+// (after a visible tooltip was left) shows a neighbour's label at once until `until`. `anchor` is
+// where the pointer last was over the label, for the neighbour distance. Labels live in
+// Window.tooltip_text, because a label may be built for one event in temporary memory.
+Tooltip :: union {
+	Tooltip_Pending,
+	Tooltip_Visible,
+	Tooltip_Warm,
+}
+
+Tooltip_Pending :: struct {
+	label:    string,
+	deadline: time.Tick,
+	anchor:   [2]f32,
+}
+
+Tooltip_Visible :: struct {
+	label:  string,
+	anchor: [2]f32,
+}
+
+Tooltip_Warm :: struct {
+	until:  time.Tick,
+	anchor: [2]f32,
+}
+
+// The label the window is waiting to show or showing; empty when Cold or Warm.
+tooltip_current :: proc(w: ^Window) -> string {
+	#partial switch s in w.tooltip {
+	case Tooltip_Pending: return s.label
+	case Tooltip_Visible: return s.label
+	}
+	return ""
+}
+
+tooltip_shown :: proc(w: ^Window) -> (string, bool) {
+	visible, ok := w.tooltip.(Tooltip_Visible)
+	return visible.label, ok
+}
+
+tooltip_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
+	pending, ok := w.tooltip.(Tooltip_Pending)
+	return pending.deadline, ok
+}
+
+@(private = "file")
+tooltip_store :: proc(w: ^Window, label: string) -> string {
+	return string(w.tooltip_text[:copy(w.tooltip_text[:], label)])
 }
 
 tooltip_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
 	if e.buttons != {} {tooltip_cancel(w); return}
 	label := tooltip_label(app, w, owner, f32(e.x), f32(e.y))
 	point := [2]f32{f32(e.x), f32(e.y)}
-	dx, dy := point.x - w.tooltip_anchor.x, point.y - w.tooltip_anchor.y
+	anchor: [2]f32
+	switch s in w.tooltip {
+	case Tooltip_Pending: anchor = s.anchor
+	case Tooltip_Visible: anchor = s.anchor
+	case Tooltip_Warm: anchor = s.anchor
+	}
+	dx, dy := point.x - anchor.x, point.y - anchor.y
 	reach := TOOLTIP_NEIGHBOR_DISTANCE * max(1, w.scale)
 	near := dx * dx + dy * dy <= reach * reach
-	if label == w.tooltip {
-		if label != "" {w.tooltip_anchor = point}
-		if label == "" && !near {w.tooltip_warm_until = {}}
+	now := time.tick_now()
+	if label == tooltip_current(w) {
+		switch &s in w.tooltip {
+		case Tooltip_Pending: s.anchor = point
+		case Tooltip_Visible: s.anchor = point
+		case Tooltip_Warm: if !near {w.tooltip = nil}
+		}
 		return
 	}
-	now := time.tick_now()
-	warm := w.tooltip_visible || w.tooltip_warm_until != {} &&
-		time.tick_diff(now, w.tooltip_warm_until) > 0
-	immediate := label != "" && warm && near
-	if (label == "" && w.tooltip_visible) || immediate {
-		w.tooltip_warm_until = time.tick_add(now, TOOLTIP_GRACE)
-	} else if !warm || (label != "" && !immediate) {
-		w.tooltip_warm_until = {}
-	}
-	tooltip_store(w, label)
-	w.tooltip_visible = immediate
-	w.tooltip_deadline = label == "" || immediate ? {} : time.tick_add(now, TOOLTIP_DELAY)
-	if label != "" {w.tooltip_anchor = point}
 	w.dirty = true
+	switch s in w.tooltip {
+	case Tooltip_Visible:
+		if label == "" {
+			w.tooltip = Tooltip_Warm{time.tick_add(now, TOOLTIP_GRACE), anchor}
+			return
+		}
+		if near {
+			w.tooltip = Tooltip_Visible{tooltip_store(w, label), point}
+			return
+		}
+	case Tooltip_Warm:
+		if label != "" && near && time.tick_diff(now, s.until) > 0 {
+			w.tooltip = Tooltip_Visible{tooltip_store(w, label), point}
+			return
+		}
+	case Tooltip_Pending:
+	}
+	if label == "" {
+		w.tooltip = nil
+		return
+	}
+	w.tooltip = Tooltip_Pending{tooltip_store(w, label), time.tick_add(now, TOOLTIP_DELAY), point}
 }
 
 tooltip_cancel :: proc(w: ^Window) {
-	if w.tooltip == "" && w.tooltip_deadline == {} && w.tooltip_warm_until == {} {return}
-	tooltip_store(w, "")
-	w.tooltip_deadline, w.tooltip_warm_until, w.tooltip_visible = {}, {}, false
+	if w.tooltip == nil {return}
+	w.tooltip = nil
 	w.dirty = true
 }
 
-tooltip_tick :: proc(w: ^Window) {
-	if w.tooltip_deadline == {} || time.tick_diff(time.tick_now(), w.tooltip_deadline) > 0 {return}
-	w.tooltip_deadline = {}
-	w.tooltip_visible = true
-	w.tooltip_warm_until = time.tick_add(time.tick_now(), TOOLTIP_GRACE)
+tooltip_tick :: proc(w: ^Window, now: time.Tick) {
+	pending, ok := w.tooltip.(Tooltip_Pending)
+	if !ok || time.tick_diff(now, pending.deadline) > 0 {return}
+	w.tooltip = Tooltip_Visible{pending.label, pending.anchor}
 	w.dirty = true
 }
 
 tooltip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	if !w.tooltip_visible || w.tooltip == "" {return .Ok}
+	label, shown := tooltip_shown(w)
+	if !shown {return .Ok}
 	owner := pointer_target(app, w, w.pointer.x, w.pointer.y)
-	if tooltip_label(app, w, owner, w.pointer.x, w.pointer.y) != w.tooltip {return .Ok}
+	if tooltip_label(app, w, owner, w.pointer.x, w.pointer.y) != label {return .Ok}
 	s := w.scale
 	room := max(0, min(TOOLTIP_MAX_WIDTH * s, f32(w.width) - 8 * s) - 16 * s)
 	lines := make([dynamic]string, context.temp_allocator)
 	wrapped := make([dynamic]string, context.temp_allocator)
-	rest := w.tooltip
+	rest := label
 	for line in strings.split_lines_iterator(&rest) {
 		ui.wrap(&w.ui_text, line, room, &wrapped)
 		append(&lines, ..wrapped[:])

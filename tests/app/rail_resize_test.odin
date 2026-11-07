@@ -19,7 +19,7 @@ rail_and_pane_junction_drags_both_axes :: proc(t: ^testing.T) {
 		x, y := app.rail_width_pixels(w), d.rect.y + d.rect.height / 2
 		before := w.tree.nodes[d.node].(layout.Split).ratio
 		gesture_button(s, w, .Left, true, x, y)
-		testing.expect_value(t, w.dragging.count, 2)
+		testing.expect_value(t, divider_count(w), 2)
 		rail_resize_drag_to(s, w, x + 40, y + 50)
 		testing.expect_value(t, app.rail_width_pixels(w), x + 40)
 		testing.expect(t, w.tree.nodes[d.node].(layout.Split).ratio > before)
@@ -43,6 +43,12 @@ rail_resize_drag_to :: proc(s: ^app.App, w: ^app.Window, x, y: f32) {
 	})
 }
 
+@(private)
+divider_count :: proc(w: ^app.Window) -> int {
+	drag := app.divider_dragging(w)
+	return drag == nil ? 0 : drag.count
+}
+
 @(test)
 rail_resize_drag_updates_content_clamps_and_finishes_outside :: proc(t: ^testing.T) {
 	f: Palette_Fixture
@@ -58,14 +64,14 @@ rail_resize_drag_updates_content_clamps_and_finishes_outside :: proc(t: ^testing
 		x, y := app.rail_width_pixels(w) + scale, 100 * scale
 		pointer_expect_move(t, s, w, x, y, .Resize_Horizontal)
 		gesture_button(s, w, .Left, true, x, y)
-		testing.expect(t, w.rail_resizing && !w.tab_drag.pressed && !w.selecting)
+		testing.expect(t, app.rail_resizing(w) && !w.tab_drag.pressed && !app.selection_active(w))
 		rail_resize_drag_to(s, w, x + 80 * scale, y)
 		testing.expect_value(t, app.rail_width_pixels(w), 288 * scale)
 		after := app.window_content_area(s, w)
 		testing.expect_value(t, after.x - before.x, 80 * scale)
 		testing.expect_value(t, before.width - after.width, 80 * scale)
 		gesture_button(s, w, .Left, false, x + 80 * scale, -20)
-		testing.expect(t, !w.rail_resizing && !w.pane_drag.pressed)
+		testing.expect(t, !app.rail_resizing(w) && !w.pane_drag.pressed)
 		pointer_expect_move(t, s, w, x + 120 * scale, y, .Text)
 		testing.expect_value(t, app.rail_width_pixels(w), 288 * scale)
 
@@ -75,7 +81,7 @@ rail_resize_drag_updates_content_clamps_and_finishes_outside :: proc(t: ^testing
 		rail_resize_drag_to(s, w, f32(w.width) + 200, y)
 		testing.expect_value(t, app.rail_width_pixels(w), ui.RAIL_MAX_WIDTH * scale)
 		gesture_button(s, w, .Left, false, f32(w.width) + 200, y)
-		testing.expect(t, !w.rail_resizing)
+		testing.expect(t, !app.rail_resizing(w))
 	}
 }
 
@@ -98,7 +104,7 @@ rail_resize_cancellation_and_orientation_preserve_the_last_width :: proc(t: ^tes
 			s.settings.tabs.orientation = .Horizontal
 			app.window_apply_settings(s, w)
 		}
-		testing.expect(t, !w.rail_resizing)
+		testing.expect(t, !app.rail_resizing(w))
 		rail_resize_drag_to(s, w, 400 * w.scale, y)
 		gesture_button(s, w, .Left, false, 400 * w.scale, y)
 		testing.expect_value(t, app.rail_width_pixels(w), width)
@@ -106,6 +112,51 @@ rail_resize_cancellation_and_orientation_preserve_the_last_width :: proc(t: ^tes
 		s.settings.tabs.orientation = .Vertical
 		app.window_apply_settings(s, w)
 	}
+}
+
+// Ending a rail drag from outside the pointer path (a pane focus change here) must end the rail resize
+// with it; a stale one made the next rail toggle cancel an unrelated held button.
+@(test)
+rail_resize_ended_elsewhere_leaves_later_presses_alone :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !rail_resize_fixture(t, &f, "rail-resize-stale") {return}
+	s, w := &f.state, f.state.windows[0]
+	y := 100 * w.scale
+	gesture_button(s, w, .Left, true, app.rail_width_pixels(w), y)
+	if !testing.expect(t, app.rail_resizing(w)) {return}
+	app.focus_leave(s, w)
+	app.focus_enter(s, w)
+	testing.expect(t, !app.rail_resizing(w))
+	gesture_button(s, w, .Left, false, app.rail_width_pixels(w), y)
+	x, cy := f32(w.width) / 2 + 100 * w.scale, f32(w.height) / 2
+	if !testing.expect_value(t, app.pointer_target(s, w, x, cy), app.Pointer_Target.Content) {return}
+	gesture_button(s, w, .Left, true, x, cy)
+	app.rail_toggle(s, w)
+	_, cancelled := w.gesture.captures[.Left].(app.Gesture_Cancelled)
+	testing.expect(t, !cancelled, "the toggle must not take a press that is not a rail resize")
+	gesture_button(s, w, .Left, false, x, cy)
+}
+
+// A cancelled press is no first click: the next press on the same edge starts a drag, not a balance.
+@(test)
+divider_double_click_does_not_span_a_cancel :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !rail_resize_fixture(t, &f, "divider-click-cancel") {return}
+	s, w := &f.state, f.state.windows[0]
+	x, y := app.rail_width_pixels(w), 100 * w.scale
+	press := platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+		x = i32(x), y = i32(y), time_ns = 1_000_000_000}
+	app.handle_event(s, press)
+	if !testing.expect(t, app.rail_resizing(w)) {return}
+	app.handle_event(s, platform.Capture_Lost_Event{w.id})
+	press.time_ns += 200_000_000
+	app.handle_event(s, press)
+	testing.expect(t, app.rail_resizing(w), "the second press must start a resize")
+	release := press
+	release.pressed = false
+	app.handle_event(s, release)
 }
 
 @(test)
@@ -125,7 +176,7 @@ rail_resize_overlay_keeps_content_geometry_and_stays_inside_window :: proc(t: ^t
 		if d.axis != .Vertical {continue}
 		x, y := app.rail_width_pixels(w), d.rect.y + d.rect.height / 2
 		gesture_button(s, w, .Left, true, x, y)
-		testing.expect(t, w.dragging.count == 1, "overlay border must not grab a split behind it")
+		testing.expect(t, divider_count(w) == 1, "overlay border must not grab a split behind it")
 		gesture_button(s, w, .Left, false, x, y)
 		break
 	}
@@ -135,7 +186,7 @@ rail_resize_overlay_keeps_content_geometry_and_stays_inside_window :: proc(t: ^t
 	testing.expect_value(t, app.rail_width_pixels(w), 300 * w.scale)
 	testing.expect_value(t, app.window_content_area(s, w), before)
 	app.rail_toggle(s, w)
-	testing.expect_value(t, w.rail_resizing, false)
+	testing.expect_value(t, app.rail_resizing(w), false)
 	testing.expect_value(t, app.rail_visible(w), false)
 	gesture_button(s, w, .Left, false, 500 * w.scale, y)
 	testing.expect_value(t, w.workspace.selected, 0)

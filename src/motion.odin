@@ -16,7 +16,7 @@ motion_active :: proc(app: ^App) -> bool {
 				return true
 			}
 		}
-		if ui.motion_active(w.rail_slide) ||
+		if rail_sliding(w) ||
 		   ui.motion_active(w.tab_underline) ||
 		   ui.motion_active(w.tab_incoming.ghost) ||
 		   confirmation_active(w) { return true }
@@ -56,10 +56,7 @@ update_motion :: proc(app: ^App) {
 		}
 		hovered := p.menu_hover != 0 && workspace_row_index(w, p.menu_hover) >= 0
 		if ui.control_update(&p.menu_motion, hovered, false, app.animations, now) { w.dirty = true }
-		rail_changed := ui.motion_update(&w.rail_slide, now)
-		if rail_changed && !ui.motion_active(w.rail_slide) && !rail_overlay(w) {
-			w.rail_was_overlay = false
-		}
+		rail_changed := rail_slide_update(w, now)
 		tabs_changed := false
 		for &position, i in w.tab_positions {
 			if i >= len(w.workspace.tabs) {continue}

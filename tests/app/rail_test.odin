@@ -70,7 +70,7 @@ rail_adaptive_threshold_toggle_and_crossing_restore_automatic_behaviour :: proc(
 	state: app.App
 	w := app.Window{width = 1200, height = 700, scale = 1, phase = .Preparing}
 	app.rail_adaptive_update(&w)
-	testing.expect(t, w.rail_auto)
+	testing.expect(t, w.rail_wide)
 	testing.expect(t, app.rail_docked(&w))
 	testing.expect(t, !app.rail_overlay(&w))
 
@@ -80,31 +80,31 @@ rail_adaptive_threshold_toggle_and_crossing_restore_automatic_behaviour :: proc(
 	w.width = 1100
 	app.rail_adaptive_update(&w)
 	testing.expect(t, !app.rail_visible(&w))
-	testing.expect_value(t, w.rail_override, app.Rail_Override.Hidden)
+	testing.expect(t, w.rail == nil)
 	app.rail_toggle(&state, &w)
 	testing.expect(t, app.rail_docked(&w))
 
 	// Below the threshold the automatic behaviour hides the rail and the toggle overlays it.
 	w.width = 600
 	app.rail_adaptive_update(&w)
-	testing.expect(t, !w.rail_auto)
+	testing.expect(t, !w.rail_wide)
 	testing.expect(t, !app.rail_visible(&w))
-	testing.expect_value(t, w.rail_override, app.Rail_Override.Auto)
-	testing.expect_value(t, w.rail_slide.value, f32(0))
-	testing.expect(t, !w.rail_was_overlay)
+	// The docked rail hidden by the crossing leaves nothing behind to draw as an overlay.
+	testing.expect(t, w.rail == nil)
 	app.rail_toggle(&state, &w)
 	testing.expect(t, app.rail_overlay(&w))
 	testing.expect(t, !app.rail_docked(&w))
-	testing.expect(t, w.rail_was_overlay)
+	_, overlay := w.rail.(app.Rail_Overlay)
+	testing.expect(t, overlay)
 	w.width = 660
 	app.rail_adaptive_update(&w)
 	testing.expect(t, app.rail_overlay(&w))
-	testing.expect_value(t, w.rail_override, app.Rail_Override.Shown)
 
 	// Crossing the threshold drops the override, so widening docks the rail again.
 	w.width = 1300
 	app.rail_adaptive_update(&w)
-	testing.expect_value(t, w.rail_override, app.Rail_Override.Auto)
+	_, docked := w.rail.(app.Rail_Docked)
+	testing.expect(t, docked)
 	testing.expect(t, app.rail_docked(&w))
 }
 
@@ -123,8 +123,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 		width         = 600,
 		height        = 700,
 		scale         = 1,
-		rail_auto     = false,
-		rail_override = .Shown,
+		rail          = app.Rail_Overlay{slide = {value = 1, target = 1}},
 	}
 	app.focus_init(&w)
 	append(&state.windows, &w)
@@ -133,7 +132,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	testing.expect(t, !app.rail_overlay(&w))
 	testing.expect(t, !app.rail_visible(&w))
 
-	w.rail_override = .Shown
+	rail_show(&w)
 	testing.expect(t, app.rail_overlay(&w))
 	row := app.rail_row_rect_for_tab(&w, 0)
 	app.handle_event(
@@ -179,8 +178,7 @@ rail_keyboard_tab_selection_closes_an_open_overlay :: proc(t: ^testing.T) {
 		width          = 600,
 		height         = 700,
 		scale          = 1,
-		rail_auto      = false,
-		rail_override  = .Shown,
+		rail           = app.Rail_Overlay{slide = {value = 1, target = 1}},
 		phase          = .Preparing,
 	}
 	append(&state.windows, &w)
@@ -194,7 +192,7 @@ rail_keyboard_tab_selection_closes_an_open_overlay :: proc(t: ^testing.T) {
 @(test)
 rail_preview_windows_do_not_reserve_rail_width :: proc(t: ^testing.T) {
 	state: app.App
-	w := app.Window{width = 1000, height = 700, scale = 1, rail_auto = true, phase = .Preparing}
+	w := app.Window{width = 1000, height = 700, scale = 1, rail_wide = true, rail = app.Rail_Docked{}, phase = .Preparing}
 	preview := app.window_content_area(&state, &w)
 	testing.expect_value(t, preview.x, f32(0))
 	testing.expect_value(t, preview.width, f32(1000))
@@ -230,7 +228,8 @@ rail_close_and_multiselect_keep_the_selected_group_and_remaining_tab :: proc(t: 
 		width     = 1000,
 		height    = 700,
 		scale     = 1,
-		rail_auto = true,
+		rail_wide = true,
+		rail      = app.Rail_Docked{},
 	}
 	append(&state.windows, &w)
 	row1 := app.rail_row_rect_for_tab(&w, 1)
@@ -278,7 +277,8 @@ rail_footer_and_empty_space_are_new_tab_drop_targets :: proc(t: ^testing.T) {
 		width     = 1000,
 		height    = 700,
 		scale     = 1,
-		rail_auto = true,
+		rail_wide = true,
+		rail      = app.Rail_Docked{},
 	}
 	append(&state.windows, &w)
 	layout_state, ok := app.rail_current_layout(&w)
@@ -293,4 +293,10 @@ rail_footer_and_empty_space_are_new_tab_drop_targets :: proc(t: ^testing.T) {
 	on_tab, on_new, on_target := app.rail_pane_target(&w, row.x + 20, row.y + 16)
 	testing.expect(t, on_target && !on_new)
 	testing.expect_value(t, on_tab, 0)
+}
+
+// What the rail toggle shows from hidden: docked when the window is wide, otherwise an open overlay.
+@(private)
+rail_show :: proc(w: ^app.Window) {
+	if w.rail_wide {w.rail = app.Rail_Docked{}} else {w.rail = app.Rail_Overlay{slide = {value = 1, target = 1}}}
 }

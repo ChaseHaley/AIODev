@@ -50,14 +50,14 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 					before := w.tree.nodes[d.node].(layout.Split).ratio
 					pointer_expect_move(t, s, w, x, y, .Resize_All)
 					gesture_button(s, w, .Left, true, x, y)
-					testing.expect_value(t, w.dragging.count, 2)
+					testing.expect_value(t, divider_count(w), 2)
 					dx := side == .Left ? 40 * scale : -40 * scale
 					rail_resize_drag_to(s, w, x + dx, y + 30 * scale)
 					after := app.status_panel_rect(s, w)
 					testing.expect_value(t, after.width - panel.width, 40 * scale)
 					testing.expect(t, w.tree.nodes[d.node].(layout.Split).ratio > before)
 					gesture_button(s, w, .Left, false, x + dx, y + 30 * scale)
-					testing.expect_value(t, w.dragging.count, 0)
+					testing.expect_value(t, divider_count(w), 0)
 					break
 				}
 			}
@@ -125,7 +125,7 @@ activity_in_rail_height_drags_clamps_and_double_click_resets_to_setting :: proc(
 		x, y := rail.x + rail.width / 2, panel.y
 		pointer_expect_move(t, s, w, x, y, .Resize_Vertical)
 		gesture_button(s, w, .Left, true, x, y)
-		testing.expect_value(t, w.dragging.count, 1)
+		testing.expect_value(t, divider_count(w), 1)
 		rail_resize_drag_to(s, w, x, y - 60 * scale)
 		testing.expect_value(t, app.status_panel_rect(s, w).height, panel.height + 60 * scale)
 		testing.expect_value(t, w.status_rail_reserve, panel.height + 60 * scale)
@@ -134,7 +134,7 @@ activity_in_rail_height_drags_clamps_and_double_click_resets_to_setting :: proc(
 		rail_resize_drag_to(s, w, x, rail.y + rail.height)
 		testing.expect_value(t, app.status_panel_rect(s, w).height, 80 * scale)
 		gesture_button(s, w, .Left, false, x, rail.y + rail.height)
-		testing.expect_value(t, w.dragging.count, 0)
+		testing.expect_value(t, divider_count(w), 0)
 
 		s.settings.status.panel_height = 30
 		top := app.status_panel_rect(s, w).y

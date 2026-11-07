@@ -198,7 +198,7 @@ gesture_finish :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) ->
 		return true
 	}
 	if settings_active(w) {editor_outcome(app, w, ui.editor_release(&w.editor)); return true}
-	if w.selecting {selection_finish(app, w, x, y); return true}
+	if selection_active(w) {selection_finish(app, w, x, y); return true}
 	return false
 }
 
@@ -209,7 +209,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 		target := pointer_target(app, w, x, y)
 		modal := pointer_modal(target)
 		if !modal {
-			if ui.armed_down(w.find.armed) {target = .Find} else if w.selecting {target = .Content}
+			if ui.armed_down(w.find.armed) {target = .Find} else if selection_active(w) {target = .Content}
 		}
 		w.gesture.captures[e.button] = Gesture_Held{target}
 		if !modal {
@@ -249,7 +249,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 @(private)
 content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
-	if !w.selecting {
+	if !selection_active(w) {
 		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
 	}
 	if settings_active(w) {
@@ -266,21 +266,19 @@ content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if entry == nil {
 		return
 	}
-	if e.button == .Left && !w.selecting && .Control in e.modifiers {
+	if e.button == .Left && !selection_active(w) && .Control in e.modifiers {
 		if link_click(app, w, x, y) {
 			return
 		}
 	}
-	if e.button == .Right && !w.selecting && .Control in e.modifiers {
+	if e.button == .Right && !selection_active(w) && .Control in e.modifiers {
 		if document_menu_open_link(app, w, x, y) {
 			gesture_swallow(w, .Right, .Content)
 			return
 		}
 	}
-	if e.button == .Left && (w.selecting || !reports_mouse(entry, e.modifiers)) {
-		w.selecting = true
-		term.selection_press(entry.session, x, y, e.time_ns)
-		w.dirty = true
+	if e.button == .Left && (selection_active(w) || !reports_mouse(entry, e.modifiers)) {
+		selection_begin(w, entry, x, y, e.time_ns)
 		return
 	}
 	if reports_mouse(entry, e.modifiers) {
@@ -290,7 +288,7 @@ content_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 }
 
 gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
-	if w.scroll_drag.active {terminal_scrollbar_move(app, w, f32(event.y)); return}
+	if terminal_scrollbar_dragging(w) {terminal_scrollbar_move(app, w, f32(event.y)); return}
 	if w.phase == .Preparing {return}
 	e := event
 	e.buttons -= gesture_buttons(w, Gesture_Cancelled)
@@ -341,8 +339,8 @@ gesture_move :: proc(app: ^App, w: ^Window, event: platform.Mouse_Move_Event) {
 		pointer_move(app, w, target, e)
 		return
 	}
-	if w.dragging.count > 0 {
-		if .Left not_in e.buttons {w.dragging, w.rail_resizing = {}, false; return}
+	if divider_dragging(w) != nil {
+		if .Left not_in e.buttons {divider_cancel(w); return}
 		divider_drag(app, w, x, y)
 		return
 	}
@@ -374,22 +372,15 @@ content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	shape: platform.Cursor_Shape = swallowed ? .Arrow : .Text
 	if title && !swallowed {shape = chrome_pointer(app, w, x, y)}
 	entry := pane_at(app, w, e.x, e.y)
-	if shape == .Text && entry == nil && !w.selecting {shape = .Arrow}
+	if shape == .Text && entry == nil && !selection_active(w) {shape = .Arrow}
 	resize, over_divider := divider_cursor(w, x, y)
 	over_divider &&= !floating_covers(w, x, y)
 	if over_divider && !swallowed {shape = resize}
-	if !w.selecting && !over_divider && !swallowed && !title && link_hover_update(app, w, x, y) {
-		shape = .Hand
-	} else if w.selecting || over_divider || swallowed || title {
-		link_hover_clear(w)
-	}
+	if link_hover_move(app, w, x, y, over_divider, title) {shape = .Hand}
 	pointer_set(app, w, shape)
 	if swallowed || entry == nil {return}
-	if w.selecting {
-		term.selection_drag(entry.session, x, y)
-		w.pointer = {x, y}
-		autoscroll_follow(w, entry)
-		w.dirty = true
+	if selection_active(w) {
+		selection_move(w, entry, x, y)
 	} else if reports_mouse(entry, e.modifiers) {
 		held := e.buttons & gesture_buttons(w, Gesture_Reported)
 		if e.buttons != {} && held == {} {return}
@@ -397,12 +388,3 @@ content_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
 	}
 }
 
-@(private)
-selection_finish :: proc(app: ^App, w: ^Window, x, y: f32) {
-	entry := focused_session(app, w)
-	w.selecting, w.autoscrolling = false, false
-	if entry == nil {return}
-	term.selection_release(entry.session, x, y)
-	if app.settings.terminal.copy_on_select {copy_selection(app, entry, false)}
-	w.dirty = true
-}

@@ -80,7 +80,7 @@ pointer_held_find_press_keeps_the_pointer :: proc(t: ^testing.T) {
 	pane := w.panes[0].rect
 	inside := [2]f32{pane.x + pane.width / 2, pane.y + pane.height / 2}
 	pointer_expect_move(t, s, w, inside.x, inside.y, .Arrow)
-	testing.expect(t, !w.selecting)
+	testing.expect(t, !app.selection_active(w))
 	gesture_button(s, w, .Left, false, inside.x, inside.y)
 	testing.expect(t, ui.find_is_open(&w.find), "releasing off the button must not close the bar")
 	pointer_expect_move(t, s, w, inside.x, inside.y, .Text)

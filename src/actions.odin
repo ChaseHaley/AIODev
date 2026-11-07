@@ -755,11 +755,11 @@ run_action :: proc(
 			)
 		}
 		if target != w.tree.focus {
-			w.selecting, w.autoscrolling = false, false
-			w.dragging = {}
+			selection_cancel(w)
+			divider_cancel(w)
 			w.wheel_remainder = 0
 			if layout.swap(w.tree, w.tree.focus, target) {window_relayout(app, w)}
-			reset_blink(w)
+			cursor_blink_reset(w)
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
 		direction := layout.Direction(int(action) - int(Action.Focus_Left))

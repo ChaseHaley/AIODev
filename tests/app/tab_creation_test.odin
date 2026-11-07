@@ -77,7 +77,7 @@ profile.order = default, cmd, hidden
 	s, w := &f.state, f.state.windows[0]
 	for horizontal in ([?]bool{false, true}) {
 		w.tabs_horizontal = horizontal
-		w.rail_override = .Shown
+		rail_show(w)
 		count := len(w.workspace.tabs)
 		chevron := horizontal ? app.tab_chevron_rect(s, w) : app.rail_profile_rect(w)
 		creation_click(s, w, chevron, .Left)
@@ -100,7 +100,7 @@ profile.order = default, cmd, hidden
 		testing.expect_value(t, app.focused_session(s, w).profile_id, "cmd")
 		if !horizontal {testing.expect(t, !app.rail_overlay(w))}
 
-		w.rail_override = .Shown
+		rail_show(w)
 		plus := horizontal ? app.window_tab_new_rect(s, w) : app.rail_new_tab_rect(w)
 		creation_click(s, w, plus, .Right)
 		testing.expect(t, app.profile_menu_shown(w))

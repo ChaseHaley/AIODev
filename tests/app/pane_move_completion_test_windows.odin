@@ -56,9 +56,9 @@ move_fixture_init :: proc(t: ^testing.T, f: ^Move_Fixture) -> bool {
 	f.source.tree.focus = f.node
 	for w in state.windows {
 		app.focus_init(w)
-		w.cursor_phase_visible = false
+		w.cursor_blink = app.Cursor_Blink_On{}
 		w.wheel_remainder = 0.5
-		w.selecting = true
+		w.selection = app.Selection_Selecting{}
 	}
 	return true
 }
@@ -78,12 +78,12 @@ move_fixture_destroy :: proc(t: ^testing.T, f: ^Move_Fixture) {
 @(private="file")
 move_expect_handoff :: proc(t: ^testing.T, f: ^Move_Fixture, prepared := false) {
 	for w in ([?]^app.Window{f.source, f.destination}) {
-		testing.expect(t, w.cursor_phase_visible)
+		testing.expect(t, app.cursor_visible(w))
 		borrowed := prepared && w == f.destination
-		testing.expect_value(t, w.selecting, borrowed)
+		testing.expect_value(t, app.selection_active(w), borrowed)
 		testing.expect_value(t, w.wheel_remainder, borrowed ? f32(0.5) : 0)
 	}
-	testing.expect(t, !f.observer.cursor_phase_visible && f.observer.selecting)
+	testing.expect(t, !app.cursor_visible(f.observer) && app.selection_active(f.observer))
 	testing.expect_value(t, f.observer.wheel_remainder, f32(0.5))
 }
 
@@ -272,7 +272,7 @@ pane_move_completion_preserves_unrelated_selected_source_tab :: proc(t: ^testing
 	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
 		f.node, destination.tree.root, .Right, false)) {return}
 	testing.expect(t, app.selected_tab(f.source.workspace) == other && f.source.tree == &other.tree)
-	testing.expect(t, app.tab_menu_shown(f.source) && f.source.selecting && !f.source.cursor_phase_visible)
+	testing.expect(t, app.tab_menu_shown(f.source) && app.selection_active(f.source) && !app.cursor_visible(f.source))
 	testing.expect_value(t, f.source.wheel_remainder, f32(0.5))
 	testing.expect_value(t, source.tree.nodes[source.tree.focus].(layout.Pane).content.id, u32(4))
 	testing.expect_value(t, len(f.source.panes), 1)

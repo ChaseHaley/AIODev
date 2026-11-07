@@ -170,7 +170,8 @@ tabs_dragged_to_another_window_join_its_workspace :: proc(t: ^testing.T) {
 
 	// A drop that takes the last tabs closes their window and deletes their workspace, with no shell stopping.
 	// This group lands in a rail, in order, at the row under the pointer.
-	destination.tabs_horizontal, destination.rail_override = false, .Shown
+	destination.tabs_horizontal = false
+	rail_show(destination)
 	app.window_relayout(&state, destination)
 	row := app.rail_row_rect_for_tab(destination, 0)
 	app.tab_pointer_select(&state, source, 0, false, false)

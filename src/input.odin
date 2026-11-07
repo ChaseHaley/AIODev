@@ -341,7 +341,7 @@ on_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
 				term.clear_selection(entry.session)
 			}
 			paste_confirm_cancel(app, w)
-			reset_blink(w)
+			cursor_blink_reset(w)
 		}
 	}
 	term.send_key(entry.session, e)
@@ -385,7 +385,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
 		term.send_text(entry.session, text)
-		reset_blink(w)
+		cursor_blink_reset(w)
 	}
 }
 
@@ -431,7 +431,7 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 @(private)
 pane_at :: proc(app: ^App, w: ^Window, x, y: i32) -> ^Session_Entry {
 	pane, found := layout.hit_test(w.panes[:], f32(x), f32(y))
-	if w.selecting {return focused_session(app, w)}
+	if selection_active(w) {return selection_entry(app, w)}
 	if !found {return nil}
 	return workspace_session_for_content(app, pane.content)
 }

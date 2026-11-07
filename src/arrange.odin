@@ -16,11 +16,61 @@ DRAG_THRESHOLD :: 5
 @(private)
 GHOST_DURATION :: 120 * time.Millisecond
 
-// Splits whose dividers meet under the pointer move together, outermost first.
+// A Left press on a divider, dock edge or rail edge; nil is Idle. First_Click remembers the last press,
+// so a second press on the same divider within DOUBLE_CLICK_NS balances what it divides. Dragging moves
+// the splits whose dividers meet under the pointer, outermost first, and keeps its press as the first
+// click for the release. The procs below are the only writers.
+Divider_Gesture :: union {
+	Divider_First_Click,
+	Divider_Drag,
+}
+
+Divider_First_Click :: struct {
+	node:    layout.Node_Id,
+	time_ns: i64,
+}
+
 Divider_Drag :: struct {
-	nodes: [4]layout.Node_Id,
+	nodes:   [4]layout.Node_Id,
 	offsets: [4]f32,
-	count: int,
+	count:   int,
+	click:   Divider_First_Click,
+}
+
+divider_dragging :: proc(w: ^Window) -> ^Divider_Drag {
+	drag, ok := &w.divider.(Divider_Drag)
+	return ok ? drag : nil
+}
+
+when AIO_CONTROL {
+	divider_drag_count :: proc(w: ^Window) -> int {
+		drag := divider_dragging(w)
+		return drag == nil ? 0 : drag.count
+	}
+}
+
+// The rail edge is among the dragged dividers.
+rail_resizing :: proc(w: ^Window) -> bool {
+	drag := divider_dragging(w)
+	if drag == nil {return false}
+	for node in drag.nodes[:drag.count] {if node == RAIL_DIVIDER {return true}}
+	return false
+}
+
+// The drag ends at the release point; its press stays the first click of a double-click.
+divider_drag_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	if divider_dragging(w) == nil {return false}
+	divider_drag(app, w, x, y)
+	if drag := divider_dragging(w); drag != nil {
+		click := drag.click
+		w.divider = click
+	}
+	return true
+}
+
+// A drag or first click that was interrupted: a later press starts over.
+divider_cancel :: proc(w: ^Window) {
+	w.divider = nil
 }
 
 // A header press that becomes a pane move, or a swap while Shift is held, once it passes the threshold.
@@ -107,10 +157,11 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 	hits: [4]layout.Divider
 	n := divider_hits(w, x, y, hits[:])
 	if n == 0 {return false}
-	w.selecting, w.autoscrolling = false, false
-	if hits[0].node == w.divider_click_node && time_ns > w.divider_click_ns &&
-	   time_ns - w.divider_click_ns <= DOUBLE_CLICK_NS {
-		w.divider_click_node = layout.INVALID_NODE
+	selection_cancel(w)
+	if click, ok := w.divider.(Divider_First_Click);
+	   ok && hits[0].node == click.node && time_ns > click.time_ns &&
+	   time_ns - click.time_ns <= DOUBLE_CLICK_NS {
+		w.divider = nil
 		balanced := false
 		for d in hits[:n] {
 			if dock_divider(d.node) {dock_divider_reset(w, d.node); balanced = true}
@@ -119,30 +170,32 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 		if balanced {window_relayout(app, w)}
 		return true
 	}
-	w.divider_click_node, w.divider_click_ns = hits[0].node, time_ns
-	w.dragging = {
+	drag := Divider_Drag {
 		count = n,
+		click = {hits[0].node, time_ns},
 	}
 	for d, i in hits[:n] {
-		w.dragging.nodes[i] = d.node
+		drag.nodes[i] = d.node
 		if dock_divider(d.node) {
 			pointer := d.axis == .Vertical ? y : x
-			w.dragging.offsets[i] = pointer - dock_divider_position(app, w, d.node)
+			drag.offsets[i] = pointer - dock_divider_position(app, w, d.node)
 		}
-		if d.node == RAIL_DIVIDER {w.rail_resizing = true}
 	}
+	w.divider = drag
 	return true
 }
 
 // Each split takes the pointer position on its own axis. Divider areas are refreshed after every move,
 // because an outer split resizes the region of the splits nested inside it.
 divider_drag :: proc(app: ^App, w: ^Window, x, y: f32) {
+	drag := divider_dragging(w)
+	if drag == nil {return}
 	gap := window_gap(app, w)
 	moved := false
-	for node, i in w.dragging.nodes[:w.dragging.count] {
+	for node, i in drag.nodes[:drag.count] {
 		if dock_divider(node) {
 			pointer := node == ACTIVITY_HEIGHT_DIVIDER ? y : x
-			dock_divider_drag(app, w, node, pointer - w.dragging.offsets[i])
+			dock_divider_drag(app, w, node, pointer - drag.offsets[i])
 			w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
 			w.status_rail_reserve = status_panel_rail_height(app, w)
 			window_dividers(app, w)
@@ -887,7 +940,7 @@ arrange_cancel :: proc(app: ^App, w: ^Window) {
 		}
 	}
 	if window_find(app, id) == nil {return}
-	w.dragging = {}
+	divider_cancel(w)
 	tab_drag_cancel(app, w)
 	pane_drag_cancel(app, w)
 }

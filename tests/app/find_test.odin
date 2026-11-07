@@ -41,7 +41,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	defer delete(workspace.tabs)
 	w := app.Window{id = 138, workspace = &workspace, tree = &tabs[0].tree,
 		width = 1000, height = 600, scale = 1,
-		divider_click_node = layout.INVALID_NODE, rail_auto = true}
+		rail_wide = true, rail = app.Rail_Docked{}}
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, nil, 14)) { return }
 	w.metrics = term_view.compute_metrics(fonts, w.ui_text.family, 14, 1)
 	ui.find_init(&w.find)
@@ -99,10 +99,10 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	d := w.dividers[0].rect
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(d.x+d.width/2), y = 300, time_ns = 1_000_000_000})
-	if !testing.expect_value(t, w.dragging.count, 1) { return }
+	if !testing.expect_value(t, divider_count(&w), 1) { return }
 	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = y, buttons = {.Left}})
 	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
-	testing.expect_value(t, w.dragging.count, 0)
+	testing.expect_value(t, divider_count(&w), 0)
 	testing.expect(t, !ui.armed_down(w.find.armed) && ui.find_is_open(&w.find))
 }
 

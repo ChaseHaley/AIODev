@@ -57,12 +57,12 @@ focus_bracket_entering_another_pane_leaves_the_one_that_held_focus :: proc(t: ^t
 	previous := app.focused_session(s, w).session
 	term.search_set_needle(previous, "focus")
 	testing.expect(t, term.search_summary(previous).progress != .Off)
-	w.selecting = true
+	w.selection = app.Selection_Selecting{}
 	// A change of focus that skipped focus_leave: entering takes focus from the pane that still holds it.
 	w.tree.focus = first
 	app.focus_enter(s, w)
 	testing.expect(t, focus_holds_shown(w))
-	testing.expect(t, !ui.find_is_open(&w.find) && !w.selecting)
+	testing.expect(t, !ui.find_is_open(&w.find) && !app.selection_active(w))
 	testing.expect(t, term.search_summary(previous).progress == .Off, "the departed pane's search closes")
 
 	ui.find_open(&w.find)
