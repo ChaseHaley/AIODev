@@ -12,8 +12,10 @@ function Invoke-TestSuite {
     . "$PSScriptRoot/test-lanes.ps1"
     $budget = Enter-TestBudget
     try {
-        # The pure entry point compiles these suites together; don't run them twice in full runs.
-        $grouped = @('colour', 'draws', 'fuzzy', 'perf', 'pixels', 'program_art', 'vector')
+        # The pure entry point compiles the suites it imports; don't run them twice in full runs.
+        $grouped = @(Select-String -LiteralPath tests/pure/pure_test.odin -Pattern '^@\(require\) import "\.\./(\w+)"' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value })
+        if ($grouped.Count -eq 0) { throw 'tests/pure/pure_test.odin imports no suites.' }
         $targets = if ($Package) { @($Package) } else { @($testPackages | Where-Object { $_ -notin $grouped }) }
         if ($targets.Count -eq 0) { throw 'No test packages found under tests/.' }
         foreach ($name in $targets) {

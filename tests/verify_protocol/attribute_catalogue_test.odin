@@ -1,15 +1,15 @@
-package control_test
+package verify_protocol_test
 
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:term"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
 
-catalogue_names :: proc(kinds: bit_set[control.Attribute_Kind], separator: string) -> string {
+catalogue_names :: proc(kinds: bit_set[verify_protocol.Attribute_Kind], separator: string) -> string {
 	names: [dynamic]string
 	defer delete(names)
-	for entry in control.ATTRIBUTE_CATALOGUE {
+	for entry in verify_protocol.ATTRIBUTE_CATALOGUE {
 		if entry.kind in kinds {
 			append(&names, entry.name)
 		}
@@ -21,7 +21,7 @@ catalogue_names :: proc(kinds: bit_set[control.Attribute_Kind], separator: strin
 underline_names :: proc(include_none: bool, separator: string) -> string {
 	names: [dynamic]string
 	defer delete(names)
-	for name, i in control.UNDERLINES {
+	for name, i in verify_protocol.UNDERLINES {
 		if i == 0 && !include_none {continue}
 		append(&names, name)
 	}
@@ -39,7 +39,7 @@ catalogue_validates_emits_and_compares :: proc(t: ^testing.T) {
 	defer term.snapshot_destroy(&s)
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
-	testing.expect_value(t, control.format_cells(&b, &s, {0, {}}), control.Error.None)
+	testing.expect_value(t, verify_protocol.format_cells(&b, &s, {0, {}}), verify_protocol.Error.None)
 	output := strings.to_string(b)
 	testing.expect_value(t, output,
 		"row 0 cols 0-1\n" +
@@ -55,7 +55,7 @@ catalogue_validates_emits_and_compares :: proc(t: ^testing.T) {
 	out := strings.builder_make()
 	defer strings.builder_destroy(&out)
 	item_buffer: [128]u8
-	for entry in control.ATTRIBUTE_CATALOGUE {
+	for entry in verify_protocol.ATTRIBUTE_CATALOGUE {
 		if entry.kind == .Text {continue}
 		if !testing.expectf(t, index < len(tokens), "%s: no emitted token", entry.name) {
 			return
@@ -78,24 +78,24 @@ catalogue_validates_emits_and_compares :: proc(t: ^testing.T) {
 				delete(upper)
 			}
 		}
-		r, err := control.parse({"expect", "cell", "0,0", item})
+		r, err := verify_protocol.parse({"expect", "cell", "0,0", item})
 		if testing.expectf(t, err.advice == "", "%s: %s", item, err.advice) {
 			strings.builder_reset(&out)
-			passed, failure := control.evaluate(&out, r.(control.Expect), &s)
-			testing.expect_value(t, failure, control.Error.None)
+			passed, failure := verify_protocol.evaluate(&out, r.(verify_protocol.Expect), &s)
+			testing.expect_value(t, failure, verify_protocol.Error.None)
 			testing.expectf(t, passed, "%s did not match its emitted value", item)
 		}
-		control.request_destroy(&r)
+		verify_protocol.request_destroy(&r)
 	}
 	testing.expect_value(t, index, len(tokens))
 
-	r, err := control.parse({"expect", "cell", "0,0", "text=漢"})
-	defer control.request_destroy(&r)
+	r, err := verify_protocol.parse({"expect", "cell", "0,0", "text=漢"})
+	defer verify_protocol.request_destroy(&r)
 	testing.expect_value(t, err.advice, "")
 	if err.advice == "" {
 		strings.builder_reset(&out)
-		passed, failure := control.evaluate(&out, r.(control.Expect), &s)
-		testing.expect_value(t, failure, control.Error.None)
+		passed, failure := verify_protocol.evaluate(&out, r.(verify_protocol.Expect), &s)
+		testing.expect_value(t, failure, verify_protocol.Error.None)
 		testing.expect(t, passed)
 	}
 }
@@ -103,7 +103,7 @@ catalogue_validates_emits_and_compares :: proc(t: ^testing.T) {
 @(test)
 catalogue_rejects_kind_specific_bad_values :: proc(t: ^testing.T) {
 	buffer: [128]u8
-	for entry in control.ATTRIBUTE_CATALOGUE {
+	for entry in verify_protocol.ATTRIBUTE_CATALOGUE {
 		value: string
 		switch entry.kind {
 		case .Text:
@@ -116,26 +116,26 @@ catalogue_rejects_kind_specific_bad_values :: proc(t: ^testing.T) {
 			value = "bad"
 		}
 		item := fmt.bprintf(buffer[:], "%s=%s", entry.name, value)
-		r, err := control.parse({"expect", "cell", "0,0", item})
+		r, err := verify_protocol.parse({"expect", "cell", "0,0", item})
 		testing.expectf(t, err.advice != "", "%s accepted", item)
-		control.request_destroy(&r)
+		verify_protocol.request_destroy(&r)
 	}
-	for name in control.UNDERLINES {
+	for name in verify_protocol.UNDERLINES {
 		item := fmt.bprintf(buffer[:], "underline=%s", name)
-		r, err := control.parse({"expect", "cell", "0,0", item})
+		r, err := verify_protocol.parse({"expect", "cell", "0,0", item})
 		testing.expectf(t, err.advice == "", "%s rejected", item)
-		control.request_destroy(&r)
+		verify_protocol.request_destroy(&r)
 	}
-	r, err := control.parse({"expect", "cell", "0,0", "text="})
+	r, err := verify_protocol.parse({"expect", "cell", "0,0", "text="})
 	testing.expect_value(t, err.advice, "")
-	control.request_destroy(&r)
+	verify_protocol.request_destroy(&r)
 }
 
 @(test)
 help_lists_the_catalogue_vocabulary :: proc(t: ^testing.T) {
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
-	testing.expect_value(t, control.help(&b, "cells"), control.Error.None)
+	testing.expect_value(t, verify_protocol.help(&b, "cells"), verify_protocol.Error.None)
 	cells := strings.to_string(b)
 	prefix := "Attributes, in order: "
 	end := ". Only nondefaults appear"
@@ -157,7 +157,7 @@ help_lists_the_catalogue_vocabulary :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(cells, underline_line))
 
 	strings.builder_reset(&b)
-	testing.expect_value(t, control.help(&b, "expect"), control.Error.None)
+	testing.expect_value(t, verify_protocol.help(&b, "expect"), verify_protocol.Error.None)
 	expect := strings.to_string(b)
 	text_name := catalogue_names({.Text}, "")
 	defer delete(text_name)

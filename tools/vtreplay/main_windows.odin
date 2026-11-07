@@ -1,11 +1,10 @@
 package main
 
-import "aio:control"
 import "aio:term"
+import "aio:verify_protocol"
 import "core:fmt"
 import "core:io"
 import "core:os"
-import "core:strconv"
 import "core:strings"
 
 USAGE :: `vtreplay <capture> [--screen [first:last]] [--cells <row> [first:last]]
@@ -33,8 +32,8 @@ Mode :: enum {
 Options :: struct {
 	capture: string,
 	mode:    Mode,
-	rows:    control.Range,
-	cells:   control.Cells,
+	rows:    verify_protocol.Range,
+	cells:   verify_protocol.Cells,
 	help:    bool,
 }
 
@@ -115,19 +114,19 @@ run :: proc(args: []string) -> int {
 	}
 	defer term.snapshot_destroy(&snapshot)
 	out := strings.builder_make(context.temp_allocator)
-	format_error: control.Error
+	format_error: verify_protocol.Error
 	switch options.mode {
 	case .Screen:
 		if failure := screen_range_failure(options.rows, int(snapshot.rows)); failure != "" {
 			return usage_failure(failure)
 		}
-		format_error = control.format_screen(&out, &snapshot, options.rows)
+		format_error = verify_protocol.format_screen(&out, &snapshot, options.rows)
 	case .Cells:
 		if failure := cells_range_failure(options.cells, int(snapshot.columns), int(snapshot.rows));
 		   failure != "" {
 			return usage_failure(failure)
 		}
-		format_error = control.format_cells(&out, &snapshot, options.cells)
+		format_error = verify_protocol.format_cells(&out, &snapshot, options.cells)
 	}
 	if format_error != .None {
 		fmt.eprintfln("error: formatting the replay failed (%v)", format_error)
@@ -171,7 +170,7 @@ parse :: proc(args: []string) -> (o: Options, failure: string) {
 			selector = true
 			i += 1
 			if i < len(args) && !strings.has_prefix(args[i], "--") {
-				rows, ok := parse_range(args[i], true)
+				rows, ok := verify_protocol.parse_range(args[i], true)
 				if !ok {
 					return {}, "use a nonnegative row or first:last after --screen"
 				}
@@ -187,14 +186,14 @@ parse :: proc(args: []string) -> (o: Options, failure: string) {
 			if i + 1 >= len(args) {
 				return {}, "supply a row after --cells"
 			}
-			row, ok := parse_number(args[i + 1])
+			row, ok := verify_protocol.parse_number(args[i + 1])
 			if !ok {
 				return {}, "use a nonnegative row after --cells"
 			}
 			o.cells.row = row
 			i += 2
 			if i < len(args) && !strings.has_prefix(args[i], "--") {
-				columns, columns_ok := parse_range(args[i], false)
+				columns, columns_ok := verify_protocol.parse_range(args[i], false)
 				if !columns_ok {
 					return {}, "use first:last columns after the row"
 				}
@@ -220,33 +219,7 @@ parse :: proc(args: []string) -> (o: Options, failure: string) {
 }
 
 @(private, require_results)
-parse_number :: proc(text: string) -> (int, bool) {
-	if text == "" {
-		return 0, false
-	}
-	for c in text {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-	}
-	value, ok := strconv.parse_int(text)
-	return value, ok && value >= 0
-}
-
-@(private, require_results)
-parse_range :: proc(text: string, single: bool) -> (control.Range, bool) {
-	separator := strings.index_byte(text, ':')
-	if separator < 0 {
-		value, ok := parse_number(text)
-		return {value, value, true}, ok && single
-	}
-	first, first_ok := parse_number(text[:separator])
-	last, last_ok := parse_number(text[separator + 1:])
-	return {first, last, true}, first_ok && last_ok && first <= last
-}
-
-@(private, require_results)
-screen_range_failure :: proc(rows: control.Range, count: int) -> string {
+screen_range_failure :: proc(rows: verify_protocol.Range, count: int) -> string {
 	if !rows.specified {
 		return ""
 	}
@@ -262,7 +235,7 @@ screen_range_failure :: proc(rows: control.Range, count: int) -> string {
 }
 
 @(private, require_results)
-cells_range_failure :: proc(request: control.Cells, columns, rows: int) -> string {
+cells_range_failure :: proc(request: verify_protocol.Cells, columns, rows: int) -> string {
 	if request.row < 0 || request.row >= rows {
 		return fmt.tprintf("row %d is outside the recorded %d rows", request.row, rows)
 	}

@@ -1,9 +1,9 @@
-package control_test
+package verify_protocol_test
 
 import "base:runtime"
 import "core:strings"
 import "core:testing"
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:input"
 
 fail_allocation :: proc(
@@ -52,29 +52,29 @@ parse_commands :: proc(t: ^testing.T) {
 		{"perf"}, {"perf", "--reset"}, {"vt", "record", "on"}, {"vt", "record", "off"},
 	}
 	for args in cases {
-		r, err := control.parse(args)
+		r, err := verify_protocol.parse(args)
 		testing.expect(t, err.advice == "", args[0])
-		control.request_destroy(&r)
+		verify_protocol.request_destroy(&r)
 	}
-	r, err := control.parse({"wait", "idle"})
-	defer control.request_destroy(&r)
+	r, err := verify_protocol.parse({"wait", "idle"})
+	defer verify_protocol.request_destroy(&r)
 	testing.expect_value(t, err.advice, "")
-	w := r.(control.Wait)
+	w := r.(verify_protocol.Wait)
 	testing.expect_value(t, w.idle_ms, 300)
 	testing.expect_value(t, w.timeout_ms, 5000)
-	run, run_error := control.parse({"run", "x"})
+	run, run_error := verify_protocol.parse({"run", "x"})
 	testing.expect_value(t, run_error.advice, "")
-	testing.expect_value(t, run.(control.Run).idle_ms, 300)
-	testing.expect_value(t, run.(control.Run).timeout_ms, 10000)
-	m, mouse_error := control.parse({"mouse", "click", "2,3"})
+	testing.expect_value(t, run.(verify_protocol.Run).idle_ms, 300)
+	testing.expect_value(t, run.(verify_protocol.Run).timeout_ms, 10000)
+	m, mouse_error := verify_protocol.parse({"mouse", "click", "2,3"})
 	testing.expect_value(t, mouse_error.advice, "")
-	testing.expect_value(t, m.(control.Mouse).button, input.Mouse_Button.Left)
-	testing.expect_value(t, m.(control.Mouse).position, control.Position{2, 3})
-	testing.expect(t, !m.(control.Mouse).pixels)
-	split, split_error := control.parse({"command", "pane.split", "--direction", "up",
+	testing.expect_value(t, m.(verify_protocol.Mouse).button, input.Mouse_Button.Left)
+	testing.expect_value(t, m.(verify_protocol.Mouse).position, verify_protocol.Position{2, 3})
+	testing.expect(t, !m.(verify_protocol.Mouse).pixels)
+	split, split_error := verify_protocol.parse({"command", "pane.split", "--direction", "up",
 		"--ratio", "0.3", "--focus", "false"})
 	testing.expect_value(t, split_error.advice, "")
-	s := split.(control.Command)
+	s := split.(verify_protocol.Command)
 	testing.expect_value(t, s.ratio, f32(0.3))
 	testing.expect(t, !s.focus)
 }
@@ -145,87 +145,77 @@ parse_errors :: proc(t: ^testing.T) {
 		{"vt", "record", "on", "x"},
 	}
 	for args in cases {
-		r, err := control.parse(args)
+		r, err := verify_protocol.parse(args)
 		testing.expect(t, err.advice != "")
-		control.request_destroy(&r)
+		verify_protocol.request_destroy(&r)
 	}
-	r, err := control.parse({"key", "A"}, failing_allocator())
-	control.request_destroy(&r)
+	r, err := verify_protocol.parse({"key", "A"}, failing_allocator())
+	verify_protocol.request_destroy(&r)
 	testing.expect(t, err.advice != "")
 }
 
 @(test)
-help_and_pipe_name :: proc(t: ^testing.T) {
+help_verbs :: proc(t: ^testing.T) {
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
-	testing.expect_value(t, control.help(&b), control.Error.None)
-	testing.expect_value(t, strings.to_string(b), control.HELP_OVERVIEW)
+	testing.expect_value(t, verify_protocol.help(&b), verify_protocol.Error.None)
+	testing.expect_value(t, strings.to_string(b), verify_protocol.HELP_OVERVIEW)
 	for command in ([]string{"ping", "screen", "cells", "state", "wait", "expect", "type", "key",
 		"run", "mouse", "focus", "resize", "dpi", "tray", "command", "window", "help", "capture",
 		"pixels", "diff", "draws", "perf", "vt"}) {
 		strings.builder_reset(&b)
-		testing.expect_value(t, control.help(&b, command), control.Error.None)
+		testing.expect_value(t, verify_protocol.help(&b, command), verify_protocol.Error.None)
 		testing.expect(t, strings.has_prefix(strings.to_string(b), command))
 	}
-	testing.expect_value(t, control.help(&b, "bad"), control.Error.Invalid_Argument)
-	name, err := control.pipe_name("test")
-	defer delete(name)
-	testing.expect_value(t, err, control.Error.None)
-	testing.expect_value(t, name, `\\.\pipe\test.control`)
-	for invalid in ([]string{"", "a/b", "a\\b", "a\x00b", "\xff"}) {
-		_, failure := control.pipe_name(invalid)
-		testing.expect_value(t, failure, control.Error.Invalid_Argument)
-	}
-	_, allocation_error := control.pipe_name("test", failing_allocator())
-	testing.expect_value(t, allocation_error, control.Error.Out_Of_Memory)
+	testing.expect_value(t, verify_protocol.help(&b, "bad"), verify_protocol.Error.Invalid_Argument)
 }
 
 @(test)
 window_requests_preserve_screen_coordinates_and_target_ids :: proc(t: ^testing.T) {
-	r, err := control.parse({"window", "select", "4294967297"})
+	r, err := verify_protocol.parse({"window", "select", "4294967297"})
 	testing.expect_value(t, err.advice, "")
-	testing.expect_value(t, r.(control.Window_Select).id, u64(4294967297))
-	r, err = control.parse({"window", "move", "-1920,-240"})
+	testing.expect_value(t, r.(verify_protocol.Window_Select).id, u64(4294967297))
+	r, err = verify_protocol.parse({"window", "move", "-1920,-240"})
 	testing.expect_value(t, err.advice, "")
-	testing.expect_value(t, r.(control.Window_Move).position, control.Position{-1920, -240})
-	r, err = control.parse({"mouse", "drag", "-1920,-240", "200,-300", "--screen"})
+	testing.expect_value(t, r.(verify_protocol.Window_Move).position, verify_protocol.Position{-1920, -240})
+	r, err = verify_protocol.parse({"mouse", "drag", "-1920,-240", "200,-300", "--screen"})
 	testing.expect_value(t, err.advice, "")
-	m := r.(control.Mouse)
-	testing.expect_value(t, m.position, control.Position{-1920, -240})
-	testing.expect_value(t, m.end, control.Position{200, -300})
+	m := r.(verify_protocol.Mouse)
+	testing.expect_value(t, m.position, verify_protocol.Position{-1920, -240})
+	testing.expect_value(t, m.end, verify_protocol.Position{200, -300})
 	testing.expect(t, m.screen && !m.pixels)
 }
 
 @(test)
 evidence_requests_default_to_the_whole_window :: proc(t: ^testing.T) {
-	capture, capture_error := control.parse({"capture"})
+	capture, capture_error := verify_protocol.parse({"capture"})
 	testing.expect_value(t, capture_error.advice, "")
-	testing.expect_value(t, capture.(control.Capture).region.kind, control.Region_Kind.Window)
-	testing.expect_value(t, capture.(control.Capture).output, "")
+	testing.expect_value(t, capture.(verify_protocol.Capture).region.kind, verify_protocol.Region_Kind.Window)
+	testing.expect_value(t, capture.(verify_protocol.Capture).output, "")
 
-	pixels, pixels_error := control.parse({"pixels"})
+	pixels, pixels_error := verify_protocol.parse({"pixels"})
 	testing.expect_value(t, pixels_error.advice, "")
-	testing.expect_value(t, pixels.(control.Pixels).region.kind, control.Region_Kind.Window)
-	testing.expect(t, !pixels.(control.Pixels).rows && !pixels.(control.Pixels).columns)
+	testing.expect_value(t, pixels.(verify_protocol.Pixels).region.kind, verify_protocol.Region_Kind.Window)
+	testing.expect(t, !pixels.(verify_protocol.Pixels).rows && !pixels.(verify_protocol.Pixels).columns)
 
-	cell, cell_error := control.parse({"capture", "--cell", "4,5"})
+	cell, cell_error := verify_protocol.parse({"capture", "--cell", "4,5"})
 	testing.expect_value(t, cell_error.advice, "")
-	region := cell.(control.Capture).region
-	testing.expect_value(t, region.kind, control.Region_Kind.Cells)
+	region := cell.(verify_protocol.Capture).region
+	testing.expect_value(t, region.kind, verify_protocol.Region_Kind.Cells)
 	testing.expect_value(t, region.x, 4)
 	testing.expect_value(t, region.y, 5)
 	testing.expect_value(t, region.width, 1)
 	testing.expect_value(t, region.height, 1)
 
-	sample, sample_error := control.parse({"pixels", "--sample", "2,3"})
+	sample, sample_error := verify_protocol.parse({"pixels", "--sample", "2,3"})
 	testing.expect_value(t, sample_error.advice, "")
-	testing.expect_value(t, sample.(control.Pixels).sample, control.Position{2, 3})
+	testing.expect_value(t, sample.(verify_protocol.Pixels).sample, verify_protocol.Position{2, 3})
 
-	draws, draws_error := control.parse({"draws", "--kind", "glyph"})
+	draws, draws_error := verify_protocol.parse({"draws", "--kind", "glyph"})
 	testing.expect_value(t, draws_error.advice, "")
-	testing.expect_value(t, draws.(control.Draws).kind, control.Draw_Kind.Glyph)
+	testing.expect_value(t, draws.(verify_protocol.Draws).kind, verify_protocol.Draw_Kind.Glyph)
 
-	vt, vt_error := control.parse({"vt", "record", "on"})
+	vt, vt_error := verify_protocol.parse({"vt", "record", "on"})
 	testing.expect_value(t, vt_error.advice, "")
-	testing.expect(t, vt.(control.Vt).recording)
+	testing.expect(t, vt.(verify_protocol.Vt).recording)
 }

@@ -153,14 +153,6 @@ theme.custom.mine.selection_foreground =
 }
 
 @(test)
-paths :: proc(t: ^testing.T) {
-	path, err := settings.default_path()
-	defer delete(path)
-	testing.expect_value(t, err, nil)
-	testing.expect(t, strings.has_suffix(path, "\\AIODev\\settings.ini"))
-}
-
-@(test)
 file_lifecycle :: proc(t: ^testing.T) {
 	directory, directory_error := os.mkdir_temp("tests/settings", "io-", context.allocator)
 	testing.expect_value(t, directory_error, nil)

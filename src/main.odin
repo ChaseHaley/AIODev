@@ -6,7 +6,7 @@ import "aio:platform"
 import "core:fmt"
 import "core:log"
 import "core:os"
-import "core:path/filepath"
+import "core:strings"
 
 main :: proc() {
 	code := start()
@@ -85,15 +85,22 @@ start :: proc() -> int {
 	case .Primary:
 		app.platform_ready = true
 	}
+	paths, paths_error := instance.paths(options)
+	defer instance.paths_destroy(&paths)
+	if paths_error != nil {log.errorf("locating the instance files failed: %v", paths_error)}
 	log_error: os.Error
-	logger.file, app.log_path, log_error = file_logger_create(options, level)
+	logger.file, app.log_path, log_error = file_logger_create(paths, level)
 	if log_error != nil {
 		log.errorf("opening the log file failed: %v", log_error)
 	}
-	if path, path_error := layout_path_create(options); path_error != nil {
-		log.errorf("locating the saved layout failed: %v", path_error)
+	if paths.layout == "" {
+		log.error("locating the saved layout failed: no local data directory")
+	} else if directory_error := os.mkdir_all(paths.local); directory_error != nil {
+		log.errorf("locating the saved layout failed: %v", directory_error)
+	} else if layout, layout_error := strings.clone(paths.layout); layout_error != nil {
+		log.errorf("locating the saved layout failed: %v", layout_error)
 	} else {
-		layout_state_enable(&app, path)
+		layout_state_enable(&app, layout)
 	}
 	if !app_init(&app) {return 1}
 	run(&app)
@@ -103,40 +110,18 @@ start :: proc() -> int {
 
 @(private, require_results)
 file_logger_create :: proc(
-	options: instance.Options,
+	paths: instance.Paths,
 	level: log.Level,
 ) -> (
 	log.Logger,
 	string,
 	os.Error,
 ) {
-	root, root_error := local_data_root(options)
-	if root_error != nil {return {}, "", root_error}
-	directory, directory_error := filepath.join({root, "logs"}, context.temp_allocator)
-	if directory_error != nil {return {}, "", directory_error}
-	if err := os.mkdir_all(directory); err != nil {return {}, "", err}
-	name, name_error := instance.log_file_name(options, context.temp_allocator)
-	if name_error != nil {return {}, "", name_error}
-	path, path_error := filepath.join({directory, name})
+	if paths.log == "" {return {}, "", os.General_Error.Env_Var_Not_Found}
+	if err := os.mkdir_all(paths.logs); err != nil {return {}, "", err}
+	path, path_error := strings.clone(paths.log)
 	if path_error != nil {return {}, "", path_error}
 	file, err := os.open(path, os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
 	if err != nil {return {}, path, err}
 	return log.create_file_logger(file, level), path, nil
-}
-
-// Machine-local state: the instance's data directory, else %LOCALAPPDATA%\AIODev.
-@(private, require_results)
-local_data_root :: proc(options: instance.Options) -> (string, os.Error) {
-	if options.data_dir != "" {return options.data_dir, nil}
-	base, found := os.lookup_env("LOCALAPPDATA", context.temp_allocator)
-	if !found {return "", os.General_Error.Env_Var_Not_Found}
-	return filepath.join({base, instance.APP_NAME}, context.temp_allocator)
-}
-
-@(private, require_results)
-layout_path_create :: proc(options: instance.Options) -> (path: string, err: os.Error) {
-	root := local_data_root(options) or_return
-	os.mkdir_all(root) or_return
-	name := instance.layout_file_name(options, context.temp_allocator) or_return
-	return filepath.join({root, name})
 }

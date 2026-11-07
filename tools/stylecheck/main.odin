@@ -87,7 +87,7 @@ rule_text :: proc(rule: Rule) -> string {
 	case .Unspaced_Operator:
 		return "put one space around a binary operator"
 	case .Line_Width:
-		return "keep the line within 110 columns"
+		return fmt.tprintf("keep the line within %d columns", MAX_WIDTH)
 	case .Design_Radius:
 		return "use RADIUS_CONTROL, RADIUS_OVERLAY or pill_radius() for a corner radius"
 	case .Design_Text_Size:

@@ -1,12 +1,12 @@
 package main
 
-import "aio:control"
 import "aio:draws"
 import "aio:render"
+import "aio:verify_protocol"
 import "core:fmt"
 import "core:strings"
 
-_ :: control
+_ :: verify_protocol
 _ :: draws
 _ :: fmt
 _ :: render
@@ -19,15 +19,12 @@ when AIO_CONTROL {
 	draws_read :: proc(
 		app: ^App,
 		out: ^strings.Builder,
-		request: control.Draws,
-	) -> control.Error {
+		request: verify_protocol.Draws,
+	) -> verify_protocol.Error {
 		w := verify_window(app)
-		if w == nil {
-			fmt.sbprintf(out, "error: window hidden; run tray open")
-			return .Invalid_Argument
-		}
-		// draws.Kind mirrors control.Draw_Kind, but map explicitly so a protocol reorder fails here
-		// rather than silently relabelling the filter.
+		if w == nil {return verify_protocol.explain(out, "window hidden; run tray open")}
+		// draws.Kind mirrors verify_protocol.Draw_Kind, but map explicitly so a protocol reorder
+		// fails here rather than silently relabelling the filter.
 		kind: draws.Kind
 		switch request.kind {
 		case .All:
@@ -46,17 +43,18 @@ when AIO_CONTROL {
 				height = f32(request.region.height),
 			}
 			if !draws.region_fits(region, int(w.width), int(w.height)) {
-				fmt.sbprintf(
+				return verify_protocol.explain(
 					out,
-					"error: region %d,%d,%d,%d is outside the window client area %dx%d",
-					request.region.x,
-					request.region.y,
-					request.region.width,
-					request.region.height,
-					w.width,
-					w.height,
+					fmt.tprintf(
+						"region %d,%d,%d,%d is outside the window client area %dx%d",
+						request.region.x,
+						request.region.y,
+						request.region.width,
+						request.region.height,
+						w.width,
+						w.height,
+					),
 				)
-				return .Invalid_Argument
 			}
 			filter.bounded, filter.region = true, region
 		}

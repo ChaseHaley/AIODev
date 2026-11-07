@@ -1,5 +1,6 @@
 package main
 
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:layout"
 import "aio:localpath"
@@ -12,26 +13,6 @@ import "core:strings"
 // The control side of the command core (WORK-038): what a CLI request names and gets back. Every
 // interface runs commands through command_execute; a control request passes Control_Request.
 
-// One terminal pane as the CLI reports it. Strings are temporary.
-Pane_Report :: struct {
-	id:             u32,
-	name, title:    string,
-	process:        string,
-	workspace:      u32,
-	workspace_name: string,
-	// The tab's position in its workspace, from 1.
-	tab:            int,
-	// Whether a window shows this pane focused and that window has keyboard focus.
-	focused:        bool,
-	status:         string,
-	exit_code:      u32,
-	directory:      string,
-}
-
-Command_Report :: struct {
-	name, title, usage: string,
-}
-
 // What an invocation produced. Key, palette and pointer invocations report through notices instead.
 // Strings and slices are temporary.
 Outcome :: struct {
@@ -40,8 +21,8 @@ Outcome :: struct {
 	// The pane a command created, or 0.
 	pane:      u32,
 	text:      string,
-	panes:     []Pane_Report,
-	catalogue: []Command_Report,
+	panes:     []cli_protocol.Pane_Report,
+	catalogue: []cli_protocol.Command_Report,
 }
 
 // A pane a control invocation acts on, with the identity mutation needs.
@@ -193,8 +174,8 @@ pane_target_session :: proc(app: ^App, id: u32) -> (Pane_Target, bool) {
 
 // Every terminal pane in workspace and tab order, or only `only`'s.
 @(private)
-pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
-	reports := make([dynamic]Pane_Report, context.temp_allocator)
+pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Report {
+	reports := make([dynamic]cli_protocol.Pane_Report, context.temp_allocator)
 	for workspace in app.workspaces {
 		if workspace.provisional || only != nil && only.workspace != workspace {continue}
 		w := window_for_workspace(app, workspace)
@@ -205,7 +186,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 			status := term.status(entry.session)
 			linked := pane_link_window_of(app, pane.content)
 			linked_focus := linked != nil && linked.focused && pane_link_content(linked) == pane.content
-			report := Pane_Report {
+			report := cli_protocol.Pane_Report {
 				id             = entry.id,
 				name           = entry.name,
 				title          = pane_header_title(&entry.header),
@@ -215,7 +196,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 				tab            = pane.tab + 1,
 				focused        = linked != nil ? linked_focus : w != nil && w.focused &&
 					workspace.selected == pane.tab && w.tree.focus == pane.node,
-				status         = PANE_STATUS_WORDS[status.kind],
+				status         = cli_protocol.PANE_STATUS_WORDS[PANE_STATUS[status.kind]],
 				exit_code      = status.exit_code,
 				directory      = entry.header.launch_directory,
 			}
@@ -229,17 +210,18 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []Pane_Report {
 	return reports[:]
 }
 
+// The CLI's word for each terminal status; a pane closed while running reports Closed instead.
 @(private, rodata)
-PANE_STATUS_WORDS := [term.Status_Kind]string {
-	.Running = "running",
-	.Exited  = "exited",
-	.Failed  = "failed",
+PANE_STATUS := [term.Status_Kind]cli_protocol.Pane_Status {
+	.Running = .Running,
+	.Exited  = .Exited,
+	.Failed  = .Failed,
 }
 
 // How a pane named by id, or the caller's own, ended after it closed: exited or failed with its
 // program, or closed while the program still ran.
 @(private)
-closed_pane_report :: proc(app: ^App, text: string, caller: u32) -> ([]Pane_Report, bool) {
+closed_pane_report :: proc(app: ^App, text: string, caller: u32) -> ([]cli_protocol.Pane_Report, bool) {
 	id, valid := pane_id_parse(text)
 	if text == "" || text == "here" {id, valid = caller, caller != 0}
 	if !valid {return nil, false}
@@ -247,10 +229,11 @@ closed_pane_report :: proc(app: ^App, text: string, caller: u32) -> ([]Pane_Repo
 		index := (app.closed_next - offset + len(app.closed_sessions)) % len(app.closed_sessions)
 		closed := app.closed_sessions[index]
 		if closed.id != id || id == 0 {continue}
-		report := make([]Pane_Report, 1, context.temp_allocator)
+		report := make([]cli_protocol.Pane_Report, 1, context.temp_allocator)
+		status := closed.status == .Running ? cli_protocol.Pane_Status.Closed : PANE_STATUS[closed.status]
 		report[0] = {
 			id        = id,
-			status    = closed.status == .Running ? "closed" : PANE_STATUS_WORDS[closed.status],
+			status    = cli_protocol.PANE_STATUS_WORDS[status],
 			exit_code = closed.exit_code,
 		}
 		return report, true
@@ -405,11 +388,11 @@ control_created :: proc(app: ^App, w: ^Window, id: u32, name: string) -> Outcome
 // Every command with its usage, or one command's when `name` is given.
 @(private)
 command_catalogue :: proc(app: ^App, name: string) -> Outcome {
-	reports := make([dynamic]Command_Report, context.temp_allocator)
+	reports := make([dynamic]cli_protocol.Command_Report, context.temp_allocator)
 	for &command in app.registry.items {
 		if name != "" && command.name != name {continue}
 		usage := commands.usage(&command, context.temp_allocator)
-		append(&reports, Command_Report{command.name, command.title, usage})
+		append(&reports, cli_protocol.Command_Report{command.name, command.title, usage})
 	}
 	if name != "" && len(reports) == 0 {return outcome_failure(.Usage, "unknown command; use aio commands")}
 	return {catalogue = reports[:]}

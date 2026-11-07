@@ -79,6 +79,7 @@ App :: struct {
 	verify:                Verify,
 	perf:                  perf.Stats,
 	options:               instance.Options,
+	paths:                 instance.Paths,
 	app_id:                string,
 	platform:              platform_api.Platform,
 	platform_ready:        bool,
@@ -91,6 +92,7 @@ App :: struct {
 	markdown_pick:         Maybe(File_Dialog),
 	// The file dialog behind Add File and Add Folder, and the pane it is choosing for.
 	document_pick:         Maybe(Document_Pick),
+	// The settings file this app reads and saves; app_init takes it from paths.
 	settings_path:         string,
 	log_path:              string,
 	fonts:                 ^font.System,
@@ -156,13 +158,21 @@ CLI_EXECUTABLE :: "aio.exe"
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
 	perf.start(&app.perf)
-	if app.options.data_dir != "" {
-		path, err := filepath.join({app.options.data_dir, "settings.ini"})
-		if err != nil {
-			log.errorf("constructing the settings path failed: %v", err)
-			return false
-		}
+	paths, paths_error := instance.paths(app.options)
+	if paths_error != nil {
+		log.errorf("locating the instance files failed: %v", paths_error)
+		return false
+	}
+	app.paths = paths
+	if app.paths.settings == "" {
+		log.error("locating the settings file failed: no settings directory")
+	} else if path, err := strings.clone(app.paths.settings); err != nil {
+		log.errorf("constructing the settings path failed: %v", err)
+		return false
+	} else {
 		app.settings_path = path
+	}
+	if app.options.data_dir != "" {
 		if directory_error := os.mkdir_all(app.options.data_dir); directory_error != nil {
 			log.errorf("creating the data directory failed: %v", directory_error)
 			return false
@@ -289,6 +299,7 @@ app_destroy :: proc(app: ^App) {
 	settings.destroy(&app.settings)
 	settings.diagnostics_destroy(&app.settings_diagnostics)
 	delete(app.settings_path)
+	instance.paths_destroy(&app.paths)
 	delete(app.log_path)
 	layout_state_disable(app)
 	delete(app.layout_saved)
@@ -690,13 +701,6 @@ Settings_Read :: struct {
 // Reads the settings file, or defaults when it cannot be read. Fails only when neither is available.
 @(private, require_results)
 settings_read :: proc(app: ^App) -> (read: Settings_Read, ok: bool) {
-	if app.settings_path == "" {
-		path, err := settings.default_path()
-		if err != nil {
-			log.errorf("locating the settings file failed: %v", err)
-		}
-		app.settings_path = path
-	}
 	comments, comment_count := binding_comments()
 	read.loaded, read.diagnostics, read.created, read.migrated, read.migration_error, read.read_error =
 		settings.load(

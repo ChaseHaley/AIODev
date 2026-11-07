@@ -10,9 +10,12 @@ import w "core:sys/windows"
 import "aio:control"
 import "aio:instance"
 import "aio:platform"
+import "aio:verify_protocol"
 
+// repo and executable are this repository's verify build outputs; files holds the instance's own
+// storage under data, as the app resolves it.
 @(private)
-Paths :: struct { repo, data, executable, pipe, app_id, record: string }
+Paths :: struct { repo, data, executable, pipe, app_id, record: string, files: instance.Paths }
 
 main :: proc() {
 	context.logger = log.Logger{procedure = diagnostic, lowest_level = .Warning}
@@ -66,6 +69,9 @@ make_paths :: proc(name: string) -> (Paths, bool) {
 	pipe, pipe_error := control.pipe_name(p.app_id, context.temp_allocator)
 	if pipe_error != .None || !safe_data_path(repo, p.data, name) { return {}, false }
 	p.pipe = pipe
+	files, files_error := instance.paths({name = name, data_dir = p.data}, context.temp_allocator)
+	if files_error != nil { return {}, false }
+	p.files = files
 	return p, true
 }
 
@@ -106,22 +112,16 @@ start :: proc() -> int {
 		)
 	}
 	defer control.close(&c)
-	timeout := 15000
-	request, parse_error := control.parse(o.args)
-	defer control.request_destroy(&request)
-	if parse_error.advice == "" {
-		#partial switch q in request {
-		case control.Wait: timeout = min(q.timeout_ms, int(max(i32))-1000)+1000
-		case control.Run: timeout = min(q.timeout_ms, int(max(i32))-1000)+1000
-		}
-	}
+	request, parse_error := verify_protocol.parse(o.args)
+	defer verify_protocol.request_destroy(&request)
+	timeout := verify_protocol.CLIENT_TIMEOUT_MS
+	if parse_error.advice == "" { timeout = verify_protocol.client_timeout_ms(request) }
 	response, call_error := control.call(&c, o.args, timeout)
 	defer control.response_destroy(&response)
 	if call_error != .None {
 		return fail(fmt.tprintf("control request failed (%v); run aioctl doctor", call_error))
 	}
-	if !response.ok && !strings.has_prefix(response.text, "error:") &&
-	   !strings.has_prefix(response.text, "FAIL") {
+	if !response.ok && !verify_protocol.reply_is_result(response.text) {
 		return fail(response.text)
 	}
 	fmt.println(response_body(response.text))
@@ -172,7 +172,7 @@ Output: stopped <name> pid=<pid> forced=<true|false> children=<n> data=<dir>
 	b, allocation_error := strings.builder_make()
 	if allocation_error != nil { return fail("not enough memory for help; retry") }
 	defer strings.builder_destroy(&b)
-	err := control.help(&b, command)
+	err := verify_protocol.help(&b, command)
 	if err != .None {
 		fmt.eprintln("error: unknown help command; use help")
 		return 2
@@ -310,8 +310,8 @@ launch_environment :: proc(keep: bool) -> ([]u16, bool) {
 spawn :: proc(o: Options, p: Paths) -> (w.PROCESS_INFORMATION, bool) {
 	log_path := wide(fmt.tprintf("%s\\stdout.log", p.data))
 	null_path := wide("NUL")
-	command_text := fmt.tprintf("\"%s\" --instance %s --data-dir \"%s\" --no-activate",
-		p.executable, o.name, p.data)
+	command_text := fmt.tprintf("\"%s\" %s %s %s \"%s\" %s", p.executable, instance.FLAG_INSTANCE, o.name,
+		instance.FLAG_DATA_DIR, p.data, instance.FLAG_NO_ACTIVATE)
 	if log_path == nil || null_path == nil { return {}, false }
 	sa := w.SECURITY_ATTRIBUTES{nLength = size_of(w.SECURITY_ATTRIBUTES), bInheritHandle = true}
 	output := w.CreateFileW(log_path, w.GENERIC_WRITE, w.FILE_SHARE_READ | w.FILE_SHARE_WRITE,
@@ -462,20 +462,18 @@ launch :: proc(o: Options, p: Paths) -> int {
 	if err := os.mkdir_all(p.data); err != nil {
 		return fail(fmt.tprintf("cannot create data directory: %v; check permissions", err))
 	}
-	if err := os.write_entire_file(fmt.tprintf("%s\\settings.ini", p.data), text); err != nil {
+	if err := os.write_entire_file(p.files.settings, text); err != nil {
 		return fail(fmt.tprintf("cannot write settings (%v); check data-directory permissions", err))
 	}
 	if !o.keep_layout {
-		name, name_error := instance.layout_file_name({name = o.name}, context.temp_allocator)
-		if name_error != nil { return fail("cannot name the saved layout; retry") }
-		if err := os.remove(fmt.tprintf("%s\\%s", p.data, name)); err != nil && err != .Not_Exist {
+		if err := os.remove(p.files.layout); err != nil && err != .Not_Exist {
 			return fail(fmt.tprintf("cannot remove the saved layout (%v); check permissions", err))
 		}
 	}
 	success := false
 	defer if !success {
 		log_tail(fmt.tprintf("%s\\stdout.log", p.data))
-		log_tail(fmt.tprintf("%s\\logs\\aiodev.%s.log", p.data, o.name))
+		log_tail(p.files.log)
 	}
 	start_time := time.tick_now()
 	info, spawned := spawn(o, p)
@@ -490,9 +488,10 @@ launch :: proc(o: Options, p: Paths) -> int {
 	created, created_ok := creation_time(info.hProcess)
 	if !created_ok { return fail("cannot record launch identity; inspect OS errors and retry") }
 	// Record ownership before the child can create a session.
-	history := o.shell != "" ? "custom-shell" : (o.settings != "" ? "settings-file" : "isolated")
-	record := fmt.tprintf("pid=%d\ncreated=%d\nexecutable=%s\nno_color=%s\nhistory=%s\n",
-		info.dwProcessId, created, p.executable, o.keep_env ? "kept" : "removed", history)
+	history := History.Isolated
+	if o.shell != "" { history = .Custom_Shell } else if o.settings != "" { history = .Settings_File }
+	record := record_text({info.dwProcessId, created, p.executable, o.keep_env, history},
+		context.temp_allocator)
 	if err := os.write_entire_file(p.record, record); err != nil {
 		return fail(fmt.tprintf("cannot record launch (%v); check directory permissions", err))
 	}
@@ -522,13 +521,16 @@ launch :: proc(o: Options, p: Paths) -> int {
 				step[0], err, response.text))
 		}
 		if step[0] == "ping" {
-			app_id, id_ok := response_field(response.text, "app", context.temp_allocator)
+			app_id, id_ok := verify_protocol.reply_field(response.text,
+				verify_protocol.PING_FIELDS[.App], context.temp_allocator)
 			if !id_ok || app_id != p.app_id { return fail("unexpected app identity; inspect the log tails") }
-			data, data_ok := response_field(response.text, "data", context.temp_allocator)
+			data, data_ok := verify_protocol.reply_field(response.text,
+				verify_protocol.PING_FIELDS[.Data], context.temp_allocator)
 			if !data_ok || !strings.equal_fold(data, p.data) {
 				return fail("unexpected data directory; inspect the log tails")
 			}
-			build_id, build_ok := response_field(response.text, "build", context.temp_allocator)
+			build_id, build_ok := verify_protocol.reply_field(response.text,
+				verify_protocol.PING_FIELDS[.Build], context.temp_allocator)
 			if !build_ok { return fail("missing build identity; rebuild with build.ps1 verify") }
 			build = build_id
 		}
@@ -607,7 +609,8 @@ doctor :: proc(o: Options, p: Paths, r: Record, verified: bool) -> int {
 	}
 	defer control.response_destroy(&ping)
 	failed = !check_line(pipe_ok, "pipe answers and server identity matches recorded process") || failed
-	app_id, id_ok := response_field(ping.text, "app", context.temp_allocator)
+	app_id, id_ok := verify_protocol.reply_field(ping.text, verify_protocol.PING_FIELDS[.App],
+		context.temp_allocator)
 	isolated := pipe_ok && id_ok && app_id == p.app_id
 	failed = !check_line(isolated, "instance is isolated from the owner's default") || failed
 	if !fresh_build(p) { failed = true }
@@ -627,8 +630,8 @@ doctor :: proc(o: Options, p: Paths, r: Record, verified: bool) -> int {
 		response, state_error := control.call(&c, {"state"}, 1000)
 		defer control.response_destroy(&response)
 		state_ok = state_error == .None && response.ok &&
-		           state_has(response.text, "session.status=running") &&
-		           state_has(response.text, "window.visible=true")
+		           state_is(response.text, "session.status", "running") &&
+		           state_is(response.text, "window.visible", "true")
 	}
 	failed = !check_line(state_ok, "session running and window visible") || failed
 	if failed {
@@ -640,12 +643,9 @@ doctor :: proc(o: Options, p: Paths, r: Record, verified: bool) -> int {
 }
 
 @(private)
-state_has :: proc(text, line: string) -> bool {
-	remaining := text
-	for entry in strings.split_lines_iterator(&remaining) {
-		if entry == line { return true }
-	}
-	return false
+state_is :: proc(text, key, value: string) -> bool {
+	observed, found := verify_protocol.reply_field(text, key, context.temp_allocator)
+	return found && observed == value
 }
 
 @(private, require_results)

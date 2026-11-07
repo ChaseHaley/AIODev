@@ -1,14 +1,14 @@
 package main
 
-import "aio:control"
 import "aio:font"
 import "aio:glyphs"
 import "aio:perf"
 import "aio:term"
+import "aio:verify_protocol"
 import "core:fmt"
 import "core:strings"
 
-_ :: control
+_ :: verify_protocol
 _ :: font
 _ :: glyphs
 _ :: perf
@@ -17,37 +17,15 @@ _ :: fmt
 _ :: strings
 
 // Timing evidence: format the counters recorded in the App's perf.Stats and in the packages that
-// own the remaining counters. The reply is the key=value list control.help documents for `perf`.
+// own the remaining counters, in verify_protocol.PERF_REPLY_FORMAT's order.
 
 when AIO_CONTROL {
-	@(private)
-	PERF_REPLY_FORMAT ::
-		"frames.presented=%d\n" +
-		"frames.built=%d\n" +
-		"frame.build.p50=%.3f\n" +
-		"frame.build.p95=%.3f\n" +
-		"frame.build.max=%.3f\n" +
-		"frame.render.p50=%.3f\n" +
-		"frame.render.p95=%.3f\n" +
-		"frame.render.max=%.3f\n" +
-		"input.latency.last=%.3f\n" +
-		"input.latency.p50=%.3f\n" +
-		"input.latency.p95=%.3f\n" +
-		"input.latency.max=%.3f\n" +
-		"pty.bytes=%d\n" +
-		"pty.bytes_per_second=%.3f\n" +
-		"shape.calls=%d\n" +
-		"glyph.hits=%d\n" +
-		"glyph.misses=%d\n" +
-		"idle.presents=%d\n" +
-		"uptime.ms=%d\n"
-
 	@(require_results)
 	perf_read :: proc(
 		app: ^App,
 		out: ^strings.Builder,
-		request: control.Perf,
-	) -> control.Error {
+		request: verify_protocol.Perf,
+	) -> verify_protocol.Error {
 		s := perf.snapshot(&app.perf)
 		pty_bytes: u64
 		for entry in app.sessions {
@@ -62,7 +40,7 @@ when AIO_CONTROL {
 		buffer: [1024]u8
 		text := fmt.bprintf(
 			buffer[:],
-			PERF_REPLY_FORMAT,
+			verify_protocol.PERF_REPLY_FORMAT,
 			s.presented,
 			s.built,
 			s.build.p50_ms,
@@ -84,8 +62,7 @@ when AIO_CONTROL {
 			s.uptime_ms,
 		)
 		if _, err := append(&out.buf, ..transmute([]u8)text); err != nil {
-			strings.write_string(out, "error: not enough memory for the perf reply")
-			return .Out_Of_Memory
+			return verify_protocol.explain(out, "not enough memory for the perf reply", .Out_Of_Memory)
 		}
 		if request.reset {
 			// Every printed counter belongs to its owner, so reset each one after the reply is

@@ -1,5 +1,6 @@
 package cli
 
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:control"
 import "aio:instance"
@@ -40,7 +41,7 @@ start :: proc() -> commands.Status {
 	}
 	defer instance.command_line_destroy(args, context.allocator)
 	if len(args) == 0 || len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
-		fmt.print(USAGE)
+		print_usage()
 		return len(args) == 0 ? .Usage : .Ok
 	}
 	// These outlive wait's per-poll release of the temporary allocator.
@@ -118,17 +119,7 @@ send :: proc(pipe: string, request: []string) -> (control.Response, commands.Sta
 		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
 		return {}, .Unreachable
 	}
-	if response.status != 0 {return response, commands.Status(response.status)}
-	return response, response.ok ? .Ok : .Failed
-}
-
-@(private)
-Wait_Reply :: struct {
-	error: string,
-	panes: []struct {
-		status:    string,
-		exit_code: u32,
-	},
+	return response, cli_protocol.response_status(response)
 }
 
 // Polls until the pane shows the text or its program exits, so no request holds the pipe.
@@ -146,7 +137,7 @@ wait :: proc(o: Options, pipe, caller: string) -> commands.Status {
 	start := time.tick_now()
 	for {
 		response, status := send(pipe, request(query, caller, context.temp_allocator))
-		reply: Wait_Reply
+		reply: cli_protocol.Reply_Json
 		parsed := o.wait.exit &&
 			json.unmarshal_string(response.text, &reply, allocator = context.temp_allocator) == nil
 		if status != .Ok {
@@ -162,10 +153,12 @@ wait :: proc(o: Options, pipe, caller: string) -> commands.Status {
 			}
 			// AIODev remembers how recently closed panes ended, so a program that exits before the
 			// first poll still reports its code. A pane closed while running reports closed.
-			switch pane := reply.panes[0]; pane.status {
-			case "running":
-			case "closed":
-				fmt.println(o.json ? response.text : "closed")
+			pane := reply.panes[0]
+			pane_status, known := cli_protocol.pane_status_parse(pane.status)
+			switch {
+			case known && pane_status == .Running:
+			case known && pane_status == .Closed:
+				fmt.println(o.json ? response.text : cli_protocol.PANE_STATUS_WORDS[.Closed])
 				return .Ok
 			case:
 				fmt.println(o.json ? response.text : fmt.tprintf("%d", pane.exit_code))

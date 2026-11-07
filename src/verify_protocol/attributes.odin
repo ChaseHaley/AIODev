@@ -1,4 +1,4 @@
-package control
+package verify_protocol
 
 import "aio:colour"
 import "aio:term"

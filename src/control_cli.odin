@@ -1,5 +1,6 @@
 package main
 
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:control"
 import "core:encoding/json"
@@ -7,12 +8,7 @@ import "core:fmt"
 import "core:log"
 import "core:strings"
 
-// The aio command line's side of the CLI pipe. A request is a JSON string array:
-// [caller pane id or "", "text" or "json", command name, arguments...]. The reply's status is the
-// CLI exit code (D-046).
-
-@(private)
-CLI_REQUEST_HEADER :: 2
+// The aio command line's side of the CLI pipe; cli_protocol owns the request and reply shapes.
 
 // The CLI pipe's state; nil is off. A pipe that failed to start stays failed while control.enabled
 // stays on, so the settings syncs that follow do not retry it and repeat the notice; turning the
@@ -33,7 +29,7 @@ control_cli_sync :: proc(app: ^App) {
 	if app.cli != nil {return}
 	name, err := control.cli_pipe_name(app.app_id, context.temp_allocator)
 	server: ^control.Server
-	if err == .None {server, err = control.create(name, {wake_platform, &app.platform}, raw = true)}
+	if err == .None {server, err = control.create(name, {wake_platform, &app.platform})}
 	if err != .None {
 		log.errorf("starting the command line pipe failed: %v", err)
 		notify(app, .Error, "Could not start command line control. Check the log, then turn it off and on.")
@@ -63,24 +59,21 @@ control_cli_tick :: proc(app: ^App) {
 
 @(require_results)
 control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
-	if len(args) <= CLI_REQUEST_HEADER || (args[1] != "text" && args[1] != "json") {
+	request, well_formed := cli_protocol.request_decode(args)
+	if !well_formed {
 		return control_cli_reply(
 			outcome_failure(.Usage, "malformed request; use the aio that came with this AIODev"),
 			false,
 		)
 	}
-	json_output := args[1] == "json"
+	json_output := request.format == .Json
 	caller: u32
-	if args[0] != "" {
-		id, valid := pane_id_parse(args[0])
+	if request.caller != "" {
+		id, valid := pane_id_parse(request.caller)
 		if !valid {return control_cli_reply(outcome_failure(.Usage, "AIODEV_PANE is not a pane id"), json_output)}
 		caller = id
 	}
-	invocation, parse_error := commands.parse_invocation(
-		&app.registry,
-		args[CLI_REQUEST_HEADER:],
-		context.temp_allocator,
-	)
+	invocation, parse_error := commands.parse_invocation(&app.registry, request.command, context.temp_allocator)
 	if parse_error.advice != "" {
 		message := fmt.tprintf("%q: %s", parse_error.argument, parse_error.advice)
 		return control_cli_reply(outcome_failure(.Usage, message), json_output)
@@ -88,26 +81,14 @@ control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
 	return control_cli_reply(command_execute(app, Control_Request{caller}, invocation), json_output)
 }
 
-@(private)
-Cli_Json :: struct {
-	ok:       bool,
-	status:   u8,
-	error:    string,
-	pane:     u32,
-	text:     string,
-	panes:    []Pane_Report,
-	commands: []Command_Report,
-}
-
+// The reply text follows whichever Outcome field the command filled: a failure's message, a
+// created pane, one command's usage, the catalogue, the pane list, else the text.
 @(private)
 control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Response {
-	ok := outcome.status == .Ok
-	response := control.Response {
-		ok     = ok,
-		status = u8(outcome.status),
-	}
+	response := cli_protocol.response(outcome.status, "")
+	ok := response.ok
 	if json_output {
-		document := Cli_Json {
+		document := cli_protocol.Reply_Json {
 			ok       = ok,
 			status   = u8(outcome.status),
 			error    = outcome.message,
@@ -118,7 +99,7 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 		}
 		data, err := json.marshal(document, {}, context.temp_allocator)
 		if err != nil {
-			return {ok = false, text = "not enough memory for the reply", status = u8(commands.Status.Failed)}
+			return cli_protocol.response(.Failed, "not enough memory for the reply")
 		}
 		response.text = string(data)
 		return response

@@ -1,5 +1,7 @@
-package control
+package verify_protocol
 
+import "aio:commands"
+import "aio:layout"
 import "core:strings"
 
 HELP_OVERVIEW :: `aioctl <command> [arguments]
@@ -12,6 +14,29 @@ Expect prints one PASS or FAIL line; FAIL includes observed state.
 Requests use the isolated instance's local, current-user-only control pipe.
 Client commands launch, doctor, and stop are documented by aioctl.
 `
+
+// The perf reply, one key=value line per counter in the order the perf help lists them. Times are
+// milliseconds.
+PERF_REPLY_FORMAT ::
+	"frames.presented=%d\n" +
+	"frames.built=%d\n" +
+	"frame.build.p50=%.3f\n" +
+	"frame.build.p95=%.3f\n" +
+	"frame.build.max=%.3f\n" +
+	"frame.render.p50=%.3f\n" +
+	"frame.render.p95=%.3f\n" +
+	"frame.render.max=%.3f\n" +
+	"input.latency.last=%.3f\n" +
+	"input.latency.p50=%.3f\n" +
+	"input.latency.p95=%.3f\n" +
+	"input.latency.max=%.3f\n" +
+	"pty.bytes=%d\n" +
+	"pty.bytes_per_second=%.3f\n" +
+	"shape.calls=%d\n" +
+	"glyph.hits=%d\n" +
+	"glyph.misses=%d\n" +
+	"idle.presents=%d\n" +
+	"uptime.ms=%d\n"
 
 @(private)
 put_attribute_names :: proc(
@@ -62,15 +87,31 @@ put_underline_names :: proc(w: ^Writer, include_none: bool, separator: string) {
 	}
 }
 
+// The help spells the split shares literally; these keep the text in step with the declarations.
+#assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
+#assert(SPLIT_RATIO == 0.5)
+
+@(private)
+put_direction_words :: proc(w: ^Writer) {
+	for word, direction in commands.DIRECTION_WORDS {
+		if direction != min(layout.Direction) {put(w, "|")}
+		put(w, word)
+	}
+}
+
 @(require_results)
 help :: proc(out: ^strings.Builder, command: string = "") -> Error {
 	w := Writer {
 		out = out,
 	}
-	switch command {
-	case "":
+	if command == "" {
 		put(&w, HELP_OVERVIEW)
-	case "ping":
+		return w.error
+	}
+	verb, known := verb_parse(command)
+	if !known {return .Invalid_Argument}
+	switch verb {
+	case .Ping:
 		put(
 			&w,
 			`ping
@@ -79,7 +120,7 @@ pid=<pid> app=<app id> build=<build id> data=<dir|default> settings=<path> log=<
 No arguments or defaults.
 `,
 		)
-	case "screen":
+	case .Screen:
 		put(
 			&w,
 			`screen [<first>[:<last>]]
@@ -91,7 +132,7 @@ Example: 1|hi
 Out-of-grid ranges fail; this reads terminal state, not rendered pixels.
 `,
 		)
-	case "cells":
+	case .Cells:
 		put(
 			&w,
 			`cells <row> [<first>:<last>]
@@ -111,7 +152,7 @@ Underline values: `)
 Out-of-grid rows or columns fail.
 `,
 		)
-	case "state":
+	case .State:
 		put(
 			&w,
 			`state
@@ -130,20 +171,25 @@ Hidden tabs retain their sessions and last grid size; only visible panes have cu
 No arguments or defaults. Available keys come from the app; screen/cells inspect the focused pane.
 `,
 		)
-	case "wait":
+	case .Wait:
+		put(&w, `wait text <s> | gone <s> | idle [<ms>] | frame [--timeout <ms>]
+Every form accepts --timeout; default `)
+		integer(&w, WAIT_TIMEOUT_MS)
+		put(&w, ` ms. Idle defaults to `)
+		integer(&w, IDLE_MS)
 		put(
 			&w,
-			`wait text <s> | gone <s> | idle [<ms>] | frame [--timeout <ms>]
-Every form accepts --timeout; default 5000 ms. Idle defaults to 300 ms without terminal activity.
+			` ms without terminal activity.
 Text/gone wait for row-text presence/absence; frame waits for a subsequent presented frame.
 Keeps the request pending without blocking the app's main loop. Timeout fails with observed state.
 Output is one PASS or FAIL line with elapsed time; failures include observed state.
 Examples: PASS wait idle 300ms after 840ms
 FAIL wait text "done": timeout after 5000ms; last rows: 1|hi 2|PS C:\>
-Milliseconds are nonnegative integers, at most 2147483647.
-`,
+Milliseconds are nonnegative integers, at most `,
 		)
-	case "expect":
+		integer(&w, MAX_NUMBER)
+		put(&w, ".\n")
+	case .Expect:
 		put(
 			&w,
 			`expect text <s> | no-text <s> | cursor <col>,<row>
@@ -172,7 +218,7 @@ Example: PASS cell 0,1 "X" underline=single
 Failure includes expected and observed values plus cell content, cursor, or recent rows.
 `,
 		)
-	case "type":
+	case .Type:
 		put(
 			&w,
 			`type <text>
@@ -182,7 +228,7 @@ Example: ok; rows 1-2 changed
 No defaults; the empty string is allowed. Use key for shortcuts, run for a shell line.
 `,
 		)
-	case "key":
+	case .Key:
 		put(
 			&w,
 			`key <chord> [<chord>...]
@@ -194,19 +240,25 @@ Key names address physical positions. Physical+ and Leader+ are binding metadata
 This proves app input handling; it does not test Win32 keyboard-message translation.
 `,
 		)
-	case "run":
+	case .Run:
+		put(&w, `run <line> [--idle <ms>] [--timeout <ms>]
+Types a shell line, presses Enter, then waits for terminal idle.
+Defaults: --idle `)
+		integer(&w, IDLE_MS)
+		put(&w, ", --timeout ")
+		integer(&w, RUN_TIMEOUT_MS)
+		put(&w, " milliseconds; nonnegative, at most ")
+		integer(&w, MAX_NUMBER)
 		put(
 			&w,
-			`run <line> [--idle <ms>] [--timeout <ms>]
-Types a shell line, presses Enter, then waits for terminal idle.
-Defaults: --idle 300, --timeout 10000 milliseconds; nonnegative, at most 2147483647.
+			`.
 Proves the input-to-terminal path, not shell success. Use expect to check the result.
 Output starts with ok; <changes>, followed by the last three non-blank rows. Failures start with error:.
 Example: ok; rows 1-2 changed
 1|hi
 `,
 		)
-	case "mouse":
+	case .Mouse:
 		put(
 			&w,
 			`mouse move|down|up|click <pos> [options]
@@ -221,7 +273,7 @@ Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start wi
 Options may appear in any order after positions.
 `,
 		)
-	case "capture":
+	case .Capture:
 		put(
 			&w,
 			`capture [--cell <c,r[,w,h]> | --region <x,y,w,h>] [--out <file.png>]
@@ -234,7 +286,7 @@ Proves rasterization, blending, and pixel-grid alignment at the current DPI. It 
 OS composition such as the frame color or shadow; use win32.ps1 -Shot for those.
 `,
 		)
-	case "pixels":
+	case .Pixels:
 		put(
 			&w,
 			`pixels [--cell | --region] [--rows | --columns] [--sample x,y]
@@ -246,7 +298,7 @@ where x,y are relative to the resolved region. Use --sample for exact colors; us
 alignment and unintended-change checks.
 `,
 		)
-	case "diff":
+	case .Diff:
 		put(
 			&w,
 			`diff <baseline.png>
@@ -256,7 +308,7 @@ Fails when the baseline is missing, is not a PNG, or has a different size.
 Proves visual locality: only the intended cells changed.
 `,
 		)
-	case "draws":
+	case .Draws:
 		put(
 			&w,
 			`draws [--region <x,y,w,h>] [--kind rect|glyph]
@@ -271,7 +323,7 @@ image <i> <x,y> <w>x<h>, only without --kind
 --kind limits instance lines to rect or glyph. Coordinates are client pixels.
 `,
 		)
-	case "perf":
+	case .Perf:
 		put(
 			&w,
 			`perf [--reset]
@@ -284,7 +336,7 @@ These are diagnostics for a candidate, not a benchmark receipt; use the TermBenc
 performance gates.
 `,
 		)
-	case "vt":
+	case .Vt:
 		put(
 			&w,
 			`vt record on|off
@@ -296,7 +348,7 @@ The capture is written under the instance data directory and is not committed.
 Feed it to tools\vtreplay to reproduce screen and cell state without a shell.
 `,
 		)
-	case "window":
+	case .Window:
 		put(
 			&w,
 			`window select <id>
@@ -309,7 +361,7 @@ Coordinates are signed 32-bit integers; quote x,y in PowerShell. Unknown window 
 Output is one line: ok; <changes>. No defaults.
 `,
 		)
-	case "focus":
+	case .Focus:
 		put(
 			&w,
 			`focus in|out
@@ -318,25 +370,31 @@ Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start wi
 No defaults; does not activate an OS window.
 `,
 		)
-	case "resize":
+	case .Resize:
+		put(&w, `resize <cols>x<rows>
+Resizes the real window on the main thread, proving the normal terminal resize path.
+Both dimensions must be 1..`)
+		integer(&w, MAX_GRID_DIMENSION)
 		put(
 			&w,
-			`resize <cols>x<rows>
-Resizes the real window on the main thread, proving the normal terminal resize path.
-Both dimensions must be 1..1000; no defaults.
+			`; no defaults.
 Output is one line: ok; <changes>, e.g. ok; rows 1-2 changed. Failures start with error:.
 `,
 		)
-	case "dpi":
+	case .Dpi:
+		put(&w, `dpi <dpi>
+Requests a translated DPI change; proves app layout/rasterization handling, not OS monitor delivery.
+Range `)
+		integer(&w, MIN_DPI)
+		put(&w, "..")
+		integer(&w, MAX_DPI)
 		put(
 			&w,
-			`dpi <dpi>
-Requests a translated DPI change; proves app layout/rasterization handling, not OS monitor delivery.
-Range 48..768; no default.
+			`; no default.
 Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start with error:.
 `,
 		)
-	case "tray":
+	case .Tray:
 		put(
 			&w,
 			`tray open|hide|quit
@@ -344,25 +402,28 @@ Runs tray actions through the app's normal path; quit fully exits and stops mana
 No defaults. Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start with error:.
 `,
 		)
-	case "command":
+	case .Command:
+		put(&w, `command <command name> [pane.split options]
+pane.split accepts --direction `)
+		put_direction_words(&w)
+		put(&w, ", --ratio 0.05..0.95 (new pane's share),\nand --focus true|false. Defaults: ")
+		put(&w, commands.DIRECTION_WORDS[SPLIT_DIRECTION])
+		put(&w, ", 0.5")
+		put(&w, SPLIT_FOCUS ? ", true" : ", false")
 		put(
 			&w,
-			`command <command name> [pane.split options]
-pane.split accepts --direction left|right|up|down, --ratio 0.05..0.95 (new pane's share),
-and --focus true|false. Defaults: right, 0.5, true. Other commands accept no options.
+			`. Other commands accept no options.
 Invokes a registered palette command by stable name, e.g. command app.reload_settings.
 Proves command dispatch. Output is one line: ok; <changes>. Failures start with error:.
 Example: ok; rows 1-2 changed; palette open "rel" app.reload_settings
 No defaults. Unknown or unavailable commands fail with an explanation from the app.
 `,
 		)
-	case "help":
+	case .Help:
 		put(
 			&w,
 			"help [command]\nShows grammar, evidence, output, and defaults. Default: command overview.\n",
 		)
-	case:
-		return .Invalid_Argument
 	}
 	return w.error
 }

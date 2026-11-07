@@ -56,23 +56,25 @@ Plan :: struct {
 }
 
 // classify maps changed paths to tier obligations. It does not inspect the filesystem; finalize adds
-// the missing-test fallback and drops packages that do not exist.
+// the missing-test fallback and drops packages that do not exist. Both see the paths with forward
+// slashes.
 @(require_results)
 classify :: proc(paths: []string, allocator := context.allocator) -> Plan {
 	plan := Plan {
 		allocator = allocator,
-		paths     = paths,
+		paths     = make([]string, len(paths), allocator),
 		tests     = make([dynamic]string, allocator),
 		reasons   = make([dynamic]string, allocator),
 	}
-	for raw in paths {
-		path, _ := strings.replace_all(raw, "\\", "/", context.temp_allocator)
-		classify_path(&plan, path)
+	for raw, i in paths {
+		plan.paths[i], _ = strings.replace_all(raw, "\\", "/", context.temp_allocator)
+		classify_path(&plan, plan.paths[i])
 	}
 	return plan
 }
 
 plan_destroy :: proc(plan: ^Plan) {
+	delete(plan.paths, plan.allocator)
 	delete(plan.tests)
 	delete(plan.reasons)
 	plan^ = {}
