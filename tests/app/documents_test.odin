@@ -207,9 +207,8 @@ center :: proc(r: [4]f32) -> (f32, f32) {return r[0] + r[2] / 2, r[1] + r[3] / 2
 
 @(private = "file")
 open_button :: proc(s: ^app.App, w: ^app.Window) {
-	r := w.panes[0].rect
-	l := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
-	x, y := center(transmute([4]f32)l.buttons[int(ui.Header_Action.Documents) - 1])
+	l := app.pane_header_layout(w, w.panes[0])
+	x, y := center(transmute([4]f32)l.buttons[.Documents])
 	press(s, w, x, y)
 }
 

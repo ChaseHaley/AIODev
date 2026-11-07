@@ -2,7 +2,6 @@ package app_test
 
 import app "../../src"
 import "aio:input"
-import "aio:layout"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -16,10 +15,10 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 	if !palette_fixture_create(t, &f, "dock-default-menu", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	for scale in ([?]f32{1, 1.5}) {
-		for node in ([?]layout.Node_Id{app.RAIL_DIVIDER, app.ACTIVITY_DIVIDER, app.ACTIVITY_HEIGHT_DIVIDER}) {
+		for edge in ([?]app.Dock_Edge{.Rail_Width, .Activity_Width, .Activity_Height}) {
 			saved := app.settings_save_value(s, "status.panel", "true", "enable Activity")
 			if !testing.expect(t, saved) {return}
-			side := node == app.ACTIVITY_HEIGHT_DIVIDER ? "left" : "right"
+			side := edge == .Activity_Height ? "left" : "right"
 			saved = app.settings_save_value(s, "status.panel_side", side, "set side")
 			if !testing.expect(t, saved) {return}
 			saved = app.settings_save_value(s, "tabs.orientation", "vertical", "set orientation")
@@ -29,8 +28,9 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			app.rail_adaptive_update(w)
 			app.window_relayout(s, w)
 			x, y: f32
-			for d in w.dividers {
-				if d.node == node {x, y = d.rect.x + d.rect.width / 2, d.rect.y + d.rect.height / 2}
+			for shown, i in w.dock_edges.edges[:w.dock_edges.count] {
+				r := w.dock_edges.bars[i].rect
+				if shown == edge {x, y = r.x + r.width / 2, r.y + r.height / 2}
 			}
 			before, read_error := os.read_entire_file(f.path, context.temp_allocator)
 			if !testing.expect_value(t, read_error, nil) {return}
@@ -38,7 +38,7 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			gesture_button(s, w, .Right, false, x, y)
 			divider, shown := w.overlay.(app.Overlay_Divider_Menu)
 			testing.expect(t, shown)
-			testing.expect_value(t, divider.node, node)
+			testing.expect_value(t, divider.edge, edge)
 			testing.expect_value(t, len(w.divider_menu.items), 1)
 			testing.expect_value(t, w.divider_menu.items[0].label, "Set as Default Size")
 			testing.expect_value(t, divider_count(w), 0)
@@ -51,10 +51,10 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			gesture_button(s, w, .Right, false, x, y)
 			key: string
 			expected: int
-			switch node {
-			case app.RAIL_DIVIDER: key, expected = "tabs.rail_width", 272
-			case app.ACTIVITY_DIVIDER: key, expected = "status.panel_width", 354
-			case app.ACTIVITY_HEIGHT_DIVIDER:
+			switch edge {
+			case .Rail_Width: key, expected = "tabs.rail_width", 272
+			case .Activity_Width: key, expected = "status.panel_width", 354
+			case .Activity_Height:
 				key = "status.panel_height"
 				expected = int(math.round(100 * app.status_panel_rail_height(s, w) / app.rail_area(w).height))
 			}
@@ -70,13 +70,13 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			text, err := os.read_entire_file(f.path, context.temp_allocator)
 			testing.expect_value(t, err, nil)
 			testing.expect(t, strings.contains(string(text), fmt.tprintf("%s = %d", key, expected)))
-			app.dock_divider_reset(w, node)
+			app.dock_edge_reset(w, edge)
 			app.window_relayout(s, w)
-			switch node {
-			case app.RAIL_DIVIDER: testing.expect_value(t, app.rail_width_pixels(w), f32(expected) * scale)
-			case app.ACTIVITY_DIVIDER:
+			switch edge {
+			case .Rail_Width: testing.expect_value(t, app.rail_width_pixels(w), f32(expected) * scale)
+			case .Activity_Width:
 				testing.expect_value(t, app.status_panel_dock_width(s, w), f32(expected) * scale)
-			case app.ACTIVITY_HEIGHT_DIVIDER:
+			case .Activity_Height:
 				testing.expect_value(t, s.settings.status.panel_height, expected)
 			}
 		}

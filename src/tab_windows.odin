@@ -85,11 +85,11 @@ tab_drag_over :: proc(app: ^App, w, destination: ^Window, x, y: f32) {
 	a, _ := tab_drag_state(w)
 	if a == nil {return}
 	if destination == nil {
-		drag_retarget(app, w, a, nil)
+		tab_drag_retarget(app, w, a, nil)
 		return
 	}
 	slot := tab_drop_slot(app, destination, tabs_marked_count(w.workspace), x, y)
-	drag_retarget(app, w, a, Drop_Other_Window{destination.id, slot})
+	tab_drag_retarget(app, w, a, Drop_Other_Window{destination.id, slot})
 }
 
 // Holds w's workspace dropdown open while the pointer is on it, as for a pane.
@@ -100,12 +100,14 @@ tab_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32) -> boo
 	grabbed := carry.grabbed
 	request := Workspace_Move_Request{source.workspace.id, grabbed.id, grabbed.tree.focus, true}
 	allows := tab_window_source_allows(source.workspace)
-	held, on := workspace_picker_drag_hover(app, a.destination, w, x, y, request, allows)
+	held, on := workspace_picker_drag_hover(app, a, w, x, y, request, allows)
 	if !on {
-		if _, holding := a.destination.(Drop_Workspace_Dropdown); holding {drag_retarget(app, source, a, nil)}
+		if _, holding := carry.destination.(Drop_Workspace_Dropdown); holding {
+			tab_drag_retarget(app, source, a, nil)
+		}
 		return false
 	}
-	drag_retarget(app, source, a, held)
+	tab_drag_retarget(app, source, a, held)
 	source.dirty, w.dirty = true, true
 	return true
 }
@@ -126,7 +128,7 @@ tab_drag_windows_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	}
 	if !ok || point.window != nil || !tab_window_source_allows(w.workspace) {return false}
 	_ = tear_off_preview_ensure(app, a, true)
-	drag_retarget(app, w, a, Drop_Tear_Off{})
+	tab_drag_retarget(app, w, a, Drop_Tear_Off{})
 	_, ready := a.preview.(Preview_Ready)
 	region := window_content_area(app, w)
 	drag_thumbnail_sync(app, w, &a.thumbnail, region, ready, point.screen_x, point.screen_y)
@@ -328,7 +330,7 @@ tab_incoming_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 // The thumbnail copies the tab live, so the source marks it with an outline and nothing over its text.
 tab_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if a, _ := tab_drag_state(w); a != nil {
-		_, tear_off := a.destination.(Drop_Tear_Off)
+		tear_off := drag_tearing_off(a)
 		_, ready := a.preview.(Preview_Ready)
 		if tear_off && ready {tab_drag_outline(app, w)}
 	}

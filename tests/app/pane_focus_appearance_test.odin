@@ -5,7 +5,6 @@ import "core:testing"
 import app "../../src"
 import "aio:platform"
 import "aio:render"
-import "aio:ui"
 
 @(test)
 pane_focus_appearance_follows_keyboard_focus_across_windows :: proc(t: ^testing.T) {
@@ -44,7 +43,7 @@ pane_focus_appearance_follows_keyboard_focus_across_windows :: proc(t: ^testing.
 						if rect.rect == r && rect.color.a == 0.45 && rect.stroke == 0 {dimmed = true}
 					}
 					testing.expect_value(t, dimmed, !focused)
-					header := ui.header_layout(r, w.scale)
+					header := app.pane_header_layout(w, pane)
 					title_ink := focused ? s.theme.text : s.theme.muted
 					title_found := false
 					for glyph in w.list.glyphs {

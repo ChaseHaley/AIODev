@@ -137,10 +137,15 @@ rail_width_pixels :: proc(w: ^Window) -> f32 {
 	return ui.rail_pixel_width(w.scale, width > 0 ? width : ui.RAIL_WIDTH, f32(w.width))
 }
 
-rail_resize_rect :: proc(w: ^Window) -> render.Rect {
-	if w.phase == .Preparing || !rail_visible(w) {return {}}
-	area := rail_area(w)
-	return {area.x + area.width - 3 * w.scale, area.y, 6 * w.scale, area.height}
+when AIO_CONTROL {
+	// DIVIDER_GRAB either side of the rail's right side, where a press starts resizing it, as verify reports
+	// it; divider_hits finds the same band from the rail's dock edge.
+	rail_resize_rect :: proc(w: ^Window) -> render.Rect {
+		if w.phase == .Preparing || !rail_visible(w) {return {}}
+		area := rail_area(w)
+		grab := DIVIDER_GRAB * w.scale
+		return {area.x + area.width - grab, area.y, 2 * grab, area.height}
+	}
 }
 
 rail_resize_cancel :: proc(w: ^Window) {

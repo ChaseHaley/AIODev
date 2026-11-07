@@ -95,12 +95,12 @@ update_motion :: proc(app: ^App) {
 		controls_changed := false
 		if w.header_height > 0 || w.split_overlay || window_floats_shown(w) {
 			for &pane in w.views {
-				for &control, i in pane.header_controls {
+				for &control, button in pane.header_controls {
 					controls_changed =
 						ui.control_update(
 							&control,
-							pane.header_hover == ui.Header_Action(i + 1),
-							ui.armed_is(pane.header_armed, ui.Header_Action(i + 1)),
+							pane.header_hover == button,
+							ui.armed_is(pane.header_armed, button),
 							app.animations,
 							now,
 						) ||
@@ -122,7 +122,7 @@ update_motion :: proc(app: ^App) {
 		active := header != layout.INVALID_NODE
 		changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
 		for &control, i in w.float_header_controls {
-			action := Float_Header_Action(i + 1)
+			action := FLOAT_HEADER_BUTTONS[i].action
 			over := spotted && spot.action == action
 			pressed := floating_button_pressed(w, action)
 			changed = ui.control_update(&control, over, pressed, app.animations, now) || changed

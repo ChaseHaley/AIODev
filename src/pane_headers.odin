@@ -72,199 +72,99 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
-pane_header_draw :: proc(
-	app: ^App,
-	w: ^Window,
-	pane: layout.Pane_Rect,
-	entry: ^Session_Entry,
-) -> render.Build_Status {
-	controls: [ui.HEADER_BUTTONS]ui.Control_Motion
-	if view := pane_view(w, pane.content); view != nil {controls = view.header_controls}
+// The pane header's buttons, left to right. A pane in a float keeps its split controls; minimizing, docking
+// and moving belong to the float header. Tiled panes add their view controls and Float.
+Pane_Header_Button :: enum u8 {
+	Documents,
+	Split_Right,
+	Split_Down,
+	Zoom,
+	Fill_Window,
+	Linked_Window,
+	Dock,
+	Close,
+}
+
+// What a point on a pane header does: a button, the shell badge's menu, or nil for the title, which
+// focuses and drags the pane.
+Pane_Header_Target :: ui.Header_Target(Pane_Header_Button)
+
+Pane_Header_Layout :: ui.Header_Layout(Pane_Header_Button)
+
+@(private = "file")
+PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
+	.Documents, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
+}
+@(private = "file")
+PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button]{.Documents, .Split_Right, .Split_Down, .Close}
+@(private = "file")
+PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Documents, .Split_Right, .Split_Down}
+
+// The order buttons give way in a narrow header: the Documents button first, then the tiled view
+// controls, so splitting, floating and closing stay longest.
+@(private = "file", rodata)
+PANE_HEADER_DROP_ORDER := [?]Pane_Header_Button {
+	.Documents, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
+}
+
+// Whether a pane shows a header row. A tiled pane without one carries its split controls in the split
+// overlay, which shows while the pointer is near its top or its document menu is open.
+pane_header_row :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
+	return pane.floating || w.header_height > 0
+}
+
+// The header row or split overlay of a pane, which drawing and hit testing share. Every pane can split
+// and close; the view controls and Float apply only to the tiled layout, and a pane that takes no pins
+// has no Documents button.
+pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_Layout {
 	r := pane.rect
-	documents := pane_header_documents(w, pane)
-	if w.header_height == 0 && !pane.floating {
-		if !w.split_overlay && !documents.open {return .Ok}
-		return ui.split_overlay_draw(
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			ui.split_overlay_layout({r.x, r.y, r.width, r.height}, w.scale, documents.shown),
-			controls,
-			w.scale,
-			w.pointer,
-			documents,
-		)
+	area := render.Rect{r.x, r.y, r.width, r.height}
+	row := pane_header_row(w, pane)
+	shown := PANE_HEADER_TILED
+	if !row {
+		shown = PANE_HEADER_OVERLAY
+	} else if pane.floating {
+		shown = PANE_HEADER_FLOATING
 	}
-	icon_atlas: render.Rect
-	title, directory := content_title(app, pane.content), content_directory(app, pane.content)
-	icon := content_icon(pane.content.kind)
-	if entry != nil {
-		// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
-		title = session_display_title(entry)
-		directory = entry.header.directory
-		result: render.Build_Status
-		icon, icon_atlas, result = pane_icon(app, entry, ui.ICON_BUTTON * w.scale)
-		if result != .Ok {return result}
-	}
-	badge_hovered := false
-	if entry != nil {
-		layout := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale, documents.shown, pane.floating)
-		badge_hovered =
-			w.pointer.x >= layout.badge.x - 3 * w.scale &&
-			w.pointer.x < layout.badge.x + layout.badge.width + 9 * w.scale &&
-			w.pointer.y >= layout.badge.y - 3 * w.scale &&
-			w.pointer.y < layout.badge.y + layout.badge.height + 3 * w.scale
-	}
-	status: ui.Status_Mark
-	status_text: string
-	if entry != nil && app.settings.status.pane_headers {
-		summary: Status_Summary
-		status_summary_add(app, &summary, entry)
-		if summary.found {
-			status = status_presentation(summary.top).mark
-			buffer: [8]u8
-			headline := status_headline(status, buffer[:])
-			status_text = strings.clone(headline, context.temp_allocator)
-			if summary.top.message != "" {
-				status_text = fmt.tprintf("%s · %s", headline, summary.top.message)
-				if status.glyph == .Working && status.progress < 0 {status_text = summary.top.message}
-			}
-		}
-	}
-	return ui.header_draw(
-		&w.list,
-		&w.ui_text,
-		app.theme,
-		{r.x, r.y, r.width, r.height},
-		app.theme.pane,
-		window_pane_radius(app, w),
+	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Documents}}
+	if !row {return ui.split_overlay_layout(area, w.scale, shown, Pane_Header_Button.Documents)}
+	return ui.header_layout(
+		area,
 		w.scale,
-		title,
-		directory,
-		icon,
-		w.focused && pane.node == window_tree(w).focus,
-		controls,
-		pane_view_current(w) == .Zoom,
-		w.pane_fill == .Content,
-		window_linked(w),
-		icon_atlas,
-		badge_hovered,
-		w.pointer,
-		status,
-		status_text,
-		status_phase(app, w, status),
-		content_icon = pane.content.kind == .Markdown ? .Markdown : .None,
-		documents = documents,
-		floating = pane.floating,
+		shown,
+		Pane_Header_Button.Documents,
+		PANE_HEADER_DROP_ORDER[:],
 	)
 }
 
+// The icon a header button shows, which can follow the window's state.
+@(private = "file")
+pane_header_icon :: proc(w: ^Window, button: Pane_Header_Button) -> ui.Icon {
+	switch button {
+	case .Documents:
+		return .Document
+	case .Split_Right:
+		return .Split_Right
+	case .Split_Down:
+		return .Split_Down
+	case .Zoom:
+		return pane_view_current(w) == .Zoom ? .Collapse : .Expand
+	case .Fill_Window:
+		return w.pane_fill == .Content ? .Restore : .Zoom
+	case .Linked_Window:
+		return window_linked(w) ? .Window_In : .Window_Out
+	case .Dock:
+		return .Float_Pane
+	case .Close:
+		return .Close
+	}
+	return .None
+}
+
+// The command a header button runs. Documents opens its menu on press instead.
 @(private)
-pane_header_documents :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Documents {
-	if !CONTENT_POLICY[pane.content.kind].documents {return {}}
-	return {shown = true, open = document_menu_shown_for(w, pane.content)}
-}
-
-// The header under the point, on the topmost pane there: a floating pane covers the headers below it.
-pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, ui.Header_Action, bool) {
-	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found || (!pane.floating && w.header_height == 0 && !w.split_overlay) {return {}, .None, false}
-	l := pane_header_layout(w, pane)
-	if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
-	return {}, .None, false
-}
-
-pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Header_Layout {
-	r := pane.rect
-	area := render.Rect{r.x, r.y, r.width, r.height}
-	documents := CONTENT_POLICY[pane.content.kind].documents
-	if w.header_height == 0 && !pane.floating {return ui.split_overlay_layout(area, w.scale, documents)}
-	return ui.header_layout(area, w.scale, documents, pane.floating)
-}
-
-// Where a pane's document menu hangs from: under its Documents button, or inside its corner without one.
-// A split pane with headers off shows no controls, so its menu sits in the corner the header would use.
-pane_header_document_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> [2]f32 {
-	r := pane.rect
-	s := w.scale
-	width := ui.MENU_WIDTH * s
-	if w.header_height == 0 && !pane.floating && !pane_single_tiled(w) {
-		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.SPACE_2 * s}
-	}
-	button := pane_header_layout(w, pane).buttons[int(ui.Header_Action.Documents) - 1]
-	if button.width == 0 {
-		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.HEADER_HEIGHT * s + ui.SPACE_1 * s}
-	}
-	return {button.x + button.width - width, button.y + button.height + ui.SPACE_1 * s}
-}
-
-// One tiled pane alone, which shows split controls while headers are off. Floating panes follow
-// the tiled ones.
-@(private)
-pane_single_tiled :: proc(w: ^Window) -> bool {
-	return len(w.panes) > 0 && !w.panes[0].floating && (len(w.panes) == 1 || w.panes[1].floating)
-}
-
-pane_header_cancel :: proc(w: ^Window) {
-	for &view in w.views {
-		view.header_hover = .None
-		ui.armed_cancel(&view.header_armed)
-	}
-}
-
-// The terminal must not receive either half of a header click: the header swallows the press, and
-// pane_header_release finishes it wherever it is released.
-pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
-	if !hit || selection_active(w) {return}
-	gesture_swallow(w, e.button, .Pane_Header)
-	if e.button != .Left {return}
-	pane_focus(app, w, pane.node)
-	if action == .Badge {
-		if workspace_session_for_content(app, pane.content) == nil {return}
-		x, y := pane.rect.x + 8 * w.scale, pane.rect.y + ui.HEADER_HEIGHT * w.scale
-		profile_menu_open_pane(app, w, pane.node, x, y)
-		return
-	}
-	if action == .Documents {
-		document_menu_open_pane(app, w, pane)
-		return
-	}
-	if view := pane_view(w, pane.content); view != nil {ui.armed_press(&view.header_armed, action)}
-	// Every pane header rearranges panes; a float moves by its own float header.
-	if action == .None {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
-}
-
-pane_header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
-	if e.button == .Left && pane_drag_active(w) {
-		pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers)
-		pane_header_cancel(w)
-		_ = pane_drag_release(app, w)
-		return
-	}
-	if e.button == .Left {
-		_ = pane_drag_release(app, w)
-	}
-	chosen: ui.Header_Action
-	for &view in w.views {
-		if e.button == .Left {
-			fired, ok := ui.armed_release(
-				&view.header_armed,
-				hit && view.content == pane.content ? action : ui.Header_Action.None,
-			)
-			// A view armed with no action must not clear another view's choice.
-			if ok && fired != .None {chosen = fired}
-		}
-	}
-	if chosen == .None {return}
-	if action, runs := pane_header_command(chosen); runs {run_action(app, w, action)}
-}
-
-// The command a header button runs. Documents opens its menu on press, and the badge runs none.
-@(private)
-pane_header_command :: proc(action: ui.Header_Action) -> (Action, bool) {
-	switch action {
+pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
+	switch button {
 	case .Split_Right:
 		return .Split_Right, true
 	case .Split_Down:
@@ -279,14 +179,17 @@ pane_header_command :: proc(action: ui.Header_Action) -> (Action, bool) {
 		return .Float_Pane, true
 	case .Close:
 		return .Close_Pane, true
-	case .None, .Documents, .Badge:
+	case .Documents:
 	}
 	return {}, false
 }
 
-// What a header button's tooltip says it does, which can depend on the window's current state.
-pane_header_tooltip :: proc(w: ^Window, action: ui.Header_Action) -> string {
-	switch action {
+// What a header button's tooltip says it does, which can depend on the window's current state. The badge
+// and title have none.
+pane_header_tooltip :: proc(w: ^Window, target: Pane_Header_Target) -> string {
+	button, ok := target.(Pane_Header_Button)
+	if !ok {return ""}
+	switch button {
 	case .Documents:
 		return "Documents"
 	case .Split_Right:
@@ -303,25 +206,180 @@ pane_header_tooltip :: proc(w: ^Window, action: ui.Header_Action) -> string {
 		return "Move to a float"
 	case .Close:
 		return "Close pane"
-	case .None, .Badge:
 	}
 	return ""
 }
 
-pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, ui.Header_Action) {
-	pane, action, hit := pane_header_hit(w, x, y)
+pane_header_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: layout.Pane_Rect,
+	entry: ^Session_Entry,
+) -> render.Build_Status {
+	l := pane_header_layout(w, pane)
+	open := CONTENT_POLICY[pane.content.kind].documents && document_menu_shown_for(w, pane.content)
+	buttons: [Pane_Header_Button]ui.Header_Button
+	view := pane_view(w, pane.content)
+	for &face, button in buttons {
+		face.icon = pane_header_icon(w, button)
+		if view != nil {face.motion = view.header_controls[button]}
+	}
+	buttons[.Documents].selected = open
+	buttons[.Close].danger = true
+	if !pane_header_row(w, pane) {
+		if !w.split_overlay && !open {return .Ok}
+		return ui.split_overlay_draw(&w.list, app.theme, l, buttons, w.scale, w.pointer)
+	}
+	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
+	title := content_pane_title(app, entry, pane.content)
+	directory := entry != nil ? entry.header.directory : content_directory(app, pane.content)
+	badge, result := content_badge(app, entry, pane.content.kind, ui.ICON_BUTTON * w.scale, header = true)
+	if result != .Ok {return result}
+	status: ui.Status_Mark
+	status_text: string
+	if entry != nil && app.settings.status.pane_headers {
+		summary: Status_Summary
+		status_summary_add(app, &summary, entry)
+		if summary.found {
+			status = status_presentation(summary.top).mark
+			buffer: [8]u8
+			headline := status_headline(status, buffer[:])
+			status_text = strings.clone(headline, context.temp_allocator)
+			if summary.top.message != "" {
+				status_text = fmt.tprintf("%s · %s", headline, summary.top.message)
+				if status.glyph == .Working && status.progress < 0 {status_text = summary.top.message}
+			}
+		}
+	}
+	r := pane.rect
+	return ui.header_draw(
+		&w.list,
+		&w.ui_text,
+		app.theme,
+		{r.x, r.y, r.width, r.height},
+		l,
+		buttons,
+		app.theme.pane,
+		window_pane_radius(app, w),
+		w.scale,
+		title,
+		directory,
+		badge.glyph,
+		w.focused && pane.node == window_tree(w).focus,
+		badge.atlas,
+		entry != nil && render.rect_contains(l.badge_target, w.pointer.x, w.pointer.y),
+		w.pointer,
+		status,
+		status_text,
+		status_phase(app, w, status),
+		badge.icon,
+	)
+}
+
+// The header under the point, on the topmost pane there: a floating pane covers the headers below it.
+pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, Pane_Header_Target, bool) {
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found || (!pane_header_row(w, pane) && !w.split_overlay) {return {}, nil, false}
+	l := pane_header_layout(w, pane)
+	if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
+	return {}, nil, false
+}
+
+// Where a pane's document menu hangs from: under its Documents button, or inside its corner without one.
+// A split pane with headers off shows no controls, so its menu sits in the corner the header would use.
+pane_header_document_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> [2]f32 {
+	r := pane.rect
+	s := w.scale
+	width := ui.MENU_WIDTH * s
+	if !pane_header_row(w, pane) && !pane_single_tiled(w) {
+		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.SPACE_2 * s}
+	}
+	button := pane_header_layout(w, pane).buttons[.Documents]
+	if button.width == 0 {
+		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.HEADER_HEIGHT * s + ui.SPACE_1 * s}
+	}
+	return {button.x + button.width - width, button.y + button.height + ui.SPACE_1 * s}
+}
+
+// One tiled pane alone, which shows split controls while headers are off. Floating panes follow
+// the tiled ones.
+@(private)
+pane_single_tiled :: proc(w: ^Window) -> bool {
+	return len(w.panes) > 0 && !w.panes[0].floating && (len(w.panes) == 1 || w.panes[1].floating)
+}
+
+pane_header_cancel :: proc(w: ^Window) {
 	for &view in w.views {
-		hover := enabled && hit && view.content == pane.content ? action : ui.Header_Action.None
+		view.header_hover = nil
+		ui.armed_cancel(&view.header_armed)
+	}
+}
+
+// The terminal must not receive either half of a header click: the header swallows the press, and
+// pane_header_release finishes it wherever it is released.
+pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	pane, target, hit := pane_header_hit(w, f32(e.x), f32(e.y))
+	if !hit || selection_active(w) {return}
+	gesture_swallow(w, e.button, .Pane_Header)
+	if e.button != .Left {return}
+	pane_focus(app, w, pane.node)
+	if _, badge := target.(ui.Header_Badge); badge {
+		if workspace_session_for_content(app, pane.content) == nil {return}
+		x, y := pane.rect.x + 8 * w.scale, pane.rect.y + ui.HEADER_HEIGHT * w.scale
+		profile_menu_open_pane(app, w, pane.node, x, y)
+		return
+	}
+	if target == Pane_Header_Button.Documents {
+		document_menu_open_pane(app, w, pane)
+		return
+	}
+	if view := pane_view(w, pane.content); view != nil {ui.armed_press(&view.header_armed, target)}
+	// Every pane header rearranges panes; a float moves by its own float header.
+	if target == nil {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
+}
+
+pane_header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	pane, target, hit := pane_header_hit(w, f32(e.x), f32(e.y))
+	if e.button == .Left && pane_drag_active(w) {
+		pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers)
+		pane_header_cancel(w)
+		_ = pane_drag_release(app, w)
+		return
+	}
+	if e.button == .Left {
+		_ = pane_drag_release(app, w)
+	}
+	chosen: Pane_Header_Target
+	for &view in w.views {
+		if e.button == .Left {
+			released: Pane_Header_Target
+			if hit && view.content == pane.content {released = target}
+			fired, ok := ui.armed_release(&view.header_armed, released)
+			// A view armed with no target must not clear another view's choice.
+			if ok && fired != nil {chosen = fired}
+		}
+	}
+	button, chose := chosen.(Pane_Header_Button)
+	if !chose {return}
+	if action, runs := pane_header_command(button); runs {run_action(app, w, action)}
+}
+
+pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, Pane_Header_Target) {
+	pane, target, hit := pane_header_hit(w, x, y)
+	for &view in w.views {
+		hover: Pane_Header_Target
+		if enabled && hit && view.content == pane.content {hover = target}
 		if hover != view.header_hover {view.header_hover = hover; w.dirty = true}
 	}
-	return enabled && hit, enabled && hit ? action : .None
+	if !enabled || !hit {return false, nil}
+	return true, target
 }
 
 // Shows a single pane's split controls while the pointer is within the top band of its card.
 split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
 	shown := false
 	single := pane_single_tiled(w)
-	if enabled && w.header_height == 0 && single {
+	if enabled && single && !pane_header_row(w, w.panes[0]) {
 		r := w.panes[0].rect
 		top, found := layout.hit_test(w.panes[:], x, y)
 		shown = found && !top.floating && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + 40 * w.scale

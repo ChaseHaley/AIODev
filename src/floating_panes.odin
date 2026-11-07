@@ -28,7 +28,7 @@ FLOAT_CAPSULE_MAXIMUM :: f32(200)
 // it forms the float header, which moves the float and holds its buttons.
 FLOAT_HEADER :: ui.HEADER_HEIGHT
 
-// What a point on a float header does. Buttons come first, in their left-to-right order.
+// What a point on a float header does.
 Float_Header_Action :: enum u8 {
 	None,
 	Minimize,
@@ -36,7 +36,20 @@ Float_Header_Action :: enum u8 {
 	Close,
 	Move,
 }
-FLOAT_HEADER_BUTTONS :: 3
+
+// A float header button: what it does and its icon. FLOAT_HEADER_BUTTONS lists them left to right, and
+// their rectangles and motions keep its order.
+Float_Header_Button :: struct {
+	action: Float_Header_Action,
+	icon:   ui.Icon,
+}
+
+@(rodata)
+FLOAT_HEADER_BUTTONS := [?]Float_Header_Button {
+	{action = .Minimize, icon = .Minimize},
+	{action = .Dock, icon = .Float_Pane},
+	{action = .Close, icon = .Close},
+}
 
 Float_Edge :: enum u8 {
 	Left,
@@ -165,17 +178,17 @@ floating_area :: proc(w: ^Window) -> layout.Rect {
 
 floating_header_height :: proc(w: ^Window) -> f32 {return FLOAT_HEADER * w.scale}
 
-// The float header's buttons, right-aligned in the strip above the panes: Minimize, Dock, Close.
-floating_header_buttons :: proc(w: ^Window, frame: layout.Rect) -> [FLOAT_HEADER_BUTTONS]render.Rect {
+// The float header's buttons, right-aligned in the strip above the panes in FLOAT_HEADER_BUTTONS' order.
+floating_header_buttons :: proc(w: ^Window, frame: layout.Rect) -> [len(FLOAT_HEADER_BUTTONS)]render.Rect {
 	s := w.scale
 	size := ui.HEIGHT_COMPACT * s
 	strip := min(floating_header_height(w), frame.height)
 	y := frame.y + max(0, (strip - size) / 2)
 	end := frame.x + frame.width - ui.SPACE_1 * s
-	buttons: [FLOAT_HEADER_BUTTONS]render.Rect
-	for i := FLOAT_HEADER_BUTTONS - 1; i >= 0; i -= 1 {
+	buttons: [len(FLOAT_HEADER_BUTTONS)]render.Rect
+	#reverse for &button in buttons {
 		end -= size
-		buttons[i] = {max(frame.x, end), y, size, min(size, strip)}
+		button = {max(frame.x, end), y, size, min(size, strip)}
 	}
 	return buttons
 }
@@ -209,7 +222,7 @@ floating_header_at :: proc(
 		if rounded_contains(pane.rect, radius, x, y) {return layout.INVALID_NODE, .None, false}
 	}
 	for button, i in floating_header_buttons(w, frame) {
-		if render.rect_contains(button, x, y) {return group, Float_Header_Action(i + 1), true}
+		if render.rect_contains(button, x, y) {return group, FLOAT_HEADER_BUTTONS[i].action, true}
 	}
 	return group, .Move, true
 }
@@ -260,22 +273,21 @@ floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 			)
 		}
 	}
-	icons := [FLOAT_HEADER_BUTTONS]ui.Icon{.Minimize, .Float_Pane, .Close}
-	for button, i in floating_header_buttons(w, frame) {
-		action := Float_Header_Action(i + 1)
-		b := ui.Button{rect = button}
+	for rect, i in floating_header_buttons(w, frame) {
+		button := FLOAT_HEADER_BUTTONS[i]
+		b := ui.Button{rect = rect}
 		if shown {
 			b.hover = w.float_header_controls[i].hover.value
 			b.press = w.float_header_controls[i].press.value
 		}
-		if action == .Close {
+		if button.action == .Close {
 			danger := app.theme.error
 			danger.a *= 0.14
 			b.press_color = danger
 		}
 		face, button_ink, button_err := ui.button_draw(&w.list, app.theme, b, s, w.pointer)
 		if button_err != .None {return}
-		ui.icon_draw(&w.list, icons[i], face, button_ink, ui.ICON_BUTTON, s)
+		ui.icon_draw(&w.list, button.icon, face, button_ink, ui.ICON_BUTTON, s)
 	}
 }
 
@@ -459,24 +471,18 @@ window_tiled_rects :: proc(w: ^Window) -> []layout.Pane_Rect {
 	return w.panes[:tiled]
 }
 
-// The topmost floating group whose frame contains the point.
-floating_frame_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, rect: layout.Rect, ok: bool) {
-	last := layout.INVALID_NODE
-	tree := window_tree(w)
-	#reverse for candidate in floating_rects(w) {
-		group := layout.float_root(tree, candidate.node)
-		if group == last {continue}
-		last = group
-		frame, found := layout.float_rect(tree, group, floating_area(w))
-		if found && x >= frame.x && x < frame.x + frame.width &&
-		   y >= frame.y && y < frame.y + frame.height {return group, frame, true}
-	}
-	return layout.INVALID_NODE, {}, false
-}
-
-// The floating group whose outer edge band holds the point. Internal split edges remain dividers.
-floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edges: Float_Edges, ok: bool) {
-	band := FLOAT_EDGE * w.scale / 2
+// The topmost floating group whose frame, grown by `margin` on every side, holds the point: a pane of the
+// group, its root and its frame.
+@(private)
+floating_group_at :: proc(
+	w: ^Window,
+	x, y, margin: f32,
+) -> (
+	pane: layout.Pane_Rect,
+	root: layout.Node_Id,
+	frame: layout.Rect,
+	ok: bool,
+) {
 	last := layout.INVALID_NODE
 	tree := window_tree(w)
 	#reverse for candidate in floating_rects(w) {
@@ -484,19 +490,31 @@ floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edge
 		if group == last {continue}
 		last = group
 		r, found := layout.float_rect(tree, group, floating_area(w))
-		if !found ||
-		   x < r.x - band || x >= r.x + r.width + band ||
-		   y < r.y - band || y >= r.y + r.height + band {continue}
-		if x < r.x + band {edges += {.Left}}
-		if x >= r.x + r.width - band {edges += {.Right}}
-		if y < r.y + band {edges += {.Top}}
-		if y >= r.y + r.height - band {edges += {.Bottom}}
-		if edges == {} {return {}, {}, false}
-		pane = candidate
-		pane.rect = r
-		return pane, edges, true
+		if found && x >= r.x - margin && x < r.x + r.width + margin &&
+		   y >= r.y - margin && y < r.y + r.height + margin {return candidate, group, r, true}
 	}
-	return {}, {}, false
+	return {}, layout.INVALID_NODE, {}, false
+}
+
+// The topmost floating group whose frame contains the point.
+floating_frame_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, rect: layout.Rect, ok: bool) {
+	_, root, rect, ok = floating_group_at(w, x, y, 0)
+	return
+}
+
+// The floating group whose outer edge band holds the point. Internal split edges remain dividers.
+floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edges: Float_Edges, ok: bool) {
+	band := FLOAT_EDGE * w.scale / 2
+	candidate, _, r, found := floating_group_at(w, x, y, band)
+	if !found {return {}, {}, false}
+	if x < r.x + band {edges += {.Left}}
+	if x >= r.x + r.width - band {edges += {.Right}}
+	if y < r.y + band {edges += {.Top}}
+	if y >= r.y + r.height - band {edges += {.Bottom}}
+	if edges == {} {return {}, {}, false}
+	pane = candidate
+	pane.rect = r
+	return pane, edges, true
 }
 
 // Whether a floating group, its edge band or the capsule row covers the point.
@@ -672,7 +690,8 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	area := floating_area(w)
 	margin := ui.SPACE_3 * s
 	for &capsule, i in w.float_capsules {
-		text := ui.text_width(&label, floating_title(app, capsule.content))
+		entry := workspace_session_for_content(app, capsule.content)
+		text := ui.text_width(&label, content_pane_title(app, entry, capsule.content))
 		w.float_capsule_widths[i] = clamp(
 			text + (ui.SPACE_3 + ui.ICON_BUTTON + ui.SPACE_2 + ui.SPACE_3) * s,
 			FLOAT_CAPSULE_MINIMUM * s,
@@ -703,13 +722,9 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-floating_capsules :: proc(w: ^Window) -> []Float_Capsule {
-	return w.float_capsules[:]
-}
-
 @(private)
 floating_capsule_at :: proc(w: ^Window, x, y: f32) -> Maybe(Float_Capsule) {
-	for capsule in floating_capsules(w) {
+	for capsule in w.float_capsules {
 		if render.rect_contains(capsule.rect, x, y) {return capsule}
 	}
 	return nil
@@ -749,23 +764,15 @@ floating_capsules_follow :: proc(w: ^Window, x, y: f32) -> bool {
 	return true
 }
 
-floating_title :: proc(app: ^App, content: layout.Content) -> string {
-	if entry := workspace_session_for_content(app, content); entry != nil {
-		return session_display_title(entry)
-	}
-	return content_title(app, content)
-}
-
 floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	capsules := floating_capsules(w)
-	if len(capsules) == 0 {return .Ok}
+	if len(w.float_capsules) == 0 {return .Ok}
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	label := ui.text_styled(&w.ui_text, .Body)
 	capsule_theme := app.theme
 	capsule_theme.hover_lift = 0
 	capsule_theme.hover = {}
-	for capsule in capsules {
+	for capsule in w.float_capsules {
 		r := capsule.rect
 		radius := ui.pill_radius(r)
 		panel := ui.popover_panel(r, s)
@@ -791,23 +798,25 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			ui.ICON_BUTTON * s,
 			ui.ICON_BUTTON * s,
 		}
-		switch capsule.content.kind {
-		case .Terminal:
-			entry := workspace_session_for_content(app, capsule.content)
-			badge, atlas, found := pane_icon(app, entry, ui.ICON_BUTTON * s)
-			if found != .Ok {return found}
-			if result := ui.shell_badge_draw(&w.list, &w.ui_text, app.theme, icon, badge, s, atlas);
-			   result != .Ok {return result}
-		case .Markdown:
-			ui.icon_draw(&w.list, .Markdown, icon, ink, ui.ICON_BUTTON, s)
-		case .Settings:
-			ui.icon_draw(&w.list, .Settings, icon, ink, ui.ICON_BUTTON, s)
-		}
+		entry := workspace_session_for_content(app, capsule.content)
+		badge, found := content_badge(app, entry, capsule.content.kind, ui.ICON_BUTTON * s)
+		if found != .Ok {return found}
+		if badge.icon != .None {
+			ui.icon_draw(&w.list, badge.icon, icon, ink, ui.ICON_BUTTON, s)
+		} else if result := ui.shell_badge_draw(
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			icon,
+			badge.glyph,
+			s,
+			badge.atlas,
+		); result != .Ok {return result}
 		text_x := icon.x + icon.width + ui.SPACE_2 * s
 		if result := ui.draw_fading_text(
 			&label,
 			&w.list,
-			floating_title(app, capsule.content),
+			content_pane_title(app, entry, capsule.content),
 			text_x,
 			face.y + (face.height - label.line_height) / 2 + label.ascent,
 			ink,

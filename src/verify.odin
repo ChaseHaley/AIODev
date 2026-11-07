@@ -912,7 +912,7 @@ when AIO_CONTROL {
 			pane_state := [?]verify_protocol.State_Entry {
 				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
 				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
-				{"panes.capsules", fmt.tprintf("%d", len(floating_capsules(w)))},
+				{"panes.capsules", fmt.tprintf("%d", len(w.float_capsules))},
 				{
 					"panes.capsule_group",
 					fmt.tprintf(
@@ -1488,15 +1488,7 @@ when AIO_CONTROL {
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case verify_protocol.Resize:
 			insets := pane_insets(app, w.scale, focused_session(app, w))
-			desired, width, height := pane_box_for_grid(
-				app,
-				w.scale,
-				w.metrics,
-				u16(r.columns),
-				u16(r.rows),
-				insets,
-				w.rail_width > 0 ? w.rail_width : f32(app.settings.tabs.rail_width),
-			)
+			desired, width, height, _ := pane_box_for_grid(app, w^, u16(r.columns), u16(r.rows), insets)
 			// Activity can move between a standalone dock and the rail as the width changes.
 			for _ in 0..<32 {
 				candidate := w^

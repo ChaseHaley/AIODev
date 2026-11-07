@@ -3,7 +3,6 @@ package app_test
 import "core:testing"
 import app "../../src"
 import "aio:platform"
-import "aio:ui"
 import w "core:sys/windows"
 
 @(private)
@@ -21,7 +20,7 @@ gestures_native_capture_loss_cancels_armed_header_before_late_release :: proc(t:
 	s, window := &f.state, f.state.windows[0]
 	app.pane_split(s, window, .Right)
 	gesture_dispatch_pending(t, s)
-	close := gesture_header(window).buttons[int(ui.Header_Action.Fill_Window) - 1]
+	close := gesture_header(window).buttons[.Fill_Window]
 	position := w.LPARAM(u32(close.x+4) | (u32(close.y+4) << 16))
 	hwnd := w.HWND(platform.window_native_handle(&s.platform, window.id))
 	w.SendMessageW(hwnd, w.WM_LBUTTONDOWN, w.MK_LBUTTON, position)

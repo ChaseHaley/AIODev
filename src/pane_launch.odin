@@ -24,7 +24,6 @@ pane_split :: proc(
 		app, w, w.workspace, tab, window_tree(w).focus, direction, ratio, focus, launch, true,
 	); err {
 	case .None:
-		if window_linked(w) {pane_link_store(app, w)}
 	case .Minimum:
 	case .Check:
 		notify(app, .Error, "Could not check the new pane size.")
@@ -120,6 +119,7 @@ pane_split_check :: proc(
 	return .None
 }
 
+// A linked window's copy only arranges its slot, so its new pane joins the slot in the tab's tree.
 @(private, require_results)
 pane_split_attach :: proc(
 	app: ^App,
@@ -132,6 +132,7 @@ pane_split_attach :: proc(
 	focus: bool,
 	content: layout.Content,
 ) -> bool {
+	if w != nil && window_linked(w) {return pane_link_split(app, w, node, direction, ratio, focus, content)}
 	tab := workspace.tabs[tab_index]
 	added, err := layout.split_direction(&tab.tree, node, direction, ratio, content)
 	if err != nil {return false}

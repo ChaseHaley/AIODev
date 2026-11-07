@@ -934,11 +934,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			other = layout.focus_cycle(rects, tree.focus, action == .Swap_Next ? 1 : -1)
 		}
 		if other != tree.focus {
-			selection_cancel(w)
-			divider_cancel(w)
-			w.wheel_remainder = 0
-			if layout.swap(tree, tree.focus, other) {window_relayout(app, w)}
-			cursor_blink_reset(w)
+			tab := selected_tab(w.workspace)
+			swap := Pane_Operation{place = .Swap, source = tab, destination = tab, node = tree.focus,
+				target = other, slot = layout.INVALID_NODE}
+			_ = pane_rearrange(app, w, swap)
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
 		start := pane_action_focus(w)
