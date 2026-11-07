@@ -227,18 +227,9 @@ status_panel_tree_append :: proc(
 @(private)
 status_panel_reports :: proc(app: ^App, w: ^Window) -> []Status_Panel_Report {
 	reports := make([dynamic]Status_Panel_Report, context.temp_allocator)
-	if !app.settings.status.enabled {return reports[:]}
-	walk := status_scope_walk(app, w, eligible_only = true)
-	for pane, workspace, ok := status_scope_next(&walk); ok; pane, workspace, ok = status_scope_next(&walk) {
-		entry := pane.session
-		if len(entry.statuses) == 0 {continue}
-		records := make([dynamic]term.Program_Status, 0, len(entry.statuses), context.temp_allocator)
-		for record in entry.statuses {
-			if status_shown(app, record) {append(&records, record)}
-		}
-		if len(records) == 0 {continue}
-		crumb := session_location_at(workspace, pane.tab, entry)
-		status_panel_tree_append(&reports, records[:], entry.id, crumb, workspace.name)
+	walk := status_scope_records(app, w)
+	for shown, ok := status_scope_records_next(&walk); ok; shown, ok = status_scope_records_next(&walk) {
+		status_panel_tree_append(&reports, shown.records, shown.session, shown.crumb, shown.workspace)
 	}
 	return reports[:]
 }
@@ -433,10 +424,11 @@ status_panel_comfy_draw :: proc(
 	text_x := left + (logo + ui.SPACE_2) * s
 	right := box.x + box.width - ui.CONTROL_INSET * s
 	title_room := max(0, right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - text_x)
-	quiet := term.program_status_seen(item.record.state)
+	presentation := status_presentation(item.record)
+	quiet := presentation.seen
 	if result := ui.draw_fading_text(&strong, &w.list, status_item_name(app, item), text_x, line_one,
 		quiet ? app.theme.muted : app.theme.text, title_room); result != .Ok {return result}
-	mark := status_presentation(item.record).mark
+	mark := presentation.mark
 	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
 		return result
 	}
@@ -474,7 +466,8 @@ status_panel_dense_draw :: proc(
 	small := ui.text_styled(&w.ui_text, .Detail)
 	baseline := middle - body.line_height / 2 + body.ascent
 	right := box.x + box.width - ui.CONTROL_INSET * s
-	mark := status_presentation(item.record).mark
+	presentation := status_presentation(item.record)
+	mark := presentation.mark
 	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
 		return result
 	}
@@ -486,7 +479,7 @@ status_panel_dense_draw :: proc(
 	   result != .Ok {return result}
 	text_x := left + (logo + ui.SPACE_2) * s
 	room := max(0, age_x - ui.SPACE_2 * s - text_x)
-	quiet := term.program_status_seen(item.record.state) || item.record.state == .Idle
+	quiet := presentation.seen || item.record.state == .Idle
 	ink := quiet ? app.theme.muted : app.theme.text
 	name := status_item_name(app, item)
 	if row.depth > 0 {return ui.draw_fading_text(&body, &w.list, name, text_x, baseline, ink, room)}

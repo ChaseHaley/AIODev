@@ -148,6 +148,11 @@ program_status_ranks_attention_first :: proc(t: ^testing.T) {
 
 @(test)
 program_status_marks_follow_state_and_kind :: proc(t: ^testing.T) {
+	for state in term.Program_Status_State {
+		p := app.status_presentation({state = state})
+		testing.expect_value(t, p.seen, term.program_status_seen(state))
+		testing.expect_value(t, p.mark.dim, p.seen)
+	}
 	question := app.status_presentation({state = .Blocked, kind = .Question, progress = 10}).mark
 	testing.expect_value(t, question.glyph, ui.Status_Glyph.Question)
 	testing.expect_value(t, question.progress, i8(10))
@@ -212,4 +217,44 @@ program_status_summaries_respect_settings :: proc(t: ^testing.T) {
 	testing.expect(t, !whole.found)
 	_, shown = app.status_indicator(whole)
 	testing.expect(t, !shown)
+}
+
+@(test)
+program_status_scope_records_share_filtering_and_borrow_no_sortable_snapshot :: proc(t: ^testing.T) {
+	f: Status_Fixture
+	defer status_fixture_destroy(&f)
+	if !status_fixture_init(t, &f) {return}
+	w := app.Window{workspace = f.workspace}
+	walk := app.status_scope_records(&f.state, &w)
+	first, ok := app.status_scope_records_next(&walk)
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, first.session, u32(1))
+	testing.expect_value(t, len(first.records), 2)
+	testing.expect_value(t, first.records[0].id, "")
+	testing.expect_value(t, first.records[1].id, "test")
+	testing.expect_value(t, first.workspace, f.workspace.name)
+	testing.expect_value(t, first.crumb,
+		app.session_location_at(f.workspace, 0, &f.state.sessions[0]))
+	// Each overview can reorder its copy without changing the next overview's input.
+	first.records[0], first.records[1] = first.records[1], first.records[0]
+	testing.expect_value(t, f.first[0].id, "")
+	second, more := app.status_scope_records_next(&walk)
+	if !testing.expect(t, more) {return}
+	testing.expect_value(t, second.session, u32(2))
+	testing.expect_value(t, len(second.records), 2)
+	_, more = app.status_scope_records_next(&walk)
+	testing.expect(t, !more)
+
+	ignored := f.state.settings.status.ignore_apps
+	f.state.settings.status.ignore_apps = "cargo"
+	walk = app.status_scope_records(&f.state, &w)
+	second, more = app.status_scope_records_next(&walk)
+	testing.expect(t, more)
+	testing.expect_value(t, second.session, u32(2))
+	f.state.settings.status.ignore_apps = ignored
+
+	f.state.settings.status.enabled = false
+	walk = app.status_scope_records(&f.state, &w)
+	_, more = app.status_scope_records_next(&walk)
+	testing.expect(t, !more)
 }

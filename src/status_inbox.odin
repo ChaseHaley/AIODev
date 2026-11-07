@@ -61,18 +61,11 @@ status_record_id_less :: proc(a, b: term.Program_Status) -> bool {
 // Every shown record in the window's scope, by urgency.
 status_items :: proc(app: ^App, w: ^Window) -> []Status_Item {
 	items := make([dynamic]Status_Item, context.temp_allocator)
-	if !app.settings.status.enabled {return items[:]}
-	walk := status_scope_walk(app, w, eligible_only = true)
-	for pane, workspace, ok := status_scope_next(&walk); ok; pane, workspace, ok = status_scope_next(&walk) {
-		entry := pane.session
-		if len(entry.statuses) == 0 {continue}
-		records := slice.clone(entry.statuses, context.temp_allocator)
-		slice.sort_by(records, status_record_id_less)
-		crumb := ""
-		for record in records {
-			if !status_shown(app, record) {continue}
-			if crumb == "" {crumb = session_location_at(workspace, pane.tab, entry)}
-			append(&items, Status_Item{entry.id, record, crumb, workspace.name})
+	walk := status_scope_records(app, w)
+	for shown, ok := status_scope_records_next(&walk); ok; shown, ok = status_scope_records_next(&walk) {
+		slice.sort_by(shown.records, status_record_id_less)
+		for record in shown.records {
+			append(&items, Status_Item{shown.session, record, shown.crumb, shown.workspace})
 		}
 	}
 	slice.sort_by(items[:], status_item_less)
@@ -119,7 +112,8 @@ status_row_draw :: proc(
 	if highlighted {
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
 	}
-	mark := status_presentation(item.record).mark
+	presentation := status_presentation(item.record)
+	mark := presentation.mark
 	left := r.x + ui.CONTROL_INSET * s
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
@@ -129,7 +123,7 @@ status_row_draw :: proc(
 	if result := status_mark_draw(app, w, {left, icon_y, icon, icon}, mark); result != .Ok {
 		return result
 	}
-	quiet := term.program_status_seen(item.record.state)
+	quiet := presentation.seen
 	text_x := left + icon + ui.SPACE_2 * s
 	show_dismiss := highlighted && term.program_status_finished(item.record.state)
 	right := r.x + r.width - (show_dismiss ? ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_1 : ui.CONTROL_INSET) * s

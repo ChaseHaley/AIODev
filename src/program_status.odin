@@ -311,6 +311,51 @@ status_scope_next :: proc(
 	}
 }
 
+// One pane's records that settings show, with what an overview names and places them by. The
+// records are a temp copy in the session's order, so an overview may sort them; their strings borrow
+// from the session's snapshot, so the projection lives for one frame or event at most.
+Status_Scope_Records :: struct {
+	session:   u32,
+	records:   []term.Program_Status,
+	crumb:     string,
+	workspace: string,
+}
+
+Status_Scope_Records_Walk :: struct {
+	scope:   Status_Scope_Walk,
+	enabled: bool,
+}
+
+// The panes in a window's status scope that show any record, for the inbox and the Activity panel.
+status_scope_records :: proc(app: ^App, w: ^Window) -> Status_Scope_Records_Walk {
+	return {scope = status_scope_walk(app, w, eligible_only = true), enabled = app.settings.status.enabled}
+}
+
+@(require_results)
+status_scope_records_next :: proc(
+	walk: ^Status_Scope_Records_Walk,
+) -> (
+	shown: Status_Scope_Records,
+	ok: bool,
+) {
+	if !walk.enabled {return}
+	app := walk.scope.app
+	for pane, workspace, more := status_scope_next(&walk.scope);
+	    more;
+	    pane, workspace, more = status_scope_next(&walk.scope) {
+		entry := pane.session
+		if len(entry.statuses) == 0 {continue}
+		records := make([dynamic]term.Program_Status, 0, len(entry.statuses), context.temp_allocator)
+		for record in entry.statuses {
+			if status_shown(app, record) {append(&records, record)}
+		}
+		if len(records) == 0 {continue}
+		crumb := session_location_at(workspace, pane.tab, entry)
+		return {entry.id, records[:], crumb, workspace.name}, true
+	}
+	return
+}
+
 // Moves to the most urgent record that needs the user, skipping the pane already in view so
 // repeating the command walks the queue.
 status_next_attention :: proc(app: ^App, w: ^Window) {

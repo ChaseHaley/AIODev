@@ -43,7 +43,8 @@ Status_Presentation :: struct {
 	section:   Status_Section,
 	// Next-attention walks these, and the pill and picker count them as needing the user.
 	attention: bool,
-	// Finished work the user has looked at. Tab and pill marks leave it to the lists.
+	// Finished work the user has looked at, as term.program_status_seen says, not set in the table.
+	// Tab and pill marks leave it to the lists.
 	seen:      bool,
 	notice:    ui.Notice_Kind,
 	taskbar:   Status_Taskbar_Role,
@@ -88,14 +89,12 @@ STATUS_PRESENTATIONS := [term.Program_Status_State]Status_Presentation {
 	.Done_Seen  = {
 		rank = .Done_Seen,
 		section = .Finished,
-		seen = true,
 		notice = .Success,
 		mark = {glyph = .Done},
 	},
 	.Error_Seen = {
 		rank = .Failed_Seen,
 		section = .Finished,
-		seen = true,
 		notice = .Error,
 		mark = {glyph = .Error, urgent = true},
 	},
@@ -123,6 +122,7 @@ status_section_names := [Status_Section]string {
 status_presentation :: proc(record: term.Program_Status) -> Status_Presentation {
 	p := STATUS_PRESENTATIONS[record.state]
 	if record.state == .Blocked {p.mark.glyph = STATUS_BLOCKED_GLYPHS[record.kind]}
+	p.seen = term.program_status_seen(record.state)
 	p.mark.progress, p.mark.dim = record.progress, p.seen
 	return p
 }
