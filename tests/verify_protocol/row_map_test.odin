@@ -1,7 +1,6 @@
 package verify_protocol_test
 
 import "core:testing"
-import "aio:ghostty"
 import "aio:term"
 
 // A match may begin inside a wide cell and continue into the next one; it is reported at
@@ -13,7 +12,7 @@ text_match_inside_wide_cell :: proc(t: ^testing.T) {
 	if !ok { return }
 	defer term.snapshot_destroy(&s)
 	wide := term.snapshot_cell(&s, 2, 0)
-	if !testing.expect(t, wide != nil && wide.width == ghostty.Cell_Wide.Wide) { return }
+	if !testing.expect(t, wide != nil && wide.width == term.Cell_Width.Wide) { return }
 	testing.expect_value(t, wide.text, "\U0001F469\u200D")
 	check_expect(t, &s, {"expect", "text", "\u200D\U0001F4BB"},
 		"PASS text \"\u200D\U0001F4BB\" at 2,0\n", true)

@@ -105,13 +105,14 @@ bounds :: proc(r: Range, size: int) -> (int, int, bool) {
 @(private)
 cursor :: proc(w: ^Writer, s: ^term.Snapshot) {
 	put(w, "cursor ")
-	if !s.cursor.viewport_has_value {
+	position, on_screen := s.cursor.position.?
+	if !on_screen {
 		put(w, "off-screen")
 		return
 	}
-	integer(w, int(s.cursor.viewport_x))
+	integer(w, position.x)
 	put(w, ",")
-	integer(w, int(s.cursor.viewport_y))
+	integer(w, position.y)
 	if !s.cursor.visible {
 		put(w, " hidden")
 	}
@@ -173,11 +174,12 @@ format_screen :: proc(out: ^strings.Builder, s: ^term.Snapshot, rows := Range{})
 }
 
 @(private)
-attributes :: proc(s: ^term.Snapshot, c: ^term.Snapshot_Cell) -> Attributes {
+attributes :: proc(c: ^term.Snapshot_Cell) -> Attributes {
 	a := Attributes {
-		fg        = c.foreground,
-		bg        = c.background,
-		underline = c.style.underline,
+		fg              = c.foreground,
+		bg              = c.background,
+		underline       = c.style.underline,
+		underline_color = c.style.underline_color,
 	}
 	v := c.style
 	if v.bold {
@@ -210,13 +212,6 @@ attributes :: proc(s: ^term.Snapshot, c: ^term.Snapshot_Cell) -> Attributes {
 	if c.width == .Wide || c.width == .Spacer_Tail {
 		a.flags += {.Wide}
 	}
-	switch v.underline_color.tag {
-	case .None:
-	case .Palette:
-		a.underline_color = s.palette[v.underline_color.value.palette]
-	case .Rgb:
-		a.underline_color = term.color_from_ghostty(v.underline_color.value.rgb)
-	}
 	return a
 }
 
@@ -230,7 +225,7 @@ attributes_at :: proc(s: ^term.Snapshot, column, row: int) -> Attributes {
 			c = previous
 		}
 	}
-	return attributes(s, c)
+	return attributes(c)
 }
 
 @(private)
@@ -563,10 +558,8 @@ evaluate :: proc(
 		}
 	case .Cursor:
 		p := request.position
-		passed =
-			s.cursor.viewport_has_value &&
-			int(s.cursor.viewport_x) == p.x &&
-			int(s.cursor.viewport_y) == p.y
+		observed, on_screen := s.cursor.position.?
+		passed = on_screen && observed.x == p.x && observed.y == p.y
 		put(&w, passed ? PASS_PREFIX : FAIL_PREFIX)
 		put(&w, "cursor ")
 		integer(&w, p.x)

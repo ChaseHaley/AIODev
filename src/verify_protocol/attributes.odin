@@ -62,12 +62,13 @@ ATTRIBUTE_CATALOGUE :: [?]Attribute {
 }
 
 UNDERLINES :: [?]string{"none", "single", "double", "curly", "dotted", "dashed"}
+#assert(len(UNDERLINES) == len(term.Underline))
 
 @(private)
 Attributes :: struct {
 	fg, bg, underline_color: Maybe(term.Color),
 	flags:                   bit_set[Attribute_Flag],
-	underline:               i32,
+	underline:               term.Underline,
 }
 
 @(private, require_results)
@@ -98,10 +99,7 @@ attribute_value :: proc(entry: Attribute, a: Attributes, buffer: []u8) -> (strin
 	case .Underline_Color:
 		return color_text(a.underline_color, buffer), a.underline_color != nil
 	case .Underline:
-		if a.underline >= 0 && int(a.underline) < len(underlines) {
-			return underlines[a.underline], a.underline > 0
-		}
-		return "unknown", false
+		return underlines[int(a.underline)], a.underline != .None
 	case .Flag:
 		set := entry.flag in a.flags
 		return set ? "true" : "false", set

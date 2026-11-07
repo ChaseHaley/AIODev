@@ -8,7 +8,6 @@ import app "../../src"
 import "aio:font"
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
 import "aio:term"
 import "aio:term_view"
 import "aio:ui"
@@ -50,10 +49,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	defer {
 		delete(w.panes)
 		delete(w.dividers)
-		for &view in w.views {
-			term_view.destroy(&view.view)
-			render.draw_list_destroy(&view.cache)
-		}
+		for &view in w.views {app.pane_view_destroy(&view)}
 		delete(w.views)
 	}
 	state: app.App
@@ -112,7 +108,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testing.T) {
 	session, err := term.create({
 		command_line = "cmd.exe /d /c \"echo MATCH138 &echo MATCH138 &echo MATCH138\"",
-		working_directory = "C:\\Windows\\System32", scrollback_lines = 1000,
+		working_directory = "C:\\Windows\\System32", options = {scrollback_lines = 1000},
 		geometry = {columns = 80, rows = 24, cell_width = 8, cell_height = 16,
 			surface_width = 640, surface_height = 384},
 	}, {})
@@ -172,7 +168,7 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	testing.expect(t, enabled)
 	for expected in 0 ..< 4 {
 		l, _ := app.find_controls(&w, &state.sessions[0])
-		x, y := i32(l.older.x+16), i32(l.older.y+16)
+		x, y := i32(l.up.x+16), i32(l.up.y+16)
 		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y,
 			button = .Left, pressed = true})
 		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
@@ -181,8 +177,8 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	}
 	l, _ := app.find_controls(&w, &state.sessions[0])
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.newer.x+16),
-			y = i32(l.newer.y+16), button = .Left, pressed = down})
+		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.down.x+16),
+			y = i32(l.down.y+16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, term.search_summary(session).selected, 2)
 	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
@@ -191,28 +187,28 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	testing.expect_value(t, term.search_summary(session).selected, 2)
 	label, _ = app.find_presentation(&w, &state.sessions[0])
 	testing.expect_value(t, label, "3 of 3")
-	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
-		y = i32(l.older.y+16), button = .Left, pressed = true})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x+16),
+		y = i32(l.up.y+16), button = .Left, pressed = true})
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = w.width-20, y = 20, button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
 	testing.expect(t, !ui.armed_down(w.find.armed))
 	testing.expect(t, !ui.armed_down(w.caption_armed))
-	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
-		y = i32(l.older.y+16), button = .Left, pressed = true})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x+16),
+		y = i32(l.up.y+16), button = .Left, pressed = true})
 	w.dirty = false
 	app.handle_event(&state, platform.Capture_Lost_Event{w.id})
 	testing.expect(t, !ui.armed_down(w.find.armed) &&
 		ui.armed_target(w.find.armed) == .None && w.dirty)
-	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
-		y = i32(l.older.y+16), button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x+16),
+		y = i32(l.up.y+16), button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
-	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
-		y = i32(l.older.y+16), button = .Left, pressed = true})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x+16),
+		y = i32(l.up.y+16), button = .Left, pressed = true})
 	app.handle_event(&state, platform.Focus_Event{window = w.id, focused = false})
 	testing.expect(t, !ui.armed_down(w.find.armed) &&
 		ui.armed_target(w.find.armed) == .None && ui.find_is_open(&w.find))
-	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
-		y = i32(l.older.y+16), button = .Left})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x+16),
+		y = i32(l.up.y+16), button = .Left})
 	testing.expect_value(t, term.search_summary(session).selected, 2)
 	app.handle_event(&state, input.Text_Event{w.id, "absent"})
 	find_settle(t, session)
@@ -221,13 +217,13 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 	testing.expect(t, !enabled)
 	l, _ = app.find_controls(&w, &state.sessions[0])
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
-			y = i32(l.older.y+16), button = .Left, pressed = down})
+		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x+16),
+			y = i32(l.up.y+16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, term.search_summary(session).selected, -1)
 	testing.expect_value(t, term.search_summary(other).selected, -1)
-	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x+16),
-		y = i32(l.older.y+16), button = .Left, pressed = true})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x+16),
+		y = i32(l.up.y+16), button = .Left, pressed = true})
 	testing.expect(t, ui.armed_down(w.find.armed) && ui.armed_target(w.find.armed) == .None)
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = 5, y = 5, button = .Left})
 	testing.expect(t, !ui.armed_down(w.find.armed))
@@ -242,7 +238,7 @@ find_headless_events_keep_counts_scope_keyboard_wrap_and_close :: proc(t: ^testi
 find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T) {
 	session, err := term.create({
 		command_line = "cmd.exe /d /c \"for /l %i in (1,1,200) do @echo LINE_%i\"",
-		working_directory = `C:\Windows\System32`, scrollback_lines = 1000,
+		working_directory = `C:\Windows\System32`, options = {scrollback_lines = 1000},
 		geometry = {columns = 80, rows = 24, cell_width = 8, cell_height = 16,
 			surface_width = 640, surface_height = 384},
 	}, {})

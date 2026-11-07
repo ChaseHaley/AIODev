@@ -64,7 +64,7 @@ send :: proc(f: ^Image_Fixture, control: string, payload: []u8 = nil) {
 
 @(private = "file")
 placements :: proc(t: ^testing.T, f: ^Image_Fixture) -> []term.Image_Placement {
-	testing.expect(t, term.capture(f.session, f.state, nil, &f.images))
+	testing.expect(t, updated(term.capture(f.session, f.state, nil, &f.images)))
 	return f.images.placements[:]
 }
 

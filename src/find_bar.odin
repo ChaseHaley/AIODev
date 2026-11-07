@@ -3,6 +3,7 @@ package main
 import "aio:input"
 import "aio:markdown"
 import "aio:platform"
+import "aio:search"
 import "aio:term"
 import "aio:ui"
 import "core:fmt"
@@ -35,7 +36,7 @@ find_target :: proc(app: ^App, w: ^Window) -> Find_Target {
 }
 
 @(private)
-find_target_set :: proc(target: Find_Target, needle: string, options: term.Search_Options = {}) {
+find_target_set :: proc(target: Find_Target, needle: string, options: search.Options = {}) {
 	switch t in target {
 	case ^Session_Entry:
 		if t != nil {term.search_set_needle(t.session, needle, options)}
@@ -44,18 +45,19 @@ find_target_set :: proc(target: Find_Target, needle: string, options: term.Searc
 	}
 }
 
+// Moves the target's selection up or down the screen; each backend wraps at either end.
 @(private)
-find_target_select :: proc(w: ^Window, target: Find_Target, older: bool) {
+find_target_select :: proc(w: ^Window, target: Find_Target, up: bool) {
 	switch t in target {
 	case ^Session_Entry:
-		if t != nil {term.search_select(t.session, older)}
+		if t != nil {term.search_select(t.session, up)}
 	case ^Markdown_Pane:
-		if t != nil {markdown_find_select(w, t, older)}
+		if t != nil {markdown_find_select(w, t, up)}
 	}
 }
 
 @(require_results)
-find_target_summary :: proc(target: Find_Target) -> (summary: term.Search_Summary, ok: bool) {
+find_target_summary :: proc(target: Find_Target) -> (summary: search.Summary, ok: bool) {
 	switch t in target {
 	case ^Session_Entry:
 		if t != nil {return term.search_summary(t.session), true}
@@ -87,7 +89,7 @@ find_close :: proc(app: ^App, w: ^Window, target: Find_Target) {
 	find_target_set(target, "")
 }
 
-find_options :: proc(w: ^Window) -> term.Search_Options {
+find_options :: proc(w: ^Window) -> search.Options {
 	return {case_sensitive = w.find.case_sensitive, regex = w.find.regex}
 }
 
@@ -99,17 +101,30 @@ on_find_outcome :: proc(app: ^App, w: ^Window, target: Find_Target, outcome: ui.
 	if target == nil {
 		return
 	}
+	step: search.Step
 	switch outcome {
-	case .None, .Moved:
+	case .None, .Moved, .Case_Toggle, .Regex_Toggle, .Close:
+		return
 	case .Changed:
 		find_target_set(target, ui.field_string(&w.find.query), find_options(w))
-	case .Older, .Newer:
-		ui.find_history_add(&app.find_history, &w.find)
-		find_target_select(w, target, outcome == .Older)
+		return
 	case .Closed:
 		find_close(app, w, target)
-	case .Case_Toggle, .Regex_Toggle, .Close:
+		return
+	case .Next:
+		step = .Next
+	case .Previous:
+		step = .Previous
+	case .Up:
+		step = .Up
+	case .Down:
+		step = .Down
 	}
+	ui.find_history_add(&app.find_history, &w.find)
+	// A terminal reads from its newest line up and a document from its first line down, so Enter
+	// follows the target's reading order while the bar's arrows always point the way they move.
+	summary, _ := find_target_summary(target)
+	find_target_select(w, target, search.moves_up(summary.order, step))
 }
 
 // A key while the bar has the keyboard edits the query; none reach the pane.
@@ -126,18 +141,7 @@ find_bar_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 		outcome = ui.find_key(&w.find, logical, &app.find_history)
 	}
 	if outcome == .Closed {key_suppress(w, e)}
-	target := find_target(app, w)
-	// A terminal is read from its newest line up and a document from its first line down, so Enter
-	// follows the reading direction. The bar's arrows always point the way they move.
-	if _, document := target.(^Markdown_Pane); document {
-		#partial switch outcome {
-		case .Older:
-			outcome = .Newer
-		case .Newer:
-			outcome = .Older
-		}
-	}
-	on_find_outcome(app, w, target, outcome)
+	on_find_outcome(app, w, find_target(app, w), outcome)
 }
 
 // The find bar's match count: "3 of 17" once a match is selected. A search that failed has found nothing.

@@ -173,13 +173,13 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	// The bar's arrows move the way they point, whichever way Enter goes.
 	l, _ := app.find_controls(w, pane)
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.older.x + 16),
-			y = i32(l.older.y + 16), button = .Left, pressed = down})
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x + 16),
+			y = i32(l.up.y + 16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, find_count(w, pane), "2 of 3")
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.newer.x + 16),
-			y = i32(l.newer.y + 16), button = .Left, pressed = down})
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.down.x + 16),
+			y = i32(l.down.y + 16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, find_count(w, pane), "3 of 3")
 

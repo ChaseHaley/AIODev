@@ -2,6 +2,7 @@ package term
 
 import "aio:ghostty"
 import "aio:line_match"
+import "aio:search"
 import "base:runtime"
 import "core:log"
 import "core:slice"
@@ -10,7 +11,6 @@ import "core:time"
 import "core:unicode/utf8"
 
 // libghostty matches literal text with ASCII case folding. Any other mode uses this scanner.
-Search_Options :: line_match.Options
 
 // Rows read per terminal lock hold, so output ingestion is never blocked for long.
 @(private)
@@ -113,7 +113,7 @@ pattern_clear :: proc(p: ^Pattern_Search) {
 
 // The state a new needle starts in. An invalid expression stays with the scanner so the find bar can say so.
 @(private, require_results)
-pattern_set :: proc(s: ^Session, needle: string, options: Search_Options) -> Search_State {
+pattern_set :: proc(s: ^Session, needle: string, options: search.Options) -> Search_State {
 	switch line_match.init(&s.pattern.matcher, needle, options, s.allocator) {
 	case .Out_Of_Memory:
 		log.error("term: copying the search text failed")
@@ -185,8 +185,8 @@ pattern_results :: proc(p: ^Pattern_Search) -> []Pattern_Match {
 }
 
 @(private)
-pattern_summary :: proc(p: ^Pattern_Search, phase: Pattern_Phase) -> Search_Summary {
-	progress: Search_Progress
+pattern_summary :: proc(p: ^Pattern_Search, phase: Pattern_Phase) -> search.Summary {
+	progress: search.Progress
 	switch phase {
 	case .Invalid:
 		progress = .Invalid
@@ -431,14 +431,8 @@ pattern_select :: proc(s: ^Session, older: bool) -> bool {
 	if total == 0 {
 		return false
 	}
-	switch {
-	case p.selected < 0 || p.selected >= total:
-		p.selected = older ? total - 1 : 0
-	case older:
-		p.selected = (p.selected - 1 + total) % total
-	case:
-		p.selected = (p.selected + 1) % total
-	}
+	// Results run oldest first, so an older match is a step back.
+	p.selected = search.step_index(p.selected, total, older)
 	match := matches[p.selected]
 	p.selected_match = match
 	sync.mutex_lock(&s.mutex)

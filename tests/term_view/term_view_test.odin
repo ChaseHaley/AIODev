@@ -95,7 +95,7 @@ fixture_create :: proc(t: ^testing.T, command: string, family := "Consolas") -> 
 			surface_width = u32(width),
 			surface_height = u32(height),
 		},
-		scrollback_lines = 100,
+		options = {scrollback_lines = 100, program_status_enabled = true},
 		colors = {foreground = {255, 255, 255}, background = {0, 0, 0}, cursor = {0, 255, 0}, palette = palette()},
 	}
 	session_error: term.Error

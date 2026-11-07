@@ -2,7 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:platform"
-import "aio:pty"
+import "aio:procinfo"
 import "core:encoding/json"
 import "core:log"
 import "core:os"
@@ -170,7 +170,7 @@ layout_state_save :: proc(app: ^App, fresh := false) {
 layout_state_encode :: proc(
 	app: ^App,
 	allocator := context.allocator,
-	processes: []pty.Process_Info = nil,
+	processes: []procinfo.Process_Info = nil,
 ) -> (
 	string,
 	bool,
@@ -217,7 +217,7 @@ layout_state_encode :: proc(
 layout_tree_encode :: proc(
 	app: ^App,
 	tree: ^layout.Layout,
-	processes: []pty.Process_Info,
+	processes: []procinfo.Process_Info,
 ) -> (
 	nodes: []Saved_Node,
 	focus: int,
@@ -257,7 +257,11 @@ layout_link_encode :: proc(app: ^App, slot: []layout.Flat_Node, saved: ^Saved_No
 }
 
 @(private)
-layout_pane_encode :: proc(app: ^App, content: layout.Content, processes: []pty.Process_Info) -> Saved_Node {
+layout_pane_encode :: proc(
+	app: ^App,
+	content: layout.Content,
+	processes: []procinfo.Process_Info,
+) -> Saved_Node {
 	saved := Saved_Node{content = content.kind}
 	if content.kind == .Markdown {
 		if pane := markdown_find(app, content.id); pane != nil {

@@ -1,6 +1,5 @@
 package term_test
 
-import "aio:ghostty"
 import "aio:term"
 import "core:os"
 import "core:strings"
@@ -117,8 +116,8 @@ replay_reproduces_screen_and_cell_attributes :: proc(t: ^testing.T) {
 	testing.expect_value(t, second, "bold plain")
 	wide := term.snapshot_cell(&screen, 6, 0)
 	testing.expect_value(t, wide.text, "\u6c49")
-	testing.expect_value(t, wide.width, ghostty.Cell_Wide.Wide)
-	testing.expect_value(t, term.snapshot_cell(&screen, 7, 0).width, ghostty.Cell_Wide.Spacer_Tail)
+	testing.expect_value(t, wide.width, term.Cell_Width.Wide)
+	testing.expect_value(t, term.snapshot_cell(&screen, 7, 0).width, term.Cell_Width.Spacer_Tail)
 	bold := term.snapshot_cell(&screen, 0, 1)
 	testing.expect_value(t, bold.text, "b")
 	testing.expect(t, bold.style.bold)

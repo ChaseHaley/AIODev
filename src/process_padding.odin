@@ -1,6 +1,6 @@
 package main
 
-import "aio:pty"
+import "aio:procinfo"
 import "aio:settings"
 import "aio:term"
 import "core:math"
@@ -22,7 +22,7 @@ pane_padding :: proc(app: ^App, scale: f32, entry: ^Session_Entry) -> f32 {
 // program changes.
 update_processes :: proc(app: ^App) {
 	processes, ready := process_snapshot_take(&app.processes)
-	defer if ready {pty.process_snapshot_destroy(processes, app.processes.allocator)}
+	defer if ready {procinfo.process_snapshot_destroy(processes, app.processes.allocator)}
 	padding := app.settings.process.padding_groups != ""
 	icons := app.settings.tabs.program_icons
 	running := false
@@ -51,8 +51,13 @@ update_processes :: proc(app: ^App) {
 }
 
 @(private)
-padding_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Process_Info, root: u32) -> bool {
-	index := pty.process_leaf(processes, root)
+padding_update :: proc(
+	app: ^App,
+	entry: ^Session_Entry,
+	processes: []procinfo.Process_Info,
+	root: u32,
+) -> bool {
+	index := procinfo.process_leaf(processes, root)
 	padding := app.settings.window.padding
 	entry.process_name_length = 0
 	if index >= 0 {
@@ -61,7 +66,7 @@ padding_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Proces
 			matched := false
 			padding, matched = settings.process_padding(&app.settings, processes[index].executable)
 			if matched || processes[index].id == root {break}
-			index = pty.process_ancestor(processes, index)
+			index = procinfo.process_ancestor(processes, index)
 			if index >= 0 && processes[index].id == root {break}
 		}
 	}

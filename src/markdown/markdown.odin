@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:encoding/entity"
 import "core:fmt"
 import "core:strings"
+import "core:unicode/utf8"
 
 Style_Flag :: enum u8 {
 	Strong,
@@ -268,9 +269,9 @@ on_enter_block :: proc "c" (type: i32, detail, user: rawptr) -> i32 {
 	case .Th, .Td:
 		b.cell_header = kind == .Th
 		align := Align.Left
-		switch (^Md_Td_Detail)(detail).align {
-		case 2: align = .Center
-		case 3: align = .Right
+		#partial switch (^Md_Td_Detail)(detail).align {
+		case .Center: align = .Center
+		case .Right: align = .Right
 		}
 		ok = block_begin(b, .Table_Cell, 0, align)
 	}
@@ -305,32 +306,37 @@ on_leave_block :: proc "c" (type: i32, detail, user: rawptr) -> i32 {
 	return 0
 }
 
+// Owned text of an attribute with its entities decoded; false when memory runs out.
 @(private)
 attribute_text :: proc(attribute: Md_Attribute) -> (string, bool) {
-	out := strings.builder_make()
+	out: [dynamic]u8
 	offset := u32(0)
 	for i := 0; offset < attribute.size; i += 1 {
 		next := attribute.substr_offsets[i + 1]
 		part := string(attribute.text[offset:next])
-		if attribute.substr_types[i] == .Entity {
-			write_entity(&out, part)
-		} else {
-			strings.write_string(&out, part)
+		buffer: [8]u8
+		if attribute.substr_types[i] == .Entity {part = entity_text(&buffer, part)}
+		if _, err := append(&out, part); err != nil {
+			delete(out)
+			return "", false
 		}
 		offset = next
 	}
-	return strings.to_string(out), true
+	return string(out[:]), true
 }
 
+// What an entity reads as, decoded into `buffer`; an unknown entity reads as written.
 @(private)
-write_entity :: proc(out: ^strings.Builder, text: string) {
+entity_text :: proc(buffer: ^[8]u8, text: string) -> string {
 	name := strings.trim_suffix(strings.trim_prefix(text, "&"), ";")
 	decoded, count, ok := entity.xml_decode_entity(name)
-	if !ok {
-		strings.write_string(out, text)
-		return
+	if !ok {return text}
+	length := 0
+	for i in 0 ..< count {
+		bytes, size := utf8.encode_rune(decoded[i])
+		length += copy(buffer[length:], bytes[:size])
 	}
-	for i in 0 ..< count {strings.write_rune(out, decoded[i])}
+	return string(buffer[:length])
 }
 
 @(private)
@@ -440,9 +446,8 @@ on_text :: proc "c" (type: Md_Text, text: [^]u8, size: u32, user: rawptr) -> i32
 	case .Soft_Br:
 		ok = text_append(b, " ")
 	case .Entity:
-		out := strings.builder_make(context.temp_allocator)
-		write_entity(&out, string(text[:size]))
-		ok = text_append(b, strings.to_string(out))
+		buffer: [8]u8
+		ok = text_append(b, entity_text(&buffer, string(text[:size])))
 	case:
 		ok = text_append(b, string(text[:size]))
 	}

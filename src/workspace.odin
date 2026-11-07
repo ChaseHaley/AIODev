@@ -3,6 +3,7 @@ package main
 import "aio:layout"
 import "aio:localpath"
 import "aio:platform"
+import "aio:procinfo"
 import "aio:pty"
 import "aio:settings"
 import "aio:term"
@@ -541,7 +542,7 @@ pane_directory :: proc(app: ^App, entry: ^Session_Entry) -> (directory: string, 
 pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: string, refused: bool) {
 	root := term.process_id(entry.session)
 	if program != 0 {
-		path, found := pty.process_directory(program, root, context.temp_allocator)
+		path, found := procinfo.process_directory(program, root, context.temp_allocator)
 		if found && pty.working_directory_is_local(path) {return path, false}
 	}
 	raw := term.working_directory(entry.session, context.temp_allocator)
@@ -549,7 +550,7 @@ pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: st
 		if pty.working_directory_is_local(reported) {return reported, false}
 		refused = true
 	}
-	path, ok := pty.process_directory(root, root, context.temp_allocator)
+	path, ok := procinfo.process_directory(root, root, context.temp_allocator)
 	if ok && pty.working_directory_is_local(path) {return path, refused}
 	directory, _ = local_launch_directory("", entry.header.launch_directory)
 	return directory, refused
@@ -562,7 +563,7 @@ pane_program :: proc(app: ^App, entry: ^Session_Entry, root: u32) -> u32 {
 	if app.settings.tabs.program_icons {
 		return program_polled(entry)
 	}
-	processes, err := pty.process_snapshot(context.temp_allocator)
+	processes, err := procinfo.process_snapshot(context.temp_allocator)
 	if err != .None {return 0}
 	program, _ := pane_running(app, entry, processes)
 	return program
@@ -570,9 +571,9 @@ pane_program :: proc(app: ^App, entry: ^Session_Entry, root: u32) -> u32 {
 
 // The processes to read running programs from when a pane is remembered: nil while icon polling
 // tracks them, otherwise one snapshot taken now, in temporary memory.
-pane_processes :: proc(app: ^App) -> []pty.Process_Info {
+pane_processes :: proc(app: ^App) -> []procinfo.Process_Info {
 	if app.settings.tabs.program_icons || len(app.sessions) == 0 {return nil}
-	processes, err := pty.process_snapshot(context.temp_allocator)
+	processes, err := procinfo.process_snapshot(context.temp_allocator)
 	return err == .None ? processes : nil
 }
 
@@ -581,7 +582,7 @@ pane_processes :: proc(app: ^App) -> []pty.Process_Info {
 pane_running :: proc(
 	app: ^App,
 	entry: ^Session_Entry,
-	processes: []pty.Process_Info,
+	processes: []procinfo.Process_Info,
 ) -> (
 	program: u32,
 	command: string,
@@ -591,10 +592,10 @@ pane_running :: proc(
 		return program_polled(entry), command
 	}
 	root := term.process_id(entry.session)
-	index := pty.process_program(processes, root, program_reporters(entry), 0)
+	index := procinfo.process_program(processes, root, program_reporters(entry), 0)
 	if index < 0 {return}
 	program = processes[index].id
-	arguments, _ := pty.process_arguments(program, root, context.temp_allocator)
+	arguments, _ := procinfo.process_arguments(program, root, context.temp_allocator)
 	stem := settings.executable_stem(processes[index].executable)
 	return program, program_command(arguments, stem, context.temp_allocator)
 }

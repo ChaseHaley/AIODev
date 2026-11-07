@@ -53,14 +53,18 @@ Find_History :: struct {
 	entries: [dynamic]Find_Entry,
 }
 
-Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, older, newer, close: render.Rect }
+Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, up, down, close: render.Rect }
 
 Find_Outcome :: enum {
 	None,
 	Changed,
 	Moved,
-	Older,
-	Newer,
+	// Enter and Shift+Enter: the next and previous match in the searched surface's reading order.
+	Next,
+	Previous,
+	// The arrow buttons: the match above or below on screen.
+	Up,
+	Down,
 	Closed,
 	// Pointer targets; activating one returns Changed or Closed.
 	Case_Toggle,
@@ -175,8 +179,9 @@ find_edit :: proc(f: ^Find_Bar) {
 	if _, browsing := f.state.(Find_Browsing); browsing { find_enter(f, Find_Editing{}) }
 }
 
-// Handles a key while the bar has the keyboard. Enter moves to older matches and Shift+Enter to newer;
-// Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular expressions.
+// Handles a key while the bar has the keyboard. Enter moves to the next match and Shift+Enter to the
+// previous; Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular
+// expressions.
 find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
 	if !e.pressed {
 		return .None
@@ -188,7 +193,7 @@ find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Fi
 	case .Enter, .Numpad_Enter:
 		find_history_add(h, f)
 		find_edit(f)
-		return .Shift in e.modifiers ? .Newer : .Older
+		return .Shift in e.modifiers ? .Previous : .Next
 	case .Arrow_Up:
 		return find_recall(f, h, true)
 	case .Arrow_Down:
@@ -297,9 +302,9 @@ find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 	l.close = {right - button, y, button, button}
 	edge := l.close.x - gap
 	if !stacked {
-		l.newer = {edge - button, y, button, button}
-		l.older = {l.newer.x - button, y, button, button}
-		l.status = {l.older.x - gap - status_width, y, status_width, button}
+		l.down = {edge - button, y, button, button}
+		l.up = {l.down.x - button, y, button, button}
+		l.status = {l.up.x - gap - status_width, y, status_width, button}
 		edge = l.status.x - gap
 	}
 	l.regex_toggle = {edge - toggle, y, toggle, button}
@@ -315,14 +320,14 @@ find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 			y += FIND_HEIGHT * scale
 			l.panel.height += FIND_HEIGHT * scale
 		}
-		l.newer = {right - button, y, button, button}
-		l.older = {l.newer.x - button, y, button, button}
-		if !separate { l.status.x = l.older.x - gap - l.status.width }
+		l.down = {right - button, y, button, button}
+		l.up = {l.down.x - button, y, button, button}
+		if !separate { l.status.x = l.up.x - gap - l.status.width }
 	}
 	// Tiny windows squeeze the controls; clip them so none reaches outside the panel.
 	content := render.Rect{left, l.panel.y, inner, l.panel.height}
 	controls_rects := [?]^render.Rect {
-		&l.query, &l.case_toggle, &l.regex_toggle, &l.status, &l.older, &l.newer, &l.close,
+		&l.query, &l.case_toggle, &l.regex_toggle, &l.status, &l.up, &l.down, &l.close,
 	}
 	for r in controls_rects { r^ = clip_rect(r^, content) }
 	return l
@@ -343,8 +348,8 @@ find_hit :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> Find_Outcome {
 	if render.rect_contains(l.case_toggle, x, y) { return .Case_Toggle }
 	if render.rect_contains(l.regex_toggle, x, y) { return .Regex_Toggle }
 	if !enabled { return .None }
-	if render.rect_contains(l.older, x, y) { return .Older }
-	if render.rect_contains(l.newer, x, y) { return .Newer }
+	if render.rect_contains(l.up, x, y) { return .Up }
+	if render.rect_contains(l.down, x, y) { return .Down }
 	return .None
 }
 
@@ -390,7 +395,7 @@ find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mo
 	fired, ok := armed_release(&f.armed, hit)
 	if !ok { return .Moved }
 	#partial switch fired {
-	case .Older, .Newer:
+	case .Up, .Down:
 		return fired
 	case .Close:
 		return .Closed
@@ -433,8 +438,8 @@ find_draw :: proc(
 		on:     bool,
 		live:   bool,
 	} {
-		{l.older, .Older, .Arrow_Up, "", false, enabled},
-		{l.newer, .Newer, .Arrow_Down, "", false, enabled},
+		{l.up, .Up, .Arrow_Up, "", false, enabled},
+		{l.down, .Down, .Arrow_Down, "", false, enabled},
 		{l.close, .Close, .Close, "", false, true},
 		{l.case_toggle, .Case_Toggle, {}, "Aa", f.case_sensitive, true},
 		{l.regex_toggle, .Regex_Toggle, {}, ".*", f.regex, true},

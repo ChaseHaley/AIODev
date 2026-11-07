@@ -4,7 +4,7 @@ import "aio:colour"
 import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:program_art"
-import "aio:pty"
+import "aio:procinfo"
 import "aio:render"
 import "aio:settings"
 import "core:log"
@@ -367,9 +367,14 @@ program_adopted :: proc(entry: ^Session_Entry) -> ^Program_Adopted {
 }
 
 // Follows the pane's program to this poll's snapshot; reports whether its icon may change.
-program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Process_Info, root: u32) -> bool {
+program_update :: proc(
+	app: ^App,
+	entry: ^Session_Entry,
+	processes: []procinfo.Process_Info,
+	root: u32,
+) -> bool {
 	apps := program_reporters(entry)
-	index := pty.process_program(processes, root, apps, program_polled(entry))
+	index := procinfo.process_program(processes, root, apps, program_polled(entry))
 	if index < 0 {
 		// A program seen once never showed, so its end changes nothing drawn or saved.
 		if _, seen := entry.program.(Program_Seen); seen {entry.program = nil; return false}
@@ -416,11 +421,11 @@ program_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Proces
 // What a program confirmed by a second poll shows: its image, name and command.
 @(private)
 program_adopt :: proc(app: ^App, id, root: u32, stem: string) -> (program: Program_Adopted) {
-	path, ok := pty.process_image(id, root)
+	path, ok := procinfo.process_image(id, root)
 	name := stem
-	arguments, _ := pty.process_arguments(id, root, context.temp_allocator)
+	arguments, _ := procinfo.process_arguments(id, root, context.temp_allocator)
 	if program_listed(program_launchers[:], stem) {
-		if script := pty.process_script(arguments); program_known(app, script) {
+		if script := procinfo.process_script(arguments); program_known(app, script) {
 			name = script
 			// The launcher's own icon would show Node or cmd rather than the program.
 			delete(path)
@@ -451,7 +456,7 @@ program_command :: proc(arguments: []string, stem: string, allocator := context.
 	b := strings.builder_make(context.temp_allocator)
 	first := 1
 	if program_listed(program_launchers[:], stem) {
-		if script := pty.process_script(arguments); script != "" {
+		if script := procinfo.process_script(arguments); script != "" {
 			// The argument naming the script; anything after the script in it (cmd's quoted
 			// command) is kept.
 			for argument, i in arguments[1:] {

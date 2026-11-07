@@ -1,8 +1,6 @@
 package main
 
 import "aio:layout"
-import "aio:render"
-import "aio:term_view"
 import "aio:ui"
 
 Workspace_View_Resources :: struct {
@@ -48,11 +46,8 @@ workspace_view_prepare :: proc(
 	   reserve(&resources.views, len(resources.tree.nodes)) != nil {return false}
 	walk := workspace_tab_panes(app, resources.tree, resources.workspace.selected)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-		entry := Pane_View{content = pane.content}
-		if pane.session != nil {
-			if !term_view.create(&entry.view) {return false}
-			entry.cache = render.draw_list_init()
-		}
+		entry, created := pane_view_create(pane.content, pane.session != nil)
+		if !created {return false}
 		append(&resources.views, entry)
 	}
 	prepared = true
@@ -60,12 +55,7 @@ workspace_view_prepare :: proc(
 }
 
 workspace_view_destroy :: proc(resources: ^Workspace_View_Resources) {
-	for &pane in resources.views {
-		if pane_owns_session(pane.content.kind) {
-			term_view.destroy(&pane.view)
-			render.draw_list_destroy(&pane.cache)
-		}
-	}
+	for &pane in resources.views {pane_view_destroy(&pane)}
 	delete(resources.views)
 	tab_presentation_destroy(&resources.presentation)
 	delete(resources.panes)

@@ -1,10 +1,16 @@
-package pty
+package procinfo
 
 import "core:strings"
 
 Process_Info :: struct {
 	id, parent: u32,
 	executable: string,
+}
+
+Error :: enum {
+	None,
+	Read,
+	Out_Of_Memory,
 }
 
 // Returns the deepest descendant; snapshot order breaks ties between sibling processes.

@@ -158,7 +158,7 @@ link_at :: proc(
 // target. Line is the whole normalized selection, and start and end bound the target within it.
 @(require_results)
 link_selection_at :: proc(m: ^Link_Map, column, row: int) -> (target: Link_Target, found: bool) {
-	if !m.valid || !m.selection_active || !range_contains(m.selection_range, column, row) {
+	if !m.valid || !m.selection_active || !range_contains(m.selection_range, column, row, m.columns) {
 		return {}, false
 	}
 	return {
@@ -179,7 +179,7 @@ link_detected_at :: proc(m: ^Link_Map, column, row: int) -> (target: Link_Target
 		if row < span.range.first_row || row > span.range.last_row {
 			continue
 		}
-		if !range_contains(span.range, column, row) {
+		if !range_contains(span.range, column, row, m.columns) {
 			continue
 		}
 		uri := span.uri_start
@@ -198,22 +198,41 @@ link_detected_at :: proc(m: ^Link_Map, column, row: int) -> (target: Link_Target
 }
 
 @(private, require_results)
-range_contains :: proc(r: Link_Range, column, row: int) -> bool {
-	if row == r.first_row && row == r.last_row {
-		return column >= r.first_column && column <= r.last_column
+range_contains :: proc(r: Link_Range, column, row, columns: int) -> bool {
+	first, last, present := link_range_columns(r, row, columns)
+	return present && column >= first && column <= last
+}
+
+// The columns of `row` that `r` covers, both inclusive, within a grid `columns` wide: the tail of its
+// first row, whole middle rows and the head of its last row. Hit-testing and the drawn underline both
+// read a range through this. Not present when the row is outside the range.
+@(require_results)
+link_range_columns :: proc(r: Link_Range, row, columns: int) -> (first, last: int, present: bool) {
+	if row < r.first_row || row > r.last_row {return 0, -1, false}
+	first, last = 0, columns - 1
+	if row == r.first_row {first = max(r.first_column, 0)}
+	if row == r.last_row {last = min(r.last_column, columns - 1)}
+	return first, last, first <= last
+}
+
+// How many links the map holds: what verification reports as the pane's spans.
+link_span_count :: proc(m: ^Link_Map) -> int {
+	return len(m.spans)
+}
+
+// Rescans the live viewport only when the terminal changed since the last scan, so hover hit-tests
+// read the stored spans without touching libghostty. False leaves the map invalid.
+@(require_results)
+link_map_refresh :: proc(m: ^Link_Map, s: ^Session) -> bool {
+	if m.valid && m.generation == generation(s) {
+		return true
 	}
-	if row == r.first_row {
-		return column >= r.first_column
-	}
-	if row == r.last_row {
-		return column <= r.last_column
-	}
-	return row > r.first_row && row < r.last_row
+	return link_map_scan(m, s)
 }
 
 // link_map_scan reads the live viewport under the session lock. The pointer never reaches
 // libghostty: callers scan after the grid changes, then hit-test the stored spans on hover.
-@(require_results)
+@(private, require_results)
 link_map_scan :: proc(m: ^Link_Map, s: ^Session) -> bool {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
@@ -814,10 +833,7 @@ scan_selection :: proc(m: ^Link_Map, terminal: ghostty.Terminal) -> bool {
 	   int(last.y - first.y) >= links.SELECTION_ROWS {
 		return true
 	}
-	options := ghostty.sized(ghostty.Terminal_Selection_Format_Options)
-	options.emit = .Plain
-	options.unwrap = true
-	options.trim = true
+	options := selection_format_options()
 	text: [^]u8
 	length: uint
 	if ghostty.terminal_selection_format_alloc(terminal, nil, options, &text, &length) != .Success {

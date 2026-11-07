@@ -25,12 +25,20 @@ UI_PREFIXES :: []string {
 	"src/term/",
 	"src/ghostty/",
 }
-NATIVE_PREFIXES :: []string{"src/platform/", "src/input/", "src/instance/", "src/pty/", "src/localpath/"}
+NATIVE_PREFIXES :: []string {
+	"src/platform/",
+	"src/input/",
+	"src/instance/",
+	"src/pty/",
+	"src/procinfo/",
+	"src/localpath/",
+}
 NATIVE_FILES :: []string{"src/term/input.odin", "src/term/input_windows.odin"}
 PERF_PREFIXES :: []string {
 	"src/render/",
 	"src/term/",
 	"src/pty/",
+	"src/procinfo/",
 	"src/font/",
 	"src/dwrite/",
 	"src/glyphs/",

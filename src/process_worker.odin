@@ -2,7 +2,7 @@ package main
 
 import platform_api "aio:platform"
 import "aio:program_art"
-import "aio:pty"
+import "aio:procinfo"
 import "core:image/png"
 import "core:log"
 import "core:mem"
@@ -43,7 +43,7 @@ Process_Snapshot_Taking :: struct {}
 
 // Owned by the worker's allocator until taken. A failed snapshot is ready with no processes.
 Process_Snapshot_Ready :: struct {
-	processes: []pty.Process_Info,
+	processes: []procinfo.Process_Info,
 }
 
 // Reports whether the worker must be woken. A snapshot being taken or waiting to be taken already
@@ -61,14 +61,14 @@ process_snapshot_begin :: proc(s: ^Process_Snapshot) -> bool {
 	return true
 }
 
-process_snapshot_finish :: proc(s: ^Process_Snapshot, processes: []pty.Process_Info) {
+process_snapshot_finish :: proc(s: ^Process_Snapshot, processes: []procinfo.Process_Info) {
 	_, taking := s^.(Process_Snapshot_Taking)
 	assert(taking)
 	s^ = Process_Snapshot_Ready{processes}
 }
 
 // Hands over a ready snapshot, which the caller then owns.
-process_snapshot_collect :: proc(s: ^Process_Snapshot) -> (processes: []pty.Process_Info, ready: bool) {
+process_snapshot_collect :: proc(s: ^Process_Snapshot) -> (processes: []procinfo.Process_Info, ready: bool) {
 	snapshot := s^.(Process_Snapshot_Ready) or_return
 	s^ = nil
 	return snapshot.processes, true
@@ -95,7 +95,7 @@ process_worker_destroy :: proc(pw: ^Process_Worker) {
 		thread.join(pw.worker)
 		thread.destroy(pw.worker)
 		if ready, ok := pw.snapshot.(Process_Snapshot_Ready); ok {
-			pty.process_snapshot_destroy(ready.processes, pw.allocator)
+			procinfo.process_snapshot_destroy(ready.processes, pw.allocator)
 		}
 	}
 	for &icon in pw.icons {
@@ -135,7 +135,7 @@ process_worker_main :: proc(t: ^thread.Thread) {
 		if pw.stop {sync.mutex_unlock(&pw.mutex); return}
 		if process_snapshot_begin(&pw.snapshot) {
 			sync.mutex_unlock(&pw.mutex)
-			snapshot, err := pty.process_snapshot(pw.allocator)
+			snapshot, err := procinfo.process_snapshot(pw.allocator)
 			if err != .None {log.errorf("process snapshot failed: %v", err)}
 			sync.mutex_lock(&pw.mutex)
 			process_snapshot_finish(&pw.snapshot, snapshot)
@@ -162,7 +162,7 @@ process_snapshot_request :: proc(pw: ^Process_Worker, platform: ^platform_api.Pl
 }
 
 // The finished snapshot, if any; the caller destroys it with pw.allocator.
-process_snapshot_take :: proc(pw: ^Process_Worker) -> (snapshot: []pty.Process_Info, ready: bool) {
+process_snapshot_take :: proc(pw: ^Process_Worker) -> (snapshot: []procinfo.Process_Info, ready: bool) {
 	if pw.worker == nil {return}
 	sync.mutex_lock(&pw.mutex)
 	defer sync.mutex_unlock(&pw.mutex)

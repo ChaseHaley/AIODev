@@ -36,28 +36,28 @@ find_layout_reserves_count_and_usable_navigation_at_each_scale :: proc(t: ^testi
 				l := ui.find_layout(width*scale, scale, status_width*scale)
 				testing.expect(t, l.panel.y >= 40*scale)
 				testing.expect(t, l.status.width >= status_width*scale)
-				rects := [?]render.Rect{l.query, l.case_toggle, l.regex_toggle, l.status, l.older, l.newer,
+				rects := [?]render.Rect{l.query, l.case_toggle, l.regex_toggle, l.status, l.up, l.down,
 					l.close}
 				for r in rects {
 					testing.expect(t, r.x >= l.panel.x && r.y >= l.panel.y)
 					testing.expect(t, r.x+r.width <= l.panel.x+l.panel.width)
 					testing.expect(t, r.y+r.height <= l.panel.y+l.panel.height)
 				}
-				for r in ([?]render.Rect{l.older, l.newer, l.close}) { testing.expect_value(t, r.width, 32*scale) }
-				testing.expect(t, l.older.x+l.older.width <= l.newer.x)
+				for r in ([?]render.Rect{l.up, l.down, l.close}) { testing.expect_value(t, r.width, 32*scale) }
+				testing.expect(t, l.up.x+l.up.width <= l.down.x)
 				testing.expect(t, l.query.x+l.query.width <= l.case_toggle.x)
 				testing.expect(t, l.case_toggle.x+l.case_toggle.width <= l.regex_toggle.x)
 				testing.expect(t, l.regex_toggle.x+l.regex_toggle.width <= l.close.x)
 				testing.expect(t, l.query.y != l.status.y || l.regex_toggle.x+l.regex_toggle.width <= l.status.x)
-				testing.expect(t, l.status.y != l.older.y || l.status.x+l.status.width <= l.older.x)
-				testing.expect(t, l.newer.y != l.close.y || l.newer.x+l.newer.width <= l.close.x)
+				testing.expect(t, l.status.y != l.up.y || l.status.x+l.status.width <= l.up.x)
+				testing.expect(t, l.down.y != l.close.y || l.down.x+l.down.width <= l.close.x)
 			}
 		}
 	}
 	for width in ([?]f32{0, 1, 10, 24, 50, 100}) {
 		l := ui.find_layout(width, 2, 190)
 		testing.expect(t, l.panel.x >= 0 && l.panel.x+l.panel.width <= width)
-		testing.expect(t, l.query.width >= 0 && l.status.width >= 0 && l.older.width >= 0)
+		testing.expect(t, l.query.width >= 0 && l.status.width >= 0 && l.up.width >= 0)
 		testing.expect(t, l.close.width >= 0 && l.case_toggle.width >= 0)
 	}
 }
@@ -138,20 +138,20 @@ find_pointer_requires_matching_release_and_disables_without_matches :: proc(t: ^
 	defer ui.find_destroy(&f)
 	ui.find_open(&f)
 	l := ui.find_layout(1000, 1, 100)
-	x, y := l.older.x+16, l.older.y+16
-	next := l.newer.x+16
+	x, y := l.up.x+16, l.up.y+16
+	next := l.down.x+16
 	Outcome :: ui.Find_Outcome
 	testing.expect(t, ui.find_hover(&f, l, true, x, y))
-	testing.expect_value(t, f.hover, Outcome.Older)
+	testing.expect_value(t, f.hover, Outcome.Up)
 	testing.expect(t, !ui.find_hover(&f, l, true, x, y))
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Right, true, x, y), Outcome.None)
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), Outcome.Moved)
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, true, x, y), Outcome.Moved)
 	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), Outcome.Moved)
 	ui.find_mouse(&f, l, true, .Left, true, x, y)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), Outcome.Older)
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), Outcome.Up)
 	ui.find_mouse(&f, l, true, .Left, true, next, y)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), Outcome.Newer)
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), Outcome.Down)
 	ui.find_mouse(&f, l, true, .Left, true, x, y)
 	testing.expect_value(t, ui.find_mouse(&f, l, false, .Left, false, x, y), Outcome.Moved)
 	ui.find_mouse(&f, l, false, .Left, true, next, y)
@@ -183,7 +183,7 @@ find_toggles_close_and_focus_respond_without_matches :: proc(t: ^testing.T) {
 	testing.expect(t, f.case_sensitive && !f.regex)
 	testing.expect_value(t, click(&f, l, l.regex_toggle), Outcome.Changed)
 	testing.expect(t, f.case_sensitive && f.regex)
-	testing.expect_value(t, click(&f, l, l.older), Outcome.Moved)
+	testing.expect_value(t, click(&f, l, l.up), Outcome.Moved)
 	alt :: proc(k: input.Key) -> input.Key_Event { return {key = k, modifiers = {.Alt}, pressed = true, text = "c"} }
 	testing.expect_value(t, ui.find_key(&f, alt(.C)), Outcome.Changed)
 	testing.expect_value(t, ui.find_key(&f, alt(.R)), Outcome.Changed)
@@ -202,7 +202,7 @@ find_toggles_close_and_focus_respond_without_matches :: proc(t: ^testing.T) {
 	ui.find_mouse(&f, l, false, .Left, false, l.query.x+4, l.query.y+4)
 	testing.expect_value(t, click(&f, l, l.close), Outcome.Closed)
 	testing.expect_value(t, ui.find_pointer(l, false, l.close.x+4, l.close.y+4), platform.Cursor_Shape.Hand)
-	testing.expect_value(t, ui.find_pointer(l, false, l.older.x+4, l.older.y+4), platform.Cursor_Shape.Arrow)
+	testing.expect_value(t, ui.find_pointer(l, false, l.up.x+4, l.up.y+4), platform.Cursor_Shape.Arrow)
 }
 
 @(test)

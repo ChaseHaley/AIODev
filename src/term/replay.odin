@@ -1,7 +1,6 @@
 package term
 
 import "aio:ghostty"
-import "core:log"
 import "core:sync"
 
 // A capture is the seven magic bytes, a little-endian u16 columns, a little-endian u16 rows, then
@@ -37,31 +36,27 @@ capture_geometry :: proc(header: []u8) -> (columns, rows: u16, ok: bool) {
 
 // create_headless builds the same libghostty terminal as create() with no process behind it, so
 // recorded bytes can be replayed offscreen. It starts no reader, waiter, or writer thread, and its
-// process phase stays nil, so destroy performs no process cleanup.
+// process phase stays nil, so destroy performs no process cleanup. Program-status reports stay
+// enabled, as in a live session, and the cursor keeps libghostty's default.
 @(require_results)
 create_headless :: proc(
 	geometry: Geometry,
 	scrollback_lines: int,
 	allocator := context.allocator,
 ) -> (^Session, Error) {
-	s, allocation_error := new(Session, allocator)
-	if allocation_error != nil {
+	s := session_new(geometry, allocator)
+	if s == nil {
 		return nil, .Out_Of_Memory
 	}
-	s.allocator = allocator
-	s.callback_context = context
-	s.geometry = geometry
-	s.queue.pending.allocator = allocator
-	s.search_matches.allocator = allocator
 	ok := false
 	defer if !ok {
 		destroy(s)
 	}
-	config := Config {
-		geometry         = geometry,
-		scrollback_lines = scrollback_lines,
+	options := Options {
+		scrollback_lines       = scrollback_lines,
+		program_status_enabled = true,
 	}
-	if err := ghostty_create(s, config); err != .None {
+	if err := ghostty_create(s, geometry, options); err != .None {
 		return nil, err
 	}
 	ok = true
@@ -84,18 +79,5 @@ replay_write :: proc(s: ^Session, data: []u8) {
 // and cell output come from the production readers instead of a second formatter.
 @(require_results)
 replay_snapshot :: proc(s: ^Session, allocator := context.allocator) -> (Snapshot, Error) {
-	state: ghostty.Render_State
-	if ghostty.render_state_new(nil, &state) != .Success {
-		log.error("term: creating a render state for replay failed")
-		return {}, .Terminal_Failed
-	}
-	defer ghostty.render_state_free(state)
-	sync.mutex_lock(&s.mutex)
-	result := ghostty.render_state_update(state, s.terminal)
-	sync.mutex_unlock(&s.mutex)
-	if result != .Success {
-		log.errorf("term: updating the replayed render state failed: %v", result)
-		return {}, result == .Out_Of_Memory ? .Out_Of_Memory : .Terminal_Failed
-	}
-	return snapshot(state, allocator)
+	return screen_snapshot(s, allocator)
 }

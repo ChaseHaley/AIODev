@@ -179,7 +179,7 @@ send_focus :: proc(s: ^Session, focused: bool) {
 		log.errorf("term: focus encoding failed: %v", result)
 		return
 	}
-	queue_push(&s.queue, buffer[:n])
+	_ = queue_push(&s.queue, buffer[:n])
 }
 
 mouse_tracking :: proc(s: ^Session) -> bool {
@@ -287,7 +287,7 @@ send_mouse :: proc(
 	n := encode_mouse(s, ghostty_action, target, modifiers, x, y, buffer[:])
 	sync.mutex_unlock(&s.mutex)
 	if n > 0 {
-		queue_push(&s.queue, buffer[:n])
+		_ = queue_push(&s.queue, buffer[:n])
 	}
 }
 
@@ -326,7 +326,7 @@ scroll :: proc(s: ^Session, rows: int, modifiers: input.Modifiers, x, y: f32) {
 	}
 	sync.mutex_unlock(&s.mutex)
 	if n > 0 {
-		queue_push(&s.queue, buffer[:n])
+		_ = queue_push(&s.queue, buffer[:n])
 	}
 	mark_changed(s)
 }

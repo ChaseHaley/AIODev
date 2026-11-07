@@ -4,17 +4,6 @@ import "aio:layout"
 import "aio:links"
 import "aio:localpath"
 import "aio:term"
-import "aio:term_view"
-
-@(private, require_results)
-link_pane :: proc(w: ^Window, content: layout.Content) -> ^Pane_View {
-	for &pane, i in w.views {
-		if pane.content == content {
-			return &w.views[i]
-		}
-	}
-	return nil
-}
 
 // The terminal link under the pointer: the pane content showing it and the cells the renderer
 // underlines. Window.link_hover holds at most one; nil is None. This file is the only writer. Hover is
@@ -52,45 +41,55 @@ link_hover_move :: proc(app: ^App, w: ^Window, x, y: f32, over_divider, title: b
 	return link_hover_update(app, w, x, y)
 }
 
-// link_hover_update refreshes the hovered pane's spans only when its grid changed, hit-tests the
-// pointer, and records the range that the renderer underlines. It returns whether the pointer is
-// over a web target.
+// The terminal cell under a point and the pane state indexing its links. It borrows the window's
+// views, so it is for immediate use only.
+@(private)
+Terminal_Link_Hit :: struct {
+	content:     layout.Content,
+	entry:       ^Session_Entry,
+	pane:        ^Pane_View,
+	column, row: int,
+}
+
+// The one way hover, click and refresh find a link cell: the terminal pane under the point, its link
+// index brought up to date only when the grid changed, and the cell. Settings and Markdown panes
+// have no session, so they never hit. It does no filesystem work.
 @(private, require_results)
-link_cell :: proc(entry: ^Session_Entry, x, y: f32) -> (column, row: int, ok: bool) {
+terminal_link_probe :: proc(app: ^App, w: ^Window, x, y: f32) -> (hit: Terminal_Link_Hit, ok: bool) {
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found {return}
+	entry := workspace_session_for_content(app, pane.content)
+	state := entry != nil ? pane_view(w, pane.content) : nil
+	if state == nil || !term.link_map_refresh(&state.links, entry.session) {return}
 	g := term.geometry(entry.session)
 	extent := term.grid_extent(g)
 	if x < f32(g.padding_left) ||
 	   y < f32(g.padding_top) ||
 	   x >= f32(g.padding_left + extent.width) ||
 	   y >= f32(g.padding_top + extent.height) {
-		return 0, 0, false
+		return
 	}
-	column, row = term.cell_at(g, x, y)
-	return column, row, true
+	column, row := term.cell_at(g, x, y)
+	return {pane.content, entry, state, column, row}, true
 }
 
-// link_hover_update refreshes the hovered pane's spans only when its grid changed, hit-tests the
-// pointer, and records the range that the renderer underlines. It returns whether the pointer is
-// over a web target.
+// The link the probe finds at the point, as the renderer underlines it.
+@(private = "file", require_results)
+link_hover_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Maybe(Link_Hover) {
+	hit, ok := terminal_link_probe(app, w, x, y)
+	if !ok {return nil}
+	range, _, over := term.link_at(&hit.pane.links, hit.column, hit.row)
+	if !over {return nil}
+	return Link_Hover{hit.content, range}
+}
+
+// Records the range the renderer underlines under the pointer. It returns whether the pointer is
+// over a link.
 @(private = "file", require_results)
 link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	pane, found := layout.hit_test(w.panes[:], x, y)
-	entry := found ? workspace_session_for_content(app, pane.content) : nil
-	state := entry != nil ? link_pane(w, pane.content) : nil
-	if entry == nil || state == nil || !term_view.links_refresh(&state.view, entry.session) {
-		link_hover_clear(w)
-		return false
-	}
-	column, row, inside := link_cell(entry, x, y)
-	if !inside {
-		link_hover_clear(w)
-		return false
-	}
-	range, _, hit := term.link_at(&state.view.links, column, row)
-	next: Maybe(Link_Hover)
-	if hit {next = Link_Hover{pane.content, range}}
+	next := link_hover_at(app, w, x, y)
 	link_hover_set(w, next)
-	return hit
+	return next != nil
 }
 
 // What a click at the point would open; nil when nothing under the pointer reads as a link. The
@@ -98,27 +97,18 @@ link_hover_update :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 // copy them to keep them.
 @(private, require_results)
 link_resolve :: proc(app: ^App, w: ^Window, x, y: f32, buffer: []u8) -> Target {
-	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found {
+	hit, ok := terminal_link_probe(app, w, x, y)
+	if !ok {
 		return nil
 	}
-	entry := workspace_session_for_content(app, pane.content)
-	state := link_pane(w, pane.content)
-	if entry == nil || state == nil || !term_view.links_refresh(&state.view, entry.session) {
-		return nil
-	}
-	column, row, inside := link_cell(entry, x, y)
-	if !inside {
-		return nil
-	}
-	cwd := term.working_directory(entry.session, context.temp_allocator)
-	selection, selected := term.link_selection_at(&state.view.links, column, row)
+	cwd := term.working_directory(hit.entry.session, context.temp_allocator)
+	selection, selected := term.link_selection_at(&hit.pane.links, hit.column, hit.row)
 	if selected {
 		if uri, web := link_selection_web(selection, buffer); web {return Web_Target{uri}}
 		if path, exists := link_selection_file(selection, cwd, buffer); exists {return File_Target{path}}
 	}
-	target, hit := term.link_detected_at(&state.view.links, column, row)
-	if !hit {
+	target, detected := term.link_detected_at(&hit.pane.links, hit.column, hit.row)
+	if !detected {
 		if selected {return Missing_Target{}}
 		return nil
 	}
@@ -204,24 +194,14 @@ link_selection_web :: proc(selection: term.Link_Target, buffer: []u8) -> (string
 link_hover_refresh :: proc(app: ^App, w: ^Window) {
 	hover, hovering := w.link_hover.?
 	if !hovering {return}
-	pane := link_pane(w, hover.content)
-	if pane == nil {
+	if pane_view(w, hover.content) == nil {
 		link_hover_clear(w)
 		return
 	}
-	w.link_hover = link_hover_at_pointer(app, w, pane)
-	pointer_set(app, w, w.link_hover != nil ? .Hand : .Text)
-}
-
-@(private = "file")
-link_hover_at_pointer :: proc(app: ^App, w: ^Window, pane: ^Pane_View) -> Maybe(Link_Hover) {
-	hovered, found := layout.hit_test(w.panes[:], w.pointer.x, w.pointer.y)
-	if !found || hovered.content != pane.content {return nil}
-	entry := workspace_session_for_content(app, pane.content)
-	if entry == nil || !term_view.links_refresh(&pane.view, entry.session) {return nil}
-	column, row, inside := link_cell(entry, w.pointer.x, w.pointer.y)
-	if !inside {return nil}
-	range, _, over := term.link_at(&pane.view.links, column, row)
-	if !over {return nil}
-	return Link_Hover{pane.content, range}
+	// Only the pane already showing the link is scanned again.
+	under, found := layout.hit_test(w.panes[:], w.pointer.x, w.pointer.y)
+	next: Maybe(Link_Hover)
+	if found && under.content == hover.content {next = link_hover_at(app, w, w.pointer.x, w.pointer.y)}
+	link_hover_set(w, next)
+	pointer_set(app, w, next != nil ? .Hand : .Text)
 }

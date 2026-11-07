@@ -6,11 +6,12 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import "aio:ghostty"
+import "aio:search"
 import "aio:term"
 
 LINES_200 :: "cmd.exe /d /c \"for /l %i in (1,1,200) do @echo LINE_%i\""
 
-settle_search :: proc(t: ^testing.T, s: ^term.Session) -> term.Search_Summary {
+settle_search :: proc(t: ^testing.T, s: ^term.Session) -> search.Summary {
 	started := time.tick_now()
 	for term.search_pending(s) && time.tick_since(started) < 10 * time.Second {
 		term.search_update(s)
@@ -52,11 +53,11 @@ search_walks_scrollback_matches :: proc(t: ^testing.T) {
 	highlights := make([dynamic]term.Highlight)
 	defer delete(highlights)
 
-	testing.expect_value(t, term.search_summary(s), term.Search_Summary{selected = -1})
+	testing.expect_value(t, term.search_summary(s), search.Summary{selected = -1})
 	testing.expect(t, !term.search_select(s, true))
 	term.search_set_needle(s, "line_1")
 	summary := settle_search(t, s)
-	settled := term.Search_Summary{progress = .Complete, total = 111, selected = -1}
+	settled := search.Summary{progress = .Complete, total = 111, selected = -1}
 	testing.expect_value(t, summary, settled)
 	term.search_set_needle(s, "77")
 	summary = settle_search(t, s)
@@ -65,7 +66,7 @@ search_walks_scrollback_matches :: proc(t: ^testing.T) {
 	testing.expect(t, term.search_select(s, true))
 	testing.expect_value(t, term.search_summary(s).selected, 0)
 	testing.expect_value(t, viewport_up(s), 0)
-	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect(t, updated(term.capture(s, state, &highlights)))
 	testing.expect_value(t, len(highlights), 2)
 	newest, found := selected_highlight(highlights[:])
 	testing.expect(t, found)
@@ -75,7 +76,7 @@ search_walks_scrollback_matches :: proc(t: ^testing.T) {
 	testing.expect(t, term.search_select(s, true))
 	testing.expect_value(t, term.search_summary(s).selected, 1)
 	testing.expect(t, viewport_up(s) > 0)
-	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect(t, updated(term.capture(s, state, &highlights)))
 	oldest, oldest_found := selected_highlight(highlights[:])
 	testing.expect(t, oldest_found)
 	testing.expect_value(t, oldest.first, 5)
@@ -89,9 +90,9 @@ search_walks_scrollback_matches :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.search_summary(s).selected, 1)
 
 	term.search_set_needle(s, "")
-	testing.expect_value(t, term.search_summary(s), term.Search_Summary{selected = -1})
+	testing.expect_value(t, term.search_summary(s), search.Summary{selected = -1})
 	testing.expect(t, !term.search_pending(s))
-	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect(t, updated(term.capture(s, state, &highlights)))
 	testing.expect_value(t, len(highlights), 0)
 }
 
@@ -113,8 +114,8 @@ search_matches_case_and_expressions :: proc(t: ^testing.T) {
 	defer ghostty.render_state_free(state)
 	highlights := make([dynamic]term.Highlight)
 	defer delete(highlights)
-	exact := term.Search_Options{case_sensitive = true}
-	pattern := term.Search_Options{regex = true}
+	exact := search.Options{case_sensitive = true}
+	pattern := search.Options{regex = true}
 
 	term.search_set_needle(s, "LINE_1", exact)
 	testing.expect_value(t, settle_search(t, s).total, 111)
@@ -132,7 +133,7 @@ search_matches_case_and_expressions :: proc(t: ^testing.T) {
 
 	term.search_set_needle(s, "(", pattern)
 	summary := term.search_summary(s)
-	testing.expect_value(t, summary.progress, term.Search_Progress.Invalid)
+	testing.expect_value(t, summary.progress, search.Progress.Invalid)
 	testing.expect(t, !term.search_pending(s))
 	testing.expect(t, !term.search_select(s, true))
 
@@ -143,7 +144,7 @@ search_matches_case_and_expressions :: proc(t: ^testing.T) {
 	testing.expect(t, viewport_up(s) > 0)
 	settle_search(t, s)
 	testing.expect_value(t, term.search_summary(s).selected, 0)
-	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect(t, updated(term.capture(s, state, &highlights)))
 	selected, found := selected_highlight(highlights[:])
 	testing.expect(t, found)
 	testing.expect_value(t, selected.first, 0)
@@ -155,8 +156,8 @@ search_matches_case_and_expressions :: proc(t: ^testing.T) {
 	term.search_set_needle(s, "line_77")
 	testing.expect_value(t, settle_search(t, s).total, 1)
 	term.search_set_needle(s, "")
-	testing.expect_value(t, term.search_summary(s), term.Search_Summary{selected = -1})
-	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect_value(t, term.search_summary(s), search.Summary{selected = -1})
+	testing.expect(t, updated(term.capture(s, state, &highlights)))
 	testing.expect_value(t, len(highlights), 0)
 }
 
@@ -183,8 +184,8 @@ search_reports_out_of_memory :: proc(t: ^testing.T) {
 	defer ghostty.render_state_free(state)
 	highlights := make([dynamic]term.Highlight)
 	defer delete(highlights)
-	pattern := term.Search_Options{regex = true}
-	failed := term.Search_Summary{progress = .Failed, selected = -1}
+	pattern := search.Options{regex = true}
+	failed := search.Summary{progress = .Failed, selected = -1}
 
 	// The needle cannot be copied.
 	a.remaining = 0
@@ -201,13 +202,13 @@ search_reports_out_of_memory :: proc(t: ^testing.T) {
 	a.remaining = -1
 	testing.expect_value(t, term.search_summary(s), failed)
 	testing.expect(t, !term.search_pending(s))
-	testing.expect(t, term.capture(s, state, &highlights))
+	testing.expect(t, updated(term.capture(s, state, &highlights)))
 	testing.expect_value(t, len(highlights), 0)
 
 	// The next needle searches again.
 	term.search_set_needle(s, "LINE_7", pattern)
 	summary := settle_search(t, s)
-	testing.expect_value(t, summary.progress, term.Search_Progress.Complete)
+	testing.expect_value(t, summary.progress, search.Progress.Complete)
 	testing.expect(t, summary.total > 0)
 }
 
@@ -294,7 +295,7 @@ scrollback_lines_bound_history :: proc(t: ^testing.T) {
 		marker: string,
 	}{{1000, "FIRST"}, {1000, "SECOND"}, {200, "THIRD"}, {200, "FOURTH"}}
 	for batch in batches {
-		term.configure(s, batch.limit, .Block, false)
+		term.configure(s, {scrollback_lines = batch.limit, program_status_enabled = true})
 		command := fmt.tprintf("for /l %%i in (1,1,3000) do @echo %s_%%i\r", batch.marker)
 		testing.expect(t, term.send_text(s, command))
 		if !await(t, s, shows, fmt.tprintf("%s_3000", batch.marker)) {

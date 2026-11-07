@@ -58,7 +58,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			w.workspace_picker.menu_hover = 0
 			ui.editor_hover_clear(&w.editor)
 			link_hover_clear(w)
-			terminal_scrollbar_hover_set(w, 0)
+			pane_scrollbar_hover_leave(w, .Terminal)
 			w.split_overlay = false
 			for &view in w.views {
 				view.header_hover = .None
