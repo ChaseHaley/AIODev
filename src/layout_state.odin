@@ -467,7 +467,7 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 @(private, require_results)
 layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, ok: bool) {
 	// A directory that is remote or no longer exists falls back to the profile's own.
-	directory, refused := local_launch_directory(saved.directory, "")
+	directory, refused := local_launch_directory(saved.directory)
 	if refused {
 		notify(
 			app,

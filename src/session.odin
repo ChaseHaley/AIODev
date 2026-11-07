@@ -138,7 +138,7 @@ session_open :: proc(
 	}
 	// Defense in depth: every caller filters its directory, but an untrusted one must never reach
 	// CreateProcess. Falling back here keeps the pane usable instead of failing the whole open.
-	launch_directory, refused := local_launch_directory(directory, "")
+	launch_directory, refused := local_launch_directory(directory)
 	if refused {
 		notify(
 			app,
