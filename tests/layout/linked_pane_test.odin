@@ -404,6 +404,39 @@ a_slot_cannot_take_the_only_shown_pane_or_one_of_its_own :: proc(t: ^testing.T) 
 	testing.expect(t, !taken)
 }
 
+// Regression: a slot's only pane moving into another slot of the tab freed nodes the new split reused, and
+// the split then found itself as the slot's parent and became its own child.
+@(test)
+a_slots_only_pane_can_join_another_slot_of_its_tab :: proc(t: ^testing.T) {
+	home, view: layout.Layout
+	defer layout.destroy(&home)
+	defer layout.destroy(&view)
+	testing.expect_value(t, layout.init(&home, pane_of(1)), nil)
+	first := home.root
+	moving, _ := layout.split(&home, first, .Horizontal, 0.5, pane_of(2))
+	testing.expect(t, layout.set_linked(&home, moving, true))
+	slot, _ := layout.split(&home, first, .Horizontal, 0.5, pane_of(3))
+	testing.expect(t, layout.set_linked(&home, slot, true))
+	added, ok := layout.slot_take_pane(&home, moving, slot, slot, .Right, false)
+	if !testing.expect(t, ok) {return}
+	// Read the new split directly: a walk up from a split that holds itself would never end.
+	root := layout.INVALID_NODE
+	for node, i in home.nodes {
+		if s, is_split := node.(layout.Split); is_split && (s.first == added || s.second == added) {
+			root = layout.Node_Id(i)
+		}
+	}
+	if !testing.expect(t, root != layout.INVALID_NODE) {return}
+	branch := home.nodes[root].(layout.Split)
+	if !testing.expect(t, branch.first != root && branch.second != root, "the new slot holds itself") {return}
+	testing.expect_value(t, layout.link_root(&home, added), root)
+	testing.expect_value(t, layout.link_root(&home, slot), root)
+	testing.expect_value(t, layout.pane_count(&home), 3)
+	testing.expect_value(t, len(shown(&home)), 1)
+	testing.expect_value(t, layout.link_view_load(&view, &home, root), nil)
+	testing.expect_value(t, layout.pane_count(&view), 2)
+}
+
 @(test)
 a_pane_can_join_another_tabs_slot :: proc(t: ^testing.T) {
 	source, destination, view: layout.Layout
