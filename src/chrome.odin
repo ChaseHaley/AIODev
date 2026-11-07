@@ -2,6 +2,7 @@ package main
 
 import "aio:colour"
 import "aio:commands"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
@@ -268,4 +269,55 @@ window_shared_border :: proc(app: ^App, w: ^Window, bar: layout.Edge) -> bool {
 		   .None {return false}
 	}
 	return true
+}
+
+// The native caption buttons as a pointer surface; pointer_surfaces composes them.
+
+@(private)
+caption_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return ui.caption_hit(f32(w.width), x, y, w.scale) != nil
+}
+
+@(private)
+caption_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	x, y := f32(e.x), f32(e.y)
+	caption: Maybe(platform.Caption_Button)
+	if owner == .Caption {caption = ui.caption_hit(f32(w.width), x, y, w.scale)}
+	if caption != w.caption_hover {w.caption_hover, w.dirty = caption, true}
+	if owner == .Caption {pointer_set(app, w, chrome_pointer(app, w, x, y))}
+}
+
+@(private)
+caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	button, hit := ui.caption_hit(f32(w.width), x, y, w.scale).?
+	if !hit {return ""}
+	switch button {
+	case .Minimize: return "Minimize"
+	case .Maximize: return w.maximized ? "Restore" : "Maximize"
+	case .Close: return window_linked(w) ? "Return pane to tab" : "Close window"
+	}
+	return ""
+}
+
+@(private)
+caption_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button != .Left || drag_held(w) {return}
+	ui.armed_press(&w.caption_armed, ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale))
+}
+
+@(private)
+caption_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	if e.button != .Left || !ui.armed_down(w.caption_armed) || drag_held(w) {
+		return false
+	}
+	fired, ok := ui.armed_release(&w.caption_armed, ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale))
+	w.dirty = true
+	if button, has := fired.?; ok && has {platform.window_caption_action(&app.platform, w.id, button)}
+	return true
+}
+
+@(private)
+caption_cancel :: proc(_: ^App, w: ^Window) {
+	w.caption_hover = nil
+	ui.armed_cancel(&w.caption_armed)
 }
