@@ -223,23 +223,21 @@ window_place_at_pointer :: proc(app: ^App, preview, source_window: ^Window, poin
 	return true
 }
 
-pane_drag_thumbnail_sync :: proc(app: ^App, w: ^Window, d: ^Pane_Drag, shown: bool, x, y: i32) {
+pane_drag_thumbnail_sync :: proc(
+	app: ^App,
+	w: ^Window,
+	a: ^Drag_Active,
+	carry: ^Pane_Carry,
+	shown: bool,
+	x, y: i32,
+) {
 	region: layout.Rect
-	for pane in w.panes {if pane.node == d.node {region = pane.rect; break}}
-	drag_thumbnail_sync(app, w, &d.thumbnail, region, shown, x, y)
+	for pane in w.panes {if pane.node == carry.node {region = pane.rect; break}}
+	drag_thumbnail_sync(app, w, &a.thumbnail, region, shown, x, y)
 }
 
-// Puts the pane in the prepared window at the pointer and starts naming it there.
-@(require_results)
-pane_tear_off :: proc(app: ^App, source_window: ^Window, d: Pane_Drag) -> bool {
-	preview := window_find(app, d.preview_window)
-	if preview == nil {return false}
-	if !window_place_at_pointer(app, preview, source_window, d.pointer) {return false}
-	if !pane_to_window(app, source_window, d.source, d.node, preview.id) {return false}
-	workspace_name_begin(app, preview)
-	return true
-}
-
+// Moves the pane into the prepared window. Every step that can fail comes first, and the window shows before
+// the pane leaves its tab, so a failure leaves the source as it was and the preview still prepared.
 @(require_results)
 pane_to_window :: proc(
 	app: ^App,
@@ -280,22 +278,24 @@ pane_to_window :: proc(
 	if !pane_minimum_allows(app, preview, panes[:], nil, notify_failure = true) {return false}
 	name := workspace_default_name(app)
 	if name == "" {return false}
-	was_linked := window_linked(source_window)
+	// The preview is still Preparing here, so the move leaves only the windows that were live.
 	move := pane_move_begin(app, preview, home.tab, workspace)
-	if !layout.remove(&home.tab.tree, home.node) {
+	if !window_commit(app, preview) {
 		delete(name)
 		pane_move_enter(app, move)
 		return false
 	}
+	was_linked := window_linked(source_window)
+	// The node was checked to be a pane above, which is all a removal needs.
+	removed := layout.remove(&home.tab.tree, home.node)
+	assert(removed)
 	destination.tree.nodes[destination.tree.root] = layout_pane
 	destination.tree.next_pane_order = layout_pane.order
-	shown := window_commit(app, preview)
 	preview.workspace.provisional = false
 	preview.workspace.name = name
 	workspace_pickers_refresh(app)
 	pane_move_finish(app, move, destination)
 	if was_linked {pane_link_refresh_source(app, source_window, pane.content)}
-	if !shown {return false}
 	_ = window_activate(app, preview)
 	return true
 }

@@ -404,8 +404,8 @@ wait_timeout :: proc(app: ^App) -> u32 {
 		   pending && (!found || time.tick_diff(next, deadline) > 0) {
 			deadline, found = next, true
 		}
-		if next := window.pane_drag.hover_until;
-		   next != {} && (!found || time.tick_diff(next, deadline) > 0) {
+		if next, armed := drag_hover_deadline(window);
+		   armed && (!found || time.tick_diff(next, deadline) > 0) {
 			deadline, found = next, true
 		}
 		if next, armed := leader_deadline(window);

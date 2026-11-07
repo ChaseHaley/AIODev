@@ -287,27 +287,27 @@ pane_drag_dropdown_cancel_gap_scroll_and_last_pane_guard :: proc(t: ^testing.T) 
 	state, w := &f.state, f.source
 	w.height = 260
 	for _ in 0 ..< 12 {if !testing.expect(t, app.workspace_create_empty(state) != nil) {return}}
-	app.pane_drag_press(state, w, f.node, 400, 200)
-	w.pane_drag.active = true
+	seed_pane_drag(w, app.selected_tab(w.workspace), f.node)
 	chip := app.workspace_button_rect(w)
 	testing.expect(t, app.pane_workspace_drag_move(state, w, w, chip.x + 4, chip.y + 4, false))
 	testing.expect(t, app.pane_workspace_drag_move(state, w, w, chip.x + 4, 37, false))
-	testing.expect_value(t, w.pane_drag.picker_hit, -1)
-	testing.expect(t, app.pane_workspace_drag_wheel(state, w, -1))
+	held, _ := app.drag_destination(w).(app.Drop_Workspace_Dropdown)
+	testing.expect_value(t, held.row, -1)
+	testing.expect(t, app.drag_wheel(state, w, -1))
 	testing.expect_value(t, w.workspace_picker.scroll, 1)
 	app.handle_event(state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-	testing.expect(t, !w.pane_drag.active && !app.workspace_picker_active(&w.workspace_picker))
+	testing.expect(t, !app.drag_held(w) && !app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(w.workspace)), 2)
 	other := f.destination
-	app.pane_drag_press(state, other, other.tree.root, 400, 200)
-	other.pane_drag.active = true
+	seed_pane_drag(other, app.selected_tab(other.workspace), other.tree.root)
 	chip = app.workspace_button_rect(other)
 	testing.expect(t, app.pane_workspace_drag_move(state, other, other, chip.x + 4, chip.y + 4, false))
 	row := app.workspace_picker_row_rect(other, len(other.workspace_picker.rows) + 1)
 	other.workspace_picker.scroll = len(other.workspace_picker.rows)
 	row = app.workspace_picker_row_rect(other, len(other.workspace_picker.rows) + 1)
 	testing.expect(t, app.pane_workspace_drag_move(state, other, other, row.x + 4, row.y + 4, false))
-	testing.expect_value(t, other.pane_drag.picker_hit, -1)
+	held, _ = app.drag_destination(other).(app.Drop_Workspace_Dropdown)
+	testing.expect_value(t, held.row, -1)
 	app.pane_drag_cancel(state, other)
 	testing.expect_value(t, len(state.windows), 3)
 }
@@ -328,10 +328,12 @@ pane_drag_cancel_enters_the_destination_tab_it_restores_by_index :: proc(t: ^tes
 	append(&destination.workspace.tabs, other)
 	app.tab_select(state, destination, 1, true)
 	if !testing.expect(t, focus_holds_shown(destination)) {return}
-	app.pane_drag_press(state, w, f.node, 400, 200)
-	w.pane_drag.active = true
-	w.pane_drag.destination_window = destination.id
-	w.pane_drag.destination_original_index = 0
+	w.drag = app.Drag_Active {
+		carry = app.Pane_Carry {
+			grab = {app.selected_tab(w.workspace), f.node},
+			visit = {window = destination.id, original_index = 0},
+		},
+	}
 	app.pane_drag_cancel(state, w)
 	testing.expect_value(t, destination.workspace.selected, 0)
 	testing.expect(t, focus_holds_shown(destination))

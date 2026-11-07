@@ -46,7 +46,7 @@ gestures_header_multiple_buttons_release_outside_over_caption :: proc(t: ^testin
 	}
 	testing.expect(t, app.gesture_buttons(w, app.Gesture_Swallowed) == {.Left, .Right, .Middle})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
-	testing.expect(t, !w.pane_drag.pressed)
+	testing.expect(t, !app.drag_held(w))
 	gesture_button(s, w, .Right, false, -20, f32(w.height)+20)
 	gesture_button(s, w, .Middle, false, -20, f32(w.height)+20)
 	testing.expect(t, gesture_captured(w) == {})
@@ -90,7 +90,7 @@ gestures_opening_and_focus_capture_cancel_then_ignore_late_release :: proc(t: ^t
 			testing.expect_value(t, term.process_id(entry.session), pids[i])
 			testing.expect_value(t, term.status(entry.session).kind, term.Status_Kind.Running)
 		}
-		testing.expect(t, !w.pane_drag.pressed && !w.tab_drag.pressed && gesture_captured(w) == {})
+		testing.expect(t, !app.drag_held(w) && gesture_captured(w) == {})
 		testing.expect(t, !app.selection_active(w))
 		if scenario == 5 {
 			// Return to the same terminal tree after the Settings case, with every runtime intact.
@@ -175,14 +175,13 @@ gestures_cancel_preview_destruction_and_late_events_preserve_runtime :: proc(t: 
 	preview := app.pane_window_preview_create(s, source, w.tree.focus)
 	if !testing.expect(t, preview != nil) {return}
 	preview_id := preview.id
-	app.pane_drag_press(s, w, w.tree.focus, 30, 60)
-	w.pane_drag.preview_window = preview_id
+	seed_pane_drag(w, source, w.tree.focus, preview = app.Preview_Ready{preview_id})
 	app.handle_event(s, platform.Capture_Lost_Event{preview_id})
 	testing.expect(t, app.window_find(s, preview_id) == nil)
 	app.handle_event(s, platform.Focus_Event{preview_id, false})
 	app.handle_event(s, platform.Mouse_Button_Event{window = preview_id, button = .Left})
 	gesture_button(s, w, .Left, false, f32(w.width)-20, 10)
-	testing.expect(t, !w.pane_drag.pressed && !w.pane_drag.active)
+	testing.expect(t, !app.drag_held(w))
 	testing.expect_value(t, len(s.windows), 2)
 	testing.expect_value(t, len(w.panes), 2)
 	entry = app.session_find(s, id)
@@ -204,9 +203,9 @@ gestures_completion_removes_source_window_and_preserves_both_runtimes :: proc(t:
 		ids := [?]u32{s.sessions[0].id, s.sessions[1].id}
 		sessions := [?]^term.Session{s.sessions[0].session, s.sessions[1].session}
 		pids := [?]u32{term.process_id(sessions[0]), term.process_id(sessions[1])}
-		w.pane_drag = {pressed = true, active = true, shown = true, new_tab = to_tab,
-			source = source, destination = destination, node = source.tree.root,
-			target = destination.tree.root, destination_window = target.id, direction = .Right}
+		place: app.Drag_Destination = app.Drop_Pane{target.id, destination, destination.tree.root, .Right, .Fits}
+		if to_tab {place = app.Drop_New_Tab{target.id, destination, .Fits}}
+		seed_pane_drag(w, source, source.tree.root, place)
 		app.handle_event(s, platform.Mouse_Button_Event{window = window_id, button = .Left})
 		testing.expect(t, app.window_find(s, window_id) == nil)
 		testing.expect(t, app.workspace_find(s, workspace_id) == nil)

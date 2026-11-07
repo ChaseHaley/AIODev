@@ -900,6 +900,10 @@ when AIO_CONTROL {
 			if _, err := append(&entries, ..tab_floats[:]); err != nil {return nil, .Out_Of_Memory}
 		}
 		if w != nil {
+			drag := drag_report(w)
+			tab_thumbnail, pane_thumbnail: Drag_Thumbnail
+			if drag.tab {tab_thumbnail = drag.thumbnail}
+			if drag.pane {pane_thumbnail = drag.thumbnail}
 			pane_state := [?]control.State_Entry {
 				{"panes.count", fmt.tprintf("%d", len(window_tiled_rects(w)))},
 				{"panes.floating", fmt.tprintf("%d", len(floating_rects(w)))},
@@ -918,7 +922,7 @@ when AIO_CONTROL {
 				{"panes.gap", fmt.tprintf("%g", window_gap(app, w))},
 				{"panes.header_height", fmt.tprintf("%g", w.header_height)},
 				{"panes.split_overlay", fmt.tprintf("%t", w.split_overlay)},
-				{"panes.dragging", fmt.tprintf("%t", w.pane_drag.active)},
+				{"panes.dragging", fmt.tprintf("%t", drag.pane)},
 				{"panes.float_dragging", fmt.tprintf("%t", floating_dragging(w))},
 				{
 					"panes.float_header_hover",
@@ -926,37 +930,31 @@ when AIO_CONTROL {
 				},
 				{"panes.float_header_hover_value", fmt.tprintf("%g", w.float_header_motion.hover.value)},
 				{"panes.float_header_press_value", fmt.tprintf("%g", w.float_header_motion.press.value)},
-				{"tabs.dragging", fmt.tprintf("%t", w.tab_drag.active)},
-				{"tabs.drop.new_window", fmt.tprintf("%t", w.tab_drag.new_window)},
-				{"tabs.drop.preview_window", fmt.tprintf("%d", w.tab_drag.preview_window)},
-				{"tabs.drop.window", fmt.tprintf("%d", w.tab_drag.destination_window)},
+				{"tabs.dragging", fmt.tprintf("%t", drag.tab)},
+				{"tabs.drop.new_window", fmt.tprintf("%t", drag.tab && drag.tear_off)},
+				{"tabs.drop.preview_window", fmt.tprintf("%d", drag.tab ? drag.preview : 0)},
+				{"tabs.drop.window", fmt.tprintf("%d", drag.tab ? drag.window : 0)},
 				{"tabs.incoming.count", fmt.tprintf("%d", w.tab_incoming.count)},
 				{"tabs.incoming.slot", fmt.tprintf("%d", w.tab_incoming.slot)},
-				{"tabs.drop.thumbnail", fmt.tprintf("%t", w.tab_drag.thumbnail.shown)},
+				{"tabs.drop.thumbnail", fmt.tprintf("%t", drag.tab && drag.thumbnail.shown)},
 				{
 					"tabs.drop.thumbnail_size",
-					fmt.tprintf("%dx%d", w.tab_drag.thumbnail.width, w.tab_drag.thumbnail.height),
+					fmt.tprintf("%dx%d", tab_thumbnail.width, tab_thumbnail.height),
 				},
-				{"panes.drop.shown", fmt.tprintf("%t", w.pane_drag.shown)},
-				{"panes.drop.root", fmt.tprintf("%t", w.pane_drag.root)},
-				{"panes.drop.new_tab", fmt.tprintf("%t", w.pane_drag.new_tab)},
-				{"panes.drop.new_window", fmt.tprintf("%t", w.pane_drag.new_window)},
-				{"panes.drop.window", fmt.tprintf("%d", w.pane_drag.destination_window)},
-				{"panes.drop.preview_window", fmt.tprintf("%d", w.pane_drag.preview_window)},
-				{"panes.drop.thumbnail", fmt.tprintf("%t", w.pane_drag.thumbnail.shown)},
+				{"panes.drop.shown", fmt.tprintf("%t", drag.shown)},
+				{"panes.drop.root", fmt.tprintf("%t", drag.root)},
+				{"panes.drop.new_tab", fmt.tprintf("%t", drag.new_tab)},
+				{"panes.drop.new_window", fmt.tprintf("%t", drag.pane && drag.tear_off)},
+				{"panes.drop.window", fmt.tprintf("%d", drag.tab ? 0 : drag.window)},
+				{"panes.drop.preview_window", fmt.tprintf("%d", drag.pane ? drag.preview : 0)},
+				{"panes.drop.thumbnail", fmt.tprintf("%t", drag.pane && drag.thumbnail.shown)},
 				{
 					"panes.drop.thumbnail_size",
-					fmt.tprintf("%dx%d", w.pane_drag.thumbnail.width, w.pane_drag.thumbnail.height),
+					fmt.tprintf("%dx%d", pane_thumbnail.width, pane_thumbnail.height),
 				},
 				{
 					"panes.drop.rect",
-					fmt.tprintf(
-						"%g,%g,%g,%g",
-						w.pane_drag.ghost[0].target,
-						w.pane_drag.ghost[1].target,
-						w.pane_drag.ghost[2].target,
-						w.pane_drag.ghost[3].target,
-					),
+					fmt.tprintf("%g,%g,%g,%g", drag.ghost[0], drag.ghost[1], drag.ghost[2], drag.ghost[3]),
 				},
 			}
 			if _, err := append(&entries, ..pane_state[:]); err != nil {return nil, .Out_Of_Memory}

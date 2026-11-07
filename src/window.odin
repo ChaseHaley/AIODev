@@ -44,8 +44,8 @@ Window :: struct {
 	scroll_hover: u32,
 	// A divider press, drag or the first click of a double-click; see arrange.odin.
 	divider: Divider_Gesture,
-	pane_drag: Pane_Drag,
-	tab_drag: Tab_Drag,
+	// The pane or tab drag this window's pointer holds; see drag.odin.
+	drag: Drag,
 	// The float surface's held Left press: a float header button, a float moving or resizing, or the
 	// capsule row; see floating_panes.odin.
 	float_press: Float_Press,
@@ -232,18 +232,17 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	return w
 }
 
-// Preparing → Shown: the window owns its content from here and takes input. A show the OS refuses still
-// commits, since the caller may already have moved content in; the result says whether it is on screen.
+// Preparing → Shown: the window owns its content from here and takes input. A show the OS refuses leaves it
+// Preparing, so callers commit before moving content in and can still discard the window.
 @(require_results)
 window_commit :: proc(app: ^App, w: ^Window) -> bool {
 	assert(w.phase == .Preparing)
-	w.phase = .Shown
 	show_error := platform.window_show_inactive(&app.platform, w.id)
 	if show_error != .None {
 		log.errorf("showing the window failed: %v", show_error)
 		return false
 	}
-	w.dirty = true
+	w.phase, w.dirty = .Shown, true
 	return true
 }
 
@@ -270,9 +269,10 @@ window_for_workspace :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 
 window_close :: proc(app: ^App, w: ^Window) {
 	if w.phase == .Closing {return}
-	// A preview stays Preparing through the cancel: cancelling the drag that made it is how a preview is
-	// discarded, and that discard closes it from inside this call. Any other window is Closing first, so
-	// nothing the cancel sets off takes it for a live window or closes it again.
+	// A window still Preparing (a preview, or one whose show failed) stays Preparing through the cancel:
+	// cancelling the drag that made a preview is how it is discarded, and that discard closes it from
+	// inside this call. Any other window is Closing first, so nothing the cancel sets off takes it for a
+	// live window or closes it again.
 	if w.phase != .Preparing {w.phase = .Closing}
 	if !gesture_cancel(app, w) {return}
 	w.phase = .Closing
@@ -300,7 +300,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 @(private)
 window_free :: proc(w: ^Window) {
 	workspace_view_destroy(&w.resources)
-	delete(w.tab_drag.order)
+	drag_destroy(w)
 	delete(w.rail_rows)
 	ui.find_destroy(&w.find)
 	profile_menu_destroy(&w.profile_menu)

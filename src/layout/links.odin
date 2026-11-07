@@ -215,6 +215,8 @@ slot_insert_pane :: proc(
 		return place_pane(l, target_node, inserted, direction), true
 	}
 	if reserve(&l.nodes, len(l.nodes) + 2) != nil {return INVALID_NODE, false}
+	// Before the new split exists: it also holds the slot, and a vacant node can put it first in the scan.
+	parent := parent_of(l, slot)
 	added := allocate_node(l, inserted)
 	before := direction == .Left || direction == .Up
 	axis: Axis = direction == .Left || direction == .Right ? .Horizontal : .Vertical
@@ -226,7 +228,6 @@ slot_insert_pane :: proc(
 	)
 	// The mark moves to the new split so the old slot's panes and the added pane all stay in the window.
 	node_set_linked(l, slot, false)
-	parent := parent_of(l, slot)
 	if parent == INVALID_NODE {
 		l.root = branch
 	} else {

@@ -79,10 +79,10 @@ when app.AIO_CONTROL {
 		testing.expect(t, app.verify_window(&state) == &second)
 		state.verify.mouse_window, state.verify.buttons = second.id, {.Left}
 		second.divider = app.Divider_Drag{count = 1}
-		second.tab_drag.pressed = true
+		second.drag = app.Drag_Pressed{grab = app.Tab_Grab{}}
 		app.handle_event(&state, platform.Capture_Lost_Event{second.id})
 		testing.expect_value(t, divider_count(&second), 0)
-		testing.expect(t, !second.tab_drag.pressed)
+		testing.expect(t, !app.drag_held(&second))
 		ordered_remove(&state.windows, 1)
 		testing.expect(t, app.verify_window(&state) == &first)
 		testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))

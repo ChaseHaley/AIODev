@@ -203,7 +203,7 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event)
 
 pane_header_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	pane, action, hit := pane_header_hit(w, f32(e.x), f32(e.y))
-	if e.button == .Left && w.pane_drag.active {
+	if e.button == .Left && pane_drag_active(w) {
 		pane_drag_move(app, w, f32(e.x), f32(e.y), .Shift in e.modifiers)
 		pane_header_cancel(w)
 		_ = pane_drag_release(app, w)

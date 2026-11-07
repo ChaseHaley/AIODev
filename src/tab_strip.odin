@@ -67,7 +67,7 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> int
 	if x < bar.x || x >= bar.x + bar.width || y < 0 || y >= bar.height {return -1}
 	for pass in 0 ..< 2 {
 		for i := bar.count - 1; i >= 0; i -= 1 {
-			foreground := w.tab_drag.active && w.workspace.tabs[i].marked
+			foreground := tab_drag_active(w) && w.workspace.tabs[i].marked
 			if foreground != (pass == 0) {continue}
 			r := window_tab_rect(app, w, i)
 			if x >= r.x && x < r.x + r.width {return i}
@@ -139,10 +139,11 @@ tab_control :: proc(w: ^Window, index: int) -> ui.Control_Motion {
 window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 {return .Ok}
-	for pass in 0 ..< (w.tab_drag.active ? 2 : 1) {
+	dragging := tab_drag_active(w)
+	for pass in 0 ..< (dragging ? 2 : 1) {
 		foreground := pass == 1
 		for tab, i in w.workspace.tabs {
-			if (w.tab_drag.active && tab.marked) != foreground {continue}
+			if (dragging && tab.marked) != foreground {continue}
 			title := fmt.tprintf("Tab %d", i + 1)
 			if tab.title != "" {title = tab.title}
 			icon: string
@@ -180,7 +181,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {
 		x := bar.x + w.tab_underline.value * bar.tab_width + 10 * w.scale
-		moving := w.tab_drag.active
+		moving := dragging
 		for position in w.tab_positions {moving ||= ui.motion_active(position)}
 		if moving {x = bar.x + tab_position(w, w.workspace.selected) * bar.tab_width + 10 * w.scale}
 		// The selected tab rises with its hover, so its underline rises with it.
@@ -200,7 +201,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		   ) !=
 		   .None {return .Ok}
 	}
-	if (w.pane_drag.active && w.pane_drag.new_tab) || w.tab_incoming.count > 0 {return .Ok}
+	if _, new_tab := drag_destination(w).(Drop_New_Tab); new_tab || w.tab_incoming.count > 0 {return .Ok}
 	if result := ui.tab_draw(
 		&w.list,
 		&w.ui_text,

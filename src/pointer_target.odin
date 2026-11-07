@@ -418,13 +418,13 @@ caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 
 @(private = "file")
 caption_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
-	if e.button != .Left || w.pane_drag.pressed || w.tab_drag.pressed {return}
+	if e.button != .Left || drag_held(w) {return}
 	ui.armed_press(&w.caption_armed, ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale))
 }
 
 @(private = "file")
 caption_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
-	if e.button != .Left || !ui.armed_down(w.caption_armed) || w.pane_drag.pressed || w.tab_drag.pressed {
+	if e.button != .Left || !ui.armed_down(w.caption_armed) || drag_held(w) {
 		return false
 	}
 	fired, ok := ui.armed_release(&w.caption_armed, ui.caption_hit(f32(w.width), f32(e.x), f32(e.y), w.scale))
@@ -792,7 +792,7 @@ tabs_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> b
 	if e.button != .Left {return false}
 	w.dirty = true
 	if tab_interaction_release(app, w, f32(e.x), f32(e.y)) {return true}
-	if !w.tab_drag.pressed {return false}
+	if !tab_drag_held(w) {return false}
 	tab_drag_finish(app, w)
 	return true
 }

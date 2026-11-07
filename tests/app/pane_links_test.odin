@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:time"
 import app "../../src"
 import "aio:commands"
 import "aio:layout"
@@ -524,18 +525,9 @@ drag_pane_to :: proc(
 	direction: layout.Direction,
 	root := false,
 ) {
-	source_window.pane_drag = {
-		source = source,
-		destination = destination,
-		node = node,
-		target = target,
-		direction = direction,
-		destination_window = destination_window.id,
-		pressed = true,
-		active = true,
-		shown = true,
-		root = root,
-	}
+	place: app.Drag_Destination = app.Drop_Pane{destination_window.id, destination, target, direction, .Fits}
+	if root {place = app.Drop_Dock_Root{destination_window.id, destination, target, direction, .Fits}}
+	seed_pane_drag(source_window, source, node, place)
 }
 
 @(test)
@@ -553,7 +545,8 @@ dragging_inside_a_linked_window_rearranges_it :: proc(t: ^testing.T) {
 	x := target.rect.x + target.rect.width / 2
 	y := target.rect.y + target.rect.height - 8 * w.scale
 	testing.expect(t, app.pane_drag_move(f.state, w, x, y, false))
-	testing.expect(t, !w.pane_drag.new_window)
+	_, tear_off := app.drag_destination(w).(app.Drop_Tear_Off)
+	testing.expect(t, !tear_off)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	root, is_split := w.tree.nodes[w.tree.root].(layout.Split)
 	testing.expect(t, is_split && root.axis == .Vertical, "the drop stacks the panes")
@@ -759,9 +752,9 @@ dragging_a_linked_pane_outside_every_window_tears_it_off :: proc(t: ^testing.T) 
 	start := [2]f32{source.rect.x + 40, source.rect.y + 8}
 	app.pane_drag_press(f.state, w, source.node, start.x, start.y)
 	testing.expect(t, app.pane_drag_move(f.state, w, -30_000, -30_000, false))
-	testing.expect(t, w.pane_drag.new_window, "a linked pane can leave for a window of its own")
-	testing.expect(t, w.pane_drag.preview_window != 0)
-	testing.expect(t, w.pane_drag.shown)
+	_, tear_off := app.drag_destination(w).(app.Drop_Tear_Off)
+	testing.expect(t, tear_off, "a linked pane can leave for a window of its own")
+	testing.expect(t, drag_preview(w) != 0)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	testing.expect_value(t, len(f.state.windows), 3)
 	testing.expect_value(t, len(f.state.workspaces), 2)
@@ -788,15 +781,12 @@ dragging_a_linked_pane_to_a_new_host_tab_moves_it_there :: proc(t: ^testing.T) {
 	if !fixture_start(t, &f, 40) {return}
 	w, added, ok := fixture_split_linked(t, &f)
 	if !ok {return}
-	w.pane_drag = {
-		source = app.selected_tab(w.workspace),
-		node = w.panes[1].node,
-		destination_window = f.host.id,
-		pressed = true,
-		active = true,
-		shown = true,
-		new_tab = true,
-	}
+	seed_pane_drag(
+		w,
+		app.selected_tab(w.workspace),
+		w.panes[1].node,
+		app.Drop_New_Tab{f.host.id, app.selected_tab(f.host.workspace), .Fits},
+	)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	testing.expect_value(t, len(f.state.windows), 2)
 	testing.expect_value(t, len(f.host.workspace.tabs), 2)
@@ -843,7 +833,7 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 	if !testing.expect(t, destination != nil) {return}
 	source := w.panes[0]
 	app.pane_drag_press(f.state, w, source.node, source.rect.x + 40, source.rect.y + 8)
-	w.pane_drag.active = true
+	seed_pane_drag(w, app.selected_tab(w.workspace), source.node)
 	chip := app.workspace_button_rect(f.host)
 	if !testing.expect(
 		t,
@@ -856,7 +846,8 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 			false,
 		),
 	) {return}
-	testing.expect_value(t, w.pane_drag.picker_window, f.host.id)
+	held, holding := app.drag_destination(w).(app.Drop_Workspace_Dropdown)
+	testing.expect(t, holding && held.window == f.host.id)
 	row := app.workspace_picker_row_rect(f.host, 0)
 	if !testing.expect(
 		t,
@@ -869,7 +860,8 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 			false,
 		),
 	) {return}
-	testing.expect_value(t, w.pane_drag.picker_hit, 0)
+	held, _ = app.drag_destination(w).(app.Drop_Workspace_Dropdown)
+	testing.expect_value(t, held.row, 0)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	testing.expect(t, f.host.workspace == destination)
 	testing.expect_value(t, len(f.state.windows), 2)
@@ -1039,4 +1031,62 @@ saved_slots_hold_no_slots_or_settings :: proc(t: ^testing.T) {
 	defer layout.destroy(&shown)
 	if !testing.expect(t, app.layout_tree_decode(&settings, &shown)) {return}
 	testing.expect(t, !shown.nodes[2].(layout.Split).linked)
+}
+
+// Regression: with two linked windows of one tab, dragging the first window's only pane into the second
+// crashed the drop. The pane joins the second window's slot and the emptied window closes.
+@(test)
+dragging_between_same_tab_linked_windows_crash_repro :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 91) {return}
+	if !fixture_split(t, &f) {return}
+	app.pane_link_toggle(f.state, f.host)
+	first := linked_window(&f)
+	if !testing.expect(t, first != nil) {return}
+	app.pane_split(f.state, f.host, .Right, 0.5)
+	second_content := f.tab.tree.nodes[f.tab.tree.focus].(layout.Pane).content
+	app.pane_link_toggle(f.state, f.host)
+	second := app.pane_link_window_of(f.state, second_content)
+	if !testing.expect(t, second != nil) {return}
+	testing.expect_value(t, len(f.state.windows), 3)
+	drag_pane_to(
+		first,
+		second,
+		app.selected_tab(first.workspace),
+		app.selected_tab(second.workspace),
+		first.tree.focus,
+		second.tree.focus,
+		.Right,
+	)
+	testing.expect(t, app.pane_drag_release(f.state, first))
+	testing.expect_value(t, len(f.state.windows), 2)
+	testing.expect(t, app.pane_link_window_of(f.state, f.content) == second)
+	testing.expect(t, app.pane_link_window_of(f.state, second_content) == second)
+	testing.expect_value(t, layout.pane_count(second.tree), 2)
+	testing.expect_value(t, app.tab_pane_count(f.tab), 3)
+	app.pane_links_sync(f.state)
+	testing.expect(t, second.phase == .Shown)
+}
+
+// Regression: a drag from a linked window armed the switch to the host tab under the pointer but could never
+// carry it out, so the overdue switch woke the loop every tick for as long as the pointer rested there.
+@(test)
+a_drag_from_a_linked_window_never_arms_the_host_tab_switch :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 92) {return}
+	w, _, ok := fixture_split_linked(t, &f)
+	if !ok {return}
+	if !testing.expect(t, app.tab_create(f.state, f.host.workspace)) {return}
+	app.tab_select(f.state, f.host, 0)
+	other := f.host.workspace.tabs[1]
+	for source in ([?]^app.Window{w, f.host}) {
+		seed_pane_drag(source, app.selected_tab(source.workspace), source.tree.focus)
+		carry := &app.drag_active(source).carry.(app.Pane_Carry)
+		app.pane_drag_hover(f.state, source, carry, f.host, other, 1, false, time.tick_now())
+		_, armed := app.drag_hover_deadline(source)
+		testing.expect_value(t, armed, source == f.host)
+		source.drag = nil
+	}
 }

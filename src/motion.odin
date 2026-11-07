@@ -58,9 +58,12 @@ update_motion :: proc(app: ^App) {
 		if ui.control_update(&p.menu_motion, hovered, false, app.animations, now) { w.dirty = true }
 		rail_changed := rail_slide_update(w, now)
 		tabs_changed := false
+		// D-069: dragged tabs follow the pointer (tab_drag_follow_pointer); the others, and every tab once
+		// dropped, settle into their slots, opening the gap another window's drag asks for.
+		following := tab_drag_active(w)
 		for &position, i in w.tab_positions {
 			if i >= len(w.workspace.tabs) {continue}
-			if !w.tab_drag.active || !w.workspace.tabs[i].marked {
+			if !following || !w.workspace.tabs[i].marked {
 				gap := i >= w.tab_incoming.slot ? w.tab_incoming.count : 0
 				ui.motion_target(
 					&position,
