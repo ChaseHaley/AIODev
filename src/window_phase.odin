@@ -52,10 +52,27 @@ window_primary :: proc(app: ^App) -> ^Window {
 	return nil
 }
 
-// Command and verification requests share the focused window, falling back to the primary.
+// Command and verification requests share the focused window, falling back to the primary whatever
+// it can draw.
 window_focused_or_primary :: proc(app: ^App) -> ^Window {
 	for w in app.windows {if w.focused {return w}}
 	return window_primary(app)
+}
+
+// The window the user is in among those that can draw: the focused one, else the one focused most
+// recently (window_focus_note); nil when none can draw. The notices show there and the jump list moves
+// there when its window closes.
+window_focused_or_recent :: proc(app: ^App) -> ^Window {
+	target: ^Window
+	for w in app.windows {
+		if !window_drawable(w) {continue}
+		if target == nil ||
+		   (w.focused && !target.focused) ||
+		   (w.focused == target.focused && w.focus_order > target.focus_order) {
+			target = w
+		}
+	}
+	return target
 }
 
 // Every workspace window has been hidden to the tray, so only the tray icon reopens the app.

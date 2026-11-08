@@ -10,18 +10,10 @@ window_focus_note :: proc(app: ^App, w: ^Window) {
 	w.focus_order = app.window_focus_order
 }
 
-// The notices show in one window: the focused one, else the one focused most recently. Focus changes,
-// closing a window and each tick call this, as any of them can change which window that is.
+// The notices show in window_focused_or_recent. Focus changes, closing a window and each tick call
+// this, as any of them can change which window that is.
 window_notices_sync :: proc(app: ^App) {
-	target: ^Window
-	for w in app.windows {
-		if !window_drawable(w) {continue}
-		if target == nil ||
-		   (w.focused && !target.focused) ||
-		   (w.focused == target.focused && w.focus_order > target.focus_order) {
-			target = w
-		}
-	}
+	target := window_focused_or_recent(app)
 	id := target != nil ? target.id : input.Window_Id(0)
 	if app.notice_window == id {return}
 	app.notice_window = id
