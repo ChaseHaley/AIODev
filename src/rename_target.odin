@@ -1,6 +1,5 @@
 package main
 
-import "aio:layout"
 import "core:strings"
 
 // What a rename names. A tab is found within its workspace and a pane by its terminal session, so the
@@ -78,20 +77,7 @@ rename_target_commit :: proc(
 			owner.dirty = true
 		}
 	case Rename_Pane_Target:
-		// The pane's workspace window and a linked window holding the pane both show its name.
-		content := layout.Content{.Terminal, t.session}
-		for window in app.windows {
-			if !workspace_has_content(window.workspace, content) {continue}
-			for tab in window.workspace.tabs {tab_update_title(app, tab)}
-			window_update_title(app, window)
-			window.dirty = true
-			tree := window_tree(window)
-			if tree == nil {continue}
-			node := layout.find_content(tree, content)
-			if floating, ok := layout.float_of(tree, node); ok && floating.minimized {
-				floating_capsules_refresh(app, window)
-			}
-		}
+		session_titles_changed(app, t.session)
 	case Rename_Workspace_Target:
 		for window in app.windows {window_relayout(app, window)}
 		workspace_mutation_finish(app, workspace_find(app, t.workspace), {.Names})

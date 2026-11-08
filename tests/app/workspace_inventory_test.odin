@@ -214,3 +214,30 @@ workspace_inventory_maps_content_to_its_session :: proc(t: ^testing.T) {
 		app.workspace_session_for_content(&f.state, layout.Content{.Terminal, 9}) == nil,
 	)
 }
+
+@(test)
+session_pane_find_skips_provisional_borrowers :: proc(t: ^testing.T) {
+	f: Inventory_Fixture
+	defer inventory_fixture_destroy(&f)
+	if !inventory_fixture_init(t, &f) {return}
+	preview := app.workspace_create_empty(&f.state, true)
+	if !testing.expect(t, preview != nil) {return}
+	defer app.workspace_destroy(preview)
+	if !inventory_tab(t, preview, {.Terminal, 8}) {return}
+	// The borrower comes first, so iteration order cannot accidentally choose the owner.
+	f.state.workspaces[0], f.state.workspaces[1] = preview, f.workspace
+	workspace, pane, found := app.session_pane_find(&f.state, 8)
+	if testing.expect(t, found) {
+		testing.expect_value(t, workspace, f.workspace)
+		testing.expect_value(t, pane.tab, 1)
+		testing.expect_value(t, pane.node, layout.Node_Id(0))
+		testing.expect_value(t, pane.content, layout.Content{.Terminal, 8})
+	}
+	testing.expect_value(t, app.session_workspace(&f.state, 8), f.workspace)
+	_, _, unknown := app.session_pane_find(&f.state, 999)
+	testing.expect(t, !unknown)
+	f.workspace.provisional = true
+	workspace, _, found = app.session_pane_find(&f.state, 8)
+	testing.expect(t, !found && workspace == nil)
+	testing.expect(t, app.session_workspace(&f.state, 8) == nil)
+}
