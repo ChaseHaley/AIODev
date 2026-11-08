@@ -13,8 +13,8 @@ Header_Layout :: struct($E: typeid) {
 	// never outside the panel.
 	badge_target:        render.Rect,
 	buttons:             [E]render.Rect,
-	// Sets the separated button apart from the buttons after it.
-	divider:             render.Rect,
+	// Hairlines set each separated button apart from the buttons after it; empty where none follows.
+	dividers:            [E]render.Rect,
 }
 
 // A header's badge, which opens its menu.
@@ -41,14 +41,29 @@ header_divider :: proc(next: render.Rect, panel_y, panel_height, scale: f32) -> 
 	return {next.x - SPACE_1 * scale - scale, panel_y + (panel_height - height) / 2, scale, height}
 }
 
+// Whether a divider follows `action`: it is separated and some shown button comes after it.
+@(private = "file")
+header_divided :: proc(action: $E, shown, separated: bit_set[E]) -> bool {
+	if action not_in separated || action not_in shown {return false}
+	for later in E {if later > action && later in shown {return true}}
+	return false
+}
+
+// The width of the `shown` buttons, with a gap after each one a divider follows.
+@(private = "file")
+header_buttons_width :: proc(shown, separated: bit_set[$E], button, gap: f32) -> f32 {
+	width: f32
+	for action in shown {width += button + (header_divided(action, shown, separated) ? gap : 0)}
+	return width
+}
+
 // A header row across the top of `area`: the badge and title at the start and the `shown` buttons at the
-// end, `separated` set apart from those after it. Buttons never cover the badge or the start of the
-// title, which focus and drag the pane, so in a narrow header they give way in `drop_order`.
+// end, each `separated` button set apart from those after it. Buttons never cover the badge or the start
+// of the title, which focus and drag the pane, so in a narrow header they give way in `drop_order`.
 header_layout :: proc(
 	area: render.Rect,
 	scale: f32,
-	shown: bit_set[$E],
-	separated: E,
+	shown, separated: bit_set[$E],
 	drop_order: []E,
 ) -> Header_Layout(E) {
 	l := Header_Layout(E) {
@@ -67,19 +82,15 @@ header_layout :: proc(
 	title_end := area.x + (SPACE_2 + ICON_BUTTON + SPACE_2 + HEADER_TITLE_MINIMUM) * scale
 	gap := 2 * SPACE_1 * scale + scale
 	shown := shown
-	width: f32
-	for action in shown {width += button + (action == separated ? gap : 0)}
 	for action in drop_order {
-		if end - width >= title_end {break}
-		if action not_in shown {continue}
+		if end - header_buttons_width(shown, separated, button, gap) >= title_end {break}
 		shown -= {action}
-		width -= button + (action == separated ? gap : 0)
 	}
 	placed: render.Rect
 	#reverse for &rect, action in l.buttons {
 		if action not_in shown {continue}
-		if action == separated {
-			l.divider = header_divider(placed, l.panel.y, l.panel.height, scale)
+		if header_divided(action, shown, separated) {
+			l.dividers[action] = header_divider(placed, l.panel.y, l.panel.height, scale)
 			end -= gap
 		}
 		rect = {
@@ -273,25 +284,26 @@ header_buttons_draw :: proc(
 		if err != .None {return}
 		icon_draw(list, button.icon, face, ink, ICON_BUTTON, scale)
 	}
-	if l.divider.width > 0 {draw_rect(list, {rect = l.divider, color = theme.border})}
+	for divider in l.dividers {
+		if divider.width > 0 {draw_rect(list, {rect = divider, color = theme.border})}
+	}
 }
 
 // Single-pane tabs keep their full terminal height, so their split controls float in a small pill at the
-// pane's top-right corner instead of a header row: a grip in `title`, then the `shown` buttons, with
-// `separated` set apart from those after it.
+// pane's top-right corner instead of a header row: a grip in `title`, then the `shown` buttons, each
+// `separated` button set apart from those after it.
 split_overlay_layout :: proc(
 	area: render.Rect,
 	scale: f32,
-	shown: bit_set[$E],
-	separated: E,
+	shown, separated: bit_set[$E],
 ) -> Header_Layout(E) {
 	// A grip and compact buttons in a toolbar-height pill, SPACE_2 from the pane's corner.
 	button := HEIGHT_COMPACT * scale
 	inset := (HEIGHT_TOOLBAR - HEIGHT_COMPACT) / 2 * scale
 	gap := 2 * SPACE_1 * scale + scale
 	// The grip takes a button's room.
-	width, height := f32(card(shown - {separated}) + 1) * button + 2 * inset, HEIGHT_TOOLBAR * scale
-	if separated in shown {width += button + gap}
+	width := button + header_buttons_width(shown, separated, button, gap) + 2 * inset
+	height := HEIGHT_TOOLBAR * scale
 	l := Header_Layout(E) {
 		panel = {
 			max(area.x, area.x + area.width - width - SPACE_2 * scale),
@@ -302,13 +314,15 @@ split_overlay_layout :: proc(
 	}
 	l.title = {l.panel.x + inset, l.panel.y + inset, button, button}
 	x := l.title.x + button
-	divide := false
+	previous: Maybe(E)
 	for &rect, action in l.buttons {
 		if action not_in shown {continue}
 		rect = {x, l.title.y, button, button}
-		if divide {l.divider = header_divider(rect, l.panel.y, l.panel.height, scale)}
-		divide = action == separated
-		x += divide ? button + gap : button
+		if before, ok := previous.?; ok && before in separated {
+			l.dividers[before] = header_divider(rect, l.panel.y, l.panel.height, scale)
+		}
+		previous = action
+		x += header_divided(action, shown, separated) ? button + gap : button
 	}
 	return l
 }

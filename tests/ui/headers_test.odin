@@ -12,15 +12,18 @@ Header_Button :: enum u8 {
 	Split_Down,
 	Zoom,
 	Fill_Window,
-	Linked_Window,
 	Dock,
+	Linked_Window,
 	Close,
 }
 
 @(private = "file")
 ALL :: bit_set[Header_Button] {
-	.Documents, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
+	.Documents, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Dock, .Linked_Window, .Close,
 }
+
+@(private = "file")
+GROUP_ENDS :: bit_set[Header_Button]{.Documents, .Split_Down, .Fill_Window, .Linked_Window}
 
 @(private = "file", rodata)
 DROP_ORDER := [?]Header_Button {
@@ -29,7 +32,7 @@ DROP_ORDER := [?]Header_Button {
 
 @(private = "file")
 header :: proc(area: render.Rect, scale: f32, shown := ALL) -> ui.Header_Layout(Header_Button) {
-	return ui.header_layout(area, scale, shown, Header_Button.Documents, DROP_ORDER[:])
+	return ui.header_layout(area, scale, shown, GROUP_ENDS, DROP_ORDER[:])
 }
 
 @(test)
@@ -74,14 +77,15 @@ headers_set_the_documents_button_apart_and_can_leave_it_out :: proc(t: ^testing.
 	l := header(area, scale)
 	button, next := l.buttons[.Documents], l.buttons[.Split_Right]
 	testing.expect(t, button.width > 0)
-	testing.expect(t, l.divider.x >= button.x + button.width && l.divider.x + l.divider.width <= next.x)
-	testing.expect_value(t, l.divider.y + l.divider.height / 2, l.panel.y + l.panel.height / 2)
+	divider := l.dividers[.Documents]
+	testing.expect(t, divider.x >= button.x + button.width && divider.x + divider.width <= next.x)
+	testing.expect_value(t, divider.y + divider.height / 2, l.panel.y + l.panel.height / 2)
 	documents := ui.header_hit_test(l, button.x + 2, button.y + 2)
 	testing.expect_value(t, documents, ui.Header_Target(Header_Button)(Header_Button.Documents))
 
 	without := header(area, scale, ALL - {.Documents})
 	testing.expect_value(t, without.buttons[.Documents].width, f32(0))
-	testing.expect_value(t, without.divider.width, f32(0))
+	testing.expect_value(t, without.dividers[.Documents].width, f32(0))
 	testing.expect_value(t, without.buttons[.Split_Right], next)
 	testing.expect(t, without.title.width > l.title.width)
 
@@ -89,15 +93,40 @@ headers_set_the_documents_button_apart_and_can_leave_it_out :: proc(t: ^testing.
 	small := header({5, 8, 198, 200}, 1)
 	testing.expect_value(t, small.buttons[.Documents].width, f32(0))
 	testing.expect(t, ui.header_hit_test(small, 5 + 35, 8 + 14) == nil)
-	wide_enough := header({5, 8, 280, 200}, 1)
+	wide_enough := header({5, 8, 310, 200}, 1)
 	testing.expect(t, wide_enough.buttons[.Documents].width > 0)
 	testing.expect(t, wide_enough.buttons[.Documents].x >= wide_enough.badge.x + wide_enough.badge.width + 48)
 
 	// Too narrow for every control: the controls for the pane itself stay.
 	narrow := header({5, 8, 170 * scale, 200 * scale}, scale)
 	testing.expect_value(t, narrow.buttons[.Documents].width, f32(0))
-	testing.expect_value(t, narrow.divider.width, f32(0))
+	testing.expect_value(t, narrow.dividers[.Documents].width, f32(0))
 	testing.expect(t, narrow.buttons[.Split_Right].width > 0)
+}
+
+// Each group ends in a divider before the next group, and a group with nothing shown after it has none, so a
+// float's header (no view or move buttons) shows no hairline beside Close.
+@(test)
+headers_divide_groups_only_where_a_later_group_shows :: proc(t: ^testing.T) {
+	scale := f32(1)
+	area := render.Rect{0, 0, 600, 200}
+	l := header(area, scale)
+	for end in GROUP_ENDS {
+		divider := l.dividers[end]
+		testing.expectf(t, divider.width > 0, "a divider follows %v", end)
+		testing.expect(t, divider.x >= l.buttons[end].x + l.buttons[end].width)
+		next := Header_Button(int(end) + 1)
+		testing.expect(t, divider.x + divider.width <= l.buttons[next].x)
+	}
+	testing.expect_value(t, l.dividers[.Zoom].width, f32(0))
+
+	floating := header(area, scale, {.Documents, .Split_Right, .Split_Down, .Close})
+	testing.expect(t, floating.dividers[.Split_Down].width > 0)
+	only_splits := header(area, scale, {.Split_Right, .Split_Down})
+	testing.expect_value(t, only_splits.dividers[.Split_Down].width, f32(0))
+	end := area.x + area.width - ui.SPACE_1 * scale
+	down := only_splits.buttons[.Split_Down]
+	testing.expect_value(t, down.x + down.width, end)
 }
 
 @(test)
@@ -105,14 +134,16 @@ the_split_overlay_carries_the_documents_button_first :: proc(t: ^testing.T) {
 	scale := f32(1)
 	area := render.Rect{0, 0, 600, 400}
 	shown := bit_set[Header_Button]{.Documents, .Split_Right, .Split_Down}
-	l := ui.split_overlay_layout(area, scale, shown, Header_Button.Documents)
+	l := ui.split_overlay_layout(area, scale, shown, GROUP_ENDS)
 	documents, right, down := l.buttons[.Documents], l.buttons[.Split_Right], l.buttons[.Split_Down]
-	testing.expect(t, documents.x > l.title.x && l.divider.x > documents.x)
-	testing.expect(t, right.x > l.divider.x && down.x > right.x)
+	divider := l.dividers[.Documents]
+	testing.expect(t, documents.x > l.title.x && divider.x > documents.x)
+	testing.expect(t, right.x > divider.x && down.x > right.x)
+	testing.expect_value(t, l.dividers[.Split_Down].width, f32(0))
 	testing.expect(t, down.x + down.width <= l.panel.x + l.panel.width)
 	split := ui.header_hit_test(l, right.x + 2, right.y + 2)
 	testing.expect_value(t, split, ui.Header_Target(Header_Button)(Header_Button.Split_Right))
-	without := ui.split_overlay_layout(area, scale, shown - {.Documents}, Header_Button.Documents)
+	without := ui.split_overlay_layout(area, scale, shown - {.Documents}, GROUP_ENDS)
 	testing.expect_value(t, without.buttons[.Documents].width, f32(0))
 	testing.expect(t, without.panel.width < l.panel.width)
 }

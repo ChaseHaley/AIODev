@@ -55,6 +55,13 @@ Tooltip_Warm :: struct {
 	anchor: [2]f32,
 }
 
+// What a control would do, shown under its label: a sentence and, for a pane header button, a picture of
+// the window afterwards. Built while the tooltip draws, in temporary memory.
+Tooltip_Card :: struct {
+	description: string,
+	preview:     Maybe(ui.Pane_Preview),
+}
+
 // A window's tooltip with the text its labels point into: a label may be built for one event in
 // temporary memory, so tooltip_store copies it here, and only this file writes either. Window embeds it.
 Tooltip_State :: struct {
@@ -151,6 +158,10 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !shown {return .Ok}
 	owner := pointer_target(app, w, w.pointer.x, w.pointer.y)
 	if tooltip_label(app, w, owner, w.pointer.x, w.pointer.y) != label {return .Ok}
+	if card_of := pointer_surfaces[owner].tooltip_card; card_of != nil {
+		card := card_of(app, w, w.pointer.x, w.pointer.y)
+		if card.description != "" || card.preview != nil {return tooltip_card_draw(app, w, label, card)}
+	}
 	s := w.scale
 	room := max(0, min(TOOLTIP_MAX_WIDTH * s, f32(w.width) - 8 * s) - 16 * s)
 	lines := make([dynamic]string, context.temp_allocator)
@@ -173,6 +184,47 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	for line, i in lines {
 		baseline := top + f32(i) * w.ui_text.line_height + w.ui_text.ascent
 		if result := ui.draw_text(&w.ui_text, &w.list, line, x + 8 * s, baseline, app.theme.text);
+		   result != .Ok {return result}
+	}
+	return .Ok
+}
+
+// The label in emphasis, then the picture, then the sentence in detail text wrapped to the picture's width.
+@(private = "file")
+tooltip_card_draw :: proc(app: ^App, w: ^Window, label: string, card: Tooltip_Card) -> render.Build_Status {
+	s := w.scale
+	pad, gap := ui.SPACE_2 * s, ui.SPACE_2 * s
+	strong := ui.text_styled(&w.ui_text, .Strong)
+	detail := ui.text_styled(&w.ui_text, .Detail)
+	preview, pictured := card.preview.?
+	picture: [2]f32
+	if pictured {picture = ui.pane_preview_size(preview, s)}
+	room := max(0, min(TOOLTIP_MAX_WIDTH * s, f32(w.width) - 8 * s) - 2 * pad)
+	inner := min(room, max(ui.text_width(&strong, label), picture.x, ui.PANE_PREVIEW_WIDTH * s))
+	lines := make([dynamic]string, context.temp_allocator)
+	if card.description != "" {ui.wrap(&detail, card.description, inner, &lines)}
+	width := inner + 2 * pad
+	height := pad + strong.line_height + pad
+	if pictured {height += gap + picture.y}
+	if len(lines) > 0 {height += gap + f32(len(lines)) * detail.line_height}
+	x := clamp(w.pointer.x + 12 * s, 4 * s, max(4 * s, f32(w.width) - width - 4 * s))
+	y := clamp(w.pointer.y + 16 * s, 4 * s, max(4 * s, f32(w.height) - height - 4 * s))
+	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
+	if ui.panel_draw(&w.list, {rect = {x, y, width, height}, radius = ui.RADIUS_CONTROL * s,
+	   scale = s, shadow_y = 2, softness = 8, border = .Stroked}, app.theme) != .None {return .Ok}
+	top := y + pad
+	if result := ui.draw_text(&strong, &w.list, label, x + pad, top + strong.ascent, app.theme.text);
+	   result != .Ok {return result}
+	top += strong.line_height
+	if pictured {
+		top += gap
+		if ui.pane_preview_draw(&w.list, app.theme, {x + pad, top}, preview, s) != .None {return .Ok}
+		top += picture.y
+	}
+	if len(lines) > 0 {top += gap}
+	for line, i in lines {
+		baseline := top + f32(i) * detail.line_height + detail.ascent
+		if result := ui.draw_text(&detail, &w.list, line, x + pad, baseline, app.theme.muted);
 		   result != .Ok {return result}
 	}
 	return .Ok

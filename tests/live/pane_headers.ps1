@@ -71,12 +71,15 @@ function Shot([string] $Label) {
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $directory "$Label.png")
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
 }
+# Buttons are 24 DIPs from the header's right end inward, with a 9-DIP divider gap after each group:
+# Documents | Split right, Split down | Zoom, Fill window | Float, Linked window | Close.
 function Header-Button([ValidateSet('split_right','split_down','zoom','close')][string] $Action) {
     $s = Read-State
     $r = $s["pane.$($s['panes.focused']).rect"] -split ',' | ForEach-Object { [double]$_ }
     $scale = [double]$s['window.scale']
-    $slot = @{split_right=0; split_down=1; zoom=2; close=5}[$Action]
-    $x = [int]($r[0]+$r[2]-(16+24*(5-$slot))*$scale)
+    $slot = @{split_right=6; split_down=5; zoom=4; close=0}[$Action]
+    $gaps = @{split_right=3; split_down=3; zoom=2; close=0}[$Action]
+    $x = [int]($r[0]+$r[2]-(16+24*$slot+9*$gaps)*$scale)
     $y = [int]($r[1]+14*$scale)
     Invoke-Aio mouse click "$x,$y" --px
 }
