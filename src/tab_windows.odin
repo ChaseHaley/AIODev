@@ -100,7 +100,7 @@ tab_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32) -> boo
 	grabbed := carry.grabbed
 	request := Workspace_Move_Request{source.workspace.id, grabbed.id, grabbed.tree.focus, true}
 	allows := tab_window_source_allows(source.workspace)
-	held, on := workspace_picker_drag_hover(app, a, w, x, y, request, allows)
+	held, on := workspace_picker_drag_hover(app, a, w, x, y, request, true, allows)
 	if !on {
 		if _, holding := carry.destination.(Drop_Workspace_Dropdown); holding {
 			tab_drag_retarget(app, source, a, nil)

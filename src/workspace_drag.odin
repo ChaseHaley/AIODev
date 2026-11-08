@@ -42,9 +42,9 @@ workspace_picker_drag_leave :: proc(app: ^App, d: Drop_Workspace_Dropdown) {
 }
 
 // Opens w's dropdown while the pointer is over its chip and keeps it open over its rows, returning the hold
-// and whether the drag is on it. `a` is the drag, holding its destination now. The dropdown's last row, a new
-// window, takes a drop only when the content may leave for one. Leaving the dropdown is the caller's next
-// destination, which closes it.
+// and whether the drag is on it. `a` is the drag, holding its destination now. The workspace rows take a drop
+// only when the content may move to another workspace, and the last row, a new window, only when it may
+// leave for one. Leaving the dropdown is the caller's next destination, which closes it.
 @(require_results)
 workspace_picker_drag_hover :: proc(
 	app: ^App,
@@ -52,7 +52,7 @@ workspace_picker_drag_hover :: proc(
 	w: ^Window,
 	x, y: f32,
 	request: Workspace_Move_Request,
-	new_window_allowed: bool,
+	move_allowed, new_window_allowed: bool,
 ) -> (
 	Drop_Workspace_Dropdown,
 	bool,
@@ -76,8 +76,12 @@ workspace_picker_drag_hover :: proc(
 		workspace_picker_filter(app, w)
 	}
 	row := workspace_picker_hit(w, x, y)
-	_, new_window := workspace_picker_target_at(w, row).(Picker_New_Window)
-	if new_window && !new_window_allowed {row = -1}
+	#partial switch _ in workspace_picker_target_at(w, row) {
+	case Picker_Workspace, Picker_New_Workspace:
+		if !move_allowed {row = -1}
+	case Picker_New_Window:
+		if !new_window_allowed {row = -1}
+	}
 	p.selected = row
 	return {window = w.id, pointer = {x, y}, row = row}, true
 }

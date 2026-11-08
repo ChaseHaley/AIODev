@@ -320,7 +320,7 @@ workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> b
 	case Workspace_Picker_Rename:
 		row := workspace_picker_row_rect(w, workspace_row_index(w, workspace_picker_rename_id(p)))
 		if y >= row.y + row.height && render.rect_contains(workspace_row_rename_field_rect(w), x, y) {
-			workspace_picker_pointer(app, w, x, true, extend)
+			workspace_picker_pointer(w, x, true, extend)
 			return true
 		}
 		workspace_row_rename_finish(app, w, false)
@@ -338,7 +338,7 @@ workspace_row_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) ->
 		return true
 	case Workspace_Picker_Rename:
 		if p.rename.dragging && .Left in e.buttons {
-			workspace_picker_pointer(app, w, f32(e.x), false, true)
+			workspace_picker_pointer(w, f32(e.x), false, true)
 		}
 		inside := render.rect_contains(workspace_row_rename_field_rect(w), f32(e.x), f32(e.y))
 		pointer_set(app, w, inside ? .Text : .Arrow)

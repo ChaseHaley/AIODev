@@ -889,6 +889,27 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 	testing.expect(t, w.phase == .Hidden)
 }
 
+// The host tab's last shown pane may not move to another workspace, by command or by drag: the tab would
+// hold only its linked pane.
+@(test)
+moving_the_last_shown_host_pane_to_a_workspace_is_refused :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 93) {return}
+	if !fixture_split(t, &f) {return}
+	app.pane_link_toggle(f.state, f.host)
+	if !testing.expect(t, linked_window(&f) != nil) {return}
+	shown := f.tab.tree.focus
+	testing.expect(t, shown != f.node)
+	testing.expect(t, !app.workspace_pane_move_allowed(f.state, f.tab, shown))
+	testing.expect(t, app.workspace_pane_move_allowed(f.state, f.tab, f.node))
+	app.run_action(f.state, f.host, .Move_Pane_New_Workspace)
+	testing.expect_value(t, len(f.state.workspaces), 1)
+	testing.expect_value(t, app.tab_pane_count(f.tab), 2)
+	testing.expect(t, pane_is_linked(&f))
+	testing.expect(t, linked_window(&f) != nil)
+}
+
 @(test)
 closing_a_tab_closes_every_pane_of_its_split_linked_window :: proc(t: ^testing.T) {
 	f: Fixture

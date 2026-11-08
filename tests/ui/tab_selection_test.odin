@@ -15,7 +15,7 @@ rail_tab_rows_fill_the_flat_workspace_list :: proc(t: ^testing.T) {
 		right := layout.list.x + layout.list.width - ui.RAIL_PADDING * scale
 		testing.expect_value(t, row.x + row.width, right)
 		testing.expect_value(t, row.height, ui.RAIL_ROW_HEIGHT * scale)
-		testing.expect(t, ui.rail_row_contains(layout, 1, row.x + 1, row.y + 1))
+		testing.expect(t, render.rect_contains(layout.list, row.x + 1, row.y + 1))
 	}
 }
 

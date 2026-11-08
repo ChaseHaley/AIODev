@@ -213,10 +213,13 @@ rail_rows_scroll_clip_and_hit_only_the_visible_list :: proc(t: ^testing.T) {
 		testing.expect_value(t, layout.list.height, (200 - 32) * scale)
 		testing.expect_value(t, layout.footer.y, area.y + layout.list.height)
 		testing.expect(t, ui.rail_scroll_max(layout) > 0)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, area.y + 8 * scale), 0)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, area.y - 1), -1)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x - 1, area.y + 8 * scale), -1)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, layout.footer.y + 4), -1)
+		// A row hit is a row rectangle inside the list, which the main package's rail_tab_hit clips to.
+		top := [2]f32{area.x + 20 * scale, area.y + 8 * scale}
+		testing.expect(t, render.rect_contains(layout.list, top.x, top.y))
+		testing.expect(t, render.rect_contains(ui.rail_row_rect(layout, 0), top.x, top.y))
+		testing.expect(t, !render.rect_contains(layout.list, area.x + 20 * scale, area.y - 1))
+		testing.expect(t, !render.rect_contains(layout.list, area.x - 1, area.y + 8 * scale))
+		testing.expect(t, !render.rect_contains(layout.list, area.x + 20 * scale, layout.footer.y + 4))
 		testing.expect(t, ui.rail_footer_hit(layout, area.x + 20 * scale, layout.footer.y + 4))
 		testing.expect(t, !ui.rail_footer_hit(layout, area.x + 20 * scale, layout.footer.y - 1))
 
@@ -225,11 +228,8 @@ rail_rows_scroll_clip_and_hit_only_the_visible_list :: proc(t: ^testing.T) {
 		testing.expect_value(t, scrolled.scroll, scroll)
 		// The first row has scrolled under the list's top padding; the row at the top edge is the
 		// one whose rect now intersects the pointer.
-		testing.expect_value(
-			t,
-			ui.rail_row_hit(scrolled, area.x + 20 * scale, area.y + 8 * scale),
-			int((8 - 4 + scroll) / (ui.RAIL_ROW_HEIGHT * scale)),
-		)
+		under := int((8 - 4 + scroll) / (ui.RAIL_ROW_HEIGHT * scale))
+		testing.expect(t, render.rect_contains(ui.rail_row_rect(scrolled, under), top.x, top.y))
 		expect_clamped := ui.rail_scroll_clamped(layout, -10)
 		testing.expect_value(t, expect_clamped, f32(0))
 		expect_clamped = ui.rail_scroll_clamped(layout, 1e6)
@@ -248,16 +248,26 @@ rail_close_targets_and_caption_buttons_are_distinct :: proc(t: ^testing.T) {
 		layout := ui.rail_layout(area, scale, 3, 0)
 		for i in 0 ..< layout.count {
 			r := ui.rail_close_rect(layout, i, scale)
-			testing.expect_value(t, ui.rail_close_hit(layout, r.x + r.width / 2, r.y + r.height / 2, scale), i)
-			testing.expect_value(t, ui.rail_close_hit(layout, r.x - 2 * scale, r.y + r.height / 2, scale), -1)
+			testing.expect_value(t, rail_close_at(layout, r.x + r.width / 2, r.y + r.height / 2, scale), i)
+			testing.expect_value(t, rail_close_at(layout, r.x - 2 * scale, r.y + r.height / 2, scale), -1)
 		}
-		testing.expect_value(t, ui.rail_close_hit(layout, area.x + area.width - 6 * scale, layout.footer.y + 4, scale), -1)
+		footer := [2]f32{area.x + area.width - 6 * scale, layout.footer.y + 4}
+		testing.expect_value(t, rail_close_at(layout, footer.x, footer.y, scale), -1)
 		for button in platform.Caption_Button {
 			x := (1085 + f32(int(button)) * platform.CAPTION_BUTTON_WIDTH) * scale
 			testing.expect_value(t, ui.caption_hit(1200 * scale, x, 20 * scale, scale), button)
 		}
 		testing.expect_value(t, ui.caption_hit(1200 * scale, 300 * scale, 20 * scale, scale), nil)
 	}
+}
+
+// The row whose close rectangle holds the point, or -1.
+@(private = "file")
+rail_close_at :: proc(layout: ui.Rail_Layout, x, y, scale: f32) -> int {
+	for i in 0 ..< layout.count {
+		if render.rect_contains(ui.rail_close_rect(layout, i, scale), x, y) {return i}
+	}
+	return -1
 }
 
 @(test)

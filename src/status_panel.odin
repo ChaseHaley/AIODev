@@ -165,7 +165,7 @@ status_panel_side_toggle :: proc(app: ^App) {
 }
 
 @(private)
-status_panel_list :: proc(app: ^App, w: ^Window, panel: render.Rect) -> render.Rect {
+status_panel_list :: proc(w: ^Window, panel: render.Rect) -> render.Rect {
 	s := w.scale
 	header, pad := STATUS_PANEL_HEADER * s, ui.OVERLAY_PADDING * s
 	return {panel.x + pad, panel.y + header, max(0, panel.width - 2 * pad), max(0, panel.height - header - pad)}
@@ -326,7 +326,7 @@ status_panel_project :: proc(
 @(private)
 status_panel_layout :: proc(app: ^App, w: ^Window) -> (rows: []Status_Panel_Row, total, scroll: f32) {
 	rows, total = status_panel_project(app.settings.status.panel_view, status_panel_reports(app, w), w.scale)
-	list := status_panel_list(app, w, status_panel_rect(app, w))
+	list := status_panel_list(w, status_panel_rect(app, w))
 	return rows, total, clamp(w.status.panel_scroll, 0, max(0, total - list.height))
 }
 
@@ -562,7 +562,7 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		press := f32(int(ui.armed_is(w.status.panel_button_armed, b.button)))
 		_ = ui.icon_button_draw(&w.list, app.theme, b.rect, b.icon, hover, press, s, w.pointer)
 	}
-	list := status_panel_list(app, w, panel)
+	list := status_panel_list(w, panel)
 	if render.push_layer(&w.list, list) != .None {return .Ok}
 	if len(rows) == 0 {
 		return ui.draw_fading_text(
@@ -609,7 +609,7 @@ status_panel_hit :: proc(
 	index: int,
 	rect: render.Rect,
 ) {
-	list := status_panel_list(app, w, status_panel_rect(app, w))
+	list := status_panel_list(w, status_panel_rect(app, w))
 	if !render.rect_contains(list, x, y) {return -1, {}}
 	for row, i in rows {
 		r := status_panel_row_rect(list, row, w.status.panel_scroll)
@@ -736,7 +736,7 @@ status_panel_cancel :: proc(_: ^App, w: ^Window) {
 status_panel_wheel :: proc(app: ^App, w: ^Window, x, y, delta: f32) -> bool {
 	if !status_panel_contains(app, w, x, y) {return false}
 	_, total := status_panel_rows(app, w)
-	list := status_panel_list(app, w, status_panel_rect(app, w))
+	list := status_panel_list(w, status_panel_rect(app, w))
 	step := f32(math.sign(delta)) * STATUS_PANEL_WHEEL * w.scale
 	w.status.panel_scroll = clamp(w.status.panel_scroll - step, 0, max(0, total - list.height))
 	w.dirty = true
@@ -757,7 +757,7 @@ when AIO_CONTROL {
 		state_rect(r, "activity.view_button", status_panel_view_rect(app, w))
 		state_text(r, "activity.view", views[app.settings.status.panel_view])
 		rows, _, scroll := status_panel_layout(app, w)
-		list := status_panel_list(app, w, area)
+		list := status_panel_list(w, area)
 		for row, i in rows {
 			state_rect(r, state_key("activity.row.%d.rect", i), status_panel_row_rect(list, row, scroll))
 			state_value(r, state_key("activity.row.%d.report", i), row.report)

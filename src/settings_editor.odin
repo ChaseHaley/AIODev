@@ -726,8 +726,7 @@ editor_profile_remove_ask :: proc(app: ^App, w: ^Window, id: string) {
 			notify(app, .Error, "Could not prepare profile deletion.")
 			return
 		}
-		overlay_close_all(app, w)
-		confirmation_open(w, Profile_Remove{owned, name}, focus = .Cancel)
+		confirmation_ask(app, w, Profile_Remove{owned, name}, focus = .Cancel)
 		return
 	}
 }

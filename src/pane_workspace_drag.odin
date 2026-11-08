@@ -7,11 +7,12 @@ pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap:
 	if a == nil {return false}
 	held, on := Drop_Workspace_Dropdown{}, false
 	if !swap {
-		home, _, allowed := pane_source_leaves(app, carry.source, carry.node)
+		home, _, _ := pane_source_leaves(app, carry.source, carry.node)
 		if home.workspace == nil {return false}
 		request := Workspace_Move_Request{home.workspace.id, home.tab.id, home.node, false}
-		allowed = allowed && pane_window_source_allows(home.workspace)
-		held, on = workspace_picker_drag_hover(app, a, w, x, y, request, allowed)
+		move_allowed := workspace_pane_move_allowed(app, carry.source, carry.node)
+		new_window_allowed := pane_window_source_can_lose(app, carry.source, carry.node)
+		held, on = workspace_picker_drag_hover(app, a, w, x, y, request, move_allowed, new_window_allowed)
 	}
 	if !on {
 		if _, holding := carry.destination.(Drop_Workspace_Dropdown); holding {

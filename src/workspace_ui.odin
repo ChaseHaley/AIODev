@@ -541,11 +541,11 @@ workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 		p.selected = hit
 		workspace_picker_choose(app, w)
 	} else if render.rect_contains(workspace_picker_field_rect(w), x, y) {
-		workspace_picker_pointer(app, w, x, true, extend)
+		workspace_picker_pointer(w, x, true, extend)
 	}
 }
 
-workspace_picker_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
+workspace_picker_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool) {
 	defer workspace_picker_layout_changed(w)
 	if workspace_picker_icons(&w.workspace_picker) { workspace_picker_select_target(w, Picker_Emoji_Field{}) }
 	box := workspace_picker_query_box(w)

@@ -57,16 +57,20 @@ confirmation_asking :: proc(w: ^Window, $T: typeid) -> ^T {
 	return confirmation_subject(w, T)
 }
 
-// Asks about `subject`, which the window now owns, presenting it as stated. A question still closing is
-// released at once; a caller rewriting an asking question in place has taken what it keeps from it. The
-// caller has closed the surfaces the question replaces, and cancelled any pointer gesture that asked it.
-confirmation_open :: proc(
+// Asks about `subject`, which the window now owns, presenting it as stated. The question first closes
+// what it replaces (overlay_close_all), except `reopening`: an asking question its caller rewrites in
+// place, having taken what it keeps from it. A question still closing is released at once. The caller
+// has cancelled any pointer gesture that asked it.
+confirmation_ask :: proc(
+	app: ^App,
 	w: ^Window,
 	subject: Confirmation_Subject,
 	extended := false,
 	focus := ui.Confirm_Button.Accept,
 	show_option := false,
+	reopening: ^ui.Confirm = nil,
 ) {
+	overlay_close_all(app, w, reopening)
 	confirmation_clear(w)
 	c := Confirmation{subject = subject}
 	ui.confirm_open(&c.dialog, extended, focus, show_option)

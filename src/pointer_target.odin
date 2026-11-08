@@ -193,9 +193,9 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		held = scrollbar_held, holds = true, blurs_find = true, in_pane = true,
 	},
 	.Settings_Page    = {
-		claims = settings_claims, hover = settings_pointer_hover, press = content_press,
-		tooltip = settings_tooltip, cancel = settings_pointer_cancel, leave = settings_leave, holds = true,
-		blurs_find = true, in_pane = true,
+		claims = settings_claims, hover = settings_pointer_hover, press = settings_press,
+		release = settings_release, tooltip = settings_tooltip, cancel = settings_pointer_cancel,
+		leave = settings_leave, holds = true, blurs_find = true, in_pane = true,
 	},
 	// Not in_pane: a lone Markdown pane's content does not reveal its split controls, as it never has.
 	.Markdown_Page    = {
@@ -203,8 +203,8 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		cancel = markdown_gesture_clear, leave = markdown_leave, holds = true, blurs_find = true,
 	},
 	.Content          = {
-		claims = content_claims, hover = content_hover, press = content_press, cancel = content_cancel,
-		leave = content_leave, holds = true, blurs_find = true, in_pane = true,
+		claims = content_claims, hover = content_hover, press = content_press, release = content_release,
+		cancel = content_cancel, leave = content_leave, holds = true, blurs_find = true, in_pane = true,
 	},
 }
 

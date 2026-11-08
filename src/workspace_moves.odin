@@ -117,6 +117,15 @@ workspace_move_destination_settle :: proc(app: ^App, workspace: ^Workspace, crea
 	}
 }
 
+// Whether the pane at `node` of `source` may move to another workspace: the tab that owns it must keep a
+// pane it can show (pane_link_tab_can_lose); a linked pane leaves its slot freely. A drag's workspace rows
+// and the commit below both ask.
+@(require_results)
+workspace_pane_move_allowed :: proc(app: ^App, source: ^Tab, node: layout.Node_Id) -> bool {
+	_, _, allowed := pane_source_leaves(app, source, node)
+	return allowed
+}
+
 @(require_results)
 workspace_move_content :: proc(
 	app: ^App,
@@ -134,6 +143,7 @@ workspace_move_content :: proc(
 	index := tab_index_by_id(source_workspace, request.tab)
 	if index < 0 {return false}
 	source := source_workspace.tabs[index]
+	if !workspace_pane_move_allowed(app, source, request.node) {return false}
 	content, valid := layout.pane_content(&source.tree, request.node)
 	if !valid || !pane_content_can_join(content, destination, source) {return false}
 	receiver := window_for_workspace(app, destination)

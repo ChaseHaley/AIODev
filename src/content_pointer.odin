@@ -4,10 +4,9 @@ import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
-import "aio:ui"
 
-// The pointer over pane content and anything uncovered: pane focus, a settings page press, links, the
-// selection, and programs that report the mouse.
+// The pointer over pane content and anything uncovered: pane focus, links, the selection, and programs
+// that report the mouse.
 
 @(private)
 pane_at :: proc(app: ^App, w: ^Window, x, y: i32) -> ^Session_Entry {
@@ -41,22 +40,22 @@ content_leave :: proc(_: ^App, w: ^Window) {
 	link_hover_clear(w)
 }
 
-// A press on pane content focuses the pane, then reaches a settings page, a link, the selection or a
-// program that reports the mouse. That program also receives the release, wherever it lands.
+// A press on a pane focuses it, unless a selection drag holds the pointer.
+@(private)
+pane_press_focus :: proc(app: ^App, w: ^Window, x, y: f32) {
+	if selection_active(w) {return}
+	if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
+}
+
+// A press on pane content focuses the pane, then reaches a link, the selection or a program that
+// reports the mouse. That program also receives the release, wherever it lands. A press that leaves
+// a settings page focused, outside every pane, still reaches the page, as does its release.
 @(private)
 content_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
-	if !selection_active(w) {
-		if pane, found := layout.hit_test(w.panes[:], x, y); found {pane_focus(app, w, pane.node)}
-	}
+	pane_press_focus(app, w, x, y)
 	if settings_active(w) {
-		if e.button == .Left {
-			editor_outcome(
-				app,
-				w,
-				ui.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y, .Shift in e.modifiers),
-			)
-		}
+		settings_page_press(app, w, e)
 		return
 	}
 	entry := pane_at(app, w, e.x, e.y)
@@ -82,6 +81,11 @@ content_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		gesture_report(w, e.button, entry.id)
 		term.send_mouse(entry.session, .Press, e.button, {e.button}, e.modifiers, x, y)
 	}
+}
+
+@(private)
+content_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	return settings_release(app, w, e)
 }
 
 // The release of a press a program received goes to that program, though the pointer has since moved

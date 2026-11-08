@@ -435,7 +435,7 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event)
 	hover := u32(0)
 	shape := platform.Cursor_Shape.Arrow
 	if p.query.dragging && .Left in e.buttons {
-		workspace_picker_pointer(app, w, x, false, true)
+		workspace_picker_pointer(w, x, false, true)
 		shape = .Text
 	} else if hit := workspace_picker_hit(w, x, y); hit >= 0 {
 		shape = .Hand
