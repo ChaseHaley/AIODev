@@ -480,7 +480,7 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 					app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 						x = i32(frame.x), y = i32(sample.y+16*scale)})
 					testing.expect_value(t, w.workspace_picker.rename.cursor, 0)
-					app.workspace_picker_pointer(s, w, frame.x+frame.width, false, true)
+					app.workspace_picker_pointer(w, frame.x+frame.width, false, true)
 					testing.expect_value(t, ui.field_selected_text(&w.workspace_picker.rename), f.target.name)
 					app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = false,
 						x = i32(frame.x+frame.width), y = i32(sample.y+16*scale)})

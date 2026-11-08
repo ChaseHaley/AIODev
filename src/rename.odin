@@ -122,7 +122,7 @@ rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
 	return ui.field_box_standard(&w.rename, &w.ui_text, rename_field_rect(w), w.scale)
 }
 
-rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
+rename_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool) {
 	box := rename_field_box(w)
 	ui.field_pointer(&w.rename, ui.field_box_offset(box, x), pressed, extend)
 	w.dirty = true
@@ -224,7 +224,7 @@ rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return rename_s
 rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Rename {return}
 	x, y := f32(e.x), f32(e.y)
-	if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
+	if w.rename.dragging && .Left in e.buttons {rename_pointer(w, x, false, true)}
 	pointer_set(app, w, render.rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
 }
 
@@ -246,7 +246,7 @@ rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		rename_finish(app, w, false)
 		gesture_swallow(w, e.button, .Rename)
 	} else if e.button == .Left && render.rect_contains(rename_field_rect(w), x, y) {
-		rename_pointer(app, w, x, true, .Shift in e.modifiers)
+		rename_pointer(w, x, true, .Shift in e.modifiers)
 	}
 }
 

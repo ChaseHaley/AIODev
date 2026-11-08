@@ -654,8 +654,13 @@ when AIO_CONTROL {
 		state_text(r, "session.program.name", program.name)
 		program_icon_state_report(r, app, entry)
 		state_text(r, "session.header.directory", entry.header.directory)
+		// The shell source pane_icon draws: the badge text, or the image by its configured path.
 		icon := entry.header.icon
-		if app.shell_icon.width > 0 {icon = settings.profile_base(&app.settings.profiles).icon}
+		switch pane_badge_source(app) {
+		case .Text:
+		case .Shell_Image:
+			icon = settings.profile_base(&app.settings.profiles).icon
+		}
 		state_text(r, "session.header.icon", icon)
 		state_valuef(r, "grid.origin", "%d,%d", g.padding_left, g.padding_top)
 		state_text(r, "session.viewport", up == 0 ? "bottom" : fmt.tprintf("up:%d", up))

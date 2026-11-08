@@ -290,7 +290,9 @@ tick :: proc(app: ^App) {
 
 // Every timed feature that is not a window's, once. Each advances itself and names its next deadline:
 // tick advances them and wait_timeout sleeps until the earliest. A value added here must be named by
-// every switch below, so no feature can be advanced without waking the loop, or the reverse.
+// every switch below, so no feature can be advanced without waking the loop, or the reverse. Find
+// progress stays outside, as a pair: find_tick runs before update_motion, where no phase here runs, and
+// find_pending wakes the loop at once rather than at a deadline.
 @(private = "file")
 App_Timer :: enum u8 {
 	Processes,
@@ -468,14 +470,14 @@ wake_platform :: proc(user: rawptr) {
 
 initial_geometry :: proc(app: ^App) -> term.Geometry {
 	scale := dpi_scale(platform_api.primary_dpi(&app.platform))
-	metrics := window_metrics(app, scale)
+	fields := window_settings_fields(app, scale, linked = false)
 	// A new window as it shows once opened and its settings apply, before it has a size.
 	template := Window {
 		scale              = scale,
-		metrics            = metrics,
-		rail_default_width = f32(app.settings.tabs.rail_width),
-		tabs_horizontal    = app.settings.tabs.orientation == .Horizontal,
-		header_height      = pane_header_row_height(app, scale),
+		metrics            = fields.metrics,
+		rail_default_width = fields.rail_default_width,
+		tabs_horizontal    = fields.tabs_horizontal,
+		header_height      = fields.header_height,
 	}
 	// window.columns and window.rows size the window without a docked Activity panel, which then takes
 	// its width from the pane. This is the shipped policy, kept pending the owner's decision on whether
@@ -491,8 +493,8 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 	return {
 		columns = box.columns,
 		rows = box.rows,
-		cell_width = u32(metrics.cell_width),
-		cell_height = u32(metrics.cell_height),
+		cell_width = u32(fields.metrics.cell_width),
+		cell_height = u32(fields.metrics.cell_height),
 		padding_left = u32(box.origin.x),
 		padding_top = u32(box.origin.y),
 		surface_width = u32(width),

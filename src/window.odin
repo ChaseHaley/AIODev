@@ -50,7 +50,7 @@ Window :: struct {
 	gesture: Gesture_State,
 	// The pane scrollbar under the pointer and a held thumb; see pane_scrollbar.odin.
 	scrollbars: Pane_Scrollbars,
-	// A divider press, drag or the first click of a double-click; see arrange.odin.
+	// A divider press, drag or the first click of a double-click; see divider_drag.odin.
 	divider: Divider_Gesture,
 	// The pane or tab drag this window's pointer holds; see drag.odin.
 	drag: Drag,
@@ -344,18 +344,38 @@ window_sync_placement :: proc(app: ^App, w: ^Window) -> bool {
 	return true
 }
 
+// What a window derives from the settings at a scale, without side effects. window_apply_settings
+// stores it, apart from header_height, which window_relayout stores as it places the panes;
+// initial_geometry sizes the first window by it before any window exists.
+Window_Settings_Fields :: struct {
+	metrics:            term_view.Metrics,
+	rail_default_width: f32,
+	tabs_horizontal:    bool,
+	header_height:      f32,
+}
+
+window_settings_fields :: proc(app: ^App, scale: f32, linked: bool) -> Window_Settings_Fields {
+	return {
+		metrics = window_metrics(app, scale),
+		rail_default_width = f32(app.settings.tabs.rail_width),
+		// A linked window has no tabs to place, and the rail is the only placement that takes pane space.
+		tabs_horizontal = linked || app.settings.tabs.orientation == .Horizontal,
+		header_height = pane_header_row_height(app, scale),
+	}
+}
+
 window_apply_settings :: proc(app: ^App, w: ^Window) {
 	w.ui_text = app.ui_text
 	ui.text_set_size(&w.ui_text, points_pixels(f32(app.settings.interface.font_size), w.scale))
-	w.metrics = window_metrics(app, w.scale)
-	w.rail_default_width = f32(app.settings.tabs.rail_width)
+	fields := window_settings_fields(app, w.scale, window_linked(w))
+	w.metrics = fields.metrics
+	w.rail_default_width = fields.rail_default_width
 	colors := app.settings.active_theme.colors
 	if platform.window_set_frame_color(&app.platform, w.id, colors[.Tab_Bar].rgb, colors[.Text].rgb) !=
 	   .None {
 		log.error("setting the window frame color failed")
 	}
-	// A linked window has no tabs to place, and the rail is the only placement that takes pane space.
-	horizontal := window_linked(w) || app.settings.tabs.orientation == .Horizontal
+	horizontal := fields.tabs_horizontal
 	placement_changed := horizontal != w.tabs_horizontal
 	w.tabs_horizontal = horizontal
 	if placement_changed {

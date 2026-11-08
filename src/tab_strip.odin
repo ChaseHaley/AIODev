@@ -2,7 +2,11 @@ package main
 
 import "aio:input"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
+
+// settings is used only when AIO_CONTROL is set.
+_ :: settings
 
 // Horizontal tab-strip geometry and drawing. The strip shares the 40 DIP title bar with the
 // workspace chip and the caption controls, so both the tab bar and the controls end read the same
@@ -195,7 +199,10 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 when AIO_CONTROL {
 	tab_strip_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
 		bar := window_tab_bar(app, w)
-		state_text(r, "tabs.orientation", w.tabs_horizontal ? "horizontal" : "vertical")
+		@(static, rodata)
+		names := settings.TABS_ORIENTATION_NAME
+		orientation: settings.Tabs_Orientation = w.tabs_horizontal ? .Horizontal : .Vertical
+		state_text(r, "tabs.orientation", names[orientation])
 		state_valuef(r, "tabs.width", "%g", bar.tab_width)
 		state_valuef(r, "tabs.x", "%g", bar.x)
 		state_valuef(r, "tabs.height", "%g", bar.height)

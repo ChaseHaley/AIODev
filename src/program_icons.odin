@@ -222,8 +222,23 @@ pane_icon :: proc(
 		}
 	}
 	badge = entry.header.icon
-	atlas, result = shell_icon_atlas(app)
+	switch pane_badge_source(app) {
+	case .Text:
+	case .Shell_Image:
+		atlas, result = shell_icon_atlas(app)
+	}
 	return
+}
+
+// What stands for a pane's shell when no program icon does: the configured shell image once it is
+// loaded, which replaces the text badge, otherwise the session's text badge.
+Pane_Badge_Source :: enum u8 {
+	Text,
+	Shell_Image,
+}
+
+pane_badge_source :: proc(app: ^App) -> Pane_Badge_Source {
+	return app.shell_icon.width > 0 ? .Shell_Image : .Text
 }
 
 // The icon for a status report: what the reporting program's name draws, so a child reporter shows
