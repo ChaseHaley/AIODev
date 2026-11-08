@@ -69,14 +69,17 @@ pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Ins
 PANE_BOX_SOLVE_STEPS :: 32
 
 // The client size at which `w` gives a single pane `columns` × `rows`, and the box the pane then receives:
-// the inverse of pane_box across window_content_area. Each step resizes a copy of `w` by what its content
+// the inverse of pane_box across window_content_area_in. Each step resizes a copy of `w` by what its content
 // area lacks, through the forward geometry, since whether the rail docks and how wide the Activity panel
-// is follow the window's width. Not solved when the steps run out; the size is then the last tried.
+// is follow the window's width. Without `activity_dock` the size leaves out a docked Activity panel's width,
+// so the panel then takes its width from the pane. Not solved when the steps run out; the size is then the
+// last tried.
 pane_box_for_grid :: proc(
 	app: ^App,
 	w: Window,
 	columns, rows: u16,
 	insets: Pane_Insets,
+	activity_dock: bool,
 ) -> (
 	box: Pane_Box,
 	width, height: i32,
@@ -85,12 +88,12 @@ pane_box_for_grid :: proc(
 	want_width := f32(columns) * w.metrics.cell_width + 2 * insets.padding
 	want_height := f32(rows) * w.metrics.cell_height + 2 * insets.padding + insets.header
 	candidate := w
-	area := window_content_area(app, &candidate)
+	area := window_content_area_in(app, &candidate, candidate.pane_fill, activity_dock)
 	for _ in 0 ..< PANE_BOX_SOLVE_STEPS {
 		candidate.width += i32(math.ceil(want_width - area.width))
 		candidate.height += i32(math.ceil(want_height - area.height))
 		rail_adaptive_update(&candidate)
-		area = window_content_area(app, &candidate)
+		area = window_content_area_in(app, &candidate, candidate.pane_fill, activity_dock)
 		box = pane_box(w.metrics, area, insets)
 		if box.columns == columns && box.rows == rows {return box, candidate.width, candidate.height, true}
 	}

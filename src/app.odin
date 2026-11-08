@@ -486,12 +486,16 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 		rail_default_width = f32(app.settings.tabs.rail_width),
 		tabs_horizontal    = app.settings.tabs.orientation == .Horizontal,
 	}
+	// window.columns and window.rows size the window without a docked Activity panel, which then takes
+	// its width from the pane. This is the shipped policy, kept pending the owner's decision on whether
+	// the window should widen for the panel instead.
 	box, width, height, _ := pane_box_for_grid(
 		app,
 		template,
 		u16(app.settings.window.columns),
 		u16(app.settings.window.rows),
 		pane_insets(app, scale, nil),
+		activity_dock = false,
 	)
 	return {
 		columns = box.columns,

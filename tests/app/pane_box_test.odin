@@ -5,6 +5,7 @@ import "core:math"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
+import "aio:settings"
 import "aio:term_view"
 import "aio:ui"
 
@@ -64,7 +65,7 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 						headers ? math.round(ui.HEADER_HEIGHT * scale) : 0)
 					for grid in ([?][2]u16{{80, 24}, {40, 10}, {1, 1}}) {
 						box, width, height, solved := app.pane_box_for_grid(
-							&state, w, grid.x, grid.y, insets,
+							&state, w, grid.x, grid.y, insets, activity_dock = true,
 						)
 						testing.expect(t, solved)
 						testing.expect_value(t, box.columns, grid.x)
@@ -93,7 +94,9 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 			w := box_window(&workspace, scale)
 			w.rail_width = width
 			insets := app.pane_insets(&state, scale, nil)
-			box, client_width, client_height, solved := app.pane_box_for_grid(&state, w, 120, 24, insets)
+			box, client_width, client_height, solved := app.pane_box_for_grid(
+				&state, w, 120, 24, insets, activity_dock = true,
+			)
 			testing.expect(t, solved)
 			w.width, w.height = client_width, client_height
 			app.rail_adaptive_update(&w)
@@ -102,6 +105,31 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 			testing.expect_value(t, applied.columns, u16(120))
 			testing.expect_value(t, applied.rows, u16(24))
 		}
+	}
+}
+
+// window.columns and window.rows size a new window as if the Activity panel took no width beside the
+// pane, on either side; the docked panel then takes its width from the pane.
+@(test)
+new_window_size_leaves_out_the_docked_activity_panel :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "window-size-activity") {return}
+	s := &f.state
+	s.settings.window.columns, s.settings.window.rows = 120, 32
+	s.settings.status.enabled = true
+	s.settings.status.panel = false
+	without := app.initial_geometry(s)
+	s.settings.status.panel = true
+	s.settings.status.panel_width = 300
+	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
+		s.settings.status.panel_side = side
+		docked := app.initial_geometry(s)
+		testing.expect_value(t, docked.surface_width, without.surface_width)
+		testing.expect_value(t, docked.surface_height, without.surface_height)
+		testing.expect_value(t, docked.columns, without.columns)
+		testing.expect_value(t, docked.rows, without.rows)
+		testing.expect_value(t, docked.padding_left, without.padding_left)
 	}
 }
 

@@ -943,7 +943,9 @@ when AIO_CONTROL {
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case verify_protocol.Resize:
 			insets := pane_insets(app, w.scale, focused_session(app, w))
-			desired, width, height, _ := pane_box_for_grid(app, w^, u16(r.columns), u16(r.rows), insets)
+			desired, width, height, _ := pane_box_for_grid(
+				app, w^, u16(r.columns), u16(r.rows), insets, activity_dock = true,
+			)
 			// Activity can move between a standalone dock and the rail as the width changes.
 			for _ in 0..<32 {
 				candidate := w^
