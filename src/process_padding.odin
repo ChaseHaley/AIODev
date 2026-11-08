@@ -69,9 +69,9 @@ padding_update :: proc(
 ) -> bool {
 	index := procinfo.process_leaf(processes, root)
 	padding := app.settings.window.padding
-	entry.process_name_length = 0
+	entry.padding_leaf_length = 0
 	if index >= 0 {
-		entry.process_name_length = copy(entry.process_name[:], transmute([]u8)processes[index].executable)
+		entry.padding_leaf_length = copy(entry.padding_leaf[:], transmute([]u8)processes[index].executable)
 		for steps := 0; index >= 0 && steps <= len(processes); steps += 1 {
 			matched := false
 			padding, matched = settings.process_padding(&app.settings, processes[index].executable)

@@ -48,6 +48,10 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	testing.expect_value(t, listed.payload.(app.Outcome_Panes)[0].id, first)
 	testing.expect_value(t, listed.payload.(app.Outcome_Panes)[0].tab, 1)
 	testing.expect_value(t, listed.payload.(app.Outcome_Panes)[0].status, "running")
+	// The pane's process is reported without process.padding_groups, which these settings leave unset.
+	testing.expect_value(t, state.settings.process.padding_groups, "")
+	process := listed.payload.(app.Outcome_Panes)[0].process
+	testing.expectf(t, strings.equal_fold(process, "pwsh.exe"), "pane.list process %q", process)
 
 	// New panes open in the background: the window keeps its tab and focus.
 	created := invoke(&state, first, "tab.new", "--name", "agent")

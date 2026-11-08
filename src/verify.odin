@@ -538,7 +538,7 @@ when AIO_CONTROL {
 		state_value(r, "pointer.updates", app.verify.pointer_updates)
 		state_valuef(r, "grid.cell", "%gx%g", w.metrics.cell_width, w.metrics.cell_height)
 		state_valuef(r, "grid.padding", "%g", pane_padding(app, w.scale, entry))
-		process := entry != nil ? string(entry.process_name[:entry.process_name_length]) : ""
+		process := entry != nil ? string(entry.padding_leaf[:entry.padding_leaf_length]) : ""
 		state_text(r, "session.process", process)
 	}
 
