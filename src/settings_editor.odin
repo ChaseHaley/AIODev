@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:colour"
 import "aio:font"
 import "aio:input"
 import "aio:platform"
@@ -21,6 +22,11 @@ THEME_KEY :: "theme.name"
 THEME_NAME_KEY :: "theme.display_name"
 @(private)
 THEME_RENAME_KEY :: "theme.rename"
+
+@(private)
+settings_profile_row_key :: proc(id: string) -> string {
+	return fmt.tprintf("%s%s", settings.PROFILE_PREFIX, id)
+}
 
 // Whether a profile's command line names an executable that exists. Explicit paths must exist;
 // a bare name is resolved through the same trusted directories the terminal uses. A lookup that
@@ -162,7 +168,7 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 			row.icon,
 		)
 		table_row := ui.Editor_Row {
-			key         = fmt.tprintf("%s%s", settings.PROFILE_PREFIX, row.id),
+			key         = settings_profile_row_key(row.id),
 			title       = row.name,
 			description = row.command,
 			value       = row.directory,
@@ -237,7 +243,7 @@ settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Setti
 		value := commands.shortcut_set_text(command.shortcuts, context.temp_allocator)
 		for binding in s.keys {if binding.name == command.name {value = binding.value; break}}
 		row := ui.Editor_Row {
-			key           = fmt.tprintf("%s%s", settings.KEY_BINDING_PREFIX, command.name),
+			key           = settings.binding_key(command.name),
 			title         = command.title,
 			value         = value,
 			default_value = commands.shortcut_set_text(command.defaults, context.temp_allocator),
@@ -422,7 +428,7 @@ editor_profile_mutate :: proc(app: ^App, w: ^Window, change: settings.Profile_Mu
 		_ = settings_page_report(&w.editor, result, .Profile)
 		return
 	}
-	key := fmt.tprintf("%s%s", settings.PROFILE_PREFIX, result.id)
+	key := settings_profile_row_key(result.id)
 	message: string
 	switch change.kind {
 	case .Add:
@@ -457,7 +463,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 				w,
 				result,
 				.Profile_Field,
-				fmt.tprintf("%s%s", settings.PROFILE_PREFIX, r.id),
+				settings_profile_row_key(r.id),
 				"Default profile saved. New tabs, splits and the plus button use it.",
 			)
 		case .Duplicate:
@@ -471,7 +477,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 			w,
 			settings_change(app, value, Settings_Page{&w.editor}),
 			.Profile_Field,
-			fmt.tprintf("%s%s", settings.PROFILE_PREFIX, r.id),
+			settings_profile_row_key(r.id),
 			r.hidden ? "Profile hidden from menus." : "Profile shown in menus.",
 		)
 	case ui.Profile_Order_Request:
@@ -580,9 +586,9 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 			},
 		}
 		for row in rows {
-			if ui.editor_add(p, row, "Theme") != nil {return false}
+			if ui.editor_add(p, row, settings.group_title("theme.name")) != nil {return false}
 		}
-	} else if ui.editor_add(p, duplicate, "Theme") != nil {return false}
+	} else if ui.editor_add(p, duplicate, settings.group_title("theme.name")) != nil {return false}
 	if ui.editor_add(p, {
 		key = "theme.export",
 		title = "Export Theme File",
@@ -590,7 +596,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 		kind = .Action,
 		value = "Export",
 		action = .Theme_Export,
-	}, "Theme") != nil {return false}
+	}, settings.group_title("theme.name")) != nil {return false}
 	base := settings.theme_base(s)
 	tokens := settings.THEME_TOKENS
 	for token in settings.Theme_Token {
@@ -631,7 +637,7 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 	alpha_dropped := false
 	if token, found := settings.token_find(token_key); found && value != "" {
 		tokens := settings.THEME_TOKENS
-		_, _, alpha := settings.parse_color(value)
+		_, _, alpha := colour.parse(value, .Permissive)
 		alpha_dropped = alpha && tokens[token].kind != .Translucent
 	}
 	result, applied := editor_theme_change(app, w, Theme_Color{token_key, value})
@@ -665,6 +671,7 @@ editor_owns :: proc(e: input.Key_Event) -> bool {
 settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	pane_header_cancel(w)
 	p := &w.editor
+	_ = settings_layout(w)
 	w.dirty = true
 	key_suppress(w, e)
 	// Escape backs out of a delete prompt even when the page has nothing else to leave.

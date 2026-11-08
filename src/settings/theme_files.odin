@@ -6,6 +6,8 @@ import "core:os"
 import "core:strings"
 
 THEME_FILE_MAX_BYTES :: 64 * 1024
+@(private)
+THEME_FILE_SIZE_NOTICE :: "Theme file exceeds 64 KiB."
 
 // The top-level fields of a theme file, in the order the schema lists them.
 Theme_Field :: enum {
@@ -54,7 +56,7 @@ theme_field_find :: proc(key: string) -> (Theme_Field_Info, bool) {
 
 @(require_results)
 theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
-	if len(text) > THEME_FILE_MAX_BYTES {return {}, "Theme file exceeds 64 KiB."}
+	if len(text) > THEME_FILE_MAX_BYTES {return {}, THEME_FILE_SIZE_NOTICE}
 	lexer := json.make_tokenizer(text, .JSON)
 	depth, completed := 0, false
 	previous := json.Token_Kind.Invalid

@@ -58,8 +58,11 @@ settings_pane_rect :: proc(w: ^Window) -> layout.Pane_Rect {
 }
 
 @(require_results)
+// Composition fits the editor before input/drawing; ui.editor_layout remains a pure geometry query.
 settings_layout_for :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Editor_Layout {
-	return ui.editor_layout(pane_body_rect(w, pane), w.scale)
+	l := ui.editor_layout(pane_body_rect(w, pane), w.scale)
+	ui.editor_fit(&w.editor, l)
+	return l
 }
 
 settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {

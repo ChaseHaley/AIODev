@@ -22,7 +22,7 @@ profile_detected_row_drag_survives_publication_and_reopen :: proc(t: ^testing.T)
 	if !testing.expect(t, id != "") {return}
 	e := profile_open(&f)
 	l := ui.editor_layout({0, 40, 1200, 8000}, 1)
-	e.visible_rows = l.rows
+	ui.editor_fit(e, l)
 	item := profile_item(e, fmt.tprintf("profile.%s", id))
 	alpha := profile_item(e, "profile.alpha")
 	if !testing.expect(t, item >= 0 && alpha >= 0) {return}
@@ -126,6 +126,7 @@ profile_fixture_destroy :: proc(t: ^testing.T, f: ^Profile_Fixture) {
 profile_open :: proc(f: ^Profile_Fixture) -> ^ui.Editor {
 	_ = app.settings_load(&f.state, &f.state.windows[0].editor)
 	app.settings_reveal_page(&f.state.windows[0].editor, {search = .Clear})
+	ui.editor_fit(&f.state.windows[0].editor, ui.editor_layout({0, 40, 1200, 1400}, 1))
 	return&f.state.windows[0].editor
 }
 

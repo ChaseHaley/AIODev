@@ -375,6 +375,8 @@ Editor :: struct {
 	groups:                                                            [dynamic]Editor_Group,
 	items:                                                             [dynamic]Editor_Item,
 	selected, scroll, visible_rows:                                    int,
+	// Geometry is fitted explicitly before input/rendering, never learned from drawing.
+	fit_layout:                                                        Editor_Layout,
 	filter, value:                                                     Text_Field,
 	choice_search:                                                     Text_Field,
 	popup_bar_hover:                                                   bool,
@@ -572,6 +574,7 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 		return .Draft_Conflict
 	}
 	next.filter.cursor, next.filter.anchor = p.filter.cursor, p.filter.anchor
+	next.fit_layout, next.visible_rows = p.fit_layout, p.visible_rows
 	next.scroll = clamp(p.scroll, 0, max(0, len(next.items) - max(1, p.visible_rows)))
 	if selected {editor_carry(next, p, draft)}
 	editor_destroy(p)
@@ -596,8 +599,8 @@ editor_carry :: proc(to, from: ^Editor, draft: bool) {
 	// A picker keeps its hue and saturation even at black, where rebuilding them from RGB loses both.
 	if popup == .Color && next.kind == row.kind {
 		mode = Editor_Color_Popup{}
-		previous_color, previous_ok, _ := settings.parse_color(field_string(&from.value))
-		next_color, next_ok, _ := settings.parse_color(field_string(&to.value))
+		previous_color, previous_ok, _ := colour.parse(field_string(&from.value), .Permissive)
+		next_color, next_ok, _ := colour.parse(field_string(&to.value), .Permissive)
 		if previous_ok && next_ok && previous_color == next_color {to.hsv = from.hsv}
 	}
 	if draft {
@@ -903,7 +906,7 @@ swatch_color :: proc(value: string) -> (render.Color, bool) {
 sync_color :: proc(p: ^Editor) {
 	row := editor_row(p)
 	if row == nil || (row.kind != .Color && row.kind != .Optional_Color) {return}
-	c, ok, _ := settings.parse_color(field_string(&p.value))
+	c, ok, _ := colour.parse(field_string(&p.value), .Permissive)
 	if !ok || colour.hsv_to_rgb(p.hsv[0], p.hsv[1], p.hsv[2]) == c {return}
 	h, s, v := colour.rgb_to_hsv(c)
 	if s == 0 || v == 0 {h = p.hsv[0]}
@@ -1117,12 +1120,12 @@ editor_profile_set_expanded :: proc(p: ^Editor, id: string) {
 	p.expanded = strings.clone(id)
 }
 
-// Opens one profile's inline editor and closes any other. The table's row key is profile.ID.
+// Opens one profile's inline editor and closes any other.
 editor_profile_expand :: proc(p: ^Editor, id: string) {
 	if id == "" {return}
 	if p.expanded != id {editor_profile_set_expanded(p, id)}
 	editor_rebuild(p)
-	editor_select_key(p, fmt.tprintf("profile.%s", id))
+	editor_select_profile(p, id)
 }
 
 editor_profile_collapse :: proc(p: ^Editor) {
@@ -1130,7 +1133,17 @@ editor_profile_collapse :: proc(p: ^Editor) {
 	id := strings.clone(p.expanded, context.temp_allocator)
 	editor_profile_set_expanded(p, "")
 	editor_rebuild(p)
-	editor_select_key(p, fmt.tprintf("profile.%s", id))
+	editor_select_profile(p, id)
+}
+
+// Profile identity is independent of the page owner's reveal-key vocabulary.
+@(private)
+editor_select_profile :: proc(p: ^Editor, id: string) {
+	for item, index in p.items {
+		if item.row < 0 {continue}
+		row := &p.rows[item.row]
+		if row.kind == .Profile && row.profile == id {editor_select(p, index); return}
+	}
 }
 
 editor_profile_toggle :: proc(p: ^Editor, id: string) {
@@ -1655,11 +1668,12 @@ profile_control_step :: proc(p: ^Editor, row: ^Editor_Row, step: int) {
 	order: [5]Profile_Control
 	order[0], order[1], order[2], order[3], order[4] = .Expand, .Radio, .Hidden, .Duplicate, .Remove
 	count := .Protected in row.flags ? 4 : 5
-	if p.profile_menu_parts.more.width > 0 {
+	parts := editor_profile_parts(p, p.fit_layout, p.selected)
+	if parts.more.width > 0 {
 		order[0] = .Expand
 		count = 1
-		if p.profile_menu_parts.radio.width > 0 {order[count] = .Radio; count += 1}
-		if p.profile_menu_parts.toggle.width > 0 {order[count] = .Hidden; count += 1}
+		if parts.radio.width > 0 {order[count] = .Radio; count += 1}
+		if parts.toggle.width > 0 {order[count] = .Hidden; count += 1}
 		order[count] = .More
 		count += 1
 	}
@@ -1686,7 +1700,7 @@ profile_activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Remove:
 		return profile_request(p, .Remove, row.profile)
 	case .More:
-		editor_profile_menu_open(p, row, p.profile_menu_parts)
+		editor_profile_menu_open(p, row, editor_profile_parts(p, p.fit_layout, p.selected))
 		return .Changed
 	}
 	return .None
@@ -1749,9 +1763,10 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_O
 	}
 	if popup == .Choice {
 		count := editor_choice_count(p, row)
-		if choice_list_key(&p.choice_list, e, count) {return .Changed, true}
+		visible := choice_popup_rows(p, row, p.fit_layout)
+		if choice_list_key(&p.choice_list, e, count, visible) {return .Changed, true}
 		if e.key == .Home || e.key == .End {
-			choice_list_move(&p.choice_list, e.key == .Home ? -count : count, count)
+			choice_list_move(&p.choice_list, e.key == .Home ? -count : count, count, visible)
 			return .Changed, true
 		}
 	}
@@ -1784,7 +1799,8 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	}
 	row := editor_row(p)
 	if _, shortcut := p.mode.(Editor_Shortcut); shortcut && row != nil {
-		outcome := shortcut_capture_key(&p.capture, &p.value, row.value, row.shortcut_mode, raw)
+		visible := shortcut_capture_popup_rows(row.value, p.fit_layout.page, p.fit_layout.scale)
+		outcome := shortcut_capture_key(&p.capture, &p.value, row.value, row.shortcut_mode, raw, visible)
 		return shortcut_outcome(p, outcome)
 	}
 	e := raw
@@ -1795,7 +1811,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		return .Changed
 	}
 	if row != nil && row.kind == .Profile && e.key == .Context_Menu {
-		editor_profile_menu_open(p, row, p.profile_menu_parts)
+		editor_profile_menu_open(p, row, editor_profile_parts(p, p.fit_layout, p.selected))
 		return .Changed
 	}
 	focus := editor_focus(p)
@@ -2029,6 +2045,37 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 	return l
 }
 
+// Applies viewport-dependent navigation state before input or drawing. Layout and draw are queries;
+// neither drawing once nor drawing the selected profile row is a prerequisite for keyboard use.
+editor_fit :: proc(p: ^Editor, l: Editor_Layout) {
+	p.fit_layout = l
+	p.visible_rows = l.rows
+	p.profile_menu.bounds = l.page
+	p.scroll = clamp(p.scroll, 0, max_scroll(p))
+	entries := outline_entries(p)
+	rows := outline_rows(l)
+	active := editor_active_group(p)
+	if active != p.outline_active {
+		for header, entry in entries {
+			if p.items[header].group != active {continue}
+			if entry < p.outline_scroll {p.outline_scroll = entry}
+			if entry >= p.outline_scroll + rows {p.outline_scroll = entry - rows + 1}
+		}
+		p.outline_active = active
+	}
+	p.outline_scroll = clamp(p.outline_scroll, 0, max(0, len(entries) - rows))
+	if row := editor_row(p); row != nil {
+		if editor_popup(p) == .Choice {
+			choice_list_keep_visible(&p.choice_list, editor_choice_count(p, row), choice_popup_rows(p, row, l))
+		}
+		if editor_popup(p) == .Shortcuts {
+			choice_list_keep_visible(&p.capture.alternatives,
+				len(commands.shortcut_alternatives(row.value, context.temp_allocator)) + 1,
+				shortcut_capture_popup_rows(row.value, l.page, l.scale))
+		}
+	}
+}
+
 // The clear button inside the search field, shown while the field has text.
 editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	if len(p.filter.bytes) == 0 {return {}}
@@ -2156,8 +2203,7 @@ editor_profile_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Profil
 @(private)
 choice_popup_rows :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout) -> int {
 	header := choice_search_height(row, l.scale)
-	return min(editor_choice_count(p, row), CHOICE_LIST_ROWS,
-	           max(1, int((l.page.height - 24 * l.scale - header) / (CHOICE_HEIGHT * l.scale))))
+	return choice_list_rows(editor_choice_count(p, row), l.page.height, l.scale, header)
 }
 
 // Scrolls the choice list, keeping the highlighted option on a visible row.
@@ -2907,7 +2953,6 @@ profile_row_draw :: proc(
 	scale: f32,
 ) -> render.Build_Status {
 	table := profile_row_parts(.Profile, parts.row, scale)
-	if selected {p.profile_menu_parts = table}
 	small := text_styled(text, .Detail)
 	cy := parts.row.y + parts.row.height / 2
 	focused := selected && editor_editing(p)
@@ -3373,15 +3418,6 @@ outline_draw :: proc(
 	entries := outline_entries(p)
 	rows := outline_rows(l)
 	active := editor_active_group(p)
-	if active != p.outline_active {
-		for header, entry in entries {
-			if p.items[header].group != active {continue}
-			if entry < p.outline_scroll {p.outline_scroll = entry}
-			if entry >= p.outline_scroll + rows {p.outline_scroll = entry - rows + 1}
-		}
-		p.outline_active = active
-	}
-	p.outline_scroll = clamp(p.outline_scroll, 0, max(0, len(entries) - rows))
 	if render.push_layer(list, l.outline) != .None {return .Ok}
 	small := text_styled(text, .Detail)
 	for entry in p.outline_scroll ..< min(len(entries), p.outline_scroll + rows) {
@@ -3421,9 +3457,6 @@ editor_draw :: proc(
 	pointer: [2]f32 = {},
 ) -> render.Build_Status {
 	s := l.scale
-	p.visible_rows = l.rows
-	p.profile_menu.bounds = l.page
-	p.scroll = clamp(p.scroll, 0, max_scroll(p))
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	strong := text_styled(text, .Strong)
 	small := text_styled(text, .Detail)

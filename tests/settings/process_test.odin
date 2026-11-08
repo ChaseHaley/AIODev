@@ -31,6 +31,30 @@ process_padding_groups_match_names_and_preserve_order :: proc(t: ^testing.T) {
 }
 
 @(test)
+window_and_process_padding_accept_the_same_content_range :: proc(t: ^testing.T) {
+	entry := settings.schema_find("window.padding")
+	if !testing.expect(t, entry != nil) {return}
+	testing.expect_value(t, entry.valid, settings.CONTENT_PADDING_RANGE)
+	minimum, maximum := int(entry.valid.minimum), int(entry.valid.maximum)
+	for padding in ([?]int{minimum - 1, minimum, maximum, maximum + 1}) {
+		source := fmt.tprintf(
+			"window.padding = %d\nprocess.padding_groups = test:%d:nvim\n", padding, padding,
+		)
+		s, diagnostics, error := settings.parse(source)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&diagnostics)
+		testing.expect_value(t, error, nil)
+		accepted := padding >= minimum && padding <= maximum
+		testing.expect_value(t, len(diagnostics), accepted ? 0 : 2)
+		if accepted {
+			actual, matched := settings.process_padding(&s, "nvim.exe")
+			testing.expect(t, matched)
+			testing.expect_value(t, actual, s.window.padding)
+		}
+	}
+}
+
+@(test)
 process_padding_groups_reject_malformed_rules :: proc(t: ^testing.T) {
 	for value in ([?]string{"missing", "group:-1:nvim", "group:1025:nvim", "group:zero:nvim",
 		":0:nvim", "group:0:", "group:0:nvim,,vim", "group:0:C:\\nvim.exe", "group:0:vim*",

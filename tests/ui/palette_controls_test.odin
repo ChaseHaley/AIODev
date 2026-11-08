@@ -2,6 +2,7 @@ package ui_test
 
 import "aio:commands"
 import "aio:input"
+import "aio:settings"
 import "aio:ui"
 import "core:testing"
 
@@ -374,4 +375,30 @@ palette_reset_button_restores_the_default_and_ignores_an_unchanged_setting :: pr
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "input.leader")
 	testing.expect_value(t, value, "ctrl+b")
+}
+
+@(test)
+palette_static_choice_popup_keeps_descriptor_labels_and_saved_values :: proc(t: ^testing.T) {
+	rows := [1]ui.Palette_Setting{ui.palette_setting(settings.schema_find("status.panel_view")^)}
+	p: ui.Palette
+	testing.expect_value(t, ui.palette_init(&p, rows[:]), nil)
+	defer ui.palette_destroy(&p)
+	v: Control_Values
+	control_set(&v, "status.panel_view", "comfy")
+	ui.palette_set_values(&p, {user = &v, value = control_value})
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	ui.palette_open_mode(&p, &registry, .Settings)
+	ui.palette_fit(&p, 1000, 800, 1)
+
+	ui.palette_key(&p, &registry, press(.Enter, {.Control}))
+	if !testing.expect_value(t, len(p.buffers.labels), 2) {return}
+	testing.expect_value(t, p.buffers.labels[0], "Comfy")
+	testing.expect_value(t, p.buffers.labels[1], "Dense")
+	ui.palette_key(&p, &registry, press(.Arrow_Down))
+	outcome, _ := ui.palette_key(&p, &registry, press(.Enter))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	testing.expect_value(t, key, "status.panel_view")
+	testing.expect_value(t, value, "dense")
 }

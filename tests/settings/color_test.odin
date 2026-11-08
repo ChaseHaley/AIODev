@@ -1,5 +1,6 @@
 package settings_test
 
+import "aio:colour"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
@@ -25,14 +26,14 @@ parse_color_accepts_pasted_representations :: proc(t: ^testing.T) {
 		{"HSB(0, 0%, 0%)", {0, 0, 0}, false},
 	}
 	for c in cases {
-		color, ok, alpha := settings.parse_color(c.text)
+		color, ok, alpha := colour.parse(c.text, .Permissive)
 		testing.expectf(t, ok, "%q should parse", c.text)
 		testing.expectf(t, color == c.color, "%q gave %v, expected %v", c.text, color, c.color)
 		testing.expectf(t, alpha == c.alpha, "%q alpha %v", c.text, alpha)
 	}
 	for text in ([?]string{"", "#12", "#ggg", "blue", "rgb(256, 0, 0)", "rgb(1, 2)", "hsl(0, 120%, 50%)",
 		"rgb(1, 2, 3", "rgb(nan, 0, 0)", "1 2 3 4 5", "#12345"}) {
-		_, ok, _ := settings.parse_color(text)
+		_, ok, _ := colour.parse(text, .Permissive)
 		testing.expectf(t, !ok, "%q should be rejected", text)
 	}
 }

@@ -99,7 +99,7 @@ process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
 	page := ui.editor_layout({0, 0, 1000, 800}, 1)
-	p.visible_rows = page.rows
+	ui.editor_fit(&p, page)
 	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.0.add"}))
 	_ = ui.editor_process_activate(&p, ui.editor_row(&p))
 	testing.expect_value(t, ui.editor_row(&p).key, "process.group.3.name")
@@ -160,7 +160,7 @@ process_groups_drag_escape_and_required_delete_outcome :: proc(t: ^testing.T) {
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
 	l := ui.editor_layout({0, 0, 1100, 900}, 1)
-	p.visible_rows = l.rows
+	ui.editor_fit(&p, l)
 	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1"}))
 	row := ui.editor_row_parts(&p, l, p.selected).row
 	parts := ui.editor_process_parts(row, 1)
@@ -251,7 +251,7 @@ process_groups_drag_reflows_whole_groups_like_profiles :: proc(t: ^testing.T) {
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
 	l := ui.editor_layout({0, 0, 1100, 900}, 1)
-	p.visible_rows = l.rows
+	ui.editor_fit(&p, l)
 	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1.name"}))
 	header := profile_item_index(&p, "process.group.1")
 	name := profile_item_index(&p, "process.group.1.name")

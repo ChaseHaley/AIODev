@@ -4,8 +4,6 @@ package ui
 // ring is on, the pointer's hover, the overflow menu, and an inline field problem. Strings are owned.
 Profile_Editor_State :: struct {
 	profile_menu:                         Menu,
-	profile_menu_controls:                [4]Profile_Control,
-	profile_menu_parts:                   Profile_Parts,
 	expanded:                             string,
 	profile_control:                      Profile_Control,
 	hover_profile_item:                   int,

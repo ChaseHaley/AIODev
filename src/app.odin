@@ -138,10 +138,6 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	if !palette_settings_init(app) {return false}
 	palette_set_sources(app)
-	ui.palette_set_values(
-		&app.palette,
-		{user = app, value = palette_setting_value, choices = palette_setting_choices},
-	)
 	control_cli_init(app)
 	if !load_settings(app) {return false}
 	font_error: font.Error

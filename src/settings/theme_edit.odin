@@ -40,13 +40,13 @@ theme_color_edit :: proc(
 		base := theme_active_id(s)
 		id = theme_id_free(s, fmt.tprintf("%s-custom", base))
 		if issue, error = theme_custom_lines(s, &revision, id, base, allocator); error != .None {return}
-		key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, token_key)
+		key := custom_theme_field_key(id, token_key)
 		if issue, error = theme_edit_line(&revision, key, value, allocator); error != .None {return}
 		if issue, error = theme_edit_line(&revision, "theme.name", id, allocator); error != .None {return}
 		created, clone_error = strings.clone(id, allocator)
 		if clone_error != nil {return "", "", "", .Allocation}
 	} else {
-		key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, token_key)
+		key := custom_theme_field_key(id, token_key)
 		if value == "" {
 			if error = theme_remove_lines(&revision, key, false, allocator); error != .None {return}
 		} else if issue, error = theme_edit_line(&revision, key, value, allocator); error != .None {
@@ -78,7 +78,7 @@ theme_duplicate :: proc(
 		if custom.name != "" {
 			if _, error = theme_edit_line(
 				&revision,
-				fmt.tprintf("%s%s.name", CUSTOM_THEME_PREFIX, id),
+				custom_theme_field_key(id, "name"),
 				fmt.tprintf("%s Copy", custom.name),
 				allocator,
 			); error != .None {return}
@@ -86,14 +86,14 @@ theme_duplicate :: proc(
 		if custom.base != "" {
 			if _, error = theme_edit_line(
 				&revision,
-				fmt.tprintf("%s%s.base", CUSTOM_THEME_PREFIX, id),
+				custom_theme_field_key(id, "base"),
 				custom.base,
 				allocator,
 			); error != .None {return}
 		}
 		tokens := THEME_TOKENS
 		for token in custom.overrides {
-			key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, tokens[token].key)
+			key := custom_theme_field_key(id, tokens[token].key)
 			text := theme_color_text(token, custom.colors[token])
 			if text == "" {continue}
 			if _, error = theme_edit_line(&revision, key, text, allocator); error != .None {return}
@@ -108,6 +108,30 @@ theme_duplicate :: proc(
 	if clone_error != nil {return "", "", .Allocation}
 	updated, revision = revision, ""
 	return
+}
+
+// Sets the active custom theme's display name without changing its ID or editing a theme file.
+@(require_results)
+theme_name_edit :: proc(
+	s: ^Settings,
+	source, name: string,
+	allocator := context.allocator,
+) -> (
+	updated, issue: string,
+	error: Theme_Edit_Error,
+) {
+	if !theme_custom(s) {return "", "", .Unavailable}
+	key := custom_theme_field_key(s.theme.name, "name")
+	message: string
+	alloc_error: runtime.Allocator_Error
+	updated, message, alloc_error = edit_text(source, key, strings.trim_space(name), allocator)
+	defer delete(message, allocator)
+	if alloc_error != nil || message != "" {
+		delete(updated, allocator)
+		if alloc_error != nil {return "", "", .Allocation}
+		return "", strings.clone(message, context.temp_allocator), .Invalid
+	}
+	return updated, "", .None
 }
 
 // Renames the active custom theme, rewriting every line it owns and the selection.
@@ -198,9 +222,9 @@ theme_custom_lines :: proc(
 	error: Theme_Edit_Error,
 ) {
 	name := fmt.tprintf("%s Custom", theme_display_name(s, base))
-	name_key := fmt.tprintf("%s%s.name", CUSTOM_THEME_PREFIX, id)
+	name_key := custom_theme_field_key(id, "name")
 	if issue, error = theme_edit_line(revision, name_key, name, allocator); error != .None {return}
-	return theme_edit_line(revision, fmt.tprintf("%s%s.base", CUSTOM_THEME_PREFIX, id), base, allocator)
+	return theme_edit_line(revision, custom_theme_field_key(id, "base"), base, allocator)
 }
 
 // The theme a new custom theme starts from: the selected theme, or the default for an unknown name.
@@ -370,10 +394,10 @@ migrate_theme_text :: proc(
 		base := s.theme.name
 		id := theme_id_free(&s, fmt.tprintf("%s-custom", base))
 		lines := make([dynamic][2]string, 0, count + 2, context.temp_allocator)
-		append(&lines, [2]string{fmt.tprintf("%s%s.base", CUSTOM_THEME_PREFIX, id), base})
+		append(&lines, [2]string{custom_theme_field_key(id, "base"), base})
 		tokens := THEME_TOKENS
 		for c in colors[:count] {
-			key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, tokens[c.token].key)
+			key := custom_theme_field_key(id, tokens[c.token].key)
 			append(&lines, [2]string{key, c.value})
 		}
 		append(&lines, [2]string{"theme.name", id})

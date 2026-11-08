@@ -4,6 +4,16 @@ import "core:testing"
 import "aio:procinfo"
 
 @(test)
+executable_stems_share_case_insensitive_suffix_and_space_rules :: proc(t: ^testing.T) {
+	for fixture in ([?][2]string{
+		{"  NVim.ExE \t", "NVim"}, {"codex", "codex"}, {"tool.exe.exe", "tool.exe"},
+		{".exe", ".exe"}, {"exe", "exe"}, {" \t", ""},
+	}) {
+		testing.expect_value(t, procinfo.executable_stem(fixture[0]), fixture[1])
+	}
+}
+
+@(test)
 process_tree_tracks_children_and_shell_return :: proc(t: ^testing.T) {
 	processes := [?]procinfo.Process_Info{
 		{1, 0, "host"}, {2, 1, "pwsh.exe"}, {3, 2, "nvim.exe"},

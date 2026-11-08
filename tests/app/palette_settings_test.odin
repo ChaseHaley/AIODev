@@ -91,4 +91,33 @@ palette_controls_match_the_settings_page_and_keep_complex_settings_jump_only :: 
 	testing.expect_value(t, gap.default_value, "4")
 	testing.expect(t, ui.palette_setting(settings.schema_find("input.leader")^).resettable)
 	testing.expect(t, !ui.palette_setting(settings.schema_find(settings.PADDING_GROUPS_KEY)^).resettable)
+	for entry in settings.SCHEMA {
+		row := ui.palette_setting(entry)
+		if row.control == .Slider {testing.expect(t, row.step > 0, entry.key)}
+	}
+}
+
+@(test)
+palette_setting_values_use_static_choice_labels :: proc(t: ^testing.T) {
+	state: app.App
+	app.palette_set_sources(&state)
+	names, labels := settings.STATUS_PANEL_VIEW_NAME, settings.STATUS_PANEL_VIEW_LABEL
+	for view in ([?]settings.Status_Panel_View{.Comfy, .Dense}) {
+		state.settings.status.panel_view = view
+		value, label := state.palette.values.value(state.palette.values.user, "status.panel_view")
+		testing.expect_value(t, value, names[view])
+		testing.expect_value(t, label, labels[view])
+	}
+}
+
+@(test)
+palette_setting_values_use_live_choice_labels :: proc(t: ^testing.T) {
+	state: app.App
+	append(&state.settings.themes, settings.Custom_Theme{id = "custom-theme", name = "My Theme"})
+	defer delete(state.settings.themes)
+	state.settings.theme.name = "custom-theme"
+	app.palette_set_sources(&state)
+	value, label := state.palette.values.value(state.palette.values.user, "theme.name")
+	testing.expect_value(t, value, "custom-theme")
+	testing.expect_value(t, label, "My Theme")
 }

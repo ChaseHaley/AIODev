@@ -54,6 +54,13 @@ edit_rename :: proc(source, id: string, directory := "") -> (string, string, set
 }
 
 @(private)
+edit_name :: proc(source, name: string, directory := "") -> (string, string, settings.Theme_Edit_Error) {
+	s := theme_model(source, directory)
+	defer settings.destroy(&s)
+	return settings.theme_name_edit(&s, source, name)
+}
+
+@(private)
 edit_delete :: proc(source: string, directory := "") -> (string, string, settings.Theme_Edit_Error) {
 	s := theme_model(source, directory)
 	defer settings.destroy(&s)
@@ -256,10 +263,9 @@ themes_show_free_text_names_while_ids_stay_the_key :: proc(t: ^testing.T) {
 	testing.expect_value(t, edit_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, issue, "")
 	testing.expect(t, strings.contains(updated, "theme.custom.tide-dark-custom.name = \"Tide Dark Custom\"\n"))
-	named, message, alloc := settings.edit_text(updated, "theme.custom.tide-dark-custom.name", "Mine, with spaces!")
+	named, message, name_error := edit_name(updated, "Mine, with spaces!", THEMES)
 	defer delete(named)
-	defer delete(message)
-	testing.expect_value(t, alloc, nil)
+	testing.expect_value(t, name_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, message, "")
 	copy, copy_id, copy_error := edit_duplicate(named, THEMES)
 	defer delete(copy)
@@ -272,4 +278,27 @@ themes_show_free_text_names_while_ids_stay_the_key :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(cd), 0)
 	testing.expect_value(t, settings.theme_display_name(&c, "tide-dark-custom"), "Mine, with spaces!")
 	testing.expect_value(t, settings.theme_display_name(&c, copy_id), "Mine, with spaces! Copy")
+}
+
+@(test)
+theme_name_edits_own_custom_theme_admission_and_line_layout :: proc(t: ^testing.T) {
+	source := "# keep\r\ntheme.name = mine\r\ntheme.custom.mine.name = \"Old\"\r\n" +
+		"theme.custom.mine.base = tide-dark\r\n"
+	updated, issue, error := edit_name(source, "  My theme  ", THEMES)
+	defer delete(updated)
+	testing.expect_value(t, error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, issue, "")
+	testing.expect_value(t, updated, "# keep\r\ntheme.name = mine\r\n" +
+		"theme.custom.mine.name = \"My theme\"\r\ntheme.custom.mine.base = tide-dark\r\n")
+	refused, problem, invalid := edit_name(source, "one\ntwo", THEMES)
+	defer delete(refused)
+	testing.expect_value(t, invalid, settings.Theme_Edit_Error.Invalid)
+	testing.expect_value(t, problem, "Use a single line without NUL bytes.")
+	for file_source in ([?]string{"", "theme.name = tide-dark\n", "theme.name = missing\n"}) {
+		unchanged, reason, unavailable := edit_name(file_source, "New name", THEMES)
+		defer delete(unchanged)
+		testing.expect_value(t, unavailable, settings.Theme_Edit_Error.Unavailable)
+		testing.expect_value(t, unchanged, "")
+		testing.expect_value(t, reason, "")
+	}
 }

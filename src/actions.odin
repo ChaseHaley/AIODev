@@ -972,7 +972,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Status_Inbox:
 		status_inbox_toggle(app, w)
 	case .Status_Panel:
-		settings_toggle_bool(app, "status.panel", app.settings.status.panel)
+		panel := app.settings.status.panel ? "false" : "true"
+		settings_save_value(app, "status.panel", panel, "Could not save the setting.")
 	case .Status_Dismiss_Finished:
 		status_dismiss_finished(app, w)
 	}

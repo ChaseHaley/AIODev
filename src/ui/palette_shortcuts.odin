@@ -3,6 +3,7 @@ package ui
 import "aio:commands"
 import "aio:input"
 import "aio:render"
+import "aio:settings"
 import "core:strings"
 
 // Match the Settings shortcut row so capture, physical positions and its popup share geometry.
@@ -23,12 +24,22 @@ palette_binding_popup :: proc(p: ^Palette, binding: ^Shortcut_Edit, l: Palette_L
 	return shortcut_capture_popup_rect(&binding.capture, parts, l.viewport, binding.saved, l.scale)
 }
 
+// Fitting, not drawing, keeps the open alternatives inside the current viewport.
+palette_binding_fit :: proc(p: ^Palette) {
+	if binding, open := p.edit.(Shortcut_Edit); open && binding.capture.state == .Alternatives {
+		choice_list_keep_visible(&binding.capture.alternatives,
+			len(commands.shortcut_alternatives(binding.saved, context.temp_allocator)) + 1,
+			shortcut_capture_popup_rows(binding.saved, p.fit_page, p.fit_scale))
+		p.edit = binding
+	}
+}
+
 palette_binding_open :: proc(p: ^Palette, index: int) -> Outcome {
 	if index < 0 || index >= len(p.results) || p.results[index].command == nil {return .None}
 	command := p.results[index].command
 	edit_set(p, nil)
 	binding := Shortcut_Edit {
-		key      = strings.concatenate({"keys.", command.name}),
+		key      = strings.clone(settings.binding_key(command.name)),
 		saved    = commands.shortcut_set_text(command.shortcuts),
 		defaults = commands.shortcut_set_text(command.defaults),
 		result   = index,
@@ -70,8 +81,9 @@ palette_binding_saved :: proc(p: ^Palette, saved: bool) {
 palette_binding_key :: proc(p: ^Palette, binding: ^Shortcut_Edit, raw: input.Key_Event) -> Outcome {
 	c := &binding.capture
 	if c.state != .Idle {
+		visible := shortcut_capture_popup_rows(binding.saved, p.fit_page, p.fit_scale)
 		return palette_binding_outcome(p, binding, shortcut_capture_key(c, &binding.draft, binding.saved,
-		                               .Alternatives, raw))
+		                               .Alternatives, raw, visible))
 	}
 	e := raw
 	e.key = commands.logical_key(raw.key, raw.unshifted)

@@ -33,6 +33,7 @@ editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 	}
 	for r in rows { testing.expect_value(t, ui.editor_add(p, r.row, r.group), nil) }
 	ui.editor_filter(p)
+	_ = page(p)
 }
 
 @(private)
@@ -45,7 +46,7 @@ visible_keys :: proc(p: ^ui.Editor) -> [dynamic]string {
 @(private)
 page :: proc(p: ^ui.Editor) -> ui.Editor_Layout {
 	l := ui.editor_layout({0, 40, 1200, 1400}, 1)
-	p.visible_rows = l.rows
+	ui.editor_fit(p, l)
 	return l
 }
 
@@ -104,7 +105,7 @@ editor_outline_jumps_without_filtering_and_tracks_scroll :: proc(t: ^testing.T) 
 	testing.expect_value(t, keys[0], "Panes")
 	testing.expect_value(t, ui.editor_row(&p).key, "pane.gap")
 	l := ui.editor_layout({0, 40, 1200, 500}, 1)
-	p.visible_rows = l.rows
+	ui.editor_fit(&p, l)
 	ui.editor_jump(&p, 2)
 	testing.expect_value(t, ui.editor_row(&p).key, "cursor.style")
 	testing.expect_value(t, ui.editor_active_group(&p), 2)

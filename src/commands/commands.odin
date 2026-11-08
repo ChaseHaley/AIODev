@@ -613,28 +613,75 @@ parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 	return {}, false
 }
 
+// One alternative ends at the first comma boundary that parses, not necessarily the first comma:
+// the comma itself can be the key. `last` distinguishes a final comma key from a trailing separator.
+@(private)
+shortcut_alternative_take :: proc(text: string) -> (
+	part, rest: string, shortcut: Shortcut, found, last: bool,
+) {
+	for end in 1 ..= len(text) {
+		if end < len(text) && text[end] != ',' {continue}
+		chord, ok := parse_shortcut(text[:end])
+		if !ok {continue}
+		if end == len(text) {return strings.trim_space(text[:end]), "", chord, true, true}
+		return strings.trim_space(text[:end]), strings.trim_space(text[end + 1:]), chord, true, false
+	}
+	return
+}
+
 @(require_results)
 parse_shortcuts :: proc(text: string, out: []Shortcut) -> (int, Error) {
 	rest := strings.trim_space(text)
 	count := 0
 	for rest != "" {
-		found := false
-		for end in 1 ..= len(rest) {
-			if end < len(rest) && rest[end] != ',' {continue}
-			shortcut, ok := parse_shortcut(rest[:end])
-			if !ok {continue}
-			if count == len(out) {return 0, .Output_Too_Small}
-			out[count] = shortcut
-			count += 1
-			if end == len(rest) {return count, .None}
-			rest = strings.trim_space(rest[end + 1:])
-			if rest == "" {return 0, .Invalid_Shortcut}
-			found = true
-			break
-		}
+		_, next, shortcut, found, last := shortcut_alternative_take(rest)
 		if !found {return 0, .Invalid_Shortcut}
+		if count == len(out) {return 0, .Output_Too_Small}
+		out[count] = shortcut
+		count += 1
+		if last {return count, .None}
+		rest = next
+		if rest == "" {return 0, .Invalid_Shortcut}
 	}
 	return count, .None
+}
+
+// An allocation-free cursor over borrowed, trimmed source labels. It uses the same complete-value
+// parse/fallback decision as the owned canonical labels, so malformed values still display as typed.
+Shortcut_Alternatives :: struct {
+	rest: string,
+	parsed, remaining: bool,
+}
+
+shortcut_alternatives_begin :: proc(text: string) -> Shortcut_Alternatives {
+	trimmed := strings.trim_space(text)
+	cursor := Shortcut_Alternatives{rest = trimmed, parsed = true, remaining = trimmed != ""}
+	rest := trimmed
+	for rest != "" {
+		_, next, _, found, last := shortcut_alternative_take(rest)
+		if !found || (!last && next == "") {cursor.parsed = false; break}
+		if last {break}
+		rest = next
+	}
+	return cursor
+}
+
+@(require_results)
+shortcut_alternatives_next :: proc(cursor: ^Shortcut_Alternatives) -> (part: string, ok: bool) {
+	if !cursor.remaining {return}
+	if cursor.parsed {
+		taken, rest, _, _, last := shortcut_alternative_take(cursor.rest)
+		cursor.rest, cursor.remaining = rest, !last
+		return taken, true
+	}
+	end := strings.index_byte(cursor.rest, ',')
+	if end < 0 {
+		cursor.remaining = false
+		return strings.trim_space(cursor.rest), true
+	}
+	part = strings.trim_space(cursor.rest[:end])
+	cursor.rest = cursor.rest[end + 1:]
+	return part, true
 }
 
 // The alternatives of a stored value, as display-ready labels: the canonical label of each parsed

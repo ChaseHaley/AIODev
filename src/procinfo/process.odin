@@ -13,6 +13,16 @@ Error :: enum {
 	Out_Of_Memory,
 }
 
+// Executable identity ignores surrounding space and a case-insensitive trailing ".exe".
+@(require_results)
+executable_stem :: proc(name: string) -> string {
+	text := strings.trim_space(name)
+	if len(text) > 4 && strings.equal_fold(text[len(text) - 4:], ".exe") {
+		return text[:len(text) - 4]
+	}
+	return text
+}
+
 // Returns the deepest descendant; snapshot order breaks ties between sibling processes.
 // Windows has no host-side foreground process API, so detached/background descendants are ambiguous.
 process_leaf :: proc(processes: []Process_Info, root: u32) -> int {
@@ -87,9 +97,7 @@ process_depth :: proc(parents: map[u32]u32, id, root: u32, limit: int) -> int {
 
 @(private)
 process_stem_is :: proc(executable, name: string) -> bool {
-	stem := executable
-	if len(stem) > 4 && strings.equal_fold(stem[len(stem) - 4:], ".exe") {stem = stem[:len(stem) - 4]}
-	return name != "" && strings.equal_fold(stem, name)
+	return name != "" && strings.equal_fold(executable_stem(executable), name)
 }
 
 // The program a launcher such as Node or cmd runs, named from its arguments: the package of a

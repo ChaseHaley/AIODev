@@ -68,7 +68,7 @@ inputs_read :: proc(
 		if !strings.has_suffix(file.name, ".theme.json") {continue}
 		path := fmt.tprintf("%s/%s", themes_directory, file.name)
 		if file.size > THEME_FILE_MAX_BYTES {
-			theme_file_keep(&inputs, path, "Theme file exceeds 64 KiB.", {}) or_return
+			theme_file_keep(&inputs, path, THEME_FILE_SIZE_NOTICE, {}) or_return
 			continue
 		}
 		data, error := os.read_entire_file(path, context.temp_allocator)

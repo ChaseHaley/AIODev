@@ -44,6 +44,12 @@ custom_theme_find :: proc(s: ^Settings, id: string) -> ^Custom_Theme {
 	return nil
 }
 
+// The persisted key of one custom theme field. Temporary.
+@(private)
+custom_theme_field_key :: proc(id, field: string) -> string {
+	return fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, field)
+}
+
 // Splits theme.custom.ID.FIELD. A field may itself contain dots, as palette.3 does.
 custom_theme_key_split :: proc(key: string) -> (id, field: string, ok: bool) {
 	if !strings.has_prefix(key, CUSTOM_THEME_PREFIX) {return}

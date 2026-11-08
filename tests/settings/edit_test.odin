@@ -230,6 +230,28 @@ editor_rejects_invalid_values_without_output :: proc(t: ^testing.T) {
 }
 
 @(test)
+file_and_memory_edits_share_single_line_admission :: proc(t: ^testing.T) {
+	s, error := settings.defaults()
+	if !testing.expect_value(t, error, nil) {return}
+	defer settings.destroy(&s)
+	entry := settings.schema_find("font.family")
+	if !testing.expect(t, entry != nil) {return}
+	previous := s.font.family
+	for value in ([?]string{"one\rtwo", "one\ntwo", "one\x00two"}) {
+		updated, file_issue, file_error := settings.edit_text("", entry.key, value)
+		defer delete(updated)
+		defer delete(file_issue)
+		memory_issue, memory_error := settings.setting_assign(&s, entry^, value)
+		testing.expect_value(t, file_error, nil)
+		testing.expect_value(t, memory_error, nil)
+		testing.expect_value(t, file_issue, "Use a single line without NUL bytes.")
+		testing.expect_value(t, memory_issue, file_issue)
+		testing.expect_value(t, updated, "")
+		testing.expect_value(t, s.font.family, previous)
+	}
+}
+
+@(test)
 editor_save_detects_conflicts_and_cleans_up :: proc(t: ^testing.T) {
 	context.logger = {}
 	dir, err := os.make_directory_temp("", "aio-settings-*", context.allocator)

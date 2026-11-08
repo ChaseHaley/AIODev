@@ -120,13 +120,14 @@ shortcut_capture_key :: proc(
 	saved: string,
 	mode: Shortcut_Mode,
 	raw: input.Key_Event,
+	visible: int,
 ) -> Shortcut_Capture_Outcome {
 	switch c.state {
 	case .Idle:
 	case .Alternatives:
 		e := raw
 		e.key = commands.logical_key(raw.key, raw.unshifted)
-		return alternatives_key(c, draft, saved, e)
+		return alternatives_key(c, draft, saved, e, visible)
 	case .Capturing, .Leader_Pending:
 		return capture_key(c, draft, saved, mode, raw)
 	}
@@ -139,6 +140,7 @@ alternatives_key :: proc(
 	draft: ^Text_Field,
 	saved: string,
 	e: input.Key_Event,
+	visible: int,
 ) -> Shortcut_Capture_Outcome {
 	count := len(commands.shortcut_alternatives(saved, context.temp_allocator))
 	#partial switch e.key {
@@ -148,7 +150,7 @@ alternatives_key :: proc(
 	case .Arrow_Up, .Arrow_Down, LIST_PREVIOUS_KEY, LIST_NEXT_KEY:
 		step := list_step(e)
 		if step == 0 {return .None}
-		choice_list_move(&c.alternatives, step, count + 1)
+		choice_list_move(&c.alternatives, step, count + 1, visible)
 	case .Enter, .Numpad_Enter, .Space:
 		shortcut_capture_start(c, c.alternatives.index)
 		return .Hinted
@@ -216,11 +218,8 @@ capture_key :: proc(
 // How many alternative rows the list shows on `page`: the saved ones and Add shortcut.
 @(private)
 shortcut_capture_popup_rows :: proc(saved: string, page: render.Rect, scale: f32) -> int {
-	return min(
-		len(commands.shortcut_alternatives(saved, context.temp_allocator)) + 1,
-		CHOICE_LIST_ROWS,
-		max(1, int((page.height - 16 * scale) / (CHOICE_HEIGHT * scale))),
-	)
+	return choice_list_rows(len(commands.shortcut_alternatives(saved, context.temp_allocator)) + 1,
+	                        page.height, scale)
 }
 
 // The open alternatives list, under the field at its right edge, or nothing while it is closed.
@@ -311,8 +310,7 @@ shortcut_capture_popup_draw :: proc(
 	if panel_draw(list, popover_panel(r, s), theme) != .None {return .Ok}
 	parts := commands.shortcut_alternatives(saved, context.temp_allocator)
 	count := shortcut_capture_popup_rows(saved, page, s)
-	shown := &c.alternatives
-	shown.scroll = clamp(shown.scroll, max(0, shown.index - count + 1), shown.index)
+	shown := c.alternatives
 	for visible in 0 ..< count {
 		i := shown.scroll + visible
 		if i > len(parts) {break}

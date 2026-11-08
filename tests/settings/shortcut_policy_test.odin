@@ -26,4 +26,20 @@ shortcut_warning_kind_is_preserved :: proc(t: ^testing.T) {
 		"input.leader conflicts with tab.new; input.leader wins", .Shortcut_Warning), nil)
 	testing.expect_value(t, diagnostics[0].kind, settings.Diagnostic_Kind.Shortcut_Warning)
 	testing.expect_value(t, diagnostics[0].line, 4)
+	testing.expect_value(t, diagnostics[0].identity, diagnostics[0].message)
+}
+
+@(test)
+diagnostic_identity_is_supplied_by_its_producer_or_is_the_whole_message :: proc(t: ^testing.T) {
+	diagnostics := make([dynamic]settings.Diagnostic)
+	defer settings.diagnostics_destroy(&diagnostics)
+	message := "literal [not a location]"
+	testing.expect_value(t, settings.diagnostic_append(
+		&diagnostics, 4, "input.leader", message, .Shortcut_Warning,
+	), nil)
+	testing.expect_value(t, diagnostics[0].identity, message)
+	testing.expect_value(t, settings.diagnostic_append(
+		&diagnostics, 5, "input.leader", message, .Shortcut_Warning, "producer meaning",
+	), nil)
+	testing.expect_value(t, diagnostics[1].identity, "producer meaning")
 }
