@@ -305,6 +305,48 @@ gestures_terminal_press_motion_release_keep_reporting :: proc(t: ^testing.T) {
 	gesture_terminal_packets(t, true)
 }
 
+// A program that received a press keeps that button's motion and release, though the pointer crosses
+// into another pane whose program also reports the mouse.
+@(test)
+gestures_program_motion_follows_the_pressed_session :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "gesture-program-motion", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	app.pane_split(s, w, .Right)
+	if !testing.expect_value(t, len(w.panes), 2) {return}
+	entries: [2]^app.Session_Entry
+	originals, sessions: [2]^term.Session
+	defer for session, i in sessions {
+		if session == nil {continue}
+		entries[i].session = originals[i]
+		term.destroy(session)
+	}
+	for i in 0 ..< 2 {
+		entries[i] = app.workspace_session_for_content(s, w.panes[i].content)
+		if !testing.expect(t, entries[i] != nil) {return}
+		session, err := term.create_headless(term.geometry(entries[i].session), 100)
+		if !testing.expect_value(t, err, term.Error.None) {return}
+		originals[i], sessions[i] = entries[i].session, session
+		entries[i].session = session
+		tracking := "\x1b[?1003h\x1b[?1006h"
+		term.replay_write(session, transmute([]u8)tracking)
+	}
+	a, b := w.panes[0].rect, w.panes[1].rect
+	gesture_button(s, w, .Left, true, a.x + a.width / 2, a.y + a.height / 2)
+	testing.expect(t, app.gesture_buttons(w, app.Gesture_Reported) == {.Left})
+	testing.expect(t, strings.has_prefix(string(sessions[0].queue.pending[:]), "\x1b[<0;"))
+	for session in sessions {clear(&session.queue.pending)}
+	bx, by := b.x + b.width / 2, b.y + b.height / 2
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(bx), y = i32(by), buttons = {.Left}})
+	testing.expect_value(t, string(sessions[1].queue.pending[:]), "")
+	testing.expect(t, strings.has_prefix(string(sessions[0].queue.pending[:]), "\x1b[<32;"))
+	for session in sessions {clear(&session.queue.pending)}
+	gesture_button(s, w, .Left, false, bx, by)
+	testing.expect_value(t, string(sessions[1].queue.pending[:]), "")
+	testing.expect(t, strings.has_suffix(string(sessions[0].queue.pending[:]), "m"))
+}
+
 @(private)
 gesture_settings_header :: proc(w: ^app.Window) -> (app.Pane_Header_Layout, bool) {
 	for pane in w.panes {

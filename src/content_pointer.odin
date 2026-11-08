@@ -94,7 +94,9 @@ content_report_release :: proc(app: ^App, session: u32, e: input.Mouse_Button_Ev
 }
 
 // Moves over terminal content: the text cursor, links, the selection and programs that report the
-// mouse. A button swallowed by another surface keeps the arrow and reaches no program.
+// mouse. A button swallowed by another surface keeps the arrow and reaches no program; a button a
+// program received moves with that program wherever the pointer is, and only free motion reaches the
+// program under the pointer.
 @(private)
 content_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
@@ -113,12 +115,36 @@ content_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 		shape = .Hand
 	}
 	pointer_set(app, w, shape)
-	if swallowed || entry == nil {return}
+	if swallowed {return}
 	if selection_active(w) {
-		selection_move(w, entry, x, y)
-	} else if reports_mouse(entry, e.modifiers) {
-		held := e.buttons & gesture_buttons(w, Gesture_Reported)
-		if e.buttons != {} && held == {} {return}
-		term.send_mouse(entry.session, .Motion, nil, held, e.modifiers, x, y)
+		if entry != nil {selection_move(w, entry, x, y)}
+		return
+	}
+	if reported := e.buttons & gesture_buttons(w, Gesture_Reported); reported != {} {
+		content_report_motion(app, w, reported, e)
+		return
+	}
+	if entry == nil || e.buttons != {} || !reports_mouse(entry, e.modifiers) {return}
+	term.send_mouse(entry.session, .Motion, nil, {}, e.modifiers, x, y)
+}
+
+// Held buttons programs received, grouped by the session recorded at each press: every program sees
+// the motion with its own buttons only.
+@(private)
+content_report_motion :: proc(app: ^App, w: ^Window, held: input.Mouse_Buttons, e: input.Mouse_Move_Event) {
+	sent: input.Mouse_Buttons
+	for button in held {
+		if button in sent {continue}
+		recipient, _ := w.gesture.captures[button].(Gesture_Reported)
+		buttons: input.Mouse_Buttons
+		for other in held {
+			if c, ok := w.gesture.captures[other].(Gesture_Reported); ok && c.session == recipient.session {
+				buttons += {other}
+			}
+		}
+		sent += buttons
+		if entry := session_find(app, recipient.session); entry != nil && reports_mouse(entry, e.modifiers) {
+			term.send_mouse(entry.session, .Motion, nil, buttons, e.modifiers, f32(e.x), f32(e.y))
+		}
 	}
 }
