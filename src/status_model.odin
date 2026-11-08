@@ -134,28 +134,32 @@ status_before :: proc(a, b: term.Program_Status) -> bool {
 	return time.diff(b.updated_at, a.updated_at) > 0
 }
 
-// The settings that govern a state, the same for finished work whether seen or not.
+// What the settings let a state do: show in the lists, take the taskbar button and notify.
+Status_State_Policy :: struct {
+	shown, taskbar: bool,
+	channels:       settings.Status_Channels,
+}
+
+// The settings that govern a state, the same for finished work whether seen or not. Idle and
+// finished work have no taskbar setting; their presentation gives them no taskbar role.
 @(private)
 status_state_settings :: proc(
 	s: ^settings.Status_Settings,
 	state: term.Program_Status_State,
-) -> (
-	shown: bool,
-	channels: settings.Status_Channels,
-) {
+) -> Status_State_Policy {
 	switch state {
 	case .Idle:
-		return s.show_idle, s.notify_idle
+		return {shown = s.show_idle, channels = s.notify_idle}
 	case .Working:
-		return s.show_working, s.notify_working
+		return {s.show_working, s.taskbar_working, s.notify_working}
 	case .Blocked:
-		return s.show_blocked, s.notify_blocked
+		return {s.show_blocked, s.taskbar_blocked, s.notify_blocked}
 	case .Done, .Done_Seen:
-		return s.show_done, s.notify_done
+		return {shown = s.show_done, channels = s.notify_done}
 	case .Error, .Error_Seen:
-		return s.show_error, s.notify_error
+		return {s.show_error, s.taskbar_error, s.notify_error}
 	}
-	return false, {}
+	return {}
 }
 
 status_app_ignored :: proc(list, name: string) -> bool {
@@ -170,8 +174,7 @@ status_app_ignored :: proc(list, name: string) -> bool {
 status_shown :: proc(app: ^App, record: term.Program_Status) -> bool {
 	s := &app.settings.status
 	if !s.enabled {return false}
-	shown, _ := status_state_settings(s, record.state)
-	return shown && !status_app_ignored(s.ignore_apps, record.app)
+	return status_state_settings(s, record.state).shown && !status_app_ignored(s.ignore_apps, record.app)
 }
 
 // "40%" in `buffer`, which holds at least four bytes; progress is 0..100.

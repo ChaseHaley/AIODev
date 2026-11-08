@@ -181,7 +181,7 @@ status_notification_channels :: proc(
 	state: term.Program_Status_State,
 ) -> Status_Notification_Channels {
 	if !s.enabled {return {}}
-	_, set := status_state_settings(s, state)
+	set := status_state_settings(s, state).channels
 	return {.Banner in set, .Tray in set, .Flash in set, .Sound in set, .Notice in set}
 }
 
@@ -412,14 +412,14 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 			if pane.session == nil {continue}
 			for record in pane.session.statuses {
 				if !status_shown(app, record) {continue}
+				if !status_state_settings(s, record.state).taskbar {continue}
 				switch status_presentation(record).taskbar {
 				case .None:
 				case .Failed:
-					failed ||= s.taskbar_error
+					failed = true
 				case .Blocked:
-					blocked ||= s.taskbar_blocked
+					blocked = true
 				case .Working:
-					if !s.taskbar_working {continue}
 					working = true
 					if record.progress >= 0 {
 						least = min(least, int(record.progress))
