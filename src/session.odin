@@ -21,8 +21,10 @@ Session_Entry :: struct {
 	status:              term.Status_Kind,
 	keep_open:           bool,
 	process_padding:     Maybe(int),
-	process_name:        [780]u8,
-	process_name_length: int,
+	// The leaf process padding_update last matched, kept only while padding groups are set; the
+	// control report shows it beside the padding it chose. The CLI reads its own snapshot.
+	padding_leaf:        [780]u8,
+	padding_leaf_length: int,
 	header:              Pane_Header_Metadata,
 	name:                string,
 	profile_id:          string,

@@ -5,6 +5,7 @@ import "aio:commands"
 import "aio:layout"
 import "aio:localpath"
 import "aio:platform"
+import "aio:procinfo"
 import "aio:settings"
 import "aio:term"
 import "core:fmt"
@@ -186,10 +187,13 @@ pane_target_session :: proc(app: ^App, id: u32) -> (Pane_Target, bool) {
 	return {workspace, pane}, found
 }
 
-// Every terminal pane in workspace and tab order, or only `only`'s.
+// Every terminal pane in workspace and tab order, or only `only`'s. A running pane's process is
+// its shell's deepest descendant in one snapshot taken now, the first time a running pane needs it.
 @(private)
 pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Report {
 	reports := make([dynamic]cli_protocol.Pane_Report, context.temp_allocator)
+	processes: []procinfo.Process_Info
+	snapped := false
 	for workspace in app.workspaces {
 		if workspace.provisional || only != nil && only.workspace != workspace {continue}
 		w := window_for_workspace(app, workspace)
@@ -204,7 +208,6 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Repor
 				id             = entry.id,
 				name           = entry.name,
 				title          = pane_header_title(&entry.header),
-				process        = string(entry.process_name[:entry.process_name_length]),
 				workspace      = workspace.id,
 				workspace_name = workspace.name,
 				tab            = pane.tab + 1,
@@ -213,6 +216,14 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Repor
 				status         = cli_protocol.PANE_STATUS_WORDS[PANE_STATUS[status.kind]],
 				exit_code      = status.exit_code,
 				directory      = entry.header.launch_directory,
+			}
+			if status.kind == .Running {
+				if !snapped {
+					processes, _ = procinfo.process_snapshot(context.temp_allocator)
+					snapped = true
+				}
+				leaf := procinfo.process_leaf(processes, term.process_id(entry.session))
+				if leaf >= 0 {report.process = processes[leaf].executable}
 			}
 			raw := term.working_directory(entry.session, context.temp_allocator)
 			if label, err := localpath.directory_label(raw, context.temp_allocator); err == nil && label != "" {

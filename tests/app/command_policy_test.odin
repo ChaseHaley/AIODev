@@ -44,7 +44,7 @@ command_payloads_select_catalogue_usage_and_empty_panes :: proc(t: ^testing.T) {
 	one := app.command_execute(&state, app.Control_Request{}, catalogue)
 	usage, is_usage := one.payload.(app.Outcome_Usage)
 	if !testing.expect(t, is_usage) {return}
-	reply := app.control_cli_answer(&state, {"", "text", cli_protocol.CATALOGUE_COMMAND, "pane.send"})
+	reply := app.control_cli_answer(&state, {"", "text", "", cli_protocol.CATALOGUE_COMMAND, "pane.send"})
 	testing.expect_value(t, reply.text, fmt.tprintf("%s\n%s", usage.usage, usage.title))
 	expected := cli_protocol.Reply_Json {
 		ok = true,
@@ -52,7 +52,7 @@ command_payloads_select_catalogue_usage_and_empty_panes :: proc(t: ^testing.T) {
 	}
 	encoded, err := json.marshal(expected, {}, context.temp_allocator)
 	if !testing.expect_value(t, err, nil) {return}
-	json_reply := app.control_cli_answer(&state, {"", "json", cli_protocol.CATALOGUE_COMMAND, "pane.send"})
+	json_reply := app.control_cli_answer(&state, {"", "json", "", cli_protocol.CATALOGUE_COMMAND, "pane.send"})
 	testing.expect_value(t, json_reply.text, string(encoded))
 }
 

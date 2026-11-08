@@ -2,6 +2,8 @@ package app_test
 
 import "aio:input"
 import "core:fmt"
+import "core:os"
+import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:verify_protocol"
@@ -162,5 +164,37 @@ when app.AIO_CONTROL {
 		testing.expect_value(t, state_error, verify_protocol.Error.None)
 		testing.expect_value(t, app.verify_value(entries, "window.id"), "0")
 		testing.expect_value(t, app.verify_value(entries, "tabs.count"), "0")
+	}
+
+	// A drive names a changed key only when the state report writes it, so a misspelled key would
+	// silently report nothing. A running app with a terminal pane writes every one.
+	@(test)
+	verification_state_reports_every_changed_key :: proc(t: ^testing.T) {
+		directory, directory_error := os.make_directory_temp("", "aio-changed-*", context.allocator)
+		if !testing.expect_value(t, directory_error, nil) {return}
+		defer delete(directory)
+		defer testing.expect_value(t, os.remove(directory), nil)
+		path := strings.concatenate({directory, "/settings.ini"})
+		defer delete(path)
+		defer os.remove(path)
+		settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+		if !testing.expect_value(t, os.write_entire_file(path, settings), nil) {return}
+		state := app.App{options = {data_dir = directory, inactive = true}}
+		state.app_id = fmt.aprintf("AIODev.Test.VerifyChangedKeys.%d", os.get_pid())
+		defer app.app_destroy(&state)
+		if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {
+			return
+		}
+		state.platform_ready = true
+		if !testing.expect(t, app.app_init(&state)) {return}
+		entries, state_error := app.verify_state(&state)
+		testing.expect_value(t, state_error, verify_protocol.Error.None)
+		for changed in app.CHANGED_KEYS {
+			found := false
+			for entry in entries {
+				if entry.key == changed.key {found = true; break}
+			}
+			testing.expectf(t, found, "changed key %q is missing from the state report", changed.key)
+		}
 	}
 }

@@ -127,7 +127,7 @@ pane_link_reconcile :: proc(app: ^App, w: ^Window) -> bool {
 @(private)
 pane_link_reload :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
 	if home.tab == nil || !layout.slot_valid(&home.tab.tree, home.slot) {return}
-	_ = gesture_cancel(app, w)
+	if !gesture_cancel(app, w) {return}
 	focus_leave(app, w)
 	if layout.link_view_load(window_tree(w), &home.tab.tree, home.slot) != nil {
 		log.error("updating a linked window's panes failed")

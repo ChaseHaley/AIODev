@@ -3,10 +3,12 @@ package commands
 import "aio:layout"
 import "base:runtime"
 import "core:fmt"
+import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 
 // The arguments a command may take beyond its target pane. A command lists the ones it accepts.
+// Directory and File name paths; the requester's working directory resolves a relative one.
 Argument :: enum u8 {
 	Direction,
 	Ratio,
@@ -15,6 +17,7 @@ Argument :: enum u8 {
 	Name,
 	Profile,
 	Text,
+	File,
 	Enter,
 	Lines,
 	Program,
@@ -32,6 +35,7 @@ Invocation :: struct {
 	ratio:                                   f32,
 	focus:                                   bool,
 	directory, name, profile, text, program: string,
+	file:                                    string,
 	enter:                                   bool,
 	lines:                                   int,
 }
@@ -45,7 +49,6 @@ MAX_LINES :: 10000
 
 // The interactive split defaults; CLI requests explicitly start without focus.
 SPLIT_DEFAULT :: Invocation{direction = .Right, ratio = 0.5, focus = true}
-OPEN_MARKDOWN_COMMAND :: "pane.open_markdown"
 
 // The words that name a direction.
 DIRECTION_WORDS :: [layout.Direction]string {
@@ -69,6 +72,7 @@ argument_grammar := [Argument]struct {
 	.Name      = {"--name", " <name>"},
 	.Profile   = {"--profile", " <id>"},
 	.Text      = {"", "<text>"},
+	.File      = {"", "<file>"},
 	.Enter     = {"--enter", ""},
 	.Lines     = {"--lines", " <rows>"},
 	.Program   = {"", "-- <program> [arguments]"},
@@ -110,11 +114,33 @@ option_argument :: proc(option: string) -> (Argument, bool) {
 	return {}, false
 }
 
-// Whether the command grammar consumes a value after this option. --pane is common to all commands.
-option_takes_value :: proc(option: string) -> bool {
-	if option == "--pane" {return true}
-	argument, known := option_argument(option)
-	return known && argument_grammar[argument].usage != ""
+// Where an invocation keeps a path argument; nil for an argument that names no path.
+@(private)
+argument_path :: proc(invocation: ^Invocation, argument: Argument) -> ^string {
+	#partial switch argument {
+	case .Directory:
+		return &invocation.directory
+	case .File:
+		return &invocation.file
+	}
+	return nil
+}
+
+// Makes the given path arguments absolute against `directory`, the working directory of whoever
+// sent the command line; an empty directory leaves them as given. Joined paths use allocator.
+@(require_results)
+invocation_paths_resolve :: proc(
+	invocation: ^Invocation,
+	directory: string,
+	allocator := context.allocator,
+) -> runtime.Allocator_Error {
+	if directory == "" {return nil}
+	for argument in invocation.given {
+		path := argument_path(invocation, argument)
+		if path == nil || filepath.is_abs(path^) {continue}
+		path^ = filepath.join({directory, path^}, allocator) or_return
+	}
+	return nil
 }
 
 // How a diagnostic names an argument: its option, or its positional form.
@@ -160,11 +186,14 @@ parse_invocation :: proc(
 		}
 		argument, named := option_argument(option)
 		if !named {
-			if strings.has_prefix(option, "--") || .Text not_in command.arguments || .Text in result.given {
+			// The positional argument: text, or a file for a command that takes one.
+			positional := .File in command.arguments ? Argument.File : Argument.Text
+			if strings.has_prefix(option, "--") || positional not_in command.arguments ||
+			   positional in result.given {
 				return {}, {option, "unknown option; use aio help <command> for its options"}
 			}
-			result.text = option
-			result.given += {.Text}
+			if positional == .File {result.file = option} else {result.text = option}
+			result.given += {positional}
 			continue
 		}
 		if argument not_in command.arguments {

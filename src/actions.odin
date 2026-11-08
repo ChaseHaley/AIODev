@@ -379,8 +379,8 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Rename_Pane = {"pane.rename", "Rename Pane", nil, .Local, {accepted = {.Text}, control = .Pane}},
 	.Change_Pane_Shell = {"pane.change_shell", "Change Pane Shell…", nil, .Local, {}},
 	.Open_Markdown = {
-		commands.OPEN_MARKDOWN_COMMAND, "Open Markdown File…", nil, .Host,
-		{accepted = {.Text, .Direction, .Ratio, .Focus}, control = .Pane},
+		"pane.open_markdown", "Open Markdown File…", nil, .Host,
+		{accepted = {.File, .Direction, .Ratio, .Focus}, control = .Pane},
 	},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil, .Host, {}},
 	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil, .Host, {}},
