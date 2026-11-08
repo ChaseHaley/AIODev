@@ -3,7 +3,6 @@ package main
 import "aio:input"
 import "aio:render"
 import "aio:ui"
-import "core:strings"
 
 // The dialog or the chip's name field shows.
 rename_shown :: proc(w: ^Window) -> bool {
@@ -21,11 +20,6 @@ chip_name_shown :: proc(w: ^Window) -> bool {
 // Opens the dialog naming a tab or pane, holding its current name with the whole name selected. A workspace
 // names in place instead, in the chip of the window that shows it (Overlay_Chip_Name).
 rename_open :: proc(app: ^App, w: ^Window, target: Rename_Target) {
-	if workspace, naming := target.(Rename_Workspace_Target); naming {
-		owner := window_for_workspace(app, workspace_find(app, workspace.workspace))
-		if owner != nil {workspace_name_begin(app, owner)}
-		return
-	}
 	destination := rename_target_destination(app, target)
 	if destination == nil {return}
 	value := destination^
@@ -49,11 +43,7 @@ workspace_name_begin :: proc(app: ^App, w: ^Window) {
 chip_name_save :: proc(app: ^App, w: ^Window, workspace_id: u32) -> bool {
 	value := ui.field_string(&w.rename)
 	if name := rename_clean(value); name != "" {
-		for workspace in app.workspaces {
-			if !workspace.provisional && workspace.id != workspace_id && strings.equal_fold(workspace.name, name) {
-				return false
-			}
-		}
+		if workspace_name_taken(app, name, workspace_id) {return false}
 	}
 	_ = rename_target_commit(app, Rename_Workspace_Target{workspace_id}, value, .Workspace_Chip)
 	return true

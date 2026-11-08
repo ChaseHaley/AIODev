@@ -416,8 +416,7 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 		_ = workspace_discard_empty(app, workspace)
 		return nil
 	}
-	workspace.selected = clamp(selected, 0, len(workspace.tabs) - 1)
-	tab_select_one(workspace, workspace.selected)
+	workspace_tab_choose(workspace, clamp(selected, 0, len(workspace.tabs) - 1))
 	return workspace
 }
 
@@ -480,7 +479,7 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 @(private, require_results)
 layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, ok: bool) {
 	// A directory that is remote or no longer exists falls back to the profile's own.
-	directory, refused := local_launch_directory(saved.directory, "")
+	directory, refused := local_launch_directory(saved.directory)
 	if refused {
 		notify(
 			app,

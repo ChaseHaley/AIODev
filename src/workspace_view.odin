@@ -123,7 +123,7 @@ workspace_adopt :: proc(
 	case .Replace:
 		workspace_view_move(&w.resources, &prepared)
 	}
-	if workspace.selection_anchor == 0 {tab_select_one(workspace, workspace.selected)}
+	if workspace.selection_anchor == 0 {workspace_tab_choose(workspace, workspace.selected)}
 	w.tab_underline = {
 		value  = f32(workspace.selected),
 		target = f32(workspace.selected),

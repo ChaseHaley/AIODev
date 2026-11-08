@@ -56,7 +56,7 @@ workspace_icon_set :: proc(app: ^App, workspace: ^Workspace, preset: int, emoji:
 	if err != nil {return false}
 	delete(workspace.icon.emoji)
 	workspace.icon = {preset = preset, emoji = owned, tint = workspace.icon.tint}
-	mark_all_dirty(app)
+	workspace_mutation_finish(app, workspace, {.Appearance})
 	return true
 }
 

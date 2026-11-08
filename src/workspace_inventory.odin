@@ -34,10 +34,6 @@ Workspace_Pane_Walk :: struct {
 	scope:     Workspace_Pane_Scope,
 }
 
-pane_owns_session :: proc(kind: layout.Content_Kind) -> bool {
-	return CONTENT_POLICY[kind].owns_session
-}
-
 @(private)
 pane_scope_includes :: proc(scope: Workspace_Pane_Scope, kind: layout.Content_Kind) -> bool {
 	switch scope {

@@ -115,6 +115,17 @@ linked_window_follows_its_tab :: proc(t: ^testing.T) {
 	testing.expect(t, w.phase == .Shown)
 	geometry := term.geometry(session.session)
 
+	// Linked views have private workspaces, so session-title updates must visit them explicitly.
+	name, name_error := strings.clone("Build shell")
+	if !testing.expect_value(t, name_error, nil) {return}
+	delete(session.name)
+	session.name = name
+	app.session_titles_changed(f.state, session.id)
+	testing.expect_value(t, app.selected_tab(w.workspace).title, "Build shell")
+	testing.expect_value(t, app.rename_target_commit(f.state, app.Rename_Pane_Target{session.id},
+		"Renamed shell", .Automatic_Title), app.Rename_Outcome.Saved)
+	testing.expect_value(t, app.selected_tab(w.workspace).title, "Renamed shell")
+
 	if _, created := app.tab_create(f.state, f.host.workspace); !testing.expect(t, created) {return}
 	app.tab_select(f.state, f.host, 1)
 	app.pane_links_sync(f.state)

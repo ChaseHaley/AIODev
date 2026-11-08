@@ -152,12 +152,11 @@ pane_split_attach :: proc(
 // rejected, so the caller can say why a different directory is used; each caller words that itself.
 // An empty result means the profile's own directory. pty.spawn still checks again (defense in depth).
 @(require_results)
-local_launch_directory :: proc(candidate, fallback: string) -> (directory: string, refused: bool) {
+local_launch_directory :: proc(candidate: string) -> (directory: string, refused: bool) {
 	if candidate != "" {
 		if pty.working_directory_is_local(candidate) {return candidate, false}
 		refused = true
 	}
-	if fallback != "" && pty.working_directory_is_local(fallback) {return fallback, refused}
 	return "", refused
 }
 
@@ -185,7 +184,9 @@ pane_directory_of :: proc(entry: ^Session_Entry, program: u32) -> (directory: st
 	}
 	path, ok := procinfo.process_directory(root, root, context.temp_allocator)
 	if ok && pty.working_directory_is_local(path) {return path, refused}
-	directory, _ = local_launch_directory("", entry.header.launch_directory)
+	if launch := entry.header.launch_directory; launch != "" && pty.working_directory_is_local(launch) {
+		directory = launch
+	}
 	return directory, refused
 }
 

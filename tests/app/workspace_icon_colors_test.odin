@@ -160,3 +160,28 @@ workspace143_short_color_grid_keeps_all_choices_and_back_reachable :: proc(t: ^t
 		}
 	}
 }
+
+@(test)
+workspace_icon_mutations_schedule_save_without_resetting_picker_scroll :: proc(t: ^testing.T) {
+	state: app.App
+	workspace := app.Workspace{id = 7, name = "Original"}
+	w := app.Window{workspace = &workspace}
+	w.workspace_picker.state = app.Workspace_Picker_List{}
+	w.workspace_picker.scroll = 42
+	append(&state.workspaces, &workspace)
+	append(&state.windows, &w)
+	defer delete(state.workspaces)
+	defer delete(state.windows)
+	defer delete(workspace.icon.emoji)
+	defer delete(w.workspace_picker.rows)
+	for tint in [?]bool{false, true} {
+		state.layout_save = app.Layout_Save_Idle{}
+		w.dirty = false
+		changed := tint ? app.workspace_icon_color_set(&state, &workspace, 1) :
+			app.workspace_icon_set(&state, &workspace, 2, "")
+		testing.expect(t, changed)
+		_, scheduled := state.layout_save.(app.Layout_Save_Scheduled)
+		testing.expect(t, scheduled && w.dirty)
+		testing.expect_value(t, w.workspace_picker.scroll, f32(42))
+	}
+}

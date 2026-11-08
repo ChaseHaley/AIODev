@@ -61,19 +61,22 @@ workspace_default_name :: proc(app: ^App) -> string {
 		index /= len(nouns)
 		candidate := fmt.tprintf("%s %s %s", adjectives[index / len(colors)],
 			colors[index % len(colors)], nouns[noun])
-		occupied := false
-		for workspace in app.workspaces {
-			if !workspace.provisional && strings.equal_fold(workspace.name, candidate) {
-				occupied = true
-				break
-			}
-		}
-		if occupied {continue}
+		if workspace_name_taken(app, candidate, 0) {continue}
 		owned, err := strings.clone(candidate)
 		if err != nil {return ""}
 		return owned
 	}
 	return ""
+}
+
+// Provisional previews never reserve names; an editor may exclude its own workspace.
+workspace_name_taken :: proc(app: ^App, name: string, except: u32) -> bool {
+	for workspace in app.workspaces {
+		if !workspace.provisional && workspace.id != except && strings.equal_fold(workspace.name, name) {
+			return true
+		}
+	}
+	return false
 }
 
 selected_tab :: proc(workspace: ^Workspace) -> ^Tab {
@@ -144,6 +147,12 @@ tab_show :: proc(app: ^App, w: ^Window, index: int) {
 tab_select_one :: proc(workspace: ^Workspace, index: int) {
 	for tab, i in workspace.tabs {tab.marked = i == index}
 	workspace.selection_anchor = workspace.tabs[index].id
+}
+
+// Chooses a tab without a window's focus transition, keeping selection and its marks together.
+workspace_tab_choose :: proc(workspace: ^Workspace, index: int) {
+	workspace.selected = index
+	tab_select_one(workspace, index)
 }
 
 tab_pointer_select :: proc(app: ^App, w: ^Window, index: int, toggle, range: bool) {
@@ -218,7 +227,7 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 		closed_record_tab(app, workspace, index)
 		workspace_close_tab(app, workspace, index)
 	}
-	if group && len(workspace.tabs) > 0 {tab_select_one(workspace, workspace.selected)}
+	if group && len(workspace.tabs) > 0 {workspace_tab_choose(workspace, workspace.selected)}
 	workspace_close_empty(app, workspace)
 }
 
@@ -312,7 +321,7 @@ tab_close_restore :: proc(w: ^Window, restore: ^[dynamic]u32) {
 		for id in restore^ {tab.marked ||= tab.id == id}
 		kept ||= tab.marked
 	}
-	if !kept && len(w.workspace.tabs) > 0 {tab_select_one(w.workspace, w.workspace.selected)}
+	if !kept && len(w.workspace.tabs) > 0 {workspace_tab_choose(w.workspace, w.workspace.selected)}
 	w.dirty = true
 }
 
@@ -361,7 +370,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	ordered_remove(&workspace.tabs, index)
 	workspace.selected = tab_selected_after_remove(workspace.selected, index, len(workspace.tabs))
 	tab_record_free(tab)
-	workspace_settings_sync(app, workspace)
+	workspace_mutation_finish(app, workspace, {.Structure})
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {
 		w := app.windows[i]
 		if w.workspace != workspace {continue}

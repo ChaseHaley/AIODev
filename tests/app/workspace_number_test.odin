@@ -143,3 +143,16 @@ every_new_window_opens_at_the_configured_size :: proc(t: ^testing.T) {
 	testing.expect_value(t, u32(opened.width), expected.surface_width)
 	testing.expect_value(t, u32(opened.height), expected.surface_height)
 }
+
+@(test)
+workspace_name_taken_ignores_previews_and_the_edited_workspace :: proc(t: ^testing.T) {
+	owner := app.Workspace{id = 7, name = "Build Tools"}
+	preview := app.Workspace{id = 8, name = "Preview Name", provisional = true}
+	state: app.App
+	defer delete(state.workspaces)
+	append(&state.workspaces, &owner, &preview)
+	testing.expect(t, app.workspace_name_taken(&state, "build tools", 0))
+	testing.expect(t, !app.workspace_name_taken(&state, "BUILD TOOLS", owner.id))
+	testing.expect(t, !app.workspace_name_taken(&state, "preview name", 0))
+	testing.expect(t, !app.workspace_name_taken(&state, "Unused Name", 0))
+}

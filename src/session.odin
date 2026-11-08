@@ -139,7 +139,7 @@ session_open :: proc(
 	}
 	// Defense in depth: every caller filters its directory, but an untrusted one must never reach
 	// CreateProcess. Falling back here keeps the pane usable instead of failing the whole open.
-	launch_directory, refused := local_launch_directory(directory, "")
+	launch_directory, refused := local_launch_directory(directory)
 	if refused {
 		notify(
 			app,
@@ -324,25 +324,20 @@ session_close :: proc(app: ^App, id: u32) {
 @(require_results)
 close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 	if entry := session_find(app, id); entry != nil && entry.keep_open {return false}
-	for workspace in app.workspaces {
-		pane, found := workspace_first_session(app, workspace, id)
-		if !found {continue}
-		if len(workspace.tabs) == 1 &&
-		   workspace.tabs[pane.tab].tree.root == pane.node {return false}
-		pane_close_at(app, workspace, pane.tab, pane.node)
-		return true
-	}
-	return false
+	workspace, pane, found := session_pane_find(app, id)
+	if !found {return false}
+	if len(workspace.tabs) == 1 && workspace.tabs[pane.tab].tree.root == pane.node {return false}
+	pane_close_at(app, workspace, pane.tab, pane.node)
+	return true
 }
 
 session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 	for workspace in app.workspaces {
-		for tab in workspace.tabs {
-			pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-			if pane.content == {.Terminal, id} {tab_update_title(app, tab)}
-		}
+		session_workspace_titles_changed(app, workspace, id)
 	}
 	for window in app.windows {
+		// Linked views own private workspaces, outside app.workspaces.
+		if window_linked(window) {session_workspace_titles_changed(app, window.workspace, id)}
 		window.dirty = true
 		if tree := window_tree(window); tree != nil {
 			node := layout.find_content(tree, {.Terminal, id})
@@ -353,6 +348,14 @@ session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 		if focused := focused_session(app, window); focused != nil && focused.id == id {
 			window_update_title(app, window)
 		}
+	}
+}
+
+@(private = "file")
+session_workspace_titles_changed :: proc(app: ^App, workspace: ^Workspace, id: u32) {
+	for tab in workspace.tabs {
+		pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+		if pane.content == {.Terminal, id} {tab_update_title(app, tab)}
 	}
 }
 

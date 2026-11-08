@@ -180,7 +180,7 @@ tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 
 	tab_select(app, source_window, tab_kept_index(workspace, tabs), .Preserve_Marks)
 	workspace_tabs_transfer(app, transfer)
-	tab_select_one(workspace, workspace.selected)
+	workspace_tab_choose(workspace, workspace.selected)
 	window_relayout(app, source_window)
 	rail_reveal_active(source_window)
 	window_preview_publish(preview, name)

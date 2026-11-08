@@ -137,7 +137,7 @@ pane_shell_swap :: proc(
 		if label_error != nil {
 			log.errorf("resolving the pane directory failed: %v", label_error)
 		} else if label != "" {
-			directory, refused := local_launch_directory(label, "")
+			directory, refused := local_launch_directory(label)
 			if refused {
 				notify(
 					app,
