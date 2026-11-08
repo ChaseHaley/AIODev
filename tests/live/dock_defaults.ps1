@@ -22,9 +22,11 @@ function Equal($actual, $expected, $label) {
     if ("$actual" -ne "$expected") { throw "$label expected $expected, observed $actual" }
     Write-Output "PASS $label"
 }
+$paneGap = 4
 Aio launch --fresh --size 140x40 | Out-Null
 try {
-    Add-Content -LiteralPath "$data/settings.ini" -Value "`nstatus.panel = true`ntabs.orientation = vertical"
+    Add-Content -LiteralPath "$data/settings.ini" `
+        -Value "`nstatus.panel = true`ntabs.orientation = vertical`npane.gap = $paneGap"
     Aio command settings.reload | Out-Null
     foreach ($dpi in @(96, 144)) {
         Aio dpi $dpi | Out-Null
@@ -39,7 +41,7 @@ try {
             $scale = [double]$s['window.scale']
             $rail = Rect $s 'rail.rect'
             $panel = Rect $s 'activity.rect'
-            $gap = [math]::Max(1, [math]::Round(5*$scale))
+            $gap = [math]::Max(1, [math]::Round($paneGap*$scale))
             $x, $y = [int]($panel[0]-$gap/2), [int]($panel[1]+60*$scale)
             if ($kind -eq 'rail') { $x, $y = [int]($rail[0]+$rail[2]), [int]($rail[1]+60*$scale) }
             if ($kind -eq 'height') { $x, $y = [int]($rail[0]+$rail[2]/2), [int]$panel[1] }
