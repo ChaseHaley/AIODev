@@ -1,5 +1,6 @@
 package settings
 
+import "aio:procinfo"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:strings"
@@ -100,7 +101,7 @@ shell_executable :: proc(command: string) -> string {
 	for c, i in text {
 		if c == '/' || c == '\\' {start = i + 1}
 	}
-	return executable_stem(text[start:])
+	return procinfo.executable_stem(text[start:])
 }
 
 // Wraps the prompt after the user's profile has defined it, as VS Code's PowerShell integration

@@ -1,12 +1,13 @@
 package ui
 
+import "aio:commands"
 import "aio:render"
 import "core:fmt"
-import "core:strings"
 
 SHORTCUT_FIELD_WIDTH :: f32(176)
 
-// The field borrows the first label; the complete alternatives remain in its owner's value.
+// The field borrows the first label; the complete alternatives remain in its owner's value. Labels come
+// from the shortcut grammar, so a comma can itself be a key ("Ctrl+,").
 Shortcut_Summary :: struct {
 	first:      string,
 	additional: int,
@@ -14,12 +15,11 @@ Shortcut_Summary :: struct {
 
 shortcut_summary :: proc(value: string) -> Shortcut_Summary {
 	result: Shortcut_Summary
-	start, count := 0, 0
-	for end in 0 ..= len(value) {
-		if end < len(value) && value[end] != ',' {continue}
-		part := strings.trim_space(value[start:end])
-		start = end + 1
-		if part == "" || strings.equal_fold(part, "none") {continue}
+	count := 0
+	alternatives := commands.shortcut_alternatives_begin(value)
+	for part, ok := commands.shortcut_alternatives_next(&alternatives); ok;
+	    part, ok = commands.shortcut_alternatives_next(&alternatives) {
+		if part == "" {continue}
 		if count == 0 {result.first = part}
 		count += 1
 	}

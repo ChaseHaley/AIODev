@@ -64,6 +64,12 @@ color_hex :: proc(c: Color) -> string {
 	return fmt.tprintf("%s", colour.format(c, buffer[:]))
 }
 
+@(private)
+value_line_problem :: proc(value: string) -> string {
+	if strings.contains_any(value, "\r\n\x00") {return "Use a single line without NUL bytes."}
+	return ""
+}
+
 // The returned message is owned by the caller, even when validation fails.
 @(require_results)
 edit_text :: proc(
@@ -73,8 +79,8 @@ edit_text :: proc(
 	updated, message: string,
 	err: runtime.Allocator_Error,
 ) {
-	if strings.contains_any(value, "\r\n\x00") {
-		message, err = strings.clone("Use a single line without NUL bytes.", allocator)
+	if issue := value_line_problem(value); issue != "" {
+		message, err = strings.clone(issue, allocator)
 		return
 	}
 	encoded, encoded_error := strings.builder_make(allocator)
@@ -153,7 +159,7 @@ setting_assign :: proc(
 	message: string,
 	err: runtime.Allocator_Error,
 ) {
-	if strings.contains_any(value, "\r\n\x00") {return "Use a single line without NUL bytes.", nil}
+	if issue := value_line_problem(value); issue != "" {return issue, nil}
 	encoded := strings.builder_make(context.temp_allocator) or_return
 	encode_value(&encoded, entry, value) or_return
 	issue := assign(s, entry, strings.to_string(encoded)) or_return

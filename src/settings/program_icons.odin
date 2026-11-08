@@ -1,5 +1,6 @@
 package settings
 
+import "aio:procinfo"
 import "core:fmt"
 import "core:strings"
 
@@ -15,7 +16,7 @@ PROGRAM_NAME_FORBIDDEN :: `=;:/\*?"`
 // file. The first entry naming it wins; malformed entries are skipped.
 @(require_results)
 program_icon_file :: proc(s: ^Settings, program: string) -> (path: string, found: bool) {
-	name := executable_stem(program)
+	name := procinfo.executable_stem(program)
 	if name == "" {return}
 	items := Program_Icon_Items {
 		rest = s.tabs.program_icon_files,
@@ -23,7 +24,7 @@ program_icon_file :: proc(s: ^Settings, program: string) -> (path: string, found
 	for {
 		item := program_icon_next(&items) or_break
 		entry, entry_path, ok := program_icon_entry(item)
-		if ok && strings.equal_fold(executable_stem(entry), name) {return entry_path, true}
+		if ok && strings.equal_fold(procinfo.executable_stem(entry), name) {return entry_path, true}
 	}
 	return
 }

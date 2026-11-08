@@ -13,30 +13,37 @@ Choice_List :: struct {
 	index, scroll: int,
 }
 
-// Clamps the highlight to `count` options and scrolls so it sits on one of CHOICE_LIST_ROWS rows.
-choice_list_keep_visible :: proc(c: ^Choice_List, count: int) {
-	c.index = clamp(c.index, 0, max(0, count - 1))
-	if c.index < c.scroll {c.scroll = c.index}
-	if c.index >= c.scroll + CHOICE_LIST_ROWS {c.scroll = c.index - CHOICE_LIST_ROWS + 1}
-	c.scroll = clamp(c.scroll, 0, max(0, count - CHOICE_LIST_ROWS))
+// Eight DIPs of page margin on either side plus the popup's own eight-DIP inset.
+choice_list_rows :: proc(count: int, page_height, scale: f32, header_height: f32 = 0) -> int {
+	return min(count, CHOICE_LIST_ROWS,
+	           max(1, int((page_height - 24 * scale - header_height) / (CHOICE_HEIGHT * scale))))
 }
 
-choice_list_move :: proc(c: ^Choice_List, delta, count: int) {
+// Clamps the highlight and keeps it inside the caller's fitted number of rows.
+choice_list_keep_visible :: proc(c: ^Choice_List, count, visible: int) {
+	c.index = clamp(c.index, 0, max(0, count - 1))
+	if c.index < c.scroll {c.scroll = c.index}
+	rows := max(1, visible)
+	if c.index >= c.scroll + rows {c.scroll = c.index - rows + 1}
+	c.scroll = clamp(c.scroll, 0, max(0, count - rows))
+}
+
+choice_list_move :: proc(c: ^Choice_List, delta, count, visible: int) {
 	c.index += delta
-	choice_list_keep_visible(c, count)
+	choice_list_keep_visible(c, count, visible)
 }
 
 // Steps the highlight with list_step's chords, and Page Up or Page Down by a list's height.
-choice_list_key :: proc(c: ^Choice_List, e: input.Key_Event, count: int) -> bool {
+choice_list_key :: proc(c: ^Choice_List, e: input.Key_Event, count, visible: int) -> bool {
 	delta := list_step(e)
 	#partial switch e.key {
 	case .Page_Up:
-		delta = -CHOICE_LIST_ROWS
+		delta = -max(1, visible)
 	case .Page_Down:
-		delta = CHOICE_LIST_ROWS
+		delta = max(1, visible)
 	}
 	if delta == 0 || !e.pressed {return false}
-	choice_list_move(c, delta, count)
+	choice_list_move(c, delta, count, visible)
 	return true
 }
 

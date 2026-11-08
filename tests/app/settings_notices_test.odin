@@ -20,9 +20,10 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 	defer settings.diagnostics_destroy(&state.settings_diagnostics)
 	issues := make([dynamic]settings.Diagnostic)
 	defer settings.diagnostics_destroy(&issues)
+	identity := "input.leader vs Select All (edit.select_all); input.leader wins"
 	testing.expect_value(t, settings.diagnostic_append(&issues, 92, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:92; defaults]",
-		.Shortcut_Warning), nil)
+		.Shortcut_Warning, identity), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
 	if !testing.expect_value(t, len(state.notices.items), 1) { return }
 	first := state.notices.items[0]
@@ -31,14 +32,14 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 	testing.expect(t, !strings.contains(first.text, "settings.ini:") && !strings.contains(first.text, "Line 92"))
 	testing.expect_value(t, settings.diagnostic_append(&issues, 93, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:93; defaults]",
-		.Shortcut_Warning), nil)
+		.Shortcut_Warning, identity), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
 	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), ui.notice_expiry(first))
 	testing.expect(t, ui.notices_expire(&state.notices, false,
 		time.tick_add(ui.notice_expiry(first).?, time.Second)))
 	testing.expect_value(t, settings.diagnostic_append(&issues, 93, "input.leader",
 		"input.leader vs Select All (edit.select_all); input.leader wins [settings.ini:93; defaults]",
-		.Shortcut_Warning), nil)
+		.Shortcut_Warning, identity), nil)
 	show_diagnostics_quietly(&state, &issues, nil)
 	testing.expect_value(t, len(state.notices.items), 0)
 	testing.expect_value(t, settings.diagnostic_append(&issues, 1, "font.size", "invalid number", .Invalid_Value), nil)
@@ -65,10 +66,15 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 
 @(test)
 settings_diagnostic_comparison_ignores_order_and_locations_but_preserves_new_meanings :: proc(t: ^testing.T) {
-	a := [?]settings.Diagnostic{{1, "a", "invalid", .Invalid_Value, ""}, {2, "b", "unknown", .Unknown_Key, ""}}
-	b := [?]settings.Diagnostic{{8, "b", "unknown", .Unknown_Key, ""}, {9, "a", "invalid", .Invalid_Value, ""}}
+	a := [?]settings.Diagnostic{
+		{1, "a", "invalid", .Invalid_Value, "invalid"}, {2, "b", "unknown", .Unknown_Key, "unknown"},
+	}
+	b := [?]settings.Diagnostic{
+		{8, "b", "unknown", .Unknown_Key, "unknown"}, {9, "a", "invalid", .Invalid_Value, "invalid"},
+	}
 	testing.expect(t, app.settings_diagnostics_equal(a[:], b[:]))
 	b[0].message = "different"
+	b[0].identity = "different"
 	testing.expect(t, !app.settings_diagnostics_equal(a[:], b[:]))
 	b[0] = a[0]
 	b[1] = a[0]
@@ -77,9 +83,11 @@ settings_diagnostic_comparison_ignores_order_and_locations_but_preserves_new_mea
 	b[0].kind = .Out_Of_Range
 	testing.expect(t, !app.settings_diagnostics_equal(a[:], b[:]))
 	leader_a := [?]settings.Diagnostic{{1, "input.leader",
-		"input.leader (Ctrl+B) vs New Tab; input.leader wins [settings.ini:1; defaults]", .Shortcut_Warning, "input.leader (Ctrl+B) vs New Tab; input.leader wins"}}
+		"input.leader (Ctrl+B) vs New Tab; input.leader wins [settings.ini:1; defaults]",
+		.Shortcut_Warning, "input.leader (Ctrl+B) vs New Tab; input.leader wins"}}
 	leader_b := [?]settings.Diagnostic{{2, "input.leader",
-		"input.leader (Ctrl+T) vs New Tab; input.leader wins [settings.ini:2; defaults]", .Shortcut_Warning, "input.leader (Ctrl+T) vs New Tab; input.leader wins"}}
+		"input.leader (Ctrl+T) vs New Tab; input.leader wins [settings.ini:2; defaults]",
+		.Shortcut_Warning, "input.leader (Ctrl+T) vs New Tab; input.leader wins"}}
 	testing.expect(t, !app.settings_diagnostics_equal(leader_a[:], leader_b[:]))
 }
 
@@ -149,7 +157,7 @@ settings_bracket_leader_preserves_actions_and_winners_after_notice_expiry :: pro
 	sequence := [?]settings.Diagnostic{a[0], d[0], b[0], c[0]}
 	for diagnostic in sequence {
 		testing.expect_value(t, settings.diagnostic_append(&issues, diagnostic.line,
-			diagnostic.key, diagnostic.message, diagnostic.kind), nil)
+			diagnostic.key, diagnostic.message, diagnostic.kind, diagnostic.identity), nil)
 		show_diagnostics_quietly(&state, &issues, nil)
 		if diagnostic.message == d[0].message {
 			testing.expect_value(t, len(state.notices.items), 0)

@@ -12,7 +12,7 @@ profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testi
 	defer ui.editor_destroy(&p)
 	profile_editor_fixture(t, &p)
 	l := ui.editor_layout({500, 40, 300, 700}, 1)
-	p.visible_rows = l.rows
+	ui.editor_fit(&p, l)
 	testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
 	parts := ui.editor_profile_parts(&p, l, p.selected)
 	x, y := profile_center(parts.more)
@@ -253,6 +253,7 @@ profile_editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 	}
 	ui.editor_group_table(p, "Profiles")
 	ui.editor_filter(p)
+	ui.editor_fit(p, ui.editor_layout({0, 40, 1200, 1400}, 1))
 }
 
 @(private)
@@ -557,7 +558,7 @@ profile_trash_requests_shared_confirmation_and_protects_detected :: proc(t: ^tes
 	ui.editor_filter(&p)
 	layout := ui.editor_layout({0, 40, 1200, 4000}, 1)
 	testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
-	p.visible_rows = layout.rows
+	ui.editor_fit(&p, layout)
 	index := profile_item_index(&p, "profile.beta")
 	trash := ui.editor_profile_parts(&p, layout, index).remove
 	x, y := profile_center(trash)

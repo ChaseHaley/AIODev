@@ -11,10 +11,12 @@ import fixtures "../fixtures"
 @(test)
 shortcut_summary_keeps_only_the_first_label_and_the_additional_count :: proc(t: ^testing.T) {
 	for test in ([?]struct {value, first: string, additional: int} {
-		{"", "", 0}, {"none", "", 0}, {"Ctrl+K", "Ctrl+K", 0},
+		{"", "", 0}, {"Ctrl+K", "Ctrl+K", 0},
 		{"Ctrl+K, Ctrl+Shift+K", "Ctrl+K", 1},
 		{" Ctrl+K , Ctrl+Shift+K, Alt+K ", "Ctrl+K", 2},
 		{"Ctrl+K, , Alt+K", "Ctrl+K", 1},
+		// The comma key: the stored default of settings.open.
+		{"Ctrl+,", "Ctrl+,", 0}, {"Ctrl+,, Alt+K", "Ctrl+,", 1},
 	}) {
 		summary := ui.shortcut_summary(test.value)
 		testing.expect_value(t, summary.first, test.first)
@@ -104,7 +106,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		                                        value = "Ctrl+K, Alt+K"}, "Shortcuts"), nil)
 		ui.editor_filter(&e)
 		page := ui.editor_layout({0, 0, 1000 * scale, 800 * scale}, scale)
-		e.visible_rows = page.rows
+		ui.editor_fit(&e, page)
 		for selected in ([?]bool{false, true}) {
 			if selected {ui.editor_select_key(&e, "keys.test.alpha")} else {e.selected = 0}
 			e.scroll = 0

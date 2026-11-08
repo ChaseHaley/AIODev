@@ -70,7 +70,7 @@ binding_report :: proc(
 				kind     = .Unknown_Command,
 				severity = .Invalid_Value,
 				line     = binding.line,
-				key      = binding_key(binding.name),
+				key      = settings.binding_key(binding.name),
 				name     = binding.name,
 			}
 			if _, err := append(&issues, issue); err != nil {
@@ -86,7 +86,7 @@ binding_report :: proc(
 				kind     = .Invalid_Shortcut,
 				severity = .Invalid_Value,
 				line     = binding.line,
-				key      = binding_key(binding.name),
+				key      = settings.binding_key(binding.name),
 				name     = binding.name,
 				value    = binding.value,
 			}
@@ -107,7 +107,7 @@ binding_report :: proc(
 				kind     = .Unsupported_Leader_Shortcut,
 				severity = .Invalid_Value,
 				line     = binding.line,
-				key      = binding_key(binding.name),
+				key      = settings.binding_key(binding.name),
 				name     = binding.name,
 			}
 			if _, err := append(&issues, issue); err != nil {
@@ -139,7 +139,7 @@ binding_report :: proc(
 			kind        = .Apply_Failed,
 			severity    = .Invalid_Value,
 			line        = binding.line,
-			key         = binding_key(binding.name),
+			key         = settings.binding_key(binding.name),
 			name        = binding.name,
 			apply_error = error,
 		}
@@ -299,11 +299,6 @@ binding_origin :: proc(path: string, line: int) -> string {
 }
 
 @(private)
-binding_key :: proc(name: string) -> string {
-	return fmt.tprintf("%s%s", settings.KEY_BINDING_PREFIX, name)
-}
-
-@(private)
 binding_file_name :: proc(path: string) -> string {
 	i := max(strings.last_index_byte(path, '/'), strings.last_index_byte(path, '\\'))
 	return path[i + 1:]
@@ -311,10 +306,10 @@ binding_file_name :: proc(path: string) -> string {
 
 @(private)
 binding_comment :: proc(descriptor: Command_Descriptor) -> string {
-	if len(descriptor.shortcuts) == 0 {return fmt.tprintf("%s =", binding_key(descriptor.name))}
+	if len(descriptor.shortcuts) == 0 {return fmt.tprintf("%s =", settings.binding_key(descriptor.name))}
 	set := commands.Shortcut_Set{descriptor.shortcuts, len(descriptor.shortcuts)}
 	value := commands.shortcut_set_text(set, context.temp_allocator)
-	return fmt.tprintf("%s = %s", binding_key(descriptor.name), value)
+	return fmt.tprintf("%s = %s", settings.binding_key(descriptor.name), value)
 }
 
 // The settings file's shortcut comments: a heading, then one line per command a key can run.
@@ -354,8 +349,7 @@ apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 	report, report_error := binding_report(&app.registry, &app.settings)
 	for issue in report.issues {
 		message := binding_issue_text(issue, app.settings_path)
-		identity := ""
-		if issue.kind == .Leader_Prefix {identity = binding_issue_identity(issue, app.settings_path)}
+		identity := binding_issue_identity(issue, app.settings_path)
 		settings_diagnostic(app, diagnostics, issue.line, issue.key, message, issue.severity, identity)
 	}
 	if report_error != nil {

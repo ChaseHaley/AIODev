@@ -32,7 +32,7 @@ program_polling :: proc(app: ^App) -> bool {
 
 // The bundled artwork for an executable stem or reported app key.
 program_art_find :: proc(app: ^App, name: string) -> (program_art.Art, bool) {
-	return program_art.find(&app.program_art, settings.executable_stem(name))
+	return program_art.find(&app.program_art, procinfo.executable_stem(name))
 }
 
 // The pane's program as polling sees it; nil while its shell is at the prompt. A program is adopted
@@ -110,7 +110,7 @@ program_update :: proc(
 		return true
 	}
 	id := processes[index].id
-	stem := settings.executable_stem(processes[index].executable)
+	stem := procinfo.executable_stem(processes[index].executable)
 	adopted := false
 	switch &program in entry.program {
 	case nil:
@@ -302,6 +302,6 @@ pane_running :: proc(
 	if index < 0 {return}
 	program = processes[index].id
 	arguments, _ := procinfo.process_arguments(program, root, context.temp_allocator)
-	stem := settings.executable_stem(processes[index].executable)
+	stem := procinfo.executable_stem(processes[index].executable)
 	return program, program_command(arguments, stem, context.temp_allocator)
 }

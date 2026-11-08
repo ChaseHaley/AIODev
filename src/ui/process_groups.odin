@@ -271,7 +271,11 @@ editor_process_value :: proc(p: ^Editor) -> (value, problem: string) {
 	case .Program: problem = "Enter one executable name per program."
 	case .Duplicate_Program: problem = "This program is already in the group."
 	case .Name: problem = "Enter a group name without : or ;."
-	case .Padding: problem = "Padding must be a whole number from 0 to 1024."
+	case .Padding:
+		problem = fmt.tprintf(
+			"Padding must be a whole number from %d to %d.",
+			int(settings.CONTENT_PADDING_RANGE.minimum), int(settings.CONTENT_PADDING_RANGE.maximum),
+		)
 	case .No_Programs: problem = "Add a program or delete the group."
 	}
 	return "", problem

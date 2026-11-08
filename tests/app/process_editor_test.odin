@@ -140,7 +140,6 @@ process_editor_drop_outside_window_cancels_the_last_valid_target :: proc(t: ^tes
 	testing.expect(t, ui.editor_reveal(p, ui.Reveal_Row{"process.group.1"}))
 	p.scroll = p.selected
 	l := app.settings_layout(w)
-	p.visible_rows = l.rows
 	first := ui.editor_row_parts(p, l, p.selected).row
 	second := first
 	for item, index in p.items {

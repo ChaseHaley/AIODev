@@ -6,12 +6,7 @@ import "core:log"
 import "core:os"
 import "core:time"
 
-// Saving unrelated settings can move source lines without changing a problem's meaning. Every
-// diagnostic settings records has an identity; a hand-built one without it is its message.
-@(private)
-diagnostic_identity :: proc(d: settings.Diagnostic) -> string {
-	return d.identity != "" ? d.identity : d.message
-}
+// Saving unrelated settings can move source lines without changing a diagnostic's identity.
 
 settings_diagnostics_equal :: proc(a, b: []settings.Diagnostic) -> bool {
 	if len(a) != len(b) {return false}
@@ -20,12 +15,12 @@ settings_diagnostics_equal :: proc(a, b: []settings.Diagnostic) -> bool {
 		for other in a {
 			if d.key == other.key &&
 			   d.kind == other.kind &&
-			   diagnostic_identity(d) == diagnostic_identity(other) {matches_a += 1}
+			   d.identity == other.identity {matches_a += 1}
 		}
 		for other in b {
 			if d.key == other.key &&
 			   d.kind == other.kind &&
-			   diagnostic_identity(d) == diagnostic_identity(other) {matches_b += 1}
+			   d.identity == other.identity {matches_b += 1}
 		}
 		if matches_a != matches_b {return false}
 	}

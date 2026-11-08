@@ -1,5 +1,6 @@
 package settings
 
+import "aio:procinfo"
 import "base:runtime"
 import "core:fmt"
 import "core:strconv"
@@ -15,10 +16,7 @@ PADDING_GROUPS_KEY :: "process.padding_groups"
 // malformed value both show it, so a grammar change updates the example with the parser.
 PADDING_GROUPS_EXAMPLE :: "editors:0:nvim,vim; tools:4:less,bat"
 
-@(private)
-PADDING_MIN :: 0
-@(private)
-PADDING_MAX :: 1024
+CONTENT_PADDING_RANGE :: Range{0, 1024}
 @(private)
 PADDING_NAME_FORBIDDEN :: ":/\\*?\""
 // `;` ends a group and a line break ends the setting, so no edited field can hold either. A group
@@ -106,7 +104,8 @@ padding_group :: proc(text: string) -> (group: Padding_Group) {
 @(private, require_results)
 padding_value :: proc(text: string) -> (int, bool) {
 	padding, parsed := strconv.parse_int(strings.trim_space(text), 10)
-	return padding, parsed && padding >= PADDING_MIN && padding <= PADDING_MAX
+	return padding, parsed &&
+		padding >= int(CONTENT_PADDING_RANGE.minimum) && padding <= int(CONTENT_PADDING_RANGE.maximum)
 }
 
 @(private, require_results)
@@ -166,7 +165,7 @@ padding_group_check :: proc(group: Padding_Draft) -> Maybe(Padding_Problem) {
 			return Padding_Problem.Program
 		}
 		for other in group.programs[:index] {
-			if strings.equal_fold(executable_stem(strings.trim_space(other)), executable_stem(name)) {
+			if strings.equal_fold(procinfo.executable_stem(other), procinfo.executable_stem(name)) {
 				return Padding_Problem.Duplicate_Program
 			}
 		}
@@ -197,26 +196,15 @@ padding_groups_rules :: proc(buffer: []u8) -> string {
 		buffer,
 		"Process names cannot be empty or use any of %s. Padding is %d..%d; a value looks like %s.",
 		PADDING_NAME_FORBIDDEN,
-		PADDING_MIN,
-		PADDING_MAX,
+		int(CONTENT_PADDING_RANGE.minimum),
+		int(CONTENT_PADDING_RANGE.maximum),
 		PADDING_GROUPS_EXAMPLE,
 	)
 }
 
-// Padding-group names and shell command lines both identify an executable by a case-insensitive name
-// without a trailing ".exe".
-@(require_results)
-executable_stem :: proc(name: string) -> string {
-	text := strings.trim_space(name)
-	if len(text) > 4 && strings.equal_fold(text[len(text) - 4:], ".exe") {
-		return text[:len(text) - 4]
-	}
-	return text
-}
-
 // Names match whole executable basenames. The first listed group wins an overlap.
 process_padding :: proc(s: ^Settings, executable: string) -> (int, bool) {
-	name := executable_stem(executable)
+	name := procinfo.executable_stem(executable)
 	groups := padding_groups_scan(s.process.padding_groups)
 	for {
 		group, more := padding_groups_next(&groups)
@@ -226,7 +214,7 @@ process_padding :: proc(s: ^Settings, executable: string) -> (int, bool) {
 		for {
 			process, has_name := padding_processes_next(&names)
 			if !has_name {break}
-			if strings.equal_fold(executable_stem(process), name) {return group.padding, true}
+			if strings.equal_fold(procinfo.executable_stem(process), name) {return group.padding, true}
 		}
 	}
 	return s.window.padding, false

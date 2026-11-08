@@ -3,11 +3,8 @@ package main
 import "aio:localpath"
 import "aio:render"
 import "aio:settings"
+import "core:fmt"
 import "core:image/png"
-
-@(private)
-SHELL_ICON_INVALID_NOTICE ::
-	"Shell Icon needs a readable PNG no larger than 1024 × 1024. Using the shell default."
 
 Shell_Icon :: struct {
 	pixels:        [32 * 32 * 4]u8,
@@ -34,7 +31,10 @@ shell_icon_load :: proc(app: ^App) {
 	switch load_error {
 	case .None:
 	case .Refused:
-		notify(app, .Error, SHELL_ICON_INVALID_NOTICE)
+		notify(app, .Error, fmt.tprintf(
+			"Shell Icon needs a readable PNG no larger than %d × %d. Using the shell default.",
+			ICON_PNG_MAX_SIDE, ICON_PNG_MAX_SIDE,
+		))
 		return
 	case .Undecodable:
 		notify(

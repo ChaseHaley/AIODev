@@ -32,9 +32,9 @@ Palette_Control :: enum {
 	Text,
 }
 
-// Reads live values for setting controls. `value` returns the saved value and the text a choice
-// displays for it; `choices` lists a dynamic choice's values and optional labels. Both may borrow
-// temporary memory: the palette copies what it keeps.
+// Reads live values for setting controls. `value` returns the saved value and its optional display
+// label; `choices` lists a dynamic choice's values and optional labels. Both may borrow temporary
+// memory: the palette copies what it keeps.
 Palette_Values :: struct {
 	user:    rawptr,
 	value:   proc(user: rawptr, key: string) -> (value, label: string),
@@ -130,6 +130,7 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 		maximum       = row.maximum,
 		step          = row.step,
 		choices       = row.choices,
+		choice_labels = row.choice_labels,
 		searchable    = row.searchable,
 		default_value = entry.default_value,
 		resettable    = entry.control != .Group,
@@ -240,8 +241,7 @@ setting_value :: proc(p: ^Palette, s: ^Palette_Setting) -> (value, label: string
 
 @(private)
 snap :: proc(s: ^Palette_Setting, value: f64) -> f64 {
-	step := s.step > 0 ? s.step : 1
-	return clamp(math.round(value / step) * step, s.minimum, s.maximum)
+	return clamp(math.round(value / s.step) * s.step, s.minimum, s.maximum)
 }
 
 @(private)
@@ -262,13 +262,13 @@ choose_value :: proc(p: ^Palette, s: ^Palette_Setting, value: string) -> Outcome
 
 @(private)
 choose_number :: proc(p: ^Palette, s: ^Palette_Setting, value: f64) -> Outcome {
-	return choose_value(p, s, number_text(s.step > 0 ? s.step : 1, snap(s, value)))
+	return choose_value(p, s, number_text(s.step, snap(s, value)))
 }
 
 @(private)
 step_number :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome {
 	current := setting_number(p, s)
-	step := s.step > 0 ? s.step : 1
+	step := s.step
 	if (s.maximum - s.minimum) / step <= PALETTE_UNIT_STEPS {
 		return choose_number(p, s, current + f64(direction) * step)
 	}
@@ -282,7 +282,7 @@ step_number :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome
 // The values a choice offers: static enum names, or the owner's live list.
 @(private)
 static_or_live_choices :: proc(p: ^Palette, s: ^Palette_Setting) -> (choices, labels: []string) {
-	if len(s.choices) > 0 {return s.choices, nil}
+	if len(s.choices) > 0 {return s.choices, s.choice_labels}
 	if p.values.choices == nil {return nil, nil}
 	return p.values.choices(p.values.user, s.key)
 }
@@ -336,7 +336,7 @@ open_choice :: proc(p: ^Palette, setting: int) -> Outcome {
 	c := &p.edit.(Choice_Edit)
 	choice_filter_update(p, c)
 	for match, i in b.matches {if b.choices[match] == current {c.list.index = i}}
-	choice_list_keep_visible(&c.list, len(b.matches))
+	choice_list_keep_visible(&c.list, len(b.matches), CHOICE_LIST_ROWS)
 	return .Changed
 }
 
@@ -423,7 +423,7 @@ edit_key :: proc(p: ^Palette, e: input.Key_Event) -> Outcome {
 		}
 		return field_key(&b.field, e) == .None ? .None : .Changed
 	case Choice_Edit:
-		if choice_list_key(&edit.list, e, len(b.matches)) {return .Changed}
+		if choice_list_key(&edit.list, e, len(b.matches), CHOICE_LIST_ROWS) {return .Changed}
 		if e.key == .Enter || e.key == .Numpad_Enter {return popup_choose(p, &edit, edit.list.index)}
 		if !p.settings[edit.setting].searchable {return .None}
 		if field_key(&b.filter, e) == .Edited {choice_filter_update(p, &edit)}
@@ -818,7 +818,7 @@ draw_control :: proc(
 		drag, sliding := p.drag.(Slider_Drag)
 		number := sliding && drag.setting == setting ? drag.number : setting_number(p, s)
 		slider_draw(list, slider_track(control, scale), slider_fraction(s.minimum, s.maximum, number), theme, scale)
-		shown := number_text(s.step > 0 ? s.step : 1, number)
+		shown := number_text(s.step, number)
 		number_box := slider_number_rect(control, scale)
 		width := text_width(&input_text, shown)
 		return draw_text(&input_text, list, shown, number_box.x + number_box.width - width, baseline,

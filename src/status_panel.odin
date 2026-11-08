@@ -139,8 +139,10 @@ status_panel_view_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 
 // One preference in the settings file, so Settings and every window follow it.
 status_panel_view_toggle :: proc(app: ^App) {
-	value := app.settings.status.panel_view == .Comfy ? "dense" : "comfy"
-	settings_save_value(app, "status.panel_view", value, "Could not save Activity view.")
+	@(static, rodata)
+	names := settings.STATUS_PANEL_VIEW_NAME
+	next: settings.Status_Panel_View = app.settings.status.panel_view == .Comfy ? .Dense : .Comfy
+	settings_save_value(app, "status.panel_view", names[next], "Could not save Activity view.")
 }
 
 // Runs a header button after a press and release both landed on it.
@@ -156,8 +158,10 @@ status_panel_button_fire :: proc(app: ^App, button: Status_Panel_Button) {
 }
 
 status_panel_side_toggle :: proc(app: ^App) {
-	next := app.settings.status.panel_side == .Right ? "left" : "right"
-	settings_save_value(app, "status.panel_side", next, "Could not save Activity side.")
+	@(static, rodata)
+	names := settings.STATUS_PANEL_SIDE_NAME
+	next: settings.Status_Panel_Side = app.settings.status.panel_side == .Right ? .Left : .Right
+	settings_save_value(app, "status.panel_side", names[next], "Could not save Activity side.")
 }
 
 @(private)
@@ -746,9 +750,13 @@ when AIO_CONTROL {
 		area := status_panel_rect(app, w)
 		state_rect(r, "activity.rect", area)
 		state_rect(r, "activity.side_button", status_panel_side_rect(app, w))
-		state_text(r, "activity.side", app.settings.status.panel_side == .Left ? "left" : "right")
+		@(static, rodata)
+		sides := settings.STATUS_PANEL_SIDE_NAME
+		@(static, rodata)
+		views := settings.STATUS_PANEL_VIEW_NAME
+		state_text(r, "activity.side", sides[app.settings.status.panel_side])
 		state_rect(r, "activity.view_button", status_panel_view_rect(app, w))
-		state_text(r, "activity.view", app.settings.status.panel_view == .Comfy ? "comfy" : "dense")
+		state_text(r, "activity.view", views[app.settings.status.panel_view])
 		rows, _ := status_panel_rows(app, w)
 		list := status_panel_list(app, w, area)
 		for row, i in rows {

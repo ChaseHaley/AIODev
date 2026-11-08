@@ -243,6 +243,10 @@ SCHEMA_CAPACITY :: 128
 // and the slider's comfortable one.
 FONT_SIZE_ZOOM :: Range{6, 72}
 KEY_BINDING_PREFIX :: "keys."
+// The settings key of a command's shortcuts, "keys.NAME". Temporary.
+binding_key :: proc(name: string) -> string {
+	return fmt.tprintf("%s%s", KEY_BINDING_PREFIX, name)
+}
 Key_Binding :: struct {
 	name, value: string,
 	line:        int,
@@ -319,6 +323,46 @@ Schema_Entry :: struct {
 	// A change must be checked against every command shortcut.
 	affects_bindings:  bool,
 }
+
+group_title :: proc(key: string) -> string {
+	dot := strings.index_byte(key, '.')
+	switch dot < 0 ? key : key[:dot] {
+	case "theme":
+		return "Theme"
+	case "pane":
+		return "Panes"
+	case "tab":
+		return "Tabs"
+	case "tabs":
+		return "Tabs"
+	case "status":
+		return "Program Status"
+	case "shell":
+		return "Shell"
+	case "input":
+		return "Input"
+	case "process":
+		return "Processes"
+	case "font":
+		return "Font"
+	case "interface":
+		return "Interface"
+	case "window":
+		return "Window"
+	case "scrollback":
+		return "Scrollback"
+	case "terminal":
+		return "Terminal"
+	case "cursor":
+		return "Cursor"
+	case "colors":
+		return "Colors"
+	case "control":
+		return "Command Line"
+	}
+	return "Other"
+}
+
 SCHEMA :: [?]Schema_Entry {
 	{
 		key = "terminal.scroll_page_length",
@@ -882,7 +926,7 @@ SCHEMA :: [?]Schema_Entry {
 		kind = .Int,
 		offset = offset_of(Settings, window) + offset_of(Window_Settings, padding),
 		default_value = "8",
-		valid = {0, 1024},
+		valid = CONTENT_PADDING_RANGE,
 		description = "Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap.",
 	},
 	{
@@ -999,7 +1043,7 @@ Diagnostic :: struct {
 	key, message: string,
 	kind:         Diagnostic_Kind,
 	// What the problem means without where it is, so moved source lines do not make it new. Every
-	// diagnostic has one: given by the producer, or derived by diagnostic_identity_of.
+	// diagnostic has one: given by the producer, or its message.
 	identity:     string,
 }
 
@@ -1362,7 +1406,7 @@ add_diagnostic :: proc(
 		delete(issue.message, out.allocator)
 		return err
 	}
-	meaning := identity != "" ? identity : diagnostic_identity_of(issue.kind, issue.message)
+	meaning := identity != "" ? identity : issue.message
 	if meaning, err = strings.clone(meaning, out.allocator); err == nil {
 		_, err = append(out, Diagnostic{line, copy, issue.message, issue.kind, meaning})
 	}
@@ -1372,17 +1416,6 @@ add_diagnostic :: proc(
 		delete(issue.message, out.allocator)
 	}
 	return err
-}
-
-// The identity of a diagnostic whose producer gave none. Settings problems carry their line apart
-// from the message, so the message is the meaning. A shortcut warning names its source lines in a
-// trailing " [file:line; ...]" part, which is location rather than meaning.
-@(private)
-diagnostic_identity_of :: proc(kind: Diagnostic_Kind, message: string) -> string {
-	if kind == .Shortcut_Warning && strings.has_suffix(message, "]") {
-		if at := strings.last_index(message, " ["); at > 0 {return strings.trim_space(message[:at])}
-	}
-	return message
 }
 
 @(private, require_results)

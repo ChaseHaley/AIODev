@@ -152,10 +152,6 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	if !palette_settings_init(app) {return false}
 	palette_set_sources(app)
-	ui.palette_set_values(
-		&app.palette,
-		{user = app, value = palette_setting_value, choices = palette_setting_choices},
-	)
 	if executable, err := os.get_executable_path(context.temp_allocator); err == nil {
 		directory := filepath.dir(executable)
 		if cli, join_error := filepath.join({directory, CLI_EXECUTABLE}, context.temp_allocator);

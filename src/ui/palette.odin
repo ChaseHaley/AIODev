@@ -130,7 +130,7 @@ Palette_Setting :: struct {
 	key, title, group:      string,
 	control:                Palette_Control,
 	minimum, maximum, step: f64,
-	choices:                []string,
+	choices, choice_labels: []string,
 	// The choice list has a filter field, as the Settings page gives font pickers.
 	searchable:             bool,
 	// A reset button restores `default_value`, as on the Settings page.
@@ -179,6 +179,9 @@ Palette :: struct {
 	query:          Text_Field,
 	selected, scroll: int,
 	visible_rows:   int,
+	// The last explicit fit supplies geometry to keyboard-operated popups, before any draw.
+	fit_page:       render.Rect,
+	fit_scale:      f32,
 	results:        [dynamic]Palette_Result,
 	// Matches gathered per domain before sections are ordered into `results`.
 	ordered:        [dynamic]Palette_Result,
@@ -257,6 +260,7 @@ palette_init :: proc(
 	edit_init(&p.buffers, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
+	p.fit_scale = 1
 	p.mode_hover = -1
 	p.reset_hover = -1
 	err: runtime.Allocator_Error
@@ -999,8 +1003,12 @@ palette_frame :: proc(viewport_width, viewport_height, viewport_scale: f32) -> P
 // Sizes the result list for a viewport: how many rows fit, with the selection kept on one of them.
 // Owners fit whenever the viewport may have changed; palette_draw fits before it draws.
 palette_fit :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) {
-	p.visible_rows = palette_frame(viewport_width, viewport_height, viewport_scale).rows
+	frame := palette_frame(viewport_width, viewport_height, viewport_scale)
+	p.visible_rows = frame.rows
+	p.fit_page = {0, 0, frame.width, frame.height}
+	p.fit_scale = frame.scale
 	keep_selection_visible(p)
+	palette_binding_fit(p)
 }
 
 // Measures the palette for a viewport without changing it.

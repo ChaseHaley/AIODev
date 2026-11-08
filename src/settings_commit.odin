@@ -371,8 +371,7 @@ settings_theme_edit :: proc(
 			return {result = {status = .Unchanged}}
 		}
 	case Theme_Name:
-		key := fmt.tprintf("%s%s.name", settings.CUSTOM_THEME_PREFIX, model.theme.name)
-		return settings_text_edit(source, key, strings.trim_space(c.name))
+		updated, issue, error = settings.theme_name_edit(model, source, c.name)
 	case Theme_Rename:
 		updated, issue, error = settings.theme_rename(model, source, c.id)
 		built.result.id = c.id
@@ -526,11 +525,9 @@ settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, adopti
 	}
 }
 
-settings_toggle_bool :: proc(app: ^App, key: string, value: bool) {
-	settings_save_value(app, key, value ? "false" : "true", "Could not save the setting.")
-}
-
 toggle_tab_orientation :: proc(app: ^App) {
-	next := app.settings.tabs.orientation == .Horizontal ? "vertical" : "horizontal"
-	settings_save_value(app, "tabs.orientation", next, "Could not save the tab orientation.")
+	@(static, rodata)
+	names := settings.TABS_ORIENTATION_NAME
+	next: settings.Tabs_Orientation = app.settings.tabs.orientation == .Horizontal ? .Vertical : .Horizontal
+	settings_save_value(app, "tabs.orientation", names[next], "Could not save the tab orientation.")
 }

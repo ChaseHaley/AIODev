@@ -3,7 +3,7 @@ package program_art_test
 import "core:strings"
 import "core:testing"
 import "aio:program_art"
-import "aio:settings"
+import "aio:procinfo"
 
 // The table parsed once for a test; callers destroy it.
 @(private)
@@ -12,7 +12,7 @@ catalogue :: proc(t: ^testing.T) -> (program_art.Catalogue, bool) {
 	return c, testing.expect_value(t, err, nil)
 }
 
-// Names arrive as executable stems, so ".exe" is stripped by settings.executable_stem first.
+// Names arrive as executable stems, so ".exe" is stripped by procinfo.executable_stem first.
 @(test)
 names_match_without_case_or_exe_and_resolve_to_their_canonical_entry :: proc(t: ^testing.T) {
 	c, ok := catalogue(t)
@@ -26,11 +26,11 @@ names_match_without_case_or_exe_and_resolve_to_their_canonical_entry :: proc(t: 
 		{"nvim", "nvim"},
 		{"python3", "python"},
 	}) {
-		art, found := program_art.find(&c, settings.executable_stem(test[0]))
+		art, found := program_art.find(&c, procinfo.executable_stem(test[0]))
 		if testing.expect(t, found, test[0]) {testing.expect_value(t, program_art.canonical(art), test[1])}
 	}
 	for name in ([?]string{"", "pwsh", "codexx", "#", "names"}) {
-		_, found := program_art.find(&c, settings.executable_stem(name))
+		_, found := program_art.find(&c, procinfo.executable_stem(name))
 		testing.expect(t, !found, name)
 	}
 }
