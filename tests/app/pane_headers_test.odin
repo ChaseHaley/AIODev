@@ -78,6 +78,48 @@ pane_header_previews_show_what_the_buttons_do :: proc(t: ^testing.T) {
 	}
 }
 
+// A button the window would refuse draws disabled, takes no press and says why in its tooltip card; it comes
+// back once the refusal no longer holds.
+@(test)
+refused_header_buttons_are_disabled_and_say_why :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "header-refused", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.animations = false
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	pane := w.panes[0]
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Dock), app.Pane_Header_Refusal.Last_Tiled)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Linked_Window), app.Pane_Header_Refusal.Keeps_One)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Right), app.Pane_Header_Refusal.None)
+	card := app.pane_header_card(s, w, pane, .Dock)
+	testing.expect_value(t, card.description, app.PANE_HEADER_REFUSAL_TEXT[.Last_Tiled])
+	testing.expect(t, card.preview == nil, "a refused button pictures nothing")
+	notices := len(s.notices.items)
+	gesture_click_header(s, w, .Dock, app.pane_header_layout(w, pane))
+	gesture_click_header(s, w, .Linked_Window, app.pane_header_layout(w, pane))
+	testing.expect_value(t, len(w.panes), 1)
+	testing.expect(t, !w.panes[0].floating, "the disabled Float button floats nothing")
+	testing.expect_value(t, len(s.windows), 1)
+	testing.expect_value(t, len(s.notices.items), notices)
+
+	// Too small to split: both split buttons are refused until the minimum allows them again.
+	s.settings.pane.minimum_columns = 10_000
+	app.window_relayout(s, w)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Right), app.Pane_Header_Refusal.Minimum)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Down), app.Pane_Header_Refusal.Minimum)
+	gesture_click_header(s, w, .Split_Right, app.pane_header_layout(w, pane))
+	testing.expect_value(t, len(w.panes), 1)
+	s.settings.pane.minimum_columns = 0
+	app.window_relayout(s, w)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Right), app.Pane_Header_Refusal.None)
+	gesture_click_header(s, w, .Split_Right, app.pane_header_layout(w, pane))
+	if !testing.expect_value(t, len(w.panes), 2) {return}
+	// With a second tiled pane the first can float, and linking it leaves the other here.
+	testing.expect_value(t, app.pane_header_refused(w, w.panes[0], .Dock), app.Pane_Header_Refusal.None)
+	testing.expect_value(t, app.pane_header_refused(w, w.panes[0], .Linked_Window), app.Pane_Header_Refusal.None)
+}
+
 // The Settings pane's header shows the Settings icon the tab strip, rail and float capsules show,
 // rather than a keycap.
 @(test)

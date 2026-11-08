@@ -218,7 +218,9 @@ pane_header_draw :: proc(
 	view := pane_view(w, pane.content)
 	for &face, button in buttons {
 		face.icon = pane_header_icon(w, button)
-		if view != nil {face.motion = view.header_controls[button]}
+		if view == nil {continue}
+		face.motion = view.header_controls[button]
+		face.disabled = view.header_refused[button] != .None
 	}
 	buttons[.Documents].selected = open
 	buttons[.Close].danger = true
@@ -387,6 +389,9 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		document_menu_open_pane(app, w, pane)
 		return
 	}
+	// A refused button takes the press and does nothing; its tooltip says why.
+	if button, is_button := target.(Pane_Header_Button);
+	   is_button && pane_header_refused(w, pane, button) != .None {return}
 	if view := pane_view(w, pane.content); view != nil {ui.armed_press(&view.header_armed, target)}
 	// Every pane header rearranges panes; a float moves by its own float header.
 	if target == nil {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
@@ -418,8 +423,11 @@ pane_header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	if action, runs := pane_header_command(button); runs {run_action(app, w, action)}
 }
 
+// Follows the hovered header button; a refused button takes no hover, so it stays flat under the arrow.
 pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, Pane_Header_Target) {
 	pane, target, hit := pane_header_hit(w, x, y)
+	if button, is_button := target.(Pane_Header_Button);
+	   is_button && hit && pane_header_refused(w, pane, button) != .None {target = nil}
 	for &view in w.views {
 		hover: Pane_Header_Target
 		if enabled && hit && view.content == pane.content {hover = target}

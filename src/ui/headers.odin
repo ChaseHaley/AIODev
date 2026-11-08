@@ -26,12 +26,12 @@ Header_Target :: union($E: typeid) {
 	Header_Badge,
 }
 
-// How a header button draws: its icon and motion, toggled on when selected, and pressed in a faint error
-// tint rather than the neutral fill when it is a danger.
+// How a header button draws: its icon and motion, toggled on when selected, pressed in a faint error tint
+// rather than the neutral fill when it is a danger, and flat with faint ink when disabled.
 Header_Button :: struct {
-	icon:             Icon,
-	motion:           Control_Motion,
-	selected, danger: bool,
+	icon:                       Icon,
+	motion:                     Control_Motion,
+	selected, danger, disabled: bool,
 }
 
 // A hairline with SPACE_1 either side.
@@ -274,6 +274,7 @@ header_buttons_draw :: proc(
 			hover    = button.motion.hover.value,
 			press    = button.motion.press.value,
 			selected = button.selected,
+			disabled = button.disabled,
 		}
 		if button.danger {
 			danger := theme.error
@@ -282,6 +283,8 @@ header_buttons_draw :: proc(
 		}
 		face, ink, err := button_draw(list, theme, b, scale, pointer)
 		if err != .None {return}
+		// Faint ink alone sits too close to the muted ink of its neighbours at icon size.
+		if button.disabled {ink.a *= 0.55}
 		icon_draw(list, button.icon, face, ink, ICON_BUTTON, scale)
 	}
 	for divider in l.dividers {
