@@ -59,10 +59,9 @@ pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int, restore: ^[dyn
 			close.restore, held.restore = held.restore, {}
 		}
 	}
-	overlay_close_all(app, w, reopening)
 	pc := Pending_Close{target = close}
 	pc.tabs, pc.panes, _ = tab_close_scope(w.workspace, index)
-	confirmation_open(w, pc)
+	confirmation_ask(app, w, pc, reopening = reopening)
 }
 
 // Opens the workspace question. Names are cloned before the gesture and overlay cancellation
@@ -93,13 +92,15 @@ pending_close_open_workspace :: proc(
 		delete(destination_name)
 		return
 	}
+	// This question also ends the Activity inbox and the overlay rail, which overlay_close_all, and so
+	// every other question, leaves open; no reason for the difference is recorded.
 	window_overlays_cancel(app, w)
 	pc := Pending_Close {
 		target = Close_Workspace{plan = plan, workspace_name = name, destination_name = destination_name},
 	}
 	counts := workspace_pane_counts(workspace)
 	pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
-	confirmation_open(w, pc, extended = true)
+	confirmation_ask(app, w, pc, extended = true)
 }
 
 // Counts follow panes that exit while the question is `open`, then stay fixed while it closes.

@@ -50,7 +50,6 @@ pane_shell_swap_request :: proc(
 		current = found.name
 	}
 	if !gesture_cancel(app, w) {return}
-	overlay_close_all(app, w)
 	owned_id, id_error := strings.clone(profile.id)
 	if id_error != nil {notify(app, .Error, "Could not prepare the shell switch."); return}
 	owned_name, name_error := strings.clone(profile.name)
@@ -72,7 +71,7 @@ pane_shell_swap_request :: proc(
 		profile_name = owned_name,
 		current_name = owned_current,
 	}
-	confirmation_open(w, swap, show_option = true)
+	confirmation_ask(app, w, swap, show_option = true)
 }
 
 pane_swap_text :: proc(swap: Pane_Swap) -> Confirmation_Text {

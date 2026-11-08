@@ -117,8 +117,7 @@ target_open_file :: proc(app: ^App, w: ^Window, path: string) {
 		return
 	}
 	if !gesture_cancel(app, w) {localpath.open_file_destroy(&file); return}
-	overlay_close_all(app, w)
-	confirmation_open(w, Pending_File{file}, extended = true, focus = .Cancel)
+	confirmation_ask(app, w, Pending_File{file}, extended = true, focus = .Cancel)
 }
 
 pending_file_text :: proc(pending: Pending_File) -> Confirmation_Text {
