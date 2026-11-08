@@ -17,7 +17,7 @@ Client commands launch, doctor, and stop are documented by aioctl.
 `
 
 // The perf reply, one key=value line per counter in the order the perf help lists them. Times are
-// milliseconds.
+// milliseconds, except the display keys, which are microseconds.
 PERF_REPLY_FORMAT ::
 	"frames.presented=%d\n" +
 	"frames.built=%d\n" +
@@ -37,7 +37,14 @@ PERF_REPLY_FORMAT ::
 	"glyph.hits=%d\n" +
 	"glyph.misses=%d\n" +
 	"idle.presents=%d\n" +
-	"uptime.ms=%d\n"
+	"uptime.ms=%d\n" +
+	"display.period.us=%.3f\n" +
+	"motion.frames=%d\n" +
+	"motion.confirmed=%d\n" +
+	"motion.repeated=%d\n" +
+	"motion.display_skipped=%d\n" +
+	"motion.offset.min.us=%.3f\n" +
+	"motion.offset.max.us=%.3f\n"
 
 @(private)
 put_attribute_names :: proc(
@@ -330,8 +337,15 @@ image <i> <x,y> <w>x<h>, only without --kind
 Reads process-local build counters and frame timing as key=value lines:
 frames.presented, frames.built, frame.build.p50/p95/max, frame.render.p50/p95/max,
 input.latency.last/p50/p95/max, pty.bytes, pty.bytes_per_second, shape.calls,
-glyph.hits, glyph.misses, idle.presents, uptime.ms.
---reset clears the counters after printing. Times are milliseconds.
+glyph.hits, glyph.misses, idle.presents, uptime.ms, then the display's frame pacing:
+display.period.us, the verified window's display refresh; motion.frames, frames presented
+while something moved, in every window; motion.confirmed, those the compositor reported showing;
+motion.repeated, compositor vblanks on which a moving window showed its previous frame again (0
+when every animated frame met its vblank); motion.display_skipped, vblanks of a display refreshing
+apart from the compositor that no animated frame was built for (0 when each showed its own);
+motion.offset.min.us/max.us, when confirmed animated frames reached the compositor's screen less
+the compositor tick they were built for (equal when sampling is exact).
+--reset clears the counters after printing. Times are milliseconds unless named .us.
 These are diagnostics for a candidate, not a benchmark receipt; use the TermBench recipe for
 performance gates.
 `,

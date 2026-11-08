@@ -6,7 +6,6 @@ import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:log"
-import "core:time"
 
 // Floats (WORK-045). A float is a window of one or more panes above its tab's tiled panes, so opening,
 // moving, minimizing or closing it never resizes or reflows them. Its float header moves it, and holds
@@ -186,7 +185,7 @@ floating_button_pressed :: proc(w: ^Window, action: Float_Header_Action) -> bool
 
 // The float header under the pointer, or the one moving its float, takes the animation; a header the
 // pointer left keeps it while it fades. True when the window must draw again.
-floating_header_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+floating_header_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 	header := layout.INVALID_NODE
 	spot, spotted := w.float_header_hover.?
 	if spotted {header = spot.root}
@@ -197,12 +196,12 @@ floating_header_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
 	}
 	if header != layout.INVALID_NODE {w.float_header_shown = header}
 	active := header != layout.INVALID_NODE
-	changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
+	changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, frame)
 	for &control, i in w.float_header_controls {
 		action := FLOAT_HEADER_BUTTONS[i].action
 		over := spotted && spot.action == action
 		pressed := floating_button_pressed(w, action)
-		changed = ui.control_update(&control, over, pressed, app.animations, now) || changed
+		changed = ui.control_update(&control, over, pressed, app.animations, frame) || changed
 	}
 	return changed
 }

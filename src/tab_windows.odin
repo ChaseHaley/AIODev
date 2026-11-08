@@ -6,7 +6,6 @@ import "aio:render"
 import "aio:ui"
 import "core:fmt"
 import "core:math"
-import "core:time"
 
 // A drag carries the marked tabs. As with a pane, their workspace must keep content of its own.
 @(require_results)
@@ -65,14 +64,7 @@ tab_incoming_set :: proc(app: ^App, id: input.Window_Id, offer: Tab_Incoming) {
 		}
 	case incoming.slot != offer.slot:
 		incoming.slot = offer.slot
-		ui.motion_target(
-			&incoming.ghost,
-			f32(offer.slot),
-			ui.REORDER_DURATION,
-			.Decelerate,
-			app.animations,
-			time.tick_now(),
-		)
+		ui.motion_target(&incoming.ghost, f32(offer.slot), ui.REORDER_DURATION, .Decelerate, app.animations)
 	case:
 		return
 	}

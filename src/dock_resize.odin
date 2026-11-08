@@ -43,6 +43,7 @@ window_dividers :: proc(app: ^App, w: ^Window) {
 	if tree == nil {return}
 	g := window_geometry(app, w, w.pane_fill)
 	layout.dividers_shown(tree, g, pane_view_solo(w), &w.dividers)
+	pane_bars_refresh(app, w)
 	w.dock_edges = {}
 	for edge in Dock_Edge {
 		rect, shown := dock_edge_rect(app, w, edge, g.gap)

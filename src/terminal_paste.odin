@@ -68,7 +68,7 @@ paste_confirm_cancel :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	w.paste_confirm = nil
-	ui.notices_clear(&app.notices, u32(Notice_Key.Paste), app.animations, time.tick_now())
+	ui.notices_clear(&app.notices, u32(Notice_Key.Paste), app.animations)
 	mark_all_dirty(app)
 }
 

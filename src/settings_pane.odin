@@ -82,10 +82,10 @@ settings_pane_under_pointer :: proc(
 	return pane, true
 }
 
+// The settings page inside its pane; pane_draw draws the card, header and outline around it.
 @(require_results)
-settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: int) -> render.Build_Status {
-	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
-	result := ui.editor_draw(
+settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> render.Build_Status {
+	return ui.editor_draw(
 		&w.editor,
 		settings_layout_for(w, pane),
 		&w.list,
@@ -94,11 +94,6 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, card: 
 		pane_shows_focus(w, pane) && !palette_active(app, w),
 		w.pointer,
 	)
-	if result != .Ok {return result}
-	if header := pane_header_draw(app, w, pane, nil); header != .Ok {return header}
-	window_card_dim(app, w, pane, app.theme.pane)
-	window_card_outline(app, w, pane)
-	return .Ok
 }
 
 // Keeps the window's settings page matching its workspace: load one when a settings pane arrives

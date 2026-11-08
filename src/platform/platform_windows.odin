@@ -443,22 +443,38 @@ wake :: proc(p: ^Platform) -> Error {
 	return .None
 }
 
+// Sleeps until a message, a wake or one of `frames` signals, or the timeout passes. `frames` are swap
+// chain waitables of windows that want to draw; a wait satisfied by one consumes its signal, so the
+// returned index names the window that may now draw without waiting, or -1 when none signaled.
 @(require_results)
-wait_events :: proc(p: ^Platform, timeout_ms: u32) -> Error {
-	if p.wake_event == nil {return .Not_Initialized}
-	if p.queues[p.write_queue].count != 0 || sync.atomic_load(&p.wake_pending) != 0 {return .None}
+wait_events :: proc(p: ^Platform, timeout_ms: u32, frames: []rawptr) -> (signaled: int, err: Error) {
+	signaled = -1
+	if p.wake_event == nil {return signaled, .Not_Initialized}
+	if p.queues[p.write_queue].count != 0 || sync.atomic_load(&p.wake_pending) != 0 {
+		return signaled, .None
+	}
+	// MsgWaitForMultipleObjectsEx takes at most MAXIMUM_WAIT_OBJECTS - 1 (63) handles.
+	handles: [63]w.HANDLE
+	handles[0] = p.wake_event
+	count := 1
+	for frame in frames {
+		if count == len(handles) {break}
+		handles[count] = w.HANDLE(frame)
+		count += 1
+	}
 	result := MsgWaitForMultipleObjectsEx(
-		1,
-		&p.wake_event,
+		u32(count),
+		&handles[0],
 		timeout_ms,
 		w.QS_ALLINPUT,
 		MWMO_INPUTAVAILABLE,
 	)
 	if result == w.WAIT_FAILED {
 		log.errorf("MsgWaitForMultipleObjectsEx failed: %d", w.GetLastError())
-		return .Os
+		return signaled, .Os
 	}
-	return .None
+	if index := int(result - w.WAIT_OBJECT_0); index >= 1 && index < count {signaled = index - 1}
+	return signaled, .None
 }
 
 // Room for every event one more message can produce.

@@ -610,6 +610,7 @@ when AIO_CONTROL {
 		state_valuef(r, "panes.gap", "%g", window_gap(app, w))
 		state_valuef(r, "panes.header_height", "%g", w.header_height)
 		state_value(r, "panes.split_overlay", w.split_overlay)
+		state_value(r, "panes.moving", pane_motion_animating(w))
 		for view in w.views {
 			if !pane_owns_session(view.content.kind) {continue}
 			state_value(r, state_key("session.%d.builds", view.content.id), view.builds)
@@ -617,6 +618,9 @@ when AIO_CONTROL {
 		for pane in w.panes {
 			p := pane.rect
 			state_valuef(r, state_key("pane.%d.rect", pane.node), "%g,%g,%g,%g", p.x, p.y, p.width, p.height)
+			// Where the last frame drew it; the rect while a split or close motion moves it.
+			d := pane_motion_rect(w, pane)
+			state_valuef(r, state_key("pane.%d.shown", pane.node), "%g,%g,%g,%g", d.x, d.y, d.width, d.height)
 		}
 	}
 
@@ -1196,8 +1200,13 @@ when AIO_CONTROL {
 		elapsed := int(time.tick_diff(d.started, now) / time.Millisecond)
 		idle_ms, timeout_ms := verify_drive_limits(d.message.request)
 		_, is_run := d.message.request.(verify_protocol.Run)
-		quiet := time.tick_diff(v.changed, now) >= time.Duration(idle_ms) * time.Millisecond
-		frame := w == nil || v.frames > d.request_frame && !w.dirty
+		// Nothing changed for the idle time and nothing moves, so the reply reads a settled window and
+		// building it cannot cost a moving window its frames.
+		quiet := time.tick_diff(v.changed, now) >= time.Duration(idle_ms) * time.Millisecond && !motion_active(app)
+		// Drawing follows the display, so output that never pauses is always newer than the last frame
+		// at some point of a tick; then any frame since the request shows the drive. A quiet window must
+		// have drawn its latest state.
+		frame := w == nil || v.frames > d.request_frame && (!w.dirty || !quiet)
 		if elapsed < timeout_ms && (!quiet || !frame) {
 			if w != nil && quiet {w.dirty = true}
 			return

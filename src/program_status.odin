@@ -114,7 +114,7 @@ status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
 	if mark.glyph != .Working || mark.progress >= 0 || !app.animations {return 0}
 	w.status_spinning = true
 	period := i64(STATUS_SPIN_PERIOD_MS) * i64(time.Millisecond)
-	return f32(f64(time.tick_now()._nsec % period) / f64(period))
+	return f32(f64(w.frame.display._nsec % period) / f64(period))
 }
 
 status_mark_draw :: proc(
@@ -136,8 +136,8 @@ status_tab_mark :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) 
 	return mark
 }
 
-// Queue the next frame immediately. window_render waits on the swap chain before sampling the
-// phase, so display refresh paces animation without a timer cap or an extra sleep after Present.
+// Queue the next frame immediately. The loop draws the window as the swap chain takes each frame and
+// samples the phase at the frame's display time, so the spinner turns exactly one refresh per frame.
 status_spin_active :: proc(w: ^Window) -> bool {
 	return w.status_spinning && window_drawable(w)
 }

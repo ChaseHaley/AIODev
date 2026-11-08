@@ -130,8 +130,8 @@ notices_replace_expire_and_report_deadlines :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(n.items), 1)
 	_, any := ui.notices_deadline(&n)
 	testing.expect(t, !any)
-	testing.expect(t, ui.notices_clear(&n, 7, false, now))
-	testing.expect(t, !ui.notices_clear(&n, 7, false, now))
+	testing.expect(t, ui.notices_clear(&n, 7, false))
+	testing.expect(t, !ui.notices_clear(&n, 7, false))
 }
 
 @(test)

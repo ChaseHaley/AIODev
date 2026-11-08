@@ -4,7 +4,6 @@ import "aio:layout"
 import "aio:render"
 import "aio:ui"
 import "core:log"
-import "core:time"
 
 // What tab `index` of the window's workspace shows in the strip and in the rail: its title, the
 // focused pane's content icon or program badge, and its program status.
@@ -95,7 +94,7 @@ tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int)
 
 // Advances the window's tab motion: tabs easing into their slots, the ghost of tabs arriving from
 // another window, the selection underline and the strip controls. True when the window must draw again.
-tab_presentation_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 	changed := false
 	// D-069: dragged tabs follow the pointer (tab_drag_follow_pointer); the others, and every tab once
 	// dropped, settle into their slots, opening the gap another window's drag asks for.
@@ -104,19 +103,19 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool 
 		if i >= len(w.workspace.tabs) {continue}
 		if !following || !w.workspace.tabs[i].marked {
 			gap := i >= w.tab_incoming.slot ? w.tab_incoming.count : 0
-			ui.motion_target(&position, f32(i + gap), ui.REORDER_DURATION, .Decelerate, app.animations, now)
+			ui.motion_target(&position, f32(i + gap), ui.REORDER_DURATION, .Decelerate, app.animations)
 		}
-		changed = ui.motion_update(&position, now) || changed
+		changed = ui.motion_update(&position, frame) || changed
 	}
-	changed = ui.motion_update(&w.tab_incoming.ghost, now) || changed
+	changed = ui.motion_update(&w.tab_incoming.ghost, frame) || changed
 	selected := f32(w.workspace.selected)
-	ui.motion_target(&w.tab_underline, selected, ui.REORDER_DURATION, .Decelerate, app.animations, now)
+	ui.motion_target(&w.tab_underline, selected, ui.REORDER_DURATION, .Decelerate, app.animations)
 	for &control, i in w.tab_controls {
-		changed = tab_strip_control_update(app, w, &control, Tab_Chrome_Tab{i}, now) || changed
+		changed = tab_strip_control_update(app, w, &control, Tab_Chrome_Tab{i}, frame) || changed
 	}
-	changed = tab_strip_control_update(app, w, &w.new_tab_control, Tab_Chrome_New{}, now) || changed
-	changed = tab_strip_control_update(app, w, &w.profiles_control, Tab_Chrome_Profiles{}, now) || changed
-	return ui.motion_update(&w.tab_underline, now) || changed
+	changed = tab_strip_control_update(app, w, &w.new_tab_control, Tab_Chrome_New{}, frame) || changed
+	changed = tab_strip_control_update(app, w, &w.profiles_control, Tab_Chrome_Profiles{}, frame) || changed
+	return ui.motion_update(&w.tab_underline, frame) || changed
 }
 
 tab_presentation_animating :: proc(w: ^Window) -> bool {
@@ -134,10 +133,11 @@ tab_strip_control_update :: proc(
 	w: ^Window,
 	control: ^ui.Control_Motion,
 	target: Tab_Chrome_Target,
-	now: time.Tick,
+	frame: ui.Frame_Time,
 ) -> bool {
 	hovered := w.tabs_horizontal && w.tab_hover == target
-	return ui.control_update(control, hovered, hovered && gesture_tab_pressed(w) != nil, app.animations, now)
+	pressed := hovered && gesture_tab_pressed(w) != nil
+	return ui.control_update(control, hovered, pressed, app.animations, frame)
 }
 
 // Relayout fits the presentation to the tab count. Only the strip draws its hover and presses from the

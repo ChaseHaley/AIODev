@@ -47,6 +47,8 @@ Window :: struct {
 	ui_text: ui.Text,
 	using markdown_pointer: Markdown_Pointer,
 	using resources: Workspace_View_Resources,
+	// Tiled panes easing to the places a split or close gave them; see pane_motion.odin.
+	pane_motion: Pane_Motion,
 	gesture: Gesture_State,
 	// The pane scrollbar under the pointer and a held thumb; see pane_scrollbar.odin.
 	scrollbars: Pane_Scrollbars,
@@ -64,6 +66,10 @@ Window :: struct {
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
+	// The frame being built: when it will be on screen. Drawing that moves with time reads it.
+	frame: ui.Frame_Time,
+	// Some motion moved since the last present, so the next frame shows it; see render.frame_presented.
+	frame_moved: bool,
 	focus_order: u64,
 	focus_bracket: Focus_Bracket,
 	phase: Window_Phase,
@@ -309,6 +315,7 @@ window_free :: proc(w: ^Window) {
 	workspace_picker_destroy(w)
 	floating_window_destroy(&w.floats)
 	confirmation_clear(w)
+	pane_motion_destroy(w)
 	render.draw_list_destroy(&w.list)
 	free(w)
 }
@@ -410,7 +417,11 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	if palette_visible(app, w) {
 		ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	}
-	if w.phase == .Preparing || window_minimized(w) {return}
+	if w.phase == .Preparing || window_minimized(w) {
+		// A change the window cannot show now does not move when it is shown later.
+		w.pane_motion.armed = nil
+		return
+	}
 	bar_height := window_title_height(w)
 	tab_presentation_fit(w)
 	platform.window_title_bar(
@@ -423,7 +434,9 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	_, _ = rail_current_layout(w)
 	pane_header_relayout_reset(w)
 	w.header_height = pane_header_row_height(app, w.scale)
+	shown := pane_motion_shown(w)
 	layout.place_shown(window_tree(w), window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
+	pane_motion_placed(app, w, shown)
 	window_panes_placed(app, w, 0)
 	rail_reveal_active(w)
 }
@@ -541,13 +554,24 @@ focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 	return is_pane ? workspace_session_for_content(app, content) : nil
 }
 
-window_render :: proc(app: ^App, w: ^Window) {
+// Draws w once its swap chain has room for a frame. With `wait` it waits for that room, as tests and the
+// modal resize loop need; the main loop passes false, having waited on frame_waitable itself. The frame
+// is built for the moment it will be on screen, and every motion is sampled at that moment.
+window_render :: proc(app: ^App, w: ^Window, wait := true) {
 	if window_minimized(w) {return}
 	if !window_surface_ready(app, w) {return}
 	surface := window_surface(w)
-	if err := render.frame_wait(surface, FRAME_WAIT_MS); err == .Wait_Failed {
+	ready, wait_error := render.frame_acquire(surface, wait ? FRAME_WAIT_MS : 0)
+	if wait_error == .Wait_Failed {
 		log.error("waiting for the swap chain failed")
 	}
+	if !ready {return}
+	frame := render.frame_predict(surface, time.tick_now())
+	_ = window_motion_update(app, w, frame)
+	// A motion waiting on a resuming frame still needs that frame on screen so the next one is back to
+	// back; it shows the window unchanged.
+	if !w.dirty && !window_animating(app, w) {return}
+	w.frame = frame
 	background := app.theme.window
 	when FRAME_STATS {build_start := time.tick_now()}
 	if !window_build_frame(app, w) {return}
@@ -571,6 +595,10 @@ window_render :: proc(app: ^App, w: ^Window) {
 		if err == .None {
 			perf.record_frame(&app.perf, build_ms, render_ms, perf.idle_at(&app.perf, render_start))
 		}
+	}
+	if err == .None {
+		render.frame_presented(surface, frame, w.frame_moved)
+		w.frame_moved = false
 	}
 	w.dirty = false
 }
@@ -596,10 +624,15 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	blinking := false
 	w.frame_wakes = {}
+	// Closed panes collapse beneath the panes taking their place.
+	pane_ghosts_draw(app, w)
+	pane_motion_drawn_reset(w)
 	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
 	for pane in w.panes {
 		if pane.floating {continue}
+		from := render.draw_mark(&w.list)
 		if result := pane_draw(app, w, pane, &blinking); result != .Ok {return result}
+		pane_motion_drawn(w, pane, from)
 	}
 	if w.pane_fill != .Screen {
 		if result := window_chrome_draw(app, w); result != .Ok {return result}
@@ -664,27 +697,75 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	)
 }
 
-// Draws one pane's card, content, header, scrollbar, dimming and outline.
+// Draws one pane's card, content, header, scrollbar, dimming and outline. While the pane moves, its
+// frame draws where the motion has it and its content, laid out at the layout rectangle, moves with the
+// frame's corner inside it; see pane_motion.odin.
 @(private)
 pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool) -> render.Build_Status {
+	f := pane_frame(w, pane)
+	if f.shown.width < 1 || f.shown.height < 1 {return .Ok}
+	framed := pane
+	framed.rect = f.shown
 	card := len(w.list.rects)
-	window_card_draw(app, w, pane)
+	window_card_draw(app, w, framed)
+	content := render.draw_mark(&w.list)
+	background := app.theme.pane
+	entry: ^Session_Entry
+	scrollbar := true
 	switch pane.content.kind {
 	case .Terminal:
+		entry = workspace_session_for_content(app, pane.content)
+		state := pane_view(w, pane.content)
+		if entry == nil || state == nil {return .Ok}
+		frame, result := terminal_pane_draw(app, w, pane, entry, &state.view)
+		if result != .Ok {return result}
+		background = frame.background
+		blinking^ ||= frame.cursor_blinking && pane_has_keyboard(app, w, pane)
 	case .Settings:
-		return settings_pane_draw(app, w, pane, card)
+		if result := settings_pane_draw(app, w, pane); result != .Ok {return result}
+		scrollbar = false
 	case .Markdown:
-		return markdown_pane_draw(app, w, pane, card)
+		drawn, result := markdown_pane_draw(app, w, pane)
+		if result != .Ok {return result}
+		scrollbar = drawn
 	}
-	entry := workspace_session_for_content(app, pane.content)
-	state := pane_view(w, pane.content)
-	if entry == nil || state == nil {return .Ok}
-	view := &state.view
+	pane_frame_content(w, f, content)
+	if card < len(w.list.rects) {w.list.rects[card].color = background}
+	if entry != nil && entry.status != .Running {
+		message := session_message(app, entry.profile_id, term.status(entry.session))
+		if message_result := ui.pane_message_draw(
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			{f.shown.x, f.shown.y, f.shown.width, f.shown.height},
+			message,
+			w.scale,
+			window_pane_radius(app, w),
+		); message_result != .Ok {return message_result}
+	}
+	if header_result := pane_header_draw(app, w, framed, entry); header_result != .Ok {return header_result}
+	if scrollbar {pane_scrollbar_draw(app, w, framed)}
+	window_card_dim(app, w, framed, background)
+	window_card_outline(app, w, framed)
+	return .Ok
+}
+
+// A terminal's screen, laid out at the pane's layout rectangle.
+@(private = "file")
+terminal_pane_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: layout.Pane_Rect,
+	entry: ^Session_Entry,
+	view: ^term_view.View,
+) -> (
+	term_view.Frame,
+	render.Build_Status,
+) {
 	c := app.settings.colors
 	selection_foreground: Maybe(render.Color)
 	if fg, ok := c.selection_foreground.?; ok {selection_foreground = colour.rgba(fg)}
 	content_focused := pane_has_keyboard(app, w, pane)
-	hover := link_hover_range(w, pane.content)
 	minimum_contrast := f32(1)
 	if app.settings.active_theme.terminal_light {
 		minimum_contrast = f32(app.settings.terminal.minimum_contrast)
@@ -700,36 +781,13 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 		minimum_contrast = minimum_contrast,
 		focused = content_focused,
 		cursor_phase_visible = !content_focused || cursor_visible(w),
-		hover = hover,
+		hover = link_hover_range(w, pane.content),
 	}
-	box := pane_box(
-		w.metrics,
-		pane.rect,
-		pane_insets(app, w, entry, pane),
-	)
+	box := pane_box(w.metrics, pane.rect, pane_insets(app, w, entry, pane))
 	frame, result := build_pane(app, w, pane, entry, view, box.origin, style)
-	if result != .Ok {return result}
+	if result != .Ok {return frame, result}
 	if held, ok := frame.capture.(term.Capture_Held); ok {capture_hold_note(w, held.until)}
-	if card < len(w.list.rects) {w.list.rects[card].color = frame.background}
-	blinking^ ||= frame.cursor_blinking && content_focused
-	if entry.status != .Running {
-		message := session_message(app, entry.profile_id, term.status(entry.session))
-		if message_result := ui.pane_message_draw(
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height},
-			message,
-			w.scale,
-			window_pane_radius(app, w),
-		); message_result != .Ok {return message_result}
-	}
-	if header_result := pane_header_draw(app, w, pane, entry);
-	   header_result != .Ok {return header_result}
-	pane_scrollbar_draw(app, w, pane)
-	window_card_dim(app, w, pane, frame.background)
-	window_card_outline(app, w, pane)
-	return .Ok
+	return frame, .Ok
 }
 
 @(private)

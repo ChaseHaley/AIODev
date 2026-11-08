@@ -155,9 +155,11 @@ layout_state_path :: proc(app: ^App) -> (string, bool) {
 	return "", false
 }
 
+// Saving holds the main thread for a moment, so it waits for every motion to settle rather than cost a
+// moving window its frames; the loop wakes for it once nothing moves.
 layout_state_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 	scheduled, ok := app.layout_save.(Layout_Save_Scheduled)
-	return scheduled.deadline, ok
+	return scheduled.deadline, ok && !motion_active(app)
 }
 
 // Schedules a save check; repeated calls before it runs coalesce into one.
@@ -169,7 +171,7 @@ layout_state_touch :: proc(app: ^App) {
 
 layout_state_tick :: proc(app: ^App) {
 	scheduled, ok := app.layout_save.(Layout_Save_Scheduled)
-	if !ok || time.tick_diff(time.tick_now(), scheduled.deadline) > 0 {return}
+	if !ok || time.tick_diff(time.tick_now(), scheduled.deadline) > 0 || motion_active(app) {return}
 	app.layout_save = Layout_Save_Idle{scheduled.path}
 	layout_state_save(app)
 }

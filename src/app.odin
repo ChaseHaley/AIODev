@@ -168,7 +168,7 @@ app_init :: proc(app: ^App) -> bool {
 	tray_init(app)
 	platform_api.set_modal_loop_callback(
 		&app.platform,
-		proc(user: rawptr) {tick((^App)(user))},
+		proc(user: rawptr) {tick((^App)(user), wait_frames = true)},
 		app,
 	)
 	if !layout_state_restore(app) {
@@ -235,15 +235,68 @@ app_destroy :: proc(app: ^App) {
 
 run :: proc(app: ^App) {
 	for app_running(app) {
-		if platform_api.wait_events(&app.platform, wait_timeout(app)) != .None {
+		waits := frame_waits(app)
+		signaled, err := platform_api.wait_events(
+			&app.platform,
+			wait_timeout(app, waits),
+			waits.handles[:waits.count],
+		)
+		if err != .None {
 			log.error("waiting for events failed")
 		}
-		tick(app)
+		if signaled >= 0 {render.frame_signaled(window_surface(waits.windows[signaled]))}
+		tick(app, wait_frames = false)
 	}
 }
 
-// One iteration of the main loop; also driven by the platform during modal resize loops.
-tick :: proc(app: ^App) {
+// The windows that want a frame and how the loop learns it may draw them: a window with a swap chain
+// draws when the swap chain signals room for its next frame, so frames follow the display's refresh
+// and each window keeps its own display's pace.
+@(private = "file")
+Frame_Waits :: struct {
+	handles: [32]rawptr,
+	windows: [32]^Window,
+	count:   int,
+	// A window can draw at once: it has no surface yet, which its next frame makes.
+	ready:   bool,
+	// A window wants frames that its swap chain cannot wake the loop for: it cannot present but still
+	// has motion to finish, it holds a frame it failed to draw, or no wait slot is left. The loop
+	// retries on the assumed refresh.
+	unpaced: bool,
+}
+
+@(private = "file")
+frame_waits :: proc(app: ^App) -> (waits: Frame_Waits) {
+	waits.unpaced = notices_unshown(app) && ui.notices_animating(&app.notices)
+	for w in app.windows {
+		animating := window_animating(app, w)
+		if !window_drawable(w) {
+			waits.unpaced ||= animating
+			continue
+		}
+		if !w.dirty && !animating && !status_spin_active(w) {continue}
+		switch surface in w.surface {
+		case ^render.Surface:
+			handle := render.frame_waitable(surface)
+			if handle == nil || waits.count == len(waits.handles) {
+				waits.unpaced = true
+				continue
+			}
+			waits.handles[waits.count], waits.windows[waits.count] = handle, w
+			waits.count += 1
+		case Surface_Failed:
+			waits.unpaced ||= animating
+		case nil:
+			waits.ready = true
+		}
+	}
+	return
+}
+
+// One iteration of the main loop; also driven by the platform during modal resize loops and by tests.
+// Those wait for each window's swap chain and draw it, as the size-move timer expects; the main loop
+// passes false because its own wait already took the swap chains that signaled.
+tick :: proc(app: ^App, wait_frames := true) {
 	events, err := platform_api.poll_events(&app.platform)
 	if err != .None {
 		log.errorf("polling events failed: %v", err)
@@ -260,6 +313,7 @@ tick :: proc(app: ^App) {
 		}
 		mark_all_dirty(app)
 	}
+	// Each window samples its next frame's instant, picking up motion events retargeted without drawing.
 	update_motion(app)
 	app_timers_advance(app, .Before_Draw)
 	pane_links_sync(app)
@@ -269,16 +323,12 @@ tick :: proc(app: ^App) {
 		for timer in Window_Timer {window_timer_advance(app, window, timer, now)}
 		status_spin_tick(window)
 		status_taskbar_follow(app, window)
-		switch window.phase {
-		case .Preparing:
-			window.dirty = false
+		if !window_drawable(window) {
+			if window.phase == .Preparing {window.dirty = false}
 			continue
-		case .Hidden, .Closing:
-			continue
-		case .Shown:
 		}
-		if window.dirty {
-			window_render(app, window)
+		if window.dirty || window_animating(app, window) {
+			window_render(app, window, wait_frames)
 			// The harness counts this window's present now; its After_Draw timer reads every window's.
 			when AIO_CONTROL {verify_presented(app, window)}
 		}
@@ -292,8 +342,8 @@ tick :: proc(app: ^App) {
 // Every timed feature that is not a window's, once. Each advances itself and names its next deadline:
 // tick advances them and wait_timeout sleeps until the earliest. A value added here must be named by
 // every switch below, so no feature can be advanced without waking the loop, or the reverse. Find
-// progress stays outside, as a pair: find_tick runs before update_motion, where no phase here runs, and
-// find_pending wakes the loop at once rather than at a deadline.
+// progress stays outside, as a pair: find_tick runs before the timers and the windows' motion, where no
+// phase here runs, and find_pending wakes the loop at once rather than at a deadline.
 @(private = "file")
 App_Timer :: enum u8 {
 	Processes,
@@ -426,13 +476,12 @@ earliest :: proc(current: time.Tick, found: bool, next: time.Tick) -> (time.Tick
 	return next, true
 }
 
-@(private)
-wait_timeout :: proc(app: ^App) -> u32 {
-	// Spinner frames are already paced by the swap chain, including on high-refresh displays.
-	for window in app.windows {
-		if status_spin_active(window) {return 0}
-	}
-	if motion_active(app) {return 16}
+// How long the loop may sleep when nothing signals. Windows paced by their swap chain are not timed
+// here: their waitables wake the loop.
+@(private = "file")
+wait_timeout :: proc(app: ^App, waits: Frame_Waits) -> u32 {
+	if waits.ready {return 0}
+	if waits.unpaced {return u32(time.duration_milliseconds(render.FRAME_PERIOD_DEFAULT))}
 	INFINITE :: max(u32)
 	deadline: time.Tick
 	found := false
@@ -502,7 +551,7 @@ apply_fonts :: proc(app: ^App) {
 	family, err := font.family_load(app.fonts, app.settings.font.family)
 	if err == .None {
 		app.family = family
-		ui.notices_clear(&app.notices, u32(Notice_Key.Font), app.animations, time.tick_now())
+		ui.notices_clear(&app.notices, u32(Notice_Key.Font), app.animations)
 		return
 	}
 	for name in FALLBACK_FONT_FAMILIES {

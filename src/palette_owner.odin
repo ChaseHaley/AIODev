@@ -5,7 +5,6 @@ import "aio:input"
 import "aio:platform"
 import "aio:settings"
 import "aio:ui"
-import "core:time"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
 // mapping between them, so keeping a window through a closing fade needs no second hand-synced phase.
@@ -24,13 +23,15 @@ palette_owner_state :: proc(app: ^App) -> Palette_Owner_State {
 	return Palette_Closing{owner}
 }
 
-// Advances the palette's fade; its window draws it, and keeps it until a fade-out settles.
-palette_animate :: proc(app: ^App, now: time.Tick) {
-	changed, settled := ui.presence_advance(&app.palette.presence, app.animations, now)
+// Advances the palette's fade in its window, which draws it and keeps it until a fade-out settles;
+// true when that window must draw again.
+palette_animate :: proc(app: ^App, frame: ui.Frame_Time) -> bool {
+	changed, settled := ui.presence_advance(&app.palette.presence, app.animations, frame)
 	owner := palette_owner_window(app)
-	if owner == nil {return}
+	if owner == nil {return false}
 	if changed {owner.dirty = true}
 	if settled {palette_release(app, owner)}
+	return changed || settled
 }
 
 palette_animating :: proc(app: ^App) -> bool {

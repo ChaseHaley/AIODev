@@ -2,7 +2,6 @@ package main
 
 import "aio:input"
 import "aio:ui"
-import "core:time"
 
 // w took focus, so it becomes the most recently focused window, the one the notices prefer.
 window_focus_note :: proc(app: ^App, w: ^Window) {
@@ -59,7 +58,7 @@ notice_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 	if app.notice_window != w.id {return true}
 	if e.button == .Left {
 		hit := notice_hit(app, w, f32(e.x), f32(e.y))
-		if ui.notices_release(&app.notices, hit.close ? hit.id : 0, app.animations, time.tick_now()) {
+		if ui.notices_release(&app.notices, hit.close ? hit.id : 0, app.animations) {
 			for window in app.windows {window.dirty = true}
 		}
 	}

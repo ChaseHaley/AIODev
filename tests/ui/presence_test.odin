@@ -13,8 +13,8 @@ Presence_Probe :: struct {
 }
 
 @(private)
-presence_probe_frame :: proc(p: ^Presence_Probe, enabled: bool, now: time.Tick) {
-	_, settled := ui.presence_advance(&p.presence, enabled, now)
+presence_probe_frame :: proc(p: ^Presence_Probe, enabled: bool, display: time.Tick) {
+	_, settled := ui.presence_advance(&p.presence, enabled, test_frame(display))
 	if settled {p.released += 1}
 }
 
@@ -72,16 +72,16 @@ presence_fade_rises_only_while_closing :: proc(t: ^testing.T) {
 	start := time.tick_now()
 	p: ui.Presence
 	ui.presence_open(&p, PRESENCE_PROBE_SPEC)
-	_, _ = ui.presence_advance(&p, true, start)
-	_, _ = ui.presence_advance(&p, true, time.tick_add(start, 200*time.Millisecond))
+	_, _ = ui.presence_advance(&p, true, test_frame(start))
+	_, _ = ui.presence_advance(&p, true, test_frame(time.tick_add(start, 200*time.Millisecond)))
 	fade := ui.presence_fade(p, 6)
 	testing.expect_value(t, fade, ui.Fade{opacity = 1, rise = 0})
 	// A presence built as already shown fades the same as one that finished opening.
 	testing.expect_value(t, ui.presence_fade(ui.presence_shown(PRESENCE_PROBE_SPEC), 6), fade)
 
 	ui.presence_close(&p)
-	_, _ = ui.presence_advance(&p, true, time.tick_add(start, 200*time.Millisecond))
-	_, _ = ui.presence_advance(&p, true, time.tick_add(start, 245*time.Millisecond))
+	_, _ = ui.presence_advance(&p, true, test_frame(time.tick_add(start, 200*time.Millisecond)))
+	_, _ = ui.presence_advance(&p, true, test_frame(time.tick_add(start, 245*time.Millisecond)))
 	fade = ui.presence_fade(p, 6)
 	testing.expect(t, fade.opacity > 0 && fade.opacity < 1)
 	testing.expect(t, fade.rise > 0 && fade.rise < 6)

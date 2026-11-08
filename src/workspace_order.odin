@@ -3,7 +3,6 @@ package main
 import "aio:input"
 import "aio:ui"
 import "core:math"
-import "core:time"
 
 @(require_results)
 workspace_reorder :: proc(app: ^App, id, target_id: u32) -> bool {
@@ -143,11 +142,11 @@ workspace_order_move :: proc(w: ^Window, x, y: f32) {
 	top := clamp((y - origin.y) / origin.height - d.grab, 0, f32(len(p.rows) - 1))
 	d.to = int(math.round(top))
 	if entry := workspace_order_position(p, d.id); entry != nil {
-		ui.motion_target(&entry.position, top, 0, .Linear, false, time.tick_now())
+		ui.motion_target(&entry.position, top, 0, .Linear, false)
 	}
 }
 
-workspace_order_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) -> bool {
+workspace_order_animate :: proc(w: ^Window, enabled: bool, frame: ui.Frame_Time) -> bool {
 	p := &w.workspace_picker
 	if len(p.order_positions) == 0 {return false}
 	lift := workspace_order_lift(p)
@@ -162,9 +161,9 @@ workspace_order_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) -> bo
 				if from < lift.to && index > from && index <= lift.to {target -= 1}
 				if lift.to < from && index >= lift.to && index < from {target += 1}
 			}
-			ui.motion_target(&entry.position, f32(target), ui.REORDER_DURATION, .Decelerate, enabled, now)
+			ui.motion_target(&entry.position, f32(target), ui.REORDER_DURATION, .Decelerate, enabled)
 		}
-		changed = ui.motion_update(&entry.position, now) || changed
+		changed = ui.motion_update(&entry.position, frame) || changed
 		moving ||= ui.motion_active(entry.position)
 	}
 	if lift == nil && !moving {workspace_order_stop(p); changed = true}
@@ -204,7 +203,7 @@ workspace_order_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) 
 	lifted := workspace_order_lift(p) != nil
 	if lifted {
 		workspace_order_move(w, x, y)
-		_ = workspace_order_animate(w, app.animations, time.tick_now())
+		_ = workspace_order_animate(w, app.animations, window_frame_time(w))
 	}
 	w.dirty = true
 	pointer_set(app, w, lifted ? .Resize_All : .Hand)
@@ -231,7 +230,7 @@ workspace_order_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 			_ = workspace_reorder(app, d.id, p.rows[d.to].id)
 			workspace_row_reveal(w, d.id)
 		}
-		_ = workspace_order_animate(w, app.animations, time.tick_now())
+		_ = workspace_order_animate(w, app.animations, window_frame_time(w))
 	} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 && hit < len(p.rows) &&
 	          p.rows[hit].id == id {
 		p.selected = hit

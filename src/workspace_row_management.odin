@@ -123,7 +123,7 @@ workspace_row_rename_open :: proc(app: ^App, w: ^Window, id: u32) {
 	if workspace_picker_icons(&w.workspace_picker) {workspace_picker_return(app, w)}
 	workspace_picker_transition(w, Workspace_Picker_Rename{id = id})
 	p := &w.workspace_picker
-	workspace_row_rename_target(p, app.animations, time.tick_now())
+	workspace_row_rename_target(p, app.animations)
 	ui.field_set(&p.rename, target.name)
 	ui.field_select_all(&p.rename)
 	workspace_row_reveal(w, id)
@@ -155,16 +155,16 @@ workspace_row_rename_error_set :: proc(w: ^Window, error: bool) {
 }
 
 // The rename field eases open below its row while the rename lasts; true when it moved this frame.
-workspace_row_rename_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) -> bool {
+workspace_row_rename_animate :: proc(w: ^Window, enabled: bool, frame: ui.Frame_Time) -> bool {
 	p := &w.workspace_picker
 	if _, renaming := p.state.(Workspace_Picker_Rename); !renaming {return false}
-	workspace_row_rename_target(p, enabled, now)
-	return ui.motion_update(&p.rename_motion, now)
+	workspace_row_rename_target(p, enabled)
+	return ui.motion_update(&p.rename_motion, frame)
 }
 
 @(private = "file")
-workspace_row_rename_target :: proc(p: ^Workspace_Picker, enabled: bool, now: time.Tick) {
-	ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, enabled, now)
+workspace_row_rename_target :: proc(p: ^Workspace_Picker, enabled: bool) {
+	ui.motion_target(&p.rename_motion, 1, 140 * time.Millisecond, .Decelerate, enabled)
 }
 
 // The inline rename: SPACE_2, a standard field, SPACE_2, one Detail hint line and SPACE_2.

@@ -54,7 +54,7 @@ settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_p
 	read_expiry := ui.notice_expiry(state.notices.items[0])
 	show_diagnostics_quietly(&state, &issues, os.Error(os.General_Error.Invalid_Path))
 	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), read_expiry)
-	ui.notices_clear(&state.notices, state.notices.items[0].key, false, time.tick_now())
+	ui.notices_clear(&state.notices, state.notices.items[0].key, false)
 	show_diagnostics_quietly(&state, &issues, os.Error(os.General_Error.Not_Exist))
 	testing.expect_value(t, len(state.notices.items), 1)
 	show_diagnostics_quietly(&state, &issues, nil)

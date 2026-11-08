@@ -139,6 +139,8 @@ pane_split_attach :: proc(
 	if err != nil {return false}
 	if w == nil {return true}
 	visible := workspace.selected == tab_index
+	// The panes of a tab in view ease apart to make room; a split that switches tabs shows at once.
+	if visible {pane_motion_arm(w)}
 	if focus {
 		if !visible {tab_select(app, w, tab_index)}
 		pane_focus(app, w, added)

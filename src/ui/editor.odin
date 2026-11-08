@@ -11,7 +11,6 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
-import "core:time"
 import "core:unicode/utf8"
 
 Row_Kind :: enum {
@@ -1403,14 +1402,14 @@ profile_drag_move :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> bool {
 	}
 	drag.target = slot <= drag.from ? slot : slot + 1
 	if entry := profile_position(p, profile_block_id(p, grabbed)); entry != nil {
-		motion_target(&entry.position, top, 0, .Linear, false, time.tick_now())
+		motion_target(&entry.position, top, 0, .Linear, false)
 	}
 	return true
 }
 
 // Eases reordering blocks toward their lines; returns whether the page must redraw. Positions are
 // dropped, and the reorder ends, once the drag has ended and every block has settled.
-editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bool {
+editor_profiles_animate :: proc(p: ^Editor, enabled: bool, frame: Frame_Time) -> bool {
 	if len(p.profile_positions) == 0 {return false}
 	blocks := profile_blocks(p)
 	_, dragging := p.order.(Order_Dragging)
@@ -1429,9 +1428,9 @@ editor_profiles_animate :: proc(p: ^Editor, enabled: bool, now: time.Tick) -> bo
 		}
 		if !dragging || !entry.lifted {
 			line := f32(profile_block_line(p, blocks, block))
-			motion_target(&entry.position, line, REORDER_DURATION, .Decelerate, enabled, now)
+			motion_target(&entry.position, line, REORDER_DURATION, .Decelerate, enabled)
 		}
-		changed = motion_update(&entry.position, now) || changed
+		changed = motion_update(&entry.position, frame) || changed
 		moving ||= motion_active(entry.position)
 		i += 1
 	}

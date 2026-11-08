@@ -234,7 +234,7 @@ pane_drag_outside :: proc(
 	rect: layout.Rect
 	if tear_off {for pane in w.panes {if pane.node == carry.node {rect = pane.rect; break}}}
 	values := [4]f32{rect.x, rect.y, rect.width, rect.height}
-	for &m, i in carry.ghost {ui.motion_target(&m, values[i], 0, .Linear, false, time.tick_now())}
+	for &m, i in carry.ghost {ui.motion_target(&m, values[i], 0, .Linear, false)}
 	w.dirty = true
 }
 
@@ -325,12 +325,12 @@ pane_drag_target_move :: proc(
 	pane_drag_retarget(app, source_window, a, next)
 	// The ghost fades in on every drop kind, so crossing between the tab strip and a pane
 	// never flashes between faded and opaque.
-	ui.motion_target(&carry.reveal, 1, GHOST_DURATION, .Decelerate, app.animations, now)
+	ui.motion_target(&carry.reveal, 1, GHOST_DURATION, .Decelerate, app.animations)
 	w.dirty = true
 	source_window.dirty = true
 	values := [4]f32{rect.x, rect.y, rect.width, rect.height}
 	for &m, i in carry.ghost {
-		ui.motion_target(&m, values[i], GHOST_DURATION, .Decelerate, app.animations && shown, now)
+		ui.motion_target(&m, values[i], GHOST_DURATION, .Decelerate, app.animations && shown)
 	}
 	return true
 }
@@ -444,7 +444,7 @@ pane_drag_animating :: proc(w: ^Window) -> bool {
 	return false
 }
 
-pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) {
+pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, frame: ui.Frame_Time) {
 	_, carry := pane_drag_state(w)
 	if carry == nil {return}
 	if !enabled && pane_drag_animating(w) {
@@ -453,8 +453,8 @@ pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) 
 		w.dirty = true
 		return
 	}
-	if ui.motion_update(&carry.reveal, now) {w.dirty = true}
-	for &m in carry.ghost {if ui.motion_update(&m, now) {w.dirty = true}}
+	if ui.motion_update(&carry.reveal, frame) {w.dirty = true}
+	for &m in carry.ghost {if ui.motion_update(&m, frame) {w.dirty = true}}
 	if w.dirty {
 		if target := window_find(app, carry.visit.window); target != nil {target.dirty = true}
 	}

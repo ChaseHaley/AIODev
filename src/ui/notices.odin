@@ -141,7 +141,7 @@ notices_live :: proc(n: ^Notices) -> []Notice {
 }
 
 // Shows a notice. A nonzero key replaces the notice already shown under it; a zero duration is sticky.
-// `enabled` and `now` are the caller's animation policy and clock, as for every notice transition.
+// `enabled` is the caller's animation policy, as for every notice transition; `now` dates the expiry.
 notices_put :: proc(
 	n: ^Notices,
 	key: u32,
@@ -162,7 +162,7 @@ notices_put :: proc(
 		return
 	}
 	if key != 0 {
-		notices_clear(n, key, enabled, now)
+		notices_clear(n, key, enabled)
 	}
 	n.next_id += 1
 	notice := Notice {
@@ -175,23 +175,25 @@ notices_put :: proc(
 	presence_open(&entering.presence, NOTICE_PRESENCE)
 	if duration != 0 {entering.expires = time.tick_add(now, duration)}
 	notice.state = entering
-	_, _ = notice_advance(&notice, enabled, now)
+	// Without animations the notice shows at once, and a disabled motion never reads the frame;
+	// otherwise its entry starts with the next frame.
+	if !enabled {_, _ = notice_advance(&notice, false, {})}
 	inject_at(&n.items, len(notices_live(n)), notice)
 }
 
-notices_clear :: proc(n: ^Notices, key: u32, enabled: bool, now: time.Tick) -> bool {
+notices_clear :: proc(n: ^Notices, key: u32, enabled: bool) -> bool {
 	for i := len(notices_live(n)) - 1; i >= 0; i -= 1 {
 		if n.items[i].key == key {
-			notice_fade(n, i, enabled, now)
+			notice_fade(n, i, enabled)
 			return true
 		}
 	}
 	return false
 }
 
-notices_dismiss :: proc(n: ^Notices, id: u64, enabled: bool, now: time.Tick) -> bool {
+notices_dismiss :: proc(n: ^Notices, id: u64, enabled: bool) -> bool {
 	for item, i in notices_live(n) {
-		if item.id == id {notice_fade(n, i, enabled, now); return true}
+		if item.id == id {notice_fade(n, i, enabled); return true}
 	}
 	return false
 }
@@ -208,9 +210,9 @@ notices_press :: proc(n: ^Notices, id: u64) {
 }
 
 // Dismisses the notice whose close button both the press and this release landed on.
-notices_release :: proc(n: ^Notices, id: u64, enabled: bool, now: time.Tick) -> (dismissed: bool) {
+notices_release :: proc(n: ^Notices, id: u64, enabled: bool) -> (dismissed: bool) {
 	fired, ok := armed_release(&n.armed, id)
-	return ok && fired != 0 && notices_dismiss(n, fired, enabled, now)
+	return ok && fired != 0 && notices_dismiss(n, fired, enabled)
 }
 
 notices_pointer_cancel :: proc(n: ^Notices) {
@@ -284,7 +286,7 @@ notices_expire :: proc(n: ^Notices, enabled: bool, now: time.Tick) -> bool {
 	faded := false
 	for i := len(notices_live(n)) - 1; i >= 0; i -= 1 {
 		if expires, timed := notice_expiry(n.items[i]).?; timed && time.tick_diff(expires, now) >= 0 {
-			notice_fade(n, i, enabled, now)
+			notice_fade(n, i, enabled)
 			faded = true
 		}
 	}
@@ -320,7 +322,7 @@ notices_draw :: proc(
 	hover, pressed := n.hover, armed_target(n.armed)
 	for i := len(n.items) - 1; i >= 0; i -= 1 {
 		item := n.items[i]
-		mark := fade_mark(list)
+		mark := render.draw_mark(list)
 		l := notice_layout(item, text, width, bottom, scale, &n.lines)
 		box, content_width, shown := l.box, l.content_width, l.shown
 		label, symbol, accent := notice_style(item.kind, theme)
@@ -369,7 +371,7 @@ notices_draw :: proc(
 // a fading notice never shows a hovered or pressed close button; without animations the close
 // settles at once and the notice is gone.
 @(private)
-notice_fade :: proc(n: ^Notices, index: int, enabled: bool, now: time.Tick) {
+notice_fade :: proc(n: ^Notices, index: int, enabled: bool) {
 	item := n.items[index]
 	if n.hover == item.id {n.hover = 0}
 	if armed_is(n.armed, item.id) {armed_cancel(&n.armed)}
@@ -377,7 +379,10 @@ notice_fade :: proc(n: ^Notices, index: int, enabled: bool, now: time.Tick) {
 	p := is_entering ? entering.presence : presence_shown(NOTICE_PRESENCE)
 	presence_close(&p)
 	item.state = Notice_Fading{p}
-	_, settled := notice_advance(&item, enabled, now)
+	// A disabled close, or one with nothing left to fade, settles without reading the frame; any
+	// other fade starts with the next frame.
+	settled := false
+	if !enabled || p.phase == .Release_Due {_, settled = notice_advance(&item, enabled, {})}
 	copy(n.items[index:], n.items[index + 1:])
 	if settled {
 		delete(item.text, n.items.allocator)
@@ -399,10 +404,10 @@ notices_animating :: proc(n: ^Notices) -> bool {
 
 // Advances every notice's motion. Disabled animations snap each to the end of its motion: an
 // entering one is shown and a fading one is gone.
-notices_animate :: proc(n: ^Notices, enabled: bool, now: time.Tick) -> bool {
+notices_animate :: proc(n: ^Notices, enabled: bool, frame: Frame_Time) -> bool {
 	changed := false
 	for i := len(n.items) - 1; i >= 0; i -= 1 {
-		item_changed, settled := notice_advance(&n.items[i], enabled, now)
+		item_changed, settled := notice_advance(&n.items[i], enabled, frame)
 		changed = item_changed || changed
 		if settled {
 			delete(n.items[i].text, n.items.allocator)
@@ -415,17 +420,17 @@ notices_animate :: proc(n: ^Notices, enabled: bool, now: time.Tick) -> bool {
 // Arrival, the end of entry and the end of a fade are the only lifetime transitions. Motion exists
 // only during entry and fade, and only entry and timed display can carry a deadline.
 @(private)
-notice_advance :: proc(item: ^Notice, enabled: bool, now: time.Tick) -> (changed, settled: bool) {
+notice_advance :: proc(item: ^Notice, enabled: bool, frame: Frame_Time) -> (changed, settled: bool) {
 	switch &state in item.state {
 	case Notice_Entering:
-		changed, _ = presence_advance(&state.presence, enabled, now)
+		changed, _ = presence_advance(&state.presence, enabled, frame)
 		if !presence_active(state.presence) {
 			expires := state.expires
 			if deadline, timed := expires.?; timed {item.state = Notice_Shown{deadline}}
 			else {item.state = Notice_Sticky{}}
 		}
 	case Notice_Fading:
-		changed, settled = presence_advance(&state.presence, enabled, now)
+		changed, settled = presence_advance(&state.presence, enabled, frame)
 	case Notice_Shown, Notice_Sticky:
 	}
 	return

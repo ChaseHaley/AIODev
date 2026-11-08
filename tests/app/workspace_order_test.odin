@@ -28,8 +28,10 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	testing.expect_value(t, neighbour.position.target, f32(0))
 	testing.expect_value(t, neighbour.position.duration, 140 * time.Millisecond)
 	testing.expect_value(t, neighbour.position.easing, ui.Easing.Decelerate)
+	// The move sampled the window's next frame, which started the neighbour's motion.
 	started := neighbour.position.started
-	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 70 * time.Millisecond))
+	testing.expect(t, started != {})
+	_ = app.workspace_order_animate(&w, true, frame_at(time.tick_add(started, 70 * time.Millisecond)))
 	testing.expect(t, neighbour.position.value > 0 && neighbour.position.value < 1)
 	testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, row.y + 40)
 	testing.expect(t, app.workspace_order_lifted(&w.workspace_picker, 0))
@@ -41,21 +43,31 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	if !testing.expect(t, grabbed != nil) {return}
 	testing.expect(t, app.workspace_order_settling(&w.workspace_picker))
 	testing.expect(t, app.workspace_order_lifted(&w.workspace_picker, 1))
-	testing.expect_value(t, grabbed.position.value, f32(1.25))
+	// The release sampled the window's next frame, which takes the dropped row its first step.
+	testing.expect(t, grabbed.position.value > 1 && grabbed.position.value < 1.25)
 	testing.expect_value(t, grabbed.position.target, f32(1))
 	testing.expect_value(t, grabbed.position.duration, 140 * time.Millisecond)
 	testing.expect_value(t, grabbed.position.easing, ui.Easing.Decelerate)
+	settling := app.workspace_picker_row_rect(&w, 1).y
 	app.workspace_row_menu_open(&state, &w, 1)
 	testing.expect_value(t, len(w.workspace_picker.order_positions), 4)
 	testing.expect(t, app.workspace_order_settling(&w.workspace_picker))
-	testing.expect_value(t, app.workspace_picker_row_rect(&w, 1).y, row.y + 40)
+	testing.expect_value(t, app.workspace_picker_row_rect(&w, 1).y, settling)
+	// The release sampled the window's next frame, which started the grabbed row's settle.
 	started = grabbed.position.started
-	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 70 * time.Millisecond))
+	testing.expect(t, started != {})
+	_ = app.workspace_order_animate(&w, true, frame_at(time.tick_add(started, 70 * time.Millisecond)))
 	testing.expect(t, grabbed.position.value > 1 && grabbed.position.value < 1.25)
-	_ = app.workspace_order_animate(&w, true, time.tick_add(started, 140 * time.Millisecond))
+	_ = app.workspace_order_animate(&w, true, frame_at(time.tick_add(started, 140 * time.Millisecond)))
 	testing.expect_value(t, len(w.workspace_picker.order_positions), 0)
 	testing.expect(t, !app.workspace_order_animating(&w.workspace_picker))
 	testing.expect(t, !app.workspace_order_settling(&w.workspace_picker))
+}
+
+// The frame shown at `display` on a 60 Hz display.
+@(private)
+frame_at :: proc(display: time.Tick) -> ui.Frame_Time {
+	return {display = display, period = time.Second / 60}
 }
 
 @(private="file")
@@ -103,7 +115,12 @@ order_scrolled_drop :: proc(t: ^testing.T, enabled: bool) {
 	testing.expect_value(t, w.workspace_picker.scroll, 5)
 	testing.expect_value(t, state.workspaces[7].id, u32(7))
 	after := app.workspace_picker_row_rect(&w, 7)
-	testing.expect_value(t, after.y, enabled ? before.y : row.y + row.height)
+	if !enabled {
+		testing.expect_value(t, after.y, row.y + row.height)
+		return
+	}
+	// The dropped row settles from where it was let go: the next frame takes it one step from there.
+	testing.expect(t, after.y != row.y + row.height && abs(after.y - before.y) < row.height / 4)
 }
 
 @(test)

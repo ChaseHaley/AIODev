@@ -63,7 +63,7 @@ show_settings_diagnostics :: proc(
 	app.settings_read_error = read_error
 	if !changed {return}
 	if read_error == nil && len(app.settings_diagnostics) == 0 {
-		ui.notices_clear(&app.notices, u32(Notice_Key.Settings), app.animations, time.tick_now())
+		ui.notices_clear(&app.notices, u32(Notice_Key.Settings), app.animations)
 		return
 	}
 	kind: ui.Notice_Kind = .Warning
