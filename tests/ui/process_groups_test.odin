@@ -176,7 +176,7 @@ process_groups_drag_escape_and_required_delete_outcome :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_order_target(&p), -1)
 	testing.expect(t, !ui.editor_drag(&p, l, nil, parts.handle.x + 4, row.y + row.height * 3))
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.None)
-	ui.editor_profiles_animate(&p, false, time.tick_now())
+	ui.editor_profiles_animate(&p, false, test_frame(time.tick_now()))
 	testing.expect(t, !ui.editor_profiles_animating(&p))
 	testing.expect_value(t, ui.editor_row_parts(&p, l, p.selected).row.y, row.y)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, parts.remove.x + 4, parts.remove.y + 4, false),
@@ -272,9 +272,9 @@ process_groups_drag_reflows_whole_groups_like_profiles :: proc(t: ^testing.T) {
 
 	// Past the next group's midpoint, that group eases up into the grabbed group's place.
 	testing.expect(t, ui.editor_drag(&p, l, nil, x, tools_row.y + tools_row.height * 2))
-	testing.expect(t, ui.editor_profiles_animate(&p, true, time.tick_now()))
+	testing.expect(t, ui.editor_profiles_animate(&p, true, test_frame(time.tick_now())))
 	testing.expect(t, ui.editor_profiles_animating(&p))
-	ui.editor_profiles_animate(&p, false, time.tick_now())
+	ui.editor_profiles_animate(&p, false, test_frame(time.tick_now()))
 	testing.expect_value(t, ui.editor_row_parts(&p, l, tools).row.y, header_row.y)
 
 	// Dropping saves the new order, then every row settles on its own line.
@@ -283,6 +283,6 @@ process_groups_drag_reflows_whole_groups_like_profiles :: proc(t: ^testing.T) {
 	testing.expect_value(t, problem, "")
 	testing.expect(t, strings.has_prefix(value, "Tools:"))
 	testing.expect(t, ui.editor_profiles_animating(&p))
-	ui.editor_profiles_animate(&p, false, time.tick_now())
+	ui.editor_profiles_animate(&p, false, test_frame(time.tick_now()))
 	testing.expect(t, !ui.editor_profiles_animating(&p))
 }

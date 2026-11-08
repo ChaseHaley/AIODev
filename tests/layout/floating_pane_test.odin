@@ -222,6 +222,30 @@ closing_one_pane_keeps_the_remaining_split_pane_floating :: proc(t: ^testing.T) 
 	testing.expect_value(t, floating.bounds, bounds)
 }
 
+// Panes in one floating group share its name, which survives a split or close inside it; tiled panes have
+// none, and another group has its own.
+@(test)
+floating_group_keeps_its_name_through_splits_and_closes :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	_, b := two_tiled(t, &l)
+	testing.expect(t, layout.set_floating(&l, b, true, {0.25, 0.15, 0.5, 0.7}))
+	group := shown(&l)[1].group
+	testing.expect(t, group != 0 && shown(&l)[0].group == 0)
+	_, err := layout.split_direction(&l, b, .Down, 0.5, pane_of(3))
+	testing.expect_value(t, err, nil)
+	split := shown(&l)
+	if !testing.expect_value(t, len(split), 3) {return}
+	testing.expect(t, split[1].group == group && split[2].group == group)
+	testing.expect(t, layout.remove(&l, b))
+	testing.expect_value(t, shown(&l)[1].group, group)
+	_, other_error := layout.float_new(&l, pane_of(4), {0.1, 0.1, 0.3, 0.3})
+	testing.expect_value(t, other_error, nil)
+	placed := shown(&l)
+	if !testing.expect_value(t, len(placed), 3) {return}
+	testing.expect(t, placed[2].group != 0 && placed[2].group != group)
+}
+
 @(test)
 panes_move_into_and_out_of_a_floating_window :: proc(t: ^testing.T) {
 	l: layout.Layout

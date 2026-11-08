@@ -19,7 +19,9 @@ Surface :: struct {
 	target:        ^d3d.IRenderTargetView,
 	chain:         ^dxgi.ISwapChain2,
 	waitable:      win.HANDLE,
+	window:        win.HWND,
 	width, height: i32,
+	clock:         Frame_Clock,
 }
 
 @(private)
@@ -93,6 +95,7 @@ swap_chain_create :: proc(d: ^Device, s: ^Surface, window: win.HWND, width, heig
 		AlphaMode = .IGNORE,
 		Flags = {.FRAME_LATENCY_WAITABLE_OBJECT},
 	}
+	s.window = window
 	chain: ^dxgi.ISwapChain1
 	hr := d.factory->CreateSwapChainForHwnd(d.native, window, &desc, nil, nil, &chain)
 	if err := checked(d, hr, "CreateSwapChainForHwnd", .Surface_Failed); err != .None {
@@ -196,22 +199,6 @@ surface_destroy :: proc(s: ^Surface) {
 	}
 	release(s.chain)
 	free(s, s.allocator)
-}
-
-@(require_results)
-frame_wait :: proc(s: ^Surface, timeout_ms: u32) -> Error {
-	if s.waitable == nil {
-		return .None
-	}
-	switch win.WaitForSingleObject(s.waitable, timeout_ms) {
-	case win.WAIT_OBJECT_0:
-		return .None
-	case win.WAIT_TIMEOUT:
-		return .Timeout
-	case:
-		log.errorf("WaitForSingleObject frame latency failed: %d", win.GetLastError())
-		return .Wait_Failed
-	}
 }
 
 @(require_results)

@@ -3,7 +3,6 @@ package main
 import "aio:render"
 import "aio:ui"
 import "core:math"
-import "core:time"
 
 tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) {
 	if index < 0 || index >= len(w.workspace.tabs) || !w.workspace.tabs[index].marked {return}
@@ -107,11 +106,11 @@ tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 
 @(private)
 tab_drag_follow_pointer :: proc(w: ^Window, first: f32) {
-	rank, now := 0, time.tick_now()
+	rank := 0
 	for tab, i in w.workspace.tabs {
 		if !tab.marked {continue}
 		if i < len(w.tab_positions) {
-			ui.motion_target(&w.tab_positions[i], first + f32(rank), 0, .Linear, false, now)
+			ui.motion_target(&w.tab_positions[i], first + f32(rank), 0, .Linear, false)
 		}
 		rank += 1
 	}

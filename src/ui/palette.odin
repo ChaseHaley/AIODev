@@ -1459,7 +1459,7 @@ palette_draw :: proc(
 		return .Ok
 	}
 	// The full-window clip stays put; the panel sinks no lower than the client's bottom edge.
-	mark := fade_mark(list)
+	mark := render.draw_mark(list)
 	bounded := Fade{fade.opacity, clamp(fade.rise, 0, max(0, height - scale - panel.y - panel.height))}
 	defer fade_draw(list, mark, bounded)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})

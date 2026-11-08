@@ -357,7 +357,10 @@ surface_resize_and_errors :: proc(t: ^testing.T) {
 		testing.expect_value(t, err, render.Error.Invalid_Argument)
 		testing.expect_value(t, s, nil)
 	}
-	testing.expect_value(t, render.frame_wait(f.surface, 0), render.Error.None)
+	// An offscreen surface has no swap chain to wait for.
+	ready, wait_error := render.frame_acquire(f.surface, 0)
+	testing.expect(t, ready)
+	testing.expect_value(t, wait_error, render.Error.None)
 	testing.expect_value(t, render.surface_resize(f.device, f.surface, 0, 1), render.Error.Invalid_Argument)
 	testing.expect_value(t, render.surface_resize(f.device, f.surface, 7, 5), render.Error.None)
 	pixels := render_pixels(t, &f, {0, 0.5, 0, 0.5})

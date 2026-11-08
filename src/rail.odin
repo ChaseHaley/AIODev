@@ -125,10 +125,10 @@ rail_sliding :: proc(w: ^Window) -> bool {
 }
 
 // Advances the overlay slide; a finished closing slide hides the rail.
-rail_slide_update :: proc(w: ^Window, now: time.Tick) -> bool {
+rail_slide_update :: proc(w: ^Window, frame: ui.Frame_Time) -> bool {
 	overlay, ok := &w.rail.(Rail_Overlay)
 	if !ok {return false}
-	changed := ui.motion_update(&overlay.slide, now)
+	changed := ui.motion_update(&overlay.slide, frame)
 	rail_overlay_settle(w)
 	return changed
 }
@@ -143,7 +143,7 @@ rail_overlay_settle :: proc(w: ^Window) {
 rail_overlay_slide :: proc(app: ^App, w: ^Window, target: f32) {
 	if _, ok := w.rail.(Rail_Overlay); !ok {w.rail = Rail_Overlay{}}
 	overlay := &w.rail.(Rail_Overlay)
-	ui.motion_target(&overlay.slide, target, RAIL_SLIDE, .Decelerate, app.animations, time.tick_now())
+	ui.motion_target(&overlay.slide, target, RAIL_SLIDE, .Decelerate, app.animations)
 	rail_overlay_settle(w)
 }
 

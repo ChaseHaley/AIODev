@@ -21,7 +21,7 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	s, w := &f.state, f.state.windows[0]
 	// The fixture runs without animations, so the application's notice transitions settle at once.
 	now := time.tick_now()
-	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false, now)}
+	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false)}
 	ui.notices_put(&s.notices, 0, .Info, "First", time.Hour, false, now)
 	ui.notices_put(&s.notices, 0, .Success, "Second", 0, false, now)
 	close := notice_close_point(w)
@@ -71,7 +71,7 @@ notice_press_held_while_its_notice_fades_disarms_without_dismissing :: proc(t: ^
 	if !palette_fixture_create(t, &f, "notice-fade-press", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	now := time.tick_now()
-	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false, now)}
+	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false)}
 	ui.notices_put(&s.notices, 0, .Info, "Timed", time.Millisecond, false, now)
 	s.animations = true
 	id := s.notices.items[0].id
@@ -86,6 +86,6 @@ notice_press_held_while_its_notice_fades_disarms_without_dismissing :: proc(t: ^
 	testing.expect_value(t, s.notices.hover, u64(0))
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect(t, !app.selection_active(w) && gesture_captured(w) == {})
-	ui.notices_animate(&s.notices, false, time.tick_now())
+	ui.notices_animate(&s.notices, false, frame_at(time.tick_now()))
 	testing.expect_value(t, len(s.notices.items), 0)
 }

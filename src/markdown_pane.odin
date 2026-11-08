@@ -489,38 +489,37 @@ markdown_message_draw :: proc(
 	return ui.draw_text(&w.ui_text, &w.list, path, g.left, baseline, app.theme.muted, g.width)
 }
 
+// The document inside its pane, or a message when it cannot be shown; `scrollable` when the document
+// drew and its scrollbar belongs beside it. pane_draw draws the card, header and outline around it.
 @(require_results)
-markdown_pane_draw :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, card: int) -> render.Build_Status {
-	if card < len(w.list.rects) {w.list.rects[card].color = app.theme.pane}
+markdown_pane_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	shown: layout.Pane_Rect,
+) -> (
+	scrollable: bool,
+	result: render.Build_Status,
+) {
 	pane := markdown_find(app, shown.content.id)
 	g := markdown_geometry_of(w, shown)
 	document := pane != nil ? markdown_document(pane) : nil
-	if document != nil {
-		view := &pane.view
-		ui.markdown_view_fit(view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
-		ui.markdown_scroll_by(view, 0, int(g.area.height))
-		find: ui.Markdown_Find
-		if pane.search.phase != .Off {
-			c := app.settings.colors
-			find = {
-				matches = pane.search.matches[:],
-				selected = pane.search.selected,
-				foreground = colour.rgba(c.search_foreground),
-				background = colour.rgba(c.search_background),
-				selected_background = colour.rgba(c.search_selected_background),
-			}
+	if document == nil {return false, markdown_message_draw(app, w, pane, g)}
+	view := &pane.view
+	ui.markdown_view_fit(view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
+	ui.markdown_scroll_by(view, 0, int(g.area.height))
+	find: ui.Markdown_Find
+	if pane.search.phase != .Off {
+		c := app.settings.colors
+		find = {
+			matches = pane.search.matches[:],
+			selected = pane.search.selected,
+			foreground = colour.rgba(c.search_foreground),
+			background = colour.rgba(c.search_background),
+			selected_background = colour.rgba(c.search_selected_background),
 		}
-		hover := markdown_link_hovered(w, pane.id)
-		if result := ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover);
-		   result != .Ok {
-			return result
-		}
-		pane_scrollbar_draw(app, w, shown)
-	} else if result := markdown_message_draw(app, w, pane, g); result != .Ok {return result}
-	if header := pane_header_draw(app, w, shown, nil); header != .Ok {return header}
-	window_card_dim(app, w, shown, app.theme.pane)
-	window_card_outline(app, w, shown)
-	return .Ok
+	}
+	hover := markdown_link_hovered(w, pane.id)
+	return true, ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover)
 }
 
 @(private)

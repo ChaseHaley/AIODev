@@ -10,7 +10,6 @@ import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:strings"
-import "core:time"
 
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
@@ -327,13 +326,13 @@ pane_header_controls_shown :: proc(w: ^Window) -> bool {
 }
 
 // Advances every header button's hover and press; true when the window must draw again.
-pane_header_controls_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+pane_header_controls_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 	if !pane_header_controls_shown(w) {return false}
 	changed := false
 	for &pane in w.views {
 		for &control, button in pane.header_controls {
 			hovered, armed := pane.header_hover == button, ui.armed_is(pane.header_armed, button)
-			changed = ui.control_update(&control, hovered, armed, app.animations, now) || changed
+			changed = ui.control_update(&control, hovered, armed, app.animations, frame) || changed
 		}
 	}
 	return changed

@@ -257,7 +257,7 @@ confirm_draw :: proc(
 ) -> render.Build_Status {
 	l := confirm_layout(width, height, scale, c.extended, c.show_option)
 	s := scale
-	mark := fade_mark(list)
+	mark := render.draw_mark(list)
 	defer fade_draw(list, mark, fade)
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})

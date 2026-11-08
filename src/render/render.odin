@@ -126,7 +126,6 @@ Error :: enum {
 	Shader_Failed,
 	Surface_Failed,
 	Wait_Failed,
-	Timeout,
 	Atlas_Invalidated,
 	Construction_Failed,
 }
@@ -181,6 +180,59 @@ append_list :: proc(list: ^Draw_List, source: ^Draw_List) -> Error {
 		append(&list.layers, adjusted)
 	}
 	return .None
+}
+
+// Where drawing into a list stood, so a later pass can move or fade only what was drawn after it.
+Draw_Mark :: struct {
+	layers, rects, glyphs, images: int,
+}
+
+draw_mark :: proc(list: ^Draw_List) -> Draw_Mark {
+	return {len(list.layers), len(list.rects), len(list.glyphs), len(list.images)}
+}
+
+// Moves everything drawn since `mark` by `offset` and keeps it inside `clip`.
+draw_translate :: proc(list: ^Draw_List, mark: Draw_Mark, offset: [2]f32, clip: Rect) {
+	for &layer in list.layers[mark.layers:] {
+		c := layer.clip
+		left, top := max(c.x + offset.x, clip.x), max(c.y + offset.y, clip.y)
+		right := min(c.x + offset.x + c.width, clip.x + clip.width)
+		bottom := min(c.y + offset.y + c.height, clip.y + clip.height)
+		layer.clip = {left, top, max(0, right - left), max(0, bottom - top)}
+	}
+	for &rect in list.rects[mark.rects:] {rect.rect.x += offset.x; rect.rect.y += offset.y}
+	for &glyph in list.glyphs[mark.glyphs:] {
+		glyph.rect.x += offset.x
+		glyph.rect.y += offset.y
+		glyph.fade_start += offset.x
+		glyph.fade_end += offset.x
+	}
+	for &image in list.images[mark.images:] {image.rect.x += offset.x; image.rect.y += offset.y}
+}
+
+// Appends what `source` drew between `from` and `to` to `list`, as a copy that outlives `source`'s next
+// build. The range must start with a layer, so every instance in it belongs to one of its layers.
+@(require_results)
+draw_list_copy :: proc(list: ^Draw_List, source: ^Draw_List, from, to: Draw_Mark) -> Error {
+	if list.error != .None {return list.error}
+	base := draw_mark(list)
+	if _, err := append(&list.rects, ..source.rects[from.rects:to.rects]); err != nil {
+		list.error = .Out_Of_Memory
+	}
+	if _, err := append(&list.glyphs, ..source.glyphs[from.glyphs:to.glyphs]); err != nil {
+		list.error = .Out_Of_Memory
+	}
+	if _, err := append(&list.images, ..source.images[from.images:to.images]); err != nil {
+		list.error = .Out_Of_Memory
+	}
+	for layer in source.layers[from.layers:to.layers] {
+		copied := layer
+		copied.rect_start += base.rects - from.rects
+		copied.glyph_start += base.glyphs - from.glyphs
+		copied.image_start += base.images - from.images
+		if _, err := append(&list.layers, copied); err != nil {list.error = .Out_Of_Memory}
+	}
+	return list.error
 }
 
 @(require_results)

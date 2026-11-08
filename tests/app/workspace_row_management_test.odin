@@ -342,9 +342,12 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 		motion := &w.workspace_picker.rename_motion
 		testing.expect_value(t, motion.value, f32(0))
 		testing.expect(t, ui.motion_active(motion^))
-		ui.motion_update(motion, time.tick_add(motion.started, 70*time.Millisecond))
+		// The rename eases open from the first frame that samples it.
+		ui.motion_update(motion, frame_at(time.tick_now()))
+		start := motion.started
+		ui.motion_update(motion, frame_at(time.tick_add(start, 70*time.Millisecond)))
 		testing.expect(t, motion.value > 0 && motion.value < 1)
-		ui.motion_update(motion, time.tick_add(motion.started, 140*time.Millisecond))
+		ui.motion_update(motion, frame_at(time.tick_add(start, 140*time.Millisecond)))
 		testing.expect_value(t, motion.value, f32(1))
 		app.workspace_row_rename_finish(s, w, false)
 		indicator := app.workspace_button_indicator_rect(w)

@@ -5,7 +5,6 @@ import "aio:platform"
 import "aio:render"
 import "aio:search"
 import "core:strings"
-import "core:time"
 
 @(private) FIND_WIDTH :: 440
 @(private) FIND_HEIGHT :: 40
@@ -372,11 +371,12 @@ find_hover :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, x, y: f32) -> bo
 }
 
 // Moves each button's hover and press toward the pointer and the armed press; true when a frame is due.
-find_animate :: proc(f: ^Find_Bar, animations: bool, now: time.Tick) -> bool {
+find_animate :: proc(f: ^Find_Bar, animations: bool, frame: Frame_Time) -> bool {
 	changed := false
 	for &m, action in f.motion {
 		hovered := f.hover == action && action != .None
-		changed = control_update(&m, hovered, hovered && armed_is(f.armed, action), animations, now) || changed
+		pressed := hovered && armed_is(f.armed, action)
+		changed = control_update(&m, hovered, pressed, animations, frame) || changed
 	}
 	return changed
 }

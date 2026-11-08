@@ -3,7 +3,6 @@ package main
 import "aio:input"
 import "aio:render"
 import "aio:ui"
-import "core:time"
 
 // The question a window asks before a change it cannot undo. A window asks at most one: nil is None;
 // otherwise the dialog's presence is the phase, Asking while it opens or shows (ui.presence_is_open)
@@ -193,12 +192,12 @@ confirmation_active :: proc(w: ^Window) -> bool {
 	return c != nil && (ui.presence_active(c.dialog.presence) || ui.control_active(c.dialog.hover_motion))
 }
 
-confirmation_advance :: proc(app: ^App, w: ^Window, now: time.Tick) {
+confirmation_advance :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) {
 	c := confirmation_shown(w)
 	if c == nil {return}
-	changed, settled := ui.presence_advance(&c.dialog.presence, app.animations, now)
+	changed, settled := ui.presence_advance(&c.dialog.presence, app.animations, frame)
 	changed =
-		ui.control_update(&c.dialog.hover_motion, c.dialog.hover != .None, false, app.animations, now) ||
+		ui.control_update(&c.dialog.hover_motion, c.dialog.hover != .None, false, app.animations, frame) ||
 		changed
 	if changed || settled {w.dirty = true}
 	if settled {confirmation_clear(w)}

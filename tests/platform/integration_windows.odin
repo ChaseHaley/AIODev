@@ -59,7 +59,8 @@ invalid_and_partial_lifecycle :: proc(t: ^testing.T) {
 	_, err := p.window_create(&platform, {hidden = true, width = 80, height = 40})
 	testing.expect_value(t, err, p.Error.Not_Initialized)
 	testing.expect_value(t, p.wake(&platform), p.Error.Not_Initialized)
-	testing.expect_value(t, p.wait_events(&platform, 0), p.Error.Not_Initialized)
+	_, wait_error := p.wait_events(&platform, 0, nil)
+	testing.expect_value(t, wait_error, p.Error.Not_Initialized)
 	_, err = p.poll_events(&platform)
 	testing.expect_value(t, err, p.Error.Not_Initialized)
 	testing.expect_value(t, p.window_destroy(&platform, 1), p.Error.Invalid_Window)
@@ -271,7 +272,8 @@ wake_from_thread :: proc(t: ^testing.T) {
 	start := time.tick_now()
 	woke := false
 	for time.tick_since(start) < 2*time.Second {
-		testing.expect_value(t, p.wait_events(&platform, 100), p.Error.None)
+		_, wait_error := p.wait_events(&platform, 100, nil)
+		testing.expect_value(t, wait_error, p.Error.None)
 		events, err := p.poll_events(&platform)
 		testing.expect_value(t, err, p.Error.None)
 		for event in events {
@@ -560,4 +562,28 @@ resize_does_not_turn_a_stationary_cursor_into_mouse_input :: proc(t: ^testing.T)
 		}
 	}
 	testing.expect_value(t, moves, 1)
+}
+
+// A window's swap chain signals room for a frame through a handle the loop waits on beside its
+// messages; the wait names that window and takes the signal, so drawing need not wait again.
+@(test)
+wait_events_names_the_frame_handle_that_signaled :: proc(t: ^testing.T) {
+	platform: p.Platform
+	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.FrameWait"), p.Init_Result.Primary) { return }
+	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
+	_, initial_error := p.poll_events(&platform)
+	testing.expect_value(t, initial_error, p.Error.None)
+	idle := w.CreateEventW(nil, false, false, nil)
+	ready := w.CreateEventW(nil, false, true, nil)
+	if !testing.expect(t, idle != nil && ready != nil) { return }
+	defer w.CloseHandle(idle)
+	defer w.CloseHandle(ready)
+	frames := []rawptr{rawptr(idle), rawptr(ready)}
+	signaled, err := p.wait_events(&platform, 1000, frames)
+	testing.expect_value(t, err, p.Error.None)
+	testing.expect_value(t, signaled, 1)
+	testing.expect_value(t, w.WaitForSingleObject(ready, 0), w.WAIT_TIMEOUT)
+	signaled, err = p.wait_events(&platform, 0, frames)
+	testing.expect_value(t, err, p.Error.None)
+	testing.expect_value(t, signaled, -1)
 }

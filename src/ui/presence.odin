@@ -72,7 +72,7 @@ presence_active :: proc(p: Presence) -> bool {
 
 // settled is true on the single advance that finishes a close, so a caller that releases on it
 // cannot release twice. Disabled animations snap to the target on that same advance.
-presence_advance :: proc(p: ^Presence, enabled: bool, now: time.Tick) -> (changed, settled: bool) {
+presence_advance :: proc(p: ^Presence, enabled: bool, frame: Frame_Time) -> (changed, settled: bool) {
 	switch p.phase {
 	case .Closed, .Open:
 		return false, false
@@ -80,11 +80,11 @@ presence_advance :: proc(p: ^Presence, enabled: bool, now: time.Tick) -> (change
 		presence_reset(p)
 		return false, true
 	case .Opening:
-		motion_target(&p.motion, 1, p.spec.open, .Decelerate, enabled, now)
+		motion_target(&p.motion, 1, p.spec.open, .Decelerate, enabled)
 	case .Closing:
-		motion_target(&p.motion, 0, p.spec.close, .Accelerate, enabled, now)
+		motion_target(&p.motion, 0, p.spec.close, .Accelerate, enabled)
 	}
-	changed = motion_update(&p.motion, now)
+	changed = motion_update(&p.motion, frame)
 	if motion_active(p.motion) {return changed, false}
 	if p.phase == .Opening {
 		p.phase = .Open

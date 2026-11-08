@@ -7,7 +7,6 @@ import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:math"
-import "core:time"
 
 // The title bar's own controls under the pointer and held: the title actions, the tab orientation
 // button, the native caption buttons and the workspace button. Window embeds it; the pointer surfaces
@@ -24,8 +23,8 @@ Title_Controls :: struct {
 }
 
 // Only the workspace button animates its hover; true when the window must draw again.
-title_controls_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
-	return ui.control_update(&w.workspace_motion, w.workspace_hovered, false, app.animations, now)
+title_controls_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
+	return ui.control_update(&w.workspace_motion, w.workspace_hovered, false, app.animations, frame)
 }
 
 title_controls_animating :: proc(w: ^Window) -> bool {
@@ -146,7 +145,7 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		clip = {r.x, r.y, r.width, r.height}
 		edge := math.ceil(max(1, w.scale))
 		for bar in w.dock_edges.bars[:w.dock_edges.count] {card_clip_shared(&clip, r, bar, edge)}
-		for d in w.dividers {card_clip_shared(&clip, r, {d.axis, d.rect}, edge)}
+		for bar in pane_bars(w) {card_clip_shared(&clip, r, bar, edge)}
 	}
 	if render.push_layer(&w.list, clip) != .None {return}
 	radius := window_pane_radius(app, w)
@@ -203,13 +202,15 @@ window_card_dim :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, backgroun
 
 @(private)
 window_shared_borders :: proc(app: ^App, w: ^Window) {
-	if app.settings.pane.gap != 0 || (len(w.dividers) == 0 && w.dock_edges.count == 0) {return}
+	if app.settings.pane.gap != 0 {return}
+	bars := pane_bars(w)
+	if len(bars) == 0 && w.dock_edges.count == 0 {return}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return}
 	for bar in w.dock_edges.bars[:w.dock_edges.count] {
 		if !window_shared_border(app, w, bar) {return}
 	}
-	for d in w.dividers {
-		if !window_shared_border(app, w, {d.axis, d.rect}) {return}
+	for bar in bars {
+		if !window_shared_border(app, w, bar) {return}
 	}
 }
 
@@ -225,7 +226,7 @@ window_shared_border :: proc(app: ^App, w: ^Window, bar: layout.Edge) -> bool {
 	   .None {return false}
 	for pane in w.panes {
 		if pane.floating || !window_focus_outlined(app, w, pane) {continue}
-		p := pane.rect
+		p := pane_motion_rect(w, pane)
 		if leading, trailing := bar_adjacent(p, bar); !leading && !trailing {continue}
 		segment := r
 		if bar.axis == .Horizontal {

@@ -415,7 +415,7 @@ editor_profile_drag_escape_cancels_without_a_request :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_order_profile(&p), "")
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.None)
 	testing.expect(t, p.request == nil)
-	ui.editor_profiles_animate(&p, false, time.tick_now())
+	ui.editor_profiles_animate(&p, false, test_frame(time.tick_now()))
 	testing.expect(t, !ui.editor_profiles_animating(&p))
 	testing.expect_value(t, ui.editor_row_parts(&p, l, alpha_index).row.y, alpha_row.y)
 }
@@ -455,15 +455,15 @@ editor_profile_drag_reflows_rows_like_tabs :: proc(t: ^testing.T) {
 
 	// Past the midpoint the next profile slides up into the grabbed row's place.
 	testing.expect(t, ui.editor_drag(&p, l, nil, x, beta_row.y + beta_row.height / 2))
-	testing.expect(t, ui.editor_profiles_animate(&p, true, time.tick_now()))
+	testing.expect(t, ui.editor_profiles_animate(&p, true, test_frame(time.tick_now())))
 	testing.expect(t, ui.editor_profiles_animating(&p))
-	ui.editor_profiles_animate(&p, false, time.tick_now())
+	ui.editor_profiles_animate(&p, false, test_frame(time.tick_now()))
 	testing.expect_value(t, ui.editor_row_parts(&p, l, beta_index).row.y, alpha_row.y)
 
 	// Dropping settles every row on its own line and releases the positions.
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Profile_Action)
 	testing.expect(t, ui.editor_profiles_animating(&p))
-	ui.editor_profiles_animate(&p, false, time.tick_now())
+	ui.editor_profiles_animate(&p, false, test_frame(time.tick_now()))
 	testing.expect(t, !ui.editor_profiles_animating(&p))
 	testing.expect_value(t, ui.editor_row_parts(&p, l, beta_index).row.y, beta_row.y)
 }

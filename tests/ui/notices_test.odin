@@ -50,21 +50,25 @@ notices_hold_a_removed_clone_until_its_close_settles :: proc(t: ^testing.T) {
 	ui.notices_init(&n)
 	defer ui.notices_destroy(&n)
 	now := time.tick_now()
-	// Midway through its entry, so the close has a fade to run.
-	later := time.tick_add(now, 50*time.Millisecond)
 	ui.notices_put(&n, 1, .Info, "closing", 0, true, now)
-	ui.notices_animate(&n, true, later)
+	// Its first frame starts the entry; midway through it, the close has a fade to run.
+	ui.notices_animate(&n, true, test_frame(now))
+	later := time.tick_add(now, 50*time.Millisecond)
+	ui.notices_animate(&n, true, test_frame(later))
 	testing.expect_value(t, len(ui.notices_live(&n)), 1)
-	testing.expect(t, ui.notices_clear(&n, 1, true, later))
+	testing.expect(t, ui.notices_clear(&n, 1, true))
 	testing.expect_value(t, len(ui.notices_live(&n)), 0)
 	if !testing.expect_value(t, len(n.items), 1) {return}
 	testing.expect(t, ui.notice_fading(n.items[0]))
-	testing.expect(t, !ui.notices_clear(&n, 1, true, now), "a fading notice is no longer shown under its key")
+	testing.expect(t, !ui.notices_clear(&n, 1, true), "a fading notice is no longer shown under its key")
 	testing.expect(t, ui.notices_animating(&n))
-	testing.expect(t, ui.notices_animate(&n, true, time.tick_add(now, time.Second)))
+	// The fade starts with the next frame and holds the clone until it settles.
+	testing.expect(t, ui.notices_animate(&n, true, test_frame(time.tick_add(later, TEST_FRAME_PERIOD))))
+	testing.expect_value(t, len(n.items), 1)
+	testing.expect(t, ui.notices_animate(&n, true, test_frame(time.tick_add(now, time.Second))))
 	testing.expect_value(t, len(n.items), 0)
 	testing.expect(t, !ui.notices_animating(&n))
-	testing.expect(t, !ui.notices_animate(&n, true, time.tick_add(now, 2*time.Second)))
+	testing.expect(t, !ui.notices_animate(&n, true, test_frame(time.tick_add(now, 2*time.Second))))
 	testing.expect_value(t, len(n.items), 0)
 }
 
@@ -76,7 +80,7 @@ notices_without_animations_free_a_removed_clone_immediately :: proc(t: ^testing.
 	now := time.tick_now()
 	ui.notices_put(&n, 1, .Info, "snapped", 0, false, now)
 	testing.expect_value(t, len(n.items), 1)
-	testing.expect(t, ui.notices_clear(&n, 1, false, now))
+	testing.expect(t, ui.notices_clear(&n, 1, false))
 	testing.expect_value(t, len(n.items), 0)
 	testing.expect(t, !ui.notices_animating(&n))
 }
@@ -90,8 +94,10 @@ notices_fade_behind_live_notices_and_turning_animations_off_settles_every_motion
 	later := time.tick_add(now, 50*time.Millisecond)
 	ui.notices_put(&n, 0, .Info, "first", time.Hour, true, now)
 	ui.notices_put(&n, 0, .Info, "second", 0, true, now)
+	// Drawn once, so the dismissed notice has a fade to run.
+	ui.notices_animate(&n, true, test_frame(now))
 	first := n.items[0].id
-	testing.expect(t, ui.notices_dismiss(&n, first, true, later))
+	testing.expect(t, ui.notices_dismiss(&n, first, true))
 	ui.notices_put(&n, 0, .Info, "third", time.Hour, true, later)
 	// The fading notice stays at the bottom of the stack while new ones arrive above it.
 	if !testing.expect_value(t, len(n.items), 3) {return}
@@ -99,10 +105,10 @@ notices_fade_behind_live_notices_and_turning_animations_off_settles_every_motion
 	testing.expect_value(t, n.items[1].text, "third")
 	testing.expect_value(t, n.items[2].id, first)
 	testing.expect_value(t, len(ui.notices_live(&n)), 2)
-	testing.expect(t, !ui.notices_dismiss(&n, first, true, now))
+	testing.expect(t, !ui.notices_dismiss(&n, first, true))
 	deadline, timed := ui.notices_deadline(&n)
 	testing.expect(t, timed && deadline == ui.notice_expiry(n.items[1]).?)
-	ui.notices_animate(&n, false, now)
+	ui.notices_animate(&n, false, test_frame(now))
 	testing.expect_value(t, len(n.items), 2)
 	testing.expect(t, !ui.notices_animating(&n))
 }
@@ -115,6 +121,8 @@ notices_fading_notice_drops_its_hover_and_armed_press :: proc(t: ^testing.T) {
 	now := time.tick_now()
 	ui.notices_put(&n, 0, .Info, "timed", time.Millisecond, true, now)
 	ui.notices_put(&n, 0, .Info, "sticky", 0, true, now)
+	// Drawn once, so each close has a fade to run.
+	ui.notices_animate(&n, true, test_frame(now))
 	timed, sticky := n.items[0].id, n.items[1].id
 	testing.expect(t, ui.notices_hover(&n, timed))
 	ui.notices_press(&n, timed)
@@ -123,11 +131,11 @@ notices_fading_notice_drops_its_hover_and_armed_press :: proc(t: ^testing.T) {
 	testing.expect(t, ui.notice_fading(n.items[1]))
 	testing.expect_value(t, n.hover, u64(0))
 	testing.expect(t, !ui.armed_is(n.armed, timed), "a press must not stay armed on a fading notice")
-	testing.expect(t, !ui.notices_release(&n, timed, true, now))
+	testing.expect(t, !ui.notices_release(&n, timed, true))
 	// Another notice's pointer state survives that fade.
 	testing.expect(t, ui.notices_hover(&n, sticky))
 	ui.notices_press(&n, sticky)
-	testing.expect(t, ui.notices_release(&n, sticky, true, now))
+	testing.expect(t, ui.notices_release(&n, sticky, true))
 	testing.expect_value(t, len(ui.notices_live(&n)), 0)
 }
 
@@ -180,7 +188,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 			}
 		}
 	}
-	for kind in ui.Notice_Kind {ui.notices_clear(&n, u32(kind)+1, false, time.tick_now())}
+	for kind in ui.Notice_Kind {ui.notices_clear(&n, u32(kind)+1, false)}
 	for scale in ([?]f32{1, 1.5, 2}) {
 		ui.text_set_size(&text, 16*scale)
 		for width in ([?]f32{160, 320, 1000}) {
@@ -225,16 +233,16 @@ notices_dismiss_one_anonymous_notice_and_ignore_stale_identity :: proc(t: ^testi
 	ui.notices_put(&n, 0, .Success, "second", 0, false, now)
 	first, second := n.items[0].id, n.items[1].id
 	testing.expect(t, first != second)
-	testing.expect(t, ui.notices_dismiss(&n, first, false, now))
+	testing.expect(t, ui.notices_dismiss(&n, first, false))
 	testing.expect_value(t, len(n.items), 1)
 	testing.expect_value(t, n.items[0].id, second)
-	testing.expect(t, !ui.notices_dismiss(&n, first, false, now))
-	testing.expect(t, ui.notices_dismiss(&n, second, false, now))
+	testing.expect(t, !ui.notices_dismiss(&n, first, false))
+	testing.expect(t, ui.notices_dismiss(&n, second, false))
 	testing.expect_value(t, len(n.items), 0)
 	ui.notices_put(&n, 7, .Warning, "old", time.Hour, false, now)
 	old := n.items[0].id
 	ui.notices_put(&n, 7, .Error, "new", time.Hour, false, now)
-	testing.expect(t, !ui.notices_dismiss(&n, old, false, now))
+	testing.expect(t, !ui.notices_dismiss(&n, old, false))
 	testing.expect_value(t, len(n.items), 1)
 	testing.expect_value(t, n.items[0].text, "new")
 }
