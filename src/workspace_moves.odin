@@ -212,7 +212,7 @@ workspace_tabs_move :: proc(
 	if kept >= 0 {
 		marked := false
 		for tab in source.tabs {if tab.marked {marked = true}}
-		if !marked {tab_select_one(source, source.selected)}
+		if !marked {workspace_tab_choose(source, source.selected)}
 		window_relayout(app, w)
 		rail_reveal_active(w)
 	}

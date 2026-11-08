@@ -22,3 +22,18 @@ tab_order_selection_after_remove_clamps_to_remaining_tabs :: proc(t: ^testing.T)
 	testing.expect_value(t, app.tab_selected_after_remove(0, 0, 3), 0)
 	testing.expect_value(t, app.tab_selected_after_remove(0, 0, 0), 0)
 }
+
+@(test)
+workspace_tab_choose_pairs_selection_marks_and_anchor :: proc(t: ^testing.T) {
+	tabs := [3]app.Tab{{id = 11, marked = true}, {id = 23, marked = true}, {id = 47}}
+	workspace := app.Workspace{selection_anchor = 11}
+	defer delete(workspace.tabs)
+	for &tab in tabs {append(&workspace.tabs, &tab)}
+	for index in [?]int{2, 0, 0} {
+		for tab in workspace.tabs {tab.marked = true}
+		app.workspace_tab_choose(&workspace, index)
+		testing.expect_value(t, workspace.selected, index)
+		testing.expect_value(t, workspace.selection_anchor, tabs[index].id)
+		for tab, i in workspace.tabs {testing.expect_value(t, tab.marked, i == index)}
+	}
+}

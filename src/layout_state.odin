@@ -403,8 +403,7 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 		_ = workspace_discard_empty(app, workspace)
 		return nil
 	}
-	workspace.selected = clamp(selected, 0, len(workspace.tabs) - 1)
-	tab_select_one(workspace, workspace.selected)
+	workspace_tab_choose(workspace, clamp(selected, 0, len(workspace.tabs) - 1))
 	return workspace
 }
 

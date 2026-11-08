@@ -227,7 +227,7 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 		closed_record_tab(app, workspace, index)
 		workspace_close_tab(app, workspace, index)
 	}
-	if group && len(workspace.tabs) > 0 {tab_select_one(workspace, workspace.selected)}
+	if group && len(workspace.tabs) > 0 {workspace_tab_choose(workspace, workspace.selected)}
 	workspace_close_empty(app, workspace)
 }
 
@@ -321,7 +321,7 @@ tab_close_restore :: proc(w: ^Window, restore: ^[dynamic]u32) {
 		for id in restore^ {tab.marked ||= tab.id == id}
 		kept ||= tab.marked
 	}
-	if !kept && len(w.workspace.tabs) > 0 {tab_select_one(w.workspace, w.workspace.selected)}
+	if !kept && len(w.workspace.tabs) > 0 {workspace_tab_choose(w.workspace, w.workspace.selected)}
 	w.dirty = true
 }
 
