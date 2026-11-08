@@ -109,13 +109,13 @@ when AIO_CONTROL {
 		}
 	}
 
-	// tab.N's rail row index (-1 on a tab strip), row and close button, as rail_row_rect_for_tab and
-	// the drawer place them.
+	// tab.N's rail row index (-1 on a tab strip), row and close button, as rail_tab_rect,
+	// rail_tab_close_rect and the drawer place them, mid-reorder included.
 	rail_tab_report_rects :: proc(w: ^Window, tab: int) -> (index: int, row, close: render.Rect) {
 		layout, ok := rail_layout_query(w)
 		index = w.tabs_horizontal ? -1 : tab
 		if ok && tab >= 0 && tab < rail_tab_count(w) {row = rail_tab_rect(w, layout, tab)}
-		return index, row, ui.rail_close_rect(layout, index, w.scale)
+		return index, row, rail_tab_close_rect(w, layout, index)
 	}
 }
 
