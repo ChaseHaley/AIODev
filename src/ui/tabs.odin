@@ -33,16 +33,6 @@ tab_drop_hit :: proc(bar: Tab_Bar, width, scale, x, y: f32) -> bool {
 	return r.width > 0 && render.rect_contains(r, x, y)
 }
 
-// The tab whose resting slot is under the point.
-tab_at :: proc(bar: Tab_Bar, x, y: f32) -> (index: int, ok: bool) {
-	local_x := x - bar.x
-	if bar.count == 0 || bar.tab_width <= 0 || local_x < 0 || y < 0 || y >= bar.height {
-		return -1, false
-	}
-	index = int(local_x / bar.tab_width)
-	return index < bar.count ? index : -1, index < bar.count
-}
-
 // The new-tab button, just after the last tab.
 tab_new_rect :: proc(bar: Tab_Bar) -> render.Rect {
 	return {bar.x + f32(bar.count) * bar.tab_width, 0, bar.button_width, bar.height}
@@ -242,13 +232,4 @@ tab_close_rect :: proc(bar: Tab_Bar, index: int, position: f32, scale: f32) -> r
 	x := bar.x + f32(index + 1) * bar.tab_width - 4 * scale - button
 	x += (position - f32(index)) * bar.tab_width
 	return {x, (bar.height - button) / 2, button, button}
-}
-
-// The resting tab whose close button is under the point.
-tab_close_hit :: proc(bar: Tab_Bar, x, y, scale: f32) -> (index: int, ok: bool) {
-	index, ok = tab_at(bar, x, y)
-	if !ok {return -1, false}
-	r := tab_close_rect(bar, index, f32(index), scale)
-	if r.width > 0 && render.rect_contains(r, x, y) {return index, true}
-	return -1, false
 }

@@ -8,31 +8,21 @@ import "aio:ui"
 import fixtures "../fixtures"
 
 @(test)
-tab_bar_caps_widths_and_hit_tests_tabs_actions_and_empty_space :: proc(t: ^testing.T) {
+tab_bar_caps_widths_and_places_tabs_actions_and_empty_space :: proc(t: ^testing.T) {
 	bar := ui.tab_bar_layout(0, 500, 1, 3)
 	testing.expect_value(t, bar.count, 3)
 	testing.expect_value(t, bar.height, ui.TITLE_BAR_HEIGHT)
 	testing.expect(t, bar.tab_width > 0 && bar.tab_width <= 220)
-	expect_tab :: proc(t: ^testing.T, bar: ui.Tab_Bar, x, y: f32, expected: int, loc := #caller_location) {
-		index, ok := ui.tab_at(bar, x, y)
-		testing.expect_value(t, ok, expected >= 0, loc)
-		if ok {testing.expect_value(t, index, expected, loc)}
-	}
-	expect_tab(t, bar, bar.x+2, 20, 0)
-	expect_tab(t, bar, bar.x+bar.tab_width+2, 20, 1)
-	expect_tab(t, bar, bar.x+2, bar.height, -1)
-	expect_tab(t, bar, 1, 20, 0)
-	expect_tab(t, bar, -1, 20, -1)
-
+	// The main package's window_tab_hit tests the points against these slots.
 	new_tab := ui.tab_new_rect(bar)
 	testing.expect_value(t, new_tab.x, bar.x + f32(bar.count)*bar.tab_width)
 	testing.expect_value(t, new_tab.width, bar.button_width)
-	expect_tab(t, bar, new_tab.x+2, 20, -1)
 
 	close := ui.tab_close_rect(bar, 1, 1, 1)
 	testing.expect_value(t, close.width, f32(24))
-	index, ok := ui.tab_close_hit(bar, close.x+close.width/2, close.y+close.height/2, 1)
-	testing.expect(t, ok && index == 1)
+	// A resting tab's close button sits inside its own slot.
+	testing.expect(t, close.x >= bar.x+bar.tab_width && close.x+close.width <= bar.x+2*bar.tab_width)
+	testing.expect(t, close.y >= 0 && close.y+close.height <= bar.height)
 	// A tab sliding toward another slot carries its close button with it.
 	moved := ui.tab_close_rect(bar, 1, 1.5, 1)
 	testing.expect_value(t, moved.x - close.x, bar.tab_width / 2)
@@ -43,12 +33,11 @@ tab_bar_caps_widths_and_hit_tests_tabs_actions_and_empty_space :: proc(t: ^testi
 }
 
 @(test)
-tab_bar_with_no_tabs_has_no_hit_surface :: proc(t: ^testing.T) {
+tab_bar_with_no_tabs_has_no_tab_slots :: proc(t: ^testing.T) {
 	bar := ui.tab_bar_layout(0, 500, 1, 0)
 	testing.expect_value(t, bar.count, 0)
 	testing.expect_value(t, bar.tab_width, f32(0))
-	_, ok := ui.tab_at(bar, 40, 20)
-	testing.expect(t, !ok)
+	testing.expect_value(t, ui.tab_close_rect(bar, 0, 0, 1), render.Rect{})
 	// Tabs a drag offers take their share of the width without counting as tabs.
 	offered := ui.tab_bar_layout(10, 500, 1, 2, 1)
 	testing.expect_value(t, offered.count, 2)

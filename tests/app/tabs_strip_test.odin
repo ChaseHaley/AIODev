@@ -71,6 +71,8 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	testing.expect_value(t, bar.count, 3)
 	testing.expect(t, bar.tab_width > 0 && bar.tab_width <= 220)
 	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, 20) == app.Tab_Chrome_Tab{0})
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width+2, 20) == app.Tab_Chrome_Tab{1})
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, bar.height) == nil)
 	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width*3+2, 20) == app.Tab_Chrome_New{})
 	testing.expect(t, app.window_tab_hit(&state, &w, bar, 1, 20) == nil)
 
@@ -79,6 +81,20 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.window_tab_rect(&state, &w, 0).x, bar.x)
 	expect_close := app.window_tab_close_rect(&state, &w, 1)
 	testing.expect_value(t, expect_close.width, ui.HEIGHT_COMPACT)
+	center_x, center_y := expect_close.x+expect_close.width/2, expect_close.y+expect_close.height/2
+	testing.expect_value(t, app.window_tab_close_hit(&state, &w, bar, center_x, center_y), 1)
+	testing.expect_value(t, app.window_tab_close_hit(&state, &w, bar, bar.x+2, 20), -1)
+}
+
+@(test)
+horizontal_tab_strip_without_tabs_has_no_tab_hit :: proc(t: ^testing.T) {
+	state: app.App
+	defer strip_destroy(&state)
+	workspace := strip_workspace(&state, 1, "Build")
+	w := app.Window{workspace = workspace, width = 1000, height = 700, scale = 1, tabs_horizontal = true}
+	bar := app.window_tab_bar(&state, &w)
+	testing.expect_value(t, bar.count, 0)
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+40, 20) == nil)
 }
 
 @(test)

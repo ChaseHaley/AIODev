@@ -71,22 +71,6 @@ rail_row_rect :: proc(layout: Rail_Layout, index: int) -> render.Rect {
 	}
 }
 
-rail_row_hit :: proc(layout: Rail_Layout, x, y: f32) -> int {
-	if layout.count == 0 ||
-	   x < layout.list.x ||
-	   x >= layout.list.x + layout.list.width ||
-	   y < layout.list.y ||
-	   y >= layout.list.y + layout.list.height {return -1}
-	local := y - layout.list.y - RAIL_PADDING * layout.scale + layout.scroll
-	if local < 0 {return -1}
-	index := int(math.floor(local / max(1, layout.row_height)))
-	return index < layout.count ? index : -1
-}
-
-rail_row_contains :: proc(layout: Rail_Layout, index: int, x, y: f32) -> bool {
-	return render.rect_contains(rail_row_rect(layout, index), x, y)
-}
-
 // Keeps `index` fully inside the list, moving the scroll only when it is not already visible.
 rail_reveal_row :: proc(layout: Rail_Layout, index: int) -> f32 {
 	if index < 0 || index >= layout.count {return rail_scroll_clamped(layout, layout.scroll)}
@@ -111,13 +95,6 @@ rail_close_rect :: proc(layout: Rail_Layout, index: int, scale: f32) -> render.R
 		HEIGHT_COMPACT * scale,
 		HEIGHT_COMPACT * scale,
 	}
-}
-
-rail_close_hit :: proc(layout: Rail_Layout, x, y, scale: f32) -> int {
-	index := rail_row_hit(layout, x, y)
-	r := rail_close_rect(layout, index, scale)
-	if r.width > 0 && render.rect_contains(r, x, y) {return index}
-	return -1
 }
 
 rail_footer_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {

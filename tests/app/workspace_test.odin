@@ -130,7 +130,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	if !testing.expect(t, layout_ok && app.rail_docked(w)) { return }
 	row0 := app.rail_row_rect_for_tab(w, 0)
 	row1 := app.rail_row_rect_for_tab(w, 1)
-	testing.expect_value(t, ui.rail_row_hit(layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), 0)
+	testing.expect_value(t, app.rail_tab_hit(w, layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), 0)
 	close := ui.rail_close_rect(layout, 1, w.scale)
 	hit := app.rail_tab_interaction_hit(w, close.x + close.width / 2, close.y + close.height / 2, .Left)
 	testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{1})
