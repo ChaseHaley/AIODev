@@ -97,7 +97,7 @@ pane_restart_takes_its_keys_only_from_a_stopped_session :: proc(t: ^testing.T) {
 		testing.expect_value(t, defaults[1], commands.Shortcut{.Numpad_Enter, {}})
 	}
 	exited := term.Status{kind = .Exited, exit_code = 1}
-	testing.expect_value(t, app.session_message(s, exited), "The shell exited with code 1. Press Enter to restart it.")
+	testing.expect_value(t, app.session_message(s, "", exited), "The shell exited with code 1. Press Enter to restart it.")
 	testing.expect(t, !app.action_available(s, w, .Restart_Pane))
 	app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect(t, !app.key_suppressed(w, .Enter))
@@ -120,9 +120,9 @@ pane_restart_takes_its_keys_only_from_a_stopped_session :: proc(t: ^testing.T) {
 	testing.expect_value(t, entry.status, term.Status_Kind.Exited)
 	policy_key(s, w, .F5)
 	testing.expect_value(t, entry.status, term.Status_Kind.Running)
-	testing.expect_value(t, app.session_message(s, exited), "The shell exited with code 1. Press F5 to restart it.")
+	testing.expect_value(t, app.session_message(s, "", exited), "The shell exited with code 1. Press F5 to restart it.")
 	unbound := [?]commands.Override{{command.id, nil}}
 	testing.expect_value(t, commands.rebind(&s.registry, unbound[:], errors[:]), commands.Error.None)
-	testing.expect_value(t, app.session_message(s, {kind = .Failed, message = "Gone."}),
-		"Gone. Check shell.command and shell.directory in settings, then run Restart Stopped Pane to try again.")
+	testing.expect_value(t, app.session_message(s, "pwsh", {kind = .Failed, message = "Gone."}),
+		"Gone. Check profile.pwsh.command and profile.pwsh.directory in settings, then run Restart Stopped Pane to try again.")
 }
