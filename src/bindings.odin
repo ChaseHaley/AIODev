@@ -171,14 +171,14 @@ binding_report :: proc(
 		}
 	}
 	if s.input.leader != "" {
-		leader_line := settings.setting_line(s, "input.leader")
+		leader_line := settings.setting_line(s, settings.LEADER_KEY)
 		leader, valid := commands.parse_shortcut(s.input.leader)
 		if !valid || .Leader in leader.modifiers || !leader_key_supported(leader.key) {
 			issue := Binding_Issue {
 				kind     = .Unsupported_Leader_Shortcut,
 				severity = .Invalid_Value,
 				line     = leader_line,
-				key      = "input.leader",
+				key      = settings.LEADER_KEY,
 			}
 			if _, err := append(&issues, issue); err != nil {
 				report.issues = issues[:]
@@ -199,7 +199,7 @@ binding_report :: proc(
 			leader_wins := winner == nil
 			winner_source: Binding_Source
 			if leader_wins {
-				winner_source = {"input.leader", "", leader_line}
+				winner_source = {settings.LEADER_KEY, "", leader_line}
 				report.leader = leader
 			} else {
 				winner_source = {winner.name, winner.title, applied_lines[Action(winner.id)]}
@@ -214,7 +214,7 @@ binding_report :: proc(
 						kind     = .Leader_Prefix,
 						severity = .Shortcut_Warning,
 						line     = leader_line,
-						key      = "input.leader",
+						key      = settings.LEADER_KEY,
 						conflict = {
 							shortcut    = shortcut,
 							leader_text = s.input.leader,
@@ -283,7 +283,7 @@ binding_issue_identity :: proc(issue: Binding_Issue, path: string) -> string {
 	if issue.kind != .Leader_Prefix {return binding_issue_text(issue, path)}
 	conflict := issue.conflict
 	return fmt.tprintf(
-		"input.leader (%s) vs %s (%s); %s wins",
+		settings.LEADER_KEY + " (%s) vs %s (%s); %s wins",
 		conflict.leader_text,
 		conflict.loser.title,
 		conflict.loser.name,

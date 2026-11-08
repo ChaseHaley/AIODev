@@ -243,6 +243,8 @@ SCHEMA_CAPACITY :: 128
 // and the slider's comfortable one.
 FONT_SIZE_ZOOM :: Range{6, 72}
 KEY_BINDING_PREFIX :: "keys."
+// The settings key of the leader shortcut, which binding validation reports beside the "keys." rows.
+LEADER_KEY :: "input.leader"
 // The settings key of a command's shortcuts, "keys.NAME". Temporary.
 binding_key :: proc(name: string) -> string {
 	return fmt.tprintf("%s%s", KEY_BINDING_PREFIX, name)
@@ -788,7 +790,7 @@ SCHEMA :: [?]Schema_Entry {
 		description = "Profile for new tabs, splits and the plus button. Profiles are ordered by profile.order.",
 	},
 	{
-		key = "input.leader",
+		key = LEADER_KEY,
 		title = "Leader Key",
 		kind = .String,
 		offset = offset_of(Settings, input) + offset_of(Input_Settings, leader),
