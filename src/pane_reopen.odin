@@ -42,9 +42,9 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	if index < 0 || index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[index]
 	terminal := false
-	for node in tab.tree.nodes {
-		pane := node.(layout.Pane) or_continue
-		terminal ||= pane_owns_session(pane.content.kind)
+	for _, id in tab.tree.nodes {
+		content, is_pane := layout.pane_content(&tab.tree, layout.Node_Id(id))
+		if is_pane {terminal ||= pane_owns_session(content.kind)}
 	}
 	if !terminal {return}
 	saved, encoded := layout_tab_encode(app, tab, pane_processes(app))
@@ -56,9 +56,8 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
 	if tab_index < 0 || tab_index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[tab_index]
-	if int(node) >= len(tab.tree.nodes) {return}
-	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
-	if !is_pane || !pane_owns_session(pane.content.kind) {return}
+	content, is_pane := layout.pane_content(&tab.tree, node)
+	if !is_pane || !pane_owns_session(content.kind) {return}
 	sibling, axis, before, share, split := layout.placement(&tab.tree, node)
 	if !split {
 		closed_record_tab(app, workspace, tab_index)
@@ -66,7 +65,7 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 	}
 	beside := make([dynamic]layout.Content, context.temp_allocator)
 	layout.contents(&tab.tree, sibling, &beside)
-	nodes := []Saved_Node{layout_pane_encode(app, pane.content, pane_processes(app))}
+	nodes := []Saved_Node{layout_pane_encode(app, content, pane_processes(app))}
 	floating, is_floating := layout.float_of(&tab.tree, node)
 	record := Closed_Record {
 		tab    = {nodes = nodes},
@@ -206,7 +205,7 @@ closed_reopen_linked :: proc(
 	if home == layout.INVALID_NODE {home = layout.find_content(tree, group[0])}
 	added, placed := closed_pane_restore(app, tree, home, record, join_slot = true)
 	if !placed {return}
-	content := tree.nodes[added].(layout.Pane).content
+	content, _ := layout.pane_content(tree, added)
 	if w.workspace.selected != tab_index {tab_select(app, w, tab_index)}
 	pane_link_joined(app, linked, content, focus = true)
 	pane_link_activate(linked)

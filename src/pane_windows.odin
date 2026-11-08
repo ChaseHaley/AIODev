@@ -30,10 +30,9 @@ pane_window_source :: proc(
 	pane: Workspace_Pane,
 	ok: bool,
 ) {
-	linked, found: bool
-	home, linked, found = pane_link_origin(app, source, node)
-	if !found || !pane_window_source_allows(home.workspace) {return}
-	if !linked && !pane_link_tab_can_lose(home.tab) {return}
+	allowed: bool
+	home, _, allowed = pane_source_leaves(app, source, node)
+	if !allowed || !pane_window_source_allows(home.workspace) {return}
 	pane, ok = workspace_pane_at(app, home.workspace, tab_index_by_id(home.workspace, home.tab.id), home.node)
 	return
 }
@@ -95,9 +94,9 @@ pane_to_window :: proc(
 		return false
 	}
 	destination := selected_tab(preview.workspace)
-	if destination == nil ||
-	   destination.tree.nodes[destination.tree.root].(layout.Pane).content !=
-		   pane.content {return false}
+	if destination == nil {return false}
+	if shown, is_pane := layout.pane_content(&destination.tree, destination.tree.root);
+	   !is_pane || shown != pane.content {return false}
 	layout_pane := home.tab.tree.nodes[home.node].(layout.Pane)
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}

@@ -427,18 +427,14 @@ control_markdown_open :: proc(
 // The window's focused pane when it shows Markdown.
 @(require_results)
 markdown_focused :: proc(app: ^App, w: ^Window) -> ^Markdown_Pane {
-	tree := window_tree(w)
-	if tree == nil || tree.focus == layout.INVALID_NODE {return nil}
-	pane, ok := tree.nodes[tree.focus].(layout.Pane)
-	if !ok || pane.content.kind != .Markdown {return nil}
-	return markdown_find(app, pane.content.id)
+	content, ok := window_focused_content(w)
+	if !ok || content.kind != .Markdown {return nil}
+	return markdown_find(app, content.id)
 }
 
 markdown_active :: proc(w: ^Window) -> bool {
-	tree := window_tree(w)
-	if tree == nil || tree.focus == layout.INVALID_NODE {return false}
-	pane, ok := tree.nodes[tree.focus].(layout.Pane)
-	return ok && pane.content.kind == .Markdown
+	content, ok := window_focused_content(w)
+	return ok && content.kind == .Markdown
 }
 
 @(private, require_results)

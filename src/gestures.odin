@@ -170,8 +170,8 @@ gesture_complete :: proc(app: ^App, w: ^Window, capture: Gesture_Capture, e: inp
 	if reported, ok := capture.(Gesture_Reported); ok {content_report_release(app, reported.session, e)}
 }
 
-// The shared completion of a release its surface declined: a confirmation, the palette, then a pane
-// drag the header began, a settings page and the selection.
+// The shared completion of a release its surface declined: a confirmation, the palette,
+// a settings page and the selection.
 @(private)
 gesture_finish :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if confirmation_button(app, w, e) {return true}
@@ -182,7 +182,6 @@ gesture_finish :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 		return true
 	}
 	if e.button != .Left {return false}
-	if _, pane := pane_drag_grab(w); pane {_ = pane_drag_release(app, w); return true}
 	if settings_pointer_release(app, w, x, y) {return true}
 	if selection_active(w) {selection_finish(app, w, x, y); return true}
 	return false

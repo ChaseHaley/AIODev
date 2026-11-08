@@ -137,9 +137,9 @@ tab_drag_windows_move :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 
 @(require_results)
 tab_window_preview_create :: proc(app: ^App, tab: ^Tab) -> ^Window {
-	pane, valid := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+	content, valid := layout.focused_content(&tab.tree)
 	if !valid {return nil}
-	return window_preview_prepare(app, pane.content, "")
+	return window_preview_prepare(app, content, "")
 }
 
 @(private, require_results)

@@ -996,7 +996,7 @@ pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
 	}
 	if !pane_view_solo(w) {return window_tiled_rects(w)}
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	layout.compute(tree, window_content_area(app, w), window_gap(app, w), &rects, false)
+	layout.compute(tree, window_content_area(app, w), window_gap(app, w), &rects)
 	return rects[:]
 }
 

@@ -6,15 +6,13 @@ import "aio:ui"
 // A tab's second identity: the focused pane's terminal title, which can differ from a user name.
 @(require_results)
 palette_tab_detail :: proc(app: ^App, tab: ^Tab) -> string {
-	if tab == nil || tab.tree.root == layout.INVALID_NODE || tab.tree.focus == layout.INVALID_NODE {
-		return ""
-	}
-	pane, is_pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
+	if tab == nil || tab.tree.root == layout.INVALID_NODE {return ""}
+	content, is_pane := layout.focused_content(&tab.tree)
 	if !is_pane {return ""}
-	if entry := workspace_session_for_content(app, pane.content); entry != nil {
+	if entry := workspace_session_for_content(app, content); entry != nil {
 		return pane_header_title(&entry.header)
 	}
-	return content_title(app, pane.content)
+	return content_title(app, content)
 }
 
 @(private)

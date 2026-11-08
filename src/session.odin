@@ -354,8 +354,8 @@ session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 @(private = "file")
 session_workspace_titles_changed :: proc(app: ^App, workspace: ^Workspace, id: u32) {
 	for tab in workspace.tabs {
-		pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-		if pane.content == {.Terminal, id} {tab_update_title(app, tab)}
+		content, is_pane := layout.focused_content(&tab.tree)
+		if is_pane && content == {.Terminal, id} {tab_update_title(app, tab)}
 	}
 }
 

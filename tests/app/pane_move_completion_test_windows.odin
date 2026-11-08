@@ -104,8 +104,10 @@ pane_move_completion_selects_titles_and_relayouts_all_destinations :: proc(t: ^t
 		destination.name, _ = strings.clone("destination")
 		switch kind {
 		case 0:
-			if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
-				f.node, destination.tree.root, .Right, false)) {return}
+			if !testing.expect(t, app.pane_drop_commit(state, f.destination,
+				app.Pane_Grab{source, f.node}, f.destination,
+				app.Pane_Drop{tab = destination, place = .Beside,
+					target = destination.tree.root, direction = .Right})) {return}
 		case 1:
 			if !testing.expect(t, app.pane_to_tab(state, f.destination, source, f.node)) {return}
 			destination = app.selected_tab(f.destination.workspace)
@@ -164,8 +166,10 @@ settings_content_moves_like_any_other_pane_and_stays_unique :: proc(t: ^testing.
 	layout.destroy(&destination.tree)
 	if !testing.expect_value(t, layout.init(&destination.tree, {.Settings, 0}), nil) {return}
 
-	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
-		f.node, destination.tree.root, .Right, false)) {return}
+	if !testing.expect(t, app.pane_drop_commit(state, f.destination,
+		app.Pane_Grab{source, f.node}, f.destination,
+		app.Pane_Drop{tab = destination, place = .Beside,
+			target = destination.tree.root, direction = .Right})) {return}
 	settings_node, settings_found := move_find_pane(&destination.tree, {.Settings, 0})
 	_, terminal_found := move_find_pane(&destination.tree, {.Terminal, 1})
 	testing.expect(t, settings_found && terminal_found)
@@ -174,8 +178,9 @@ settings_content_moves_like_any_other_pane_and_stays_unique :: proc(t: ^testing.
 	app.pane_focus(state, f.destination, settings_node)
 	testing.expect(t, app.settings_active(f.destination))
 
-	if !testing.expect(t, app.pane_transfer(state, f.source, destination, source,
-		settings_node, source.tree.focus, .Right, false)) {return}
+	if !testing.expect(t, app.pane_drop_commit(state, f.source,
+		app.Pane_Grab{destination, settings_node}, f.source,
+		app.Pane_Drop{tab = source, place = .Beside, target = source.tree.focus, direction = .Right})) {return}
 	_, moved_to_source := move_find_pane(&source.tree, {.Settings, 0})
 	_, left_destination := move_find_pane(&destination.tree, {.Settings, 0})
 	testing.expect(t, moved_to_source && !left_destination)
@@ -187,8 +192,9 @@ settings_content_moves_like_any_other_pane_and_stays_unique :: proc(t: ^testing.
 	source_settings, found := move_find_pane(&source.tree, {.Settings, 0})
 	if !testing.expect(t, found) {return}
 	source_root, observer_root := source.tree.root, observer.tree.root
-	testing.expect(t, !app.pane_transfer(state, f.observer, source, observer,
-		source_settings, observer.tree.root, .Right, false))
+	testing.expect(t, !app.pane_drop_commit(state, f.observer,
+		app.Pane_Grab{source, source_settings}, f.observer,
+		app.Pane_Drop{tab = observer, place = .Beside, target = observer.tree.root, direction = .Right}))
 	testing.expect_value(t, source.tree.root, source_root)
 	testing.expect_value(t, observer.tree.root, observer_root)
 	testing.expect(t, !app.pane_to_tab(state, f.observer, source, source_settings))
@@ -241,8 +247,9 @@ pane_move_completion_allocation_failure_restores_departed_focus :: proc(t: ^test
 				append(&destination.tree.nodes, layout.Vacant{})
 			}
 			destination.tree.nodes.allocator = allocator
-			moved = app.pane_transfer(state, f.destination, source, destination,
-				f.node, destination.tree.root, .Right, false)
+			moved = app.pane_drop_commit(state, f.destination, app.Pane_Grab{source, f.node}, f.destination,
+				app.Pane_Drop{tab = destination, place = .Beside,
+					target = destination.tree.root, direction = .Right})
 			destination.tree.nodes.allocator = failure.backing
 		}
 		testing.expect(t, failure.failed && !moved)
@@ -270,8 +277,10 @@ pane_move_completion_preserves_unrelated_selected_source_tab :: proc(t: ^testing
 	append(&f.source.workspace.tabs, other)
 	f.source.workspace.selected = 1
 	f.source.overlay = app.Overlay_Tab_Menu{tab = other.id}
-	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
-		f.node, destination.tree.root, .Right, false)) {return}
+	if !testing.expect(t, app.pane_drop_commit(state, f.destination,
+		app.Pane_Grab{source, f.node}, f.destination,
+		app.Pane_Drop{tab = destination, place = .Beside,
+			target = destination.tree.root, direction = .Right})) {return}
 	testing.expect(t, app.selected_tab(f.source.workspace) == other)
 	testing.expect(t, app.window_tree(f.source) == &other.tree)
 	testing.expect(t, app.tab_menu_shown(f.source) && app.selection_active(f.source) && !app.cursor_visible(f.source))

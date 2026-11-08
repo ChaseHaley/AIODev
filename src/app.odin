@@ -479,6 +479,7 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 		metrics            = metrics,
 		rail_default_width = f32(app.settings.tabs.rail_width),
 		tabs_horizontal    = app.settings.tabs.orientation == .Horizontal,
+		header_height      = pane_header_row_height(app, scale),
 	}
 	// window.columns and window.rows size the window without a docked Activity panel, which then takes
 	// its width from the pane. This is the shipped policy, kept pending the owner's decision on whether
@@ -488,7 +489,7 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 		template,
 		u16(app.settings.window.columns),
 		u16(app.settings.window.rows),
-		pane_insets(app, scale, nil),
+		pane_insets(app, &template, nil),
 		activity_dock = false,
 	)
 	return {

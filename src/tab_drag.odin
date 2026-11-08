@@ -170,7 +170,7 @@ tab_drag_release :: proc(app: ^App, w: ^Window) {
 	d := drag_end(w)
 	switch &state in d {
 	case Drag_Pressed:
-		if !state.grab.(Tab_Grab).modified {tab_select_one(w.workspace, w.workspace.selected)}
+		if !state.grab.(Tab_Grab).modified {workspace_tab_choose(w.workspace, w.workspace.selected)}
 	case Drag_Active:
 		a := &state
 		drag_thumbnail_destroy(&a.thumbnail)

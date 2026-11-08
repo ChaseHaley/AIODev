@@ -39,7 +39,17 @@ pane_drag_dropdown_preserves_runtime_for_each_destination :: proc(t: ^testing.T)
 		if destination == 0 {
 			if !testing.expect(t, app.workspace_create_empty(&state) != nil) {return}
 		}
-		app.pane_drag_press(&state, w, node, 400, 200)
+		header: app.Pane_Header_Layout
+		found := false
+		for pane in w.panes {
+			if pane.node != node {continue}
+			header, found = app.pane_header_layout(w, pane), true
+			break
+		}
+		if !testing.expect(t, found && header.title.width > 0 && header.title.height > 0) {return}
+		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+			x = i32(header.title.x + header.title.width / 2),
+			y = i32(header.title.y + header.title.height / 2)})
 		chip := app.workspace_button_rect(w)
 		app.handle_event(&state, input.Mouse_Move_Event{window = w.id,
 			x = i32(chip.x + chip.width / 2), y = i32(chip.y + chip.height / 2), buttons = {.Left}})

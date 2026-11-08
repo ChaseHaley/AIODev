@@ -66,8 +66,8 @@ tab_display_title :: proc(tab: ^Tab, ordinal: int) -> string {
 // One rule for construction and later refreshes: the tab's own name, else its content's title.
 @(private)
 tab_update_title :: proc(app: ^App, tab: ^Tab) {
-	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	title := content_pane_title(app, workspace_session_for_content(app, pane.content), pane.content)
+	content, _ := layout.focused_content(&tab.tree)
+	title := content_pane_title(app, workspace_session_for_content(app, content), content)
 	if tab.name != "" {title = tab.name}
 	owned, err := strings.clone(title)
 	if err != nil {log.error("copying the tab title failed"); return}

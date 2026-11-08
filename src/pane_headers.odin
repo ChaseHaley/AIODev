@@ -11,7 +11,6 @@ import "core:fmt"
 import "core:log"
 import "core:strings"
 import "core:time"
-import "core:unicode/utf8"
 
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
@@ -59,14 +58,7 @@ pane_header_refresh :: proc(entry: ^Session_Entry) {
 // A program-supplied or user-typed title as shown: control characters dropped, capped at 1024
 // bytes on a complete UTF-8 rune.
 display_title :: proc(raw: string, allocator := context.allocator) -> string {
-	bytes := make([dynamic]u8, 0, min(1024, len(raw)), allocator)
-	for r in raw {
-		if r < ' ' || r >= 0x7f && r <= 0x9f {continue}
-		encoded, count := utf8.encode_rune(r)
-		if len(bytes) + count > 1024 {break}
-		if _, err := append(&bytes, ..encoded[:count]); err != nil {break}
-	}
-	return string(bytes[:])
+	return printable_text(raw, 1024, allocator)
 }
 
 pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {

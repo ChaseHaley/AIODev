@@ -39,10 +39,8 @@ settings_pane_location :: proc(
 
 // Whether the window shows a focused settings pane, which then takes keyboard input.
 settings_active :: proc(w: ^Window) -> bool {
-	tree := window_tree(w)
-	if tree == nil || tree.focus == layout.INVALID_NODE {return false}
-	pane, ok := tree.nodes[tree.focus].(layout.Pane)
-	return ok && pane.content.kind == .Settings
+	content, ok := window_focused_content(w)
+	return ok && content.kind == .Settings
 }
 
 // The rectangle of the settings pane the window should address, preferring the focused one.

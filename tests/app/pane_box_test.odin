@@ -15,13 +15,14 @@ box_metrics :: proc(scale: f32) -> term_view.Metrics {
 }
 
 @(private="file")
-box_window :: proc(workspace: ^app.Workspace, scale: f32) -> app.Window {
+box_window :: proc(state: ^app.App, workspace: ^app.Workspace, scale: f32) -> app.Window {
 	w := app.Window {
 		workspace = workspace,
 		scale = scale,
 		metrics = box_metrics(scale),
 		width = i32(1000 * scale),
 		height = i32(650 * scale),
+		header_height = app.pane_header_row_height(state, scale),
 	}
 	app.rail_adaptive_update(&w)
 	return w
@@ -42,10 +43,10 @@ box_applied :: proc(
 	rects := make([dynamic]layout.Pane_Rect)
 	defer delete(rects)
 	layout.compute(&tree, app.window_content_area(state, w),
-		app.window_gap(state, w), &rects, false)
+		app.window_gap(state, w), &rects)
 	if !testing.expect_value(t, len(rects), 1) {return {}}
 	return app.pane_box(w.metrics, rects[0].rect,
-		app.pane_insets(state, w.scale, nil))
+		app.pane_insets(state, w, nil))
 }
 
 @(test)
@@ -59,8 +60,8 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 					state.settings.window.padding = padding
 					state.settings.pane.show_headers = headers
 					workspace: app.Workspace
-					w := box_window(&workspace, scale)
-					insets := app.pane_insets(&state, scale, nil)
+					w := box_window(&state, &workspace, scale)
+					insets := app.pane_insets(&state, &w, nil)
 					testing.expect_value(t, insets.header,
 						headers ? math.round(ui.HEADER_HEIGHT * scale) : 0)
 					for grid in ([?][2]u16{{80, 24}, {40, 10}, {1, 1}}) {
@@ -91,9 +92,9 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 			state: app.App
 			state.settings.tabs.orientation = .Vertical
 			workspace: app.Workspace
-			w := box_window(&workspace, scale)
+			w := box_window(&state, &workspace, scale)
 			w.rail_width = width
-			insets := app.pane_insets(&state, scale, nil)
+			insets := app.pane_insets(&state, &w, nil)
 			box, client_width, client_height, solved := app.pane_box_for_grid(
 				&state, w, 120, 24, insets, activity_dock = true,
 			)
@@ -149,7 +150,7 @@ pane_minimum_refusal_reports_the_grid_the_layout_applies_at_every_scale :: proc(
 			defer layout.destroy(&shown_tab.tree)
 			workspace: app.Workspace
 			defer delete(workspace.tabs)
-			w := box_window(&workspace, scale)
+			w := box_window(&state, &workspace, scale)
 			append(&workspace.tabs, &shown_tab)
 			shown := box_applied(t, &state, &w, shown_kind)
 			// A new tab or split guards a terminal pane, which is what the layout

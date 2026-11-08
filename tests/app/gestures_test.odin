@@ -202,10 +202,11 @@ gestures_completion_removes_source_window_and_preserves_both_runtimes :: proc(t:
 		ids := [?]u32{s.sessions[0].id, s.sessions[1].id}
 		sessions := [?]^term.Session{s.sessions[0].session, s.sessions[1].session}
 		pids := [?]u32{term.process_id(sessions[0]), term.process_id(sessions[1])}
-		place := app.Pane_Drop{target.id, destination, .Beside, destination.tree.root, .Right, .Fits}
+		place := app.Pane_Drop{target.id, destination, .Beside, destination.tree.root, .Right, .Fits, false}
 		if to_tab {place = app.Pane_Drop{window = target.id, tab = destination, place = .New_Tab}}
 		seed_pane_drag(w, source, source.tree.root, place)
-		app.handle_event(s, input.Mouse_Button_Event{window = window_id, button = .Left})
+		// The header that began the drag finishes it on release; the seeded drag has no header capture.
+		_ = app.pane_drag_release(s, w)
 		testing.expect(t, app.window_find(s, window_id) == nil)
 		testing.expect(t, app.workspace_find(s, workspace_id) == nil)
 		app.handle_event(s, input.Mouse_Move_Event{window = window_id, x = 100, y = 100})

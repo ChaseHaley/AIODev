@@ -91,18 +91,18 @@ pane_drag_preview :: proc(
 	source_window: ^Window,
 	carry: ^Pane_Carry,
 	w: ^Window,
-	drop: Pane_Drop,
+	drop: ^Pane_Drop,
 ) -> (
 	layout.Rect,
 	Drop_Fit,
 ) {
 	switch drop.place {
 	case .New_Tab:
-		pane := carry.source.tree.nodes[carry.node].(layout.Pane)
-		panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
-		reorders_tab :=
-			pane_source_workspace(app, carry.source) == w.workspace && carry.node == carry.source.tree.root
-		if !reorders_tab && !pane_minimum_allows(app, w, panes[:], nil, notify_failure = false) {
+		content, is_pane := layout.pane_content(&carry.source.tree, carry.node)
+		if !is_pane {return {}, .Refused}
+		panes := [?]layout.Pane_Rect{{content = content, rect = window_content_area(app, w)}}
+		drop.reorders_tab = pane_to_tab_reorders(app, w, carry.source, carry.node)
+		if !drop.reorders_tab && !pane_minimum_allows(app, w, panes[:], nil, notify_failure = false) {
 			return {}, .Too_Small
 		}
 		if w.tabs_horizontal {
@@ -129,8 +129,8 @@ pane_drag_preview :: proc(
 		return {}, .Refused
 	case .Beside, .Edge:
 	}
-	op, resolved := pane_drop_operation(app, source_window, carry.source, carry.node, w, drop)
-	if !resolved {return {}, pane_drop_refusal(source_window, carry.source, w, drop)}
+	op, resolved := pane_drop_operation(app, source_window, carry.source, carry.node, w, drop^)
+	if !resolved {return {}, pane_drop_refusal(source_window, carry.source, w, drop^)}
 	result := pane_trial_operation(app, w, op)
 	#partial switch result.error {
 	case .None:
@@ -316,19 +316,19 @@ pane_drag_target_move :: proc(
 	next: Pane_Destination
 	switch {
 	case new_tab:
-		next = Pane_Drop{w.id, destination, .New_Tab, layout.INVALID_NODE, .Left, .Fits}
+		next = Pane_Drop{w.id, destination, .New_Tab, layout.INVALID_NODE, .Left, .Fits, false}
 	case target == layout.INVALID_NODE:
 	case swap:
-		next = Pane_Drop{w.id, destination, .Swap, target, .Left, .Fits}
+		next = Pane_Drop{w.id, destination, .Swap, target, .Left, .Fits, false}
 	case root:
-		next = Pane_Drop{w.id, destination, .Edge, target, direction, .Fits}
+		next = Pane_Drop{w.id, destination, .Edge, target, direction, .Fits, false}
 	case:
-		next = Pane_Drop{w.id, destination, .Beside, target, direction, .Fits}
+		next = Pane_Drop{w.id, destination, .Beside, target, direction, .Fits, false}
 	}
 	if pane_destination_same(carry.destination, next) && !changed_window {return true}
 	rect: layout.Rect
 	if drop, placed := &next.(Pane_Drop); placed {
-		rect, drop.fit = pane_drag_preview(app, source_window, carry, w, drop^)
+		rect, drop.fit = pane_drag_preview(app, source_window, carry, w, drop)
 	}
 	shown := pane_drag_ghost_shown(a)
 	pane_drag_retarget(app, source_window, a, next)
@@ -471,12 +471,10 @@ pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, now: time.Tick) 
 
 // The label a drop would produce, independent of its drawing.
 @(require_results)
-pane_drag_label :: proc(grab: Pane_Grab, drop: Pane_Drop) -> string {
+pane_drag_label :: proc(drop: Pane_Drop) -> string {
 	switch drop.place {
 	case .New_Tab:
-		if drop.tab == grab.source && grab.node == grab.source.tree.root {
-			return "Move tab to end"
-		}
+		if drop.reorders_tab {return "Move tab to end"}
 		return "+ New tab"
 	case .Swap:
 		return "Swap panes"
@@ -522,7 +520,7 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		   {rect = r, color = accent, radius = radius, stroke = 2 * w.scale},
 	   ) !=
 	   .None {return .Ok}
-	label := pane_drag_label(carry.grab, drop)
+	label := pane_drag_label(drop)
 	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
 	label_color := app.theme.text
@@ -553,7 +551,6 @@ arrange_cancel :: proc(app: ^App, w: ^Window) {
 		}
 	}
 	if window_find(app, id) == nil {return}
-	divider_cancel(w)
 	tab_drag_cancel(app, w)
 	pane_drag_cancel(app, w)
 }
