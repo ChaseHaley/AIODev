@@ -150,8 +150,8 @@ try {
 
     Invoke-Aio key Ctrl+Shift+O
     Ready
-    $invalid = [regex]::Replace($original, '(?m)^shell.command = .*',
-        'shell.command = aio_missing_exit_test_3317.exe')
+    $invalid = [regex]::Replace($original, '(?m)^profile\.default\.command = .*',
+        'profile.default.command = aio_missing_exit_test_3317.exe')
     [IO.File]::WriteAllText($settingsPath, $invalid)
     Invoke-Aio command settings.reload
     Invoke-Aio command terminal.restart_shell
@@ -165,8 +165,8 @@ try {
     Wait-State panes.count 1
     Write-Output 'PASS failed launches remain visible and recoverable'
 
-    $quick = [regex]::Replace($original, '(?m)^shell.command = .*',
-        'shell.command = cmd.exe /d /c exit 0')
+    $quick = [regex]::Replace($original, '(?m)^profile\.default\.command = .*',
+        'profile.default.command = cmd.exe /d /c exit 0')
     [IO.File]::WriteAllText($settingsPath, $quick)
     Invoke-Aio command settings.reload
     Invoke-Aio key Ctrl+Shift+T
