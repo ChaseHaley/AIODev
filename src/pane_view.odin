@@ -32,9 +32,14 @@ window_title_height_in :: proc(w: ^Window, fill: layout.Pane_Fill) -> f32 {
 	return ui.TITLE_BAR_HEIGHT * w.scale
 }
 
-// The owner chose a view. The window follows at once, unless the operating system refused.
+// The owner chose a view. The window follows at once, unless the operating system refused, and the panes
+// ease there, the focused one above the others as it grows over them or shrinks back off them.
 pane_view_toggle :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) {
-	if pane_view_apply(app, w, event) {window_relayout(app, w)}
+	if !pane_view_apply(app, w, event) {return}
+	tree := window_tree(w)
+	content, _ := layout.pane_content(tree, layout.focus_tiled(tree))
+	pane_motion_arm(w, content)
+	window_relayout(app, w)
 }
 
 // Runs at the top of every layout, which every change to a shown tree reaches, so no caller can forget

@@ -134,9 +134,29 @@ try {
     Assert-Motion 'float close' @('pane.close')
     Assert-Motion 'float close again' @('pane.close')
     Invoke-Aio expect state panes.floating=1 | Out-Null
+    Assert-Motion 'float minimize' @('pane.minimize_floating')
+    Invoke-Aio expect state panes.capsules=1 | Out-Null
+    Assert-Motion 'float restore' @('pane.minimize_floating')
+    Invoke-Aio expect state panes.capsules=0 | Out-Null
     Invoke-Aio command pane.close | Out-Null
     Invoke-Aio expect state panes.floating=0 | Out-Null
     Wait-Settled
+
+    # Every other change that sets a pane's size at once eases it there too; only the user's own drags
+    # and the OS maximizing the window do not.
+    Invoke-Aio command pane.split_right | Out-Null
+    Invoke-Aio wait text 'PS ' | Out-Null
+    Wait-Settled
+    Assert-Motion 'swap' @('pane.swap_left')
+    Assert-Motion 'resize from the keyboard' @('pane.resize_right_large')
+    Assert-Motion 'balance' @('pane.balance')
+    Assert-Motion 'zoom' @('pane.zoom')
+    Assert-Motion 'leave zoom' @('pane.zoom')
+    Assert-Motion 'fill window' @('pane.fill_window')
+    Assert-Motion 'leave fill window' @('pane.fill_window')
+    Assert-Motion 'hide the Activity panel' @('status.panel')
+    Assert-Motion 'show the Activity panel' @('status.panel')
+    Assert-Motion 'close after the rest' @('pane.close')
 
     # Every other display, which may refresh at another rate than the compositor's clock.
     Add-Type -AssemblyName System.Windows.Forms

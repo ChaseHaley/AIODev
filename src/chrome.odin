@@ -144,7 +144,7 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	if app.settings.pane.gap == 0 && !pane.floating {
 		clip = {r.x, r.y, r.width, r.height}
 		edge := math.ceil(max(1, w.scale))
-		for bar in w.dock_edges.bars[:w.dock_edges.count] {card_clip_shared(&clip, r, bar, edge)}
+		for bar in dock_edge_bars(w) {card_clip_shared(&clip, r, bar, edge)}
 		for bar in pane_bars(w) {card_clip_shared(&clip, r, bar, edge)}
 	}
 	if render.push_layer(&w.list, clip) != .None {return}
@@ -158,6 +158,14 @@ window_card_outline :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		   {rect = {r.x, r.y, r.width, r.height}, color = border, radius = radius, stroke = stroke},
 	   ) !=
 	   .None {return}
+}
+
+// The borders the rail and Activity panel share with the panes when there is no gap. While the window's
+// panes and chrome move they sit nowhere final, so each pane draws its own outline instead.
+@(private = "file")
+dock_edge_bars :: proc(w: ^Window) -> []layout.Edge {
+	if pane_motion_animating(w) {return nil}
+	return w.dock_edges.bars[:w.dock_edges.count]
 }
 
 // Leaves out the side of a pane rectangle `r` that touches `bar`, whose shared border draws it.
@@ -203,10 +211,10 @@ window_card_dim :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, backgroun
 @(private)
 window_shared_borders :: proc(app: ^App, w: ^Window) {
 	if app.settings.pane.gap != 0 {return}
-	bars := pane_bars(w)
-	if len(bars) == 0 && w.dock_edges.count == 0 {return}
+	bars, docks := pane_bars(w), dock_edge_bars(w)
+	if len(bars) == 0 && len(docks) == 0 {return}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return}
-	for bar in w.dock_edges.bars[:w.dock_edges.count] {
+	for bar in docks {
 		if !window_shared_border(app, w, bar) {return}
 	}
 	for bar in bars {

@@ -200,6 +200,8 @@ pane_rearrange :: proc(app: ^App, w: ^Window, op: Pane_Operation) -> bool {
 	selection_cancel(w)
 	divider_cancel(w)
 	w.wheel_remainder = 0
+	// Rearranged and swapped panes travel from where they were to their new places.
+	pane_motion_arm(w)
 	window_relayout(app, w)
 	window_update_title(app, w)
 	cursor_blink_reset(w)
@@ -332,7 +334,9 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 		return
 	}
 	focus_leave(app, w)
-	// A floating pane rises above the others, and comes out of its capsule, as it takes focus.
+	// A floating pane rises above the others, and comes out of its capsule, as it takes focus; out of
+	// its capsule, it grows from it.
+	if floating, ok := layout.float_of(tree, node); ok && floating.minimized {pane_motion_arm(w)}
 	floats_changed := layout.focus_set(tree, node)
 	if pane_view_solo(w) && !layout.is_floating(tree, node) {
 		window_relayout(app, w)

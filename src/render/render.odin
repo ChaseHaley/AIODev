@@ -227,6 +227,10 @@ draw_list_copy :: proc(list: ^Draw_List, source: ^Draw_List, from, to: Draw_Mark
 	}
 	for layer in source.layers[from.layers:to.layers] {
 		copied := layer
+		// Drawing after the range may have gone on into its last layer; the copy keeps only the range.
+		copied.rect_count = clamp(to.rects - layer.rect_start, 0, layer.rect_count)
+		copied.glyph_count = clamp(to.glyphs - layer.glyph_start, 0, layer.glyph_count)
+		copied.image_count = clamp(to.images - layer.image_start, 0, layer.image_count)
 		copied.rect_start += base.rects - from.rects
 		copied.glyph_start += base.glyphs - from.glyphs
 		copied.image_start += base.images - from.images

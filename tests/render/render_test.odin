@@ -101,6 +101,32 @@ draw_list_reuse :: proc(t: ^testing.T) {
 	}
 }
 
+// A copy of a range holds only what was drawn in it, even when drawing after the range went on into the
+// range's last layer.
+@(test)
+draw_list_copy_keeps_only_its_range :: proc(t: ^testing.T) {
+	source := render.draw_list_init()
+	defer render.draw_list_destroy(&source)
+	copy := render.draw_list_init()
+	defer render.draw_list_destroy(&copy)
+	layer(t, &source, {0, 0, 32, 32})
+	rect(t, &source, {rect = {0, 0, 1, 1}})
+	from := render.draw_mark(&source)
+	layer(t, &source, {0, 0, 32, 32})
+	rect(t, &source, {rect = {1, 0, 1, 1}})
+	glyph(t, &source, {rect = {1, 0, 1, 1}})
+	to := render.draw_mark(&source)
+	rect(t, &source, {rect = {2, 0, 1, 1}})
+	glyph(t, &source, {rect = {2, 0, 1, 1}})
+	testing.expect_value(t, render.draw_list_copy(&copy, &source, from, to), render.Error.None)
+	if !testing.expect_value(t, len(copy.layers), 1) {return}
+	testing.expect_value(t, len(copy.rects), 1)
+	testing.expect_value(t, copy.layers[0].rect_start, 0)
+	testing.expect_value(t, copy.layers[0].rect_count, 1)
+	testing.expect_value(t, copy.layers[0].glyph_count, 1)
+	testing.expect_value(t, copy.rects[0].rect.x, f32(1))
+}
+
 @(test)
 allocation_errors :: proc(t: ^testing.T) {
 	failing := runtime.Allocator{procedure = failing_allocator}

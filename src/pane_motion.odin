@@ -18,9 +18,13 @@ Pane_Motion :: struct {
 	tree:   ^layout.Layout,
 	// The next placement of this tab layout moves: a split or close changed it.
 	armed:  ^layout.Layout,
+	// The tiled pane drawn above the others while the motion runs, as a zoomed pane shrinking back over the
+	// panes it uncovers, and the one the next armed placement raises.
+	raised, raise_next: Maybe(u64),
 	// The bars between tiled panes as drawn; see pane_bars.
 	bars:   [dynamic]layout.Edge,
-	// Where each pane's drawing sits in the window's last frame, so a closed pane can keep it.
+	// Where each pane, float frame and chrome region drew in the window's last frame, so one that goes
+	// away can keep showing it, and where a frame or region starts moving from.
 	drawn:  [dynamic]Pane_Drawn,
 	// Closed panes collapsing away, each drawn from a copy of its last frame.
 	ghosts: [dynamic]Pane_Ghost,
@@ -28,26 +32,60 @@ Pane_Motion :: struct {
 
 @(private = "file")
 Pane_Drawn :: struct {
-	key:      u64,
-	from, to: render.Draw_Mark,
-	rect:     layout.Rect,
+	key, container: u64,
+	from, to:       render.Draw_Mark,
+	rect:           layout.Rect,
 }
 
 @(private = "file")
 Pane_Ghost :: struct {
-	// The closed pane, and the pane it collapses beneath.
-	key, successor: u64,
+	// What went away, and the pane it collapses beneath; one sent away by a hint, such as a float into its
+	// capsule, has none and draws on its own (see pane_ghosts_draw_alone).
+	key:       u64,
+	successor: Maybe(u64),
+	container: u64,
 	// Where the copied drawing was drawn, and the glyph atlas it refers to.
-	rect:           layout.Rect,
-	list:           render.Draw_List,
-	atlas:          u64,
+	rect:      layout.Rect,
+	list:      render.Draw_List,
+	atlas:     u64,
+}
+
+// Motion keys: a pane's content (below these bits), a float's frame by its Float.id, and a chrome region:
+// the docked tab rail and the Activity panel.
+PANE_MOTION_FRAME :: u64(1) << 62
+PANE_MOTION_CHROME :: u64(2) << 62
+PANE_MOTION_RAIL :: PANE_MOTION_CHROME | 1
+PANE_MOTION_PANEL :: PANE_MOTION_CHROME | 2
+
+// A chrome region drawing from the motion: its background at `shown`, and its content laid out at `rect`,
+// the layout's rectangle, then moved with `shown`'s corner and clipped to it, as a pane's content is.
+Pane_Region_Draw :: struct {
+	key:           u64,
+	rect, shown:   render.Rect,
+	from, content: render.Draw_Mark,
+}
+
+// What the window showed before a relayout: the panes, float frames and chrome as drawn, and the float
+// capsules by Float.id, which a restored float grows out of.
+Pane_Motion_Shown :: struct {
+	places:   []ui.Layout_Place,
+	capsules: []ui.Layout_Hint,
 }
 
 PANE_MOTION_DURATION :: 160 * time.Millisecond
 
-// The next relayout of w's visible tab eases its panes to their new places.
-pane_motion_arm :: proc(w: ^Window) {
+// The next relayout of w's visible tab eases its panes to their new places; `raised` draws above the
+// other tiled panes while they move.
+pane_motion_arm :: proc(w: ^Window, raised: Maybe(layout.Content) = nil) {
 	w.pane_motion.armed = window_tree(w)
+	w.pane_motion.raise_next = nil
+	if content, ok := raised.?; ok {w.pane_motion.raise_next = pane_motion_key(content)}
+}
+
+// Whether `pane` draws above the other tiled panes this frame; see Pane_Motion.raised.
+pane_motion_raised :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
+	raised, ok := w.pane_motion.raised.?
+	return ok && pane_motion_animating(w) && raised == pane_motion_key(pane.content)
 }
 
 pane_motion_destroy :: proc(w: ^Window) {
@@ -77,78 +115,268 @@ pane_motion_rect :: proc(w: ^Window, pane: layout.Pane_Rect) -> layout.Rect {
 	return {shown.x, shown.y, shown.width, shown.height}
 }
 
-// The panes as drawn now, collected before a relayout replaces w.panes.
+// Where a float's frame draws this frame, by its Float.id; `frame` when it is not moving.
+pane_motion_frame :: proc(w: ^Window, id: u64, frame: layout.Rect) -> layout.Rect {
+	r := frame
+	shown := ui.layout_motion_rect(&w.pane_motion.moving, PANE_MOTION_FRAME | id, {r.x, r.y, r.width, r.height})
+	return {shown.x, shown.y, shown.width, shown.height}
+}
+
+// Starts drawing chrome region `key`, which the layout puts at `rect`: draw its background at `shown`,
+// then call pane_motion_region_content before its content and pane_motion_region_end after it.
+pane_motion_region_begin :: proc(w: ^Window, key: u64, rect: render.Rect) -> Pane_Region_Draw {
+	shown := ui.layout_motion_rect(&w.pane_motion.moving, key, rect)
+	mark := render.draw_mark(&w.list)
+	return {key, rect, shown, mark, mark}
+}
+
+pane_motion_region_content :: proc(w: ^Window, region: ^Pane_Region_Draw) {
+	region.content = render.draw_mark(&w.list)
+}
+
+pane_motion_region_end :: proc(w: ^Window, region: ^Pane_Region_Draw) {
+	r, s := region.rect, region.shown
+	if s != r {
+		offset := [2]f32{math.round(s.x - r.x), math.round(s.y - r.y)}
+		render.draw_translate(&w.list, region.content, offset, s)
+	}
+	pane_motion_region_drawn(w, region.key, {s.x, s.y, s.width, s.height}, region.from)
+}
+
+// What the window shows now, collected before a relayout replaces w.panes; float frames come first, so a
+// float's frame copy draws beneath its panes' copies.
 @(require_results)
-pane_motion_shown :: proc(w: ^Window) -> []ui.Layout_Place {
-	return pane_motion_places(w, true)
+pane_motion_shown :: proc(w: ^Window) -> Pane_Motion_Shown {
+	places := make([dynamic]ui.Layout_Place, 0, len(w.panes) + 4, context.temp_allocator)
+	// Float frames, chrome, and copies still on their way out, from where the last frame drew them.
+	outer: for drawn in w.pane_motion.drawn {
+		if drawn.key & (PANE_MOTION_FRAME | PANE_MOTION_CHROME) == 0 {
+			for pane in w.panes {if pane_motion_key(pane.content) == drawn.key {continue outer}}
+		}
+		r := drawn.rect
+		append(&places, ui.Layout_Place{drawn.key, {r.x, r.y, r.width, r.height}, drawn.container})
+	}
+	pane_places_add(w, &places, true)
+	return {places[:], pane_motion_capsules(w)}
+}
+
+// The float capsules the window shows, by Float.id.
+@(private = "file")
+pane_motion_capsules :: proc(w: ^Window) -> []ui.Layout_Hint {
+	capsules := make([dynamic]ui.Layout_Hint, 0, len(w.float_capsules), context.temp_allocator)
+	if tree := window_tree(w); tree != nil {
+		for capsule in w.float_capsules {
+			if floating, ok := layout.float_of(tree, capsule.root); ok {
+				append(&capsules, ui.Layout_Hint{floating.id, capsule.rect})
+			}
+		}
+	}
+	return capsules[:]
 }
 
 // After a relayout placed w.panes: an armed change of the same tab starts the motion from `shown`, any
 // other change of that tab carries a running motion to the new rectangles, and another tab stops it.
-pane_motion_placed :: proc(app: ^App, w: ^Window, shown: []ui.Layout_Place) {
+pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 	m := &w.pane_motion
 	tree := window_tree(w)
 	armed := m.armed != nil && m.armed == tree && m.tree == tree
-	m.armed = nil
+	raise := m.raise_next
+	m.armed, m.raise_next = nil, nil
 	defer m.tree = tree
 	if m.tree != tree {
 		ui.layout_motion_stop(&m.moving)
 		pane_ghosts_clear(m)
 		return
 	}
-	targets := pane_motion_places(w, false)
+	defer pane_bars_refresh(app, w)
+	targets := pane_motion_targets(app, w)
 	if !armed {
 		ui.layout_motion_retarget(&m.moving, targets)
 		return
 	}
 	pane_ghosts_clear(m)
-	ui.layout_motion_begin(&m.moving, shown, targets, PANE_MOTION_DURATION, .Decelerate, app.animations)
+	m.raised = raise
+	hints := pane_motion_hints(app, w, shown, targets)
+	ui.layout_motion_begin(
+		&m.moving,
+		shown.places,
+		targets,
+		PANE_MOTION_DURATION,
+		.Decelerate,
+		app.animations,
+		hints,
+	)
 	if !pane_motion_animating(w) {return}
-	for place in shown {
-		successor, leaving := ui.layout_motion_successor(&m.moving, place.key)
+	for place in shown.places {
+		successor, leaving := ui.layout_motion_leaving(&m.moving, place.key)
 		if leaving {pane_ghost_capture(app, w, place.key, successor)}
 	}
+}
+
+// A float that went into its capsule shrinks into it, frame and panes together, and one that came back
+// out grows from where its capsule was. Chrome that appears or goes away slides from or into the window
+// edge it lies against.
+@(private = "file")
+pane_motion_hints :: proc(
+	app: ^App,
+	w: ^Window,
+	shown: Pane_Motion_Shown,
+	targets: []ui.Layout_Place,
+) -> []ui.Layout_Hint {
+	hints := make([dynamic]ui.Layout_Hint, 0, 8, context.temp_allocator)
+	for key in ([?]u64{PANE_MOTION_RAIL, PANE_MOTION_PANEL}) {
+		before, after := pane_place_get(shown.places, key), pane_place_get(targets, key)
+		if r, gone := before.?; gone && after == nil {append(&hints, pane_region_edge(w, key, r))}
+		if r, came := after.?; came && before == nil {append(&hints, pane_region_edge(w, key, r))}
+	}
+	now := pane_motion_capsules(w)
+	// The frame and panes of float `id` in `places` that `others` does not have head for `capsule`.
+	add :: proc(
+		hints: ^[dynamic]ui.Layout_Hint,
+		places, others: []ui.Layout_Place,
+		id: u64,
+		capsule: render.Rect,
+	) {
+		for place in places {
+			if place.key != PANE_MOTION_FRAME | id && place.container != id {continue}
+			if pane_place_find(others, place.key) {continue}
+			append(hints, ui.Layout_Hint{place.key, capsule})
+		}
+	}
+	for target in targets {
+		if target.key & PANE_MOTION_FRAME == 0 || pane_place_find(shown.places, target.key) {continue}
+		id := target.key &~ PANE_MOTION_FRAME
+		for capsule in shown.capsules {
+			if capsule.key == id {add(&hints, targets, shown.places, id, capsule.rect)}
+		}
+	}
+	for place in shown.places {
+		if place.key & PANE_MOTION_FRAME == 0 || pane_place_find(targets, place.key) {continue}
+		id := place.key &~ PANE_MOTION_FRAME
+		for capsule in now {
+			if capsule.key == id {add(&hints, shown.places, targets, id, capsule.rect)}
+		}
+	}
+	return hints[:]
+}
+
+// The zero-width rectangle on the window edge chrome region `key` at `r` slides from or into: the left
+// edge for the rail and a left panel, the right edge for a right panel, and the rail's bottom for a panel
+// under the tabs.
+@(private = "file")
+pane_region_edge :: proc(w: ^Window, key: u64, r: render.Rect) -> ui.Layout_Hint {
+	edge := render.Rect{r.x, r.y, 0, r.height}
+	if key == PANE_MOTION_PANEL {
+		rail := rail_area(w)
+		if abs(r.x - rail.x) < 1 && abs(r.width - rail.width) < 1 && r.y > rail.y + 1 {
+			edge = {r.x, r.y + r.height, r.width, 0}
+		} else if r.x + r.width / 2 > f32(w.width) / 2 {
+			edge.x = r.x + r.width
+		}
+	}
+	return {key, edge}
+}
+
+@(private = "file")
+pane_place_get :: proc(places: []ui.Layout_Place, key: u64) -> Maybe(render.Rect) {
+	for place in places {
+		if place.key == key {return place.rect}
+	}
+	return nil
+}
+
+@(private = "file")
+pane_place_find :: proc(places: []ui.Layout_Place, key: u64) -> bool {
+	for place in places {
+		if place.key == key {return true}
+	}
+	return false
 }
 
 // Notes where build_frame drew a pane, from `from` to the list's end.
 pane_motion_drawn :: proc(w: ^Window, pane: layout.Pane_Rect, from: render.Draw_Mark) {
 	key, to := pane_motion_key(pane.content), render.draw_mark(&w.list)
 	// Without room to note it, a closed pane collapses as background instead.
-	_, _ = append(&w.pane_motion.drawn, Pane_Drawn{key, from, to, pane_motion_rect(w, pane)})
+	_, _ = append(&w.pane_motion.drawn, Pane_Drawn{key, pane.group, from, to, pane_motion_rect(w, pane)})
 }
 
-// A new frame starts recording where the panes draw.
+// Notes where build_frame drew a float frame or chrome region under `key`, at `rect`, from `from` to the
+// list's end. Each is its own container: it never takes an edge from another.
+pane_motion_region_drawn :: proc(w: ^Window, key: u64, rect: layout.Rect, from: render.Draw_Mark) {
+	to := render.draw_mark(&w.list)
+	_, _ = append(&w.pane_motion.drawn, Pane_Drawn{key, key, from, to, rect})
+}
+
+// A new frame starts recording where the panes draw. An arm no relayout took, as when focus restored
+// nothing, lapses here, so it never moves a later, unrelated change.
 pane_motion_drawn_reset :: proc(w: ^Window) {
 	clear(&w.pane_motion.drawn)
+	w.pane_motion.armed, w.pane_motion.raise_next = nil, nil
 }
 
 // Draws the last frame of each closed pane collapsing beneath `pane`, just before `pane` draws, so it sits
 // in the same container and stacking position: moved with its collapsing rectangle and clipped to it.
 pane_ghosts_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
-	m := &w.pane_motion
-	if len(m.ghosts) == 0 {return}
-	atlas := render.atlas_generation(app.device)
+	if len(w.pane_motion.ghosts) == 0 {return}
 	key := pane_motion_key(pane.content)
-	for &ghost in m.ghosts {
-		if ghost.successor != key {continue}
-		shown := ui.layout_motion_rect(&m.moving, ghost.key, {})
-		if shown.width < 1 || shown.height < 1 || ghost.atlas != atlas {continue}
-		mark := render.draw_mark(&w.list)
-		if render.append_list(&w.list, &ghost.list) != .None {return}
-		offset := [2]f32{math.round(shown.x - ghost.rect.x), math.round(shown.y - ghost.rect.y)}
-		render.draw_translate(&w.list, mark, offset, shown)
+	for &ghost in w.pane_motion.ghosts {
+		if successor, ok := ghost.successor.?; ok && successor == key {pane_ghost_draw(app, w, &ghost)}
 	}
+}
+
+// Draws what went away on its own, such as a float shrinking into its capsule: the chrome regions when
+// `chrome`, the floats otherwise, each where the live one would draw.
+pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
+	ghosts := w.pane_motion.ghosts[:]
+	alone :: proc(g: Pane_Ghost, kind: u64) -> bool {
+		return g.successor == nil && g.key & (PANE_MOTION_FRAME | PANE_MOTION_CHROME) == kind
+	}
+	if chrome {
+		for &ghost in ghosts {if alone(ghost, PANE_MOTION_CHROME) {pane_ghost_draw(app, w, &ghost)}}
+		return
+	}
+	// Float by float, each frame beneath its own panes, then panes whose frame stayed.
+	for &frame in ghosts {
+		if !alone(frame, PANE_MOTION_FRAME) {continue}
+		pane_ghost_draw(app, w, &frame)
+		for &pane in ghosts {
+			if alone(pane, 0) && pane.container == frame.key &~ PANE_MOTION_FRAME {pane_ghost_draw(app, w, &pane)}
+		}
+	}
+	framed :: proc(ghosts: []Pane_Ghost, container: u64) -> bool {
+		for g in ghosts {if g.successor == nil && g.key == PANE_MOTION_FRAME | container {return true}}
+		return false
+	}
+	for &pane in ghosts {
+		if alone(pane, 0) && !framed(ghosts, pane.container) {pane_ghost_draw(app, w, &pane)}
+	}
+}
+
+// Draws a copy where its motion has it now, and notes it as drawn there, so a change that brings it back
+// before it has gone continues from there.
+@(private = "file")
+pane_ghost_draw :: proc(app: ^App, w: ^Window, ghost: ^Pane_Ghost) {
+	shown := ui.layout_motion_rect(&w.pane_motion.moving, ghost.key, {})
+	if shown.width < 1 || shown.height < 1 || ghost.atlas != render.atlas_generation(app.device) {return}
+	mark := render.draw_mark(&w.list)
+	if render.append_list(&w.list, &ghost.list) != .None {return}
+	offset := [2]f32{math.round(shown.x - ghost.rect.x), math.round(shown.y - ghost.rect.y)}
+	render.draw_translate(&w.list, mark, offset, shown)
+	to := render.draw_mark(&w.list)
+	r := layout.Rect{shown.x, shown.y, shown.width, shown.height}
+	_, _ = append(&w.pane_motion.drawn, Pane_Drawn{ghost.key, ghost.container, mark, to, r})
 }
 
 // Copies what the last frame drew for the pane under `key` before its drawing is lost.
 @(private = "file")
-pane_ghost_capture :: proc(app: ^App, w: ^Window, key, successor: u64) {
+pane_ghost_capture :: proc(app: ^App, w: ^Window, key: u64, successor: Maybe(u64)) {
 	m := &w.pane_motion
 	for drawn in m.drawn {
 		if drawn.key != key {continue}
 		ghost := Pane_Ghost {
 			key       = key,
 			successor = successor,
+			container = drawn.container,
 			rect      = drawn.rect,
 			list      = render.draw_list_init(),
 			atlas     = render.atlas_generation(app.device),
@@ -168,15 +396,35 @@ pane_ghosts_clear :: proc(m: ^Pane_Motion) {
 	clear(&m.ghosts)
 }
 
+// Where the layout now puts every pane, every shown float's frame and the chrome regions.
 @(private = "file")
-pane_motion_places :: proc(w: ^Window, drawn: bool) -> []ui.Layout_Place {
-	places := make([dynamic]ui.Layout_Place, 0, len(w.panes), context.temp_allocator)
+pane_motion_targets :: proc(app: ^App, w: ^Window) -> []ui.Layout_Place {
+	places := make([dynamic]ui.Layout_Place, 0, len(w.panes) + 4, context.temp_allocator)
+	if rail, ok := rail_current_layout(w); ok && rail_docked(w) {
+		append(&places, ui.Layout_Place{PANE_MOTION_RAIL, rail.area, PANE_MOTION_RAIL})
+	}
+	if panel := status_panel_rect(app, w); panel.width > 0 && panel.height > 0 {
+		append(&places, ui.Layout_Place{PANE_MOTION_PANEL, panel, PANE_MOTION_PANEL})
+	}
+	pane_places_add(w, &places, false)
+	tree := window_tree(w)
+	area := floating_area(w)
 	for pane in w.panes {
-		r := drawn ? pane_motion_rect(w, pane) : pane.rect
-		place := ui.Layout_Place{pane_motion_key(pane.content), {r.x, r.y, r.width, r.height}, pane.group}
-		append(&places, place)
+		if !pane.floating || pane_place_find(places[:], PANE_MOTION_FRAME | pane.group) {continue}
+		frame, found := layout.float_rect(tree, layout.float_root(tree, pane.node), area)
+		if !found {continue}
+		key := PANE_MOTION_FRAME | pane.group
+		append(&places, ui.Layout_Place{key, {frame.x, frame.y, frame.width, frame.height}, key})
 	}
 	return places[:]
+}
+
+@(private = "file")
+pane_places_add :: proc(w: ^Window, places: ^[dynamic]ui.Layout_Place, drawn: bool) {
+	for pane in w.panes {
+		r := drawn ? pane_motion_rect(w, pane) : pane.rect
+		append(places, ui.Layout_Place{pane_motion_key(pane.content), {r.x, r.y, r.width, r.height}, pane.group})
+	}
 }
 
 @(private = "file")
