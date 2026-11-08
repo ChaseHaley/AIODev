@@ -116,6 +116,9 @@ Pane_Rect :: struct {
 	rect:     Rect,
 	order:    u64,
 	floating: bool,
+	// The floating group the pane is in (its Float.id), zero for a tiled pane: panes in the same group,
+	// or all tiled panes, share one container.
+	group:    u64,
 }
 
 @(private)
@@ -134,6 +137,7 @@ Layout :: struct {
 	// The tiled pane focus returns to when a floating pane gives it up; see focus_set.
 	tiled_focus:      Node_Id,
 	next_float_stack: u64,
+	next_float_id:    u64,
 }
 
 init :: proc(
@@ -684,7 +688,7 @@ place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane
 	case Vacant:
 	case Pane:
 		if !node.linked && !node.floating {
-			append(out, Pane_Rect{id, node.content, area, node.order, false})
+			append(out, Pane_Rect{id, node.content, area, node.order, false, 0})
 		}
 	case Split:
 		if node.floating {return}

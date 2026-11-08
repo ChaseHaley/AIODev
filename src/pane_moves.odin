@@ -453,9 +453,10 @@ pane_remove :: proc(
 	if visible {
 		for w in app.windows {
 			if w.workspace != workspace {continue}
-			// A floating pane's close leaves the tiled panes exactly as they were; a tiled pane's
-			// neighbours ease into the space it leaves.
-			if floating {window_floats_layout(app, w)} else {pane_motion_arm(w); window_relayout(app, w)}
+			// The closed pane's neighbours in its container ease into the space it leaves. A floating
+			// pane's close leaves the tiled panes exactly as they were.
+			pane_motion_arm(w)
+			if floating {window_floats_layout(app, w)} else {window_relayout(app, w)}
 			if was_focused {focus_enter(app, w)}
 		}
 	}

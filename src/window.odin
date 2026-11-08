@@ -445,11 +445,16 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 // panes keep their rectangles, grids and cached drawing.
 window_floats_layout :: proc(app: ^App, w: ^Window) {
 	tree := window_tree(w)
-	if w.phase == .Preparing || window_minimized(w) || tree == nil {return}
+	if w.phase == .Preparing || window_minimized(w) || tree == nil {
+		w.pane_motion.armed = nil
+		return
+	}
+	shown := pane_motion_shown(w)
 	tiled := len(window_tiled_rects(w))
 	resize(&w.panes, tiled)
 	g := window_geometry(app, w, w.pane_fill)
 	layout.floats_place(tree, g.floating, g.gap, g.header, &w.panes)
+	pane_motion_placed(app, w, shown)
 	window_panes_placed(app, w, tiled)
 }
 
@@ -624,15 +629,11 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	blinking := false
 	w.frame_wakes = {}
-	// Closed panes collapse beneath the panes taking their place.
-	pane_ghosts_draw(app, w)
 	pane_motion_drawn_reset(w)
 	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
 	for pane in w.panes {
 		if pane.floating {continue}
-		from := render.draw_mark(&w.list)
-		if result := pane_draw(app, w, pane, &blinking); result != .Ok {return result}
-		pane_motion_drawn(w, pane, from)
+		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
 	if w.pane_fill != .Screen {
 		if result := window_chrome_draw(app, w); result != .Ok {return result}
@@ -648,7 +649,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			group = root
 			floating_header_draw(app, w, root)
 		}
-		if result := pane_draw(app, w, pane, &blinking); result != .Ok {return result}
+		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
 	if result := floating_capsules_draw(app, w); result != .Ok {return result}
 	cursor_blink_observe(w, blinking)
@@ -695,6 +696,22 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		w.scale,
 		w.pointer,
 	)
+}
+
+// Draws a pane where its container draws it: first any closed pane collapsing beneath it, then the pane,
+// noting where its drawing sits so the pane can keep showing it if it closes; see pane_motion.odin.
+@(private = "file")
+pane_draw_noted :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: layout.Pane_Rect,
+	blinking: ^bool,
+) -> render.Build_Status {
+	pane_ghosts_draw(app, w, pane)
+	from := render.draw_mark(&w.list)
+	if result := pane_draw(app, w, pane, blinking); result != .Ok {return result}
+	pane_motion_drawn(w, pane, from)
+	return .Ok
 }
 
 // Draws one pane's card, content, header, scrollbar, dimming and outline. While the pane moves, its

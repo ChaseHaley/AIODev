@@ -6,11 +6,12 @@ import "aio:ui"
 import "core:math"
 import "core:time"
 
-// When a split or a close changes a tab's tiled panes, they ease from where they were drawn to their new
-// rectangles together; a new pane opens out of the side of the pane it divides, and a closed pane keeps
-// showing its last frame while it collapses under the neighbour taking its place. Only drawing moves:
-// grids, hit targets and input take the new layout at once (a closed pane's session ends at once too),
-// and each pane's content keeps its new size, anchored to the moving frame's corner and clipped to it.
+// When a split or a close changes a tab's panes, they ease from where they were drawn to their new
+// rectangles together, each within its container, the tiling or its floating group; nothing here depends
+// on which. A new pane opens out of the side of the pane it divides, and a closed pane keeps showing its
+// last frame while it collapses under the neighbour taking its place. Only drawing moves: grids, hit
+// targets and input take the new layout at once (a closed pane's session ends at once too), and each
+// pane's content keeps its new size, anchored to the moving frame's corner and clipped to it.
 Pane_Motion :: struct {
 	moving: ui.Layout_Motion,
 	// The tab layout the window last placed; placing another one, a tab switch, never moves.
@@ -19,7 +20,7 @@ Pane_Motion :: struct {
 	armed:  ^layout.Layout,
 	// The bars between tiled panes as drawn; see pane_bars.
 	bars:   [dynamic]layout.Edge,
-	// Where each tiled pane's drawing sits in the window's last frame, so a closed pane can keep it.
+	// Where each pane's drawing sits in the window's last frame, so a closed pane can keep it.
 	drawn:  [dynamic]Pane_Drawn,
 	// Closed panes collapsing away, each drawn from a copy of its last frame.
 	ghosts: [dynamic]Pane_Ghost,
@@ -34,11 +35,12 @@ Pane_Drawn :: struct {
 
 @(private = "file")
 Pane_Ghost :: struct {
-	key:   u64,
+	// The closed pane, and the pane it collapses beneath.
+	key, successor: u64,
 	// Where the copied drawing was drawn, and the glyph atlas it refers to.
-	rect:  layout.Rect,
-	list:  render.Draw_List,
-	atlas: u64,
+	rect:           layout.Rect,
+	list:           render.Draw_List,
+	atlas:          u64,
 }
 
 PANE_MOTION_DURATION :: 160 * time.Millisecond
@@ -67,16 +69,15 @@ pane_motion_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool
 	return changed
 }
 
-// Where a tiled pane draws this frame; its layout rectangle when nothing moves.
+// Where a pane draws this frame; its layout rectangle when nothing moves.
 pane_motion_rect :: proc(w: ^Window, pane: layout.Pane_Rect) -> layout.Rect {
-	if pane.floating {return pane.rect}
 	r := pane.rect
 	key := pane_motion_key(pane.content)
 	shown := ui.layout_motion_rect(&w.pane_motion.moving, key, {r.x, r.y, r.width, r.height})
 	return {shown.x, shown.y, shown.width, shown.height}
 }
 
-// The tiled panes as drawn now, collected before a relayout replaces w.panes.
+// The panes as drawn now, collected before a relayout replaces w.panes.
 @(require_results)
 pane_motion_shown :: proc(w: ^Window) -> []ui.Layout_Place {
 	return pane_motion_places(w, true)
@@ -103,15 +104,13 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: []ui.Layout_Place) {
 	pane_ghosts_clear(m)
 	ui.layout_motion_begin(&m.moving, shown, targets, PANE_MOTION_DURATION, .Decelerate, app.animations)
 	if !pane_motion_animating(w) {return}
-	outer: for place in shown {
-		for target in targets {
-			if target.key == place.key {continue outer}
-		}
-		pane_ghost_capture(app, w, place.key)
+	for place in shown {
+		successor, leaving := ui.layout_motion_successor(&m.moving, place.key)
+		if leaving {pane_ghost_capture(app, w, place.key, successor)}
 	}
 }
 
-// Notes where build_frame drew a tiled pane, from `from` to the list's end.
+// Notes where build_frame drew a pane, from `from` to the list's end.
 pane_motion_drawn :: proc(w: ^Window, pane: layout.Pane_Rect, from: render.Draw_Mark) {
 	key, to := pane_motion_key(pane.content), render.draw_mark(&w.list)
 	// Without room to note it, a closed pane collapses as background instead.
@@ -123,11 +122,15 @@ pane_motion_drawn_reset :: proc(w: ^Window) {
 	clear(&w.pane_motion.drawn)
 }
 
-// Draws each closed pane's last frame, moved with its collapsing rectangle and clipped to it.
-pane_ghosts_draw :: proc(app: ^App, w: ^Window) {
+// Draws the last frame of each closed pane collapsing beneath `pane`, just before `pane` draws, so it sits
+// in the same container and stacking position: moved with its collapsing rectangle and clipped to it.
+pane_ghosts_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	m := &w.pane_motion
+	if len(m.ghosts) == 0 {return}
 	atlas := render.atlas_generation(app.device)
+	key := pane_motion_key(pane.content)
 	for &ghost in m.ghosts {
+		if ghost.successor != key {continue}
 		shown := ui.layout_motion_rect(&m.moving, ghost.key, {})
 		if shown.width < 1 || shown.height < 1 || ghost.atlas != atlas {continue}
 		mark := render.draw_mark(&w.list)
@@ -139,15 +142,16 @@ pane_ghosts_draw :: proc(app: ^App, w: ^Window) {
 
 // Copies what the last frame drew for the pane under `key` before its drawing is lost.
 @(private = "file")
-pane_ghost_capture :: proc(app: ^App, w: ^Window, key: u64) {
+pane_ghost_capture :: proc(app: ^App, w: ^Window, key, successor: u64) {
 	m := &w.pane_motion
 	for drawn in m.drawn {
 		if drawn.key != key {continue}
 		ghost := Pane_Ghost {
-			key   = key,
-			rect  = drawn.rect,
-			list  = render.draw_list_init(),
-			atlas = render.atlas_generation(app.device),
+			key       = key,
+			successor = successor,
+			rect      = drawn.rect,
+			list      = render.draw_list_init(),
+			atlas     = render.atlas_generation(app.device),
 		}
 		if render.draw_list_copy(&ghost.list, &w.list, drawn.from, drawn.to) != .None {
 			render.draw_list_destroy(&ghost.list)
@@ -168,9 +172,9 @@ pane_ghosts_clear :: proc(m: ^Pane_Motion) {
 pane_motion_places :: proc(w: ^Window, drawn: bool) -> []ui.Layout_Place {
 	places := make([dynamic]ui.Layout_Place, 0, len(w.panes), context.temp_allocator)
 	for pane in w.panes {
-		if pane.floating {continue}
 		r := drawn ? pane_motion_rect(w, pane) : pane.rect
-		append(&places, ui.Layout_Place{pane_motion_key(pane.content), {r.x, r.y, r.width, r.height}})
+		place := ui.Layout_Place{pane_motion_key(pane.content), {r.x, r.y, r.width, r.height}, pane.group}
+		append(&places, place)
 	}
 	return places[:]
 }

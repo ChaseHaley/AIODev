@@ -122,6 +122,22 @@ try {
     Warm-Up
     Run-Rounds 4
 
+    # A float is another container: its panes move inside it just as tiled panes do in the window.
+    Invoke-Aio command pane.new_floating | Out-Null
+    Invoke-Aio expect state panes.floating=1 | Out-Null
+    Invoke-Aio wait text 'PS ' | Out-Null
+    Wait-Settled
+    Assert-Motion 'float split right' @('pane.split_right')
+    Invoke-Aio wait text 'PS ' | Out-Null
+    Assert-Motion 'float split down' @('pane.split', '--direction', 'down')
+    Invoke-Aio wait text 'PS ' | Out-Null
+    Assert-Motion 'float close' @('pane.close')
+    Assert-Motion 'float close again' @('pane.close')
+    Invoke-Aio expect state panes.floating=1 | Out-Null
+    Invoke-Aio command pane.close | Out-Null
+    Invoke-Aio expect state panes.floating=0 | Out-Null
+    Wait-Settled
+
     # Every other display, which may refresh at another rate than the compositor's clock.
     Add-Type -AssemblyName System.Windows.Forms
     foreach ($screen in [System.Windows.Forms.Screen]::AllScreens | Where-Object { -not $_.Primary }) {

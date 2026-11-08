@@ -33,8 +33,8 @@ layout_split_opens_the_new_item_from_the_side_it_divides :: proc(t: ^testing.T) 
 	for c in cases {
 		m: ui.Layout_Motion
 		defer ui.layout_motion_destroy(&m)
-		shown := []ui.Layout_Place{{1, old}}
-		targets := []ui.Layout_Place{{1, c.kept}, {2, c.added}}
+		shown := []ui.Layout_Place{{1, old, 0}}
+		targets := []ui.Layout_Place{{1, c.kept, 0}, {2, c.added, 0}}
 		ui.layout_motion_begin(&m, shown, targets, LAYOUT_DURATION, .Linear, true)
 		testing.expect(t, ui.layout_motion_active(&m))
 		testing.expect_value(t, ui.layout_motion_rect(&m, 1, c.kept), old)
@@ -60,8 +60,8 @@ layout_split_opens_the_new_item_from_the_side_it_divides :: proc(t: ^testing.T) 
 layout_close_collapses_the_closed_item_under_its_growing_neighbour :: proc(t: ^testing.T) {
 	m: ui.Layout_Motion
 	defer ui.layout_motion_destroy(&m)
-	shown := []ui.Layout_Place{{1, {10.5, 0, 40, 30}}, {2, {54.5, 0, 40, 30}}}
-	targets := []ui.Layout_Place{{2, {10.5, 0, 84, 30}}}
+	shown := []ui.Layout_Place{{1, {10.5, 0, 40, 30}, 0}, {2, {54.5, 0, 40, 30}, 0}}
+	targets := []ui.Layout_Place{{2, {10.5, 0, 84, 30}, 0}}
 	layout_motion_first_frame(&m, shown, targets)
 	r := ui.layout_motion_rect(&m, 2, targets[0].rect)
 	testing.expect(t, r.x > 10.5 && r.x < 54.5, "the neighbour's left edge moves into the space left")
@@ -78,8 +78,8 @@ layout_close_collapses_the_closed_item_under_its_growing_neighbour :: proc(t: ^t
 layout_motion_without_animations_or_change_lands_at_once :: proc(t: ^testing.T) {
 	m: ui.Layout_Motion
 	defer ui.layout_motion_destroy(&m)
-	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}}}
-	split := []ui.Layout_Place{{1, {0, 0, 48, 40}}, {2, {52, 0, 48, 40}}}
+	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
+	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
 	ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, .Decelerate, false)
 	testing.expect(t, !ui.layout_motion_active(&m))
 	testing.expect_value(t, ui.layout_motion_rect(&m, 2, split[1].rect), split[1].rect)
@@ -91,12 +91,12 @@ layout_motion_without_animations_or_change_lands_at_once :: proc(t: ^testing.T) 
 layout_retarget_carries_progress_to_new_rectangles :: proc(t: ^testing.T) {
 	m: ui.Layout_Motion
 	defer ui.layout_motion_destroy(&m)
-	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}}}
-	split := []ui.Layout_Place{{1, {0, 0, 48, 40}}, {2, {52, 0, 48, 40}}}
+	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
+	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
 	first := layout_motion_first_frame(&m, shown, split)
 	progress := m.progress.value
 	// The window grows mid-motion; a third item arrives without a motion of its own.
-	wider := []ui.Layout_Place{{1, {0, 0, 98, 40}}, {2, {102, 0, 98, 40}}, {3, {0, 44, 200, 40}}}
+	wider := []ui.Layout_Place{{1, {0, 0, 98, 40}, 0}, {2, {102, 0, 98, 40}, 0}, {3, {0, 44, 200, 40}, 0}}
 	ui.layout_motion_retarget(&m, wider)
 	testing.expect(t, ui.layout_motion_active(&m))
 	testing.expect_value(t, m.progress.value, progress)
@@ -105,4 +105,22 @@ layout_retarget_carries_progress_to_new_rectangles :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.layout_motion_rect(&m, 2, wider[1].rect), render.Rect{100, 0, 10, 40})
 	ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION)))
 	testing.expect_value(t, ui.layout_motion_rect(&m, 1, wider[0].rect), wider[0].rect)
+}
+
+// A pane split inside a floating group grows from the group's divided pane, not from a larger tiled pane
+// beneath the float; a pane closing there collapses beneath its float neighbour.
+@(test)
+layout_items_move_within_their_container :: proc(t: ^testing.T) {
+	m: ui.Layout_Motion
+	defer ui.layout_motion_destroy(&m)
+	tiled := ui.Layout_Place{1, {0, 0, 400, 300}, 0}
+	shown := []ui.Layout_Place{tiled, {2, {100, 100, 200, 100}, 7}}
+	split := []ui.Layout_Place{tiled, {2, {100, 100, 98, 100}, 7}, {3, {202, 100, 98, 100}, 7}}
+	ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, .Linear, true)
+	testing.expect_value(t, ui.layout_motion_rect(&m, 3, split[2].rect), render.Rect{300, 100, 0, 100})
+	ui.layout_motion_begin(&m, split, shown, LAYOUT_DURATION, .Linear, true)
+	successor, leaving := ui.layout_motion_successor(&m, 3)
+	testing.expect(t, leaving)
+	testing.expect_value(t, successor, u64(2))
+	testing.expect_value(t, ui.layout_motion_rect(&m, 3, {}), split[2].rect)
 }

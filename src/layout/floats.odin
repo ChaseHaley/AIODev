@@ -16,6 +16,8 @@ Float :: struct {
 	stack:     u64,
 	// Hidden behind a capsule. Its program keeps running.
 	minimized: bool,
+	// Names the group while it floats, through every split and close inside it; nonzero.
+	id:        u64,
 }
 
 // The smallest share of the content area either side of a floating pane may take.
@@ -178,13 +180,14 @@ float_new :: proc(l: ^Layout, content: Content, bounds: Rect) -> (Node_Id, runti
 	if err := reserve(&l.nodes, len(l.nodes) + 2); err != nil {return INVALID_NODE, err}
 	l.next_pane_order += 1
 	l.next_float_stack += 1
+	l.next_float_id += 1
 	added := allocate_node(
 		l,
 		Pane {
 			content = content,
 			order = l.next_pane_order,
 			floating = true,
-			float = {bounds = float_bounds_clamp(bounds), stack = l.next_float_stack},
+			float = {bounds = float_bounds_clamp(bounds), stack = l.next_float_stack, id = l.next_float_id},
 		},
 	)
 	l.root = allocate_node(l, Split{axis = .Horizontal, ratio = 0.5, first = l.root, second = added})
@@ -202,11 +205,12 @@ set_floating :: proc(l: ^Layout, node: Node_Id, floating: bool, bounds: Rect = {
 		if root != INVALID_NODE || !pane_tiled(l, node) || l.root == INVALID_NODE ||
 		   shown_count(l, l.root) <= 1 {return false}
 		l.next_float_stack += 1
+		l.next_float_id += 1
 		node_set_float(
 			l,
 			node,
 			true,
-			{bounds = float_bounds_clamp(bounds), stack = l.next_float_stack},
+			{bounds = float_bounds_clamp(bounds), stack = l.next_float_stack, id = l.next_float_id},
 		)
 		// Focus stays on the lifted pane; behind it is the tiled pane last focused, or its neighbour.
 		if l.focus == node && !pane_tiled(l, l.tiled_focus) {
@@ -293,15 +297,15 @@ float_next :: proc(
 }
 
 @(private)
-float_place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
+float_place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, group: u64, out: ^[dynamic]Pane_Rect) {
 	switch node in l.nodes[id] {
 	case Vacant:
 	case Pane:
-		if !node.linked {append(out, Pane_Rect{id, node.content, area, node.order, true})}
+		if !node.linked {append(out, Pane_Rect{id, node.content, area, node.order, true, group})}
 	case Split:
 		p := partition(area, node.axis, node.ratio, gap)
-		float_place(l, node.first, p.first, gap, out)
-		float_place(l, node.second, p.second, gap, out)
+		float_place(l, node.first, p.first, gap, group, out)
+		float_place(l, node.second, p.second, gap, group, out)
 	}
 }
 
@@ -320,7 +324,8 @@ floats_place :: proc(l: ^Layout, area: Rect, gap, header: f32, out: ^[dynamic]Pa
 		root, next_stack := float_next(l, stack, index, false)
 		if root == INVALID_NODE {return}
 		rect, _ := float_rect(l, root, area)
-		float_place(l, root, float_content_rect(rect, header), gap, out)
+		floating, _ := node_float(l, root)
+		float_place(l, root, float_content_rect(rect, header), gap, floating.id, out)
 		stack, index = next_stack, int(root)
 	}
 }
@@ -371,12 +376,20 @@ float_counts :: proc(l: ^Layout) -> (shown, minimized: int) {
 	return
 }
 
-// Continues stacking above the highest saved floating group, once an imported tree holds them.
+// Continues stacking above the highest saved floating group, once an imported tree holds them, and names
+// any group that came without a name.
 @(private)
 float_stack_restore :: proc(l: ^Layout) {
 	for _, i in l.nodes {
 		if floating, ok := node_float(l, Node_Id(i)); ok {
 			l.next_float_stack = max(l.next_float_stack, floating.stack)
+			l.next_float_id = max(l.next_float_id, floating.id)
+		}
+	}
+	for _, i in l.nodes {
+		if floating, ok := node_float(l, Node_Id(i)); ok && floating.id == 0 {
+			l.next_float_id += 1
+			floating.id = l.next_float_id
 		}
 	}
 }

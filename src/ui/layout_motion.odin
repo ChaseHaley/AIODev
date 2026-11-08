@@ -12,18 +12,22 @@ Layout_Motion :: struct {
 	items:    [dynamic]Layout_Item,
 }
 
-// Where an item is, under a key that names the same item before and after the change.
+// Where an item is, under a key that names the same item before and after the change. Items move within
+// their container (a window's tiling, one floating group): a new or leaving item only ever takes its edge
+// from items in the same container.
 Layout_Place :: struct {
-	key:  u64,
-	rect: render.Rect,
+	key:       u64,
+	rect:      render.Rect,
+	container: u64,
 }
 
 @(private)
 Layout_Item :: struct {
 	key:      u64,
 	from, to: render.Rect,
-	// The layout no longer has the item; it collapses away while the others take its place.
-	leaving:  bool,
+	// The layout no longer has the item; it collapses away beneath `successor`, the item taking its place.
+	leaving:   bool,
+	successor: u64,
 }
 
 // Edges this close are the same edge; layout rounds to whole pixels.
@@ -75,8 +79,8 @@ layout_motion_begin :: proc(
 	if enabled {
 		for target in targets {
 			from, found := layout_place_rect(shown, target.key)
-			if !found {from = layout_enter_rect(shown, target.rect)}
-			if _, err := append(&m.items, Layout_Item{target.key, from, target.rect, false}); err != nil {
+			if !found {from, _ = layout_enter_rect(shown, target)}
+			if _, err := append(&m.items, Layout_Item{target.key, from, target.rect, false, 0}); err != nil {
 				// Without room to remember the motion, the layout takes its place at once.
 				moving = false
 				break
@@ -85,8 +89,11 @@ layout_motion_begin :: proc(
 		}
 		for place in shown {
 			if _, kept := layout_place_rect(targets, place.key); kept {continue}
-			to := layout_enter_rect(targets, place.rect)
-			if _, err := append(&m.items, Layout_Item{place.key, place.rect, to, true}); err != nil {
+			to, successor := layout_enter_rect(targets, place)
+			// Nothing takes its place, so there is nothing for it to collapse beneath.
+			if successor == nil {continue}
+			item := Layout_Item{place.key, place.rect, to, true, successor.?}
+			if _, err := append(&m.items, item); err != nil {
 				moving = false
 				break
 			}
@@ -112,18 +119,28 @@ layout_motion_retarget :: proc(m: ^Layout_Motion, targets: []Layout_Place) {
 			m.items[kept] = item
 			kept += 1
 		} else if to, found := layout_place_rect(targets, item.key); found {
-			m.items[kept] = {item.key, item.from, to, false}
+			m.items[kept] = {item.key, item.from, to, false, 0}
 			kept += 1
 		}
 	}
 	resize(&m.items, kept)
 	for target in targets {
 		if layout_item_moving(m.items[:kept], target.key) {continue}
-		if _, err := append(&m.items, Layout_Item{target.key, target.rect, target.rect, false}); err != nil {
+		if _, err := append(&m.items, Layout_Item{target.key, target.rect, target.rect, false, 0}); err != nil {
 			layout_motion_stop(m)
 			return
 		}
 	}
+}
+
+// The item a leaving `key` collapses beneath; draw it just before that item so it sits in the same
+// container and stacking position.
+layout_motion_successor :: proc(m: ^Layout_Motion, key: u64) -> (u64, bool) {
+	if !motion_active(m.progress) {return 0, false}
+	for item in m.items {
+		if item.key == key && item.leaving {return item.successor, true}
+	}
+	return 0, false
 }
 
 // Every item lands on its target now.
@@ -153,19 +170,25 @@ layout_item_moving :: proc(items: []Layout_Item, key: u64) -> bool {
 	return false
 }
 
-// The zero-size rectangle a new item grows from, or a leaving one collapses to: on the edge of `target`
-// that lies on an edge of the item in `shown` it overlaps most, across the axis where the two differ.
+// The zero-size rectangle a new item grows from, or a leaving one collapses to: on the edge of `item` that
+// lies on an edge of the item of its container in `others` it overlaps most, across the axis where the
+// two differ; with that item's key, or nil when it overlaps nothing there.
 @(private = "file")
-layout_enter_rect :: proc(shown: []Layout_Place, target: render.Rect) -> render.Rect {
+layout_enter_rect :: proc(others: []Layout_Place, item: Layout_Place) -> (render.Rect, Maybe(u64)) {
+	target := item.rect
 	best: render.Rect
+	best_key: Maybe(u64)
 	best_area := f32(0)
-	for place in shown {
+	for place in others {
+		if place.container != item.container {continue}
 		r := place.rect
 		width := min(r.x + r.width, target.x + target.width) - max(r.x, target.x)
 		height := min(r.y + r.height, target.y + target.height) - max(r.y, target.y)
-		if width > 0 && height > 0 && width * height > best_area {best, best_area = r, width * height}
+		if width > 0 && height > 0 && width * height > best_area {
+			best, best_key, best_area = r, place.key, width * height
+		}
 	}
-	if best_area == 0 {return target}
+	if best_area == 0 {return target, nil}
 	same :: proc(a, b: f32) -> bool {return abs(a - b) <= EDGE_TOLERANCE}
 	across_x := same(target.y, best.y) && same(target.y + target.height, best.y + best.height)
 	across_y := same(target.x, best.x) && same(target.x + target.width, best.x + best.width)
@@ -179,5 +202,5 @@ layout_enter_rect :: proc(shown: []Layout_Place, target: render.Rect) -> render.
 		else if !same(target.y, best.y) {r.y = target.y + target.height / 2}
 		r.height = 0
 	}
-	return r
+	return r, best_key
 }
