@@ -62,7 +62,9 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 		return nil
 	}
 	app.next_workspace_id = workspace.id
-	workspace_mutation_finish(app, workspace, {.Names})
+	// An empty workspace is not saved state yet: the tab that fills it saves the layout. Startup
+	// creates one after setting aside a damaged layout file and must not schedule a save.
+	workspace_pickers_refresh(app)
 	return workspace
 }
 
@@ -79,7 +81,7 @@ workspace_discard_empty :: proc(app: ^App, workspace: ^Workspace) -> bool {
 		if current != workspace {continue}
 		ordered_remove(&app.workspaces, i)
 		workspace_destroy(workspace)
-		workspace_mutation_finish(app, nil, {.Names})
+		workspace_pickers_refresh(app)
 		return true
 	}
 	return false

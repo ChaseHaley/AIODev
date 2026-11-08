@@ -38,7 +38,7 @@ workspace_delete_commit :: proc(app: ^App, plan: Workspace_Delete_Plan) -> bool 
 	} else if plan.destination != 0 && destination == nil {return false}
 	committed := false
 	defer if plan.fresh &&
-	   !committed {workspace_delete_release(app, destination); workspace_mutation_finish(app, nil, {.Names})}
+	   !committed {workspace_delete_release(app, destination); workspace_pickers_refresh(app)}
 	session: u32
 	if plan.created_tab {
 		created: bool
