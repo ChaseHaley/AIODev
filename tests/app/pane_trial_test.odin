@@ -169,7 +169,8 @@ pane_trial_minimum_keeps_unchanged_exemption_and_process_header_dpi_policy :: pr
 		defer delete(workspace.tabs)
 		w := app.Window{workspace = &workspace, scale = scale,
 			width = i32(1000*scale), height = i32(650*scale),
-			metrics = {cell_width = 10*scale, cell_height = 20*scale}}
+			metrics = {cell_width = 10*scale, cell_height = 20*scale},
+			header_height = app.pane_header_row_height(&state, scale)}
 		snapshot := trial_clone(tree)
 		defer layout.destroy(&snapshot)
 		// The narrow left pane is already below 40 columns and does not shrink.
@@ -185,6 +186,8 @@ pane_trial_minimum_keeps_unchanged_exemption_and_process_header_dpi_policy :: pr
 		testing.expect_value(t, app.pane_trial_split(&state, &w, .Down, 0.5,
 			context.allocator).error, app.Pane_Trial_Error.Minimum)
 		state.settings.pane.show_headers = false
+		// Panes follow the header setting once relayout caches it.
+		w.header_height = app.pane_header_row_height(&state, scale)
 		testing.expect_value(t, app.pane_trial_split(&state, &w, .Down, 0.5,
 			context.allocator).error, app.Pane_Trial_Error.None)
 		state.settings.window.padding = 80
