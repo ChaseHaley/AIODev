@@ -62,7 +62,7 @@ App :: struct {
 	font_points:           f32,
 	device:                ^render.Device,
 	cache:                 glyphs.Cache,
-	shell_icon:            Shell_Icon,
+	shell_icons:           [dynamic]Shell_Icon,
 	processes:             Process_Worker,
 	program_icons:         Program_Icon_Cache,
 	program_art:           program_art.Catalogue,
@@ -162,7 +162,7 @@ app_init :: proc(app: ^App) -> bool {
 		log.error("no interface font is available")
 		return false
 	}
-	shell_icon_load(app)
+	shell_icons_load(app)
 	apply_fonts(app)
 	apply_theme(app)
 	tray_init(app)
@@ -202,7 +202,7 @@ app_destroy :: proc(app: ^App) {
 	process_worker_destroy(&app.processes)
 	program_icon_cache_destroy(&app.program_icons)
 	program_art.catalogue_destroy(&app.program_art)
-	shell_icon_destroy(&app.shell_icon)
+	shell_icons_destroy(&app.shell_icons)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)

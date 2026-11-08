@@ -15,6 +15,9 @@ import "core:time"
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
 	command, launch_directory:    string,
+	// The started process's image path, whose own icon stands for the shell; empty when nothing
+	// started.
+	executable_path:              string,
 	icon:                         string, // Borrowed static shell badge.
 }
 
@@ -24,6 +27,7 @@ pane_header_destroy :: proc(header: ^Pane_Header_Metadata) {
 	delete(header.directory)
 	delete(header.command)
 	delete(header.launch_directory)
+	delete(header.executable_path)
 	header^ = {}
 }
 
@@ -34,12 +38,13 @@ header_clone :: proc(text: string) -> string {
 	return copy
 }
 
-pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config) {
+pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config, session: ^term.Session) {
 	pane_header_destroy(header)
 	header.executable = header_clone(settings.shell_executable(config.command_line))
 	header.command, header.launch_directory =
 		header_clone(config.command_line), header_clone(config.working_directory)
 	header.icon = settings.shell_badge(config.command_line)
+	header.executable_path = term.process_image(session)
 }
 
 pane_header_refresh :: proc(entry: ^Session_Entry) {
@@ -226,7 +231,7 @@ pane_header_draw :: proc(
 	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 	title := content_pane_title(app, entry, pane.content)
 	directory := entry != nil ? entry.header.directory : content_directory(app, pane.content)
-	badge, result := content_badge(app, entry, pane.content.kind, ui.ICON_BUTTON * w.scale, header = true)
+	badge, result := content_badge(app, entry, pane.content.kind, ui.ICON_BUTTON * w.scale)
 	if result != .Ok {return result}
 	status: ui.Status_Mark
 	status_text: string

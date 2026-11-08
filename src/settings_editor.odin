@@ -204,7 +204,7 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 			},
 			.Icon = {
 				title = "Icon",
-				description = "PNG path; empty uses the executable's text badge.",
+				description = "PNG path; empty uses the shell's own icon, else its text badge.",
 				value = row.icon,
 				badge = row.badge,
 				kind = .Profile_Icon,

@@ -56,6 +56,16 @@ function Set-Option([string] $Key, [string] $Value) {
     else { $text += "`n$Key = $Value`n" }
     [IO.File]::WriteAllText($path, $text)
 }
+# Waits for the pane header to draw the shell's own executable icon, which is read in the background.
+function Await-HeaderExecutable([string] $Executable) {
+    $until = [DateTime]::UtcNow.AddSeconds(6)
+    do {
+        $icon = "$((Read-State)['session.header.icon'])".Trim('"')
+        if ([IO.Path]::GetFileName($icon) -eq $Executable) { Write-Output "PASS header icon $icon"; return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $until)
+    throw "Expected the header to draw $Executable's icon, observed '$icon'"
+}
 function Shot([string] $Label) {
     Start-Sleep -Milliseconds 250
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Shot (Join-Path $directory "$Label.png")
@@ -105,7 +115,7 @@ try {
     Invoke-Aio wait text HEADER_READY
     Invoke-Aio expect state session.header.title=HEADER_TITLE
     Invoke-Aio expect state 'session.header.directory=C:\Header Test'
-    Invoke-Aio expect state 'session.header.icon=>_'
+    Await-HeaderExecutable 'pwsh.exe'
     Invoke-Aio expect state panes.header_height=28
     $session = (Read-State)['session.id']
     Assert-Origin
@@ -113,11 +123,11 @@ try {
     Set-Option profile.default.directory 'C:\Windows'
     Invoke-Aio command settings.reload
     Invoke-Aio expect state "session.id=$session"
-    Invoke-Aio expect state 'session.header.icon=>_'
+    Await-HeaderExecutable 'pwsh.exe'
     Invoke-Aio expect state 'session.header.directory=C:\Header Test'
     Header-Button split_down
     Invoke-Aio wait text 'Microsoft Windows'
-    Invoke-Aio expect state 'session.header.icon=C:'
+    Await-HeaderExecutable 'cmd.exe'
     Invoke-Aio expect state session.header.directory=
     Invoke-Aio expect state panes.count=3
     Header-Button close
