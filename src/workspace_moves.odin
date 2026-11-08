@@ -40,6 +40,8 @@ Workspace_Change :: enum {
 	Structure,
 	// Workspaces, or what their picker rows show, were added, removed or renamed.
 	Names,
+	// An icon or tint changed without changing picker membership or order.
+	Appearance,
 	// Workspaces changed places in the list.
 	Order,
 }

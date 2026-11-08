@@ -62,7 +62,7 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 		return nil
 	}
 	app.next_workspace_id = workspace.id
-	workspace_pickers_refresh(app)
+	workspace_mutation_finish(app, workspace, {.Names})
 	return workspace
 }
 
@@ -79,7 +79,7 @@ workspace_discard_empty :: proc(app: ^App, workspace: ^Workspace) -> bool {
 		if current != workspace {continue}
 		ordered_remove(&app.workspaces, i)
 		workspace_destroy(workspace)
-		workspace_pickers_refresh(app)
+		workspace_mutation_finish(app, nil, {.Names})
 		return true
 	}
 	return false

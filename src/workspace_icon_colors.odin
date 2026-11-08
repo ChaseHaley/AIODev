@@ -36,7 +36,7 @@ workspace_icon_color_set :: proc(app: ^App, workspace: ^Workspace, tint: int) ->
 	if !workspace_registered(app, workspace) { return false }
 	if !workspace_icon_valid_value({tint = tint}) { return false }
 	workspace.icon.tint = tint
-	mark_all_dirty(app)
+	workspace_mutation_finish(app, workspace, {.Appearance})
 	return true
 }
 
