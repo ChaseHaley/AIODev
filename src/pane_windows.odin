@@ -5,7 +5,7 @@ import "aio:layout"
 
 // A pane torn off into a window of its own; tear_off_window.odin owns the preview window and thumbnail.
 
-@(private)
+@(private = "file")
 pane_window_source_allows :: proc(workspace: ^Workspace) -> bool {
 	if workspace == nil {return false}
 	walk := workspace_panes(nil, workspace)
