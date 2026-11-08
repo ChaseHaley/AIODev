@@ -2,7 +2,6 @@ package main
 
 import "aio:input"
 import "aio:ui"
-import "aio:render"
 
 // A control on the tab strip or rail: a tab by index, the new-tab button or the profile chevron. Nil
 // is none: empty chrome or outside it.
@@ -111,41 +110,19 @@ tabs_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 tabs_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	hover: Tab_Chrome_Target
-	if owner == .Tabs && w.tabs_horizontal {
-		bar := window_tab_bar(app, w)
-		hover = window_tab_hit(app, w, bar, x, y)
-		chevron := tab_chevron_rect(app, w)
-		if x >= chevron.x && x < chevron.x + chevron.width && y >= 0 && y < bar.height {
-			hover = Tab_Chrome_Profiles{}
-		}
-	} else if owner == .Tabs {
-		if layout, ok := rail_current_layout(w); ok {
-			if index := rail_tab_hit(w, layout, x, y); index >= 0 {
-				hover = Tab_Chrome_Tab{index}
-			} else {
-				hover = rail_footer_target(layout, x, y)
-			}
-		}
-	}
+	if owner == .Tabs {hover = tab_chrome_hit(app, w, x, y, .Left).target}
 	if hover != w.tab_hover {w.tab_hover, w.dirty = hover, true}
 	if owner == .Tabs {pointer_set(app, w, chrome_pointer(app, w, x, y))}
 }
 
 @(private)
 tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
-	if w.tabs_horizontal {
-		bar := window_tab_bar(app, w)
-		if window_tab_close_hit(app, w, bar, x, y) >= 0 {return "Close tab"}
-		if x >= tab_chevron_rect(app, w).x {return "Choose profile"}
-		if _, new_tab := window_tab_hit(app, w, bar, x, y).(Tab_Chrome_New); new_tab {return "New tab"}
-	} else if layout, ok := rail_current_layout(w); ok {
-		if row := rail_tab_hit(w, layout, x, y); row >= 0 {
-			close := rail_tab_close_rect(w, layout, row)
-			if render.rect_contains(close, x, y) {return "Close tab"}
-		}
-		if ui.rail_footer_hit(layout, x, y) {
-			if ui.rail_profile_hit(layout, x, y) {return "Choose profile"}
-		}
+	hit := tab_chrome_hit(app, w, x, y, .Left)
+	switch _ in hit.target {
+	case Tab_Chrome_Tab: if hit.close {return "Close tab"}
+	case Tab_Chrome_Profiles: return "Choose profile"
+	case Tab_Chrome_New: if w.tabs_horizontal {return "New tab"}
+	case nil:
 	}
 	return ""
 }

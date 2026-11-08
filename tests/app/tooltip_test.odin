@@ -127,3 +127,20 @@ tooltip_pending :: proc(w: ^app.Window) -> bool {
 	_, pending := app.tooltip_deadline(w)
 	return pending
 }
+
+@(test)
+tooltip_profile_chevron_uses_shared_hit_bounds :: proc(t: ^testing.T) {
+	state: app.App
+	workspace: app.Workspace
+	w := app.Window{width = 900, height = 600, scale = 1, tabs_horizontal = true, workspace = &workspace}
+	r := app.tab_chevron_rect(&state, &w)
+	app.tooltip_hover(&state, &w, .Tabs,
+		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
+	testing.expect_value(t, app.tooltip_current(&w), "Choose profile")
+	app.tooltip_hover(&state, &w, .Tabs,
+		input.Mouse_Move_Event{x = i32(r.x + r.width + 1), y = i32(r.y + r.height / 2)})
+	testing.expect_value(t, app.tooltip_current(&w), "")
+	app.tooltip_hover(&state, &w, .Tabs,
+		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height + 1)})
+	testing.expect_value(t, app.tooltip_current(&w), "")
+}

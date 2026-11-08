@@ -294,14 +294,6 @@ rail_tab_hit :: proc(w: ^Window, layout: ui.Rail_Layout, x, y: f32) -> int {
 	return -1
 }
 
-// The footer control under the point: the profile chevron or the new-tab tile around it.
-@(private)
-rail_footer_target :: proc(layout: ui.Rail_Layout, x, y: f32) -> Tab_Chrome_Target {
-	if !ui.rail_footer_hit(layout, x, y) {return nil}
-	if ui.rail_profile_hit(layout, x, y) {return Tab_Chrome_Profiles{}}
-	return Tab_Chrome_New{}
-}
-
 rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Button) -> Tab_Interaction_Hit {
 	if !rail_visible(w) || !render.rect_contains(rail_area(w), x, y) {return {}}
 	layout, ok := rail_current_layout(w)
@@ -323,16 +315,10 @@ rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Butt
 
 @(require_results)
 rail_pane_target :: proc(w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool) {
-	if !rail_visible(w) {return -1, false, false}
-	if !render.rect_contains(rail_area(w), x, y) {
-		return -1, false, false
-	}
-	layout, built := rail_current_layout(w)
-	if !built {return -1, false, false}
-	if ui.rail_footer_hit(layout, x, y) {return -1, true, true}
-	index := rail_tab_hit(w, layout, x, y)
-	if index < 0 {return -1, true, true}
-	return index, false, true
+	hit := rail_tab_interaction_hit(w, x, y, .Left)
+	if !hit.inside {return -1, false, false}
+	if target, on_tab := hit.target.(Tab_Chrome_Tab); on_tab {return target.index, false, true}
+	return -1, true, true
 }
 
 @(require_results)
