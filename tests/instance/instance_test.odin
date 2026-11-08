@@ -2,6 +2,7 @@ package instance_test
 
 import "base:runtime"
 import "core:testing"
+import "core:strings"
 import "aio:instance"
 
 @(test)
@@ -74,29 +75,62 @@ name_alphabet_and_boundaries :: proc(t: ^testing.T) {
 		valid := byte >= 'a' && byte <= 'z' || byte >= 'A' && byte <= 'Z' ||
 			byte >= '0' && byte <= '9' || byte == '-' || byte == '_'
 		testing.expect_value(t, err, valid ? instance.Parse_Error.None : instance.Parse_Error.Invalid_Name)
+		testing.expect_value(t, instance.valid_name(name), valid)
 	}
 	_, err := instance.parse([]string{"--instance", "12345678901234567890123456789012"})
 	testing.expect_value(t, err, instance.Parse_Error.None)
+	testing.expect(t, !instance.valid_name(""))
+	testing.expect(t, !instance.valid_name("123456789012345678901234567890123"))
 }
 
 @(test)
 identities :: proc(t: ^testing.T) {
-	Case :: struct { name, id, file: string }
+	Case :: struct { name, id, log, layout: string }
 	for item in ([]Case{
-		{"", "AIODev", "aiodev.log"},
-		{"test", "AIODev.test", "aiodev.test.log"},
-		{"A-0_z", "AIODev.A-0_z", "aiodev.A-0_z.log"},
+		{"", "AIODev", `C:\local\AIODev\logs\aiodev.log`, `C:\local\AIODev\layout.json`},
+		{"test", "AIODev.test", `C:\local\AIODev\logs\aiodev.test.log`, `C:\local\AIODev\layout.test.json`},
+		{"A-0_z", "AIODev.A-0_z", `C:\local\AIODev\logs\aiodev.A-0_z.log`, `C:\local\AIODev\layout.A-0_z.json`},
 	}) {
 		options := instance.Options{name = item.name}
 		id, id_error := instance.app_id(options, context.allocator)
 		defer delete(id)
 		testing.expect_value(t, id_error, runtime.Allocator_Error.None)
 		testing.expect_value(t, id, item.id)
-		file, file_error := instance.log_file_name(options, context.allocator)
-		defer delete(file)
-		testing.expect_value(t, file_error, runtime.Allocator_Error.None)
-		testing.expect_value(t, file, item.file)
+		paths, paths_error := instance.paths_resolve(options, `C:\local`, `C:\roaming`)
+		defer instance.paths_destroy(&paths)
+		testing.expect_value(t, paths_error, runtime.Allocator_Error.None)
+		testing.expect_value(t, paths.log, item.log)
+		testing.expect_value(t, paths.layout, item.layout)
+		// Named instances share the default instance's roaming settings file.
+		testing.expect_value(t, paths.settings, `C:\roaming\AIODev\settings.ini`)
+		testing.expect_value(t, paths.captures, "")
 	}
+}
+
+@(test)
+data_directory_paths :: proc(t: ^testing.T) {
+	options := instance.Options{name = "verify", data_dir = `C:\repo\build\verify\verify`}
+	paths, err := instance.paths_resolve(options, `C:\local`, `C:\roaming`)
+	defer instance.paths_destroy(&paths)
+	testing.expect_value(t, err, runtime.Allocator_Error.None)
+	testing.expect_value(t, paths.local, `C:\repo\build\verify\verify`)
+	testing.expect_value(t, paths.logs, `C:\repo\build\verify\verify\logs`)
+	testing.expect_value(t, paths.log, `C:\repo\build\verify\verify\logs\aiodev.verify.log`)
+	testing.expect_value(t, paths.layout, `C:\repo\build\verify\verify\layout.verify.json`)
+	testing.expect_value(t, paths.settings, `C:\repo\build\verify\verify\settings.ini`)
+	testing.expect_value(t, paths.captures, `C:\repo\build\verify\verify\captures`)
+	missing, missing_error := instance.paths_resolve({}, "", "")
+	defer instance.paths_destroy(&missing)
+	testing.expect_value(t, missing_error, runtime.Allocator_Error.None)
+	testing.expect_value(t, missing, instance.Paths{})
+}
+
+@(test)
+roaming_settings_on_this_machine :: proc(t: ^testing.T) {
+	paths, err := instance.paths({name = "test"})
+	defer instance.paths_destroy(&paths)
+	testing.expect_value(t, err, runtime.Allocator_Error.None)
+	testing.expect(t, strings.has_suffix(paths.settings, `\AIODev\settings.ini`))
 }
 
 @(private)
@@ -113,8 +147,8 @@ allocation_errors :: proc(t: ^testing.T) {
 		id, id_error := instance.app_id(options, allocator)
 		testing.expect_value(t, id_error, runtime.Allocator_Error.Out_Of_Memory)
 		testing.expect_value(t, id, "")
-		file, file_error := instance.log_file_name(options, allocator)
-		testing.expect_value(t, file_error, runtime.Allocator_Error.Out_Of_Memory)
-		testing.expect_value(t, file, "")
+		paths, paths_error := instance.paths_resolve(options, `C:\local`, `C:\roaming`, allocator)
+		testing.expect_value(t, paths_error, runtime.Allocator_Error.Out_Of_Memory)
+		testing.expect_value(t, paths, instance.Paths{})
 	}
 }

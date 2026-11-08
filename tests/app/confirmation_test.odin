@@ -6,7 +6,6 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -43,7 +42,7 @@ confirmation_fixture_destroy :: proc(t: ^testing.T, f: ^Confirmation_Fixture) {
 @(private="file")
 confirmation_open_subject :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, swap: bool) -> ^ui.Confirm {
 	if swap {
-		app.pane_shell_swap_request(state, w, w.tree.focus, "alternate")
+		app.pane_shell_swap_request(state, w, app.window_tree(w).focus, "alternate")
 		testing.expect(t, app.confirmation_asking(w, app.Pane_Swap) != nil)
 	} else {
 		app.pending_close_open_tab(state, w, w.workspace.selected)
@@ -54,13 +53,13 @@ confirmation_open_subject :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window
 
 @(private="file")
 confirmation_test_key :: proc(state: ^app.App, w: ^app.Window, key: input.Key) {
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, pressed = true})
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, pressed = false})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, pressed = true})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, pressed = false})
 }
 
 @(private="file")
 confirmation_test_mouse :: proc(state: ^app.App, w: ^app.Window, pressed: bool, x, y: f32) {
-	app.handle_event(state, platform.Mouse_Button_Event{
+	app.handle_event(state, input.Mouse_Button_Event{
 		window = w.id, button = .Left, pressed = pressed, x = i32(x), y = i32(y),
 	})
 }
@@ -81,7 +80,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		app.update_motion(state)
 		testing.expect_value(t, c.motion.value, f32(1))
 		l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale, c.extended, c.show_option)
-		app.handle_event(state, platform.Mouse_Move_Event{
+		app.handle_event(state, input.Mouse_Move_Event{
 			window = w.id, x = i32(l.accept.x + 10), y = i32(l.accept.y + 10),
 		})
 		app.update_motion(state)
@@ -89,7 +88,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		app.update_motion(state)
 		testing.expect_value(t, c.hover_motion.hover.value, f32(1))
 		render.draw_list_reset(&w.list)
-		testing.expect_value(t, app.confirmation_draw(state, w), glyphs.Result.Ok)
+		testing.expect_value(t, app.confirmation_draw(state, w), render.Build_Status.Ok)
 		testing.expect(t, len(w.list.rects) > 0 && len(w.list.glyphs) > 0)
 		confirmation_test_key(state, w, .Escape)
 		testing.expect(t, !ui.presence_is_open(c.presence) && ui.presence_visible(c.presence))
@@ -102,7 +101,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		// The settled question released its subject with it.
 		testing.expect(t, w.dirty && app.confirmation_shown(w) == nil)
 		render.draw_list_reset(&w.list)
-		testing.expect_value(t, app.confirmation_draw(state, w), glyphs.Result.Ok)
+		testing.expect_value(t, app.confirmation_draw(state, w), render.Build_Status.Ok)
 		testing.expect_value(t, len(w.list.rects), 0)
 		// Disabled motion still releases the same payload through the application's motion loop.
 		state.animations = false

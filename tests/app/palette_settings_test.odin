@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:settings"
 import "aio:ui"
 import "core:testing"
@@ -37,12 +38,31 @@ palette_toggle_saves_through_the_settings_file_and_stays_open :: proc(t: ^testin
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	chosen, chose := ui.palette_chosen_take(&s.palette).(ui.Chosen_Value)
 	if !testing.expect(t, chose) {return}
-	saved, _ := app.settings_save_value(s, chosen.key, chosen.value, "Could not save the setting.")
+	saved := app.settings_save_value(s, chosen.key, chosen.value, "Could not save the setting.")
 	testing.expect(t, saved)
 	testing.expect(t, s.settings.cursor.blink, "the toggle reached the live settings")
 	testing.expect(t, app.palette_active(s, w), "the palette stays open")
 	outcome, _ = ui.palette_key(&s.palette, &s.registry, {key = .Arrow_Right, modifiers = {.Alt}, pressed = true})
 	testing.expect_value(t, outcome, ui.Outcome.Changed)
+}
+
+// Each step of a slider saves on top of the revision the previous step wrote.
+@(test)
+palette_slider_saves_consecutive_steps :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "inline-steps", second_window = false) {return}
+	s := &f.state
+	w := s.windows[0]
+	app.palette_open_mode(s, w, .Settings)
+	ui.palette_text(&s.palette, &s.registry, "pane.gap")
+	if !testing.expect(t, len(s.palette.results) > 0) {return}
+	testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "pane.gap")
+	gap := s.settings.pane.gap
+	for step in 1 ..= 2 {
+		app.handle_event(s, input.Key_Event{window = w.id, key = .Arrow_Right, modifiers = {.Alt}, pressed = true})
+		testing.expect_value(t, s.settings.pane.gap, gap + step)
+	}
 }
 
 @(test)
@@ -71,4 +91,33 @@ palette_controls_match_the_settings_page_and_keep_complex_settings_jump_only :: 
 	testing.expect_value(t, gap.default_value, "4")
 	testing.expect(t, ui.palette_setting(settings.schema_find("input.leader")^).resettable)
 	testing.expect(t, !ui.palette_setting(settings.schema_find(settings.PADDING_GROUPS_KEY)^).resettable)
+	for entry in settings.SCHEMA {
+		row := ui.palette_setting(entry)
+		if row.control == .Slider {testing.expect(t, row.step > 0, entry.key)}
+	}
+}
+
+@(test)
+palette_setting_values_use_static_choice_labels :: proc(t: ^testing.T) {
+	state: app.App
+	app.palette_set_sources(&state)
+	names, labels := settings.STATUS_PANEL_VIEW_NAME, settings.STATUS_PANEL_VIEW_LABEL
+	for view in ([?]settings.Status_Panel_View{.Comfy, .Dense}) {
+		state.settings.status.panel_view = view
+		value, label := state.palette.values.value(state.palette.values.user, "status.panel_view")
+		testing.expect_value(t, value, names[view])
+		testing.expect_value(t, label, labels[view])
+	}
+}
+
+@(test)
+palette_setting_values_use_live_choice_labels :: proc(t: ^testing.T) {
+	state: app.App
+	append(&state.settings.themes, settings.Custom_Theme{id = "custom-theme", name = "My Theme"})
+	defer delete(state.settings.themes)
+	state.settings.theme.name = "custom-theme"
+	app.palette_set_sources(&state)
+	value, label := state.palette.values.value(state.palette.values.user, "theme.name")
+	testing.expect_value(t, value, "custom-theme")
+	testing.expect_value(t, label, "My Theme")
 }

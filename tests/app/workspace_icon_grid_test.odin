@@ -1,10 +1,10 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
 import "aio:font"
 import "aio:glyphs"
-import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import fixtures "../fixtures"
@@ -55,7 +55,7 @@ workspace_icon_grid_keys_keep_grid_and_custom_editing_accessible :: proc(t: ^tes
 	w := app.Window{width = 600, height = 300, scale = 1}
 	w.workspace_picker.state = app.Workspace_Picker_Icons{}
 	defer delete(w.workspace_picker.query.bytes)
-	key :: proc(state: ^app.App, w: ^app.Window, e: platform.Key_Event, selected: int, t: ^testing.T) {
+	key :: proc(state: ^app.App, w: ^app.Window, e: input.Key_Event, selected: int, t: ^testing.T) {
 		app.workspace_picker_key(state, w, e)
 		testing.expect_value(t, w.workspace_picker.selected, selected)
 	}
@@ -110,10 +110,10 @@ workspace_icon_grid_pointer_apply_cancel_and_invalid_custom_preserve_identity ::
 	app.workspace_icon_open(&state, &w)
 	g := app.workspace_icon_picker_layout(&w)
 	cell := app.workspace_picker_row_rect(&w, 7)
-	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = i32(cell.x+22), y = i32(cell.y+22)})
+	app.handle_event(&state, input.Mouse_Move_Event{window = w.id, x = i32(cell.x+22), y = i32(cell.y+22)})
 	testing.expect_value(t, w.workspace_picker.selected, 7)
 	testing.expect_value(t, workspace.icon.preset, 0)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(cell.x+22), y = i32(cell.y+22)})
 	testing.expect_value(t, workspace.icon.preset, 7)
 	testing.expect(t, app.workspace_picker_active(&w.workspace_picker) && !app.workspace_picker_icons(&w.workspace_picker))
@@ -147,7 +147,7 @@ workspace_icon_grid_pointer_apply_cancel_and_invalid_custom_preserve_identity ::
 	app.workspace_icon_open(&state, &w)
 	w.workspace_picker.selected = 0
 	for i in 1..<5 {
-		app.handle_event(&state, platform.Mouse_Wheel_Event{window = w.id, x = 30, y = 100, delta_y = -1})
+		app.handle_event(&state, input.Mouse_Wheel_Event{window = w.id, x = 30, y = 100, delta_y = -1})
 		testing.expect_value(t, w.workspace_picker.selected, i)
 	}
 	testing.expect(t, w.workspace_picker.scroll > 0)
@@ -155,7 +155,7 @@ workspace_icon_grid_pointer_apply_cancel_and_invalid_custom_preserve_identity ::
 	app.workspace_picker_click(&state, &w, g.divider.x+1, g.divider.y, false)
 	testing.expect(t, app.workspace_picker_icons(&w.workspace_picker))
 	testing.expect_value(t, workspace.icon.emoji, "1️⃣")
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = 1, y = 41})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = 1, y = 41})
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, workspace.icon.emoji, "1️⃣")
 	testing.expect(t, w.workspace == &workspace && owner.workspace == &other)
@@ -191,11 +191,11 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 		w.scale, w.width, w.height = scale, i32(600*scale), i32(400*scale)
 		ui.text_set_size(&w.ui_text, 14*scale)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			state := app.App{theme = ui.theme_from(fixtures.shipped_theme(id))}
+			state := app.App{theme = ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())}
 			append(&state.workspaces, &workspace)
 			defer delete(state.workspaces)
 			render.draw_list_reset(&w.list)
-			testing.expect_value(t, app.workspace_picker_draw(&state, &w), glyphs.Result.Ok)
+			testing.expect_value(t, app.workspace_picker_draw(&state, &w), render.Build_Status.Ok)
 			g := app.workspace_icon_picker_layout(&w)
 			selected := app.workspace_icon_picker_cell(&w, g, 7)
 			current := app.workspace_icon_picker_cell(&w, g, 2)

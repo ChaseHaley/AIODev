@@ -1,17 +1,16 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
 import "aio:term"
-import "aio:term_view"
 import "aio:ui"
 
 @(private="file")
@@ -44,13 +43,12 @@ cleanup_fixture_init :: proc(t: ^testing.T, f: ^Cleanup_Fixture) -> bool {
 		id, err := platform.window_create(&state.platform, {hidden = true, width = 320, height = 200})
 		if !testing.expect_value(t, err, platform.Error.None) { return false }
 		w := new(app.Window)
-		w.id, w.workspace, w.tree = id, workspace, &tab.tree
+		w.id, w.workspace = id, workspace
 		app.focus_init(w)
 		append(&state.windows, w)
-		view: term_view.View
-		if !testing.expect(t, term_view.create(&view)) { return false }
-		append(&w.views, app.Pane_View{content = {.Terminal, u32(index+1)}, view = view,
-			cache = render.draw_list_init()})
+		view, created := app.pane_view_create({.Terminal, u32(index+1)}, true)
+		if !testing.expect(t, created) { return false }
+		append(&w.views, view)
 		if index == 0 { f.source = w } else { f.destination = w }
 	}
 	return true
@@ -80,7 +78,7 @@ pane_cleanup_committed_final_pane_removes_source_registry_and_view :: proc(t: ^t
 		source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
 		source_id, window_id := f.source.workspace.id, f.source.id
 		if scenario >= 2 { app.window_close(state, f.source) }
-		destination_workspace, destination_tree := f.destination.workspace, f.destination.tree
+		destination_workspace, destination_tree := f.destination.workspace, app.window_tree(f.destination)
 		app.workspace_picker_open(state, f.destination)
 		when app.AIO_CONTROL {
 			state.verify.target_window, state.verify.mouse_window = window_id, window_id
@@ -89,8 +87,10 @@ pane_cleanup_committed_final_pane_removes_source_registry_and_view :: proc(t: ^t
 		if scenario%2 == 1 {
 			if !testing.expect(t, app.pane_to_tab(state, f.destination, source, source.tree.root)) { return }
 		} else {
-			if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
-				source.tree.root, destination.tree.root, .Right, false)) { return }
+			if !testing.expect(t, app.pane_drop_commit(state, f.destination,
+				app.Pane_Grab{source, source.tree.root}, f.destination,
+				app.Pane_Drop{tab = destination, place = .Beside,
+					target = destination.tree.root, direction = .Right})) { return }
 		}
 		testing.expect(t, app.workspace_find(state, source_id) == nil)
 		testing.expect(t, app.window_find(state, window_id) == nil)
@@ -105,11 +105,11 @@ pane_cleanup_committed_final_pane_removes_source_registry_and_view :: proc(t: ^t
 		testing.expect(t, app.workspace_index(state, 0) == destination_workspace)
 		testing.expect(t, app.workspace_index(state, 1) == nil)
 		when app.AIO_CONTROL {
-			testing.expect_value(t, app.verify_drive(state, control.Window_Select{u64(window_id)}),
-				control.Error.Invalid_Argument)
+			testing.expect_value(t, app.verify_drive(state, verify_protocol.Window_Select{u64(window_id)}),
+				verify_protocol.Error.Invalid_Argument)
 			testing.expect(t, app.verify_window(state) == f.destination)
-			testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))
-			testing.expect_value(t, state.verify.mouse_window, platform.Window_Id(0))
+			testing.expect_value(t, state.verify.target_window, input.Window_Id(0))
+			testing.expect_value(t, state.verify.mouse_window, input.Window_Id(0))
 			testing.expect(t, state.verify.buttons == {})
 		}
 		testing.expect(t, !state.tray_hint_shown)
@@ -129,8 +129,9 @@ pane_cleanup_drag_release_returns_after_source_view_is_freed :: proc(t: ^testing
 		state := &f.state
 		source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
 		id, window_id := f.source.workspace.id, f.source.id
-		place: app.Drag_Destination = app.Drop_Pane{f.destination.id, destination, destination.tree.root, .Right, .Fits}
-		if to_tab {place = app.Drop_New_Tab{f.destination.id, destination, .Fits}}
+		place := app.Pane_Drop{
+			f.destination.id, destination, .Beside, destination.tree.root, .Right, .Fits, false}
+		if to_tab {place.place, place.target = .New_Tab, layout.INVALID_NODE}
 		seed_pane_drag(f.source, source, source.tree.root, place)
 		if !testing.expect(t, app.pane_drag_release(state, f.source)) { return }
 		testing.expect(t, app.window_find(state, window_id) == nil)
@@ -153,15 +154,17 @@ pane_cleanup_refreshes_another_windows_open_picker :: proc(t: ^testing.T) {
 	id, err := platform.window_create(&state.platform, {hidden = true, width = 320, height = 200})
 	if !testing.expect_value(t, err, platform.Error.None) { return }
 	observer := new(app.Window)
-	observer.id, observer.workspace, observer.tree = id, workspace, &tab.tree
+	observer.id, observer.workspace = id, workspace
 	app.focus_init(observer)
 	append(&state.windows, observer)
 	app.workspace_picker_open(state, observer)
 	testing.expect_value(t, len(observer.workspace_picker.rows), 3)
 	source_id := f.source.workspace.id
 	source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
-	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
-		source.tree.root, destination.tree.root, .Right, false)) { return }
+	if !testing.expect(t, app.pane_drop_commit(state, f.destination,
+		app.Pane_Grab{source, source.tree.root}, f.destination,
+		app.Pane_Drop{tab = destination, place = .Beside,
+			target = destination.tree.root, direction = .Right})) { return }
 	testing.expect(t, app.workspace_picker_active(&observer.workspace_picker))
 	testing.expect_value(t, len(observer.workspace_picker.rows), 2)
 	for row in observer.workspace_picker.rows { testing.expect(t, row.id != source_id) }
@@ -189,12 +192,14 @@ pane_cleanup_other_tabs_settings_and_split_panes_keep_source :: proc(t: ^testing
 			if to_tab {
 				if !testing.expect(t, app.pane_to_tab(state, f.destination, source, node)) { return }
 			} else {
-				if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
-					node, destination.tree.root, .Right, false)) { return }
+				if !testing.expect(t, app.pane_drop_commit(state, f.destination,
+					app.Pane_Grab{source, node}, f.destination,
+					app.Pane_Drop{tab = destination, place = .Beside,
+						target = destination.tree.root, direction = .Right})) { return }
 			}
 			testing.expect(t, app.workspace_find(state, workspace.id) == workspace)
 			testing.expect(t, app.window_for_workspace(state, workspace) == f.source)
-			testing.expect(t, f.source.tree == &app.selected_tab(workspace).tree)
+			testing.expect(t, app.window_tree(f.source) == &app.selected_tab(workspace).tree)
 			testing.expect_value(t, len(state.workspaces), 2)
 			testing.expect_value(t, len(state.windows), 2)
 		}
@@ -213,10 +218,12 @@ pane_cleanup_failure_cancel_stale_and_same_workspace_preserve_source :: proc(t: 
 	seed_pane_drag(f.source, source, node)
 	app.pane_drag_cancel(state, f.source)
 	testing.expect(t, !app.pane_drag_release(state, f.source))
-	testing.expect(t, !app.pane_transfer(state, f.destination, source, destination,
-		layout.INVALID_NODE, target, .Right, false))
+	testing.expect(t, !app.pane_drop_commit(state, f.destination,
+		app.Pane_Grab{source, layout.INVALID_NODE}, f.destination,
+		app.Pane_Drop{tab = destination, place = .Beside, target = target, direction = .Right}))
 	stale: app.Tab
-	testing.expect(t, !app.pane_transfer(state, f.destination, &stale, destination, node, target, .Right, false))
+	testing.expect(t, !app.pane_drop_commit(state, f.destination, app.Pane_Grab{&stale, node}, f.destination,
+		app.Pane_Drop{tab = destination, place = .Beside, target = target, direction = .Right}))
 	testing.expect(t, !app.pane_to_tab(state, f.destination, &stale, node))
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
@@ -227,7 +234,8 @@ pane_cleanup_failure_cancel_stale_and_same_workspace_preserve_source :: proc(t: 
 		append(&destination.tree.nodes, layout.Vacant{})
 	}
 	destination.tree.nodes.allocator = runtime.nil_allocator()
-	failed = app.pane_transfer(state, f.destination, source, destination, node, target, .Right, false)
+	failed = app.pane_drop_commit(state, f.destination, app.Pane_Grab{source, node}, f.destination,
+		app.Pane_Drop{tab = destination, place = .Beside, target = target, direction = .Right})
 	destination.tree.nodes.allocator = allocator
 	testing.expect(t, !failed)
 	testing.expect_value(t, source.tree.root, node)
@@ -238,8 +246,8 @@ pane_cleanup_failure_cancel_stale_and_same_workspace_preserve_source :: proc(t: 
 	testing.expect_value(t, len(workspace.tabs), 1)
 	other := cleanup_tab(t, workspace, {.Terminal, 3})
 	if other == nil { return }
-	if !testing.expect(t, app.pane_transfer(state, f.source, source, other,
-		node, other.tree.root, .Right, false)) { return }
+	if !testing.expect(t, app.pane_drop_commit(state, f.source, app.Pane_Grab{source, node}, f.source,
+		app.Pane_Drop{tab = other, place = .Beside, target = other.tree.root, direction = .Right})) { return }
 	testing.expect(t, app.workspace_find(state, workspace.id) == workspace)
 	testing.expect_value(t, len(workspace.tabs), 1)
 	testing.expect(t, app.pane_to_tab(state, f.source, other, other.tree.focus))
@@ -277,8 +285,10 @@ pane_cleanup_moved_and_destination_runtime_pids_survive :: proc(t: ^testing.T) {
 	pids := [?]u32{term.process_id(moved), term.process_id(destination_session)}
 	source, destination := app.selected_tab(f.source.workspace), app.selected_tab(f.destination.workspace)
 	id := f.source.workspace.id
-	if !testing.expect(t, app.pane_transfer(state, f.destination, source, destination,
-		source.tree.root, destination.tree.root, .Right, false)) { return }
+	if !testing.expect(t, app.pane_drop_commit(state, f.destination,
+		app.Pane_Grab{source, source.tree.root}, f.destination,
+		app.Pane_Drop{tab = destination, place = .Beside,
+			target = destination.tree.root, direction = .Right})) { return }
 	testing.expect(t, app.workspace_find(state, id) == nil)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect(t, state.sessions[0].session == moved && state.sessions[1].session == destination_session)

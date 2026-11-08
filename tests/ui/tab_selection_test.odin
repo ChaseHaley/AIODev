@@ -5,19 +5,17 @@ import "aio:render"
 import "aio:ui"
 
 @(test)
-rail_tab_tiles_fill_the_flat_workspace_list_row :: proc(t: ^testing.T) {
+rail_tab_rows_fill_the_flat_workspace_list :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 1.75}) {
 		area := render.Rect{0, 40 * scale, ui.RAIL_WIDTH * scale, 400 * scale}
 		layout := ui.rail_layout(area, scale, 3, 0)
+		// A tab draws on its whole row, which spans the list inside the rail padding.
 		row := ui.rail_row_rect(layout, 1)
-		tile := ui.rail_tab_tile(layout, row)
-		testing.expect_value(t, tile.x, row.x + ui.RAIL_TAB_INDENT * scale)
-		testing.expect_value(t, tile.x + tile.width, row.x + row.width)
-		testing.expect_value(t, tile.y, row.y)
-		testing.expect_value(t, tile.height, row.height)
-		testing.expect(t, ui.rail_row_contains(layout, 1, tile.x + 1, tile.y + 1))
-		testing.expect_value(t, tile.x, row.x)
-		testing.expect_value(t, tile.width, row.width)
+		testing.expect_value(t, row.x, layout.list.x + ui.RAIL_PADDING * scale)
+		right := layout.list.x + layout.list.width - ui.RAIL_PADDING * scale
+		testing.expect_value(t, row.x + row.width, right)
+		testing.expect_value(t, row.height, ui.RAIL_ROW_HEIGHT * scale)
+		testing.expect(t, render.rect_contains(layout.list, row.x + 1, row.y + 1))
 	}
 }
 

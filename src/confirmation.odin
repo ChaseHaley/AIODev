@@ -1,7 +1,7 @@
 package main
 
-import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
+import "aio:render"
 import "aio:ui"
 import "core:time"
 
@@ -57,16 +57,20 @@ confirmation_asking :: proc(w: ^Window, $T: typeid) -> ^T {
 	return confirmation_subject(w, T)
 }
 
-// Asks about `subject`, which the window now owns, presenting it as stated. A question still closing is
-// released at once; a caller rewriting an asking question in place has taken what it keeps from it. The
-// caller has closed the surfaces the question replaces, and cancelled any pointer gesture that asked it.
-confirmation_open :: proc(
+// Asks about `subject`, which the window now owns, presenting it as stated. The question first closes
+// what it replaces (overlay_close_all), except `reopening`: an asking question its caller rewrites in
+// place, having taken what it keeps from it. A question still closing is released at once. The caller
+// has cancelled any pointer gesture that asked it.
+confirmation_ask :: proc(
+	app: ^App,
 	w: ^Window,
 	subject: Confirmation_Subject,
 	extended := false,
 	focus := ui.Confirm_Button.Accept,
 	show_option := false,
+	reopening: ^ui.Confirm = nil,
 ) {
+	overlay_close_all(app, w, reopening)
 	confirmation_clear(w)
 	c := Confirmation{subject = subject}
 	ui.confirm_open(&c.dialog, extended, focus, show_option)
@@ -107,14 +111,13 @@ confirmation_clear :: proc(w: ^Window) {
 	case Pane_Swap:
 		pane_swap_destroy(&subject)
 	case Pending_File:
-		platform.terminal_file_destroy(&subject.file)
+		pending_file_destroy(&subject)
 	case Process_Remove:
-		delete(subject.name)
-		delete(subject.source)
+		editor_process_remove_destroy(&subject)
 	case Profile_Remove:
-		delete(subject.id)
+		editor_profile_remove_destroy(&subject)
 	case Settings_Reset:
-		delete(subject.source)
+		settings_reset_destroy(&subject)
 	}
 	w.confirmation = nil
 }
@@ -125,6 +128,12 @@ confirmation_clear :: proc(w: ^Window) {
 confirmation_cancel :: proc(app: ^App, w: ^Window) {
 	confirmation_finish(app, w, false)
 	if confirmation_subject(w, Pending_Close) != nil {confirmation_clear(w)}
+}
+
+// The window stops showing its workspace. A close question counts the tabs it stops showing, so it
+// ends now, putting back any marks its subset replaced; other questions are unaffected.
+confirmation_workspace_depart :: proc(app: ^App, w: ^Window) {
+	if confirmation_subject(w, Pending_Close) != nil {confirmation_cancel(app, w)}
 }
 
 @(private)
@@ -143,16 +152,17 @@ confirmation_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Confirm_Outcome)
 	}
 }
 
-confirmation_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) -> bool {
+confirmation_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	c := confirmation_current(w)
 	if c == nil {return false}
 	pane_header_cancel(w)
 	key_suppress(w, e)
-	confirmation_outcome(app, w, ui.confirm_key(c, e))
+	option := confirmation_text(app, w, confirmation_shown(w), recount = false).option
+	confirmation_outcome(app, w, ui.confirm_key(c, e, option))
 	return true
 }
 
-confirmation_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+confirmation_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	c := confirmation_current(w)
 	if c == nil {return false}
 	outcome := ui.confirm_mouse(c, confirmation_layout(w, c), e.button, e.pressed, f32(e.x), f32(e.y))
@@ -193,30 +203,90 @@ confirmation_advance :: proc(app: ^App, w: ^Window, now: time.Tick) {
 	if settled {confirmation_clear(w)}
 }
 
-confirmation_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	c := confirmation_shown(w)
-	if c == nil || !ui.presence_visible(c.dialog.presence) {return .Ok}
-	text: Confirmation_Text
+// The words of the question shown. A close question that is still asking recounts what it closes
+// when `recount` is set; reading the text for anything but drawing leaves the counts alone.
+@(private)
+confirmation_text :: proc(app: ^App, w: ^Window, c: ^Confirmation, recount: bool) -> Confirmation_Text {
 	switch &subject in c.subject {
 	case Pending_Close:
-		text = pending_close_text(app, &subject, ui.presence_is_open(c.dialog.presence), w.workspace)
+		counting := recount && ui.presence_is_open(c.dialog.presence)
+		return pending_close_text(app, &subject, counting, w.workspace)
 	case Pane_Swap:
-		text = pane_swap_text(subject)
+		return pane_swap_text(subject)
 	case Pending_File:
-		text = pending_file_text(subject)
+		return pending_file_text(subject)
 	case Process_Remove:
-		text = editor_process_remove_text(subject)
+		return editor_process_remove_text(subject)
 	case Profile_Remove:
-		text = editor_profile_remove_text(app, subject.id)
+		return editor_profile_remove_text(subject)
 	case Settings_Reset:
-		text = settings_reset_text()
+		return settings_reset_text()
 	}
-	layers, rects, glyph_count := len(w.list.layers), len(w.list.rects), len(w.list.glyphs)
-	result := ui.confirm_draw(
+	return {}
+}
+
+confirmation_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
+	c := confirmation_shown(w)
+	if c == nil || !ui.presence_visible(c.dialog.presence) {return .Ok}
+	text := confirmation_text(app, w, c, recount = true)
+	return ui.confirm_draw(
 		&c.dialog, &w.list, &w.ui_text, app.theme, f32(w.width), f32(w.height), w.scale,
-		text.title, text.body, text.label, text.note, text.option, w.pointer,
+		text.title, text.body, text.label, text.note, text.option,
+		ui.presence_fade(c.dialog.presence, ui.RISE_DIALOG * w.scale), w.pointer,
 	)
-	opacity, rise := ui.presence_fade(c.dialog.presence, 4 * w.scale)
-	ui.fade_draw(&w.list, layers, rects, glyph_count, opacity, rise)
-	return result
+}
+
+when AIO_CONTROL {
+	// The close, file and swap questions' keys. Each reads the question only while it is about that
+	// key's subject.
+	confirmation_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		question := confirmation_shown(w)
+		opacity := question != nil ? question.dialog.motion.value : 0
+		closing := confirmation_subject(w, Pending_Close)
+		close_open := confirmation_asking(w, Pending_Close) != nil
+		confirm: Confirmation_Text
+		close_workspace: u32
+		if closing != nil {
+			confirm = pending_close_text(app, closing, close_open, w.workspace)
+			if target, ok := closing.target.(Close_Workspace); ok {close_workspace = target.workspace}
+		}
+		file := confirmation_subject(w, Pending_File)
+		swap := confirmation_subject(w, Pane_Swap)
+		state_value(r, "confirm.open", close_open)
+		state_valuef(r, "confirm.opacity", "%g", closing != nil ? opacity : 0)
+		state_text(r, "confirm.title", close_open ? confirm.title : "")
+		state_text(r, "confirm.body", close_open ? confirm.body : "")
+		state_value(r, "confirm.workspace", close_workspace)
+		state_value(r, "file.open", confirmation_asking(w, Pending_File) != nil)
+		state_text(r, "file.path", file != nil ? file.file.path : "")
+		state_text(r, "file.target", file != nil ? file.file.target : "")
+		state_value(r, "swap.open", confirmation_asking(w, Pane_Swap) != nil)
+		state_valuef(r, "swap.opacity", "%g", swap != nil ? opacity : 0)
+		state_text(r, "swap.profile", swap != nil ? swap.profile_id : "")
+	}
+}
+
+// Confirmation pointer surface
+
+@(private)
+confirmation_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return confirmation_current(w) != nil}
+
+@(private)
+confirmation_pointer_hover :: proc(
+	app: ^App,
+	w: ^Window,
+	owner: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) {
+	if owner == .Confirmation {_ = confirmation_hover(app, w, f32(e.x), f32(e.y))}
+}
+
+@(private)
+confirmation_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	_ = confirmation_button(app, w, e)
+}
+
+@(private)
+confirmation_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	confirmation_release(w)
 }

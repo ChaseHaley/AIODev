@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -21,7 +22,7 @@ profile_detected_row_drag_survives_publication_and_reopen :: proc(t: ^testing.T)
 	if !testing.expect(t, id != "") {return}
 	e := profile_open(&f)
 	l := ui.editor_layout({0, 40, 1200, 8000}, 1)
-	e.visible_rows = l.rows
+	ui.editor_fit(e, l)
 	item := profile_item(e, fmt.tprintf("profile.%s", id))
 	alpha := profile_item(e, "profile.alpha")
 	if !testing.expect(t, item >= 0 && alpha >= 0) {return}
@@ -55,7 +56,7 @@ profile_add_and_remove_preserve_settings_scroll :: proc(t: ^testing.T) {
 	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
 	removing := app.confirmation_asking(f.state.windows[0], app.Profile_Remove)
 	if !testing.expect(t, removing != nil) {return}
-	testing.expect_value(t, app.editor_profile_remove_text(&f.state, removing.id).title, "Delete New Profile?")
+	testing.expect_value(t, app.editor_profile_remove_text(removing^).title, "Delete New Profile?")
 	e.scroll = 35
 	app.confirmation_finish(&f.state, f.state.windows[0], true)
 	testing.expect_value(t, e.scroll, 35)
@@ -123,7 +124,9 @@ profile_fixture_destroy :: proc(t: ^testing.T, f: ^Profile_Fixture) {
 
 @(private)
 profile_open :: proc(f: ^Profile_Fixture) -> ^ui.Editor {
-	app.settings_reveal_page(&f.state, &f.state.windows[0].editor, {search = .Clear, reload = true})
+	_ = app.settings_load(&f.state, &f.state.windows[0].editor)
+	app.settings_reveal_page(&f.state.windows[0].editor, {search = .Clear})
+	ui.editor_fit(&f.state.windows[0].editor, ui.editor_layout({0, 40, 1200, 1400}, 1))
 	return&f.state.windows[0].editor
 }
 
@@ -178,7 +181,7 @@ profile_file_lacks :: proc(path, prefix: string) -> bool {
 }
 
 @(private)
-profile_press :: proc(f: ^Profile_Fixture, key: platform.Key_Event) {
+profile_press :: proc(f: ^Profile_Fixture, key: input.Key_Event) {
 	e := key
 	e.pressed = true
 	w := f.state.windows[0]
@@ -315,7 +318,6 @@ profile_table_and_inline_save_agree_on_detected_names :: proc(t: ^testing.T) {
 	defer ui.profile_table_destroy(&table)
 	testing.expect_value(t, error, nil)
 	for row in table.rows {if row.id == "alpha" {testing.expect_value(t, row.note, "")}}
-	for row in table.detected {if row.id == "found" {testing.expect_value(t, row.note, "")}}
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha")) {return}
 	profile_press(&f, {key = .Enter})
 	if !testing.expect(t, ui.editor_select_key(e, "profile.alpha.name")) {return}
@@ -351,7 +353,7 @@ profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^tes
 			ui.editor_request_set(e, ui.Profile_Request{.Duplicate, strings.clone("alpha")})
 			app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
 		} else {
-			if !testing.expect(t, ui.editor_reveal(e, key)) {return}
+			if !testing.expect(t, ui.editor_reveal(e, ui.Reveal_Row{key})) {return}
 			app.editor_outcome(&f.state, f.state.windows[0], .Save)
 		}
 		if !testing.expect(t, !e.error) {return}
@@ -363,7 +365,7 @@ profile_generated_names_have_no_table_warning_and_save_unchanged :: proc(t: ^tes
 		defer ui.profile_table_destroy(&table)
 		testing.expect_value(t, error, nil)
 		for row in table.rows {if row.id == id {testing.expect_value(t, row.note, "")}}
-		if !testing.expect(t, ui.editor_reveal(e, fmt.tprintf("profile.%s.name", id))) {return}
+		if !testing.expect(t, ui.editor_reveal(e, ui.Reveal_Row{fmt.tprintf("profile.%s.name", id)})) {return}
 		ui.field_set(&e.value, name)
 		ui.editor_focus_row(e)
 		app.editor_outcome(&f.state, f.state.windows[0], .Save)
@@ -401,6 +403,16 @@ profile_table_includes_detected_and_confirms_custom_removal :: proc(t: ^testing.
 		nil,
 	)
 	testing.expect_value(t, settings.profiles_finalize(&f.state.settings), nil)
+	// Pages read machine shells from the revision's input snapshot, which the running settings
+	// were parsed with; the fake shell joins both.
+	inputs := &f.state.settings_inputs
+	detected := make([dynamic]settings.Detected_Profile, context.temp_allocator)
+	append(&detected, ..inputs.detected[:])
+	append(&detected, settings.Detected_Profile{"fake-shell", "Fake Shell", "cmd.exe", "~"})
+	replacement, inputs_error := settings.inputs_read(inputs.themes_directory, detected[:])
+	if !testing.expect_value(t, inputs_error, nil) {return}
+	settings.inputs_destroy(inputs)
+	inputs^ = replacement
 	e := profile_open(&f)
 
 	testing.expect(t, !ui.editor_select_key(e, "profiles.detected"))
@@ -481,7 +493,6 @@ profile_table_opens_detected_section_for_a_detected_default :: proc(t: ^testing.
 	)
 	testing.expect_value(t, settings.profiles_finalize(&f.state.settings), nil)
 	e := profile_open(&f)
-	testing.expect(t, !e.detected_open)
 	defaults := 0
 	for row in e.rows {
 		if .Default in row.flags {defaults += 1}

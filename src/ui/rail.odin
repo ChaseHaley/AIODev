@@ -8,11 +8,10 @@ import "core:math"
 RAIL_WIDTH :: f32(208)
 RAIL_MIN_WIDTH :: f32(144)
 RAIL_MAX_WIDTH :: f32(480)
-RAIL_ROW_HEIGHT :: f32(32)
-RAIL_FOOTER_HEIGHT :: f32(32)
+// Rail rows and the footer that holds the new-tab row are standard list rows.
+RAIL_ROW_HEIGHT :: HEIGHT_STANDARD
+RAIL_FOOTER_HEIGHT :: HEIGHT_STANDARD
 RAIL_PADDING :: f32(4)
-RAIL_TAB_INDENT :: f32(0)
-RAIL_TOGGLE_WIDTH :: f32(32)
 // A docked 208 rail leaves about 500 DIPs of pane at this width, roughly 60 columns at the
 // default font. Narrower than that the rail takes more than a third of the window.
 RAIL_DOCK_MIN_WIDTH :: f32(720)
@@ -72,23 +71,6 @@ rail_row_rect :: proc(layout: Rail_Layout, index: int) -> render.Rect {
 	}
 }
 
-rail_row_hit :: proc(layout: Rail_Layout, x, y: f32) -> int {
-	if layout.count == 0 ||
-	   x < layout.list.x ||
-	   x >= layout.list.x + layout.list.width ||
-	   y < layout.list.y ||
-	   y >= layout.list.y + layout.list.height {return -1}
-	local := y - layout.list.y - RAIL_PADDING * layout.scale + layout.scroll
-	if local < 0 {return -1}
-	index := int(math.floor(local / max(1, layout.row_height)))
-	return index < layout.count ? index : -1
-}
-
-rail_row_contains :: proc(layout: Rail_Layout, index: int, x, y: f32) -> bool {
-	row := rail_row_rect(layout, index)
-	return x >= row.x && x < row.x + row.width && y >= row.y && y < row.y + row.height
-}
-
 // Keeps `index` fully inside the list, moving the scroll only when it is not already visible.
 rail_reveal_row :: proc(layout: Rail_Layout, index: int) -> f32 {
 	if index < 0 || index >= layout.count {return rail_scroll_clamped(layout, layout.scroll)}
@@ -115,20 +97,8 @@ rail_close_rect :: proc(layout: Rail_Layout, index: int, scale: f32) -> render.R
 	}
 }
 
-rail_close_hit :: proc(layout: Rail_Layout, x, y, scale: f32) -> int {
-	index := rail_row_hit(layout, x, y)
-	r := rail_close_rect(layout, index, scale)
-	if r.width > 0 &&
-	   x >= r.x &&
-	   x < r.x + r.width &&
-	   y >= r.y &&
-	   y < r.y + r.height {return index}
-	return -1
-}
-
 rail_footer_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {
-	r := layout.footer
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return render.rect_contains(layout.footer, x, y)
 }
 
 rail_footer_tile :: proc(layout: Rail_Layout) -> render.Rect {
@@ -148,17 +118,11 @@ rail_profile_rect :: proc(layout: Rail_Layout) -> render.Rect {
 }
 
 rail_profile_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {
-	r := rail_profile_rect(layout)
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return render.rect_contains(rail_profile_rect(layout), x, y)
 }
 
 rail_new_tab_tile :: proc(layout: Rail_Layout) -> render.Rect {
 	tile := rail_footer_tile(layout)
 	tile.width = max(0, tile.width - rail_profile_rect(layout).width)
 	return tile
-}
-
-rail_tab_tile :: proc(layout: Rail_Layout, row: render.Rect) -> render.Rect {
-	inset := RAIL_TAB_INDENT * layout.scale
-	return {row.x + inset, row.y, max(0, row.width - inset), row.height}
 }

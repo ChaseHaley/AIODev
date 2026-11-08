@@ -1,13 +1,11 @@
 package term
 
 import "aio:ghostty"
+import "aio:search"
 import "base:runtime"
 import "core:log"
 import "core:sync"
 import "core:time"
-
-@(private)
-SEARCH_STEP_BUDGET :: 2 * time.Millisecond
 
 // What the session's search is doing; nil is no search. One value names the backend, so libghostty and
 // the row scanner never hold a needle at the same time.
@@ -26,25 +24,6 @@ Literal_Search :: struct {
 // The search could not start or went on without memory. It holds no needle and no matches.
 Search_Failed :: struct {}
 
-Search_Progress :: enum u8 {
-	Off,
-	Searching,
-	Complete,
-	// The regular expression does not compile.
-	Invalid,
-	// The search stopped with no matches, such as when memory ran out.
-	Failed,
-}
-
-Search_Summary :: struct {
-	progress: Search_Progress,
-	total:    int,
-	// Position of the selected match counting from the newest, or -1 when none is selected.
-	selected: int,
-	// Changes when a refresh moves the scanner's results without changing the counts.
-	revision: int,
-}
-
 // A run of matched cells on one viewport row; columns are inclusive.
 Highlight :: struct {
 	row, first, last: int,
@@ -54,7 +33,7 @@ Highlight :: struct {
 // Starts a search of the session's scrollback and screens; an empty needle ends it. Literal text without
 // case sensitivity uses libghostty's incremental search; other options use the row scanner. This and the
 // passes in pattern_update are the only writers of s.search_state.
-search_set_needle :: proc(s: ^Session, needle: string, options: Search_Options = {}) {
+search_set_needle :: proc(s: ^Session, needle: string, options: search.Options = {}) {
 	literal := len(needle) > 0 && options == {}
 	switch _ in s.search_state {
 	case Literal_Search:
@@ -114,7 +93,7 @@ search_update :: proc(s: ^Session) {
 		state.fed = generation(s)
 		ghostty_update(s)
 	case Pattern_Phase:
-		pattern_update(s, state, SEARCH_STEP_BUDGET)
+		pattern_update(s, state, search.STEP_BUDGET)
 	case Search_Failed:
 	}
 }
@@ -125,7 +104,7 @@ ghostty_update :: proc(s: ^Session) {
 	if !search_feed(s) {
 		return
 	}
-	for time.tick_since(start) < SEARCH_STEP_BUDGET {
+	for time.tick_since(start) < search.STEP_BUDGET {
 		status: ghostty.Search_Status
 		if result := ghostty.search_tick(s.search, &status); result != .Success {
 			log.errorf("term: advancing the search failed: %v", result)
@@ -155,7 +134,7 @@ search_feed :: proc(s: ^Session) -> bool {
 }
 
 // Selects the next older match, or the next newer one, wrapping at either end, and scrolls it into view.
-// Returns false when there is nothing to select.
+// Older matches sit higher on screen. Returns false when there is nothing to select.
 search_select :: proc(s: ^Session, older: bool) -> bool {
 	switch _ in s.search_state {
 	case Literal_Search:
@@ -179,7 +158,8 @@ ghostty_select :: proc(s: ^Session, older: bool) -> bool {
 	return result == .Success
 }
 
-search_summary :: proc(s: ^Session) -> Search_Summary {
+// What the find bar shows, counted from the newest match up (search.Order.Newest_First, the zero value).
+search_summary :: proc(s: ^Session) -> search.Summary {
 	switch phase in s.search_state {
 	case Literal_Search:
 		return ghostty_summary(s)
@@ -192,8 +172,8 @@ search_summary :: proc(s: ^Session) -> Search_Summary {
 }
 
 @(private)
-ghostty_summary :: proc(s: ^Session) -> Search_Summary {
-	summary := Search_Summary {
+ghostty_summary :: proc(s: ^Session) -> search.Summary {
+	summary := search.Summary {
 		progress = .Searching,
 		selected = -1,
 	}

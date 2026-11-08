@@ -1,5 +1,6 @@
 package platform_test
 
+import "aio:input"
 import p "aio:platform"
 import "core:testing"
 import "core:thread"
@@ -41,7 +42,7 @@ tabbed_title_bar_keeps_native_hit_testing_and_client_size :: proc(t: ^testing.T)
 	testing.expect_value(t, size_error, p.Error.None)
 	testing.expect_value(t, width, i32(800))
 	testing.expect_value(t, height, i32(500))
-	p.window_caption_action(&platform, id, 2)
+	p.window_caption_action(&platform, id, .Close)
 	events, poll_error := p.poll_events(&platform)
 	testing.expect_value(t, poll_error, p.Error.None)
 	closed := false
@@ -63,7 +64,7 @@ invalid_and_partial_lifecycle :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, p.Error.Not_Initialized)
 	testing.expect_value(t, p.window_destroy(&platform, 1), p.Error.Invalid_Window)
 	testing.expect_value(t, p.window_set_title(&platform, 1, "x"), p.Error.Invalid_Window)
-	testing.expect_value(t, p.window_set_frame_color(&platform, 1, {}), p.Error.Invalid_Window)
+	testing.expect_value(t, p.window_set_frame_color(&platform, 1, {}, {}), p.Error.Invalid_Window)
 	testing.expect_value(t, p.window_set_cursor(&platform, 1, .Arrow), p.Error.Invalid_Window)
 	testing.expect_value(t, p.window_flash(&platform, 1), p.Error.Invalid_Window)
 	testing.expect(t, p.window_native_handle(&platform, 1) == nil)
@@ -95,7 +96,8 @@ window_lifecycle_and_events :: proc(t: ^testing.T) {
 	testing.expect_value(t, width, i32(320))
 	testing.expect_value(t, height, i32(200))
 	testing.expect_value(t, p.window_set_title(&platform, first, "Changed 漢😀"), p.Error.None)
-	testing.expect_value(t, p.window_set_frame_color(&platform, first, {0x0f, 0x11, 0x15}), p.Error.None)
+	frame_color := p.window_set_frame_color(&platform, first, {0x0f, 0x11, 0x15}, {0xec, 0xec, 0xf1})
+	testing.expect_value(t, frame_color, p.Error.None)
 	for shape in p.Cursor_Shape {
 		testing.expect_value(t, p.window_set_cursor(&platform, first, shape), p.Error.None)
 	}
@@ -150,7 +152,7 @@ text_and_key_pump :: proc(t: ^testing.T) {
 	testing.expect_value(t, poll_error, p.Error.None)
 	text_count := 0
 	for event in events {
-		if e, ok := event.(p.Text_Event); ok {
+		if e, ok := event.(input.Text_Event); ok {
 			testing.expect_value(t, e.window, id)
 			testing.expect_value(t, e.text, text_count == 0 ? "漢" : "😀")
 			text_count += 1
@@ -163,7 +165,7 @@ text_and_key_pump :: proc(t: ^testing.T) {
 	testing.expect_value(t, poll_error, p.Error.None)
 	key_count := 0
 	for event in events {
-		if e, ok := event.(p.Key_Event); ok {
+		if e, ok := event.(input.Key_Event); ok {
 			testing.expect_value(t, e.key, p.key_from_scan_code(0x3c, false))
 			testing.expect_value(t, e.pressed, key_count == 0)
 			testing.expect(t, !e.repeat && e.text == "")
@@ -184,13 +186,13 @@ text_and_key_pump :: proc(t: ^testing.T) {
 	testing.expect_value(t, poll_error, p.Error.None)
 	paired := false
 	for event in events {
-		if e, ok := event.(p.Key_Event); ok && e.pressed {
+		if e, ok := event.(input.Key_Event); ok && e.pressed {
 			testing.expect(t, e.text != "" && e.unshifted != 0 && e.native.char != 0)
 			testing.expect(t, e.repeat)
 			testing.expect_value(t, e.native.repeat_count, u16(2))
 			paired = true
 		}
-		if _, ok := event.(p.Text_Event); ok {
+		if _, ok := event.(input.Text_Event); ok {
 			testing.expect(t, false, "translated character was not paired")
 		}
 	}
@@ -238,7 +240,7 @@ alt_f4_only_requests_close :: proc(t: ^testing.T) {
 		case p.Close_Request_Event:
 			testing.expect_value(t, e.window, id)
 			close_count += 1
-		case p.Key_Event:
+		case input.Key_Event:
 			key_count += 1
 		}
 	}
@@ -336,7 +338,7 @@ mouse_and_modal_messages :: proc(t: ^testing.T) {
 	last_time: i64
 	for event in events {
 		#partial switch e in event {
-		case p.Mouse_Button_Event:
+		case input.Mouse_Button_Event:
 			testing.expect_value(t, e.window, id)
 			testing.expect_value(t, e.x, i32(12))
 			testing.expect_value(t, e.y, i32(24))
@@ -344,7 +346,7 @@ mouse_and_modal_messages :: proc(t: ^testing.T) {
 			last_time = e.time_ns
 			testing.expect_value(t, e.pressed, buttons%2 == 0)
 			buttons += 1
-		case p.Mouse_Move_Event:
+		case input.Mouse_Move_Event:
 			testing.expect(t, e.time_ns >= last_time)
 			last_time = e.time_ns
 			moves += 1
@@ -484,7 +486,13 @@ synthetic_mouse_moves :: proc(t: ^testing.T) {
 	second, second_error := p.window_create(&platform, {hidden = true, width = 160, height = 100})
 	if !testing.expect_value(t, second_error, p.Error.None) { return }
 	position := w.LPARAM(10 | (20 << 16))
-	Case :: struct { window: p.Window_Id, position: w.LPARAM, buttons: w.WPARAM, expected: int, leave: bool }
+	Case :: struct {
+		window:   input.Window_Id,
+		position: w.LPARAM,
+		buttons:  w.WPARAM,
+		expected: int,
+		leave:    bool,
+	}
 	cases := [?]Case{
 		{first, position, 0, 1, false},
 		{first, position, 0, 0, false},
@@ -509,7 +517,7 @@ synthetic_mouse_moves :: proc(t: ^testing.T) {
 	testing.expect_value(t, poll_error, p.Error.None)
 	index := 0
 	for event in events {
-		if move, ok := event.(p.Mouse_Move_Event); ok {
+		if move, ok := event.(input.Mouse_Move_Event); ok {
 			for index < len(cases) && cases[index].expected == 0 { index += 1 }
 			if !testing.expect(t, index < len(cases)) { continue }
 			item := cases[index]
@@ -545,7 +553,7 @@ resize_does_not_turn_a_stationary_cursor_into_mouse_input :: proc(t: ^testing.T)
 	testing.expect_value(t, final_error, p.Error.None)
 	moves := 0
 	for event in events {
-		if move, ok := event.(p.Mouse_Move_Event); ok {
+		if move, ok := event.(input.Mouse_Move_Event); ok {
 			moves += 1
 			testing.expect_value(t, move.x, point.x+1)
 			testing.expect_value(t, move.y, point.y)

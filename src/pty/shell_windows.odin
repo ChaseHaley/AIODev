@@ -1,5 +1,6 @@
 package pty
 
+import "aio:localpath"
 import "base:runtime"
 import "core:os"
 import "core:strings"
@@ -28,13 +29,7 @@ executable_token :: proc(command_line: string) -> string {
 // module name. Explicit paths stay explicit; only bare names are resolved by the terminal.
 @(require_results)
 is_explicit_path :: proc(token: string) -> bool {
-	return(
-		(len(token) >= 2 &&
-				token[1] == ':' &&
-				((token[0] >= 'a' && token[0] <= 'z') ||
-						(token[0] >= 'A' && token[0] <= 'Z'))) ||
-		strings.contains_any(token, `/\`)
-	)
+	return localpath.has_drive_prefix(token) || strings.contains_any(token, `/\`)
 }
 
 @(private, require_results)
@@ -45,19 +40,21 @@ same_directory :: proc(a, b: string) -> bool {
 	return left != "" && strings.equal_fold(left, right)
 }
 
+// A PATH entry's directory: surrounding space and one pair of quotes removed.
+@(private, require_results)
+path_entry_text :: proc(entry: string) -> string {
+	text := strings.trim_space(entry)
+	if len(text) >= 2 && text[0] == '"' && text[len(text) - 1] == '"' {text = text[1:len(text) - 1]}
+	return text
+}
+
 // A PATH entry may name an absolute directory other than the process's current directory. Relative
 // entries and the current directory itself are not authorization to choose a different executable.
 @(require_results)
 path_entry_trusted :: proc(entry, current_directory: string) -> bool {
-	text := strings.trim_space(entry)
-	if len(text) >= 2 && text[0] == '"' && text[len(text) - 1] == '"' {text = text[1:len(text) - 1]}
+	text := path_entry_text(entry)
 	if text == "" || text == "." || text == ".." {return false}
-	absolute :=
-		len(text) >= 3 &&
-		text[1] == ':' &&
-		((text[0] >= 'a' && text[0] <= 'z') || (text[0] >= 'A' && text[0] <= 'Z')) &&
-		(text[2] == '\\' || text[2] == '/')
-	if !absolute && !strings.has_prefix(text, `\\`) {return false}
+	if !localpath.is_drive_absolute(text) && !strings.has_prefix(text, `\\`) {return false}
 	return !same_directory(text, current_directory)
 }
 
@@ -137,11 +134,9 @@ search_directories :: proc(
 		rest := path
 		for entry in strings.split_by_byte_iterator(&rest, ';') {
 			if !path_entry_trusted(entry, cwd) {continue}
-			text := strings.trim_space(entry)
-			if len(text) >= 2 && text[0] == '"' && text[len(text) - 1] == '"' {
-				text = text[1:len(text) - 1]
+			if err := add_directory(&directories, path_entry_text(entry), allocator); err != nil {
+				return nil, err
 			}
-			if err := add_directory(&directories, text, allocator); err != nil {return nil, err}
 		}
 	}
 	success = true
@@ -191,4 +186,44 @@ resolve_executable :: proc(
 	result, conversion_error := w.utf16_to_utf8(buffer[:n], allocator)
 	if conversion_error != nil {return "", {.Out_Of_Memory, 0}}
 	return result, {}
+}
+
+// What a command line launches. nil: the line names no executable at all.
+Executable :: union {
+	Explicit_Executable,
+	Searched_Executable,
+}
+
+// A path spelled by the command line, left for CreateProcess to find; borrows the command line.
+Explicit_Executable :: struct {
+	token: string,
+}
+
+// A bare name found in the trusted search directories; owns its path.
+Searched_Executable :: struct {
+	path: string,
+}
+
+// The one resolution order every caller uses: executable token, then explicit-path spelling, then
+// the trusted directories for a bare name. A failed bare-name search reports Start_Process with the
+// OS code; Out_Of_Memory means the lookup itself could not run.
+@(require_results)
+resolve_command :: proc(command_line: string, allocator := context.allocator) -> (Executable, Spawn_Error) {
+	token := executable_token(command_line)
+	if token == "" {return nil, {}}
+	if is_explicit_path(token) {return Explicit_Executable{token}, {}}
+	directories, directories_error := search_directories(allocator)
+	if directories_error != nil {return nil, {.Out_Of_Memory, 0}}
+	defer {
+		for directory in directories {delete(directory, allocator)}
+		delete(directories, allocator)
+	}
+	path, err := resolve_executable(command_line, directories, allocator)
+	if err.kind != .None {return nil, err}
+	return Searched_Executable{path}, {}
+}
+
+executable_destroy :: proc(executable: ^Executable, allocator := context.allocator) {
+	if searched, ok := executable.(Searched_Executable); ok {delete(searched.path, allocator)}
+	executable^ = nil
 }

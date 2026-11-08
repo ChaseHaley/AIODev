@@ -2,33 +2,13 @@ package commands
 
 import "aio:layout"
 import "base:runtime"
+import "core:fmt"
+import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 
-// Where an invocation came from. Every interface runs commands through one executor; the origin
-// only selects defaults that differ between interfaces (D-046).
-Origin :: enum u8 {
-	Key,
-	Palette,
-	// A menu, button or other control in the window.
-	Menu,
-	// The CLI's control pipe.
-	Control,
-}
-
-// The outcome of an invocation, shared by every interface. The values are the CLI exit codes (D-046).
-Status :: enum u8 {
-	Ok          = 0,
-	Failed      = 1,
-	Usage       = 2,
-	Target      = 3,
-	Unreachable = 4,
-	// The pipe answered, but its server process was not the expected AIODev.
-	Impostor    = 5,
-	Interrupted = 130,
-}
-
 // The arguments a command may take beyond its target pane. A command lists the ones it accepts.
+// Directory and File name paths; the requester's working directory resolves a relative one.
 Argument :: enum u8 {
 	Direction,
 	Ratio,
@@ -37,6 +17,7 @@ Argument :: enum u8 {
 	Name,
 	Profile,
 	Text,
+	File,
 	Enter,
 	Lines,
 	Program,
@@ -46,7 +27,6 @@ Arguments :: bit_set[Argument;u16]
 // One request to run a command. Text fields borrow from the arguments they were parsed from.
 Invocation :: struct {
 	id:                                      Command_Id,
-	origin:                                  Origin,
 	// Empty means the caller's own pane, else the focused pane; also `here`, `focused`, an id or a
 	// pane name.
 	pane:                                    string,
@@ -55,6 +35,7 @@ Invocation :: struct {
 	ratio:                                   f32,
 	focus:                                   bool,
 	directory, name, profile, text, program: string,
+	file:                                    string,
 	enter:                                   bool,
 	lines:                                   int,
 }
@@ -66,37 +47,107 @@ Parse_Error :: struct {
 // The longest pane read the grammar accepts, in rows.
 MAX_LINES :: 10000
 
-@(private, rodata)
-argument_options := [Argument]string {
-	.Direction = "--direction",
-	.Ratio     = "--ratio",
-	.Focus     = "--focus",
-	.Directory = "--cwd",
-	.Name      = "--name",
-	.Profile   = "--profile",
-	.Text      = "<text>",
-	.Enter     = "--enter",
-	.Lines     = "--lines",
-	.Program   = "-- <program> [arguments]",
+// The interactive split defaults; CLI requests explicitly start without focus.
+SPLIT_DEFAULT :: Invocation{direction = .Right, ratio = 0.5, focus = true}
+
+// The words that name a direction.
+DIRECTION_WORDS :: [layout.Direction]string {
+	.Left  = "left",
+	.Right = "right",
+	.Up    = "up",
+	.Down  = "down",
 }
 
+// How each argument is written: the option naming it, empty for the positional text and program, and
+// what usage shows after that option.
 @(private, rodata)
-argument_values := [Argument]string {
-	.Direction = " left|right|up|down",
-	.Ratio     = " 0.05-0.95",
-	.Focus     = "",
-	.Directory = " <directory>",
-	.Name      = " <name>",
-	.Profile   = " <id>",
-	.Text      = "",
-	.Enter     = "",
-	.Lines     = " <rows>",
-	.Program   = "",
+argument_grammar := [Argument]struct {
+	option, usage: string,
+} {
+	.Direction = {"--direction", " left|right|up|down"},
+	// This range and parse's message spell layout's split share; the assert below holds them together.
+	.Ratio     = {"--ratio", " 0.05-0.95"},
+	.Focus     = {"--focus", ""},
+	.Directory = {"--cwd", " <directory>"},
+	.Name      = {"--name", " <name>"},
+	.Profile   = {"--profile", " <id>"},
+	.Text      = {"", "<text>"},
+	.File      = {"", "<file>"},
+	.Enter     = {"--enter", ""},
+	.Lines     = {"--lines", " <rows>"},
+	.Program   = {"", "-- <program> [arguments]"},
+}
+#assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
+
+// The defaults every interface starts from: a new pane splits right, taking half the space. `focus`
+// says whether a pane a command creates takes focus: interactive commands always focus it, a CLI
+// request only when it passes --focus (D-046).
+invocation :: proc(id: Command_Id, focus: bool) -> Invocation {
+	return {id = id, direction = SPLIT_DEFAULT.direction, ratio = SPLIT_DEFAULT.ratio, focus = focus}
 }
 
-// The defaults every interface starts from; key and palette invocations change nothing else.
-invocation :: proc(id: Command_Id, origin: Origin) -> Invocation {
-	return {id = id, origin = origin, direction = .Right, ratio = 0.5, focus = origin != .Control}
+// A direction word, such as `left`.
+@(require_results)
+parse_direction :: proc(word: string) -> (layout.Direction, bool) {
+	@(static, rodata)
+	words := DIRECTION_WORDS
+	for spelling, direction in words {
+		if spelling == word {return direction, true}
+	}
+	return {}, false
+}
+
+// A split's share for the new pane, within layout's split share range.
+@(require_results)
+parse_ratio :: proc(text: string) -> (f32, bool) {
+	ratio, ok := strconv.parse_f32(text)
+	if !ok || !(ratio >= layout.SPLIT_SHARE_MIN && ratio <= layout.SPLIT_SHARE_MAX) {return 0, false}
+	return ratio, true
+}
+
+// The argument an option names, such as Directory for --cwd.
+@(private, require_results)
+option_argument :: proc(option: string) -> (Argument, bool) {
+	for grammar, argument in argument_grammar {
+		if grammar.option != "" && grammar.option == option {return argument, true}
+	}
+	return {}, false
+}
+
+// Where an invocation keeps a path argument; nil for an argument that names no path.
+@(private)
+argument_path :: proc(invocation: ^Invocation, argument: Argument) -> ^string {
+	#partial switch argument {
+	case .Directory:
+		return &invocation.directory
+	case .File:
+		return &invocation.file
+	}
+	return nil
+}
+
+// Makes the given path arguments absolute against `directory`, the working directory of whoever
+// sent the command line; an empty directory leaves them as given. Joined paths use allocator.
+@(require_results)
+invocation_paths_resolve :: proc(
+	invocation: ^Invocation,
+	directory: string,
+	allocator := context.allocator,
+) -> runtime.Allocator_Error {
+	if directory == "" {return nil}
+	for argument in invocation.given {
+		path := argument_path(invocation, argument)
+		if path == nil || filepath.is_abs(path^) {continue}
+		path^ = filepath.join({directory, path^}, allocator) or_return
+	}
+	return nil
+}
+
+// How a diagnostic names an argument: its option, or its positional form.
+@(private)
+argument_name :: proc(argument: Argument) -> string {
+	grammar := argument_grammar[argument]
+	return grammar.option != "" ? grammar.option : grammar.usage
 }
 
 // Parses `name [options] [text] [-- program arguments]` against the command's accepted arguments.
@@ -113,7 +164,7 @@ parse_invocation :: proc(
 	if len(args) == 0 || args[0] == "" {return {}, {"<command>", "name a command; use aio commands"}}
 	command := find(registry, args[0])
 	if command == nil {return {}, {args[0], "unknown command; use aio commands"}}
-	result := invocation(command.id, .Control)
+	result := invocation(command.id, focus = false)
 	seen_pane := false
 	for i := 1; i < len(args); i += 1 {
 		option := args[i]
@@ -126,36 +177,23 @@ parse_invocation :: proc(
 			result.given += {.Program}
 			break
 		}
-		argument: Argument
-		switch option {
-		case "--pane":
+		if option == "--pane" {
 			if seen_pane {return {}, {option, "use --pane once"}}
 			if i + 1 == len(args) || args[i + 1] == "" {return {}, {option, "name a pane after --pane"}}
 			i += 1
 			result.pane, seen_pane = args[i], true
 			continue
-		case "--direction":
-			argument = .Direction
-		case "--ratio":
-			argument = .Ratio
-		case "--focus":
-			argument = .Focus
-		case "--cwd":
-			argument = .Directory
-		case "--name":
-			argument = .Name
-		case "--profile":
-			argument = .Profile
-		case "--enter":
-			argument = .Enter
-		case "--lines":
-			argument = .Lines
-		case:
-			if strings.has_prefix(option, "--") || .Text not_in command.arguments || .Text in result.given {
+		}
+		argument, named := option_argument(option)
+		if !named {
+			// The positional argument: text, or a file for a command that takes one.
+			positional := .File in command.arguments ? Argument.File : Argument.Text
+			if strings.has_prefix(option, "--") || positional not_in command.arguments ||
+			   positional in result.given {
 				return {}, {option, "unknown option; use aio help <command> for its options"}
 			}
-			result.text = option
-			result.given += {.Text}
+			if positional == .File {result.file = option} else {result.text = option}
+			result.given += {positional}
 			continue
 		}
 		if argument not_in command.arguments {
@@ -172,25 +210,18 @@ parse_invocation :: proc(
 		value := args[i]
 		#partial switch argument {
 		case .Direction:
-			switch value {
-			case "left":
-				result.direction = .Left
-			case "right":
-				result.direction = .Right
-			case "up":
-				result.direction = .Up
-			case "down":
-				result.direction = .Down
-			case:
-				return {}, {value, "choose left, right, up or down"}
-			}
+			direction, valid := parse_direction(value)
+			if !valid {return {}, {value, "choose left, right, up or down"}}
+			result.direction = direction
 		case .Ratio:
-			ratio, ok := strconv.parse_f32(value)
-			if !ok || !(ratio >= 0.05 && ratio <= 0.95) {return {}, {value, "use a ratio from 0.05 to 0.95"}}
+			ratio, valid := parse_ratio(value)
+			if !valid {return {}, {value, "use a ratio from 0.05 to 0.95"}}
 			result.ratio = ratio
 		case .Lines:
 			lines, ok := strconv.parse_int(value, 10)
-			if !ok || lines < 1 || lines > MAX_LINES {return {}, {value, "use a row count from 1 to 10000"}}
+			if !ok || lines < 1 || lines > MAX_LINES {
+				return {}, {value, fmt.tprintf("use a row count from 1 to %d", MAX_LINES)}
+			}
 			result.lines = lines
 		case .Directory, .Name, .Profile:
 			if value == "" {return {}, {option, "supply a nonempty value"}}
@@ -206,7 +237,7 @@ parse_invocation :: proc(
 	}
 	missing := command.required - result.given
 	for argument in Argument {
-		if argument in missing {return {}, {argument_options[argument], "supply this required argument"}}
+		if argument in missing {return {}, {argument_name(argument), "supply this required argument"}}
 	}
 	return result, {}
 }
@@ -221,8 +252,8 @@ usage :: proc(command: ^Command, allocator := context.allocator) -> string {
 		if argument not_in command.arguments {continue}
 		required := argument in command.required
 		strings.write_string(&b, required ? " " : " [")
-		strings.write_string(&b, argument_options[argument])
-		strings.write_string(&b, argument_values[argument])
+		strings.write_string(&b, argument_grammar[argument].option)
+		strings.write_string(&b, argument_grammar[argument].usage)
 		if !required {strings.write_byte(&b, ']')}
 	}
 	return strings.to_string(b)

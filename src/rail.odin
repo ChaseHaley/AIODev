@@ -1,19 +1,10 @@
 package main
 
-import "aio:glyphs"
 import "aio:input"
+import "aio:layout"
 import "aio:render"
 import "aio:ui"
-import "core:fmt"
 import "core:time"
-
-RAIL_NEW_TAB_ROW :: -2
-RAIL_PROFILE_ROW :: -3
-
-Rail_Row :: struct {
-	workspace: ^Workspace,
-	tab:       int,
-}
 
 // The rail's presentation in vertical tab view; nil is Hidden. A docked rail takes pane space; an
 // overlay slides over the panes and is removed when its closing slide ends. Only this file writes it.
@@ -39,21 +30,19 @@ Rail_Overlay_Phase :: enum {
 	Closing,
 }
 
+// A window's vertical tab rail, which Window embeds: its presentation, whether the window is wide enough
+// to dock it, its list's scroll, the width a rail-edge drag chose (0 for none) and tabs.rail_width, the
+// width a double-click on the rail edge returns to.
+Rail_State :: struct {
+	rail:               Rail_Presentation,
+	rail_wide:          bool,
+	rail_scroll:        f32,
+	rail_width:         f32,
+	rail_default_width: f32,
+}
+
 @(private = "file")
 RAIL_SLIDE :: 140 * time.Millisecond
-
-@(require_results)
-rail_rows_build :: proc(w: ^Window, rows: ^[dynamic]Rail_Row) -> bool {
-	clear(rows)
-	if w == nil || w.workspace == nil {return true}
-	for _, tab in w.workspace.tabs {
-		if _, err := append(rows, Rail_Row{w.workspace, tab}); err != nil {
-			clear(rows)
-			return false
-		}
-	}
-	return true
-}
 
 rail_auto_at :: proc(width: i32, scale: f32) -> bool {
 	return f32(width) >= ui.RAIL_DOCK_MIN_WIDTH * scale
@@ -82,13 +71,51 @@ rail_overlay_phase :: proc(w: ^Window) -> (Rail_Overlay_Phase, bool) {
 }
 
 when AIO_CONTROL {
-	// How far the rail is out: 1 docked, 0 hidden, and the slide's position for an overlay.
-	rail_slide_value :: proc(w: ^Window) -> f32 {
-		switch r in w.rail {
-		case Rail_Docked: return 1
-		case Rail_Overlay: return r.slide.value
+	// The rail's verification keys, read without storing the scroll clamp the layout applies.
+	rail_state_report :: proc(r: ^State_Report, w: ^Window) {
+		// How far the rail is out: 1 docked, 0 hidden, and the slide's position for an overlay.
+		slide: f32
+		switch rail in w.rail {
+		case Rail_Docked: slide = 1
+		case Rail_Overlay: slide = rail.slide.value
 		}
-		return 0
+		toggle := tab_orientation_button_rect(w)
+		state_value(r, "rail.visible", rail_visible(w))
+		state_value(r, "rail.docked", rail_docked(w))
+		state_rect(r, "rail.rect", rail_area(w))
+		state_rect(r, "rail.resize", rail_resize_rect(w))
+		state_value(r, "rail.resizing", rail_resizing(w))
+		state_value(r, "rail.overlay", rail_overlay(w))
+		state_valuef(r, "rail.scroll", "%g", w.rail_scroll)
+		state_valuef(r, "rail.slide", "%g", slide)
+		state_value(r, "rail.rows", rail_tab_count(w))
+		state_valuef(r, "rail.row.height", "%g", ui.RAIL_ROW_HEIGHT * w.scale)
+		// rail.toggle is the published name of the orientation button the tab strip also reports.
+		state_rect(r, "rail.toggle", toggle)
+		state_rect(r, "tabs.orientation_button", toggle)
+		layout, ok := rail_layout_query(w)
+		state_rect(r, "rail.new_tab", ok ? ui.rail_new_tab_tile(layout) : render.Rect{})
+		state_rect(r, "rail.profile", ok ? ui.rail_profile_rect(layout) : render.Rect{})
+		if !ok {return}
+		for tab, i in w.workspace.tabs {
+			n := i + 1
+			state_text(r, state_key("rail.row.%d.kind", n), "tab")
+			state_text(r, state_key("rail.row.%d.title", n), tab.title)
+			state_rect(r, state_key("rail.row.%d.rect", n), ui.rail_row_rect(layout, i))
+			state_value(r, state_key("rail.row.%d.selected", n), i == w.workspace.selected)
+			state_value(r, state_key("rail.row.%d.marked", n), tab.marked)
+			state_value(r, state_key("rail.row.%d.workspace", n), w.workspace.id)
+			state_value(r, state_key("rail.row.%d.tab", n), n)
+		}
+	}
+
+	// tab.N's rail row index (-1 on a tab strip), row and close button, as rail_tab_rect,
+	// rail_tab_close_rect and the drawer place them, mid-reorder included.
+	rail_tab_report_rects :: proc(w: ^Window, tab: int) -> (index: int, row, close: render.Rect) {
+		layout, ok := rail_layout_query(w)
+		index = w.tabs_horizontal ? -1 : tab
+		if ok && tab >= 0 && tab < rail_tab_count(w) {row = rail_tab_rect(w, layout, tab)}
+		return index, row, rail_tab_close_rect(w, layout, index)
 	}
 }
 
@@ -121,14 +148,23 @@ rail_overlay_slide :: proc(app: ^App, w: ^Window, target: f32) {
 }
 
 rail_visible :: proc(w: ^Window) -> bool {
-	if w.tabs_horizontal || pane_fill_active(w) {return false}
+	return rail_visible_in(w, w.pane_fill)
+}
+
+// Whether the rail shows when the window's pane fill is `fill`; a filling pane covers it.
+rail_visible_in :: proc(w: ^Window, fill: layout.Pane_Fill) -> bool {
+	if w.tabs_horizontal || fill != .None {return false}
 	phase, overlay := rail_overlay_phase(w)
 	return overlay ? phase != .Closing : w.rail != nil
 }
 
 rail_docked :: proc(w: ^Window) -> bool {
+	return rail_docked_in(w, w.pane_fill)
+}
+
+rail_docked_in :: proc(w: ^Window, fill: layout.Pane_Fill) -> bool {
 	_, docked := w.rail.(Rail_Docked)
-	return docked && rail_visible(w)
+	return docked && rail_visible_in(w, fill)
 }
 
 rail_overlay :: proc(w: ^Window) -> bool {
@@ -150,10 +186,15 @@ rail_width_pixels :: proc(w: ^Window) -> f32 {
 	return ui.rail_pixel_width(w.scale, width > 0 ? width : ui.RAIL_WIDTH, f32(w.width))
 }
 
-rail_resize_rect :: proc(w: ^Window) -> render.Rect {
-	if w.phase == .Preparing || !rail_visible(w) {return {}}
-	area := rail_area(w)
-	return {area.x + area.width - 3 * w.scale, area.y, 6 * w.scale, area.height}
+when AIO_CONTROL {
+	// DIVIDER_GRAB either side of the rail's right side, where a press starts resizing it, as verify reports
+	// it; divider_hits finds the same band from the rail's dock edge.
+	rail_resize_rect :: proc(w: ^Window) -> render.Rect {
+		if w.phase == .Preparing || !rail_visible(w) {return {}}
+		area := rail_area(w)
+		grab := DIVIDER_GRAB * w.scale
+		return {area.x + area.width - grab, area.y, 2 * grab, area.height}
+	}
 }
 
 rail_resize_cancel :: proc(w: ^Window) {
@@ -162,30 +203,34 @@ rail_resize_cancel :: proc(w: ^Window) {
 	divider_cancel(w)
 }
 
-@(require_results)
-rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
-	if w.tabs_horizontal {return {}, false}
-	if !rail_rows_build(w, &w.rail_rows) {return {}, false}
-	area := rail_area(w)
-	area.height = max(0, area.height - w.status_rail_reserve)
-	layout = ui.rail_layout(area, w.scale, len(w.rail_rows) + w.tab_incoming.count, w.rail_scroll)
-	w.rail_scroll = layout.scroll
-	return layout, true
+// The rail shows one row per tab of the window's workspace, in tab order.
+rail_tab_count :: proc(w: ^Window) -> int {
+	return w.tabs_horizontal || w.workspace == nil ? 0 : len(w.workspace.tabs)
 }
 
-rail_row_index_for_tab :: proc(rows: []Rail_Row, workspace: ^Workspace, tab: int) -> int {
-	for row, i in rows {
-		if row.workspace == workspace && row.tab == tab {return i}
-	}
-	return -1
+// The rail's layout with its scroll clamped to the rows, stored so later readers start from it.
+@(require_results)
+rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+	layout, ok = rail_layout_query(w)
+	if ok {w.rail_scroll = layout.scroll}
+	return
+}
+
+// The rail's layout with its scroll clamped to the rows, leaving the window unchanged.
+@(require_results)
+rail_layout_query :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+	if w.tabs_horizontal {return {}, false}
+	area := rail_area(w)
+	area.height = max(0, area.height - w.status_rail_reserve)
+	return ui.rail_layout(area, w.scale, rail_tab_count(w) + w.tab_incoming.count, w.rail_scroll), true
 }
 
 rail_reveal_active :: proc(w: ^Window) {
 	if w.tabs_horizontal {return}
 	layout, ok := rail_current_layout(w)
 	if !ok {return}
-	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, w.workspace.selected)
-	if index < 0 {return}
+	index := w.workspace.selected
+	if index < 0 || index >= rail_tab_count(w) {return}
 	scroll := ui.rail_reveal_row(layout, index)
 	if scroll != w.rail_scroll {
 		w.rail_scroll, w.dirty = scroll, true
@@ -194,12 +239,12 @@ rail_reveal_active :: proc(w: ^Window) {
 
 tab_orientation_button_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
-	return {4 * s, 4 * s, ui.RAIL_TOGGLE_WIDTH * s, 32 * s}
+	return {4 * s, 4 * s, ui.TITLE_BUTTON_WIDTH * s, ui.HEIGHT_STANDARD * s}
 }
 
 tab_orientation_button_hit :: proc(w: ^Window, x, y: f32) -> bool {
 	r := tab_orientation_button_rect(w)
-	return r.width >= 24 * w.scale && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return r.width >= 24 * w.scale && render.rect_contains(r, x, y)
 }
 
 rail_toggle :: proc(app: ^App, w: ^Window) {
@@ -227,83 +272,64 @@ rail_overlay_dismiss :: proc(app: ^App, w: ^Window) {
 
 rail_row_rect_for_tab :: proc(w: ^Window, tab: int) -> render.Rect {
 	layout, ok := rail_current_layout(w)
-	if !ok {return {}}
-	index := rail_row_index_for_tab(w.rail_rows[:], w.workspace, tab)
-	return rail_tab_rect(w, layout, index)
+	if !ok || tab < 0 || tab >= rail_tab_count(w) {return {}}
+	return rail_tab_rect(w, layout, tab)
 }
 
 @(private)
 rail_tab_rect :: proc(w: ^Window, layout: ui.Rail_Layout, index: int) -> render.Rect {
 	r := ui.rail_row_rect(layout, index)
-	if index < 0 || index >= len(w.rail_rows) {return r}
-	r.y += (tab_position(w, w.rail_rows[index].tab) - f32(index)) * layout.row_height
+	if index < 0 || index >= rail_tab_count(w) {return r}
+	r.y += (tab_position(w, index) - f32(index)) * layout.row_height
 	return r
 }
 
 @(private)
 rail_tab_close_rect :: proc(w: ^Window, layout: ui.Rail_Layout, index: int) -> render.Rect {
 	r := ui.rail_close_rect(layout, index, w.scale)
-	if index < 0 || index >= len(w.rail_rows) {return r}
-	r.y += (tab_position(w, w.rail_rows[index].tab) - f32(index)) * layout.row_height
+	if index < 0 || index >= rail_tab_count(w) {return r}
+	r.y += (tab_position(w, index) - f32(index)) * layout.row_height
 	return r
 }
 
+// The tab whose row is under the point, or -1. Dragged tabs draw above the rest, so they hit first.
 rail_tab_hit :: proc(w: ^Window, layout: ui.Rail_Layout, x, y: f32) -> int {
-	if x < layout.list.x || x >= layout.list.x + layout.list.width ||
-	   y < layout.list.y || y >= layout.list.y + layout.list.height {return -1}
+	if !render.rect_contains(layout.list, x, y) {return -1}
 	for pass in 0 ..< 2 {
-		for index := len(w.rail_rows) - 1; index >= 0; index -= 1 {
-			row := w.rail_rows[index]
-			foreground := tab_drag_active(w) && row.workspace.tabs[row.tab].marked
+		for index := rail_tab_count(w) - 1; index >= 0; index -= 1 {
+			foreground := tab_drag_active(w) && w.workspace.tabs[index].marked
 			if foreground != (pass == 0) {continue}
-			r := rail_tab_rect(w, layout, index)
-			if x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height {return index}
+			if render.rect_contains(rail_tab_rect(w, layout, index), x, y) {return index}
 		}
 	}
 	return -1
 }
 
 rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Button) -> Tab_Interaction_Hit {
-	area := rail_area(w)
-	if !rail_visible(w) || x < area.x || x >= area.x + area.width ||
-	   y < area.y || y >= area.y + area.height {return {}}
+	if !rail_visible(w) || !render.rect_contains(rail_area(w), x, y) {return {}}
 	layout, ok := rail_current_layout(w)
-	if !ok {return {kind = .Empty}}
+	if !ok {return {inside = true}}
 	if ui.rail_footer_hit(layout, x, y) {
 		if button == .Left && ui.rail_profile_hit(layout, x, y) {
 			tile := rail_profile_rect(w)
-			return {kind = .Profiles, menu_anchor = {tile.x, tile.y + tile.height}}
+			anchor := [2]f32{tile.x, tile.y + tile.height}
+			return {target = Tab_Chrome_Profiles{}, inside = true, menu_anchor = anchor}
 		}
 		tile := ui.rail_footer_tile(layout)
-		return {kind = .New_Tab, menu_anchor = {tile.x, tile.y + tile.height}}
+		return {target = Tab_Chrome_New{}, inside = true, menu_anchor = {tile.x, tile.y + tile.height}}
 	}
-	row := rail_tab_hit(w, layout, x, y)
-	if row < 0 {return {kind = .Empty}}
-	entry := w.rail_rows[row]
-	if entry.workspace != w.workspace || entry.tab < 0 || entry.tab >= len(w.workspace.tabs) {
-		return {kind = .Empty}
-	}
-	close := rail_tab_close_rect(w, layout, row)
-	on_close := x >= close.x && x < close.x + close.width && y >= close.y && y < close.y + close.height
-	kind: Tab_Interaction_Kind = on_close ? .Close : .Tab
-	return {kind = kind, index = entry.tab}
+	index := rail_tab_hit(w, layout, x, y)
+	if index < 0 {return {inside = true}}
+	close := render.rect_contains(rail_tab_close_rect(w, layout, index), x, y)
+	return {target = Tab_Chrome_Tab{index}, inside = true, close = close}
 }
 
 @(require_results)
 rail_pane_target :: proc(w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool) {
-	if !rail_visible(w) {return -1, false, false}
-	area := rail_area(w)
-	if x < area.x || x >= area.x + area.width || y < area.y || y >= area.y + area.height {
-		return -1, false, false
-	}
-	layout, built := rail_current_layout(w)
-	if !built {return -1, false, false}
-	if ui.rail_footer_hit(layout, x, y) {return -1, true, true}
-	row := rail_tab_hit(w, layout, x, y)
-	if row < 0 {return -1, true, true}
-	entry := w.rail_rows[row]
-	if entry.workspace == w.workspace {return entry.tab, false, true}
-	return -1, false, false
+	hit := rail_tab_interaction_hit(w, x, y, .Left)
+	if !hit.inside {return -1, false, false}
+	if target, on_tab := hit.target.(Tab_Chrome_Tab); on_tab {return target.index, false, true}
+	return -1, true, true
 }
 
 @(require_results)
@@ -331,77 +357,45 @@ rail_row_draw :: proc(
 	layout: ui.Rail_Layout,
 	index: int,
 	moving: bool,
-) -> glyphs.Result {
-	row := w.rail_rows[index]
+) -> render.Build_Status {
 	s := w.scale
-	hover := w.rail_hover == index
-	pressed := gesture_rail_pressed(w) == index
-	rect := rail_tab_rect(w, layout, index)
-	if rect.width <= 0 || rect.y + rect.height <= layout.list.y || rect.y >= layout.list.y + layout.list.height {
+	hover := w.tab_hover == Tab_Chrome_Tab{index}
+	pressed := gesture_tab_pressed(w) == Tab_Chrome_Tab{index}
+	tile := rail_tab_rect(w, layout, index)
+	list_bottom := layout.list.y + layout.list.height
+	if tile.width <= 0 || tile.y + tile.height <= layout.list.y || tile.y >= list_bottom {
 		return .Ok
 	}
 	if moving {
 		if render.push_layer(&w.list, layout.list) != .None {return .Ok}
-		if rail_docked(w) {ui.draw_rect(&w.list, {rect = rect, color = app.theme.tab_bar})}
+		if rail_docked(w) {ui.draw_rect(&w.list, {rect = tile, color = app.theme.tab_bar})}
 	}
-	tile := ui.rail_tab_tile(layout, rect)
-	selected := row.workspace == w.workspace && row.tab == w.workspace.selected
-	marked := row.workspace == w.workspace && tab_marked_shown(w, row.tab)
-	title := fmt.tprintf("Tab %d", row.tab + 1)
-	if row.tab < len(row.workspace.tabs) && row.workspace.tabs[row.tab].title != "" {
-		title = row.workspace.tabs[row.tab].title
-	}
-	icon: string
-	atlas := render.Rect{}
-	if pane, terminal := workspace_focused_session_pane(app, row.workspace, row.tab); terminal {
-		result: glyphs.Result
-		icon, atlas, result = pane_icon(app, pane.session, 16 * s)
-		if result != .Ok {return result}
-	}
-	status := status_tab_mark(app, w, row.workspace, row.tab)
-	content_icon := tab_content_icon(row.workspace.tabs[row.tab])
-	has_badge := content_icon != .None || icon != "" || atlas.width > 0
-	current := row.workspace == w.workspace
+	t, built := tab_tile(app, w, index)
+	if built != .Ok {return built}
+	has_badge := ui.tab_badge_shown(t.badge)
 	close := rail_tab_close_rect(w, layout, index)
-	show_close := current && (hover || pressed || ui.armed_is(w.tab_close_armed, row.tab))
+	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, index)
 	leading := has_badge ? (ui.ICON_BUTTON + ui.SPACE_2) * s : 0
 	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0
 	// Status sits at the right, before Close when it shows, with its place kept while tab status is on.
 	status_right := show_close ? close.x : tile.x + tile.width - 4 * s
-	if app.settings.status.enabled && app.settings.status.tab_indicators || status.glyph != .None {
+	if t.status_slot || t.status.glyph != .None {
 		trailing = tile.x + tile.width - status_right + (ui.ICON_INDICATOR + ui.SPACE_1) * s
 	}
 	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, tile,
-		{title = title, selected = selected, marked = marked, hovered = hover, pressed = pressed,
+		{title = t.title, selected = t.selected, marked = t.marked, hovered = hover, pressed = pressed,
 		 leading = leading, trailing = trailing}, s, w.pointer); result != .Ok {return result}
-	if status.glyph != .None {
-		ui.status_progress_draw(
-			&w.list,
-			app.theme,
-			{tile.x + 8 * s, tile.y + s, max(0, tile.width - 16 * s), tile.height - 3 * s},
-			status,
-			s,
-		)
+	if t.status.glyph != .None {
+		band := render.Rect{tile.x, tile.y + s, tile.width, tile.height - 3 * s}
+		ui.tab_progress_draw(&w.list, app.theme, band, t.status, s)
 		size := ui.ICON_INDICATOR * s
 		mark := render.Rect{status_right - ui.SPACE_1 * s - size, tile.y + (tile.height - size) / 2, size, size}
-		if result := status_mark_draw(app, w, mark, status); result != .Ok {return result}
+		if result := ui.status_glyph_draw(&w.list, &w.ui_text, app.theme, mark, t.status, t.status_phase, s);
+		   result != .Ok {return result}
 	}
 	if has_badge {
-		area := render.Rect{
-			tile.x + ui.CONTROL_INSET * s, tile.y + (tile.height - 16 * s) / 2, 16 * s, 16 * s,
-		}
-		if content_icon != .None {
-			ui.icon_draw(&w.list, content_icon, area,
-				selected ? app.theme.tab_active_text : app.theme.tab_text, ui.ICON_BUTTON, s)
-		} else if result := ui.shell_badge_draw(
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			area,
-			icon,
-			s,
-			atlas,
-		); result != .Ok {return result}
+		badge := ui.tab_badge_draw(&w.list, &w.ui_text, app.theme, tile, t, s)
+		if badge != .Ok {return badge}
 	}
 	if show_close {
 		ui.icon_draw(&w.list, .Close, close, app.theme.tab_text, ui.ICON_INDICATOR, s)
@@ -409,7 +403,7 @@ rail_row_draw :: proc(
 	return .Ok
 }
 
-rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if w.tabs_horizontal {return .Ok}
 	// An overlay draws while open or sliding; a docked rail only in its own presentation.
 	overlay, draw_overlay := w.rail.(Rail_Overlay)
@@ -420,7 +414,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	area := layout.area
 	if draw_overlay {
 		area.x -= (1 - overlay.slide.value) * area.width
-		layout = ui.rail_layout(area, w.scale, len(w.rail_rows) + w.tab_incoming.count, w.rail_scroll)
+		layout = ui.rail_layout(area, w.scale, rail_tab_count(w) + w.tab_incoming.count, w.rail_scroll)
 	}
 	if area.x + area.width <= 0 {return .Ok}
 	if render.push_layer(&w.list, area) != .None {return .Ok}
@@ -442,15 +436,15 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	for position in w.tab_positions {moving ||= ui.motion_active(position)}
 	for pass in 0 ..< (dragging ? 2 : 1) {
 		foreground := pass == 1
-		for row, index in w.rail_rows {
-			if (dragging && row.workspace.tabs[row.tab].marked) != foreground {continue}
+		for tab, index in w.workspace.tabs {
+			if (dragging && tab.marked) != foreground {continue}
 			if result := rail_row_draw(app, w, layout, index, moving); result != .Ok {return result}
 		}
 	}
 	if render.push_layer(&w.list, layout.footer) != .None {return .Ok}
 	tile := ui.rail_new_tab_tile(layout)
-	hover := w.rail_hover == RAIL_NEW_TAB_ROW
-	pressed := gesture_rail_pressed(w) == RAIL_NEW_TAB_ROW
+	hover := w.tab_hover == Tab_Chrome_New{}
+	pressed := gesture_tab_pressed(w) == Tab_Chrome_New{}
 	if hover || pressed {
 		fill := pressed ? app.theme.pressed : app.theme.hover
 		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = ui.RADIUS_CONTROL * w.scale})
@@ -474,8 +468,8 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		}
 	}
 	chevron := ui.rail_profile_rect(layout)
-	profile_hover := f32(int(w.rail_hover == RAIL_PROFILE_ROW))
-	profile_press := f32(int(gesture_rail_pressed(w) == RAIL_PROFILE_ROW))
+	profile_hover := f32(int(w.tab_hover == Tab_Chrome_Profiles{}))
+	profile_press := f32(int(gesture_tab_pressed(w) == Tab_Chrome_Profiles{}))
 	_ = ui.icon_button_draw(
 		&w.list,
 		app.theme,
@@ -490,7 +484,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	return .Ok
 }
 
-tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+tab_orientation_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r := tab_orientation_button_rect(w)
 	if r.width < 24 * w.scale {return .Ok}
 	if render.push_layer(

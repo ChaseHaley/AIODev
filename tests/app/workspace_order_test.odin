@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:ui"
@@ -17,9 +18,9 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	state.animations = true
 	row := app.workspace_picker_row_rect(&w, 0)
 	x, y := i32(row.x + 40), i32(row.y + row.height / 2)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 		pressed = true, x = x, y = y})
-	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x,
+	app.handle_event(&state, input.Mouse_Move_Event{window = w.id, x = x,
 		y = y + 40, buttons = {.Left}})
 	testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, row.y + 40)
 	neighbour := app.workspace_order_position(&w.workspace_picker, 2)
@@ -33,7 +34,7 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, row.y + 40)
 	testing.expect(t, app.workspace_order_lifted(&w.workspace_picker, 0))
 	testing.expect_value(t, app.workspace_picker_hit(&w, f32(x), f32(y + 40)), 0)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 		x = x, y = y + 40})
 	testing.expect_value(t, state.workspaces[1].id, u32(1))
 	grabbed := app.workspace_order_position(&w.workspace_picker, 1)
@@ -92,12 +93,12 @@ order_scrolled_drop :: proc(t: ^testing.T, enabled: bool) {
 	app.workspace_picker_layout_changed(&w)
 	row := app.workspace_picker_row_rect(&w, 6)
 	x, y := i32(row.x + 40), i32(row.y + row.height / 2)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 		pressed = true, x = x, y = y})
-	app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x,
+	app.handle_event(&state, input.Mouse_Move_Event{window = w.id, x = x,
 		y = y + 37, buttons = {.Left}})
 	before := app.workspace_picker_row_rect(&w, 6)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 		x = x, y = y + 37})
 	testing.expect_value(t, w.workspace_picker.scroll, 5)
 	testing.expect_value(t, state.workspaces[7].id, u32(7))
@@ -169,9 +170,9 @@ workspace_order_drag_commits_on_release_and_cancel_preserves_order :: proc(t: ^t
 		last := app.workspace_picker_row_rect(&w, 3)
 		x, y, end_y := i32(first.x + 40 * scale), i32(first.y + first.height / 2), i32(last.y + last.height / 2)
 		for cancel in ([?]bool{true, false}) {
-			app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+			app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 				pressed = true, x = x, y = y})
-			app.handle_event(&state, platform.Mouse_Move_Event{window = w.id, x = x, y = end_y, buttons = {.Left}})
+			app.handle_event(&state, input.Mouse_Move_Event{window = w.id, x = x, y = end_y, buttons = {.Left}})
 			testing.expect(t, app.workspace_order_lift(&w.workspace_picker) != nil)
 			testing.expect_value(t, app.workspace_picker_row_rect(&w, 1).y, first.y)
 			testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, last.y)
@@ -179,7 +180,7 @@ workspace_order_drag_commits_on_release_and_cancel_preserves_order :: proc(t: ^t
 			if cancel {
 				app.handle_event(&state, platform.Capture_Lost_Event{window = w.id})
 			}
-			app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = end_y})
+			app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = end_y})
 			testing.expect_value(t, state.workspaces[0].id, cancel ? u32(1) : u32(2))
 			testing.expect_value(t, w.workspace.id, u32(1))
 			testing.expect_value(t, app.workspace_order_grabbed(&w.workspace_picker), u32(0))

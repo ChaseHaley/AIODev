@@ -1,6 +1,5 @@
 package main
 
-import "aio:layout"
 
 // Holds w's workspace dropdown open while the pane drag is on it; Shift, which swaps panes, never holds it.
 pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap: bool) -> bool {
@@ -8,18 +7,21 @@ pane_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32, swap:
 	if a == nil {return false}
 	held, on := Drop_Workspace_Dropdown{}, false
 	if !swap {
-		home, _, found := pane_link_origin(app, carry.source, carry.node)
-		if !found {return false}
+		home, _, _ := pane_source_leaves(app, carry.source, carry.node)
+		if home.workspace == nil {return false}
 		request := Workspace_Move_Request{home.workspace.id, home.tab.id, home.node, false}
-		allowed := pane_window_source_can_lose(app, carry.source, carry.node)
-		held, on = workspace_picker_drag_hover(app, a.destination, w, x, y, request, allowed)
+		move_allowed := workspace_pane_move_allowed(app, carry.source, carry.node)
+		new_window_allowed := pane_window_source_can_lose(app, carry.source, carry.node)
+		held, on = workspace_picker_drag_hover(app, a, w, x, y, request, move_allowed, new_window_allowed)
 	}
 	if !on {
-		if _, holding := a.destination.(Drop_Workspace_Dropdown); holding {drag_retarget(app, source, a, nil)}
+		if _, holding := carry.destination.(Drop_Workspace_Dropdown); holding {
+			pane_drag_retarget(app, source, a, nil)
+		}
 		return false
 	}
 	carry.visit.hover = nil
-	drag_retarget(app, source, a, held)
+	pane_drag_retarget(app, source, a, held)
 	source.dirty, w.dirty = true, true
 	return true
 }
@@ -39,12 +41,10 @@ pane_workspace_drag_release :: proc(
 		pane_drag_restore(app, source, carry)
 		return
 	case Workspace_Drop_Row:
-		drag_let_go(app, source, a)
-		workspace_move_choose(app, pane_link_acting_window(app, source), row.request, row.id)
-		if window_linked(source) {
-			pane, is_pane := carry.source.tree.nodes[carry.node].(layout.Pane)
-			if is_pane {pane_link_refresh_source(app, source, pane.content)}
-		}
+		pane_workspace_drop_move(app, source, a, row.request, Workspace_Move_Existing{row.id})
+		return
+	case Workspace_Drop_New_Workspace:
+		pane_workspace_drop_move(app, source, a, row.request, Workspace_Move_New{})
 		return
 	case Workspace_Drop_New_Window:
 	}
@@ -55,4 +55,16 @@ pane_workspace_drag_release :: proc(
 	drag_let_go(app, source, a)
 	pane_drag_restore(app, source, carry)
 	notify(app, .Error, "Could not move the pane to a new window. The source was preserved.")
+}
+
+@(private = "file")
+pane_workspace_drop_move :: proc(
+	app: ^App,
+	source: ^Window,
+	a: ^Drag_Active,
+	request: Workspace_Move_Request,
+	destination: Workspace_Move_Destination,
+) {
+	drag_let_go(app, source, a)
+	workspace_move_choose(app, pane_link_acting_window(app, source), request, destination)
 }

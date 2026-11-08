@@ -1,10 +1,11 @@
 package main
 
+import "aio:input"
 import "aio:platform"
+import "aio:render"
 import "core:math"
 import "aio:ui"
-
-Workspace_Picker_Mode :: enum { Closed, List, Menu, Rename, Icons, Tint }
+import "core:time"
 
 // Which part of the picker is open; nil is closed. workspace_picker_transition and workspace_picker_list_set
 // are its only writers, so a move target, a drag hold or a row press ends with the list it belongs to.
@@ -62,7 +63,10 @@ Workspace_Picker_Tint :: struct {
 Workspace_Picker :: struct {
 	state: Workspace_Picker_State,
 	query: ui.Text_Field,
+	// The row editor's text while Workspace_Picker_Rename shows. The buffer is kept for reuse.
+	rename: ui.Text_Field,
 	rows: [dynamic]Workspace_Row,
+	// A navigation cursor over the current targets; workspace_picker_target_at says what it is on.
 	selected, scroll: int,
 	menu_selected: int,
 	menu_hover: u32,
@@ -74,35 +78,115 @@ Workspace_Picker :: struct {
 	order_settle: Maybe(Workspace_Order_Settle),
 }
 
+// What a picker position chooses. Each part of the picker lays its targets out in one order:
+//
+// - browsing, a row menu or a rename: each workspace row, then each of WORKSPACE_ACTIONS;
+// - a keyboard move: each workspace row, then a new workspace;
+// - a drag move: each workspace row, then a new workspace and a new window;
+// - icons: each preset icon, then the emoji field, its Apply button and the icon colour button;
+// - tint: each preset colour, then Back to icons.
+Workspace_Picker_Target :: union {
+	Picker_Workspace,
+	Picker_Action,
+	Picker_New_Workspace,
+	Picker_New_Window,
+	Picker_Icon,
+	Picker_Emoji_Field,
+	Picker_Emoji_Apply,
+	Picker_Tint_Open,
+	Picker_Tint,
+	Picker_Tint_Back,
+}
+
+// A workspace row: switch to it, or move content into it.
+Picker_Workspace :: struct {
+	id: u32,
+}
+
+// A browse list's command row, one of WORKSPACE_ACTIONS.
+Picker_Action :: struct {
+	action: Action,
+}
+
+// A move's destination row that creates a workspace for the content.
+Picker_New_Workspace :: struct {}
+
+// A drag's destination row that tears the content off into a new window.
+Picker_New_Window :: struct {}
+
+// A preset icon cell, by its index in WORKSPACE_ICONS.
+Picker_Icon :: struct {
+	preset: int,
+}
+
+Picker_Emoji_Field :: struct {}
+
+Picker_Emoji_Apply :: struct {}
+
+// The icon grid's colour button, which opens the tint grid.
+Picker_Tint_Open :: struct {}
+
+// A preset colour cell, by its index in WORKSPACE_ICON_COLORS.
+Picker_Tint :: struct {
+	tint: int,
+}
+
+Picker_Tint_Back :: struct {}
+
+// The emoji field, its Apply button and the colour button follow the preset icons.
+WORKSPACE_ICON_CONTROLS :: 3
+
 workspace_picker_active :: proc(p: ^Workspace_Picker) -> bool {
 	return p.state != nil
 }
 
-workspace_picker_mode :: proc(p: ^Workspace_Picker) -> Workspace_Picker_Mode {
-	switch _ in p.state {
-	case Workspace_Picker_List: return .List
-	case Workspace_Picker_Menu: return .Menu
-	case Workspace_Picker_Rename: return .Rename
-	case Workspace_Picker_Icons: return .Icons
-	case Workspace_Picker_Tint: return .Tint
-	}
-	return .Closed
+// Advances the picker's motion: rows settling after a reorder, the rename field and the hovered row's
+// menu button. True when the window must draw again.
+workspace_picker_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+	p := &w.workspace_picker
+	changed := workspace_order_animate(w, app.animations, now)
+	changed = workspace_row_rename_animate(w, app.animations, now) || changed
+	hovered := p.menu_hover != 0 && workspace_row_index(w, p.menu_hover) >= 0
+	return ui.control_update(&p.menu_motion, hovered, false, app.animations, now) || changed
 }
 
+// Only a shown picker keeps the loop awake for its motion.
+workspace_picker_animating :: proc(w: ^Window) -> bool {
+	p := &w.workspace_picker
+	if !workspace_picker_active(p) {return false}
+	return workspace_order_animating(p) || ui.motion_active(p.rename_motion) || ui.control_active(p.menu_motion)
+}
+
+// The icon grid or the tint grid it opens shows.
 workspace_picker_icons :: proc(p: ^Workspace_Picker) -> bool {
-	mode := workspace_picker_mode(p)
-	return mode == .Icons || mode == .Tint
+	#partial switch _ in p.state {
+	case Workspace_Picker_Icons, Workspace_Picker_Tint: return true
+	}
+	return false
 }
 
-// The workspace a row menu, rename or icon grid acts on, or 0 when the picker is not in that mode. Icons
-// includes Tint, which edits the same workspace's icon.
-workspace_picker_target :: proc(p: ^Workspace_Picker, mode: Workspace_Picker_Mode) -> u32 {
-	switch s in p.state {
-	case Workspace_Picker_List:
-	case Workspace_Picker_Menu: if mode == .Menu {return s.id}
-	case Workspace_Picker_Rename: if mode == .Rename {return s.id}
-	case Workspace_Picker_Icons: if mode == .Icons {return s.id}
-	case Workspace_Picker_Tint: if mode == .Icons || mode == .Tint {return s.id}
+workspace_picker_tint :: proc(p: ^Workspace_Picker) -> bool {
+	_, tint := p.state.(Workspace_Picker_Tint)
+	return tint
+}
+
+// The workspace whose row menu shows, or 0.
+workspace_picker_menu_id :: proc(p: ^Workspace_Picker) -> u32 {
+	menu, _ := p.state.(Workspace_Picker_Menu)
+	return menu.id
+}
+
+// The workspace the row editor renames, or 0.
+workspace_picker_rename_id :: proc(p: ^Workspace_Picker) -> u32 {
+	rename, _ := p.state.(Workspace_Picker_Rename)
+	return rename.id
+}
+
+// The workspace whose icon the icon or tint grid edits, or 0.
+workspace_picker_icon_id :: proc(p: ^Workspace_Picker) -> u32 {
+	#partial switch s in p.state {
+	case Workspace_Picker_Icons: return s.id
+	case Workspace_Picker_Tint: return s.id
 	}
 	return 0
 }
@@ -130,26 +214,105 @@ workspace_picker_rename_error :: proc(p: ^Workspace_Picker) -> bool {
 	return renaming && rename.error
 }
 
-// Enters mode, leaving any list state behind. target_id is the workspace a Menu, Rename, Icons or Tint
-// acts on. Row motion carries on settling under the rows of List, Menu and Rename; the icon grids hide
-// the rows.
-@(private)
-workspace_picker_transition :: proc(w: ^Window, mode: Workspace_Picker_Mode, target_id: u32 = 0) {
+// How many targets the current part of the picker lays out.
+workspace_picker_count :: proc(w: ^Window) -> int {
 	p := &w.workspace_picker
-	next: Workspace_Picker_State
-	switch mode {
-	case .Closed:
-	case .List: next = Workspace_Picker_List{}
-	case .Menu: next = Workspace_Picker_Menu{target_id}
-	case .Rename: next = Workspace_Picker_Rename{id = target_id}
-	case .Icons: next = Workspace_Picker_Icons{target_id}
-	case .Tint: next = Workspace_Picker_Tint{target_id}
+	#partial switch _ in p.state {
+	case Workspace_Picker_Icons: return len(WORKSPACE_ICONS) + WORKSPACE_ICON_CONTROLS
+	case Workspace_Picker_Tint: return len(WORKSPACE_ICON_COLORS) + 1
 	}
+	if move, moving := workspace_picker_move(p); moving {
+		return len(p.rows) + (move.drag ? 2 : 1)
+	}
+	return len(p.rows) + len(WORKSPACE_ACTIONS)
+}
+
+// The target at a cursor position, or nil outside the current targets.
+workspace_picker_target_at :: proc(w: ^Window, index: int) -> Workspace_Picker_Target {
+	p := &w.workspace_picker
+	if index < 0 || index >= workspace_picker_count(w) {return nil}
+	#partial switch _ in p.state {
+	case Workspace_Picker_Icons:
+		switch index - len(WORKSPACE_ICONS) {
+		case 0: return Picker_Emoji_Field{}
+		case 1: return Picker_Emoji_Apply{}
+		case 2: return Picker_Tint_Open{}
+		}
+		return Picker_Icon{index}
+	case Workspace_Picker_Tint:
+		if index == len(WORKSPACE_ICON_COLORS) {return Picker_Tint_Back{}}
+		return Picker_Tint{index}
+	}
+	if index < len(p.rows) {return Picker_Workspace{p.rows[index].id}}
+	tail := index - len(p.rows)
+	if _, moving := workspace_picker_move(p); moving {
+		if tail == 0 {return Picker_New_Workspace{}}
+		return Picker_New_Window{}
+	}
+	@(static, rodata) actions := WORKSPACE_ACTIONS
+	return Picker_Action{actions[tail]}
+}
+
+// The cursor position of a target, and whether the current part of the picker shows it.
+workspace_picker_target_index :: proc(w: ^Window, target: Workspace_Picker_Target) -> (int, bool) {
+	p := &w.workspace_picker
+	_, icons := p.state.(Workspace_Picker_Icons)
+	tint := workspace_picker_tint(p)
+	move, moving := workspace_picker_move(p)
+	rows := !icons && !tint
+	switch t in target {
+	case nil:
+	case Picker_Workspace:
+		if index := workspace_row_index(w, t.id); rows && index >= 0 {return index, true}
+	case Picker_Action:
+		if !rows || moving {break}
+		@(static, rodata) actions := WORKSPACE_ACTIONS
+		for action, i in actions {if action == t.action {return len(p.rows) + i, true}}
+	case Picker_New_Workspace:
+		if moving {return len(p.rows), true}
+	case Picker_New_Window:
+		if moving && move.drag {return len(p.rows) + 1, true}
+	case Picker_Icon:
+		if icons && t.preset >= 0 && t.preset < len(WORKSPACE_ICONS) {return t.preset, true}
+	case Picker_Emoji_Field:
+		if icons {return len(WORKSPACE_ICONS), true}
+	case Picker_Emoji_Apply:
+		if icons {return len(WORKSPACE_ICONS) + 1, true}
+	case Picker_Tint_Open:
+		if icons {return len(WORKSPACE_ICONS) + 2, true}
+	case Picker_Tint:
+		if tint && t.tint >= 0 && t.tint < len(WORKSPACE_ICON_COLORS) {return t.tint, true}
+	case Picker_Tint_Back:
+		if tint {return len(WORKSPACE_ICON_COLORS), true}
+	}
+	return -1, false
+}
+
+// The target under the cursor.
+workspace_picker_selection :: proc(w: ^Window) -> Workspace_Picker_Target {
+	return workspace_picker_target_at(w, w.workspace_picker.selected)
+}
+
+// Moves the cursor onto a target the current part of the picker shows; any other target leaves it.
+workspace_picker_select_target :: proc(w: ^Window, target: Workspace_Picker_Target) {
+	if index, shown := workspace_picker_target_index(w, target); shown {
+		w.workspace_picker.selected, w.dirty = index, true
+	}
+}
+
+// Enters `next`, leaving any list state behind; nil closes the picker. Row motion carries on settling under
+// the rows of List, Menu and Rename; the icon grids hide the rows.
+@(private)
+workspace_picker_transition :: proc(w: ^Window, next: Workspace_Picker_State) {
+	p := &w.workspace_picker
 	workspace_picker_state_set(w, next)
-	if mode == .Closed || mode == .Icons || mode == .Tint {workspace_order_stop(p)}
+	switch _ in next {
+	case nil, Workspace_Picker_Icons, Workspace_Picker_Tint: workspace_order_stop(p)
+	case Workspace_Picker_List, Workspace_Picker_Menu, Workspace_Picker_Rename:
+	}
 	p.menu_hover, p.menu_selected, p.rename_motion = 0, 0, {}
 	ui.field_release(&p.query)
-	ui.field_release(&w.rename)
+	ui.field_release(&p.rename)
 }
 
 // Moves an open list between browsing (nil), a chip press, a move target and a row reorder. Outside the
@@ -174,14 +337,15 @@ workspace_picker_state_set :: proc(w: ^Window, next: Workspace_Picker_State) {
 workspace_picker_cancel :: proc(w: ^Window, focus_lost := false) {
 	p := &w.workspace_picker
 	ui.field_release(&p.query)
-	ui.field_release(&w.rename)
+	ui.field_release(&p.rename)
 	// Windows' emoji picker can take focus before delivering text to the icon field.
 	if focus_lost && workspace_picker_icons(p) {return}
-	workspace_picker_transition(w, .Closed)
+	workspace_picker_transition(w, nil)
 }
 
 workspace_picker_destroy :: proc(w: ^Window) {
 	delete(w.workspace_picker.query.bytes)
+	delete(w.workspace_picker.rename.bytes)
 	delete(w.workspace_picker.saved_query.bytes)
 	delete(w.workspace_picker.rows)
 	delete(w.workspace_picker.order_positions)
@@ -196,12 +360,21 @@ workspace_picker_layout_changed :: proc(w: ^Window) {
 		workspace_icon_picker_reveal(w, workspace_icon_picker_layout(w))
 		return
 	}
-	if mode := workspace_picker_mode(p); mode == .Rename || mode == .Menu {
-		if index := workspace_row_index(w, workspace_picker_target(p, mode)); index >= 0 {p.selected = index}
-	}
+	id := workspace_picker_menu_id(p)
+	if id == 0 {id = workspace_picker_rename_id(p)}
+	if index := workspace_row_index(w, id); index >= 0 {p.selected = index}
 	_, rows := workspace_picker_rect(w)
 	p.scroll = clamp(p.scroll, max(0, p.selected - rows + 1), p.selected)
-	p.scroll = clamp(p.scroll, 0, max(0, workspace_picker_count(w) - rows))
+	workspace_picker_scroll(w, 0)
+}
+
+// Scrolls the list by `rows` within its current targets. A lifted row reorders among the workspace rows,
+// so it scrolls them alone; otherwise every target, including a move's or drag's destinations, counts.
+workspace_picker_scroll :: proc(w: ^Window, rows: int) {
+	p := &w.workspace_picker
+	_, visible := workspace_picker_rect(w)
+	count := workspace_order_lift(p) != nil ? len(p.rows) : workspace_picker_count(w)
+	p.scroll = clamp(p.scroll + rows, 0, max(0, count - visible))
 }
 
 workspace_picker_select :: proc(w: ^Window, index: int) {
@@ -215,11 +388,11 @@ workspace_picker_chip_press :: proc(app: ^App, w: ^Window, time_ns: i64) {
 	workspace_picker_list_set(w, Workspace_Chip_Pressed{time_ns})
 }
 
-workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	p := &w.workspace_picker
 	if !e.pressed {
 		ui.field_release(&p.query)
-		ui.field_release(&w.rename)
+		ui.field_release(&p.rename)
 		if e.button == .Left {workspace_order_release(app, w, e)}
 		return
 	}
@@ -228,20 +401,21 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 	r, _ := workspace_picker_rect(w)
 	if list, listing := p.state.(Workspace_Picker_List); listing && e.button == .Left {
 		if chip, pressed := list.sub.(Workspace_Chip_Pressed); pressed &&
-		   workspace_rect_contains(workspace_button_rect(w), x, y) &&
+		   render.rect_contains(workspace_button_rect(w), x, y) &&
 		   e.time_ns - chip.time_ns <= DOUBLE_CLICK_NS {
 			workspace_name_begin(app, w)
 			return
 		}
 	}
-	if workspace_picker_mode(p) == .Menu && e.button == .Left {
+	if _, menu := p.state.(Workspace_Picker_Menu); menu && e.button == .Left {
 		workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
-	} else if !workspace_rect_contains(r, x, y) {
+	} else if !render.rect_contains(r, x, y) {
 		workspace_picker_cancel(w)
 	} else if e.button == .Left {
 		if workspace_picker_browsing(p) {
-			if hit := workspace_picker_hit(w, x, y); hit >= 0 && hit < len(p.rows) &&
-			   !workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+			hit := workspace_picker_hit(w, x, y)
+			if _, on_row := workspace_picker_target_at(w, hit).(Picker_Workspace); on_row &&
+			   !render.rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
 				row := workspace_picker_row_rect(w, hit)
 				workspace_picker_list_set(w, Workspace_Order_Pressed{id = p.rows[hit].id, start_x = x,
 					start_y = y, grab = (y - row.y) / row.height})
@@ -253,7 +427,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_
 	}
 }
 
-workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) {
+workspace_picker_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 	if workspace_order_hover(app, w, e) {return}
 	if workspace_row_hover(app, w, e) {return}
 	p := &w.workspace_picker
@@ -261,16 +435,17 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Eve
 	hover := u32(0)
 	shape := platform.Cursor_Shape.Arrow
 	if p.query.dragging && .Left in e.buttons {
-		workspace_picker_pointer(app, w, x, false, true)
+		workspace_picker_pointer(w, x, false, true)
 		shape = .Text
 	} else if hit := workspace_picker_hit(w, x, y); hit >= 0 {
 		shape = .Hand
 		workspace_picker_select(w, hit)
-		if workspace_picker_browsing(p) && hit < len(p.rows) &&
-		   workspace_rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
-			hover = p.rows[hit].id
+		row, on_row := workspace_picker_target_at(w, hit).(Picker_Workspace)
+		if workspace_picker_browsing(p) && on_row &&
+		   render.rect_contains(workspace_picker_menu_button_rect(w, hit), x, y) {
+			hover = row.id
 		}
-	} else if workspace_rect_contains(workspace_picker_field_rect(w), x, y) {
+	} else if render.rect_contains(workspace_picker_field_rect(w), x, y) {
 		shape = .Text
 	}
 	if hover != p.menu_hover {
@@ -281,13 +456,90 @@ workspace_picker_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Eve
 
 workspace_picker_wheel :: proc(w: ^Window, delta: f32) {
 	p := &w.workspace_picker
-	if mode := workspace_picker_mode(p); mode == .Menu || mode == .Rename {return}
+	#partial switch _ in p.state {
+	case Workspace_Picker_Menu, Workspace_Picker_Rename: return
+	}
 	if lift := workspace_order_lift(p); lift != nil {
-		_, rows := workspace_picker_rect(w)
-		p.scroll = clamp(p.scroll - int(math.sign(delta)), 0, max(0, len(p.rows) - rows))
+		workspace_picker_scroll(w, -int(math.sign(delta)))
 		workspace_order_move(w, lift.pointer_x, lift.pointer_y)
 		w.dirty = true
 		return
 	}
 	workspace_picker_select(w, p.selected - int(math.sign(delta)))
+}
+
+when AIO_CONTROL {
+	// The workspace button's and picker's verification keys, with the shown workspace's identity.
+	workspace_picker_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		p := &w.workspace_picker
+		picker_rect, _ := workspace_picker_rect(w)
+		menu_target := workspace_picker_menu_id(p)
+		state_value(r, "workspace.id", w.workspace.id)
+		state_text(r, "workspace.name", w.workspace.name)
+		state_rect(r, "workspace.button", workspace_button_rect(w))
+		state_value(r, "workspace.button.hover", w.workspace_hovered)
+		state_value(r, "workspace.picker", workspace_picker_active(p))
+		state_value(r, "workspace.icon.preset", w.workspace.icon.preset)
+		state_text(r, "workspace.icon.emoji", w.workspace.icon.emoji)
+		state_value(r, "workspace.icon.tint", w.workspace.icon.tint)
+		state_value(r, "workspace.picker.colors", workspace_picker_tint(p))
+		state_rect(r, "workspace.picker.color_button", workspace_icon_color_button(w))
+		state_value(r, "workspace.picker.icons", workspace_picker_icons(p))
+		state_value(r, "workspace.picker.selected", p.selected)
+		state_value(r, "workspace.picker.count", workspace_picker_count(w))
+		state_text(r, "workspace.picker.query", ui.field_string(&p.query))
+		state_rect(r, "workspace.picker.rect", picker_rect)
+		state_rect(r, "workspace.picker.field", workspace_picker_field_rect(w))
+		state_rect(r, "workspace.picker.row", workspace_picker_row_rect(w, p.selected))
+		state_value(r, "workspace.picker.menu_target", menu_target)
+		state_value(r, "workspace.picker.menu_hover", p.menu_hover)
+		state_value(r, "workspace.picker.menu_selected", p.menu_selected)
+		state_value(r, "workspace.picker.window_enabled", workspace_row_window_enabled(app, w, menu_target))
+		state_text(r, "workspace.picker.window_title", workspace_row_window_title(app, menu_target))
+		state_rect(r, "workspace.picker.menu_button", workspace_picker_menu_button_rect(w, p.selected))
+		state_rect(r, "workspace.picker.menu_item", workspace_row_menu_item_rect(w, p.menu_selected))
+		state_value(r, "workspace.picker.rename_target", workspace_picker_rename_id(p))
+		state_text(r, "workspace.picker.rename_value", ui.field_string(&p.rename))
+		state_rect(r, "workspace.picker.rename_field", workspace_row_rename_field_rect(w))
+		state_value(r, "workspace.picker.rename_error", workspace_picker_rename_error(p))
+		state_value(r, "workspace.picker.icon_target", workspace_picker_icon_id(p))
+	}
+}
+
+// Workspace picker pointer surface
+
+@(private)
+workspace_picker_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return workspace_picker_active(&w.workspace_picker)
+}
+
+@(private)
+workspace_picker_pointer_hover :: proc(
+	app: ^App,
+	w: ^Window,
+	owner: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) {
+	if owner == .Workspace_Picker {workspace_picker_hover(app, w, e)}
+}
+
+@(private)
+workspace_picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
+	_, icons := w.workspace_picker.state.(Workspace_Picker_Icons)
+	if icons && render.rect_contains(workspace_icon_color_button(w), x, y) {
+		return "Change icon color"
+	}
+	return ""
+}
+
+@(private)
+workspace_picker_pointer_cancel :: proc(app: ^App, w: ^Window) {
+	ui.field_release(&w.workspace_picker.query)
+	workspace_order_end(w)
+	_ = workspace_order_animate(w, app.animations, time.tick_now())
+}
+
+@(private)
+workspace_picker_leave :: proc(_: ^App, w: ^Window) {
+	w.workspace_picker.menu_hover = 0
 }

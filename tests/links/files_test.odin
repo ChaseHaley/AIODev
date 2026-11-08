@@ -203,6 +203,68 @@ row_breaks_read_as_a_space_or_as_nothing :: proc(t: ^testing.T) {
 }
 
 @(test)
+break_readings_descend_masks_and_cap_variable_breaks :: proc(t: ^testing.T) {
+	buffer: [32]u8
+	readings := links.break_readings("a\nb\nc\nd\ne", buffer[:])
+	expected := [?]string{
+		"a b c d e",
+		"ab c d e",
+		"a bc d e",
+		"abc d e",
+		"a b cd e",
+		"ab cd e",
+		"a bcd e",
+		"abcd e",
+	}
+	count := 0
+	for reading in links.break_readings_next(&readings) {
+		if testing.expect(t, count < len(expected)) {
+			testing.expect_value(t, reading, expected[count])
+		}
+		count += 1
+	}
+	testing.expect_value(t, count, len(expected))
+	reading, more := links.break_readings_next(&readings)
+	testing.expect(t, !more)
+	testing.expect_value(t, reading, "")
+}
+
+@(test)
+break_readings_skip_oversized_variants_without_losing_shorter_ones :: proc(t: ^testing.T) {
+	buffer: [4]u8
+	readings := links.break_readings("a\nb\nc", buffer[:])
+	expected := [?]string{"ab c", "a bc", "abc"}
+	count := 0
+	for reading in links.break_readings_next(&readings) {
+		if testing.expect(t, count < len(expected)) {
+			testing.expect_value(t, reading, expected[count])
+		}
+		count += 1
+	}
+	testing.expect_value(t, count, len(expected))
+
+	readings = links.break_readings("a\nbc", buffer[:2])
+	for _ in 0 ..< 2 {
+		reading, more := links.break_readings_next(&readings)
+		testing.expect(t, !more)
+		testing.expect_value(t, reading, "")
+	}
+}
+
+@(test)
+break_readings_yield_unbroken_and_empty_text_once :: proc(t: ^testing.T) {
+	buffer: [4]u8
+	for text in ([?]string{"path", ""}) {
+		readings := links.break_readings(text, buffer[:])
+		reading, more := links.break_readings_next(&readings)
+		testing.expect(t, more)
+		testing.expect_value(t, reading, text)
+		_, again := links.break_readings_next(&readings)
+		testing.expect(t, !again)
+	}
+}
+
+@(test)
 selected_text_is_a_target_when_it_can_name_one :: proc(t: ^testing.T) {
 	cases := [?]struct {
 		raw:      string,
@@ -214,6 +276,7 @@ selected_text_is_a_target_when_it_can_name_one :: proc(t: ^testing.T) {
 		{`"C:\My Dir\a.txt"`, false, `C:\My Dir\a.txt`},
 		{`C:\My Dir\a.txt.`, false, `C:\My Dir\a.txt`},
 		{"https://example.com/a\n  /b", false, "https://example.com/a\n/b"},
+		{"ht\ntps://example.com/a", false, "ht\ntps://example.com/a"},
 		{`My Folder\a b.txt`, true, `My Folder\a b.txt`},
 		{`My Folder\a b.txt`, false, ""},
 		{`just some words`, true, ""},
@@ -232,15 +295,4 @@ selected_text_is_a_target_when_it_can_name_one :: proc(t: ^testing.T) {
 		testing.expectf(t, ok == (c.target != ""), "%q gave %v", c.raw, ok)
 		if ok {testing.expect_value(t, text[r.start:r.end], c.target)}
 	}
-}
-
-@(test)
-active_file_types_need_confirmation_even_without_pathext :: proc(t: ^testing.T) {
-	for path in ([?]string{`C:\a.EXE`, `C:\a.ps1`, `C:\a.lnk`, `C:\a.url`, `C:\a.msi`,
-		`C:\a.hta`, `C:\a.scf`, `C:\a.library-ms`, `C:\a.settingcontent-ms`, `C:\a.appref-ms`,
-		`C:\a.msu`, `C:\a.search-ms`, `C:\a.iqy`, `C:\a.xll`, `C:\a.iso`, `C:\a.vhdx`}) {
-		testing.expectf(t, links.file_needs_confirmation(path, ""), "%s must be confirmed", path)
-	}
-	testing.expect(t, links.file_needs_confirmation(`C:\a.custom`, ".EXE;;.CUSTOM;"))
-	testing.expect(t, !links.file_needs_confirmation(`C:\a.txt`, ".EXE;;"))
 }

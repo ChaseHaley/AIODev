@@ -44,7 +44,7 @@ theme_export_roundtrips_every_color_and_preserves_files :: proc(t: ^testing.T) {
 	if temp_error != nil {return}
 	defer delete(directory)
 	defer os.remove_all(directory)
-	s, d, error := settings.parse("theme.name = tide-light\n", themes_directory = THEMES)
+	s, d, error := parse_themes("theme.name = tide-light\n", THEMES)
 	testing.expect_value(t, error, nil)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
@@ -60,9 +60,7 @@ theme_export_roundtrips_every_color_and_preserves_files :: proc(t: ^testing.T) {
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, int(card(theme.overrides)), len(settings.THEME_TOKENS))
 	testing.expect_value(t, settings.custom_theme_resolve(nil, &theme), s.active_theme)
-	loaded, diagnostics, load_error := settings.parse(
-		fmt.tprintf("theme.name = %s\n", theme.id), themes_directory = directory,
-	)
+	loaded, diagnostics, load_error := parse_themes(fmt.tprintf("theme.name = %s\n", theme.id), directory)
 	testing.expect_value(t, load_error, nil)
 	defer settings.destroy(&loaded)
 	defer settings.diagnostics_destroy(&diagnostics)
@@ -81,21 +79,19 @@ theme_discovery_isolates_bad_files_and_edits_shared_theme_as_copy :: proc(t: ^te
 	testing.expect_value(t, os.write_entire_file(path, string(THEME_FIXTURE)), nil)
 	testing.expect_value(t, os.write_entire_file(fmt.tprintf("%s/bad.theme.json", directory), []u8{'{'}), nil)
 	source := "theme.name = shared\n"
-	s, d, error := settings.parse(source, themes_directory = directory)
+	s, d, error := parse_themes(source, directory)
 	testing.expect_value(t, error, nil)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, len(d), 1)
 	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{0x12, 0x34, 0x56, 255})
-	updated, created, issue, edit_error := settings.theme_color_edit(
-		source, "accent", "#abcdef", themes_directory = directory,
-	)
+	updated, created, issue, edit_error := edit_color(source, "accent", "#abcdef", directory)
 	defer delete(updated)
 	defer delete(created)
 	testing.expect_value(t, edit_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, created, "shared-custom")
-	copy, cd, ce := settings.parse(updated, themes_directory = directory)
+	copy, cd, ce := parse_themes(updated, directory)
 	defer settings.destroy(&copy)
 	defer settings.diagnostics_destroy(&cd)
 	testing.expect_value(t, ce, nil)
@@ -105,9 +101,7 @@ theme_discovery_isolates_bad_files_and_edits_shared_theme_as_copy :: proc(t: ^te
 	defer delete(data)
 	testing.expect_value(t, re, nil)
 	testing.expect_value(t, string(data), THEME_FIXTURE)
-	local, ld, le := settings.parse(
-		"theme.name = shared\ntheme.custom.shared.base = studio-dark\n", themes_directory = directory,
-	)
+	local, ld, le := parse_themes("theme.name = shared\ntheme.custom.shared.base = studio-dark\n", directory)
 	defer settings.destroy(&local)
 	defer settings.diagnostics_destroy(&ld)
 	testing.expect_value(t, le, nil)

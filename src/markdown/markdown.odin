@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:encoding/entity"
 import "core:fmt"
 import "core:strings"
+import "core:unicode/utf8"
 
 Style_Flag :: enum u8 {
 	Strong,
@@ -37,6 +38,13 @@ Align :: enum u8 {
 	Right,
 }
 
+// A task list item's checkbox. Its marker text (☐ or ☑) is only what the item copies as.
+Task :: enum u8 {
+	None,
+	Open,
+	Done,
+}
+
 // One flat block. Containers become depths on the blocks they hold, and the first block of a list
 // item carries its marker.
 Block :: struct {
@@ -46,6 +54,7 @@ Block :: struct {
 	// Follows the previous block with no gap, as items of a tight list do.
 	tight:                    bool,
 	marker_start, marker_end: int,
+	task:                     Task,
 	first_span, span_count:   int,
 	table, row, column:       int,
 	header:                   bool,
@@ -83,6 +92,7 @@ Builder :: struct {
 	quote_depth:   int,
 	marker:        [16]u8,
 	marker_len:    int,
+	task:          Task,
 	// A tight list item's text arrives with no paragraph around it.
 	implicit:      bool,
 	block_open:    bool,
@@ -177,11 +187,11 @@ block_begin :: proc(b: ^Builder, kind: Block_Kind, level := 0, align := Align.Le
 		block.row, block.column, block.header = b.table_row, b.table_column, b.cell_header
 	}
 	if b.marker_len > 0 {
-		block.marker_start = len(b.doc.text)
+		block.marker_start, block.task = len(b.doc.text), b.task
 		if _, err := append(&b.doc.text, string(b.marker[:b.marker_len])); err != nil {return false}
 		block.marker_end = len(b.doc.text)
 		if _, err := append(&b.doc.text, " "); err != nil {return false}
-		b.marker_len = 0
+		b.marker_len, b.task = 0, .None
 	}
 	_, err := append(&b.doc.blocks, block)
 	b.block_open = err == nil
@@ -212,8 +222,10 @@ implicit_end :: proc(b: ^Builder) {
 marker_set :: proc(b: ^Builder, detail: ^Md_Li_Detail) {
 	list := &b.lists[len(b.lists) - 1]
 	text: string
+	b.task = .None
 	if detail.is_task != 0 {
-		text = detail.task_mark == ' ' ? "☐" : "☑"
+		b.task = detail.task_mark == ' ' ? .Open : .Done
+		text = b.task == .Open ? "☐" : "☑"
 		if list.ordered {list.next += 1}
 	} else if list.ordered {
 		text = fmt.bprintf(b.marker[:], "%d.", list.next)
@@ -268,9 +280,9 @@ on_enter_block :: proc "c" (type: i32, detail, user: rawptr) -> i32 {
 	case .Th, .Td:
 		b.cell_header = kind == .Th
 		align := Align.Left
-		switch (^Md_Td_Detail)(detail).align {
-		case 2: align = .Center
-		case 3: align = .Right
+		#partial switch (^Md_Td_Detail)(detail).align {
+		case .Center: align = .Center
+		case .Right: align = .Right
 		}
 		ok = block_begin(b, .Table_Cell, 0, align)
 	}
@@ -305,32 +317,37 @@ on_leave_block :: proc "c" (type: i32, detail, user: rawptr) -> i32 {
 	return 0
 }
 
+// Owned text of an attribute with its entities decoded; false when memory runs out.
 @(private)
 attribute_text :: proc(attribute: Md_Attribute) -> (string, bool) {
-	out := strings.builder_make()
+	out: [dynamic]u8
 	offset := u32(0)
 	for i := 0; offset < attribute.size; i += 1 {
 		next := attribute.substr_offsets[i + 1]
 		part := string(attribute.text[offset:next])
-		if attribute.substr_types[i] == .Entity {
-			write_entity(&out, part)
-		} else {
-			strings.write_string(&out, part)
+		buffer: [8]u8
+		if attribute.substr_types[i] == .Entity {part = entity_text(&buffer, part)}
+		if _, err := append(&out, part); err != nil {
+			delete(out)
+			return "", false
 		}
 		offset = next
 	}
-	return strings.to_string(out), true
+	return string(out[:]), true
 }
 
+// What an entity reads as, decoded into `buffer`; an unknown entity reads as written.
 @(private)
-write_entity :: proc(out: ^strings.Builder, text: string) {
+entity_text :: proc(buffer: ^[8]u8, text: string) -> string {
 	name := strings.trim_suffix(strings.trim_prefix(text, "&"), ";")
 	decoded, count, ok := entity.xml_decode_entity(name)
-	if !ok {
-		strings.write_string(out, text)
-		return
+	if !ok {return text}
+	length := 0
+	for i in 0 ..< count {
+		bytes, size := utf8.encode_rune(decoded[i])
+		length += copy(buffer[length:], bytes[:size])
 	}
-	for i in 0 ..< count {strings.write_rune(out, decoded[i])}
+	return string(buffer[:length])
 }
 
 @(private)
@@ -440,9 +457,8 @@ on_text :: proc "c" (type: Md_Text, text: [^]u8, size: u32, user: rawptr) -> i32
 	case .Soft_Br:
 		ok = text_append(b, " ")
 	case .Entity:
-		out := strings.builder_make(context.temp_allocator)
-		write_entity(&out, string(text[:size]))
-		ok = text_append(b, strings.to_string(out))
+		buffer: [8]u8
+		ok = text_append(b, entity_text(&buffer, string(text[:size])))
 	case:
 		ok = text_append(b, string(text[:size]))
 	}

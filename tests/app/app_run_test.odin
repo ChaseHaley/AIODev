@@ -144,9 +144,7 @@ when app.AIO_CONTROL {
 		defer layout.destroy(&tab.tree)
 		append(&workspace.tabs, &tab)
 		defer delete(workspace.tabs)
-		w := app.Window{id = window_id, workspace = &workspace, tree = &tab.tree, focused = true,
-			width = 160, height = 100}
-		defer delete(w.rail_rows)
+		w := app.Window{id = window_id, workspace = &workspace, focused = true, width = 160, height = 100}
 		append(&state.windows, &w)
 		defer delete(state.windows)
 		append(&state.workspaces, &workspace)

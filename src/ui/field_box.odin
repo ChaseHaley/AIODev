@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 // A one-line editable field drawn inside a rectangle. Draw and hit-test read the same numbers; the
@@ -14,6 +13,21 @@ Field_Box :: struct {
 	radius:      f32,
 	style:       Text_Style,
 	scale:       f32,
+}
+
+// The standard text field: Body text inset like a control, a one-DIP caret and the control corner.
+// The palette query and the find bar keep looks of their own.
+field_box_standard :: proc(field: ^Text_Field, text: ^Text, rect: render.Rect, scale: f32) -> Field_Box {
+	return {
+		field = field,
+		text = text,
+		rect = rect,
+		inset = CONTROL_INSET,
+		caret_width = 1,
+		radius = RADIUS_CONTROL,
+		style = .Body,
+		scale = scale,
+	}
 }
 
 field_box_text_rect :: proc(box: Field_Box) -> render.Rect {
@@ -37,8 +51,7 @@ field_box_baseline :: proc(box: Field_Box) -> f32 {
 	return box.rect.y + (box.rect.height - text.line_height) / 2 + text.ascent
 }
 
-// Draws the field at `baseline`, clipped to the box. A surface that draws more content in the
-// box's layer draws it before this call or pushes its own layer afterwards.
+// Draws the field at `baseline`, clipped to the box. The caller's layer is current again afterwards.
 field_box_draw :: proc(
 	box: Field_Box,
 	list: ^render.Draw_List,
@@ -46,10 +59,12 @@ field_box_draw :: proc(
 	baseline: f32,
 	focused: bool,
 	placeholder: string,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	text := text_styled(box.text, box.style)
 	frame := field_box_text_rect(box)
-	if render.push_layer(list, box.rect, box.radius * box.scale) != .None {return .Ok}
+	scope, opened := clip_scope_open(list, box.rect, box.radius * box.scale)
+	if !opened {return .Ok}
+	defer clip_scope_close(list, scope)
 	return field_draw(
 		f           = box.field,
 		list        = list,

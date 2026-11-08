@@ -3,7 +3,8 @@ package app_test
 import "base:runtime"
 import "core:testing"
 import app "../../src"
-import "aio:pty"
+import "aio:program_art"
+import "aio:procinfo"
 
 @(test)
 process_snapshot_asked_for_while_one_is_taken_is_not_taken_twice :: proc(t: ^testing.T) {
@@ -46,6 +47,9 @@ icon_queue_refusal :: proc(
 @(test)
 program_icon_is_not_left_pending_when_the_worker_cannot_start :: proc(t: ^testing.T) {
 	state: app.App
+	if !art_catalogue(t, &state) {return}
+	defer program_art.catalogue_destroy(&state.program_art)
+	defer app.program_icon_cache_destroy(&state.program_icons)
 	defer app.process_worker_destroy(&state.processes)
 	state.settings.tabs.program_icons = true
 	entry: app.Session_Entry
@@ -55,14 +59,14 @@ program_icon_is_not_left_pending_when_the_worker_cannot_start :: proc(t: ^testin
 		_, pending, _ := app.report_icon(&state, &entry, "claude", 16)
 		testing.expect(t, pending, "the artwork is still to be read")
 	}
-	for icon in state.processes.icons {
+	for icon in state.program_icons.icons {
 		testing.expect_value(t, icon.state, app.Program_Icon_State.Free)
 	}
 	state.processes.jobs.allocator = context.allocator
 	_, pending, _ := app.report_icon(&state, &entry, "claude", 16)
 	testing.expect(t, pending)
 	queued := 0
-	for icon in state.processes.icons {
+	for icon in state.program_icons.icons {
 		if icon.state != .Free {queued += 1}
 	}
 	testing.expect_value(t, queued, 1)
@@ -75,10 +79,12 @@ program_is_adopted_on_a_second_poll_and_dropped_at_the_prompt :: proc(t: ^testin
 	ROOT :: 1_000_001
 	CLAUDE :: 1_000_003
 	CODEX :: 1_000_005
-	shell := []pty.Process_Info{{id = ROOT, parent = 1, executable = "pwsh.exe"}}
-	claude := []pty.Process_Info{shell[0], {id = CLAUDE, parent = ROOT, executable = "claude.exe"}}
-	codex := []pty.Process_Info{shell[0], {id = CODEX, parent = ROOT, executable = "codex.exe"}}
+	shell := []procinfo.Process_Info{{id = ROOT, parent = 1, executable = "pwsh.exe"}}
+	claude := []procinfo.Process_Info{shell[0], {id = CLAUDE, parent = ROOT, executable = "claude.exe"}}
+	codex := []procinfo.Process_Info{shell[0], {id = CODEX, parent = ROOT, executable = "codex.exe"}}
 	state: app.App
+	if !art_catalogue(t, &state) {return}
+	defer program_art.catalogue_destroy(&state.program_art)
 	entry: app.Session_Entry
 	defer app.program_forget(&entry)
 
@@ -117,4 +123,12 @@ expect_adopted :: proc(t: ^testing.T, entry: ^app.Session_Entry, id: u32, name: 
 	testing.expect_value(t, program.id, id)
 	testing.expect_value(t, program.name, name)
 	testing.expect(t, program.has_art)
+}
+
+// Program names resolve against the bundled artwork, which the app parses at start.
+@(private)
+art_catalogue :: proc(t: ^testing.T, state: ^app.App) -> bool {
+	catalogue, err := program_art.catalogue_make()
+	state.program_art = catalogue
+	return testing.expect_value(t, err, nil)
 }

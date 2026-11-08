@@ -19,14 +19,15 @@ Theme :: struct {
 	pane_border, pane_focus: render.Color,
 	scrollbar_track, scrollbar, scrollbar_hover, scrollbar_active: render.Color,
 	// The shared raised-hover look. `rim` is the colour of the pointer-following edge light;
-	// `hover_edge` is the hairline that holds a light fill's shape. lift and gloss are
-	// overridden from interface.hover_lift and interface.hover_gloss.
+	// `hover_edge` is the hairline that holds a light fill's shape. lift and gloss are the
+	// interface.hover_lift and interface.hover_gloss settings.
 	rim:        render.Color,
 	hover_edge: render.Color,
 	hover_lift, hover_gloss: f32,
 }
 
-theme_from :: proc(t: settings.Theme) -> Theme {
+// The interface theme from a resolved settings theme and the interface settings that tune the hover.
+theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) -> Theme {
 	c :: proc(t: settings.Theme, token: settings.Theme_Token) -> render.Color {
 		value := t.colors[token]
 		return colour.rgba(value.rgb, f32(value.a) / 255)
@@ -71,8 +72,8 @@ theme_from :: proc(t: settings.Theme) -> Theme {
 		// must stay faint, or it becomes the dark edge the paper fill exists to avoid.
 		rim = colour.rgba(t.light ? accent : text, t.light ? 0.20 : 0.80),
 		hover_edge = t.light ? colour.rgba(text, 0.10) : render.Color{0, 0, 0, 0},
-		hover_lift = 1.5,
-		hover_gloss = 1,
+		hover_lift = f32(interface.hover_lift),
+		hover_gloss = f32(interface.hover_gloss),
 	}
 }
 
@@ -145,7 +146,7 @@ draw_text :: proc(
 	max_width: f32 = 0,
 	highlights: []int = nil,
 	highlight: render.Color = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	limit := max_width > 0 ? max_width - text_width(t, ELLIPSIS) : max(f32)
 	clipped := max_width > 0 && text_width(t, s) > max_width
 	pen := x
@@ -184,7 +185,7 @@ draw_glyph :: proc(
 	g: font.Glyph,
 	x, baseline: f32,
 	c: render.Color,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	entry, result := glyphs.glyph(t.cache, g, t.size_px)
 	if result != .Ok || entry.size.x == 0 {
 		return result
@@ -230,6 +231,27 @@ draw_rect :: proc(list: ^render.Draw_List, instance: render.Rect_Instance) {
 	_ = render.push_rect(list, instance)
 }
 
+// A widget that clips its own drawing opens a clip scope and closes it before returning, so its
+// caller keeps drawing in the layer it was in. The list has no pop, so closing pushes that layer
+// again.
+@(private)
+Clip_Scope :: struct {
+	previous: render.Layer,
+	restore:  bool,
+}
+
+@(private)
+clip_scope_open :: proc(list: ^render.Draw_List, clip: render.Rect, radius: f32 = 0) -> (Clip_Scope, bool) {
+	scope: Clip_Scope
+	if count := len(list.layers); count > 0 {scope = {list.layers[count - 1], true}}
+	return scope, render.push_layer(list, clip, radius) == .None
+}
+
+@(private)
+clip_scope_close :: proc(list: ^render.Draw_List, scope: Clip_Scope) {
+	if scope.restore {_ = render.push_layer(list, scope.previous.clip, scope.previous.radius)}
+}
+
 // The type ramp: four sizes and two weights. Body is the interface font size setting (13 DIPs by
 // default); the other sizes keep their ratio to it. Hierarchy comes from size first, then weight,
 // then the text colour roles, never from a size outside this ramp.
@@ -270,7 +292,7 @@ draw_fading_text :: proc(
 	x, baseline: f32,
 	color: render.Color,
 	width: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if width <= 0 {return .Ok}
 	pen := x
 	clipped := text_width(t, s) > width
@@ -318,7 +340,7 @@ draw_glyph_centered :: proc(
 	r: rune,
 	area: render.Rect,
 	c: render.Color,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
 	if !found {return .Ok}
 	entry, result := glyphs.glyph(t.cache, g, t.size_px)
@@ -333,20 +355,20 @@ draw_glyph_centered :: proc(
 	return .Ok
 }
 
-// Draws an icon-font glyph centered in `area`, sized to `fraction` of the area's height. Without an icon
-// font nothing is drawn.
+// Draws an icon-font glyph centered in `area` with the font at `size_px` pixels. Without an icon font
+// nothing is drawn.
 draw_icon :: proc(
 	t: ^Text,
 	list: ^render.Draw_List,
 	icon: rune,
 	area: render.Rect,
 	c: render.Color,
-	fraction: f32,
-) -> glyphs.Result {
+	size_px: f32,
+) -> render.Build_Status {
 	if !t.has_icons {return .Ok}
 	icons := t^
 	icons.family = t.icons
-	text_set_size(&icons, area.height * fraction * 0.6)
+	text_set_size(&icons, size_px)
 	return draw_glyph_centered(&icons, list, icon, area, c)
 }
 
@@ -358,7 +380,7 @@ draw_cluster_centered :: proc(
 	area: render.Rect,
 	c: render.Color,
 	size_px: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	runes: [32]rune
 	clusters: [32]int
 	count := 0

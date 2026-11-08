@@ -5,7 +5,6 @@ import "core:testing"
 import app "../../src"
 import "aio:platform"
 import "aio:render"
-import "aio:ui"
 
 @(test)
 pane_focus_appearance_follows_keyboard_focus_across_windows :: proc(t: ^testing.T) {
@@ -19,7 +18,7 @@ pane_focus_appearance_follows_keyboard_focus_across_windows :: proc(t: ^testing.
 	s.settings.pane.focus_border = 4
 	s.settings.pane.unfocused_dim = 45
 	for &entry in s.sessions {delete(entry.name); entry.name = strings.clone("Focus")}
-	first_node, second_node := first.tree.focus, second.tree.focus
+	first_node, second_node := app.window_tree(first).focus, app.window_tree(second).focus
 	for gap in ([?]int{0, 4}) {
 		s.settings.pane.gap = gap
 		app.window_relayout(s, first)
@@ -37,14 +36,14 @@ pane_focus_appearance_follows_keyboard_focus_across_windows :: proc(t: ^testing.
 				}
 				testing.expect_value(t, focus_outlines, w == active ? 1 : 0)
 				for pane in w.panes {
-					focused := w == active && pane.node == w.tree.focus
+					focused := w == active && pane.node == app.window_tree(w).focus
 					r := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
 					dimmed := false
 					for rect in w.list.rects {
 						if rect.rect == r && rect.color.a == 0.45 && rect.stroke == 0 {dimmed = true}
 					}
 					testing.expect_value(t, dimmed, !focused)
-					header := ui.header_layout(r, w.scale)
+					header := app.pane_header_layout(w, pane)
 					title_ink := focused ? s.theme.text : s.theme.muted
 					title_found := false
 					for glyph in w.list.glyphs {
@@ -59,8 +58,8 @@ pane_focus_appearance_follows_keyboard_focus_across_windows :: proc(t: ^testing.
 					testing.expect(t, title_found)
 				}
 			}
-			testing.expect_value(t, first.tree.focus, first_node)
-			testing.expect_value(t, second.tree.focus, second_node)
+			testing.expect_value(t, app.window_tree(first).focus, first_node)
+			testing.expect_value(t, app.window_tree(second).focus, second_node)
 		}
 	}
 }

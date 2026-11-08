@@ -1,11 +1,12 @@
 package main
 
-import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:log"
+import "core:time"
 
 // Floats (WORK-045). A float is a window of one or more panes above its tab's tiled panes, so opening,
 // moving, minimizing or closing it never resizes or reflows them. Its float header moves it, and holds
@@ -28,7 +29,7 @@ FLOAT_CAPSULE_MAXIMUM :: f32(200)
 // it forms the float header, which moves the float and holds its buttons.
 FLOAT_HEADER :: ui.HEADER_HEIGHT
 
-// What a point on a float header does. Buttons come first, in their left-to-right order.
+// What a point on a float header does.
 Float_Header_Action :: enum u8 {
 	None,
 	Minimize,
@@ -36,7 +37,20 @@ Float_Header_Action :: enum u8 {
 	Close,
 	Move,
 }
-FLOAT_HEADER_BUTTONS :: 3
+
+// A float header button: what it does and its icon. FLOAT_HEADER_BUTTONS lists them left to right, and
+// their rectangles and motions keep its order.
+Float_Header_Button :: struct {
+	action: Float_Header_Action,
+	icon:   ui.Icon,
+}
+
+@(rodata)
+FLOAT_HEADER_BUTTONS := [?]Float_Header_Button {
+	{action = .Minimize, icon = .Minimize},
+	{action = .Dock, icon = .Float_Pane},
+	{action = .Close, icon = .Close},
+}
 
 Float_Edge :: enum u8 {
 	Left,
@@ -115,6 +129,36 @@ Float_Header_Spot :: struct {
 	action: Float_Header_Action,
 }
 
+// A window's floating-pane presentation, which Window embeds; floating_window_init and
+// floating_window_destroy are its lifetime, and this file is its only writer.
+Float_Window_State :: struct {
+	// The float surface's held Left press: a float header button, a float moving or resizing, or the
+	// capsule row.
+	float_press: Float_Press,
+	// The float header part under the pointer, and the float the hover and press animation belongs to,
+	// which it keeps while fading out.
+	float_header_hover:    Maybe(Float_Header_Spot),
+	float_header_shown:    layout.Node_Id,
+	float_header_motion:   ui.Control_Motion,
+	float_header_controls: [len(FLOAT_HEADER_BUTTONS)]ui.Control_Motion,
+	// The minimized float whose capsule is under the pointer; where the user left the capsule row, as a
+	// fraction of the room it can travel, or nil for the bottom-right; and the row's cached geometry.
+	float_capsule_hover:      Maybe(layout.Content),
+	float_capsule_anchor:     Maybe([2]f32),
+	float_capsule_group:      render.Rect,
+	float_capsules:           [dynamic]Float_Capsule,
+	float_capsule_widths:     [dynamic]f32,
+}
+
+floating_window_init :: proc(s: ^Float_Window_State) {
+	s.float_header_shown = layout.INVALID_NODE
+}
+
+floating_window_destroy :: proc(s: ^Float_Window_State) {
+	delete(s.float_capsules)
+	delete(s.float_capsule_widths)
+}
+
 // A float moves or resizes with the pointer.
 floating_dragging :: proc(w: ^Window) -> bool {
 	#partial switch _ in w.float_press {
@@ -138,6 +182,35 @@ floating_header_held :: proc(w: ^Window) -> (layout.Content, bool) {
 floating_button_pressed :: proc(w: ^Window, action: Float_Header_Action) -> bool {
 	p, ok := w.float_press.(Float_Button_Press)
 	return ok && p.action == action
+}
+
+// The float header under the pointer, or the one moving its float, takes the animation; a header the
+// pointer left keeps it while it fades. True when the window must draw again.
+floating_header_animate :: proc(app: ^App, w: ^Window, now: time.Tick) -> bool {
+	header := layout.INVALID_NODE
+	spot, spotted := w.float_header_hover.?
+	if spotted {header = spot.root}
+	held, moving := floating_header_held(w)
+	if moving {
+		tree := window_tree(w)
+		header = layout.float_root(tree, layout.find_content(tree, held))
+	}
+	if header != layout.INVALID_NODE {w.float_header_shown = header}
+	active := header != layout.INVALID_NODE
+	changed := ui.control_update(&w.float_header_motion, active, moving, app.animations, now)
+	for &control, i in w.float_header_controls {
+		action := FLOAT_HEADER_BUTTONS[i].action
+		over := spotted && spot.action == action
+		pressed := floating_button_pressed(w, action)
+		changed = ui.control_update(&control, over, pressed, app.animations, now) || changed
+	}
+	return changed
+}
+
+floating_header_animating :: proc(w: ^Window) -> bool {
+	if ui.control_active(w.float_header_motion) {return true}
+	for control in w.float_header_controls {if ui.control_active(control) {return true}}
+	return false
 }
 
 @(private)
@@ -165,17 +238,17 @@ floating_area :: proc(w: ^Window) -> layout.Rect {
 
 floating_header_height :: proc(w: ^Window) -> f32 {return FLOAT_HEADER * w.scale}
 
-// The float header's buttons, right-aligned in the strip above the panes: Minimize, Dock, Close.
-floating_header_buttons :: proc(w: ^Window, frame: layout.Rect) -> [FLOAT_HEADER_BUTTONS]render.Rect {
+// The float header's buttons, right-aligned in the strip above the panes in FLOAT_HEADER_BUTTONS' order.
+floating_header_buttons :: proc(w: ^Window, frame: layout.Rect) -> [len(FLOAT_HEADER_BUTTONS)]render.Rect {
 	s := w.scale
 	size := ui.HEIGHT_COMPACT * s
 	strip := min(floating_header_height(w), frame.height)
 	y := frame.y + max(0, (strip - size) / 2)
 	end := frame.x + frame.width - ui.SPACE_1 * s
-	buttons: [FLOAT_HEADER_BUTTONS]render.Rect
-	for i := FLOAT_HEADER_BUTTONS - 1; i >= 0; i -= 1 {
+	buttons: [len(FLOAT_HEADER_BUTTONS)]render.Rect
+	#reverse for &button in buttons {
 		end -= size
-		buttons[i] = {max(frame.x, end), y, size, min(size, strip)}
+		button = {max(frame.x, end), y, size, min(size, strip)}
 	}
 	return buttons
 }
@@ -203,12 +276,13 @@ floating_header_at :: proc(
 	group, frame, found := floating_frame_at(w, x, y)
 	if !found {return layout.INVALID_NODE, .None, false}
 	radius := window_pane_radius(app, w)
+	tree := window_tree(w)
 	for pane in floating_rects(w) {
-		if layout.float_root(w.tree, pane.node) != group {continue}
+		if layout.float_root(tree, pane.node) != group {continue}
 		if rounded_contains(pane.rect, radius, x, y) {return layout.INVALID_NODE, .None, false}
 	}
 	for button, i in floating_header_buttons(w, frame) {
-		if rect_contains(button, x, y) {return group, Float_Header_Action(i + 1), true}
+		if render.rect_contains(button, x, y) {return group, FLOAT_HEADER_BUTTONS[i].action, true}
 	}
 	return group, .Move, true
 }
@@ -217,7 +291,7 @@ floating_header_at :: proc(
 // the title bar's colour and behaves as one flat control: the shared hover fill, pointer gloss and pressed
 // fill without lifting, over the whole frame, with its handle and buttons in the strip at the top.
 floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
-	frame, found := layout.float_rect(w.tree, root, floating_area(w))
+	frame, found := layout.float_rect(window_tree(w), root, floating_area(w))
 	if !found {return}
 	s := w.scale
 	radius := window_pane_radius(app, w)
@@ -227,12 +301,10 @@ floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 	shown := w.float_header_shown == root
 	hover, press: f32
 	if shown {hover, press = w.float_header_motion.hover.value, w.float_header_motion.press.value}
-	flat := app.theme
-	flat.hover_lift = 0
 	_, ink, err := ui.button_draw(
 		&w.list,
-		flat,
-		{rect = r, hover = hover, press = press, radius = max(radius / s, 0.01)},
+		app.theme,
+		{rect = r, hover = hover, press = press, radius = max(radius / s, 0.01), surface = .Flat},
 		s,
 		w.pointer,
 	)
@@ -259,29 +331,28 @@ floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 			)
 		}
 	}
-	icons := [FLOAT_HEADER_BUTTONS]ui.Icon{.Minimize, .Float_Pane, .Close}
-	for button, i in floating_header_buttons(w, frame) {
-		action := Float_Header_Action(i + 1)
-		b := ui.Button{rect = button}
+	for rect, i in floating_header_buttons(w, frame) {
+		button := FLOAT_HEADER_BUTTONS[i]
+		b := ui.Button{rect = rect}
 		if shown {
 			b.hover = w.float_header_controls[i].hover.value
 			b.press = w.float_header_controls[i].press.value
 		}
-		if action == .Close {
+		if button.action == .Close {
 			danger := app.theme.error
 			danger.a *= 0.14
 			b.press_color = danger
 		}
 		face, button_ink, button_err := ui.button_draw(&w.list, app.theme, b, s, w.pointer)
 		if button_err != .None {return}
-		ui.icon_draw(&w.list, icons[i], face, button_ink, ui.ICON_BUTTON, s)
+		ui.icon_draw(&w.list, button.icon, face, button_ink, ui.ICON_BUTTON, s)
 	}
 }
 
 // Closes every pane of a float, each as a close Reopen Closed can undo.
 floating_close :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 	contents := make([dynamic]layout.Content, context.temp_allocator)
-	layout.contents(w.tree, root, &contents)
+	layout.contents(window_tree(w), root, &contents)
 	workspace, tab := w.workspace, w.workspace.selected
 	for content in contents {
 		node := layout.find_content(&workspace.tabs[tab].tree, content)
@@ -291,18 +362,19 @@ floating_close :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 
 @(private)
 floating_header_fire :: proc(app: ^App, w: ^Window, content: layout.Content, action: Float_Header_Action) {
-	node := layout.find_content(w.tree, content)
-	if !layout.is_floating(w.tree, node) {return}
+	tree := window_tree(w)
+	node := layout.find_content(tree, content)
+	if !layout.is_floating(tree, node) {return}
 	switch action {
 	case .None, .Move:
 	case .Minimize:
 		floating_minimize(app, w, node)
 	case .Dock:
-		if !layout.set_floating(w.tree, node, false) {return}
+		if !layout.set_floating(tree, node, false) {return}
 		window_relayout(app, w)
 		layout_state_touch(app)
 	case .Close:
-		floating_close(app, w, layout.float_root(w.tree, node))
+		floating_close(app, w, layout.float_root(tree, node))
 	}
 }
 
@@ -336,8 +408,8 @@ floating_open :: proc(
 	bool,
 ) {
 	if tab_index < 0 || tab_index >= len(workspace.tabs) {return 0, false}
-	if !session_open(app, launch.command, launch.directory, launch.profile) {return 0, false}
-	id := app.next_session_id
+	id, opened := session_open(app, launch.command, launch.directory, launch.profile)
+	if !opened {return 0, false}
 	if !floating_attach(app, w, workspace, tab_index, {.Terminal, id}, focus) {
 		session_close(app, id)
 		return 0, false
@@ -385,10 +457,11 @@ floating_new :: proc(app: ^App, w: ^Window) {
 // Float or Dock Pane: lifts the focused tiled pane above the others, or docks a floating one back where
 // it came from.
 floating_toggle :: proc(app: ^App, w: ^Window) {
-	node := w.tree.focus
-	if layout.is_floating(w.tree, node) {
-		if !layout.set_floating(w.tree, node, false) {return}
-	} else if !layout.set_floating(w.tree, node, true, floating_bounds_new(w, w.tree)) {
+	tree := window_tree(w)
+	node := tree.focus
+	if layout.is_floating(tree, node) {
+		if !layout.set_floating(tree, node, false) {return}
+	} else if !layout.set_floating(tree, node, true, floating_bounds_new(w, tree)) {
 		notify(app, .Info, "The tab keeps one tiled pane; split it before floating this one.")
 		return
 	}
@@ -398,11 +471,12 @@ floating_toggle :: proc(app: ^App, w: ^Window) {
 
 // Minimizes the focused floating group, or brings back the group minimized last.
 floating_minimize_toggle :: proc(app: ^App, w: ^Window) {
-	if layout.is_floating(w.tree, w.tree.focus) {
-		floating_minimize(app, w, w.tree.focus)
+	tree := window_tree(w)
+	if layout.is_floating(tree, tree.focus) {
+		floating_minimize(app, w, tree.focus)
 		return
 	}
-	node := layout.float_latest(w.tree, true)
+	node := layout.float_latest(tree, true)
 	if node == layout.INVALID_NODE {
 		notify(app, .Info, "No float in this tab is minimized.")
 		return
@@ -412,19 +486,20 @@ floating_minimize_toggle :: proc(app: ^App, w: ^Window) {
 
 // Minimizes every shown floating group, or when none is shown, brings every minimized one back.
 floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
-	shown, minimized := layout.float_counts(w.tree)
+	tree := window_tree(w)
+	shown, minimized := layout.float_counts(tree)
 	if shown == 0 && minimized == 0 {
 		notify(app, .Info, "This tab has no floats.")
 		return
 	}
-	focused := layout.is_floating(w.tree, w.tree.focus)
+	focused := layout.is_floating(tree, tree.focus)
 	if focused {focus_leave(app, w)}
-	for _, i in w.tree.nodes {
+	for _, i in tree.nodes {
 		root := layout.Node_Id(i)
-		if layout.float_is_root(w.tree, root) {_ = layout.float_minimize(w.tree, root, shown > 0)}
+		if layout.float_is_root(tree, root) {_ = layout.float_minimize(tree, root, shown > 0)}
 	}
 	if shown == 0 {
-		latest := layout.float_latest(w.tree, false)
+		latest := layout.float_latest(tree, false)
 		if latest != layout.INVALID_NODE {pane_focus(app, w, latest)}
 	}
 	window_floats_layout(app, w)
@@ -433,9 +508,10 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 }
 
 floating_minimize :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
-	focused := layout.float_root(w.tree, w.tree.focus) == layout.float_root(w.tree, node)
+	tree := window_tree(w)
+	focused := layout.float_root(tree, tree.focus) == layout.float_root(tree, node)
 	if focused {focus_leave(app, w)}
-	if !layout.float_minimize(w.tree, node, true) {return}
+	if !layout.float_minimize(tree, node, true) {return}
 	window_floats_layout(app, w)
 	if focused {focus_enter(app, w)}
 	layout_state_touch(app)
@@ -453,55 +529,63 @@ window_tiled_rects :: proc(w: ^Window) -> []layout.Pane_Rect {
 	return w.panes[:tiled]
 }
 
-// The topmost floating group whose frame contains the point.
-floating_frame_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, rect: layout.Rect, ok: bool) {
+// The topmost floating group whose frame, grown by `margin` on every side, holds the point: a pane of the
+// group, its root and its frame.
+@(private)
+floating_group_at :: proc(
+	w: ^Window,
+	x, y, margin: f32,
+) -> (
+	pane: layout.Pane_Rect,
+	root: layout.Node_Id,
+	frame: layout.Rect,
+	ok: bool,
+) {
 	last := layout.INVALID_NODE
+	tree := window_tree(w)
 	#reverse for candidate in floating_rects(w) {
-		group := layout.float_root(w.tree, candidate.node)
+		group := layout.float_root(tree, candidate.node)
 		if group == last {continue}
 		last = group
-		frame, found := layout.float_rect(w.tree, group, floating_area(w))
-		if found && x >= frame.x && x < frame.x + frame.width &&
-		   y >= frame.y && y < frame.y + frame.height {return group, frame, true}
+		r, found := layout.float_rect(tree, group, floating_area(w))
+		if found && x >= r.x - margin && x < r.x + r.width + margin &&
+		   y >= r.y - margin && y < r.y + r.height + margin {return candidate, group, r, true}
 	}
-	return layout.INVALID_NODE, {}, false
+	return {}, layout.INVALID_NODE, {}, false
+}
+
+// The topmost floating group whose frame contains the point.
+floating_frame_at :: proc(w: ^Window, x, y: f32) -> (root: layout.Node_Id, rect: layout.Rect, ok: bool) {
+	_, root, rect, ok = floating_group_at(w, x, y, 0)
+	return
 }
 
 // The floating group whose outer edge band holds the point. Internal split edges remain dividers.
 floating_edge_at :: proc(w: ^Window, x, y: f32) -> (pane: layout.Pane_Rect, edges: Float_Edges, ok: bool) {
 	band := FLOAT_EDGE * w.scale / 2
-	last := layout.INVALID_NODE
-	#reverse for candidate in floating_rects(w) {
-		group := layout.float_root(w.tree, candidate.node)
-		if group == last {continue}
-		last = group
-		r, found := layout.float_rect(w.tree, group, floating_area(w))
-		if !found ||
-		   x < r.x - band || x >= r.x + r.width + band ||
-		   y < r.y - band || y >= r.y + r.height + band {continue}
-		if x < r.x + band {edges += {.Left}}
-		if x >= r.x + r.width - band {edges += {.Right}}
-		if y < r.y + band {edges += {.Top}}
-		if y >= r.y + r.height - band {edges += {.Bottom}}
-		if edges == {} {return {}, {}, false}
-		pane = candidate
-		pane.rect = r
-		return pane, edges, true
-	}
-	return {}, {}, false
+	candidate, _, r, found := floating_group_at(w, x, y, band)
+	if !found {return {}, {}, false}
+	if x < r.x + band {edges += {.Left}}
+	if x >= r.x + r.width - band {edges += {.Right}}
+	if y < r.y + band {edges += {.Top}}
+	if y >= r.y + r.height - band {edges += {.Bottom}}
+	if edges == {} {return {}, {}, false}
+	pane = candidate
+	pane.rect = r
+	return pane, edges, true
 }
 
 // Whether a floating group, its edge band or the capsule row covers the point.
 floating_covers :: proc(w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
 	if _, _, frame := floating_frame_at(w, x, y); frame {return true}
-	return rect_contains(w.float_capsule_group, x, y)
+	return render.rect_contains(w.float_capsule_group, x, y)
 }
 
 // Where a move or resize of the float holding the pane begins; false when the pane no longer floats.
 @(private)
 floating_grab :: proc(w: ^Window, pane: layout.Pane_Rect, x, y: f32) -> (Float_Grab, bool) {
-	rect, found := layout.float_rect(w.tree, pane.node, floating_area(w))
+	rect, found := layout.float_rect(window_tree(w), pane.node, floating_area(w))
 	return {content = pane.content, start = {x, y}, rect = rect}, found
 }
 
@@ -556,19 +640,20 @@ floating_drag_follow :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	case:
 		return false
 	}
-	node := layout.find_content(w.tree, grab.content)
-	if !layout.is_floating(w.tree, node) {w.float_press = nil; return false}
+	tree := window_tree(w)
+	node := layout.find_content(tree, grab.content)
+	if !layout.is_floating(tree, node) {w.float_press = nil; return false}
 	area := floating_area(w)
 	if area.width <= 0 || area.height <= 0 {return true}
 	r := floating_drag_rect(area, grab.rect, {x - grab.start.x, y - grab.start.y}, edges, w.scale)
 	bounds := floating_bounds_for_rect(area, r)
-	if layout.float_set_bounds(w.tree, node, bounds) {window_floats_layout(app, w)}
+	if layout.float_set_bounds(tree, node, bounds) {window_floats_layout(app, w)}
 	return true
 }
 
 // Moves while the float surface holds Left: the float or the capsule row follows the pointer. False when
 // no drag is held, so the move reaches the surfaces; a move without Left ends the drag the release missed.
-floating_pointer_move :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
+floating_pointer_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) -> bool {
 	switch _ in w.float_press {
 	case nil, Float_Button_Press:
 		return false
@@ -627,20 +712,22 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	clear(&w.float_capsules)
 	clear(&w.float_capsule_widths)
 	w.float_capsule_group = {}
-	if w.tree == nil || window_linked(w) {return}
+	tree := window_tree(w)
+	if tree == nil || window_linked(w) {return}
 	s := w.scale
-	for _, i in w.tree.nodes {
+	for _, i in tree.nodes {
 		root := layout.Node_Id(i)
-		if !layout.float_is_root(w.tree, root) {continue}
-		floating, ok := layout.float_of(w.tree, root)
+		if !layout.float_is_root(tree, root) {continue}
+		floating, ok := layout.float_of(tree, root)
 		if !ok || !floating.minimized {continue}
-		pane_id := layout.float_pane(w.tree, root)
+		pane_id := layout.float_pane(tree, root)
 		if pane_id == layout.INVALID_NODE {continue}
-		pane := w.tree.nodes[pane_id].(layout.Pane) or_continue
+		content, is_pane := layout.pane_content(tree, pane_id)
+		if !is_pane {continue}
 		capsule := Float_Capsule {
 			root = root,
-			content = pane.content,
-			order = layout.float_order(w.tree, root),
+			content = content,
+			order = layout.float_order(tree, root),
 		}
 		if _, err := append(&w.float_capsules, capsule); err != nil {
 			clear(&w.float_capsules)
@@ -662,7 +749,8 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	area := floating_area(w)
 	margin := ui.SPACE_3 * s
 	for &capsule, i in w.float_capsules {
-		text := ui.text_width(&label, floating_title(app, capsule.content))
+		entry := workspace_session_for_content(app, capsule.content)
+		text := ui.text_width(&label, content_pane_title(app, entry, capsule.content))
 		w.float_capsule_widths[i] = clamp(
 			text + (ui.SPACE_3 + ui.ICON_BUTTON + ui.SPACE_2 + ui.SPACE_3) * s,
 			FLOAT_CAPSULE_MINIMUM * s,
@@ -693,14 +781,10 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-floating_capsules :: proc(w: ^Window) -> []Float_Capsule {
-	return w.float_capsules[:]
-}
-
 @(private)
 floating_capsule_at :: proc(w: ^Window, x, y: f32) -> Maybe(Float_Capsule) {
-	for capsule in floating_capsules(w) {
-		if rect_contains(capsule.rect, x, y) {return capsule}
+	for capsule in w.float_capsules {
+		if render.rect_contains(capsule.rect, x, y) {return capsule}
 	}
 	return nil
 }
@@ -739,23 +823,12 @@ floating_capsules_follow :: proc(w: ^Window, x, y: f32) -> bool {
 	return true
 }
 
-floating_title :: proc(app: ^App, content: layout.Content) -> string {
-	if entry := workspace_session_for_content(app, content); entry != nil {
-		return entry.name != "" ? entry.name : pane_header_title(&entry.header)
-	}
-	return content_title(app, content)
-}
-
-floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
-	capsules := floating_capsules(w)
-	if len(capsules) == 0 {return .Ok}
+floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
+	if len(w.float_capsules) == 0 {return .Ok}
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	label := ui.text_styled(&w.ui_text, .Body)
-	capsule_theme := app.theme
-	capsule_theme.hover_lift = 0
-	capsule_theme.hover = {}
-	for capsule in capsules {
+	for capsule in w.float_capsules {
 		r := capsule.rect
 		radius := ui.pill_radius(r)
 		panel := ui.popover_panel(r, s)
@@ -764,12 +837,13 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		hovered := w.float_capsule_hover == capsule.content
 		face, ink, err := ui.button_draw(
 			&w.list,
-			capsule_theme,
+			app.theme,
 			{
 				rect = r,
 				hover = hovered ? 1 : 0,
 				press = floating_capsule_pressed(w, capsule.content) ? 1 : 0,
 				radius = radius / s,
+				surface = .Flat_Unfilled,
 			},
 			s,
 			w.pointer,
@@ -781,23 +855,25 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 			ui.ICON_BUTTON * s,
 			ui.ICON_BUTTON * s,
 		}
-		switch capsule.content.kind {
-		case .Terminal:
-			entry := workspace_session_for_content(app, capsule.content)
-			badge, atlas, found := pane_icon(app, entry, ui.ICON_BUTTON * s)
-			if found != .Ok {return found}
-			if result := ui.shell_badge_draw(&w.list, &w.ui_text, app.theme, icon, badge, s, atlas);
-			   result != .Ok {return result}
-		case .Markdown:
-			ui.icon_draw(&w.list, .Markdown, icon, ink, ui.ICON_BUTTON, s)
-		case .Settings:
-			ui.icon_draw(&w.list, .Settings, icon, ink, ui.ICON_BUTTON, s)
-		}
+		entry := workspace_session_for_content(app, capsule.content)
+		badge, found := content_badge(app, entry, capsule.content.kind, ui.ICON_BUTTON * s)
+		if found != .Ok {return found}
+		if badge.icon != .None {
+			ui.icon_draw(&w.list, badge.icon, icon, ink, ui.ICON_BUTTON, s)
+		} else if result := ui.shell_badge_draw(
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			icon,
+			badge.glyph,
+			s,
+			badge.atlas,
+		); result != .Ok {return result}
 		text_x := icon.x + icon.width + ui.SPACE_2 * s
 		if result := ui.draw_fading_text(
 			&label,
 			&w.list,
-			floating_title(app, capsule.content),
+			content_pane_title(app, entry, capsule.content),
 			text_x,
 			face.y + (face.height - label.line_height) / 2 + label.ascent,
 			ink,
@@ -813,10 +889,10 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 floating_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if _, _, edge := floating_edge_at(w, x, y); edge {return true}
 	if _, _, header := floating_header_at(app, w, x, y); header {return true}
-	return rect_contains(w.float_capsule_group, x, y)
+	return render.rect_contains(w.float_capsule_group, x, y)
 }
 
-floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	hover: Maybe(layout.Content)
 	header: Maybe(Float_Header_Spot)
@@ -844,10 +920,10 @@ floating_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform
 	}
 }
 
-floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+floating_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	x, y := f32(e.x), f32(e.y)
-	if rect_contains(w.float_capsule_group, x, y) {
+	if render.rect_contains(w.float_capsule_group, x, y) {
 		press := Float_Capsules_Press {
 			grab = {start = {x, y}, rect = w.float_capsule_group},
 		}
@@ -860,12 +936,14 @@ floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if !edge {
 		root, action, header := floating_header_at(app, w, x, y)
 		if !header {return}
-		node := w.tree.focus
-		if layout.float_root(w.tree, node) != root {node = layout.float_pane(w.tree, root)}
+		tree := window_tree(w)
+		node := tree.focus
+		if layout.float_root(tree, node) != root {node = layout.float_pane(tree, root)}
 		w.dirty = true
 		if action != .Move {
 			// A button fires on release over itself, like every other control.
-			w.float_press = Float_Button_Press{w.tree.nodes[node].(layout.Pane).content, action}
+			content, _ := layout.pane_content(tree, node)
+			w.float_press = Float_Button_Press{content, action}
 			return
 		}
 		pane_focus(app, w, node)
@@ -882,7 +960,7 @@ floating_press :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
 	if grab, found := floating_grab(w, pane, x, y); found {w.float_press = Float_Resize{grab, edges}}
 }
 
-floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+floating_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
 	x, y := f32(e.x), f32(e.y)
 	switch p in w.float_press {
@@ -896,7 +974,8 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		pane_header_cancel(w)
 	case Float_Button_Press:
 		under := Float_Header_Action.None
-		target := layout.float_root(w.tree, layout.find_content(w.tree, p.content))
+		tree := window_tree(w)
+		target := layout.float_root(tree, layout.find_content(tree, p.content))
 		if root, action, over := floating_header_at(app, w, x, y); over && root == target {under = action}
 		w.float_press = nil
 		w.dirty = true
@@ -910,7 +989,7 @@ floating_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) 
 		if !armed {return true}
 		w.dirty = true
 		if capsule, found := floating_capsule_at(w, x, y).?; found && capsule.content == pressed {
-			pane_focus(app, w, layout.find_content(w.tree, pressed))
+			pane_focus(app, w, layout.find_content(window_tree(w), pressed))
 			layout_state_touch(app)
 		}
 	}
@@ -936,4 +1015,29 @@ floating_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .Move, .None:
 	}
 	return "Move float"
+}
+
+when AIO_CONTROL {
+	floating_state_report :: proc(r: ^State_Report, w: ^Window) {
+		hover := (w.float_header_hover.? or_else Float_Header_Spot{}).action
+		state_value(r, "panes.floating", len(floating_rects(w)))
+		state_value(r, "panes.capsules", len(w.float_capsules))
+		state_rect(r, "panes.capsule_group", w.float_capsule_group)
+		state_value(r, "panes.float_dragging", floating_dragging(w))
+		state_value(r, "panes.float_header_hover", hover)
+		state_valuef(r, "panes.float_header_hover_value", "%g", w.float_header_motion.hover.value)
+		state_valuef(r, "panes.float_header_press_value", "%g", w.float_header_motion.press.value)
+	}
+}
+
+// Floating pane pointer surface: leave and held drag
+
+@(private)
+floating_leave :: proc(_: ^App, w: ^Window) {
+	floating_hover_clear(w)
+}
+
+@(private)
+floating_held :: proc(app: ^App, w: ^Window, _: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
+	return floating_pointer_move(app, w, e) ? .Taken : .Free
 }

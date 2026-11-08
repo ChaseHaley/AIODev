@@ -137,7 +137,6 @@ layout_state_encode_round_trips_structure :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, json.unmarshal(transmute([]u8)text, &decoded,
 		allocator = context.temp_allocator), nil) { return }
 	testing.expect_value(t, decoded.version, app.LAYOUT_STATE_VERSION)
-	testing.expect_value(t, decoded.workspace_number, u32(0))
 	if !testing.expect_value(t, len(decoded.workspaces), 1) { return }
 	saved := decoded.workspaces[0]
 	testing.expect_value(t, saved.name, "Notes")
@@ -208,13 +207,14 @@ layout_state_restores_workspaces_tabs_and_directories :: proc(t: ^testing.T) {
 	app.pane_split(&first.state, w, .Right, 0.4)
 	first_root := w.workspace.tabs[0].tree.root
 	saved_ratio := w.workspace.tabs[0].tree.nodes[first_root].(layout.Split).ratio
-	if !testing.expect(t, app.tab_create(&first.state, w.workspace, directory = pane_directory)) {
+	server, created := app.tab_create(&first.state, w.workspace, directory = pane_directory)
+	if !testing.expect(t, created) {
 		app.app_destroy(&first.state)
 		return
 	}
 	app.tab_select(&first.state, w, 1)
 	w.workspace.tabs[1].name = strings.clone("Build")
-	first.state.sessions[len(first.state.sessions) - 1].name = strings.clone("server")
+	app.session_find(&first.state, server).name = strings.clone("server")
 	delete(w.workspace.name)
 	w.workspace.name = strings.clone("Project")
 	w.workspace.icon.tint = 4

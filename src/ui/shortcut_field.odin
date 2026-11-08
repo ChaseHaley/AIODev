@@ -1,13 +1,13 @@
 package ui
 
-import "aio:glyphs"
+import "aio:commands"
 import "aio:render"
 import "core:fmt"
-import "core:strings"
 
 SHORTCUT_FIELD_WIDTH :: f32(176)
 
-// The field borrows the first label; the complete alternatives remain in its owner's value.
+// The field borrows the first label; the complete alternatives remain in its owner's value. Labels come
+// from the shortcut grammar, so a comma can itself be a key ("Ctrl+,").
 Shortcut_Summary :: struct {
 	first:      string,
 	additional: int,
@@ -15,12 +15,11 @@ Shortcut_Summary :: struct {
 
 shortcut_summary :: proc(value: string) -> Shortcut_Summary {
 	result: Shortcut_Summary
-	start, count := 0, 0
-	for end in 0 ..= len(value) {
-		if end < len(value) && value[end] != ',' {continue}
-		part := strings.trim_space(value[start:end])
-		start = end + 1
-		if part == "" || strings.equal_fold(part, "none") {continue}
+	count := 0
+	alternatives := commands.shortcut_alternatives_begin(value)
+	for part, ok := commands.shortcut_alternatives_next(&alternatives); ok;
+	    part, ok = commands.shortcut_alternatives_next(&alternatives) {
+		if part == "" {continue}
 		if count == 0 {result.first = part}
 		count += 1
 	}
@@ -54,11 +53,12 @@ Shortcut_Field_State :: struct {
 }
 
 // One field for idle, selected and recording states on every surface. Only the popup lists
-// alternatives; even a recording field keeps the same compact summary and input typography.
+// alternatives; even a recording field keeps the same compact summary and input typography. The
+// caller's layer is current again afterwards.
 shortcut_field_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, parts: Row_Parts,
 	summary: Shortcut_Summary, state: Shortcut_Field_State, page: render.Rect, scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	input := text_styled(text, .Body)
 	baseline := parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent
 	box_draw(list, parts.field, theme, state.focused && !state.capturing, scale)
@@ -66,7 +66,9 @@ shortcut_field_draw :: proc(
 		radius := RADIUS_CONTROL * scale
 		draw_rect(list, {rect = parts.field, color = theme.accent, radius = radius, stroke = 2 * scale})
 	}
-	if render.push_layer(list, parts.field, RADIUS_CONTROL * scale) != .None {return .Ok}
+	scope, opened := clip_scope_open(list, parts.field, RADIUS_CONTROL * scale)
+	if !opened {return .Ok}
+	defer clip_scope_close(list, scope)
 	first := summary.first
 	if first == "" {
 		empty := state.empty_label != "" ? state.empty_label : "Add shortcut"

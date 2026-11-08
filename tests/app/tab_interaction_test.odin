@@ -23,9 +23,9 @@ interaction_rect :: proc(s: ^app.App, w: ^app.Window, index: int, close := false
 }
 
 @(private="file")
-interaction_button :: proc(s: ^app.App, id: platform.Window_Id, r: render.Rect,
+interaction_button :: proc(s: ^app.App, id: input.Window_Id, r: render.Rect,
 	button: input.Mouse_Button, pressed: bool, modifiers: input.Modifiers = {}) {
-	app.handle_event(s, platform.Mouse_Button_Event{window = id, button = button, pressed = pressed,
+	app.handle_event(s, input.Mouse_Button_Event{window = id, button = button, pressed = pressed,
 		x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2), modifiers = modifiers})
 }
 
@@ -78,7 +78,7 @@ tab_interaction_selection_context_and_drag_use_both_geometry_adapters :: proc(t:
 		interaction_marks(t, w, {true, false, true})
 		testing.expect_value(t, w.workspace.selected, selected)
 		interaction_button(s, w.id, r, .Right, false)
-		app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+		app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 		interaction_button(s, w.id, r, .Left, true)
 		pressed, held := w.drag.(app.Drag_Pressed)
 		testing.expect(t, held && !pressed.grab.(app.Tab_Grab).modified)
@@ -88,7 +88,7 @@ tab_interaction_selection_context_and_drag_use_both_geometry_adapters :: proc(t:
 		grabbed := w.workspace.tabs[0]
 		interaction_button(s, w.id, r, .Left, true)
 		target := interaction_rect(s, w, 2)
-		app.handle_event(s, platform.Mouse_Move_Event{window = w.id, buttons = {.Left},
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, buttons = {.Left},
 			x = i32(target.x + target.width / 2), y = i32(target.y + target.height / 2)})
 		testing.expect(t, app.tab_drag_active(w))
 		testing.expect(t, w.workspace.tabs[2] == grabbed)
@@ -158,7 +158,7 @@ tab_interaction_overlay_selection_dismisses_without_arming_reorder :: proc(t: ^t
 	interaction_button(s, w.id, r, .Right, true)
 	testing.expect(t, app.tab_menu_shown(w) && !app.rail_visible(w))
 	interaction_button(s, w.id, r, .Right, false)
-	app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	app.tab_select(s, w, 0)
 	rail_show(w)
 	close := interaction_rect(s, w, 1, true)

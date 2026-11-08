@@ -1,9 +1,9 @@
 package app_test
 
+import "aio:colour"
 import "core:testing"
 import app "../../src"
 import "aio:render"
-import "aio:term_view"
 import "aio:ui"
 import fixtures "../fixtures"
 
@@ -41,16 +41,16 @@ workspace143_colors_have_contrast_in_all_shipped_themes_and_selection_states :: 
 	for file in fixtures.SHIPPED_THEMES {
 		{
 			resolved := fixtures.shipped_theme_file(file) or_continue
-			theme := ui.theme_from(resolved)
+			theme := ui.theme_from(resolved, fixtures.default_interface())
 			testing.expect_value(t, app.workspace_icon_tint(0, theme.text), theme.text)
 			testing.expect_value(t, app.workspace_icon_tint(-1, theme.text), theme.text)
 			for tint in 1..<len(app.WORKSPACE_ICON_COLORS) {
 				color := app.workspace_icon_tint(tint, theme.text)
 				for base in ([?]render.Color{theme.pane, theme.surface}) {
-					testing.expect(t, term_view.contrast_ratio(color, base) >= 3)
+					testing.expect(t, colour.contrast_ratio(color, base) >= 3)
 					selected := base
 					for i in 0..<3 { selected[i] = theme.selection[i]*theme.selection.a+base[i]*(1-theme.selection.a) }
-					testing.expect(t, term_view.contrast_ratio(color, selected) >= 3)
+					testing.expect(t, colour.contrast_ratio(color, selected) >= 3)
 				}
 			}
 		}
@@ -78,7 +78,7 @@ workspace143_targeted_pointer_keyboard_cancel_and_saved_filter :: proc(t: ^testi
 	app.workspace_row_icon_open(&state, &w, target.id)
 	button := app.workspace_icon_color_button(&w)
 	app.workspace_picker_click(&state, &w, button.x+button.width/2, button.y+button.height/2, false)
-	testing.expect(t, (app.workspace_picker_mode(&w.workspace_picker) == .Tint))
+	testing.expect(t, app.workspace_picker_tint(&w.workspace_picker))
 	testing.expect_value(t, app.workspace_picker_count(&w), len(app.WORKSPACE_ICON_COLORS)+1)
 	app.workspace_picker_key(&state, &w, {key = .Arrow_Down, pressed = true})
 	testing.expect_value(t, w.workspace_picker.selected, 5)
@@ -88,7 +88,7 @@ workspace143_targeted_pointer_keyboard_cancel_and_saved_filter :: proc(t: ^testi
 	app.workspace_picker_text(&state, &w, "ignored")
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "")
 	app.workspace_picker_key(&state, &w, {key = .Escape, pressed = true})
-	testing.expect(t, !(app.workspace_picker_mode(&w.workspace_picker) == .Tint) && app.workspace_picker_icons(&w.workspace_picker))
+	testing.expect(t, !app.workspace_picker_tint(&w.workspace_picker) && app.workspace_picker_icons(&w.workspace_picker))
 	testing.expect_value(t, target.icon.tint, 0)
 	testing.expect_value(t, w.workspace_picker.selected, len(app.WORKSPACE_ICONS)+2)
 	app.workspace_picker_key(&state, &w, {key = .Enter, pressed = true})
@@ -96,7 +96,7 @@ workspace143_targeted_pointer_keyboard_cancel_and_saved_filter :: proc(t: ^testi
 	app.workspace_picker_key(&state, &w, {key = .Enter, pressed = true})
 	testing.expect_value(t, target.icon.tint, len(app.WORKSPACE_ICON_COLORS)-1)
 	testing.expect_value(t, current.icon.tint, 0)
-	testing.expect(t, !app.workspace_picker_icons(&w.workspace_picker) && !(app.workspace_picker_mode(&w.workspace_picker) == .Tint))
+	testing.expect(t, !app.workspace_picker_icons(&w.workspace_picker) && !app.workspace_picker_tint(&w.workspace_picker))
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "Target")
 	testing.expect(t, w.workspace == &current)
 	app.workspace_row_icon_open(&state, &w, target.id)
@@ -108,7 +108,7 @@ workspace143_targeted_pointer_keyboard_cancel_and_saved_filter :: proc(t: ^testi
 	app.workspace_row_icon_open(&state, &w, target.id)
 	app.workspace_icon_color_open(&state, &w)
 	app.workspace_picker_open(&state, &w)
-	testing.expect(t, !(app.workspace_picker_mode(&w.workspace_picker) == .Tint) && !app.workspace_picker_icons(&w.workspace_picker))
+	testing.expect(t, !app.workspace_picker_tint(&w.workspace_picker) && !app.workspace_picker_icons(&w.workspace_picker))
 }
 
 @(test)
@@ -134,7 +134,7 @@ workspace143_stale_color_target_never_changes_current_workspace :: proc(t: ^test
 	testing.expect(t, app.workspace_discard_empty(&state, target))
 	app.workspace_picker_key(&state, &w, {key = .Enter, pressed = true})
 	testing.expect_value(t, current.icon.tint, 0)
-	testing.expect(t, !(app.workspace_picker_mode(&w.workspace_picker) == .Tint) && !app.workspace_picker_icons(&w.workspace_picker))
+	testing.expect(t, !app.workspace_picker_tint(&w.workspace_picker) && !app.workspace_picker_icons(&w.workspace_picker))
 	testing.expect(t, w.workspace == current)
 }
 
@@ -158,5 +158,30 @@ workspace143_short_color_grid_keeps_all_choices_and_back_reachable :: proc(t: ^t
 				testing.expect_value(t, app.workspace_picker_hit(&w, g.apply.x+1, g.apply.y+1), len(app.WORKSPACE_ICON_COLORS))
 			}
 		}
+	}
+}
+
+@(test)
+workspace_icon_mutations_schedule_save_without_resetting_picker_scroll :: proc(t: ^testing.T) {
+	state: app.App
+	workspace := app.Workspace{id = 7, name = "Original"}
+	w := app.Window{workspace = &workspace}
+	w.workspace_picker.state = app.Workspace_Picker_List{}
+	w.workspace_picker.scroll = 42
+	append(&state.workspaces, &workspace)
+	append(&state.windows, &w)
+	defer delete(state.workspaces)
+	defer delete(state.windows)
+	defer delete(workspace.icon.emoji)
+	defer delete(w.workspace_picker.rows)
+	for tint in ([?]bool{false, true}) {
+		state.layout_save = app.Layout_Save_Idle{}
+		w.dirty = false
+		changed := tint ? app.workspace_icon_color_set(&state, &workspace, 1) :
+			app.workspace_icon_set(&state, &workspace, 2, "")
+		testing.expect(t, changed)
+		_, scheduled := state.layout_save.(app.Layout_Save_Scheduled)
+		testing.expect(t, scheduled && w.dirty)
+		testing.expect_value(t, w.workspace_picker.scroll, 42)
 	}
 }

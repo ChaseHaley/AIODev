@@ -34,8 +34,8 @@ workspace_phrases_are_unique_and_previews_remain_unnamed :: proc(t: ^testing.T) 
 	defer delete(name)
 	workspace := app.workspace_create_empty(&state)
 	if !testing.expect(t, workspace != nil) {return}
-	testing.expect_value(t, app.rename_target_commit(&state, nil,
-		{app.Rename_Kind.Workspace, workspace.id}, name), app.Rename_Outcome.Saved)
+	testing.expect_value(t, app.rename_target_commit(&state, app.Rename_Workspace_Target{workspace.id}, name,
+		.Workspace_Row), app.Rename_Outcome.Saved)
 	rng = rand.create(42)
 	other := app.workspace_default_name(&state)
 	defer delete(other)
@@ -142,4 +142,17 @@ every_new_window_opens_at_the_configured_size :: proc(t: ^testing.T) {
 	if !testing.expect(t, opened != nil) {return}
 	testing.expect_value(t, u32(opened.width), expected.surface_width)
 	testing.expect_value(t, u32(opened.height), expected.surface_height)
+}
+
+@(test)
+workspace_name_taken_ignores_previews_and_the_edited_workspace :: proc(t: ^testing.T) {
+	owner := app.Workspace{id = 7, name = "Build Tools"}
+	preview := app.Workspace{id = 8, name = "Preview Name", provisional = true}
+	state: app.App
+	defer delete(state.workspaces)
+	append(&state.workspaces, &owner, &preview)
+	testing.expect(t, app.workspace_name_taken(&state, "build tools", 0))
+	testing.expect(t, !app.workspace_name_taken(&state, "BUILD TOOLS", owner.id))
+	testing.expect(t, !app.workspace_name_taken(&state, "preview name", 0))
+	testing.expect(t, !app.workspace_name_taken(&state, "Unused Name", 0))
 }

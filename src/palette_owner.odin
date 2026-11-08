@@ -1,12 +1,11 @@
 package main
 
 import "aio:commands"
-import "aio:font"
-import "aio:layout"
-import "aio:settings"
-import "aio:term"
+import "aio:input"
 import "aio:platform"
+import "aio:settings"
 import "aio:ui"
+import "core:time"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
 // mapping between them, so keeping a window through a closing fade needs no second hand-synced phase.
@@ -15,8 +14,8 @@ Palette_Owner_State :: union {
 	Palette_Closing,
 }
 
-Palette_Open :: struct {window: platform.Window_Id}
-Palette_Closing :: struct {window: platform.Window_Id}
+Palette_Open :: struct {window: input.Window_Id}
+Palette_Closing :: struct {window: input.Window_Id}
 
 palette_owner_state :: proc(app: ^App) -> Palette_Owner_State {
 	owner, owned := app.palette_owner.?
@@ -25,8 +24,21 @@ palette_owner_state :: proc(app: ^App) -> Palette_Owner_State {
 	return Palette_Closing{owner}
 }
 
+// Advances the palette's fade; its window draws it, and keeps it until a fade-out settles.
+palette_animate :: proc(app: ^App, now: time.Tick) {
+	changed, settled := ui.presence_advance(&app.palette.presence, app.animations, now)
+	owner := palette_owner_window(app)
+	if owner == nil {return}
+	if changed {owner.dirty = true}
+	if settled {palette_release(app, owner)}
+}
+
+palette_animating :: proc(app: ^App) -> bool {
+	return palette_owner_state(app) != nil && ui.presence_active(app.palette.presence)
+}
+
 // Zero means unowned at the external window-id boundary, not in the stored owner.
-palette_owner_id :: proc(app: ^App) -> platform.Window_Id {
+palette_owner_id :: proc(app: ^App) -> input.Window_Id {
 	switch state in palette_owner_state(app) {
 	case nil: return 0
 	case Palette_Open: return state.window
@@ -82,153 +94,183 @@ palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 		palette_release(app, previous)
 	}
 	window_overlays_cancel(app, w)
-	entry := focused_session(app, w)
-	has_selection := entry != nil && term.has_selection(entry.session)
-	registered := commands.set_enabled(
-		&app.registry,
-		commands.Command_Id(Action.Copy),
-		has_selection,
-	)
-	assert(registered)
 	app.palette_owner = w.id
 	app.palette.leader = app.leader
 	ui.palette_open_mode(&app.palette, &app.registry, mode)
-	ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
+	ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
 }
 
-// A tab's second identity: the focused pane's terminal title, which can differ from a user name.
+// The palette's settings: every schema setting with a row of its own, then the page sections the
+// palette can jump to. The palette borrows the table for the app's lifetime.
 @(require_results)
-palette_tab_detail :: proc(app: ^App, tab: ^Tab) -> string {
-	if tab == nil || tab.tree.root == layout.INVALID_NODE || tab.tree.focus == layout.INVALID_NODE {
-		return ""
-	}
-	pane, is_pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	if !is_pane {return ""}
-	if entry := workspace_session_for_content(app, pane.content); entry != nil {
-		return pane_header_title(&entry.header)
-	}
-	return content_title(app, pane.content)
-}
-
-@(private)
-palette_tab_key :: proc(workspace: ^Workspace, tab: ^Tab) -> u64 {
-	return u64(workspace.id) << 32 | u64(tab.id)
-}
-
-@(private)
-palette_tab_count :: proc(user: rawptr) -> int {
-	app := cast(^App)user
+palette_settings_init :: proc(app: ^App) -> bool {
+	@(static) table: [len(settings.SCHEMA) + len(Settings_Section)]ui.Palette_Setting
+	@(static, rodata)
+	schema := settings.SCHEMA
 	count := 0
-	for workspace in app.workspaces {
-		if workspace.provisional {continue}
-		count += len(workspace.tabs)
+	for entry in schema {
+		if entry.embedded {continue}
+		table[count] = ui.palette_setting(entry)
+		count += 1
 	}
-	return count
+	for section in SETTINGS_SECTIONS {
+		if section.palette_key == "" {continue}
+		table[count] = {key = section.palette_key, title = section.title, group = section.title}
+		count += 1
+	}
+	return ui.palette_init(&app.palette, table[:count]) == nil
 }
 
-@(private)
-palette_tab_at :: proc(user: rawptr, index: int) -> ui.Palette_Item {
-	app := cast(^App)user
-	remaining := index
-	for workspace in app.workspaces {
-		if workspace.provisional {continue}
-		if remaining < len(workspace.tabs) {
-			tab := workspace.tabs[remaining]
-			return {
-				label  = tab.title,
-				detail = palette_tab_detail(app, tab),
-				owner  = workspace.name,
-				id     = palette_tab_key(workspace, tab),
+when AIO_CONTROL {
+	// The palette's verification keys. Only the window that owns the palette reports its contents.
+	palette_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		owner := palette_owner_id(app)
+		owns := w != nil && owner == w.id
+		p := &app.palette
+		layout: ui.Palette_Layout
+		item, value := "", ""
+		edit := ui.Palette_Edit_Kind.None
+		if owns {
+			layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+			edit = ui.palette_editing(p)
+			if p.selected >= 0 && p.selected < len(p.results) {
+				selected := p.results[p.selected]
+				item = ui.palette_result_name(p, selected)
+				// The saved value of the selected setting row, read the way its palette control reads it.
+				if selected.kind == .Setting {value, _ = palette_setting_value(app, item)}
+				if selected.command != nil {
+					value = commands.shortcut_set_text(selected.command.shortcuts, context.temp_allocator)
+				}
 			}
 		}
-		remaining -= len(workspace.tabs)
-	}
-	return {}
-}
-
-@(private)
-palette_workspace_count :: proc(user: rawptr) -> int {
-	app := cast(^App)user
-	count := 0
-	for workspace in app.workspaces {
-		if !workspace.provisional {count += 1}
-	}
-	return count
-}
-
-@(private)
-palette_workspace_at :: proc(user: rawptr, index: int) -> ui.Palette_Item {
-	app := cast(^App)user
-	remaining := index
-	for workspace in app.workspaces {
-		if workspace.provisional {continue}
-		if remaining == 0 {
-			detail := ""
-			if tab := selected_tab(workspace); tab != nil {
-				detail = palette_tab_detail(app, tab)
-			}
-			return {label = workspace.name, detail = detail, id = u64(workspace.id)}
-		}
-		remaining -= 1
-	}
-	return {}
-}
-
-palette_set_sources :: proc(app: ^App) {
-	ui.palette_set_sources(
-		&app.palette,
-		{user = app, count = palette_tab_count, item = palette_tab_at},
-		{user = app, count = palette_workspace_count, item = palette_workspace_at},
-	)
-}
-
-// Selecting a tab follows its workspace's exclusive window ownership (D-051): an owned workspace
-// reuses and focuses its window, an unowned one is adopted by the requesting window first.
-palette_activate_tab :: proc(app: ^App, w: ^Window, key: u64) -> bool {
-	workspace := workspace_find(app, u32(key >> 32))
-	if workspace == nil {return false}
-	tab_id := u32(key)
-	tab_index := -1
-	for tab, index in workspace.tabs {
-		if tab.id == tab_id {
-			tab_index = index
-			break
+		state_value(r, "palette.window", owner)
+		state_value(r, "palette.open", palette_active(app, w))
+		state_text(r, "palette.query", owns ? ui.palette_query(p) : "")
+		state_text(r, "palette.mode", owns ? ui.palette_mode_word(p.mode) : "all")
+		state_text(r, "palette.prefix", owns ? ui.palette_mode_prefix(p.mode) : "")
+		state_value(r, "palette.selected", owns ? p.selected : 0)
+		state_value(r, "palette.items", owns ? len(p.results) : 0)
+		state_text(r, "palette.item", item)
+		state_value(r, "palette.scroll", owns ? p.scroll : 0)
+		state_value(r, "palette.edit", edit)
+		state_text(r, "palette.value", value)
+		state_value(r, "palette.rows", layout.rows)
+		state_valuef(r, "palette.row_height", "%g", layout.row_height)
+		state_rect(r, "palette.panel", layout.panel)
+		state_rect(r, "palette.input", layout.input)
+		state_rect(r, "palette.list", layout.list)
+		for mode in ui.Palette_Mode {
+			state_rect(r, state_key("palette.mode.%s", ui.palette_mode_word(mode)), layout.modes[mode])
 		}
 	}
-	if tab_index < 0 {return false}
-	owner := window_for_workspace(app, workspace)
-	if owner == nil {
-		if !workspace_select(app, w, workspace) {return false}
-		owner = window_for_workspace(app, workspace)
+}
+
+// Command palette pointer surface
+
+@(private)
+palette_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return palette_active(app, w)}
+
+@(private)
+palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Palette {return}
+	x, y := f32(e.x), f32(e.y)
+	p := &app.palette
+	l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+	pointer_set(app, w, ui.palette_pointer(p, l, x, y))
+	on_palette_outcome(app, w, ui.palette_pointer_move(p, l, &w.ui_text, x, y, .Left in e.buttons), 0)
+}
+
+@(private)
+palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
+	p := &app.palette
+	return p.reset_hover >= 0 && ui.palette_editing(p) == .None ? "Reset setting" : ""
+}
+
+@(private)
+palette_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	x, y := f32(e.x), f32(e.y)
+	p := &app.palette
+	l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+	if e.button == .Left && ui.palette_input_contains(l, x, y) && !ui.palette_popup_contains(p, l, x, y) {
+		outcome := ui.palette_input_press(p, l, &w.ui_text, x, y, w.scale, .Shift in e.modifiers)
+		on_palette_outcome(app, w, outcome, 0)
+		return
 	}
-	if owner == nil {return false}
-	tab_select(app, owner, tab_index)
-	if owner != w {return window_activate(app, owner)}
-	return true
-}
-
-palette_activate_workspace :: proc(app: ^App, w: ^Window, id: u32) -> bool {
-	workspace := workspace_find(app, id)
-	if workspace == nil {return false}
-	return workspace_select(app, w, workspace)
-}
-
-
-@(private)
-palette_setting_value :: proc(user: rawptr, key: string) -> (value, label: string) {
-	app := cast(^App)user
-	entry := settings.schema_find(key)
-	if entry == nil {return}
-	value = settings.value_text(&app.settings, entry^)
-	if key == "theme.name" {label = settings.theme_display_name(&app.settings, value)}
-	return
+	outcome, id := ui.palette_mouse_press(p, &app.registry, l, x, y, &w.ui_text)
+	on_palette_outcome(app, w, outcome, id)
 }
 
 @(private)
-palette_setting_choices :: proc(user: rawptr, key: string) -> (choices, labels: []string) {
-	app := cast(^App)user
-	fonts, _ := font.installed_families(app.fonts)
-	choices, labels, _ = setting_live_choices(&app.settings, fonts, key)
-	return
+palette_pointer_cancel :: proc(app: ^App, w: ^Window) {
+	if palette_active(app, w) {ui.palette_drag_cancel(&app.palette)}
+}
+
+// Keys while the palette shows: a shortcut field records them, text fields keep their clipboard chords,
+// and the rest navigate by the layout's letters.
+@(private)
+palette_key_input :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
+	pane_header_cancel(w)
+	key_suppress(w, e)
+	p := &app.palette
+	if ui.palette_editing(p) == .Shortcut {
+		outcome, id := ui.palette_key(p, &app.registry, e)
+		on_palette_outcome(app, w, outcome, id)
+		return
+	}
+	switch clipboard_chord(logical) {
+	case .Copy:
+		clipboard_copy(app, ui.palette_selection(p))
+	case .Cut:
+		if clipboard_copy(
+			app,
+			ui.palette_selection(p),
+		) {on_palette_outcome(app, w, ui.palette_cut(p, &app.registry), 0)}
+	case .Paste:
+		if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
+			on_palette_outcome(app, w, ui.palette_paste(p, &app.registry, text), 0)
+		}
+	case .None:
+		outcome, id := ui.palette_key(p, &app.registry, logical)
+		on_palette_outcome(app, w, outcome, id)
+	}
+}
+
+@(private)
+on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: commands.Command_Id) {
+	// The outcome that names a choice is the only one that may act on it.
+	chosen := ui.palette_chosen_take(&app.palette)
+	switch outcome {
+	case .None:
+	case .Changed, .Closed:
+		w.dirty = true
+	case .Run:
+		w.dirty = true
+		run_action(app, w, Action(id))
+	case .Open_Setting:
+		w.dirty = true
+		if setting, ok := chosen.(ui.Chosen_Setting); ok {
+			settings_reveal(
+				app,
+				pane_link_acting_window(app, w),
+				{key = setting.key, search = .Clear, focus = .Control},
+			)
+		}
+	case .Set_Setting:
+		w.dirty = true
+		if value, ok := chosen.(ui.Chosen_Value); ok {
+			saved := settings_save_value(app, value.key, value.value, "Could not save the setting.")
+			ui.palette_binding_saved(&app.palette, saved)
+		}
+	case .Open_Tab:
+		w.dirty = true
+		if tab, ok := chosen.(ui.Chosen_Tab); ok {
+			palette_activate_tab(app, pane_link_acting_window(app, w), tab.id)
+		}
+	case .Open_Workspace:
+		w.dirty = true
+		if workspace, ok := chosen.(ui.Chosen_Workspace); ok {
+			palette_activate_workspace(app, pane_link_acting_window(app, w), u32(workspace.id))
+		}
+	}
 }

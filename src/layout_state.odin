@@ -2,10 +2,9 @@ package main
 
 import "aio:layout"
 import "aio:platform"
-import "aio:pty"
+import "aio:procinfo"
 import "core:encoding/json"
 import "core:log"
-import "core:math"
 import "core:os"
 import "core:strings"
 import "core:time"
@@ -20,10 +19,10 @@ LAYOUT_SAVE_DELAY :: 2 * time.Second
 // A tree larger than any reachable layout is treated as damage rather than allocated.
 LAYOUT_NODE_LIMIT :: 4096
 
+// Files written before it was dropped also hold an unused `workspace_number`, which reading skips.
 Layout_State :: struct {
-	version:          int,
-	workspace_number: u32,
-	workspaces:       []Saved_Workspace,
+	version:    int,
+	workspaces: []Saved_Workspace,
 }
 
 Saved_Workspace :: struct {
@@ -61,7 +60,7 @@ Saved_Node :: struct {
 	command:   string `json:"command,omitempty"`,
 	linked:    bool,
 	// A linked pane's window, as a slice because only an empty one is left out of the file.
-	window:    []platform.Window_Placement `json:"window,omitempty"`,
+	window:    []Saved_Window `json:"window,omitempty"`,
 	// A floating pane's place above the tiling, likewise a slice of at most one.
 	float:     []Saved_Float `json:"float,omitempty"`,
 	documents: []Document `json:"documents,omitempty"`,
@@ -74,6 +73,16 @@ Saved_Float :: struct {
 	minimized:           bool,
 }
 
+// A linked window's restored rectangle and maximized state as the layout file stores them. The tags are
+// the file's names, so the platform's placement type can change without changing the format.
+Saved_Window :: struct {
+	left:      i32 `json:"left"`,
+	top:       i32 `json:"top"`,
+	right:     i32 `json:"right"`,
+	bottom:    i32 `json:"bottom"`,
+	maximized: bool `json:"maximized"`,
+}
+
 // The saved form of a floating pane group's place, in temporary memory, or nil for a tiled node.
 @(private)
 layout_float_encode :: proc(floating: bool, value: layout.Float) -> []Saved_Float {
@@ -84,10 +93,11 @@ layout_float_encode :: proc(floating: bool, value: layout.Float) -> []Saved_Floa
 	return saved
 }
 
+// A saved floating place as layout takes it, which brings the bounds into range.
 @(private)
 layout_float_decode :: proc(saved: Saved_Float) -> layout.Float {
 	return {
-		bounds = layout.float_bounds_clamp({saved.x, saved.y, saved.width, saved.height}),
+		bounds = {saved.x, saved.y, saved.width, saved.height},
 		stack = saved.stack,
 		minimized = saved.minimized,
 	}
@@ -108,6 +118,19 @@ Layout_Save_Idle :: struct {
 Layout_Save_Scheduled :: struct {
 	path:     string,
 	deadline: time.Tick,
+}
+
+// Layout persistence as App embeds it: the save state and the text last written, which a save
+// compares against so an unchanged layout is not written again. layout_state_destroy releases both.
+Layout_Store :: struct {
+	layout_save:  Layout_Save,
+	layout_saved: string,
+}
+
+layout_state_destroy :: proc(app: ^App) {
+	layout_state_disable(app)
+	delete(app.layout_saved)
+	app.layout_saved = ""
 }
 
 // Saves the layout to `path`, which the app then owns.
@@ -170,7 +193,7 @@ layout_state_save :: proc(app: ^App, fresh := false) {
 layout_state_encode :: proc(
 	app: ^App,
 	allocator := context.allocator,
-	processes: []pty.Process_Info = nil,
+	processes: []procinfo.Process_Info = nil,
 ) -> (
 	string,
 	bool,
@@ -180,18 +203,9 @@ layout_state_encode :: proc(
 		if workspace.provisional || len(workspace.tabs) == 0 {continue}
 		tabs := make([]Saved_Tab, len(workspace.tabs), context.temp_allocator)
 		for tab, i in workspace.tabs {
-			nodes := make([dynamic]Saved_Node, 0, len(tab.tree.nodes), context.temp_allocator)
-			focus := 0
-			if layout_node_encode(app, &tab.tree, tab.tree.root, &nodes, &focus, processes) < 0 {
-				return "", false
-			}
-			tabs[i] = {
-				name = tab.name,
-				focus = focus,
-				zoomed = tab.tree.zoomed,
-				nodes = nodes[:],
-				documents = tab.documents[:],
-			}
+			encoded: bool
+			tabs[i], encoded = layout_tab_encode(app, tab, processes)
+			if !encoded {return "", false}
 		}
 		append(
 			&workspaces,
@@ -206,65 +220,80 @@ layout_state_encode :: proc(
 		)
 	}
 	state := Layout_State {
-		version          = LAYOUT_STATE_VERSION,
-		workspaces       = workspaces[:],
+		version    = LAYOUT_STATE_VERSION,
+		workspaces = workspaces[:],
 	}
 	data, err := json.marshal(state, {pretty = true, use_enum_names = true}, allocator)
 	if err != nil {return "", false}
 	return string(data), true
 }
 
+// A tab as layout state and the closed-tab journal save it, in temporary memory.
+@(private, require_results)
+layout_tab_encode :: proc(app: ^App, tab: ^Tab, processes: []procinfo.Process_Info) -> (Saved_Tab, bool) {
+	nodes, focus, encoded := layout_tree_encode(app, &tab.tree, processes)
+	if !encoded {return {}, false}
+	return {
+			name = tab.name,
+			focus = focus,
+			zoomed = tab.tree.zoomed,
+			nodes = nodes,
+			documents = tab.documents[:],
+		},
+		true
+}
+
+// The tree's saved nodes, root first, in temporary memory, and the saved index of its focused pane. False
+// for a tree that has lost its shape.
 @(private)
-layout_node_encode :: proc(
+layout_tree_encode :: proc(
 	app: ^App,
 	tree: ^layout.Layout,
-	id: layout.Node_Id,
-	nodes: ^[dynamic]Saved_Node,
-	focus: ^int,
-	processes: []pty.Process_Info,
-) -> int {
-	if int(id) >= len(tree.nodes) {return -1}
-	index := len(nodes)
-	switch node in tree.nodes[id] {
-	case layout.Vacant:
-		return -1
-	case layout.Pane:
-		saved := layout_pane_encode(app, node.content, processes)
-		if node.linked {layout_link_encode(app, tree, id, &saved)}
-		saved.float = layout_float_encode(node.floating, node.float)
-		append(nodes, saved)
-		if id == tree.focus {focus^ = index}
-	case layout.Split:
-		saved := Saved_Node{split = true, axis = node.axis, ratio = node.ratio}
-		if node.linked {layout_link_encode(app, tree, id, &saved)}
-		saved.float = layout_float_encode(node.floating, node.float)
-		append(nodes, saved)
-		first := layout_node_encode(app, tree, node.first, nodes, focus, processes)
-		second := layout_node_encode(app, tree, node.second, nodes, focus, processes)
-		if first < 0 || second < 0 {return -1}
-		nodes[index].first, nodes[index].second = first, second
+	processes: []procinfo.Process_Info,
+) -> (
+	nodes: []Saved_Node,
+	focus: int,
+	ok: bool,
+) {
+	flat := make([dynamic]layout.Flat_Node, 0, len(tree.nodes), context.temp_allocator)
+	focus = layout.flatten(tree, &flat) or_return
+	nodes = make([]Saved_Node, len(flat), context.temp_allocator)
+	for node, i in flat {
+		if node.split {
+			nodes[i] = {split = true, axis = node.axis, ratio = node.ratio, first = node.first, second = node.second}
+		} else {
+			nodes[i] = layout_pane_encode(app, node.content, processes)
+		}
+		if node.linked {layout_link_encode(app, flat[i:], &nodes[i])}
+		nodes[i].float = layout_float_encode(node.floating, node.float)
 	}
-	return index
+	return nodes, focus, true
 }
 
-// Marks a saved node as a linked slot and records where its window is.
+// Marks a saved node as a linked slot and records where its window is. `slot` starts at the slot's own
+// flat node, so its first pane is the slot's first.
 @(private)
-layout_link_encode :: proc(app: ^App, tree: ^layout.Layout, slot: layout.Node_Id, saved: ^Saved_Node) {
+layout_link_encode :: proc(app: ^App, slot: []layout.Flat_Node, saved: ^Saved_Node) {
 	saved.linked = true
-	panes := make([dynamic]layout.Content, context.temp_allocator)
-	layout.contents(tree, slot, &panes)
-	if len(panes) == 0 {return}
-	linked := pane_link_window_of(app, panes[0])
-	if linked == nil {return}
-	if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
-		window := make([]platform.Window_Placement, 1, context.temp_allocator)
-		window[0] = placement
-		saved.window = window
+	for node in slot {
+		if node.split {continue}
+		linked := pane_link_window_of(app, node.content)
+		if linked == nil {return}
+		if placement, err := platform.window_placement(&app.platform, linked.id); err == .None {
+			window := make([]Saved_Window, 1, context.temp_allocator)
+			window[0] = {placement.left, placement.top, placement.right, placement.bottom, placement.maximized}
+			saved.window = window
+		}
+		return
 	}
 }
 
 @(private)
-layout_pane_encode :: proc(app: ^App, content: layout.Content, processes: []pty.Process_Info) -> Saved_Node {
+layout_pane_encode :: proc(
+	app: ^App,
+	content: layout.Content,
+	processes: []procinfo.Process_Info,
+) -> Saved_Node {
 	saved := Saved_Node{content = content.kind}
 	if content.kind == .Markdown {
 		if pane := markdown_find(app, content.id); pane != nil {
@@ -370,14 +399,14 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 			workspace.name = name
 		}
 	}
+	// Each part is kept on its own: a damaged tint must not cost the workspace a valid preset or emoji.
 	icon := saved.icon
-	if icon.preset >= 0 && icon.preset < len(WORKSPACE_ICONS) &&
-	   (icon.emoji == "" || workspace_icon_valid(icon.emoji)) {
+	if workspace_icon_valid_value({preset = icon.preset, emoji = icon.emoji}) {
 		if emoji, err := strings.clone(icon.emoji); err == nil {
 			workspace.icon = {preset = icon.preset, emoji = emoji}
 		}
 	}
-	if icon.tint >= 0 && icon.tint < len(WORKSPACE_ICON_COLORS) {workspace.icon.tint = icon.tint}
+	if workspace_icon_valid_value({tint = icon.tint}) {workspace.icon.tint = icon.tint}
 	documents_restore(&workspace.documents, saved.documents)
 	selected := saved.selected
 	for &tab, i in saved.tabs {
@@ -387,32 +416,31 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 		_ = workspace_discard_empty(app, workspace)
 		return nil
 	}
-	workspace.selected = clamp(selected, 0, len(workspace.tabs) - 1)
-	tab_select_one(workspace, workspace.selected)
+	workspace_tab_choose(workspace, clamp(selected, 0, len(workspace.tabs) - 1))
 	return workspace
 }
 
 @(private, require_results)
 layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) -> bool {
-	tab, record_error := tab_record_reserve(workspace)
-	if record_error != .None {return false}
+	tab, reserved := tab_record_reserve(workspace)
+	if !reserved {return false}
 	if !layout_tree_decode(saved, &tab.tree) {
 		log.error("skipping a saved tab with a damaged layout")
 		tab_record_free(tab)
 		return false
 	}
-	settings_seen := false
+	// Content a workspace holds once may come back once, and only when the workspace lacks it.
+	once: bit_set[layout.Content_Kind]
 	for &node, i in tab.tree.nodes {
 		pane, is_pane := &node.(layout.Pane)
 		if !is_pane {continue}
 		restored := false
-		switch pane.content.kind {
+		kind := pane.content.kind
+		switch kind {
 		case .Terminal:
-			restored = layout_session_restore(app, &saved.nodes[i])
-			if restored {pane.content.id = app.next_session_id}
+			pane.content.id, restored = layout_session_restore(app, &saved.nodes[i])
 		case .Settings:
-			restored = !settings_seen && !workspace_has_content(workspace, pane.content)
-			if restored {settings_seen = true} else {log.error("skipping a saved tab with a second settings page")}
+			restored = true
 		case .Markdown:
 			path := saved.nodes[i].path
 			document := path != "" && utf8.valid_string(path) ? markdown_pane_create(app, path, false) : nil
@@ -422,8 +450,16 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 				documents_restore(&document.documents, saved.nodes[i].documents)
 			}
 		}
+		if restored && CONTENT_POLICY[kind].one_per_workspace {
+			restored = kind not_in once && !workspace_has_content(workspace, pane.content)
+			if restored {
+				once += {kind}
+			} else {
+				log.errorf("skipping a saved tab with a second %s page", CONTENT_POLICY[kind].display_name)
+			}
+		}
 		if !restored {
-			layout_tab_discard(app, tab)
+			layout_tab_discard(app, tab, i)
 			return false
 		}
 	}
@@ -439,118 +475,62 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 	return true
 }
 
+// Opens the saved pane's session and returns its id.
 @(private, require_results)
-layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> bool {
+layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, ok: bool) {
 	// A directory that is remote or no longer exists falls back to the profile's own.
-	directory := saved.directory
-	if directory != "" && !pty.working_directory_is_local(directory) {
+	directory, refused := local_launch_directory(saved.directory)
+	if refused {
 		notify(
 			app,
 			.Warning,
 			"A saved pane directory is remote or unavailable; using the profile's default.",
 		)
-		directory = ""
 	}
 	command := saved.command
 	if !utf8.valid_string(command) || len(command) > PROGRAM_COMMAND_LIMIT * 4 {command = ""}
-	if !session_open(app, "", directory, saved.profile, command) {return false}
-	entry := &app.sessions[len(app.sessions) - 1]
+	id, opened := session_open(app, "", directory, saved.profile, command)
+	if !opened {return 0, false}
+	entry := session_find(app, id)
 	entry.keep_open = saved.keep_open
 	documents_restore(&entry.documents, saved.documents)
 	if saved.name != "" && utf8.valid_string(saved.name) {
 		if name, err := strings.clone(saved.name); err == nil {entry.name = name}
 	}
-	return true
+	return id, true
 }
 
-// Closes the sessions a partly restored tab already opened before freeing it.
+// Closes the sessions a partly restored tab opened for its first `restored` nodes, before freeing it.
 @(private)
-layout_tab_discard :: proc(app: ^App, tab: ^Tab) {
-	for node in tab.tree.nodes {
-		pane := node.(layout.Pane) or_continue
-		if pane_owns_session(pane.content.kind) && pane.content.id != 0 {session_close(app, pane.content.id)}
+layout_tab_discard :: proc(app: ^App, tab: ^Tab, restored: int) {
+	for i in 0 ..< restored {
+		content, is_pane := layout.pane_content(&tab.tree, layout.Node_Id(i))
+		if is_pane && pane_owns_session(content.kind) {session_close(app, content.id)}
 	}
 	tab_record_free(tab)
 }
 
-// Rebuilds a tree whose node indices match the saved ones. Every node must be reached exactly
-// once from the root, so cycles, shared children and orphans are rejected. Pane content ids are
-// left at zero for the caller to fill.
+// Rebuilds a tree whose node indices match the saved ones; layout.unflatten rejects a damaged tree and
+// repairs its detached groups. Pane content ids are left at zero for the caller to fill.
 @(require_results)
 layout_tree_decode :: proc(saved: ^Saved_Tab, tree: ^layout.Layout) -> bool {
 	count := len(saved.nodes)
 	if count == 0 || count > LAYOUT_NODE_LIMIT {return false}
-	visited, visited_error := make([]bool, count, context.temp_allocator)
-	if visited_error != nil {return false}
-	nodes, nodes_error := make([dynamic]layout.Node, count)
-	if nodes_error != nil {return false}
-	tree^ = {nodes = nodes}
-	if !layout_node_decode(saved.nodes, 0, visited, tree, false, false) {
-		layout.destroy(tree)
-		return false
-	}
-	for reached in visited {if !reached {layout.destroy(tree); return false}}
-	tree.root = 0
-	focus := saved.focus
-	if focus < 0 || focus >= count || saved.nodes[focus].split {
-		for node, i in saved.nodes {if !node.split {focus = i; break}}
-	}
-	tree.focus = layout.Node_Id(focus)
-	tree.zoomed = saved.zoomed
-	layout.float_stack_restore(tree)
-	layout.links_repair(tree)
-	return true
-}
-
-@(private, require_results)
-layout_node_decode :: proc(
-	saved: []Saved_Node,
-	index: int,
-	visited: []bool,
-	tree: ^layout.Layout,
-	in_slot, in_float: bool,
-) -> bool {
-	if index < 0 || index >= len(saved) || visited[index] {return false}
-	visited[index] = true
-	node := saved[index]
-	if !node.split {
-		if node.content > max(layout.Content_Kind) {return false}
-		tree.next_pane_order += 1
-		// A pane inside a linked or floating group cannot introduce another detached group.
-		floating := len(node.float) == 1 && !in_slot && !in_float && !node.linked
-		linked := node.linked && !in_slot && !in_float && CONTENT_POLICY[node.content].linkable
-		tree.nodes[index] = layout.Pane {
-			content  = {kind = node.content},
-			order    = tree.next_pane_order,
-			linked   = linked,
-			floating = floating,
-			float    = floating ? layout_float_decode(node.float[0]) : {},
+	flat, flat_error := make([]layout.Flat_Node, count, context.temp_allocator)
+	if flat_error != nil {return false}
+	for node, i in saved.nodes {
+		flat[i] = {
+			split   = node.split,
+			axis    = node.axis,
+			ratio   = node.ratio,
+			first   = node.first,
+			second  = node.second,
+			content = {kind = node.content},
+			linked  = node.linked,
 		}
-		return true
+		if len(node.float) == 1 {flat[i].floating, flat[i].float = true, layout_float_decode(node.float[0])}
 	}
-	if node.axis != .Horizontal && node.axis != .Vertical {return false}
-	if math.is_nan(node.ratio) {return false}
-	// A linked or floating slot holds no nested slots; only linkable content can have a linked window.
-	floating := len(node.float) == 1 && !in_slot && !in_float && !node.linked
-	linked := node.linked && !in_slot && !in_float && !floating
-	if !layout_node_decode(saved, node.first, visited, tree, in_slot || linked, in_float || floating) ||
-	   !layout_node_decode(saved, node.second, visited, tree, in_slot || linked, in_float || floating) {
-		return false
-	}
-	if linked {
-		panes := make([dynamic]layout.Content, context.temp_allocator)
-		layout.contents(tree, layout.Node_Id(node.first), &panes)
-		layout.contents(tree, layout.Node_Id(node.second), &panes)
-		for pane in panes {linked &&= CONTENT_POLICY[pane.kind].linkable}
-	}
-	tree.nodes[index] = layout.Split {
-		axis   = node.axis,
-		ratio  = clamp(node.ratio, 0.05, 0.95),
-		first  = layout.Node_Id(node.first),
-		second = layout.Node_Id(node.second),
-		linked = linked,
-		floating = floating,
-		float = floating ? layout_float_decode(node.float[0]) : {},
-	}
-	return true
+	linkable: bit_set[layout.Content_Kind]
+	for policy, kind in CONTENT_POLICY {if policy.linkable {linkable += {kind}}}
+	return layout.unflatten(tree, flat, saved.focus, saved.zoomed, linkable)
 }

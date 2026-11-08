@@ -1,7 +1,6 @@
 package ui
 
-import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "base:runtime"
 
@@ -9,7 +8,9 @@ MENU_WIDTH :: f32(280)
 MENU_ROW_HEIGHT :: HEIGHT_STANDARD
 // A hairline with SPACE_1 above and below.
 MENU_SEPARATOR_HEIGHT :: 2 * SPACE_1 + 1
-MENU_MAX_ITEMS :: 64
+// Enough for the longest owner: a profile menu's settings.PROFILE_LIMIT profiles and its separator,
+// Settings and Command Palette rows.
+MENU_MAX_ITEMS :: 72
 
 Menu_Item :: struct {
 	label, shortcut, icon: string,
@@ -17,14 +18,16 @@ Menu_Item :: struct {
 	checked, enabled:      bool,
 	separator:             bool,
 	// A line icon in place of a badge, inked like the label.
-	glyph:                 Maybe(Icon),
+	glyph:                 Icon,
 	// Secondary text after the label, fading out where it runs out of room.
 	detail:                string,
 	// A compact button at the row's end, and one beyond it that shows while the row is selected.
-	action:                Maybe(Icon),
-	selected_action:       Maybe(Icon),
+	action:                Icon,
+	selected_action:       Icon,
 	// The label is an error.
 	danger:                bool,
+	// The owner's key for what choosing the row does; the menu only carries it.
+	payload:               u32,
 }
 
 Menu_Row_Part :: enum {
@@ -62,11 +65,12 @@ menu_clear :: proc(m: ^Menu) {
 	m.scroll = 0
 }
 
-menu_add :: proc(m: ^Menu, item: Menu_Item) -> runtime.Allocator_Error {
-	if len(m.items) >= MENU_MAX_ITEMS {return nil}
-	_, err := append(&m.items, item)
-	if err == nil && len(m.items) == 1 {menu_select(m, 0)}
-	return err
+// Added is false when the menu already holds MENU_MAX_ITEMS rows; the error is the append's.
+menu_add :: proc(m: ^Menu, item: Menu_Item) -> (added: bool, error: runtime.Allocator_Error) {
+	if len(m.items) >= MENU_MAX_ITEMS {return false, nil}
+	if _, error = append(&m.items, item); error != nil {return false, error}
+	if len(m.items) == 1 {menu_select(m, 0)}
+	return true, nil
 }
 
 // The row, or -1 for no selection at the row-index interface.
@@ -216,11 +220,11 @@ menu_action_rect :: proc(
 menu_row_part :: proc(m: ^Menu, index: int, x, y, width, height, scale: f32) -> Menu_Row_Part {
 	if index < 0 || index >= len(m.items) {return .Row}
 	item := m.items[index]
-	if _, shown := item.action.?; shown {
-		if contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
+	if item.action != .None {
+		if render.rect_contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
 	}
-	if _, shown := item.selected_action.?; shown && index == menu_selected(m) {
-		if contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
+	if item.selected_action != .None && index == menu_selected(m) {
+		if render.rect_contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
 			return .Selected_Action
 		}
 	}
@@ -235,7 +239,7 @@ Menu_Outcome :: enum {
 }
 
 // Closed asks the owner to close the menu; whether it shows is the owner's state.
-menu_key :: proc(m: ^Menu, e: platform.Key_Event) -> Menu_Outcome {
+menu_key :: proc(m: ^Menu, e: input.Key_Event) -> Menu_Outcome {
 	if !e.pressed {return .None}
 	if step := list_step(e); step != 0 {
 		menu_step(m, step)
@@ -271,13 +275,10 @@ menu_draw :: proc(
 	theme: Theme,
 	width, height, scale: f32,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	surface, rows, first := menu_view(m, width, height, scale)
 	selected := menu_selected(m)
-	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
-	frame := popover_panel(surface, scale)
-	if panel_draw(list, frame, theme) != .None {return .Ok}
-	if render.push_layer(list, surface, RADIUS_OVERLAY * scale) != .None {return .Ok}
+	if !popover_open(list, surface, theme, width, height, scale) {return .Ok}
 	small := text_styled(text, .Detail)
 	inset := CONTROL_INSET * scale
 	for visible in 0..<rows {
@@ -320,13 +321,14 @@ menu_draw :: proc(
 		}
 		ink := item.enabled ? theme.text : theme.muted
 		if item.danger {ink = theme.error}
-		if glyph, drawn := item.glyph.?; drawn {
-			icon_draw(list, glyph, {label_x, row.y, ICON_BUTTON * scale, row.height}, ink, ICON_BUTTON, scale)
+		if item.glyph != .None {
+			glyph := render.Rect{label_x, row.y, ICON_BUTTON * scale, row.height}
+			icon_draw(list, item.glyph, glyph, ink, ICON_BUTTON, scale)
 			label_x += (ICON_BUTTON + SPACE_2) * scale
 		}
 		end := row.x + row.width - inset
-		_, has_action := item.action.?
-		_, has_selected_action := item.selected_action.?
+		has_action := item.action != .None
+		has_selected_action := item.selected_action != .None
 		if has_selected_action {
 			end = menu_action_rect(m, i, .Selected_Action, width, height, scale).x
 		}
@@ -368,21 +370,23 @@ menu_draw :: proc(
 				); result != .Ok {return result}
 			}
 		}
-		if i == selected && item.enabled && contains(row, pointer.x, pointer.y) {
+		if i == selected && item.enabled && render.rect_contains(row, pointer.x, pointer.y) {
 			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
 		}
-		if icon, shown := item.action.?; shown {
+		if item.action != .None {
 			hover: f32 = i == selected && m.hover_part == .Action ? 1 : 0
 			rect := menu_action_rect(m, i, .Action, width, height, scale)
-			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {
+			if icon_button_draw(list, theme, rect, item.action, hover, 0, scale, pointer,
+				radius = RADIUS_CONTROL) != .None {
 				return .Ok
 			}
 		}
-		if icon, shown := item.selected_action.?; shown && i == selected {
+		if item.selected_action != .None && i == selected {
 			hover: f32 = m.hover_part == .Selected_Action ? 1 : 0
 			rect := menu_action_rect(m, i, .Selected_Action, width, height, scale)
-			if icon_button_draw(list, theme, rect, icon, hover, 0, scale, pointer, radius = RADIUS_CONTROL) != .None {
+			if icon_button_draw(list, theme, rect, item.selected_action, hover, 0, scale, pointer,
+				radius = RADIUS_CONTROL) != .None {
 				return .Ok
 			}
 		}

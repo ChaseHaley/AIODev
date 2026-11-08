@@ -14,7 +14,7 @@ Terminal_Copy_Fixture :: struct {
 	state: app.App,
 	window: app.Window,
 	workspace: app.Workspace,
-	tree: layout.Layout,
+	tab: app.Tab,
 	session: ^term.Session,
 }
 
@@ -23,8 +23,9 @@ terminal_copy_fixture :: proc(t: ^testing.T, f: ^Terminal_Copy_Fixture) -> bool 
 	f.state.registry = commands.create()
 	if !testing.expect_value(t, app.register_actions(&f.state.registry), commands.Error.None) {return false}
 	ui.notices_init(&f.state.notices)
-	if !testing.expect_value(t, layout.init(&f.tree, {.Terminal, 232}), nil) {return false}
-	f.window = {id = 232, tree = &f.tree, workspace = &f.workspace, width = 640, height = 384, scale = 1}
+	if !testing.expect_value(t, layout.init(&f.tab.tree, {.Terminal, 232}), nil) {return false}
+	append(&f.workspace.tabs, &f.tab)
+	f.window = {id = 232, workspace = &f.workspace, width = 640, height = 384, scale = 1}
 	ui.find_init(&f.window.find)
 	append(&f.state.windows, &f.window)
 	geometry := term.Geometry{columns = 80, rows = 24, cell_width = 8, cell_height = 16,
@@ -41,7 +42,8 @@ terminal_copy_fixture :: proc(t: ^testing.T, f: ^Terminal_Copy_Fixture) -> bool 
 @(private)
 terminal_copy_fixture_destroy :: proc(f: ^Terminal_Copy_Fixture) {
 	if f.session != nil {term.destroy(f.session)}
-	layout.destroy(&f.tree)
+	layout.destroy(&f.tab.tree)
+	delete(f.workspace.tabs)
 	ui.find_destroy(&f.window.find)
 	ui.notices_destroy(&f.state.notices)
 	commands.destroy(&f.state.registry)
@@ -101,7 +103,7 @@ terminal_native_copy_keeps_repeats_and_release_out_of_the_application :: proc(t:
 	if !terminal_copy_fixture(t, &f) {return}
 	term.select_all(f.session)
 	if !testing.expect(t, term.has_selection(f.session)) {return}
-	e := platform.Key_Event{window = f.window.id, key = .C, modifiers = {.Control, .Shift}, pressed = true}
+	e := input.Key_Event{window = f.window.id, key = .C, modifiers = {.Control, .Shift}, pressed = true}
 	app.handle_event(&f.state, e)
 	testing.expect_value(t, len(f.session.queue.pending), 0)
 	testing.expect(t, app.key_suppressed(&f.window, .C))
@@ -133,7 +135,7 @@ terminal_overlapping_shortcuts_keep_both_releases_out_of_the_application :: proc
 	term.select_all(f.session)
 	shortcut(t, &f, .Insert, true, buffer[:])
 	term.select_all(f.session)
-	e := platform.Key_Event{window = f.window.id, key = .C, modifiers = {.Control, .Shift}, pressed = true}
+	e := input.Key_Event{window = f.window.id, key = .C, modifiers = {.Control, .Shift}, pressed = true}
 	app.handle_event(&f.state, e)
 	shortcut(t, &f, .Insert, false, buffer[:])
 	e.pressed = false

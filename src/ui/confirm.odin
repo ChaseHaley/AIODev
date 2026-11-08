@@ -1,10 +1,7 @@
 package ui
 
-import "aio:glyphs"
 import "aio:input"
-import "aio:platform"
 import "aio:render"
-import "core:time"
 
 Confirm_Button :: enum {
 	None,
@@ -44,11 +41,6 @@ CONFIRM_HEIGHT :: 144
 CONFIRM_BUTTON_WIDTH :: 96
 @(private)
 CONFIRM_BUTTON_HEIGHT :: HEIGHT_STANDARD
-@(private)
-CONFIRM_PRESENCE :: Presence_Spec {
-	open  = 120 * time.Millisecond,
-	close = 90 * time.Millisecond,
-}
 
 // Opens the dialog as a fresh question, so one asked again while it fades fades in from nothing. The
 // caller states the whole presentation here: the wide panel, the button that has the keyboard first and
@@ -56,7 +48,7 @@ CONFIRM_PRESENCE :: Presence_Spec {
 confirm_open :: proc(c: ^Confirm, extended := false, focus := Confirm_Button.Accept, show_option := false) {
 	assert(focus != .None && (focus != .Option || show_option))
 	c^ = {focus = focus, extended = extended, show_option = show_option}
-	presence_open(&c.presence, CONFIRM_PRESENCE)
+	presence_open(&c.presence, DIALOG_PRESENCE)
 }
 
 confirm_close :: proc(c: ^Confirm) {
@@ -97,13 +89,13 @@ confirm_layout :: proc(width, height, scale: f32, extended := false, show_option
 }
 
 confirm_hit :: proc(l: Confirm_Layout, x, y: f32) -> Confirm_Button {
-	if l.option.width > 0 && contains(l.option, x, y) {return .Option}
-	if contains(l.accept, x, y) {return .Accept}
-	if contains(l.cancel, x, y) {return .Cancel}
+	if l.option.width > 0 && render.rect_contains(l.option, x, y) {return .Option}
+	if render.rect_contains(l.accept, x, y) {return .Accept}
+	if render.rect_contains(l.cancel, x, y) {return .Cancel}
 	return .None
 }
 
-confirm_contains :: proc(l: Confirm_Layout, x, y: f32) -> bool {return contains(l.panel, x, y)}
+confirm_contains :: proc(l: Confirm_Layout, x, y: f32) -> bool {return render.rect_contains(l.panel, x, y)}
 
 @(private)
 confirm_cycle :: proc(c: ^Confirm, step: int) {
@@ -121,9 +113,24 @@ confirm_cycle :: proc(c: ^Confirm, step: int) {
 	c.focus = order[index]
 }
 
-confirm_key :: proc(c: ^Confirm, e: platform.Key_Event) -> Confirm_Outcome {
+// The option's accelerator is Alt with the first letter of its label, so "Don't ask again" is Alt+D.
+@(private)
+confirm_option_key :: proc(label: string) -> (input.Key, bool) {
+	for r in label {
+		switch r {
+		case 'a' ..= 'z': return input.Key(int(input.Key.A) + int(r - 'a')), true
+		case 'A' ..= 'Z': return input.Key(int(input.Key.A) + int(r - 'A')), true
+		}
+		break
+	}
+	return .Unidentified, false
+}
+
+// `option_label` is the option's text as drawn; it names the option's accelerator.
+confirm_key :: proc(c: ^Confirm, e: input.Key_Event, option_label: string) -> Confirm_Outcome {
 	if !e.pressed {return .None}
-	if c.show_option && .Alt in e.modifiers && e.key == .D {
+	if key, ok := confirm_option_key(option_label);
+	   ok && c.show_option && .Alt in e.modifiers && e.key == key {
 		c.option = !c.option
 		c.focus = .Option
 		return .Changed
@@ -196,7 +203,7 @@ confirm_button_draw :: proc(
 	label: string,
 	scale: f32,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	accept := button == .Accept
 	active := armed_is(c.armed, button)
 	hover := c.hover == button ? c.hover_motion.hover.value : 0
@@ -245,10 +252,13 @@ confirm_draw :: proc(
 	title, body, accept_label: string,
 	note: string,
 	option_label: string = "",
+	fade := FADE_NONE,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	l := confirm_layout(width, height, scale, c.extended, c.show_option)
 	s := scale
+	mark := fade_mark(list)
+	defer fade_draw(list, mark, fade)
 	if render.push_layer(list, {0, 0, width, height}) != .None {return .Ok}
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
 	p := l.panel
@@ -293,17 +303,8 @@ confirm_draw :: proc(
 		inner,
 	); r != .Ok {return r}
 	if c.show_option && option_label != "" {
-		box := render.Rect {
-			l.option.x,
-			l.option.y + (l.option.height - 16 * s) / 2,
-			16 * s,
-			16 * s,
-		}
-		draw_rect(list, {rect = box, color = theme.border, radius = RADIUS_CONTROL * s})
-		if c.option {
-			draw_rect(list, {rect = box, color = theme.accent, radius = RADIUS_CONTROL * s})
-			icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, s)
-		}
+		box := checkbox_rect(l.option.x, l.option.y, l.option.height, s)
+		checkbox_draw(list, box, c.option, theme, s)
 		if c.focus == .Option {focus_ring_draw(list, box, theme, s)}
 		if r := draw_text(
 			&small,

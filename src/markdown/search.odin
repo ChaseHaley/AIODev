@@ -1,6 +1,7 @@
 package markdown
 
 import "aio:line_match"
+import "aio:search"
 import "core:log"
 import "core:strings"
 import "core:time"
@@ -47,7 +48,7 @@ search_destroy :: proc(s: ^Search) {
 }
 
 // Starts a search from the top of the document; an empty needle ends it.
-search_set :: proc(s: ^Search, needle: string, options: line_match.Options = {}) {
+search_set :: proc(s: ^Search, needle: string, options: search.Options = {}) {
 	line_match.destroy(&s.matcher)
 	clear(&s.matches)
 	s.phase = .Off
@@ -140,14 +141,34 @@ search_first_after :: proc(matches: []Match, offset: int) -> int {
 search_select :: proc(s: ^Search, upward: bool) -> bool {
 	total := len(s.matches)
 	if total == 0 {return false}
-	switch {
-	case s.selected < 0 || s.selected >= total:
-		s.selected = upward ? total - 1 : 0
-	case upward:
-		s.selected = (s.selected - 1 + total) % total
-	case:
-		s.selected = (s.selected + 1) % total
-	}
+	s.selected = search.step_index(s.selected, total, upward)
 	s.keep = -1
 	return true
+}
+
+// What the find bar shows, counted from the first line down. A document that is not `shown` has
+// nothing to find, whatever it last searched.
+search_summary :: proc(s: ^Search, shown: bool) -> search.Summary {
+	summary := search.Summary {
+		selected = -1,
+		order    = .Document_Order,
+	}
+	switch s.phase {
+	case .Off:
+		return summary
+	case .Invalid:
+		summary.progress = .Invalid
+	case .Scanning:
+		summary.progress = .Searching
+	case .Complete:
+		summary.progress = .Complete
+	case .Failed:
+		summary.progress = .Failed
+	}
+	if !shown {
+		if summary.progress == .Searching {summary.progress = .Complete}
+		return summary
+	}
+	summary.total, summary.selected, summary.revision = len(s.matches), s.selected, s.revision
+	return summary
 }

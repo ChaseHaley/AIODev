@@ -99,9 +99,9 @@ closing_a_window_closes_its_file_dialog :: proc(t: ^testing.T) {
 	s := &f.state
 	first, second := s.windows[0], s.windows[1]
 	app.markdown_open_picker(s, second)
-	if !testing.expect(t, s.markdown_pick != nil) { return }
+	if !testing.expect(t, s.dialogs.markdown != nil) { return }
 	app.window_close(s, first)
-	testing.expect(t, s.markdown_pick != nil)
+	testing.expect(t, s.dialogs.markdown != nil)
 	app.window_close(s, second)
-	testing.expect(t, s.markdown_pick == nil)
+	testing.expect(t, s.dialogs.markdown == nil)
 }

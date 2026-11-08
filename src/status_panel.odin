@@ -1,7 +1,7 @@
 package main
 
-import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
+import "aio:layout"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -23,10 +23,40 @@ import "core:strings"
 @(private) STATUS_PANEL_DENSE_CHILD_LOGO :: f32(14)
 @(private) STATUS_PANEL_INDENT :: f32(12)
 @(private) STATUS_PANEL_DEPTH_MAX :: 3
+// In the rail the panel keeps its header and a row, and the tabs keep the footer and two rows.
+@(private) STATUS_PANEL_RAIL_MIN :: f32(80)
+@(private) STATUS_RAIL_TABS_MIN :: f32(96)
+// The Activity panel's title band.
+STATUS_PANEL_HEADER :: ui.HEIGHT_STANDARD
+// One wheel notch, independent of the views' row heights.
+@(private) STATUS_PANEL_WHEEL :: f32(96)
+
+Status_Panel_Button :: enum {
+	None,
+	Side,
+	View,
+}
+
+// The Activity panel's state in one window.
+Status_Panel :: struct {
+	// A dragged width in DIPs and in-rail height as a share of the rail; zero follows the settings.
+	panel_width, panel_height: f32,
+	panel_button_armed: ui.Armed(Status_Panel_Button),
+	panel_button_hover: Status_Panel_Button,
+	// The row under the pointer.
+	panel_hover:        Maybe(int),
+	// Kept within the rows by status_panel_rows, which every draw and event projects through.
+	panel_scroll:       f32,
+}
 
 status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
+	return status_panel_visible_in(app, w, w.pane_fill)
+}
+
+// Whether the panel shows when the window's pane fill is `fill`; a filling pane covers it.
+status_panel_visible_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> bool {
 	s := &app.settings.status
-	if !s.enabled || !s.panel || w.phase == .Preparing || window_linked(w) || pane_fill_active(w) {
+	if !s.enabled || !s.panel || w.phase == .Preparing || window_linked(w) || fill != .None {
 		return false
 	}
 	return true
@@ -34,7 +64,12 @@ status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
 
 // Vertical view puts a left panel under the tabs in the docked rail.
 status_panel_in_rail :: proc(app: ^App, w: ^Window) -> bool {
-	return status_panel_visible(app, w) && app.settings.status.panel_side == .Left && rail_docked(w)
+	return status_panel_in_rail_in(app, w, w.pane_fill)
+}
+
+status_panel_in_rail_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> bool {
+	return status_panel_visible_in(app, w, fill) && app.settings.status.panel_side == .Left &&
+		rail_docked_in(w, fill)
 }
 
 // The rail gives the bottom of its height to the panel in vertical view.
@@ -53,10 +88,22 @@ status_panel_rail_clamp :: proc(w: ^Window, height: f32) -> f32 {
 }
 
 status_panel_dock_width :: proc(app: ^App, w: ^Window) -> f32 {
-	if !status_panel_visible(app, w) || status_panel_in_rail(app, w) {return 0}
+	return status_panel_dock_width_in(app, w, w.pane_fill)
+}
+
+// The width the panel takes beside the panes when the window's pane fill is `fill`.
+status_panel_dock_width_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> f32 {
+	if !status_panel_visible_in(app, w, fill) || status_panel_in_rail_in(app, w, fill) {return 0}
 	width := w.status.panel_width > 0 ? w.status.panel_width : f32(app.settings.status.panel_width)
-	available := f32(w.width) - (rail_docked(w) ? rail_width_pixels(w) : 0)
+	available := f32(w.width) - (rail_docked_in(w, fill) ? rail_width_pixels(w) : 0)
 	return ui.rail_pixel_width(w.scale, width, available)
+}
+
+// Refreshes what the panel reserves from the rail: its width left of the rail, which places the rail,
+// and its height in the rail, which the tab list leaves free. Relayout and dock edge drags call it.
+window_dock_reserve :: proc(app: ^App, w: ^Window) {
+	w.dock_left_width = app.settings.status.panel_side == .Left ? status_panel_dock_width(app, w) : 0
+	w.status_rail_reserve = status_panel_rail_height(app, w)
 }
 
 status_panel_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
@@ -92,16 +139,14 @@ status_panel_view_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 
 // One preference in the settings file, so Settings and every window follow it.
 status_panel_view_toggle :: proc(app: ^App) {
-	dense := app.settings.status.panel_view == .Comfy
-	value := dense ? "dense" : "comfy"
-	if _, has_file := settings_save_value(app, "status.panel_view", value, "Could not save Activity view.");
-	   !has_file {
-		app.settings.status.panel_view = dense ? .Dense : .Comfy
-		for window in app.windows {window.dirty = true}
-	}
+	@(static, rodata)
+	names := settings.STATUS_PANEL_VIEW_NAME
+	next: settings.Status_Panel_View = app.settings.status.panel_view == .Comfy ? .Dense : .Comfy
+	settings_save_value(app, "status.panel_view", names[next], "Could not save Activity view.")
 }
 
 // Runs a header button after a press and release both landed on it.
+@(private)
 status_panel_button_fire :: proc(app: ^App, button: Status_Panel_Button) {
 	switch button {
 	case .None:
@@ -113,16 +158,14 @@ status_panel_button_fire :: proc(app: ^App, button: Status_Panel_Button) {
 }
 
 status_panel_side_toggle :: proc(app: ^App) {
-	next := app.settings.status.panel_side == .Right ? "left" : "right"
-	if _, has_file := settings_save_value(app, "status.panel_side", next, "Could not save Activity side.");
-	   !has_file {
-		app.settings.status.panel_side = next == "left" ? .Left : .Right
-		for window in app.windows {window_relayout(app, window)}
-	}
+	@(static, rodata)
+	names := settings.STATUS_PANEL_SIDE_NAME
+	next: settings.Status_Panel_Side = app.settings.status.panel_side == .Right ? .Left : .Right
+	settings_save_value(app, "status.panel_side", names[next], "Could not save Activity side.")
 }
 
 @(private)
-status_panel_list :: proc(app: ^App, w: ^Window, panel: render.Rect) -> render.Rect {
+status_panel_list :: proc(w: ^Window, panel: render.Rect) -> render.Rect {
 	s := w.scale
 	header, pad := STATUS_PANEL_HEADER * s, ui.OVERLAY_PADDING * s
 	return {panel.x + pad, panel.y + header, max(0, panel.width - 2 * pad), max(0, panel.height - header - pad)}
@@ -132,21 +175,6 @@ status_panel_list :: proc(app: ^App, w: ^Window, panel: render.Rect) -> render.R
 Status_Panel_Report :: struct {
 	item:  Status_Item,
 	depth: int,
-}
-
-Status_Panel_Section :: enum {
-	Needs_You,
-	Working,
-	Finished,
-	Idle,
-}
-
-@(private, rodata)
-status_panel_section_names := [Status_Panel_Section]string {
-	.Needs_You = "Needs you",
-	.Working   = "Working",
-	.Finished  = "Finished",
-	.Idle      = "Idle",
 }
 
 // One row of the panel as this frame or event lays it out: a report, or a label above reports.
@@ -203,38 +231,11 @@ status_panel_tree_append :: proc(
 @(private)
 status_panel_reports :: proc(app: ^App, w: ^Window) -> []Status_Panel_Report {
 	reports := make([dynamic]Status_Panel_Report, context.temp_allocator)
-	if !app.settings.status.enabled {return reports[:]}
-	for workspace in app.workspaces {
-		if !workspace_eligible(app, workspace) || !status_in_scope(app, w, workspace) {continue}
-		walk := workspace_session_panes(app, workspace)
-		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-			entry := pane.session
-			if entry == nil || len(entry.statuses) == 0 {continue}
-			records := make([dynamic]term.Program_Status, 0, len(entry.statuses), context.temp_allocator)
-			for record in entry.statuses {
-				if status_shown(app, record) {append(&records, record)}
-			}
-			if len(records) == 0 {continue}
-			crumb := status_crumb_at(workspace, pane.tab, entry)
-			status_panel_tree_append(&reports, records[:], entry.id, crumb, workspace.name)
-		}
+	walk := status_scope_records(app, w)
+	for shown, ok := status_scope_records_next(&walk); ok; shown, ok = status_scope_records_next(&walk) {
+		status_panel_tree_append(&reports, shown.records, shown.session, shown.crumb, shown.workspace)
 	}
 	return reports[:]
-}
-
-@(private)
-status_panel_section :: proc(record: term.Program_Status) -> Status_Panel_Section {
-	switch record.state {
-	case .Blocked, .Error:
-		return .Needs_You
-	case .Done, .Done_Seen, .Error_Seen:
-		return .Finished
-	case .Working:
-		return .Working
-	case .Idle:
-		return .Idle
-	}
-	return .Idle
 }
 
 // Lays reports out for a view at `scale`. Comfy keeps their order under workspace labels. Dense
@@ -294,21 +295,21 @@ status_panel_project :: proc(
 		Tree :: struct {
 			first, end: int,
 		}
-		trees: [Status_Panel_Section][dynamic]Tree
-		for section in Status_Panel_Section {trees[section].allocator = context.temp_allocator}
+		trees: [Status_Section][dynamic]Tree
+		for section in Status_Section {trees[section].allocator = context.temp_allocator}
 		for first := 0; first < len(reports); {
 			end := first + 1
-			section := status_panel_section(reports[first].item.record)
+			section := status_presentation(reports[first].item.record).section
 			for end < len(reports) && reports[end].depth > 0 {
-				section = min(section, status_panel_section(reports[end].item.record))
+				section = min(section, status_presentation(reports[end].item.record).section)
 				end += 1
 			}
 			append(&trees[section], Tree{first, end})
 			first = end
 		}
-		for section in Status_Panel_Section {
+		for section in Status_Section {
 			if len(trees[section]) == 0 {continue}
-			name := status_panel_section_names[section]
+			name := status_section_names[section]
 			label(&out, name, len(trees[section]), section == .Needs_You, &total, scale)
 			for tree in trees[section] {
 				for r in reports[tree.first:tree.end] {
@@ -321,13 +322,24 @@ status_panel_project :: proc(
 	return out[:], total + ui.SPACE_1 * scale
 }
 
+// The panel's rows, their height and the scroll kept within them, projected without storing anything.
+@(private)
+status_panel_layout :: proc(app: ^App, w: ^Window) -> (rows: []Status_Panel_Row, total, scroll: f32) {
+	rows, total = status_panel_project(app.settings.status.panel_view, status_panel_reports(app, w), w.scale)
+	list := status_panel_list(w, status_panel_rect(app, w))
+	return rows, total, clamp(w.status.panel_scroll, 0, max(0, total - list.height))
+}
+
+// The panel's rows this frame or event. Projecting also stores the scroll clamp, so a hit test after
+// the reports shrink or the panel resizes sees the rows a draw would show.
 status_panel_rows :: proc(app: ^App, w: ^Window) -> (rows: []Status_Panel_Row, total: f32) {
-	return status_panel_project(app.settings.status.panel_view, status_panel_reports(app, w), w.scale)
+	rows, total, w.status.panel_scroll = status_panel_layout(app, w)
+	return
 }
 
 @(private)
-status_panel_row_rect :: proc(w: ^Window, list: render.Rect, row: Status_Panel_Row) -> render.Rect {
-	return {list.x, list.y + row.y - w.status.panel_scroll, list.width, row.height}
+status_panel_row_rect :: proc(list: render.Rect, row: Status_Panel_Row, scroll: f32) -> render.Rect {
+	return {list.x, list.y + row.y - scroll, list.width, row.height}
 }
 
 @(private)
@@ -368,7 +380,7 @@ status_panel_logo_draw :: proc(
 	w: ^Window,
 	x, middle, size: f32,
 	item: Status_Item,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	extent := math.round(size * s)
 	area := render.Rect{math.round(x), math.round(middle - extent / 2), extent, extent}
@@ -389,7 +401,7 @@ status_panel_end_draw :: proc(
 	item: Status_Item,
 	mark: ui.Status_Mark,
 	highlighted: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if highlighted && term.program_status_finished(item.record.state) {
 		close := status_panel_dismiss_rect(app, w, r)
 		ui.icon_draw(&w.list, .Close, close, app.theme.muted, ui.ICON_INDICATOR, w.scale)
@@ -407,7 +419,7 @@ status_panel_comfy_draw :: proc(
 	r: render.Rect,
 	row: Status_Panel_Row,
 	highlighted: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	item := row.item
 	box := status_panel_row_box(w, r, row)
@@ -422,10 +434,11 @@ status_panel_comfy_draw :: proc(
 	text_x := left + (logo + ui.SPACE_2) * s
 	right := box.x + box.width - ui.CONTROL_INSET * s
 	title_room := max(0, right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - text_x)
-	quiet := term.program_status_seen(item.record.state)
+	presentation := status_presentation(item.record)
+	quiet := presentation.seen
 	if result := ui.draw_fading_text(&strong, &w.list, status_item_name(app, item), text_x, line_one,
 		quiet ? app.theme.muted : app.theme.text, title_room); result != .Ok {return result}
-	mark := status_mark(item.record)
+	mark := presentation.mark
 	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
 		return result
 	}
@@ -434,7 +447,7 @@ status_panel_comfy_draw :: proc(
 	if result := ui.draw_text(&small, &w.list, age, right - age_width, line_two, app.theme.faint);
 	   result != .Ok {return result}
 	buffer: [8]u8
-	detail := item.record.message != "" ? item.record.message : ui.status_headline(mark, buffer[:])
+	detail := item.record.message != "" ? item.record.message : status_headline(mark, buffer[:])
 	if result := ui.draw_fading_text(&small, &w.list, detail, text_x, line_two, app.theme.faint,
 		max(0, right - age_width - ui.SPACE_2 * s - text_x)); result != .Ok {return result}
 	bar := render.Rect{text_x, r.y, max(0, right - text_x), r.height - ui.SPACE_1 * s}
@@ -450,7 +463,7 @@ status_panel_dense_draw :: proc(
 	r: render.Rect,
 	row: Status_Panel_Row,
 	highlighted: bool,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	item := row.item
 	box := status_panel_row_box(w, r, row)
@@ -463,18 +476,20 @@ status_panel_dense_draw :: proc(
 	small := ui.text_styled(&w.ui_text, .Detail)
 	baseline := middle - body.line_height / 2 + body.ascent
 	right := box.x + box.width - ui.CONTROL_INSET * s
-	mark := status_mark(item.record)
+	presentation := status_presentation(item.record)
+	mark := presentation.mark
 	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
 		return result
 	}
+	buffer: [8]u8
 	progress_or_age := status_age(item.record.updated_at)
-	if mark.progress >= 0 {progress_or_age = fmt.tprintf("%d%%", mark.progress)}
+	if mark.progress >= 0 {progress_or_age = status_progress_text(mark.progress, buffer[:])}
 	age_x := right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - ui.text_width(&small, progress_or_age)
 	if result := ui.draw_text(&small, &w.list, progress_or_age, age_x, baseline, app.theme.faint);
 	   result != .Ok {return result}
 	text_x := left + (logo + ui.SPACE_2) * s
 	room := max(0, age_x - ui.SPACE_2 * s - text_x)
-	quiet := term.program_status_seen(item.record.state) || item.record.state == .Idle
+	quiet := presentation.seen || item.record.state == .Idle
 	ink := quiet ? app.theme.muted : app.theme.text
 	name := status_item_name(app, item)
 	if row.depth > 0 {return ui.draw_fading_text(&body, &w.list, name, text_x, baseline, ink, room)}
@@ -493,7 +508,7 @@ status_panel_label_draw :: proc(
 	w: ^Window,
 	r: render.Rect,
 	row: Status_Panel_Row,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := w.scale
 	small := ui.text_styled(&w.ui_text, .Detail)
 	ink := row.attention ? ui.status_color(app.theme, .Blocked) : app.theme.faint
@@ -508,7 +523,7 @@ status_panel_label_draw :: proc(
 	return ui.draw_fading_text(&small, &w.list, row.label, x, baseline, ink, max(0, right - x))
 }
 
-status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	panel := status_panel_rect(app, w)
 	if panel.width <= 0 || panel.height <= 0 {return .Ok}
 	s := w.scale
@@ -520,7 +535,7 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar})
 		ui.draw_rect(&w.list, {rect = {panel.x, panel.y, panel.width, s}, color = app.theme.border})
 	}
-	rows, total := status_panel_rows(app, w)
+	rows, _ := status_panel_rows(app, w)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	header := STATUS_PANEL_HEADER * s
@@ -547,26 +562,25 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		press := f32(int(ui.armed_is(w.status.panel_button_armed, b.button)))
 		_ = ui.icon_button_draw(&w.list, app.theme, b.rect, b.icon, hover, press, s, w.pointer)
 	}
-	list := status_panel_list(app, w, panel)
+	list := status_panel_list(w, panel)
 	if render.push_layer(&w.list, list) != .None {return .Ok}
 	if len(rows) == 0 {
 		return ui.draw_fading_text(
 			&small,
 			&w.list,
-			"Nothing is reporting status.",
+			STATUS_EMPTY_TEXT,
 			list.x + 8 * s,
 			list.y + 8 * s + small.ascent,
 			app.theme.faint,
 			max(0, list.width - 16 * s),
 		)
 	}
-	w.status.panel_scroll = clamp(w.status.panel_scroll, 0, max(0, total - list.height))
 	dense := app.settings.status.panel_view == .Dense
 	hovered, any_hovered := w.status.panel_hover.?
 	for row, i in rows {
-		r := status_panel_row_rect(w, list, row)
+		r := status_panel_row_rect(list, row, w.status.panel_scroll)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
-		result: glyphs.Result
+		result: render.Build_Status
 		highlighted := any_hovered && hovered == i
 		if row.report {
 			box := status_panel_row_box(w, r, row)
@@ -595,11 +609,11 @@ status_panel_hit :: proc(
 	index: int,
 	rect: render.Rect,
 ) {
-	list := status_panel_list(app, w, status_panel_rect(app, w))
-	if !status_rect_contains(list, x, y) {return -1, {}}
+	list := status_panel_list(w, status_panel_rect(app, w))
+	if !render.rect_contains(list, x, y) {return -1, {}}
 	for row, i in rows {
-		r := status_panel_row_rect(w, list, row)
-		if row.report && status_rect_contains(r, x, y) {return i, r}
+		r := status_panel_row_rect(list, row, w.status.panel_scroll)
+		if row.report && render.rect_contains(r, x, y) {return i, r}
 	}
 	return -1, {}
 }
@@ -611,14 +625,14 @@ status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	if index < 0 {return ""}
 	item := rows[index].item
 	if term.program_status_finished(item.record.state) &&
-	   status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
+	   render.rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		return "Dismiss"
 	}
 	name := status_item_name(app, item)
 	who := name
 	if item.record.app != "" && item.record.app != name {who = fmt.tprintf("%s · %s", item.record.app, name)}
 	buffer: [8]u8
-	state := ui.status_headline(status_mark(item.record), buffer[:])
+	state := status_headline(status_presentation(item.record).mark, buffer[:])
 	if item.record.message != "" {
 		// Half the tooltip at most, so a long message never pushes the location out of it.
 		message := tooltip_clip(item.record.message, TOOLTIP_LIMIT / 2)
@@ -628,42 +642,144 @@ status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 status_panel_button_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Status_Panel_Button {
-	if status_rect_contains(status_panel_side_rect(app, w), x, y) {return .Side}
-	return status_rect_contains(status_panel_view_rect(app, w), x, y) ? .View : .None
+	if render.rect_contains(status_panel_side_rect(app, w), x, y) {return .Side}
+	return render.rect_contains(status_panel_view_rect(app, w), x, y) ? .View : .None
 }
 
 status_panel_contains :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return status_rect_contains(status_panel_rect(app, w), x, y)
+	return render.rect_contains(status_panel_rect(app, w), x, y)
 }
 
-// Panel clicks open the pane a row came from; the panel takes every press inside it.
-status_panel_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) -> bool {
+// The pointer moved over the panel, which owns it.
+status_panel_move :: proc(app: ^App, w: ^Window, x, y: f32) {
+	button := status_panel_button_at(app, w, x, y)
+	if button != w.status.panel_button_hover {w.status.panel_button_hover, w.dirty = button, true}
+	// The divider on the panel's edge sets its own cursor and leaves the row hover as it was.
+	if _, on_divider := divider_cursor(w, x, y); on_divider {return}
+	hover: Maybe(int)
+	rows, _ := status_panel_rows(app, w)
+	if index, _ := status_panel_hit(app, w, rows, x, y); index >= 0 {hover = index}
+	status_panel_hover_set(w, hover)
+	_, on_row := hover.?
+	pointer_set(app, w, on_row || button != .None ? .Hand : .Arrow)
+}
+
+// The pointer left the panel for another surface.
+status_panel_leave :: proc(_: ^App, w: ^Window) {
+	status_panel_hover_set(w, nil)
+	if w.status.panel_button_hover != .None {w.status.panel_button_hover, w.dirty = .None, true}
+}
+
+@(private = "file")
+status_panel_hover_set :: proc(w: ^Window, hover: Maybe(int)) {
+	if hover == w.status.panel_hover {return}
+	w.status.panel_hover = hover
+	w.dirty = true
+}
+
+// Forgets the hovered row without a repaint, for an overlay cancelling every overview at once.
+status_panel_hover_clear :: proc(w: ^Window) {
+	w.status.panel_hover = nil
+}
+
+// Header buttons, then the row under the pointer.
+status_panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
+	switch status_panel_button_at(app, w, x, y) {
+	case .Side:
+		return "Move activity panel"
+	case .View:
+		return app.settings.status.panel_view == .Comfy ? "Switch to Dense" : "Switch to Comfy"
+	case .None:
+	}
+	return status_panel_row_tooltip(app, w, x, y)
+}
+
+// A press on the panel, which owns the pointer: header buttons arm, rows open the pane they came
+// from, and a finished row's Dismiss removes it.
+status_panel_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {return}
 	x, y := f32(e.x), f32(e.y)
-	if !e.pressed || !status_panel_contains(app, w, x, y) {return false}
 	gesture_swallow(w, e.button, .Status_Panel)
-	if e.button != .Left {return true}
+	if e.button != .Left {return}
 	if button := status_panel_button_at(app, w, x, y); button != .None {
 		ui.armed_press(&w.status.panel_button_armed, button)
-		return true
+		return
 	}
 	rows, _ := status_panel_rows(app, w)
 	index, rect := status_panel_hit(app, w, rows, x, y)
-	if index < 0 {return true}
+	if index < 0 {return}
 	item := rows[index].item
 	if term.program_status_finished(item.record.state) &&
-	   status_rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
+	   render.rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		status_dismiss_item(app, item)
 		w.dirty = true
-		return true
+		return
 	}
 	status_open_item(app, w, item)
+}
+
+// Fires an armed header button when the release lands on it; reports whether the panel took it.
+status_panel_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	if e.button != .Left || !ui.armed_down(w.status.panel_button_armed) {return false}
+	w.dirty = true
+	button := status_panel_button_at(app, w, f32(e.x), f32(e.y))
+	if fired, ok := ui.armed_release(&w.status.panel_button_armed, button); ok {
+		status_panel_button_fire(app, fired)
+	}
 	return true
+}
+
+status_panel_cancel :: proc(_: ^App, w: ^Window) {
+	ui.armed_cancel(&w.status.panel_button_armed)
 }
 
 status_panel_wheel :: proc(app: ^App, w: ^Window, x, y, delta: f32) -> bool {
 	if !status_panel_contains(app, w, x, y) {return false}
-	step := f32(math.sign(delta)) * 2 * STATUS_ROW_HEIGHT * w.scale
-	w.status.panel_scroll = max(0, w.status.panel_scroll - step)
+	_, total := status_panel_rows(app, w)
+	list := status_panel_list(w, status_panel_rect(app, w))
+	step := f32(math.sign(delta)) * STATUS_PANEL_WHEEL * w.scale
+	w.status.panel_scroll = clamp(w.status.panel_scroll - step, 0, max(0, total - list.height))
 	w.dirty = true
 	return true
+}
+
+when AIO_CONTROL {
+	// The Activity panel's verification keys and its rows as the panel lists them.
+	status_panel_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		area := status_panel_rect(app, w)
+		state_rect(r, "activity.rect", area)
+		state_rect(r, "activity.side_button", status_panel_side_rect(app, w))
+		@(static, rodata)
+		sides := settings.STATUS_PANEL_SIDE_NAME
+		@(static, rodata)
+		views := settings.STATUS_PANEL_VIEW_NAME
+		state_text(r, "activity.side", sides[app.settings.status.panel_side])
+		state_rect(r, "activity.view_button", status_panel_view_rect(app, w))
+		state_text(r, "activity.view", views[app.settings.status.panel_view])
+		rows, _, scroll := status_panel_layout(app, w)
+		list := status_panel_list(w, area)
+		for row, i in rows {
+			state_rect(r, state_key("activity.row.%d.rect", i), status_panel_row_rect(list, row, scroll))
+			state_value(r, state_key("activity.row.%d.report", i), row.report)
+			text := row.report ? status_item_name(app, row.item) : row.label
+			state_text(r, state_key("activity.row.%d.text", i), text)
+			state_value(r, state_key("activity.row.%d.depth", i), row.depth)
+		}
+	}
+}
+
+// Activity panel pointer surface
+
+@(private)
+status_panel_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return status_panel_contains(app, w, x, y)
+}
+
+@(private)
+status_panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Status_Panel {
+		status_panel_move(app, w, f32(e.x), f32(e.y))
+		return
+	}
+	status_panel_leave(app, w)
 }

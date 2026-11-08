@@ -301,19 +301,3 @@ program_status_dismiss :: proc(s: ^Session, id: string) {
 	defer sync.mutex_unlock(&s.mutex)
 	clear_program_status(s, .Dismissed, id)
 }
-
-// Disabling stops listening: reports are dropped, the support query goes unanswered so programs
-// see the protocol as unsupported, and every stored record is removed.
-set_program_status_enabled :: proc(s: ^Session, enabled: bool) {
-	sync.mutex_lock(&s.mutex)
-	defer sync.mutex_unlock(&s.mutex)
-	if s.program_status_enabled == enabled {return}
-	callback: ghostty.Terminal_Program_Status_Fn = on_program_status
-	value := enabled ? rawptr(callback) : nil
-	if ghostty.terminal_set(s.terminal, .Program_Status, value) != .Success {
-		log.error("term: switching program status reports failed")
-		return
-	}
-	s.program_status_enabled = enabled
-	if !enabled {clear_program_status(s, .All)}
-}

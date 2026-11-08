@@ -43,10 +43,6 @@ Bitmap :: struct {
 	color:         bool,
 }
 
-Text_Gamma :: struct {
-	gamma, enhanced_contrast: f32,
-}
-
 Error :: enum {
 	None,
 	Out_Of_Memory,

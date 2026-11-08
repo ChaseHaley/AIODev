@@ -94,6 +94,7 @@ choice_dropdown_scrollbar_pages_drags_and_keeps_options_clear :: proc(t: ^testin
 	for &choice, i in choices {choice = fmt.tprintf("Font %02d", i)}
 	testing.expect_value(t, ui.editor_add(&p, {
 		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true,
+		font_filter = true, choice_min_width = 360,
 		value = choices[0], choices = choices[:],
 	}, "Font"), nil)
 	ui.editor_filter(&p)
@@ -111,25 +112,25 @@ choice_dropdown_scrollbar_pages_drags_and_keeps_options_clear :: proc(t: ^testin
 	testing.expect(t, !p.popup_bar_hover)
 
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, bottom, false), ui.Editor_Outcome.Changed)
-	testing.expect(t, p.popup_scroll > 0)
-	testing.expect(t, p.popup_index >= p.popup_scroll)
+	testing.expect(t, p.choice_list.scroll > 0)
+	testing.expect(t, p.choice_list.index >= p.choice_list.scroll)
 	testing.expect(t, !ui.editor_dragging(&p))
 
-	top := p.popup_scroll
+	top := p.choice_list.scroll
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, popup.y + 68 + 6, false), ui.Editor_Outcome.Changed)
-	testing.expect(t, p.popup_scroll < top)
+	testing.expect(t, p.choice_list.scroll < top)
 
 	// At the top, the thumb starts at the track's top, so a press there grabs it.
-	for p.popup_scroll > 0 {_ = ui.editor_press(&p, l, nil, x, popup.y + 68 + 6, false)}
+	for p.choice_list.scroll > 0 {_ = ui.editor_press(&p, l, nil, x, popup.y + 68 + 6, false)}
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, popup.y + 68 + 6, false), ui.Editor_Outcome.Changed)
 	testing.expect(t, ui.editor_scrollbar_dragging(&p))
 	testing.expect(t, ui.editor_drag(&p, l, nil, x + 500, 10000))
 	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Changed)
 	testing.expect(t, !ui.editor_dragging(&p))
 	// A drag past the window's edge reaches the end: the wheel can scroll no further.
-	end := p.popup_scroll
+	end := p.choice_list.scroll
 	ui.editor_wheel(&p, l, popup.x + 10, popup.y + 80, -100)
-	testing.expect_value(t, p.popup_scroll, end)
+	testing.expect_value(t, p.choice_list.scroll, end)
 	testing.expect(t, end > top)
 	testing.expect_value(t, ui.field_string(&p.value), "Font 00")
 }

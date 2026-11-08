@@ -2,13 +2,13 @@ package ui
 
 import "aio:commands"
 import "aio:fuzzy"
-import "aio:glyphs"
+import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "base:runtime"
+import "core:log"
 import "core:slice"
 import "core:strings"
-import "core:time"
 import "core:unicode/utf8"
 
 @(private) PALETTE_MAX_ROWS :: 8
@@ -24,10 +24,6 @@ import "core:unicode/utf8"
 // A leading icon and the gap after it.
 @(private) PALETTE_GLYPH_WIDTH :: ICON_BUTTON + SPACE_2
 @(private) PALETTE_NO_RANK :: 99
-@(private) PALETTE_PRESENCE :: Presence_Spec {
-	open  = 120 * time.Millisecond,
-	close = 90 * time.Millisecond,
-}
 
 // What activating a result does.
 Outcome :: enum {
@@ -58,16 +54,18 @@ Palette_Mode :: enum {
 	Commands,
 }
 
+// `word` labels the mode's tab and `name` reports it; `prefix` typed first selects the mode.
 Palette_Mode_Info :: struct {
-	word, prefix, placeholder: string,
+	word, name, prefix, placeholder: string,
+	icon:                            Icon,
 }
 
 @(private) PALETTE_MODES := [Palette_Mode]Palette_Mode_Info {
-	.All         = {"All", "", "Search anything"},
-	.Tabs        = {"Tabs", "t:", "Search tabs"},
-	.Workspaces  = {"Workspaces", "w:", "Search workspaces"},
-	.Settings    = {"Settings", "s:", "Search settings"},
-	.Commands    = {"Commands", "c:", "Search commands"},
+	.All         = {"All", "all", "", "Search anything", .Grid},
+	.Tabs        = {"Tabs", "tabs", "t:", "Search tabs", .Layout_Top},
+	.Workspaces  = {"Workspaces", "workspaces", "w:", "Search workspaces", .Workspace},
+	.Settings    = {"Settings", "settings", "s:", "Search settings", .Settings},
+	.Commands    = {"Commands", "commands", "c:", "Search commands", .Command},
 }
 
 @(private) PALETTE_CYCLE := [?]Palette_Mode {
@@ -76,14 +74,6 @@ Palette_Mode_Info :: struct {
 	.Workspaces,
 	.Settings,
 	.Commands,
-}
-
-@(private) PALETTE_MODE_ICONS := [Palette_Mode]Icon {
-	.All = .Grid,
-	.Tabs = .Layout_Top,
-	.Workspaces = .Workspace,
-	.Settings = .Settings,
-	.Commands = .Command,
 }
 
 @(private) PALETTE_MODE_WIDTHS := [Palette_Mode]f32 {
@@ -104,12 +94,13 @@ Palette_Mode_Info :: struct {
 	.Workspace = "Workspace",
 }
 
-// Identity never relies on colour: every row carries this shape, and a type word on a title clash.
-@(private) PALETTE_KIND_ICONS := [Palette_Kind]Icon {
-	.Command = .Command,
+// The mode listing only one kind; its icon marks that kind's rows. Identity never relies on colour:
+// every row carries this shape, and a type word on a title clash.
+@(private) PALETTE_KIND_MODES := [Palette_Kind]Palette_Mode {
+	.Command = .Commands,
 	.Setting = .Settings,
-	.Tab = .Layout_Top,
-	.Workspace = .Workspace,
+	.Tab = .Tabs,
+	.Workspace = .Workspaces,
 }
 
 // One footer entry: its keycaps, joined by a slash, and what they do.
@@ -121,13 +112,25 @@ Palette_Key_Hint :: struct {
 // At most navigate, three selection actions, and close.
 @(private) PALETTE_HINT_CAP :: 5
 
+// The palette's chords beyond list_step, each beside the keycap the footer shows for it. palette_key
+// and edit_key match these, so changing a chord changes its hint. Enter and Numpad Enter both accept.
+// The operate modifier with Enter edits a command's shortcut or operates a setting's control.
+@(private) PALETTE_OPERATE :: input.Modifier.Control
+@(private) PALETTE_OPERATE_LABEL :: "Ctrl+Enter"
+// The adjust modifier with Left or Right steps the selected setting.
+@(private) PALETTE_ADJUST :: input.Modifier.Alt
+@(private) PALETTE_ADJUST_LABEL :: "Alt+←/→"
+@(private) PALETTE_ACCEPT_LABEL :: "Enter"
+@(private) PALETTE_CANCEL_KEY :: input.Key.Escape
+@(private) PALETTE_CANCEL_LABEL :: "Esc"
+
 // A setting the palette can open in the settings editor, and the control it offers in place.
 // The strings are static schema text. A choice without `choices` asks Palette_Values for a live list.
 Palette_Setting :: struct {
 	key, title, group:      string,
 	control:                Palette_Control,
 	minimum, maximum, step: f64,
-	choices:                []string,
+	choices, choice_labels: []string,
 	// The choice list has a filter field, as the Settings page gives font pickers.
 	searchable:             bool,
 	// A reset button restores `default_value`, as on the Settings page.
@@ -148,6 +151,13 @@ Palette_Source :: struct {
 	user:  rawptr,
 	count: proc(user: rawptr) -> int,
 	item:  proc(user: rawptr, index: int) -> Palette_Item,
+}
+
+// Asks the caller, on every query, whether a command can run now; the palette leaves out one that
+// cannot. Without a callback every command that is not hidden is listed.
+Palette_Availability :: struct {
+	user:      rawptr,
+	available: proc(user: rawptr, id: commands.Command_Id) -> bool,
 }
 
 // A command result, a setting result, or a tab/workspace result.
@@ -176,6 +186,9 @@ Palette :: struct {
 	query:          Text_Field,
 	selected, scroll: int,
 	visible_rows:   int,
+	// The last explicit fit supplies geometry to keyboard-operated popups, before any draw.
+	fit_page:       render.Rect,
+	fit_scale:      f32,
 	results:        [dynamic]Palette_Result,
 	// Matches gathered per domain before sections are ordered into `results`.
 	ordered:        [dynamic]Palette_Result,
@@ -195,6 +208,7 @@ Palette :: struct {
 	buffers:      Edit_Buffers,
 	drag:         Palette_Drag,
 	leader:       Maybe(commands.Shortcut),
+	availability: Palette_Availability,
 	reset_hover:  int,
 	scroll_hover: bool,
 }
@@ -252,6 +266,7 @@ palette_init :: proc(
 	edit_init(&p.buffers, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
+	p.fit_scale = 1
 	p.mode_hover = -1
 	p.reset_hover = -1
 	err: runtime.Allocator_Error
@@ -284,12 +299,16 @@ palette_set_sources :: proc(p: ^Palette, tabs, workspaces: Palette_Source) {
 	p.tabs, p.workspaces = tabs, workspaces
 }
 
+palette_set_availability :: proc(p: ^Palette, availability: Palette_Availability) {
+	p.availability = availability
+}
+
 palette_open :: proc(p: ^Palette, registry: ^commands.Registry) {
 	palette_open_mode(p, registry, .All)
 }
 
 palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
-	presence_open(&p.presence, PALETTE_PRESENCE)
+	presence_open(&p.presence, DIALOG_PRESENCE)
 	field_set(&p.query, "")
 	p.selected, p.scroll = 0, 0
 	p.mode = mode
@@ -316,17 +335,18 @@ palette_close :: proc(p: ^Palette) {
 palette_choose :: proc(p: ^Palette, chosen: Palette_Chosen) {p.chosen = chosen}
 
 // Values need owned storage, but schema keys outlive the palette. The embedded shortcut row's key
-// needs a copy too, since closing that edit destroys its editor.
+// needs a copy too, since closing that edit destroys its editor. A copy that cannot be stored chooses
+// nothing, so the owner never applies a partial value.
 @(private)
 choose_setting :: proc(p: ^Palette, key, value: string, copy_key := false) -> Outcome {
 	saved_key := key
 	if copy_key {
 		clear(&p.chosen_key)
-		append(&p.chosen_key, key)
+		if _, err := append(&p.chosen_key, key); err != nil {return .None}
 		saved_key = string(p.chosen_key[:])
 	}
 	clear(&p.chosen_value)
-	append(&p.chosen_value, value)
+	if _, err := append(&p.chosen_value, value); err != nil {return .None}
 	palette_choose(p, Chosen_Value{saved_key, string(p.chosen_value[:])})
 	return .Set_Setting
 }
@@ -341,40 +361,16 @@ palette_chosen_take :: proc(p: ^Palette) -> Palette_Chosen {
 
 palette_query :: proc(p: ^Palette) -> string {return field_string(&p.query)}
 
-palette_mode :: proc(p: ^Palette) -> Palette_Mode {return p.mode}
-
 palette_mode_info :: proc(mode: Palette_Mode) -> Palette_Mode_Info {return PALETTE_MODES[mode]}
 
-palette_mode_word :: proc(mode: Palette_Mode) -> string {
-	switch mode {
-	case .All:
-		return "all"
-	case .Tabs:
-		return "tabs"
-	case .Workspaces:
-		return "workspaces"
-	case .Settings:
-		return "settings"
-	case .Commands:
-		return "commands"
-	}
-	return "all"
-}
+palette_mode_word :: proc(mode: Palette_Mode) -> string {return PALETTE_MODES[mode].name}
 
 palette_mode_prefix :: proc(mode: Palette_Mode) -> string {return PALETTE_MODES[mode].prefix}
 
 // The prefix a typed query starts with, or no length when it is literal text.
 palette_parse_prefix :: proc(text: string) -> (mode: Palette_Mode, length: int) {
-	if len(text) < 2 || text[1] != ':' {return .All, 0}
-	switch text[0] {
-	case 't':
-		return .Tabs, 2
-	case 'w':
-		return .Workspaces, 2
-	case 's':
-		return .Settings, 2
-	case 'c':
-		return .Commands, 2
+	for info, candidate in PALETTE_MODES {
+		if info.prefix != "" && strings.has_prefix(text, info.prefix) {return candidate, len(info.prefix)}
 	}
 	return .All, 0
 }
@@ -401,30 +397,12 @@ palette_cycle_mode :: proc(p: ^Palette, registry: ^commands.Registry, reverse: b
 	palette_set_mode(p, registry, palette_next_mode(p.mode, reverse))
 }
 
-// The category a command name belongs to, such as Panes for pane.split_right.
-command_category :: proc(name: string) -> string {
-	dot := strings.index_byte(name, '.')
-	switch dot < 0 ? name : name[:dot] {
-	case "app":
-		return "Application"
-	case "terminal":
-		return "Terminal"
-	case "pane":
-		return "Panes"
-	case "tab":
-		return "Tabs"
-	case "workspace":
-		return "Workspaces"
-	case "window":
-		return "Windows"
-	case "settings":
-		return "Settings"
-	case "edit":
-		return "Edit"
-	case "view":
-		return "View"
-	}
-	return "Commands"
+// Whether the palette lists a command: hidden ones serve scripts, and an unavailable one cannot run.
+@(private)
+palette_lists :: proc(p: ^Palette, command: ^commands.Command) -> bool {
+	if command.hidden {return false}
+	a := p.availability
+	return a.available == nil || a.available(a.user, command.id)
 }
 
 @(private)
@@ -500,6 +478,9 @@ setting_header_match :: proc(p: ^Palette, setting: int, query: string, highlight
 ) {
 	s := p.settings[setting]
 	clear(&p.haystack)
+	// Room for the header alias and the title, so the text matched is never a truncated copy.
+	needed := len(s.group) + len(PALETTE_SETTING_SUFFIX) + 2 + len(s.title)
+	if reserve(&p.haystack, needed) != nil {return}
 	append(&p.haystack, s.group)
 	append(&p.haystack, PALETTE_SETTING_SUFFIX)
 	// The displayed singular header is also a subsequence of this plural alias.
@@ -706,11 +687,18 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	workspaces := (p.mode == .All || p.mode == .Workspaces) ? count_of(p.workspaces) : 0
 	enabled_commands := 0
 	if p.mode == .All || p.mode == .Commands {
-		for command in registry.items {if !command.disabled && !command.hidden {enabled_commands += 1}}
+		for &command in registry.items {if palette_lists(p, &command) {enabled_commands += 1}}
 	}
 	setting_count := (p.mode == .All || p.mode == .Settings) ? len(p.settings) : 0
 	candidates := tabs + workspaces + setting_count + enabled_commands
-	if !empty && width > 0 {resize(&p.positions, candidates * width)}
+	// Every candidate's storage is in place before ranking, so the appends below cannot fail and the
+	// published list is complete. Without room the palette lists nothing rather than a partial list.
+	if reserve(&p.ordered, candidates) != nil || reserve(&p.results, candidates) != nil ||
+	   (width > 0 && resize(&p.positions, candidates * width) != nil) {
+		log.errorf("palette: no room for %d results", candidates)
+		p.selected, p.scroll = 0, 0
+		return
+	}
 	spans: [Palette_Kind][2]int
 	if p.mode == .All || p.mode == .Tabs {
 		start := len(p.ordered)
@@ -777,7 +765,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	if p.mode == .All || p.mode == .Commands {
 		start := len(p.ordered)
 		for &command in registry.items {
-			if command.disabled || command.hidden {continue}
+			if !palette_lists(p, &command) {continue}
 			if empty {
 				append(&p.ordered, Palette_Result{kind = .Command, command = &command, setting = -1,
 					rank = PALETTE_NO_RANK})
@@ -792,7 +780,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					command.title,
 					query,
 					width,
-					[]string{command_category(command.name)},
+					[]string{commands.category(command.name).title},
 					true,
 				)
 			}
@@ -800,7 +788,6 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 		spans[.Command] = {start, len(p.ordered)}
 	}
 	if len(p.ordered) > 0 {
-		_ = reserve(&p.results, len(p.ordered))
 		for kind in PALETTE_DOMAIN_ORDER {
 			append(&p.results, ..p.ordered[spans[kind][0]:spans[kind][1]])
 		}
@@ -887,7 +874,7 @@ edited :: proc(p: ^Palette, registry: ^commands.Registry, change: Field_Change) 
 palette_key :: proc(
 	p: ^Palette,
 	registry: ^commands.Registry,
-	e: platform.Key_Event,
+	e: input.Key_Event,
 ) -> (
 	Outcome,
 	commands.Command_Id,
@@ -913,26 +900,26 @@ palette_key :: proc(
 		}
 	}
 	shift := .Shift in e.modifiers
-	if (e.key == .Enter || e.key == .Numpad_Enter) && .Control in e.modifiers &&
+	if (e.key == .Enter || e.key == .Numpad_Enter) && PALETTE_OPERATE in e.modifiers &&
 	   p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Command {
 		return palette_binding_open(p, p.selected), 0
 	}
-	// Alt+Left and Alt+Right step the selected setting; Ctrl+Enter operates its control.
+	// The adjust chord steps the selected setting; the operate chord operates its control.
 	if s := result_setting(p, p.selected); s != nil && s.control != .None {
 		setting := p.results[p.selected].setting
-		alt := .Alt in e.modifiers && .Control not_in e.modifiers
+		alt := PALETTE_ADJUST in e.modifiers && PALETTE_OPERATE not_in e.modifiers
 		#partial switch e.key {
 		case .Arrow_Left:
 			if alt {return control_step(p, setting, -1), 0}
 		case .Arrow_Right:
 			if alt {return control_step(p, setting, 1), 0}
 		case .Enter, .Numpad_Enter:
-			if .Control in e.modifiers {return control_activate(p, setting), 0}
+			if PALETTE_OPERATE in e.modifiers {return control_activate(p, setting), 0}
 		}
 	}
 	if step := list_step(e); step != 0 {return move(p, step), 0}
 	#partial switch e.key {
-	case .Escape:
+	case PALETTE_CANCEL_KEY:
 		palette_close(p)
 		return .Closed, 0
 	case .Enter, .Numpad_Enter:
@@ -971,7 +958,18 @@ palette_cut :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	return palette_text(p, registry, "")
 }
 
-palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) -> Palette_Layout {
+// The panel's bands for a viewport: where it starts, how tall each part is and how many result rows
+// fit. palette_fit and palette_layout both measure from it.
+@(private)
+Palette_Frame :: struct {
+	width, height, scale, border, panel_width, top:                f32,
+	row_height, padding, footer_height, input_height, mode_height: f32,
+	separator:                                                     f32,
+	rows:                                                          int,
+}
+
+@(private)
+palette_frame :: proc(viewport_width, viewport_height, viewport_scale: f32) -> Palette_Frame {
 	width, height := max(0, viewport_width), max(0, viewport_height)
 	scale := viewport_scale > 0 ? viewport_scale : 1
 	border := min(scale, width / 2, height / 2)
@@ -1005,15 +1003,39 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		footer_height = 0
 	}
 	rows_space := max(0, remaining - 2 * padding - footer_height)
-	p.visible_rows = clamp(int(rows_space / row_height), 0, PALETTE_MAX_ROWS)
+	return {
+		width = width, height = height, scale = scale, border = border, panel_width = panel_width,
+		top = top, row_height = row_height, padding = padding, footer_height = footer_height,
+		input_height = input_height, mode_height = mode_height, separator = separator,
+		rows = clamp(int(rows_space / row_height), 0, PALETTE_MAX_ROWS),
+	}
+}
+
+// Sizes the result list for a viewport: how many rows fit, with the selection kept on one of them.
+// Owners fit whenever the viewport may have changed; palette_draw fits before it draws.
+palette_fit :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) {
+	frame := palette_frame(viewport_width, viewport_height, viewport_scale)
+	p.visible_rows = frame.rows
+	p.fit_page = {0, 0, frame.width, frame.height}
+	p.fit_scale = frame.scale
 	keep_selection_visible(p)
-	rows := clamp(len(p.results) - p.scroll, 0, p.visible_rows)
-	if len(p.results) == 0 && p.visible_rows > 0 {rows = 1}
+	palette_binding_fit(p)
+}
+
+// Measures the palette for a viewport without changing it.
+palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) -> Palette_Layout {
+	f := palette_frame(viewport_width, viewport_height, viewport_scale)
+	width, height, scale, border := f.width, f.height, f.scale, f.border
+	panel_width, row_height, padding := f.panel_width, f.row_height, f.padding
+	footer_height, input_height := f.footer_height, f.input_height
+	mode_height, separator := f.mode_height, f.separator
+	rows := clamp(len(p.results) - p.scroll, 0, f.rows)
+	if len(p.results) == 0 && f.rows > 0 {rows = 1}
 	used := f32(rows) * row_height
 	list_padding := min(padding, panel_width / 2)
 	panel := render.Rect {
 		x      = (width - panel_width) / 2,
-		y      = top,
+		y      = f.top,
 		width  = panel_width,
 		height = mode_height + input_height + separator + 2 * padding + used + footer_height,
 	}
@@ -1044,7 +1066,7 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	}
 	if footer_height > 0 {l.footer = {panel.x, l.list.y + used + padding, panel.width, footer_height}}
 	// The track replaces the list's right padding, inside the panel border.
-	extent := Scroll_Extent{len(p.results), p.visible_rows, p.scroll}
+	extent := Scroll_Extent{len(p.results), f.rows, p.scroll}
 	gutter := SCROLLBAR_TRACK * scale + border
 	area := render.Rect{panel.x + panel.width - gutter, l.list.y, SCROLLBAR_TRACK * scale, used}
 	state := palette_scrollbar_state(p)
@@ -1057,7 +1079,7 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 @(private)
 row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 	r := l.list
-	if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height || l.row_height <= 0 {
+	if !render.rect_contains(r, x, y) || l.row_height <= 0 {
 		return -1
 	}
 	index := p.scroll + int((y - r.y) / l.row_height)
@@ -1067,7 +1089,7 @@ row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 @(private)
 mode_at :: proc(l: Palette_Layout, x, y: f32) -> int {
 	for mode, i in PALETTE_CYCLE {
-		if contains(l.modes[mode], x, y) {return i}
+		if render.rect_contains(l.modes[mode], x, y) {return i}
 	}
 	return -1
 }
@@ -1076,7 +1098,7 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome
 	if _, sliding := p.drag.(Slider_Drag); sliding {return .None}
 	switch &edit in p.edit {
 	case Shortcut_Edit:
-		return editor_hover(&edit.editor, palette_binding_layout(p, l, edit.result), x, y) ? .Changed : .None
+		return palette_binding_hover(p, &edit, l, x, y)
 	case Choice_Edit:
 		hover := popup_row_at(p, &edit, l, x, y)
 		if hover == edit.hover {return .None}
@@ -1119,7 +1141,7 @@ palette_mouse_press :: proc(
 		return .Changed, 0
 	}
 	if binding, open := &p.edit.(Shortcut_Edit); open {
-		return palette_binding_press(p, binding, l, text, x, y), 0
+		return palette_binding_press(p, binding, l, x, y), 0
 	}
 	if outcome, handled := edit_press(p, l, text, x, y); handled {return outcome, 0}
 	if l.bar_visible && scrollbar_contains(l.bar, x, y) {
@@ -1133,15 +1155,14 @@ palette_mouse_press :: proc(
 		if p.results[index].kind == .Command {
 			row, _ := row_rect(p, l, index)
 			parts := palette_binding_parts(row, l.scale)
-			if contains(parts.reset, x, y) {return palette_binding_reset(p, index), 0}
-			if contains(parts.field, x, y) {return palette_binding_open(p, index), 0}
+			if render.rect_contains(parts.reset, x, y) {return palette_binding_reset(p, index), 0}
+			if render.rect_contains(parts.field, x, y) {return palette_binding_open(p, index), 0}
 		}
 		if outcome, handled := reset_press(p, l, index, x, y); handled {return outcome, 0}
 		if outcome, handled := control_press(p, l, index, x, y); handled {return outcome, 0}
 		return run(p, index)
 	}
-	r := l.panel
-	if x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height {
+	if !render.rect_contains(l.panel, x, y) {
 		palette_close(p)
 		return .Closed, 0
 	}
@@ -1167,8 +1188,7 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 }
 
 palette_input_contains :: proc(l: Palette_Layout, x, y: f32) -> bool {
-	r := l.input
-	return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+	return render.rect_contains(l.input, x, y)
 }
 
 palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
@@ -1249,7 +1269,7 @@ draw_footer :: proc(
 	theme: Theme,
 	l: Palette_Layout,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if l.footer.width <= 0 || l.footer.height <= 0 {return .Ok}
 	if render.push_layer(list, l.footer) != .None {return .Ok}
 	draw_rect(list, {
@@ -1257,16 +1277,11 @@ draw_footer :: proc(
 		color = theme.border,
 	})
 	if binding, open := &p.edit.(Shortcut_Edit); open {
-		b := &binding.editor
 		hint_text := text_styled(text, .Detail)
-		message := b.message
-		if !b.error {
-			message = editor_capturing(b) ? "Press keys · Enter saves · Esc cancels · Backspace removes" :
-			          "Enter replaces · Delete removes · Esc cancels"
-		}
+		message, error := shortcut_capture_footer(&binding.capture)
 		return draw_text(&hint_text, list, message, l.footer.x + 12 * scale,
 		                 l.footer.y + (l.footer.height - hint_text.line_height) / 2 + hint_text.ascent,
-		                 b.error ? theme.error : theme.muted, max(1, l.footer.width - 24 * scale))
+		                 error ? theme.error : theme.muted, max(1, l.footer.width - 24 * scale))
 	}
 	hints: [PALETTE_HINT_CAP]Palette_Key_Hint
 	count := palette_key_hints(p, &hints)
@@ -1300,34 +1315,34 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 	}
 	#partial switch _ in p.edit {
 	case Choice_Edit:
-		add(out, &count, "Ctrl+N", "Ctrl+P", "Navigate")
-		add(out, &count, "Enter", "", "Choose")
-		add(out, &count, "Esc", "", "Cancel")
+		add(out, &count, LIST_NEXT_LABEL, LIST_PREVIOUS_LABEL, "Navigate")
+		add(out, &count, PALETTE_ACCEPT_LABEL, "", "Choose")
+		add(out, &count, PALETTE_CANCEL_LABEL, "", "Cancel")
 		return count
 	case Text_Edit:
-		add(out, &count, "Enter", "", "Apply")
-		add(out, &count, "Esc", "", "Cancel")
+		add(out, &count, PALETTE_ACCEPT_LABEL, "", "Apply")
+		add(out, &count, PALETTE_CANCEL_LABEL, "", "Cancel")
 		return count
 	}
 	if p.selected >= 0 && p.selected < len(p.results) {
-		add(out, &count, "Ctrl+N", "Ctrl+P", "Navigate")
+		add(out, &count, LIST_NEXT_LABEL, LIST_PREVIOUS_LABEL, "Navigate")
 		switch p.results[p.selected].kind {
 		case .Command:
-			add(out, &count, "Enter", "", "Run command")
-			add(out, &count, "Ctrl+Enter", "", "Edit shortcut")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Run command")
+			add(out, &count, PALETTE_OPERATE_LABEL, "", "Edit shortcut")
 		case .Setting:
-			add(out, &count, "Enter", "", "Go to setting")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Go to setting")
 			if s := result_setting(p, p.selected); s != nil && s.control != .None {
-				add(out, &count, "Ctrl+Enter", "", "Change")
-				if s.control != .Text {add(out, &count, "Alt+←/→", "", "Adjust")}
+				add(out, &count, PALETTE_OPERATE_LABEL, "", "Change")
+				if s.control != .Text {add(out, &count, PALETTE_ADJUST_LABEL, "", "Adjust")}
 			}
 		case .Tab:
-			add(out, &count, "Enter", "", "Switch tab")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Switch tab")
 		case .Workspace:
-			add(out, &count, "Enter", "", "Switch workspace")
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Switch workspace")
 		}
 	}
-	add(out, &count, "Esc", "", "Close")
+	add(out, &count, PALETTE_CANCEL_LABEL, "", "Close")
 	return count
 }
 
@@ -1351,7 +1366,7 @@ draw_key_hint :: proc(
 	footer: render.Rect,
 	baseline: f32,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	pen := x
 	height := min(PALETTE_KEYCAP_HEIGHT * scale, footer.height)
 	top := footer.y + (footer.height - height) / 2
@@ -1387,7 +1402,7 @@ draw_modes :: proc(
 	theme: Theme,
 	l: Palette_Layout,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if l.mode_bar.width <= 0 || l.mode_bar.height <= 0 {return .Ok}
 	if render.push_layer(list, l.mode_bar) != .None {return .Ok}
 	draw_rect(list, {
@@ -1419,7 +1434,7 @@ draw_modes :: proc(
 		x := row.x + (row.width - icon_size - gap - width) / 2
 		ink := p.mode == mode || p.mode_hover == i ? theme.text : theme.muted
 		icon := render.Rect{x, row.y, icon_size, row.height}
-		icon_draw(list, PALETTE_MODE_ICONS[mode], icon, ink, icon_size / scale, scale)
+		icon_draw(list, PALETTE_MODES[mode].icon, icon, ink, icon_size / scale, scale)
 		if text_room <= 0 {continue}
 		baseline := row.y + (row.height - mode_text.line_height) / 2 + mode_text.ascent
 		if result := draw_text(&mode_text, list, word, x + icon_size + gap, baseline,
@@ -1434,17 +1449,19 @@ palette_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, height, scale: f32,
-	opacity: f32 = 1, rise: f32 = 0,
+	fade := FADE_NONE,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
+	palette_fit(p, width, height, scale)
 	l := palette_layout(p, width, height, scale)
 	panel := l.panel
 	if render.push_layer(list, {0, 0, width, height}) != .None {
 		return .Ok
 	}
-	layer_start, rect_start, glyph_start := len(list.layers), len(list.rects), len(list.glyphs)
-	bounded_rise := clamp(rise, 0, max(0, height - scale - panel.y - panel.height))
-	defer fade_draw(list, layer_start, rect_start, glyph_start, opacity, bounded_rise)
+	// The full-window clip stays put; the panel sinks no lower than the client's bottom edge.
+	mark := fade_mark(list)
+	bounded := Fade{fade.opacity, clamp(fade.rise, 0, max(0, height - scale - panel.y - panel.height))}
+	defer fade_draw(list, mark, bounded)
 	draw_rect(list, {rect = {0, 0, width, height}, color = theme.scrim})
 	frame := dialog_panel(panel, scale)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
@@ -1484,7 +1501,7 @@ palette_draw :: proc(
 			row := render.Rect{l.list.x, l.list.y + f32(rows) * l.row_height, l.list.width, l.row_height}
 			if index == p.selected {
 				draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
-				if contains(row, pointer.x, pointer.y) {
+				if render.rect_contains(row, pointer.x, pointer.y) {
 					// The row carries the selection tint, not the paper fill, so no hairline.
 					if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer, false);
 					   result != .None {return .Ok}
@@ -1496,7 +1513,7 @@ palette_draw :: proc(
 				parts := palette_binding_parts(row, scale)
 				side = parts.field.x
 				binding, open := &p.edit.(Shortcut_Edit)
-				if open && binding.result == index && editor_popup(&binding.editor) == .None {
+				if open && binding.result == index && binding.capture.state != .Alternatives {
 					side = parts.positions.x
 				}
 				if result := palette_binding_draw(p, item.command, index, row, list, text, theme, l, pointer);
@@ -1521,7 +1538,8 @@ palette_draw :: proc(
 			icon_size := ICON_BUTTON * scale
 			icon_y := row.y + (row.height - icon_size) / 2
 			kind_icon := render.Rect{row.x + row_padding, icon_y, icon_size, icon_size}
-			icon_draw(list, PALETTE_KIND_ICONS[item.kind], kind_icon, theme.muted, ICON_BUTTON, scale)
+			kind_mark := PALETTE_MODES[PALETTE_KIND_MODES[item.kind]].icon
+			icon_draw(list, kind_mark, kind_icon, theme.muted, ICON_BUTTON, scale)
 			title := palette_result_title(p, item)
 			title_x := row.x + row_padding + PALETTE_GLYPH_WIDTH * scale
 			room := max(0, side - 12 * scale - title_x)
@@ -1558,8 +1576,7 @@ palette_draw :: proc(
 	if l.bar_visible {scrollbar_draw(list, theme, l.bar, palette_scrollbar_state(p))}
 	if result := draw_footer(p, list, text, theme, l, scale); result != .Ok {return result}
 	if binding, open := &p.edit.(Shortcut_Edit); open {
-		layout := palette_binding_layout(p, l, binding.result)
-		return popup_draw(&binding.editor, layout, list, text, theme, pointer)
+		return palette_binding_popup_draw(p, binding, l, list, text, theme, pointer)
 	}
 	if result := draw_popup(p, list, text, theme, l); result != .Ok {return result}
 	return .Ok

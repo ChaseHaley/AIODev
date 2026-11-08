@@ -1,5 +1,6 @@
 package main
 
+import "aio:render"
 import "aio:ui"
 import "core:math"
 
@@ -11,13 +12,19 @@ import "core:math"
 // content back.
 Workspace_Drag_Drop :: union {
 	Workspace_Drop_Row,
+	Workspace_Drop_New_Workspace,
 	Workspace_Drop_New_Window,
 }
 
-// A workspace row; id 0 is the new workspace row.
+// An existing workspace's row.
 Workspace_Drop_Row :: struct {
 	request: Workspace_Move_Request,
 	id:      u32,
+}
+
+// The row that moves the content into a new workspace.
+Workspace_Drop_New_Workspace :: struct {
+	request: Workspace_Move_Request,
 }
 
 Workspace_Drop_New_Window :: struct {}
@@ -35,26 +42,26 @@ workspace_picker_drag_leave :: proc(app: ^App, d: Drop_Workspace_Dropdown) {
 }
 
 // Opens w's dropdown while the pointer is over its chip and keeps it open over its rows, returning the hold
-// and whether the drag is on it. `current` is the drag's destination now. The dropdown's last row, a new
-// window, takes a drop only when the content may leave for one. Leaving the dropdown is the caller's next
-// destination, which closes it.
+// and whether the drag is on it. `a` is the drag, holding its destination now. The workspace rows take a drop
+// only when the content may move to another workspace, and the last row, a new window, only when it may
+// leave for one. Leaving the dropdown is the caller's next destination, which closes it.
 @(require_results)
 workspace_picker_drag_hover :: proc(
 	app: ^App,
-	current: Drag_Destination,
+	a: ^Drag_Active,
 	w: ^Window,
 	x, y: f32,
 	request: Workspace_Move_Request,
-	new_window_allowed: bool,
+	move_allowed, new_window_allowed: bool,
 ) -> (
 	Drop_Workspace_Dropdown,
 	bool,
 ) {
 	p := &w.workspace_picker
 	button := workspace_button_rect(w)
-	on_button := workspace_rect_contains(button, x, y)
+	on_button := render.rect_contains(button, x, y)
 	panel, _ := workspace_picker_rect(w)
-	previous, holding := current.(Drop_Workspace_Dropdown)
+	previous, holding := drag_held_dropdown(a)
 	held := holding && workspace_drag_picker(app, previous) == w
 	// Keep the drag alive through the gap between the chip and its dropdown.
 	in_panel := held && x >= panel.x && x < panel.x + panel.width &&
@@ -63,13 +70,18 @@ workspace_picker_drag_hover :: proc(
 	if !held {
 		if holding {workspace_picker_drag_leave(app, previous)}
 		window_overlays_cancel(app, w)
-		workspace_picker_transition(w, .List)
+		workspace_picker_transition(w, Workspace_Picker_List{})
 		workspace_picker_list_set(w, Workspace_Move_Target{request, true})
 		ui.field_set(&p.query, "")
 		workspace_picker_filter(app, w)
 	}
 	row := workspace_picker_hit(w, x, y)
-	if row == len(p.rows) + 1 && !new_window_allowed {row = -1}
+	#partial switch _ in workspace_picker_target_at(w, row) {
+	case Picker_Workspace, Picker_New_Workspace:
+		if !move_allowed {row = -1}
+	case Picker_New_Window:
+		if !new_window_allowed {row = -1}
+	}
 	p.selected = row
 	return {window = w.id, pointer = {x, y}, row = row}, true
 }
@@ -79,9 +91,7 @@ workspace_picker_drag_hover :: proc(
 workspace_picker_drag_scroll :: proc(app: ^App, d: Drop_Workspace_Dropdown, delta: f32) -> ^Window {
 	w := workspace_drag_picker(app, d)
 	if w == nil {return nil}
-	_, visible := workspace_picker_rect(w)
-	p := &w.workspace_picker
-	p.scroll = clamp(p.scroll - int(math.sign(delta)), 0, max(0, workspace_picker_count(w) - visible))
+	workspace_picker_scroll(w, -int(math.sign(delta)))
 	return w
 }
 
@@ -90,18 +100,21 @@ workspace_picker_drag_drop :: proc(app: ^App, d: Drop_Workspace_Dropdown) -> (dr
 	defer workspace_picker_drag_leave(app, d)
 	w := workspace_drag_picker(app, d)
 	if w == nil {return}
-	p := &w.workspace_picker
-	move, _ := workspace_picker_move(p)
-	hit, count := d.row, len(p.rows)
-	if hit >= 0 && hit <= count {return Workspace_Drop_Row{move.request, hit < count ? p.rows[hit].id : 0}}
-	if hit == count + 1 {return Workspace_Drop_New_Window{}}
+	move, _ := workspace_picker_move(&w.workspace_picker)
+	#partial switch t in workspace_picker_target_at(w, d.row) {
+	case Picker_Workspace: return Workspace_Drop_Row{move.request, t.id}
+	case Picker_New_Workspace: return Workspace_Drop_New_Workspace{move.request}
+	case Picker_New_Window: return Workspace_Drop_New_Window{}
+	}
 	return
 }
 
 // Scrolls a dropdown a drag holds and follows the rows under the still pointer; whether the wheel was the
 // drag's.
 drag_wheel :: proc(app: ^App, w: ^Window, delta: f32) -> bool {
-	held, holding := drag_destination(w).(Drop_Workspace_Dropdown)
+	a := drag_active(w)
+	if a == nil {return false}
+	held, holding := drag_held_dropdown(a)
 	if !holding {return false}
 	picker := workspace_picker_drag_scroll(app, held, delta)
 	if picker == nil {return false}

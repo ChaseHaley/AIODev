@@ -1,7 +1,6 @@
 package app_test
 
 import app "../../src"
-import "aio:settings"
 import "aio:font"
 import "aio:ui"
 import "core:testing"
@@ -22,8 +21,7 @@ font_pickers_filter_and_apply_independent_families_to_all_windows :: proc(t: ^te
 	testing.expect(t, !slice.contains(row.choices, "Segoe UI"))
 	previous_shell := s.family
 	previous_ui := s.ui_text.family
-	updated := commit_text(t, ui.editor_source(p), "interface.font_family", "Consolas")
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated, p), settings.Save_Error.None)
+	testing.expect_value(t, commit_value(s, "interface.font_family", "Consolas", app.Settings_Page{p}), app.Settings_Status.Applied)
 	testing.expect_value(t, s.family, previous_shell)
 	testing.expect(t, s.ui_text.family != previous_ui)
 	expected_ui, err := font.family_load(s.fonts, "Consolas")
@@ -43,12 +41,10 @@ font_pickers_filter_and_apply_independent_families_to_all_windows :: proc(t: ^te
 	testing.expect(t, ui.editor_choice_toggle_focused(p))
 	ui.editor_key(p, {key = .Escape, pressed = true})
 	testing.expect(t, slice.contains(ui.editor_row(p).choices, "Segoe UI"))
-	updated = commit_text(t, ui.editor_source(p), "font.family", "Segoe UI")
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated, p), settings.Save_Error.None)
+	testing.expect_value(t, commit_value(s, "font.family", "Segoe UI", app.Settings_Page{p}), app.Settings_Status.Applied)
 	testing.expect_value(t, s.settings.interface.font_family, "Consolas")
 	testing.expect_value(t, s.settings.font.family, "Segoe UI")
-	updated = commit_text(t, ui.editor_source(p), "font.show_all", "false")
-	testing.expect_value(t, app.settings_commit(s, ui.editor_source(p), updated, p), settings.Save_Error.None)
+	testing.expect_value(t, commit_value(s, "font.show_all", "false", app.Settings_Page{p}), app.Settings_Status.Applied)
 	testing.expect(t, ui.editor_select_key(p, "font.family"))
 	testing.expect(t, slice.contains(ui.editor_row(p).choices, "Segoe UI"))
 	testing.expect(t, ui.editor_select_key(p, "interface.font_family"))

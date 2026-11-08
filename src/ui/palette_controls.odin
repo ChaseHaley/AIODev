@@ -1,6 +1,6 @@
 package ui
 
-import "aio:glyphs"
+import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -18,7 +18,6 @@ import "core:strings"
 @(private) PALETTE_RESET_SIZE :: HEIGHT_COMPACT
 @(private) PALETTE_RESET_INSET :: SPACE_2
 @(private) PALETTE_RESET_GAP :: SPACE_3
-@(private) PALETTE_POPUP_ROWS :: 8
 @(private) PALETTE_POPUP_SEARCH :: HEIGHT_STANDARD
 // Keyboard steps across a wide range move a twentieth of the track instead of one unit.
 @(private) PALETTE_STEP_FRACTION :: 0.05
@@ -33,9 +32,9 @@ Palette_Control :: enum {
 	Text,
 }
 
-// Reads live values for setting controls. `value` returns the saved value and the text a choice
-// displays for it; `choices` lists a dynamic choice's values and optional labels. Both may borrow
-// temporary memory: the palette copies what it keeps.
+// Reads live values for setting controls. `value` returns the saved value and its optional display
+// label; `choices` lists a dynamic choice's values and optional labels. Both may borrow temporary
+// memory: the palette copies what it keeps.
 Palette_Values :: struct {
 	user:    rawptr,
 	value:   proc(user: rawptr, key: string) -> (value, label: string),
@@ -60,22 +59,26 @@ Palette_Edit :: union {
 	Shortcut_Edit,
 }
 
-// `index` is the highlighted match, `scroll` the first match shown and `hover` the match under the
+// `list` holds the highlighted match and the first match shown; `hover` is the match under the
 // pointer, or -1.
 Choice_Edit :: struct {
-	setting:              int,
-	index, scroll, hover: int,
+	setting: int,
+	list:    Choice_List,
+	hover:   int,
 }
 
 Text_Edit :: struct {
 	setting: int,
 }
 
-// The single Settings row editing the shortcuts of result `result`. Its editor drives capture and
-// the alternatives list through its own mode, exactly as on the Settings page.
+// The inline shortcut row of result `result`. Its capture records chords and lists alternatives
+// exactly as a Settings shortcut row does. It owns the setting key, the saved alternatives the list
+// shows, the defaults a reset restores and the draft a save sends.
 Shortcut_Edit :: struct {
-	editor: Editor,
-	result: int,
+	capture:              Shortcut_Capture,
+	key, saved, defaults: string,
+	draft:                Text_Field,
+	result:               int,
 }
 
 // Storage the open edit fills: the text entry, the choice list's filter, owned copies of the
@@ -127,9 +130,10 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 		maximum       = row.maximum,
 		step          = row.step,
 		choices       = row.choices,
+		choice_labels = row.choice_labels,
 		searchable    = row.searchable,
 		default_value = entry.default_value,
-		resettable    = entry.key != settings.PADDING_GROUPS_KEY,
+		resettable    = entry.control != .Group,
 	}
 	#partial switch row.kind {
 	case .Toggle:
@@ -140,7 +144,7 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 		// A multiple choice keeps its popup open between options, so it is edited on the page.
 		s.control = row.multiple ? .None : .Choice
 	case .Text:
-		s.control = entry.key == settings.PADDING_GROUPS_KEY ? .None : .Text
+		s.control = entry.control == .Group ? .None : .Text
 	}
 	return s
 }
@@ -197,7 +201,10 @@ edit_set :: proc(p: ^Palette, next: Palette_Edit) {
 		edit_choices_clear(&p.buffers)
 	case Text_Edit:
 	case Shortcut_Edit:
-		editor_destroy(&e.editor)
+		delete(e.key)
+		delete(e.saved)
+		delete(e.defaults)
+		delete(e.draft.bytes)
 	}
 	#partial switch _ in p.drag {
 	case Field_Drag, Filter_Drag:
@@ -234,8 +241,7 @@ setting_value :: proc(p: ^Palette, s: ^Palette_Setting) -> (value, label: string
 
 @(private)
 snap :: proc(s: ^Palette_Setting, value: f64) -> f64 {
-	step := s.step > 0 ? s.step : 1
-	return clamp(math.round(value / step) * step, s.minimum, s.maximum)
+	return clamp(math.round(value / s.step) * s.step, s.minimum, s.maximum)
 }
 
 @(private)
@@ -256,13 +262,13 @@ choose_value :: proc(p: ^Palette, s: ^Palette_Setting, value: string) -> Outcome
 
 @(private)
 choose_number :: proc(p: ^Palette, s: ^Palette_Setting, value: f64) -> Outcome {
-	return choose_value(p, s, number_text(s.step > 0 ? s.step : 1, snap(s, value)))
+	return choose_value(p, s, number_text(s.step, snap(s, value)))
 }
 
 @(private)
 step_number :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome {
 	current := setting_number(p, s)
-	step := s.step > 0 ? s.step : 1
+	step := s.step
 	if (s.maximum - s.minimum) / step <= PALETTE_UNIT_STEPS {
 		return choose_number(p, s, current + f64(direction) * step)
 	}
@@ -276,7 +282,7 @@ step_number :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome
 // The values a choice offers: static enum names, or the owner's live list.
 @(private)
 static_or_live_choices :: proc(p: ^Palette, s: ^Palette_Setting) -> (choices, labels: []string) {
-	if len(s.choices) > 0 {return s.choices, nil}
+	if len(s.choices) > 0 {return s.choices, s.choice_labels}
 	if p.values.choices == nil {return nil, nil}
 	return p.values.choices(p.values.user, s.key)
 }
@@ -296,7 +302,7 @@ step_choice :: proc(p: ^Palette, s: ^Palette_Setting, direction: int) -> Outcome
 choice_filter_update :: proc(p: ^Palette, c: ^Choice_Edit) {
 	b := &p.buffers
 	choice_matches_filter(&b.matches, b.choices[:], b.labels[:], field_string(&b.filter))
-	c.index, c.scroll = 0, 0
+	c.list = {}
 }
 
 @(private)
@@ -308,17 +314,29 @@ open_choice :: proc(p: ^Palette, setting: int) -> Outcome {
 	b := &p.buffers
 	allocator := b.choices.allocator
 	current, _ := setting_value(p, s)
+	// The choices and their labels stay aligned: a failed copy opens nothing rather than a short list.
+	if reserve(&b.choices, len(choices)) != nil || reserve(&b.labels, len(choices)) != nil {return .None}
 	for choice, i in choices {
 		label := i < len(labels) ? labels[i] : ""
-		append(&b.choices, strings.clone(choice, allocator))
-		append(&b.labels, label != "" && label != choice ? strings.clone(label, allocator) : "")
+		owned, choice_error := strings.clone(choice, allocator)
+		owned_label, label_error := "", choice_error
+		if label != "" && label != choice && choice_error == nil {
+			owned_label, label_error = strings.clone(label, allocator)
+		}
+		if label_error != nil {
+			delete(owned, allocator)
+			edit_choices_clear(b)
+			return .None
+		}
+		append(&b.choices, owned)
+		append(&b.labels, owned_label)
 	}
 	field_set(&b.filter, "")
 	edit_set(p, Choice_Edit{setting = setting, hover = -1})
 	c := &p.edit.(Choice_Edit)
 	choice_filter_update(p, c)
-	for match, i in b.matches {if b.choices[match] == current {c.index = i}}
-	popup_keep_visible(p, c)
+	for match, i in b.matches {if b.choices[match] == current {c.list.index = i}}
+	choice_list_keep_visible(&c.list, len(b.matches), CHOICE_LIST_ROWS)
 	return .Changed
 }
 
@@ -334,19 +352,11 @@ open_text :: proc(p: ^Palette, setting: int) -> Outcome {
 }
 
 @(private)
-popup_keep_visible :: proc(p: ^Palette, c: ^Choice_Edit) {
-	count := len(p.buffers.matches)
-	c.index = clamp(c.index, 0, max(0, count - 1))
-	if c.index < c.scroll {c.scroll = c.index}
-	if c.index >= c.scroll + PALETTE_POPUP_ROWS {c.scroll = c.index - PALETTE_POPUP_ROWS + 1}
-	c.scroll = clamp(c.scroll, 0, max(0, count - PALETTE_POPUP_ROWS))
-}
-
-@(private)
 popup_choose :: proc(p: ^Palette, c: ^Choice_Edit, index: int) -> Outcome {
 	b := &p.buffers
 	if index < 0 || index >= len(b.matches) {return .None}
-	value := strings.clone(b.choices[b.matches[index]], context.temp_allocator)
+	value, clone_error := strings.clone(b.choices[b.matches[index]], context.temp_allocator)
+	if clone_error != nil {return .None}
 	return choose_value(p, &p.settings[c.setting], value)
 }
 
@@ -388,9 +398,9 @@ control_step :: proc(p: ^Palette, setting: int, direction: int) -> Outcome {
 
 // Keys for an open choice list or text entry. Every key is consumed.
 @(private)
-edit_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
+edit_key :: proc(p: ^Palette, e: input.Key_Event) -> Outcome {
 	#partial switch e.key {
-	case .Escape:
+	case PALETTE_CANCEL_KEY:
 		edit_set(p, nil)
 		return .Changed
 	case .Tab:
@@ -402,7 +412,8 @@ edit_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
 		#partial switch e.key {
 		case .Enter, .Numpad_Enter:
 			s := &p.settings[edit.setting]
-			value := strings.clone(field_string(&b.field), context.temp_allocator)
+			value, clone_error := strings.clone(field_string(&b.field), context.temp_allocator)
+			if clone_error != nil {return .None}
 			if s.control == .Slider {
 				number, ok := strconv.parse_f64(strings.trim_space(value))
 				// An unreadable number still goes to the owner, which reports why it was refused.
@@ -412,23 +423,8 @@ edit_key :: proc(p: ^Palette, e: platform.Key_Event) -> Outcome {
 		}
 		return field_key(&b.field, e) == .None ? .None : .Changed
 	case Choice_Edit:
-		if step := list_step(e); step != 0 {
-			edit.index += step
-			popup_keep_visible(p, &edit)
-			return .Changed
-		}
-		#partial switch e.key {
-		case .Enter, .Numpad_Enter:
-			return popup_choose(p, &edit, edit.index)
-		case .Page_Up:
-			edit.index -= PALETTE_POPUP_ROWS
-			popup_keep_visible(p, &edit)
-			return .Changed
-		case .Page_Down:
-			edit.index += PALETTE_POPUP_ROWS
-			popup_keep_visible(p, &edit)
-			return .Changed
-		}
+		if choice_list_key(&edit.list, e, len(b.matches), CHOICE_LIST_ROWS) {return .Changed}
+		if e.key == .Enter || e.key == .Numpad_Enter {return popup_choose(p, &edit, edit.list.index)}
 		if !p.settings[edit.setting].searchable {return .None}
 		if field_key(&b.filter, e) == .Edited {choice_filter_update(p, &edit)}
 		return .Changed
@@ -505,7 +501,7 @@ reset_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 	s := result_setting(p, index)
 	if s == nil {return -1}
 	row, _ := row_rect(p, l, index)
-	return contains(reset_rect(s, row, l.scale), x, y) ? index : -1
+	return render.rect_contains(reset_rect(s, row, l.scale), x, y) ? index : -1
 }
 
 // A press on a reset button saves the default. An unmodified setting has nothing to reset.
@@ -527,11 +523,11 @@ draw_reset :: proc(
 	index: int,
 	row: render.Rect,
 	pointer: [2]f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := result_setting(p, index)
 	rect := reset_rect(s, row, l.scale)
 	if rect.width <= 0 {return .Ok}
-	hovered := contains(rect, pointer.x, pointer.y)
+	hovered := render.rect_contains(rect, pointer.x, pointer.y)
 	modified, selected := setting_modified(p, s), index == p.selected
 	_ = reset_button_draw(list, theme, rect, modified, hovered, selected, pointer, l.scale)
 	return .Ok
@@ -575,7 +571,7 @@ edit_control :: proc(p: ^Palette, l: Palette_Layout, setting: int) -> render.Rec
 palette_popup_rect :: proc(p: ^Palette, l: Palette_Layout) -> render.Rect {
 	#partial switch &edit in p.edit {
 	case Shortcut_Edit:
-		return editor_popup_rect(&edit.editor, palette_binding_layout(p, l, edit.result))
+		return palette_binding_popup(p, &edit, l)
 	case Choice_Edit:
 		return choice_popup_rect(p, &edit, l)
 	}
@@ -588,7 +584,7 @@ choice_popup_rect :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout) -> re
 	control := edit_control(p, l, c.setting)
 	if control.width <= 0 {return {}}
 	s := l.scale
-	rows := min(PALETTE_POPUP_ROWS, max(1, len(p.buffers.matches)))
+	rows := min(CHOICE_LIST_ROWS, max(1, len(p.buffers.matches)))
 	height := (f32(rows) * PALETTE_POPUP_ROW + 2 * OVERLAY_PADDING) * s
 	if p.settings[c.setting].searchable {height += PALETTE_POPUP_SEARCH * s}
 	width := max(control.width, 220 * s)
@@ -599,7 +595,7 @@ choice_popup_rect :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout) -> re
 }
 
 palette_popup_contains :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> bool {
-	return contains(palette_popup_rect(p, l), x, y)
+	return render.rect_contains(palette_popup_rect(p, l), x, y)
 }
 
 // Searchable lists, such as installed fonts, have a filter field at the top of the popup.
@@ -613,28 +609,22 @@ popup_list_top :: proc(p: ^Palette, c: ^Choice_Edit, popup: render.Rect, scale: 
 @(private)
 popup_row_at :: proc(p: ^Palette, c: ^Choice_Edit, l: Palette_Layout, x, y: f32) -> int {
 	popup := choice_popup_rect(p, c, l)
-	if !contains(popup, x, y) {return -1}
+	if !render.rect_contains(popup, x, y) {return -1}
 	top := popup_list_top(p, c, popup, l.scale)
-	if y < top {return -1}
-	index := c.scroll + int((y - top) / (PALETTE_POPUP_ROW * l.scale))
-	return index < len(p.buffers.matches) ? index : -1
+	count := len(p.buffers.matches)
+	return choice_list_at(c.list, top, PALETTE_POPUP_ROW * l.scale, y, count, CHOICE_LIST_ROWS)
 }
 
 @(private)
 popup_search_box :: proc(p: ^Palette, popup: render.Rect, text: ^Text, scale: f32) -> Field_Box {
-	return {
-		field = &p.buffers.filter, text = text,
-		rect = {popup.x + 4 * scale, popup.y + 4 * scale, popup.width - 8 * scale, HEIGHT_TOOLBAR * scale},
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
-	}
+	pad := OVERLAY_PADDING * scale
+	rect := render.Rect{popup.x + pad, popup.y + pad, popup.width - 2 * pad, HEIGHT_TOOLBAR * scale}
+	return field_box_standard(&p.buffers.filter, text, rect, scale)
 }
 
 @(private)
 text_entry_box :: proc(p: ^Palette, control: render.Rect, text: ^Text, scale: f32) -> Field_Box {
-	return {
-		field = &p.buffers.field, text = text, rect = control,
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = scale,
-	}
+	return field_box_standard(&p.buffers.field, text, control, scale)
 }
 
 // A press on a setting row's control. The second result is false when the press missed it.
@@ -648,12 +638,12 @@ control_press :: proc(p: ^Palette, l: Palette_Layout, index: int, x, y: f32) -> 
 	// The toggle takes a slightly taller target than it draws.
 	target := control
 	target.y, target.height = row.y, row.height
-	if !contains(target, x, y) {return .None, false}
+	if !render.rect_contains(target, x, y) {return .None, false}
 	setting := p.results[index].setting
 	p.selected = index
 	#partial switch s.control {
 	case .Slider:
-		if contains(slider_number_rect(control, l.scale), x, y) {return open_text(p, setting), true}
+		if render.rect_contains(slider_number_rect(control, l.scale), x, y) {return open_text(p, setting), true}
 		edit_set(p, nil)
 		track := slider_track(control, l.scale)
 		number := snap(s, slider_value(s.minimum, s.maximum, (x - track.x) / max(1, track.width)))
@@ -720,12 +710,8 @@ palette_pointer_release :: proc(p: ^Palette) -> Outcome {
 
 @(private)
 popup_wheel :: proc(p: ^Palette, c: ^Choice_Edit, rows: int) -> Outcome {
-	limit := max(0, len(p.buffers.matches) - PALETTE_POPUP_ROWS)
-	scroll := clamp(c.scroll - rows, 0, limit)
-	if scroll == c.scroll {return .None}
-	c.scroll = scroll
-	c.index = clamp(c.index, scroll, scroll + PALETTE_POPUP_ROWS - 1)
-	return .Changed
+	moved := choice_list_scroll_to(&c.list, c.list.scroll - rows, len(p.buffers.matches), CHOICE_LIST_ROWS)
+	return moved ? .Changed : .None
 }
 
 // Mouse presses while a choice list or text entry is open. The second result is false when the
@@ -735,13 +721,13 @@ edit_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> (O
 	#partial switch &edit in p.edit {
 	case Choice_Edit:
 		popup := choice_popup_rect(p, &edit, l)
-		if contains(popup, x, y) {
+		if render.rect_contains(popup, x, y) {
 			if index := popup_row_at(p, &edit, l, x, y); index >= 0 {
 				return popup_choose(p, &edit, index), true
 			}
 			if text != nil && p.settings[edit.setting].searchable {
 				box := popup_search_box(p, popup, text, l.scale)
-				if contains(box.rect, x, y) {
+				if render.rect_contains(box.rect, x, y) {
 					_ = field_move(&p.buffers.filter, field_box_offset(box, x), false)
 					drag_set(p, Filter_Drag{})
 				}
@@ -749,12 +735,12 @@ edit_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> (O
 			return .Changed, true
 		}
 		// A press on the open control closes the list, like the Settings page.
-		closing := contains(edit_control(p, l, edit.setting), x, y)
+		closing := render.rect_contains(edit_control(p, l, edit.setting), x, y)
 		edit_set(p, nil)
 		return .Changed, closing
 	case Text_Edit:
 		control := edit_control(p, l, edit.setting)
-		if contains(control, x, y) {
+		if render.rect_contains(control, x, y) {
 			if text != nil {
 				box := text_entry_box(p, control, text, l.scale)
 				_ = field_move(&p.buffers.field, field_box_offset(box, x), false)
@@ -774,21 +760,23 @@ control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.
 	if _, sliding := p.drag.(Slider_Drag); sliding {return .Hand, true}
 	switch &edit in p.edit {
 	case Shortcut_Edit:
-		if contains(palette_popup_rect(p, l), x, y) {return .Hand, true}
+		if render.rect_contains(palette_popup_rect(p, l), x, y) {return .Hand, true}
 		row, _ := row_rect(p, l, edit.result)
 		parts := palette_binding_parts(row, l.scale)
-		if contains(parts.field, x, y) || contains(parts.positions, x, y) || contains(parts.reset, x, y) {
+		if render.rect_contains(parts.field, x, y) ||
+		   render.rect_contains(parts.positions, x, y) ||
+		   render.rect_contains(parts.reset, x, y) {
 			return .Hand, true
 		}
 		return .Arrow, false
 	case Choice_Edit:
 		popup := choice_popup_rect(p, &edit, l)
-		if contains(popup, x, y) {
+		if render.rect_contains(popup, x, y) {
 			if popup_row_at(p, &edit, l, x, y) >= 0 {return .Hand, true}
 			return y < popup_list_top(p, &edit, popup, l.scale) ? .Text : .Arrow, true
 		}
 	case Text_Edit:
-		if contains(edit_control(p, l, edit.setting), x, y) {return .Text, true}
+		if render.rect_contains(edit_control(p, l, edit.setting), x, y) {return .Text, true}
 	}
 	index := row_at(p, l, x, y)
 	s := result_setting(p, index)
@@ -796,7 +784,7 @@ control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.
 	if reset_at(p, l, x, y) == index {return .Hand, true}
 	if s.control == .None {return .Arrow, false}
 	row, _ := row_rect(p, l, index)
-	if contains(control_rect(s, row, l.scale), x, y) {return .Hand, true}
+	if render.rect_contains(control_rect(s, row, l.scale), x, y) {return .Hand, true}
 	return .Arrow, false
 }
 
@@ -809,7 +797,7 @@ draw_control :: proc(
 	l: Palette_Layout,
 	setting: int,
 	row: render.Rect,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	s := &p.settings[setting]
 	scale := l.scale
 	control := control_rect(s, row, scale)
@@ -820,10 +808,7 @@ draw_control :: proc(
 	if entry, typing := p.edit.(Text_Edit); typing && entry.setting == setting {
 		box := text_entry_box(p, control, text, scale)
 		box_draw(list, control, theme, true, scale)
-		result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Empty")
-		// The field leaves its clip pushed; later rows draw in the list again.
-		_ = render.push_layer(list, l.list)
-		return result
+		return field_box_draw(box, list, theme, field_box_baseline(box), true, "Empty")
 	}
 	switch s.control {
 	case .None:
@@ -833,7 +818,7 @@ draw_control :: proc(
 		drag, sliding := p.drag.(Slider_Drag)
 		number := sliding && drag.setting == setting ? drag.number : setting_number(p, s)
 		slider_draw(list, slider_track(control, scale), slider_fraction(s.minimum, s.maximum, number), theme, scale)
-		shown := number_text(s.step > 0 ? s.step : 1, number)
+		shown := number_text(s.step, number)
 		number_box := slider_number_rect(control, scale)
 		width := text_width(&input_text, shown)
 		return draw_text(&input_text, list, shown, number_box.x + number_box.width - width, baseline,
@@ -868,7 +853,7 @@ draw_popup :: proc(
 	text: ^Text,
 	theme: Theme,
 	l: Palette_Layout,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	c, listing := &p.edit.(Choice_Edit)
 	if !listing {return .Ok}
 	popup := choice_popup_rect(p, c, l)
@@ -883,7 +868,6 @@ draw_popup :: proc(
 		box_draw(list, box.rect, theme, true, scale)
 		if result := field_box_draw(box, list, theme, field_box_baseline(box), true, "Search");
 		   result != .Ok {return result}
-		if render.push_layer(list, popup) != .None {return .Ok}
 	}
 	top := popup_list_top(p, c, popup, scale)
 	row_height := PALETTE_POPUP_ROW * scale
@@ -893,11 +877,14 @@ draw_popup :: proc(
 		return draw_text(&item_text, list, "No matches", popup.x + SPACE_3 * scale, baseline, theme.muted)
 	}
 	current, _ := setting_value(p, &p.settings[c.setting])
-	for i := c.scroll; i < len(b.matches) && i < c.scroll + PALETTE_POPUP_ROWS; i += 1 {
+	shown := c.list
+	for i := shown.scroll; i < len(b.matches) && i < shown.scroll + CHOICE_LIST_ROWS; i += 1 {
 		choice := b.matches[i]
 		pad := OVERLAY_PADDING * scale
-		row := render.Rect{popup.x + pad, top + f32(i - c.scroll) * row_height, popup.width - 2 * pad, row_height}
-		if i == c.index {
+		row := render.Rect {
+			popup.x + pad, top + f32(i - shown.scroll) * row_height, popup.width - 2 * pad, row_height,
+		}
+		if i == shown.index {
 			draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
 		} else if i == c.hover {
 			draw_rect(list, {rect = row, color = theme.hover, radius = RADIUS_CONTROL * scale})

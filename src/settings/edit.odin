@@ -3,17 +3,41 @@ package settings
 import "aio:colour"
 import "base:runtime"
 import "core:fmt"
+import "core:io"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:time"
 
 schema_find :: proc(key: string) -> ^Schema_Entry {
 	@(static, rodata)
 	schema := SCHEMA
-	for &entry in schema {
-		if entry.key == key {return &entry}
+	index := schema_index(key)
+	if index < 0 {return nil}
+	return &schema[index]
+}
+
+// The SCHEMA position of `key`, or -1.
+schema_index :: proc(key: string) -> int {
+	@(static, rodata)
+	schema := SCHEMA
+	for entry, i in schema {
+		if entry.key == key {return i}
 	}
-	return nil
+	return -1
+}
+
+// The file line that set a schema key, or zero when the file leaves it at its default.
+setting_line :: proc(s: ^Settings, key: string) -> int {
+	index := schema_index(key)
+	return index < 0 ? 0 : s.lines[index]
+}
+
+// Whether saving `key` must be checked against every command shortcut.
+setting_affects_bindings :: proc(key: string) -> bool {
+	if strings.has_prefix(key, KEY_BINDING_PREFIX) {return true}
+	entry := schema_find(key)
+	return entry != nil && entry.affects_bindings
 }
 
 value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
@@ -28,9 +52,9 @@ value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
 	case .Bool:
 		return (cast(^bool)p)^ ? "true" : "false"
 	case .Enum:
-		return entry.enum_names[(cast(^int)p)^]
+		return entry.names[(cast(^int)p)^]
 	case .Set:
-		return set_text(entry.enum_names, (cast(^u32)p)^)
+		return set_text(entry.names, (cast(^u32)p)^)
 	}
 	return ""
 }
@@ -38,6 +62,12 @@ value_text :: proc(s: ^Settings, entry: Schema_Entry) -> string {
 color_hex :: proc(c: Color) -> string {
 	buffer: [colour.HEX_LENGTH]u8
 	return fmt.tprintf("%s", colour.format(c, buffer[:]))
+}
+
+@(private)
+value_line_problem :: proc(value: string) -> string {
+	if strings.contains_any(value, "\r\n\x00") {return "Use a single line without NUL bytes."}
+	return ""
 }
 
 // The returned message is owned by the caller, even when validation fails.
@@ -49,8 +79,8 @@ edit_text :: proc(
 	updated, message: string,
 	err: runtime.Allocator_Error,
 ) {
-	if strings.contains_any(value, "\r\n\x00") {
-		message, err = strings.clone("Use a single line without NUL bytes.", allocator)
+	if issue := value_line_problem(value); issue != "" {
+		message, err = strings.clone(issue, allocator)
 		return
 	}
 	encoded, encoded_error := strings.builder_make(allocator)
@@ -60,18 +90,15 @@ edit_text :: proc(
 	if entry := schema_find(key); entry != nil {
 		if err = encode_value(&encoded, entry^, value); err != nil {return}
 		serialized = strings.to_string(encoded)
-		s, default_error := defaults(allocator)
-		if default_error != nil {err = default_error; return}
-		defer destroy(&s)
-		issue, assign_error := assign(&s, entry^, serialized)
-		if assign_error != nil {err = assign_error; return}
+		_, issue, parse_error := value_parse(entry^, serialized, allocator)
+		if parse_error != nil {err = parse_error; return}
 		if p, ok := issue.?; ok {message = p.message; return}
-	} else if slot, legacy := legacy_shell_slot(key); legacy {
-		if value == "" && slot != 2 {
+	} else if field, legacy := legacy_shell_field(key); legacy {
+		entry := legacy_shell_entries[field]
+		if value == "" && entry.valid.minimum > 0 {
 			message, err = strings.clone("Shell command and starting directory cannot be empty.", allocator)
 			return
 		}
-		entry := legacy_shell_entry(slot)
 		if err = encode_value(&encoded, entry, value); err != nil {return}
 		serialized = strings.to_string(encoded)
 	} else if strings.has_prefix(key, CUSTOM_THEME_PREFIX) {
@@ -121,11 +148,66 @@ edit_text :: proc(
 	return
 }
 
+// Sets one schema setting of `s` to an edited value, refusing what edit_text refuses. It changes
+// running settings when there is no settings file to edit. `message`, when set, is temporary.
+@(require_results)
+setting_assign :: proc(
+	s: ^Settings,
+	entry: Schema_Entry,
+	value: string,
+) -> (
+	message: string,
+	err: runtime.Allocator_Error,
+) {
+	if issue := value_line_problem(value); issue != "" {return issue, nil}
+	encoded := strings.builder_make(context.temp_allocator) or_return
+	encode_value(&encoded, entry, value) or_return
+	issue := assign(s, entry, strings.to_string(encoded)) or_return
+	refused, present := issue.?
+	if !present {return "", nil}
+	defer delete(refused.message, s.allocator)
+	return strings.clone(refused.message, context.temp_allocator)
+}
+
+// Replaces the owned `text` with its revision setting `key`. A refusal leaves `text` alone and
+// returns edit_text's message, owned by `allocator`; nothing else is left to free.
+@(private, require_results)
+revision_edit_owned :: proc(
+	text: ^string,
+	key, value: string,
+	allocator: runtime.Allocator,
+) -> (
+	message: string,
+	err: runtime.Allocator_Error,
+) {
+	updated: string
+	updated, message, err = edit_text(text^, key, value, allocator)
+	if err != nil || message != "" {
+		delete(updated, allocator)
+		if err != nil {
+			delete(message, allocator)
+			message = ""
+		}
+		return
+	}
+	delete(text^, allocator)
+	text^ = updated
+	return
+}
+
 Save_Error :: enum {
 	None,
 	Conflict,
 	IO,
 }
+
+// How long a save waits for another process, such as a virus scanner or indexer opening the file
+// a moment ago, to let go of settings.ini. Windows reports that as Permission_Denied, which a
+// truly unwritable file also reports, so the wait is short and bounded.
+@(private)
+SAVE_LOCK_ATTEMPTS :: 20
+@(private)
+SAVE_LOCK_WAIT :: 10 * time.Millisecond
 
 @(require_results)
 save :: proc(path, expected, updated: string) -> Save_Error {
@@ -150,13 +232,22 @@ save :: proc(path, expected, updated: string) -> Save_Error {
 		)
 		return .IO
 	}
-	current, read_error := os.read_entire_file(path, context.temp_allocator)
-	if read_error !=
-	   nil {log.errorf("reading settings before save failed: %v", read_error); return .IO}
-	if string(current) != expected {return .Conflict}
-	if rename_error := os.rename(name, path); rename_error != nil {
-		log.errorf("replacing settings failed: %v", rename_error)
-		return .IO
+	// The file is checked against `expected` again before every replace attempt, so a wait never
+	// lets an edit made meanwhile be overwritten.
+	for attempt in 1 ..= SAVE_LOCK_ATTEMPTS {
+		current, read_error := os.read_entire_file(path, context.temp_allocator)
+		replace_error := read_error
+		if read_error == nil {
+			if string(current) != expected {return .Conflict}
+			replace_error = os.rename(name, path)
+			if replace_error == nil {return .None}
+		}
+		locked := replace_error == io.Error.Permission_Denied
+		if !locked || attempt == SAVE_LOCK_ATTEMPTS {
+			log.errorf("%s settings failed: %v", read_error != nil ? "reading" : "replacing", replace_error)
+			return .IO
+		}
+		time.sleep(SAVE_LOCK_WAIT)
 	}
-	return .None
+	return .IO
 }

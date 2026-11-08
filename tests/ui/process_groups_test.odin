@@ -19,7 +19,7 @@ process_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 
 @(private)
 process_edit :: proc(t: ^testing.T, p: ^ui.Editor, key, value: string) {
-	testing.expect(t, ui.editor_reveal(p, key))
+	testing.expect(t, ui.editor_reveal(p, ui.Reveal_Row{key}))
 	ui.editor_focus_row(p)
 	ui.field_set(&p.value, value)
 	testing.expect(t, ui.editor_process_capture(p))
@@ -52,7 +52,7 @@ process_groups_keep_incomplete_new_entries_as_drafts_and_validate_each_field :: 
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
-	testing.expect(t, ui.editor_reveal(&p, "process.group.0.add"))
+	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.0.add"}))
 	testing.expect_value(t, ui.editor_process_activate(&p, ui.editor_row(&p)), ui.Editor_Outcome.Changed)
 	testing.expect_value(t, ui.editor_row(&p).key, "process.group.3.name")
 	process_edit(t, &p, "process.group.3.name", "Focus")
@@ -94,18 +94,18 @@ process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"))
+	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
 	page := ui.editor_layout({0, 0, 1000, 800}, 1)
-	p.visible_rows = page.rows
-	testing.expect(t, ui.editor_reveal(&p, "process.group.0.add"))
+	ui.editor_fit(&p, page)
+	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.0.add"}))
 	_ = ui.editor_process_activate(&p, ui.editor_row(&p))
 	testing.expect_value(t, ui.editor_row(&p).key, "process.group.3.name")
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	p.scroll = 0
-	testing.expect_value(t, ui.editor_draw(&p, page, &list, &text, theme, true), glyphs.Result.Ok)
+	testing.expect_value(t, ui.editor_draw(&p, page, &list, &text, theme, true), render.Build_Status.Ok)
 	// Each label below the focused field must paint inside its layer's clip, not the field's.
 	for key in ([?]string{"process.group.3.padding", "process.group.3.add", "process.group.0.add"}) {
 		row: render.Rect
@@ -131,7 +131,7 @@ process_groups_add_remove_programs_without_reusing_keys_or_losing_other_drafts :
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
-	testing.expect(t, ui.editor_reveal(&p, "process.group.1.add"))
+	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1.add"}))
 	_ = ui.editor_process_activate(&p, ui.editor_row(&p))
 	key := strings.clone(ui.editor_row(&p).key, context.temp_allocator)
 	process_edit(t, &p, key, "NVIM.exe")
@@ -143,7 +143,7 @@ process_groups_add_remove_programs_without_reusing_keys_or_losing_other_drafts :
 	value, problem = ui.editor_process_value(&p)
 	testing.expect_value(t, problem, "")
 	testing.expect(t, strings.has_prefix(value, "Editors:0:vim,helix"))
-	testing.expect(t, ui.editor_reveal(&p, "process.group.1.add"))
+	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1.add"}))
 	_ = ui.editor_process_activate(&p, ui.editor_row(&p))
 	testing.expect(t, ui.editor_row(&p).key != key)
 	copy: ui.Editor
@@ -160,8 +160,8 @@ process_groups_drag_escape_and_required_delete_outcome :: proc(t: ^testing.T) {
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
 	l := ui.editor_layout({0, 0, 1100, 900}, 1)
-	p.visible_rows = l.rows
-	testing.expect(t, ui.editor_reveal(&p, "process.group.1"))
+	ui.editor_fit(&p, l)
+	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1"}))
 	row := ui.editor_row_parts(&p, l, p.selected).row
 	parts := ui.editor_process_parts(row, 1)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, parts.handle.x + 4, parts.handle.y + 4, false),
@@ -226,7 +226,7 @@ process_groups_partial_load_and_caption_allocation_failures_are_safe :: proc(t: 
 	for limit in 0 ..< 2 {
 		p: ui.Editor
 		process_fixture(t, &p)
-		testing.expect(t, ui.editor_reveal(&p, "process.group.1.name"))
+		testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1.name"}))
 		ui.editor_focus_row(&p)
 		ui.field_set(&p.value, "Replacement")
 		failure := Process_Failure_Allocator{backing, limit}
@@ -251,8 +251,8 @@ process_groups_drag_reflows_whole_groups_like_profiles :: proc(t: ^testing.T) {
 	defer ui.editor_destroy(&p)
 	process_fixture(t, &p)
 	l := ui.editor_layout({0, 0, 1100, 900}, 1)
-	p.visible_rows = l.rows
-	testing.expect(t, ui.editor_reveal(&p, "process.group.1.name"))
+	ui.editor_fit(&p, l)
+	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1.name"}))
 	header := profile_item_index(&p, "process.group.1")
 	name := profile_item_index(&p, "process.group.1.name")
 	tools := profile_item_index(&p, "process.group.2")

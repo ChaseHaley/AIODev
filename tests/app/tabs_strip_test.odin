@@ -5,7 +5,6 @@ import app "../../src"
 import "aio:layout"
 import "aio:commands"
 import "aio:input"
-import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
@@ -55,7 +54,6 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	one.marked = true
 	w := app.Window {
 		workspace       = workspace,
-		tree            = &one.tree,
 		width           = 1000,
 		height          = 700,
 		scale           = 1,
@@ -72,15 +70,31 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	bar := app.window_tab_bar(&state, &w)
 	testing.expect_value(t, bar.count, 3)
 	testing.expect(t, bar.tab_width > 0 && bar.tab_width <= 220)
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, 20) == 0)
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width*3+2, 20) == bar.count)
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, 1, 20) == -1)
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, 20) == app.Tab_Chrome_Tab{0})
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width+2, 20) == app.Tab_Chrome_Tab{1})
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, bar.height) == nil)
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width*3+2, 20) == app.Tab_Chrome_New{})
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, 1, 20) == nil)
 
 	// The strip and the two trailing buttons end before the native caption buttons start.
 	testing.expect(t, app.window_title_controls_end(&state, &w) < f32(w.width)-138)
 	testing.expect_value(t, app.window_tab_rect(&state, &w, 0).x, bar.x)
 	expect_close := app.window_tab_close_rect(&state, &w, 1)
 	testing.expect_value(t, expect_close.width, ui.HEIGHT_COMPACT)
+	center_x, center_y := expect_close.x+expect_close.width/2, expect_close.y+expect_close.height/2
+	testing.expect_value(t, app.window_tab_close_hit(&state, &w, bar, center_x, center_y), 1)
+	testing.expect_value(t, app.window_tab_close_hit(&state, &w, bar, bar.x+2, 20), -1)
+}
+
+@(test)
+horizontal_tab_strip_without_tabs_has_no_tab_hit :: proc(t: ^testing.T) {
+	state: app.App
+	defer strip_destroy(&state)
+	workspace := strip_workspace(&state, 1, "Build")
+	w := app.Window{workspace = workspace, width = 1000, height = 700, scale = 1, tabs_horizontal = true}
+	bar := app.window_tab_bar(&state, &w)
+	testing.expect_value(t, bar.count, 0)
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+40, 20) == nil)
 }
 
 @(test)
@@ -95,7 +109,6 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	w := app.Window {
 		id              = 71,
 		workspace       = workspace,
-		tree            = &one.tree,
 		width           = 1000,
 		height          = 700,
 		scale           = 1,
@@ -106,7 +119,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	second := app.window_tab_rect(&state, &w, 1)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -117,19 +130,19 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	testing.expect_value(t, workspace.selected, 1)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			x = i32(second.x + second.width / 2),
 			y = i32(second.y + second.height / 2),
 		},
 	)
-	testing.expect(t, w.tree == &two.tree)
+	testing.expect(t, app.window_tree(&w) == &two.tree)
 
 	close := app.window_tab_close_rect(&state, &w, 1)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -140,7 +153,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 	testing.expect(t, ui.armed_is(w.tab_close_armed, 1))
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			x = i32(close.x + close.width / 2),
@@ -192,7 +205,7 @@ tab_orientation_button_click_switches_both_directions :: proc(t: ^testing.T) {
 	for expected in ([?]settings.Tabs_Orientation{.Horizontal, .Vertical}) {
 		r := app.tab_orientation_button_rect(&w)
 		for pressed in ([?]bool{true, false}) {
-			app.gesture_button(&state, &w, platform.Mouse_Button_Event {
+			app.gesture_button(&state, &w, input.Mouse_Button_Event {
 				window = w.id, button = .Left, pressed = pressed,
 				x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2),
 			})

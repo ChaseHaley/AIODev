@@ -15,14 +15,19 @@ foreign notifications {
 	aio_notifications_create :: proc "c"(window: w.HWND, message: u32, out: ^rawptr) -> i32 ---
 	aio_notifications_destroy :: proc "c"(state: rawptr) ---
 	aio_notifications_show :: proc "c"(
-		state: rawptr, title, text: cstring16, token: u32, sound: bool, operation: ^cstring,
+		state: rawptr, title, text: cstring16, token: Notification_Token, sound: bool, operation: ^cstring,
 	) -> i32 ---
 }
 
 // Windows owns banner visibility (including Do Not Disturb); this reports API failures explicitly.
 // Unavailable means notifications could not start, which the first attempt already reported.
 @(require_results)
-notification_show :: proc(p: ^Platform, title, text: string, token: u32, sound: bool) -> Error {
+notification_show :: proc(
+	p: ^Platform,
+	title, text: string,
+	token: Notification_Token,
+	sound: bool,
+) -> Error {
 	if p.host.hwnd == nil {return .Not_Initialized}
 	state: rawptr
 	switch service in p.notifications {
@@ -58,6 +63,6 @@ notifications_destroy :: proc(p: ^Platform) {
 
 @(require_results)
 notification_sound :: proc() -> Error {
-	if !os_ok(w.MessageBeep(0x40), "MessageBeep") {return .Os}
+	if !os_ok(w.MessageBeep(MB_ICONINFORMATION), "MessageBeep") {return .Os}
 	return .None
 }

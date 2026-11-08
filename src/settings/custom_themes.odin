@@ -9,9 +9,10 @@ CUSTOM_THEME_PREFIX :: "theme.custom."
 CUSTOM_THEME_LIMIT :: 64
 // How many bases a theme may stack; a cycle stops here.
 THEME_BASE_DEPTH :: 8
+// Theme IDs share the profile ID grammar but declare their own limit.
+THEME_ID_MAX_LENGTH :: 32
 
-// Theme IDs follow profile IDs.
-theme_id_valid :: proc(id: string) -> bool {return profile_id_valid(id)}
+theme_id_valid :: proc(id: string) -> bool {return id_valid(id, THEME_ID_MAX_LENGTH)}
 
 // Built-in themes were once a name plus a dark or light mode, and bases named a variant such as
 // tokyonight-storm-dark. Each now is one theme file; this maps the old pair to that file's ID.
@@ -43,6 +44,12 @@ custom_theme_find :: proc(s: ^Settings, id: string) -> ^Custom_Theme {
 	return nil
 }
 
+// The persisted key of one custom theme field. Temporary.
+@(private)
+custom_theme_field_key :: proc(id, field: string) -> string {
+	return fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, field)
+}
+
 // Splits theme.custom.ID.FIELD. A field may itself contain dots, as palette.3 does.
 custom_theme_key_split :: proc(key: string) -> (id, field: string, ok: bool) {
 	if !strings.has_prefix(key, CUSTOM_THEME_PREFIX) {return}
@@ -52,34 +59,82 @@ custom_theme_key_split :: proc(key: string) -> (id, field: string, ok: bool) {
 	return rest[:dot], rest[dot + 1:], true
 }
 
-// Validates one custom theme line and returns its canonical file value. The serialized text is
-// temporary and is consumed immediately by edit_text.
+Custom_Theme_Field :: enum {
+	Base,
+	Name,
+	Color,
+}
+
+// What a theme.custom.ID.FIELD key names. The file and Settings check keys with this one grammar
+// and word its problems for their own readers.
+Custom_Theme_Key :: struct {
+	id, field: string,
+	kind:      Custom_Theme_Field,
+	token:     Theme_Token,
+}
+
+Custom_Theme_Key_Problem :: enum {
+	None,
+	Shape,
+	Id,
+	Unknown_Color,
+}
+
+custom_theme_key :: proc(key: string) -> (parsed: Custom_Theme_Key, problem: Custom_Theme_Key_Problem) {
+	id, field, shaped := custom_theme_key_split(key)
+	if !shaped {return {}, .Shape}
+	if !theme_id_valid(id) {return {}, .Id}
+	parsed = {id = id, field = field}
+	switch field {
+	case "base":
+		parsed.kind = .Base
+	case "name":
+		parsed.kind = .Name
+	case:
+		token, found := token_find(field)
+		if !found {return {}, .Unknown_Color}
+		parsed.kind, parsed.token = .Color, token
+	}
+	return parsed, .None
+}
+
+// Validates one custom theme line from Settings and returns its canonical file value. The
+// serialized text is temporary and is consumed immediately by edit_text.
 custom_theme_value :: proc(
 	key, value: string,
 	policy: colour.Parse_Policy,
 ) -> (
 	serialized, issue: string,
 ) {
-	id, field, shaped := custom_theme_key_split(key)
-	if !shaped {return "", "Expected theme.custom.ID.base or theme.custom.ID.COLOR."}
-	if !theme_id_valid(id) {return "", "Invalid theme ID. Use lowercase letters, digits, - and _."}
-	if field == "base" {
+	parsed, problem := custom_theme_key(key)
+	switch problem {
+	case .None:
+	case .Shape:
+		return "", "Expected theme.custom.ID.base or theme.custom.ID.COLOR."
+	case .Id:
+		return "", "Invalid theme ID. Use lowercase letters, digits, - and _."
+	case .Unknown_Color:
+		return "", "Unknown theme color."
+	}
+	switch parsed.kind {
+	case .Base:
 		if !theme_id_valid(value) {return "", "Expected a theme ID such as studio-dark or tide-light."}
 		return value, ""
-	}
-	if field == "name" {
-		if !profile_value_facts(value).valid {return "", "Expected UTF-8 text without NUL bytes."}
+	case .Name:
+		if !text_valid(value) {return "", "Expected UTF-8 text without NUL bytes."}
 		return fmt.tprintf("\"%s\"", value), ""
+	case .Color:
+		c, valid := theme_color_parse(parsed.token, value, policy)
+		if !valid {
+			tokens := THEME_TOKENS
+			if tokens[parsed.token].kind == .Translucent {
+				return "", "Expected a color such as #rrggbb or #rrggbbaa."
+			}
+			return "", "Expected a color such as #rrggbb."
+		}
+		return theme_color_text(parsed.token, c), ""
 	}
-	token, found := token_find(field)
-	if !found {return "", "Unknown theme color."}
-	c, valid := theme_color_parse(token, value, policy)
-	if !valid {
-		tokens := THEME_TOKENS
-		if tokens[token].kind == .Translucent {return "", "Expected a color such as #rrggbb or #rrggbbaa."}
-		return "", "Expected a color such as #rrggbb."
-	}
-	return theme_color_text(token, c), ""
+	return "", ""
 }
 
 @(private, require_results)
@@ -102,8 +157,10 @@ parse_custom_theme_key :: proc(
 	key, value: string,
 	line: int,
 ) -> runtime.Allocator_Error {
-	id, field, shaped := custom_theme_key_split(key)
-	if !shaped {
+	parsed, problem := custom_theme_key(key)
+	switch problem {
+	case .None:
+	case .Shape:
 		return diagnostic_append(
 			diagnostics,
 			line,
@@ -111,8 +168,7 @@ parse_custom_theme_key :: proc(
 			"expected theme.custom.ID.base or theme.custom.ID.COLOR",
 			.Unknown_Key,
 		)
-	}
-	if !theme_id_valid(id) {
+	case .Id:
 		return diagnostic_append(
 			diagnostics,
 			line,
@@ -120,9 +176,8 @@ parse_custom_theme_key :: proc(
 			"invalid theme ID; use lowercase letters, digits, - and _",
 			.Unknown_Key,
 		)
-	}
-	token, found := token_find(field)
-	if field != "base" && field != "name" && !found {
+	case .Unknown_Color:
+		_, field, _ := custom_theme_key_split(key)
 		message, message_error := strings.concatenate(
 			{"unknown theme color \"", field, "\""},
 			context.temp_allocator,
@@ -130,22 +185,25 @@ parse_custom_theme_key :: proc(
 		if message_error != nil {message = "unknown theme color"}
 		return diagnostic_append(diagnostics, line, key, message, .Unknown_Key)
 	}
-	theme, add_error := custom_theme_add(s, id)
+	theme, add_error := custom_theme_add(s, parsed.id)
 	if add_error != nil {return add_error}
 	if theme == nil {
-		return diagnostic_append(diagnostics, line, key, "too many custom themes; the limit is 64")
+		return diagnostic_append(diagnostics, line, key, limit_message("custom themes", CUSTOM_THEME_LIMIT))
 	}
-	if field == "base" ? theme.base_set : field == "name" ? theme.name_set : token in theme.overrides {
-		message, message_error := strings.concatenate(
-			{"duplicate key \"", key, "\"; last value wins"},
-			context.temp_allocator,
-		)
-		if message_error != nil {message = "duplicate key; last value wins"}
-		if err := diagnostic_append(diagnostics, line, key, message, .Duplicate_Key); err != nil {
-			return err
-		}
+	duplicate: bool
+	switch parsed.kind {
+	case .Base:
+		duplicate = theme.base_set
+	case .Name:
+		duplicate = theme.name_set
+	case .Color:
+		duplicate = parsed.token in theme.overrides
 	}
-	if field == "base" {
+	if duplicate {
+		if err := duplicate_key_diagnostic(diagnostics, key, line); err != nil {return err}
+	}
+	switch parsed.kind {
+	case .Base:
 		if !theme_id_valid(value) {
 			return diagnostic_append(
 				diagnostics,
@@ -158,30 +216,29 @@ parse_custom_theme_key :: proc(
 		if clone_error != nil {return clone_error}
 		delete(theme.base, s.allocator)
 		theme.base, theme.base_set = base, true
-		return nil
-	}
-	if field == "name" {
-		text, issue := profile_text_value(value)
+	case .Name:
+		text, issue := text_value_decode(value)
 		if issue != "" {return diagnostic_append(diagnostics, line, key, issue)}
 		name, clone_error := strings.clone(text, s.allocator)
 		if clone_error != nil {return clone_error}
 		delete(theme.name, s.allocator)
 		theme.name, theme.name_set = name, true
-		return nil
+	case .Color:
+		token := parsed.token
+		c, valid := theme_color_parse(token, value, .Strict)
+		if !valid {
+			tokens := THEME_TOKENS
+			expected := tokens[token].kind == .Translucent ? "#rrggbb or #rrggbbaa" : "#rrggbb"
+			message, message_error := strings.concatenate(
+				{"invalid color \"", value, "\", expected ", expected},
+				context.temp_allocator,
+			)
+			if message_error != nil {message = "invalid color"}
+			return diagnostic_append(diagnostics, line, key, message)
+		}
+		theme.colors[token] = c
+		theme.overrides += {token}
 	}
-	c, valid := theme_color_parse(token, value, .Strict)
-	if !valid {
-		tokens := THEME_TOKENS
-		expected := tokens[token].kind == .Translucent ? "#rrggbb or #rrggbbaa" : "#rrggbb"
-		message, message_error := strings.concatenate(
-			{"invalid color \"", value, "\", expected ", expected},
-			context.temp_allocator,
-		)
-		if message_error != nil {message = "invalid color"}
-		return diagnostic_append(diagnostics, line, key, message)
-	}
-	theme.colors[token] = c
-	theme.overrides += {token}
 	return nil
 }
 
@@ -244,7 +301,8 @@ resolve_theme :: proc(s: ^Settings, diagnostics: ^[dynamic]Diagnostic) -> runtim
 	}
 	if diagnostics != nil && missing != "" {
 		message := fmt.tprintf("unknown theme \"%s\"; using %s", missing, DEFAULT_THEME_ID)
-		if err := diagnostic_append(diagnostics, s.theme_line, "theme.name", message); err != nil {
+		theme_line := setting_line(s, "theme.name")
+		if err := diagnostic_append(diagnostics, theme_line, "theme.name", message); err != nil {
 			return err
 		}
 	}

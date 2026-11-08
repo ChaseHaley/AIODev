@@ -5,10 +5,43 @@ import "base:runtime"
 import "core:log"
 import "core:sync"
 
+// A cell's column footprint: a wide glyph's leading half, its trailing spacer, and the spacer
+// that ends a row when a wide glyph wraps to the next one.
+Cell_Width :: enum u8 {
+	Narrow,
+	Wide,
+	Spacer_Tail,
+	Spacer_Head,
+}
+
+Underline :: enum u8 {
+	None,
+	Single,
+	Double,
+	Curly,
+	Dotted,
+	Dashed,
+}
+
+// The SGR attributes diagnostics report. A set underline colour is resolved through the snapshot
+// palette; nil means none was set.
+Snapshot_Style :: struct {
+	bold, faint, italic, blink:                  bool,
+	inverse, invisible, strikethrough, overline: bool,
+	underline:                                   Underline,
+	underline_color:                             Maybe(Color),
+}
+
+// position is the cursor's viewport column and row, nil while it is off-screen.
+Snapshot_Cursor :: struct {
+	position:          Maybe([2]int),
+	visible, blinking: bool,
+}
+
 Snapshot_Cell :: struct {
 	text:                   string,
-	width:                  ghostty.Cell_Wide,
-	style:                  ghostty.Style,
+	width:                  Cell_Width,
+	style:                  Snapshot_Style,
 	foreground, background: Maybe(Color),
 	selected:               bool,
 }
@@ -16,7 +49,7 @@ Snapshot_Cell :: struct {
 Snapshot :: struct {
 	columns, rows:          u16,
 	cells:                  [dynamic]Snapshot_Cell,
-	cursor:                 ghostty.Render_State_Cursor,
+	cursor:                 Snapshot_Cursor,
 	foreground, background: Color,
 	cursor_color:           Maybe(Color),
 	palette:                [256]Color,
@@ -28,13 +61,6 @@ snapshot_result :: proc(result: ghostty.Result, operation: string) -> Error {
 	if result == .Success {return .None}
 	log.errorf("term: snapshot %s failed: %v", operation, result)
 	return result == .Out_Of_Memory ? .Out_Of_Memory : .Terminal_Failed
-}
-
-// snapshot_color keeps the cell-read seam stable: the value contract lives in the colour module,
-// and this names the byte conversion the snapshot and frame share.
-@(private)
-snapshot_color :: proc(rgb: ghostty.Color_Rgb) -> Color {
-	return color_from_ghostty(rgb)
 }
 
 @(require_results)
@@ -59,16 +85,23 @@ snapshot :: proc(
 	if err := snapshot_result(ghostty.render_state_row_cells_new(nil, &cells), "creating cells");
 	   err != .None {return {}, err}
 	defer ghostty.render_state_row_cells_free(cells)
-	s.cursor = ghostty.sized(ghostty.Render_State_Cursor)
+	cursor := ghostty.sized(ghostty.Render_State_Cursor)
 	colors := ghostty.sized(ghostty.Render_State_Colors)
 	keys := [?]ghostty.Render_State_Data{.Cols, .Rows, .Cursor, .Colors, .Row_Iterator}
-	values := [?]rawptr{&s.columns, &s.rows, &s.cursor, &colors, &rows}
+	values := [?]rawptr{&s.columns, &s.rows, &cursor, &colors, &rows}
 	result := ghostty.render_state_get_multi(state, len(keys), &keys[0], &values[0], nil)
 	if err := snapshot_result(result, "reading state"); err != .None {return {}, err}
+	s.cursor = {
+		visible  = cursor.visible,
+		blinking = cursor.blinking,
+	}
+	if cursor.viewport_has_value {
+		s.cursor.position = [2]int{int(cursor.viewport_x), int(cursor.viewport_y)}
+	}
 	s.foreground, s.background =
-		snapshot_color(colors.foreground), snapshot_color(colors.background)
-	if colors.cursor_has_value {s.cursor_color = snapshot_color(colors.cursor)}
-	for c, i in colors.palette {s.palette[i] = snapshot_color(c)}
+		color_from_ghostty(colors.foreground), color_from_ghostty(colors.background)
+	if colors.cursor_has_value {s.cursor_color = color_from_ghostty(colors.cursor)}
+	for c, i in colors.palette {s.palette[i] = color_from_ghostty(c)}
 	if runtime.resize(&s.cells, int(s.columns) * int(s.rows)) != nil {return {}, .Out_Of_Memory}
 	offsets, allocation_error := make([]int, len(s.cells), allocator)
 	if allocation_error != nil {return {}, .Out_Of_Memory}
@@ -92,7 +125,7 @@ snapshot :: proc(
 			index := int(y) * int(s.columns) + x
 			offsets[index] = len(s.text)
 			c := &s.cells[index]
-			if err := snapshot_read_cell(cells, c, &s.text); err != .None {return {}, err}
+			if err := snapshot_read_cell(cells, c, &s.palette, &s.text); err != .None {return {}, err}
 		}
 	}
 	// Rebind strings after the shared buffer stops growing; only their lengths survive reallocations.
@@ -109,14 +142,16 @@ snapshot :: proc(
 snapshot_read_cell :: proc(
 	cells: ghostty.Render_State_Row_Cells,
 	c: ^Snapshot_Cell,
+	palette: ^[256]Color,
 	text: ^[dynamic]u8,
 ) -> Error {
 	cell := read_render_cell(cells)
-	c.width, c.style = cell.width, cell.style
+	c.width = snapshot_width(cell.width)
+	c.style = snapshot_style(cell.style, palette)
 	c.foreground = nil
-	if rgb, ok := cell.foreground.?; ok {c.foreground = snapshot_color(rgb)}
+	if rgb, ok := cell.foreground.?; ok {c.foreground = color_from_ghostty(rgb)}
 	c.background = nil
-	if rgb, ok := cell.background.?; ok {c.background = snapshot_color(rgb)}
+	if rgb, ok := cell.background.?; ok {c.background = color_from_ghostty(rgb)}
 	selected: bool
 	if ghostty.render_state_row_cells_get(cells, .Selected, &selected) == .Success {
 		c.selected = selected
@@ -125,6 +160,63 @@ snapshot_read_cell :: proc(
 	if err != .None {return err}
 	c.text = string(span)
 	return .None
+}
+
+@(private, require_results)
+snapshot_width :: proc(width: ghostty.Cell_Wide) -> Cell_Width {
+	switch width {
+	case .Narrow:
+		return .Narrow
+	case .Wide:
+		return .Wide
+	case .Spacer_Tail:
+		return .Spacer_Tail
+	case .Spacer_Head:
+		return .Spacer_Head
+	}
+	return .Narrow
+}
+
+@(private, require_results)
+snapshot_underline :: proc(underline: i32) -> Underline {
+	switch ghostty.Sgr_Underline(underline) {
+	case .None:
+		return .None
+	case .Single:
+		return .Single
+	case .Double:
+		return .Double
+	case .Curly:
+		return .Curly
+	case .Dotted:
+		return .Dotted
+	case .Dashed:
+		return .Dashed
+	}
+	return .None
+}
+
+@(private, require_results)
+snapshot_style :: proc(style: ghostty.Style, palette: ^[256]Color) -> Snapshot_Style {
+	s := Snapshot_Style {
+		bold          = style.bold,
+		faint         = style.faint,
+		italic        = style.italic,
+		blink         = style.blink,
+		inverse       = style.inverse,
+		invisible     = style.invisible,
+		strikethrough = style.strikethrough,
+		overline      = style.overline,
+		underline     = snapshot_underline(style.underline),
+	}
+	switch style.underline_color.tag {
+	case .None:
+	case .Palette:
+		s.underline_color = palette[style.underline_color.value.palette]
+	case .Rgb:
+		s.underline_color = color_from_ghostty(style.underline_color.value.rgb)
+	}
+	return s
 }
 
 snapshot_destroy :: proc(s: ^Snapshot) {
@@ -199,17 +291,7 @@ row_text :: proc(s: ^Snapshot, row: int, allocator := context.allocator) -> (str
 // state of its own, so it needs no view and does not wait out a program's synchronized update.
 @(require_results)
 screen_rows :: proc(s: ^Session, allocator := context.allocator) -> ([]string, Error) {
-	state: ghostty.Render_State
-	if err := snapshot_result(ghostty.render_state_new(nil, &state), "creating state"); err != .None {
-		return nil, err
-	}
-	defer ghostty.render_state_free(state)
-	sync.mutex_lock(&s.mutex)
-	result := ghostty.render_state_begin_update(state, s.terminal)
-	sync.mutex_unlock(&s.mutex)
-	if result == .Success {result = ghostty.render_state_end_update(state)}
-	if err := snapshot_result(result, "updating state"); err != .None {return nil, err}
-	shot, shot_error := snapshot(state, context.temp_allocator)
+	shot, shot_error := screen_snapshot(s, context.temp_allocator)
 	if shot_error != .None {return nil, shot_error}
 	rows, rows_error := make([dynamic]string, 0, int(shot.rows), allocator)
 	if rows_error != nil {return nil, .Out_Of_Memory}
@@ -226,4 +308,22 @@ screen_rows :: proc(s: ^Session, allocator := context.allocator) -> ([]string, E
 	}
 	for line in rows[used:] {delete(line, allocator)}
 	return rows[:used], .None
+}
+
+// Copies the session's current screen through its own render state, for live and headless sessions.
+// Unlike capture, which feeds a view, it ignores a synchronized output hold and collects no
+// highlights or images. The caller owns the result and releases it with snapshot_destroy.
+@(require_results)
+screen_snapshot :: proc(s: ^Session, allocator := context.allocator) -> (Snapshot, Error) {
+	state: ghostty.Render_State
+	if err := snapshot_result(ghostty.render_state_new(nil, &state), "creating state"); err != .None {
+		return {}, err
+	}
+	defer ghostty.render_state_free(state)
+	sync.mutex_lock(&s.mutex)
+	result := ghostty.render_state_begin_update(state, s.terminal)
+	sync.mutex_unlock(&s.mutex)
+	if result == .Success {result = ghostty.render_state_end_update(state)}
+	if err := snapshot_result(result, "updating state"); err != .None {return {}, err}
+	return snapshot(state, allocator)
 }

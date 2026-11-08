@@ -88,7 +88,6 @@ pane_first :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
 // A pane inside the floating group holding `id`, for focus and capsule restoration.
 float_pane :: proc(l: ^Layout, id: Node_Id) -> Node_Id {
 	root := float_root(l, id)
-	if root == INVALID_NODE && float_is_root(l, id) {root = id}
 	return root == INVALID_NODE ? INVALID_NODE : pane_first(l, root)
 }
 
@@ -107,7 +106,6 @@ pane_order_first :: proc(l: ^Layout, id: Node_Id) -> u64 {
 
 float_order :: proc(l: ^Layout, id: Node_Id) -> u64 {
 	root := float_root(l, id)
-	if root == INVALID_NODE && float_is_root(l, id) {root = id}
 	return root == INVALID_NODE ? max(u64) : pane_order_first(l, root)
 }
 
@@ -123,11 +121,6 @@ pane_tiled :: proc(l: ^Layout, node: Node_Id) -> bool {
 @(private)
 pane_settle :: proc(pane: ^Pane) {
 	pane.linked, pane.floating, pane.float = false, false, {}
-}
-
-@(private)
-float_clear :: proc(l: ^Layout, node: Node_Id) {
-	node_set_float(l, node, false)
 }
 
 @(private)
@@ -378,7 +371,8 @@ float_counts :: proc(l: ^Layout) -> (shown, minimized: int) {
 	return
 }
 
-// Continues stacking above the highest saved floating group, once a decoded tree holds them.
+// Continues stacking above the highest saved floating group, once an imported tree holds them.
+@(private)
 float_stack_restore :: proc(l: ^Layout) {
 	for _, i in l.nodes {
 		if floating, ok := node_float(l, Node_Id(i)); ok {

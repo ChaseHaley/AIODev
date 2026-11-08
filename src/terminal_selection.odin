@@ -1,7 +1,30 @@
 package main
 
 import "aio:term"
+import "aio:ui"
 import "core:time"
+
+@(private)
+COPY_NOTICE_DURATION :: 2 * time.Second
+
+copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
+	text, selected := term.selection_text(entry.session, context.temp_allocator)
+	if !selected {
+		return
+	}
+	if !clipboard_copy(app, text) {return}
+	ui.notices_put(
+		&app.notices,
+		u32(Notice_Key.Copy),
+		.Success,
+		"Copied to clipboard",
+		COPY_NOTICE_DURATION,
+		app.animations,
+		time.tick_now(),
+	)
+	mark_all_dirty(app)
+	if explicit {term.clear_selection(entry.session)}
+}
 
 // A Left drag selecting terminal text; nil is Idle. Selecting holds the session pressed; past the top or
 // bottom edge it is Autoscrolling, and history scrolls a row each time `deadline` passes. The direction
@@ -19,6 +42,10 @@ Selection_Autoscrolling :: struct {
 	session:  u32,
 	deadline: time.Tick,
 }
+
+// How often an autoscrolling drag moves history by a row.
+@(private = "file")
+AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
 
 selection_active :: proc(w: ^Window) -> bool {
 	return w.selection != nil
@@ -50,7 +77,6 @@ selection_begin :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32, time_ns: i
 @(private)
 selection_move :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32) {
 	term.selection_drag(entry.session, x, y)
-	w.pointer = {x, y}
 	selection_follow(w, entry, time.tick_now())
 	w.dirty = true
 }
@@ -69,6 +95,8 @@ selection_autoscroll_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 	autoscrolling, ok := w.selection.(Selection_Autoscrolling)
 	if !ok {return}
 	entry := session_find(app, autoscrolling.session)
+	// A gone session only stops the scrolling. The button is still held, so the drag stays Selecting
+	// and keeps the pointer until the release ends it; selection_entry then finds nothing to copy.
 	if entry == nil {
 		w.selection = Selection_Selecting{autoscrolling.session}
 		return

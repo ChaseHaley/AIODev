@@ -3,19 +3,19 @@ package ui
 import "aio:render"
 import "aio:settings"
 import "base:runtime"
-import "core:fmt"
 import "core:strings"
 
-// One profile as the settings table reads it. The strings are owned by Profile_Table.
+// One profile as the settings table reads it. The strings are owned by Profile_Table. `removable`
+// is settings.profile_can_remove.
 Profile_Row :: struct {
 	id, name, command, directory, icon, badge, note: string,
-	hidden, detected, is_default, listed:           bool,
+	hidden, detected, is_default, listed, removable: bool,
 }
 
 // Configured and machine profiles in profile.order order.
 Profile_Table :: struct {
-	rows, detected: [dynamic]Profile_Row,
-	allocator:      runtime.Allocator,
+	rows:      [dynamic]Profile_Row,
+	allocator: runtime.Allocator,
 }
 
 // A caller-supplied check keeps the table model free of the filesystem. It answers whether the
@@ -38,14 +38,11 @@ Profile_Columns :: struct {
 profile_table_init :: proc(table: ^Profile_Table, allocator := context.allocator) {
 	table.allocator = allocator
 	table.rows.allocator = allocator
-	table.detected.allocator = allocator
 }
 
 profile_table_destroy :: proc(table: ^Profile_Table) {
 	for &row in table.rows {profile_row_destroy(&row, table.allocator)}
-	for &row in table.detected {profile_row_destroy(&row, table.allocator)}
 	delete(table.rows)
-	delete(table.detected)
 	table^ = {}
 }
 
@@ -54,20 +51,6 @@ profile_row_destroy :: proc(row: ^Profile_Row, allocator: runtime.Allocator) {
 	for field in ([?]string{row.id, row.name, row.command, row.directory, row.icon, row.badge, row.note}) {
 		delete(field, allocator)
 	}
-}
-
-@(private)
-profile_row_note :: proc(
-	profiles: ^settings.Profiles,
-	profile: ^settings.Profile,
-) -> string {
-	name := settings.profile_value_facts(profile.name, profiles, profile.id)
-	command := settings.profile_value_facts(profile.command)
-	if !name.valid || !command.valid {return "Expected UTF-8 text without NUL bytes."}
-	if name.empty {return "A profile needs a name."}
-	if command.empty {return "A profile needs a command line."}
-	if name.name_taken {return "Another profile uses this name."}
-	return ""
 }
 
 // Builds one table from the resolved profile list. Duplicate names and unreadable commands
@@ -94,6 +77,7 @@ profile_table_build :: proc(
 			detected   = profile.builtin,
 			is_default = default != nil && profile.id == default.id,
 			listed     = settings.profile_order_has(profiles, profile.id),
+			removable  = settings.profile_can_remove(profile),
 		}
 		row_ok := false
 		defer if !row_ok {profile_row_destroy(&row, allocator)}
@@ -102,21 +86,19 @@ profile_table_build :: proc(
 		row.command = strings.clone(profile.command, allocator) or_return
 		row.directory = strings.clone(profile.directory, allocator) or_return
 		row.icon = strings.clone(profile.icon, allocator) or_return
-		row.badge = strings.clone(
-			settings.shell_icon(settings.shell_executable(profile.command), ""),
-			allocator,
-		) or_return
-		note := profile_row_note(profiles, profile)
-		if note == "" &&
+		row.badge = strings.clone(settings.shell_badge(profile.command), allocator) or_return
+		problem := settings.profile_check(profiles, profile)
+		if problem == .None &&
 		   !profile.detected &&
 		   command_exists != nil &&
 		   !command_exists(profile.command) {
-			executable := settings.shell_executable(profile.command)
-			note = fmt.tprintf("Command not found: %s.", executable)
+			problem = .Command_Missing
 		}
-		row.note = strings.clone(note, allocator) or_return
-		target := &table.rows
-		if _, append_error := append(target, row); append_error != nil {return {}, append_error}
+		row.note = strings.clone(
+			settings.profile_problem_text(problem, .Table_Note, profile.command),
+			allocator,
+		) or_return
+		if _, append_error := append(&table.rows, row); append_error != nil {return {}, append_error}
 		row_ok = true
 	}
 	success = true
@@ -204,12 +186,11 @@ profile_cell :: proc(x, limit, width: f32, row: render.Rect) -> render.Rect {
 	return {x, row.y, min(width, max(0, limit - x)), row.height}
 }
 
-// The clickable cells of one table or detected row. Actions are right-aligned inside their column.
+// The clickable cells of one table row. Actions are right-aligned inside their column.
 Profile_Parts :: struct {
 	handle, icon, name, command, directory: render.Rect,
 	radio, toggle:                          render.Rect,
 	expand, duplicate, remove, more:        render.Rect,
-	enable, chevron:                        render.Rect,
 }
 
 profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profile_Parts {
@@ -246,25 +227,6 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 			x += size + gap
 			parts.remove = {x, cy - size / 2, size, size}
 		}
-	case .Detected:
-		badge, radio := HEIGHT_COMPACT * s, SWITCH_HEIGHT * s
-		parts.icon = {row.x + SPACE_3 * s, cy - badge / 2, badge, badge}
-		field_h := HEIGHT_STANDARD * s
-		parts.enable = {row.x + row.width - SPACE_3 * s - 64 * s, cy - field_h / 2, 64 * s, field_h}
-		parts.radio = {parts.enable.x - SPACE_3 * s - radio, cy - radio / 2, radio, radio}
-		name_width := clamp(row.width * 0.24, 100 * s, 180 * s)
-		name_room := max(0, parts.radio.x - 12 * s - (parts.icon.x + parts.icon.width + 8 * s))
-		name_width = min(name_width, name_room)
-		parts.name = {parts.icon.x + parts.icon.width + 8 * s, row.y, name_width, row.height}
-		command_x := min(parts.name.x + parts.name.width + 8 * s, parts.radio.x - 8 * s)
-		parts.command = {
-			command_x,
-			row.y,
-			max(0, parts.radio.x - 8 * s - command_x),
-			row.height,
-		}
-	case .Detected_Header:
-		parts.chevron = {row.x + SPACE_3 * s, cy - HEIGHT_COMPACT / 2 * s, HEIGHT_COMPACT * s, HEIGHT_COMPACT * s}
 	case .Process_Group, .Profile_Add, .Text, .Integer, .Number, .Toggle, .Choice, .Color, .Optional_Color,
 	     .Shortcut, .Action, .Profile_Icon:
 	}

@@ -4,23 +4,21 @@ import "aio:settings"
 import "aio:ui"
 import "core:log"
 import "core:os"
-import "core:strings"
+import "core:time"
 
-@(private)
-diagnostic_identity :: proc(d: settings.Diagnostic) -> string {
-	return diagnostic_identity_text(d.kind, d.message)
+// What the settings notice last reported, so an unchanged revision stays quiet, and whether the format
+// migration was announced this run. App embeds it; reading and applying settings are its only writers.
+Settings_Notice_State :: struct {
+	settings_diagnostics:       [dynamic]settings.Diagnostic,
+	settings_read_error:        os.Error,
+	settings_migration_noticed: bool,
 }
 
-@(private)
-diagnostic_identity_text :: proc(kind: settings.Diagnostic_Kind, message: string) -> string {
-	if kind == .Shortcut_Warning {
-		// Saving unrelated settings can move source lines without changing the conflict.
-		if at := strings.last_index(message, " ["); at > 0 {
-			return strings.trim_space(message[:at])
-		}
-	}
-	return message
+settings_notice_state_destroy :: proc(s: ^Settings_Notice_State) {
+	settings.diagnostics_destroy(&s.settings_diagnostics)
 }
+
+// Saving unrelated settings can move source lines without changing a diagnostic's identity.
 
 settings_diagnostics_equal :: proc(a, b: []settings.Diagnostic) -> bool {
 	if len(a) != len(b) {return false}
@@ -29,12 +27,12 @@ settings_diagnostics_equal :: proc(a, b: []settings.Diagnostic) -> bool {
 		for other in a {
 			if d.key == other.key &&
 			   d.kind == other.kind &&
-			   diagnostic_identity(d) == diagnostic_identity(other) {matches_a += 1}
+			   d.identity == other.identity {matches_a += 1}
 		}
 		for other in b {
 			if d.key == other.key &&
 			   d.kind == other.kind &&
-			   diagnostic_identity(d) == diagnostic_identity(other) {matches_b += 1}
+			   d.identity == other.identity {matches_b += 1}
 		}
 		if matches_a != matches_b {return false}
 	}
@@ -65,7 +63,7 @@ show_settings_diagnostics :: proc(
 	app.settings_read_error = read_error
 	if !changed {return}
 	if read_error == nil && len(app.settings_diagnostics) == 0 {
-		ui.notices_clear(&app.notices, u32(Notice_Key.Settings))
+		ui.notices_clear(&app.notices, u32(Notice_Key.Settings), app.animations, time.tick_now())
 		return
 	}
 	kind: ui.Notice_Kind = .Warning
@@ -79,5 +77,6 @@ show_settings_diagnostics :: proc(
 		kind = .Error
 		text = "Some settings could not be applied. Open Settings to review them; check the log for details."
 	}
-	ui.notices_put(&app.notices, u32(Notice_Key.Settings), kind, text, ERROR_NOTICE_DURATION)
+	key := u32(Notice_Key.Settings)
+	ui.notices_put(&app.notices, key, kind, text, ERROR_NOTICE_DURATION, app.animations, time.tick_now())
 }

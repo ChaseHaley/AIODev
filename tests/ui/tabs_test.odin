@@ -8,24 +8,24 @@ import "aio:ui"
 import fixtures "../fixtures"
 
 @(test)
-tab_bar_caps_widths_and_hit_tests_tabs_actions_and_empty_space :: proc(t: ^testing.T) {
-	bar := ui.tab_bar_layout(500, 1, 3)
+tab_bar_caps_widths_and_places_tabs_actions_and_empty_space :: proc(t: ^testing.T) {
+	bar := ui.tab_bar_layout(0, 500, 1, 3)
 	testing.expect_value(t, bar.count, 3)
 	testing.expect_value(t, bar.height, ui.TITLE_BAR_HEIGHT)
 	testing.expect(t, bar.tab_width > 0 && bar.tab_width <= 220)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.x+2, 20), 0)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.x+bar.tab_width+2, 20), 1)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, bar.x+2, bar.height), -1)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, 1, 20), 0)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, -1, 20), -1)
+	// The main package's window_tab_hit tests the points against these slots.
+	new_tab := ui.tab_new_rect(bar)
+	testing.expect_value(t, new_tab.x, bar.x + f32(bar.count)*bar.tab_width)
+	testing.expect_value(t, new_tab.width, bar.button_width)
 
-	new_tab := bar.x + f32(bar.count)*bar.tab_width + 2
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, new_tab, 20), bar.count)
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, new_tab+bar.button_width, 20), -1)
-
-	close := ui.tab_close_rect(bar, 1, 1)
+	close := ui.tab_close_rect(bar, 1, 1, 1)
 	testing.expect_value(t, close.width, f32(24))
-	testing.expect_value(t, ui.tab_close_hit(bar, close.x+close.width/2, close.y+close.height/2, 1), 1)
+	// A resting tab's close button sits inside its own slot.
+	testing.expect(t, close.x >= bar.x+bar.tab_width && close.x+close.width <= bar.x+2*bar.tab_width)
+	testing.expect(t, close.y >= 0 && close.y+close.height <= bar.height)
+	// A tab sliding toward another slot carries its close button with it.
+	moved := ui.tab_close_rect(bar, 1, 1.5, 1)
+	testing.expect_value(t, moved.x - close.x, bar.tab_width / 2)
 
 	drop := ui.tab_drop_region(bar, 900, 1)
 	testing.expect(t, ui.tab_drop_hit(bar, 900, 1, drop.x+2, 20))
@@ -33,11 +33,16 @@ tab_bar_caps_widths_and_hit_tests_tabs_actions_and_empty_space :: proc(t: ^testi
 }
 
 @(test)
-tab_bar_with_no_tabs_has_no_hit_surface :: proc(t: ^testing.T) {
-	bar := ui.tab_bar_layout(500, 1, 0)
+tab_bar_with_no_tabs_has_no_tab_slots :: proc(t: ^testing.T) {
+	bar := ui.tab_bar_layout(0, 500, 1, 0)
 	testing.expect_value(t, bar.count, 0)
 	testing.expect_value(t, bar.tab_width, f32(0))
-	testing.expect_value(t, ui.tab_bar_hit_test(bar, 40, 20), -1)
+	testing.expect_value(t, ui.tab_close_rect(bar, 0, 0, 1), render.Rect{})
+	// Tabs a drag offers take their share of the width without counting as tabs.
+	offered := ui.tab_bar_layout(10, 500, 1, 2, 1)
+	testing.expect_value(t, offered.count, 2)
+	testing.expect_value(t, offered.x, f32(10))
+	testing.expect_value(t, offered.tab_width, ui.tab_bar_layout(10, 500, 1, 3).tab_width)
 }
 
 // The program icon stays at the left and status sits just before Close; a tab too narrow for both
@@ -59,17 +64,19 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 	defer render.draw_list_destroy(&list)
 	resolved, ok := fixtures.shipped_theme_file(fixtures.SHIPPED_THEMES[0])
 	if !testing.expect(t, ok) {return}
-	theme := ui.theme_from(resolved)
+	theme := ui.theme_from(resolved, fixtures.default_interface())
 	done := ui.Status_Mark{glyph = .Done, progress = -1}
 	for scale in ([?]f32{1, 1.5, 2}) {
 		ui.text_set_size(&text, 14 * scale)
 		for width, i in ([?]f32{200, 80}) {
-			bar := ui.tab_bar_layout(width * 2 * scale + 32 * scale, scale, 2)
+			bar := ui.tab_bar_layout(0, width * 2 * scale + 32 * scale, scale, 2)
 			render.draw_list_reset(&list)
-			testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 1, "Title", false, scale,
-				icon_atlas = {0, 0, 14 * scale, 14 * scale}, status = done, status_slot = true), glyphs.Result.Ok)
+			testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 1, 1,
+				{title = "Title", badge = {atlas = {0, 0, 14 * scale, 14 * scale}}, status = done,
+				 status_slot = true},
+				0, 0, scale), render.Build_Status.Ok)
 			left := bar.x + bar.tab_width
-			close := ui.tab_close_rect(bar, 1, scale)
+			close := ui.tab_close_rect(bar, 1, 1, scale)
 			icon_found, status_found := false, false
 			for g in list.glyphs {
 				if g.flags & render.GLYPH_COLOR == 0 {continue}
@@ -85,8 +92,9 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 			testing.expect(t, status_found)
 			// Without a status to show, a narrow tab keeps its icon.
 			render.draw_list_reset(&list)
-			testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 1, "Title", false, scale,
-				icon_atlas = {0, 0, 14 * scale, 14 * scale}, status_slot = true), glyphs.Result.Ok)
+			testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 1, 1,
+				{title = "Title", badge = {atlas = {0, 0, 14 * scale, 14 * scale}}, status_slot = true},
+				0, 0, scale), render.Build_Status.Ok)
 			icon_found = false
 			for g in list.glyphs {icon_found ||= g.flags & render.GLYPH_COLOR != 0}
 			testing.expect(t, icon_found)

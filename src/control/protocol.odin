@@ -6,16 +6,40 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
+// The pipe transport: current-user named pipes carrying one JSON string-array request line and one
+// JSON reply line. It delivers arguments unparsed; each protocol's owner interprets them.
+
 MAX_MESSAGE :: 4 * 1024 * 1024
 // Real requests use fewer than ten arguments. Capping the decoded array keeps a
 // small line from expanding into a large allocation before parsing.
 MAX_ARGUMENTS :: 64
+
+Error :: enum {
+	None,
+	Out_Of_Memory,
+	Invalid_Argument,
+	Protocol,
+	Timeout,
+	Closed,
+	System,
+	// The pipe answered, but its server process did not match the expected identity.
+	Impostor,
+}
+
+// The process a client expects behind a control pipe. A zero field is not checked; a client that
+// knows only the image still gets the image check.
+Server_Identity :: struct {
+	pid:     u32,
+	created: u64,
+	image:   string,
+}
+
 Wake :: struct {
 	procedure: proc(user: rawptr),
 	user:      rawptr,
 }
-// `status` carries a CLI exit status (commands.Status); zero is left off the wire, so verification
-// replies keep their two-key form.
+// `status` is a protocol-defined numeric status (the CLI protocol's exit status); zero is left off
+// the wire, so replies without one keep their two-key form.
 Response :: struct {
 	ok:     bool,
 	text:   string,
@@ -32,16 +56,13 @@ valid_pipe_name :: proc(name: string) -> bool {
 	)
 }
 Message :: struct {
-	id:          u64,
-	args:        []string,
-	request:     Request,
-	parse_error: Parse_Error,
-	allocator:   runtime.Allocator,
+	id:        u64,
+	args:      []string,
+	allocator: runtime.Allocator,
 }
 
 message_destroy :: proc(m: ^Message) {
 	if m == nil {return}
-	request_destroy(&m.request)
 	for arg in m.args {
 		delete(arg, m.allocator)
 	}
@@ -71,9 +92,8 @@ instance_pipe_name :: proc(app_id, suffix: string, allocator: runtime.Allocator)
 	return s, .None
 }
 
-// A raw server hands requests over unparsed, for callers with their own grammar.
 @(private, require_results)
-decode_request :: proc(data: []u8, raw: bool, allocator := context.allocator) -> (^Message, Error) {
+decode_request :: proc(data: []u8, allocator := context.allocator) -> (^Message, Error) {
 	if len(data) > MAX_MESSAGE {return nil, .Protocol}
 	text := strings.trim_space(string(data))
 	if len(text) == 0 || text[0] != '[' {return nil, .Protocol}
@@ -117,7 +137,6 @@ decode_request :: proc(data: []u8, raw: bool, allocator := context.allocator) ->
 			return nil, .Protocol
 		}
 	}
-	if !raw {m.request, m.parse_error = parse(m.args, allocator)}
 	return m, .None
 }
 

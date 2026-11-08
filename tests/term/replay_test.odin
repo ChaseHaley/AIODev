@@ -1,6 +1,5 @@
 package term_test
 
-import "aio:ghostty"
 import "aio:term"
 import "core:os"
 import "core:strings"
@@ -102,7 +101,7 @@ replay_reproduces_screen_and_cell_attributes :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, session_error, term.Error.None) {return}
 	defer term.destroy(session)
 	term.replay_write(session, data[term.CAPTURE_HEADER_SIZE:])
-	screen, snapshot_error := term.replay_snapshot(session)
+	screen, snapshot_error := term.screen_snapshot(session)
 	if !testing.expect_value(t, snapshot_error, term.Error.None) {return}
 	defer term.snapshot_destroy(&screen)
 	testing.expect_value(t, screen.columns, 20)
@@ -117,8 +116,8 @@ replay_reproduces_screen_and_cell_attributes :: proc(t: ^testing.T) {
 	testing.expect_value(t, second, "bold plain")
 	wide := term.snapshot_cell(&screen, 6, 0)
 	testing.expect_value(t, wide.text, "\u6c49")
-	testing.expect_value(t, wide.width, ghostty.Cell_Wide.Wide)
-	testing.expect_value(t, term.snapshot_cell(&screen, 7, 0).width, ghostty.Cell_Wide.Spacer_Tail)
+	testing.expect_value(t, wide.width, term.Cell_Width.Wide)
+	testing.expect_value(t, term.snapshot_cell(&screen, 7, 0).width, term.Cell_Width.Spacer_Tail)
 	bold := term.snapshot_cell(&screen, 0, 1)
 	testing.expect_value(t, bold.text, "b")
 	testing.expect(t, bold.style.bold)

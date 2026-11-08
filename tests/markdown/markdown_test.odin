@@ -110,6 +110,9 @@ task_lists_mark_their_state :: proc(t: ^testing.T) {
 	defer markdown.document_destroy(&doc)
 	testing.expect(t, markdown.parse("- [ ] open\n- [x] done\n", &doc))
 	testing.expect_value(t, string(doc.text[:]), "☐ open\n☑ done")
+	if !testing.expect_value(t, len(doc.blocks), 2) {return}
+	testing.expect_value(t, doc.blocks[0].task, markdown.Task.Open)
+	testing.expect_value(t, doc.blocks[1].task, markdown.Task.Done)
 }
 
 @(test)

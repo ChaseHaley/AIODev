@@ -1,32 +1,37 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
-// One slot per Header_Action from Documents through Close, in that order, left to right. A pane in a float
-// keeps its split controls; minimizing, docking and moving belong to the float header. Tiled panes add
-// their view controls and Float.
-HEADER_BUTTONS :: 8
 @(private = "file")
 HEADER_TITLE_MINIMUM :: f32(40)
-Header_Action :: enum {
-	None,
-	Documents,
-	Split_Right,
-	Split_Down,
-	Zoom,
-	Fill_Window,
-	Linked_Window,
-	Dock,
-	Close,
-	Badge,
-}
-Header_Layout :: struct {
+
+// A header's geometry for its owner's button set E, whose order runs left to right.
+Header_Layout :: struct($E: typeid) {
 	panel, title, badge: render.Rect,
-	buttons:             [HEADER_BUTTONS]render.Rect,
-	// Sets the Documents button apart from the controls for the pane itself.
+	// Where the badge takes hover and clicks: a little past its glyph and over the chevron its hover shows,
+	// never outside the panel.
+	badge_target:        render.Rect,
+	buttons:             [E]render.Rect,
+	// Sets the separated button apart from the buttons after it.
 	divider:             render.Rect,
+}
+
+// A header's badge, which opens its menu.
+Header_Badge :: struct {}
+
+// What a point on a header does: one of its buttons, its badge, or nil for its title.
+Header_Target :: union($E: typeid) {
+	E,
+	Header_Badge,
+}
+
+// How a header button draws: its icon and motion, toggled on when selected, and pressed in a faint error
+// tint rather than the neutral fill when it is a danger.
+Header_Button :: struct {
+	icon:             Icon,
+	motion:           Control_Motion,
+	selected, danger: bool,
 }
 
 // A hairline with SPACE_1 either side.
@@ -36,109 +41,73 @@ header_divider :: proc(next: render.Rect, panel_y, panel_height, scale: f32) -> 
 	return {next.x - SPACE_1 * scale - scale, panel_y + (panel_height - height) / 2, scale, height}
 }
 
-// How a pane's Documents button shows. A pane that takes no pins has no button.
-Header_Documents :: struct {
-	shown, open: bool,
-}
-
-// Whether a header shows the action's button. Every pane can split and close; view controls and Float
-// apply only to the tiled layout.
-@(private = "file")
-header_shows :: proc(action: Header_Action, floating: bool) -> bool {
-	#partial switch action {
-	case .Documents, .Split_Right, .Split_Down, .Close:
-		return true
-	}
-	return !floating
-}
-
-// The order controls give way in a narrow header: the Documents button first, then the tiled view
-// controls, so splitting, floating and closing stay longest.
-@(private = "file")
-HEADER_DROP_ORDER :: [?]Header_Action {
-	.Documents, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
-}
-
-header_layout :: proc(area: render.Rect, scale: f32, documents := true, floating := false) -> Header_Layout {
-	l := Header_Layout {
+// A header row across the top of `area`: the badge and title at the start and the `shown` buttons at the
+// end, `separated` set apart from those after it. Buttons never cover the badge or the start of the
+// title, which focus and drag the pane, so in a narrow header they give way in `drop_order`.
+header_layout :: proc(
+	area: render.Rect,
+	scale: f32,
+	shown: bit_set[$E],
+	separated: E,
+	drop_order: []E,
+) -> Header_Layout(E) {
+	l := Header_Layout(E) {
 		panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT * scale)},
 	}
 	// The badge and the last button's icon both sit SPACE_2 from the card's edges.
 	badge := ICON_BUTTON * scale
 	l.badge = {area.x + SPACE_2 * scale, area.y + (l.panel.height - badge) / 2, badge, badge}
+	left := max(l.panel.x, l.badge.x - 3 * scale)
+	top := max(l.panel.y, l.badge.y - 3 * scale)
+	right := min(l.panel.x + l.panel.width, l.badge.x + l.badge.width + 9 * scale)
+	bottom := min(l.panel.y + l.panel.height, l.badge.y + l.badge.height + 3 * scale)
+	l.badge_target = {left, top, max(0, right - left), max(0, bottom - top)}
 	button := HEIGHT_COMPACT * scale
 	end := area.x + area.width - SPACE_1 * scale
-	// Buttons never cover the badge or the start of the title, which focus and drag the pane.
 	title_end := area.x + (SPACE_2 + ICON_BUTTON + SPACE_2 + HEADER_TITLE_MINIMUM) * scale
 	gap := 2 * SPACE_1 * scale + scale
-	shown: [HEADER_BUTTONS]bool
+	shown := shown
 	width: f32
-	for i in 0 ..< HEADER_BUTTONS {
-		action := Header_Action(i + 1)
-		if !header_shows(action, floating) || (action == .Documents && !documents) {continue}
-		shown[i] = true
-		width += button + (action == .Documents ? gap : 0)
-	}
-	for action in HEADER_DROP_ORDER {
+	for action in shown {width += button + (action == separated ? gap : 0)}
+	for action in drop_order {
 		if end - width >= title_end {break}
-		i := int(action) - 1
-		if !shown[i] {continue}
-		shown[i] = false
-		width -= button + (action == .Documents ? gap : 0)
+		if action not_in shown {continue}
+		shown -= {action}
+		width -= button + (action == separated ? gap : 0)
 	}
-	{
-		placed: render.Rect
-		for i := len(l.buttons) - 1; i >= 0; i -= 1 {
-			if !shown[i] {continue}
-			if i == int(Header_Action.Documents) - 1 {
-				l.divider = header_divider(placed, l.panel.y, l.panel.height, scale)
-				end -= gap
-			}
-			l.buttons[i] = {
-				end - button,
-				area.y + max(0, (l.panel.height - button) / 2),
-				button,
-				min(button, l.panel.height),
-			}
-			placed = l.buttons[i]
-			end -= button
+	placed: render.Rect
+	#reverse for &rect, action in l.buttons {
+		if action not_in shown {continue}
+		if action == separated {
+			l.divider = header_divider(placed, l.panel.y, l.panel.height, scale)
+			end -= gap
 		}
+		rect = {
+			end - button,
+			area.y + max(0, (l.panel.height - button) / 2),
+			button,
+			min(button, l.panel.height),
+		}
+		placed = rect
+		end -= button
 	}
 	title_x := l.badge.x + l.badge.width + SPACE_2 * scale
 	l.title = {title_x, area.y, max(0, end - SPACE_2 * scale - title_x), l.panel.height}
 	return l
 }
 
-header_hit_test :: proc(l: Header_Layout, x, y: f32) -> Header_Action {
-	for button, i in l.buttons {
+header_hit_test :: proc(l: Header_Layout($E), x, y: f32) -> Header_Target(E) {
+	for button, action in l.buttons {
 		if button.width > 0 &&
-		   x >= button.x &&
-		   x < button.x + button.width &&
-		   y >= button.y &&
-		   y < button.y + button.height &&
-		   x >= l.panel.x &&
-		   x < l.panel.x + l.panel.width &&
-		   y >= l.panel.y &&
-		   y < l.panel.y + l.panel.height {return Header_Action(i + 1)}
+		   render.rect_contains(button, x, y) &&
+		   render.rect_contains(l.panel, x, y) {return action}
 	}
-	// The badge's hover target extends a little past the glyph, but never outside the visible card.
-	if l.badge.width > 0 && l.panel.width > 0 && l.panel.height > 0 {
-		left := max(l.panel.x, l.badge.x - 3)
-		top := max(l.panel.y, l.badge.y - 3)
-		right := min(l.panel.x + l.panel.width, l.badge.x + l.badge.width + 9)
-		bottom := min(l.panel.y + l.panel.height, l.badge.y + l.badge.height + 3)
-		if x >= left && x < right && y >= top && y < bottom {return .Badge}
-	}
-	return .None
+	if render.rect_contains(l.badge_target, x, y) {return Header_Badge{}}
+	return nil
 }
 
-header_contains :: proc(l: Header_Layout, x, y: f32) -> bool {
-	return(
-		x >= l.panel.x &&
-		x < l.panel.x + l.panel.width &&
-		y >= l.panel.y &&
-		y < l.panel.y + l.panel.height \
-	)
+header_contains :: proc(l: Header_Layout($E), x, y: f32) -> bool {
+	return render.rect_contains(l.panel, x, y)
 }
 
 shell_badge_draw :: proc(
@@ -149,7 +118,7 @@ shell_badge_draw :: proc(
 	icon: string,
 	scale: f32,
 	atlas: render.Rect = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if atlas.width > 0 {
 		r := area
 		factor := min(area.width / atlas.width, area.height / atlas.height)
@@ -176,40 +145,18 @@ shell_badge_draw :: proc(
 	)
 }
 
-@(private)
-header_icon :: proc(action: Header_Action, zoomed, fullscreen, linked: bool) -> Icon {
-	#partial switch action {
-	case .Documents:
-		return .Document
-	case .Split_Down:
-		return .Split_Down
-	case .Zoom:
-		return zoomed ? .Collapse : .Expand
-	case .Fill_Window:
-		return fullscreen ? .Restore : .Zoom
-	case .Linked_Window:
-		return linked ? .Window_In : .Window_Out
-	case .Dock:
-		return .Float_Pane
-	case .Close:
-		return .Close
-	}
-	return .Split_Right
-}
-
+// Draws a header row laid out by header_layout over the card at `area`.
 header_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
 	area: render.Rect,
+	l: Header_Layout($E),
+	buttons: [E]Header_Button,
 	background: render.Color,
 	radius, scale: f32,
 	title, directory, icon: string,
 	focused: bool,
-	controls: [HEADER_BUTTONS]Control_Motion,
-	zoomed := false,
-	fullscreen := false,
-	linked := false,
 	icon_atlas: render.Rect = {},
 	badge_hovered := false,
 	pointer: [2]f32 = {},
@@ -217,10 +164,7 @@ header_draw :: proc(
 	status_text: string = "",
 	status_phase: f32 = 0,
 	content_icon: Icon = .None,
-	documents: Header_Documents = {shown = true},
-	floating := false,
-) -> glyphs.Result {
-	l := header_layout(area, scale, documents.shown, floating)
+) -> render.Build_Status {
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
 	if render.push_layer(list, l.panel) != .None {return .Ok}
@@ -263,7 +207,7 @@ header_draw :: proc(
 			scale,
 		); result != .Ok {return result}
 		ink := theme.muted
-		if status_blocked(status.glyph) || status.glyph == .Error {ink = status_color(theme, status.glyph)}
+		if status.urgent {ink = status_color(theme, status.glyph)}
 		if result := draw_fading_text(
 			&small,
 			list,
@@ -297,47 +241,58 @@ header_draw :: proc(
 			width - title_width - 8 * scale,
 		); result != .Ok {return result}
 	}
-	for button, i in l.buttons {
-		if button.width == 0 {continue}
-		action := Header_Action(i + 1)
+	header_buttons_draw(list, theme, l, buttons, scale, pointer)
+	return .Ok
+}
+
+// Draws the laid-out buttons, then the divider; stops at a full draw list.
+@(private = "file")
+header_buttons_draw :: proc(
+	list: ^render.Draw_List,
+	theme: Theme,
+	l: Header_Layout($E),
+	buttons: [E]Header_Button,
+	scale: f32,
+	pointer: [2]f32,
+) {
+	for rect, action in l.buttons {
+		if rect.width == 0 {continue}
+		button := buttons[action]
 		b := Button {
-			rect  = button,
-			hover = controls[i].hover.value,
-			press = controls[i].press.value,
+			rect     = rect,
+			hover    = button.motion.hover.value,
+			press    = button.motion.press.value,
+			selected = button.selected,
 		}
-		// Close presses in a faint error tint rather than the neutral pressed fill.
-		if action == .Close {
+		if button.danger {
 			danger := theme.error
 			danger.a *= 0.14
 			b.press_color = danger
 		}
-		if action == .Documents {b.selected = documents.open}
 		face, ink, err := button_draw(list, theme, b, scale, pointer)
-		if err != .None {return .Ok}
-		icon_draw(
-			list,
-			header_icon(action, zoomed, fullscreen, linked),
-			face,
-			ink,
-			ICON_BUTTON,
-			scale,
-		)
+		if err != .None {return}
+		icon_draw(list, button.icon, face, ink, ICON_BUTTON, scale)
 	}
 	if l.divider.width > 0 {draw_rect(list, {rect = l.divider, color = theme.border})}
-	return .Ok
 }
 
-
 // Single-pane tabs keep their full terminal height, so their split controls float in a small pill at the
-// pane's top-right corner instead of a header row.
-split_overlay_layout :: proc(area: render.Rect, scale: f32, documents := true) -> Header_Layout {
+// pane's top-right corner instead of a header row: a grip in `title`, then the `shown` buttons, with
+// `separated` set apart from those after it.
+split_overlay_layout :: proc(
+	area: render.Rect,
+	scale: f32,
+	shown: bit_set[$E],
+	separated: E,
+) -> Header_Layout(E) {
 	// A grip and compact buttons in a toolbar-height pill, SPACE_2 from the pane's corner.
 	button := HEIGHT_COMPACT * scale
 	inset := (HEIGHT_TOOLBAR - HEIGHT_COMPACT) / 2 * scale
 	gap := 2 * SPACE_1 * scale + scale
-	width, height := 3 * button + 2 * inset, HEIGHT_TOOLBAR * scale
-	if documents {width += button + gap}
-	l := Header_Layout {
+	// The grip takes a button's room.
+	width, height := f32(card(shown - {separated}) + 1) * button + 2 * inset, HEIGHT_TOOLBAR * scale
+	if separated in shown {width += button + gap}
+	l := Header_Layout(E) {
 		panel = {
 			max(area.x, area.x + area.width - width - SPACE_2 * scale),
 			area.y + SPACE_2 * scale,
@@ -347,44 +302,30 @@ split_overlay_layout :: proc(area: render.Rect, scale: f32, documents := true) -
 	}
 	l.title = {l.panel.x + inset, l.panel.y + inset, button, button}
 	x := l.title.x + button
-	if documents {
-		l.buttons[0] = {x, l.title.y, button, button}
-		x += button + gap
+	divide := false
+	for &rect, action in l.buttons {
+		if action not_in shown {continue}
+		rect = {x, l.title.y, button, button}
+		if divide {l.divider = header_divider(rect, l.panel.y, l.panel.height, scale)}
+		divide = action == separated
+		x += divide ? button + gap : button
 	}
-	l.buttons[1] = {x, l.title.y, button, button}
-	l.buttons[2] = {x + button, l.title.y, button, button}
-	if documents {l.divider = header_divider(l.buttons[1], l.panel.y, l.panel.height, scale)}
 	return l
 }
 
 split_overlay_draw :: proc(
 	list: ^render.Draw_List,
-	text: ^Text,
 	theme: Theme,
-	l: Header_Layout,
-	controls: [HEADER_BUTTONS]Control_Motion,
+	l: Header_Layout($E),
+	buttons: [E]Header_Button,
 	scale: f32,
 	pointer: [2]f32 = {},
-	documents: Header_Documents = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	radius := RADIUS_OVERLAY * scale
 	if render.push_layer(list, l.panel, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = theme.surface, radius = radius})
 	draw_rect(list, {rect = l.panel, color = theme.border, radius = radius, stroke = scale})
 	icon_draw(list, .Grip, l.title, theme.muted, ICON_BUTTON, scale)
-	buttons := l.buttons
-	for button, i in buttons[:3] {
-		if button.width == 0 {continue}
-		b := Button {
-			rect     = button,
-			hover    = controls[i].hover.value,
-			press    = controls[i].press.value,
-			selected = i == 0 && documents.open,
-		}
-		face, ink, err := button_draw(list, theme, b, scale, pointer)
-		if err != .None {return .Ok}
-		icon_draw(list, header_icon(Header_Action(i + 1), false, false, false), face, ink, ICON_BUTTON, scale)
-	}
-	if l.divider.width > 0 {draw_rect(list, {rect = l.divider, color = theme.border})}
+	header_buttons_draw(list, theme, l, buttons, scale, pointer)
 	return .Ok
 }

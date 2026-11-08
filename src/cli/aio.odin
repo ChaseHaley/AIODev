@@ -1,14 +1,19 @@
 package cli
 
+import "aio:cli_protocol"
 import "aio:instance"
-import "core:path/filepath"
+import "aio:layout"
+import "core:fmt"
 import "core:strconv"
-import "core:strings"
 
 // aio: the AIODev command line. Every command runs inside AIODev through the shared command core;
 // this program only carries the request, prints the reply and exits with its status (D-046).
 
-USAGE :: `Usage: aio [--instance <name>] [--json] <command> [options] [-- <program> [arguments]]
+// The usage text. Its wait default and exit statuses come from their declarations; print_usage
+// supplies them in order. The split ratio range is spelled literally, held in step by the #assert.
+#assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
+@(private)
+USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [-- <program> [arguments]]
        aio wait [--pane <pane>] (--text <text> | --exit) [--timeout <ms>]
        aio commands
        aio help [<command>]
@@ -28,40 +33,28 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--focus] [-- <program> [argum
         aio pane.list                     one line per pane; --json for details
         aio pane.close
 Wait    aio wait polls until the pane shows the text or its program exits; the default
-        timeout is 30000 ms, and 0 waits without limit. --exit prints the exit code, even
+        timeout is %d ms, and 0 waits without limit. --exit prints the exit code, even
         after the pane closed with its program, or closed when it was closed while running.
-Exit    0 ok, 1 failed, 2 bad command line, 3 pane missing or ambiguous,
-        4 AIODev unreachable, 5 control pipe server unverified, 130 interrupted.
+Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
+        %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
 Turn on Command Line Control in AIODev's Settings (control.enabled) first.
 `
 
 WAIT_DEFAULT_TIMEOUT_MS :: 30000
 
-// AIODev has its own working directory, so a relative file must be made absolute here. Returns args
-// unchanged for any other command.
-@(require_results)
-absolute_file_argument :: proc(
-	args: []string,
-	directory: string,
-	allocator := context.allocator,
-) -> []string {
-	if len(args) == 0 || args[0] != "pane.open_markdown" {return args}
-	result := make([]string, len(args), allocator)
-	copy(result, args)
-	for i := 1; i < len(result); i += 1 {
-		switch result[i] {
-		case "--focus":
-		case "--pane", "--direction", "--ratio":
-			i += 1
-		case:
-			if !filepath.is_abs(result[i]) && !strings.has_prefix(result[i], "--") {
-				joined, err := filepath.join({directory, result[i]}, allocator)
-				if err == nil {result[i] = joined}
-			}
-		}
-	}
-	return result
+print_usage :: proc() {
+	fmt.printf(
+		USAGE_FORMAT,
+		WAIT_DEFAULT_TIMEOUT_MS,
+		u8(cli_protocol.Status.Ok),
+		u8(cli_protocol.Status.Failed),
+		u8(cli_protocol.Status.Usage),
+		u8(cli_protocol.Status.Target),
+		u8(cli_protocol.Status.Unreachable),
+		u8(cli_protocol.Status.Impostor),
+		u8(cli_protocol.Status.Interrupted),
+	)
 }
 
 Wait :: struct {
@@ -81,12 +74,12 @@ Options :: struct {
 	wait:     Wait,
 }
 
-// Reads aio's own options, which come before the command. `instance` is the AIODEV_INSTANCE value,
-// overridden by --instance. Strings borrow from args.
+// Reads aio's own options, which come before the command. `environment` is the AIODEV_INSTANCE
+// value, overridden by --instance. Strings borrow from args.
 @(require_results)
-parse_options :: proc(args: []string, instance: string) -> (Options, string) {
+parse_options :: proc(args: []string, environment: string) -> (Options, string) {
 	o := Options {
-		instance = instance,
+		instance = environment,
 	}
 	i := 0
 	seen_instance := false
@@ -98,8 +91,8 @@ parse_options :: proc(args: []string, instance: string) -> (Options, string) {
 			continue
 		case "--instance":
 			if seen_instance {return {}, "use --instance once"}
-			if i + 1 == len(args) || !valid_instance(args[i + 1]) {
-				return {}, "--instance takes 1 to 32 letters, digits, - or _"
+			if i + 1 == len(args) || !instance.valid_name(args[i + 1]) {
+				return {}, "--instance takes " + instance.NAME_RULE
 			}
 			i += 1
 			o.instance, seen_instance = args[i], true
@@ -142,25 +135,20 @@ parse_options :: proc(args: []string, instance: string) -> (Options, string) {
 	return o, ""
 }
 
-// The pipe request for a command: the caller pane, the reply format, then the command line.
-// `commands` and `help <command>` ask AIODev's catalogue.
+// The pipe request for a command: the caller pane, the reply format, aio's working directory, then
+// the command line. `commands` and `help <command>` ask AIODev's catalogue.
 @(require_results)
-request :: proc(o: Options, caller: string, allocator := context.allocator) -> []string {
-	args := make([dynamic]string, 0, len(o.args) + 3, allocator)
-	append(&args, caller, o.json ? "json" : "text")
+request :: proc(o: Options, caller, directory: string, allocator := context.allocator) -> []string {
+	command := o.args
 	switch o.args[0] {
 	case "commands", "help":
-		append(&args, "app.commands")
-		append(&args, ..o.args[1:])
-	case:
-		append(&args, ..o.args)
+		command = make([]string, len(o.args), allocator)
+		command[0] = cli_protocol.CATALOGUE_COMMAND
+		copy(command[1:], o.args[1:])
 	}
-	return args[:]
-}
-
-// The app's own --instance rule decides which names are valid.
-@(private, require_results)
-valid_instance :: proc(name: string) -> bool {
-	_, err := instance.parse({"--instance", name})
-	return err == .None
+	format := o.json ? cli_protocol.Format.Json : cli_protocol.Format.Text
+	return cli_protocol.request_encode(
+		{caller = caller, format = format, directory = directory, command = command},
+		allocator,
+	)
 }

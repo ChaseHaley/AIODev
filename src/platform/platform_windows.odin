@@ -14,6 +14,9 @@ ACTIVATE_MESSAGE :: w.WM_APP + 1
 TRAY_MESSAGE :: w.WM_APP + 2
 @(private)
 NOTIFICATION_MESSAGE :: w.WM_APP + 3
+// native/windows_notifications.cpp posts a toast failure as the message it was given plus one.
+@(private)
+NOTIFICATION_FAILED_MESSAGE :: NOTIFICATION_MESSAGE + 1
 @(private)
 EVENT_CAPACITY :: 2048
 @(private)
@@ -44,14 +47,14 @@ Screen_Full :: struct {
 @(private)
 Window :: struct {
 	owner:                            ^Platform,
-	id:                               Window_Id,
+	id:                               input.Window_Id,
 	hwnd:                             w.HWND,
 	cursor:                           w.HCURSOR,
 	tracking:                         bool,
 	size_move:                        Size_Move,
 	buttons:                          u8,
 	high_surrogate:                   u16,
-	previous_move:                    Mouse_Move_Event,
+	previous_move:                    input.Mouse_Move_Event,
 	has_previous_move:                bool,
 	tabbed_title_bar:                 bool,
 	title_height, title_controls_end: i32,
@@ -107,7 +110,7 @@ Tray_Requested :: struct {}
 // The shell holds the icon. `balloon` is the token of the last balloon shown on it.
 @(private)
 Tray_Added :: struct {
-	balloon: u64,
+	balloon: Notification_Token,
 }
 
 @(require_results)
@@ -516,24 +519,8 @@ keyboard_state :: proc() -> ([256]u8, bool) {
 pump_key :: proc(p: ^Platform, window: ^Window, message: ^w.MSG) {
 	msg := message.message
 	if msg == w.WM_CHAR || msg == w.WM_SYSCHAR {
-		unit := u16(message.wParam & 0xffff)
-		if unit >= 0xd800 && unit <= 0xdbff {
-			if window.high_surrogate != 0 {
-				enqueue(p, Text_Event{window.id, queue_rune(p, '\ufffd')})
-			}
-			window.high_surrogate = unit
-			return
-		}
-		r := rune(unit)
-		if window.high_surrogate != 0 {
-			if unit >= 0xdc00 && unit <= 0xdfff {
-				r = utf16.decode_surrogate_pair(rune(window.high_surrogate), r)
-			} else {
-				enqueue(p, Text_Event{window.id, queue_rune(p, '\ufffd')})
-			}
-			window.high_surrogate = 0
-		} else if unit >= 0xdc00 && unit <= 0xdfff {r = '\ufffd'}
-		enqueue(p, Text_Event{window.id, queue_rune(p, r)})
+		runes, count := utf16_feed(&window.high_surrogate, u16(message.wParam & 0xffff))
+		for r in runes[:count] {enqueue(p, input.Text_Event{window.id, queue_rune(p, r)})}
 		return
 	}
 	if msg != w.WM_KEYDOWN &&
@@ -566,7 +553,7 @@ pump_key :: proc(p: ^Platform, window: ^Window, message: ^w.MSG) {
 	if vk == w.VK_SNAPSHOT {
 		key = .Print_Screen
 	}
-	event := Key_Event {
+	event := input.Key_Event {
 		window = window.id,
 		key = key,
 		modifiers = modifiers_from_state(state),
@@ -580,29 +567,12 @@ pump_key :: proc(p: ^Platform, window: ^Window, message: ^w.MSG) {
 		},
 	}
 	if pressed {
-		empty: [256]w.BYTE
-		units: [8]u16
-		layout := GetKeyboardLayout(0)
-		if layout == nil {
-			log.errorf("GetKeyboardLayout failed: %d", w.GetLastError())
+		layout, layout_ok := keyboard_layout()
+		if !layout_ok {
 			p.error = .Os
 			return
 		}
-		n := ToUnicodeEx(
-			u32(vk),
-			u32(scan),
-			&empty[0],
-			&units[0],
-			i32(len(units)),
-			TO_UNICODE_NO_STATE_CHANGE,
-			layout,
-		)
-		if n > 0 {
-			event.unshifted = rune(units[0])
-			if n >= 2 && utf16.is_surrogate(event.unshifted) {
-				event.unshifted = utf16.decode_surrogate_pair(rune(units[0]), rune(units[1]))
-			}
-		}
+		event.unshifted = unshifted_rune(u32(vk), scan, layout)
 	}
 	if pressed {
 		translated := bool(w.TranslateMessage(message))
@@ -634,18 +604,8 @@ pump_key :: proc(p: ^Platform, window: ^Window, message: ^w.MSG) {
 					event.native.char = unit
 					first = false
 				}
-				if unit >= 0xd800 && unit <= 0xdbff {
-					pending_high = unit
-					continue
-				}
-				r := rune(unit)
-				if pending_high != 0 {
-					r = utf16.decode_surrogate_pair(rune(pending_high), r)
-					pending_high = 0
-				} else if utf16.is_surrogate(r) {
-					r = '\ufffd'
-				}
-				queue_rune(p, r)
+				runes, count := utf16_feed(&pending_high, unit)
+				for r in runes[:count] {queue_rune(p, r)}
 			}
 			if pending_high != 0 {
 				queue_rune(p, '\ufffd')
@@ -658,7 +618,7 @@ pump_key :: proc(p: ^Platform, window: ^Window, message: ^w.MSG) {
 }
 
 @(private)
-find_window :: proc(p: ^Platform, id: Window_Id) -> ^Window {
+find_window :: proc(p: ^Platform, id: input.Window_Id) -> ^Window {
 	for window in p.windows {
 		if window.id == id {return window}
 	}
@@ -666,7 +626,7 @@ find_window :: proc(p: ^Platform, id: Window_Id) -> ^Window {
 }
 
 @(require_results)
-window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
+window_create :: proc(p: ^Platform, desc: Window_Desc) -> (input.Window_Id, Error) {
 	if p.host.hwnd == nil {return 0, .Not_Initialized}
 	if desc.width <= 0 || desc.height <= 0 || desc.width > 32767 || desc.height > 32767 {
 		return 0, .Invalid_Argument
@@ -682,7 +642,7 @@ window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
 	window.owner = p
 	window.tabbed_title_bar = desc.tabbed_title_bar
 	p.next_id += 1
-	window.id = Window_Id(p.next_id)
+	window.id = input.Window_Id(p.next_id)
 	window.cursor = w.LoadCursorW(nil, transmute(cstring16)w.IDC_ARROW)
 	if window.cursor == nil {
 		log.errorf("LoadCursorW failed: %d", w.GetLastError())
@@ -730,7 +690,7 @@ window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
 	}
 	if window.tabbed_title_bar {
 		margins := w.MARGINS {
-			cyTopHeight = i32(40 * dpi / 96),
+			cyTopHeight = i32(TITLE_BAR_HEIGHT * dpi / 96),
 		}
 		if hr := w.DwmExtendFrameIntoClientArea(window.hwnd, &margins); hr < 0 {
 			log.errorf("DwmExtendFrameIntoClientArea failed: HRESULT %x", u32(hr))
@@ -785,7 +745,7 @@ window_create :: proc(p: ^Platform, desc: Window_Desc) -> (Window_Id, Error) {
 }
 
 @(require_results)
-window_destroy :: proc(p: ^Platform, id: Window_Id) -> Error {
+window_destroy :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 	for window, i in p.windows {
 		if window.id != id {
 			continue
@@ -798,27 +758,27 @@ window_destroy :: proc(p: ^Platform, id: Window_Id) -> Error {
 	return .Invalid_Window
 }
 
-window_native_handle :: proc(p: ^Platform, id: Window_Id) -> rawptr {
+window_native_handle :: proc(p: ^Platform, id: input.Window_Id) -> rawptr {
 	window := find_window(p, id)
 	return window != nil ? rawptr(window.hwnd) : nil
 }
 
 @(require_results)
-window_hide :: proc(p: ^Platform, id: Window_Id) -> Error {
+window_hide :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	w.ShowWindow(window.hwnd, w.SW_HIDE)
 	return .None
 }
 
-window_title_bar :: proc(p: ^Platform, id: Window_Id, height, controls_end: i32) {
+window_title_bar :: proc(p: ^Platform, id: input.Window_Id, height, controls_end: i32) {
 	if window := find_window(p, id); window != nil {
 		window.title_height, window.title_controls_end = height, controls_end
 	}
 }
 
 @(require_results)
-window_client_size :: proc(p: ^Platform, id: Window_Id) -> (width, height: i32, err: Error) {
+window_client_size :: proc(p: ^Platform, id: input.Window_Id) -> (width, height: i32, err: Error) {
 	window := find_window(p, id)
 	if window == nil {return 0, 0, .Invalid_Window}
 	rect: w.RECT
@@ -827,7 +787,7 @@ window_client_size :: proc(p: ^Platform, id: Window_Id) -> (width, height: i32, 
 }
 
 @(require_results)
-window_to_screen :: proc(p: ^Platform, id: Window_Id, x, y: i32) -> (i32, i32, Error) {
+window_to_screen :: proc(p: ^Platform, id: input.Window_Id, x, y: i32) -> (i32, i32, Error) {
 	window := find_window(p, id)
 	if window == nil {return 0, 0, .Invalid_Window}
 	point := w.POINT{x, y}
@@ -836,7 +796,7 @@ window_to_screen :: proc(p: ^Platform, id: Window_Id, x, y: i32) -> (i32, i32, E
 }
 
 @(require_results)
-window_from_screen :: proc(p: ^Platform, id: Window_Id, x, y: i32) -> (i32, i32, Error) {
+window_from_screen :: proc(p: ^Platform, id: input.Window_Id, x, y: i32) -> (i32, i32, Error) {
 	window := find_window(p, id)
 	if window == nil {return 0, 0, .Invalid_Window}
 	point := w.POINT{x, y}
@@ -845,7 +805,7 @@ window_from_screen :: proc(p: ^Platform, id: Window_Id, x, y: i32) -> (i32, i32,
 }
 
 @(require_results)
-window_at_point :: proc(p: ^Platform, screen_x, screen_y: i32) -> (Window_Id, i32, i32, Error) {
+window_at_point :: proc(p: ^Platform, screen_x, screen_y: i32) -> (input.Window_Id, i32, i32, Error) {
 	if p.host.hwnd == nil {return 0, 0, 0, .Not_Initialized}
 	hwnd := w.WindowFromPoint({screen_x, screen_y})
 	for window in p.windows {
@@ -857,7 +817,7 @@ window_at_point :: proc(p: ^Platform, screen_x, screen_y: i32) -> (Window_Id, i3
 }
 
 @(require_results)
-window_set_position :: proc(p: ^Platform, id: Window_Id, screen_x, screen_y: i32) -> Error {
+window_set_position :: proc(p: ^Platform, id: input.Window_Id, screen_x, screen_y: i32) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	flags := u32(w.SWP_NOSIZE | w.SWP_NOZORDER | w.SWP_NOACTIVATE)
@@ -870,7 +830,7 @@ window_set_position :: proc(p: ^Platform, id: Window_Id, screen_x, screen_y: i32
 
 // Moves the window's top-left corner to the point, staying inside the work area of the point's monitor.
 @(require_results)
-window_place_on_monitor :: proc(p: ^Platform, id: Window_Id, screen_x, screen_y: i32) -> Error {
+window_place_on_monitor :: proc(p: ^Platform, id: input.Window_Id, screen_x, screen_y: i32) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	frame: w.RECT
@@ -894,7 +854,7 @@ Thumbnail :: struct {
 @(require_results)
 thumbnail_create :: proc(
 	p: ^Platform,
-	source: Window_Id,
+	source: input.Window_Id,
 	region_x, region_y, region_width, region_height: i32,
 	width, height: i32,
 	border: [3]u8,
@@ -983,7 +943,7 @@ thumbnail_destroy :: proc(thumbnail: ^Thumbnail) {
 }
 
 @(require_results)
-window_set_client_size :: proc(p: ^Platform, id: Window_Id, width, height: i32) -> Error {
+window_set_client_size :: proc(p: ^Platform, id: input.Window_Id, width, height: i32) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	if width <= 0 || height <= 0 || width > 32767 || height > 32767 {return .Invalid_Argument}
@@ -1026,7 +986,7 @@ window_set_client_size :: proc(p: ^Platform, id: Window_Id, width, height: i32) 
 	return .None
 }
 
-window_dpi :: proc(p: ^Platform, id: Window_Id) -> u32 {
+window_dpi :: proc(p: ^Platform, id: input.Window_Id) -> u32 {
 	window := find_window(p, id)
 	if window == nil {return 0}
 	dpi := w.GetDpiForWindow(window.hwnd)
@@ -1045,13 +1005,13 @@ primary_dpi :: proc(p: ^Platform) -> u32 {
 	return dpi
 }
 
-window_is_focused :: proc(p: ^Platform, id: Window_Id) -> bool {
+window_is_focused :: proc(p: ^Platform, id: input.Window_Id) -> bool {
 	window := find_window(p, id)
 	return window != nil && w.GetFocus() == window.hwnd
 }
 
 @(require_results)
-window_focus :: proc(p: ^Platform, id: Window_Id) -> Error {
+window_focus :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	// SW_RESTORE would also un-maximize; only restore when minimized.
@@ -1065,8 +1025,63 @@ window_focus :: proc(p: ^Platform, id: Window_Id) -> Error {
 	return .None
 }
 
+// Keeps the window's maximized state and raises it above other applications without taking focus.
 @(require_results)
-window_set_title :: proc(p: ^Platform, id: Window_Id, title: string) -> Error {
+window_show_raised :: proc(p: ^Platform, id: input.Window_Id) -> Error {
+	window := find_window(p, id)
+	if window == nil {return .Invalid_Window}
+	flags := u32(w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW)
+	if !os_ok(w.SetWindowPos(window.hwnd, w.HWND_TOP, 0, 0, 0, 0, flags), "SetWindowPos(raise)") {return .Os}
+	return .None
+}
+
+window_maximize :: proc(p: ^Platform, id: input.Window_Id) {
+	if window := find_window(p, id); window != nil {w.ShowWindow(window.hwnd, w.SW_MAXIMIZE)}
+}
+
+@(require_results)
+window_placement :: proc(p: ^Platform, id: input.Window_Id) -> (Window_Placement, Error) {
+	window := find_window(p, id)
+	if window == nil {return {}, .Invalid_Window}
+	placement := w.WINDOWPLACEMENT {
+		length = size_of(w.WINDOWPLACEMENT),
+	}
+	if !os_ok(w.GetWindowPlacement(window.hwnd, &placement), "GetWindowPlacement") {return {}, .Os}
+	r := placement.rcNormalPosition
+	return {r.left, r.top, r.right, r.bottom, bool(w.IsZoomed(window.hwnd))}, .None
+}
+
+// Moves a hidden window to its restored rectangle and leaves it hidden. Windows pulls the rectangle back
+// on screen if its monitor has gone. Maximizing waits until the window is shown.
+@(require_results)
+window_set_placement :: proc(p: ^Platform, id: input.Window_Id, target: Window_Placement) -> Error {
+	window := find_window(p, id)
+	if window == nil {return .Invalid_Window}
+	placement := w.WINDOWPLACEMENT {
+		length = size_of(w.WINDOWPLACEMENT),
+	}
+	if !os_ok(w.GetWindowPlacement(window.hwnd, &placement), "GetWindowPlacement") {return .Os}
+	placement.showCmd = u32(w.SW_HIDE)
+	placement.rcNormalPosition = {target.left, target.top, target.right, target.bottom}
+	if !os_ok(w.SetWindowPlacement(window.hwnd, &placement), "SetWindowPlacement") {return .Os}
+	return .None
+}
+
+@(require_results)
+window_show_inactive :: proc(p: ^Platform, id: input.Window_Id) -> Error {
+	window := find_window(p, id)
+	if window == nil {return .Invalid_Window}
+	// ShowWindow returns the previous visibility, not success.
+	w.ShowWindow(window.hwnd, w.SW_SHOWNOACTIVATE)
+	if !bool(w.IsWindowVisible(window.hwnd)) {
+		log.errorf("ShowWindow(inactive) failed: %v", w.GetLastError())
+		return .Os
+	}
+	return .None
+}
+
+@(require_results)
+window_set_title :: proc(p: ^Platform, id: input.Window_Id, title: string) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	for c in title {
@@ -1082,9 +1097,9 @@ window_set_title :: proc(p: ^Platform, id: Window_Id, title: string) -> Error {
 @(require_results)
 window_set_frame_color :: proc(
 	p: ^Platform,
-	id: Window_Id,
+	id: input.Window_Id,
 	rgb: [3]u8,
-	foreground: [3]u8 = {0xec, 0xec, 0xf1},
+	foreground: [3]u8,
 ) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
@@ -1114,7 +1129,7 @@ window_set_frame_color :: proc(
 }
 
 @(require_results)
-window_set_cursor :: proc(p: ^Platform, id: Window_Id, shape: Cursor_Shape) -> Error {
+window_set_cursor :: proc(p: ^Platform, id: input.Window_Id, shape: Cursor_Shape) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	if shape == .Hidden {
@@ -1152,7 +1167,7 @@ window_set_cursor :: proc(p: ^Platform, id: Window_Id, shape: Cursor_Shape) -> E
 }
 
 @(require_results)
-window_flash :: proc(p: ^Platform, id: Window_Id) -> Error {
+window_flash :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	info := FLASHWINFO {
@@ -1248,8 +1263,10 @@ window_proc :: proc "system" (
 				}
 			}
 		}
+		// A move outside the client area, not Mouse_Leave_Event: the pointer may still be over the client,
+		// and an ordinary move lets the app's pointer routing clear only the caption buttons' hover.
 		if message == w.WM_NCMOUSELEAVE {
-			enqueue(p, Mouse_Move_Event{window = window.id, x = -1, y = -1})
+			enqueue(p, input.Mouse_Move_Event{window = window.id, x = -1, y = -1})
 		}
 		result: w.LRESULT
 		if message != w.WM_NCHITTEST && bool(DwmDefWindowProc(hwnd, message, wp, lp, &result)) {
@@ -1268,15 +1285,20 @@ window_proc :: proc "system" (
 			   point.y < i32(5 * w.GetDpiForWindow(hwnd) / 96) {return w.HTTOP}
 			client: w.RECT
 			if !os_ok(w.GetClientRect(hwnd, &client), "GetClientRect(caption)") {return result}
-			button_width := i32(46 * w.GetDpiForWindow(hwnd) / 96)
-			if point.y < window.title_height && point.x >= client.right - 3 * button_width {
+			button_width := i32(CAPTION_BUTTON_WIDTH * w.GetDpiForWindow(hwnd) / 96)
+			count := i32(len(Caption_Button))
+			if point.y < window.title_height && point.x >= client.right - count * button_width {
 				index := clamp(
-					(point.x - client.right + 3 * button_width) / max(1, button_width),
+					(point.x - client.right + count * button_width) / max(1, button_width),
 					0,
-					2,
+					count - 1,
 				)
-				hits := [3]w.LRESULT{w.HTMINBUTTON, w.HTMAXBUTTON, w.HTCLOSE}
-				return hits[index]
+				hits := [Caption_Button]w.LRESULT {
+					.Minimize = w.HTMINBUTTON,
+					.Maximize = w.HTMAXBUTTON,
+					.Close    = w.HTCLOSE,
+				}
+				return hits[Caption_Button(index)]
 			}
 			if point.y < window.title_height &&
 			   point.x >= window.title_controls_end {return w.HTCAPTION}
@@ -1295,9 +1317,9 @@ window_proc :: proc "system" (
 		enqueue(p, Activate_Request_Event{})
 		return 0
 	case NOTIFICATION_MESSAGE:
-		enqueue(p, Tray_Notification_Event{u64(wp)})
+		enqueue(p, Tray_Notification_Event{Notification_Token(wp)})
 		return 0
-	case NOTIFICATION_MESSAGE + 1:
+	case NOTIFICATION_FAILED_MESSAGE:
 		enqueue(p, Notification_Error_Event{u32(wp)})
 		return 0
 	case TRAY_MESSAGE:
@@ -1414,14 +1436,14 @@ window_proc :: proc "system" (
 	return w.DefWindowProcW(hwnd, message, wp, lp)
 }
 
-window_maximized :: proc(p: ^Platform, id: Window_Id) -> bool {
+window_maximized :: proc(p: ^Platform, id: input.Window_Id) -> bool {
 	window := find_window(p, id)
 	return window != nil && bool(w.IsZoomed(window.hwnd))
 }
 
 // window_set_screen covers the monitor with no caption or frame, and restores the prior placement.
 // An error means the window stayed as it was, so the caller's view of it stays true.
-window_set_screen :: proc(p: ^Platform, id: Window_Id, on: bool) -> Error {
+window_set_screen :: proc(p: ^Platform, id: input.Window_Id, on: bool) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	full, is_full := window.screen.?
@@ -1490,17 +1512,17 @@ screen_style :: proc(full: Screen_Full) -> w.LONG_PTR {
 	return full.style & ~(w.LONG_PTR(w.WS_CAPTION) | w.LONG_PTR(w.WS_THICKFRAME))
 }
 
-window_caption_action :: proc(p: ^Platform, id: Window_Id, index: int) {
+window_caption_action :: proc(p: ^Platform, id: input.Window_Id, button: Caption_Button) {
 	window := find_window(p, id)
-	if window == nil || index < 0 || index > 2 {return}
+	if window == nil {return}
 	command: w.WPARAM
-	switch index {
-	case 0:
+	switch button {
+	case .Minimize:
 		command = w.SC_MINIMIZE
-	case 1:
+	case .Maximize:
 		command = w.SC_MAXIMIZE
 		if bool(w.IsZoomed(window.hwnd)) {command = w.SC_RESTORE}
-	case 2:
+	case .Close:
 		command = w.SC_CLOSE
 	}
 	record_os(p, w.PostMessageW(window.hwnd, w.WM_SYSCOMMAND, command, 0), "PostMessageW(caption)")
@@ -1537,7 +1559,7 @@ mouse_message :: proc(window: ^Window, message: u32, wp: w.WPARAM, lp: w.LPARAM)
 		   previous.x != x ||
 		   previous.y != y ||
 		   previous.buttons != buttons {
-			move := Mouse_Move_Event{window.id, x, y, buttons, mods, time}
+			move := input.Mouse_Move_Event{window.id, x, y, buttons, mods, time}
 			window.previous_move = move
 			window.has_previous_move = true
 			enqueue(p, move)
@@ -1559,7 +1581,7 @@ mouse_message :: proc(window: ^Window, message: u32, wp: w.WPARAM, lp: w.LPARAM)
 		delta := f32(cast(i16)u16((wp >> 16) & 0xffff)) / 120
 		enqueue(
 			p,
-			Mouse_Wheel_Event {
+			input.Mouse_Wheel_Event {
 				window = window.id,
 				x = point.x,
 				y = point.y,
@@ -1603,7 +1625,7 @@ mouse_message :: proc(window: ^Window, message: u32, wp: w.WPARAM, lp: w.LPARAM)
 			record_os(p, w.ReleaseCapture(), "ReleaseCapture")
 		}
 	}
-	enqueue(p, Mouse_Button_Event{window.id, button, pressed, x, y, mods, time})
+	enqueue(p, input.Mouse_Button_Event{window.id, button, pressed, x, y, mods, time})
 }
 
 @(private)

@@ -1,6 +1,7 @@
 package font
 
 import dw "aio:dwrite"
+import "aio:render"
 import "base:runtime"
 import "core:log"
 import "core:math"
@@ -18,7 +19,7 @@ System :: struct {
 	faces:      [dynamic]Face,
 	families:   [dynamic]Loaded_Family,
 	cache:      map[Lookup_Key]Lookup_Result,
-	gamma:      Text_Gamma,
+	gamma:      render.Text_Gamma,
 	shaping:    Shaping,
 	// Real DirectWrite shaping runs since startup. The render thread owns the counter, so it
 	// needs no lock and perf_read sees it from that same thread.
@@ -643,7 +644,8 @@ rasterize_color :: proc(
 		.None
 }
 
-text_gamma :: proc(s: ^System) -> Text_Gamma {
+// The system's grayscale text gamma, in the form the renderer takes it.
+text_gamma :: proc(s: ^System) -> render.Text_Gamma {
 	assert(s != nil)
 	return s.gamma
 }

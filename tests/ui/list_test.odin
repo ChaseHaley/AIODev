@@ -1,13 +1,13 @@
 package ui_test
 
+import "aio:input"
 import "core:testing"
-import "aio:platform"
 import "aio:ui"
 
 @(test)
 list_step_classifies_navigation_without_text_or_key_releases :: proc(t: ^testing.T) {
 	expected := [?]int{-1, 1, 1, -1, 0, 0, 0}
-	for e, i in ([?]platform.Key_Event{
+	for e, i in ([?]input.Key_Event{
 		{key = .Arrow_Up, pressed = true}, {key = .Arrow_Down, pressed = true},
 		{key = .N, modifiers = {.Control}, pressed = true},
 		{key = .P, modifiers = {.Control}, pressed = true},

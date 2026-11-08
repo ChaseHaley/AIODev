@@ -126,7 +126,7 @@ activity_view_button_saves_one_preference_and_cancels_outside_or_on_capture_loss
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "activity-view", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	saved, _ := app.settings_save_value(s, "status.panel", "true", "enable panel")
+	saved := app.settings_save_value(s, "status.panel", "true", "enable panel")
 	if !testing.expect(t, saved) {return}
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Comfy)
 	r := app.status_panel_view_rect(s, w)
@@ -150,7 +150,7 @@ activity_view_button_saves_one_preference_and_cancels_outside_or_on_capture_loss
 		testing.expect(t, strings.contains(string(text), expected))
 	}
 	// A Settings edit reaches the same preference the button reads.
-	saved, _ = app.settings_save_value(s, "status.panel_view", "dense", "set view")
+	saved = app.settings_save_value(s, "status.panel_view", "dense", "set view")
 	testing.expect(t, saved)
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Dense)
 }
@@ -167,7 +167,7 @@ activity_view_change_repaints_every_window :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Dense)
 	for window in s.windows {testing.expect(t, window.dirty)}
 	for window in s.windows {window.dirty = false}
-	saved, _ := app.settings_save_value(s, "status.panel_view", "comfy", "set view")
+	saved := app.settings_save_value(s, "status.panel_view", "comfy", "set view")
 	testing.expect(t, saved)
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Comfy)
 	for window in s.windows {testing.expect(t, window.dirty)}

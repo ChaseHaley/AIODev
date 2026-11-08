@@ -59,7 +59,7 @@ scrollbar_layout :: proc(
 	return {track, thumb, extent}, true
 }
 
-scrollbar_contains :: proc(bar: Scrollbar, x, y: f32) -> bool {return contains(bar.track, x, y)}
+scrollbar_contains :: proc(bar: Scrollbar, x, y: f32) -> bool {return render.rect_contains(bar.track, x, y)}
 
 // A press on the track pages toward the pointer, or on the thumb starts a drag. Returns the offset
 // the surface scrolls to.
@@ -84,9 +84,11 @@ scrollbar_drag :: proc(drag: Scroll_Drag, bar: Scrollbar, y: f32) -> int {
 	return int(fraction * f32(e.total - e.visible) + 0.5)
 }
 
-// Draws in a layer clipped to the track, which stays current: push a layer before drawing more.
+// Draws clipped to the track; the caller's layer is current again afterwards.
 scrollbar_draw :: proc(list: ^render.Draw_List, theme: Theme, bar: Scrollbar, state: Scrollbar_State) {
-	if render.push_layer(list, bar.track, 0) != .None {return}
+	scope, opened := clip_scope_open(list, bar.track)
+	if !opened {return}
+	defer clip_scope_close(list, scope)
 	color := theme.scrollbar
 	if state != .Collapsed {
 		color = state == .Active ? theme.scrollbar_active : theme.scrollbar_hover

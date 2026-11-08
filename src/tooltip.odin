@@ -1,7 +1,6 @@
 package main
 
-import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
 import "aio:ui"
 import "core:strings"
@@ -33,8 +32,7 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 
 // The window's tooltip: nil is Cold. Pending shows `label` at `deadline`; Visible shows it; Warm
 // (after a visible tooltip was left) shows a neighbour's label at once until `until`. `anchor` is
-// where the pointer last was over the label, for the neighbour distance. Labels live in
-// Window.tooltip_text, because a label may be built for one event in temporary memory.
+// where the pointer last was over the label, for the neighbour distance.
 Tooltip :: union {
 	Tooltip_Pending,
 	Tooltip_Visible,
@@ -55,6 +53,13 @@ Tooltip_Visible :: struct {
 Tooltip_Warm :: struct {
 	until:  time.Tick,
 	anchor: [2]f32,
+}
+
+// A window's tooltip with the text its labels point into: a label may be built for one event in
+// temporary memory, so tooltip_store copies it here, and only this file writes either. Window embeds it.
+Tooltip_State :: struct {
+	tooltip:      Tooltip,
+	tooltip_text: [TOOLTIP_LIMIT]u8,
 }
 
 // The label the window is waiting to show or showing; empty when Cold or Warm.
@@ -81,7 +86,7 @@ tooltip_store :: proc(w: ^Window, label: string) -> string {
 	return string(w.tooltip_text[:copy(w.tooltip_text[:], label)])
 }
 
-tooltip_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: platform.Mouse_Move_Event) {
+tooltip_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if e.buttons != {} {tooltip_cancel(w); return}
 	label := tooltip_label(app, w, owner, f32(e.x), f32(e.y))
 	point := [2]f32{f32(e.x), f32(e.y)}
@@ -141,7 +146,7 @@ tooltip_tick :: proc(w: ^Window, now: time.Tick) {
 	w.dirty = true
 }
 
-tooltip_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+tooltip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	label, shown := tooltip_shown(w)
 	if !shown {return .Ok}
 	owner := pointer_target(app, w, w.pointer.x, w.pointer.y)

@@ -1,16 +1,13 @@
 package main
 
+import "aio:cli_protocol"
 import "aio:commands"
+import "aio:input"
 import "aio:layout"
-import "aio:markdown"
 import "aio:platform"
-import "aio:settings"
 import "aio:term"
 import "aio:ui"
 import "core:fmt"
-import "core:log"
-import "core:strings"
-import "core:time"
 
 Action :: enum u32 {
 	Command_Palette,
@@ -149,328 +146,445 @@ Action :: enum u32 {
 	Minimize_All_Floating,
 }
 
+// Everything one command is: its name and title, default shortcuts, what it does when a linked window
+// runs it, and how the CLI reaches it. Entries are positional, so none can be left out.
 @(private)
-Action_Info :: struct {
+Command_Descriptor :: struct {
 	name, title: string,
-	shortcuts: []commands.Shortcut,
+	shortcuts:   []commands.Shortcut,
+	route:       Pane_Link_Route,
+	spec:        Command_Spec,
+}
+
+// What a command takes beyond its descriptor's identity. The zero value is an ordinary command.
+@(private)
+Command_Spec :: struct {
+	// The arguments a control request may give, and those it must.
+	accepted, required: commands.Arguments,
+	// Serves the CLI and scripts only: it stays out of the palette and shortcut lists, and a key bound
+	// to it does nothing.
+	hidden:             bool,
+	control:            Control_Form,
+	param:              Action_Param,
+}
+
+// How a control request reaches a command.
+@(private)
+Control_Form :: enum u8 {
+	// The named pane is shown and focused in its window first, and the command runs there.
+	Focus,
+	// The command acts on the named pane where it is, without moving focus.
+	Pane,
+	// The command names no pane, or resolves its own.
+	Unnamed,
+}
+
+// The member of a command family a command is; its field of Action_Param holds the value.
+@(private)
+Action_Family :: enum u8 {
+	None,
+	// `direction`: Focus, Swap and Split toward a side.
+	Toward,
+	// `index`, from 0: Select Tab N.
+	Tab,
+	// `index`, from 0: Select Workspace N.
+	Workspace,
+	// `index`, from 0: New Tab with the Nth visible profile.
+	Profile,
+	// `resize`.
+	Resize,
+	// `mode`: the palette domain a direct-open command shows.
+	Palette,
 }
 
 @(private)
-ACTIONS :: [Action]Action_Info {
-	.Show_Build_Info = {"app.build_info", "Show Build Info", nil},
-	.Move_Pane_Workspace = {"pane.move_workspace", "Move Pane to Workspace…", nil},
-	.Move_Pane_New_Workspace = {"pane.move_new_workspace", "Move Pane to New Workspace", nil},
-	.Move_Tab_Workspace = {"tab.move_workspace", "Move Tab to Workspace…", nil},
-	.Move_Tab_New_Workspace = {"tab.move_new_workspace", "Move Tab to New Workspace", nil},
-	.New_Workspace = {"workspace.new", "New Workspace", nil},
-	.Change_Workspace = {"workspace.change", "Change Workspace…", nil},
-	.Next_Workspace = {"workspace.next", "Next Workspace", nil},
-	.Previous_Workspace = {"workspace.previous", "Previous Workspace", nil},
-	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil},
-	.New_Window = {"window.new", "New Window", {{.N, {.Control, .Shift}}}},
-	.Delete_Workspace = {"workspace.delete", "Delete Workspace…", nil},
-	.Change_Workspace_Icon = {"workspace.change_icon", "Change Workspace Icon…", nil},
-	.Workspace_1 = {"workspace.select_1", "Select Workspace 1", {{.Digit_1, {.Control, .Shift}}}},
-	.Workspace_2 = {"workspace.select_2", "Select Workspace 2", {{.Digit_2, {.Control, .Shift}}}},
-	.Workspace_3 = {"workspace.select_3", "Select Workspace 3", {{.Digit_3, {.Control, .Shift}}}},
-	.Workspace_4 = {"workspace.select_4", "Select Workspace 4", {{.Digit_4, {.Control, .Shift}}}},
-	.Workspace_5 = {"workspace.select_5", "Select Workspace 5", {{.Digit_5, {.Control, .Shift}}}},
-	.Workspace_6 = {"workspace.select_6", "Select Workspace 6", {{.Digit_6, {.Control, .Shift}}}},
-	.Workspace_7 = {"workspace.select_7", "Select Workspace 7", {{.Digit_7, {.Control, .Shift}}}},
-	.Workspace_8 = {"workspace.select_8", "Select Workspace 8", {{.Digit_8, {.Control, .Shift}}}},
-	.Workspace_9 = {"workspace.select_9", "Select Workspace 9", {{.Digit_9, {.Control, .Shift}}}},
-	.Command_Palette       = {
-		"app.command_palette",
-		"Show Command Palette",
-		{{.P, {.Control, .Shift}}},
+Action_Param :: struct {
+	family:    Action_Family,
+	direction: layout.Direction,
+	index:     int,
+	resize:    Resize_Step,
+	mode:      ui.Palette_Mode,
+}
+
+// A divider move along `axis`, by `pixels`; negative moves toward the left or the top.
+@(private)
+Resize_Step :: struct {
+	axis:   layout.Axis,
+	pixels: f32,
+}
+
+// The resize commands' steps. The large step's titles state RESIZE_LARGE_LABEL.
+@(private)
+RESIZE_PIXELS :: 10
+@(private)
+RESIZE_LARGE_PIXELS :: 50
+@(private)
+RESIZE_LARGE_LABEL :: "50"
+
+@(private)
+ACTIONS :: [Action]Command_Descriptor {
+	.Command_Palette = {
+		"app.command_palette", "Show Command Palette", {{.P, {.Control, .Shift}}}, .Local, {},
 	},
-	.Copy                  = {
-		"edit.copy",
-		"Copy",
-		{{.C, {.Control, .Shift}}, {.Insert, {.Control}}},
+	.Copy = {"edit.copy", "Copy", {{.C, {.Control, .Shift}}, {.Insert, {.Control}}}, .Local, {}},
+	.Paste = {"edit.paste", "Paste", {{.V, {.Control, .Shift}}, {.Insert, {.Shift}}}, .Local, {}},
+	.Select_All = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}, .Local, {}},
+	.Find = {"terminal.find", "Find", {{.F, {.Control, .Shift}}}, .Local, {}},
+	.Clear_Scrollback = {
+		"terminal.clear_scrollback", "Clear Scrollback", {{.K, {.Control, .Shift}}}, .Local, {},
 	},
-	.Paste                 = {
-		"edit.paste",
-		"Paste",
-		{{.V, {.Control, .Shift}}, {.Insert, {.Shift}}},
+	.Scroll_Page_Up = {
+		"terminal.scroll_page_up", "Scroll Up One Page", {{.Page_Up, {.Shift}}}, .Local, {},
 	},
-	.Select_All = {"edit.select_all", "Select All", {{.A, {.Control, .Shift}}}},
-	.Find = {"terminal.find", "Find", {{.F, {.Control, .Shift}}}},
-	.Clear_Scrollback      = {
-		"terminal.clear_scrollback",
-		"Clear Scrollback",
-		{{.K, {.Control, .Shift}}},
-	},
-	.Scroll_Page_Up        = {
-		"terminal.scroll_page_up",
-		"Scroll Up One Page",
-		{{.Page_Up, {.Shift}}},
-	},
-	.Scroll_Page_Down      = {
-		"terminal.scroll_page_down",
-		"Scroll Down One Page",
-		{{.Page_Down, {.Shift}}},
+	.Scroll_Page_Down = {
+		"terminal.scroll_page_down", "Scroll Down One Page", {{.Page_Down, {.Shift}}}, .Local, {},
 	},
 	.Scroll_Partial_Up = {
 		"terminal.scroll_partial_up", "Scroll Up Configured Page Length", {{.Page_Up, {.Control}}},
+		.Local, {},
 	},
 	.Scroll_Partial_Down = {
-		"terminal.scroll_partial_down", "Scroll Down Configured Page Length", {{.Page_Down, {.Control}}},
+		"terminal.scroll_partial_down", "Scroll Down Configured Page Length",
+		{{.Page_Down, {.Control}}}, .Local, {},
 	},
 	.Font_Size_Increase = {
-		"view.font_size_increase",
-		"Increase Font Size",
-		{{.Equal, {.Control}}, {.Numpad_Add, {.Control}}},
+		"view.font_size_increase", "Increase Font Size",
+		{{.Equal, {.Control}}, {.Numpad_Add, {.Control}}}, .Local, {},
 	},
 	.Font_Size_Decrease = {
-		"view.font_size_decrease",
-		"Decrease Font Size",
-		{{.Minus, {.Control}}, {.Numpad_Subtract, {.Control}}},
+		"view.font_size_decrease", "Decrease Font Size",
+		{{.Minus, {.Control}}, {.Numpad_Subtract, {.Control}}}, .Local, {},
 	},
 	.Font_Size_Reset = {
-		"view.font_size_reset",
-		"Reset Font Size",
-		{{.Digit_0, {.Control}}, {.Numpad_0, {.Control}}},
+		"view.font_size_reset", "Reset Font Size",
+		{{.Digit_0, {.Control}}, {.Numpad_0, {.Control}}}, .Local, {},
 	},
-	.Open_Settings = {"settings.open_file", "Open Settings File", nil},
-	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}},
-	.Rename_Tab = {"tab.rename", "Rename Tab", nil},
-	.Rename_Pane = {"pane.rename", "Rename Pane", nil},
-	.Change_Pane_Shell = {"pane.change_shell", "Change Pane Shell…", nil},
-	.Open_Markdown = {"pane.open_markdown", "Open Markdown File…", nil},
-	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil},
-	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil},
-	.Move_Tab_Right = {"tab.move_right", "Move Tab Right", nil},
-	.Move_Tab_Start = {"tab.move_start", "Move Selected Tabs to Start", nil},
-	.Move_Tab_End = {"tab.move_end", "Move Selected Tabs to End", nil},
-	.Close_Other_Tabs = {"tab.close_others", "Close Other Tabs", nil},
-	.Close_Right_Tabs = {"tab.close_right", "Close Tabs to the Right", nil},
-	.Tab_Settings = {"tab.settings", "Tab Settings", nil},
-	.Reload_Settings       = {
-		"settings.reload",
-		"Reload Settings",
-		{{.Comma, {.Control, .Shift}}},
+	.Open_Settings = {"settings.open_file", "Open Settings File", nil, .Local, {}},
+	.Reload_Settings = {
+		"settings.reload", "Reload Settings", {{.Comma, {.Control, .Shift}}}, .Local, {},
 	},
-	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil},
-	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil},
-	.Quit = {"app.quit", "Quit AIODev", {{.Q, {.Control, .Shift}}}},
-	.New_Tab = {"tab.new", "New Tab", {{.T, {.Control, .Shift}}}},
-	.Close_Pane = {"pane.close", "Close Pane", nil},
-	.Next_Tab              = {
-		"tab.next",
-		"Next Tab",
-		{{.Tab, {.Control}}},
+	.Restart_Shell = {"terminal.restart_shell", "Restart Shell", nil, .Local, {}},
+	.Hide_To_Tray = {"app.hide_to_tray", "Hide to Tray", nil, .Host, {}},
+	.Quit = {"app.quit", "Quit AIODev", {{.Q, {.Control, .Shift}}}, .Local, {}},
+	.New_Tab = {
+		"tab.new", "New Tab", {{.T, {.Control, .Shift}}}, .Host,
+		{accepted = {.Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
 	},
-	.Previous_Tab          = {
-		"tab.previous",
-		"Previous Tab",
-		{{.Tab, {.Control, .Shift}}},
+	.Close_Pane = {"pane.close", "Close Pane", nil, .Local, {control = .Pane}},
+	.Next_Tab = {"tab.next", "Next Tab", {{.Tab, {.Control}}}, .Host, {}},
+	.Previous_Tab = {"tab.previous", "Previous Tab", {{.Tab, {.Control, .Shift}}}, .Host, {}},
+	.Tab_1 = {"tab.select_1", "Select Tab 1", nil, .Host, {param = {family = .Tab, index = 0}}},
+	.Tab_2 = {"tab.select_2", "Select Tab 2", nil, .Host, {param = {family = .Tab, index = 1}}},
+	.Tab_3 = {"tab.select_3", "Select Tab 3", nil, .Host, {param = {family = .Tab, index = 2}}},
+	.Tab_4 = {"tab.select_4", "Select Tab 4", nil, .Host, {param = {family = .Tab, index = 3}}},
+	.Tab_5 = {"tab.select_5", "Select Tab 5", nil, .Host, {param = {family = .Tab, index = 4}}},
+	.Tab_6 = {"tab.select_6", "Select Tab 6", nil, .Host, {param = {family = .Tab, index = 5}}},
+	.Tab_7 = {"tab.select_7", "Select Tab 7", nil, .Host, {param = {family = .Tab, index = 6}}},
+	.Tab_8 = {"tab.select_8", "Select Tab 8", nil, .Host, {param = {family = .Tab, index = 7}}},
+	.Tab_9 = {"tab.select_9", "Select Tab 9", nil, .Host, {param = {family = .Tab, index = 8}}},
+	.Split_Right = {
+		"pane.split_right", "Split Right", {{.O, {.Control, .Shift}}}, .Local,
+		{param = {family = .Toward, direction = .Right}},
 	},
-	.Tab_1 = {"tab.select_1", "Select Tab 1", nil},
-	.Tab_2 = {"tab.select_2", "Select Tab 2", nil},
-	.Tab_3 = {"tab.select_3", "Select Tab 3", nil},
-	.Tab_4 = {"tab.select_4", "Select Tab 4", nil},
-	.Tab_5 = {"tab.select_5", "Select Tab 5", nil},
-	.Tab_6 = {"tab.select_6", "Select Tab 6", nil},
-	.Tab_7 = {"tab.select_7", "Select Tab 7", nil},
-	.Tab_8 = {"tab.select_8", "Select Tab 8", nil},
-	.Tab_9 = {"tab.select_9", "Select Tab 9", nil},
-	.Split_Right = {"pane.split_right", "Split Right", {{.O, {.Control, .Shift}}}},
-	.Split_Down = {"pane.split_down", "Split Down", {{.E, {.Control, .Shift}}}},
-	.Focus_Left = {"pane.focus_left", "Focus Left", {{.Arrow_Left, {.Control, .Alt}}}},
-	.Focus_Right           = {
-		"pane.focus_right",
-		"Focus Right",
-		{{.Arrow_Right, {.Control, .Alt}}},
+	.Split_Down = {
+		"pane.split_down", "Split Down", {{.E, {.Control, .Shift}}}, .Local,
+		{param = {family = .Toward, direction = .Down}},
 	},
-	.Focus_Up = {"pane.focus_up", "Focus Up", {{.Arrow_Up, {.Control, .Alt}}}},
-	.Focus_Down = {"pane.focus_down", "Focus Down", {{.Arrow_Down, {.Control, .Alt}}}},
-	.Resize_Left           = {
-		"pane.resize_left",
-		"Resize Left",
-		{{.Arrow_Left, {.Control, .Super, .Shift}}},
+	.Focus_Left = {
+		"pane.focus_left", "Focus Left", {{.Arrow_Left, {.Control, .Alt}}}, .Local,
+		{param = {family = .Toward, direction = .Left}},
 	},
-	.Resize_Right          = {
-		"pane.resize_right",
-		"Resize Right",
-		{{.Arrow_Right, {.Control, .Super, .Shift}}},
+	.Focus_Right = {
+		"pane.focus_right", "Focus Right", {{.Arrow_Right, {.Control, .Alt}}}, .Local,
+		{param = {family = .Toward, direction = .Right}},
 	},
-	.Resize_Up             = {
-		"pane.resize_up",
-		"Resize Up",
-		{{.Arrow_Up, {.Control, .Super, .Shift}}},
+	.Focus_Up = {
+		"pane.focus_up", "Focus Up", {{.Arrow_Up, {.Control, .Alt}}}, .Local,
+		{param = {family = .Toward, direction = .Up}},
 	},
-	.Resize_Down           = {
-		"pane.resize_down",
-		"Resize Down",
-		{{.Arrow_Down, {.Control, .Super, .Shift}}},
+	.Focus_Down = {
+		"pane.focus_down", "Focus Down", {{.Arrow_Down, {.Control, .Alt}}}, .Local,
+		{param = {family = .Toward, direction = .Down}},
 	},
-	.Focus_Previous        = {
-		"pane.focus_previous",
-		"Focus Previous Pane",
-		{{.Bracket_Left, {.Control, .Super}}},
+	.Resize_Left = {
+		"pane.resize_left", "Resize Left", {{.Arrow_Left, {.Control, .Super, .Shift}}}, .Local,
+		{param = {family = .Resize, resize = {.Horizontal, -RESIZE_PIXELS}}},
 	},
-	.Focus_Next            = {
-		"pane.focus_next",
-		"Focus Next Pane",
-		{{.Bracket_Right, {.Control, .Super}}},
+	.Resize_Right = {
+		"pane.resize_right", "Resize Right", {{.Arrow_Right, {.Control, .Super, .Shift}}}, .Local,
+		{param = {family = .Resize, resize = {.Horizontal, RESIZE_PIXELS}}},
 	},
-	.Last_Tab = {"tab.last", "Select Last Tab", nil},
-	.Close_Tab = {"tab.close", "Close Selected Tabs", {{.W, {.Control, .Shift}}}},
-	.Split = {"pane.split", "Split Pane", nil},
-	.Split_Left = {"pane.split_left", "Split Left", nil},
-	.Split_Up = {"pane.split_up", "Split Up", nil},
-	.Zoom_Pane = {"pane.zoom", "Zoom pane", nil},
-	.Fill_Window_Pane = {"pane.fill_window", "Fill window", {{.Enter, {.Control, .Shift}}}},
-	.Fullscreen_Pane = {"pane.fullscreen", "Fullscreen", {{.F11, {}}}},
-	.Balance_Panes = {"pane.balance", "Balance All Splits", nil},
-	.Swap_Left = {"pane.swap_left", "Swap Pane Left", nil},
-	.Swap_Right = {"pane.swap_right", "Swap Pane Right", nil},
-	.Swap_Up = {"pane.swap_up", "Swap Pane Up", nil},
-	.Swap_Down = {"pane.swap_down", "Swap Pane Down", nil},
-	.Swap_Previous = {"pane.swap_previous", "Swap With Previous Pane", nil},
-	.Swap_Next = {"pane.swap_next", "Swap With Next Pane", nil},
-	.Resize_Left_Large = {"pane.resize_left_large", "Resize Left by 50 Pixels", nil},
-	.Resize_Right_Large = {"pane.resize_right_large", "Resize Right by 50 Pixels", nil},
-	.Resize_Up_Large = {"pane.resize_up_large", "Resize Up by 50 Pixels", nil},
-	.Resize_Down_Large = {"pane.resize_down_large", "Resize Down by 50 Pixels", nil},
-	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil},
-	.Change_Shortcut = {"settings.change_shortcut", "Change Shortcut…", nil},
-	.Customize_Colors = {"settings.customize_colors", "Customize Colors…", nil},
+	.Resize_Up = {
+		"pane.resize_up", "Resize Up", {{.Arrow_Up, {.Control, .Super, .Shift}}}, .Local,
+		{param = {family = .Resize, resize = {.Vertical, -RESIZE_PIXELS}}},
+	},
+	.Resize_Down = {
+		"pane.resize_down", "Resize Down", {{.Arrow_Down, {.Control, .Super, .Shift}}}, .Local,
+		{param = {family = .Resize, resize = {.Vertical, RESIZE_PIXELS}}},
+	},
+	.Focus_Previous = {
+		"pane.focus_previous", "Focus Previous Pane", {{.Bracket_Left, {.Control, .Super}}}, .Local, {},
+	},
+	.Focus_Next = {
+		"pane.focus_next", "Focus Next Pane", {{.Bracket_Right, {.Control, .Super}}}, .Local, {},
+	},
+	.Last_Tab = {"tab.last", "Select Last Tab", nil, .Host, {}},
+	.Close_Tab = {"tab.close", "Close Selected Tabs", {{.W, {.Control, .Shift}}}, .Host, {}},
+	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}, .Host, {}},
+	.Split = {
+		"pane.split", "Split Pane", nil, .Local,
+		{accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+	},
+	.Split_Left = {
+		"pane.split_left", "Split Left", nil, .Local, {param = {family = .Toward, direction = .Left}},
+	},
+	.Split_Up = {"pane.split_up", "Split Up", nil, .Local, {param = {family = .Toward, direction = .Up}}},
+	.Zoom_Pane = {"pane.zoom", "Zoom pane", nil, .Local, {}},
+	.Fill_Window_Pane = {"pane.fill_window", "Fill window", {{.Enter, {.Control, .Shift}}}, .Local, {}},
+	.Fullscreen_Pane = {"pane.fullscreen", "Fullscreen", {{.F11, {}}}, .Local, {}},
+	.Balance_Panes = {"pane.balance", "Balance All Splits", nil, .Local, {}},
+	.Swap_Left = {
+		"pane.swap_left", "Swap Pane Left", nil, .Local, {param = {family = .Toward, direction = .Left}},
+	},
+	.Swap_Right = {
+		"pane.swap_right", "Swap Pane Right", nil, .Local,
+		{param = {family = .Toward, direction = .Right}},
+	},
+	.Swap_Up = {"pane.swap_up", "Swap Pane Up", nil, .Local, {param = {family = .Toward, direction = .Up}}},
+	.Swap_Down = {
+		"pane.swap_down", "Swap Pane Down", nil, .Local, {param = {family = .Toward, direction = .Down}},
+	},
+	.Swap_Previous = {"pane.swap_previous", "Swap With Previous Pane", nil, .Local, {}},
+	.Swap_Next = {"pane.swap_next", "Swap With Next Pane", nil, .Local, {}},
+	.Resize_Left_Large = {
+		"pane.resize_left_large", "Resize Left by " + RESIZE_LARGE_LABEL + " Pixels", nil, .Local,
+		{param = {family = .Resize, resize = {.Horizontal, -RESIZE_LARGE_PIXELS}}},
+	},
+	.Resize_Right_Large = {
+		"pane.resize_right_large", "Resize Right by " + RESIZE_LARGE_LABEL + " Pixels", nil, .Local,
+		{param = {family = .Resize, resize = {.Horizontal, RESIZE_LARGE_PIXELS}}},
+	},
+	.Resize_Up_Large = {
+		"pane.resize_up_large", "Resize Up by " + RESIZE_LARGE_LABEL + " Pixels", nil, .Local,
+		{param = {family = .Resize, resize = {.Vertical, -RESIZE_LARGE_PIXELS}}},
+	},
+	.Resize_Down_Large = {
+		"pane.resize_down_large", "Resize Down by " + RESIZE_LARGE_LABEL + " Pixels", nil, .Local,
+		{param = {family = .Resize, resize = {.Vertical, RESIZE_LARGE_PIXELS}}},
+	},
+	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil, .Local, {}},
+	.Change_Shortcut = {"settings.change_shortcut", "Change Shortcut…", nil, .Host, {}},
+	.Customize_Colors = {"settings.customize_colors", "Customize Colors…", nil, .Host, {}},
+	.Rename_Tab = {"tab.rename", "Rename Tab", nil, .Host, {}},
+	.Rename_Pane = {"pane.rename", "Rename Pane", nil, .Local, {accepted = {.Text}, control = .Pane}},
+	.Change_Pane_Shell = {"pane.change_shell", "Change Pane Shell…", nil, .Local, {}},
+	.Open_Markdown = {
+		"pane.open_markdown", "Open Markdown File…", nil, .Host,
+		{accepted = {.File, .Direction, .Ratio, .Focus}, control = .Pane},
+	},
+	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil, .Host, {}},
+	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil, .Host, {}},
+	.Move_Tab_Right = {"tab.move_right", "Move Tab Right", nil, .Host, {}},
+	.Move_Tab_Start = {"tab.move_start", "Move Selected Tabs to Start", nil, .Host, {}},
+	.Move_Tab_End = {"tab.move_end", "Move Selected Tabs to End", nil, .Host, {}},
+	.Close_Other_Tabs = {"tab.close_others", "Close Other Tabs", nil, .Host, {}},
+	.Close_Right_Tabs = {"tab.close_right", "Close Tabs to the Right", nil, .Host, {}},
+	.Tab_Settings = {"tab.settings", "Tab Settings", nil, .Host, {}},
+	.New_Workspace = {"workspace.new", "New Workspace", nil, .Host, {}},
+	.Change_Workspace = {"workspace.change", "Change Workspace…", nil, .Host, {}},
+	.Next_Workspace = {"workspace.next", "Next Workspace", nil, .Host, {}},
+	.Previous_Workspace = {"workspace.previous", "Previous Workspace", nil, .Host, {}},
+	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil, .Host, {}},
+	.New_Window = {"window.new", "New Window", {{.N, {.Control, .Shift}}}, .Host, {}},
+	.Delete_Workspace = {"workspace.delete", "Delete Workspace…", nil, .Host, {}},
+	.Change_Workspace_Icon = {"workspace.change_icon", "Change Workspace Icon…", nil, .Host, {}},
+	.Workspace_1 = {
+		"workspace.select_1", "Select Workspace 1", {{.Digit_1, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 0}},
+	},
+	.Workspace_2 = {
+		"workspace.select_2", "Select Workspace 2", {{.Digit_2, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 1}},
+	},
+	.Workspace_3 = {
+		"workspace.select_3", "Select Workspace 3", {{.Digit_3, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 2}},
+	},
+	.Workspace_4 = {
+		"workspace.select_4", "Select Workspace 4", {{.Digit_4, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 3}},
+	},
+	.Workspace_5 = {
+		"workspace.select_5", "Select Workspace 5", {{.Digit_5, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 4}},
+	},
+	.Workspace_6 = {
+		"workspace.select_6", "Select Workspace 6", {{.Digit_6, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 5}},
+	},
+	.Workspace_7 = {
+		"workspace.select_7", "Select Workspace 7", {{.Digit_7, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 6}},
+	},
+	.Workspace_8 = {
+		"workspace.select_8", "Select Workspace 8", {{.Digit_8, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 7}},
+	},
+	.Workspace_9 = {
+		"workspace.select_9", "Select Workspace 9", {{.Digit_9, {.Control, .Shift}}}, .Host,
+		{param = {family = .Workspace, index = 8}},
+	},
+	.Show_Build_Info = {"app.build_info", "Show Build Info", nil, .Local, {}},
 	.Profile_1 = {
-		"profile.open_1",
-		"New Tab with Profile 1",
-		nil,
+		"profile.open_1", "New Tab with Profile 1", nil, .Host, {param = {family = .Profile, index = 0}},
 	},
 	.Profile_2 = {
-		"profile.open_2",
-		"New Tab with Profile 2",
-		nil,
+		"profile.open_2", "New Tab with Profile 2", nil, .Host, {param = {family = .Profile, index = 1}},
 	},
 	.Profile_3 = {
-		"profile.open_3",
-		"New Tab with Profile 3",
-		nil,
+		"profile.open_3", "New Tab with Profile 3", nil, .Host, {param = {family = .Profile, index = 2}},
 	},
 	.Profile_4 = {
-		"profile.open_4",
-		"New Tab with Profile 4",
-		nil,
+		"profile.open_4", "New Tab with Profile 4", nil, .Host, {param = {family = .Profile, index = 3}},
 	},
 	.Profile_5 = {
-		"profile.open_5",
-		"New Tab with Profile 5",
-		nil,
+		"profile.open_5", "New Tab with Profile 5", nil, .Host, {param = {family = .Profile, index = 4}},
 	},
 	.Profile_6 = {
-		"profile.open_6",
-		"New Tab with Profile 6",
-		nil,
+		"profile.open_6", "New Tab with Profile 6", nil, .Host, {param = {family = .Profile, index = 5}},
 	},
 	.Profile_7 = {
-		"profile.open_7",
-		"New Tab with Profile 7",
-		nil,
+		"profile.open_7", "New Tab with Profile 7", nil, .Host, {param = {family = .Profile, index = 6}},
 	},
 	.Profile_8 = {
-		"profile.open_8",
-		"New Tab with Profile 8",
-		nil,
+		"profile.open_8", "New Tab with Profile 8", nil, .Host, {param = {family = .Profile, index = 7}},
 	},
 	.Profile_9 = {
-		"profile.open_9",
-		"New Tab with Profile 9",
-		nil,
+		"profile.open_9", "New Tab with Profile 9", nil, .Host, {param = {family = .Profile, index = 8}},
 	},
-	.Palette_Tabs = {"app.palette_tabs", "Show Palette: Tabs", nil},
-	.Palette_Workspaces = {"app.palette_workspaces", "Show Palette: Workspaces", nil},
-	.Palette_Settings = {"app.palette_settings", "Show Palette: Settings", nil},
-	.Palette_Commands = {"app.palette_commands", "Show Palette: Commands", nil},
+	.Palette_Tabs = {
+		"app.palette_tabs", "Show Palette: Tabs", nil, .Local, {param = {family = .Palette, mode = .Tabs}},
+	},
+	.Palette_Workspaces = {
+		"app.palette_workspaces", "Show Palette: Workspaces", nil, .Local,
+		{param = {family = .Palette, mode = .Workspaces}},
+	},
+	.Palette_Settings = {
+		"app.palette_settings", "Show Palette: Settings", nil, .Local,
+		{param = {family = .Palette, mode = .Settings}},
+	},
+	.Palette_Commands = {
+		"app.palette_commands", "Show Palette: Commands", nil, .Local,
+		{param = {family = .Palette, mode = .Commands}},
+	},
 	.Toggle_Tabs_Rail = {
-		"view.tabs_rail",
-		"Show or Hide the Tab Rail",
-		{{.B, {.Control, .Shift}}},
+		"view.tabs_rail", "Show or Hide the Tab Rail", {{.B, {.Control, .Shift}}}, .Host, {},
 	},
 	.Toggle_Tabs_Orientation = {
-		"view.tabs_orientation",
-		"Switch Between Vertical and Horizontal Tabs",
-		{{.L, {.Control, .Shift}}},
+		"view.tabs_orientation", "Switch Between Vertical and Horizontal Tabs",
+		{{.L, {.Control, .Shift}}}, .Host, {},
 	},
-	.Status_Next = {"status.next", "Go to the Next Program That Needs You", {{.J, {.Control, .Shift}}}},
+	.Status_Next = {
+		"status.next", "Go to the Next Program That Needs You", {{.J, {.Control, .Shift}}}, .Host, {},
+	},
 	.Focus_Back = {
-		"pane.focus_back",
-		"Go Back to the Previous Pane",
-		{{.Bracket_Left, {.Control, .Shift}}},
+		"pane.focus_back", "Go Back to the Previous Pane", {{.Bracket_Left, {.Control, .Shift}}},
+		.Host, {},
 	},
 	.Focus_Forward = {
-		"pane.focus_forward",
-		"Go Forward to the Next Pane",
-		{{.Bracket_Right, {.Control, .Shift}}},
+		"pane.focus_forward", "Go Forward to the Next Pane", {{.Bracket_Right, {.Control, .Shift}}},
+		.Host, {},
 	},
-	.Status_Inbox = {"status.inbox", "Show the Program Status Inbox", {{.I, {.Control, .Shift}}}},
-	.Status_Panel = {"status.panel", "Show or Hide the Activity Panel", {{.Y, {.Control, .Shift}}}},
-	.Status_Dismiss_Finished = {"status.dismiss_finished", "Dismiss Finished Program Status", nil},
-	.Pane_List = {"pane.list", "List Panes", nil},
-	.Pane_Status = {"pane.status", "Show Pane Status", nil},
-	.Pane_Read = {"pane.read", "Read Pane Screen", nil},
-	.Pane_Send = {"pane.send", "Send Text to Pane", nil},
-	.Pane_Focus = {"pane.focus", "Focus Pane", nil},
-	.App_Commands = {"app.commands", "List Commands", nil},
-	.Reopen_Closed = {"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}},
-	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil},
-	.Show_Documents = {"pane.documents", "Show Documents", nil},
-	.New_Floating = {"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}},
-	.Float_Pane = {"pane.float", "Float or Dock Pane", {{.Enter, {.Control, .Alt}}}},
+	.Status_Inbox = {
+		"status.inbox", "Show the Program Status Inbox", {{.I, {.Control, .Shift}}}, .Host, {},
+	},
+	.Status_Panel = {
+		"status.panel", "Show or Hide the Activity Panel", {{.Y, {.Control, .Shift}}}, .Host, {},
+	},
+	.Status_Dismiss_Finished = {
+		"status.dismiss_finished", "Dismiss Finished Program Status", nil, .Host, {},
+	},
+	.Move_Pane_Workspace = {"pane.move_workspace", "Move Pane to Workspace…", nil, .Refuse, {}},
+	.Move_Pane_New_Workspace = {
+		"pane.move_new_workspace", "Move Pane to New Workspace", nil, .Refuse, {},
+	},
+	.Move_Tab_Workspace = {"tab.move_workspace", "Move Tab to Workspace…", nil, .Host, {}},
+	.Move_Tab_New_Workspace = {"tab.move_new_workspace", "Move Tab to New Workspace", nil, .Host, {}},
+	.Pane_List = {"pane.list", "List Panes", nil, .Host, {hidden = true, control = .Unnamed}},
+	.Pane_Status = {
+		cli_protocol.PANE_STATUS_COMMAND, "Show Pane Status", nil, .Host, {hidden = true, control = .Unnamed},
+	},
+	.Pane_Read = {
+		cli_protocol.PANE_READ_COMMAND, "Read Pane Screen", nil, .Host,
+		{accepted = {.Lines}, hidden = true, control = .Pane},
+	},
+	.Pane_Send = {
+		"pane.send", "Send Text to Pane", nil, .Host,
+		{accepted = {.Text, .Enter}, required = {.Text}, hidden = true, control = .Pane},
+	},
+	.Pane_Focus = {"pane.focus", "Focus Pane", nil, .Host, {hidden = true, control = .Pane}},
+	.App_Commands = {
+		cli_protocol.CATALOGUE_COMMAND, "List Commands", nil, .Host,
+		{accepted = {.Text}, hidden = true, control = .Unnamed},
+	},
+	.Reopen_Closed = {
+		"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}, .Host, {},
+	},
+	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil, .Local, {}},
+	.Show_Documents = {"pane.documents", "Show Documents", nil, .Local, {}},
+	.New_Floating = {
+		"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}, .Host,
+		{accepted = {.Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+	},
+	.Float_Pane = {"pane.float", "Float or Dock Pane", {{.Enter, {.Control, .Alt}}}, .Refuse, {}},
 	.Minimize_Floating = {
-		"pane.minimize_floating",
-		"Minimize or Restore Float",
-		{{.M, {.Control, .Shift}}},
+		"pane.minimize_floating", "Minimize or Restore Float", {{.M, {.Control, .Shift}}}, .Host,
+		{control = .Pane},
 	},
 	.Minimize_All_Floating = {
-		"pane.minimize_all_floating",
-		"Minimize or Restore All Floats",
-		nil,
+		"pane.minimize_all_floating", "Minimize or Restore All Floats", nil, .Host, {},
 	},
 }
 
 @(require_results)
 register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 	@(static, rodata)
-	actions := ACTIONS
-	@(static, rodata)
-	arguments := ACTION_ARGUMENTS
-	for info, action in actions {
+	descriptors := ACTIONS
+	for descriptor, action in descriptors {
 		command := commands.Command {
-			id = commands.Command_Id(action),
-			name = info.name,
-			title = info.title,
-			shortcuts = {info.shortcuts, len(info.shortcuts)},
-			arguments = arguments[action].accepted,
-			required = arguments[action].required,
-			hidden = arguments[action].hidden,
+			id        = commands.Command_Id(action),
+			name      = descriptor.name,
+			title     = descriptor.title,
+			shortcuts = {descriptor.shortcuts, len(descriptor.shortcuts)},
+			arguments = descriptor.spec.accepted,
+			required  = descriptor.spec.required,
+			hidden    = descriptor.spec.hidden,
 		}
 		if err := commands.register(registry, command); err != .None {return err}
 	}
 	return .None
 }
 
-// The mode a direct-open action selects; only the four palette actions have one.
-palette_action_mode :: proc(action: Action) -> ui.Palette_Mode {
-	#partial switch action {
-	case .Palette_Tabs:
-		return .Tabs
-	case .Palette_Workspaces:
-		return .Workspaces
-	case .Palette_Settings:
-		return .Settings
-	case .Palette_Commands:
-		return .Commands
-	case:
-		return .All
+// The New Tab with Profile N command that opens visible profile `index`, if one does.
+@(require_results)
+profile_action :: proc(index: int) -> (Action, bool) {
+	@(static, rodata)
+	descriptors := ACTIONS
+	for descriptor, action in descriptors {
+		param := descriptor.spec.param
+		if param.family == .Profile && param.index == index {return action, true}
 	}
+	return {}, false
 }
 
-shortcut_action :: proc(app: ^App, e: platform.Key_Event) -> (Action, bool) {
+// The label of the first shortcut that runs `action` now, written to out (SHORTCUT_TEXT_CAP bytes);
+// empty when none does. Menus and hints show this rather than a default that rebinding can change.
+@(require_results)
+action_shortcut_text :: proc(app: ^App, action: Action, out: []u8) -> string {
+	return commands.active_shortcut_text(commands.find(&app.registry, commands.Command_Id(action)), out)
+}
+
+shortcut_action :: proc(app: ^App, e: input.Key_Event) -> (Action, bool) {
 	if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted);
 	   command != nil {
 		return Action(command.id), true
@@ -478,43 +592,176 @@ shortcut_action :: proc(app: ^App, e: platform.Key_Event) -> (Action, bool) {
 	return {}, false
 }
 
-run_action :: proc(
-	app: ^App,
-	w: ^Window,
-	action: Action,
-	split_direction: layout.Direction = .Right,
-	split_ratio: f32 = 0.5,
-	split_focus := true,
-) {
-	if drag_held(w) && !gesture_cancel(app, w) {return}
+// A window's own keys, palette, menus and buttons act on its focus. Tab commands act on `tab`, or the
+// selected tab when none is named; a tab menu names the tab it opened on.
+Window_Context :: struct {
+	window: ^Window,
+	tab:    Maybe(int),
+}
+
+// A control request names its pane in the invocation; empty means `caller`, the pane the request came
+// from (D-046).
+Control_Request :: struct {
+	caller: u32,
+}
+
+// Who runs a command, which decides what it acts on.
+Command_Context :: union #no_nil {
+	Window_Context,
+	Control_Request,
+}
+
+// Runs `action` as a person at w would, on its focus and selected tab. Failures show as notices.
+run_action :: proc(app: ^App, w: ^Window, action: Action) {
+	invocation := commands.invocation(commands.Command_Id(action), focus = true)
+	_ = command_execute(app, Window_Context{window = w}, invocation)
+}
+
+// The window that runs a command w was asked to run, or nil when it must not run: a held drag that
+// cannot be cancelled keeps it, and a linked window passes tab and workspace commands to the window
+// showing its tab and refuses ones that would take its pane out of that tab.
+@(private)
+command_window :: proc(app: ^App, w: ^Window, action: Action) -> ^Window {
+	@(static, rodata)
+	descriptors := ACTIONS
+	if drag_held(w) && !gesture_cancel(app, w) {return nil}
 	if window_linked(w) {
-		switch pane_link_route(action) {
+		switch descriptors[action].route {
 		case .Local:
 			pane_link_reconcile(app, w)
 		case .Host:
 			host := pane_link_acting_window(app, w)
-			if host != w {run_action(app, host, action, split_direction, split_ratio, split_focus)}
-			return
+			return host != w ? command_window(app, host, action) : nil
 		case .Refuse:
 			notify(app, .Info, "Return this pane to its tab first.")
-			return
+			return nil
 		}
 	}
-	entry := focused_session(app, w)
 	w.dirty = true
+	return w
+}
+
+// Availability is command policy; each surface decides how an unavailable action is presented. Copy needs
+// something to copy: the find query's keyboard, or a selection in the focused terminal or document.
+action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
+	if action != .Copy {return true}
+	if ui.find_has_keyboard(&w.find) {return true}
+	if entry := focused_session(app, w); entry != nil {return term.has_selection(entry.session)}
+	return markdown_selected(app, w) != ""
+}
+
+// Runs one command for every interface, so it behaves the same from each (WORK-038). A window context
+// acts on that window's focus and reports failures as notices; its outcome carries nothing. A control
+// request names its pane, which the command's Control_Form decides how to reach.
+@(require_results)
+command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.Invocation) -> Outcome {
+	@(static, rodata)
+	descriptors := ACTIONS
+	action := Action(invocation.id)
+	w: ^Window
+	tab: Maybe(int)
+	// The pane a control request names, for commands that act on it where it is.
+	target: Maybe(Pane_Target)
+	switch c in ctx {
+	case Window_Context:
+		w = command_window(app, c.window, action)
+		if w == nil || descriptors[action].spec.hidden {return {}}
+		if w == c.window {tab = c.tab}
+	case Control_Request:
+		if commands.find(&app.registry, invocation.id) == nil {
+			return outcome_failure(.Usage, "unknown command; use aio commands")
+		}
+		switch descriptors[action].spec.control {
+		case .Focus:
+			named, failure := pane_target_resolve(app, invocation.pane, c.caller)
+			if failure.status != .Ok {return failure}
+			w, failure = control_focus(app, named, action)
+			if w == nil {return failure}
+		case .Pane:
+			named, failure := pane_target_resolve(app, invocation.pane, c.caller)
+			if failure.status != .Ok {return failure}
+			target = named
+		case .Unnamed:
+		}
+	}
+	param := descriptors[action].spec.param
+	entry: ^Session_Entry
+	tab_index := -1
+	if w != nil {
+		entry = focused_session(app, w)
+		if w.workspace != nil {tab_index = tab.? or_else w.workspace.selected}
+	}
 	switch action {
+	case .App_Commands:
+		return command_catalogue(app, invocation.text)
+	case .Pane_List:
+		return {payload = Outcome_Panes(pane_reports(app, nil))}
+	case .Pane_Status:
+		return control_pane_status(app, ctx.(Control_Request), invocation)
+	case .Pane_Read:
+		named := target.?
+		return pane_read(named.pane.session, invocation.lines)
+	case .Pane_Send:
+		named := target.?
+		return pane_send(named.pane.session, invocation.text, invocation.enter)
+	case .Pane_Focus:
+		return control_pane_focus(app, target.?)
+	case .Close_Pane:
+		if t, named := target.?; named {
+			pane_close_at(app, t.workspace, t.pane.tab, t.pane.node)
+			return {}
+		}
+		pane_close(app, w)
+	case .New_Tab:
+		if t, named := target.?; named {
+			return control_tab_new(app, window_for_workspace(app, t.workspace), t.workspace, invocation)
+		}
+		tab_new(app, w)
+	case .Split:
+		if t, named := target.?; named {
+			return control_split(app, window_for_workspace(app, t.workspace), t, invocation)
+		}
+		pane_split(app, w, invocation.direction, invocation.ratio, invocation.focus)
+	case .Open_Markdown:
+		if t, named := target.?; named {
+			return control_markdown_open(app, window_for_workspace(app, t.workspace), t, invocation)
+		}
+		markdown_open_picker(app, w)
+	case .New_Floating:
+		if t, named := target.?; named {
+			return control_floating_new(app, window_for_workspace(app, t.workspace), t, invocation)
+		}
+		floating_new(app, w)
+	case .Rename_Pane:
+		if t, named := target.?; named {
+			if .Text in invocation.given {return control_rename(app, t, invocation.text)}
+			failure: Outcome
+			w, failure = control_focus(app, t, action)
+			if w == nil {return failure}
+		}
+		if pane := focused_session(app, w); pane != nil {rename_open(app, w, Rename_Pane_Target{pane.id})}
+	case .Minimize_Floating:
+		if t, named := target.?; named {
+			shown, failure := control_show(app, t)
+			if shown == nil {return failure}
+			// Naming a minimized float restores it, as focusing it does.
+			if floating, ok := layout.float_of(window_tree(shown), t.pane.node); ok && floating.minimized {
+				pane_focus(app, shown, t.pane.node)
+				layout_state_touch(app)
+				return {}
+			}
+			w, failure = control_focus(app, t, action)
+			if w == nil {return failure}
+		}
+		floating_minimize_toggle(app, w)
 	case .Linked_Window:
-		if layout.is_floating(w.tree, w.tree.focus) {
+		if tree := window_tree(w); layout.is_floating(tree, tree.focus) {
 			notify(app, .Info, "Dock the float before moving its pane to a linked window.")
-			return
+			return {}
 		}
 		pane_link_toggle(app, w)
-	case .New_Floating:
-		floating_new(app, w)
 	case .Float_Pane:
 		floating_toggle(app, w)
-	case .Minimize_Floating:
-		floating_minimize_toggle(app, w)
 	case .Minimize_All_Floating:
 		floating_minimize_all_toggle(app, w)
 	case .Show_Documents:
@@ -524,16 +771,15 @@ run_action :: proc(
 	case .Command_Palette:
 		if palette_active(app, w) {
 			palette_close(app, w)
-			return
+			return {}
 		}
 		palette_open(app, w)
 	case .Palette_Tabs, .Palette_Workspaces, .Palette_Settings, .Palette_Commands:
-		mode := palette_action_mode(action)
 		if palette_active(app, w) {
-			ui.palette_set_mode(&app.palette, &app.registry, mode)
-			return
+			ui.palette_set_mode(&app.palette, &app.registry, param.mode)
+			return {}
 		}
-		palette_open_mode(app, w, mode)
+		palette_open_mode(app, w, param.mode)
 	case .Copy:
 		if ui.find_has_keyboard(&w.find) {
 			clipboard_copy(app, ui.field_selected_text(&w.find.query))
@@ -555,11 +801,11 @@ run_action :: proc(
 			markdown_select_all(app, w)
 		}
 	case .Find:
-		target := find_target(app, w)
-		if target == nil {return}
+		find := find_target(app, w)
+		if find == nil {return {}}
 		leader_cancel(w)
 		pane_header_cancel(w)
-		find_toggle(app, w, target)
+		find_toggle(app, w, find)
 	case .Clear_Scrollback:
 		if entry != nil {
 			term.clear_scrollback(entry.session)
@@ -594,48 +840,38 @@ run_action :: proc(
 		pane_header_cancel(w)
 		editor_open(app, w)
 	case .Change_Shortcut:
-		settings_reveal(app, w, {query = "keys.", search = .Scope})
+		settings_reveal(app, w, {section = .Shortcuts})
 	case .Reload_Settings:
 		reload_settings(app)
 	case .Customize_Colors:
-		settings_reveal(app, w, {query = "colors.", search = .Scope})
-	case .Open_Markdown:
-		markdown_open_picker(app, w)
+		settings_reveal(app, w, {section = .Colors})
 	case .Rename_Tab:
-		rename_open(app, w, true, w.workspace.selected)
-	case .Rename_Pane:
-		rename_open(app, w, false, w.workspace.selected)
+		if tab_index >= 0 && tab_index < len(w.workspace.tabs) {
+			rename_open(app, w, Rename_Tab_Target{w.workspace.id, w.workspace.tabs[tab_index].id})
+		}
 	case .Change_Pane_Shell:
+		focus := window_tree(w).focus
 		for pane in w.panes {
-			if pane.node != w.tree.focus || !pane_owns_session(pane.content.kind) {continue}
-			profile_menu_open_pane(
-				app,
-				w,
-				pane.node,
-				pane.rect.x + 8 * w.scale,
-				pane.rect.y + ui.HEADER_HEIGHT * w.scale,
-			)
+			if pane.node != focus || !pane_owns_session(pane.content.kind) {continue}
+			profile_menu_open_pane(app, w, pane)
 			break
 		}
 	case .Duplicate_Tab:
-		tab_duplicate(app, w, w.workspace.selected)
+		tab_duplicate(app, w, tab_index)
 	case .Move_Pane_Workspace, .Move_Tab_Workspace:
-		workspace_move_open(app, w, action == .Move_Tab_Workspace, w.workspace.selected)
+		workspace_move_open(app, w, action == .Move_Tab_Workspace, tab_index)
 	case .Move_Pane_New_Workspace, .Move_Tab_New_Workspace:
-		workspace_move_new(app, w, action == .Move_Tab_New_Workspace, w.workspace.selected)
+		workspace_move_new(app, w, action == .Move_Tab_New_Workspace, tab_index)
 	case .Move_Tab_Left:
-		tab_move(app, w, w.workspace.selected, max(0, w.workspace.selected - 1))
+		tab_move(app, w, tab_index, max(0, tab_index - 1))
 	case .Move_Tab_Right:
-		tab_move(
-			app,
-			w,
-			w.workspace.selected,
-			min(len(w.workspace.tabs) - 1, w.workspace.selected + 1),
-		)
+		tab_move(app, w, tab_index, min(len(w.workspace.tabs) - 1, tab_index + 1))
 	case .Move_Tab_Start, .Move_Tab_End:
 		tab_move_group(app, w, action == .Move_Tab_End)
 	case .Close_Other_Tabs, .Close_Right_Tabs:
-		tab_close_subset(app, w, action == .Close_Right_Tabs, w.workspace.selected)
+		tab_close_subset(app, w, action == .Close_Right_Tabs, tab_index)
+	case .Close_Tab:
+		tab_close_request(app, w, tab_index)
 	case .Tab_Settings:
 		settings_reveal(app, w, {key = "tab.confirm_close", search = .Clear})
 	case .Restart_Shell:
@@ -646,18 +882,9 @@ run_action :: proc(
 		hide_to_tray(app, w)
 	case .Quit:
 		app_quit(app)
-	case .New_Tab:
-		tab_new(app, w)
-	case .Profile_1,
-	     .Profile_2,
-	     .Profile_3,
-	     .Profile_4,
-	     .Profile_5,
-	     .Profile_6,
-	     .Profile_7,
-	     .Profile_8,
+	case .Profile_1, .Profile_2, .Profile_3, .Profile_4, .Profile_5, .Profile_6, .Profile_7, .Profile_8,
 	     .Profile_9:
-		tab_new_profile(app, w, int(action) - int(Action.Profile_1))
+		tab_new_profile(app, w, param.index)
 	case .New_Workspace:
 		workspace_new(app, w, false)
 	case .Change_Workspace:
@@ -672,65 +899,27 @@ run_action :: proc(
 		workspace_delete_request(app, w, w.workspace)
 	case .Change_Workspace_Icon:
 		workspace_icon_open(app, w)
-	case .Workspace_1,
-	     .Workspace_2,
-	     .Workspace_3,
-	     .Workspace_4,
-	     .Workspace_5,
-	     .Workspace_6,
-	     .Workspace_7,
-	     .Workspace_8,
-	     .Workspace_9:
-		workspace_select_index(app, w, int(action) - int(Action.Workspace_1))
+	case .Workspace_1, .Workspace_2, .Workspace_3, .Workspace_4, .Workspace_5, .Workspace_6,
+	     .Workspace_7, .Workspace_8, .Workspace_9:
+		workspace_select_index(app, w, param.index)
 	case .New_Window:
 		workspace_new(app, w, true)
-	case .Close_Pane:
-		pane_close(app, w)
 	case .Reopen_Closed:
 		closed_reopen(app, w)
 	case .Next_Tab:
-		tab_select(app, w, (w.workspace.selected + 1) % len(w.workspace.tabs))
-		rail_overlay_dismiss(app, w)
+		tab_show(app, w, (w.workspace.selected + 1) % len(w.workspace.tabs))
 	case .Previous_Tab:
-		tab_select(
-			app,
-			w,
-			(w.workspace.selected + len(w.workspace.tabs) - 1) % len(w.workspace.tabs),
-		)
-		rail_overlay_dismiss(app, w)
+		tabs := len(w.workspace.tabs)
+		tab_show(app, w, (w.workspace.selected + tabs - 1) % tabs)
 	case .Tab_1, .Tab_2, .Tab_3, .Tab_4, .Tab_5, .Tab_6, .Tab_7, .Tab_8, .Tab_9:
-		index := int(action) - int(Action.Tab_1)
-		if index >= 0 && index < len(w.workspace.tabs) {
-			tab_select(app, w, index)
-			rail_overlay_dismiss(app, w)
-		}
+		if param.index < len(w.workspace.tabs) {tab_show(app, w, param.index)}
 	case .Last_Tab:
-		if len(w.workspace.tabs) > 0 {
-			tab_select(app, w, len(w.workspace.tabs) - 1)
-			rail_overlay_dismiss(app, w)
-		}
-	case .Close_Tab:
-		tab_close_request(app, w, w.workspace.selected)
+		if len(w.workspace.tabs) > 0 {tab_show(app, w, len(w.workspace.tabs) - 1)}
 	case .Focus_Previous, .Focus_Next:
-		pane_focus(
-			app,
-			w,
-			layout.focus_cycle(
-				pane_action_rects(app, w),
-				pane_action_focus(w),
-				action == .Focus_Next ? 1 : -1,
-			),
-		)
-	case .Split:
-		pane_split(app, w, split_direction, split_ratio, split_focus)
-	case .Split_Right:
-		pane_split(app, w, .Right)
-	case .Split_Down:
-		pane_split(app, w, .Down)
-	case .Split_Left:
-		pane_split(app, w, .Left)
-	case .Split_Up:
-		pane_split(app, w, .Up)
+		step := action == .Focus_Next ? 1 : -1
+		pane_focus(app, w, layout.focus_cycle(pane_action_rects(app, w), pane_action_focus(w), step))
+	case .Split_Right, .Split_Down, .Split_Left, .Split_Up:
+		pane_split(app, w, param.direction)
 	case .Zoom_Pane:
 		pane_view_toggle(app, w, .Toggle_Zoom)
 	case .Fill_Window_Pane:
@@ -738,43 +927,44 @@ run_action :: proc(
 	case .Fullscreen_Pane:
 		pane_view_toggle(app, w, .Toggle_Screen)
 	case .Balance_Panes:
-		layout.balance(w.tree)
+		layout.balance(window_tree(w))
 		window_relayout(app, w)
 	case .Keep_Pane_Open:
 		pane_keep_open(app, w)
 	case .Swap_Left, .Swap_Right, .Swap_Up, .Swap_Down, .Swap_Previous, .Swap_Next:
 		rects := pane_action_rects(app, w)
-		target: layout.Node_Id
-		if action == .Swap_Previous || action == .Swap_Next {
-			target = layout.focus_cycle(rects, w.tree.focus, action == .Swap_Next ? 1 : -1)
+		other: layout.Node_Id
+		tree := window_tree(w)
+		if param.family == .Toward {
+			other = layout.focus_direction(rects, tree.focus, param.direction)
 		} else {
-			target = layout.focus_direction(
-				rects,
-				w.tree.focus,
-				layout.Direction(int(action) - int(Action.Swap_Left)),
-			)
+			other = layout.focus_cycle(rects, tree.focus, action == .Swap_Next ? 1 : -1)
 		}
-		if target != w.tree.focus {
-			selection_cancel(w)
-			divider_cancel(w)
-			w.wheel_remainder = 0
-			if layout.swap(w.tree, w.tree.focus, target) {window_relayout(app, w)}
-			cursor_blink_reset(w)
+		if other != tree.focus {
+			tab := selected_tab(w.workspace)
+			swap := Pane_Operation{place = .Swap, source = tab, destination = tab, node = tree.focus,
+				target = other, slot = layout.INVALID_NODE}
+			_ = pane_rearrange(app, w, swap)
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
-		direction := layout.Direction(int(action) - int(Action.Focus_Left))
 		start := pane_action_focus(w)
-		target := layout.focus_direction(pane_action_rects(app, w), start, direction)
+		other := layout.focus_direction(pane_action_rects(app, w), start, param.direction)
 		// Leaving a floating group's outer edge continues from the tiled pane behind it.
-		if target == start && layout.is_floating(w.tree, start) {
-			target = layout.focus_direction(window_tiled_rects(w), layout.focus_tiled(w.tree), direction)
+		tree := window_tree(w)
+		if other == start && layout.is_floating(tree, start) {
+			tiled := window_tiled_rects(w)
+			other = layout.focus_direction(tiled, layout.focus_tiled(tree), param.direction)
 		}
-		pane_focus(app, w, target)
-	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
-		resize_pane(app, w, action, 10)
-	case .Resize_Left_Large, .Resize_Right_Large, .Resize_Up_Large, .Resize_Down_Large:
-		resize_pane(app, w, action, 50)
+		pane_focus(app, w, other)
+	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down, .Resize_Left_Large, .Resize_Right_Large,
+	     .Resize_Up_Large, .Resize_Down_Large:
+		step := param.resize
+		tree := window_tree(w)
+		if layout.resize_pixels(tree, tree.focus, step.axis, step.pixels, w.dividers[:]) {
+			window_relayout(app, w)
+		}
 	case .Toggle_Tabs_Rail:
+		// Only the vertical tabs have a rail.
 		if !w.tabs_horizontal {rail_toggle(app, w)}
 	case .Toggle_Tabs_Orientation:
 		toggle_tab_orientation(app)
@@ -787,44 +977,24 @@ run_action :: proc(
 	case .Status_Inbox:
 		status_inbox_toggle(app, w)
 	case .Status_Panel:
-		settings_toggle_bool(app, "status.panel", &app.settings.status.panel)
+		panel := app.settings.status.panel ? "false" : "true"
+		settings_save_value(app, "status.panel", panel, "Could not save the setting.")
 	case .Status_Dismiss_Finished:
 		status_dismiss_finished(app, w)
-	case .Pane_List, .Pane_Status, .Pane_Read, .Pane_Send, .Pane_Focus, .App_Commands:
-	// command_invoke answers these; they have no form that acts on a window's focus.
 	}
-}
-
-// Moves the divider on the pressed arrow's axis by `amount` pixels toward the pressed side.
-@(private)
-resize_pane :: proc(app: ^App, w: ^Window, action: Action, amount: f32) {
-	axis: layout.Axis
-	delta: f32
-	#partial switch action {
-	case .Resize_Left, .Resize_Left_Large:
-		axis, delta = .Horizontal, -amount
-	case .Resize_Right, .Resize_Right_Large:
-		axis, delta = .Horizontal, amount
-	case .Resize_Up, .Resize_Up_Large:
-		axis, delta = .Vertical, -amount
-	case .Resize_Down, .Resize_Down_Large:
-		axis, delta = .Vertical, amount
-	case:
-	}
-	if layout.resize_pixels(w.tree, w.tree.focus, axis, delta, w.dividers[:]) {
-		window_relayout(app, w)
-	}
+	return {}
 }
 
 // The panes sharing the focused pane's arrangement: its floating group, or the tiled panes.
 @(private)
 pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
-	root := layout.float_root(w.tree, w.tree.focus)
+	tree := window_tree(w)
+	root := layout.float_root(tree, tree.focus)
 	if root != layout.INVALID_NODE {
 		floats := floating_rects(w)
 		start := -1
 		for pane, i in floats {
-			same := layout.float_root(w.tree, pane.node) == root
+			same := layout.float_root(tree, pane.node) == root
 			if same && start < 0 {start = i}
 			if !same && start >= 0 {return floats[start:i]}
 		}
@@ -832,303 +1002,12 @@ pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
 	}
 	if !pane_view_solo(w) {return window_tiled_rects(w)}
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	layout.compute(w.tree, window_content_area(app, w), window_gap(app, w), &rects, false)
+	layout.compute(tree, window_content_area(app, w), window_gap(app, w), &rects)
 	return rects[:]
 }
 
 @(private)
 pane_action_focus :: proc(w: ^Window) -> layout.Node_Id {
-	return layout.is_floating(w.tree, w.tree.focus) ? w.tree.focus : layout.focus_tiled(w.tree)
-}
-
-copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
-	text, selected := term.selection_text(entry.session, context.temp_allocator)
-	if !selected {
-		return
-	}
-	if !platform.clipboard_set_text(&app.platform, text) {
-		notify(app, .Error, "Could not copy to the clipboard.")
-	} else {
-		ui.notices_put(
-			&app.notices,
-			u32(Notice_Key.Copy),
-			.Success,
-			"Copied to clipboard",
-			COPY_NOTICE_DURATION,
-		)
-		mark_all_dirty(app)
-		if explicit {term.clear_selection(entry.session)}
-	}
-}
-
-// Pastes the clipboard's first line into the find bar.
-find_paste :: proc(app: ^App, w: ^Window) {
-	text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
-	if !ok || len(text) == 0 {
-		return
-	}
-	line := text
-	if end := strings.index_any(text, "\r\n"); end >= 0 {
-		line = text[:end]
-	}
-	on_find_outcome(app, w, find_target(app, w), ui.find_text(&w.find, line))
-}
-
-// A multiline paste waiting to be confirmed; nil is Idle. Armed names the pane's session, so only a
-// second paste into that pane within the wait counts as the confirmation. The Paste notice shows the
-// wait: arming puts it, cancelling clears it, and it expires with the arm. The procs below are the
-// only writers.
-Paste_Confirm :: union {
-	Paste_Armed,
-}
-
-Paste_Armed :: struct {
-	session: u32,
-	until:   time.Tick,
-}
-
-// Pastes into the shell. Text the shell would run line by line waits for a second paste into the
-// same pane within PASTE_CONFIRM_DURATION.
-paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
-	text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
-	if !ok || len(text) == 0 {
-		return
-	}
-	if entry.status != .Running {
-		notify(app, .Error, "Could not paste: the shell is not running.")
-		return
-	}
-	now := time.tick_now()
-	armed, is_armed := w.paste_confirm.(Paste_Armed)
-	confirmed :=
-		!app.settings.terminal.confirm_multiline_paste ||
-		(is_armed && armed.session == entry.id && time.tick_diff(now, armed.until) > 0)
-	switch term.paste(entry.session, text, confirmed) {
-	case .Sent:
-		paste_confirm_cancel(app, w)
-	case .Unsafe:
-		// The notice expires no earlier than the arm, so its wake-up finds the arm already over.
-		w.paste_confirm = Paste_Armed{entry.id, time.tick_add(now, PASTE_CONFIRM_DURATION)}
-		ui.notices_put(
-			&app.notices,
-			u32(Notice_Key.Paste),
-			.Warning,
-			PASTE_CONFIRM_TEXT,
-			PASTE_CONFIRM_DURATION,
-		)
-		mark_all_dirty(app)
-	case .Failed:
-		notify(app, .Error, "Could not paste: the shell is not accepting input.")
-	}
-}
-
-paste_confirm_cancel :: proc(app: ^App, w: ^Window) {
-	if w.paste_confirm == nil {
-		return
-	}
-	w.paste_confirm = nil
-	ui.notices_clear(&app.notices, u32(Notice_Key.Paste))
-	mark_all_dirty(app)
-}
-
-// Ends an arm whose wait ran out. Its notice expires by itself.
-paste_confirm_expire :: proc(w: ^Window, now: time.Tick) {
-	if armed, ok := w.paste_confirm.(Paste_Armed); ok && time.tick_diff(now, armed.until) <= 0 {
-		w.paste_confirm = nil
-	}
-}
-
-// What the window's find bar searches: whatever its focused pane shows.
-Find_Target :: union {
-	^Session_Entry,
-	^Markdown_Pane,
-}
-
-@(require_results)
-find_target :: proc(app: ^App, w: ^Window) -> Find_Target {
-	if pane := markdown_focused(app, w); pane != nil {return pane}
-	if entry := focused_session(app, w); entry != nil {return entry}
-	return nil
-}
-
-@(private)
-find_target_set :: proc(target: Find_Target, needle: string, options: term.Search_Options = {}) {
-	switch t in target {
-	case ^Session_Entry:
-		if t != nil {term.search_set_needle(t.session, needle, options)}
-	case ^Markdown_Pane:
-		if t != nil {markdown.search_set(&t.search, needle, options)}
-	}
-}
-
-@(private)
-find_target_select :: proc(w: ^Window, target: Find_Target, older: bool) {
-	switch t in target {
-	case ^Session_Entry:
-		if t != nil {term.search_select(t.session, older)}
-	case ^Markdown_Pane:
-		if t != nil {markdown_find_select(w, t, older)}
-	}
-}
-
-@(require_results)
-find_target_summary :: proc(target: Find_Target) -> (summary: term.Search_Summary, ok: bool) {
-	switch t in target {
-	case ^Session_Entry:
-		if t != nil {return term.search_summary(t.session), true}
-	case ^Markdown_Pane:
-		if t != nil {return markdown_find_summary(t), true}
-	}
-	return {}, false
-}
-
-// Opens find, gives an open bar back the keyboard, or closes a bar that has it.
-find_toggle :: proc(app: ^App, w: ^Window, target: Find_Target) {
-	t := app.settings.terminal
-	switch {
-	case !ui.find_is_open(&w.find):
-		ui.find_open(&w.find, &app.find_history, t.find_keep_query, t.find_select_query)
-		on_find_outcome(app, w, target, .Changed)
-	case !ui.find_has_keyboard(&w.find):
-		ui.find_focus(&w.find, t.find_select_query)
-	case:
-		find_close(app, w, target)
-	}
-	w.dirty = true
-}
-
-// Ends the search and leaves the viewport where the search put it.
-find_close :: proc(app: ^App, w: ^Window, target: Find_Target) {
-	ui.find_close(&w.find, &app.find_history)
-	w.dirty = true
-	find_target_set(target, "")
-}
-
-find_options :: proc(w: ^Window) -> term.Search_Options {
-	return {case_sensitive = w.find.case_sensitive, regex = w.find.regex}
-}
-
-on_find_outcome :: proc(app: ^App, w: ^Window, target: Find_Target, outcome: ui.Find_Outcome) {
-	if outcome == .None {
-		return
-	}
-	w.dirty = true
-	if target == nil {
-		return
-	}
-	switch outcome {
-	case .None, .Moved:
-	case .Changed:
-		find_target_set(target, ui.field_string(&w.find.query), find_options(w))
-	case .Older, .Newer:
-		ui.find_history_add(&app.find_history, &w.find)
-		find_target_select(w, target, outcome == .Older)
-	case .Closed:
-		find_close(app, w, target)
-	case .Case_Toggle, .Regex_Toggle, .Close:
-	}
-}
-
-// A key while the bar has the keyboard edits the query; none reach the pane.
-find_bar_key :: proc(app: ^App, w: ^Window, e, logical: platform.Key_Event) {
-	outcome: ui.Find_Outcome
-	switch clipboard_chord(logical) {
-	case .Copy:
-		clipboard_copy(app, ui.field_selected_text(&w.find.query))
-	case .Cut:
-		if clipboard_copy(app, ui.field_selected_text(&w.find.query)) {outcome = ui.find_text(&w.find, "")}
-	case .Paste:
-		find_paste(app, w)
-	case .None:
-		outcome = ui.find_key(&w.find, logical, &app.find_history)
-	}
-	if outcome == .Closed {key_suppress(w, e)}
-	target := find_target(app, w)
-	// A terminal is read from its newest line up and a document from its first line down, so Enter
-	// follows the reading direction. The bar's arrows always point the way they move.
-	if _, document := target.(^Markdown_Pane); document {
-		#partial switch outcome {
-		case .Older:
-			outcome = .Newer
-		case .Newer:
-			outcome = .Older
-		}
-	}
-	on_find_outcome(app, w, target, outcome)
-}
-
-// The find bar's match count: "3 of 17" once a match is selected. A search that failed has found nothing.
-find_presentation :: proc(w: ^Window, target: Find_Target) -> (label: string, enabled: bool) {
-	s, ok := find_target_summary(target)
-	if !ok || len(w.find.query.bytes) == 0 { return "0 of 0", false }
-	switch s.progress {
-	case .Invalid:
-		return "Invalid expression", false
-	case .Searching:
-		return fmt.tprintf("%d of %d · Searching…", s.selected + 1, s.total), s.total > 0
-	case .Off, .Complete, .Failed:
-	}
-	if s.total == 0 { return "0 of 0", false }
-	return fmt.tprintf("%d of %d", s.selected + 1, s.total), true
-}
-
-find_controls :: proc(w: ^Window, target: Find_Target) -> (l: ui.Find_Layout, enabled: bool) {
-	label, available := find_presentation(w, target)
-	text := ui.text_styled(&w.ui_text, .Detail)
-	return ui.find_layout(f32(w.width), w.scale, ui.text_width(&text, label)), available
-}
-
-@(private)
-binding_comment :: proc(info: Action_Info) -> string {
-	if len(info.shortcuts) == 0 {return fmt.tprintf("keys.%s =", info.name)}
-	set := commands.Shortcut_Set{info.shortcuts, len(info.shortcuts)}
-	value := commands.shortcut_set_text(set, context.temp_allocator)
-	return fmt.tprintf("keys.%s = %s", info.name, value)
-}
-
-// The settings file's shortcut comments: a heading, then one line per command a key can run.
-@(private)
-binding_comments :: proc() -> (lines: [len(Action) + 1]string, count: int) {
-	lines[0] =
-		"Shortcuts: uncomment a line to change it. Separate several with commas; " +
-		"leave the value empty to remove them."
-	count = 1
-	@(static, rodata)
-	actions := ACTIONS
-	@(static, rodata)
-	arguments := ACTION_ARGUMENTS
-	for info, action in actions {
-		if arguments[action].hidden {continue}
-		lines[count] = binding_comment(info)
-		count += 1
-	}
-	return
-}
-
-@(private)
-settings_diagnostic :: proc(
-	app: ^App,
-	diagnostics: ^[dynamic]settings.Diagnostic,
-	line: int,
-	key, message: string,
-	kind: settings.Diagnostic_Kind = .Invalid_Value,
-) {
-	if err := settings.diagnostic_append(diagnostics, line, key, message, kind); err != nil {
-		log.errorf("recording shortcut diagnostic failed: %v", err)
-		notify(app, .Error, message)
-	}
-}
-
-@(private)
-apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
-	report, report_error := binding_report(&app.registry, &app.settings)
-	for issue in report.issues {
-		message := binding_issue_text(issue, app.settings_path)
-		settings_diagnostic(app, diagnostics, issue.line, issue.key, message, issue.severity)
-	}
-	if report_error != nil {
-		notify(app, .Error, "Could not allocate shortcut bindings.")
-		return
-	}
-	app.leader = report.leader
+	tree := window_tree(w)
+	return layout.is_floating(tree, tree.focus) ? tree.focus : layout.focus_tiled(tree)
 }

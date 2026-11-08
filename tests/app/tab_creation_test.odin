@@ -2,7 +2,6 @@ package app_test
 
 import app "../../src"
 import "aio:input"
-import "aio:platform"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
@@ -31,7 +30,6 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 	if !testing.expect_value(t, table_error, nil) {return}
 	defer ui.profile_table_destroy(&table)
 	testing.expect_value(t, len(table.rows), 4)
-	testing.expect_value(t, len(table.detected), 0)
 	w: app.Window
 	app.profile_menu_init(&w.profile_menu)
 	defer app.profile_menu_destroy(&w.profile_menu)
@@ -40,22 +38,23 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 		expected := 0
 		for row in table.rows {
 			if row.hidden || row.command == "" {continue}
-			if !testing.expect(t, expected < w.profile_menu.count) {return}
-			entry := w.profile_menu.entries[expected]
-			testing.expect_value(t, entry.profile_id, row.id)
-			testing.expect_value(t, entry.visible_index, expected)
+			entry, listed := app.profile_menu_entry(&w.profile_menu, expected)
+			if !testing.expect(t, listed) {return}
+			testing.expect_value(t, entry.action, app.Profile_Menu_Action.Profile)
+			testing.expect_value(t, app.profile_menu_entry_id(&entry), row.id)
 			testing.expect_value(t, w.profile_menu.items[expected].label, row.name)
 			expected += 1
 		}
 		_, swap := mode.(app.Profile_Menu_Swap_Pane)
-		testing.expect_value(t, w.profile_menu.count, expected + (swap ? 3 : 0))
+		testing.expect_value(t, len(w.profile_menu.items), expected + (swap ? 3 : 0))
+		testing.expect_value(t, w.profile_menu.count, len(w.profile_menu.items))
 	}
 }
 
 @(private="file")
 creation_click :: proc(s: ^app.App, w: ^app.Window, r: render.Rect, button: input.Mouse_Button) {
 	for pressed in ([?]bool{true, false}) {
-		app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = button, pressed = pressed,
+		app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = button, pressed = pressed,
 			x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
 	}
 }
@@ -82,19 +81,20 @@ profile.order = default, cmd, hidden
 		chevron := horizontal ? app.tab_chevron_rect(s, w) : app.rail_profile_rect(w)
 		creation_click(s, w, chevron, .Left)
 		if !testing.expect(t, app.profile_menu_shown(w)) {return}
-		testing.expect_value(t, app.gesture_rail_pressed(w), -1)
+		testing.expect(t, app.gesture_tab_pressed(w) == nil)
 		testing.expect_value(t, len(w.workspace.tabs), count)
 		shown, _ := w.overlay.(app.Overlay_Profile_Menu)
 		_, new_tab := shown.mode.(app.Profile_Menu_New_Tab)
 		testing.expect(t, new_tab)
 		cmd := -1
-		for entry, i in w.profile_menu.entries[:w.profile_menu.count] {
-			testing.expect(t, entry.profile_id != "hidden")
-			if entry.profile_id == "cmd" {cmd = i}
+		for i in 0 ..< len(w.profile_menu.items) {
+			entry, _ := app.profile_menu_entry(&w.profile_menu, i)
+			testing.expect(t, app.profile_menu_entry_id(&entry) != "hidden")
+			if app.profile_menu_entry_id(&entry) == "cmd" {cmd = i}
 		}
 		if !testing.expect(t, cmd >= 0) {return}
 		ui.menu_select(&w.profile_menu.menu, cmd)
-		app.handle_event(s, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+		app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 		testing.expect(t, !app.profile_menu_shown(w))
 		testing.expect_value(t, len(w.workspace.tabs), count + 1)
 		testing.expect_value(t, app.focused_session(s, w).profile_id, "cmd")
@@ -105,9 +105,9 @@ profile.order = default, cmd, hidden
 		creation_click(s, w, plus, .Right)
 		testing.expect(t, app.profile_menu_shown(w))
 		testing.expect_value(t, len(w.workspace.tabs), count + 1)
-		app.handle_event(s, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+		app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 		testing.expect(t, !app.profile_menu_shown(w))
-		testing.expect_value(t, app.gesture_rail_pressed(w), -1)
+		testing.expect(t, app.gesture_tab_pressed(w) == nil)
 		creation_click(s, w, plus, .Left)
 		testing.expect_value(t, len(w.workspace.tabs), count + 2)
 		testing.expect_value(t, app.focused_session(s, w).profile_id, "default")
@@ -132,18 +132,22 @@ profile.order = default, cmd
 	app.tab_new(s, w)
 	second := app.focused_session(s, w).id
 	app.tab_select(s, w, 0)
-	node := w.tree.focus
-	app.profile_menu_open_pane(s, w, node, 20, 20)
+	node := app.window_tree(w).focus
+	for pane in w.panes {
+		if pane.node == node {app.profile_menu_open_pane(s, w, pane)}
+	}
 	cmd := -1
-	for entry, i in w.profile_menu.entries[:w.profile_menu.count] {
-		if entry.profile_id == "cmd" {cmd = i}
+	for i in 0 ..< len(w.profile_menu.items) {
+		entry, _ := app.profile_menu_entry(&w.profile_menu, i)
+		if app.profile_menu_entry_id(&entry) == "cmd" {cmd = i}
 	}
 	if !testing.expect(t, cmd >= 0) {return}
 	// Replace the displayed tree without a user focus-leave: asynchronous layout changes need not pass
 	// through tab_select's overlay cancellation.
 	w.workspace.selected = 1
-	w.tree = &w.workspace.tabs[1].tree
-	if !testing.expect(t, first != second && w.tree.focus == node && app.profile_menu_shown(w)) {return}
+	if !testing.expect(t, first != second && app.window_tree(w).focus == node && app.profile_menu_shown(w)) {
+		return
+	}
 	ui.menu_select(&w.profile_menu.menu, cmd)
 	app.profile_menu_choose(s, w)
 	testing.expect(t, !app.profile_menu_shown(w) && app.confirmation_asking(w, app.Pane_Swap) == nil)

@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "aio:term"
@@ -54,11 +55,11 @@ pointer_find_bar_over_activity_panel_owns_hover_cursor_and_press :: proc(t: ^tes
 		pointer_expect_move(t, s, w, point.x, point.y, .Hand)
 		testing.expect(t, w.status.panel_hover == nil)
 	}
-	testing.expect_value(t, w.find.hover, ui.Find_Outcome.Close)
+	testing.expect_value(t, w.find.hover, ui.Find_Button.Close)
 
 	gesture_button(s, w, .Left, true, toggle.x, toggle.y)
 	gesture_button(s, w, .Left, false, toggle.x, toggle.y)
-	testing.expect(t, w.find.regex)
+	testing.expect(t, w.find.options.regex)
 	gesture_button(s, w, .Left, true, close.x, close.y)
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect(t, !ui.find_is_open(&w.find))
@@ -106,14 +107,14 @@ pointer_open_menu_owns_the_window_and_clears_hover_beneath :: proc(t: ^testing.T
 	windows := len(s.windows)
 	caption := [2]f32{f32(w.width) - 23 * w.scale, 20 * w.scale}
 	pointer_expect_move(t, s, w, caption.x, caption.y, .Arrow)
-	testing.expect_value(t, w.caption_hover, 2)
+	testing.expect_value(t, w.caption_hover, platform.Caption_Button.Close)
 	app.tab_menu_open(s, w, 0, 40 * w.scale, 60 * w.scale)
 	if !testing.expect(t, app.tab_menu_shown(w)) {return}
 	testing.expect_value(t, app.pointer_target(s, w, caption.x, caption.y), app.Pointer_Target.Tab_Menu)
-	menu, _ := app.tab_menu_rect(w)
+	menu, _ := window_menu_rect(w, &w.tab_menu.menu)
 	testing.expect(t, !pointer_inside(menu, caption.x, caption.y), "the caption must lie outside the menu")
 	pointer_expect_move(t, s, w, caption.x, caption.y + 1, .Arrow)
-	testing.expect_value(t, w.caption_hover, -1)
+	testing.expect_value(t, w.caption_hover, nil)
 	gesture_button(s, w, .Left, true, caption.x, caption.y)
 	gesture_button(s, w, .Left, false, caption.x, caption.y)
 	testing.expect(t, !app.tab_menu_shown(w), "a press off the menu closes it")

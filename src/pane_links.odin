@@ -1,16 +1,18 @@
 package main
 
-import "aio:glyphs"
 import "aio:layout"
 import "aio:platform"
+import "aio:render"
 import "aio:ui"
 import "core:log"
 
 // A linked window shows part of a tab on its own, so panes that belong together can span monitors and still
 // switch with their tab (D-077, D-079). Its panes stay in their tab's tree, under a node marked linked, which
 // keeps every walk, close, move and saved layout correct without knowing about windows. The window displays
-// a private workspace that no list reaches, holding a copy of that subtree, and pane_links_sync keeps the two
-// matching and shows the window only while its tab is on screen.
+// a private workspace that no list reaches, holding a copy of that subtree. The tab's tree is the only place
+// panes join or leave a slot (pane_link_split, pane_moves.odin, closed_reopen_linked); the copy only arranges
+// them, and pane_link_reconcile, the one writer between the two, stores that arrangement or reloads the copy.
+// pane_links_sync reconciles every tick and shows the window only while its tab is on screen.
 
 // Where a linked pane lives: its own node, and the slot marked linked that holds it.
 Pane_Link_Home :: struct {
@@ -20,7 +22,7 @@ Pane_Link_Home :: struct {
 	slot:      layout.Node_Id,
 }
 
-// What a command does when a linked window runs it.
+// What a command does when a linked window runs it; each command's descriptor in ACTIONS names one.
 Pane_Link_Route :: enum u8 {
 	// Acts on the window's own panes, or on no pane at all.
 	Local,
@@ -30,78 +32,11 @@ Pane_Link_Route :: enum u8 {
 	Refuse,
 }
 
-@(private)
-pane_link_route :: proc(action: Action) -> Pane_Link_Route {
-	#partial switch action {
-	case .Show_Build_Info,
-	     .Command_Palette,
-	     .Palette_Tabs,
-	     .Palette_Workspaces,
-	     .Palette_Settings,
-	     .Palette_Commands,
-	     .Copy,
-	     .Paste,
-	     .Select_All,
-	     .Find,
-	     .Clear_Scrollback,
-	     .Scroll_Page_Up,
-	     .Scroll_Page_Down,
-	     .Scroll_Partial_Up,
-	     .Scroll_Partial_Down,
-	     .Font_Size_Increase,
-	     .Font_Size_Decrease,
-	     .Font_Size_Reset,
-	     .Open_Settings,
-	     .Reload_Settings,
-	     .Rename_Pane,
-	     .Restart_Shell,
-	     .Quit,
-	     .Close_Pane,
-	     .Keep_Pane_Open,
-	     .Zoom_Pane,
-	     .Fill_Window_Pane,
-	     .Fullscreen_Pane,
-	     .Linked_Window,
-	     .Show_Documents,
-	     .Focus_Left,
-	     .Focus_Right,
-	     .Focus_Up,
-	     .Focus_Down,
-	     .Focus_Previous,
-	     .Focus_Next,
-	     .Resize_Left,
-	     .Resize_Right,
-	     .Resize_Up,
-	     .Resize_Down,
-	     .Resize_Left_Large,
-	     .Resize_Right_Large,
-	     .Resize_Up_Large,
-	     .Resize_Down_Large,
-	     .Balance_Panes,
-	     .Swap_Left,
-	     .Swap_Right,
-	     .Swap_Up,
-	     .Swap_Down,
-	     .Swap_Previous,
-	     .Swap_Next,
-	     .Split,
-	     .Split_Left,
-	     .Split_Right,
-	     .Split_Up,
-	     .Split_Down,
-	     .Change_Pane_Shell:
-		return .Local
-	case .Move_Pane_Workspace, .Move_Pane_New_Workspace, .Float_Pane:
-		return .Refuse
-	}
-	return .Host
-}
-
 // The pane a command in this window acts on.
 @(private)
 pane_link_content :: proc(w: ^Window) -> layout.Content {
-	pane, _ := w.tree.nodes[w.tree.focus].(layout.Pane)
-	return pane.content
+	content, _ := window_focused_content(w)
+	return content
 }
 
 // Finds a linked pane by what it shows, which stays true as its tab moves between workspaces.
@@ -122,39 +57,41 @@ pane_link_home :: proc(app: ^App, content: layout.Content) -> (Pane_Link_Home, b
 // The slot a window shows. Any of its panes names it, since one may have closed since the last sync.
 @(private, require_results)
 pane_link_locate :: proc(app: ^App, w: ^Window) -> (Pane_Link_Home, bool) {
-	for node in w.tree.nodes {
-		pane := node.(layout.Pane) or_continue
-		if home, found := pane_link_home(app, pane.content); found {return home, true}
+	tree := window_tree(w)
+	for _, id in tree.nodes {
+		content, is_pane := layout.pane_content(tree, layout.Node_Id(id))
+		if !is_pane {continue}
+		if home, found := pane_link_home(app, content); found {return home, true}
 	}
 	return {}, false
 }
 
 pane_link_window_of :: proc(app: ^App, content: layout.Content) -> ^Window {
 	for w in app.windows {
-		if window_linked(w) && layout.find_content(w.tree, content) != layout.INVALID_NODE {return w}
+		if window_linked(w) && layout.find_content(window_tree(w), content) != layout.INVALID_NODE {return w}
 	}
 	return nil
 }
 
-// The tab and node a pane really lives in, and whether that node is in a linked slot. A linked
-// window's tab is a private copy, so its pane resolves to the tab that owns it.
-pane_link_origin :: proc(
+// Resolves the pane to its owning tab and decides whether it may leave that tab. A linked
+// window's tab is a private copy; its pane leaves the slot in the tab that owns it.
+pane_source_leaves :: proc(
 	app: ^App,
 	source: ^Tab,
 	node: layout.Node_Id,
 ) -> (
 	home: Pane_Link_Home,
-	linked, ok: bool,
+	linked, allowed: bool,
 ) {
-	if source == nil || int(node) >= len(source.tree.nodes) {return {}, false, false}
-	pane, is_pane := source.tree.nodes[node].(layout.Pane)
+	if source == nil {return {}, false, false}
+	content, is_pane := layout.pane_content(&source.tree, node)
 	if !is_pane {return {}, false, false}
-	if found, is_linked := pane_link_home(app, pane.content); is_linked {
+	if found, is_linked := pane_link_home(app, content); is_linked {
 		return found, true, true
 	}
 	workspace := pane_source_workspace(app, source)
 	if workspace == nil {return {}, false, false}
-	return {workspace = workspace, tab = source, node = node}, false, true
+	return {workspace = workspace, tab = source, node = node}, false, pane_link_tab_can_lose(source)
 }
 
 // A tab keeps one pane it can show. A pane may leave a tab that has another shown pane, or whose only
@@ -165,47 +102,34 @@ pane_link_tab_can_lose :: proc(tab: ^Tab) -> bool {
 	return layout.shown_pane_count(&tab.tree) > 1 || layout.pane_count(&tab.tree) <= 1
 }
 
-// Settles the window's copy against `home`'s slot. Panes join and leave in the tab's tree, so a
-// different set of panes there replaces the copy; the same panes arranged differently came from this
-// window and go back.
-pane_link_reconcile_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) -> Pane_Link_Home {
-	result := home
-	tree := &result.tab.tree
-	if !layout.slot_valid(tree, result.slot) {return result}
-	if layout.same_arrangement(tree, result.slot, w.tree, w.tree.root) {return result}
-	if layout.same_panes(tree, result.slot, w.tree, w.tree.root) {
-		if slot, stored := layout.link_view_store(tree, result.slot, w.tree); stored {
-			result.slot = slot
-		} else {
-			log.error("saving a linked window's arrangement failed")
-		}
-		layout_state_touch(app)
-		return result
-	}
-	_ = gesture_cancel(app, w)
-	focus_leave(app, w)
-	if layout.link_view_load(w.tree, tree, result.slot) != nil {
-		log.error("updating a linked window's panes failed")
-	}
-	window_relayout(app, w)
-	focus_enter(app, w)
-	layout_state_touch(app)
-	return result
-}
-
-pane_link_reconcile :: proc(app: ^App, w: ^Window) {
+// Brings linked window w's copy and its slot into agreement, the one place either is written from the other.
+// Panes join and leave in the tab's tree, so a different set of panes there reloads the copy; the same panes
+// arranged differently came from this window and are stored in the slot. Storing rebuilds the slot, so
+// callers find panes in the tab's tree again by content. False when the arrangement could not be stored.
+pane_link_reconcile :: proc(app: ^App, w: ^Window) -> bool {
 	home, found := pane_link_locate(app, w)
-	if !found {return}
-	_ = pane_link_reconcile_at(app, w, home)
+	if !found {return true}
+	tree := &home.tab.tree
+	shown := window_tree(w)
+	if !layout.slot_valid(tree, home.slot) {return true}
+	if layout.same_arrangement(tree, home.slot, shown, shown.root) {return true}
+	if layout.same_panes(tree, home.slot, shown, shown.root) {
+		_, stored := layout.link_view_store(tree, home.slot, shown)
+		if !stored {log.error("saving a linked window's arrangement failed")}
+		layout_state_touch(app)
+		return stored
+	}
+	pane_link_reload(app, w, home)
+	return true
 }
 
-// Reloads a linked window from the slot `home` names.
+// Reloads linked window w's copy from the slot `home` names, keeping its focused pane where it can.
 @(private)
-pane_link_refresh_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
+pane_link_reload :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
 	if home.tab == nil || !layout.slot_valid(&home.tab.tree, home.slot) {return}
-	_ = gesture_cancel(app, w)
+	if !gesture_cancel(app, w) {return}
 	focus_leave(app, w)
-	if layout.link_view_load(w.tree, &home.tab.tree, home.slot) != nil {
+	if layout.link_view_load(window_tree(w), &home.tab.tree, home.slot) != nil {
 		log.error("updating a linked window's panes failed")
 	}
 	pane_link_track(w, home)
@@ -218,25 +142,54 @@ pane_link_refresh_at :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
 // have changed; a window with no panes left closes.
 pane_link_refresh_source :: proc(app: ^App, w: ^Window, content: layout.Content) {
 	if w == nil || !window_linked(w) {return}
-	for node in w.tree.nodes {
-		pane := node.(layout.Pane) or_continue
-		if pane.content == content {continue}
-		if home, found := pane_link_home(app, pane.content); found {
-			pane_link_refresh_at(app, w, home)
+	tree := window_tree(w)
+	for _, id in tree.nodes {
+		candidate, is_pane := layout.pane_content(tree, layout.Node_Id(id))
+		if !is_pane || candidate == content {continue}
+		if home, found := pane_link_home(app, candidate); found {
+			pane_link_reload(app, w, home)
 			return
 		}
 	}
 	pane_link_end(app, w)
 }
 
-// Records a pane this window just added, which the next sync would otherwise take for one that left.
-pane_link_store :: proc(app: ^App, w: ^Window) {
-	home, found := pane_link_locate(app, w)
-	if !found {return}
-	if _, stored := layout.link_view_store(&home.tab.tree, home.slot, w.tree); !stored {
-		log.error("saving a linked window's panes failed")
+// Shows linked window w's slot again after `content` joined it in the tab's tree, focusing the pane there
+// when asked.
+pane_link_joined :: proc(app: ^App, w: ^Window, content: layout.Content, focus: bool) {
+	home, found := pane_link_home(app, content)
+	if !found {
+		log.error("the pane did not join the linked window")
+		return
 	}
-	layout_state_touch(app)
+	pane_link_reload(app, w, home)
+	if !focus {return}
+	if node := layout.find_content(window_tree(w), content); node != layout.INVALID_NODE {
+		pane_focus(app, w, node)
+	}
+}
+
+// Splits the pane at `node` of linked window w's copy with `content`. The new pane joins the slot in the
+// tab's tree, where panes join and leave, and the window then shows it with the rest of the slot.
+@(require_results)
+pane_link_split :: proc(
+	app: ^App,
+	w: ^Window,
+	node: layout.Node_Id,
+	direction: layout.Direction,
+	ratio: f32,
+	focus: bool,
+	content: layout.Content,
+) -> bool {
+	beside, is_pane := layout.pane_content(window_tree(w), node)
+	if !is_pane || !pane_link_reconcile(app, w) {return false}
+	home, found := pane_link_home(app, beside)
+	if !found {return false}
+	tree := &home.tab.tree
+	if _, err := layout.split_direction(tree, home.node, direction, ratio, content, join_slot = true);
+	   err != nil {return false}
+	pane_link_joined(app, w, content, focus)
+	return true
 }
 
 // The window showing the pane's tab, or the app's window when nothing shows it.
@@ -266,8 +219,8 @@ pane_link_window_create :: proc(
 ) -> ^Window {
 	view, allocation_error := new(Workspace)
 	if allocation_error != nil {return nil}
-	tab, record_error := tab_record_reserve(view)
-	if record_error != .None {workspace_destroy(view); return nil}
+	tab, reserved := tab_record_reserve(view)
+	if !reserved {workspace_destroy(view); return nil}
 	if layout.link_view_load(&tab.tree, tree, slot) != nil {
 		tab_record_free(tab)
 		workspace_destroy(view)
@@ -287,22 +240,23 @@ pane_link_toggle :: proc(app: ^App, w: ^Window) {
 	if window_linked(w) {pane_link_return_focused(app, w); return}
 	tab := selected_tab(w.workspace)
 	if tab == nil {return}
-	node := w.tree.focus
-	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
+	tree := window_tree(w)
+	node := tree.focus
+	content, is_pane := layout.pane_content(&tab.tree, node)
 	if !is_pane {return}
-	if !CONTENT_POLICY[pane.content.kind].linkable {
+	if !CONTENT_POLICY[content.kind].linkable {
 		notify(app, .Info, "Only a terminal pane can have a linked window.")
 		return
 	}
 	focus_leave(app, w)
 	defer focus_enter(app, w)
-	if !layout.set_linked(w.tree, node, true) {
+	if !layout.set_linked(tree, node, true) {
 		notify(app, .Info, "A tab must keep one pane in this window.")
 		return
 	}
-	linked := pane_link_window_create(app, w.tree, node, w.workspace)
+	linked := pane_link_window_create(app, tree, node, w.workspace)
 	if linked == nil {
-		if !layout.set_linked(w.tree, node, false) {log.error("returning the unlinked pane failed")}
+		if !layout.set_linked(tree, node, false) {log.error("returning the unlinked pane failed")}
 		notify(app, .Error, "Could not open a linked window. The pane was preserved.")
 		return
 	}
@@ -334,7 +288,7 @@ pane_link_return :: proc(app: ^App, w: ^Window) {
 @(private)
 pane_link_return_focused :: proc(app: ^App, w: ^Window) {
 	pane_link_reconcile(app, w)
-	if layout.pane_count(w.tree) <= 1 {pane_link_return(app, w); return}
+	if layout.pane_count(window_tree(w)) <= 1 {pane_link_return(app, w); return}
 	home, found := pane_link_home(app, pane_link_content(w))
 	if !found {return}
 	focused := w.focused
@@ -384,7 +338,7 @@ pane_link_show :: proc(app: ^App, w: ^Window, host: ^Window) {
 	}
 	w.phase, w.dirty = .Shown, true
 	link := &w.link.?
-	if link.maximize && !app.options.inactive {
+	if link.maximize && !activation_suppressed(app) {
 		platform.window_maximize(&app.platform, w.id)
 		if !link.activate && host != nil {_ = window_activate(app, host)}
 	}
@@ -433,7 +387,7 @@ pane_links_sync :: proc(app: ^App) {
 	}
 }
 
-pane_link_title_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+pane_link_title_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	tab := selected_tab(w.workspace)
 	if tab == nil {return .Ok}
 	inset := ui.SPACE_3 * w.scale
@@ -456,7 +410,7 @@ pane_link_restore :: proc(
 	workspace: ^Workspace,
 	tab: ^Tab,
 	node: layout.Node_Id,
-	saved_window: []platform.Window_Placement,
+	saved_window: []Saved_Window,
 ) {
 	w := pane_link_window_create(app, &tab.tree, node, workspace)
 	if w == nil {
@@ -464,16 +418,14 @@ pane_link_restore :: proc(
 		return
 	}
 	if len(saved_window) == 0 {return}
-	placement := saved_window[0]
+	saved := saved_window[0]
+	placement := platform.Window_Placement{saved.left, saved.top, saved.right, saved.bottom, saved.maximized}
 	if placement.right <= placement.left || placement.bottom <= placement.top {return}
 	if platform.window_set_placement(&app.platform, w.id, placement) != .None {
 		log.error("restoring a linked window's placement failed")
 		return
 	}
 	if link, linked := &w.link.?; linked {link.maximize = placement.maximized}
-	if dpi := platform.window_dpi(&app.platform, w.id); dpi != 0 && f32(dpi) / 96 != w.scale {
-		window_set_dpi(app, w, dpi)
-	}
-	width, height, size_error := platform.window_client_size(&app.platform, w.id)
-	if size_error == .None && (width != w.width || height != w.height) {window_resize(app, w, width, height)}
+	// A size that cannot be read leaves the window at the size it last knew.
+	_ = window_sync_placement(app, w)
 }

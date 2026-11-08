@@ -1,5 +1,6 @@
 package settings_test
 
+import "aio:colour"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
@@ -25,26 +26,16 @@ parse_color_accepts_pasted_representations :: proc(t: ^testing.T) {
 		{"HSB(0, 0%, 0%)", {0, 0, 0}, false},
 	}
 	for c in cases {
-		color, ok, alpha := settings.parse_color(c.text)
+		color, ok, alpha := colour.parse(c.text, .Permissive)
 		testing.expectf(t, ok, "%q should parse", c.text)
 		testing.expectf(t, color == c.color, "%q gave %v, expected %v", c.text, color, c.color)
 		testing.expectf(t, alpha == c.alpha, "%q alpha %v", c.text, alpha)
 	}
 	for text in ([?]string{"", "#12", "#ggg", "blue", "rgb(256, 0, 0)", "rgb(1, 2)", "hsl(0, 120%, 50%)",
 		"rgb(1, 2, 3", "rgb(nan, 0, 0)", "1 2 3 4 5", "#12345"}) {
-		_, ok, _ := settings.parse_color(text)
+		_, ok, _ := colour.parse(text, .Permissive)
 		testing.expectf(t, !ok, "%q should be rejected", text)
 	}
-}
-
-@(test)
-hsv_conversion_round_trips_primary_and_grey_colors :: proc(t: ^testing.T) {
-	for c in ([?]settings.Color{{255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {18, 52, 86}, {128, 128, 128}, {0, 0, 0}}) {
-		h, s, v := settings.rgb_to_hsv(c)
-		testing.expect_value(t, settings.hsv_to_rgb(h, s, v), c)
-	}
-	testing.expect_value(t, settings.hsv_to_rgb(-120, 1, 1), settings.Color{0, 0, 255})
-	testing.expect_value(t, settings.hsv_to_rgb(720, 2, 1), settings.Color{255, 0, 0})
 }
 
 @(test)

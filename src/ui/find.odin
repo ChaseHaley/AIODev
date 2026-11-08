@@ -1,9 +1,9 @@
 package ui
 
-import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
+import "aio:search"
 import "core:strings"
 import "core:time"
 
@@ -16,12 +16,12 @@ import "core:time"
 
 Find_Bar :: struct {
 	// Only the procedures in this file write it.
-	state:                 Find_State,
-	query:                 Text_Field,
-	case_sensitive, regex: bool,
-	hover:                 Find_Outcome,
-	armed:                 Armed(Find_Outcome),
-	motion:                [Find_Outcome]Control_Motion,
+	state:   Find_State,
+	query:   Text_Field,
+	options: search.Options,
+	hover:   Find_Button,
+	armed:   Armed(Find_Button),
+	motion:  [Find_Button]Control_Motion,
 }
 
 // nil is closed. The bar stays open without the keyboard after a click elsewhere, so the terminal takes
@@ -45,8 +45,8 @@ Find_Browsing :: struct {
 Find_Blurred :: struct {}
 
 Find_Entry :: struct {
-	query:                 string,
-	case_sensitive, regex: bool,
+	query:   string,
+	options: search.Options,
 }
 
 // Searches shared by every window, oldest first.
@@ -54,19 +54,26 @@ Find_History :: struct {
 	entries: [dynamic]Find_Entry,
 }
 
-Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, older, newer, close: render.Rect }
+Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, up, down, close: render.Rect }
 
-Find_Outcome :: enum {
+// What a key, text or click did to the bar.
+Find_Outcome :: union #no_nil {Find_Change, search.Step}
+
+Find_Change :: enum {
 	None,
 	Changed,
 	Moved,
-	Older,
-	Newer,
 	Closed,
-	// Pointer targets; activating one returns Changed or Closed.
+}
+
+// The bar's buttons, the pointer targets a press arms and a release activates.
+Find_Button :: enum {
+	None,
+	Up,
+	Down,
+	Close,
 	Case_Toggle,
 	Regex_Toggle,
-	Close,
 }
 
 find_init :: proc(f: ^Find_Bar, allocator := context.allocator) {
@@ -113,12 +120,19 @@ find_history_newest :: proc(h: ^Find_History) -> (Find_Entry, bool) {
 find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 	query := field_string(&f.query)
 	if h == nil || len(query) == 0 { return }
+	if last := len(h.entries) - 1; last >= 0 && h.entries[last].query == query {
+		h.entries[last].options = f.options
+		return
+	}
+	// The copy and its slot come first, so a search that cannot be recorded leaves the history as it was.
+	copied, err := strings.clone(query)
+	if err != nil { return }
+	if reserve(&h.entries, len(h.entries) + 1) != nil {
+		delete(copied)
+		return
+	}
 	for entry, i in h.entries {
 		if entry.query != query { continue }
-		if i == len(h.entries) - 1 {
-			h.entries[i].case_sensitive, h.entries[i].regex = f.case_sensitive, f.regex
-			return
-		}
 		delete(entry.query)
 		ordered_remove(&h.entries, i)
 		break
@@ -127,12 +141,7 @@ find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
 		delete(h.entries[0].query)
 		ordered_remove(&h.entries, 0)
 	}
-	copied, err := strings.clone(query)
-	if err != nil { return }
-	if _, append_error := append(&h.entries, Find_Entry{copied, f.case_sensitive, f.regex});
-	   append_error != nil {
-		delete(copied)
-	}
+	append(&h.entries, Find_Entry{copied, f.options})
 }
 
 // Opens with the keyboard. `restore` refills the newest search, and `select` also selects it so typing
@@ -176,20 +185,21 @@ find_edit :: proc(f: ^Find_Bar) {
 	if _, browsing := f.state.(Find_Browsing); browsing { find_enter(f, Find_Editing{}) }
 }
 
-// Handles a key while the bar has the keyboard. Enter moves to older matches and Shift+Enter to newer;
-// Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular expressions.
-find_key :: proc(f: ^Find_Bar, e: platform.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
+// Handles a key while the bar has the keyboard. Enter moves to the next match and Shift+Enter to the
+// previous; Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular
+// expressions.
+find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
 	if !e.pressed {
-		return .None
+		return Find_Change.None
 	}
 	alt := .Alt in e.modifiers && .Control not_in e.modifiers
 	#partial switch e.key {
 	case .Escape:
-		return .Closed
+		return Find_Change.Closed
 	case .Enter, .Numpad_Enter:
 		find_history_add(h, f)
 		find_edit(f)
-		return .Shift in e.modifiers ? .Newer : .Older
+		return .Shift in e.modifiers ? search.Step.Previous : search.Step.Next
 	case .Arrow_Up:
 		return find_recall(f, h, true)
 	case .Arrow_Down:
@@ -200,47 +210,46 @@ find_key :: proc(f: ^Find_Bar, e: platform.Key_Event, h: ^Find_History = nil) ->
 		if alt { return find_toggle(f, .Regex_Toggle) }
 	}
 	outcome := find_change(field_key(&f.query, e))
-	if outcome == .Changed { find_edit(f) }
+	if outcome == Find_Change.Changed { find_edit(f) }
 	return outcome
 }
 
 @(private)
-find_toggle :: proc(f: ^Find_Bar, target: Find_Outcome) -> Find_Outcome {
+find_toggle :: proc(f: ^Find_Bar, target: Find_Button) -> Find_Change {
 	#partial switch target {
 	case .Case_Toggle:
-		f.case_sensitive = !f.case_sensitive
+		f.options.case_sensitive = !f.options.case_sensitive
 	case .Regex_Toggle:
-		f.regex = !f.regex
+		f.options.regex = !f.options.regex
 	case:
-		return .None
+		return Find_Change.None
 	}
-	return .Changed
+	return Find_Change.Changed
 }
 
 // Steps through history like a shell prompt. The first step skips an entry equal to the current query, and
 // stepping past the newest entry restores the draft and ends browsing.
 @(private)
-find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Outcome {
-	if h == nil || len(h.entries) == 0 { return .None }
+find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Change {
+	if h == nil || len(h.entries) == 0 { return Find_Change.None }
 	count := len(h.entries)
 	browsing, is_browsing := &f.state.(Find_Browsing)
 	switch {
 	case older && !is_browsing:
 		next := count - 1
 		if h.entries[next].query == field_string(&f.query) { next -= 1 }
-		if next < 0 { return .None }
-		draft: Find_Entry
-		if copied, err := strings.clone(field_string(&f.query)); err == nil {
-			draft = {copied, f.case_sensitive, f.regex}
-		}
-		find_enter(f, Find_Browsing{next, draft})
+		if next < 0 { return Find_Change.None }
+		// Browsing must be able to restore the draft, so without a copy of it nothing is recalled.
+		copied, err := strings.clone(field_string(&f.query))
+		if err != nil { return Find_Change.None }
+		find_enter(f, Find_Browsing{next, {copied, f.options}})
 		find_show(f, h.entries[next])
 	case older:
-		if browsing.index == 0 { return .None }
+		if browsing.index == 0 { return Find_Change.None }
 		browsing.index -= 1
 		find_show(f, h.entries[browsing.index])
 	case !is_browsing:
-		return .None
+		return Find_Change.None
 	case browsing.index + 1 < count:
 		browsing.index += 1
 		find_show(f, h.entries[browsing.index])
@@ -248,30 +257,30 @@ find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Outcome
 		find_show(f, browsing.draft)
 		find_enter(f, Find_Editing{})
 	}
-	return .Changed
+	return Find_Change.Changed
 }
 
 @(private)
 find_show :: proc(f: ^Find_Bar, entry: Find_Entry) {
 	field_set(&f.query, entry.query)
-	f.case_sensitive, f.regex = entry.case_sensitive, entry.regex
+	f.options = entry.options
 }
 
 @(private)
-find_change :: proc(change: Field_Change) -> Find_Outcome {
+find_change :: proc(change: Field_Change) -> Find_Change {
 	switch change {
 	case .None:
-		return .None
+		return Find_Change.None
 	case .Moved:
-		return .Moved
+		return Find_Change.Moved
 	case .Edited:
 	}
-	return .Changed
+	return Find_Change.Changed
 }
 
 find_text :: proc(f: ^Find_Bar, text: string) -> Find_Outcome {
 	outcome := find_change(field_text(&f.query, text))
-	if outcome == .Changed { find_edit(f) }
+	if outcome == Find_Change.Changed { find_edit(f) }
 	return outcome
 }
 
@@ -298,9 +307,9 @@ find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 	l.close = {right - button, y, button, button}
 	edge := l.close.x - gap
 	if !stacked {
-		l.newer = {edge - button, y, button, button}
-		l.older = {l.newer.x - button, y, button, button}
-		l.status = {l.older.x - gap - status_width, y, status_width, button}
+		l.down = {edge - button, y, button, button}
+		l.up = {l.down.x - button, y, button, button}
+		l.status = {l.up.x - gap - status_width, y, status_width, button}
 		edge = l.status.x - gap
 	}
 	l.regex_toggle = {edge - toggle, y, toggle, button}
@@ -316,14 +325,14 @@ find_layout :: proc(width, scale: f32, status_width: f32 = 0) -> Find_Layout {
 			y += FIND_HEIGHT * scale
 			l.panel.height += FIND_HEIGHT * scale
 		}
-		l.newer = {right - button, y, button, button}
-		l.older = {l.newer.x - button, y, button, button}
-		if !separate { l.status.x = l.older.x - gap - l.status.width }
+		l.down = {right - button, y, button, button}
+		l.up = {l.down.x - button, y, button, button}
+		if !separate { l.status.x = l.up.x - gap - l.status.width }
 	}
 	// Tiny windows squeeze the controls; clip them so none reaches outside the panel.
 	content := render.Rect{left, l.panel.y, inner, l.panel.height}
 	controls_rects := [?]^render.Rect {
-		&l.query, &l.case_toggle, &l.regex_toggle, &l.status, &l.older, &l.newer, &l.close,
+		&l.query, &l.case_toggle, &l.regex_toggle, &l.status, &l.up, &l.down, &l.close,
 	}
 	for r in controls_rects { r^ = clip_rect(r^, content) }
 	return l
@@ -336,23 +345,23 @@ clip_rect :: proc(r, bounds: render.Rect) -> render.Rect {
 	return {x, r.y, max(0, right - x), r.height}
 }
 
-find_contains :: proc(l: Find_Layout, x, y: f32) -> bool { return contains(l.panel, x, y) }
+find_contains :: proc(l: Find_Layout, x, y: f32) -> bool { return render.rect_contains(l.panel, x, y) }
 
 // Toggles and close always respond; the arrows only when there are matches.
-find_hit :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> Find_Outcome {
-	if contains(l.close, x, y) { return .Close }
-	if contains(l.case_toggle, x, y) { return .Case_Toggle }
-	if contains(l.regex_toggle, x, y) { return .Regex_Toggle }
+find_hit :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> Find_Button {
+	if render.rect_contains(l.close, x, y) { return .Close }
+	if render.rect_contains(l.case_toggle, x, y) { return .Case_Toggle }
+	if render.rect_contains(l.regex_toggle, x, y) { return .Regex_Toggle }
 	if !enabled { return .None }
-	if contains(l.older, x, y) { return .Older }
-	if contains(l.newer, x, y) { return .Newer }
+	if render.rect_contains(l.up, x, y) { return .Up }
+	if render.rect_contains(l.down, x, y) { return .Down }
 	return .None
 }
 
 // Text over the query, a hand over an enabled button.
 find_pointer :: proc(l: Find_Layout, enabled: bool, x, y: f32) -> platform.Cursor_Shape {
 	if find_hit(l, enabled, x, y) != .None {return .Hand}
-	return contains(l.query, x, y) ? .Text : .Arrow
+	return render.rect_contains(l.query, x, y) ? .Text : .Arrow
 }
 
 find_hover :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, x, y: f32) -> bool {
@@ -381,24 +390,27 @@ find_animating :: proc(f: ^Find_Bar) -> bool {
 // gives it the keyboard.
 find_mouse :: proc(f: ^Find_Bar, l: Find_Layout, enabled: bool, button: input.Mouse_Button,
 	pressed: bool, x, y: f32) -> Find_Outcome {
-	if button != .Left { return .None }
+	if button != .Left { return Find_Change.None }
 	hit := find_hit(l, enabled, x, y)
 	if pressed {
 		find_focus(f)
 		armed_press(&f.armed, hit)
-		return .Moved
+		return Find_Change.Moved
 	}
 	fired, ok := armed_release(&f.armed, hit)
-	if !ok { return .Moved }
-	#partial switch fired {
-	case .Older, .Newer:
-		return fired
+	if !ok { return Find_Change.Moved }
+	switch fired {
+	case .None:
+	case .Up:
+		return search.Step.Up
+	case .Down:
+		return search.Step.Down
 	case .Close:
-		return .Closed
+		return Find_Change.Closed
 	case .Case_Toggle, .Regex_Toggle:
 		return find_toggle(f, fired)
 	}
-	return .Moved
+	return Find_Change.Moved
 }
 
 // Draws the bar with `status` (such as "3 of 17") right-aligned after the query.
@@ -411,7 +423,7 @@ find_draw :: proc(
 	enabled: bool,
 	width, height, scale: f32,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	input_text := text_styled(base, .Body)
 	count := text_styled(base, .Detail)
 	l := find_layout(width, scale, text_width(&count, status))
@@ -428,17 +440,17 @@ find_draw :: proc(
 	}
 	buttons := [?]struct {
 		area:   render.Rect,
-		action: Find_Outcome,
+		action: Find_Button,
 		icon:   Icon,
 		label:  string,
 		on:     bool,
 		live:   bool,
 	} {
-		{l.older, .Older, .Arrow_Up, "", false, enabled},
-		{l.newer, .Newer, .Arrow_Down, "", false, enabled},
+		{l.up, .Up, .Arrow_Up, "", false, enabled},
+		{l.down, .Down, .Arrow_Down, "", false, enabled},
 		{l.close, .Close, .Close, "", false, true},
-		{l.case_toggle, .Case_Toggle, {}, "Aa", f.case_sensitive, true},
-		{l.regex_toggle, .Regex_Toggle, {}, ".*", f.regex, true},
+		{l.case_toggle, .Case_Toggle, .None, "Aa", f.options.case_sensitive, true},
+		{l.regex_toggle, .Regex_Toggle, .None, ".*", f.options.regex, true},
 	}
 	for b in buttons {
 		if b.area.width <= 0 { continue }

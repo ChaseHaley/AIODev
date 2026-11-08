@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -76,13 +77,13 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	for name in ([?]string{"workspace.new", "workspace.change", "workspace.rename", "window.new"}) {
 		testing.expect(t, commands.find(&state.registry, name) != nil)
 	}
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(app.workspace_button_rect(w).x + 12 * w.scale), y = 20})
 	testing.expect(t, app.workspace_picker_active(&w.workspace_picker))
-	app.handle_event(&state, platform.Text_Event{window = w.id, text = "missing"})
+	app.handle_event(&state, input.Text_Event{window = w.id, text = "missing"})
 	testing.expect_value(t, len(w.workspace_picker.rows), 0)
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "missing")
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	app.run_action(&state, w, .New_Workspace)
 	app.rename_finish(&state, w, true)
@@ -96,8 +97,8 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect(t, !app.workspace_discard_empty(&state, original))
 	app.run_action(&state, w, .Rename_Workspace)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker) && app.chip_name_shown(w))
-	app.handle_event(&state, platform.Text_Event{window = w.id, text = "  Build tools  "})
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&state, input.Text_Event{window = w.id, text = "  Build tools  "})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect_value(t, two.name, "Build tools")
 	state.sessions[1].status = .Failed
 	app.workspace_picker_open(&state, w)
@@ -112,13 +113,13 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	state.sessions[1].status = .Running
 	app.workspace_picker_cancel(w)
 	testing.expect_value(t, two.id, u32(2))
-	testing.expect(t, app.rename_target_commit(&state, w,
-		{app.Rename_Kind.Workspace, two.id}, " \n\t ") == app.Rename_Outcome.Empty)
+	testing.expect(t, app.rename_target_commit(&state, app.Rename_Workspace_Target{two.id}, " \n\t ",
+		.Workspace_Row) == app.Rename_Outcome.Empty)
 	testing.expect_value(t, two.name, "Build tools")
 	app.run_action(&state, w, .Change_Workspace)
-	app.handle_event(&state, platform.Text_Event{window = w.id, text = original.name})
+	app.handle_event(&state, input.Text_Event{window = w.id, text = original.name})
 	testing.expect_value(t, len(w.workspace_picker.rows), 1)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
 	testing.expect(t, w.workspace == original)
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
 	testing.expect_value(t, term.process_id(first_session), first_pid)
@@ -129,13 +130,11 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	if !testing.expect(t, layout_ok && app.rail_docked(w)) { return }
 	row0 := app.rail_row_rect_for_tab(w, 0)
 	row1 := app.rail_row_rect_for_tab(w, 1)
-	row0_index := app.rail_row_index_for_tab(w.rail_rows[:], original, 0)
-	testing.expect_value(t, ui.rail_row_hit(layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), row0_index)
-	close := ui.rail_close_rect(layout, row0_index + 1, w.scale)
+	testing.expect_value(t, app.rail_tab_hit(w, layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), 0)
+	close := ui.rail_close_rect(layout, 1, w.scale)
 	hit := app.rail_tab_interaction_hit(w, close.x + close.width / 2, close.y + close.height / 2, .Left)
-	testing.expect_value(t, hit.kind, app.Tab_Interaction_Kind.Close)
-	testing.expect_value(t, hit.index, 1)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{1})
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row0.x + 20 * w.scale), y = i32(row0.y + 16 * w.scale)})
 	testing.expect_value(t, original.selected, 0)
 	grabbed := app.selected_tab(original)
@@ -191,9 +190,9 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	app.workspace_picker_text(&state, other, "Build tools")
 	r := app.workspace_picker_row_rect(other, 0)
 	app.tick(&state)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = other.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = other.id, button = .Left, pressed = true,
 		x = i32(r.x+20*other.scale), y = i32(r.y+17*other.scale)})
-	app.handle_event(&state, platform.Mouse_Button_Event{window = other.id, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = other.id, button = .Left,
 		x = i32(r.x+20*other.scale), y = i32(r.y+17*other.scale)})
 	testing.expect(t, other.workspace == two)
 	testing.expect(t, app.window_for_workspace(&state, three) == nil)

@@ -1,6 +1,6 @@
 package main
 
-import "aio:pty"
+import "aio:procinfo"
 import "aio:settings"
 import "aio:term"
 import "core:math"
@@ -19,15 +19,15 @@ pane_padding :: proc(app: ^App, scale: f32, entry: ^Session_Entry) -> f32 {
 
 // One process snapshot per interval serves padding groups and program icons alike, and is skipped
 // when neither is in use. The worker takes it; windows redraw only when a pane's padding or
-// program changes.
+// program changes. app.process_deadline, zero while nothing polls, is this poll's alone.
 update_processes :: proc(app: ^App) {
 	processes, ready := process_snapshot_take(&app.processes)
-	defer if ready {pty.process_snapshot_destroy(processes, app.processes.allocator)}
+	defer if ready {procinfo.process_snapshot_destroy(processes, app.processes.allocator)}
 	padding := app.settings.process.padding_groups != ""
-	icons := app.settings.tabs.program_icons
+	polling := program_polling(app)
 	running := false
 	for &entry in app.sessions {
-		if entry.status == .Running && icons {running = true; continue}
+		if entry.status == .Running && polling {running = true; continue}
 		if program_forget(&entry) {mark_all_dirty(app)}
 		running ||= entry.status == .Running && padding
 	}
@@ -35,7 +35,7 @@ update_processes :: proc(app: ^App) {
 	now := time.tick_now()
 	if app.process_deadline == {} || time.tick_diff(now, app.process_deadline) <= 0 {
 		app.process_deadline = time.tick_add(now, PROCESS_INTERVAL)
-		process_snapshot_request(&app.processes, app.platform_ready ? &app.platform : nil)
+		process_snapshot_request(&app.processes, process_worker_platform(app))
 	}
 	if len(processes) == 0 {return}
 	relayout, redraw := false, false
@@ -43,25 +43,40 @@ update_processes :: proc(app: ^App) {
 		if entry.status != .Running {continue}
 		root := term.process_id(entry.session)
 		if padding {relayout ||= padding_update(app, &entry, processes, root)}
-		if icons {redraw ||= program_update(app, &entry, processes, root)}
+		if polling {redraw ||= program_update(app, &entry, processes, root)}
 	}
 	if relayout {
 		for window in app.windows {window_relayout(app, window); window.dirty = true}
 	} else if redraw {mark_all_dirty(app)}
 }
 
+// When update_processes next asks for a snapshot; false while nothing polls.
+process_poll_deadline :: proc(app: ^App) -> (time.Tick, bool) {
+	return app.process_deadline, app.process_deadline != {}
+}
+
+// New settings may poll for other reasons, so the next update asks for a snapshot at once.
+process_poll_restart :: proc(app: ^App) {
+	app.process_deadline = {}
+}
+
 @(private)
-padding_update :: proc(app: ^App, entry: ^Session_Entry, processes: []pty.Process_Info, root: u32) -> bool {
-	index := pty.process_leaf(processes, root)
+padding_update :: proc(
+	app: ^App,
+	entry: ^Session_Entry,
+	processes: []procinfo.Process_Info,
+	root: u32,
+) -> bool {
+	index := procinfo.process_leaf(processes, root)
 	padding := app.settings.window.padding
-	entry.process_name_length = 0
+	entry.padding_leaf_length = 0
 	if index >= 0 {
-		entry.process_name_length = copy(entry.process_name[:], transmute([]u8)processes[index].executable)
+		entry.padding_leaf_length = copy(entry.padding_leaf[:], transmute([]u8)processes[index].executable)
 		for steps := 0; index >= 0 && steps <= len(processes); steps += 1 {
 			matched := false
 			padding, matched = settings.process_padding(&app.settings, processes[index].executable)
 			if matched || processes[index].id == root {break}
-			index = pty.process_ancestor(processes, index)
+			index = procinfo.process_ancestor(processes, index)
 			if index >= 0 && processes[index].id == root {break}
 		}
 	}

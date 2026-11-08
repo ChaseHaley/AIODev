@@ -6,22 +6,15 @@ import w "core:sys/windows"
 import "core:unicode/utf16"
 import "core:unicode/utf8"
 
-Native_Key :: struct {
-	vk, scan_code:     u16,
-	char:              u16,
-	control_key_state: u32,
-	repeat_count:      u16,
-}
-
 @(require_results)
 synthesize_key :: proc(
-	window: Window_Id,
+	window: input.Window_Id,
 	key: input.Key,
 	modifiers: input.Modifiers,
 	pressed: bool,
 	buffer: []u8,
 ) -> (
-	Key_Event,
+	input.Key_Event,
 	Error,
 ) {
 	scan, extended, mapped := scan_code_from_key(key)
@@ -85,7 +78,7 @@ synthesize_key :: proc(
 	}
 	if .Caps_Lock in modifiers {state[w.VK_CAPITAL] = 1}
 	if .Num_Lock in modifiers {state[w.VK_NUMLOCK] = 1}
-	e := Key_Event {
+	e := input.Key_Event {
 		window = window,
 		key = key,
 		modifiers = modifiers,
@@ -98,29 +91,11 @@ synthesize_key :: proc(
 		},
 	}
 	if !pressed {return e, .None}
-	layout := GetKeyboardLayout(0)
-	if layout == nil {
-		log.errorf("GetKeyboardLayout failed: %v", w.GetLastError())
-		return {}, .Os
-	}
-	empty: [256]u8
+	layout, layout_ok := keyboard_layout()
+	if !layout_ok {return {}, .Os}
+	e.unshifted = unshifted_rune(vk, scan, layout)
 	units: [8]u16
 	n := ToUnicodeEx(
-		vk,
-		u32(scan),
-		cast(^w.BYTE)&empty[0],
-		&units[0],
-		i32(len(units)),
-		TO_UNICODE_NO_STATE_CHANGE,
-		layout,
-	)
-	if n > 0 {
-		e.unshifted = rune(units[0])
-		if n >= 2 && utf16.is_surrogate(e.unshifted) {
-			e.unshifted = utf16.decode_surrogate_pair(rune(units[0]), rune(units[1]))
-		}
-	}
-	n = ToUnicodeEx(
 		vk,
 		u32(scan),
 		cast(^w.BYTE)&state[0],
@@ -131,27 +106,68 @@ synthesize_key :: proc(
 	)
 	if n <= 0 {return e, .None}
 	e.native.char = units[0]
+	high: u16
 	at := 0
-	for i := 0; i < int(n); i += 1 {
-		r := rune(units[i])
-		if utf16.is_surrogate(r) {
-			if i + 1 < int(n) &&
-			   units[i] >= 0xd800 &&
-			   units[i] <= 0xdbff &&
-			   units[i + 1] >= 0xdc00 &&
-			   units[i + 1] <= 0xdfff {
-				r = utf16.decode_surrogate_pair(r, rune(units[i + 1]))
-				i += 1
-			} else {
-				r = '\ufffd'
-			}
+	for i in 0 ..= int(n) {
+		runes: [2]rune
+		count := 0
+		if i < int(n) {
+			runes, count = utf16_feed(&high, units[i])
+		} else if high != 0 {
+			runes[0], count = '\ufffd', 1
 		}
-		bytes, size := utf8.encode_rune(r)
-		if size > len(buffer) - at {return {}, .Invalid_Argument}
-		at += copy(buffer[at:], bytes[:size])
+		for r in runes[:count] {
+			bytes, size := utf8.encode_rune(r)
+			if size > len(buffer) - at {return {}, .Invalid_Argument}
+			at += copy(buffer[at:], bytes[:size])
+		}
 	}
 	e.text = string(buffer[:at])
 	return e, .None
+}
+
+@(private, require_results)
+keyboard_layout :: proc() -> (HKL, bool) {
+	layout := GetKeyboardLayout(0)
+	if layout == nil {log.errorf("GetKeyboardLayout failed: %v", w.GetLastError())}
+	return layout, layout != nil
+}
+
+// The character the key types with no modifiers or dead key held, or 0 when it types none.
+@(private, require_results)
+unshifted_rune :: proc(vk: u32, scan: u16, layout: HKL) -> rune {
+	empty: [256]w.BYTE
+	units: [8]u16
+	flags := u32(TO_UNICODE_NO_STATE_CHANGE)
+	n := ToUnicodeEx(vk, u32(scan), &empty[0], &units[0], i32(len(units)), flags, layout)
+	if n <= 0 {return 0}
+	if n >= 2 && utf16.is_surrogate(rune(units[0])) {
+		return utf16.decode_surrogate_pair(rune(units[0]), rune(units[1]))
+	}
+	return rune(units[0])
+}
+
+// Feeds one UTF-16 unit to a decoder whose pending high surrogate is `high`, and returns the runes it
+// completes. A pair joins into one rune; an unpaired surrogate becomes U+FFFD. A high surrogate left
+// pending at the end of the text is the caller's to replace.
+@(private, require_results)
+utf16_feed :: proc(high: ^u16, unit: u16) -> (out: [2]rune, count: int) {
+	if unit >= 0xd800 && unit <= 0xdbff {
+		if high^ != 0 {out[0], count = '\ufffd', 1}
+		high^ = unit
+		return
+	}
+	if high^ != 0 {
+		pending := high^
+		high^ = 0
+		if unit >= 0xdc00 && unit <= 0xdfff {
+			out[0] = utf16.decode_surrogate_pair(rune(pending), rune(unit))
+			return out, 1
+		}
+		out[0], count = '\ufffd', 1
+	}
+	out[count] = unit >= 0xdc00 && unit <= 0xdfff ? '\ufffd' : rune(unit)
+	return out, count + 1
 }
 
 @(private)

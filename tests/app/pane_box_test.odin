@@ -5,6 +5,7 @@ import "core:math"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
+import "aio:settings"
 import "aio:term_view"
 import "aio:ui"
 
@@ -14,13 +15,14 @@ box_metrics :: proc(scale: f32) -> term_view.Metrics {
 }
 
 @(private="file")
-box_window :: proc(workspace: ^app.Workspace, scale: f32) -> app.Window {
+box_window :: proc(state: ^app.App, workspace: ^app.Workspace, scale: f32) -> app.Window {
 	w := app.Window {
 		workspace = workspace,
 		scale = scale,
 		metrics = box_metrics(scale),
 		width = i32(1000 * scale),
 		height = i32(650 * scale),
+		header_height = app.pane_header_row_height(state, scale),
 	}
 	app.rail_adaptive_update(&w)
 	return w
@@ -38,15 +40,13 @@ box_applied :: proc(
 	tree: layout.Layout
 	if !testing.expect_value(t, layout.init(&tree, {kind, 1}), nil) {return {}}
 	defer layout.destroy(&tree)
-	local := w^
-	local.tree = &tree
 	rects := make([dynamic]layout.Pane_Rect)
 	defer delete(rects)
-	layout.compute(&tree, app.window_content_area(state, &local),
-		app.window_gap(state, &local), &rects, false)
+	layout.compute(&tree, app.window_content_area(state, w),
+		app.window_gap(state, w), &rects)
 	if !testing.expect_value(t, len(rects), 1) {return {}}
-	return app.pane_box(local.metrics, rects[0].rect,
-		app.pane_insets(state, local.scale, nil))
+	return app.pane_box(w.metrics, rects[0].rect,
+		app.pane_insets(state, w, nil))
 }
 
 @(test)
@@ -60,19 +60,15 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 					state.settings.window.padding = padding
 					state.settings.pane.show_headers = headers
 					workspace: app.Workspace
-					w := box_window(&workspace, scale)
-					insets := app.pane_insets(&state, scale, nil)
+					w := box_window(&state, &workspace, scale)
+					insets := app.pane_insets(&state, &w, nil)
 					testing.expect_value(t, insets.header,
 						headers ? math.round(ui.HEADER_HEIGHT * scale) : 0)
 					for grid in ([?][2]u16{{80, 24}, {40, 10}, {1, 1}}) {
-						box, width, height := app.pane_box_for_grid(
-							&state,
-							scale,
-							w.metrics,
-							grid.x,
-							grid.y,
-							insets,
+						box, width, height, solved := app.pane_box_for_grid(
+							&state, w, grid.x, grid.y, insets, activity_dock = true,
 						)
+						testing.expect(t, solved)
 						testing.expect_value(t, box.columns, grid.x)
 						testing.expect_value(t, box.rows, grid.y)
 						w.width, w.height = width, height
@@ -96,12 +92,13 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 			state: app.App
 			state.settings.tabs.orientation = .Vertical
 			workspace: app.Workspace
-			w := box_window(&workspace, scale)
+			w := box_window(&state, &workspace, scale)
 			w.rail_width = width
-			insets := app.pane_insets(&state, scale, nil)
-			box, client_width, client_height := app.pane_box_for_grid(
-				&state, scale, w.metrics, 120, 24, insets, width,
+			insets := app.pane_insets(&state, &w, nil)
+			box, client_width, client_height, solved := app.pane_box_for_grid(
+				&state, w, 120, 24, insets, activity_dock = true,
 			)
+			testing.expect(t, solved)
 			w.width, w.height = client_width, client_height
 			app.rail_adaptive_update(&w)
 			applied := box_applied(t, &state, &w, .Terminal)
@@ -112,23 +109,49 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 	}
 }
 
+// window.columns and window.rows size a new window as if the Activity panel took no width beside the
+// pane, on either side; the docked panel then takes its width from the pane.
+@(test)
+new_window_size_leaves_out_the_docked_activity_panel :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "window-size-activity") {return}
+	s := &f.state
+	s.settings.window.columns, s.settings.window.rows = 120, 32
+	s.settings.status.enabled = true
+	s.settings.status.panel = false
+	without := app.initial_geometry(s)
+	s.settings.status.panel = true
+	s.settings.status.panel_width = 300
+	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
+		s.settings.status.panel_side = side
+		docked := app.initial_geometry(s)
+		testing.expect_value(t, docked.surface_width, without.surface_width)
+		testing.expect_value(t, docked.surface_height, without.surface_height)
+		testing.expect_value(t, docked.columns, without.columns)
+		testing.expect_value(t, docked.rows, without.rows)
+		testing.expect_value(t, docked.padding_left, without.padding_left)
+	}
+}
+
 @(test)
 pane_minimum_refusal_reports_the_grid_the_layout_applies_at_every_scale :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 2}) {
 		for settings_tab in ([?]bool{false, true}) {
-			state := app.App{next_session_id = 2}
+			state: app.App
 			ui.notices_init(&state.notices)
 			defer ui.notices_destroy(&state.notices)
 			state.settings.window.padding = 8
 			state.settings.pane.gap = 5
 			state.settings.pane.show_headers = true
 			shown_kind: layout.Content_Kind = settings_tab ? .Settings : .Terminal
-			shown_tree: layout.Layout
-			if !testing.expect_value(t, layout.init(&shown_tree, {shown_kind, 1}), nil) {return}
-			defer layout.destroy(&shown_tree)
+			shown_tab: app.Tab
+			if !testing.expect_value(t, layout.init(&shown_tab.tree, {shown_kind, 1}), nil) {return}
+			defer layout.destroy(&shown_tab.tree)
 			workspace: app.Workspace
-			w := box_window(&workspace, scale)
-			w.tree = &shown_tree
+			defer delete(workspace.tabs)
+			w := box_window(&state, &workspace, scale)
+			append(&workspace.tabs, &shown_tab)
 			shown := box_applied(t, &state, &w, shown_kind)
 			// A new tab or split guards a terminal pane, which is what the layout
 			// applies next whichever tab is on screen.

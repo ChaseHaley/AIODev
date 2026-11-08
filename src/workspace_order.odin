@@ -1,6 +1,6 @@
 package main
 
-import "aio:platform"
+import "aio:input"
 import "aio:ui"
 import "core:math"
 import "core:time"
@@ -21,9 +21,7 @@ workspace_reorder :: proc(app: ^App, id, target_id: u32) -> bool {
 		for i := from; i > to; i -= 1 {app.workspaces[i] = app.workspaces[i - 1]}
 	}
 	app.workspaces[to] = workspace
-	workspace_pickers_refresh(app, preserve_scroll = true)
-	layout_state_touch(app)
-	mark_all_dirty(app)
+	workspace_mutation_finish(app, workspace, {.Order})
 	return true
 }
 
@@ -164,7 +162,7 @@ workspace_order_animate :: proc(w: ^Window, enabled: bool, now: time.Tick) -> bo
 				if from < lift.to && index > from && index <= lift.to {target -= 1}
 				if lift.to < from && index >= lift.to && index < from {target += 1}
 			}
-			ui.motion_target(&entry.position, f32(target), 140 * time.Millisecond, .Decelerate, enabled, now)
+			ui.motion_target(&entry.position, f32(target), ui.REORDER_DURATION, .Decelerate, enabled, now)
 		}
 		changed = ui.motion_update(&entry.position, now) || changed
 		moving ||= ui.motion_active(entry.position)
@@ -187,7 +185,7 @@ workspace_order_lifted :: proc(p: ^Workspace_Picker, index: int) -> bool {
 	return settling && settle.id == id
 }
 
-workspace_order_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Event) -> bool {
+workspace_order_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) -> bool {
 	p := &w.workspace_picker
 	if workspace_order_grabbed(p) == 0 {return false}
 	if .Left not_in e.buttons {workspace_order_end(w); return false}
@@ -213,7 +211,7 @@ workspace_order_hover :: proc(app: ^App, w: ^Window, e: platform.Mouse_Move_Even
 	return true
 }
 
-workspace_order_release :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+workspace_order_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	p := &w.workspace_picker
 	id := workspace_order_grabbed(p)
 	if id == 0 {return}

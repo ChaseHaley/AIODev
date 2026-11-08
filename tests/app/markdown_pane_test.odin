@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:input"
 import "aio:layout"
@@ -56,7 +57,7 @@ open :: proc(state: ^app.App, path: string, focus := false) -> app.Outcome {
 	args := focus ? []string{"pane.open_markdown", "--focus", path} : []string{"pane.open_markdown", path}
 	invocation, err := commands.parse_invocation(&state.registry, args, context.temp_allocator)
 	if err.advice != "" {return {status = .Usage, message = err.advice}}
-	return app.command_invoke(state, nil, invocation, state.sessions[0].id)
+	return app.command_execute(state, app.Control_Request{state.sessions[0].id}, invocation)
 }
 
 // Runs the poll now rather than waiting for its interval.
@@ -97,10 +98,10 @@ opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^tes
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Open") {return}
 	w := f.state.windows[0]
-	before := w.tree.focus
+	before := app.window_tree(w).focus
 	opened := open(&f.state, f.file)
-	testing.expect_value(t, opened.status, commands.Status.Ok)
-	testing.expect_value(t, w.tree.focus, before)
+	testing.expect_value(t, opened.status, cli_protocol.Status.Ok)
+	testing.expect_value(t, app.window_tree(w).focus, before)
 	if !testing.expect_value(t, len(f.state.markdown_panes), 1) {return}
 	pane := f.state.markdown_panes[0]
 	testing.expect_value(t, load_name(pane), "Loaded")
@@ -111,7 +112,7 @@ opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^tes
 
 @(private = "file")
 find_settle :: proc(state: ^app.App) {
-	for app.markdown_find_pending(state) {app.markdown_find_tick(state)}
+	for app.find_pending(state) {app.find_tick(state)}
 }
 
 @(private = "file")
@@ -122,8 +123,8 @@ find_count :: proc(w: ^app.Window, pane: ^app.Markdown_Pane) -> string {
 
 @(private = "file")
 press :: proc(state: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.Modifiers = {}) {
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true})
-	app.handle_event(state, platform.Key_Event{window = w.id, key = key, modifiers = modifiers})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, modifiers = modifiers})
 }
 
 // Drives the bar through the real dispatcher: the keys and bar of terminal find, reading top down.
@@ -135,7 +136,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	body := strings.repeat("paragraph\n\n", 80, context.temp_allocator)
 	source := strings.concatenate({"needle first\n\n", body, "NEEDLE middle\n\n", body, "needle last\n"}, context.temp_allocator)
 	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	w := f.state.windows[0]
 	if !testing.expect(t, app.markdown_active(w)) {return}
 	pane := f.state.markdown_panes[0]
@@ -146,7 +147,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	app.run_action(&f.state, w, .Find)
 	testing.expect(t, ui.find_has_keyboard(&w.find))
 	testing.expect_value(t, find_count(w, pane), "0 of 0")
-	app.handle_event(&f.state, platform.Text_Event{w.id, "needle"})
+	app.handle_event(&f.state, input.Text_Event{w.id, "needle"})
 	testing.expect_value(t, ui.field_string(&w.find.query), "needle")
 	find_settle(&f.state)
 	testing.expect_value(t, find_count(w, pane), "0 of 3")
@@ -173,13 +174,13 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	// The bar's arrows move the way they point, whichever way Enter goes.
 	l, _ := app.find_controls(w, pane)
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = i32(l.older.x + 16),
-			y = i32(l.older.y + 16), button = .Left, pressed = down})
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.up.x + 16),
+			y = i32(l.up.y + 16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, find_count(w, pane), "2 of 3")
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = i32(l.newer.x + 16),
-			y = i32(l.newer.y + 16), button = .Left, pressed = down})
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(l.down.x + 16),
+			y = i32(l.down.y + 16), button = .Left, pressed = down})
 	}
 	testing.expect_value(t, find_count(w, pane), "3 of 3")
 
@@ -190,13 +191,13 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 
 	// Case and expression toggles, on their usual keys.
 	press(&f.state, w, .C, {.Alt})
-	testing.expect(t, w.find.case_sensitive)
+	testing.expect(t, w.find.options.case_sensitive)
 	find_settle(&f.state)
 	testing.expect_value(t, find_count(w, pane), "0 of 2")
 	press(&f.state, w, .C, {.Alt})
 	press(&f.state, w, .R, {.Alt})
-	testing.expect(t, w.find.regex)
-	app.handle_event(&f.state, platform.Text_Event{w.id, "("})
+	testing.expect(t, w.find.options.regex)
+	app.handle_event(&f.state, input.Text_Event{w.id, "("})
 	find_settle(&f.state)
 	testing.expect_value(t, find_count(w, pane), "Invalid expression")
 	press(&f.state, w, .Backspace)
@@ -225,7 +226,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
 	x, y := i32(shown.rect.x + shown.rect.width / 2), i32(shown.rect.y + shown.rect.height / 2)
 	for down in ([2]bool{true, false}) {
-		app.handle_event(&f.state, platform.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = down})
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = down})
 	}
 	testing.expect(t, ui.find_is_open(&w.find) && !ui.find_has_keyboard(&w.find) && pane.search.phase != .Off)
 	press(&f.state, w, .Escape)
@@ -246,10 +247,10 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	// A new query does not read the document the missing file left behind; the file's return does.
 	app.run_action(&f.state, w, .Find)
 	press(&f.state, w, .End)
-	app.handle_event(&f.state, platform.Text_Event{w.id, " last"})
+	app.handle_event(&f.state, input.Text_Event{w.id, " last"})
 	testing.expect_value(t, ui.field_string(&w.find.query), "needle last")
-	testing.expect(t, !app.markdown_find_pending(&f.state))
-	app.markdown_find_tick(&f.state)
+	testing.expect(t, !app.find_pending(&f.state))
+	app.find_tick(&f.state)
 	testing.expect_value(t, pane.search.next, 0)
 	testing.expect_value(t, find_count(w, pane), "0 of 0")
 	testing.expect_value(t, os.write_entire_file(f.file, "needle last\n"), nil)
@@ -269,8 +270,8 @@ a_pane_without_a_search_costs_no_wakeups :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Idle") {return}
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
-	testing.expect(t, !app.markdown_find_pending(&f.state))
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
+	testing.expect(t, !app.find_pending(&f.state))
 }
 
 @(test)
@@ -278,8 +279,8 @@ opening_a_shown_file_again_reuses_its_pane :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Reuse") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
-	testing.expect_value(t, open(&f.state, strings.to_upper(f.file, context.temp_allocator)).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
+	testing.expect_value(t, open(&f.state, strings.to_upper(f.file, context.temp_allocator)).status, cli_protocol.Status.Ok)
 	testing.expect_value(t, len(f.state.markdown_panes), 1)
 	testing.expect_value(t, app.tab_pane_count(f.state.windows[0].workspace.tabs[0]), 2)
 }
@@ -290,12 +291,12 @@ opening_refuses_unavailable_files_and_active_types :: proc(t: ^testing.T) {
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Refuse") {return}
 	missing := strings.concatenate({f.directory, "\\missing.md"}, context.temp_allocator)
-	testing.expect_value(t, open(&f.state, missing).status, commands.Status.Failed)
-	testing.expect_value(t, open(&f.state, "\\\\server\\share\\doc.md").status, commands.Status.Failed)
-	testing.expect_value(t, open(&f.state, "relative.md").status, commands.Status.Failed)
+	testing.expect_value(t, open(&f.state, missing).status, cli_protocol.Status.Failed)
+	testing.expect_value(t, open(&f.state, "\\\\server\\share\\doc.md").status, cli_protocol.Status.Failed)
+	testing.expect_value(t, open(&f.state, "relative.md").status, cli_protocol.Status.Failed)
 	script := strings.concatenate({f.directory, "\\run.cmd"}, context.temp_allocator)
 	testing.expect_value(t, os.write_entire_file(script, "echo hi"), nil)
-	testing.expect_value(t, open(&f.state, script).status, commands.Status.Failed)
+	testing.expect_value(t, open(&f.state, script).status, cli_protocol.Status.Failed)
 	testing.expect_value(t, len(f.state.markdown_panes), 0)
 }
 
@@ -305,7 +306,7 @@ a_markdown_id_is_never_read_as_a_session :: proc(t: ^testing.T) {
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Collide") {return}
 	w := f.state.windows[0]
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	// Both id spaces start at 1, so without the kind check this would find the first shell.
 	testing.expect(t, app.session_find(&f.state, pane.id) != nil)
@@ -318,12 +319,32 @@ a_markdown_id_is_never_read_as_a_session :: proc(t: ^testing.T) {
 	testing.expect_value(t, counts.sessions, 1)
 }
 
+// The palette and `command edit.copy` ask action_available, so it must agree with the keyboard, which
+// copies a document's selection.
+@(test)
+copy_is_available_in_a_document_with_a_selection :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Copy") {return}
+	w := f.state.windows[0]
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
+	if !testing.expect(t, app.markdown_active(w)) {return}
+	pane := f.state.markdown_panes[0]
+	document := app.markdown_document(pane)
+	if !testing.expect(t, document != nil) {return}
+	testing.expect(t, !app.action_available(&f.state, w, .Copy))
+	ui.markdown_select_all(&pane.view, document)
+	testing.expect(t, app.action_available(&f.state, w, .Copy))
+	ui.markdown_selection_clear(&pane.view)
+	testing.expect(t, !app.action_available(&f.state, w, .Copy))
+}
+
 @(test)
 the_poll_follows_changes_to_the_file :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Poll") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	revision := pane.revision
 	poll(&f.state)
@@ -348,7 +369,7 @@ a_file_that_failed_to_parse_is_read_again_only_once_it_changes :: proc(t: ^testi
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Failed") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	loaded, ok := pane.load.(app.Markdown_Loaded)
 	if !testing.expect(t, ok) {return}
@@ -372,7 +393,7 @@ files_past_the_limit_are_not_read :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Limit") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	large := make([]u8, 16 * 1024 * 1024 + 1)
 	defer delete(large)
@@ -387,9 +408,9 @@ closing_the_pane_frees_it_and_stops_the_poll :: proc(t: ^testing.T) {
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Close") {return}
 	w := f.state.windows[0]
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	testing.expect(t, f.state.markdown_deadline != {})
-	app.pane_close_at(&f.state, w.workspace, w.workspace.selected, w.tree.focus)
+	app.pane_close_at(&f.state, w.workspace, w.workspace.selected, app.window_tree(w).focus)
 	testing.expect_value(t, len(f.state.markdown_panes), 1)
 	poll(&f.state)
 	testing.expect_value(t, len(f.state.markdown_panes), 0)
@@ -419,7 +440,7 @@ layout_restore_reopens_files_and_keeps_a_pane_for_a_missing_one :: proc(t: ^test
 	defer delete(first.file)
 	defer delete(first.directory)
 	defer testing.expect_value(t, os.remove_all(first.directory), nil)
-	testing.expect_value(t, open(&first.state, first.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&first.state, first.file).status, cli_protocol.Status.Ok)
 	app.layout_state_save(&first.state)
 	app.app_destroy(&first.state)
 
@@ -471,7 +492,7 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	if !fixture_start(t, &f, "Pointer") {return}
 	source := "first paragraph\n\nsecond paragraph\n\n[link](https://a.example) after\n"
 	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	w := f.state.windows[0]
 	testing.expect(t, w.markdown_hover == nil, "a newly opened pane must not hover its first link")
 	pane := f.state.markdown_panes[0]
@@ -489,13 +510,13 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	y := g.top + line / 2
 
 	button := proc(state: ^app.App, w: ^app.Window, x, y: f32, pressed: bool) {
-		app.handle_event(state, platform.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+		app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
 			button = .Left, pressed = pressed})
 	}
 	button(&f.state, w, g.left + 1, y, true)
 	held, selecting := w.markdown_gesture.(app.Markdown_Selecting)
 	testing.expect(t, selecting && held.pane == pane.id)
-	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id, x = i32(g.left + g.width),
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(g.left + g.width),
 		y = i32(y), buttons = {.Left}})
 	testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "first paragraph")
 	testing.expect(t, w.markdown_hover == nil)
@@ -507,11 +528,11 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	for ui.markdown_link_at(&pane.view, g, g.left + 5, link_y) < 0 && link_y < g.area.y + g.area.height {
 		link_y += 1
 	}
-	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id, x = i32(g.left + 5), y = i32(link_y)})
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(g.left + 5), y = i32(link_y)})
 	link, over := w.markdown_hover.(app.Markdown_Link_Hover)
 	testing.expect(t, over && link.pane == pane.id && link.link == 0)
 	t_rect := terminal.rect
-	app.handle_event(&f.state, platform.Mouse_Move_Event{window = w.id,
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id,
 		x = i32(t_rect.x + t_rect.width / 2), y = i32(t_rect.y + t_rect.height / 2)})
 	testing.expect(t, w.markdown_hover == nil)
 }

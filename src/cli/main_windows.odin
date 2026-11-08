@@ -1,6 +1,6 @@
 package cli
 
-import "aio:commands"
+import "aio:cli_protocol"
 import "aio:control"
 import "aio:instance"
 import "core:encoding/json"
@@ -32,7 +32,7 @@ main :: proc() {
 }
 
 @(private, require_results)
-start :: proc() -> commands.Status {
+start :: proc() -> cli_protocol.Status {
 	args, argument_error := instance.command_line(context.allocator)
 	if argument_error != .None {
 		fmt.eprintln("aio: could not read the command line")
@@ -40,7 +40,7 @@ start :: proc() -> commands.Status {
 	}
 	defer instance.command_line_destroy(args, context.allocator)
 	if len(args) == 0 || len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
-		fmt.print(USAGE)
+		print_usage()
 		return len(args) == 0 ? .Usage : .Ok
 	}
 	// These outlive wait's per-poll release of the temporary allocator.
@@ -60,10 +60,9 @@ start :: proc() -> commands.Status {
 	if pipe_error != .None {return .Failed}
 	defer delete(pipe)
 	if o.waiting {return wait(o, pipe, caller)}
-	if directory, directory_error := os.get_working_directory(context.temp_allocator); directory_error == nil {
-		o.args = absolute_file_argument(o.args, directory, context.temp_allocator)
-	}
-	response, status := send(pipe, request(o, caller, context.temp_allocator))
+	// A directory that cannot be read leaves relative paths as given.
+	directory, _ := os.get_working_directory(context.temp_allocator)
+	response, status := send(pipe, request(o, caller, directory, context.temp_allocator))
 	if status == .Unreachable {return status}
 	if response.text != "" {
 		if response.ok || o.json {fmt.println(response.text)} else {fmt.eprintfln("aio: %s", response.text)}
@@ -84,7 +83,7 @@ server_identity :: proc(allocator := context.allocator) -> (control.Server_Ident
 
 // One request on its own connection, so other clients can interleave between a wait's polls.
 @(private, require_results)
-send :: proc(pipe: string, request: []string) -> (control.Response, commands.Status) {
+send :: proc(pipe: string, request: []string) -> (control.Response, cli_protocol.Status) {
 	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, context.temp_allocator)
 	if connect_error != .None {
 		fmt.eprintln(
@@ -118,35 +117,26 @@ send :: proc(pipe: string, request: []string) -> (control.Response, commands.Sta
 		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
 		return {}, .Unreachable
 	}
-	if response.status != 0 {return response, commands.Status(response.status)}
-	return response, response.ok ? .Ok : .Failed
-}
-
-@(private)
-Wait_Reply :: struct {
-	error: string,
-	panes: []struct {
-		status:    string,
-		exit_code: u32,
-	},
+	return response, cli_protocol.response_status(response)
 }
 
 // Polls until the pane shows the text or its program exits, so no request holds the pipe.
 @(private, require_results)
-wait :: proc(o: Options, pipe, caller: string) -> commands.Status {
+wait :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 	if !bool(w.SetConsoleCtrlHandler(on_interrupt, true)) {
 		fmt.eprintln("aio: could not watch for Ctrl+C")
 		return .Failed
 	}
-	query_args := [3]string{o.wait.exit ? "pane.status" : "pane.read", "--pane", o.wait.pane}
+	command := o.wait.exit ? cli_protocol.PANE_STATUS_COMMAND : cli_protocol.PANE_READ_COMMAND
+	query_args := [3]string{command, "--pane", o.wait.pane}
 	query := Options {
 		json = o.wait.exit,
 		args = query_args[:o.wait.pane == "" ? 1 : 3],
 	}
 	start := time.tick_now()
 	for {
-		response, status := send(pipe, request(query, caller, context.temp_allocator))
-		reply: Wait_Reply
+		response, status := send(pipe, request(query, caller, "", context.temp_allocator))
+		reply: cli_protocol.Reply_Json
 		parsed := o.wait.exit &&
 			json.unmarshal_string(response.text, &reply, allocator = context.temp_allocator) == nil
 		if status != .Ok {
@@ -162,10 +152,12 @@ wait :: proc(o: Options, pipe, caller: string) -> commands.Status {
 			}
 			// AIODev remembers how recently closed panes ended, so a program that exits before the
 			// first poll still reports its code. A pane closed while running reports closed.
-			switch pane := reply.panes[0]; pane.status {
-			case "running":
-			case "closed":
-				fmt.println(o.json ? response.text : "closed")
+			pane := reply.panes[0]
+			pane_status, known := cli_protocol.pane_status_parse(pane.status)
+			switch {
+			case known && pane_status == .Running:
+			case known && pane_status == .Closed:
+				fmt.println(o.json ? response.text : cli_protocol.PANE_STATUS_WORDS[.Closed])
 				return .Ok
 			case:
 				fmt.println(o.json ? response.text : fmt.tprintf("%d", pane.exit_code))

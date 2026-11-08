@@ -1,5 +1,6 @@
 package main
 
+import "aio:settings"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"
@@ -58,10 +59,9 @@ pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int, restore: ^[dyn
 			close.restore, held.restore = held.restore, {}
 		}
 	}
-	overlay_open(app, w, nil, reopening)
 	pc := Pending_Close{target = close}
 	pc.tabs, pc.panes, _ = tab_close_scope(w.workspace, index)
-	confirmation_open(w, pc)
+	confirmation_ask(app, w, pc, reopening = reopening)
 }
 
 // Opens the workspace question. Names are cloned before the gesture and overlay cancellation
@@ -92,13 +92,15 @@ pending_close_open_workspace :: proc(
 		delete(destination_name)
 		return
 	}
+	// This question also ends the Activity inbox and the overlay rail, which overlay_close_all, and so
+	// every other question, leaves open; no reason for the difference is recorded.
 	window_overlays_cancel(app, w)
 	pc := Pending_Close {
 		target = Close_Workspace{plan = plan, workspace_name = name, destination_name = destination_name},
 	}
 	counts := workspace_pane_counts(workspace)
 	pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
-	confirmation_open(w, pc, extended = true)
+	confirmation_ask(app, w, pc, extended = true)
 }
 
 // Counts follow panes that exit while the question is `open`, then stay fixed while it closes.
@@ -122,11 +124,12 @@ pending_close_text :: proc(
 			text.body = "The shells running in it will exit."
 		}
 		text.label = "Close"
-		text.note = "Turn this off with Confirm Closing Split Tabs in Settings."
 		if index := tab_index_by_id(workspace, target.tab); tab_close_has_work(app, workspace, index) {
 			text.title = pc.tabs > 1 ? "Close tabs with ongoing work?" : "Close tab with ongoing work?"
 			text.body = "Closing will interrupt this work."
-			text.note = ""
+		} else {
+			setting := settings.schema_find("tab.confirm_close")
+			text.note = fmt.tprintf("Turn this off with %s in Settings.", setting.title)
 		}
 	case Close_Workspace:
 		name := target.workspace_name

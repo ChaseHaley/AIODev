@@ -13,6 +13,7 @@ long_choice_list_scroll_hit_testing_and_keyboard :: proc(t: ^testing.T) {
 	for &choice, i in choices {choice = fmt.tprintf("Font %02d", i)}
 	testing.expect_value(t, ui.editor_add(&p, {
 		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true,
+		font_filter = true, choice_min_width = 360,
 		value = choices[0], choices = choices[:],
 	}, "Font"), nil)
 	ui.editor_filter(&p)
@@ -23,16 +24,16 @@ long_choice_list_scroll_hit_testing_and_keyboard :: proc(t: ^testing.T) {
 	testing.expect(t, popup.height <= 8*32+8+68)
 	testing.expect(t, popup.y >= l.page.y && popup.y+popup.height <= l.page.y+l.page.height)
 	ui.editor_wheel(&p, l, popup.x+10, popup.y+10, -12)
-	testing.expect_value(t, p.popup_scroll, 12)
+	testing.expect_value(t, p.choice_list.scroll, 12)
 	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, popup.y+68+4+32*1.5))
-	testing.expect_value(t, p.popup_index, 13)
+	testing.expect_value(t, p.choice_list.index, 13)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, popup.x+10, popup.y+68+4+32*1.5, false), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "Font 13")
 	ui.editor_key(&p, key({key = .Enter}))
 	for _ in 0..<26 {ui.editor_key(&p, key({key = .Arrow_Down}))}
 	popup = ui.editor_popup_rect(&p, l)
-	testing.expect_value(t, p.popup_index, 39)
-	testing.expect_value(t, p.popup_scroll, 32)
+	testing.expect_value(t, p.choice_list.index, 39)
+	testing.expect_value(t, p.choice_list.scroll, 32)
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "Font 39")
 	ui.editor_key(&p, key({key = .Enter}))
@@ -48,6 +49,7 @@ font_search_filters_selects_and_cancels_without_editing_settings_search :: proc(
 	for font_key in ([?]string{"font.family", "interface.font_family"}) {
 		testing.expect_value(t, ui.editor_add(&p, {
 			key = font_key, title = "Font", kind = .Choice, searchable = true,
+			font_filter = font_key == "font.family", choice_min_width = 360,
 			value = "Consolas", choices = choices[:],
 		}, "Fonts"), nil)
 	}
@@ -99,6 +101,7 @@ font_search_accepts_translated_text_on_key_events :: proc(t: ^testing.T) {
 	for font_key in ([?]string{"font.family", "interface.font_family"}) {
 		testing.expect_value(t, ui.editor_add(&p, {
 			key = font_key, title = "Font", kind = .Choice, searchable = true, value = "Consolas", choices = choices[:],
+			font_filter = font_key == "font.family", choice_min_width = 360,
 		}, "Fonts"), nil)
 	}
 	ui.editor_filter(&p)
@@ -126,6 +129,7 @@ font_popup_toggle_keeps_search_and_family_and_supports_pointer_and_keyboard :: p
 	mono := [?]string{"Consolas", "Cove Nerd Font Mono"}
 	testing.expect_value(t, ui.editor_add(&p, {
 		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true, value = "Consolas",
+		font_filter = true, choice_min_width = 360,
 		choices = mono[:],
 	}, "Fonts"), nil)
 	ui.editor_filter(&p)

@@ -1,7 +1,7 @@
 package main
 
-import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
+import "aio:colour"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
@@ -28,25 +28,26 @@ workspace_icon_tint :: proc(index: int, foreground: render.Color) -> render.Colo
 	@(static, rodata) colors := WORKSPACE_ICON_COLORS
 	color := colors[index].light
 	if foreground.r + foreground.g + foreground.b > 1.5 { color = colors[index].dark }
-	return {f32(color.r) / 255, f32(color.g) / 255, f32(color.b) / 255, foreground.a}
+	return colour.rgba(color, foreground.a)
 }
 
 @(require_results)
 workspace_icon_color_set :: proc(app: ^App, workspace: ^Workspace, tint: int) -> bool {
 	if !workspace_registered(app, workspace) { return false }
-	if tint < 0 || tint >= len(WORKSPACE_ICON_COLORS) { return false }
+	if !workspace_icon_valid_value({tint = tint}) { return false }
 	workspace.icon.tint = tint
-	mark_all_dirty(app)
+	workspace_mutation_finish(app, workspace, {.Appearance})
 	return true
 }
 
 workspace_icon_color_open :: proc(app: ^App, w: ^Window) {
 	defer workspace_picker_layout_changed(w)
-	target := workspace_row_target(app, workspace_picker_target(&w.workspace_picker, .Icons))
+	target := workspace_row_target(app, workspace_picker_icon_id(&w.workspace_picker))
 	if target == nil { workspace_picker_return(app, w); return }
 	p := &w.workspace_picker
-	workspace_picker_transition(w, .Tint, target.id)
-	p.selected, p.scroll = target.icon.tint, 0
+	workspace_picker_transition(w, Workspace_Picker_Tint{target.id})
+	p.scroll = 0
+	workspace_picker_select_target(w, Picker_Tint{target.icon.tint})
 	ui.field_release(&p.query)
 	w.dirty = true
 }
@@ -54,54 +55,75 @@ workspace_icon_color_open :: proc(app: ^App, w: ^Window) {
 workspace_icon_color_back :: proc(w: ^Window) {
 	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
-	workspace_picker_transition(w, .Icons, workspace_picker_target(p, .Icons))
-	p.selected, p.scroll = len(WORKSPACE_ICONS) + 2, 0
+	workspace_picker_transition(w, Workspace_Picker_Icons{workspace_picker_icon_id(p)})
+	p.scroll = 0
+	workspace_picker_select_target(w, Picker_Tint_Open{})
 	w.dirty = true
 }
 
 workspace_icon_color_choose :: proc(app: ^App, w: ^Window) {
 	p := &w.workspace_picker
-	if p.selected == len(WORKSPACE_ICON_COLORS) { workspace_icon_color_back(w); return }
-	target := workspace_row_target(app, workspace_picker_target(p, .Icons))
+	tint: int
+	#partial switch t in workspace_picker_selection(w) {
+	case Picker_Tint_Back: workspace_icon_color_back(w); return
+	case Picker_Tint: tint = t.tint
+	case: return
+	}
+	target := workspace_row_target(app, workspace_picker_icon_id(p))
 	if target == nil { workspace_picker_return(app, w); return }
-	if !workspace_icon_color_set(app, target, p.selected) { return }
+	if !workspace_icon_color_set(app, target, tint) { return }
 	workspace_picker_return(app, w)
 }
 
-workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+// Arrows move through the colour grid, down to Back and round to the top; Left and Right stay in the grid.
+workspace_icon_color_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	defer workspace_picker_layout_changed(w)
 	p := &w.workspace_picker
 	n := len(WORKSPACE_ICON_COLORS)
+	count := workspace_picker_count(w)
 	columns := workspace_icon_picker_layout(w).columns
+	current := workspace_picker_selection(w)
+	_, on_back := current.(Picker_Tint_Back)
+	cell, on_cell := current.(Picker_Tint)
 	if step := ui.list_step(e); step != 0 && e.key != .Arrow_Up && e.key != .Arrow_Down {
-		p.selected = (p.selected + n + 1 + step) % (n + 1)
+		p.selected = (p.selected + count + step) % count
 	} else {
 		#partial switch e.key {
 		case .Escape: workspace_icon_color_back(w)
 		case .Enter, .Numpad_Enter: workspace_icon_color_choose(app, w)
-		case .Tab: p.selected = (p.selected + n + 1 + (.Shift in e.modifiers ? -1 : 1)) % (n + 1)
+		case .Tab: p.selected = (p.selected + count + (.Shift in e.modifiers ? -1 : 1)) % count
 		case .Arrow_Right, .Arrow_Left:
-			if p.selected < n { p.selected = (p.selected + n + (e.key == .Arrow_Left ? -1 : 1)) % n }
-		case .Arrow_Down: p.selected = p.selected < n ? min(n, p.selected + columns) : 0
-		case .Arrow_Up:
-			if p.selected == n {
-				p.selected = n - 1
-			} else if p.selected < columns {
-				p.selected = n
-			} else {
-				p.selected -= columns
+			if on_cell {
+				delta := e.key == .Arrow_Left ? -1 : 1
+				workspace_picker_select_target(w, Picker_Tint{(cell.tint + n + delta) % n})
 			}
-		case .Home: p.selected = 0
-		case .End: p.selected = n - 1
+		case .Arrow_Down:
+			if on_cell && cell.tint + columns < n {
+				workspace_picker_select_target(w, Picker_Tint{cell.tint + columns})
+			} else if on_cell {
+				workspace_picker_select_target(w, Picker_Tint_Back{})
+			} else {
+				workspace_picker_select_target(w, Picker_Tint{0})
+			}
+		case .Arrow_Up:
+			if on_back {
+				workspace_picker_select_target(w, Picker_Tint{n - 1})
+			} else if cell.tint < columns {
+				workspace_picker_select_target(w, Picker_Tint_Back{})
+			} else {
+				workspace_picker_select_target(w, Picker_Tint{cell.tint - columns})
+			}
+		case .Home: workspace_picker_select_target(w, Picker_Tint{0})
+		case .End: workspace_picker_select_target(w, Picker_Tint{n - 1})
 		}
 	}
 	w.dirty = true
 }
 
-workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	p, s := &w.workspace_picker, w.scale
 	g := workspace_icon_picker_layout(w)
-	target := workspace_row_target(app, workspace_picker_target(p, .Icons))
+	target := workspace_row_target(app, workspace_picker_icon_id(p))
 	if target == nil { return .Ok }
 	if result := workspace_icon_picker_title(app, w, g, "Preset icon color"); result != .Ok { return result }
 	if render.push_layer(&w.list, g.grid) != .None { return .Ok }
@@ -126,14 +148,17 @@ workspace_icon_color_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if render.push_layer(&w.list, g.panel, ui.RADIUS_OVERLAY * s) != .None { return .Ok }
 	if render.push_rect(&w.list, {rect = g.divider, color = app.theme.border}) != .None { return .Ok }
 	@(static, rodata) colors := WORKSPACE_ICON_COLORS
-	label := p.selected < len(colors) ? colors[p.selected].name : "Emoji keep their original colors"
+	chosen := workspace_picker_selection(w)
+	label := "Emoji keep their original colors"
+	if cell, on_cell := chosen.(Picker_Tint); on_cell { label = colors[cell.tint].name }
 	inset := ui.CONTROL_INSET * s
 	middle := proc(r: render.Rect, t: ^ui.Text) -> f32 {return r.y + (r.height - t.line_height) / 2 + t.ascent}
 	if result := ui.draw_fading_text(&w.ui_text, &w.list, label, g.field.x + inset,
 		middle(g.field, &w.ui_text), app.theme.text, max(0, g.field.width - 2 * inset)); result != .Ok {
 		return result
 	}
-	fill := p.selected == len(colors) ? app.theme.selection : app.theme.pane
+	_, on_back := chosen.(Picker_Tint_Back)
+	fill := on_back ? app.theme.selection : app.theme.pane
 	apply := render.Rect_Instance{rect = g.apply, color = fill, radius = ui.RADIUS_CONTROL * s}
 	if render.push_rect(&w.list, apply) != .None { return .Ok }
 	back := "Back to icons"

@@ -12,7 +12,7 @@ profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testi
 	defer ui.editor_destroy(&p)
 	profile_editor_fixture(t, &p)
 	l := ui.editor_layout({500, 40, 300, 700}, 1)
-	p.visible_rows = l.rows
+	ui.editor_fit(&p, l)
 	testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
 	parts := ui.editor_profile_parts(&p, l, p.selected)
 	x, y := profile_center(parts.more)
@@ -115,7 +115,6 @@ profile_table_builds_one_ordered_list_including_detected :: proc(t: ^testing.T) 
 	defer ui.profile_table_destroy(&table)
 	testing.expect_value(t, table_error, nil)
 	testing.expect_value(t, len(table.rows), 6)
-	testing.expect_value(t, len(table.detected), 0)
 	testing.expect_value(t, table.rows[0].id, "cmd")
 	testing.expect_value(t, table.rows[1].id, "pwsh")
 	testing.expect_value(t, table.rows[2].id, "default")
@@ -173,7 +172,6 @@ profile_table_facts_keep_detected_and_explicit_names_separate :: proc(t: ^testin
 	defer ui.profile_table_destroy(&table)
 	testing.expect_value(t, table_error, nil)
 	for row in table.rows {if row.id == "alpha" {testing.expect_value(t, row.note, "")}}
-	for row in table.detected {testing.expect_value(t, row.note, "Another profile uses this name.")}
 }
 
 @(test)
@@ -233,18 +231,6 @@ profile_columns_drop_the_directory_before_any_cell_overlaps :: proc(t: ^testing.
 	}
 }
 
-@(test)
-profile_detected_rows_keep_the_enable_action_clear_of_the_command :: proc(t: ^testing.T) {
-	for scale in ([?]f32{1, 1.5}) {
-		for width in ([?]f32{420, 300, 220, 180}) {
-			parts := ui.profile_row_parts(.Detected, {0, 0, width * scale, 52 * scale}, scale)
-			testing.expect(t, parts.name.x + parts.name.width <= parts.enable.x - 12 * scale + 0.01)
-			testing.expect(t, parts.command.x + parts.command.width <= parts.enable.x - 12 * scale + 0.01)
-			testing.expect(t, parts.enable.x + parts.enable.width <= width * scale + 0.01)
-		}
-	}
-}
-
 @(private)
 profile_editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 	rows := [?]struct{ row: ui.Editor_Row, group: string }{
@@ -261,17 +247,13 @@ profile_editor_fixture :: proc(t: ^testing.T, p: ^ui.Editor) {
 			value = "Beta", profile = "beta", kind = .Text}, "Profiles"},
 		{{key = "profiles.add", title = "Add Profile", description = "Add a shell.",
 			value = "Add Profile", kind = .Profile_Add}, "Profiles"},
-		{{key = "profiles.detected", title = "Detected on this PC", value = "1",
-			detail = "Gamma gamma.exe", kind = .Detected_Header}, "Profiles"},
-		{{key = "profile.gamma", title = "Gamma", description = "gamma.exe", value = "~",
-			profile = "gamma", badge = "$", detail = "gamma.exe ~", kind = .Detected,
-			flags = {.Listed}}, "Profiles"},
 	}
 	for entry in rows {
 		testing.expect_value(t, ui.editor_add(p, entry.row, entry.group), nil)
 	}
 	ui.editor_group_table(p, "Profiles")
 	ui.editor_filter(p)
+	ui.editor_fit(p, ui.editor_layout({0, 40, 1200, 1400}, 1))
 }
 
 @(private)
@@ -306,7 +288,7 @@ editor_profile_table_expands_one_row_and_searches_by_name :: proc(t: ^testing.T)
 	ui.field_set(&p.filter, "beta")
 	ui.editor_filter(&p)
 	testing.expect_value(t, ui.editor_row(&p).key, "profile.beta")
-	testing.expect(t, ui.editor_reveal(&p, "profile.beta.name"))
+	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"profile.beta.name"}))
 	testing.expect_value(t, ui.editor_row(&p).key, "profile.beta.name")
 	testing.expect_value(t, p.expanded, "beta")
 }
@@ -347,26 +329,6 @@ editor_profile_row_actions_write_default_hidden_and_remove :: proc(t: ^testing.T
 }
 
 @(test)
-editor_detected_section_toggles_and_enables :: proc(t: ^testing.T) {
-	p: ui.Editor
-	defer ui.editor_destroy(&p)
-	profile_editor_fixture(t, &p)
-	testing.expect(t, ui.editor_select_key(&p, "profiles.detected"))
-	testing.expect(t, profile_item_index(&p, "profile.gamma") < 0)
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Changed)
-	testing.expect(t, p.detected_open)
-	testing.expect(t, profile_item_index(&p, "profile.gamma") >= 0)
-	testing.expect(t, ui.editor_select_key(&p, "profile.gamma"))
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Profile_Action)
-	expect_profile_request(t, &p, .Enable, "gamma")
-
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Tab})), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, p.profile_control, ui.Profile_Control.Enable)
-	testing.expect_value(t, ui.editor_key(&p, key({key = .Space, text = " "})), ui.Editor_Outcome.Profile_Action)
-	expect_profile_request(t, &p, .Enable, "gamma")
-}
-
-@(test)
 editor_profile_default_row_has_no_remove_action :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
@@ -383,7 +345,7 @@ editor_profile_default_row_has_no_remove_action :: proc(t: ^testing.T) {
 				profile = "default",
 				badge = ">_",
 				kind = .Profile,
-				flags = {.Default},
+				flags = {.Default, .Protected},
 			},
 			"Profiles",
 		),
@@ -596,7 +558,7 @@ profile_trash_requests_shared_confirmation_and_protects_detected :: proc(t: ^tes
 	ui.editor_filter(&p)
 	layout := ui.editor_layout({0, 40, 1200, 4000}, 1)
 	testing.expect(t, ui.editor_select_key(&p, "profile.beta"))
-	p.visible_rows = layout.rows
+	ui.editor_fit(&p, layout)
 	index := profile_item_index(&p, "profile.beta")
 	trash := ui.editor_profile_parts(&p, layout, index).remove
 	x, y := profile_center(trash)

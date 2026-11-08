@@ -183,7 +183,7 @@ press :: proc(s: ^app.App, w: ^app.Window, x, y: f32, button: input.Mouse_Button
 	for pressed in ([?]bool{true, false}) {
 		app.handle_event(
 			s,
-			platform.Mouse_Button_Event {
+			input.Mouse_Button_Event {
 				window = w.id,
 				button = button,
 				pressed = pressed,
@@ -198,8 +198,8 @@ press :: proc(s: ^app.App, w: ^app.Window, x, y: f32, button: input.Mouse_Button
 
 @(private = "file")
 key :: proc(s: ^app.App, w: ^app.Window, which: input.Key) {
-	app.handle_event(s, platform.Key_Event{window = w.id, key = which, pressed = true})
-	app.handle_event(s, platform.Key_Event{window = w.id, key = which, pressed = false})
+	app.handle_event(s, input.Key_Event{window = w.id, key = which, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = which, pressed = false})
 }
 
 @(private = "file")
@@ -207,9 +207,8 @@ center :: proc(r: [4]f32) -> (f32, f32) {return r[0] + r[2] / 2, r[1] + r[3] / 2
 
 @(private = "file")
 open_button :: proc(s: ^app.App, w: ^app.Window) {
-	r := w.panes[0].rect
-	l := ui.header_layout({r.x, r.y, r.width, r.height}, w.scale)
-	x, y := center(transmute([4]f32)l.buttons[int(ui.Header_Action.Documents) - 1])
+	l := app.pane_header_layout(w, w.panes[0])
+	x, y := center(transmute([4]f32)l.buttons[.Documents])
 	press(s, w, x, y)
 }
 
@@ -280,8 +279,8 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	if !palette_fixture_create(t, &f, "documents-menu", false) {return}
 	s, w := &f.state, f.state.windows[0]
 	Open_Stub_State = {}
-	s.open_url = link_open_stub
-	defer s.open_url = nil
+	s.opener.url = link_open_stub
+	defer s.opener.url = nil
 	menu := &w.document_menu
 
 	// With nothing pinned the menu offers the ways to add, and what opened it keeps its place.
@@ -296,13 +295,13 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	entering, invalid := url_entry(w)
 	testing.expect(t, entering)
 	testing.expect(t, row_of(w, .Add_Url) < 0 && row_of(w, .Url_Field) >= 0)
-	app.handle_event(s, platform.Text_Event{window = w.id, text = "not a url"})
+	app.handle_event(s, input.Text_Event{window = w.id, text = "not a url"})
 	testing.expect_value(t, ui.field_string(&menu.url), "not a url")
 	key(s, w, .Enter)
 	entering, invalid = url_entry(w)
 	testing.expect(t, invalid && entering)
 	ui.field_set(&menu.url, "")
-	app.handle_event(s, platform.Text_Event{window = w.id, text = "https://example.com/a"})
+	app.handle_event(s, input.Text_Event{window = w.id, text = "https://example.com/a"})
 	entering, invalid = url_entry(w)
 	testing.expect(t, entering && !invalid)
 	key(s, w, .Enter)
@@ -368,7 +367,7 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	// Remove with the row's button, shown once selected, and with Delete. The menu stays.
 	row := row_of(w, .Open, "https://example.com/a")
 	r = ui.menu_row_rect(&menu.menu, row, f32(w.width), f32(w.height), w.scale)
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(r.x + 40), y = i32(r.y + r.height / 2)})
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(r.x + 40), y = i32(r.y + r.height / 2)})
 	testing.expect_value(t, ui.menu_selected(&menu.menu), row)
 	click_part(s, w, row, .Selected_Action)
 	testing.expect_value(t, len(scopes.pane), 0)
@@ -438,8 +437,8 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 	if !palette_fixture_create(t, &f, "documents-link", false) {return}
 	s, w := &f.state, f.state.windows[0]
 	Open_Stub_State = {}
-	s.open_url = link_open_stub
-	defer s.open_url = nil
+	s.opener.url = link_open_stub
+	defer s.opener.url = nil
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/one")
 	point, ok := link_point(t, &f, 4, 0)
 	if !ok {return}

@@ -1,11 +1,14 @@
 package main
 
-import "aio:glyphs"
+import "aio:input"
 import "aio:layout"
+import "aio:links"
+import "aio:localpath"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:strings"
 
@@ -122,7 +125,7 @@ document_menu_text_clear :: proc(menu: ^Document_Menu) {
 	clear(&menu.text)
 }
 
-// Frees the document a Pin or Link mode holds; overlay_close and document_menu_set call it on leaving one.
+// Frees the document a Pin or Link mode holds; document_menu_close and document_menu_set call it.
 document_menu_mode_release :: proc(mode: Document_Menu_Mode) {
 	switch m in mode {
 	case Document_Menu_List:
@@ -131,6 +134,13 @@ document_menu_mode_release :: proc(mode: Document_Menu_Mode) {
 	case Document_Menu_Link:
 		delete(m.document.target)
 	}
+}
+
+// The menu's surface ends: the document its mode holds, the URL being typed and the hover go with it.
+document_menu_close :: proc(menu: ^Document_Menu, mode: Document_Menu_Mode) {
+	document_menu_mode_release(mode)
+	ui.field_release(&menu.url)
+	menu.menu.hover_part = .Row
 }
 
 // Takes w because a menu still showing when its window is freed holds a document in w.overlay.
@@ -218,12 +228,25 @@ document_menu_own :: proc(menu: ^Document_Menu, text: string) -> string {
 	return owned
 }
 
+// Each row's payload keys its entry; a row the menu could not take gets none.
 @(private = "file")
 document_menu_push :: proc(menu: ^Document_Menu, item: ui.Menu_Item, entry: Document_Menu_Entry = {}) {
-	if menu.count >= ui.MENU_MAX_ITEMS {return}
-	if ui.menu_add(&menu.menu, item) != nil {return}
+	row := item
+	row.payload = u32(menu.count)
+	added, err := ui.menu_add(&menu.menu, row)
+	if err != nil {log.errorf("adding a document menu row failed: %v", err)}
+	if !added {return}
 	menu.entries[menu.count] = entry
 	menu.count += 1
+}
+
+// The entry row `row` stands for, or none for a row out of range.
+@(private = "file")
+document_menu_entry :: proc(menu: ^Document_Menu, row: int) -> (Document_Menu_Entry, bool) {
+	if row < 0 || row >= len(menu.menu.items) {return {}, false}
+	key := int(menu.menu.items[row].payload)
+	if key >= menu.count {return {}, false}
+	return menu.entries[key], true
 }
 
 @(private = "file")
@@ -318,13 +341,14 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	} else {
 		menu.menu.scroll = scroll
 		ui.menu_select(&menu.menu, clamp(selected, 0, max(0, len(menu.menu.items) - 1)))
-		if menu.count > 0 && !menu.menu.items[ui.menu_selected(&menu.menu)].enabled {
+		if len(menu.menu.items) > 0 && !menu.menu.items[ui.menu_selected(&menu.menu)].enabled {
 			ui.menu_step(&menu.menu, 1)
 		}
 	}
 	if _, entering := document_menu_url_entry(w); entering {
-		for i in 0 ..< menu.count {
-			if menu.entries[i].action == .Url_Field {ui.menu_select(&menu.menu, i)}
+		for i in 0 ..< len(menu.menu.items) {
+			entry, _ := document_menu_entry(menu, i)
+			if entry.action == .Url_Field {ui.menu_select(&menu.menu, i)}
 		}
 	}
 	ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
@@ -345,34 +369,20 @@ document_menu_show :: proc(
 	document_menu_build(app, w, true)
 }
 
-// Where the menu hangs from: under the pane's Documents button, or inside its corner without one.
-@(private = "file")
-document_menu_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> (x, y: f32) {
-	r := pane.rect
-	l := pane_header_layout(w, pane)
-	width := ui.MENU_WIDTH * w.scale
-	if w.header_height == 0 && !pane.floating && len(w.panes) > 1 && !w.panes[1].floating {
-		return r.x + r.width - width - ui.SPACE_2 * w.scale, r.y + ui.SPACE_2 * w.scale
-	}
-	button := l.buttons[int(ui.Header_Action.Documents) - 1]
-	if button.width == 0 {
-		return r.x + r.width - width - ui.SPACE_2 * w.scale, r.y + ui.HEADER_HEIGHT * w.scale + ui.SPACE_1 * w.scale
-	}
-	return button.x + button.width - width, button.y + button.height + ui.SPACE_1 * w.scale
-}
-
 document_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	if !CONTENT_POLICY[pane.content.kind].documents {return}
-	x, y := document_menu_anchor(w, pane)
-	document_menu_show(app, w, pane.content, Document_Menu_List{}, x, y)
+	anchor := pane_header_document_anchor(w, pane)
+	document_menu_show(app, w, pane.content, Document_Menu_List{}, anchor.x, anchor.y)
 }
 
 // The Show Documents command: the only way to the menu for a split pane with headers off.
 document_menu_open_focused :: proc(app: ^App, w: ^Window) {
+	tree := window_tree(w)
+	if tree == nil {return}
 	for pane in w.panes {
-		if pane.node != w.tree.focus {continue}
+		if pane.node != tree.focus {continue}
 		if !CONTENT_POLICY[pane.content.kind].documents {
-			notify(app, .Info, "Settings has no documents of its own.")
+			notify(app, .Info, content_documents_notice(pane.content.kind))
 			return
 		}
 		if !gesture_cancel(app, w) {return}
@@ -384,21 +394,23 @@ document_menu_open_focused :: proc(app: ^App, w: ^Window) {
 // Ctrl+right-click on a terminal link. False leaves the press to the terminal.
 @(require_results)
 document_menu_open_link :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	buffer: [4096]u8 = ---
-	resolution, target := link_resolve(app, w, x, y, buffer[:])
-	switch resolution {
-	case .None:
+	buffer: [links.TARGET_BYTES]u8 = ---
+	spelling, folder := "", false
+	switch t in link_resolve(app, w, x, y, buffer[:]) {
+	case nil:
 		return false
-	case .Missing:
-		notify(app, .Error, "That local file is not available.")
+	case Missing_Target:
+		target_unavailable(app)
 		return true
-	case .Web, .File:
+	case Web_Target:
+		spelling = t.uri
+	case File_Target:
+		spelling, folder = t.path, os.is_dir(t.path)
 	}
 	pane, found := layout.hit_test(w.panes[:], x, y)
 	if !found {return false}
-	owned, err := strings.clone(target)
+	owned, err := strings.clone(spelling)
 	if err != nil {return false}
-	folder := resolution == .File && os.is_dir(target)
 	document_menu_show(app, w, pane.content, Document_Menu_Link{{owned, folder}}, x, y)
 	return true
 }
@@ -412,16 +424,10 @@ document_menu_show_pin :: proc(app: ^App, w: ^Window, content: layout.Content, d
 	document_menu_show(app, w, content, Document_Menu_Pin{{owned, document.folder}}, x, y)
 }
 
-// Add File and Add Folder choose for the document scope of `content`.
-Document_Pick :: struct {
-	using dialog: File_Dialog,
-	content:      layout.Content,
-}
-
 @(private = "file")
 document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 	state := document_menu_state(w)
-	if state == nil || app.document_pick != nil {return}
+	if state == nil || app.dialogs.document != nil {return}
 	content := state.content
 	if !gesture_cancel(app, w) {return}
 	overlay_close(app, w)
@@ -434,37 +440,19 @@ document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 		notify(app, .Error, "Could not show the file dialog.")
 		return
 	}
-	app.document_pick = Document_Pick{{pick, w.id}, content}
+	app.dialogs.document = Document_Pick{{pick, w.id}, content}
 }
 
-// Collects what the dialog chose once it closes. The pane may have gone in the meantime.
-document_pick_tick :: proc(app: ^App) {
-	dialog, open := app.document_pick.?
-	if !open {return}
-	path, finished := platform.file_pick_finished(dialog.pick)
-	if !finished {return}
-	if w := window_find(app, dialog.window); w != nil && path != "" {
-		if _, found := document_scopes(app, dialog.content); found {
-			document_chosen(app, w, dialog.content, path)
-		}
-	}
-	document_pick_close(app)
-}
-
-@(private = "file")
-document_chosen :: proc(app: ^App, w: ^Window, content: layout.Content, path: string) {
-	file, ok := platform.prepare_terminal_file(path)
+// Pins what Add File or Add Folder chose, unless the pane has gone in the meantime.
+document_pick_chosen :: proc(app: ^App, w: ^Window, content: layout.Content, path: string) {
+	if _, found := document_scopes(app, content); !found {return}
+	file, ok := localpath.prepare_open(path)
 	if !ok {
-		notify(app, .Error, "That local file is not available.")
+		target_unavailable(app)
 		return
 	}
-	defer platform.terminal_file_destroy(&file)
+	defer localpath.open_file_destroy(&file)
 	document_menu_show_pin(app, w, content, {file.path, os.is_dir(file.target)})
-}
-
-document_pick_close :: proc(app: ^App) {
-	if dialog, open := app.document_pick.?; open {platform.file_pick_destroy(dialog.pick)}
-	app.document_pick = nil
 }
 
 // Pins are app state: every window may be showing a button this changes, and the layout saves them.
@@ -495,9 +483,9 @@ document_menu_pin :: proc(app: ^App, w: ^Window, level: Document_Level, document
 document_menu_remove :: proc(app: ^App, w: ^Window, index: int) {
 	state := document_menu_state(w)
 	menu := &w.document_menu
-	if state == nil || index < 0 || index >= menu.count {return}
-	entry := menu.entries[index]
-	if entry.action != .Open {return}
+	if state == nil {return}
+	entry, listed := document_menu_entry(menu, index)
+	if !listed || entry.action != .Open {return}
 	scopes, found := document_scopes(app, state.content)
 	if found && document_remove(scopes, entry.level, entry.target) {documents_changed(app)}
 	document_menu_build(app, w)
@@ -507,19 +495,20 @@ document_menu_remove :: proc(app: ^App, w: ^Window, index: int) {
 document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 	state := document_menu_state(w)
 	menu := &w.document_menu
-	if state == nil || index < 0 || index >= menu.count {return}
-	entry := menu.entries[index]
+	if state == nil {return}
+	entry, listed := document_menu_entry(menu, index)
+	if !listed {return}
 	switch entry.action {
 	case .None, .Url_Field:
 	case .Open:
 		target := strings.clone(entry.target, context.temp_allocator)
 		overlay_close(app, w)
-		document_open(app, w, target)
+		target_open(app, w, target_from_document(target))
 	case .Open_Link:
 		link, _ := state.mode.(Document_Menu_Link)
 		target := strings.clone(link.document.target, context.temp_allocator)
 		overlay_close(app, w)
-		document_open(app, w, target)
+		target_open(app, w, target_from_document(target))
 	case .Add_File:
 		document_pick_start(app, w, false)
 	case .Add_Folder:
@@ -566,11 +555,12 @@ document_menu_url_edited :: proc(app: ^App, w: ^Window) {
 @(private = "file")
 document_popout_open :: proc(app: ^App, w: ^Window, index: int) {
 	menu := &w.document_menu
-	if index < 0 || index >= menu.count || menu.entries[index].action != .Open {return}
+	entry, _ := document_menu_entry(menu, index)
+	if entry.action != .Open {return}
 	if _, entering := document_menu_url_entry(w); entering {
 		document_menu_set(app, w, Document_Menu_List{}, .Rebuild)
 	}
-	document_menu_set(app, w, Document_Menu_List{Document_Popout{index, menu.entries[index].level}}, .Keep)
+	document_menu_set(app, w, Document_Menu_List{Document_Popout{index, entry.level}}, .Keep)
 }
 
 @(private = "file")
@@ -591,7 +581,7 @@ document_popout_choose :: proc(app: ^App, w: ^Window, level: Document_Level) {
 	popout, shown := document_menu_popout(w)
 	if !shown {return}
 	menu := &w.document_menu
-	entry := menu.entries[popout.row]
+	entry, _ := document_menu_entry(menu, popout.row)
 	document_popout_close(app, w)
 	if entry.level == level {return}
 	// Rebuilding replaces the text the entry borrows.
@@ -599,8 +589,10 @@ document_popout_choose :: proc(app: ^App, w: ^Window, level: Document_Level) {
 	document_menu_pin(app, w, level, {target, entry.folder})
 	document_menu_build(app, w)
 	// The row moved with its level, so the selection follows it there.
-	for i in 0 ..< menu.count {
-		if menu.entries[i].action == .Open && menu.entries[i].target == target {ui.menu_select(&menu.menu, i)}
+	for i in 0 ..< len(menu.menu.items) {
+		if row, _ := document_menu_entry(menu, i); row.action == .Open && row.target == target {
+			ui.menu_select(&menu.menu, i)
+		}
 	}
 	ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
 }
@@ -629,12 +621,12 @@ document_popout_button :: proc(w: ^Window, level: Document_Level) -> render.Rect
 @(private = "file")
 document_popout_hit :: proc(w: ^Window, x, y: f32) -> (Document_Level, bool) {
 	for level in Document_Level {
-		if rect_contains(document_popout_button(w, level), x, y) {return level, true}
+		if render.rect_contains(document_popout_button(w, level), x, y) {return level, true}
 	}
 	return {}, false
 }
 
-document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: platform.Key_Event) {
+document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) {
 	state := document_menu_state(w)
 	if state == nil || !logical.pressed {return}
 	menu := &w.document_menu
@@ -706,18 +698,10 @@ document_menu_text_input :: proc(app: ^App, w: ^Window, text: string) {
 @(private = "file")
 document_url_box :: proc(w: ^Window) -> (ui.Field_Box, bool) {
 	menu := &w.document_menu
-	for i in 0 ..< menu.count {
-		if menu.entries[i].action != .Url_Field {continue}
-		return {
-			field = &menu.url,
-			text = &w.ui_text,
-			rect = ui.menu_row_rect(&menu.menu, i, f32(w.width), f32(w.height), w.scale),
-			inset = ui.CONTROL_INSET,
-			caret_width = 1,
-			radius = ui.RADIUS_CONTROL,
-			style = .Body,
-			scale = w.scale,
-		}, true
+	for i in 0 ..< len(menu.menu.items) {
+		if entry, _ := document_menu_entry(menu, i); entry.action != .Url_Field {continue}
+		rect := ui.menu_row_rect(&menu.menu, i, f32(w.width), f32(w.height), w.scale)
+		return ui.field_box_standard(&menu.url, &w.ui_text, rect, w.scale), true
 	}
 	return {}, false
 }
@@ -738,7 +722,7 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 			ui.field_pointer(&menu.url, ui.field_box_offset(box, x), false, true)
 			w.dirty = true
 		}
-		if rect_contains(box.rect, x, y) {
+		if render.rect_contains(box.rect, x, y) {
 			pointer_set(app, w, .Text)
 			return
 		}
@@ -757,7 +741,7 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 	pointer_set(app, w, shape)
 }
 
-document_menu_tooltip :: proc(w: ^Window, x, y: f32) -> string {
+document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	menu := &w.document_menu
 	if _, popout := document_menu_popout(w); popout {
 		level, hit := document_popout_hit(w, x, y)
@@ -765,19 +749,20 @@ document_menu_tooltip :: proc(w: ^Window, x, y: f32) -> string {
 	}
 	width, height := f32(w.width), f32(w.height)
 	row := ui.menu_hit(&menu.menu, x, y, width, height, w.scale)
-	if row < 0 || menu.entries[row].action != .Open {return ""}
+	entry, _ := document_menu_entry(menu, row)
+	if entry.action != .Open {return ""}
 	switch ui.menu_row_part(&menu.menu, row, x, y, width, height, w.scale) {
 	case .Row:
 		return ""
 	case .Action:
-		return DOCUMENT_LEVEL_TIPS[menu.entries[row].level]
+		return DOCUMENT_LEVEL_TIPS[entry.level]
 	case .Selected_Action:
 		return "Remove"
 	}
 	return ""
 }
 
-document_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Event) {
+document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	menu := &w.document_menu
 	if !e.pressed {
 		w.dirty = true
@@ -801,7 +786,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Eve
 		return
 	}
 	if e.button != .Left {return}
-	if menu.entries[hit].action == .Url_Field {
+	if entry, _ := document_menu_entry(menu, hit); entry.action == .Url_Field {
 		if box, shown := document_url_box(w); shown {
 			ui.field_pointer(&menu.url, ui.field_box_offset(box, x), true, .Shift in e.modifiers)
 			w.dirty = true
@@ -821,7 +806,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: platform.Mouse_Button_Eve
 	}
 }
 
-document_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	menu := &w.document_menu
 	s := w.scale
 	width, height := f32(w.width), f32(w.height)
@@ -840,7 +825,8 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	if !shown {return .Ok}
 	if render.push_layer(&w.list, {0, 0, width, height}) != .None {return .Ok}
 	if ui.panel_draw(&w.list, ui.popover_panel(document_popout_rect(w), s), app.theme) != .None {return .Ok}
-	current := menu.entries[popout.row].level
+	entry, _ := document_menu_entry(menu, popout.row)
+	current := entry.level
 	for level in Document_Level {
 		b := ui.Button {
 			rect     = document_popout_button(w, level),
@@ -853,4 +839,45 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		ui.icon_draw(&w.list, document_level_icon(level), face, ink, ui.ICON_BUTTON, s)
 	}
 	return .Ok
+}
+
+when AIO_CONTROL {
+	// The document menu's keys; documents.mode is list, pin or link, and empty while it is closed.
+	document_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
+		mode := ""
+		if state, shown := w.overlay.(Overlay_Document_Menu); shown {
+			switch _ in state.mode {
+			case Document_Menu_List: mode = "list"
+			case Document_Menu_Pin: mode = "pin"
+			case Document_Menu_Link: mode = "link"
+			}
+		}
+		_, popout := document_menu_popout(w)
+		_, url_entry := document_menu_url_entry(w)
+		state_value(r, "documents.open", document_menu_shown(w))
+		state_text(r, "documents.mode", mode)
+		state_value(r, "documents.count", w.document_menu.count)
+		state_value(r, "documents.popout", popout)
+		state_value(r, "documents.url_open", url_entry)
+	}
+}
+
+// Document menu pointer surface
+
+@(private)
+document_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return document_menu_shown(w)}
+
+@(private)
+document_menu_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner == .Document_Menu {document_menu_hover(app, w, f32(e.x), f32(e.y), .Left in e.buttons)}
+}
+
+@(private)
+document_menu_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.document_menu.url)
+}
+
+@(private)
+document_menu_leave :: proc(_: ^App, w: ^Window) {
+	w.document_menu.menu.hover_part = .Row
 }

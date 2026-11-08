@@ -12,7 +12,7 @@ tab_presentation_resize_keeps_storage_and_initialises_only_appended_entries :: p
 	defer app.tab_presentation_destroy(&presentation)
 	app.tab_presentation_init(&presentation)
 	if !testing.expect(t, app.tab_presentation_resize(&presentation, 3)) {return}
-	testing.expect_value(t, len(presentation.tab_controls), 5)
+	testing.expect_value(t, len(presentation.tab_controls), 3)
 	testing.expect_value(t, len(presentation.tab_positions), 3)
 	presentation.tab_positions[1] = ui.Motion{from = 4, value = 5, target = 6}
 	controls, positions := raw_data(presentation.tab_controls), raw_data(presentation.tab_positions)
@@ -28,9 +28,13 @@ tab_presentation_resize_keeps_storage_and_initialises_only_appended_entries :: p
 	testing.expect_value(t, presentation.tab_positions[3].value, f32(3))
 	testing.expect_value(t, presentation.tab_positions[3].target, f32(3))
 	controls, positions = raw_data(presentation.tab_controls), raw_data(presentation.tab_positions)
+	presentation.new_tab_control.hover.value = 1
+	presentation.profiles_control.press.value = 1
 	app.tab_presentation_clear(&presentation)
 	testing.expect_value(t, len(presentation.tab_positions), 0)
 	testing.expect_value(t, len(presentation.tab_controls), 0)
+	testing.expect_value(t, presentation.new_tab_control, ui.Control_Motion{})
+	testing.expect_value(t, presentation.profiles_control, ui.Control_Motion{})
 	// Workspace adoption retains the storage and lets relayout refill it.
 	testing.expect_value(t, raw_data(presentation.tab_controls), controls)
 	testing.expect_value(t, raw_data(presentation.tab_positions), positions)
@@ -40,7 +44,7 @@ tab_presentation_resize_keeps_storage_and_initialises_only_appended_entries :: p
 }
 
 @(test)
-tab_presentation_move_follows_the_tab_and_keeps_controls_trailing :: proc(t: ^testing.T) {
+tab_presentation_move_follows_the_tab_and_keeps_the_named_controls :: proc(t: ^testing.T) {
 	presentation: app.Tab_Presentation
 	defer app.tab_presentation_destroy(&presentation)
 	app.tab_presentation_init(&presentation)
@@ -53,11 +57,13 @@ tab_presentation_move_follows_the_tab_and_keeps_controls_trailing :: proc(t: ^te
 		}
 	}
 	first_position, first_control := presentation.tab_positions[0], presentation.tab_controls[0]
-	trailing := presentation.tab_controls[3]
+	new_tab := ui.Control_Motion{hover = ui.Motion{value = 60}}
+	presentation.new_tab_control = new_tab
 	app.tab_presentation_move(&presentation, 0, 2)
 	testing.expect_value(t, presentation.tab_positions[2], first_position)
 	testing.expect_value(t, presentation.tab_controls[2], first_control)
-	testing.expect_value(t, presentation.tab_controls[3], trailing)
+	testing.expect_value(t, presentation.new_tab_control, new_tab)
+	testing.expect_value(t, len(presentation.tab_controls), 3)
 	testing.expect_value(t, presentation.tab_positions[0].value, f32(21))
 	testing.expect_value(t, presentation.tab_positions[1].value, f32(22))
 	app.tab_presentation_move(&presentation, 2, 0)
@@ -72,15 +78,18 @@ tab_presentation_move_follows_the_tab_and_keeps_controls_trailing :: proc(t: ^te
 }
 
 @(test)
-tab_presentation_remove_keeps_the_control_trailing_and_clamps_the_selection :: proc(t: ^testing.T) {
+tab_presentation_remove_keeps_the_named_controls_and_clamps_the_selection :: proc(t: ^testing.T) {
 	presentation: app.Tab_Presentation
 	defer app.tab_presentation_destroy(&presentation)
 	app.tab_presentation_init(&presentation)
 	if !testing.expect(t, app.tab_presentation_resize(&presentation, 4)) {return}
 	for i in 0 ..< 4 {presentation.tab_positions[i] = ui.Motion{value = f32(i + 5)}}
+	profiles := ui.Control_Motion{press = ui.Motion{value = 9}}
+	presentation.profiles_control = profiles
 	app.tab_presentation_remove(&presentation, 3)
 	testing.expect_value(t, len(presentation.tab_positions), 3)
-	testing.expect_value(t, len(presentation.tab_controls), 5)
+	testing.expect_value(t, len(presentation.tab_controls), 3)
+	testing.expect_value(t, presentation.profiles_control, profiles)
 	testing.expect_value(t, presentation.tab_positions[0].value, f32(5))
 	testing.expect_value(t, presentation.tab_positions[2].value, f32(7))
 	// Closing the last selected tab, an earlier tab, and the only tab.

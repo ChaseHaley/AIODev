@@ -32,9 +32,12 @@ $repo = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $repo
 $tag = "v$Version"
 
+# Shows the build's output as it runs and returns it.
 function Invoke-Build([string] $Task) {
-    & pwsh -NoLogo -NoProfile -File (Join-Path $repo 'build.ps1') $Task
+    $lines = @(& pwsh -NoLogo -NoProfile -File (Join-Path $repo 'build.ps1') $Task |
+        ForEach-Object { Write-Host $_; $_ })
     if ($LASTEXITCODE -ne 0) { throw "build.ps1 $Task failed." }
+    return $lines
 }
 
 if ((git branch --show-current) -ne 'main') { throw 'Release from main.' }
@@ -49,18 +52,20 @@ if (-not $DryRun) {
 
 $previous = try { git describe --tags --abbrev=0 2>$null } catch { $null }
 
-Invoke-Build check
+$null = Invoke-Build check
 git tag --annotate $tag --message "AIODev $tag"
 try {
-    Invoke-Build package
+    $packaged = Invoke-Build package
 }
 catch {
     git tag --delete $tag | Out-Null
     throw
 }
 
-$archive = "build/AIODev-$tag-windows-x64.zip"
-if (-not (Test-Path -LiteralPath $archive)) { throw "Expected $archive." }
+# build.ps1 names the archive and reports it; it uses the tag only when it finds HEAD tagged and clean.
+$archive = @($packaged | Where-Object { $_ -match '^Package: (.+)$' } | ForEach-Object { $Matches[1] })[0]
+if (-not $archive -or -not (Test-Path -LiteralPath $archive)) { throw 'build.ps1 package reported no archive.' }
+if ((Split-Path $archive -Leaf) -notlike "*-$tag-*") { throw "Expected the archive $archive to carry $tag." }
 $hash = (Get-Content -LiteralPath "$archive.sha256" -Raw).Split(' ')[0]
 
 # Release notes list user-facing Conventional Commits since the previous tag.

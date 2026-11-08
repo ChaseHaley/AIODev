@@ -1,10 +1,10 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:testing"
 import "core:unicode/utf8"
 import app "../../src"
-import "aio:platform"
 import "aio:ui"
 
 @(test)
@@ -85,17 +85,17 @@ workspace_navigation_wraps_actions_and_consumes_closing_key_release :: proc(t: ^
 	w.workspace_picker.state = app.Workspace_Picker_List{}
 	append(&w.workspace_picker.rows, app.Workspace_Row{1, ""})
 	count := app.workspace_picker_count(&w)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .P, modifiers = {.Control}, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .P, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.selected, count-1)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .N, modifiers = {.Control}, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .N, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.selected, 0)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Y, unshifted = 'p',
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Y, unshifted = 'p',
 		modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.selected, count-1)
 	testing.expect_value(t, ui.field_string(&w.workspace_picker.query), "")
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.workspace_picker_active(&w.workspace_picker))
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = false})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = false})
 	testing.expect(t, !app.key_suppressed(&w, .Escape))
 	// A tab menu names its tab in the window's workspace; this one names a tab that is not there.
 	workspace := app.workspace_create_empty(&state)
@@ -104,12 +104,17 @@ workspace_navigation_wraps_actions_and_consumes_closing_key_release :: proc(t: ^
 	defer app.workspace_destroy(workspace)
 	w.workspace = workspace
 	w.overlay = app.Overlay_Tab_Menu{tab = 1}
-	w.tab_menu.count = 3
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .P, modifiers = {.Control}, pressed = true})
-	testing.expect_value(t, w.tab_menu.selected, 2)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .N, modifiers = {.Control}, pressed = true})
-	testing.expect_value(t, w.tab_menu.selected, 0)
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Enter, pressed = false})
+	defer app.tab_menu_destroy(&w.tab_menu)
+	for _ in 0 ..< 3 {
+		row := ui.Menu_Item{label = "Command Palette", payload = u32(app.Action.Command_Palette)}
+		added, err := ui.menu_add(&w.tab_menu.menu, row)
+		testing.expect(t, added && err == nil)
+	}
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .P, modifiers = {.Control}, pressed = true})
+	testing.expect_value(t, ui.menu_selected(&w.tab_menu.menu), 2)
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .N, modifiers = {.Control}, pressed = true})
+	testing.expect_value(t, ui.menu_selected(&w.tab_menu.menu), 0)
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = false})
 	testing.expect(t, app.tab_menu_shown(&w))
 }
 

@@ -1,7 +1,6 @@
 package ui
 
 import "aio:render"
-import "aio:settings"
 import "core:strings"
 
 @(private)
@@ -25,7 +24,7 @@ choice_source_index :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> int {
 @(private)
 choice_filter :: proc(p: ^Editor, row: ^Editor_Row) {
 	choice_matches_filter(&p.choice_matches, row.choices, row.choice_labels, field_string(&p.choice_search))
-	p.popup_index, p.popup_scroll = 0, 0
+	p.choice_list = {}
 }
 
 @(private)
@@ -37,13 +36,13 @@ choice_choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcom
 @(private)
 choice_search_height :: proc(row: ^Editor_Row, scale: f32) -> f32 {
 	if !choice_searchable(row) {return 0}
-	return (CHOICE_SEARCH_HEIGHT + (row.key == "font.family" ? CHOICE_HEIGHT : 0)) * scale
+	return (CHOICE_SEARCH_HEIGHT + (row.font_filter ? CHOICE_HEIGHT : 0)) * scale
 }
 
 @(private)
 choice_font_toggle_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	row := editor_row(p)
-	if row == nil || row.key != "font.family" || editor_popup(p) != .Choice {return {}}
+	if row == nil || !row.font_filter || editor_popup(p) != .Choice {return {}}
 	r := editor_popup_rect(p, l)
 	s := l.scale
 	return {r.x + 4 * s, r.y + (4 + CHOICE_SEARCH_HEIGHT) * s, r.width - 8 * s, CHOICE_HEIGHT * s}
@@ -62,36 +61,36 @@ editor_font_search_restore :: proc(p: ^Editor, query: string, toggle_focus: bool
 choice_search_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
 	r := editor_popup_rect(p, l)
 	s := l.scale
-	return {
-		field = &p.choice_search, text = text,
-		rect = {r.x + 4 * s, r.y + 4 * s, r.width - 8 * s, HEIGHT_STANDARD * s},
-		inset = CONTROL_INSET, caret_width = 1, radius = RADIUS_CONTROL, style = .Body, scale = s,
-	}
+	pad := OVERLAY_PADDING * s
+	rect := render.Rect{r.x + pad, r.y + pad, r.width - 2 * pad, HEIGHT_STANDARD * s}
+	return field_box_standard(&p.choice_search, text, rect, s)
+}
+
+// The options a multiple choice has on: the pending bits of the selected row, which its owner saves
+// by name.
+editor_choice_set :: proc(p: ^Editor) -> u32 {
+	return p.choice_set
 }
 
 @(private)
-choice_set_has :: proc(row: ^Editor_Row, value: string, index: int) -> bool {
-	mask, _, ok := settings.set_parse(row.choices, value)
-	return ok && mask & (1 << u32(index)) != 0
+choice_set_has :: proc(mask: u32, index: int) -> bool {
+	return mask & (1 << u32(index)) != 0
 }
 
 // Flips one option and saves at once, leaving the popup open for the next option.
 @(private)
-choice_set_toggle :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
-	mask, _, _ := settings.set_parse(row.choices, field_string(&p.value))
-	field_set(&p.value, settings.set_text(row.choices, mask ~ (1 << u32(index))))
-	p.popup_index = index
+choice_set_toggle :: proc(p: ^Editor, index: int) -> Editor_Outcome {
+	p.choice_set ~= 1 << u32(index)
+	p.choice_list.index = index
 	return .Save
 }
 
 @(private)
-choice_set_label :: proc(row: ^Editor_Row, value: string) -> string {
-	mask, _, ok := settings.set_parse(row.choices, value)
-	if !ok {return value}
+choice_set_label :: proc(row: ^Editor_Row, mask: u32) -> string {
 	if mask == 0 {return "Off"}
 	b := strings.builder_make(context.temp_allocator)
 	for label, i in row.choice_labels {
-		if mask & (1 << u32(i)) == 0 {continue}
+		if !choice_set_has(mask, i) {continue}
 		if strings.builder_len(b) > 0 {strings.write_string(&b, ", ")}
 		strings.write_string(&b, label)
 	}

@@ -16,41 +16,37 @@ Theme_Edit_Error :: enum {
 // Sets one color of the active theme. Theme files are never changed: the first edit saves a custom
 // theme based on the file's theme, selects it and returns its new ID in `created`. An empty value
 // returns a custom theme's color to its base. `updated` and `created` are owned; `issue` is
-// temporary.
+// temporary. Every theme edit takes `s`, the revision `source` parses to with its inputs.
 @(require_results)
 theme_color_edit :: proc(
+	s: ^Settings,
 	source, token_key, value: string,
 	allocator := context.allocator,
-	themes_directory: string = "",
 ) -> (
 	updated, created, issue: string,
 	error: Theme_Edit_Error,
 ) {
 	if _, found := token_find(token_key); !found {return "", "", "", .Unavailable}
-	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
-	if parse_error != nil {return "", "", "", .Allocation}
-	diagnostics_destroy(&diagnostics)
-	defer destroy(&s)
 	revision, clone_error := strings.clone(source, allocator)
 	if clone_error != nil {return "", "", "", .Allocation}
 	defer delete(revision, allocator)
 	id := s.theme.name
-	if !theme_custom(&s) {
+	if !theme_custom(s) {
 		if value == "" {
 			updated, clone_error = strings.clone(source, allocator)
 			if clone_error != nil {return "", "", "", .Allocation}
 			return
 		}
-		base := theme_active_id(&s)
-		id = theme_id_free(&s, fmt.tprintf("%s-custom", base))
-		if issue, error = theme_custom_lines(&s, &revision, id, base, allocator); error != .None {return}
-		key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, token_key)
+		base := theme_active_id(s)
+		id = theme_id_free(s, fmt.tprintf("%s-custom", base))
+		if issue, error = theme_custom_lines(s, &revision, id, base, allocator); error != .None {return}
+		key := custom_theme_field_key(id, token_key)
 		if issue, error = theme_edit_line(&revision, key, value, allocator); error != .None {return}
 		if issue, error = theme_edit_line(&revision, "theme.name", id, allocator); error != .None {return}
 		created, clone_error = strings.clone(id, allocator)
 		if clone_error != nil {return "", "", "", .Allocation}
 	} else {
-		key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, token_key)
+		key := custom_theme_field_key(id, token_key)
 		if value == "" {
 			if error = theme_remove_lines(&revision, key, false, allocator); error != .None {return}
 		} else if issue, error = theme_edit_line(&revision, key, value, allocator); error != .None {
@@ -65,28 +61,24 @@ theme_color_edit :: proc(
 // empty custom theme based on a theme file.
 @(require_results)
 theme_duplicate :: proc(
+	s: ^Settings,
 	source: string,
 	allocator := context.allocator,
-	themes_directory: string = "",
 ) -> (
 	updated, created: string,
 	error: Theme_Edit_Error,
 ) {
-	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
-	if parse_error != nil {return "", "", .Allocation}
-	diagnostics_destroy(&diagnostics)
-	defer destroy(&s)
 	if len(s.themes) >= CUSTOM_THEME_LIMIT {return "", "", .Invalid}
 	revision, clone_error := strings.clone(source, allocator)
 	if clone_error != nil {return "", "", .Allocation}
 	defer delete(revision, allocator)
 	id: string
-	if custom := custom_theme_find(&s, s.theme.name); custom != nil && !custom.external {
-		id = theme_id_free(&s, fmt.tprintf("%s-copy", custom.id))
+	if custom := custom_theme_find(s, s.theme.name); custom != nil && !custom.external {
+		id = theme_id_free(s, fmt.tprintf("%s-copy", custom.id))
 		if custom.name != "" {
 			if _, error = theme_edit_line(
 				&revision,
-				fmt.tprintf("%s%s.name", CUSTOM_THEME_PREFIX, id),
+				custom_theme_field_key(id, "name"),
 				fmt.tprintf("%s Copy", custom.name),
 				allocator,
 			); error != .None {return}
@@ -94,22 +86,22 @@ theme_duplicate :: proc(
 		if custom.base != "" {
 			if _, error = theme_edit_line(
 				&revision,
-				fmt.tprintf("%s%s.base", CUSTOM_THEME_PREFIX, id),
+				custom_theme_field_key(id, "base"),
 				custom.base,
 				allocator,
 			); error != .None {return}
 		}
 		tokens := THEME_TOKENS
 		for token in custom.overrides {
-			key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, tokens[token].key)
+			key := custom_theme_field_key(id, tokens[token].key)
 			text := theme_color_text(token, custom.colors[token])
 			if text == "" {continue}
 			if _, error = theme_edit_line(&revision, key, text, allocator); error != .None {return}
 		}
 	} else {
-		base := theme_active_id(&s)
-		id = theme_id_free(&s, fmt.tprintf("%s-custom", base))
-		if _, error = theme_custom_lines(&s, &revision, id, base, allocator); error != .None {return}
+		base := theme_active_id(s)
+		id = theme_id_free(s, fmt.tprintf("%s-custom", base))
+		if _, error = theme_custom_lines(s, &revision, id, base, allocator); error != .None {return}
 	}
 	if _, error = theme_edit_line(&revision, "theme.name", id, allocator); error != .None {return}
 	created, clone_error = strings.clone(id, allocator)
@@ -118,26 +110,46 @@ theme_duplicate :: proc(
 	return
 }
 
-// Renames the active custom theme, rewriting every line it owns and the selection.
+// Sets the active custom theme's display name without changing its ID or editing a theme file.
 @(require_results)
-theme_rename :: proc(
-	source, new_id: string,
+theme_name_edit :: proc(
+	s: ^Settings,
+	source, name: string,
 	allocator := context.allocator,
-	themes_directory: string = "",
 ) -> (
 	updated, issue: string,
 	error: Theme_Edit_Error,
 ) {
-	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
-	if parse_error != nil {return "", "", .Allocation}
-	diagnostics_destroy(&diagnostics)
-	defer destroy(&s)
-	if !theme_custom(&s) {return "", "", .Unavailable}
-	if custom_theme_find(&s, s.theme.name).external {return "", "", .Unavailable}
+	if !theme_custom(s) {return "", "", .Unavailable}
+	key := custom_theme_field_key(s.theme.name, "name")
+	message: string
+	alloc_error: runtime.Allocator_Error
+	updated, message, alloc_error = edit_text(source, key, strings.trim_space(name), allocator)
+	defer delete(message, allocator)
+	if alloc_error != nil || message != "" {
+		delete(updated, allocator)
+		if alloc_error != nil {return "", "", .Allocation}
+		return "", strings.clone(message, context.temp_allocator), .Invalid
+	}
+	return updated, "", .None
+}
+
+// Renames the active custom theme, rewriting every line it owns and the selection.
+@(require_results)
+theme_rename :: proc(
+	s: ^Settings,
+	source, new_id: string,
+	allocator := context.allocator,
+) -> (
+	updated, issue: string,
+	error: Theme_Edit_Error,
+) {
+	if !theme_custom(s) {return "", "", .Unavailable}
+	if custom_theme_find(s, s.theme.name).external {return "", "", .Unavailable}
 	if !theme_id_valid(new_id) {
 		return "", "Use lowercase letters, digits, - and _.", .Invalid
 	}
-	if new_id != s.theme.name && custom_theme_find(&s, new_id) != nil {
+	if new_id != s.theme.name && custom_theme_find(s, new_id) != nil {
 		return "", "Another theme uses this ID.", .Invalid
 	}
 	old_prefix := fmt.tprintf("%s%s.", CUSTOM_THEME_PREFIX, s.theme.name)
@@ -176,25 +188,21 @@ theme_rename :: proc(
 // Removes the active custom theme and selects the theme it was based on, or the default theme.
 @(require_results)
 theme_delete :: proc(
+	s: ^Settings,
 	source: string,
 	allocator := context.allocator,
-	themes_directory: string = "",
 ) -> (
 	updated, selected: string,
 	error: Theme_Edit_Error,
 ) {
-	s, diagnostics, parse_error := parse(source, allocator, themes_directory)
-	if parse_error != nil {return "", "", .Allocation}
-	diagnostics_destroy(&diagnostics)
-	defer destroy(&s)
-	custom := custom_theme_find(&s, s.theme.name)
+	custom := custom_theme_find(s, s.theme.name)
 	if custom == nil || custom.external {return "", "", .Unavailable}
 	revision, clone_error := strings.clone(source, allocator)
 	if clone_error != nil {return "", "", .Allocation}
 	defer delete(revision, allocator)
 	prefix := fmt.tprintf("%s%s.", CUSTOM_THEME_PREFIX, custom.id)
 	if error = theme_remove_lines(&revision, prefix, true, allocator); error != .None {return}
-	next := theme_delete_target(&s, custom)
+	next := theme_delete_target(s, custom)
 	if _, error = theme_edit_line(&revision, "theme.name", next, allocator); error != .None {return}
 	selected, clone_error = strings.clone(next, allocator)
 	if clone_error != nil {return "", "", .Allocation}
@@ -214,9 +222,9 @@ theme_custom_lines :: proc(
 	error: Theme_Edit_Error,
 ) {
 	name := fmt.tprintf("%s Custom", theme_display_name(s, base))
-	name_key := fmt.tprintf("%s%s.name", CUSTOM_THEME_PREFIX, id)
+	name_key := custom_theme_field_key(id, "name")
 	if issue, error = theme_edit_line(revision, name_key, name, allocator); error != .None {return}
-	return theme_edit_line(revision, fmt.tprintf("%s%s.base", CUSTOM_THEME_PREFIX, id), base, allocator)
+	return theme_edit_line(revision, custom_theme_field_key(id, "base"), base, allocator)
 }
 
 // The theme a new custom theme starts from: the selected theme, or the default for an unknown name.
@@ -236,7 +244,7 @@ theme_delete_target :: proc(s: ^Settings, custom: ^Custom_Theme) -> string {
 @(private)
 theme_id_free :: proc(s: ^Settings, wanted: string) -> string {
 	stem := wanted
-	if len(stem) > PROFILE_ID_MAX_LENGTH - 3 {stem = stem[:PROFILE_ID_MAX_LENGTH - 3]}
+	if len(stem) > THEME_ID_MAX_LENGTH - 3 {stem = stem[:THEME_ID_MAX_LENGTH - 3]}
 	stem = strings.trim_right(stem, "-_")
 	id := stem
 	for number := 2; custom_theme_find(s, id) != nil; number += 1 {
@@ -254,19 +262,10 @@ theme_edit_line :: proc(
 	issue: string,
 	error: Theme_Edit_Error,
 ) {
-	updated, message, alloc_error := edit_text(text^, key, value, allocator)
+	message, alloc_error := revision_edit_owned(text, key, value, allocator)
 	defer delete(message, allocator)
-	if alloc_error != nil {
-		delete(updated, allocator)
-		delete(message, allocator)
-		return "", .Allocation
-	}
-	if message != "" {
-		delete(updated, allocator)
-		return strings.clone(message, context.temp_allocator), .Invalid
-	}
-	delete(text^, allocator)
-	text^ = updated
+	if alloc_error != nil {return "", .Allocation}
+	if message != "" {return strings.clone(message, context.temp_allocator), .Invalid}
 	return
 }
 
@@ -395,10 +394,10 @@ migrate_theme_text :: proc(
 		base := s.theme.name
 		id := theme_id_free(&s, fmt.tprintf("%s-custom", base))
 		lines := make([dynamic][2]string, 0, count + 2, context.temp_allocator)
-		append(&lines, [2]string{fmt.tprintf("%s%s.base", CUSTOM_THEME_PREFIX, id), base})
+		append(&lines, [2]string{custom_theme_field_key(id, "base"), base})
 		tokens := THEME_TOKENS
 		for c in colors[:count] {
-			key := fmt.tprintf("%s%s.%s", CUSTOM_THEME_PREFIX, id, tokens[c.token].key)
+			key := custom_theme_field_key(id, tokens[c.token].key)
 			append(&lines, [2]string{key, c.value})
 		}
 		append(&lines, [2]string{"theme.name", id})

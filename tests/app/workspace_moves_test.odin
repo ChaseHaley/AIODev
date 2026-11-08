@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
@@ -54,7 +55,8 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	name, name_error := strings.clone("Build pair")
 	if !testing.expect_value(t, name_error, nil) {return}
 	app.selected_tab(two).name = name
-	request := app.workspace_move_request(w, true, w.workspace.selected)
+	// A pane move needs a new tab record, so an allocation failure leaves the source whole.
+	request := app.workspace_move_request(w, false, w.workspace.selected)
 	allocator := context.allocator
 	context.allocator = runtime.nil_allocator()
 	failed := app.workspace_move_content(&state, w, request, original)
@@ -62,6 +64,10 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	testing.expect(t, !failed)
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(two)), 2)
 	testing.expect_value(t, len(original.tabs), 1)
+	// The whole tab record moves, so the tab's pinned documents travel with its layout and name.
+	pinned, pinned_error := strings.clone("C:/build/notes.md")
+	if !testing.expect_value(t, pinned_error, nil) {return}
+	append(&app.selected_tab(two).documents, app.Document{target = pinned})
 	app.run_action(&state, w, .Move_Tab_Workspace)
 	if !testing.expect_value(t, len(w.workspace_picker.rows), 1) {return}
 	app.workspace_picker_choose(&state, w)
@@ -70,6 +76,8 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	testing.expect_value(t, len(original.tabs), 2)
 	testing.expect_value(t, app.selected_tab(original).name, "Build pair")
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(original)), 2)
+	documents := app.selected_tab(original).documents
+	testing.expect(t, len(documents) == 1 && documents[0].target == "C:/build/notes.md")
 	testing.expect_value(t, len(state.sessions), 3)
 	testing.expect_value(t, term.process_id(session), pid)
 	app.run_action(&state, w, .Move_Tab_New_Workspace)
@@ -102,7 +110,7 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	for row, i in other.workspace_picker.rows {
 		if row.id == original.id {other.workspace_picker.selected = i; break}
 	}
-	app.handle_event(&state, platform.Key_Event{window = other.id, key = .Enter, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = other.id, key = .Enter, pressed = true})
 	testing.expect(t, app.window_find(&state, other_id) == nil)
 	testing.expect(t, app.workspace_find(&state, settings_id) == nil)
 	testing.expect_value(t, len(state.sessions), 3)

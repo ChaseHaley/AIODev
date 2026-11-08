@@ -3,9 +3,21 @@ package program_art_test
 import "core:strings"
 import "core:testing"
 import "aio:program_art"
+import "aio:procinfo"
 
+// The table parsed once for a test; callers destroy it.
+@(private)
+catalogue :: proc(t: ^testing.T) -> (program_art.Catalogue, bool) {
+	c, err := program_art.catalogue_make()
+	return c, testing.expect_value(t, err, nil)
+}
+
+// Names arrive as executable stems, so ".exe" is stripped by procinfo.executable_stem first.
 @(test)
 names_match_without_case_or_exe_and_resolve_to_their_canonical_entry :: proc(t: ^testing.T) {
+	c, ok := catalogue(t)
+	if !ok {return}
+	defer program_art.catalogue_destroy(&c)
 	for test in ([?][2]string {
 		{"codex", "codex"},
 		{"Codex.EXE", "codex"},
@@ -14,34 +26,34 @@ names_match_without_case_or_exe_and_resolve_to_their_canonical_entry :: proc(t: 
 		{"nvim", "nvim"},
 		{"python3", "python"},
 	}) {
-		art, found := program_art.find(test[0])
+		art, found := program_art.find(&c, procinfo.executable_stem(test[0]))
 		if testing.expect(t, found, test[0]) {testing.expect_value(t, program_art.canonical(art), test[1])}
 	}
 	for name in ([?]string{"", "pwsh", "codexx", "#", "names"}) {
-		_, found := program_art.find(name)
+		_, found := program_art.find(&c, procinfo.executable_stem(name))
 		testing.expect(t, !found, name)
 	}
 }
 
 @(test)
 brand_colours_parse_and_entries_without_one_use_the_theme :: proc(t: ^testing.T) {
-	claude, _ := program_art.find("claude")
-	layers := claude.layers
-	layer, _ := program_art.next_layer(&layers)
-	colour, ok := program_art.brand(layer)
-	testing.expect(t, ok)
-	testing.expect_value(t, colour, [3]u8{0xD9, 0x77, 0x57})
-	opencode, _ := program_art.find("opencode")
-	layers = opencode.layers
-	layer, _ = program_art.next_layer(&layers)
-	_, ok = program_art.brand(layer)
-	testing.expect(t, !ok)
+	c, ok := catalogue(t)
+	if !ok {return}
+	defer program_art.catalogue_destroy(&c)
+	claude, _ := program_art.find(&c, "claude")
+	testing.expect(t, claude.layers[0].branded)
+	testing.expect_value(t, claude.layers[0].colour, [3]u8{0xD9, 0x77, 0x57})
+	opencode, _ := program_art.find(&c, "opencode")
+	testing.expect(t, !opencode.layers[0].branded)
 }
 
 // Neovim's flat mark: a blue left stroke under green right and diagonal strokes (WORK-290).
 @(test)
 layers_keep_their_own_colours_unless_painted_mono :: proc(t: ^testing.T) {
-	art, found := program_art.find("nvim")
+	c, ok := catalogue(t)
+	if !ok {return}
+	defer program_art.catalogue_destroy(&c)
+	art, found := program_art.find(&c, "nvim")
 	if !testing.expect(t, found) {return}
 	size :: 24
 	pixels: [size * size * 4]u8
@@ -58,21 +70,25 @@ layers_keep_their_own_colours_unless_painted_mono :: proc(t: ^testing.T) {
 // A later layer covers an earlier one where they overlap, as SVG paints them.
 @(test)
 later_layers_paint_over_earlier_ones :: proc(t: ^testing.T) {
-	art := program_art.Art {
-		names  = "test",
-		layers = "FF0000:nonzero:M0 0H24V24H0Z|0000FF:nonzero:M0 0H12V24H0Z",
+	layers := [2]program_art.Layer {
+		{colour = {0xFF, 0, 0}, branded = true, rule = .Nonzero, path = "M0 0H24V24H0Z"},
+		{colour = {0, 0, 0xFF}, branded = true, rule = .Nonzero, path = "M0 0H12V24H0Z"},
 	}
+	art := program_art.Art{names = "test", layers = layers[:]}
 	pixels: [4 * 4 * 4]u8
 	testing.expect(t, program_art.draw(art, 4, {}, pixels[:]))
 	testing.expect_value(t, pixel(pixels[:], 0), [4]u8{0, 0, 255, 255})
 	testing.expect_value(t, pixel(pixels[:], 12), [4]u8{255, 0, 0, 255})
-	art.layers = "FF0000:nonzero:M0 0H24V24H0Z|bad"
+	layers[1].path = "bad"
 	testing.expect(t, !program_art.draw(art, 4, {}, pixels[:]))
 }
 
 // Guards the generated table: every entry parses, names stay unique, and every path draws.
 @(test)
 every_entry_draws_at_tab_and_header_sizes :: proc(t: ^testing.T) {
+	c, ok := catalogue(t)
+	if !ok {return}
+	defer program_art.catalogue_destroy(&c)
 	seen: map[string]bool
 	defer delete(seen)
 	rest := program_art.TABLE
@@ -82,7 +98,7 @@ every_entry_draws_at_tab_and_header_sizes :: proc(t: ^testing.T) {
 		names := line[:strings.index_byte(line, '|')]
 		first := names
 		if comma := strings.index_byte(names, ','); comma >= 0 {first = names[:comma]}
-		art, found := program_art.find(first)
+		art, found := program_art.find(&c, first)
 		if !testing.expect(t, found, first) {continue}
 		entries += 1
 		for name in strings.split_iterator(&names, ",") {
@@ -106,7 +122,10 @@ every_entry_draws_at_tab_and_header_sizes :: proc(t: ^testing.T) {
 
 @(test)
 drawing_premultiplies_the_colour :: proc(t: ^testing.T) {
-	art, _ := program_art.find("git")
+	c, ok := catalogue(t)
+	if !ok {return}
+	defer program_art.catalogue_destroy(&c)
+	art, _ := program_art.find(&c, "git")
 	pixels: [16 * 16 * 4]u8
 	testing.expect(t, program_art.draw(art, 16, {text = {200, 100, 50}, mono = true}, pixels[:]))
 	for i := 0; i < len(pixels); i += 4 {

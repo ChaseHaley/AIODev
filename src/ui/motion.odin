@@ -15,6 +15,14 @@ Motion :: struct {
 	easing:              Easing,
 }
 
+// How long a reordered list item takes to ease into its slot (D-069). Tabs, workspace rows and
+// settings profile blocks share it so every reorderable list moves alike.
+REORDER_DURATION :: 140 * time.Millisecond
+
+// How long a control takes to light up or settle under hover and press.
+@(private)
+CONTROL_MOTION_DURATION :: 80 * time.Millisecond
+
 motion_active :: proc(m: Motion) -> bool {return m.value != m.target}
 
 motion_update :: proc(m: ^Motion, now: time.Tick) -> bool {
@@ -53,14 +61,20 @@ motion_target :: proc(
 	m.from, m.target, m.started, m.duration, m.easing = m.value, target, now, duration, easing
 }
 
-fade_draw :: proc(
-	list: ^render.Draw_List,
-	layer_start, rect_start, glyph_start: int,
-	opacity, rise: f32,
-) {
-	for &layer in list.layers[layer_start:] {layer.clip.y += rise}
-	for &rect in list.rects[rect_start:] {rect.rect.y += rise; rect.color.a *= opacity}
-	for &glyph in list.glyphs[glyph_start:] {glyph.rect.y += rise; glyph.color.a *= opacity}
+// Where a surface's drawing starts in a draw list, so its fade moves and dims only what it drew.
+Fade_Mark :: struct {
+	layers, rects, glyphs: int,
+}
+
+fade_mark :: proc(list: ^render.Draw_List) -> Fade_Mark {
+	return {len(list.layers), len(list.rects), len(list.glyphs)}
+}
+
+// Applies `fade` to everything drawn since `mark`.
+fade_draw :: proc(list: ^render.Draw_List, mark: Fade_Mark, fade: Fade) {
+	for &layer in list.layers[mark.layers:] {layer.clip.y += fade.rise}
+	for &rect in list.rects[mark.rects:] {rect.rect.y += fade.rise; rect.color.a *= fade.opacity}
+	for &glyph in list.glyphs[mark.glyphs:] {glyph.rect.y += fade.rise; glyph.color.a *= fade.opacity}
 }
 
 Control_Motion :: struct {
@@ -72,8 +86,8 @@ control_active :: proc(m: Control_Motion) -> bool {
 }
 
 control_update :: proc(m: ^Control_Motion, hover, press, enabled: bool, now: time.Tick) -> bool {
-	motion_target(&m.hover, hover ? 1 : 0, 80 * time.Millisecond, .Linear, enabled, now)
-	motion_target(&m.press, press ? 1 : 0, 80 * time.Millisecond, .Linear, enabled, now)
+	motion_target(&m.hover, hover ? 1 : 0, CONTROL_MOTION_DURATION, .Linear, enabled, now)
+	motion_target(&m.press, press ? 1 : 0, CONTROL_MOTION_DURATION, .Linear, enabled, now)
 	hover_changed := motion_update(&m.hover, now)
 	press_changed := motion_update(&m.press, now)
 	return hover_changed || press_changed

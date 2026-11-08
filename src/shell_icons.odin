@@ -1,55 +1,50 @@
 package main
 
-import "aio:glyphs"
-import platform_api "aio:platform"
+import "aio:localpath"
 import "aio:render"
 import "aio:settings"
+import "core:fmt"
 import "core:image/png"
-import "core:path/filepath"
-
-// Shell icons are small, and the PNG loader reads a whole file before checking its header, so a
-// settings value naming a huge file must be refused before it is read into memory.
-@(private)
-SHELL_ICON_MAX_BYTES :: 32 << 20
-@(private)
-SHELL_ICON_INVALID_NOTICE ::
-	"Shell Icon needs a readable PNG no larger than 1024 × 1024. Using the shell default."
+import "core:strings"
 
 Shell_Icon :: struct {
 	pixels:        [32 * 32 * 4]u8,
 	width, height: int,
 	slot:          render.Atlas_Slot,
+	// The Shell Icon setting as written when these pixels loaded from it; owned, empty without an image.
+	path:          string,
+}
+
+shell_icon_destroy :: proc(icon: ^Shell_Icon) {
+	delete(icon.path)
+	icon^ = {}
 }
 
 shell_icon_load :: proc(app: ^App) {
-	app.shell_icon = {}
-	if app.settings.shell.icon == "" {return}
-	path, err := settings.expand_home(app.settings.shell.icon, context.temp_allocator)
-	if err != nil {notify(app, .Error, "Could not allocate the shell icon path."); return}
-	if !filepath.is_abs(path) {
-		path, err = filepath.join({filepath.dir(app.settings_path), path}, context.temp_allocator)
-		if err != nil {notify(app, .Error, "Could not resolve the shell icon path."); return}
-	}
-	// The settings file is trusted, but a device path, remote share, directory, or oversized file
-	// would stall startup or allocate without bound before the decoder's own checks run.
-	if !platform_api.local_file_within_limit(path, SHELL_ICON_MAX_BYTES) {
-		notify(app, .Error, SHELL_ICON_INVALID_NOTICE)
+	shell_icon_destroy(&app.shell_icon)
+	icon_path := settings.profile_base(&app.settings.profiles).icon
+	if icon_path == "" {return}
+	path, path_error := localpath.settings_relative(icon_path, app.settings_path, context.temp_allocator)
+	switch path_error {
+	case .None:
+	case .Expand:
+		notify(app, .Error, "Could not allocate the shell icon path.")
+		return
+	case .Join:
+		notify(app, .Error, "Could not resolve the shell icon path.")
 		return
 	}
-	header, header_error := png.load(path, {.return_header})
-	defer png.destroy(header)
-	if header_error != nil ||
-	   header == nil ||
-	   header.width < 1 ||
-	   header.height < 1 ||
-	   header.width > 1024 ||
-	   header.height > 1024 {
-		notify(app, .Error, SHELL_ICON_INVALID_NOTICE)
-		return
-	}
-	image, image_error := png.load(path, {.alpha_add_if_missing, .alpha_premultiply})
+	image, load_error := icon_png_load(path)
 	defer png.destroy(image)
-	if image_error != nil || image == nil || image.depth != 8 || image.channels != 4 {
+	switch load_error {
+	case .None:
+	case .Refused:
+		notify(app, .Error, fmt.tprintf(
+			"Shell Icon needs a readable PNG no larger than %d × %d. Using the shell default.",
+			ICON_PNG_MAX_SIDE, ICON_PNG_MAX_SIDE,
+		))
+		return
+	case .Undecodable:
 		notify(
 			app,
 			.Error,
@@ -68,23 +63,20 @@ shell_icon_load :: proc(app: ^App) {
 			copy(icon.pixels[to:to + 4], image.pixels.buf[from:from + 4])
 		}
 	}
+	icon.path = strings.clone(icon_path)
 	mark_all_dirty(app)
 }
 
-shell_icon_atlas :: proc(app: ^App) -> (render.Rect, glyphs.Result) {
+shell_icon_atlas :: proc(app: ^App) -> (render.Rect, render.Build_Status) {
 	icon := &app.shell_icon
 	if icon.width == 0 {return {}, .Ok}
-	if icon.slot.generation != render.atlas_generation(app.device) {
-		slot, ok := render.atlas_reserve(app.device, i32(icon.width), i32(icon.height), true)
-		if !ok {render.atlas_reset(app.device); return {}, .Atlas_Reset}
-		render.atlas_upload(
-			app.device,
-			slot,
-			icon.pixels[:icon.width * icon.height * 4],
-			icon.width,
-		)
-		icon.slot = slot
-	}
-	r := icon.slot
-	return {f32(r.x), f32(r.y), f32(r.width), f32(r.height)}, .Ok
+	return render.atlas_ensure(
+		app.device,
+		&icon.slot,
+		i32(icon.width),
+		i32(icon.height),
+		icon.pixels[:icon.width * icon.height * 4],
+		icon.width,
+		true,
+	)
 }

@@ -6,67 +6,7 @@ import "core:strings"
 import w "core:sys/windows"
 import "core:unicode/utf16"
 import "aio:links"
-
-// A window's restored rectangle in workspace coordinates, and whether it is maximized over it.
-Window_Placement :: struct {
-	left, top, right, bottom: i32,
-	maximized:                bool,
-}
-
-// Keeps the window's maximized state and raises it above other applications without taking focus.
-@(require_results)
-window_show_raised :: proc(p: ^Platform, id: Window_Id) -> Error {
-	window := find_window(p, id)
-	if window == nil {return .Invalid_Window}
-	flags := u32(w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW)
-	if !os_ok(w.SetWindowPos(window.hwnd, w.HWND_TOP, 0, 0, 0, 0, flags), "SetWindowPos(raise)") {return .Os}
-	return .None
-}
-
-window_maximize :: proc(p: ^Platform, id: Window_Id) {
-	if window := find_window(p, id); window != nil {w.ShowWindow(window.hwnd, w.SW_MAXIMIZE)}
-}
-
-@(require_results)
-window_placement :: proc(p: ^Platform, id: Window_Id) -> (Window_Placement, Error) {
-	window := find_window(p, id)
-	if window == nil {return {}, .Invalid_Window}
-	placement := w.WINDOWPLACEMENT {
-		length = size_of(w.WINDOWPLACEMENT),
-	}
-	if !os_ok(w.GetWindowPlacement(window.hwnd, &placement), "GetWindowPlacement") {return {}, .Os}
-	r := placement.rcNormalPosition
-	return {r.left, r.top, r.right, r.bottom, bool(w.IsZoomed(window.hwnd))}, .None
-}
-
-// Moves a hidden window to its restored rectangle and leaves it hidden. Windows pulls the rectangle back
-// on screen if its monitor has gone. Maximizing waits until the window is shown.
-@(require_results)
-window_set_placement :: proc(p: ^Platform, id: Window_Id, target: Window_Placement) -> Error {
-	window := find_window(p, id)
-	if window == nil {return .Invalid_Window}
-	placement := w.WINDOWPLACEMENT {
-		length = size_of(w.WINDOWPLACEMENT),
-	}
-	if !os_ok(w.GetWindowPlacement(window.hwnd, &placement), "GetWindowPlacement") {return .Os}
-	placement.showCmd = u32(w.SW_HIDE)
-	placement.rcNormalPosition = {target.left, target.top, target.right, target.bottom}
-	if !os_ok(w.SetWindowPlacement(window.hwnd, &placement), "SetWindowPlacement") {return .Os}
-	return .None
-}
-
-@(require_results)
-window_show_inactive :: proc(p: ^Platform, id: Window_Id) -> Error {
-	window := find_window(p, id)
-	if window == nil {return .Invalid_Window}
-	// ShowWindow returns the previous visibility, not success.
-	w.ShowWindow(window.hwnd, w.SW_SHOWNOACTIVATE)
-	if !bool(w.IsWindowVisible(window.hwnd)) {
-		log.errorf("ShowWindow(inactive) failed: %v", w.GetLastError())
-		return .Os
-	}
-	return .None
-}
+import "aio:localpath"
 
 // Requested → Added. Explorer restarting drops the icon, so its broadcast brings the tray back here.
 @(require_results)
@@ -207,13 +147,18 @@ clamp_utf16_units :: proc(s: string, max_units: int) -> string {
 
 // A click on the notification reports `token` back in a Tray_Notification_Event; 0 means no target.
 @(require_results)
-tray_notify :: proc(p: ^Platform, title, text: string, token: u64 = 0, sound := true) -> Error {
+tray_notify :: proc(
+	p: ^Platform,
+	title, text: string,
+	token: Notification_Token = 0,
+	sound := true,
+) -> Error {
 	added, ok := &p.tray.(Tray_Added)
 	if !ok {return .Not_Initialized}
 	data := p.tray_data
 	data.uFlags = w.NIF_INFO
 	data.dwInfoFlags = NIIF_INFO
-	if !sound {data.dwInfoFlags |= 0x10} // NIIF_NOSOUND
+	if !sound {data.dwInfoFlags |= NIIF_NOSOUND}
 	utf16.encode_string(data.szInfoTitle[:63], clamp_utf16_units(title, 63))
 	utf16.encode_string(data.szInfo[:255], clamp_utf16_units(text, 255))
 	if !os_ok(w.Shell_NotifyIconW(w.NIM_MODIFY, &data), "Shell_NotifyIconW(notify)") {return .Os}
@@ -368,12 +313,7 @@ open_path_allowed :: proc(path: string) -> bool {
 	for c in path {
 		if c == 0 {return false}
 	}
-	drive_absolute :=
-		len(path) >= 3 &&
-		path[1] == ':' &&
-		((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) &&
-		(path[2] == '\\' || path[2] == '/')
-	if drive_absolute {return true}
+	if localpath.is_drive_absolute(path) {return true}
 	if strings.has_prefix(path, `\\`) || strings.has_prefix(path, "//") {return false}
 	for c in path {
 		if c == ':' {return false}
@@ -401,13 +341,10 @@ local_file_within_limit :: proc(path: string, limit: i64) -> bool {
 	return size > 0 && size <= limit
 }
 
-@(require_results)
-open_path :: proc(path: string) -> bool {
-	if !open_path_allowed(path) {
-		log.warnf("platform: refusing to open a non-local path")
-		return false
-	}
-	text := w.utf8_to_wstring(path, context.allocator)
+// Hands an already-admitted path or address to the shell's default handler.
+@(private, require_results)
+shell_open :: proc(target: string) -> bool {
+	text := w.utf8_to_wstring(target, context.allocator)
 	if text == nil {return false}
 	defer delete(text)
 	result := w.ShellExecuteW(nil, nil, text, nil, nil, w.SW_SHOWNORMAL)
@@ -416,6 +353,15 @@ open_path :: proc(path: string) -> bool {
 		return false
 	}
 	return true
+}
+
+@(require_results)
+open_path :: proc(path: string) -> bool {
+	if !open_path_allowed(path) {
+		log.warnf("platform: refusing to open a non-local path")
+		return false
+	}
+	return shell_open(path)
 }
 
 // open_url hands a web target to the system's default browser. It never runs a command shell:
@@ -427,13 +373,5 @@ open_url :: proc(uri: string) -> bool {
 		log.warnf("platform: refusing to open a non-web target")
 		return false
 	}
-	text := w.utf8_to_wstring(uri, context.allocator)
-	if text == nil {return false}
-	defer delete(text)
-	result := w.ShellExecuteW(nil, nil, text, nil, nil, w.SW_SHOWNORMAL)
-	if uintptr(result) <= SHELL_EXECUTE_ERROR_MAX {
-		log.errorf("ShellExecuteW failed: code %d", uintptr(result))
-		return false
-	}
-	return true
+	return shell_open(uri)
 }

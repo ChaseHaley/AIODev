@@ -1,12 +1,11 @@
 package main
 
 import "aio:layout"
-import "aio:pty"
+import "aio:localpath"
 import "aio:settings"
 import "aio:term"
 import "core:fmt"
 import "core:log"
-import "core:os"
 import "core:strings"
 
 // The shell switch a confirmation asks about: the pane, the profile it switches to, and the names its
@@ -24,15 +23,6 @@ pane_swap_destroy :: proc(swap: ^Pane_Swap) {
 	swap^ = {}
 }
 
-@(private)
-shell_is_windows :: proc(command: string) -> bool {
-	executable := settings.shell_executable(command)
-	for unix in ([?]string{"wsl", "bash", "zsh", "fish", "sh"}) {
-		if strings.equal_fold(executable, unix) {return false}
-	}
-	return true
-}
-
 // Opens the confirmation for replacing a running pane's shell, or swaps immediately when the
 // pane has exited or the warning is off.
 pane_shell_swap_request :: proc(
@@ -41,9 +31,9 @@ pane_shell_swap_request :: proc(
 	node: layout.Node_Id,
 	profile_id: string,
 ) {
-	pane, is_pane := w.tree.nodes[node].(layout.Pane)
-	if !is_pane || !pane_owns_session(pane.content.kind) {return}
-	entry := session_find(app, pane.content.id)
+	content, is_pane := layout.pane_content(window_tree(w), node)
+	if !is_pane || !pane_owns_session(content.kind) {return}
+	entry := session_find(app, content.id)
 	if entry == nil {return}
 	if entry.profile_id == profile_id {return}
 	profile, requested := settings.profile_resolve(&app.settings, profile_id)
@@ -60,7 +50,6 @@ pane_shell_swap_request :: proc(
 		current = found.name
 	}
 	if !gesture_cancel(app, w) {return}
-	overlay_open(app, w, nil)
 	owned_id, id_error := strings.clone(profile.id)
 	if id_error != nil {notify(app, .Error, "Could not prepare the shell switch."); return}
 	owned_name, name_error := strings.clone(profile.name)
@@ -82,7 +71,7 @@ pane_shell_swap_request :: proc(
 		profile_name = owned_name,
 		current_name = owned_current,
 	}
-	confirmation_open(w, swap, show_option = true)
+	confirmation_ask(app, w, swap, show_option = true)
 }
 
 pane_swap_text :: proc(swap: Pane_Swap) -> Confirmation_Text {
@@ -104,27 +93,10 @@ pane_swap_finish :: proc(app: ^App, w: ^Window, swap: Pane_Swap, opt_out, accept
 
 @(private)
 pane_swap_opt_out :: proc(app: ^App) {
-	data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
-	if read_error != nil {
-		notify(app, .Error, "Could not save the shell-switch warning preference.")
-		return
+	failure :: "Could not save the shell-switch warning preference."
+	if settings_save_value(app, "pane.confirm_shell_switch", "false", failure) {
+		notify(app, .Info, "Won't ask again. Turn it back on in Settings.")
 	}
-	updated, message, edit_error := settings.edit_text(
-		string(data),
-		"pane.confirm_shell_switch",
-		"false",
-	)
-	defer delete(updated)
-	defer delete(message)
-	if edit_error != nil || message != "" {
-		notify(app, .Error, "Could not save the shell-switch warning preference.")
-		return
-	}
-	if settings_commit(app, string(data), updated) != .None {
-		notify(app, .Error, "Could not save the shell-switch warning preference.")
-		return
-	}
-	notify(app, .Info, "Won't ask again. Turn it back on in Settings.")
 }
 
 // Replaces the session's process in place. The session ID, pane, focus and name are unchanged;
@@ -135,9 +107,9 @@ pane_shell_swap :: proc(
 	node: layout.Node_Id,
 	profile_id: string,
 ) {
-	pane, is_pane := w.tree.nodes[node].(layout.Pane)
-	if !is_pane || !pane_owns_session(pane.content.kind) {return}
-	entry := session_find(app, pane.content.id)
+	content, is_pane := layout.pane_content(window_tree(w), node)
+	if !is_pane || !pane_owns_session(content.kind) {return}
+	entry := session_find(app, content.id)
 	if entry == nil {return}
 	profile, requested := settings.profile_resolve(&app.settings, profile_id)
 	if !requested {
@@ -154,32 +126,29 @@ pane_shell_swap :: proc(
 	raw_directory := term.working_directory(entry.session, context.temp_allocator)
 	carry :=
 		raw_directory != "" &&
-		shell_is_windows(profile.command) &&
-		shell_is_windows(entry.header.command)
+		!settings.shell_definitions[settings.shell_kind(profile.command)].unix &&
+		!settings.shell_definitions[settings.shell_kind(entry.header.command)].unix
 	if carry {
-		label, label_error := settings.directory_label(
+		label, label_error := localpath.directory_label(
 			raw_directory,
 			context.temp_allocator,
 		)
 		if label_error != nil {
 			log.errorf("resolving the pane directory failed: %v", label_error)
 		} else if label != "" {
-			if pty.working_directory_is_local(label) {
-				config.working_directory = label
-			} else {
+			directory, refused := local_launch_directory(label)
+			if refused {
 				notify(
 					app,
 					.Warning,
 					"The pane's directory is remote or unavailable; using the profile's default.",
 				)
+			} else {
+				config.working_directory = directory
 			}
 		}
 	}
-	term.restart(entry.session, config)
 	delete(entry.profile_id)
 	entry.profile_id = owned_id
-	pane_header_launch(&entry.header, config)
-	pane_header_refresh(entry)
-	session_status_sync(entry)
-	mark_all_dirty(app)
+	session_relaunch(app, entry, config)
 }

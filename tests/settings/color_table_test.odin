@@ -44,7 +44,7 @@ every_token_round_trips_through_a_custom_theme :: proc(t: ^testing.T) {
 			settings.theme_color_text(token, expected[token]),
 		)
 	}
-	s, diagnostics, err := settings.parse(strings.to_string(b), themes_directory = THEMES)
+	s, diagnostics, err := parse_themes(strings.to_string(b), THEMES)
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, err, nil)

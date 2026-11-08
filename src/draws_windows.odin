@@ -1,15 +1,15 @@
 package main
 
-import "aio:control"
 import "aio:draws"
-import "aio:render"
+import "aio:pixels"
+import "aio:verify_protocol"
 import "core:fmt"
 import "core:strings"
 
-_ :: control
+_ :: verify_protocol
 _ :: draws
+_ :: pixels
 _ :: fmt
-_ :: render
 _ :: strings
 
 // Draw-list evidence: report the selected window's last built frame in draw order.
@@ -19,15 +19,12 @@ when AIO_CONTROL {
 	draws_read :: proc(
 		app: ^App,
 		out: ^strings.Builder,
-		request: control.Draws,
-	) -> control.Error {
+		request: verify_protocol.Draws,
+	) -> verify_protocol.Error {
 		w := verify_window(app)
-		if w == nil {
-			fmt.sbprintf(out, "error: window hidden; run tray open")
-			return .Invalid_Argument
-		}
-		// draws.Kind mirrors control.Draw_Kind, but map explicitly so a protocol reorder fails here
-		// rather than silently relabelling the filter.
+		if w == nil {return verify_protocol.explain(out, "window hidden; run tray open")}
+		// draws.Kind mirrors verify_protocol.Draw_Kind, but map explicitly so a protocol reorder
+		// fails here rather than silently relabelling the filter.
 		kind: draws.Kind
 		switch request.kind {
 		case .All:
@@ -39,26 +36,28 @@ when AIO_CONTROL {
 		}
 		filter := draws.Filter{kind = kind}
 		if request.region.kind == .Pixels {
-			region := render.Rect {
-				x      = f32(request.region.x),
-				y      = f32(request.region.y),
-				width  = f32(request.region.width),
-				height = f32(request.region.height),
-			}
-			if !draws.region_fits(region, int(w.width), int(w.height)) {
-				fmt.sbprintf(
+			requested := request.region
+			// The integer region is checked as pixel evidence checks it, then handed over as floats.
+			if !pixels.rect_within(
+				int(w.width),
+				int(w.height),
+				{requested.x, requested.y, requested.width, requested.height},
+			) {
+				return verify_protocol.explain(
 					out,
-					"error: region %d,%d,%d,%d is outside the window client area %dx%d",
-					request.region.x,
-					request.region.y,
-					request.region.width,
-					request.region.height,
-					w.width,
-					w.height,
+					fmt.tprintf(
+						"region %d,%d,%d,%d is outside the window client area %dx%d",
+						request.region.x,
+						request.region.y,
+						request.region.width,
+						request.region.height,
+						w.width,
+						w.height,
+					),
 				)
-				return .Invalid_Argument
 			}
-			filter.bounded, filter.region = true, region
+			filter.bounded = true
+			filter.region = {f32(requested.x), f32(requested.y), f32(requested.width), f32(requested.height)}
 		}
 		draws.format_report(out, &w.list, filter)
 		return .None

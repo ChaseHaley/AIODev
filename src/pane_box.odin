@@ -1,6 +1,8 @@
 package main
 
 import "aio:layout"
+import "aio:render"
+import "aio:term"
 import "aio:term_view"
 import "aio:ui"
 import "core:math"
@@ -27,21 +29,31 @@ pane_header_height :: proc(scale: f32, show_headers: bool) -> f32 {
 	return math.round(ui.HEADER_HEIGHT * scale)
 }
 
-pane_insets :: proc(
-	app: ^App,
-	scale: f32,
-	entry: ^Session_Entry,
-	floating := false,
-) -> Pane_Insets {
-	return {
-		padding = pane_padding(app, scale, entry),
-		header = pane_header_height(scale, floating || app.settings.pane.show_headers),
-	}
+// The header row height tiled panes get under the settings; relayout caches it in w.header_height, which
+// every later question about a pane's header reads.
+pane_header_row_height :: proc(app: ^App, scale: f32) -> f32 {
+	return pane_header_height(scale, app.settings.pane.show_headers)
 }
 
-// The header height of a pane the window shows.
+// A shown pane's padding and header; a pane not yet placed is taken as tiled.
+pane_insets :: proc(
+	app: ^App,
+	w: ^Window,
+	entry: ^Session_Entry,
+	pane: layout.Pane_Rect = {},
+) -> Pane_Insets {
+	return {padding = pane_padding(app, w.scale, entry), header = pane_header_of(w, pane)}
+}
+
+// The header height of a pane the window shows: a header row's, or none under an overlay.
 pane_header_of :: proc(w: ^Window, pane: layout.Pane_Rect) -> f32 {
-	return pane.floating ? pane_header_height(w.scale, true) : w.header_height
+	return pane_header_height(w.scale, pane_header_row(w, pane))
+}
+
+// The pane below its header; a pane shorter than its header has no body.
+pane_body_rect :: proc(w: ^Window, pane: layout.Pane_Rect) -> render.Rect {
+	r, header := pane.rect, pane_header_of(w, pane)
+	return {r.x, r.y + header, r.width, max(0, r.height - header)}
 }
 
 pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Insets) -> Pane_Box {
@@ -64,45 +76,53 @@ pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Ins
 	}
 }
 
-// The client size for a single pane's requested grid, and the box it then receives; inverse of
-// pane_box across window_content_area.
+// The terminal geometry of a box in a `width` × `height` surface: the one conversion the first window's
+// size and every live fit share, so the two cannot drift.
+pane_box_geometry :: proc(box: Pane_Box, metrics: term_view.Metrics, width, height: i32) -> term.Geometry {
+	return {
+		columns = box.columns,
+		rows = box.rows,
+		cell_width = u32(metrics.cell_width),
+		cell_height = u32(metrics.cell_height),
+		surface_width = u32(width),
+		surface_height = u32(height),
+		padding_left = u32(box.origin.x),
+		padding_top = u32(box.origin.y),
+	}
+}
+
+// How many sizes pane_box_for_grid tries before giving up.
+@(private = "file")
+PANE_BOX_SOLVE_STEPS :: 32
+
+// The client size at which `w` gives a single pane `columns` × `rows`, and the box the pane then receives:
+// the inverse of pane_box across window_content_area_in. Each step resizes a copy of `w` by what its content
+// area lacks, through the forward geometry, since whether the rail docks and how wide the Activity panel
+// is follow the window's width. Without `activity_dock` the size leaves out a docked Activity panel's width,
+// so the panel then takes its width from the pane. Not solved when the steps run out; the size is then the
+// last tried.
 pane_box_for_grid :: proc(
 	app: ^App,
-	scale: f32,
-	metrics: term_view.Metrics,
+	w: Window,
 	columns, rows: u16,
 	insets: Pane_Insets,
-	rail_width: f32 = ui.RAIL_WIDTH,
+	activity_dock: bool,
 ) -> (
 	box: Pane_Box,
 	width, height: i32,
+	solved: bool,
 ) {
-	inset := math.round(f32(app.settings.pane.gap) * scale)
-	top := ui.TITLE_BAR_HEIGHT * scale
-	box.rect = {
-		x      = inset,
-		y      = top + inset,
-		width  = f32(columns) * metrics.cell_width + 2 * insets.padding,
-		height = f32(rows) * metrics.cell_height + 2 * insets.padding + insets.header,
+	want_width := f32(columns) * w.metrics.cell_width + 2 * insets.padding
+	want_height := f32(rows) * w.metrics.cell_height + 2 * insets.padding + insets.header
+	candidate := w
+	area := window_content_area_in(app, &candidate, candidate.pane_fill, activity_dock)
+	for _ in 0 ..< PANE_BOX_SOLVE_STEPS {
+		candidate.width += i32(math.ceil(want_width - area.width))
+		candidate.height += i32(math.ceil(want_height - area.height))
+		rail_adaptive_update(&candidate)
+		area = window_content_area_in(app, &candidate, candidate.pane_fill, activity_dock)
+		box = pane_box(w.metrics, area, insets)
+		if box.columns == columns && box.rows == rows {return box, candidate.width, candidate.height, true}
 	}
-	base_width := box.rect.width + 2 * inset
-	rail := f32(0)
-	// Include the rail only when the resulting window would dock it. The rule is the same one
-	// the window applies after the resize, so the requested grid is not widened by a hidden rail.
-	if app.settings.tabs.orientation == .Vertical &&
-	   f32(i32(base_width)) >= ui.RAIL_DOCK_MIN_WIDTH * scale {
-		rail = ui.rail_pixel_width(scale, rail_width)
-		box.rect.x += rail
-	}
-	width = i32(box.rect.width + 2 * inset + rail)
-	// A fractional DPI tab bar would otherwise truncate the client height below
-	// the requested row count.
-	height = i32(math.ceil(box.rect.height + top + 2 * inset))
-	box.rect.height = f32(height) - top - 2 * inset
-	box.padding = insets.padding
-	box.header = insets.header
-	box.columns = columns
-	box.rows = rows
-	box.origin = {box.rect.x + insets.padding, box.rect.y + insets.header + insets.padding}
-	return
+	return box, candidate.width, candidate.height, false
 }

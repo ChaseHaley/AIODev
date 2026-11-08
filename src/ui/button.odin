@@ -1,17 +1,27 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 
-// The surface every chrome button shares: the raised hover (lift, seat shadow, fill, rim light),
-// the press fill and the ink for its content. `hover` and `press` are the animated 0..1 values from
-// Control_Motion; `radius` is in DIPs. A `selected` toggle keeps its tint under the hover. A
-// disabled button stays flat with faint ink. `press_color` replaces the default pressed fill.
+// How a button's surface answers the hover. A raised button lifts on a seat shadow; a flat one stays
+// in place, for a control that is itself a whole surface such as a float header. An unfilled flat
+// button also leaves out the hover fill, for a control already drawn on its own panel.
+Button_Surface :: enum u8 {
+	Raised,
+	Flat,
+	Flat_Unfilled,
+}
+
+// The surface every chrome button shares: the hover (lift, seat shadow, fill, rim light), the press
+// fill and the ink for its content. `hover` and `press` are the animated 0..1 values from
+// Control_Motion; `radius` is in DIPs, RADIUS_BUTTON when zero. A `selected` toggle keeps its tint
+// under the hover. A disabled button stays flat with faint ink. `press_color` replaces the default
+// pressed fill.
 Button :: struct {
 	rect:        render.Rect,
 	hover:       f32,
 	press:       f32,
 	radius:      f32,
+	surface:     Button_Surface,
 	selected:    bool,
 	disabled:    bool,
 	press_color: Maybe(render.Color),
@@ -30,17 +40,19 @@ button_draw :: proc(
 	ink: render.Color,
 	err: render.Error,
 ) {
-	radius := (b.radius > 0 ? b.radius : 6) * scale
+	radius := (b.radius > 0 ? b.radius : RADIUS_BUTTON) * scale
 	hover := b.disabled ? 0 : clamp(b.hover, 0, 1)
 	press := b.disabled ? 0 : clamp(b.press, 0, 1)
 	face = b.rect
-	face.y -= hover_lift_at(theme, hover, scale)
-	if hover > 0 {
-		if err = hover_shadow_draw(list, theme, face, radius, hover, scale); err != .None {return}
+	if b.surface == .Raised {
+		face.y -= hover_lift_at(theme, hover, scale)
+		if hover > 0 {
+			if err = hover_shadow_draw(list, theme, face, radius, hover, scale); err != .None {return}
+		}
 	}
 	if b.selected {draw_rect(list, {rect = face, color = theme.selection, radius = radius})}
 	if !b.selected || !hover_fill_opaque(theme) {
-		fill := theme.hover
+		fill := b.surface == .Flat_Unfilled ? render.Color{} : theme.hover
 		fill.a *= hover
 		draw_rect(list, {rect = face, color = fill, radius = radius})
 	}
@@ -69,7 +81,7 @@ icon_button_draw :: proc(
 	hover, press, scale: f32,
 	pointer: [2]f32,
 	size := ICON_BUTTON,
-	radius: f32 = 6,
+	radius := RADIUS_BUTTON,
 ) -> render.Error {
 	b := Button {
 		rect   = rect,
@@ -80,6 +92,19 @@ icon_button_draw :: proc(
 	face, ink, err := button_draw(list, theme, b, scale, pointer)
 	icon_draw(list, icon, face, ink, size, scale)
 	return err
+}
+
+// The checkbox of a confirmation option and of a Markdown task item, at `x` and centred in the band
+// from `top` that is `height` tall.
+checkbox_rect :: proc(x, top, height, scale: f32) -> render.Rect {
+	size := CHECKBOX_SIZE * scale
+	return {x, top + (height - size) / 2, size, size}
+}
+
+checkbox_draw :: proc(list: ^render.Draw_List, box: render.Rect, checked: bool, theme: Theme, scale: f32) {
+	fill := checked ? theme.accent : theme.border
+	draw_rect(list, {rect = box, color = fill, radius = RADIUS_CONTROL * scale})
+	if checked {icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, scale)}
 }
 
 // A secondary text button: the raised surface with a hairline border and a centred label. The
@@ -93,13 +118,13 @@ text_button_draw :: proc(
 	focused: bool,
 	scale: f32,
 	pointer: [2]f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if rect.width <= 0 {return .Ok}
 	radius := RADIUS_CONTROL * scale
 	draw_rect(list, {rect = rect, color = theme.surface, radius = radius})
 	draw_rect(list, {rect = rect, color = theme.border, radius = radius, stroke = scale})
 	if focused {focus_ring_draw(list, rect, theme, scale)}
-	if contains(rect, pointer.x, pointer.y) {
+	if render.rect_contains(rect, pointer.x, pointer.y) {
 		if hover_rim_draw(list, theme, rect, radius, 1, scale, pointer, true) != .None {return .Ok}
 	}
 	inset := CONTROL_INSET * scale

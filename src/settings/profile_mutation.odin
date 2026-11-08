@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:strings"
 
-Profile_Mutation_Kind :: enum {Add, Duplicate, Enable, Remove, Move}
+Profile_Mutation_Kind :: enum {Add, Duplicate, Remove, Move}
 
 Profile_Mutation :: struct {
 	kind: Profile_Mutation_Kind,
@@ -28,8 +28,7 @@ profile_mutate :: proc(
 	if (change.kind == .Add || change.kind == .Duplicate) && len(profiles.items) >= PROFILE_LIMIT {
 		return "", "", "", .Limit
 	}
-	if change.kind == .Enable && !profile.detected {return "", "", "", .Unavailable}
-	if change.kind == .Remove && (profile.id == PROFILE_DEFAULT_ID || profile.builtin) {
+	if change.kind == .Remove && !profile_can_remove(profile) {
 		return "", "", "", .Unavailable
 	}
 
@@ -49,30 +48,28 @@ profile_mutate :: proc(
 	}
 	if alloc_error != nil {return "", "", "", .Allocation}
 	defer delete(revision, allocator)
-	if change.kind == .Add || change.kind == .Duplicate || change.kind == .Enable {
+	if change.kind == .Add || change.kind == .Duplicate {
 		values := Profile {
 			name = "New Profile", command = DEFAULT_PROFILE_COMMAND, directory = DEFAULT_PROFILE_DIRECTORY,
 		}
-		count := 3
+		fields := bit_set[Profile_Field]{.Name, .Command, .Directory}
 		if change.kind != .Add {
 			values = profile^
-			count = 4
+			fields += {.Hidden}
 			if change.kind == .Duplicate {values.name = fmt.tprintf("%s copy", profile.name)}
 		}
-		if change.kind != .Enable {
-			base := values.name
-			for number := 2; profile_value_facts(values.name, profiles).name_taken; number += 1 {
-				values.name = fmt.tprintf("%s %d", base, number)
-			}
+		if change.kind == .Duplicate && values.icon != "" {fields += {.Icon}}
+		base := values.name
+		for number := 2; profile_name_taken(profiles, "", values.name); number += 1 {
+			values.name = fmt.tprintf("%s %d", base, number)
 		}
-		pairs := [5][2]string {
-			{"name", values.name}, {"command", values.command}, {"directory", values.directory},
-			{"hidden", "false"}, {"icon", values.icon},
-		}
-		if change.kind == .Duplicate && values.icon != "" {count = 5}
-		for pair in pairs[:count] {
-			key := fmt.tprintf("profile.%s.%s", target, pair[0])
-			if issue, error = profile_mutation_edit(&revision, key, pair[1], allocator); error != .None {
+		// The order new lines are appended in.
+		for field in ([?]Profile_Field{.Name, .Command, .Directory, .Hidden, .Icon}) {
+			if field not_in fields {continue}
+			value := field == .Hidden ? "false" : profile_text(&values, field)^
+			if issue, error = profile_mutation_edit(
+				&revision, profile_field_key(target, field), value, allocator,
+			); error != .None {
 				return "", "", issue, error
 			}
 		}
@@ -84,12 +81,7 @@ profile_mutate :: proc(
 	for index in indices[:count] {
 		item := &profiles.items[index]
 		if change.kind == .Remove && item.id == target {continue}
-		if item.detected {
-			if change.kind != .Move && !(change.kind == .Enable && item.id == target) &&
-			   !profile_order_has(profiles, item.id) {
-				continue
-			}
-		}
+		if item.detected && change.kind != .Move && !profile_order_has(profiles, item.id) {continue}
 		if item.id == target {from = written}
 		ordered[written] = item.id
 		written += 1
@@ -99,7 +91,7 @@ profile_mutate :: proc(
 			from = written - 1
 		}
 	}
-	if (change.kind == .Add || change.kind == .Duplicate || change.kind == .Enable) && from < 0 {
+	if (change.kind == .Add || change.kind == .Duplicate) && from < 0 {
 		ordered[written] = target
 		written += 1
 	}
@@ -127,18 +119,8 @@ profile_mutation_edit :: proc(
 	key, value: string,
 	allocator: runtime.Allocator,
 ) -> (issue: string, error: Profile_Mutation_Error) {
-	updated, message, alloc_error := edit_text(text^, key, value, allocator)
-	if alloc_error != nil {
-		delete(updated, allocator)
-		delete(message, allocator)
-		return "", .Allocation
-	}
-	if message != "" {
-		delete(updated, allocator)
-		return message, .Edit
-	}
-	delete(message, allocator)
-	delete(text^, allocator)
-	text^ = updated
+	message, alloc_error := revision_edit_owned(text, key, value, allocator)
+	if alloc_error != nil {return "", .Allocation}
+	if message != "" {return message, .Edit}
 	return
 }

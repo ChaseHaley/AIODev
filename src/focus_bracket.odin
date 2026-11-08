@@ -19,7 +19,7 @@ Focus_Entered :: struct {
 // A new window holds the pane it opens on. Nothing is reported: the window has no focus yet, and
 // whatever the pane heard last came from the window or pane it was shown in before.
 focus_init :: proc(w: ^Window) {
-	content, shown := focus_shown(w)
+	content, shown := window_focused_content(w)
 	w.focus_bracket = shown ? Focus_Entered{content} : nil
 }
 
@@ -30,7 +30,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	entered, ok := w.focus_bracket.(Focus_Entered)
 	if !ok {return}
 	w.focus_bracket = nil
-	theme_delete_disarm(&w.resources)
+	ui.editor_theme_delete_disarm(&w.editor)
 	window_overlays_cancel(app, w)
 	entry := workspace_session_for_content(app, entered.content)
 	if entry != nil {status_focus_leave(app, entry)}
@@ -54,7 +54,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 // Gives focus to the pane the window now shows, leaving first a different pane that still holds it.
 // The pane that holds it already hears nothing again; the window is refreshed either way.
 focus_enter :: proc(app: ^App, w: ^Window) {
-	content, shown := focus_shown(w)
+	content, shown := window_focused_content(w)
 	if entered, ok := w.focus_bracket.(Focus_Entered); ok && (!shown || entered.content != content) {
 		focus_leave(app, w)
 	}
@@ -77,9 +77,9 @@ focus_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 	return ok ? workspace_session_for_content(app, entered.content) : nil
 }
 
-@(private = "file")
-focus_shown :: proc(w: ^Window) -> (layout.Content, bool) {
-	if w.tree == nil || w.tree.focus == layout.INVALID_NODE {return {}, false}
-	pane, is_pane := w.tree.nodes[w.tree.focus].(layout.Pane)
-	return pane.content, is_pane
+// What the window's focused pane shows; false while it shows no tab or its focus is not a pane.
+window_focused_content :: proc(w: ^Window) -> (layout.Content, bool) {
+	tree := window_tree(w)
+	if tree == nil {return {}, false}
+	return layout.focused_content(tree)
 }

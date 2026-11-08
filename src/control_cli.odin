@@ -1,18 +1,16 @@
 package main
 
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:control"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
+import "core:os"
+import "core:path/filepath"
 import "core:strings"
 
-// The aio command line's side of the CLI pipe. A request is a JSON string array:
-// [caller pane id or "", "text" or "json", command name, arguments...]. The reply's status is the
-// CLI exit code (D-046).
-
-@(private)
-CLI_REQUEST_HEADER :: 2
+// The aio command line's side of the CLI pipe; cli_protocol owns the request and reply shapes.
 
 // The CLI pipe's state; nil is off. A pipe that failed to start stays failed while control.enabled
 // stays on, so the settings syncs that follow do not retry it and repeat the notice; turning the
@@ -22,6 +20,33 @@ Cli_Pipe :: union {
 	Cli_Pipe_Failed,
 }
 Cli_Pipe_Failed :: struct {}
+
+@(private = "file")
+CLI_EXECUTABLE :: "aio.exe"
+
+// The aio command line as App embeds it: the pipe it reaches the app through, and the directory holding
+// aio.exe beside this executable, which each shell's PATH gets; empty when aio.exe is missing.
+Cli_State :: struct {
+	cli:           Cli_Pipe,
+	cli_directory: string,
+}
+
+// Finds aio.exe beside this executable; the pipe starts with control_cli_sync once settings apply.
+control_cli_init :: proc(app: ^App) {
+	executable, err := os.get_executable_path(context.temp_allocator)
+	if err != nil {return}
+	directory := filepath.dir(executable)
+	if cli, join_error := filepath.join({directory, CLI_EXECUTABLE}, context.temp_allocator);
+	   join_error == nil && os.exists(cli) {
+		app.cli_directory = strings.clone(directory)
+	}
+}
+
+control_cli_destroy :: proc(app: ^App) {
+	control_cli_stop(app)
+	delete(app.cli_directory)
+	app.cli_directory = ""
+}
 
 // Starts or stops the CLI pipe to match control.enabled (D-046). Settings apply at startup, on
 // Reload Settings and on each Settings page change.
@@ -33,7 +58,7 @@ control_cli_sync :: proc(app: ^App) {
 	if app.cli != nil {return}
 	name, err := control.cli_pipe_name(app.app_id, context.temp_allocator)
 	server: ^control.Server
-	if err == .None {server, err = control.create(name, {wake_platform, &app.platform}, raw = true)}
+	if err == .None {server, err = control.create(name, {wake_platform, &app.platform})}
 	if err != .None {
 		log.errorf("starting the command line pipe failed: %v", err)
 		notify(app, .Error, "Could not start command line control. Check the log, then turn it off and on.")
@@ -63,91 +88,90 @@ control_cli_tick :: proc(app: ^App) {
 
 @(require_results)
 control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
-	if len(args) <= CLI_REQUEST_HEADER || (args[1] != "text" && args[1] != "json") {
+	request, well_formed := cli_protocol.request_decode(args)
+	if !well_formed {
 		return control_cli_reply(
 			outcome_failure(.Usage, "malformed request; use the aio that came with this AIODev"),
 			false,
 		)
 	}
-	json_output := args[1] == "json"
+	json_output := request.format == .Json
 	caller: u32
-	if args[0] != "" {
-		id, valid := pane_id_parse(args[0])
+	if request.caller != "" {
+		id, valid := pane_id_parse(request.caller)
 		if !valid {return control_cli_reply(outcome_failure(.Usage, "AIODEV_PANE is not a pane id"), json_output)}
 		caller = id
 	}
-	invocation, parse_error := commands.parse_invocation(
-		&app.registry,
-		args[CLI_REQUEST_HEADER:],
-		context.temp_allocator,
-	)
+	invocation, parse_error := commands.parse_invocation(&app.registry, request.command, context.temp_allocator)
 	if parse_error.advice != "" {
 		message := fmt.tprintf("%q: %s", parse_error.argument, parse_error.advice)
 		return control_cli_reply(outcome_failure(.Usage, message), json_output)
 	}
-	return control_cli_reply(command_invoke(app, nil, invocation, caller), json_output)
+	// AIODev has its own working directory, so a relative path means one in aio's.
+	if commands.invocation_paths_resolve(&invocation, request.directory, context.temp_allocator) != nil {
+		return control_cli_reply(outcome_failure(.Failed, "not enough memory for the paths"), json_output)
+	}
+	return control_cli_reply(command_execute(app, Control_Request{caller}, invocation), json_output)
 }
 
-@(private)
-Cli_Json :: struct {
-	ok:       bool,
-	status:   u8,
-	error:    string,
-	pane:     u32,
-	text:     string,
-	panes:    []Pane_Report,
-	commands: []Command_Report,
-}
-
+// The payload kind selects the reply shape; status and message report failures independently.
 @(private)
 control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Response {
-	ok := outcome.status == .Ok
-	response := control.Response {
-		ok     = ok,
-		status = u8(outcome.status),
-	}
+	response := cli_protocol.response(outcome.status, "")
+	ok := response.ok
 	if json_output {
-		document := Cli_Json {
+		document := cli_protocol.Reply_Json {
 			ok       = ok,
 			status   = u8(outcome.status),
 			error    = outcome.message,
-			pane     = outcome.pane,
-			text     = outcome.text,
-			panes    = outcome.panes,
-			commands = outcome.catalogue,
+		}
+		switch payload in outcome.payload {
+		case Outcome_Created:
+			document.pane = payload.pane
+		case Outcome_Text:
+			document.text = string(payload)
+		case Outcome_Panes:
+			document.panes = ([]cli_protocol.Pane_Report)(payload)
+		case Outcome_Catalogue:
+			document.commands = ([]cli_protocol.Command_Report)(payload)
+		case Outcome_Usage:
+			document.commands = []cli_protocol.Command_Report{cli_protocol.Command_Report(payload)}
 		}
 		data, err := json.marshal(document, {}, context.temp_allocator)
 		if err != nil {
-			return {ok = false, text = "not enough memory for the reply", status = u8(commands.Status.Failed)}
+			return cli_protocol.response(.Failed, "not enough memory for the reply")
 		}
 		response.text = string(data)
 		return response
 	}
 	b := strings.builder_make(context.temp_allocator)
-	switch {
-	case !ok:
+	if !ok {
 		strings.write_string(&b, outcome.message)
-		if outcome.pane != 0 {fmt.sbprintf(&b, " (pane %d)", outcome.pane)}
-	case outcome.pane != 0:
-		fmt.sbprintf(&b, "%d", outcome.pane)
-	case len(outcome.catalogue) == 1:
-		fmt.sbprintf(&b, "%s\n%s", outcome.catalogue[0].usage, outcome.catalogue[0].title)
-	case outcome.catalogue != nil:
-		for command, i in outcome.catalogue {
-			if i > 0 {strings.write_byte(&b, '\n')}
-			fmt.sbprintf(&b, "%-30s %s", command.name, command.title)
+		if created, present := outcome.payload.(Outcome_Created); present && created.pane != 0 {
+			fmt.sbprintf(&b, " (pane %d)", created.pane)
 		}
-	case outcome.panes != nil:
-		// One tab-separated line per pane: id, focus mark, workspace, tab, status, process, title,
-		// directory.
-		for pane, i in outcome.panes {
-			if i > 0 {strings.write_byte(&b, '\n')}
-			title := pane.name != "" ? pane.name : pane.title
-			fmt.sbprintf(&b, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s", pane.id, pane.focused ? "*" : "",
-				pane.workspace_name, pane.tab, pane.status, pane.process, title, pane.directory)
+	} else {
+		switch payload in outcome.payload {
+		case Outcome_Created:
+			fmt.sbprintf(&b, "%d", payload.pane)
+		case Outcome_Usage:
+			fmt.sbprintf(&b, "%s\n%s", payload.usage, payload.title)
+		case Outcome_Catalogue:
+			for command, i in payload {
+				if i > 0 {strings.write_byte(&b, '\n')}
+				fmt.sbprintf(&b, "%-30s %s", command.name, command.title)
+			}
+		case Outcome_Panes:
+			// Tab-separated id, focus, workspace, tab, status, process, title and directory.
+			for pane, i in payload {
+				if i > 0 {strings.write_byte(&b, '\n')}
+				title := pane.name != "" ? pane.name : pane.title
+				fmt.sbprintf(&b, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s", pane.id, pane.focused ? "*" : "",
+					pane.workspace_name, pane.tab, pane.status, pane.process, title, pane.directory)
+			}
+		case Outcome_Text:
+			strings.write_string(&b, string(payload))
 		}
-	case:
-		strings.write_string(&b, outcome.text)
 	}
 	response.text = strings.to_string(b)
 	return response

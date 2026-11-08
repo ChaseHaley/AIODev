@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -43,7 +44,7 @@ palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string,
 			testing.expect_value(t, append_error, nil)
 			return false
 		}
-		if !testing.expect(t, app.tab_create(&f.state, workspace)) { return false }
+		if _, created := app.tab_create(&f.state, workspace); !testing.expect(t, created) { return false }
 		if !testing.expect(t, app.window_open(&f.state, workspace)) { return false }
 	}
 	app.tick(&f.state)
@@ -98,20 +99,20 @@ palette_routes_input_and_render_only_to_its_window :: proc(t: ^testing.T) {
 	testing.expect(t, second.views[1].style.focused)
 	app.palette_close(s, second)
 	testing.expect(t, app.palette_active(s, first))
-	app.handle_event(s, platform.Text_Event{first.id, "font"})
+	app.handle_event(s, input.Text_Event{first.id, "font"})
 	app.run_action(s, second, .Find)
-	app.handle_event(s, platform.Text_Event{second.id, "needle"})
-	app.handle_event(s, platform.Key_Event{window = second.id, key = .Backspace, pressed = true})
+	app.handle_event(s, input.Text_Event{second.id, "needle"})
+	app.handle_event(s, input.Key_Event{window = second.id, key = .Backspace, pressed = true})
 	testing.expect_value(t, ui.field_string(&second.find.query), "needl")
 	testing.expect_value(t, ui.palette_query(&s.palette), "font")
 	selected, scroll := s.palette.selected, s.palette.scroll
 	l := ui.palette_layout(&s.palette, f32(first.width), f32(first.height), first.scale)
-	app.handle_event(s, platform.Mouse_Move_Event{window = second.id,
+	app.handle_event(s, input.Mouse_Move_Event{window = second.id,
 		x = i32(l.list.x+20), y = i32(l.list.y+2*l.row_height)})
-	app.handle_event(s, platform.Mouse_Wheel_Event{window = second.id, delta_y = -1})
-	app.handle_event(s, platform.Mouse_Button_Event{window = second.id, button = .Left,
+	app.handle_event(s, input.Mouse_Wheel_Event{window = second.id, delta_y = -1})
+	app.handle_event(s, input.Mouse_Button_Event{window = second.id, button = .Left,
 		pressed = true, x = i32(l.panel.x-10), y = i32(l.panel.y+20)})
-	app.handle_event(s, platform.Mouse_Button_Event{window = second.id, button = .Left,
+	app.handle_event(s, input.Mouse_Button_Event{window = second.id, button = .Left,
 		x = i32(l.panel.x-10), y = i32(l.panel.y+20)})
 	testing.expect(t, app.palette_active(s, first))
 	testing.expect_value(t, s.palette.selected, selected)
@@ -120,7 +121,7 @@ palette_routes_input_and_render_only_to_its_window :: proc(t: ^testing.T) {
 	app.editor_open(s, second)
 	testing.expect(t, app.settings_active(second))
 	testing.expect(t, app.palette_active(s, first))
-	app.handle_event(s, platform.Text_Event{second.id, "line height"})
+	app.handle_event(s, input.Text_Event{second.id, "line height"})
 	testing.expect_value(t, ui.field_string(&second.editor.filter), "line height")
 	testing.expect_value(t, ui.palette_query(&s.palette), "font")
 	app.palette_release(s, first)
@@ -147,22 +148,23 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	if !palette_fixture_create(t, &f, "lifecycle") { return }
 	s := &f.state
 	first, second := s.windows[0], s.windows[1]
-	first_workspace, first_tree := first.workspace, first.tree
-	first_selected, first_focus := first.workspace.selected, first.tree.focus
+	first_workspace, first_tree := first.workspace, app.window_tree(first)
+	first_selected, first_focus := first.workspace.selected, app.window_tree(first).focus
 	first_pid, second_pid := term.process_id(s.sessions[0].session), term.process_id(s.sessions[1].session)
 	app.run_action(s, first, .Find)
-	app.handle_event(s, platform.Text_Event{first.id, "retained"})
+	app.handle_event(s, input.Text_Event{first.id, "retained"})
 	app.palette_open(s, first)
 	s.palette.drag = ui.Query_Drag{}
-	app.rename_open(s, second, true, second.workspace.selected)
-	app.handle_event(s, platform.Text_Event{second.id, "unsaved"})
+	second_tab := app.Rename_Tab_Target{second.workspace.id, app.selected_tab(second.workspace).id}
+	app.rename_open(s, second, second_tab)
+	app.handle_event(s, input.Text_Event{second.id, "unsaved"})
 	testing.expect(t, app.palette_active(s, first))
 	app.run_action(s, second, .Command_Palette)
 	testing.expect(t, app.palette_active(s, second) && !app.palette_visible(s, first))
 	testing.expect(t, s.palette.drag == nil && !app.rename_shown(second))
-	testing.expect(t, first.workspace == first_workspace && first.tree == first_tree)
+	testing.expect(t, first.workspace == first_workspace && app.window_tree(first) == first_tree)
 	testing.expect_value(t, first.workspace.selected, first_selected)
-	testing.expect_value(t, first.tree.focus, first_focus)
+	testing.expect_value(t, app.window_tree(first).focus, first_focus)
 	testing.expect_value(t, ui.field_string(&first.find.query), "retained")
 	testing.expect_value(t, len(first.workspace.tabs), 1)
 	testing.expect_value(t, len(s.sessions), 2)
@@ -170,7 +172,8 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect_value(t, term.process_id(s.sessions[1].session), second_pid)
 	testing.expect_value(t, app.selected_tab(second.workspace).name, "")
 	s.palette.drag = ui.Query_Drag{}
-	app.rename_open(s, first, true, first.workspace.selected)
+	first_tab := app.Rename_Tab_Target{first.workspace.id, app.selected_tab(first.workspace).id}
+	app.rename_open(s, first, first_tab)
 	app.handle_event(s, platform.Focus_Event{first.id, false})
 	testing.expect(t, !app.rename_shown(first))
 	testing.expect(t, app.palette_active(s, second) && s.palette.drag != nil)
@@ -195,12 +198,12 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect(t, !ui.presence_is_open(s.palette.presence) && s.palette.drag == nil)
 	testing.expect(t, s.palette_owner == nil)
 	app.palette_open(s, second)
-	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape, pressed = true})
+	app.handle_event(s, input.Key_Event{window = second.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.palette_active(s, second) && app.key_suppressed(second, .Escape))
-	app.handle_event(s, platform.Key_Event{window = second.id, key = .Escape})
+	app.handle_event(s, input.Key_Event{window = second.id, key = .Escape})
 	testing.expect(t, !app.key_suppressed(second, .Escape))
 	app.palette_open(s, second)
-	seed_pane_drag(second, app.selected_tab(second.workspace), second.tree.focus)
+	seed_pane_drag(second, app.selected_tab(second.workspace), app.window_tree(second).focus)
 	app.focus_leave(s, second)
 	testing.expect(t, !app.palette_visible(s, second) && s.palette_owner == nil)
 	testing.expect(t, app.pane_drag_active(second))
@@ -234,10 +237,11 @@ palette_stays_with_its_owner_when_the_new_window_goes_away :: proc(t: ^testing.T
 	app.pane_split(s, w, .Right)
 	app.palette_open(s, previous)
 	if !testing.expect(t, app.palette_active(s, previous)) { return }
-	preview := app.pane_window_preview_create(s, app.selected_tab(w.workspace), w.tree.focus)
+	focus := app.window_tree(w).focus
+	preview := app.pane_window_preview_create(s, app.selected_tab(w.workspace), focus)
 	if !testing.expect(t, preview != nil) { return }
 	preview_id := preview.id
-	seed_pane_drag(w, app.selected_tab(w.workspace), w.tree.focus, preview = app.Preview_Ready{preview_id})
+	seed_pane_drag(w, app.selected_tab(w.workspace), focus, preview = app.Preview_Ready{preview_id})
 	app.palette_open(s, preview)
 	testing.expect(t, app.window_find(s, preview_id) == nil)
 	testing.expect(t, app.palette_active(s, previous) && app.palette_visible(s, previous))

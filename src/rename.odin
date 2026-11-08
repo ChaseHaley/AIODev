@@ -1,14 +1,8 @@
 package main
 
-import "aio:glyphs"
-import "aio:platform"
+import "aio:input"
 import "aio:render"
-import "aio:settings"
 import "aio:ui"
-import "core:strings"
-
-// What the rename dialog names. A workspace names in place instead, in its chip (Overlay_Chip_Name).
-Rename_Dialog :: enum u8 {Tab, Pane}
 
 // The dialog or the chip's name field shows.
 rename_shown :: proc(w: ^Window) -> bool {
@@ -23,18 +17,14 @@ chip_name_shown :: proc(w: ^Window) -> bool {
 	return shown
 }
 
-// Renames tab `index`, or the focused pane when tab_name is false.
-rename_open :: proc(app: ^App, w: ^Window, tab_name: bool, index: int) {
-	if index < 0 || index >= len(w.workspace.tabs) {return}
-	tab := w.workspace.tabs[index]
-	dialog, value := Overlay_Rename{.Tab, tab.id}, tab.name
-	if !tab_name {
-		entry := focused_session(app, w)
-		if entry == nil {return}
-		dialog, value = {.Pane, entry.id}, entry.name
-	}
+// Opens the dialog naming a tab or pane, holding its current name with the whole name selected. A workspace
+// names in place instead, in the chip of the window that shows it (Overlay_Chip_Name).
+rename_open :: proc(app: ^App, w: ^Window, target: Rename_Target) {
+	destination := rename_target_destination(app, target)
+	if destination == nil {return}
+	value := destination^
 	if !gesture_cancel(app, w) {return}
-	overlay_open(app, w, dialog)
+	overlay_open(app, w, Overlay_Rename{target})
 	ui.field_set(&w.rename, value)
 	ui.field_select_all(&w.rename)
 }
@@ -47,17 +37,15 @@ workspace_name_begin :: proc(app: ^App, w: ^Window) {
 	ui.field_select_all(&w.rename)
 }
 
-// Stores the chip's text as the workspace's name. An empty field keeps the existing name. False when
-// another workspace already uses the name, which leaves the workspace's name as it was.
+// Stores the chip's text as the workspace's name. An empty field keeps the existing name, which
+// rename_target_commit's .Workspace_Chip intent decides. False when another workspace already uses the
+// name, which leaves the workspace's name as it was.
 chip_name_save :: proc(app: ^App, w: ^Window, workspace_id: u32) -> bool {
-	name := settings.display_title(strings.trim_space(ui.field_string(&w.rename)), context.temp_allocator)
-	if name == "" {return true}
-	for workspace in app.workspaces {
-		if !workspace.provisional && workspace.id != workspace_id && strings.equal_fold(workspace.name, name) {
-			return false
-		}
+	value := ui.field_string(&w.rename)
+	if name := rename_clean(value); name != "" {
+		if workspace_name_taken(app, name, workspace_id) {return false}
 	}
-	_ = rename_target_commit(app, w, {.Workspace, workspace_id}, name)
+	_ = rename_target_commit(app, Rename_Workspace_Target{workspace_id}, value, .Workspace_Chip)
 	return true
 }
 
@@ -67,10 +55,7 @@ chip_name_save :: proc(app: ^App, w: ^Window, workspace_id: u32) -> bool {
 rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 	#partial switch &current in w.overlay {
 	case Overlay_Rename:
-		if save {
-			kind: Rename_Kind = current.kind == .Tab ? .Tab : .Pane
-			_ = rename_target_commit(app, w, {kind, current.id}, ui.field_string(&w.rename))
-		}
+		if save {_ = rename_target_commit(app, current.target, ui.field_string(&w.rename), .Automatic_Title)}
 	case Overlay_Chip_Name:
 		if save && !chip_name_save(app, w, current.workspace) {
 			current.error, w.dirty = true, true
@@ -82,7 +67,7 @@ rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 	overlay_close(app, w)
 }
 
-rename_key :: proc(app: ^App, w: ^Window, e: platform.Key_Event) {
+rename_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if !e.pressed {return}
 	if e.key == .Escape {rename_finish(app, w, false); return}
 	if e.key == .Enter || e.key == .Numpad_Enter {rename_finish(app, w, true); return}
@@ -134,19 +119,10 @@ rename_field_rect :: proc(w: ^Window) -> render.Rect {
 }
 
 rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
-	return {
-		field = &w.rename,
-		text = &w.ui_text,
-		rect = rename_field_rect(w),
-		inset = ui.CONTROL_INSET,
-		caret_width = 1,
-		radius = ui.RADIUS_CONTROL,
-		style = .Body,
-		scale = w.scale,
-	}
+	return ui.field_box_standard(&w.rename, &w.ui_text, rename_field_rect(w), w.scale)
 }
 
-rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
+rename_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool) {
 	box := rename_field_box(w)
 	ui.field_pointer(&w.rename, ui.field_box_offset(box, x), pressed, extend)
 	w.dirty = true
@@ -154,7 +130,7 @@ rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
 
 // The chip keeps its shape and size: its chevron gives way to a field holding the name.
 @(private = "file")
-workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+workspace_name_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	s := w.scale
 	r := rename_rect(w)
 	radius := ui.RADIUS_CONTROL * s
@@ -182,7 +158,7 @@ workspace_name_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	return ui.draw_text(&detail, &w.list, message, panel.x + pad, baseline, app.theme.error)
 }
 
-rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
+rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	dialog, shown := w.overlay.(Overlay_Rename)
 	if !shown {return workspace_name_draw(app, w)}
 	s := w.scale
@@ -194,7 +170,8 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 	   .None {return .Ok}
 	frame := ui.dialog_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	title := dialog.kind == .Tab ? "Rename Tab" : "Rename Pane"
+	_, tab := dialog.target.(Rename_Tab_Target)
+	title := tab ? "Rename Tab" : "Rename Pane"
 	if result := ui.draw_text(
 		&heading,
 		&w.list,
@@ -227,4 +204,53 @@ rename_draw :: proc(app: ^App, w: ^Window) -> glyphs.Result {
 		app.theme.muted,
 		max(1, r.width - 2 * pad),
 	)
+}
+
+when AIO_CONTROL {
+	rename_state_report :: proc(r: ^State_Report, w: ^Window) {
+		chip, _ := w.overlay.(Overlay_Chip_Name)
+		state_value(r, "rename.open", rename_shown(w))
+		state_value(r, "rename.error", chip.error)
+		state_text(r, "rename.value", ui.field_string(&w.rename))
+	}
+}
+
+// Rename field pointer surface
+
+@(private)
+rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return rename_shown(w)}
+
+@(private)
+rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Rename {return}
+	x, y := f32(e.x), f32(e.y)
+	if w.rename.dragging && .Left in e.buttons {rename_pointer(w, x, false, true)}
+	pointer_set(app, w, render.rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
+}
+
+// A press outside the dialog finishes the rename and is swallowed with its release. The workspace chip
+// field is not modal: the press leaves it, keeping the name typed so far when it can, and still reaches
+// what it landed on.
+@(private)
+rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {ui.field_release(&w.rename); return}
+	x, y := f32(e.x), f32(e.y)
+	if chip_name_shown(w) && !render.rect_contains(rename_rect(w), x, y) {
+		overlay_close(app, w, .Leave)
+		target := pointer_target(app, w, x, y)
+		gesture_hand_off(w, e.button, target)
+		pointer_press(app, w, target, e)
+		return
+	}
+	if !render.rect_contains(rename_rect(w), x, y) {
+		rename_finish(app, w, false)
+		gesture_swallow(w, e.button, .Rename)
+	} else if e.button == .Left && render.rect_contains(rename_field_rect(w), x, y) {
+		rename_pointer(w, x, true, .Shift in e.modifiers)
+	}
+}
+
+@(private)
+rename_pointer_cancel :: proc(_: ^App, w: ^Window) {
+	ui.field_release(&w.rename)
 }

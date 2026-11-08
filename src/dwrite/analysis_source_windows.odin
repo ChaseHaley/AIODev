@@ -2,11 +2,22 @@ package dwrite
 
 import windows "core:sys/windows"
 
+// An Analysis_Source points at a shared static vtable, so it holds no pointer to itself and may be
+// copied or moved; DirectWrite borrows it and its text only for the call it is passed to.
 Analysis_Source :: struct {
 	using interface: ITextAnalysisSource,
 	text:            []u16,
 	locale:          windows.wstring,
-	methods:         ITextAnalysisSource_VTable,
+}
+
+@(private, rodata)
+source_methods := ITextAnalysisSource_VTable {
+	iunknown_vtable = {source_query_interface, source_add_ref, source_release},
+	GetTextAtPosition = source_text_at,
+	GetTextBeforePosition = source_text_before,
+	GetParagraphReadingDirection = source_reading_direction,
+	GetLocaleName = source_locale,
+	GetNumberSubstitution = source_number_substitution,
 }
 
 @(require_results)
@@ -21,17 +32,8 @@ analysis_source_init :: proc(
 	source^ = Analysis_Source {
 		text = text,
 		locale = locale,
-		methods = {
-			iunknown_vtable = {source_query_interface, source_add_ref, source_release},
-			GetTextAtPosition = source_text_at,
-			GetTextBeforePosition = source_text_before,
-			GetParagraphReadingDirection = source_reading_direction,
-			GetLocaleName = source_locale,
-			GetNumberSubstitution = source_number_substitution,
-		},
 	}
-	// The source and its borrowed text must remain at this address until MapCharacters returns.
-	source.vtable = &source.methods
+	source.vtable = &source_methods
 	return true
 }
 

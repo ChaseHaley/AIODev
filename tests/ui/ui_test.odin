@@ -1,5 +1,6 @@
 package ui_test
 
+import "aio:input"
 import "core:testing"
 import "core:time"
 import "aio:commands"
@@ -7,6 +8,7 @@ import "aio:font"
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
+import "aio:search"
 import "aio:ui"
 
 registry_create :: proc(t: ^testing.T) -> commands.Registry {
@@ -30,7 +32,7 @@ palette_settings := [?]ui.Palette_Setting{
 	{key = "terminal.copy_on_select", title = "Copy on Select", group = "Terminal"},
 }
 
-key :: proc(k: platform.Key_Event) -> platform.Key_Event {
+key :: proc(k: input.Key_Event) -> input.Key_Event {
 	e := k
 	e.pressed = true
 	return e
@@ -115,20 +117,21 @@ notices_replace_expire_and_report_deadlines :: proc(t: ^testing.T) {
 	n: ui.Notices
 	ui.notices_init(&n)
 	defer ui.notices_destroy(&n)
-	ui.notices_put(&n, 7, .Info, "first", 0)
-	ui.notices_put(&n, 7, .Error, "replaced", 0)
-	ui.notices_put(&n, 0, .Info, "transient", time.Millisecond)
+	now := time.tick_now()
+	ui.notices_put(&n, 7, .Info, "first", 0, false, now)
+	ui.notices_put(&n, 7, .Error, "replaced", 0, false, now)
+	ui.notices_put(&n, 0, .Info, "transient", time.Millisecond, false, now)
 	testing.expect_value(t, len(n.items), 2)
 	testing.expect_value(t, n.items[0].text, "replaced")
 	deadline, found := ui.notices_deadline(&n)
 	testing.expect(t, found)
-	testing.expect(t, !ui.notices_expire(&n, time.tick_add(deadline, -time.Millisecond)))
-	testing.expect(t, ui.notices_expire(&n, time.tick_add(deadline, time.Millisecond)))
+	testing.expect(t, !ui.notices_expire(&n, false, time.tick_add(deadline, -time.Millisecond)))
+	testing.expect(t, ui.notices_expire(&n, false, time.tick_add(deadline, time.Millisecond)))
 	testing.expect_value(t, len(n.items), 1)
 	_, any := ui.notices_deadline(&n)
 	testing.expect(t, !any)
-	testing.expect(t, ui.notices_clear(&n, 7))
-	testing.expect(t, !ui.notices_clear(&n, 7))
+	testing.expect(t, ui.notices_clear(&n, 7, false, now))
+	testing.expect(t, !ui.notices_clear(&n, 7, false, now))
 }
 
 @(test)
@@ -169,30 +172,29 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 	f: ui.Find_Bar
 	ui.find_init(&f)
 	defer ui.find_destroy(&f)
-	Outcome :: ui.Find_Outcome
 	ui.find_open(&f)
 	testing.expect(t, ui.find_is_open(&f))
-	testing.expect_value(t, ui.find_key(&f, key({key = .E, text = "e"})), Outcome.Changed)
-	testing.expect_value(t, ui.find_text(&f, "rr or"), Outcome.Changed)
-	testing.expect_value(t, ui.find_text(&f, "\x1b"), Outcome.None)
+	testing.expect_value(t, ui.find_key(&f, key({key = .E, text = "e"})), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect_value(t, ui.find_text(&f, "rr or"), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect_value(t, ui.find_text(&f, "\x1b"), ui.Find_Outcome(ui.Find_Change.None))
 	testing.expect_value(t, ui.field_string(&f.query), "err or")
 	control_a := key({key = .A, text = "\x01", modifiers = {.Control}})
-	testing.expect_value(t, ui.find_key(&f, control_a), Outcome.Moved)
+	testing.expect_value(t, ui.find_key(&f, control_a), ui.Find_Outcome(ui.Find_Change.Moved))
 	testing.expect_value(t, ui.field_selected_text(&f.query), "err or")
-	testing.expect_value(t, ui.find_key(&f, key({key = .End})), Outcome.Moved)
-	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace, modifiers = {.Control}})), Outcome.Changed)
+	testing.expect_value(t, ui.find_key(&f, key({key = .End})), ui.Find_Outcome(ui.Find_Change.Moved))
+	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace, modifiers = {.Control}})), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "err ")
-	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace})), Outcome.Changed)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace})), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "err")
-	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), Outcome.Older)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), ui.Find_Outcome(search.Step.Next))
 	shift_enter := key({key = .Enter, text = "\r", modifiers = {.Shift}})
-	testing.expect_value(t, ui.find_key(&f, shift_enter), Outcome.Newer)
+	testing.expect_value(t, ui.find_key(&f, shift_enter), ui.Find_Outcome(search.Step.Previous))
 	// Without history, Up and Down leave the query alone.
-	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Up})), Outcome.None)
-	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Down})), Outcome.None)
-	testing.expect_value(t, ui.find_key(&f, {key = .Escape}), Outcome.None)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Up})), ui.Find_Outcome(ui.Find_Change.None))
+	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Down})), ui.Find_Outcome(ui.Find_Change.None))
+	testing.expect_value(t, ui.find_key(&f, {key = .Escape}), ui.Find_Outcome(ui.Find_Change.None))
 	testing.expect(t, ui.find_is_open(&f))
-	testing.expect_value(t, ui.find_key(&f, key({key = .Escape})), Outcome.Closed)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Escape})), ui.Find_Outcome(ui.Find_Change.Closed))
 	ui.find_close(&f)
 	testing.expect(t, !ui.find_is_open(&f) && !ui.find_has_keyboard(&f))
 	r := ui.find_layout(1000, 1.5)
@@ -211,10 +213,13 @@ rail_rows_scroll_clip_and_hit_only_the_visible_list :: proc(t: ^testing.T) {
 		testing.expect_value(t, layout.list.height, (200 - 32) * scale)
 		testing.expect_value(t, layout.footer.y, area.y + layout.list.height)
 		testing.expect(t, ui.rail_scroll_max(layout) > 0)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, area.y + 8 * scale), 0)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, area.y - 1), -1)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x - 1, area.y + 8 * scale), -1)
-		testing.expect_value(t, ui.rail_row_hit(layout, area.x + 20 * scale, layout.footer.y + 4), -1)
+		// A row hit is a row rectangle inside the list, which the main package's rail_tab_hit clips to.
+		top := [2]f32{area.x + 20 * scale, area.y + 8 * scale}
+		testing.expect(t, render.rect_contains(layout.list, top.x, top.y))
+		testing.expect(t, render.rect_contains(ui.rail_row_rect(layout, 0), top.x, top.y))
+		testing.expect(t, !render.rect_contains(layout.list, area.x + 20 * scale, area.y - 1))
+		testing.expect(t, !render.rect_contains(layout.list, area.x - 1, area.y + 8 * scale))
+		testing.expect(t, !render.rect_contains(layout.list, area.x + 20 * scale, layout.footer.y + 4))
 		testing.expect(t, ui.rail_footer_hit(layout, area.x + 20 * scale, layout.footer.y + 4))
 		testing.expect(t, !ui.rail_footer_hit(layout, area.x + 20 * scale, layout.footer.y - 1))
 
@@ -223,11 +228,8 @@ rail_rows_scroll_clip_and_hit_only_the_visible_list :: proc(t: ^testing.T) {
 		testing.expect_value(t, scrolled.scroll, scroll)
 		// The first row has scrolled under the list's top padding; the row at the top edge is the
 		// one whose rect now intersects the pointer.
-		testing.expect_value(
-			t,
-			ui.rail_row_hit(scrolled, area.x + 20 * scale, area.y + 8 * scale),
-			int((8 - 4 + scroll) / (ui.RAIL_ROW_HEIGHT * scale)),
-		)
+		under := int((8 - 4 + scroll) / (ui.RAIL_ROW_HEIGHT * scale))
+		testing.expect(t, render.rect_contains(ui.rail_row_rect(scrolled, under), top.x, top.y))
 		expect_clamped := ui.rail_scroll_clamped(layout, -10)
 		testing.expect_value(t, expect_clamped, f32(0))
 		expect_clamped = ui.rail_scroll_clamped(layout, 1e6)
@@ -246,19 +248,26 @@ rail_close_targets_and_caption_buttons_are_distinct :: proc(t: ^testing.T) {
 		layout := ui.rail_layout(area, scale, 3, 0)
 		for i in 0 ..< layout.count {
 			r := ui.rail_close_rect(layout, i, scale)
-			testing.expect_value(t, ui.rail_close_hit(layout, r.x + r.width / 2, r.y + r.height / 2, scale), i)
-			testing.expect_value(t, ui.rail_close_hit(layout, r.x - 2 * scale, r.y + r.height / 2, scale), -1)
+			testing.expect_value(t, rail_close_at(layout, r.x + r.width / 2, r.y + r.height / 2, scale), i)
+			testing.expect_value(t, rail_close_at(layout, r.x - 2 * scale, r.y + r.height / 2, scale), -1)
 		}
-		testing.expect_value(t, ui.rail_close_hit(layout, area.x + area.width - 6 * scale, layout.footer.y + 4, scale), -1)
-		for i in 0 ..< 3 {
-			testing.expect_value(
-				t,
-				ui.caption_hit(1200 * scale, (1085 + f32(i) * 46) * scale, 20 * scale, scale),
-				i,
-			)
+		footer := [2]f32{area.x + area.width - 6 * scale, layout.footer.y + 4}
+		testing.expect_value(t, rail_close_at(layout, footer.x, footer.y, scale), -1)
+		for button in platform.Caption_Button {
+			x := (1085 + f32(int(button)) * platform.CAPTION_BUTTON_WIDTH) * scale
+			testing.expect_value(t, ui.caption_hit(1200 * scale, x, 20 * scale, scale), button)
 		}
-		testing.expect_value(t, ui.caption_hit(1200 * scale, 300 * scale, 20 * scale, scale), -1)
+		testing.expect_value(t, ui.caption_hit(1200 * scale, 300 * scale, 20 * scale, scale), nil)
 	}
+}
+
+// The row whose close rectangle holds the point, or -1.
+@(private = "file")
+rail_close_at :: proc(layout: ui.Rail_Layout, x, y, scale: f32) -> int {
+	for i in 0 ..< layout.count {
+		if render.rect_contains(ui.rail_close_rect(layout, i, scale), x, y) {return i}
+	}
+	return -1
 }
 
 @(test)

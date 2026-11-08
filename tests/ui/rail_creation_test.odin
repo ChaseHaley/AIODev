@@ -19,7 +19,8 @@ rail_creation_follows_short_lists_and_sticks_below_overflow :: proc(t: ^testing.
 				tile := ui.rail_footer_tile(l)
 				x, y := tile.x + tile.width / 2, tile.y + tile.height / 2
 				testing.expect(t, ui.rail_footer_hit(l, x, y))
-				testing.expect_value(t, ui.rail_row_hit(l, x, y), -1)
+				// Row hits clip to the list, which ends where the footer starts.
+				testing.expect(t, !render.rect_contains(l.list, x, y))
 				if count > 0 && ui.rail_scroll_max(l) == 0 {
 					last := ui.rail_row_rect(l, count - 1)
 					testing.expect_value(t, l.footer.y - last.y - last.height, ui.RAIL_PADDING * scale)

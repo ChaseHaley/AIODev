@@ -1,7 +1,6 @@
 package main
 
 import "aio:layout"
-import "base:runtime"
 
 Pane_Trial_Error :: enum {
 	None,
@@ -10,20 +9,15 @@ Pane_Trial_Error :: enum {
 	Minimum,
 }
 
+// The content geometry trials measure in place of a pane that does not exist yet. It is used only for
+// measurement and names no session: session ids are allocated upward from 1 and never reach it, so
+// it never matches a real pane's content or looks up a session's header.
+PANE_MEASUREMENT_CONTENT :: layout.Content{.Terminal, max(u32)}
+
 // Geometry is copied out; all detached storage belongs to the evaluation's scratch allocator.
 Pane_Trial_Result :: struct {
 	rect:  layout.Rect,
 	error: Pane_Trial_Error,
-}
-
-@(private, require_results)
-pane_trial_copy :: proc(original: ^layout.Layout, allocator: runtime.Allocator) -> (layout.Layout, bool) {
-	trial := original^
-	nodes, err := make([dynamic]layout.Node, len(original.nodes), len(original.nodes) + 2, allocator)
-	if err != nil {return {}, false}
-	copy(nodes[:], original.nodes[:])
-	trial.nodes, trial.zoomed = nodes, false
-	return trial, true
 }
 
 @(private, require_results)
@@ -41,11 +35,10 @@ pane_trial_evaluate :: proc(
 	before, before_error := make([dynamic]layout.Pane_Rect, 0, len(original.nodes), allocator)
 	if before_error != nil {return {error = .Allocation}}
 	defer delete(before)
-	area, gap := pane_view_split_area(app, w), window_gap(app, w)
-	layout.compute(trial, area, gap, &rects, false)
-	layout.compute(original, area, gap, &before, false)
-	layout.floats_place(trial, floating_area(w), gap, floating_header_height(w), &rects)
-	layout.floats_place(original, floating_area(w), gap, floating_header_height(w), &before)
+	// Judged by the split view panes return to once the change has ended any fill.
+	g := window_geometry(app, w, .None)
+	layout.place_shown(trial, g, false, &rects)
+	layout.place_shown(original, g, false, &before)
 	if !pane_minimum_allows(app, w, rects[:], before[:], notify_failure) {return {error = .Minimum}}
 	for pane in rects {if pane.node == added {return {rect = pane.rect}}}
 	return {error = .Invalid}
@@ -65,48 +58,54 @@ pane_trial_split :: proc(
 	notify_failure := true,
 ) -> Pane_Trial_Result {
 	original, target := tree, node
-	if original == nil {original, target = w.tree, w.tree.focus}
-	if int(target) >= len(original.nodes) {return {error = .Invalid}}
-	if _, ok := original.nodes[target].(layout.Pane); !ok {return {error = .Invalid}}
-	trial, copied := pane_trial_copy(original, allocator)
-	if !copied {return {error = .Allocation}}
+	if original == nil {
+		original = window_tree(w)
+		target = original.focus
+	}
+	if _, ok := layout.pane_content(original, target); !ok {return {error = .Invalid}}
+	trial, copy_error := layout.clone(original, allocator)
+	if copy_error != nil {return {error = .Allocation}}
 	defer layout.destroy(&trial)
-	added, err := layout.split_direction(
-		&trial,
-		target,
-		direction,
-		ratio,
-		{.Terminal, app.next_session_id + 1},
-	)
+	added, err := layout.split_direction(&trial, target, direction, ratio, PANE_MEASUREMENT_CONTENT)
 	if err != nil {return {error = .Allocation}}
 	return pane_trial_evaluate(app, w, original, &trial, added, notify_failure)
 }
 
+// Measures `op` on copies of its trees as w would show the result: the destination tab's tree, or for a
+// linked window the copy of the slot the pane joins.
 @(require_results)
-pane_trial_move :: proc(
+pane_trial_operation :: proc(
 	app: ^App,
 	w: ^Window,
-	source, destination: ^layout.Layout,
-	node, target: layout.Node_Id,
-	direction: layout.Direction,
-	root: bool,
+	op: Pane_Operation,
 	allocator := context.temp_allocator,
 ) -> Pane_Trial_Result {
-	trial, copied := pane_trial_copy(destination, allocator)
-	if !copied {return {error = .Allocation}}
+	content, is_pane := layout.pane_content(&op.source.tree, op.node)
+	if !is_pane {return {error = .Invalid}}
+	trial, copy_error := layout.clone(&op.destination.tree, allocator)
+	if copy_error != nil {return {error = .Allocation}}
 	defer layout.destroy(&trial)
 	added := layout.INVALID_NODE
 	moved := false
-	if source != destination {
-		detached, source_copied := pane_trial_copy(source, allocator)
-		if !source_copied {return {error = .Allocation}}
+	if op.source != op.destination {
+		detached, source_error := layout.clone(&op.source.tree, allocator)
+		if source_error != nil {return {error = .Allocation}}
 		defer layout.destroy(&detached)
-		added, moved = layout.transfer_pane(&detached, &trial, node, target, direction, root)
-	} else if root {
-		added, moved = layout.dock_pane(&trial, node, direction)
+		added, moved = pane_operation_apply(op, &detached, &trial)
 	} else {
-		added, moved = layout.move_pane(&trial, node, target, direction)
+		added, moved = pane_operation_apply(op, &trial, &trial)
 	}
 	if !moved {return {error = .Invalid}}
-	return pane_trial_evaluate(app, w, destination, &trial, added, false)
+	if op.slot == layout.INVALID_NODE {
+		return pane_trial_evaluate(app, w, &op.destination.tree, &trial, added, false)
+	}
+	before := layout.Layout{nodes = make([dynamic]layout.Node, allocator)}
+	defer layout.destroy(&before)
+	after := layout.Layout{nodes = make([dynamic]layout.Node, allocator)}
+	defer layout.destroy(&after)
+	if layout.link_view_load(&before, &op.destination.tree, op.slot) != nil {return {error = .Allocation}}
+	if layout.link_view_load(&after, &trial, layout.link_root(&trial, added)) != nil {
+		return {error = .Allocation}
+	}
+	return pane_trial_evaluate(app, w, &before, &after, layout.find_content(&after, content), false)
 }

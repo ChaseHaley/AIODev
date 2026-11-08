@@ -74,6 +74,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $here = (Get-Location).Path
+. (Join-Path $PSScriptRoot 'instance.ps1')
 
 # The compare folder lives in the main checkout so every worktree shares one ref cache. Each candidate
 # gets its own session folder for checkout builds, data and its running record.
@@ -243,7 +244,9 @@ function Build-Side($Side) {
 function Reset-Data([string] $Data, [string] $SettingsSource) {
     if (-not $KeepData -and (Test-Path $Data)) { Remove-Item -LiteralPath $Data -Recurse -Force }
     New-Item -ItemType Directory -Force $Data | Out-Null
-    if ($SettingsSource) { Copy-Item -LiteralPath $SettingsSource -Destination (Join-Path $Data 'settings.ini') -Force }
+    if ($SettingsSource) {
+        Copy-Item -LiteralPath $SettingsSource -Destination (Join-Path $Data $AIODevSettingsFile) -Force
+    }
 }
 
 function Wait-Window([int] $ProcessId) {
@@ -272,7 +275,7 @@ $settingsSource = $null
 if ($Settings -and $MySettings) { throw 'Use either -Settings or -MySettings.' }
 if ($Settings) { $settingsSource = (Resolve-Path $Settings).Path }
 if ($MySettings) {
-    $settingsSource = Join-Path $env:APPDATA 'AIODev/settings.ini'
+    $settingsSource = Get-AIODevUserSettingsPath
     if (-not (Test-Path $settingsSource)) { throw "No settings at $settingsSource." }
 }
 
@@ -293,7 +296,7 @@ for ($i = 0; $i -lt $sides.Count; $i++) {
     $data = Join-Path $session "$($side.Name.ToLower())/data"
     Reset-Data $data $settingsSource
     $instance = "cmp-$key-$($side.Name.ToLower())"
-    $process = Start-Process -FilePath $exe -ArgumentList @('--instance', $instance, '--data-dir', "`"$data`"") `
+    $process = Start-Process -FilePath $exe -ArgumentList (Get-AIODevInstanceArguments $instance $data) `
         -WorkingDirectory $here -PassThru
     $window = Wait-Window $process.Id
     if ($window -eq [IntPtr]::Zero) { throw "$($side.Name) opened no window; see $data for its log." }

@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "aio:ghostty"
-import "aio:platform"
+import "aio:localpath"
 import "aio:term"
 
 Link_Source :: struct {
@@ -444,7 +444,7 @@ hover_hit_testing_follows_scrollback :: proc(t: ^testing.T) {
 
 @(test)
 reported_local_cwd_enables_relative_file_links :: proc(t: ^testing.T) {
-	hosts := platform.local_hosts()
+	hosts := localpath.local_hosts()
 	testing.expect(t, len(hosts) > 0, "this machine reports its own name")
 	machine := len(hosts) > 0 ? fmt.tprintf("file://%s/C:/repo", hosts[0]) : "file://localhost/C:/repo"
 	for cwd in ([?]string{"file://localhost/C:/repo", "file://remote/C:/repo", "C:\\repo", "", machine}) {

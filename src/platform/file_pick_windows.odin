@@ -1,5 +1,7 @@
 package platform
 
+import "aio:com"
+import "aio:input"
 import "core:log"
 import "core:strings"
 import "core:sync"
@@ -73,7 +75,6 @@ File_Pick :: struct {
 	filter, directory: cstring16,
 	folders:           bool,
 	path:              string,
-	picked:            bool,
 	thread_id:         w.DWORD,
 	done:              bool,
 }
@@ -87,9 +88,10 @@ file_pick_run :: proc(t: ^thread.Thread) {
 		// Wakes the UI thread's event wait so it collects the result. A closed owner needs no waking.
 		w.PostMessageW(pick.owner, w.WM_NULL, 0, 0)
 	}
-	// The Explorer dialog needs an apartment on the thread that shows it.
-	initialized := w.CoInitializeEx(nil, .APARTMENTTHREADED)
-	defer if initialized >= 0 {w.CoUninitialize()}
+	// The Explorer dialog needs an apartment on the thread that shows it. Without one the folder dialog
+	// fails to start and says so, and the classic file dialog still runs.
+	initialized, _ := com.apartment()
+	defer if initialized {w.CoUninitialize()}
 	if pick.folders {
 		file_pick_folder(pick)
 		return
@@ -112,7 +114,7 @@ file_pick_run :: proc(t: ^thread.Thread) {
 	length := 0
 	for length < len(buffer) && buffer[length] != 0 {length += 1}
 	path, err := w.utf16_to_utf8(buffer[:length], context.allocator)
-	if err == nil {pick.path, pick.picked = path, true}
+	if err == nil {pick.path = path}
 }
 
 // The classic dialog cannot choose a folder, so this one asks the shell's item dialog for one.
@@ -175,7 +177,7 @@ file_pick_folder :: proc(pick: ^File_Pick) {
 	length := 0
 	for name[length] != 0 {length += 1}
 	path, err := w.utf16_to_utf8(name[:length], context.allocator)
-	if err == nil {pick.path, pick.picked = path, true}
+	if err == nil {pick.path = path}
 }
 
 // Opens a dialog owned by the window. Returns nil when it could not start. With `folders`, it chooses
@@ -183,7 +185,7 @@ file_pick_folder :: proc(pick: ^File_Pick) {
 @(require_results)
 file_pick_start :: proc(
 	p: ^Platform,
-	id: Window_Id,
+	id: input.Window_Id,
 	filter_name, pattern, directory: string,
 	folders := false,
 ) -> ^File_Pick {

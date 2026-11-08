@@ -3,6 +3,11 @@ package font
 import dw "aio:dwrite"
 import windows "core:sys/windows"
 
+// The locale shaping and fallback mapping both report for text, so a run maps to the face that
+// then shapes it. The catalogue's name preference is a separate choice.
+@(private)
+SHAPING_LOCALE :: "en-us"
+
 // The family DirectWrite's system fallback maps a run from.
 @(private)
 Fallback_Base :: enum u8 {
@@ -39,7 +44,8 @@ fallback_resolve :: proc(
 	assert(s != nil)
 	assert(len(units) > 0)
 	source: dw.Analysis_Source
-	assert(dw.analysis_source_init(&source, units, windows.L("en-us")))
+	source_ready := dw.analysis_source_init(&source, units, windows.L(SHAPING_LOCALE))
+	assert(source_ready)
 	weight, slant := style_values(style)
 	base_family: windows.wstring
 	if base == .Emoji {

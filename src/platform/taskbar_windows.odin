@@ -1,5 +1,7 @@
 package platform
 
+import "aio:com"
+import "aio:input"
 import "core:log"
 import w "core:sys/windows"
 
@@ -13,16 +15,12 @@ taskbar_list :: proc(p: ^Platform) -> (^w.ITaskbarList3, Error) {
 	case nil:
 	}
 	p.taskbar = Service_Failed{}
-	result := w.CoInitializeEx(nil, .APARTMENTTHREADED)
+	entered, usable := com.apartment()
 	// S_FALSE means COM was already initialized on this thread, and still needs a matching uninit.
-	if result >= 0 {
-		p.com_initialized = true
-	} else if u32(result) != 0x80010106 {
-		log.errorf("CoInitializeEx failed: HRESULT 0x%x", u32(result))
-		return nil, .Os
-	}
+	p.com_initialized = entered
+	if !usable {return nil, .Os}
 	list: rawptr
-	result = w.CoCreateInstance(
+	result := w.CoCreateInstance(
 		w.CLSID_TaskbarList,
 		nil,
 		w.CLSCTX_INPROC_SERVER,
@@ -54,7 +52,7 @@ taskbar_destroy :: proc(p: ^Platform) {
 }
 
 // Shows progress on the window's taskbar button. `percent` is ignored for None and Indeterminate.
-window_set_progress :: proc(p: ^Platform, id: Window_Id, state: Progress_State, percent: int) -> Error {
+window_set_progress :: proc(p: ^Platform, id: input.Window_Id, state: Progress_State, percent: int) -> Error {
 	window := find_window(p, id)
 	if window == nil {return .Invalid_Window}
 	taskbar, err := taskbar_list(p)

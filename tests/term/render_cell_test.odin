@@ -40,6 +40,20 @@ render_cell_frame_and_snapshot_agree :: proc(t: ^testing.T) {
 	utf8: [dynamic]u8
 	defer delete(utf8)
 	seen: int
+	widths := [ghostty.Cell_Wide]term.Cell_Width {
+		.Narrow      = .Narrow,
+		.Wide        = .Wide,
+		.Spacer_Tail = .Spacer_Tail,
+		.Spacer_Head = .Spacer_Head,
+	}
+	underlines := [ghostty.Sgr_Underline]term.Underline {
+		.None   = .None,
+		.Single = .Single,
+		.Double = .Double,
+		.Curly  = .Curly,
+		.Dotted = .Dotted,
+		.Dashed = .Dashed,
+	}
 	for ghostty.render_state_row_iterator_next(rows) {
 		y: i32
 		testing.expect_value(
@@ -68,8 +82,29 @@ render_cell_frame_and_snapshot_agree :: proc(t: ^testing.T) {
 			testing.expect_value(t, text_err, term.Error.None)
 			expected := term.snapshot_cell(&s, x, int(y))
 			if !testing.expect(t, expected != nil) {continue}
-			testing.expect_value(t, cell.width, expected.width)
-			testing.expect_value(t, cell.style, expected.style)
+			testing.expect_value(t, expected.width, widths[cell.width])
+			style := cell.style
+			underline_color: Maybe(term.Color)
+			switch style.underline_color.tag {
+			case .None:
+			case .Palette:
+				underline_color = s.palette[style.underline_color.value.palette]
+			case .Rgb:
+				rgb := style.underline_color.value.rgb
+				underline_color = term.Color{rgb.r, rgb.g, rgb.b}
+			}
+			testing.expect_value(t, expected.style, term.Snapshot_Style {
+				bold            = style.bold,
+				faint           = style.faint,
+				italic          = style.italic,
+				blink           = style.blink,
+				inverse         = style.inverse,
+				invisible       = style.invisible,
+				strikethrough   = style.strikethrough,
+				overline        = style.overline,
+				underline       = underlines[ghostty.Sgr_Underline(style.underline)],
+				underline_color = underline_color,
+			})
 			if rgb, has := cell.foreground.?; has {
 				foreground: Maybe(term.Color) = term.Color{rgb.r, rgb.g, rgb.b}
 				testing.expect_value(t, foreground, expected.foreground)

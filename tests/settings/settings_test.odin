@@ -24,7 +24,7 @@ round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.font.size, 12)
 	testing.expect_value(t, s.interface.hover_lift, 1.5)
 	testing.expect_value(t, s.interface.hover_gloss, 1.0)
-	testing.expect_value(t, s.shell.directory, "~")
+	testing.expect_value(t, settings.profile_base(&s.profiles).directory, "~")
 	testing.expect_value(t, s.window.columns, 120)
 	testing.expect(t, s.window.tray_notification)
 	testing.expect_value(t, s.colors.palette[15], settings.Color{0xf4, 0xf4, 0xf7})
@@ -56,8 +56,8 @@ window.tray_notification = false`
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
 	testing.expect_value(t, s.font.family, "  Mono  ")
-	testing.expect_value(t, s.shell.command, "cmd /c echo #hello")
-	testing.expect_value(t, s.shell.directory, "~")
+	testing.expect_value(t, settings.profile_base(&s.profiles).command, "cmd /c echo #hello")
+	testing.expect_value(t, settings.profile_base(&s.profiles).directory, "~")
 	testing.expect_value(t, s.cursor.style, settings.Cursor_Style.Underline)
 	testing.expect_value(t, s.cursor.blink, true)
 	testing.expect_value(t, s.colors.cursor, settings.Color{0xab, 0x12, 0xef})
@@ -101,27 +101,31 @@ font.family = `
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	expected := []settings.Diagnostic{
-		{1, "unknown", `unknown key "unknown"; expected a key from the settings schema`, .Unknown_Key},
-		{2, "missing separator", `expected "key = value"`, .Malformed_Line},
-		{3, "font.size", "0 is out of range 1..200", .Out_Of_Range},
-		{4, "cursor.blink", `invalid boolean "TRUE", expected true or false`, .Invalid_Value},
-		{5, "cursor.style", `"Block" is not one of block, bar, underline`, .Invalid_Value},
-		{6, "theme.custom.mine.cursor", `invalid color "blu", expected #rrggbb`, .Invalid_Value},
-		{8, "window.rows", `duplicate key "window.rows"; last value wins`, .Duplicate_Key},
-		{8, "window.rows", `invalid integer "nope", expected a decimal integer`, .Invalid_Value},
-		{9, "font.family", "expected a closing double quote", .Invalid_Value},
-		{10, "font.line_height", "NaN is out of range 0.5..4", .Out_Of_Range},
-		{11, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key},
-		{11, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range},
-		{12, "font.size", `duplicate key "font.size"; last value wins`, .Duplicate_Key},
-		{12, "font.size", `invalid number "twelve", expected a number`, .Invalid_Value},
-		{13, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key},
-		{13, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range},
+		{1, "unknown", `unknown key "unknown"; expected a key from the settings schema`, .Unknown_Key, ""},
+		{2, "missing separator", `expected "key = value"`, .Malformed_Line, ""},
+		{3, "font.size", "0 is out of range 1..200", .Out_Of_Range, ""},
+		{4, "cursor.blink", `invalid boolean "TRUE", expected true or false`, .Invalid_Value, ""},
+		{5, "cursor.style", `"Block" is not one of block, bar, underline`, .Invalid_Value, ""},
+		{6, "theme.custom.mine.cursor", `invalid color "blu", expected #rrggbb`, .Invalid_Value, ""},
+		{8, "window.rows", `duplicate key "window.rows"; last value wins`, .Duplicate_Key, ""},
+		{8, "window.rows", `invalid integer "nope", expected a decimal integer`, .Invalid_Value, ""},
+		{9, "font.family", "expected a closing double quote", .Invalid_Value, ""},
+		{10, "font.line_height", "NaN is out of range 0.5..4", .Out_Of_Range, ""},
+		{11, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key, ""},
+		{11, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range, ""},
+		{12, "font.size", `duplicate key "font.size"; last value wins`, .Duplicate_Key, ""},
+		{12, "font.size", `invalid number "twelve", expected a number`, .Invalid_Value, ""},
+		{13, "font.family", `duplicate key "font.family"; last value wins`, .Duplicate_Key, ""},
+		{13, "font.family", "string length is out of range 1..256 UTF-8 bytes", .Out_Of_Range, ""},
 	}
 	testing.expect_value(t, len(d), len(expected))
 	for actual, i in d {
 		if i >= len(expected) { break }
-		testing.expect_value(t, actual, expected[i])
+		// Parse problems keep their line apart from the message, which is their identity.
+		testing.expect_value(t, actual.identity, actual.message)
+		located := actual
+		located.identity = ""
+		testing.expect_value(t, located, expected[i])
 	}
 	testing.expect_value(t, s.window.rows, 32)
 	testing.expect_value(t, s.font.size, 12)
@@ -150,31 +154,6 @@ theme.custom.mine.selection_foreground =
 	testing.expect_value(t, s.font.size, 200)
 	testing.expect_value(t, s.font.line_height, 4)
 	testing.expect_value(t, s.colors.selection_foreground, nil)
-}
-
-@(test)
-paths :: proc(t: ^testing.T) {
-	path, err := settings.default_path()
-	defer delete(path)
-	testing.expect_value(t, err, nil)
-	testing.expect(t, strings.has_suffix(path, "\\AIODev\\settings.ini"))
-	home, home_error := os.user_home_dir(context.allocator)
-	defer delete(home)
-	
-	for input in ([]string{"~", "~/child", "~\\child", "~other", "relative"}) {
-		output, expand_error := settings.expand_home(input)
-		defer delete(output)
-		if input == "~" || strings.has_prefix(input, "~/") || strings.has_prefix(input, "~\\") {
-			testing.expect_value(t, expand_error, home_error)
-			if home_error != nil { continue }
-		} else { testing.expect_value(t, expand_error, nil) }
-		if input == "~" {
-			testing.expect_value(t, output, home)
-		}
-		if strings.has_prefix(input, "~/") || strings.has_prefix(input, "~\\") {
-			testing.expect(t, strings.has_prefix(output, home))
-		} else if input != "~" { testing.expect_value(t, output, input) }
-	}
 }
 
 @(test)
@@ -360,9 +339,6 @@ keys.edit.copy = Ctrl+Insert`, allocator)
 	text, text_error := settings.default_text(runtime.nil_allocator())
 	testing.expect_value(t, text, "")
 	testing.expect_value(t, text_error, runtime.Allocator_Error.Out_Of_Memory)
-	path, path_error := settings.expand_home("relative", runtime.nil_allocator())
-	testing.expect_value(t, path, "")
-	testing.expect_value(t, path_error, os.Error(runtime.Allocator_Error.Out_Of_Memory))
 }
 
 expect_settings :: proc(t: ^testing.T, actual, expected: settings.Settings) {

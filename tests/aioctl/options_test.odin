@@ -96,8 +96,8 @@ generated_settings :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, parse_error, runtime.Allocator_Error.None)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect_value(t, s.shell.command, o.shell)
-	testing.expect_value(t, s.shell.directory, `C:\repo with spaces\data`)
+	testing.expect_value(t, settings.profile_base(&s.profiles).command, o.shell)
+	testing.expect_value(t, settings.profile_base(&s.profiles).directory, `C:\repo with spaces\data`)
 	testing.expect_value(t, s.font.family, "Cascadia Mono")
 	testing.expect_value(t, s.cursor.blink, false)
 	testing.expect_value(t, s.window.columns, 90)
@@ -114,7 +114,7 @@ generated_settings :: proc(t: ^testing.T) {
 		defer settings.diagnostics_destroy(&issues)
 		testing.expect_value(t, error, runtime.Allocator_Error.None)
 		testing.expect_value(t, len(issues), 0)
-		testing.expect_value(t, parsed.shell.command, shell)
+		testing.expect_value(t, settings.profile_base(&parsed.profiles).command, shell)
 	}
 	for bad in ([]ctl.Options{{}, {shell = "x", columns = 0, rows = 1},
 		{shell = "x", columns = 1, rows = 1001}, {shell = "x\nkey=true", columns = 1, rows = 1}}) {
@@ -152,7 +152,7 @@ default_history_settings :: proc(t: ^testing.T) {
 			defer settings.diagnostics_destroy(&diagnostics)
 			testing.expect_value(t, parse_error, runtime.Allocator_Error.None)
 			testing.expect_value(t, len(diagnostics), 0)
-			testing.expect_value(t, s.shell.command, item.command)
+			testing.expect_value(t, settings.profile_base(&s.profiles).command, item.command)
 		}
 	}
 	o, error := ctl.parse_options({"launch"})
@@ -211,32 +211,17 @@ record_validation :: proc(t: ^testing.T) {
 }
 
 @(test)
-response_fields :: proc(t: ^testing.T) {
-	text :: `pid="123" app="AIODev.verify" build="abc123+dirty" data="C:\\repo with spaces"`
-	for field in ([]struct { key, value: string }{
-		{"pid", "123"}, {"app", "AIODev.verify"}, {"build", "abc123+dirty"},
-		{"data", `C:\repo with spaces`},
-	}) {
-		value, ok := ctl.response_field(text, field.key)
-		defer delete(value)
-		testing.expect(t, ok)
-		testing.expect_value(t, value, field.value)
+record_round_trip :: proc(t: ^testing.T) {
+	for history in ([]ctl.History{.Isolated, .Custom_Shell, .Settings_File}) {
+		for keep_env in ([]bool{false, true}) {
+			record := ctl.Record{7, 8, `C:\repo\build\aiodev-verify.exe`, keep_env, history}
+			text := ctl.record_text(record)
+			defer delete(text)
+			parsed, ok := ctl.parse_record(text)
+			testing.expect(t, ok)
+			testing.expect_value(t, parsed, record)
+		}
 	}
-	for bad in ([]string{"", "app", `app="unterminated`, `app="bad\`, `app="bad\q"`}) {
-		value, ok := ctl.response_field(bad, "app")
-		defer delete(value)
-		testing.expect(t, !ok)
-	}
-	value, ok := ctl.response_field("build=abc", "build")
-	defer delete(value)
-	testing.expect(t, ok)
-	testing.expect_value(t, value, "abc")
-	missing, found := ctl.response_field(text, "missing")
-	defer delete(missing)
-	testing.expect(t, !found)
-	failed, allocated := ctl.response_field(text, "app", runtime.Allocator{procedure = fail_allocation})
-	testing.expect(t, !allocated)
-	testing.expect_value(t, failed, "")
 }
 
 @(test)

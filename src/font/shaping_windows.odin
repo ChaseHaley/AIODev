@@ -416,7 +416,7 @@ shape_span :: proc(s: ^System, id: Face_Id, runes: []rune, base: int, size, scal
 	}
 	source: dw.Analysis_Source
 	sink: dw.Script_Sink
-	if !dw.analysis_source_init(&source, p.text[:n], windows.L("en-us")) ||
+	if !dw.analysis_source_init(&source, p.text[:n], windows.L(SHAPING_LOCALE)) ||
 	   !dw.script_sink_init(&sink, p.scripts[:]) {
 		return .Invalid_Argument
 	}
@@ -463,7 +463,7 @@ shape_script :: proc(s: ^System, id: Face_Id, start, end: int, size, scale: f32)
 			false,
 			false,
 			&p.scripts[start],
-			windows.L("en-us"),
+			windows.L(SHAPING_LOCALE),
 			nil,
 			&feature_ptr,
 			&n,
@@ -504,7 +504,7 @@ shape_script :: proc(s: ^System, id: Face_Id, start, end: int, size, scale: f32)
 			   false,
 			   false,
 			   &p.scripts[start],
-			   windows.L("en-us"),
+			   windows.L(SHAPING_LOCALE),
 			   &feature_ptr,
 			   &n,
 			   1,

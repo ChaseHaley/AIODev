@@ -1,15 +1,12 @@
 package line_match
 
+import "aio:search"
 import "base:runtime"
 import "core:strings"
 import "core:text/regex"
 import "core:unicode/utf8"
 
 // Find's matching rules for one line of text at a time, shared by every searchable surface.
-
-Options :: struct {
-	case_sensitive, regex: bool,
-}
 
 Init_Result :: enum u8 {
 	Ok,
@@ -19,7 +16,7 @@ Init_Result :: enum u8 {
 }
 
 Matcher :: struct {
-	options:   Options,
+	options:   search.Options,
 	// Lowered when matching literal text without case sensitivity.
 	needle:    string,
 	iterator:  regex.Match_Iterator,
@@ -31,7 +28,12 @@ Matcher :: struct {
 }
 
 @(require_results)
-init :: proc(m: ^Matcher, needle: string, options: Options, allocator := context.allocator) -> Init_Result {
+init :: proc(
+	m: ^Matcher,
+	needle: string,
+	options: search.Options,
+	allocator := context.allocator,
+) -> Init_Result {
 	m^ = {}
 	m.options, m.allocator = options, allocator
 	copied, err := strings.clone(needle, allocator)

@@ -1,13 +1,13 @@
 package main
 
-import "aio:colour"
 import "aio:commands"
 import "aio:font"
 import "aio:glyphs"
+import "aio:input"
 import "aio:instance"
 import platform_api "aio:platform"
 import "aio:perf"
-import "aio:pty"
+import "aio:program_art"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -15,29 +15,18 @@ import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import "core:time"
 
 @(private)
 FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
 @(private)
-MIN_FONT_POINTS :: 6
-@(private)
-MAX_FONT_POINTS :: 72
-@(private)
 NOTICE_DURATION :: 6 * time.Second
-@(private)
-COPY_NOTICE_DURATION :: 2 * time.Second
+// Errors, and notices meant to be read at leisure.
 @(private)
 ERROR_NOTICE_DURATION :: 12 * time.Second
-@(private)
-PASTE_CONFIRM_DURATION :: 10 * time.Second
-@(private)
-PASTE_CONFIRM_TEXT ::
-	"The clipboard text has line breaks, so the shell will run each line as a command. " +
-	"Paste again within 10 seconds to confirm."
 
+// Every notice that replaces its own earlier copy has a key here, so no two features share one.
 @(private)
 Notice_Key :: enum u32 {
 	Transient = 1,
@@ -48,52 +37,24 @@ Notice_Key :: enum u32 {
 	Build_Info,
 }
 
-Session_Entry :: struct {
-	id:                  u32,
-	session:             ^term.Session,
-	status:              term.Status_Kind,
-	keep_open:           bool,
-	process_padding:     Maybe(int),
-	process_name:        [780]u8,
-	process_name_length: int,
-	header:              Pane_Header_Metadata,
-	name:                string,
-	profile_id:          string,
-	// The program status records last copied from the session, and the last notice they raised.
-	statuses:            []term.Program_Status,
-	status_notified:     time.Tick,
-	// The program its icon names and a reopened pane remembers, as process polling sees it.
-	program:             Program,
-	documents:           Document_List,
-}
-
-// Release only the entry's owned memory; callers own removal from app.sessions.
-session_entry_destroy :: proc(entry: ^Session_Entry) {
-	documents_destroy(&entry.documents)
-	pane_header_destroy(&entry.header)
-	delete(entry.name)
-	delete(entry.profile_id)
-	status_release(entry)
-	program_forget(entry)
-	term.destroy(entry.session)
-}
-
+// What every window shares. Each feature's own state is a struct declared beside that feature's procs
+// and embedded here, so the app composes it without knowing its fields. main defers app_destroy before
+// anything starts, so every feature's destroy must accept its zero value.
 App :: struct {
 	verify:                Verify,
 	perf:                  perf.Stats,
 	options:               instance.Options,
+	paths:                 instance.Paths,
 	app_id:                string,
 	platform:              platform_api.Platform,
 	platform_ready:        bool,
-	settings_diagnostics:  [dynamic]settings.Diagnostic,
-	settings_read_error:   os.Error,
+	using settings_notices: Settings_Notice_State,
+	// Theme files and machine shells the running revision was read with; saves and pages reuse them.
+	settings_inputs:       settings.Inputs,
 	settings:              settings.Settings,
-	markdown_panes:        [dynamic]^Markdown_Pane,
-	next_markdown_id:      u32,
-	markdown_deadline:     time.Tick,
-	markdown_pick:         Maybe(File_Dialog),
-	// The file dialog behind Add File and Add Folder, and the pane it is choosing for.
-	document_pick:         Maybe(Document_Pick),
+	using markdown_state:  Markdown_App,
+	dialogs:               File_Dialogs,
+	// The settings file this app reads and saves; app_init takes it from paths.
 	settings_path:         string,
 	log_path:              string,
 	fonts:                 ^font.System,
@@ -103,8 +64,9 @@ App :: struct {
 	cache:                 glyphs.Cache,
 	shell_icon:            Shell_Icon,
 	processes:             Process_Worker,
+	program_icons:         Program_Icon_Cache,
+	program_art:           program_art.Catalogue,
 	ui_text:               ui.Text,
-	ui_ready:              bool,
 	animations:            bool,
 	theme:                 ui.Theme,
 	registry:              commands.Registry,
@@ -113,60 +75,50 @@ App :: struct {
 	find_history:          ui.Find_History,
 	focus_jumps:           Focus_Jumps,
 	// The window the palette is open or closing in; see palette_owner.odin.
-	palette_owner:         Maybe(platform_api.Window_Id),
+	palette_owner:         Maybe(input.Window_Id),
 	notices:               ui.Notices,
-	notice_window:         platform_api.Window_Id,
+	notice_window:         input.Window_Id,
+	// Counts window activations; see window_focus_note.
 	window_focus_order:    u64,
 	sessions:              [dynamic]Session_Entry,
 	workspaces:            [dynamic]^Workspace,
 	next_workspace_id:     u32,
+	// The last session id session_open allocated; callers use the id it returns instead.
 	next_session_id:       u32,
 	windows:               [dynamic]^Window,
 	run:                   App_Run,
 	tray_hint_shown:       bool,
-	settings_migration_noticed: bool,
+	// See update_processes.
 	process_deadline:      time.Tick,
-	// Only the real launch enables it, which also turns restoring on.
-	layout_save:           Layout_Save,
-	layout_saved:          string,
-	// Tests replace this to observe Ctrl+click without launching a browser.
-	open_url:              proc(uri: string) -> bool,
-	open_file:             proc(path, approved: string) -> bool,
-	cli:                   Cli_Pipe,
-	// The directory holding aio.exe beside this executable, added to each shell's PATH; empty
-	// when aio.exe is missing.
-	cli_directory:         string,
-	// How the most recently closed sessions ended, oldest overwritten first. A pane closes as its
-	// program exits, so a CLI wait that polls afterwards still learns the exit code.
-	closed_sessions:       [32]Closed_Session,
-	closed_next:           int,
+	// Only the real launch enables saving, which also turns restoring on.
+	using layout_store:    Layout_Store,
+	// Hands web and file targets to the system; see target_open.odin.
+	opener:                Target_Opener,
+	using cli_state:       Cli_State,
+	// How the most recently closed sessions ended; see session.odin.
+	closed_sessions:       Closed_Sessions,
 	// Panes and tabs closed explicitly, newest last, for Reopen Closed.
 	closed:                [dynamic]Closed_Item,
 }
 
-Closed_Session :: struct {
-	id:        u32,
-	status:    term.Status_Kind,
-	exit_code: u32,
-}
-
-@(private)
-PANE_VARIABLE :: "AIODEV_PANE"
-@(private)
-INSTANCE_VARIABLE :: "AIODEV_INSTANCE"
-@(private)
-CLI_EXECUTABLE :: "aio.exe"
-
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
-	perf.start(&app.perf)
-	if app.options.data_dir != "" {
-		path, err := filepath.join({app.options.data_dir, "settings.ini"})
-		if err != nil {
-			log.errorf("constructing the settings path failed: %v", err)
-			return false
-		}
+	when FRAME_STATS {perf.start(&app.perf)}
+	paths, paths_error := instance.paths(app.options)
+	if paths_error != nil {
+		log.errorf("locating the instance files failed: %v", paths_error)
+		return false
+	}
+	app.paths = paths
+	if app.paths.settings == "" {
+		log.error("locating the settings file failed: no settings directory")
+	} else if path, err := strings.clone(app.paths.settings); err != nil {
+		log.errorf("constructing the settings path failed: %v", err)
+		return false
+	} else {
 		app.settings_path = path
+	}
+	if app.options.data_dir != "" {
 		if directory_error := os.mkdir_all(app.options.data_dir); directory_error != nil {
 			log.errorf("creating the data directory failed: %v", directory_error)
 			return false
@@ -174,39 +126,20 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	app.animations = platform_api.client_animations_enabled()
 	ui.notices_init(&app.notices)
-	app.notices.animations = app.animations
+	if catalogue, err := program_art.catalogue_make(); err == nil {
+		app.program_art = catalogue
+	} else {
+		log.errorf("parsing the bundled program artwork failed: %v", err)
+	}
 	app.registry = commands.create()
 	if err := register_actions(&app.registry); err != .None {
 		log.errorf("registering commands failed: %v", err)
 		return false
 	}
-	@(static) palette_settings: [len(settings.SCHEMA) + 1]ui.Palette_Setting
-	@(static, rodata)
-	schema := settings.SCHEMA
-	setting_count := 0
-	for entry in schema {
-		if entry.key == "font.show_all" {continue}
-		palette_settings[setting_count] = ui.palette_setting(entry)
-		setting_count += 1
-	}
-	palette_settings[setting_count] = {key = "profiles", title = "Profiles", group = "Profiles"}
-	setting_count += 1
-	if ui.palette_init(&app.palette, palette_settings[:setting_count]) != nil {
-		return false
-	}
+	if !palette_settings_init(app) {return false}
 	palette_set_sources(app)
-	ui.palette_set_values(
-		&app.palette,
-		{user = app, value = palette_setting_value, choices = palette_setting_choices},
-	)
-	if executable, err := os.get_executable_path(context.temp_allocator); err == nil {
-		directory := filepath.dir(executable)
-		if cli, join_error := filepath.join({directory, CLI_EXECUTABLE}, context.temp_allocator);
-		   join_error == nil && os.exists(cli) {
-			app.cli_directory = strings.clone(directory)
-		}
-	}
-	load_settings(app)
+	control_cli_init(app)
+	if !load_settings(app) {return false}
 	font_error: font.Error
 	app.fonts, font_error = font.system_create()
 	if font_error != .None {
@@ -221,26 +154,18 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	apply_text_gamma(app)
 	glyphs.init(&app.cache, app.fonts, app.device)
-	ui_size_px :=
-		f32(app.settings.interface.font_size) * f32(platform_api.primary_dpi(&app.platform)) / 72
+	ui_size_px := points_pixels(
+		f32(app.settings.interface.font_size),
+		dpi_scale(platform_api.primary_dpi(&app.platform)),
+	)
 	if !ui.text_init(&app.ui_text, app.fonts, &app.cache, ui_size_px, app.settings.interface.font_family) {
 		log.error("no interface font is available")
 		return false
 	}
-	app.ui_ready = true
 	shell_icon_load(app)
 	apply_fonts(app)
 	apply_theme(app)
-	if platform_api.tray_create(&app.platform, app.app_id) != .None {
-		log.error("creating the tray icon failed")
-	}
-	tray_menu := [?]platform_api.Tray_Menu_Item {
-		{id = TRAY_OPEN, title = "Open AIODev"},
-		{id = TRAY_QUIT, title = "Quit"},
-	}
-	if platform_api.tray_set_menu(&app.platform, tray_menu[:]) != .None {
-		log.error("setting the tray menu failed")
-	}
+	tray_init(app)
 	platform_api.set_modal_loop_callback(
 		&app.platform,
 		proc(user: rawptr) {tick((^App)(user))},
@@ -249,18 +174,18 @@ app_init :: proc(app: ^App) -> bool {
 	if !layout_state_restore(app) {
 		workspace := workspace_create_empty(app)
 		if workspace == nil {return false}
-		if !tab_create(app, workspace) {return false}
+		if _, created := tab_create(app, workspace); !created {return false}
 		if !window_open(app, workspace) {return false}
 	}
-	verify_start(app)
+	when AIO_CONTROL {verify_start(app)}
 	control_cli_sync(app)
 	return true
 }
 
+// Also runs for an App that never started, so each feature's destroy accepts its zero value.
 app_destroy :: proc(app: ^App) {
-	verify_destroy(app)
-	control_cli_stop(app)
-	delete(app.cli_directory)
+	when AIO_CONTROL {verify_destroy(app)}
+	control_cli_destroy(app)
 	for len(app.windows) > 0 {
 		window_close(app, app.windows[len(app.windows) - 1])
 	}
@@ -272,11 +197,12 @@ app_destroy :: proc(app: ^App) {
 	for workspace in app.workspaces {workspace_destroy(workspace)}
 	delete(app.workspaces)
 	if app.platform_ready {
-		if platform_api.tray_destroy(&app.platform) != .None {
-			log.error("removing the tray icon failed")
-		}
+		tray_destroy(app)
 	}
 	process_worker_destroy(&app.processes)
+	program_icon_cache_destroy(&app.program_icons)
+	program_art.catalogue_destroy(&app.program_art)
+	shell_icon_destroy(&app.shell_icon)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)
@@ -287,15 +213,17 @@ app_destroy :: proc(app: ^App) {
 	ui.palette_destroy(&app.palette)
 	ui.find_history_destroy(&app.find_history)
 	focus_jumps_destroy(&app.focus_jumps)
-	markdown_panes_destroy(app)
+	file_dialogs_destroy(app)
+	markdown_app_destroy(&app.markdown_state)
 	ui.notices_destroy(&app.notices)
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
-	settings.diagnostics_destroy(&app.settings_diagnostics)
+	settings.inputs_destroy(&app.settings_inputs)
+	settings_notice_state_destroy(&app.settings_notices)
 	delete(app.settings_path)
+	instance.paths_destroy(&app.paths)
 	delete(app.log_path)
-	layout_state_disable(app)
-	delete(app.layout_saved)
+	layout_state_destroy(app)
 	closed_destroy(app)
 	delete(app.app_id)
 	if app.platform_ready {
@@ -325,34 +253,22 @@ tick :: proc(app: ^App) {
 	}
 	if len(events) > 0 {layout_state_touch(app)}
 	update_sessions(app)
-	markdown_find_tick(app)
-	update_processes(app)
-	if ready, unreadable := process_icons_adopt(&app.processes); ready || unreadable != "" {
+	find_tick(app)
+	if ready, unreadable := program_icons_adopt(app); ready || unreadable != "" {
 		if unreadable != "" {
 			notify(app, .Error, fmt.tprintf("Could not read %s as a PNG program icon.", unreadable))
 		}
 		mark_all_dirty(app)
 	}
 	update_motion(app)
-	if ui.notices_expire(&app.notices, time.tick_now()) {
-		mark_all_dirty(app)
-	}
-	// A dwell can create or discard the trailing preview window.
-	for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], time.tick_now())}
+	app_timers_advance(app, .Before_Draw)
 	pane_links_sync(app)
 	window_notices_sync(app)
 	for window in app.windows {
 		now := time.tick_now()
-		leader_expire(window, now)
-		paste_confirm_expire(window, now)
-		cursor_blink_tick(window, now)
-		selection_autoscroll_tick(app, window, now)
-		tooltip_tick(window, now)
+		for timer in Window_Timer {window_timer_advance(app, window, timer, now)}
 		status_spin_tick(window)
-		if window.taskbar_workspace != window.workspace {
-			window.taskbar_workspace = window.workspace
-			status_taskbar_update(app, window)
-		}
+		status_taskbar_follow(app, window)
 		switch window.phase {
 		case .Preparing:
 			window.dirty = false
@@ -363,15 +279,151 @@ tick :: proc(app: ^App) {
 		}
 		if window.dirty {
 			window_render(app, window)
-			verify_presented(app, window)
+			// The harness counts this window's present now; its After_Draw timer reads every window's.
+			when AIO_CONTROL {verify_presented(app, window)}
 		}
 	}
-	verify_tick(app)
+	app_timers_advance(app, .After_Draw)
 	control_cli_tick(app)
 	focus_jumps_track(app)
-	layout_state_tick(app)
-	markdown_tick(app)
 	free_all(context.temp_allocator)
+}
+
+// Every timed feature that is not a window's, once. Each advances itself and names its next deadline:
+// tick advances them and wait_timeout sleeps until the earliest. A value added here must be named by
+// every switch below, so no feature can be advanced without waking the loop, or the reverse. Find
+// progress stays outside, as a pair: find_tick runs before update_motion, where no phase here runs, and
+// find_pending wakes the loop at once rather than at a deadline.
+@(private = "file")
+App_Timer :: enum u8 {
+	Processes,
+	Notices,
+	// A pane drag resting on another tab switches to it; this can create or discard a preview window.
+	Drag_Hover,
+	Verify,
+	Layout_Save,
+	File_Dialogs,
+	Markdown,
+}
+
+// Before the windows draw, a timer's change shows in this tick's frame; after, verify counts the
+// frames this tick presented.
+@(private = "file")
+Timer_Phase :: enum u8 {
+	Before_Draw,
+	After_Draw,
+}
+
+@(private = "file")
+app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
+	switch timer {
+	case .Processes, .Notices, .Drag_Hover:
+		return .Before_Draw
+	case .Verify, .Layout_Save, .File_Dialogs, .Markdown:
+		return .After_Draw
+	}
+	return .Before_Draw
+}
+
+@(private = "file")
+app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
+	for timer in App_Timer {
+		if app_timer_phase(timer) != phase {continue}
+		switch timer {
+		case .Processes:
+			update_processes(app)
+		case .Notices:
+			if ui.notices_expire(&app.notices, app.animations, time.tick_now()) {mark_all_dirty(app)}
+		case .Drag_Hover:
+			for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], time.tick_now())}
+		case .Verify:
+			when AIO_CONTROL {verify_tick(app)}
+		case .Layout_Save:
+			layout_state_tick(app)
+		case .File_Dialogs:
+			file_dialogs_tick(app)
+		case .Markdown:
+			markdown_tick(app)
+		}
+	}
+}
+
+@(private = "file")
+app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pending: bool) {
+	switch timer {
+	case .Processes:
+		return process_poll_deadline(app)
+	case .Notices:
+		return ui.notices_deadline(&app.notices)
+	case .Drag_Hover:
+		for w in app.windows {
+			if at, armed := drag_hover_deadline(w); armed {next, pending = earliest(next, pending, at)}
+		}
+	case .Verify:
+		when AIO_CONTROL {return verify_deadline(app)}
+	case .Layout_Save:
+		return layout_state_deadline(app)
+	case .File_Dialogs:
+		// A finished dialog wakes the loop itself.
+	case .Markdown:
+		return markdown_poll_deadline(app)
+	}
+	return
+}
+
+// Every timed feature of a window, once, advanced before the window draws.
+@(private = "file")
+Window_Timer :: enum u8 {
+	Leader,
+	Paste_Confirm,
+	Cursor_Blink,
+	Capture_Hold,
+	Selection_Autoscroll,
+	Tooltip,
+}
+
+@(private = "file")
+window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: time.Tick) {
+	switch timer {
+	case .Leader:
+		leader_expire(w, now)
+	case .Paste_Confirm:
+		paste_confirm_expire(w, now)
+	case .Cursor_Blink:
+		cursor_blink_tick(w, now)
+	case .Capture_Hold:
+		capture_hold_tick(w, now)
+	case .Selection_Autoscroll:
+		selection_autoscroll_tick(app, w, now)
+	case .Tooltip:
+		tooltip_tick(w, now)
+	}
+}
+
+@(private = "file")
+window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bool) {
+	switch timer {
+	case .Leader:
+		return leader_deadline(w)
+	case .Paste_Confirm:
+		return paste_confirm_deadline(w)
+	case .Cursor_Blink:
+		return cursor_blink_deadline(w)
+	case .Capture_Hold:
+		return capture_hold_deadline(w)
+	case .Selection_Autoscroll:
+		return selection_autoscroll_deadline(w)
+	case .Tooltip:
+		return tooltip_deadline(w)
+	}
+	return {}, false
+}
+
+// The earlier of a deadline found so far, if any, and `next`.
+@(private = "file")
+earliest :: proc(current: time.Tick, found: bool, next: time.Tick) -> (time.Tick, bool) {
+	if found && time.tick_diff(next, current) <= 0 {return current, true}
+	return next, true
 }
 
 @(private)
@@ -382,51 +434,21 @@ wait_timeout :: proc(app: ^App) -> u32 {
 	}
 	if motion_active(app) {return 16}
 	INFINITE :: max(u32)
-	deadline, found := ui.notices_deadline(&app.notices)
-	if app.process_deadline != {} &&
-	   (!found || time.tick_diff(app.process_deadline, deadline) > 0) {
-		deadline, found = app.process_deadline, true
-	}
-	if next, scheduled := layout_state_deadline(app);
-	   scheduled && (!found || time.tick_diff(next, deadline) > 0) {
-		deadline, found = next, true
-	}
-	if app.markdown_deadline != {} &&
-	   (!found || time.tick_diff(app.markdown_deadline, deadline) > 0) {
-		deadline, found = app.markdown_deadline, true
-	}
-	if next, pending := verify_deadline(app);
-	   pending && (!found || time.tick_diff(next, deadline) > 0) {
-		deadline, found = next, true
+	deadline: time.Tick
+	found := false
+	for timer in App_Timer {
+		if next, pending := app_timer_deadline(app, timer); pending {
+			deadline, found = earliest(deadline, found, next)
+		}
 	}
 	for window in app.windows {
-		if next, pending := tooltip_deadline(window);
-		   pending && (!found || time.tick_diff(next, deadline) > 0) {
-			deadline, found = next, true
-		}
-		if next, armed := drag_hover_deadline(window);
-		   armed && (!found || time.tick_diff(next, deadline) > 0) {
-			deadline, found = next, true
-		}
-		if next, armed := leader_deadline(window);
-		   armed && (!found || time.tick_diff(next, deadline) > 0) {
-			deadline, found = next, true
-		}
-		if next, blinking := cursor_blink_deadline(window);
-		   blinking && (!found || time.tick_diff(next, deadline) > 0) {
-			deadline, found = next, true
-		}
-		if next, autoscrolling := selection_autoscroll_deadline(window);
-		   autoscrolling && (!found || time.tick_diff(next, deadline) > 0) {
-			deadline, found = next, true
+		for timer in Window_Timer {
+			if next, pending := window_timer_deadline(window, timer); pending {
+				deadline, found = earliest(deadline, found, next)
+			}
 		}
 	}
-	for entry in app.sessions {
-		if term.search_pending(entry.session) {
-			return 0
-		}
-	}
-	if markdown_find_pending(app) {return 0}
+	if find_pending(app) {return 0}
 	if !found {
 		return INFINITE
 	}
@@ -447,407 +469,36 @@ wake_platform :: proc(user: rawptr) {
 	}
 }
 
-// `pane` is the session id the launch serves. The shell learns it from AIODEV_PANE, so the aio command
-// line acts on "here" by default, and finds aio itself on PATH.
-@(private)
-session_config :: proc(
-	app: ^App,
-	pane: u32,
-	geometry: term.Geometry,
-	profile: ^settings.Profile,
-	command_override: string = "",
-) -> term.Config {
-	directory_text := app.settings.shell.directory
-	command, title := app.settings.shell.command, ""
-	if profile != nil {
-		directory_text, command, title = profile.directory, profile.command, profile.name
-	}
-	if command_override != "" {command, title = command_override, ""}
-	directory, err := settings.expand_home(directory_text, context.temp_allocator)
-	if err != nil {
-		log.errorf("expanding the shell directory failed: %v", err)
-		directory = directory_text
-	}
-	environment := make([dynamic]pty.Env_Var, 0, 2, context.temp_allocator)
-	append(&environment, pty.Env_Var{PANE_VARIABLE, fmt.tprintf("%d", pane)})
-	if app.options.name != "" {append(&environment, pty.Env_Var{INSTANCE_VARIABLE, app.options.name})}
-	return {
-		command_line = settings.shell_command_line(command, app.settings.shell.integration),
-		title = title,
-		environment = environment[:],
-		path_append = app.cli_directory,
-		refresh_environment = app.settings.shell.refresh_environment,
-		working_directory = directory,
-		geometry = geometry,
-		scrollback_lines = app.settings.scrollback.lines,
-		colors = terminal_colors(app.settings.colors),
-		ignore_program_status = !app.settings.status.enabled,
-	}
-}
-
 initial_geometry :: proc(app: ^App) -> term.Geometry {
-	scale := f32(platform_api.primary_dpi(&app.platform)) / 96
-	metrics := window_metrics(app, scale)
-	box, width, height := pane_box_for_grid(
+	scale := dpi_scale(platform_api.primary_dpi(&app.platform))
+	fields := window_settings_fields(app, scale, linked = false)
+	// A new window as it shows once opened and its settings apply, before it has a size.
+	template := Window {
+		scale              = scale,
+		metrics            = fields.metrics,
+		rail_default_width = fields.rail_default_width,
+		tabs_horizontal    = fields.tabs_horizontal,
+		header_height      = fields.header_height,
+	}
+	// window.columns and window.rows size the window without a docked Activity panel, which then takes
+	// its width from the pane. This is the shipped policy, kept pending the owner's decision on whether
+	// the window should widen for the panel instead.
+	box, width, height, _ := pane_box_for_grid(
 		app,
-		scale,
-		metrics,
+		template,
 		u16(app.settings.window.columns),
 		u16(app.settings.window.rows),
-		pane_insets(app, scale, nil),
-		f32(app.settings.tabs.rail_width),
+		pane_insets(app, &template, nil),
+		activity_dock = false,
 	)
-	return {
-		columns = box.columns,
-		rows = box.rows,
-		cell_width = u32(metrics.cell_width),
-		cell_height = u32(metrics.cell_height),
-		padding_left = u32(box.origin.x),
-		padding_top = u32(box.origin.y),
-		surface_width = u32(width),
-		surface_height = u32(height),
-	}
-}
-
-@(private)
-session_open :: proc(
-	app: ^App,
-	command: string = "",
-	directory: string = "",
-	profile_id: string = "",
-	last_command: string = "",
-) -> bool {
-	profile, _ := settings.profile_resolve(&app.settings, profile_id)
-	geometry := initial_geometry(app)
-	config := session_config(app, app.next_session_id + 1, geometry, profile, command)
-	// A reopened pane notes what it was running above the fresh shell's first prompt.
-	if shown := printable_command(last_command, context.temp_allocator); shown != "" {
-		config.preface = fmt.tprintf("\x1b[2mLast running: %s\x1b[0m\r\n", shown)
-	}
-	// Defense in depth: every caller filters its directory, but an untrusted one must never reach
-	// CreateProcess. Falling back here keeps the pane usable instead of failing the whole open.
-	launch_directory := directory
-	if launch_directory != "" && !pty.working_directory_is_local(launch_directory) {
-		notify(
-			app,
-			.Warning,
-			"The requested directory is remote or unavailable; using the profile's default.",
-		)
-		launch_directory = ""
-	}
-	if launch_directory != "" {config.working_directory = launch_directory}
-	session, err := term.create(config, {wake_platform, &app.platform})
-	if err != .None {
-		log.errorf("creating the terminal session failed: %v", err)
-		return false
-	}
-	resolved_id := profile_id
-	if resolved_id == "" && profile != nil {resolved_id = profile.id}
-	owned_id, id_error := strings.clone(resolved_id)
-	if id_error != nil {
-		term.destroy(session)
-		return false
-	}
-	app.next_session_id += 1
-	if _, allocation_error := append(
-		&app.sessions,
-		Session_Entry {
-			id = app.next_session_id,
-			session = session,
-			profile_id = owned_id,
-		},
-	); allocation_error != nil {
-		delete(owned_id)
-		term.destroy(session)
-		return false
-	}
-	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config)
-	session_status_sync(&app.sessions[len(app.sessions) - 1])
-	configure_session(app, session)
-	return true
-}
-
-@(private)
-configure_session :: proc(app: ^App, session: ^term.Session) {
-	cursor: term.Cursor_Style
-	switch app.settings.cursor.style {
-	case .Block:
-		cursor = .Block
-	case .Bar:
-		cursor = .Bar
-	case .Underline:
-		cursor = .Underline
-	}
-	term.configure(session, app.settings.scrollback.lines, cursor, app.settings.cursor.blink)
-}
-
-session_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
-	for &entry in app.sessions {
-		if entry.id == id {
-			return &entry
-		}
-	}
-	return nil
-}
-
-// Session_Entry.status is the frame's copy of the session's process phase, so drawing never takes
-// the session mutex. This is its only writer; it reports whether the copy changed.
-@(private)
-session_status_sync :: proc(entry: ^Session_Entry) -> (status: term.Status, changed: bool) {
-	status = term.status(entry.session)
-	changed = status.kind != entry.status
-	entry.status = status.kind
-	return
-}
-
-session_restart :: proc(app: ^App, entry: ^Session_Entry) {
-	geometry := term.geometry(entry.session)
-	profile, requested := settings.profile_resolve(&app.settings, entry.profile_id)
-	config := session_config(app, entry.id, geometry, profile)
-	// A removed or unusable profile restarts from the exact line it last launched, without
-	// applying the directory-reporting wrapper a second time.
-	if !requested && entry.profile_id != "" && entry.header.command != "" {
-		config.command_line = entry.header.command
-		if entry.header.launch_directory != "" {
-			config.working_directory = entry.header.launch_directory
-		}
-	}
-	term.restart(entry.session, config)
-	pane_header_launch(&entry.header, config)
-	pane_header_refresh(entry)
-	session_status_sync(entry)
-	mark_all_dirty(app)
-}
-
-@(private)
-update_sessions :: proc(app: ^App) {
-	workspace_status_changed := false
-	// Exit cleanup removes only the current entry; earlier entries remain valid.
-	for i := len(app.sessions) - 1; i >= 0; i -= 1 {
-		entry := &app.sessions[i]
-		s := entry.session
-		if term.search_pending(s) {
-			before := term.search_summary(s)
-			term.search_update(s)
-			if term.search_summary(s) != before {
-				mark_all_dirty(app)
-			}
-		}
-		if term.take_status_change(s) {
-			workspace_status_changed = true
-			layout_state_touch(app)
-			status, changed := session_status_sync(entry)
-			if changed {mark_all_dirty(app)}
-			if status.kind == .Exited && close_exited_session(app, entry.id) {continue}
-		}
-		if term.take_title_change(s) {
-			layout_state_touch(app)
-			pane_header_refresh(entry)
-			session_titles_changed(app, entry.id)
-		}
-		if term.take_program_status_change(s) {
-			workspace_status_changed = true
-			status_refresh(app, entry)
-			if status_watched(app, entry) {term.program_status_acknowledge(s)}
-			mark_all_dirty(app)
-		}
-		if term.take_bell(s) {
-			for window in app.windows {
-				if !window.focused && window.phase == .Shown &&
-				   platform_api.window_flash(&app.platform, window.id) != .None {
-					log.error("flashing the window failed")
-				}
-			}
-		}
-	}
-	if workspace_status_changed {
-		workspace_picker_status_changed(app)
-		for window in app.windows {status_taskbar_update(app, window)}
-	}
-	for window in app.windows {
-		generation := window_generation(app, window)
-		if generation != window.generation {
-			window.generation = generation
-			link_hover_refresh(app, window)
-			window.dirty = true
-		}
-	}
+	return pane_box_geometry(box, fields.metrics, width, height)
 }
 
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	duration := kind == .Error || kind == .Warning ? ERROR_NOTICE_DURATION : NOTICE_DURATION
-	ui.notices_put(&app.notices, u32(Notice_Key.Transient), kind, text, duration)
+	key := u32(Notice_Key.Transient)
+	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, time.tick_now())
 	mark_all_dirty(app)
-}
-
-// The settings file as read, before any of it applies.
-@(private)
-Settings_Read :: struct {
-	loaded:            settings.Settings,
-	diagnostics:       [dynamic]settings.Diagnostic,
-	// Owned exact parsed text, transferred by settings.load; lives through publication.
-	source:            string,
-	read_error:        os.Error,
-	created, migrated: bool,
-	migration_error:   settings.Save_Error,
-}
-
-// Reads the settings file, or defaults when it cannot be read. Fails only when neither is available.
-@(private, require_results)
-settings_read :: proc(app: ^App) -> (read: Settings_Read, ok: bool) {
-	if app.settings_path == "" {
-		path, err := settings.default_path()
-		if err != nil {
-			log.errorf("locating the settings file failed: %v", err)
-		}
-		app.settings_path = path
-	}
-	comments, comment_count := binding_comments()
-	read.loaded, read.diagnostics, read.created, read.migrated, read.migration_error, read.read_error =
-		settings.load(
-			app.settings_path,
-			extra_comments = comments[:comment_count],
-			themes_directory = settings.theme_directory(),
-			source_out = &read.source,
-		)
-	if read.read_error != nil {
-		log.errorf("reading %s failed: %v", app.settings_path, read.read_error)
-		defaults, default_error := settings.defaults()
-		if default_error != nil {
-			log.errorf("loading default settings failed: %v", default_error)
-			notify(
-				app,
-				.Error,
-				"Could not load settings or defaults. Check the log and restart AIODev.",
-			)
-			settings.diagnostics_destroy(&read.diagnostics)
-			return {}, false
-		}
-		read.loaded = defaults
-	}
-	return read, true
-}
-
-// Reports what reading the file changed on disk, once the settings it read apply.
-@(private)
-settings_read_report :: proc(app: ^App, read: ^Settings_Read) {
-	if read.created {
-		log.infof("created %s", app.settings_path)
-	}
-	if (read.migrated || read.migration_error != .None) && !app.settings_migration_noticed {
-		app.settings_migration_noticed = true
-		if read.migrated {
-			notify(
-				app,
-				.Info,
-				"settings.ini was updated to the current format; existing shells are unchanged.",
-			)
-		} else {
-			log.errorf("migrating settings failed: %v", read.migration_error)
-			notify(
-				app,
-				.Error,
-				"Could not update settings.ini to the current format. Its settings still apply; " +
-				"check the settings file permissions.",
-			)
-		}
-	}
-}
-
-// At startup nothing runs yet that a revision must reach, so the file only replaces the settings.
-load_settings :: proc(app: ^App) {
-	read, ok := settings_read(app)
-	if !ok {return}
-	defer settings.diagnostics_destroy(&read.diagnostics)
-	defer delete(read.source)
-	settings_apply_revision(app, read.loaded, &read.diagnostics, read.read_error)
-	settings_read_report(app, &read)
-}
-
-// The one order every settings revision after startup takes, saved here or read from the file again:
-// interactions holding old settings end, the revision replaces the running settings, windows and
-// sessions apply it, and then the open settings pages show it.
-@(private)
-settings_revision_apply :: proc(
-	app: ^App,
-	loaded: settings.Settings,
-	diagnostics: ^[dynamic]settings.Diagnostic,
-	read_error: os.Error,
-	publication: Settings_Publication,
-) {
-	settings_prepare_reload(app)
-	settings_apply_revision(app, loaded, diagnostics, read_error)
-	settings_apply_running(app)
-	settings_publish(app, publication)
-}
-
-@(private)
-settings_apply_revision :: proc(
-	app: ^App,
-	loaded: settings.Settings,
-	diagnostics: ^[dynamic]settings.Diagnostic,
-	read_error: os.Error = nil,
-) {
-	settings.destroy(&app.settings)
-	app.settings = loaded
-	detect_shell_profiles(app)
-	app.process_deadline = {}
-	for &entry in app.sessions {entry.process_padding = nil}
-	apply_bindings(app, diagnostics)
-	app.font_points = f32(loaded.font.size)
-	show_settings_diagnostics(app, diagnostics, read_error)
-}
-
-@(private)
-settings_prepare_reload :: proc(app: ^App) {
-	refresh_animations(app)
-	for i := len(app.windows) - 1; i >= 0; i -= 1 {
-		if i >= len(app.windows) {continue}
-		window := app.windows[i]
-		_ = gesture_cancel(app, window)
-	}
-}
-
-reload_settings :: proc(app: ^App, announce := true) {
-	previous_shell := strings.clone(app.settings.shell.command, context.temp_allocator)
-	previous_directory := strings.clone(app.settings.shell.directory, context.temp_allocator)
-	read, ok := settings_read(app)
-	if !ok {return}
-	defer settings.diagnostics_destroy(&read.diagnostics)
-	defer delete(read.source)
-	publication: Settings_Publication = Publish_Unavailable{}
-	if read.read_error == nil {publication = Publish_Reloaded{read.source}}
-	settings_revision_apply(app, read.loaded, &read.diagnostics, read.read_error, publication)
-	settings_read_report(app, &read)
-	if announce {
-		if previous_shell != app.settings.shell.command ||
-		   previous_directory != app.settings.shell.directory {
-			notify(app, .Info, "Shell settings apply the next time the shell restarts.")
-		} else if app.settings_read_error == nil && len(app.settings_diagnostics) == 0 {
-			notify(app, .Info, "Settings reloaded.")
-		}
-	}
-}
-
-@(private)
-settings_apply_running :: proc(app: ^App) {
-	if !ui.text_init(
-		&app.ui_text, app.fonts, &app.cache, app.ui_text.size_px, app.settings.interface.font_family,
-	) {notify(app, .Error, "Could not load an interface font.")}
-	apply_fonts(app)
-	apply_theme(app)
-	for entry in app.sessions {
-		term.set_colors(entry.session, terminal_colors(app.settings.colors))
-		configure_session(app, entry.session)
-	}
-	for window in app.windows {
-		window_apply_settings(app, window)
-		rail_reveal_active(window)
-	}
-	status_apply_settings(app)
-	shell_icon_load(app)
-	program_icons_reload(app)
-	control_cli_sync(app)
 }
 
 // Resolves the configured terminal font, falling back to fonts every Windows install has.
@@ -855,7 +506,7 @@ apply_fonts :: proc(app: ^App) {
 	family, err := font.family_load(app.fonts, app.settings.font.family)
 	if err == .None {
 		app.family = family
-		ui.notices_clear(&app.notices, u32(Notice_Key.Font))
+		ui.notices_clear(&app.notices, u32(Notice_Key.Font), app.animations, time.tick_now())
 		return
 	}
 	for name in FALLBACK_FONT_FAMILIES {
@@ -866,7 +517,10 @@ apply_fonts :: proc(app: ^App) {
 				app.settings.font.family,
 				name,
 			)
-			ui.notices_put(&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION)
+			ui.notices_put(
+				&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION, app.animations,
+				time.tick_now(),
+			)
 			return
 		}
 	}
@@ -874,13 +528,7 @@ apply_fonts :: proc(app: ^App) {
 }
 
 apply_theme :: proc(app: ^App) {
-	app.theme = ui.theme_from(app.settings.active_theme)
-	app.theme.hover_lift = f32(app.settings.interface.hover_lift)
-	app.theme.hover_gloss = f32(app.settings.interface.hover_gloss)
-}
-
-color :: proc(c: settings.Color, alpha: f32 = 1) -> render.Color {
-	return colour.rgba(c, alpha)
+	app.theme = ui.theme_from(app.settings.active_theme, app.settings.interface)
 }
 
 @(private)
@@ -897,16 +545,13 @@ terminal_colors :: proc(c: settings.Color_Settings) -> term.Colors {
 }
 
 set_font_points :: proc(app: ^App, points: f32) {
-	app.font_points = clamp(points, MIN_FONT_POINTS, MAX_FONT_POINTS)
+	zoom := settings.FONT_SIZE_ZOOM
+	app.font_points = clamp(points, f32(zoom.minimum), f32(zoom.maximum))
 	for window in app.windows {
 		window_apply_settings(app, window)
 	}
 }
 
 apply_text_gamma :: proc(app: ^App) {
-	gamma := font.text_gamma(app.fonts)
-	render.set_text_gamma(
-		app.device,
-		{gamma = gamma.gamma, enhanced_contrast = gamma.enhanced_contrast},
-	)
+	render.set_text_gamma(app.device, font.text_gamma(app.fonts))
 }

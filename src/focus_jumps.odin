@@ -1,6 +1,6 @@
 package main
 
-import platform_api "aio:platform"
+import "aio:input"
 
 // Pane focus as a jump list, like an editor's back and forward. Entries are session ids, so a pane
 // keeps its place as it moves between tabs, workspaces and windows.
@@ -13,7 +13,7 @@ Focus_Jumps :: struct {
 	index: int,
 	// The window the user last worked in. It is tracked here rather than read from window focus
 	// events, which arrive a tick after a jump asks for activation.
-	window: platform_api.Window_Id,
+	window: input.Window_Id,
 }
 
 focus_jumps_destroy :: proc(j: ^Focus_Jumps) {
@@ -64,11 +64,19 @@ focus_jumps_track :: proc(app: ^App) {
 	if entry := focused_session(app, w); entry != nil {focus_jumps_note(&app.focus_jumps, entry.id)}
 }
 
+// A destroyed window never reports losing focus, so the jump list moves on to the window the user is
+// in now.
+focus_jumps_window_closed :: proc(app: ^App, id: input.Window_Id) {
+	if app.focus_jumps.window != id {return}
+	next := window_focused_or_recent(app)
+	app.focus_jumps.window = next != nil ? next.id : 0
+}
+
 @(private)
 focus_jump_reachable :: proc(data: rawptr, session: u32) -> bool {
 	app := (^App)(data)
 	if session_find(app, session) == nil {return false}
-	workspace := status_workspace_of(app, session)
+	workspace := session_workspace(app, session)
 	return workspace != nil && workspace_eligible(app, workspace)
 }
 
@@ -76,14 +84,10 @@ focus_jump_reachable :: proc(data: rawptr, session: u32) -> bool {
 focus_jump :: proc(app: ^App, w: ^Window, step: int) {
 	session, ok := focus_jumps_step(&app.focus_jumps, step, focus_jump_reachable, app)
 	if !ok {return}
-	target := window_for_workspace(app, status_workspace_of(app, session))
-	if target == nil {target = w}
+	target := session_window(app, session, w)
 	if target != w && !window_activate(app, target) {return}
-	if !status_reveal(app, target, session) {
-		notify(app, .Error, "Could not show that pane.")
-		return
-	}
-	if owner := window_for_workspace(app, status_workspace_of(app, session)); owner != nil {
+	if !session_show(app, target, session) {return}
+	if owner := window_for_workspace(app, session_workspace(app, session)); owner != nil {
 		app.focus_jumps.window = owner.id
 	}
 }

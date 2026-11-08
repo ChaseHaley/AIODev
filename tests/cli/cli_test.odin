@@ -59,30 +59,18 @@ wait_needs_one_condition :: proc(t: ^testing.T) {
 }
 
 @(test)
-requests_carry_caller_and_format :: proc(t: ^testing.T) {
+requests_carry_caller_format_and_directory :: proc(t: ^testing.T) {
 	o, _ := cli.parse_options({"--json", "pane.send", "--enter", "hi"}, "")
-	request := cli.request(o, "12", context.temp_allocator)
-	testing.expect_value(t, len(request), 5)
-	expected := [?]string{"12", "json", "pane.send", "--enter", "hi"}
+	request := cli.request(o, "12", `C:\work`, context.temp_allocator)
+	testing.expect_value(t, len(request), 6)
+	expected := [?]string{"12", "json", `C:\work`, "pane.send", "--enter", "hi"}
 	for item, i in expected {testing.expect_value(t, request[i], item)}
 	help, _ := cli.parse_options({"help", "pane.split"}, "")
-	asked := cli.request(help, "", context.temp_allocator)
-	testing.expect_value(t, len(asked), 4)
+	asked := cli.request(help, "", "", context.temp_allocator)
+	testing.expect_value(t, len(asked), 5)
 	testing.expect_value(t, asked[1], "text")
-	testing.expect_value(t, asked[2], "app.commands")
-	testing.expect_value(t, asked[3], "pane.split")
+	testing.expect_value(t, asked[3], "app.commands")
+	testing.expect_value(t, asked[4], "pane.split")
 	listing, _ := cli.parse_options({"commands"}, "")
-	testing.expect_value(t, cli.request(listing, "", context.temp_allocator)[2], "app.commands")
-}
-
-@(test)
-a_relative_markdown_file_becomes_absolute_before_it_is_sent :: proc(t: ^testing.T) {
-	args := []string{"pane.open_markdown", "--direction", "down", "--focus", `docs\plan.md`}
-	result := cli.absolute_file_argument(args, `C:\work`, context.temp_allocator)
-	testing.expect_value(t, result[2], "down")
-	testing.expect_value(t, result[4], `C:\work\docs\plan.md`)
-	absolute := []string{"pane.open_markdown", `D:\plan.md`}
-	testing.expect_value(t, cli.absolute_file_argument(absolute, `C:\work`, context.temp_allocator)[1], `D:\plan.md`)
-	other := []string{"pane.send", `docs\plan.md`}
-	testing.expect_value(t, cli.absolute_file_argument(other, `C:\work`, context.temp_allocator)[1], `docs\plan.md`)
+	testing.expect_value(t, cli.request(listing, "", "", context.temp_allocator)[3], "app.commands")
 }

@@ -1,6 +1,5 @@
 package ui
 
-import "aio:glyphs"
 import "aio:render"
 import "core:math"
 
@@ -17,11 +16,13 @@ Status_Glyph :: enum u8 {
 	Error,
 }
 
-// Progress is -1 when the program reported none. Dim marks finished work the user has seen.
+// Progress is -1 when the program reported none. Dim marks finished work the user has seen. Urgent
+// inks the state's words in its colour rather than muted.
 Status_Mark :: struct {
 	glyph:    Status_Glyph,
 	progress: i8,
 	dim:      bool,
+	urgent:   bool,
 }
 
 @(private)
@@ -43,10 +44,6 @@ status_color :: proc(theme: Theme, glyph: Status_Glyph) -> render.Color {
 	return theme.faint
 }
 
-status_blocked :: proc(glyph: Status_Glyph) -> bool {
-	return glyph == .Blocked || glyph == .Permission || glyph == .Question || glyph == .Auth
-}
-
 // Draws the mark centered in `area`. `phase` in [0, 1) places the working spinner's dot, so a
 // caller that never advances it draws a still spinner.
 status_glyph_draw :: proc(
@@ -57,7 +54,7 @@ status_glyph_draw :: proc(
 	mark: Status_Mark,
 	phase: f32,
 	scale: f32,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if mark.glyph == .None {return .Ok}
 	size := min(area.width, area.height)
 	if size <= 2 * scale {return .Ok}
@@ -92,7 +89,7 @@ status_glyph_draw :: proc(
 		text_set_size(&symbol, size * 0.72) // design-exempt: a glyph drawn as part of the status mark
 		paper := theme.window
 		if mark.glyph == .Auth && text.has_icons {
-			return draw_icon(text, list, STATUS_LOCK_ICON, r, paper, 0.95)
+			return draw_icon(text, list, STATUS_LOCK_ICON, r, paper, r.height * 0.57)
 		}
 		glyph: rune
 		#partial switch mark.glyph {
@@ -123,42 +120,4 @@ status_progress_draw :: proc(
 	done.width = track.width * f32(mark.progress) / 100
 	if done.width <= 0 {return}
 	draw_rect(list, {rect = done, color = status_color(theme, mark.glyph), radius = height / 2})
-}
-
-// A short label for the state: what a blocked program needs, or a percentage while working.
-status_headline :: proc(mark: Status_Mark, buffer: []u8) -> string {
-	switch mark.glyph {
-	case .None:
-		return ""
-	case .Idle:
-		return "Idle"
-	case .Working:
-		if mark.progress >= 0 && len(buffer) >= 4 {
-			n := int(mark.progress)
-			i := len(buffer)
-			i -= 1
-			buffer[i] = '%'
-			for {
-				i -= 1
-				buffer[i] = u8('0' + n % 10)
-				n /= 10
-				if n == 0 {break}
-			}
-			return string(buffer[i:])
-		}
-		return "Working"
-	case .Blocked:
-		return "Needs you"
-	case .Permission:
-		return "Needs permission"
-	case .Question:
-		return "Has a question"
-	case .Auth:
-		return "Needs sign-in"
-	case .Done:
-		return "Done"
-	case .Error:
-		return "Failed"
-	}
-	return ""
 }

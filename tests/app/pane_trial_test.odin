@@ -30,7 +30,7 @@ trial_committed_rect :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window,
 	tree: ^layout.Layout, node: layout.Node_Id) -> layout.Rect {
 	rects := make([dynamic]layout.Pane_Rect)
 	defer delete(rects)
-	layout.compute(tree, app.window_content_area(state, w), app.window_gap(state, w), &rects, false)
+	layout.compute(tree, app.window_content_area(state, w), app.window_gap(state, w), &rects)
 	for pane in rects {if pane.node == node {return pane.rect}}
 	testing.expect(t, false)
 	return {}
@@ -43,21 +43,24 @@ pane_trial_split_is_detached_and_matches_committed_geometry :: proc(t: ^testing.
 			for zoomed in ([?]bool{false, true}) {
 				for direction in layout.Direction {
 					for ratio in ([?]f32{0.05, 0.3, 0.5, 0.95}) {
-						tree: layout.Layout
-						if !testing.expect_value(t, layout.init(&tree, {.Terminal, 1}), nil) {return}
-						defer layout.destroy(&tree)
-						right, _ := layout.split_direction(&tree, 0, .Right, 0.6, {.Terminal, 2})
+						tab: app.Tab
+						tree := &tab.tree
+						if !testing.expect_value(t, layout.init(tree, {.Terminal, 1}), nil) {return}
+						defer layout.destroy(tree)
+						right, _ := layout.split_direction(tree, 0, .Right, 0.6, {.Terminal, 2})
 						tree.focus, tree.zoomed = right, zoomed
-						snapshot := trial_clone(&tree)
+						snapshot := trial_clone(tree)
 						defer layout.destroy(&snapshot)
 						workspace: app.Workspace
-						state := app.App{next_session_id = 2}
+						append(&workspace.tabs, &tab)
+						defer delete(workspace.tabs)
+						state: app.App
 						state.settings.pane.gap = gap
-						w := app.Window{tree = &tree, workspace = &workspace, scale = scale,
+						w := app.Window{workspace = &workspace, scale = scale,
 							width = i32(1000*scale), height = i32(650*scale)}
 						result := app.pane_trial_split(&state, &w, direction, ratio, context.allocator)
 						testing.expect_value(t, result.error, app.Pane_Trial_Error.None)
-						trial_unchanged(t, &tree, &snapshot)
+						trial_unchanged(t, tree, &snapshot)
 						added, err := layout.split_direction(&snapshot, right, direction, ratio, {.Terminal, 3})
 						testing.expect_value(t, err, nil)
 						testing.expect_value(t, result.rect, trial_committed_rect(t, &state, &w, &snapshot, added))
@@ -68,23 +71,47 @@ pane_trial_split_is_detached_and_matches_committed_geometry :: proc(t: ^testing.
 	}
 }
 
+// The trial of moving `node` of `source` beside `target` of `destination`, or along its edge.
+@(private = "file")
+trial_move :: proc(
+	state: ^app.App,
+	w: ^app.Window,
+	source, destination: ^app.Tab,
+	node, target: layout.Node_Id,
+	direction: layout.Direction,
+	root: bool,
+	allocator := context.allocator,
+) -> app.Pane_Trial_Result {
+	op := app.Pane_Operation {
+		place       = root ? .Edge : .Beside,
+		source      = source,
+		destination = destination,
+		node        = node,
+		target      = target,
+		slot        = layout.INVALID_NODE,
+		direction   = direction,
+	}
+	return app.pane_trial_operation(state, w, op, allocator)
+}
+
 @(test)
 pane_trial_move_dock_and_transfer_preserve_inputs_and_match_commit :: proc(t: ^testing.T) {
 	for mode in 0 ..< 4 {
 		for direction in layout.Direction {
 			for scale in ([?]f32{1, 1.5, 1.75}) {
 				for zoomed in ([?]bool{false, true}) {
-					source, destination: layout.Layout
-					testing.expect_value(t, layout.init(&source, {.Terminal, 1}), nil)
-					defer layout.destroy(&source)
-					right, _ := layout.split_direction(&source, 0, .Right, 0.5, {.Terminal, 2})
-					_, _ = layout.split_direction(&source, right, .Down, 0.4, {.Terminal, 3})
-					testing.expect_value(t, layout.init(&destination, {.Terminal, 4}), nil)
-					defer layout.destroy(&destination)
-					_, _ = layout.split_direction(&destination, 0, .Down, 0.7, {.Terminal, 5})
+					source_tab, destination_tab: app.Tab
+					source, destination := &source_tab.tree, &destination_tab.tree
+					testing.expect_value(t, layout.init(source, {.Terminal, 1}), nil)
+					defer layout.destroy(source)
+					right, _ := layout.split_direction(source, 0, .Right, 0.5, {.Terminal, 2})
+					_, _ = layout.split_direction(source, right, .Down, 0.4, {.Terminal, 3})
+					testing.expect_value(t, layout.init(destination, {.Terminal, 4}), nil)
+					defer layout.destroy(destination)
+					_, _ = layout.split_direction(destination, 0, .Down, 0.7, {.Terminal, 5})
 					source.focus, source.zoomed = right, zoomed
 					destination.zoomed = zoomed
-					before_source, before_destination := trial_clone(&source), trial_clone(&destination)
+					before_source, before_destination := trial_clone(source), trial_clone(destination)
 					defer layout.destroy(&before_source)
 					defer layout.destroy(&before_destination)
 					workspace: app.Workspace
@@ -92,12 +119,11 @@ pane_trial_move_dock_and_transfer_preserve_inputs_and_match_commit :: proc(t: ^t
 					state.settings.pane.gap = 5
 					w := app.Window{workspace = &workspace, scale = scale,
 						width = i32(1000*scale), height = i32(650*scale)}
-					dest := mode < 2 ? &source : &destination
-					result := app.pane_trial_move(&state, &w, &source, dest, right, 0,
-						direction, mode%2 == 1, context.allocator)
+					dest := mode < 2 ? &source_tab : &destination_tab
+					result := trial_move(&state, &w, &source_tab, dest, right, 0, direction, mode%2 == 1)
 					testing.expect_value(t, result.error, app.Pane_Trial_Error.None)
-					trial_unchanged(t, &source, &before_source)
-					trial_unchanged(t, &destination, &before_destination)
+					trial_unchanged(t, source, &before_source)
+					trial_unchanged(t, destination, &before_destination)
 					added := layout.INVALID_NODE
 					moved := false
 					committed := &before_source
@@ -112,8 +138,7 @@ pane_trial_move_dock_and_transfer_preserve_inputs_and_match_commit :: proc(t: ^t
 					testing.expect_value(t, result.rect, trial_committed_rect(t, &state, &w, committed, added))
 					retained := result.rect
 					state.settings.pane.gap = 24
-					_ = app.pane_trial_move(&state, &w, &source, dest, right, 0,
-						direction, mode%2 == 1, context.allocator)
+					_ = trial_move(&state, &w, &source_tab, dest, right, 0, direction, mode%2 == 1)
 					testing.expect_value(t, result.rect, retained)
 				}
 			}
@@ -124,7 +149,7 @@ pane_trial_move_dock_and_transfer_preserve_inputs_and_match_commit :: proc(t: ^t
 @(test)
 pane_trial_minimum_keeps_unchanged_exemption_and_process_header_dpi_policy :: proc(t: ^testing.T) {
 	for scale in ([?]f32{1, 1.5, 1.75}) {
-		state := app.App{next_session_id = 2}
+		state: app.App
 		ui.notices_init(&state.notices)
 		defer ui.notices_destroy(&state.notices)
 		state.settings.window.padding = 8
@@ -133,16 +158,20 @@ pane_trial_minimum_keeps_unchanged_exemption_and_process_header_dpi_policy :: pr
 		state.sessions = make([dynamic]app.Session_Entry)
 		defer delete(state.sessions)
 		append(&state.sessions, app.Session_Entry{id = 2})
-		tree: layout.Layout
-		testing.expect_value(t, layout.init(&tree, {.Terminal, 1}), nil)
-		defer layout.destroy(&tree)
-		right, _ := layout.split_direction(&tree, 0, .Right, 0.9, {.Terminal, 2})
+		tab: app.Tab
+		tree := &tab.tree
+		testing.expect_value(t, layout.init(tree, {.Terminal, 1}), nil)
+		defer layout.destroy(tree)
+		right, _ := layout.split_direction(tree, 0, .Right, 0.9, {.Terminal, 2})
 		tree.focus, tree.zoomed = right, true
 		workspace: app.Workspace
-		w := app.Window{tree = &tree, workspace = &workspace, scale = scale,
+		append(&workspace.tabs, &tab)
+		defer delete(workspace.tabs)
+		w := app.Window{workspace = &workspace, scale = scale,
 			width = i32(1000*scale), height = i32(650*scale),
-			metrics = {cell_width = 10*scale, cell_height = 20*scale}}
-		snapshot := trial_clone(&tree)
+			metrics = {cell_width = 10*scale, cell_height = 20*scale},
+			header_height = app.pane_header_row_height(&state, scale)}
+		snapshot := trial_clone(tree)
 		defer layout.destroy(&snapshot)
 		// The narrow left pane is already below 40 columns and does not shrink.
 		result := app.pane_trial_split(&state, &w, .Down, 0.5, context.allocator)
@@ -157,6 +186,8 @@ pane_trial_minimum_keeps_unchanged_exemption_and_process_header_dpi_policy :: pr
 		testing.expect_value(t, app.pane_trial_split(&state, &w, .Down, 0.5,
 			context.allocator).error, app.Pane_Trial_Error.Minimum)
 		state.settings.pane.show_headers = false
+		// Panes follow the header setting once relayout caches it.
+		w.header_height = app.pane_header_row_height(&state, scale)
 		testing.expect_value(t, app.pane_trial_split(&state, &w, .Down, 0.5,
 			context.allocator).error, app.Pane_Trial_Error.None)
 		state.settings.window.padding = 80
@@ -165,7 +196,7 @@ pane_trial_minimum_keeps_unchanged_exemption_and_process_header_dpi_policy :: pr
 		state.settings.pane.minimum_rows = 0
 		testing.expect_value(t, app.pane_trial_split(&state, &w, .Down, 0.5,
 			context.allocator).error, app.Pane_Trial_Error.None)
-		trial_unchanged(t, &tree, &snapshot)
+		trial_unchanged(t, tree, &snapshot)
 	}
 }
 
@@ -174,36 +205,37 @@ pane_trial_move_minimum_and_invalid_operations_are_detached :: proc(t: ^testing.
 	state: app.App
 	state.settings.pane.minimum_columns = 1000
 	state.settings.pane.minimum_rows = 1000
-	source, destination: layout.Layout
-	testing.expect_value(t, layout.init(&source, {.Terminal, 1}), nil)
-	defer layout.destroy(&source)
-	_, _ = layout.split_direction(&source, 0, .Right, 0.5, {.Terminal, 2})
-	testing.expect_value(t, layout.init(&destination, {.Terminal, 3}), nil)
-	defer layout.destroy(&destination)
-	before_source, before_destination := trial_clone(&source), trial_clone(&destination)
+	source_tab, destination_tab: app.Tab
+	source, destination := &source_tab.tree, &destination_tab.tree
+	testing.expect_value(t, layout.init(source, {.Terminal, 1}), nil)
+	defer layout.destroy(source)
+	_, _ = layout.split_direction(source, 0, .Right, 0.5, {.Terminal, 2})
+	testing.expect_value(t, layout.init(destination, {.Terminal, 3}), nil)
+	defer layout.destroy(destination)
+	before_source, before_destination := trial_clone(source), trial_clone(destination)
 	defer layout.destroy(&before_source)
 	defer layout.destroy(&before_destination)
 	workspace: app.Workspace
-	w := app.Window{tree = &source, workspace = &workspace, scale = 1, width = 1000, height = 650,
+	w := app.Window{workspace = &workspace, scale = 1, width = 1000, height = 650,
 		metrics = {cell_width = 10, cell_height = 20}}
 	for root in ([?]bool{false, true}) {
-		testing.expect_value(t, app.pane_trial_move(&state, &w, &source, &source, 0, 1,
-			.Down, root, context.allocator).error, app.Pane_Trial_Error.Minimum)
-		testing.expect_value(t, app.pane_trial_move(&state, &w, &source, &destination, 0, 0,
-			.Down, root, context.allocator).error, app.Pane_Trial_Error.Minimum)
+		testing.expect_value(t, trial_move(&state, &w, &source_tab, &source_tab, 0, 1, .Down, root).error,
+			app.Pane_Trial_Error.Minimum)
+		testing.expect_value(t, trial_move(&state, &w, &source_tab, &destination_tab, 0, 0, .Down, root).error,
+			app.Pane_Trial_Error.Minimum)
 	}
-	testing.expect_value(t, app.pane_trial_move(&state, &w, &source, &source, 0, 0,
-		.Right, false, context.allocator).error, app.Pane_Trial_Error.Invalid)
-	testing.expect_value(t, app.pane_trial_move(&state, &w, &source, &destination, layout.INVALID_NODE, 0,
-		.Right, true, context.allocator).error, app.Pane_Trial_Error.Invalid)
-	trial_unchanged(t, &source, &before_source)
-	trial_unchanged(t, &destination, &before_destination)
-	settings_tree: layout.Layout
-	testing.expect_value(t, layout.init(&settings_tree, {.Settings, 0}), nil)
-	defer layout.destroy(&settings_tree)
+	testing.expect_value(t, trial_move(&state, &w, &source_tab, &source_tab, 0, 0, .Right, false).error,
+		app.Pane_Trial_Error.Invalid)
+	testing.expect_value(t, trial_move(&state, &w, &source_tab, &destination_tab, layout.INVALID_NODE, 0,
+		.Right, true).error, app.Pane_Trial_Error.Invalid)
+	trial_unchanged(t, source, &before_source)
+	trial_unchanged(t, destination, &before_destination)
+	settings_tab: app.Tab
+	testing.expect_value(t, layout.init(&settings_tab.tree, {.Settings, 0}), nil)
+	defer layout.destroy(&settings_tab.tree)
 	// A terminal may join a settings tab; the 1000-cell minimum still refuses the trial.
-	testing.expect_value(t, app.pane_trial_move(&state, &w, &source, &settings_tree, 0, 0,
-		.Right, false, context.allocator).error, app.Pane_Trial_Error.Minimum)
+	testing.expect_value(t, trial_move(&state, &w, &source_tab, &settings_tab, 0, 0, .Right, false).error,
+		app.Pane_Trial_Error.Minimum)
 }
 
 @(private="file")
@@ -226,18 +258,21 @@ trial_fail_allocation :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, 
 @(test)
 pane_trial_allocation_failures_leave_inputs_and_return_no_geometry :: proc(t: ^testing.T) {
 	state: app.App
-	source, destination: layout.Layout
-	testing.expect_value(t, layout.init(&source, {.Terminal, 1}), nil)
-	defer layout.destroy(&source)
-	_, _ = layout.split_direction(&source, 0, .Right, 0.5, {.Terminal, 2})
-	testing.expect_value(t, layout.init(&destination, {.Terminal, 3}), nil)
-	defer layout.destroy(&destination)
+	source_tab, destination_tab: app.Tab
+	source, destination := &source_tab.tree, &destination_tab.tree
+	testing.expect_value(t, layout.init(source, {.Terminal, 1}), nil)
+	defer layout.destroy(source)
+	_, _ = layout.split_direction(source, 0, .Right, 0.5, {.Terminal, 2})
+	testing.expect_value(t, layout.init(destination, {.Terminal, 3}), nil)
+	defer layout.destroy(destination)
 	source.zoomed, destination.zoomed = true, true
-	before_source, before_destination := trial_clone(&source), trial_clone(&destination)
+	before_source, before_destination := trial_clone(source), trial_clone(destination)
 	defer layout.destroy(&before_source)
 	defer layout.destroy(&before_destination)
 	workspace: app.Workspace
-	w := app.Window{tree = &source, workspace = &workspace, scale = 1, width = 1000, height = 650}
+	append(&workspace.tabs, &source_tab)
+	defer delete(workspace.tabs)
+	w := app.Window{workspace = &workspace, scale = 1, width = 1000, height = 650}
 	for mode in 0 ..< 4 {
 		allocations := mode == 3 ? 4 : 3
 		for allowed in 0 ..= allocations {
@@ -246,13 +281,13 @@ pane_trial_allocation_failures_leave_inputs_and_return_no_geometry :: proc(t: ^t
 			result: app.Pane_Trial_Result
 			switch mode {
 			case 0: result = app.pane_trial_split(&state, &w, .Right, 0.5, allocator)
-			case 1, 2: result = app.pane_trial_move(&state, &w, &source, &source, 0, 1, .Down, mode == 2, allocator)
-			case 3: result = app.pane_trial_move(&state, &w, &source, &destination, 0, 0, .Down, true, allocator)
+			case 1, 2: result = trial_move(&state, &w, &source_tab, &source_tab, 0, 1, .Down, mode == 2, allocator)
+			case 3: result = trial_move(&state, &w, &source_tab, &destination_tab, 0, 0, .Down, true, allocator)
 			}
 			testing.expect_value(t, result.error, allowed == allocations ? app.Pane_Trial_Error.None : .Allocation)
 			if allowed < allocations {testing.expect_value(t, result.rect, layout.Rect{})}
-			trial_unchanged(t, &source, &before_source)
-			trial_unchanged(t, &destination, &before_destination)
+			trial_unchanged(t, source, &before_source)
+			trial_unchanged(t, destination, &before_destination)
 		}
 	}
 }

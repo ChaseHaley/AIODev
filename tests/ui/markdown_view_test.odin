@@ -225,7 +225,7 @@ matches_draw_in_find_colours_with_the_selected_one_distinct :: proc(t: ^testing.
 		background = {1, 0, 0, 1},
 		selected_background = {0, 1, 0, 1},
 	}
-	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme, find), glyphs.Result.Ok)
+	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme, find), render.Build_Status.Ok)
 	match_rect, selected_rect: render.Rect
 	match_count, selected_count := 0, 0
 	for rect in list.rects {
@@ -239,7 +239,7 @@ matches_draw_in_find_colours_with_the_selected_one_distinct :: proc(t: ^testing.
 
 	// Nothing active draws nothing extra.
 	render.draw_list_reset(&list)
-	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme), glyphs.Result.Ok)
+	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme), render.Build_Status.Ok)
 	for rect in list.rects {
 		testing.expect(t, rect.color != find.background && rect.color != find.selected_background)
 	}
@@ -269,7 +269,7 @@ only_the_hovered_link_is_underlined :: proc(t: ^testing.T) {
 	for hover, i in ([3]int{-1, 0, 1}) {
 		render.draw_list_reset(&list)
 		result := ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme, {}, hover)
-		testing.expect_value(t, result, glyphs.Result.Ok)
+		testing.expect_value(t, result, render.Build_Status.Ok)
 		for rect in list.rects {
 			if rect.color == theme.accent && rect.rect.height <= 1 {
 				underlines[i] += 1

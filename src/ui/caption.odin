@@ -1,10 +1,10 @@
 package ui
 
-import "aio:glyphs"
+import "aio:platform"
 import "aio:render"
 
-TITLE_BAR_HEIGHT :: f32(40)
-CAPTION_WIDTH :: f32(138)
+TITLE_BAR_HEIGHT :: f32(platform.TITLE_BAR_HEIGHT)
+CAPTION_WIDTH :: f32(platform.CAPTION_WIDTH)
 
 // The title chrome claims pointer input over this height for its caption controls. The
 // claim is hit before any floating surface placed after the chrome, so such a surface
@@ -14,9 +14,10 @@ caption_claim_height :: proc(scale: f32) -> f32 {
 	return TITLE_BAR_HEIGHT * scale
 }
 
-caption_hit :: proc(width, x, y, scale: f32) -> int {
-	if y < 0 || y >= caption_claim_height(scale) || x < width - CAPTION_WIDTH * scale || x >= width {return -1}
-	return clamp(int((x - width + CAPTION_WIDTH * scale) / (46 * scale)), 0, 2)
+caption_hit :: proc(width, x, y, scale: f32) -> Maybe(platform.Caption_Button) {
+	if y < 0 || y >= caption_claim_height(scale) || x < width - CAPTION_WIDTH * scale || x >= width {return nil}
+	index := int((x - width + CAPTION_WIDTH * scale) / (platform.CAPTION_BUTTON_WIDTH * scale))
+	return platform.Caption_Button(clamp(index, 0, len(platform.Caption_Button) - 1))
 }
 
 caption_draw :: proc(
@@ -24,22 +25,38 @@ caption_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	width, scale: f32,
-	hover, pressed: int,
+	hover, pressed: Maybe(platform.Caption_Button),
 	maximized: bool,
 	pointer: [2]f32 = {},
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if render.push_layer(list, {0, 0, width, TITLE_BAR_HEIGHT * scale}) != .None {return .Ok}
-	for i in 0 ..< 3 {
-		r := render.Rect{width - f32(3 - i) * 46 * scale, 0, 46 * scale, TITLE_BAR_HEIGHT * scale}
+	for button in platform.Caption_Button {
+		count := f32(len(platform.Caption_Button) - int(button))
+		r := render.Rect {
+			width - count * platform.CAPTION_BUTTON_WIDTH * scale,
+			0,
+			platform.CAPTION_BUTTON_WIDTH * scale,
+			TITLE_BAR_HEIGHT * scale,
+		}
 		ink := theme.text
-		if i == hover {
-			fill := i == pressed ? theme.pressed : theme.hover
-			if i == 2 {fill, ink = {0.77, 0.17, 0.11, 1}, {1, 1, 1, 1}}
+		hovered := hover != nil && hover.? == button
+		if hovered {
+			fill := pressed != nil && pressed.? == button ? theme.pressed : theme.hover
+			if button == .Close {fill, ink = {0.77, 0.17, 0.11, 1}, {1, 1, 1, 1}}
 			draw_rect(list, {rect = r, color = fill})
 		}
-		icon := ([3]rune{'\ue921', maximized ? '\ue923' : '\ue922', '\ue8bb'})[i]
-		if result := draw_icon(text, list, icon, r, ink, 0.4); result != .Ok {return result}
-		if i == hover {
+		icon: rune
+		switch button {
+		case .Minimize:
+			icon = '\ue921'
+		case .Maximize:
+			icon = maximized ? '\ue923' : '\ue922'
+		case .Close:
+			icon = '\ue8bb'
+		}
+		// The native caption glyphs at the size Windows draws them: 0.24 of the title-bar height.
+		if result := draw_icon(text, list, icon, r, ink, r.height * 0.24); result != .Ok {return result}
+		if hovered {
 			// The buttons are flush with the window edge and some carry a forced fill, so the
 			// paper hairline would read as a stray border.
 			if result := hover_rim_draw(list, theme, r, 0, 1, scale, pointer, false);

@@ -1,9 +1,12 @@
 package app_test
 
+import "aio:input"
 import "core:fmt"
+import "core:os"
+import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:layout"
 import "aio:platform"
 import "aio:term_view"
@@ -27,6 +30,8 @@ when app.AIO_CONTROL {
 		state.settings.status.panel_width = 192
 		for scale in ([?]f32{1, 1.1, 1.5, 2}) {
 			w.scale = scale
+			// What relayout would cache for this scale and the header setting.
+			w.header_height = app.pane_header_row_height(&state, scale)
 			w.metrics = term_view.Metrics{cell_width = 9.2 * scale, cell_height = 20 * scale}
 			for horizontal in ([?]bool{false, true}) {
 				w.tabs_horizontal = horizontal
@@ -43,14 +48,14 @@ when app.AIO_CONTROL {
 								case 1: w.rail = nil
 								case 2: rail_show(&w)
 								}
-								if !testing.expect_value(t, app.verify_drive(&state, control.Resize{columns, 24}),
-									control.Error.None) {continue}
+								if !testing.expect_value(t, app.verify_drive(&state, verify_protocol.Resize{columns, 24}),
+									verify_protocol.Error.None) {continue}
 								width, height, size_error := platform.window_client_size(&state.platform, id)
 								testing.expect_value(t, size_error, platform.Error.None)
 								w.width, w.height = width, height
 								app.rail_adaptive_update(&w)
 								box := app.pane_box(w.metrics, app.window_content_area(&state, &w),
-									app.pane_insets(&state, scale, nil))
+									app.pane_insets(&state, &w, nil))
 								testing.expect_value(t, box.columns, u16(columns))
 								testing.expect_value(t, box.rows, u16(24))
 							}
@@ -70,11 +75,11 @@ when app.AIO_CONTROL {
 		append(&state.windows, &first, &second)
 		defer delete(state.windows)
 		testing.expect(t, app.verify_window(&state) == &first)
-		testing.expect_value(t, app.verify_drive(&state, control.Window_Select{22}), control.Error.None)
+		testing.expect_value(t, app.verify_drive(&state, verify_protocol.Window_Select{22}), verify_protocol.Error.None)
 		testing.expect(t, app.verify_window(&state) == &second)
 		testing.expect(t, first.focused && !second.focused)
-		testing.expect_value(t, app.verify_drive(&state, control.Window_Select{99}), control.Error.Invalid_Argument)
-		testing.expect_value(t, state.verify.target_window, platform.Window_Id(22))
+		testing.expect_value(t, app.verify_drive(&state, verify_protocol.Window_Select{99}), verify_protocol.Error.Invalid_Argument)
+		testing.expect_value(t, state.verify.target_window, input.Window_Id(22))
 		app.verify_end(&state.verify)
 		testing.expect(t, app.verify_window(&state) == &second)
 		state.verify.mouse_window, state.verify.buttons = second.id, {.Left}
@@ -85,8 +90,8 @@ when app.AIO_CONTROL {
 		testing.expect(t, !app.drag_held(&second))
 		ordered_remove(&state.windows, 1)
 		testing.expect(t, app.verify_window(&state) == &first)
-		testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))
-		testing.expect_value(t, state.verify.mouse_window, platform.Window_Id(0))
+		testing.expect_value(t, state.verify.target_window, input.Window_Id(0))
+		testing.expect_value(t, state.verify.mouse_window, input.Window_Id(0))
 		testing.expect(t, state.verify.buttons == {})
 		first.focused = false
 		testing.expect(t, app.verify_window(&state) == &first)
@@ -117,16 +122,14 @@ when app.AIO_CONTROL {
 		defer delete(first_workspace.tabs)
 		append(&second_workspace.tabs, &second_tab)
 		defer delete(second_workspace.tabs)
-		first := app.Window{id = first_id, workspace = &first_workspace, tree = &first_tab.tree,
-			focused = true, width = 160, height = 100}
-		second := app.Window{id = second_id, workspace = &second_workspace, tree = &second_tab.tree,
-			width = 240, height = 140}
+		first := app.Window{id = first_id, workspace = &first_workspace, focused = true, width = 160, height = 100}
+		second := app.Window{id = second_id, workspace = &second_workspace, width = 240, height = 140}
 		append(&state.windows, &first, &second)
 		defer delete(state.windows)
 		append(&state.workspaces, &first_workspace, &second_workspace)
 		defer delete(state.workspaces)
-		testing.expect_value(t, app.verify_drive(&state, control.Window_Select{u64(second_id)}), control.Error.None)
-		testing.expect_value(t, app.verify_drive(&state, control.Window_Move{{-320, -200}}), control.Error.None)
+		testing.expect_value(t, app.verify_drive(&state, verify_protocol.Window_Select{u64(second_id)}), verify_protocol.Error.None)
+		testing.expect_value(t, app.verify_drive(&state, verify_protocol.Window_Move{{-320, -200}}), verify_protocol.Error.None)
 		x, y, screen_error := platform.window_to_screen(&state.platform, second_id, -20, -10)
 		testing.expect_value(t, screen_error, platform.Error.None)
 		point, ok := app.verify_position(&state, &second, {int(x), int(y)}, false, true)
@@ -135,7 +138,7 @@ when app.AIO_CONTROL {
 		_, ok = app.verify_position(&state, &second, {-1, 0}, true)
 		testing.expect(t, !ok)
 		entries, state_error := app.verify_state(&state)
-		testing.expect_value(t, state_error, control.Error.None)
+		testing.expect_value(t, state_error, verify_protocol.Error.None)
 		testing.expect_value(t, app.verify_value(entries, "windows.count"), "2")
 		testing.expect_value(t, app.verify_value(entries, "window.id"), fmt.tprintf("%d", second_id))
 		testing.expect_value(t, app.verify_value(entries, "window.workspace_index"), "2")
@@ -153,13 +156,45 @@ when app.AIO_CONTROL {
 		testing.expect_value(t, app.verify_value(entries, "find.newer"), "")
 		state.verify.target_window = first_id
 		entries, state_error = app.verify_state(&state)
-		testing.expect_value(t, state_error, control.Error.None)
+		testing.expect_value(t, state_error, verify_protocol.Error.None)
 		testing.expect_value(t, app.verify_value(entries, "tab.1.id"), "101")
 		clear(&state.windows)
 		clear(&state.workspaces)
 		entries, state_error = app.verify_state(&state)
-		testing.expect_value(t, state_error, control.Error.None)
+		testing.expect_value(t, state_error, verify_protocol.Error.None)
 		testing.expect_value(t, app.verify_value(entries, "window.id"), "0")
 		testing.expect_value(t, app.verify_value(entries, "tabs.count"), "0")
+	}
+
+	// A drive names a changed key only when the state report writes it, so a misspelled key would
+	// silently report nothing. A running app with a terminal pane writes every one.
+	@(test)
+	verification_state_reports_every_changed_key :: proc(t: ^testing.T) {
+		directory, directory_error := os.make_directory_temp("", "aio-changed-*", context.allocator)
+		if !testing.expect_value(t, directory_error, nil) {return}
+		defer delete(directory)
+		defer testing.expect_value(t, os.remove(directory), nil)
+		path := strings.concatenate({directory, "/settings.ini"})
+		defer delete(path)
+		defer os.remove(path)
+		settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ncursor.blink = false\n"
+		if !testing.expect_value(t, os.write_entire_file(path, settings), nil) {return}
+		state := app.App{options = {data_dir = directory, inactive = true}}
+		state.app_id = fmt.aprintf("AIODev.Test.VerifyChangedKeys.%d", os.get_pid())
+		defer app.app_destroy(&state)
+		if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {
+			return
+		}
+		state.platform_ready = true
+		if !testing.expect(t, app.app_init(&state)) {return}
+		entries, state_error := app.verify_state(&state)
+		testing.expect_value(t, state_error, verify_protocol.Error.None)
+		for changed in app.CHANGED_KEYS {
+			found := false
+			for entry in entries {
+				if entry.key == changed.key {found = true; break}
+			}
+			testing.expectf(t, found, "changed key %q is missing from the state report", changed.key)
+		}
 	}
 }

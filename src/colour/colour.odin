@@ -1,5 +1,5 @@
 // Package colour owns the colour value: three opaque RGB channels, one hex digit grammar, the
-// canonical formatter, the alpha report and the float and HSV conversions.
+// canonical formatter, the alpha report, the float and HSV conversions and WCAG contrast.
 //
 // The settings file and the control attribute reader accept the canonical `#rrggbb` text alone; a
 // person may paste more, so both accept sets are explicit policies over the same grammar. `alpha`

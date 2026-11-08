@@ -25,7 +25,6 @@ Server :: struct {
 	// The last request id handed out. Every earlier id, and this one once the slot empties, has
 	// been delivered or abandoned.
 	serial:             u64,
-	raw:                bool,
 }
 
 // The one request in flight between the server thread and the app; nil is empty. The procs that
@@ -145,24 +144,16 @@ security_descriptor :: proc(allocator: runtime.Allocator) -> (w.PSECURITY_DESCRI
 	return descriptor, .None
 }
 
-// A raw server delivers each request's arguments unparsed; otherwise it answers verification grammar
-// errors itself.
+// The server delivers each request's arguments unparsed; the app answers every request, including
+// malformed ones, in its own protocol's words.
 @(require_results)
-create :: proc(
-	name: string,
-	wake: Wake,
-	allocator := context.allocator,
-	raw := false,
-) -> (
-	^Server,
-	Error,
-) {
+create :: proc(name: string, wake: Wake, allocator := context.allocator) -> (^Server, Error) {
 	if !valid_pipe_name(name) {
 		return nil, .Invalid_Argument
 	}
 	s, allocation_error := new(Server, allocator)
 	if allocation_error != nil {return nil, .Out_Of_Memory}
-	s.allocator, s.wake, s.raw = allocator, wake, raw
+	s.allocator, s.wake = allocator, wake
 	ok := false
 	defer if !ok {
 		destroy(s)
@@ -461,39 +452,9 @@ serve_client :: proc(s: ^Server) -> Error {
 			s.allocator,
 		)
 		if read_error != .None {return read_error}
-		m, decode_error := decode_request(data, s.raw, s.allocator)
+		m, decode_error := decode_request(data, s.allocator)
 		delete(data, s.allocator)
 		if decode_error != .None {return decode_error}
-		if m.parse_error.advice != "" {
-			text := strings.builder_make(s.allocator)
-			writer := Writer {
-				out = &text,
-			}
-			quoted(&writer, m.parse_error.argument)
-			put(&writer, ": ")
-			put(&writer, m.parse_error.advice)
-			message_destroy(m)
-			if writer.error != .None {
-				strings.builder_destroy(&text)
-				return writer.error
-			}
-			response, encode_error := encode_response(
-				Response{ok = false, text = strings.to_string(text)},
-				s.allocator,
-			)
-			strings.builder_destroy(&text)
-			if encode_error != .None {return encode_error}
-			write_error := write_line(
-				s.pipe,
-				response,
-				s.stop,
-				time.tick_now(),
-				SERVER_IO_TIMEOUT_MS,
-			)
-			delete(response, s.allocator)
-			if write_error != .None {return write_error}
-			continue
-		}
 		slot_queue(s, m)
 		if s.wake.procedure != nil {
 			s.wake.procedure(s.wake.user)

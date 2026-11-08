@@ -34,6 +34,10 @@ Style :: struct {
 Frame :: struct {
 	background:      render.Color,
 	cursor_blinking: bool,
+	// What reading the session did for this build. Anything but Updated drew the previously
+	// captured screen (a synchronized-output hold or a failed read), so the frame must not be
+	// cached as any generation; a hold also says when to draw again.
+	capture:         term.Capture_Result,
 }
 
 View :: struct {
@@ -49,7 +53,6 @@ View :: struct {
 	columns:    [dynamic]int,
 	shaped:     [dynamic]font.Shaped_Glyph,
 	contrast:   Contrast_Cache,
-	links:      term.Link_Map,
 	images:     term.Image_Capture,
 }
 
@@ -62,8 +65,7 @@ create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	v.runes = make([dynamic]rune, allocator)
 	v.columns = make([dynamic]int, allocator)
 	v.shaped = make([dynamic]font.Shaped_Glyph, allocator)
-	ok := term.link_map_create(&v.links, allocator)
-	ok &&= ghostty.render_state_new(nil, &v.state) == .Success
+	ok := ghostty.render_state_new(nil, &v.state) == .Success
 	ok &&= ghostty.render_state_row_iterator_new(nil, &v.rows) == .Success
 	ok &&= ghostty.render_state_row_cells_new(nil, &v.cells) == .Success
 	ok &&= term.image_capture_create(&v.images, allocator)
@@ -77,7 +79,6 @@ destroy :: proc(v: ^View) {
 	ghostty.render_state_row_cells_free(v.cells)
 	ghostty.render_state_row_iterator_free(v.rows)
 	ghostty.render_state_free(v.state)
-	term.link_map_destroy(&v.links)
 	term.image_capture_destroy(&v.images)
 	delete(v.codepoints)
 	delete(v.highlights)
@@ -87,16 +88,6 @@ destroy :: proc(v: ^View) {
 	delete(v.columns)
 	delete(v.shaped)
 	v^ = {}
-}
-
-// links_refresh rescans only when the terminal changed since the last scan. Hover hit-testing
-// then reads the stored spans without touching libghostty.
-@(require_results)
-links_refresh :: proc(v: ^View, s: ^term.Session) -> bool {
-	if v.links.valid && v.links.generation == term.generation(s) {
-		return true
-	}
-	return term.link_map_scan(&v.links, s)
 }
 
 // Cell size comes from the regular face's advance and line metrics, rounded to whole pixels so
@@ -171,6 +162,9 @@ Builder :: struct {
 	rows:              int,
 	// The cursor sits on a wide cluster, so it covers two cells.
 	cursor_wide:       bool,
+	// The cell the cursor draws from: on a wide cluster the head, even if it reports the tail.
+	cursor_column:     int,
+	cursor_color:      render.Color,
 	// Below-text images took a pass of their own for the backgrounds that go under them.
 	backgrounds_drawn: bool,
 }
@@ -208,10 +202,10 @@ build :: proc(
 	style: Style,
 ) -> (
 	Frame,
-	glyphs.Result,
+	render.Build_Status,
 ) {
 	if list.error != .None {return {}, .Ok}
-	term.capture(session, v.state, &v.highlights, &v.images)
+	capture := term.capture(session, v.state, &v.highlights, &v.images)
 	b := Builder {
 		list    = list,
 		cache   = cache,
@@ -232,9 +226,13 @@ build :: proc(
 		return {}, .Ok
 	}
 	b.columns = int(columns)
+	b.cursor_column = int(b.cursor.viewport_x) - (b.cursor.wide_tail ? 1 : 0)
+	b.cursor_color =
+		b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
 	frame := Frame {
 		background      = color(b.colors.background),
 		cursor_blinking = b.cursor.visible && b.cursor.blinking,
+		capture         = capture,
 	}
 	has_images := len(v.images.placements) > 0
 	if has_images {
@@ -350,10 +348,7 @@ paint_cell :: proc(
 	}
 	if b.style.minimum_contrast > 1 && !p.style.invisible {
 		background := p.has_background ? p.background : color(b.colors.background)
-		if block_cursor_at(b, x, y) {
-			background =
-				b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
-		}
+		if block_cursor_at(b, x, y) {background = b.cursor_color}
 		p.foreground = minimum_contrast_cached(
 			&v.contrast,
 			p.foreground,
@@ -373,7 +368,7 @@ block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 		b.style.focused &&
 		b.style.cursor_phase_visible &&
 		c.visual_style == .Block &&
-		int(c.viewport_x) - (c.wide_tail ? 1 : 0) == x &&
+		b.cursor_column == x &&
 		int(c.viewport_y) == y \
 	)
 }
@@ -402,7 +397,7 @@ row_paints :: proc(v: ^View, b: ^Builder, y: int) {
 	}
 	c := b.cursor
 	if c.viewport_has_value && int(c.viewport_y) == y {
-		x := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
+		x := b.cursor_column
 		b.cursor_wide = c.wide_tail || (x >= 0 && x < len(v.paints) && v.paints[x].width == .Wide)
 	}
 }
@@ -438,7 +433,7 @@ row_backgrounds :: proc(v: ^View, b: ^Builder, top: f32) {
 }
 
 @(private)
-build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
+build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 	m := b.metrics
 	top := b.origin.y + f32(y) * m.cell_height
 	row_paints(v, b, y)
@@ -450,7 +445,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 		}
 	}
 	if hover, has := b.style.hover.?; has {
-		first, last := hover_columns(hover, y, b.columns)
+		first, last, _ := term.link_range_columns(hover, y, b.columns)
 		x := max(first, 0)
 		for x <= last && x < len(v.paints) {
 			p := v.paints[x]
@@ -543,23 +538,6 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> glyphs.Result {
 	return draw_run(v, b, face, top)
 }
 
-@(private, require_results)
-hover_columns :: proc(r: term.Link_Range, row, columns: int) -> (first, last: int) {
-	if row < r.first_row || row > r.last_row {
-		return 1, 0
-	}
-	if r.first_row == r.last_row {
-		return max(r.first_column, 0), min(r.last_column, columns - 1)
-	}
-	if row == r.first_row {
-		return max(r.first_column, 0), columns - 1
-	}
-	if row == r.last_row {
-		return 0, min(r.last_column, columns - 1)
-	}
-	return 0, columns - 1
-}
-
 @(private)
 cell_face :: proc(p: Cell_Paint) -> font.Style {
 	if p.style.bold && p.style.italic {return .Bold_Italic}
@@ -569,7 +547,7 @@ cell_face :: proc(p: Cell_Paint) -> font.Style {
 }
 
 @(private, require_results)
-draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
+draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> render.Build_Status {
 	if len(v.runes) == 0 {return .Ok}
 	clear(&v.shaped)
 	if err := font.shape(
@@ -632,7 +610,7 @@ draw_run :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Re
 }
 
 @(private, require_results)
-draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> glyphs.Result {
+draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> render.Build_Status {
 	for r, i in v.runes {
 		g, found := font.glyph_lookup(b.fonts, b.style.family, face, r)
 		if !found {continue}
@@ -650,7 +628,7 @@ draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> gl
 }
 
 @(private)
-decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> glyphs.Result {
+decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> render.Build_Status {
 	m := b.metrics
 	baseline := top + m.baseline
 	if p.style.strikethrough {
@@ -697,9 +675,8 @@ build_cursor :: proc(b: ^Builder) {
 		return
 	}
 	m := b.metrics
-	cursor_color := b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
-	// On a wide cluster the cursor covers both of its cells, from the head even if it reports the tail.
-	column := int(c.viewport_x) - (c.wide_tail ? 1 : 0)
+	cursor_color := b.cursor_color
+	column := b.cursor_column
 	cell := render.Rect {
 		b.origin.x + f32(column) * m.cell_width,
 		b.origin.y + f32(c.viewport_y) * m.cell_height,

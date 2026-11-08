@@ -205,3 +205,67 @@ Mouse_Button :: enum u8 {
 }
 
 Mouse_Buttons :: bit_set[Mouse_Button;u8]
+
+@(require_results)
+is_modifier_key :: proc(key: Key) -> bool {
+	#partial switch key {
+	case .Shift_Left,
+	     .Shift_Right,
+	     .Control_Left,
+	     .Control_Right,
+	     .Alt_Left,
+	     .Alt_Right,
+	     .Meta_Left,
+	     .Meta_Right,
+	     .Caps_Lock,
+	     .Num_Lock:
+		return true
+	}
+	return false
+}
+
+Window_Id :: distinct u64
+
+// The OS key record a key event came from, kept whole for ConPTY's win32-input mode.
+Native_Key :: struct {
+	vk, scan_code:     u16,
+	char:              u16,
+	control_key_state: u32,
+	repeat_count:      u16,
+}
+
+Key_Event :: struct {
+	window:          Window_Id,
+	key:             Key,
+	modifiers:       Modifiers,
+	pressed, repeat: bool,
+	text:            string,
+	unshifted:       rune,
+	native:          Native_Key,
+}
+Text_Event :: struct {
+	window: Window_Id,
+	text:   string,
+}
+Mouse_Button_Event :: struct {
+	window:    Window_Id,
+	button:    Mouse_Button,
+	pressed:   bool,
+	x, y:      i32,
+	modifiers: Modifiers,
+	time_ns:   i64,
+}
+Mouse_Move_Event :: struct {
+	window:    Window_Id,
+	x, y:      i32,
+	buttons:   Mouse_Buttons,
+	modifiers: Modifiers,
+	time_ns:   i64,
+}
+Mouse_Wheel_Event :: struct {
+	window:           Window_Id,
+	x, y:             i32,
+	delta_x, delta_y: f32,
+	modifiers:        Modifiers,
+	time_ns:          i64,
+}

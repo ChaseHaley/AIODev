@@ -1,118 +1,247 @@
 package main
 
+import "aio:input"
 import "aio:layout"
+import "aio:render"
 import "aio:ui"
 import "core:fmt"
+import "core:log"
 import "core:math"
 
-RAIL_DIVIDER :: layout.Node_Id(max(u32) - 1)
-ACTIVITY_DIVIDER :: layout.Node_Id(max(u32) - 2)
-// The edge between the tab list and an activity panel sharing the rail.
-ACTIVITY_HEIGHT_DIVIDER :: layout.Node_Id(max(u32) - 3)
+// The edges of the docked chrome the pointer drags: the Activity panel's top where it shares the rail,
+// its side beside the panes, and the rail's side. Declared in hit order, ahead of the layout's dividers.
+Dock_Edge :: enum u8 {
+	Activity_Height,
+	Activity_Width,
+	Rail_Width,
+}
+
+@(private = "file", rodata)
+DOCK_EDGE_AXIS := [Dock_Edge]layout.Axis {
+	.Activity_Height = .Vertical,
+	.Activity_Width  = .Horizontal,
+	.Rail_Width      = .Horizontal,
+}
+
+// The setting that names each edge's default size.
+@(private = "file", rodata)
+DOCK_EDGE_SETTING := [Dock_Edge]string {
+	.Activity_Height = "status.panel_height",
+	.Activity_Width  = "status.panel_width",
+	.Rail_Width      = "tabs.rail_width",
+}
+
+// The dock edges a window shows, in hit order: `bars[i]` is where `edges[i]` lies.
+Dock_Edges_Shown :: struct {
+	edges: [len(Dock_Edge)]Dock_Edge,
+	bars:  [len(Dock_Edge)]layout.Edge,
+	count: int,
+}
 
 window_dividers :: proc(app: ^App, w: ^Window) {
-	if w.tree == nil {return}
-	area, gap := window_content_area(app, w), window_gap(app, w)
-	if pane_view_solo(w) {clear(&w.dividers)} else {layout.dividers(w.tree, area, gap, &w.dividers)}
-	layout.floats_dividers(w.tree, floating_area(w), gap, floating_header_height(w), &w.dividers)
-	if rail_visible(w) {
-		r := rail_resize_rect(w)
-		d := layout.Divider{node = RAIL_DIVIDER, axis = .Horizontal,
-			rect = {r.x + 3 * w.scale, r.y, max(1, gap), r.height}}
-		inject_at(&w.dividers, 0, d)
-	}
-	if status_panel_in_rail(app, w) {
-		r := status_panel_rect(app, w)
-		d := layout.Divider{node = ACTIVITY_HEIGHT_DIVIDER, axis = .Vertical,
-			rect = {r.x, r.y, r.width, max(1, w.scale)}}
-		inject_at(&w.dividers, 0, d)
-	} else if status_panel_visible(app, w) {
-		r := status_panel_rect(app, w)
-		x := app.settings.status.panel_side == .Left ? r.x + r.width : r.x - gap
-		d := layout.Divider{node = ACTIVITY_DIVIDER, axis = .Horizontal,
-			rect = {x, r.y, max(1, gap), r.height}}
-		inject_at(&w.dividers, 0, d)
+	tree := window_tree(w)
+	if tree == nil {return}
+	g := window_geometry(app, w, w.pane_fill)
+	layout.dividers_shown(tree, g, pane_view_solo(w), &w.dividers)
+	w.dock_edges = {}
+	for edge in Dock_Edge {
+		rect, shown := dock_edge_rect(app, w, edge, g.gap)
+		if !shown {continue}
+		shown_edges := &w.dock_edges
+		shown_edges.edges[shown_edges.count] = edge
+		shown_edges.bars[shown_edges.count] = {DOCK_EDGE_AXIS[edge], rect}
+		shown_edges.count += 1
 	}
 }
 
-dock_divider :: proc(node: layout.Node_Id) -> bool {
-	return node == RAIL_DIVIDER || node == ACTIVITY_DIVIDER || node == ACTIVITY_HEIGHT_DIVIDER
+// The bar a dock edge shows as, a pane gap wide, while the edge shows.
+@(private = "file")
+dock_edge_rect :: proc(app: ^App, w: ^Window, edge: Dock_Edge, gap: f32) -> (layout.Rect, bool) {
+	switch edge {
+	case .Activity_Height:
+		if !status_panel_in_rail(app, w) {return {}, false}
+		r := status_panel_rect(app, w)
+		return {r.x, r.y, r.width, max(1, w.scale)}, true
+	case .Activity_Width:
+		if status_panel_in_rail(app, w) || !status_panel_visible(app, w) {return {}, false}
+		r := status_panel_rect(app, w)
+		x := app.settings.status.panel_side == .Left ? r.x + r.width : r.x - gap
+		return {x, r.y, max(1, gap), r.height}, true
+	case .Rail_Width:
+		if w.phase == .Preparing || !rail_visible(w) {return {}, false}
+		area := rail_area(w)
+		return {area.x + area.width, area.y, max(1, gap), area.height}, true
+	}
+	return {}, false
+}
+
+// The pointer coordinate a dock edge follows on its own axis.
+dock_edge_along :: proc(edge: Dock_Edge, x, y: f32) -> f32 {
+	return DOCK_EDGE_AXIS[edge] == .Vertical ? y : x
 }
 
 // Where a dock edge sits on its own axis: x for the side edges, y for the panel's top in the rail.
-dock_divider_position :: proc(app: ^App, w: ^Window, node: layout.Node_Id) -> f32 {
-	switch node {
-	case RAIL_DIVIDER:
-		return rail_area(w).x + rail_width_pixels(w)
-	case ACTIVITY_HEIGHT_DIVIDER:
+dock_edge_position :: proc(app: ^App, w: ^Window, edge: Dock_Edge) -> f32 {
+	switch edge {
+	case .Activity_Height:
 		return status_panel_rect(app, w).y
+	case .Activity_Width:
+		width := status_panel_dock_width(app, w)
+		return app.settings.status.panel_side == .Left ? width : f32(w.width) - width
+	case .Rail_Width:
+		return rail_area(w).x + rail_width_pixels(w)
 	}
-	width := status_panel_dock_width(app, w)
-	return app.settings.status.panel_side == .Left ? width : f32(w.width) - width
+	return 0
 }
 
-dock_divider_drag :: proc(app: ^App, w: ^Window, node: layout.Node_Id, position: f32) {
-	if node == ACTIVITY_HEIGHT_DIVIDER {
+dock_edge_drag :: proc(app: ^App, w: ^Window, edge: Dock_Edge, position: f32) {
+	switch edge {
+	case .Activity_Height:
 		area := rail_area(w)
 		if area.height <= 0 {return}
 		height := status_panel_rail_clamp(w, area.y + area.height - position)
 		w.status.panel_height = height / area.height
-		return
+	case .Activity_Width:
+		width := app.settings.status.panel_side == .Right ? f32(w.width) - position : position
+		available := f32(w.width) - (rail_docked(w) ? rail_width_pixels(w) : 0)
+		w.status.panel_width = ui.rail_pixel_width(w.scale, width / w.scale, available) / w.scale
+	case .Rail_Width:
+		width := position - rail_area(w).x
+		w.rail_width = ui.rail_pixel_width(w.scale, width / w.scale, f32(w.width)) / w.scale
 	}
-	width := position
-	if node == RAIL_DIVIDER {width -= rail_area(w).x}
-	if node == ACTIVITY_DIVIDER && app.settings.status.panel_side == .Right {width = f32(w.width) - position}
-	available := f32(w.width)
-	if node == ACTIVITY_DIVIDER && rail_docked(w) {available -= rail_width_pixels(w)}
-	width = ui.rail_pixel_width(w.scale, width / w.scale, available) / w.scale
-	if node == RAIL_DIVIDER {w.rail_width = width} else {w.status.panel_width = width}
 }
 
 // Double-clicking a dock edge returns it to the size its setting names.
-dock_divider_reset :: proc(w: ^Window, node: layout.Node_Id) {
-	switch node {
-	case RAIL_DIVIDER:
-		w.rail_width = 0
-	case ACTIVITY_DIVIDER:
-		w.status.panel_width = 0
-	case ACTIVITY_HEIGHT_DIVIDER:
+dock_edge_reset :: proc(w: ^Window, edge: Dock_Edge) {
+	switch edge {
+	case .Activity_Height:
 		w.status.panel_height = 0
+	case .Activity_Width:
+		w.status.panel_width = 0
+	case .Rail_Width:
+		w.rail_width = 0
 	}
 }
 
+// What a dock edge's menu offers; each row's payload names one.
+Dock_Divider_Choice :: enum u32 {
+	Save_Default,
+}
+
+@(private = "file", rodata)
+DOCK_DIVIDER_CHOICE_LABELS := [Dock_Divider_Choice]string {
+	.Save_Default = "Set as Default Size",
+}
+
+dock_divider_menu_shown :: proc(w: ^Window) -> bool {
+	_, shown := w.overlay.(Overlay_Divider_Menu)
+	return shown
+}
+
 dock_divider_menu_open :: proc(app: ^App, w: ^Window, x, y: f32) {
-	hits: [4]layout.Divider
+	hits: [DIVIDER_HITS_MAX]Divider_Hit
 	count := divider_hits(w, x, y, hits[:])
 	for hit in hits[:count] {
-		if !dock_divider(hit.node) {continue}
+		edge := hit.target.(Dock_Edge) or_continue
 		if !gesture_cancel(app, w) {return}
-		overlay_open(app, w, Overlay_Divider_Menu{node = hit.node})
-		w.tab_menu = {count = 1, position = {x, y}}
+		overlay_open(app, w, Overlay_Divider_Menu{edge = edge})
+		menu := &w.divider_menu
+		ui.menu_clear(menu)
+		ui.menu_anchor(menu, x, y)
+		for choice in Dock_Divider_Choice {
+			label := DOCK_DIVIDER_CHOICE_LABELS[choice]
+			item := ui.Menu_Item{label = label, enabled = true, payload = u32(choice)}
+			if added, err := ui.menu_add(menu, item); !added {
+				log.errorf("adding a dock edge menu row failed: %v", err)
+				overlay_close(app, w)
+				return
+			}
+		}
 		return
 	}
 }
 
-dock_divider_save_default :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
-	key: string
+dock_divider_menu_choose :: proc(app: ^App, w: ^Window) {
+	divider, shown := w.overlay.(Overlay_Divider_Menu)
+	index := ui.menu_selected(&w.divider_menu)
+	if !shown || index < 0 {return}
+	item := w.divider_menu.items[index]
+	if !item.enabled || item.separator {return}
+	overlay_close(app, w)
+	switch Dock_Divider_Choice(item.payload) {
+	case .Save_Default:
+		dock_edge_save_default(app, w, divider.edge)
+	}
+}
+
+dock_divider_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
+	if !e.pressed {return}
+	w.dirty = true
+	switch ui.menu_key(&w.divider_menu, e) {
+	case .None:
+	case .Changed: ui.menu_reveal(&w.divider_menu, f32(w.width), f32(w.height), w.scale)
+	case .Chosen: dock_divider_menu_choose(app, w)
+	case .Closed: overlay_close(app, w)
+	}
+}
+
+dock_divider_menu_wheel :: proc(w: ^Window, rows: int) {
+	ui.menu_wheel(&w.divider_menu, rows)
+	ui.menu_reveal(&w.divider_menu, f32(w.width), f32(w.height), w.scale)
+	w.dirty = true
+}
+
+dock_divider_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
+	return ui.menu_hit(&w.divider_menu, x, y, f32(w.width), f32(w.height), w.scale)
+}
+
+dock_divider_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
+	width, height := f32(w.width), f32(w.height)
+	return ui.menu_draw(&w.divider_menu, &w.list, &w.ui_text, app.theme, width, height, w.scale, w.pointer)
+}
+
+dock_edge_save_default :: proc(app: ^App, w: ^Window, edge: Dock_Edge) {
 	size: f32
-	switch node {
-	case RAIL_DIVIDER:
-		key, size = "tabs.rail_width", rail_width_pixels(w) / w.scale
-	case ACTIVITY_DIVIDER:
-		key, size = "status.panel_width", status_panel_dock_width(app, w) / w.scale
-	case ACTIVITY_HEIGHT_DIVIDER:
+	switch edge {
+	case .Activity_Height:
 		area := rail_area(w)
 		if area.height <= 0 {return}
-		key, size = "status.panel_height", 100 * status_panel_rail_height(app, w) / area.height
-	case: return
+		size = 100 * status_panel_rail_height(app, w) / area.height
+	case .Activity_Width:
+		size = status_panel_dock_width(app, w) / w.scale
+	case .Rail_Width:
+		size = rail_width_pixels(w) / w.scale
 	}
-	value := int(math.round(size))
-	_, has_file := settings_save_value(app, key, fmt.tprintf("%d", value), "Could not save default size.")
-	if has_file {return}
-	switch node {
-	case RAIL_DIVIDER: app.settings.tabs.rail_width = value
-	case ACTIVITY_DIVIDER: app.settings.status.panel_width = value
-	case ACTIVITY_HEIGHT_DIVIDER: app.settings.status.panel_height = value
+	value := fmt.tprintf("%d", int(math.round(size)))
+	settings_save_value(app, DOCK_EDGE_SETTING[edge], value, "Could not save default size.")
+}
+
+// Dock edge menu pointer surface
+
+@(private)
+divider_menu_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return dock_divider_menu_shown(w)}
+
+@(private)
+divider_menu_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	if owner != .Divider_Menu {return}
+	x, y := f32(e.x), f32(e.y)
+	hit := dock_divider_menu_hit(w, x, y)
+	enabled := hit >= 0 && w.divider_menu.items[hit].enabled
+	if enabled && hit != ui.menu_selected(&w.divider_menu) {
+		ui.menu_select(&w.divider_menu, hit)
+		w.dirty = true
 	}
-	for window in app.windows {window_apply_settings(app, window); window_relayout(app, window)}
+	pointer_set(app, w, enabled ? .Hand : .Arrow)
+}
+
+@(private)
+divider_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if !e.pressed {return}
+	gesture_swallow(w, e.button, .Divider_Menu)
+	if hit := dock_divider_menu_hit(w, f32(e.x), f32(e.y)); hit >= 0 && e.button == .Left {
+		if w.divider_menu.items[hit].enabled {
+			ui.menu_select(&w.divider_menu, hit)
+			dock_divider_menu_choose(app, w)
+		}
+	} else {overlay_close(app, w)}
 }

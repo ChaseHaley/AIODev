@@ -2,10 +2,20 @@ package dwrite
 
 import windows "core:sys/windows"
 
+// A Script_Sink points at a shared static vtable, so it holds no pointer to itself; DirectWrite
+// borrows it and its output storage for the duration of AnalyzeScript.
 Script_Sink :: struct {
 	using interface: ITextAnalysisSink,
 	scripts:         []Script_Analysis,
-	methods:         ITextAnalysisSink_VTable,
+}
+
+@(private, rodata)
+sink_methods := ITextAnalysisSink_VTable {
+	iunknown_vtable = {script_query_interface, script_add_ref, script_release},
+	SetScriptAnalysis = script_set,
+	SetLineBreakpoints = script_line_breakpoints,
+	SetBidiLevel = script_bidi,
+	SetNumberSubstitution = script_substitution,
 }
 
 @(require_results)
@@ -15,16 +25,8 @@ script_sink_init :: proc(sink: ^Script_Sink, scripts: []Script_Analysis) -> bool
 	}
 	sink^ = {
 		scripts = scripts,
-		methods = {
-			iunknown_vtable = {script_query_interface, script_add_ref, script_release},
-			SetScriptAnalysis = script_set,
-			SetLineBreakpoints = script_line_breakpoints,
-			SetBidiLevel = script_bidi,
-			SetNumberSubstitution = script_substitution,
-		},
 	}
-	// DirectWrite borrows the sink and its output storage for the duration of AnalyzeScript.
-	sink.vtable = &sink.methods
+	sink.vtable = &sink_methods
 	return true
 }
 

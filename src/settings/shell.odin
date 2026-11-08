@@ -1,10 +1,90 @@
 package settings
 
-import "base:runtime"
+import "aio:procinfo"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:strings"
-import "core:unicode/utf8"
+
+// The shells AIODev knows by name.
+Shell_Kind :: enum {
+	Other,
+	PowerShell_7,
+	// Found apart from PowerShell 7; a pwsh command line still infers PowerShell_7.
+	PowerShell_7_Preview,
+	Windows_PowerShell,
+	Command_Prompt,
+	WSL,
+	Bash,
+	Zsh,
+	Fish,
+	Sh,
+}
+
+// What AIODev knows about one shell. `id`, `name` and `command` are the profile machine discovery
+// adds, and `name` also names a profile without one. `stem` is matched case-insensitively against a
+// command line's executable; an empty stem is never inferred. `badge` is the text icon shown when
+// there is no PNG.
+Shell_Definition :: struct {
+	id, name, stem, command, badge: string,
+	// Runs AIODev's prompt integration.
+	powershell:                     bool,
+	// A Unix shell rather than a Windows one.
+	unix:                           bool,
+}
+
+@(rodata)
+shell_definitions := [Shell_Kind]Shell_Definition {
+	.Other = {badge = ">_"},
+	.PowerShell_7 = {
+		id = "pwsh",
+		name = "PowerShell 7",
+		stem = "pwsh",
+		command = DEFAULT_PROFILE_COMMAND,
+		badge = ">_",
+		powershell = true,
+	},
+	.PowerShell_7_Preview = {
+		id = "pwsh-preview",
+		name = "PowerShell 7 Preview",
+		command = DEFAULT_PROFILE_COMMAND,
+		badge = ">_",
+		powershell = true,
+	},
+	.Windows_PowerShell = {
+		id = "powershell",
+		name = "Windows PowerShell",
+		stem = "powershell",
+		command = "powershell.exe -NoLogo",
+		badge = ">_",
+		powershell = true,
+	},
+	.Command_Prompt = {
+		id = "cmd",
+		name = "Command Prompt",
+		stem = "cmd",
+		command = "cmd.exe",
+		badge = "C:",
+	},
+	.WSL = {name = "WSL", stem = "wsl", badge = "$", unix = true},
+	.Bash = {name = "Bash", stem = "bash", badge = "$", unix = true},
+	.Zsh = {stem = "zsh", badge = "$", unix = true},
+	.Fish = {stem = "fish", badge = "$", unix = true},
+	.Sh = {stem = "sh", badge = "$", unix = true},
+}
+
+// The known shell a command line runs, by its executable's stem.
+shell_kind :: proc(command: string) -> Shell_Kind {
+	executable := shell_executable(command)
+	for definition, kind in shell_definitions {
+		if definition.stem != "" && strings.equal_fold(executable, definition.stem) {return kind}
+	}
+	return .Other
+}
+
+// The text badge of the shell a command line runs.
+shell_badge :: proc(command: string) -> string {
+	return shell_definitions[shell_kind(command)].badge
+}
 
 shell_executable :: proc(command: string) -> string {
 	text := strings.trim_space(command)
@@ -21,7 +101,7 @@ shell_executable :: proc(command: string) -> string {
 	for c, i in text {
 		if c == '/' || c == '\\' {start = i + 1}
 	}
-	return executable_stem(text[start:])
+	return procinfo.executable_stem(text[start:])
 }
 
 // Wraps the prompt after the user's profile has defined it, as VS Code's PowerShell integration
@@ -39,11 +119,7 @@ $p
 // The command line that starts an interactive PowerShell with AIODev's shell integration, or the
 // command unchanged for other shells and for launches that run a script or command and exit.
 shell_command_line :: proc(command: string, integration: bool) -> string {
-	executable := shell_executable(command)
-	if !integration ||
-	   !(strings.equal_fold(executable, "pwsh") || strings.equal_fold(executable, "powershell")) {
-		return command
-	}
+	if !integration || !shell_definitions[shell_kind(command)].powershell {return command}
 	// Options taking a value, with pwsh's aliases; any other bare argument is a script it would run.
 	VALUED :: [?]string{"executionpolicy", "ep", "workingdirectory", "wd", "configurationname",
 		"custompipename", "settingsfile", "inputformat", "outputformat", "windowstyle", "version",
@@ -73,91 +149,4 @@ shell_command_line :: proc(command: string, integration: bool) -> string {
 @(private)
 option_abbreviates :: proc(name, option: string) -> bool {
 	return name != "" && len(name) <= len(option) && strings.equal_fold(name, option[:len(name)])
-}
-
-shell_icon :: proc(executable, override: string) -> string {
-	if override != "" {return override}
-	if strings.equal_fold(executable, "cmd") {return "C:"}
-	for name in ([?]string{"wsl", "bash", "zsh", "fish", "sh"}) {
-		if strings.equal_fold(executable, name) {return "$"}
-	}
-	return ">_"
-}
-
-display_title :: proc(raw: string, allocator := context.allocator) -> string {
-	bytes := make([dynamic]u8, 0, min(1024, len(raw)), allocator)
-	for r in raw {
-		if r < ' ' || r >= 0x7f && r <= 0x9f {continue}
-		encoded, count := utf8.encode_rune(r)
-		if len(bytes) + count > 1024 {break}
-		if _, err := append(&bytes, ..encoded[:count]); err != nil {break}
-	}
-	return string(bytes[:])
-}
-
-@(private)
-hex_digit :: proc(c: u8) -> (u8, bool) {
-	if c >= '0' && c <= '9' {return c - '0', true}
-	if c >= 'a' && c <= 'f' {return c - 'a' + 10, true}
-	if c >= 'A' && c <= 'F' {return c - 'A' + 10, true}
-	return 0, false
-}
-
-// Windows drive and UNC paths display with backslashes; other paths, such as WSL or Unix ones, keep
-// their slashes.
-@(private)
-windows_separators :: proc(path: string) -> string {
-	drive :=
-		len(path) >= 2 &&
-		path[1] == ':' &&
-		((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))
-	if !drive && !strings.has_prefix(path, `\\`) && !strings.has_prefix(path, "//") {return path}
-	bytes := transmute([]u8)path
-	for &c in bytes {if c == '/' {c = '\\'}}
-	return path
-}
-
-// The display form of a shell directory: file URIs are decoded and Windows paths use backslashes.
-@(require_results)
-directory_label :: proc(
-	raw: string,
-	allocator := context.allocator,
-) -> (
-	string,
-	runtime.Allocator_Error,
-) {
-	text := raw
-	if !strings.has_prefix(text, "file://") {
-		copy, err := strings.clone(raw, allocator)
-		return windows_separators(copy), err
-	}
-	text = text[7:]
-	if slash := strings.index_byte(text, '/'); slash >= 0 {
-		host, path := text[:slash], text[slash:]
-		drive := len(path) >= 3 && path[0] == '/' && path[2] == ':'
-		text = path
-		if host != "" && !strings.equal_fold(host, "localhost") && !drive {
-			text = fmt.tprintf("//%s%s", host, path)
-		}
-	}
-	if len(text) >= 3 && text[0] == '/' && text[2] == ':' {text = text[1:]}
-	builder, err := strings.builder_make(allocator)
-	if err != nil {return "", err}
-	defer strings.builder_destroy(&builder)
-	for i := 0; i < len(text); i += 1 {
-		c := text[i]
-		if c == '%' && i + 2 < len(text) {
-			hi, hi_ok := hex_digit(text[i + 1])
-			lo, lo_ok := hex_digit(text[i + 2])
-			if hi_ok && lo_ok && hi * 16 + lo >= ' ' {
-				c = hi * 16 + lo
-				i += 2
-			}
-		}
-		if strings.write_byte(&builder, c) != 1 {return "", .Out_Of_Memory}
-	}
-	decoded := strings.to_string(builder)
-	if !utf8.valid_string(decoded) {return strings.clone(raw, allocator)}
-	copy, clone_error := strings.clone(decoded, allocator)
-	return windows_separators(copy), clone_error
 }

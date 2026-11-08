@@ -2,7 +2,6 @@ package term
 
 import "aio:ghostty"
 import "aio:input"
-import "aio:platform"
 import "core:log"
 import "core:strings"
 import "core:sync"
@@ -14,21 +13,48 @@ Mouse_Action :: enum {
 }
 
 @(private)
-key_action :: proc(event: platform.Key_Event) -> ghostty.Key_Action {
+key_action :: proc(event: input.Key_Event) -> ghostty.Key_Action {
 	if !event.pressed {
 		return .Release
 	}
 	return event.repeat ? .Repeat : .Press
 }
 
+// Leader and Physical are shortcut-binding flags, not device state, so they never reach the encoder.
 @(private)
 ghostty_mods :: proc(modifiers: input.Modifiers) -> ghostty.Mods {
-	return transmute(ghostty.Mods)modifiers
+	mods: ghostty.Mods
+	for modifier in modifiers {
+		switch modifier {
+		case .Shift:
+			mods += {.Shift}
+		case .Control:
+			mods += {.Ctrl}
+		case .Alt:
+			mods += {.Alt}
+		case .Super:
+			mods += {.Super}
+		case .Caps_Lock:
+			mods += {.Caps_Lock}
+		case .Num_Lock:
+			mods += {.Num_Lock}
+		case .Right_Shift:
+			mods += {.Shift_Side}
+		case .Right_Control:
+			mods += {.Ctrl_Side}
+		case .Right_Alt:
+			mods += {.Alt_Side}
+		case .Right_Super:
+			mods += {.Super_Side}
+		case .Leader, .Physical:
+		}
+	}
+	return mods
 }
 
 // Modifiers the keyboard layout used to produce the text: Shift, and Ctrl+Alt for AltGr.
 @(private)
-consumed_mods :: proc(event: platform.Key_Event) -> ghostty.Mods {
+consumed_mods :: proc(event: input.Key_Event) -> ghostty.Mods {
 	consumed: ghostty.Mods
 	if len(event.text) == 0 || event.text[0] < 0x20 || event.text[0] == 0x7f {
 		return consumed
@@ -43,11 +69,11 @@ consumed_mods :: proc(event: platform.Key_Event) -> ghostty.Mods {
 }
 
 @(private)
-encode_key :: proc(s: ^Session, event: platform.Key_Event, out: []u8) -> int {
+encode_key :: proc(s: ^Session, event: input.Key_Event, out: []u8) -> int {
 	e := s.key_event
 	ghostty.key_encoder_setopt_from_terminal(s.key_encoder, s.terminal)
 	ghostty.key_event_set_action(e, key_action(event))
-	ghostty.key_event_set_key(e, ghostty.Key(event.key))
+	ghostty.key_event_set_key(e, ghostty_keys[event.key])
 	ghostty.key_event_set_mods(e, ghostty_mods(event.modifiers))
 	ghostty.key_event_set_consumed_mods(e, consumed_mods(event))
 	ghostty.key_event_set_composing(e, false)
@@ -63,7 +89,7 @@ encode_key :: proc(s: ^Session, event: platform.Key_Event, out: []u8) -> int {
 }
 
 @(private)
-send_key_vt :: proc(s: ^Session, event: platform.Key_Event) -> bool {
+send_key_vt :: proc(s: ^Session, event: input.Key_Event) -> bool {
 	buffer: [128]u8
 	sync.mutex_lock(&s.mutex)
 	n := encode_key(s, event, buffer[:])
@@ -153,7 +179,7 @@ send_focus :: proc(s: ^Session, focused: bool) {
 		log.errorf("term: focus encoding failed: %v", result)
 		return
 	}
-	queue_push(&s.queue, buffer[:n])
+	_ = queue_push(&s.queue, buffer[:n])
 }
 
 mouse_tracking :: proc(s: ^Session) -> bool {
@@ -261,7 +287,7 @@ send_mouse :: proc(
 	n := encode_mouse(s, ghostty_action, target, modifiers, x, y, buffer[:])
 	sync.mutex_unlock(&s.mutex)
 	if n > 0 {
-		queue_push(&s.queue, buffer[:n])
+		_ = queue_push(&s.queue, buffer[:n])
 	}
 }
 
@@ -300,7 +326,189 @@ scroll :: proc(s: ^Session, rows: int, modifiers: input.Modifiers, x, y: f32) {
 	}
 	sync.mutex_unlock(&s.mutex)
 	if n > 0 {
-		queue_push(&s.queue, buffer[:n])
+		_ = queue_push(&s.queue, buffer[:n])
 	}
 	mark_changed(s)
+}
+
+// Maps by name, so the compiler rejects an input key the encoder does not name.
+@(private)
+@(rodata)
+ghostty_keys := [input.Key]ghostty.Key {
+	.Unidentified           = .Unidentified,
+	.Backquote              = .Backquote,
+	.Backslash              = .Backslash,
+	.Bracket_Left           = .Bracket_Left,
+	.Bracket_Right          = .Bracket_Right,
+	.Comma                  = .Comma,
+	.Digit_0                = .Digit_0,
+	.Digit_1                = .Digit_1,
+	.Digit_2                = .Digit_2,
+	.Digit_3                = .Digit_3,
+	.Digit_4                = .Digit_4,
+	.Digit_5                = .Digit_5,
+	.Digit_6                = .Digit_6,
+	.Digit_7                = .Digit_7,
+	.Digit_8                = .Digit_8,
+	.Digit_9                = .Digit_9,
+	.Equal                  = .Equal,
+	.Intl_Backslash         = .Intl_Backslash,
+	.Intl_Ro                = .Intl_Ro,
+	.Intl_Yen               = .Intl_Yen,
+	.A                      = .A,
+	.B                      = .B,
+	.C                      = .C,
+	.D                      = .D,
+	.E                      = .E,
+	.F                      = .F,
+	.G                      = .G,
+	.H                      = .H,
+	.I                      = .I,
+	.J                      = .J,
+	.K                      = .K,
+	.L                      = .L,
+	.M                      = .M,
+	.N                      = .N,
+	.O                      = .O,
+	.P                      = .P,
+	.Q                      = .Q,
+	.R                      = .R,
+	.S                      = .S,
+	.T                      = .T,
+	.U                      = .U,
+	.V                      = .V,
+	.W                      = .W,
+	.X                      = .X,
+	.Y                      = .Y,
+	.Z                      = .Z,
+	.Minus                  = .Minus,
+	.Period                 = .Period,
+	.Quote                  = .Quote,
+	.Semicolon              = .Semicolon,
+	.Slash                  = .Slash,
+	.Alt_Left               = .Alt_Left,
+	.Alt_Right              = .Alt_Right,
+	.Backspace              = .Backspace,
+	.Caps_Lock              = .Caps_Lock,
+	.Context_Menu           = .Context_Menu,
+	.Control_Left           = .Control_Left,
+	.Control_Right          = .Control_Right,
+	.Enter                  = .Enter,
+	.Meta_Left              = .Meta_Left,
+	.Meta_Right             = .Meta_Right,
+	.Shift_Left             = .Shift_Left,
+	.Shift_Right            = .Shift_Right,
+	.Space                  = .Space,
+	.Tab                    = .Tab,
+	.Convert                = .Convert,
+	.Kana_Mode              = .Kana_Mode,
+	.Non_Convert            = .Non_Convert,
+	.Delete                 = .Delete,
+	.End                    = .End,
+	.Help                   = .Help,
+	.Home                   = .Home,
+	.Insert                 = .Insert,
+	.Page_Down              = .Page_Down,
+	.Page_Up                = .Page_Up,
+	.Arrow_Down             = .Arrow_Down,
+	.Arrow_Left             = .Arrow_Left,
+	.Arrow_Right            = .Arrow_Right,
+	.Arrow_Up               = .Arrow_Up,
+	.Num_Lock               = .Num_Lock,
+	.Numpad_0               = .Numpad_0,
+	.Numpad_1               = .Numpad_1,
+	.Numpad_2               = .Numpad_2,
+	.Numpad_3               = .Numpad_3,
+	.Numpad_4               = .Numpad_4,
+	.Numpad_5               = .Numpad_5,
+	.Numpad_6               = .Numpad_6,
+	.Numpad_7               = .Numpad_7,
+	.Numpad_8               = .Numpad_8,
+	.Numpad_9               = .Numpad_9,
+	.Numpad_Add             = .Numpad_Add,
+	.Numpad_Backspace       = .Numpad_Backspace,
+	.Numpad_Clear           = .Numpad_Clear,
+	.Numpad_Clear_Entry     = .Numpad_Clear_Entry,
+	.Numpad_Comma           = .Numpad_Comma,
+	.Numpad_Decimal         = .Numpad_Decimal,
+	.Numpad_Divide          = .Numpad_Divide,
+	.Numpad_Enter           = .Numpad_Enter,
+	.Numpad_Equal           = .Numpad_Equal,
+	.Numpad_Memory_Add      = .Numpad_Memory_Add,
+	.Numpad_Memory_Clear    = .Numpad_Memory_Clear,
+	.Numpad_Memory_Recall   = .Numpad_Memory_Recall,
+	.Numpad_Memory_Store    = .Numpad_Memory_Store,
+	.Numpad_Memory_Subtract = .Numpad_Memory_Subtract,
+	.Numpad_Multiply        = .Numpad_Multiply,
+	.Numpad_Paren_Left      = .Numpad_Paren_Left,
+	.Numpad_Paren_Right     = .Numpad_Paren_Right,
+	.Numpad_Subtract        = .Numpad_Subtract,
+	.Numpad_Separator       = .Numpad_Separator,
+	.Numpad_Up              = .Numpad_Up,
+	.Numpad_Down            = .Numpad_Down,
+	.Numpad_Right           = .Numpad_Right,
+	.Numpad_Left            = .Numpad_Left,
+	.Numpad_Begin           = .Numpad_Begin,
+	.Numpad_Home            = .Numpad_Home,
+	.Numpad_End             = .Numpad_End,
+	.Numpad_Insert          = .Numpad_Insert,
+	.Numpad_Delete          = .Numpad_Delete,
+	.Numpad_Page_Up         = .Numpad_Page_Up,
+	.Numpad_Page_Down       = .Numpad_Page_Down,
+	.Escape                 = .Escape,
+	.F1                     = .F1,
+	.F2                     = .F2,
+	.F3                     = .F3,
+	.F4                     = .F4,
+	.F5                     = .F5,
+	.F6                     = .F6,
+	.F7                     = .F7,
+	.F8                     = .F8,
+	.F9                     = .F9,
+	.F10                    = .F10,
+	.F11                    = .F11,
+	.F12                    = .F12,
+	.F13                    = .F13,
+	.F14                    = .F14,
+	.F15                    = .F15,
+	.F16                    = .F16,
+	.F17                    = .F17,
+	.F18                    = .F18,
+	.F19                    = .F19,
+	.F20                    = .F20,
+	.F21                    = .F21,
+	.F22                    = .F22,
+	.F23                    = .F23,
+	.F24                    = .F24,
+	.F25                    = .F25,
+	.Fn                     = .Fn,
+	.Fn_Lock                = .Fn_Lock,
+	.Print_Screen           = .Print_Screen,
+	.Scroll_Lock            = .Scroll_Lock,
+	.Pause                  = .Pause,
+	.Browser_Back           = .Browser_Back,
+	.Browser_Favorites      = .Browser_Favorites,
+	.Browser_Forward        = .Browser_Forward,
+	.Browser_Home           = .Browser_Home,
+	.Browser_Refresh        = .Browser_Refresh,
+	.Browser_Search         = .Browser_Search,
+	.Browser_Stop           = .Browser_Stop,
+	.Eject                  = .Eject,
+	.Launch_App_1           = .Launch_App_1,
+	.Launch_App_2           = .Launch_App_2,
+	.Launch_Mail            = .Launch_Mail,
+	.Media_Play_Pause       = .Media_Play_Pause,
+	.Media_Select           = .Media_Select,
+	.Media_Stop             = .Media_Stop,
+	.Media_Track_Next       = .Media_Track_Next,
+	.Media_Track_Previous   = .Media_Track_Previous,
+	.Power                  = .Power,
+	.Sleep                  = .Sleep,
+	.Audio_Volume_Down      = .Audio_Volume_Down,
+	.Audio_Volume_Mute      = .Audio_Volume_Mute,
+	.Audio_Volume_Up        = .Audio_Volume_Up,
+	.Wake_Up                = .Wake_Up,
+	.Copy                   = .Copy,
+	.Cut                    = .Cut,
+	.Paste                  = .Paste,
 }

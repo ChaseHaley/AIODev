@@ -31,6 +31,30 @@ process_padding_groups_match_names_and_preserve_order :: proc(t: ^testing.T) {
 }
 
 @(test)
+window_and_process_padding_accept_the_same_content_range :: proc(t: ^testing.T) {
+	entry := settings.schema_find("window.padding")
+	if !testing.expect(t, entry != nil) {return}
+	testing.expect_value(t, entry.valid, settings.CONTENT_PADDING_RANGE)
+	minimum, maximum := int(entry.valid.minimum), int(entry.valid.maximum)
+	for padding in ([?]int{minimum - 1, minimum, maximum, maximum + 1}) {
+		source := fmt.tprintf(
+			"window.padding = %d\nprocess.padding_groups = test:%d:nvim\n", padding, padding,
+		)
+		s, diagnostics, error := settings.parse(source)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&diagnostics)
+		testing.expect_value(t, error, nil)
+		accepted := padding >= minimum && padding <= maximum
+		testing.expect_value(t, len(diagnostics), accepted ? 0 : 2)
+		if accepted {
+			actual, matched := settings.process_padding(&s, "nvim.exe")
+			testing.expect(t, matched)
+			testing.expect_value(t, actual, s.window.padding)
+		}
+	}
+}
+
+@(test)
 process_padding_groups_reject_malformed_rules :: proc(t: ^testing.T) {
 	for value in ([?]string{"missing", "group:-1:nvim", "group:1025:nvim", "group:zero:nvim",
 		":0:nvim", "group:0:", "group:0:nvim,,vim", "group:0:C:\\nvim.exe", "group:0:vim*",
@@ -105,4 +129,45 @@ padding_group_lookup_skips_a_malformed_group_that_validation_rejects :: proc(t: 
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(diagnostics), 1)
+}
+
+@(test)
+padding_groups_text_encodes_what_the_parser_reads_and_names_the_first_refused_field :: proc(t: ^testing.T) {
+	groups := [?]settings.Padding_Draft{
+		{name = " editors ", padding = " 0 ", programs = []string{"nvim", " vim.exe "}},
+		{name = "tools", padding = "1024", programs = []string{"less"}},
+	}
+	text, problem, err := settings.padding_groups_text(groups[:], context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	testing.expect(t, problem == nil)
+	testing.expect_value(t, text, "editors:0:nvim,vim.exe;tools:1024:less")
+	s, diagnostics, parse_error := settings.parse(fmt.tprintf("%s = %s", settings.PADDING_GROUPS_KEY, text))
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	padding, matched := settings.process_padding(&s, "VIM")
+	testing.expect(t, matched && padding == 0)
+
+	Case :: struct {
+		group:   settings.Padding_Draft,
+		problem: settings.Padding_Problem,
+	}
+	for c in ([?]Case{
+		{{name = "a", padding = "0", programs = []string{"x;y"}}, .Program},
+		{{name = "a", padding = "0", programs = []string{"foo,bar"}}, .Program},
+		{{name = "a", padding = "0", programs = []string{"*.exe"}}, .Program},
+		{{name = "a", padding = "0", programs = []string{"nvim", "NVIM.exe"}}, .Duplicate_Program},
+		{{name = "a;b", padding = "0", programs = []string{"nvim"}}, .Name},
+		{{name = " ", padding = "0", programs = []string{"nvim"}}, .Name},
+		{{name = "a", padding = "1025", programs = []string{"nvim"}}, .Padding},
+		{{name = "a", padding = "0"}, .No_Programs},
+	}) {
+		drafts := []settings.Padding_Draft{c.group}
+		refused, refusal, refused_error := settings.padding_groups_text(drafts, context.temp_allocator)
+		testing.expect_value(t, refused_error, nil)
+		testing.expect_value(t, refused, "")
+		got, has_problem := refusal.?
+		testing.expect(t, has_problem && got == c.problem, c.group.name)
+	}
 }

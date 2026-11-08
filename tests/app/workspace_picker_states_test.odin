@@ -1,8 +1,8 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:layout"
-import "aio:platform"
 import "core:testing"
 
 @(private="file")
@@ -50,7 +50,8 @@ workspace_picker_reopen_and_icon_return_drop_a_move_target :: proc(t: ^testing.T
 	app.workspace_move_open(&state, &w, true, 0)
 	app.workspace_icon_open(&state, &w)
 	app.workspace_picker_key(&state, &w, {key = .Escape, pressed = true})
-	testing.expect_value(t, app.workspace_picker_mode(p), app.Workspace_Picker_Mode.List)
+	_, listing := p.state.(app.Workspace_Picker_List)
+	testing.expect(t, listing)
 	_, moving = app.workspace_picker_move(p)
 	testing.expect(t, !moving)
 	testing.expect_value(t, len(p.rows), 3)
@@ -67,15 +68,15 @@ workspace_chip_double_click_needs_the_press_that_opened_the_list :: proc(t: ^tes
 	chip := app.workspace_button_rect(&w)
 	x, y := i32(chip.x + chip.width / 2), i32(chip.y + chip.height / 2)
 	press :: proc(state: ^app.App, w: ^app.Window, x, y: i32, time_ns: i64) {
-		app.handle_event(state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+		app.handle_event(state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 			x = x, y = y, time_ns = time_ns})
-		app.handle_event(state, platform.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = y,
+		app.handle_event(state, input.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = y,
 			time_ns = time_ns})
 	}
 	press(&state, &w, x, y, 1_000_000_000)
 	if !testing.expect(t, app.workspace_picker_active(&w.workspace_picker)) {return}
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape})
 	app.workspace_picker_open(&state, &w)
 	press(&state, &w, x, y, 1_100_000_000)
 	testing.expect(t, !app.rename_shown(&w))

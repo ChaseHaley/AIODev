@@ -4,7 +4,6 @@ import "core:testing"
 import app "../../src"
 import "aio:commands"
 import "aio:input"
-import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 
@@ -181,7 +180,7 @@ settings_inline_duplicate_names_the_winner_without_reading_prose :: proc(t: ^tes
 	s := &f.state
 	w := s.windows[0]
 	app.editor_open(s, w)
-	app.handle_event(s, platform.Text_Event{w.id, "keys.tab.new"})
+	app.handle_event(s, input.Text_Event{w.id, "keys.tab.new"})
 	if !testing.expect_value(t, ui.editor_row(&w.editor).key, "keys.tab.new") {return}
 	ui.field_set(&w.editor.value, "Ctrl+Shift+P")
 	app.editor_outcome(s, w, .Save)

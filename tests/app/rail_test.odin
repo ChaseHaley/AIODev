@@ -1,9 +1,9 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
 import "aio:ui"
 
 @(private="file")
@@ -48,21 +48,13 @@ rail_rows_show_only_the_current_workspace_and_follow_switches :: proc(t: ^testin
 	rail_tab(one, 2)
 	two := rail_workspace(&state, 2, "Tests")
 	rail_tab(two, 3)
-	w := app.Window{workspace = one}
-	rows := make([dynamic]app.Rail_Row)
-	defer delete(rows)
-	testing.expect(t, app.rail_rows_build(&w, &rows))
-	if !testing.expect_value(t, len(rows), 2) {return}
-	for row, i in rows {
-		testing.expect_value(t, row.workspace, one)
-		testing.expect_value(t, row.tab, i)
-	}
-	testing.expect_value(t, app.rail_row_index_for_tab(rows[:], two, 0), -1)
+	w := app.Window{workspace = one, width = 800, height = 600, scale = 1}
+	testing.expect_value(t, app.rail_tab_count(&w), 2)
+	testing.expect(t, app.rail_row_rect_for_tab(&w, 1).height > 0)
 	w.workspace = two
-	testing.expect(t, app.rail_rows_build(&w, &rows))
-	if !testing.expect_value(t, len(rows), 1) {return}
-	testing.expect_value(t, rows[0].workspace, two)
-	testing.expect_value(t, rows[0].tab, 0)
+	testing.expect_value(t, app.rail_tab_count(&w), 1)
+	testing.expect(t, app.rail_row_rect_for_tab(&w, 0).height > 0)
+	testing.expect_value(t, app.rail_row_rect_for_tab(&w, 1).height, f32(0))
 }
 
 @(test)
@@ -119,7 +111,6 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	w := app.Window {
 		id            = 44,
 		workspace     = workspace,
-		tree          = &tab.tree,
 		width         = 600,
 		height        = 700,
 		scale         = 1,
@@ -128,7 +119,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	app.focus_init(&w)
 	append(&state.windows, &w)
 	testing.expect(t, app.rail_overlay(&w))
-	app.handle_event(&state, platform.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 	testing.expect(t, !app.rail_overlay(&w))
 	testing.expect(t, !app.rail_visible(&w))
 
@@ -137,7 +128,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	row := app.rail_row_rect_for_tab(&w, 0)
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			pressed = true,
@@ -149,7 +140,7 @@ rail_overlay_closes_on_escape_and_after_a_selection :: proc(t: ^testing.T) {
 	testing.expect(t, !app.rail_overlay(&w))
 	app.handle_event(
 		&state,
-		platform.Mouse_Button_Event {
+		input.Mouse_Button_Event {
 			window = w.id,
 			button = .Left,
 			x = i32(row.x + 20),
@@ -174,7 +165,6 @@ rail_keyboard_tab_selection_closes_an_open_overlay :: proc(t: ^testing.T) {
 	w := app.Window {
 		id             = 47,
 		workspace      = workspace,
-		tree           = &one.tree,
 		width          = 600,
 		height         = 700,
 		scale          = 1,
@@ -224,7 +214,6 @@ rail_close_and_multiselect_keep_the_selected_group_and_remaining_tab :: proc(t: 
 	w := app.Window {
 		id        = 45,
 		workspace = workspace,
-		tree      = &one.tree,
 		width     = 1000,
 		height    = 700,
 		scale     = 1,
@@ -233,25 +222,24 @@ rail_close_and_multiselect_keep_the_selected_group_and_remaining_tab :: proc(t: 
 	}
 	append(&state.windows, &w)
 	row1 := app.rail_row_rect_for_tab(&w, 1)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row1.x + 20), y = i32(row1.y + 16), modifiers = {.Control}})
 	testing.expect(t, one.marked && two.marked && !three.marked)
 	testing.expect_value(t, workspace.selected, 1)
 
 	layout_state, ok := app.rail_current_layout(&w)
 	if !testing.expect(t, ok) {return}
-	row_index := app.rail_row_index_for_tab(w.rail_rows[:], workspace, 1)
-	close := ui.rail_close_rect(layout_state, row_index, w.scale)
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
+	close := ui.rail_close_rect(layout_state, 1, w.scale)
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x + close.width / 2), y = i32(close.y + close.height / 2)})
 	testing.expect(t, ui.armed_down(w.tab_close_armed))
-	app.handle_event(&state, platform.Mouse_Button_Event{window = w.id, button = .Left,
+	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 		x = i32(close.x + close.width / 2), y = i32(close.y + close.height / 2)})
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	if !testing.expect_value(t, len(workspace.tabs), 1) {return}
 	testing.expect(t, workspace.tabs[0] == three)
 	testing.expect_value(t, workspace.selected, 0)
-	testing.expect_value(t, w.tree, &three.tree)
+	testing.expect_value(t, app.window_tree(&w), &three.tree)
 }
 
 @(test)
@@ -273,7 +261,6 @@ rail_footer_and_empty_space_are_new_tab_drop_targets :: proc(t: ^testing.T) {
 	w := app.Window {
 		id        = 46,
 		workspace = workspace,
-		tree      = &tab.tree,
 		width     = 1000,
 		height    = 700,
 		scale     = 1,

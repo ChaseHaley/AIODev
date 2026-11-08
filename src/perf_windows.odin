@@ -1,14 +1,14 @@
 package main
 
-import "aio:control"
 import "aio:font"
 import "aio:glyphs"
 import "aio:perf"
 import "aio:term"
+import "aio:verify_protocol"
 import "core:fmt"
 import "core:strings"
 
-_ :: control
+_ :: verify_protocol
 _ :: font
 _ :: glyphs
 _ :: perf
@@ -17,37 +17,28 @@ _ :: fmt
 _ :: strings
 
 // Timing evidence: format the counters recorded in the App's perf.Stats and in the packages that
-// own the remaining counters. The reply is the key=value list control.help documents for `perf`.
+// own the remaining counters, in verify_protocol.PERF_REPLY_FORMAT's order.
 
 when AIO_CONTROL {
-	@(private)
-	PERF_REPLY_FORMAT ::
-		"frames.presented=%d\n" +
-		"frames.built=%d\n" +
-		"frame.build.p50=%.3f\n" +
-		"frame.build.p95=%.3f\n" +
-		"frame.build.max=%.3f\n" +
-		"frame.render.p50=%.3f\n" +
-		"frame.render.p95=%.3f\n" +
-		"frame.render.max=%.3f\n" +
-		"input.latency.last=%.3f\n" +
-		"input.latency.p50=%.3f\n" +
-		"input.latency.p95=%.3f\n" +
-		"input.latency.max=%.3f\n" +
-		"pty.bytes=%d\n" +
-		"pty.bytes_per_second=%.3f\n" +
-		"shape.calls=%d\n" +
-		"glyph.hits=%d\n" +
-		"glyph.misses=%d\n" +
-		"idle.presents=%d\n" +
-		"uptime.ms=%d\n"
+	// The owner a counter's --reset goes to, in the order the resets run.
+	Perf_Owner :: enum {
+		Pty,
+		Shaping,
+		Glyphs,
+		Frames,
+	}
+
+	Perf_Counter :: struct {
+		value: any,
+		owner: Perf_Owner,
+	}
 
 	@(require_results)
 	perf_read :: proc(
 		app: ^App,
 		out: ^strings.Builder,
-		request: control.Perf,
-	) -> control.Error {
+		request: verify_protocol.Perf,
+	) -> verify_protocol.Error {
 		s := perf.snapshot(&app.perf)
 		pty_bytes: u64
 		for entry in app.sessions {
@@ -58,45 +49,59 @@ when AIO_CONTROL {
 		if s.uptime_ms > 0 {
 			per_second = f64(pty_bytes) * 1000 / f64(s.uptime_ms)
 		}
+		shape_calls := font.shape_calls(app.fonts)
 		hits, misses := glyphs.glyph_counts(&app.cache)
-		buffer: [1024]u8
-		text := fmt.bprintf(
-			buffer[:],
-			PERF_REPLY_FORMAT,
-			s.presented,
-			s.built,
-			s.build.p50_ms,
-			s.build.p95_ms,
-			s.build.max_ms,
-			s.render.p50_ms,
-			s.render.p95_ms,
-			s.render.max_ms,
-			s.input_last_ms,
-			s.input.p50_ms,
-			s.input.p95_ms,
-			s.input.max_ms,
-			pty_bytes,
-			per_second,
-			font.shape_calls(app.fonts),
-			hits,
-			misses,
-			s.idle_presents,
-			s.uptime_ms,
-		)
-		if _, err := append(&out.buf, ..transmute([]u8)text); err != nil {
-			strings.write_string(out, "error: not enough memory for the perf reply")
-			return .Out_Of_Memory
+		// One entry per PERF_REPLY_FORMAT verb, in its order. frames.presented here is
+		// perf.Stats.presented; Verify.frames documents how it differs from state's key.
+		counters := [?]Perf_Counter {
+			{s.presented, .Frames},
+			{s.built, .Frames},
+			{s.build.p50_ms, .Frames},
+			{s.build.p95_ms, .Frames},
+			{s.build.max_ms, .Frames},
+			{s.render.p50_ms, .Frames},
+			{s.render.p95_ms, .Frames},
+			{s.render.max_ms, .Frames},
+			{s.input_last_ms, .Frames},
+			{s.input.p50_ms, .Frames},
+			{s.input.p95_ms, .Frames},
+			{s.input.max_ms, .Frames},
+			{pty_bytes, .Pty},
+			{per_second, .Pty},
+			{shape_calls, .Shaping},
+			{hits, .Glyphs},
+			{misses, .Glyphs},
+			{s.idle_presents, .Frames},
+			{s.uptime_ms, .Frames},
 		}
-		if request.reset {
-			// Every printed counter belongs to its owner, so reset each one after the reply is
-			// built. Live sessions keep their PTYs; only the delivered totals restart.
-			for entry in app.sessions {
-				if entry.session == nil {continue}
-				term.session_reset_pty_bytes(entry.session)
+		values: [len(counters)]any
+		owners: bit_set[Perf_Owner]
+		for counter, i in counters {
+			values[i] = counter.value
+			owners += {counter.owner}
+		}
+		buffer: [1024]u8
+		text := fmt.bprintf(buffer[:], verify_protocol.PERF_REPLY_FORMAT, ..values[:])
+		if _, err := append(&out.buf, ..transmute([]u8)text); err != nil {
+			return verify_protocol.explain(out, "not enough memory for the perf reply", .Out_Of_Memory)
+		}
+		if !request.reset {return .None}
+		// Every printed counter belongs to its owner, so reset each one after the reply is built.
+		// Live sessions keep their PTYs; only the delivered totals restart.
+		for owner in owners {
+			switch owner {
+			case .Frames:
+				perf.reset(&app.perf)
+			case .Pty:
+				for entry in app.sessions {
+					if entry.session == nil {continue}
+					term.session_reset_pty_bytes(entry.session)
+				}
+			case .Shaping:
+				font.reset_shape_calls(app.fonts)
+			case .Glyphs:
+				glyphs.reset_counts(&app.cache)
 			}
-			font.reset_shape_calls(app.fonts)
-			glyphs.reset_counts(&app.cache)
-			perf.reset(&app.perf)
 		}
 		return .None
 	}

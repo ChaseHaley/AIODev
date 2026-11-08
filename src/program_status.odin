@@ -1,19 +1,18 @@
 package main
 
 import platform_api "aio:platform"
-import "aio:glyphs"
 import "aio:render"
+import "aio:settings"
 import "aio:term"
 import "aio:ui"
-import "aio:settings"
 import "core:fmt"
 import "core:log"
-import "core:strings"
 import "core:time"
 
 // Program status (OSC 7501) as AIODev presents it. Each session's records are copied when they
 // change, so drawing reads Session_Entry.statuses without taking the session lock. Only reports
-// reach these surfaces; nothing is inferred from screen contents or titles.
+// reach these surfaces; nothing is inferred from screen contents or titles. status_model.odin
+// classifies each record.
 
 @(private)
 STATUS_SPIN_PERIOD_MS :: 1200
@@ -21,13 +20,26 @@ STATUS_SPIN_PERIOD_MS :: 1200
 @(private)
 STATUS_NOTICE_INTERVAL :: 5 * time.Second
 
+// Shown records counted by rank; `needs` counts those that need the user, and `top` is the most
+// urgent.
 Status_Summary :: struct {
-	top:                                  term.Program_Status,
-	session:                              u32,
-	found:                                bool,
-	blocked, failed, done, working, idle: int,
+	top:     term.Program_Status,
+	session: u32,
+	found:   bool,
+	counts:  [Status_Rank]int,
+	needs:   int,
 }
 
+// What a window last told its taskbar button, and for which workspace, so only a change reaches
+// the shell.
+Status_Taskbar :: struct {
+	workspace: ^Workspace,
+	state:     platform_api.Progress_State,
+	percent:   int,
+}
+
+// Keeps the previous snapshot when reading the session's records fails (retained: the next change
+// reads them again).
 status_refresh :: proc(app: ^App, entry: ^Session_Entry) {
 	next, err := term.program_status(entry.session)
 	if err != nil {return}
@@ -45,116 +57,20 @@ status_release :: proc(entry: ^Session_Entry) {
 // Turning the protocol on or off reaches every live session at once.
 status_apply_settings :: proc(app: ^App) {
 	for &entry in app.sessions {
-		term.set_program_status_enabled(entry.session, app.settings.status.enabled)
+		term.configure(entry.session, session_options(app))
 		status_refresh(app, &entry)
 	}
 	for w in app.windows {status_taskbar_update(app, w, true)}
 	mark_all_dirty(app)
 }
 
-status_app_ignored :: proc(list, name: string) -> bool {
-	if name == "" || list == "" {return false}
-	rest := list
-	for part in strings.split_iterator(&rest, ",") {
-		if strings.equal_fold(strings.trim_space(part), name) {return true}
-	}
-	return false
-}
-
-status_shown :: proc(app: ^App, record: term.Program_Status) -> bool {
-	s := &app.settings.status
-	if !s.enabled {return false}
-	shown := false
-	switch record.state {
-	case .Idle:
-		shown = s.show_idle
-	case .Working:
-		shown = s.show_working
-	case .Blocked:
-		shown = s.show_blocked
-	case .Done, .Done_Seen:
-		shown = s.show_done
-	case .Error, .Error_Seen:
-		shown = s.show_error
-	}
-	return shown && !status_app_ignored(s.ignore_apps, record.app)
-}
-
-status_mark :: proc(record: term.Program_Status) -> ui.Status_Mark {
-	glyph: ui.Status_Glyph
-	switch record.state {
-	case .Idle:
-		glyph = .Idle
-	case .Working:
-		glyph = .Working
-	case .Blocked:
-		switch record.kind {
-		case .None:
-			glyph = .Blocked
-		case .Permission:
-			glyph = .Permission
-		case .Question:
-			glyph = .Question
-		case .Auth:
-			glyph = .Auth
-		}
-	case .Done, .Done_Seen:
-		glyph = .Done
-	case .Error, .Error_Seen:
-		glyph = .Error
-	}
-	return {glyph, record.progress, term.program_status_seen(record.state)}
-}
-
-// Lower ranks need the user sooner. Finished work the user has seen ranks below anything live.
-status_rank :: proc(record: term.Program_Status) -> int {
-	switch record.state {
-	case .Blocked:
-		return 0
-	case .Error:
-		return 1
-	case .Done:
-		return 2
-	case .Error_Seen:
-		return 5
-	case .Done_Seen:
-		return 6
-	case .Working:
-		return 3
-	case .Idle:
-		return 4
-	}
-	return 7
-}
-
-status_attention :: proc(record: term.Program_Status) -> bool {
-	return status_rank(record) <= 2
-}
-
-@(private)
-status_before :: proc(a, b: term.Program_Status) -> bool {
-	ra, rb := status_rank(a), status_rank(b)
-	if ra != rb {return ra < rb}
-	return time.diff(b.updated_at, a.updated_at) > 0
-}
-
 status_summary_add :: proc(app: ^App, summary: ^Status_Summary, entry: ^Session_Entry) {
 	if entry == nil {return}
 	for record in entry.statuses {
 		if !status_shown(app, record) {continue}
-		switch record.state {
-		case .Blocked:
-			summary.blocked += 1
-		case .Error:
-			summary.failed += 1
-		case .Done:
-			summary.done += 1
-		case .Done_Seen, .Error_Seen:
-		case .Working:
-			summary.working += 1
-		case .Idle:
-			summary.idle += 1
-		}
+		p := status_presentation(record)
+		summary.counts[p.rank] += 1
+		if p.attention {summary.needs += 1}
 		if !summary.found || status_before(record, summary.top) {
 			summary.top, summary.session, summary.found = record, entry.id, true
 		}
@@ -183,34 +99,17 @@ status_workspace_summary :: proc(app: ^App, workspace: ^Workspace) -> Status_Sum
 	return summary
 }
 
-// The workspace picker's summary of what a workspace's programs report.
-status_picker_text :: proc(app: ^App, workspace: ^Workspace) -> string {
-	if !app.settings.status.workspace_picker {return ""}
-	summary := status_workspace_summary(app, workspace)
-	parts: [4]string
-	count := 0
-	counts := [4]int{summary.blocked, summary.failed, summary.done, summary.working}
-	labels := [4]string{"need you", "failed", "done", "working"}
-	for n, i in counts {
-		if n == 0 {continue}
-		parts[count] = fmt.tprintf("%d %s", n, n == 1 && i == 0 ? "needs you" : labels[i])
-		count += 1
-	}
-	return strings.join(parts[:count], " · ", context.temp_allocator)
-}
-
-status_needs :: proc(summary: Status_Summary) -> int {
-	return summary.blocked + summary.failed + summary.done
-}
-
 // The mark a tab or row shows for a summary. Finished work already seen is left to the lists.
 status_indicator :: proc(summary: Status_Summary) -> (ui.Status_Mark, bool) {
-	if !summary.found || status_rank(summary.top) >= 5 {return {}, false}
-	return status_mark(summary.top), true
+	if !summary.found {return {}, false}
+	p := status_presentation(summary.top)
+	if p.seen {return {}, false}
+	return p.mark, true
 }
 
 // The spinner position for a mark this frame draws. Drawing a spinner keeps the window repainting
-// while system animations are on; a still spinner is drawn otherwise.
+// while system animations are on; a still spinner is drawn otherwise. Retained as a draw-time
+// flag: only drawing knows which marks are visible this frame.
 status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
 	if mark.glyph != .Working || mark.progress >= 0 || !app.animations {return 0}
 	w.status_spinning = true
@@ -218,7 +117,12 @@ status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
 	return f32(f64(time.tick_now()._nsec % period) / f64(period))
 }
 
-status_mark_draw :: proc(app: ^App, w: ^Window, area: render.Rect, mark: ui.Status_Mark) -> glyphs.Result {
+status_mark_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	area: render.Rect,
+	mark: ui.Status_Mark,
+) -> render.Build_Status {
 	phase := status_phase(app, w, mark)
 	return ui.status_glyph_draw(&w.list, &w.ui_text, app.theme, area, mark, phase, w.scale)
 }
@@ -242,41 +146,10 @@ status_spin_tick :: proc(w: ^Window) {
 	if status_spin_active(w) {w.dirty = true}
 }
 
-status_pane_title :: proc(entry: ^Session_Entry) -> string {
-	return entry.name != "" ? entry.name : pane_header_title(&entry.header)
-}
-
 status_record_name :: proc(entry: ^Session_Entry, record: term.Program_Status) -> string {
 	if record.title != "" {return record.title}
 	if record.app != "" {return record.app}
-	return status_pane_title(entry)
-}
-
-@(private)
-status_tab_title :: proc(workspace: ^Workspace, tab: int) -> string {
-	title := workspace.tabs[tab].title
-	return title != "" ? title : fmt.tprintf("Tab %d", tab + 1)
-}
-
-// Where a session lives, for lists and notices that must say which pane they mean.
-status_crumb :: proc(app: ^App, entry: ^Session_Entry) -> string {
-	for workspace in app.workspaces {
-		pane, ok := workspace_first_session(app, workspace, entry.id)
-		if !ok {continue}
-		tab := status_tab_title(workspace, pane.tab)
-		if tab_pane_count(workspace.tabs[pane.tab]) > 1 {
-			return fmt.tprintf("%s › %s › %s", workspace.name, tab, status_pane_title(entry))
-		}
-		return fmt.tprintf("%s › %s", workspace.name, tab)
-	}
-	return status_pane_title(entry)
-}
-
-status_workspace_of :: proc(app: ^App, session: u32) -> ^Workspace {
-	for workspace in app.workspaces {
-		if _, ok := workspace_first_session(app, workspace, session); ok {return workspace}
-	}
-	return nil
+	return session_display_title(entry)
 }
 
 status_watched :: proc(app: ^App, entry: ^Session_Entry) -> bool {
@@ -298,36 +171,18 @@ status_focus_leave :: proc(app: ^App, entry: ^Session_Entry) {
 	term.program_status_dismiss_finished(entry.session)
 }
 
-Status_Notification_Channels :: struct {
-	banner, tray, flash, sound, notice: bool,
-}
-
 // A pure routing policy shared by transition eligibility and delivery.
 status_notification_channels :: proc(
 	s: ^settings.Status_Settings,
 	state: term.Program_Status_State,
-) -> Status_Notification_Channels {
+) -> settings.Status_Channels {
 	if !s.enabled {return {}}
-	set: settings.Status_Channels
-	switch state {
-	case .Idle:
-		set = s.notify_idle
-	case .Working:
-		set = s.notify_working
-	case .Blocked:
-		set = s.notify_blocked
-	case .Error, .Error_Seen:
-		set = s.notify_error
-	case .Done, .Done_Seen:
-		set = s.notify_done
-	}
-	return {.Banner in set, .Tray in set, .Flash in set, .Sound in set, .Notice in set}
+	return status_state_settings(s, state).channels
 }
 
 @(private)
 status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
-	c := status_notification_channels(&app.settings.status, record.state)
-	return c.banner || c.tray || c.flash || c.sound || c.notice
+	return status_notification_channels(&app.settings.status, record.state) != {}
 }
 
 // A pane notifies at most once an interval, for the newest change that wants a notification. Once
@@ -361,25 +216,27 @@ status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term
 
 @(private)
 status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Status) {
+	p := status_presentation(record)
 	buffer: [8]u8
-	headline := ui.status_headline(status_mark(record), buffer[:])
+	headline := status_headline(p.mark, buffer[:])
 	title := fmt.tprintf("%s: %s", status_record_name(entry, record), headline)
-	text := status_crumb(app, entry)
+	text := session_location(app, entry)
 	if record.message != "" {text = fmt.tprintf("%s · %s", record.message, text)}
 	c := status_notification_channels(&app.settings.status, record.state)
 	// The sound rides on the first notification Windows shows, and plays on its own when none does.
-	sound := c.sound
-	if c.banner {
+	sound := .Sound in c
+	token := platform_api.Notification_Token(entry.id)
+	if .Banner in c {
 		// Unavailable: notifications could not start, which the first banner already reported.
-		result := platform_api.notification_show(&app.platform, title, text, entry.id, sound)
+		result := platform_api.notification_show(&app.platform, title, text, token, sound)
 		if result == .None {
 			sound = false
 		} else if result != .Unavailable {
 			notify(app, .Error, "Windows could not show a status notification. Check notification settings.")
 		}
 	}
-	if c.tray {
-		if platform_api.tray_notify(&app.platform, title, text, u64(entry.id), sound) == .None {
+	if .Tray in c {
+		if platform_api.tray_notify(&app.platform, title, text, token, sound) == .None {
 			sound = false
 		} else {
 			notify(app, .Error, "Windows could not show a tray notification.")
@@ -388,23 +245,9 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	if sound && platform_api.notification_sound() != .None {
 		log.error("playing program status sound failed")
 	}
-	if c.notice {
-		kind: ui.Notice_Kind
-		#partial switch term.program_status_reported(record.state) {
-		case .Blocked:
-			kind = .Warning
-		case .Error:
-			kind = .Error
-		case .Done:
-			kind = .Success
-		case:
-			kind = .Info
-		}
-		notify(app, kind, fmt.tprintf("%s: %s", title, text))
-	}
-	target := window_for_workspace(app, status_workspace_of(app, entry.id))
-	if target == nil {target = window_primary(app)}
-	if c.flash && target != nil && !target.focused &&
+	if .Notice in c {notify(app, p.notice, fmt.tprintf("%s: %s", title, text))}
+	target := session_window(app, entry.id, window_primary(app))
+	if .Flash in c && target != nil && !target.focused &&
 	   platform_api.window_flash(&app.platform, target.id) != .None {
 		log.error("flashing the window for program status failed")
 	}
@@ -415,32 +258,96 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 status_notification_clicked :: proc(app: ^App, session: u32) {
 	if app_tray_only(app) {show_window(app)}
 	if app_tray_only(app) {return}
-	target := window_for_workspace(app, status_workspace_of(app, session))
-	if target == nil {target = window_primary(app)}
+	target := session_window(app, session, window_primary(app))
 	if !window_activate(app, target) {return}
-	if !status_reveal(app, target, session) {notify(app, .Error, "Could not show that pane.")}
-}
-
-// Shows the pane a record came from, switching workspace, tab and focus as needed.
-status_reveal :: proc(app: ^App, w: ^Window, session: u32) -> bool {
-	for workspace in app.workspaces {
-		if !workspace_eligible(app, workspace) {continue}
-		pane, ok := workspace_first_session(app, workspace, session)
-		if !ok {continue}
-		if !workspace_select(app, w, workspace) {return false}
-		owner := window_for_workspace(app, workspace)
-		if owner == nil {return false}
-		if owner.workspace.selected != pane.tab {tab_select(app, owner, pane.tab)}
-		pane_focus(app, owner, pane.node)
-		status_focus_enter(app, owner)
-		owner.dirty = true
-		return true
-	}
-	return false
+	_ = session_show(app, target, session)
 }
 
 status_in_scope :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	return app.settings.status.scope == .All || workspace == w.workspace
+}
+
+// The panes with a session in every workspace of a window's status scope, in workspace and tab
+// order. Each caller states whether workspaces workspace_eligible refuses are skipped.
+Status_Scope_Walk :: struct {
+	app:           ^App,
+	w:             ^Window,
+	eligible_only: bool,
+	next:          int,
+	panes:         Workspace_Pane_Walk,
+}
+
+status_scope_walk :: proc(app: ^App, w: ^Window, eligible_only: bool) -> Status_Scope_Walk {
+	return {app = app, w = w, eligible_only = eligible_only}
+}
+
+@(require_results)
+status_scope_next :: proc(
+	walk: ^Status_Scope_Walk,
+) -> (
+	pane: Workspace_Pane,
+	workspace: ^Workspace,
+	ok: bool,
+) {
+	for {
+		if walk.panes.workspace != nil {
+			for p, more := workspace_pane_next(&walk.panes); more; p, more = workspace_pane_next(&walk.panes) {
+				if p.session != nil {return p, walk.panes.workspace, true}
+			}
+		}
+		if walk.next >= len(walk.app.workspaces) {return}
+		candidate := walk.app.workspaces[walk.next]
+		walk.next += 1
+		walk.panes = {}
+		if walk.eligible_only && !workspace_eligible(walk.app, candidate) {continue}
+		if !status_in_scope(walk.app, walk.w, candidate) {continue}
+		walk.panes = workspace_session_panes(walk.app, candidate)
+	}
+}
+
+// One pane's records that settings show, with what an overview names and places them by. The
+// records are a temp copy in the session's order, so an overview may sort them; their strings borrow
+// from the session's snapshot, so the projection lives for one frame or event at most.
+Status_Scope_Records :: struct {
+	session:   u32,
+	records:   []term.Program_Status,
+	crumb:     string,
+	workspace: string,
+}
+
+Status_Scope_Records_Walk :: struct {
+	scope:   Status_Scope_Walk,
+	enabled: bool,
+}
+
+// The panes in a window's status scope that show any record, for the inbox and the Activity panel.
+status_scope_records :: proc(app: ^App, w: ^Window) -> Status_Scope_Records_Walk {
+	return {scope = status_scope_walk(app, w, eligible_only = true), enabled = app.settings.status.enabled}
+}
+
+@(require_results)
+status_scope_records_next :: proc(
+	walk: ^Status_Scope_Records_Walk,
+) -> (
+	shown: Status_Scope_Records,
+	ok: bool,
+) {
+	if !walk.enabled {return}
+	app := walk.scope.app
+	for pane, workspace, more := status_scope_next(&walk.scope);
+	    more;
+	    pane, workspace, more = status_scope_next(&walk.scope) {
+		entry := pane.session
+		if len(entry.statuses) == 0 {continue}
+		records := make([dynamic]term.Program_Status, 0, len(entry.statuses), context.temp_allocator)
+		for record in entry.statuses {
+			if status_shown(app, record) {append(&records, record)}
+		}
+		if len(records) == 0 {continue}
+		crumb := session_location_at(workspace, pane.tab, entry)
+		return {entry.id, records[:], crumb, workspace.name}, true
+	}
+	return
 }
 
 // Moves to the most urgent record that needs the user, skipping the pane already in view so
@@ -450,17 +357,14 @@ status_next_attention :: proc(app: ^App, w: ^Window) {
 	best: term.Program_Status
 	session: u32
 	found := false
-	for workspace in app.workspaces {
-		if !workspace_eligible(app, workspace) || !status_in_scope(app, w, workspace) {continue}
-		walk := workspace_session_panes(app, workspace)
-		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-			entry := pane.session
-			if entry == nil || entry == current {continue}
-			for record in entry.statuses {
-				if !status_shown(app, record) || !status_attention(record) {continue}
-				if !found || status_before(record, best) {
-					best, session, found = record, entry.id, true
-				}
+	walk := status_scope_walk(app, w, eligible_only = true)
+	for pane, _, ok := status_scope_next(&walk); ok; pane, _, ok = status_scope_next(&walk) {
+		entry := pane.session
+		if entry == current {continue}
+		for record in entry.statuses {
+			if !status_shown(app, record) || !status_presentation(record).attention {continue}
+			if !found || status_before(record, best) {
+				best, session, found = record, entry.id, true
 			}
 		}
 	}
@@ -468,22 +372,28 @@ status_next_attention :: proc(app: ^App, w: ^Window) {
 		notify(app, .Info, "No program needs you.")
 		return
 	}
-	if !status_reveal(app, w, session) {notify(app, .Error, "Could not show that pane.")}
+	_ = session_show(app, w, session)
 }
 
-// Dismisses finished work everywhere in the window's overview scope.
+// Dismisses finished work everywhere in the window's overview scope. Unlike the inbox that offers
+// it, it also reaches workspaces workspace_eligible refuses (retained pending the owner's call).
 status_dismiss_finished :: proc(app: ^App, w: ^Window) {
-	for workspace in app.workspaces {
-		if !status_in_scope(app, w, workspace) {continue}
-		walk := workspace_session_panes(app, workspace)
-		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-			if pane.session != nil {term.program_status_dismiss_finished(pane.session.session, true)}
-		}
+	walk := status_scope_walk(app, w, eligible_only = false)
+	for pane, _, ok := status_scope_next(&walk); ok; pane, _, ok = status_scope_next(&walk) {
+		term.program_status_dismiss_finished(pane.session.session, true)
 	}
 }
 
+// Shows a window's newly selected workspace on its taskbar button.
+status_taskbar_follow :: proc(app: ^App, w: ^Window) {
+	if w.taskbar.workspace == w.workspace {return}
+	w.taskbar.workspace = w.workspace
+	status_taskbar_update(app, w)
+}
+
 // Mirrors the window's workspace on its taskbar button: failures, then blocked work, then the
-// least advanced job. Only a change reaches the shell.
+// least advanced job. Progress is 0..100 or negative for none, so 101 means no determinate job.
+// Only a change reaches the shell.
 status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 	state := platform_api.Progress_State.None
 	percent := 0
@@ -496,13 +406,14 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 			if pane.session == nil {continue}
 			for record in pane.session.statuses {
 				if !status_shown(app, record) {continue}
-				#partial switch record.state {
-				case .Error:
-					failed ||= s.taskbar_error
+				if !status_state_settings(s, record.state).taskbar {continue}
+				switch status_presentation(record).taskbar {
+				case .None:
+				case .Failed:
+					failed = true
 				case .Blocked:
-					blocked ||= s.taskbar_blocked
+					blocked = true
 				case .Working:
-					if !s.taskbar_working {continue}
 					working = true
 					if record.progress >= 0 {
 						least = min(least, int(record.progress))
@@ -523,8 +434,8 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 			state = .Indeterminate
 		}
 	}
-	if !force && state == w.taskbar_state && percent == w.taskbar_percent {return}
-	w.taskbar_state, w.taskbar_percent = state, percent
+	if !force && state == w.taskbar.state && percent == w.taskbar.percent {return}
+	w.taskbar.state, w.taskbar.percent = state, percent
 	// Unavailable: the taskbar list could not start, which its first use already logged.
 	if err := platform_api.window_set_progress(&app.platform, w.id, state, percent);
 	   err != .None && err != .Unavailable {

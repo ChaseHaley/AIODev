@@ -1,8 +1,8 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
 
 @(test)
 workspace_delete_plan_derives_owner_destination_and_first_tab :: proc(t: ^testing.T) {
@@ -23,7 +23,7 @@ workspace_delete_plan_derives_owner_destination_and_first_tab :: proc(t: ^testin
 	// The first eligible workspace after the subject that nobody displays becomes the destination.
 	plan := app.workspace_delete_plan(&state, &two)
 	testing.expect_value(t, plan.workspace, u32(2))
-	testing.expect_value(t, plan.owner, platform.Window_Id(7))
+	testing.expect_value(t, plan.owner, input.Window_Id(7))
 	testing.expect_value(t, plan.destination, u32(3))
 	testing.expect(t, !plan.fresh)
 	testing.expect(t, plan.created_tab)
@@ -59,7 +59,7 @@ workspace_delete_plan_replaces_only_an_owned_or_last_workspace :: proc(t: ^testi
 	// A hidden workspace among others has nobody to replace and leaves no destination.
 	plan := app.workspace_delete_plan(&state, &one)
 	testing.expect_value(t, plan.workspace, u32(1))
-	testing.expect_value(t, plan.owner, platform.Window_Id(0))
+	testing.expect_value(t, plan.owner, input.Window_Id(0))
 	testing.expect_value(t, plan.destination, u32(0))
 	testing.expect(t, !plan.fresh && !plan.created_tab)
 
@@ -114,6 +114,6 @@ workspace_delete_plan_skips_provisional_destinations_and_compares_identity :: pr
 	// Losing the owning window changes the identity, so the question must reopen.
 	ordered_remove(&state.windows, 0)
 	plan = app.workspace_delete_plan(&state, &two)
-	testing.expect_value(t, plan.owner, platform.Window_Id(0))
+	testing.expect_value(t, plan.owner, input.Window_Id(0))
 	testing.expect(t, !app.workspace_delete_plan_same(plan, recorded))
 }

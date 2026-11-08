@@ -1,6 +1,6 @@
 package pty
 
-import "aio:links"
+import "aio:localpath"
 import "core:log"
 import "core:strings"
 import "core:unicode/utf8"
@@ -9,7 +9,10 @@ import w "core:sys/windows"
 // A working directory must stay on this machine. UNC, device, and drive-relative forms are refused
 // before any filesystem access. An accepted path is resolved and its final target checked, so a
 // junction or mapped drive cannot smuggle in a remote share. Relative paths stay allowed and are
-// resolved against this process's current directory.
+// resolved against this process's current directory. This is deliberately not the click-time file
+// admission in localpath: a directory may be relative and may cross a local junction, and only its
+// final target must be a local directory on a drive that is neither remote nor rootless. Only the
+// path grammar is shared.
 @(require_results)
 working_directory_is_local :: proc(path: string) -> bool {
 	if path == "" || strings.contains(path, "\x00") || !utf8.valid_string(path) {
@@ -79,29 +82,18 @@ open_failure :: proc() -> bool {
 // drive letter not followed by a separator is a drive-relative path whose target is not obvious.
 @(private, require_results)
 local_path_shape :: proc(path: string) -> bool {
-	if len(path) >= 2 && path_separator(path[0]) && path_separator(path[1]) {return false}
-	if len(path) >= 4 && path_separator(path[0]) && path[1] == '?' && path[2] == '?' &&
-	   path_separator(path[3]) {
+	separator :: localpath.is_separator
+	if len(path) >= 2 && separator(path[0]) && separator(path[1]) {return false}
+	if len(path) >= 4 && separator(path[0]) && path[1] == '?' && path[2] == '?' && separator(path[3]) {
 		return false
 	}
-	if len(path) >= 2 && path[1] == ':' && ascii_letter(path[0]) {
-		if len(path) == 2 || !path_separator(path[2]) {return false}
-	}
+	if localpath.has_drive_prefix(path) && !localpath.is_drive_absolute(path) {return false}
 	return true
 }
 
-@(private, require_results)
-path_separator :: proc(c: u8) -> bool {
-	return c == '\\' || c == '/'
-}
-
-@(private, require_results)
-ascii_letter :: proc(c: u8) -> bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
 // A resolved absolute path must have a drive root that is not a network drive, and its characters
-// must satisfy the same local-path rules used by the link opener.
+// must satisfy the same local-path rules used by the link opener. This shape check runs on UTF-16
+// before any conversion is allocated.
 @(private, require_results)
 local_absolute_wide :: proc(path: []u16) -> bool {
 	if len(path) < 3 || path[1] != ':' || (path[2] != '\\' && path[2] != '/') {
@@ -134,7 +126,7 @@ local_final_path :: proc(path: []u16) -> bool {
 
 @(private, require_results)
 local_drive_path :: proc(path: string) -> bool {
-	if !links.local_absolute(path) {return false}
+	if !localpath.local_absolute(path) {return false}
 	root := [4]u16{u16(path[0]), ':', '\\', 0}
 	drive := GetDriveTypeW(cstring16(&root[0]))
 	return drive != DRIVE_REMOTE && drive != DRIVE_NO_ROOT_DIR

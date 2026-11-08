@@ -1,9 +1,9 @@
 package ui
 
 import "aio:font"
-import "aio:glyphs"
 import "aio:markdown"
 import "aio:render"
+import "core:log"
 import "core:math"
 
 // A rendered Markdown document: every run measured and placed once per width, then drawn only where
@@ -16,9 +16,6 @@ MARKDOWN_COLUMN :: f32(720)
 MARKDOWN_BODY_RATIO :: f32(15.0 / 13)
 @(private = "file")
 MARKDOWN_VISUAL_DEPTH :: 6
-// The same size as a confirmation's option box.
-@(private = "file")
-TASK_BOX :: f32(16)
 
 Markdown_Face :: enum u8 {
 	Body,
@@ -132,6 +129,13 @@ Markdown_View :: struct {
 	anchor:     int,
 	head:       int,
 	scale:      f32,
+	// A layout append failed during this fit; fit discards the partial layout.
+	failed:     bool,
+}
+
+@(private = "file")
+layout_append :: proc(v: ^Markdown_View, array: ^[dynamic]$T, value: T) {
+	if _, err := append(array, value); err != nil {v.failed = true}
 }
 
 // Where a view sits in its pane.
@@ -190,11 +194,20 @@ markdown_view_fit :: proc(
 	clear(&v.runs)
 	clear(&v.lines)
 	clear(&v.boxes)
+	v.failed = false
 	y: f32
 	for i := 0; i < len(doc.blocks); {
 		i, y = layout_block(v, doc, i, y)
 	}
 	v.height = y
+	if v.failed {
+		// Nothing partial is shown or kept as current: the view is empty until a later fit succeeds.
+		log.errorf("markdown: no room to lay out the document")
+		clear(&v.runs)
+		clear(&v.lines)
+		clear(&v.boxes)
+		v.height, v.width = 0, -1
+	}
 }
 
 @(private = "file")
@@ -252,7 +265,7 @@ items_collect :: proc(v: ^Markdown_View, doc: ^markdown.Document, block: markdow
 				advance = rune_advance(v, face, r),
 				r       = r,
 			}
-			append(&v.items, item)
+			layout_append(v, &v.items, item)
 		}
 	}
 }
@@ -308,11 +321,12 @@ flow :: proc(
 			text := string(doc.text[block.marker_start:block.marker_end])
 			marker_width := string_advance(v, .Body, text)
 			flags: bit_set[Run_Flag;u8]
-			if text == "☐" || text == "☑" {
-				marker_width = TASK_BOX * v.scale
-				flags = text == "☐" ? {.Task_Open} : {.Task_Done}
+			if block.task != .None {
+				marker_width = CHECKBOX_SIZE * v.scale
+				flags = block.task == .Open ? {.Task_Open} : {.Task_Done}
 			}
-			append(
+			layout_append(
+				v,
 				&v.runs,
 				Run {
 					x = x - marker_width - SPACE_2 * v.scale,
@@ -347,16 +361,16 @@ flow :: proc(
 				color = .Link in style ? .Accent : color,
 			}
 			if .Strike in style {run.flags += {.Strike}}
-			append(&v.runs, run)
+			layout_append(v, &v.runs, run)
 			if .Code in style && block.kind != .Code {
 				pad := 3 * v.scale
 				rect := render.Rect{pen - pad, y + v.scale, run_width + 2 * pad, height - 2 * v.scale}
-				append(&v.boxes, Box{rect, .Fill, RADIUS_CONTROL * v.scale})
+				layout_append(v, &v.boxes, Box{rect, .Fill, RADIUS_CONTROL * v.scale})
 			}
 			pen += run_width
 		}
 		line.run_count = i32(len(v.runs)) - line.first_run
-		append(&v.lines, line)
+		layout_append(v, &v.lines, line)
 		return y + height
 	}
 	start, pen, last_break, first := 0, f32(0), -1, true
@@ -425,12 +439,12 @@ layout_block :: proc(
 	case .Code:
 		pad := SPACE_3 * s
 		box := len(v.boxes)
-		append(&v.boxes, Box{{x, y, width, 0}, .Fill, RADIUS_CONTROL * s})
+		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Fill, RADIUS_CONTROL * s})
 		y = flow(v, doc, block, x + pad, max(width - 2 * pad, 1), y + pad, .Text) + pad
-		v.boxes[box].rect.height = y - top
+		if box < len(v.boxes) {v.boxes[box].rect.height = y - top}
 	case .Rule:
 		height := max(1, math.round(s))
-		append(&v.boxes, Box{{x, y, width, height}, .Line, 0})
+		layout_append(v, &v.boxes, Box{{x, y, width, height}, .Line, 0})
 		y += height
 	case .Table_Cell:
 		next, y = layout_table(v, doc, index, x, width, y)
@@ -440,7 +454,7 @@ layout_block :: proc(
 		joined := index > 0 && doc.blocks[index - 1].quote_depth > depth
 		reach := joined ? gap : 0
 		rect := render.Rect{bar, top - reach, math.round(2 * s), y - top + reach}
-		append(&v.boxes, Box{rect, .Line, 0})
+		layout_append(v, &v.boxes, Box{rect, .Line, 0})
 	}
 	return next, y
 }
@@ -521,7 +535,7 @@ layout_table :: proc(
 		}
 		y = bottom + pad / 2
 		for &line in v.lines[first_line:] {line.band_top, line.band_bottom = row_top, y}
-		append(&v.boxes, Box{{x, y, table_width, rule}, .Line, 0})
+		layout_append(v, &v.boxes, Box{{x, y, table_width, rule}, .Line, 0})
 		y += rule
 	}
 	return end, y
@@ -720,7 +734,7 @@ draw_run :: proc(
 	color: render.Color,
 	find: Markdown_Find,
 	selected_from, selected_to: int,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	m := &v.faces[run.face]
 	shown := text^
 	shown.size_px = m.size_px
@@ -753,7 +767,7 @@ markdown_draw :: proc(
 	theme: Theme,
 	find: Markdown_Find = {},
 	hover_link := -1,
-) -> glyphs.Result {
+) -> render.Build_Status {
 	if render.push_layer(list, g.area, 0) != .None {return .Ok}
 	origin_y := g.top - f32(v.scroll)
 	visible_top := g.area.y - origin_y
@@ -780,11 +794,8 @@ markdown_draw :: proc(
 			run := v.runs[line.first_run + i]
 			x := run.x + g.left
 			if run.flags & {.Task_Open, .Task_Done} != {} {
-				box := render.Rect{x, line.top + origin_y + (line.height - run.width) / 2, run.width, run.width}
-				done := .Task_Done in run.flags
-				radius := RADIUS_CONTROL * v.scale
-				draw_rect(list, {rect = box, color = done ? theme.accent : theme.border, radius = radius})
-				if done {icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, v.scale)}
+				box := checkbox_rect(x, line.top + origin_y, line.height, v.scale)
+				checkbox_draw(list, box, .Task_Done in run.flags, theme, v.scale)
 				continue
 			}
 			draw_matches(v, doc, list, find, run, x, line.top + origin_y, line.height)

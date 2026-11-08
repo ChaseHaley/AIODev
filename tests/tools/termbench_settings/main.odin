@@ -30,7 +30,8 @@ main :: proc() {
 	issue := diagnostics[0]
 	require(issue.line == 1 && issue.key == "shell.command" && issue.kind == .Invalid_Value &&
 		issue.message == "expected a closing double quote", "unexpected legacy command diagnostic")
-	require(before.shell.command != command, "legacy command unexpectedly round-tripped")
+	require(settings.profile_base(&before.profiles).command != command,
+		"legacy command unexpectedly round-tripped")
 
 	after, issues, after_error := settings.parse(read_text(os.args[2]))
 	defer settings.destroy(&after)
@@ -40,7 +41,8 @@ main :: proc() {
 		fmt.eprintf("line %d %s: %s\n", problem.line, problem.key, problem.message)
 	}
 	require(len(issues) == 0, "generated settings produced diagnostics")
-	require(after.shell.command == command, "shell.command changed during settings round-trip")
-	require(after.shell.directory == directory, "shell.directory changed during settings round-trip")
+	base := settings.profile_base(&after.profiles)
+	require(base.command == command, "shell.command changed during settings round-trip")
+	require(base.directory == directory, "shell.directory changed during settings round-trip")
 	require(after.process.padding_groups == groups, "process.padding_groups changed during settings round-trip")
 }

@@ -23,7 +23,6 @@ Command :: struct {
 	id:                  Command_Id,
 	name, title:         string,
 	shortcuts, defaults: Shortcut_Set,
-	disabled:            bool,
 	// The arguments the command accepts, and those it cannot run without.
 	arguments, required: Arguments,
 	// Hidden commands serve the CLI and scripts: they stay out of the palette and shortcut lists.
@@ -108,13 +107,29 @@ logical_key :: proc(physical: input.Key, unshifted: rune) -> input.Key {
 	return physical
 }
 
+// The modifiers a chord compares: the binding's held modifiers and Leader, without the Physical flag,
+// which chooses the key identity rather than naming a held key.
+@(private)
+chord_modifiers :: proc(modifiers: input.Modifiers) -> input.Modifiers {
+	return normalized(modifiers) - {.Physical}
+}
+
+// The one match rule: a Physical binding names the pressed position, any other the layout's key.
+@(private)
+binding_matches :: proc(
+	binding: Shortcut,
+	physical, logical: input.Key,
+	modifiers: input.Modifiers,
+) -> bool {
+	key := .Physical in binding.modifiers ? physical : logical
+	return binding.key == key && chord_modifiers(binding.modifiers) == modifiers
+}
+
 // A prefix reserves the same named chord in both identity modes. Direct
 // logical/physical bindings remain distinct and retain physical-first dispatch.
 prefix_conflicts :: proc(prefix, binding: Shortcut) -> bool {
-	return(
-		prefix.key == binding.key &&
-		normalized(prefix.modifiers) - {.Physical} == normalized(binding.modifiers) - {.Physical} \
-	)
+	same := chord_modifiers(prefix.modifiers) == chord_modifiers(binding.modifiers)
+	return prefix.key == binding.key && same
 }
 
 shortcut_matches :: proc(
@@ -123,11 +138,8 @@ shortcut_matches :: proc(
 	modifiers: input.Modifiers,
 	unshifted: rune,
 ) -> bool {
-	key := .Physical in binding.modifiers ? physical : logical_key(physical, unshifted)
-	return(
-		binding.key == key &&
-		normalized(binding.modifiers) - {.Physical} == normalized(modifiers) - {.Physical} \
-	)
+	logical := logical_key(physical, unshifted)
+	return binding_matches(binding, physical, logical, chord_modifiers(modifiers))
 }
 
 @(require_results)
@@ -138,18 +150,30 @@ find_by_key :: proc(
 	unshifted: rune,
 ) -> ^Command {
 	logical := logical_key(physical, unshifted)
-	mods := normalized(modifiers) - {.Physical}
+	mods := chord_modifiers(modifiers)
 	fallback: ^Command
 	for &item in registry.items {
 		for binding in active_shortcuts(&item) {
-			if normalized(binding.modifiers) - {.Physical} != mods {continue}
-			is_physical := .Physical in binding.modifiers
-			if binding.key != (is_physical ? physical : logical) {continue}
-			if is_physical {return &item}
+			if !binding_matches(binding, physical, logical, mods) {continue}
+			if .Physical in binding.modifiers {return &item}
 			if fallback == nil {fallback = &item}
 		}
 	}
 	return fallback
+}
+
+// Whether two shortcuts are one binding: the same key and the same binding modifiers.
+shortcut_equal :: proc(a, b: Shortcut) -> bool {
+	return a.key == b.key && normalized(a.modifiers) == normalized(b.modifiers)
+}
+
+// Whether two sets bind the same shortcuts in the same order.
+shortcut_set_equal :: proc(a, b: Shortcut_Set) -> bool {
+	if a.count != b.count {return false}
+	for i in 0 ..< a.count {
+		if !shortcut_equal(a.items[i], b.items[i]) {return false}
+	}
+	return true
 }
 
 @(require_results)
@@ -157,8 +181,7 @@ unbind :: proc(registry: ^Registry, id: Command_Id, shortcut: Shortcut) -> bool 
 	item := find(registry, id)
 	if item == nil {return false}
 	for binding, i in active_shortcuts(item) {
-		if binding.key != shortcut.key ||
-		   normalized(binding.modifiers) != normalized(shortcut.modifiers) {
+		if !shortcut_equal(binding, shortcut) {
 			continue
 		}
 		for j := i;
@@ -242,21 +265,42 @@ find_name :: proc(registry: ^Registry, name: string) -> ^Command {
 find_by_shortcut :: proc(registry: ^Registry, shortcut: Shortcut) -> ^Command {
 	for &item in registry.items {
 		for binding in active_shortcuts(&item) {
-			if binding.key == shortcut.key &&
-			   normalized(binding.modifiers) == normalized(shortcut.modifiers) {
-				return &item
-			}
+			if shortcut_equal(binding, shortcut) {return &item}
 		}
 	}
 	return nil
 }
 
-@(require_results)
-set_enabled :: proc(registry: ^Registry, id: Command_Id, enabled: bool) -> bool {
-	command := find(registry, id)
-	if command == nil {return false}
-	command.disabled = !enabled
-	return true
+// Where a command is listed: its palette category and its group among the settings shortcuts.
+Category :: struct {
+	title, group: string,
+}
+
+// The category of a command name's namespace, such as Panes for pane.split_right.
+category :: proc(name: string) -> Category {
+	@(static, rodata)
+	categories := [?]struct {
+		namespace: string,
+		category:  Category,
+	} {
+		{"app", {"Application", "Application Shortcuts"}},
+		{"terminal", {"Terminal", "Terminal Shortcuts"}},
+		{"pane", {"Panes", "Pane Shortcuts"}},
+		{"tab", {"Tabs", "Tab Shortcuts"}},
+		{"workspace", {"Workspaces", "Workspace Shortcuts"}},
+		{"window", {"Windows", "Window Shortcuts"}},
+		{"settings", {"Settings", "Settings Shortcuts"}},
+		{"edit", {"Edit", "Edit Shortcuts"}},
+		{"view", {"View", "View Shortcuts"}},
+		{"status", {"Status", "Status Shortcuts"}},
+		{"profile", {"Profiles", "Profile Shortcuts"}},
+	}
+	dot := strings.index_byte(name, '.')
+	namespace := dot < 0 ? name : name[:dot]
+	for entry in categories {
+		if entry.namespace == namespace {return entry.category}
+	}
+	return {"Commands", "Other Shortcuts"}
 }
 
 @(private)
@@ -370,6 +414,20 @@ KEY_LABELS :: #partial [input.Key]string {
 	.Wake_Up                = "Wake",
 }
 
+// Each binding modifier's word, in the order labels write them; parsing accepts them in any order.
+@(private, rodata)
+modifier_words := [?]struct {
+	modifier: input.Modifier,
+	word:     string,
+} {
+	{.Leader, "Leader"},
+	{.Physical, "Physical"},
+	{.Control, "Ctrl"},
+	{.Shift, "Shift"},
+	{.Alt, "Alt"},
+	{.Super, SUPER_LABEL},
+}
+
 @(require_results)
 shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 	@(static, rodata)
@@ -381,25 +439,11 @@ shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
 		key = label
 	}
 	length := 0
-	for modifier in ([?]input.Modifier{.Leader, .Physical, .Control, .Shift, .Alt, .Super}) {
-		if modifier not_in shortcut.modifiers {continue}
-		text: string
-		#partial switch modifier {
-		case .Control:
-			text = "Ctrl+"
-		case .Shift:
-			text = "Shift+"
-		case .Alt:
-			text = "Alt+"
-		case .Super:
-			text = SUPER_LABEL + "+"
-		case .Leader:
-			text = "Leader+"
-		case .Physical:
-			text = "Physical+"
-		}
-		if len(out) - length < len(text) {return "", .Output_Too_Small}
-		length += copy(out[length:], text)
+	for entry in modifier_words {
+		if entry.modifier not_in shortcut.modifiers {continue}
+		if len(out) - length < len(entry.word) + 1 {return "", .Output_Too_Small}
+		length += copy(out[length:], entry.word)
+		length += copy(out[length:], "+")
 	}
 	if len(out) - length < len(key) {return "", .Output_Too_Small}
 	length += copy(out[length:], key)
@@ -419,6 +463,14 @@ shortcut_text :: proc(shortcut: Shortcut, out: []u8) -> string {
 	label, err := shortcut_label(shortcut, out)
 	assert(err == .None)
 	return label
+}
+
+// The label of the command's first active shortcut, the one menus and hints show, written to out
+// (SHORTCUT_TEXT_CAP bytes); empty when the command is unknown or unbound.
+@(require_results)
+active_shortcut_text :: proc(command: ^Command, out: []u8) -> string {
+	if command == nil || command.shortcuts.count == 0 {return ""}
+	return shortcut_text(command.shortcuts.items[0], out)
 }
 
 // The stored text of alternatives: each trimmed, empty ones dropped, joined by SHORTCUT_SEPARATOR.
@@ -514,6 +566,31 @@ rebind :: proc(registry: ^Registry, overrides: []Override, errors: []Error) -> E
 	return .None
 }
 
+// The binding modifier a word names, such as Ctrl; case does not matter.
+@(private, require_results)
+modifier_named :: proc(word: string) -> (input.Modifier, bool) {
+	for entry in modifier_words {
+		if strings.equal_fold(word, entry.word) {return entry.modifier, true}
+	}
+	return {}, false
+}
+
+// Bare modifiers joined by `+`, such as `Ctrl+Shift`: each part names one modifier, once.
+@(require_results)
+parse_modifiers :: proc(text: string) -> (input.Modifiers, bool) {
+	modifiers: input.Modifiers
+	rest := text
+	for {
+		plus := strings.index_byte(rest, '+')
+		part := plus < 0 ? rest : rest[:plus]
+		modifier, named := modifier_named(strings.trim_space(part))
+		if !named || modifier in modifiers {return {}, false}
+		modifiers += {modifier}
+		if plus < 0 {return modifiers, true}
+		rest = rest[plus + 1:]
+	}
+}
+
 @(require_results)
 parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 	rest := strings.trim_space(text)
@@ -521,26 +598,8 @@ parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 	for {
 		plus := strings.index_byte(rest, '+')
 		if plus < 0 {break}
-		prefix := strings.trim_space(rest[:plus])
-		modifier: input.Modifier
-		recognized := true
-		switch {
-		case strings.equal_fold(prefix, "Ctrl"):
-			modifier = .Control
-		case strings.equal_fold(prefix, "Shift"):
-			modifier = .Shift
-		case strings.equal_fold(prefix, "Alt"):
-			modifier = .Alt
-		case strings.equal_fold(prefix, SUPER_LABEL):
-			modifier = .Super
-		case strings.equal_fold(prefix, "Leader"):
-			modifier = .Leader
-		case strings.equal_fold(prefix, "Physical"):
-			modifier = .Physical
-		case:
-			recognized = false
-		}
-		if !recognized {break}
+		modifier, named := modifier_named(strings.trim_space(rest[:plus]))
+		if !named {break}
 		if modifier in modifiers {return {}, false}
 		modifiers += {modifier}
 		rest = strings.trim_space(rest[plus + 1:])
@@ -554,28 +613,75 @@ parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 	return {}, false
 }
 
+// One alternative ends at the first comma boundary that parses, not necessarily the first comma:
+// the comma itself can be the key. `last` distinguishes a final comma key from a trailing separator.
+@(private)
+shortcut_alternative_take :: proc(text: string) -> (
+	part, rest: string, shortcut: Shortcut, found, last: bool,
+) {
+	for end in 1 ..= len(text) {
+		if end < len(text) && text[end] != ',' {continue}
+		chord, ok := parse_shortcut(text[:end])
+		if !ok {continue}
+		if end == len(text) {return strings.trim_space(text[:end]), "", chord, true, true}
+		return strings.trim_space(text[:end]), strings.trim_space(text[end + 1:]), chord, true, false
+	}
+	return
+}
+
 @(require_results)
 parse_shortcuts :: proc(text: string, out: []Shortcut) -> (int, Error) {
 	rest := strings.trim_space(text)
 	count := 0
 	for rest != "" {
-		found := false
-		for end in 1 ..= len(rest) {
-			if end < len(rest) && rest[end] != ',' {continue}
-			shortcut, ok := parse_shortcut(rest[:end])
-			if !ok {continue}
-			if count == len(out) {return 0, .Output_Too_Small}
-			out[count] = shortcut
-			count += 1
-			if end == len(rest) {return count, .None}
-			rest = strings.trim_space(rest[end + 1:])
-			if rest == "" {return 0, .Invalid_Shortcut}
-			found = true
-			break
-		}
+		_, next, shortcut, found, last := shortcut_alternative_take(rest)
 		if !found {return 0, .Invalid_Shortcut}
+		if count == len(out) {return 0, .Output_Too_Small}
+		out[count] = shortcut
+		count += 1
+		if last {return count, .None}
+		rest = next
+		if rest == "" {return 0, .Invalid_Shortcut}
 	}
 	return count, .None
+}
+
+// An allocation-free cursor over borrowed, trimmed source labels. It uses the same complete-value
+// parse/fallback decision as the owned canonical labels, so malformed values still display as typed.
+Shortcut_Alternatives :: struct {
+	rest: string,
+	parsed, remaining: bool,
+}
+
+shortcut_alternatives_begin :: proc(text: string) -> Shortcut_Alternatives {
+	trimmed := strings.trim_space(text)
+	cursor := Shortcut_Alternatives{rest = trimmed, parsed = true, remaining = trimmed != ""}
+	rest := trimmed
+	for rest != "" {
+		_, next, _, found, last := shortcut_alternative_take(rest)
+		if !found || (!last && next == "") {cursor.parsed = false; break}
+		if last {break}
+		rest = next
+	}
+	return cursor
+}
+
+@(require_results)
+shortcut_alternatives_next :: proc(cursor: ^Shortcut_Alternatives) -> (part: string, ok: bool) {
+	if !cursor.remaining {return}
+	if cursor.parsed {
+		taken, rest, _, _, last := shortcut_alternative_take(cursor.rest)
+		cursor.rest, cursor.remaining = rest, !last
+		return taken, true
+	}
+	end := strings.index_byte(cursor.rest, ',')
+	if end < 0 {
+		cursor.remaining = false
+		return strings.trim_space(cursor.rest), true
+	}
+	part = strings.trim_space(cursor.rest[:end])
+	cursor.rest = cursor.rest[end + 1:]
+	return part, true
 }
 
 // The alternatives of a stored value, as display-ready labels: the canonical label of each parsed

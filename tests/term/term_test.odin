@@ -7,7 +7,6 @@ import "core:testing"
 import "core:time"
 import "aio:ghostty"
 import "aio:input"
-import "aio:platform"
 import "aio:term"
 
 POWERSHELL :: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command "
@@ -33,9 +32,15 @@ config :: proc(command: string) -> term.Config {
 			surface_width = 800,
 			surface_height = 480,
 		},
-		scrollback_lines = 1000,
+		options = {scrollback_lines = 1000, program_status_enabled = true},
 		colors = {foreground = {220, 220, 220}, background = {16, 16, 16}, cursor = {255, 255, 255}},
 	}
+}
+
+// The capture read the terminal, rather than holding or failing.
+updated :: proc(result: term.Capture_Result) -> bool {
+	_, ok := result.(term.Capture_Updated)
+	return ok
 }
 
 start :: proc(t: ^testing.T, command: string, wakes: ^Wakes) -> ^term.Session {
@@ -74,7 +79,7 @@ exited :: proc(s: ^term.Session, _: string) -> bool {
 	return term.status(s).kind == .Exited
 }
 
-press_and_release :: proc(s: ^term.Session, event: platform.Key_Event) {
+press_and_release :: proc(s: ^term.Session, event: input.Key_Event) {
 	down := event
 	down.pressed = true
 	term.send_key(s, down)
@@ -85,7 +90,7 @@ press_and_release :: proc(s: ^term.Session, event: platform.Key_Event) {
 	term.send_key(s, up)
 }
 
-enter :: proc(modifiers: input.Modifiers, state: u32) -> platform.Key_Event {
+enter :: proc(modifiers: input.Modifiers, state: u32) -> input.Key_Event {
 	return {
 		key = .Enter,
 		modifiers = modifiers,

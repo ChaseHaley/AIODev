@@ -11,10 +11,12 @@ import fixtures "../fixtures"
 @(test)
 shortcut_summary_keeps_only_the_first_label_and_the_additional_count :: proc(t: ^testing.T) {
 	for test in ([?]struct {value, first: string, additional: int} {
-		{"", "", 0}, {"none", "", 0}, {"Ctrl+K", "Ctrl+K", 0},
+		{"", "", 0}, {"Ctrl+K", "Ctrl+K", 0},
 		{"Ctrl+K, Ctrl+Shift+K", "Ctrl+K", 1},
 		{" Ctrl+K , Ctrl+Shift+K, Alt+K ", "Ctrl+K", 2},
 		{"Ctrl+K, , Alt+K", "Ctrl+K", 1},
+		// The comma key: the stored default of settings.open.
+		{"Ctrl+,", "Ctrl+,", 0}, {"Ctrl+,, Alt+K", "Ctrl+,", 1},
 	}) {
 		summary := ui.shortcut_summary(test.value)
 		testing.expect_value(t, summary.first, test.first)
@@ -42,7 +44,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 	defer commands.destroy(&r)
 	defer ui.palette_destroy(&p)
 	testing.expect_value(t, commands.set_shortcuts(&r, 1, {{.K, {.Control}}}), commands.Error.None)
-	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"))
+	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
 	for scale in ([?]f32{1, 1.5, 2}) {
 		ui.text_set_size(&text, 14 * scale)
 		l := ui.palette_layout(&p, 1000 * scale, 800 * scale, scale)
@@ -50,7 +52,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		render.draw_list_reset(&list)
 		_ = render.push_layer(&list, l.viewport)
 		testing.expect_value(t, ui.palette_binding_draw(&p, &r.items[0], 0, row, &list, &text, theme, l, {}),
-		                     glyphs.Result.Ok)
+		                     render.Build_Status.Ok)
 		if !testing.expect(t, len(list.glyphs) > 0) {return}
 		idle := list.glyphs[0].rect
 		parts := ui.palette_binding_parts(row, scale)
@@ -60,13 +62,13 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		input := ui.text_styled(&text, .Body)
 		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K", parts.field.x + ui.CONTROL_INSET * scale,
 		                     parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent,
-		                     theme.text), glyphs.Result.Ok)
+		                     theme.text), render.Build_Status.Ok)
 		if testing.expect(t, len(list.glyphs) > 0) {testing.expect_value(t, list.glyphs[0].rect, idle)}
 		ui.palette_key(&p, &r, press(.Enter, {.Control}))
 		render.draw_list_reset(&list)
 		_ = render.push_layer(&list, l.viewport)
 		testing.expect_value(t, ui.palette_binding_draw(&p, &r.items[0], 0, row, &list, &text, theme, l, {}),
-		                     glyphs.Result.Ok)
+		                     render.Build_Status.Ok)
 		if testing.expect(t, len(list.glyphs) > 0) {
 			testing.expect_value(t, list.glyphs[0].rect, idle)
 		}
@@ -78,7 +80,7 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		_ = render.push_layer(&list, l.viewport)
 		testing.expect_value(t, ui.draw_text(&input, &list, "Ctrl+K, +1", parts.field.x + ui.CONTROL_INSET * scale,
 		                     parts.field.y + (parts.field.height - input.line_height) / 2 + input.ascent,
-		                     theme.text), glyphs.Result.Ok)
+		                     theme.text), render.Build_Status.Ok)
 		expected := make([]render.Glyph_Instance, len(list.glyphs), context.temp_allocator)
 		copy(expected, list.glyphs[:])
 		for editing in ([?]bool{false, true}) {
@@ -86,14 +88,14 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 			render.draw_list_reset(&list)
 			_ = render.push_layer(&list, l.viewport)
 			testing.expect_value(t, ui.palette_binding_draw(&p, &r.items[0], 0, row, &list, &text, theme, l, {}),
-			                     glyphs.Result.Ok)
+			                     render.Build_Status.Ok)
 			testing.expect_value(t, len(list.glyphs), len(expected))
 			for glyph, i in list.glyphs {
 				if i < len(expected) {testing.expect_value(t, glyph.atlas, expected[i].atlas)}
 			}
 			if editing {
-				if b := binding_editor(&p); testing.expect(t, b != nil) {
-					testing.expect_value(t, ui.editor_row(b).value, "Ctrl+K, Alt+K")
+				if b, open := p.edit.(ui.Shortcut_Edit); testing.expect(t, open) {
+					testing.expect_value(t, b.saved, "Ctrl+K, Alt+K")
 				}
 				ui.palette_key(&p, &r, press(.Escape))
 			}
@@ -104,14 +106,14 @@ shortcut_field_font_and_width_stay_constant_when_palette_edit_opens :: proc(t: ^
 		                                        value = "Ctrl+K, Alt+K"}, "Shortcuts"), nil)
 		ui.editor_filter(&e)
 		page := ui.editor_layout({0, 0, 1000 * scale, 800 * scale}, scale)
-		e.visible_rows = page.rows
+		ui.editor_fit(&e, page)
 		for selected in ([?]bool{false, true}) {
 			if selected {ui.editor_select_key(&e, "keys.test.alpha")} else {e.selected = 0}
 			e.scroll = 0
 			field := ui.editor_row_parts(&e, page, 1).field
 			testing.expect_value(t, field.width, parts.field.width)
 			render.draw_list_reset(&list)
-			testing.expect_value(t, ui.editor_draw(&e, page, &list, &text, theme, true), glyphs.Result.Ok)
+			testing.expect_value(t, ui.editor_draw(&e, page, &list, &text, theme, true), render.Build_Status.Ok)
 			count := 0
 			for glyph in list.glyphs {
 				center := [2]f32{glyph.rect.x + glyph.rect.width / 2, glyph.rect.y + glyph.rect.height / 2}

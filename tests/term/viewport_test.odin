@@ -1,13 +1,13 @@
 package term_test
 
+import "aio:input"
 import "core:fmt"
 import "core:testing"
 import "aio:ghostty"
-import "aio:platform"
 import "aio:term"
 
 cursor_in_viewport :: proc(t: ^testing.T, s: ^term.Session, state: ghostty.Render_State) -> bool {
-	if !testing.expect(t, term.capture(s, state)) {
+	if !testing.expect(t, updated(term.capture(s, state))) {
 		return false
 	}
 	cursor := ghostty.sized(ghostty.Render_State_Cursor)
@@ -46,7 +46,7 @@ only_text_input_returns_to_live_screen :: proc(t: ^testing.T) {
 		}
 		term.scroll_viewport(s, -50)
 		testing.expect(t, !cursor_in_viewport(t, s, state))
-		keys := [?]platform.Key_Event{
+		keys := [?]input.Key_Event{
 			{key = .Arrow_Left, pressed = true, native = {vk = 0x25, scan_code = 0x4b}},
 			{key = .F1, pressed = true, native = {vk = 0x70, scan_code = 0x3b}},
 			{key = .Shift_Left, pressed = true, native = {vk = 0x10, scan_code = 0x2a}},
@@ -59,7 +59,7 @@ only_text_input_returns_to_live_screen :: proc(t: ^testing.T) {
 		testing.expect(t, term.send_text(s, ""))
 		testing.expect_value(t, term.paste(s, ""), term.Paste_Result.Sent)
 		testing.expect(t, !cursor_in_viewport(t, s, state))
-		text_keys := [?]platform.Key_Event{
+		text_keys := [?]input.Key_Event{
 			{key = .A, pressed = true, text = "a", native = {vk = 'A', scan_code = 0x1e}},
 			{key = .Enter, pressed = true, text = "\r", native = {vk = 0x0d, scan_code = 0x1c}},
 			{key = .Backspace, pressed = true, text = "\x08", native = {vk = 0x08, scan_code = 0x0e}},

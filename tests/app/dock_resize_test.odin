@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:settings"
@@ -37,7 +38,9 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 					testing.expect_value(t, panel.y + panel.height, rail.y + rail.height)
 					testing.expect_value(t, w.dock_left_width, 0)
 					testing.expect(t, w.status_rail_reserve > 0)
-					for d in w.dividers {testing.expect(t, d.node != app.ACTIVITY_DIVIDER)}
+					for edge in w.dock_edges.edges[:w.dock_edges.count] {
+						testing.expect(t, edge != .Activity_Width)
+					}
 					continue
 				}
 				if side == .Left {
@@ -47,7 +50,7 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 					if d.axis != .Vertical {continue}
 					x := side == .Left ? panel.x + panel.width : panel.x
 					y := d.rect.y + d.rect.height / 2
-					before := w.tree.nodes[d.node].(layout.Split).ratio
+					before := app.window_tree(w).nodes[d.node].(layout.Split).ratio
 					pointer_expect_move(t, s, w, x, y, .Resize_All)
 					gesture_button(s, w, .Left, true, x, y)
 					testing.expect_value(t, divider_count(w), 2)
@@ -55,7 +58,7 @@ activity_dock_junctions_resize_in_both_orientations_and_sides :: proc(t: ^testin
 					rail_resize_drag_to(s, w, x + dx, y + 30 * scale)
 					after := app.status_panel_rect(s, w)
 					testing.expect_value(t, after.width - panel.width, 40 * scale)
-					testing.expect(t, w.tree.nodes[d.node].(layout.Split).ratio > before)
+					testing.expect(t, app.window_tree(w).nodes[d.node].(layout.Split).ratio > before)
 					gesture_button(s, w, .Left, false, x + dx, y + 30 * scale)
 					testing.expect_value(t, divider_count(w), 0)
 					break
@@ -71,7 +74,7 @@ activity_side_button_persists_setting_and_cancels_outside_or_on_capture_loss :: 
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "activity-side", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	saved, _ := app.settings_save_value(s, "status.panel", "true", "enable panel")
+	saved := app.settings_save_value(s, "status.panel", "true", "enable panel")
 	if !testing.expect(t, saved) {return}
 	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
 		r := app.status_panel_side_rect(s, w)
@@ -99,7 +102,7 @@ activity_side_button_persists_setting_and_cancels_outside_or_on_capture_loss :: 
 @(private)
 dock_click_at :: proc(s: ^app.App, w: ^app.Window, x, y: f32, time_ns: i64) {
 	for pressed in ([?]bool{true, false}) {
-		app.handle_event(s, platform.Mouse_Button_Event{window = w.id, button = .Left,
+		app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left,
 			pressed = pressed, x = i32(x), y = i32(y), time_ns = time_ns})
 	}
 }

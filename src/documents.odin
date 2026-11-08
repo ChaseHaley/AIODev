@@ -2,6 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:links"
+import "aio:localpath"
 import "aio:ui"
 import "core:log"
 import "core:path/filepath"
@@ -26,9 +27,9 @@ Document_Level :: enum {
 Document_List :: [dynamic]Document
 
 DOCUMENT_LEVEL_LIMIT :: 16
-// Longer than any path a link can resolve to or any address worth pinning.
+// Every path a link can resolve to fits, and so does any address worth pinning.
 @(private)
-DOCUMENT_TARGET_LIMIT :: 4096
+DOCUMENT_TARGET_LIMIT :: links.TARGET_BYTES
 
 // The lists one pane can see. A nil pane list means its content takes no pins of its own.
 Document_Scopes :: struct {
@@ -140,22 +141,10 @@ document_scopes :: proc(app: ^App, content: layout.Content) -> (scopes: Document
 		if workspace.provisional {continue}
 		for tab in workspace.tabs {
 			if layout.find_content(&tab.tree, content) == layout.INVALID_NODE {continue}
-			return {document_pane_list(app, content), &tab.documents, &workspace.documents}, true
+			return {content_documents(app, content), &tab.documents, &workspace.documents}, true
 		}
 	}
 	return {}, false
-}
-
-@(private, require_results)
-document_pane_list :: proc(app: ^App, content: layout.Content) -> ^Document_List {
-	switch content.kind {
-	case .Terminal:
-		if entry := session_find(app, content.id); entry != nil {return &entry.documents}
-	case .Markdown:
-		if pane := markdown_find(app, content.id); pane != nil {return &pane.documents}
-	case .Settings:
-	}
-	return nil
 }
 
 @(require_results)
@@ -206,16 +195,21 @@ document_pin :: proc(
 ) -> Document_Pin_Result {
 	destination := document_scope_list(scopes, level)
 	if destination == nil {return .Failed}
-	if !document_list_has(destination, document.target) && len(destination) >= DOCUMENT_LEVEL_LIMIT {
-		return .Level_Full
-	}
-	// The caller's document may borrow from a list about to give it up.
-	target, err := strings.clone(document.target, context.temp_allocator)
+	present := document_list_has(destination, document.target)
+	if !present && len(destination) >= DOCUMENT_LEVEL_LIMIT {return .Level_Full}
+	// The caller's document may borrow from a list about to give it up, so the stored copy and the
+	// destination's room exist before any list changes. A target already there frees its own slot.
+	target, err := strings.clone(document.target)
 	if err != nil {return .Failed}
+	if !present && reserve(destination, len(destination) + 1) != nil {
+		delete(target)
+		log.error("storing a pinned document failed")
+		return .Failed
+	}
 	for other in Document_Level {
 		if list := document_scope_list(scopes, other); list != nil {_ = document_list_remove(list, target)}
 	}
-	if !document_list_append(destination, {target, document.folder}) {return .Failed}
+	append(destination, Document{target, document.folder})
 	return .Pinned
 }
 
@@ -227,7 +221,7 @@ document_remove :: proc(scopes: Document_Scopes, level: Document_Level, target: 
 @(private, require_results)
 document_valid :: proc(target: string) -> bool {
 	if target == "" || len(target) > DOCUMENT_TARGET_LIMIT || !utf8.valid_string(target) {return false}
-	return document_is_web(target) || links.local_absolute(target)
+	return document_is_web(target) || localpath.local_absolute(target)
 }
 
 // Takes what a saved layout holds. A hand-edited or damaged entry never reaches an opener.
@@ -249,13 +243,4 @@ documents_copy :: proc(list: ^Document_List, from: []Document) {
 	for document in from {
 		if !document_list_append(list, document) {return}
 	}
-}
-
-// Opens what a click on the link it came from would open, with the same checks.
-document_open :: proc(app: ^App, w: ^Window, target: string) {
-	if document_is_web(target) {
-		if !open_link(app, target) {notify(app, .Error, "Could not open the link.")}
-		return
-	}
-	terminal_file_request(app, w, target)
 }

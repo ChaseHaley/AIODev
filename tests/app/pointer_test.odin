@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
@@ -15,7 +16,7 @@ pointer_expect_move :: proc(
 	shape: platform.Cursor_Shape,
 ) {
 	before := s.verify.pointer_updates
-	app.handle_event(s, platform.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)})
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)})
 	testing.expect_value(t, w.pointer_shape, shape)
 	testing.expect(t, s.verify.pointer_updates - before <= 1, "one move must not flash another cursor")
 }
@@ -111,10 +112,10 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	app.editor_open(s, w)
 	if !testing.expect(t, app.settings_active(w)) {return}
 	l := app.settings_layout(w)
-	if !testing.expect(t, ui.editor_select_key(&w.editor, "pane.show_headers")) {return}
+	if !testing.expect(t, pointer_settings_select_top(w, "pane.show_headers")) {return}
 	x, y := pointer_center(ui.editor_row_parts(&w.editor, l, w.editor.selected).toggle)
 	pointer_expect_move(t, s, w, x, y, .Hand)
-	if !testing.expect(t, ui.editor_select_key(&w.editor, "font.family")) {return}
+	if !testing.expect(t, pointer_settings_select_top(w, "font.family")) {return}
 	parts := ui.editor_row_parts(&w.editor, l, w.editor.selected)
 	x, y = pointer_center(parts.field)
 	pointer_expect_move(t, s, w, x, y, .Hand)
@@ -122,6 +123,14 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	pointer_expect_move(t, s, w, x, y, .Hand)
 	h, found := gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
-	x, y = pointer_center(h.buttons[int(ui.Header_Action.Split_Right) - 1])
+	x, y = pointer_center(h.buttons[.Split_Right])
 	pointer_expect_move(t, s, w, x, y, .Hand)
+}
+
+// Selection keeps a row inside the fitted page, possibly on its last row under the fixture's notice toast.
+@(private)
+pointer_settings_select_top :: proc(w: ^app.Window, key: string) -> bool {
+	if !ui.editor_select_key(&w.editor, key) {return false}
+	w.editor.scroll = w.editor.selected
+	return true
 }

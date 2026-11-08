@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:input"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -7,7 +8,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:control"
+import "aio:verify_protocol"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
@@ -45,7 +46,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 		testing.expect_value(t, err, nil)
 		return
 	}
-	if !testing.expect(t, app.tab_create(&state, second_workspace)) { return }
+	if _, created := app.tab_create(&state, second_workspace); !testing.expect(t, created) { return }
 	if !testing.expect(t, app.window_open(&state, second_workspace)) { return }
 	second := state.windows[1]
 	second_session := state.sessions[1].session
@@ -53,14 +54,14 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect(t, second_pid != 0 && second_pid != first_pid)
 	testing.expect(t, first.workspace == state.workspaces[0])
 	testing.expect(t, second.workspace == second_workspace)
-	testing.expect(t, first.tree != second.tree)
+	testing.expect(t, app.window_tree(first) != app.window_tree(second))
 	testing.expect_value(t, len(state.sessions), 2)
 	app.tick(&state)
 	when app.AIO_CONTROL {
 		first.focused, second.focused = true, false
-		testing.expect_value(t, app.verify_drive(&state, control.Window_Select{u64(second.id)}), control.Error.None)
+		testing.expect_value(t, app.verify_drive(&state, verify_protocol.Window_Select{u64(second.id)}), verify_protocol.Error.None)
 		entries, state_error := app.verify_state(&state)
-		testing.expect_value(t, state_error, control.Error.None)
+		testing.expect_value(t, state_error, verify_protocol.Error.None)
 		testing.expect_value(t, app.verify_value(entries, "session.id"), fmt.tprintf("%d", state.sessions[1].id))
 		testing.expect_value(t, app.verify_value(entries, "window.workspace_index"), "2")
 		testing.expect(t, app.verify_window(&state) == second)
@@ -114,7 +115,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect(t, !opened)
 	testing.expect_value(t, len(state.windows), 1)
 	if !testing.expect(t, app.window_open(&state, state.workspaces[0])) { return }
-	testing.expect(t, state.windows[1].tree == &state.workspaces[0].tabs[0].tree)
+	testing.expect(t, app.window_tree(state.windows[1]) == &state.workspaces[0].tabs[0].tree)
 	testing.expect_value(t, term.process_id(first_session), first_pid)
 	testing.expect_value(t, len(state.sessions), 2)
 
@@ -156,16 +157,20 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	moved_id := state.sessions[2].id
 	moved_pid := term.process_id(moved_session)
 	testing.expect(t, moved_pid != 0 && moved_pid != first_pid && moved_pid != second_pid)
-	if !testing.expect(t, app.pane_transfer(&state, second, source, destination,
-		source.tree.focus, destination.tree.focus, .Right, false)) { return }
+	if !testing.expect(t, app.pane_drop_commit(&state, second,
+		app.Pane_Grab{source, source.tree.focus}, second,
+		app.Pane_Drop{tab = destination, place = .Beside,
+			target = destination.tree.focus, direction = .Right})) { return }
 	testing.expect_value(t, len(first.panes), 1)
 	testing.expect_value(t, len(second.panes), 2)
 	testing.expect_value(t, destination.tree.nodes[destination.tree.focus].(layout.Pane).content.id, moved_id)
 	testing.expect_value(t, term.process_id(moved_session), moved_pid)
 	testing.expect_value(t, term.status(moved_session).kind, term.Status_Kind.Running)
 	testing.expect_value(t, len(state.sessions), 3)
-	if !testing.expect(t, app.pane_transfer(&state, second, source, destination,
-		source.tree.focus, destination.tree.focus, .Down, true)) { return }
+	if !testing.expect(t, app.pane_drop_commit(&state, second,
+		app.Pane_Grab{source, source.tree.focus}, second,
+		app.Pane_Drop{tab = destination, place = .Edge,
+			target = destination.tree.focus, direction = .Down})) { return }
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect(t, state.windows[0] == second)
 	testing.expect(t, app.workspace_find(&state, source_workspace_id) == nil)
@@ -179,7 +184,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	when app.AIO_CONTROL {
 		app.window_close(&state, second)
 		testing.expect(t, app.verify_window(&state) == nil)
-		testing.expect_value(t, state.verify.target_window, platform.Window_Id(0))
+		testing.expect_value(t, state.verify.target_window, input.Window_Id(0))
 		testing.expect_value(t, term.process_id(second_session), second_pid)
 		testing.expect_value(t, len(state.sessions), 3)
 	}
