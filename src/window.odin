@@ -60,6 +60,8 @@ Window :: struct {
 	tab_incoming: Tab_Incoming,
 	// A single pane has no header row, so its split controls appear while the pointer is near its top.
 	split_overlay: bool,
+	// The pane under the pointer. Its header shows its buttons, as the focused pane's does.
+	header_pane: Maybe(layout.Content),
 	list: render.Draw_List,
 	width, height: i32,
 	header_height: f32,

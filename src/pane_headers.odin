@@ -227,6 +227,7 @@ pane_header_draw :: proc(
 		if !w.split_overlay && !open {return .Ok}
 		return ui.split_overlay_draw(&w.list, app.theme, l, buttons, w.scale, w.pointer)
 	}
+	if !pane_header_buttons_shown(w, pane, open) {l.buttons, l.divider = {}, {}}
 	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 	title := content_pane_title(app, entry, pane.content)
 	directory := entry != nil ? entry.header.directory : content_directory(app, pane.content)
@@ -271,6 +272,32 @@ pane_header_draw :: proc(
 		status_phase(app, w, status),
 		badge.icon,
 	)
+}
+
+// A header row shows its buttons on the focused pane, the pane under the pointer and a pane whose document
+// menu is open. The others keep the buttons' space, so their titles stay put when the buttons appear.
+@(private = "file")
+pane_header_buttons_shown :: proc(w: ^Window, pane: layout.Pane_Rect, menu_open: bool) -> bool {
+	hovered, found := w.header_pane.?
+	return menu_open || pane_shows_focus(w, pane) || (found && hovered == pane.content)
+}
+
+// The surfaces that lie on a pane's card, so the pointer over one is over that pane.
+@(private = "file")
+PANE_HOVER_SURFACES :: bit_set[Pointer_Target] {
+	.Find, .Pane_Header, .Scrollbar, .Settings_Page, .Markdown_Page, .Content,
+}
+
+// Follows the pane under the pointer, whose header shows its buttons.
+@(private = "file")
+header_pane_update :: proc(w: ^Window, owner: Pointer_Target, x, y: f32) {
+	hovered: Maybe(layout.Content)
+	if owner in PANE_HOVER_SURFACES {
+		if pane, found := layout.hit_test(w.panes[:], x, y); found {hovered = pane.content}
+	}
+	if hovered == w.header_pane {return}
+	w.header_pane = hovered
+	w.dirty = true
 }
 
 // The header under the point, on the topmost pane there: a floating pane covers the headers below it.
@@ -430,6 +457,7 @@ header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private)
 header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
+	header_pane_update(w, owner, x, y)
 	in_pane := pointer_surfaces[owner].in_pane
 	split_overlay_update(w, x, y, in_pane && !selection_active(w))
 	over, target := pane_header_pointer(w, x, y, owner == .Pane_Header && !selection_active(w))
@@ -455,6 +483,14 @@ header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 header_cancel :: proc(_: ^App, w: ^Window) {
 	pane_header_cancel(w)
 	w.split_overlay = false
+}
+
+// The pointer left the window, so no pane is under it. Capture loss keeps the hovered pane, which stays
+// under the pointer.
+@(private)
+header_leave :: proc(app: ^App, w: ^Window) {
+	header_cancel(app, w)
+	w.header_pane = nil
 }
 
 // A pane drag follows the pointer once it has started, or while no modal surface is under it.
