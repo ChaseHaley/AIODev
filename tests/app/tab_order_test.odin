@@ -29,7 +29,7 @@ workspace_tab_choose_pairs_selection_marks_and_anchor :: proc(t: ^testing.T) {
 	workspace := app.Workspace{selection_anchor = 11}
 	defer delete(workspace.tabs)
 	for &tab in tabs {append(&workspace.tabs, &tab)}
-	for index in [?]int{2, 0, 0} {
+	for index in ([?]int{2, 0, 0}) {
 		for tab in workspace.tabs {tab.marked = true}
 		app.workspace_tab_choose(&workspace, index)
 		testing.expect_value(t, workspace.selected, index)

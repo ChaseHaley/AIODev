@@ -131,7 +131,11 @@ tooltip_pending :: proc(w: ^app.Window) -> bool {
 @(test)
 tooltip_profile_chevron_uses_shared_hit_bounds :: proc(t: ^testing.T) {
 	state: app.App
+	// A strip always holds a tab; with none, the new-tab button and chevron have no width.
+	tab: app.Tab
 	workspace: app.Workspace
+	append(&workspace.tabs, &tab)
+	defer delete(workspace.tabs)
 	w := app.Window{width = 900, height = 600, scale = 1, tabs_horizontal = true, workspace = &workspace}
 	r := app.tab_chevron_rect(&state, &w)
 	app.tooltip_hover(&state, &w, .Tabs,
