@@ -2,6 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:render"
+import "aio:term"
 import "aio:term_view"
 import "aio:ui"
 import "core:math"
@@ -72,6 +73,21 @@ pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Ins
 			rect.x + insets.padding,
 			rect.y + min(rect.height, insets.header) + insets.padding,
 		},
+	}
+}
+
+// The terminal geometry of a box in a `width` × `height` surface: the one conversion the first window's
+// size and every live fit share, so the two cannot drift.
+pane_box_geometry :: proc(box: Pane_Box, metrics: term_view.Metrics, width, height: i32) -> term.Geometry {
+	return {
+		columns = box.columns,
+		rows = box.rows,
+		cell_width = u32(metrics.cell_width),
+		cell_height = u32(metrics.cell_height),
+		surface_width = u32(width),
+		surface_height = u32(height),
+		padding_left = u32(box.origin.x),
+		padding_top = u32(box.origin.y),
 	}
 }
 

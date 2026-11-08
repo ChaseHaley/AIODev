@@ -55,6 +55,7 @@ shell_icon_load_accepts_local_png_and_refuses_device_and_oversized_files :: proc
 	app.shell_icon_load(&state)
 	testing.expect(t, state.shell_icon.width > 0, "a valid local PNG still loads")
 	testing.expect_value(t, len(state.notices.items), 0)
+	testing.expect_value(t, state.shell_icon.path, "icon.png")
 
 	// The extended-length alias reads the same local PNG, so only the path policy refuses it.
 	device := strings.concatenate({`\\?\`, icon})
@@ -63,6 +64,7 @@ shell_icon_load_accepts_local_png_and_refuses_device_and_oversized_files :: proc
 	app.shell_icon_load(&state)
 	testing.expect_value(t, state.shell_icon.width, 0)
 	testing.expect_value(t, len(state.notices.items), 1)
+	testing.expect_value(t, state.shell_icon.path, "")
 
 	// A valid PNG padded past the 32 MiB cap decodes only when the size guard is missing.
 	oversized := strings.concatenate({directory, `\oversized.png`})

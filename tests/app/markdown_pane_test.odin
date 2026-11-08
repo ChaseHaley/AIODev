@@ -319,6 +319,26 @@ a_markdown_id_is_never_read_as_a_session :: proc(t: ^testing.T) {
 	testing.expect_value(t, counts.sessions, 1)
 }
 
+// The palette and `command edit.copy` ask action_available, so it must agree with the keyboard, which
+// copies a document's selection.
+@(test)
+copy_is_available_in_a_document_with_a_selection :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Copy") {return}
+	w := f.state.windows[0]
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
+	if !testing.expect(t, app.markdown_active(w)) {return}
+	pane := f.state.markdown_panes[0]
+	document := app.markdown_document(pane)
+	if !testing.expect(t, document != nil) {return}
+	testing.expect(t, !app.action_available(&f.state, w, .Copy))
+	ui.markdown_select_all(&pane.view, document)
+	testing.expect(t, app.action_available(&f.state, w, .Copy))
+	ui.markdown_selection_clear(&pane.view)
+	testing.expect(t, !app.action_available(&f.state, w, .Copy))
+}
+
 @(test)
 the_poll_follows_changes_to_the_file :: proc(t: ^testing.T) {
 	f: Fixture

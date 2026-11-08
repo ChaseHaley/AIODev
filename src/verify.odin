@@ -74,7 +74,8 @@ when AIO_CONTROL {
 	// A drive answers once the focused content has been quiet DRIVE_IDLE_MS, or at DRIVE_TIMEOUT_MS.
 	DRIVE_IDLE_MS :: 50
 	DRIVE_TIMEOUT_MS :: 1000
-	// A resize may report only once the grid follows, which takes longer than the frame.
+	// A resize may report only once the grid follows, which takes longer than the frame; its drive waits this
+	// long instead of DRIVE_TIMEOUT_MS.
 	RESIZE_TIMEOUT_MS :: 5000
 	// The slowest fixed-budget drive, a gated resize, answers before a client stops waiting.
 	#assert(GATE_TIMEOUT_MS + RESIZE_TIMEOUT_MS < verify_protocol.CLIENT_TIMEOUT_MS)
@@ -298,7 +299,6 @@ when AIO_CONTROL {
 		case Verify_Drive:
 			started = s.started
 			idle_ms, timeout_ms = verify_drive_limits(s.message.request)
-			if _, resize := s.message.request.(verify_protocol.Resize); resize {timeout_ms = RESIZE_TIMEOUT_MS}
 		}
 		for w in app.windows {
 			if w.dirty && window_drawable(w) {return now, true}
@@ -348,9 +348,11 @@ when AIO_CONTROL {
 		return GATE_TIMEOUT_MS
 	}
 
-	// How long after a drive the content must be quiet, and the longest a drive waits for it.
+	// How long after a drive the content must be quiet, and the longest a drive waits for it and, for a
+	// resize, for the grid to follow.
 	verify_drive_limits :: proc(request: verify_protocol.Request) -> (idle_ms, timeout_ms: int) {
 		if r, run := request.(verify_protocol.Run); run {return r.idle_ms, r.timeout_ms}
+		if _, resize := request.(verify_protocol.Resize); resize {return DRIVE_IDLE_MS, RESIZE_TIMEOUT_MS}
 		return DRIVE_IDLE_MS, DRIVE_TIMEOUT_MS
 	}
 
@@ -654,12 +656,12 @@ when AIO_CONTROL {
 		state_text(r, "session.program.name", program.name)
 		program_icon_state_report(r, app, entry)
 		state_text(r, "session.header.directory", entry.header.directory)
-		// The shell source pane_icon draws: the badge text, or the image by its configured path.
+		// The shell source pane_icon draws: the badge text, or the image by the path it loaded from.
 		icon := entry.header.icon
 		switch pane_badge_source(app) {
 		case .Text:
 		case .Shell_Image:
-			icon = settings.profile_base(&app.settings.profiles).icon
+			icon = app.shell_icon.path
 		}
 		state_text(r, "session.header.icon", icon)
 		state_valuef(r, "grid.origin", "%d,%d", g.padding_left, g.padding_top)
@@ -1227,7 +1229,7 @@ when AIO_CONTROL {
 		if state_error != .None {verify_error(app, state_error); return}
 		if r, resize := d.message.request.(verify_protocol.Resize); resize {
 			if verify_value(entries, "grid.size") != fmt.tprintf("%dx%d", r.columns, r.rows) {
-				if elapsed < RESIZE_TIMEOUT_MS {return}
+				if elapsed < timeout_ms {return}
 				verify_reply(app, false, "error: resize timed out; use state to inspect grid.size")
 				return
 			}

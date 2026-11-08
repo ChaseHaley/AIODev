@@ -511,9 +511,12 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Move_Tab_Workspace = {"tab.move_workspace", "Move Tab to Workspace…", nil, .Host, {}},
 	.Move_Tab_New_Workspace = {"tab.move_new_workspace", "Move Tab to New Workspace", nil, .Host, {}},
 	.Pane_List = {"pane.list", "List Panes", nil, .Host, {hidden = true, control = .Unnamed}},
-	.Pane_Status = {"pane.status", "Show Pane Status", nil, .Host, {hidden = true, control = .Unnamed}},
+	.Pane_Status = {
+		cli_protocol.PANE_STATUS_COMMAND, "Show Pane Status", nil, .Host, {hidden = true, control = .Unnamed},
+	},
 	.Pane_Read = {
-		"pane.read", "Read Pane Screen", nil, .Host, {accepted = {.Lines}, hidden = true, control = .Pane},
+		cli_protocol.PANE_READ_COMMAND, "Read Pane Screen", nil, .Host,
+		{accepted = {.Lines}, hidden = true, control = .Pane},
 	},
 	.Pane_Send = {
 		"pane.send", "Send Text to Pane", nil, .Host,
@@ -638,11 +641,13 @@ command_window :: proc(app: ^App, w: ^Window, action: Action) -> ^Window {
 	return w
 }
 
-// Availability is command policy; each surface decides how an unavailable action is presented.
+// Availability is command policy; each surface decides how an unavailable action is presented. Copy needs
+// something to copy: the find query's keyboard, or a selection in the focused terminal or document.
 action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
 	if action != .Copy {return true}
-	entry := focused_session(app, w)
-	return ui.find_has_keyboard(&w.find) || entry != nil && term.has_selection(entry.session)
+	if ui.find_has_keyboard(&w.find) {return true}
+	if entry := focused_session(app, w); entry != nil {return term.has_selection(entry.session)}
+	return markdown_selected(app, w) != ""
 }
 
 // Runs one command for every interface, so it behaves the same from each (WORK-038). A window context

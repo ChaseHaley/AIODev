@@ -250,8 +250,8 @@ session_relaunch :: proc(app: ^App, entry: ^Session_Entry, config: term.Config) 
 	mark_all_dirty(app)
 }
 
-// The per-tick poll of every session: search progress, status, title, program status and bell, then
-// the windows whose shown screens changed.
+// The per-tick poll of every session: status, title, program status and bell, then the windows whose
+// shown screens changed.
 @(private)
 update_sessions :: proc(app: ^App) {
 	workspace_status_changed := false

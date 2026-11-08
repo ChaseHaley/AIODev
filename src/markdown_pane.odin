@@ -549,13 +549,17 @@ markdown_page :: proc(app: ^App, w: ^Window, pages: f64) {
 	markdown_scroll(w, pane, shown, int(pages * f64(page)))
 }
 
+// The focused document's selected text, empty when nothing is selected or no document is focused.
+@(require_results)
+markdown_selected :: proc(app: ^App, w: ^Window) -> string {
+	pane := markdown_focused(app, w)
+	if pane == nil {return ""}
+	document := markdown_document(pane)
+	return document == nil ? "" : ui.markdown_selected_text(&pane.view, document)
+}
+
 markdown_copy :: proc(app: ^App, w: ^Window) {
-	if pane := markdown_focused(app, w); pane != nil {
-		if document := markdown_document(pane); document != nil {
-			text := ui.markdown_selected_text(&pane.view, document)
-			if text != "" {clipboard_copy(app, text)}
-		}
-	}
+	if text := markdown_selected(app, w); text != "" {clipboard_copy(app, text)}
 }
 
 markdown_select_all :: proc(app: ^App, w: ^Window) {

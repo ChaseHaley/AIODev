@@ -40,9 +40,7 @@ pane_drag_show_source :: proc(app: ^App, w: ^Window, source: ^Tab) {
 pane_drag_restore :: proc(app: ^App, w: ^Window, carry: ^Pane_Carry) {
 	visit := carry.visit
 	if destination := window_find(app, visit.window); destination != nil && destination != w {
-		for tab, i in destination.workspace.tabs {
-			if tab == visit.original {tab_select(app, destination, i, .Preserve_Marks); break}
-		}
+		pane_drag_show_source(app, destination, visit.original)
 		if destination.workspace.selected != visit.original_index &&
 		   visit.original_index >= 0 &&
 		   visit.original_index < len(destination.workspace.tabs) {
@@ -106,14 +104,9 @@ pane_drag_preview :: proc(
 			return {}, .Too_Small
 		}
 		if w.tabs_horizontal {
-			r := ui.tab_drop_region(window_tab_bar(app, w), f32(w.width), w.scale)
-			return {
-					r.x + 2 * w.scale,
-					(ui.TITLE_BAR_HEIGHT - ui.HEIGHT_TOOLBAR) / 2 * w.scale,
-					max(0, min(180 * w.scale, r.width) - 4 * w.scale),
-					ui.HEIGHT_TOOLBAR * w.scale,
-				},
-				.Fits
+			bar := window_tab_bar(app, w)
+			r := ui.tab_drop_region(bar, f32(w.width), w.scale)
+			return layout.Rect(ui.tab_tile_rect(bar, r.x, min(180 * w.scale, r.width), 0, w.scale)), .Fits
 		}
 		r := rail_new_tab_rect(w)
 		inset := 2 * w.scale
@@ -204,9 +197,7 @@ pane_drag_visit :: proc(app: ^App, w: ^Window, carry: ^Pane_Carry, destination: 
 	id := destination == nil ? 0 : destination.id
 	if id == previous {return false}
 	if old := window_find(app, previous); old != nil && old != w {
-		for tab, i in old.workspace.tabs {
-			if tab == visit.original {tab_select(app, old, i, .Preserve_Marks); break}
-		}
+		pane_drag_show_source(app, old, visit.original)
 		old.dirty = true
 	}
 	visit.window, visit.original, visit.hover = id, nil, nil

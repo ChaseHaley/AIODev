@@ -153,6 +153,13 @@ Palette_Source :: struct {
 	item:  proc(user: rawptr, index: int) -> Palette_Item,
 }
 
+// Asks the caller, on every query, whether a command can run now; the palette leaves out one that
+// cannot. Without a callback every command that is not hidden is listed.
+Palette_Availability :: struct {
+	user:      rawptr,
+	available: proc(user: rawptr, id: commands.Command_Id) -> bool,
+}
+
 // A command result, a setting result, or a tab/workspace result.
 Palette_Result :: struct {
 	kind:        Palette_Kind,
@@ -201,8 +208,7 @@ Palette :: struct {
 	buffers:      Edit_Buffers,
 	drag:         Palette_Drag,
 	leader:       Maybe(commands.Shortcut),
-	// A command the window that opened the palette cannot run now, which the palette leaves out.
-	unavailable:  Maybe(commands.Command_Id),
+	availability: Palette_Availability,
 	reset_hover:  int,
 	scroll_hover: bool,
 }
@@ -291,6 +297,10 @@ palette_destroy :: proc(p: ^Palette) {
 // The app supplies its live tab and workspace lists once; the callbacks read current records.
 palette_set_sources :: proc(p: ^Palette, tabs, workspaces: Palette_Source) {
 	p.tabs, p.workspaces = tabs, workspaces
+}
+
+palette_set_availability :: proc(p: ^Palette, availability: Palette_Availability) {
+	p.availability = availability
 }
 
 palette_open :: proc(p: ^Palette, registry: ^commands.Registry) {
@@ -387,11 +397,12 @@ palette_cycle_mode :: proc(p: ^Palette, registry: ^commands.Registry, reverse: b
 	palette_set_mode(p, registry, palette_next_mode(p.mode, reverse))
 }
 
-// Whether the palette lists a command: hidden ones serve scripts, and the unavailable one cannot run.
+// Whether the palette lists a command: hidden ones serve scripts, and an unavailable one cannot run.
 @(private)
 palette_lists :: proc(p: ^Palette, command: ^commands.Command) -> bool {
-	unavailable, some := p.unavailable.?
-	return !command.hidden && !(some && unavailable == command.id)
+	if command.hidden {return false}
+	a := p.availability
+	return a.available == nil || a.available(a.user, command.id)
 }
 
 @(private)

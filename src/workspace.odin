@@ -209,23 +209,25 @@ tab_new_profile_id :: proc(app: ^App, w: ^Window, profile_id: string) {
 	tab_show(app, w, len(w.workspace.tabs) - 1)
 }
 
+// Whether a close of tab `index`, which must exist, covers tab `i`: the whole marked group when `index` is
+// marked, otherwise that tab alone.
+@(private)
+tab_close_covers :: proc(workspace: ^Workspace, index, i: int) -> bool {
+	return workspace.tabs[index].marked ? workspace.tabs[i].marked : i == index
+}
+
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
 	workspace := w.workspace
 	if index < 0 || index >= len(workspace.tabs) {return}
 	group := workspace.tabs[index].marked
-	if group {
-		// Closing one tab can clear the marks on the rest, so the group is named by id before any close.
-		ids := make([dynamic]u32, 0, len(workspace.tabs), context.temp_allocator)
-		for tab in workspace.tabs {if tab.marked {_ = append(&ids, tab.id)}}
-		for id in ids {
-			if current := tab_index_by_id(workspace, id); current >= 0 {
-				closed_record_tab(app, workspace, current)
-				workspace_close_tab(app, workspace, current)
-			}
+	// Closing one tab can clear the marks on the rest, so the covered tabs are named by id before any close.
+	ids := make([dynamic]u32, 0, len(workspace.tabs), context.temp_allocator)
+	for tab, i in workspace.tabs {if tab_close_covers(workspace, index, i) {_ = append(&ids, tab.id)}}
+	for id in ids {
+		if current := tab_index_by_id(workspace, id); current >= 0 {
+			closed_record_tab(app, workspace, current)
+			workspace_close_tab(app, workspace, current)
 		}
-	} else {
-		closed_record_tab(app, workspace, index)
-		workspace_close_tab(app, workspace, index)
 	}
 	if group && len(workspace.tabs) > 0 {workspace_tab_choose(workspace, workspace.selected)}
 	workspace_close_empty(app, workspace)
@@ -235,9 +237,8 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 @(private)
 tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int, split: bool) {
 	if index < 0 || index >= len(workspace.tabs) {return}
-	group := workspace.tabs[index].marked
 	for tab, i in workspace.tabs {
-		if group ? !tab.marked : i != index {continue}
+		if !tab_close_covers(workspace, index, i) {continue}
 		count := tab_pane_count(tab)
 		tabs, panes = tabs + 1, panes + count
 		split ||= count > 1
@@ -248,9 +249,8 @@ tab_close_scope :: proc(workspace: ^Workspace, index: int) -> (tabs, panes: int,
 // Reported running or blocked work always needs confirmation, including in selected groups.
 tab_close_has_work :: proc(app: ^App, workspace: ^Workspace, index: int) -> bool {
 	if index < 0 || index >= len(workspace.tabs) {return false}
-	group := workspace.tabs[index].marked
 	for tab, i in workspace.tabs {
-		if group ? !tab.marked : i != index {continue}
+		if !tab_close_covers(workspace, index, i) {continue}
 		walk := tab_session_panes(app, &tab.tree, i)
 		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
 			if pane.session == nil {continue}

@@ -484,16 +484,7 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		pane.rect,
 		pane_insets(app, w, entry, pane),
 	)
-	g := term.Geometry {
-		columns = box.columns,
-		rows = box.rows,
-		cell_width = u32(w.metrics.cell_width),
-		cell_height = u32(w.metrics.cell_height),
-		surface_width = u32(w.width),
-		surface_height = u32(w.height),
-		padding_left = u32(box.origin.x),
-		padding_top = u32(box.origin.y),
-	}
+	g := pane_box_geometry(box, w.metrics, w.width, w.height)
 	// A floating pane that only moved keeps its grid, so its program sees no resize.
 	if g != term.geometry(entry.session) && !(pane.floating && term.reposition(entry.session, g)) {
 		term.resize(entry.session, g)

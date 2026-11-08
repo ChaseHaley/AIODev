@@ -5,15 +5,23 @@ import "aio:render"
 import "aio:settings"
 import "core:fmt"
 import "core:image/png"
+import "core:strings"
 
 Shell_Icon :: struct {
 	pixels:        [32 * 32 * 4]u8,
 	width, height: int,
 	slot:          render.Atlas_Slot,
+	// The Shell Icon setting as written when these pixels loaded from it; owned, empty without an image.
+	path:          string,
+}
+
+shell_icon_destroy :: proc(icon: ^Shell_Icon) {
+	delete(icon.path)
+	icon^ = {}
 }
 
 shell_icon_load :: proc(app: ^App) {
-	app.shell_icon = {}
+	shell_icon_destroy(&app.shell_icon)
 	icon_path := settings.profile_base(&app.settings.profiles).icon
 	if icon_path == "" {return}
 	path, path_error := localpath.settings_relative(icon_path, app.settings_path, context.temp_allocator)
@@ -55,6 +63,7 @@ shell_icon_load :: proc(app: ^App) {
 			copy(icon.pixels[to:to + 4], image.pixels.buf[from:from + 4])
 		}
 	}
+	icon.path = strings.clone(icon_path)
 	mark_all_dirty(app)
 }
 

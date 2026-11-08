@@ -171,24 +171,18 @@ status_focus_leave :: proc(app: ^App, entry: ^Session_Entry) {
 	term.program_status_dismiss_finished(entry.session)
 }
 
-Status_Notification_Channels :: struct {
-	banner, tray, flash, sound, notice: bool,
-}
-
 // A pure routing policy shared by transition eligibility and delivery.
 status_notification_channels :: proc(
 	s: ^settings.Status_Settings,
 	state: term.Program_Status_State,
-) -> Status_Notification_Channels {
+) -> settings.Status_Channels {
 	if !s.enabled {return {}}
-	set := status_state_settings(s, state).channels
-	return {.Banner in set, .Tray in set, .Flash in set, .Sound in set, .Notice in set}
+	return status_state_settings(s, state).channels
 }
 
 @(private)
 status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
-	c := status_notification_channels(&app.settings.status, record.state)
-	return c.banner || c.tray || c.flash || c.sound || c.notice
+	return status_notification_channels(&app.settings.status, record.state) != {}
 }
 
 // A pane notifies at most once an interval, for the newest change that wants a notification. Once
@@ -230,9 +224,9 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	if record.message != "" {text = fmt.tprintf("%s · %s", record.message, text)}
 	c := status_notification_channels(&app.settings.status, record.state)
 	// The sound rides on the first notification Windows shows, and plays on its own when none does.
-	sound := c.sound
+	sound := .Sound in c
 	token := platform_api.Notification_Token(entry.id)
-	if c.banner {
+	if .Banner in c {
 		// Unavailable: notifications could not start, which the first banner already reported.
 		result := platform_api.notification_show(&app.platform, title, text, token, sound)
 		if result == .None {
@@ -241,7 +235,7 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 			notify(app, .Error, "Windows could not show a status notification. Check notification settings.")
 		}
 	}
-	if c.tray {
+	if .Tray in c {
 		if platform_api.tray_notify(&app.platform, title, text, token, sound) == .None {
 			sound = false
 		} else {
@@ -251,9 +245,9 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	if sound && platform_api.notification_sound() != .None {
 		log.error("playing program status sound failed")
 	}
-	if c.notice {notify(app, p.notice, fmt.tprintf("%s: %s", title, text))}
+	if .Notice in c {notify(app, p.notice, fmt.tprintf("%s: %s", title, text))}
 	target := session_window(app, entry.id, window_primary(app))
-	if c.flash && target != nil && !target.focused &&
+	if .Flash in c && target != nil && !target.focused &&
 	   platform_api.window_flash(&app.platform, target.id) != .None {
 		log.error("flashing the window for program status failed")
 	}

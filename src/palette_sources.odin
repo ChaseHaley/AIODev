@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:font"
 import "aio:layout"
 import "aio:settings"
@@ -113,6 +114,14 @@ palette_setting_choices :: proc(user: rawptr, key: string) -> (choices, labels: 
 	return
 }
 
+// The palette asks for the window that opened it, so it lists what that window can run now.
+@(private)
+palette_command_available :: proc(user: rawptr, id: commands.Command_Id) -> bool {
+	app := cast(^App)user
+	w := palette_owner_window(app)
+	return w == nil || action_available(app, w, Action(id))
+}
+
 palette_set_sources :: proc(app: ^App) {
 	ui.palette_set_sources(
 		&app.palette,
@@ -123,6 +132,7 @@ palette_set_sources :: proc(app: ^App) {
 		&app.palette,
 		{user = app, value = palette_setting_value, choices = palette_setting_choices},
 	)
+	ui.palette_set_availability(&app.palette, {user = app, available = palette_command_available})
 }
 
 // Selecting a tab follows its workspace's exclusive window ownership (D-051): an owned workspace

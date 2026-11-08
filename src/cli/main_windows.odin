@@ -127,7 +127,8 @@ wait :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 		fmt.eprintln("aio: could not watch for Ctrl+C")
 		return .Failed
 	}
-	query_args := [3]string{o.wait.exit ? "pane.status" : "pane.read", "--pane", o.wait.pane}
+	command := o.wait.exit ? cli_protocol.PANE_STATUS_COMMAND : cli_protocol.PANE_READ_COMMAND
+	query_args := [3]string{command, "--pane", o.wait.pane}
 	query := Options {
 		json = o.wait.exit,
 		args = query_args[:o.wait.pane == "" ? 1 : 3],

@@ -94,10 +94,6 @@ palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 		palette_release(app, previous)
 	}
 	window_overlays_cancel(app, w)
-	app.palette.unavailable = nil
-	for command in app.registry.items {
-		if !action_available(app, w, Action(command.id)) {app.palette.unavailable = command.id}
-	}
 	app.palette_owner = w.id
 	app.palette.leader = app.leader
 	ui.palette_open_mode(&app.palette, &app.registry, mode)
