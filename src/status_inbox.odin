@@ -205,7 +205,7 @@ status_pill_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	if width == 0 {return {}}
 	height := ui.HEIGHT_TOOLBAR * w.scale
 	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
-	return {workspace_button_width(w), top, width - ui.SPACE_1 * w.scale, height}
+	return {title_actions_end(w) + ui.SPACE_1 * w.scale, top, width - ui.SPACE_1 * w.scale, height}
 }
 
 status_pill_hover_set :: proc(w: ^Window, hovered: bool) {
@@ -297,7 +297,7 @@ status_inbox_layout :: proc(
 	s := w.scale
 	width := min(STATUS_INBOX_WIDTH * s, f32(w.width) - 16 * s)
 	anchor := status_pill_rect(app, w)
-	if anchor.width == 0 {anchor = workspace_button_rect(w)}
+	if anchor.width == 0 {anchor = workspace_button_rect(app, w)}
 	x := clamp(anchor.x, 8 * s, max(8 * s, f32(w.width) - width - 8 * s))
 	y := (ui.TITLE_BAR_HEIGHT + ui.SPACE_1) * s
 	content := f32(max(1, len(items))) * STATUS_ROW_HEIGHT * s

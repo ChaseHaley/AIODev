@@ -143,26 +143,31 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) 
 	if target := window_for_workspace(app, workspace); target != nil {workspace_name_begin(app, target)}
 }
 
-workspace_button_width :: proc(w: ^Window) -> f32 {
-	left := title_actions_end(w)
+// The chip starts after the title actions and the status pill, which sits on its left.
+workspace_button_left :: proc(app: ^App, w: ^Window) -> f32 {
+	return title_actions_end(w) + status_pill_width(app, w)
+}
+
+workspace_button_width :: proc(app: ^App, w: ^Window) -> f32 {
+	left := workspace_button_left(app, w)
 	available := max(0, f32(w.width) - window_caption_reserve(w) - left)
 	return left + min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
 }
 
 // The chip's visual and hit rectangle. Hit testing keeps this rectangle even while the
 // control is drawn lifted, so the hover never changes where the click target is.
-workspace_button_rect :: proc(w: ^Window) -> render.Rect {
-	width := workspace_button_width(w)
-	left := title_actions_end(w)
+workspace_button_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	width := workspace_button_width(app, w)
+	left := workspace_button_left(app, w)
 	height := ui.HEIGHT_TOOLBAR * w.scale
 	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
 	return {left + ui.SPACE_1 * w.scale, top, max(0, width - left - 2 * ui.SPACE_1 * w.scale), height}
 }
 
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	width := workspace_button_width(w)
+	width := workspace_button_width(app, w)
 	if width <= 12 * w.scale {return .Ok}
-	r := workspace_button_rect(w)
+	r := workspace_button_rect(app, w)
 	// While the chip holds the name field it stays flat, so nothing shows around the field.
 	hover := chip_name_shown(w) ? 0 : w.workspace_motion.hover.value
 	lift := ui.hover_lift_at(app.theme, hover, w.scale)
@@ -192,7 +197,7 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if result := workspace_icon_draw(w, w.workspace.icon, icon, app.theme.text);
 		   result != .Ok { return result }
 	}
-	indicator := workspace_button_indicator_rect(w)
+	indicator := workspace_button_indicator_rect(app, w)
 	indicator.y -= lift
 	label_x := r.x + (ui.CONTROL_INSET + ui.ICON_BUTTON + ui.SPACE_2) * w.scale
 	label_width := indicator.x - label_x - ui.SPACE_2 * w.scale
@@ -679,8 +684,8 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 
 @(private)
 workspace_button_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return y >= 0 && y < window_title_height(w) && x >= title_actions_end(w) &&
-		x < workspace_button_width(w)
+	return y >= 0 && y < window_title_height(w) && x >= workspace_button_left(app, w) &&
+		x < workspace_button_width(app, w)
 }
 
 @(private)
@@ -708,8 +713,8 @@ workspace_button_leave :: proc(_: ^App, w: ^Window) {
 
 // Every move that reaches the window updates the button's hover, which drives its motion; a drag or a
 // modal surface does not hide it.
-workspace_button_track :: proc(w: ^Window, x, y: f32) {
-	if hovered := render.rect_contains(workspace_button_rect(w), x, y); hovered != w.workspace_hovered {
+workspace_button_track :: proc(app: ^App, w: ^Window, x, y: f32) {
+	if hovered := render.rect_contains(workspace_button_rect(app, w), x, y); hovered != w.workspace_hovered {
 		w.workspace_hovered, w.dirty = hovered, true
 	}
 }

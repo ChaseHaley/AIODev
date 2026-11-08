@@ -50,7 +50,7 @@ pane_drag_dropdown_preserves_runtime_for_each_destination :: proc(t: ^testing.T)
 		app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 			x = i32(header.title.x + header.title.width / 2),
 			y = i32(header.title.y + header.title.height / 2)})
-		chip := app.workspace_button_rect(w)
+		chip := app.workspace_button_rect(&state, w)
 		app.handle_event(&state, input.Mouse_Move_Event{window = w.id,
 			x = i32(chip.x + chip.width / 2), y = i32(chip.y + chip.height / 2), buttons = {.Left}})
 		if !testing.expect(t, app.pane_drag_active(w) && app.workspace_picker_held(&w.workspace_picker)) {return}

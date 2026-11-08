@@ -350,9 +350,9 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 		ui.motion_update(motion, frame_at(time.tick_add(start, 140*time.Millisecond)))
 		testing.expect_value(t, motion.value, f32(1))
 		app.workspace_row_rename_finish(s, w, false)
-		indicator := app.workspace_button_indicator_rect(w)
+		indicator := app.workspace_button_indicator_rect(s, w)
 		testing.expect_value(t, indicator.width, ui.ICON_INDICATOR*scale)
-		testing.expect(t, indicator.x+indicator.width <= app.workspace_button_width(w))
+		testing.expect(t, indicator.x+indicator.width <= app.workspace_button_width(s, w))
 	}
 }
 
@@ -418,7 +418,7 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 				pixels, pixel_error := render.surface_read_pixels(device, surface, context.allocator)
 				if !testing.expect_value(t, pixel_error, render.Error.None) { return }
 				defer delete(pixels)
-				indicator := app.workspace_button_indicator_rect(w)
+				indicator := app.workspace_button_indicator_rect(s, w)
 				clear := true
 				for y in int(indicator.y)..<int(indicator.y+indicator.height) {
 					for x in int(indicator.x-4*scale)..<int(indicator.x+indicator.width) {
