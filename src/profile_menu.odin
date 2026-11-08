@@ -54,7 +54,9 @@ Profile_Menu :: struct {
 
 // Rows that can show a shortcut: one per New Tab with Profile N command, Settings and the palette.
 @(private)
-PROFILE_MENU_SHORTCUTS :: 11
+PROFILE_ACTION_COUNT :: int(Action.Profile_9) - int(Action.Profile_1) + 1
+@(private)
+PROFILE_MENU_SHORTCUTS :: PROFILE_ACTION_COUNT + 2
 
 profile_menu_init :: proc(menu: ^Profile_Menu) {
 	ui.menu_init(&menu.menu)
