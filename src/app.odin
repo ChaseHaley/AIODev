@@ -103,7 +103,7 @@ App :: struct {
 
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
-	perf.start(&app.perf)
+	when FRAME_STATS {perf.start(&app.perf)}
 	paths, paths_error := instance.paths(app.options)
 	if paths_error != nil {
 		log.errorf("locating the instance files failed: %v", paths_error)
@@ -143,7 +143,7 @@ app_init :: proc(app: ^App) -> bool {
 		{user = app, value = palette_setting_value, choices = palette_setting_choices},
 	)
 	control_cli_init(app)
-	load_settings(app)
+	if !load_settings(app) {return false}
 	font_error: font.Error
 	app.fonts, font_error = font.system_create()
 	if font_error != .None {
@@ -181,14 +181,14 @@ app_init :: proc(app: ^App) -> bool {
 		if _, created := tab_create(app, workspace); !created {return false}
 		if !window_open(app, workspace) {return false}
 	}
-	verify_start(app)
+	when AIO_CONTROL {verify_start(app)}
 	control_cli_sync(app)
 	return true
 }
 
 // Also runs for an App that never started, so each feature's destroy accepts its zero value.
 app_destroy :: proc(app: ^App) {
-	verify_destroy(app)
+	when AIO_CONTROL {verify_destroy(app)}
 	control_cli_destroy(app)
 	for len(app.windows) > 0 {
 		window_close(app, app.windows[len(app.windows) - 1])
@@ -283,7 +283,7 @@ tick :: proc(app: ^App) {
 		if window.dirty {
 			window_render(app, window)
 			// The harness counts this window's present now; its After_Draw timer reads every window's.
-			verify_presented(app, window)
+			when AIO_CONTROL {verify_presented(app, window)}
 		}
 	}
 	app_timers_advance(app, .After_Draw)
@@ -338,7 +338,7 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 		case .Drag_Hover:
 			for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], time.tick_now())}
 		case .Verify:
-			verify_tick(app)
+			when AIO_CONTROL {verify_tick(app)}
 		case .Layout_Save:
 			layout_state_tick(app)
 		case .File_Dialogs:
@@ -361,7 +361,7 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 			if at, armed := drag_hover_deadline(w); armed {next, pending = earliest(next, pending, at)}
 		}
 	case .Verify:
-		return verify_deadline(app)
+		when AIO_CONTROL {return verify_deadline(app)}
 	case .Layout_Save:
 		return layout_state_deadline(app)
 	case .File_Dialogs:
