@@ -164,7 +164,10 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 				balanced = layout.balance_related(tree, target) || balanced
 			}
 		}
-		if balanced {window_relayout(app, w)}
+		if balanced {
+			pane_motion_arm(w)
+			window_relayout(app, w)
+		}
 		return true
 	}
 	drag := Divider_Drag {

@@ -288,10 +288,14 @@ floating_header_at :: proc(
 
 // Draws a float's frame before its panes, which cover all of it but the float header. The header takes
 // the title bar's colour and behaves as one flat control: the shared hover fill, pointer gloss and pressed
-// fill without lifting, over the whole frame, with its handle and buttons in the strip at the top.
-floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
-	frame, found := layout.float_rect(window_tree(w), root, floating_area(w))
+// fill without lifting, over the whole frame, with its handle and buttons in the strip at the top. The
+// frame follows the float's motion, as when it grows out of its capsule; returns where it drew.
+floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) -> (frame: layout.Rect) {
+	tree := window_tree(w)
+	placed, found := layout.float_rect(tree, root, floating_area(w))
 	if !found {return}
+	floating, _ := layout.float_of(tree, root)
+	frame = pane_motion_frame(w, floating.id, placed)
 	s := w.scale
 	radius := window_pane_radius(app, w)
 	r := render.Rect{frame.x, frame.y, frame.width, frame.height}
@@ -346,6 +350,7 @@ floating_header_draw :: proc(app: ^App, w: ^Window, root: layout.Node_Id) {
 		if button_err != .None {return}
 		ui.icon_draw(&w.list, button.icon, face, button_ink, ui.ICON_BUTTON, s)
 	}
+	return
 }
 
 // Closes every pane of a float, each as a close Reopen Closed can undo.
@@ -370,6 +375,7 @@ floating_header_fire :: proc(app: ^App, w: ^Window, content: layout.Content, act
 		floating_minimize(app, w, node)
 	case .Dock:
 		if !layout.set_floating(tree, node, false) {return}
+		pane_motion_arm(w)
 		window_relayout(app, w)
 		layout_state_touch(app)
 	case .Close:
@@ -464,6 +470,7 @@ floating_toggle :: proc(app: ^App, w: ^Window) {
 		notify(app, .Info, "The tab keeps one tiled pane; split it before floating this one.")
 		return
 	}
+	pane_motion_arm(w)
 	window_relayout(app, w)
 	layout_state_touch(app)
 }
@@ -497,6 +504,7 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 		root := layout.Node_Id(i)
 		if layout.float_is_root(tree, root) {_ = layout.float_minimize(tree, root, shown > 0)}
 	}
+	pane_motion_arm(w)
 	if shown == 0 {
 		latest := layout.float_latest(tree, false)
 		if latest != layout.INVALID_NODE {pane_focus(app, w, latest)}
@@ -511,6 +519,8 @@ floating_minimize :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	focused := layout.float_root(tree, tree.focus) == layout.float_root(tree, node)
 	if focused {focus_leave(app, w)}
 	if !layout.float_minimize(tree, node, true) {return}
+	// The float shrinks into its capsule.
+	pane_motion_arm(w)
 	window_floats_layout(app, w)
 	if focused {focus_enter(app, w)}
 	layout_state_touch(app)

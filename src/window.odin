@@ -436,8 +436,9 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	w.header_height = pane_header_row_height(app, w.scale)
 	shown := pane_motion_shown(w)
 	layout.place_shown(window_tree(w), window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
-	pane_motion_placed(app, w, shown)
+	// After the capsules are placed, which a float shrinking into one heads for.
 	window_panes_placed(app, w, 0)
+	pane_motion_placed(app, w, shown)
 	rail_reveal_active(w)
 }
 
@@ -454,8 +455,8 @@ window_floats_layout :: proc(app: ^App, w: ^Window) {
 	resize(&w.panes, tiled)
 	g := window_geometry(app, w, w.pane_fill)
 	layout.floats_place(tree, g.floating, g.gap, g.header, &w.panes)
-	pane_motion_placed(app, w, shown)
 	window_panes_placed(app, w, tiled)
+	pane_motion_placed(app, w, shown)
 }
 
 // What follows placing w.panes[first:], for the full and the floats-only relayout alike: the dividers,
@@ -631,8 +632,13 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	w.frame_wakes = {}
 	pane_motion_drawn_reset(w)
 	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
+	raised: Maybe(layout.Pane_Rect)
 	for pane in w.panes {
 		if pane.floating {continue}
+		if pane_motion_raised(w, pane) {raised = pane; continue}
+		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
+	}
+	if pane, ok := raised.?; ok {
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
 	if w.pane_fill != .Screen {
@@ -640,6 +646,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	if result := rail_draw(app, w); result != .Ok {return result}
 	if result := status_panel_draw(app, w); result != .Ok {return result}
+	// Chrome sliding out of view, as the rail and panel do when a pane fills the window.
+	pane_ghosts_draw_alone(app, w, true)
 	group := layout.INVALID_NODE
 	tree := window_tree(w)
 	for pane in w.panes {
@@ -647,10 +655,14 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		// Each float's frame and header draw with it, so a higher float covers a lower one's.
 		if root := layout.float_root(tree, pane.node); root != group {
 			group = root
-			floating_header_draw(app, w, root)
+			from := render.draw_mark(&w.list)
+			frame := floating_header_draw(app, w, root)
+			pane_motion_region_drawn(w, PANE_MOTION_FRAME | pane.group, frame, from)
 		}
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
+	// Floats shrinking into their capsules draw above the others.
+	pane_ghosts_draw_alone(app, w, false)
 	if result := floating_capsules_draw(app, w); result != .Ok {return result}
 	cursor_blink_observe(w, blinking)
 	if result := pane_drag_draw(app, w); result != .Ok {return result}

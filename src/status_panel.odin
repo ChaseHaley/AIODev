@@ -527,14 +527,19 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	panel := status_panel_rect(app, w)
 	if panel.width <= 0 || panel.height <= 0 {return .Ok}
 	s := w.scale
-	if render.push_layer(&w.list, panel) != .None {return .Ok}
+	// The panel draws from the window's motion, as when its width resets or it slides out of view.
+	region := pane_motion_region_begin(w, PANE_MOTION_PANEL, panel)
+	defer pane_motion_region_end(w, &region)
+	shown := region.shown
+	if render.push_layer(&w.list, shown) != .None {return .Ok}
 	if !status_panel_in_rail(app, w) {
 		radius := f32(app.settings.pane.corner_radius) * s
-		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar, radius = radius})
+		ui.draw_rect(&w.list, {rect = shown, color = app.theme.tab_bar, radius = radius})
 	} else {
-		ui.draw_rect(&w.list, {rect = panel, color = app.theme.tab_bar})
-		ui.draw_rect(&w.list, {rect = {panel.x, panel.y, panel.width, s}, color = app.theme.border})
+		ui.draw_rect(&w.list, {rect = shown, color = app.theme.tab_bar})
+		ui.draw_rect(&w.list, {rect = {shown.x, shown.y, shown.width, s}, color = app.theme.border})
 	}
+	pane_motion_region_content(w, &region)
 	rows, _ := status_panel_rows(app, w)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	strong := ui.text_styled(&w.ui_text, .Strong)

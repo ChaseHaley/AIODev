@@ -258,7 +258,13 @@ rail_toggle :: proc(app: ^App, w: ^Window) {
 	} else {
 		rail_overlay_slide(app, w, 1)
 	}
-	if was_docked != rail_docked(w) {window_relayout(app, w)} else {window_dividers(app, w)}
+	if was_docked != rail_docked(w) {
+		// The docked rail slides in or out and the panes ease into the space.
+		pane_motion_arm(w)
+		window_relayout(app, w)
+	} else {
+		window_dividers(app, w)
+	}
 	w.dirty = true
 }
 
@@ -417,7 +423,10 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		layout = ui.rail_layout(area, w.scale, rail_tab_count(w) + w.tab_incoming.count, w.rail_scroll)
 	}
 	if area.x + area.width <= 0 {return .Ok}
-	if render.push_layer(&w.list, area) != .None {return .Ok}
+	// A docked rail draws from the window's motion, as when its width resets or it slides out of view.
+	region := pane_motion_region_begin(w, PANE_MOTION_RAIL, area)
+	defer if !draw_overlay {pane_motion_region_end(w, &region)}
+	if render.push_layer(&w.list, draw_overlay ? area : region.shown) != .None {return .Ok}
 	if draw_overlay {
 		frame := ui.Panel {
 			rect     = area,
@@ -428,8 +437,9 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		}
 		if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
 	} else {
-		ui.draw_rect(&w.list, {rect = area, color = app.theme.tab_bar})
+		ui.draw_rect(&w.list, {rect = region.shown, color = app.theme.tab_bar})
 	}
+	pane_motion_region_content(w, &region)
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
 	dragging := tab_drag_active(w)
 	moving := dragging

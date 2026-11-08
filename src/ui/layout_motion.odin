@@ -21,13 +21,21 @@ Layout_Place :: struct {
 	container: u64,
 }
 
+// Where an item that enters comes from, or where one that leaves goes, in place of the edge it shares with
+// a neighbour in its container: a float growing out of its capsule, or shrinking into it.
+Layout_Hint :: struct {
+	key:  u64,
+	rect: render.Rect,
+}
+
 @(private)
 Layout_Item :: struct {
-	key:      u64,
-	from, to: render.Rect,
-	// The layout no longer has the item; it collapses away beneath `successor`, the item taking its place.
+	key:       u64,
+	from, to:  render.Rect,
+	// The layout no longer has the item; it collapses away beneath `successor`, the item taking its place,
+	// or, sent away by a hint, on its own.
 	leaving:   bool,
-	successor: u64,
+	successor: Maybe(u64),
 }
 
 // Edges this close are the same edge; layout rounds to whole pixels.
@@ -65,22 +73,27 @@ layout_motion_rect :: proc(m: ^Layout_Motion, key: u64, target: render.Rect) -> 
 // An item that was not drawn grows out of the edge it shares with the drawn item it overlaps most, as a
 // new split pane opens from the side of the pane it divides; one that overlaps nothing appears in place.
 // An item with no target leaves the same way in reverse, collapsing onto the edge it shares with the item
-// that takes its place; the caller draws what it last showed there (see layout_motion_rect). Disabled
-// animations, or nothing to move, end any motion.
+// that takes its place; the caller draws what it last showed there (see layout_motion_rect). A hint for a
+// key replaces either edge with its rectangle. Disabled animations, or nothing to move, end any motion.
 layout_motion_begin :: proc(
 	m: ^Layout_Motion,
 	shown, targets: []Layout_Place,
 	duration: time.Duration,
 	easing: Easing,
 	enabled: bool,
+	hints: []Layout_Hint = nil,
 ) {
 	clear(&m.items)
 	moving := false
 	if enabled {
 		for target in targets {
 			from, found := layout_place_rect(shown, target.key)
-			if !found {from, _ = layout_enter_rect(shown, target)}
-			if _, err := append(&m.items, Layout_Item{target.key, from, target.rect, false, 0}); err != nil {
+			if !found {
+				hinted: bool
+				from, hinted = layout_hint_rect(hints, target.key)
+				if !hinted {from, _ = layout_enter_rect(shown, target)}
+			}
+			if _, err := append(&m.items, Layout_Item{target.key, from, target.rect, false, nil}); err != nil {
 				// Without room to remember the motion, the layout takes its place at once.
 				moving = false
 				break
@@ -89,10 +102,14 @@ layout_motion_begin :: proc(
 		}
 		for place in shown {
 			if _, kept := layout_place_rect(targets, place.key); kept {continue}
-			to, successor := layout_enter_rect(targets, place)
-			// Nothing takes its place, so there is nothing for it to collapse beneath.
-			if successor == nil {continue}
-			item := Layout_Item{place.key, place.rect, to, true, successor.?}
+			to, hinted := layout_hint_rect(hints, place.key)
+			successor: Maybe(u64)
+			if !hinted {
+				to, successor = layout_enter_rect(targets, place)
+				// Nothing takes its place, so there is nothing for it to collapse beneath.
+				if successor == nil {continue}
+			}
+			item := Layout_Item{place.key, place.rect, to, true, successor}
 			if _, err := append(&m.items, item); err != nil {
 				moving = false
 				break
@@ -119,28 +136,28 @@ layout_motion_retarget :: proc(m: ^Layout_Motion, targets: []Layout_Place) {
 			m.items[kept] = item
 			kept += 1
 		} else if to, found := layout_place_rect(targets, item.key); found {
-			m.items[kept] = {item.key, item.from, to, false, 0}
+			m.items[kept] = {item.key, item.from, to, false, nil}
 			kept += 1
 		}
 	}
 	resize(&m.items, kept)
 	for target in targets {
 		if layout_item_moving(m.items[:kept], target.key) {continue}
-		if _, err := append(&m.items, Layout_Item{target.key, target.rect, target.rect, false, 0}); err != nil {
+		if _, err := append(&m.items, Layout_Item{target.key, target.rect, target.rect, false, nil}); err != nil {
 			layout_motion_stop(m)
 			return
 		}
 	}
 }
 
-// The item a leaving `key` collapses beneath; draw it just before that item so it sits in the same
-// container and stacking position.
-layout_motion_successor :: proc(m: ^Layout_Motion, key: u64) -> (u64, bool) {
-	if !motion_active(m.progress) {return 0, false}
+// Whether `key` is leaving, and the item it collapses beneath: draw it just before that item so it sits in
+// the same container and stacking position. A leaving item sent away by a hint has none.
+layout_motion_leaving :: proc(m: ^Layout_Motion, key: u64) -> (successor: Maybe(u64), leaving: bool) {
+	if !motion_active(m.progress) {return nil, false}
 	for item in m.items {
 		if item.key == key && item.leaving {return item.successor, true}
 	}
-	return 0, false
+	return nil, false
 }
 
 // Every item lands on its target now.
@@ -158,6 +175,14 @@ layout_motion_destroy :: proc(m: ^Layout_Motion) {
 layout_place_rect :: proc(places: []Layout_Place, key: u64) -> (render.Rect, bool) {
 	for place in places {
 		if place.key == key {return place.rect, true}
+	}
+	return {}, false
+}
+
+@(private = "file")
+layout_hint_rect :: proc(hints: []Layout_Hint, key: u64) -> (render.Rect, bool) {
+	for hint in hints {
+		if hint.key == key {return hint.rect, true}
 	}
 	return {}, false
 }

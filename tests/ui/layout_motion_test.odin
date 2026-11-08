@@ -119,8 +119,39 @@ layout_items_move_within_their_container :: proc(t: ^testing.T) {
 	ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, .Linear, true)
 	testing.expect_value(t, ui.layout_motion_rect(&m, 3, split[2].rect), render.Rect{300, 100, 0, 100})
 	ui.layout_motion_begin(&m, split, shown, LAYOUT_DURATION, .Linear, true)
-	successor, leaving := ui.layout_motion_successor(&m, 3)
+	successor, leaving := ui.layout_motion_leaving(&m, 3)
 	testing.expect(t, leaving)
-	testing.expect_value(t, successor, u64(2))
+	testing.expect_value(t, successor.? or_else 0, u64(2))
 	testing.expect_value(t, ui.layout_motion_rect(&m, 3, {}), split[2].rect)
+}
+
+// A hint replaces the shared edge: a float grows out of its capsule and shrinks back into it, frame and
+// pane together, with nothing in its container to collapse beneath on the way out.
+@(test)
+layout_items_follow_hints_in_and_out :: proc(t: ^testing.T) {
+	m: ui.Layout_Motion
+	defer ui.layout_motion_destroy(&m)
+	capsule := render.Rect{300, 280, 80, 20}
+	tiled := ui.Layout_Place{1, {0, 0, 400, 300}, 0}
+	float := []ui.Layout_Place{tiled, {10, {100, 70, 200, 130}, 10}, {2, {100, 100, 200, 100}, 7}}
+	hints := []ui.Layout_Hint{{10, capsule}, {2, capsule}}
+	ui.layout_motion_begin(&m, {tiled}, float, LAYOUT_DURATION, .Linear, true, hints)
+	testing.expect_value(t, ui.layout_motion_rect(&m, 10, float[1].rect), capsule)
+	testing.expect_value(t, ui.layout_motion_rect(&m, 2, float[2].rect), capsule)
+	first := test_frame(time.tick_now())
+	ui.layout_motion_update(&m, first)
+	ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION / 2)))
+	frame, pane := ui.layout_motion_rect(&m, 10, float[1].rect), ui.layout_motion_rect(&m, 2, float[2].rect)
+	testing.expect(t, frame.x <= pane.x && frame.x + frame.width >= pane.x + pane.width, "the pane stays inside")
+	testing.expect(t, frame.width > capsule.width && frame.width < float[1].rect.width)
+	testing.expect_value(t, ui.layout_motion_rect(&m, 1, tiled.rect), tiled.rect)
+
+	ui.layout_motion_begin(&m, float, {tiled}, LAYOUT_DURATION, .Linear, true, hints)
+	successor, leaving := ui.layout_motion_leaving(&m, 2)
+	testing.expect(t, leaving && successor == nil)
+	testing.expect_value(t, ui.layout_motion_rect(&m, 2, {}), float[2].rect)
+	last := test_frame(time.tick_now())
+	ui.layout_motion_update(&m, last)
+	ui.layout_motion_update(&m, test_frame(time.tick_add(last.display, LAYOUT_DURATION)))
+	testing.expect(t, !ui.layout_motion_active(&m))
 }
