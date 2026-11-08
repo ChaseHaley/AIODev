@@ -363,8 +363,8 @@ session_workspace_titles_changed :: proc(app: ^App, workspace: ^Workspace, id: u
 }
 
 // A stopped pane's message names the first key bound to Restart Stopped Pane, or the command itself
-// when no key is.
-session_message :: proc(app: ^App, status: term.Status) -> string {
+// when no key is. A failed start points at the pane's own profile keys, which the file format uses.
+session_message :: proc(app: ^App, profile_id: string, status: term.Status) -> string {
 	if status.kind == .Running {return ""}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	chord := action_shortcut_text(app, .Restart_Pane, buffer[:])
@@ -379,9 +379,14 @@ session_message :: proc(app: ^App, status: term.Status) -> string {
 		)
 	case .Failed:
 		reason := status.message != "" ? status.message : "Could not start the shell."
+		profile := profile_id != "" ? profile_id : settings.PROFILE_DEFAULT_ID
 		return fmt.tprintf(
-			"%s Check shell.command and shell.directory in settings, then %s %s to try again.",
+			"%s Check %s%s.command and %s%s.directory in settings, then %s %s to try again.",
 			reason,
+			settings.PROFILE_PREFIX,
+			profile,
+			settings.PROFILE_PREFIX,
+			profile,
 			chord != "" ? "press" : "run",
 			target,
 		)

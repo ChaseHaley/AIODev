@@ -713,7 +713,7 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 	if card < len(w.list.rects) {w.list.rects[card].color = frame.background}
 	blinking^ ||= frame.cursor_blinking && content_focused
 	if entry.status != .Running {
-		message := session_message(app, term.status(entry.session))
+		message := session_message(app, entry.profile_id, term.status(entry.session))
 		if message_result := ui.pane_message_draw(
 			&w.list,
 			&w.ui_text,
