@@ -148,10 +148,20 @@ workspace_button_left :: proc(app: ^App, w: ^Window) -> f32 {
 	return title_actions_end(w) + status_pill_width(app, w)
 }
 
+// The chip hugs its content: icon, name and the chevron's slot, so the tabs start right after the
+// name. While the chip holds the name field it fits the typed text instead.
 workspace_button_width :: proc(app: ^App, w: ^Window) -> f32 {
 	left := workspace_button_left(app, w)
 	available := max(0, f32(w.width) - window_caption_reserve(w) - left)
-	return left + min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
+	limit := min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
+	if w.workspace == nil || w.ui_text.fonts == nil {return left + limit}
+	label := chip_name_shown(w) ? ui.field_string(&w.rename) : w.workspace.name
+	if label == "" {label = "Workspace name"}
+	// One spare pixel keeps rounding in the chip's layout from fading a name that fits.
+	content :=
+		ui.text_width(&w.ui_text, label) + 1 +
+		(2 * ui.CONTROL_INSET + ui.ICON_BUTTON + 2 * ui.SPACE_2 + ui.ICON_INDICATOR + 2 * ui.SPACE_1) * w.scale
+	return left + min(limit, content)
 }
 
 // The chip's visual and hit rectangle. Hit testing keeps this rectangle even while the
@@ -178,20 +188,24 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if result := ui.hover_shadow_draw(&w.list, app.theme, r, radius, hover, w.scale);
 		   result != .None {return .Ok}
 	}
+	// At rest the chip is only its icon and name on the chrome; an open picker tints it.
 	active := workspace_picker_active(&w.workspace_picker)
-	fill := active ? app.theme.selection : app.theme.pane
-	if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None { return .Ok }
+	if active {
+		if render.push_rect(&w.list, {rect = r, color = app.theme.selection, radius = radius}) != .None {
+			return .Ok
+		}
+	}
 	// An open picker already tints the chip; an opaque paper fill would paint over it, while a
 	// translucent dark fill can pass over without hiding it.
 	skip_fill := ui.hover_fill_opaque(app.theme) && active
 	if hover > 0 && !skip_fill {
-		fill = app.theme.hover
+		fill := app.theme.hover
 		fill.a *= hover
 		if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None {
 			return .Ok
 		}
 	}
-	if width >= 72 * w.scale {
+	if r.width >= (2 * ui.CONTROL_INSET + ui.ICON_BUTTON) * w.scale {
 		size := ui.ICON_BUTTON * w.scale
 		icon := render.Rect{r.x + ui.CONTROL_INSET * w.scale, r.y + (r.height - size) / 2, size, size}
 		if result := workspace_icon_draw(w, w.workspace.icon, icon, app.theme.text);
@@ -201,13 +215,17 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	indicator.y -= lift
 	label_x := r.x + (ui.CONTROL_INSET + ui.ICON_BUTTON + ui.SPACE_2) * w.scale
 	label_width := indicator.x - label_x - ui.SPACE_2 * w.scale
-	if label_width >= 24 * w.scale {
+	if label_width > 0 {
 		if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, label_x,
 			r.y + (r.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			app.theme.text, label_width); result != .Ok { return result }
 	}
-	chevron_ink := hover > 0 ? app.theme.text : app.theme.muted
-	ui.icon_draw(&w.list, .Chevron_Down, indicator, chevron_ink, ui.ICON_INDICATOR, w.scale)
+	// The chevron shows only while the chip is hovered or its picker is open.
+	if chevron := active ? 1 : hover; chevron > 0 {
+		ink := app.theme.text
+		ink.a *= chevron
+		ui.icon_draw(&w.list, .Chevron_Down, indicator, ink, ui.ICON_INDICATOR, w.scale)
+	}
 	if hover > 0 {
 		if result := ui.hover_rim_draw(
 			&w.list,

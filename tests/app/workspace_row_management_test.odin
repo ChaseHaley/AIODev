@@ -404,7 +404,8 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 			s.theme = ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
 			for width in ([?]i32{360, 460, 600, 900}) {
 				w.width = i32(f32(width)*scale)
-				f.current.name = ""
+				// Blank but long enough to fill the chip, so the chip has the same width in both frames.
+				f.current.name = "                                                                "
 				render.draw_list_reset(&w.list)
 				testing.expect_value(t, app.workspace_button_draw(s, w), render.Build_Status.Ok)
 				testing.expect_value(t, render.frame_render(device, surface, &w.list, s.theme.window), render.Error.None)
