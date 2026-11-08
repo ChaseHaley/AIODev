@@ -184,7 +184,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Pane_Header      = {
 		claims = header_claims, hover = header_hover, press = pane_header_press, release = header_release,
-		tooltip = header_tooltip, cancel = header_cancel, leave = header_cancel, held = pane_drag_held,
+		tooltip = header_tooltip, cancel = header_cancel, leave = header_leave, held = pane_drag_held,
 		holds = true, blurs_find = true, in_pane = true,
 	},
 	.Scrollbar        = {
