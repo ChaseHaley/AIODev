@@ -216,10 +216,30 @@ settings_leave :: proc(_: ^App, w: ^Window) {
 	ui.editor_hover_clear(&w.editor)
 }
 
-// A release no surface took: a held process-group row drops where it is released, then the focused page
-// finishes its press.
+// A press on a settings pane focuses it, then reaches the page.
 @(private)
-settings_pointer_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+settings_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	pane_press_focus(app, w, f32(e.x), f32(e.y))
+	settings_page_press(app, w, e)
+}
+
+// The focused page takes a Left press.
+@(private)
+settings_page_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button != .Left || !settings_active(w) {return}
+	x, y := f32(e.x), f32(e.y)
+	press := ui.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y, .Shift in e.modifiers)
+	editor_outcome(app, w, press)
+}
+
+// The release of a page press. A confirmation or the palette that opened since takes it first, in the
+// shared completion (gesture_finish). Otherwise a held process-group row drops where it is released,
+// then the focused page finishes its press.
+@(private)
+settings_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	if e.button != .Left || confirmation_current(w) != nil || palette_active(app, w) {return false}
+	w.dirty = true
+	x, y := f32(e.x), f32(e.y)
 	if ui.editor_order_dragging(&w.editor, .Process_Groups) {
 		_ = ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
 		editor_outcome(app, w, ui.editor_release(&w.editor))
