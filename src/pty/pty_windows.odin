@@ -43,6 +43,21 @@ process_id :: proc(p: ^Pty) -> u32 {
 	return p.id
 }
 
+// The full image path of the started process, empty without one. An app execution alias such as
+// the Store's pwsh.exe names the packaged executable it started, which carries the icon.
+process_image :: proc(p: ^Pty, allocator := context.allocator) -> string {
+	if p.process == nil {return ""}
+	buffer: [w.MAX_PATH_WIDE]u16
+	length := w.DWORD(len(buffer))
+	if !bool(QueryFullProcessImageNameW(p.process, 0, raw_data(buffer[:]), &length)) {
+		log.errorf("pty: QueryFullProcessImageNameW failed (OS code %v)", w.GetLastError())
+		return ""
+	}
+	path, err := w.utf16_to_utf8(buffer[:length], allocator)
+	if err != nil {return ""}
+	return path
+}
+
 @(private, require_results)
 spawn_failure :: proc(call: string, kind: Spawn_Error_Kind, code: u32) -> Spawn_Error {
 	log.errorf("pty: %s failed (OS code %v)", call, code)

@@ -498,7 +498,7 @@ when AIO_CONTROL {
 		state_valuef(r, "ui.font_points", "%g", app.settings.interface.font_size)
 		state_text(r, "ui.font_family", app.settings.interface.font_family)
 		state_text(r, "terminal.font_family", app.settings.font.family)
-		state_value(r, "shell.icon.loaded", app.shell_icon.width > 0)
+		state_value(r, "shell.icon.loaded", shell_icon_find(app, settings.PROFILE_DEFAULT_ID) != nil)
 		state_value(r, "ui.animating", motion_active(app))
 		state_value(r, "leader.enabled", app.leader != nil)
 		state_value(r, "workspaces.count", len(app.workspaces))
@@ -656,12 +656,15 @@ when AIO_CONTROL {
 		state_text(r, "session.program.name", program.name)
 		program_icon_state_report(r, app, entry)
 		state_text(r, "session.header.directory", entry.header.directory)
-		// The shell source pane_icon draws: the badge text, or the image by the path it loaded from.
+		// The shell source pane_icon draws: the profile's Icon as written, the launched executable once
+		// its icon is ready at any size, otherwise the badge text.
 		icon := entry.header.icon
-		switch pane_badge_source(app) {
-		case .Text:
-		case .Shell_Image:
-			icon = app.shell_icon.path
+		image, executable := pane_badge_source(app, entry)
+		executable_icon := Program_Icon_Want{source = .Executable, path = executable}
+		if image != nil {
+			icon = image.path
+		} else if program_icon_find(&app.program_icons, executable_icon, 0, {.Ready}) != nil {
+			icon = executable
 		}
 		state_text(r, "session.header.icon", icon)
 		state_valuef(r, "grid.origin", "%d,%d", g.padding_left, g.padding_top)

@@ -27,6 +27,16 @@ function Read-State {
     }
     return $state
 }
+# Waits for the pane header to draw the shell's own executable icon, which is read in the background.
+function Await-HeaderExecutable([string] $Executable) {
+    $until = [DateTime]::UtcNow.AddSeconds(6)
+    do {
+        $icon = (Read-State)['session.header.icon']
+        if ([IO.Path]::GetFileName($icon) -eq $Executable) { Write-Output "PASS header icon $icon"; return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $until)
+    throw "Expected the header to draw $Executable's icon, observed '$icon'"
+}
 function Tab-Point([int] $Index) {
     $s = Read-State
     $key = "tab.$Index.rect"
@@ -163,11 +173,12 @@ try {
     Set-Option profile.default.icon shell.png
     Invoke-Aio command settings.reload
     Invoke-Aio expect state shell.icon.loaded=true
+    Invoke-Aio expect state session.header.icon=shell.png
     Shot image-icon
     Set-Option profile.default.icon missing.png
     Invoke-Aio command settings.reload
     Invoke-Aio expect state shell.icon.loaded=false
-    Invoke-Aio expect state 'session.header.icon=>_'
+    Await-HeaderExecutable 'pwsh.exe'
     Set-Option profile.default.icon shell.png
     Set-Option theme.name studio-light
     Invoke-Aio command settings.reload

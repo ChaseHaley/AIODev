@@ -176,7 +176,7 @@ session_open :: proc(
 		term.destroy(session)
 		return 0, false
 	}
-	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config)
+	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config, session)
 	session_status_sync(&app.sessions[len(app.sessions) - 1])
 	return id, true
 }
@@ -244,7 +244,7 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 // launch and the status what the new process reports.
 session_relaunch :: proc(app: ^App, entry: ^Session_Entry, config: term.Config) {
 	term.restart(entry.session, config)
-	pane_header_launch(&entry.header, config)
+	pane_header_launch(&entry.header, config, entry.session)
 	pane_header_refresh(entry)
 	session_status_sync(entry)
 	mark_all_dirty(app)

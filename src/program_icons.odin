@@ -14,8 +14,9 @@ import "core:strings"
 
 // Icons of the programs running in panes (WORK-272, WORK-279). A program's icon is the user's PNG
 // for its name, then bundled artwork, then the executable's own icon, then the shell badge. The
-// process worker reads and draws each one at the drawn pixel size, cached by source and size; a
-// source that yields nothing is cached as missing so the next one is used.
+// shell's own executable icon is read through the same cache (WORK-345). The process worker reads
+// and draws each one at the drawn pixel size, cached by source and size; a source that yields
+// nothing is cached as missing so the next one is used.
 
 @(private)
 PROGRAM_ICON_LIMIT :: 32
@@ -198,9 +199,9 @@ program_icons_adopt :: proc(app: ^App) -> (ready: bool, unreadable: string) {
 	return
 }
 
-// The badge for a pane drawn `size` pixels square: its program's icon once one is ready,
-// otherwise the shell's text badge and configured shell image. While a preferred source is still
-// being read the shell badge stands in, so a lesser icon never flashes first.
+// The badge for a pane drawn `size` pixels square: its program's icon once one is ready, otherwise
+// its shell's (pane_badge_source). While a preferred source is still being read the next one stands
+// in, so a lesser icon never flashes first; the text badge stands in for them all.
 pane_icon :: proc(
 	app: ^App,
 	entry: ^Session_Entry,
@@ -211,34 +212,33 @@ pane_icon :: proc(
 	result: render.Build_Status,
 ) {
 	if entry == nil {return}
+	pixels := int(math.round(size))
 	program := program_adopted(entry)
 	if app.settings.tabs.program_icons && program != nil && program.name != "" {
-		want, found := program_icon_source(app, program, int(math.round(size)), .Draw)
+		want, found := program_icon_source(app, program, pixels, .Draw)
 		if found {
 			state: Program_Icon_State
-			atlas, state, result = program_icon_atlas(app, want, int(math.round(size)))
+			atlas, state, result = program_icon_atlas(app, want, pixels)
 			if result != .Ok || state == .Ready {return}
 			atlas = {}
 		}
 	}
 	badge = entry.header.icon
-	switch pane_badge_source(app) {
-	case .Text:
-	case .Shell_Image:
-		atlas, result = shell_icon_atlas(app)
+	image, executable := pane_badge_source(app, entry)
+	if image != nil {
+		atlas, result = shell_icon_atlas(app, image)
+	} else {
+		atlas, _, result = program_icon_atlas(app, {source = .Executable, path = executable}, pixels)
 	}
 	return
 }
 
-// What stands for a pane's shell when no program icon does: the configured shell image once it is
-// loaded, which replaces the text badge, otherwise the session's text badge.
-Pane_Badge_Source :: enum u8 {
-	Text,
-	Shell_Image,
-}
-
-pane_badge_source :: proc(app: ^App) -> Pane_Badge_Source {
-	return app.shell_icon.width > 0 ? .Shell_Image : .Text
+// What stands for a pane's shell when no program icon does: the Icon of the profile it was launched
+// with once loaded, otherwise the launched executable's own icon, read at the drawn size. The
+// session's text badge stands in while that is read, and for good when there is none.
+pane_badge_source :: proc(app: ^App, entry: ^Session_Entry) -> (image: ^Shell_Icon, executable: string) {
+	if image = shell_icon_find(app, entry.profile_id); image != nil {return}
+	return nil, entry.header.executable_path
 }
 
 // The icon for a status report: what the reporting program's name draws, so a child reporter shows
