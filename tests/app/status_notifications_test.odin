@@ -12,15 +12,15 @@ status_notifications_default_to_windows_banners_without_flashing :: proc(t: ^tes
 	if !testing.expect_value(t, err, nil) {return}
 	defer settings.destroy(&s)
 	for state in ([2]term.Program_Status_State{.Blocked, .Error}) {
-		c := app.status_notification_channels(&s.status, state)
-		testing.expect(t, c.banner && c.sound)
-		testing.expect(t, !c.tray && !c.flash && !c.notice)
+		testing.expect_value(t, app.status_notification_channels(&s.status, state),
+		                     settings.Status_Channels{.Banner, .Sound})
 	}
 	for state in ([3]term.Program_Status_State{.Idle, .Working, .Done}) {
-		testing.expect_value(t, app.status_notification_channels(&s.status, state), app.Status_Notification_Channels{})
+		channels := app.status_notification_channels(&s.status, state)
+		testing.expect_value(t, channels, settings.Status_Channels{})
 	}
 	s.status.enabled = false
-	testing.expect_value(t, app.status_notification_channels(&s.status, .Blocked), app.Status_Notification_Channels{})
+	testing.expect_value(t, app.status_notification_channels(&s.status, .Blocked), settings.Status_Channels{})
 }
 
 @(test)
@@ -34,8 +34,7 @@ status_channels_round_trip_and_route_independently_for_every_state :: proc(t: ^t
 			if !testing.expect_value(t, err, nil) {continue}
 			testing.expect_value(t, len(diagnostics), 0)
 			c := app.status_notification_channels(&s.status, state)
-			values := [5]bool{c.banner, c.tray, c.flash, c.sound, c.notice}
-			for value, index in values {testing.expect_value(t, value, index == selected)}
+			testing.expect_value(t, c, settings.Status_Channels{settings.Status_Channel(selected)})
 			// Seeing finished work does not change how it is routed.
 			for seen in ([2]term.Program_Status_State{.Done_Seen, .Error_Seen}) {
 				if term.program_status_reported(seen) != state {continue}
@@ -59,12 +58,12 @@ status_channel_sets_accept_combinations_and_none :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, len(diagnostics), 1)
 	testing.expect_value(t, app.status_notification_channels(&s.status, .Done),
-	                     app.Status_Notification_Channels{banner = true, flash = true, sound = true})
+	                     settings.Status_Channels{.Banner, .Flash, .Sound})
 	testing.expect_value(t, settings.value_text(&s, settings.schema_find("status.notify_done")^), "banner, flash, sound")
-	testing.expect_value(t, app.status_notification_channels(&s.status, .Blocked), app.Status_Notification_Channels{})
+	testing.expect_value(t, app.status_notification_channels(&s.status, .Blocked), settings.Status_Channels{})
 	// An unknown channel keeps the default rather than silencing the state.
 	testing.expect_value(t, app.status_notification_channels(&s.status, .Error),
-	                     app.Status_Notification_Channels{banner = true, sound = true})
+	                     settings.Status_Channels{.Banner, .Sound})
 }
 
 @(test)

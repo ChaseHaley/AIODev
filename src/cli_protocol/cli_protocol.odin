@@ -35,6 +35,9 @@ HEADER_LENGTH :: 3
 
 // The command whose reply is AIODev's command catalogue; aio's `commands` and `help` ask it.
 CATALOGUE_COMMAND :: "app.commands"
+// The commands `aio wait` polls: a pane's status when waiting for its exit, its screen otherwise.
+PANE_STATUS_COMMAND :: "pane.status"
+PANE_READ_COMMAND :: "pane.read"
 
 Request :: struct {
 	// The pane aio runs in, or "" outside AIODev.

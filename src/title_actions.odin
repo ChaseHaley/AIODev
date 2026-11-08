@@ -30,10 +30,14 @@ title_actions_end :: proc(w: ^Window) -> f32 {
 	return (TITLE_SLOTS * ui.TITLE_BUTTON_WIDTH + 8) * w.scale
 }
 
-// The title-bar width the native caption buttons keep at the right, which the workspace chip and the
-// tab bar both leave free.
+// Empty title bar kept beside the caption buttons since the title-bar tabs arrived (e2d9708).
+@(private = "file")
+CAPTION_CLEAR_MARGIN :: 80
+
+// The title-bar width at the right that the workspace chip and the tab bar leave free: the native
+// caption buttons and the empty margin beside them.
 window_caption_reserve :: proc(w: ^Window) -> f32 {
-	return 218 * w.scale
+	return (ui.CAPTION_WIDTH + CAPTION_CLEAR_MARGIN) * w.scale
 }
 
 title_action_rect :: proc(w: ^Window, action: Title_Action) -> render.Rect {

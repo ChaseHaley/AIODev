@@ -275,13 +275,8 @@ tab_incoming_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r, clip: render.Rect
 	if w.tabs_horizontal && !pane_fill_active(w) {
 		bar := window_tab_bar(app, w)
-		inset, height := 2 * w.scale, ui.HEIGHT_TOOLBAR * w.scale
-		r = {
-			bar.x + incoming.ghost.value * bar.tab_width + inset,
-			(bar.height - height) / 2,
-			max(0, f32(incoming.count) * bar.tab_width - 2 * inset),
-			height,
-		}
+		x := bar.x + incoming.ghost.value * bar.tab_width
+		r = ui.tab_tile_rect(bar, x, f32(incoming.count) * bar.tab_width, 0, w.scale)
 		clip = {0, 0, f32(w.width), bar.height}
 	} else if rail, built := rail_current_layout(w); built && rail_visible(w) {
 		first := ui.rail_row_rect(rail, 0)

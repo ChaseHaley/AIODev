@@ -202,6 +202,7 @@ app_destroy :: proc(app: ^App) {
 	process_worker_destroy(&app.processes)
 	program_icon_cache_destroy(&app.program_icons)
 	program_art.catalogue_destroy(&app.program_art)
+	shell_icon_destroy(&app.shell_icon)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)
@@ -490,16 +491,7 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 		pane_insets(app, &template, nil),
 		activity_dock = false,
 	)
-	return {
-		columns = box.columns,
-		rows = box.rows,
-		cell_width = u32(fields.metrics.cell_width),
-		cell_height = u32(fields.metrics.cell_height),
-		padding_left = u32(box.origin.x),
-		padding_top = u32(box.origin.y),
-		surface_width = u32(width),
-		surface_height = u32(height),
-	}
+	return pane_box_geometry(box, fields.metrics, width, height)
 }
 
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
