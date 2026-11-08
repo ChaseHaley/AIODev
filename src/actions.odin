@@ -144,6 +144,8 @@ Action :: enum u32 {
 	Float_Pane,
 	Minimize_Floating,
 	Minimize_All_Floating,
+	Tab_Context_Menu,
+	Restart_Pane,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -544,6 +546,12 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Minimize_All_Floating = {
 		"pane.minimize_all_floating", "Minimize or Restore All Floats", nil, .Host, {},
 	},
+	.Tab_Context_Menu = {
+		"tab.context_menu", "Show Tab Menu", {{.Context_Menu, {}}, {.F10, {.Shift}}}, .Host, {},
+	},
+	.Restart_Pane = {
+		"pane.restart", "Restart Stopped Pane", {{.Enter, {}}, {.Numpad_Enter, {}}}, .Local, {},
+	},
 }
 
 @(require_results)
@@ -641,13 +649,22 @@ command_window :: proc(app: ^App, w: ^Window, action: Action) -> ^Window {
 	return w
 }
 
-// Availability is command policy; each surface decides how an unavailable action is presented. Copy needs
-// something to copy: the find query's keyboard, or a selection in the focused terminal or document.
+// Availability is command policy; each surface decides how an unavailable action is presented, and a key
+// bound to one goes on to the focused pane. Copy needs something to copy: the find query's keyboard, or a
+// selection in the focused terminal or document. Restart Stopped Pane needs a focused session that is not
+// running, and leaves Enter to a find bar that has the keyboard.
 action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
-	if action != .Copy {return true}
-	if ui.find_has_keyboard(&w.find) {return true}
-	if entry := focused_session(app, w); entry != nil {return term.has_selection(entry.session)}
-	return markdown_selected(app, w) != ""
+	#partial switch action {
+	case .Copy:
+		if ui.find_has_keyboard(&w.find) {return true}
+		if entry := focused_session(app, w); entry != nil {return term.has_selection(entry.session)}
+		return markdown_selected(app, w) != ""
+	case .Restart_Pane:
+		if ui.find_has_keyboard(&w.find) {return false}
+		entry := focused_session(app, w)
+		return entry != nil && entry.status != .Running
+	}
+	return true
 }
 
 // Runs one command for every interface, so it behaves the same from each (WORK-038). A window context
@@ -878,6 +895,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		if entry != nil {
 			session_restart(app, entry)
 		}
+	case .Restart_Pane:
+		if entry != nil && entry.status != .Running {session_restart(app, entry)}
+	case .Tab_Context_Menu:
+		tab_menu_open_at(app, w, tab_index)
 	case .Hide_To_Tray:
 		hide_to_tray(app, w)
 	case .Quit:

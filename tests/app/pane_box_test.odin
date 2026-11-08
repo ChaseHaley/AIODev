@@ -65,9 +65,7 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 					testing.expect_value(t, insets.header,
 						headers ? math.round(ui.HEADER_HEIGHT * scale) : 0)
 					for grid in ([?][2]u16{{80, 24}, {40, 10}, {1, 1}}) {
-						box, width, height, solved := app.pane_box_for_grid(
-							&state, w, grid.x, grid.y, insets, activity_dock = true,
-						)
+						box, width, height, solved := app.pane_box_for_grid(&state, w, grid.x, grid.y, insets)
 						testing.expect(t, solved)
 						testing.expect_value(t, box.columns, grid.x)
 						testing.expect_value(t, box.rows, grid.y)
@@ -95,9 +93,7 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 			w := box_window(&state, &workspace, scale)
 			w.rail_width = width
 			insets := app.pane_insets(&state, &w, nil)
-			box, client_width, client_height, solved := app.pane_box_for_grid(
-				&state, w, 120, 24, insets, activity_dock = true,
-			)
+			box, client_width, client_height, solved := app.pane_box_for_grid(&state, w, 120, 24, insets)
 			testing.expect(t, solved)
 			w.width, w.height = client_width, client_height
 			app.rail_adaptive_update(&w)
@@ -109,28 +105,45 @@ pane_box_inverse_respects_resized_rail_width :: proc(t: ^testing.T) {
 	}
 }
 
-// window.columns and window.rows size a new window as if the Activity panel took no width beside the
-// pane, on either side; the docked panel then takes its width from the pane.
+// The grid the single pane of a window New Window opens receives, and that window's client width.
+@(private="file")
+new_window_grid :: proc(t: ^testing.T, state: ^app.App) -> (grid: [2]u16, width: i32) {
+	app.workspace_new(state, state.windows[0], true, name_it = false)
+	w := state.windows[len(state.windows) - 1]
+	app.tick(state)
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	box := app.pane_box(w.metrics, w.panes[0].rect, app.pane_insets(state, w, nil))
+	return {box.columns, box.rows}, w.width
+}
+
+// window.columns and window.rows give a new window's terminal that grid with the Activity panel docked on
+// either side, so the window widens by the panel; with the panel hidden it keeps its narrower size.
 @(test)
-new_window_size_leaves_out_the_docked_activity_panel :: proc(t: ^testing.T) {
+new_window_grid_honours_the_docked_activity_panel :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "window-size-activity") {return}
+	if !palette_fixture_create(t, &f, "window-size-activity", second_window = false) {return}
 	s := &f.state
 	s.settings.window.columns, s.settings.window.rows = 120, 32
 	s.settings.status.enabled = true
 	s.settings.status.panel = false
+	hidden, hidden_width := new_window_grid(t, s)
+	testing.expect_value(t, hidden, [2]u16{120, 32})
 	without := app.initial_geometry(s)
+	testing.expect_value(t, u32(hidden_width), without.surface_width)
 	s.settings.status.panel = true
 	s.settings.status.panel_width = 300
 	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
 		s.settings.status.panel_side = side
-		docked := app.initial_geometry(s)
-		testing.expect_value(t, docked.surface_width, without.surface_width)
-		testing.expect_value(t, docked.surface_height, without.surface_height)
-		testing.expect_value(t, docked.columns, without.columns)
-		testing.expect_value(t, docked.rows, without.rows)
-		testing.expect_value(t, docked.padding_left, without.padding_left)
+		docked, docked_width := new_window_grid(t, s)
+		w := s.windows[len(s.windows) - 1]
+		testing.expect(t, app.status_panel_dock_width(s, w) > 0)
+		testing.expect_value(t, docked, [2]u16{120, 32})
+		testing.expect(t, docked_width > hidden_width)
+		geometry := app.initial_geometry(s)
+		testing.expect_value(t, u32(docked_width), geometry.surface_width)
+		testing.expect_value(t, geometry.surface_height, without.surface_height)
+		testing.expect_value(t, [2]u16{geometry.columns, geometry.rows}, [2]u16{120, 32})
 	}
 }
 

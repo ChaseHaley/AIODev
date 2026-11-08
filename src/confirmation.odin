@@ -57,10 +57,10 @@ confirmation_asking :: proc(w: ^Window, $T: typeid) -> ^T {
 	return confirmation_subject(w, T)
 }
 
-// Asks about `subject`, which the window now owns, presenting it as stated. The question first closes
-// what it replaces (overlay_close_all), except `reopening`: an asking question its caller rewrites in
-// place, having taken what it keeps from it. A question still closing is released at once. The caller
-// has cancelled any pointer gesture that asked it.
+// Asks about `subject`, which the window now owns, presenting it as stated. Every question first closes
+// what it replaces (overlay_close_all, which includes the Activity inbox) and the overlay rail, except
+// `reopening`: an asking question its caller rewrites in place, having taken what it keeps from it. A
+// question still closing is released at once. The caller has cancelled any pointer gesture that asked it.
 confirmation_ask :: proc(
 	app: ^App,
 	w: ^Window,
@@ -71,6 +71,7 @@ confirmation_ask :: proc(
 	reopening: ^ui.Confirm = nil,
 ) {
 	overlay_close_all(app, w, reopening)
+	rail_overlay_dismiss(app, w)
 	confirmation_clear(w)
 	c := Confirmation{subject = subject}
 	ui.confirm_open(&c.dialog, extended, focus, show_option)

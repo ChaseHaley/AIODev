@@ -28,16 +28,16 @@ Invoke-Aio launch
 $original = $null
 try {
     $original = [IO.File]::ReadAllText($settingsPath)
-    $invalid = [regex]::Replace($original, '(?m)^shell.command = .*',
-        'shell.command = aio_t1_missing_program_9821.exe')
+    $invalid = [regex]::Replace($original, '(?m)^profile\.default\.command = .*',
+        'profile.default.command = aio_t1_missing_program_9821.exe')
     [IO.File]::WriteAllText($settingsPath, $invalid)
     Invoke-Aio command settings.reload
     Invoke-Aio command terminal.restart_shell
     Invoke-Aio expect state session.status=failed
     Assert-SessionMessage 'aio_t1_missing_program_9821.exe'
 
-    $invalid = [regex]::Replace($original, '(?m)^shell.directory = .*',
-        'shell.directory = "C:\AIODev_t1_nonexistent_directory_9821"')
+    $invalid = [regex]::Replace($original, '(?m)^profile\.default\.directory = .*',
+        'profile.default.directory = "C:\AIODev_t1_nonexistent_directory_9821"')
     [IO.File]::WriteAllText($settingsPath, $invalid)
     Invoke-Aio command settings.reload
     Invoke-Aio command terminal.restart_shell

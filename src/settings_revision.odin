@@ -190,7 +190,7 @@ settings_apply_running :: proc(app: ^App) {
 		rail_reveal_active(window)
 	}
 	status_apply_settings(app)
-	shell_icon_load(app)
+	shell_icons_load(app)
 	program_icons_reload(app)
 	control_cli_sync(app)
 }

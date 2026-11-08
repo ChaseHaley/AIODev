@@ -36,6 +36,9 @@ Geometry :: struct {
 }
 
 process_id :: proc(s: ^Session) -> u32 {return pty.process_id(&s.pty)}
+process_image :: proc(s: ^Session, allocator := context.allocator) -> string {
+	return pty.process_image(&s.pty, allocator)
+}
 
 Config :: struct {
 	command_line, working_directory: string,

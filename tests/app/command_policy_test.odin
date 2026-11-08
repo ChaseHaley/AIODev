@@ -3,6 +3,7 @@ package app_test
 import app "../../src"
 import "aio:cli_protocol"
 import "aio:commands"
+import "aio:input"
 import "aio:term"
 import "aio:ui"
 import "core:encoding/json"
@@ -68,4 +69,60 @@ copy_availability_follows_terminal_selection_or_find_keyboard :: proc(t: ^testin
 	term.clear_selection(f.session)
 	ui.find_open(&f.window.find)
 	testing.expect(t, app.action_available(&f.state, &f.window, .Copy))
+}
+
+@(private = "file")
+policy_key :: proc(s: ^app.App, w: ^app.Window, key: input.Key) {
+	e := input.Key_Event{window = w.id, key = key, pressed = true}
+	app.handle_event(s, e)
+	e.pressed = false
+	app.handle_event(s, e)
+}
+
+// Restart Stopped Pane holds Enter only while the focused session can restart; otherwise, and while
+// the find bar has the keyboard, Enter goes on to the pane, as it did before the key was a binding.
+@(test)
+pane_restart_takes_its_keys_only_from_a_stopped_session :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pane-restart", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	entry := app.focused_session(s, w)
+	if !testing.expect(t, entry != nil && entry.status == .Running) {return}
+	command := commands.find(&s.registry, "pane.restart")
+	if !testing.expect(t, command != nil) {return}
+	defaults := commands.active_shortcuts(command)
+	if testing.expect_value(t, len(defaults), 2) {
+		testing.expect_value(t, defaults[0], commands.Shortcut{.Enter, {}})
+		testing.expect_value(t, defaults[1], commands.Shortcut{.Numpad_Enter, {}})
+	}
+	exited := term.Status{kind = .Exited, exit_code = 1}
+	testing.expect_value(t, app.session_message(s, "", exited), "The shell exited with code 1. Press Enter to restart it.")
+	testing.expect(t, !app.action_available(s, w, .Restart_Pane))
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
+	testing.expect(t, !app.key_suppressed(w, .Enter))
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Enter})
+	entry.status = .Exited
+	testing.expect(t, app.action_available(s, w, .Restart_Pane))
+	policy_key(s, w, .Numpad_Enter)
+	testing.expect_value(t, entry.status, term.Status_Kind.Running)
+	entry.status = .Exited
+	ui.find_open(&w.find)
+	testing.expect(t, !app.action_available(s, w, .Restart_Pane))
+	policy_key(s, w, .Enter)
+	testing.expect_value(t, entry.status, term.Status_Kind.Exited)
+	ui.find_close(&w.find)
+	bindings := [?]commands.Shortcut{{.F5, {}}}
+	overrides := [?]commands.Override{{command.id, bindings[:]}}
+	errors: [1]commands.Error
+	testing.expect_value(t, commands.rebind(&s.registry, overrides[:], errors[:]), commands.Error.None)
+	policy_key(s, w, .Enter)
+	testing.expect_value(t, entry.status, term.Status_Kind.Exited)
+	policy_key(s, w, .F5)
+	testing.expect_value(t, entry.status, term.Status_Kind.Running)
+	testing.expect_value(t, app.session_message(s, "", exited), "The shell exited with code 1. Press F5 to restart it.")
+	unbound := [?]commands.Override{{command.id, nil}}
+	testing.expect_value(t, commands.rebind(&s.registry, unbound[:], errors[:]), commands.Error.None)
+	testing.expect_value(t, app.session_message(s, "pwsh", {kind = .Failed, message = "Gone."}),
+		"Gone. Check profile.pwsh.command and profile.pwsh.directory in settings, then run Restart Stopped Pane to try again.")
 }

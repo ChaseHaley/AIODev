@@ -23,7 +23,7 @@ Shell_Kind :: enum {
 // What AIODev knows about one shell. `id`, `name` and `command` are the profile machine discovery
 // adds, and `name` also names a profile without one. `stem` is matched case-insensitively against a
 // command line's executable; an empty stem is never inferred. `badge` is the text icon shown when
-// there is no PNG.
+// there is neither a PNG nor an icon in the executable.
 Shell_Definition :: struct {
 	id, name, stem, command, badge: string,
 	// Runs AIODev's prompt integration.

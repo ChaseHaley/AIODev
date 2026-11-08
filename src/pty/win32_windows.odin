@@ -93,4 +93,5 @@ foreign kernel32 {
 	GetWindowsDirectoryW :: proc(lpBuffer: w.LPWSTR, uSize: w.UINT) -> w.UINT ---
 	GetDriveTypeW :: proc(root: w.LPCWSTR) -> u32 ---
 	SearchPathW :: proc(lpPath, lpFileName, lpExtension: w.LPCWSTR, nBufferLength: w.DWORD, lpBuffer: w.LPWSTR, lpFilePart: ^w.LPWSTR) -> w.DWORD ---
+	QueryFullProcessImageNameW :: proc(hProcess: w.HANDLE, dwFlags: w.DWORD, lpExeName: w.LPWSTR, lpdwSize: ^w.DWORD) -> w.BOOL ---
 }

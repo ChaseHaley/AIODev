@@ -226,9 +226,9 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		overlay_input(app, w, kind, key)
 		return
 	}
-	if status_inbox_shown(w) {
+	// The open Activity inbox keeps the keys it uses; every other key takes the normal route.
+	if status_inbox_shown(w) && status_inbox_key(app, w, e, key.logical) {
 		key_suppress(w, e)
-		status_inbox_key(app, w, e, key.logical)
 		return
 	}
 	if e.pressed && e.key == .Escape && drag_active(w) != nil {
@@ -268,6 +268,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 		overlay_input(app, w, kind, Overlay_Text{text})
 		return
 	}
+	status_inbox_close(w)
 	if settings_active(w) {
 		ui.editor_text(&w.editor, text)
 		w.dirty = true
@@ -338,26 +339,22 @@ terminal_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	key, consumed := content_key_prelude(app, w, e, true)
 	if consumed {return}
 	if key.found {
-		repeated := e.repeat && key_suppressed(w, e.key)
-		if repeated || action_available(app, w, key.action) {
+		// A held Copy key stays with the app once its first press copied and ended the selection.
+		held_copy := key.action == .Copy && e.repeat && key_suppressed(w, e.key)
+		if held_copy || action_available(app, w, key.action) {
 			key_suppress(w, e)
-			if !repeated || key.action != .Copy {run_action(app, w, key.action)}
+			if !held_copy {run_action(app, w, key.action)}
 			return
 		}
 	}
+	status_inbox_typed(w, e)
 	if ui.find_has_keyboard(&w.find) {
 		find_bar_key(app, w, e, key.logical)
 		return
 	}
 	if e.pressed {
-		// Enter restarts a stopped session: the pane's own key, not a binding.
-		if entry.status != .Running {
-			if e.key == .Enter || e.key == .Numpad_Enter {
-				key_suppress(w, e)
-				session_restart(app, entry)
-			}
-			return
-		}
+		// A stopped session takes no keys; Restart Stopped Pane, on Enter by default, runs it again.
+		if entry.status != .Running {return}
 		if !input.is_modifier_key(e.key) {
 			if term.has_selection(entry.session) {
 				term.clear_selection(entry.session)

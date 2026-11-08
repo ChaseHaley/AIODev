@@ -167,23 +167,29 @@ tab_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 }
 
-// The keyboard's context-menu key, or Shift+F10, opens the selected tab's menu at that tab: below it
-// on the strip, or below the start of its row on the rail. A linked window shows no tabs. These are
-// the native context-menu conventions, so they are not user bindings.
-tab_menu_key_open :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
-	if !e.pressed || window_linked(w) {return false}
-	if e.key != .Context_Menu && !(e.key == .F10 && .Shift in e.modifiers) {return false}
-	selected := w.workspace.selected
+// Opens tab `index`'s menu at that tab, as the keyboard does: below it on the strip, or below the start
+// of its row on the rail.
+tab_menu_open_at :: proc(app: ^App, w: ^Window, index: int) {
+	if w.workspace == nil || index < 0 || index >= len(w.workspace.tabs) {return}
 	if w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
-		tab_menu_open(app, w, selected, bar.x + tab_position(w, selected) * bar.tab_width, bar.height)
+		tab_menu_open(app, w, index, bar.x + tab_position(w, index) * bar.tab_width, bar.height)
 	} else {
-		row := rail_row_rect_for_tab(w, selected)
+		row := rail_row_rect_for_tab(w, index)
 		if row.height <= 0 {
 			row = {16, ui.TITLE_BAR_HEIGHT * w.scale, 1, 1}
 		}
-		tab_menu_open(app, w, selected, row.x + 16 * w.scale, row.y + row.height)
+		tab_menu_open(app, w, index, row.x + 16 * w.scale, row.y + row.height)
 	}
+}
+
+// A key bound to tab.context_menu (Menu and Shift+F10 by default, the native context-menu keys) opens the
+// selected tab's menu before settings fields, the find bar and the focused pane see the key. A linked
+// window shows no tabs, so the key goes on to its pane.
+tab_menu_key_open :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
+	if !e.pressed || window_linked(w) {return false}
+	if action, found := shortcut_action(app, e); !found || action != .Tab_Context_Menu {return false}
+	tab_menu_open_at(app, w, w.workspace.selected)
 	key_suppress(w, e)
 	return true
 }

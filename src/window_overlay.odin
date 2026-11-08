@@ -129,14 +129,15 @@ overlay_open :: proc(app: ^App, w: ^Window, next: Window_Overlay) {
 }
 
 // Ends whatever has the window's input before something else takes it: the window's surface with its
-// cancel exit, a palette owned here (which fades out), the picker and an open confirmation. `reopening`
-// is a confirmation its caller rewrites in place: cancelling it would undo what the caller prepared for
-// the new question, such as the tabs a close subset just marked.
+// cancel exit, a palette owned here (which fades out), the picker, an open confirmation and the Activity
+// inbox. `reopening` is a confirmation its caller rewrites in place: cancelling it would undo what the
+// caller prepared for the new question, such as the tabs a close subset just marked.
 overlay_close_all :: proc(app: ^App, w: ^Window, reopening: ^ui.Confirm = nil) {
 	overlay_close(app, w)
 	palette_close(app, w)
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_cancel(w)}
 	if current := confirmation_current(w); current != nil && current != reopening {confirmation_cancel(app, w)}
+	status_inbox_close(w)
 	w.dirty = true
 }
 

@@ -20,6 +20,17 @@ function Await-State([string] $Key, [string] $Value) {
     } while ([DateTime]::UtcNow -lt $until)
     throw "Expected $Key like '$Value'"
 }
+# The prompt shows the checkout's path, so it can wrap at any column; rows are joined before matching.
+function Await-Prompt([string] $Text) {
+    $until = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $screen = & $ctl --name $name screen
+        $rows = $screen | Select-Object -Skip 1 | ForEach-Object { $_ -replace '^\s*\d+\|', '' }
+        if (($rows -join '') -like "*$Text*") { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $until)
+    throw "Expected the prompt '$Text'; last rows: $($rows -join ' / ')"
+}
 $directory = Join-Path $repo "build/verify/$name-work"
 New-Item -ItemType Directory -Force $directory | Out-Null
 $settings = Join-Path $repo "build/verify/$name-settings.ini"
@@ -44,7 +55,7 @@ try {
     Invoke-Aio key Ctrl+Shift+R | Out-Null
     Invoke-Aio expect state panes.count=2 | Out-Null
     Invoke-Aio wait text 'Last running: PING -n 60 127.0.0.1' | Out-Null
-    Invoke-Aio wait text 'reopen-closed-work>' | Out-Null
+    Await-Prompt 'reopen-closed-work>'
     Invoke-Aio expect text 'Last running: PING -n 60 127.0.0.1' | Out-Null
     Await-State 'session.name' 'pinger'
     Write-Output 'PASS pane reopens named, in its directory, noting its program'
@@ -55,7 +66,7 @@ try {
     Invoke-Aio expect state panes.count=1 | Out-Null
     Invoke-Aio command pane.reopen_closed | Out-Null
     Invoke-Aio expect state panes.count=2 | Out-Null
-    Invoke-Aio wait text 'reopen-closed-work>' | Out-Null
+    Await-Prompt 'reopen-closed-work>'
     Await-State 'session.name' 'pinger'
     Write-Output 'PASS pane whose shell exited reopens'
 

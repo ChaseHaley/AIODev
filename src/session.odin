@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:layout"
 import "aio:localpath"
 import "aio:platform"
@@ -176,7 +177,7 @@ session_open :: proc(
 		term.destroy(session)
 		return 0, false
 	}
-	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config)
+	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config, session)
 	session_status_sync(&app.sessions[len(app.sessions) - 1])
 	return id, true
 }
@@ -244,7 +245,7 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 // launch and the status what the new process reports.
 session_relaunch :: proc(app: ^App, entry: ^Session_Entry, config: term.Config) {
 	term.restart(entry.session, config)
-	pane_header_launch(&entry.header, config)
+	pane_header_launch(&entry.header, config, entry.session)
 	pane_header_refresh(entry)
 	session_status_sync(entry)
 	mark_all_dirty(app)
@@ -361,21 +362,33 @@ session_workspace_titles_changed :: proc(app: ^App, workspace: ^Workspace, id: u
 	}
 }
 
-session_message :: proc(status: term.Status) -> string {
-	switch status.kind {
-	case .Running:
-		return ""
+// A stopped pane's message names the first key bound to Restart Stopped Pane, or the command itself
+// when no key is. A failed start points at the pane's own profile keys, which the file format uses.
+session_message :: proc(app: ^App, profile_id: string, status: term.Status) -> string {
+	if status.kind == .Running {return ""}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	chord := action_shortcut_text(app, .Restart_Pane, buffer[:])
+	target := chord != "" ? chord : "Restart Stopped Pane"
+	#partial switch status.kind {
 	case .Exited:
 		return fmt.tprintf(
-			"The shell exited with code %d. Press Enter to restart it.",
+			"The shell exited with code %d. %s %s to restart it.",
 			status.exit_code,
+			chord != "" ? "Press" : "Run",
+			target,
 		)
 	case .Failed:
 		reason := status.message != "" ? status.message : "Could not start the shell."
+		profile := profile_id != "" ? profile_id : settings.PROFILE_DEFAULT_ID
 		return fmt.tprintf(
-			"%s Check shell.command and shell.directory in settings, " +
-			"then press Enter to try again.",
+			"%s Check %s%s.command and %s%s.directory in settings, then %s %s to try again.",
 			reason,
+			settings.PROFILE_PREFIX,
+			profile,
+			settings.PROFILE_PREFIX,
+			profile,
+			chord != "" ? "press" : "run",
+			target,
 		)
 	}
 	return ""

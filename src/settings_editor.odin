@@ -204,7 +204,7 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 			},
 			.Icon = {
 				title = "Icon",
-				description = "PNG path; empty uses the executable's text badge.",
+				description = "PNG path; empty uses the shell's own icon, else its text badge.",
 				value = row.icon,
 				badge = row.badge,
 				kind = .Profile_Icon,
@@ -695,10 +695,11 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		return
 	case .None:
 	}
-	if key.found && !editor_owns(key.logical) {
+	if key.found && !editor_owns(key.logical) && action_available(app, w, key.action) {
 		run_action(app, w, key.action)
 		return
 	}
+	status_inbox_typed(w, e)
 	editor_outcome(app, w, ui.editor_key(p, e))
 }
 

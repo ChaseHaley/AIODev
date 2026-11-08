@@ -498,7 +498,7 @@ when AIO_CONTROL {
 		state_valuef(r, "ui.font_points", "%g", app.settings.interface.font_size)
 		state_text(r, "ui.font_family", app.settings.interface.font_family)
 		state_text(r, "terminal.font_family", app.settings.font.family)
-		state_value(r, "shell.icon.loaded", app.shell_icon.width > 0)
+		state_value(r, "shell.icon.loaded", shell_icon_find(app, settings.PROFILE_DEFAULT_ID) != nil)
 		state_value(r, "ui.animating", motion_active(app))
 		state_value(r, "leader.enabled", app.leader != nil)
 		state_value(r, "workspaces.count", len(app.workspaces))
@@ -643,7 +643,7 @@ when AIO_CONTROL {
 		program: Program_Adopted
 		if adopted := program_adopted(entry); adopted != nil {program = adopted^}
 		state_value(r, "session.id", entry.id)
-		state_text(r, "session.message", session_message(status))
+		state_text(r, "session.message", session_message(app, entry.profile_id, status))
 		state_valuef(r, "grid.size", "%dx%d", g.columns, g.rows)
 		state_word(r, "session.status", status.kind)
 		state_valuef(r, "session.exit", "%d", status.exit_code)
@@ -656,12 +656,15 @@ when AIO_CONTROL {
 		state_text(r, "session.program.name", program.name)
 		program_icon_state_report(r, app, entry)
 		state_text(r, "session.header.directory", entry.header.directory)
-		// The shell source pane_icon draws: the badge text, or the image by the path it loaded from.
+		// The shell source pane_icon draws: the profile's Icon as written, the launched executable once
+		// its icon is ready at any size, otherwise the badge text.
 		icon := entry.header.icon
-		switch pane_badge_source(app) {
-		case .Text:
-		case .Shell_Image:
-			icon = app.shell_icon.path
+		image, executable := pane_badge_source(app, entry)
+		executable_icon := Program_Icon_Want{source = .Executable, path = executable}
+		if image != nil {
+			icon = image.path
+		} else if program_icon_find(&app.program_icons, executable_icon, 0, {.Ready}) != nil {
+			icon = executable
 		}
 		state_text(r, "session.header.icon", icon)
 		state_valuef(r, "grid.origin", "%d,%d", g.padding_left, g.padding_top)
@@ -956,9 +959,7 @@ when AIO_CONTROL {
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case verify_protocol.Resize:
 			insets := pane_insets(app, w, focused_session(app, w))
-			_, width, height, solved := pane_box_for_grid(
-				app, w^, u16(r.columns), u16(r.rows), insets, activity_dock = true,
-			)
+			_, width, height, solved := pane_box_for_grid(app, w^, u16(r.columns), u16(r.rows), insets)
 			if !solved {return .Invalid_Argument}
 			if platform.window_set_client_size(&app.platform, w.id, width, height) != .None {return .System}
 			return .None
