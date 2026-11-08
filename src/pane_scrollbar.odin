@@ -56,9 +56,7 @@ pane_scrollbar_geometry :: proc(
 		if entry == nil || !app.settings.terminal.scrollbar {return}
 		lines, ok := term.scrollbar(entry.session)
 		if !ok {return}
-		header := pane_header_of(w, pane)
-		r := pane.rect
-		area = pane_scrollbar_area({r.x, r.y + header, r.width, r.height - header}, w.scale)
+		area = pane_scrollbar_area(pane_body_rect(w, pane), w.scale)
 		extent = {int(lines.total), int(lines.len), int(lines.offset)}
 	case .Markdown:
 		page := markdown_find(app, pane.content.id)
@@ -122,7 +120,6 @@ pane_scrollbar_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 		if held.content.kind == .Markdown {
 			page := markdown_find(app, held.content.id)
 			if page == nil || markdown_document(page) == nil {break}
-			w.pointer = {x, y}
 		}
 		bar, visible := pane_scrollbar_geometry(app, w, pane)
 		if !visible {return}
@@ -159,29 +156,6 @@ terminal_scrollbar_at :: proc(app: ^App, w: ^Window, x, y: f32) -> (content: lay
 	return content, found && content.kind == .Terminal
 }
 
-// Records which terminal's track is under the pointer; true when one is.
-terminal_scrollbar_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	content, over := layout.Content{}, false
-	if !selection_active(w) {content, over = terminal_scrollbar_at(app, w, x, y)}
-	if over {pane_scrollbar_hover_set(w, content)} else {pane_scrollbar_hover_leave(w, .Terminal)}
-	return over
-}
-
-terminal_scrollbar_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
-	if !e.pressed || e.button != .Left {return false}
-	x, y := f32(e.x), f32(e.y)
-	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found || pane.content.kind != .Terminal {return false}
-	return pane_scrollbar_press(app, w, pane, x, y)
-}
-
-terminal_scrollbar_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	if !pane_scrollbar_end(w, .Terminal) {return false}
-	w.dirty = true
-	terminal_scrollbar_hover(app, w, x, y)
-	return true
-}
-
 // Terminal scrollbar pointer surface
 
 @(private)
@@ -191,24 +165,35 @@ scrollbar_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 }
 
 @(private)
+scrollbar_hover_at :: proc(app: ^App, w: ^Window, x, y: f32) {
+	content, found := terminal_scrollbar_at(app, w, x, y)
+	if found {pane_scrollbar_hover_set(w, content)} else {pane_scrollbar_hover_leave(w, .Terminal)}
+}
+
+@(private)
 scrollbar_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Scrollbar {
 		pane_scrollbar_hover_leave(w, .Terminal)
 		return
 	}
-	content, found := terminal_scrollbar_at(app, w, f32(e.x), f32(e.y))
-	if found {pane_scrollbar_hover_set(w, content)} else {pane_scrollbar_hover_leave(w, .Terminal)}
+	scrollbar_hover_at(app, w, f32(e.x), f32(e.y))
 	pointer_set(app, w, .Arrow)
 }
 
 @(private)
 scrollbar_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	_ = terminal_scrollbar_button(app, w, e)
+	if !e.pressed || e.button != .Left {return}
+	x, y := f32(e.x), f32(e.y)
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if found && pane.content.kind == .Terminal {_ = pane_scrollbar_press(app, w, pane, x, y)}
 }
 
 @(private)
 scrollbar_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
-	return e.button == .Left && terminal_scrollbar_release(app, w, f32(e.x), f32(e.y))
+	if e.button != .Left || !pane_scrollbar_end(w, .Terminal) {return false}
+	w.dirty = true
+	scrollbar_hover_at(app, w, f32(e.x), f32(e.y))
+	return true
 }
 
 @(private)

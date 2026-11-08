@@ -101,7 +101,7 @@ replay_reproduces_screen_and_cell_attributes :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, session_error, term.Error.None) {return}
 	defer term.destroy(session)
 	term.replay_write(session, data[term.CAPTURE_HEADER_SIZE:])
-	screen, snapshot_error := term.replay_snapshot(session)
+	screen, snapshot_error := term.screen_snapshot(session)
 	if !testing.expect_value(t, snapshot_error, term.Error.None) {return}
 	defer term.snapshot_destroy(&screen)
 	testing.expect_value(t, screen.columns, 20)

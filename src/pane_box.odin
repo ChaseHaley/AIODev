@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:render"
 import "aio:term_view"
 import "aio:ui"
 import "core:math"
@@ -42,6 +43,12 @@ pane_insets :: proc(
 // The header height of a pane the window shows: a header row's, or none under an overlay.
 pane_header_of :: proc(w: ^Window, pane: layout.Pane_Rect) -> f32 {
 	return pane_header_height(w.scale, pane_header_row(w, pane))
+}
+
+// The pane below its header; a pane shorter than its header has no body.
+pane_body_rect :: proc(w: ^Window, pane: layout.Pane_Rect) -> render.Rect {
+	r, header := pane.rect, pane_header_of(w, pane)
+	return {r.x, r.y + header, r.width, max(0, r.height - header)}
 }
 
 pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Insets) -> Pane_Box {

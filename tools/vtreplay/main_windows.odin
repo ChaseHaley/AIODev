@@ -107,7 +107,7 @@ run :: proc(args: []string) -> int {
 			break
 		}
 	}
-	snapshot, snapshot_error := term.replay_snapshot(session)
+	snapshot, snapshot_error := term.screen_snapshot(session)
 	if snapshot_error != .None {
 		fmt.eprintfln("error: reading the replayed screen failed (%v)", snapshot_error)
 		return 1

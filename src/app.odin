@@ -256,7 +256,7 @@ tick :: proc(app: ^App) {
 	}
 	if len(events) > 0 {layout_state_touch(app)}
 	update_sessions(app)
-	markdown_find_tick(app)
+	find_tick(app)
 	if ready, unreadable := program_icons_adopt(app); ready || unreadable != "" {
 		if unreadable != "" {
 			notify(app, .Error, fmt.tprintf("Could not read %s as a PNG program icon.", unreadable))
@@ -449,13 +449,7 @@ wait_timeout :: proc(app: ^App) -> u32 {
 			}
 		}
 	}
-	// Searches still running are work, not deadlines: the loop comes straight back to them.
-	for entry in app.sessions {
-		if term.search_pending(entry.session) {
-			return 0
-		}
-	}
-	if markdown_find_pending(app) {return 0}
+	if find_pending(app) {return 0}
 	if !found {
 		return INFINITE
 	}

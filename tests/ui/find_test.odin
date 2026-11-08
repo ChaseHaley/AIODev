@@ -8,6 +8,7 @@ import "aio:glyphs"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
+import "aio:search"
 import "aio:ui"
 import fixtures "../fixtures"
 
@@ -140,26 +141,25 @@ find_pointer_requires_matching_release_and_disables_without_matches :: proc(t: ^
 	l := ui.find_layout(1000, 1, 100)
 	x, y := l.up.x+16, l.up.y+16
 	next := l.down.x+16
-	Outcome :: ui.Find_Outcome
 	testing.expect(t, ui.find_hover(&f, l, true, x, y))
 	testing.expect_value(t, f.hover, ui.Find_Button.Up)
 	testing.expect(t, !ui.find_hover(&f, l, true, x, y))
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Right, true, x, y), Outcome.None)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), Outcome.Moved)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, true, x, y), Outcome.Moved)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), Outcome.Moved)
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Right, true, x, y), ui.Find_Outcome(ui.Find_Change.None))
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), ui.Find_Outcome(ui.Find_Change.Moved))
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, true, x, y), ui.Find_Outcome(ui.Find_Change.Moved))
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), ui.Find_Outcome(ui.Find_Change.Moved))
 	ui.find_mouse(&f, l, true, .Left, true, x, y)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), Outcome.Up)
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, x, y), ui.Find_Outcome(search.Step.Up))
 	ui.find_mouse(&f, l, true, .Left, true, next, y)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), Outcome.Down)
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), ui.Find_Outcome(search.Step.Down))
 	ui.find_mouse(&f, l, true, .Left, true, x, y)
-	testing.expect_value(t, ui.find_mouse(&f, l, false, .Left, false, x, y), Outcome.Moved)
+	testing.expect_value(t, ui.find_mouse(&f, l, false, .Left, false, x, y), ui.Find_Outcome(ui.Find_Change.Moved))
 	ui.find_mouse(&f, l, false, .Left, true, next, y)
 	testing.expect_value(t, ui.armed_target(f.armed), ui.Find_Button.None)
 	testing.expect(t, ui.armed_down(f.armed))
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), Outcome.Moved)
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, next, y), ui.Find_Outcome(ui.Find_Change.Moved))
 	ui.find_mouse(&f, l, true, .Left, true, x, y)
-	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, 0, 0), Outcome.Moved)
+	testing.expect_value(t, ui.find_mouse(&f, l, true, .Left, false, 0, 0), ui.Find_Outcome(ui.Find_Change.Moved))
 	ui.find_close(&f)
 	testing.expect(t, !ui.armed_down(f.armed))
 	testing.expect_value(t, ui.armed_target(f.armed), ui.Find_Button.None)
@@ -172,27 +172,26 @@ find_toggles_close_and_focus_respond_without_matches :: proc(t: ^testing.T) {
 	ui.find_init(&f)
 	defer ui.find_destroy(&f)
 	ui.find_open(&f)
-	Outcome :: ui.Find_Outcome
 	l := ui.find_layout(1000, 1, 100)
 	click :: proc(f: ^ui.Find_Bar, l: ui.Find_Layout, r: render.Rect) -> ui.Find_Outcome {
 		x, y := r.x+r.width/2, r.y+r.height/2
 		ui.find_mouse(f, l, false, .Left, true, x, y)
 		return ui.find_mouse(f, l, false, .Left, false, x, y)
 	}
-	testing.expect_value(t, click(&f, l, l.case_toggle), Outcome.Changed)
-	testing.expect(t, f.case_sensitive && !f.regex)
-	testing.expect_value(t, click(&f, l, l.regex_toggle), Outcome.Changed)
-	testing.expect(t, f.case_sensitive && f.regex)
-	testing.expect_value(t, click(&f, l, l.up), Outcome.Moved)
+	testing.expect_value(t, click(&f, l, l.case_toggle), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect(t, f.options.case_sensitive && !f.options.regex)
+	testing.expect_value(t, click(&f, l, l.regex_toggle), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect(t, f.options.case_sensitive && f.options.regex)
+	testing.expect_value(t, click(&f, l, l.up), ui.Find_Outcome(ui.Find_Change.Moved))
 	alt :: proc(k: input.Key) -> input.Key_Event { return {key = k, modifiers = {.Alt}, pressed = true, text = "c"} }
-	testing.expect_value(t, ui.find_key(&f, alt(.C)), Outcome.Changed)
-	testing.expect_value(t, ui.find_key(&f, alt(.R)), Outcome.Changed)
-	testing.expect(t, !f.case_sensitive && !f.regex)
+	testing.expect_value(t, ui.find_key(&f, alt(.C)), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect_value(t, ui.find_key(&f, alt(.R)), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect(t, !f.options.case_sensitive && !f.options.regex)
 	testing.expect_value(t, ui.field_string(&f.query), "")
 	// AltGr arrives as Control+Alt and types its character.
 	altgr := input.Key_Event{key = .C, modifiers = {.Control, .Alt}, pressed = true, text = "\u00a9"}
-	testing.expect_value(t, ui.find_key(&f, altgr), Outcome.Changed)
-	testing.expect(t, !f.case_sensitive)
+	testing.expect_value(t, ui.find_key(&f, altgr), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect(t, !f.options.case_sensitive)
 	testing.expect_value(t, ui.field_string(&f.query), "\u00a9")
 
 	ui.find_blur(&f)
@@ -200,7 +199,7 @@ find_toggles_close_and_focus_respond_without_matches :: proc(t: ^testing.T) {
 	ui.find_mouse(&f, l, false, .Left, true, l.query.x+4, l.query.y+4)
 	testing.expect(t, ui.find_has_keyboard(&f))
 	ui.find_mouse(&f, l, false, .Left, false, l.query.x+4, l.query.y+4)
-	testing.expect_value(t, click(&f, l, l.close), Outcome.Closed)
+	testing.expect_value(t, click(&f, l, l.close), ui.Find_Outcome(ui.Find_Change.Closed))
 	testing.expect_value(t, ui.find_pointer(l, false, l.close.x+4, l.close.y+4), platform.Cursor_Shape.Hand)
 	testing.expect_value(t, ui.find_pointer(l, false, l.up.x+4, l.up.y+4), platform.Cursor_Shape.Arrow)
 }
@@ -212,7 +211,6 @@ find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 	f: ui.Find_Bar
 	ui.find_init(&f)
 	defer ui.find_destroy(&f)
-	Outcome :: ui.Find_Outcome
 	up := input.Key_Event{key = .Arrow_Up, pressed = true}
 	down := input.Key_Event{key = .Arrow_Down, pressed = true}
 	enter := input.Key_Event{key = .Enter, pressed = true}
@@ -220,7 +218,7 @@ find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 	ui.find_text(&f, "alpha")
 	ui.find_key(&f, enter, &h)
 	ui.find_text(&f, "2")
-	f.regex = true
+	f.options = {case_sensitive = true, regex = true}
 	ui.find_close(&f, &h)
 	ui.find_open(&f, &h)
 	testing.expect_value(t, ui.field_string(&f.query), "")
@@ -232,18 +230,18 @@ find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 
 	ui.find_focus(&f)
 	ui.field_set(&f.query, "draft")
-	f.regex = false
-	testing.expect_value(t, ui.find_key(&f, up, &h), Outcome.Changed)
+	f.options = {}
+	testing.expect_value(t, ui.find_key(&f, up, &h), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "alpha")
-	testing.expect_value(t, ui.find_key(&f, up, &h), Outcome.Changed)
+	testing.expect_value(t, ui.find_key(&f, up, &h), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "alpha2")
-	testing.expect(t, f.regex)
-	testing.expect_value(t, ui.find_key(&f, up, &h), Outcome.None)
-	testing.expect_value(t, ui.find_key(&f, down, &h), Outcome.Changed)
-	testing.expect_value(t, ui.find_key(&f, down, &h), Outcome.Changed)
+	testing.expect(t, f.options.case_sensitive && f.options.regex)
+	testing.expect_value(t, ui.find_key(&f, up, &h), ui.Find_Outcome(ui.Find_Change.None))
+	testing.expect_value(t, ui.find_key(&f, down, &h), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect_value(t, ui.find_key(&f, down, &h), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "draft")
-	testing.expect(t, !f.regex)
-	testing.expect_value(t, ui.find_key(&f, down, &h), Outcome.None)
+	testing.expect(t, !f.options.case_sensitive && !f.options.regex)
+	testing.expect_value(t, ui.find_key(&f, down, &h), ui.Find_Outcome(ui.Find_Change.None))
 	// The first step back skips a query equal to the newest entry.
 	ui.field_set(&f.query, "alpha")
 	ui.find_key(&f, up, &h)
@@ -257,7 +255,7 @@ find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 	ui.find_close(&f, &h)
 	ui.find_open(&f, &h, select = true)
 	testing.expect_value(t, ui.field_selected_text(&f.query), "alpha2")
-	testing.expect_value(t, ui.find_text(&f, "beta"), Outcome.Changed)
+	testing.expect_value(t, ui.find_text(&f, "beta"), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "beta")
 }
 
@@ -285,7 +283,7 @@ find_history_browsing_frees_its_draft_when_it_ends :: proc(t: ^testing.T) {
 		if !ui.find_is_open(&f) {ui.find_open(&f, &h)}
 		ui.find_focus(&f)
 		ui.field_set(&f.query, "draft")
-		testing.expect_value(t, ui.find_key(&f, up, &h), ui.Find_Outcome.Changed)
+		testing.expect_value(t, ui.find_key(&f, up, &h), ui.Find_Outcome(ui.Find_Change.Changed))
 		testing.expect_value(t, ui.field_string(&f.query), "older")
 		switch way {
 		case .Past_Newest:
@@ -301,6 +299,6 @@ find_history_browsing_frees_its_draft_when_it_ends :: proc(t: ^testing.T) {
 			ui.find_close(&f, &h)
 		}
 		testing.expectf(t, len(tracking.allocation_map) == 0, "%v kept the draft", way)
-		testing.expect_value(t, ui.find_key(&f, down, &h), ui.Find_Outcome.None)
+		testing.expect_value(t, ui.find_key(&f, down, &h), ui.Find_Outcome(ui.Find_Change.None))
 	}
 }

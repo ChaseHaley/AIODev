@@ -63,13 +63,6 @@ snapshot_result :: proc(result: ghostty.Result, operation: string) -> Error {
 	return result == .Out_Of_Memory ? .Out_Of_Memory : .Terminal_Failed
 }
 
-// snapshot_color keeps the cell-read seam stable: the value contract lives in the colour module,
-// and this names the byte conversion the snapshot and frame share.
-@(private)
-snapshot_color :: proc(rgb: ghostty.Color_Rgb) -> Color {
-	return color_from_ghostty(rgb)
-}
-
 @(require_results)
 snapshot :: proc(
 	state: ghostty.Render_State,
@@ -106,9 +99,9 @@ snapshot :: proc(
 		s.cursor.position = [2]int{int(cursor.viewport_x), int(cursor.viewport_y)}
 	}
 	s.foreground, s.background =
-		snapshot_color(colors.foreground), snapshot_color(colors.background)
-	if colors.cursor_has_value {s.cursor_color = snapshot_color(colors.cursor)}
-	for c, i in colors.palette {s.palette[i] = snapshot_color(c)}
+		color_from_ghostty(colors.foreground), color_from_ghostty(colors.background)
+	if colors.cursor_has_value {s.cursor_color = color_from_ghostty(colors.cursor)}
+	for c, i in colors.palette {s.palette[i] = color_from_ghostty(c)}
 	if runtime.resize(&s.cells, int(s.columns) * int(s.rows)) != nil {return {}, .Out_Of_Memory}
 	offsets, allocation_error := make([]int, len(s.cells), allocator)
 	if allocation_error != nil {return {}, .Out_Of_Memory}
@@ -156,9 +149,9 @@ snapshot_read_cell :: proc(
 	c.width = snapshot_width(cell.width)
 	c.style = snapshot_style(cell.style, palette)
 	c.foreground = nil
-	if rgb, ok := cell.foreground.?; ok {c.foreground = snapshot_color(rgb)}
+	if rgb, ok := cell.foreground.?; ok {c.foreground = color_from_ghostty(rgb)}
 	c.background = nil
-	if rgb, ok := cell.background.?; ok {c.background = snapshot_color(rgb)}
+	if rgb, ok := cell.background.?; ok {c.background = color_from_ghostty(rgb)}
 	selected: bool
 	if ghostty.render_state_row_cells_get(cells, .Selected, &selected) == .Success {
 		c.selected = selected
@@ -221,7 +214,7 @@ snapshot_style :: proc(style: ghostty.Style, palette: ^[256]Color) -> Snapshot_S
 	case .Palette:
 		s.underline_color = palette[style.underline_color.value.palette]
 	case .Rgb:
-		s.underline_color = snapshot_color(style.underline_color.value.rgb)
+		s.underline_color = color_from_ghostty(style.underline_color.value.rgb)
 	}
 	return s
 }
@@ -317,11 +310,11 @@ screen_rows :: proc(s: ^Session, allocator := context.allocator) -> ([]string, E
 	return rows[:used], .None
 }
 
-// Copies the session's screen as it is now through a render state of its own: the one read behind
-// screen_rows and replay_snapshot. Unlike capture, which feeds a view, it ignores a synchronized
-// output hold and collects no highlights or images.
-@(private, require_results)
-screen_snapshot :: proc(s: ^Session, allocator: runtime.Allocator) -> (Snapshot, Error) {
+// Copies the session's current screen through its own render state, for live and headless sessions.
+// Unlike capture, which feeds a view, it ignores a synchronized output hold and collects no
+// highlights or images. The caller owns the result and releases it with snapshot_destroy.
+@(require_results)
+screen_snapshot :: proc(s: ^Session, allocator := context.allocator) -> (Snapshot, Error) {
 	state: ghostty.Render_State
 	if err := snapshot_result(ghostty.render_state_new(nil, &state), "creating state"); err != .None {
 		return {}, err

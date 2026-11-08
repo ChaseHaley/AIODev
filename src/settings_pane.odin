@@ -61,8 +61,7 @@ settings_pane_rect :: proc(w: ^Window) -> layout.Pane_Rect {
 
 @(require_results)
 settings_layout_for :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Editor_Layout {
-	rect, header := pane.rect, pane_header_of(w, pane)
-	return ui.editor_layout({rect.x, rect.y + header, rect.width, max(0, rect.height - header)}, w.scale)
+	return ui.editor_layout(pane_body_rect(w, pane), w.scale)
 }
 
 settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {

@@ -1,7 +1,7 @@
 package platform
 
+import "aio:com"
 import "aio:input"
-import "aio:localpath"
 import "core:log"
 import w "core:sys/windows"
 
@@ -15,7 +15,7 @@ taskbar_list :: proc(p: ^Platform) -> (^w.ITaskbarList3, Error) {
 	case nil:
 	}
 	p.taskbar = Service_Failed{}
-	entered, usable := localpath.com_apartment()
+	entered, usable := com.apartment()
 	// S_FALSE means COM was already initialized on this thread, and still needs a matching uninit.
 	p.com_initialized = entered
 	if !usable {return nil, .Os}

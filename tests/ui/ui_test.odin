@@ -8,6 +8,7 @@ import "aio:font"
 import "aio:glyphs"
 import "aio:platform"
 import "aio:render"
+import "aio:search"
 import "aio:ui"
 
 registry_create :: proc(t: ^testing.T) -> commands.Registry {
@@ -171,30 +172,29 @@ find_bar_edits_query_and_navigates :: proc(t: ^testing.T) {
 	f: ui.Find_Bar
 	ui.find_init(&f)
 	defer ui.find_destroy(&f)
-	Outcome :: ui.Find_Outcome
 	ui.find_open(&f)
 	testing.expect(t, ui.find_is_open(&f))
-	testing.expect_value(t, ui.find_key(&f, key({key = .E, text = "e"})), Outcome.Changed)
-	testing.expect_value(t, ui.find_text(&f, "rr or"), Outcome.Changed)
-	testing.expect_value(t, ui.find_text(&f, "\x1b"), Outcome.None)
+	testing.expect_value(t, ui.find_key(&f, key({key = .E, text = "e"})), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect_value(t, ui.find_text(&f, "rr or"), ui.Find_Outcome(ui.Find_Change.Changed))
+	testing.expect_value(t, ui.find_text(&f, "\x1b"), ui.Find_Outcome(ui.Find_Change.None))
 	testing.expect_value(t, ui.field_string(&f.query), "err or")
 	control_a := key({key = .A, text = "\x01", modifiers = {.Control}})
-	testing.expect_value(t, ui.find_key(&f, control_a), Outcome.Moved)
+	testing.expect_value(t, ui.find_key(&f, control_a), ui.Find_Outcome(ui.Find_Change.Moved))
 	testing.expect_value(t, ui.field_selected_text(&f.query), "err or")
-	testing.expect_value(t, ui.find_key(&f, key({key = .End})), Outcome.Moved)
-	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace, modifiers = {.Control}})), Outcome.Changed)
+	testing.expect_value(t, ui.find_key(&f, key({key = .End})), ui.Find_Outcome(ui.Find_Change.Moved))
+	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace, modifiers = {.Control}})), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "err ")
-	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace})), Outcome.Changed)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Backspace})), ui.Find_Outcome(ui.Find_Change.Changed))
 	testing.expect_value(t, ui.field_string(&f.query), "err")
-	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), Outcome.Next)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Enter, text = "\r"})), ui.Find_Outcome(search.Step.Next))
 	shift_enter := key({key = .Enter, text = "\r", modifiers = {.Shift}})
-	testing.expect_value(t, ui.find_key(&f, shift_enter), Outcome.Previous)
+	testing.expect_value(t, ui.find_key(&f, shift_enter), ui.Find_Outcome(search.Step.Previous))
 	// Without history, Up and Down leave the query alone.
-	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Up})), Outcome.None)
-	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Down})), Outcome.None)
-	testing.expect_value(t, ui.find_key(&f, {key = .Escape}), Outcome.None)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Up})), ui.Find_Outcome(ui.Find_Change.None))
+	testing.expect_value(t, ui.find_key(&f, key({key = .Arrow_Down})), ui.Find_Outcome(ui.Find_Change.None))
+	testing.expect_value(t, ui.find_key(&f, {key = .Escape}), ui.Find_Outcome(ui.Find_Change.None))
 	testing.expect(t, ui.find_is_open(&f))
-	testing.expect_value(t, ui.find_key(&f, key({key = .Escape})), Outcome.Closed)
+	testing.expect_value(t, ui.find_key(&f, key({key = .Escape})), ui.Find_Outcome(ui.Find_Change.Closed))
 	ui.find_close(&f)
 	testing.expect(t, !ui.find_is_open(&f) && !ui.find_has_keyboard(&f))
 	r := ui.find_layout(1000, 1.5)

@@ -67,13 +67,52 @@ find_target_summary :: proc(target: Find_Target) -> (summary: search.Summary, ok
 	return {}, false
 }
 
+// Both scanners participate in the same wake and update policy. A document that is missing or
+// unreadable waits for a successful reload before its search can continue.
+@(private)
+find_target_pending :: proc(target: Find_Target) -> bool {
+	switch t in target {
+	case ^Session_Entry:
+		return t != nil && term.search_pending(t.session)
+	case ^Markdown_Pane:
+		return t != nil && markdown_document(t) != nil && markdown.search_pending(&t.search)
+	}
+	return false
+}
+
+@(require_results)
+find_pending :: proc(app: ^App) -> bool {
+	for &entry in app.sessions {if find_target_pending(&entry) {return true}}
+	for pane in app.markdown_panes {if find_target_pending(pane) {return true}}
+	return false
+}
+
+@(private)
+find_target_tick :: proc(app: ^App, target: Find_Target) {
+	if !find_target_pending(target) {return}
+	before, _ := find_target_summary(target)
+	switch t in target {
+	case ^Session_Entry:
+		term.search_update(t.session)
+	case ^Markdown_Pane:
+		markdown.search_update(&t.search, markdown_document(t), search.STEP_BUDGET)
+	}
+	after, _ := find_target_summary(target)
+	if after != before {mark_all_dirty(app)}
+}
+
+find_tick :: proc(app: ^App) {
+	for &entry in app.sessions {find_target_tick(app, &entry)}
+	for pane in app.markdown_panes {find_target_tick(app, pane)}
+}
+
 // Opens find, gives an open bar back the keyboard, or closes a bar that has it.
 find_toggle :: proc(app: ^App, w: ^Window, target: Find_Target) {
 	t := app.settings.terminal
 	switch {
 	case !ui.find_is_open(&w.find):
 		ui.find_open(&w.find, &app.find_history, t.find_keep_query, t.find_select_query)
-		on_find_outcome(app, w, target, .Changed)
+		on_find_outcome(app, w, target, ui.Find_Change.Changed)
 	case !ui.find_has_keyboard(&w.find):
 		ui.find_focus(&w.find, t.find_select_query)
 	case:
@@ -89,42 +128,27 @@ find_close :: proc(app: ^App, w: ^Window, target: Find_Target) {
 	find_target_set(target, "")
 }
 
-find_options :: proc(w: ^Window) -> search.Options {
-	return {case_sensitive = w.find.case_sensitive, regex = w.find.regex}
-}
-
 on_find_outcome :: proc(app: ^App, w: ^Window, target: Find_Target, outcome: ui.Find_Outcome) {
-	if outcome == .None {
-		return
+	switch change in outcome {
+	case ui.Find_Change:
+		if change == .None {return}
+		w.dirty = true
+		if target == nil {return}
+		switch change {
+		case .None, .Moved:
+		case .Changed:
+			find_target_set(target, ui.field_string(&w.find.query), w.find.options)
+		case .Closed:
+			find_close(app, w, target)
+		}
+	case search.Step:
+		w.dirty = true
+		if target == nil {return}
+		ui.find_history_add(&app.find_history, &w.find)
+		// Enter follows the target's reading order; the bar's arrows always move up or down.
+		summary, _ := find_target_summary(target)
+		find_target_select(w, target, search.moves_up(summary.order, change))
 	}
-	w.dirty = true
-	if target == nil {
-		return
-	}
-	step: search.Step
-	switch outcome {
-	case .None, .Moved:
-		return
-	case .Changed:
-		find_target_set(target, ui.field_string(&w.find.query), find_options(w))
-		return
-	case .Closed:
-		find_close(app, w, target)
-		return
-	case .Next:
-		step = .Next
-	case .Previous:
-		step = .Previous
-	case .Up:
-		step = .Up
-	case .Down:
-		step = .Down
-	}
-	ui.find_history_add(&app.find_history, &w.find)
-	// A terminal reads from its newest line up and a document from its first line down, so Enter
-	// follows the target's reading order while the bar's arrows always point the way they move.
-	summary, _ := find_target_summary(target)
-	find_target_select(w, target, search.moves_up(summary.order, step))
 }
 
 // A key while the bar has the keyboard edits the query; none reach the pane.
@@ -140,7 +164,7 @@ find_bar_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 	case .None:
 		outcome = ui.find_key(&w.find, logical, &app.find_history)
 	}
-	if outcome == .Closed {key_suppress(w, e)}
+	if outcome == ui.Find_Outcome(ui.Find_Change.Closed) {key_suppress(w, e)}
 	on_find_outcome(app, w, find_target(app, w), outcome)
 }
 
@@ -184,8 +208,8 @@ when AIO_CONTROL {
 		open := ui.find_is_open(&w.find)
 		state_value(r, "find.open", open)
 		state_value(r, "find.focused", ui.find_has_keyboard(&w.find))
-		state_value(r, "find.case_sensitive", w.find.case_sensitive)
-		state_value(r, "find.regex", w.find.regex)
+		state_value(r, "find.case_sensitive", w.find.options.case_sensitive)
+		state_value(r, "find.regex", w.find.options.regex)
 		state_text(r, "find.query", ui.field_string(&w.find.query))
 		state_text(r, "find.matches", matches)
 		state_text(r, "find.count", label)

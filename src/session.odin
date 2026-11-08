@@ -257,13 +257,6 @@ update_sessions :: proc(app: ^App) {
 	for i := len(app.sessions) - 1; i >= 0; i -= 1 {
 		entry := &app.sessions[i]
 		s := entry.session
-		if term.search_pending(s) {
-			before := term.search_summary(s)
-			term.search_update(s)
-			if term.search_summary(s) != before {
-				mark_all_dirty(app)
-			}
-		}
 		if term.take_status_change(s) {
 			workspace_status_changed = true
 			layout_state_touch(app)

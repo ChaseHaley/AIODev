@@ -51,11 +51,11 @@ armed_press_replaces_target_and_reports_change :: proc(t: ^testing.T) {
 @(test)
 armed_keeps_a_press_that_has_no_target :: proc(t: ^testing.T) {
 	// Find-style: a press inside the surface but off every button still owns the release.
-	a: ui.Armed(ui.Find_Outcome)
-	testing.expect(t, ui.armed_press(&a, ui.Find_Outcome.None))
-	testing.expect(t, ui.armed_down(a) && ui.armed_is(a, ui.Find_Outcome.None))
-	fired, ok := ui.armed_release(&a, ui.Find_Outcome.None)
-	testing.expect(t, ok && fired == ui.Find_Outcome.None)
+	a: ui.Armed(ui.Find_Change)
+	testing.expect(t, ui.armed_press(&a, ui.Find_Change.None))
+	testing.expect(t, ui.armed_down(a) && ui.armed_is(a, ui.Find_Change.None))
+	fired, ok := ui.armed_release(&a, ui.Find_Change.None)
+	testing.expect(t, ok && fired == ui.Find_Change.None)
 	testing.expect(t, !ui.armed_down(a))
 }
 
