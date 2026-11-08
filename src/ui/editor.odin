@@ -1162,15 +1162,6 @@ profile_index_at :: proc(p: ^Editor, item_index: int) -> int {
 	return count
 }
 
-@(private)
-profile_row_count :: proc(p: ^Editor) -> int {
-	count := 0
-	for item in p.items {
-		if item.row >= 0 && p.rows[item.row].kind == .Profile {count += 1}
-	}
-	return count
-}
-
 // A reorderable block's first row and the inline editor rows under it, as page lines: a profile
 // with its expanded editor, or a process group with its fields.
 @(private)
