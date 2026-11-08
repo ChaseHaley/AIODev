@@ -226,7 +226,7 @@ pane_header_draw :: proc(
 	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 	title := content_pane_title(app, entry, pane.content)
 	directory := entry != nil ? entry.header.directory : content_directory(app, pane.content)
-	badge, result := content_badge(app, entry, pane.content.kind, ui.ICON_BUTTON * w.scale, header = true)
+	badge, result := content_badge(app, entry, pane.content.kind, ui.ICON_BUTTON * w.scale)
 	if result != .Ok {return result}
 	status: ui.Status_Mark
 	status_text: string

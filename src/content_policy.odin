@@ -16,10 +16,9 @@ Content_Policy :: struct {
 	linkable:          bool,
 	// Has a Documents button and its own pinned documents.
 	documents:         bool,
-	// The badge a tab, float capsule or pane shows for the content; terminals show their shell's instead.
+	// The badge a tab, float capsule or pane header shows for the content; terminals show their shell's
+	// instead.
 	icon:              ui.Icon,
-	// Shown in a keycap as a pane header's badge in place of the icon.
-	header_glyph:      string,
 	// What the kind is called where it has no title of its own.
 	display_name:      string,
 }
@@ -27,7 +26,7 @@ Content_Policy :: struct {
 @(rodata)
 CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	.Terminal = {owns_session = true, linkable = true, documents = true, display_name = "Terminal"},
-	.Settings = {one_per_workspace = true, icon = .Settings, header_glyph = "⚙", display_name = "Settings"},
+	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
 	.Markdown = {documents = true, icon = .Markdown, display_name = "Markdown"},
 }
 
@@ -58,26 +57,22 @@ Content_Badge :: struct {
 	atlas: render.Rect,
 }
 
-// A session's program icon or shell badge `size` pixels square, else the kind's icon, or in a pane header
-// the kind's glyph where it has one.
+// A session's program icon or shell badge `size` pixels square, else the kind's icon: the badge the
+// tab strip shows, so pane headers and float capsules show the same one.
 @(require_results)
 content_badge :: proc(
 	app: ^App,
 	entry: ^Session_Entry,
 	kind: layout.Content_Kind,
 	size: f32,
-	header := false,
 ) -> (
 	badge: Content_Badge,
 	result: render.Build_Status,
 ) {
 	policy := CONTENT_POLICY[kind]
-	switch {
-	case policy.owns_session:
+	if policy.owns_session {
 		badge.glyph, badge.atlas, result = pane_icon(app, entry, size)
-	case header && policy.header_glyph != "":
-		badge.glyph = policy.header_glyph
-	case:
+	} else {
 		badge.icon = policy.icon
 	}
 	return
