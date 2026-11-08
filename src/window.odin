@@ -12,8 +12,16 @@ import "aio:ui"
 import "core:log"
 import "core:time"
 
+// perf is used only when FRAME_STATS is set.
+_ :: perf
+
 @(private)
 FRAME_WAIT_MS :: 100
+
+// Frame timing and counters for `aioctl perf` and the frame construction tests. Release builds
+// compile none of it, so their frames read no clock and fill no sample ring.
+@(private)
+FRAME_STATS :: AIO_CONTROL || ODIN_TEST
 
 // A pane's state in one window: header controls for every pane and, for a terminal, its drawing view,
 // cached draw list and the links on its screen (see term_links.odin). pane_view_create makes one and
@@ -75,10 +83,7 @@ Window :: struct {
 	using keys: Key_State,
 	// Tab placement: horizontal restores the title-bar strip and the presentation arrays below.
 	tabs_horizontal: bool,
-	tab_underline:   ui.Motion,
-	// The strip control or rail row under the pointer.
-	tab_hover:       Tab_Chrome_Target,
-	tab_close_armed: ui.Armed(int),
+	using tab_chrome: Tab_Chrome_State,
 	using rail_state: Rail_State,
 	// The Activity panel's width left of the rail; see window_dock_reserve.
 	dock_left_width: f32,
@@ -175,10 +180,7 @@ window_prepare :: proc(app: ^App, workspace: ^Workspace) -> ^Window {
 	if !workspace_view_init(app, &w.resources, workspace) {window_free(w); return nil}
 	focus_init(w)
 	if w.workspace.selection_anchor == 0 {tab_select_one(w.workspace, w.workspace.selected)}
-	w.tab_underline = {
-		value  = f32(w.workspace.selected),
-		target = f32(w.workspace.selected),
-	}
+	tab_chrome_reset(w)
 	// Every new window opens at the configured size, whatever window its content last filled.
 	g := initial_geometry(app)
 	desc := platform.Window_Desc {
@@ -358,8 +360,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	w.tabs_horizontal = horizontal
 	if placement_changed {
 		rail_resize_cancel(w)
-		w.tab_hover = nil
-		gesture_tab_unpress(w)
+		tab_chrome_forget_hover(w)
 	}
 	if placement_changed && !horizontal {
 		// Returning from the strip restores the rail's automatic state; a manual hide or overlay
@@ -398,12 +399,9 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		i32(bar_height),
 		i32(window_title_controls_end(app, w)),
 	)
-	if !w.tabs_horizontal {
-		rail_layout_state, rail_ok := rail_current_layout(w)
-		if rail_ok {w.rail_scroll = rail_layout_state.scroll}
-	}
-	pane_header_cancel(w)
-	for &view in w.views {view.header_controls = {}}
+	// The rail owner stores its scroll clamp for the new size.
+	_, _ = rail_current_layout(w)
+	pane_header_relayout_reset(w)
 	w.header_height = pane_insets(app, w.scale, nil).header
 	layout.place_shown(window_tree(w), window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
 	window_panes_placed(app, w, 0)
@@ -545,14 +543,16 @@ window_render :: proc(app: ^App, w: ^Window) {
 		log.error("waiting for the swap chain failed")
 	}
 	background := app.theme.window
-	build_start := time.tick_now()
+	when FRAME_STATS {build_start := time.tick_now()}
 	if !window_build_frame(app, w) {return}
-	perf.mark_built(&app.perf)
-	build_ms := perf.since_ms(build_start)
+	when FRAME_STATS {
+		perf.mark_built(&app.perf)
+		build_ms := perf.since_ms(build_start)
+	}
 	w.gloss_hovered = ui.hover_rim_present(&w.list)
-	render_start := time.tick_now()
+	when FRAME_STATS {render_start := time.tick_now()}
 	err := window_surface_present(app, w, background)
-	render_ms := perf.since_ms(render_start)
+	when FRAME_STATS {render_ms := perf.since_ms(render_start)}
 	// The surface module recovered a lost device; the next frame draws on the new one.
 	if err == .Device_Lost {return}
 	if err != .None {
@@ -561,8 +561,10 @@ window_render :: proc(app: ^App, w: ^Window) {
 	// A failed render still built a draw list, but only a presented frame can carry an input
 	// latency sample; counting successes alone keeps frames.presented meaningful. The render
 	// start tick is the idle predicate's clock, so a frame reads the clock only twice.
-	if err == .None {
-		perf.record_frame(&app.perf, build_ms, render_ms, perf.idle_at(&app.perf, render_start))
+	when FRAME_STATS {
+		if err == .None {
+			perf.record_frame(&app.perf, build_ms, render_ms, perf.idle_at(&app.perf, render_start))
+		}
 	}
 	w.dirty = false
 }

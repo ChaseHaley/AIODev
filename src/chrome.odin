@@ -1,7 +1,6 @@
 package main
 
 import "aio:colour"
-import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
@@ -122,29 +121,6 @@ window_gap :: proc(app: ^App, w: ^Window) -> f32 {
 window_pane_radius :: proc(app: ^App, w: ^Window) -> f32 {
 	if w.pane_fill == .Screen {return 0}
 	return f32(app.settings.pane.corner_radius) * w.scale
-}
-
-window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	if !leader_armed(w) {return .Ok}
-	leader, enabled := app.leader.?
-	if !enabled {return .Ok}
-	buffer: [commands.SHORTCUT_TEXT_CAP]u8
-	label := commands.shortcut_text(leader, buffer[:])
-	tree := window_tree(w)
-	if tree == nil {return .Ok}
-	for pane in w.panes {
-		if pane.node != tree.focus {continue}
-		r := pane.rect
-		return ui.leader_status_draw(
-			&w.list,
-			&w.ui_text,
-			app.theme,
-			{r.x, r.y, r.width, r.height},
-			label,
-			w.scale,
-		)
-	}
-	return .Ok
 }
 
 window_card_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {

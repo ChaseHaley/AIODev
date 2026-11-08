@@ -316,6 +316,12 @@ pane_header_cancel :: proc(w: ^Window) {
 	}
 }
 
+// A relayout moves every header, so each drops its hover and press and its buttons restart at rest.
+pane_header_relayout_reset :: proc(w: ^Window) {
+	pane_header_cancel(w)
+	for &view in w.views {view.header_controls = {}}
+}
+
 // Header buttons animate only while some header shows: a header row, a single pane's split controls or
 // a float's panes.
 @(private = "file")
