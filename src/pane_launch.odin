@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:layout"
 import "aio:localpath"
 import "aio:procinfo"
@@ -10,8 +11,8 @@ pane_split :: proc(
 	app: ^App,
 	w: ^Window,
 	direction: layout.Direction,
-	ratio: f32 = 0.5,
-	focus := true,
+	ratio: f32 = commands.SPLIT_DEFAULT.ratio,
+	focus := commands.SPLIT_DEFAULT.focus,
 ) {
 	tab := w.workspace.selected
 	launch: Pane_Launch

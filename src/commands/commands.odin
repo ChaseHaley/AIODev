@@ -292,6 +292,8 @@ category :: proc(name: string) -> Category {
 		{"settings", {"Settings", "Settings Shortcuts"}},
 		{"edit", {"Edit", "Edit Shortcuts"}},
 		{"view", {"View", "View Shortcuts"}},
+		{"status", {"Status", "Status Shortcuts"}},
+		{"profile", {"Profiles", "Profile Shortcuts"}},
 	}
 	dot := strings.index_byte(name, '.')
 	namespace := dot < 0 ? name : name[:dot]

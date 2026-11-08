@@ -52,6 +52,12 @@ window_primary :: proc(app: ^App) -> ^Window {
 	return nil
 }
 
+// Command and verification requests share the focused window, falling back to the primary.
+window_focused_or_primary :: proc(app: ^App) -> ^Window {
+	for w in app.windows {if w.focused {return w}}
+	return window_primary(app)
+}
+
 // Every workspace window has been hidden to the tray, so only the tray icon reopens the app.
 app_tray_only :: proc(app: ^App) -> bool {
 	return window_primary(app) == nil

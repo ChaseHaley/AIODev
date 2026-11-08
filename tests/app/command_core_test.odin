@@ -6,6 +6,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:layout"
 import "aio:platform"
@@ -42,22 +43,22 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	first := state.sessions[0].id
 
 	listed := invoke(&state, 0, "pane.list")
-	testing.expect_value(t, listed.status, commands.Status.Ok)
-	if !testing.expect_value(t, len(listed.panes), 1) { return }
-	testing.expect_value(t, listed.panes[0].id, first)
-	testing.expect_value(t, listed.panes[0].tab, 1)
-	testing.expect_value(t, listed.panes[0].status, "running")
+	testing.expect_value(t, listed.status, cli_protocol.Status.Ok)
+	if !testing.expect_value(t, len(listed.payload.(app.Outcome_Panes)), 1) { return }
+	testing.expect_value(t, listed.payload.(app.Outcome_Panes)[0].id, first)
+	testing.expect_value(t, listed.payload.(app.Outcome_Panes)[0].tab, 1)
+	testing.expect_value(t, listed.payload.(app.Outcome_Panes)[0].status, "running")
 
 	// New panes open in the background: the window keeps its tab and focus.
 	created := invoke(&state, first, "tab.new", "--name", "agent")
-	testing.expect_value(t, created.status, commands.Status.Ok)
-	tab_pane := created.pane
+	testing.expect_value(t, created.status, cli_protocol.Status.Ok)
+	tab_pane := created.payload.(app.Outcome_Created).pane
 	testing.expect(t, tab_pane != 0 && tab_pane != first)
 	if !testing.expect_value(t, len(workspace.tabs), 2) { return }
 	testing.expect_value(t, workspace.selected, 0)
 	split := invoke(&state, first, "pane.split", "--pane", "agent", "--direction", "down")
-	testing.expect_value(t, split.status, commands.Status.Ok)
-	split_pane := split.pane
+	testing.expect_value(t, split.status, cli_protocol.Status.Ok)
+	split_pane := split.payload.(app.Outcome_Created).pane
 	testing.expect_value(t, app.tab_pane_count(workspace.tabs[1]), 2)
 	testing.expect_value(t, workspace.selected, 0)
 	testing.expect(t, app.window_tree(w) == &workspace.tabs[0].tree)
@@ -73,25 +74,25 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	for deadline := time.tick_now(); !seen && time.tick_since(deadline) < 15 * time.Second; {
 		app.tick(&state)
 		read := invoke(&state, 0, "pane.read", "--pane", id)
-		seen = read.status == .Ok && strings.contains(read.text, expected)
+		seen = read.status == .Ok && strings.contains(string(read.payload.(app.Outcome_Text)), expected)
 		if !seen { time.sleep(50 * time.Millisecond) }
 	}
 	testing.expect(t, seen, "the split pane printed its AIODEV_PANE")
 	last := invoke(&state, 0, "pane.read", "--pane", id, "--lines", "1")
-	testing.expect(t, !strings.contains(last.text, "\n"))
+	testing.expect(t, !strings.contains(string(last.payload.(app.Outcome_Text)), "\n"))
 
 	// Targets: the caller, a missing id, and a name two panes share.
-	testing.expect_value(t, invoke(&state, 0, "pane.status", "--pane", "here").status, commands.Status.Target)
+	testing.expect_value(t, invoke(&state, 0, "pane.status", "--pane", "here").status, cli_protocol.Status.Target)
 	here := invoke(&state, first, "pane.status")
-	if testing.expect_value(t, len(here.panes), 1) { testing.expect_value(t, here.panes[0].id, first) }
-	testing.expect_value(t, invoke(&state, first, "pane.status", "--pane", "4000000").status, commands.Status.Target)
-	testing.expect_value(t, invoke(&state, first, "pane.rename", "--pane", id, "agent").status, commands.Status.Ok)
+	if testing.expect_value(t, len(here.payload.(app.Outcome_Panes)), 1) { testing.expect_value(t, here.payload.(app.Outcome_Panes)[0].id, first) }
+	testing.expect_value(t, invoke(&state, first, "pane.status", "--pane", "4000000").status, cli_protocol.Status.Target)
+	testing.expect_value(t, invoke(&state, first, "pane.rename", "--pane", id, "agent").status, cli_protocol.Status.Ok)
 	ambiguous := invoke(&state, first, "pane.status", "--pane", "agent")
-	testing.expect_value(t, ambiguous.status, commands.Status.Target)
+	testing.expect_value(t, ambiguous.status, cli_protocol.Status.Target)
 	testing.expect(t, strings.contains(ambiguous.message, fmt.tprintf("%d", tab_pane)))
 
 	// A command without a targeted form focuses its target first.
-	testing.expect_value(t, invoke(&state, first, "pane.zoom", "--pane", id).status, commands.Status.Ok)
+	testing.expect_value(t, invoke(&state, first, "pane.zoom", "--pane", id).status, cli_protocol.Status.Ok)
 	testing.expect_value(t, workspace.selected, 1)
 	shown := app.window_tree(w)
 	focused := shown.nodes[shown.focus].(layout.Pane)
@@ -100,47 +101,47 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 
 	// A targeted minimize command restores a minimized float instead of focusing and hiding it again.
 	floating := invoke(&state, first, "pane.new_floating", "--pane", id)
-	testing.expect_value(t, floating.status, commands.Status.Ok)
-	float_id := strings.clone(fmt.tprintf("%d", floating.pane))
+	testing.expect_value(t, floating.status, cli_protocol.Status.Ok)
+	float_id := strings.clone(fmt.tprintf("%d", floating.payload.(app.Outcome_Created).pane))
 	defer delete(float_id)
 	testing.expect_value(
-		t, invoke(&state, first, "pane.minimize_floating", "--pane", float_id).status, commands.Status.Ok,
+		t, invoke(&state, first, "pane.minimize_floating", "--pane", float_id).status, cli_protocol.Status.Ok,
 	)
-	float_node := layout.find_content(shown, {.Terminal, floating.pane})
+	float_node := layout.find_content(shown, {.Terminal, floating.payload.(app.Outcome_Created).pane})
 	float_state, float_ok := layout.float_of(shown, float_node)
 	testing.expect(t, float_ok && float_state.minimized)
 	testing.expect_value(
-		t, invoke(&state, first, "pane.minimize_floating", "--pane", float_id).status, commands.Status.Ok,
+		t, invoke(&state, first, "pane.minimize_floating", "--pane", float_id).status, cli_protocol.Status.Ok,
 	)
 	float_state, float_ok = layout.float_of(shown, float_node)
 	testing.expect(t, float_ok && !float_state.minimized)
 	float_split := invoke(&state, first, "pane.split", "--pane", float_id, "--direction", "right")
-	testing.expect_value(t, float_split.status, commands.Status.Ok)
-	float_split_node := layout.find_content(shown, {.Terminal, float_split.pane})
+	testing.expect_value(t, float_split.status, cli_protocol.Status.Ok)
+	float_split_node := layout.find_content(shown, {.Terminal, float_split.payload.(app.Outcome_Created).pane})
 	testing.expect_value(t, layout.float_root(shown, float_split_node), layout.float_root(shown, float_node))
-	float_split_id := strings.clone(fmt.tprintf("%d", float_split.pane))
+	float_split_id := strings.clone(fmt.tprintf("%d", float_split.payload.(app.Outcome_Created).pane))
 	defer delete(float_split_id)
 	testing.expect_value(
-		t, invoke(&state, first, "pane.close", "--pane", float_split_id).status, commands.Status.Ok,
+		t, invoke(&state, first, "pane.close", "--pane", float_split_id).status, cli_protocol.Status.Ok,
 	)
-	testing.expect_value(t, invoke(&state, first, "pane.close", "--pane", float_id).status, commands.Status.Ok)
+	testing.expect_value(t, invoke(&state, first, "pane.close", "--pane", float_id).status, cli_protocol.Status.Ok)
 
 	sessions := len(state.sessions)
-	testing.expect_value(t, invoke(&state, first, "pane.close", "--pane", id).status, commands.Status.Ok)
+	testing.expect_value(t, invoke(&state, first, "pane.close", "--pane", id).status, cli_protocol.Status.Ok)
 	testing.expect_value(t, len(state.sessions), sessions - 1)
 	testing.expect_value(t, app.tab_pane_count(workspace.tabs[1]), 1)
 	// A closed pane still reports how it ended; only pane.status looks past the open panes.
 	ended := invoke(&state, first, "pane.status", "--pane", id)
-	testing.expect_value(t, ended.status, commands.Status.Ok)
-	if testing.expect_value(t, len(ended.panes), 1) { testing.expect_value(t, ended.panes[0].status, "closed") }
-	testing.expect_value(t, invoke(&state, first, "pane.read", "--pane", id).status, commands.Status.Target)
+	testing.expect_value(t, ended.status, cli_protocol.Status.Ok)
+	if testing.expect_value(t, len(ended.payload.(app.Outcome_Panes)), 1) { testing.expect_value(t, ended.payload.(app.Outcome_Panes)[0].status, "closed") }
+	testing.expect_value(t, invoke(&state, first, "pane.read", "--pane", id).status, cli_protocol.Status.Target)
 
 	// The pipe's answers: malformed requests and grammar errors are usage errors.
-	testing.expect_value(t, app.control_cli_answer(&state, {"", "text"}).status, u8(commands.Status.Usage))
+	testing.expect_value(t, app.control_cli_answer(&state, {"", "text"}).status, u8(cli_protocol.Status.Usage))
 	testing.expect_value(t, app.control_cli_answer(&state, {"x", "text", "pane.list"}).status,
-		u8(commands.Status.Usage))
+		u8(cli_protocol.Status.Usage))
 	testing.expect_value(t, app.control_cli_answer(&state, {"", "text", "pane.read", "--lines", "0"}).status,
-		u8(commands.Status.Usage))
+		u8(cli_protocol.Status.Usage))
 	reply := app.control_cli_answer(&state, {"", "json", "pane.list"})
 	testing.expect(t, reply.ok && strings.contains(reply.text, `"panes":[`))
 	created_reply := app.control_cli_answer(&state, {"", "text", "tab.new"})

@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:cli_protocol"
 import "aio:commands"
 import "aio:input"
 import "aio:layout"
@@ -99,7 +100,7 @@ opening_splits_beside_the_caller_and_keeps_focus_in_the_terminal :: proc(t: ^tes
 	w := f.state.windows[0]
 	before := app.window_tree(w).focus
 	opened := open(&f.state, f.file)
-	testing.expect_value(t, opened.status, commands.Status.Ok)
+	testing.expect_value(t, opened.status, cli_protocol.Status.Ok)
 	testing.expect_value(t, app.window_tree(w).focus, before)
 	if !testing.expect_value(t, len(f.state.markdown_panes), 1) {return}
 	pane := f.state.markdown_panes[0]
@@ -135,7 +136,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	body := strings.repeat("paragraph\n\n", 80, context.temp_allocator)
 	source := strings.concatenate({"needle first\n\n", body, "NEEDLE middle\n\n", body, "needle last\n"}, context.temp_allocator)
 	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	w := f.state.windows[0]
 	if !testing.expect(t, app.markdown_active(w)) {return}
 	pane := f.state.markdown_panes[0]
@@ -269,7 +270,7 @@ a_pane_without_a_search_costs_no_wakeups :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Idle") {return}
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	testing.expect(t, !app.find_pending(&f.state))
 }
 
@@ -278,8 +279,8 @@ opening_a_shown_file_again_reuses_its_pane :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Reuse") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
-	testing.expect_value(t, open(&f.state, strings.to_upper(f.file, context.temp_allocator)).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
+	testing.expect_value(t, open(&f.state, strings.to_upper(f.file, context.temp_allocator)).status, cli_protocol.Status.Ok)
 	testing.expect_value(t, len(f.state.markdown_panes), 1)
 	testing.expect_value(t, app.tab_pane_count(f.state.windows[0].workspace.tabs[0]), 2)
 }
@@ -290,12 +291,12 @@ opening_refuses_unavailable_files_and_active_types :: proc(t: ^testing.T) {
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Refuse") {return}
 	missing := strings.concatenate({f.directory, "\\missing.md"}, context.temp_allocator)
-	testing.expect_value(t, open(&f.state, missing).status, commands.Status.Failed)
-	testing.expect_value(t, open(&f.state, "\\\\server\\share\\doc.md").status, commands.Status.Failed)
-	testing.expect_value(t, open(&f.state, "relative.md").status, commands.Status.Failed)
+	testing.expect_value(t, open(&f.state, missing).status, cli_protocol.Status.Failed)
+	testing.expect_value(t, open(&f.state, "\\\\server\\share\\doc.md").status, cli_protocol.Status.Failed)
+	testing.expect_value(t, open(&f.state, "relative.md").status, cli_protocol.Status.Failed)
 	script := strings.concatenate({f.directory, "\\run.cmd"}, context.temp_allocator)
 	testing.expect_value(t, os.write_entire_file(script, "echo hi"), nil)
-	testing.expect_value(t, open(&f.state, script).status, commands.Status.Failed)
+	testing.expect_value(t, open(&f.state, script).status, cli_protocol.Status.Failed)
 	testing.expect_value(t, len(f.state.markdown_panes), 0)
 }
 
@@ -305,7 +306,7 @@ a_markdown_id_is_never_read_as_a_session :: proc(t: ^testing.T) {
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Collide") {return}
 	w := f.state.windows[0]
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	// Both id spaces start at 1, so without the kind check this would find the first shell.
 	testing.expect(t, app.session_find(&f.state, pane.id) != nil)
@@ -323,7 +324,7 @@ the_poll_follows_changes_to_the_file :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Poll") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	revision := pane.revision
 	poll(&f.state)
@@ -348,7 +349,7 @@ a_file_that_failed_to_parse_is_read_again_only_once_it_changes :: proc(t: ^testi
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Failed") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	loaded, ok := pane.load.(app.Markdown_Loaded)
 	if !testing.expect(t, ok) {return}
@@ -372,7 +373,7 @@ files_past_the_limit_are_not_read :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Limit") {return}
-	testing.expect_value(t, open(&f.state, f.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file).status, cli_protocol.Status.Ok)
 	pane := f.state.markdown_panes[0]
 	large := make([]u8, 16 * 1024 * 1024 + 1)
 	defer delete(large)
@@ -387,7 +388,7 @@ closing_the_pane_frees_it_and_stops_the_poll :: proc(t: ^testing.T) {
 	defer fixture_destroy(t, &f)
 	if !fixture_start(t, &f, "Close") {return}
 	w := f.state.windows[0]
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	testing.expect(t, f.state.markdown_deadline != {})
 	app.pane_close_at(&f.state, w.workspace, w.workspace.selected, app.window_tree(w).focus)
 	testing.expect_value(t, len(f.state.markdown_panes), 1)
@@ -419,7 +420,7 @@ layout_restore_reopens_files_and_keeps_a_pane_for_a_missing_one :: proc(t: ^test
 	defer delete(first.file)
 	defer delete(first.directory)
 	defer testing.expect_value(t, os.remove_all(first.directory), nil)
-	testing.expect_value(t, open(&first.state, first.file).status, commands.Status.Ok)
+	testing.expect_value(t, open(&first.state, first.file).status, cli_protocol.Status.Ok)
 	app.layout_state_save(&first.state)
 	app.app_destroy(&first.state)
 
@@ -471,7 +472,7 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	if !fixture_start(t, &f, "Pointer") {return}
 	source := "first paragraph\n\nsecond paragraph\n\n[link](https://a.example) after\n"
 	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
-	testing.expect_value(t, open(&f.state, f.file, true).status, commands.Status.Ok)
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
 	w := f.state.windows[0]
 	testing.expect(t, w.markdown_hover == nil, "a newly opened pane must not hover its first link")
 	pane := f.state.markdown_panes[0]

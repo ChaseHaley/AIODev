@@ -14,7 +14,7 @@ launch [--fresh] [--settings <file>] [--shell <command>] [--size <cols>x<rows>] 
 doctor
 stop
 help [<command>]
-Name defaults to verify; names contain 1..32 ASCII letters, digits, hyphens, or underscores.
+Name defaults to verify; names contain ` + instance.NAME_RULE + `.
 In PowerShell, quote positions such as '5,4' so each col,row remains one argument.
 Exit codes: 0 success, 1 failed check or request, 2 usage error.
 `
@@ -34,7 +34,7 @@ parse_options :: proc(args: []string) -> (Options, string) {
 	if len(args) > 0 && args[0] == "--name" {
 		if len(args) < 2 { return {}, "supply a name after --name; use help" }
 		if !instance.valid_name(args[1]) {
-			return {}, "use a name of 1..32 ASCII letters, digits, hyphens, or underscores"
+			return {}, "use a name of " + instance.NAME_RULE
 		}
 		o.name, args = args[1], args[2:]
 	}

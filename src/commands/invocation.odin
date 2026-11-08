@@ -6,18 +6,6 @@ import "core:fmt"
 import "core:strconv"
 import "core:strings"
 
-// The outcome of an invocation, shared by every interface. The values are the CLI exit codes (D-046).
-Status :: enum u8 {
-	Ok          = 0,
-	Failed      = 1,
-	Usage       = 2,
-	Target      = 3,
-	Unreachable = 4,
-	// The pipe answered, but its server process was not the expected AIODev.
-	Impostor    = 5,
-	Interrupted = 130,
-}
-
 // The arguments a command may take beyond its target pane. A command lists the ones it accepts.
 Argument :: enum u8 {
 	Direction,
@@ -55,6 +43,10 @@ Parse_Error :: struct {
 // The longest pane read the grammar accepts, in rows.
 MAX_LINES :: 10000
 
+// The interactive split defaults; CLI requests explicitly start without focus.
+SPLIT_DEFAULT :: Invocation{direction = .Right, ratio = 0.5, focus = true}
+OPEN_MARKDOWN_COMMAND :: "pane.open_markdown"
+
 // The words that name a direction.
 DIRECTION_WORDS :: [layout.Direction]string {
 	.Left  = "left",
@@ -87,7 +79,7 @@ argument_grammar := [Argument]struct {
 // says whether a pane a command creates takes focus: interactive commands always focus it, a CLI
 // request only when it passes --focus (D-046).
 invocation :: proc(id: Command_Id, focus: bool) -> Invocation {
-	return {id = id, direction = .Right, ratio = 0.5, focus = focus}
+	return {id = id, direction = SPLIT_DEFAULT.direction, ratio = SPLIT_DEFAULT.ratio, focus = focus}
 }
 
 // A direction word, such as `left`.
@@ -116,6 +108,13 @@ option_argument :: proc(option: string) -> (Argument, bool) {
 		if grammar.option != "" && grammar.option == option {return argument, true}
 	}
 	return {}, false
+}
+
+// Whether the command grammar consumes a value after this option. --pane is common to all commands.
+option_takes_value :: proc(option: string) -> bool {
+	if option == "--pane" {return true}
+	argument, known := option_argument(option)
+	return known && argument_grammar[argument].usage != ""
 }
 
 // How a diagnostic names an argument: its option, or its positional form.

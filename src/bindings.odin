@@ -335,28 +335,18 @@ binding_comments :: proc() -> (lines: [len(Action) + 1]string, count: int) {
 }
 
 @(private)
-settings_diagnostic :: proc(
-	app: ^App,
-	diagnostics: ^[dynamic]settings.Diagnostic,
-	line: int,
-	key, message: string,
-	kind: settings.Diagnostic_Kind = .Invalid_Value,
-	identity := "",
-) {
-	if err := settings.diagnostic_append(diagnostics, line, key, message, kind, identity); err != nil {
-		log.errorf("recording shortcut diagnostic failed: %v", err)
-		notify(app, .Error, message)
-	}
-}
-
-@(private)
 apply_bindings :: proc(app: ^App, diagnostics: ^[dynamic]settings.Diagnostic) {
 	report, report_error := binding_report(&app.registry, &app.settings)
 	for issue in report.issues {
 		message := binding_issue_text(issue, app.settings_path)
 		identity := ""
 		if issue.kind == .Leader_Prefix {identity = binding_issue_identity(issue, app.settings_path)}
-		settings_diagnostic(app, diagnostics, issue.line, issue.key, message, issue.severity, identity)
+		if err := settings.diagnostic_append(
+			diagnostics, issue.line, issue.key, message, issue.severity, identity,
+		); err != nil {
+			log.errorf("recording shortcut diagnostic failed: %v", err)
+			notify(app, .Error, message)
+		}
 	}
 	if report_error != nil {
 		notify(app, .Error, "Could not allocate shortcut bindings.")
