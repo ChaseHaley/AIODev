@@ -318,18 +318,24 @@ status_panel_project :: proc(
 	return out[:], total + ui.SPACE_1 * scale
 }
 
-// The panel's rows this frame or event. Projecting also keeps the scroll within them, so a hit
-// test after the reports shrink or the panel resizes sees the rows a draw would show.
-status_panel_rows :: proc(app: ^App, w: ^Window) -> (rows: []Status_Panel_Row, total: f32) {
+// The panel's rows, their height and the scroll kept within them, projected without storing anything.
+@(private)
+status_panel_layout :: proc(app: ^App, w: ^Window) -> (rows: []Status_Panel_Row, total, scroll: f32) {
 	rows, total = status_panel_project(app.settings.status.panel_view, status_panel_reports(app, w), w.scale)
 	list := status_panel_list(app, w, status_panel_rect(app, w))
-	w.status.panel_scroll = clamp(w.status.panel_scroll, 0, max(0, total - list.height))
+	return rows, total, clamp(w.status.panel_scroll, 0, max(0, total - list.height))
+}
+
+// The panel's rows this frame or event. Projecting also stores the scroll clamp, so a hit test after
+// the reports shrink or the panel resizes sees the rows a draw would show.
+status_panel_rows :: proc(app: ^App, w: ^Window) -> (rows: []Status_Panel_Row, total: f32) {
+	rows, total, w.status.panel_scroll = status_panel_layout(app, w)
 	return
 }
 
 @(private)
-status_panel_row_rect :: proc(w: ^Window, list: render.Rect, row: Status_Panel_Row) -> render.Rect {
-	return {list.x, list.y + row.y - w.status.panel_scroll, list.width, row.height}
+status_panel_row_rect :: proc(list: render.Rect, row: Status_Panel_Row, scroll: f32) -> render.Rect {
+	return {list.x, list.y + row.y - scroll, list.width, row.height}
 }
 
 @(private)
@@ -568,7 +574,7 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	dense := app.settings.status.panel_view == .Dense
 	hovered, any_hovered := w.status.panel_hover.?
 	for row, i in rows {
-		r := status_panel_row_rect(w, list, row)
+		r := status_panel_row_rect(list, row, w.status.panel_scroll)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
 		result: render.Build_Status
 		highlighted := any_hovered && hovered == i
@@ -602,7 +608,7 @@ status_panel_hit :: proc(
 	list := status_panel_list(app, w, status_panel_rect(app, w))
 	if !render.rect_contains(list, x, y) {return -1, {}}
 	for row, i in rows {
-		r := status_panel_row_rect(w, list, row)
+		r := status_panel_row_rect(list, row, w.status.panel_scroll)
 		if row.report && render.rect_contains(r, x, y) {return i, r}
 	}
 	return -1, {}
@@ -742,10 +748,10 @@ when AIO_CONTROL {
 		state_text(r, "activity.side", app.settings.status.panel_side == .Left ? "left" : "right")
 		state_rect(r, "activity.view_button", status_panel_view_rect(app, w))
 		state_text(r, "activity.view", app.settings.status.panel_view == .Comfy ? "comfy" : "dense")
-		rows, _ := status_panel_rows(app, w)
+		rows, _, scroll := status_panel_layout(app, w)
 		list := status_panel_list(app, w, area)
 		for row, i in rows {
-			state_rect(r, state_key("activity.row.%d.rect", i), status_panel_row_rect(w, list, row))
+			state_rect(r, state_key("activity.row.%d.rect", i), status_panel_row_rect(list, row, scroll))
 			state_value(r, state_key("activity.row.%d.report", i), row.report)
 			text := row.report ? status_item_name(app, row.item) : row.label
 			state_text(r, state_key("activity.row.%d.text", i), text)

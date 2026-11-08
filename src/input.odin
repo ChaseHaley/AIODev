@@ -3,6 +3,7 @@ package main
 import "aio:commands"
 import "aio:input"
 import "aio:platform"
+import "aio:render"
 import "aio:term"
 import "aio:ui"
 import "core:log"
@@ -524,6 +525,30 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 		return .Consumed
 	}
 	return .None
+}
+
+// While the chord is armed, the leader's name shows over the focused pane.
+window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
+	if !leader_armed(w) {return .Ok}
+	leader, enabled := app.leader.?
+	if !enabled {return .Ok}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	label := commands.shortcut_text(leader, buffer[:])
+	tree := window_tree(w)
+	if tree == nil {return .Ok}
+	for pane in w.panes {
+		if pane.node != tree.focus {continue}
+		r := pane.rect
+		return ui.leader_status_draw(
+			&w.list,
+			&w.ui_text,
+			app.theme,
+			{r.x, r.y, r.width, r.height},
+			label,
+			w.scale,
+		)
+	}
+	return .Ok
 }
 
 // Keys whose press a surface consumed, so their release must not reach the terminal. A set, because

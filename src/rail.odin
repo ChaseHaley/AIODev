@@ -93,9 +93,9 @@ when AIO_CONTROL {
 		// rail.toggle is the published name of the orientation button the tab strip also reports.
 		state_rect(r, "rail.toggle", toggle)
 		state_rect(r, "tabs.orientation_button", toggle)
-		state_rect(r, "rail.new_tab", rail_new_tab_rect(w))
-		state_rect(r, "rail.profile", rail_profile_rect(w))
 		layout, ok := rail_layout_query(w)
+		state_rect(r, "rail.new_tab", ok ? ui.rail_new_tab_tile(layout) : render.Rect{})
+		state_rect(r, "rail.profile", ok ? ui.rail_profile_rect(layout) : render.Rect{})
 		if !ok {return}
 		for tab, i in w.workspace.tabs {
 			n := i + 1

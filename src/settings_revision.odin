@@ -95,14 +95,17 @@ settings_read_report :: proc(app: ^App, read: ^Settings_Read) {
 }
 
 // At startup nothing runs yet that a revision must reach, so the file only replaces the settings.
-load_settings :: proc(app: ^App) {
+// Unlike a reload, which keeps the running revision, startup has none to keep: false stops it.
+@(require_results)
+load_settings :: proc(app: ^App) -> bool {
 	read, ok := settings_read(app)
-	if !ok {return}
+	if !ok {return false}
 	defer settings.diagnostics_destroy(&read.diagnostics)
 	defer delete(read.source)
 	settings_inputs_adopt(app, &read)
 	settings_apply_revision(app, read.loaded, &read.diagnostics, read.read_error)
 	settings_read_report(app, &read)
+	return true
 }
 
 // The one order every settings revision after startup takes, saved here or read from the file again:

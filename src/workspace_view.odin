@@ -124,13 +124,7 @@ workspace_adopt :: proc(
 		workspace_view_move(&w.resources, &prepared)
 	}
 	if workspace.selection_anchor == 0 {workspace_tab_choose(workspace, workspace.selected)}
-	w.tab_underline = {
-		value  = f32(workspace.selected),
-		target = f32(workspace.selected),
-	}
-	w.tab_hover = nil
-	gesture_tab_unpress(w)
-	ui.armed_cancel(&w.tab_close_armed)
+	tab_chrome_reset(w)
 	window_relayout(app, w)
 	rail_reveal_active(w)
 	focus_enter(app, w)

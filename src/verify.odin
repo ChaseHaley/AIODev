@@ -26,6 +26,7 @@ _ :: math
 _ :: os
 _ :: strings
 _ :: utf8
+_ :: time
 _ :: commands
 _ :: control
 _ :: layout
@@ -372,6 +373,14 @@ when AIO_CONTROL {
 		return fmt.tprintf("%d", key)
 	}
 
+	// A notice's state key and the start of its value that identifies it, kind and text. The report
+	// appends the time left and a closing parenthesis; a value that keeps this start is the same notice
+	// counting down.
+	verify_notice_entry :: proc(n: ui.Notice) -> (key, identity: string) {
+		kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
+		return state_key("notice.%s", verify_notice_key(n.key)), fmt.tprintf("%s: %s (", kind, n.text)
+	}
+
 	// Where every report writes the verification state: key=value entries in the order written. Each
 	// feature's report sits beside its state; the first failure is kept and later writes are dropped.
 	State_Report :: struct {
@@ -667,8 +676,8 @@ when AIO_CONTROL {
 				remaining := max(i64(0), i64(time.tick_diff(time.tick_now(), expires) / time.Millisecond))
 				left = fmt.tprintf("%dms", remaining)
 			}
-			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
-			state_valuef(r, state_key("notice.%s", verify_notice_key(n.key)), "%s: %s (%s)", kind, n.text, left)
+			key, identity := verify_notice_entry(n)
+			state_valuef(r, key, "%s%s)", identity, left)
 		}
 
 	}
@@ -1031,12 +1040,9 @@ when AIO_CONTROL {
 			if _, err := append(&parts, change); err != nil {return "", .Out_Of_Memory}
 		}
 		for n in ui.notices_live(&app.notices) {
-			key := fmt.tprintf("notice.%s", verify_notice_key(n.key))
-			old := verify_value(d.before_state, key)
+			key, identity := verify_notice_entry(n)
 			// Expiry countdown changes are not a new notice.
-			kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
-			prefix := fmt.tprintf("%s: %s (", kind, n.text)
-			if strings.has_prefix(old, prefix) {continue}
+			if strings.has_prefix(verify_value(d.before_state, key), identity) {continue}
 			value := strings.builder_make(context.temp_allocator)
 			if err := verify_protocol.format_value(&value, n.text); err != .None {return "", err}
 			label := fmt.tprintf(
@@ -1427,9 +1433,4 @@ when AIO_CONTROL {
 	}
 } else {
 	Verify :: struct {}
-	verify_start :: proc(_: ^App) {}
-	verify_destroy :: proc(_: ^App) {}
-	verify_presented :: proc(_: ^App, _: ^Window) {}
-	verify_tick :: proc(_: ^App) {}
-	verify_deadline :: proc(_: ^App) -> (time.Tick, bool) {return {}, false}
 }

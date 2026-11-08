@@ -37,6 +37,29 @@ Tab_Presentation :: struct {
 	profiles_control: ui.Control_Motion,
 }
 
+// The window's tab chrome beside the per-tab arrays, which Window embeds: the selection underline's
+// motion, the strip control or rail row under the pointer, and a Close press held on a tab.
+Tab_Chrome_State :: struct {
+	tab_underline:   ui.Motion,
+	tab_hover:       Tab_Chrome_Target,
+	tab_close_armed: ui.Armed(int),
+}
+
+// The window shows its workspace afresh: the underline rests on the selected tab, and no hover or
+// Close press carries over.
+tab_chrome_reset :: proc(w: ^Window) {
+	selected := f32(w.workspace.selected)
+	w.tab_underline = {value = selected, target = selected}
+	tab_chrome_forget_hover(w)
+	ui.armed_cancel(&w.tab_close_armed)
+}
+
+// The tabs moved under the pointer: no control hovers, and a held press stops drawing pressed.
+tab_chrome_forget_hover :: proc(w: ^Window) {
+	w.tab_hover = nil
+	gesture_tab_unpress(w)
+}
+
 tab_presentation_init :: proc(presentation: ^Tab_Presentation) {
 	presentation.tab_controls = make([dynamic]ui.Control_Motion)
 	presentation.tab_positions = make([dynamic]ui.Motion)
@@ -122,10 +145,7 @@ tab_strip_control_update :: proc(
 // were: drawing and tab_presentation_animate bound every index by the tab count instead.
 tab_presentation_fit :: proc(w: ^Window) {
 	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
-	if tab_count != len(w.tab_positions) && w.tabs_horizontal {
-		w.tab_hover = nil
-		gesture_tab_unpress(w)
-	}
+	if tab_count != len(w.tab_positions) && w.tabs_horizontal {tab_chrome_forget_hover(w)}
 	if !tab_presentation_resize(&w.presentation, tab_count) {
 		log.error("resizing tab presentation values failed")
 	}

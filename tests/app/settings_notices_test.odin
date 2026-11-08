@@ -101,23 +101,23 @@ settings_load_keeps_source_order_conflict_and_text_field_chords_separate :: proc
 	defer ui.notices_destroy(&state.notices)
 	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) { return }
 	if !testing.expect_value(t, os.write_entire_file(path, "input.leader = Ctrl+Shift+A\n"), nil) { return }
-	app.load_settings(&state)
+	if !testing.expect(t, app.load_settings(&state)) { return }
 	testing.expect(t, state.leader != nil)
 	testing.expect_value(t, len(state.settings_diagnostics), 1)
 	testing.expect_value(t, state.settings_diagnostics[0].kind, settings.Diagnostic_Kind.Shortcut_Warning)
 	select_all := commands.find(&state.registry, "edit.select_all")
 	testing.expect_value(t, len(commands.active_shortcuts(select_all)), 0)
 	expires := ui.notice_expiry(state.notices.items[0])
-	app.load_settings(&state)
+	if !testing.expect(t, app.load_settings(&state)) { return }
 	testing.expect_value(t, ui.notice_expiry(state.notices.items[0]), expires)
 	if !testing.expect_value(t, os.write_entire_file(path, "input.leader = Ctrl+A\n"), nil) { return }
-	app.load_settings(&state)
+	if !testing.expect(t, app.load_settings(&state)) { return }
 	testing.expect_value(t, len(state.settings_diagnostics), 0)
 	testing.expect_value(t, len(state.notices.items), 0)
 	testing.expect_value(t, len(commands.active_shortcuts(select_all)), 1)
 	if !testing.expect_value(t, os.write_entire_file(path,
 		"input.leader = Ctrl+Shift+A\nkeys.edit.select_all = Ctrl+Shift+A\n"), nil) { return }
-	app.load_settings(&state)
+	if !testing.expect(t, app.load_settings(&state)) { return }
 	testing.expect(t, state.leader == nil)
 	testing.expect_value(t, len(commands.active_shortcuts(select_all)), 1)
 	testing.expect_value(t, state.notices.items[0].kind, ui.Notice_Kind.Warning)
