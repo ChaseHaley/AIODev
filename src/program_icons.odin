@@ -141,6 +141,23 @@ program_icon_request :: proc(app: ^App, want: Program_Icon_Want, size: int) {
 	process_icon_request(&app.processes, {index = index, want = icon.want, size = size, pixels = pixels})
 }
 
+// Source identity belongs to the cache. A zero size is an observer's ready-at-any-size query,
+// which deliberately ignores paint too: session.program.icon has always reported any ready icon.
+@(private)
+program_icon_find :: proc(
+	cache: ^Program_Icon_Cache,
+	want: Program_Icon_Want,
+	size: int,
+	states: bit_set[Program_Icon_State],
+) -> ^Program_Icon {
+	for &icon in cache.icons {
+		if icon.state not_in states || icon.source != want.source || icon.path != want.path {continue}
+		if size != 0 && (icon.size != size || icon.paint != want.paint) {continue}
+		return &icon
+	}
+	return nil
+}
+
 // The atlas rectangle of one source's icon once it is ready; `state` is Pending while it is read.
 // An empty path or a size the decoders refuse reports Missing, so the next source is used.
 @(private)
@@ -156,11 +173,7 @@ program_icon_atlas :: proc(
 	cache := &app.program_icons
 	if want.path == "" || size < 1 || size > platform_api.EXECUTABLE_ICON_MAX {return {}, .Missing, .Ok}
 	cache.clock += 1
-	for &icon in cache.icons {
-		if icon.state == .Free || icon.source != want.source || icon.size != size || icon.paint != want.paint {
-			continue
-		}
-		if icon.path != want.path {continue}
+	if icon := program_icon_find(cache, want, size, {.Pending, .Ready, .Missing}); icon != nil {
 		icon.used = cache.clock
 		if icon.state != .Ready {return {}, icon.state, .Ok}
 		side := i32(size)
@@ -266,6 +279,8 @@ program_icon_source :: proc(
 }
 
 // The user's PNG for a program's name, then its bundled artwork.
+// Size zero is the state report's observer query: the first named source ready at any size/paint,
+// rather than the first source not known missing at a particular draw size.
 @(private)
 program_named_source :: proc(
 	app: ^App,
@@ -280,12 +295,16 @@ program_named_source :: proc(
 ) {
 	if file, ok := program_named_file(app, name, art, has_art); ok {
 		want = {source = .File, path = file}
-		if !program_icon_missing(app, want, size, lookup) {return want, true}
+		if size == 0 {
+			if program_icon_find(&app.program_icons, want, 0, {.Ready}) != nil {return want, true}
+		} else if !program_icon_missing(app, want, size, lookup) {return want, true}
 	}
 	if has_art {
 		paint := program_art_paint(app, art)
 		want = {source = .Artwork, path = program_art.canonical(art), art = art, paint = paint}
-		if !program_icon_missing(app, want, size, lookup) {return want, true}
+		if size == 0 {
+			if program_icon_find(&app.program_icons, want, 0, {.Ready}) != nil {return want, true}
+		} else if !program_icon_missing(app, want, size, lookup) {return want, true}
 	}
 	return {}, false
 }
@@ -298,12 +317,9 @@ program_icon_missing :: proc(
 	lookup: Program_Icon_Lookup,
 ) -> bool {
 	cache := &app.program_icons
-	for &icon in cache.icons {
-		if icon.state == .Missing && icon.source == want.source && icon.size == size &&
-		   icon.paint == want.paint && icon.path == want.path {
-			if lookup == .Draw {icon.used = cache.clock}
-			return true
-		}
+	if icon := program_icon_find(cache, want, size, {.Missing}); icon != nil {
+		if lookup == .Draw {icon.used = cache.clock}
+		return true
 	}
 	return false
 }
@@ -326,8 +342,7 @@ program_named_file :: proc(app: ^App, name: string, art: program_art.Art, has_ar
 // on light themes, and a multi-colour logo is never partly recoloured.
 @(private)
 program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_art.Paint) {
-	text := app.theme.tab_text
-	paint.text = {u8(math.round(text.r * 255)), u8(math.round(text.g * 255)), u8(math.round(text.b * 255))}
+	paint.text = app.settings.active_theme.colors[.Tab_Text].rgb
 	for layer in art.layers {
 		if !layer.branded {continue}
 		if colour.contrast_ratio(colour.rgba(layer.colour), app.theme.tab_bar) < PROGRAM_ART_CONTRAST {
@@ -350,15 +365,10 @@ when AIO_CONTROL {
 		found, ready := false, false
 		if program := program_adopted(entry); program != nil && program.name != "" {
 			want, found = program_icon_source(app, program, PROGRAM_ICON_REPORT_SIZE, .Observe)
-			file, has_file := program_named_file(app, program.name, program.art, program.has_art)
-			art := program.has_art ? program_art.canonical(program.art) : ""
-			for icon in app.program_icons.icons {
-				if icon.state != .Ready {continue}
-				switch icon.source {
-				case .File: ready ||= has_file && icon.path == file
-				case .Artwork: ready ||= art != "" && icon.path == art
-				case .Executable: ready ||= program.path != "" && icon.path == program.path
-				}
+			_, ready = program_named_source(app, program.name, program.art, program.has_art, 0, .Observe)
+			if !ready && program.path != "" {
+				executable := Program_Icon_Want{source = .Executable, path = program.path}
+				ready = program_icon_find(&app.program_icons, executable, 0, {.Ready}) != nil
 			}
 		}
 		if found {
