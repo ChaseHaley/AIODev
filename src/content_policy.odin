@@ -91,9 +91,8 @@ content_directory :: proc(app: ^App, content: layout.Content) -> string {
 	return pane != nil ? pane.directory : ""
 }
 
-@(require_results)
-content_tab_icon :: proc(kind: layout.Content_Kind) -> ui.Icon {
-	return CONTENT_POLICY[kind].icon
+pane_owns_session :: proc(kind: layout.Content_Kind) -> bool {
+	return CONTENT_POLICY[kind].owns_session
 }
 
 // The content's own pinned documents, or nil for a kind without them or content no longer running.

@@ -24,7 +24,7 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 	}
 	if int(tab.tree.focus) < len(tab.tree.nodes) {
 		if pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane); ok {
-			t.badge.icon = content_tab_icon(pane.content.kind)
+			t.badge.icon = CONTENT_POLICY[pane.content.kind].icon
 		}
 	}
 	return t, .Ok
