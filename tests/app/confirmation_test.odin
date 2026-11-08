@@ -183,3 +183,23 @@ confirmation_accept_keeps_swap_identity_and_retires_last_tab_window :: proc(t: ^
 	testing.expect_value(t, len(state.sessions), 0)
 	testing.expect_value(t, len(state.workspaces), 0)
 }
+
+// Every question, not only a workspace deletion, ends the Activity inbox and the overlay rail.
+@(test)
+confirmation_closes_the_activity_inbox_and_overlay_rail :: proc(t: ^testing.T) {
+	f: Confirmation_Fixture
+	defer confirmation_fixture_destroy(t, &f)
+	if !confirmation_fixture_init(t, &f) {return}
+	state := &f.state
+	w := state.windows[0]
+	state.settings.status.enabled = true
+	state.settings.tabs.orientation = .Vertical
+	app.window_apply_settings(state, w)
+	w.width = i32(600 * w.scale)
+	app.rail_adaptive_update(w)
+	app.status_inbox_toggle(state, w)
+	app.rail_toggle(state, w)
+	if !testing.expect(t, app.status_inbox_shown(w) && app.rail_overlay(w)) {return}
+	testing.expect(t, confirmation_open_subject(t, state, w, true) != nil)
+	testing.expect(t, !app.status_inbox_shown(w) && !app.rail_overlay(w))
+}

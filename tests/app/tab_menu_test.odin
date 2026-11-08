@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:commands"
 import "aio:input"
 import "core:fmt"
 import "core:os"
@@ -42,7 +43,8 @@ menu_fixture_init :: proc(t: ^testing.T, f: ^Menu_Fixture, count: int) -> bool {
 	f.workspace.id = 1
 	append(&f.state.workspaces, &f.workspace)
 	f.state.settings.tab.confirm_close = true
-	return true
+	f.state.registry = commands.create()
+	return testing.expect_value(t, app.register_actions(&f.state.registry), commands.Error.None)
 }
 
 menu_fixture_destroy :: proc(f: ^Menu_Fixture) {
@@ -62,6 +64,7 @@ menu_fixture_destroy :: proc(f: ^Menu_Fixture) {
 	delete(f.w.dividers)
 	ui.editor_destroy(&f.w.editor)
 	_ = platform.destroy(&f.state.platform)
+	commands.destroy(&f.state.registry)
 }
 
 menu_key :: proc(f: ^Menu_Fixture, key: input.Key_Event) {
@@ -225,6 +228,35 @@ tab_menu_event_navigation_and_dismissal :: proc(t: ^testing.T) {
 	testing.expect(t, !app.tab_menu_shown(w) && shown && naming_tab)
 	testing.expect_value(t, target.tab, f.workspace.tabs[0].id)
 	testing.expect_value(t, target.workspace, f.workspace.id)
+}
+
+// The menu keys are the defaults of Show Tab Menu, so a rebinding moves them like any other shortcut.
+@(test)
+tab_context_menu_is_a_rebindable_command :: proc(t: ^testing.T) {
+	f: Menu_Fixture
+	defer menu_fixture_destroy(&f)
+	if !menu_fixture_init(t, &f, 1) { return }
+	w := &f.w
+	command := commands.find(&f.state.registry, "tab.context_menu")
+	if !testing.expect(t, command != nil) { return }
+	defaults := commands.active_shortcuts(command)
+	if testing.expect_value(t, len(defaults), 2) {
+		testing.expect_value(t, defaults[0], commands.Shortcut{.Context_Menu, {}})
+		testing.expect_value(t, defaults[1], commands.Shortcut{.F10, {.Shift}})
+	}
+	bindings := [?]commands.Shortcut{{.M, {.Control, .Alt}}}
+	overrides := [?]commands.Override{{command.id, bindings[:]}}
+	errors: [1]commands.Error
+	testing.expect_value(t, commands.rebind(&f.state.registry, overrides[:], errors[:]), commands.Error.None)
+	menu_key(&f, {key = .Context_Menu})
+	menu_key(&f, {key = .F10, modifiers = {.Shift}})
+	testing.expect(t, !app.tab_menu_shown(w))
+	menu_key(&f, {key = .M, modifiers = {.Control, .Alt}})
+	testing.expect(t, app.tab_menu_shown(w))
+	testing.expect_value(t, app.tab_menu_target(w), 0)
+	menu_key(&f, {key = .Escape})
+	app.run_action(&f.state, w, .Tab_Context_Menu)
+	testing.expect(t, app.tab_menu_shown(w))
 }
 
 @(test)
