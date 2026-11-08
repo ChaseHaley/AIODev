@@ -31,9 +31,9 @@ pane_shell_swap_request :: proc(
 	node: layout.Node_Id,
 	profile_id: string,
 ) {
-	pane, is_pane := window_tree(w).nodes[node].(layout.Pane)
-	if !is_pane || !pane_owns_session(pane.content.kind) {return}
-	entry := session_find(app, pane.content.id)
+	content, is_pane := layout.pane_content(window_tree(w), node)
+	if !is_pane || !pane_owns_session(content.kind) {return}
+	entry := session_find(app, content.id)
 	if entry == nil {return}
 	if entry.profile_id == profile_id {return}
 	profile, requested := settings.profile_resolve(&app.settings, profile_id)
@@ -108,9 +108,9 @@ pane_shell_swap :: proc(
 	node: layout.Node_Id,
 	profile_id: string,
 ) {
-	pane, is_pane := window_tree(w).nodes[node].(layout.Pane)
-	if !is_pane || !pane_owns_session(pane.content.kind) {return}
-	entry := session_find(app, pane.content.id)
+	content, is_pane := layout.pane_content(window_tree(w), node)
+	if !is_pane || !pane_owns_session(content.kind) {return}
+	entry := session_find(app, content.id)
 	if entry == nil {return}
 	profile, requested := settings.profile_resolve(&app.settings, profile_id)
 	if !requested {

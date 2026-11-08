@@ -62,8 +62,7 @@ pane_trial_split :: proc(
 		original = window_tree(w)
 		target = original.focus
 	}
-	if int(target) >= len(original.nodes) {return {error = .Invalid}}
-	if _, ok := original.nodes[target].(layout.Pane); !ok {return {error = .Invalid}}
+	if _, ok := layout.pane_content(original, target); !ok {return {error = .Invalid}}
 	trial, copy_error := layout.clone(original, allocator)
 	if copy_error != nil {return {error = .Allocation}}
 	defer layout.destroy(&trial)
@@ -81,8 +80,7 @@ pane_trial_operation :: proc(
 	op: Pane_Operation,
 	allocator := context.temp_allocator,
 ) -> Pane_Trial_Result {
-	if int(op.node) >= len(op.source.tree.nodes) {return {error = .Invalid}}
-	pane, is_pane := op.source.tree.nodes[op.node].(layout.Pane)
+	content, is_pane := layout.pane_content(&op.source.tree, op.node)
 	if !is_pane {return {error = .Invalid}}
 	trial, copy_error := layout.clone(&op.destination.tree, allocator)
 	if copy_error != nil {return {error = .Allocation}}
@@ -109,5 +107,5 @@ pane_trial_operation :: proc(
 	if layout.link_view_load(&after, &trial, layout.link_root(&trial, added)) != nil {
 		return {error = .Allocation}
 	}
-	return pane_trial_evaluate(app, w, &before, &after, layout.find_content(&after, pane.content), false)
+	return pane_trial_evaluate(app, w, &before, &after, layout.find_content(&after, content), false)
 }

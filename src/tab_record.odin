@@ -66,9 +66,9 @@ tab_display_title :: proc(tab: ^Tab, ordinal: int) -> string {
 // One rule for construction and later refreshes: the tab's own name, else its content's title.
 @(private)
 tab_update_title :: proc(app: ^App, tab: ^Tab) {
-	pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-	title := content_title(app, pane.content)
-	if entry := workspace_session_for_content(app, pane.content); entry != nil {
+	content, _ := layout.focused_content(&tab.tree)
+	title := content_title(app, content)
+	if entry := workspace_session_for_content(app, content); entry != nil {
 		title = session_display_title(entry)
 	}
 	if tab.name != "" {title = tab.name}

@@ -270,8 +270,8 @@ close_exited_session :: #force_no_inline proc(app: ^App, id: u32) -> bool {
 session_titles_changed :: #force_no_inline proc(app: ^App, id: u32) {
 	for workspace in app.workspaces {
 		for tab in workspace.tabs {
-			pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-			if pane.content == {.Terminal, id} {tab_update_title(app, tab)}
+			content, is_pane := layout.focused_content(&tab.tree)
+			if is_pane && content == {.Terminal, id} {tab_update_title(app, tab)}
 		}
 	}
 	for window in app.windows {

@@ -662,10 +662,11 @@ floating_capsules_refresh :: proc(app: ^App, w: ^Window) {
 		if !ok || !floating.minimized {continue}
 		pane_id := layout.float_pane(tree, root)
 		if pane_id == layout.INVALID_NODE {continue}
-		pane := tree.nodes[pane_id].(layout.Pane) or_continue
+		content, is_pane := layout.pane_content(tree, pane_id)
+		if !is_pane {continue}
 		capsule := Float_Capsule {
 			root = root,
-			content = pane.content,
+			content = content,
 			order = layout.float_order(tree, root),
 		}
 		if _, err := append(&w.float_capsules, capsule); err != nil {
@@ -881,7 +882,8 @@ floating_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		w.dirty = true
 		if action != .Move {
 			// A button fires on release over itself, like every other control.
-			w.float_press = Float_Button_Press{tree.nodes[node].(layout.Pane).content, action}
+			content, _ := layout.pane_content(tree, node)
+			w.float_press = Float_Button_Press{content, action}
 			return
 		}
 		pane_focus(app, w, node)

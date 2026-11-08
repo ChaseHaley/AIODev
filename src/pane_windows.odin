@@ -40,9 +40,8 @@ pane_window_source_allows :: proc(workspace: ^Workspace) -> bool {
 // pane it can show when the pane is not already linked.
 @(require_results)
 pane_window_source_can_lose :: proc(app: ^App, source: ^Tab, node: layout.Node_Id) -> bool {
-	home, linked, found := pane_link_origin(app, source, node)
-	if !found || !pane_window_source_allows(home.workspace) {return false}
-	return linked || pane_link_tab_can_lose(home.tab)
+	home, _, allowed := pane_source_leaves(app, source, node)
+	return allowed && pane_window_source_allows(home.workspace)
 }
 
 // Preview tabs borrow their source runtime; discarding one must never close its session.
@@ -68,11 +67,9 @@ pane_window_preview_discard :: proc(app: ^App, id: input.Window_Id) {
 // Prepares the hidden destination window of a tear-off, proving the pane fits before the drop.
 @(require_results)
 pane_window_preview_create :: proc(app: ^App, source: ^Tab, node: layout.Node_Id) -> ^Window {
-	home, linked, found := pane_link_origin(app, source, node)
-	if !found {return nil}
+	home, _, allowed := pane_source_leaves(app, source, node)
 	source_workspace := home.workspace
-	if !pane_window_source_allows(source_workspace) {return nil}
-	if !linked && !pane_link_tab_can_lose(home.tab) {return nil}
+	if !allowed || !pane_window_source_allows(source_workspace) {return nil}
 	pane, valid := workspace_pane_at(
 		app,
 		source_workspace,
@@ -254,18 +251,16 @@ pane_to_window :: proc(
 	preview_id: input.Window_Id,
 ) -> bool {
 	preview := window_find(app, preview_id)
-	home, linked, found := pane_link_origin(app, source, node)
-	if !found {return false}
+	home, _, allowed := pane_source_leaves(app, source, node)
+	if !allowed {return false}
 	workspace := home.workspace
 	if preview == nil ||
 	   preview.phase != .Preparing ||
-	   workspace == nil ||
 	   !(source_window.workspace == workspace ||
 			   window_link_workspace(source_window) == workspace.id) ||
 	   !pane_window_source_allows(workspace) {
 		return false
 	}
-	if !linked && !pane_link_tab_can_lose(home.tab) {return false}
 	pane, valid := workspace_pane_at(
 		app,
 		workspace,
@@ -273,10 +268,9 @@ pane_to_window :: proc(
 		home.node,
 	)
 	destination := selected_tab(preview.workspace)
-	if !valid ||
-	   destination == nil ||
-	   destination.tree.nodes[destination.tree.root].(layout.Pane).content !=
-		   pane.content {return false}
+	if !valid || destination == nil {return false}
+	shown, shown_is_pane := layout.pane_content(&destination.tree, destination.tree.root)
+	if !shown_is_pane || shown != pane.content {return false}
 	layout_pane := home.tab.tree.nodes[home.node].(layout.Pane)
 	area := window_content_area(app, preview)
 	panes := [?]layout.Pane_Rect{{content = pane.content, rect = area}}

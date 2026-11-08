@@ -127,10 +127,8 @@ tab_menu_enabled :: proc(w: ^Window, index: int) -> bool {
 	case .Rename_Tab, .Move_Tab_Workspace, .Move_Tab_New_Workspace, .Close_Tab: return target >= 0
 	case .Duplicate_Tab:
 		if target < 0 {return false}
-		tree := &w.workspace.tabs[target].tree
-		if tree.focus == layout.INVALID_NODE {return false}
-		pane, ok := tree.nodes[tree.focus].(layout.Pane)
-		return ok && pane_owns_session(pane.content.kind)
+		content, ok := layout.focused_content(&w.workspace.tabs[target].tree)
+		return ok && pane_owns_session(content.kind)
 	case .Close_Right_Tabs: return target >= 0 && target + 1 < len(w.workspace.tabs)
 	case .Close_Other_Tabs: return target >= 0 && tab_menu_scope(w) < len(w.workspace.tabs)
 	}

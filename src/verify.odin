@@ -454,8 +454,8 @@ when AIO_CONTROL {
 			state_text(&r, "window.focused", "false")
 			if len(app.workspaces) > 0 {
 				if tab := selected_tab(app.workspaces[0]); tab != nil {
-					pane := tab.tree.nodes[tab.tree.focus].(layout.Pane)
-					entry = workspace_session_for_content(app, pane.content)
+					content, _ := layout.focused_content(&tab.tree)
+					entry = workspace_session_for_content(app, content)
 				}
 			}
 		}
@@ -571,16 +571,16 @@ when AIO_CONTROL {
 			state_text(r, state_key("tab.%d.title", n), tab.title)
 			state_value(r, state_key("tab.%d.zoomed", n), tab.tree.zoomed)
 			count := 0
-			for node, id in tab.tree.nodes {
-				pane, ok := node.(layout.Pane)
+			for _, id in tab.tree.nodes {
+				content, ok := layout.pane_content(&tab.tree, layout.Node_Id(id))
 				if !ok {continue}
 				count += 1
-				if session := workspace_session_for_content(app, pane.content); session != nil {
+				if session := workspace_session_for_content(app, content); session != nil {
 					g := term.geometry(session.session)
 					state_valuef(r, state_key("tab.%d.pane.%d.grid", n, id), "%dx%d", g.columns, g.rows)
 					state_value(r, state_key("tab.%d.pane.%d.keep_open", n, id), session.keep_open)
 				}
-				state_value(r, state_key("tab.%d.pane.%d.session", n, id), pane.content.id)
+				state_value(r, state_key("tab.%d.pane.%d.session", n, id), content.id)
 				if floating, floated := layout.float_of(&tab.tree, layout.Node_Id(id)); floated {
 					b := floating.bounds
 					float_key := state_key("tab.%d.pane.%d.float", n, id)
@@ -810,7 +810,7 @@ when AIO_CONTROL {
 		if entry == nil {return {}, "the selected window has no focused pane; address the region in pixels"}
 		for pane in w.panes {
 			if pane.content != {.Terminal, entry.id} {continue}
-			return pane_box(w.metrics, pane.rect, pane_insets(app, w.scale, entry, pane.floating)), ""
+			return pane_box(w.metrics, pane.rect, pane_insets(app, w, entry, pane)), ""
 		}
 		return {}, "the focused pane is not visible; select its tab or use --region"
 	}
@@ -942,24 +942,11 @@ when AIO_CONTROL {
 		case verify_protocol.Dpi:
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case verify_protocol.Resize:
-			insets := pane_insets(app, w.scale, focused_session(app, w))
-			desired, width, height, _ := pane_box_for_grid(app, w^, u16(r.columns), u16(r.rows), insets)
-			// Activity can move between a standalone dock and the rail as the width changes.
-			for _ in 0..<32 {
-				candidate := w^
-				candidate.width, candidate.height = width, height
-				rail_adaptive_update(&candidate)
-				area := window_content_area(app, &candidate)
-				box := pane_box(w.metrics, area, insets)
-				if box.columns == u16(r.columns) && box.rows == u16(r.rows) {
-					if platform.window_set_client_size(&app.platform, w.id,
-						candidate.width, candidate.height) != .None {return .System}
-					return .None
-				}
-				width += i32(math.ceil(desired.rect.width - area.width))
-				height += i32(math.ceil(desired.rect.height - area.height))
-			}
-			return .Invalid_Argument
+			insets := pane_insets(app, w, focused_session(app, w))
+			_, width, height, solved := pane_box_for_grid(app, w^, u16(r.columns), u16(r.rows), insets)
+			if !solved {return .Invalid_Argument}
+			if platform.window_set_client_size(&app.platform, w.id, width, height) != .None {return .System}
+			return .None
 		case verify_protocol.Command:
 			command := commands.find(&app.registry, r.name)
 			if command == nil {return .Invalid_Argument}

@@ -6,7 +6,6 @@ import "aio:settings"
 import "aio:term"
 import "core:slice"
 import "core:strings"
-import "core:unicode/utf8"
 
 // Which program each pane runs (WORK-272, WORK-279): named by its executable stem, the script a
 // launcher runs, or the app a WSL or SSH session reports. Split directories, remembered commands
@@ -216,13 +215,7 @@ program_command :: proc(arguments: []string, stem: string, allocator := context.
 // The text without control characters, cut to PROGRAM_COMMAND_LIMIT bytes, so it can be written
 // to a terminal as plain text.
 printable_command :: proc(text: string, allocator := context.allocator) -> string {
-	out := strings.builder_make(allocator)
-	for r in text {
-		if r < 0x20 || r == 0x7f || r >= 0x80 && r < 0xa0 || r == utf8.RUNE_ERROR {continue}
-		if strings.builder_len(out) + utf8.rune_size(r) > PROGRAM_COMMAND_LIMIT {break}
-		strings.write_rune(&out, r)
-	}
-	return strings.to_string(out)
+	return printable_text(text, PROGRAM_COMMAND_LIMIT, allocator, drop_replacement = true)
 }
 
 @(private)

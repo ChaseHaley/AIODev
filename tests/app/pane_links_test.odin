@@ -523,7 +523,7 @@ drag_pane_to :: proc(
 	root := false,
 ) {
 	place_kind := root ? app.Pane_Place.Edge : app.Pane_Place.Beside
-	place := app.Pane_Drop{destination_window.id, destination, place_kind, target, direction, .Fits}
+	place := app.Pane_Drop{destination_window.id, destination, place_kind, target, direction, .Fits, false}
 	seed_pane_drag(source_window, source, node, place)
 }
 
@@ -783,7 +783,8 @@ dragging_a_linked_pane_to_a_new_host_tab_moves_it_there :: proc(t: ^testing.T) {
 		w,
 		app.selected_tab(w.workspace),
 		w.panes[1].node,
-		app.Pane_Drop{f.host.id, app.selected_tab(f.host.workspace), .New_Tab, layout.INVALID_NODE, .Left, .Fits},
+		app.Pane_Drop{
+			f.host.id, app.selected_tab(f.host.workspace), .New_Tab, layout.INVALID_NODE, .Left, .Fits, false},
 	)
 	testing.expect(t, app.pane_drag_release(f.state, w))
 	testing.expect_value(t, len(f.state.windows), 2)

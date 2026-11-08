@@ -22,11 +22,7 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 		t.badge.shell, t.badge.atlas, result = pane_icon(app, pane.session, ui.ICON_BUTTON * w.scale)
 		if result != .Ok {return t, result}
 	}
-	if int(tab.tree.focus) < len(tab.tree.nodes) {
-		if pane, ok := tab.tree.nodes[tab.tree.focus].(layout.Pane); ok {
-			t.badge.icon = content_tab_icon(pane.content.kind)
-		}
-	}
+	if content, ok := layout.focused_content(&tab.tree); ok {t.badge.icon = content_tab_icon(content.kind)}
 	return t, .Ok
 }
 

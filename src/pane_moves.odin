@@ -81,8 +81,8 @@ pane_drop_operation :: proc(
 	Pane_Operation,
 	bool,
 ) {
-	if drop.place == .New_Tab || source == nil || int(node) >= len(source.tree.nodes) {return {}, false}
-	pane, is_pane := source.tree.nodes[node].(layout.Pane)
+	if drop.place == .New_Tab || source == nil {return {}, false}
+	content, is_pane := layout.pane_content(&source.tree, node)
 	if !is_pane {return {}, false}
 	op := Pane_Operation {
 		place     = drop.place,
@@ -100,9 +100,8 @@ pane_drop_operation :: proc(
 		return pane_transfer_operation(app, w, source, drop.tab, op)
 	}
 	if drop.place == .Swap {return {}, false}
-	home, source_linked, found := pane_link_origin(app, source, node)
-	if !found {return {}, false}
-	if !source_linked && !pane_link_tab_can_lose(home.tab) {return {}, false}
+	home, source_linked, allowed := pane_source_leaves(app, source, node)
+	if !allowed {return {}, false}
 	destination_linked := window_linked(w)
 	destination := drop.tab
 	if destination_linked {
@@ -111,10 +110,9 @@ pane_drop_operation :: proc(
 		destination, op.slot = destination_home.tab, destination_home.slot
 		if !layout.slot_valid(&destination.tree, op.slot) {return {}, false}
 		if op.target != layout.INVALID_NODE {
-			if int(op.target) >= len(drop.tab.tree.nodes) {return {}, false}
-			target_pane, target_is_pane := drop.tab.tree.nodes[op.target].(layout.Pane)
+			target_content, target_is_pane := layout.pane_content(&drop.tab.tree, op.target)
 			if !target_is_pane {return {}, false}
-			op.target = layout.find_content(&destination.tree, target_pane.content)
+			op.target = layout.find_content(&destination.tree, target_content)
 			if op.target == layout.INVALID_NODE && drop.place != .Edge {return {}, false}
 		}
 	}
@@ -123,7 +121,7 @@ pane_drop_operation :: proc(
 	if destination_workspace == nil {return {}, false}
 	// An unlinked destination window shows the tab it receives, so the tab must be one of its own.
 	if !destination_linked && destination_workspace != w.workspace {return {}, false}
-	if !pane_content_can_join(pane.content, destination_workspace, home.tab) {return {}, false}
+	if !pane_content_can_join(content, destination_workspace, home.tab) {return {}, false}
 	if destination == home.tab {
 		if destination_linked {
 			// Two windows of one slot show the same panes; moving between them is no move at all.
@@ -151,11 +149,9 @@ pane_transfer_operation :: proc(
 	if pane_source_workspace(app, source) == nil || tab_index_by_id(w.workspace, destination.id) < 0 {
 		return {}, false
 	}
-	if int(op.node) >= len(source.tree.nodes) || int(op.target) >= len(destination.tree.nodes) {
-		return {}, false
-	}
-	pane, valid := source.tree.nodes[op.node].(layout.Pane)
-	if !valid || !pane_content_can_join(pane.content, w.workspace, source) {return {}, false}
+	if int(op.target) >= len(destination.tree.nodes) {return {}, false}
+	content, valid := layout.pane_content(&source.tree, op.node)
+	if !valid || !pane_content_can_join(content, w.workspace, source) {return {}, false}
 	resolved := op
 	resolved.source, resolved.destination = source, destination
 	return resolved, true
@@ -172,35 +168,26 @@ pane_drop_commit :: proc(
 	w: ^Window,
 	drop: Pane_Drop,
 ) -> bool {
-	if int(grab.node) >= len(grab.source.tree.nodes) {return false}
-	pane, is_pane := grab.source.tree.nodes[grab.node].(layout.Pane)
+	content, is_pane := layout.pane_content(&grab.source.tree, grab.node)
 	if !is_pane {return false}
 	if drop.place == .New_Tab {
 		if !window_linked(source_window) {return pane_to_tab(app, w, grab.source, grab.node)}
 		if window_linked(w) || !pane_link_reconcile(app, source_window) {return false}
-		home, linked := pane_link_home(app, pane.content)
+		home, linked := pane_link_home(app, content)
 		return linked && pane_to_tab(app, w, home.tab, home.node)
 	}
 	if !pane_drop_crosses_link(source_window, w) {
-		if drop.tab != grab.source {
-			edge := drop.place == .Edge
-			return pane_transfer(app, w, grab.source, drop.tab, grab.node, drop.target, drop.direction, edge)
-		}
 		op, resolved := pane_drop_operation(app, source_window, grab.source, grab.node, w, drop)
-		return resolved && pane_rearrange(app, w, op)
+		if !resolved {return false}
+		if op.source == op.destination {return pane_rearrange(app, w, op)}
+		return pane_operation_move(app, w, op)
 	}
-	target := layout.Content{}
-	targeted := false
-	if int(drop.target) < len(drop.tab.tree.nodes) {
-		target_pane: layout.Pane
-		target_pane, targeted = drop.tab.tree.nodes[drop.target].(layout.Pane)
-		target = target_pane.content
-	}
+	target, targeted := layout.pane_content(&drop.tab.tree, drop.target)
 	if window_linked(source_window) && !pane_link_reconcile(app, source_window) {return false}
 	if window_linked(w) && !pane_link_reconcile(app, w) {return false}
 	settled := drop
 	if targeted {settled.target = layout.find_content(&drop.tab.tree, target)}
-	node := layout.find_content(&grab.source.tree, pane.content)
+	node := layout.find_content(&grab.source.tree, content)
 	op, resolved := pane_drop_operation(app, source_window, grab.source, node, w, settled)
 	return resolved && pane_operation_move(app, w, op)
 }
@@ -251,15 +238,15 @@ Pane_Move :: struct {
 // no focus to take.
 @(private)
 pane_move_begin :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -> Pane_Move {
-	pane := source.tree.nodes[node].(layout.Pane)
+	content, _ := layout.pane_content(&source.tree, node)
 	move := Pane_Move {
 		source      = source,
 		workspace   = pane_source_workspace(app, source),
-		content     = pane.content,
+		content     = content,
 		destination = w.id,
 	}
 	if layout.link_root(&source.tree, node) != layout.INVALID_NODE {
-		if linked := pane_link_window_of(app, pane.content); linked != nil {move.linked = linked.id}
+		if linked := pane_link_window_of(app, content); linked != nil {move.linked = linked.id}
 	}
 	if w.phase != .Preparing {focus_leave(app, w)}
 	owner := window_for_workspace(app, move.workspace)
@@ -284,26 +271,30 @@ pane_move_enter :: proc(app: ^App, move: Pane_Move) {
 // left empty closes and a linked window it left shows its slot again; the layout is saved, and the
 // workspace it left retires once nothing is left in it.
 @(private)
-pane_move_finish :: proc(app: ^App, move: Pane_Move, destination: ^Tab) {
+pane_move_finish :: proc(app: ^App, move: Pane_Move, destination: ^Tab, activate := false) {
 	w := window_find(app, move.destination)
 	emptied := move.source.tree.root == layout.INVALID_NODE
 	if !emptied {tab_update_title(app, move.source)}
 	// The moved content may have been Settings, so each side's page follows what it now shows.
-	workspace_settings_sync(app, move.workspace)
-	destination_workspace := w.workspace
+	workspace_mutation_finish(app, move.workspace, {.Structure})
+	destination_workspace := pane_source_workspace(app, destination)
 	if window_linked(w) {
-		destination_workspace = pane_source_workspace(app, destination)
 		pane_link_joined(app, w, move.content, focus = true)
 	} else {
-		if index := tab_index_by_id(w.workspace, destination.id); index >= 0 {
-			tab_select_one(w.workspace, index)
-			w.workspace.selected = index
+		if index := tab_index_by_id(destination_workspace, destination.id); index >= 0 {
+			workspace_tab_choose(destination_workspace, index)
 		}
 		if node := layout.find_content(&destination.tree, move.content); node != layout.INVALID_NODE {
 			destination.tree.focus = node
 		}
-		window_relayout(app, w)
-		focus_enter(app, w)
+		if w.workspace == destination_workspace {
+			window_relayout(app, w)
+			focus_enter(app, w)
+		} else if !workspace_select(app, w, destination_workspace) {
+			notify(app, .Error, "Content moved, but the destination could not be displayed.")
+			window_relayout(app, w)
+			focus_enter(app, w)
+		}
 	}
 	if linked := window_find(app, move.linked); linked != nil {
 		pane_link_refresh_source(app, linked, move.content)
@@ -318,18 +309,24 @@ pane_move_finish :: proc(app: ^App, move: Pane_Move, destination: ^Tab) {
 		if owner.id == move.owner {focus_enter(app, owner)}
 	}
 	workspace_mutation_finish(app, destination_workspace, {.Structure})
+	if activate && !window_activate(app, w) {
+		notify(app, .Error, "Content moved, but the destination could not be displayed.")
+	}
 	// A move has already focused its destination; its exhausted source window can retire.
-	workspace_close_empty(app, move.workspace, replace_window = false)
+	workspace_close_empty(
+		app, move.workspace,
+		replace_window = !window_linked(w) && w.workspace != destination_workspace,
+	)
 }
 
 pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	tree := window_tree(w)
 	if tree.focus == node || int(node) >= len(tree.nodes) {return}
 	// Status, jumps and scripts name a pane wherever it is; a linked one takes focus in its own window.
-	pane, is_pane := tree.nodes[node].(layout.Pane)
+	content, is_pane := layout.pane_content(tree, node)
 	if is_pane && layout.link_root(tree, node) != layout.INVALID_NODE {
-		if linked := pane_link_window_of(app, pane.content); linked != nil {
-			pane_focus(app, linked, layout.find_content(window_tree(linked), pane.content))
+		if linked := pane_link_window_of(app, content); linked != nil {
+			pane_focus(app, linked, layout.find_content(window_tree(linked), content))
 			pane_link_activate(linked)
 		}
 		return
@@ -353,11 +350,16 @@ pane_content_can_join :: proc(content: layout.Content, destination: ^Workspace, 
 	return !workspace_content_outside_tab(destination, content, source)
 }
 
+// Dropping a tab's root on New Tab in its own workspace moves that tab to the end.
+pane_to_tab_reorders :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -> bool {
+	return node == source.tree.root && pane_source_workspace(app, source) == w.workspace
+}
+
 @(require_results)
 pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -> bool {
 	source_workspace := pane_source_workspace(app, source)
 	if source_workspace == nil || int(node) >= len(source.tree.nodes) {return false}
-	if node == source.tree.root && source_workspace == w.workspace {
+	if pane_to_tab_reorders(app, w, source, node) {
 		for tab, index in w.workspace.tabs {
 			if tab != source {continue}
 			tab_move(app, w, index, len(w.workspace.tabs) - 1)
@@ -366,11 +368,11 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 		}
 		return false
 	}
-	pane, valid := source.tree.nodes[node].(layout.Pane)
+	content, valid := layout.pane_content(&source.tree, node)
 	if !valid {return false}
 	destination_workspace := w.workspace
-	if !pane_content_can_join(pane.content, destination_workspace, source) {return false}
-	panes := [?]layout.Pane_Rect{{content = pane.content, rect = window_content_area(app, w)}}
+	if !pane_content_can_join(content, destination_workspace, source) {return false}
+	panes := [?]layout.Pane_Rect{{content = content, rect = window_content_area(app, w)}}
 	if !pane_minimum_allows(app, w, panes[:], nil, notify_failure = true) {return false}
 	tab, reserved := tab_record_reserve(w.workspace)
 	if !reserved {
@@ -389,22 +391,6 @@ pane_to_tab :: proc(app: ^App, w: ^Window, source: ^Tab, node: layout.Node_Id) -
 	tab_record_commit(app, w.workspace, tab)
 	pane_move_finish(app, move, tab)
 	return true
-}
-
-@(require_results)
-pane_transfer :: proc(
-	app: ^App,
-	w: ^Window,
-	source, destination: ^Tab,
-	node, target: layout.Node_Id,
-	direction: layout.Direction,
-	root: bool,
-) -> bool {
-	place := root ? Pane_Place.Edge : Pane_Place.Beside
-	request := Pane_Operation{place = place, node = node, target = target, slot = layout.INVALID_NODE,
-		direction = direction}
-	op, resolved := pane_transfer_operation(app, w, source, destination, request)
-	return resolved && pane_operation_move(app, w, op)
 }
 
 pane_keep_open :: proc(app: ^App, w: ^Window) {
@@ -447,7 +433,7 @@ pane_remove :: proc(
 	tab := workspace.tabs[tab_index]
 	for w in app.windows {if w.workspace == workspace {_ = gesture_cancel(app, w)}}
 	for current, i in workspace.tabs {if current == tab {tab_index = i; break}}
-	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
+	content, is_pane := layout.pane_content(&tab.tree, node)
 	if !is_pane {return}
 	if tab.tree.root == node {
 		workspace_close_tab(app, workspace, tab_index)
@@ -459,15 +445,16 @@ pane_remove :: proc(
 	if was_focused {
 		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
 	}
+	floating := layout.float_is_root(&tab.tree, node)
 	if !layout.remove(&tab.tree, node) {return}
-	if pane_owns_session(pane.content.kind) {session_close(app, pane.content.id)}
-	workspace_settings_sync(app, workspace)
+	if pane_owns_session(content.kind) {session_close(app, content.id)}
+	workspace_mutation_finish(app, workspace, {.Structure})
 	tab_update_title(app, tab)
 	if visible {
 		for w in app.windows {
 			if w.workspace != workspace {continue}
 			// A floating pane's close leaves the tiled panes exactly as they were.
-			if pane.floating {window_floats_layout(app, w)} else {window_relayout(app, w)}
+			if floating {window_floats_layout(app, w)} else {window_relayout(app, w)}
 			if was_focused {focus_enter(app, w)}
 		}
 	}

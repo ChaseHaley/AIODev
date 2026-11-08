@@ -491,9 +491,9 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, 
 // Closes the sessions a partly restored tab opened for its first `restored` nodes, before freeing it.
 @(private)
 layout_tab_discard :: proc(app: ^App, tab: ^Tab, restored: int) {
-	for node in tab.tree.nodes[:restored] {
-		pane := node.(layout.Pane) or_continue
-		if pane_owns_session(pane.content.kind) {session_close(app, pane.content.id)}
+	for i in 0 ..< restored {
+		content, is_pane := layout.pane_content(&tab.tree, layout.Node_Id(i))
+		if is_pane && pane_owns_session(content.kind) {session_close(app, content.id)}
 	}
 	tab_record_free(tab)
 }

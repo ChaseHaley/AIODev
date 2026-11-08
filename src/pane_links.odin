@@ -35,9 +35,8 @@ Pane_Link_Route :: enum u8 {
 // The pane a command in this window acts on.
 @(private)
 pane_link_content :: proc(w: ^Window) -> layout.Content {
-	tree := window_tree(w)
-	pane, _ := tree.nodes[tree.focus].(layout.Pane)
-	return pane.content
+	content, _ := window_focused_content(w)
+	return content
 }
 
 // Finds a linked pane by what it shows, which stays true as its tab moves between workspaces.
@@ -58,9 +57,11 @@ pane_link_home :: proc(app: ^App, content: layout.Content) -> (Pane_Link_Home, b
 // The slot a window shows. Any of its panes names it, since one may have closed since the last sync.
 @(private, require_results)
 pane_link_locate :: proc(app: ^App, w: ^Window) -> (Pane_Link_Home, bool) {
-	for node in window_tree(w).nodes {
-		pane := node.(layout.Pane) or_continue
-		if home, found := pane_link_home(app, pane.content); found {return home, true}
+	tree := window_tree(w)
+	for _, id in tree.nodes {
+		content, is_pane := layout.pane_content(tree, layout.Node_Id(id))
+		if !is_pane {continue}
+		if home, found := pane_link_home(app, content); found {return home, true}
 	}
 	return {}, false
 }
@@ -72,25 +73,25 @@ pane_link_window_of :: proc(app: ^App, content: layout.Content) -> ^Window {
 	return nil
 }
 
-// The tab and node a pane really lives in, and whether that node is in a linked slot. A linked
-// window's tab is a private copy, so its pane resolves to the tab that owns it.
-pane_link_origin :: proc(
+// Resolves the pane to its owning tab and decides whether it may leave that tab. A linked
+// window's tab is a private copy; its pane leaves the slot in the tab that owns it.
+pane_source_leaves :: proc(
 	app: ^App,
 	source: ^Tab,
 	node: layout.Node_Id,
 ) -> (
 	home: Pane_Link_Home,
-	linked, ok: bool,
+	linked, allowed: bool,
 ) {
-	if source == nil || int(node) >= len(source.tree.nodes) {return {}, false, false}
-	pane, is_pane := source.tree.nodes[node].(layout.Pane)
+	if source == nil {return {}, false, false}
+	content, is_pane := layout.pane_content(&source.tree, node)
 	if !is_pane {return {}, false, false}
-	if found, is_linked := pane_link_home(app, pane.content); is_linked {
+	if found, is_linked := pane_link_home(app, content); is_linked {
 		return found, true, true
 	}
 	workspace := pane_source_workspace(app, source)
 	if workspace == nil {return {}, false, false}
-	return {workspace = workspace, tab = source, node = node}, false, true
+	return {workspace = workspace, tab = source, node = node}, false, pane_link_tab_can_lose(source)
 }
 
 // A tab keeps one pane it can show. A pane may leave a tab that has another shown pane, or whose only
@@ -141,10 +142,11 @@ pane_link_reload :: proc(app: ^App, w: ^Window, home: Pane_Link_Home) {
 // have changed; a window with no panes left closes.
 pane_link_refresh_source :: proc(app: ^App, w: ^Window, content: layout.Content) {
 	if w == nil || !window_linked(w) {return}
-	for node in window_tree(w).nodes {
-		pane := node.(layout.Pane) or_continue
-		if pane.content == content {continue}
-		if home, found := pane_link_home(app, pane.content); found {
+	tree := window_tree(w)
+	for _, id in tree.nodes {
+		candidate, is_pane := layout.pane_content(tree, layout.Node_Id(id))
+		if !is_pane || candidate == content {continue}
+		if home, found := pane_link_home(app, candidate); found {
 			pane_link_reload(app, w, home)
 			return
 		}
@@ -179,11 +181,9 @@ pane_link_split :: proc(
 	focus: bool,
 	content: layout.Content,
 ) -> bool {
-	view := window_tree(w)
-	if int(node) >= len(view.nodes) {return false}
-	beside, is_pane := view.nodes[node].(layout.Pane)
+	beside, is_pane := layout.pane_content(window_tree(w), node)
 	if !is_pane || !pane_link_reconcile(app, w) {return false}
-	home, found := pane_link_home(app, beside.content)
+	home, found := pane_link_home(app, beside)
 	if !found {return false}
 	tree := &home.tab.tree
 	if _, err := layout.split_direction(tree, home.node, direction, ratio, content, join_slot = true);
@@ -242,9 +242,9 @@ pane_link_toggle :: proc(app: ^App, w: ^Window) {
 	if tab == nil {return}
 	tree := window_tree(w)
 	node := tree.focus
-	pane, is_pane := tab.tree.nodes[node].(layout.Pane)
+	content, is_pane := layout.pane_content(&tab.tree, node)
 	if !is_pane {return}
-	if !CONTENT_POLICY[pane.content.kind].linkable {
+	if !CONTENT_POLICY[content.kind].linkable {
 		notify(app, .Info, "Only a terminal pane can have a linked window.")
 		return
 	}

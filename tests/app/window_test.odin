@@ -157,16 +157,20 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	moved_id := state.sessions[2].id
 	moved_pid := term.process_id(moved_session)
 	testing.expect(t, moved_pid != 0 && moved_pid != first_pid && moved_pid != second_pid)
-	if !testing.expect(t, app.pane_transfer(&state, second, source, destination,
-		source.tree.focus, destination.tree.focus, .Right, false)) { return }
+	if !testing.expect(t, app.pane_drop_commit(&state, second,
+		app.Pane_Grab{source, source.tree.focus}, second,
+		app.Pane_Drop{tab = destination, place = .Beside,
+			target = destination.tree.focus, direction = .Right})) { return }
 	testing.expect_value(t, len(first.panes), 1)
 	testing.expect_value(t, len(second.panes), 2)
 	testing.expect_value(t, destination.tree.nodes[destination.tree.focus].(layout.Pane).content.id, moved_id)
 	testing.expect_value(t, term.process_id(moved_session), moved_pid)
 	testing.expect_value(t, term.status(moved_session).kind, term.Status_Kind.Running)
 	testing.expect_value(t, len(state.sessions), 3)
-	if !testing.expect(t, app.pane_transfer(&state, second, source, destination,
-		source.tree.focus, destination.tree.focus, .Down, true)) { return }
+	if !testing.expect(t, app.pane_drop_commit(&state, second,
+		app.Pane_Grab{source, source.tree.focus}, second,
+		app.Pane_Drop{tab = destination, place = .Edge,
+			target = destination.tree.focus, direction = .Down})) { return }
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect(t, state.windows[0] == second)
 	testing.expect(t, app.workspace_find(&state, source_workspace_id) == nil)

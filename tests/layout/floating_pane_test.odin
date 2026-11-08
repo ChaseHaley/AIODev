@@ -11,10 +11,9 @@ pane_of :: proc(id: u32) -> layout.Content {return {.Terminal, id}}
 
 // Tiled panes first, then the shown floating panes, bottom first, as a window lays them out.
 @(private = "file")
-shown :: proc(l: ^layout.Layout) -> [dynamic]layout.Pane_Rect {
+shown :: proc(l: ^layout.Layout, solo := false) -> [dynamic]layout.Pane_Rect {
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	layout.compute(l, AREA, 0, &rects)
-	layout.floats_place(l, AREA, 0, 0, &rects)
+	layout.place_shown(l, {tiled = AREA, floating = AREA}, solo, &rects)
 	return rects
 }
 
@@ -34,12 +33,12 @@ floating_pane_leaves_tiled_panes_and_zoom_alone :: proc(t: ^testing.T) {
 	l.focus = b
 	l.zoomed = true
 	l.panes_changed = false
-	before := shown(&l)
+	before := shown(&l, true)
 	f, err := layout.float_new(&l, pane_of(3), {0.5, 0.2, 0.4, 0.6})
 	testing.expect_value(t, err, nil)
 	testing.expect(t, l.zoomed && !l.panes_changed, "a new floating pane is no tiling change")
 	testing.expect_value(t, l.focus, b)
-	after := shown(&l)
+	after := shown(&l, true)
 	testing.expect_value(t, len(after), len(before) + 1)
 	for rect, i in before {testing.expect_value(t, after[i], rect)}
 	testing.expect_value(t, after[len(after) - 1].node, f)
@@ -64,12 +63,12 @@ focus_returns_to_the_tiled_pane_a_floating_pane_was_opened_over :: proc(t: ^test
 	testing.expect_value(t, l.focus, f)
 	testing.expect_value(t, layout.focus_tiled(&l), a)
 	l.zoomed = true
-	zoomed := shown(&l)
+	zoomed := shown(&l, true)
 	testing.expect_value(t, zoomed[0].node, a)
 	testing.expect_value(t, zoomed[0].rect, AREA)
 	testing.expect(t, layout.float_minimize(&l, f, true))
 	testing.expect_value(t, l.focus, a)
-	testing.expect_value(t, len(shown(&l)), 1)
+	testing.expect_value(t, len(shown(&l, true)), 1)
 	testing.expect(t, layout.focus_set(&l, f), "focus brings a minimized pane back")
 	testing.expect_value(t, l.focus, f)
 	testing.expect(t, layout.remove(&l, f))

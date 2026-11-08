@@ -132,42 +132,25 @@ workspace_move_content :: proc(
 	index := tab_index_by_id(source_workspace, request.tab)
 	if index < 0 {return false}
 	source := source_workspace.tabs[index]
-	if int(request.node) >= len(source.tree.nodes) {return false}
-	pane, valid := source.tree.nodes[request.node].(layout.Pane)
-	if !valid || !pane_content_can_join(pane.content, destination, source) {return false}
+	content, valid := layout.pane_content(&source.tree, request.node)
+	if !valid || !pane_content_can_join(content, destination, source) {return false}
+	receiver := window_for_workspace(app, destination)
+	if receiver == nil {receiver = w}
+	panes := [?]layout.Pane_Rect{{content = content, rect = window_content_area(app, receiver)}}
+	if !pane_minimum_allows(app, receiver, panes[:], nil, notify_failure = true) {return false}
 	tab, reserved := tab_record_reserve(destination)
 	if !reserved {return false}
-	focus_leave(app, w)
-	owner := window_for_workspace(app, destination)
-	if owner != nil {focus_leave(app, owner)}
+	move := pane_move_begin(app, receiver, source, request.node)
 	tree, separated := layout.separate_pane(&source.tree, request.node)
 	if !separated {
 		tab_record_free(tab)
-		focus_enter(app, w)
-		if owner != nil {focus_enter(app, owner)}
+		pane_move_enter(app, move)
 		return false
 	}
 	tab.tree = tree
 	tab_record_commit(app, destination, tab)
-	tab_select_one(destination, len(destination.tabs) - 1)
-	destination.selected = len(destination.tabs) - 1
-	if source.tree.root == layout.INVALID_NODE {
-		workspace_close_tab(app, source_workspace, index)
-	} else {
-		tab_update_title(app, source)
-		workspace_settings_sync(app, source_workspace)
-		window_relayout(app, w)
-		focus_enter(app, w)
-	}
-	workspace_settings_sync(app, destination)
-	if owner != nil {
-		window_relayout(app, owner)
-		focus_enter(app, owner)
-	}
-	if !workspace_select(app, w, destination) {
-		notify(app, .Error, "Content moved, but the destination could not be displayed.")
-	}
-	workspace_close_empty(app, source_workspace, replace_window = owner == nil)
+	pane_move_finish(app, move, tab, activate = receiver != w)
+	// Open pickers show the destination with the tab it gained.
 	workspace_mutation_finish(app, destination, {.Names})
 	return true
 }
@@ -252,9 +235,10 @@ workspace_tabs_transfer_reserve :: proc(app: ^App, transfer: Workspace_Tab_Trans
 	for id in transfer.tabs {
 		index := tab_index_by_id(source, id)
 		if index < 0 {return false}
-		for node in source.tabs[index].tree.nodes {
-			pane := node.(layout.Pane) or_continue
-			if !pane_content_can_join(pane.content, destination, transfer.replacing) {return false}
+		tree := &source.tabs[index].tree
+		for _, node in tree.nodes {
+			content, is_pane := layout.pane_content(tree, layout.Node_Id(node))
+			if is_pane && !pane_content_can_join(content, destination, transfer.replacing) {return false}
 		}
 	}
 	count := len(destination.tabs) + len(transfer.tabs)

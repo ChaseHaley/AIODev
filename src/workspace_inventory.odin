@@ -104,17 +104,15 @@ workspace_pane_next :: proc(walk: ^Workspace_Pane_Walk) -> (pane: Workspace_Pane
 			walk.node = 0
 		}
 		for walk.node < len(walk.tree.nodes) {
-			node := walk.tree.nodes[walk.node]
 			node_id := layout.Node_Id(walk.node)
 			walk.node += 1
-			candidate, is_pane := node.(layout.Pane)
-			if !is_pane ||
-			   !pane_scope_includes(walk.scope, candidate.content.kind) {continue}
+			content, is_pane := layout.pane_content(walk.tree, node_id)
+			if !is_pane || !pane_scope_includes(walk.scope, content.kind) {continue}
 			return Workspace_Pane{
 				tab = walk.tab,
 				node = node_id,
-				content = candidate.content,
-				session = workspace_session_for_content(walk.app, candidate.content),
+				content = content,
+				session = workspace_session_for_content(walk.app, content),
 			}, true
 		}
 		if walk.workspace == nil {return {}, false}
@@ -138,9 +136,7 @@ workspace_pane_counts :: proc(workspace: ^Workspace) -> Workspace_Pane_Counts {
 // Every pane in one tab, including the panes that own no session.
 @(require_results)
 tab_pane_count :: proc(tab: ^Tab) -> int {
-	count := 0
-	for node in tab.tree.nodes {if _, ok := node.(layout.Pane); ok {count += 1}}
-	return count
+	return layout.pane_count(&tab.tree)
 }
 
 // The first Terminal pane carrying `session`, with the tab and node identity mutation needs.
@@ -166,15 +162,13 @@ workspace_pane_at :: proc(
 	node: layout.Node_Id,
 ) -> (Workspace_Pane, bool) {
 	if workspace == nil || tab < 0 || tab >= len(workspace.tabs) {return {}, false}
-	tree := &workspace.tabs[tab].tree
-	if int(node) >= len(tree.nodes) {return {}, false}
-	pane, ok := tree.nodes[node].(layout.Pane)
+	content, ok := layout.pane_content(&workspace.tabs[tab].tree, node)
 	if !ok {return {}, false}
 	return Workspace_Pane{
 		tab = tab,
 		node = node,
-		content = pane.content,
-		session = workspace_session_for_content(app, pane.content),
+		content = content,
+		session = workspace_session_for_content(app, content),
 	}, true
 }
 
@@ -214,9 +208,7 @@ workspace_content_search :: proc(workspace: ^Workspace, content: layout.Content,
 	if workspace == nil {return false}
 	for tab in workspace.tabs {
 		if tab == excluded {continue}
-		for node in tab.tree.nodes {
-			if pane, ok := node.(layout.Pane); ok && pane.content == content {return true}
-		}
+		if layout.find_content(&tab.tree, content) != layout.INVALID_NODE {return true}
 	}
 	return false
 }

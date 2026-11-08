@@ -28,6 +28,8 @@ when app.AIO_CONTROL {
 		state.settings.status.panel_width = 192
 		for scale in ([?]f32{1, 1.1, 1.5, 2}) {
 			w.scale = scale
+			// What relayout would cache for this scale and the header setting.
+			w.header_height = app.pane_header_row_height(&state, scale)
 			w.metrics = term_view.Metrics{cell_width = 9.2 * scale, cell_height = 20 * scale}
 			for horizontal in ([?]bool{false, true}) {
 				w.tabs_horizontal = horizontal
@@ -51,7 +53,7 @@ when app.AIO_CONTROL {
 								w.width, w.height = width, height
 								app.rail_adaptive_update(&w)
 								box := app.pane_box(w.metrics, app.window_content_area(&state, &w),
-									app.pane_insets(&state, scale, nil))
+									app.pane_insets(&state, &w, nil))
 								testing.expect_value(t, box.columns, u16(columns))
 								testing.expect_value(t, box.rows, u16(24))
 							}

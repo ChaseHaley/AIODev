@@ -152,6 +152,8 @@ Pane_Drop :: struct {
 	target:    layout.Node_Id,
 	direction: layout.Direction,
 	fit:       Drop_Fit,
+	// A New_Tab drop of the source's root in its own workspace only reorders that tab.
+	reorders_tab: bool,
 }
 
 // Tabs in the order their own strip or rail shows as they move.

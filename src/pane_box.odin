@@ -27,16 +27,20 @@ pane_header_height :: proc(scale: f32, show_headers: bool) -> f32 {
 	return math.round(ui.HEADER_HEIGHT * scale)
 }
 
+// The header row height tiled panes get under the settings; relayout caches it in w.header_height, which
+// every later question about a pane's header reads.
+pane_header_row_height :: proc(app: ^App, scale: f32) -> f32 {
+	return pane_header_height(scale, app.settings.pane.show_headers)
+}
+
+// A shown pane's padding and header; a pane not yet placed is taken as tiled.
 pane_insets :: proc(
 	app: ^App,
-	scale: f32,
+	w: ^Window,
 	entry: ^Session_Entry,
-	floating := false,
+	pane: layout.Pane_Rect = {},
 ) -> Pane_Insets {
-	return {
-		padding = pane_padding(app, scale, entry),
-		header = pane_header_height(scale, floating || app.settings.pane.show_headers),
-	}
+	return {padding = pane_padding(app, w.scale, entry), header = pane_header_of(w, pane)}
 }
 
 // The header height of a pane the window shows: a header row's, or none under an overlay.

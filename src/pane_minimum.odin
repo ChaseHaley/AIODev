@@ -27,7 +27,7 @@ pane_minimum_allows :: proc(
 		}
 		if unchanged {continue}
 		entry := workspace_session_for_content(app, pane.content)
-		box := pane_box(w.metrics, pane.rect, pane_insets(app, w.scale, entry, pane.floating))
+		box := pane_box(w.metrics, pane.rect, pane_insets(app, w, entry, pane))
 		if int(box.columns) < minimum.minimum_columns || int(box.rows) < minimum.minimum_rows {
 			if notify_failure {
 				notify(

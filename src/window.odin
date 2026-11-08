@@ -413,7 +413,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	}
 	pane_header_cancel(w)
 	for &view in w.views {view.header_controls = {}}
-	w.header_height = pane_insets(app, w.scale, nil).header
+	w.header_height = pane_header_row_height(app, w.scale)
 	layout.place_shown(window_tree(w), window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
 	window_dividers(app, w)
 	window_views_prune(w)
@@ -470,7 +470,7 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	box := pane_box(
 		w.metrics,
 		pane.rect,
-		pane_insets(app, w.scale, entry, pane.floating),
+		pane_insets(app, w, entry, pane),
 	)
 	g := term.Geometry {
 		columns = box.columns,
@@ -534,13 +534,8 @@ pane_view_destroy :: proc(pane: ^Pane_View) {
 
 // The session shown in the focused pane, which receives keyboard input.
 focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
-	tree := window_tree(w)
-	if tree == nil || tree.focus == layout.INVALID_NODE {return nil}
-	pane, is_pane := tree.nodes[tree.focus].(layout.Pane)
-	if !is_pane {
-		return nil
-	}
-	return workspace_session_for_content(app, pane.content)
+	content, is_pane := window_focused_content(w)
+	return is_pane ? workspace_session_for_content(app, content) : nil
 }
 
 window_render :: proc(app: ^App, w: ^Window) {
@@ -736,7 +731,7 @@ pane_draw :: proc(
 	box := pane_box(
 		w.metrics,
 		pane.rect,
-		pane_insets(app, w.scale, entry, pane.floating),
+		pane_insets(app, w, entry, pane),
 	)
 	frame, result = build_pane(app, w, pane, entry, view, box.origin, style)
 	if result != .Ok {return frame, result}

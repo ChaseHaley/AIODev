@@ -256,6 +256,18 @@ placement :: proc(
 	return sibling, s.axis, before, share, true
 }
 
+// The content shown by the pane at `node`; false when `node` is out of range or not a pane.
+pane_content :: proc(l: ^Layout, node: Node_Id) -> (Content, bool) {
+	if int(node) >= len(l.nodes) {return {}, false}
+	pane, is_pane := l.nodes[node].(Pane)
+	return pane.content, is_pane
+}
+
+// The content of the focused pane; false when nothing holds focus.
+focused_content :: proc(l: ^Layout) -> (Content, bool) {
+	return pane_content(l, l.focus)
+}
+
 // Appends the content of every pane under `node`, first to second.
 contents :: proc(l: ^Layout, node: Node_Id, out: ^[dynamic]Content) {
 	if int(node) >= len(l.nodes) {return}
@@ -625,7 +637,7 @@ Geometry :: struct {
 // Places the panes a window shows: every tiled pane, or only the focused one when `solo`, then the floating
 // groups above them. The window's view decides what shows alone, not the tab's zoom.
 place_shown :: proc(l: ^Layout, g: Geometry, solo: bool, out: ^[dynamic]Pane_Rect) {
-	if solo {compute_focused(l, g.tiled, out)} else {compute(l, g.tiled, g.gap, out, false)}
+	if solo {compute_focused(l, g.tiled, out)} else {compute(l, g.tiled, g.gap, out)}
 	floats_place(l, g.floating, g.gap, g.header, out)
 }
 
@@ -637,10 +649,10 @@ dividers_shown :: proc(l: ^Layout, g: Geometry, solo: bool, out: ^[dynamic]Divid
 }
 
 // Places the tiled panes; floats_place adds the floating ones above them.
-compute :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect, honor_zoom := true) {
+compute :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Pane_Rect) {
 	clear(out)
 	if l.root == INVALID_NODE {return}
-	place(l, l.zoomed && honor_zoom ? focus_tiled(l) : l.root, area, gap, out)
+	place(l, l.root, area, gap, out)
 }
 
 @(private)
@@ -688,7 +700,7 @@ place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane
 
 dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {
 	clear(out)
-	if l.root != INVALID_NODE && !l.zoomed {place_dividers(l, l.root, area, gap, out)}
+	if l.root != INVALID_NODE {place_dividers(l, l.root, area, gap, out)}
 }
 
 @(private)

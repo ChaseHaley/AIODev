@@ -31,16 +31,13 @@ drag_preview :: proc(w: ^app.Window) -> input.Window_Id {
 
 @(test)
 pane_drag_label_names_each_drop :: proc(t: ^testing.T) {
-	source := app.Tab{}
 	destination := app.Tab{}
-	grab := app.Pane_Grab{source = &source, node = 1}
-	testing.expect_value(t, app.pane_drag_label(grab, app.Pane_Drop{tab = &destination}), "Move pane here")
+	testing.expect_value(t, app.pane_drag_label(app.Pane_Drop{tab = &destination}), "Move pane here")
 	edge := app.Pane_Drop{tab = &destination, place = .Edge}
-	testing.expect_value(t, app.pane_drag_label(grab, edge), "Dock to workspace edge")
-	testing.expect_value(t, app.pane_drag_label(grab, app.Pane_Drop{place = .Swap}), "Swap panes")
+	testing.expect_value(t, app.pane_drag_label(edge), "Dock to workspace edge")
+	testing.expect_value(t, app.pane_drag_label(app.Pane_Drop{place = .Swap}), "Swap panes")
 	new_tab := app.Pane_Drop{tab = &destination, place = .New_Tab}
-	testing.expect_value(t, app.pane_drag_label(grab, new_tab), "+ New tab")
-	grab.node = source.tree.root
-	new_tab.tab = &source
-	testing.expect_value(t, app.pane_drag_label(grab, new_tab), "Move tab to end")
+	testing.expect_value(t, app.pane_drag_label(new_tab), "+ New tab")
+	new_tab.reorders_tab = true
+	testing.expect_value(t, app.pane_drag_label(new_tab), "Move tab to end")
 }

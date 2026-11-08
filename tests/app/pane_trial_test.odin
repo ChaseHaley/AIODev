@@ -30,7 +30,7 @@ trial_committed_rect :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window,
 	tree: ^layout.Layout, node: layout.Node_Id) -> layout.Rect {
 	rects := make([dynamic]layout.Pane_Rect)
 	defer delete(rects)
-	layout.compute(tree, app.window_content_area(state, w), app.window_gap(state, w), &rects, false)
+	layout.compute(tree, app.window_content_area(state, w), app.window_gap(state, w), &rects)
 	for pane in rects {if pane.node == node {return pane.rect}}
 	testing.expect(t, false)
 	return {}
