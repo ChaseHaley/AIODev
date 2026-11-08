@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:layout"
 import "aio:localpath"
 import "aio:platform"
@@ -361,21 +362,28 @@ session_workspace_titles_changed :: proc(app: ^App, workspace: ^Workspace, id: u
 	}
 }
 
-session_message :: proc(status: term.Status) -> string {
-	switch status.kind {
-	case .Running:
-		return ""
+// A stopped pane's message names the first key bound to Restart Stopped Pane, or the command itself
+// when no key is.
+session_message :: proc(app: ^App, status: term.Status) -> string {
+	if status.kind == .Running {return ""}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	chord := action_shortcut_text(app, .Restart_Pane, buffer[:])
+	target := chord != "" ? chord : "Restart Stopped Pane"
+	#partial switch status.kind {
 	case .Exited:
 		return fmt.tprintf(
-			"The shell exited with code %d. Press Enter to restart it.",
+			"The shell exited with code %d. %s %s to restart it.",
 			status.exit_code,
+			chord != "" ? "Press" : "Run",
+			target,
 		)
 	case .Failed:
 		reason := status.message != "" ? status.message : "Could not start the shell."
 		return fmt.tprintf(
-			"%s Check shell.command and shell.directory in settings, " +
-			"then press Enter to try again.",
+			"%s Check shell.command and shell.directory in settings, then %s %s to try again.",
 			reason,
+			chord != "" ? "press" : "run",
+			target,
 		)
 	}
 	return ""

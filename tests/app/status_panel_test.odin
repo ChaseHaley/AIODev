@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:input"
 import "aio:platform"
 import "aio:settings"
 import "aio:term"
@@ -249,4 +250,43 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 		index, _ := app.status_panel_hit(s, w, rows, list.x + 40 * w.scale, y)
 		testing.expect_value(t, index, -1)
 	}
+}
+
+@(private = "file")
+inbox_press :: proc(s: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.Modifiers = {}) {
+	e := input.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true}
+	app.handle_event(s, e)
+	e.pressed = false
+	app.handle_event(s, e)
+}
+
+// The open inbox keeps its list keys and passes every other key to the shortcuts and the terminal. It
+// stays open for modifiers and shortcuts that open nothing, and closes for typing and other surfaces.
+@(test)
+activity_inbox_passes_keys_it_does_not_use :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-inbox-keys", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.enabled = true
+	app.run_action(s, w, .Status_Inbox)
+	if !testing.expect(t, app.status_inbox_shown(w)) {return}
+	inbox_press(s, w, .Arrow_Down)
+	inbox_press(s, w, .Control_Left, {.Control})
+	points := s.font_points
+	inbox_press(s, w, .Equal, {.Control})
+	testing.expect(t, app.status_inbox_shown(w))
+	testing.expect(t, s.font_points > points)
+	// WORK-343: the inbox's own shortcut reaches it and closes it.
+	inbox_press(s, w, .I, {.Control, .Shift})
+	testing.expect(t, !app.status_inbox_shown(w))
+	app.run_action(s, w, .Status_Inbox)
+	typed := input.Key_Event{window = w.id, key = .A, pressed = true, text = "a"}
+	app.handle_event(s, typed)
+	testing.expect(t, !app.status_inbox_shown(w) && !app.key_suppressed(w, .A))
+	typed.pressed, typed.text = false, ""
+	app.handle_event(s, typed)
+	app.run_action(s, w, .Status_Inbox)
+	inbox_press(s, w, .F10, {.Shift})
+	testing.expect(t, app.tab_menu_shown(w) && !app.status_inbox_shown(w))
 }

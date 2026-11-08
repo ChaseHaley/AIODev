@@ -583,10 +583,11 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		return
 	}
 	if !e.pressed {return}
-	if key.found {
+	if key.found && action_available(app, w, key.action) {
 		run_action(app, w, key.action)
 		return
 	}
+	status_inbox_typed(w, e)
 	if has_find {
 		find_bar_key(app, w, e, logical)
 		return

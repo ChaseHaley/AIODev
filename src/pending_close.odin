@@ -92,9 +92,6 @@ pending_close_open_workspace :: proc(
 		delete(destination_name)
 		return
 	}
-	// This question also ends the Activity inbox and the overlay rail, which overlay_close_all, and so
-	// every other question, leaves open; no reason for the difference is recorded.
-	window_overlays_cancel(app, w)
 	pc := Pending_Close {
 		target = Close_Workspace{plan = plan, workspace_name = name, destination_name = destination_name},
 	}

@@ -643,7 +643,7 @@ when AIO_CONTROL {
 		program: Program_Adopted
 		if adopted := program_adopted(entry); adopted != nil {program = adopted^}
 		state_value(r, "session.id", entry.id)
-		state_text(r, "session.message", session_message(status))
+		state_text(r, "session.message", session_message(app, status))
 		state_valuef(r, "grid.size", "%dx%d", g.columns, g.rows)
 		state_word(r, "session.status", status.kind)
 		state_valuef(r, "session.exit", "%d", status.exit_code)

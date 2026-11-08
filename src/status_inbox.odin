@@ -490,18 +490,19 @@ status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
 	w.dirty = true
 }
 
-// The open inbox is modal: it takes list navigation and the chord bound to status.next, and every
-// other key is suppressed by the caller.
-status_inbox_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
+// The keys the open inbox keeps: list navigation, Enter, Delete, Escape and the chord bound to
+// status.next. It reports whether it kept the key; every other key, and every release, goes on to the
+// shortcuts and the focused pane.
+status_inbox_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) -> bool {
 	inbox, open := &w.status.inbox.?
-	if !e.pressed || !open {return}
+	if !e.pressed || !open {return false}
 	view := status_inbox_view(app, w, inbox)
 	items := view.items
 	if step := ui.list_step(logical); step != 0 {
 		inbox.selected = clamp(inbox.selected + step, 0, max(0, len(items) - 1))
 		status_inbox_clamp(w, inbox, view.list, len(items))
 		w.dirty = true
-		return
+		return true
 	}
 	selected := inbox.selected >= 0 && inbox.selected < len(items)
 	#partial switch logical.key {
@@ -512,11 +513,18 @@ status_inbox_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 	case .Delete:
 		if selected {status_dismiss_item(app, items[inbox.selected])}
 	case:
-		if action, found := shortcut_action(app, e); found && action == .Status_Next {
-			status_inbox_close(w)
-			status_next_attention(app, w)
-		}
+		action, found := shortcut_action(app, e)
+		if !found || action != .Status_Next {return false}
+		status_inbox_close(w)
+		status_next_attention(app, w)
 	}
+	return true
+}
+
+// A key the focused pane takes as its own, such as typing, ends the open inbox. Modifiers, and keys that
+// ran a shortcut, leave it open; a shortcut that opens another surface closes it there.
+status_inbox_typed :: proc(w: ^Window, e: input.Key_Event) {
+	if e.pressed && !input.is_modifier_key(e.key) {status_inbox_close(w)}
 }
 
 status_overview_cancel :: proc(w: ^Window) {
