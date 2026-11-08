@@ -956,9 +956,7 @@ when AIO_CONTROL {
 			handle_event(app, platform.Dpi_Event{w.id, u32(r.value)})
 		case verify_protocol.Resize:
 			insets := pane_insets(app, w, focused_session(app, w))
-			_, width, height, solved := pane_box_for_grid(
-				app, w^, u16(r.columns), u16(r.rows), insets, activity_dock = true,
-			)
+			_, width, height, solved := pane_box_for_grid(app, w^, u16(r.columns), u16(r.rows), insets)
 			if !solved {return .Invalid_Argument}
 			if platform.window_set_client_size(&app.platform, w.id, width, height) != .None {return .System}
 			return .None

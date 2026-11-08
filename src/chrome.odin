@@ -44,17 +44,11 @@ pane_has_keyboard :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> bool
 }
 
 window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
-	return window_content_area_in(app, w, w.pane_fill, true)
+	return window_content_area_in(app, w, w.pane_fill)
 }
 
-// The content area w has when its pane fill is `fill`, which need not be the fill it has now. Without
-// `activity_dock` it is the area the panes would have if the Activity panel took no width beside them.
-window_content_area_in :: proc(
-	app: ^App,
-	w: ^Window,
-	fill: layout.Pane_Fill,
-	activity_dock: bool,
-) -> layout.Rect {
+// The content area w has when its pane fill is `fill`, which need not be the fill it has now.
+window_content_area_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> layout.Rect {
 	if fill == .Screen {return {0, 0, f32(w.width), f32(w.height)}}
 	r := ui.pane_area(
 		f32(w.width),
@@ -68,7 +62,6 @@ window_content_area_in :: proc(
 		r.x += rail_width
 		r.width -= rail_width
 	}
-	if !activity_dock {return {r.x, r.y, r.width, r.height}}
 	dock_width := status_panel_dock_width_in(app, w, fill)
 	r.width = max(0, r.width - dock_width)
 	if app.settings.status.panel_side == .Left {r.x += dock_width}
@@ -79,7 +72,7 @@ window_content_area_in :: proc(
 // own floating area whatever the fill.
 window_geometry :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> layout.Geometry {
 	return {
-		tiled = window_content_area_in(app, w, fill, true),
+		tiled = window_content_area_in(app, w, fill),
 		floating = floating_area(w),
 		gap = window_gap(app, w),
 		header = floating_header_height(w),
