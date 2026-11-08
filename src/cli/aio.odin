@@ -1,13 +1,10 @@
 package cli
 
 import "aio:cli_protocol"
-import "aio:commands"
 import "aio:instance"
 import "aio:layout"
 import "core:fmt"
-import "core:path/filepath"
 import "core:strconv"
-import "core:strings"
 
 // aio: the AIODev command line. Every command runs inside AIODev through the shared command core;
 // this program only carries the request, prints the reply and exits with its status (D-046).
@@ -58,30 +55,6 @@ print_usage :: proc() {
 		u8(cli_protocol.Status.Impostor),
 		u8(cli_protocol.Status.Interrupted),
 	)
-}
-
-// AIODev has its own working directory, so a relative file must be made absolute here. Returns args
-// unchanged for any other command.
-@(require_results)
-absolute_file_argument :: proc(
-	args: []string,
-	directory: string,
-	allocator := context.allocator,
-) -> []string {
-	if len(args) == 0 || args[0] != commands.OPEN_MARKDOWN_COMMAND {return args}
-	result := make([]string, len(args), allocator)
-	copy(result, args)
-	for i := 1; i < len(result); i += 1 {
-		if commands.option_takes_value(result[i]) {
-			i += 1
-		} else {
-			if !filepath.is_abs(result[i]) && !strings.has_prefix(result[i], "--") {
-				joined, err := filepath.join({directory, result[i]}, allocator)
-				if err == nil {result[i] = joined}
-			}
-		}
-	}
-	return result
 }
 
 Wait :: struct {
@@ -162,10 +135,10 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 	return o, ""
 }
 
-// The pipe request for a command: the caller pane, the reply format, then the command line.
-// `commands` and `help <command>` ask AIODev's catalogue.
+// The pipe request for a command: the caller pane, the reply format, aio's working directory, then
+// the command line. `commands` and `help <command>` ask AIODev's catalogue.
 @(require_results)
-request :: proc(o: Options, caller: string, allocator := context.allocator) -> []string {
+request :: proc(o: Options, caller, directory: string, allocator := context.allocator) -> []string {
 	command := o.args
 	switch o.args[0] {
 	case "commands", "help":
@@ -174,5 +147,8 @@ request :: proc(o: Options, caller: string, allocator := context.allocator) -> [
 		copy(command[1:], o.args[1:])
 	}
 	format := o.json ? cli_protocol.Format.Json : cli_protocol.Format.Text
-	return cli_protocol.request_encode({caller = caller, format = format, command = command}, allocator)
+	return cli_protocol.request_encode(
+		{caller = caller, format = format, directory = directory, command = command},
+		allocator,
+	)
 }

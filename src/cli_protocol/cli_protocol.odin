@@ -4,7 +4,8 @@ import "aio:control"
 
 // The aio command line's wire contract with AIODev, shared by the aio client and the app's CLI pipe
 // server (D-046). A request is a JSON string array: the caller pane id or "", the reply format word,
-// then the command name and its arguments. The reply's status is the CLI exit status.
+// aio's working directory or "", then the command name and its arguments. The reply's status is the
+// CLI exit status.
 
 // Shared invocation outcomes; the values are the CLI exit codes (D-046).
 Status :: enum u8 {
@@ -29,25 +30,28 @@ FORMAT_WORDS := [Format]string {
 	.Json = "json",
 }
 
-// The caller and format words that precede the command.
-HEADER_LENGTH :: 2
+// The caller, format and directory words that precede the command.
+HEADER_LENGTH :: 3
 
 // The command whose reply is AIODev's command catalogue; aio's `commands` and `help` ask it.
 CATALOGUE_COMMAND :: "app.commands"
 
 Request :: struct {
 	// The pane aio runs in, or "" outside AIODev.
-	caller:  string,
-	format:  Format,
+	caller:    string,
+	format:    Format,
+	// aio's working directory, against which AIODev resolves relative path arguments; "" leaves
+	// them as given.
+	directory: string,
 	// The command name and its arguments.
-	command: []string,
+	command:   []string,
 }
 
 // The pipe arguments for a request. The slice is allocated; its strings borrow from the request.
 @(require_results)
 request_encode :: proc(request: Request, allocator := context.allocator) -> []string {
 	args := make([dynamic]string, 0, HEADER_LENGTH + len(request.command), allocator)
-	append(&args, request.caller, FORMAT_WORDS[request.format])
+	append(&args, request.caller, FORMAT_WORDS[request.format], request.directory)
 	append(&args, ..request.command)
 	return args[:]
 }
@@ -58,7 +62,14 @@ request_encode :: proc(request: Request, allocator := context.allocator) -> []st
 request_decode :: proc(args: []string) -> (Request, bool) {
 	if len(args) <= HEADER_LENGTH {return {}, false}
 	for word, format in FORMAT_WORDS {
-		if args[1] == word {return {caller = args[0], format = format, command = args[HEADER_LENGTH:]}, true}
+		if args[1] != word {continue}
+		request := Request {
+			caller    = args[0],
+			format    = format,
+			directory = args[2],
+			command   = args[HEADER_LENGTH:],
+		}
+		return request, true
 	}
 	return {}, false
 }

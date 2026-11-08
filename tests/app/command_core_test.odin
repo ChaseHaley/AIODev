@@ -2,6 +2,7 @@ package app_test
 
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -141,15 +142,24 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	testing.expect_value(t, invoke(&state, first, "pane.read", "--pane", id).status, cli_protocol.Status.Target)
 
 	// The pipe's answers: malformed requests and grammar errors are usage errors.
-	testing.expect_value(t, app.control_cli_answer(&state, {"", "text"}).status, u8(cli_protocol.Status.Usage))
-	testing.expect_value(t, app.control_cli_answer(&state, {"x", "text", "pane.list"}).status,
+	testing.expect_value(t, app.control_cli_answer(&state, {"", "text", ""}).status,
 		u8(cli_protocol.Status.Usage))
-	testing.expect_value(t, app.control_cli_answer(&state, {"", "text", "pane.read", "--lines", "0"}).status,
+	testing.expect_value(t, app.control_cli_answer(&state, {"x", "text", "", "pane.list"}).status,
 		u8(cli_protocol.Status.Usage))
-	reply := app.control_cli_answer(&state, {"", "json", "pane.list"})
+	testing.expect_value(t, app.control_cli_answer(&state, {"", "text", "", "pane.read", "--lines", "0"}).status,
+		u8(cli_protocol.Status.Usage))
+	reply := app.control_cli_answer(&state, {"", "json", "", "pane.list"})
 	testing.expect(t, reply.ok && strings.contains(reply.text, `"panes":[`))
-	created_reply := app.control_cli_answer(&state, {"", "text", "tab.new"})
+	created_reply := app.control_cli_answer(&state, {"", "text", "", "tab.new"})
 	testing.expect(t, created_reply.ok && created_reply.text != "")
-	usage := app.control_cli_answer(&state, {"", "text", "app.commands", "pane.send"})
+	// A relative --cwd names a directory in aio's working directory, not in AIODev's.
+	root, has_root := os.lookup_env("SystemRoot", context.temp_allocator)
+	if testing.expect(t, has_root) {
+		in_root := app.control_cli_answer(&state, {"", "text", root, "tab.new", "--cwd", "System32"})
+		testing.expectf(t, in_root.ok, "tab.new --cwd System32: %s", in_root.text)
+		system, _ := filepath.join({root, "System32"}, context.temp_allocator)
+		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, system)
+	}
+	usage := app.control_cli_answer(&state, {"", "text", "", "app.commands", "pane.send"})
 	testing.expect(t, usage.ok && strings.has_prefix(usage.text, "pane.send [--pane <pane>] <text> [--enter]"))
 }

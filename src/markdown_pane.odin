@@ -400,8 +400,8 @@ control_markdown_open :: proc(
 	target: Pane_Target,
 	invocation: commands.Invocation,
 ) -> Outcome {
-	if .Text not_in invocation.given {return outcome_failure(.Usage, "name a file to open")}
-	file, ok := localpath.prepare_open(invocation.text)
+	if .File not_in invocation.given {return outcome_failure(.Usage, "name a file to open")}
+	file, ok := localpath.prepare_open(invocation.file)
 	if !ok {return outcome_failure(.Failed, "that file is not available; use a local, absolute path")}
 	defer localpath.open_file_destroy(&file)
 	if file.confirm {return outcome_failure(.Failed, "that file type is not shown as Markdown")}

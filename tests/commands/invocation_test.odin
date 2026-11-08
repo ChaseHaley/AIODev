@@ -24,6 +24,7 @@ invocation_registry :: proc(t: ^testing.T) -> commands.Registry {
 			hidden = true,
 		},
 		{id = 4, name = "pane.read", title = "Read Pane", arguments = {.Lines}, hidden = true},
+		{id = 5, name = "pane.open_markdown", title = "Open Markdown", arguments = {.File, .Direction, .Focus}},
 	}
 	for item in items {testing.expect_value(t, commands.register(&registry, item), commands.Error.None)}
 	return registry
@@ -104,6 +105,7 @@ invocation_rejects_bad_command_lines :: proc(t: ^testing.T) {
 		{{"pane.send"}, "<text>"},
 		{{"pane.send", "--enter"}, "<text>"},
 		{{"pane.send", "one", "two"}, "two"},
+		{{"pane.open_markdown", "one.md", "two.md"}, "two.md"},
 		{{"pane.read", "--lines", "0"}, "0"},
 		{{"pane.read", "--lines", "10001"}, "10001"},
 		{{"pane.read", "--lines", "-3"}, "-3"},
@@ -133,6 +135,45 @@ invocation_usage_names_accepted_arguments :: proc(t: ^testing.T) {
 		commands.usage(commands.find(&registry, "pane.read"), context.temp_allocator),
 		"pane.read [--pane <pane>] [--lines <rows>]",
 	)
+	testing.expect_value(
+		t,
+		commands.usage(commands.find(&registry, "pane.open_markdown"), context.temp_allocator),
+		"pane.open_markdown [--pane <pane>] [--direction left|right|up|down] [--focus] [<file>]",
+	)
+}
+
+// Path-ness follows the argument kind: --cwd and a command's file resolve against the sender's
+// directory wherever they appear, while text and other values stay as given.
+@(test)
+invocation_paths_resolve_against_the_senders_directory :: proc(t: ^testing.T) {
+	registry := invocation_registry(t)
+	defer commands.destroy(&registry)
+	open := [?]string{"pane.open_markdown", "--pane", "agent", "--direction", "down", `docs\plan.md`}
+	file, file_error := commands.parse_invocation(&registry, open[:], context.temp_allocator)
+	testing.expect_value(t, file_error, commands.Parse_Error{})
+	testing.expect_value(t, file.given, commands.Arguments{.Direction, .File})
+	testing.expect_value(t, commands.invocation_paths_resolve(&file, `C:\work`, context.temp_allocator), nil)
+	testing.expect_value(t, file.file, `C:\work\docs\plan.md`)
+	testing.expect_value(t, file.pane, "agent")
+	split := [?]string{"pane.split", "--cwd", `..\other`, "--name", "build"}
+	relative, relative_error := commands.parse_invocation(&registry, split[:], context.temp_allocator)
+	testing.expect_value(t, relative_error, commands.Parse_Error{})
+	resolved := commands.invocation_paths_resolve(&relative, `C:\work\repo`, context.temp_allocator)
+	testing.expect_value(t, resolved, nil)
+	testing.expect_value(t, relative.directory, `C:\work\other`)
+	testing.expect_value(t, relative.name, "build")
+	absolute := [?]string{"pane.split", "--cwd", `D:\code`}
+	kept, _ := commands.parse_invocation(&registry, absolute[:], context.temp_allocator)
+	testing.expect_value(t, commands.invocation_paths_resolve(&kept, `C:\work`, context.temp_allocator), nil)
+	testing.expect_value(t, kept.directory, `D:\code`)
+	send := [?]string{"pane.send", `docs\plan.md`}
+	text, _ := commands.parse_invocation(&registry, send[:], context.temp_allocator)
+	testing.expect_value(t, commands.invocation_paths_resolve(&text, `C:\work`, context.temp_allocator), nil)
+	testing.expect_value(t, text.text, `docs\plan.md`)
+	unknown := [?]string{"pane.split", "--cwd", "work"}
+	unresolved, _ := commands.parse_invocation(&registry, unknown[:], context.temp_allocator)
+	testing.expect_value(t, commands.invocation_paths_resolve(&unresolved, "", context.temp_allocator), nil)
+	testing.expect_value(t, unresolved.directory, "work")
 }
 
 @(test)

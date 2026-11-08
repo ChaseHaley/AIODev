@@ -60,10 +60,9 @@ start :: proc() -> cli_protocol.Status {
 	if pipe_error != .None {return .Failed}
 	defer delete(pipe)
 	if o.waiting {return wait(o, pipe, caller)}
-	if directory, directory_error := os.get_working_directory(context.temp_allocator); directory_error == nil {
-		o.args = absolute_file_argument(o.args, directory, context.temp_allocator)
-	}
-	response, status := send(pipe, request(o, caller, context.temp_allocator))
+	// A directory that cannot be read leaves relative paths as given.
+	directory, _ := os.get_working_directory(context.temp_allocator)
+	response, status := send(pipe, request(o, caller, directory, context.temp_allocator))
 	if status == .Unreachable {return status}
 	if response.text != "" {
 		if response.ok || o.json {fmt.println(response.text)} else {fmt.eprintfln("aio: %s", response.text)}
@@ -135,7 +134,7 @@ wait :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 	}
 	start := time.tick_now()
 	for {
-		response, status := send(pipe, request(query, caller, context.temp_allocator))
+		response, status := send(pipe, request(query, caller, "", context.temp_allocator))
 		reply: cli_protocol.Reply_Json
 		parsed := o.wait.exit &&
 			json.unmarshal_string(response.text, &reply, allocator = context.temp_allocator) == nil
