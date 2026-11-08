@@ -39,6 +39,8 @@ Pane_View :: struct {
 	header_controls: [Pane_Header_Button]ui.Control_Motion,
 	header_hover:   Pane_Header_Target,
 	header_armed:   ui.Armed(Pane_Header_Target),
+	// The header buttons the window would refuse for this pane, measured at the last relayout.
+	header_refused: [Pane_Header_Button]Pane_Header_Refusal,
 }
 
 Window :: struct {
@@ -472,6 +474,11 @@ window_panes_placed :: proc(app: ^App, w: ^Window, first: int) {
 		for &view in w.views {if view.content == pane.content {view.valid = false}}
 	}
 	floating_capsules_refresh(app, w)
+	// Any pane's room can change when one moves, so every pane's buttons are measured again.
+	for pane in w.panes {
+		view := pane_view(w, pane.content)
+		if view != nil {view.header_refused = pane_header_refusals(app, w, pane)}
+	}
 	w.dirty = true
 }
 

@@ -72,6 +72,8 @@ Pointer_Surface :: struct {
 	release:      proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool,
 	// The hovered control supplies a short label; the shared tooltip owns timing and drawing.
 	tooltip:      proc(app: ^App, w: ^Window, x, y: f32) -> string,
+	// Optional: what the labelled control would do, drawn under the label while the tooltip shows.
+	tooltip_card: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Card,
 	// Capture loss: the surface drops its hover, armed control and drag, whether or not it holds a button.
 	cancel:       proc(app: ^App, w: ^Window),
 	// The pointer left the window: the surface drops its hover, as a move another surface owns does.
@@ -184,8 +186,8 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Pane_Header      = {
 		claims = header_claims, hover = header_hover, press = pane_header_press, release = header_release,
-		tooltip = header_tooltip, cancel = header_cancel, leave = header_leave, held = pane_drag_held,
-		holds = true, blurs_find = true, in_pane = true,
+		tooltip = header_tooltip, tooltip_card = header_tooltip_card, cancel = header_cancel,
+		leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true, in_pane = true,
 	},
 	.Scrollbar        = {
 		claims = scrollbar_claims, hover = scrollbar_hover, press = scrollbar_press,
