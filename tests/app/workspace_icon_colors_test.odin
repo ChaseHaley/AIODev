@@ -174,7 +174,7 @@ workspace_icon_mutations_schedule_save_without_resetting_picker_scroll :: proc(t
 	defer delete(state.windows)
 	defer delete(workspace.icon.emoji)
 	defer delete(w.workspace_picker.rows)
-	for tint in [?]bool{false, true} {
+	for tint in ([?]bool{false, true}) {
 		state.layout_save = app.Layout_Save_Idle{}
 		w.dirty = false
 		changed := tint ? app.workspace_icon_color_set(&state, &workspace, 1) :
@@ -182,6 +182,6 @@ workspace_icon_mutations_schedule_save_without_resetting_picker_scroll :: proc(t
 		testing.expect(t, changed)
 		_, scheduled := state.layout_save.(app.Layout_Save_Scheduled)
 		testing.expect(t, scheduled && w.dirty)
-		testing.expect_value(t, w.workspace_picker.scroll, f32(42))
+		testing.expect_value(t, w.workspace_picker.scroll, 42)
 	}
 }
