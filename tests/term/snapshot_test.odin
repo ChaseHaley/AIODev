@@ -334,3 +334,19 @@ screen_text_joins_soft_wraps_and_reaches_history :: proc(t: ^testing.T) {
 	blank, _ := term.screen_text(empty, {scrollback = true, unwrap = true, max_rows = 100}, context.temp_allocator)
 	testing.expect_value(t, blank, "")
 }
+
+// ConEmu's OSC 9;9 quotes the path; OSC 7 and unquoted 9;9 reports read as sent.
+@(test)
+reported_directory_drops_conemu_quotes :: proc(t: ^testing.T) {
+	s, err := term.create_headless(replay_geometry(10, 4), 100)
+	if !testing.expect_value(t, err, term.Error.None) {return}
+	defer term.destroy(s)
+	for row in ([?][2]string{
+		{"\x1b]9;9;\"D:\\Code\\central-auth\"\x1b\\", `D:\Code\central-auth`},
+		{"\x1b]9;9;C:\\repo\x07", `C:\repo`},
+		{"\x1b]7;file://host/C:/Some%20Name\x07", "file://host/C:/Some%20Name"},
+	}) {
+		term.replay_write(s, transmute([]u8)row[0])
+		testing.expect_value(t, term.working_directory(s, context.temp_allocator), row[1])
+	}
+}

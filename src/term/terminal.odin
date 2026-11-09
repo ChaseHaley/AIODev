@@ -856,12 +856,16 @@ title :: proc(s: ^Session, allocator := context.allocator) -> string {
 	return strings.clone(string(value.ptr[:value.len]), allocator)
 }
 
+// The shell's last reported directory (OSC 7 or ConEmu's OSC 9;9). ConEmu documents 9;9 with the path
+// in double quotes, and shell integrations send it that way, so one surrounding pair is dropped.
 working_directory :: proc(s: ^Session, allocator := context.allocator) -> string {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
 	value: ghostty.String
 	if ghostty.terminal_get(s.terminal, .Pwd, &value) != .Success || value.len == 0 {return ""}
-	return strings.clone(string(value.ptr[:value.len]), allocator)
+	text := string(value.ptr[:value.len])
+	if len(text) >= 2 && text[0] == '"' && text[len(text) - 1] == '"' {text = text[1:len(text) - 1]}
+	return strings.clone(text, allocator)
 }
 
 take_title_change :: proc(s: ^Session) -> bool {
