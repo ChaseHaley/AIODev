@@ -9,7 +9,9 @@ import "aio:procinfo"
 import "aio:settings"
 import "aio:term"
 import "core:fmt"
+import "core:os"
 import "core:strings"
+import "core:unicode/utf8"
 
 // The control side of the command core (WORK-038): what a CLI request names and gets back. Every
 // interface runs commands through command_execute; a control request passes Control_Request.
@@ -481,6 +483,59 @@ control_profile_check :: proc(app: ^App, profile: string) -> (Outcome, bool) {
 	if profile == "" {return {}, true}
 	if _, found := settings.profile_resolve(&app.settings, profile); found {return {}, true}
 	return outcome_failure(.Failed, "no shell profile has that id"), false
+}
+
+// The largest command file and text file a command line may name. A Windows command line holds
+// 32767 UTF-16 units, so a larger command file could not start its program anyway.
+@(private)
+COMMAND_FILE_LIMIT :: 64 * 1024
+@(private)
+TEXT_FILE_LIMIT :: 1024 * 1024
+
+// Replaces a command file with the program line it holds and a text file with its text (WORK-366).
+// AIODev reads them rather than aio, so no shell's quoting touches what they hold.
+@(private, require_results)
+invocation_files_read :: proc(invocation: ^commands.Invocation) -> Outcome {
+	if .Command_File in invocation.given {
+		path := invocation.command_file
+		data, failure := argument_file_read(path, COMMAND_FILE_LIMIT)
+		if failure.status != .Ok {return failure}
+		line, advice := commands.command_file_parse(string(data), context.temp_allocator)
+		if advice != "" {return outcome_failure(.Usage, fmt.tprintf("%s: %s", path, advice))}
+		invocation.program = line
+	}
+	if .Text_File in invocation.given {
+		path := invocation.text_file
+		data, failure := argument_file_read(path, TEXT_FILE_LIMIT)
+		if failure.status != .Ok {return failure}
+		text := strings.trim_prefix(string(data), "\uFEFF")
+		if !utf8.valid_string(text) {
+			return outcome_failure(.Usage, fmt.tprintf("%s: not UTF-8 text", path))
+		}
+		invocation.text = text
+	}
+	return {}
+}
+
+// A local file's bytes, read into temporary memory when it is a nonempty regular file of at most
+// `limit` bytes.
+@(private, require_results)
+argument_file_read :: proc(path: string, limit: i64) -> ([]u8, Outcome) {
+	if !platform.local_file_within_limit(path, limit) {
+		// The existence check follows the local-path check, so a share is never touched.
+		if platform.open_path_allowed(path) && !os.exists(path) {
+			return nil, outcome_failure(.Failed, fmt.tprintf("%s: no such file", path))
+		}
+		return nil, outcome_failure(
+			.Failed,
+			fmt.tprintf("%s: use a nonempty local file of at most %d KiB", path, limit / 1024),
+		)
+	}
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	if err != nil || i64(len(data)) > limit {
+		return nil, outcome_failure(.Failed, fmt.tprintf("%s: could not read the file", path))
+	}
+	return data, {}
 }
 
 // Names a new pane and reports it, failing when its program could not start; the pane stays open

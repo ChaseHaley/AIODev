@@ -2,13 +2,16 @@ package commands
 
 import "aio:layout"
 import "base:runtime"
+import "core:encoding/json"
 import "core:fmt"
 import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
+import "core:unicode/utf8"
 
 // The arguments a command may take beyond its target pane. A command lists the ones it accepts.
-// Directory and File name paths; the requester's working directory resolves a relative one.
+// Directory, File, Command_File and Text_File name paths; the requester's working directory resolves a
+// relative one.
 Argument :: enum u8 {
 	Direction,
 	Ratio,
@@ -23,6 +26,8 @@ Argument :: enum u8 {
 	Program,
 	Tab_Name,
 	Workspace,
+	Command_File,
+	Text_File,
 }
 Arguments :: bit_set[Argument;u16]
 
@@ -37,7 +42,7 @@ Invocation :: struct {
 	ratio:                                   f32,
 	focus:                                   bool,
 	directory, name, profile, text, program: string,
-	file:                                    string,
+	file, command_file, text_file:           string,
 	enter:                                   bool,
 	// The name a new tab takes, and a workspace id or name for commands that act on a workspace.
 	tab_name, workspace:                     string,
@@ -82,8 +87,15 @@ argument_grammar := [Argument]struct {
 	.Program   = {"", "-- <program> [arguments]"},
 	.Tab_Name  = {"--tab-name", " <name>"},
 	.Workspace = {"--workspace", " <workspace>"},
+	.Command_File = {"--command-file", " <file>"},
+	.Text_File = {"--file", " <file>"},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
+
+// Each argument with the option that reads it from a file instead, so no shell's quoting touches it.
+// A command accepting both takes one or the other.
+@(private, rodata)
+file_alternatives := [?][2]Argument{{.Program, .Command_File}, {.Text, .Text_File}}
 
 // The defaults every interface starts from: a new pane splits right, taking half the space. `focus`
 // says whether a pane a command creates takes focus: interactive commands always focus it, a CLI
@@ -128,6 +140,10 @@ argument_path :: proc(invocation: ^Invocation, argument: Argument) -> ^string {
 		return &invocation.directory
 	case .File:
 		return &invocation.file
+	case .Command_File:
+		return &invocation.command_file
+	case .Text_File:
+		return &invocation.text_file
 	}
 	return nil
 }
@@ -229,13 +245,17 @@ parse_invocation :: proc(
 				return {}, {value, fmt.tprintf("use a row count from 1 to %d", MAX_LINES)}
 			}
 			result.lines = lines
-		case .Directory, .Name, .Profile, .Tab_Name, .Workspace:
+		case .Directory, .Name, .Profile, .Tab_Name, .Workspace, .Command_File, .Text_File:
 			if value == "" {return {}, {option, "supply a nonempty value"}}
 			#partial switch argument {
 			case .Directory:
 				result.directory = value
 			case .Name:
 				result.name = value
+			case .Command_File:
+				result.command_file = value
+			case .Text_File:
+				result.text_file = value
 			case .Profile:
 				result.profile = value
 			case .Tab_Name:
@@ -246,6 +266,14 @@ parse_invocation :: proc(
 		}
 	}
 	missing := command.required - result.given
+	for pair in file_alternatives {
+		if pair[1] not_in result.given {continue}
+		if pair[0] in result.given {
+			file, given := argument_name(pair[1]), argument_name(pair[0])
+			return {}, {file, fmt.tprintf("use either %s or %s, not both", file, given)}
+		}
+		missing -= {pair[0]}
+	}
 	for argument in Argument {
 		if argument in missing {return {}, {argument_name(argument), "supply this required argument"}}
 	}
@@ -260,11 +288,26 @@ usage :: proc(command: ^Command, allocator := context.allocator) -> string {
 	strings.write_string(&b, " [--pane <pane>]")
 	for argument in Argument {
 		if argument not_in command.arguments {continue}
+		alternative: Maybe(Argument)
+		shown_with_alternative := false
+		for pair in file_alternatives {
+			if pair[1] in command.arguments && pair[0] in command.arguments {
+				if pair[0] == argument {alternative = pair[1]}
+				shown_with_alternative ||= pair[1] == argument
+			}
+		}
+		if shown_with_alternative {continue}
 		required := argument in command.required
-		strings.write_string(&b, required ? " " : " [")
+		file, grouped := alternative.?
+		strings.write_string(&b, !required ? " [" : (grouped ? " (" : " "))
 		strings.write_string(&b, argument_grammar[argument].option)
 		strings.write_string(&b, argument_grammar[argument].usage)
-		if !required {strings.write_byte(&b, ']')}
+		if grouped {
+			strings.write_string(&b, " | ")
+			strings.write_string(&b, argument_grammar[file].option)
+			strings.write_string(&b, argument_grammar[file].usage)
+		}
+		if !required {strings.write_byte(&b, ']')} else if grouped {strings.write_byte(&b, ')')}
 	}
 	return strings.to_string(b)
 }
@@ -304,4 +347,37 @@ command_line_join :: proc(
 		strings.write_byte(&b, '"')
 	}
 	return strings.to_string(b), nil
+}
+
+// Reads a command file's text: a UTF-8 JSON array of strings, program first, such as
+// `["claude.exe", "--resume", "the prompt"]`. Returns the program line command_line_join makes of it,
+// allocated with allocator, or advice saying what is wrong with the text.
+@(require_results)
+command_file_parse :: proc(text: string, allocator := context.allocator) -> (line: string, advice: string) {
+	if !utf8.valid_string(text) {return "", "not UTF-8 text"}
+	// The parser frees a half-read array with the context allocator, so it must be the one parsing.
+	context.allocator = allocator
+	parser := json.make_parser_from_string(text, .JSON)
+	value, parse_error := json.parse_value(&parser)
+	defer json.destroy_value(value, allocator)
+	if parse_error == .Out_Of_Memory {return "", "not enough memory to read it"}
+	elements, is_array := value.(json.Array)
+	if parse_error != .None || !is_array || parser.curr_token.kind != .EOF {
+		return "", `not a JSON array of strings, such as ["program.exe", "argument"]`
+	}
+	if len(elements) == 0 {return "", "the array is empty; name a program first"}
+	args, args_error := make([]string, len(elements), allocator)
+	if args_error != nil {return "", "not enough memory to read it"}
+	defer delete(args, allocator)
+	for element, i in elements {
+		arg, is_string := element.(json.String)
+		if !is_string {return "", fmt.tprintf("element %d is not a string", i + 1)}
+		// A command line is a NUL-terminated string, so it cannot carry one.
+		if strings.contains_rune(arg, 0) {return "", fmt.tprintf("element %d holds a NUL character", i + 1)}
+		args[i] = arg
+	}
+	if args[0] == "" {return "", "the program, the first element, is empty"}
+	joined, join_error := command_line_join(args, allocator)
+	if join_error != nil {return "", "not enough memory for the program line"}
+	return joined, ""
 }

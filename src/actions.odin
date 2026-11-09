@@ -270,7 +270,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Quit = {"app.quit", "Quit AIODev", {{.Q, {.Control, .Shift}}}, .Local, {}},
 	.New_Tab = {
 		"tab.new", "New Tab", {{.T, {.Control, .Shift}}}, .Host,
-		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Tab_Name}, control = .Pane},
+		{
+			accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File, .Tab_Name},
+			control = .Pane,
+		},
 	},
 	.Close_Pane = {"pane.close", "Close Pane", nil, .Local, {control = .Pane}},
 	.Next_Tab = {"tab.next", "Next Tab", {{.Tab, {.Control}}}, .Host, {}},
@@ -335,7 +338,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}, .Host, {}},
 	.Split = {
 		"pane.split", "Split Pane", nil, .Local,
-		{accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+		{
+			accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program, .Command_File},
+			control = .Pane,
+		},
 	},
 	.Split_Left = {
 		"pane.split_left", "Split Left", nil, .Local, {param = {family = .Toward, direction = .Left}},
@@ -394,7 +400,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Tab_Settings = {"tab.settings", "Tab Settings", nil, .Host, {}},
 	.New_Workspace = {
 		"workspace.new", "New Workspace", nil, .Host,
-		{accepted = {.Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
 	},
 	.Change_Workspace = {"workspace.change", "Change Workspace…", nil, .Host, {accepted = {.Workspace}}},
 	.Next_Workspace = {"workspace.next", "Next Workspace", nil, .Host, {}},
@@ -531,7 +537,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Pane_Send = {
 		"pane.send", "Send Text to Pane", nil, .Host,
-		{accepted = {.Text, .Enter}, required = {.Text}, hidden = true, control = .Pane},
+		{accepted = {.Text, .Enter, .Text_File}, required = {.Text}, hidden = true, control = .Pane},
 	},
 	.Pane_Focus = {"pane.focus", "Focus Pane", nil, .Host, {hidden = true, control = .Pane}},
 	.App_Commands = {
@@ -545,7 +551,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Show_Documents = {"pane.documents", "Show Documents", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}, .Host,
-		{accepted = {.Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
 	},
 	.Float_Pane = {"pane.float", "Float or Dock Pane", {{.Enter, {.Control, .Alt}}}, .Refuse, {}},
 	.Minimize_Floating = {
@@ -683,6 +689,7 @@ action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
 command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.Invocation) -> Outcome {
 	@(static, rodata)
 	descriptors := ACTIONS
+	invocation := invocation
 	action := Action(invocation.id)
 	w: ^Window
 	tab: Maybe(int)
@@ -718,6 +725,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		case .Unnamed:
 		}
 	}
+	if failure := invocation_files_read(&invocation); failure.status != .Ok {return failure}
 	param := descriptors[action].spec.param
 	entry: ^Session_Entry
 	tab_index := -1

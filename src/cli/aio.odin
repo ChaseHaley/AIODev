@@ -33,10 +33,13 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] 
             Each prints the new pane's id, starts in aio's working directory unless --cwd
             names another, and leaves focus where it is unless --focus.
             tab.new --name names the pane; workspace.new --name names the workspace.
+            --command-file <file> takes the program and arguments from a JSON array of
+            strings instead, so no shell quotes them.
         aio tab.rename <name>             names the pane's tab
         aio workspace.rename [--workspace <workspace>] <name>
             Without a name, both open their dialog.
         aio pane.send [--enter] <text>    types text into the pane, then presses Enter
+        aio pane.send --file <file>       types a UTF-8 file's text exactly
         aio pane.read [--lines <rows>]    prints the pane's visible text
         aio pane.list                     one line per pane; --json for details
         aio pane.close
