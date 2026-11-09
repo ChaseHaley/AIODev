@@ -14,6 +14,9 @@ Launch :: struct {
 	flags:     []string,
 	// omp's --profile, which says where omp keeps the pane's sessions; borrowed from the arguments.
 	profile:   string,
+	// The session the launch named, such as claude --resume <id> or codex resume <id>, which is the
+	// pane's session unless it moved on since; borrowed from the arguments.
+	session:   string,
 }
 
 @(private)
@@ -276,19 +279,24 @@ launch_parse :: proc(harness: Harness, arguments: []string, allocator := context
 	kept := make([dynamic]string, 0, len(arguments), allocator)
 	exact := true
 	positionals := 0
-	// Codex's resume and fork take a session before the prompt; both are dropped.
-	session_command := false
+	// Codex's resume and fork take a session before the prompt; both are dropped, and resume's session
+	// is the one the launch continues.
+	codex_command := ""
 	for i := 0; i < len(arguments); i += 1 {
 		argument := arguments[i]
 		if argument == "--" {break}
 		if len(argument) < 2 || argument[0] != '-' {
-			if positionals == 0 && harness == .Codex && name_listed(codex_session_commands[:], argument) {
-				session_command = true
+			if positionals == 0 && harness == .Codex && codex_command == "" &&
+			   name_listed(codex_session_commands[:], argument) {
+				codex_command = argument
 				continue
 			}
-			if positionals == 0 && !session_command && name_listed(commands, argument) {
+			if positionals == 0 && codex_command == "" && name_listed(commands, argument) {
 				launch.resumable = false
 				break
+			}
+			if positionals == 0 && codex_command == "resume" && session_id_valid(argument) {
+				launch.session = argument
 			}
 			positionals += 1
 			continue
@@ -321,6 +329,10 @@ launch_parse :: proc(harness: Harness, arguments: []string, allocator := context
 			if !attached && i + 1 < len(arguments) && !option_like(arguments[i + 1]) {i += 1}
 		}
 		if !launch.resumable {break}
+		if harness != .Codex && (name == "-r" || name == "--resume" || name == "--session-id") {
+			named := attached ? value : (i > start ? arguments[i] : "")
+			if session_id_valid(named) {launch.session = named}
+		}
 		#partial switch option.kind {
 		case .Keep, .Keep_Value, .Keep_Values, .Keep_Optional:
 			append(&kept, ..arguments[start:i + 1])
@@ -337,6 +349,11 @@ launch_parse :: proc(harness: Harness, arguments: []string, allocator := context
 		launch.flags = kept[:]
 	} else {
 		delete(kept)
+		// omp keeps a profile's sessions apart, so even a resume by session alone needs the profile.
+		if harness == .Omp && launch.profile != "" && token_safe(launch.profile) {
+			launch.flags = make([]string, 2, allocator)
+			launch.flags[0], launch.flags[1] = "--profile", launch.profile
+		}
 	}
 	return launch
 }

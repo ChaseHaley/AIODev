@@ -43,7 +43,7 @@ agent_session_record :: proc(args: []string) -> cli_protocol.Status {
 		return .Failed
 	}
 	ancestors := hook_ancestors(processes, u32(os.get_pid()))
-	if agent.ancestry_nested(ancestors, harness) {return .Ok}
+	if agent.ancestry_nested(ancestors) {return .Ok}
 	ids := make([]u32, len(ancestors), context.temp_allocator)
 	for ancestor, i in ancestors {ids[i] = ancestor.id}
 	names := agent.HARNESS_NAMES
@@ -53,8 +53,8 @@ agent_session_record :: proc(args: []string) -> cli_protocol.Status {
 	return .Ok
 }
 
-// The processes above `self` up to the AIODev that runs the pane, nearest first, by executable stem;
-// an agent that started AIODev itself is not the hook's.
+// The processes above `self` up to the AIODev that runs the pane, nearest first, by executable stem, a
+// launcher such as node by the script it runs; an agent that started AIODev itself is not the hook's.
 @(private)
 hook_ancestors :: proc(processes: []procinfo.Process_Info, self: u32) -> []agent.Ancestor {
 	parents := make(map[u32]int, len(processes), context.temp_allocator)
@@ -69,6 +69,14 @@ hook_ancestors :: proc(processes: []procinfo.Process_Info, self: u32) -> []agent
 		stem := procinfo.executable_stem(processes[index].executable)
 		if len(stem) >= 6 && strings.equal_fold(stem[:6], "aiodev") {break}
 		append(&ancestors, agent.Ancestor{parent, stem})
+	}
+	if len(ancestors) == 0 {return nil}
+	// Every ancestor descends from the oldest one, the pane's shell, which guards the argument reads.
+	root := ancestors[len(ancestors) - 1].id
+	for &ancestor in ancestors {
+		if !procinfo.is_launcher(ancestor.stem) {continue}
+		arguments, read := procinfo.process_arguments(ancestor.id, root, context.temp_allocator)
+		if script := procinfo.process_script(arguments); read && script != "" {ancestor.stem = script}
 	}
 	return ancestors[:]
 }

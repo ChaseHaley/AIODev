@@ -108,22 +108,25 @@ agent_panes_resume_their_session_on_reopen :: proc(t: ^testing.T) {
 	for name in ([?]string{"claude", "codex", "omp"}) {
 		write_file(t, fmt.tprintf(`%s\%s.exe`, programs, name), string(idle))
 	}
-	// The harnesses' own folders, redirected into the test directory.
+	// The harnesses' own folders, redirected into the test directory, and a PATH holding only the
+	// fixtures and cmd's folder, so a typed resume line never starts a real agent.
+	system := os.get_env("SystemRoot", context.temp_allocator)
 	claude_home := fmt.aprintf(`%s\claude`, directory, allocator = keep)
 	codex_home := fmt.aprintf(`%s\codex`, directory, allocator = keep)
 	omp_home := fmt.aprintf(`%s\omp`, directory, allocator = keep)
-	testing.expect_value(t, os.set_env("CLAUDE_CONFIG_DIR", claude_home), nil)
-	testing.expect_value(t, os.set_env("CODEX_HOME", codex_home), nil)
-	testing.expect_value(t, os.set_env("PI_CODING_AGENT_DIR", omp_home), nil)
-	// Only the fixtures and cmd itself are found by name, so a resumed line never starts a real agent.
-	path := os.get_env("PATH", keep)
-	system := os.get_env("SystemRoot", context.temp_allocator)
-	testing.expect_value(t, os.set_env("PATH", fmt.tprintf(`%s;%s\System32`, programs, system)), nil)
-	defer {
-		os.unset_env("CLAUDE_CONFIG_DIR")
-		os.unset_env("CODEX_HOME")
-		os.unset_env("PI_CODING_AGENT_DIR")
-		_ = os.set_env("PATH", path)
+	redirected := [?][2]string {
+		{"CLAUDE_CONFIG_DIR", claude_home},
+		{"CODEX_HOME", codex_home},
+		{"PI_CODING_AGENT_DIR", omp_home},
+		{"PATH", fmt.aprintf(`%s;%s\System32`, programs, system, allocator = keep)},
+	}
+	previous: [len(redirected)]Maybe(string)
+	for pair, i in redirected {
+		if value, found := os.lookup_env(pair[0], keep); found {previous[i] = value}
+		testing.expect_value(t, os.set_env(pair[0], pair[1]), nil)
+	}
+	defer for pair, i in redirected {
+		if value, found := previous[i].?; found {_ = os.set_env(pair[0], value)} else {os.unset_env(pair[0])}
 	}
 	settings := "shell.command = cmd.exe /d\ntabs.program_icons = false\ntab.confirm_close = false\ncursor.blink = false\n"
 	write_file(t, fmt.tprintf("%s/settings.ini", directory), settings)

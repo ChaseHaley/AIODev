@@ -20,7 +20,7 @@ harnesses_are_named_by_canonical_program_name :: proc(t: ^testing.T) {
 session_ids_are_plain_tokens :: proc(t: ^testing.T) {
 	testing.expect(t, agent.session_id_valid("81b3816b-4fce-4b04-b3bf-9f40b8d2172e"))
 	testing.expect(t, agent.session_id_valid("01a1bd8b_d33b"))
-	for id in ([?]string{"", "a b", "a;b", "$x", "a\"b", strings.repeat("a", 129, context.temp_allocator)}) {
+	for id in ([?]string{"", "a b", "a;b", "$x", "a\"b", "--dangerously-skip-permissions", strings.repeat("a", 129, context.temp_allocator)}) {
 		testing.expectf(t, !agent.session_id_valid(id), "%q should be refused", id)
 	}
 }
@@ -61,6 +61,32 @@ launches_keep_their_options_and_drop_prompts_and_session_choices :: proc(t: ^tes
 		launch := agent.launch_parse(c.harness, c.arguments, context.temp_allocator)
 		testing.expectf(t, launch.resumable == c.resumable, "%v: resumable %v", c.arguments, launch.resumable)
 		testing.expectf(t, slice.equal(launch.flags, c.flags), "%v: kept %v, want %v", c.arguments, launch.flags, c.flags)
+	}
+}
+
+// The session a launch named carries over when nothing newer names one.
+@(test)
+launches_remember_the_session_they_named :: proc(t: ^testing.T) {
+	cases := [?]struct {
+		harness:   agent.Harness,
+		arguments: []string,
+		session:   string,
+	} {
+		{.Claude, {"--model", "opus", "--resume", "81b3"}, "81b3"},
+		{.Claude, {"-r", "81b3"}, "81b3"},
+		{.Claude, {"--resume=81b3"}, "81b3"},
+		{.Claude, {"--session-id", "c1a0", "hello"}, "c1a0"},
+		{.Claude, {"--resume"}, ""},
+		{.Codex, {"resume", "01a1", "--search"}, "01a1"},
+		{.Codex, {"-m", "gpt-5", "resume", "01a1"}, "01a1"},
+		{.Codex, {"fork", "01a1"}, ""},
+		{.Codex, {"resume", "--last"}, ""},
+		{.Omp, {"--resume", "01a1bd8b"}, "01a1bd8b"},
+		{.Omp, {"-c"}, ""},
+	}
+	for c in cases {
+		launch := agent.launch_parse(c.harness, c.arguments, context.temp_allocator)
+		testing.expectf(t, launch.session == c.session, "%v: session %q, want %q", c.arguments, launch.session, c.session)
 	}
 }
 
@@ -105,6 +131,7 @@ unclassified_or_unsafe_arguments_fall_back_to_the_session_alone :: proc(t: ^test
 		{.Codex, {"--full-auto"}},
 		{.Codex, {"-c", `model="o3"`}},
 		{.Omp, {"--verbose=yes"}},
+		{.Claude, {"--add-dir", "C:\\Users\\Zoë"}},
 	}
 	for c in cases {
 		launch := agent.launch_parse(c.harness, c.arguments, context.temp_allocator)
@@ -114,10 +141,10 @@ unclassified_or_unsafe_arguments_fall_back_to_the_session_alone :: proc(t: ^test
 }
 
 @(test)
-omp_profile_is_read_even_when_only_the_session_is_kept :: proc(t: ^testing.T) {
+omp_keeps_its_profile_even_when_only_the_session_is_kept :: proc(t: ^testing.T) {
 	launch := agent.launch_parse(.Omp, {"--profile", "work", "--odd"}, context.temp_allocator)
 	testing.expect_value(t, launch.profile, "work")
-	testing.expect(t, launch.flags == nil)
+	testing.expect(t, slice.equal(launch.flags, []string{"--profile", "work"}))
 	launch = agent.launch_parse(.Omp, {"--profile=home"}, context.temp_allocator)
 	testing.expect_value(t, launch.profile, "home")
 }
@@ -134,6 +161,13 @@ resume_lines_follow_each_harness :: proc(t: ^testing.T) {
 		agent.resume_line(claude, "81b3", context.temp_allocator),
 		`claude --dangerously-skip-permissions --add-dir "C:\My Work" --tools "Bash,Edit" --resume 81b3`,
 	)
+	// bash reads an unquoted backslash as an escape, so paths are always quoted.
+	paths := agent.Launch {
+		harness   = .Claude,
+		resumable = true,
+		flags     = {"--add-dir", `C:\work`},
+	}
+	testing.expect_value(t, agent.resume_line(paths, "81b3", context.temp_allocator), `claude --add-dir "C:\work" --resume 81b3`)
 	codex := agent.Launch {
 		harness   = .Codex,
 		resumable = true,
@@ -145,6 +179,15 @@ resume_lines_follow_each_harness :: proc(t: ^testing.T) {
 		resumable = true,
 	}
 	testing.expect_value(t, agent.resume_line(omp, "01a1", context.temp_allocator), "omp --resume 01a1")
+	// A line that would pass the saved-line limit keeps only the session.
+	long := agent.Launch {
+		harness   = .Claude,
+		resumable = true,
+		flags     = {"--append-system-prompt", strings.repeat("a", agent.RESUME_LINE_LIMIT, context.temp_allocator)},
+	}
+	line := agent.resume_line(long, "81b3", context.temp_allocator)
+	testing.expect_value(t, line, "claude --resume 81b3")
+	testing.expect(t, agent.resume_line_valid(line))
 }
 
 @(test)
@@ -210,15 +253,20 @@ records_round_trip_and_count_only_for_their_agent :: proc(t: ^testing.T) {
 @(test)
 nested_agents_are_told_from_launcher_chains :: proc(t: ^testing.T) {
 	// The hook's own shell, then the agent and what launched it, then the pane's shell.
-	direct := []agent.Ancestor{{1, "bash"}, {2, "bash"}, {3, "claude"}, {4, "pwsh"}, {5, "aiodev"}}
-	testing.expect(t, !agent.ancestry_nested(direct, .Claude))
+	direct := []agent.Ancestor{{1, "bash"}, {2, "bash"}, {3, "claude"}, {4, "pwsh"}}
+	testing.expect(t, !agent.ancestry_nested(direct))
 	launcher := []agent.Ancestor{{1, "pwsh"}, {2, "codex-x86_64-pc-windows-msvc"}, {3, "codex"}, {4, "pwsh"}}
-	testing.expect(t, !agent.ancestry_nested(launcher, .Codex))
+	testing.expect(t, !agent.ancestry_nested(launcher))
 	nested := []agent.Ancestor{{1, "bash"}, {2, "claude"}, {3, "bash"}, {4, "claude"}, {5, "pwsh"}}
-	testing.expect(t, agent.ancestry_nested(nested, .Claude))
-	other := []agent.Ancestor{{1, "bash"}, {2, "claude"}, {3, "bash"}, {4, "omp"}, {5, "pwsh"}}
-	testing.expect(t, !agent.ancestry_nested(other, .Claude))
-	testing.expect(t, !agent.ancestry_nested([]agent.Ancestor{{1, "codexx"}, {2, "pwsh"}, {3, "codexx"}}, .Codex))
+	testing.expect(t, agent.ancestry_nested(nested))
+	// npm installs run under node, which the hook names by its package.
+	npm := []agent.Ancestor{{1, "bash"}, {2, "claude-code"}, {3, "bash"}, {4, "claude-code"}, {5, "pwsh"}}
+	testing.expect(t, agent.ancestry_nested(npm))
+	// An agent of another harness started this one, such as codex exec from a Claude Code session.
+	other := []agent.Ancestor{{1, "pwsh"}, {2, "codex"}, {3, "bash"}, {4, "claude"}, {5, "pwsh"}}
+	testing.expect(t, agent.ancestry_nested(other))
+	testing.expect(t, !agent.ancestry_nested([]agent.Ancestor{{1, "codexx"}, {2, "pwsh"}, {3, "codexx"}}))
+	testing.expect(t, !agent.ancestry_nested(nil))
 }
 
 @(test)

@@ -7,6 +7,7 @@ import "aio:settings"
 import "aio:term"
 import "core:slice"
 import "core:strings"
+import "core:time"
 
 // Which program each pane runs (WORK-272, WORK-279): named by its executable stem, the script a
 // launcher runs, or the app a WSL or SSH session reports. Split directories, remembered commands
@@ -15,10 +16,6 @@ import "core:strings"
 // A remembered command longer than this is cut; it only reminds the user what ran.
 @(private)
 PROGRAM_COMMAND_LIMIT :: 240
-
-// Launchers run the program named by their arguments rather than being one.
-@(private, rodata)
-program_launchers := [?]string{"node", "bun", "deno", "npx", "pnpx", "bunx", "cmd", "uv", "uvx"}
 
 // Bridges run programs out of Windows' sight, which can only be named by what they report.
 @(private, rodata)
@@ -51,16 +48,19 @@ Program_Seen :: struct {
 
 // The process adopted and its image path; the name icons are looked up by and its bundled artwork;
 // whether it is a WSL or SSH bridge, named by what its programs report; how it was started, as a
-// reopened pane shows it; and, for a coding agent, what resuming it keeps.
+// reopened pane shows it; and, for a coding agent, what resuming it keeps and the Codex session a
+// rollout search found, with when it last searched.
 Program_Adopted :: struct {
-	id:      u32,
-	path:    string,
-	name:    string,
-	art:     program_art.Art,
-	has_art: bool,
-	bridge:  bool,
-	command: string,
-	launch:  agent.Launch,
+	id:               u32,
+	path:             string,
+	name:             string,
+	art:              program_art.Art,
+	has_art:          bool,
+	bridge:           bool,
+	command:          string,
+	launch:           agent.Launch,
+	rollout:          string,
+	rollout_searched: time.Tick,
 }
 
 // The adopted program stands while the last poll saw another, `id`, for the first time.
@@ -152,7 +152,7 @@ program_adopt :: proc(app: ^App, id, root: u32, stem: string) -> (program: Progr
 	path, ok := procinfo.process_image(id, root)
 	name := stem
 	arguments, _ := procinfo.process_arguments(id, root, context.temp_allocator)
-	if program_listed(program_launchers[:], stem) {
+	if procinfo.is_launcher(stem) {
 		if script := procinfo.process_script(arguments); program_known(app, script) {
 			name = script
 			// The launcher's own icon would show Node or cmd rather than the program.
@@ -203,7 +203,7 @@ program_invocation :: proc(arguments: []string, stem: string) -> (name: string, 
 	name = stem
 	tokens := make([dynamic]string, 0, len(arguments), context.temp_allocator)
 	first := 1
-	if program_listed(program_launchers[:], stem) {
+	if procinfo.is_launcher(stem) {
 		if script := procinfo.process_script(arguments); script != "" {
 			// The argument naming the script; anything after the script in it (cmd's quoted
 			// command) is kept.
@@ -281,6 +281,7 @@ program_release :: proc(program: ^Program_Adopted) {
 	delete(program.name)
 	delete(program.command)
 	launch_release(&program.launch)
+	delete(program.rollout)
 }
 
 // Drops the pane's program; reports whether it had one.

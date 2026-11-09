@@ -28,6 +28,10 @@ TERM_SESSION_VARIABLE :: "TERM_SESSION_ID"
 // A Codex program running longer than this is not matched to a rollout by its start time.
 @(private)
 ROLLOUT_SEARCH_DAYS :: 7
+// Layout saves follow every burst of input, so a Codex rollout search that found nothing is repeated
+// no more often than this; one that found the session keeps it for the program's life.
+@(private)
+ROLLOUT_SEARCH_INTERVAL :: 30 * time.Second
 
 // Keys are lowercase hexadecimal, so they are safe in file names and environment values.
 pane_key_valid :: proc(key: string) -> bool {
@@ -84,12 +88,14 @@ agent_record_path :: proc(app: ^App, key: string) -> string {
 	return err == nil ? path : ""
 }
 
-// The agent a pane runs, as resuming it needs: how it was launched, its process and the pane shell's.
+// The agent a pane runs, as resuming it needs: how it was launched, its process and the pane shell's,
+// and polling's record of it, which keeps what the rollout search found; nil without polling.
 @(private)
 Pane_Agent :: struct {
 	launch:  agent.Launch,
 	program: u32,
 	root:    u32,
+	adopted: ^Program_Adopted,
 }
 
 // The command that resumes the agent the pane runs, in temporary memory; empty when resuming is off,
@@ -142,6 +148,7 @@ program_launch :: proc(
 		harness   = parsed.harness,
 		resumable = parsed.resumable,
 		profile   = strings.clone(parsed.profile, allocator),
+		session   = strings.clone(parsed.session, allocator),
 	}
 	if parsed.flags != nil {
 		launch.flags = make([]string, len(parsed.flags), allocator)
@@ -155,6 +162,7 @@ launch_release :: proc(launch: ^agent.Launch) {
 	for flag in launch.flags {delete(flag)}
 	delete(launch.flags)
 	delete(launch.profile)
+	delete(launch.session)
 	launch^ = {}
 }
 
@@ -166,7 +174,7 @@ pane_agent :: proc(app: ^App, entry: ^Session_Entry, processes: []procinfo.Proce
 	if program_polling(app) {
 		adopted := program_adopted(entry)
 		if adopted == nil || adopted.id != program_polled(entry) {return {}}
-		return {launch = adopted.launch, program = adopted.id, root = root}
+		return {launch = adopted.launch, program = adopted.id, root = root, adopted = adopted}
 	}
 	program, _ := pane_running(app, entry, processes)
 	if program == 0 {return {}}
@@ -180,20 +188,26 @@ pane_agent :: proc(app: ^App, entry: ^Session_Entry, processes: []procinfo.Proce
 	return {launch = launch, program = program, root = root}
 }
 
-// The session the pane's agent is in. omp's breadcrumb names it; for Claude Code and Codex the hook's
-// record does, else a source that names exactly one session.
+// The session the pane's agent is in. omp's breadcrumb names it, and for Claude Code and Codex the
+// hook's record; else a source that names exactly one session, or the session the launch named.
 @(private)
 agent_session :: proc(app: ^App, entry: ^Session_Entry, running: Pane_Agent) -> (string, bool) {
-	switch running.launch.harness {
+	launch := running.launch
+	found: bool
+	session: string
+	switch launch.harness {
 	case .Omp:
-		return omp_session(entry.key, running.launch.profile)
-	case .Claude, .Codex:
-		if session, found := hooked_session(app, entry.key, running); found {return session, true}
-		if running.launch.harness == .Claude {return claude_registered_session(running.program)}
-		return codex_rollout_session(entry, running)
+		session, found = omp_session(entry.key, launch.profile)
+	case .Claude:
+		session, found = hooked_session(app, entry.key, running)
+		if !found {session, found = claude_registered_session(running.program)}
+	case .Codex:
+		session, found = hooked_session(app, entry.key, running)
+		if !found && launch.session == "" {session, found = codex_fallback_session(entry, running)}
 	case .None:
 	}
-	return "", false
+	if !found && launch.session != "" {return launch.session, true}
+	return session, found
 }
 
 @(private)
@@ -257,8 +271,26 @@ claude_registered_session :: proc(program: u32) -> (string, bool) {
 	return agent.claude_registry_session(data)
 }
 
+// The Codex session the rollout search names. With polling, the search runs at most once per
+// ROLLOUT_SEARCH_INTERVAL and its answer is remembered on polling's record of the program meanwhile.
+@(private)
+codex_fallback_session :: proc(entry: ^Session_Entry, running: Pane_Agent) -> (string, bool) {
+	adopted := running.adopted
+	if adopted == nil {return codex_rollout_session(entry, running)}
+	now := time.tick_now()
+	searched := adopted.rollout_searched
+	if searched == {} || time.tick_diff(searched, now) >= ROLLOUT_SEARCH_INTERVAL {
+		adopted.rollout_searched = now
+		session, _ := codex_rollout_session(entry, running)
+		delete(adopted.rollout)
+		adopted.rollout = strings.clone(session)
+	}
+	return adopted.rollout, adopted.rollout != ""
+}
+
 // The Codex rollout begun in the program's directory since it started, read only without a hook
-// record. Rollouts are filed by local date, so the days around the start are searched.
+// record. Rollouts are filed by local date, so the days around the start are searched; a file last
+// written before the program started cannot be its rollout and is not opened.
 @(private)
 codex_rollout_session :: proc(entry: ^Session_Entry, running: Pane_Agent) -> (string, bool) {
 	started, known := procinfo.process_started(running.program, running.root)
@@ -274,32 +306,35 @@ codex_rollout_session :: proc(entry: ^Session_Entry, running: Pane_Agent) -> (st
 		home, _ = filepath.join({user, ".codex"}, context.temp_allocator)
 	}
 	rollouts := make([dynamic]agent.Rollout, 0, 16, context.temp_allocator)
+	buffer := make([]u8, agent.RECORD_LIMIT, context.temp_allocator)
 	for day := time.time_add(started, -24 * time.Hour);
 	    time.diff(day, time.time_add(now, 24 * time.Hour)) >= 0;
 	    day = time.time_add(day, 24 * time.Hour) {
 		year, month, date := time.date(day)
+		year_text, month_text := fmt.tprintf("%04d", year), fmt.tprintf("%02d", int(month))
 		folder, _ := filepath.join(
-			{home, "sessions", fmt.tprintf("%04d", year), fmt.tprintf("%02d", int(month)), fmt.tprintf("%02d", date)},
+			{home, "sessions", year_text, month_text, fmt.tprintf("%02d", date)},
 			context.temp_allocator,
 		)
 		files, list_error := os.read_all_directory_by_path(folder, context.temp_allocator)
 		if list_error != nil {continue}
 		for file in files {
 			if !strings.has_prefix(file.name, "rollout-") || !strings.has_suffix(file.name, ".jsonl") {continue}
-			if rollout, ok := rollout_first_line(file.fullpath); ok {append(&rollouts, rollout)}
+			if time.diff(started, file.modification_time) < 0 {continue}
+			if rollout, ok := rollout_first_line(file.fullpath, buffer); ok {append(&rollouts, rollout)}
 		}
 	}
 	return agent.rollout_pick(rollouts[:], directory, started)
 }
 
+// A rollout's first line, read into `buffer`; the parsed strings are copies.
 @(private)
-rollout_first_line :: proc(path: string) -> (agent.Rollout, bool) {
+rollout_first_line :: proc(path: string, buffer: []u8) -> (agent.Rollout, bool) {
 	f, err := os.open(path)
 	if err != nil {return {}, false}
 	defer os.close(f)
-	buffer := make([]u8, agent.RECORD_LIMIT, context.temp_allocator)
 	n, _ := os.read(f, buffer)
-	line := buffer[:n]
+	line := buffer[:max(n, 0)]
 	if newline := strings.index_byte(string(line), '\n'); newline >= 0 {line = line[:newline]}
 	return agent.rollout_parse(line)
 }
@@ -389,6 +424,16 @@ harness_directory :: proc(variable, folder: string) -> string {
 hook_install_file :: proc(directory, file, command: string) -> Hook_Outcome {
 	if directory == "" || !os.is_dir(directory) {return .Absent}
 	path, _ := filepath.join({directory, file}, context.temp_allocator)
+	// A settings file kept as a link elsewhere, as dotfiles setups do, is updated where it lives.
+	if info, err := os.lstat(path, context.temp_allocator); err == nil && info.type == .Symlink {
+		target, link_error := os.read_link(path, context.temp_allocator)
+		if link_error != nil {
+			log.errorf("reading the link %s failed: %v", path, link_error)
+			return .Failed
+		}
+		if !filepath.is_abs(target) {target, _ = filepath.join({directory, target}, context.temp_allocator)}
+		path = target
+	}
 	text: string
 	if os.exists(path) {
 		data, err := os.read_entire_file(path, context.temp_allocator)

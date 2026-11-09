@@ -54,35 +54,39 @@ record_owned :: proc(record: Record, harness: Harness, program: u32) -> bool {
 	return false
 }
 
-// A process as the hook command sees its ancestors.
+// A process as the hook command sees its ancestors: a launcher such as node is named by the script it
+// runs, so an npm install of Claude Code reads as claude-code.
 Ancestor :: struct {
 	id:   u32,
 	stem: string,
 }
 
 // Whether a hook running under `ancestors`, nearest first, belongs to a nested agent: one started by
-// another agent of the same harness, such as `claude -p` run from a Claude Code session, whose
-// session is not the pane's. Directly chained processes of the harness, a launcher and the program it
-// starts, count as one.
-ancestry_nested :: proc(ancestors: []Ancestor, harness: Harness) -> bool {
-	names := HARNESS_NAMES
-	name := names[harness]
-	groups := 0
-	inside := false
+// another agent, such as `claude -p` or `codex exec` run from an agent's shell tool, whose session is
+// not the pane's. Directly chained processes of one harness, a launcher and the program it starts,
+// count as one agent.
+ancestry_nested :: proc(ancestors: []Ancestor) -> bool {
+	agents := 0
+	previous := Harness.None
 	for ancestor in ancestors {
-		is_harness := stem_names(ancestor.stem, name)
-		if is_harness && !inside {groups += 1}
-		inside = is_harness
+		harness := stem_harness(ancestor.stem)
+		if harness != .None && harness != previous {agents += 1}
+		previous = harness
 	}
-	return groups > 1
+	return agents > 1
 }
 
-// Whether an executable stem is the harness `name`, or one of its platform builds such as
-// codex-x86_64-pc-windows-msvc.
+// The harness an executable stem is, counting platform builds such as codex-x86_64-pc-windows-msvc and
+// packages such as claude-code.
 @(private)
-stem_names :: proc(stem, name: string) -> bool {
-	if len(stem) < len(name) || !strings.equal_fold(stem[:len(name)], name) {return false}
-	return len(stem) == len(name) || stem[len(name)] == '-'
+stem_harness :: proc(stem: string) -> Harness {
+	names := HARNESS_NAMES
+	for harness in Harness {
+		name := names[harness]
+		if harness == .None || len(stem) < len(name) || !strings.equal_fold(stem[:len(name)], name) {continue}
+		if len(stem) == len(name) || stem[len(name)] == '-' {return harness}
+	}
+	return .None
 }
 
 // The session omp's breadcrumb for a terminal names: its second line is the session file,
