@@ -1,6 +1,7 @@
 package cli_test
 
 import "core:testing"
+import "core:text/regex"
 import "aio:cli"
 
 @(test)
@@ -55,6 +56,63 @@ wait_needs_one_condition :: proc(t: ^testing.T) {
 	}) {
 		_, failure := cli.parse_options(args, "")
 		testing.expectf(t, failure != "", "%v should fail", args)
+	}
+}
+
+@(test)
+wait_combines_idle_with_one_screen_condition :: proc(t: ^testing.T) {
+	pattern, problem := cli.parse_options({"wait", "--regex", `ready \d+`, "--idle", "250"}, "")
+	testing.expect_value(t, problem, "")
+	testing.expect_value(t, pattern.wait.regex, `ready \d+`)
+	testing.expect_value(t, pattern.wait.idle_ms, 250)
+	idle, idle_problem := cli.parse_options({"wait", "--idle", "1000", "--pane", "agent"}, "")
+	testing.expect_value(t, idle_problem, "")
+	testing.expect(t, idle.wait.text == "" && idle.wait.regex == "" && !idle.wait.exit)
+	text, text_problem := cli.parse_options({"wait", "--text", "done", "--idle", "1"}, "")
+	testing.expect_value(t, text_problem, "")
+	testing.expect_value(t, text.wait.idle_ms, 1)
+	for args in ([][]string{
+		{"wait", "--text", "a", "--regex", "b"},
+		{"wait", "--regex", "b", "--exit"},
+		{"wait", "--exit", "--idle", "100"},
+		{"wait", "--regex", ""},
+		{"wait", "--regex", "a", "--regex", "b"},
+		{"wait", "--idle", "0"},
+		{"wait", "--idle", "-5"},
+		{"wait", "--idle", "soon"},
+		{"wait", "--idle", "5", "--idle", "5"},
+		{"wait", "--idle"},
+	}) {
+		_, failure := cli.parse_options(args, "")
+		testing.expectf(t, failure != "", "%v should fail", args)
+	}
+}
+
+@(test)
+wait_patterns_match_one_line_at_a_time :: proc(t: ^testing.T) {
+	screen := "PS C:\\work> build\nbuilt 12 targets in 3.5s\nPS C:\\work>"
+	compiled, problem := cli.wait_pattern(`built \d+ targets`)
+	if !testing.expect_value(t, problem, "") {return}
+	defer regex.destroy_regex(compiled)
+	testing.expect(t, cli.wait_found({}, compiled, screen))
+	testing.expect(t, !cli.wait_found({}, compiled, "built many targets"))
+	// A line ends the match, so a pattern cannot span a hard line break.
+	spanning, spanning_problem := cli.wait_pattern(`build.built`)
+	if !testing.expect_value(t, spanning_problem, "") {return}
+	defer regex.destroy_regex(spanning)
+	testing.expect(t, !cli.wait_found({}, spanning, screen))
+	anchored, anchored_problem := cli.wait_pattern(`^PS .*>$`)
+	if !testing.expect_value(t, anchored_problem, "") {return}
+	defer regex.destroy_regex(anchored)
+	testing.expect(t, cli.wait_found({}, anchored, screen))
+	testing.expect(t, !cli.wait_found({}, anchored, "PS C:\\work> build"))
+	// Text matches anywhere in the screen; waiting for idleness alone looks for nothing.
+	testing.expect(t, cli.wait_found({text = "work> build\nbuilt"}, nil, screen))
+	testing.expect(t, !cli.wait_found({text = "missing"}, nil, screen))
+	testing.expect(t, cli.wait_found({idle_ms = 100}, nil, ""))
+	for bad in ([]string{`(unclosed`, `a{2`, `[z-a`}) {
+		_, failure := cli.wait_pattern(bad)
+		testing.expectf(t, failure != "", "%q should not compile", bad)
 	}
 }
 

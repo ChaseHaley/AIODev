@@ -518,7 +518,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Pane_Read = {
 		cli_protocol.PANE_READ_COMMAND, "Read Pane Screen", nil, .Host,
-		{accepted = {.Lines}, hidden = true, control = .Pane},
+		{accepted = {.Lines, .Scrollback, .Unwrap}, hidden = true, control = .Pane},
 	},
 	.Pane_Send = {
 		"pane.send", "Send Text to Pane", nil, .Host,
@@ -717,7 +717,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return control_pane_status(app, ctx.(Control_Request), invocation)
 	case .Pane_Read:
 		named := target.?
-		return pane_read(named.pane.session, invocation.lines)
+		return pane_read(named.pane.session, invocation)
 	case .Pane_Send:
 		named := target.?
 		return pane_send(named.pane.session, invocation.text, invocation.enter)

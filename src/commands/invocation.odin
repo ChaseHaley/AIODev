@@ -21,6 +21,8 @@ Argument :: enum u8 {
 	Enter,
 	Lines,
 	Program,
+	Scrollback,
+	Unwrap,
 }
 Arguments :: bit_set[Argument;u16]
 
@@ -38,6 +40,7 @@ Invocation :: struct {
 	file:                                    string,
 	enter:                                   bool,
 	lines:                                   int,
+	scrollback, unwrap:                      bool,
 }
 
 Parse_Error :: struct {
@@ -76,6 +79,8 @@ argument_grammar := [Argument]struct {
 	.Enter     = {"--enter", ""},
 	.Lines     = {"--lines", " <rows>"},
 	.Program   = {"", "-- <program> [arguments]"},
+	.Scrollback = {"--scrollback", ""},
+	.Unwrap    = {"--unwrap", ""},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 
@@ -203,6 +208,10 @@ parse_invocation :: proc(
 		result.given += {argument}
 		if argument == .Focus || argument == .Enter {
 			if argument == .Focus {result.focus = true} else {result.enter = true}
+			continue
+		}
+		if argument == .Scrollback || argument == .Unwrap {
+			if argument == .Scrollback {result.scrollback = true} else {result.unwrap = true}
 			continue
 		}
 		if i + 1 == len(args) {return {}, {option, "supply a value after this option"}}

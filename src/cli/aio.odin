@@ -5,6 +5,8 @@ import "aio:instance"
 import "aio:layout"
 import "core:fmt"
 import "core:strconv"
+import "core:strings"
+import "core:text/regex"
 
 // aio: the AIODev command line. Every command runs inside AIODev through the shared command core;
 // this program only carries the request, prints the reply and exits with its status (D-046).
@@ -14,7 +16,8 @@ import "core:strconv"
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 @(private)
 USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [-- <program> [arguments]]
-       aio wait [--pane <pane>] (--text <text> | --exit) [--timeout <ms>]
+       aio wait [--pane <pane>] [--text <text> | --regex <pattern>] [--idle <ms>] [--timeout <ms>]
+       aio wait [--pane <pane>] --exit [--timeout <ms>]
        aio commands
        aio help [<command>]
 
@@ -29,12 +32,16 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--focus] [-- <program> [argum
         aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
             Both print the new pane's id and leave focus where it is unless --focus.
         aio pane.send [--enter] <text>    types text into the pane, then presses Enter
-        aio pane.read [--lines <rows>]    prints the pane's visible text
+        aio pane.read [--lines <rows>] [--scrollback] [--unwrap]
+            Prints the pane's visible text; --scrollback adds the history above it, --unwrap joins
+            rows the terminal wrapped, and --lines keeps the last lines.
         aio pane.list                     one line per pane; --json for details
         aio pane.close
-Wait    aio wait polls until the pane shows the text or its program exits; the default
-        timeout is %d ms, and 0 waits without limit. --exit prints the exit code, even
-        after the pane closed with its program, or closed when it was closed while running.
+Wait    aio wait polls until the pane shows the text, a line matches the pattern or its program
+        exits; text and patterns match across rows the terminal wrapped. --idle also waits until
+        the screen has not changed for that long. The default timeout is %d ms, and 0 waits
+        without limit. --exit prints the exit code, even after the pane closed with its program,
+        or closed when it was closed while running.
 Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
@@ -58,9 +65,9 @@ print_usage :: proc() {
 }
 
 Wait :: struct {
-	pane, text: string,
-	exit:       bool,
-	timeout_ms: int,
+	pane, text, regex:   string,
+	exit:                bool,
+	idle_ms, timeout_ms: int,
 }
 
 Options :: struct {
@@ -123,16 +130,55 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 		case "--text":
 			if o.wait.text != "" || value == "" {return {}, "use --text once with nonempty text"}
 			o.wait.text = value
+		case "--regex":
+			if o.wait.regex != "" || value == "" {return {}, "use --regex once with a pattern"}
+			o.wait.regex = value
+		case "--idle":
+			idle, ok := strconv.parse_int(value, 10)
+			if o.wait.idle_ms > 0 || !ok || idle < 1 {return {}, "use --idle once with milliseconds above 0"}
+			o.wait.idle_ms = idle
 		case "--timeout":
 			timeout, ok := strconv.parse_int(value, 10)
 			if seen_timeout || !ok || timeout < 0 {return {}, "use --timeout once with milliseconds"}
 			o.wait.timeout_ms, seen_timeout = timeout, true
 		case:
-			return {}, "wait takes --pane, --text, --exit and --timeout"
+			return {}, "wait takes --pane, --text, --regex, --idle, --exit and --timeout"
 		}
 	}
-	if (o.wait.text != "") == o.wait.exit {return {}, "wait for either --text or --exit"}
+	conditions := int(o.wait.text != "") + int(o.wait.regex != "") + int(o.wait.exit)
+	if conditions > 1 {return {}, "wait for one of --text, --regex and --exit"}
+	if o.wait.exit && o.wait.idle_ms > 0 {return {}, "--idle does not combine with --exit"}
+	if conditions == 0 && o.wait.idle_ms == 0 {return {}, "wait for --text, --regex, --idle or --exit"}
 	return o, ""
+}
+
+// Compiles the wait's pattern, or says why it does not compile.
+@(require_results)
+wait_pattern :: proc(
+	pattern: string,
+	allocator := context.allocator,
+) -> (
+	regex.Regular_Expression,
+	string,
+) {
+	compiled, err := regex.create(pattern, {.Unicode, .No_Capture}, allocator)
+	if err != nil {return {}, fmt.tprintf("--regex %q does not compile (%v)", pattern, err)}
+	return compiled, ""
+}
+
+// Whether the pane's text shows what the wait looks for: the text anywhere, or a line the pattern
+// matches. Waiting for --idle alone looks for nothing, so any text will do.
+@(require_results)
+wait_found :: proc(w: Wait, pattern: Maybe(regex.Regular_Expression), text: string) -> bool {
+	if w.text != "" {return strings.contains(text, w.text)}
+	compiled, has_pattern := pattern.?
+	if !has_pattern {return true}
+	lines := text
+	for line in strings.split_lines_iterator(&lines) {
+		_, matched := regex.match_and_allocate_capture(compiled, line, context.temp_allocator)
+		if matched {return true}
+	}
+	return false
 }
 
 // The pipe request for a command: the caller pane, the reply format, aio's working directory, then
