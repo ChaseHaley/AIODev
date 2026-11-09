@@ -16,7 +16,7 @@ expected_view :: proc(view: layout.Pane_View, event: layout.Pane_View_Event) -> 
 	case .Toggle_Screen:
 		if fill == .Screen {return .Split}
 		return layout.pane_view_of(.Screen, zoomed)
-	case .Panes_Changed:
+	case .Panes_Changed, .Tab_Changed:
 		return .Split
 	}
 	return .Split
