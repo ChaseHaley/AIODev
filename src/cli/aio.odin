@@ -27,7 +27,8 @@ Files   aio pane.open_markdown [--direction right|down|left|up] [--focus] <file>
             Shows a Markdown file beside the pane and updates it when the file changes.
 Common  aio tab.new [--cwd <dir>] [--name <name>] [--focus] [-- <program> [arguments]]
         aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
-            Both print the new pane's id and leave focus where it is unless --focus.
+            Both print the new pane's id, start in aio's working directory unless --cwd
+            names another, and leave focus where it is unless --focus.
         aio pane.send [--enter] <text>    types text into the pane, then presses Enter
         aio pane.read [--lines <rows>]    prints the pane's visible text
         aio pane.list                     one line per pane; --json for details

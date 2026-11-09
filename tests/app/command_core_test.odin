@@ -152,6 +152,13 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	testing.expect(t, reply.ok && strings.contains(reply.text, `"panes":[`))
 	created_reply := app.control_cli_answer(&state, {"", "text", "", "tab.new"})
 	testing.expect(t, created_reply.ok && created_reply.text != "")
+	// Without aio's working directory, a new pane starts where the profile's panes do.
+	profile_directory := state.sessions[0].header.launch_directory
+	testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, profile_directory)
+	// A remote working directory is refused as a remote --cwd is; the profile's is used (WORK-127).
+	remote := app.control_cli_answer(&state, {"", "text", `\\server\share`, "tab.new"})
+	testing.expectf(t, remote.ok, "tab.new from a share: %s", remote.text)
+	testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, profile_directory)
 	// A relative --cwd names a directory in aio's working directory, not in AIODev's.
 	root, has_root := os.lookup_env("SystemRoot", context.temp_allocator)
 	if testing.expect(t, has_root) {
@@ -159,6 +166,30 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 		testing.expectf(t, in_root.ok, "tab.new --cwd System32: %s", in_root.text)
 		system, _ := filepath.join({root, "System32"}, context.temp_allocator)
 		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, system)
+
+		// Without --cwd, a pane the request opens starts in aio's working directory (WORK-367).
+		testing.expect(t, !strings.equal_fold(root, profile_directory))
+		from_root := app.control_cli_answer(&state, {"", "text", root, "tab.new"})
+		testing.expectf(t, from_root.ok, "tab.new from %s: %s", root, from_root.text)
+		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, root)
+		split_root := app.control_cli_answer(&state, {"", "text", root, "pane.split", "--pane", from_root.text})
+		testing.expectf(t, split_root.ok, "pane.split from %s: %s", root, split_root.text)
+		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, root)
+		split_system := app.control_cli_answer(
+			&state, {"", "text", root, "pane.split", "--pane", in_root.text, "--cwd", "System32"},
+		)
+		testing.expectf(t, split_system.ok, "pane.split --cwd System32: %s", split_system.text)
+		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, system)
+		// A float otherwise starts in its target's directory; aio's working directory comes first.
+		float_root := app.control_cli_answer(&state, {"", "text", root, "pane.new_floating"})
+		testing.expectf(t, float_root.ok, "pane.new_floating from %s: %s", root, float_root.text)
+		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, root)
+
+		// A key split still starts in its pane's directory, whatever the last request named.
+		key_directory, _ := app.pane_directory(&state, app.focused_session(&state, w))
+		testing.expect(t, key_directory != root)
+		app.run_action(&state, w, .Split)
+		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, key_directory)
 	}
 	usage := app.control_cli_answer(&state, {"", "text", "", "app.commands", "pane.send"})
 	testing.expect(t, usage.ok && strings.has_prefix(usage.text, "pane.send [--pane <pane>] <text> [--enter]"))
