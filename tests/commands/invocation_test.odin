@@ -23,7 +23,13 @@ invocation_registry :: proc(t: ^testing.T) -> commands.Registry {
 			required = {.Text},
 			hidden = true,
 		},
-		{id = 4, name = "pane.read", title = "Read Pane", arguments = {.Lines}, hidden = true},
+		{
+			id = 4,
+			name = "pane.read",
+			title = "Read Pane",
+			arguments = {.Lines, .Scrollback, .Unwrap},
+			hidden = true,
+		},
 		{id = 5, name = "pane.open_markdown", title = "Open Markdown", arguments = {.File, .Direction, .Focus}},
 		{id = 6, name = "workspace.rename", title = "Rename Workspace", arguments = {.Text, .Workspace}},
 		{id = 7, name = "tab.new", title = "New Tab", arguments = {.Focus, .Name, .Program, .Tab_Name}},
@@ -76,6 +82,14 @@ invocation_parses_every_argument :: proc(t: ^testing.T) {
 	testing.expect_value(t, next_error, commands.Parse_Error{})
 	testing.expect_value(t, next.given, commands.Arguments{})
 	testing.expect_value(t, next.pane, "")
+	read := [?]string{"pane.read", "--unwrap", "--lines", "5", "--scrollback"}
+	reading, read_error := commands.parse_invocation(&registry, read[:], context.temp_allocator)
+	testing.expect_value(t, read_error, commands.Parse_Error{})
+	testing.expect(t, reading.scrollback && reading.unwrap)
+	testing.expect_value(t, reading.lines, 5)
+	visible, visible_error := commands.parse_invocation(&registry, {"pane.read"}, context.temp_allocator)
+	testing.expect_value(t, visible_error, commands.Parse_Error{})
+	testing.expect(t, !visible.scrollback && !visible.unwrap)
 }
 
 @(test)
@@ -127,6 +141,9 @@ invocation_rejects_bad_command_lines :: proc(t: ^testing.T) {
 		{{"pane.send", "hello", "--enter", "--file", "prompt.txt"}, "--file"},
 		{{"pane.read", "--command-file", "a.json"}, "--command-file"},
 		{{"tab.next", "--file", "prompt.txt"}, "--file"},
+		{{"pane.read", "--unwrap", "--unwrap"}, "--unwrap"},
+		{{"pane.read", "--scrollback", "--scrollback"}, "--scrollback"},
+		{{"pane.split", "--scrollback"}, "--scrollback"},
 	}
 	for item in cases {
 		_, err := commands.parse_invocation(&registry, item.args, context.temp_allocator)
@@ -216,7 +233,7 @@ invocation_usage_names_accepted_arguments :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		commands.usage(commands.find(&registry, "pane.read"), context.temp_allocator),
-		"pane.read [--pane <pane>] [--lines <rows>]",
+		"pane.read [--pane <pane>] [--lines <rows>] [--scrollback] [--unwrap]",
 	)
 	testing.expect_value(
 		t,
@@ -262,6 +279,33 @@ invocation_parses_tab_names_and_workspace_targets :: proc(t: ^testing.T) {
 	testing.expect_value(t, by_id.workspace, "2")
 	testing.expect_value(t, by_id.pane, "here")
 	testing.expect_value(t, by_id.given, commands.Arguments{.Workspace})
+}
+
+// A new argument cannot reach help without its description, default and example.
+@(test)
+every_argument_has_help :: proc(t: ^testing.T) {
+	plain: commands.Command
+	for argument in commands.Argument {
+		help := commands.argument_help(&plain, argument)
+		testing.expectf(t, help.description != "", "%v has no description", argument)
+		testing.expectf(t, help.default != "", "%v has no default", argument)
+		testing.expectf(t, help.example != "", "%v has no example", argument)
+	}
+}
+
+@(test)
+a_command_note_replaces_only_the_fields_it_gives :: proc(t: ^testing.T) {
+	plain: commands.Command
+	shared := commands.argument_help(&plain, .Text)
+	notes := [?]commands.Argument_Note{{.Text, {description = "the text to type"}}}
+	send := commands.Command {
+		notes = notes[:],
+	}
+	help := commands.argument_help(&send, .Text)
+	testing.expect_value(t, help.description, "the text to type")
+	testing.expect_value(t, help.default, shared.default)
+	testing.expect_value(t, help.example, shared.example)
+	testing.expect_value(t, commands.argument_help(&send, .Enter), commands.argument_help(&plain, .Enter))
 }
 
 // Path-ness follows the argument kind: --cwd, a command's file and the file options resolve against

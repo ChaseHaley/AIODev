@@ -12,6 +12,7 @@ import "core:time"
 import app "../../src"
 import "aio:cli_protocol"
 import "aio:commands"
+import "aio:control"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"
@@ -529,3 +530,65 @@ control_lists_report_programs_geometry_tabs_and_workspaces :: proc(t: ^testing.T
 		testing.expect(t, reply.ok && reply.commands == nil && reply.pane == nil)
 	}
 }
+
+// --unwrap joins the rows a long line wrapped onto and --scrollback reaches lines above the screen;
+// --lines counts from the bottom either way, and a read too large for one reply keeps its last lines.
+@(test)
+pane_read_unwraps_and_reaches_scrollback :: proc(t: ^testing.T) {
+	f: Terminal_Copy_Fixture
+	defer terminal_copy_fixture_destroy(&f)
+	if !terminal_copy_fixture(t, &f) {return}
+	f.window.focused = true
+	LONG_LINE :: "the quick brown fox jumps over the lazy dog"
+	if !pane_read_session(t, &f, 20, LONG_LINE + "\r\nPS>") {return}
+	Case :: struct {
+		args:     []string,
+		expected: string,
+	}
+	cases := [?]Case{
+		{{"pane.read"}, "line 12\nthe quick brown fox\njumps over the lazy\ndog\nPS>"},
+		{{"pane.read", "--unwrap"}, "line 12\n" + LONG_LINE + "\nPS>"},
+		{{"pane.read", "--scrollback", "--lines", "3"}, "jumps over the lazy\ndog\nPS>"},
+		{{"pane.read", "--scrollback", "--unwrap", "--lines", "2"}, LONG_LINE + "\nPS>"},
+	}
+	for item in cases {
+		read := invoke(&f.state, 0, ..item.args)
+		text, _ := read.payload.(app.Outcome_Text)
+		testing.expectf(t, read.status == .Ok && string(text) == item.expected, "%v read %v %q", item.args,
+			read.status, text)
+	}
+	history := string(invoke(&f.state, 0, "pane.read", "--scrollback").payload.(app.Outcome_Text))
+	testing.expectf(t, strings.has_prefix(history, "line 1\nline 2\n"), "scrollback read %q", history)
+	testing.expect(t, strings.has_suffix(history, "line 12\nthe quick brown fox\njumps over the lazy\ndog\nPS>"))
+
+	// 6000 rows of 200 columns outgrow one reply, which keeps the newest whole lines.
+	filler := strings.repeat("x", 190, context.temp_allocator)
+	b := strings.builder_make(context.temp_allocator)
+	for i in 1 ..= 6000 {fmt.sbprintf(&b, "row %05d %s\r\n", i, filler)}
+	strings.write_string(&b, "PS>")
+	if !pane_read_session(t, &f, 200, strings.to_string(b)) {return}
+	large := string(invoke(&f.state, 0, "pane.read", "--scrollback").payload.(app.Outcome_Text))
+	testing.expectf(t, len(large) <= control.MAX_MESSAGE / 4, "a read of %d bytes", len(large))
+	testing.expectf(t, len(large) > control.MAX_MESSAGE / 8, "a read of %d bytes", len(large))
+	testing.expect(t, strings.has_prefix(large, "row "))
+	testing.expect(t, strings.has_suffix(large, fmt.tprintf("row 06000 %s\nPS>", filler)))
+	// The JSON reply escapes the text once more on the pipe, so it must stay within half a message.
+	reply := app.control_cli_answer(&f.state, {"", "json", "", "pane.read", "--scrollback"})
+	testing.expect(t, reply.ok && len(reply.text) <= control.MAX_MESSAGE / 2)
+}
+
+// Replaces the fixture's pane with a five-row headless terminal of `columns` that has printed twelve
+// numbered lines, then `output`.
+@(private = "file", require_results)
+pane_read_session :: proc(t: ^testing.T, f: ^Terminal_Copy_Fixture, columns: u16, output: string) -> bool {
+	term.destroy(f.session)
+	geometry := term.Geometry{columns = columns, rows = 5, cell_width = 8, cell_height = 16,
+		surface_width = u32(columns) * 8, surface_height = 80}
+	session, err := term.create_headless(geometry, commands.MAX_LINES)
+	f.session, f.state.sessions[0].session = session, session
+	if !testing.expect_value(t, err, term.Error.None) {return false}
+	for i in 1 ..= 12 {term.replay_write(session, transmute([]u8)fmt.tprintf("line %d\r\n", i))}
+	term.replay_write(session, transmute([]u8)output)
+	return true
+}
+

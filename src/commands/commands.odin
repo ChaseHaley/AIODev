@@ -27,6 +27,10 @@ Command :: struct {
 	arguments, required: Arguments,
 	// Hidden commands serve the CLI and scripts: they stay out of the palette and shortcut lists.
 	hidden:              bool,
+	// What help says beyond the title, empty when the title says it all; and the command's own help
+	// for arguments whose shared wording does not fit it. Both borrow from the registering caller.
+	summary:             string,
+	notes:               []Argument_Note,
 }
 Error :: enum {
 	None,

@@ -28,8 +28,10 @@ Argument :: enum u8 {
 	Workspace,
 	Command_File,
 	Text_File,
+	Scrollback,
+	Unwrap,
 }
-Arguments :: bit_set[Argument;u16]
+Arguments :: bit_set[Argument;u32]
 
 // One request to run a command. Text fields borrow from the arguments they were parsed from.
 Invocation :: struct {
@@ -47,6 +49,7 @@ Invocation :: struct {
 	// The name a new tab takes, and a workspace id or name for commands that act on a workspace.
 	tab_name, workspace:                     string,
 	lines:                                   int,
+	scrollback, unwrap:                      bool,
 }
 
 Parse_Error :: struct {
@@ -67,30 +70,135 @@ DIRECTION_WORDS :: [layout.Direction]string {
 	.Down  = "down",
 }
 
+// What help says about an argument: what it does, what a command does without it, and one use of it.
+Argument_Help :: struct {
+	description, default, example: string,
+}
+
+// A command's own help for an argument whose shared help does not fit it; empty fields keep the
+// shared wording.
+Argument_Note :: struct {
+	argument: Argument,
+	help:     Argument_Help,
+}
+
 // How each argument is written: the option naming it, empty for the positional text and program, and
-// what usage shows after that option.
+// what usage shows after that option; then its help, worded to hold for every command that takes it.
 @(private, rodata)
 argument_grammar := [Argument]struct {
 	option, usage: string,
+	help:          Argument_Help,
 } {
-	.Direction = {"--direction", " left|right|up|down"},
-	// This range and parse's message spell layout's split share; the assert below holds them together.
-	.Ratio     = {"--ratio", " 0.05-0.95"},
-	.Focus     = {"--focus", ""},
-	.Directory = {"--cwd", " <directory>"},
-	.Name      = {"--name", " <name>"},
-	.Profile   = {"--profile", " <id>"},
-	.Text      = {"", "<text>"},
-	.File      = {"", "<file>"},
-	.Enter     = {"--enter", ""},
-	.Lines     = {"--lines", " <rows>"},
-	.Program   = {"", "-- <program> [arguments]"},
-	.Tab_Name  = {"--tab-name", " <name>"},
-	.Workspace = {"--workspace", " <workspace>"},
-	.Command_File = {"--command-file", " <file>"},
-	.Text_File = {"--file", " <file>"},
+	.Direction = {
+		"--direction", " left|right|up|down",
+		{"the side of the pane the new pane opens on", "right", "--direction down"},
+	},
+	// This range and parse's message spell layout's split share, and help spells the defaults; the
+	// asserts below hold them together.
+	.Ratio     = {
+		"--ratio", " 0.05-0.95",
+		{
+			"the new pane's share of the split pane's width (left, right) or height (up, down)",
+			"0.5 (half)",
+			"--ratio 0.3",
+		},
+	},
+	.Focus     = {"--focus", "", {"moves focus to the new pane", "off (focus stays where it is)", "--focus"}},
+	// Where a new pane starts, unless a command's note says otherwise.
+	.Directory = {
+		"--cwd", " <directory>",
+		{
+			"the directory the new pane starts in (a relative path is from aio's working directory)",
+			"aio's working directory",
+			`--cwd C:\src\app`,
+		},
+	},
+	.Name      = {
+		"--name", " <name>",
+		{
+			"names the new pane, not its tab (--pane then accepts the name)",
+			"none (the pane shows its program's title)",
+			"--name build",
+		},
+	},
+	.Profile   = {
+		"--profile", " <id>",
+		{
+			"the shell profile the new pane runs, by id",
+			"the default profile (shell.default_profile)",
+			"--profile pwsh",
+		},
+	},
+	.Text      = {"", "<text>", {"the command's text", "none", `"hello"`}},
+	.File      = {
+		"", "<file>",
+		{
+			"the file to open (a relative path is from aio's working directory)",
+			"none (required)",
+			"README.md",
+		},
+	},
+	.Enter     = {"--enter", "", {"presses Enter after the text", "off", "--enter"}},
+	.Lines     = {
+		"--lines", " <rows>",
+		{"keeps only the last rows (joined lines with --unwrap), 1 to 10000", "every row read", "--lines 20"},
+	},
+	.Program   = {
+		"", "-- <program> [arguments]",
+		{
+			"runs this program in the new pane instead of the profile's shell (only .exe names resolve: " +
+			"run .cmd and .ps1 through a shell)",
+			"the profile's shell",
+			"-- pwsh -NoLogo",
+		},
+	},
+	.Tab_Name  = {
+		"--tab-name", " <name>",
+		{"names the new tab (--name names its pane)", "none (the tab shows its pane's title)", "--tab-name Agents"},
+	},
+	.Workspace = {
+		"--workspace", " <workspace>",
+		{
+			"the workspace to act on, by id or exact name; digits are always an id",
+			"none (the command opens its dialog)",
+			"--workspace Agents",
+		},
+	},
+	.Command_File = {
+		"--command-file", " <file>",
+		{
+			"reads the program and its arguments from a UTF-8 JSON array of strings, program first, so no " +
+			"shell quotes them; at most 64 KiB, relative to aio's working directory; not with --",
+			"none (the profile's shell)",
+			"--command-file fork.json",
+		},
+	},
+	.Text_File = {
+		"--file", " <file>",
+		{
+			"types a UTF-8 file's text exactly instead of <text>; one leading BOM is dropped, CR acts as " +
+			"Enter; at most 1 MiB, relative to aio's working directory",
+			"none (give <text> or --file)",
+			"--file prompt.txt",
+		},
+	},
+	.Scrollback = {
+		"--scrollback", "",
+		{
+			"adds the history above the screen, up to the last 10000 rows; a read over about 1 MiB keeps " +
+			"its last whole lines",
+			"off (the visible screen only)",
+			"--scrollback --lines 200",
+		},
+	},
+	.Unwrap    = {
+		"--unwrap", "",
+		{"joins rows the terminal soft-wrapped into one line", "off (one line per row)", "--unwrap"},
+	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
+#assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
+#assert(MAX_LINES == 10000)
 
 // Each argument with the option that reads it from a file instead, so no shell's quoting touches it.
 // A command accepting both takes one or the other.
@@ -172,6 +280,25 @@ argument_name :: proc(argument: Argument) -> string {
 	return grammar.option != "" ? grammar.option : grammar.usage
 }
 
+// Writes how usage shows an argument, such as `--ratio 0.05-0.95`.
+argument_write :: proc(b: ^strings.Builder, argument: Argument) {
+	strings.write_string(b, argument_grammar[argument].option)
+	strings.write_string(b, argument_grammar[argument].usage)
+}
+
+// The help for one of the command's arguments: the command's own note over the shared wording.
+@(require_results)
+argument_help :: proc(command: ^Command, argument: Argument) -> Argument_Help {
+	help := argument_grammar[argument].help
+	for note in command.notes {
+		if note.argument != argument {continue}
+		if note.help.description != "" {help.description = note.help.description}
+		if note.help.default != "" {help.default = note.help.default}
+		if note.help.example != "" {help.example = note.help.example}
+	}
+	return help
+}
+
 // Parses `name [options] [text] [-- program arguments]` against the command's accepted arguments.
 // Text fields borrow from args; the program line is allocated with allocator.
 @(require_results)
@@ -225,6 +352,10 @@ parse_invocation :: proc(
 		result.given += {argument}
 		if argument == .Focus || argument == .Enter {
 			if argument == .Focus {result.focus = true} else {result.enter = true}
+			continue
+		}
+		if argument == .Scrollback || argument == .Unwrap {
+			if argument == .Scrollback {result.scrollback = true} else {result.unwrap = true}
 			continue
 		}
 		if i + 1 == len(args) {return {}, {option, "supply a value after this option"}}
@@ -300,12 +431,10 @@ usage :: proc(command: ^Command, allocator := context.allocator) -> string {
 		required := argument in command.required
 		file, grouped := alternative.?
 		strings.write_string(&b, !required ? " [" : (grouped ? " (" : " "))
-		strings.write_string(&b, argument_grammar[argument].option)
-		strings.write_string(&b, argument_grammar[argument].usage)
+		argument_write(&b, argument)
 		if grouped {
 			strings.write_string(&b, " | ")
-			strings.write_string(&b, argument_grammar[file].option)
-			strings.write_string(&b, argument_grammar[file].usage)
+			argument_write(&b, file)
 		}
 		if !required {strings.write_byte(&b, ']')} else if grouped {strings.write_byte(&b, ')')}
 	}
