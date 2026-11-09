@@ -53,14 +53,14 @@ images_draw :: proc(v: ^View, b: ^Builder, layer: term.Image_Layer) {
 			f32(p.source_width) / image_width,
 			f32(p.source_height) / image_height,
 		}
-		if visible, visible_uv, ok := image_clipped(placed, uv, cells); ok {
+		if visible, visible_uv, ok := quad_clipped(placed, uv, cells); ok {
 			_ = render.push_image(b.list, {rect = visible, uv = visible_uv, key = p.generation})
 		}
 	}
 }
 
 @(private, require_results)
-image_clipped :: proc(placed, uv, bounds: render.Rect) -> (render.Rect, render.Rect, bool) {
+quad_clipped :: proc(placed, uv, bounds: render.Rect) -> (render.Rect, render.Rect, bool) {
 	left, top := max(placed.x, bounds.x), max(placed.y, bounds.y)
 	right := min(placed.x + placed.width, bounds.x + bounds.width)
 	bottom := min(placed.y + placed.height, bounds.y + bounds.height)

@@ -4,6 +4,7 @@ import app "../../src"
 import "aio:cli_protocol"
 import "aio:commands"
 import "aio:input"
+import "aio:settings"
 import "aio:term"
 import "aio:ui"
 import "core:encoding/json"
@@ -46,7 +47,7 @@ command_payloads_select_catalogue_usage_and_empty_panes :: proc(t: ^testing.T) {
 	usage, is_usage := one.payload.(app.Outcome_Usage)
 	if !testing.expect(t, is_usage) {return}
 	reply := app.control_cli_answer(&state, {"", "text", "", cli_protocol.CATALOGUE_COMMAND, "pane.send"})
-	testing.expect_value(t, reply.text, fmt.tprintf("%s\n%s", usage.usage, usage.title))
+	testing.expect(t, strings.has_prefix(reply.text, fmt.tprintf("%s\n%s\n", usage.usage, usage.title)))
 	expected := cli_protocol.Reply_Json {
 		ok = true,
 		commands = []cli_protocol.Command_Report{cli_protocol.Command_Report(usage)},
@@ -55,6 +56,59 @@ command_payloads_select_catalogue_usage_and_empty_panes :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, err, nil) {return}
 	json_reply := app.control_cli_answer(&state, {"", "json", "", cli_protocol.CATALOGUE_COMMAND, "pane.send"})
 	testing.expect_value(t, json_reply.text, string(encoded))
+}
+
+// Help gives --pane and each accepted argument a line saying what it does, its default and an example;
+// --profile names the profiles that can launch, in settings order, and the default one.
+@(test)
+command_help_describes_every_option :: proc(t: ^testing.T) {
+	state := app.App{registry = commands.create()}
+	defer commands.destroy(&state.registry)
+	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return}
+	profiles := &state.settings.profiles
+	profiles.items = make([dynamic]settings.Profile, context.temp_allocator)
+	append(
+		&profiles.items,
+		settings.Profile{id = "pwsh", command = "pwsh.exe"},
+		settings.Profile{id = "empty"},
+		settings.Profile{id = "cmd", command = "cmd.exe"},
+	)
+	profiles.default_id = "cmd"
+	split := commands.find(&state.registry, "pane.split")
+	reply := app.control_cli_answer(&state, {"", "text", "", cli_protocol.CATALOGUE_COMMAND, "pane.split"})
+	if !testing.expect(t, reply.ok) {return}
+	lines, split_error := strings.split_lines(reply.text, context.temp_allocator)
+	if !testing.expect_value(t, split_error, nil) {return}
+	// Usage, title, summary and a blank line come first.
+	options := lines[4:]
+	if !testing.expect_value(t, len(options), 1 + card(split.arguments)) {return}
+	testing.expect(t, strings.has_prefix(options[0], "  --pane <pane> "))
+	for line in options {
+		described := strings.contains(line, "; default: ") && strings.contains(line, "; example: ")
+		testing.expectf(t, described, "%q", line)
+	}
+	i := 1
+	for argument in commands.Argument {
+		if argument not_in split.arguments {continue}
+		form := strings.builder_make(context.temp_allocator)
+		commands.argument_write(&form, argument)
+		prefix := fmt.tprintf("  %s ", strings.to_string(form))
+		testing.expectf(t, strings.has_prefix(options[i], prefix), "%q", options[i])
+		if argument == .Profile {
+			listed := strings.contains(options[i], "by id: cmd, pwsh;") && strings.contains(options[i], "now cmd;")
+			testing.expectf(t, listed, "%q", options[i])
+		}
+		i += 1
+	}
+	send := app.control_cli_answer(&state, {"", "text", "", cli_protocol.CATALOGUE_COMMAND, "pane.send"})
+	testing.expectf(t, strings.contains(send.text, "the text to type; required; example: "), "%q", send.text)
+	json_reply := app.control_cli_answer(&state, {"", "json", "", cli_protocol.CATALOGUE_COMMAND, "pane.split"})
+	document: cli_protocol.Reply_Json
+	parsed := json.unmarshal_string(json_reply.text, &document, allocator = context.temp_allocator)
+	if !testing.expect_value(t, parsed, nil) {return}
+	if !testing.expect_value(t, len(document.commands), 1) {return}
+	testing.expect_value(t, len(document.commands[0].options), 1 + card(split.arguments))
+	testing.expect(t, document.commands[0].summary != "")
 }
 
 @(test)

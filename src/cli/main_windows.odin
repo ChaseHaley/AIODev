@@ -5,11 +5,13 @@ import "aio:control"
 import "aio:instance"
 import "core:encoding/json"
 import "core:fmt"
+import "core:hash"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import w "core:sys/windows"
+import "core:text/regex"
 import "core:time"
 
 @(private)
@@ -43,7 +45,7 @@ start :: proc() -> cli_protocol.Status {
 		return .Usage
 	}
 	defer instance.command_line_destroy(args, context.allocator)
-	if len(args) == 0 || len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
+	if len(args) == 0 || len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		print_usage()
 		return len(args) == 0 ? .Usage : .Ok
 	}
@@ -58,6 +60,11 @@ start :: proc() -> cli_protocol.Status {
 		fmt.eprintfln("aio: %s; use aio help", problem)
 		return .Usage
 	}
+	if len(o.args) == 1 && o.args[0] == "help" {
+		print_usage()
+		return .Ok
+	}
+	if report, local := local_help(o); local {return help_print(report, o.json)}
 	app_id, id_error := instance.app_id({name = o.instance}, context.allocator)
 	if id_error != nil {return .Failed}
 	defer delete(app_id)
@@ -65,9 +72,10 @@ start :: proc() -> cli_protocol.Status {
 	if pipe_error != .None {return .Failed}
 	defer delete(pipe)
 	if o.waiting {return wait(o, pipe, caller)}
+	if o.version {return version(o, pipe, caller)}
 	// A directory that cannot be read leaves relative paths as given.
 	directory, _ := os.get_working_directory(context.temp_allocator)
-	response, status := send(pipe, request(o, caller, directory, context.temp_allocator))
+	response, status := send(pipe, request(o, caller, directory, context.temp_allocator), true)
 	if status == .Unreachable {return status}
 	if response.text != "" {
 		if response.ok || o.json {fmt.println(response.text)} else {fmt.eprintfln("aio: %s", response.text)}
@@ -86,9 +94,51 @@ server_identity :: proc(name: string, allocator := context.allocator) -> (contro
 	return {image = image}, true
 }
 
-// One request on its own connection, so other clients can interleave between a wait's polls.
+// This aio's build, as build_warning compares it. The text is temporary.
 @(private, require_results)
-send :: proc(pipe: string, request: []string) -> (control.Response, cli_protocol.Status) {
+own_build :: proc() -> string {
+	return cli_protocol.build_text(
+		cli_protocol.BUILD_VERSION, cli_protocol.BUILD_ID, cli_protocol.BUILD_KIND, context.temp_allocator,
+	)
+}
+
+// aio's build line, then the running AIODev's. aio prints its own first, so it still shows when
+// AIODev is unreachable; under --json the reply's text holds both lines.
+@(private, require_results)
+version :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
+	own := own_build()
+	line := fmt.tprintf("aio %s", own)
+	if !o.json {fmt.println(line)}
+	response, status := send(pipe, request(o, caller, "", context.temp_allocator), false)
+	if status != .Unreachable && status != .Impostor {
+		if warning := build_warning(own, response.ok ? response.text : "", context.temp_allocator);
+		   warning != "" {fmt.eprintln(warning)}
+	}
+	if o.json {
+		reply := cli_protocol.Reply_Json {
+			ok     = response.ok,
+			status = u8(status),
+			text   = response.ok ? fmt.tprintf("%s\n%s", line, response.text) : line,
+		}
+		if !response.ok {reply.error = response.text}
+		text, err := json.marshal(reply, {}, context.temp_allocator)
+		if err != nil {
+			fmt.eprintln("aio: not enough memory for the reply")
+			return .Failed
+		}
+		fmt.println(string(text))
+	} else if response.ok {
+		fmt.println(response.text)
+	} else if response.text != "" {
+		fmt.eprintfln("aio: %s", response.text)
+	}
+	return status
+}
+
+// One request on its own connection, so other clients can interleave between a wait's polls. With
+// `check_build`, aio first asks AIODev's build on the same connection and warns when it differs.
+@(private, require_results)
+send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Response, cli_protocol.Status) {
 	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, context.temp_allocator)
 	if connect_error != .None {
 		fmt.eprintln(
@@ -112,7 +162,8 @@ send :: proc(pipe: string, request: []string) -> (control.Response, cli_protocol
 	if verify_error != .None {
 		if verify_error == .Impostor {
 			fmt.eprintfln(
-				"aio: the control pipe is served by an unverified process (PID %d); refusing to send.",
+				"aio: the control pipe is served by an unverified process (PID %d); refusing to send. " +
+				"If AIODev runs from another folder, use the aio beside it ($env:AIODEV_CLI in its panes).",
 				client.process_id,
 			)
 			return {}, .Impostor
@@ -123,6 +174,17 @@ send :: proc(pipe: string, request: []string) -> (control.Response, cli_protocol
 		)
 		return {}, .Unreachable
 	}
+	if check_build {
+		version_command := [1]string{cli_protocol.VERSION_COMMAND}
+		query := cli_protocol.request_encode({command = version_command[:]}, context.temp_allocator)
+		reply, reply_error := control.call(&client, query, CALL_TIMEOUT_MS)
+		if reply_error != .None {
+			fmt.eprintfln("aio: lost the connection to AIODev (%v)", reply_error)
+			return {}, .Unreachable
+		}
+		if warning := build_warning(own_build(), reply.ok ? reply.text : "", context.temp_allocator);
+		   warning != "" {fmt.eprintln(warning)}
+	}
 	response, call_error := control.call(&client, request, CALL_TIMEOUT_MS)
 	if call_error != .None {
 		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
@@ -131,22 +193,63 @@ send :: proc(pipe: string, request: []string) -> (control.Response, cli_protocol
 	return response, cli_protocol.response_status(response)
 }
 
-// Polls until the pane shows the text or its program exits, so no request holds the pipe.
+// Prints help aio answers itself, in the shape AIODev's help replies take.
+@(private, require_results)
+help_print :: proc(report: cli_protocol.Command_Report, json_output: bool) -> cli_protocol.Status {
+	if !json_output {
+		b := strings.builder_make(context.temp_allocator)
+		cli_protocol.command_report_write(&b, report)
+		fmt.println(strings.to_string(b))
+		return .Ok
+	}
+	data, err := json.marshal(
+		cli_protocol.Reply_Json{ok = true, commands = {report}},
+		{},
+		context.temp_allocator,
+	)
+	if err != nil {
+		fmt.eprintln("aio: not enough memory for the help")
+		return .Failed
+	}
+	fmt.println(string(data))
+	return .Ok
+}
+
+// Polls until the pane shows the text or a matching line and, with --idle, its screen has stayed the
+// same for that long, or until its program exits. No request holds the pipe.
 @(private, require_results)
 wait :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
+	pattern: Maybe(regex.Regular_Expression)
+	if o.wait.regex != "" {
+		compiled, problem := wait_pattern(o.wait.regex)
+		if problem != "" {
+			fmt.eprintfln("aio: %s; use aio help", problem)
+			return .Usage
+		}
+		pattern = compiled
+	}
+	defer if compiled, ok := pattern.?; ok {regex.destroy_regex(compiled)}
 	if !bool(w.SetConsoleCtrlHandler(on_interrupt, true)) {
 		fmt.eprintln("aio: could not watch for Ctrl+C")
 		return .Failed
 	}
-	command := o.wait.exit ? cli_protocol.PANE_STATUS_COMMAND : cli_protocol.PANE_READ_COMMAND
-	query_args := [3]string{command, "--pane", o.wait.pane}
+	// The screen is read with soft-wrapped rows joined, so text split by a wrap still matches.
+	read_args := [4]string{cli_protocol.PANE_READ_COMMAND, "--unwrap", "--pane", o.wait.pane}
+	status_args := [3]string{cli_protocol.PANE_STATUS_COMMAND, "--pane", o.wait.pane}
+	query_args := o.wait.exit ? status_args[:] : read_args[:]
 	query := Options {
 		json = o.wait.exit,
-		args = query_args[:o.wait.pane == "" ? 1 : 3],
+		args = o.wait.pane == "" ? query_args[:len(query_args) - 2] : query_args,
 	}
 	start := time.tick_now()
-	for {
-		response, status := send(pipe, request(query, caller, "", context.temp_allocator))
+	// The build is checked once, not on every poll.
+	check_build := true
+	// The screen's digest when it last changed, and when that poll saw it.
+	screen: u64
+	changed := start
+	for polls := 0;; polls += 1 {
+		response, status := send(pipe, request(query, caller, "", context.temp_allocator), check_build)
+		check_build = false
 		reply: cli_protocol.Reply_Json
 		parsed := o.wait.exit &&
 			json.unmarshal_string(response.text, &reply, allocator = context.temp_allocator) == nil
@@ -174,9 +277,14 @@ wait :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 				fmt.println(o.json ? response.text : fmt.tprintf("%d", pane.exit_code))
 				return .Ok
 			}
-		} else if strings.contains(response.text, o.wait.text) {
-			if o.json {fmt.println(`{"ok":true,"status":0}`)}
-			return .Ok
+		} else {
+			digest := hash.fnv64a(transmute([]u8)response.text)
+			if polls == 0 || digest != screen {screen, changed = digest, time.tick_now()}
+			quiet := time.tick_since(changed) >= time.Duration(o.wait.idle_ms) * time.Millisecond
+			if quiet && wait_found(o.wait, pattern, response.text) {
+				if o.json {fmt.println(`{"ok":true,"status":0}`)}
+				return .Ok
+			}
 		}
 		if sync.atomic_load(&interrupted) {return .Interrupted}
 		if o.wait.timeout_ms > 0 && time.tick_since(start) >= time.Duration(o.wait.timeout_ms) * time.Millisecond {

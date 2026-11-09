@@ -134,13 +134,20 @@ fixture_destroy :: proc(f: ^Fixture) {
 	}
 }
 
-render_frame :: proc(t: ^testing.T, f: ^Fixture, style: term_view.Style) -> (term_view.Frame, []u8) {
+render_frame :: proc(
+	t: ^testing.T, f: ^Fixture, style: term_view.Style, frame_time := render.Frame_Time{},
+	clip_radius := f32(0),
+) -> (term_view.Frame, []u8) {
 	frame: term_view.Frame
+	g := term.geometry(f.session)
 	for _ in 0 ..< 2 {
 		render.draw_list_reset(&f.list)
-		testing.expect_value(t, render.push_layer(&f.list, {0, 0, 4096, 4096}), render.Error.None)
+		clip := render.Rect{0, 0, f32(g.surface_width), f32(g.surface_height)}
+		testing.expect_value(t, render.push_layer(&f.list, clip, clip_radius), render.Error.None)
 		result: render.Build_Status
-		frame, result = term_view.build(&f.view, f.session, f.fonts, &f.cache, &f.list, {0, 0}, f.metrics, style)
+		frame, result = term_view.build(
+			&f.view, f.session, f.fonts, &f.cache, &f.list, {0, 0}, f.metrics, style, frame_time,
+		)
 		if result == .Ok {
 			break
 		}

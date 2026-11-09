@@ -57,7 +57,7 @@ floating_drag_geometry_clamps_moves_edges_and_bounds :: proc(t: ^testing.T) {
 }
 
 // A window of two tiled panes with the focused one floated above them, and that float's frame.
-@(private = "file")
+@(private)
 float_fixture :: proc(
 	t: ^testing.T,
 	f: ^Palette_Fixture,
