@@ -255,6 +255,8 @@ switch ($Task) {
             Invoke-Odin check src @flags
             Invoke-Odin check src @appFlags
             Invoke-Odin check src '-define:AIO_CONTROL=true' @appFlags
+            Invoke-Odin check src '-define:AIO_HEADLESS=true' @appFlags
+            Invoke-Odin check src '-define:AIO_HEADLESS=true' '-define:AIO_CONTROL=true' @appFlags
         }
         foreach ($name in $toolPackages) {
             Invoke-Odin check "tools/$name" @flags

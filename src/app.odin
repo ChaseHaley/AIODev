@@ -17,6 +17,8 @@ import "core:log"
 import "core:os"
 import "core:strings"
 import "core:time"
+// Only the headless build reads the bundled test fonts; other builds compile none of them in.
+@(require) import test_fonts "../tests/fixtures/fonts"
 
 @(private)
 FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
@@ -144,7 +146,13 @@ app_init :: proc(app: ^App) -> bool {
 	control_cli_init(app)
 	if !load_settings(app) {return false}
 	font_error: font.Error
-	app.fonts, font_error = font.system_create()
+	when platform_api.AIO_HEADLESS {
+		// The same pixels on every machine: bundled fonts (WORK-351) on WARP (WORK-350).
+		app.fonts, font_error = font.system_create_private(test_fonts.files())
+		app.render_driver = .Warp
+	} else {
+		app.fonts, font_error = font.system_create()
+	}
 	if font_error != .None {
 		log.errorf("font system creation failed: %v", font_error)
 		return false

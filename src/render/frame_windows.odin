@@ -149,6 +149,7 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 	}
 	images_evict(d)
 	if s.chain == nil {
+		s.rendered += 1
 		return .None
 	}
 	return checked(d, s.chain->Present(1, {}), "Present", .Surface_Failed)
