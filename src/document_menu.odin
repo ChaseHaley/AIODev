@@ -10,6 +10,7 @@ import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 
 // What the document menu shows; it is held by Overlay_Document_Menu while the menu shows.
@@ -47,7 +48,8 @@ Document_Menu_Pin :: struct {
 	document: Document,
 }
 
-// Ctrl+right-click on a terminal link: open it, or choose a level for it. The menu owns document.target.
+// Ctrl+ or Shift+right-click on a terminal or Markdown link: open it here or elsewhere, copy it, or choose a
+// level for it. The menu owns document.target.
 Document_Menu_Link :: struct {
 	document: Document,
 }
@@ -61,13 +63,18 @@ Document_Menu_Action :: enum {
 	Url_Field,
 	Pin,
 	Open_Link,
+	Open_In,
+	Open_External,
+	Open_Folder,
+	Copy_Target,
 }
 
 Document_Menu_Entry :: struct {
-	action: Document_Menu_Action,
-	level:  Document_Level,
-	target: string,
-	folder: bool,
+	action:    Document_Menu_Action,
+	level:     Document_Level,
+	placement: Markdown_Placement,
+	target:    string,
+	folder:    bool,
 }
 
 // Rows hold their own copies of what they show, so a pane closing behind an open menu leaves nothing
@@ -311,6 +318,88 @@ document_menu_build_levels :: proc(
 	}
 }
 
+@(private = "file", rodata)
+DOCUMENT_PLACEMENT_ROWS := [Markdown_Placement]struct {
+	label: string,
+	glyph: ui.Icon,
+} {
+	.Split         = {"Open in Split", .Split_Right},
+	.Float         = {"Open in Float", .Float_Pane},
+	.Tab           = {"Open in New Tab", .Layout_Top},
+	.Linked_Window = {"Open in Linked Window", .Window_Out},
+}
+
+// A link's rows: open it, open a Markdown file in a chosen place or the system's handler, copy it, show
+// a file's folder, or pin it.
+@(private = "file")
+document_menu_build_link :: proc(
+	app: ^App,
+	menu: ^Document_Menu,
+	content: layout.Content,
+	document: Document,
+) {
+	add :: proc(menu: ^Document_Menu, label: string, glyph: ui.Icon, entry: Document_Menu_Entry) {
+		document_menu_push(menu, {label = label, glyph = glyph, enabled = true}, entry)
+	}
+	web := document_is_web(document.target)
+	file := !web && !document.folder
+	add(menu, "Open", document_icon(document), {action = .Open_Link})
+	if file && markdown_is_path(document.target) {
+		for row, placement in DOCUMENT_PLACEMENT_ROWS {
+			add(menu, row.label, row.glyph, {action = .Open_In, placement = placement})
+		}
+		add(menu, "Open with Default App", .Document, {action = .Open_External})
+	}
+	document_menu_push(menu, {separator = true})
+	add(menu, web ? "Copy Link" : "Copy Path", .Copy, {action = .Copy_Target})
+	if file {add(menu, "Open Containing Folder", .Folder, {action = .Open_Folder})}
+	document_menu_push(menu, {separator = true})
+	document_menu_build_levels(app, menu, content, DOCUMENT_PIN_LABELS)
+}
+
+// Shows a Markdown file from a link at `placement`, beside the pane showing `content` or, once that pane has
+// gone, the focused one.
+@(private = "file")
+document_link_open_in :: proc(
+	app: ^App,
+	w: ^Window,
+	content: layout.Content,
+	path: string,
+	placement: Markdown_Placement,
+) {
+	tree := window_tree(w)
+	if tree == nil {return}
+	file, ok := localpath.prepare_open(path)
+	if !ok {
+		target_unavailable(app)
+		return
+	}
+	defer localpath.open_file_destroy(&file)
+	node := layout.find_content(tree, content)
+	if node == layout.INVALID_NODE {node = tree.focus}
+	if !markdown_open_placed(app, w, node, file.target, placement) {
+		notify(app, .Error, "Could not open the file.")
+	}
+}
+
+// Hands a Markdown file to the system instead of a pane. A type that needs confirming takes the usual
+// confirmation.
+@(private = "file")
+document_link_open_external :: proc(app: ^App, w: ^Window, path: string) {
+	file, ok := localpath.prepare_open(path)
+	if !ok {
+		target_unavailable(app)
+		return
+	}
+	if file.confirm {
+		localpath.open_file_destroy(&file)
+		target_open(app, w, File_Target{path})
+		return
+	}
+	defer localpath.open_file_destroy(&file)
+	if !target_open_approved(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
+}
+
 // Rebuilds the rows for the current mode, keeping the selection near where it was. It leaves the mode as
 // it is: a popout names a row, so the transitions that rebuild leave the popout first.
 @(private = "file")
@@ -332,9 +421,7 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 		document_menu_push(menu, {label = document_menu_own(menu, label)})
 		document_menu_build_levels(app, menu, state.content, DOCUMENT_LEVEL_LABELS)
 	case Document_Menu_Link:
-		document_menu_push(menu, {label = "Open", enabled = true}, {action = .Open_Link})
-		document_menu_push(menu, {separator = true})
-		document_menu_build_levels(app, menu, state.content, DOCUMENT_PIN_LABELS)
+		document_menu_build_link(app, menu, state.content, mode.document)
 	}
 	if select_first {
 		ui.menu_select_edge(&menu.menu, false)
@@ -391,28 +478,36 @@ document_menu_open_focused :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-// Ctrl+right-click on a terminal link. False leaves the press to the terminal.
+// Ctrl+ or Shift+right-click on a terminal link. False leaves the press to the terminal.
 @(require_results)
 document_menu_open_link :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	buffer: [links.TARGET_BYTES]u8 = ---
+	target := link_resolve(app, w, x, y, buffer[:])
+	if target == nil {return false}
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found {return false}
+	document_menu_open_target(app, w, pane.content, target, x, y)
+	return true
+}
+
+// The link menu at the point for `target`, a link shown in the pane showing `content`; a file that is not
+// there is reported instead.
+document_menu_open_target :: proc(app: ^App, w: ^Window, content: layout.Content, target: Target, x, y: f32) {
 	spelling, folder := "", false
-	switch t in link_resolve(app, w, x, y, buffer[:]) {
+	switch t in target {
 	case nil:
-		return false
+		return
 	case Missing_Target:
 		target_unavailable(app)
-		return true
+		return
 	case Web_Target:
 		spelling = t.uri
 	case File_Target:
 		spelling, folder = t.path, os.is_dir(t.path)
 	}
-	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found {return false}
 	owned, err := strings.clone(spelling)
-	if err != nil {return false}
-	document_menu_show(app, w, pane.content, Document_Menu_Link{{owned, folder}}, x, y)
-	return true
+	if err != nil {return}
+	document_menu_show(app, w, content, Document_Menu_Link{{owned, folder}}, x, y)
 }
 
 // Back from the file dialog, with the menu it closed, to choose a level.
@@ -509,6 +604,26 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 		target := strings.clone(link.document.target, context.temp_allocator)
 		overlay_close(app, w)
 		target_open(app, w, target_from_document(target))
+	case .Open_In:
+		link, _ := state.mode.(Document_Menu_Link)
+		path := strings.clone(link.document.target, context.temp_allocator)
+		content := state.content
+		overlay_close(app, w)
+		document_link_open_in(app, w, content, path, entry.placement)
+	case .Open_External:
+		link, _ := state.mode.(Document_Menu_Link)
+		path := strings.clone(link.document.target, context.temp_allocator)
+		overlay_close(app, w)
+		document_link_open_external(app, w, path)
+	case .Open_Folder:
+		link, _ := state.mode.(Document_Menu_Link)
+		folder := strings.clone(filepath.dir(link.document.target), context.temp_allocator)
+		overlay_close(app, w)
+		target_open(app, w, File_Target{folder})
+	case .Copy_Target:
+		link, _ := state.mode.(Document_Menu_Link)
+		_ = clipboard_copy(app, link.document.target)
+		overlay_close(app, w)
 	case .Add_File:
 		document_pick_start(app, w, false)
 	case .Add_Folder:

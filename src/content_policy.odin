@@ -27,7 +27,7 @@ Content_Policy :: struct {
 CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	.Terminal = {owns_session = true, linkable = true, documents = true, display_name = "Terminal"},
 	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
-	.Markdown = {documents = true, icon = .Markdown, display_name = "Markdown"},
+	.Markdown = {linkable = true, documents = true, icon = .Markdown, display_name = "Markdown"},
 }
 
 // The title of content that does not title itself through a session.

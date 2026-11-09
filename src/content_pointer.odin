@@ -67,7 +67,7 @@ content_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			return
 		}
 	}
-	if e.button == .Right && !selection_active(w) && .Control in e.modifiers {
+	if e.button == .Right && !selection_active(w) && (.Control in e.modifiers || .Shift in e.modifiers) {
 		if document_menu_open_link(app, w, x, y) {
 			gesture_swallow(w, .Right, .Content)
 			return

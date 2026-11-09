@@ -536,3 +536,61 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 		x = i32(t_rect.x + t_rect.width / 2), y = i32(t_rect.y + t_rect.height / 2)})
 	testing.expect(t, w.markdown_hover == nil)
 }
+
+// A link in a document has the menu a terminal link has, and its file opens where the menu says.
+@(test)
+a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "LinkMenu") {return}
+	other := strings.concatenate({f.directory, "\\other.md"}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(other, "# Other\n"), nil) {return}
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
+	w := f.state.windows[0]
+	pane := f.state.markdown_panes[0]
+	document := app.markdown_document(pane)
+	if !testing.expect(t, document != nil) {return}
+	shown: layout.Pane_Rect
+	for candidate in w.panes {if candidate.content.kind == .Markdown {shown = candidate}}
+	r := shown.rect
+	g := ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
+	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
+	x, y := g.left + 5, g.top
+	for ui.markdown_link_at(&pane.view, g, x, y) < 0 && y < g.area.y + g.area.height {y += 1}
+	right_click := proc(state: ^app.App, w: ^app.Window, x, y: f32, modifiers: input.Modifiers) {
+		for pressed in ([?]bool{true, false}) {
+			app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+				button = .Right, pressed = pressed, modifiers = modifiers})
+		}
+	}
+
+	// A plain right-click leaves the menu closed; Ctrl or Shift shows it.
+	right_click(&f.state, w, x, y, {})
+	testing.expect(t, !app.document_menu_shown(w))
+	right_click(&f.state, w, x, y, {.Shift})
+	if !testing.expect(t, app.document_menu_shown(w)) {return}
+	state, _ := w.overlay.(app.Overlay_Document_Menu)
+	link, is_link := state.mode.(app.Document_Menu_Link)
+	testing.expect(t, is_link && strings.has_suffix(link.document.target, "other.md"), link.document.target)
+	testing.expect_value(t, state.content, shown.content)
+
+	menu := &w.document_menu
+	row := -1
+	for i in 0 ..< menu.count {
+		if menu.entries[i].action == .Open_In && menu.entries[i].placement == .Linked_Window {row = i}
+	}
+	if !testing.expect(t, row >= 0) {return}
+	rect := ui.menu_row_rect(&menu.menu, row, f32(w.width), f32(w.height), w.scale)
+	for pressed in ([?]bool{true, false}) {
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(rect.x + 40 * w.scale),
+			y = i32(rect.y + rect.height / 2), button = .Left, pressed = pressed})
+	}
+	testing.expect(t, !app.document_menu_shown(w))
+	linked: ^app.Window
+	for window in f.state.windows {if app.window_linked(window) {linked = window}}
+	if !testing.expect(t, linked != nil) {return}
+	content, _ := layout.focused_content(app.window_tree(linked))
+	opened := app.markdown_find(&f.state, content.id)
+	if !testing.expect(t, opened != nil) {return}
+	testing.expect_value(t, opened.title, "other.md")
+}

@@ -13,7 +13,7 @@ Pane_Header_Refusal :: enum u8 {
 	Minimum,
 	// Floating would leave the tab without a tiled pane.
 	Last_Tiled,
-	// Only terminal panes can have a linked window.
+	// A Settings pane cannot have a linked window.
 	Not_Linkable,
 	// Linking would leave this window without a pane of the tab.
 	Keeps_One,
@@ -24,7 +24,7 @@ PANE_HEADER_REFUSAL_TEXT := [Pane_Header_Refusal]string {
 	.None         = "",
 	.Minimum      = "Too small to split: a pane would be below the minimum pane size.",
 	.Last_Tiled   = "The tab keeps one tiled pane; split it before floating this one.",
-	.Not_Linkable = "Only a terminal pane can have a linked window.",
+	.Not_Linkable = "A Settings pane cannot have a linked window.",
 	.Keeps_One    = "A tab must keep one pane in this window.",
 }
 

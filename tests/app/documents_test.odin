@@ -472,6 +472,111 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 	testing.expect(t, !app.document_menu_shown(w))
 }
 
+@(private = "file")
+placement_row :: proc(w: ^app.Window, placement: app.Markdown_Placement) -> int {
+	menu := &w.document_menu
+	for i in 0 ..< menu.count {
+		if menu.entries[i].action == .Open_In && menu.entries[i].placement == placement {return i}
+	}
+	return -1
+}
+
+@(test)
+link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-link-places", false) {return}
+	root, root_error := os.make_directory_temp("", "aio-link-places-*", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer {testing.expect_value(t, os.remove_all(root), nil); delete(root)}
+	path := fmt.aprintf(`%s\notes.md`, root)
+	defer delete(path)
+	if !testing.expect_value(t, os.write_entire_file(path, transmute([]u8)string("# Notes\n")), nil) {return}
+	s, w := &f.state, f.state.windows[0]
+	Open_Stub_State = {}
+	s.opener.file = link_file_stub
+	s.opener.url = link_open_stub
+	defer {s.opener.file = nil; s.opener.url = nil}
+	terminal := w.panes[0].content
+	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", path))
+	// Reopens the menu on the printed path from the terminal pane, wherever the last choice moved focus.
+	menu_on_path :: proc(t: ^testing.T, f: ^Palette_Fixture, terminal: layout.Content, modifiers: input.Modifiers) -> bool {
+		s, w := &f.state, f.state.windows[0]
+		if s.windows[0].workspace.selected != 0 {app.tab_select(s, w, 0)}
+		app.pane_focus(s, w, layout.find_content(app.window_tree(w), terminal))
+		point, ok := link_point(t, f, 4, 0)
+		if !ok {return false}
+		press(s, w, f32(point.x), f32(point.y), .Right, modifiers)
+		return testing.expect(t, shown_in(w, app.Document_Menu_Link))
+	}
+
+	// Shift+right-click shows the menu Ctrl+right-click shows, with every place a Markdown file can open.
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	for placement in app.Markdown_Placement {testing.expect(t, placement_row(w, placement) >= 0)}
+	testing.expect(t, row_of(w, .Open_External) >= 0 && row_of(w, .Copy_Target) >= 0 && row_of(w, .Open_Folder) >= 0)
+	held := strings.clone(held_target(w))
+	defer delete(held)
+
+	// Every choice opens its own pane, though the file already shows in another.
+	click_row(s, w, placement_row(w, .Split))
+	tree := app.window_tree(w)
+	testing.expect_value(t, layout.pane_count(tree), 2)
+	focused, _ := layout.focused_content(tree)
+	testing.expect_value(t, focused.kind, layout.Content_Kind.Markdown)
+	testing.expect(t, !layout.is_floating(tree, tree.focus))
+
+	if !menu_on_path(t, &f, terminal, {.Control}) {return}
+	click_row(s, w, placement_row(w, .Float))
+	testing.expect_value(t, len(app.floating_rects(w)), 1)
+	focused, _ = layout.focused_content(app.window_tree(w))
+	testing.expect_value(t, focused.kind, layout.Content_Kind.Markdown)
+
+	if !menu_on_path(t, &f, terminal, {.Control}) {return}
+	click_row(s, w, placement_row(w, .Tab))
+	testing.expect_value(t, len(w.workspace.tabs), 2)
+	testing.expect_value(t, w.workspace.selected, 1)
+
+	if !menu_on_path(t, &f, terminal, {.Control}) {return}
+	click_row(s, w, placement_row(w, .Linked_Window))
+	linked: ^app.Window
+	for window in s.windows {if app.window_linked(window) {linked = window}}
+	if testing.expect(t, linked != nil) {
+		shown, _ := layout.focused_content(app.window_tree(linked))
+		testing.expect_value(t, shown.kind, layout.Content_Kind.Markdown)
+		testing.expect_value(t, app.pane_link_window_of(s, shown), linked)
+	}
+	testing.expect_value(t, len(s.markdown_panes), 4)
+
+	// The system's handler, the copy and the folder each act on the file the menu holds.
+	if !menu_on_path(t, &f, terminal, {.Control}) {return}
+	click_row(s, w, row_of(w, .Open_External))
+	testing.expect_value(t, Open_Stub_State.calls, 1)
+	testing.expect(t, strings.has_suffix(Open_Stub_State.uri, `notes.md`), Open_Stub_State.uri)
+	testing.expect(t, !Open_Stub_State.confirmed)
+
+	if !menu_on_path(t, &f, terminal, {.Control}) {return}
+	click_row(s, w, row_of(w, .Copy_Target))
+	copied, copied_ok := platform.clipboard_get_text(&s.platform, context.allocator)
+	testing.expect(t, copied_ok)
+	testing.expect_value(t, copied, held)
+	delete(copied)
+
+	if !menu_on_path(t, &f, terminal, {.Control}) {return}
+	click_row(s, w, row_of(w, .Open_Folder))
+	testing.expect_value(t, Open_Stub_State.calls, 2)
+	testing.expect(t, !strings.has_suffix(Open_Stub_State.uri, `notes.md`), Open_Stub_State.uri)
+	testing.expect(t, strings.has_prefix(held, Open_Stub_State.uri), Open_Stub_State.uri)
+
+	// A web address can only open in the browser, so it offers no pane or folder.
+	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/two")
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	for placement in app.Markdown_Placement {testing.expect(t, placement_row(w, placement) < 0)}
+	testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0)
+	testing.expect(t, row_of(w, .Copy_Target) >= 0)
+}
+
 @(test)
 closed_and_duplicated_panes_keep_their_documents :: proc(t: ^testing.T) {
 	directory, directory_error := os.make_directory_temp("", "aio-documents-*", context.allocator)
