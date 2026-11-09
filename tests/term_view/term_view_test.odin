@@ -70,7 +70,7 @@ fixture_create :: proc(t: ^testing.T, command: string, family := "Consolas") -> 
 	}
 	f.family, font_error = font.family_load(f.fonts, family)
 	render_error: render.Error
-	f.device, render_error = render.device_create()
+	f.device, render_error = render.device_create(.Warp)
 	if font_error != .None || render_error != .None {
 		testing.fail(t)
 		return

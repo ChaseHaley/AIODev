@@ -141,7 +141,7 @@ text_measures_and_wraps :: proc(t: ^testing.T) {
 		return
 	}
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) {
 		return
 	}

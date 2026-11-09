@@ -73,7 +73,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	cache: glyphs.Cache
@@ -303,7 +303,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 	fonts, font_error := font.system_create(allocator)
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	cache: glyphs.Cache

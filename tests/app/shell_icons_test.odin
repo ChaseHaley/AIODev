@@ -128,7 +128,7 @@ pane_draws_the_icon_of_the_profile_it_was_launched_with :: proc(t: ^testing.T) {
 	defer profile_icon_fixture_destroy(&f)
 	if !profile_icon_fixture_init(t, &f, "profile.cmd.name = Command Prompt\n" +
 		"profile.cmd.command = cmd.exe\nprofile.cmd.icon = icon.png\n") {return}
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) {return}
 	defer render.device_destroy(device)
 	f.state.device = device

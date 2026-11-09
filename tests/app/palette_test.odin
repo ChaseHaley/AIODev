@@ -31,6 +31,7 @@ palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string,
 	settings := idle_shell_settings(t, "interface.font_size = 12\ncursor.blink = false\n")
 	if !testing.expect_value(t, os.write_entire_file(f.path, settings), nil) { return false }
 	f.state.options = {data_dir = f.directory, inactive = true}
+	f.state.render_driver = .Warp
 	f.state.app_id = fmt.aprintf("AIODev.Test.Palette.%s.%d", name, os.get_pid())
 	if !testing.expect_value(t, platform.init(&f.state.platform, f.state.app_id),
 		platform.Init_Result.Primary) { return false }

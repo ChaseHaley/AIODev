@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:os"
 import "core:testing"
 import app "../../src"
+import "aio:render"
 
 // A window can be left without a surface when device recovery cannot recreate it. It must survive a
 // resize, a second recovery must rebuild it, and its next frame must create it if nothing else does.
@@ -22,6 +23,7 @@ device_recovery_rebuilds_a_window_left_without_a_surface :: proc(t: ^testing.T) 
 	testing.expect(t, app.app_running(s))
 	testing.expect(t, s.device != lost)
 	testing.expect(t, s.cache.device == s.device)
+	testing.expect_value(t, render.device_driver(s.device), render.Driver.Warp)
 	testing.expect(t, app.window_surface(first) != nil)
 	testing.expect(t, app.window_surface(second) != nil)
 	app.window_surface_release(second)
