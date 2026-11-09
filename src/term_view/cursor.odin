@@ -173,7 +173,7 @@ Cursor_Motion :: struct {
 	target, head_from, tail_from, head, tail: render.Rect,
 	drawn_head, drawn_tail:                   render.Rect,
 	started:                                 time.Tick,
-	// A focused cursor was drawn by the last build, so the next move can start from it.
+	// The focused cursor's pose survives idle blinking, so the next move can start from it.
 	present:                                 bool,
 	active:                                  bool,
 	progress:                                f32,
@@ -220,8 +220,7 @@ cursor_reset :: proc(v: ^View) {
 @(private, require_results)
 cursor_viewport_capture :: proc(v: ^View, b: ^Builder) -> bool {
 	if !cursor_effects_active(b.style.cursor_effects) || !b.style.focused || b.style.cursor_suppressed ||
-	   !b.style.cursor_phase_visible || !b.cursor.visible ||
-	   !b.cursor.viewport_has_value || b.frame_time.display == {} {return true}
+	   !b.cursor.visible || !b.cursor.viewport_has_value || b.frame_time.display == {} {return true}
 	if len(v.cursor_rows) != b.rows {cursor_reset(v)}
 	if resize(&v.cursor_rows, b.rows) != nil {
 		b.list.error = .Out_Of_Memory
@@ -320,7 +319,6 @@ cursor_begin :: proc(v: ^View, b: ^Builder) {
 	if !cursor.visible ||
 	   !cursor.viewport_has_value ||
 	   !b.style.focused ||
-	   !b.style.cursor_phase_visible ||
 	   b.style.cursor_suppressed ||
 	   b.style.cursor_effects.preset == .Off {
 		cursor_reset(v)

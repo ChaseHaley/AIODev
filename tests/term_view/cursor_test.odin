@@ -171,7 +171,7 @@ trail_fades_toward_where_the_cursor_was :: proc(t: ^testing.T) {
 }
 
 @(test)
-hidden_reset_and_scrolled_cursors_land_without_replay :: proc(t: ^testing.T) {
+reset_scrolled_and_terminal_hidden_cursors_land_without_replay :: proc(t: ^testing.T) {
 	f, ok := headless_create(t)
 	defer fixture_destroy(&f)
 	if !ok {return}
@@ -180,16 +180,6 @@ hidden_reset_and_scrolled_cursors_land_without_replay :: proc(t: ^testing.T) {
 	write(&f, "\x1b[2;8H")
 	render_frame(t, &f, style, frame_at(1))
 	testing.expect(t, term_view.cursor_animating(&f.view))
-
-	// A blink's hidden phase drops the motion and its smear.
-	hidden := style
-	hidden.cursor_phase_visible = false
-	render_frame(t, &f, hidden, frame_at(2))
-	testing.expect(t, !term_view.cursor_animating(&f.view))
-	_, shown := render_frame(t, &f, style, frame_at(3))
-	shown = slice.clone(shown, context.temp_allocator)
-	testing.expect(t, !term_view.cursor_animating(&f.view))
-	testing.expect(t, slice.equal(shown, render_still(t, &f)))
 
 	// After a reset the next build draws the cursor where the terminal has it, with no motion.
 	render_frame(t, &f, style, frame_at(4))
@@ -208,7 +198,7 @@ hidden_reset_and_scrolled_cursors_land_without_replay :: proc(t: ^testing.T) {
 	testing.expect(t, !term_view.cursor_animating(&f.view))
 	testing.expect(t, slice.equal(scrolled, render_still(t, &f)))
 
-	// Terminal-hidden cursors also clear their history, not only a blink's hidden phase.
+	// Terminal-controlled cursor hiding clears motion history.
 	render_frame(t, &f, style, frame_at(8))
 	write(&f, "\x1b[?25l\x1b[2;15H")
 	render_frame(t, &f, style, frame_at(9))
@@ -295,5 +285,67 @@ moving_block_preserves_image_z_order_and_full_image_clip :: proc(t: ^testing.T) 
 	_, above := render_frame(t, &f, style, frame_at(2))
 	for column in 0 ..< COLUMNS {
 		testing.expect_value(t, cell_pixel(&f, above, column, 0, m.cell_width / 2, m.cell_height / 2), [4]u8{0, 255, 0, 255})
+	}
+}
+
+@(test)
+blink_hidden_moves_show_every_selected_preset_and_resume_idle_blinking :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	for choice in ([5]struct {preset: term_view.Cursor_Preset, movement: bool} {
+		{.Smooth, true}, {.Smear, true}, {.Trail, true}, {.Smear, false}, {.Trail, false},
+	}) {
+		term_view.cursor_reset(&f.view)
+		write(&f, "\x1b[1 q\x1b[2J\x1b[1;17H")
+		style := effects_style(&f, choice.preset, movement = choice.movement)
+		first, _ := render_frame(t, &f, style, frame_at(0))
+		from, captured := first.cursor.?
+		if !testing.expect(t, captured) {continue}
+		style.cursor_phase_visible = false
+		_, hidden := render_frame(t, &f, style, frame_at(1))
+		hidden = slice.clone(hidden, context.temp_allocator)
+		testing.expect_value(t, cell_pixel(&f, hidden, 16, 0, 1, 1), BLACK)
+
+		// The shell's Home redraw changes position, not the blink's hidden phase.
+		write(&f, "\x1b[H")
+		moving, pixels := render_frame(t, &f, style, frame_at(2))
+		testing.expect(t, term_view.cursor_animating(&f.view),
+			"a blink-hidden departure must animate instead of teleporting")
+		paint, shown := moving.cursor.?
+		if !testing.expect(t, shown, "a moving cursor must be visible during a hidden blink") {continue}
+		if choice.movement {
+			testing.expect(t, paint.head.x > paint.target.x && paint.head.x < from.head.x)
+		} else {
+			testing.expect_value(t, paint.head, paint.target)
+		}
+		testing.expect(t, cell_pixel(&f, pixels, 0, 0, paint.head.x + 1, 1) != BLACK,
+			"the moving head must actually paint pixels, not merely retain cursor metadata")
+		if choice.preset != .Smooth {
+			x := (paint.head.x + paint.head.width + paint.tail.x + paint.tail.width) / 2
+			y := f.metrics.cell_height / 2
+			testing.expect(t, cell_pixel(&f, pixels, 0, 0, x, y) != cell_pixel(&f, hidden, 0, 0, x, y),
+				"the smear or trail must remain visible, not only its head")
+		}
+		_, landed := render_frame(t, &f, style, frame_at(8))
+		testing.expect(t, !term_view.cursor_animating(&f.view))
+		testing.expect(t, slice.equal(landed, hidden), "settlement must restore the hidden idle blink")
+		style.cursor_phase_visible = true
+		_, visible := render_frame(t, &f, style, frame_at(9))
+		visible = slice.clone(visible, context.temp_allocator)
+		testing.expect(t, !term_view.cursor_animating(&f.view) && cell_pixel(&f, visible, 0, 0, 1, 1) != BLACK,
+			"the next visible phase must show the logical destination without replay")
+
+		// A blink that begins in the middle of a move must not cancel the effect either.
+		write(&f, "\x1b[1;17H")
+		render_frame(t, &f, style, frame_at(10))
+		style.cursor_phase_visible = false
+		continuing, continuation_pixels := render_frame(t, &f, style, frame_at(11))
+		testing.expect(t, term_view.cursor_animating(&f.view))
+		paint, captured = continuing.cursor.?
+		if !testing.expect(t, captured) {continue}
+		testing.expect(t, cell_pixel(&f, continuation_pixels, 0, 0, paint.head.x + 1, 1) != BLACK)
+		_, landed = render_frame(t, &f, style, frame_at(16))
+		testing.expect(t, !term_view.cursor_animating(&f.view) && slice.equal(landed, hidden))
 	}
 }

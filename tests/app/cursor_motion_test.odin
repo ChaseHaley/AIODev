@@ -412,3 +412,70 @@ markdown_float_masks_terminal_text_replayed_by_a_crossing_cursor :: proc(t: ^tes
 	}
 	testing.expect(t, observed, "the fixture must put the traveling head inside the Markdown float")
 }
+
+@(test)
+blink_hidden_cursor_animates_in_cached_panes_and_across_focus :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "cursor-hidden-blink", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	app.pane_split(s, w, .Right)
+	app.handle_event(s, platform.Focus_Event{w.id, true})
+	s.animations = true
+	s.settings.cursor.blink = true
+	s.settings.cursor.animation = .Smear
+	s.settings.cursor.animation_duration = 100
+	s.settings.cursor.animation_movement = true
+	s.settings.cursor.animation_across_panes = true
+	app.run_action(s, w, .Focus_Left)
+	cursor_feed(t, s, w, "\x1b[1 q\x1b[2J\x1b[H")
+	app.run_action(s, w, .Focus_Right)
+	start := time.tick_add({}, time.Second)
+	w.frame = render.frame_time_at(start)
+	cursor_feed(t, s, w, "\x1b[1 q\x1b[2J\x1b[Habcdefghijklmnop")
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	from := cursor_head(t, s, w)
+	on, blinking := w.cursor_blink.(app.Cursor_Blink_On)
+	if !testing.expect(t, blinking) {return}
+	app.cursor_blink_tick(w, on.deadline)
+	testing.expect(t, !app.cursor_visible(w))
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+
+	cursor_feed(t, s, w, "\x1b[H")
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, app.cursor_motion_animating(w), "Home must animate from a blink-hidden departure")
+	middle := render.frame_time_at(time.tick_add(start, 40 * time.Millisecond))
+	app.window_motion_update(s, w, middle)
+	w.frame = middle
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	head := cursor_head(t, s, w)
+	target := from.x - 16 * w.metrics.cell_width
+	testing.expect(t, head.x > target && head.x < from.x,
+		"the frame scheduler must advance the visible effect without cancelling it for blinking")
+	finish := render.frame_time_at(time.tick_add(start, 150 * time.Millisecond))
+	app.window_motion_update(s, w, finish)
+	w.frame = finish
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, !app.cursor_motion_animating(w))
+	testing.expect(t, !app.cursor_visible(w), "finishing an effect must not disable the idle blink")
+
+	app.run_action(s, w, .Focus_Left)
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, app.cursor_motion_animating(w), "a blink-hidden source must still seed pane travel")
+	testing.expect_value(t, cursor_head(t, s, w).x, target)
+	on, blinking = w.cursor_blink.(app.Cursor_Blink_On)
+	if blinking && on.visible {
+		app.cursor_blink_tick(w, on.deadline)
+	}
+	middle = render.frame_time_at(time.tick_add(finish.display, 40 * time.Millisecond))
+	app.window_motion_update(s, w, middle)
+	w.frame = middle
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, cursor_head(t, s, w).x < target)
+	finish = render.frame_time_at(time.tick_add(finish.display, 150 * time.Millisecond))
+	app.window_motion_update(s, w, finish)
+	w.frame = finish
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	if !cursor_restore_frame(t, s, w) {return}
+	testing.expect(t, !app.cursor_visible(w) && !app.cursor_motion_animating(w))
+}

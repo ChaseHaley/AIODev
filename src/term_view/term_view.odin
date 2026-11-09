@@ -38,6 +38,7 @@ Style :: struct {
 Frame :: struct {
 	background:      render.Color,
 	cursor_blinking: bool,
+	// Effects retain the logical pose during idle blink hiding, without painting a cursor.
 	cursor:          Maybe(Cursor_Paint),
 	// What reading the session did for this build. Anything but Updated drew the previously
 	// captured screen (a synchronized-output hold or a failed read), so the frame must not be
@@ -697,7 +698,8 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> render.Build_Sta
 build_cursor :: proc(v: ^View, b: ^Builder) -> Maybe(Cursor_Paint) {
 	if b.list.error != .None {return nil}
 	c := b.cursor
-	if !c.visible || !c.viewport_has_value || !b.style.cursor_phase_visible {
+	if !c.visible || !c.viewport_has_value ||
+	   (!b.style.cursor_phase_visible && b.style.cursor_effects.preset == .Off) {
 		return nil
 	}
 	m := b.metrics
@@ -727,6 +729,7 @@ build_cursor :: proc(v: ^View, b: ^Builder) -> Maybe(Cursor_Paint) {
 		cursor_draw_moving(v, b, paint)
 		return paint
 	}
+	if !b.style.cursor_phase_visible {return paint}
 	// A block cursor sits between the cell background and the glyph: rects in a layer draw before its glyphs.
 	if block_cursor_at(b, b.cursor_column, int(c.viewport_y)) {
 		rect(b, cell, b.cursor_color)

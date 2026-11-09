@@ -61,7 +61,7 @@ cursor_paint_translate :: proc(paint: term_view.Cursor_Paint, offset: [2]f32) ->
 @(private = "file")
 cursor_crossing_enabled :: proc(app: ^App, w: ^Window) -> bool {
 	return app.settings.cursor.animation_across_panes && app.animations &&
-	       app.settings.cursor.animation != .Off && window_drawable(w) && cursor_visible(w) &&
+	       app.settings.cursor.animation != .Off && window_drawable(w) &&
 	       term_view.cursor_effects_active(cursor_effects(app))
 }
 
@@ -241,7 +241,7 @@ cursor_motion_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bo
 	case .Empty, .Tracking, .Pending:
 	}
 	enabled := app.animations && app.settings.cursor.animation != .Off &&
-	           window_drawable(w) && cursor_visible(w)
+	           window_drawable(w)
 	for &view in w.views {
 		if view.content.kind != .Terminal {continue}
 		focused := false

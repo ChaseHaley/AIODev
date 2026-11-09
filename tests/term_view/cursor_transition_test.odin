@@ -122,9 +122,7 @@ cursor_capture_survives_suppression_and_unfocused_wide_cells :: proc(t: ^testing
 	testing.expect_value(t, suppressed.cursor_blinking, first.cursor_blinking)
 	style.cursor_suppressed = false
 	style.cursor_phase_visible = false
-	hidden, no_cursor := render_frame(t, &f, style, frame_at(3))
-	_, captured = hidden.cursor.?
-	testing.expect(t, !captured)
+	_, no_cursor := render_frame(t, &f, style, frame_at(3))
 	testing.expect(t, slice.equal(pixels, no_cursor), "suppression must remove the body and destination foreground recoloring")
 	write(&f, "\x1b[1;2H")
 	style.cursor_phase_visible, style.focused = true, false
@@ -133,7 +131,7 @@ cursor_capture_survives_suppression_and_unfocused_wide_cells :: proc(t: ^testing
 	testing.expect(t, captured)
 	testing.expect_value(t, paint.target, render.Rect{0, 0, 2 * f.metrics.cell_width, f.metrics.cell_height})
 	write(&f, "\x1b[?25l")
-	hidden, _ = render_frame(t, &f, style, frame_at(5))
+	hidden, _ := render_frame(t, &f, style, frame_at(5))
 	_, captured = hidden.cursor.?
 	testing.expect(t, !captured)
 }
