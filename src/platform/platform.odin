@@ -2,6 +2,11 @@ package platform
 
 import "aio:input"
 
+// Chooses the backend at compile time: the Win32 one (`*_windows.odin`), or with
+// -define:AIO_HEADLESS=true one that opens no window (WORK-349). Each backend file wraps its
+// declarations in `when`, so release builds hold only the Win32 code and dispatch nothing at run time.
+AIO_HEADLESS :: #config(AIO_HEADLESS, false)
+
 Init_Result :: enum {
 	Failed,
 	Primary,
