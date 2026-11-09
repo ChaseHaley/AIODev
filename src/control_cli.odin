@@ -21,7 +21,7 @@ Cli_Pipe :: union {
 }
 Cli_Pipe_Failed :: struct {}
 
-@(private = "file")
+@(private)
 CLI_EXECUTABLE :: "aio.exe"
 
 // The aio command line as App embeds it: the pipe it reaches the app through, and the directory holding

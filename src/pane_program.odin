@@ -1,5 +1,6 @@
 package main
 
+import "aio:agent"
 import "aio:program_art"
 import "aio:procinfo"
 import "aio:settings"
@@ -49,8 +50,8 @@ Program_Seen :: struct {
 }
 
 // The process adopted and its image path; the name icons are looked up by and its bundled artwork;
-// whether it is a WSL or SSH bridge, named by what its programs report; and how it was started, as
-// a reopened pane shows it.
+// whether it is a WSL or SSH bridge, named by what its programs report; how it was started, as a
+// reopened pane shows it; and, for a coding agent, what resuming it keeps.
 Program_Adopted :: struct {
 	id:      u32,
 	path:    string,
@@ -59,6 +60,7 @@ Program_Adopted :: struct {
 	has_art: bool,
 	bridge:  bool,
 	command: string,
+	launch:  agent.Launch,
 }
 
 // The adopted program stands while the last poll saw another, `id`, for the first time.
@@ -161,6 +163,7 @@ program_adopt :: proc(app: ^App, id, root: u32, stem: string) -> (program: Progr
 	program.id, program.path = id, ok ? path : ""
 	program_name_set(app, &program, name)
 	program.command = program_command(arguments, stem)
+	program.launch = program_launch(app, arguments, stem)
 	program.bridge = program_listed(program_bridges[:], stem)
 	return
 }
@@ -277,6 +280,7 @@ program_release :: proc(program: ^Program_Adopted) {
 	delete(program.path)
 	delete(program.name)
 	delete(program.command)
+	launch_release(&program.launch)
 }
 
 // Drops the pane's program; reports whether it had one.

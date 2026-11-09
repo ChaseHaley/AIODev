@@ -43,6 +43,7 @@ start :: proc() -> cli_protocol.Status {
 		print_usage()
 		return len(args) == 0 ? .Usage : .Ok
 	}
+	if args[0] == AGENT_SESSION_COMMAND {return agent_session_record(args[1:])}
 	// These outlive wait's per-poll release of the temporary allocator.
 	named, _ := os.lookup_env("AIODEV_INSTANCE", context.allocator)
 	defer delete(named)

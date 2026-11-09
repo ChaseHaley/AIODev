@@ -46,6 +46,7 @@ Pane_Settings :: struct {
 	show_headers:                  bool,
 	markdown_floating:             bool,
 	confirm_shell_switch:          bool,
+	resume_agents:                 bool,
 	minimum_columns, minimum_rows: int,
 	focus_border, unfocused_dim:   int,
 }
@@ -456,6 +457,16 @@ SCHEMA :: [?]Schema_Entry {
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, confirm_shell_switch),
 		default_value = "true",
 		description = "Ask before a running pane's shell is replaced, losing its session.",
+	},
+	{
+		key = "pane.resume_agents",
+		title = "Resume Agent Sessions",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, resume_agents),
+		default_value = "true",
+		description = "Bring a pane running Claude Code, Codex or omp back in the same conversation when it " +
+			"is reopened or AIODev restarts. Run Install Agent Session Hooks once so Claude Code and Codex " +
+			"panes always know their conversation.",
 	},
 	{
 		key = "pane.minimum_columns",

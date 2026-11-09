@@ -11,7 +11,8 @@ import "core:time"
 import "core:unicode/utf8"
 
 // The workspace, tab and split structure that survives a full exit or reboot (D-020). Panes come
-// back as fresh shells in their saved directories; running programs are not resumed.
+// back as fresh shells in their saved directories; a pane running a coding agent types its resume
+// line into the fresh shell (WORK-361), and other running programs are not resumed.
 LAYOUT_STATE_VERSION :: 1
 // Changes are written this long after the first one, so a burst of edits costs one write and a
 // reboot loses at most this much.
@@ -58,6 +59,9 @@ Saved_Node :: struct {
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
+	// The pane's lasting key and, when it ran a coding agent, the command that resumes its session.
+	key:       string `json:"key,omitempty"`,
+	resume:    string `json:"resume,omitempty"`,
 	linked:    bool,
 	// A linked pane's window, as a slice because only an empty one is left out of the file.
 	window:    []Saved_Window `json:"window,omitempty"`,
@@ -184,7 +188,7 @@ layout_state_save :: proc(app: ^App, fresh := false) {
 	text, ok := layout_state_encode(app, context.temp_allocator, fresh ? pane_processes(app) : nil)
 	if !ok {log.error("encoding the workspace layout failed"); return}
 	if text == app.layout_saved {return}
-	if !layout_state_write(path, text) {return}
+	if !file_replace(path, text) {return}
 	owned, err := strings.clone(text)
 	if err != nil {return}
 	delete(app.layout_saved)
@@ -309,26 +313,28 @@ layout_pane_encode :: proc(
 	directory, _ := pane_directory_of(entry, program)
 	saved.profile, saved.directory, saved.name = entry.profile_id, directory, entry.name
 	saved.keep_open, saved.command = entry.keep_open, command
+	saved.key, saved.resume = entry.key, pane_resume_line(app, entry, processes)
 	saved.documents = entry.documents[:]
 	return saved
 }
 
-// Replaces the file atomically so a crash mid-write leaves the previous layout intact.
+// Replaces the file atomically so a crash mid-write leaves the previous contents intact.
 @(private, require_results)
-layout_state_write :: proc(path, text: string) -> bool {
-	f, err := os.create_temp_file(os.dir(path), ".aiodev-layout-*")
-	if err != nil {log.errorf("creating the layout temporary file failed: %v", err); return false}
+file_replace :: proc(path, text: string) -> bool {
+	f, err := os.create_temp_file(os.dir(path), ".aiodev-*")
+	if err != nil {log.errorf("creating a temporary file for %s failed: %v", path, err); return false}
 	name := strings.clone(os.name(f), context.temp_allocator)
 	defer if cleanup_error := os.remove(name);
 	   cleanup_error != nil && cleanup_error != .Not_Exist {
-		log.errorf("removing the layout temporary file failed: %v", cleanup_error)
+		log.errorf("removing the temporary file %s failed: %v", name, cleanup_error)
 	}
 	n, write_error := os.write(f, transmute([]u8)text)
 	sync_error := os.sync(f)
 	close_error := os.close(f)
 	if write_error != nil || n != len(text) || sync_error != nil || close_error != nil {
 		log.errorf(
-			"writing the layout failed: %v, %v, %v (%d/%d bytes)",
+			"writing %s failed: %v, %v, %v (%d/%d bytes)",
+			path,
 			write_error,
 			sync_error,
 			close_error,
@@ -338,7 +344,7 @@ layout_state_write :: proc(path, text: string) -> bool {
 		return false
 	}
 	if rename_error := os.rename(name, path); rename_error != nil {
-		log.errorf("replacing the layout failed: %v", rename_error)
+		log.errorf("replacing %s failed: %v", path, rename_error)
 		return false
 	}
 	return true
@@ -491,7 +497,9 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, 
 	}
 	command := saved.command
 	if !utf8.valid_string(command) || len(command) > PROGRAM_COMMAND_LIMIT * 4 {command = ""}
-	id, opened := session_open(app, "", directory, saved.profile, command)
+	resume := app.settings.pane.resume_agents ? saved.resume : ""
+	// A pane resuming its agent shows the agent coming back rather than a note about it.
+	id, opened := session_open(app, "", directory, saved.profile, resume != "" ? "" : command, saved.key)
 	if !opened {return 0, false}
 	entry := session_find(app, id)
 	entry.keep_open = saved.keep_open
@@ -499,6 +507,7 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, 
 	if saved.name != "" && utf8.valid_string(saved.name) {
 		if name, err := strings.clone(saved.name); err == nil {entry.name = name}
 	}
+	pane_resume(app, entry, resume)
 	return id, true
 }
 
