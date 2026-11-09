@@ -19,7 +19,7 @@ pane_headers_in_a_float_keep_split_and_close_only :: proc(t: ^testing.T) {
 	in_tile, in_float := app.pane_header_layout(w, tiled), app.pane_header_layout(w, floating)
 	for button in app.Pane_Header_Button {
 		testing.expectf(t, in_tile.buttons[button].width > 0, "a tiled header shows %v", button)
-		kept := button == .Documents || button == .Split_Right || button == .Split_Down || button == .Close
+		kept := button == .Links || button == .Split_Right || button == .Split_Down || button == .Close
 		testing.expectf(t, (in_float.buttons[button].width > 0) == kept, "a floating header and %v", button)
 	}
 }
@@ -72,7 +72,7 @@ pane_header_previews_show_what_the_buttons_do :: proc(t: ^testing.T) {
 		case .Linked_Window:
 			testing.expect_value(t, preview.pane, -1)
 			testing.expect_value(t, preview.away, [2]f32{pane.rect.width, pane.rect.height})
-		case .Documents, .Zoom, .Fill_Window, .Dock, .Close:
+		case .Links, .Zoom, .Fill_Window, .Dock, .Close:
 			testing.expectf(t, w.panes[preview.pane].content == pane.content, "%v picks its pane", c.button)
 		}
 	}

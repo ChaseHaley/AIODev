@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:links"
@@ -12,7 +13,8 @@ import "core:log"
 import "core:os"
 import "core:strings"
 
-// What the document menu shows; it is held by Overlay_Document_Menu while the menu shows.
+// What the Links menu shows; it is held by Overlay_Document_Menu while the menu shows. Its rows are the
+// other windows showing part of this tab, then pinned documents: files, folders and web addresses.
 Document_Menu_Mode :: union #no_nil {
 	Document_Menu_List,
 	Document_Menu_Pin,
@@ -24,10 +26,11 @@ Document_Menu_List :: struct {
 	step: Document_Menu_Step,
 }
 
-// A step taken inside the list; nil is browsing it. Either one closes before the other opens.
+// A step taken inside the list; nil is browsing it. Only one is open at a time.
 Document_Menu_Step :: union {
 	Document_Url_Entry,
 	Document_Popout,
+	Document_More,
 }
 
 // An address field in place of the Add URL row.
@@ -40,6 +43,20 @@ Document_Url_Entry :: struct {
 Document_Popout :: struct {
 	row:  int,
 	pick: Document_Level,
+}
+
+// The More list under row `row`'s More button: where to open the Markdown file the row shows. Its rows and
+// selection are Document_Menu.more.
+Document_More :: struct {
+	row: int,
+}
+
+// Where a Markdown file opens from its More list, beside the pane the menu belongs to.
+Document_Placement :: enum u8 {
+	Split_Right,
+	Split_Down,
+	Float,
+	Linked_Window,
 }
 
 // Choosing the level for the document just added. The menu owns document.target.
@@ -61,6 +78,7 @@ Document_Menu_Action :: enum {
 	Url_Field,
 	Pin,
 	Open_Link,
+	Focus_Window,
 }
 
 Document_Menu_Entry :: struct {
@@ -68,6 +86,8 @@ Document_Menu_Entry :: struct {
 	level:  Document_Level,
 	target: string,
 	folder: bool,
+	// The window a Focus_Window row brings forward.
+	window: input.Window_Id,
 }
 
 // Rows hold their own copies of what they show, so a pane closing behind an open menu leaves nothing
@@ -79,7 +99,23 @@ Document_Menu :: struct {
 	count:       int,
 	text:        [dynamic]string,
 	url:         ui.Text_Field,
+	// The More list's rows, each with a Document_Placement as its payload.
+	more:        ui.Menu,
 }
+
+@(private = "file", rodata)
+DOCUMENT_PLACEMENT_ROWS := [Document_Placement]struct {
+	label: string,
+	glyph: ui.Icon,
+} {
+	.Split_Right   = {"Open in Right Split", .Split_Right},
+	.Split_Down    = {"Open in Down Split", .Split_Down},
+	.Float         = {"Open in Float", .Float_Pane},
+	.Linked_Window = {"Open in Linked Window", .Window_Out},
+}
+
+@(private = "file")
+DOCUMENT_MORE_WIDTH :: f32(224)
 
 @(private = "file", rodata)
 DOCUMENT_LEVEL_LABELS := [Document_Level]string {
@@ -117,6 +153,8 @@ document_level_icon :: proc(level: Document_Level) -> ui.Icon {
 
 document_menu_init :: proc(menu: ^Document_Menu) {
 	ui.menu_init(&menu.menu)
+	ui.menu_init(&menu.more)
+	menu.more.width = DOCUMENT_MORE_WIDTH
 }
 
 @(private = "file")
@@ -151,6 +189,7 @@ document_menu_destroy :: proc(w: ^Window) {
 	delete(menu.text)
 	delete(menu.url.bytes)
 	ui.menu_destroy(&menu.menu)
+	ui.menu_destroy(&menu.more)
 }
 
 document_menu_shown :: proc(w: ^Window) -> bool {
@@ -190,6 +229,11 @@ document_menu_popout :: proc(w: ^Window) -> (Document_Popout, bool) {
 document_menu_url_entry :: proc(w: ^Window) -> (Document_Url_Entry, bool) {
 	entry, shown := document_list_step(w).(Document_Url_Entry)
 	return entry, shown
+}
+
+document_menu_more :: proc(w: ^Window) -> (Document_More, bool) {
+	more, shown := document_list_step(w).(Document_More)
+	return more, shown
 }
 
 // How the rows follow a mode change.
@@ -249,20 +293,56 @@ document_menu_entry :: proc(menu: ^Document_Menu, row: int) -> (Document_Menu_En
 	return menu.entries[key], true
 }
 
+// The other windows showing part of w's tab, the window showing the tab first, then its linked windows. A
+// row brings its window forward.
+@(private = "file")
+document_menu_build_windows :: proc(app: ^App, menu: ^Document_Menu, w: ^Window) {
+	tab, host := selected_tab(w.workspace), w
+	if window_linked(w) {
+		home, found := pane_link_locate(app, w)
+		if !found {return}
+		tab, host = home.tab, nil
+		if selected_tab(home.workspace) == home.tab {host = window_for_workspace(app, home.workspace)}
+	}
+	if tab == nil {return}
+	add :: proc(menu: ^Document_Menu, other: ^Window, glyph: ui.Icon, detail: string) {
+		shown := selected_tab(other.workspace)
+		title := shown != nil && shown.title != "" ? shown.title : "Untitled"
+		document_menu_push(
+			menu,
+			{label = document_menu_own(menu, title), detail = detail, glyph = glyph, enabled = true, two_line = true},
+			{action = .Focus_Window, window = other.id},
+		)
+	}
+	if host != nil && host != w {add(menu, host, .Window_In, "Main window")}
+	for other in app.windows {
+		if other == w || !window_linked(other) || other.phase != .Shown {continue}
+		if home, found := pane_link_locate(app, other); found && home.tab == tab {
+			add(menu, other, .Window_Out, "Linked window")
+		}
+	}
+}
+
 @(private = "file")
 document_menu_build_list :: proc(
 	app: ^App,
+	w: ^Window,
 	menu: ^Document_Menu,
 	content: layout.Content,
 	list: Document_Menu_List,
 ) {
 	scopes, found := document_scopes(app, content)
 	if !found {return}
+	document_menu_build_windows(app, menu, w)
+	windows := menu.count
 	rows := documents_visible(scopes)
+	if windows > 0 && len(rows) > 0 {document_menu_push(menu, {separator = true})}
 	for row, i in rows {
 		if i > 0 && rows[i - 1].level != row.level {document_menu_push(menu, {separator = true})}
 		name, detail := document_label(row.document, context.temp_allocator)
 		target := document_menu_own(menu, row.document.target)
+		// Only a Markdown file opens inside AIODev, so only it has a choice of where.
+		local_file := !row.document.folder && !document_is_web(row.document.target)
 		document_menu_push(
 			menu,
 			{
@@ -272,11 +352,13 @@ document_menu_build_list :: proc(
 				enabled = true,
 				action = document_level_icon(row.level),
 				selected_action = ui.Icon.Close,
+				more = local_file && markdown_is_path(row.document.target),
+				two_line = true,
 			},
 			{action = .Open, level = row.level, target = target, folder = row.document.folder},
 		)
 	}
-	if len(rows) > 0 {document_menu_push(menu, {separator = true})}
+	if windows > 0 || len(rows) > 0 {document_menu_push(menu, {separator = true})}
 	add :: proc(menu: ^Document_Menu, label: string, glyph: ui.Icon, action: Document_Menu_Action) {
 		document_menu_push(menu, {label = label, glyph = glyph, enabled = true}, {action = action})
 	}
@@ -325,7 +407,7 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	menu.entries = {}
 	switch mode in state.mode {
 	case Document_Menu_List:
-		document_menu_build_list(app, menu, state.content, mode)
+		document_menu_build_list(app, w, menu, state.content, mode)
 	case Document_Menu_Pin:
 		name, _ := document_label(mode.document, context.temp_allocator)
 		label := fmt.tprintf("Pin %s to", name)
@@ -375,7 +457,7 @@ document_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	document_menu_show(app, w, pane.content, Document_Menu_List{}, anchor.x, anchor.y)
 }
 
-// The Show Documents command: the only way to the menu for a split pane with headers off.
+// The Show Links command: the only way to the menu for a split pane with headers off.
 document_menu_open_focused :: proc(app: ^App, w: ^Window) {
 	tree := window_tree(w)
 	if tree == nil {return}
@@ -472,10 +554,10 @@ document_menu_pin :: proc(app: ^App, w: ^Window, level: Document_Level, document
 	case .Pinned:
 		documents_changed(app)
 	case .Level_Full:
-		message := fmt.tprintf("%s already has %d documents.", DOCUMENT_LEVEL_LABELS[level], DOCUMENT_LEVEL_LIMIT)
+		message := fmt.tprintf("%s already has %d links.", DOCUMENT_LEVEL_LABELS[level], DOCUMENT_LEVEL_LIMIT)
 		notify(app, .Warning, message)
 	case .Failed:
-		notify(app, .Error, "Could not pin the document.")
+		notify(app, .Error, "Could not pin the link.")
 	}
 }
 
@@ -509,6 +591,9 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 		target := strings.clone(link.document.target, context.temp_allocator)
 		overlay_close(app, w)
 		target_open(app, w, target_from_document(target))
+	case .Focus_Window:
+		overlay_close(app, w)
+		if other := window_find(app, entry.window); other != nil {_ = window_activate(app, other)}
 	case .Add_File:
 		document_pick_start(app, w, false)
 	case .Add_Folder:
@@ -566,6 +651,101 @@ document_popout_open :: proc(app: ^App, w: ^Window, index: int) {
 @(private = "file")
 document_popout_close :: proc(app: ^App, w: ^Window) {
 	document_menu_set(app, w, Document_Menu_List{}, .Keep)
+}
+
+// Opens the More list under the row's More button, ending any address being typed as the popout does.
+@(private = "file")
+document_more_open :: proc(app: ^App, w: ^Window, index: int) {
+	menu := &w.document_menu
+	entry, _ := document_menu_entry(menu, index)
+	if entry.action != .Open || index < 0 || !menu.menu.items[index].more {return}
+	if _, entering := document_menu_url_entry(w); entering {
+		document_menu_set(app, w, Document_Menu_List{}, .Rebuild)
+	}
+	more := &menu.more
+	ui.menu_clear(more)
+	for row, placement in DOCUMENT_PLACEMENT_ROWS {
+		item := ui.Menu_Item{label = row.label, glyph = row.glyph, enabled = true, payload = u32(placement)}
+		if _, err := ui.menu_add(more, item); err != nil {log.errorf("adding a More row failed: %v", err)}
+	}
+	s := w.scale
+	button := ui.menu_action_rect(&menu.menu, index, .More, f32(w.width), f32(w.height), s)
+	x, y := button.x + button.width - DOCUMENT_MORE_WIDTH * s, button.y + button.height + ui.SPACE_1 * s
+	ui.menu_anchor(more, x, y)
+	ui.menu_select(&menu.menu, index)
+	document_menu_set(app, w, Document_Menu_List{Document_More{index}}, .Keep)
+}
+
+// Opens the file the More list's row shows at `placement`; the menu closes first.
+@(private = "file")
+document_more_choose :: proc(app: ^App, w: ^Window, placement: Document_Placement) {
+	state := document_menu_state(w)
+	more, shown := document_menu_more(w)
+	if state == nil || !shown {return}
+	entry, _ := document_menu_entry(&w.document_menu, more.row)
+	path := strings.clone(entry.target, context.temp_allocator)
+	content := state.content
+	overlay_close(app, w)
+	document_open_placed(app, w, content, path, placement)
+}
+
+// Opens a Markdown file in a new pane beside the pane showing `content` in w. A split joins w, linked or
+// not; a float or a linked window belongs to the window showing the tab, beside its focused pane.
+@(private = "file")
+document_open_placed :: proc(
+	app: ^App,
+	w: ^Window,
+	content: layout.Content,
+	path: string,
+	placement: Document_Placement,
+) {
+	file, ok := localpath.prepare_open(path)
+	if !ok {
+		target_unavailable(app)
+		return
+	}
+	defer localpath.open_file_destroy(&file)
+	acting := w
+	if placement == .Float || placement == .Linked_Window {acting = pane_link_acting_window(app, w)}
+	tree := window_tree(acting)
+	if tree == nil || window_linked(acting) {
+		notify(app, .Error, "Could not open the file.")
+		return
+	}
+	beside := acting == w ? layout.find_content(tree, content) : tree.focus
+	if beside == layout.INVALID_NODE {beside = tree.focus}
+	pane := markdown_pane_create(app, file.target, true)
+	if pane == nil {
+		notify(app, .Error, "Could not open the file.")
+		return
+	}
+	added := layout.Content{.Markdown, pane.id}
+	workspace, tab_index := acting.workspace, acting.workspace.selected
+	ratio := commands.SPLIT_DEFAULT.ratio
+	failure := Pane_Split_Error.None
+	switch placement {
+	case .Split_Right, .Split_Down:
+		direction: layout.Direction = placement == .Split_Right ? .Right : .Down
+		failure = pane_split_insert(app, acting, workspace, tab_index, beside, direction, ratio, true, added, true)
+	case .Float:
+		if !floating_attach(app, acting, workspace, tab_index, added, true) {failure = .Layout}
+	case .Linked_Window:
+		// The new pane leaves for its own window at once, so it needs no room here; it splits a tiled pane.
+		if layout.is_floating(tree, beside) {beside = layout.focus_tiled(tree)}
+		failure = pane_split_insert(app, nil, workspace, tab_index, beside, .Right, ratio, false, added, false)
+		// A refused link leaves the file showing in the split, which the refusal's notice explains.
+		if failure == .None && !pane_link_open(app, acting, layout.find_content(tree, added)) {
+			window_relayout(app, acting)
+		}
+	}
+	#partial switch failure {
+	case .None:
+		layout_state_touch(app)
+	case .Minimum:
+	// The split has said why already.
+	case:
+		notify(app, .Error, "Could not open the file.")
+	}
 }
 
 @(private = "file")
@@ -655,6 +835,22 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) 
 		}
 		w.dirty = true
 		return
+	case Document_More:
+		#partial switch logical.key {
+		case .Escape, .Arrow_Left:
+			document_popout_close(app, w)
+		case:
+			switch ui.menu_key(&menu.more, logical) {
+			case .None, .Changed:
+			case .Chosen:
+				placement := Document_Placement(menu.more.items[ui.menu_selected(&menu.more)].payload)
+				document_more_choose(app, w, placement)
+			case .Closed:
+				document_popout_close(app, w)
+			}
+		}
+		w.dirty = true
+		return
 	}
 	#partial switch logical.key {
 	case .Delete:
@@ -663,6 +859,14 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) 
 	case .Arrow_Right:
 		document_popout_open(app, w, ui.menu_selected(&menu.menu))
 		return
+	case .Context_Menu, .F10:
+		// The Menu key or Shift+F10 opens a row's More list; elsewhere the Menu key closes the menu.
+		selected := ui.menu_selected(&menu.menu)
+		wants := logical.key == .Context_Menu || logical.modifiers == {.Shift}
+		if wants && selected >= 0 && menu.menu.items[selected].more {
+			document_more_open(app, w, selected)
+			return
+		}
 	case .Escape:
 		if _, pinning := state.mode.(Document_Menu_Pin); pinning {
 			document_menu_set(app, w, Document_Menu_List{}, .Rebuild_Select_First)
@@ -681,9 +885,12 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) 
 	}
 }
 
-// The wheel moves the selection, which leaves a popout behind.
+// The wheel moves the selection, which leaves a popout or More list behind.
 document_menu_wheel :: proc(app: ^App, w: ^Window, rows: int) {
-	if _, shown := document_menu_popout(w); shown {document_popout_close(app, w)}
+	#partial switch _ in document_list_step(w) {
+	case Document_Popout, Document_More:
+		document_popout_close(app, w)
+	}
 	menu := &w.document_menu
 	ui.menu_wheel(&menu.menu, rows)
 	ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
@@ -712,6 +919,15 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 	if _, popout := document_menu_popout(w); popout {
 		if level, hit := document_popout_hit(w, x, y); hit {
 			document_popout_pick(app, w, level)
+			shape = .Hand
+		}
+		pointer_set(app, w, shape)
+		return
+	}
+	if _, more := document_menu_more(w); more {
+		hit := ui.menu_hit(&menu.more, x, y, f32(w.width), f32(w.height), w.scale)
+		if hit >= 0 {
+			if hit != ui.menu_selected(&menu.more) {ui.menu_select(&menu.more, hit); w.dirty = true}
 			shape = .Hand
 		}
 		pointer_set(app, w, shape)
@@ -747,6 +963,7 @@ document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 		level, hit := document_popout_hit(w, x, y)
 		return hit ? DOCUMENT_LEVEL_LABELS[level] : ""
 	}
+	if _, more := document_menu_more(w); more {return ""}
 	width, height := f32(w.width), f32(w.height)
 	row := ui.menu_hit(&menu.menu, x, y, width, height, w.scale)
 	entry, _ := document_menu_entry(menu, row)
@@ -758,6 +975,8 @@ document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 		return DOCUMENT_LEVEL_TIPS[entry.level]
 	case .Selected_Action:
 		return "Remove"
+	case .More:
+		return "More"
 	}
 	return ""
 }
@@ -774,6 +993,15 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	if _, popout := document_menu_popout(w); popout {
 		if level, hit := document_popout_hit(w, x, y); hit && e.button == .Left {
 			document_popout_choose(app, w, level)
+		} else {
+			document_popout_close(app, w)
+		}
+		return
+	}
+	if _, more := document_menu_more(w); more {
+		hit := ui.menu_hit(&menu.more, x, y, f32(w.width), f32(w.height), w.scale)
+		if hit >= 0 && e.button == .Left {
+			document_more_choose(app, w, Document_Placement(menu.more.items[hit].payload))
 		} else {
 			document_popout_close(app, w)
 		}
@@ -803,6 +1031,8 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 		document_popout_open(app, w, hit)
 	case .Selected_Action:
 		document_menu_remove(app, w, hit)
+	case .More:
+		document_more_open(app, w, hit)
 	}
 }
 
@@ -820,6 +1050,9 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if render.push_rect(&w.list, edge) != .None {return .Ok}
 		if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), true, "https://");
 		   result != .Ok {return result}
+	}
+	if _, more := document_menu_more(w); more {
+		return ui.menu_draw(&menu.more, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer)
 	}
 	popout, shown := document_menu_popout(w)
 	if !shown {return .Ok}
@@ -842,7 +1075,7 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 }
 
 when AIO_CONTROL {
-	// The document menu's keys; documents.mode is list, pin or link, and empty while it is closed.
+	// The Links menu's keys; documents.mode is list, pin or link, and empty while it is closed.
 	document_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
 		mode := ""
 		if state, shown := w.overlay.(Overlay_Document_Menu); shown {
@@ -854,11 +1087,13 @@ when AIO_CONTROL {
 		}
 		_, popout := document_menu_popout(w)
 		_, url_entry := document_menu_url_entry(w)
+		_, more := document_menu_more(w)
 		state_value(r, "documents.open", document_menu_shown(w))
 		state_text(r, "documents.mode", mode)
 		state_value(r, "documents.count", w.document_menu.count)
 		state_value(r, "documents.popout", popout)
 		state_value(r, "documents.url_open", url_entry)
+		state_value(r, "documents.more", more)
 	}
 }
 

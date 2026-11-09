@@ -208,7 +208,7 @@ center :: proc(r: [4]f32) -> (f32, f32) {return r[0] + r[2] / 2, r[1] + r[3] / 2
 @(private = "file")
 open_button :: proc(s: ^app.App, w: ^app.Window) {
 	l := app.pane_header_layout(w, w.panes[0])
-	x, y := center(transmute([4]f32)l.buttons[.Documents])
+	x, y := center(transmute([4]f32)l.buttons[.Links])
 	press(s, w, x, y)
 }
 
@@ -426,6 +426,77 @@ document_menu_popout_takes_the_keyboard_from_the_address_field :: proc(t: ^testi
 	key(s, w, .Enter)
 	testing.expect_value(t, len(scopes.pane), 0)
 	testing.expect_value(t, len(scopes.tab), 1)
+}
+
+// Only a Markdown file opens inside AIODev, so only its row has More; its list places the file beside the
+// pane the menu belongs to.
+@(test)
+more_list_opens_a_markdown_link_beside_the_pane :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	directory, directory_error := os.make_directory_temp("", "aio-links-more-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) {return}
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	// The app frees the temporary allocator each tick, so the path outlives it.
+	file := strings.concatenate({directory, "\\Plan.md"})
+	defer delete(file)
+	if !testing.expect_value(t, os.write_entire_file(file, "# Plan\n"), nil) {return}
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-more", false) {return}
+	s, w := &f.state, f.state.windows[0]
+	scopes, found := app.document_scopes(s, w.panes[0].content)
+	if !testing.expect(t, found) {return}
+	_ = app.document_pin(scopes, .Pane, {target = file})
+	_ = app.document_pin(scopes, .Pane, {target = "https://example.com/a"})
+	menu := &w.document_menu
+	open_button(s, w)
+	markdown, web := row_of(w, .Open, file), row_of(w, .Open, "https://example.com/a")
+	if !testing.expect(t, markdown >= 0 && web >= 0) {return}
+	testing.expect(t, menu.menu.items[markdown].more && menu.menu.items[markdown].two_line)
+	testing.expect(t, !menu.menu.items[web].more)
+	// The More button sits on the row's second line, under its label.
+	row := ui.menu_row_rect(&menu.menu, markdown, f32(w.width), f32(w.height), w.scale)
+	more := ui.menu_action_rect(&menu.menu, markdown, .More, f32(w.width), f32(w.height), w.scale)
+	testing.expect(t, more.y > row.y + row.height / 2 - 1)
+
+	click_part(s, w, markdown, .More)
+	_, shown := app.document_menu_more(w)
+	if !testing.expect(t, shown) {return}
+	// A press outside the list closes only the list.
+	press(s, w, 2, f32(w.height) - 2)
+	_, shown = app.document_menu_more(w)
+	testing.expect(t, app.document_menu_shown(w) && !shown)
+
+	// The keyboard reaches it too, and Enter on Open in Down Split puts the file under the pane.
+	ui.menu_select(&menu.menu, markdown)
+	key(s, w, .Context_Menu)
+	_, shown = app.document_menu_more(w)
+	if !testing.expect(t, shown) {return}
+	key(s, w, .Arrow_Down)
+	key(s, w, .Enter)
+	testing.expect(t, !app.document_menu_shown(w))
+	if !testing.expect_value(t, len(w.panes), 2) {return}
+	above, below := w.panes[0], w.panes[1]
+	if above.content.kind == .Markdown {above, below = below, above}
+	testing.expect_value(t, below.content.kind, layout.Content_Kind.Markdown)
+	testing.expect(t, below.rect.y > above.rect.y)
+
+	// Open in Float from the pointer adds a floating pane.
+	open_button(s, w)
+	click_part(s, w, row_of(w, .Open, file), .More)
+	more_rows := &menu.more
+	r := ui.menu_row_rect(more_rows, int(app.Document_Placement.Float), f32(w.width), f32(w.height), w.scale)
+	press(s, w, r.x + 40 * w.scale, r.y + r.height / 2)
+	testing.expect(t, !app.document_menu_shown(w))
+	tree := &app.selected_tab(w.workspace).tree
+	floats := 0
+	for _, id in tree.nodes {
+		content, is_pane := layout.pane_content(tree, layout.Node_Id(id))
+		if is_pane && content.kind == .Markdown && layout.is_floating(tree, layout.Node_Id(id)) {floats += 1}
+	}
+	testing.expect_value(t, floats, 1)
 }
 
 @(test)

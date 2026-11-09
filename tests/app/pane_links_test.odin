@@ -9,7 +9,9 @@ import app "../../src"
 import "aio:commands"
 import "aio:layout"
 import "aio:platform"
+import "aio:input"
 import "aio:term"
+import "aio:ui"
 
 @(private = "file")
 Fixture :: struct {
@@ -221,6 +223,102 @@ closing_a_linked_pane_or_its_tab_closes_the_window :: proc(t: ^testing.T) {
 	app.pane_links_sync(f.state)
 	testing.expect_value(t, len(f.state.windows), 1)
 	testing.expect_value(t, len(f.state.sessions), 1)
+}
+
+// The Focus_Window rows of w's Links menu, in order.
+@(private = "file")
+links_menu_windows :: proc(f: ^Fixture, w: ^app.Window) -> [dynamic]input.Window_Id {
+	windows := make([dynamic]input.Window_Id, context.temp_allocator)
+	app.document_menu_open_focused(f.state, w)
+	menu := &w.document_menu
+	for i in 0 ..< menu.count {
+		if entry := menu.entries[i]; entry.action == .Focus_Window {append(&windows, entry.window)}
+	}
+	app.overlay_close(f.state, w)
+	return windows
+}
+
+@(private = "file")
+press_key :: proc(f: ^Fixture, w: ^app.Window, which: input.Key) {
+	app.handle_event(f.state, input.Key_Event{window = w.id, key = which, pressed = true})
+	app.handle_event(f.state, input.Key_Event{window = w.id, key = which, pressed = false})
+}
+
+// A Links menu lists the other windows showing its tab: the main window first, then linked windows, never
+// the window it is in. Choosing one closes the menu.
+@(test)
+links_menu_lists_the_other_windows_of_its_tab :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 60) {return}
+	testing.expect_value(t, len(links_menu_windows(&f, f.host)), 0)
+	if !fixture_split(t, &f) {return}
+	app.pane_link_toggle(f.state, f.host)
+	first := linked_window(&f)
+	if !fixture_split(t, &f) {return}
+	app.pane_link_toggle(f.state, f.host)
+	second := linked_window(&f)
+	if !testing.expect(t, first != nil && second != nil && first != second) {return}
+	app.pane_links_sync(f.state)
+
+	from_host := links_menu_windows(&f, f.host)
+	testing.expect_value(t, len(from_host), 2)
+	for id in from_host {testing.expect(t, id == first.id || id == second.id)}
+	from_first := links_menu_windows(&f, first)
+	if testing.expect_value(t, len(from_first), 2) {
+		testing.expect_value(t, from_first[0], f.host.id)
+		testing.expect_value(t, from_first[1], second.id)
+	}
+
+	// A window whose tab is off screen is hidden, so the menu leaves it out.
+	if _, created := app.tab_create(f.state, f.host.workspace); !testing.expect(t, created) {return}
+	app.tab_select(f.state, f.host, 1)
+	app.pane_links_sync(f.state)
+	testing.expect_value(t, len(links_menu_windows(&f, f.host)), 0)
+	app.tab_select(f.state, f.host, 0)
+	app.pane_links_sync(f.state)
+
+	app.document_menu_open_focused(f.state, first)
+	menu := &first.document_menu
+	for i in 0 ..< menu.count {
+		if menu.entries[i].action != .Focus_Window {continue}
+		ui.menu_select(&menu.menu, i)
+		break
+	}
+	press_key(&f, first, .Enter)
+	testing.expect(t, !app.document_menu_shown(first))
+}
+
+// Open in Linked Window from a Markdown link's More list gives the file a linked window of its own.
+@(test)
+links_menu_opens_a_markdown_link_in_a_linked_window :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 61) {return}
+	file := strings.concatenate({f.directory, "\\Notes.md"})
+	defer delete(file)
+	if !testing.expect_value(t, os.write_entire_file(file, "# Notes\n"), nil) {return}
+	scopes, found := app.document_scopes(f.state, f.host.panes[0].content)
+	if !testing.expect(t, found) {return}
+	_ = app.document_pin(scopes, .Pane, {target = file})
+	app.document_menu_open_focused(f.state, f.host)
+	menu := &f.host.document_menu
+	for i in 0 ..< menu.count {
+		if menu.entries[i].action == .Open {ui.menu_select(&menu.menu, i)}
+	}
+	press_key(&f, f.host, .Context_Menu)
+	for _ in 0 ..< int(app.Document_Placement.Linked_Window) {press_key(&f, f.host, .Arrow_Down)}
+	press_key(&f, f.host, .Enter)
+	testing.expect(t, !app.document_menu_shown(f.host))
+	tab := app.selected_tab(f.host.workspace)
+	markdown := layout.Content{}
+	for _, id in tab.tree.nodes {
+		content, is_pane := layout.pane_content(&tab.tree, layout.Node_Id(id))
+		if is_pane && content.kind == .Markdown {markdown = content}
+	}
+	if !testing.expect_value(t, markdown.kind, layout.Content_Kind.Markdown) {return}
+	testing.expect(t, app.pane_link_window_of(f.state, markdown) != nil)
+	testing.expect_value(t, len(f.host.panes), 1)
 }
 
 @(test)
