@@ -2,6 +2,7 @@ package procinfo
 
 import "core:log"
 import w "core:sys/windows"
+import "core:time"
 
 foreign import kernel32 "system:kernel32.lib"
 
@@ -94,7 +95,8 @@ process_arguments :: proc(id, root: u32, allocator := context.allocator) -> ([]s
 	if status != STATUS_INFO_LENGTH_MISMATCH || size < size_of(w.UNICODE_STRING) || size > 1 << 17 {
 		return nil, false
 	}
-	buffer := make([]u8, size, context.temp_allocator)
+	// The query refuses a misaligned buffer, and temporary memory hands out bytes at any address.
+	buffer := make([]u64, (size + 7) / 8, context.temp_allocator)
 	if w.NtQueryInformationProcess(process, COMMAND_LINE_CLASS, raw_data(buffer), size, &size) != 0 {
 		return nil, false
 	}
@@ -160,6 +162,21 @@ read_memory :: proc(process: w.HANDLE, address: uintptr, buffer: rawptr, size: i
 	read: w.SIZE_T
 	ok := w.ReadProcessMemory(process, rawptr(address), buffer, w.SIZE_T(size), &read)
 	return bool(ok) && int(read) == size
+}
+
+// When a descendant of `root` started.
+@(require_results)
+process_started :: proc(id, root: u32) -> (time.Time, bool) {
+	process, opened := open_descendant(id, root)
+	if !opened {return {}, false}
+	defer close_process(process)
+	created, unused: w.FILETIME
+	if !bool(w.GetProcessTimes(process, &created, &unused, &unused, &unused)) {
+		log.errorf("GetProcessTimes failed: %v", w.GetLastError())
+		return {}, false
+	}
+	// FILETIME counts 100 ns intervals from 1601; Unix time starts 11,644,473,600 seconds later.
+	return time.unix(0, (i64(filetime(created)) - 116_444_736_000_000_000) * 100), true
 }
 
 @(private, require_results)

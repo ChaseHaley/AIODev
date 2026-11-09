@@ -21,6 +21,7 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio commands
        aio help [<command>]
        aio version
+       aio agent-session (claude | codex)
 
 Runs AIODev commands from scripts and coding agents. Every palette command runs by
 name, such as aio tab.next; aio commands lists them all, and aio help <command>
@@ -59,6 +60,8 @@ Wait    aio wait polls until the pane shows the text, a line matches the pattern
         the screen has not changed for that long. The default timeout is %d ms, and 0 waits
         without limit. --exit prints the exit code, even after the pane closed with its program,
         or closed when it was closed while running.
+Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
+        session the hook names, so the pane can resume it; Install Agent Session Hooks sets it up.
 Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
@@ -131,8 +134,8 @@ local_commands := [?]cli_protocol.Command_Report {
 		options = {
 			{
 				option = "<command>",
-				description = "the command to explain: any name aio commands lists, or wait, commands, help " +
-				"or version",
+				description = "the command to explain: any name aio commands lists, or wait, commands, help, " +
+				"version or agent-session",
 				default = "none (prints aio's usage)",
 				example = "pane.split",
 			},
@@ -144,6 +147,22 @@ local_commands := [?]cli_protocol.Command_Report {
 		usage = "version",
 		summary = "Prints aio's build, then the running AIODev's; --version does the same. aio warns on " +
 		"stderr whenever the two differ, and exits 4 after its own line when AIODev is unreachable.",
+	},
+	{
+		name = "agent-session",
+		title = "Record an Agent Session",
+		usage = "agent-session (claude | codex)",
+		summary = "Run by a Claude Code or Codex SessionStart hook: records the session the hook names so " +
+		"the pane can resume it. Needs no control pipe, prints nothing and succeeds outside an AIODev pane; " +
+		"Install Agent Session Hooks sets it up.",
+		options = {
+			{
+				option = "claude | codex",
+				description = "the harness whose hook runs it",
+				default = "none (required)",
+				example = "claude",
+			},
+		},
 	},
 }
 

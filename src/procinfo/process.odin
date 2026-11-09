@@ -23,6 +23,18 @@ executable_stem :: proc(name: string) -> string {
 	return text
 }
 
+// Launchers run the program named by their arguments rather than being one.
+@(private, rodata)
+launchers := [?]string{"node", "bun", "deno", "npx", "pnpx", "bunx", "cmd", "uv", "uvx"}
+
+@(require_results)
+is_launcher :: proc(stem: string) -> bool {
+	for name in launchers {
+		if strings.equal_fold(name, stem) {return true}
+	}
+	return false
+}
+
 // Returns the deepest descendant; snapshot order breaks ties between sibling processes.
 // Windows has no host-side foreground process API, so detached/background descendants are ambiguous.
 process_leaf :: proc(processes: []Process_Info, root: u32) -> int {

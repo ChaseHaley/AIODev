@@ -7,6 +7,7 @@ foreign import user32 "system:user32.lib"
 foreign import kernel32 "system:kernel32.lib"
 foreign import dwmapi "system:dwmapi.lib"
 
+// Win32 declarations both backends use; the headless one opens no window but still runs on Windows.
 MWMO_INPUTAVAILABLE :: 0x0004
 FLASHW_ALL :: 0x00000003
 NIIF_INFO :: 0x00000001
@@ -17,6 +18,7 @@ NINF_KEY :: 0x1
 NIN_KEYSELECT :: w.NIN_SELECT | NINF_KEY
 NIN_BALLOONUSERCLICK :: w.WM_USER + 5
 TO_UNICODE_NO_STATE_CHANGE :: 1 << 2
+KLF_NOTELLSHELL :: 0x00000080
 SIZING_TIMER_ID :: 1
 SHELL_EXECUTE_ERROR_MAX :: 32
 
@@ -59,6 +61,8 @@ foreign dwmapi {
 foreign user32 {
 	MsgWaitForMultipleObjectsEx :: proc(nCount: w.DWORD, pHandles: [^]w.HANDLE, dwMilliseconds, dwWakeMask, dwFlags: w.DWORD) -> w.DWORD ---
 	GetKeyboardLayout :: proc(idThread: w.DWORD) -> HKL ---
+	LoadKeyboardLayoutW :: proc(pwszKLID: w.LPCWSTR, Flags: w.UINT) -> HKL ---
+	MapVirtualKeyExW :: proc(uCode, uMapType: w.UINT, dwhkl: HKL) -> w.UINT ---
 	ToUnicodeEx :: proc(wVirtKey, wScanCode: w.UINT, lpKeyState: ^w.BYTE, pwszBuff: w.LPWSTR, cchBuff: w.INT, wFlags: w.UINT, dwhkl: HKL) -> w.INT ---
 	FlashWindowEx :: proc(pfwi: ^FLASHWINFO) -> w.BOOL ---
 	AllowSetForegroundWindow :: proc(dwProcessId: w.DWORD) -> w.BOOL ---

@@ -22,6 +22,8 @@ Surface :: struct {
 	window:        win.HWND,
 	width, height: i32,
 	clock:         Frame_Clock,
+	// Frames rendered to an offscreen surface, which has no swap chain to count presents.
+	rendered:      u32,
 }
 
 @(private)
@@ -29,9 +31,12 @@ valid_size :: proc(width, height: i32) -> bool {
 	return width > 0 && height > 0 && width <= MAX_SURFACE_SIZE && height <= MAX_SURFACE_SIZE
 }
 
+// The frames shown so far: the swap chain's present count, or for an offscreen surface the frames
+// rendered to it.
 @(require_results)
 surface_present_count :: proc(s: ^Surface) -> (u32, Error) {
-	if s == nil || s.chain == nil {return 0, .Invalid_Argument}
+	if s == nil {return 0, .Invalid_Argument}
+	if s.chain == nil {return s.rendered, .None}
 	count: u32
 	err := checked(
 		s.owner,

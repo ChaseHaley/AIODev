@@ -292,6 +292,7 @@ category :: proc(name: string) -> Category {
 		{"pane", {"Panes", "Pane Shortcuts"}},
 		{"tab", {"Tabs", "Tab Shortcuts"}},
 		{"workspace", {"Workspaces", "Workspace Shortcuts"}},
+		{"layout", {"Layouts", "Layout Shortcuts"}},
 		{"window", {"Windows", "Window Shortcuts"}},
 		{"settings", {"Settings", "Settings Shortcuts"}},
 		{"edit", {"Edit", "Edit Shortcuts"}},

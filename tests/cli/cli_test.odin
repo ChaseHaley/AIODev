@@ -182,7 +182,7 @@ help_for_client_commands_is_answered_locally :: proc(t: ^testing.T) {
 	testing.expect(t, local)
 	testing.expect_value(t, report.name, "wait")
 	testing.expect_value(t, len(report.options), 6)
-	for name in ([]string{"commands", "help", "version"}) {
+	for name in ([]string{"commands", "help", "version", "agent-session"}) {
 		o, _ := cli.parse_options({"help", name}, "")
 		_, answered := cli.local_help(o)
 		testing.expectf(t, answered, "help %s should be answered by aio", name)

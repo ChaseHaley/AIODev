@@ -367,11 +367,14 @@ Feed it to tools\vtreplay to reproduce screen and cell state without a shell.
 			&w,
 			`window select <id>
 window move <signed-x>,<signed-y>
+window maximize|restore|close
 Select a persistent verification target from state's window.N.id, without changing OS focus.
 Reads and subsequent commands use this window until another is selected or it is destroyed.
 On destruction, clear the target and fall back to the focused or first remaining window.
 Move positions the selected window's outer top-left in screen pixels without activating it.
 Coordinates are signed 32-bit integers; quote x,y in PowerShell. Unknown window IDs fail.
+Maximize, restore and close act on the selected window as its caption buttons do: restore leaves
+maximized, and close asks the window to close, which may confirm first.
 Output is one line: ok; <changes>. No defaults.
 `,
 		)
