@@ -147,6 +147,8 @@ Action :: enum u32 {
 	Tab_Context_Menu,
 	Restart_Pane,
 	Layout_Apply,
+	Tab_List,
+	Workspace_List,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -572,6 +574,8 @@ ACTIONS :: [Action]Command_Descriptor {
 		"layout.apply", "Apply Layout File", nil, .Host,
 		{accepted = {.File, .Focus}, required = {.File}, hidden = true, control = .Pane},
 	},
+	.Tab_List = {"tab.list", "List Tabs", nil, .Host, {hidden = true, control = .Unnamed}},
+	.Workspace_List = {"workspace.list", "List Workspaces", nil, .Host, {hidden = true, control = .Unnamed}},
 }
 
 @(require_results)
@@ -743,6 +747,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return command_catalogue(app, invocation.text)
 	case .Pane_List:
 		return {payload = Outcome_Panes(pane_reports(app, nil))}
+	case .Tab_List:
+		return {payload = Outcome_Tabs(tab_reports(app))}
+	case .Workspace_List:
+		return {payload = Outcome_Workspaces(workspace_reports(app))}
 	case .Pane_Status:
 		return control_pane_status(app, ctx.(Control_Request), invocation)
 	case .Pane_Read:

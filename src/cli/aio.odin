@@ -44,6 +44,7 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] 
         aio pane.send --file <file>       types a UTF-8 file's text exactly
         aio pane.read [--lines <rows>]    prints the pane's visible text
         aio pane.list                     one line per pane; --json for details
+        aio tab.list, aio workspace.list  one line per tab or workspace
         aio pane.close
 Wait    aio wait polls until the pane shows the text or its program exits; the default
         timeout is %d ms, and 0 waits without limit. --exit prints the exit code, even
