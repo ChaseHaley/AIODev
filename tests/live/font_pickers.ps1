@@ -3,6 +3,12 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
 $name = 'font-pickers'
+# A headless instance sees only the bundled fonts (WORK-351): Cascadia Code stands in for the installed
+# monospace Consolas and Selawik for the proportional Segoe UI.
+$headless = $env:AIOCTL_HEADLESS -eq '1'
+$mono = if ($headless) { 'Cascadia Code' } else { 'Consolas' }
+$proportional = if ($headless) { 'Selawik' } else { 'Segoe' }
+$proportionalFull = if ($headless) { 'Selawik' } else { 'Segoe ui' }
 function Invoke-Aio {
     $result = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $args : $result" }
@@ -36,8 +42,8 @@ try {
     Invoke-Aio expect state settings.popup=Choice
     Shot shell-fonts
     $beforeSearch = (Read-State)['terminal.font_family']
-    Invoke-Aio key C O N S O L A S
-    Invoke-Aio expect state settings.choice_query=consolas
+    Invoke-Aio type $mono
+    Invoke-Aio expect state "settings.choice_query=$mono"
     Invoke-Aio expect state settings.choice_matches=1
     Invoke-Aio expect state settings.filter=font.family
     Invoke-Aio expect state "terminal.font_family=$beforeSearch"
@@ -52,15 +58,15 @@ try {
     $allCount = [int](Read-State)['settings.choice_count']
     if ($allCount -le $monoCount) {throw 'Show All Fonts did not expand the list'}
     Invoke-Aio key Tab
-    Invoke-Aio type Segoe
+    Invoke-Aio type $proportional
     Invoke-Aio key Tab Space
-    Invoke-Aio expect state settings.choice_query=Segoe
+    Invoke-Aio expect state "settings.choice_query=$proportional"
     Invoke-Aio expect state settings.choice_matches=0
     Invoke-Aio expect state settings.popup=Choice
     Invoke-Aio expect state "terminal.font_family=$shell"
     Shot shell-filtered-empty
     Invoke-Aio key Space
-    Invoke-Aio expect state settings.choice_query=Segoe
+    Invoke-Aio expect state "settings.choice_query=$proportional"
     if ([int](Read-State)['settings.choice_matches'] -lt 1) {throw 'Toggle did not refilter the current search'}
     Invoke-Aio key Tab Ctrl+A Backspace End
     Shot all-fonts-end
@@ -68,16 +74,19 @@ try {
     if ((Read-State)['terminal.font_family'] -ne $shell) {throw 'Cancel changed shell font'}
     Write-Output "PASS Show All Fonts expands to $allCount families; End scrolls; Escape cancels"
     Open-Field interface.font_family
-    if ([int](Read-State)['settings.choice_count'] -ne $allCount) {throw 'GUI picker lacks installed fonts'}
+    # The default interface family (Segoe UI Variable) is not bundled, so headless the picker also keeps
+    # the current value as a choice, as it does for any family that is not installed.
+    $guiCount = if ($headless) { $allCount + 1 } else { $allCount }
+    if ([int](Read-State)['settings.choice_count'] -ne $guiCount) {throw 'GUI picker lacks installed fonts'}
     Invoke-Aio type no-such-font-xyz
     Invoke-Aio expect state settings.choice_matches=0
     Invoke-Aio key Enter
     Invoke-Aio expect state settings.popup=Choice
     Shot no-fonts-found
     Invoke-Aio key Ctrl+A Backspace
-    Invoke-Aio expect state "settings.choice_matches=$allCount"
-    Invoke-Aio key Shift+S E G O E Space U I
-    Invoke-Aio expect state 'settings.choice_query=Segoe ui'
+    Invoke-Aio expect state "settings.choice_matches=$guiCount"
+    Invoke-Aio type $proportionalFull
+    Invoke-Aio expect state "settings.choice_query=$proportionalFull"
     Shot gui-search
     Invoke-Aio key Enter
     $gui = (Read-State)['ui.font_family']

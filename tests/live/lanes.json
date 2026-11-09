@@ -273,7 +273,8 @@
       "lane": "headless"
     },
     "workspace_dropdown": {
-      "lane": "headless"
+      "lane": "native",
+      "reason": "Sends Ctrl+N, Ctrl+P and emoji text as real input through win32.ps1 -Chord -Activate and -Text."
     },
     "workspace_icon_colors": {
       "lane": "headless"

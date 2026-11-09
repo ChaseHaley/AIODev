@@ -5,7 +5,8 @@ $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
 $name = 'creator-theme-files'
 $id = 'live-theme-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-$themes = Join-Path $repo 'build/themes'
+# The app reads themes beside its executable; the headless build lives in build\headless (WORK-356).
+$themes = Join-Path $repo ($env:AIOCTL_HEADLESS -eq '1' ? 'build/headless/themes' : 'build/themes')
 $fixture = Join-Path $themes "$id.theme.json"
 $path = Join-Path $repo "build/verify/$name/settings.ini"
 function Invoke-Aio {
