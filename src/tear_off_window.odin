@@ -123,10 +123,10 @@ drag_thumbnail_sync :: proc(
 		t.shown = false
 		return
 	}
-	if t.image == {} && !t.failed {
+	if !platform.thumbnail_exists(t.image) && !t.failed {
 		t.failed = !drag_thumbnail_create(app, w, t, region)
 	}
-	if t.image == {} {return}
+	if !platform.thumbnail_exists(t.image) {return}
 	offset := i32(math.round(16 * w.scale))
 	platform.thumbnail_place(t.image, x + offset, y + offset)
 	t.shown = true
@@ -156,7 +156,7 @@ drag_thumbnail_create :: proc(app: ^App, w: ^Window, t: ^Drag_Thumbnail, r: layo
 }
 
 drag_thumbnail_destroy :: proc(t: ^Drag_Thumbnail) {
-	if t.image != {} {platform.thumbnail_destroy(&t.image)}
+	if platform.thumbnail_exists(t.image) {platform.thumbnail_destroy(&t.image)}
 	t.shown = false
 }
 
