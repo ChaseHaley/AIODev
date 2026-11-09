@@ -6,8 +6,6 @@ import "base:runtime"
 
 MENU_WIDTH :: f32(280)
 MENU_ROW_HEIGHT :: HEIGHT_STANDARD
-// A two-line row: the label on one compact line, and its detail and buttons on a second below it.
-MENU_TWO_LINE_HEIGHT :: 2 * HEIGHT_COMPACT + 2 * SPACE_1
 // A hairline with SPACE_1 above and below.
 MENU_SEPARATOR_HEIGHT :: 2 * SPACE_1 + 1
 // Enough for the longest owner: a profile menu's settings.PROFILE_LIMIT profiles and its separator,
@@ -26,10 +24,6 @@ Menu_Item :: struct {
 	// A compact button at the row's end, and one beyond it that shows while the row is selected.
 	action:                Icon,
 	selected_action:       Icon,
-	// A More button between those two, for a row with further choices.
-	more:                  bool,
-	// The detail and buttons sit on a second line, leaving the label the row's whole width.
-	two_line:              bool,
 	// The label is an error.
 	danger:                bool,
 	// The owner's key for what choosing the row does; the menu only carries it.
@@ -39,7 +33,6 @@ Menu_Item :: struct {
 Menu_Row_Part :: enum {
 	Row,
 	Action,
-	More,
 	Selected_Action,
 }
 
@@ -100,8 +93,7 @@ menu_anchor :: proc(m: ^Menu, x, y: f32) {
 
 menu_row_height :: proc(m: ^Menu, index: int) -> f32 {
 	item := m.items[index]
-	if item.separator {return MENU_SEPARATOR_HEIGHT}
-	return item.two_line ? MENU_TWO_LINE_HEIGHT : MENU_ROW_HEIGHT
+	return item.separator ? MENU_SEPARATOR_HEIGHT : MENU_ROW_HEIGHT
 }
 
 // Moves the selection to the next enabled row in the step's direction. False leaves it where it was.
@@ -212,9 +204,7 @@ menu_hit :: proc(m: ^Menu, x, y, width, height, scale: f32) -> int {
 	return -1
 }
 
-// Where a row's button sits, from the row's end: the button shown while selected, More, then the row's own
-// button. A slot is kept even while its button is hidden, so labels hold still. A two-line row has its
-// buttons on the second line.
+// Where a row's button sits. Its slot is kept even while the button is hidden, so labels hold still.
 menu_action_rect :: proc(
 	m: ^Menu,
 	index: int,
@@ -222,14 +212,10 @@ menu_action_rect :: proc(
 	width, height, scale: f32,
 ) -> render.Rect {
 	row := menu_row_rect(m, index, width, height, scale)
-	item := m.items[index]
 	size := HEIGHT_COMPACT * scale
-	inset := (MENU_ROW_HEIGHT * scale - size) / 2
-	y := item.two_line ? row.y + row.height - SPACE_1 * scale - size : row.y + (row.height - size) / 2
-	slot: f32 = 1
-	if part != .Selected_Action && item.selected_action != .None {slot += 1}
-	if part == .Action && item.more {slot += 1}
-	return {row.x + row.width - inset - slot * size, y, size, size}
+	inset := (row.height - size) / 2
+	slot: f32 = part == .Selected_Action ? 1 : 2
+	return {row.x + row.width - inset - slot * size, row.y + inset, size, size}
 }
 
 // The part of row `index` at the point. Only buttons the row is showing count.
@@ -238,9 +224,6 @@ menu_row_part :: proc(m: ^Menu, index: int, x, y, width, height, scale: f32) -> 
 	item := m.items[index]
 	if item.action != .None {
 		if render.rect_contains(menu_action_rect(m, index, .Action, width, height, scale), x, y) {return .Action}
-	}
-	if item.more {
-		if render.rect_contains(menu_action_rect(m, index, .More, width, height, scale), x, y) {return .More}
 	}
 	if item.selected_action != .None && index == menu_selected(m) {
 		if render.rect_contains(menu_action_rect(m, index, .Selected_Action, width, height, scale), x, y) {
@@ -324,9 +307,6 @@ menu_draw :: proc(
 			if render.push_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)}) !=
 			   .None {return .Ok}
 		}
-		// The label's line: the whole row, or the first line of a two-line row.
-		line := row
-		if item.two_line {line = {row.x, row.y + SPACE_1 * scale, row.width, HEIGHT_COMPACT * scale}}
 		label_x := row.x + inset
 		if item.icon != "" || item.icon_atlas.width > 0 {
 			icon_width := (16 + SPACE_2) * scale
@@ -334,7 +314,7 @@ menu_draw :: proc(
 				list,
 				text,
 				theme,
-				{label_x, line.y + (line.height - 16 * scale) / 2, 16 * scale, 16 * scale},
+				{label_x, row.y + (row.height - 16 * scale) / 2, 16 * scale, 16 * scale},
 				item.icon,
 				scale,
 				item.icon_atlas,
@@ -344,18 +324,19 @@ menu_draw :: proc(
 		ink := item.enabled ? theme.text : theme.muted
 		if item.danger {ink = theme.error}
 		if item.glyph != .None {
-			glyph := render.Rect{label_x, line.y, ICON_BUTTON * scale, line.height}
+			glyph := render.Rect{label_x, row.y, ICON_BUTTON * scale, row.height}
 			icon_draw(list, item.glyph, glyph, ink, ICON_BUTTON, scale)
 			label_x += (ICON_BUTTON + SPACE_2) * scale
 		}
-		// Where the buttons begin, which ends the label's line, or the second line of a two-line row.
-		buttons := row.x + row.width - inset
-		if item.selected_action != .None {
-			buttons = menu_action_rect(m, i, .Selected_Action, width, height, scale).x
+		end := row.x + row.width - inset
+		has_action := item.action != .None
+		has_selected_action := item.selected_action != .None
+		if has_selected_action {
+			end = menu_action_rect(m, i, .Selected_Action, width, height, scale).x
 		}
-		if item.more {buttons = menu_action_rect(m, i, .More, width, height, scale).x}
-		if item.action != .None {buttons = menu_action_rect(m, i, .Action, width, height, scale).x}
-		end := item.two_line ? row.x + row.width - inset : buttons
+		if has_action {
+			end = menu_action_rect(m, i, .Action, width, height, scale).x
+		}
 		shortcut_width := f32(0)
 		if item.shortcut != "" {
 			shortcut_width = text_width(&small, item.shortcut)
@@ -364,25 +345,17 @@ menu_draw :: proc(
 				list,
 				item.shortcut,
 				row.x + row.width - inset - shortcut_width,
-				line.y + (line.height - small.line_height) / 2 + small.ascent,
+				row.y + (row.height - small.line_height) / 2 + small.ascent,
 				theme.faint,
 			); result != .Ok {return result}
 		}
 		end -= shortcut_width > 0 ? shortcut_width + SPACE_2 * scale : 0
 		available := max(1, end - label_x)
-		label_baseline := line.y + (line.height - text.line_height) / 2 + text.ascent
-		if item.detail == "" || item.two_line {
+		label_baseline := row.y + (row.height - text.line_height) / 2 + text.ascent
+		if item.detail == "" {
 			if result := draw_text(text, list, item.label, label_x, label_baseline, ink, available);
 			   result != .Ok {return result}
-		}
-		if item.detail != "" && item.two_line {
-			second := line.y + line.height
-			baseline := second + (HEIGHT_COMPACT * scale - small.line_height) / 2 + small.ascent
-			if detail_width := buttons - SPACE_2 * scale - label_x; detail_width > 0 {
-				if result := draw_fading_text(&small, list, item.detail, label_x, baseline, theme.faint, detail_width);
-				   result != .Ok {return result}
-			}
-		} else if item.detail != "" {
+		} else {
 			label_width := min(text_width(text, item.label), available)
 			if result := draw_fading_text(text, list, item.label, label_x, label_baseline, ink, label_width);
 			   result != .Ok {return result}
@@ -403,20 +376,18 @@ menu_draw :: proc(
 			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
 			   result != .None {return .Ok}
 		}
-		Row_Button :: struct {
-			part: Menu_Row_Part,
-			icon: Icon,
+		if item.action != .None {
+			hover: f32 = i == selected && m.hover_part == .Action ? 1 : 0
+			rect := menu_action_rect(m, i, .Action, width, height, scale)
+			if icon_button_draw(list, theme, rect, item.action, hover, 0, scale, pointer,
+				radius = RADIUS_CONTROL) != .None {
+				return .Ok
+			}
 		}
-		shown := [?]Row_Button {
-			{.Action, item.action},
-			{.More, item.more ? .More_Vertical : .None},
-			{.Selected_Action, i == selected ? item.selected_action : .None},
-		}
-		for button in shown {
-			if button.icon == .None {continue}
-			hover: f32 = i == selected && m.hover_part == button.part ? 1 : 0
-			rect := menu_action_rect(m, i, button.part, width, height, scale)
-			if icon_button_draw(list, theme, rect, button.icon, hover, 0, scale, pointer,
+		if item.selected_action != .None && i == selected {
+			hover: f32 = m.hover_part == .Selected_Action ? 1 : 0
+			rect := menu_action_rect(m, i, .Selected_Action, width, height, scale)
+			if icon_button_draw(list, theme, rect, item.selected_action, hover, 0, scale, pointer,
 				radius = RADIUS_CONTROL) != .None {
 				return .Ok
 			}
