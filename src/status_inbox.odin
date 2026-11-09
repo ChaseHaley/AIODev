@@ -200,12 +200,14 @@ status_pill_width :: proc(app: ^App, w: ^Window) -> f32 {
 	return s.enabled && s.inbox ? STATUS_PILL_WIDTH * w.scale : 0
 }
 
+// The pill follows the palette button with no gap, as the title buttons follow each other.
 status_pill_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	width := status_pill_width(app, w)
 	if width == 0 {return {}}
 	height := ui.HEIGHT_TOOLBAR * w.scale
 	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
-	return {title_actions_end(w) + ui.SPACE_1 * w.scale, top, width - ui.SPACE_1 * w.scale, height}
+	palette := title_action_rect(w, .Palette)
+	return {palette.x + palette.width, top, width - ui.SPACE_1 * w.scale, height}
 }
 
 status_pill_hover_set :: proc(w: ^Window, hovered: bool) {

@@ -143,9 +143,10 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) 
 	if target := window_for_workspace(app, workspace); target != nil {workspace_name_begin(app, target)}
 }
 
-// The chip starts after the title actions and the status pill, which sits on its left.
+// The chip starts after the status pill when it shows, else after the title actions.
 workspace_button_left :: proc(app: ^App, w: ^Window) -> f32 {
-	return title_actions_end(w) + status_pill_width(app, w)
+	pill := status_pill_rect(app, w)
+	return pill.width > 0 ? pill.x + pill.width : title_actions_end(w)
 }
 
 // The chip hugs its content: icon, name and the chevron's slot, so the tabs start right after the
